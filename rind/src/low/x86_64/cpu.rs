@@ -275,6 +275,16 @@ impl HaveSha256 {
     }
 }
 
+/// Proof that the CPU has AVX-512F, which Argon2id's widest permutation uses.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveAvx512F(());
+
+impl HaveAvx512F {
+    pub(crate) fn check() -> Option<Self> {
+        has(AVX512F).then_some(Self(()))
+    }
+}
+
 /// Proof that the CPU has AVX2, and the BMI1, BMI2, POPCNT, and SSSE3 that
 /// rind's AVX2 kernels also use: ChaCha20, SHA-1, SHA-2, ML-KEM, the 4-way
 /// Keccak-f, and the constant-time table selects.

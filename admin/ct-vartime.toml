@@ -70,6 +70,38 @@ why = "The length check and step_by iterator divide only the public stored-key l
 "s390x-unknown-linux-gnu" = "dlgr x2"
 
 [[public]]
+function = "rind::mid::argon2::layout"
+why = "Divides the public memory parameter, in kibibytes, by four times the public lane count, to round it as RFC 9106 specifies. Neither operand comes from the password."
+[public.holds]
+"x86_64-unknown-linux-gnu" = "div"
+"aarch64-unknown-linux-gnu" = "udiv"
+"armv7-unknown-linux-gnueabihf" = "calls __aeabi_uidiv"
+"x86_64-unknown-linux-gnu+portable" = "div"
+"armv7-unknown-linux-gnueabihf+portable" = "calls __aeabi_uidiv"
+"loongarch64-unknown-linux-gnu" = "div.wu"
+"i686-unknown-linux-gnu" = "div"
+"arm-unknown-linux-gnueabihf" = "calls __aeabi_uidiv"
+"powerpc-unknown-linux-gnu" = "divwu"
+"powerpc64-unknown-linux-gnu" = "divwu"
+"powerpc64le-unknown-linux-gnu" = "divwu"
+"riscv64gc-unknown-linux-gnu" = "divuw"
+"s390x-unknown-linux-gnu" = "dlr"
+
+[[public]]
+function = "rind::mid::argon2::divisor"
+why = "Divides 2^64 by the public lane count to build the Barrett multiplier for the per-block remainder. Both operands are public. 32-bit targets lower the wide division to a loop the scan does not report."
+[public.holds]
+"x86_64-unknown-linux-gnu" = "calls __udivti3"
+"aarch64-unknown-linux-gnu" = "calls __udivti3"
+"x86_64-unknown-linux-gnu+portable" = "calls __udivti3"
+"loongarch64-unknown-linux-gnu" = "calls __udivti3"
+"powerpc-unknown-linux-gnu" = "calls __udivti3"
+"powerpc64-unknown-linux-gnu" = "calls __udivti3"
+"powerpc64le-unknown-linux-gnu" = "calls __udivti3"
+"riscv64gc-unknown-linux-gnu" = "calls __udivti3"
+"s390x-unknown-linux-gnu" = "calls __udivti3"
+
+[[public]]
 function = "<u64>::_fmt_inner"
 why = "Formats a number for Debug or Display output, which never holds a secret. Only 32-bit PowerPC reaches it, through the `.got2` table of addresses its position-independent code loads from, which the scan follows whole."
 [public.holds]

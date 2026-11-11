@@ -432,6 +432,30 @@ pub mod pbkdf2 {
     }
 }
 
+/// Password hashing with Argon2id.
+///
+/// A [`argon2::Secret`] holds a password and derives a key for a salt and
+/// [`argon2::Params`], or checks one derived before. [`argon2::RECOMMENDED`]
+/// and [`argon2::RECOMMENDED_LOW_MEMORY`] are the two sets RFC 9106 recommends.
+///
+/// ```
+/// use rind::argon2::{self, Params};
+///
+/// let params = Params::new(32, 3, 1).unwrap();
+/// let secret = argon2::Secret::new(b"password").unwrap();
+///
+/// let mut stored = [0u8; 32];
+/// secret
+///     .derive(params, b"saltsalt", b"", b"", &mut stored)
+///     .unwrap();
+/// secret
+///     .verify(params, b"saltsalt", b"", b"", &stored)
+///     .unwrap();
+/// ```
+pub mod argon2 {
+    pub use super::high::argon2::{Params, RECOMMENDED, RECOMMENDED_LOW_MEMORY, Secret};
+}
+
 /// Authenticated encryption.
 ///
 /// An [`aead::Key`] is built from an algorithm constant and key bytes, and

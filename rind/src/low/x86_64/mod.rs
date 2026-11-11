@@ -9,6 +9,7 @@ pub(crate) mod aes_gcm;
 pub(crate) mod aes_gcm_avx;
 pub(crate) mod aes_gcm_vaes;
 pub(crate) mod aes_nohw;
+pub(crate) mod argon2;
 pub(crate) mod bignum_add;
 pub(crate) mod bignum_add_p256;
 pub(crate) mod bignum_add_p384;

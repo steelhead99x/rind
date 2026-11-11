@@ -27,6 +27,8 @@ rcgen = { version = "0.14", default-features = false }
 rustls = { version = "0.23.20", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
 str0m = { version = "0.25", default-features = false }
 str0m-aws-lc-rs = "0.7"
+# Argon2id, which aws-lc-rs does not expose.
+argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
 
 [dependencies.rind]
 path = "../rind"
@@ -104,6 +106,13 @@ bench = false
 [[bin]]
 name = "pbkdf2"
 path = "fuzzer/pbkdf2.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "argon2"
+path = "fuzzer/argon2.rs"
 test = false
 doc = false
 bench = false

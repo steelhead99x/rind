@@ -766,6 +766,61 @@ mod pbkdf2 {
     }
 }
 
+mod argon2id {
+    use ::argon2::{Algorithm, Argon2, AssociatedData, ParamsBuilder, Version};
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use rind::argon2::Params;
+
+    // Small memories: the fill is what the comparison checks, and a large one
+    // would dominate the suite.
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(24))]
+        #[test]
+        fn matches_rustcrypto(
+            password in vec(any::<u8>(), 0..48),
+            salt in vec(any::<u8>(), 8..32),
+            secret in vec(any::<u8>(), 0..16),
+            ad in vec(any::<u8>(), 0..24),
+            lanes in 1u32..3,
+            extra in 0u32..16,
+            passes in 1u32..3,
+            len in 4usize..96,
+        ) {
+            let memory = lanes * 8 + extra;
+            let mut builder = ParamsBuilder::new();
+            builder.m_cost(memory).t_cost(passes).p_cost(lanes).output_len(len);
+            builder.data(AssociatedData::new(&ad).unwrap());
+            let theirs = Argon2::new_with_secret(
+                &secret,
+                Algorithm::Argon2id,
+                Version::V0x13,
+                builder.build().unwrap(),
+            )
+            .unwrap();
+            let mut wanted = vec![0u8; len];
+            theirs.hash_password_into(&password, &salt, &mut wanted).unwrap();
+
+            let mut got = vec![0u8; len];
+            rind::argon2::Secret::new(&password)
+                .unwrap()
+                .derive(Params::new(memory, passes, lanes).unwrap(), &salt, &secret, &ad, &mut got)
+                .unwrap();
+            prop_assert_eq!(&got, &wanted);
+            prop_assert_eq!(
+                rind::argon2::Secret::new(&password).unwrap().verify(
+                    Params::new(memory, passes, lanes).unwrap(),
+                    &salt,
+                    &secret,
+                    &ad,
+                    &wanted,
+                ),
+                Ok(())
+            );
+        }
+    }
+}
+
 mod aead {
     use aws_lc_rs::aead as theirs;
     use proptest::collection::vec;

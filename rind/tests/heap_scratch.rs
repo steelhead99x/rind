@@ -223,6 +223,25 @@ fn ecdh() {
 }
 
 #[test]
+fn argon2() {
+    use rind::argon2::{Params, Secret};
+
+    // The minimum memory, so the matrix is eight 1 KiB blocks.
+    let params = Params::new(8, 2, 1).unwrap();
+    independent(
+        "argon2",
+        [b"password".to_vec(), b"PASSWOR2".to_vec()],
+        |password| {
+            let secret = Secret::new(password).unwrap();
+            let mut out = [0u8; 32];
+            secret
+                .derive(params, b"saltsalt", b"pepper", b"ad", &mut out)
+                .unwrap();
+        },
+    );
+}
+
+#[test]
 fn mlkem768() {
     use rind::kem::{DecapsulationKey, ML_KEM_768};
     zeroed("ML-KEM key generation", || {

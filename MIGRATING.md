@@ -78,6 +78,13 @@ A `Secret` keys HMAC once, so deriving or verifying with several salts
 reuses it. `verify` refuses a stored value shorter than the HMAC output with
 `Error::WrongLength`, where ring and aws-lc-rs compare any prefix.
 
+## argon2
+
+ring and aws-lc-rs have no Argon2. [`argon2`](rind/src/lib.rs) is Argon2id
+only: [`argon2::Params`] holds the memory, passes, and lanes,
+[`argon2::Secret`] the password, and `derive` / `verify` take the salt, the
+optional secret, and the associated data.
+
 ## aead
 
 | aws-lc-rs | rind |

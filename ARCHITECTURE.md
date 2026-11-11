@@ -50,6 +50,7 @@ The modules:
 - `hmac`: HMAC over SHA-1 and SHA-2, keyed once and reused.
 - `hkdf`: HKDF over those HMACs, whose output becomes an `aead`, QUIC header-protection, or `hmac` key.
 - `pbkdf2`: PBKDF2 over those HMACs, deriving or verifying a key from a password.
+- `argon2`: Argon2id, deriving or verifying a key from a password.
 - `encoding`: the PKCS#8, SEC1, and `SubjectPublicKeyInfo` encodings key
   types export.
 - `constant_time`: comparing secrets such as MACs without a timing leak.

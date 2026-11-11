@@ -4,6 +4,7 @@
 #![deny(unsafe_code)]
 
 pub(super) mod agreement;
+pub(super) mod argon2;
 pub(super) mod asn1;
 pub(super) mod constant_time;
 pub(super) mod curve;

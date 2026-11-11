@@ -188,6 +188,14 @@ fn hmac() {
 }
 
 #[test]
+fn argon2() {
+    use rind::argon2::Secret;
+
+    check_zeroed_on_drop(Box::pin(Secret::new(b"password").unwrap()));
+    check_zeroed_on_drop(Box::pin(Secret::new(b"").unwrap()));
+}
+
+#[test]
 fn pbkdf2() {
     use rind::pbkdf2::*;
 
