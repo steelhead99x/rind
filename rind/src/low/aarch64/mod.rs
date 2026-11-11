@@ -13,6 +13,7 @@ pub(crate) mod aes256_gcm_enc_alt;
 pub(crate) mod aes_cbc;
 pub(crate) mod aes_ctr;
 pub(crate) mod aes_gcm;
+pub(crate) mod argon2;
 pub(crate) mod bignum_add;
 pub(crate) mod bignum_add_p256;
 pub(crate) mod bignum_add_p384;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! Argon2id, RFC 9106, over the portable compression function.
+//! Argon2id, RFC 9106, over the backend's compression function.
 //!
 //! The first half of the first pass addresses memory from public inputs. Every
 //! later block addresses it from the previous block. That index is the leak

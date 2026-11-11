@@ -28,6 +28,10 @@ impl Block {
 /// `G(prev, reference)`, optionally XORed with the block it replaces.
 ///
 /// `next` may alias `prev` or `reference`: both are read before `next` is written.
+///
+/// aarch64's release build runs the NEON permutation instead. The scalar one
+/// stays in test builds, which compare the two.
+#[cfg(any(test, not(rind_backend = "aarch64")))]
 pub(crate) fn compress(next: &mut Block, prev: &Block, reference: &Block, with_xor: bool) {
     let mut r = [0u64; 128];
     let mut tmp = [0u64; 128];
@@ -62,6 +66,7 @@ pub(crate) fn compress(next: &mut Block, prev: &Block, reference: &Block, with_x
 }
 
 /// BLAKE2b's round with no message, using BlaMka in place of addition.
+#[cfg(any(test, not(rind_backend = "aarch64")))]
 fn round(v: &mut [u64; 16]) {
     g(v, 0, 4, 8, 12);
     g(v, 1, 5, 9, 13);
@@ -73,6 +78,7 @@ fn round(v: &mut [u64; 16]) {
     g(v, 3, 4, 9, 14);
 }
 
+#[cfg(any(test, not(rind_backend = "aarch64")))]
 fn g(v: &mut [u64; 16], a: usize, b: usize, c: usize, d: usize) {
     v[a] = blamka(v[a], v[b]);
     v[d] = (v[d] ^ v[a]).rotate_right(32);
@@ -85,6 +91,7 @@ fn g(v: &mut [u64; 16], a: usize, b: usize, c: usize, d: usize) {
 }
 
 /// `x + y + 2 * (x mod 2^32) * (y mod 2^32)`.
+#[cfg(any(test, not(rind_backend = "aarch64")))]
 fn blamka(x: u64, y: u64) -> u64 {
     let product = (x & 0xFFFF_FFFF).wrapping_mul(y & 0xFFFF_FFFF);
     x.wrapping_add(y)

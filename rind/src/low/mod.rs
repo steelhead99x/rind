@@ -110,9 +110,11 @@ pub(crate) mod cpu;
 mod entry;
 mod posint;
 
+#[cfg(rind_backend = "aarch64")]
+pub(crate) use aarch64::argon2::compress as argon2_compress;
 pub(crate) use entry::Entry;
 pub(crate) use generic::argon2;
-#[cfg(not(rind_backend = "x86_64"))]
+#[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
 pub(crate) use generic::argon2::compress as argon2_compress;
 pub(crate) use generic::blake2b;
 pub(crate) use generic::blockwise::{Blockwise, UpdateBlocks, pad, sha256_digest, split_tail};

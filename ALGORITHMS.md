@@ -43,7 +43,7 @@ SHA-512.
 | HKDF | rind ⚡ |  |  |  |  |
 | HPKE, over the rows it builds on | rind |  |  |  |  |
 | PBKDF2 | rind |  |  |  |  |
-| Argon2id | phc-argon2 | rind |  |  |  |
+| Argon2id | phc-argon2 |  |  |  | rind |
 | X25519 | s2n-bignum ✓ |  |  |  |  |
 | Ed25519 | s2n-bignum ✓ + Graviola |  |  |  |  |
 | P-256 ECDH, ECDSA | s2n-bignum ✓ + aws-lc ⚡ + Graviola ⚡ |  |  |  |  |
@@ -62,17 +62,20 @@ SHA-512.
 - MD5: rind's portable Rust runs on every target, as no CPU has MD5
   instructions. On an i7-8700 it measured level with [aws-lc]'s x86_64
   assembly at 16 KB and 8% faster at 1350 B.
-- Argon2id: x86_64 with AVX-512F runs a port of the [phc-argon2] AVX-512F
-  permutation. On this host one pass of 64 MiB and one lane took 28 ms,
-  against 46 ms for rind's scalar permutation, 41 ms for RustCrypto's AVX2,
-  and 30 ms for phc-argon2's own AVX-512F build; at 1 MiB and three passes,
-  0.41 ms against 1.2 ms, 0.89 ms, and 0.43 ms. Without AVX-512F the scalar
-  permutation runs. HACL\*'s verified BLAKE2b does not implement BlaMka, and
-  the hash is negligible beside the fill, so no verified permutation was
-  available to time. A proof of the permutation is future work. The tests
-  check it against RFC 9106's vector, the reference implementation's known
-  answers, and RustCrypto's argon2. The data-dependent half's memory index
-  is the exception [AGENTS.md](AGENTS.md) records.
+- Argon2id: x86_64 runs a port of the [phc-argon2] permutation, AVX-512F when
+  the CPU has it, the AVX2 set (`HaveAvx2`: AVX, AVX2, BMI1, BMI2, POPCNT, and
+  SSSE3) otherwise, and SSSE3 when that set is absent. The portable permutation
+  runs only without SSSE3. aarch64 runs the NEON permutation, which this
+  backend requires; a CPU without NEON is refused, naming it. On this host one
+  pass of 64 MiB and one lane took 27.5 ms with AVX-512F, 36.7 ms with AVX2,
+  46.7 ms with SSSE3, and 47.1 ms for the scalar permutation, against 43.8 ms
+  for RustCrypto's AVX2; at 1 MiB and three passes, 0.37 ms, 0.63 ms, 1.07 ms,
+  and 1.16 ms, against 0.88 ms. HACL\*'s verified BLAKE2b does not implement
+  BlaMka, and the hash is negligible beside the fill, so no verified
+  permutation was available to time. A proof of the permutation is future
+  work. The tests check each fill against RFC 9106's vector, the reference
+  implementation's known answers, and RustCrypto's argon2. The data-dependent
+  half's memory index is the exception [AGENTS.md](AGENTS.md) records.
 - AES-GCM key setup: a key reaches its cipher through an indirect call, so
   that a binary links only the ciphers it names; the call adds about 3 ns per
   key or 32 B seal.
@@ -113,7 +116,7 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | HKDF | rind ⚡ |  |  |  |
 | HPKE, over the rows it builds on | rind |  |  |  |
 | PBKDF2 | rind |  |  |  |
-| Argon2id | rind |  |  |  |
+| Argon2id | phc-argon2 |  | rind |  |
 | X25519 | s2n-bignum ✓ |  | BoringSSL ⚡ + curve25519-dalek ⚡ | curve25519-dalek ⚡ |
 | Ed25519 | s2n-bignum ✓ + Graviola |  | curve25519-dalek ⚡ + rind ⚡ |  |
 | P-256 ECDH, ECDSA | s2n-bignum ✓ + Graviola |  | fiat-crypto ✓ + rind ⚡ + Graviola ⚡ |  |
@@ -155,7 +158,7 @@ tests use [Wycheproof]'s vectors.
 | [OpenSSL] | copied, by `admin/import-openssl`: its x86_64 AVX2 SHA-256 and SHA-512 assembly and its SHA-512 assembly for the SHA512 instructions, from `sha512-x86_64`, as Rust naked functions; its 32-bit ARM Keccak-f assembly, integer and NEON, `keccak1600-armv4`, in Rust `global_asm!` | Apache-2.0 | nothing |
 | [curve25519-dalek] | dependency, with its serial backend, for armv7 and the portable backend; ported: its AVX2 backend's field arithmetic, point formulas, and base point table, and its scalars' non-adjacent forms, to Rust intrinsics, for Ed25519 verification on x86_64 CPUs with AVX2 but without ADX | BSD-3-Clause | nothing: that backend's field arithmetic is hand-written, as is the AVX2 backend's. Its `fiat` backend would run [fiat-crypto]'s verified field arithmetic instead, but only a `--cfg` flag for the whole build selects it, so rind refuses it rather than let the build pick. |
 | [fiat-crypto] | dependency | MIT OR Apache-2.0 OR BSD-1-Clause | [Coq proofs](https://github.com/mit-plv/fiat-crypto/tree/67316f05d771f7f2db62beede59e9b56406a9efd) that each generated field operation is correct. rind's point formulas, inversion, and table lookup over them are not covered. |
-| [phc-argon2] | ported: the AVX-512F compression permutation, from `opt.c` and `blamka-round-opt.h` | CC0-1.0 OR Apache-2.0 | nothing |
+| [phc-argon2] | ported: the AVX-512F, AVX2, and SSSE3 compression permutations, from `opt.c` and `blamka-round-opt.h`; the NEON permutation is libsodium's port of that SSSE3 fill, `blamka-round-neon.h` and `argon2-fill-block-neon.c` | CC0-1.0 OR Apache-2.0 | nothing |
 
 rind's own code is licensed under Apache-2.0 OR ISC OR MIT-0. Copied code
 keeps its source's copyright and license, which [LICENSE] lists with the

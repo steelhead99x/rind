@@ -11,6 +11,7 @@ codspeed-criterion-compat = { optional = true, version = "6" }
 
 [dev-dependencies]
 aes-gcm = "0.11"
+argon2 = "0.6"
 aws-lc-rs = { version = "1.16", features = ["non-fips"], default-features = false }
 # For XChaCha20-Poly1305, which aws-lc-rs does not expose.
 aws-lc-sys = { version = "0.47", default-features = false }
@@ -148,6 +149,10 @@ harness = false
 
 [[bench]]
 name = "pbkdf2"
+harness = false
+
+[[bench]]
+name = "argon2"
 harness = false
 
 [[bench]]
