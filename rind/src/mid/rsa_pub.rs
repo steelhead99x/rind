@@ -120,19 +120,24 @@ impl RsaPublicKey {
 
     /// A random residue in `1..n` that is coprime to `n`.
     ///
-    /// Sixteen draws that all fall outside that set are [`Error::RngFailed`].
-    /// Each rejection declassifies one bit, that the draw was not usable.
-    /// The residue stays secret.
+    /// The draw is masked to the modulus bit length before the comparison,
+    /// so a modulus just above a power of two is not rejected for its spare
+    /// high bits. At most half the masked draws then fall outside `1..n`,
+    /// and sixty-four failures are [`Error::RngFailed`]. Each rejection
+    /// declassifies one bit, that the draw was not usable. The residue stays
+    /// secret.
     pub(crate) fn random_factor(
         &self,
         rng: &mut dyn crate::mid::rng::RandomSource,
     ) -> Result<RsaPosInt, Error> {
         let k = self.modulus_len_bytes();
+        let excess = k * 8 - self.modulus_len_bits();
         let mut zero = RsaPosInt::zero();
         zero.expand(&self.n);
-        for _ in 0..16 {
+        for _ in 0..64 {
             let mut bytes = [0u8; MAX_PUBLIC_MODULUS_BYTES];
             rng.fill(&mut bytes[..k])?;
+            bytes[0] &= 0xff >> excess;
             low::ct::secret_slice(&bytes[..k]);
             let r = self.int_from_be(&bytes[..k])?;
             let usable = r.less_than(&self.n) & !r.equals(&zero);
@@ -163,6 +168,7 @@ type RsaPosInt = low::PosInt<MAX_PUBLIC_MODULUS_WORDS>;
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::error::Error;
 
     #[test]
     fn smoke() {
@@ -176,5 +182,55 @@ mod tests {
         let mut mb = [0; 256];
         let mb = m.to_bytes(&mut mb).unwrap();
         println!("m = {mb:02x?}");
+    }
+
+    /// Draws the same bytes every time: the top byte is set, the last is one.
+    struct HighBitSource {
+        len: usize,
+        top: u8,
+    }
+
+    impl crate::mid::rng::RandomSource for HighBitSource {
+        fn fill(&mut self, out: &mut [u8]) -> Result<(), Error> {
+            assert_eq!(out.len(), self.len);
+            out.fill(0);
+            out[0] = self.top;
+            *out.last_mut().unwrap() = 1;
+            Ok(())
+        }
+    }
+
+    /// 1024 bits leaves no spare bits in the top byte. 1025 bits leaves
+    /// seven, and an unmasked draw there sits above the modulus.
+    #[test]
+    fn random_factor_respects_modulus_bit_length() {
+        let mut one = RsaPosInt::one();
+
+        let aligned = vec![0xffu8; 128];
+        let aligned = RsaPublicKey::new(RsaPosInt::from_bytes(&aligned).unwrap(), 3).unwrap();
+        assert_eq!(aligned.modulus_len_bits() % 8, 0);
+        one.expand(&aligned.n);
+        let factor = aligned
+            .random_factor(&mut HighBitSource {
+                len: 128,
+                top: 0x00,
+            })
+            .unwrap();
+        assert!(low::ct::into_public(factor.equals(&one)));
+
+        let mut spare = vec![0u8; 129];
+        spare[0] = 0x01;
+        spare[128] = 0x01;
+        let spare = RsaPublicKey::new(RsaPosInt::from_bytes(&spare).unwrap(), 3).unwrap();
+        assert_eq!(spare.modulus_len_bits(), 1025);
+        assert_eq!(spare.modulus_len_bits() % 8, 1);
+        one.expand(&spare.n);
+        let factor = spare
+            .random_factor(&mut HighBitSource {
+                len: 129,
+                top: 0x80,
+            })
+            .unwrap();
+        assert!(low::ct::into_public(factor.equals(&one)));
     }
 }
