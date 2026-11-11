@@ -126,6 +126,18 @@ fn rsa() {
 }
 
 #[test]
+fn blind_rsa() {
+    use rind::blind_rsa::{BlindedMessage, KeyPair};
+    // Same integer under two moduli. Generation is `rsa_generate`.
+    let pkcs8 = rsa_keys().next().unwrap();
+    let keys = pkcs8.map(|der| KeyPair::from_pkcs8(&der).unwrap());
+    let blinded = BlindedMessage::from_bytes(&[1; 256]).unwrap();
+    independent("blind RSA signing", keys.each_ref(), |key| {
+        key.blind_sign(&blinded).unwrap()
+    });
+}
+
+#[test]
 fn rsa_oaep() {
     use rind::rsa::{DecryptingKey, OAEP_SHA256};
     for pkcs8 in rsa_keys() {
