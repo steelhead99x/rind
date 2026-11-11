@@ -173,6 +173,16 @@ pub(crate) fn verify_pss_sig<H: Hash>(
     m_hash: &[u8],
     s_len: Option<usize>,
 ) -> Result<(), Error> {
+    // A fixed salt length is the constant-time body. `None` scans for the
+    // salt, which is public.
+    if let Some(s_len) = s_len {
+        return if verify_pss_sig_secret::<H>(em, em_bits, m_hash, s_len) {
+            Ok(())
+        } else {
+            Err(Error::BadSignature)
+        };
+    }
+
     // 1.   If the length of M is greater than the input limitation for
     //      the hash function (2^61 - 1 octets for SHA-1), output
     //      "inconsistent" and stop.
@@ -183,7 +193,7 @@ pub(crate) fn verify_pss_sig<H: Hash>(
     let em_len = em.len();
     let top_mask = u8::MAX >> (8 * em_len - em_bits);
     let h_len = m_hash.len();
-    if em_len < h_len + s_len.unwrap_or(0) + 2 {
+    if em_len < h_len + 2 {
         return Err(Error::BadSignature);
     }
 
@@ -220,13 +230,10 @@ pub(crate) fn verify_pss_sig<H: Hash>(
     //      value 0x01, output "inconsistent" and stop.
     // 11.  Let salt be the last sLen octets of DB.
     // (with any sLen, PS runs to the first nonzero octet)
-    let ps_len = match s_len {
-        Some(s_len) => em_len - h_len - s_len - 2,
-        None => db
-            .iter()
-            .position(|b| *b != 0x00)
-            .ok_or(Error::BadSignature)?,
-    };
+    let ps_len = db
+        .iter()
+        .position(|b| *b != 0x00)
+        .ok_or(Error::BadSignature)?;
     let (zeroes, one_salt) = db.split_at(ps_len);
     let (one, salt) = one_salt.split_first().unwrap();
     if zeroes.iter().any(|z| *z != 0x00) || *one != 0x01 {
