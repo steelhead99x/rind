@@ -623,29 +623,11 @@ fn verify_message(
     if signature.len() != key.modulus_len_bytes() {
         return Err(Error::BadSignature);
     }
-    let hash = PreparedBytes { prefix, message }.hash();
-    let em_bits = key.modulus_len_bits() - 1;
-    let mut em = [0u8; MAX_MODULUS];
-    let em_len = em_bits.div_ceil(8);
-    let opened = match key.public_op_be(signature, &mut em) {
-        Ok(opened) => opened,
-        Err(Error::WrongLength) => return Err(Error::BadSignature),
-        Err(error) => return Err(error),
-    };
-    if opened.len() < em_len {
-        return Err(Error::BadSignature);
-    }
-    let start = opened.len() - em_len;
-    let mut encoded = [0u8; MAX_MODULUS];
-    encoded[..em_len].copy_from_slice(&opened[start..start + em_len]);
-    match pkcs1::verify_pss_sig_secret::<hash::Sha384>(
-        &mut encoded[..em_len],
-        em_bits,
-        hash.as_ref(),
-        algorithm.salt_len(),
-    ) {
-        true => Ok(()),
-        false => Err(Error::BadSignature),
+    match verify_secret(key, *algorithm, prefix, message, signature) {
+        Ok(verdict) if ct::into_public(verdict) => Ok(()),
+        Ok(_) => Err(Error::BadSignature),
+        Err(Error::WrongLength) => Err(Error::BadSignature),
+        Err(error) => Err(error),
     }
 }
 
@@ -666,14 +648,21 @@ fn verify_secret(
     }
     let start = opened.len() - em_len;
     let mut encoded = [0u8; MAX_MODULUS];
-    encoded[..em_len].copy_from_slice(&opened[start..start + em_len]);
+    encoded[..em_len].copy_from_slice(&opened[start..]);
     ct::secret_slice(&encoded[..em_len]);
-    Ok(pkcs1::verify_pss_sig_secret::<hash::Sha384>(
-        &mut encoded[..em_len],
-        em_bits,
-        hash.as_ref(),
-        algorithm.salt_len(),
-    ))
+    // RFC 8017 I2OSP to emLen: a modulus whose bit length is 1 mod 8 is one
+    // byte longer than EM. That byte is part of the representative, so a
+    // nonzero value fails together with the PSS checks.
+    ct::secret_slice(&opened[..start]);
+    let zeroes = [0u8; MAX_MODULUS];
+    let fits = crate::low::ct_equal(&opened[..start], &zeroes[..start]);
+    Ok(fits
+        & pkcs1::verify_pss_sig_secret::<hash::Sha384>(
+            &mut encoded[..em_len],
+            em_bits,
+            hash.as_ref(),
+            algorithm.salt_len(),
+        ))
 }
 
 const OID_RSA_ENCRYPTION: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
@@ -988,6 +977,98 @@ mod tests {
         for spki in [&salt32, &sha256, &mgf512] {
             assert!(PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, spki).is_err());
         }
+    }
+
+    /// A 2049-bit modulus drops one octet when the encoded message is
+    /// written at `emLen`. RFC 8017's I2OSP refuses that octet unless it is
+    /// zero. `e = 3`, so `0x01 || EM` is a signature of a valid encoding.
+    #[test]
+    fn rejects_nonzero_octet_above_em_len() {
+        let n = hex::decode("01d543aff201e1b06b8b7654bcbe732431a08c76b17e57713356339f2864538fa57e91c489d8289d50aaf76419fe44df8013b3f520aaf7b5af6349dbf7efa722b0c38a7ef90cc658015712c8f67cbbd9a3770d06e9cf9eec8939af8c9ee88d8d00928b3297f49d57a2ec4b2b07e715793baeee41e5f95f831db2ae1a4635a744ed5d5bf8bff72a1c058e9350ae00dbb8b432da6abbb421bd2773818a0f5f7b93637d2b472a2dd4bf7298277f818bcbc8f0d6c458afa644161e96931c6b797bd9a7344c8c24d22062cb688dbd5a01ec9fbc37f50349a10112c5e4fd8da8a5b4a1c82bb488bfc61ca756fa6bcb72bae2996d848b882036c16cef00ea1920f13c5ab7").unwrap();
+        let signing = SigningKey::from_components(
+            &hex::decode("01d92300d6c7d773fcad94c7f69041aa28475d2d5197926dcd0bf4ed28a42c3e6e425d4f00a804d3a9a5cfd904e3781ed704e6bdfc7a804a02ce70658d55836604a7a1f191dee966cafb5958fbbe05876dfb5e2de7f11f0fec05014b5a9a1baf22d6a988cf0eaa7088f89c4f5881b091281280d2166a6414eca297356081fdf8b9").unwrap(),
+            &hex::decode("00fde7a0fc32a43bc513cabf82eb570f7f361027fdfb28bca6fb66dc19a8759b3b40d6255e4e10c51a08727eb79f85315621cb902eb022ebde759bde6a85a47cd06642a66ceea9020417d0c5ab3fa8393fee0094660dfb05b375d13cf1c6a46b908b6a38d9010fd87095989acb179863f3a80df74a814b6a684edad9a020ab56ef").unwrap(),
+            &hex::decode("0138d7caa15696759d07a4387dd44cc2cbc05da476543a4b778ecd14c59837b518ff0bd85be57068e071fa42bbfed895000d22a36b1ca523ca42313d4ff51a1720825c54a608843aab8f61db4efdd29117a4b359f135149db0d11fb3149b0908ab0c5ccc654dbe3a6c9d87720544b8fb7d1f498143fb950213cc74118423c4d89c598b8f48a874482d3377db7858d754b3239e0e48164461ccf2c3d5de0c91267bfbfa8c877a7f6f1f4698c52e05defb2d200c0702fd15ead38c59e5a2698d4f36c4454d6eadb3fbfd8e4269ccad7f3f5edf0ed5fd1699fe199c1cae3d834daf633115da0fceec3ee8f2cf40df6bbbc2e1315329d4dcb69e66b4fab16adf0cb20b").unwrap(),
+            &n,
+            3,
+        )
+        .unwrap();
+        let public = PublicKey {
+            key: signing.public_key(),
+        };
+        assert_eq!(public.key.modulus_len_bits() % 8, 1);
+        let algorithm = &RSABSSA_SHA384_PSS_DETERMINISTIC;
+        let message = b"2049-bit modulus";
+        let hash = PreparedBytes {
+            prefix: &[],
+            message,
+        }
+        .hash();
+        let em_bits = public.key.modulus_len_bits() - 1;
+        let em_len = em_bits.div_ceil(8);
+        let k = public.key.modulus_len_bytes();
+        assert_eq!(k, em_len + 1);
+        let low = &n[k - em_len..];
+
+        let mut witnessed = false;
+        for salt_byte in 0..=255 {
+            let salt = [salt_byte; 48];
+            let mut em = [0u8; MAX_MODULUS];
+            pkcs1::encode_pss_sig::<hash::Sha384>(
+                &mut em[..em_len],
+                em_bits,
+                &mut SaltBytes(&salt),
+                hash.as_ref(),
+                algorithm.salt_len(),
+            )
+            .unwrap();
+            if &em[..em_len] >= low {
+                continue;
+            }
+            let mut encoded = vec![0u8; k];
+            encoded[k - em_len..].copy_from_slice(&em[..em_len]);
+            let mut lifted = encoded.clone();
+            lifted[0] = 0x01;
+
+            let mut out = [0u8; MAX_MODULUS];
+            let good_bytes = signing.blind_sign(&encoded, &mut out).unwrap().to_vec();
+            let mut out = [0u8; MAX_MODULUS];
+            let bad_bytes = signing.blind_sign(&lifted, &mut out).unwrap().to_vec();
+            let good = Signature::from_bytes(&good_bytes).unwrap();
+            let bad = Signature::from_bytes(&bad_bytes).unwrap();
+            public.verify(algorithm, message, &good).unwrap();
+            assert!(
+                public.verify(algorithm, message, &bad).is_err(),
+                "public verification accepted 0x01 || EM"
+            );
+
+            let mut inverse = [0u8; MAX_MODULUS];
+            inverse[k - 1] = 1;
+            let mut stored = [0u8; MAX_MESSAGE];
+            stored[..message.len()].copy_from_slice(message);
+            let blinding = || Blinding {
+                key: public.key.clone(),
+                inverse,
+                inverse_len: k as u16,
+                prefix: [0; PREFIX_LEN],
+                prefix_len: 0,
+                message: stored,
+                message_len: message.len() as u16,
+                kind: algorithm.kind(),
+            };
+            assert!(
+                blinding()
+                    .finalize(&BlindSignature::from_bytes(&bad_bytes).unwrap())
+                    .is_err(),
+                "finalize accepted 0x01 || EM"
+            );
+            blinding()
+                .finalize(&BlindSignature::from_bytes(&good_bytes).unwrap())
+                .unwrap();
+            witnessed = true;
+            break;
+        }
+        assert!(witnessed, "no encoded message sat under the spare octet");
     }
 
     #[test]
