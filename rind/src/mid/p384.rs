@@ -1,13 +1,14 @@
 // Written for Graviola by Joe Birr-Pixton, 2024.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
+use core::fmt;
+use core::ops::Range;
+
 use super::hash_to_curve::{self, ExpandError, HashedPoint, SwuConstants, SwuField};
 use super::util;
 use crate::error::{Error, KeyFormatError};
 use crate::low;
 use crate::mid::rng::{RandomSource, SystemRandom};
-use core::fmt;
-use core::ops::Range;
 
 mod precomp;
 

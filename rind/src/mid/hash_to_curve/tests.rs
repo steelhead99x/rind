@@ -359,10 +359,11 @@ fn ctgrind_maps_and_scalars() {
 #[cfg(not(miri))]
 #[allow(unsafe_code)]
 mod differential {
-    use super::fit;
-    use crate::mid::{p256, p384, p521};
     use elliptic_curve::sec1::ToSec1Point;
     use hash2curve::GroupDigest;
+
+    use super::fit;
+    use crate::mid::{p256, p384, p521};
 
     fn aws_point(
         nid: i32,
@@ -577,6 +578,7 @@ mod differential {
     /// that algorithm. The P-384 suite vectors also run it.
     fn expand_sha384_matches(msg: &[u8], dst: &[u8], len: u16) {
         use core::num::NonZero;
+
         use hash2curve::{ExpandMsg, Expander, MapToCurve};
 
         let mut ours = vec![0u8; usize::from(len)];
