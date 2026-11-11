@@ -21,64 +21,81 @@ const SHA384_LEN: u16 = 48;
 const MAX_MODULUS: usize = rsa_pub::MAX_PUBLIC_MODULUS_BYTES;
 
 /// One RSABSSA-SHA384 variant. Only this module's constants build one.
+///
+/// A new variant is a new [`Kind`], and every match on it has to name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Algorithm {
-    salt_len: u16,
-    randomized: bool,
+    kind: Kind,
+}
+
+/// The four variants. `#[repr(u8)]` makes the zero bit pattern the first one,
+/// which a wiped [`Blinding`] may hold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum Kind {
+    PssRandomized,
+    PssZeroRandomized,
+    PssDeterministic,
+    PssZeroDeterministic,
+}
+
+impl Kind {
+    fn salt_len(self) -> usize {
+        match self {
+            Self::PssRandomized | Self::PssDeterministic => usize::from(SHA384_LEN),
+            Self::PssZeroRandomized | Self::PssZeroDeterministic => 0,
+        }
+    }
+
+    fn randomized(self) -> bool {
+        match self {
+            Self::PssRandomized | Self::PssZeroRandomized => true,
+            Self::PssDeterministic | Self::PssZeroDeterministic => false,
+        }
+    }
+
+    fn algorithm(self) -> &'static Algorithm {
+        match self {
+            Self::PssRandomized => &RSABSSA_SHA384_PSS_RANDOMIZED,
+            Self::PssZeroRandomized => &RSABSSA_SHA384_PSSZERO_RANDOMIZED,
+            Self::PssDeterministic => &RSABSSA_SHA384_PSS_DETERMINISTIC,
+            Self::PssZeroDeterministic => &RSABSSA_SHA384_PSSZERO_DETERMINISTIC,
+        }
+    }
 }
 
 impl Algorithm {
     fn salt_len(self) -> usize {
-        usize::from(self.salt_len)
+        self.kind.salt_len()
     }
 
-    fn kind(self) -> u8 {
-        match (self.randomized, self.salt_len) {
-            (true, SHA384_LEN) => 0,
-            (true, 0) => 1,
-            (false, SHA384_LEN) => 2,
-            (false, 0) => 3,
-            // The constants are the only constructors.
-            _ => 0,
-        }
-    }
-
-    fn from_kind(kind: u8) -> &'static Self {
-        match kind {
-            1 => &RSABSSA_SHA384_PSSZERO_RANDOMIZED,
-            2 => &RSABSSA_SHA384_PSS_DETERMINISTIC,
-            3 => &RSABSSA_SHA384_PSSZERO_DETERMINISTIC,
-            _ => &RSABSSA_SHA384_PSS_RANDOMIZED,
-        }
+    fn randomized(self) -> bool {
+        self.kind.randomized()
     }
 }
 
 /// RSABSSA-SHA384-PSS-Randomized. The signed message is 32 random bytes
 /// followed by the caller's message, and the PSS salt is 48 bytes.
 pub static RSABSSA_SHA384_PSS_RANDOMIZED: Algorithm = Algorithm {
-    salt_len: SHA384_LEN,
-    randomized: true,
+    kind: Kind::PssRandomized,
 };
 
 /// RSABSSA-SHA384-PSSZERO-Randomized. Same preparation, with an empty PSS salt.
 pub static RSABSSA_SHA384_PSSZERO_RANDOMIZED: Algorithm = Algorithm {
-    salt_len: 0,
-    randomized: true,
+    kind: Kind::PssZeroRandomized,
 };
 
 /// RSABSSA-SHA384-PSS-Deterministic. The message is signed as given, with a
 /// 48-byte PSS salt. Privacy Pass tokens (RFC 9578 type `0x0002`) use this
 /// with a 2048-bit key.
 pub static RSABSSA_SHA384_PSS_DETERMINISTIC: Algorithm = Algorithm {
-    salt_len: SHA384_LEN,
-    randomized: false,
+    kind: Kind::PssDeterministic,
 };
 
 /// RSABSSA-SHA384-PSSZERO-Deterministic. The message is signed as given, with
 /// an empty PSS salt.
 pub static RSABSSA_SHA384_PSSZERO_DETERMINISTIC: Algorithm = Algorithm {
-    salt_len: 0,
-    randomized: false,
+    kind: Kind::PssZeroDeterministic,
 };
 
 /// A message prepared for a randomized variant: 32 random bytes, then the
@@ -88,7 +105,7 @@ pub struct PreparedMessage {
     prefix: [u8; PREFIX_LEN],
     message: [u8; MAX_MESSAGE],
     message_len: u16,
-    kind: u8,
+    kind: Kind,
 }
 
 impl PreparedMessage {
@@ -167,7 +184,7 @@ impl PublicKey {
         message: &[u8],
     ) -> Result<PreparedMessage, Error> {
         let _entry = Entry::new_public();
-        if !algorithm.randomized {
+        if !algorithm.randomized() {
             return Err(Error::Unsupported);
         }
         let mut prefix = [0u8; PREFIX_LEN];
@@ -187,7 +204,7 @@ impl PublicKey {
         prefix: &[u8],
         message: &[u8],
     ) -> Result<PreparedMessage, Error> {
-        if !algorithm.randomized || prefix.len() != PREFIX_LEN {
+        if !algorithm.randomized() || prefix.len() != PREFIX_LEN {
             return Err(if prefix.len() == PREFIX_LEN {
                 Error::Unsupported
             } else {
@@ -205,7 +222,7 @@ impl PublicKey {
             prefix: prefix_bytes,
             message: stored,
             message_len: message.len() as u16,
-            kind: algorithm.kind(),
+            kind: algorithm.kind,
         })
     }
 
@@ -219,7 +236,7 @@ impl PublicKey {
         algorithm: &'static Algorithm,
         message: &[u8],
     ) -> Result<(BlindedMessage, Blinding), Error> {
-        if algorithm.randomized {
+        if algorithm.randomized() {
             return Err(Error::Unsupported);
         }
         if message.len() > MAX_MESSAGE {
@@ -235,7 +252,7 @@ impl PublicKey {
     ) -> Result<(BlindedMessage, Blinding), Error> {
         blind_message(
             &self.key,
-            Algorithm::from_kind(message.kind),
+            message.kind.algorithm(),
             message.prefix(),
             message.message(),
             None,
@@ -253,7 +270,7 @@ impl PublicKey {
         message: &[u8],
         signature: &Signature,
     ) -> Result<(), Error> {
-        if algorithm.randomized {
+        if algorithm.randomized() {
             return Err(Error::Unsupported);
         }
         verify_message(&self.key, algorithm, &[], message, signature.as_ref())
@@ -267,7 +284,7 @@ impl PublicKey {
     ) -> Result<(), Error> {
         verify_message(
             &self.key,
-            Algorithm::from_kind(message.kind),
+            message.kind.algorithm(),
             message.prefix(),
             message.message(),
             signature.as_ref(),
@@ -394,7 +411,7 @@ pub struct Blinding {
     prefix_len: u8,
     message: [u8; MAX_MESSAGE],
     message_len: u16,
-    kind: u8,
+    kind: Kind,
 }
 
 impl Blinding {
@@ -413,7 +430,7 @@ impl Blinding {
         self.key
             .mul_mod_be(blind_signature.as_ref(), &self.inverse[..k], &mut signature)?;
         ct::secret_slice(&signature[..k]);
-        let algorithm = *Algorithm::from_kind(self.kind);
+        let algorithm = *self.kind.algorithm();
         let verdict = verify_secret(
             &self.key,
             algorithm,
@@ -600,7 +617,7 @@ fn blind_message(
                 prefix_len: prefix.len() as u8,
                 message: stored_message,
                 message_len: message.len() as u16,
-                kind: algorithm.kind(),
+                kind: algorithm.kind,
             },
         ));
     }
@@ -1049,7 +1066,7 @@ mod tests {
                 prefix_len: 0,
                 message: stored,
                 message_len: message.len() as u16,
-                kind: algorithm.kind(),
+                kind: algorithm.kind,
             };
             assert!(
                 blinding()
@@ -1142,14 +1159,14 @@ mod tests {
                     algorithm.salt_len(),
                 )
                 .unwrap();
-                assert_eq!(&em[..em_len], encoded.as_slice(), "{}", algorithm.kind());
+                assert_eq!(&em[..em_len], encoded.as_slice(), "{:?}", algorithm.kind);
             }
             assert_eq!(blinded.as_ref(), number("blinded_msg").as_slice());
             let blind_sig = pair.blind_sign(&blinded).unwrap();
             assert_eq!(blind_sig.as_ref(), number("blind_sig").as_slice());
             let signature = blinding.finalize(&blind_sig).unwrap();
             assert_eq!(signature.as_ref(), number("sig").as_slice());
-            if algorithm.randomized {
+            if algorithm.randomized() {
                 let prepared = PublicKey::prepared(algorithm, &prefix, &msg).unwrap();
                 public.verify_prepared(&prepared, &signature).unwrap();
                 assert_eq!(
