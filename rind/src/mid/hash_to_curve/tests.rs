@@ -138,6 +138,27 @@ fn expand_message_refuses_hostile_lengths() {
     assert!(expand_sha256(b"", dst, &mut []).is_ok());
     // An empty message is a real input. Appendix K starts with one.
     assert!(expand_sha384(b"", dst, &mut [0; 48]).is_ok());
+
+    // A tag of 255 bytes is used as written. One more byte is hashed first.
+    let mut at_limit = [0u8; 32];
+    let mut over = [0u8; 32];
+    let dst_255 = vec![b'Z'; 255];
+    let dst_256 = vec![b'Z'; 256];
+    expand_sha256(b"", &dst_255, &mut at_limit).unwrap();
+    expand_sha256(b"", &dst_256, &mut over).unwrap();
+    assert_ne!(at_limit, over);
+    expand_sha384(b"abc", &dst_255, &mut [0; 48]).unwrap();
+    expand_sha512(b"abc", &dst_256, &mut [0; 64]).unwrap();
+
+    // `L` outside a suite is refused before any allocation.
+    assert_eq!(
+        super::expand_two::<0>(b"m", dst, expand_sha256),
+        Err(ExpandError::OutputLength)
+    );
+    assert_eq!(
+        super::expand_two::<129>(b"m", dst, expand_sha512),
+        Err(ExpandError::OutputLength)
+    );
 }
 
 #[test]
@@ -187,6 +208,151 @@ fn reduce_be_matches_schoolbook() {
     assert_eq!(reduce_be(&past, &p256, &r2), school(&past, &p256));
     let ones = [0xffu8; 48];
     assert_eq!(reduce_be(&ones, &p256, &r2), school(&ones, &p256));
+    check_modulus(&p256, &r2);
+    check_modulus(
+        &[
+            0xf3b9_cac2_fc63_2551,
+            0xbce6_faad_a717_9e84,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_0000_0000,
+        ],
+        &[
+            0x8324_4c95_be79_eea2,
+            0x4699_799c_49bd_6fa6,
+            0x2845_b239_2b6b_ec59,
+            0x66e1_2d94_f3d9_5620,
+        ],
+    );
+
+    // P-384 and P-521, at the modulus, one below, and one past. The order is
+    // the scalar modulus `hash_to_scalar` reduces by.
+    check_modulus(
+        &[
+            0x0000_0000_ffff_ffff,
+            0xffff_ffff_0000_0000,
+            0xffff_ffff_ffff_fffe,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_ffff_ffff,
+        ],
+        &[
+            0xffff_fffe_0000_0001,
+            0x0000_0002_0000_0000,
+            0xffff_fffe_0000_0000,
+            0x0000_0002_0000_0000,
+            0x0000_0000_0000_0001,
+            0x0000_0000_0000_0000,
+        ],
+    );
+    check_modulus(
+        &[
+            0xecec_196a_ccc5_2973,
+            0x581a_0db2_48b0_a77a,
+            0xc763_4d81_f437_2ddf,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_ffff_ffff,
+        ],
+        &[
+            0x2d31_9b24_19b4_09a9,
+            0xff3d_81e5_df1a_a419,
+            0xbc3e_483a_fcb8_2947,
+            0xd40d_4917_4aab_1cc5,
+            0x3fb0_5b7a_2826_6895,
+            0x0c84_ee01_2b39_bf21,
+        ],
+    );
+    check_modulus(
+        &[
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_ffff_ffff,
+            0x0000_0000_0000_01ff,
+        ],
+        &[
+            0x0000_0000_0000_0000,
+            0x0000_4000_0000_0000,
+            0x0000_0000_0000_0000,
+            0x0000_0000_0000_0000,
+            0x0000_0000_0000_0000,
+            0x0000_0000_0000_0000,
+            0x0000_0000_0000_0000,
+            0x0000_0000_0000_0000,
+            0x0000_0000_0000_0000,
+        ],
+    );
+    check_modulus(
+        &[
+            0xbb6f_b71e_9138_6409,
+            0x3bb5_c9b8_899c_47ae,
+            0x7fcc_0148_f709_a5d0,
+            0x5186_8783_bf2f_966b,
+            0xffff_ffff_ffff_fffa,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_ffff_ffff,
+            0x0000_0000_0000_01ff,
+        ],
+        &[
+            0x137c_d04d_cf15_dd04,
+            0xf707_badc_e554_7ea3,
+            0x12a7_8d38_7945_73ff,
+            0xd372_1ef5_57f7_5e06,
+            0xdd6e_23d8_2e49_c7db,
+            0xcff3_d142_b775_6e3e,
+            0x5bcc_6d61_a8e5_67bc,
+            0x2d8e_03d1_492d_0d45,
+            0x0000_0000_0000_003d,
+        ],
+    );
+}
+
+/// `modulus`, one below it, and one past it, against schoolbook reduction.
+fn check_modulus<const N: usize>(modulus: &[u64; N], r2: &[u64; N]) {
+    let be = |words: &[u64; N]| -> Vec<u8> {
+        let mut out = vec![0u8; N * 8];
+        for (i, word) in words.iter().enumerate() {
+            let at = out.len() - (i + 1) * 8;
+            out[at..at + 8].copy_from_slice(&word.to_be_bytes());
+        }
+        out
+    };
+    let encoded = be(modulus);
+    assert_eq!(reduce_be(&encoded, modulus, r2), [0; N]);
+    let mut below = encoded.clone();
+    decrement(&mut below);
+    assert_eq!(reduce_be(&below, modulus, r2), school(&below, modulus));
+    let mut past = encoded.clone();
+    increment(&mut past);
+    assert_eq!(reduce_be(&past, modulus, r2), school(&past, modulus));
+    let mut one = [0u64; N];
+    one[0] = 1;
+    assert_eq!(reduce_be(&past, modulus, r2), one);
+}
+
+fn increment(bytes: &mut [u8]) {
+    for byte in bytes.iter_mut().rev() {
+        let (sum, carry) = byte.overflowing_add(1);
+        *byte = sum;
+        if !carry {
+            return;
+        }
+    }
+}
+
+fn decrement(bytes: &mut [u8]) {
+    for byte in bytes.iter_mut().rev() {
+        let (diff, borrow) = byte.overflowing_sub(1);
+        *byte = diff;
+        if !borrow {
+            return;
+        }
+    }
 }
 
 /// `bytes` reduced mod `modulus`, one bit at a time.
@@ -596,14 +762,20 @@ mod differential {
 
     #[test]
     fn field_scalar_and_sha384_match_hash2curve() {
+        let dst_255 = vec![b'D'; 255];
+        let dst_256 = vec![b'D'; 256];
         for msg in [b"".as_slice(), b"abc", b"password", &[0xff; 40]] {
             for dst in [
                 b"QUUX-V01-CS02".as_slice(),
                 b"another-domain-separation-tag",
+                dst_255.as_slice(),
+                dst_256.as_slice(),
             ] {
                 field_and_scalar(msg, dst);
-                expand_sha384_matches(msg, dst, 32);
-                expand_sha384_matches(msg, dst, 96);
+                // One byte, one hash output, and one byte past it.
+                expand_sha384_matches(msg, dst, 1);
+                expand_sha384_matches(msg, dst, 48);
+                expand_sha384_matches(msg, dst, 49);
             }
         }
     }

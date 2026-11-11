@@ -152,11 +152,12 @@ pub(in crate::mid) fn add_affine<F: SwuField>(p: Affine<F>, q: Affine<F>, a: F) 
 ///
 /// `modulus` is `M` little-endian limbs with a nonzero top limb, and `r2` is
 /// `2^(128 M) mod modulus`, the Montgomery factor `bignum_montifier` returns.
-/// `bytes` is a big-endian integer of 1 to 128 bytes, below `2^(64 M)` times
-/// the modulus, which holds for every suite `L`: the input is shorter than
-/// two field elements. Reduction is Montgomery reduction of that width, which
-/// s2n-bignum's `bignum_montredc` performs, then multiplication by `r2` to
-/// cancel the Montgomery factor. The lengths are public.
+/// `bytes` is a big-endian integer of 1 to `min(128, 16 M)` bytes, below
+/// `2^(64 M)` times the modulus. Every suite `L` is inside that: `bignum_montredc`
+/// reads only the lowest `2 M` limbs, so a longer input would drop its high
+/// bytes instead of reducing them. Reduction is Montgomery reduction of that
+/// width, then multiplication by `r2` to cancel the Montgomery factor. The
+/// lengths are public.
 pub(in crate::mid) fn reduce_be<const M: usize>(
     bytes: &[u8],
     modulus: &[u64; M],
@@ -164,7 +165,11 @@ pub(in crate::mid) fn reduce_be<const M: usize>(
 ) -> [u64; M] {
     assert!(M < 16, "hash-to-field modulus is wider than its input");
     assert!(!bytes.is_empty(), "hash-to-field element is empty");
-    assert!(bytes.len() <= 128, "hash-to-field element is wider than L");
+    // Two field elements, and no more than the 16-limb input buffer.
+    assert!(
+        bytes.len() <= (M * 16).min(128),
+        "hash-to-field element is wider than two field elements"
+    );
 
     let limbs = bytes.len().div_ceil(8);
     let mut words = [0u64; 16];

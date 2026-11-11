@@ -78,19 +78,29 @@ pub(in crate::mid) fn expand_reduced<T, const L: usize>(
     Ok(reduce(&uniform))
 }
 
+/// Widest `L` a suite passes to [`expand_two`]. Two elements fit on the stack.
+const MAX_ELEMENT: usize = 128;
+
 /// `expand_message_xmd` of `2L` bytes, split into the two field elements the
 /// random-oracle suite maps. The caller holds an [`Entry`].
+///
+/// `L` is the suite length, at most [`MAX_ELEMENT`]. The bytes stay on the
+/// stack: a `Vec` would panic if the allocator refused a buffer derived from
+/// the message.
 pub(in crate::mid) fn expand_two<const L: usize>(
     msg: &[u8],
     dst: &[u8],
     expand: ExpandFn,
 ) -> Result<([u8; L], [u8; L]), ExpandError> {
-    // `L * 2` is not a const array length: const parameters cannot be multiplied there.
-    let mut uniform = vec![0u8; L.saturating_mul(2)];
-    expand(msg, dst, &mut uniform)?;
+    if L == 0 || L > MAX_ELEMENT {
+        return Err(ExpandError::OutputLength);
+    }
+    let mut uniform = [0u8; MAX_ELEMENT * 2];
+    let len = L * 2;
+    expand(msg, dst, &mut uniform[..len])?;
     let mut u0 = [0u8; L];
     let mut u1 = [0u8; L];
     u0.copy_from_slice(&uniform[..L]);
-    u1.copy_from_slice(&uniform[L..]);
+    u1.copy_from_slice(&uniform[L..len]);
     Ok((u0, u1))
 }
