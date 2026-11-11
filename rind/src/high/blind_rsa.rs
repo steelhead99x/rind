@@ -33,33 +33,33 @@ pub struct Algorithm {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 enum Kind {
-    PssRandomized,
-    PssZeroRandomized,
-    PssDeterministic,
-    PssZeroDeterministic,
+    Randomized,
+    ZeroRandomized,
+    Deterministic,
+    ZeroDeterministic,
 }
 
 impl Kind {
     fn salt_len(self) -> usize {
         match self {
-            Self::PssRandomized | Self::PssDeterministic => usize::from(SHA384_LEN),
-            Self::PssZeroRandomized | Self::PssZeroDeterministic => 0,
+            Self::Randomized | Self::Deterministic => usize::from(SHA384_LEN),
+            Self::ZeroRandomized | Self::ZeroDeterministic => 0,
         }
     }
 
     fn randomized(self) -> bool {
         match self {
-            Self::PssRandomized | Self::PssZeroRandomized => true,
-            Self::PssDeterministic | Self::PssZeroDeterministic => false,
+            Self::Randomized | Self::ZeroRandomized => true,
+            Self::Deterministic | Self::ZeroDeterministic => false,
         }
     }
 
     fn algorithm(self) -> &'static Algorithm {
         match self {
-            Self::PssRandomized => &RSABSSA_SHA384_PSS_RANDOMIZED,
-            Self::PssZeroRandomized => &RSABSSA_SHA384_PSSZERO_RANDOMIZED,
-            Self::PssDeterministic => &RSABSSA_SHA384_PSS_DETERMINISTIC,
-            Self::PssZeroDeterministic => &RSABSSA_SHA384_PSSZERO_DETERMINISTIC,
+            Self::Randomized => &RSABSSA_SHA384_PSS_RANDOMIZED,
+            Self::ZeroRandomized => &RSABSSA_SHA384_PSSZERO_RANDOMIZED,
+            Self::Deterministic => &RSABSSA_SHA384_PSS_DETERMINISTIC,
+            Self::ZeroDeterministic => &RSABSSA_SHA384_PSSZERO_DETERMINISTIC,
         }
     }
 }
@@ -77,25 +77,25 @@ impl Algorithm {
 /// RSABSSA-SHA384-PSS-Randomized. The signed message is 32 random bytes
 /// followed by the caller's message, and the PSS salt is 48 bytes.
 pub static RSABSSA_SHA384_PSS_RANDOMIZED: Algorithm = Algorithm {
-    kind: Kind::PssRandomized,
+    kind: Kind::Randomized,
 };
 
 /// RSABSSA-SHA384-PSSZERO-Randomized. Same preparation, with an empty PSS salt.
 pub static RSABSSA_SHA384_PSSZERO_RANDOMIZED: Algorithm = Algorithm {
-    kind: Kind::PssZeroRandomized,
+    kind: Kind::ZeroRandomized,
 };
 
 /// RSABSSA-SHA384-PSS-Deterministic. The message is signed as given, with a
 /// 48-byte PSS salt. Privacy Pass tokens (RFC 9578 type `0x0002`) use this
 /// with a 2048-bit key.
 pub static RSABSSA_SHA384_PSS_DETERMINISTIC: Algorithm = Algorithm {
-    kind: Kind::PssDeterministic,
+    kind: Kind::Deterministic,
 };
 
 /// RSABSSA-SHA384-PSSZERO-Deterministic. The message is signed as given, with
 /// an empty PSS salt.
 pub static RSABSSA_SHA384_PSSZERO_DETERMINISTIC: Algorithm = Algorithm {
-    kind: Kind::PssZeroDeterministic,
+    kind: Kind::ZeroDeterministic,
 };
 
 /// A message prepared for a randomized variant: 32 random bytes, then the
