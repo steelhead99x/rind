@@ -168,6 +168,7 @@ impl PublicKey {
 
     /// Loads an RSA public key from its big-endian modulus and exponent.
     pub fn from_components(n: &[u8], e: &[u8]) -> Result<Self, Error> {
+        let _entry = Entry::new_public();
         Ok(Self {
             key: VerifyingKey::from_components(n, e)?,
         })
@@ -204,6 +205,7 @@ impl PublicKey {
         prefix: &[u8],
         message: &[u8],
     ) -> Result<PreparedMessage, Error> {
+        let _entry = Entry::new_public();
         if !algorithm.randomized() || prefix.len() != PREFIX_LEN {
             return Err(if prefix.len() == PREFIX_LEN {
                 Error::Unsupported
@@ -236,6 +238,7 @@ impl PublicKey {
         algorithm: &'static Algorithm,
         message: &[u8],
     ) -> Result<(BlindedMessage, Blinding), Error> {
+        let _entry = Entry::new_secret();
         if algorithm.randomized() {
             return Err(Error::Unsupported);
         }
@@ -250,6 +253,7 @@ impl PublicKey {
         &self,
         message: &PreparedMessage,
     ) -> Result<(BlindedMessage, Blinding), Error> {
+        let _entry = Entry::new_secret();
         blind_message(
             &self.key,
             message.kind.algorithm(),
@@ -270,6 +274,7 @@ impl PublicKey {
         message: &[u8],
         signature: &Signature,
     ) -> Result<(), Error> {
+        let _entry = Entry::new_public();
         if algorithm.randomized() {
             return Err(Error::Unsupported);
         }
@@ -282,6 +287,7 @@ impl PublicKey {
         message: &PreparedMessage,
         signature: &Signature,
     ) -> Result<(), Error> {
+        let _entry = Entry::new_public();
         verify_message(
             &self.key,
             message.kind.algorithm(),
@@ -309,6 +315,7 @@ pub struct BlindedMessage {
 impl BlindedMessage {
     /// Copies `bytes` when they fit a modulus this library accepts.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        let _entry = Entry::new_public();
         fixed(bytes).map(|fixed| Self {
             bytes: fixed.0,
             len: fixed.1,
@@ -339,6 +346,7 @@ pub struct BlindSignature {
 impl BlindSignature {
     /// Copies `bytes` when they fit a modulus this library accepts.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        let _entry = Entry::new_public();
         fixed(bytes).map(|fixed| Self {
             bytes: fixed.0,
             len: fixed.1,
@@ -369,6 +377,7 @@ pub struct Signature {
 impl Signature {
     /// Copies `bytes` when they fit a modulus this library accepts.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        let _entry = Entry::new_public();
         fixed(bytes).map(|fixed| Self {
             bytes: fixed.0,
             len: fixed.1,
@@ -471,6 +480,7 @@ pub struct KeyPair {
 impl KeyPair {
     /// Generates a two-prime RSA key of `size`.
     pub fn generate(size: crate::mid::rsa_key_size::RsaKeySize) -> Result<Self, Error> {
+        let _entry = Entry::new_secret();
         Ok(Self {
             key: SigningKey::generate(size)?,
         })
@@ -478,6 +488,7 @@ impl KeyPair {
 
     /// Decodes a two-prime RSA key from PKCS#8 DER.
     pub fn from_pkcs8(bytes: &[u8]) -> Result<Self, Error> {
+        let _entry = Entry::new_secret();
         Ok(Self {
             key: SigningKey::from_pkcs8_der(bytes)?,
         })
@@ -486,6 +497,7 @@ impl KeyPair {
     /// Signs `blinded`. The signature is an ordinary RSA private operation,
     /// checked against the public key.
     pub fn blind_sign(&self, blinded: &BlindedMessage) -> Result<BlindSignature, Error> {
+        let _entry = Entry::new_secret();
         let mut out = [0u8; MAX_MODULUS];
         let signed = self.key.blind_sign(blinded.as_ref(), &mut out)?;
         let len = signed.len();
@@ -1207,34 +1219,41 @@ mod tests {
             result: String,
         }
 
-        let file: File = serde_json::from_str(include_str!(
-            "../../../thirdparty/wycheproof/testvectors_v1/rsa_pss_2048_sha384_mgf1_48_test.json"
-        ))
-        .unwrap();
-        assert!(!file.groups.is_empty());
-        for group in file.groups {
-            assert_eq!(group.sha, "SHA-384");
-            assert_eq!(group.mgf_sha, "SHA-384");
-            assert_eq!(group.salt_len, 48);
-            let key =
-                PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, &group.public_key_der)
-                    .unwrap();
-            for case in group.tests {
-                let signature = match Signature::from_bytes(&case.sig) {
-                    Ok(signature) => signature,
-                    Err(Error::WrongLength) => {
-                        assert_ne!(case.result, "valid");
-                        continue;
+        for file in [
+            include_str!(
+                "../../../thirdparty/wycheproof/testvectors_v1/rsa_pss_2048_sha384_mgf1_48_test.json"
+            ),
+            include_str!(
+                "../../../thirdparty/wycheproof/testvectors_v1/rsa_pss_4096_sha384_mgf1_48_test.json"
+            ),
+        ] {
+            let file: File = serde_json::from_str(file).unwrap();
+            assert!(!file.groups.is_empty());
+            for group in file.groups {
+                assert_eq!(group.sha, "SHA-384");
+                assert_eq!(group.mgf_sha, "SHA-384");
+                assert_eq!(group.salt_len, 48);
+                let key =
+                    PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, &group.public_key_der)
+                        .unwrap();
+                for case in group.tests {
+                    let signature = match Signature::from_bytes(&case.sig) {
+                        Ok(signature) => signature,
+                        Err(Error::WrongLength) => {
+                            assert_ne!(case.result, "valid");
+                            continue;
+                        }
+                        Err(error) => panic!("{error:?}"),
+                    };
+                    let result =
+                        key.verify(&RSABSSA_SHA384_PSS_DETERMINISTIC, &case.msg, &signature);
+                    match case.result.as_str() {
+                        "valid" => result.unwrap(),
+                        "invalid" | "acceptable" => {
+                            assert_eq!(result.err(), Some(Error::BadSignature));
+                        }
+                        other => panic!("unexpected result {other}"),
                     }
-                    Err(error) => panic!("{error:?}"),
-                };
-                let result = key.verify(&RSABSSA_SHA384_PSS_DETERMINISTIC, &case.msg, &signature);
-                match case.result.as_str() {
-                    "valid" => result.unwrap(),
-                    "invalid" | "acceptable" => {
-                        assert_eq!(result.err(), Some(Error::BadSignature));
-                    }
-                    other => panic!("unexpected result {other}"),
                 }
             }
         }
