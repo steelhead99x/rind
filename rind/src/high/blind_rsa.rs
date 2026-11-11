@@ -133,9 +133,14 @@ pub struct PublicKey {
 
 impl PublicKey {
     /// Decodes an RSA public key from `SubjectPublicKeyInfo` DER.
-    pub fn from_spki(bytes: &[u8]) -> Result<Self, Error> {
+    ///
+    /// An `id-RSASSA-PSS` key must name SHA-384, MGF1 with SHA-384, and
+    /// `algorithm`'s salt length. `rsaEncryption` carries no PSS parameters.
+    /// Any other algorithm, or a parameter that does not match, is refused.
+    pub fn from_spki(algorithm: &'static Algorithm, bytes: &[u8]) -> Result<Self, Error> {
+        let _entry = Entry::new_public();
         Ok(Self {
-            key: VerifyingKey::from_der(bytes)?,
+            key: spki_key(algorithm, bytes)?,
         })
     }
 
@@ -671,6 +676,255 @@ fn verify_secret(
     ))
 }
 
+const OID_RSA_ENCRYPTION: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
+const OID_RSASSA_PSS: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a];
+const OID_MGF1: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x08];
+const OID_SHA384: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02];
+
+fn spki_key(algorithm: &Algorithm, bytes: &[u8]) -> Result<VerifyingKey, Error> {
+    let mut spki = Cursor::new(bytes);
+    let body = spki.tag(0x30)?;
+    spki.finish()?;
+    let mut body = Cursor::new(body);
+    let algorithm_id = body.tag(0x30)?;
+    let bits = body.tag(0x03)?;
+    body.finish()?;
+
+    let mut id = Cursor::new(algorithm_id);
+    let oid = id.tag(0x06)?;
+    if oid == OID_RSA_ENCRYPTION {
+        if !id.rest.is_empty() {
+            let null = id.tag(0x05)?;
+            if !null.is_empty() {
+                return Err(crate::error::KeyFormatError::Asn1(
+                    crate::high::asn1::Error::IllegalNull,
+                )
+                .into());
+            }
+            id.finish()?;
+        }
+        return VerifyingKey::from_der(bytes);
+    }
+    if oid != OID_RSASSA_PSS {
+        return Err(crate::error::KeyFormatError::MismatchedSpkiAlgorithm.into());
+    }
+    let params = id.tag(0x30)?;
+    id.finish()?;
+    pss_parameters(algorithm, params)?;
+
+    let unused = *bits.first().ok_or(crate::error::KeyFormatError::Asn1(
+        crate::high::asn1::Error::UnexpectedEof,
+    ))?;
+    if unused != 0 {
+        return Err(crate::error::KeyFormatError::Asn1(
+            crate::high::asn1::Error::UnhandledBitString,
+        )
+        .into());
+    }
+    VerifyingKey::from_der(&bits[1..])
+}
+
+/// RFC 4055 `RSASSA-PSS-params`. Absent fields take the standard defaults
+/// (SHA-1, MGF1-SHA-1, salt 20, trailer 1), which do not match these variants.
+fn pss_parameters(algorithm: &Algorithm, params: &[u8]) -> Result<(), Error> {
+    let mut cursor = Cursor::new(params);
+    let mut hash = None;
+    let mut mgf = None;
+    let mut salt = None;
+    let mut trailer = None;
+    while !cursor.rest.is_empty() {
+        let (tag, body) = cursor.tlv()?;
+        let slot = match tag {
+            0xa0 => &mut hash,
+            0xa1 => &mut mgf,
+            0xa2 => &mut salt,
+            0xa3 => &mut trailer,
+            _ => return Err(crate::error::KeyFormatError::MismatchedSpkiAlgorithm.into()),
+        };
+        if slot.is_some() {
+            return Err(crate::error::KeyFormatError::MismatchedSpkiAlgorithm.into());
+        }
+        *slot = Some(body);
+    }
+    let hash = hash.map(hash_oid).transpose()?.unwrap_or(OID_SHA1);
+    let mgf = match mgf {
+        Some(body) => mgf_hash(body)?,
+        None => OID_SHA1,
+    };
+    let salt = match salt {
+        Some(body) => der_uint(body)?,
+        None => 20,
+    };
+    let trailer = match trailer {
+        Some(body) => der_uint(body)?,
+        None => 1,
+    };
+    if hash != OID_SHA384 || mgf != OID_SHA384 || salt != algorithm.salt_len() || trailer != 1 {
+        return Err(crate::error::KeyFormatError::MismatchedSpkiAlgorithm.into());
+    }
+    Ok(())
+}
+
+const OID_SHA1: &[u8] = &[0x2b, 0x0e, 0x03, 0x02, 0x1a];
+
+fn hash_oid(identifier: &[u8]) -> Result<&[u8], Error> {
+    let mut cursor = Cursor::new(identifier);
+    let seq = cursor.tag(0x30)?;
+    cursor.finish()?;
+    algorithm_oid(seq)
+}
+
+/// `algorithm` and an optional NULL, the contents of an AlgorithmIdentifier.
+fn algorithm_oid(content: &[u8]) -> Result<&[u8], Error> {
+    let mut seq = Cursor::new(content);
+    let oid = seq.tag(0x06)?;
+    if !seq.rest.is_empty() {
+        let null = seq.tag(0x05)?;
+        if !null.is_empty() {
+            return Err(
+                crate::error::KeyFormatError::Asn1(crate::high::asn1::Error::IllegalNull).into(),
+            );
+        }
+        seq.finish()?;
+    }
+    Ok(oid)
+}
+
+fn mgf_hash(body: &[u8]) -> Result<&[u8], Error> {
+    let mut cursor = Cursor::new(body);
+    let seq = cursor.tag(0x30)?;
+    cursor.finish()?;
+    let mut seq = Cursor::new(seq);
+    let oid = seq.tag(0x06)?;
+    if oid != OID_MGF1 {
+        return Err(crate::error::KeyFormatError::MismatchedSpkiAlgorithm.into());
+    }
+    let hash = seq.tag(0x30)?;
+    seq.finish()?;
+    algorithm_oid(hash)
+}
+
+fn der_uint(tlv: &[u8]) -> Result<usize, Error> {
+    let mut cursor = Cursor::new(tlv);
+    let value = cursor.tag(0x02)?;
+    cursor.finish()?;
+    if value.is_empty() || value.len() > size_of::<usize>() || value[0] & 0x80 != 0 {
+        return Err(crate::error::KeyFormatError::Asn1(
+            crate::high::asn1::Error::IntegerOutOfRange,
+        )
+        .into());
+    }
+    if value.len() > 1 && value[0] == 0 && value[1] & 0x80 == 0 {
+        return Err(crate::error::KeyFormatError::Asn1(
+            crate::high::asn1::Error::NonCanonicalEncoding,
+        )
+        .into());
+    }
+    Ok(value
+        .iter()
+        .fold(0, |acc, byte| acc << 8 | usize::from(*byte)))
+}
+
+struct Cursor<'a> {
+    rest: &'a [u8],
+}
+
+impl<'a> Cursor<'a> {
+    fn new(rest: &'a [u8]) -> Self {
+        Self { rest }
+    }
+
+    fn tlv(&mut self) -> Result<(u8, &'a [u8]), Error> {
+        let tag = *self.rest.first().ok_or(crate::error::KeyFormatError::Asn1(
+            crate::high::asn1::Error::UnexpectedEof,
+        ))?;
+        self.rest = &self.rest[1..];
+        if tag & 0x1f == 0x1f {
+            return Err(crate::error::KeyFormatError::Asn1(
+                crate::high::asn1::Error::UnexpectedTag,
+            )
+            .into());
+        }
+        let len = self.len()?;
+        let (body, rest) =
+            self.rest
+                .split_at_checked(len)
+                .ok_or(crate::error::KeyFormatError::Asn1(
+                    crate::high::asn1::Error::UnexpectedEof,
+                ))?;
+        self.rest = rest;
+        Ok((tag, body))
+    }
+
+    fn tag(&mut self, want: u8) -> Result<&'a [u8], Error> {
+        let (tag, body) = self.tlv()?;
+        if tag != want {
+            return Err(crate::error::KeyFormatError::Asn1(
+                crate::high::asn1::Error::UnexpectedTag,
+            )
+            .into());
+        }
+        Ok(body)
+    }
+
+    fn finish(self) -> Result<(), Error> {
+        if self.rest.is_empty() {
+            Ok(())
+        } else {
+            Err(crate::error::KeyFormatError::Asn1(
+                crate::high::asn1::Error::UnexpectedTrailingData,
+            )
+            .into())
+        }
+    }
+
+    fn len(&mut self) -> Result<usize, Error> {
+        let byte = *self.rest.first().ok_or(crate::error::KeyFormatError::Asn1(
+            crate::high::asn1::Error::UnexpectedEof,
+        ))?;
+        self.rest = &self.rest[1..];
+        match byte {
+            0x00..=0x7f => Ok(usize::from(byte)),
+            0x81 => {
+                let len = *self.rest.first().ok_or(crate::error::KeyFormatError::Asn1(
+                    crate::high::asn1::Error::UnexpectedEof,
+                ))?;
+                self.rest = &self.rest[1..];
+                if len < 0x80 {
+                    return Err(crate::error::KeyFormatError::Asn1(
+                        crate::high::asn1::Error::NonCanonicalEncoding,
+                    )
+                    .into());
+                }
+                Ok(usize::from(len))
+            }
+            0x82 => {
+                let pair: [u8; 2] =
+                    self.rest
+                        .get(..2)
+                        .ok_or(crate::error::KeyFormatError::Asn1(
+                            crate::high::asn1::Error::UnexpectedEof,
+                        ))?[..]
+                        .try_into()
+                        .unwrap();
+                self.rest = &self.rest[2..];
+                let len = usize::from(u16::from_be_bytes(pair));
+                if len < 0x100 {
+                    return Err(crate::error::KeyFormatError::Asn1(
+                        crate::high::asn1::Error::NonCanonicalEncoding,
+                    )
+                    .into());
+                }
+                Ok(len)
+            }
+            _ => Err(crate::error::KeyFormatError::Asn1(
+                crate::high::asn1::Error::UnsupportedLargeObjectLength,
+            )
+            .into()),
+        }
+    }
+}
+
 /// Blinds with a fixed PSS salt and blinding inverse. RFC 9474's vectors
 /// publish both.
 #[cfg(test)]
@@ -696,6 +950,45 @@ pub(crate) fn blind_fixed(
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    /// OpenSSL `RSA-PSS` SPKIs. Parameters must match the chosen variant.
+    #[test]
+    fn accepts_openssl_rsassa_pss_spki() {
+        fn der(hex_spki: &str) -> Vec<u8> {
+            hex::decode(hex_spki).unwrap()
+        }
+        // sha384, MGF1-sha384, salt 48.
+        let pss = der(
+            "30820156304106092a864886f70d01010a3034a00f300d06096086480165030402020500a11c301a06092a864886f70d010108300d06096086480165030402020500a2030201300382010f003082010a02820101009e289eb2008fd6f7c68fa7653e27a63ed0c8f79d69185aaa48f7498f8257718237a8cb65eaa2ae401747d9197e82ce98212e9992104a2309de21ec1725727d03f9dcb03440f5c7c1b31dbbd3fe78fe427fef216d034766d85c1483faa946630eb62199e7125532fce10405a3bdd5cf4708cbe8d73045e64e3de5d80c2af25850039718799b02f5af27772307523b2b436f080f6bbc89b42160f658df733baa51a3e543d8a15e638d80f38032e2232ebb3dd920bd2dbec61bf04c9a740c24e9c443e700729a06df3644250e0dc367cd76696753d22406849c7ff9a2c1a67f4f38a89a014fbfa8e287a56e98148907359d4f70bd08b1589b5d0721e03f2f0325690203010001",
+        );
+        let key = PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, &pss).unwrap();
+        assert_eq!(key.key.modulus_len_bits(), 2048);
+        PublicKey::from_spki(&RSABSSA_SHA384_PSS_RANDOMIZED, &pss).unwrap();
+        assert!(PublicKey::from_spki(&RSABSSA_SHA384_PSSZERO_DETERMINISTIC, &pss).is_err());
+        assert!(PublicKey::from_spki(&RSABSSA_SHA384_PSSZERO_RANDOMIZED, &pss).is_err());
+
+        // The same hash and MGF, salt 0.
+        let zero = der(
+            "30820156304106092a864886f70d01010a3034a00f300d06096086480165030402020500a11c301a06092a864886f70d010108300d06096086480165030402020500a2030201000382010f003082010a0282010100dc0bd86e1a7d48ff4d7d45e74373fd8f4377434c37662951be00981b3beed446c4bd8b05bd78b46aa3e612c3fff6adbffc6758ec521b0bc57ba2560a92b90f3b355a57866344330aeaf2906691a0e8f95a3151dbd981a9452f7ea4ec3c230688ed79360575f72a0521e0811371cba6efb2476ed5bda7938be1560a6062e0dc52a0775ad679a5775f484062661e6adf39a452865546b585148ca7ef5875274fdef93cc52aa33952a5cb777e36eb636dddfa01fb5576d8b046f2fba778aa0a6ba93d32630f0413a0a98f019b9b50a3fb26c825d0e6f5de9056a2867cc9274245f45170cf4b68e8acd4a789642b092303b362fb32ca3f051b983f3e7e459428ef470203010001",
+        );
+        PublicKey::from_spki(&RSABSSA_SHA384_PSSZERO_DETERMINISTIC, &zero).unwrap();
+        PublicKey::from_spki(&RSABSSA_SHA384_PSSZERO_RANDOMIZED, &zero).unwrap();
+        assert!(PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, &zero).is_err());
+
+        // Salt 32, SHA-256, and MGF1-SHA-512 do not match a SHA-384 salt-48 variant.
+        let salt32 = der(
+            "30820156304106092a864886f70d01010a3034a00f300d06096086480165030402020500a11c301a06092a864886f70d010108300d06096086480165030402020500a2030201200382010f003082010a028201010098a82428a4d968925a7c153b6277e6616327797b43f3f191a0d05961478fe6d3c0a40ba63e7a25ce06cd3da407f4cda9b7c614d41a1998501f1b5d0e5d9e8ed44e383de67e05d6e847dfa871adafb55d74fada77147b35c8c4b605fcc30de4cc3f00144906f1227781e624745891aad280fc5885e6300ab4197acc277307bc394bddb5972cfdb78f265f4ac27dd238c58dc76be6efa5e15705699e8309dcb5670cae2607aca7743d057b09ff696abfca871dbcbc1c25e7cd131276008379a6e555797691b24ac75891d8f1c7c9af644a0bbb0d11a0b9097fb58bb2e76f27b0851d01493f274cadd1dafc89f9b106ef86e699389466ff6cb6a12fb7cd143711190203010001",
+        );
+        let sha256 = der(
+            "30820156304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a2030201300382010f003082010a0282010100db065e83dd316d9791578ca73ba82415de348b62fa4e70ea00823167c96be4537aac2adb58a7c4f3a072a31d008725821ccbbd371efb26c47dfa4f965470d3c0c0bca4fbbccf646f70cd03e8df2eed40cd2098ae96149dbfb73889f691ac82b11062cc2dc86308845aa0254e6d3a3fe4edd4be57f5773b234edbd26271130a0758033d1ea5189f64bcbe6226e99fd06d880e9ea9f30ae9b2eaeed48acf975ed82f405bf07ad8b32d7e8c7a952457b15fc375928390fe37fd4f51f5308bf97031cd638cdbaca7dc13f5f39f22e7fcef9a43262a131b2f805097da2832472fd1750c97f1f7d7e75ebf85ebd953fe0730ab197f3249909385b1b5531dc06864533d0203010001",
+        );
+        let mgf512 = der(
+            "30820156304106092a864886f70d01010a3034a00f300d06096086480165030402020500a11c301a06092a864886f70d010108300d06096086480165030402030500a2030201300382010f003082010a0282010100d11d4ba5c30cd11f12e99def01deb04361cc7469360e28fa802e96c72e4f22e64b2bd78f8ce990667b1d47a59ec1cf0a4a4950d2ddf8a84ac6c37f7b51cdd432ef08ccab57698bd52a360d5f019d9cf435af0af31c815ba75ad5dbe14ce7b5f53b19fc314c90b5de41475ca49ff3e27de0df96845a752006cfbe54fe35936d09c8008ca136f05dbe7c09ec1ede27f1588bfb36874c22b57d2131b2b99852f231ff836db769b3275fda3ad37d49184f0832d574d55ac2c8c28ced1c9e25c28375b059ca784ce6b741274177218a38538ce1b4e004305179d7a4103bb9e4ea5f93f510c2bc774e54e78c7b05541a91b972a1e528a9c4bf62211cb8b7cdd2f7b72d0203010001",
+        );
+        for spki in [&salt32, &sha256, &mgf512] {
+            assert!(PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, spki).is_err());
+        }
+    }
 
     #[test]
     fn rejects_the_wrong_variant_and_a_long_message() {
@@ -830,7 +1123,9 @@ mod tests {
             assert_eq!(group.sha, "SHA-384");
             assert_eq!(group.mgf_sha, "SHA-384");
             assert_eq!(group.salt_len, 48);
-            let key = PublicKey::from_spki(&group.public_key_der).unwrap();
+            let key =
+                PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, &group.public_key_der)
+                    .unwrap();
             for case in group.tests {
                 let signature = match Signature::from_bytes(&case.sig) {
                     Ok(signature) => signature,
