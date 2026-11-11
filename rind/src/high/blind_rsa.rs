@@ -43,12 +43,12 @@ impl Algorithm {
         }
     }
 
-    fn from_kind(kind: u8) -> Self {
+    fn from_kind(kind: u8) -> &'static Self {
         match kind {
-            1 => RSABSSA_SHA384_PSSZERO_RANDOMIZED,
-            2 => RSABSSA_SHA384_PSS_DETERMINISTIC,
-            3 => RSABSSA_SHA384_PSSZERO_DETERMINISTIC,
-            _ => RSABSSA_SHA384_PSS_RANDOMIZED,
+            1 => &RSABSSA_SHA384_PSSZERO_RANDOMIZED,
+            2 => &RSABSSA_SHA384_PSS_DETERMINISTIC,
+            3 => &RSABSSA_SHA384_PSSZERO_DETERMINISTIC,
+            _ => &RSABSSA_SHA384_PSS_RANDOMIZED,
         }
     }
 }
@@ -233,10 +233,9 @@ impl PublicKey {
         &self,
         message: &PreparedMessage,
     ) -> Result<(BlindedMessage, Blinding), Error> {
-        let algorithm = Algorithm::from_kind(message.kind);
         blind_message(
             &self.key,
-            algorithm_static(algorithm),
+            Algorithm::from_kind(message.kind),
             message.prefix(),
             message.message(),
             None,
@@ -268,20 +267,11 @@ impl PublicKey {
     ) -> Result<(), Error> {
         verify_message(
             &self.key,
-            algorithm_static(Algorithm::from_kind(message.kind)),
+            Algorithm::from_kind(message.kind),
             message.prefix(),
             message.message(),
             signature.as_ref(),
         )
-    }
-}
-
-fn algorithm_static(algorithm: Algorithm) -> &'static Algorithm {
-    match algorithm.kind() {
-        1 => &RSABSSA_SHA384_PSSZERO_RANDOMIZED,
-        2 => &RSABSSA_SHA384_PSS_DETERMINISTIC,
-        3 => &RSABSSA_SHA384_PSSZERO_DETERMINISTIC,
-        _ => &RSABSSA_SHA384_PSS_RANDOMIZED,
     }
 }
 
@@ -423,7 +413,7 @@ impl Blinding {
         self.key
             .mul_mod_be(blind_signature.as_ref(), &self.inverse[..k], &mut signature)?;
         ct::secret_slice(&signature[..k]);
-        let algorithm = Algorithm::from_kind(self.kind);
+        let algorithm = *Algorithm::from_kind(self.kind);
         let verdict = verify_secret(
             &self.key,
             algorithm,
