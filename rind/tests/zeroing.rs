@@ -58,6 +58,20 @@ fn rsa() {
 }
 
 #[test]
+fn blind_rsa() {
+    use rind::blind_rsa::{KeyPair, RSABSSA_SHA384_PSS_DETERMINISTIC};
+    use rind::rsa::KeySize;
+    let pair = KeyPair::generate(KeySize::Rsa2048).unwrap();
+    let public = pair.public_key();
+    let (blinded, blinding) = public
+        .blind(&RSABSSA_SHA384_PSS_DETERMINISTIC, b"token")
+        .unwrap();
+    let _ = blinded;
+    check_zeroed_on_drop(Box::pin(blinding));
+    check_zeroed_on_drop(Box::pin(pair));
+}
+
+#[test]
 fn rsa_oaep() {
     use rind::rsa::*;
     let key =

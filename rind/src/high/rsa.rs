@@ -64,7 +64,7 @@ impl PssSalt {
 ///
 /// Keys supported by this library have public moduli between
 /// 1024- and 8192-bits; each verification algorithm may set a higher floor.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct VerifyingKey(rsa_pub::RsaPublicKey);
 
 impl VerifyingKey {
@@ -397,6 +397,79 @@ impl VerifyingKey {
         let c = ct::into_public(self.0.public_op(m)?);
         i2osp(&c, ciphertext).map(|c| &*c)
     }
+
+    /// The public modulus length, in bytes.
+    pub(crate) fn modulus_len_bytes(&self) -> usize {
+        self.0.modulus_len_bytes()
+    }
+
+    /// `base^e mod n`, written at the modulus length.
+    ///
+    /// `base` is big-endian and at most that long. It must be below `n`.
+    pub(crate) fn public_op_be<'a>(
+        &self,
+        base: &[u8],
+        out: &'a mut [u8],
+    ) -> Result<&'a [u8], Error> {
+        let c = self.0.int_from_be(base)?;
+        let m = self.0.public_op(c)?;
+        let out = out
+            .get_mut(..self.modulus_len_bytes())
+            .ok_or(Error::WrongLength)?;
+        i2osp(&m, out).map(|m| &*m)
+    }
+
+    /// `a * b mod n`, both big-endian and below `n`, at the modulus length.
+    pub(crate) fn mul_mod_be<'a>(
+        &self,
+        a: &[u8],
+        b: &[u8],
+        out: &'a mut [u8],
+    ) -> Result<&'a [u8], Error> {
+        let a = self.0.int_from_be(a)?;
+        let b = self.0.int_from_be(b)?;
+        let m = self.0.mul_mod(&a, &b)?;
+        let out = out
+            .get_mut(..self.modulus_len_bytes())
+            .ok_or(Error::WrongLength)?;
+        i2osp(&m, out).map(|m| &*m)
+    }
+
+    /// Whether `a` and the modulus are coprime. The verdict is declassified.
+    pub(crate) fn is_coprime_be(&self, a: &[u8]) -> Result<bool, Error> {
+        let a = self.0.int_from_be(a)?;
+        Ok(ct::into_public(a.is_coprime(&self.0.n)))
+    }
+
+    /// `a^{-1} mod n` at the modulus length.
+    ///
+    /// Fails with [`Error::Unsupported`] when `a` shares a factor with `n`.
+    pub(crate) fn invert_be<'a>(&self, a: &[u8], out: &'a mut [u8]) -> Result<&'a [u8], Error> {
+        let a = self.0.int_from_be(a)?;
+        let mut zero = PosInt::zero();
+        zero.expand(&self.0.n);
+        if !ct::into_public(a.less_than(&self.0.n) & !a.equals(&zero) & a.is_coprime(&self.0.n)) {
+            return Err(Error::Unsupported);
+        }
+        let inv = a.mod_inverse(&self.0.n);
+        let out = out
+            .get_mut(..self.modulus_len_bytes())
+            .ok_or(Error::WrongLength)?;
+        i2osp(&inv, out).map(|inv| &*inv)
+    }
+
+    /// A random residue in `1..n` coprime to `n`, at the modulus length.
+    pub(crate) fn random_factor_be<'a>(
+        &self,
+        rng: &mut dyn crate::mid::rng::RandomSource,
+        out: &'a mut [u8],
+    ) -> Result<&'a [u8], Error> {
+        let r = self.0.random_factor(rng)?;
+        let out = out
+            .get_mut(..self.modulus_len_bytes())
+            .ok_or(Error::WrongLength)?;
+        i2osp(&r, out).map(|r| &*r)
+    }
 }
 
 /// An RSA signing private key.
@@ -524,6 +597,39 @@ impl SigningKey {
         let _entry = Entry::new_secret();
         pkcs8::Key::decode(bytes, &KEY_ALGORITHMS, Some(asn1::Any::Null(asn1::Null)))
             .and_then(|k| Self::from_pkcs1_der(k.v1_private_key()?))
+    }
+
+    /// A two-prime key from its prime factors, private exponent, modulus,
+    /// and public exponent.
+    #[cfg(test)]
+    pub(crate) fn from_components(
+        p: &[u8],
+        q: &[u8],
+        d: &[u8],
+        n: &[u8],
+        e: u64,
+    ) -> Result<Self, Error> {
+        let _entry = Entry::new_secret();
+        Ok(Self(rsa_priv::RsaPrivateKey::from_components(
+            p, q, d, n, e,
+        )?))
+    }
+
+    /// RSASP1 on a modulus-length integer, checked against the public key.
+    ///
+    /// The result is declassified: a blind signature is what the signer sends.
+    pub(crate) fn blind_sign<'a>(
+        &self,
+        blinded: &[u8],
+        out: &'a mut [u8],
+    ) -> Result<&'a [u8], Error> {
+        let _entry = Entry::new_secret();
+        if blinded.len() != self.0.modulus_len_bytes() {
+            return Err(Error::WrongLength);
+        }
+        let m = PosInt::from_bytes(blinded).map_err(|_| Error::WrongLength)?;
+        let c = ct::into_public(self.0.private_op(&m)?);
+        self.to_signature(&c, out)
     }
 
     /// Returns the matching public key.

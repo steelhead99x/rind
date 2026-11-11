@@ -125,6 +125,31 @@ impl RsaPrivateKey {
         core::mem::swap(&mut self.dp, &mut self.dq);
     }
 
+    /// A two-prime key from `p`, `q`, `d`, `n`, and `e`, deriving the CRT
+    /// values the way an ACVP `standard` key does.
+    #[cfg(test)]
+    pub(crate) fn from_components(
+        p: &[u8],
+        q: &[u8],
+        d: &[u8],
+        n: &[u8],
+        e: u64,
+    ) -> Result<Self, Error> {
+        let mismatched = |_| KeyFormatError::MismatchedRsaComponents;
+        let p = RsaPosIntModP::from_bytes(p).map_err(|_| KeyFormatError::RsaPrimes)?;
+        let q = RsaPosIntModP::from_bytes(q).map_err(|_| KeyFormatError::RsaPrimes)?;
+        let d = RsaPosIntD::from_bytes(d).map_err(mismatched)?;
+        let n = RsaPosIntModN::from_bytes(n).map_err(|_| KeyFormatError::RsaModulus)?;
+        let one = low::PosInt::one();
+        let q_mod_p: RsaPosIntModP = q
+            .widen::<{ MAX_PRIVATE_MODULUS_WORDS * 2 }>()
+            .reduce(&p, &p.montifier());
+        let dp = d.reduce_even(&p.sub(&one));
+        let dq = d.reduce_even(&q.sub(&one));
+        let iqmp = q_mod_p.mod_inverse(&p);
+        Self::new(p, q, d, dp, dq, iqmp, n, e)
+    }
+
     pub(crate) fn public_key(&self) -> RsaPublicKey {
         self.public.clone()
     }
