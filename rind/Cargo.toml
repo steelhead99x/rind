@@ -59,8 +59,13 @@ libc = { version = "0.2", default-features = false }
 aws-lc-rs = { version = "1.19", default-features = false, features = ["alloc", "prebuilt-nasm", "non-fips"] }
 # aws-lc's XChaCha20-Poly1305, which aws-lc-rs does not expose.
 aws-lc-sys = { version = "0.47", default-features = false }
-# P-521 hash-to-curve. aws-lc exposes the P-256 and P-384 suites only.
+# Hash-to-curve differentials. aws-lc exposes the P-256 and P-384 suites only,
+# so P-521's point map uses `p521`, and `hash_to_field` / `hash_to_scalar`
+# on all three use hash2curve.
+p256 = { version = "0.14", default-features = false, features = ["group-digest"] }
+p384 = { version = "0.14", default-features = false, features = ["group-digest"] }
 p521 = { version = "0.14", default-features = false, features = ["group-digest"] }
+sha2 = "0.11"
 hash2curve = "0.14"
 elliptic-curve = { version = "0.14", default-features = false, features = ["sec1"] }
 # HPKE, which aws-lc-rs does not expose either; `hazmat` reads its private keys.

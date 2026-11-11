@@ -7,7 +7,6 @@
 //! An empty tag is refused: section 3.1 requires a nonzero length, and hashing
 //! it would turn the refusal into a different tag.
 
-use crate::low::Entry;
 use crate::mid::sha2::{Sha256Context, Sha384Context, Sha512Context};
 
 /// Why `expand_message_xmd` refused its inputs.
@@ -38,7 +37,6 @@ impl XmdHash for Sha256 {
     const OUT: usize = Sha256Context::OUTPUT_SZ;
 
     fn hash(parts: &[&[u8]]) -> [u8; 64] {
-        let _entry = Entry::new_secret();
         let mut ctx = Sha256Context::new();
         for part in parts {
             ctx.update(part);
@@ -55,7 +53,6 @@ impl XmdHash for Sha384 {
     const OUT: usize = Sha384Context::OUTPUT_SZ;
 
     fn hash(parts: &[&[u8]]) -> [u8; 64] {
-        let _entry = Entry::new_secret();
         let mut ctx = Sha384Context::new();
         for part in parts {
             ctx.update(part);
@@ -72,7 +69,6 @@ impl XmdHash for Sha512 {
     const OUT: usize = Sha512Context::OUTPUT_SZ;
 
     fn hash(parts: &[&[u8]]) -> [u8; 64] {
-        let _entry = Entry::new_secret();
         let mut ctx = Sha512Context::new();
         for part in parts {
             ctx.update(part);
@@ -116,8 +112,9 @@ fn expand<H: XmdHash>(msg: &[u8], dst: &[u8], out: &mut [u8]) -> Result<(), Expa
     if len > 65535 {
         return Err(ExpandError::OutputLength);
     }
-    // A loop, not a division: SHA-384's 48-byte output is not a power of two,
-    // and a division's time can depend on its operands.
+    // Both operands are public: the requested length and the hash output size.
+    // `admin/ct-vartime` has no allowlist entry for this function, so the
+    // count is a loop rather than a division.
     let ell = block_count(len, H::OUT);
     if ell > 255 {
         return Err(ExpandError::OutputLength);

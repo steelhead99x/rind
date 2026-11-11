@@ -2629,6 +2629,7 @@ checksum = "d2c9239b2dbc807adbbe147e8cf72ea7450c3a0aabe62cb8e75ff4ec22e1f72a"
 dependencies = [
  "ecdsa",
  "elliptic-curve",
+ "hash2curve",
  "primefield",
  "primeorder",
  "sha2",
@@ -2643,6 +2644,7 @@ dependencies = [
  "ecdsa",
  "elliptic-curve",
  "fiat-crypto",
+ "hash2curve",
  "primefield",
  "primeorder",
  "sha2",
@@ -3248,10 +3250,13 @@ dependencies = [
  "libcrux-poly1305",
  "libcrux-sha2",
  "libcrux-traits",
+ "p256",
+ "p384",
  "p521",
  "proptest",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

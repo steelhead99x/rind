@@ -28,7 +28,8 @@ pub(in crate::mid) use swu::{Affine, SwuConstants, SwuField, add_affine, map_to_
 ///
 /// `infinity` is 1 when the point is the identity, and then `x` and `y` are
 /// zero. The flag is a secret: select on it, do not branch.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// [`Debug`] redacts the coordinates. [`PartialEq`] compares them in constant time.
+#[derive(Clone, Copy)]
 pub(crate) struct HashedPoint<const N: usize> {
     /// The affine x coordinate, or zero at infinity.
     pub(crate) x: [u8; N],
@@ -41,7 +42,55 @@ pub(crate) struct HashedPoint<const N: usize> {
 #[cfg(test)]
 mod tests;
 
+impl<const N: usize> core::fmt::Debug for HashedPoint<N> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("HashedPoint").finish_non_exhaustive()
+    }
+}
+
+impl<const N: usize> PartialEq for HashedPoint<N> {
+    fn eq(&self, other: &Self) -> bool {
+        // `bool`'s `&` does not skip the later comparisons.
+        crate::low::ct_equal(&self.x, &other.x)
+            & crate::low::ct_equal(&self.y, &other.y)
+            & crate::low::ct_equal(&[self.infinity], &[other.infinity])
+    }
+}
+
+impl<const N: usize> Eq for HashedPoint<N> {}
+
 /// Map both field elements and add the points. The cofactor of each suite is 1.
 pub(super) fn hash_to_curve_ro<F: SwuField>(u0: F, u1: F, c: &SwuConstants<F>) -> Affine<F> {
     add_affine(map_to_curve(u0, c), map_to_curve(u1, c), c.a)
+}
+
+type ExpandFn = fn(&[u8], &[u8], &mut [u8]) -> Result<(), ExpandError>;
+
+/// `expand_message_xmd` of `L` bytes, then one reduction. The caller holds an [`Entry`].
+pub(in crate::mid) fn expand_reduced<T, const L: usize>(
+    msg: &[u8],
+    dst: &[u8],
+    expand: ExpandFn,
+    reduce: impl FnOnce(&[u8]) -> T,
+) -> Result<T, ExpandError> {
+    let mut uniform = [0u8; L];
+    expand(msg, dst, &mut uniform)?;
+    Ok(reduce(&uniform))
+}
+
+/// `expand_message_xmd` of `2L` bytes, split into the two field elements the
+/// random-oracle suite maps. The caller holds an [`Entry`].
+pub(in crate::mid) fn expand_two<const L: usize>(
+    msg: &[u8],
+    dst: &[u8],
+    expand: ExpandFn,
+) -> Result<([u8; L], [u8; L]), ExpandError> {
+    // `L * 2` is not a const array length: const parameters cannot be multiplied there.
+    let mut uniform = vec![0u8; L.saturating_mul(2)];
+    expand(msg, dst, &mut uniform)?;
+    let mut u0 = [0u8; L];
+    let mut u1 = [0u8; L];
+    u0.copy_from_slice(&uniform[..L]);
+    u1.copy_from_slice(&uniform[L..]);
+    Ok((u0, u1))
 }

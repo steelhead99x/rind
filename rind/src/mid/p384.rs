@@ -1,15 +1,13 @@
 // Written for Graviola by Joe Birr-Pixton, 2024.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-use core::fmt;
-use core::ops::Range;
-use std::sync::OnceLock;
-
 use super::hash_to_curve::{self, ExpandError, HashedPoint, SwuConstants, SwuField};
 use super::util;
 use crate::error::{Error, KeyFormatError};
 use crate::low;
 use crate::mid::rng::{RandomSource, SystemRandom};
+use core::fmt;
+use core::ops::Range;
 
 mod precomp;
 
@@ -1274,6 +1272,7 @@ impl SwuField for FieldElement {
 }
 
 impl FieldElement {
+    #[cfg(test)]
     fn from_small(v: u64) -> Self {
         let mut w = Self::default();
         w.0[0] = v;
@@ -1290,19 +1289,33 @@ impl FieldElement {
     }
 }
 
+/// Z = -12, in Montgomery form, and `sqrt(-Z) = (-Z)^((p + 1) / 4)`.
+///
+/// The test `hash_addition_matches_base_point_multiples` checks these limbs
+/// against that exponentiation.
+const SWU: SwuConstants<FieldElement> = SwuConstants {
+    a: CURVE_A_MONT,
+    b: CURVE_B_MONT,
+    z: FieldElement([
+        0x0000_000c_ffff_fff3,
+        0xffff_fff3_0000_0000,
+        0xffff_ffff_ffff_fff2,
+        0xffff_ffff_ffff_ffff,
+        0xffff_ffff_ffff_ffff,
+        0xffff_ffff_ffff_ffff,
+    ]),
+    sqrt_neg_z: FieldElement([
+        0x1cdf_6f1c_c0a3_f1f8,
+        0xfdf2_313b_4c08_f647,
+        0x89cb_6776_d418_3d32,
+        0xacb3_a761_476b_11b6,
+        0xe428_a383_c093_fcea,
+        0xd78f_a36b_3ae4_0b98,
+    ]),
+};
+
 fn swu_constants() -> SwuConstants<FieldElement> {
-    static CACHED: OnceLock<SwuConstants<FieldElement>> = OnceLock::new();
-    *CACHED.get_or_init(|| {
-        // Z = -12. sqrt(-Z) = (-Z)^((p + 1) / 4).
-        let z = FieldElement::from_small(12).neg();
-        let neg_z = z.neg();
-        SwuConstants {
-            a: CURVE_A_MONT,
-            b: CURVE_B_MONT,
-            z,
-            sqrt_neg_z: neg_z.pow_c1().field_mul(neg_z),
-        }
-    })
+    SWU
 }
 
 fn scalar_from_hash(bytes: &[u8]) -> Scalar {
@@ -1329,14 +1342,11 @@ fn point_from_affine(point: hash_to_curve::Affine<FieldElement>) -> HashedPoint<
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn hash_to_curve(msg: &[u8], dst: &[u8]) -> Result<HashedPoint<48>, ExpandError> {
     let _entry = low::Entry::new_secret();
-    let mut uniform = [0u8; HASH_L * 2];
-    hash_to_curve::expand_sha384(msg, dst, &mut uniform)?;
-    let (u0, u1) = uniform.split_at(HASH_L);
-    let constants = swu_constants();
+    let (u0, u1) = hash_to_curve::expand_two::<HASH_L>(msg, dst, hash_to_curve::expand_sha384)?;
     Ok(point_from_affine(hash_to_curve::hash_to_curve_ro(
-        FieldElement::from_be_reduced(u0),
-        FieldElement::from_be_reduced(u1),
-        &constants,
+        FieldElement::from_be_reduced(&u0),
+        FieldElement::from_be_reduced(&u1),
+        &swu_constants(),
     )))
 }
 
@@ -1349,9 +1359,13 @@ pub(crate) fn hash_to_field(
     dst: &[u8],
 ) -> Result<[u8; FieldElement::BYTES], ExpandError> {
     let _entry = low::Entry::new_secret();
-    let mut uniform = [0u8; HASH_L];
-    hash_to_curve::expand_sha384(msg, dst, &mut uniform)?;
-    Ok(FieldElement::from_be_reduced(&uniform).to_be_bytes())
+    let element = hash_to_curve::expand_reduced::<_, HASH_L>(
+        msg,
+        dst,
+        hash_to_curve::expand_sha384,
+        FieldElement::from_be_reduced,
+    )?;
+    Ok(element.to_be_bytes())
 }
 
 /// Hash `msg` to a P-384 scalar.
@@ -1360,9 +1374,12 @@ pub(crate) fn hash_to_field(
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn hash_to_scalar(msg: &[u8], dst: &[u8]) -> Result<Scalar, ExpandError> {
     let _entry = low::Entry::new_secret();
-    let mut uniform = [0u8; HASH_L];
-    hash_to_curve::expand_sha384(msg, dst, &mut uniform)?;
-    Ok(scalar_from_hash(&uniform))
+    hash_to_curve::expand_reduced::<_, HASH_L>(
+        msg,
+        dst,
+        hash_to_curve::expand_sha384,
+        scalar_from_hash,
+    )
 }
 
 /// The simplified SWU image of a field element, for the suite's test vectors.
@@ -1433,10 +1450,15 @@ mod tests {
         assert_eq!(opposite.x.0, [0; 6]);
 
         let constants = swu_constants();
+        let z = FieldElement::from_small(12).neg();
+        let neg_z = z.neg();
+        assert_eq!(constants.z.0, z.0);
+        assert_eq!(constants.sqrt_neg_z.0, neg_z.pow_c1().field_mul(neg_z).0);
         assert_eq!(
             constants.sqrt_neg_z.field_mul(constants.sqrt_neg_z).0,
             constants.z.neg().0
         );
+        assert!(scalar_from_hash(&Scalar(CURVE_ORDER).as_bytes()).is_zero());
     }
 
     const CURVE_GENERATOR: AffineMontPoint = AffineMontPoint {

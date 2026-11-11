@@ -174,6 +174,19 @@ fn reduce_be_matches_schoolbook() {
 
     let wide = [0x5au8; 48];
     assert_eq!(reduce_be(&wide, &p256, &r2), school(&wide, &p256));
+
+    // The modulus, one below it, one past it, and an all-ones input of length L.
+    let modulus = be(&p256);
+    assert_eq!(reduce_be(&modulus, &p256, &r2), [0; 4]);
+    let mut below = modulus.clone();
+    *below.last_mut().unwrap() -= 1;
+    assert_ne!(reduce_be(&below, &p256, &r2), [0; 4]);
+    assert_eq!(reduce_be(&below, &p256, &r2), school(&below, &p256));
+    let mut past = vec![0x01];
+    past.extend_from_slice(&modulus);
+    assert_eq!(reduce_be(&past, &p256, &r2), school(&past, &p256));
+    let ones = [0xffu8; 48];
+    assert_eq!(reduce_be(&ones, &p256, &r2), school(&ones, &p256));
 }
 
 /// `bytes` reduced mod `modulus`, one bit at a time.
@@ -290,6 +303,14 @@ fn p521_suite_vectors() {
 }
 
 #[test]
+fn hashed_point_debug_redacts_coordinates() {
+    let point = p256::hash_to_curve(b"abc", b"dst-not-empty!!").unwrap();
+    let text = format!("{point:?}");
+    assert_eq!(text, "HashedPoint { .. }");
+    assert!(!text.contains(&hex::encode(point.x)));
+}
+
+#[test]
 fn hash_to_field_is_one_element_and_scalar_differs() {
     let dst = b"rind-hash-to-field-v1";
     let msg = b"";
@@ -327,6 +348,9 @@ fn ctgrind_maps_and_scalars() {
     ct_point(p256::hash_to_curve);
     ct_point(p384::hash_to_curve);
     ct_point(p521::hash_to_curve);
+    ct_scalar_bytes(|msg, dst| p256::hash_to_field(msg, dst).unwrap());
+    ct_scalar_bytes(|msg, dst| p384::hash_to_field(msg, dst).unwrap());
+    ct_scalar_bytes(|msg, dst| p521::hash_to_field(msg, dst).unwrap());
     ct_scalar_bytes(|msg, dst| p256::hash_to_scalar(msg, dst).unwrap().as_bytes());
     ct_scalar_bytes(|msg, dst| p384::hash_to_scalar(msg, dst).unwrap().as_bytes());
     ct_scalar_bytes(|msg, dst| p521::hash_to_scalar(msg, dst).unwrap().as_bytes());
@@ -337,6 +361,8 @@ fn ctgrind_maps_and_scalars() {
 mod differential {
     use super::fit;
     use crate::mid::{p256, p384, p521};
+    use elliptic_curve::sec1::ToSec1Point;
+    use hash2curve::GroupDigest;
 
     fn aws_point(
         nid: i32,
@@ -460,6 +486,144 @@ mod differential {
                 assert_eq!(ours.x, fit(x, 66).as_slice());
                 assert_eq!(ours.y, fit(y, 66).as_slice());
             }
+        }
+    }
+
+    fn field_and_scalar(msg: &[u8], dst: &[u8]) {
+        use hash2curve::{ExpandMsgXmd, MapToCurve};
+        use sha2::{Sha256, Sha384, Sha512};
+
+        let [fe] = hash2curve::hash_to_field::<
+            1,
+            ExpandMsgXmd<Sha256>,
+            <::p256::NistP256 as MapToCurve>::SecurityLevel,
+            <::p256::NistP256 as MapToCurve>::FieldElement,
+            <::p256::NistP256 as MapToCurve>::Length,
+        >(&[msg], &[dst])
+        .unwrap();
+        assert_eq!(
+            p256::hash_to_field(msg, dst).unwrap().as_slice(),
+            fe.to_bytes().as_slice()
+        );
+        let scalar = hash2curve::hash_to_scalar::<
+            ::p256::NistP256,
+            ExpandMsgXmd<Sha256>,
+            <::p256::NistP256 as MapToCurve>::Length,
+        >(&[msg], &[dst])
+        .unwrap();
+        assert_eq!(
+            p256::hash_to_scalar(msg, dst)
+                .unwrap()
+                .as_bytes()
+                .as_slice(),
+            scalar.to_bytes().as_slice()
+        );
+
+        let [fe] = hash2curve::hash_to_field::<
+            1,
+            ExpandMsgXmd<Sha384>,
+            <::p384::NistP384 as MapToCurve>::SecurityLevel,
+            <::p384::NistP384 as MapToCurve>::FieldElement,
+            <::p384::NistP384 as MapToCurve>::Length,
+        >(&[msg], &[dst])
+        .unwrap();
+        assert_eq!(
+            p384::hash_to_field(msg, dst).unwrap().as_slice(),
+            fe.to_bytes().as_slice()
+        );
+        let scalar = hash2curve::hash_to_scalar::<
+            ::p384::NistP384,
+            ExpandMsgXmd<Sha384>,
+            <::p384::NistP384 as MapToCurve>::Length,
+        >(&[msg], &[dst])
+        .unwrap();
+        assert_eq!(
+            p384::hash_to_scalar(msg, dst)
+                .unwrap()
+                .as_bytes()
+                .as_slice(),
+            scalar.to_bytes().as_slice()
+        );
+
+        let [fe] = hash2curve::hash_to_field::<
+            1,
+            ExpandMsgXmd<Sha512>,
+            <::p521::NistP521 as MapToCurve>::SecurityLevel,
+            <::p521::NistP521 as MapToCurve>::FieldElement,
+            <::p521::NistP521 as MapToCurve>::Length,
+        >(&[msg], &[dst])
+        .unwrap();
+        assert_eq!(
+            p521::hash_to_field(msg, dst).unwrap().as_slice(),
+            fe.to_bytes().as_slice()
+        );
+        let scalar = hash2curve::hash_to_scalar::<
+            ::p521::NistP521,
+            ExpandMsgXmd<Sha512>,
+            <::p521::NistP521 as MapToCurve>::Length,
+        >(&[msg], &[dst])
+        .unwrap();
+        assert_eq!(
+            p521::hash_to_scalar(msg, dst)
+                .unwrap()
+                .as_bytes()
+                .as_slice(),
+            scalar.to_bytes().as_slice()
+        );
+    }
+
+    /// RFC 9380 appendix K has no `expand_message_xmd` file for SHA-384.
+    /// This compares the function with RustCrypto's SHA-384 expander, which is
+    /// that algorithm. The P-384 suite vectors also run it.
+    fn expand_sha384_matches(msg: &[u8], dst: &[u8], len: u16) {
+        use core::num::NonZero;
+        use hash2curve::{ExpandMsg, Expander, MapToCurve};
+
+        let mut ours = vec![0u8; usize::from(len)];
+        super::expand_sha384(msg, dst, &mut ours).unwrap();
+        let msgs = [msg];
+        let dsts = [dst];
+        let mut expander = <hash2curve::ExpandMsgXmd<sha2::Sha384> as ExpandMsg<
+            <::p384::NistP384 as MapToCurve>::SecurityLevel,
+        >>::expand_message(&msgs, &dsts, NonZero::new(len).unwrap())
+        .unwrap();
+        let mut theirs = vec![0u8; usize::from(len)];
+        expander.fill_bytes(&mut theirs).unwrap();
+        assert_eq!(ours, theirs);
+    }
+
+    #[test]
+    fn field_scalar_and_sha384_match_hash2curve() {
+        for msg in [b"".as_slice(), b"abc", b"password", &[0xff; 40]] {
+            for dst in [
+                b"QUUX-V01-CS02".as_slice(),
+                b"another-domain-separation-tag",
+            ] {
+                field_and_scalar(msg, dst);
+                expand_sha384_matches(msg, dst, 32);
+                expand_sha384_matches(msg, dst, 96);
+            }
+        }
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(8))]
+        #[test]
+        fn random_messages_match_hash2curve(
+            msg in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..80),
+            dst in proptest::collection::vec(proptest::prelude::any::<u8>(), 1..48),
+        ) {
+            field_and_scalar(&msg, &dst);
+            expand_sha384_matches(&msg, &dst, 48);
+            let ours = p256::hash_to_curve(&msg, &dst).unwrap();
+            let theirs = ::p256::NistP256::hash_from_bytes(&[&msg], &[&dst]).unwrap();
+            let encoded = theirs.to_affine().to_sec1_point(false);
+            let elliptic_curve::sec1::Coordinates::Uncompressed { x, y } = encoded.coordinates() else {
+                panic!("uncompressed");
+            };
+            assert_eq!(ours.infinity, 0);
+            assert_eq!(ours.x.as_slice(), x.as_slice());
+            assert_eq!(ours.y.as_slice(), y.as_slice());
         }
     }
 }
