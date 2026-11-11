@@ -772,8 +772,9 @@ mod argon2id {
     use proptest::prelude::*;
     use rind::argon2::Params;
 
-    // Small memories: the fill is what the comparison checks, and a large one
-    // would dominate the suite.
+    // Lane counts that are not powers of two exercise `rem_u32`'s Barrett
+    // correction. Memory runs past the eight-block minimum, still small
+    // enough that the suite stays short.
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(24))]
         #[test]
@@ -782,8 +783,8 @@ mod argon2id {
             salt in vec(any::<u8>(), 8..32),
             secret in vec(any::<u8>(), 0..16),
             ad in vec(any::<u8>(), 0..24),
-            lanes in 1u32..3,
-            extra in 0u32..16,
+            lanes in prop_oneof![Just(1u32), Just(2), Just(3), Just(5), Just(6), Just(7)],
+            extra in 0u32..256,
             passes in 1u32..3,
             len in 4usize..96,
         ) {

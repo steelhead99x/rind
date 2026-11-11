@@ -7,7 +7,7 @@
 
 use core::alloc::Layout;
 use core::ptr;
-use std::alloc::{alloc, dealloc};
+use std::alloc::{alloc, alloc_zeroed, dealloc};
 
 use super::zeroise::{Zeroable, zeroise, zeroise_value};
 use crate::Error;
@@ -23,6 +23,57 @@ impl Block {
     pub(crate) const fn zero() -> Self {
         Self([0; 128])
     }
+}
+
+impl Zeroable for Block {}
+
+/// One zeroed allocation of `blocks` blocks.
+///
+/// Fails with [`Error::OutOfRange`] when the size does not fit in the address
+/// space or the allocator refuses it. Overcommit is not a refusal: the
+/// reservation can succeed and the process can still be killed when the matrix
+/// is written. This does not claim to detect that.
+pub(crate) fn allocate_blocks(blocks: u32) -> Result<Vec<Block>, Error> {
+    let count = blocks as usize;
+    // A valid parameter set is at least eight blocks. `alloc_zeroed` of a
+    // zero-sized layout is not a defined allocation.
+    if count == 0 {
+        return Err(Error::OutOfRange);
+    }
+    let layout = Layout::array::<Block>(count).map_err(|_| Error::OutOfRange)?;
+    // SAFETY: `layout` is `count` blocks and its size is non-zero.
+    let ptr = unsafe { alloc_zeroed(layout) };
+    if ptr.is_null() {
+        return Err(Error::OutOfRange);
+    }
+    // SAFETY: the pointer is `count` zeroed blocks at `layout`'s alignment,
+    // and the `Vec` frees them with that same layout.
+    Ok(unsafe { Vec::from_raw_parts(ptr.cast(), count, count) })
+}
+
+/// The portable permutation. A backend with its own fill exports a different
+/// [`Fill`]; this one is that type where the scalar permutation is the only one.
+#[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
+#[derive(Clone, Copy)]
+pub(crate) struct Fill;
+
+#[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
+impl Fill {
+    pub(crate) fn select() -> Self {
+        Self
+    }
+}
+
+/// `compress` for a [`Fill`] chosen once per derivation.
+#[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
+pub(crate) fn compress_selected(
+    _fill: Fill,
+    next: &mut Block,
+    prev: &Block,
+    reference: &Block,
+    with_xor: bool,
+) {
+    compress(next, prev, reference, with_xor);
 }
 
 /// `G(prev, reference)`, optionally XORed with the block it replaces.

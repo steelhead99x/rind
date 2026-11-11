@@ -2,16 +2,18 @@
 
 //! Argon2id, RFC 9106, over the backend's compression function.
 //!
-//! The first half of the first pass addresses memory from public inputs. Every
-//! later block addresses it from the previous block. That index is the leak
-//! RFC 9106 accepts; the arithmetic that produces it does not branch on the
-//! password, and only the lane and block numbers are declassified before the load.
+//! The first half of the first pass addresses memory from the pass, lane, and
+//! slice, which are public. Every later block addresses it from the previous
+//! block. That index is the leak RFC 9106 accepts; the arithmetic that produces
+//! it does not branch on the password, and only the lane and block numbers are
+//! declassified before the load. A secret-dependent address in the first half
+//! is a bug: ctgrind must not see one there.
 
 use crate::Error;
-use crate::low::argon2::Block;
+use crate::low::argon2::{Block, allocate_blocks};
 use crate::low::argon2_compress as compress;
 use crate::low::blake2b::{self, blake2b_long};
-use crate::low::{Entry, ct, zeroise};
+use crate::low::{Argon2Fill, Entry, ct, zeroise};
 
 /// Argon2id's type id in the initial hash and the address block.
 const TYPE_ID: u64 = 2;
@@ -39,8 +41,8 @@ pub(crate) fn derive(
 ) -> Result<(), Error> {
     Entry::assert_held();
     let layout = layout(memory_kib, lanes);
-    let bytes = allocation_bytes(layout.blocks)?;
-    let mut memory = Matrix::allocate(layout.blocks, bytes)?;
+    let fill = Argon2Fill::select();
+    let mut memory = Matrix::allocate(layout.blocks)?;
 
     // H0 is BLAKE2b-512 of the parameters, not the length-prefixed H'.
     let mut h0 = [0u8; 72];
@@ -86,6 +88,7 @@ pub(crate) fn derive(
                     pass,
                     lane,
                     slice,
+                    fill,
                 );
             }
         }
@@ -106,15 +109,10 @@ pub(crate) fn derive(
 struct Matrix(Vec<Block>);
 
 impl Matrix {
-    fn allocate(blocks: u32, bytes: usize) -> Result<Self, Error> {
-        let mut memory = Vec::new();
-        // One reservation, then the blocks. A platform that cannot hold `bytes`
-        // fails here rather than aborting.
-        if memory.try_reserve_exact(blocks as usize).is_err() || bytes == 0 {
-            return Err(Error::OutOfRange);
-        }
-        memory.resize(blocks as usize, Block::zero());
-        Ok(Self(memory))
+    /// One zeroed allocation. See [`allocate_blocks`] for what a refusal means,
+    /// including that overcommit can kill the process instead of returning.
+    fn allocate(blocks: u32) -> Result<Self, Error> {
+        Ok(Self(allocate_blocks(blocks)?))
     }
 }
 
@@ -122,9 +120,7 @@ impl Drop for Matrix {
     fn drop(&mut self) {
         // The matrix is the password hashed into 1 KiB blocks. Wipe it before
         // the allocation is freed; `zeroise` does nothing without `wipe`.
-        for block in &mut self.0 {
-            zeroise(&mut block.0);
-        }
+        zeroise(&mut self.0);
     }
 }
 
@@ -146,17 +142,6 @@ fn layout(memory_kib: u32, lanes: u32) -> Layout {
         lane_length: segment_length * 4,
         blocks: segment_length * 4 * lanes,
     }
-}
-
-/// Bytes of `blocks` 1 KiB blocks, or an error when they do not fit in the
-/// address space. `Vec` refuses a size above `isize::MAX`.
-fn allocation_bytes(blocks: u32) -> Result<usize, Error> {
-    let bytes = usize::try_from(blocks)
-        .ok()
-        .and_then(|n| n.checked_mul(1024))
-        .filter(|n| *n <= isize::MAX as usize)
-        .ok_or(Error::OutOfRange)?;
-    Ok(bytes)
 }
 
 /// `floor(2^64 / m)` for a public modulus, so a later reduction is a multiply.
@@ -228,6 +213,7 @@ fn fill_segment(
     pass: u32,
     lane: u32,
     slice: u32,
+    fill: Argon2Fill,
 ) {
     let data_independent = pass == 0 && slice < SYNC_POINTS / 2;
     let mut input = Block::zero();
@@ -247,7 +233,7 @@ fn fill_segment(
         // The first two blocks of each lane were generated from H0.
         starting = 2;
         if data_independent {
-            next_addresses(&mut address, &mut input, &zero);
+            next_addresses(&mut address, &mut input, &zero, fill);
         }
     }
 
@@ -269,7 +255,10 @@ fn fill_segment(
         let pseudo = if data_independent {
             // 128 addresses per block, a power of two, so the index is a mask.
             if i & (ADDRESSES_IN_BLOCK - 1) == 0 {
-                next_addresses(&mut address, &mut input, &zero);
+                // Words past the public counter stay zero. A password-derived
+                // value written there would change the address block.
+                debug_assert!(input.0[7..].iter().all(|&word| word == 0));
+                next_addresses(&mut address, &mut input, &zero, fill);
             }
             address.0[(i & (ADDRESSES_IN_BLOCK - 1)) as usize]
         } else {
@@ -298,9 +287,9 @@ fn fill_segment(
             reduce_below_twice(u64::from(start).wrapping_add(relative), lane_length);
 
         // The data-dependent half's memory index is the accepted leak. The
-        // data-independent half's index comes from the address block, which
-        // is a function of the pass, lane, and slice, so it stays classified
-        // and ctgrind still sees a secret-dependent address there.
+        // data-independent half's index comes from the address block, built
+        // only from the pass, lane, slice, and the other public parameters.
+        // Those addresses are not secret, and ctgrind must not report one.
         if !data_independent {
             ref_lane = ct::into_public(ref_lane);
             block_index = ct::into_public(block_index);
@@ -309,7 +298,13 @@ fn fill_segment(
         let reference = memory[ref_lane as usize * lane_length as usize + block_index as usize];
         let previous = memory[prev as usize];
         let with_xor = pass != 0;
-        compress(&mut memory[curr as usize], &previous, &reference, with_xor);
+        compress(
+            fill,
+            &mut memory[curr as usize],
+            &previous,
+            &reference,
+            with_xor,
+        );
 
         curr += 1;
         prev += 1;
@@ -358,12 +353,12 @@ fn reference_area(
     (if_same & mask) | (if_other & !mask)
 }
 
-fn next_addresses(address: &mut Block, input: &mut Block, zero: &Block) {
+fn next_addresses(address: &mut Block, input: &mut Block, zero: &Block, fill: Argon2Fill) {
     input.0[6] = input.0[6].wrapping_add(1);
-    compress(address, zero, input, false);
+    compress(fill, address, zero, input, false);
     // The second compression reads the address block it also writes.
     let reference = *address;
-    compress(address, zero, &reference, false);
+    compress(fill, address, zero, &reference, false);
 }
 
 impl Block {
@@ -420,6 +415,6 @@ mod tests {
         assert_eq!(layout.segment_length, 2);
         assert_eq!(layout.lane_length, 8);
         assert_eq!(layout.blocks, 32);
-        assert!(allocation_bytes(layout.blocks).is_ok());
+        assert!(Matrix::allocate(layout.blocks).is_ok());
     }
 }

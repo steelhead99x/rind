@@ -237,6 +237,10 @@ fn argon2() {
             secret
                 .derive(params, b"saltsalt", b"pepper", b"ad", &mut out)
                 .unwrap();
+            // `verify` allocates the tag it derives and must wipe that buffer.
+            secret
+                .verify(params, b"saltsalt", b"pepper", b"ad", &out)
+                .unwrap();
         },
     );
 }

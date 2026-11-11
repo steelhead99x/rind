@@ -13,25 +13,55 @@ use core::arch::x86_64::*;
 use super::cpu::{HaveAvx2, HaveAvx512F, HaveSsse3};
 use crate::low::argon2::{Block, compress as compress_scalar};
 
-/// `G(prev, reference)`.
-///
-/// AVX-512F, then the AVX2 set [`HaveAvx2`] names (AVX, AVX2, BMI1, BMI2,
-/// POPCNT, and SSSE3), then SSSE3, then the portable permutation. Each step is
-/// that feature's check. A CPU without the wider feature does not run it, and
-/// the portable permutation runs only when SSSE3 is absent too.
-pub(crate) fn compress(next: &mut Block, prev: &Block, reference: &Block, with_xor: bool) {
-    if HaveAvx512F::check().is_some() {
-        // SAFETY: `HaveAvx512F` is proof of AVX-512F, and the blocks are 1024
-        // bytes each, which the loads and stores stay inside.
-        unsafe { compress_avx512(next, prev, reference, with_xor) };
-    } else if HaveAvx2::check().is_some() {
-        // SAFETY: `HaveAvx2` is proof of AVX2, which this permutation uses.
-        unsafe { compress_avx2(next, prev, reference, with_xor) };
-    } else if HaveSsse3::check().is_some() {
-        // SAFETY: `HaveSsse3` is proof of SSSE3, which this permutation uses.
-        unsafe { compress_ssse3(next, prev, reference, with_xor) };
-    } else {
-        compress_scalar(next, prev, reference, with_xor);
+/// Which permutation [`compress`] runs. Chosen once per derivation.
+#[derive(Clone, Copy)]
+pub(crate) enum Fill {
+    Avx512,
+    Avx2,
+    Ssse3,
+    Scalar,
+}
+
+impl Fill {
+    /// AVX-512F, then the AVX2 set [`HaveAvx2`] names (AVX, AVX2, BMI1, BMI2,
+    /// POPCNT, and SSSE3), then SSSE3, then the portable permutation. A CPU
+    /// without the wider feature does not run it.
+    pub(crate) fn select() -> Self {
+        if HaveAvx512F::check().is_some() {
+            Self::Avx512
+        } else if HaveAvx2::check().is_some() {
+            Self::Avx2
+        } else if HaveSsse3::check().is_some() {
+            Self::Ssse3
+        } else {
+            Self::Scalar
+        }
+    }
+}
+
+/// `G(prev, reference)` with a permutation [`Fill::select`] already chose.
+pub(crate) fn compress(
+    fill: Fill,
+    next: &mut Block,
+    prev: &Block,
+    reference: &Block,
+    with_xor: bool,
+) {
+    match fill {
+        Fill::Avx512 => {
+            // SAFETY: `Fill::Avx512` is proof of AVX-512F, and the blocks are
+            // 1024 bytes each, which the loads and stores stay inside.
+            unsafe { compress_avx512(next, prev, reference, with_xor) }
+        }
+        Fill::Avx2 => {
+            // SAFETY: `Fill::Avx2` is proof of AVX2, and the blocks are 1024 bytes.
+            unsafe { compress_avx2(next, prev, reference, with_xor) }
+        }
+        Fill::Ssse3 => {
+            // SAFETY: `Fill::Ssse3` is proof of SSSE3, and the blocks are 1024 bytes.
+            unsafe { compress_ssse3(next, prev, reference, with_xor) }
+        }
+        Fill::Scalar => compress_scalar(next, prev, reference, with_xor),
     }
 }
 
@@ -829,7 +859,13 @@ mod tests {
     }
 
     fn matches_scalar(run: unsafe fn(&mut Block, &Block, &Block, bool)) {
-        for seed in [0x9E37_79B9_7F4A_7C15, 1] {
+        // Sixty-four blocks, not one fixed pattern: each seed changes every
+        // lane, and both XOR modes are compared with the scalar permutation.
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        for _ in 0..64 {
+            seed = seed
+                .wrapping_mul(0x6C62_272E_07BB_0142)
+                .wrapping_add(0x9E37);
             let (prev, reference, next) = blocks(seed);
             for with_xor in [false, true] {
                 let mut scalar = next;
@@ -876,7 +912,7 @@ mod tests {
             let mut scalar = next;
             let mut chosen = next;
             compress_scalar(&mut scalar, &prev, &reference, with_xor);
-            compress(&mut chosen, &prev, &reference, with_xor);
+            compress(Fill::select(), &mut chosen, &prev, &reference, with_xor);
             assert_eq!(scalar.0, chosen.0, "with_xor={with_xor}");
         }
     }

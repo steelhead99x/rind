@@ -111,11 +111,11 @@ mod entry;
 mod posint;
 
 #[cfg(rind_backend = "aarch64")]
-pub(crate) use aarch64::argon2::compress as argon2_compress;
+pub(crate) use aarch64::argon2::{Fill as Argon2Fill, compress as argon2_compress};
 pub(crate) use entry::Entry;
 pub(crate) use generic::argon2;
 #[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
-pub(crate) use generic::argon2::compress as argon2_compress;
+pub(crate) use generic::argon2::{Fill as Argon2Fill, compress_selected as argon2_compress};
 pub(crate) use generic::blake2b;
 pub(crate) use generic::blockwise::{Blockwise, UpdateBlocks, pad, sha256_digest, split_tail};
 pub(crate) use generic::chacha20::{chacha20_block, hchacha20};
@@ -132,7 +132,7 @@ pub(crate) use generic::zeroise::{Zeroable, ZeroableRef, zeroise, zeroise_value}
 pub(crate) use portable::poly1305;
 pub(crate) use posint::{ModExp, PosInt, SecretPosInt};
 #[cfg(rind_backend = "x86_64")]
-pub(crate) use x86_64::argon2::compress as argon2_compress;
+pub(crate) use x86_64::argon2::{Fill as Argon2Fill, compress as argon2_compress};
 
 #[cfg(all(test, any(rind_backend = "x86_64", rind_backend = "aarch64")))]
 #[cfg_attr(coverage_nightly, coverage(off))]

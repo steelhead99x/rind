@@ -112,8 +112,11 @@ impl Secret {
     /// longer than 2^32 - 1 bytes.
     ///
     /// Fails with [`Error::WrongLength`] when a length is outside that range,
-    /// leaving `out` unchanged, and with [`Error::OutOfRange`] when the memory
-    /// `params` names cannot be allocated. The memory is one allocation.
+    /// leaving `out` unchanged, and with [`Error::OutOfRange`] when the
+    /// allocator refuses the matrix. The matrix is one allocation. A platform
+    /// that overcommits does not refuse the reservation, and can kill the
+    /// process when the matrix is first written; that kill is not an error
+    /// this function returns.
     pub fn derive(
         &self,
         params: Params,
@@ -140,8 +143,11 @@ impl Secret {
     /// makes for the same inputs.
     ///
     /// Fails with [`Error::WrongLength`] under the same conditions as
-    /// [`Secret::derive`], and with [`Error::BadSignature`] when the keys differ.
+    /// [`Secret::derive`], with [`Error::OutOfRange`] when the derived tag
+    /// cannot be allocated, and with [`Error::BadSignature`] when the keys differ.
     /// A stored key shorter than 4 bytes is refused because it is easier to match.
+    /// Overcommit is the same limit as [`Secret::derive`]: the allocator can
+    /// accept the tag and the process can still be killed when it is written.
     pub fn verify(
         &self,
         params: Params,
@@ -152,7 +158,11 @@ impl Secret {
     ) -> Result<(), Error> {
         let _entry = Entry::new_secret();
         check_input(salt, secret, ad, previously_derived.len())?;
-        let mut got = vec![0u8; previously_derived.len()];
+        let mut got = Vec::new();
+        if got.try_reserve_exact(previously_derived.len()).is_err() {
+            return Err(Error::OutOfRange);
+        }
+        got.resize(previously_derived.len(), 0);
         argon2::derive(
             self.0.as_slice(),
             params.memory_kib,

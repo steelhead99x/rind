@@ -16,8 +16,24 @@ use core::arch::aarch64::*;
 
 use crate::low::argon2::Block;
 
+/// The only permutation on this backend. Chosen once per derivation.
+#[derive(Clone, Copy)]
+pub(crate) struct Fill;
+
+impl Fill {
+    pub(crate) fn select() -> Self {
+        Self
+    }
+}
+
 /// `G(prev, reference)`, the NEON permutation.
-pub(crate) fn compress(next: &mut Block, prev: &Block, reference: &Block, with_xor: bool) {
+pub(crate) fn compress(
+    _fill: Fill,
+    next: &mut Block,
+    prev: &Block,
+    reference: &Block,
+    with_xor: bool,
+) {
     // SAFETY: this backend requires NEON, and the blocks are 1024 bytes each,
     // which the loads and stores stay inside.
     unsafe { compress_neon(next, prev, reference, with_xor) };
@@ -278,7 +294,11 @@ mod tests {
         let mut prev = Block::zero();
         let mut reference = Block::zero();
         let mut next = Block::zero();
-        for seed in [0x9E37_79B9_7F4A_7C15, 1] {
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        for _ in 0..64 {
+            seed = seed
+                .wrapping_mul(0x6C62_272E_07BB_0142)
+                .wrapping_add(0x9E37);
             for i in 0..128 {
                 prev.0[i] = (i as u64).wrapping_mul(seed);
                 reference.0[i] = (i as u64).wrapping_mul(seed ^ 0x1234_5678_9ABC_DEF0) ^ 0x00FF;
