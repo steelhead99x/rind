@@ -234,6 +234,38 @@ pub mod rsa {
     }
 }
 
+/// RSA blind signatures: the four RSABSSA-SHA384 variants of [RFC 9474].
+///
+/// [`RSABSSA_SHA384_PSS_DETERMINISTIC`] signs the message itself with a
+/// 48-byte PSS salt. Privacy Pass's publicly verifiable token uses that
+/// variant with a 2048-bit key. A randomized variant signs 32 random bytes
+/// prepended to the message, and verification takes that
+/// [`PreparedMessage`].
+///
+/// ```
+/// # fn main() -> Result<(), rind::Error> {
+/// use rind::blind_rsa::{KeyPair, RSABSSA_SHA384_PSS_DETERMINISTIC};
+/// use rind::rsa::KeySize;
+///
+/// let server = KeyPair::generate(KeySize::Rsa2048)?;
+/// let client = server.public_key();
+/// let (blinded, blinding) = client.blind(&RSABSSA_SHA384_PSS_DETERMINISTIC, b"token")?;
+/// let blind_signature = server.blind_sign(&blinded)?;
+/// let signature = blinding.finalize(&blind_signature)?;
+/// client.verify(&RSABSSA_SHA384_PSS_DETERMINISTIC, b"token", &signature)?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// [RFC 9474]: https://www.rfc-editor.org/rfc/rfc9474.html
+pub mod blind_rsa {
+    pub use crate::high::blind_rsa::{
+        Algorithm, BlindSignature, BlindedMessage, Blinding, KeyPair, MAX_MESSAGE, PreparedMessage,
+        PublicKey, RSABSSA_SHA384_PSS_DETERMINISTIC, RSABSSA_SHA384_PSS_RANDOMIZED,
+        RSABSSA_SHA384_PSSZERO_DETERMINISTIC, RSABSSA_SHA384_PSSZERO_RANDOMIZED, Signature,
+    };
+}
+
 /// Public key signatures: ECDSA on P-256, P-384, and P-521, RSA, and Ed25519.
 ///
 /// A key pair signs with a [`signature::sign`] algorithm, and a peer's

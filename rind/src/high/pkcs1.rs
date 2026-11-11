@@ -8,6 +8,7 @@ use crate::Error;
 use crate::error::KeyFormatError;
 use crate::low::{ct, ct_equal};
 use crate::mid::rng::RandomSource;
+use crate::mid::rsa_pub;
 
 /// This is EMSA-PKCS1-v1_5-ENCODE
 ///
@@ -254,6 +255,45 @@ pub(crate) fn verify_pss_sig<H: Hash>(
     } else {
         Err(Error::BadSignature)
     }
+}
+
+/// EMSA-PSS-VERIFY of a secret encoded message.
+///
+/// The checks of [`verify_pss_sig`] run to the end and combine with
+/// [`ct_equal`], so a caller declassifies one verdict. `s_len` is public.
+pub(crate) fn verify_pss_sig_secret<H: Hash>(
+    em: &mut [u8],
+    em_bits: usize,
+    m_hash: &[u8],
+    s_len: usize,
+) -> bool {
+    let em_len = em.len();
+    let h_len = m_hash.len();
+    if em_len < h_len + s_len + 2 {
+        return false;
+    }
+    let top_mask = u8::MAX >> (8 * em_len - em_bits);
+    let (bc, body) = em.split_last_mut().unwrap();
+    let (masked_db, h) = body.split_at_mut(em_len - h_len - 1);
+    let top = masked_db[0] & !top_mask;
+    let mut ok = ct_equal(&[*bc], &[0xbc]) & ct_equal(&[top], &[0]);
+
+    mgf1_xor::<H>(h, h_len, masked_db);
+    let db = masked_db;
+    db[0] &= top_mask;
+
+    let ps_len = em_len - h_len - s_len - 2;
+    let (ps, one_salt) = db.split_at(ps_len);
+    let (one, salt) = one_salt.split_first().unwrap();
+    let zeroes = [0u8; rsa_pub::MAX_PUBLIC_MODULUS_BYTES];
+    ok &= ct_equal(ps, &zeroes[..ps.len()]) & ct_equal(&[*one], &[0x01]);
+
+    let mut ctx = H::new();
+    ctx.update(&[0u8; 8]);
+    ctx.update(m_hash);
+    ctx.update(salt);
+    let h_prime = ctx.finish();
+    ok & h_prime.ct_equal(h)
 }
 
 /// The longest message EME-OAEP with `H` fits in `k` octets, the modulus

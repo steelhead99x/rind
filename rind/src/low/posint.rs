@@ -191,6 +191,13 @@ impl<const N: usize> PosInt<N> {
         &self.words[..len.used]
     }
 
+    /// Marks the words secret for `admin/ctgrind`.
+    #[must_use]
+    pub(crate) fn into_secret(mut self) -> Self {
+        self.words = low::ct::into_secret(self.words);
+        self
+    }
+
     /// Constant-time equality
     pub(crate) fn equals(&self, other: &Self) -> bool {
         low::bignum_eq(self.as_words(), other.as_words())

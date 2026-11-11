@@ -88,6 +88,64 @@ impl RsaPublicKey {
 
         Ok(accum.clone())
     }
+
+    /// `a * b mod n`.
+    ///
+    /// Both factors are below `n`. The product is secret when they are.
+    pub(crate) fn mul_mod(&self, a: &RsaPosInt, b: &RsaPosInt) -> Result<RsaPosInt, Error> {
+        if !low::ct::into_public(a.less_than(&self.n) & b.less_than(&self.n)) {
+            return Err(Error::WrongLength);
+        }
+        let mut a = a.clone();
+        let mut b = b.clone();
+        a.expand(&self.n);
+        b.expand(&self.n);
+        let a = a.to_montgomery(&self.montifier, &self.n);
+        let b = b.to_montgomery(&self.montifier, &self.n);
+        Ok(a.mont_mul(&b, &self.n, self.n0).from_montgomery(&self.n))
+    }
+
+    /// Big-endian `bytes`, shorter than or equal to the modulus, as an
+    /// integer at the modulus's width. The length is public.
+    pub(crate) fn int_from_be(&self, bytes: &[u8]) -> Result<RsaPosInt, Error> {
+        if bytes.len() > self.modulus_len_bytes() {
+            return Err(Error::WrongLength);
+        }
+        let mut words = [0u64; MAX_PUBLIC_MODULUS_WORDS];
+        for (word, chunk) in words.iter_mut().zip(bytes.rchunks(8)) {
+            *word = chunk.iter().fold(0, |w, b| w << 8 | u64::from(*b));
+        }
+        RsaPosInt::from_words(&words[..self.n.as_words().len()])
+    }
+
+    /// A random residue in `1..n` that is coprime to `n`.
+    ///
+    /// Sixteen draws that all fall outside that set are [`Error::RngFailed`].
+    /// Each rejection declassifies one bit, that the draw was not usable.
+    /// The residue stays secret.
+    pub(crate) fn random_factor(
+        &self,
+        rng: &mut dyn crate::mid::rng::RandomSource,
+    ) -> Result<RsaPosInt, Error> {
+        let k = self.modulus_len_bytes();
+        let mut zero = RsaPosInt::zero();
+        zero.expand(&self.n);
+        for _ in 0..16 {
+            let mut bytes = [0u8; MAX_PUBLIC_MODULUS_BYTES];
+            rng.fill(&mut bytes[..k])?;
+            low::ct::secret_slice(&bytes[..k]);
+            let r = self.int_from_be(&bytes[..k])?;
+            let usable = r.less_than(&self.n) & !r.equals(&zero);
+            if !low::ct::into_public(usable) {
+                continue;
+            }
+            if !low::ct::into_public(r.is_coprime(&self.n)) {
+                continue;
+            }
+            return Ok(r.into_secret());
+        }
+        Err(Error::RngFailed)
+    }
 }
 
 const MAX_PUBLIC_MODULUS_BITS: usize = 8192;
