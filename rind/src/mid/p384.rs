@@ -3,7 +3,9 @@
 
 use core::fmt;
 use core::ops::Range;
+use std::sync::OnceLock;
 
+use super::hash_to_curve::{self, ExpandError, HashedPoint, SwuConstants, SwuField};
 use super::util;
 use crate::error::{Error, KeyFormatError};
 use crate::low;
@@ -1198,6 +1200,195 @@ const CURVE_ORDER_MM: [u64; 6] = [
     0x0c84_ee01_2b39_bf21,
 ];
 
+/// `2^768 mod p`, the Montgomery factor for reducing a hash-to-field integer.
+const FIELD_R2: [u64; 6] = [
+    0xffff_fffe_0000_0001,
+    0x0000_0002_0000_0000,
+    0xffff_fffe_0000_0000,
+    0x0000_0002_0000_0000,
+    0x0000_0000_0000_0001,
+    0x0000_0000_0000_0000,
+];
+
+/// `(p - 3) / 4`, the public exponent of `sqrt_ratio_3mod4`.
+const HASH_C1: [u64; 6] = [
+    0x0000_0000_3fff_ffff,
+    0xbfff_ffff_c000_0000,
+    0xffff_ffff_ffff_ffff,
+    0xffff_ffff_ffff_ffff,
+    0xffff_ffff_ffff_ffff,
+    0x3fff_ffff_ffff_ffff,
+];
+
+/// The byte length `L` of `P384_XMD:SHA-384_SSWU_RO_` (RFC 9380, section 8.3).
+const HASH_L: usize = 72;
+
+impl SwuField for FieldElement {
+    const C1: &'static [u64] = &HASH_C1;
+
+    fn zero() -> Self {
+        Self::default()
+    }
+
+    fn one() -> Self {
+        CURVE_ONE_MONT
+    }
+
+    fn field_add(self, rhs: Self) -> Self {
+        Self::add(&self, &rhs)
+    }
+
+    fn field_sub(self, rhs: Self) -> Self {
+        self.field_add(rhs.neg())
+    }
+
+    fn field_mul(self, rhs: Self) -> Self {
+        self.mont_mul(&rhs)
+    }
+
+    fn field_sqr(self) -> Self {
+        self.mont_sqr()
+    }
+
+    fn neg(self) -> Self {
+        self.negate_mod_p()
+    }
+
+    fn inv0(self) -> Self {
+        self.demont().inv().as_mont()
+    }
+
+    fn cmov(a: Self, b: Self, flag: u64) -> Self {
+        let mut out = Self::default();
+        low::bignum_mux(flag, &mut out.0, &b.0, &a.0);
+        out
+    }
+
+    fn ct_eq(self, rhs: Self) -> u64 {
+        u64::from(low::bignum_eq(&self.0, &rhs.0))
+    }
+
+    fn sgn0(self) -> u64 {
+        self.demont().0[0] & 1
+    }
+}
+
+impl FieldElement {
+    fn from_small(v: u64) -> Self {
+        let mut w = Self::default();
+        w.0[0] = v;
+        w.as_mont()
+    }
+
+    /// Big-endian `bytes` reduced mod p, in Montgomery form.
+    fn from_be_reduced(bytes: &[u8]) -> Self {
+        Self(hash_to_curve::reduce_be(bytes, &CURVE_PRIME, &FIELD_R2)).as_mont()
+    }
+
+    fn to_be_bytes(self) -> [u8; Self::BYTES] {
+        util::u64x6_to_big_endian(&self.demont().0)
+    }
+}
+
+fn swu_constants() -> SwuConstants<FieldElement> {
+    static CACHED: OnceLock<SwuConstants<FieldElement>> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        // Z = -12. sqrt(-Z) = (-Z)^((p + 1) / 4).
+        let z = FieldElement::from_small(12).neg();
+        let neg_z = z.neg();
+        SwuConstants {
+            a: CURVE_A_MONT,
+            b: CURVE_B_MONT,
+            z,
+            sqrt_neg_z: neg_z.pow_c1().field_mul(neg_z),
+        }
+    })
+}
+
+fn scalar_from_hash(bytes: &[u8]) -> Scalar {
+    Scalar(hash_to_curve::reduce_be(
+        bytes,
+        &CURVE_ORDER,
+        &CURVE_ORDER_MM,
+    ))
+}
+
+fn point_from_affine(point: hash_to_curve::Affine<FieldElement>) -> HashedPoint<48> {
+    HashedPoint {
+        x: point.x.to_be_bytes(),
+        y: point.y.to_be_bytes(),
+        infinity: (point.infinity & 1) as u8,
+    }
+}
+
+/// Hash `msg` to a P-384 point, suite `P384_XMD:SHA-384_SSWU_RO_`.
+///
+/// `dst` is the domain separation tag. The cofactor is 1, so clearing it
+/// does nothing. See [`HashedPoint`] for the infinity flag.
+// Used by the OPRF quest, which is not in the crate yet.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn hash_to_curve(msg: &[u8], dst: &[u8]) -> Result<HashedPoint<48>, ExpandError> {
+    let _entry = low::Entry::new_secret();
+    let mut uniform = [0u8; HASH_L * 2];
+    hash_to_curve::expand_sha384(msg, dst, &mut uniform)?;
+    let (u0, u1) = uniform.split_at(HASH_L);
+    let constants = swu_constants();
+    Ok(point_from_affine(hash_to_curve::hash_to_curve_ro(
+        FieldElement::from_be_reduced(u0),
+        FieldElement::from_be_reduced(u1),
+        &constants,
+    )))
+}
+
+/// Hash `msg` to one P-384 field element, big-endian.
+///
+/// This is `hash_to_field` with count 1, `L` = 72, and SHA-384.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn hash_to_field(
+    msg: &[u8],
+    dst: &[u8],
+) -> Result<[u8; FieldElement::BYTES], ExpandError> {
+    let _entry = low::Entry::new_secret();
+    let mut uniform = [0u8; HASH_L];
+    hash_to_curve::expand_sha384(msg, dst, &mut uniform)?;
+    Ok(FieldElement::from_be_reduced(&uniform).to_be_bytes())
+}
+
+/// Hash `msg` to a P-384 scalar.
+///
+/// `hash_to_field` over the group order, with the suite's `L` and SHA-384.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn hash_to_scalar(msg: &[u8], dst: &[u8]) -> Result<Scalar, ExpandError> {
+    let _entry = low::Entry::new_secret();
+    let mut uniform = [0u8; HASH_L];
+    hash_to_curve::expand_sha384(msg, dst, &mut uniform)?;
+    Ok(scalar_from_hash(&uniform))
+}
+
+/// The simplified SWU image of a field element, for the suite's test vectors.
+#[cfg(test)]
+pub(super) fn map_field_element(
+    be: &[u8],
+) -> ([u8; FieldElement::BYTES], [u8; FieldElement::BYTES]) {
+    let point = hash_to_curve::map_to_curve(FieldElement::from_be_reduced(be), &swu_constants());
+    (point.x.to_be_bytes(), point.y.to_be_bytes())
+}
+
+/// The two `hash_to_field` elements `hash_to_curve` adds, big-endian.
+#[cfg(test)]
+pub(super) fn hash_elements(
+    msg: &[u8],
+    dst: &[u8],
+) -> ([u8; FieldElement::BYTES], [u8; FieldElement::BYTES]) {
+    let mut uniform = [0u8; HASH_L * 2];
+    hash_to_curve::expand_sha384(msg, dst, &mut uniform).unwrap();
+    let (u0, u1) = uniform.split_at(HASH_L);
+    (
+        FieldElement::from_be_reduced(u0).to_be_bytes(),
+        FieldElement::from_be_reduced(u1).to_be_bytes(),
+    )
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -1209,6 +1400,44 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn hash_addition_matches_base_point_multiples() {
+        let g = CURVE_GENERATOR;
+        let twice = JacobianMontPoint::from_affine(&g).double().as_affine();
+        let thrice = JacobianMontPoint::from_affine(&twice)
+            .add(&JacobianMontPoint::from_affine(&g))
+            .as_affine();
+        let affine = |point: AffineMontPoint| hash_to_curve::Affine {
+            x: point.x(),
+            y: point.y(),
+            infinity: 0,
+        };
+        let doubled = hash_to_curve::add_affine(affine(g), affine(g), CURVE_A_MONT);
+        assert_eq!(doubled.infinity, 0);
+        assert_eq!(doubled.x.0, twice.x().0);
+        assert_eq!(doubled.y.0, twice.y().0);
+        let chord = hash_to_curve::add_affine(affine(g), affine(twice), CURVE_A_MONT);
+        assert_eq!(chord.x.0, thrice.x().0);
+        assert_eq!(chord.y.0, thrice.y().0);
+        let opposite = hash_to_curve::add_affine(
+            affine(g),
+            hash_to_curve::Affine {
+                x: g.x(),
+                y: g.y().negate_mod_p(),
+                infinity: 0,
+            },
+            CURVE_A_MONT,
+        );
+        assert_eq!(opposite.infinity, 1);
+        assert_eq!(opposite.x.0, [0; 6]);
+
+        let constants = swu_constants();
+        assert_eq!(
+            constants.sqrt_neg_z.field_mul(constants.sqrt_neg_z).0,
+            constants.z.neg().0
+        );
+    }
 
     const CURVE_GENERATOR: AffineMontPoint = AffineMontPoint {
         xy: [

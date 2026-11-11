@@ -59,6 +59,10 @@ libc = { version = "0.2", default-features = false }
 aws-lc-rs = { version = "1.19", default-features = false, features = ["alloc", "prebuilt-nasm", "non-fips"] }
 # aws-lc's XChaCha20-Poly1305, which aws-lc-rs does not expose.
 aws-lc-sys = { version = "0.47", default-features = false }
+# P-521 hash-to-curve. aws-lc exposes the P-256 and P-384 suites only.
+p521 = { version = "0.14", default-features = false, features = ["group-digest"] }
+hash2curve = "0.14"
+elliptic-curve = { version = "0.14", default-features = false, features = ["sec1"] }
 # HPKE, which aws-lc-rs does not expose either; `hazmat` reads its private keys.
 hpke-rs = { version = "0.8", default-features = false, features = ["hazmat", "rustcrypto", "std"] }
 

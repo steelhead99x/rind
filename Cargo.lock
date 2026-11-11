@@ -1418,6 +1418,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hash2curve"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1eaf40612d7d854743e7189228a6d528f0f6e8502cf6a0cb831d28a218b7f3f6"
+dependencies = [
+ "digest 0.11.3",
+ "elliptic-curve",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2647,6 +2657,7 @@ dependencies = [
  "base16ct",
  "ecdsa",
  "elliptic-curve",
+ "hash2curve",
  "primefield",
  "primeorder",
  "sha2",
@@ -3223,9 +3234,11 @@ dependencies = [
  "cfg-if",
  "crabgrind 0.4.0",
  "curve25519-dalek",
+ "elliptic-curve",
  "fiat-crypto",
  "flate2",
  "getrandom 0.4.3",
+ "hash2curve",
  "hex",
  "hpke-rs",
  "libc",
@@ -3235,6 +3248,7 @@ dependencies = [
  "libcrux-poly1305",
  "libcrux-sha2",
  "libcrux-traits",
+ "p521",
  "proptest",
  "serde",
  "serde_json",

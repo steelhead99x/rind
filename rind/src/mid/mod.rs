@@ -22,6 +22,7 @@ pub(super) mod aes_cbc;
 pub(super) mod aes_kw;
 pub(super) mod chacha20;
 pub(super) mod chacha20poly1305;
+pub(super) mod hash_to_curve;
 pub(super) mod md5;
 pub(super) mod mlkem768;
 pub(super) mod p256;
