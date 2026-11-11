@@ -13,12 +13,10 @@ use crate::low::{Entry, Zeroable, ct, zeroise_value};
 use crate::mid::rng::{RandomSource, SystemRandom};
 use crate::mid::rsa_pub;
 
-/// The longest message [`PublicKey::blind`] or [`PublicKey::prepare`] takes.
-pub const MAX_MESSAGE: usize = 1024;
-
 const PREFIX_LEN: usize = 32;
 const SHA384_LEN: u16 = 48;
 const MAX_MODULUS: usize = rsa_pub::MAX_PUBLIC_MODULUS_BYTES;
+const SPKI_MAX: usize = MAX_MODULUS + 256;
 
 /// One RSABSSA-SHA384 variant. Only this module's constants build one.
 ///
@@ -99,12 +97,11 @@ pub static RSABSSA_SHA384_PSSZERO_DETERMINISTIC: Algorithm = Algorithm {
 };
 
 /// A message prepared for a randomized variant: 32 random bytes, then the
-/// message. Verification takes this type, so the unprepared message is not
-/// a signature input.
+/// message, reduced to the SHA-384 digest that PSS signs. Verification takes
+/// this type, so the unprepared message is not a signature input.
 pub struct PreparedMessage {
     prefix: [u8; PREFIX_LEN],
-    message: [u8; MAX_MESSAGE],
-    message_len: u16,
+    digest: [u8; 48],
     kind: Kind,
 }
 
@@ -119,17 +116,15 @@ impl PreparedMessage {
         &self.prefix
     }
 
-    /// The caller's message.
-    pub fn message(&self) -> &[u8] {
-        &self.message[..usize::from(self.message_len)]
+    /// SHA-384 of the prefix and the caller's message.
+    fn digest(&self) -> &[u8] {
+        &self.digest
     }
 }
 
 impl fmt::Debug for PreparedMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PreparedMessage")
-            .field("message_len", &self.message_len)
-            .finish_non_exhaustive()
+        f.debug_struct("PreparedMessage").finish_non_exhaustive()
     }
 }
 
@@ -148,9 +143,14 @@ impl PreparedBytes<'_> {
 }
 
 /// The client's RSA public key.
+///
+/// `salt` is the `id-RSASSA-PSS` salt length when the key was loaded from
+/// that algorithm. `None` is `rsaEncryption` or raw components, which name
+/// no PSS parameters and accept every variant.
 #[derive(Clone)]
 pub struct PublicKey {
     key: VerifyingKey,
+    salt: Option<u8>,
 }
 
 impl PublicKey {
@@ -161,9 +161,8 @@ impl PublicKey {
     /// Any other algorithm, or a parameter that does not match, is refused.
     pub fn from_spki(algorithm: &'static Algorithm, bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_public();
-        Ok(Self {
-            key: spki_key(algorithm, bytes)?,
-        })
+        let (key, salt) = spki_key(algorithm, bytes)?;
+        Ok(Self { key, salt })
     }
 
     /// Loads an RSA public key from its big-endian modulus and exponent.
@@ -171,14 +170,55 @@ impl PublicKey {
         let _entry = Entry::new_public();
         Ok(Self {
             key: VerifyingKey::from_components(n, e)?,
+            salt: None,
+        })
+    }
+
+    fn require(&self, algorithm: &Algorithm) -> Result<(), Error> {
+        match self.salt {
+            Some(salt) if usize::from(salt) == algorithm.salt_len() => Ok(()),
+            Some(_) => Err(Error::Unsupported),
+            None => Ok(()),
+        }
+    }
+
+    /// `n` and `e`, big-endian, with no leading zero.
+    pub fn components(&self) -> Result<Components, Error> {
+        let _entry = Entry::new_public();
+        let mut wide = [0u8; MAX_MODULUS];
+        let raw = self.key.modulus_be(&mut wide)?;
+        let mut n = [0u8; MAX_MODULUS];
+        n[..raw.len()].copy_from_slice(raw);
+        let n_len = raw.len() as u16;
+        let be = self.key.exponent().to_be_bytes();
+        let start = be.iter().position(|byte| *byte != 0).unwrap_or(0);
+        let mut e = [0u8; 8];
+        e[..be.len() - start].copy_from_slice(&be[start..]);
+        Ok(Components {
+            n,
+            n_len,
+            e,
+            e_len: (be.len() - start) as u8,
+        })
+    }
+
+    /// `SubjectPublicKeyInfo` for `id-RSASSA-PSS`, with `algorithm`'s hash
+    /// and salt. A key loaded with a different salt is [`Error::Unsupported`].
+    pub fn to_spki(&self, algorithm: &'static Algorithm) -> Result<SubjectPublicKeyInfo, Error> {
+        let _entry = Entry::new_public();
+        self.require(algorithm)?;
+        let mut bytes = [0u8; SPKI_MAX];
+        let len = encode_pss_spki(&self.key, algorithm, &mut bytes)?;
+        Ok(SubjectPublicKeyInfo {
+            bytes,
+            len: len as u16,
         })
     }
 
     /// Prepares `message` for a randomized variant.
     ///
-    /// Fails with [`Error::Unsupported`] for a deterministic variant, and
-    /// with [`Error::WrongLength`] when `message` is longer than
-    /// [`MAX_MESSAGE`].
+    /// Fails with [`Error::Unsupported`] for a deterministic variant.
+    /// `message` has no length cap: only its digest is kept.
     pub fn prepare(
         &self,
         algorithm: &'static Algorithm,
@@ -198,8 +238,7 @@ impl PublicKey {
     ///
     /// The prefix is the 32 bytes that were prepended. Fails with
     /// [`Error::Unsupported`] for a deterministic variant, and with
-    /// [`Error::WrongLength`] when `prefix` is not 32 bytes or `message`
-    /// is longer than [`MAX_MESSAGE`].
+    /// [`Error::WrongLength`] when `prefix` is not 32 bytes.
     pub fn prepared(
         algorithm: &'static Algorithm,
         prefix: &[u8],
@@ -213,17 +252,18 @@ impl PublicKey {
                 Error::WrongLength
             });
         }
-        if message.len() > MAX_MESSAGE {
-            return Err(Error::WrongLength);
-        }
-        let mut stored = [0u8; MAX_MESSAGE];
-        stored[..message.len()].copy_from_slice(message);
         let mut prefix_bytes = [0u8; PREFIX_LEN];
         prefix_bytes.copy_from_slice(prefix);
+        let digest = PreparedBytes {
+            prefix: &prefix_bytes,
+            message,
+        }
+        .hash();
+        let mut stored = [0u8; 48];
+        stored.copy_from_slice(digest.as_ref());
         Ok(PreparedMessage {
             prefix: prefix_bytes,
-            message: stored,
-            message_len: message.len() as u16,
+            digest: stored,
             kind: algorithm.kind,
         })
     }
@@ -231,21 +271,24 @@ impl PublicKey {
     /// Blinds a deterministic variant's message.
     ///
     /// Fails with [`Error::Unsupported`] for a randomized variant, or when
-    /// the PSS encoding shares a factor with the modulus. A message longer
-    /// than [`MAX_MESSAGE`] is [`Error::WrongLength`].
+    /// the PSS encoding shares a factor with the modulus. The key's PSS
+    /// salt, when the key names one, has to be this variant's.
     pub fn blind(
         &self,
         algorithm: &'static Algorithm,
         message: &[u8],
     ) -> Result<(BlindedMessage, Blinding), Error> {
         let _entry = Entry::new_secret();
+        self.require(algorithm)?;
         if algorithm.randomized() {
             return Err(Error::Unsupported);
         }
-        if message.len() > MAX_MESSAGE {
-            return Err(Error::WrongLength);
+        let digest = PreparedBytes {
+            prefix: &[],
+            message,
         }
-        blind_message(&self.key, algorithm, &[], message, None, None)
+        .hash();
+        blind_message(&self.key, algorithm, digest.as_ref(), None, None)
     }
 
     /// Blinds a [`PreparedMessage`].
@@ -254,11 +297,11 @@ impl PublicKey {
         message: &PreparedMessage,
     ) -> Result<(BlindedMessage, Blinding), Error> {
         let _entry = Entry::new_secret();
+        self.require(message.kind.algorithm())?;
         blind_message(
             &self.key,
             message.kind.algorithm(),
-            message.prefix(),
-            message.message(),
+            message.digest(),
             None,
             None,
         )
@@ -275,6 +318,7 @@ impl PublicKey {
         signature: &Signature,
     ) -> Result<(), Error> {
         let _entry = Entry::new_public();
+        self.require(algorithm)?;
         if algorithm.randomized() {
             return Err(Error::Unsupported);
         }
@@ -288,11 +332,11 @@ impl PublicKey {
         signature: &Signature,
     ) -> Result<(), Error> {
         let _entry = Entry::new_public();
-        verify_message(
+        self.require(message.kind.algorithm())?;
+        finish_verify(
             &self.key,
-            message.kind.algorithm(),
-            message.prefix(),
-            message.message(),
+            *message.kind.algorithm(),
+            &message.digest,
             signature.as_ref(),
         )
     }
@@ -408,18 +452,14 @@ fn fixed(bytes: &[u8]) -> Result<([u8; MAX_MODULUS], u16), Error> {
     Ok((stored, bytes.len() as u16))
 }
 
-/// The client's secret blinding factor and the message it covers.
+/// The client's secret blinding factor and the digest it covers.
 ///
 /// [`Self::finalize`] consumes it and checks the signature before returning
 /// one. Drop wipes it under `wipe`.
 pub struct Blinding {
     key: VerifyingKey,
     inverse: [u8; MAX_MODULUS],
-    inverse_len: u16,
-    prefix: [u8; PREFIX_LEN],
-    prefix_len: u8,
-    message: [u8; MAX_MESSAGE],
-    message_len: u16,
+    digest: [u8; 48],
     kind: Kind,
 }
 
@@ -427,33 +467,33 @@ impl Blinding {
     /// Turns `blind_signature` into a verified RSASSA-PSS signature.
     ///
     /// Fails with [`Error::BadSignature`] when the signature does not
-    /// unblind to this message, and with [`Error::WrongLength`] when it is
-    /// not the modulus length.
+    /// unblind to this message, including when the integer is not below the
+    /// modulus. [`Error::WrongLength`] is a signature that is not the
+    /// modulus length.
     pub fn finalize(self, blind_signature: &BlindSignature) -> Result<Signature, Error> {
         let _entry = Entry::new_secret();
         let k = self.key.modulus_len_bytes();
-        if blind_signature.as_ref().len() != k || usize::from(self.inverse_len) != k {
+        if blind_signature.as_ref().len() != k {
             return Err(Error::WrongLength);
         }
         let mut signature = [0u8; MAX_MODULUS];
-        self.key
-            .mul_mod_be(blind_signature.as_ref(), &self.inverse[..k], &mut signature)?;
+        if self
+            .key
+            .mul_mod_be(blind_signature.as_ref(), &self.inverse[..k], &mut signature)
+            .is_err()
+        {
+            return Err(Error::BadSignature);
+        }
         ct::secret_slice(&signature[..k]);
         let algorithm = *self.kind.algorithm();
-        let verdict = verify_secret(
-            &self.key,
-            algorithm,
-            &self.prefix[..usize::from(self.prefix_len)],
-            &self.message[..usize::from(self.message_len)],
-            &signature[..k],
-        )?;
+        let verdict = verify_secret(&self.key, algorithm, &self.digest, &signature[..k])?;
         if !ct::into_public(verdict) {
             return Err(Error::BadSignature);
         }
         ct::public_slice(&signature[..k]);
         Ok(Signature {
             bytes: signature,
-            len: self.inverse_len,
+            len: k as u16,
         })
     }
 }
@@ -507,11 +547,22 @@ impl KeyPair {
         })
     }
 
-    /// The public key.
+    /// The public key. It names no PSS parameters, so every variant accepts it.
     pub fn public_key(&self) -> PublicKey {
         PublicKey {
             key: self.key.public_key(),
+            salt: None,
         }
+    }
+
+    /// `n` and `e`, big-endian, with no leading zero.
+    pub fn components(&self) -> Result<Components, Error> {
+        self.public_key().components()
+    }
+
+    /// `SubjectPublicKeyInfo` for `id-RSASSA-PSS`, with `algorithm`'s salt.
+    pub fn to_spki(&self, algorithm: &'static Algorithm) -> Result<SubjectPublicKeyInfo, Error> {
+        self.public_key().to_spki(algorithm)
     }
 }
 
@@ -544,8 +595,7 @@ impl RandomSource for SaltBytes<'_> {
 fn blind_message(
     key: &VerifyingKey,
     algorithm: &'static Algorithm,
-    prefix: &[u8],
-    message: &[u8],
+    digest: &[u8],
     salt: Option<&[u8]>,
     inverse: Option<&[u8]>,
 ) -> Result<(BlindedMessage, Blinding), Error> {
@@ -559,15 +609,17 @@ fn blind_message(
     } else {
         4
     };
+    let mut stored_digest = [0u8; 48];
+    stored_digest[..digest.len()].copy_from_slice(digest);
+    ct::secret_slice(&stored_digest);
     for _ in 0..attempts {
-        let hash = PreparedBytes { prefix, message }.hash();
         match salt {
             Some(salt) => {
                 pkcs1::encode_pss_sig::<hash::Sha384>(
                     &mut em[..em_len],
                     em_bits,
                     &mut SaltBytes(salt),
-                    hash.as_ref(),
+                    digest,
                     algorithm.salt_len(),
                 )?;
             }
@@ -576,7 +628,7 @@ fn blind_message(
                     &mut em[..em_len],
                     em_bits,
                     &mut SystemRandom,
-                    hash.as_ref(),
+                    digest,
                     algorithm.salt_len(),
                 )?;
             }
@@ -601,7 +653,7 @@ fn blind_message(
             }
             None => {
                 key.random_factor_be(&mut SystemRandom, &mut factor)?;
-                key.invert_be(&factor[..k], &mut inv)?;
+                key.invert_coprime_be(&factor[..k], &mut inv)?;
             }
         }
         ct::secret_slice(&factor[..k]);
@@ -612,10 +664,6 @@ fn blind_message(
         key.mul_mod_be(&encoded[..k], &powered[..k], &mut blinded)?;
         ct::public_slice(&blinded[..k]);
 
-        let mut stored_prefix = [0u8; PREFIX_LEN];
-        stored_prefix[..prefix.len()].copy_from_slice(prefix);
-        let mut stored_message = [0u8; MAX_MESSAGE];
-        stored_message[..message.len()].copy_from_slice(message);
         return Ok((
             BlindedMessage {
                 bytes: blinded,
@@ -624,11 +672,7 @@ fn blind_message(
             Blinding {
                 key: key.clone(),
                 inverse: inv,
-                inverse_len: k as u16,
-                prefix: stored_prefix,
-                prefix_len: prefix.len() as u8,
-                message: stored_message,
-                message_len: message.len() as u16,
+                digest: stored_digest,
                 kind: algorithm.kind,
             },
         ));
@@ -644,10 +688,20 @@ fn verify_message(
     signature: &[u8],
 ) -> Result<(), Error> {
     let _entry = Entry::new_public();
+    let hash = PreparedBytes { prefix, message }.hash();
+    finish_verify(key, *algorithm, hash.as_ref(), signature)
+}
+
+fn finish_verify(
+    key: &VerifyingKey,
+    algorithm: Algorithm,
+    hash: &[u8],
+    signature: &[u8],
+) -> Result<(), Error> {
     if signature.len() != key.modulus_len_bytes() {
         return Err(Error::BadSignature);
     }
-    match verify_secret(key, *algorithm, prefix, message, signature) {
+    match verify_secret(key, algorithm, hash, signature) {
         Ok(verdict) if ct::into_public(verdict) => Ok(()),
         Ok(_) => Err(Error::BadSignature),
         Err(Error::WrongLength) => Err(Error::BadSignature),
@@ -658,11 +712,9 @@ fn verify_message(
 fn verify_secret(
     key: &VerifyingKey,
     algorithm: Algorithm,
-    prefix: &[u8],
-    message: &[u8],
+    hash: &[u8],
     signature: &[u8],
 ) -> Result<bool, Error> {
-    let hash = PreparedBytes { prefix, message }.hash();
     let em_bits = key.modulus_len_bits() - 1;
     let mut em = [0u8; MAX_MODULUS];
     let opened = key.public_op_be(signature, &mut em)?;
@@ -684,258 +736,176 @@ fn verify_secret(
         & pkcs1::verify_pss_sig_secret::<hash::Sha384>(
             &mut encoded[..em_len],
             em_bits,
-            hash.as_ref(),
+            hash,
             algorithm.salt_len(),
         ))
 }
 
-const OID_RSA_ENCRYPTION: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
-const OID_RSASSA_PSS: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a];
-const OID_MGF1: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x08];
-const OID_SHA384: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02];
+fn spki_key(algorithm: &Algorithm, bytes: &[u8]) -> Result<(VerifyingKey, Option<u8>), Error> {
+    use crate::high::asn1::pkix::PssSubjectPublicKeyInfo;
+    use crate::high::asn1::{Type, oid};
 
-fn spki_key(algorithm: &Algorithm, bytes: &[u8]) -> Result<VerifyingKey, Error> {
-    let mut spki = Cursor::new(bytes);
-    let body = spki.tag(0x30)?;
-    spki.finish()?;
-    let mut body = Cursor::new(body);
-    let algorithm_id = body.tag(0x30)?;
-    let bits = body.tag(0x03)?;
-    body.finish()?;
-
-    let mut id = Cursor::new(algorithm_id);
-    let oid = id.tag(0x06)?;
-    if oid == OID_RSA_ENCRYPTION {
-        if !id.rest.is_empty() {
-            let null = id.tag(0x05)?;
-            if !null.is_empty() {
-                return Err(crate::error::KeyFormatError::Asn1(
-                    crate::high::asn1::Error::IllegalNull,
-                )
-                .into());
-            }
-            id.finish()?;
+    match PssSubjectPublicKeyInfo::from_bytes(bytes) {
+        Ok(spki) if spki.algorithm.algorithm == oid::id_RSASSA_PSS => {
+            let salt = pss_salt(algorithm, &spki.algorithm.parameters)?;
+            let key = VerifyingKey::from_pkcs1_der(spki.subjectPublicKey.as_octets())?;
+            Ok((key, Some(salt)))
         }
-        return VerifyingKey::from_der(bytes);
+        _ => Ok((VerifyingKey::from_der(bytes)?, None)),
     }
-    if oid != OID_RSASSA_PSS {
-        return Err(crate::error::KeyFormatError::MismatchedSpkiAlgorithm.into());
-    }
-    let params = id.tag(0x30)?;
-    id.finish()?;
-    pss_parameters(algorithm, params)?;
-
-    let unused = *bits.first().ok_or(crate::error::KeyFormatError::Asn1(
-        crate::high::asn1::Error::UnexpectedEof,
-    ))?;
-    if unused != 0 {
-        return Err(crate::error::KeyFormatError::Asn1(
-            crate::high::asn1::Error::UnhandledBitString,
-        )
-        .into());
-    }
-    VerifyingKey::from_der(&bits[1..])
 }
 
-/// RFC 4055 `RSASSA-PSS-params`. Absent fields take the standard defaults
-/// (SHA-1, MGF1-SHA-1, salt 20, trailer 1), which do not match these variants.
-fn pss_parameters(algorithm: &Algorithm, params: &[u8]) -> Result<(), Error> {
-    let mut cursor = Cursor::new(params);
-    let mut hash = None;
-    let mut mgf = None;
-    let mut salt = None;
-    let mut trailer = None;
-    while !cursor.rest.is_empty() {
-        let (tag, body) = cursor.tlv()?;
-        let slot = match tag {
-            0xa0 => &mut hash,
-            0xa1 => &mut mgf,
-            0xa2 => &mut salt,
-            0xa3 => &mut trailer,
-            _ => return Err(crate::error::KeyFormatError::MismatchedSpkiAlgorithm.into()),
+/// The salt length bound into an `id-RSASSA-PSS` key.
+///
+/// `high::asn1` reads the parameters in order and rejects a non-canonical
+/// length, a high tag, and trailing data, so a field out of order fails as
+/// trailing data. A present field whose value is the RFC 4055 default is
+/// rejected too: DER omits those.
+fn pss_salt(
+    algorithm: &Algorithm,
+    params: &crate::high::asn1::pkix::RsaSsaPssParameters<'_>,
+) -> Result<u8, Error> {
+    use crate::high::asn1::pkix::AlgorithmIdentifier;
+    use crate::high::asn1::{Any, oid};
+
+    fn hash_ok(id: &AlgorithmIdentifier<'_>) -> Result<bool, Error> {
+        let null_or_absent = match &id.parameters {
+            None | Some(Any::Null(_)) => true,
+            Some(_) => false,
         };
-        if slot.is_some() {
-            return Err(crate::error::KeyFormatError::MismatchedSpkiAlgorithm.into());
+        if id.algorithm == oid::id_sha1 {
+            return Err(asn1_error(crate::high::asn1::Error::NonCanonicalEncoding));
         }
-        *slot = Some(body);
+        Ok(null_or_absent && id.algorithm == oid::id_sha384)
     }
-    let hash = hash.map(hash_oid).transpose()?.unwrap_or(OID_SHA1);
-    let mgf = match mgf {
-        Some(body) => mgf_hash(body)?,
-        None => OID_SHA1,
+
+    let Some(hash) = params.hashAlgorithm.inner().as_ref() else {
+        return Err(mismatched());
     };
-    let salt = match salt {
-        Some(body) => der_uint(body)?,
-        None => 20,
+    if !hash_ok(hash)? {
+        return Err(mismatched());
+    }
+
+    let Some(mgf) = params.maskGenAlgorithm.inner().as_ref() else {
+        return Err(mismatched());
     };
-    let trailer = match trailer {
-        Some(body) => der_uint(body)?,
-        None => 1,
+    if mgf.algorithm != oid::id_mgf1 || !hash_ok(&mgf.hash)? {
+        return Err(mismatched());
+    }
+
+    let Some(salt) = params.saltLength.inner().as_ref() else {
+        return Err(mismatched());
     };
-    if hash != OID_SHA384 || mgf != OID_SHA384 || salt != algorithm.salt_len() || trailer != 1 {
-        return Err(crate::error::KeyFormatError::MismatchedSpkiAlgorithm.into());
+    let salt = salt.as_usize().map_err(asn1_error)?;
+    if salt == 20 {
+        return Err(asn1_error(crate::high::asn1::Error::NonCanonicalEncoding));
     }
-    Ok(())
-}
+    if salt != algorithm.salt_len() {
+        return Err(mismatched());
+    }
 
-const OID_SHA1: &[u8] = &[0x2b, 0x0e, 0x03, 0x02, 0x1a];
-
-fn hash_oid(identifier: &[u8]) -> Result<&[u8], Error> {
-    let mut cursor = Cursor::new(identifier);
-    let seq = cursor.tag(0x30)?;
-    cursor.finish()?;
-    algorithm_oid(seq)
-}
-
-/// `algorithm` and an optional NULL, the contents of an AlgorithmIdentifier.
-fn algorithm_oid(content: &[u8]) -> Result<&[u8], Error> {
-    let mut seq = Cursor::new(content);
-    let oid = seq.tag(0x06)?;
-    if !seq.rest.is_empty() {
-        let null = seq.tag(0x05)?;
-        if !null.is_empty() {
-            return Err(
-                crate::error::KeyFormatError::Asn1(crate::high::asn1::Error::IllegalNull).into(),
-            );
+    if let Some(trailer) = params.trailerField.inner().as_ref() {
+        let trailer = trailer.as_usize().map_err(asn1_error)?;
+        if trailer == 1 {
+            return Err(asn1_error(crate::high::asn1::Error::NonCanonicalEncoding));
         }
-        seq.finish()?;
+        return Err(mismatched());
     }
-    Ok(oid)
+    u8::try_from(salt).map_err(|_| mismatched())
 }
 
-fn mgf_hash(body: &[u8]) -> Result<&[u8], Error> {
-    let mut cursor = Cursor::new(body);
-    let seq = cursor.tag(0x30)?;
-    cursor.finish()?;
-    let mut seq = Cursor::new(seq);
-    let oid = seq.tag(0x06)?;
-    if oid != OID_MGF1 {
-        return Err(crate::error::KeyFormatError::MismatchedSpkiAlgorithm.into());
-    }
-    let hash = seq.tag(0x30)?;
-    seq.finish()?;
-    algorithm_oid(hash)
-}
+fn encode_pss_spki(
+    key: &VerifyingKey,
+    algorithm: &Algorithm,
+    out: &mut [u8],
+) -> Result<usize, Error> {
+    use crate::high::asn1::pkix::{
+        AlgorithmIdentifier, Mgf1Algorithm, PssAlgorithmIdentifier, PssSubjectPublicKeyInfo,
+        RsaSsaPssParameters,
+    };
+    use crate::high::asn1::{Any, BitString, Encoder, Integer, Null, Type, oid};
 
-fn der_uint(tlv: &[u8]) -> Result<usize, Error> {
-    let mut cursor = Cursor::new(tlv);
-    let value = cursor.tag(0x02)?;
-    cursor.finish()?;
-    if value.is_empty() || value.len() > size_of::<usize>() || value[0] & 0x80 != 0 {
-        return Err(crate::error::KeyFormatError::Asn1(
-            crate::high::asn1::Error::IntegerOutOfRange,
-        )
-        .into());
-    }
-    if value.len() > 1 && value[0] == 0 && value[1] & 0x80 == 0 {
-        return Err(crate::error::KeyFormatError::Asn1(
-            crate::high::asn1::Error::NonCanonicalEncoding,
-        )
-        .into());
-    }
-    Ok(value
-        .iter()
-        .fold(0, |acc, byte| acc << 8 | usize::from(*byte)))
-}
-
-struct Cursor<'a> {
-    rest: &'a [u8],
-}
-
-impl<'a> Cursor<'a> {
-    fn new(rest: &'a [u8]) -> Self {
-        Self { rest }
-    }
-
-    fn tlv(&mut self) -> Result<(u8, &'a [u8]), Error> {
-        let tag = *self.rest.first().ok_or(crate::error::KeyFormatError::Asn1(
-            crate::high::asn1::Error::UnexpectedEof,
-        ))?;
-        self.rest = &self.rest[1..];
-        if tag & 0x1f == 0x1f {
-            return Err(crate::error::KeyFormatError::Asn1(
-                crate::high::asn1::Error::UnexpectedTag,
-            )
-            .into());
-        }
-        let len = self.len()?;
-        let (body, rest) =
-            self.rest
-                .split_at_checked(len)
-                .ok_or(crate::error::KeyFormatError::Asn1(
-                    crate::high::asn1::Error::UnexpectedEof,
-                ))?;
-        self.rest = rest;
-        Ok((tag, body))
-    }
-
-    fn tag(&mut self, want: u8) -> Result<&'a [u8], Error> {
-        let (tag, body) = self.tlv()?;
-        if tag != want {
-            return Err(crate::error::KeyFormatError::Asn1(
-                crate::high::asn1::Error::UnexpectedTag,
-            )
-            .into());
-        }
-        Ok(body)
-    }
-
-    fn finish(self) -> Result<(), Error> {
-        if self.rest.is_empty() {
-            Ok(())
-        } else {
-            Err(crate::error::KeyFormatError::Asn1(
-                crate::high::asn1::Error::UnexpectedTrailingData,
-            )
-            .into())
-        }
-    }
-
-    fn len(&mut self) -> Result<usize, Error> {
-        let byte = *self.rest.first().ok_or(crate::error::KeyFormatError::Asn1(
-            crate::high::asn1::Error::UnexpectedEof,
-        ))?;
-        self.rest = &self.rest[1..];
-        match byte {
-            0x00..=0x7f => Ok(usize::from(byte)),
-            0x81 => {
-                let len = *self.rest.first().ok_or(crate::error::KeyFormatError::Asn1(
-                    crate::high::asn1::Error::UnexpectedEof,
-                ))?;
-                self.rest = &self.rest[1..];
-                if len < 0x80 {
-                    return Err(crate::error::KeyFormatError::Asn1(
-                        crate::high::asn1::Error::NonCanonicalEncoding,
-                    )
-                    .into());
+    let mut pkcs1 = [0u8; crate::high::rsa::MAX_PUBLIC_KEY_LEN];
+    let pkcs1 = key.to_pkcs1_der(&mut pkcs1)?;
+    let hash = AlgorithmIdentifier {
+        algorithm: oid::id_sha384.clone(),
+        parameters: Some(Any::Null(Null)),
+    };
+    let salt = [u8::try_from(algorithm.salt_len()).map_err(|_| Error::Unsupported)?];
+    let spki = PssSubjectPublicKeyInfo {
+        algorithm: PssAlgorithmIdentifier {
+            algorithm: oid::id_RSASSA_PSS.clone(),
+            parameters: RsaSsaPssParameters {
+                hashAlgorithm: hash.clone().into(),
+                maskGenAlgorithm: Mgf1Algorithm {
+                    algorithm: oid::id_mgf1.clone(),
+                    hash,
                 }
-                Ok(usize::from(len))
-            }
-            0x82 => {
-                let pair: [u8; 2] =
-                    self.rest
-                        .get(..2)
-                        .ok_or(crate::error::KeyFormatError::Asn1(
-                            crate::high::asn1::Error::UnexpectedEof,
-                        ))?[..]
-                        .try_into()
-                        .unwrap();
-                self.rest = &self.rest[2..];
-                let len = usize::from(u16::from_be_bytes(pair));
-                if len < 0x100 {
-                    return Err(crate::error::KeyFormatError::Asn1(
-                        crate::high::asn1::Error::NonCanonicalEncoding,
-                    )
-                    .into());
-                }
-                Ok(len)
-            }
-            _ => Err(crate::error::KeyFormatError::Asn1(
-                crate::high::asn1::Error::UnsupportedLargeObjectLength,
-            )
-            .into()),
-        }
+                .into(),
+                saltLength: Integer::new(&salt).into(),
+                trailerField: crate::high::asn1::Context::absent(),
+            },
+        },
+        subjectPublicKey: BitString::new(pkcs1),
+    };
+    spki.encode(&mut Encoder::new(out))
+        .map_err(|_| Error::WrongLength)
+}
+
+/// `n` and `e` of an RSA public key.
+pub struct Components {
+    n: [u8; MAX_MODULUS],
+    n_len: u16,
+    e: [u8; 8],
+    e_len: u8,
+}
+
+impl Components {
+    /// The modulus.
+    pub fn modulus(&self) -> &[u8] {
+        &self.n[..usize::from(self.n_len)]
     }
+
+    /// The public exponent.
+    pub fn exponent(&self) -> &[u8] {
+        &self.e[..usize::from(self.e_len)]
+    }
+}
+
+impl fmt::Debug for Components {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Components")
+            .field("n_len", &self.n_len)
+            .finish_non_exhaustive()
+    }
+}
+
+/// An `id-RSASSA-PSS` `SubjectPublicKeyInfo`.
+pub struct SubjectPublicKeyInfo {
+    bytes: [u8; SPKI_MAX],
+    len: u16,
+}
+
+impl AsRef<[u8]> for SubjectPublicKeyInfo {
+    fn as_ref(&self) -> &[u8] {
+        &self.bytes[..usize::from(self.len)]
+    }
+}
+
+impl fmt::Debug for SubjectPublicKeyInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SubjectPublicKeyInfo")
+            .field("len", &self.len)
+            .finish_non_exhaustive()
+    }
+}
+
+fn mismatched() -> Error {
+    crate::error::KeyFormatError::MismatchedSpkiAlgorithm.into()
+}
+
+fn asn1_error(error: crate::high::asn1::Error) -> Error {
+    crate::error::KeyFormatError::Asn1(error).into()
 }
 
 /// Blinds with a fixed PSS salt and blinding inverse. RFC 9474's vectors
@@ -949,11 +919,11 @@ pub(crate) fn blind_fixed(
     salt: &[u8],
     inverse: &[u8],
 ) -> Result<(BlindedMessage, Blinding), Error> {
+    let hash = PreparedBytes { prefix, message }.hash();
     blind_message(
         &key.key,
         algorithm,
-        prefix,
-        message,
+        hash.as_ref(),
         Some(salt),
         Some(inverse),
     )
@@ -1001,6 +971,198 @@ mod tests {
         for spki in [&salt32, &sha256, &mgf512] {
             assert!(PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, spki).is_err());
         }
+
+        let dummy = Signature::from_bytes(&vec![1u8; key.key.modulus_len_bytes()]).unwrap();
+        assert_eq!(
+            key.blind(&RSABSSA_SHA384_PSSZERO_DETERMINISTIC, b"m").err(),
+            Some(Error::Unsupported)
+        );
+        assert_eq!(
+            key.verify(&RSABSSA_SHA384_PSSZERO_DETERMINISTIC, b"m", &dummy)
+                .err(),
+            Some(Error::Unsupported)
+        );
+        let zero_key = PublicKey::from_spki(&RSABSSA_SHA384_PSSZERO_DETERMINISTIC, &zero).unwrap();
+        let dummy0 = Signature::from_bytes(&vec![1u8; zero_key.key.modulus_len_bytes()]).unwrap();
+        assert_eq!(
+            zero_key
+                .blind(&RSABSSA_SHA384_PSS_DETERMINISTIC, b"m")
+                .err(),
+            Some(Error::Unsupported)
+        );
+        assert_eq!(
+            zero_key
+                .verify(&RSABSSA_SHA384_PSS_DETERMINISTIC, b"m", &dummy0)
+                .err(),
+            Some(Error::Unsupported)
+        );
+        assert_eq!(
+            key.blind(&RSABSSA_SHA384_PSS_RANDOMIZED, b"m").err(),
+            Some(Error::Unsupported)
+        );
+        key.blind(&RSABSSA_SHA384_PSS_DETERMINISTIC, &[0x5a; 2048])
+            .unwrap();
+
+        let exported = key.to_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC).unwrap();
+        let loaded =
+            PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, exported.as_ref()).unwrap();
+        assert_eq!(
+            loaded.components().unwrap().modulus(),
+            key.components().unwrap().modulus()
+        );
+        assert_eq!(
+            loaded.components().unwrap().exponent(),
+            key.components().unwrap().exponent()
+        );
+        assert!(
+            loaded
+                .to_spki(&RSABSSA_SHA384_PSSZERO_DETERMINISTIC)
+                .is_err()
+        );
+        assert!(
+            PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, &nested_spki(&pss)).is_err()
+        );
+        reject_malformed_pss(&pss);
+    }
+
+    /// The BIT STRING of a valid SPKI, replaced by that SPKI. PKCS#1 decoding
+    /// refuses the nested `SubjectPublicKeyInfo`.
+    fn nested_spki(spki: &[u8]) -> Vec<u8> {
+        assert_eq!(&spki[..4], &[0x30, 0x82, 0x01, 0x56]);
+        let alg = &spki[4..4 + 67];
+        assert_eq!(alg[0], 0x30);
+        let mut bits = Vec::new();
+        bits.push(0x03);
+        let body = spki.len() + 1;
+        bits.push(0x82);
+        bits.push((body >> 8) as u8);
+        bits.push(body as u8);
+        bits.push(0x00);
+        bits.extend(spki);
+        let total = alg.len() + bits.len();
+        let mut out = vec![0x30, 0x82, (total >> 8) as u8, total as u8];
+        out.extend(alg);
+        out.extend(bits);
+        out
+    }
+
+    fn reject_malformed_pss(spki: &[u8]) {
+        let algorithm = &RSABSSA_SHA384_PSS_DETERMINISTIC;
+        assert!(PublicKey::from_spki(algorithm, &spki[..spki.len() - 8]).is_err());
+        let mut indefinite = spki.to_vec();
+        // The hash context's short length becomes the indefinite-length octet.
+        let hash = indefinite
+            .windows(2)
+            .position(|w| w == [0xa0, 0x0f])
+            .unwrap();
+        indefinite[hash + 1] = 0x80;
+        assert!(PublicKey::from_spki(algorithm, &indefinite).is_err());
+
+        let mut long_form = spki.to_vec();
+        long_form[hash + 1] = 0x81;
+        long_form.insert(hash + 2, 0x0f);
+        assert!(PublicKey::from_spki(algorithm, &long_form).is_err());
+
+        let mut high_tag = spki.to_vec();
+        high_tag[hash] = 0xbf;
+        assert!(PublicKey::from_spki(algorithm, &high_tag).is_err());
+
+        let mut duplicate = spki.to_vec();
+        let field = &spki[hash..hash + 2 + 0x0f];
+        duplicate.splice(hash..hash, field.iter().copied());
+        assert!(PublicKey::from_spki(algorithm, &duplicate).is_err());
+
+        let mut unknown = spki.to_vec();
+        unknown[hash] = 0xa4;
+        assert!(PublicKey::from_spki(algorithm, &unknown).is_err());
+
+        // salt INTEGER 48, `02 01 30`, written with a leading zero.
+        let salt = spki
+            .windows(4)
+            .position(|w| w == [0x02, 0x01, 0x30, 0x03])
+            .unwrap();
+        let mut overlong = spki.to_vec();
+        overlong.splice(salt..salt + 3, [0x02, 0x02, 0x00, 0x30]);
+        assert!(PublicKey::from_spki(algorithm, &overlong).is_err());
+
+        // Trailer DEFAULT 1, encoded explicitly after the salt.
+        let mut trailer = spki.to_vec();
+        let after_salt = salt + 3;
+        trailer.splice(after_salt..after_salt, [0xa3, 0x03, 0x02, 0x01, 0x01]);
+        assert!(PublicKey::from_spki(algorithm, &trailer).is_err());
+
+        // Salt, then the hash: same length, so only the order changed.
+        let hash_end = hash + 2 + 0x0f;
+        let salt_start = salt - 2;
+        let salt_end = salt + 3;
+        assert_eq!(&spki[salt_start..salt_start + 2], &[0xa2, 0x03]);
+        let hash_tlv = spki[hash..hash_end].to_vec();
+        let middle = spki[hash_end..salt_start].to_vec();
+        let salt_tlv = spki[salt_start..salt_end].to_vec();
+        let mut ordered = spki.to_vec();
+        ordered.splice(
+            hash..salt_end,
+            salt_tlv.iter().chain(&middle).chain(&hash_tlv).copied(),
+        );
+        assert_eq!(ordered.len(), spki.len());
+        assert!(PublicKey::from_spki(algorithm, &ordered).is_err());
+
+        // No parameters: the algorithm is the OID and a NULL.
+        let mut absent = spki.to_vec();
+        let params_at = absent.windows(2).position(|w| w == [0x30, 0x34]).unwrap();
+        absent.splice(params_at..params_at + 2 + 0x34, [0x05, 0x00]);
+        assert!(PublicKey::from_spki(algorithm, &absent).is_err());
+
+        let mut trailing = spki.to_vec();
+        trailing.push(0x00);
+        assert!(PublicKey::from_spki(algorithm, &trailing).is_err());
+    }
+
+    #[test]
+    #[cfg(not(miri))]
+    fn blind_sign_and_finalize_reject_bad_integers() {
+        let first = KeyPair::generate(crate::rsa::KeySize::Rsa2048).unwrap();
+        let second = KeyPair::generate(crate::rsa::KeySize::Rsa2048).unwrap();
+        let public = first.public_key();
+        let k = public.key.modulus_len_bytes();
+        let blinded = |bytes: &[u8]| BlindedMessage::from_bytes(bytes).unwrap();
+        assert!(BlindedMessage::from_bytes(&[]).is_err());
+        assert_eq!(
+            first.blind_sign(&blinded(&[0u8; 1])).err(),
+            Some(Error::WrongLength)
+        );
+        assert_eq!(
+            first.blind_sign(&blinded(&vec![0u8; k + 1])).err(),
+            Some(Error::WrongLength)
+        );
+        assert!(first.blind_sign(&blinded(&vec![0u8; k])).is_ok());
+
+        let parts = public.components().unwrap();
+        let modulus = parts.modulus();
+        let mut n = vec![0u8; k];
+        n[k - modulus.len()..].copy_from_slice(modulus);
+        assert_eq!(
+            first.blind_sign(&blinded(&n)).err(),
+            Some(Error::WrongLength)
+        );
+        let mut bigger = n.clone();
+        bigger[0] = bigger[0].saturating_add(1);
+        assert_eq!(
+            first.blind_sign(&blinded(&bigger)).err(),
+            Some(Error::WrongLength)
+        );
+
+        let algorithm = &RSABSSA_SHA384_PSS_DETERMINISTIC;
+        let (message, blinding) = public.blind(algorithm, b"token").unwrap();
+        let foreign = second.blind_sign(&message).unwrap();
+        assert_eq!(blinding.finalize(&foreign).err(), Some(Error::BadSignature));
+        let (_, blinding) = public.blind(algorithm, b"token").unwrap();
+        assert_eq!(
+            blinding
+                .finalize(&BlindSignature::from_bytes(&n).unwrap())
+                .err(),
+            Some(Error::BadSignature)
+        );
     }
 
     /// A 2049-bit modulus drops one octet when the encoded message is
@@ -1019,6 +1181,7 @@ mod tests {
         .unwrap();
         let public = PublicKey {
             key: signing.public_key(),
+            salt: None,
         };
         assert_eq!(public.key.modulus_len_bits() % 8, 1);
         let algorithm = &RSABSSA_SHA384_PSS_DETERMINISTIC;
@@ -1068,16 +1231,12 @@ mod tests {
 
             let mut inverse = [0u8; MAX_MODULUS];
             inverse[k - 1] = 1;
-            let mut stored = [0u8; MAX_MESSAGE];
-            stored[..message.len()].copy_from_slice(message);
+            let mut digest = [0u8; 48];
+            digest.copy_from_slice(hash.as_ref());
             let blinding = || Blinding {
                 key: public.key.clone(),
                 inverse,
-                inverse_len: k as u16,
-                prefix: [0; PREFIX_LEN],
-                prefix_len: 0,
-                message: stored,
-                message_len: message.len() as u16,
+                digest,
                 kind: algorithm.kind,
             };
             assert!(
@@ -1105,15 +1264,7 @@ mod tests {
             PublicKey::prepared(&RSABSSA_SHA384_PSS_RANDOMIZED, &[0; 16], b"m").err(),
             Some(Error::WrongLength)
         );
-        assert_eq!(
-            PublicKey::prepared(
-                &RSABSSA_SHA384_PSS_RANDOMIZED,
-                &[0; 32],
-                &[0; MAX_MESSAGE + 1]
-            )
-            .err(),
-            Some(Error::WrongLength)
-        );
+        assert!(PublicKey::prepared(&RSABSSA_SHA384_PSS_RANDOMIZED, &[0; 32], &[0; 4096]).is_ok());
     }
 
     #[test]
@@ -1387,15 +1538,12 @@ mod tests {
                 message,
             )
             .unwrap();
-            // Their signature used PSSZERO. Our verifier tries PSS first.
-            // Check the salt-zero variant by blinding's kind: verify the
-            // signature bytes with a fresh PSSZERO finalize path, which is
-            // `verify_message` through a signature we know is PSSZERO.
+            // The signature is PSSZERO. The salt-48 variant must reject it.
             verify_message(
                 &public.key,
                 &RSABSSA_SHA384_PSSZERO_RANDOMIZED,
                 prepared.prefix(),
-                prepared.message(),
+                message,
                 their_final.as_ref(),
             )
             .unwrap();
@@ -1404,7 +1552,7 @@ mod tests {
                     &public.key,
                     &RSABSSA_SHA384_PSS_RANDOMIZED,
                     prepared.prefix(),
-                    prepared.message(),
+                    message,
                     their_final.as_ref(),
                 )
                 .is_err()

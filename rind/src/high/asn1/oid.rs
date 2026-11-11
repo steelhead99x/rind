@@ -54,6 +54,20 @@ asn1_oid! {
 }
 
 asn1_oid! {
+    id_mgf1 OBJECT IDENTIFIER ::= {
+        iso(1) member_body(2)
+        us(840) rsadsi(113549) pkcs(1) 1 8
+    }
+}
+
+asn1_oid! {
+    id_RSASSA_PSS OBJECT IDENTIFIER ::= {
+        iso(1) member_body(2)
+        us(840) rsadsi(113549) pkcs(1) 1 10
+    }
+}
+
+asn1_oid! {
     id_sha1 OBJECT IDENTIFIER ::= {
         iso(1) identified_organization(3) oiw(14) secsig(3) algorithms(2) 26
     }
