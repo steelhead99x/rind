@@ -1037,7 +1037,8 @@ mod tests {
         let pkcs1 = key.key.to_pkcs1_der(&mut pkcs1_buf).unwrap();
         assert!(PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, pkcs1).is_err());
 
-        let mut spki_buf = [0u8; crate::high::rsa::MAX_SPKI_LEN];
+        // An RSA SPKI is the PKCS#1 key plus its algorithm identifier.
+        let mut spki_buf = [0u8; crate::high::rsa::MAX_PUBLIC_KEY_LEN + 32];
         let spki = key.key.to_spki_der(&mut spki_buf).unwrap();
         let loaded = PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, spki).unwrap();
         assert!(loaded.salt.is_none());
