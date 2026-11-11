@@ -751,7 +751,7 @@ fn spki_key(algorithm: &Algorithm, bytes: &[u8]) -> Result<(VerifyingKey, Option
             let key = VerifyingKey::from_pkcs1_der(spki.subjectPublicKey.as_octets())?;
             Ok((key, Some(salt)))
         }
-        _ => Ok((VerifyingKey::from_der(bytes)?, None)),
+        _ => Ok((VerifyingKey::from_spki_der(bytes)?, None)),
     }
 }
 
@@ -941,9 +941,7 @@ mod tests {
             hex::decode(hex_spki).unwrap()
         }
         // sha384, MGF1-sha384, salt 48.
-        let pss = der(
-            "30820156304106092a864886f70d01010a3034a00f300d06096086480165030402020500a11c301a06092a864886f70d010108300d06096086480165030402020500a2030201300382010f003082010a02820101009e289eb2008fd6f7c68fa7653e27a63ed0c8f79d69185aaa48f7498f8257718237a8cb65eaa2ae401747d9197e82ce98212e9992104a2309de21ec1725727d03f9dcb03440f5c7c1b31dbbd3fe78fe427fef216d034766d85c1483faa946630eb62199e7125532fce10405a3bdd5cf4708cbe8d73045e64e3de5d80c2af25850039718799b02f5af27772307523b2b436f080f6bbc89b42160f658df733baa51a3e543d8a15e638d80f38032e2232ebb3dd920bd2dbec61bf04c9a740c24e9c443e700729a06df3644250e0dc367cd76696753d22406849c7ff9a2c1a67f4f38a89a014fbfa8e287a56e98148907359d4f70bd08b1589b5d0721e03f2f0325690203010001",
-        );
+        let pss = openssl_pss_spki();
         let key = PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, &pss).unwrap();
         assert_eq!(key.key.modulus_len_bits(), 2048);
         PublicKey::from_spki(&RSABSSA_SHA384_PSS_RANDOMIZED, &pss).unwrap();
@@ -1023,6 +1021,26 @@ mod tests {
             PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, &nested_spki(&pss)).is_err()
         );
         reject_malformed_pss(&pss);
+    }
+
+    /// OpenSSL `RSA-PSS` SPKI, SHA-384, MGF1-SHA-384, salt 48.
+    fn openssl_pss_spki() -> Vec<u8> {
+        hex::decode("30820156304106092a864886f70d01010a3034a00f300d06096086480165030402020500a11c301a06092a864886f70d010108300d06096086480165030402020500a2030201300382010f003082010a02820101009e289eb2008fd6f7c68fa7653e27a63ed0c8f79d69185aaa48f7498f8257718237a8cb65eaa2ae401747d9197e82ce98212e9992104a2309de21ec1725727d03f9dcb03440f5c7c1b31dbbd3fe78fe427fef216d034766d85c1483faa946630eb62199e7125532fce10405a3bdd5cf4708cbe8d73045e64e3de5d80c2af25850039718799b02f5af27772307523b2b436f080f6bbc89b42160f658df733baa51a3e543d8a15e638d80f38032e2232ebb3dd920bd2dbec61bf04c9a740c24e9c443e700729a06df3644250e0dc367cd76696753d22406849c7ff9a2c1a67f4f38a89a014fbfa8e287a56e98148907359d4f70bd08b1589b5d0721e03f2f0325690203010001").unwrap()
+    }
+
+    /// `from_spki` takes `SubjectPublicKeyInfo`. A PKCS#1 `RSAPublicKey` is not one.
+    #[test]
+    fn rejects_a_bare_pkcs1_key() {
+        let key =
+            PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, &openssl_pss_spki()).unwrap();
+        let mut pkcs1_buf = [0u8; crate::high::rsa::MAX_PUBLIC_KEY_LEN];
+        let pkcs1 = key.key.to_pkcs1_der(&mut pkcs1_buf).unwrap();
+        assert!(PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, pkcs1).is_err());
+
+        let mut spki_buf = [0u8; crate::high::rsa::MAX_SPKI_LEN];
+        let spki = key.key.to_spki_der(&mut spki_buf).unwrap();
+        let loaded = PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, spki).unwrap();
+        assert!(loaded.salt.is_none());
     }
 
     /// The BIT STRING of a valid SPKI, replaced by that SPKI. PKCS#1 decoding

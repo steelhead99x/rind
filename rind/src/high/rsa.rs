@@ -98,7 +98,7 @@ impl VerifyingKey {
     /// algorithm must be one of [`KEY_ALGORITHMS`] with `NULL` parameters, as
     /// RFC 3279 section 2.3.1 requires for `rsaEncryption`, or none, which
     /// aws-lc also takes.
-    fn from_spki_der(bytes: &[u8]) -> Result<Self, Error> {
+    pub(crate) fn from_spki_der(bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_public();
         let spki = pkix::SubjectPublicKeyInfo::from_bytes(bytes).map_err(KeyFormatError::Asn1)?;
         if !KEY_ALGORITHMS.contains(&&spki.algorithm.algorithm)
