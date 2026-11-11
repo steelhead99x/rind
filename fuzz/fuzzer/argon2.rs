@@ -71,7 +71,9 @@ fuzz_target!(|input: Input| {
 
     let mut stored = ours_out.clone();
     input.edit.apply(&mut stored);
-    let valid = stored == ours_out[..stored.len()];
+    // The tag length is hashed into H0, so a shorter tag is not a prefix of a
+    // longer one. A cut is a different derivation, and `verify` rejects it.
+    let valid = stored.len() == ours_out.len() && stored == ours_out;
     let result = ours.verify(params, &salt, &input.secret, &ad, &stored);
     if stored.len() < 4 {
         assert_eq!(result, Err(rind::Error::WrongLength));
