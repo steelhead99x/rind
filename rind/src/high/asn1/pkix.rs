@@ -52,6 +52,38 @@ asn1_struct! {
 }
 
 asn1_struct! {
+    Mgf1Algorithm ::= SEQUENCE {
+        algorithm                 OBJECT IDENTIFIER,
+        hash                      AlgorithmIdentifier REF
+    }
+}
+
+// RFC 4055 `RSASSA-PSS-params`. Each field is optional. A missing field is
+// the standard default, and DER omits a field that carries that default.
+asn1_struct! {
+    RsaSsaPssParameters ::= SEQUENCE {
+        hashAlgorithm [0] EXPLICIT    AlgorithmIdentifier REF,
+        maskGenAlgorithm [1] EXPLICIT Mgf1Algorithm REF,
+        saltLength [2] EXPLICIT       INTEGER,
+        trailerField [3] EXPLICIT     INTEGER
+    }
+}
+
+asn1_struct! {
+    PssAlgorithmIdentifier ::= SEQUENCE {
+        algorithm                 OBJECT IDENTIFIER,
+        parameters                RsaSsaPssParameters REF
+    }
+}
+
+asn1_struct! {
+    PssSubjectPublicKeyInfo ::= SEQUENCE {
+        algorithm                 PssAlgorithmIdentifier REF,
+        subjectPublicKey          BIT STRING
+    }
+}
+
+asn1_struct! {
     EcPrivateKey ::= SEQUENCE {
         version                   EcPrivateKeyVer,
         privateKey                OCTET STRING,

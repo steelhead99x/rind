@@ -1,0 +1,21 @@
+--- rind/src/high/blind_rsa.rs
++++ delete ! in PublicKey::prepare
+@@ -180,17 +180,17 @@
+     /// with [`Error::WrongLength`] when `message` is longer than
+     /// [`MAX_MESSAGE`].
+     pub fn prepare(
+         &self,
+         algorithm: &'static Algorithm,
+         message: &[u8],
+     ) -> Result<PreparedMessage, Error> {
+         let _entry = Entry::new_public();
+-        if !algorithm.randomized() {
++        if  /* ~ changed by cargo-mutants ~ */algorithm.randomized() {
+             return Err(Error::Unsupported);
+         }
+         let mut prefix = [0u8; PREFIX_LEN];
+         SystemRandom.fill(&mut prefix)?;
+         ct::secret_slice(&prefix);
+         Self::prepared(algorithm, &prefix, message)
+     }
+ 

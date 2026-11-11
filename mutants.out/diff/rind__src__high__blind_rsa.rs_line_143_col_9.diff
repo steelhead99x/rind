@@ -1,0 +1,24 @@
+--- rind/src/high/blind_rsa.rs
++++ replace PreparedBytes<'_>::hash -> digest::Digest with Default::default()
+@@ -135,20 +135,17 @@
+ 
+ struct PreparedBytes<'a> {
+     prefix: &'a [u8],
+     message: &'a [u8],
+ }
+ 
+ impl PreparedBytes<'_> {
+     fn hash(&self) -> digest::Digest {
+-        let mut ctx = digest::Context::new(&digest::SHA384);
+-        ctx.update(self.prefix);
+-        ctx.update(self.message);
+-        ctx.finish()
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ /// The client's RSA public key.
+ #[derive(Clone)]
+ pub struct PublicKey {
+     key: VerifyingKey,
+ }

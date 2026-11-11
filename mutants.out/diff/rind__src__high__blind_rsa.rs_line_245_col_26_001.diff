@@ -1,0 +1,21 @@
+--- rind/src/high/blind_rsa.rs
++++ replace > with < in PublicKey::blind
+@@ -237,17 +237,17 @@
+         &self,
+         algorithm: &'static Algorithm,
+         message: &[u8],
+     ) -> Result<(BlindedMessage, Blinding), Error> {
+         let _entry = Entry::new_secret();
+         if algorithm.randomized() {
+             return Err(Error::Unsupported);
+         }
+-        if message.len() > MAX_MESSAGE {
++        if message.len() < /* ~ changed by cargo-mutants ~ */ MAX_MESSAGE {
+             return Err(Error::WrongLength);
+         }
+         blind_message(&self.key, algorithm, &[], message, None, None)
+     }
+ 
+     /// Blinds a [`PreparedMessage`].
+     pub fn blind_prepared(
+         &self,

@@ -1,0 +1,29 @@
+--- rind/src/high/blind_rsa.rs
++++ replace PublicKey::blind_prepared -> Result<(BlindedMessage, Blinding), Error> with Ok((Default::default(), Default::default()))
+@@ -248,25 +248,17 @@
+         blind_message(&self.key, algorithm, &[], message, None, None)
+     }
+ 
+     /// Blinds a [`PreparedMessage`].
+     pub fn blind_prepared(
+         &self,
+         message: &PreparedMessage,
+     ) -> Result<(BlindedMessage, Blinding), Error> {
+-        let _entry = Entry::new_secret();
+-        blind_message(
+-            &self.key,
+-            message.kind.algorithm(),
+-            message.prefix(),
+-            message.message(),
+-            None,
+-            None,
+-        )
++        Ok((Default::default(), Default::default())) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Verifies `signature` on `message` under a deterministic variant.
+     ///
+     /// A randomized variant is [`Error::Unsupported`]: pass the
+     /// [`PreparedMessage`] to [`Self::verify_prepared`].
+     pub fn verify(
+         &self,

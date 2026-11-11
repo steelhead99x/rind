@@ -1,0 +1,51 @@
+
+*** rind/src/high/blind_rsa.rs:171:9: replace PublicKey::from_components -> Result<Self, Error> with Ok(Default::default())
+
+*** mutation diff:
+--- rind/src/high/blind_rsa.rs
++++ replace PublicKey::from_components -> Result<Self, Error> with Ok(Default::default())
+@@ -163,20 +163,17 @@
+         let _entry = Entry::new_public();
+         Ok(Self {
+             key: spki_key(algorithm, bytes)?,
+         })
+     }
+ 
+     /// Loads an RSA public key from its big-endian modulus and exponent.
+     pub fn from_components(n: &[u8], e: &[u8]) -> Result<Self, Error> {
+-        let _entry = Entry::new_public();
+-        Ok(Self {
+-            key: VerifyingKey::from_components(n, e)?,
+-        })
++        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Prepares `message` for a randomized variant.
+     ///
+     /// Fails with [`Error::Unsupported`] for a deterministic variant, and
+     /// with [`Error::WrongLength`] when `message` is longer than
+     /// [`MAX_MESSAGE`].
+     pub fn prepare(
+
+
+*** cargo nextest run --no-run --verbose --package=rind@0.3.2
+   Compiling rind v0.3.2 (/tmp/nix-shell.jbZQH1/cargo-mutants-rind-blind-rsa-DTrkCf.tmp/rind)
+error[E0277]: the trait bound `high::blind_rsa::PublicKey: Default` is not satisfied
+   --> rind/src/high/blind_rsa.rs:171:12
+    |
+171 |         Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+    |            ^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+    |
+help: the trait `Default` is not implemented for `high::blind_rsa::PublicKey`
+   --> rind/src/high/blind_rsa.rs:152:1
+    |
+152 | pub struct PublicKey {
+    | ^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `rind` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `rind` (lib test) due to 1 previous error
+error: command `/nix/store/85lxjwg78jw6rf7pqkf3vcq6291nrlfh-cargo-1.98.1-x86_64-unknown-linux-gnu/bin/cargo '--color=auto' test --no-run --message-format json-render-diagnostics --package rind@0.3.2` exited with code 101
+
+*** result: Failure(101)

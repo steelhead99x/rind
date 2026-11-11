@@ -1,0 +1,24 @@
+--- rind/src/high/blind_rsa.rs
++++ replace Kind::salt_len -> usize with 0
+@@ -36,20 +36,17 @@
+     Randomized,
+     ZeroRandomized,
+     Deterministic,
+     ZeroDeterministic,
+ }
+ 
+ impl Kind {
+     fn salt_len(self) -> usize {
+-        match self {
+-            Self::Randomized | Self::Deterministic => usize::from(SHA384_LEN),
+-            Self::ZeroRandomized | Self::ZeroDeterministic => 0,
+-        }
++        0 /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     fn randomized(self) -> bool {
+         match self {
+             Self::Randomized | Self::ZeroRandomized => true,
+             Self::Deterministic | Self::ZeroDeterministic => false,
+         }
+     }

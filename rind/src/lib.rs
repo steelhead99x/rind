@@ -260,9 +260,10 @@ pub mod rsa {
 /// [RFC 9474]: https://www.rfc-editor.org/rfc/rfc9474.html
 pub mod blind_rsa {
     pub use crate::high::blind_rsa::{
-        Algorithm, BlindSignature, BlindedMessage, Blinding, KeyPair, MAX_MESSAGE, PreparedMessage,
+        Algorithm, BlindSignature, BlindedMessage, Blinding, Components, KeyPair, PreparedMessage,
         PublicKey, RSABSSA_SHA384_PSS_DETERMINISTIC, RSABSSA_SHA384_PSS_RANDOMIZED,
         RSABSSA_SHA384_PSSZERO_DETERMINISTIC, RSABSSA_SHA384_PSSZERO_RANDOMIZED, Signature,
+        SubjectPublicKeyInfo,
     };
 }
 

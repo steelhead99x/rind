@@ -1,0 +1,40 @@
+
+*** rind/src/high/blind_rsa.rs:51:9: replace Kind::randomized -> bool with false
+
+*** mutation diff:
+--- rind/src/high/blind_rsa.rs
++++ replace Kind::randomized -> bool with false
+@@ -43,20 +43,17 @@
+     fn salt_len(self) -> usize {
+         match self {
+             Self::Randomized | Self::Deterministic => usize::from(SHA384_LEN),
+             Self::ZeroRandomized | Self::ZeroDeterministic => 0,
+         }
+     }
+ 
+     fn randomized(self) -> bool {
+-        match self {
+-            Self::Randomized | Self::ZeroRandomized => true,
+-            Self::Deterministic | Self::ZeroDeterministic => false,
+-        }
++        false /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     fn algorithm(self) -> &'static Algorithm {
+         match self {
+             Self::Randomized => &RSABSSA_SHA384_PSS_RANDOMIZED,
+             Self::ZeroRandomized => &RSABSSA_SHA384_PSSZERO_RANDOMIZED,
+             Self::Deterministic => &RSABSSA_SHA384_PSS_DETERMINISTIC,
+             Self::ZeroDeterministic => &RSABSSA_SHA384_PSSZERO_DETERMINISTIC,
+
+
+*** cargo nextest run --no-run --verbose --package=rind@0.3.2
+   Compiling rind v0.3.2 (/tmp/nix-shell.jbZQH1/cargo-mutants-rind-blind-rsa-DTrkCf.tmp/rind)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.89s
+
+*** result: Success
+
+*** cargo nextest run --verbose --package=rind@0.3.2 -p rind --lib high::blind_rsa:: -- --test-threads=8
+error: failed to parse test binary arguments `--test-threads=8`: arguments are unsupported
+
+*** result: Failure(96)

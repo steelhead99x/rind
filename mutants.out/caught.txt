@@ -1,0 +1,24 @@
+rind/src/high/blind_rsa.rs:44:9: replace Kind::salt_len -> usize with 0
+rind/src/high/blind_rsa.rs:51:9: replace Kind::randomized -> bool with true
+rind/src/high/blind_rsa.rs:51:9: replace Kind::randomized -> bool with false
+rind/src/high/blind_rsa.rs:44:9: replace Kind::salt_len -> usize with 1
+rind/src/high/blind_rsa.rs:69:9: replace Algorithm::salt_len -> usize with 0
+rind/src/high/blind_rsa.rs:69:9: replace Algorithm::salt_len -> usize with 1
+rind/src/high/blind_rsa.rs:73:9: replace Algorithm::randomized -> bool with true
+rind/src/high/blind_rsa.rs:73:9: replace Algorithm::randomized -> bool with false
+rind/src/high/blind_rsa.rs:118:9: replace PreparedMessage::prefix -> &[u8; PREFIX_LEN] with Box::leak(Box::new([0; PREFIX_LEN]))
+rind/src/high/blind_rsa.rs:118:9: replace PreparedMessage::prefix -> &[u8; PREFIX_LEN] with Box::leak(Box::new([1; PREFIX_LEN]))
+rind/src/high/blind_rsa.rs:124:9: replace PreparedMessage::message -> &[u8] with Vec::leak(Vec::new())
+rind/src/high/blind_rsa.rs:124:9: replace PreparedMessage::message -> &[u8] with Vec::leak(vec![0])
+rind/src/high/blind_rsa.rs:124:9: replace PreparedMessage::message -> &[u8] with Vec::leak(vec![1])
+rind/src/high/blind_rsa.rs:130:9: replace <impl fmt::Debug for PreparedMessage>::fmt -> fmt::Result with Ok(Default::default())
+rind/src/high/blind_rsa.rs:188:12: delete ! in PublicKey::prepare
+rind/src/high/blind_rsa.rs:209:36: replace || with && in PublicKey::prepared
+rind/src/high/blind_rsa.rs:209:12: delete ! in PublicKey::prepared
+rind/src/high/blind_rsa.rs:209:52: replace != with == in PublicKey::prepared
+rind/src/high/blind_rsa.rs:210:40: replace == with != in PublicKey::prepared
+rind/src/high/blind_rsa.rs:216:26: replace > with == in PublicKey::prepared
+rind/src/high/blind_rsa.rs:216:26: replace > with < in PublicKey::prepared
+rind/src/high/blind_rsa.rs:216:26: replace > with >= in PublicKey::prepared
+rind/src/high/blind_rsa.rs:245:26: replace > with == in PublicKey::blind
+rind/src/high/blind_rsa.rs:245:26: replace > with < in PublicKey::blind

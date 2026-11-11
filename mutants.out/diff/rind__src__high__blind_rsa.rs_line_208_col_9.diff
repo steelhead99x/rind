@@ -1,0 +1,41 @@
+--- rind/src/high/blind_rsa.rs
++++ replace PublicKey::prepared -> Result<PreparedMessage, Error> with Ok(Default::default())
+@@ -200,37 +200,17 @@
+     /// [`Error::Unsupported`] for a deterministic variant, and with
+     /// [`Error::WrongLength`] when `prefix` is not 32 bytes or `message`
+     /// is longer than [`MAX_MESSAGE`].
+     pub fn prepared(
+         algorithm: &'static Algorithm,
+         prefix: &[u8],
+         message: &[u8],
+     ) -> Result<PreparedMessage, Error> {
+-        let _entry = Entry::new_public();
+-        if !algorithm.randomized() || prefix.len() != PREFIX_LEN {
+-            return Err(if prefix.len() == PREFIX_LEN {
+-                Error::Unsupported
+-            } else {
+-                Error::WrongLength
+-            });
+-        }
+-        if message.len() > MAX_MESSAGE {
+-            return Err(Error::WrongLength);
+-        }
+-        let mut stored = [0u8; MAX_MESSAGE];
+-        stored[..message.len()].copy_from_slice(message);
+-        let mut prefix_bytes = [0u8; PREFIX_LEN];
+-        prefix_bytes.copy_from_slice(prefix);
+-        Ok(PreparedMessage {
+-            prefix: prefix_bytes,
+-            message: stored,
+-            message_len: message.len() as u16,
+-            kind: algorithm.kind,
+-        })
++        Ok(Default::default()) /* ~ changed by cargo-mutants ~ */
+     }
+ 
+     /// Blinds a deterministic variant's message.
+     ///
+     /// Fails with [`Error::Unsupported`] for a randomized variant, or when
+     /// the PSS encoding shares a factor with the modulus. A message longer
+     /// than [`MAX_MESSAGE`] is [`Error::WrongLength`].
+     pub fn blind(

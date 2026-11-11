@@ -1,0 +1,30 @@
+
+*** rind/src/high/blind_rsa.rs:245:26: replace > with >= in PublicKey::blind
+
+*** mutation diff:
+--- rind/src/high/blind_rsa.rs
++++ replace > with >= in PublicKey::blind
+@@ -237,17 +237,17 @@
+         &self,
+         algorithm: &'static Algorithm,
+         message: &[u8],
+     ) -> Result<(BlindedMessage, Blinding), Error> {
+         let _entry = Entry::new_secret();
+         if algorithm.randomized() {
+             return Err(Error::Unsupported);
+         }
+-        if message.len() > MAX_MESSAGE {
++        if message.len() >= /* ~ changed by cargo-mutants ~ */ MAX_MESSAGE {
+             return Err(Error::WrongLength);
+         }
+         blind_message(&self.key, algorithm, &[], message, None, None)
+     }
+ 
+     /// Blinds a [`PreparedMessage`].
+     pub fn blind_prepared(
+         &self,
+
+
+*** cargo nextest run --no-run --verbose --package=rind@0.3.2
+    Blocking waiting for file lock on package cache
+   Compiling rind v0.3.2 (/tmp/nix-shell.jbZQH1/cargo-mutants-rind-blind-rsa-DTrkCf.tmp/rind)

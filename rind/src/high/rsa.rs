@@ -114,10 +114,13 @@ impl VerifyingKey {
 
     /// Decodes an RSA public verification key from PKCS#1 DER format.
     ///
+    /// A `SubjectPublicKeyInfo` is not this encoding. Callers that accept
+    /// either use [`Self::from_der`].
+    ///
     /// This format is defined in
     /// [RFC8017](https://datatracker.ietf.org/doc/html/rfc8017#appendix-A.1.1)
     /// (and earlier standards, including the original PKCS#1 standard).
-    fn from_pkcs1_der(bytes: &[u8]) -> Result<Self, Error> {
+    pub(crate) fn from_pkcs1_der(bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_public();
         let decoded = pkix::RSAPublicKey::from_bytes(bytes).map_err(KeyFormatError::Asn1)?;
 
@@ -190,6 +193,18 @@ impl VerifyingKey {
     /// Returns the public modulus length, in bits.
     pub(crate) fn modulus_len_bits(&self) -> usize {
         self.0.modulus_len_bits()
+    }
+
+    /// The modulus, big-endian, with no leading zero.
+    pub(crate) fn modulus_be<'a>(&self, out: &'a mut [u8]) -> Result<&'a [u8], Error> {
+        let bytes = self.0.n.to_bytes(out)?;
+        let start = bytes.iter().position(|b| *b != 0).unwrap_or(0);
+        Ok(&bytes[start..])
+    }
+
+    /// The public exponent.
+    pub(crate) fn exponent(&self) -> u64 {
+        self.0.e
     }
 
     /// Verifies `signature`, using RSASSA-PKCS1-v1_5 with SHA-1.
@@ -449,10 +464,35 @@ impl VerifyingKey {
     ///
     /// Fails with [`Error::Unsupported`] when `a` shares a factor with `n`.
     pub(crate) fn invert_be<'a>(&self, a: &[u8], out: &'a mut [u8]) -> Result<&'a [u8], Error> {
+        self.invert_be_in(a, out, true)
+    }
+
+    /// [`Self::invert_be`] for a factor already known to be coprime to `n`.
+    ///
+    /// The coprimality test is a gcd. A caller that just drew the factor
+    /// with [`Self::random_factor_be`] has already run it.
+    pub(crate) fn invert_coprime_be<'a>(
+        &self,
+        a: &[u8],
+        out: &'a mut [u8],
+    ) -> Result<&'a [u8], Error> {
+        self.invert_be_in(a, out, false)
+    }
+
+    fn invert_be_in<'a>(
+        &self,
+        a: &[u8],
+        out: &'a mut [u8],
+        check_coprime: bool,
+    ) -> Result<&'a [u8], Error> {
         let a = self.0.int_from_be(a)?;
         let mut zero = PosInt::zero();
         zero.expand(&self.0.n);
-        if !ct::into_public(a.less_than(&self.0.n) & !a.equals(&zero) & a.is_coprime(&self.0.n)) {
+        let mut ok = a.less_than(&self.0.n) & !a.equals(&zero);
+        if check_coprime {
+            ok &= a.is_coprime(&self.0.n);
+        }
+        if !ct::into_public(ok) {
             return Err(Error::Unsupported);
         }
         let inv = a.mod_inverse(&self.0.n);
