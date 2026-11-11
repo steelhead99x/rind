@@ -93,7 +93,12 @@ pub struct PreparedMessage {
 
 impl PreparedMessage {
     /// The 32-byte prefix.
+    ///
+    /// This is the value the client sends with the signature, so it is
+    /// public from here on. `prepare` marks the fresh bytes secret only
+    /// while they are being copied in.
     pub fn prefix(&self) -> &[u8; PREFIX_LEN] {
+        ct::public_slice(&self.prefix);
         &self.prefix
     }
 
@@ -1415,6 +1420,16 @@ mod tests {
         let prepared = public
             .prepare(&RSABSSA_SHA384_PSS_RANDOMIZED, &message)
             .unwrap();
+        // The prefix is public once `prefix` returns it: a verifier may
+        // branch on those bytes. Leaving them secret makes that a ctgrind
+        // false positive.
+        let mut branched = 0u8;
+        for byte in prepared.prefix() {
+            if core::hint::black_box(*byte) == 0 {
+                branched = core::hint::black_box(branched.wrapping_add(1));
+            }
+        }
+        core::hint::black_box(branched);
         let (blinded, blinding) = public.blind_prepared(&prepared).unwrap();
         ct::public_slice(blinded.as_ref());
         let blind_sig = pair.blind_sign(&blinded).unwrap();
