@@ -963,6 +963,8 @@ mod tests {
         assert_eq!(mask_nonzero(1 << 63), u64::MAX);
     }
 
+    // wasm32-wasip2 aborts on panic, so a `should_panic` test cannot run there.
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     #[should_panic]
     fn other_modulus_refused() {

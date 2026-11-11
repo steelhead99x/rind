@@ -2,9 +2,12 @@
 //! inject randomness, so they run in `src/high/kem.rs`, and RFC 6979's
 //! rejection vector in `src/high/ecdsa.rs`.
 
-// Each vector is checked against aws-lc, which Miri cannot run.
+// Each vector is checked against aws-lc, which Miri cannot run and which
+// does not build for wasm. Those targets still run the vectors: a small-order
+// key is rejected, and any other key is not.
 #![cfg(not(miri))]
 
+#[cfg(not(target_family = "wasm"))]
 use aws_lc_rs::signature::{ED25519, UnparsedPublicKey};
 use rind::Error;
 use rind::signature::{self, verify};
@@ -35,6 +38,7 @@ fn ed25519_edge_cases() {
     assert_eq!(vectors.len(), 914);
 
     for v in vectors {
+        #[cfg(not(target_family = "wasm"))]
         let theirs = UnparsedPublicKey::new(&ED25519, &v.key)
             .verify(v.msg.as_bytes(), &v.sig)
             .is_ok();
@@ -42,12 +46,26 @@ fn ed25519_edge_cases() {
             .map(|key| key.verify(v.msg.as_bytes(), &v.sig));
         let flags = v.flags.unwrap_or_default();
         match ours {
-            Ok(result) => assert_eq!(
-                result.is_ok(),
-                theirs,
-                "{}: {flags:?}: ours {result:?}",
-                v.number
-            ),
+            Ok(result) => {
+                assert!(
+                    !flags.iter().any(|f| f == "low_order_A"),
+                    "{}: {flags:?}: a small-order key was accepted",
+                    v.number
+                );
+                // A key rind accepts yields a signature verdict. Whether that
+                // verdict matches aws-lc is checked where aws-lc builds.
+                match &result {
+                    Ok(()) | Err(Error::BadSignature) => {}
+                    Err(e) => panic!("{}: {flags:?}: {e:?}", v.number),
+                }
+                #[cfg(not(target_family = "wasm"))]
+                assert_eq!(
+                    result.is_ok(),
+                    theirs,
+                    "{}: {flags:?}: ours {result:?}",
+                    v.number
+                );
+            }
             Err(Error::KeyRejected(e)) => {
                 assert!(
                     flags.iter().any(|f| f == "low_order_A"),

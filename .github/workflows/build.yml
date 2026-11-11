@@ -273,6 +273,24 @@ jobs:
       - name: Build, lint, and test
         run: just qemu ${{ matrix.shell }}
 
+  # rind's vector tests on wasm32-wasip2, under wasmtime, on the portable
+  # backend. aws-lc-rs does not build for wasm, so the differential tests
+  # stay on `just portable`. wasm32-unknown-unknown stays compile-only.
+  wasm:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/vectors
+      - uses: ./.github/actions/just
+      - uses: ./.github/actions/nix
+
+      - name: Build, lint, and test
+        run: just wasm
+
   # rind-dart's Dart package on each host Dart and Flutter build on. Its tests
   # run natively, and its build hook cross-builds the mobile targets, whose
   # libraries the hook's test checks are for the right architecture.

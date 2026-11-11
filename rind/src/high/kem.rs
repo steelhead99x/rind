@@ -498,7 +498,7 @@ mod tests {
 
     // Exporting our decapsulation key needs crate access, so this
     // differential test lives here rather than in `tests/crosschecks.rs`.
-    #[cfg(not(miri))]
+    #[cfg(not(any(miri, target_family = "wasm")))]
     mod crosscheck {
         use aws_lc_rs::kem::{self, ML_KEM_768};
         use proptest::prelude::*;

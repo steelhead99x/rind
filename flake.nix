@@ -630,6 +630,18 @@
             # other CI job would download.
             armv7 = pkgs.mkShell armv7-shell;
 
+            # `just wasm` enters it to run rind's vector tests on
+            # wasm32-wasip2 under wasmtime. A separate shell so the other CI
+            # jobs do not download wasmtime.
+            wasm = pkgs.mkShell {
+              packages = [
+                rust-toolchain
+                pkgs.git
+                pkgs.wasmtime
+              ];
+              env.IN_RIND_DEV_SHELL = "1";
+            };
+
             # `just qemu s390x` tests the portable backend on big-endian
             # s390x in it.
             s390x = qemu-shell {

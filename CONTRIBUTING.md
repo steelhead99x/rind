@@ -53,6 +53,10 @@ the nightly `qemu` job, which lints and tests the portable backend: `s390x`
 `armv6-softfloat` (the Raspberry Pi 1's core), or `powerpc64le`, `powerpc64`,
 and `powerpc` (the last two big-endian) under qemu, or `i686` (32-bit x86)
 natively.
+`just wasm` runs the nightly wasm job: it lints and tests rind on
+`wasm32-wasip2` under wasmtime. The vectors run; aws-lc-rs does not build
+for wasm, so the differential tests stay on `just portable`.
+`wasm32-unknown-unknown` stays a compile check.
 `just miri` runs the nightly `miri` job, the portable backend's tests under
 Miri, on x86_64, and `just miri s390x-unknown-linux-gnu` big-endian.
 `nix develop .#ctgrind --command admin/ctgrind` runs the nightly

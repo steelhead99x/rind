@@ -13,7 +13,9 @@ changes:
 ring = { package = "rind-ring", version = "0.17" }
 ```
 
-Every ring feature is accepted and changes nothing.
+Every ring feature is accepted. `wasm32_unknown_unknown_js` selects
+getrandom's JavaScript backend on `wasm32-unknown-unknown`, as ring's does.
+The other features change nothing.
 
 The rename reaches only the crate that makes it. A binary moves every crate
 in its tree on ring 0.17 to rind, including dependencies that name ring such

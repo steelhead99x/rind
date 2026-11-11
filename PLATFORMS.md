@@ -6,7 +6,7 @@ a portable Rust backend for every other architecture. CI tests Linux (glibc and 
 `armv7`, ARMv5TE, `x86_64`, and 32-bit `x86`, all but `x86_64` under qemu, and
 Linux on `armv7`, ARMv6, big-endian `s390x`, `riscv64gc` (glibc and musl),
 `loongarch64`, `powerpc64le`, and big-endian `powerpc64` and `powerpc` under
-qemu. iOS devices' code is only built.
+qemu, and `wasm32-wasip2` under wasmtime. iOS devices' code is only built.
 
 - `aarch64` requires the `neon` CPU feature. Where the CPU has the crypto
   extension (`aes`, `pmull`, and `sha2`), as the Raspberry Pi 5 and most
@@ -83,7 +83,11 @@ qemu. iOS devices' code is only built.
   where `--cfg rind_portable` forces it. Every PR also compiles the library for
   `wasm32-wasip2` and `wasm32-unknown-unknown`, with and without `wipe`. The
   latter enables `getrandom/wasm_js` for JavaScript randomness; the WASI target
-  uses its system random source. These are compile checks, not runtime tests.
+  uses its system random source. The nightly `just wasm` job runs rind's
+  vector tests on `wasm32-wasip2` under wasmtime. `wasm32-unknown-unknown`
+  stays a compile check: its tests need a JavaScript host. Constant-time
+  behavior is unchecked under a wasm engine, which compiles rind again and
+  may turn a select into a branch.
   On 32-bit `x86` it needs Rust 1.94 rather than the 1.90 MSRV, since
   libcrux-platform 0.0.4 calls `__cpuid` outside `unsafe`
   ([libcrux#1646](https://github.com/celabshq/libcrux/issues/1646)).

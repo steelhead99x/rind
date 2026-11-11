@@ -98,6 +98,7 @@ an Intel SDE CPU model, as `x86-cpu.yml` names them.
 | portable | riscv64gc Linux, glibc and musl | `just qemu riscv64` and `just qemu riscv64-musl`: as s390x | none, as above | as s390x |
 | portable | PowerPC Linux: powerpc64le, big-endian powerpc64 and powerpc | `just qemu powerpc64le`, `just qemu powerpc64`, and `just qemu powerpc`: as s390x | none, as above | as s390x |
 | portable | ARM before ARMv7 (Raspberry Pi 1 and Zero) | `just qemu armv6` and `just qemu armv6-softfloat`: as s390x, on qemu's ARM1176; `build.yml`'s `android` job: ARMv5TE Android | none, as above | as s390x |
+| portable | wasm32-wasip2 | `just wasm`: release vectors under wasmtime. Differential tests stay on `just portable`: aws-lc-rs does not build for wasm. `wasm32-unknown-unknown` is compile-only | none, as above | unchecked: a wasm engine compiles rind again and may turn a select into a branch |
 
 ## Vector suites
 
@@ -136,7 +137,10 @@ expect fails it. The SHA-2 and SHA-3 sets' 1 to 8 GiB messages run only with
 neither as rind uses them.
 
 These suites run wherever the [tier table](#tiers) runs `cargo test`, including
-the forced portable backend. The nightly `build.yml` runs the million-case
+the forced portable backend and `wasm32-wasip2`. On wasm the comparisons with
+aws-lc inside a vector test are left out, because aws-lc-rs does not build
+there; the vectors themselves run. Tests that catch a panic do not run
+there either: the wasip2 standard library aborts on panic. The nightly `build.yml` runs the million-case
 accumulation in native release builds, on every denied x86_64/aarch64 tier,
 and through `just portable`. `just armv7` and `x86-cpu.yml`'s SDE models use
 the default 10,000 cases, even though they build in release mode.
@@ -158,7 +162,9 @@ tests `sh/miri.sh` lists as slow, which are the vector sets, RSA beyond
 `debug::rsa`'s one decryption, and the tests that run many scalar
 multiplications. Every primitive keeps a test that builds, uses, and drops its
 keys. Miri cannot run aws-lc's C, so its builds leave out aws-lc-rs and the
-differential tests, `tests/crosschecks.rs` and `tests/cctv.rs` among them.
+differential tests, `tests/crosschecks.rs` among them. `tests/cctv.rs` compares
+with aws-lc only where aws-lc builds; Miri does not run that file. wasm cannot
+build aws-lc either, so it runs `tests/cctv.rs` without that comparison.
 `tests/wycheproof.rs` and `tests/aws_lc.rs` are vector sets too, and
 `tests/zeroing.rs` reads a dropped value on purpose.
 

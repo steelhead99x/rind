@@ -1200,6 +1200,8 @@ mod tests {
         assert_eq!((nonzero_u8(0), nonzero_u8(1), nonzero_u8(0x80)), (0, 1, 1));
     }
 
+    // wasm32-wasip2 aborts on panic, so a `should_panic` test cannot run there.
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     #[should_panic]
     fn other_modulus_refused() {

@@ -1326,14 +1326,18 @@ mod tests {
     }
 
     /// A buffer with no room for a tag, whose `extend` panics.
+    /// wasm32-wasip2 aborts on panic, so the test that catches it cannot run there.
+    #[cfg(not(target_family = "wasm"))]
     struct NoRoom(Vec<u8>);
 
+    #[cfg(not(target_family = "wasm"))]
     impl AsMut<[u8]> for NoRoom {
         fn as_mut(&mut self) -> &mut [u8] {
             &mut self.0
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     impl<'a> Extend<&'a u8> for NoRoom {
         fn extend<I: IntoIterator<Item = &'a u8>>(&mut self, _: I) {
             panic!("no room for the tag");
@@ -1341,6 +1345,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_family = "wasm"))]
     fn panicking_append_spends_nonce() {
         let private_key = PrivateKey::generate(&DHKEM_X25519_HKDF_SHA256).unwrap();
         let suite = Suite {

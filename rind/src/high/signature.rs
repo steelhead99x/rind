@@ -1824,7 +1824,7 @@ mod tests {
     // `tests/crosschecks.rs`. Wycheproof has no P-256 with SHA-384 vectors,
     // nor P-521 with SHA-256 or SHA-384.
     #[test]
-    #[cfg(not(miri))]
+    #[cfg(not(any(miri, target_family = "wasm")))]
     fn ecdsa_verification_matches_aws_lc_rs() {
         use aws_lc_rs::signature as theirs;
 

@@ -55,7 +55,9 @@ fn zeroed<R>(what: &str, op: impl Fn() -> R) {
 }
 
 /// The check sees key-derived bytes left on the heap, so a clean result
-/// means something.
+/// means something. wasm32-wasip2 aborts on panic, so these stay on the
+/// native runs.
+#[cfg(not(target_family = "wasm"))]
 #[test]
 #[should_panic(expected = "holds bytes of the key")]
 fn detects_a_leak() {
@@ -64,6 +66,7 @@ fn detects_a_leak() {
     });
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[test]
 #[should_panic(expected = "holds bytes of the key")]
 fn detects_a_leak_in_key_generation() {
