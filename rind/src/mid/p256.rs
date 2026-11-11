@@ -1261,7 +1261,7 @@ impl FieldElement {
 
 /// Z = -10, in Montgomery form, and `sqrt(-Z) = (-Z)^((p + 1) / 4)`.
 ///
-/// The test `swu_constants_match_the_exponentiation` checks these limbs
+/// The test `hash_addition_matches_base_point_multiples` checks these limbs
 /// against that exponentiation.
 const SWU: SwuConstants<FieldElement> = SwuConstants {
     a: CURVE_A_MONT,
