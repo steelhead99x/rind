@@ -530,8 +530,12 @@ const M57: u64 = (1 << 57) - 1;
 
 /// Limbs of a 521-bit integer: limb i is bits `[58 * i, 58 * i + 58)`,
 /// and the top limb stops at bit 521.
+///
+/// `from_bytes` also keeps bits 521..527, the next seven bits of word 8.
+/// Masking the top limb to 57 bits drops them, so this agrees with
+/// `from_bytes` only when those bits are zero. `fe_shifted` checks that.
 fn unpack_words(w: &[u64; 9]) -> [u64; 9] {
-    // `from_bytes` reads 66 bytes, which is every bit of a value below 2^521.
+    // `from_bytes` reads 66 bytes. Below 2^521 that is the whole integer.
     let w8 = w[8] & 0xffff;
     [
         w[0] & M58,
@@ -547,6 +551,11 @@ fn unpack_words(w: &[u64; 9]) -> [u64; 9] {
 }
 
 fn fe_shifted(x: &[u64; 9]) -> Fe {
+    // Bits 521 and above sit in `x[8]` above its low nine. `from_bytes`
+    // keeps 521..527; `unpack_words` drops them. Callers pass a reduced
+    // coordinate or the low 521 bits. `bignum_inv_p521` splits a larger
+    // input before it calls `fe`, because 2^521 is 1 mod p.
+    debug_assert!(x[8] >> 9 == 0);
     let limbs = unpack_words(x);
     let mut out = Fe([0; FE_LIMBS]);
     for (dst, src) in out.0.iter_mut().zip(limbs) {
@@ -1197,6 +1206,49 @@ mod tests {
         assert_eq!(words_shifted(&full), words_bytes(&full));
     }
 
+    /// Inversion of an input with bits above 521 set. `fe` sees only the low
+    /// 521 bits; the rest is added as a separate field element, since 2^521
+    /// is 1 mod p. s2n-bignum leaves the inverse of a multiple of p unspecified.
+    #[test]
+    fn inv_above_521_matches_s2n() {
+        let mut samples = [
+            [1, 0, 0, 0, 0, 0, 0, 0, 1 << 9],
+            [1, 0, 0, 0, 0, 0, 0, 0, 1 << 15],
+            [0xffff, 0, 0, 0, 0, 0, 0, 0, u64::MAX],
+            [0, 0, 0, 0, 0, 0, 0, 0, 1 << 9],
+            P,
+        ];
+        samples[4][8] |= 1 << 20;
+        let mut state = 0x0f1e_2d3c_4b5a_6978u64;
+        for _ in 0..16 {
+            let mut words = [0; 9];
+            for word in &mut words {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                *word = state;
+            }
+            words[8] |= 1 << 9;
+            samples_check(&words);
+        }
+        for words in samples {
+            samples_check(&words);
+        }
+
+        fn samples_check(x: &[u64; 9]) {
+            let mut low = *x;
+            low[8] &= 0x1ff;
+            let high = [x[8] >> 9, 0, 0, 0, 0, 0, 0, 0, 0];
+            if words(&fe_add(&fe(&low), &fe(&high))) == [0; 9] {
+                return;
+            }
+            let (mut ours, mut theirs) = ([0; 9], [0; 9]);
+            bignum_inv_p521(&mut ours, x);
+            low::bignum_inv_p521(&mut theirs, x);
+            assert_eq!(ours, theirs, "{x:x?}");
+        }
+    }
+
     /// Public verification's addition chain, against s2n-bignum's scalar
     /// multiplication. The digits are a width-5 NAF, and the tables are the
     /// multiples that NAF reads.
@@ -1276,6 +1328,119 @@ mod tests {
         p_digits[0] = -1;
         p521_public_twin_mul(&mut got, &g_digits, &p_digits, &g_table, &[odd]);
         assert!(affine(&got).is_none());
+    }
+
+    /// Width-`w` NAF of a full-width scalar, low digit first, as `mid::util::public_naf`.
+    fn naf_digits(k: &[u64; 9], w: u32) -> [i8; 522] {
+        let mut digits = [0; 522];
+        let mut window = (k[0] & ((1u64 << w) - 1)) as i32;
+        for (i, digit) in digits.iter_mut().enumerate() {
+            if window & 1 == 1 {
+                let d = if window < (1 << (w - 1)) {
+                    window
+                } else {
+                    window - (1 << w)
+                };
+                window -= d;
+                *digit = d as i8;
+            }
+            let at = i + w as usize;
+            let bit = k
+                .get(at / 64)
+                .map_or(0, |word| ((word >> (at % 64)) & 1) as i32);
+            window = (window >> 1) + (bit << (w - 1));
+        }
+        digits
+    }
+
+    /// 1G through 16G, affine, in rows of 18 words.
+    fn generator_table() -> [u64; 288] {
+        let g_xy = affine(&GENERATOR).unwrap();
+        let mut jac = [GENERATOR; 16];
+        let mut doubled = [0; 27];
+        low::p521_jdouble(&mut doubled, &GENERATOR);
+        jac[1] = doubled;
+        for i in 2..jac.len() {
+            let mut next = [0; 27];
+            low::p521_jmixadd(&mut next, &jac[i - 1], &g_xy);
+            jac[i] = next;
+        }
+        let mut table = [0; 288];
+        for (i, point) in jac.iter().enumerate() {
+            table[i * 18..(i + 1) * 18].copy_from_slice(&affine(point).unwrap());
+        }
+        table
+    }
+
+    /// 1P, 3P, ..., 31P as two rows of eight. The second row is what a
+    /// width-6 digit of absolute value 17, 19, ..., 31 reads.
+    fn odd_rows(p: &[u64; 27]) -> ([u64; 144], [u64; 144]) {
+        let mut two = [0; 27];
+        low::p521_jdouble(&mut two, p);
+        let mut odds = [*p; 16];
+        for i in 1..odds.len() {
+            let mut next = [0; 27];
+            low::p521_jadd(&mut next, &odds[i - 1], &two);
+            odds[i] = next;
+        }
+        let mut rows = [[0u64; 144]; 2];
+        for (i, point) in odds.iter().enumerate() {
+            let xy = affine(point).expect("small multiple");
+            let slot = i % 8;
+            rows[i / 8][slot * 18..(slot + 1) * 18].copy_from_slice(&xy);
+        }
+        (rows[0], rows[1])
+    }
+
+    fn mul_mod_n(x: &[u64; 9], y: &[u64; 9]) -> [u64; 9] {
+        let (mut xm, mut ym, mut prod, mut out) = ([0; 9], [0; 9], [0; 9], [0; 9]);
+        low::bignum_montmul(&mut xm, x, &MM, &N);
+        low::bignum_montmul(&mut ym, y, &MM, &N);
+        low::bignum_montmul(&mut prod, &xm, &ym, &N);
+        low::bignum_demont(&mut out, &prod, &N);
+        out
+    }
+
+    fn add_mod_n(x: &[u64; 9], y: &[u64; 9]) -> [u64; 9] {
+        let mut z = [0; 9];
+        low::bignum_modadd(&mut z, x, y, &N);
+        z
+    }
+
+    // Each case is a scalar multiplication, as `scalar_multiply` is.
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(8))]
+
+        /// `g·G + m·P` for full-width scalars and `P = l·G`, against s2n-bignum's
+        /// scalar multiplication. `m`'s width-6 NAF reads the second row of odd
+        /// multiples: a digit of absolute value 17 through 31.
+        #[test]
+        fn public_twin_random_point(g in scalar(), m in scalar(), l in scalar()) {
+            prop_assume!(l != [0; 9]);
+            let mut point = [0; 27];
+            low::p521_jscalarmul(&mut point, &l, &GENERATOR);
+            prop_assume!(affine(&point).is_some());
+
+            let g_digits = naf_digits(&g, 5);
+            let p_digits = naf_digits(&m, 6);
+            prop_assume!(
+                p_digits
+                    .iter()
+                    .any(|d| usize::from(d.unsigned_abs()) / 2 >= 8)
+            );
+
+            let g_table = generator_table();
+            let (row0, row1) = odd_rows(&point);
+            let row0: &[u64] = &row0;
+            let row1: &[u64] = &row1;
+            let mut got = [0; 27];
+            p521_public_twin_mul(&mut got, &g_digits, &p_digits, &g_table, &[row0, row1]);
+
+            let sum = add_mod_n(&g, &mul_mod_n(&m, &l));
+            let mut expect = [0; 27];
+            low::p521_jscalarmul(&mut expect, &sum, &GENERATOR);
+            prop_assert!(same_point(&got, &expect));
+        }
     }
 
     #[test]
