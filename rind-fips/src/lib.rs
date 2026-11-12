@@ -6,6 +6,7 @@
 //! from the operating system. rind's own key generation does not call this.
 
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, Once};
 
 use rind::Error;
@@ -155,6 +156,19 @@ fn clear_parent() {
     }
 }
 
+fn ensure_health() -> Result<(), Error> {
+    static ONCE: Once = Once::new();
+    static PASSED: AtomicBool = AtomicBool::new(false);
+    ONCE.call_once(|| {
+        PASSED.store(rind::drbg::health_test().is_ok(), Ordering::Relaxed);
+    });
+    if PASSED.load(Ordering::Relaxed) {
+        Ok(())
+    } else {
+        Err(Error::Fault)
+    }
+}
+
 fn register_exit_wipe() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
@@ -180,11 +194,14 @@ unsafe extern "C" {
 
 /// Fills `out` from this thread's HMAC-SHA-512 DRBG.
 ///
-/// The first call on a thread seeds the process generator from the operating
-/// system, then seeds the thread's generator from that. A failed read returns
-/// [`Error::RngFailed`] and tries no other source. After a fork, the next
-/// call replaces both generators.
+/// The first call in the process runs [`rind::drbg::health_test`]. A failure
+/// is [`Error::Fault`] and this returns no bytes. The first call on a thread
+/// seeds the process generator from the operating system, then seeds the
+/// thread's generator from that. A failed read returns [`Error::RngFailed`]
+/// and tries no other source. After a fork, the next call replaces both
+/// generators.
 pub fn fill(out: &mut [u8]) -> Result<(), Error> {
+    ensure_health()?;
     register_exit_wipe();
     let mut parent = PARENT.lock().map_err(|_| Error::RngFailed)?;
     CHILD.with(|child| {

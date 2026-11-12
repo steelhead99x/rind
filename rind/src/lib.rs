@@ -600,5 +600,5 @@ pub mod rand {
 /// drbg.generate(&mut out, None).unwrap();
 /// ```
 pub mod drbg {
-    pub use crate::high::drbg::HmacDrbg;
+    pub use crate::high::drbg::{HmacDrbg, health_test};
 }

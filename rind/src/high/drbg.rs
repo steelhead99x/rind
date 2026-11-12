@@ -89,6 +89,53 @@ impl HmacDrbg {
     }
 }
 
+/// Known-answer test of instantiate, generate, and reseed (SP 800-90A section 11.3).
+///
+/// `rind-fips` runs this before its first `fill`. A caller can run it on
+/// demand. A mismatch is [`Error::Fault`]: an internal failure, and the caller
+/// must not use output from a generator that failed it.
+pub fn health_test() -> Result<(), Error> {
+    let _entry = Entry::new_public();
+    let mut drbg = HmacDrbg::new(&[0x11; 32], &[0x22; 16], &[]);
+    let mut out = [0u8; 32];
+    drbg.generate(&mut out, None)?;
+    matches(
+        &out,
+        &[
+            0xf5, 0x97, 0xde, 0x88, 0x79, 0x15, 0xd4, 0x0f, 0xd9, 0x2f, 0x5f, 0x9a, 0xb9, 0x27,
+            0xeb, 0xdb, 0xd2, 0x05, 0x4c, 0xf0, 0x0d, 0xe4, 0x42, 0xe9, 0xe4, 0x24, 0xbc, 0x19,
+            0xf1, 0x10, 0x86, 0x74,
+        ],
+    )?;
+    drbg.generate(&mut out, None)?;
+    matches(
+        &out,
+        &[
+            0x9a, 0x6f, 0x7c, 0x2d, 0xb5, 0x2b, 0xd8, 0x91, 0xf1, 0x78, 0x04, 0xc8, 0xb1, 0x66,
+            0xcd, 0xe7, 0xdc, 0x2d, 0x0e, 0xcf, 0x72, 0x4b, 0xdc, 0x4c, 0xf2, 0x87, 0x48, 0x7c,
+            0xaf, 0x5e, 0xa5, 0x43,
+        ],
+    )?;
+    drbg.reseed(&[0x44; 32], Some(&[0x55; 4]));
+    drbg.generate(&mut out, None)?;
+    matches(
+        &out,
+        &[
+            0xda, 0x51, 0xa1, 0xb1, 0xf3, 0x23, 0xfa, 0x74, 0x8f, 0xcc, 0xc4, 0x29, 0x5d, 0x45,
+            0x8e, 0xef, 0x4d, 0x08, 0xea, 0xd0, 0x17, 0xe2, 0xbb, 0xcc, 0x8d, 0x3c, 0xe2, 0x6d,
+            0xa1, 0x21, 0xe7, 0x7d,
+        ],
+    )
+}
+
+fn matches(got: &[u8; 32], expected: &[u8; 32]) -> Result<(), Error> {
+    if got == expected {
+        Ok(())
+    } else {
+        Err(Error::Fault)
+    }
+}
+
 impl Drop for HmacDrbg {
     fn drop(&mut self) {
         zeroise_value(self);
@@ -198,6 +245,16 @@ mod tests {
         let out = reseed_then_generate(&entropy, &nonce, &additional);
         crate::low::ct::public_slice(&out);
         assert_eq!(out, wanted);
+    }
+
+    #[test]
+    fn health_test_accepts_the_known_answers() {
+        health_test().unwrap();
+    }
+
+    #[test]
+    fn health_test_refuses_a_mismatch() {
+        assert_eq!(matches(&[0; 32], &[1; 32]), Err(Error::Fault));
     }
 
     #[test]

@@ -18,6 +18,10 @@ self-tests, no integrity check, and no `fips` feature for rind-rustls or
 rind-aws-lc-rs. Entropy comes from `getrandom`. A failed read is
 `rind::Error::RngFailed`, with no other source tried.
 
+`fill` runs `rind::drbg::health_test` once per process before it draws
+(SP 800-90A section 11.3). A mismatch returns `rind::Error::Fault` and no
+bytes. `rind::drbg::health_test` is the on-demand run.
+
 The DRBG wipes its state on drop when rind is built with the `wipe` feature.
 This crate does not turn that feature on: in a workspace, doing so would turn
 it on for every member.

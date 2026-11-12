@@ -495,7 +495,10 @@ does not call it. `rind-fips` keeps one generator per thread, seeded from a
 process-wide generator, and reseeds each after 4096 generates, which is
 aws-lc's `kCtrDrbgReseedInterval`. Entropy is 64 bytes and the nonce is 32,
 from `getrandom` for the process generator and from that generator for each
-thread. A failed read is an error.
+thread. A failed read is an error. Before the first draw, and on demand from
+`drbg::health_test`, a known-answer test runs instantiate, generate, and
+reseed (SP 800-90A section 11.3). A mismatch is `Error::Fault` and no output
+is returned.
 
 The code which selects a term from a table of points is non-verified,
 and is written in AVX2, SSE2, or Neon intrinsics, or for P256 on x86_64 is
