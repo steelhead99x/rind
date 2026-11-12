@@ -585,7 +585,7 @@ impl Affine {
     ///
     /// The mask is 0 or 1 and does not branch on the coordinates.
     pub(crate) fn identity_mask(self) -> u64 {
-        eq_mask(&self.0.xy[..4], &[0; 4]) & eq_mask(&self.0.xy[4..], &[0; 4])
+        u64::from(low::bignum_eq(&self.0.xy, &[0; 8]))
     }
 
     /// `other` when `select` is 1, and `self` when it is 0.
@@ -880,11 +880,11 @@ impl JacobianMontPoint {
         let x2 = p.x().mont_mul(&z1sq);
         let y1 = self.y().mont_mul(&z2sq).mont_mul(&p.z());
         let y2 = p.y().mont_mul(&z1sq).mont_mul(&self.z());
-        let x_eq = eq_mask(&x1.0, &x2.0);
-        let y_eq = eq_mask(&y1.0, &y2.0);
-        let y_neg = eq_mask(&y1.add(&y2).0, &[0; 4]);
-        let z1_zero = eq_mask(&self.z().0, &[0; 4]);
-        let z2_zero = eq_mask(&p.z().0, &[0; 4]);
+        let x_eq = u64::from(low::bignum_eq(&x1.0, &x2.0));
+        let y_eq = u64::from(low::bignum_eq(&y1.0, &y2.0));
+        let y_neg = u64::from(low::bignum_eq(&y1.add(&y2).0, &[0; 4]));
+        let z1_zero = u64::from(low::bignum_eq(&self.z().0, &[0; 4]));
+        let z2_zero = u64::from(low::bignum_eq(&p.z().0, &[0; 4]));
         let finite = (z1_zero ^ 1) & (z2_zero ^ 1);
         let use_double = x_eq & y_eq & finite;
         let use_identity = x_eq & y_neg & finite & (use_double ^ 1);
@@ -906,16 +906,6 @@ impl JacobianMontPoint {
         low::bignum_mux(select, &mut r.xyz[..], &p1.xyz[..], &p0.xyz[..]);
         r
     }
-}
-
-/// 1 when the limbs are equal, else 0. The comparison does not branch.
-fn eq_mask(a: &[u64], b: &[u64]) -> u64 {
-    let mut diff = 0u64;
-    for i in 0..a.len().max(b.len()) {
-        diff |= a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0);
-    }
-    let diff = core::hint::black_box(diff);
-    ((diff | diff.wrapping_neg()) >> 63) ^ 1
 }
 
 fn mux_point(
