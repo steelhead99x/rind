@@ -349,7 +349,9 @@ ring has none.
 
 ## Adapter crates
 
-Each `rind-*` crate stands in for a crate's aws-lc-rs or ring backend.
+Each `rind-*` crate stands in for a crate's crypto backend, such as its
+aws-lc-rs, ring, or RustCrypto one, and offers that backend's signatures, so
+none returns an error for a CPU it lacks.
 
 ### rind-ring
 
