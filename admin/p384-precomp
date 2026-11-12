@@ -42,6 +42,7 @@ out = [
 
 # Each table is its own constant, which Aeneas translates to its own Lean
 # definition: Lean cannot compile the whole comb as one literal.
+# See UPSTREAM.md, "Lean cannot compile P-384's comb as one literal".
 base = (GX, GY)
 for j in range(TABLES):
     out.append(f"/// 1G..{POINTS}G << {20 * j}")
