@@ -17,6 +17,11 @@ ignore = [
     # by hax-lib-macros under libcrux's `cfg(hax)` dependencies, which only
     # hax's verification toolchain compiles; no build of rind does.
     "RUSTSEC-2026-0173",
+
+    # crypto-bigint 0.5 timing: openmls_rust_crypto, which rind-openmls's
+    # tests compare against, reaches it through p256 and p384 0.13. No
+    # published crate depends on it.
+    "RUSTSEC-2026-0387",
 ]
 
 [licenses]

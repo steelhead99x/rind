@@ -5,8 +5,6 @@
 //!
 //! See <https://nvlpubs.nist.gov/nistpubs/fips/nist.fips.202.pdf>
 
-use core::ops::Range;
-
 use crate::low::{Entry, sha3_keccak_f1600, sha3_keccak_nof4_f1600, sha3_keccak4_f1600};
 
 /// A context for incremental computation of a SHA3 hash with an `R`-byte
@@ -88,11 +86,14 @@ impl Shake128 {
 
 pub(crate) type Shake128Sponge = Sponge<SHAKE_128_R_BYTES, SHAKE_PAD_BYTE>;
 pub(crate) type Shake128SqueezingSponge = SqueezingSponge<SHAKE_128_R_BYTES>;
+pub(crate) type Shake256Sponge = Sponge<SHAKE_256_R_BYTES, SHAKE_PAD_BYTE>;
 
 /// This is SHAKE256.
 ///
 /// This has one-shot input behaviour (all input must be provided to the
 /// constructor [`Shake256::new`]) and incremental output behaviour.
+///
+/// ML-KEM squeezes the sponges directly; ML-DSA reads through this.
 pub(crate) struct Shake256 {
     sponge: SqueezingSponge<SHAKE_256_R_BYTES>,
     buffer: [u8; SHAKE_256_R_BYTES],
@@ -105,7 +106,7 @@ impl Shake256 {
     /// The items of `message` are processed in order, as if concatenated.
     pub(crate) fn new(message: &[&[u8]]) -> Self {
         Self {
-            sponge: Sponge::<SHAKE_256_R_BYTES, SHAKE_PAD_BYTE>::new_for_message(message),
+            sponge: Shake256Sponge::new_for_message(message),
             buffer: [0u8; SHAKE_256_R_BYTES],
             buffer_offset: SHAKE_256_R_BYTES,
         }
@@ -118,46 +119,36 @@ impl Shake256 {
         self.sponge
             .shake_read(output, &mut self.buffer, &mut self.buffer_offset);
     }
+}
 
-    /// Compute `P` SHAKE256 outputs in one go, four at a time.
-    ///
-    /// Each item of `inputs` shall be 40 bytes in length, which accommodates ML-KEM's `SamplePolyCBD`
-    /// requirements of 33 bytes.  The 34th byte shall be `SHAKE_PAD_BYTE` and the remainder shall be
-    /// zeroes.
-    pub(crate) fn one_shot_batch<const P: usize>(
-        inputs: &[[u8; 40]; P],
-        outputs: &mut [[u8; 128]; P],
-    ) {
-        debug_assert!(inputs.iter().all(|inp| inp[33] == SHAKE_PAD_BYTE));
-
-        let mut states = [[0; 25]; 4];
-
-        for (inputs, outputs) in inputs.chunks(4).zip(outputs.chunks_mut(4)) {
-            for (s, input) in states.iter_mut().zip(inputs) {
-                *s = [0; 25];
-                let (chunks, _) = input.as_chunks::<8>();
-                for (s, inp) in s.iter_mut().zip(chunks) {
-                    *s = u64::from_le_bytes(*inp);
-                }
-                s[SHAKE_256_R_BYTES / size_of::<u64>() - 1] = 0x8000_0000_0000_0000;
-            }
-
-            // A short batch leaves stale states in the unused lanes, whose
-            // outputs are never read.
-            match inputs.len() {
-                4 => sha3_keccak4_f1600(&mut states, &RC),
-                3 => sha3_keccak_nof4_f1600::<3>(&mut states, &RC),
-                2 => sha3_keccak_nof4_f1600::<2>(&mut states, &RC),
-                _ => sha3_keccak_nof4_f1600::<1>(&mut states, &RC),
-            }
-
-            for (s, output) in states.iter().zip(outputs) {
-                let (chunks, _) = output.as_chunks_mut::<8>();
-                for (ch, s) in chunks.iter_mut().zip(s) {
-                    *ch = s.to_le_bytes();
-                }
-            }
+/// Computes `P` 128-byte SHAKE256 outputs in one go, four at a time.
+///
+/// Each item of `inputs` shall be 40 bytes in length, which accommodates ML-KEM's `SamplePolyCBD`
+/// requirements of 33 bytes.  The 34th byte shall be `SHAKE_PAD_BYTE` and the remainder shall be
+/// zeroes.
+pub(crate) fn shake256_batch<const P: usize>(inputs: &[[u8; 40]; P], outputs: &mut [[u8; 128]; P]) {
+    let mut states = [[0; 25]; 4];
+    let mut done = 0;
+    while done < P {
+        let n = Ord::min(P - done, 4);
+        for j in 0..n {
+            debug_assert!(inputs[done + j][33] == SHAKE_PAD_BYTE);
+            states[j] = padded_block::<SHAKE_256_R_BYTES>(&inputs[done + j]);
         }
+
+        // A short batch leaves stale states in the unused lanes, whose
+        // outputs are never read.
+        match n {
+            4 => sha3_keccak4_f1600(&mut states, &RC),
+            3 => sha3_keccak_nof4_f1600::<3>(&mut states, &RC),
+            2 => sha3_keccak_nof4_f1600::<2>(&mut states, &RC),
+            _ => sha3_keccak_nof4_f1600::<1>(&mut states, &RC),
+        }
+
+        for j in 0..n {
+            store_bytes(&states[j], &mut outputs[done + j]);
+        }
+        done += n;
     }
 }
 
@@ -176,15 +167,12 @@ impl<const R: usize> SqueezingSponge<R> {
     /// Squeeze into `output`.
     pub(crate) fn squeeze(&mut self, output: &mut [u8]) {
         Entry::assert_held();
-        for chunk in output.chunks_mut(R) {
+        let mut done = 0;
+        while done < output.len() {
+            let n = Ord::min(R, output.len() - done);
             sha3_keccak_f1600(&mut self.s, &RC);
-            self.squeeze_current(chunk);
-        }
-    }
-
-    fn squeeze_current(&mut self, output: &mut [u8]) {
-        for (i, ch) in output.chunks_mut(8).enumerate() {
-            ch.copy_from_slice(&self.s[i].to_le_bytes()[..ch.len()]);
+            store_bytes(&self.s, &mut output[done..done + n]);
+            done += n;
         }
     }
 
@@ -227,87 +215,38 @@ impl SqueezingSponge4xShake128 {
     /// Each item of `input` shall be 40 bytes in length, which matches ML-KEM's requirements
     /// of 34 bytes.  The 35th byte shall be `SHAKE_PAD_BYTE` and the remainder shall be zeroes.
     pub(crate) fn new(inputs: &[[u8; 40]; 4]) -> Self {
-        debug_assert!(inputs.iter().all(|inp| inp[34] == SHAKE_PAD_BYTE));
-
-        // This is gnarly, for the benefit of avoiding a SHAKE_128_R_BYTES-byte buffer which is
-        // mostly zeroes, and then decoding the buffer into 64-bit words.
-        let mut s = [0; 25];
-
-        s[SHAKE_128_R_BYTES / size_of::<u64>() - 1] = 0x8000_0000_0000_0000;
-
-        let mut states = [
-            {
-                let (chunks, _) = inputs[0].as_chunks::<8>();
-                for (i, inp) in chunks.iter().enumerate() {
-                    s[i] = u64::from_le_bytes(*inp);
-                }
-                s
-            },
-            {
-                let (chunks, _) = inputs[1].as_chunks::<8>();
-                for (i, inp) in chunks.iter().enumerate() {
-                    s[i] = u64::from_le_bytes(*inp);
-                }
-                s
-            },
-            {
-                let (chunks, _) = inputs[2].as_chunks::<8>();
-                for (i, inp) in chunks.iter().enumerate() {
-                    s[i] = u64::from_le_bytes(*inp);
-                }
-                s
-            },
-            {
-                let (chunks, _) = inputs[3].as_chunks::<8>();
-                for (i, inp) in chunks.iter().enumerate() {
-                    s[i] = u64::from_le_bytes(*inp);
-                }
-                s
-            },
-        ];
-
+        let mut states = [[0; 25]; 4];
+        for j in 0..4 {
+            debug_assert!(inputs[j][34] == SHAKE_PAD_BYTE);
+            states[j] = padded_block::<SHAKE_128_R_BYTES>(&inputs[j]);
+        }
         sha3_keccak4_f1600(&mut states, &RC);
 
         Self { states }
     }
 
+    /// Squeezes three blocks of each sponge into `output`, returning the
+    /// sponges, which then owe a Keccak-f as a `SqueezingSponge` expects.
+    // Indexed rather than zipped, which Aeneas cannot translate.
+    #[allow(clippy::needless_range_loop)]
     pub(crate) fn squeeze(
         mut self,
         output: &mut [[u8; SHAKE_128_R_BYTES * 3]; 4],
     ) -> [SqueezingSponge<SHAKE_128_R_BYTES>; 4] {
-        // nb. we're doing three blocks.  The states are post-absorb, so the sequence should be:
-        //
-        // - squeeze, keccak-f, squeeze, keccak-f, squeeze
-        //
-        // This leaves a trailing keccak-f owing, as a `SqueezingSponge` expects.
-
-        fn squeeze_rate(
-            states: &[[u64; 25]; 4],
-            output: &mut [[u8; SHAKE_128_R_BYTES * 3]; 4],
-            span: Range<usize>,
-        ) {
+        // The states are post-absorb, so: squeeze, Keccak-f, squeeze,
+        // Keccak-f, squeeze.
+        for block in 0..3 {
+            if block > 0 {
+                sha3_keccak4_f1600(&mut self.states, &RC);
+            }
             for j in 0..4 {
-                debug_assert!(span.len().is_multiple_of(8));
-                let (chunks, _) = output[j][span.clone()].as_chunks_mut::<8>();
-                for (i, ch) in chunks.iter_mut().enumerate() {
-                    ch.copy_from_slice(&states[j][i].to_le_bytes());
-                }
+                let start = block * SHAKE_128_R_BYTES;
+                store_bytes(
+                    &self.states[j],
+                    &mut output[j][start..start + SHAKE_128_R_BYTES],
+                );
             }
         }
-
-        squeeze_rate(&self.states, output, 0..SHAKE_128_R_BYTES);
-        sha3_keccak4_f1600(&mut self.states, &RC);
-        squeeze_rate(
-            &self.states,
-            output,
-            SHAKE_128_R_BYTES..SHAKE_128_R_BYTES * 2,
-        );
-        sha3_keccak4_f1600(&mut self.states, &RC);
-        squeeze_rate(
-            &self.states,
-            output,
-            SHAKE_128_R_BYTES * 2..SHAKE_128_R_BYTES * 3,
-        );
 
         self.states.map(SqueezingSponge::new)
     }
@@ -416,7 +355,6 @@ impl<const R: usize, const PAD: u8> Sponge<R, PAD> {
     }
 
     /// Pads the input absorbed so far, to squeeze the output.
-    #[cfg(test)]
     pub(crate) fn finish(&self) -> SqueezingSponge<R> {
         SqueezingSponge::new(self.padded_state())
     }
@@ -442,11 +380,32 @@ fn add_bytes(s: &mut [u64; 25], offset: usize, bytes: &[u8]) {
 
     let first = offset.div_ceil(8);
     let (lanes, tail) = bytes.as_chunks::<8>();
-    for (s, lane) in s[first..].iter_mut().zip(lanes) {
-        *s ^= u64::from_le_bytes(*lane);
+    let whole = &mut s[first..first + lanes.len()];
+    for (i, lane) in lanes.iter().enumerate() {
+        whole[i] ^= u64::from_le_bytes(*lane);
     }
     if !tail.is_empty() {
         s[first + lanes.len()] ^= partial_lane(tail);
+    }
+}
+
+/// The state absorbing the one block `input`: a message, its first padding
+/// byte, then zeroes, under the rate `R`, whose last bit then ends the padding.
+fn padded_block<const R: usize>(input: &[u8; 40]) -> [u64; 25] {
+    let mut s = [0; 25];
+    add_bytes(&mut s, 0, input);
+    s[R / 8 - 1] ^= 0x80 << 56;
+    s
+}
+
+/// Writes the state's first `output.len()` bytes, under the rate, into
+/// `output`: its lanes little-endian.
+fn store_bytes(s: &[u64; 25], output: &mut [u8]) {
+    let mut done = 0;
+    while done < output.len() {
+        let n = Ord::min(8, output.len() - done);
+        output[done..done + n].copy_from_slice(&s[done / 8].to_le_bytes()[..n]);
+        done += n;
     }
 }
 
@@ -457,7 +416,7 @@ fn partial_lane(bytes: &[u8]) -> u64 {
     u64::from_le_bytes(lane)
 }
 
-const RC: [u64; 24] = [
+pub(crate) const RC: [u64; 24] = [
     0x00000000_00000001,
     0x00000000_00008082,
     0x80000000_0000808A,
@@ -582,7 +541,7 @@ mod tests {
         }
 
         let mut batched = [[0u8; 128]; P];
-        Shake256::one_shot_batch(&inputs, &mut batched);
+        shake256_batch(&inputs, &mut batched);
 
         for (n, inp) in inputs.iter().enumerate() {
             // the absorbed message is the 33 bytes preceding the pad byte
