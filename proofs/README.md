@@ -350,6 +350,20 @@ under `--cfg rind_portable`: `keccak_f1600_spec`, `keccak4_f1600_spec`, and
 given FIPS 202's round constants and nothing of the CPU. Each round is
 `keccak_round` written out, which `round_spec` proves by unfolding.
 
+ML-KEM's polynomial arithmetic, against FIPS 203 as SymCrypt's Lean spec
+(`Rind/SymCrypt/MlKem.lean`, MIT) states it, though not yet rind's Rust,
+which has [its quest](/quest/m4/verified/mlkem-construction.md):
+
+- `NTT_get`, `NTTInv_get` (`Rind/MlKem.lean`): Algorithms 9 and 10 compute
+  the residues FIPS 203's Equations (4.12) and (4.13) define, and back;
+- `forwardNtt_eq`, `inverseNtt_eq`, `mulcache_eq`, `basemul3Even_eq`,
+  `basemul3Odd_eq`, and `tomont3329_eq` (`Rind/S2nMlKem.lean`): the specs
+  s2n-bignum's aarch64 ML-KEM routines' theorems state are FIPS 203's `NTT`,
+  its `NTTInv` times 2^16, and its `MultiplyNTTs` times 2^-16;
+- `avx2ForwardNtt_eq`, `avx2InverseNtt_eq`, `avx2Mulcache_eq`, and
+  `pmulaccred0K3_eq` and its siblings: the same for the x86_64 routines, which
+  keep FIPS 203's coefficients in the AVX2 order.
+
 Ed25519 on x86_64 and aarch64, from the signature API's `Ed25519KeyPair` and
 `PublicKey` to s2n-bignum's routines and the SHA-512 proof above, in
 `Rind/X86_64/Ed25519.lean`, which `admin/prove` also writes for aarch64:
@@ -615,6 +629,11 @@ mentions `Verification::Rsa(` or builds an `Rsa` outside them.
   on each target, and `Rind/Portable/Keccak.lean`: the portable backend's
   Keccak-f; `Rind/X86_64/Sha3.lean`: the SHA-3 and
   SHAKE proofs.
+- `Rind/SymCrypt/{NatBit,Round,Xof,MlKem,MlKemPolynomials,MlKemNtt}.lean`:
+  SymCrypt's Lean FIPS 203 spec and its NTT lemmas, vendored;
+  `Rind/MlKem.lean`: FIPS 203's NTT and inverse NTT in closed form;
+  `Rind/S2nMlKem.lean`: s2n-bignum's ML-KEM specs, transliterated, and their
+  proofs that they are FIPS 203's.
 - `Rind/<Arch>/ShaBlocks.lean`: SHA-1 and SHA-256's block functions on each
   target, SHA-1's padded last blocks, and SHA-256's padded last blocks and
   finish; `Rind/Aarch64/Sha256Hw.lean`, the axiom for aarch64's routine with
@@ -660,6 +679,9 @@ Beyond Lean's kernel:
 - That `Rind/SymCrypt/Sha3.lean` is FIPS 202, as SymCrypt's authors state,
   and that `Rind/Keccak.lean` transliterates s2n-bignum's `keccak_spec.ml`,
   in which the Keccak-f axioms state their results.
+- That `Rind/SymCrypt/MlKem.lean` is FIPS 203, as SymCrypt's authors state,
+  and that `Rind/S2nMlKem.lean` transliterates the s2n-bignum ML-KEM specs it
+  names.
 - That `Rind/Sha2.lean` restates cryptol-specs' SHA-512 around
   `processBlock_Common`, and `Rind/S2nSha256.lean` transliterates
   s2n-bignum's SHA-256 spec.
