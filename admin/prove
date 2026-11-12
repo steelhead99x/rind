@@ -10,14 +10,16 @@
 # x86_64 ones with the target renamed, which this writes too, all but each
 # target's own `ShaBlocks.lean` and `HashAxioms.lean`.
 #
-# Usage: admin/prove [bytes | hol-light | lean]
+# Usage: admin/prove [bytes | hol-light | cosim | lean]
 #
 # An argument checks only those proofs, `bytes` only that the assembly rind
 # imports is the object code its upstream's proofs checked, and declares
-# each register they let it change. Run it in the
-# flake's `prove` dev shell: `nix develop .#prove --command admin/prove`, or
-# for the HOL Light proofs or the bytes alone, `nix develop .#hol-light
-# --command admin/prove hol-light`.
+# each register they let it change. `cosim`, which no other run includes
+# since it needs an x86_64 CPU with AVX2, checks the instructions rind adds
+# to s2n-bignum's x86 model against this CPU. Run it in the flake's `prove`
+# dev shell: `nix develop .#prove --command admin/prove`, or for the HOL
+# Light proofs, the cosimulation, or the bytes alone, `nix develop
+# .#hol-light --command admin/prove hol-light`.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -25,9 +27,9 @@ out=.tmp/prove
 mkdir -p "$out"
 tools=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin
 case "${1:-}" in
-'' | bytes | hol-light | lean) only=${1:-} ;;
+'' | bytes | hol-light | cosim | lean) only=${1:-} ;;
 *)
-    echo "usage: admin/prove [bytes | hol-light | lean]" >&2
+    echo "usage: admin/prove [bytes | hol-light | cosim | lean]" >&2
     exit 2
     ;;
 esac
@@ -223,10 +225,30 @@ asm_function() {
         "$obj" "$dest"
 }
 
+# Writes to `$out/s2n-bignum` the files of s2n-bignum's x86 model that
+# `proofs/hol-light/s2n-bignum/x86.patch` changes, each the copy that
+# directory vendors or else the submodule's, with the patch applied, which
+# fails unless every hunk applies exactly. HOL Light loads them ahead of both.
+s2n_bignum_model() {
+    local model=$out/s2n-bignum carried=proofs/hol-light/s2n-bignum file
+    git submodule update --init --depth 1 thirdparty/s2n-bignum
+    rm -rf "$model"
+    while read -r file; do
+        mkdir -p "$model/$(dirname "$file")"
+        if [[ -f $carried/$file ]]; then
+            cp "$carried/$file" "$model/$file"
+        else
+            cp "thirdparty/s2n-bignum/$file" "$model/$file"
+        fi
+    done < <(sed -n 's|^+++ b/||p' "$carried/x86.patch")
+    patch --quiet --fuzz=0 --no-backup-if-mismatch -p1 -d "$model" <"$carried/x86.patch"
+}
+
 # rind's own HOL Light proofs, each of the `asm!` block in a Rust function or
 # of a naked one, on s2n-bignum's model, tactics, and specs at its submodule's
-# commit, the revision rind's transliteration pins, with the specs of
-# s2n-bignum pull requests not yet merged from `proofs/hol-light/s2n-bignum/`.
+# commit, the revision rind's transliteration pins, with what
+# `proofs/hol-light/s2n-bignum/` carries: the specs of s2n-bignum pull
+# requests not yet merged, and rind's additions to the x86 model.
 # Each `<arch>/<file>.ml` reads its object code from `<arch>/<file>.bin`, the
 # block's bytes, which `asm_block` writes, or `<arch>/<file>.o`, the naked
 # function's object, which `asm_function` writes, and asserts it is what it
@@ -242,8 +264,8 @@ hol_light_proofs=(
     "x86_64 ct_compare_16.bin rind::low::x86_64::cpu::ct_compare_16"
 )
 hol_light() {
-    local dir=$out/hol-light root=$PWD arches arch file path proof
-    git submodule update --init --depth 1 thirdparty/s2n-bignum
+    local dir=$out/hol-light arches arch file path proof
+    s2n_bignum_model
     rm -rf "$dir"
     mkdir -p "$dir"
     arches=$(printf '%s\n' "${hol_light_proofs[@]}" | cut -d' ' -f1 | sort -u)
@@ -262,15 +284,48 @@ hol_light() {
     done
     for arch in $arches; do
         printf 'check_axioms ();; Printf.printf "%s: %%.0f s\\n" (Unix.time () -. prove_start);;\n' "$arch" >>"$dir/$arch.ml"
-        (cd "$dir" && HOLLIGHT_LOAD_PATH="$root/proofs/hol-light:$root/proofs/hol-light/s2n-bignum:$root/thirdparty/s2n-bignum" \
-            ocaml "$HOLLIGHT_DIR/inline_load.ml" "$arch.ml" "$arch-inlined.ml")
-        OCAMLRUNPARAM=l=2000000000 ocamlopt.byte -pp "$("$HOLLIGHT_DIR/hol.sh" -pp)" \
-            -I "$HOLLIGHT_DIR" -I +unix -c hol_lib.cmxa "$dir/$arch-inlined.ml" -o "$dir/$arch.cmx" -w -a
-        ocamlfind ocamlopt -package zarith,unix -linkpkg hol_lib.cmxa -I "$HOLLIGHT_DIR" \
-            "$dir/$arch.cmx" -o "$dir/$arch.native"
+        hol_light_compile "$dir" "$arch"
         (cd "$dir" && "./$arch.native")
     done
 }
+
+# Compiles `dir/name.ml` into `dir/name.native`, as s2n-bignum's
+# `tools/build-proof.sh` compiles each of its proofs, with rind's HOL Light
+# files, the model `s2n_bignum_model` writes, what
+# `proofs/hol-light/s2n-bignum/` carries, and the submodule on the load path,
+# in that order.
+hol_light_compile() {
+    local dir=$1 name=$2 root=$PWD
+    (cd "$dir" && HOLLIGHT_LOAD_PATH="$root/proofs/hol-light:$root/$out/s2n-bignum:$root/proofs/hol-light/s2n-bignum:$root/thirdparty/s2n-bignum" \
+        ocaml "$HOLLIGHT_DIR/inline_load.ml" "$name.ml" "$name-inlined.ml")
+    OCAMLRUNPARAM=l=2000000000 ocamlopt.byte -pp "$("$HOLLIGHT_DIR/hol.sh" -pp)" \
+        -I "$HOLLIGHT_DIR" -I +unix -c hol_lib.cmxa "$dir/$name-inlined.ml" -o "$dir/$name.cmx" -w -a
+    ocamlfind ocamlopt -package zarith,unix -linkpkg hol_lib.cmxa -I "$HOLLIGHT_DIR" \
+        "$dir/$name.cmx" -o "$dir/$name.native"
+}
+
+# Cosimulates rind's additions to s2n-bignum's x86 model against this CPU with
+# `proofs/hol-light/s2n-bignum/x86-cosim.ml`, on s2n-bignum's simulator, whose
+# executor assembles each case with the C toolchain. The simulator's list of
+# s2n-bignum's own instructions is empty, so the one case of s2n-bignum's own
+# campaign that loading it runs is one of those it adds by hand.
+cosim() {
+    local dir=$out/cosim root=$PWD
+    if [[ $(uname -m) != x86_64 ]] || ! grep -qw avx2 /proc/cpuinfo; then
+        echo "admin/prove: cosim needs an x86_64 CPU with AVX2" >&2
+        return 1
+    fi
+    s2n_bignum_model
+    rm -rf "$dir"
+    mkdir -p "$dir/tmp" "$out/s2n-bignum/x86"
+    printf 'let iclasses_regreg = [];;\nlet iclasses_simplemem = [];;\n' >"$out/s2n-bignum/x86/x86-insns.ml"
+    echo 'loadt "x86-cosim.ml";;' >"$dir/cosim.ml"
+    hol_light_compile "$dir" cosim
+    (cd "$dir" && TMPDIR="$root/$dir/tmp" S2N_BIGNUM_SEMATEST_CASES=1 \
+        S2N_BIGNUM_X86_64_EXECUTOR="$root/thirdparty/s2n-bignum/tools/simulate-persistent x86" \
+        ./cosim.native)
+}
+
 # Writes to `dest` the bytes of the routine at the symbol `sym` in the object
 # `obj`, through its size or, where it has none, to the next global symbol,
 # with its layout as `asm_block` writes it, and to `dest.data/<target>` the
@@ -364,6 +419,9 @@ fi
 if [[ -z $only || $only == hol-light ]]; then
     hol_light
 fi
+if [[ $only == cosim ]]; then
+    cosim
+fi
 if [[ -n $only && $only != lean ]]; then
     exit 0
 fi
@@ -430,7 +488,9 @@ check_quote X86_64/AesNi aes_ni_items
 check_quote X86_64/AeadDispatch items rind/src/aead.rs 'pub struct Algorithm ' 'impl Algorithm {' \
     'pub static AES_128_GCM:' 'pub static AES_192_GCM:' 'pub static AES_256_GCM:' 'pub static CHACHA20_POLY1305:' 'impl Key {' \
     'struct Sealer<' 'type Seal<' 'type Open<' 'struct Ops<' 'impl<C: Cipher> Sealer<C> {' \
-    'pub struct Nonce(' 'impl Nonce {' 'pub struct Tag(' 'impl AsRef<[u8]> for Tag {'
+    'pub struct Nonce(' 'impl Nonce {' 'pub struct Tag(' 'impl AsRef<[u8]> for Tag {' \
+    'pub struct RandomizedNonceKey(' 'impl RandomizedNonceKey {' 'pub struct RandomNonce(' \
+    'impl AsRef<[u8]> for RandomNonce {' 'impl From<[u8; 24]> for RandomNonce {'
 gcm_items() {
     items rind/src/cipher.rs 'pub struct Algorithm {' 'pub static AES_128:' 'pub static AES_192:' 'pub static AES_256:'
     items rind/src/aead/gcm.rs 'pub enum TagLength {' 'impl TagLength {' "pub struct Iv<'a>(&'a [u8]);" \
@@ -510,7 +570,10 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # from its `Mask` impl down to HACL*'s rounds, which are Rust and translated
 # too; AES's key and block cipher are opaque. Then Ed25519 from
 # `high::signature`'s key pair and `high::ed25519` down to s2n-bignum's
-# routines and the SHA-512 context.
+# routines and the SHA-512 context. On x86_64, ChaCha20-Poly1305 and
+# XChaCha20-Poly1305 from their keys down to the call of aws-lc's one-pass
+# routine, which is opaque, as are the separate passes CPUs without SSE4.1
+# run, with HChaCha20 over HACL*'s rounds.
 #
 # Aeneas cannot translate function pointers, through which `PrivateKey`
 # reaches each curve's `Agree` impl, `HeaderProtectionKey` each cipher's
@@ -581,7 +644,6 @@ extract() {
         --opaque crate::high::sec1::encode_pkcs8 \
         --opaque 'crate::high::agreement::_::encode_pkcs8' \
         --opaque 'crate::high::agreement::_::encode_scalar' \
-        --opaque '{impl crate::high::agreement::Agree for crate::high::curve::P384}::load' \
         --opaque '{impl crate::high::agreement::Agree for crate::high::curve::P521}::load' \
         --opaque crate::aead::quic::Masker \
         --opaque crate::mid::aes \
@@ -605,7 +667,9 @@ extract() {
         --opaque crate::mid::md5 \
         --opaque crate::mid::sha3 \
         --opaque crate::low \
-        --opaque 'crate::mid::p384::_::_' \
+        --opaque 'crate::mid::p384::_::generate' \
+        --opaque 'crate::high::curve::_::oid' \
+        --opaque 'crate::mid::p384::_::new_random' \
         --opaque 'crate::mid::p521::_::_' \
         --include 'crate::mid::p521::_::BYTES' \
         --include crate::low::ct \
@@ -672,6 +736,14 @@ extract_kdf() {
 extract x86_64 X86_64 \
     --opaque '{impl crate::high::agreement::Agree for crate::high::curve::P256}::load' \
     --opaque 'crate::mid::p256::_::_' \
+    --include crate::low::x86_64::adx_mux::bignum_demont_p384 \
+    --include crate::low::x86_64::adx_mux::bignum_montmul_p384 \
+    --include crate::low::x86_64::adx_mux::bignum_montsqr_p384 \
+    --include crate::low::x86_64::adx_mux::bignum_tomont_p384 \
+    --include crate::low::x86_64::adx_mux::p384_montjadd \
+    --include crate::low::x86_64::adx_mux::p384_montjdouble \
+    --include crate::low::x86_64::adx_mux::p384_montjmixadd \
+    --include crate::low::x86_64::adx_mux::p384_montjscalarmul \
     --include crate::low::x86_64::adx_mux::curve25519_x25519 \
     --include crate::low::x86_64::adx_mux::curve25519_x25519base \
     --include crate::low::x86_64::adx_mux::edwards25519_decode \
@@ -692,7 +764,11 @@ extract x86_64 X86_64 \
     --opaque crate::aead::Sealer \
     --opaque crate::aead::Ops \
     --start-from '{impl crate::aead::Cipher for crate::mid::chacha20poly1305::ChaCha20Poly1305}' \
-    --opaque '{impl crate::aead::Cipher for crate::mid::chacha20poly1305::ChaCha20Poly1305}::_' \
+    --start-from crate::mid::xchacha20poly1305::XChaCha20Poly1305::new \
+    --start-from crate::mid::xchacha20poly1305::XChaCha20Poly1305::encrypt \
+    --start-from crate::mid::xchacha20poly1305::XChaCha20Poly1305::decrypt \
+    --include crate::low::x86_64::chacha20poly1305::seal \
+    --include crate::low::x86_64::chacha20poly1305::open \
     --include crate::mid::aes::expand_key \
     --include crate::mid::aes::check_gcm_lengths \
     --include crate::mid::aes::check_counter \
@@ -745,7 +821,6 @@ extract aarch64 Aarch64 \
     --start-from '{impl crate::high::curve::Scalar for crate::mid::p256::Scalar}' \
     --start-from crate::mid::p256::StaticPrivateKey::from_bytes \
     --opaque 'crate::high::curve::_::generate_random_key' \
-    --opaque 'crate::high::curve::_::oid' \
     --opaque 'crate::mid::p256::_::generate' \
     --opaque 'crate::mid::p256::_::new_random' \
     --include crate::low::aarch64::sha1::sha1_compress_padded \
@@ -759,7 +834,7 @@ extract_kdf x86_64 X86_64 --start-from '{impl core::convert::From for crate::aea
 extract_kdf aarch64 Aarch64
 
 mkdir -p proofs/Rind/Aarch64/Kdf
-for file in Dispatch X25519 DigestAlgorithm DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
+for file in Dispatch X25519 P384 DigestAlgorithm DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
     Blockwise Sha Hmac HmacDispatch HkdfExpand Kdf/TypesExternal Kdf/FunsExternal \
     CtEqual HmacApi DigestApi Hkdf Pbkdf2; do
     sed 's/X86_64/Aarch64/g; s/x86_64/aarch64/g' "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Aarch64/$file.lean"

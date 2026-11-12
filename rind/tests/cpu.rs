@@ -6,6 +6,14 @@ fn check_passes() {
     assert_eq!(rind::cpu::check(), Ok(()));
 }
 
+// The portable backend runs AES without CPU instructions on every target, so
+// a protocol choosing between AES-GCM and ChaCha20-Poly1305 should hear so.
+#[cfg(rind_backend = "portable")]
+#[test]
+fn portable_has_no_aes_hardware() {
+    assert!(!rind::cpu::has_aes_hardware());
+}
+
 // `RIND_CPU_DISABLE_*` only takes effect with debug assertions or
 // `--cfg rind_cpu_disable`, and x86_64 and the portable armv7 backend require
 // no CPU features.

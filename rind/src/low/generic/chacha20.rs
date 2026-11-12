@@ -11,7 +11,8 @@
 // do: a single block packed into vector registers is one serial chain, which
 // Zen 5's two-cycle vector latency makes twice as slow.
 //
-// `proofs/` proves `chacha20_block` against RFC 8439, these rounds included.
+// `proofs/` proves `chacha20_block` against RFC 8439 and `hchacha20` against
+// draft-irtf-cfrg-xchacha-03, these rounds included.
 
 #[inline]
 fn quarter_round(st: &mut [u32], a: u32, b: u32, c: u32, d: u32) {
@@ -105,17 +106,15 @@ fn state(key: &[u8; 32], nonce: &[u8; 16]) -> [u32; 16] {
 /// HChaCha20 of `key` and `nonce`, for XChaCha20's subkey: the ChaCha20
 /// rounds without the final addition, keeping words 0-3 and 12-15, as
 /// draft-irtf-cfrg-xchacha-03 specifies.
+//
+// Indexes, as `state` does, so `proofs/` can prove it.
 pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
     let mut st = state(key, nonce);
     rounds(&mut st);
     let mut out = [0u8; 32];
-    for (o, w) in out
-        .as_chunks_mut::<4>()
-        .0
-        .iter_mut()
-        .zip(st[..4].iter().chain(&st[12..]))
-    {
-        *o = w.to_le_bytes();
+    for i in 0..8 {
+        let w = if i < 4 { st[i] } else { st[i + 8] };
+        out[4 * i..4 * (i + 1)].copy_from_slice(&w.to_le_bytes());
     }
     out
 }

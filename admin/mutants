@@ -153,10 +153,20 @@ esac
 # `--portable` forces the portable backend on this x86_64 host. It is applied
 # after the host case above, so it stays a flag rather than another arm of
 # that case: the case has already picked this machine's campaign, and this
-# replaces its feature rows and excludes. The backend reads no CPU features,
-# so there is no denial row. It skips the three assembly backends and mutates
-# only the modules armv7's assembly replaces, plus `mont_sqr` and
-# `mont_mul_limbs`, whose mutants no other campaign compiles. Pass it first.
+# replaces its feature rows. The backend reads no CPU features, so there is
+# no denial row. It mutates only what no other campaign compiles:
+#
+# - the portable modules armv7's assembly replaces;
+# - `mont_sqr` and `mont_mul_limbs`, whose names cargo-mutants gives as
+#   `replace mont_sqr with ()` for the function and `... in mont_sqr` inside
+#   it;
+# - the AES fallback's 64-bit `word` module (`aes_nohw.rs` lines 209-270),
+#   which only a 64-bit portable build compiles; armv7 compiles the 32-bit
+#   module and the rest of that file;
+# - `cpu::has_aes_hardware`, whose portable arm returns false.
+#
+# Its `--file` list already limits it to those files, so it needs no excludes
+# beyond the generated sources below. Pass `--portable` before other arguments.
 portable_run=
 if [ "${1:-}" = --portable ]; then
     shift
@@ -174,17 +184,16 @@ if [ "${1:-}" = --portable ]; then
     }
     portable_run=1
     export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
-    skip=(
-        'rind/src/low/x86_64/**' 'rind/src/low/aarch64/**'
-        'rind/src/low/arm/**' 'rind/src/mid/arm/**'
-    )
+    skip=()
     only=(
         --file rind/src/low/portable/chacha20.rs
         --file rind/src/low/portable/cpu.rs
         --file rind/src/low/portable/keccak.rs
         --file rind/src/low/portable/sha.rs
         --file rind/src/low/generic/bignum.rs
-        --re 'rind/src/low/portable/(chacha20|cpu|keccak|sha)\.rs:|mont_sqr|mont_mul_limbs'
+        --file rind/src/low/portable/../generic/aes_nohw.rs
+        --file rind/src/low/cpu.rs
+        --re '^rind/src/low/portable/(chacha20|cpu|keccak|sha)\.rs:|^rind/src/low/portable/\.\./generic/aes_nohw\.rs:2(09|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9]|6[0-9]|70):|^rind/src/low/generic/bignum\.rs:.*(: replace | in )mont_(sqr|mul_limbs)( |$)|^rind/src/low/cpu\.rs:.*: replace has_aes_hardware '
     )
     rows=()
     base=()
