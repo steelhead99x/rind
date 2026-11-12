@@ -354,4 +354,14 @@ exclude_re = [
   # `Error::WrongLength` is a short output buffer, which this adapter maps
   # with `unspecified`, not `KeyRejected::rind`.
   'rind-aws-lc-rs/src/error\.rs:\d+:\d+: delete match arm rind::Error::WrongLength in KeyRejected::rind$',
+  # The deprecated alias, compiled only with `unstable`, which this campaign
+  # does not enable. `to_pkcs8v1` is what the tests call.
+  'rind-aws-lc-rs/src/signature/mldsa\.rs:\d+:\d+: replace PqdsaKeyPair::to_pkcs8 -> Result<Document, Unspecified> with Ok\(Default::default\(\)\)$',
+  # `3 + 13` and `3 + 4896` becoming products still leave `MAX_DER_BODY`
+  # within `u16` and above every body. The other sums on this line shrink
+  # the bound, and `debug_assert` catches them.
+  'rind-aws-lc-rs/src/signature/mldsa\.rs:596:(31|52): replace \+ with \*$',
+  # Every body is longer than 255 bytes, so the short-form test is false
+  # whether it is `<`, `==`, or `<=`.
+  'rind-aws-lc-rs/src/signature/mldsa\.rs:\d+:\d+: replace < with (==|<=) in push_tlv$',
 ]
