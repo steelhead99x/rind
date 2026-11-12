@@ -1,14 +1,14 @@
 name: mutants
 
 # Nightly, mutates the Rust that changed in the last day with cargo-mutants,
-# through `admin/mutants`, on each architecture rind has a runner for and on
-# armv7 under qemu. A mutant no architecture's tests catch fails the run,
-# which alert.yml reports: kill it with a test, or list it under
-# `exclude_re` in .cargo/mutants.toml with why no test can. The x86_64 run's
-# survivors are tried again under Intel SDE, on the AVX-512 paths no runner
-# takes. Dispatched on a branch, it mutates what the branch changed since
-# `base`. Like fuzzing, it never runs on pull requests: a large diff's
-# mutants take hours of every architecture's runners.
+# through `admin/mutants`, on each architecture rind has a runner for, on
+# armv7 under qemu, and on the portable backend forced on x86_64. A mutant no
+# run's tests catch fails the run, which alert.yml reports: kill it with a
+# test, or list it under `exclude_re` in .cargo/mutants.toml with why no test
+# can. The x86_64 run's survivors are tried again under Intel SDE, on the
+# AVX-512 paths no runner takes. Dispatched on a branch, it mutates what the
+# branch changed since `base`. Like fuzzing, it never runs on pull requests:
+# a large diff's mutants take hours of every architecture's runners.
 
 on:
   schedule:
@@ -35,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [x86_64, aarch64, macos, armv7]
+        name: [x86_64, aarch64, macos, armv7, portable]
         include:
           - name: x86_64
             os: ubuntu-latest
@@ -51,12 +51,17 @@ jobs:
             shell: default
             args: --workspace
           # Only rind's own code differs on armv7; the adapters' tests run
-          # on the other two. `wipe` runs rind/tests/zeroing.rs, which
-          # checks each `Drop` that wipes a key.
+          # on x86_64 and aarch64.
           - name: armv7
             os: ubuntu-latest
             shell: armv7
-            args: --target armv7-unknown-linux-gnueabihf -p rind --features wipe
+            args: --target armv7-unknown-linux-gnueabihf -p rind
+          # What only the portable backend compiles, and what armv7's assembly
+          # replaces. Its adapters' code is the same as on x86_64.
+          - name: portable
+            os: ubuntu-latest
+            shell: default
+            args: --portable -p rind
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 300
@@ -89,7 +94,7 @@ jobs:
           read -ra args <<<"$ARGS"
           scope=(--in-diff "$RUNNER_TEMP/changes.diff")
           if [ "$RUNNER_OS" = macOS ]; then
-            grep -qE '^\+\+\+ b/rind/src/low/(aarch64/)?cpu\.rs$' "$RUNNER_TEMP/changes.diff" || exit 0
+            grep -qE '^\+\+\+ b/rind/src/low/((aarch64/)?cpu|entry)\.rs$' "$RUNNER_TEMP/changes.diff" || exit 0
             scope=()
           fi
           nix develop ".#$DEV_SHELL" --command admin/mutants "${args[@]}" "${scope[@]}" --output "$RUNNER_TEMP" || [ $? -eq 2 ]

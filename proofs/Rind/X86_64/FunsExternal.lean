@@ -1,7 +1,6 @@
 module
 public import Aeneas
 public import Rind.X86_64.Types
-public import Rind.X86_64.AesNi
 public import Rind.X86_64.AesGcmModel
 @[expose] public section
 open Aeneas Aeneas.Std Result
@@ -9,7 +8,7 @@ set_option linter.dupNamespace false
 
 /-!
 The rind functions the x86_64 translation leaves opaque, beside those
-`Rind.X86_64.AesNi` and `Rind.X86_64.AesGcmModel` model. No proof assumes anything about them beyond what
+`Rind.X86_64.AesGcmModel` models. No proof assumes anything about them beyond what
 `Rind.X86_64.S2nBignum`, `Rind.X86_64.AwsLc`, and `Rind.X86_64.ValeAesGcm`
 state for s2n-bignum's, aws-lc's, and Vale's routines, what
 `Rind.X86_64.CtEqual` states for the constant-time compares, and what each theorem
@@ -98,16 +97,16 @@ opaque low.x86_64.vpaes_x86_64.VpaesKey.new
 opaque low.x86_64.vpaes_x86_64.VpaesKey.encrypt_block
   : low.x86_64.vpaes_x86_64.VpaesKey → Std.Array Std.U8 16#usize → Result (Std.Array Std.U8 16#usize)
 
-/-! AES-192's key expansion and block cipher. Vale has no AES-192 routine, so
-no proof reaches them. -/
+opaque low.x86_64.vpaes_x86_64.VpaesDecKey.new
+  : Slice Std.U8 → low.x86_64.cpu.HaveSsse3 → Result low.x86_64.vpaes_x86_64.VpaesDecKey
 
-opaque low.x86_64.aes.aes192_expand
-  : Std.Array Std.U8 24#usize → Result (Std.Array core.core_arch.x86.__m128i 13#usize)
-
-opaque low.x86_64.aes.aes_block {N : Std.Usize}
-  : Std.Array core.core_arch.x86.__m128i N → Std.Array Std.U8 16#usize → Result (Std.Array Std.U8 16#usize)
+opaque low.x86_64.vpaes_x86_64.VpaesDecKey.decrypt_block
+  : low.x86_64.vpaes_x86_64.VpaesDecKey → Std.Array Std.U8 16#usize → Result (Std.Array Std.U8 16#usize)
 
 opaque low.x86_64.aes_nohw.NohwKey.new : Slice Std.U8 → Result low.x86_64.aes_nohw.NohwKey
+
+opaque low.x86_64.aes_nohw.NohwKey.decrypt_block
+  : low.x86_64.aes_nohw.NohwKey → Std.Array Std.U8 16#usize → Result (Std.Array Std.U8 16#usize)
 
 opaque low.x86_64.aes_nohw.NohwKey.encrypt_block
   : low.x86_64.aes_nohw.NohwKey → Std.Array Std.U8 16#usize → Result (Std.Array Std.U8 16#usize)
@@ -401,8 +400,71 @@ opaque low.x86_64.bignum_mod_n384.bignum_mod_n384
   Array Std.U64 6#usize → Array Std.U64 6#usize → Result (Array Std.U64
     6#usize)
 
+opaque high.curve.P256.Insts.RindHighCurveCurveStaticPrivateKeyVerifyingKeyScalar.oid
+  : Result high.asn1.ObjectId
+
 opaque high.curve.P384.Insts.RindHighCurveCurveStaticPrivateKeyVerifyingKeyScalar.oid
   : Result high.asn1.ObjectId
+
+/-! P-256's s2n-bignum routines. -/
+
+opaque low.x86_64.bignum_tomont_p256.bignum_tomont_p256
+  : Array Std.U64 4#usize → Array Std.U64 4#usize → Result (Array Std.U64 4#usize)
+
+opaque low.x86_64.bignum_tomont_p256_alt.bignum_tomont_p256_alt
+  : Array Std.U64 4#usize → Array Std.U64 4#usize → Result (Array Std.U64 4#usize)
+
+opaque low.x86_64.bignum_demont_p256.bignum_demont_p256
+  : Array Std.U64 4#usize → Array Std.U64 4#usize → Result (Array Std.U64 4#usize)
+
+opaque low.x86_64.bignum_demont_p256_alt.bignum_demont_p256_alt
+  : Array Std.U64 4#usize → Array Std.U64 4#usize → Result (Array Std.U64 4#usize)
+
+opaque low.x86_64.bignum_add_p256.bignum_add_p256
+  :
+  Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
+    Result (Array Std.U64 4#usize)
+
+opaque low.x86_64.bignum_montmul_p256.bignum_montmul_p256
+  :
+  Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
+    Result (Array Std.U64 4#usize)
+
+opaque low.x86_64.bignum_montmul_p256_alt.bignum_montmul_p256_alt
+  :
+  Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
+    Result (Array Std.U64 4#usize)
+
+opaque low.x86_64.bignum_montsqr_p256.bignum_montsqr_p256
+  : Array Std.U64 4#usize → Array Std.U64 4#usize → Result (Array Std.U64 4#usize)
+
+opaque low.x86_64.bignum_montsqr_p256_alt.bignum_montsqr_p256_alt
+  : Array Std.U64 4#usize → Array Std.U64 4#usize → Result (Array Std.U64 4#usize)
+
+opaque low.x86_64.bignum_mod_n256.bignum_mod_n256
+  : Array Std.U64 4#usize → Array Std.U64 4#usize → Result (Array Std.U64 4#usize)
+
+opaque low.x86_64.p256_scalarmul.p256_scalarmul
+  :
+  Array Std.U64 8#usize → Array Std.U64 4#usize → Array Std.U64 8#usize →
+    Result (Array Std.U64 8#usize)
+
+opaque low.x86_64.p256_scalarmul_alt.p256_scalarmul_alt
+  :
+  Array Std.U64 8#usize → Array Std.U64 4#usize → Array Std.U64 8#usize →
+    Result (Array Std.U64 8#usize)
+
+/-! P-256's generator multiplication, aws-lc's on x86_64, which no proof
+covers yet. -/
+
+opaque mid.p256.AffineMontPoint.base_multiply
+  : mid.p256.Scalar → Result mid.p256.AffineMontPoint
+
+/-! P-256's key generation, which draws through a `dyn RandomSource`:
+`Rind.X86_64.P256Dispatch` models it. -/
+
+opaque mid.p256.PrivateKey.new_random
+  : Result (core.result.Result mid.p256.PrivateKey error.Error)
 
 /-! The other curves, which X25519's results never depend on. -/
 
@@ -412,14 +474,8 @@ opaque mid.p521.PrivateKey.new_random
 opaque mid.p384.PrivateKey.new_random
   : Result (core.result.Result mid.p384.PrivateKey error.Error)
 
-opaque mid.p256.PrivateKey.new_random
-  : Result (core.result.Result mid.p256.PrivateKey error.Error)
-
 opaque mid.p521.PrivateKey.public_key_uncompressed
   : mid.p521.PrivateKey → Result (Array Std.U8 133#usize)
-
-opaque mid.p256.PrivateKey.public_key_uncompressed
-  : mid.p256.PrivateKey → Result (Array Std.U8 65#usize)
 
 opaque mid.p521.PrivateKey.diffie_hellman
   :
@@ -429,13 +485,6 @@ opaque mid.p521.PrivateKey.diffie_hellman
 opaque mid.p521.PublicKey.from_x962_uncompressed
   : Slice Std.U8 → Result (core.result.Result mid.p521.PublicKey error.Error)
 
-opaque mid.p256.PrivateKey.diffie_hellman
-  :
-  mid.p256.PrivateKey → mid.p256.PublicKey → Result (core.result.Result
-    mid.p256.SharedSecret error.Error)
-
-opaque mid.p256.PublicKey.from_x962_uncompressed
-  : Slice Std.U8 → Result (core.result.Result mid.p256.PublicKey error.Error)
 
 /-! MD5, which no proof covers. -/
 
@@ -494,10 +543,6 @@ opaque high.curve.P521.Insts.RindHighAgreementAgreePrivateKey.encode_scalar
 opaque high.curve.P521.Insts.RindHighAgreementAgreePrivateKey.load
   : high.agreement.Algorithm → high.agreement.Source →
     Result (core.result.Result (mid.p521.PrivateKey × high.agreement.PublicKey) error.Error)
-
-opaque high.curve.P256.Insts.RindHighAgreementAgreePrivateKey.load
-  : high.agreement.Algorithm → high.agreement.Source →
-    Result (core.result.Result (mid.p256.PrivateKey × high.agreement.PublicKey) error.Error)
 
 /-! s2n-bignum's routines for RSA, transliterated to inline assembly. -/
 
