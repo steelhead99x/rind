@@ -1,6 +1,7 @@
 import Rind.Aarch64.P256Ecdsa
 import Rind.Aarch64.Ed25519
 import Rind.Aarch64.Hmac
+import Rind.P256Order
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
@@ -539,7 +540,7 @@ theorem p256_ecdsa_key_pair_verify (h : Runs) (hheld : Held) (hc : Cached)
 /-- A P-256 public key parsed from its encoding: refused unless it is an
 X9.62 uncompressed point on the curve, and otherwise its verification is
 ECDSA's of a message's SHA-256 under that point. -/
-theorem p256_ecdsa_public_key_new (ho : P256Order) (h : Runs) (hheld : Held) (hc : Cached)
+theorem p256_ecdsa_public_key_new (h : Runs) (hheld : Held) (hc : Cached)
     (hsha : Sha256Blocks) (bytes : Slice U8) :
     high.signature.PublicKey.new high.signature.verify.ECDSA_P256_SHA256_FIXED bytes ⦃ r =>
       x962Outcome bytes.val (fun pk => ∀ (msg sig : Slice U8), msg.length ≤ maxInput →
@@ -562,7 +563,7 @@ theorem p256_ecdsa_public_key_new (ho : P256Order) (h : Runs) (hheld : Held) (hc
       refine ⟨_, rfl, fun msg sig hm => ?_⟩
       obtain ⟨dd, dg, hhash, hdg', hdg, he⟩ := ecdsa_sha256_spec hsha msg hm
       rw [← he]
-      exact WP.spec_mono (ecdsa_verify_spec h hc Sha256Sig vk _ hvk (ho _ hvk.1 hvk.2.1) msg sig dg dd hhash
+      exact WP.spec_mono (ecdsa_verify_spec h hc Sha256Sig vk _ hvk (p256Order_holds _ hvk.1 hvk.2.1) msg sig dg dd hhash
         hdg' hdg)
         fun r hr => verdict_of_outcome hr
     · subst hr; simp

@@ -131,11 +131,11 @@ over `p256Pow` and `p256Add`. `Rind/P256Multiples.lean` proves, from
 `Rind/P256Group.lean`'s group, the laws by which the twin multiplication's
 windowed sum is e/s·G + r/s·Q, and `Rind/N256Prime.lean` that n is prime, so
 every nonzero scalar has an inverse. The sum also needs Q's order n. A key
-pair's Q is its scalar times G, whose order follows from G's, but a parsed
-public key's is any point on the curve, so `p256_ecdsa_public_key_new` takes
-`P256Order`: every finite point on the curve has order n, as HOL Light's
-`P256_GROUP_ELEMENT_ORDER` proves from the group's size, which Mathlib cannot
-count yet. Key generation and signing need only G's order. The message's
+pair's Q is its scalar times G, whose order follows from G's. A parsed public
+key's point is any finite point of the curve; `Rind/P256Order.lean` proves
+each has order n, by the counting argument: at most 2p + 1 points, n divides
+that order, and 2n is impossible because the cubic x³ − 3x + b has no root.
+Key generation and signing need only G's order. The message's
 SHA-256 is FIPS 180-4's (`sha256E`), through the SHA-256 proof below, so
 signing and verification take its `Sha256Blocks` and messages of at most
 `maxInput` bytes. Signing draws nonces until r and s are both

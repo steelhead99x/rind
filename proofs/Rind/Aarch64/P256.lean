@@ -1161,11 +1161,10 @@ theorem p256_public_key (key : high.agreement.PrivateKey) (d : Nat) (hkey : p256
   simpa [high.agreement.PrivateKey.public_key] using hpk
 
 /-- A P-256 agreement with the peer's encoded public key: `p256Agreement` of
-this key's scalar. Its fault case never happens for a scalar in [1, n) if
-every finite point has order n, which follows from the curve's group having
-n points, a count that needs more than Mathlib proves (Hasse's bound at
-least). G's order, which the kernel checks, says nothing about the peer's
-point. -/
+this key's scalar. Its fault case never happens for a scalar in [1, n),
+because every finite point has order n (`Rind/P256Order.lean`). This
+statement does not use that fact; ECDSA verification with a parsed public
+key does. -/
 theorem p256_agree (h : Runs) (key : high.agreement.PrivateKey)
     (k : high.agreement.Keyed high.curve.P256 mid.p256.PrivateKey) (hk : key.«private» = .P256 k) (peer : Slice U8) :
     high.agreement.PrivateKey.agree key peer ⦃ r =>
