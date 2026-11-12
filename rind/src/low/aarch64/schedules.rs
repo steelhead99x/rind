@@ -351,13 +351,16 @@ fn mux_follows_the_override() {
         assert_eq!(via_mux, direct);
         return;
     }
+    // libtest's `--exact` matches the whole path, less the crate.
+    let test = concat!(module_path!(), "::mux_follows_the_override");
+    let test = test.split_once("::").unwrap().1;
     for (mode, disable, force) in [
         ("narrow", true, true),
         ("wide", false, true),
         ("narrow", true, false),
     ] {
         let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
-        cmd.args(["--exact", "mux_follows_the_override", "--nocapture"])
+        cmd.args(["--exact", test, "--nocapture"])
             .env(CHILD, mode)
             .env_remove("RIND_CPU_DISABLE_wide_mul")
             .env_remove("RIND_CPU_FORCE_wide_mul");
@@ -373,6 +376,12 @@ fn mux_follows_the_override() {
             "{mode}: {}{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
+        );
+        // A name that matches no test passes without running the child.
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("1 passed"),
+            "{mode}: {test} did not run:\n{stdout}"
         );
     }
 }

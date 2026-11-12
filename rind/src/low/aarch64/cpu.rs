@@ -551,13 +551,16 @@ CPU part	: 0xd0b
             assert_eq!(wide_multiplier(), mode == "wide");
             return;
         }
+        // libtest's `--exact` matches the whole path, less the crate.
+        let test = concat!(module_path!(), "::wide_mul_env_overrides");
+        let test = test.split_once("::").unwrap().1;
         for (mode, disable, force) in [
             ("narrow", true, true),
             ("wide", false, true),
             ("narrow", true, false),
         ] {
             let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
-            cmd.args(["--exact", "wide_mul_env_overrides", "--nocapture"])
+            cmd.args(["--exact", test, "--nocapture"])
                 .env(CHILD, mode)
                 .env_remove("RIND_CPU_DISABLE_wide_mul")
                 .env_remove("RIND_CPU_FORCE_wide_mul");
@@ -573,6 +576,12 @@ CPU part	: 0xd0b
                 "{mode}: {}{}",
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
+            );
+            // A name that matches no test passes without running the child.
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                stdout.contains("1 passed"),
+                "{mode}: {test} did not run:\n{stdout}"
             );
         }
     }
