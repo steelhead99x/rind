@@ -73,7 +73,8 @@ fn hkdf() {
     }
 }
 
-/// Empty-context ML-DSA verification, the only form the adapter signs.
+/// ML-DSA verification. The adapter verifies only with the empty context,
+/// as it signs, so a signature made under another context must be refused.
 #[test]
 fn ml_dsa_verify() {
     for (file, algorithm, theirs_algorithm) in [
@@ -100,9 +101,23 @@ fn ml_dsa_verify() {
         .unwrap_or_else(|_| panic!("failed to open {file}"));
         let tests: MlDsaFile = serde_json::from_reader(BufReader::new(data)).unwrap();
         let mut count = 0;
+        let mut contexts = 0;
         for group in tests.groups {
             for test in group.tests {
                 if !test.ctx.is_empty() || test.flags.iter().any(|flag| flag == "Internal") {
+                    let theirs = aws_lc_rs::signature::UnparsedPublicKey::new(
+                        theirs_algorithm,
+                        &group.public_key,
+                    )
+                    .verify(&test.msg, &test.sig)
+                    .is_ok();
+                    let ours = signature::UnparsedPublicKey::new(algorithm, &group.public_key)
+                        .verify(&test.msg, &test.sig)
+                        .is_ok();
+                    let parsed = signature::ParsedPublicKey::new(algorithm, &group.public_key)
+                        .is_ok_and(|key| key.verify_sig(&test.msg, &test.sig).is_ok());
+                    assert!(!ours && !parsed && !theirs, "{file} {}", test.id);
+                    contexts += 1;
                     continue;
                 }
                 let unparsed = signature::UnparsedPublicKey::new(algorithm, &group.public_key)
@@ -143,6 +158,165 @@ fn ml_dsa_verify() {
             }
         }
         assert!(count > 0, "{file} has no empty-context tests");
+        assert!(contexts > 0, "{file} has no context tests");
+    }
+}
+
+/// The ML-DSA signing vectors: each group's key loaded from its seed, its
+/// PKCS#8 document, or its expanded form, refused where the file says it is
+/// invalid, and otherwise checked against the file's public key. Signing is
+/// hedged, so each signature the key makes is verified, by rind and by
+/// aws-lc-rs, rather than compared with the file's.
+///
+/// A case under a non-empty context checks that its signature is refused,
+/// since the adapter neither signs nor verifies with a context. An
+/// `Internal` case signs FIPS 204's `mu` directly, which neither aws-lc-rs's
+/// `PqdsaKeyPair` nor this one offers; its group's key is still loaded and
+/// checked, and signs a message of its own.
+#[test]
+fn ml_dsa_sign() {
+    use signature::KeyPair as _;
+
+    for (set, algorithm, theirs_algorithm, verify, theirs_verify) in [
+        (
+            "44",
+            &signature::ML_DSA_44_SIGNING,
+            &aws_lc_rs::signature::ML_DSA_44_SIGNING,
+            &signature::ML_DSA_44,
+            &aws_lc_rs::signature::ML_DSA_44,
+        ),
+        (
+            "65",
+            &signature::ML_DSA_65_SIGNING,
+            &aws_lc_rs::signature::ML_DSA_65_SIGNING,
+            &signature::ML_DSA_65,
+            &aws_lc_rs::signature::ML_DSA_65,
+        ),
+        (
+            "87",
+            &signature::ML_DSA_87_SIGNING,
+            &aws_lc_rs::signature::ML_DSA_87_SIGNING,
+            &signature::ML_DSA_87,
+            &aws_lc_rs::signature::ML_DSA_87,
+        ),
+    ] {
+        for form in ["seed", "noseed"] {
+            let file = format!("mldsa_{set}_sign_{form}_test.json");
+            let data = File::open(format!(
+                "{}/../thirdparty/wycheproof/testvectors_v1/{file}",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap_or_else(|_| panic!("failed to open {file}"));
+            let tests: MlDsaSignFile = serde_json::from_reader(BufReader::new(data)).unwrap();
+            let (mut signed, mut refused_keys, mut contexts, mut internal) = (0, 0, 0, 0);
+            for group in tests.groups {
+                let invalid_key = group.tests.iter().any(|test| {
+                    test.flags.iter().any(|flag| {
+                        flag == "IncorrectPrivateKeyLength" || flag == "InvalidPrivateKey"
+                    })
+                });
+                let first = group.tests.first().map_or(0, |test| test.id);
+
+                // Every form of the key the group gives, from both libraries.
+                let mut keys = Vec::new();
+                if let Some(seed) = hex(&group.private_seed) {
+                    let ours = signature::PqdsaKeyPair::from_seed(algorithm, &seed);
+                    let theirs =
+                        aws_lc_rs::signature::PqdsaKeyPair::from_seed(theirs_algorithm, &seed);
+                    keys.push(("seed", ours, theirs.is_ok()));
+                }
+                if let Some(pkcs8) = hex(&group.private_key_pkcs8).filter(|der| !der.is_empty()) {
+                    let ours = signature::PqdsaKeyPair::from_pkcs8(algorithm, &pkcs8);
+                    let theirs =
+                        aws_lc_rs::signature::PqdsaKeyPair::from_pkcs8(theirs_algorithm, &pkcs8);
+                    keys.push(("PKCS#8", ours, theirs.is_ok()));
+                }
+                if let Some(raw) = hex(&group.private_key) {
+                    let ours = signature::PqdsaKeyPair::from_raw_private_key(algorithm, &raw);
+                    let theirs = aws_lc_rs::signature::PqdsaKeyPair::from_raw_private_key(
+                        theirs_algorithm,
+                        &raw,
+                    );
+                    keys.push(("expanded", ours, theirs.is_ok()));
+                }
+                assert!(!keys.is_empty(), "{file} {first}: no private key");
+
+                if invalid_key {
+                    for (how, ours, theirs) in keys {
+                        assert!(ours.is_err(), "{file} {first}: {how} key loaded");
+                        assert!(!theirs, "{file} {first}: aws-lc-rs loaded the {how} key");
+                    }
+                    refused_keys += 1;
+                    continue;
+                }
+
+                let public_key = hex(&group.public_key).expect("a valid key's public key");
+                let keys: Vec<_> = keys
+                    .into_iter()
+                    .map(|(how, ours, theirs)| {
+                        assert!(theirs, "{file} {first}: aws-lc-rs refused the {how} key");
+                        let ours =
+                            ours.unwrap_or_else(|err| panic!("{file} {first}: {how} key: {err:?}"));
+                        assert_eq!(
+                            ours.public_key().as_ref(),
+                            public_key,
+                            "{file} {first}: {how} key"
+                        );
+                        ours
+                    })
+                    .collect();
+                let ours = signature::UnparsedPublicKey::new(verify, &public_key);
+                let theirs =
+                    aws_lc_rs::signature::UnparsedPublicKey::new(theirs_verify, &public_key);
+
+                for test in &group.tests {
+                    let internal_case = test.flags.iter().any(|flag| flag == "Internal");
+                    let message: &[u8] = if internal_case {
+                        b"Internal case"
+                    } else {
+                        &test.msg
+                    };
+                    if internal_case {
+                        internal += 1;
+                    } else if !test.ctx.is_empty() {
+                        assert!(
+                            ours.verify(&test.msg, &test.sig).is_err(),
+                            "{file} {}: verified under a context",
+                            test.id
+                        );
+                        contexts += 1;
+                        continue;
+                    } else {
+                        assert_eq!(test.result, "valid", "{file} {}", test.id);
+                        assert!(
+                            ours.verify(&test.msg, &test.sig).is_ok(),
+                            "{file} {}: the file's signature",
+                            test.id
+                        );
+                        signed += 1;
+                    }
+                    for key in &keys {
+                        let mut sig = vec![0; algorithm.signature_len()];
+                        let len = key.sign(message, &mut sig).unwrap();
+                        assert!(
+                            ours.verify(message, &sig[..len]).is_ok(),
+                            "{file} {}",
+                            test.id
+                        );
+                        assert!(
+                            theirs.verify(message, &sig[..len]).is_ok(),
+                            "{file} {}",
+                            test.id
+                        );
+                    }
+                }
+            }
+            assert!(
+                signed > 0 && refused_keys > 0 && contexts > 0 && internal > 0,
+                "{file}: {signed} signed, {refused_keys} keys refused, {contexts} contexts, \
+                 {internal} internal"
+            );
+        }
     }
 }
 
@@ -172,6 +346,34 @@ struct MlDsaCase {
     result: String,
     #[serde(default)]
     flags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct MlDsaSignFile {
+    #[serde(rename = "testGroups")]
+    groups: Vec<MlDsaSignGroup>,
+}
+
+/// A signing group. The file gives `null` for a missing public key, so each
+/// field is read as text.
+#[derive(Deserialize)]
+struct MlDsaSignGroup {
+    #[serde(rename = "privateSeed", default)]
+    private_seed: Option<String>,
+    #[serde(rename = "privateKeyPkcs8", default)]
+    private_key_pkcs8: Option<String>,
+    #[serde(rename = "privateKey", default)]
+    private_key: Option<String>,
+    #[serde(rename = "publicKey", default)]
+    public_key: Option<String>,
+    tests: Vec<MlDsaCase>,
+}
+
+/// Decodes a field the group has. An empty seed or expanded key is a key
+/// of length zero, which must be refused; the seed-length groups leave
+/// `privateKeyPkcs8` empty, which means they give none.
+fn hex(field: &Option<String>) -> Option<Vec<u8>> {
+    field.as_deref().map(|text| ::hex::decode(text).unwrap())
 }
 
 /// A caller's own key type, which aws-lc-rs lets any crate define.
