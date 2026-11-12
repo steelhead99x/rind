@@ -18,6 +18,7 @@ use crate::mid::rng::RandomSource;
 /// panics if the encoding cannot fit.  this is not reachable
 /// for the combinations of hash functions / key sizes that
 /// we support.
+#[allow(clippy::needless_range_loop)]
 pub(crate) fn encode_pkcs1_sig(out: &mut [u8], digest_info: &[u8], hash: &[u8]) {
     // 1.  Apply the hash function to the message M to produce a hash
     //     value H:
@@ -43,21 +44,18 @@ pub(crate) fn encode_pkcs1_sig(out: &mut [u8], digest_info: &[u8], hash: &[u8]) 
     //
     //         EM = 0x00 || 0x01 || PS || 0x00 || T.
     //
-    // (we do this in a slightly more obvious way, and minimising
-    // bounds checks...)
+    // (by index rather than splitting, which Aeneas cannot translate, so
+    // `proofs/` can prove RSA verification)
 
-    let (padding, digest_info_out) = out.split_at_mut(em_len - t_len);
-    let (prefix_out, hash_out) = digest_info_out.split_at_mut(digest_info.len());
-    let (leader, rest) = padding.split_first_mut().unwrap();
-    let (top_sep, rest) = rest.split_first_mut().unwrap();
-    let (bot_sep, ps) = rest.split_last_mut().unwrap();
-
-    *leader = 0x00;
-    *top_sep = 0x01;
-    ps.fill(0xff);
-    *bot_sep = 0x00;
-    prefix_out.copy_from_slice(digest_info);
-    hash_out.copy_from_slice(hash);
+    let t_start = em_len - t_len;
+    out[0] = 0x00;
+    out[1] = 0x01;
+    for i in 2..t_start - 1 {
+        out[i] = 0xff;
+    }
+    out[t_start - 1] = 0x00;
+    out[t_start..t_start + digest_info.len()].copy_from_slice(digest_info);
+    out[t_start + digest_info.len()..].copy_from_slice(hash);
 }
 
 pub(crate) static DIGESTINFO_SHA1: &[u8] = &[
@@ -188,14 +186,16 @@ pub(crate) fn verify_pss_sig<H: Hash>(
 
     // 4.   If the rightmost octet of EM does not have hexadecimal value
     //      0xbc, output "inconsistent" and stop.
-    let (bc, em) = em.split_last_mut().unwrap();
-    if *bc != 0xbc {
+    // (by index, then one split, which Aeneas translates where splitting
+    // twice it cannot, so `proofs/` can prove RSA verification)
+    if em[em_len - 1] != 0xbc {
         return Err(Error::BadSignature);
     }
 
     // 5.   Let maskedDB be the leftmost emLen - hLen - 1 octets of EM,
     //      and let H be the next hLen octets.
-    let (masked_db, h) = em.split_at_mut(em_len - h_len - 1);
+    let (masked_db, h_bc) = em.split_at_mut(em_len - h_len - 1);
+    let h = &h_bc[..h_len];
 
     // 6.   If the leftmost 8emLen - emBits bits of the leftmost octet in
     //      maskedDB are not all equal to zero, output "inconsistent" and
@@ -221,16 +221,12 @@ pub(crate) fn verify_pss_sig<H: Hash>(
     // (with any sLen, PS runs to the first nonzero octet)
     let ps_len = match s_len {
         Some(s_len) => em_len - h_len - s_len - 2,
-        None => db
-            .iter()
-            .position(|b| *b != 0x00)
-            .ok_or(Error::BadSignature)?,
+        None => leading_zeroes(db),
     };
-    let (zeroes, one_salt) = db.split_at(ps_len);
-    let (one, salt) = one_salt.split_first().unwrap();
-    if zeroes.iter().any(|z| *z != 0x00) || *one != 0x01 {
+    if leading_zeroes(&db[..ps_len]) != ps_len || ps_len >= db.len() || db[ps_len] != 0x01 {
         return Err(Error::BadSignature);
     }
+    let salt = &db[ps_len + 1..];
 
     // 12.  Let
 
@@ -238,13 +234,11 @@ pub(crate) fn verify_pss_sig<H: Hash>(
 
     //      M' is an octet string of length 8 + hLen + sLen with eight
     //      initial zero octets.
-    let m_prime = [&[0u8; 8], m_hash, salt];
-
     // 13.  Let H' = Hash(M'), an octet string of length hLen.
     let mut ctx = H::new();
-    for d in m_prime {
-        ctx.update(d);
-    }
+    ctx.update(&[0u8; 8]);
+    ctx.update(m_hash);
+    ctx.update(salt);
     let h_prime = ctx.finish();
 
     // 14.  If H = H', output "consistent".  Otherwise, output
@@ -410,17 +404,41 @@ fn ct_mask(b: bool) -> u8 {
     u8::from(black_box(b)).wrapping_neg()
 }
 
+/// How many zero octets `bytes` starts with.
+///
+/// By index rather than through closures, which Aeneas cannot translate, so
+/// `proofs/` can prove RSA verification.
+#[allow(clippy::needless_range_loop)]
+fn leading_zeroes(bytes: &[u8]) -> usize {
+    let mut len = 0;
+    let mut zeroes = true;
+    for i in 0..bytes.len() {
+        zeroes &= bytes[i] == 0x00;
+        len += usize::from(zeroes);
+    }
+    len
+}
+
 /// Compute MGF1-H, and XOR the result into `out`.
+///
+/// By index rather than zipping chunks, which Aeneas cannot translate, so
+/// `proofs/` can prove RSA verification.
 fn mgf1_xor<H: Hash>(seed: &[u8], h_len: usize, out: &mut [u8]) {
-    for (chunk, counter) in out.chunks_mut(h_len).zip(0u32..) {
+    let mut counter = 0u32;
+    let mut done = 0;
+    while done < out.len() {
         let mut ctx = H::new();
         ctx.update(seed);
         ctx.update(&counter.to_be_bytes());
         let term = ctx.finish();
+        let term = term.as_ref();
 
-        for (out, t) in chunk.iter_mut().zip(term.as_ref().iter()) {
-            *out ^= *t;
+        let len = h_len.min(out.len() - done);
+        for i in 0..len {
+            out[done + i] ^= term[i];
         }
+        done += len;
+        counter += 1;
     }
 }
 

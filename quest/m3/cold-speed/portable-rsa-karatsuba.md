@@ -10,7 +10,7 @@ Found by [the 64-bit limbs work](https://github.com/moq-dev/rind/pull/614), whic
 
 - Likely cause, to confirm first: rind's `low/generic/mont.rs` multiplies and squares by the schoolbook method at every width, and aws-lc's C (`crypto/fipsmodule/bn/mul.c`) switches to Karatsuba from 16 words (`BN_MULL_SIZE_NORMAL`, `BN_SQR_RECURSIVE_SIZE_NORMAL`), except in `bn_mod_mul_montgomery_small` up to 17 words, which RSA-2048's primes take. RSA-3072 signing's 24-word primes and verification's 48-word modulus are where the gap begins.
 - If so, a Karatsuba product and square for the portable backend, of fixed structure: its split, the sign of each half-difference, and the carries chosen by masks, never by branches, with a ctgrind test, as `mont.rs`'s routines have. Measure its crossover against the schoolbook loop on the portable row, on both limb widths.
-- Its correctness argument is the textbook identity; the tests check it word for word against s2n-bignum on x86_64 and aarch64, on both limb widths, as `mont.rs`'s tests do now. It runs unproven, as the loop it speeds up does: [RSA verification's proof](/quest/m4/verified/rsa-verify.md) and [signing's](/quest/m4/verified/rsa-sign.md) cover the portable loop through [the portable backend's proofs](/quest/m4/verified/portable.md).
+- Its correctness argument is the textbook identity; the tests check it word for word against s2n-bignum on x86_64 and aarch64, on both limb widths, as `mont.rs`'s tests do now. It runs unproven, as the loop it speeds up does: [the portable backend's proofs](/quest/m4/verified/portable.md) cover that loop for RSA verification and [signing](/quest/m4/verified/rsa-sign.md).
 
 ## Related
 
