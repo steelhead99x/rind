@@ -2,9 +2,9 @@
 
 ## Goal
 
-x86_64 with SHA-NI runs a proven SHA-256 at today's speed, the in-register finish included, so SHA-256, HMAC-SHA256, and HKDF-SHA256 earn ✓ there.
+x86_64 with SHA-NI runs a proven SHA-256 at today's speed, the in-register finish included, so SHA-256, HMAC-SHA256, and HKDF-SHA256 earn ✓ there. RSA-2048 PSS verification earns it there too where the CPU also has BMI2 and ADX: its MGF1 and H' hash with SHA-256 inside the scheme, and the rest is proven by [moq-dev/rind#624](https://github.com/moq-dev/rind/pull/624).
 
-This epic's own work is the ✓: `Rind/X86_64/ShaBlocks.lean`'s `Sha256Blocks` no longer assumes `shaext` or `shaext_finish`, `HashAxioms.lean` pins the frozen routine's axiom in their place, `benchmarks/verified.toml` gives the x86_64 SHA-NI cells their proof line, noting the pinned unmerged s2n-bignum PR, and `BENCHMARKS.md` is rendered from it.
+This epic's own work is the ✓: `Rind/X86_64/ShaBlocks.lean`'s `Sha256Blocks` no longer assumes `shaext` or `shaext_finish`, `HashAxioms.lean` pins the frozen routine's axiom in their place, `benchmarks/verified.toml` gives the x86_64 SHA-NI cells their proof line, noting the pinned unmerged s2n-bignum PR, and `rsa2048-pss-sha256-verify` an entry beside rind's `rsa2048-pkcs1-sha256-verify` with `cpu = ["bmi2", "adx", "sha"]`, and `BENCHMARKS.md` is rendered from it.
 
 ## Plan
 
@@ -16,7 +16,8 @@ Step 1, measured 2026-11-11 on a Ryzen 9 9950X (Zen 5), a shared host, so noisy,
 
 Step 2's shape (decided 2026-11-11 in #611, without the maintainer): split the finish rather than prove LLVM's output of today's `sha256_finish` whole.
 - LLVM's output is 714 instructions with 13 branches on the tail's length, byte-sized loads, and calls to panic handlers, and needs `pslldq` and `por`, which neither s2n-bignum nor #450 models. A HOL Light proof would case-split every tail length over bytes.
-- Instead the padding becomes plain Rust that Aeneas translates, producing the last block's eight little-endian 64-bit words, and the rounds and the digest become one `asm!` block, frozen from LLVM's output of today's intrinsics, that takes those words in fixed registers, as today's code already builds its lanes from them with `_mm_set_epi64x`. The second padded block is zeros and the length, so the block needs only the length, passed as zero when the padding fits, which it cannot be otherwise.
-- Passing the words through a stack buffer instead, read back with 8-byte loads, measured 1-4% slower and 7.7% at SHA-256 32 bytes, so the words must stay in registers.
+- Instead the padding becomes plain Rust that Aeneas translates, and the rounds and the digest become one `asm!` block whose rounds are LLVM's output of today's intrinsics.
+- As built ([moq-dev/rind#626](https://github.com/moq-dev/rind/pull/626)): the padding returns the tail's count of whole 16-byte lanes, the lane where the message ends as two little-endian words with the 0x80 and, when it is the last lane and fits, the length, and the length; the block loads the whole lanes from the message itself, zeros the rest, and puts the length in the last lane or in a second block when the lane count is 4. Passing all eight words in registers instead made a one-block SHA-256 twice as slow on Arrow Lake: today's code loads whole lanes 16 bytes at a time, and Rust cannot. Through a stack buffer, read back with 8-byte loads, the words measured 1-4% slower and 7.7% at SHA-256 32 bytes.
 - Rejected: proving LLVM's whole output, for the reasons above.
+- Its cost (maintainer, 2026-11-12, on [moq-dev/rind#626](https://github.com/moq-dev/rind/pull/626)): ✅ accept the split's fixed cost on short input, an exception to performance first, since it is what lets SHA-256, HMAC, and HKDF earn ✓ on x86_64 SHA-NI. It ties at 64 bytes and up on SHA-256 and at 1200 bytes and up everywhere; below that SHA-256 and HMAC cost 0.5-3% on Arrow Lake, HKDF-SHA256 expand 5.3% on Arrow Lake, and HMAC at 32 bytes 4.3% on Zen 3 (rejected: keep tuning, such as moving the end lane's assembly into the block, which grows the HOL Light proof; drop the split and prove LLVM's whole finish).
 

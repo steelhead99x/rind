@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   # A pull request runs only the jobs whose inputs it touches, as `changes`
   # decides: armv7 and portable on their backends and scripts, the Dart jobs
-  # on rind-dart. The nightly runs every job.
+  # on rind-dart, openmls's suite on rind-openmls. The nightly runs every job.
   pull_request:
     branches: [main]
     paths:
@@ -15,6 +15,8 @@ on:
       - sh/armv7.sh
       - sh/portable.sh
       - rind-dart/**
+      - rind-openmls/**
+      - sh/openmls.sh
       - .github/workflows/build.yml
 
 permissions:
@@ -34,6 +36,7 @@ jobs:
       armv7: ${{ steps.match.outputs.armv7 }}
       portable: ${{ steps.match.outputs.portable }}
       dart: ${{ steps.match.outputs.dart }}
+      openmls: ${{ steps.match.outputs.openmls }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,7 +53,8 @@ jobs:
           for rule in \
             'armv7=^(rind/src/low/arm/|sh/armv7\.sh$|\.github/workflows/build\.yml$)' \
             'portable=^(rind/src/low/portable/|sh/portable\.sh$|\.github/workflows/build\.yml$)' \
-            'dart=^(rind-dart/|\.github/workflows/build\.yml$)'; do
+            'dart=^(rind-dart/|\.github/workflows/build\.yml$)' \
+            'openmls=^(rind-openmls/|sh/openmls\.sh$|\.github/workflows/build\.yml$)'; do
             if [ "$GITHUB_EVENT_NAME" != pull_request ] || printf '%s\n' "$changed" | grep -qE "${rule#*=}"; then
               echo "${rule%%=*}=true"
             else
@@ -199,9 +203,9 @@ jobs:
           echo "CC_${CARGO_BUILD_TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
 
       - name: Run tests (debug)
-        run: cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-str0m
+        run: cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m
       - name: Run tests (release)
-        run: env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-str0m --release
+        run: env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --release
 
   # 32-bit x86 Windows on the portable backend, which the x86_64 runner runs
   # natively. The qemu job tests Linux's, and the android job Android's.
@@ -224,9 +228,9 @@ jobs:
           targets: i686-pc-windows-msvc
 
       - name: Run tests (debug)
-        run: cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-str0m --locked
+        run: cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked
       - name: Run tests (release)
-        run: env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-str0m --locked --release
+        run: env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked --release
 
   # 32-bit ARM runs libcrux, or aws-lc's assembly for ChaCha20, NEON, and the
   # crypto extension. The recipe builds and lints Android and Linux gnueabihf,
@@ -436,6 +440,23 @@ jobs:
       - name: Build, lint, and test
         run: just portable
 
+  # openmls's own tests and vectors, run on rind-openmls in place of the
+  # openmls_rust_crypto it mirrors.
+  openmls:
+    needs: changes
+    if: needs.changes.outputs.openmls == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/just
+      - uses: ./.github/actions/nix
+
+      - name: Test
+        run: just openmls --release
+
   # The simulator runs the iOS tests natively on the Apple silicon runner;
   # devices' code is only built, since GitHub has no iOS device to run it.
   ios:
@@ -457,10 +478,11 @@ jobs:
       # aws-lc-rs's C, which the tests link, targets the SDK's own iOS
       # version unless told otherwise, and then needs symbols rustc's
       # default iOS version lacks; this gives both rustc's default.
+      # See UPSTREAM.md, "aws-lc-sys targets the SDK's iOS version".
       - name: Build tests (device)
         run: |
           export "$(rustc --print deployment-target --target aarch64-apple-ios)"
-          cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-str0m --target aarch64-apple-ios --no-run
+          cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios --no-run
 
       - name: Boot a simulator
         run: |
@@ -474,8 +496,8 @@ jobs:
           RIND_TEST_ARM_CRYPTO_EXT: 1
         run: |
           export "$(rustc --print deployment-target --target aarch64-apple-ios-sim)"
-          cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-str0m --target aarch64-apple-ios-sim
-          env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-str0m --target aarch64-apple-ios-sim --release
+          cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios-sim
+          env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios-sim --release
 
   # cross's images (see Cross.toml) hold an Android system for the tests, and
   # run aarch64, armv7, and i686 under qemu-user. The aarch64 and armv7 CPUs
@@ -526,4 +548,4 @@ jobs:
         env:
           CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: true
           CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS: true
-        run: env ${{ matrix.expect }} cross test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-str0m --locked --release --target ${{ matrix.target }}
+        run: env ${{ matrix.expect }} cross test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked --release --target ${{ matrix.target }}

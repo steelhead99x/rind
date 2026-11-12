@@ -192,6 +192,7 @@
           # the same arguments.
           # Ubuntu's AppArmor denies the sandbox its user namespace until
           # `kernel.apparmor_restrict_unprivileged_userns=0`, as the workflows set.
+          # See UPSTREAM.md, "Ubuntu's AppArmor denies Intel SDE's sandbox".
           sde = pkgs.buildFHSEnv {
             name = "sde";
             runScript = "${
@@ -427,6 +428,8 @@
                 ]
                 ++ pkgs.lib.optionals (!pkgs.stdenv.hostPlatform.isDarwin) [
                   # Marked broken on Darwin in nixpkgs.
+                  # See UPSTREAM.md, "nixpkgs marks release-plz broken on
+                  # Darwin".
                   release-plz
                   # admin/ctgrind's constant-time checks.
                   valgrind
@@ -540,6 +543,8 @@
                 # Its tests build with nixpkgs' rustc, whose instrumented
                 # binaries crash on exit, so the cache has no build. rind's
                 # coverage builds with the toolchain above instead.
+                # See UPSTREAM.md, "nixpkgs' Rust crashes cargo-llvm-cov's
+                # tests".
                 (pkgs.cargo-llvm-cov.overrideAttrs { doCheck = false; })
                 # aws-lc-rs builds C.
                 pkgs.cmake
@@ -581,6 +586,7 @@
             # Aeneas releases for it. Lake fetches the Lean toolchain that
             # `proofs/lean-toolchain` names, whose bundled `leantar` reads
             # Mathlib's cache, which nixpkgs' Lean cannot.
+            # See UPSTREAM.md, "nixpkgs' Lean cannot read Mathlib's cache".
             prove = pkgs.mkShell {
               inputsFrom = [ hol-light ];
               packages = [
@@ -710,6 +716,8 @@
             # `crtbeginS.o` included, use the BSS PLT, which lld links without
             # error into a binary that crashes. GNU ld handles both. gcc obeys
             # the last `-fuse-ld`, so a trailing one picks GNU ld.
+            # See UPSTREAM.md, "rust-lld cannot link ELFv1" and "lld links
+            # BSS-PLT objects into a crashing ppc32 binary".
             powerpc64le = qemu-shell {
               target = "powerpc64le-unknown-linux-gnu";
               cross = pkgs.pkgsCross.powernv;

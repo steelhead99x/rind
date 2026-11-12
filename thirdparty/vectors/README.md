@@ -17,8 +17,22 @@ mode's, one per line, for the KEMs rind offers. The revision in
 [hpkewg/hpke] repeats them unchanged. They are IETF contributions, under
 [BCP 78].
 
+`rfc9380/` holds [RFC 9380]'s hash-to-curve vectors, its Appendix J and K,
+from the CFRG draft's `poc/vectors` at the revision `admin/sync-vectors`
+pins: the `expand_message_xmd` files and the P-256, P-384, and P-521
+`_RO_` suites, named without the colons Windows cannot check out. They are
+IETF contributions too.
+
+`rfc9474/test-vectors.json` holds [RFC 9474]'s four RSABSSA vectors, from
+[blind-rsa-signatures] at the revision `admin/sync-vectors` pins, as the
+CFRG draft's repository holds stale ones. They are IETF contributions, under
+[BCP 78].
+
 [aws-lc]: https://github.com/aws/aws-lc
 [BoringSSL]: https://boringssl.googlesource.com/boringssl
 [RFC 9180]: https://www.rfc-editor.org/rfc/rfc9180.html
+[RFC 9380]: https://www.rfc-editor.org/rfc/rfc9380.html
 [hpkewg/hpke]: https://github.com/hpkewg/hpke
+[RFC 9474]: https://www.rfc-editor.org/rfc/rfc9474.html
+[blind-rsa-signatures]: https://github.com/jedisct1/rust-blind-rsa-signatures
 [BCP 78]: https://www.rfc-editor.org/info/bcp78

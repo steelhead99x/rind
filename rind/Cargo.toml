@@ -38,11 +38,18 @@ libcrux-sha2 = { version = "0.0.9", features = ["expose-hacl"] }
 libc = { version = "0.2", default-features = false }
 
 [dev-dependencies]
+# ristretto255's differential reference; aws-lc-rs has no ristretto255.
+curve25519-dalek = { version = "5", default-features = false, features = ["precomputed-tables"] }
 # Checks armv7's NIST curve arithmetic against s2n-bignum's on the other arches.
 fiat-crypto = { version = "0.3", default-features = false }
 # CCTV gzips its ML-KEM modulus vectors.
 flate2 = { version = "1.1.11", default-features = false, features = ["rust_backend"] }
 hex = { version = "0.4", features = ["serde"] }
+# The reference for P-521's hash-to-curve, which aws-lc lacks, and for each
+# curve's hash to a scalar, which aws-lc does not export.
+p256 = { version = "0.14", default-features = false, features = ["group-digest"] }
+p384 = { version = "0.14", default-features = false, features = ["group-digest"] }
+p521 = { version = "0.14", default-features = false, features = ["group-digest"] }
 # Without `fork` and `timeout`, which spawn processes wasm cannot.
 proptest = { version = "1.5.0", default-features = false, features = ["std", "bit-set"] }
 serde = { version = "1", features = ["derive"] }
@@ -61,6 +68,8 @@ aws-lc-rs = { version = "1.19", default-features = false, features = ["alloc", "
 aws-lc-sys = { version = "0.47", default-features = false }
 # HPKE, which aws-lc-rs does not expose either; `hazmat` reads its private keys.
 hpke-rs = { version = "0.8", default-features = false, features = ["hazmat", "rustcrypto", "std"] }
+# RSA blind signatures, which aws-lc-rs does not offer.
+blind-rsa-signatures = { version = "0.18", default-features = false }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [

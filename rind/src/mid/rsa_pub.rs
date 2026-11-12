@@ -67,13 +67,19 @@ impl RsaPublicKey {
         let c_mont = c.to_montgomery(&self.montifier, &self.n);
 
         // e's top bit is set, so the accumulator starts at c. Each product
-        // goes to the other of these, then they swap roles.
+        // goes to the other of these, which becomes the accumulator. A flag
+        // names it rather than swapped references, which Aeneas cannot
+        // translate, so `proofs/` can prove RSA verification.
         let (mut a, mut b) = (c_mont.clone(), RsaPosInt::zero());
-        let (mut accum, mut spare) = (&mut a, &mut b);
+        let mut in_a = true;
 
         for bit in (0..self.e.ilog2()).rev() {
-            accum.mont_sqr_into(spare, &self.n, self.n0);
-            core::mem::swap(&mut accum, &mut spare);
+            if in_a {
+                a.mont_sqr_into(&mut b, &self.n, self.n0);
+            } else {
+                b.mont_sqr_into(&mut a, &self.n, self.n0);
+            }
+            in_a = !in_a;
 
             // e is odd, so the last step multiplies, and by c itself rather
             // than c_mont it takes the result out of the montgomery domain
@@ -81,12 +87,23 @@ impl RsaPublicKey {
             let mask = 1 << bit;
             if self.e & mask == mask {
                 let term = if bit == 0 { &c } else { &c_mont };
-                accum.mont_mul_into(term, spare, &self.n, self.n0);
-                core::mem::swap(&mut accum, &mut spare);
+                if in_a {
+                    a.mont_mul_into(term, &mut b, &self.n, self.n0);
+                } else {
+                    b.mont_mul_into(term, &mut a, &self.n, self.n0);
+                }
+                in_a = !in_a;
             }
         }
 
-        Ok(accum.clone())
+        Ok(if in_a { a } else { b })
+    }
+
+    /// a * b mod n, for `a` and `b` below `n`. Constant time in both.
+    pub(crate) fn mul(&self, a: &RsaPosInt, b: &RsaPosInt) -> RsaPosInt {
+        // a * b * R^-1, then * R^2 * R^-1.
+        a.mont_mul(b, &self.n, self.n0)
+            .mont_mul(&self.montifier, &self.n, self.n0)
     }
 }
 

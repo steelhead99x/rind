@@ -39,7 +39,11 @@ The modules:
   P-256, P-384, and P-521, HKDF, and the AEADs: a recipient's keys, and
   sender, recipient, and export-only contexts.
 - `rsa`: RSA-OAEP encryption and decryption, with SHA-1 under `legacy`,
-  and the key sizes and public-key components both RSA modules take.
+  and the key sizes and public-key components the RSA modules take.
+- `blind_rsa`: RFC 9474's four RSABSSA-SHA384 variants: a server's key pair
+  that signs blinded messages, and a public key that blinds a message,
+  finalizes the reply into a signature, and verifies it, as Privacy Pass's
+  publicly verifiable tokens (RFC 9578) need.
 - `signature`: ECDSA on P-256, P-384, and P-521, RSA PKCS#1 v1.5 and PSS, and
   Ed25519 key pairs and verification, plus ECDSA over a `digest` the caller
   computed, with any SHA-2 hash, RSA keys given as their components, and

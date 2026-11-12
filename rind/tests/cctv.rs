@@ -131,8 +131,7 @@ fn ed25519_record_aws_lc_verdicts() {
     let temporary = format!("{path}.tmp");
     std::fs::write(&temporary, &text)
         .unwrap_or_else(|err| panic!("cannot write {temporary}: {err}"));
-    std::fs::rename(&temporary, &path)
-        .unwrap_or_else(|err| panic!("cannot replace {path}: {err}"));
+    std::fs::rename(&temporary, &path).unwrap_or_else(|err| panic!("cannot replace {path}: {err}"));
     // The file reads back as written and parses as the readers parse it.
     let written = std::fs::read_to_string(&path).unwrap();
     assert_eq!(written, text, "{path}");

@@ -39,9 +39,6 @@ opaque mid.md5.Md5State : Type
 /-- An MD5 context, which no proof covers. -/
 opaque mid.md5.Md5Context : Type
 
-/-- A SHA-3 context, whose sponge no proof covers. -/
-opaque mid.sha3.Sha3Context (R : Std.Usize) (OUT : Std.Usize) : Type
-
 /-- A `&'static T` that a wiped value may hold, as `Rind.Aarch64.Dispatch` models it:
 the `T`, since only the drop that wipes it leaves it `None`. -/
 @[reducible] def low.generic.zeroise.ZeroableRef (T : Type) : Type := T
