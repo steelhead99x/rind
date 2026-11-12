@@ -502,3 +502,21 @@ impl fmt::Debug for Ed25519KeyPair {
             .finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Signature;
+
+    #[test]
+    fn signature_buffer_fits_a_p384_asn1_signature_only() {
+        // P-384's longest ASN.1 signature is the size `MAX_LEN` is built for:
+        // a two-byte SEQUENCE length and two INTEGERs that each need a sign
+        // byte. Turning either `+` into `*` grows the buffer, so a signature
+        // one byte past that size must still be refused.
+        let longest = [0x30; 3 + 2 * (3 + 48)];
+        assert!(Signature::new(&longest).is_ok());
+        let mut longer = longest.to_vec();
+        longer.push(0x30);
+        assert!(Signature::new(&longer).is_err());
+    }
+}

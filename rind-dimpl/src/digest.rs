@@ -78,3 +78,25 @@ impl SecureRandom for Random {
         rind::rand::fill(buf).map_err(|_| CryptoError::OperationFailed(CryptoOperation::FillRandom))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use dimpl::crypto::SecureRandom;
+    use rind::digest;
+
+    use super::{RANDOM, Running};
+
+    #[test]
+    fn random_fill_replaces_the_buffer() {
+        let mut buf = [0x5a; 32];
+        RANDOM.fill(&mut buf).unwrap();
+        assert_ne!(buf, [0x5a; 32]);
+    }
+
+    #[test]
+    fn running_debug_names_the_type() {
+        let running = Running(digest::Context::new(&digest::SHA256));
+        let rendered = format!("{running:?}");
+        assert!(rendered.contains("Running"), "{rendered}");
+    }
+}

@@ -177,3 +177,61 @@ pub(crate) fn ed25519_pkcs8(der: &[u8], v1: bool) -> Result<Ed25519Pkcs8<'_>, Ke
     }
     Ok(Ed25519Pkcs8 { seed, public_key })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ed25519_pkcs8, rsa_public_key};
+
+    #[test]
+    fn positive_integer_refuses_a_negative_encoding() {
+        // An INTEGER whose first byte has the high bit set is negative unless
+        // a leading 0x00 precedes it. Deleting that arm accepts 0x80.
+        let negative = tlv(0x02, &[0x80]);
+        let exponent = tlv(0x02, &[0x01, 0x00, 0x01]);
+        let refused = tlv(0x30, &[negative, exponent.clone()].concat());
+        assert!(rsa_public_key(&refused).is_err());
+
+        let non_negative = tlv(0x02, &[0x00, 0x80]);
+        let accepted = tlv(0x30, &[non_negative, exponent].concat());
+        assert!(rsa_public_key(&accepted).is_ok());
+    }
+
+    #[test]
+    fn ed25519_pkcs8_refuses_the_versions_ring_refuses() {
+        // Version 2 is in range but not a version ring reads. Deleting that
+        // arm reports it as a bad encoding instead.
+        let unsupported = ed25519_document(2, false);
+        let Err(error) = ed25519_pkcs8(&unsupported, false) else {
+            panic!("version 2 was accepted");
+        };
+        assert_eq!(error.to_string(), "VersionNotSupported");
+
+        // A v2 document that ends before the public key is missing it, which
+        // the `at_end` guard names. Replacing the guard with `false` parses
+        // on and reports a bad encoding.
+        let missing = ed25519_document(1, false);
+        let Err(error) = ed25519_pkcs8(&missing, false) else {
+            panic!("a v1 document without a public key was accepted");
+        };
+        assert_eq!(error.to_string(), "PublicKeyIsMissing");
+    }
+
+    fn ed25519_document(version: u8, with_public_key: bool) -> Vec<u8> {
+        let oid = tlv(0x06, &[0x2b, 0x65, 0x70]);
+        let algorithm = tlv(0x30, &oid);
+        let seed = tlv(0x04, &tlv(0x04, &[0x11; 32]));
+        let mut body = [tlv(0x02, &[version]), algorithm, seed].concat();
+        if with_public_key {
+            // [1] IMPLICIT OCTET STRING, unused by these refusals.
+            body.extend(tlv(0x81, &[0x22; 32]));
+        }
+        tlv(0x30, &body)
+    }
+
+    fn tlv(tag: u8, body: &[u8]) -> Vec<u8> {
+        assert!(body.len() < 128);
+        let mut out = vec![tag, body.len() as u8];
+        out.extend_from_slice(body);
+        out
+    }
+}

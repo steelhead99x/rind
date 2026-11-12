@@ -361,6 +361,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn verify_debug_matches_aws_lc() {
+        let aws = rustls::crypto::aws_lc_rs::default_provider();
+        for alg in crate::SUPPORTED_SIG_ALGS.all {
+            let rendered = format!("{alg:?}");
+            // rustls names its type `AwsLcRsAlgorithm`. rind names `Verify`.
+            // The identifiers are the values that have to match; an empty
+            // `Debug` contains neither.
+            assert!(rendered.contains("Verify"), "{rendered}");
+            assert!(
+                aws.signature_verification_algorithms
+                    .all
+                    .iter()
+                    .any(|other| {
+                        other.public_key_alg_id() == alg.public_key_alg_id()
+                            && other.signature_alg_id() == alg.signature_alg_id()
+                    }),
+                "{rendered}"
+            );
+        }
+    }
+
     // Like rustls's own providers: `all` holds no algorithm twice.
     #[test]
     fn test_no_duplicate_algorithms() {

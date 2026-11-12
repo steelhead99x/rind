@@ -222,6 +222,33 @@ fn verify(
         .map(|_| ())
 }
 
+#[test]
+fn der_load_and_accessors() {
+    for algorithm in GENERATED {
+        let key = KeyPair::generate_for(algorithm).unwrap();
+        let der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der()));
+        let loaded = KeyPair::from_der_and_sign_algo(&der, algorithm).unwrap();
+        assert!(loaded.is_compatible(algorithm));
+        assert!(!loaded.is_compatible(&PKCS_RSA_SHA256));
+        assert_eq!(
+            loaded.compatible_algs().collect::<Vec<_>>(),
+            vec![algorithm]
+        );
+        let raw = loaded.public_key_raw();
+        assert!(raw.len() > 1, "{}", raw.len());
+        assert!(raw.iter().any(|byte| *byte != 0));
+        assert!(raw.iter().any(|byte| *byte != 1));
+        let rendered = format!("{loaded:?}");
+        assert!(rendered.contains("KeyPair"), "{rendered}");
+    }
+
+    let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
+    let pkcs1 = PrivateKeyDer::Pkcs1(rustls::pki_types::PrivatePkcs1KeyDer::from(vec![
+        0x30, 0x00,
+    ]));
+    assert!(KeyPair::from_der_and_sign_algo(&pkcs1, key.algorithm()).is_err());
+}
+
 fn load(provider: &CryptoProvider, cert: &CertificateDer<'_>, key: &KeyPair) {
     let key = PrivateKeyDer::Pkcs8(key.serialize_der().into());
     CertifiedKey::from_der(vec![cert.clone().into_owned()], key, provider).unwrap();

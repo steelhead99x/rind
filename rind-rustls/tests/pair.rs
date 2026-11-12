@@ -179,7 +179,13 @@ fn exercise(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>) 
     let mut client = ClientConnection::new(client_config, "localhost".try_into().unwrap()).unwrap();
     let mut server = ServerConnection::new(server_config).unwrap();
 
+    // A confidentiality limit of zero never finishes the handshake: each
+    // record asks for a key update. Bound the rounds so that mutant fails
+    // instead of hanging the suite.
+    let mut rounds = 0;
     while client.is_handshaking() && server.is_handshaking() {
+        rounds += 1;
+        assert!(rounds <= 8, "handshake did not finish");
         let mut buf = [0u8; 1024];
         let wr = client.write_tls(&mut &mut buf[..]).unwrap();
         server.read_tls(&mut &buf[..wr]).unwrap();
