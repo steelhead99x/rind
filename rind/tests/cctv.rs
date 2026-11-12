@@ -8,7 +8,8 @@
 // `ed25519_verdicts_match_aws_lc` checks that file against aws-lc where aws-lc
 // builds, and every run of `ed25519_edge_cases`, including wasm, checks rind
 // against the file. `ed25519_record_aws_lc_verdicts` rewrites the file from
-// aws-lc and is ignored, so a normal run only checks it.
+// aws-lc. It is ignored, and writes only with `RIND_RECORD_VERDICTS=1`, so
+// `--include-ignored` runs alongside the readers without touching the file.
 #![cfg(not(miri))]
 
 #[cfg(not(target_family = "wasm"))]
@@ -99,12 +100,20 @@ fn ed25519_verdicts_match_aws_lc() {
     }
 }
 
-/// Rewrites `tests/cctv/ed25519-verdicts.txt` from aws-lc. Ignored so a normal
-/// run only checks the file.
+/// Rewrites `tests/cctv/ed25519-verdicts.txt` from aws-lc when
+/// `RIND_RECORD_VERDICTS=1`, and otherwise does nothing.
+///
+/// Other tests in this binary read the file at the same time, so the new
+/// text goes to a temporary file that then replaces it by a rename: a reader
+/// sees the old file or the new one, never a partial one.
 #[cfg(not(target_family = "wasm"))]
 #[test]
 #[ignore = "rewrites rind/tests/cctv/ed25519-verdicts.txt from aws-lc"]
 fn ed25519_record_aws_lc_verdicts() {
+    if std::env::var_os("RIND_RECORD_VERDICTS").is_none() {
+        eprintln!("set RIND_RECORD_VERDICTS=1 to rewrite the verdicts file");
+        return;
+    }
     let path = ed25519_verdicts_path();
     let vectors = ed25519_vectors();
     let mut text = String::new();
@@ -117,7 +126,11 @@ fn ed25519_record_aws_lc_verdicts() {
         };
         text.push_str(&format!("{i} {verdict}\n"));
     }
-    std::fs::write(&path, text).unwrap_or_else(|err| panic!("cannot write {path}: {err}"));
+    let temporary = format!("{path}.tmp");
+    std::fs::write(&temporary, &text)
+        .unwrap_or_else(|err| panic!("cannot write {temporary}: {err}"));
+    std::fs::rename(&temporary, &path)
+        .unwrap_or_else(|err| panic!("cannot replace {path}: {err}"));
     let recorded = ed25519_verdicts();
     for vector in &vectors {
         assert_eq!(aws_lc_accepts(vector), recorded[vector.number]);
