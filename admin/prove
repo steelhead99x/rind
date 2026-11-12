@@ -475,7 +475,7 @@ p256_items() {
     items rind/src/mid/p256.rs '    pub(crate) fn new_random(' '    pub(crate) fn generate(rng: &mut dyn'
     items rind/src/mid/rng.rs 'impl RandomSource for SystemRandom {'
 }
-check_quote Aarch64/P256Dispatch p256_items
+check_quote X86_64/P256Dispatch p256_items
 ecdsa_items() {
     items rind/src/high/curve.rs 'impl Curve for P256 {'
     items rind/src/mid/p256.rs '    pub(crate) fn generate(rng: &mut dyn'
@@ -630,12 +630,13 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # opaque, from what the digest API, ML-KEM, and ML-DSA call.
 # MD5, which no proof covers, is opaque.
 # P-256's key generation draws through a `dyn RandomSource`, so it is opaque
-# too, and `proofs/Rind/Aarch64/P256Dispatch.lean` models it above the
+# too, and `proofs/Rind/X86_64/P256Dispatch.lean` models it above the
 # translated `PrivateKey::from_bytes`, as `EcdsaDispatch.lean` does for ECDSA,
 # with the signature API's ECDSA key pairs and statics, which hold function
 # pointers too. The generator table is translated, so
 # `proofs/Rind/Aarch64/P256Table.lean` can prove it holds what s2n-bignum's
-# proof assumes. HMAC's keyed states are translated over any hash, and its
+# proof assumes; x86_64's `base_multiply`, aws-lc's, which no proof covers
+# yet, is opaque. HMAC's keyed states are translated over any hash, and its
 # `Key` and `Context`, which hold function pointers, are not.
 # On x86_64, RSA verification is translated from `high::rsa::VerifyingKey`
 # down to `low::posint` and the Montgomery products' dispatch in
@@ -793,8 +794,15 @@ extract_kdf() {
 }
 
 extract x86_64 X86_64 \
-    --opaque '{impl crate::high::agreement::Agree for crate::high::curve::P256}::load' \
-    --opaque 'crate::mid::p256::_::_' \
+    --start-from crate::mid::p256::PrivateKey::from_bytes \
+    --opaque 'crate::mid::p256::_::generate' \
+    --opaque 'crate::mid::p256::_::new_random' \
+    --opaque 'crate::mid::p256::_::base_multiply' \
+    --include crate::low::x86_64::adx_mux::bignum_demont_p256 \
+    --include crate::low::x86_64::adx_mux::bignum_montmul_p256 \
+    --include crate::low::x86_64::adx_mux::bignum_montsqr_p256 \
+    --include crate::low::x86_64::adx_mux::bignum_tomont_p256 \
+    --include crate::low::x86_64::adx_mux::p256_scalarmul \
     --include crate::low::x86_64::adx_mux::bignum_demont_p384 \
     --include crate::low::x86_64::adx_mux::bignum_montmul_p384 \
     --include crate::low::x86_64::adx_mux::bignum_montsqr_p384 \
@@ -935,7 +943,7 @@ mkdir -p proofs/Rind/Portable
 cp "$out/lean/Rind/Portable/Types.lean" "$out/lean/Rind/Portable/Funs.lean" proofs/Rind/Portable/
 
 mkdir -p proofs/Rind/Aarch64/Kdf
-for file in Dispatch X25519 P384 DigestAlgorithm DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
+for file in Dispatch P256Dispatch P256Agree X25519 P384 DigestAlgorithm DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
     Blockwise Sha Hmac HmacDispatch HkdfExpand Kdf/TypesExternal Kdf/FunsExternal \
     CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3 AesCipher HkdfAes; do
     sed 's/X86_64/Aarch64/g; s/x86_64/aarch64/g' "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Aarch64/$file.lean"

@@ -85,8 +85,11 @@ writes for aarch64:
 
 `rfcx25519` is HOL Light's RFC 7748 X25519, clamping and masking included.
 
-P-256 ECDH on aarch64, from the same `PrivateKey` to s2n-bignum's routines, in
-`Rind/Aarch64/P256.lean`:
+P-256 ECDH, from the same `PrivateKey` to s2n-bignum's routines, in
+`Rind/Aarch64/P256.lean` on aarch64, and, for its agreement alone, in
+`Rind/X86_64/P256Agree.lean`, which `admin/prove` also writes for aarch64, so
+`p256_agree` and `p256_shared_secret` hold on x86_64 too, where key generation
+runs aws-lc's generator multiplication, which no proof covers yet:
 
 - `p256_generate`: the key's scalar is the first of up to 64 draws whose
   bytes, read big-endian, are in [1, n), it holds its public key, and the key
@@ -284,9 +287,8 @@ cannot translate. `Rind/X86_64/Dispatch.lean` models that dispatch by hand, in
 Lean definitions beside the Rust they model, with an agreement `Algorithm` as
 which static it is. P-256's key generation draws through a `dyn
 RandomSource`, which Aeneas cannot translate either, and
-`Rind/Aarch64/P256Dispatch.lean` models it the same way, for
-`Rind/Aarch64/Dispatch.lean` to call; on x86_64, where no theorem is about
-P-256, `Rind/X86_64/P256Dispatch.lean` leaves it opaque. The signature API's `EcdsaKeyPair` reaches each curve's code, and
+`Rind/X86_64/P256Dispatch.lean`, which `admin/prove` also writes for aarch64,
+models it the same way, for `Rind/<Arch>/Dispatch.lean` to call. The signature API's `EcdsaKeyPair` reaches each curve's code, and
 `PublicKey` each ECDSA key's parser and verifier, through function pointers,
 and P-256's ECDSA key generation draws through a `dyn RandomSource`;
 `Rind/Aarch64/EcdsaDispatch.lean` models them for P-256 with SHA-256 and
@@ -671,9 +673,10 @@ mentions `Verification::Rsa(` or builds an `Rsa` outside them.
   `Rind/P256Group.lean`: that `p256` is prime, by a Pratt certificate;
   `Rind/N256Prime.lean`: that `n256` is prime; `Rind/P256Multiples.lean`: the
   group laws and multiples ECDSA's twin multiplication relies on.
-- `Rind/Aarch64/P256Dispatch.lean`, `Rind/Aarch64/P256Table.lean`, and
-  `Rind/Aarch64/P256.lean`: the hand model of P-256's key generation, the
-  generator table's proof, and the P-256 ECDH proof.
+- `Rind/X86_64/P256Dispatch.lean`, `Rind/X86_64/P256Agree.lean`,
+  `Rind/Aarch64/P256Table.lean`, and `Rind/Aarch64/P256.lean`: the hand model
+  of P-256's key generation, the P-256 agreement proof on both targets, and
+  aarch64's generator table and key generation proofs.
 - `Rind/Aarch64/EcdsaDispatch.lean`, `Rind/Aarch64/P256Ecdsa.lean`, and
   `Rind/Aarch64/P256Signature.lean`: the hand model of ECDSA's dispatch and
   key generation, the proof of `high::ecdsa` and `mid::p256`'s ECDSA at
