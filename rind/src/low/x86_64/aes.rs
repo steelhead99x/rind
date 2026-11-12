@@ -9,6 +9,7 @@ use core::arch::x86_64::*;
 
 use super::aes_nohw::NohwKey;
 use super::cpu::{HaveAesHardware, HaveSsse3};
+use super::ghash::u128_to_m128i;
 use super::vpaes_x86_64::{VpaesDecKey, VpaesKey};
 use crate::low;
 
@@ -391,42 +392,42 @@ impl AesKey256 {
 
 const RCON: [i32; 10] = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36];
 
+// The expansions fill a local array, indexing their loops, and write `out`
+// once: Aeneas translates neither a loop that writes through a reference nor
+// one over an iterator of the round constants.
+#[allow(clippy::needless_range_loop)]
 #[target_feature(enable = "aes,ssse3")]
 fn aes128_expand(key: &[u8; 16], out: &mut [__m128i; 11]) {
-    // SAFETY: `key` is 16 bytes and can be loaded from
-    let mut t = unsafe { _mm_loadu_si128(key.as_ptr().cast()) };
-    out[0] = t;
-
-    for (rk, rcon) in out[1..].iter_mut().zip(RCON) {
-        t = _mm_xor_si128(xor_prefix(t), sub_rot_word(t, rcon));
-        *rk = t;
+    let mut t = load(key);
+    let mut rk = [t; 11];
+    for i in 0..10 {
+        t = _mm_xor_si128(xor_prefix(t), sub_rot_word(t, RCON[i]));
+        rk[i + 1] = t;
     }
+    *out = rk;
 }
 
+#[allow(clippy::needless_range_loop)]
 #[target_feature(enable = "aes,ssse3")]
 fn aes256_expand(key: &[u8; 32], out: &mut [__m128i; 15]) {
-    // SAFETY: `key` is 32 bytes and readable
-    let (mut a, mut b) = unsafe {
-        (
-            _mm_loadu_si128(key.as_ptr().cast()),
-            _mm_loadu_si128(key[16..].as_ptr().cast()),
-        )
-    };
-    out[0] = a;
-    out[1] = b;
+    let mut a = load(key[..16].try_into().unwrap());
+    let mut b = load(key[16..].try_into().unwrap());
+    let mut rk = [a; 15];
+    rk[1] = b;
 
     // Round keys alternate: the first of each pair takes RotWord and the
     // round constant, as AES-128's do, and the second only SubWord.
-    for (i, rcon) in RCON[..7].iter().enumerate() {
-        a = _mm_xor_si128(xor_prefix(a), sub_rot_word(b, *rcon));
-        out[2 * i + 2] = a;
+    for i in 0..7 {
+        a = _mm_xor_si128(xor_prefix(a), sub_rot_word(b, RCON[i]));
+        rk[2 * i + 2] = a;
         if i == 6 {
             break;
         }
         let sub = _mm_aesenclast_si128(_mm_shuffle_epi32(a, 0b11_11_11_11), zero());
         b = _mm_xor_si128(xor_prefix(b), sub);
-        out[2 * i + 3] = b;
+        rk[2 * i + 3] = b;
     }
+    *out = rk;
 }
 
 /// AES-192's schedule six words at a time: `a` holds each step's first four
@@ -436,17 +437,17 @@ fn aes256_expand(key: &[u8; 32], out: &mut [__m128i; 15]) {
 /// them from a vector's last word.
 #[target_feature(enable = "aes,ssse3")]
 fn aes192_expand(key: &[u8; 24]) -> [__m128i; 13] {
-    // SAFETY: `key` is 24 readable bytes
-    let (mut a, mut b) = unsafe {
-        (
-            _mm_loadu_si128(key.as_ptr().cast()),
-            _mm_loadl_epi64(key[16..].as_ptr().cast()),
-        )
-    };
+    let mut a = load(key[..16].try_into().unwrap());
+    let mut b = u128_to_m128i(u128::from(u64::from_le_bytes(
+        key[16..].try_into().unwrap(),
+    )));
     let rot_word_1 = _mm_setr_epi8(5, 6, 7, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 6, 7, 4);
     let mut out = [a; 13];
-    for (step, rcon) in (1..).zip(&RCON[..8]) {
-        let sub = _mm_aesenclast_si128(_mm_shuffle_epi8(b, rot_word_1), _mm_set1_epi32(*rcon));
+    for step in 1..9 {
+        let sub = _mm_aesenclast_si128(
+            _mm_shuffle_epi8(b, rot_word_1),
+            _mm_set1_epi32(RCON[step - 1]),
+        );
         a = _mm_xor_si128(xor_prefix(a), sub);
         if step % 2 == 1 {
             out[3 * (step - 1) / 2 + 1] = _mm_unpacklo_epi64(b, a);
@@ -489,10 +490,29 @@ fn xor_prefix(t: __m128i) -> __m128i {
     _mm_xor_si128(t, _mm_slli_si128(t, 8))
 }
 
+/// `block` as a vector, its first byte lowest, as `_mm_loadu_si128` loads it.
+/// A value rather than a pointer, which Aeneas cannot translate.
+#[inline]
+fn load(block: &[u8; 16]) -> __m128i {
+    u128_to_m128i(u128::from_le_bytes(*block))
+}
+
+/// `v`'s bytes, the lowest first, as `_mm_storeu_si128` stores them.
+#[inline]
+fn store(v: __m128i) -> [u8; 16] {
+    // SAFETY: every x86_64 CPU has SSE2
+    let (lo, hi) = unsafe {
+        (
+            _mm_cvtsi128_si64(v) as u64,
+            _mm_cvtsi128_si64(_mm_unpackhi_epi64(v, v)) as u64,
+        )
+    };
+    (u128::from(hi) << 64 | u128::from(lo)).to_le_bytes()
+}
+
 #[target_feature(enable = "aes")]
 fn aes128_block(round_keys: &[__m128i; 11], block: &[u8; 16]) -> [u8; 16] {
-    // SAFETY: `block` is 16 bytes and readable
-    let block = unsafe { _mm_loadu_si128(block.as_ptr().cast()) };
+    let block = load(block);
     let block = _mm_xor_si128(block, round_keys[0]);
     let block = _mm_aesenc_si128(block, round_keys[1]);
     let block = _mm_aesenc_si128(block, round_keys[2]);
@@ -504,28 +524,24 @@ fn aes128_block(round_keys: &[__m128i; 11], block: &[u8; 16]) -> [u8; 16] {
     let block = _mm_aesenc_si128(block, round_keys[8]);
     let block = _mm_aesenc_si128(block, round_keys[9]);
     let block = _mm_aesenclast_si128(block, round_keys[10]);
-    // SAFETY: both are 16 bytes, and any bits are a valid array
-    unsafe { core::mem::transmute(block) }
+    store(block)
 }
 
 /// One block under any key size, by its number of round keys.
 #[target_feature(enable = "aes")]
 fn aes_block<const N: usize>(round_keys: &[__m128i; N], block: &[u8; 16]) -> [u8; 16] {
-    // SAFETY: `block` is 16 bytes and readable
-    let mut block = unsafe { _mm_loadu_si128(block.as_ptr().cast()) };
+    let mut block = load(block);
     block = _mm_xor_si128(block, round_keys[0]);
     for round_key in &round_keys[1..N - 1] {
         block = _mm_aesenc_si128(block, *round_key);
     }
     block = _mm_aesenclast_si128(block, round_keys[N - 1]);
-    // SAFETY: both are 16 bytes, and any bits are a valid array
-    unsafe { core::mem::transmute(block) }
+    store(block)
 }
 
 #[target_feature(enable = "aes")]
 fn aes256_block(round_keys: &[__m128i; 15], block: &[u8; 16]) -> [u8; 16] {
-    // SAFETY: `block` is 16 bytes and readable
-    let block = unsafe { _mm_loadu_si128(block.as_ptr().cast()) };
+    let block = load(block);
     let block = _mm_xor_si128(block, round_keys[0]);
     let block = _mm_aesenc_si128(block, round_keys[1]);
     let block = _mm_aesenc_si128(block, round_keys[2]);
@@ -541,8 +557,7 @@ fn aes256_block(round_keys: &[__m128i; 15], block: &[u8; 16]) -> [u8; 16] {
     let block = _mm_aesenc_si128(block, round_keys[12]);
     let block = _mm_aesenc_si128(block, round_keys[13]);
     let block = _mm_aesenclast_si128(block, round_keys[14]);
-    // SAFETY: both are 16 bytes, and any bits are a valid array
-    unsafe { core::mem::transmute(block) }
+    store(block)
 }
 
 /// The round keys for `aesdec` from those for `aesenc`.
@@ -559,15 +574,13 @@ fn invert_round_keys<const N: usize>(round_keys: &[__m128i; N]) -> [__m128i; N] 
 
 #[target_feature(enable = "aes")]
 fn hw_decrypt_block<const N: usize>(round_keys: &[__m128i; N], block_inout: &mut [u8; 16]) {
-    // SAFETY: `block_inout` is 16 bytes and readable
-    let mut block = unsafe { _mm_loadu_si128(block_inout.as_ptr().cast()) };
+    let mut block = load(block_inout);
     block = _mm_xor_si128(block, round_keys[0]);
     for round_key in &round_keys[1..N - 1] {
         block = _mm_aesdec_si128(block, *round_key);
     }
     block = _mm_aesdeclast_si128(block, round_keys[N - 1]);
-    // SAFETY: `block_inout` is 16 bytes and writeable
-    unsafe { _mm_storeu_si128(block_inout.as_mut_ptr().cast(), block) };
+    *block_inout = store(block);
 }
 
 #[cfg(test)]

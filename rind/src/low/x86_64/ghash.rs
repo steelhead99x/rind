@@ -43,12 +43,12 @@ macro_rules! reduce {
         let $mi = _mm_xor_si128($mi, $hi);
 
         let ls = _mm_shuffle_epi32($lo, 0b01_00_11_10);
-        let $lo = _mm_clmulepi64_si128(GF128_POLY_HI, $lo, 0x00);
+        let $lo = _mm_clmulepi64_si128(u128_to_m128i(GF128_POLY_HI), $lo, 0x00);
         let $mi = _mm_xor_si128($mi, ls);
         let $mi = _mm_xor_si128($mi, $lo);
 
         let ms = _mm_shuffle_epi32($mi, 0b01_00_11_10);
-        let $mi = _mm_clmulepi64_si128(GF128_POLY_HI, $mi, 0x00);
+        let $mi = _mm_clmulepi64_si128(u128_to_m128i(GF128_POLY_HI), $mi, 0x00);
         let $hi = _mm_xor_si128($hi, ms);
         let $hi = _mm_xor_si128($hi, $mi);
         $hi
@@ -548,7 +548,7 @@ fn gf128_big_endian(h: __m128i) -> __m128i {
     let t = _mm_shuffle_epi32(h, 0b11_01_00_11);
     let t = _mm_srai_epi32(t, 31);
     let h = _mm_add_epi64(h, h);
-    let t = _mm_and_si128(GF128_POLY_CARRY_MASK, t);
+    let t = _mm_and_si128(u128_to_m128i(GF128_POLY_CARRY_MASK), t);
     _mm_xor_si128(h, t)
 }
 
@@ -645,10 +645,12 @@ pub(crate) fn store_partial(out: &mut [u8], block: __m128i) {
     }
 }
 
+/// `v` as a vector, its bits unchanged: computed from its halves, rather than
+/// transmuted, so that Aeneas translates it.
 #[inline]
-fn u128_to_m128i(v: u128) -> __m128i {
-    // SAFETY: sizeof(u128) == sizeof(__m128i), all bits have same meaning
-    unsafe { mem::transmute(v) }
+pub(super) fn u128_to_m128i(v: u128) -> __m128i {
+    // SAFETY: every x86_64 CPU has SSE2
+    unsafe { _mm_set_epi64x((v >> 64) as i64, v as i64) }
 }
 
 // SAFETY: sizeof(u128) == sizeof(__m128i), all bits have same meaning
@@ -665,8 +667,7 @@ const TERNARY_XOR: i32 = 0x96;
 /// R is 0xe100..00u128
 ///
 /// We need this in a __m128i, but only the bottom 64-bits are used.
-// SAFETY: sizeof(u128) == sizeof(__m128i), all bits have same meaning
-const GF128_POLY_HI: __m128i = unsafe { mem::transmute(0xc2000000_00000000u128) };
+const GF128_POLY_HI: u128 = 0xc2000000_00000000;
 
 /// The same as GF128_POLY_HI, but in the top qword.
 // SAFETY: sizeof(u128) == sizeof(__m128i), all bits have same meaning
@@ -674,9 +675,7 @@ const GF128_POLY_LO: __m128i =
     unsafe { mem::transmute([0xc2000000_00000000_00000000_00000000u128]) };
 
 /// This is, again, R rotated left by one, but with a 2^64 term
-// SAFETY: sizeof(u128) == sizeof(__m128i), all bits have same meaning
-const GF128_POLY_CARRY_MASK: __m128i =
-    unsafe { mem::transmute(0xc2000000_00000001_00000000_00000001u128) };
+const GF128_POLY_CARRY_MASK: u128 = 0xc2000000_00000001_00000000_00000001;
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
