@@ -295,6 +295,15 @@ jobs:
       - name: ct-qemu
         run: nix develop .#ct-qemu-aarch64 --command admin/ct-qemu --target aarch64-unknown-linux-gnu
 
+      # This runner is a wide core, so the step above traces `_alt`. The
+      # narrow schedules are what Cortex-A72, Cortex-A76, and Neoverse N1 run.
+      - name: ct-qemu, narrow multiplier
+        run: nix develop .#ct-qemu-aarch64 --command admin/ct-qemu --target aarch64-unknown-linux-gnu
+        env:
+          RUSTFLAGS: --cfg rind_cpu_disable
+          RIND_CPU_DISABLE_wide_mul: 1
+          RIND_TEST_ARM_WIDE_MUL: 0
+
   # BINSEC proves each `ct_binsec` test's region constant time for every
   # secret at once, symbolically, on the code the runner's CPU takes short of
   # the instructions it cannot decode (see `admin/ct-binsec`). The portable
@@ -319,6 +328,16 @@ jobs:
           - backend: aarch64
             os: ubuntu-24.04-arm
             tests: --exact ct_binsec_x25519 ct_binsec_mont_mul ct_binsec_chacha20 ct_binsec_constant_time_verify
+          # The row above follows this runner's core, which is wide, so its
+          # X25519 and Montgomery product are `_alt` and `bn_mul_mont`. This
+          # row forces the narrow schedules. ECDH, Ed25519, and ECDSA stay
+          # with `admin/ct-qemu`: BINSEC cannot decode `mrs` of `tpidr_el0`
+          # in glibc's malloc or `tbl`, the same limit as the wide row.
+          - backend: aarch64-narrow
+            os: ubuntu-24.04-arm
+            rustflags: --cfg rind_cpu_disable
+            tests: --exact ct_binsec_x25519 ct_binsec_mont_mul
+            disable_wide: 1
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -329,8 +348,14 @@ jobs:
 
       - name: ct-binsec
         run: |
+          # An empty value still counts as set, and would force every row narrow.
+          if [ "${DISABLE_WIDE:-}" = 1 ]; then
+            export RIND_CPU_DISABLE_wide_mul=1
+            export RIND_TEST_ARM_WIDE_MUL=0
+          fi
           read -ra tests <<< "$TESTS"
           nix develop .#binsec --command admin/ct-binsec --timeout 480 "${tests[@]}"
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
           TESTS: ${{ matrix.tests }}
+          DISABLE_WIDE: ${{ matrix.disable_wide }}

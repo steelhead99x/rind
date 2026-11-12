@@ -3,13 +3,13 @@
 //! Schedules s2n-bignum's elliptic-curve routines for this core's multiplier.
 //!
 //! The sibling modules without a `_narrow` suffix are s2n-bignum's `_alt`
-//! schedules, written for cores that issue `umulh` widely: Apple's, and
-//! Neoverse V1, V2, V3, and N2. The `_narrow` modules are the other
-//! schedules, for cores whose high multiply is lightly pipelined.
-//! Cortex-A76 retires a `umulh` once every four cycles, and there the
-//! narrow X25519 is the one aws-lc runs. Both are correct on every
-//! core rind supports; a core this crate does not recognise runs the
-//! narrow schedule. `cpu::wide_multiplier` is the choice.
+//! schedules, written for cores that issue `umulh` widely. The `_narrow`
+//! modules are the other schedules. Cortex-A76 retires a `umulh` once
+//! every four cycles, and there the narrow X25519 is the one aws-lc runs.
+//! Both are correct on every core. Linux selects narrow only for
+//! Cortex-A72, Cortex-A76, and Neoverse N1; every other core, including
+//! one this crate does not recognise, keeps `_alt`. `cpu::wide_multiplier`
+//! is the choice.
 
 #[inline]
 pub(crate) fn bignum_invsqrt_p25519(z: &mut [u64; 4], x: &[u64; 4]) -> u64 {
@@ -211,49 +211,10 @@ pub(crate) fn p521_jscalarmul(res: &mut [u64; 27], scalar: &[u64; 9], point: &[u
 
 #[cfg(test)]
 mod tests {
-    /// Both schedules agree on these inputs. The points are on the curve,
-    /// which is the precondition the scalar-multiplication proofs state.
+    /// Both schedules agree. The cases live in `schedules`, which regeneration
+    /// of this file does not overwrite.
     #[test]
     fn schedules_agree() {
-        let scalar = [
-            0x0123_4567_89ab_cdef,
-            0xfedc_ba98_7654_3210,
-            0x0f0e_0d0c_0b0a_0908,
-            0x0706_0504_0302_0100,
-        ];
-        let point = [9, 0, 0, 0];
-        let mut wide = [0; 4];
-        let mut narrow = [0; 4];
-        super::super::curve25519_x25519::curve25519_x25519(&mut wide, &scalar, &point);
-        super::super::curve25519_x25519_narrow::curve25519_x25519(&mut narrow, &scalar, &point);
-        assert_eq!(wide, narrow);
-        super::super::curve25519_x25519base::curve25519_x25519base(&mut wide, &scalar);
-        super::super::curve25519_x25519base_narrow::curve25519_x25519base(&mut narrow, &scalar);
-        assert_eq!(wide, narrow);
-
-        let mut wide8 = [0; 8];
-        let mut narrow8 = [0; 8];
-        super::super::edwards25519_scalarmulbase::edwards25519_scalarmulbase(&mut wide8, &scalar);
-        super::super::edwards25519_scalarmulbase_narrow::edwards25519_scalarmulbase(
-            &mut narrow8,
-            &scalar,
-        );
-        assert_eq!(wide8, narrow8);
-
-        // P-256's generator, affine, little-endian limbs.
-        let g = [
-            0xf4a1_3945_d898_c296,
-            0x7703_7d81_2deb_33a0,
-            0xf8bc_e6e5_63a4_40f2,
-            0x6b17_d1f2_e12c_4247,
-            0xcbb6_4068_37bf_51f5,
-            0x2bce_3357_6b31_5ece,
-            0x8ee7_eb4a_7c0f_9e16,
-            0x4fe3_42e2_fe1a_7f9b,
-        ];
-        let two = [2, 0, 0, 0];
-        super::super::p256_scalarmul::p256_scalarmul(&mut wide8, &two, &g);
-        super::super::p256_scalarmul_narrow::p256_scalarmul(&mut narrow8, &two, &g);
-        assert_eq!(wide8, narrow8);
+        super::super::schedules::agree();
     }
 }

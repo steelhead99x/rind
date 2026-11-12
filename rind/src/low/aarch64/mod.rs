@@ -162,3 +162,5 @@ pub(crate) mod sha3_keccak_nof4_f1600;
 pub(crate) mod sha512;
 pub(crate) mod vpaes_armv8;
 pub(crate) mod wide_mux;
+#[cfg(test)]
+mod schedules;

@@ -117,14 +117,16 @@ with portable Rust in place of the assembly armv7 runs regardless.
 
 - aarch64 chooses s2n-bignum's schedule by the multiplier for X25519,
   Ed25519, the P-256, P-384, and P-521 scalar multiplications, and RSA's
-  16-word and 32-word products. Apple's cores and Neoverse V1, V2, V3, and N2
-  run the `_alt` schedules. Cortex-A72, Cortex-A76, Neoverse N1, and a core
-  rind does not recognise run the other schedules. Each of those has a HOL
-  Light proof that embeds the object's bytes, which `admin/prove-bytes`
-  checks. The SLOTHY field routines whose proofs are equivalences to an
-  asserted base program stay on `_alt`, because that check needs the byte
-  list. rind's Lean proofs of X25519, Ed25519, and P-256 name the `_alt`
-  routines, so those benchmark ✓ marks are the wide-multiplier cores.
+  16-word and 32-word products. Linux selects the narrow schedules only when
+  every online core is Cortex-A72, Cortex-A76, or Neoverse N1. Apple, Neoverse
+  V1, V2, V3, and N2, Cobalt 100, a mixed list, a core rind does not recognise,
+  and every OS but Linux keep the `_alt` schedules. Each imported routine has
+  a HOL Light proof that embeds the object's bytes, which `admin/prove-bytes`
+  checks. The narrow path has those routine proofs and not yet rind's Lean
+  composition: the Lean proofs of X25519, Ed25519, and P-256 name the `_alt`
+  routines, so those benchmark ✓ marks are the `_alt` cores. The SLOTHY field
+  routines whose proofs are equivalences to an asserted base program stay on
+  `_alt`, because that check needs the byte list.
 - AES header protection on aarch64 pays the same indirect call as AES-GCM
   key setup on x86_64.
 - armv7 without crypto: SHA-256 and SHA-1 run aws-lc's NEON routines, or

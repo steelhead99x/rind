@@ -32,10 +32,13 @@ pub fn check() -> Result<(), MissingFeature> {
 
 /// Whether this CPU runs s2n-bignum's wide-multiplier schedules.
 ///
-/// On aarch64 that is Apple's cores and Neoverse V1, V2, V3, and N2.
-/// Cortex-A72, Cortex-A76, Neoverse N1, and a core this crate does not
-/// recognise run the other schedules. On every other architecture this is
-/// false: those builds have no such choice.
+/// On aarch64 the narrow schedules run only when Linux's `/proc/cpuinfo`
+/// names every online core as Cortex-A72, Cortex-A76, or Neoverse N1.
+/// Apple's cores, Neoverse V1, V2, V3, and N2, Cobalt 100, a mixed
+/// big.LITTLE list, a core this crate does not recognise, an unreadable
+/// cpuinfo, and every operating system but Linux keep the `_alt`
+/// schedules. On every other architecture this is false: those builds have
+/// no such choice.
 #[must_use]
 pub fn wide_multiplier() -> bool {
     #[cfg(rind_backend = "aarch64")]
