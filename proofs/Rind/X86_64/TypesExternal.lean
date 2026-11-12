@@ -52,6 +52,7 @@ opaque low.x86_64.cpu.HaveAvx512ForAesGcm : Type
 
 /-- The AES keys and GHASH tables of the tiers no proof covers. -/
 opaque low.x86_64.vpaes_x86_64.VpaesKey : Type
+opaque low.x86_64.vpaes_x86_64.VpaesDecKey : Type
 opaque low.x86_64.aes_nohw.NohwKey : Type
 opaque low.x86_64.ghash_ssse3_x86_64.Ssse3Table : Type
 opaque low.x86_64.ghash_nohw.NohwTable : Type
