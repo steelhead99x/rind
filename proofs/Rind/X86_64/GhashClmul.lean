@@ -92,11 +92,16 @@ theorem mul_model_eq (lo mi hi x h : BitVec 128) :
     swap_lanes, bind_ok, e0, e4, f0, f4, Bool.false_eq_true, ite_false, ite_true, lane64_0, lane64_1,
     karaTerms]
 
+/-- The model's `reduce!` constant is the translation's `u128_to_m128i(GF128_POLY_HI)`. -/
+theorem polyHi_eq :
+    low.x86_64.ghash.u128_to_m128i low.x86_64.ghash.GF128_POLY_HI = ok low.x86_64.ghash.polyHi := by
+  rw [u128_to_m128i_eq, poly_hi_bv]; rfl
+
 theorem reduce_model_eq (lo mi hi : BitVec 128) :
     low.x86_64.ghash.reduce lo mi hi = ok (reduceModel lo mi hi) := by
   have e0 : (I32.bv 0#i32).getLsbD 0 = false := by decide
   have e4 : (I32.bv 0#i32).getLsbD 4 = false := by decide
-  simp only [low.x86_64.ghash.reduce, low.x86_64.ghash.GF128_POLY_HI,
+  simp only [low.x86_64.ghash.reduce, low.x86_64.ghash.polyHi,
     core.core_arch.x86.sse2._mm_shuffle_epi32, core.core_arch.x86.sse2._mm_xor_si128,
     core.core_arch.x86.pclmulqdq._mm_clmulepi64_si128, swap_lanes, bind_ok, e0, e4,
     Bool.false_eq_true, ite_false, lane64_0, poly_hi_lo, reduceModel]
@@ -126,7 +131,7 @@ theorem shuffle_byteswap (v : BitVec 128) :
   congr 1
 
 /-- A block of bytes as GHASH's multiplies take it: its bytes reversed. -/
-def blockBE (b : List U8) : BitVec 128 := reverseBytesQuad32 (low.x86_64.aes.load b)
+def blockBE (b : List U8) : BitVec 128 := reverseBytesQuad32 (loadBytes b)
 
 theorem load_be_eq (b : List U8) : low.x86_64.ghash.load_be b = ok (blockBE b) := by
   simp only [low.x86_64.ghash.load_be, low.x86_64.ghash.BYTESWAP, bind_ok, shuffle_byteswap, blockBE]
