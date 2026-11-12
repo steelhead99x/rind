@@ -343,6 +343,17 @@ jobs:
           RIND_DART_CROSS_TARGETS: ${{ matrix.cross }}
         run: dart test
 
+      # rind_cryptography is Dart over the rind package, whose FFI the steps
+      # above test on every host, so one host runs its tests and the
+      # cryptography package's own.
+      - name: Run rind_cryptography's tests
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: rind-dart/cryptography
+        run: |
+          dart pub get
+          dart test
+          dart run tool/upstream_test.dart
+
   # rind-dart's tests on an Android emulator, through the Flutter app in
   # rind-dart/integration. The x86_64 image runs x86_64 natively, and armv7,
   # for its 32-bit pointers, under its ARM translation.
