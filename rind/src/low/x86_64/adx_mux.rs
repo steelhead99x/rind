@@ -30,7 +30,7 @@ mux! {
     p256_montjadd / p256_montjadd_alt(p3: &mut [u64; 12], p1: &[u64; 12], p2: &[u64; 12]);
     p256_montjdouble / p256_montjdouble_alt(p3: &mut [u64; 12], p1: &[u64; 12]);
     p256_montjmixadd / p256_montjmixadd_alt(p3: &mut [u64; 12], p1: &[u64; 12], p2: &[u64; 8]);
-    p256_montjscalarmul / p256_montjscalarmul_alt(res: &mut [u64; 12], scalar: &[u64; 4], point: &[u64; 12]);
+    p256_scalarmul / p256_scalarmul_alt(res: &mut [u64; 8], scalar: &[u64; 4], point: &[u64; 8]);
 
     bignum_demont_p384 / bignum_demont_p384_alt(z: &mut [u64; 6], x: &[u64; 6]);
     bignum_montmul_p384 / bignum_montmul_p384_alt(z: &mut [u64; 6], x: &[u64; 6], y: &[u64; 6]);
@@ -151,8 +151,8 @@ pub(super) mod tests {
             same2(
                 &mut rng,
                 255,
-                p256_montjscalarmul::p256_montjscalarmul,
-                p256_montjscalarmul_alt::p256_montjscalarmul_alt,
+                p256_scalarmul::p256_scalarmul,
+                p256_scalarmul_alt::p256_scalarmul_alt,
             );
 
             same1(

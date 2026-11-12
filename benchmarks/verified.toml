@@ -54,7 +54,7 @@
 # such as SHA-256's block function on x86_64 or without the crypto extension,
 # under padding and HMAC glue that `proofs/` proves, ChaCha20-Poly1305's
 # aws-lc one-pass routines on x86_64, under glue `proofs/` proves, or x86_64
-# P-256 ECDH's Jacobian-to-affine conversion.
+# P-256's generator multiplication, aws-lc's.
 #
 # rind's RSA-2048 PKCS#1 v1.5 verification earns the ✓ on x86_64 with BMI2
 # and ADX, whose Montgomery products are s2n-bignum's Karatsuba routines; its

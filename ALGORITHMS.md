@@ -336,9 +336,8 @@ not cover rind's in-place calls.
 | `p256_montjdouble_alt` | `p256_montjdouble_alt`: `P256_MONTJDOUBLE_ALT_SUBROUTINE_SAFE` | not imported |
 | `p256_montjmixadd` | `p256_montjmixadd`: none | `p256_montjmixadd_alt`: none |
 | `p256_montjmixadd_alt` | `p256_montjmixadd_alt`: none | not imported |
-| `p256_montjscalarmul` | `p256_montjscalarmul`: `P256_MONTJSCALARMUL_SUBROUTINE_SAFE` | not imported |
-| `p256_montjscalarmul_alt` | `p256_montjscalarmul_alt`: `P256_MONTJSCALARMUL_ALT_SUBROUTINE_SAFE` | not imported |
-| `p256_scalarmul` | not imported | `p256_scalarmul_alt`: none |
+| `p256_scalarmul` | `p256_scalarmul`: none | `p256_scalarmul_alt`: none |
+| `p256_scalarmul_alt` | `p256_scalarmul_alt`: none | not imported |
 | `p256_scalarmulbase` | not imported | `p256_scalarmulbase_alt`: none |
 | `p384_montjadd` | `p384_montjadd`: `P384_MONTJADD_SUBROUTINE_SAFE` | `p384_montjadd_alt`: `P384_MONTJADD_ALT_SUBROUTINE_SAFE` |
 | `p384_montjadd_alt` | `p384_montjadd_alt`: `P384_MONTJADD_ALT_SUBROUTINE_SAFE` | not imported |
@@ -460,9 +459,8 @@ by its SSE2 or AVX2 routine and added by its mixed addition, with `mulq` or
 with BMI2 and ADX, as aws-lc's `ecp_nistz256_point_mul_base` runs them. On
 aarch64 it is s2n-bignum's `p256_scalarmulbase`, over 6-bit Booth windows and
 a table of each window's 32 multiples (an 88KB constant table). Variable
-point multiplication is s2n-bignum's `p256_montjscalarmul` on x86_64, and on
-aarch64 its `p256_scalarmul`, whose proof covers the conversion back to
-affine coordinates.
+point multiplication is s2n-bignum's `p256_scalarmul` on both, whose proof
+covers the conversion back to affine coordinates.
 
 armv7 runs the aarch64 algorithms for P256 in portable Rust, over
 fiat-crypto's field and scalar arithmetic, except its Montgomery
