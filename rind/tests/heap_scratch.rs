@@ -31,50 +31,69 @@ fn freed_blocks<K, R>(keys: [K; 2], op: impl Fn(&K) -> R) -> [Vec<Vec<u8>>; 2] {
     keys.map(|key| freed(|| op(&key)).1)
 }
 
-/// Whether the freed blocks differ, in count, length, or bytes.
-fn blocks_differ(left: &[Vec<u8>], right: &[Vec<u8>]) -> bool {
-    left.len() != right.len()
-        || left
-            .iter()
-            .zip(right)
-            .any(|(a, b)| a.len() != b.len() || a != b)
+/// How the blocks freed under two keys differ.
+#[derive(Debug)]
+enum Difference {
+    /// A different number or size of blocks: the key steered the allocations.
+    Layout,
+    /// Block `i` holds different bytes under each key.
+    Bytes(usize),
+}
+
+/// How `left` and `right` differ, if they do.
+fn difference(left: &[Vec<u8>], right: &[Vec<u8>]) -> Option<Difference> {
+    let layout = |blocks: &[Vec<u8>]| blocks.iter().map(Vec::len).collect::<Vec<_>>();
+    if layout(left) != layout(right) {
+        return Some(Difference::Layout);
+    }
+    left.iter()
+        .zip(right)
+        .position(|(a, b)| a != b)
+        .map(Difference::Bytes)
 }
 
 /// Fails if `op` frees a block under one of `keys` whose bytes differ from
 /// those of the block it frees at the same point under the other.
 fn independent<K, R>(what: &str, keys: [K; 2], op: impl Fn(&K) -> R) {
     let [left, right] = freed_blocks(keys, op);
-    assert!(
-        !blocks_differ(&left, &right),
-        "{what}: holds bytes of the key",
-    );
+    match difference(&left, &right) {
+        None => {}
+        Some(Difference::Layout) => panic!("{what}: the blocks freed depend on the key"),
+        Some(Difference::Bytes(i)) => panic!("{what}: freed block {i} holds bytes of the key"),
+    }
 }
 
-/// Whether `op` frees a block that is not all zero, after one unrecorded run.
-fn frees_nonzero<R>(op: impl Fn() -> R) -> bool {
+/// The first block `op` frees that is not all zero, after one unrecorded run.
+fn first_nonzero<R>(op: impl Fn() -> R) -> Option<usize> {
     op();
     freed(&op)
         .1
         .iter()
-        .any(|block| block.iter().any(|&byte| byte != 0))
+        .position(|block| block.iter().any(|&byte| byte != 0))
 }
 
 /// Fails if `op` frees a block that is not all zero.
 fn zeroed<R>(what: &str, op: impl Fn() -> R) {
-    assert!(!frees_nonzero(op), "{what}: holds bytes of the key");
+    if let Some(i) = first_nonzero(op) {
+        panic!("{what}: freed block {i} holds bytes of the key");
+    }
 }
 
 /// The check sees key-derived bytes left on the heap, so a clean result
 /// means something. The canaries return that fact instead of panicking:
 /// wasm32-wasip2 aborts on panic, and a `should_panic` test cannot run there.
+/// Each goes through the comparison `independent` and `zeroed` use, and
+/// passes only when that comparison finds the planted bytes, not when the
+/// allocations merely differ.
 #[test]
 fn detects_a_leak() {
     let [left, right] = freed_blocks([[1u8; 32], [2u8; 32]], |key| {
         drop(black_box(key.map(|b| b ^ 0x5a).to_vec()))
     });
+    let found = difference(&left, &right);
     assert!(
-        blocks_differ(&left, &right),
-        "planted key bytes were not visible in a freed block",
+        matches!(found, Some(Difference::Bytes(_))),
+        "planted key bytes were not found in a freed block: {found:?}",
     );
 }
 
@@ -83,8 +102,8 @@ fn detects_a_leak_in_key_generation() {
     // Without black_box, the optimizer can drop the unused allocation, and
     // the check then has nothing to find.
     assert!(
-        frees_nonzero(|| drop(black_box(vec![1u8; 32]))),
-        "planted key bytes were not visible in a freed block",
+        first_nonzero(|| drop(black_box(vec![1u8; 32]))).is_some(),
+        "planted key bytes were not found in a freed block",
     );
 }
 
