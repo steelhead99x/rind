@@ -59,11 +59,8 @@ From [the scope](/quest/m4/fips/README.md), 2026-11-11.
   `RIND_CPU_DISABLE_*` works only in debug builds). Paths that run on no
   tested CPU, such as x86_64's SSE2 integer AES, are left out of the module,
   which refuses such CPUs with an error naming the feature.
+- The approved random generator is `rind::drbg`, seeded by `rind-fips::fill`.
 
 ## Waiting
 
 - Maintainer: approve the module's exception to `AGENTS.md`'s wipe rule, which keeps stack temporaries and copies inside a call unwiped and leaves `wipe` opt-in. FIPS requires zeroizing SSPs once no longer needed, temporaries included. Options: add one line saying the FIPS module always wipes and also wipes SSPs inside a call (recommended: it confines the cost to `rind-fips`); or wipe temporaries in `rind` too, so the module needs no exception (slower for every consumer). An agent cannot change an `AGENTS.md` rule unprompted. Done once the rule is settled in the Plan and this item is deleted.
-
-## Required
-
-- [The DRBG](/quest/m4/fips/drbg.md) - the approved random generator every key generation and internal IV draws from
