@@ -122,13 +122,18 @@ with portable Rust in place of the assembly armv7 runs regardless.
   V1, V2, V3, and N2, Cobalt 100, a mixed list, and a core rind does not
   recognise keep the `_alt` schedules. A sandbox that cannot read
   `/proc/cpuinfo`, Android, and Windows on ARM do too: they never see a part
-  list, so they do not switch to the narrow schedules. Each imported routine has
-  a HOL Light proof that embeds the object's bytes, which `admin/prove-bytes`
-  checks. The narrow path has those routine proofs and not yet rind's Lean
-  composition: the Lean proofs of X25519, Ed25519, and P-256 name the `_alt`
-  routines, so those benchmark ✓ marks are the `_alt` cores. The SLOTHY field
-  routines whose proofs are equivalences to an asserted base program stay on
-  `_alt`, because that check needs the byte list.
+  list, so they do not switch to the narrow schedules. Each imported narrow
+  routine has a HOL Light correctness proof that embeds that object's bytes,
+  which `admin/prove-bytes` compares to rind's `asm!`. The inventory below is
+  a different column: "none" means s2n-bignum publishes no `_SUBROUTINE_SAFE`
+  theorem for that routine. Several narrow rows share that with their `_alt`
+  twins, including `curve25519_x25519`, `p256_scalarmul`, `p256_montjmixadd`,
+  `p521_jadd`, and `p521_jmixadd`. The narrow path has those per-routine
+  correctness proofs and not yet rind's Lean composition: the Lean proofs of
+  X25519, Ed25519, and P-256 name the `_alt` routines, so those benchmark ✓
+  marks are the `_alt` cores. The SLOTHY field routines whose proofs are
+  equivalences to an asserted base program stay on `_alt`, because that check
+  needs the byte list.
 - AES header protection on aarch64 pays the same indirect call as AES-GCM
   key setup on x86_64.
 - armv7 without crypto: SHA-256 and SHA-1 run aws-lc's NEON routines, or

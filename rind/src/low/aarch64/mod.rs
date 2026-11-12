@@ -151,6 +151,8 @@ pub(crate) mod p521_jmixadd;
 pub(crate) mod p521_jmixadd_narrow;
 pub(crate) mod p521_jscalarmul;
 pub(crate) mod p521_jscalarmul_narrow;
+#[cfg(test)]
+mod schedules;
 pub(crate) mod sha1;
 pub(crate) mod sha256;
 pub(crate) mod sha3_keccak2_f1600;
@@ -162,5 +164,3 @@ pub(crate) mod sha3_keccak_nof4_f1600;
 pub(crate) mod sha512;
 pub(crate) mod vpaes_armv8;
 pub(crate) mod wide_mux;
-#[cfg(test)]
-mod schedules;
