@@ -499,4 +499,77 @@ opaque high.curve.P256.Insts.RindHighAgreementAgreePrivateKey.load
   : high.agreement.Algorithm → high.agreement.Source →
     Result (core.result.Result (mid.p256.PrivateKey × high.agreement.PublicKey) error.Error)
 
+/-! s2n-bignum's routines for RSA, transliterated to inline assembly. -/
+
+opaque low.x86_64.bignum_negmodinv.bignum_negmodinv
+  : Slice Std.U64 → Slice Std.U64 → Result (Slice Std.U64)
+
+opaque low.x86_64.bignum_bitsize.bignum_bitsize
+  : Slice Std.U64 → Result Std.Usize
+
+opaque low.x86_64.bignum_optsub.bignum_optsub
+  :
+  Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Std.U64 → Result
+    (Slice Std.U64)
+
+opaque low.x86_64.bignum_emontredc_8n.bignum_emontredc_8n
+  :
+  Slice Std.U64 → Slice Std.U64 → Std.U64 → Result (Std.U64 × (Slice
+    Std.U64))
+
+opaque low.x86_64.bignum_kmul_16_32.bignum_kmul_16_32
+  :
+  Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Array Std.U64 32#usize
+    → Result ((Slice Std.U64) × (Array Std.U64 32#usize))
+
+opaque low.x86_64.bignum_kmul_32_64.bignum_kmul_32_64
+  :
+  Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Array Std.U64 96#usize
+    → Result ((Slice Std.U64) × (Array Std.U64 96#usize))
+
+opaque low.x86_64.bignum_ksqr_16_32.bignum_ksqr_16_32
+  :
+  Slice Std.U64 → Slice Std.U64 → Array Std.U64 24#usize → Result ((Slice
+    Std.U64) × (Array Std.U64 24#usize))
+
+opaque low.x86_64.bignum_ksqr_32_64.bignum_ksqr_32_64
+  :
+  Slice Std.U64 → Slice Std.U64 → Array Std.U64 72#usize → Result ((Slice
+    Std.U64) × (Array Std.U64 72#usize))
+
+opaque low.x86_64.bignum_montmul.bignum_montmul
+  :
+  Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Slice Std.U64 →
+    Result (Slice Std.U64)
+
+/-! aws-lc's Montgomery products, behind their Rust wrappers, which
+`Rind.X86_64.RsaMont`'s `AwsLcMont` states for the theorems that need them. -/
+
+opaque low.x86_64.mont.nohw
+  :
+  Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Slice Std.U64 →
+    Std.U64 → Result (Slice Std.U64)
+
+opaque low.x86_64.mont.mul4x
+  :
+  Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Slice Std.U64 →
+    Std.U64 → Option low.x86_64.cpu.HaveBmi2Adx → Result (Slice Std.U64)
+
+opaque low.x86_64.mont.sqr8x
+  :
+  Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Std.U64 → Option
+    low.x86_64.cpu.HaveBmi2Adx → Result (Slice Std.U64)
+
+/-! RSA's DER parsing and encoding, which the ✓ leaves out. -/
+
+opaque high.rsa.der_components
+  :
+  Slice Std.U8 → Result (core.result.Result ((Slice Std.U8) × (Slice
+    Std.U8)) error.Error)
+
+opaque high.rsa.VerifyingKey.to_pkcs1_der
+  :
+  high.rsa.VerifyingKey → Slice Std.U8 → Result ((core.result.Result (Slice
+    Std.U8) error.Error) × (Slice Std.U8))
+
 end rind.x86_64
