@@ -1,0 +1,16 @@
+# Public items ring has and rind-ring does not. A line covers that path,
+# anything under it, and impls of that type. admin/adapter-api.py checks
+# this list against the api-omit region of README.md.
+aead::chacha20_poly1305_openssh
+io
+rsa::KeyPair::from_components
+rsa::KeyPairComponents
+test_file!
+
+# Concrete types differ; both implement RsaEncoding. See README.
+sig:signature::RSA_PKCS1_SHA256
+sig:signature::RSA_PKCS1_SHA384
+sig:signature::RSA_PKCS1_SHA512
+sig:signature::RSA_PSS_SHA256
+sig:signature::RSA_PSS_SHA384
+sig:signature::RSA_PSS_SHA512

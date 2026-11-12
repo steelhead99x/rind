@@ -13,7 +13,8 @@ changes:
 ring = { package = "rind-ring", version = "0.17" }
 ```
 
-Every ring feature is accepted and changes nothing.
+Every ring feature is accepted and changes nothing. `alloc` and `std` are
+always on, including the RSA API ring gates on `alloc` and `std::error::Error`.
 
 The rename reaches only the crate that makes it. A binary moves every crate
 in its tree on ring 0.17 to rind, including dependencies that name ring such
@@ -44,15 +45,28 @@ input.
 These items are not offered, so code using them, in a patched dependency
 too, fails to build:
 
+<!-- api-omit -->
 - `aead::chacha20_poly1305_openssh`: rind refuses it, having no SSH consumer.
 - `rsa::KeyPairComponents` and `rsa::KeyPair::from_components`: building a
   key from components means encoding its secret parts as DER, which
   branches on their leading bytes. Load the key as PKCS#1 or PKCS#8.
-- `io`, `test`, `deprecated_test`, and `test_file!`: ring's DER reader and
-  test harness, which are no cryptography. `test::rand`'s fixed random
-  sources could not work, since rind draws its own randomness.
+- `io` and `test_file!`: ring's DER reader and test harness, which are no
+  cryptography.
+<!-- /api-omit -->
+
+`test::rand`'s fixed random sources could not work, since rind draws its
+own randomness. `test` and `deprecated_test` are not part of the public
+API this check compares.
 
 And these behave differently:
+
+<!-- api-sig -->
+`signature::RSA_PKCS1_SHA256`, `signature::RSA_PKCS1_SHA384`,
+`signature::RSA_PKCS1_SHA512`, `signature::RSA_PSS_SHA256`,
+`signature::RSA_PSS_SHA384`, and `signature::RSA_PSS_SHA512` are the
+public type Padding. ring's copies use unnameable padding types. Both
+implement RsaEncoding.
+<!-- /api-sig -->
 
 - Where ring takes a `rand::SecureRandom` to generate a key or sign,
   rind draws from the system random source itself, as

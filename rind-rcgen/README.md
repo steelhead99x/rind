@@ -26,6 +26,10 @@ let key = key.serialize_der();
 
 ## What rind cannot back
 
+<!-- api-omit -->
+No `aws_lc_rs` feature. rcgen's aws-lc backend is what adds P-521, ML-DSA, generate_rsa_for, and RsaKeySize.
+<!-- /api-omit -->
+
 `KeyPair` behaves as rcgen's on its `ring` backend, which is rcgen's default:
 
 - No P-521 or ML-DSA keys, and no `generate_rsa_for` or `RsaKeySize`, which rcgen offers only with `aws_lc_rs`.

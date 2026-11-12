@@ -155,6 +155,7 @@ release-plz owns crate versions; bump one only when asked.
 
 Each published `rind-<consumer>` adapter's version begins with the breaking part of the upstream version it adapts (major.minor below 1.0, major from 1.0 on), so rind-rustls 0.23.x adapts rustls 0.23; the rest of the version is the adapter's own.
 `sh/adapter-versions.sh`, in `just ci`, fails when the two drift.
+`sh/adapter-api.sh`, in `just ci`, fails when a published adapter's public API differs from the provider its upstream ships, apart from the omissions that adapter's README lists.
 An adapter's API is its upstream's, so it changes only with upstream's; the PR that moves an adapter to upstream's next breaking release sets the adapter's version to match.
 release-plz cannot cap a bump: a breaking change it finds in an adapter, by cargo-semver-checks or a `!` commit, makes its release PR propose the next breaking version, which that check then fails.
 A change that restores upstream's API fixes a bug: set its patch version by hand, and the maintainer yanks the divergent releases if needed. Hold or revert any other breaking change.

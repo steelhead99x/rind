@@ -1,0 +1,9 @@
+# Public items and features rustls's aws-lc-rs provider has that rind-rustls
+# does not. admin/adapter-api.py checks this list against README.md.
+feature:fips
+feature:prefer-post-quantum
+hpke::HpkeAwsLcRs
+kx_group::MLKEM1024
+
+# Suites are &dyn Hpke. rustls's are &HpkeAwsLcRs<..>. See README.
+sig:hpke::DH_KEM_*

@@ -57,6 +57,9 @@ declare -A scope=(
     [deny]='(^|/)Cargo\.(toml|lock)$|^deny\.toml$'
     # An adapter's manifest holds both its version and its upstream requirement.
     [versions]='^(rind-[^/]+/Cargo\.toml$|sh/adapter-versions\.sh$)'
+    # An adapter's sources, its manifest, and Cargo.lock. The rustdoc pin
+    # lives in the flake, so a bump of that nightly rechecks the JSON shape.
+    [api]='^(rind-[^/]+/|Cargo\.lock$|sh/adapter-api\.sh$|admin/adapter-api\.py$|flake\.nix$)'
     [license]='^(rind/src/|rind/LICENSE$|rind-python/LICENSE$|admin/scan-license$)'
     # Dependents may build with the workspace's declared rust-version.
     [msrv]='^(rind[^/]*/|fuzz/|Cargo\.(toml|lock)$|flake\.(nix|lock)$)'
@@ -107,6 +110,7 @@ declare -A tools=(
     [structure]='cargo cargo-modules'
     [deny]='cargo-deny'
     [versions]='cargo jq'
+    [api]='python3 cargo'
     [license]='find grep'
     [msrv]='nix cargo jq'
     [cross]='cargo'
@@ -129,7 +133,7 @@ verb=$action
 [[ "$verb" != ci ]] || verb=check
 
 case "$verb" in
-    check) modules=(rs structure msrv cross vartime deny versions license inplace testing compat bench fixtures patch py dart quest gh shell nix) ;;
+    check) modules=(rs structure msrv cross vartime deny versions api license inplace testing compat bench fixtures patch py dart quest gh shell nix) ;;
     fix) modules=(rs compat patch dart nix) ;;
 esac
 
@@ -266,6 +270,7 @@ for module in "${selected[@]}"; do
         check:vartime) nix develop .#ct-vartime --command admin/ct-vartime ;;
         check:deny) cargo deny --locked check ;;
         check:versions) sh/adapter-versions.sh ;;
+        check:api) sh/adapter-api.sh ;;
         check:quest) quest check ;;
         check:license) bash admin/scan-license ;;
         # It finds the generated kernels relative to its own directory.

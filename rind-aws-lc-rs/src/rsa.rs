@@ -227,6 +227,7 @@ impl PublicKey {
     }
 
     /// The modulus's length in bytes.
+    #[cfg(feature = "ring-io")]
     #[must_use]
     pub fn modulus_len(&self) -> usize {
         self.n.len()

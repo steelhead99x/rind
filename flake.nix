@@ -52,6 +52,12 @@
               pkgs.rust-bin.nightly."2025-02-14".minimal.override { extensions = [ "rustfmt" ]; }
             }/bin/rustfmt "$@"
           '';
+          # admin/adapter-api.py reads this nightly's rustdoc JSON (format 61).
+          # The date is the pin: a newer nightly can change the JSON shape.
+          rustdoc-json = pkgs.writeShellScriptBin "rustdoc-json" ''
+            export PATH=${pkgs.rust-bin.nightly."2026-09-17".minimal}/bin:$PATH
+            exec cargo rustdoc "$@"
+          '';
           rust-toolchain = rust-stable.minimal.override {
             # `minimal` rather than `default`, which adds offline HTML docs to
             # a closure every CI job downloads.
@@ -424,6 +430,7 @@
                   flock
                   cargo-modules
                   rustfmt-unstable
+                  rustdoc-json
                   quest-cli
                 ]
                 ++ pkgs.lib.optionals (!pkgs.stdenv.hostPlatform.isDarwin) [

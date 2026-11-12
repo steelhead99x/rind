@@ -1,0 +1,3 @@
+# rcgen features rind-rcgen does not carry. admin/adapter-api.py checks
+# this list against the api-omit region of README.md.
+feature:aws_lc_rs
