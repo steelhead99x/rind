@@ -1,4 +1,4 @@
-# rind builds on every target ring or aws-lc-rs supports
+# [S] rind builds on every target ring or aws-lc-rs supports
 
 ## Goal
 
