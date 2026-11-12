@@ -416,7 +416,7 @@ fn partial_lane(bytes: &[u8]) -> u64 {
     u64::from_le_bytes(lane)
 }
 
-const RC: [u64; 24] = [
+pub(crate) const RC: [u64; 24] = [
     0x00000000_00000001,
     0x00000000_00008082,
     0x80000000_0000808A,
