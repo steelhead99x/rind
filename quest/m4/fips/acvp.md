@@ -11,20 +11,13 @@ sets, not only the sample sets `admin/sync-acvp` keeps.
 
 From [the scope](/quest/m4/fips/README.md), 2026-11-11.
 
-- Speak the module wrapper protocol of BoringSSL's and aws-lc's `acvptool`
-  (Go, test-only, outside rind), so that tool handles ACVP's sessions,
-  authentication, and JSON, and rind writes only the per-algorithm handlers.
-  Writing an ACVP client from scratch buys nothing.
-- Cover the test types the sample sets skip: ECDH as KAS-ECC-SSC, whose
-  sample sets hold no curve rind offers; FIPS 186-5 RSA key generation from
-  the server's seeds or candidates, or keep RSA key generation out of the
-  module; ECDSA and ML-KEM key generation from given seeds; the DRBG; AES-GCM
-  with internal IVs; and the TLS 1.3 KDF if rind-rustls's FIPS build derives
-  through it.
-- Run once per CPU path, with the module's load-time CPU mask; each path is
-  its own CAVP implementation, as aws-lc's certificate lists two dozen.
-- Offline first: `acvptool` processes a vector file locally, and the sample
-  sets carry their answers, so CI checks the wrapper without NIST's server.
+- ✅ `rind-acvp` speaks the module wrapper protocol of BoringSSL's and aws-lc's `acvptool`. `cargo test -p rind-acvp` checks sample answers for SHA-256 (AFT and standard Monte Carlo), HMAC-SHA-256, AES-ECB, AES-GCM, ECDSA P-256 keyVer and sigVer, ML-KEM-768 keyGen from `d || z`, and ML-DSA-44 keyGen from its seed. `admin/acvp` runs `acvptool` itself when it is on `PATH`. On 2026-11-12, `acvptool -wrapper rind-acvp -json` matched SHA-256 AFT (512 tests) and AES-GCM (60).
+- ✅ ML-KEM-768 key generation takes the given `d || z`. ML-DSA key generation takes the given seed. ECDSA keyGen from extra bits is not in `acvptool`'s protocol: it sends only `testing candidates`, and the sample's extra-bits groups carry no seed. The wrapper answers testing candidates.
+- ✅ RSA key generation stays out of the module. rind has no FIPS 186-5 generation from the server's seeds or candidates, which this plan allows.
+- ✅ No TLS 1.3 KDF command. rind-rustls gives rustls an HMAC (`HkdfUsingHmac` in `rind-rustls/src/cipher_suite.rs`); rustls derives the traffic secrets, outside rind. Nothing to answer until a FIPS build of rind-rustls derives them through rind.
+- AES-GCM with `ivGen: internal` is refused. Sealing with an IV the module generates is [its quest](/quest/m4/fips/gcm-iv.md), which is not done. External nonces are answered, and that is what the sample sets contain.
+- One process is one CPU path. A debug build, and a release build with `--cfg rind_cpu_disable`, honours `RIND_CPU_DISABLE_<feature>`. The module's load-time mask in a release build is still [the module quest](/quest/m4/fips/module.md); this wrapper calls rind until that crate exists. The paths were not each run here.
+- `hmacDRBG` (generate, reseed, prediction resistance) for SHA-1 and SHA-2 is answered. Its known-answer check is aws-lc's `testmodulewrapper` vector, not a sample file: `admin/sync-acvp` does not fetch an `hmacDRBG` set.
 
 ## Waiting
 

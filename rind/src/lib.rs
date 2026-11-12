@@ -52,6 +52,10 @@ mod error;
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test;
 
+/// Operations `rind-acvp` needs that rind's callers do not.
+#[cfg(feature = "acvp")]
+pub mod acvp;
+
 // vvv Public API
 pub use error::{Error, KeyRejected};
 

@@ -270,8 +270,14 @@ impl<P: Params> KeyPair<P> {
         mu(self.tr(), context, message)
     }
 
-    /// FIPS 204's `ML-DSA.Sign_internal`, for tests to fix `rnd` and `mu`.
-    #[cfg(test)]
+    /// The expanded private key, FIPS 204's `sk`.
+    #[cfg(feature = "acvp")]
+    pub(crate) fn secret_key_bytes(&self) -> &[u8] {
+        self.secret_key.as_ref()
+    }
+
+    /// FIPS 204's `ML-DSA.Sign_internal`, for tests and `rind-acvp` to fix `rnd` and `mu`.
+    #[cfg(any(test, feature = "acvp"))]
     pub(crate) fn sign_internal(
         &self,
         mu: &[u8; MU_LEN],

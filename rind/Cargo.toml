@@ -13,6 +13,10 @@ rust-version.workspace = true
 default = []
 # Wipes keys, keyed state, and private-key heap scratch on drop.
 wipe = []
+# Seeded key generation and fixed-randomness signing for rind-acvp.
+# Not a supported API: it exists so the unpublished wrapper can answer
+# ACVP without widening what rind's callers can do.
+acvp = []
 __ctgrind = ["dep:crabgrind"]
 
 [dependencies]

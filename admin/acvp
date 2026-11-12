@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Check rind-acvp against NIST's sample answers.
+#
+# With no arguments, runs the crate's tests, which compare handlers to the
+# sample files. With acvptool on PATH, also runs it on the prompt-only forms
+# of SHA-256 (no 8 GiB LDT group, no alternate Monte Carlo, which acvptool
+# does not send) and AES-GCM, and compares the tool's output to the answers.
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$root"
+
+cargo test -p rind-acvp --locked
+
+if ! command -v acvptool >/dev/null; then
+    echo "acvptool is not on PATH; the crate tests are the offline check" >&2
+    exit 0
+fi
+
+cargo build -p rind-acvp --locked
+wrapper=$root/target/debug/rind-acvp
+
+python3 - "$wrapper" "$root/thirdparty/acvp" <<'PY'
+import json, subprocess, sys
+wrapper, base = sys.argv[1], sys.argv[2]
+
+def run(name, edit):
+    src = json.load(open(f"{base}/{name}.json"))
+    prompt = json.loads(json.dumps(src))
+    prompt["testGroups"] = [g for g in prompt["testGroups"] if edit(g)]
+    for g in prompt["testGroups"]:
+        for t in g["tests"]:
+            if name.startswith("ACVP-AES-GCM") and g["direction"] == "encrypt":
+                t.pop("ct", None)
+                t.pop("tag", None)
+            elif name.startswith("ACVP-AES-GCM"):
+                t.pop("pt", None)
+                t.pop("testPassed", None)
+    out = subprocess.check_output(
+        ["acvptool", "-wrapper", wrapper, "-json", "/dev/stdin"],
+        input=json.dumps([prompt]).encode(),
+    )
+    return src, {g["tgId"]: g for g in json.loads(out)[0]["testGroups"]}
+
+src, got = run(
+    "SHA2-256-1.0",
+    lambda g: g.get("testType") == "AFT" or g.get("mctVersion") == "standard" and g.get("testType") == "MCT",
+)
+n = 0
+for g in src["testGroups"]:
+    if g["tgId"] not in got:
+        continue
+    for t, u in zip(g["tests"], got[g["tgId"]]["tests"]):
+        if g["testType"] == "AFT":
+            assert t["md"].lower() == u["md"].lower()
+        else:
+            for a, b in zip(t["resultsArray"], u["resultsArray"]):
+                assert a["md"].lower() == b["md"].lower()
+        n += 1
+print(f"sha256 {n}")
+
+src, got = run("ACVP-AES-GCM-1.0", lambda g: True)
+n = 0
+for g in src["testGroups"]:
+    for t, u in zip(g["tests"], got[g["tgId"]]["tests"]):
+        if g["direction"] == "encrypt":
+            assert (u["ct"] + u["tag"]).lower() == (t["ct"] + t["tag"]).lower()
+        else:
+            assert u["testPassed"] == t["testPassed"]
+        n += 1
+print(f"aes-gcm {n}")
+PY

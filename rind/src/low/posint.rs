@@ -442,7 +442,7 @@ impl<const N: usize> PosInt<N> {
     ///
     /// This is done in a side-channel-free way, with respect to the values of `self`, `e`,
     /// `n` and `n_0`.  The instruction trace depends only on `e.used` and `n.used`.
-    fn mod_exp(&self, e: &Self, n: &Self, n_montifier: &Self, n_0: u64) -> Self {
+    pub(crate) fn mod_exp(&self, e: &Self, n: &Self, n_montifier: &Self, n_0: u64) -> Self {
         #[cfg(rind_backend = "x86_64")]
         if let Some(r) = self.mod_exp_rsaz(e, n, n_montifier, n_0) {
             return r;
