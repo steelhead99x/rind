@@ -68,6 +68,7 @@ exclude_re = [
   'rind/src/low/portable/aes\.rs:\d+:\d+: replace \| with \^ in (aes_keygen_assisti|deinterleave_u8_1|interleave_u16_2|interleave_u16_4|interleave_u16_8|interleave_u8_1|inv_mix_columns_state|inv_shift_row_u16|mix_columns_state|shift_row_u16)$',
   'rind/src/low/portable/aes\.rs:\d+:\d+: replace \^ with \| in (aes_keygen_assisti|sub_bytes_state)$',
   'rind/src/low/portable/aes\.rs:\d+:\d+: replace \^= with \|= in aes_keygen_assist[01]::aux$',
+  'rind/src/low/(portable|x86_64)/\.\./generic/aes_nohw\.rs:\d+:\d+: replace \| with \^ in word::(compact_block|rotate_rows_down|rotate_rows_twice|uncompact_block)$',
   'rind/src/low/(portable|x86_64)/\.\./generic/ghash_nohw\.rs:\d+:\d+: replace \| with \^ in (NohwTable::ghash|gcm_mul32_nohw)$',
   'rind/src/low/x86_64/aes_gcm\.rs:\d+:\d+: replace \| with \^ in counter_block$',
   'rind/src/low/x86_64/chacha20poly1305\.rs:48:\d+: replace \| with \^$',
@@ -252,8 +253,9 @@ exclude_re = [
   'rind/src/low/arm/cpu\.rs:(83|85|86|87|88):\d+: replace & with (\||\^) in detect$',
   'rind/src/low/arm/cpu\.rs:96:\d+: replace detect -> u8 with 1$',
   'rind/src/low/arm/cpu\.rs:104:\d+: replace test_toggle -> bool with (false|true)$',
-  # armv7 has no CPU state to save, so `leave_cpu_state` ignores it.
-  'rind/src/low/arm/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
+  # armv7 and the portable backend have no CPU state to save, so
+  # `leave_cpu_state` ignores it.
+  'rind/src/low/(arm|portable)/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
   'rind/src/low/x86_64/cpu\.rs:397:38: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:397:45: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:397:52: replace \| with &$',
@@ -264,6 +266,12 @@ exclude_re = [
   'rind/src/low/x86_64/cpu\.rs:11:\d+: replace enter_cpu_state -> u32 with 1$',
   'rind/src/low/x86_64/cpu\.rs:486:\d+: replace test_toggle -> bool with false$',
   'rind/src/low/x86_64/cpu\.rs:486:\d+: replace test_toggle -> bool with true$',
+  # The FIPS module's `SystemRandom`, compiled only under `--cfg rind_fips`,
+  # which no mutation run sets; `fips_rng`'s tests cover what it calls.
+  'rind/src/mid/rng\.rs:29:\d+: replace <impl RandomSource for SystemRandom>::fill -> Result<\(\), Error> with Ok\(\(\)\)$',
+  # Wipes a thread's DRBG as the thread exits, where no test can read it;
+  # `high::hmac_drbg::tests::zeroise_wipes_the_state_under_wipe` checks the wipe.
+  'rind/src/fips_rng\.rs:\d+:\d+: replace <impl Drop for ThreadDrbg>::drop with \(\)$',
   # Wipes a key inside a type whose own `Drop` wipes all of it, which
   # rind/tests/zeroing.rs checks.
   'rind/src/low/aarch64/aes\.rs:\d+:\d+: replace <impl Drop for AesDecKey>::drop with \(\)$',
@@ -277,6 +285,9 @@ exclude_re = [
   'rind/src/low/(portable|x86_64)/\.\./generic/ghash_nohw\.rs:\d+:\d+: replace <impl Drop for NohwTable>::drop with \(\)$',
   'rind/src/low/x86_64/aes\.rs:\d+:\d+: replace <impl Drop for AesDecKey>::drop with \(\)$',
   'rind/src/low/x86_64/\.\./generic/aes_nohw\.rs:\d+:\d+: replace <impl Drop for NohwKey>::drop with \(\)$',
+  # The portable backend holds `NohwKey` only as a stack temporary that
+  # `schedule()` reads, which no test can see after it drops.
+  'rind/src/low/portable/\.\./generic/aes_nohw\.rs:\d+:\d+: replace <impl Drop for NohwKey>::drop with \(\)$',
   'rind/src/low/x86_64/ghash\.rs:\d+:\d+: replace <impl Drop for GhashTable>::drop with \(\)$',
   'rind/src/low/x86_64/ghash_ssse3_x86_64\.rs:\d+:\d+: replace <impl Drop for Ssse3Table>::drop with \(\)$',
   'rind/src/low/x86_64/vpaes_x86_64\.rs:\d+:\d+: replace <impl Drop for VpaesDecKey>::drop with \(\)$',
@@ -289,7 +300,8 @@ exclude_re = [
   # case random keys reach with probability below 2^-64.
   'rind/src/high/hkdf\.rs:110:\d+: replace <impl sealed::Len for usize>::len -> usize with 0$',
   'rind/src/high/hkdf\.rs:110:\d+: replace <impl sealed::Len for usize>::len -> usize with 1$',
-  'rind/src/high/hmac_drbg\.rs:\d+:\d+: replace \+= with \*= in HmacDrbg<H>::update$',
+  'rind/src/fips_rng\.rs:\d+:\d+: replace cast -> bool with true$',
+  'rind/src/high/hmac_drbg\.rs:\d+:\d+: replace \+= with \*= in HmacDrbg<H>::generate$',
   'rind/src/high/rsa\.rs:\d+:\d+: delete match arm Error::Fault in SigningKey::decrypt_oaep$',
   'rind/src/mid/mldsa\.rs:526:\d+: replace - with [+/] in sign_internal$',
   'rind/src/mid/mldsa\.rs:762:\d+: replace < with > in expand_a$',

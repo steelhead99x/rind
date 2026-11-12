@@ -38,6 +38,12 @@ hol-light` checks them alone, in nixpkgs' HOL Light.
   with its relocations and the read-only data they reach, here the round
   constants, which `admin/prove` extracts as an object file; the proof checks
   the constants against FIPS 180-4's.
+- `aarch64/sha512_block_data_order_hw.ml`: `SHA512_HW_SUBROUTINE_CORRECT`,
+  rind's proof that the naked function
+  `low::aarch64::sha512::sha512_block_data_order_hw`, aws-lc's routine for
+  the SHA-512 instructions, computes s2n-bignum's FIPS 180-4 spec,
+  `sha512_hash_blocks`, and stores it to the state, as `sha256`'s above; the
+  proof checks its round constants against FIPS 180-4's.
 - `x86_64/bn_mul_mont_nohw.ml`: `BN_MUL_MONT_NOHW_SUBROUTINE_CORRECT`, rind's
   proof that the naked function `low::x86_64::mont::bn_mul_mont_nohw`,
   aws-lc's word-serial Montgomery multiplication, writes the Montgomery
@@ -85,8 +91,11 @@ writes for aarch64:
 
 `rfcx25519` is HOL Light's RFC 7748 X25519, clamping and masking included.
 
-P-256 ECDH on aarch64, from the same `PrivateKey` to s2n-bignum's routines, in
-`Rind/Aarch64/P256.lean`:
+P-256 ECDH, from the same `PrivateKey` to s2n-bignum's routines, in
+`Rind/Aarch64/P256.lean` on aarch64, and, for its agreement alone, in
+`Rind/X86_64/P256Agree.lean`, which `admin/prove` also writes for aarch64, so
+`p256_agree` and `p256_shared_secret` hold on x86_64 too, where key generation
+runs aws-lc's generator multiplication, which no proof covers yet:
 
 - `p256_generate`: the key's scalar is the first of up to 64 draws whose
   bytes, read big-endian, are in [1, n), it holds its public key, and the key
@@ -284,9 +293,8 @@ cannot translate. `Rind/X86_64/Dispatch.lean` models that dispatch by hand, in
 Lean definitions beside the Rust they model, with an agreement `Algorithm` as
 which static it is. P-256's key generation draws through a `dyn
 RandomSource`, which Aeneas cannot translate either, and
-`Rind/Aarch64/P256Dispatch.lean` models it the same way, for
-`Rind/Aarch64/Dispatch.lean` to call; on x86_64, where no theorem is about
-P-256, `Rind/X86_64/P256Dispatch.lean` leaves it opaque. The signature API's `EcdsaKeyPair` reaches each curve's code, and
+`Rind/X86_64/P256Dispatch.lean`, which `admin/prove` also writes for aarch64,
+models it the same way, for `Rind/<Arch>/Dispatch.lean` to call. The signature API's `EcdsaKeyPair` reaches each curve's code, and
 `PublicKey` each ECDSA key's parser and verifier, through function pointers,
 and P-256's ECDSA key generation draws through a `dyn RandomSource`;
 `Rind/Aarch64/EcdsaDispatch.lean` models them for P-256 with SHA-256 and
@@ -301,10 +309,16 @@ aarch64:
   finished, returns its hash, for messages under 2^64 bytes.
 
 The hash is cryptol-specs' FIPS 180-4 SHA-512, in `Rind/Sha2.lean`, with its
-block compression `processBlock_Common` opaque. Each theorem assumes
+block compression `processBlock_Common` transliterated from FIPS 180-4 and
+checked by `Rind/Sha2Test.lean` against its examples. Each theorem assumes
 `RunsSha512`: on x86_64 that rind picks aws-lc's AVX routine, on an Intel CPU
-with AVX but without AVX2, and on aarch64 its scalar routine, on a CPU without the SHA-512
-instructions; those are the routines whose proofs state their result. The
+with AVX but without AVX2, the routine whose proof states its result; on
+aarch64 only that rind's checks pass, as both of aws-lc's routines there have
+proofs: aws-lc-verification's of its scalar routine, and rind's HOL Light proof
+above of its routine for the SHA-512 instructions, which
+`Rind/Aarch64/AwsLc.lean` restates as the axiom
+`sha512_block_data_order_hw_spec` and `Rind/S2nSha512.lean` proves
+`Rind/Sha2.lean`'s. The
 digest API reaches each hash through function pointers too, which
 `Rind/X86_64/DigestDispatch.lean` models, and `Rind/X86_64/DigestAlgorithm.lean`
 models the `Algorithm` statics that hold them, and `Digest`, whose
@@ -613,7 +627,10 @@ mentions `Verification::Rsa(` or builds an `Rsa` outside them.
 - `Rind/Spec.lean` and `Rind/Bytes.lean`: the elliptic-curve, ChaCha20,
   Poly1305, and ChaCha20-Poly1305 specs and byte-conversion lemmas, and
   `Rind/ChaCha20Poly1305Test.lean`, the AEAD specs' known-answer tests; `Rind/Sha2.lean` and
-  `Rind/Sha2Lemmas.lean`: SHA-512's; `Rind/Ed25519.lean`: Ed25519's;
+  `Rind/Sha2Lemmas.lean`: SHA-512's, and `Rind/Sha2Test.lean`, its
+  known-answer tests; `Rind/S2nSha512.lean`, s2n-bignum's SHA-512 spec,
+  transliterated, and its proof that it is `Rind/Sha2.lean`'s;
+  `Rind/Ed25519.lean`: Ed25519's;
   `Rind/HashSpec.lean`: SHA-1's, SHA-256's, HMAC's, HKDF's, and PBKDF2's, and
   `Rind/HashSpecTest.lean`, their known-answer tests; `Rind/Vale.lean`,
   `Rind/ValeBytes.lean`, and `Rind/Gf128.lean`: Vale's AES and GF(2^128) specs
@@ -671,9 +688,10 @@ mentions `Verification::Rsa(` or builds an `Rsa` outside them.
   `Rind/P256Group.lean`: that `p256` is prime, by a Pratt certificate;
   `Rind/N256Prime.lean`: that `n256` is prime; `Rind/P256Multiples.lean`: the
   group laws and multiples ECDSA's twin multiplication relies on.
-- `Rind/Aarch64/P256Dispatch.lean`, `Rind/Aarch64/P256Table.lean`, and
-  `Rind/Aarch64/P256.lean`: the hand model of P-256's key generation, the
-  generator table's proof, and the P-256 ECDH proof.
+- `Rind/X86_64/P256Dispatch.lean`, `Rind/X86_64/P256Agree.lean`,
+  `Rind/Aarch64/P256Table.lean`, and `Rind/Aarch64/P256.lean`: the hand model
+  of P-256's key generation, the P-256 agreement proof on both targets, and
+  aarch64's generator table and key generation proofs.
 - `Rind/Aarch64/EcdsaDispatch.lean`, `Rind/Aarch64/P256Ecdsa.lean`, and
   `Rind/Aarch64/P256Signature.lean`: the hand model of ECDSA's dispatch and
   key generation, the proof of `high::ecdsa` and `mid::p256`'s ECDSA at
@@ -708,10 +726,10 @@ Beyond Lean's kernel:
 - That `Rind/SymCrypt/MlKem.lean` is FIPS 203, as SymCrypt's authors state,
   and that `Rind/S2nMlKem.lean` transliterates the s2n-bignum ML-KEM specs it
   names.
-- That `Rind/Sha2.lean` restates cryptol-specs' SHA-512 around
-  `processBlock_Common`, `Rind/S2nSha256.lean` transliterates
-  s2n-bignum's SHA-256 spec, and `Rind/S2nChaCha20Poly1305.lean` rind's
-  HOL Light ChaCha20-Poly1305 spec.
+- That `Rind/Sha2.lean` restates cryptol-specs' SHA-512, its
+  `processBlock_Common` as FIPS 180-4's, `Rind/S2nSha256.lean` and
+  `Rind/S2nSha512.lean` transliterate s2n-bignum's SHA-256 and SHA-512 specs,
+  and `Rind/S2nChaCha20Poly1305.lean` rind's HOL Light ChaCha20-Poly1305 spec.
 - That `Rind/Rsa.lean` transliterates RFC 8017's RSASSA-PKCS1-v1_5 and
   RSASSA-PSS verification.
 - That `Rind/Spec.lean`'s ChaCha20, Poly1305, and ChaCha20-Poly1305

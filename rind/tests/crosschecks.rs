@@ -3062,3 +3062,63 @@ mod blind_rsa {
         }
     }
 }
+
+/// ECVRF against `akd_core`'s Edwards25519 suite, which key transparency's
+/// `akd` runs, and `vrf-rfc9381`'s P-256 suite: each proves the same bytes
+/// for a key and input, and verifies the other's proofs.
+mod vrf {
+    use akd_core::ecvrf::{VRFPrivateKey, VRFPublicKey};
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use rind::vrf::*;
+    use vrf_rfc9381::ec::p256::EcVrfProof;
+    use vrf_rfc9381::ec::p256::tai::{EcVrfP256TaiPublicKey, EcVrfP256TaiSecretKey};
+    use vrf_rfc9381::{Proof as _, Prover as _, Verifier as _};
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        #[test]
+        fn matches_akd(seed in any::<[u8; 32]>(), alpha in vec(any::<u8>(), 0..300)) {
+            let ours = SecretKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, &seed).unwrap();
+            let theirs = VRFPrivateKey::try_from(&seed[..]).unwrap();
+            let their_public = VRFPublicKey::from(&theirs);
+            prop_assert_eq!(ours.public_key().as_ref(), their_public.as_bytes());
+
+            let (proof, output) = ours.prove(&alpha);
+            let their_proof = theirs.prove(&alpha);
+            prop_assert_eq!(proof.as_ref(), their_proof.to_bytes());
+            their_public.verify(&their_proof, &alpha).unwrap();
+
+            let public_key =
+                PublicKey::new(&ECVRF_EDWARDS25519_SHA512_TAI, their_public.as_bytes()).unwrap();
+            let verified = public_key.verify(&alpha, &their_proof.to_bytes()).unwrap();
+            prop_assert_eq!(verified.as_ref(), output.as_ref());
+        }
+
+        #[test]
+        fn matches_vrf_rfc9381(alpha in vec(any::<u8>(), 0..300)) {
+            let ours = SecretKey::generate(&ECVRF_P256_SHA256_TAI).unwrap();
+            let theirs = EcVrfP256TaiSecretKey::from_slice(ours.to_bytes().as_ref()).unwrap();
+            let their_public = theirs.verifier();
+
+            let (proof, output) = ours.prove(&alpha);
+            let their_proof = theirs.prove(&alpha).unwrap();
+            prop_assert_eq!(proof.as_ref(), &their_proof.encode_to_pi()[..]);
+            prop_assert!(
+                EcVrfP256TaiPublicKey::from_slice(ours.public_key().as_ref()).unwrap()
+                    == their_public
+            );
+            let their_output = their_public
+                .verify(&alpha, EcVrfProof::decode_pi(proof.as_ref()).unwrap())
+                .unwrap();
+            prop_assert_eq!(&their_output[..], output.as_ref());
+
+            let verified = ours
+                .public_key()
+                .verify(&alpha, &their_proof.encode_to_pi())
+                .unwrap();
+            prop_assert_eq!(verified.as_ref(), output.as_ref());
+        }
+    }
+}

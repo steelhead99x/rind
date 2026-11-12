@@ -270,7 +270,9 @@ for module in "${selected[@]}"; do
                     cargo clippy -p rind --lib --locked --target "$target" -- --deny warnings
                 done
             fi
-            CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$portable" \
+            # The FIPS module's source rides along: its cfg touches only where
+            # randomness comes from, which no backend changes.
+            CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$portable --cfg rind_fips" \
                 cargo clippy -p rind --lib --locked --target x86_64-unknown-linux-gnu -- --deny warnings
             # And on a 32-bit target, whose Poly1305 and GHASH differ.
             CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUSTFLAGS="$portable" \
