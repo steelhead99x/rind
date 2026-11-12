@@ -93,6 +93,8 @@ declare -A scope=(
     # alert.yml must watch every workflow that runs outside a pull request, and
     # every third-party action must be pinned.
     [gh]='^(\.github/|sh/(alert|pins)\.sh$)'
+    # The mutants workflow's shard plan, against stubbed listings.
+    [mutants]='^(sh/mutants-plan\.sh|admin/mutants)$'
     [shell]=''
     [nix]=''
 )
@@ -121,6 +123,7 @@ declare -A tools=(
     [dart]='nix'
     [quest]='quest'
     [gh]='actionlint yq jq'
+    [mutants]='python3'
     [shell]='shellcheck'
     [nix]='nixfmt'
 )
@@ -129,7 +132,7 @@ verb=$action
 [[ "$verb" != ci ]] || verb=check
 
 case "$verb" in
-    check) modules=(rs structure msrv cross vartime deny versions license inplace testing compat bench fixtures patch py dart quest gh shell nix) ;;
+    check) modules=(rs structure msrv cross vartime deny versions license inplace testing compat bench fixtures patch py dart quest gh mutants shell nix) ;;
     fix) modules=(rs compat patch dart nix) ;;
 esac
 
@@ -292,6 +295,7 @@ for module in "${selected[@]}"; do
             sh/alert.sh check
             sh/pins.sh
             ;;
+        check:mutants) sh/mutants-plan.sh test ;;
         check:shell) files 'sh/*.sh' | xargs -0 shellcheck ;;
         check:nix) files '*.nix' | xargs -0 nixfmt --check ;;
         fix:nix) files '*.nix' | xargs -0 nixfmt ;;
