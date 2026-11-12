@@ -133,22 +133,23 @@ opaque low.x86_64.aes_gcm_vaes.VaesKernel.avx2
 opaque low.generic.zeroise.zeroise_value {T : Type} (ZeroableInst : low.generic.zeroise.Zeroable T) :
   T → Result T
 
-/-! ChaCha20-Poly1305's AEAD, which no theorem here is about. -/
+/-! ChaCha20-Poly1305's routines: aws-lc's one-pass seal and open, behind
+their Rust wrapper, whose contract `Rind.X86_64.ChaCha20Poly1305`'s `OnePass`
+states as a hypothesis, and the separate passes CPUs without SSE4.1 run,
+which no theorem is about. -/
 
-opaque mid.chacha20poly1305.ChaCha20Poly1305.Insts.RindAeadCipher.new
-  : Slice Std.U8 → Result mid.chacha20poly1305.ChaCha20Poly1305
+opaque low.x86_64.chacha20poly1305.one_pass
+  : low.x86_64.cpu.HaveSse41 → Option low.x86_64.cpu.HaveAvx2 → Std.Array Std.U8 32#usize →
+    Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 → Bool →
+    Result ((Std.Array Std.U8 16#usize) × (Slice Std.U8))
 
-opaque mid.chacha20poly1305.ChaCha20Poly1305.Insts.RindAeadCipher.inner
-  : aead.Sealer mid.chacha20poly1305.ChaCha20Poly1305 → Result aead.Inner
+opaque low.generic.chacha20poly1305.seal
+  : Std.Array Std.U8 32#usize → Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
+    Result ((Std.Array Std.U8 16#usize) × (Slice Std.U8))
 
-opaque mid.chacha20poly1305.ChaCha20Poly1305.Insts.RindAeadCipher.seal
-  : mid.chacha20poly1305.ChaCha20Poly1305 → Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
-    Std.Array Std.U8 16#usize →
-    Result ((core.result.Result Unit error.Error) × (Slice Std.U8) × (Std.Array Std.U8 16#usize))
-
-opaque mid.chacha20poly1305.ChaCha20Poly1305.Insts.RindAeadCipher.open
-  : mid.chacha20poly1305.ChaCha20Poly1305 → Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
-    Std.Array Std.U8 16#usize → Result ((core.result.Result Unit error.Error) × (Slice Std.U8))
+opaque low.generic.chacha20poly1305.open
+  : Std.Array Std.U8 32#usize → Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
+    Result ((Std.Array Std.U8 16#usize) × (Slice Std.U8))
 
 /-! s2n-bignum's Ed25519 routines, transliterated to inline assembly. -/
 
@@ -251,6 +252,8 @@ opaque low.x86_64.cpu.HaveVaesAvx2ForAesGcm.avx_movbe
   : low.x86_64.cpu.HaveVaesAvx2ForAesGcm → Result low.x86_64.cpu.HaveAvxMovbeForAesGcm
 
 opaque low.x86_64.cpu.HaveSsse3.check : Result (Option low.x86_64.cpu.HaveSsse3)
+
+opaque low.x86_64.cpu.HaveSse41.check : Result (Option low.x86_64.cpu.HaveSse41)
 
 /-- The SHA-1 and SHA-256 routines the CPU runs, each picked once. -/
 opaque low.x86_64.sha1_mux.path : Result low.x86_64.sha1_mux.Path
