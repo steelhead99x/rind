@@ -25,14 +25,43 @@
 # architecture compiles is missed here. `admin/mutants --survivors DIR...`
 # combines runs' `mutants.out` directories: it prints each mutant some run
 # missed and none caught, and fails if there is one.
+#
+# `admin/mutants --campaign NAME --list ...` selects that campaign's filters
+# on any host, so a planner can count mutants for every architecture from
+# one machine. NAME is `x86_64`, `aarch64`, `macos`, or `armv7`. It is only
+# for `--list`: a real run is selected by the host, or by `--target` for
+# armv7, which also has the linker and qemu that listing does not need.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 avx512=
-if [ "${1:-}" = --avx512 ]; then
-    shift
-    avx512=1
-fi
+target=
+campaign=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --avx512)
+            avx512=1
+            shift
+            ;;
+        --target)
+            [ $# -ge 2 ] || {
+                echo "admin/mutants: --target needs a triple" >&2
+                exit 2
+            }
+            target=$2
+            shift 2
+            ;;
+        --campaign)
+            [ $# -ge 2 ] || {
+                echo "admin/mutants: --campaign needs a name" >&2
+                exit 2
+            }
+            campaign=$2
+            shift 2
+            ;;
+        *) break ;;
+    esac
+done
 
 if [ "${1:-}" = --survivors ]; then
     shift
@@ -56,10 +85,19 @@ if [ "${1:-}" = --survivors ]; then
     exit 0
 fi
 
-target=
-if [ "${1:-}" = --target ]; then
-    target=$2
-    shift 2
+if [ -n "$campaign" ]; then
+    [ -z "$target" ] || {
+        echo "admin/mutants: --campaign replaces --target" >&2
+        exit 2
+    }
+    found=
+    for arg in "$@"; do
+        [ "$arg" != --list ] || found=1
+    done
+    [ -n "$found" ] || {
+        echo "admin/mutants: --campaign is only for --list" >&2
+        exit 2
+    }
 fi
 
 # Only armv7 and the portable backend compile these.
@@ -73,8 +111,11 @@ base=()
 # Darwin runs only the DIT code, which compiles for Apple's platforms alone;
 # the Linux runs cover the rest.
 only=()
-case ${target:-$(uname -sm)} in
-    "Darwin arm64")
+# `--campaign` names the same arms as the host and `--target` do, so a list
+# counted elsewhere matches the run that later shards it.
+selector=${campaign:-${target:-$(uname -sm)}}
+case "$selector" in
+    macos | "Darwin arm64")
         triple=AARCH64_APPLE_DARWIN
         skip=()
         only=(
@@ -83,7 +124,7 @@ case ${target:-$(uname -sm)} in
         )
         rows=("dit")
         ;;
-    "Linux x86_64")
+    x86_64 | "Linux x86_64")
         triple=X86_64_UNKNOWN_LINUX_GNU
         skip=(
             'rind/src/low/aarch64/**' 'rind/src/low/arm/**' "${portable[@]}"
@@ -100,7 +141,7 @@ case ${target:-$(uname -sm)} in
             "adx ssse3"
         )
         ;;
-    "Linux aarch64")
+    aarch64 | "Linux aarch64")
         triple=AARCH64_UNKNOWN_LINUX_GNU
         skip=(
             'rind/src/low/x86_64/**' 'rind/src/low/arm/**' "${portable[@]}"
@@ -112,11 +153,17 @@ case ${target:-$(uname -sm)} in
             "aes pmull sha2 sha3"
         )
         ;;
-    armv7-unknown-linux-gnueabihf)
-        [ -n "${CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER:-}" ] || {
+    armv7 | armv7-unknown-linux-gnueabihf)
+        target=armv7-unknown-linux-gnueabihf
+        # Listing only parses the sources. The linker and qemu are for the run.
+        listing=
+        for arg in "$@"; do
+            [ "$arg" != --list ] || listing=1
+        done
+        if [ -z "$listing" ] && [ -z "${CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER:-}" ]; then
             echo "admin/mutants: run armv7 in 'nix develop .#armv7'" >&2
             exit 1
-        }
+        fi
         triple=ARMV7_UNKNOWN_LINUX_GNUEABIHF
         export CARGO_BUILD_TARGET=$target
         export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
@@ -141,7 +188,7 @@ case ${target:-$(uname -sm)} in
         )
         ;;
     *)
-        echo "admin/mutants: no campaign for ${target:-$(uname -sm)}" >&2
+        echo "admin/mutants: no campaign for $selector" >&2
         exit 1
         ;;
 esac
