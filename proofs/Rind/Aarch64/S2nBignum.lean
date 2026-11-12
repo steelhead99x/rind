@@ -119,33 +119,6 @@ rind's aarch64 P-256 runs the `_alt` scalar multiplications and Montgomery
 multiplication and squaring under the plain names, and the plain sources of
 the other routines, which have no `_alt`. -/
 
-/-- HOL Light's `inverse_mod p_256 (2 EXP 256)`: the number below `p256`
-that 2²⁵⁶ times is 1 mod `p256`, which `p256RInv_spec` checks, and which is
-unique since `p256` is odd. -/
-def p256RInv : Nat :=
-  115792089183396302114378112356516095823261736990586219612555396166510339686400
-
-theorem p256RInv_spec : p256RInv < p256 ∧ 2 ^ 256 * p256RInv % p256 = 1 := by
-  simp only [p256RInv, p256]; decide
-
-/-- `affinepoint_p256 xy P`: `P` is the point whose coordinates are `xy`'s,
-reduced mod `p256` (`modular_decode`),
-https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/p256_scalarmul_alt.ml#L6433 -/
-def p256Affine (xy : Nat × Nat) (P : P256Point) : Prop :=
-  P = some (xy.1 % p256, xy.2 % p256)
-
-/-- `affinepointz_p256 xy P`: as `p256Affine`, except that (0, 0) is the point
-at infinity,
-https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/p256_scalarmul_alt.ml#L6437 -/
-def p256AffineZ (xy : Nat × Nat) (P : P256Point) : Prop :=
-  if xy.1 = 0 ∧ xy.2 = 0 then P = none else P = some (xy.1 % p256, xy.2 % p256)
-
-/-- `represents2_p256 P xy`: `xy` are `P`'s coordinates in Montgomery form
-(`montgomery_decode`), each below `p256`,
-https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/p256_montjmixadd_alt.ml#L1951 -/
-def p256Represents2 (P : P256Point) (xy : Nat × Nat) : Prop :=
-  xy.1 < p256 ∧ xy.2 < p256 ∧ some (p256RInv * xy.1 % p256, p256RInv * xy.2 % p256) = P
-
 /-- `p256_tabulates P 6 tab len tabulation`, for the table rind passes: entry
 `j` of row `i`, counting entries from 1, represents `P` times 2⁶ⁱ·j. Its length
 condition, (256 / 6 + 1) · 2⁵ · 64 ≤ len, is the type's 43 rows of 256 words,
