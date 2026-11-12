@@ -11,6 +11,8 @@ proofs/Rind/*/Kdf/Funs.lean
 proofs/Rind/Aarch64/X25519.lean
 proofs/Rind/Aarch64/P384.lean
 proofs/Rind/Aarch64/Dispatch.lean
+proofs/Rind/Aarch64/P256Dispatch.lean
+proofs/Rind/Aarch64/P256Agree.lean
 proofs/Rind/Aarch64/DigestAlgorithm.lean
 proofs/Rind/Aarch64/DigestDispatch.lean
 proofs/Rind/Aarch64/Sha512.lean

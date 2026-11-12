@@ -14,6 +14,11 @@
 # too. The x86_64 and aarch64 rows are ctgrind.yml's; armv7's also pick
 # qemu's CPU.
 #
+# `admin/mutants --portable ...`, on x86_64 Linux, forces the portable backend
+# with `--cfg rind_portable`, as `just portable` does, so the files only it
+# and armv7 compile, and those armv7's assembly replaces, are mutated without
+# an emulator. It reads no CPU features, so it has no rows.
+#
 # `admin/mutants --avx512 ...`, on x86_64 in `nix develop .#sde`, runs each
 # test under Intel SDE's Sapphire Rapids model instead, which takes every
 # AVX-512 path, though no campaign host has one. Each mutant's tests take
@@ -34,16 +39,24 @@ if [ "${1:-}" = --avx512 ]; then
     avx512=1
 fi
 
+portable_backend=
+if [ "${1:-}" = --portable ]; then
+    shift
+    portable_backend=1
+fi
+
 if [ "${1:-}" = --survivors ]; then
     shift
     # A run with no mutants to test, such as one over an empty diff, writes
-    # none of these.
+    # none of these. A file two backends include by `#[path]`, such as
+    # `low/x86_64/../generic/aes_nohw.rs`, is named by its own path, so a
+    # mutant one backend misses matches the other's catch.
     list() {
         for dir in "$@"; do
             for outcome in "${outcomes[@]}"; do
                 [ ! -f "$dir/$outcome.txt" ] || cat "$dir/$outcome.txt"
             done
-        done
+        done | sed 's#/[^/]*/\.\./#/#'
     }
     outcomes=(missed)
     missed=$(list "$@" | sort -u)
@@ -73,7 +86,15 @@ base=()
 # Darwin runs only the DIT code, which compiles for Apple's platforms alone;
 # the Linux runs cover the rest.
 only=()
-case ${target:-$(uname -sm)} in
+campaign=${target:-$(uname -sm)}
+if [ -n "$portable_backend" ]; then
+    [ -z "$target" ] && [ "$campaign" = "Linux x86_64" ] || {
+        echo "admin/mutants: --portable runs only on Linux x86_64, without --target" >&2
+        exit 1
+    }
+    campaign=portable
+fi
+case $campaign in
     "Darwin arm64")
         triple=AARCH64_APPLE_DARWIN
         skip=()
@@ -141,12 +162,28 @@ case ${target:-$(uname -sm)} in
             "neon QEMU_CPU=cortex-a15 RIND_TEST_ARM_NEON=0 RIND_TEST_ARM_CRYPTO_EXT=0"
         )
         ;;
+    portable)
+        triple=X86_64_UNKNOWN_LINUX_GNU
+        # The explicit target keeps these builds apart from the host's, and
+        # RUSTFLAGS from its build scripts.
+        export CARGO_BUILD_TARGET=x86_64-unknown-linux-gnu
+        export RUSTFLAGS='--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
+        # The assembly backends, SHA-256 that only armv7 and x86_64's tests
+        # compile, and the 32-bit limbs a 64-bit target doesn't, which the
+        # x86_64 and armv7 campaigns reach.
+        skip=(
+            'rind/src/low/x86_64/**' 'rind/src/low/aarch64/**' 'rind/src/low/arm/**'
+            rind/src/low/generic/sha256.rs rind/src/low/generic/limb32.rs
+            rind/src/low/generic/p256_mul32.rs rind/src/low/generic/p384_mul32.rs
+        )
+        rows=()
+        ;;
     *)
-        echo "admin/mutants: no campaign for ${target:-$(uname -sm)}" >&2
+        echo "admin/mutants: no campaign for $campaign" >&2
         exit 1
         ;;
 esac
-[ -z "$avx512" ] || [ "$triple" = X86_64_UNKNOWN_LINUX_GNU ] || {
+[ -z "$avx512" ] || { [ "$triple" = X86_64_UNKNOWN_LINUX_GNU ] && [ -z "$portable_backend" ]; } || {
     echo "admin/mutants: --avx512 runs only on Linux x86_64" >&2
     exit 1
 }
@@ -176,7 +213,7 @@ if [ "${1:-}" = --run ]; then
         [ "$arg" != --list ] || exit 0
     done
     # A row names features to deny, and any variables to set.
-    for row in "${rows[@]}"; do
+    for row in ${rows[@]+"${rows[@]}"}; do
         deny=()
         for word in $row; do
             case $word in
@@ -211,7 +248,7 @@ for arg in "$@"; do
 done
 export NEXTEST_TEST_THREADS=$((($(nproc) + jobs - 1) / jobs))
 
-export "CARGO_TARGET_${triple}_RUNNER=$here/admin/mutants ${avx512:+--avx512 }${target:+--target $target }--run"
+export "CARGO_TARGET_${triple}_RUNNER=$here/admin/mutants ${avx512:+--avx512 }${portable_backend:+--portable }${target:+--target $target }--run"
 # A mutant that hangs the tests until the timeout is caught by them, so only
 # exit 3, timeouts alone, passes beside 0.
 status=0

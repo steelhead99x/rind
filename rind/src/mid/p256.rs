@@ -458,18 +458,18 @@ impl AffineMontPoint {
     }
 
     /// `scalar * self`, by s2n-bignum's `p256_montjscalarmul`.
-    #[cfg(not(rind_backend = "aarch64"))]
+    #[cfg(not(any(rind_backend = "aarch64", rind_backend = "x86_64")))]
     fn multiply(&self, scalar: &Scalar) -> Self {
         JacobianMontPoint::multiply(scalar, self).as_affine()
     }
 
     /// `scalar * self`, by s2n-bignum's `p256_scalarmul`.
     ///
-    /// Its proof covers the aarch64 routine from affine input to affine
+    /// Its proofs cover each routine rind runs, from affine input to affine
     /// output, inversion included, for any scalar and a point on the curve,
     /// which `self` is. It takes and returns plain coordinates, the result
     /// proven only mod p, which `as_mont` reduces.
-    #[cfg(rind_backend = "aarch64")]
+    #[cfg(any(rind_backend = "aarch64", rind_backend = "x86_64"))]
     fn multiply(&self, scalar: &Scalar) -> Self {
         let point = Self::from_xy(self.x().demont(), self.y().demont());
         let mut xy = [0; 8];
@@ -560,7 +560,7 @@ impl JacobianMontPoint {
     }
 
     /// `scalar * point`, by s2n-bignum's `p256_montjscalarmul`.
-    #[cfg(not(rind_backend = "aarch64"))]
+    #[cfg(not(any(rind_backend = "aarch64", rind_backend = "x86_64")))]
     fn multiply(scalar: &Scalar, point: &AffineMontPoint) -> Self {
         let mut r = Self::zero();
         low::p256_montjscalarmul(&mut r.xyz, &scalar.0, &Self::from_affine(point).xyz);

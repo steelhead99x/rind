@@ -15,7 +15,7 @@ ASM = re.compile(
 )
 CONST = re.compile(r"\s?(?P<type>\.(quad|long))\s+(?P<value>((0x[0-9a-fA-F]+),?)+)")
 LABEL = re.compile(r"^(?P<name>(\.L)?[a-zA-Z0-9_]+):$")
-SET_SYMBOL = re.compile(r"^\.set\s+(?P<name>[a-z_]+),\s*(?P<value>.+)$")
+SET_SYMBOL = re.compile(r"^\.set\s+(?P<name>[A-Za-z_]+),\s*(?P<value>.+)$")
 
 
 class Type(enum.StrEnum):
@@ -77,15 +77,16 @@ def merge_blank_lines(lines):
 
 
 def unroll_repeats(lines):
-    # Writes out each `.rep` block in full, replacing the `#symbol` immediates
-    # its `.set` lines count with, since the Rust output has no assembler
-    # symbols.
+    # Writes out each `.rep` block in full, replacing the symbols its `.set`
+    # lines count with, since the Rust output has no assembler symbols: an
+    # aarch64 `#symbol` immediate, or an x86_64 operand naming it bare.
     symbols = {}
 
     def substitute(line):
+        code, sep, comment = line.partition("//")
         for name, value in symbols.items():
-            line = re.sub(r"#%s\b" % name, "#%d" % value, line)
-        return line
+            code = re.sub(r"(?<![\w.])%s\b" % name, "%d" % value, code)
+        return code + sep + comment
 
     def set_symbol(line):
         m = SET_SYMBOL.match(line.strip())
