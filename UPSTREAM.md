@@ -27,7 +27,7 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 
 ### Thumb targets omit `thumb-mode`
 
-- **Breaks:** rustc 1.98 lowers `armv7-linux-androideabi` and every `thumb*` triple to Thumb (`.code 16`, a 16-bit `add r12, pc`) but `rustc --print cfg` does not set `target_feature = "thumb-mode"`. A Thumb `add Rd, pc` reads the instruction's address plus 4, so code that still uses the ARM distance 8 addresses a word four bytes low.
+- **Breaks:** rustc 1.99.1 lowers every `thumb*` triple, `armv7-linux-androideabi`, and `armv7-sony-vita-newlibeabihf` to Thumb (a 16-bit `add r12, pc`) but `rustc --print cfg` sets `thumb-mode` on none of the `arch = "arm"` targets. A Thumb `add Rd, pc` reads the instruction's address plus 4, so code that still uses the ARM distance 8 addresses a word four bytes low. `arm-linux-androideabi` stays ARM and still uses 8.
 - **Reproduce:** `rustc --print cfg --target armv7-linux-androideabi` and `--target thumbv7neon-unknown-linux-gnueabihf` name no `thumb-mode`. `cargo test -p rind --lib low::abi::tests::c_abi_arguments_arrive --target thumbv7neon-unknown-linux-gnueabihf` then reports `the stack pointer: <addr> before, 0x0 after`. The same string fails `android (armv7-linux-androideabi)` in [run 43124199406](https://github.com/moq-dev/rind/actions/runs/43124199406), including a naked `bx lr`.
 - **Workaround:** `rind/build.rs` sets `rind_arm_thumb` from the triple, and `rind/src/low/abi.rs` uses it for the Thumb `pc` distance.
 - **Reported:** no (rust-lang/rust, for setting `thumb-mode` on these targets).

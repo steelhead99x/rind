@@ -58,14 +58,17 @@ fn armv7_or_later() -> bool {
 
 /// Thumb codegen that does not advertise `target_feature = "thumb-mode"`.
 ///
-/// A triple whose arch starts with `thumb` is Thumb. So is
-/// `armv7-linux-androideabi`: rustc 1.98 emits `.code 16` and a 16-bit
-/// `add r12, pc` for it. `armv7-unknown-linux-gnueabihf` and
-/// `arm-linux-androideabi` stay ARM.
+/// rustc 1.99.1 sets that feature in no `arch = "arm"` target's
+/// `--print cfg`. Thumb is every triple whose name starts with `thumb`,
+/// plus the two whose LLVM triples are Thumb anyway:
+/// `armv7-linux-androideabi` (`armv7-none-linux-android` with `+thumb-mode`)
+/// and `armv7-sony-vita-newlibeabihf` (`thumbv7a-sony-vita-eabihf`).
+/// `arm-linux-androideabi` and `armv7-unknown-linux-gnueabihf` stay ARM, so
+/// their `add r12, pc` reads the instruction address plus 8.
 fn arm_thumb_codegen() -> bool {
     let target = env::var("TARGET").expect("cargo sets the target");
     let arch = target.split('-').next().unwrap_or_default();
-    // `armv7-linux-androideabi` has no separate `android` component: the
-    // abi is `androideabi`, which still contains `android`.
-    arch.starts_with("thumb") || (arch == "armv7" && target.contains("android"))
+    arch.starts_with("thumb")
+        || target == "armv7-linux-androideabi"
+        || target == "armv7-sony-vita-newlibeabihf"
 }
