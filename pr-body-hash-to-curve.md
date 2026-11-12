@@ -16,7 +16,7 @@ The two uniform field elements stay on the stack. `L` outside 1..=128 is `Expand
 
 `_NU_` encodings and edwards25519's Elligator 2 map are not implemented.
 
-`quest/m4/protocols/hash-to-curve.md` stays. The quest says the map ships with its first consumer, and this change has no public API. Draft #616 edits that same quest file and also edits `rind/src/mid/p256.rs`, which this branch extends with the P-256 map.
+`quest/m4/protocols/hash-to-curve.md` stays. The quest says the map ships with its first consumer, and this change has no public API.
 
 ## Impact
 
@@ -31,7 +31,7 @@ The two uniform field elements stay on the stack. `L` outside 1..=128 is `Expand
 
 - OPRF needs to multiply the hashed point by a secret scalar, including the point at infinity, without branching on the infinity flag.
 - No benchmark against aws-lc. The primitive has no public API and is not on a MoQ hot path.
-- #614 moves the portable NIST-curve arithmetic onto 64-bit limbs in `low`, which these maps call. It does not edit `mid/p256.rs`.
+- This branch rebases cleanly on upstream main (`62b17d67`). It conflicts with #614 and #616 only in the docs, Cargo, and README tables, and with #616 also in `rind/src/mid/p256.rs`. It will be updated by merge after whichever of those lands first.
 
 ## Testing
 
@@ -63,17 +63,19 @@ ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
 
 ## Review
 
-Rounds by a model from a second vendor, different from the one that wrote the code. The SHAs are this branch's commits of those changes.
+The heads in this table are pre-rebuild fork commits. The base of every round is fork main (upstream main as of 2026-11-11 plus fork-only review config).
 
 | Round | Head reviewed | Base | Score | Findings |
 | --- | --- | --- | --- | --- |
-| 1 (low effort) | `5e520cf5` | f5f82bca | 7/10 | none |
-| 1 (deep) | `5e520cf5` | f5f82bca | 7/10 | 4 medium, 4 low |
-| 2 | `1ff9d7c2` | f5f82bca | 9/10 | 1 low |
-| 3 | `0ad967c1` | f5f82bca | 10/10 | none |
+| 1 (low effort) | `fb6199d4` | fork main | 7/10 | none |
+| 1 (deep) | `fb6199d4` | fork main | 7/10 | 4 medium, 4 low |
+| 2 | `be4cc357` | fork main | 9/10 | 1 low |
+| 3 | `a4504501` | fork main | 10/10 | none |
 
-Seven round-1 findings were fixed. The eighth (replacing the block-count loop with `div_ceil`) was refuted, because that division would need an `admin/ct-vartime` allowance, and round 2 accepted the refutation. The round-2 low finding (a `const SWU` doc comment naming a test that doesn't exist) is fixed in `0ad967c1`.
+Rebuilt head `dab34e89616f43841bcf592c68d0148281039cf4` carries the same quest commits cherry-picked onto upstream main.
 
-Round 3 covered the hardening in `dd84f4db` (stack-held field elements, refused wide reductions, tests at each modulus and with 255- and 256-byte tags) and has no open findings.
+Seven round-1 findings were fixed. The eighth (replacing the block-count loop with `div_ceil`) was refuted, because that division would need an `admin/ct-vartime` allowance, and round 2 accepted the refutation. The round-2 low finding (a `const SWU` doc comment naming a test that doesn't exist) is fixed in `a4504501`.
 
-`dab34e89` is not part of those rounds. It only adds `hash2curve` 0.14.0 to `Cargo.lock` so the dev-dependency resolves against current main.
+Round 3 covered the hardening in `d59870e0` (stack-held field elements, refused wide reductions, tests at each modulus and with 255- and 256-byte tags) and has no open findings.
+
+The tip of the rebuilt head is not part of those rounds. It only adds `hash2curve` 0.14.0 to `Cargo.lock` so the dev-dependency resolves. That change is mechanical: the lockfile only, no new branch, panic site, or wipe. The differential tests that use the crate are the ones the earlier rounds already covered.

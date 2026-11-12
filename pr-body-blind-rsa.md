@@ -26,11 +26,7 @@ One message type for every variant would let a randomized caller pass the origin
 
 Partially blind RSA stays out until a consumer asks.
 
-This does not have to merge after #614 or #624. It should land first.
-
-#624 conflicts with this branch in `rind/src/high/pkcs1.rs` and `rind/src/high/rsa.rs`. `rind/src/low/posint.rs` and `rind/src/mid/rsa_pub.rs` merge. #624 rebases after this lands. If #624 lands first, this branch has to be rebased onto it before it can merge.
-
-#614's RSA and bignum changes merge with this branch. The only overlap is `quest/m4/protocols/blind-rsa.md`: this branch deletes it, and #614 edits a line number in the plan (`bignum.rs:169` to `:159`). Keep the file deleted, whichever lands second.
+This branch rebases cleanly on upstream main (`62b17d67`). It conflicts with #614 in the docs, the quest files, and `rind/src/low/mod.rs`, and with #624 in `rind/src/high/pkcs1.rs` and `rind/src/high/rsa.rs`. It will be updated by merge after whichever of those lands first.
 
 ## Testing
 
@@ -59,18 +55,18 @@ The same `just ci` run includes RFC 9474 Appendix A (`rfc9474`), Wycheproof `rsa
 
 ## Review
 
-Rounds by a model from a second vendor, different from the one that wrote the code. The SHAs are this branch's commits of those changes.
+The heads in this table are pre-rebuild fork commits. The base of every round is fork main (upstream main as of 2026-11-11 plus fork-only review config).
 
 | Round | Head reviewed | Base | Score | Findings |
 | --- | --- | --- | --- | --- |
-| 1 (low effort) | `afaec621` | `f5f82bca896a603e76c5b33a3d3eca65e6a1cd5a` | 7/10 | 3 low |
-| 1 (deep) | `0f682517` | `f5f82bca896a603e76c5b33a3d3eca65e6a1cd5a` | 7/10 | 5 medium, 5 low |
-| 2 | `c7e2b4c6` | `f5f82bca896a603e76c5b33a3d3eca65e6a1cd5a` | 9/10 | 1 low |
+| 1 (low effort) | `8201a5b5` | fork main | 7/10 | 3 low |
+| 1 (deep) | `2ac0ac98` | fork main | 7/10 | 5 medium, 5 low |
+| 2 | `72275be4` | fork main | 9/10 | 1 low |
 
-The base is main, `test(mutants): kill the surviving mutants that need crafted inputs (#603)`.
+Rebuilt head `56d288f92c745c95961ee501212bf8624de62c9f` carries the same quest commits cherry-picked onto upstream main.
 
 Every round-1 finding was fixed and confirmed in round 2. The main changes: the PSS salt is bound to the key, the PSS BIT STRING is parsed as PKCS#1 only, blinding state keeps the digest instead of the message, the key can be exported (`to_spki`, `components`), and malformed-DER tests were added.
 
-The round-2 low finding is fixed at `913eb1fb`: `from_spki`'s non-PSS path calls `VerifyingKey::from_spki_der`, and `rejects_a_bare_pkcs1_key` checks that a bare PKCS#1 key is refused. A low finding needs no further round.
+The round-2 low finding is fixed at `3dfc0475`: `from_spki`'s non-PSS path calls `VerifyingKey::from_spki_der`, and `rejects_a_bare_pkcs1_key` checks that a bare PKCS#1 key is refused. A low finding needs no further round.
 
-`56d288f9` is not part of those rounds. It is mechanical. `rsa::MAX_SPKI_LEN` left `rsa.rs` when ML-DSA landed, and this commit sizes that test's buffer as `MAX_PUBLIC_KEY_LEN + 32`, which is what the removed constant was. Checked against REVIEW.md: the buffer holds a public SPKI, so there is no new secret-dependent branch, index, or variable-time instruction; the `unwrap`s stay in the test, on a key the test built, and no library path gained one; the test still refuses a bare PKCS#1 key and reloads the SPKI; no key type or wipe path changes.
+The tip of the rebuilt head sizes that test's buffer as `MAX_PUBLIC_KEY_LEN + 32` after `rsa::MAX_SPKI_LEN` left `rsa.rs`. That change is mechanical. Checked against REVIEW.md: the buffer holds a public SPKI, so there is no new secret-dependent branch, index, or variable-time instruction; the `unwrap`s stay in the test, on a key the test built, and no library path gained one; the test still refuses a bare PKCS#1 key and reloads the SPKI; no key type or wipe path changes.

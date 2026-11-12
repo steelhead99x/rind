@@ -29,6 +29,7 @@ The data-dependent half indexes memory by a word of the previous block. That is 
 
 - A proof of the BlaMka permutation.
 - libsodium was not measured as its own binary.
+- This branch rebases cleanly on upstream main (`62b17d67`). It conflicts with #614 and #616 only in the docs, Cargo, and README tables. It will be updated by merge after whichever of those lands first.
 
 ## Testing
 
@@ -51,22 +52,24 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 649 filtered out; fi
 ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
 ```
 
-Release fill, one lane, measured on the machine that wrote the fills (Intel Xeon, milliseconds per hash). Not re-measured on this host:
+Release fill, one lane, criterion estimate (10 samples) on this machine, an Intel Xeon with AVX-512F, AVX2, and SSSE3. rind selects the AVX-512F fill. RustCrypto is `argon2` 0.6 as this bench builds it.
 
-| memory | passes | rind AVX-512F | rind scalar | RustCrypto AVX2 | phc-argon2 AVX-512F |
-| --- | --- | --- | --- | --- | --- |
-| 1 MiB | 3 | 0.41 | 1.20 | 0.89 | 0.43 |
-| 16 MiB | 1 | 4.05 | 8.81 | 5.69 | 4.12 |
-| 64 MiB | 1 | 28.3 | 45.7 | 41.6 | 30.1 |
+| memory | passes | rind | RustCrypto | RustCrypto / rind |
+| --- | --- | --- | --- | --- |
+| 1 MiB | 3 | 375.39 µs | 880.99 µs | 2.35 |
+| 16 MiB | 1 | 3.088 ms | 5.792 ms | 1.88 |
+| 64 MiB | 1 | 31.825 ms | 42.480 ms | 1.33 |
 
 ## Review
 
-Rounds by a model from a second vendor, different from the one that wrote the code. The SHAs are this branch's commits of those changes. The head of this branch is the commit round 2 reviewed.
+The heads in this table are pre-rebuild fork commits. The base of every round is fork main (upstream main as of 2026-11-11 plus fork-only review config).
 
 | Round | Head reviewed | Base | Score | Findings |
 | --- | --- | --- | --- | --- |
-| 1 (low effort) | `722daf96` | f5f82bca | 8/10 | none |
-| 1 (deep) | `722daf96` | f5f82bca | 7/10 | 1 high, 5 medium, 4 low |
-| 2 | `b538aa8d` | f5f82bca | 9/10 | none |
+| 1 (low effort) | `4ce2943c` | fork main | 8/10 | none |
+| 1 (deep) | `4ce2943c` | fork main | 7/10 | 1 high, 5 medium, 4 low |
+| 2 | `c7c4f4ef` | fork main | 9/10 | none |
+
+Rebuilt head `b538aa8de01a4ef66777726b7a88132ea6586fc7` carries the same quest commits cherry-picked onto upstream main. Its tree is the tree round 2 reviewed.
 
 The deep round's high finding was a fuzz oracle that treated a truncated tag as a prefix of the full one. All ten findings were fixed (AVX2, SSSE3, and NEON memory fills came in the same pass), and round 2 confirmed each fix with no new findings.
