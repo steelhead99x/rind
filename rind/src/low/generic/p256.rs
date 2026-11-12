@@ -743,17 +743,8 @@ mod tests {
         r
     }
 
-    /// `scalar * point` by s2n-bignum, as `plain_affine` gives it.
-    #[cfg(rind_backend = "x86_64")]
-    fn s2n_multiply(scalar: &[u64; 4], point: &[u64; 12]) -> [u64; 8] {
-        let mut r = [0; 12];
-        low::p256_montjscalarmul(&mut r, scalar, point);
-        plain_affine(&r)
-    }
-
-    /// `scalar * point` by s2n-bignum, as `plain_affine` gives it.  aarch64
-    /// runs only its affine `p256_scalarmul`, which cannot take infinity.
-    #[cfg(rind_backend = "aarch64")]
+    /// `scalar * point` by s2n-bignum, as `plain_affine` gives it, by its
+    /// affine `p256_scalarmul`, which cannot take infinity.
     fn s2n_multiply(scalar: &[u64; 4], point: &[u64; 12]) -> [u64; 8] {
         let mut r = [0; 8];
         if affine(point).is_some() {
