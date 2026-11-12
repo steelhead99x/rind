@@ -159,8 +159,54 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # Modules only the portable backend compiles, forced on x86_64 with
+  # `--cfg rind_portable`. No feature rows: that backend reads no CPU
+  # features. Its own job, rather than a row of the matrix above.
+  portable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The diff's base can lie anywhere in the history.
+          fetch-depth: 0
+
+      - uses: ./.github/actions/vectors
+
+      - uses: ./.github/actions/nix
+
+      - name: Diff
+        run: |
+          if [ -z "$BASE" ]; then
+            BASE=$(git rev-list -1 --before="24 hours ago" HEAD)
+          fi
+          git diff "$(git merge-base "$BASE" HEAD)" HEAD -- '*.rs' > "$RUNNER_TEMP/changes.diff"
+        env:
+          BASE: ${{ inputs.base || github.event.pull_request.base.sha }}
+
+      # Exit 2, a missed mutant, may be code only another architecture
+      # compiles, so `survivors` decides.
+      - name: Mutate
+        run: |
+          nix develop --command admin/mutants --portable -p rind --features wipe --in-diff "$RUNNER_TEMP/changes.diff" --output "$RUNNER_TEMP" || [ $? -eq 2 ]
+
+      - name: Keep the diff
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/mutants.out"
+          cp "$RUNNER_TEMP/changes.diff" "$RUNNER_TEMP/mutants.out/"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: mutants-portable
+          path: ${{ runner.temp }}/mutants.out
+          retention-days: 14
+          if-no-files-found: ignore
+
   survivors:
-    needs: [mutants, avx512]
+    needs: [mutants, avx512, portable]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

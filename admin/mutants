@@ -150,6 +150,48 @@ esac
     exit 1
 }
 
+# `--portable` forces the portable backend on this x86_64 host. It is applied
+# after the host case above, so it stays a flag rather than another arm of
+# that case: the case has already picked this machine's campaign, and this
+# replaces its feature rows and excludes. The backend reads no CPU features,
+# so there is no denial row. It skips the three assembly backends and mutates
+# only the modules armv7's assembly replaces, plus `mont_sqr` and
+# `mont_mul_limbs`, whose mutants no other campaign compiles. Pass it first.
+portable_run=
+if [ "${1:-}" = --portable ]; then
+    shift
+    [ "$(uname -sm)" = "Linux x86_64" ] || {
+        echo "admin/mutants: --portable runs on Linux x86_64" >&2
+        exit 1
+    }
+    [ -z "${target:-}" ] || {
+        echo "admin/mutants: --portable does not combine with --target" >&2
+        exit 1
+    }
+    [ -z "$avx512" ] || {
+        echo "admin/mutants: --portable does not combine with --avx512" >&2
+        exit 1
+    }
+    portable_run=1
+    export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
+    skip=(
+        'rind/src/low/x86_64/**' 'rind/src/low/aarch64/**'
+        'rind/src/low/arm/**' 'rind/src/mid/arm/**'
+    )
+    only=(
+        --file rind/src/low/portable/chacha20.rs
+        --file rind/src/low/portable/cpu.rs
+        --file rind/src/low/portable/keccak.rs
+        --file rind/src/low/portable/sha.rs
+        --file rind/src/low/generic/bignum.rs
+        --re 'rind/src/low/portable/(chacha20|cpu|keccak|sha)\.rs:| in mont_(sqr|mul_limbs)$'
+    )
+    rows=()
+    base=()
+    runner=()
+    profile=()
+fi
+
 # The test runner: runs one test binary on each row, failing if any fails.
 # Nextest lists a binary's tests through the runner too, which needs one run.
 if [ "${1:-}" = --run ]; then
@@ -210,7 +252,7 @@ for arg in "$@"; do
 done
 export NEXTEST_TEST_THREADS=$((($(nproc) + jobs - 1) / jobs))
 
-export "CARGO_TARGET_${triple}_RUNNER=$here/admin/mutants ${avx512:+--avx512 }${target:+--target $target }--run"
+export "CARGO_TARGET_${triple}_RUNNER=$here/admin/mutants ${avx512:+--avx512 }${portable_run:+--portable }${target:+--target $target }--run"
 # A mutant that hangs the tests until the timeout is caught by them, so only
 # exit 3, timeouts alone, passes beside 0.
 status=0
