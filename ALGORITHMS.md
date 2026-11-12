@@ -36,7 +36,7 @@ SHA-512.
 | ChaCha20-Poly1305, XChaCha20-Poly1305 | aws-lc ⚡ |  |  | HACL* ✓ + aws-lc ⚡ + Graviola ⚡ | HACL* ✓ + Graviola ⚡ |
 | MD5 | rind |  |  |  |  |
 | SHA-1 | rind | aws-lc |  |  |  |
-| SHA-256 | Graviola ⚡ | aws-lc ⚡ |  |  |  |
+| SHA-256 | Graviola ⚡ + rind ⚡ | aws-lc ⚡ |  |  |  |
 | SHA-384, SHA-512, SHA-512/256 | OpenSSL ⚡ | aws-lc ⚡ |  |  |  |
 | SHA3-256, SHA3-384, SHA3-512 | s2n-bignum ✓ + Graviola |  |  |  |  |
 | HMAC | Graviola ⚡ |  |  |  |  |
@@ -583,7 +583,9 @@ SHA1 and SHA256 have straightforward implementations using hashing intrinsics
 (aka "SHA-NI" on x86_64, "sha" extension on aarch64), except that aarch64 runs
 aws-lc's SHA256 assembly for those instructions: it keeps a register copy off
 each round's dependency chain, where LLVM's code for the intrinsics puts one
-on it. Without SHA-NI, x86_64
+on it, and x86_64 runs LLVM's code for its SHA256 intrinsics frozen into
+inline assembly, so that a proof can be about the bytes it runs, with the
+last block's padding in Rust. Without SHA-NI, x86_64
 selects at runtime an AVX2 message schedule with scalar rounds for SHA1, as
 aws-lc does, and for SHA256 runs OpenSSL's AVX2 routine, which aws-lc leaves
 out: 1.12x faster than aws-lc's AVX routine on an i7-8700 and 1.13x on Arrow
@@ -614,6 +616,9 @@ where the CPU has NEON, and its scalar routine otherwise.
 
 SHA3-256, SHA3-384, and SHA3-512 run Graviola's sponge over the Keccak-f
 ML-KEM uses (see [ML-KEM-768](#ml-kem-768)), one state at a time.
+[`proofs/`](proofs/README.md) proves the sponge, and ML-KEM's SHAKE calls,
+against FIPS 202 down to s2n-bignum's Keccak-f routines on x86_64 and
+aarch64.
 
 x86_64 decides once per process whether the CPU has AES-NI and PCLMULQDQ,
 and SSSE3. Without the first two, as on Core 2 and Nehalem, AES and AES-CTR

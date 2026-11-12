@@ -240,10 +240,13 @@ and `Rind/X86_64/HkdfAead.lean` on x86_64:
   through `aead_key_new_spec` over `aes_gcm_new`;
 - `aead_key_from_chacha20_poly1305_spec`: a ChaCha20-Poly1305 key holds the
   32 bytes of HKDF-Expand, through `aead_key_new_chacha20_poly1305_spec` over
-  `chacha20_poly1305_new`.
+  `chacha20_poly1305_new`;
+- `aes_header_key_from_spec`: AES-128 or AES-256 header protection holds
+  FIPS 197's round keys for the `4 * nk` bytes of HKDF-Expand, on x86_64 under
+  `RunsAesNi`, through `aes_header_new_spec` over `aes_header_new`.
 
-The other keys `From<Okm>` converts to, AES-192-GCM and AES header
-protection, have no proof. `Rind/X86_64/Kdf/FunsExternal.lean`'s
+The other keys `From<Okm>` converts to, AES-192-GCM and AES header protection
+on aarch64, have no proof. `Rind/X86_64/Kdf/FunsExternal.lean`'s
 `new` wrappers turn a model's refusal into the panic its `expect` makes, so
 each conversion panics exactly where its `expect` does.
 
@@ -293,6 +296,36 @@ digest API reaches each hash through function pointers too, which
 models the `Algorithm` statics that hold them, and `Digest`, whose
 `&'static Algorithm` Aeneas cannot end a borrow of `Digest` across.
 
+SHA3-256, SHA3-384, and SHA3-512, and the SHAKE calls ML-KEM makes, on x86_64
+and aarch64, from rind's Rust sponge to s2n-bignum's Keccak-f routines, in
+`Rind/X86_64/Sha3.lean`, which `admin/prove` also writes for aarch64:
+
+- `sha3_family_digest`: `digest`'s bytes are the hash of the message;
+- `sha3_family_context`: a `Context` given the message in any chunks, then
+  finished, returns its hash;
+- `sha3Family_fips202`: those hashes are FIPS 202's SHA3-256, SHA3-384, and
+  SHA3-512;
+- `sponge_absorb_spec`, `sponge_finish_spec`, `squeezing_squeeze_spec`: a
+  `Sponge` absorbs any message in any pieces, and once finished, each
+  `squeeze` writes the next bytes of FIPS 202's sponge on it, as ML-KEM's J
+  (SHAKE256) and its matrix sampling's tail draw;
+- `shake128x4_new_spec`, `shake128x4_squeeze_spec`: `SqueezingSponge4xShake128`
+  writes the first 504 bytes of SHAKE128 on each of four 34-byte inputs, and
+  returns the sponges to squeeze the rest;
+- `shake256_batch_spec`: `shake256_batch` writes the first 128 bytes of
+  SHAKE256 on each of its 33-byte inputs, four at a time.
+
+The sponge is `Rind/Sha3.lean`'s, over bytes, which `sha3_256_eq` and its
+siblings, `shake128_eq` and `shake256_eq`, prove FIPS 202's as SymCrypt's
+Lean spec (`Rind/SymCrypt/Sha3.lean`, MIT) states it. Keccak-f is
+s2n-bignum's `keccak 24` on lanes, the spec its routines' theorems state,
+which `Rind/Keccak.lean` proves SymCrypt's KECCAK-f[1600].
+`Rind/<Arch>/KeccakDispatch.lean` proves what rind's dispatch to the one-,
+two-, and four-state routines computes, from those theorems. Each theorem
+assumes `RunsSha3`: rind's entry guard and CPU checks pass. ML-DSA's SHAKE
+readers are not translated, and x86_64's AVX-512 eight-way Keccak, which
+ML-KEM's sampler runs, has [its own quest](/quest/m4/verified/mlkem-avx512-sampler.md).
+
 Ed25519 on x86_64 and aarch64, from the signature API's `Ed25519KeyPair` and
 `PublicKey` to s2n-bignum's routines and the SHA-512 proof above, in
 `Rind/X86_64/Ed25519.lean`, which `admin/prove` also writes for aarch64:
@@ -327,6 +360,29 @@ which `ed25519_key_pair_verify` assumes, is the group's theory, which these
 theorems do not import. `PublicKey` reaches each algorithm's key parser, and
 each parsed key its verification, through function pointers, which
 `Rind/X86_64/SignatureDispatch.lean` models.
+
+AES-128 and AES-256 on x86_64 CPUs with AES-NI, from `cipher::Aes` and the
+header-protection API's `HeaderProtectionKey` to rind's AES-NI key expansion
+and block cipher, in `Rind/X86_64/AesCipher.lean`:
+
+- `aes_new`: a `cipher::Aes` key that is not the algorithm's length is
+  refused, and otherwise the key holds FIPS 197's round keys for its bytes,
+  as Vale's `key_to_round_keys_LE` lays them out;
+- `aes_encrypt_block`: the block becomes Vale's `aes_encrypt_LE` of it under
+  the key;
+- `aes_header_new`: the same for `aead::quic::AES_128` and `AES_256`, whose
+  keys reach `Aes::new` through the dispatch `Rind/X86_64/Dispatch.lean`
+  models;
+- `aes_header_mask`: the mask is RFC 9001's, the first five bytes of that
+  cipher of the sample.
+
+`aesBlock` and `aesHeaderMask` are those specs on bytes, which `#guard`s
+check against FIPS 197's and RFC 9001's vectors. The theorems assume
+`RunsAesNi`, or for a key already made only its entry guard: rind's
+CPU-feature checks find AES-NI, which no input affects. AES-192 keys, which
+run `aes192_expand` and `aes_block`, and aarch64, whose intrinsics nothing
+models yet, have no proof: [the AES header-protection
+quest](/quest/m4/verified/aes-header-protection.md) owns them.
 
 AES-128-GCM and AES-256-GCM on x86_64 CPUs with AVX and MOVBE but no VAES,
 from the AEAD API's `Key` to HACL*'s Vale AES-GCM routines, in
@@ -449,11 +505,19 @@ dispatch models' quotes, if it builds a digest `Algorithm` outside
   ChaCha20, and Ed25519 proofs, `Rind/X86_64/{Blockwise,Sha,Hmac}.lean`,
   SHA-1's, SHA-256's, and HMAC's, and
   `Rind/X86_64/{DigestApi,HmacApi,Hkdf,Pbkdf2}.lean`, the digest, HMAC, HKDF,
-  and PBKDF2 APIs'; `Rind/X86_64/HkdfAead.lean`, HKDF's conversion to AES-GCM
-  and ChaCha20-Poly1305 keys; `Rind/X86_64/{AesKey,Ghash,PartialBlock,AesGcmGlue,AesGcm}.lean`:
+  and PBKDF2 APIs'; `Rind/X86_64/HkdfAead.lean`, HKDF's conversion to AES-GCM,
+  ChaCha20-Poly1305, and AES header-protection keys;
+  `Rind/X86_64/AesCipher.lean`, `cipher::Aes` and AES header protection, and
+  `Rind/X86_64/{AesKey,Ghash,PartialBlock,AesGcmGlue,AesGcm}.lean`:
   the AES-GCM proof, on x86_64 alone; `Rind/X86_64/GcmKey.lean`, the hand model
   of `aead::gcm::Key` and its proofs; `Rind/X86_64/ChaCha20Poly1305.lean`, the
   ChaCha20-Poly1305 and XChaCha20-Poly1305 proof above aws-lc's routines.
+- `Rind/SymCrypt/{Defs,Sha3}.lean`: SymCrypt's Lean FIPS 202 spec, vendored;
+  `Rind/Keccak.lean`: s2n-bignum's Keccak spec, transliterated, and its proof
+  that it is SymCrypt's; `Rind/Sha3.lean`: the sponge over bytes, and its
+  proof that it is SymCrypt's; `Rind/<Arch>/KeccakDispatch.lean`: rind's
+  Keccak-f dispatch on each target; `Rind/X86_64/Sha3.lean`: the SHA-3 and
+  SHAKE proofs.
 - `Rind/<Arch>/ShaBlocks.lean`: SHA-1 and SHA-256's block functions on each
   target, SHA-1's padded last blocks, and SHA-256's padded last blocks and
   finish; `Rind/Aarch64/Sha256Hw.lean`, the axiom for aarch64's routine with
@@ -496,6 +560,9 @@ Beyond Lean's kernel:
   its HOL Light definition, transliterated, rather than opaque, so `p256Add`,
   `p256Pow`, and `p256Inv` in `Rind/Spec.lean` are trusted to be
   `weierstrass_add`, `group_pow`, and `ring_inv` on `p256_group`.
+- That `Rind/SymCrypt/Sha3.lean` is FIPS 202, as SymCrypt's authors state,
+  and that `Rind/Keccak.lean` transliterates s2n-bignum's `keccak_spec.ml`,
+  in which the Keccak-f axioms state their results.
 - That `Rind/Sha2.lean` restates cryptol-specs' SHA-512 around
   `processBlock_Common`, and `Rind/S2nSha256.lean` transliterates
   s2n-bignum's SHA-256 spec.
