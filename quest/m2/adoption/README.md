@@ -59,5 +59,7 @@ don't ask again (✅ is the chosen option):
   is already smaller than aws-lc-rs's provider.
 - Whatever these consumers need from rind itself is planned now: the
   WebCrypto set (AES-192, MD5, RSA-OAEP key labels and SPKI export, AES key
-  wrap with padding, all landed) and platform coverage. RSA-2048 signing, which JWT's RS256 needs, is level with the
+  wrap with padding, all landed) and platform coverage (landed for the
+  targets [PLATFORMS.md](/PLATFORMS.md) says CI tests; wasm32 is the rind
+  library only). RSA-2048 signing, which JWT's RS256 needs, is level with the
   fastest library on x86_64 in [BENCHMARKS.md](/BENCHMARKS.md).

@@ -96,6 +96,7 @@ an Intel SDE CPU model, as `x86-cpu.yml` names them.
 | portable | 32-bit x86 (`i686`) | `just qemu i686`: clippy and release vectors and differential tests, natively on an x86_64 host; `build.yml`'s `i686-windows` and `android` jobs | none, as above | ctgrind's forced run, of the same code built for x86_64 |
 | portable | big-endian s390x | `just qemu s390x`: clippy and release vectors and differential tests under qemu | none, as above | ctgrind's forced run, of the same code built for x86_64 |
 | portable | riscv64gc Linux, glibc and musl | `just qemu riscv64` and `just qemu riscv64-musl`: as s390x | none, as above | as s390x |
+| portable | loongarch64 Linux | `just qemu loongarch64`: as s390x | none, as above | as s390x |
 | portable | PowerPC Linux: powerpc64le, big-endian powerpc64 and powerpc | `just qemu powerpc64le`, `just qemu powerpc64`, and `just qemu powerpc`: as s390x | none, as above | as s390x |
 | portable | ARM before ARMv7 (Raspberry Pi 1 and Zero) | `just qemu armv6` and `just qemu armv6-softfloat`: as s390x, on qemu's ARM1176; `build.yml`'s `android` job: ARMv5TE Android | none, as above | as s390x |
 | portable | wasm32-wasip2 | `just wasm`: release vectors under wasmtime, in the nightly `build.yml`; no differential tests, since aws-lc does not build for wasm, and `just portable` runs the same Rust against it | none, as above | unchecked: a wasm engine compiles rind again, and its JIT may turn a select into a branch |

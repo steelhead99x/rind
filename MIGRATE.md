@@ -14,12 +14,16 @@ Start from the default branch with no changes, tracked or ignored, and note
 its commit. If the project commits no `Cargo.lock`, run
 `cargo generate-lockfile` before branching.
 
-A library, a crate other projects depend on, keeps its current backend as
-the default, since its users build it on architectures rind refuses. It
-gains a non-default feature that builds it on rind instead, named like its
-existing backend features, and tested in CI beside them. Everything below
-applies to the build with that feature, and its measurements compare it with
-the old backend's feature in otherwise the same command.
+A library, a crate other projects depend on, may go rind-only when every
+target it releases is covered, as step 2 defines it. It then follows
+the same steps as a binary: rind replaces the old backend, including the
+default. A library that releases any uncovered target keeps its current
+backend as the default. It gains a non-default feature that builds it on
+rind instead, named like its existing backend features, and tested in CI
+beside them. For that library, everything below applies to the build with
+that feature, and its measurements compare it with the old backend's
+feature in otherwise the same command. A rind-only library measures its
+default build against the old default.
 
 1. Find where ring and aws-lc-rs come from, with the default features and
    each feature set the project's release or CI builds:
@@ -52,23 +56,34 @@ the old backend's feature in otherwise the same command.
 2. Find the release targets: the targets the project's CI, whatever runs it,
    builds for release, including Docker images' platforms, and any
    `dist-workspace.toml`, `[workspace.metadata.dist]`, or `Cross.toml`. A
-   library's are the targets its CI builds. rind compiles only for x86_64,
-   aarch64, and 32-bit ARM, so i686, wasm32, riscv64, and every other
-   architecture fail to build. Within those three, a target rind's CI does
-   not test yet, such as iOS, Android, or ARM older than ARMv7, may still
-   fail: step 3 builds each one. Distribution packages
-   and `cargo install` build where the project does not; list what they lose
-   under Breaking changes rather than stopping.
+   library's are the targets its CI builds. A target is covered when
+   [PLATFORMS.md] says rind's CI runs its tests. Those runs include rind
+   and rind-rustls, except where that page limits a target to the `rind`
+   crate. iOS device code is covered only as a build: CI compiles those
+   tests and
+   does not run them. `wasm32-wasip2` is covered for the `rind` crate
+   alone: the nightly run executes its vector tests, with no differential
+   tests and no constant-time check, and the adapters are not built.
+   `wasm32-unknown-unknown` is compile-only, again for the `rind` crate
+   alone. A release target that needs an adapter on wasm is uncovered.
+   Anything [PLATFORMS.md] does not name is uncovered, including big-endian
+   aarch64, big-endian arm, `i586`, `riscv32`, `sparc64`, and MIPS, even
+   where `rind/build.rs` would select the portable backend. Step 3 builds
+   each release target.
+   Distribution packages and `cargo install` build where the project does
+   not; list what they lose under Breaking changes rather than stopping.
 
 3. Compare the project's `rust-version`, or without one the oldest
    toolchain its CI runs, with the latest rind release's, which
    `cargo info rind` prints. If the project's is older, ask the user whether
    to raise it, and stop if they decline. Raising it includes any toolchain
-   or image its CI pins. A library keeps its own, since only its rind
-   feature needs rind's: say so in its docs.
+   or image its CI pins. A library that keeps rind behind a non-default
+   feature keeps its own `rust-version`, since only that feature needs
+   rind's: say so in its docs. A rind-only library raises its
+   `rust-version` to rind's when it is older.
 
-Stop here, before changing anything, if a release target is on another
-architecture, a dependency in what ships hard-wires aws-lc-rs, a ring older
+Stop here, before changing anything, if a binary releases an uncovered
+target, a dependency in what ships hard-wires aws-lc-rs, a ring older
 than 0.17, or in a library, which cannot patch for its users, any ring, or the
 project calls an item rind lacks: for ring's API, one [rind-ring's README]
 leaves out, and for aws-lc-rs's, one [rind-aws-lc-rs's README] leaves out.
@@ -105,16 +120,19 @@ For each way the survey found:
 - **A crate a `rind-*` adapter serves.** Follow the adapter's row in
   [MIGRATING.md] and its README.
 - **ring's API.** Rename the dependency, with no code changes:
-  `ring = { package = "rind-ring", version = "0.17" }`. A library, which
-  keeps ring, adds `rind-ring` as an optional dependency instead, with
-  `#[cfg(feature = "<its feature>")] extern crate rind_ring as ring;` at its
-  crate root. rind-ring keeps ring's signatures, such as
+  `ring = { package = "rind-ring", version = "0.17" }`. A library that
+  keeps its old backend adds `rind-ring` as an optional dependency instead,
+  with `#[cfg(feature = "<its feature>")] extern crate rind_ring as ring;`
+  at its crate root. A rind-only library renames the dependency as a binary
+  does. rind-ring keeps ring's signatures, such as
   `digest::Context::finish(self)`, so leave the code as it is: MIGRATING.md's
   tables map to rind's own API, where `finish` takes `&mut self`.
 - **aws-lc-rs's API.** Rename the dependency the same way, with no code
-  changes: `aws-lc-rs = { package = "rind-aws-lc-rs", version = "1" }`, or in
-  a library `#[cfg(feature = "<its feature>")] extern crate rind_aws_lc_rs as
-  aws_lc_rs;`. Drop the `fips` feature, which rind-aws-lc-rs refuses.
+  changes: `aws-lc-rs = { package = "rind-aws-lc-rs", version = "1" }`. A
+  library that keeps its old backend uses
+  `#[cfg(feature = "<its feature>")] extern crate rind_aws_lc_rs as
+  aws_lc_rs;` instead of renaming. Drop the `fips` feature, which
+  rind-aws-lc-rs refuses.
 - **A crate that hard-wires ring 0.17.** Patch ring in the root `Cargo.toml`
   of each binary's workspace, then run `cargo update -p ring`, which changes
   ring alone:
@@ -226,5 +244,6 @@ Ask the user, and do each only if they agree:
    with `(Written by <your model>)`.
 
 [MIGRATING.md]: https://raw.githubusercontent.com/moq-dev/rind/main/MIGRATING.md
+[PLATFORMS.md]: https://raw.githubusercontent.com/moq-dev/rind/main/PLATFORMS.md
 [rind-ring's README]: https://raw.githubusercontent.com/moq-dev/rind/main/rind-ring/README.md
 [rind-aws-lc-rs's README]: https://raw.githubusercontent.com/moq-dev/rind/main/rind-aws-lc-rs/README.md

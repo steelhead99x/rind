@@ -176,17 +176,22 @@ rind-rustls and the other adapters, and does nothing off Apple's platforms.
 
 ## Platforms
 
-rind has assembly for x86_64, aarch64, and 32-bit arm from ARMv7 on, and runs
-portable Rust on any other architecture. CI tests Linux (glibc and musl),
-macOS, and Windows on x86_64 and aarch64, Linux and Windows on 32-bit x86, iOS
-in the simulator, Android on aarch64, armv7, ARMv5TE, x86_64, and 32-bit x86,
-and Linux on armv7, ARMv6, big-endian s390x, riscv64gc (glibc and musl),
-loongarch64, powerpc64le, and big-endian powerpc64 and powerpc. Any x86_64 CPU
-runs it, little-endian aarch64 needs NEON, and every operation panics on a CPU
-missing a feature rind requires: call `rind::cpu::check()` at startup to get an
-error naming it instead.
-[PLATFORMS.md][platforms] lists what each architecture runs without each
-feature.
+rind has assembly for x86_64, aarch64, and 32-bit arm from ARMv7 on. Every
+other architecture gets the portable Rust backend. CI runs the tests on Linux
+(glibc and musl), macOS, and Windows for x86_64 and aarch64, on Linux and
+Windows for i686, in the aarch64 iOS simulator, on Android for aarch64,
+armv7, ARMv5TE, x86_64, and i686, and on Linux for armv7, ARMv6, big-endian
+s390x, riscv64gc (glibc and musl), loongarch64, powerpc64le, and big-endian
+powerpc64 and powerpc. iOS device code is built and not run. The merge gate
+compiles the rind library for wasm32 when that build's inputs change, and a
+push to main compiles it every time. The nightly run executes the library's
+vector tests on wasm32-wasip2. wasm32-unknown-unknown is compile-only, and
+the adapters are not built for wasm. A target this paragraph does not name
+is not tested. Any x86_64 CPU runs rind, little-endian aarch64 needs NEON,
+and every operation panics on a CPU missing a feature rind requires: call
+`rind::cpu::check()` at startup to get an error naming it instead.
+[PLATFORMS.md][platforms] lists the tested targets, what is only compiled,
+and what each architecture runs without each feature.
 
 ## Contributing
 

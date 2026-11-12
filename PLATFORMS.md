@@ -2,11 +2,14 @@
 
 rind has assembly for `aarch64`, `x86_64`, and 32-bit `arm` from ARMv7 on, and
 a portable Rust backend for every other architecture. CI tests Linux (glibc and musl), macOS, and Windows on `x86_64` and `aarch64`, Linux and Windows on
-32-bit `x86`, iOS in the simulator on `aarch64`, Android on `aarch64`,
-`armv7`, ARMv5TE, `x86_64`, and 32-bit `x86`, all but `x86_64` under qemu, and
+`i686`, iOS in the simulator on `aarch64`, Android on `aarch64`,
+`armv7`, ARMv5TE, `x86_64`, and `i686`, all but `x86_64` under qemu, and
 Linux on `armv7`, ARMv6, big-endian `s390x`, `riscv64gc` (glibc and musl),
 `loongarch64`, `powerpc64le`, and big-endian `powerpc64` and `powerpc` under
-qemu. iOS devices' code is only built.
+qemu. iOS devices' code is only built. CI neither compiles nor tests
+big-endian `aarch64`, big-endian `arm`, `i586`, `riscv32`, `sparc64`, or
+MIPS. `rind/build.rs` would select the portable backend for each of them.
+Stable Rust ships no MIPS standard library.
 
 - `aarch64` requires the `neon` CPU feature. Where the CPU has the crypto
   extension (`aes`, `pmull`, and `sha2`), as the Raspberry Pi 5 and most
@@ -67,7 +70,7 @@ qemu. iOS devices' code is only built.
 
 - Every other architecture, big-endian `aarch64` and `arm`, whose assembly
   assumes little-endian, and `arm` before ARMv7, which rind's ARMv7 assembly
-  does not run on, run the portable backend: what 32-bit `arm` runs without
+  does not run on, select the portable backend: what 32-bit `arm` runs without
   NEON and the crypto extension, with portable Rust in place of the assembly
   `arm` always runs (see [ALGORITHMS.md](ALGORITHMS.md)). It needs no CPU
   features, `rind::cpu::has_aes_hardware()` is false, and rind-rustls and
@@ -81,12 +84,15 @@ qemu. iOS devices' code is only built.
   Raspberry Pi 1 and Zero), on `arm-linux-androideabi`, which Rust builds for
   ARMv5TE, on `powerpc64le` and big-endian `powerpc64` and `powerpc` Linux,
   and on `x86_64`,
-  where `--cfg rind_portable` forces it. Every PR also compiles the library for
-  `wasm32-wasip2` and `wasm32-unknown-unknown`, with and without `wipe`. The
-  latter enables `getrandom/wasm_js` for JavaScript randomness; the WASI target
-  uses its system random source. The nightly `build.yml` runs the vector tests
-  on `wasm32-wasip2` under wasmtime (`just wasm`), without the differential
-  tests, since aws-lc does not build for wasm. `wasm32-unknown-unknown` stays
+  where `--cfg rind_portable` forces it. The merge gate compiles the `rind`
+  library, and not the adapters, for `wasm32-wasip2` and
+  `wasm32-unknown-unknown`, with and without `wipe`, when the diff touches
+  `rind`'s build (`src`, `tests`, `build.rs`, or its manifest), the workspace
+  manifest or lockfile, or the flake. A push to `main` compiles both every
+  time. The latter enables `getrandom/wasm_js` for JavaScript randomness; the
+  WASI target uses its system random source. The nightly `build.yml` runs the
+  vector tests on `wasm32-wasip2` under wasmtime (`just wasm`), without the
+  differential tests, since aws-lc does not build for wasm. `wasm32-unknown-unknown` stays
   compile-only: its tests need a JavaScript host. Constant time is unchecked on
   wasm: ctgrind and the trace checks inspect native code, and a wasm engine
   compiles rind again, so its JIT may turn a select into a branch.

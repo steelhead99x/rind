@@ -8,7 +8,7 @@ On the portable backend's 64-bit targets (riscv64, loongarch64, s390x, powerpc64
 
 Planned from the 2026-11-09 speed audit. Decided with the maintainer that day:
 
-- Scope: correctness tooling, speed measurement, and portable speed ✅ (rejected: no portable speed work, correctness only). This lifts [the targets epic](/quest/m2/adoption/targets/README.md)'s non-goal that speed on the new architectures waits for a consumer.
+- Scope: correctness tooling, speed measurement, and portable speed ✅ (rejected: no portable speed work, correctness only). This lifts the targets epic's former non-goal that speed on the new architectures waits for a consumer.
 - Milestone: cold-tier speed work joins m3 ✅ (rejected: m2 beside the targets, m4).
 - AGENTS.md's speed rule: run the fastest permissively licensed source; take a formally verified one only where it measures as fast at every size; otherwise run the fastest and plan its proof ✅ (rejected: verified code within about 10% on cold tiers only, or everywhere, as AGENTS.md said).
 
