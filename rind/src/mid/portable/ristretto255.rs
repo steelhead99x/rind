@@ -9,49 +9,7 @@ use curve25519_dalek::constants::RISTRETTO_BASEPOINT_TABLE;
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 
 use crate::low;
-
-/// An integer modulo the group's prime order `L`, reduced.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Scalar(curve25519_dalek::Scalar);
-
-impl Scalar {
-    /// Reads a little-endian scalar, or `None` unless it is below `L`.
-    ///
-    /// Whether it is below `L` is public; the value stays secret.
-    pub(crate) fn from_canonical_bytes(bytes: &[u8; 32]) -> Option<Self> {
-        let s = curve25519_dalek::Scalar::from_canonical_bytes(*bytes);
-        let canonical = low::ct::into_public(bool::from(s.is_some()));
-        // `unwrap_or` selects in constant time, where `unwrap` branches.
-        canonical.then(|| Self(s.unwrap_or(curve25519_dalek::Scalar::ZERO)))
-    }
-
-    /// Reduces 64 little-endian bytes modulo `L`.
-    pub(crate) fn from_uniform_bytes(bytes: &[u8; 64]) -> Self {
-        Self(curve25519_dalek::Scalar::from_bytes_mod_order_wide(bytes))
-    }
-
-    pub(crate) fn to_bytes(self) -> [u8; 32] {
-        self.0.to_bytes()
-    }
-
-    /// `self * other mod L`.
-    pub(crate) fn mul(&self, other: &Self) -> Self {
-        Self(self.0 * other.0)
-    }
-
-    /// `self - other mod L`.
-    pub(crate) fn sub(&self, other: &Self) -> Self {
-        Self(self.0 - other.0)
-    }
-
-    /// `1 / self mod L`, or `None` for zero, which has no inverse.
-    ///
-    /// Whether `self` is zero is public; the value stays secret.
-    pub(crate) fn invert(&self) -> Option<Self> {
-        let zero = low::ct::into_public(self.0 == curve25519_dalek::Scalar::ZERO);
-        (!zero).then(|| Self(self.0.invert()))
-    }
-}
+pub(crate) use crate::mid::edwards25519::Scalar;
 
 /// A ristretto255 element.
 #[derive(Clone, Copy, Debug)]

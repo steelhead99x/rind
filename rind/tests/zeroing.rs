@@ -153,6 +153,16 @@ fn ecdh() {
 }
 
 #[test]
+fn vrf() {
+    use rind::vrf::*;
+    for algorithm in [&ECVRF_EDWARDS25519_SHA512_TAI, &ECVRF_P256_SHA256_TAI] {
+        let key = SecretKey::generate(algorithm).unwrap();
+        check_zeroed_on_drop(Box::pin(key.to_bytes()));
+        check_zeroed_on_drop(Box::pin(key));
+    }
+}
+
+#[test]
 fn mlkem768() {
     use rind::kem::*;
     let key = DecapsulationKey::generate(&ML_KEM_768).unwrap();

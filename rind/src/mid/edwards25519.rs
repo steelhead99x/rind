@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! The edwards25519 group over s2n-bignum's field and point routines, with a
-//! constant-time variable-base scalar multiplication, for ristretto255.
+//! constant-time variable-base scalar multiplication, for ristretto255 and
+//! ECVRF.
 //!
 //! Each field and point routine is HOL Light-proven in s2n-bignum. What this
-//! module composes from them (the ladder, the square root of a ratio, and the
-//! signed recoding) is rind's own, covered by tests only.
+//! module composes from them (the ladder, the square root of a ratio, the
+//! inversion, and the signed recoding) is rind's own, covered by tests only.
 
 // FROST, ECVRF, and OPAQUE are their own quests. The OPRF calls ristretto255,
 // which calls this module.
@@ -105,6 +106,12 @@ impl Fe {
         x_250_0.square_times(2).mul(x)
     }
 
+    /// `1 / self`, or 0 for 0, by Fermat's little theorem:
+    /// `self^(p - 2) = (self^((p - 5) / 8))^8 * self^3`.
+    pub(crate) fn invert(&self) -> Self {
+        self.pow_p58().square_times(3).mul(&self.square().mul(self))
+    }
+
     /// 1 if `self` is negative, that is, odd, else 0.
     pub(crate) fn is_negative(&self) -> u64 {
         self.0[0] & 1
@@ -190,6 +197,49 @@ impl Point {
     pub(crate) fn coordinates(&self) -> [Fe; 4] {
         let c = |i: usize| Fe(self.0[4 * i..4 * i + 4].try_into().unwrap());
         [c(0), c(1), c(2), c(3)]
+    }
+
+    /// RFC 8032 5.1.3's decoding, or `None` for an encoding it rejects: `y`
+    /// not below `p`, no point with that `y`, or `x = 0` with the sign bit
+    /// set.
+    ///
+    /// Only public encodings are decoded: whether one decodes is public.
+    pub(crate) fn from_bytes(bytes: &[u8; 32]) -> Option<Self> {
+        let mut xy = [0u64; 8];
+        if !low::edwards25519_decode(&mut xy, bytes) {
+            return None;
+        }
+        let x = Fe(xy[0..4].try_into().unwrap());
+        let y = Fe(xy[4..8].try_into().unwrap());
+        Some(Self::from_coordinates(&x, &y, &Fe::ONE, &x.mul(&y)))
+    }
+
+    /// RFC 8032 5.1.2's encoding, in constant time.
+    pub(crate) fn to_bytes(self) -> [u8; 32] {
+        let [x, y, z, _] = self.coordinates();
+        let z_inv = z.invert();
+        // The multiplication reduces fully, whatever the point routines left.
+        let mut bytes = y.mul(&z_inv).to_le_bytes();
+        bytes[31] |= (x.mul(&z_inv).is_negative() as u8) << 7;
+        bytes
+    }
+
+    /// `-self`: `-(x, y) = (-x, y)`, so `X` and `T` change sign.
+    pub(crate) fn neg(&self) -> Self {
+        let [x, y, z, t] = self.coordinates();
+        Self::from_coordinates(&x.neg(), &y, &z, &t.neg())
+    }
+
+    /// `8 * self`, which leaves only its component in the prime-order
+    /// subgroup.
+    pub(crate) fn mul_by_cofactor(&self) -> Self {
+        let mut a = [0u64; 12];
+        let mut b = [0u64; 12];
+        low::edwards25519_pdouble(&mut a, self.projective());
+        low::edwards25519_pdouble(&mut b, &a);
+        let mut r = Self::IDENTITY;
+        low::edwards25519_epdouble(&mut r.0, &b);
+        r
     }
 
     /// `[scalar]B`, for the curve's base point `B`.
@@ -323,8 +373,13 @@ impl Scalar {
 
     /// `self * other mod L`.
     pub(crate) fn mul(&self, other: &Self) -> Self {
+        self.mul_add(other, &Self([0; 4]))
+    }
+
+    /// `self * other + addend mod L`.
+    pub(crate) fn mul_add(&self, other: &Self, addend: &Self) -> Self {
         let mut z = Self([0; 4]);
-        low::bignum_madd_n25519(&mut z.0, &self.0, &other.0, &[0; 4]);
+        low::bignum_madd_n25519(&mut z.0, &self.0, &other.0, &addend.0);
         z
     }
 
