@@ -10,6 +10,7 @@ use crate::low;
 use crate::mid::rng::{RandomSource, SystemRandom};
 
 pub(crate) mod hash_to_curve;
+pub(crate) mod oprf;
 mod precomp;
 
 /// A P-384 public key.

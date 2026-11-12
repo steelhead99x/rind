@@ -19,7 +19,9 @@ use crate::mid::sha2::Sha384Context;
 /// The point at infinity, which no message is known to reach, is refused as
 /// a small-order point.
 pub(crate) fn hash_to_curve(msg: &[u8], dst: &[u8]) -> Result<PublicKey, Error> {
-    let _entry = low::Entry::new_secret();
+    // The caller holds the `Entry`. A nested one would drop the CPU state
+    // (DIT, on Apple) while the caller still handles the point.
+    low::Entry::assert_held();
     let point = hash_to_curve::hash_to_curve::<FieldElement, Sha384Context>(msg, dst)?;
     match low::ct::into_public(point[2].ct_eq(&FieldElement::ZERO)) {
         true => Err(KeyFormatError::SmallOrder.into()),
@@ -33,7 +35,7 @@ pub(crate) fn hash_to_curve(msg: &[u8], dst: &[u8]) -> Result<PublicKey, Error> 
 /// `expand_message_xmd` with SHA-384 and the domain separation tag `dst`,
 /// as RFC 9497's P-384 suite do. It may be zero.
 pub(crate) fn hash_to_scalar(msg: &[u8], dst: &[u8]) -> Result<Scalar, Error> {
-    let _entry = low::Entry::new_secret();
+    low::Entry::assert_held();
     let mut uniform = [0; 72];
     hash_to_curve::expand_message_xmd::<Sha384Context>(msg, dst, &mut uniform)?;
     // `hi * 2^384 + lo`, where `hi * R^2 / R` is `hi * 2^384` mod n.
