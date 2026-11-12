@@ -16,17 +16,24 @@ const MAX_ARGS: usize = 16;
 pub fn serve() -> io::Result<()> {
     let mut input = io::stdin().lock();
     loop {
-        let request = match read_request(&mut input) {
+        let mut request = match read_request(&mut input) {
             Ok(request) => request,
             Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
             Err(err) => return Err(err),
         };
-        let Some((command, args)) = request.split_first() else {
-            return Err(io::Error::other("empty ACVP request"));
+        let reply = {
+            let Some((command, args)) = request.split_first() else {
+                return Err(io::Error::other("empty ACVP request"));
+            };
+            match std::str::from_utf8(command) {
+                Ok(command) => ops::handle(command, args).map_err(io::Error::other),
+                Err(_) => Err(io::Error::other("ACVP command is not UTF-8")),
+            }
         };
-        let command = std::str::from_utf8(command)
-            .map_err(|_| io::Error::other("ACVP command is not UTF-8"))?;
-        let reply = ops::handle(command, args).map_err(io::Error::other)?;
+        for arg in &mut request {
+            ops::wipe(arg);
+        }
+        let reply = reply?;
         // `io::stdout()` is block-buffered on a pipe. A reply with no newline
         // stays there until exit, and the parent still holding stdin never
         // sees it. Write the fd directly. `ManuallyDrop` keeps the drop from
@@ -34,7 +41,8 @@ pub fn serve() -> io::Result<()> {
         // SAFETY: the fd is stdout, which outlives this process. `ManuallyDrop`
         // keeps `File`'s destructor from closing it.
         let mut output = ManuallyDrop::new(unsafe { File::from_raw_fd(io::stdout().as_raw_fd()) });
-        write_reply(&mut *output, &reply)?;
+        let spans = reply.slices();
+        write_reply(&mut *output, &spans)?;
     }
 }
 
@@ -62,7 +70,7 @@ fn read_request(input: &mut impl Read) -> io::Result<Vec<Vec<u8>>> {
     Ok(args)
 }
 
-fn write_reply(output: &mut impl Write, spans: &[Vec<u8>]) -> io::Result<()> {
+fn write_reply(output: &mut impl Write, spans: &[&[u8]]) -> io::Result<()> {
     if spans.is_empty() || spans.len() > MAX_ARGS {
         return Err(io::Error::other("ACVP reply argument count"));
     }

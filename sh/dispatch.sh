@@ -207,7 +207,7 @@ for module in "${selected[@]}"; do
             # Only the zeroing and heap scratch tests see the opt-in wipe,
             # which the default build turns into no-ops.
             if ((${#packages[@]} == 0)) || printf '%s\n' "${packages[@]}" | grep -qxE 'rind|--workspace'; then
-                cargo nextest run -p rind --features wipe --test zeroing --test heap_scratch --locked
+                cargo nextest run -p rind --features wipe,__acvp --test zeroing --test heap_scratch --locked
             fi
             if ((${#packages[@]} == 0)) || printf '%s\n' "${packages[@]}" | grep -qxE 'rind-aws-lc-rs|--workspace'; then
                 cargo nextest run -p rind-aws-lc-rs --features wipe --test zeroing --locked

@@ -148,7 +148,7 @@ fn sha2_256_mct_standard() {
             let mut digest = hex(test, "msg");
             for result in test["resultsArray"].as_array().unwrap() {
                 let reply = handle("SHA2-256/MCT", &[digest]).unwrap();
-                digest = reply[0].clone();
+                digest = reply[0].to_vec();
                 assert_eq!(digest, hex(result, "md"));
             }
         }

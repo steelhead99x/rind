@@ -1705,7 +1705,11 @@ impl<P: MlDsaParameterSet> MlDsaKeyPair<P> {
     }
 
     /// Loads FIPS 204's expanded private key.
-    #[cfg(feature = "acvp")]
+    ///
+    /// Not a supported API. It exists for the unpublished `rind-acvp` binary,
+    /// behind the `__acvp` feature.
+    #[cfg(feature = "__acvp")]
+    #[doc(hidden)]
     pub fn from_expanded(sk: &[u8]) -> Result<Self, Error> {
         mldsa::KeyPair::from_secret_key(sk).map(Self)
     }
@@ -1809,10 +1813,14 @@ impl<P: MlDsaParameterSet> MlDsaKeyPair<P> {
         self.0.sign(&[], message).map(MlDsaSignature)
     }
 
-    /// The expanded private key, FIPS 204's `sk`.
-    #[cfg(feature = "acvp")]
-    pub fn expanded_secret(&self) -> Vec<u8> {
-        self.0.secret_key_bytes().to_vec()
+    /// The expanded private key, FIPS 204's `sk`, wiped on drop.
+    ///
+    /// Not a supported API. It exists for the unpublished `rind-acvp` binary,
+    /// behind the `__acvp` feature.
+    #[cfg(feature = "__acvp")]
+    #[doc(hidden)]
+    pub fn expanded_secret(&self) -> crate::acvp::SecretBuf {
+        crate::acvp::SecretBuf::from_slice(self.0.secret_key_bytes())
     }
 
     /// Signs with ACVP's `mu`, `rnd`, and context.
@@ -1820,7 +1828,11 @@ impl<P: MlDsaParameterSet> MlDsaKeyPair<P> {
     /// `mu` replaces the message representative when the vector set computes
     /// it outside the module. `rnd` is FIPS 204's per-signature randomness;
     /// all zeros is the deterministic mode.
-    #[cfg(feature = "acvp")]
+    ///
+    /// Not a supported API. It exists for the unpublished `rind-acvp` binary,
+    /// behind the `__acvp` feature.
+    #[cfg(feature = "__acvp")]
+    #[doc(hidden)]
     pub fn sign_acvp(
         &self,
         context: &[u8],

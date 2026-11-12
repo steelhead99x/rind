@@ -52,6 +52,18 @@ impl<const N: usize> PosInt<N> {
         self.used = other.used;
     }
 
+    /// Widens `self` up to `other` when `self` is shorter.
+    ///
+    /// A wider `self` is left alone. [`Self::expand`] would replace `used`,
+    /// and the high words would drop out of the value. `__acvp`'s RSA
+    /// primitive uses this so a short exponent's trace follows the modulus.
+    #[cfg(feature = "__acvp")]
+    pub(crate) fn widen_to(&mut self, other: &Self) {
+        if self.used < other.used {
+            self.expand(other);
+        }
+    }
+
     /// Replaces top word with `word` and increases `used`.
     ///
     /// This means `Self::zero().push_word(1)` == `Self::one()`,

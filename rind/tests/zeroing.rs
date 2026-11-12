@@ -330,6 +330,18 @@ fn check_zeroed_on_drop<T: Unpin>(value: Pin<Box<T>>) {
     }
 }
 
+/// `__acvp` returns an ML-KEM decapsulation key, a shared secret, and an
+/// expanded ML-DSA private key as a `SecretBuf`. The bytes are in the value,
+/// so this sees them after `Drop`.
+#[cfg(feature = "__acvp")]
+#[test]
+fn acvp_secret_buf() {
+    let short = rind::acvp::SecretBuf::from_slice(&[0xff; 32]);
+    check_zeroed_on_drop(Box::pin(short));
+    let full = rind::acvp::SecretBuf::from_slice(&[0xff; 4896]);
+    check_zeroed_on_drop(Box::pin(full));
+}
+
 fn read_into_vec(ptr: *const u8, len: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(len);
 

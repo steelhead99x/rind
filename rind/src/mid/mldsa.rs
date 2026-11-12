@@ -271,13 +271,13 @@ impl<P: Params> KeyPair<P> {
     }
 
     /// The expanded private key, FIPS 204's `sk`.
-    #[cfg(feature = "acvp")]
+    #[cfg(feature = "__acvp")]
     pub(crate) fn secret_key_bytes(&self) -> &[u8] {
         self.secret_key.as_ref()
     }
 
     /// FIPS 204's `ML-DSA.Sign_internal`, for tests and `rind-acvp` to fix `rnd` and `mu`.
-    #[cfg(any(test, feature = "acvp"))]
+    #[cfg(any(test, feature = "__acvp"))]
     pub(crate) fn sign_internal(
         &self,
         mu: &[u8; MU_LEN],

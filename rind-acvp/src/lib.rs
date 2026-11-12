@@ -9,5 +9,5 @@
 mod ops;
 mod protocol;
 
-pub use ops::handle;
+pub use ops::{Reply, handle};
 pub use protocol::serve;

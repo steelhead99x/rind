@@ -18,9 +18,72 @@ use rind::signature::{EcdsaKeyPair, Ed25519KeyPair, PublicKey, RsaKeyPair, Verif
 
 use crate::protocol::u32_arg;
 
-pub fn handle(command: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+/// One reply to `acvptool`.
+///
+/// A secret span is a [`rind::acvp::SecretBuf`], wiped on drop under rind's
+/// `wipe` feature. Public spans, such as a hash or a ciphertext, are left
+/// alone.
+pub struct Reply {
+    parts: Vec<Part>,
+}
+
+enum Part {
+    Public(Vec<u8>),
+    Secret(Box<rind::acvp::SecretBuf>),
+}
+
+impl Reply {
+    fn public_parts(parts: Vec<Vec<u8>>) -> Self {
+        Self {
+            parts: parts.into_iter().map(Part::Public).collect(),
+        }
+    }
+
+    /// Borrows each span, secret or not, in order.
+    pub fn slices(&self) -> Vec<&[u8]> {
+        self.parts
+            .iter()
+            .map(|part| match part {
+                Part::Public(bytes) => bytes.as_slice(),
+                Part::Secret(bytes) => bytes.as_slice(),
+            })
+            .collect()
+    }
+}
+
+impl std::ops::Index<usize> for Reply {
+    type Output = [u8];
+
+    fn index(&self, index: usize) -> &Self::Output {
+        match &self.parts[index] {
+            Part::Public(bytes) => bytes.as_slice(),
+            Part::Secret(bytes) => bytes.as_slice(),
+        }
+    }
+}
+
+fn public_reply(parts: Vec<Vec<u8>>) -> Result<Reply, String> {
+    Ok(Reply::public_parts(parts))
+}
+
+fn with_secret(head: Vec<Vec<u8>>, secret: rind::acvp::SecretBuf) -> Reply {
+    let mut parts = Vec::with_capacity(head.len() + 1);
+    parts.extend(head.into_iter().map(Part::Public));
+    parts.push(Part::Secret(Box::new(secret)));
+    Reply { parts }
+}
+
+pub(crate) fn wipe(bytes: &mut [u8]) {
+    for byte in bytes {
+        // SAFETY: `byte` points at a writable byte of `bytes`, and a volatile
+        // write is one the compiler must keep.
+        unsafe { core::ptr::write_volatile(byte, 0) };
+    }
+}
+
+pub fn handle(command: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     if command == "getConfig" {
-        return Ok(vec![CONFIG.as_bytes().to_vec()]);
+        return public_reply(vec![CONFIG.as_bytes().to_vec()]);
     }
     if let Some(hash) = hash_alg(command) {
         return hash_oneshot(hash, args);
@@ -67,7 +130,7 @@ pub fn handle(command: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
     }
 }
 
-fn other(command: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn other(command: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     if let Some(rest) = command.strip_prefix("KDA/HKDF/") {
         return hkdf(rest, args);
     }
@@ -112,12 +175,12 @@ fn hash_alg(name: &str) -> Option<&'static Hash> {
     })
 }
 
-fn hash_oneshot(alg: &'static Hash, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn hash_oneshot(alg: &'static Hash, args: &[Vec<u8>]) -> Result<Reply, String> {
     let msg = arg(args, 0)?;
-    Ok(vec![digest::digest(alg, msg).as_ref().to_vec()])
+    public_reply(vec![digest::digest(alg, msg).as_ref().to_vec()])
 }
 
-fn hash_mct(name: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn hash_mct(name: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let alg = hash_alg(name).ok_or_else(|| format!("unsupported hash {name}"))?;
     let seed = arg(args, 0)?.to_vec();
     let out = alg.output_len();
@@ -148,10 +211,10 @@ fn hash_mct(name: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
         }
         digest = last[2].clone();
     }
-    Ok(vec![digest])
+    public_reply(vec![digest])
 }
 
-fn hash_ldt(name: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn hash_ldt(name: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let alg = hash_alg(name).ok_or_else(|| format!("unsupported hash {name}"))?;
     let content = arg(args, 0)?;
     let times = u64_arg(arg(args, 1)?)?;
@@ -167,7 +230,7 @@ fn hash_ldt(name: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
     for _ in 0..times {
         ctx.update(content);
     }
-    Ok(vec![ctx.finish().as_ref().to_vec()])
+    public_reply(vec![ctx.finish().as_ref().to_vec()])
 }
 
 fn u64_arg(bytes: &[u8]) -> Result<u64, String> {
@@ -177,11 +240,11 @@ fn u64_arg(bytes: &[u8]) -> Result<u64, String> {
     Ok(u64::from_ne_bytes(bytes))
 }
 
-fn hmac(alg: &'static hmac::Algorithm, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn hmac(alg: &'static hmac::Algorithm, args: &[Vec<u8>]) -> Result<Reply, String> {
     // acvptool passes the message, then the key.
     let msg = arg(args, 0)?;
     let key = arg(args, 1)?;
-    Ok(vec![
+    public_reply(vec![
         hmac::sign(&HmacKey::new(alg, key), msg).as_ref().to_vec(),
     ])
 }
@@ -205,7 +268,7 @@ fn aes_alg(len: usize) -> Result<&'static rind::cipher::Algorithm, String> {
     }
 }
 
-fn aes_ecb(encrypt: bool, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn aes_ecb(encrypt: bool, args: &[Vec<u8>]) -> Result<Reply, String> {
     if !encrypt {
         return Err("AES-ECB decryption is outside the module".into());
     }
@@ -228,10 +291,10 @@ fn aes_ecb(encrypt: bool, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
             key.encrypt_block(block);
         }
     }
-    Ok(vec![result, prev])
+    public_reply(vec![result, prev])
 }
 
-fn aes_cbc(encrypt: bool, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn aes_cbc(encrypt: bool, args: &[Vec<u8>]) -> Result<Reply, String> {
     let key_bytes = arg(args, 0)?;
     let mut input = arg(args, 1)?.to_vec();
     let mut iv = arg(args, 2)?.to_vec();
@@ -275,10 +338,10 @@ fn aes_cbc(encrypt: bool, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
             input.clone_from(&prev_result);
         }
     }
-    Ok(vec![result, prev_result])
+    public_reply(vec![result, prev_result])
 }
 
-fn aes_ctr(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn aes_ctr(args: &[Vec<u8>]) -> Result<Reply, String> {
     if u32_arg(arg(args, 3)?) != Some(1) {
         return Err("AES-CTR takes one iteration".into());
     }
@@ -291,7 +354,7 @@ fn aes_ctr(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
         .map_err(|err| err.to_string())?
         .apply_keystream(&counter, &mut out)
         .map_err(|err| err.to_string())?;
-    Ok(vec![out])
+    public_reply(vec![out])
 }
 
 fn tag_length(bytes: usize) -> Result<TagLength, String> {
@@ -307,7 +370,7 @@ fn tag_length(bytes: usize) -> Result<TagLength, String> {
     })
 }
 
-fn gcm_seal(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn gcm_seal(args: &[Vec<u8>]) -> Result<Reply, String> {
     let tag_bytes = u32_arg(arg(args, 0)?).ok_or("AES-GCM tag length")? as usize;
     let key_bytes = arg(args, 1)?;
     let mut text = arg(args, 2)?.to_vec();
@@ -326,17 +389,17 @@ fn gcm_seal(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
         .seal_in_place_separate_tag(iv, aad, &mut text)
         .map_err(|err| err.to_string())?;
     text.extend_from_slice(tag.as_ref());
-    Ok(vec![text])
+    public_reply(vec![text])
 }
 
-fn gcm_open(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn gcm_open(args: &[Vec<u8>]) -> Result<Reply, String> {
     let tag_bytes = u32_arg(arg(args, 0)?).ok_or("AES-GCM tag length")? as usize;
     let key_bytes = arg(args, 1)?;
     let combined = arg(args, 2)?;
     let nonce = arg(args, 3)?;
     let aad = arg(args, 4)?;
     if combined.len() < tag_bytes {
-        return Ok(vec![vec![0], Vec::new()]);
+        return public_reply(vec![vec![0], Vec::new()]);
     }
     let (ct, tag) = combined.split_at(combined.len() - tag_bytes);
     let mut text = ct.to_vec();
@@ -344,12 +407,12 @@ fn gcm_open(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
         .map_err(|err| err.to_string())?;
     let iv = gcm::Iv::assume_unique_for_key(nonce).map_err(|err| err.to_string())?;
     match key.open_in_place_separate_tag(iv, aad, tag, &mut text) {
-        Ok(pt) => Ok(vec![vec![1], pt.to_vec()]),
-        Err(_) => Ok(vec![vec![0], Vec::new()]),
+        Ok(pt) => public_reply(vec![vec![1], pt.to_vec()]),
+        Err(_) => public_reply(vec![vec![0], Vec::new()]),
     }
 }
 
-fn kw_seal(padded: bool, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn kw_seal(padded: bool, args: &[Vec<u8>]) -> Result<Reply, String> {
     // acvptool passes dummy, key, plaintext, dummy, dummy.
     let key = arg(args, 1)?;
     let plain = arg(args, 2)?;
@@ -366,15 +429,15 @@ fn kw_seal(padded: bool, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
         kek.wrap(plain, &mut wrapped)
     }
     .map_err(|err| err.to_string())?;
-    Ok(vec![wrapped])
+    public_reply(vec![wrapped])
 }
 
-fn kw_open(padded: bool, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn kw_open(padded: bool, args: &[Vec<u8>]) -> Result<Reply, String> {
     let key = arg(args, 1)?;
     let wrapped = arg(args, 2)?;
     let kek = AesKek::new(aes_alg(key.len())?, key).map_err(|err| err.to_string())?;
     if wrapped.len() < 8 {
-        return Ok(vec![vec![0], Vec::new()]);
+        return public_reply(vec![vec![0], Vec::new()]);
     }
     let mut plain = vec![0u8; wrapped.len() - 8];
     let opened = if padded {
@@ -386,8 +449,8 @@ fn kw_open(padded: bool, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
             .map_err(|_| ())
     };
     match opened {
-        Ok(plain) => Ok(vec![vec![1], plain]),
-        Err(()) => Ok(vec![vec![0], Vec::new()]),
+        Ok(plain) => public_reply(vec![vec![1], plain]),
+        Err(()) => public_reply(vec![vec![0], Vec::new()]),
     }
 }
 
@@ -400,7 +463,7 @@ fn kw_open_padded(kek: &AesKek, wrapped: &[u8]) -> Result<Vec<u8>, ()> {
         .map_err(|_| ())
 }
 
-fn pbkdf(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn pbkdf(args: &[Vec<u8>]) -> Result<Reply, String> {
     let password = arg(args, 0)?;
     let salt = arg(args, 1)?;
     let iterations = u32_arg(arg(args, 2)?).ok_or("PBKDF iterations")?;
@@ -424,10 +487,10 @@ fn pbkdf(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
             &mut out,
         )
         .map_err(|err| err.to_string())?;
-    Ok(vec![out])
+    public_reply(vec![out])
 }
 
-fn hkdf(hash: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn hkdf(hash: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let key = arg(args, 0)?;
     let salt = arg(args, 1)?;
     let info = arg(args, 2)?;
@@ -439,10 +502,10 @@ fn hkdf(hash: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
         .expand(&[info], out_len)
         .fill(&mut out)
         .map_err(|err| err.to_string())?;
-    Ok(vec![out])
+    public_reply(vec![out])
 }
 
-fn hkdf_half(rest: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn hkdf_half(rest: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let (hash, op) = rest
         .rsplit_once('/')
         .ok_or_else(|| format!("unsupported HKDF command {rest}"))?;
@@ -452,13 +515,13 @@ fn hkdf_half(rest: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
             let ikm = arg(args, 0)?;
             let salt = arg(args, 1)?;
             let prk = hmac::sign(&HmacKey::new(hmac_alg, salt), ikm);
-            Ok(vec![prk.as_ref().to_vec()])
+            public_reply(vec![prk.as_ref().to_vec()])
         }
         "expand" => {
             let out_len = u32_arg(arg(args, 0)?).ok_or("HKDF length")? as usize;
             let prk = arg(args, 1)?;
             let info = arg(args, 2)?;
-            Ok(vec![hkdf_expand(hmac_alg, prk, info, out_len)?])
+            public_reply(vec![hkdf_expand(hmac_alg, prk, info, out_len)?])
         }
         _ => Err(format!("unsupported HKDF operation {op}")),
     }
@@ -504,7 +567,7 @@ fn hkdf_expand(
     Ok(out)
 }
 
-fn ecdh(curve: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn ecdh(curve: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let (alg, field) = match curve {
         "P-256" => (&ECDH_P256, 32),
         "P-384" => (&ECDH_P384, 48),
@@ -528,7 +591,7 @@ fn ecdh(curve: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
         return Err("ECDH public key".into());
     }
     let shared = key.agree(&peer).map_err(|err| err.to_string())?;
-    Ok(vec![
+    public_reply(vec![
         point[1..1 + field].to_vec(),
         point[1 + field..].to_vec(),
         shared.as_ref().to_vec(),
@@ -548,25 +611,25 @@ fn pad(mut bytes: &[u8], len: usize) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-fn ecdsa_keygen(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn ecdsa_keygen(args: &[Vec<u8>]) -> Result<Reply, String> {
     let curve = std::str::from_utf8(arg(args, 0)?).map_err(|_| "ECDSA curve")?;
     let alg = ecdsa_signer(curve)?;
     let key = EcdsaKeyPair::generate(alg).map_err(|err| err.to_string())?;
     let (x, y) = split_point(key.public_key().as_ref())?;
-    Ok(vec![key.to_scalar().as_ref().to_vec(), x, y])
+    public_reply(vec![key.to_scalar().as_ref().to_vec(), x, y])
 }
 
-fn ecdsa_keyver(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn ecdsa_keyver(args: &[Vec<u8>]) -> Result<Reply, String> {
     let curve = std::str::from_utf8(arg(args, 0)?).map_err(|_| "ECDSA curve")?;
     let Ok(point) = uncompressed(curve, arg(args, 1)?, arg(args, 2)?) else {
-        return Ok(vec![vec![0]]);
+        return public_reply(vec![vec![0]]);
     };
     let alg = ecdsa_verifier(curve, "SHA2-256")?;
     let ok = PublicKey::new(alg, &point).is_ok();
-    Ok(vec![vec![u8::from(ok)]])
+    public_reply(vec![vec![u8::from(ok)]])
 }
 
-fn ecdsa_siggen(args: &[Vec<u8>], component: bool) -> Result<Vec<Vec<u8>>, String> {
+fn ecdsa_siggen(args: &[Vec<u8>], component: bool) -> Result<Reply, String> {
     if component {
         return Err("ECDSA component sigGen is not in the module's capability".into());
     }
@@ -588,12 +651,7 @@ fn x_from_scalar(curve: &str, scalar: &[u8]) -> Result<Vec<u8>, String> {
     Ok(key.public_key().as_ref().to_vec())
 }
 
-fn ecdsa_sign(
-    curve: &str,
-    scalar: &[u8],
-    hash: &str,
-    message: &[u8],
-) -> Result<Vec<Vec<u8>>, String> {
+fn ecdsa_sign(curve: &str, scalar: &[u8], hash: &str, message: &[u8]) -> Result<Reply, String> {
     let point = x_from_scalar(curve, scalar)?;
     let alg = ecdsa_signer(curve)?;
     let key = EcdsaKeyPair::from_scalar_and_public_key(alg, scalar, &point)
@@ -605,10 +663,10 @@ fn ecdsa_sign(
         return Err("ECDSA signature".into());
     }
     let (r, s) = sig.split_at(sig.len() / 2);
-    Ok(vec![r.to_vec(), s.to_vec()])
+    public_reply(vec![r.to_vec(), s.to_vec()])
 }
 
-fn ecdsa_sigver(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn ecdsa_sigver(args: &[Vec<u8>]) -> Result<Reply, String> {
     let curve = std::str::from_utf8(arg(args, 0)?).map_err(|_| "ECDSA curve")?;
     let hash = std::str::from_utf8(arg(args, 1)?).map_err(|_| "ECDSA hash")?;
     let message = arg(args, 2)?;
@@ -620,7 +678,7 @@ fn ecdsa_sigver(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
     let ok = PublicKey::new(alg, &point)
         .and_then(|key| key.verify(message, &der))
         .is_ok();
-    Ok(vec![vec![u8::from(ok)]])
+    public_reply(vec![vec![u8::from(ok)]])
 }
 
 fn ecdsa_signer(curve: &str) -> Result<&'static rind::signature::EcdsaSigningAlgorithm, String> {
@@ -713,26 +771,26 @@ fn der_tl(tag: u8, body: &[u8]) -> Vec<u8> {
     out
 }
 
-fn ed25519_keygen() -> Result<Vec<Vec<u8>>, String> {
+fn ed25519_keygen() -> Result<Reply, String> {
     let key = Ed25519KeyPair::generate().map_err(|err| err.to_string())?;
-    Ok(vec![
+    public_reply(vec![
         key.to_seed().as_ref().to_vec(),
         key.public_key().as_ref().to_vec(),
     ])
 }
 
-fn ed25519_keyver(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn ed25519_keyver(args: &[Vec<u8>]) -> Result<Reply, String> {
     let ok = PublicKey::new(&verify::ED25519, arg(args, 0)?).is_ok();
-    Ok(vec![vec![u8::from(ok)]])
+    public_reply(vec![vec![u8::from(ok)]])
 }
 
-fn ed25519_siggen(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn ed25519_siggen(args: &[Vec<u8>]) -> Result<Reply, String> {
     let key = Ed25519KeyPair::from_seed(arg(args, 0)?).map_err(|err| err.to_string())?;
     let sig = key.sign(arg(args, 1)?);
-    Ok(vec![sig.as_ref().to_vec()])
+    public_reply(vec![sig.as_ref().to_vec()])
 }
 
-fn ed25519_sigver(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn ed25519_sigver(args: &[Vec<u8>]) -> Result<Reply, String> {
     // message, public key, signature. acvptool's order is checked against
     // the call site: command, message, Q, signature when prehash is off.
     let message = arg(args, 0)?;
@@ -741,44 +799,45 @@ fn ed25519_sigver(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
     let ok = PublicKey::new(&verify::ED25519, public)
         .and_then(|key| key.verify(message, signature))
         .is_ok();
-    Ok(vec![vec![u8::from(ok)]])
+    public_reply(vec![vec![u8::from(ok)]])
 }
 
-fn mlkem_keygen(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn mlkem_keygen(args: &[Vec<u8>]) -> Result<Reply, String> {
     let d = arg(args, 0)?;
     let z = arg(args, 1)?;
     let mut seed = Vec::with_capacity(64);
     seed.extend_from_slice(d);
     seed.extend_from_slice(z);
     let (ek, dk) = rind::acvp::mlkem768_keygen(&seed).map_err(|err| err.to_string())?;
-    Ok(vec![ek, dk])
+    wipe(&mut seed);
+    Ok(with_secret(vec![ek], dk))
 }
 
-fn mlkem_encap(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn mlkem_encap(args: &[Vec<u8>]) -> Result<Reply, String> {
     let (ciphertext, secret) =
         rind::acvp::mlkem768_encaps(arg(args, 0)?, arg(args, 1)?).map_err(|err| err.to_string())?;
-    Ok(vec![ciphertext, secret])
+    Ok(with_secret(vec![ciphertext], secret))
 }
 
-fn mlkem_decap(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn mlkem_decap(args: &[Vec<u8>]) -> Result<Reply, String> {
     let secret =
         rind::acvp::mlkem768_decaps(arg(args, 0)?, arg(args, 1)?).map_err(|err| err.to_string())?;
-    Ok(vec![secret])
+    Ok(with_secret(Vec::new(), secret))
 }
 
-fn mlkem_ek_check(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
-    Ok(vec![vec![u8::from(rind::acvp::mlkem768_ek_ok(arg(
+fn mlkem_ek_check(args: &[Vec<u8>]) -> Result<Reply, String> {
+    public_reply(vec![vec![u8::from(rind::acvp::mlkem768_ek_ok(arg(
         args, 0,
     )?))]])
 }
 
-fn mlkem_dk_check(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
-    Ok(vec![vec![u8::from(rind::acvp::mlkem768_dk_ok(arg(
+fn mlkem_dk_check(args: &[Vec<u8>]) -> Result<Reply, String> {
+    public_reply(vec![vec![u8::from(rind::acvp::mlkem768_dk_ok(arg(
         args, 0,
     )?))]])
 }
 
-fn mldsa(rest: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn mldsa(rest: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let (set, op) = rest
         .split_once('/')
         .ok_or_else(|| format!("unsupported ML-DSA command {rest}"))?;
@@ -790,32 +849,32 @@ fn mldsa(rest: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
     }
 }
 
-fn mldsa_keygen(set: &str, seed: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+fn mldsa_keygen(set: &str, seed: &[u8]) -> Result<Reply, String> {
     let (pk, sk) = match set {
         "ML-DSA-44" => pair44(seed)?,
         "ML-DSA-65" => pair65(seed)?,
         "ML-DSA-87" => pair87(seed)?,
         _ => return Err(format!("unsupported ML-DSA set {set}")),
     };
-    Ok(vec![pk, sk])
+    Ok(with_secret(vec![pk], sk))
 }
 
-fn pair44(seed: &[u8]) -> Result<(Vec<u8>, Vec<u8>), String> {
+fn pair44(seed: &[u8]) -> Result<(Vec<u8>, rind::acvp::SecretBuf), String> {
     let key = MlDsaKeyPair::<MlDsa44>::from_seed(seed).map_err(|err| err.to_string())?;
     Ok((key.public_key().as_ref().to_vec(), key.expanded_secret()))
 }
 
-fn pair65(seed: &[u8]) -> Result<(Vec<u8>, Vec<u8>), String> {
+fn pair65(seed: &[u8]) -> Result<(Vec<u8>, rind::acvp::SecretBuf), String> {
     let key = MlDsaKeyPair::<MlDsa65>::from_seed(seed).map_err(|err| err.to_string())?;
     Ok((key.public_key().as_ref().to_vec(), key.expanded_secret()))
 }
 
-fn pair87(seed: &[u8]) -> Result<(Vec<u8>, Vec<u8>), String> {
+fn pair87(seed: &[u8]) -> Result<(Vec<u8>, rind::acvp::SecretBuf), String> {
     let key = MlDsaKeyPair::<MlDsa87>::from_seed(seed).map_err(|err| err.to_string())?;
     Ok((key.public_key().as_ref().to_vec(), key.expanded_secret()))
 }
 
-fn mldsa_siggen(set: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn mldsa_siggen(set: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     // sk, message, mu, rnd, context, externalMu flag.
     let sk = arg(args, 0)?;
     let message = arg(args, 1)?;
@@ -830,7 +889,7 @@ fn mldsa_siggen(set: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
         "ML-DSA-87" => sign87(sk, message, mu, rnd, context)?,
         _ => return Err(format!("unsupported ML-DSA set {set}")),
     };
-    Ok(vec![sig])
+    public_reply(vec![sig])
 }
 
 fn load_mldsa<P: sign::MlDsaParameterSet>(sk: &[u8]) -> Result<MlDsaKeyPair<P>, String>
@@ -900,7 +959,7 @@ fn sign87(
     load_mldsa::<MlDsa87>(sk)?.sign_fixed(context, message, mu, rnd)
 }
 
-fn mldsa_sigver(set: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn mldsa_sigver(set: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let signature = arg(args, 0)?;
     let pk = arg(args, 1)?;
     let message = arg(args, 2)?;
@@ -913,10 +972,10 @@ fn mldsa_sigver(set: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
     let ok = PublicKey::new(alg, pk)
         .and_then(|key| key.verify(message, signature))
         .is_ok();
-    Ok(vec![vec![u8::from(ok)]])
+    public_reply(vec![vec![u8::from(ok)]])
 }
 
-fn rsa_siggen(rest: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn rsa_siggen(rest: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let (hash, pad) = rest
         .split_once('/')
         .ok_or_else(|| format!("unsupported RSA sigGen {rest}"))?;
@@ -934,10 +993,10 @@ fn rsa_siggen(rest: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
     let key = RsaKeyPair::generate(size).map_err(|err| err.to_string())?;
     let signature = key.sign(alg, message).map_err(|err| err.to_string())?;
     let (n, e) = pkcs1_public(key.public_key(alg).as_ref())?;
-    Ok(vec![n, e, signature.as_ref().to_vec()])
+    public_reply(vec![n, e, signature.as_ref().to_vec()])
 }
 
-fn rsa_sigver(rest: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn rsa_sigver(rest: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let (hash, pad) = rest
         .split_once('/')
         .ok_or_else(|| format!("unsupported RSA sigVer {rest}"))?;
@@ -950,7 +1009,7 @@ fn rsa_sigver(rest: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
     let ok = PublicKey::new(alg, &der)
         .and_then(|key| key.verify(message, signature))
         .is_ok();
-    Ok(vec![vec![u8::from(ok)]])
+    public_reply(vec![vec![u8::from(ok)]])
 }
 
 fn rsa_sign_alg(
@@ -1036,7 +1095,7 @@ fn der_int_bytes(input: &mut &[u8]) -> Result<Vec<u8>, String> {
     Ok(body)
 }
 
-fn rsa_primitive(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+fn rsa_primitive(args: &[Vec<u8>]) -> Result<Reply, String> {
     // signaturePrimitive: d, n, e, message. decryptionPrimitive: ct, d, n, e.
     // Both are base^d mod n. The two orders differ, so tell them apart by
     // which argument is the short public exponent.
@@ -1048,8 +1107,8 @@ fn rsa_primitive(args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
         return Err("RSA primitive arguments".into());
     };
     match rind::acvp::rsa_modexp(base, exp, modulus) {
-        Some(out) => Ok(vec![vec![1], out]),
-        None => Ok(vec![vec![0], Vec::new()]),
+        Some(out) => Ok(with_secret(vec![vec![1]], out)),
+        None => public_reply(vec![vec![0], Vec::new()]),
     }
 }
 
@@ -1077,6 +1136,7 @@ impl Drbg {
         seed.extend_from_slice(nonce);
         seed.extend_from_slice(personalisation);
         drbg.update(&seed);
+        wipe(&mut seed);
         drbg
     }
 
@@ -1091,16 +1151,31 @@ impl Drbg {
         msg.extend_from_slice(&self.v);
         msg.push(0);
         msg.extend_from_slice(data);
-        self.k = self.hmac(&self.k, &msg);
-        self.v = self.hmac(&self.k, &self.v);
+        let next_k = self.hmac(&self.k, &msg);
+        self.assign_k(next_k);
+        let next_v = self.hmac(&self.k, &self.v);
+        self.assign_v(next_v);
         if !data.is_empty() {
             msg.clear();
             msg.extend_from_slice(&self.v);
             msg.push(1);
             msg.extend_from_slice(data);
-            self.k = self.hmac(&self.k, &msg);
-            self.v = self.hmac(&self.k, &self.v);
+            let next_k = self.hmac(&self.k, &msg);
+            self.assign_k(next_k);
+            let next_v = self.hmac(&self.k, &self.v);
+            self.assign_v(next_v);
         }
+        wipe(&mut msg);
+    }
+
+    fn assign_k(&mut self, next: Vec<u8>) {
+        wipe(&mut self.k);
+        self.k = next;
+    }
+
+    fn assign_v(&mut self, next: Vec<u8>) {
+        wipe(&mut self.v);
+        self.v = next;
     }
 
     fn reseed(&mut self, entropy: &[u8], additional: &[u8]) {
@@ -1108,6 +1183,7 @@ impl Drbg {
         seed.extend_from_slice(entropy);
         seed.extend_from_slice(additional);
         self.update(&seed);
+        wipe(&mut seed);
     }
 
     fn generate(&mut self, out: &mut [u8], additional: &[u8]) {
@@ -1116,7 +1192,8 @@ impl Drbg {
         }
         let mut filled = 0;
         while filled < out.len() {
-            self.v = self.hmac(&self.k, &self.v);
+            let next_v = self.hmac(&self.k, &self.v);
+            self.assign_v(next_v);
             let n = (out.len() - filled).min(self.v.len());
             out[filled..filled + n].copy_from_slice(&self.v[..n]);
             filled += n;
@@ -1125,7 +1202,14 @@ impl Drbg {
     }
 }
 
-fn hmac_drbg(rest: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
+impl Drop for Drbg {
+    fn drop(&mut self) {
+        wipe(&mut self.k);
+        wipe(&mut self.v);
+    }
+}
+
+fn hmac_drbg(rest: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let (kind, hash_name) = if let Some(hash) = rest.strip_prefix("-pr/") {
         ("pr", hash)
     } else if let Some(hash) = rest.strip_prefix("-reseed/") {
@@ -1183,7 +1267,7 @@ fn hmac_drbg(rest: &str, args: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, String> {
         }
         _ => unreachable!(),
     }
-    Ok(vec![out])
+    public_reply(vec![out])
 }
 
 const MAX_DRBG: usize = 1 << 16;

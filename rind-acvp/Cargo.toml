@@ -7,7 +7,7 @@ rust-version.workspace = true
 description = "Unpublished ACVP module wrapper for rind"
 
 [dependencies]
-rind = { path = "../rind", features = ["acvp"] }
+rind = { path = "../rind", features = ["__acvp", "wipe"] }
 
 [dev-dependencies]
 serde_json = "1"

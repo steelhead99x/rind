@@ -52,8 +52,13 @@ mod error;
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test;
 
-/// Operations `rind-acvp` needs that rind's callers do not.
-#[cfg(feature = "acvp")]
+/// Operations the unpublished `rind-acvp` binary needs.
+///
+/// Not a supported API. `__acvp` exists so that binary can answer NIST's
+/// seeded tests. rind's callers generate keys from the system RNG and sign
+/// with fresh randomness.
+#[cfg(feature = "__acvp")]
+#[doc(hidden)]
 pub mod acvp;
 
 // vvv Public API
