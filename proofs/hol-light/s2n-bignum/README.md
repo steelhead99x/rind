@@ -14,6 +14,9 @@ submodule bump past its merge deletes it.
 - `x86/proofs/utils/sha256_spec.ml`: SHA-256's FIPS 180-4 spec, from
   [awslabs/s2n-bignum#415](https://github.com/awslabs/s2n-bignum/pull/415) at
   `79120e64ed55e37c9652565ff272b7ef17f76738`.
+- `x86/proofs/utils/sha512_spec.ml`: SHA-512's FIPS 180-4 spec, from
+  [awslabs/s2n-bignum#420](https://github.com/awslabs/s2n-bignum/pull/420) at
+  `7ef7ba7c2d830d9c713512035ae6eb4aa8fe0a2b`.
 
 ## rind's specs
 
