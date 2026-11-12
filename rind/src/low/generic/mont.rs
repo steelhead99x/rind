@@ -49,8 +49,16 @@ const MAX_LIMBS: usize = MAX_WORDS * PER_WORD;
 /// than the schoolbook square plus the same [`redc`]: three interleaved
 /// rounds gave schoolbook 1.15 µs and Karatsuba 1.25 µs at 32 limbs, 2.51 µs
 /// and 2.55 µs at 48, and 4.48 µs and 4.55 µs at 64. A 64-bit product wins
-/// from 48 limbs and a square from 96; 32-bit limbs from 96 and 128. Below
-/// that, the schoolbook loop runs.
+/// from 48 limbs and a square from 96.
+///
+/// 32-bit limbs were measured the same way on an AMD Ryzen 5 7535HS
+/// (family 25, model 68) on 2026-11-12, release, median of three interleaved
+/// rounds, one Karatsuba split so the halves use schoolbook. A product first
+/// wins at 48 limbs (schoolbook 1.210 µs, Karatsuba 1.102 µs) and a square
+/// at 80 (1.835 µs and 1.725 µs). At the production cutoffs, 96 limbs, the
+/// product is 5.113 µs then 4.082 µs, and at 128 the square is 4.807 µs then
+/// 3.995 µs. Those cutoffs stay 96 and 128, which still win here. Below
+/// them, the schoolbook loop runs.
 const MUL_KARATSUBA: usize = match Limb::BITS {
     64 => 48,
     _ => 96,
@@ -71,8 +79,9 @@ fn uninit<const N: usize>() -> [MaybeUninit<Limb>; N] {
     [const { MaybeUninit::uninit() }; N]
 }
 
-/// Zero the first `n` limbs of a stack slot of `N`, run `f` on them, then
-/// wipe them. The tail is not written. `low/generic` does not allocate.
+/// Zero the first `n` limbs of a stack slot of `N` and run `f` on them.
+/// The tail is not written. `low/generic` does not allocate. The slot is
+/// stack scratch, so it is left unwiped.
 ///
 /// Not inlined. The slot is `N` limbs whatever `n` is, and a caller that
 /// also has a schoolbook path would reserve it on that path too: the frame
@@ -86,9 +95,7 @@ fn with_zeroed<const N: usize, R>(n: usize, f: impl FnOnce(&mut [Limb]) -> R) ->
     // SAFETY: the loop wrote the first `n` limbs. `n > N` panics on the
     // slice above, before this.
     let buf = unsafe { core::slice::from_raw_parts_mut(raw.as_mut_ptr().cast::<Limb>(), n) };
-    let result = f(buf);
-    crate::low::zeroise(buf);
-    result
+    f(buf)
 }
 
 /// [`with_zeroed`] for a product of `n` limbs and a scratch of `m`.
@@ -117,10 +124,7 @@ fn with_zeroed2<const N: usize, const M: usize, R>(
             core::slice::from_raw_parts_mut(b.as_mut_ptr().cast::<Limb>(), m),
         )
     };
-    let result = f(a, b);
-    crate::low::zeroise(a);
-    crate::low::zeroise(b);
-    result
+    f(a, b)
 }
 
 /// Compute "montification" constant z := 2^{128k} mod m
@@ -630,9 +634,9 @@ fn sqr_karatsuba(z: &mut [Limb], x: &[Limb], t: &mut [Limb], crossover: usize) {
 fn mont_mul_karatsuba(z: &mut [u64], x: &[Limb], y: &[Limb], m: &[Limb], n0: Limb) {
     let n = m.len();
     // Stack slots of the widest product and scratch. Only the `2n` and `4n`
-    // limbs this call uses are zeroed, then wiped. `low/generic` does not
-    // allocate: a `Vec` here would run on every Montgomery step above the
-    // crossover, and on targets built without `std`.
+    // limbs this call uses are zeroed, and left unwiped. `low/generic` does
+    // not allocate: a `Vec` here would run on every Montgomery step above
+    // the crossover, and on targets built without `std`.
     with_zeroed2::<{ MAX_LIMBS * 2 }, { MAX_LIMBS * 4 }, ()>(2 * n, 4 * n, |product, scratch| {
         mul_karatsuba(product, x, y, scratch, MUL_KARATSUBA);
         redc(product, m, n0);

@@ -378,8 +378,11 @@ Montgomery products are Koç, Acar, and Kaliski's CIOS method and its
 squarings form each cross product once before reducing. At and above it,
 a product (48 limbs on 64-bit limbs, 96 on 32-bit) or a square (96 and
 128) is Karatsuba into a `2n`-limb product and a `4n`-limb scratch on
-the stack. Only that used prefix is zeroed, then wiped under the `wipe`
-feature; `low/generic` does not allocate. The Montgomery reduction after
+the stack. Only that used prefix is zeroed, and left unwiped, as stack
+scratch is; `low/generic` does not allocate. The 32-bit cutoffs were
+timed on an AMD Ryzen 5 7535HS on 2026-11-12: at 96 limbs the product
+is 5.113 µs schoolbook then 4.082 µs Karatsuba, and at 128 the square is
+4.807 µs then 3.995 µs. The Montgomery reduction after
 it is the same schoolbook loop: the half-difference's sign and the carry
 above the middle are masks. A square at a signing prime (32 to 64 limbs
 on 64-bit limbs) stays on the schoolbook square. On an Intel Xeon on
