@@ -87,7 +87,7 @@ operations = [
   "rustls-full-handshake-key/rsa-4096*",
 ]
 on = ["portable"]
-reason = "Constant-time Karatsuba in `low/generic/mont.rs`, with the half-difference sign and the carry above the middle chosen by masks, measured on an Intel Xeon (family 6, model 207) on 2026-11-12 under `--cfg rind_portable` against aws-lc-rs built without assembly at opt-level 2. It beats the schoolbook product and square from 48 limbs for a 64-bit product and 96 for a square (96 and 128 on 32-bit limbs); shorter inputs stay on CIOS and the schoolbook square. Montgomery reduction stays schoolbook and is most of a squaring, and squaring is most of RSA, so the win is small: on that host 6144- and 8192-bit verification fell to about 0.90× the schoolbook time and 6144-bit signing to about 0.96×, and 3072-bit verification and 4096-bit signing did not move. That still left them about 1.13× to 1.25× aws-lc. A branch on the sign would be faster and is not acceptable on the secret primes. This nightly data predates the change. The next refresh rechecks the ratios, including the handshake rows, which were not retimed here."
+quest = "/quest/m3/cold-speed/portable-rsa-karatsuba.md"
 
 [[gap]]
 operations = ["p[0-9]*", "rsa*", "jwt-*", "rustls-full-handshake-*"]

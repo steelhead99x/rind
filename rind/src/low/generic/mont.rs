@@ -41,13 +41,14 @@ const MAX_LIMBS: usize = MAX_WORDS * PER_WORD;
 
 /// Lengths, in limbs, from which Karatsuba beats this file's schoolbook.
 ///
-/// Measured on an Intel Xeon (family 6, model 207) on 2026-11-12, in a
-/// release build: Montgomery multiplication against CIOS, and squaring
-/// against the schoolbook square, both then reduced by the same schoolbook
-/// [`redc`]. That reduction is most of a square, so squaring, which is most
-/// of an RSA exponentiation, pulls ahead only once it is long. Below the
-/// count, the schoolbook loop is faster and is what runs. 64-bit limbs win
-/// from 48 for a product and 96 for a square; 32-bit limbs from 96 and 128.
+/// Measured on an Intel Xeon (family 6, model 207) on 2026-11-12, release,
+/// with the product and scratch sized to `2n` and `4n` limbs. A square at a
+/// signing prime (32, 48, and 64 limbs when a limb is 64 bits) stays slower
+/// than the schoolbook square plus the same [`redc`]: three interleaved
+/// rounds gave schoolbook 1.15 µs and Karatsuba 1.25 µs at 32 limbs, 2.51 µs
+/// and 2.55 µs at 48, and 4.48 µs and 4.55 µs at 64. A 64-bit product wins
+/// from 48 limbs and a square from 96; 32-bit limbs from 96 and 128. Below
+/// that, the schoolbook loop runs.
 const MUL_KARATSUBA: usize = match Limb::BITS {
     64 => 48,
     _ => 96,
@@ -134,21 +135,20 @@ pub(crate) fn bignum_montredc(z: &mut [u64], x: &[u64], m: &[u64], p: u64) {
 pub(crate) fn bignum_mul(z: &mut [u64], x: &[u64], y: &[u64]) {
     let (mut x_limbs, mut y_limbs) = ([0; MAX_LIMBS], [0; MAX_LIMBS]);
     let (x, y) = (limbs(x, &mut x_limbs), limbs(y, &mut y_limbs));
-    let mut product = [0; MAX_LIMBS * 2];
+    // The product is `x.len() + y.len()` limbs, not the maximum: zeroing a
+    // fixed `MAX_LIMBS * 2` buffer made every width pay for an 8192-bit
+    // product.
+    let mut product = vec![0; x.len() + y.len()];
     if x.len() == y.len() && karatsuba(x.len(), MUL_KARATSUBA) {
-        let mut scratch = [0; MAX_LIMBS * 4];
-        mul_karatsuba(
-            &mut product[..2 * x.len()],
-            x,
-            y,
-            &mut scratch[..4 * x.len()],
-            MUL_KARATSUBA,
-        );
+        let mut scratch = vec![0; 4 * x.len()];
+        mul_karatsuba(&mut product, x, y, &mut scratch, MUL_KARATSUBA);
+        crate::low::zeroise(&mut scratch);
     } else {
         mul_schoolbook(&mut product, x, y);
     }
     z.fill(0);
     join(&product, z);
+    crate::low::zeroise(&mut product);
 }
 
 /// `z = x * y / 2^(64k) mod m`, for `x` and `y` below the odd `m`, where `k`
@@ -551,32 +551,29 @@ fn sqr_karatsuba(z: &mut [Limb], x: &[Limb], t: &mut [Limb], crossover: usize) {
 /// and one reduction brings it below `2m`, which [`redc`] finishes.
 fn mont_mul_karatsuba(z: &mut [u64], x: &[Limb], y: &[Limb], m: &[Limb], n0: Limb) {
     let n = m.len();
-    let mut product = [0; MAX_LIMBS * 2];
-    let mut scratch = [0; MAX_LIMBS * 4];
-    mul_karatsuba(
-        &mut product[..2 * n],
-        x,
-        y,
-        &mut scratch[..4 * n],
-        MUL_KARATSUBA,
-    );
-    redc(&mut product[..2 * n], m, n0);
-    join(&product[n..2 * n], z);
+    // `2n` and `4n` limbs, not `MAX_LIMBS`. A fixed buffer zeroed every call
+    // was about 6 KiB on 64-bit limbs whatever `n` was, which is most of a
+    // short product and pushed the crossover out past RSA's primes.
+    let mut product = vec![0; 2 * n];
+    let mut scratch = vec![0; 4 * n];
+    mul_karatsuba(&mut product, x, y, &mut scratch, MUL_KARATSUBA);
+    redc(&mut product, m, n0);
+    join(&product[n..], z);
+    // Heap scratch from a private operation is as good as the prime.
+    crate::low::zeroise(&mut product);
+    crate::low::zeroise(&mut scratch);
 }
 
 /// `z = x^2 / 2^bn mod m` by a Karatsuba square and [`redc`].
 fn mont_sqr_karatsuba(z: &mut [u64], x: &[Limb], m: &[Limb], n0: Limb) {
     let n = m.len();
-    let mut square = [0; MAX_LIMBS * 2];
-    let mut scratch = [0; MAX_LIMBS * 4];
-    sqr_karatsuba(
-        &mut square[..2 * n],
-        x,
-        &mut scratch[..4 * n],
-        SQR_KARATSUBA,
-    );
-    redc(&mut square[..2 * n], m, n0);
-    join(&square[n..2 * n], z);
+    let mut square = vec![0; 2 * n];
+    let mut scratch = vec![0; 4 * n];
+    sqr_karatsuba(&mut square, x, &mut scratch, SQR_KARATSUBA);
+    redc(&mut square, m, n0);
+    join(&square[n..], z);
+    crate::low::zeroise(&mut square);
+    crate::low::zeroise(&mut scratch);
 }
 
 /// `r := 2r mod m`, for `r` below `m`.
@@ -800,6 +797,61 @@ mod tests {
             mont_sqr(&mut ours, &sx, &sm, into_secret(n0[0]));
             low::mont_mul(&mut theirs, &x, &x, &m, n0[0]);
             assert_eq!(public(&ours), public(&theirs), "mont_sqr {k}");
+        }
+    }
+
+    /// `m - 1`, an all-ones value still below `m`, and a value whose halves
+    /// match, so the Karatsuba half-difference is zero. Lengths are the
+    /// production crossovers, in words.
+    fn crossover_edges(seed: u64) -> Vec<(Vec<u64>, Vec<u64>, Vec<u64>)> {
+        let mut words = vec![MUL_KARATSUBA / PER_WORD, SQR_KARATSUBA / PER_WORD];
+        words.sort_unstable();
+        words.dedup();
+        let mut out = Vec::new();
+        for k in words {
+            let m = vec![u64::MAX; k];
+            let mut below = m.clone();
+            below[0] = below[0].wrapping_sub(1);
+            out.push((m.clone(), below.clone(), below));
+
+            let mut ones = vec![u64::MAX; k];
+            ones[k - 1] >>= 1;
+            out.push((m.clone(), ones.clone(), ones));
+
+            let h = k / 2;
+            let mut half = vec![0; h];
+            let mut s = seed | 1;
+            for w in &mut half {
+                s = s.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(1);
+                *w = s & !(1 << 63);
+            }
+            let mut x = half.clone();
+            x.extend_from_slice(&half);
+            let mut other = half;
+            other[0] ^= 0x5a5a_5a5a;
+            let mut y = other.clone();
+            y.extend_from_slice(&other);
+            out.push((m, x, y));
+        }
+        out
+    }
+
+    proptest! {
+        #![proptest_config(proptest::test_runner::Config::with_cases(8))]
+        #[test]
+        fn karatsuba_crossover_edges(seed in proptest::num::u64::ANY) {
+            for (m, x, y) in crossover_edges(seed) {
+                let (sm, sx, sy) = (secret(&m), secret(&x), secret(&y));
+                let (mut ours, mut theirs) = (vec![0; m.len()], vec![0; m.len()]);
+                let mut n0 = [0];
+                low::bignum_negmodinv(&mut n0, &m[..1]);
+                mont_mul(&mut ours, &sx, &sy, &sm, into_secret(n0[0]));
+                low::mont_mul(&mut theirs, &x, &y, &m, n0[0]);
+                prop_assert_eq!(public(&ours), theirs.clone());
+                mont_sqr(&mut ours, &sx, &sm, into_secret(n0[0]));
+                low::mont_mul(&mut theirs, &x, &x, &m, n0[0]);
+                prop_assert_eq!(public(&ours), theirs);
+            }
         }
     }
 }
