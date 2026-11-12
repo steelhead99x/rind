@@ -39,7 +39,7 @@ the old backend's feature in otherwise the same command.
    - **rustls, or a crate above it**, such as reqwest, hyper-rustls, tonic,
      or ureq.
    - **A crate a `rind-*` adapter serves**: rcgen, dimpl, str0m,
-     jsonwebtoken, or object_store.
+     jsonwebtoken, object_store, or openmls_rust_crypto.
    - **The project calls ring's API.**
    - **The project calls aws-lc-rs's API.**
    - **A crate that hard-wires ring 0.17**, such as quinn-proto.
