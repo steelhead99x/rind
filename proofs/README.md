@@ -58,8 +58,10 @@ hol-light` checks them alone, in nixpkgs' HOL Light.
 
 `hol-light/s2n-bignum/` holds what these proofs add to s2n-bignum, ahead of
 the submodule on HOL Light's load path: specs from s2n-bignum pull requests
-not yet merged, and `x86.patch`, rind's additions to the x86 model, which
-`x86-cosim.ml` checks against the CPU. Its
+not yet merged, rind's own RFC 8439 spec of ChaCha20, Poly1305, and
+ChaCha20-Poly1305, `common/chacha20poly1305.ml`, whose known-answer tests
+`admin/prove hol-light` runs, and `x86.patch`, rind's additions to the x86
+model, which `x86-cosim.ml` checks against the CPU. Its
 [README](hol-light/s2n-bignum/README.md) lists each, so they can be offered
 upstream. `nix develop .#hol-light --command admin/prove cosim` runs the
 cosimulation, on an x86_64 CPU with AVX2.
@@ -100,15 +102,15 @@ P-256 ECDH on aarch64, from the same `PrivateKey` to s2n-bignum's routines, in
   that point, or a fault unless that is a finite point on the curve;
 - `p256_shared_secret`: the secret's bytes are those.
 
-`p256Pow` is HOL Light's `group_pow p256_group`, defined as HOL Light does,
-and `Rind/P256Group.lean` proves it is multiplication in Mathlib's group of
-points on the curve. `Rind/P256Multiples.lean` proves G's order n: the kernel
+`p256Pow` is HOL Light's `group_pow p256_group`, defined as HOL Light does
+once for the NIST curves in `Rind/Spec.lean`, and `Rind/NistGroup.lean`
+proves it is multiplication in Mathlib's group of points on such a curve. `Rind/P256Multiples.lean` proves G's order n: the kernel
 computes (n - 1)·G by doubling and adding, checking each step's coordinates
 against the group law, and finds -G, and `Rind/N256Prime.lean` proves n
-prime. So a scalar in [1, n) times G is a finite point. That the same holds
-for the peer's point, so the fault never happens, needs every point's order,
-which follows from the group having n points, a count these theorems do not
-prove.
+prime. So a scalar in [1, n) times G is a finite point. `p256_order` gives
+every finite point order n too, by `Rind/NistOrder.lean`'s count of the
+curve's points, but `p256_agree` does not yet use it to rule out its fault
+case for the peer's point.
 
 P-256 ECDSA with SHA-256 and fixed-length signatures on aarch64, from the
 signature API's `EcdsaKeyPair` and `PublicKey` to s2n-bignum's routines, in
@@ -136,14 +138,17 @@ signature API's `EcdsaKeyPair` and `PublicKey` to s2n-bignum's routines, in
 
 `ecdsaP256Sign` and `ecdsaP256Verifies` in `Rind/Spec.lean` are FIPS 186-5's,
 over `p256Pow` and `p256Add`. `Rind/P256Multiples.lean` proves, from
-`Rind/P256Group.lean`'s group, the laws by which the twin multiplication's
+`Rind/NistGroup.lean`'s group, the laws by which the twin multiplication's
 windowed sum is e/s·G + r/s·Q, and `Rind/N256Prime.lean` that n is prime, so
 every nonzero scalar has an inverse. The sum also needs Q's order n. A key
-pair's Q is its scalar times G, whose order follows from G's, but a parsed
-public key's is any point on the curve, so `p256_ecdsa_public_key_new` takes
-`P256Order`: every finite point on the curve has order n, as HOL Light's
-`P256_GROUP_ELEMENT_ORDER` proves from the group's size, which Mathlib cannot
-count yet. Key generation and signing need only G's order. The message's
+pair's Q is its scalar times G, whose order follows from G's. A parsed public
+key's is any point on the curve, whose order n is `p256_order`, HOL Light's
+`P256_GROUP_ELEMENT_ORDER`: Mathlib has no Hasse bound to count the curve's
+points, so `Rind/NistOrder.lean` counts them elementarily. Each x gives at
+most two points, so the group has at most 2p + 1 < 3n; n divides its order,
+as G has order n; and an order of 2n would give a point of order 2 by Cauchy,
+whose x would be a root of x³ - 3x + b mod p, which the kernel checks has
+none. So the order is n, a prime. The message's
 SHA-256 is FIPS 180-4's (`sha256E`), through the SHA-256 proof below, so
 signing and verification take its `Sha256Blocks` and messages of at most
 `maxInput` bytes. Signing draws nonces until r and s are both
@@ -170,7 +175,7 @@ writes for aarch64:
 
 Key generation, a loaded key, and the public key a key holds run rind's comb
 for k·G, which no theorem covers yet. `p384Pow` is HOL Light's `group_pow
-p384_group`, whose group law `Rind/Nist.lean` defines once for the NIST
+p384_group`, whose group law `Rind/Spec.lean` defines once for the NIST
 curves, and `Rind/NistGroup.lean` proves it is multiplication in Mathlib's
 group of points on such a curve. `Rind/P384Group.lean` proves p and n prime,
 by Pratt certificates that `Rind/Pratt.lean` checks, and G's order n.
@@ -515,7 +520,9 @@ HChaCha20, which derives XChaCha20's subkey, runs HACL*'s rounds, which
 CPU-feature checks find SSE4.1, and `OnePass`, that aws-lc's one-pass
 routines compute RFC 8439's AEAD, which no proof covers yet;
 [the ChaCha20-Poly1305 quest](/quest/m4/verified/chacha20-poly1305-x86/aead.md)
-owns their HOL Light proofs. CPUs without SSE4.1 run the separate ChaCha20
+owns their HOL Light proofs, against `hol-light/s2n-bignum/common/chacha20poly1305.ml`,
+which `Rind/S2nChaCha20Poly1305.lean` proves is `Rind/Spec.lean`'s RFC 8439
+for a 32-byte key and a 12-byte nonce. CPUs without SSE4.1 run the separate ChaCha20
 and Poly1305 passes, which the model leaves opaque. `AeadDispatch` models
 `RandomizedNonceKey`, which reaches the system's random source, and
 `Rind/ChaCha20Poly1305Test.lean` checks `Rind/Spec.lean`'s transliterations
@@ -638,11 +645,15 @@ mentions `Verification::Rsa(` or builds an `Rsa` outside them.
   target, SHA-1's padded last blocks, and SHA-256's padded last blocks and
   finish; `Rind/Aarch64/Sha256Hw.lean`, the axiom for aarch64's routine with
   the SHA-256 instructions, and `Rind/S2nSha256.lean`, s2n-bignum's SHA-256
-  spec, transliterated, and its proof that it is `Rind/HashSpec.lean`'s.
+  spec, transliterated, and its proof that it is `Rind/HashSpec.lean`'s;
+  `Rind/S2nChaCha20Poly1305.lean`, rind's HOL Light ChaCha20-Poly1305 spec,
+  transliterated, and its proof that it is `Rind/Spec.lean`'s.
 - `admin/prove` copies the other `Rind/X86_64/` models and proofs to
   `Rind/Aarch64/` with the target renamed.
-- `Rind/P256Group.lean`: that `p256` is prime, by a Pratt certificate, and
-  that `p256Add` is the addition of Mathlib's group of points on the curve;
+- `Rind/NistGroup.lean`: that the NIST curves' `nist.add` is the addition of
+  Mathlib's group of points on the curve; `Rind/NistOrder.lean`: that every
+  finite point has order n, by counting the curve's points;
+  `Rind/P256Group.lean`: that `p256` is prime, by a Pratt certificate;
   `Rind/N256Prime.lean`: that `n256` is prime; `Rind/P256Multiples.lean`: the
   group laws and multiples ECDSA's twin multiplication relies on.
 - `Rind/Aarch64/P256Dispatch.lean`, `Rind/Aarch64/P256Table.lean`, and
@@ -673,9 +684,9 @@ Beyond Lean's kernel:
   proves it is, and `group_carrier edwards25519_group` the one
   [`EDWARDS25519_GROUP`](https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/EC/edwards25519.ml#L92)
   does. A function a proof must compute, such as `group_pow p256_group`, is
-  its HOL Light definition, transliterated, rather than opaque, so `p256Add`,
-  `p256Pow`, and `p256Inv` in `Rind/Spec.lean` are trusted to be
-  `weierstrass_add`, `group_pow`, and `ring_inv` on `p256_group`.
+  its HOL Light definition, transliterated, rather than opaque, so `nist.add`,
+  `nist.pow`, and `nist.inv` in `Rind/Spec.lean` are trusted to be
+  `weierstrass_add`, `group_pow`, and `ring_inv` on each NIST curve's group.
 - That `Rind/SymCrypt/Sha3.lean` is FIPS 202, as SymCrypt's authors state,
   and that `Rind/Keccak.lean` transliterates s2n-bignum's `keccak_spec.ml`,
   in which the Keccak-f axioms state their results.
@@ -683,8 +694,9 @@ Beyond Lean's kernel:
   and that `Rind/S2nMlKem.lean` transliterates the s2n-bignum ML-KEM specs it
   names.
 - That `Rind/Sha2.lean` restates cryptol-specs' SHA-512 around
-  `processBlock_Common`, and `Rind/S2nSha256.lean` transliterates
-  s2n-bignum's SHA-256 spec.
+  `processBlock_Common`, `Rind/S2nSha256.lean` transliterates
+  s2n-bignum's SHA-256 spec, and `Rind/S2nChaCha20Poly1305.lean` rind's
+  HOL Light ChaCha20-Poly1305 spec.
 - That `Rind/Rsa.lean` transliterates RFC 8017's RSASSA-PKCS1-v1_5 and
   RSASSA-PSS verification.
 - That `Rind/Spec.lean`'s ChaCha20, Poly1305, and ChaCha20-Poly1305
