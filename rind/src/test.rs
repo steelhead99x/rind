@@ -226,3 +226,67 @@ pub(crate) fn cctv_value<'a>(record: &'a [(String, Vec<u8>)], name: &str) -> &'a
 pub(crate) mod bignum;
 mod binsec;
 pub(crate) mod file_test;
+
+/// Messages and domain separation tags for crosschecking hashes to a curve:
+/// empty, short, and random messages, with tags of one byte, 255 bytes, and
+/// 256 bytes, the shortest RFC 9380 hashes down.
+pub(crate) fn hash_to_curve_inputs() -> Vec<(Vec<u8>, Vec<u8>)> {
+    let mut inputs = Vec::new();
+    for dst in [vec![b'D'], vec![b'D'; 255], vec![b'D'; 256]] {
+        for len in [0, 1, 64, 1000] {
+            let mut msg = vec![0; len];
+            getrandom::fill(&mut msg).unwrap();
+            inputs.push((msg, dst.clone()));
+        }
+    }
+    inputs
+}
+
+/// aws-lc's `EC_hash_to_curve_p256_xmd_sha256_sswu`, or its P-384 twin for
+/// `bits` of 384, as an X9.62 uncompressed point.
+#[cfg(not(any(miri, target_family = "wasm")))]
+pub(crate) fn aws_lc_hash_to_curve(bits: u16, msg: &[u8], dst: &[u8]) -> Vec<u8> {
+    use aws_lc_sys::*;
+
+    // SAFETY: each pointer is to a live buffer of the length passed with it,
+    // and the point is freed once encoded.
+    unsafe {
+        let (group, hash) = match bits {
+            256 => (EC_group_p256(), EC_hash_to_curve_p256_xmd_sha256_sswu as _),
+            384 => (EC_group_p384(), EC_hash_to_curve_p384_xmd_sha384_sswu as _),
+            _ => unreachable!(),
+        };
+        let hash: unsafe extern "C" fn(
+            *const EC_GROUP,
+            *mut EC_POINT,
+            *const u8,
+            usize,
+            *const u8,
+            usize,
+        ) -> core::ffi::c_int = hash;
+        let point = EC_POINT_new(group);
+        assert_eq!(
+            hash(
+                group,
+                point,
+                dst.as_ptr(),
+                dst.len(),
+                msg.as_ptr(),
+                msg.len()
+            ),
+            1
+        );
+        let mut out = vec![0; 1 + 2 * usize::from(bits / 8)];
+        let len = EC_POINT_point2oct(
+            group,
+            point,
+            point_conversion_form_t::POINT_CONVERSION_UNCOMPRESSED,
+            out.as_mut_ptr(),
+            out.len(),
+            core::ptr::null_mut(),
+        );
+        EC_POINT_free(point);
+        assert_eq!(len, out.len());
+        out
+    }
+}
