@@ -16,7 +16,6 @@ use rind::signature::sign::{MlDsa44, MlDsa65, MlDsa87, MlDsaKeyPair};
 use crate::encoding::{AsDer, Pkcs8V1Der, PublicKeyX509Der};
 use crate::error::{KeyRejected, Unspecified, unspecified};
 use crate::pkcs8::Document;
-use crate::wipe::Wiped;
 use crate::{der, signature};
 
 /// Which ML-DSA parameter set a key uses. The names are aws-lc-rs's `Debug`
@@ -376,7 +375,9 @@ impl PqdsaKeyPair {
         if id != algorithm.id() {
             return Err(KeyRejected::unspecified());
         }
-        let der = Wiped::new(expanded_pkcs8(id, raw_private_key));
+        // A copy inside the call, freed unwiped: rind wipes the key it
+        // loads, and nothing else is.
+        let der = expanded_pkcs8(id, raw_private_key);
         let key = Key::from_pkcs8(id, &der).map_err(|_| KeyRejected::invalid_encoding())?;
         Ok(Self::new(algorithm, key))
     }
@@ -533,17 +534,22 @@ fn parses_as_other_private_key(pkcs8: &[u8]) -> bool {
 
 /// RFC 5958 v1 around RFC 9881's expanded private key: an `OCTET STRING`
 /// holding the raw key, itself inside PKCS#8's `privateKey` `OCTET STRING`.
+/// Every length is known up front, so the headers are written in place and
+/// the key is copied once.
 fn expanded_pkcs8(id: AlgorithmId, raw: &[u8]) -> Vec<u8> {
-    let mut choice = Wiped::new(Vec::new());
-    push_tlv(&mut choice, 0x04, raw);
-    let mut private_key = Wiped::new(Vec::new());
-    push_tlv(&mut private_key, 0x04, &choice);
-    let mut body = Wiped::new(Vec::new());
-    body.extend_from_slice(&[0x02, 0x01, 0x00]);
-    body.extend_from_slice(algorithm_identifier(id));
-    body.extend_from_slice(&private_key);
-    let mut der = Vec::new();
-    push_tlv(&mut der, 0x30, &body);
+    let algorithm = algorithm_identifier(id);
+    let choice = tlv_len(raw.len());
+    let private_key = tlv_len(choice);
+    let body = 3 + algorithm.len() + private_key;
+    let len = tlv_len(body);
+    let mut der = Vec::with_capacity(len);
+    push_header(&mut der, 0x30, body);
+    der.extend_from_slice(&[0x02, 0x01, 0x00]);
+    der.extend_from_slice(algorithm);
+    push_header(&mut der, 0x04, choice);
+    push_header(&mut der, 0x04, raw.len());
+    der.extend_from_slice(raw);
+    debug_assert_eq!(der.len(), len);
     der
 }
 
@@ -565,17 +571,26 @@ fn algorithm_identifier(id: AlgorithmId) -> &'static [u8] {
     }
 }
 
-/// The longest body [`push_tlv`] writes: PKCS#8 around ML-DSA-87's expanded
+/// The longest body [`push_header`] writes: PKCS#8 around ML-DSA-87's expanded
 /// key (version, algorithm identifier, and two octet-string headers).
 const MAX_DER_BODY: usize = 3 + 13 + 1 + 3 + 1 + 3 + 4896;
 const _: () = assert!(MAX_DER_BODY <= 0xffff);
 
-/// Appends a DER element. `body.len()` is a public size, at most
+/// The length of a DER element whose contents are `len` bytes, at most
 /// [`MAX_DER_BODY`].
-fn push_tlv(out: &mut Vec<u8>, tag: u8, body: &[u8]) {
-    debug_assert!(body.len() <= MAX_DER_BODY);
+const fn tlv_len(len: usize) -> usize {
+    len + match len {
+        0..=0x7f => 2,
+        0x80..=0xff => 3,
+        _ => 4,
+    }
+}
+
+/// Appends a DER element's tag and length. `len` is a public size, at most
+/// [`MAX_DER_BODY`].
+fn push_header(out: &mut Vec<u8>, tag: u8, len: usize) {
+    debug_assert!(len <= MAX_DER_BODY);
     out.push(tag);
-    let len = body.len();
     if len < 0x80 {
         out.push(len as u8);
     } else if len <= 0xff {
@@ -586,5 +601,4 @@ fn push_tlv(out: &mut Vec<u8>, tag: u8, body: &[u8]) {
         out.push(0x82);
         out.extend(len.to_be_bytes());
     }
-    out.extend_from_slice(body);
 }

@@ -210,6 +210,10 @@ fn ml_dsa_public_key() {
 /// An expanded ML-DSA private key, loaded raw, which the adapter wraps in
 /// PKCS#8 itself, and loaded from a PKCS#8 document in expanded form. The
 /// needle is FIPS 204's `K`, after `rho`, which the public key repeats.
+///
+/// Each key is loaded before the check: the copies a load makes inside the
+/// call are not wiped, as rind leaves them. The check covers signing and
+/// dropping the key.
 #[test]
 fn ml_dsa_expanded() {
     use aws_lc_rs::encoding::AsRawBytes;
@@ -225,11 +229,10 @@ fn ml_dsa_expanded() {
     .as_ref()
     .to_vec();
     let secret = &raw[32..];
-    let leaked = leaks(secret, || {
-        let key = Box::new(
-            signature::PqdsaKeyPair::from_raw_private_key(&signature::ML_DSA_44_SIGNING, &raw)
-                .unwrap(),
-        );
+    let key = Box::new(
+        signature::PqdsaKeyPair::from_raw_private_key(&signature::ML_DSA_44_SIGNING, &raw).unwrap(),
+    );
+    let leaked = leaks(secret, move || {
         assert!(key.to_pkcs8v1().is_err());
         let mut sig = vec![0; signature::ML_DSA_44_SIGNING.signature_len()];
         key.sign(b"expanded", &mut sig).unwrap();
@@ -237,10 +240,10 @@ fn ml_dsa_expanded() {
     assert_eq!(leaked, 0);
 
     let pkcs8 = expanded_pkcs8(&raw);
-    let leaked = leaks(secret, || {
-        let key = Box::new(
-            signature::PqdsaKeyPair::from_pkcs8(&signature::ML_DSA_44_SIGNING, &pkcs8).unwrap(),
-        );
+    let key = Box::new(
+        signature::PqdsaKeyPair::from_pkcs8(&signature::ML_DSA_44_SIGNING, &pkcs8).unwrap(),
+    );
+    let leaked = leaks(secret, move || {
         let mut sig = vec![0; signature::ML_DSA_44_SIGNING.signature_len()];
         key.sign(b"message", &mut sig).unwrap();
     });
