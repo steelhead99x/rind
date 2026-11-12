@@ -8,7 +8,7 @@ use super::{
     CURVE_A_MONT, CURVE_B_MONT, CURVE_ONE_MONT, CURVE_ORDER_MM, FieldElement, JacobianMontPoint,
     PublicKey, Scalar, util,
 };
-use crate::error::{Error, KeyFormatError};
+use crate::error::Error;
 use crate::low;
 use crate::mid::hash_to_curve::{self, Curve};
 use crate::mid::sha2::Sha256Context;
@@ -16,17 +16,17 @@ use crate::mid::sha2::Sha256Context;
 /// Hashes `msg` to a point, by RFC 9380's `P256_XMD:SHA-256_SSWU_RO_` with
 /// the domain separation tag `dst`.
 ///
-/// The point at infinity, which no message is known to reach, is refused as
-/// a small-order point.
+/// The two map outputs are added in constant time. Opposite outputs would
+/// sum to infinity (`Z = 0`); no message is known to reach that. This
+/// selects a 1 for `Z` in that case so `as_affine` inverts a nonzero
+/// element, and neither declassifies nor branches on the bit.
 pub(crate) fn hash_to_curve(msg: &[u8], dst: &[u8]) -> Result<PublicKey, Error> {
     let _entry = low::Entry::new_secret();
-    let point = hash_to_curve::hash_to_curve::<FieldElement, Sha256Context>(msg, dst)?;
-    match low::ct::into_public(point[2].ct_eq(&FieldElement::ZERO)) {
-        true => Err(KeyFormatError::SmallOrder.into()),
-        false => Ok(PublicKey {
-            point: jacobian(&point).as_affine(),
-        }),
-    }
+    let mut point = hash_to_curve::hash_to_curve::<FieldElement, Sha256Context>(msg, dst)?;
+    point[2] = point[2].select(&FieldElement::ONE, point[2].ct_eq(&FieldElement::ZERO));
+    Ok(PublicKey {
+        point: jacobian(&point).as_affine(),
+    })
 }
 
 /// Hashes `msg` to a scalar mod n, by RFC 9380's `hash_to_field` over
@@ -197,6 +197,10 @@ mod tests {
             low::ct::public_slice(&p);
             p
         });
+        // The wrapper, so a branch on Z is under taint.
+        let msg = low::ct::into_secret(*b"password");
+        let point = hash_to_curve(&msg, b"QUUX-V01-CS02").unwrap();
+        low::ct::public_slice(&point.point.as_bytes_uncompressed());
     }
 
     /// The public functions, against aws-lc's hash to the curve and
