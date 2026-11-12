@@ -371,12 +371,18 @@ armv7 runs the same exponentiation over aws-lc's 32-bit ARM `bn_mul_mont`
 routines as aws-lc picks them (`bn_mul8x_mont_neon` with NEON for moduli whose
 width in 32-bit words is a multiple of eight, and `bn_mul_mont_nohw`
 otherwise), and the rest of the arithmetic in rind's portable Rust. The
-portable backend runs it all in that Rust, its Montgomery products by
-rind's loop (Koç, Acar, and Kaliski's CIOS method) and its squarings by
-forming each cross product once before reducing, over 64-bit limbs on
-64-bit targets and 32-bit ones elsewhere. RSA-2048 signing measured level
-with aws-lc's C without assembly on x86_64, and 4096 bits and up slower,
-where aws-lc switches to Karatsuba.
+portable backend runs it all in that Rust, over 64-bit limbs on 64-bit
+targets and 32-bit ones elsewhere. Below the measured crossover its
+Montgomery products are Koç, Acar, and Kaliski's CIOS method and its
+squarings form each cross product once before reducing. At and above it,
+a product (48 limbs on 64-bit limbs, 96 on 32-bit) or a square (96 and
+128) is Karatsuba, and the Montgomery reduction after it is the same
+schoolbook loop: the half-difference's sign and the carry above the
+middle are masks. On an Intel Xeon on 2026-11-12 that cut 6144- and
+8192-bit verification to about 0.90× the schoolbook time and left the
+smaller RSA sizes in `benchmarks/gaps.toml` where they were, still slower
+than aws-lc's C without assembly, because the reduction is most of a
+squaring.
 On x86_64 CPUs with AVX2 but without ADX, the private operation's exponentiation modulo each 1024-bit
 prime of RSA-2048 runs aws-lc's RSAZ, as aws-lc does there: Montgomery
 products on AVX2 over 29-bit limbs, and a 5-bit fixed window whose table

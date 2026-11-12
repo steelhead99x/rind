@@ -12,14 +12,22 @@
 //!
 //! Each runs in time that depends only on its lengths, and its modulus's
 //! width in `bignum_montifier`, never on its values: loops run a count fixed
-//! by those, and selects are masks. Arithmetic on values wraps, though the
-//! bounds rule out overflow, since a debug build's overflow check would
-//! branch on them.
+//! by those, and selects are masks. A half-difference's sign and the carry
+//! into a Karatsuba product's high half are masks too, never branches.
+//! Arithmetic on values wraps, though the bounds rule out overflow, since a
+//! debug build's overflow check would branch on them.
 //!
 //! The algorithms are the textbook ones, each stated with its bound where
 //! it is defined: Montgomery multiplication by Koç, Acar, and Kaliski's CIOS
-//! method, and Montgomery reduction (HAC 14.32) of a square formed with
-//! each cross product once (HAC 14.16).
+//! method, Montgomery reduction (HAC 14.32), and a square formed with each
+//! cross product once (HAC 14.16). At and above [`MUL_KARATSUBA`] limbs the
+//! product, and at and above [`SQR_KARATSUBA`] the square, are Karatsuba's
+//! (Knuth, The Art of Computer Programming, vol. 2, sec. 4.3.3): for halves
+//! `a0 + a1 B` and `b0 + b1 B`,
+//! `(a0 - a1) (b1 - b0) + a0 b0 + a1 b1 = a0 b1 + a1 b0`, and
+//! `(a0 - a1)^2 = a0^2 + a1^2 - 2 a0 a1`. The absolute values and the sign of
+//! that product are masks. The schoolbook loops stay, for shorter inputs and
+//! for proofs of this file.
 
 use super::super::bignum::{MAX_WORDS, nonzero, select, word};
 use super::{Limb, Wide, join, limbs};
@@ -30,6 +38,29 @@ const PER_WORD: usize = (u64::BITS / Limb::BITS) as usize;
 
 /// `MAX_WORDS` in limbs.
 const MAX_LIMBS: usize = MAX_WORDS * PER_WORD;
+
+/// Lengths, in limbs, from which Karatsuba beats this file's schoolbook.
+///
+/// Measured on an Intel Xeon (family 6, model 207) on 2026-11-12, in a
+/// release build: Montgomery multiplication against CIOS, and squaring
+/// against the schoolbook square, both then reduced by the same schoolbook
+/// [`redc`]. That reduction is most of a square, so squaring, which is most
+/// of an RSA exponentiation, pulls ahead only once it is long. Below the
+/// count, the schoolbook loop is faster and is what runs. 64-bit limbs win
+/// from 48 for a product and 96 for a square; 32-bit limbs from 96 and 128.
+const MUL_KARATSUBA: usize = match Limb::BITS {
+    64 => 48,
+    _ => 96,
+};
+const SQR_KARATSUBA: usize = match Limb::BITS {
+    64 => 96,
+    _ => 128,
+};
+
+/// `n` is long enough, and even, for one Karatsuba split.
+fn karatsuba(n: usize, crossover: usize) -> bool {
+    n >= crossover && n & 1 == 0
+}
 
 /// Compute "montification" constant z := 2^{128k} mod m
 ///
@@ -103,10 +134,18 @@ pub(crate) fn bignum_montredc(z: &mut [u64], x: &[u64], m: &[u64], p: u64) {
 pub(crate) fn bignum_mul(z: &mut [u64], x: &[u64], y: &[u64]) {
     let (mut x_limbs, mut y_limbs) = ([0; MAX_LIMBS], [0; MAX_LIMBS]);
     let (x, y) = (limbs(x, &mut x_limbs), limbs(y, &mut y_limbs));
-    let n = y.len();
     let mut product = [0; MAX_LIMBS * 2];
-    for (i, x) in x.iter().enumerate() {
-        product[i + n] = mul_add(&mut product[i..i + n], y, *x) as Limb;
+    if x.len() == y.len() && karatsuba(x.len(), MUL_KARATSUBA) {
+        let mut scratch = [0; MAX_LIMBS * 4];
+        mul_karatsuba(
+            &mut product[..2 * x.len()],
+            x,
+            y,
+            &mut scratch[..4 * x.len()],
+            MUL_KARATSUBA,
+        );
+    } else {
+        mul_schoolbook(&mut product, x, y);
     }
     z.fill(0);
     join(&product, z);
@@ -128,10 +167,15 @@ pub(crate) fn mont_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) 
     let mut buf = [[0; MAX_LIMBS]; 3];
     let [x_limbs, y_limbs, m_limbs] = &mut buf;
     let (x, y, m) = (limbs(x, x_limbs), limbs(y, y_limbs), limbs(m, m_limbs));
-    let mut t = [0; MAX_LIMBS + 2];
     // The low limb of `-m^-1 mod 2^64` is `-m^-1` mod a limb.
-    mont_mul_limbs(&mut t[..m.len() + 2], x, y, m, n0 as Limb);
-    join(&t, z);
+    let n0 = n0 as Limb;
+    if karatsuba(m.len(), MUL_KARATSUBA) {
+        mont_mul_karatsuba(z, x, y, m, n0);
+    } else {
+        let mut t = [0; MAX_LIMBS + 2];
+        mont_mul_limbs(&mut t[..m.len() + 2], x, y, m, n0);
+        join(&t, z);
+    }
 }
 
 /// `z = x^2 / 2^(64k) mod m`, as [`mont_mul`] takes them.
@@ -145,9 +189,14 @@ pub(crate) fn mont_sqr(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
     let (mut x_limbs, mut m_limbs) = ([0; MAX_LIMBS], [0; MAX_LIMBS]);
     let (x, m) = (limbs(x, &mut x_limbs), limbs(m, &mut m_limbs));
     let n = m.len();
-    let mut t = [0; MAX_LIMBS * 2];
-    mont_sqr_limbs(&mut t[..2 * n], x, m, n0 as Limb);
-    join(&t[n..2 * n], z);
+    let n0 = n0 as Limb;
+    if karatsuba(n, SQR_KARATSUBA) {
+        mont_sqr_karatsuba(z, x, m, n0);
+    } else {
+        let mut t = [0; MAX_LIMBS * 2];
+        mont_sqr_limbs(&mut t[..2 * n], x, m, n0);
+        join(&t[n..2 * n], z);
+    }
 }
 
 /// `t[..n] := x * y / 2^bn mod m`, for `x` and `y` below the odd `m`, each
@@ -262,6 +311,272 @@ fn mul_add_limb(a: Limb, b: Limb, c: Limb, d: Wide) -> Wide {
         .wrapping_mul(Wide::from(b))
         .wrapping_add(Wide::from(c))
         .wrapping_add(d)
+}
+
+/// `z = x * y`, schoolbook, for a `z` at least `x.len() + y.len()` limbs.
+///
+/// The same accumulation as the product this file started with.
+fn mul_schoolbook(z: &mut [Limb], x: &[Limb], y: &[Limb]) {
+    let yn = y.len();
+    let z = &mut z[..x.len() + yn];
+    z.fill(0);
+    for (i, xi) in x.iter().enumerate() {
+        z[i + yn] = mul_add(&mut z[i..i + yn], y, *xi) as Limb;
+    }
+}
+
+/// `z = x^2`, schoolbook, each cross product once, for a `z` of `2 x.len()`
+/// limbs. The products of distinct limbs sum to below `x^2 / 2`, so doubling
+/// them cannot overflow a `2n`-limb buffer.
+fn sqr_schoolbook(z: &mut [Limb], x: &[Limb]) {
+    let n = x.len();
+    let z = &mut z[..2 * n];
+    z.fill(0);
+    for i in 0..n {
+        z[i + n] = mul_add(&mut z[2 * i + 1..i + n], &x[i + 1..], x[i]) as Limb;
+    }
+    let mut out = 0;
+    for z in z.iter_mut() {
+        let next = *z >> (Limb::BITS - 1);
+        *z = *z << 1 | out;
+        out = next;
+    }
+    let mut carry = 0;
+    for (i, x) in x.iter().enumerate() {
+        let s = mul_add_limb(*x, *x, z[2 * i], carry);
+        z[2 * i] = s as Limb;
+        let s = Wide::from(z[2 * i + 1]).wrapping_add(s >> Limb::BITS);
+        z[2 * i + 1] = s as Limb;
+        carry = s >> Limb::BITS;
+    }
+}
+
+/// All ones where `bit` is one and zero where it is zero, hidden from the
+/// optimizer so the select it feeds cannot become a branch.
+fn bit_mask(bit: Limb) -> Limb {
+    core::hint::black_box(Limb::wrapping_sub(0, bit))
+}
+
+/// `r = x + y`, returning the carry, which is 0 or 1.
+fn add_limbs(r: &mut [Limb], x: &[Limb], y: &[Limb]) -> Limb {
+    let mut carry = 0;
+    for ((r, x), y) in r.iter_mut().zip(x).zip(y) {
+        let s = Wide::from(*x)
+            .wrapping_add(Wide::from(*y))
+            .wrapping_add(carry);
+        *r = s as Limb;
+        carry = s >> Limb::BITS;
+    }
+    carry as Limb
+}
+
+/// `r = x - y`, returning the borrow, which is 0 or 1.
+///
+/// The borrow is the top bit of the wrapped difference, not
+/// `overflowing_sub`'s flag: that flag lowers to a branch valgrind reports
+/// on a secret.
+fn sub_limbs(r: &mut [Limb], x: &[Limb], y: &[Limb]) -> Limb {
+    let mut borrow = 0;
+    for ((r, x), y) in r.iter_mut().zip(x).zip(y) {
+        let d = Wide::from(*x)
+            .wrapping_sub(Wide::from(*y))
+            .wrapping_sub(borrow);
+        *r = d as Limb;
+        borrow = d >> (Wide::BITS - 1);
+    }
+    borrow as Limb
+}
+
+/// `r = if_ones` where `mask` is all ones, and `if_zero` where it is zero.
+fn select_limbs(mask: Limb, r: &mut [Limb], if_ones: &[Limb], if_zero: &[Limb]) {
+    let mask = core::hint::black_box(mask);
+    for ((r, a), b) in r.iter_mut().zip(if_ones).zip(if_zero) {
+        *r = *b ^ ((*a ^ *b) & mask);
+    }
+}
+
+/// `if_ones` where `mask` is all ones, and `if_zero` where it is zero.
+fn select_i128(mask: Limb, if_ones: i128, if_zero: i128) -> i128 {
+    let m = i128::from(core::hint::black_box(mask) >> (Limb::BITS - 1)).wrapping_neg();
+    if_zero ^ ((if_ones ^ if_zero) & m)
+}
+
+/// `r += add`, then `high` just above `add`.
+///
+/// `high` is the carry out of `add`'s own limbs (about -1, 0, 1, or 2), not
+/// a carry into its first limb. The walk still runs to the end of `r` when
+/// that carry is zero.
+fn add_high(r: &mut [Limb], add: &[Limb], high: i128) {
+    let mut carry = 0i128;
+    let mut i = 0;
+    while i < add.len() {
+        let sum = i128::from(r[i]) + i128::from(add[i]) + carry;
+        r[i] = sum as Limb;
+        carry = sum >> Limb::BITS;
+        i += 1;
+    }
+    carry += high;
+    while i < r.len() {
+        let sum = i128::from(r[i]) + carry;
+        r[i] = sum as Limb;
+        carry = sum >> Limb::BITS;
+        i += 1;
+    }
+}
+
+/// `|a - b|`, and a mask of all ones when `a < b`.
+fn abs_sub(r: &mut [Limb], a: &[Limb], b: &[Limb], tmp: &mut [Limb]) -> Limb {
+    let borrow = sub_limbs(tmp, a, b);
+    sub_limbs(r, b, a);
+    let mask = bit_mask(borrow);
+    for (r, tmp) in r.iter_mut().zip(tmp.iter()) {
+        *r = *tmp ^ ((*r ^ *tmp) & mask);
+    }
+    mask
+}
+
+/// `z = x * y` by Karatsuba where `x` and `y` have the same even length at or
+/// above `crossover`, and by [`mul_schoolbook`] otherwise.
+///
+/// `t` is `4n` limbs. Its low `n` hold the two half-differences, the next
+/// `n` the product of those, and the upper `2n` the recursive scratch, which
+/// is `4` times a half. `z` is `2n` limbs and shares nothing with `x`, `y`,
+/// or `t`.
+fn mul_karatsuba(z: &mut [Limb], x: &[Limb], y: &[Limb], t: &mut [Limb], crossover: usize) {
+    let n = x.len();
+    if !karatsuba(n, crossover) {
+        mul_schoolbook(z, x, y);
+        return;
+    }
+    let h = n >> 1;
+    // `|b1 - b0|` next to `|a0 - a1|`, so the product of the two differences
+    // has the sign of `(a0 - a1) (b1 - b0)`. The temporary is the recursive
+    // scratch, still unused.
+    let neg = {
+        let (lo, scratch) = t.split_at_mut(2 * n);
+        let sign_a = abs_sub(&mut lo[..h], &x[..h], &x[h..n], &mut scratch[..h]);
+        let sign_b = abs_sub(&mut lo[h..n], &y[h..n], &y[..h], &mut scratch[..h]);
+        sign_a ^ sign_b
+    };
+
+    {
+        let (lo, scratch) = t.split_at_mut(2 * n);
+        let (diffs, prod) = lo.split_at_mut(n);
+        let (diff_a, diff_b) = diffs.split_at_mut(h);
+        mul_karatsuba(prod, diff_a, diff_b, scratch, crossover);
+    }
+    mul_karatsuba(
+        &mut z[..n],
+        &x[..h],
+        &y[..h],
+        &mut t[2 * n..4 * n],
+        crossover,
+    );
+    mul_karatsuba(
+        &mut z[n..2 * n],
+        &x[h..n],
+        &y[h..n],
+        &mut t[2 * n..4 * n],
+        crossover,
+    );
+
+    // `t[..n] = z0 + z2`, whose carry is 0 or 1. `t[n..2n]` still holds
+    // `|(a0 - a1) (b1 - b0)|`.
+    let carry = add_limbs(&mut t[..n], &z[..n], &z[n..2 * n]);
+    let borrow = {
+        let (sum, rest) = t.split_at_mut(n);
+        let (prod, dest) = rest.split_at_mut(n);
+        sub_limbs(&mut dest[..n], sum, &prod[..n])
+    };
+    let extra = {
+        let (sum, rest) = t.split_at_mut(n);
+        let (prod, dest) = rest.split_at_mut(n);
+        add_limbs(&mut dest[n..2 * n], sum, &prod[..n])
+    };
+    {
+        let (_, rest) = t.split_at_mut(n);
+        let (mid, both) = rest.split_at_mut(n);
+        let (below, above) = both.split_at_mut(n);
+        // A negative product subtracts; a positive one adds.
+        select_limbs(neg, mid, below, &above[..n]);
+    }
+    let c = select_i128(
+        neg,
+        i128::from(carry) - i128::from(borrow),
+        i128::from(carry) + i128::from(extra),
+    );
+    add_high(&mut z[h..2 * n], &t[n..2 * n], c);
+}
+
+/// `z = x^2` by Karatsuba where `x` has an even length at or above
+/// `crossover`, and by [`sqr_schoolbook`] otherwise.
+///
+/// The square of the half-difference is always subtracted: it equals
+/// `a0^2 + a1^2 - 2 a0 a1` whichever half is larger, and [`abs_sub`] still
+/// picks that absolute value by a mask. `t` and `z` are laid out as in
+/// [`mul_karatsuba`].
+fn sqr_karatsuba(z: &mut [Limb], x: &[Limb], t: &mut [Limb], crossover: usize) {
+    let n = x.len();
+    if !karatsuba(n, crossover) {
+        sqr_schoolbook(z, x);
+        return;
+    }
+    let h = n >> 1;
+    {
+        let (lo, scratch) = t.split_at_mut(2 * n);
+        abs_sub(&mut lo[..h], &x[..h], &x[h..n], &mut scratch[..h]);
+        let (diff, rest) = lo.split_at_mut(h);
+        // `rest[h..]` is `t[n..2n]`, the `n` limbs the difference's square fills.
+        sqr_karatsuba(&mut rest[h..], diff, scratch, crossover);
+    }
+    sqr_karatsuba(&mut z[..n], &x[..h], &mut t[2 * n..4 * n], crossover);
+    sqr_karatsuba(&mut z[n..2 * n], &x[h..n], &mut t[2 * n..4 * n], crossover);
+
+    let carry = add_limbs(&mut t[..n], &z[..n], &z[n..2 * n]);
+    let borrow = {
+        let (sum, rest) = t.split_at_mut(n);
+        let (diff_sqr, dest) = rest.split_at_mut(n);
+        sub_limbs(&mut dest[..n], sum, &diff_sqr[..n])
+    };
+    add_high(
+        &mut z[h..2 * n],
+        &t[2 * n..3 * n],
+        i128::from(carry) - i128::from(borrow),
+    );
+}
+
+/// `z = x * y / 2^bn mod m` by a Karatsuba product and [`redc`].
+///
+/// `x` and `y` are below the odd `m`, so their product is below `2^bn * m`
+/// and one reduction brings it below `2m`, which [`redc`] finishes.
+fn mont_mul_karatsuba(z: &mut [u64], x: &[Limb], y: &[Limb], m: &[Limb], n0: Limb) {
+    let n = m.len();
+    let mut product = [0; MAX_LIMBS * 2];
+    let mut scratch = [0; MAX_LIMBS * 4];
+    mul_karatsuba(
+        &mut product[..2 * n],
+        x,
+        y,
+        &mut scratch[..4 * n],
+        MUL_KARATSUBA,
+    );
+    redc(&mut product[..2 * n], m, n0);
+    join(&product[n..2 * n], z);
+}
+
+/// `z = x^2 / 2^bn mod m` by a Karatsuba square and [`redc`].
+fn mont_sqr_karatsuba(z: &mut [u64], x: &[Limb], m: &[Limb], n0: Limb) {
+    let n = m.len();
+    let mut square = [0; MAX_LIMBS * 2];
+    let mut scratch = [0; MAX_LIMBS * 4];
+    sqr_karatsuba(
+        &mut square[..2 * n],
+        x,
+        &mut scratch[..4 * n],
+        SQR_KARATSUBA,
+    );
+    redc(&mut square[..2 * n], m, n0);
+    join(&square[n..2 * n], z);
 }
 
 /// `r := 2r mod m`, for `r` below `m`.
@@ -392,5 +707,99 @@ mod tests {
         assert_eq!(ours, theirs);
         mont_sqr(&mut ours, &x, &m, 1);
         assert_eq!(ours, theirs);
+    }
+
+    /// The identity in the module docs, at one limb per half: 503 × 207 and
+    /// 503² in base 2^b.
+    #[test]
+    fn karatsuba_identity() {
+        let mut product = [0; 4];
+        let mut scratch = [0; 8];
+        mul_karatsuba(&mut product, &[3, 5], &[7, 2], &mut scratch, 2);
+        assert_eq!(product, [21, 41, 10, 0]);
+        mul_karatsuba(&mut product, &[2, 5], &[2, 7], &mut scratch, 2);
+        assert_eq!(product, [4, 24, 35, 0]);
+        sqr_karatsuba(&mut product, &[3, 5], &mut scratch, 2);
+        assert_eq!(product, [9, 30, 25, 0]);
+    }
+
+    /// Karatsuba at every even length, including below the production
+    /// crossover, against the schoolbook product and square.
+    #[test]
+    fn karatsuba_matches_schoolbook() {
+        let mut step = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = || {
+            step = step.wrapping_mul(0x6C62_272E_07BB_0142).wrapping_add(1);
+            step
+        };
+        for n in [2usize, 4, 6, 8, 12, 16, 24, 32, 48] {
+            let x: Vec<Limb> = (0..n).map(|_| next() as Limb).collect();
+            let y: Vec<Limb> = (0..n).map(|_| next() as Limb).collect();
+            let mut got = vec![1; 2 * n];
+            let mut expect = vec![0; 2 * n];
+            let mut scratch = vec![0; 4 * n];
+            mul_karatsuba(&mut got, &x, &y, &mut scratch, 2);
+            mul_schoolbook(&mut expect, &x, &y);
+            assert_eq!(got, expect, "mul {n}");
+            sqr_karatsuba(&mut got, &x, &mut scratch, 2);
+            sqr_schoolbook(&mut expect, &x);
+            assert_eq!(got, expect, "sqr {n}");
+            // All-ones halves force a carry out of every limb.
+            let ones = vec![Limb::MAX; n];
+            mul_karatsuba(&mut got, &ones, &ones, &mut scratch, 2);
+            mul_schoolbook(&mut expect, &ones, &ones);
+            assert_eq!(got, expect, "mul ones {n}");
+            sqr_karatsuba(&mut got, &ones, &mut scratch, 2);
+            sqr_schoolbook(&mut expect, &ones);
+            assert_eq!(got, expect, "sqr ones {n}");
+        }
+    }
+
+    /// The production crossover, on both sides, against s2n-bignum. Inputs
+    /// are marked secret, so under `admin/ctgrind` this also checks the
+    /// Karatsuba path. The words are declassified only to compare.
+    #[test]
+    fn karatsuba_matches_s2n() {
+        // Word counts. On 32-bit limbs each word is two limbs, so a count
+        // below the limb crossover still takes the Karatsuba path there.
+        // 96 and 128 words are where a 64-bit square takes Karatsuba; on
+        // 32-bit limbs that is 192 and 256 limbs, the top of the buffer.
+        for k in [1usize, 8, 12, 15, 16, 17, 24, 32, 48, 64, 96, 128] {
+            let mut step = 0xD1B5_4A32_D192_ED03u64 ^ k as u64;
+            let mut word = || {
+                step = step
+                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    .wrapping_add(0x7F4A_7C15);
+                step
+            };
+            let x: Vec<u64> = (0..k).map(|_| word()).collect();
+            let y: Vec<u64> = (0..k).map(|_| word()).collect();
+            let (sx, sy) = (secret(&x), secret(&y));
+            let wide = 2 * k;
+            let (mut ours, mut theirs) = (vec![1; wide], vec![0; wide]);
+            bignum_mul(&mut ours, &sx, &sy);
+            low::bignum_mul(&mut theirs, &x, &y);
+            assert_eq!(public(&ours), theirs, "mul {k}");
+
+            // An odd modulus whose top bit is set, and operands with that
+            // bit clear, so both sit strictly below it.
+            let mut m: Vec<u64> = (0..k).map(|_| word()).collect();
+            let mut x = x;
+            let mut y = y;
+            m[0] |= 1;
+            m[k - 1] |= 1 << 63;
+            x[k - 1] &= !(1 << 63);
+            y[k - 1] &= !(1 << 63);
+            let (sm, sx, sy) = (secret(&m), secret(&x), secret(&y));
+            let (mut ours, mut theirs) = (vec![0; k], vec![0; k]);
+            let mut n0 = [0];
+            low::bignum_negmodinv(&mut n0, &m[..1]);
+            mont_mul(&mut ours, &sx, &sy, &sm, into_secret(n0[0]));
+            low::mont_mul(&mut theirs, &x, &y, &m, n0[0]);
+            assert_eq!(public(&ours), theirs, "mont_mul {k}");
+            mont_sqr(&mut ours, &sx, &sm, into_secret(n0[0]));
+            low::mont_mul(&mut theirs, &x, &x, &m, n0[0]);
+            assert_eq!(public(&ours), public(&theirs), "mont_sqr {k}");
+        }
     }
 }
