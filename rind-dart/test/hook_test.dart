@@ -176,6 +176,9 @@ void main() {
     test(
       'builds from source for $target',
       () => _testTarget(target, userDefines: fromSource),
+      // android-arm's cross compile exceeds the 30s default; the host
+      // build above already allows five minutes for the same hook.
+      timeout: const Timeout(Duration(minutes: 5)),
     );
   }
 }

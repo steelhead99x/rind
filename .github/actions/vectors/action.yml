@@ -5,4 +5,6 @@ runs:
   using: composite
   steps:
     - shell: bash
-      run: git submodule update --init --depth 1 thirdparty/cavp thirdparty/cctv thirdparty/wycheproof
+      # checkout drops its token. A macOS credential helper then asks for a
+      # username instead of cloning these public repositories anonymously.
+      run: git -c credential.helper= submodule update --init --depth 1 thirdparty/cavp thirdparty/cctv thirdparty/wycheproof
