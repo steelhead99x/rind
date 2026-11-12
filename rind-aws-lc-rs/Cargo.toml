@@ -1,6 +1,6 @@
 [package]
 name = "rind-aws-lc-rs"
-version = "1.0.3"
+version = "1.0.4"
 edition = "2024"
 repository = "https://github.com/moq-dev/rind"
 license = "Apache-2.0 OR ISC OR MIT-0"

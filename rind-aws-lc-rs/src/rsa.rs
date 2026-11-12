@@ -140,9 +140,12 @@ impl KeyPair {
     }
 
     /// The modulus's length in bytes, which every signature has.
+    ///
+    /// Reads the modulus bytes directly. `PublicKey::modulus_len` is
+    /// `ring-io` only, as in aws-lc-rs, and this method is not.
     #[must_use]
     pub fn public_modulus_len(&self) -> usize {
-        self.public.modulus_len()
+        self.public.n.len()
     }
 }
 

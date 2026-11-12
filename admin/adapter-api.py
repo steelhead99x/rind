@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -136,14 +137,20 @@ def main(argv: list[str]) -> int:
     )
     problems = check_roster(meta)
     failures = 0
+    started = time.perf_counter()
     for adapter in ADAPTERS:
         if only and adapter.package != only:
             continue
+        began = time.perf_counter()
         print(f"adapter-api: {adapter.package}", file=sys.stderr)
         found = compare(meta, adapter, feature_limit)
+        took = time.perf_counter() - began
+        print(f"adapter-api: {adapter.package} {took:.1f}s", file=sys.stderr)
         if found:
             failures += 1
             problems.extend(found)
+    elapsed = time.perf_counter() - started
+    print(f"adapter-api: finished in {elapsed:.1f}s", file=sys.stderr)
     if problems:
         print("\n".join(problems), file=sys.stderr)
         return 1

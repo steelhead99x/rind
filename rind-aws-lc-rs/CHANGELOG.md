@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `PublicKey::modulus_len` is `ring-io` only, as in aws-lc-rs 1.19.0. `KeyPair::public_modulus_len` reads the modulus bytes, so a build without `ring-io` still compiles.
+
 ## [1.0.2](https://github.com/moq-dev/rind/compare/rind-aws-lc-rs-v1.0.1...rind-aws-lc-rs-v1.0.2) - 2026-11-08
 
 ### Other

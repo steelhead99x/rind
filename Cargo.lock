@@ -3366,7 +3366,7 @@ dependencies = [
 
 [[package]]
 name = "rind-aws-lc-rs"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "aws-lc-rs",
  "crabgrind 0.4.0",
