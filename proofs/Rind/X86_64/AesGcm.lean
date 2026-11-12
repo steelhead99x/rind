@@ -1,24 +1,10 @@
 import Rind.X86_64.AesGcmGlue
-import Rind.X86_64.AesKey
+import Rind.X86_64.AesCipher
 import Rind.X86_64.Ghash
 import Rind.X86_64.AeadDispatch
 open Aeneas Aeneas.Std Result rind.vale
 
 namespace rind.x86_64
-
-@[step]
-theorem aes128_expand_step (key : Std.Array U8 16#usize) (out : Std.Array core.core_arch.x86.__m128i 11#usize) :
-    low.x86_64.aes.aes128_expand key out ⦃ rk =>
-      rk.val = keyToRoundKeys .AES_128 (seqNat8ToSeqNat32LE (bvs key.val)) ⦄ := by
-  obtain ⟨rk, h, hv⟩ := aes128_expand_spec key out
-  rw [h, WP.spec_ok]; exact hv
-
-@[step]
-theorem aes256_expand_step (key : Std.Array U8 32#usize) (out : Std.Array core.core_arch.x86.__m128i 15#usize) :
-    low.x86_64.aes.aes256_expand key out ⦃ rk =>
-      rk.val = keyToRoundKeys .AES_256 (seqNat8ToSeqNat32LE (bvs key.val)) ⦄ := by
-  obtain ⟨rk, h, hv⟩ := aes256_expand_spec key out
-  rw [h, WP.spec_ok]; exact hv
 
 /-- rind runs Vale's AES-GCM on this CPU: its entry guard passes, and its
 CPU-feature checks find AES-NI, PCLMULQDQ, AVX, and MOVBE, but neither tier
@@ -31,53 +17,12 @@ def RunsValeAesGcm : Prop :=
   low.x86_64.cpu.HaveVaesAvx2ForAesGcm.check = ok none ∧
   (∃ t, low.x86_64.cpu.HaveAvxMovbeForAesGcm.check = ok (some t))
 
-theorem expand_key128_spec (h : RunsValeAesGcm) (key : Slice U8) (hk : key.length = 16) :
-    mid.aes.expand_key key ⦃ k => ∃ k128, k = .Hw (.Aes128 k128) ∧
-      k128.round_keys.val = keyToRoundKeys .AES_128 (seqNat8ToSeqNat32LE (bvs key.val)) ⦄ := by
-  obtain ⟨-, ⟨hw, hhw⟩, ⟨ss, hss⟩, -⟩ := h
-  unfold mid.aes.expand_key low.x86_64.aes.AesKey.new low.x86_64.aes.AesKey128.new
-  step*
-  have hl : copy_key1.len.val = 16 := by rw [Slice.len_val, copy_key1_post]; exact hk
-  have hl' : copy_key1.len = 16#usize := by scalar_tac
-  simp only [low.ct.secret_slice, hhw, hss, bind_ok, core.array.TryFromSharedArraySlice.try_from,
-    hl', ↓reduceDIte, core.result.Result.unwrap, low.x86_64.aes.zero,
-    core.core_arch.x86.sse2._mm_setzero_si128]
-  apply WP.spec_bind (aes128_expand_step _ _)
-  intro rk hrk
-  rw [WP.spec_ok]
-  refine ⟨_, rfl, ?_⟩
-  rw [hrk, Std.Array.from_val, copy_key1_post]
-
-theorem expand_key256_spec (h : RunsValeAesGcm) (key : Slice U8) (hk : key.length = 32) :
-    mid.aes.expand_key key ⦃ k => ∃ k256, k = .Hw (.Aes256 k256) ∧
-      k256.round_keys.val = keyToRoundKeys .AES_256 (seqNat8ToSeqNat32LE (bvs key.val)) ⦄ := by
-  obtain ⟨-, ⟨hw, hhw⟩, ⟨ss, hss⟩, -⟩ := h
-  unfold mid.aes.expand_key low.x86_64.aes.AesKey.new low.x86_64.aes.AesKey256.new
-  step*
-  have hl : copy_key1.len.val = 32 := by rw [Slice.len_val, copy_key1_post]; exact hk
-  have hl' : copy_key1.len = 32#usize := by scalar_tac
-  simp only [low.ct.secret_slice, hhw, hss, bind_ok, core.array.TryFromSharedArraySlice.try_from,
-    hl', ↓reduceDIte, core.result.Result.unwrap, low.x86_64.aes.zero,
-    core.core_arch.x86.sse2._mm_setzero_si128]
-  apply WP.spec_bind (aes256_expand_step _ _)
-  intro rk hrk
-  rw [WP.spec_ok]
-  refine ⟨_, rfl, ?_⟩
-  rw [hrk, Std.Array.from_val, copy_key1_post]
-
-/-- The AES-NI key holds Vale's round keys of the AES key `kw` for `alg`. -/
-def HwKeyIs (alg : Algorithm) (kw : List (BitVec 32)) : low.x86_64.aes.HwKey → Prop
-  | .Aes128 k => alg = .AES_128 ∧ k.round_keys.val = keyToRoundKeys .AES_128 kw
-  | .Aes192 _ => False
-  | .Aes256 k => alg = .AES_256 ∧ k.round_keys.val = keyToRoundKeys .AES_256 kw
+theorem RunsValeAesGcm.aesNi (h : RunsValeAesGcm) : RunsAesNi :=
+  ⟨h.1, h.2.1, h.2.2.1⟩
 
 /-- An AES-GCM key on Vale's tier, for the AES key `kw` and `alg`. -/
 def Ready (alg : Algorithm) (kw : List (BitVec 32)) (g : mid.aes_gcm.AesGcm) : Prop :=
   ∃ hk table kernel, g.key = .Hw hk ∧ g.gh = .Avx table kernel ∧ KernelKeys alg hk kw kernel
-
-/-- The key length `alg` takes, which rind's AES supports. -/
-def KeyLen (alg : Algorithm) (n : Nat) : Prop :=
-  (alg = .AES_128 ∧ n = 16) ∨ (alg = .AES_256 ∧ n = 32)
 
 theorem encrypt_zero (hk : low.x86_64.aes.HwKey) (alg : Algorithm) (kw : List (BitVec 32))
     (h : HwKeyIs alg kw hk) :
@@ -104,8 +49,8 @@ theorem aes_gcm_new_spec (h : RunsValeAesGcm) (alg : Algorithm) (key : Slice U8)
   set kw := seqNat8ToSeqNat32LE (bvs key.val)
   have hkey : mid.aes.expand_key key ⦃ k => ∃ hwk, k = .Hw hwk ∧ HwKeyIs alg kw hwk ⦄ := by
     rcases hk with ⟨rfl, hl⟩ | ⟨rfl, hl⟩
-    · exact WP.spec_mono (expand_key128_spec h key hl) fun k ⟨k128, hk1, hk2⟩ => ⟨_, hk1, rfl, hk2⟩
-    · exact WP.spec_mono (expand_key256_spec h key hl) fun k ⟨k256, hk1, hk2⟩ => ⟨_, hk1, rfl, hk2⟩
+    · exact WP.spec_mono (expand_key128_spec h.aesNi key hl) fun k ⟨k128, hk1, hk2⟩ => ⟨_, hk1, rfl, hk2⟩
+    · exact WP.spec_mono (expand_key256_spec h.aesNi key hl) fun k ⟨k256, hk1, hk2⟩ => ⟨_, hk1, rfl, hk2⟩
   unfold mid.aes_gcm.AesGcm.new
   rw [he, bind_ok]
   apply WP.spec_bind hkey
