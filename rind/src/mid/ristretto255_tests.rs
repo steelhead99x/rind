@@ -6,6 +6,7 @@ use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use proptest::prelude::*;
 use serde::Deserialize;
 
+use super::hash_to_curve::expand_message_xmd;
 use super::ristretto255::{Element, Scalar};
 use super::sha2::Sha512Context;
 use crate::low;
@@ -160,25 +161,6 @@ fn rfc9496_from_uniform_bytes() {
     }
 }
 
-/// RFC 9380's `expand_message_xmd` over SHA-512, for 64 bytes, as RFC 9497's
-/// `HashToGroup` and `HashToScalar` take it.
-fn expand_message_xmd_sha512(msg: &[u8], dst: &[u8]) -> [u8; 64] {
-    let dst_len = [u8::try_from(dst.len()).unwrap()];
-    let mut h = Sha512Context::new();
-    h.update(&[0; 128]);
-    h.update(msg);
-    h.update(&[0, 64, 0]);
-    h.update(dst);
-    h.update(&dst_len);
-    let b0 = h.finish();
-    let mut h = Sha512Context::new();
-    h.update(&b0);
-    h.update(&[1]);
-    h.update(dst);
-    h.update(&dst_len);
-    h.finish()
-}
-
 /// RFC 9497 A.1.1, OPRF(ristretto255, SHA-512)'s blinding, evaluation, and
 /// unblinding, and A.1.2's public key.
 #[test]
@@ -207,7 +189,9 @@ fn rfc9497_oprf() {
         ),
     ] {
         let input = hex::decode(input).unwrap();
-        let point = Element::from_uniform_bytes(&expand_message_xmd_sha512(&input, DST));
+        let mut uniform = [0u8; 64];
+        expand_message_xmd::<Sha512Context>(&input, DST, &mut uniform).unwrap();
+        let point = Element::from_uniform_bytes(&uniform);
         let blinded_element = point.mul(&blind).to_bytes();
         assert_eq!(blinded_element, bytes(blinded));
 
