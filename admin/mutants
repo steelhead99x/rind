@@ -79,7 +79,8 @@ case ${target:-$(uname -sm)} in
         skip=()
         only=(
             --file rind/src/low/cpu.rs --file rind/src/low/aarch64/cpu.rs
-            --re '(\bDit\b|enter_cpu_state|leave_cpu_state|\bdit::)'
+            --file rind/src/low/entry.rs
+            --re '(\bDit\b|enter_cpu_state|leave_cpu_state|\bdit::|<impl Drop for Entry>::drop with \(\))'
         )
         rows=("dit")
         ;;
