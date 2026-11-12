@@ -9,8 +9,8 @@ open Aeneas Aeneas.Std
 # What rind computes
 
 The functional spec the proofs state rind's results against: how bytes and
-limbs encode numbers, X25519 itself, and the P-256 group, each as HOL Light
-defines it for s2n-bignum's theorems, and ChaCha20, QUIC header protection,
+limbs encode numbers, X25519 itself, and the NIST curves' group law with
+P-256's, each as HOL Light defines it for s2n-bignum's theorems, and ChaCha20, QUIC header protection,
 Poly1305, ChaCha20-Poly1305, and XChaCha20-Poly1305, transliterated from their
 RFCs and draft-irtf-cfrg-xchacha-03.
 -/
@@ -45,6 +45,108 @@ It is opaque here: nothing is assumed of it beyond the routine contracts in
 `Rind.<Arch>.S2nBignum`, which restate s2n-bignum's theorems about it. -/
 opaque rfcx25519 : Nat → Nat → Nat
 
+/-! ## The NIST curves' group law
+
+HOL Light defines each NIST prime curve's group as `weierstrass_group
+(integer_mod_ring p, ring_neg (integer_mod_ring p) (&3), &b)`: the points of
+y² = x³ - 3x + b over the integers mod p. This transliterates that group law
+once, over the prime `p` and constant `b`. -/
+
+namespace nist
+
+/-- A point as HOL Light writes one: `none` at infinity, otherwise its affine
+coordinates, the field elements of `integer_mod_ring p`, which are numbers
+below `p`. -/
+abbrev Point := Option (Nat × Nat)
+
+/-- Whether a point is in `weierstrass_curve (integer_mod_ring p, ring_neg
+(integer_mod_ring p) (&3), &b)`, the group's carrier: infinity, or
+coordinates in the field that satisfy y² = x³ - 3x + b, with
+`integer_mod_ring`'s arithmetic mod `p`.
+
+The proofs must decide this membership, so the composition rule lets it be
+this defining equation rather than an opaque set. -/
+def OnCurve (p b : Nat) : Point → Prop
+  | none => True
+  | some (x, y) => x < p ∧ y < p ∧ y ^ 2 % p = (x ^ 3 + (p - 3) * x + b) % p
+
+instance (p b : Nat) : DecidablePred (OnCurve p b) := fun P =>
+  match P with
+  | none => isTrue trivial
+  | some (x, y) => inferInstanceAs (Decidable (x < p ∧ y < p ∧ _))
+
+/-! The group law, transliterated from HOL Light's definitions. The field's
+operations are `integer_mod_ring`'s on numbers below `p`,
+https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/Library/ringtheory.ml#L16887 -/
+
+/-- `ring_sub (integer_mod_ring p)`: `(a - b) rem p`, which is never
+negative. -/
+def sub (p a b : Nat) : Nat := (a + (p - b % p)) % p
+
+/-- `ring_inv (integer_mod_ring p)`: the number below `p` that `a` times is 1
+mod `p`, if `a` is a field element with one, and otherwise 0,
+https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/Library/ringtheory.ml#L1970 -/
+noncomputable def inv (p a : Nat) : Nat :=
+  haveI := Classical.propDecidable
+  if h : a < p ∧ ∃ x, x < p ∧ a * x % p = 1 then Classical.choose h.2 else 0
+
+/-- `weierstrass_add` on the curve, with `ring_div` as the product with
+`inv`, `ring_of_num` 2 and 3 as themselves, and `a` as `p - 3`. It never reads
+`b`,
+https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/EC/weierstrass.ml#L33 -/
+noncomputable def add (p : Nat) : Point → Point → Point
+  | none, q => q
+  | P, none => P
+  | some (x1, y1), some (x2, y2) =>
+    if x1 = x2 then
+      if y1 = y2 ∧ y1 ≠ 0 then
+        let m := (3 * (x1 ^ 2 % p) % p + (p - 3)) % p * inv p (2 * y1 % p) % p
+        let x3 := sub p (m ^ 2 % p) (2 * x1 % p)
+        let y3 := sub p (m * sub p x1 x3 % p) y1
+        some (x3, y3)
+      else none
+    else
+      let m := sub p y2 y1 * inv p (sub p x2 x1) % p
+      let x3 := sub p (m ^ 2 % p) ((x1 + x2) % p)
+      let y3 := sub p (m * sub p x1 x3 % p) y1
+      some (x3, y3)
+
+/-- `group_pow` on the group, the point `P` multiplied by `n`: `group_pow`'s
+definition, `P` times the multiple below,
+https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/Library/grouptheory.ml#L376 -/
+noncomputable def pow (p : Nat) (P : Point) : Nat → Point
+  | 0 => none
+  | n + 1 => add p P (pow p P n)
+
+/-- `weierstrass_neg` on the curve, which `WEIERSTRASS_GROUP` shows is
+`group_inv`: y negated mod p. -/
+def neg (p : Nat) : Point → Point
+  | none => none
+  | some (x, y) => some (x, (p - y % p) % p)
+
+/-- FIPS 186-5 section 6.4.1's ECDSA signature `(r, s)` on the curve over
+`p` whose generator `G` has order `n`, under private key `d`, with
+per-message secret `k`, of the hash's integer `e`: r is the x-coordinate of
+kG mod n, and s is (e + rd)/k mod n. A rind signature is this for the first
+`k` whose `r` and `s` are both nonzero. -/
+noncomputable def ecdsaSign (p n : Nat) (G : Point) (d k e : Nat) : Option (Nat × Nat) :=
+  match pow p G k with
+  | some (x, _) => some (x % n, (((e + x % n * d : Nat) : ZMod n) * (k : ZMod n)⁻¹).val)
+  | none => none
+
+/-- FIPS 186-5 section 6.4.2's ECDSA verification of `(r, s)` over the hash's
+integer `e` under the public key `Q`, on the curve over `p` whose generator
+`G` has order `n`: r and s are in [1, n), and u₁G + u₂Q, for u₁ = e/s and
+u₂ = r/s mod n, is a finite point whose x-coordinate mod n is r. -/
+def ecdsaVerifies (p n : Nat) (G Q : Point) (e r s : Nat) : Prop :=
+  0 < r ∧ r < n ∧ 0 < s ∧ s < n ∧
+    match add p (pow p G (((e : ZMod n) * (s : ZMod n)⁻¹).val))
+        (pow p Q (((r : ZMod n) * (s : ZMod n)⁻¹).val)) with
+    | some (x, _) => x % n = r
+    | none => False
+
+end nist
+
 /-! ## P-256, from HOL Light's `EC/nistp256.ml` at
 https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/EC/nistp256.ml -/
 
@@ -57,104 +159,39 @@ def n256 : Nat := 11579208921035624876269744694940757352999695522413576034242225
 /-- `b_256`, the curve's constant term; its `a` is -3. -/
 def b256 : Nat := 0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b
 
-/-- A point of `p256_group` as HOL Light writes one: `none` at infinity,
-otherwise its affine coordinates, the field elements of
-`integer_mod_ring p_256`, which are numbers below `p256`. -/
-abbrev P256Point := Option (Nat × Nat)
+/-- A point of `p256_group`. -/
+abbrev P256Point := nist.Point
 
-/-- Whether a point is in `group_carrier p256_group`, which `P256_GROUP`
-shows is `weierstrass_curve (integer_mod_ring p_256, ring_neg (integer_mod_ring
-p_256) (&3), &b_256)`: infinity, or coordinates in the field that satisfy
-y² = x³ - 3x + b, with `integer_mod_ring`'s arithmetic mod `p256`,
-https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/EC/nistp256.ml#L82
-
-The proofs must decide this membership, so the composition rule lets it be
-this defining equation rather than an opaque set. -/
-def p256OnCurve : P256Point → Prop
-  | none => True
-  | some (x, y) => x < p256 ∧ y < p256 ∧ y ^ 2 % p256 = (x ^ 3 + (p256 - 3) * x + b256) % p256
-
-instance : DecidablePred p256OnCurve := fun P =>
-  match P with
-  | none => isTrue trivial
-  | some (x, y) => inferInstanceAs (Decidable (x < p256 ∧ y < p256 ∧ _))
+/-- Whether a point is in `group_carrier p256_group`, by `P256_GROUP`,
+https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/EC/nistp256.ml#L82 -/
+abbrev p256OnCurve : P256Point → Prop := nist.OnCurve p256 b256
 
 /-- `G_256`, the generator. -/
 def p256G : P256Point :=
   some (0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296,
     0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5)
 
-/-! The group law, transliterated from HOL Light's definitions: `group_mul
-p256_group` is `weierstrass_add (integer_mod_ring p_256, ring_neg
-(integer_mod_ring p_256) (&3), &b_256)` by `P256_GROUP`, above. The field's
-operations are `integer_mod_ring`'s on numbers below `p256`,
-https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/Library/ringtheory.ml#L16887 -/
+/-- `ring_sub (integer_mod_ring p_256)`. -/
+abbrev p256Sub : Nat → Nat → Nat := nist.sub p256
 
-/-- `ring_sub (integer_mod_ring p_256)`: `(a - b) rem p_256`, which is never
-negative. -/
-def p256Sub (a b : Nat) : Nat := (a + (p256 - b % p256)) % p256
+/-- `ring_inv (integer_mod_ring p_256)`. -/
+noncomputable abbrev p256Inv : Nat → Nat := nist.inv p256
 
-/-- `ring_inv (integer_mod_ring p_256)`: the number below `p256` that `a` times
-is 1 mod `p256`, if `a` is a field element with one, and otherwise 0,
-https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/Library/ringtheory.ml#L1970 -/
-noncomputable def p256Inv (a : Nat) : Nat :=
-  haveI := Classical.propDecidable
-  if h : a < p256 ∧ ∃ x, x < p256 ∧ a * x % p256 = 1 then Classical.choose h.2 else 0
+/-- `group_mul p256_group`, by `P256_GROUP`. -/
+noncomputable abbrev p256Add : P256Point → P256Point → P256Point := nist.add p256
 
-/-- `weierstrass_add` on `p256_group`'s curve, with `ring_div` as the product
-with `p256Inv`, `ring_of_num` 2 and 3 as themselves, and `a` as `p256 - 3`,
-https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/EC/weierstrass.ml#L33 -/
-noncomputable def p256Add : P256Point → P256Point → P256Point
-  | none, q => q
-  | p, none => p
-  | some (x1, y1), some (x2, y2) =>
-    if x1 = x2 then
-      if y1 = y2 ∧ y1 ≠ 0 then
-        let m := (3 * (x1 ^ 2 % p256) % p256 + (p256 - 3)) % p256 * p256Inv (2 * y1 % p256) % p256
-        let x3 := p256Sub (m ^ 2 % p256) (2 * x1 % p256)
-        let y3 := p256Sub (m * p256Sub x1 x3 % p256) y1
-        some (x3, y3)
-      else none
-    else
-      let m := p256Sub y2 y1 * p256Inv (p256Sub x2 x1) % p256
-      let x3 := p256Sub (m ^ 2 % p256) ((x1 + x2) % p256)
-      let y3 := p256Sub (m * p256Sub x1 x3 % p256) y1
-      some (x3, y3)
+/-- `group_pow p256_group`. -/
+noncomputable abbrev p256Pow : P256Point → Nat → P256Point := nist.pow p256
 
-/-- `group_pow p256_group P n`, the point `P` multiplied by `n`: `group_pow`'s
-definition, `P` times the multiple below,
-https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/Library/grouptheory.ml#L376 -/
-noncomputable def p256Pow (P : P256Point) : Nat → P256Point
-  | 0 => none
-  | n + 1 => p256Add P (p256Pow P n)
+/-- `group_inv p256_group`, by `P256_GROUP`. -/
+abbrev p256Neg : P256Point → P256Point := nist.neg p256
 
-/-- `weierstrass_neg (integer_mod_ring p_256, ring_neg (integer_mod_ring p_256)
-(&3), &b_256) P`, which `P256_GROUP` shows is `group_inv p256_group P`: y
-negated mod p. -/
-def p256Neg : P256Point → P256Point
-  | none => none
-  | some (x, y) => some (x, (p256 - y % p256) % p256)
+/-- FIPS 186-5 section 6.4.1's P-256 ECDSA signature. -/
+noncomputable abbrev ecdsaP256Sign : Nat → Nat → Nat → Option (Nat × Nat) := nist.ecdsaSign p256 n256 p256G
 
-/-- FIPS 186-5 section 6.4.1's P-256 ECDSA signature `(r, s)` under private key
-`d`, with per-message secret `k`, of the hash's integer `e`: r is the
-x-coordinate of kG mod n, and s is (e + rd)/k mod n. A rind signature is this
-for the first `k` whose `r` and `s` are both nonzero. -/
-noncomputable def ecdsaP256Sign (d k e : Nat) : Option (Nat × Nat) :=
-  match p256Pow p256G k with
-  | some (x, _) =>
-    some (x % n256, (((e + x % n256 * d : Nat) : ZMod n256) * (k : ZMod n256)⁻¹).val)
-  | none => none
-
-/-- FIPS 186-5 section 6.4.2's P-256 ECDSA verification of `(r, s)` over the
-hash's integer `e` under the public key `Q`: r and s are in [1, n), and
-u₁G + u₂Q, for u₁ = e/s and u₂ = r/s mod n, is a finite point whose
-x-coordinate mod n is r. -/
-def ecdsaP256Verifies (Q : P256Point) (e r s : Nat) : Prop :=
-  0 < r ∧ r < n256 ∧ 0 < s ∧ s < n256 ∧
-    match p256Add (p256Pow p256G (((e : ZMod n256) * (s : ZMod n256)⁻¹).val))
-        (p256Pow Q (((r : ZMod n256) * (s : ZMod n256)⁻¹).val)) with
-    | some (x, _) => x % n256 = r
-    | none => False
+/-- FIPS 186-5 section 6.4.2's P-256 ECDSA verification under the public key
+`Q`. -/
+abbrev ecdsaP256Verifies : P256Point → Nat → Nat → Nat → Prop := nist.ecdsaVerifies p256 n256 p256G
 
 /-! ## ChaCha20 and QUIC header protection -/
 
