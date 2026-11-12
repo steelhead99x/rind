@@ -270,8 +270,13 @@ hol_light_proofs=(
     "x86_64 ct_compare_16.bin rind::low::x86_64::cpu::ct_compare_16"
     "x86_64 bn_mul_mont_nohw.o rind::low::x86_64::mont::bn_mul_mont_nohw"
 )
+# The specs that no proof above loads yet, each loaded into the named target's
+# program so its known-answer tests run.
+hol_light_specs=(
+    "x86_64 common/chacha20poly1305.ml"
+)
 hol_light() {
-    local dir=$out/hol-light arches arch file path proof
+    local dir=$out/hol-light arches arch file path proof spec
     s2n_bignum_model
     rm -rf "$dir"
     mkdir -p "$dir"
@@ -288,6 +293,10 @@ hol_light() {
         *.o) asm_function "$arch" "$path" "$dir/$arch/$file" ;;
         esac
         echo "loadt \"$arch/${file%.*}.ml\";;" >>"$dir/$arch.ml"
+    done
+    for spec in "${hol_light_specs[@]}"; do
+        read -r arch file <<<"$spec"
+        echo "needs \"$file\";;" >>"$dir/$arch.ml"
     done
     for arch in $arches; do
         printf 'check_axioms ();; Printf.printf "%s: %%.0f s\\n" (Unix.time () -. prove_start);;\n' "$arch" >>"$dir/$arch.ml"
@@ -487,13 +496,6 @@ check_quote X86_64/DigestAlgorithm items rind/src/high/digest.rs 'pub struct Alg
     'pub static MD5:' 'pub static SHA1:' 'pub static SHA256:' 'pub static SHA384:' 'pub static SHA512:' \
     'pub static SHA512_256:' 'pub static SHA3_256:' 'pub static SHA3_384:' 'pub static SHA3_512:' \
     'pub struct Digest {' 'impl Digest {' 'impl AsRef<[u8]> for Digest {'
-aes_ni_items() {
-    items rind/src/low/x86_64/aes.rs 'const RCON' 'fn aes128_expand(' 'fn aes256_expand(' \
-        'fn sub_rot_word(' 'fn xor_prefix(' 'fn zero()' 'fn aes128_block(' 'fn aes256_block('
-    items rind/src/low/x86_64/ghash.rs 'fn u128_to_m128i(' 'const GF128_POLY_HI:' \
-        'const GF128_POLY_CARRY_MASK:'
-}
-check_quote X86_64/AesNi aes_ni_items
 aes_gcm_items() {
     items rind/src/low/x86_64/ghash.rs 'macro_rules! mul {' 'macro_rules! reduce {' \
         '    fn add(&self, bytes: &[u8], mut current: __m128i)' '    fn mul_h(' '    fn add_tail(' \
@@ -602,8 +604,9 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # are translated. The other curves' functions are opaque; their types are
 # kept, since the agreement enums hold them. Then ChaCha20 header protection
 # from its `Mask` impl down to HACL*'s rounds, which are Rust and translated
-# too, and AES's from `cipher::Aes`, translated on x86_64 down to the AES-NI
-# key expansion and block cipher `AesNi.lean` models, and opaque on aarch64.
+# too, and AES's from `cipher::Aes` down to each target's key expansion and
+# block cipher on the AES instructions, over the intrinsics
+# `proofs/Rind/X86_64/Simd.lean` and `proofs/Rind/Aarch64/Neon.lean` model.
 # Then Ed25519 from
 # `high::signature`'s key pair and `high::ed25519` down to s2n-bignum's
 # routines and the SHA-512 context. On x86_64, ChaCha20-Poly1305 and
@@ -829,12 +832,8 @@ extract x86_64 X86_64 \
     --include crate::low::x86_64::chacha20poly1305::open \
     --include 'crate::mid::aes::_' \
     --include crate::low::x86_64::aes \
-    --opaque crate::low::x86_64::aes::aes128_expand \
-    --opaque crate::low::x86_64::aes::aes192_expand \
-    --opaque crate::low::x86_64::aes::aes256_expand \
-    --opaque crate::low::x86_64::aes::aes128_block \
-    --opaque crate::low::x86_64::aes::aes256_block \
-    --opaque crate::low::x86_64::aes::aes_block \
+    --start-from crate::low::x86_64::aes::AesDecKey::new \
+    --start-from crate::low::x86_64::aes::AesDecKey::decrypt_block \
     --opaque crate::low::x86_64::aes::HwKey::round_keys_512 \
     --opaque crate::low::x86_64::aes::RoundKeys512 \
     --include crate::low::x86_64::ghash \
@@ -847,9 +846,6 @@ extract x86_64 X86_64 \
     --opaque 'crate::low::x86_64::ghash::_::tag' \
     --opaque 'crate::low::x86_64::ghash::_::xi' \
     --opaque 'crate::low::x86_64::ghash::_::set_xi' \
-    --opaque crate::low::x86_64::ghash::u128_to_m128i \
-    --opaque crate::low::x86_64::ghash::GF128_POLY_HI \
-    --opaque crate::low::x86_64::ghash::GF128_POLY_CARRY_MASK \
     --include crate::low::x86_64::aes_gcm \
     --opaque crate::low::x86_64::aes_gcm::counter_block \
     --opaque crate::low::x86_64::aes_gcm::composed \
@@ -909,6 +905,13 @@ extract aarch64 Aarch64 \
     --include crate::low::aarch64::sha256 \
     --opaque crate::low::aarch64::sha256::compress_hw \
     --opaque crate::low::aarch64::sha256::compress_nohw \
+    --include 'crate::mid::aes::_' \
+    --include crate::low::aarch64::aes \
+    --start-from crate::low::aarch64::aes::AesDecKey::new \
+    --start-from crate::low::aarch64::aes::AesDecKey::decrypt_block \
+    --opaque crate::low::aarch64::aes::_aes128_8_blocks \
+    --opaque crate::low::aarch64::aes::_aes256_8_blocks \
+    --opaque crate::low::aarch64::aes::_aes_8_blocks \
     --start-from crate::high::digest::Digest::ct_equal
 
 # The AEAD key's conversion is x86_64's alone: the AEAD API's model and proofs
@@ -934,7 +937,7 @@ cp "$out/lean/Rind/Portable/Types.lean" "$out/lean/Rind/Portable/Funs.lean" proo
 mkdir -p proofs/Rind/Aarch64/Kdf
 for file in Dispatch X25519 P384 DigestAlgorithm DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
     Blockwise Sha Hmac HmacDispatch HkdfExpand Kdf/TypesExternal Kdf/FunsExternal \
-    CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3; do
+    CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3 AesCipher HkdfAes; do
     sed 's/X86_64/Aarch64/g; s/x86_64/aarch64/g' "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Aarch64/$file.lean"
 done
 # The AEAD model imports nothing aarch64 has, and no aarch64 translation reaches it.
@@ -943,14 +946,19 @@ sed -i '/-- BEGIN aead/,/-- END aead/d' proofs/Rind/Aarch64/Kdf/FunsExternal.lea
 
 [ "${PROVE_TRANSLATE_ONLY:-}" ] && exit 0
 # Each hand model of a CPU intrinsic, a `core.core_arch` definition but its
-# vector types' own, is tested against the instruction on this CPU:
-# `admin/simd-vectors.rs` runs each and writes `#guard`s that the models
-# compute the same, which Lean checks once the proofs build. Fail on a model
-# it does not test, so a new one cannot go untested.
+# vector types' own, is tested against the instruction: `admin/simd-vectors.rs`
+# runs each x86_64 one on this CPU and writes `#guard`s that the models compute
+# the same, which Lean checks once the proofs build, and
+# `proofs/Rind/Aarch64/NeonVectors.lean` holds what `admin/neon-vectors.rs`
+# printed on an aarch64 CPU, which the `prove` workflow's `neon` job checks is
+# still what it prints. Fail on a model neither tests, so a new one cannot go
+# untested.
 rustc --edition 2024 -O -o "$out/simd-vectors" admin/simd-vectors.rs
 "$out/simd-vectors" >"$out/SimdVectors.lean"
-untested=$(grep -rhoE '^def core\.core_arch\.[^ ]+' proofs/Rind | sed 's/^def //' | grep -v '\.__m' | sort -u |
-    while read -r model; do grep -qF " $model " "$out/SimdVectors.lean" || echo "$model"; done)
+untested=$(grep -rhoE '^def core\.core_arch\.[^ ]+' proofs/Rind | sed 's/^def //' | grep -vE '\.__m|_t\.Insts\.' | sort -u |
+    while read -r model; do
+        grep -qF " $model " "$out/SimdVectors.lean" proofs/Rind/Aarch64/NeonVectors.lean || echo "$model"
+    done)
 if [[ -n $untested ]]; then
     echo "admin/prove: no vectors test these intrinsic models:" $untested >&2
     exit 1
