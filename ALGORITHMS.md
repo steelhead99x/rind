@@ -561,6 +561,8 @@ On an AMD Ryzen 9 9950X shared with other jobs, so noisy, rind took
 verification at each parameter set. libcrux's, RustCrypto's, and
 OpenSSL's ML-DSA were slower than aws-lc-rs's with AVX2, and libcrux's
 portable ML-DSA was no faster than aws-lc-rs without assembly.
+rind-aws-lc-rs offers the same three parameter sets through aws-lc-rs's
+`PqdsaKeyPair` and `ML_DSA_*` items.
 
 ### Symmetric cryptography
 SHA1 and SHA256 have straightforward implementations using hashing intrinsics
@@ -598,6 +600,9 @@ where the CPU has NEON, and its scalar routine otherwise.
 
 SHA3-256, SHA3-384, and SHA3-512 run Graviola's sponge over the Keccak-f
 ML-KEM uses (see [ML-KEM-768](#ml-kem-768)), one state at a time.
+[`proofs/`](proofs/README.md) proves the sponge, and ML-KEM's SHAKE calls,
+against FIPS 202 down to s2n-bignum's Keccak-f routines on x86_64 and
+aarch64.
 
 x86_64 decides once per process whether the CPU has AES-NI and PCLMULQDQ,
 and SSSE3. Without the first two, as on Core 2 and Nehalem, AES and AES-CTR

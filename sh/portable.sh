@@ -21,7 +21,7 @@ if [[ -n "$unfetched" ]]; then
 fi
 
 # The bench and fuzz crates compare against other libraries, not backends.
-packages=(-p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-dimpl)
+packages=(-p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-dimpl -p rind-openmls)
 
 # The explicit target keeps these builds apart from the host's, whose flags
 # differ.
