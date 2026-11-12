@@ -22,6 +22,22 @@ benchmark/compare.dart`):
 | ECDSA P-256 sign | 27 | 9900 | |
 | ECDSA P-256 verify | 77 | 14000 | |
 
+On a Pixel 10 Pro (Tensor G5, Android 17), with rind 0.1.0 in a
+release-mode Flutter 3.50 app (Dart 3.14), the median of five runs, which
+spread up to 3x as Android moves the thread between cores:
+
+| Operation | rind | pointycastle | cryptography (Dart) |
+|---|---:|---:|---:|
+| SHA-256, 1 KiB | 1.6 | 340 | 99 |
+| HMAC-SHA256, 64 B | 0.93 | 150 | 38 |
+| AES-256-GCM seal, 1350 B | 4.1 | 5300 | 340 |
+| ChaCha20-Poly1305 seal, 1350 B | 9.1 | 300 | 300 |
+| X25519 agree | 230 | | 1700 |
+| Ed25519 sign | 35 | | 8300 |
+| Ed25519 verify | 160 | | 11000 |
+| ECDSA P-256 sign | 57 | 24000 | |
+| ECDSA P-256 verify | 180 | 42000 | |
+
 ## Setup
 
 ```shell

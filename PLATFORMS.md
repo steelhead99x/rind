@@ -93,8 +93,8 @@ qemu. iOS devices' code is only built.
   a JavaScript host. The pull-request gate clippy-checks `rind-ring` on that
   target with `wasm32_unknown_unknown_js`, which selects getrandom's JavaScript
   backend. Constant time is unchecked on wasm: ctgrind and the trace checks
-  inspect native code, and a wasm engine compiles rind again, so its JIT may
-  turn a select into a branch.
+  inspect native code, and a wasm engine
+  compiles rind again, so its JIT may turn a select into a branch.
 
 Every operation panics on a CPU missing one of these. Call `rind::cpu::check()`
 at startup to get an error naming the missing feature instead.

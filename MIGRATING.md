@@ -424,6 +424,17 @@ what rcgen's default `KeyIdMethod::Sha256` computes.
 | object_store's `aws`, `azure`, and `gcp` features | the `*-base` features, with `with_crypto_provider(rind_object_store::default_provider())` |
 | jsonwebtoken's `crypto::aws_lc::DEFAULT_PROVIDER` | `rind_jsonwebtoken::DEFAULT_PROVIDER` |
 
+### rind-openmls
+
+rind-openmls offers openmls_rust_crypto's API, item for item, so only the
+dependency and its `use` lines change. It offers the same ciphersuites; its
+[README](rind-openmls/README.md) lists the draft features rind cannot back.
+
+| openmls_rust_crypto | rind |
+|---|---|
+| `OpenMlsRustCrypto`, `RustCrypto`, `RandError`, `MemoryStorage`, `MemoryStorageError` | the same names in `rind_openmls` |
+| the `test-utils` and `extensions-draft` features | the same features |
+
 ## Crates with their own crypto backend
 
 Surveyed on 2026-10-31 against each crate's latest release, by reading its
@@ -541,6 +552,7 @@ install ring's if nothing is installed first.
 | russh 0.65 | default `aws-lc-rs`, or `ring`, for its AES-GCM and ChaCha20-Poly1305 transport | Unsupported: its cipher trait is private, and its `ring` calls `chacha20_poly1305_openssh`, which rind refuses |
 | scram 0.6 | ring 0.16, unconditionally | Unsupported |
 | ethereum_hashing 0.8 | default `ring` for SHA-256 | **Pure Rust** on x86_64; other targets need ring |
+| openmls 0.9 | a provider crate, openmls_rust_crypto or openmls_libcrux_crypto | **rind-openmls**, in place of openmls_rust_crypto |
 
 ## Adapters
 
