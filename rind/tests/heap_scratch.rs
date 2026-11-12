@@ -58,7 +58,7 @@ fn assert_independent<K, R>(what: &str, keys: [K; 2], op: impl Fn(&K) -> R) {
 /// Index of the first freed block that is not all zero, after one unrecorded
 /// run. `assert_zeroed` panics on `Some`. The canary asserts `Some` for a
 /// planted leak, so dropping the comparison here turns that canary red.
-fn zeroed<R>(op: impl Fn() -> R) -> Option<usize> {
+fn first_nonzero<R>(op: impl Fn() -> R) -> Option<usize> {
     op();
     freed(&op)
         .1
@@ -68,14 +68,14 @@ fn zeroed<R>(op: impl Fn() -> R) -> Option<usize> {
 
 /// Fails if `op` frees a block that is not all zero.
 fn assert_zeroed<R>(what: &str, op: impl Fn() -> R) {
-    if let Some(i) = zeroed(op) {
+    if let Some(i) = first_nonzero(op) {
         panic!("{what}: freed block {i} holds bytes of the key");
     }
 }
 
 /// The check sees key-derived bytes left on the heap, so a clean result
-/// means something. The canaries call `independent` and `zeroed`, the same
-/// functions the real checks use, and report the result instead of panicking:
+/// means something. The canaries call `independent` and `first_nonzero`, the
+/// same functions the real checks use, and report the result instead of panicking:
 /// wasm32-wasip2 aborts on panic, and a `should_panic` test cannot run there.
 #[test]
 fn detects_a_leak() {
@@ -93,7 +93,7 @@ fn detects_a_leak_in_key_generation() {
     // Without black_box, the optimizer can drop the unused allocation, and
     // the check then has nothing to find.
     assert!(
-        zeroed(|| drop(black_box(vec![1u8; 32]))).is_some(),
+        first_nonzero(|| drop(black_box(vec![1u8; 32]))).is_some(),
         "planted key bytes were not visible in a freed block",
     );
 }
