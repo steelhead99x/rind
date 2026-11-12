@@ -491,13 +491,56 @@ and Poly1305 passes, which the model leaves opaque. `AeadDispatch` models
 `Rind/ChaCha20Poly1305Test.lean` checks `Rind/Spec.lean`'s transliterations
 against RFC 8439's and draft-irtf-cfrg-xchacha-03's test vectors.
 
+RSASSA-PKCS1-v1_5 and RSASSA-PSS verification with SHA-256 on x86_64, from
+the signature API's `PublicKey` to the Montgomery products, in
+`Rind/X86_64/RsaDispatch.lean`, against RFC 8017 as `Rind/Rsa.lean`
+transliterates it:
+
+- `rsa_pkcs1_sha256_new_spec`, `rsa_pss_sha256_new_spec`: a key
+  `PublicKey::new` returns for `verify::RSA_PKCS1_SHA256` or
+  `RSA_PSS_SHA256` has a modulus N of 2048 to 8192 bits and an exponent E,
+  and its `verify` accepts exactly the signatures RSASSA-PKCS1-V1_5-VERIFY
+  accepts under (N, E) with SHA-256's `DigestInfo`, or RSASSA-PSS-VERIFY
+  with MGF1-SHA-256 and a 32-byte salt;
+- `rsa_pkcs1_sha256_from_components_spec`,
+  `rsa_pss_sha256_from_components_spec`: the same for a key
+  `PublicKey::from_components` returns, with N and E its components read
+  big-endian;
+- `rsa2048_mont_products`: on a CPU with BMI2 and ADX, a 2048-bit modulus's
+  Montgomery products, s2n-bignum's Karatsuba routines and Montgomery
+  reduction, return their results.
+
+Below the API, `Rind/X86_64/RsaKey.lean` proves key loading
+(`from_components_spec`): components with no leading zero byte, an odd
+modulus of 1024 to 8192 bits, and an odd exponent from 3 to below 2^33 load,
+and a loaded key holds them, with an odd modulus of 1024 to 8192 bits, an
+odd exponent of at least 3, `pub_montifier`'s R^2 mod N, and
+`mont_neg_inverse`'s -N^-1 mod 2^64.
+`Rind/X86_64/RsaPublic.lean` proves the public operation's square-and-multiply
+(`public_op_spec`), `Rind/X86_64/RsaBytes.lean` the conversions between
+bytes and words, and `Rind/X86_64/{RsaVerify,RsaPss}.lean`
+EMSA-PKCS1-v1_5's encoding check and EMSA-PSS-VERIFY. DER is opaque, as the ✓
+leaves it out, so the `new` theorems hold for every key `PublicKey::new`
+returns without saying which encodings it accepts. Each theorem assumes
+`Runs`, `Sha256Blocks`, and messages of at most `maxInput` bytes, and each
+that verifies takes `MontProducts k`, that `low::x86_64::mont`'s products
+return their results at the modulus's width of k words.
+`Rind/X86_64/RsaMont.lean`'s `mont_products` proves it at 16 and 32 words
+with BMI2 and ADX, from s2n-bignum's theorems, and from `AwsLcMont`, that
+aws-lc's unproven routines return theirs, at every other width and CPU.
+`PublicKey` reaches each RSA algorithm's key parser and verification through
+function pointers, which `Rind/X86_64/RsaDispatch.lean` models for these two
+algorithms. On aarch64 the products are aws-lc's, so these proofs are not
+copied there yet.
+
 `admin/prove` fails if a hand model's quote no longer matches the source, if
 the source names `Ops`, builds a `Masker`, or writes its `mask` outside the
 dispatch models' quotes, if it builds a digest `Algorithm` outside
 `DigestAlgorithm.lean`'s, if it mentions `Verification::Ed25519(` or
 `Parsed::Ed25519(` outside `SignatureDispatch.lean`'s, or if it mentions
 `Verification::Ecdsa(`, `EcdsaP256`, or `EcdsaKey::`, builds an `EcdsaOps` or
-`EcdsaPair`, or reads an `ops` outside the signature models' quotes.
+`EcdsaPair`, or reads an `ops` outside the signature models' quotes, or if it
+mentions `Verification::Rsa(` or builds an `Rsa` outside them.
 
 ## Layout
 
@@ -543,6 +586,11 @@ dispatch models' quotes, if it builds a digest `Algorithm` outside
   the AES-GCM proof, on x86_64 alone; `Rind/X86_64/GcmKey.lean`, the hand model
   of `aead::gcm::Key` and its proofs; `Rind/X86_64/ChaCha20Poly1305.lean`, the
   ChaCha20-Poly1305 and XChaCha20-Poly1305 proof above aws-lc's routines.
+- `Rind/Rsa.lean` and `Rind/RsaLemmas.lean`: RFC 8017's verification,
+  transliterated, and its lemmas; `Rind/X86_64/{RsaBytes,RsaMont,RsaPublic,RsaKey,RsaVerify,RsaPss}.lean`:
+  the RSA verification proof, on x86_64 alone, and
+  `Rind/X86_64/RsaDispatch.lean`, the hand model of the signature API's RSA
+  dispatch and its theorems.
 - `Rind/SymCrypt/{Defs,Sha3}.lean`: SymCrypt's Lean FIPS 202 spec, vendored;
   `Rind/Keccak.lean`: s2n-bignum's Keccak spec, transliterated, and its proof
   that it is SymCrypt's; `Rind/Sha3.lean`: the sponge over bytes, and its
@@ -599,6 +647,8 @@ Beyond Lean's kernel:
 - That `Rind/Sha2.lean` restates cryptol-specs' SHA-512 around
   `processBlock_Common`, and `Rind/S2nSha256.lean` transliterates
   s2n-bignum's SHA-256 spec.
+- That `Rind/Rsa.lean` transliterates RFC 8017's RSASSA-PKCS1-v1_5 and
+  RSASSA-PSS verification.
 - That `Rind/Spec.lean`'s ChaCha20, Poly1305, and ChaCha20-Poly1305
   transliterate RFC 8439 and RFC 9001, its HChaCha20 and XChaCha20-Poly1305
   draft-irtf-cfrg-xchacha-03, its ECDSA FIPS 186-5, and

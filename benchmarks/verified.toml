@@ -54,12 +54,26 @@
 # under padding and HMAC glue that `proofs/` proves, ChaCha20-Poly1305's
 # aws-lc one-pass routines on x86_64, under glue `proofs/` proves, or x86_64
 # P-256 ECDH's Jacobian-to-affine conversion.
+#
+# rind's RSA-2048 PKCS#1 v1.5 verification earns the ✓ on x86_64 with BMI2
+# and ADX, whose Montgomery products are s2n-bignum's Karatsuba routines; its
+# message hash is its own row. PSS's MGF1 and H' hash inside the scheme, so
+# RSA-2048 PSS verification waits on a proof of x86_64's SHA-256 block
+# function.
 [[verified]]
 library = "rind"
 operations = ["x25519-ecdh"]
 arch = "x86_64"
 proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's dispatch table holds its own curve's functions, the only table rind builds, of its agreement API's X25519 down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of curve25519_x25519, curve25519_x25519base, their _alt forms without BMI2 and ADX, and bignum_eq, of s2n-bignum's own object code, which rind transliterates"
 link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/X25519.lean"
+
+[[verified]]
+library = "rind"
+operations = ["rsa2048-pkcs1-sha256-verify"]
+arch = "x86_64"
+cpu = ["bmi2", "adx"]
+proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's RSASSA-PKCS1-v1_5 SHA-256 verification against RFC 8017, key loading's checks, R^2 mod n, and -n^-1 mod 2^64 included, down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of bignum_kmul_16_32, bignum_kmul_32_64, bignum_ksqr_16_32, bignum_ksqr_32_64, bignum_emontredc_8n, bignum_optsub, bignum_cmp_lt, bignum_bitsize, and bignum_negmodinv, of s2n-bignum's own object code, which rind transliterates"
+link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/RsaDispatch.lean"
 
 [[verified]]
 library = "rind"
