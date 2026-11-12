@@ -242,6 +242,42 @@ pub(crate) fn hash_to_curve_inputs() -> Vec<(Vec<u8>, Vec<u8>)> {
     inputs
 }
 
+/// Whether aws-lc's P-256 or P-384 suite accepts `msg` and `dst`, for `bits`
+/// of 256 or 384.
+#[cfg(not(any(miri, target_family = "wasm")))]
+pub(crate) fn aws_lc_hash_to_curve_ok(bits: u16, msg: &[u8], dst: &[u8]) -> bool {
+    use aws_lc_sys::*;
+
+    // SAFETY: each pointer is to a live buffer of the length passed with it,
+    // and the point is freed after the call.
+    unsafe {
+        let (group, hash) = match bits {
+            256 => (EC_group_p256(), EC_hash_to_curve_p256_xmd_sha256_sswu as _),
+            384 => (EC_group_p384(), EC_hash_to_curve_p384_xmd_sha384_sswu as _),
+            _ => unreachable!(),
+        };
+        let hash: unsafe extern "C" fn(
+            *const EC_GROUP,
+            *mut EC_POINT,
+            *const u8,
+            usize,
+            *const u8,
+            usize,
+        ) -> core::ffi::c_int = hash;
+        let point = EC_POINT_new(group);
+        let ok = hash(
+            group,
+            point,
+            dst.as_ptr(),
+            dst.len(),
+            msg.as_ptr(),
+            msg.len(),
+        ) == 1;
+        EC_POINT_free(point);
+        ok
+    }
+}
+
 /// aws-lc's `EC_hash_to_curve_p256_xmd_sha256_sswu`, or its P-384 twin for
 /// `bits` of 384, as an X9.62 uncompressed point.
 #[cfg(not(any(miri, target_family = "wasm")))]

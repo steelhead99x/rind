@@ -230,6 +230,18 @@ mod tests {
         }
     }
 
+    /// An empty DST is refused, as aws-lc's
+    /// `crypto/ec_extra/hash_to_curve.c` (`expand_message_xmd`) refuses it.
+    #[cfg(not(any(miri, target_family = "wasm")))]
+    #[test]
+    fn empty_dst() {
+        tests::check_empty_dst(
+            hash_to_curve(b"msg", b"").map(|_| ()),
+            hash_to_scalar(b"msg", b"").map(|_| ()),
+            Some(crate::test::aws_lc_hash_to_curve_ok(384, b"msg", b"")),
+        );
+    }
+
     #[test]
     fn scalar_in_constant_time() {
         let msg = low::ct::into_secret(*b"password");

@@ -93,7 +93,9 @@ impl Xmd for Sha512Context {
 ///
 /// A `dst` over 255 bytes is hashed down, as section 5.3.3 says. An empty
 /// `dst`, which the RFC forbids, and an `out` longer than 255 hashes are
-/// refused, as aws-lc refuses them.
+/// refused, as aws-lc's `crypto/ec_extra/hash_to_curve.c`
+/// (`expand_message_xmd`) refuses a zero `dst_len` and a counter that wraps
+/// after 255 hashes.
 pub(crate) fn expand_message_xmd<H: Xmd>(
     msg: &[u8],
     dst: &[u8],
@@ -533,6 +535,19 @@ pub(crate) mod tests {
                 .iter()
                 .fold(C::ZERO, |r, &b| r.mul(&b256).add(&byte(b)));
             assert!(C::from_wide(&input).ct_eq(&horner));
+        }
+    }
+
+    /// The public wrappers and, when given, aws-lc refuse an empty DST.
+    pub(crate) fn check_empty_dst(
+        curve: Result<(), Error>,
+        scalar: Result<(), Error>,
+        aws_lc_ok: Option<bool>,
+    ) {
+        assert_eq!(curve, Err(Error::WrongLength));
+        assert_eq!(scalar, Err(Error::WrongLength));
+        if let Some(ok) = aws_lc_ok {
+            assert!(!ok);
         }
     }
 

@@ -225,6 +225,17 @@ mod tests {
         }
     }
 
+    /// An empty DST is refused. aws-lc has no P-521 suite, so this is
+    /// only the local path.
+    #[test]
+    fn empty_dst() {
+        tests::check_empty_dst(
+            hash_to_curve(b"msg", b"").map(|_| ()),
+            hash_to_scalar(b"msg", b"").map(|_| ()),
+            None,
+        );
+    }
+
     #[test]
     fn scalar_in_constant_time() {
         let msg = low::ct::into_secret(*b"password");
