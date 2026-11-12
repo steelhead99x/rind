@@ -23,7 +23,7 @@ Found by the 2026-11-09 audit: the backend landed in [moq-dev/rind#458](https://
   - AES and AES-GCM: rind's `aes_nohw.c` and `gcm_nohw.c` ports, in [armv7's Rust proofs](/quest/m5/verified-armv7/prove.md) and [x86_64 without AES-NI](/quest/m5/verified/x86-no-aesni.md), which share one source file across word widths;
   - X25519 and Ed25519: curve25519-dalek's serial backend under rind's glue (`low/portable/curve25519.rs`, `mid/portable/ed25519.rs`), in [armv7's Curve25519](/quest/m5/verified-armv7/curve25519.md), whose source of Lean proofs also covers the 64-bit limbs this translation runs;
   - P-256, P-384, and P-521: [armv7's NIST curves](/quest/m5/verified-armv7/nist-curves.md), whose point arithmetic `limb64.rs` builds again over fiat-crypto's 64-bit field and scalar arithmetic whole, its multiplication included, so the 64-bit build needs no rind multiplication proven;
-  - RSA: [verification](/quest/m4/verified/rsa-verify.md) and [signing](/quest/m4/verified/rsa-sign.md), over `low/generic/mont.rs`'s Montgomery multiplication, squaring, and reduction, on 64-bit limbs here and 32-bit ones on 32-bit targets;
+  - RSA: verification, whose glue `proofs/Rind/X86_64/RsaDispatch.lean` proves on x86_64, and [signing](/quest/m4/verified/rsa-sign.md), over `low/generic/mont.rs`'s Montgomery multiplication, squaring, and reduction, on 64-bit limbs here and 32-bit ones on 32-bit targets;
   - MD5: [its own quest](/quest/m5/verified/md5.md).
 - Whatever still lacks a ✓ on this backend after those is [the re-audit](/quest/m4/verified/re-audit.md)'s to plan.
 
