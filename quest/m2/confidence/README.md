@@ -19,5 +19,7 @@ rind already has these:
 
 The 2026-11-09 audit found no exploitable bug and no panic reachable from public input, and planned the eleven children from the hostile-input fuzz target down: each is a hole it confirmed in the code that no test, fuzzer, or proof sees today.
 
+Three coverage children joined on 2026-11-12, with the maintainer, from the nightly `coverage.yml` report: it measures only published code under the tests that call it, rind-aws-lc-rs runs aws-lc-rs's own tests, and every published function then runs under a test.
+
 - Fix what a check finds in its own quest's PR when it's small; otherwise plan a follow-up.
 - Slow suites run in their own workflows, not in `just ci`, as `AGENTS.md` asks.
