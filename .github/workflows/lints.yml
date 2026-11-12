@@ -39,5 +39,9 @@ jobs:
 
       - uses: ./.github/actions/nix
 
+      # aws-lc-rs's own tests include_str CAVP responses. Clippy compiles
+      # every target, so those submodules have to be present.
+      - uses: ./.github/actions/vectors
+
       - name: clippy
         run: nix develop --command cargo clippy --workspace --all-targets --locked -- --deny warnings
