@@ -17,6 +17,12 @@ mode's, one per line, for the KEMs rind offers. The revision in
 [hpkewg/hpke] repeats them unchanged. They are IETF contributions, under
 [BCP 78].
 
+`rfc9380/` holds [RFC 9380]'s hash-to-curve vectors, its Appendix J and K,
+from the CFRG draft's `poc/vectors` at the revision `admin/sync-vectors`
+pins: the `expand_message_xmd` files and the P-256, P-384, and P-521
+`_RO_` suites, named without the colons Windows cannot check out. They are
+IETF contributions too.
+
 `rfc9909/` holds [RFC 9909]'s appendix C examples, an SLH-DSA-SHA2-128s
 public key, private key, and self-signed certificate, decoded from the RFC's
 PEM to DER by hand, since no repository publishes them. They too are IETF
@@ -30,6 +36,7 @@ CFRG draft's repository holds stale ones. They are IETF contributions, under
 [aws-lc]: https://github.com/aws/aws-lc
 [BoringSSL]: https://boringssl.googlesource.com/boringssl
 [RFC 9180]: https://www.rfc-editor.org/rfc/rfc9180.html
+[RFC 9380]: https://www.rfc-editor.org/rfc/rfc9380.html
 [RFC 9909]: https://www.rfc-editor.org/rfc/rfc9909.html
 [hpkewg/hpke]: https://github.com/hpkewg/hpke
 [RFC 9474]: https://www.rfc-editor.org/rfc/rfc9474.html

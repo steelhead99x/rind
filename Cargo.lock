@@ -1774,6 +1774,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hash2curve"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1eaf40612d7d854743e7189228a6d528f0f6e8502cf6a0cb831d28a218b7f3f6"
+dependencies = [
+ "digest 0.11.3",
+ "elliptic-curve 0.14.3",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3540,6 +3550,7 @@ checksum = "d2c9239b2dbc807adbbe147e8cf72ea7450c3a0aabe62cb8e75ff4ec22e1f72a"
 dependencies = [
  "ecdsa 0.17.0",
  "elliptic-curve 0.14.3",
+ "hash2curve",
  "primefield",
  "primeorder 0.14.0",
  "sha2 0.11.1",
@@ -3566,6 +3577,7 @@ dependencies = [
  "ecdsa 0.17.0",
  "elliptic-curve 0.14.3",
  "fiat-crypto 0.3.0",
+ "hash2curve",
  "primefield",
  "primeorder 0.14.0",
  "sha2 0.11.1",
@@ -3580,6 +3592,7 @@ dependencies = [
  "base16ct 1.0.0",
  "ecdsa 0.17.0",
  "elliptic-curve 0.14.3",
+ "hash2curve",
  "primefield",
  "primeorder 0.14.0",
  "sha2 0.11.1",
@@ -4229,6 +4242,9 @@ dependencies = [
  "libcrux-macros 0.0.4",
  "libcrux-poly1305 0.0.7",
  "libcrux-sha2 0.0.9",
+ "p256 0.14.0",
+ "p384 0.14.0",
+ "p521",
  "pkcs8 0.11.0",
  "proptest",
  "serde",
