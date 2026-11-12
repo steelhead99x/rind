@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 #
-# Writes rind/src/mid/p384/precomp.rs, the P-384 generator table, from
+# Writes rind/src/mid/p384/precomp.rs, the P-384 generator tables, from
 # Python's integers rather than rind's arithmetic, which the
-# `p384::tests::base_point_precomp_comb` test then checks it against.
+# `p384::tests::base_point_precomp_comb` and
+# `p384::tests::generator_odd_multiples` tests then check them against.
 #
-# Table j holds i * 2^(20 * j) * G for i in 1..=16, as affine points with
-# Montgomery coordinates, each 6 little-endian 64-bit words.
+# Table j of the comb holds i * 2^(20 * j) * G for i in 1..=16, and the odd
+# multiples G, 3G, ..., 63G that verification's width-7 NAF digits pick, as
+# affine points with Montgomery coordinates, each 6 little-endian 64-bit
+# words.
 
 import pathlib
 
@@ -15,6 +18,8 @@ GY = 0x3617DE4A96262C6F5D9E98BF9292DC29F8F41DBD289A147CE9DA3113B5F0B8C00A60B1CE1
 
 TABLES = 20
 POINTS = 16
+# Odd multiples, in rows of POINTS, each its own constant as the comb's are.
+ODD_ROWS = 2
 
 
 def add(p1, p2):
@@ -68,6 +73,24 @@ for j in range(TABLES):
     line += item
 out.append(line)
 out.append("];")
+out.append("")
+
+g2 = add((GX, GY), (GX, GY))
+point = (GX, GY)
+for j in range(ODD_ROWS):
+    first = 2 * POINTS * j + 1
+    out.append(f"/// {first}G, {first + 2}G, ..., {first + 2 * POINTS - 2}G")
+    out.append(f"const ODD_MULTIPLES_{j}: [u64; {POINTS * 12}] = [")
+    for _ in range(POINTS):
+        for coord in point:
+            out.extend(f"    0x{w:016x}," for w in words(coord))
+        point = add(point, g2)
+    out.append("];")
+    out.append("")
+rows = ", ".join(f"ODD_MULTIPLES_{j}" for j in range(ODD_ROWS))
+# Wrapped as rustfmt wraps it.
+out.append(f"pub(super) static CURVE_GENERATOR_ODD_MULTIPLES: [[u64; {POINTS * 12}]; {ODD_ROWS}] =")
+out.append(f"    [{rows}];")
 
 path = pathlib.Path(__file__).resolve().parent.parent / "rind/src/mid/p384/precomp.rs"
 # Renamed into place, so a failure partway leaves the committed file whole.

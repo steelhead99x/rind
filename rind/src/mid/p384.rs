@@ -401,11 +401,14 @@ impl AffineMontPoint {
         r
     }
 
-    /// Returns table[i - 1] for a public index > 0
-    fn public_lookup_comb(table: &[u64; 192], index: u8) -> Self {
-        let offs = (index - 1) as usize * 12;
+    /// `index * G`, for a public odd `index` up to 63, from the generator's
+    /// odd multiples.
+    fn public_generator_odd_multiple(index: u8) -> Self {
+        let i = usize::from(index / 2);
+        let row = &precomp::CURVE_GENERATOR_ODD_MULTIPLES[i / 16];
+        let offs = i % 16 * 12;
         let mut r = Self::default();
-        r.xy.copy_from_slice(&table[offs..offs + 12]);
+        r.xy.copy_from_slice(&row[offs..offs + 12]);
         r
     }
 
@@ -609,8 +612,9 @@ impl JacobianMontPoint {
     /// ..., 31P if `more` holds them.
     ///
     /// One chain of doublings serves both: P's digits are a NAF over its odd
-    /// multiples, width 5 without `more` and 6 with it, and G's a width-5 NAF
-    /// over the first comb table, which holds G to 16G.
+    /// multiples, width 5 without `more` and 6 with it, and G's a width-7 NAF
+    /// over the generator's odd multiples, G to 63G. That adds a multiple of
+    /// G about once in eight bits, where a width-5 NAF adds one once in six.
     ///
     /// The rows are two arguments, and the digits indexed rather than zipped,
     /// as Aeneas cannot translate a slice of borrowed rows or the zip.
@@ -620,12 +624,11 @@ impl JacobianMontPoint {
         odd_multiples: &[AffineMontPoint; 8],
         more: Option<&[AffineMontPoint; 8]>,
     ) -> Self {
-        let g_digits = g.public_naf::<5>();
+        let g_digits = g.public_naf::<7>();
         let p_digits = match more {
             None => p.public_naf::<5>(),
             Some(_) => p.public_naf::<6>(),
         };
-        let g_multiples = &precomp::CURVE_GENERATOR_PRECOMP_COMB[0];
 
         let mut result = Self::infinity();
         for i in (0..g_digits.len()).rev() {
@@ -646,7 +649,7 @@ impl JacobianMontPoint {
             }
             if *g_digit != 0 {
                 let mut tmp =
-                    AffineMontPoint::public_lookup_comb(g_multiples, g_digit.unsigned_abs());
+                    AffineMontPoint::public_generator_odd_multiple(g_digit.unsigned_abs());
                 if *g_digit < 0 {
                     tmp.negate_y();
                 }
@@ -1482,6 +1485,20 @@ mod tests {
                 };
             }
             base.double_inplace_n(20);
+        }
+    }
+
+    #[test]
+    fn generator_odd_multiples() {
+        let g = JacobianMontPoint::from_affine(&CURVE_GENERATOR);
+        let g2 = g.double();
+        let mut multiple = g;
+        for index in (1..64).step_by(2) {
+            assert_eq!(
+                multiple.as_affine().xy,
+                AffineMontPoint::public_generator_odd_multiple(index).xy
+            );
+            multiple = multiple.add(&g2);
         }
     }
 }
