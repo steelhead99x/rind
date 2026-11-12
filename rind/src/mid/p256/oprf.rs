@@ -19,9 +19,18 @@ use crate::mid::rng::RandomSource;
 pub(crate) const ELEMENT: usize = 33;
 pub(crate) const SCALAR: usize = 32;
 
-pub(crate) fn hash_to_group(msg: &[u8], dst: &[u8]) -> Result<[u8; ELEMENT], Error> {
+/// `scalar * HashToGroup(msg)`.
+///
+/// `hash_to_curve` already returned an affine point. Compressing that point
+/// and decoding the encoding would run the variable-time public parser on
+/// the client's input. The product's encoding is what the client sends.
+pub(crate) fn mul_hash(msg: &[u8], dst: &[u8], scalar: &[u8]) -> Result<[u8; ELEMENT], Error> {
+    let scalar = scalar_words(scalar)?;
+    if low::ct::into_public(scalar.is_zero()) {
+        return Err(KeyFormatError::ScalarOutOfRange.into());
+    }
     let point = super::hash_to_curve::hash_to_curve(msg, dst)?;
-    Ok(compress(&point.point))
+    Ok(compress(&checked(point.point.multiply(&scalar))?))
 }
 
 pub(crate) fn hash_to_scalar(msg: &[u8], dst: &[u8]) -> Result<[u8; SCALAR], Error> {

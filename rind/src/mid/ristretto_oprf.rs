@@ -16,10 +16,17 @@ use crate::mid::rng::RandomSource;
 pub(crate) const ELEMENT: usize = 32;
 pub(crate) const SCALAR: usize = 32;
 
-pub(crate) fn hash_to_group(msg: &[u8], dst: &[u8]) -> Result<[u8; ELEMENT], Error> {
+/// `scalar * HashToGroup(msg)`, multiplying the mapped element directly.
+///
+/// The product's encoding is what the client sends.
+pub(crate) fn mul_hash(msg: &[u8], dst: &[u8], scalar: &[u8]) -> Result<[u8; ELEMENT], Error> {
+    let scalar = scalar_words(scalar)?;
+    if low::ct::into_public(is_zero(&scalar)) {
+        return Err(KeyFormatError::ScalarOutOfRange.into());
+    }
     let mut uniform = [0u8; 64];
     expand_message_xmd::<Sha512Context>(msg, dst, &mut uniform)?;
-    encode(Element::from_uniform_bytes(&uniform))
+    encode(Element::from_uniform_bytes(&uniform).mul(&scalar))
 }
 
 pub(crate) fn hash_to_scalar(msg: &[u8], dst: &[u8]) -> Result<[u8; SCALAR], Error> {

@@ -314,6 +314,18 @@ fn oprf() {
     check_zeroed_on_drop(Box::pin(
         voprf::ServerKey::derive_key_pair(&P521_SHA512, &seed, info).unwrap(),
     ));
+    check_zeroed_on_drop(Box::pin(
+        oprf::ServerKey::generate(&RISTRETTO255_SHA512).unwrap(),
+    ));
+    check_zeroed_on_drop(Box::pin(
+        voprf::ServerKey::generate(&RISTRETTO255_SHA512).unwrap(),
+    ));
+    check_zeroed_on_drop(Box::pin(oprf::ServerKey::generate(&P256_SHA256).unwrap()));
+    check_zeroed_on_drop(Box::pin(voprf::ServerKey::generate(&P256_SHA256).unwrap()));
+    check_zeroed_on_drop(Box::pin(oprf::ServerKey::generate(&P384_SHA384).unwrap()));
+    check_zeroed_on_drop(Box::pin(voprf::ServerKey::generate(&P384_SHA384).unwrap()));
+    check_zeroed_on_drop(Box::pin(oprf::ServerKey::generate(&P521_SHA512).unwrap()));
+    check_zeroed_on_drop(Box::pin(voprf::ServerKey::generate(&P521_SHA512).unwrap()));
     let (_element, blind) = oprf::blind(&RISTRETTO255_SHA512, b"input").unwrap();
     check_zeroed_on_drop(Box::pin(blind));
     let (_element, blind) = voprf::blind(&P256_SHA256, b"input").unwrap();

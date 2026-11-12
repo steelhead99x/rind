@@ -5,6 +5,9 @@
 //! POPRF is not here: its first consumer, the public-metadata Privacy Pass
 //! token, is still a draft. The DLEQ proof's verification may run in variable
 //! time. Blinding, evaluation, finalization, and proof generation do not.
+//! The blinded element, the evaluation, the proof, and the public key are
+//! declassified once they are the bytes a party sends, and verification
+//! reads those bytes.
 //!
 //! [RFC 9497]: https://www.rfc-editor.org/rfc/rfc9497.html
 
@@ -509,7 +512,7 @@ struct Key<const MODE: u8, const H: usize, const E: usize, const S: usize> {
 impl<const MODE: u8, const H: usize, const E: usize, const S: usize> Key<MODE, H, E, S> {
     fn generate(suite: &'static Suite<H, E, S>) -> Result<Self, Error> {
         let scalar = suite.random_scalar(&mut SystemRandom)?;
-        let public_key = suite.base_mul(&scalar)?;
+        let public_key = publish(suite.base_mul(&scalar)?);
         Ok(Self {
             suite: ZeroableRef::new(suite),
             scalar,
@@ -531,7 +534,7 @@ impl<const MODE: u8, const H: usize, const E: usize, const S: usize> Key<MODE, H
             let scalar = suite.hash_to_scalar(dst.as_bytes(), &message)?;
             message.pop();
             if !suite.scalar_is_zero(&scalar) {
-                let public_key = suite.base_mul(&scalar)?;
+                let public_key = publish(suite.base_mul(&scalar)?);
                 return Ok(Self {
                     suite: ZeroableRef::new(suite),
                     scalar,
@@ -539,7 +542,9 @@ impl<const MODE: u8, const H: usize, const E: usize, const S: usize> Key<MODE, H
                 });
             }
         }
-        Err(Error::Fault)
+        // RFC 9497 raises DeriveKeyPairError. The scalar is not a key.
+        // `Fault` is an internal failure, which this is not.
+        Err(crate::error::KeyFormatError::ScalarOutOfRange.into())
     }
 
     fn evaluate(
@@ -551,7 +556,7 @@ impl<const MODE: u8, const H: usize, const E: usize, const S: usize> Key<MODE, H
             return Err(Error::WrongLength);
         }
         for (blinded, out) in blinded.iter().zip(evaluated.iter_mut()) {
-            *out = BlindedElement(self.suite.get().mul(&blinded.0, &self.scalar)?);
+            *out = BlindedElement(publish(self.suite.get().mul(&blinded.0, &self.scalar)?));
         }
         Ok(())
     }
@@ -581,7 +586,10 @@ impl<const MODE: u8, const H: usize, const E: usize, const S: usize> Key<MODE, H
             transcript.as_bytes(),
         )?;
         let s = suite.sub_scalars(&r, &suite.mul_scalars(&c, &self.scalar)?)?;
-        Ok(Proof { c, s })
+        Ok(Proof {
+            c: publish(c),
+            s: publish(s),
+        })
     }
 }
 
@@ -602,12 +610,14 @@ impl<const MODE: u8, const H: usize, const E: usize, const S: usize> Client<MODE
         if input.len() > MAX_INPUT {
             return Err(Error::WrongLength);
         }
-        let element = suite.hash_to_group(suite.dst(MODE, b"HashToGroup-").as_bytes(), input)?;
         let scalar = match scalar {
             Some(scalar) => suite.scalar_nonzero(scalar)?,
             None => suite.random_scalar(&mut SystemRandom)?,
         };
-        let blinded = suite.mul(&element, &scalar)?;
+        // One declassified copy: the element sent to the server, and the
+        // copy the proof reads. A second copy would stay secret.
+        let blinded =
+            publish(suite.mul_hash(suite.dst(MODE, b"HashToGroup-").as_bytes(), input, &scalar)?);
         Ok((
             BlindedElement(blinded),
             Self {
@@ -737,12 +747,12 @@ impl<const H: usize, const E: usize, const S: usize> Suite<H, E, S> {
         dst
     }
 
-    fn hash_to_group(&self, dst: &[u8], msg: &[u8]) -> Result<[u8; E], Error> {
+    fn mul_hash(&self, dst: &[u8], msg: &[u8], scalar: &[u8; S]) -> Result<[u8; E], Error> {
         match self.group {
-            GroupId::Ristretto => fit(&ristretto::hash_to_group(msg, dst)?),
-            GroupId::P256 => fit(&p256::hash_to_group(msg, dst)?),
-            GroupId::P384 => fit(&p384::hash_to_group(msg, dst)?),
-            GroupId::P521 => fit(&p521::hash_to_group(msg, dst)?),
+            GroupId::Ristretto => fit(&ristretto::mul_hash(msg, dst, scalar)?),
+            GroupId::P256 => fit(&p256::mul_hash(msg, dst, scalar)?),
+            GroupId::P384 => fit(&p384::mul_hash(msg, dst, scalar)?),
+            GroupId::P521 => fit(&p521::mul_hash(msg, dst, scalar)?),
         }
     }
 
@@ -953,6 +963,12 @@ fn fit<const N: usize>(bytes: &[u8]) -> Result<[u8; N], Error> {
     bytes.try_into().map_err(|_| Error::Fault)
 }
 
+/// Bytes a party sends. Verification parses points and compares the
+/// challenge in variable time, so the encoding is public from here on.
+fn publish<const N: usize>(bytes: [u8; N]) -> [u8; N] {
+    low::ct::into_public(bytes)
+}
+
 struct Buf<const N: usize> {
     bytes: [u8; N],
     len: usize,
@@ -1144,7 +1160,15 @@ mod tests {
         let seed = [0x42u8; 32];
         let info = b"differential";
         let inputs: [&[u8]; 3] = [b"\x00", b"hello", &[0x5a; 17]];
-        let mut rng = rand::rng();
+        // Proof nonce 9, in the suite's scalar encoding. That is also the
+        // byte string `voprf` reads for one scalar: ristretto's canonical
+        // little-endian bytes, or a NIST scalar's big-endian field bytes.
+        let mut nonce = [0u8; S];
+        if E == 32 {
+            nonce[0] = 9;
+        } else {
+            nonce[S - 1] = 9;
+        }
 
         let our = oprf::ServerKey::derive_key_pair(suite, &seed, info).unwrap();
         let their = ::voprf::OprfServer::<CS>::new_from_seed(&seed, info).unwrap();
@@ -1177,12 +1201,18 @@ mod tests {
             assert_eq!(ours.as_ref(), theirs.message.serialize().as_slice());
             let mut evaluated = [ours];
             let proof = our_v
-                .evaluate(core::slice::from_ref(&ours), &mut evaluated)
+                .evaluate_with_nonce(core::slice::from_ref(&ours), &mut evaluated, &nonce)
                 .unwrap();
-            let their_eval = their_v.blind_evaluate(&mut rng, &theirs.message);
+            let mut proof_bytes = vec![0u8; S * 2];
+            proof.copy_to(&mut proof_bytes).unwrap();
+            let their_eval = their_v.blind_evaluate(&mut NonceRng::new(&nonce), &theirs.message);
             assert_eq!(
                 evaluated[0].as_ref(),
                 their_eval.message.serialize().as_slice()
+            );
+            assert_eq!(
+                proof_bytes.as_slice(),
+                their_eval.proof.serialize().as_slice()
             );
             let our_out = state
                 .finalize(input, &evaluated[0], &proof, &our_v.public_key())
@@ -1198,7 +1228,90 @@ mod tests {
                 .unwrap();
             assert_eq!(our_out.as_ref(), their_out.as_slice());
         }
+
+        let mut blinded = Vec::new();
+        let mut states = Vec::new();
+        let mut their_clients = Vec::new();
+        let mut their_messages = Vec::new();
+        for input in inputs {
+            let (element, state) = voprf::blind_with(suite, input, blind).unwrap();
+            let theirs =
+                ::voprf::VoprfClient::<CS>::deterministic_blind_unchecked(input, scalar).unwrap();
+            assert_eq!(element.as_ref(), theirs.message.serialize().as_slice());
+            blinded.push(element);
+            states.push(state);
+            their_clients.push(theirs.state);
+            their_messages.push(theirs.message);
+        }
+        let mut evaluated = blinded.clone();
+        let proof = our_v
+            .evaluate_with_nonce(&blinded, &mut evaluated, &nonce)
+            .unwrap();
+        let mut proof_bytes = vec![0u8; S * 2];
+        proof.copy_to(&mut proof_bytes).unwrap();
+        let their_batch = their_v
+            .batch_blind_evaluate(&mut NonceRng::new(&nonce), &their_messages)
+            .unwrap();
+        assert_eq!(
+            proof_bytes.as_slice(),
+            their_batch.proof.serialize().as_slice()
+        );
+        for (ours, theirs) in evaluated.iter().zip(&their_batch.messages) {
+            assert_eq!(ours.as_ref(), theirs.serialize().as_slice());
+        }
+        let our_outputs =
+            voprf::finalize_batch(states, &inputs, &evaluated, &proof, &our_v.public_key())
+                .unwrap();
+        let their_outputs = ::voprf::VoprfClient::batch_finalize(
+            &inputs,
+            &their_clients,
+            &their_batch.messages,
+            &their_batch.proof,
+            their_v.get_public_key(),
+        )
+        .unwrap();
+        for (ours, theirs) in our_outputs.iter().zip(their_outputs) {
+            assert_eq!(ours.as_ref(), theirs.unwrap().as_slice());
+        }
     }
+
+    /// Yields one scalar, the bytes `voprf` reads for the proof nonce.
+    struct NonceRng<'a> {
+        bytes: &'a [u8],
+        used: bool,
+    }
+
+    impl<'a> NonceRng<'a> {
+        fn new(bytes: &'a [u8]) -> Self {
+            Self { bytes, used: false }
+        }
+    }
+
+    impl rand::TryRng for NonceRng<'_> {
+        type Error = core::convert::Infallible;
+
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+            let mut bytes = [0u8; 4];
+            self.try_fill_bytes(&mut bytes)?;
+            Ok(u32::from_le_bytes(bytes))
+        }
+
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+            let mut bytes = [0u8; 8];
+            self.try_fill_bytes(&mut bytes)?;
+            Ok(u64::from_le_bytes(bytes))
+        }
+
+        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
+            assert!(!self.used, "the proof nonce was read twice");
+            assert_eq!(dest.len(), self.bytes.len());
+            dest.copy_from_slice(self.bytes);
+            self.used = true;
+            Ok(())
+        }
+    }
+
+    impl rand::TryCryptoRng for NonceRng<'_> {}
 
     #[test]
     fn matches_voprf() {
@@ -1221,37 +1334,52 @@ mod tests {
     ) {
         let seed = low::ct::into_secret([0x5au8; 32]);
         let input = low::ct::into_secret(*b"client input!!");
-        let key = oprf::ServerKey::derive_key_pair(suite, &seed, b"info").unwrap();
+        let second = low::ct::into_secret(*b"second input!!!");
+
+        let key = oprf::ServerKey::generate(suite).unwrap();
         let (blinded, blind) = oprf::blind(suite, &input).unwrap();
-        let public_blinded =
-            BlindedElement::from_bytes(suite, low::ct::into_public(blinded).as_ref()).unwrap();
-        let mut evaluated = [public_blinded];
-        key.evaluate(core::slice::from_ref(&public_blinded), &mut evaluated)
+        let mut evaluated = [blinded];
+        key.evaluate(core::slice::from_ref(&blinded), &mut evaluated)
             .unwrap();
         let output = blind.finalize(&input, &evaluated[0]).unwrap();
         assert_eq!(low::ct::into_public(output).as_ref().len(), H);
 
         let key = voprf::ServerKey::derive_key_pair(suite, &seed, b"info").unwrap();
         let (blinded, blind) = voprf::blind(suite, &input).unwrap();
-        let public_blinded =
-            BlindedElement::from_bytes(suite, low::ct::into_public(blinded).as_ref()).unwrap();
-        let mut evaluated = [public_blinded];
+        let mut evaluated = [blinded];
         let proof = key
-            .evaluate(core::slice::from_ref(&public_blinded), &mut evaluated)
+            .evaluate(core::slice::from_ref(&blinded), &mut evaluated)
             .unwrap();
         let output = blind
-            .finalize(
-                &input,
-                &evaluated[0],
-                &proof,
-                &low::ct::into_public(key.public_key()),
-            )
+            .finalize(&input, &evaluated[0], &proof, &key.public_key())
             .unwrap();
         assert_eq!(low::ct::into_public(output).as_ref().len(), H);
+
+        let key = voprf::ServerKey::generate(suite).unwrap();
+        let (first, first_blind) = voprf::blind(suite, &input).unwrap();
+        let (second_element, second_blind) = voprf::blind(suite, &second).unwrap();
+        let blinded = [first, second_element];
+        let mut evaluated = blinded;
+        let proof = key.evaluate(&blinded, &mut evaluated).unwrap();
+        let outputs = voprf::finalize_batch(
+            vec![first_blind, second_blind],
+            &[&input[..], &second[..]],
+            &evaluated,
+            &proof,
+            &key.public_key(),
+        )
+        .unwrap();
+        assert_eq!(outputs.len(), 2);
+        for output in outputs {
+            assert_eq!(low::ct::into_public(output).as_ref().len(), H);
+        }
     }
 
-    /// Marks the seed, the input, and the blind, and declassifies only the
-    /// wire element and the PRF output. `admin/ctgrind` is what checks it.
+    /// Marks the seed and the inputs. A generated scalar is marked where it
+    /// is drawn. The blinded element, the evaluation, the proof, and the
+    /// public key are declassified where they are published, and verification
+    /// reads those bytes. Covers `generate` and a batch of two.
+    /// `admin/ctgrind` is what checks it.
     #[test]
     fn stays_secret() {
         stays_secret_one(&RISTRETTO255_SHA512);
@@ -1266,19 +1394,13 @@ mod tests {
         let key = voprf::ServerKey::generate(suite).unwrap();
         let (blinded, blind) = voprf::blind(suite, b"x").unwrap();
         let mut evaluated = [blinded];
-        let proof = key
-            .evaluate(core::slice::from_ref(&blinded), &mut evaluated)
+        key.evaluate(core::slice::from_ref(&blinded), &mut evaluated)
             .unwrap();
-        let mut bytes = vec![0u8; 64];
-        proof.copy_to(&mut bytes).unwrap();
-        bytes[10] ^= 0x01;
-        let bad = match Proof::from_bytes(suite, &bytes) {
-            Ok(proof) => proof,
-            Err(err) => {
-                assert!(matches!(err, Error::KeyRejected(_)));
-                return;
-            }
-        };
+        // Scalars 1 and 1 are in range, and they are not this evaluation's proof.
+        let mut bad_bytes = [0u8; 64];
+        bad_bytes[31] = 1;
+        bad_bytes[63] = 1;
+        let bad = Proof::from_bytes(suite, &bad_bytes).unwrap();
         assert_eq!(
             blind
                 .finalize(b"x", &evaluated[0], &bad, &key.public_key())
