@@ -13,12 +13,20 @@ pub(crate) trait RandomSource {
 }
 
 /// Random generation from the system entropy source via
-/// the `getrandom` crate.
+/// the `getrandom` crate, or in the FIPS module's build, from its DRBG.
 pub(crate) struct SystemRandom;
 
+#[cfg(not(rind_fips))]
 impl RandomSource for SystemRandom {
     fn fill(&mut self, out: &mut [u8]) -> Result<(), Error> {
         getrandom::fill(out).map_err(|_| Error::RngFailed)
+    }
+}
+
+#[cfg(rind_fips)]
+impl RandomSource for SystemRandom {
+    fn fill(&mut self, out: &mut [u8]) -> Result<(), Error> {
+        crate::fips_rng::fill(out)
     }
 }
 
