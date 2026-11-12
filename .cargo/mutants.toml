@@ -267,6 +267,12 @@ exclude_re = [
   'rind/src/low/x86_64/cpu\.rs:11:\d+: replace enter_cpu_state -> u32 with 1$',
   'rind/src/low/x86_64/cpu\.rs:486:\d+: replace test_toggle -> bool with false$',
   'rind/src/low/x86_64/cpu\.rs:486:\d+: replace test_toggle -> bool with true$',
+  # The FIPS module's `SystemRandom`, compiled only under `--cfg rind_fips`,
+  # which no mutation run sets; `fips_rng`'s tests cover what it calls.
+  'rind/src/mid/rng\.rs:29:\d+: replace <impl RandomSource for SystemRandom>::fill -> Result<\(\), Error> with Ok\(\(\)\)$',
+  # Wipes a thread's DRBG as the thread exits, where no test can read it;
+  # `high::hmac_drbg::tests::zeroise_wipes_the_state_under_wipe` checks the wipe.
+  'rind/src/fips_rng\.rs:\d+:\d+: replace <impl Drop for ThreadDrbg>::drop with \(\)$',
   # Wipes a key inside a type whose own `Drop` wipes all of it, which
   # rind/tests/zeroing.rs checks.
   'rind/src/low/aarch64/aes\.rs:\d+:\d+: replace <impl Drop for AesDecKey>::drop with \(\)$',
@@ -295,7 +301,8 @@ exclude_re = [
   # case random keys reach with probability below 2^-64.
   'rind/src/high/hkdf\.rs:110:\d+: replace <impl sealed::Len for usize>::len -> usize with 0$',
   'rind/src/high/hkdf\.rs:110:\d+: replace <impl sealed::Len for usize>::len -> usize with 1$',
-  'rind/src/high/hmac_drbg\.rs:\d+:\d+: replace \+= with \*= in HmacDrbg<H>::update$',
+  'rind/src/fips_rng\.rs:\d+:\d+: replace cast -> bool with true$',
+  'rind/src/high/hmac_drbg\.rs:\d+:\d+: replace \+= with \*= in HmacDrbg<H>::generate$',
   'rind/src/high/rsa\.rs:\d+:\d+: delete match arm Error::Fault in SigningKey::decrypt_oaep$',
   'rind/src/mid/mldsa\.rs:526:\d+: replace - with [+/] in sign_internal$',
   'rind/src/mid/mldsa\.rs:762:\d+: replace < with > in expand_a$',

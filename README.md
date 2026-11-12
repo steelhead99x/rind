@@ -91,7 +91,7 @@ ring and aws-lc-rs item to rind's.
 
 The `rind` crate's own API covers AES-GCM, ChaCha20-Poly1305, and
 XChaCha20-Poly1305, QUIC header protection, X25519 and ECDH, ML-KEM-768,
-HPKE, ECDSA, Ed25519, ML-DSA, and RSA signatures, RSA blind signatures, RSA-OAEP, SHA-1, SHA-2, and SHA-3,
+HPKE, ECDSA, Ed25519, ML-DSA, and RSA signatures, RSA blind signatures, ECVRF, RSA-OAEP, SHA-1, SHA-2, and SHA-3,
 HMAC, HKDF, PBKDF2, Argon2id, and AES key wrap. Each algorithm is a constant and each key
 type has one role, so misuse fails to compile:
 

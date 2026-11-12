@@ -30,7 +30,10 @@ pub(super) mod argon2;
 pub(super) mod blake2b;
 pub(super) mod chacha20;
 pub(super) mod chacha20poly1305;
-#[cfg(not(any(rind_backend = "arm", rind_backend = "portable")))]
+#[cfg_attr(
+    any(rind_backend = "arm", rind_backend = "portable"),
+    path = "portable/edwards25519.rs"
+)]
 pub(super) mod edwards25519;
 pub(super) mod hash_to_curve;
 pub(super) mod md5;

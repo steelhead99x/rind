@@ -77,7 +77,7 @@ impl Ed25519VerifyingKey {
 /// of order dividing 8, then `y = p` and `y = p + 1`, the only `y` of a
 /// small-order point whose non-canonical `y + p` fits in 255 bits. Each is
 /// compared as little-endian limbs with s2n-bignum's proven `bignum_eq`.
-fn has_small_order(bytes: &[u8]) -> bool {
+pub(crate) fn has_small_order(bytes: &[u8]) -> bool {
     const SMALL_ORDER_Y: [[u64; 4]; 7] = [
         // `y = 0`, order 4.
         [0; 4],
