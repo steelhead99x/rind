@@ -624,8 +624,7 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # reaches it, and `SignatureDispatch.lean` defines it. SHA-1's and SHA-256's
 # padding is translated down to their block functions, which are opaque.
 # SHA-3's sponge is translated down to its Keccak-f routines, which are
-# opaque, from what the digest API and ML-KEM call: ML-DSA's SHAKE readers
-# loop over borrowed slices and zip iterators, which Aeneas cannot translate.
+# opaque, from what the digest API, ML-KEM, and ML-DSA call.
 # MD5, which no proof covers, is opaque.
 # P-256's key generation draws through a `dyn RandomSource`, so it is opaque
 # too, and `proofs/Rind/Aarch64/P256Dispatch.lean` models it above the
@@ -690,6 +689,8 @@ extract() {
         --start-from crate::mid::sha3::Sponge::absorb \
         --start-from crate::mid::sha3::Sponge::finish \
         --start-from 'crate::mid::sha3::Sha3Context::_' \
+        --start-from 'crate::mid::sha3::Shake::_' \
+        --start-from 'crate::mid::sha3::Shake4x::_' \
         --opaque crate::high::agreement::Algorithm \
         --opaque crate::high::agreement::Ops \
         --opaque crate::high::agreement::x25519_from_pkcs8 \
