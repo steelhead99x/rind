@@ -331,7 +331,18 @@ impl VerifierRecord {
         Ok(Self { w0, l })
     }
 
-    /// Loads a stored record: reduced `w0`, and uncompressed `l`.
+    /// `L`, uncompressed: the public half of the record.
+    ///
+    /// RFC 9383 has the verifier store `w0` and `L` and never `w1`. Store
+    /// the `w0` passed to [`Self::from_w1`] with these bytes, and load both
+    /// with [`Self::from_record`].
+    pub fn l(&self) -> [u8; Affine::BYTES] {
+        let _entry = Entry::new_public();
+        self.l.to_uncompressed()
+    }
+
+    /// Loads a stored record: `w0`, reduced as [`ProverSecrets::new`]
+    /// reduces it, and `l`, uncompressed, as [`Self::l`] returns it.
     ///
     /// Fails with [`Error::KeyRejected`] when `l` is not on the curve.
     pub fn from_record(w0: &[u8], l: &[u8]) -> Result<Self, Error> {
@@ -758,10 +769,7 @@ mod tests {
         let prover = ProverSecrets::new(&hex(vector.w0), &hex(vector.w1)).unwrap();
         let from_w1 = VerifierRecord::from_w1(&hex(vector.w0), &hex(vector.w1)).unwrap();
         let loaded = VerifierRecord::from_record(&hex(vector.w0), &hex(vector.l)).unwrap();
-        assert_eq!(
-            from_w1.l.to_uncompressed().as_slice(),
-            hex(vector.l).as_slice()
-        );
+        assert_eq!(from_w1.l().as_slice(), hex(vector.l).as_slice());
 
         let (share_p, prover) = prover
             .start_at(
@@ -1330,7 +1338,7 @@ mod tests {
         ct::secret_slice(&w1);
         fn one<S: 'static>(suite: &'static Suite<S>, w0: &[u8], w1: &[u8]) {
             let verifier = VerifierRecord::from_w1(w0, w1).unwrap();
-            let l = verifier.l.to_uncompressed();
+            let l = verifier.l();
             ct::public_slice(&l);
             exchange(suite, ProverSecrets::new(w0, w1).unwrap(), verifier);
             exchange(
