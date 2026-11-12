@@ -1,4 +1,5 @@
 import Rind.X86_64.X25519
+import Rind.X86_64.P256Agree
 import Rind.X86_64.P384
 import Rind.X86_64.Sha512
 import Rind.X86_64.Pbkdf2
@@ -13,7 +14,7 @@ open rind.x86_64
 
 /-!
 The axioms each theorem rests on, beyond Lean's own: s2n-bignum's contracts
-in `Rind.X86_64.S2nBignum` for X25519, P-384 ECDH, Ed25519, RSA
+in `Rind.X86_64.S2nBignum` for X25519, P-256 and P-384 ECDH, Ed25519, RSA
 verification, and the Keccak-f of SHA-3 and ML-KEM's SHAKE, aws-lc's in
 `Rind.X86_64.AwsLc` for the SHA-512 family, for HMAC, HKDF, and PBKDF2, which
 cover SHA-384 and SHA-512, and for Ed25519's hashes, Vale's in
@@ -58,6 +59,28 @@ change to the trust base.
 /-- info: 'rind.x86_64.x25519_shared_secret' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms x25519_shared_secret
+
+/-- info: 'rind.x86_64.p256_agree' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_add_p256_spec,
+ bignum_demont_p256_alt_spec,
+ bignum_demont_p256_spec,
+ bignum_eq_spec,
+ bignum_montmul_p256_alt_spec,
+ bignum_montmul_p256_spec,
+ bignum_montsqr_p256_alt_spec,
+ bignum_montsqr_p256_spec,
+ bignum_tomont_p256_alt_spec,
+ bignum_tomont_p256_spec,
+ p256_scalarmul_alt_spec,
+ p256_scalarmul_spec] -/
+#guard_msgs in
+#print axioms p256_agree
+
+/-- info: 'rind.x86_64.p256_shared_secret' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms p256_shared_secret
 
 /-- info: 'rind.x86_64.p384_agree' depends on axioms: [propext,
  Classical.choice,
