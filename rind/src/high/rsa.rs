@@ -7,7 +7,7 @@ use crate::high::asn1::{self, Type, pkix};
 use crate::high::hash::{self, Hash};
 use crate::high::{pkcs1, pkcs8};
 use crate::low::{Entry, PosInt, ct};
-use crate::mid::rng::SystemRandom;
+use crate::mid::rng::{RandomSource, SystemRandom};
 use crate::mid::rsa_key_size::RsaKeySize;
 use crate::mid::{rsa_priv, rsa_pub};
 
@@ -64,7 +64,7 @@ impl PssSalt {
 ///
 /// Keys supported by this library have public moduli between
 /// 1024- and 8192-bits; each verification algorithm may set a higher floor.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct VerifyingKey(rsa_pub::RsaPublicKey);
 
 impl VerifyingKey {
@@ -113,7 +113,7 @@ impl VerifyingKey {
     /// This format is defined in
     /// [RFC8017](https://datatracker.ietf.org/doc/html/rfc8017#appendix-A.1.1)
     /// (and earlier standards, including the original PKCS#1 standard).
-    fn from_pkcs1_der(bytes: &[u8]) -> Result<Self, Error> {
+    pub(crate) fn from_pkcs1_der(bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_public();
         let decoded = pkix::RSAPublicKey::from_bytes(bytes).map_err(KeyFormatError::Asn1)?;
 
@@ -342,8 +342,17 @@ impl VerifyingKey {
         signature: &[u8],
         message: &[u8],
     ) -> Result<(), Error> {
-        let hash = H::hash(message);
+        self.verify_pss_digest::<H>(salt, signature, H::hash(message).as_ref())
+    }
 
+    /// Verifies `signature` as [`Self::verify_pss_sha256`] and its siblings
+    /// do, over a message whose `H` digest is `hash`.
+    pub(crate) fn verify_pss_digest<H: Hash>(
+        &self,
+        salt: Option<PssSalt>,
+        signature: &[u8],
+        hash: &[u8],
+    ) -> Result<(), Error> {
         if signature.len() != self.0.modulus_len_bytes() {
             return Err(Error::BadSignature);
         }
@@ -357,8 +366,8 @@ impl VerifyingKey {
         let mut em = [0u8; rsa_pub::MAX_PUBLIC_MODULUS_BYTES];
         let em = i2osp(&m, &mut em[..em_bits.div_ceil(8)]).map_err(|_| Error::BadSignature)?;
 
-        let s_len = salt.map(|salt| salt.len(em.len(), hash.as_ref().len()));
-        pkcs1::verify_pss_sig::<H>(em, em_bits, hash.as_ref(), s_len)
+        let s_len = salt.map(|salt| salt.len(em.len(), hash.len()));
+        pkcs1::verify_pss_sig::<H>(em, em_bits, hash, s_len)
     }
 
     /// Encrypts `message` with RSAES-OAEP, using `H` and MGF1 with `H`,
@@ -383,20 +392,125 @@ impl VerifyingKey {
         let em = &mut em[..k];
         pkcs1::encode_oaep::<H>(em, &mut SystemRandom, message, label)?;
 
-        // The encoded message is secret, so it is read at the modulus's
-        // width rather than by `PosInt::from_bytes`, which skips its
-        // leading zeros.
-        let mut words = [0u64; rsa_pub::MAX_PUBLIC_MODULUS_BYTES / 8];
-        let words = &mut words[..k.div_ceil(8)];
-        for (word, bytes) in words.iter_mut().zip(em.rchunks(8)) {
-            *word = bytes.iter().fold(0, |w, b| w << 8 | u64::from(*b));
-        }
-        let m = PosInt::from_words(words)?;
-
         // `m` is below the modulus, as EM's first octet is zero.
-        let c = ct::into_public(self.0.public_op(m)?);
+        let c = ct::into_public(self.0.public_op(secret_int(em))?);
         i2osp(&c, ciphertext).map(|c| &*c)
     }
+
+    /// Blinds the RSASSA-PSS encoding of a message whose `H` digest is
+    /// `hash`, as RFC 9474's Blind does: writes `m * r^e mod n`, for an `r`
+    /// drawn uniformly from `rng`, to the front of `blinded`, as long as the
+    /// modulus, and returns the [`Unblinder`] that finalizes its signature.
+    ///
+    /// Refuses a key whose modulus shares a factor with `m`, which only one
+    /// made to attack its clients gives more than negligibly often.
+    pub(crate) fn blind_pss<'a, H: Hash>(
+        &self,
+        salt: PssSalt,
+        hash: &[u8],
+        rng: &mut dyn RandomSource,
+        blinded: &'a mut [u8],
+    ) -> Result<(&'a [u8], Unblinder), Error> {
+        let _entry = Entry::new_secret();
+        let k = self.0.modulus_len_bytes();
+        let blinded = blinded.get_mut(..k).ok_or(Error::WrongLength)?;
+        let n = &self.0.n;
+
+        // RFC 8017 section 9.1.1, as `SigningKey::_sign_pss` encodes.
+        let em_bits = self.0.modulus_len_bits() - 1;
+        let mut em = [0u8; rsa_pub::MAX_PUBLIC_MODULUS_BYTES];
+        let em = &mut em[..em_bits.div_ceil(8)];
+        let s_len = salt.len(em.len(), hash.len());
+        pkcs1::encode_pss_sig::<H>(em, em_bits, rng, hash, s_len)?;
+        let m = secret_int(em);
+        if !ct::into_public(m.is_coprime(n)) {
+            return Err(KeyFormatError::RsaModulus.into());
+        }
+
+        // Rejection sampling, revealing only which candidates are refused:
+        // one at least `n`, or, for a key that is not a product of two
+        // large primes, one sharing a factor with it.
+        let mut candidate = [0u8; rsa_pub::MAX_PUBLIC_MODULUS_BYTES];
+        let candidate = &mut candidate[..k];
+        let (r, inverse) = loop {
+            rng.fill(candidate)?;
+            candidate[0] &= 0xff >> (k * 8 - self.0.modulus_len_bits());
+            let r = secret_int(candidate);
+            if !ct::into_public(r.less_than(n)) {
+                continue;
+            }
+            let inverse = r.mod_inverse(n);
+            if ct::into_public(self.0.mul(&r, &inverse).equals(&n.fixed_one())) {
+                break (r, inverse);
+            }
+        };
+
+        // `m` and `r` are below `n`, and so is `r^e`.
+        let x = self.0.public_op(r)?;
+        let z = ct::into_public(self.0.mul(&m, &x));
+        i2osp(&z, blinded)?;
+        Ok((blinded, Unblinder { inverse, m }))
+    }
+
+    /// Unblinds `blind_signature` with `unblinder`, as RFC 9474's Finalize
+    /// does, writing the result to the front of `signature` once it is a
+    /// signature of the blinded message.
+    ///
+    /// RFC 9474 checks the result with RSASSA-PSS-VERIFY. This checks that
+    /// it is a signature of the very encoding that was blinded, which also
+    /// pins its salt, in constant time: a reply from a malicious signer, such
+    /// as 1, can unblind to the secret inverse itself, which PSS decoding
+    /// would branch on.
+    ///
+    /// Every failure is [`Error::BadSignature`].
+    pub(crate) fn finalize<'a>(
+        &self,
+        unblinder: &Unblinder,
+        blind_signature: &[u8],
+        signature: &'a mut [u8],
+    ) -> Result<&'a [u8], Error> {
+        let _entry = Entry::new_secret();
+        let k = self.0.modulus_len_bytes();
+        let signature = signature.get_mut(..k).ok_or(Error::WrongLength)?;
+        if blind_signature.len() != k {
+            return Err(Error::BadSignature);
+        }
+        let z = RsaInt::from_bytes(blind_signature).map_err(|_| Error::BadSignature)?;
+        if !z.less_than(&self.0.n) {
+            return Err(Error::BadSignature);
+        }
+
+        // `z` and the inverse are below `n`, and so is their product.
+        let s = self.0.mul(&z, &unblinder.inverse);
+        let m = self.0.public_op(s.clone())?;
+        if !ct::into_public(m.equals(&unblinder.m)) {
+            return Err(Error::BadSignature);
+        }
+        // The signature is the client's to reveal, once it is checked.
+        i2osp(&ct::into_public(s), signature)?;
+        Ok(signature)
+    }
+}
+
+/// What finalizes a blinded message's signature: the inverse of its blind
+/// mod the modulus, and the encoding that was blinded, to check it against.
+pub(crate) struct Unblinder {
+    inverse: RsaInt,
+    m: RsaInt,
+}
+
+/// An integer at the width of the widest modulus.
+type RsaInt = PosInt<{ rsa_pub::MAX_PUBLIC_MODULUS_BYTES / 8 }>;
+
+/// Reads a secret big-endian value at the width of its bytes, rather than
+/// by `PosInt::from_bytes`, whose time depends on its leading zeros.
+fn secret_int(bytes: &[u8]) -> RsaInt {
+    let mut words = [0u64; rsa_pub::MAX_PUBLIC_MODULUS_BYTES / 8];
+    let words = &mut words[..bytes.len().div_ceil(8)];
+    for (word, bytes) in words.iter_mut().zip(bytes.rchunks(8)) {
+        *word = bytes.iter().fold(0, |w, b| w << 8 | u64::from(*b));
+    }
+    RsaInt::from_words(words).expect("no wider than the widest modulus")
 }
 
 /// An RSA signing private key.
@@ -418,6 +532,23 @@ impl SigningKey {
         let _entry = Entry::new_secret();
         rsa_priv::RsaPrivateKey::generate(size, &mut SystemRandom, &mut SystemRandom)
             .map(SigningKey)
+    }
+
+    /// The key [`Self::generate`] makes of the primes `p` and `q`, for
+    /// tests whose vectors give them.
+    #[cfg(test)]
+    pub(crate) fn from_primes(size: RsaKeySize, p: &[u8], q: &[u8]) -> Self {
+        use crate::high::hmac_drbg::HmacDrbg;
+        use crate::mid::rng::SliceRandomSource;
+        let _entry = Entry::new_secret();
+        Self(
+            rsa_priv::RsaPrivateKey::generate(
+                size,
+                &mut SliceRandomSource(&[p, q].concat()),
+                &mut HmacDrbg::<hash::Sha256>::new(b"", b"", b""),
+            )
+            .unwrap(),
+        )
     }
 
     /// Decodes an RSA signing key from PKCS#1 DER format.
@@ -739,6 +870,26 @@ impl SigningKey {
         let em = i2osp(&m, &mut em[..k])?;
 
         pkcs1::decode_oaep::<H>(em, label, plaintext)
+    }
+
+    /// Signs `blinded`, as RFC 9474's BlindSign does, writing the blind
+    /// signature to the front of `signature`, as long as the modulus.
+    ///
+    /// `blinded` must be as long as the modulus and below it, or this fails
+    /// with [`Error::WrongLength`]. The signature is checked against the
+    /// public key, as RFC 9474 requires, before it is returned.
+    pub(crate) fn blind_sign<'a>(
+        &self,
+        signature: &'a mut [u8],
+        blinded: &[u8],
+    ) -> Result<&'a [u8], Error> {
+        let _entry = Entry::new_secret();
+        if blinded.len() != self.0.modulus_len_bytes() {
+            return Err(Error::WrongLength);
+        }
+        let m = PosInt::from_bytes(blinded)?;
+        let s = ct::into_public(self.0.private_op(&m)?);
+        self.to_signature(&s, signature)
     }
 
     /// Writes `c` to the front of `signature` in exactly the modulus length.

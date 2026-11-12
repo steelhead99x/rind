@@ -240,6 +240,49 @@ pub mod rsa {
     }
 }
 
+/// RSA blind signatures ([RFC 9474]): a server signs a message a client
+/// blinded, learning nothing of it, and the client unblinds the reply into an
+/// RSASSA-PSS signature that anyone verifies with the server's public key.
+///
+/// Each of the four RSABSSA-SHA384 variants is an [`Algorithm`](blind_rsa::Algorithm).
+/// Privacy Pass's publicly verifiable tokens ([RFC 9578], type `0x0002`) use
+/// [`RSABSSA_SHA384_PSS_DETERMINISTIC`](blind_rsa::RSABSSA_SHA384_PSS_DETERMINISTIC)
+/// with 2048-bit keys.
+///
+/// ```
+/// # fn main() -> Result<(), rind::Error> {
+/// use rind::blind_rsa::*;
+/// use rind::rsa::KeySize;
+///
+/// // The server generates a key, and publishes its public key.
+/// let key_pair = KeyPair::generate(&RSABSSA_SHA384_PSS_RANDOMIZED, KeySize::Rsa2048)?;
+/// let spki = key_pair.public_key().to_spki();
+///
+/// // The client blinds a message to it, and sends the server the blinded
+/// // message, keeping its blinding.
+/// let public_key = PublicKey::new(&RSABSSA_SHA384_PSS_RANDOMIZED, spki.as_ref())?;
+/// let (blinded_message, blinding) = public_key.blind(b"hello")?;
+///
+/// // The server signs it, and the client unblinds the reply.
+/// let blind_signature = key_pair.blind_sign(blinded_message.as_ref())?;
+/// let signature = blinding.finalize(blind_signature.as_ref())?;
+///
+/// // Anyone with the public key verifies the signature.
+/// public_key.verify(b"hello", signature.as_ref())?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// [RFC 9474]: https://www.rfc-editor.org/rfc/rfc9474.html
+/// [RFC 9578]: https://www.rfc-editor.org/rfc/rfc9578.html
+pub mod blind_rsa {
+    pub use crate::high::blind_rsa::{
+        Algorithm, BlindSignature, BlindedMessage, Blinding, KeyPair, PublicKey,
+        RSABSSA_SHA384_PSS_DETERMINISTIC, RSABSSA_SHA384_PSS_RANDOMIZED,
+        RSABSSA_SHA384_PSSZERO_DETERMINISTIC, RSABSSA_SHA384_PSSZERO_RANDOMIZED, Signature,
+    };
+}
+
 /// Public key signatures: ECDSA on P-256, P-384, and P-521, RSA, and Ed25519.
 ///
 /// A key pair signs with a [`signature::sign`] algorithm, and a peer's

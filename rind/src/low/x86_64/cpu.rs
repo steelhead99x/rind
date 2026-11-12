@@ -456,6 +456,7 @@ fn detect() -> u32 {
     // (https://bugs.kde.org/show_bug.cgi?id=494162), so `admin/ctgrind` builds
     // with this switch to check the ADX routines rather than their `_alt`
     // twins.
+    // See UPSTREAM.md, "Valgrind hides ADX from `cpuid`".
     let adx = is_x86_feature_detected!("adx") || option_env!("VALGRIND_BUG_494162").is_some();
 
     (if test_toggle("intel", intel) {

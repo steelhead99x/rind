@@ -50,7 +50,7 @@ SHA-512.
 | P-521 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ |  |  |  |  |
 | ML-KEM | s2n-bignum ✓ + mlkem-native ✓ + Graviola ⚡ | mlkem-native ⚡ + s2n-bignum ✓ |  |  |  |
 | ML-DSA-44, ML-DSA-65, ML-DSA-87 | s2n-bignum ✓ + mldsa-native ⚡ | mldsa-native ⚡ + s2n-bignum ✓ |  |  |  |
-| RSA signatures, OAEP, key generation | s2n-bignum ✓ + aws-lc ⚡ + rind ⚡ | s2n-bignum ✓ + aws-lc ⚡ |  |  |  |
+| RSA signatures, OAEP, blind signatures, key generation | s2n-bignum ✓ + aws-lc ⚡ + rind ⚡ | s2n-bignum ✓ + aws-lc ⚡ |  |  |  |
 
 - RSA: x86_64 with ADX multiplies 1024- and 2048-bit moduli by
   [s2n-bignum]'s verified Karatsuba routines, as [#224] decided, rather than
@@ -113,7 +113,7 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | P-521 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ |  | fiat-crypto ✓ + rind ⚡ |  |
 | ML-KEM | s2n-bignum ✓ + Graviola ⚡ |  | mlkem-native ⚡ + OpenSSL ⚡ + Graviola ⚡ | mlkem-native ⚡ + HACL* + Graviola ⚡ |
 | ML-DSA-44, ML-DSA-65, ML-DSA-87 | s2n-bignum ✓ + mldsa-native ⚡ |  | mldsa-native ⚡ + OpenSSL ⚡ | mldsa-native ⚡ + HACL* |
-| RSA signatures, OAEP, key generation | s2n-bignum ✓ + aws-lc ⚡ + Graviola ⚡ |  | aws-lc ⚡ + Graviola ⚡ + rind ⚡ | Graviola ⚡ + rind ⚡ |
+| RSA signatures, OAEP, blind signatures, key generation | s2n-bignum ✓ + aws-lc ⚡ + Graviola ⚡ |  | aws-lc ⚡ + Graviola ⚡ + rind ⚡ | Graviola ⚡ + rind ⚡ |
 
 - AES header protection on aarch64 pays the same indirect call as AES-GCM
   key setup on x86_64.
@@ -402,6 +402,18 @@ modulus and exponent.  Each OAEP key is bound to one hash.  OAEP decryption is
 constant time through its padding check, and fails every malformed
 ciphertext with the same error, so it is no Manger oracle.  PKCS#1 v1.5
 encryption, which invites padding-oracle attacks, is refused.
+
+RSA blind signatures (RFC 9474) take no arithmetic of their own: a client
+blinds a message's RSASSA-PSS encoding by the public operation on a random
+blind and a Montgomery multiplication, the server signs it by the private
+operation above, checked against its public key, and the client unblinds the
+reply by the blind's inverse, from `bignum_modinv`.  Rather than
+RSASSA-PSS-VERIFY, which would branch on what a malicious reply unblinds to
+(1 unblinds to the inverse itself), the client checks in constant time that
+the result's public operation gives the very encoding it blinded.  Blinding
+and unblinding run in constant time in the message, its prefix and salt, and
+the blind, revealing only which candidate blinds rejection sampling discards
+and whether the reply was good.
 
 RSA key generation is supported for five fixed key sizes between 2048-8192-bits.
 All generated keys have e = 0x10001 and, as in aws-lc, d reduced mod

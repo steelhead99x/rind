@@ -211,6 +211,7 @@ jobs:
                 ;;
               armv7-*/no-crypto)
                 export RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha1=1 RIND_CPU_DISABLE_sha2=1
+                # See UPSTREAM.md, "aws-lc cannot deny 32-bit ARM features at run time".
                 export CFLAGS_armv7_unknown_linux_gnueabihf='-DOPENSSL_STATIC_ARMCAP -DOPENSSL_STATIC_ARMCAP_NEON'
                 ;;
               # AVX-512 F, DQ, IFMA, CD, BW, and VL in CPUID leaf 7's EBX, and

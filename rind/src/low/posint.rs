@@ -167,11 +167,10 @@ impl<const N: usize> PosInt<N> {
 
     /// Return true if `gcd(self, other)` is one
     pub(crate) fn is_coprime(&self, other: &Self) -> bool {
-        let mut tmp = vec![0u64; N + N];
-        let r = low::bignum_coprime(self.as_words(), other.as_words(), &mut tmp);
-        // Key generation's values are secret, and this scratch is on the heap.
-        low::zeroise(&mut tmp);
-        r
+        const { assert!(N <= MAX_SCRATCH_WORDS) };
+        // On the stack, so nothing derived from a key outlives the call.
+        let mut tmp = [0u64; 2 * MAX_SCRATCH_WORDS];
+        low::bignum_coprime(self.as_words(), other.as_words(), &mut tmp[..N + N])
     }
 
     /// The significant words.
@@ -565,15 +564,15 @@ impl<const N: usize> PosInt<N> {
     pub(crate) fn mod_inverse(&self, n: &Self) -> Self {
         let mut r = Self::zero();
         r.used = n.used;
-        let mut temp = vec![0u64; N * 3];
+        const { assert!(N <= MAX_SCRATCH_WORDS) };
+        // On the stack, as `is_coprime`'s.
+        let mut temp = [0u64; 3 * MAX_SCRATCH_WORDS];
         low::bignum_modinv(
             r.as_mut_words(),
             self.as_words_with_len_of(n),
             n.as_words(),
-            &mut temp,
+            &mut temp[..N * 3],
         );
-        // Key generation's values are secret, and this scratch is on the heap.
-        low::zeroise(&mut temp);
         r
     }
 
@@ -680,6 +679,10 @@ impl<const N: usize> PosInt<N> {
 
 // All-zero bytes are a valid zero.
 impl<const N: usize> low::Zeroable for PosInt<N> {}
+
+/// The widest operands of `is_coprime` and `mod_inverse`, an 8192-bit
+/// modulus, whose scratch is sized for it on the stack.
+const MAX_SCRATCH_WORDS: usize = 128;
 
 /// `base` ^ `e` mod `n`, one of a pair for [`PosInt::mod_exp_pair`], where
 /// `n_montifier` is `n.montifier()` and `n_0` is `n.mont_neg_inverse()`.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copy aws-lc's and BoringSSL's vector files that rind's tests run, and RFC
-# 9180's HPKE vectors, into thirdparty/vectors, from the revisions pinned here. Both repositories are
+# 9180's HPKE and RFC 9474's blind RSA vectors, into thirdparty/vectors, from the revisions pinned here. Both repositories are
 # hundreds of megabytes, so rind keeps copies of the files rather than
 # submodules. Bump a revision and rerun to update them.
 set -euo pipefail
@@ -10,6 +10,9 @@ BORINGSSL=0131ae9d78e42fcc2c1811315e62410ad96d8230
 # RFC 9180's repository. hpkewg/hpke's revision of it repeats these vectors
 # unchanged.
 HPKE=b1f7cb0cdeab6906c61b3d6574e8bdfdbe1cd3fb
+# blind-rsa-signatures 0.18.0, whose JSON holds all four of RFC 9474's
+# vectors; the CFRG draft's repository holds stale ones.
+BLIND_RSA=45d0abfa829c3623389daae30bc35e9b2f3b550c
 
 # aws-lc's copy of each file BoringSSL also has holds every BoringSSL vector
 # for rind's algorithms, so BoringSSL contributes only its own files.
@@ -79,3 +82,8 @@ mkdir rfc9180
 curl --fail --silent --show-error --location \
     "https://raw.githubusercontent.com/cfrg/draft-irtf-cfrg-hpke/$HPKE/test-vectors.json" |
     jq -c '.[] | select(.mode == 0 and .kem_id != 33)' >rfc9180/test-vectors.json
+
+rm -rf rfc9474
+mkdir rfc9474
+curl --fail --silent --show-error --location --output rfc9474/test-vectors.json \
+    "https://raw.githubusercontent.com/jedisct1/rust-blind-rsa-signatures/$BLIND_RSA/tests/test_vectors_rfc9474.json"

@@ -2995,3 +2995,70 @@ mod ml_dsa_65 {
 mod ml_dsa_87 {
     ml_dsa_crosschecks!(MlDsa87, ML_DSA_87_SIGNING, ML_DSA_87);
 }
+
+/// Each side of RFC 9474's protocol against blind-rsa-signatures' other
+/// side, for each variant.
+mod blind_rsa {
+    use blind_rsa_signatures::{
+        DefaultRng, Deterministic, MessagePrepare, MessageRandomizer, PSS, PSSZero, Randomized,
+        SaltMode, SecretKey, Sha384,
+    };
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use rind::blind_rsa::*;
+
+    // Their keys are 2048 to 4096 bits.
+    const KEYS: [&[u8]; 2] = [
+        include_bytes!("../src/high/rsa/rsa2048.pkcs8.der"),
+        include_bytes!("../src/high/rsa/rsa4096.pkcs8.der"),
+    ];
+
+    fn check<S: SaltMode, M: MessagePrepare>(algorithm: &'static Algorithm, message: &[u8]) {
+        for der in KEYS {
+            let ours = KeyPair::from_pkcs8(algorithm, der).unwrap();
+            let theirs = SecretKey::<Sha384, S, M>::from_der(der).unwrap();
+            let our_public = ours.public_key();
+            let their_public = theirs.public_key().unwrap();
+            let spki = their_public.to_spki().unwrap();
+            assert_eq!(our_public.to_spki().as_ref(), spki);
+            PublicKey::new(algorithm, &spki).unwrap();
+
+            // Our client, their server.
+            let (blinded, blinding) = our_public.blind(message).unwrap();
+            let blind_signature = theirs.blind_sign(blinded.as_ref()).unwrap();
+            let signature = blinding.finalize(&blind_signature).unwrap();
+            let (prefix, rsa_signature) = signature.as_ref().split_at(match M::RANDOMIZE {
+                true => 32,
+                false => 0,
+            });
+            let randomizer = M::RANDOMIZE.then(|| MessageRandomizer(prefix.try_into().unwrap()));
+            their_public
+                .verify(&rsa_signature.to_vec().into(), randomizer, message)
+                .unwrap();
+
+            // Their client, our server.
+            let result = their_public.blind(&mut DefaultRng, message).unwrap();
+            let blind_signature = ours.blind_sign(&result.blind_message).unwrap();
+            let blind_signature = blind_signature.as_ref().to_vec().into();
+            let signature = their_public
+                .finalize(&blind_signature, &result, message)
+                .unwrap();
+            let prefix = result.msg_randomizer.as_ref().map_or(&[][..], |r| &r.0[..]);
+            our_public
+                .verify(message, &[prefix, &signature].concat())
+                .unwrap();
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(16))]
+
+        #[test]
+        fn matches_blind_rsa_signatures(message in vec(any::<u8>(), 0..300)) {
+            check::<PSS, Randomized>(&RSABSSA_SHA384_PSS_RANDOMIZED, &message);
+            check::<PSSZero, Randomized>(&RSABSSA_SHA384_PSSZERO_RANDOMIZED, &message);
+            check::<PSS, Deterministic>(&RSABSSA_SHA384_PSS_DETERMINISTIC, &message);
+            check::<PSSZero, Deterministic>(&RSABSSA_SHA384_PSSZERO_DETERMINISTIC, &message);
+        }
+    }
+}
