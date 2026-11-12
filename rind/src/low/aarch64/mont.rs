@@ -11,11 +11,14 @@
 //!
 //! On a narrow multiplier the comparison reverses. At 16 and 32 words,
 //! RSA-2048's prime and modulus, this runs s2n-bignum's Karatsuba product
-//! and its 8n reduction. At any other multiple of eight words up to 128,
-//! such as RSA-3072's 24 and 48 and RSA-4096's 64, it runs s2n-bignum's
-//! generic product or square and the same reduction. That is what aws-lc
-//! runs on a core outside its wide allowlist (Neoverse V1, V2, V3, and
-//! Apple). This crate also keeps `bn_mul_mont` on Neoverse N2, Cobalt 100,
+//! and its 8n reduction. At 24, 48, and 64 words, RSA-3072's prime and
+//! modulus and RSA-4096's modulus, it runs s2n-bignum's generic product or
+//! square and the same reduction, which measured 1.3x to 1.4x faster than
+//! `bn_mul_mont` on a Raspberry Pi 5 (Cortex-A76). aws-lc runs the same
+//! routines at every multiple of eight words on a core outside its wide
+//! allowlist (Neoverse V1, V2, V3, and Apple); the other multiples of eight
+//! (such as RSA-6144's 96 and RSA-8192's 128) stay on `bn_mul_mont` here
+//! until they are measured. This crate also keeps `bn_mul_mont` on Neoverse N2, Cobalt 100,
 //! and any core Linux does not identify as Cortex-A72, Cortex-A76, or
 //! Neoverse N1. The generic routines run only below two words.
 
@@ -25,7 +28,7 @@ pub(crate) fn mont_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) 
     assert!(z.len() == m.len() && x.len() == m.len() && y.len() == m.len());
     match m.len() {
         16 | 32 if !super::cpu::wide_multiplier() => karatsuba_mul(z, x, y, m, n0),
-        k if k.is_multiple_of(8) && k <= MAX_8N && !super::cpu::wide_multiplier() => {
+        k if NARROW_8N.contains(&k) && !super::cpu::wide_multiplier() => {
             generic_8n(z, x, Some(y), m, n0)
         }
         k if k >= 2 => mul_mont(z, x, y, m, n0),
@@ -39,7 +42,7 @@ pub(crate) fn mont_sqr(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
     assert!(z.len() == m.len() && x.len() == m.len());
     match m.len() {
         16 | 32 if !super::cpu::wide_multiplier() => karatsuba_sqr(z, x, m, n0),
-        k if k.is_multiple_of(8) && k <= MAX_8N && !super::cpu::wide_multiplier() => {
+        k if NARROW_8N.contains(&k) && !super::cpu::wide_multiplier() => {
             generic_8n(z, x, None, m, n0)
         }
         k if k >= 2 => mul_mont(z, x, x, m, n0),
@@ -76,6 +79,10 @@ fn karatsuba_sqr(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
 /// The widest `generic_8n` takes, an 8192-bit modulus, the largest RSA key
 /// rind accepts. aws-lc's `BN_MONTGOMERY_MAX_WORDS` bounds it the same way.
 const MAX_8N: usize = 128;
+
+/// The widths `generic_8n` runs at on a narrow multiplier: those measured
+/// faster than `bn_mul_mont` on a Cortex-A76.
+const NARROW_8N: [usize; 3] = [24, 48, 64];
 
 /// `mont_mul`, or with no `y` `mont_sqr`, for a multiple of eight words up to
 /// `MAX_8N` on a narrow multiplier, as aws-lc's
