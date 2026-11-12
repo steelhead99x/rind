@@ -11,8 +11,9 @@ qemu. Those runs test `rind` and `rind-rustls`. The wasm runs below do
 not: they build, and on `wasm32-wasip2` test, the `rind` library only.
 iOS devices' code is only built, which is not a test, so a device target
 is not covered. CI neither compiles nor tests big-endian `aarch64`,
-big-endian `arm`, `i586`, `riscv32`, `sparc64`, or MIPS. `rind/build.rs` would select the portable
-backend for each of them. Stable Rust ships no MIPS standard library.
+big-endian `arm`, `i586`, `riscv32`, `sparc64`, or MIPS.
+`rind/build.rs` would select the portable backend for each of them.
+Stable Rust ships no MIPS standard library.
 
 ## Targets by triple
 
