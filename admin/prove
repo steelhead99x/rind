@@ -378,7 +378,8 @@ routine_layout() {
 # Each routine rind imports with a published proof, against the object code
 # that proof checked, which `admin/prove-bytes` describes. Vale's and aws-lc's
 # are assembled here from their upstream's text, at the revision of their
-# proofs, with the GNU assembler.
+# proofs, with the GNU assembler, and so are s2n-bignum's routines proven by
+# program equivalence, from the submodule's source.
 bytes() {
     local dir=$out/bytes arch kind path name obj sym target found
     git submodule update --init --depth 1 thirdparty/s2n-bignum
@@ -398,6 +399,21 @@ bytes() {
     aarch64-linux-gnu-cpp -I "$aws_lc/include" "$aws_lc/generated-src/linux-aarch64/crypto/fipsmodule/sha512-armv8.S" |
         aarch64-linux-gnu-as -L -o "$dir/sha512-armv8.o"
     admin/prove-bytes list >"$dir/routines"
+    # The routines s2n-bignum proves by program equivalence, whose proofs
+    # load the object its Makefile assembles rather than assert its bytes:
+    # assemble each as that Makefile does, and keep its `.text`, which
+    # `admin/prove-bytes check` compares against rind's.
+    local source tuned
+    while read -r arch source; do
+        tuned=$dir/$arch/$(basename "$source")
+        aarch64-linux-gnu-cpp -I thirdparty/s2n-bignum/include -xassembler-with-cpp - <"thirdparty/s2n-bignum/$source.S" |
+            tr ';' '\n' | aarch64-linux-gnu-as -march=armv8.2-a+sha3 -march=armv8-a+crypto -o "$tuned.o" -
+        if "$tools/llvm-objdump" -r "$tuned.o" | grep -q '^RELOCATION RECORDS FOR \[\.text\]'; then
+            echo "admin/prove: $source.S has relocations, which the check of a tuned object does not read" >&2
+            return 1
+        fi
+        "$tools/llvm-objcopy" -O binary --only-section=.text "$tuned.o" "$tuned.tuned"
+    done < <(admin/prove-bytes tuned)
     while read -r arch kind path name obj sym; do
         # A routine with no symbol is either inlined, which `admin/prove-bytes`
         # knows from its source, or called by nothing in the library.

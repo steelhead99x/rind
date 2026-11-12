@@ -3,6 +3,7 @@
 rind's build, to the instructions that proof checked.
 
 Usage: admin/prove-bytes list
+       admin/prove-bytes tuned
        admin/prove-bytes check <dir>
        admin/prove-bytes clobbers
        admin/prove-bytes inventory <dir>
@@ -27,6 +28,13 @@ harness in `rind/src/low/abi.rs` checks that it does.
 s2n-bignum's proofs each assert the bytes of the object code they are about,
 as a list in the proof's source, which `define_assert_from_elf` checks
 against s2n-bignum's build. `check` reads that list at the submodule's commit.
+Some of s2n-bignum's scheduled routines are proven by program equivalence
+instead: the proof asserts the bytes of an unscheduled base program, loads
+the scheduled routine's object with `define_from_elf`, which asserts nothing
+about its bytes, and proves the two equivalent. `tuned` lists those routines,
+`admin/prove` assembles each from the submodule's source as s2n-bignum's
+Makefile does, writing its `.text` to `<dir>/<arch>/<name>.tuned`, and
+`check` compares rind's code against that object.
 Vale's proofs are of the code its printer writes, and aws-lc-verification's
 of aws-lc's build at the revision it pins, so `admin/prove` assembles that
 text with the GNU assembler. rind's code must hold the same instructions, in
@@ -167,8 +175,25 @@ class Insn:
         return None not in self.data
 
 
-def proven(arch, source):
-    """The instructions of the object code `source`'s proof asserts."""
+def tuned(arch, source):
+    """Whether `source`'s proof is by program equivalence: it loads the
+    routine's own object with `define_from_elf`, asserting none of its bytes,
+    asserts an unscheduled base program's with `define_assert_from_elf`, and
+    proves an `_EQUIV` theorem between them."""
+    text = open(os.path.join(S2N, ARCHES[arch], "proofs", os.path.basename(source) + ".ml")).read()
+    obj = re.escape(f'"{source}.o"')
+    return (
+        re.search(r"\bdefine_from_elf\s*\"\w+_mc\"\s*" + obj, text) is not None
+        and re.search(r"define_assert(_relocs)?_from_elf\b(?:(?!;;).)*?" + obj, text, re.S) is None
+        and re.search(r"\bdefine_assert_from_elf\b", text) is not None
+        and re.search(r"^let \w+_EQUIV\w* = (?:time )?prove\b", text, re.M) is not None
+    )
+
+
+def proven(arch, source, out=None):
+    """The instructions of the object code `source`'s proof asserts, or, for
+    a proof by equivalence, of the object `admin/prove` assembled into `out`
+    from the source s2n-bignum's proof loads."""
     s2n = ARCHES[arch]
     name = os.path.basename(source)
     path = os.path.join(S2N, s2n, "proofs", name + ".ml")
@@ -177,6 +202,15 @@ def proven(arch, source):
     m = re.search(
         r"define_assert(_relocs)?_from_elf\b(?:(?!;;).)*?\"\w+_mc\"\s*" + obj, text, re.S
     )
+    if not m and tuned(arch, source):
+        if arch != "aarch64":
+            raise Check(f"{path} is proven by equivalence, which the check reads only on aarch64")
+        if out is None:
+            raise Check(f"{path} is proven by equivalence, which needs `admin/prove`'s object")
+        data = open(os.path.join(out, arch, name + ".tuned"), "rb").read()
+        if len(data) % 4:
+            raise Check(f"{name}.tuned is not a whole number of instructions")
+        return [Insn(list(data[i : i + 4])) for i in range(0, len(data), 4)]
     if not m:
         raise Check(f"{path} asserts no object code for {source}.o")
     rest = text[m.end() : text.index(";;", m.end())]
@@ -651,7 +685,7 @@ def inventory(out):
     for arch, path, source, inline in routines():
         if not inline and os.path.exists(os.path.join(out, arch, os.path.basename(source) + ".absent")):
             continue
-        theorem = safe_theorem(arch, source, proven(arch, source))
+        theorem = safe_theorem(arch, source, proven(arch, source, out))
         cell = f"`{os.path.basename(source)}`: " + (f"`{theorem}`" if theorem else "none")
         if inline:
             cell += "; inlinable, so unchecked"
@@ -706,6 +740,11 @@ def main():
         for arch, path, obj, sym in NAKED:
             print(arch, "naked", path, sym, obj, sym)
         return
+    if sys.argv[1:] == ["tuned"]:
+        for arch, path, source, _ in routines():
+            if tuned(arch, source):
+                print(arch, source)
+        return
     if sys.argv[1:] == ["aws-lc-revision"]:
         print(AWS_LC_REVISION)
         return
@@ -721,7 +760,7 @@ def main():
     check_clobbers()
     failed = 0
     for arch, path, source, inline in routines():
-        theorem = inline and safe_theorem(arch, source, proven(arch, source))
+        theorem = inline and safe_theorem(arch, source, proven(arch, source, out))
         if theorem:
             print(f"admin/prove-bytes: {arch} {path}: inlined copies escape the check of {theorem}; mark it #[inline(never)]", file=sys.stderr)
             failed += 1
@@ -730,7 +769,7 @@ def main():
         base = os.path.join(out, arch, name)
         try:
             data = set()
-            diffs = compare(arch, proven(arch, source), built(arch, base + ".bin"), data)
+            diffs = compare(arch, proven(arch, source, out), built(arch, base + ".bin"), data)
             for _, sym in data:
                 if open(os.path.join(base + ".bin.data", sym), "rb").read() != constant_data(source):
                     raise Check(f"{sym} differs from {source}.S's constant data")
