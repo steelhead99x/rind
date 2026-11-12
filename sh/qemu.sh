@@ -21,7 +21,7 @@ if [[ -n "$unfetched" ]]; then
 fi
 
 # The bench and fuzz crates need C libraries built for the target.
-packages=(-p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-str0m)
+packages=(-p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m)
 
 export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
 export CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true

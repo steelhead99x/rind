@@ -48,7 +48,7 @@ fn _sample_ntt<const TRANSPOSED: bool>(rho: &[u8; 32]) -> [i16; K * K * N] {
 
     sample_poly_ntt_8x(rho, inputs, output_8.try_into().unwrap());
 
-    Shake128ForMlKem::new(&[rho, &[2, 2]]).sample_into(output_tail.try_into().unwrap());
+    Shake128ForMlKem::new(rho, &[2, 2]).sample_into(output_tail.try_into().unwrap());
 
     r
 }
@@ -109,9 +109,13 @@ struct Shake128ForMlKem {
 }
 
 impl Shake128ForMlKem {
-    fn new(message: &[&[u8]]) -> Self {
+    /// The XOF `rho || ij`.
+    fn new(rho: &[u8; 32], ij: &[u8; 2]) -> Self {
+        let mut sponge = sha3::Shake128Sponge::new();
+        sponge.absorb(rho);
+        sponge.absorb(ij);
         Self {
-            sponge: sha3::Shake128Sponge::new_for_message(message),
+            sponge: sponge.finish(),
         }
     }
 

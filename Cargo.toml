@@ -9,6 +9,7 @@ members = [
   "rind-timing",
   "rind-dimpl",
   "rind-object-store",
+  "rind-openmls",
   "rind-rcgen",
   "rind-ring",
   "rind-rustls",
