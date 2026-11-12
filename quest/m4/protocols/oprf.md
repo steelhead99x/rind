@@ -10,7 +10,3 @@ A public `oprf` module implements RFC 9497's OPRF and VOPRF modes for its P-256,
 - API: one `&'static Suite` per suite; the modes are separate types (an `oprf::ServerKey` and a `voprf::ServerKey`, each wiped, from `generate` or RFC 9497's `DeriveKeyPair`), so an unverified evaluation cannot reach a verifying client. The client's `blind(suite, input)` returns the `BlindedElement` to send and a `Blind` that `finalize(self, ..)` consumes, the VOPRF one taking the `Proof` and server public key; outputs are fixed-size per suite. POPRF is left out until its first consumer, the public-metadata Privacy Pass token (draft-ietf-privacypass-public-metadata-issuance), is final.
 - Linking ristretto255 brings its s2n-bignum field and point routines into the release build for the first time, so `admin/prove bytes` starts checking them and ALGORITHMS.md's inventory needs their rows, as its tables need ristretto255's.
 - Test against RFC 9497's Appendix A vectors (the cfrg/draft-irtf-cfrg-voprf repository's `allVectors.json`), differentially against the `voprf` crate as a dev-dependency (aws-lc-rs has no OPRF; AWS-LC's trust tokens are a different protocol), and ctgrind on blinding, evaluation, and finalization.
-
-## Required
-
-None. ristretto255 is in `rind/src/mid/ristretto255.rs`, and the NIST hashes are in `mid::p256::hash_to_curve`, `mid::p384::hash_to_curve`, and `mid::p521::hash_to_curve`.

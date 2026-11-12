@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Copy aws-lc's and BoringSSL's vector files that rind's tests run, RFC
-# 9180's HPKE vectors, RFC 9380's hash-to-curve vectors, and RFC 9474's
-# blind RSA vectors, into thirdparty/vectors, from the revisions pinned
-# here. Both repositories are
+# 9180's HPKE, RFC 9380's hash-to-curve, and RFC 9474's blind RSA vectors,
+# into thirdparty/vectors, from the revisions pinned here. Both repositories are
 # hundreds of megabytes, so rind keeps copies of the files rather than
 # submodules. Bump a revision and rerun to update them.
 set -euo pipefail

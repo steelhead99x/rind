@@ -10,7 +10,3 @@ A public `frost` module implements RFC 9591's two-round FROST for its Ed25519, r
 - API: one `&'static Suite` per ciphersuite; a wiped `SigningShare` and public `VerifyingShare`s with the group's `VerifyingKey`; `SigningNonces::commit(&share)` returns nonces and the `Commitments` to send, and `SigningNonces::sign(self, ..)` consumes them, so a nonce cannot sign twice; a `SigningPackage` binds the message to the commitments. Nonces are hedged with the share as RFC 9591 recommends, drawing the rest from the system's random source.
 - Out of scope until a consumer asks: distributed key generation, which RFC 9591 leaves out; FROST(secp256k1) and its Taproot variant (which Bitcoin and Nostr projects use through `frost-secp256k1-tr`), which need secp256k1, an [aws-lc-rs extra on demand](/quest/m3/parity/aws-lc-extras.md); and FROST(Ed448), which nothing uses.
 - Test against RFC 9591's Appendix E vectors (the cfrg/draft-irtf-cfrg-frost repository's `poc` JSON), differentially against the Zcash Foundation's `frost-ed25519`, `frost-ristretto255`, and `frost-p256` 3.x as dev-dependencies (aws-lc-rs has no FROST), and ctgrind on signing and dealing.
-
-## Required
-
-None. ristretto255 is in `rind/src/mid/ristretto255.rs`, and `hash_to_scalar` is in `mid::p256::hash_to_curve`.
