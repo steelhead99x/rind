@@ -25,3 +25,4 @@ pub(super) mod rsa;
 pub(super) mod sec1;
 pub(super) mod signature;
 pub(super) mod spki;
+pub(super) mod vrf;
