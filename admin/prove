@@ -450,9 +450,11 @@ items rind/src/high/agreement.rs 'pub struct Algorithm ' 'pub static X25519:' \
     'pub static ECDH_P256:' 'pub static ECDH_P384:' 'pub static ECDH_P521:' 'pub struct PrivateKey {' \
     'impl PrivateKey {' 'struct Keyed<' 'struct Ops<' 'impl<K: Agree> Keyed<K> {' >"$out/agreement.rs"
 items rind/src/low/generic/zeroise.rs 'pub(crate) struct ZeroableRef<' 'impl<T> ZeroableRef<T> {' >"$out/zeroise.rs"
-items rind/src/aead/quic.rs 'pub struct Algorithm ' 'impl Algorithm {' 'pub static CHACHA20:' \
-    'impl HeaderProtectionKey {' 'struct Masker<' 'type MaskFn<' 'impl<C: Mask> Masker<C> {' >"$out/quic.rs"
-check_quote X86_64/Dispatch cat "$out/agreement.rs" "$out/zeroise.rs" "$out/quic.rs"
+items rind/src/aead/quic.rs 'pub struct Algorithm ' 'impl Algorithm {' 'pub static AES_128:' \
+    'pub static AES_256:' 'pub static CHACHA20:' 'impl HeaderProtectionKey {' 'struct Masker<' 'type MaskFn<' \
+    'impl<C: Mask> Masker<C> {' >"$out/quic.rs"
+items rind/src/cipher.rs 'pub static AES_128:' 'pub static AES_256:' >"$out/cipher.rs"
+check_quote X86_64/Dispatch cat "$out/agreement.rs" "$out/zeroise.rs" "$out/quic.rs" "$out/cipher.rs"
 p256_items() {
     items rind/src/mid/p256.rs '    pub(crate) fn new_random(' '    pub(crate) fn generate(rng: &mut dyn'
     items rind/src/mid/rng.rs 'impl RandomSource for SystemRandom {'
@@ -492,7 +494,6 @@ check_quote X86_64/AeadDispatch items rind/src/aead.rs 'pub struct Algorithm ' '
     'pub struct RandomizedNonceKey(' 'impl RandomizedNonceKey {' 'pub struct RandomNonce(' \
     'impl AsRef<[u8]> for RandomNonce {' 'impl From<[u8; 24]> for RandomNonce {'
 gcm_items() {
-    items rind/src/cipher.rs 'pub struct Algorithm {' 'pub static AES_128:' 'pub static AES_192:' 'pub static AES_256:'
     items rind/src/aead/gcm.rs 'pub enum TagLength {' 'impl TagLength {' "pub struct Iv<'a>(&'a [u8]);" \
         'pub struct Key {' 'impl Key {' 'pub struct Tag {' 'impl AsRef<[u8]> for Tag {'
 }
@@ -568,7 +569,9 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # are translated. The other curves' functions are opaque; their types are
 # kept, since the agreement enums hold them. Then ChaCha20 header protection
 # from its `Mask` impl down to HACL*'s rounds, which are Rust and translated
-# too; AES's key and block cipher are opaque. Then Ed25519 from
+# too, and AES's from `cipher::Aes`, translated on x86_64 down to the AES-NI
+# key expansion and block cipher `AesNi.lean` models, and opaque on aarch64.
+# Then Ed25519 from
 # `high::signature`'s key pair and `high::ed25519` down to s2n-bignum's
 # routines and the SHA-512 context. On x86_64, ChaCha20-Poly1305 and
 # XChaCha20-Poly1305 from their keys down to the call of aws-lc's one-pass
@@ -587,7 +590,10 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # `signature::PublicKey` holds the signature API's, so no translated function
 # reaches it, and `SignatureDispatch.lean` defines it. SHA-1's and SHA-256's
 # padding is translated down to their block functions, which are opaque.
-# MD5 and SHA-3's sponge, which no proof covers, are opaque.
+# SHA-3's sponge is translated down to its Keccak-f routines, which are
+# opaque, from what the digest API and ML-KEM call: ML-DSA's SHAKE readers
+# loop over borrowed slices and zip iterators, which Aeneas cannot translate.
+# MD5, which no proof covers, is opaque.
 # P-256's key generation draws through a `dyn RandomSource`, so it is opaque
 # too, and `proofs/Rind/Aarch64/P256Dispatch.lean` models it above the
 # translated `PrivateKey::from_bytes`, as `EcdsaDispatch.lean` does for ECDSA,
@@ -619,6 +625,8 @@ extract() {
         --start-from crate::aead::quic::HeaderProtectionKey \
         --start-from crate::aead::quic::AlgorithmId \
         --start-from crate::mid::chacha20::ChaCha20::new \
+        --start-from crate::mid::aes::Aes::new \
+        --start-from crate::mid::aes::Aes::encrypt_block \
         --start-from 'crate::high::hmac::HmacKey::_' \
         --start-from 'crate::high::hmac::Hmac::_' \
         --start-from crate::low::generic::ct_equal::ct_equal \
@@ -635,6 +643,14 @@ extract() {
         --start-from crate::high::signature::Ed25519KeyPair::sign \
         --start-from '{impl core::convert::AsRef for crate::high::signature::Signature}' \
         --start-from crate::high::signature::Buffer::copy_from \
+        --start-from crate::mid::sha3::shake256_batch \
+        --start-from 'crate::mid::sha3::SqueezingSponge4xShake128::_' \
+        --start-from crate::mid::sha3::SqueezingSponge::new \
+        --start-from crate::mid::sha3::SqueezingSponge::squeeze \
+        --start-from crate::mid::sha3::Sponge::new \
+        --start-from crate::mid::sha3::Sponge::absorb \
+        --start-from crate::mid::sha3::Sponge::finish \
+        --start-from 'crate::mid::sha3::Sha3Context::_' \
         --opaque crate::high::agreement::Algorithm \
         --opaque crate::high::agreement::Ops \
         --opaque crate::high::agreement::x25519_from_pkcs8 \
@@ -666,7 +682,6 @@ extract() {
         --opaque crate::high::digest::SHA3_384 \
         --opaque crate::high::digest::SHA3_512 \
         --opaque crate::mid::md5 \
-        --opaque crate::mid::sha3 \
         --opaque crate::low \
         --opaque 'crate::mid::p384::_::generate' \
         --opaque 'crate::high::curve::_::oid' \
@@ -759,6 +774,8 @@ extract x86_64 X86_64 \
     --opaque crate::low::x86_64::sha256_mux::path \
     --include crate::low::x86_64::sha512::Path \
     --opaque crate::low::x86_64::sha512::path \
+    --include crate::low::x86_64::sha3_keccak4_f1600_shim \
+    --include crate::low::x86_64::sha3_keccak_nof4_f1600 \
     --start-from '{impl crate::aead::Cipher for crate::mid::aes_gcm::AesGcm}' \
     --start-from crate::aead::Key \
     --start-from crate::aead::AlgorithmId \
@@ -771,9 +788,7 @@ extract x86_64 X86_64 \
     --start-from crate::mid::xchacha20poly1305::XChaCha20Poly1305::decrypt \
     --include crate::low::x86_64::chacha20poly1305::seal \
     --include crate::low::x86_64::chacha20poly1305::open \
-    --include crate::mid::aes::expand_key \
-    --include crate::mid::aes::check_gcm_lengths \
-    --include crate::mid::aes::check_counter \
+    --include 'crate::mid::aes::_' \
     --include crate::low::x86_64::aes \
     --opaque crate::low::x86_64::aes::aes128_expand \
     --opaque crate::low::x86_64::aes::aes192_expand \
@@ -826,6 +841,9 @@ extract aarch64 Aarch64 \
     --opaque 'crate::mid::p256::_::generate' \
     --opaque 'crate::mid::p256::_::new_random' \
     --include crate::low::aarch64::sha1::sha1_compress_padded \
+    --include crate::low::aarch64::sha3_keccak_f1600_mux \
+    --include crate::low::aarch64::sha3_keccak4_f1600_mux \
+    --include crate::low::aarch64::sha3_keccak_nof4_f1600 \
     --include crate::low::aarch64::sha256 \
     --opaque crate::low::aarch64::sha256::compress_hw \
     --opaque crate::low::aarch64::sha256::compress_nohw
@@ -838,7 +856,7 @@ extract_kdf aarch64 Aarch64
 mkdir -p proofs/Rind/Aarch64/Kdf
 for file in Dispatch X25519 P384 DigestAlgorithm DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
     Blockwise Sha Hmac HmacDispatch HkdfExpand Kdf/TypesExternal Kdf/FunsExternal \
-    CtEqual HmacApi DigestApi Hkdf Pbkdf2; do
+    CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3; do
     sed 's/X86_64/Aarch64/g; s/x86_64/aarch64/g' "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Aarch64/$file.lean"
 done
 # The AEAD model imports nothing aarch64 has, and no aarch64 translation reaches it.

@@ -35,11 +35,14 @@
 # routines, but convert between bytes and limbs in unverified Rust.
 #
 # rind: X25519, P-256 ECDH and ECDSA on aarch64, SHA-256, HMAC-SHA256, and
-# HKDF-SHA256 on aarch64 with the crypto extension, and SHA-512 and Ed25519
+# HKDF-SHA256 on aarch64 with the crypto extension, SHA3-256 and SHA3-512,
+# whose Rust sponge `proofs/` proves against SymCrypt's Lean FIPS 202 spec
+# and s2n-bignum's Keccak-f theorems, and SHA-512 and Ed25519
 # where the SHA-512 block routine's proof states the routine's result, whose
 # Rust `proofs/` proves against s2n-bignum's and aws-lc-verification's
 # theorems, ChaCha20 header protection, whose Rust `proofs/` proves against
-# RFC 8439, HACL*'s rounds included, and AES-GCM on x86_64 with AVX and MOVBE but no
+# RFC 8439, HACL*'s rounds included, AES header protection on x86_64 with AES-NI,
+# whose Rust `proofs/` proves against Vale's FIPS 197 spec, and AES-GCM on x86_64 with AVX and MOVBE but no
 # VAES, whose Rust, key setup included, `proofs/` proves against Vale's
 # theorems for AAD and messages under 2^32 bytes, every size the report
 # times. On aarch64 with the SHA-512 instructions, NSym's proof of aws-lc's
@@ -124,6 +127,20 @@ link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/Aarch64/Sha256Hw.l
 
 [[verified]]
 library = "rind"
+operations = ["sha3-256/*", "sha3-512/*"]
+arch = "x86_64"
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA3-256, SHA3-384, and SHA3-512, padding included, down to s2n-bignum's sha3_keccak_f1600, against FIPS 202 as SymCrypt's Lean spec states it, composed with s2n-bignum's HOL Light proof of sha3_keccak_f1600, of s2n-bignum's own object code, which rind transliterates"
+link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/Sha3.lean"
+
+[[verified]]
+library = "rind"
+operations = ["sha3-256/*", "sha3-512/*"]
+arch = "aarch64"
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA3-256, SHA3-384, and SHA3-512, padding included, down to s2n-bignum's sha3_keccak_f1600_alt, which rind runs with the SHA3 instructions, and sha3_keccak_f1600 otherwise, against FIPS 202 as SymCrypt's Lean spec states it, composed with s2n-bignum's HOL Light proofs of those routines, of s2n-bignum's own object code, which rind transliterates"
+link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/Sha3.lean"
+
+[[verified]]
+library = "rind"
 operations = ["quic-header-protection/chacha20"]
 arch = "x86_64"
 proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's mask is its own cipher's, the only one rind builds, of its header-protection API's ChaCha20 against RFC 9001 and RFC 8439, HACL*'s rounds included"
@@ -135,6 +152,14 @@ operations = ["quic-header-protection/chacha20"]
 arch = "aarch64"
 proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's mask is its own cipher's, the only one rind builds, of its header-protection API's ChaCha20 against RFC 9001 and RFC 8439, HACL*'s rounds included"
 link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/ChaCha20.lean"
+
+[[verified]]
+library = "rind"
+operations = ["quic-header-protection/aes128", "quic-header-protection/aes256"]
+arch = "x86_64"
+cpu = ["aes", "pclmulqdq", "ssse3", "sse4.1"]
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, which assumes each key's mask is its own cipher's, the only one rind builds, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its header-protection API's AES-128 and AES-256 against RFC 9001 and Vale's FIPS 197 spec"
+link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/AesCipher.lean"
 
 [[verified]]
 library = "rind"

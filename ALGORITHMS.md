@@ -36,7 +36,7 @@ SHA-512.
 | ChaCha20-Poly1305, XChaCha20-Poly1305 | aws-lc ⚡ |  |  | HACL* ✓ + aws-lc ⚡ + Graviola ⚡ | HACL* ✓ + Graviola ⚡ |
 | MD5 | rind |  |  |  |  |
 | SHA-1 | rind | aws-lc |  |  |  |
-| SHA-256 | Graviola ⚡ | aws-lc ⚡ |  |  |  |
+| SHA-256 | Graviola ⚡ + rind ⚡ | aws-lc ⚡ |  |  |  |
 | SHA-384, SHA-512, SHA-512/256 | OpenSSL ⚡ | aws-lc ⚡ |  |  |  |
 | SHA3-256, SHA3-384, SHA3-512 | s2n-bignum ✓ + Graviola |  |  |  |  |
 | HMAC | Graviola ⚡ |  |  |  |  |
@@ -108,8 +108,8 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | PBKDF2 | rind |  |  |  |
 | X25519 | s2n-bignum ✓ |  | BoringSSL ⚡ + curve25519-dalek ⚡ | curve25519-dalek ⚡ |
 | Ed25519 | s2n-bignum ✓ + Graviola |  | curve25519-dalek ⚡ + rind ⚡ |  |
-| P-256 ECDH, ECDSA | s2n-bignum ✓ + Graviola |  | fiat-crypto ✓ + rind ⚡ + Graviola ⚡ |  |
-| P-384 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ + Graviola ⚡ |  | fiat-crypto ✓ + rind ⚡ |  |
+| P-256 ECDH, ECDSA | s2n-bignum ✓ + Graviola |  | fiat-crypto ✓ + rind ⚡ + Graviola ⚡ | fiat-crypto ✓ + rind + Graviola ⚡ |
+| P-384 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ + Graviola ⚡ |  | fiat-crypto ✓ + rind ⚡ | fiat-crypto ✓ + rind |
 | P-521 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ |  | fiat-crypto ✓ + rind ⚡ |  |
 | ML-KEM-768 | s2n-bignum ✓ + Graviola ⚡ |  | mlkem-native ⚡ + OpenSSL ⚡ + Graviola ⚡ | mlkem-native ⚡ + HACL* + Graviola ⚡ |
 | ML-DSA-44, ML-DSA-65, ML-DSA-87 | s2n-bignum ✓ + mldsa-native ⚡ |  | mldsa-native ⚡ + OpenSSL ⚡ | mldsa-native ⚡ + HACL* |
@@ -148,8 +148,17 @@ with portable Rust in place of the assembly armv7 runs regardless.
   32-bit length that a 64-bit AEAD can overflow. SHA-3's, ML-KEM's, and
   ML-DSA's Keccak-f is a hand port of HACL*'s, outside its proofs, as libcrux-sha3 is
   unverified and exposes no permutation. RSA's Montgomery multiplication is
-  rind's 32-bit-limb loop, which wipes its scratch, rather than HACL*'s,
-  which leaves scratch unwiped on the heap.
+  rind's loop, which wipes its scratch, rather than HACL*'s, which leaves
+  scratch unwiped on the heap.
+- portable: RSA and the NIST curves run on 64-bit limbs on 64-bit targets,
+  and on wasm32 built with the `wide-arithmetic` target feature (stable from
+  Rust 1.101), and on armv7's 32-bit limbs on other 32-bit targets, where a
+  64-bit limb's product would be a library call. On 64-bit limbs P-256 and
+  P-384 run fiat-crypto's field and scalar arithmetic whole: LLVM keeps its
+  carry chains in registers there, and on x86_64 armv7's P-256 loop widened
+  to `u128` ran ECDH and verification no faster end to end. The 64-bit columns
+  are the ones this table's portable column describes; 32-bit portable
+  targets run armv7's sources.
 - P-521 on armv7: rind and aws-lc-rs both run [fiat-crypto]'s field
   arithmetic, which spills no carry flag there. A `umaal` multiply ran more
   instructions in [#281], so rind keeps the verified code.
@@ -401,8 +410,12 @@ armv7 runs the same exponentiation over aws-lc's 32-bit ARM `bn_mul_mont`
 routines as aws-lc picks them (`bn_mul8x_mont_neon` with NEON for moduli whose
 width in 32-bit words is a multiple of eight, and `bn_mul_mont_nohw`
 otherwise), and the rest of the arithmetic in rind's portable Rust. The
-portable backend runs it all in that Rust, its Montgomery products by rind's
-32-bit-limb loop.
+portable backend runs it all in that Rust, its Montgomery products by
+rind's loop (Koç, Acar, and Kaliski's CIOS method) and its squarings by
+forming each cross product once before reducing, over 64-bit limbs on
+64-bit targets and 32-bit ones elsewhere. RSA-2048 signing measured level
+with aws-lc's C without assembly on x86_64, and 4096 bits and up slower,
+where aws-lc switches to Karatsuba.
 On x86_64 CPUs with AVX2 but without ADX, the private operation's exponentiation modulo each 1024-bit
 prime of RSA-2048 runs aws-lc's RSAZ, as aws-lc does there: Montgomery
 products on AVX2 over 29-bit limbs, and a 5-bit fixed window whose table
@@ -490,7 +503,9 @@ accumulators (`umaal`) instead, in 560 instructions run to fiat-crypto's
 its bounds checks fail at every 32-bit limb count from 9 to 16. armv7's
 P384 runs rind's Montgomery multiplication and squaring the same way, in
 1,151 instructions to fiat-crypto's 2,254, over fiat-crypto's other field
-and scalar arithmetic.
+and scalar arithmetic. The portable backend runs the same on 32-bit
+targets, and on 64-bit ones over fiat-crypto's 64-bit arithmetic whole, its
+multiplication included.
 
 P384 base point multiplication uses a comb of 20 tables of 16 affine points
 (a 30KB constant table) over 5-bit Booth windows, as aws-lc does. Variable
@@ -606,7 +621,9 @@ SHA1 and SHA256 have straightforward implementations using hashing intrinsics
 (aka "SHA-NI" on x86_64, "sha" extension on aarch64), except that aarch64 runs
 aws-lc's SHA256 assembly for those instructions: it keeps a register copy off
 each round's dependency chain, where LLVM's code for the intrinsics puts one
-on it. Without SHA-NI, x86_64
+on it, and x86_64 runs LLVM's code for its SHA256 intrinsics frozen into
+inline assembly, so that a proof can be about the bytes it runs, with the
+last block's padding in Rust. Without SHA-NI, x86_64
 selects at runtime an AVX2 message schedule with scalar rounds for SHA1, as
 aws-lc does, and for SHA256 runs OpenSSL's AVX2 routine, which aws-lc leaves
 out: 1.12x faster than aws-lc's AVX routine on an i7-8700 and 1.13x on Arrow
@@ -637,6 +654,9 @@ where the CPU has NEON, and its scalar routine otherwise.
 
 SHA3-256, SHA3-384, and SHA3-512 run Graviola's sponge over the Keccak-f
 ML-KEM uses (see [ML-KEM-768](#ml-kem-768)), one state at a time.
+[`proofs/`](proofs/README.md) proves the sponge, and ML-KEM's SHAKE calls,
+against FIPS 202 down to s2n-bignum's Keccak-f routines on x86_64 and
+aarch64.
 
 x86_64 decides once per process whether the CPU has AES-NI and PCLMULQDQ,
 and SSSE3. Without the first two, as on Core 2 and Nehalem, AES and AES-CTR
