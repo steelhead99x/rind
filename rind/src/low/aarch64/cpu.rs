@@ -154,20 +154,38 @@ const CRYPTO_EXT: u8 = 1 << 1;
 const SHA3: u8 = 1 << 2;
 #[cfg(target_vendor = "apple")]
 const DIT: u8 = 1 << 3;
-/// s2n-bignum's `_alt` schedules, for a core whose 64×64→128 multiply is wide.
-const WIDE_MUL: u8 = 1 << 4;
 const DETECTED: u8 = 1 << 7;
 
 /// Whether this core should run s2n-bignum's `_alt` schedules.
 ///
 /// Those are written for cores that issue `umulh` widely. The narrow
-/// schedules run only for a core Linux names as Cortex-A72, Cortex-A76, or
+/// schedules run only for a core known as Cortex-A72, Cortex-A76, or
 /// Neoverse N1. Every other core keeps `_alt`, including one this crate
 /// does not recognise, which is what aarch64 ran before the dispatch.
 /// Both schedules are correct on every core.
+///
+/// Detected on the first call, apart from `features`, so that no other
+/// feature check reads `/proc/cpuinfo`.
 #[inline]
 pub(crate) fn wide_multiplier() -> bool {
-    features() & WIDE_MUL != 0
+    match MULTIPLIER.load(Ordering::Relaxed) {
+        UNKNOWN => detect_multiplier_once(),
+        multiplier => multiplier == WIDE_MUL,
+    }
+}
+
+static MULTIPLIER: AtomicU8 = AtomicU8::new(UNKNOWN);
+const UNKNOWN: u8 = 0;
+const NARROW_MUL: u8 = 1;
+/// s2n-bignum's `_alt` schedules, for a core whose 64×64→128 multiply is wide.
+const WIDE_MUL: u8 = 2;
+
+#[cold]
+#[inline(never)]
+fn detect_multiplier_once() -> bool {
+    let wide = wide_toggle(detect_wide_multiplier());
+    MULTIPLIER.store(if wide { WIDE_MUL } else { NARROW_MUL }, Ordering::Relaxed);
+    wide
 }
 
 static FEATURES: AtomicU8 = AtomicU8::new(0);
@@ -199,11 +217,9 @@ fn detect() -> u8 {
         // Rust's `sha2` covers the SHA-1 instructions too.
         && test_toggle("sha2", detected!("sha2"));
     let sha3 = test_toggle("sha3", detected!("sha3"));
-    let wide = wide_toggle(detect_wide_multiplier());
     let features = (if neon { NEON } else { 0 })
         | (if crypto_ext { CRYPTO_EXT } else { 0 })
-        | (if sha3 { SHA3 } else { 0 })
-        | (if wide { WIDE_MUL } else { 0 });
+        | (if sha3 { SHA3 } else { 0 });
     #[cfg(target_vendor = "apple")]
     let features = features
         | if test_toggle("dit", detected!("dit")) {
@@ -237,34 +253,116 @@ fn wide_toggle(detected: bool) -> bool {
     detected
 }
 
-/// Apple's cores are wide. On Linux, so is every part except the known
-/// narrow ones.
+/// Apple's cores are wide. On Linux and Android, so is every core except
+/// the known narrow ones.
 ///
-/// Detection reads `/proc/cpuinfo` on Linux only, and only the parts online
-/// at that moment: a core hotplugged later is not seen. Apple's platforms
-/// name the vendor in the target, so they need no file. A sandbox that
-/// cannot read the file, Android (`target_os` is not `linux`, including a
-/// build that cannot open the file), and Windows on ARM never see a part
-/// list, so they stay on `_alt` rather than guessing a narrow core. FreeBSD
-/// does too. Both schedules are correct on every core.
+/// Where the kernel sets `HWCAP_CPUID` (Linux 4.11 and later), it emulates
+/// an `mrs` of `MIDR_EL1`, so naming this core takes a trap rather than a
+/// system call, and a sandbox
+/// whose seccomp filter refuses `openat` still gets an answer. A core that
+/// is not narrow settles it, without opening a file. The register names
+/// only the core this thread is on, so a narrow one is checked against
+/// every online core in `/proc/cpuinfo`, and any core there that is not
+/// narrow keeps `_alt`, so on a big.LITTLE chip which core the first call
+/// ran on changes the answer only when the listing cannot be read. Without `HWCAP_CPUID` the listing alone decides. See
+/// `wide_from` for the table. A core hotplugged later is not seen.
+/// Windows on ARM and FreeBSD keep `_alt`. Both schedules are correct on
+/// every core.
 fn detect_wide_multiplier() -> bool {
     if cfg!(target_vendor = "apple") {
         return true;
     }
-    if cfg!(target_os = "linux") {
-        return std::fs::read_to_string("/proc/cpuinfo")
-            .map(|text| wide_from_cpuinfo(&text))
-            .unwrap_or(true);
+    if cfg!(any(target_os = "linux", target_os = "android")) {
+        return wide_from(midr::this_core(), || {
+            std::fs::read_to_string("/proc/cpuinfo")
+                .ok()
+                .and_then(|text| narrow_from_cpuinfo(&text))
+        });
     }
     true
 }
 
-/// Whether `text` should run the `_alt` schedules.
+/// Whether to run the `_alt` schedules, given this core's `MIDR_EL1`, when
+/// the kernel emulates reading it, and `listing`, which says whether every
+/// core `/proc/cpuinfo` names is narrow, or `None` when the file cannot be
+/// read or names no part.
 ///
-/// That is every listing except one whose parts are all known narrow cores.
-/// No part, an unknown part, or a mix with anything else stays on `_alt`:
-/// a chip this crate has not measured keeps the code it ran before.
-fn wide_from_cpuinfo(text: &str) -> bool {
+/// | this core | listing | schedules |
+/// |---|---|---|
+/// | not narrow | not read | `_alt` |
+/// | narrow | all narrow, or `None` | narrow |
+/// | narrow | another core | `_alt` |
+/// | unknown | all narrow | narrow |
+/// | unknown | another core, or `None` | `_alt` |
+fn wide_from(this_core: Option<u64>, listing: impl FnOnce() -> Option<bool>) -> bool {
+    match this_core {
+        Some(midr) if !narrow_midr(midr) => true,
+        Some(_) => listing() == Some(false),
+        None => listing() != Some(true),
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+// glibc from 2.16, musl from 1.1.0, and Android's bionic from API level
+// 18 (Rust's Android targets need 21) define it. It reads the auxiliary
+// vector the kernel left in memory, so it makes no system call, and it
+// has no precondition.
+unsafe extern "C" {
+    safe fn getauxval(kind: core::ffi::c_ulong) -> core::ffi::c_ulong;
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod midr {
+    use core::ffi::c_ulong;
+
+    /// `AT_HWCAP` in Linux's `include/uapi/linux/auxvec.h`.
+    const AT_HWCAP: c_ulong = 16;
+    /// `HWCAP_CPUID` in Linux's `arch/arm64/include/uapi/asm/hwcap.h`.
+    const HWCAP_CPUID: c_ulong = 1 << 11;
+
+    /// This core's `MIDR_EL1`, or `None` when the kernel does not emulate
+    /// reading it at EL0.
+    pub(super) fn this_core() -> Option<u64> {
+        // SAFETY: the kernel sets `HWCAP_CPUID`.
+        (super::getauxval(AT_HWCAP) & HWCAP_CPUID != 0).then(|| unsafe { read_midr() })
+    }
+
+    /// Reads `MIDR_EL1`.
+    ///
+    /// # Safety
+    ///
+    /// The kernel must set `HWCAP_CPUID`, which says it traps EL0's `mrs` of
+    /// `MIDR_EL1` and emulates it. Elsewhere it raises an illegal instruction.
+    pub(super) unsafe fn read_midr() -> u64 {
+        let midr: u64;
+        // SAFETY: the caller's; the emulated read writes only the output
+        // register.
+        unsafe {
+            core::arch::asm!(
+                "mrs {}, MIDR_EL1",
+                out(reg) midr,
+                options(nomem, nostack, preserves_flags),
+            );
+        }
+        midr
+    }
+}
+
+/// Elsewhere no kernel is known to emulate reading `MIDR_EL1`.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+mod midr {
+    pub(super) fn this_core() -> Option<u64> {
+        None
+    }
+}
+
+/// Whether every core `text`, a `/proc/cpuinfo` listing, names is narrow,
+/// or `None` when it names no part.
+///
+/// A part with no implementer before it, or after an unknown one, has not
+/// been identified, so it is not narrow: a chip this crate has not measured
+/// keeps the code it ran before.
+fn narrow_from_cpuinfo(text: &str) -> Option<bool> {
     let mut saw = false;
     let mut all_narrow = true;
     let mut implementer = None;
@@ -282,7 +380,7 @@ fn wide_from_cpuinfo(text: &str) -> bool {
             all_narrow &= narrow_part(implementer, parse_cpu_id(value));
         }
     }
-    !(saw && all_narrow)
+    saw.then_some(all_narrow)
 }
 
 fn parse_cpu_id(value: &str) -> Option<u64> {
@@ -291,6 +389,11 @@ fn parse_cpu_id(value: &str) -> Option<u64> {
         .or_else(|| value.strip_prefix("0X"))
         .unwrap_or(value);
     u64::from_str_radix(value, 16).ok()
+}
+
+/// Whether `midr`, a `MIDR_EL1` value, names a narrow core.
+fn narrow_midr(midr: u64) -> bool {
+    narrow_part(Some(midr >> 24 & 0xff), Some(midr >> 4 & 0xfff))
 }
 
 /// MIDR implementer and part, as Linux prints them in `/proc/cpuinfo`.
@@ -306,6 +409,12 @@ fn parse_cpu_id(value: &str) -> Option<u64> {
 /// V2, V3, and Apple, and defaults to the narrow schedules. This crate
 /// defaults to `_alt`, and keeps N2 and Cobalt there because `_alt` was
 /// measured faster on N2.
+///
+/// Qualcomm's Kryo 4xx Gold (`0x51` / `0x804`) is a Cortex-A76 derivative,
+/// but it is not listed: it ships beside Kryo 4xx Silver (`0x805`), a
+/// Cortex-A55, which no one has measured here, so a listing naming both
+/// would keep `_alt` anyway, and a sandboxed process would pick by the
+/// core its first call ran on.
 fn narrow_part(implementer: Option<u64>, part: Option<u64>) -> bool {
     matches!(
         (implementer, part),
@@ -422,6 +531,11 @@ mod tests {
                 call!(unsafe dit::write, on);
             }
         }
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        if midr::this_core().is_some() {
+            // SAFETY: the kernel emulates the read, as `this_core` found.
+            unsafe { call!(unsafe midr::read_midr) };
+        }
         let (a, b) = ([1u8; 37], [2u8; 37]);
         assert_ne!(call!(ct_compare_bytes, &a, &b), 0);
         assert_ne!(call!(ct_compare_16, &[1; 16], &[2; 16]), 0);
@@ -466,6 +580,137 @@ mod tests {
         if let Some(expected) = std::env::var_os("RIND_TEST_ARM_WIDE_MUL") {
             assert_eq!(wide_multiplier(), expected == "1");
         }
+    }
+
+    /// The listing alone, as a kernel without `HWCAP_CPUID` leaves it.
+    fn wide_from_cpuinfo(text: &str) -> bool {
+        wide_from(None, || narrow_from_cpuinfo(text))
+    }
+
+    // `MIDR_EL1` values: implementer in bits 31:24, part in 15:4.
+    const PI5_A76: u64 = 0x414f_d0b1;
+    const PI4_A72: u64 = 0x410f_d083;
+    const ALTRA_N1: u64 = 0x413f_d0c1;
+    const A55: u64 = 0x412f_d050;
+    const N2: u64 = 0x410f_d490;
+    const V1: u64 = 0x411f_d401;
+    const COBALT_100: u64 = 0x6d0f_d490;
+    const M1_FIRESTORM: u64 = 0x611f_0230;
+    const QEMU_MAX: u64 = 0x000f_0510;
+    const KRYO_4XX_GOLD: u64 = 0x51df_804e;
+    const KRYO_4XX_SILVER: u64 = 0x51df_805e;
+
+    #[test]
+    fn midr_names_narrow_cores() {
+        for midr in [PI5_A76, PI4_A72, ALTRA_N1] {
+            assert!(narrow_midr(midr), "{midr:#x}");
+        }
+        for midr in [
+            A55,
+            N2,
+            V1,
+            COBALT_100,
+            M1_FIRESTORM,
+            QEMU_MAX,
+            KRYO_4XX_GOLD,
+            KRYO_4XX_SILVER,
+            0,
+        ] {
+            assert!(!narrow_midr(midr), "{midr:#x}");
+        }
+        // The variant and revision do not matter; the architecture field
+        // is not part of the part number.
+        assert!(narrow_midr(0x410f_d0b0));
+        assert!(narrow_midr(0x41ff_d0bf));
+        assert!(!narrow_midr(0x420f_d0b1));
+    }
+
+    // `wide_from`'s table, row by row.
+    #[test]
+    fn detection_table() {
+        let unread = || -> Option<bool> { panic!("read the listing") };
+        // A core that is not narrow needs no listing.
+        for midr in [N2, V1, COBALT_100, M1_FIRESTORM, A55, QEMU_MAX] {
+            assert!(wide_from(Some(midr), unread), "{midr:#x}");
+        }
+        // A narrow core that every listed core agrees with, or whose
+        // listing cannot be read, as under a sandbox, runs narrow.
+        for midr in [PI5_A76, PI4_A72, ALTRA_N1] {
+            assert!(!wide_from(Some(midr), || Some(true)), "{midr:#x}");
+            assert!(!wide_from(Some(midr), || None), "{midr:#x}");
+            // big.LITTLE, with this thread on the big core.
+            assert!(wide_from(Some(midr), || Some(false)), "{midr:#x}");
+        }
+        // Without `HWCAP_CPUID` only a listing of narrow cores runs narrow.
+        assert!(!wide_from(None, || Some(true)));
+        assert!(wide_from(None, || Some(false)));
+        assert!(wide_from(None, || None));
+    }
+
+    #[test]
+    fn cpuinfo_names_its_parts() {
+        assert_eq!(narrow_from_cpuinfo(""), None);
+        assert_eq!(
+            narrow_from_cpuinfo("processor\t: 0\nBogoMIPS\t: 108.00\n"),
+            None
+        );
+        assert_eq!(
+            narrow_from_cpuinfo("CPU implementer\t: 0x41\nCPU part\t: 0xd0b\n"),
+            Some(true)
+        );
+        assert_eq!(
+            narrow_from_cpuinfo("CPU implementer\t: 0x41\nCPU part\t: 0xd05\n"),
+            Some(false)
+        );
+    }
+
+    // Under a kernel, or qemu, that emulates it, the read is a real
+    // `MIDR_EL1`.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn this_core_reads_midr_when_the_kernel_emulates_it() {
+        if let Some(midr) = midr::this_core() {
+            // The architecture field, bits 19:16, reads 0xf on every core
+            // that identifies itself by the ID registers.
+            assert_eq!(midr >> 16 & 0xf, 0xf, "{midr:#x}");
+            assert_eq!(midr >> 32, 0, "{midr:#x}");
+        }
+    }
+
+    // No other feature check detects the multiplier, so none reads
+    // `/proc/cpuinfo`. The cache is process-wide, so this is a child.
+    #[test]
+    fn feature_checks_leave_the_multiplier_undetected() {
+        const CHILD: &str = "RIND_TEST_LAZY_MULTIPLIER";
+        if std::env::var_os(CHILD).is_some() {
+            let _ = (
+                missing_cpu_feature(),
+                HaveCryptoExt::check(),
+                HaveSha3::check(),
+            );
+            drop(crate::low::Entry::new_secret());
+            assert_eq!(MULTIPLIER.load(Ordering::Relaxed), UNKNOWN);
+            let wide = wide_multiplier();
+            assert_ne!(MULTIPLIER.load(Ordering::Relaxed), UNKNOWN);
+            assert_eq!(wide_multiplier(), wide);
+            return;
+        }
+        let test = concat!(
+            module_path!(),
+            "::feature_checks_leave_the_multiplier_undetected"
+        );
+        let test = test.split_once("::").unwrap().1;
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test, "--nocapture"])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "{test}: {stdout}{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]

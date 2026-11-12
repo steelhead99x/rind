@@ -1110,6 +1110,11 @@ mod tests {
             "a test, whose assembly only reads DIT",
         ),
         (
+            "aarch64/cpu.rs",
+            "getauxval",
+            "the C library's, which reads memory and has no assembly of rind's",
+        ),
+        (
             "aarch64/aes_cbc.rs",
             "hw_encrypt",
             "one `aese` on registers the compiler allocates, which no ABI governs",

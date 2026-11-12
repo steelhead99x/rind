@@ -32,13 +32,15 @@ pub fn check() -> Result<(), MissingFeature> {
 
 /// Whether this CPU runs s2n-bignum's wide-multiplier schedules.
 ///
-/// On aarch64 the narrow schedules run only when Linux's `/proc/cpuinfo`
-/// names every online core as Cortex-A72, Cortex-A76, or Neoverse N1.
-/// Apple's cores, Neoverse V1, V2, V3, and N2, Cobalt 100, a mixed
-/// big.LITTLE list, and a core this crate does not recognise keep the
-/// `_alt` schedules. So does a sandbox whose `/proc/cpuinfo` cannot be
-/// read, Android (the target is not Linux, and a failed read on a Linux
-/// Android build), and Windows on ARM, which never reads a part list.
+/// On aarch64 Linux and Android the narrow schedules run only on
+/// Cortex-A72, Cortex-A76, or Neoverse N1. The kernel names the core
+/// through `MIDR_EL1`, which it emulates when it sets `HWCAP_CPUID`, and
+/// `/proc/cpuinfo`, which must name no other core, or, under a sandbox,
+/// may be unreadable when `MIDR_EL1` names a narrow core. Apple's cores,
+/// Neoverse V1, V2, V3, and N2, Cobalt 100, a mixed big.LITTLE system,
+/// and a core this crate does not recognise keep the `_alt` schedules, as
+/// does Windows on ARM. The first call detects this, and no other
+/// feature check reads a file for it.
 /// On every other architecture this is false: those builds have no such
 /// choice.
 #[must_use]
