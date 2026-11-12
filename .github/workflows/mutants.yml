@@ -58,8 +58,10 @@ jobs:
       - uses: ./.github/actions/nix
         if: github.event_name == 'pull_request'
 
-      # 40 mutants at up to 240 seconds each, plus the baseline build and
-      # test, fit well inside the 300-minute limit.
+      # armv7 under qemu spent 35s building and 794s testing each mutant
+      # (moq-dev/rind#632, job 130886996526). Forty of those are 33160s,
+      # past this job's 300 minutes. Eighteen are 18 * (35 + 794) = 14922s,
+      # and one baseline run of that test still fits.
       - name: Count
         id: count
         run: |
@@ -80,7 +82,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
-          SHARD_SIZE: 40
+          SHARD_SIZE: 18
 
   mutants:
     needs: shards
