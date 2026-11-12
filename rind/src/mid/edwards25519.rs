@@ -132,6 +132,17 @@ impl Fe {
         self.negate_if(self.is_negative())
     }
 
+    /// `1 / self`, for a nonzero element.
+    ///
+    /// `bignum_modinv` inverts modulo any odd modulus; `p = 2^255 - 19` is one.
+    /// A zero input has no inverse, and no point we encode has `Z = 0`.
+    pub(crate) fn inv(&self) -> Self {
+        let mut z = Self::ZERO;
+        let mut temp = [0u64; 4 * 3];
+        low::bignum_modinv(&mut z.0, &self.0, &P, &mut temp);
+        z
+    }
+
     /// `(1, 1 / sqrt(self))`, the non-negative root, if `self` is a nonzero
     /// square, else 0 and an unspecified element.
     pub(crate) fn invsqrt(&self) -> (u64, Self) {
@@ -257,6 +268,60 @@ impl Point {
         acc
     }
 
+    /// `-(X : Y : Z : T) = (-X : Y : Z : -T)`.
+    pub(crate) fn neg(&self) -> Self {
+        let [x, y, z, t] = self.coordinates();
+        Self::from_coordinates(&x.neg(), &y, &z, &t.neg())
+    }
+
+    /// Whether this is the identity `(0 : 1)`, in any scale `Z`.
+    ///
+    /// The coordinates are public. A secret point is not compared here.
+    pub(crate) fn is_identity(&self) -> bool {
+        let [x, y, z, _] = self.coordinates();
+        low::ct::into_public(x.ct_eq(&Fe::ZERO) & y.ct_eq(&z)) == 1
+    }
+
+    /// RFC 8032's compressed Edwards `y`, with the sign of `x` in the top bit.
+    pub(crate) fn to_edwards_bytes(self) -> [u8; 32] {
+        let [x, y, z, _] = self.coordinates();
+        let z_inv = z.inv();
+        let x = x.mul(&z_inv);
+        let y = y.mul(&z_inv);
+        let mut out = y.to_le_bytes();
+        // `y < p < 2^255`, so the top bit is clear before the sign is written.
+        out[31] |= (x.0[0] as u8 & 1) << 7;
+        out
+    }
+
+    /// RFC 8032's decompression, or `None` when the encoding is non-canonical
+    /// or off the curve. The prime-order check is the caller's: this accepts
+    /// the identity and the small-order points.
+    pub(crate) fn from_edwards_bytes(bytes: &[u8; 32]) -> Option<Self> {
+        let mut affine = [0u64; 8];
+        if !low::edwards25519_decode(&mut affine, bytes) {
+            return None;
+        }
+        let x = Fe(affine[0..4].try_into().unwrap());
+        let y = Fe(affine[4..8].try_into().unwrap());
+        Some(Self::from_coordinates(&x, &y, &Fe::ONE, &x.mul(&y)))
+    }
+
+    /// Whether `[L]self` is the identity, `L` the order of the base point.
+    ///
+    /// `L = 2^252 + L0` with `L0 < L`, so `[L]P = [2^252]P + [L0]P`. `L` is
+    /// 5 mod 8 and the curve's torsion has order 8, so this is the identity
+    /// exactly when `self` is in the prime-order subgroup. RFC 9591 requires
+    /// that check of every decoded Ed25519 element. The point is public.
+    pub(crate) fn is_torsion_free(&self) -> bool {
+        const L0: Scalar = Scalar([0x5812631a5cf5d3ed, 0x14def9dea2f79cd6, 0, 0]);
+        let mut acc = *self;
+        for _ in 0..252 {
+            acc = acc.double();
+        }
+        acc.add(&self.mul(&L0)).is_identity()
+    }
+
     /// `[digit]P` from the table of `0 * P ..= 8 * P`, for `-8 <= digit <= 8`,
     /// in constant time.
     ///
@@ -321,11 +386,35 @@ impl Scalar {
         util::u64x4_to_little_endian(&self.0)
     }
 
+    /// The scalar `v`. Every `u64` is below `L`.
+    pub(crate) fn from_u64(v: u64) -> Self {
+        Self([v, 0, 0, 0])
+    }
+
+    /// `self + other mod L`. Both are reduced, as `bignum_modadd` assumes.
+    pub(crate) fn add(&self, other: &Self) -> Self {
+        let mut z = Self([0; 4]);
+        low::bignum_modadd(&mut z.0, &self.0, &other.0, &Self::ORDER);
+        z
+    }
+
+    /// `self - other mod L`. Both are reduced, as `bignum_modsub` assumes.
+    pub(crate) fn sub(&self, other: &Self) -> Self {
+        let mut z = Self([0; 4]);
+        low::bignum_modsub(&mut z.0, &self.0, &other.0, &Self::ORDER);
+        z
+    }
+
     /// `self * other mod L`.
     pub(crate) fn mul(&self, other: &Self) -> Self {
         let mut z = Self([0; 4]);
         low::bignum_madd_n25519(&mut z.0, &self.0, &other.0, &[0; 4]);
         z
+    }
+
+    /// Whether this scalar is zero. The answer is public.
+    pub(crate) fn is_zero(&self) -> bool {
+        low::ct::into_public(low::bignum_eq(&self.0, &[0; 4]))
     }
 
     /// `1 / self mod L`, or `None` for zero, which has no inverse.
@@ -433,5 +522,52 @@ mod tests {
             let want: Vec<i32> = want.iter().flat_map(|b| [b & 15, b >> 4]).collect();
             assert_eq!(nibbles.to_vec(), want);
         }
+    }
+
+    #[test]
+    fn scalar_field() {
+        let one = Scalar::from_u64(1);
+        let two = one.add(&one);
+        assert_eq!(two.to_bytes()[0], 2);
+        assert!(two.sub(&two).is_zero());
+        assert_eq!(two.mul(&two.invert().unwrap()).to_bytes(), one.to_bytes());
+        // (L - 1) + 1 = 0
+        let order_minus = Scalar([
+            Scalar::ORDER[0] - 1,
+            Scalar::ORDER[1],
+            Scalar::ORDER[2],
+            Scalar::ORDER[3],
+        ]);
+        assert!(order_minus.add(&one).is_zero());
+        assert!(Scalar::from_canonical_bytes(&order_minus.to_bytes()).is_some());
+        assert!(
+            Scalar::from_canonical_bytes(&util::u64x4_to_little_endian(&Scalar::ORDER)).is_none()
+        );
+    }
+
+    #[test]
+    fn edwards_encoding_and_subgroup() {
+        let base = Point::mul_base(&Scalar::from_u64(1));
+        let bytes = base.to_edwards_bytes();
+        assert_eq!(
+            bytes,
+            [
+                0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+                0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+                0x66, 0x66, 0x66, 0x66,
+            ]
+        );
+        let back = Point::from_edwards_bytes(&bytes).unwrap();
+        assert_eq!(back.to_edwards_bytes(), bytes);
+        assert!(base.is_torsion_free());
+        assert!(Point::IDENTITY.is_identity());
+        assert!(Point::IDENTITY.is_torsion_free());
+        assert!(base.add(&base.neg()).is_identity());
+        // Eight times a prime-order point is not the identity.
+        let mut eight = base;
+        for _ in 0..3 {
+            eight = eight.add(&eight);
+        }
+        assert!(!eight.is_identity());
     }
 }

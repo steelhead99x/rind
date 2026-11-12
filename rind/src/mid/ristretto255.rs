@@ -133,6 +133,16 @@ impl Element {
         low::Entry::assert_held();
         Self(self.0.mul(scalar))
     }
+
+    /// Whether this is the identity. The element is public.
+    pub(crate) fn is_identity(&self) -> bool {
+        self.0.is_identity()
+    }
+
+    /// Canonical encodings are unique, so equality is equality of encodings.
+    pub(crate) fn equals(&self, other: &Self) -> bool {
+        self.to_bytes() == other.to_bytes()
+    }
 }
 
 /// RFC 9496 4.3.4's `MAP`, from 32 bytes to a point.

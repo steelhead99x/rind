@@ -8,6 +8,7 @@
 
 use curve25519_dalek::constants::RISTRETTO_BASEPOINT_TABLE;
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
+use curve25519_dalek::traits::Identity;
 
 use crate::low;
 
@@ -46,6 +47,26 @@ impl Scalar {
     pub(crate) fn invert(&self) -> Option<Self> {
         let zero = low::ct::into_public(self.0 == curve25519_dalek::Scalar::ZERO);
         (!zero).then(|| Self(self.0.invert()))
+    }
+
+    /// The scalar `v`. Every `u64` is below `L`.
+    pub(crate) fn from_u64(v: u64) -> Self {
+        Self(curve25519_dalek::Scalar::from(v))
+    }
+
+    /// `self + other mod L`.
+    pub(crate) fn add(&self, other: &Self) -> Self {
+        Self(self.0 + other.0)
+    }
+
+    /// `self - other mod L`.
+    pub(crate) fn sub(&self, other: &Self) -> Self {
+        Self(self.0 - other.0)
+    }
+
+    /// Whether this scalar is zero. The answer is public.
+    pub(crate) fn is_zero(&self) -> bool {
+        low::ct::into_public(self.0 == curve25519_dalek::Scalar::ZERO)
     }
 }
 
@@ -90,5 +111,14 @@ impl Element {
     pub(crate) fn mul(&self, scalar: &Scalar) -> Self {
         low::Entry::assert_held();
         Self(self.0 * scalar.0)
+    }
+
+    /// Whether this is the identity. The element is public.
+    pub(crate) fn is_identity(&self) -> bool {
+        self.0 == RistrettoPoint::identity()
+    }
+
+    pub(crate) fn equals(&self, other: &Self) -> bool {
+        self.0 == other.0
     }
 }

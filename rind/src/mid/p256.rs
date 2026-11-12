@@ -45,6 +45,60 @@ impl PublicKey {
         output.copy_from_slice(&point.as_bytes_uncompressed());
         Ok(output)
     }
+
+    /// SEC1's compressed point, or an error when it is not one on the curve.
+    ///
+    /// The cofactor is 1, so a point on the curve is in the prime-order group.
+    /// The point at infinity has no 33-byte compressed encoding.
+    pub(crate) fn from_compressed(bytes: &[u8]) -> Result<Self, Error> {
+        Ok(Self {
+            point: AffineMontPoint::from_x962_compressed(bytes)?,
+        })
+    }
+
+    /// SEC1's compressed encoding. The point is public and not infinity.
+    pub(crate) fn to_compressed(&self) -> [u8; 33] {
+        let raw = self.point.as_bytes_uncompressed();
+        let mut out = [0u8; 33];
+        // The least significant byte of big-endian `y` holds its parity.
+        out[0] = 0x02 | (raw[64] & 1);
+        out[1..].copy_from_slice(&raw[1..33]);
+        out
+    }
+
+    /// `[scalar]G`, in constant time. The caller holds an `Entry`.
+    pub(crate) fn mul_base(scalar: &Scalar) -> Self {
+        low::Entry::assert_held();
+        Self {
+            point: AffineMontPoint::base_multiply(scalar),
+        }
+    }
+
+    /// `[scalar]self`. The point and scalar are public when FROST aggregates.
+    pub(crate) fn mul(&self, scalar: &Scalar) -> Self {
+        Self {
+            point: self.point.multiply(scalar),
+        }
+    }
+
+    /// `self + other`, or `None` when the sum is the point at infinity.
+    ///
+    /// `as_affine` inverts `Z`, which infinity does not have.
+    pub(crate) fn add(&self, other: &Self) -> Option<Self> {
+        let sum = JacobianMontPoint::from_affine(&self.point).public_add_affine(&other.point);
+        if sum.public_is_infinity() {
+            None
+        } else {
+            Some(Self {
+                point: sum.as_affine(),
+            })
+        }
+    }
+
+    /// Public equality of the affine coordinates.
+    pub(crate) fn equals(&self, other: &Self) -> bool {
+        self.point.x().public_eq(&other.point.x()) && self.point.y().public_eq(&other.point.y())
+    }
 }
 
 /// A P-256 public key for ECDSA verification.
@@ -884,7 +938,7 @@ impl FieldElement {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub(crate) struct Scalar([u64; 4]);
 
 impl Scalar {
@@ -897,6 +951,23 @@ impl Scalar {
     ///
     /// This returns an error if the scalar is zero or larger than
     /// the curve order.
+    /// A big-endian scalar in `0..n`, zero included.
+    ///
+    /// [`Self::from_bytes_checked`] refuses zero, which a private key cannot
+    /// be. A FROST signature share may be zero.
+    pub(crate) fn from_bytes_canonical(bytes: &[u8]) -> Result<Self, Error> {
+        let full = Self(
+            util::big_endian_slice_any_size_to_u64x4(bytes)
+                .ok_or(KeyFormatError::ScalarOutOfRange)?,
+        );
+        let reduced = full.reduce_mod_n();
+        if low::ct::into_public(reduced.private_eq(&full)) {
+            Ok(full)
+        } else {
+            Err(KeyFormatError::ScalarOutOfRange.into())
+        }
+    }
+
     pub(crate) fn from_bytes_checked(bytes: &[u8]) -> Result<Self, Error> {
         let full = Self(
             util::big_endian_slice_any_size_to_u64x4(bytes)
@@ -991,11 +1062,50 @@ impl Scalar {
         r
     }
 
-    /// Add `self` + `other` mod n
-    fn add(&self, other: &Self) -> Self {
+    /// `self + other mod n`. Both are reduced, as `bignum_modadd` assumes.
+    pub(crate) fn add(&self, other: &Self) -> Self {
         let mut r = Self::default();
         low::bignum_modadd(&mut r.0, &self.0, &other.0, &CURVE_ORDER);
         r
+    }
+
+    /// `self - other mod n`. Both are reduced, as `bignum_modsub` assumes.
+    pub(crate) fn sub(&self, other: &Self) -> Self {
+        let mut r = Self::default();
+        low::bignum_modsub(&mut r.0, &self.0, &other.0, &CURVE_ORDER);
+        r
+    }
+
+    /// `self * other mod n`.
+    pub(crate) fn mul(&self, other: &Self) -> Self {
+        self.as_mont().mont_mul(&other.as_mont()).demont()
+    }
+
+    /// `1 / self mod n`, or `None` for zero.
+    ///
+    /// Whether `self` is zero is public; the value stays secret.
+    pub(crate) fn invert(&self) -> Option<Self> {
+        if low::ct::into_public(self.is_zero()) {
+            None
+        } else {
+            Some(self.inv())
+        }
+    }
+
+    /// The scalar `v`. Every `u64` is below the group order.
+    pub(crate) fn from_u64(v: u64) -> Self {
+        Self([v, 0, 0, 0])
+    }
+
+    /// Reduces 48 big-endian bytes modulo the group order.
+    ///
+    /// The width is RFC 9380's `L` for P-256 and RFC 9591's wide reduction.
+    /// It may be zero.
+    pub(crate) fn from_be_wide_48(bytes: &[u8; 48]) -> Self {
+        let (hi, lo) = bytes.split_at(16);
+        let lo = Self(util::big_endian_slice_to_u64x4(lo).unwrap()).reduce_mod_n();
+        let hi = Self(util::big_endian_slice_any_size_to_u64x4(hi).unwrap());
+        lo.add(&hi.mont_mul(&Self(CURVE_ORDER_MM)))
     }
 
     /// Iterator of the bits of the element, lowest first
