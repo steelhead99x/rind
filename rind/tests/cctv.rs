@@ -7,7 +7,8 @@
 // `tests/cctv/ed25519-verdicts.txt` is aws-lc's accept/reject for each vector.
 // `ed25519_verdicts_match_aws_lc` checks that file against aws-lc where aws-lc
 // builds, and every run of `ed25519_edge_cases`, including wasm, checks rind
-// against the file.
+// against the file. `ed25519_record_aws_lc_verdicts` rewrites the file from
+// aws-lc and is ignored, so a normal run only checks it.
 #![cfg(not(miri))]
 
 #[cfg(not(target_family = "wasm"))]
@@ -38,13 +39,17 @@ fn ed25519_vectors() -> Vec<Ed25519Vector> {
     vectors
 }
 
+fn ed25519_verdicts_path() -> String {
+    format!(
+        "{}/tests/cctv/ed25519-verdicts.txt",
+        env!("CARGO_MANIFEST_DIR")
+    )
+}
+
 /// aws-lc's verify verdict for each vector, `true` when aws-lc accepts.
 /// Line `n` is vector `n`, `accept` or `reject`.
 fn ed25519_verdicts() -> Vec<bool> {
-    let path = format!(
-        "{}/tests/cctv/ed25519-verdicts.txt",
-        env!("CARGO_MANIFEST_DIR")
-    );
+    let path = ed25519_verdicts_path();
     let text = std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("cannot open {path}"));
     let verdicts: Vec<bool> = text
         .lines()
@@ -91,6 +96,31 @@ fn ed25519_verdicts_match_aws_lc() {
             "{}",
             vector.number
         );
+    }
+}
+
+/// Rewrites `tests/cctv/ed25519-verdicts.txt` from aws-lc. Ignored so a normal
+/// run only checks the file.
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[ignore = "rewrites rind/tests/cctv/ed25519-verdicts.txt from aws-lc"]
+fn ed25519_record_aws_lc_verdicts() {
+    let path = ed25519_verdicts_path();
+    let vectors = ed25519_vectors();
+    let mut text = String::new();
+    for (i, vector) in vectors.iter().enumerate() {
+        assert_eq!(vector.number, i);
+        let verdict = if aws_lc_accepts(vector) {
+            "accept"
+        } else {
+            "reject"
+        };
+        text.push_str(&format!("{i} {verdict}\n"));
+    }
+    std::fs::write(&path, text).unwrap_or_else(|err| panic!("cannot write {path}: {err}"));
+    let recorded = ed25519_verdicts();
+    for vector in &vectors {
+        assert_eq!(aws_lc_accepts(vector), recorded[vector.number]);
     }
 }
 
