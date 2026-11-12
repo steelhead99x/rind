@@ -30,6 +30,42 @@ pub(crate) fn bignum_madd_n25519(z: &mut [u64; 4], x: &[u64; 4], y: &[u64; 4], c
 }
 
 #[inline]
+pub(crate) fn bignum_montmul_p256(z: &mut [u64; 4], x: &[u64; 4], y: &[u64; 4]) {
+    if super::cpu::wide_multiplier() {
+        super::bignum_montmul_p256::bignum_montmul_p256(z, x, y)
+    } else {
+        super::bignum_montmul_p256_narrow::bignum_montmul_p256(z, x, y)
+    }
+}
+
+#[inline]
+pub(crate) fn bignum_montmul_p384(z: &mut [u64; 6], x: &[u64; 6], y: &[u64; 6]) {
+    if super::cpu::wide_multiplier() {
+        super::bignum_montmul_p384::bignum_montmul_p384(z, x, y)
+    } else {
+        super::bignum_montmul_p384_narrow::bignum_montmul_p384(z, x, y)
+    }
+}
+
+#[inline]
+pub(crate) fn bignum_montsqr_p256(z: &mut [u64; 4], x: &[u64; 4]) {
+    if super::cpu::wide_multiplier() {
+        super::bignum_montsqr_p256::bignum_montsqr_p256(z, x)
+    } else {
+        super::bignum_montsqr_p256_narrow::bignum_montsqr_p256(z, x)
+    }
+}
+
+#[inline]
+pub(crate) fn bignum_montsqr_p384(z: &mut [u64; 6], x: &[u64; 6]) {
+    if super::cpu::wide_multiplier() {
+        super::bignum_montsqr_p384::bignum_montsqr_p384(z, x)
+    } else {
+        super::bignum_montsqr_p384_narrow::bignum_montsqr_p384(z, x)
+    }
+}
+
+#[inline]
 pub(crate) fn bignum_mul_p25519(z: &mut [u64; 4], x: &[u64; 4], y: &[u64; 4]) {
     if super::cpu::wide_multiplier() {
         super::bignum_mul_p25519::bignum_mul_p25519(z, x, y)
@@ -39,11 +75,29 @@ pub(crate) fn bignum_mul_p25519(z: &mut [u64; 4], x: &[u64; 4], y: &[u64; 4]) {
 }
 
 #[inline]
+pub(crate) fn bignum_mul_p521(z: &mut [u64; 9], x: &[u64; 9], y: &[u64; 9]) {
+    if super::cpu::wide_multiplier() {
+        super::bignum_mul_p521::bignum_mul_p521(z, x, y)
+    } else {
+        super::bignum_mul_p521_narrow::bignum_mul_p521(z, x, y)
+    }
+}
+
+#[inline]
 pub(crate) fn bignum_sqr_p25519(z: &mut [u64; 4], x: &[u64; 4]) {
     if super::cpu::wide_multiplier() {
         super::bignum_sqr_p25519::bignum_sqr_p25519(z, x)
     } else {
         super::bignum_sqr_p25519_narrow::bignum_sqr_p25519(z, x)
+    }
+}
+
+#[inline]
+pub(crate) fn bignum_sqr_p521(z: &mut [u64; 9], x: &[u64; 9]) {
+    if super::cpu::wide_multiplier() {
+        super::bignum_sqr_p521::bignum_sqr_p521(z, x)
+    } else {
+        super::bignum_sqr_p521_narrow::bignum_sqr_p521(z, x)
     }
 }
 
@@ -129,6 +183,24 @@ pub(crate) fn edwards25519_scalarmuldouble(
 }
 
 #[inline]
+pub(crate) fn p256_montjadd(p3: &mut [u64; 12], p1: &[u64; 12], p2: &[u64; 12]) {
+    if super::cpu::wide_multiplier() {
+        super::p256_montjadd::p256_montjadd(p3, p1, p2)
+    } else {
+        super::p256_montjadd_narrow::p256_montjadd(p3, p1, p2)
+    }
+}
+
+#[inline]
+pub(crate) fn p256_montjdouble(p3: &mut [u64; 12], p1: &[u64; 12]) {
+    if super::cpu::wide_multiplier() {
+        super::p256_montjdouble::p256_montjdouble(p3, p1)
+    } else {
+        super::p256_montjdouble_narrow::p256_montjdouble(p3, p1)
+    }
+}
+
+#[inline]
 pub(crate) fn p256_montjmixadd(p3: &mut [u64; 12], p1: &[u64; 12], p2: &[u64; 8]) {
     if super::cpu::wide_multiplier() {
         super::p256_montjmixadd::p256_montjmixadd(p3, p1, p2)
@@ -152,6 +224,24 @@ pub(crate) fn p256_scalarmulbase(res: &mut [u64; 8], scalar: &[u64; 4], table: &
         super::p256_scalarmulbase::p256_scalarmulbase(res, scalar, table)
     } else {
         super::p256_scalarmulbase_narrow::p256_scalarmulbase(res, scalar, table)
+    }
+}
+
+#[inline]
+pub(crate) fn p384_montjadd(p3: &mut [u64; 18], p1: &[u64; 18], p2: &[u64; 18]) {
+    if super::cpu::wide_multiplier() {
+        super::p384_montjadd::p384_montjadd(p3, p1, p2)
+    } else {
+        super::p384_montjadd_narrow::p384_montjadd(p3, p1, p2)
+    }
+}
+
+#[inline]
+pub(crate) fn p384_montjdouble(p3: &mut [u64; 18], p1: &[u64; 18]) {
+    if super::cpu::wide_multiplier() {
+        super::p384_montjdouble::p384_montjdouble(p3, p1)
+    } else {
+        super::p384_montjdouble_narrow::p384_montjdouble(p3, p1)
     }
 }
 

@@ -29,7 +29,7 @@ def proof_asserts_object(source):
     Some SLOTHY routines are proven by equivalence from an asserted base
     program (`define_from_elf` of the tuned object). `admin/prove-bytes`
     checks a routine only when the proof embeds that object's bytes, so
-    those stay on the `_alt` import.
+    those take `proof_by_equivalence` instead.
     """
     path = os.path.join(S2N, "arm/proofs", os.path.basename(source) + ".ml")
     if not os.path.exists(path):
@@ -44,6 +44,27 @@ def proof_asserts_object(source):
         )
         is not None
     )
+def proof_by_equivalence(source):
+    """The HOL Light file proves this object equivalent to an asserted base.
+
+    The proof asserts an unscheduled base program's bytes with
+    `define_assert_from_elf`, loads this object with `define_from_elf`, and
+    proves an `_EQUIV` theorem between them. `admin/prove-bytes tuned` lists
+    these, and its check compares rind's code against the object
+    `admin/prove` assembles from the submodule's source.
+    """
+    path = os.path.join(S2N, "arm/proofs", os.path.basename(source) + ".ml")
+    if not os.path.exists(path):
+        return False
+    text = open(path).read()
+    obj = re.escape(f'"{source}.o"')
+    return (
+        re.search(r"\bdefine_from_elf\s*\"\w+_mc\"\s*" + obj, text) is not None
+        and re.search(r"\bdefine_assert_from_elf\b", text) is not None
+        and re.search(r"^let \w+_EQUIV\w* = (?:time )?prove\b", text, re.M) is not None
+    )
+
+
 LOCAL_FN = re.compile(r"S2N_BN_FUNCTION_TYPE_DIRECTIVE\((L\w+)\)")
 
 
@@ -93,7 +114,7 @@ def signatures():
         # the driver emitted none; these files' parameters are the `inout`s.
         assert params and params[0][0] == "x0", (name, params[:4])
         narrow = path.replace("_alt", "")
-        if not proof_asserts_object(narrow):
+        if not proof_asserts_object(narrow) and not proof_by_equivalence(narrow):
             print("SKIP no embedded proof bytes", narrow)
             continue
         body = open(os.path.join(S2N, narrow + ".S")).read()
@@ -309,7 +330,7 @@ mod tests {
 
 if __name__ == "__main__":
     specs = signatures()
-    assert len(specs) == 21, len(specs)
+    assert len(specs) == 31, len(specs)
     for spec in specs:
         emit_one(spec)
     emit_fastmul()

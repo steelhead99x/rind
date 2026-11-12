@@ -582,6 +582,29 @@ LOOSE = {
     ("aarch64", "bignum_demont_p384", "bignum_demont_p384", "X11"),
     ("aarch64", "bignum_demont_p384", "bignum_demont_p384", "X12"),
     ("aarch64", "bignum_madd_n25519", "bignum_madd_n25519", "X17"),
+    # The schedules s2n-bignum proves by program equivalence keep the
+    # unscheduled base's MAYCHANGE, which covers registers they never use.
+    ("aarch64", "p256_montjadd_narrow", "p256_montjadd", "Q6"),
+    ("aarch64", "p256_montjadd_narrow", "p256_montjadd", "Q7"),
+    ("aarch64", "p256_montjadd_narrow", "p256_montjadd", "Q18"),
+    ("aarch64", "p256_montjadd_narrow", "p256_montjadd", "Q22"),
+    ("aarch64", "p256_montjadd_narrow", "p256_montjadd", "Q25"),
+    ("aarch64", "p256_montjadd_narrow", "p256_montjadd", "Q26"),
+    ("aarch64", "p256_montjadd_narrow", "p256_montjadd", "Q30"),
+    ("aarch64", "p256_montjadd_narrow", "p256_montjadd", "Q31"),
+    ("aarch64", "p256_montjdouble_narrow", "p256_montjdouble", "Q6"),
+    ("aarch64", "p256_montjdouble_narrow", "p256_montjdouble", "Q7"),
+    ("aarch64", "p256_montjdouble_narrow", "p256_montjdouble", "Q18"),
+    ("aarch64", "p256_montjdouble_narrow", "p256_montjdouble", "Q22"),
+    ("aarch64", "p256_montjdouble_narrow", "p256_montjdouble", "Q25"),
+    ("aarch64", "p256_montjdouble_narrow", "p256_montjdouble", "Q26"),
+    ("aarch64", "p256_montjdouble_narrow", "p256_montjdouble", "Q30"),
+    ("aarch64", "p256_montjdouble_narrow", "p256_montjdouble", "Q31"),
+    ("aarch64", "p256_montjdouble_narrow", "p256_montjdouble", "X30"),
+    ("aarch64", "p384_montjadd_narrow", "p384_montjadd", "Q2"),
+    ("aarch64", "p384_montjadd_narrow", "p384_montjadd", "X30"),
+    ("aarch64", "p384_montjdouble_narrow", "p384_montjdouble", "Q2"),
+    ("aarch64", "p384_montjdouble_narrow", "p384_montjdouble", "X30"),
 }
 
 # `arm/proofs/instruction.ml`. Q8-Q15's upper halves are the part of the

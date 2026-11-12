@@ -247,6 +247,70 @@ pub(crate) fn agree() {
     super::p521_jmixadd::p521_jmixadd(&mut w, &g521, &affine521);
     super::p521_jmixadd_narrow::p521_jmixadd(&mut n, &g521, &affine521);
     assert_eq!(w, n, "p521 mixadd");
+    // The field and point routines `wide_mux` gained with the schedules
+    // s2n-bignum proves by program equivalence.
+    let fe256 = [
+        limbs[0],
+        limbs[1],
+        limbs[3],
+        [g256[0], g256[1], g256[2], g256[3]],
+    ];
+    for (i, x) in fe256.iter().enumerate() {
+        let (mut w, mut n) = ([0; 4], [0; 4]);
+        super::bignum_montsqr_p256::bignum_montsqr_p256(&mut w, x);
+        super::bignum_montsqr_p256_narrow::bignum_montsqr_p256(&mut n, x);
+        assert_eq!(w, n, "p256 montsqr {i}");
+        for (j, y) in fe256.iter().enumerate() {
+            super::bignum_montmul_p256::bignum_montmul_p256(&mut w, x, y);
+            super::bignum_montmul_p256_narrow::bignum_montmul_p256(&mut n, x, y);
+            assert_eq!(w, n, "p256 montmul {i},{j}");
+        }
+    }
+    let fe384: [[u64; 6]; 3] = [[0; 6], [1, 0, 0, 0, 0, 0], g384[..6].try_into().unwrap()];
+    for (i, x) in fe384.iter().enumerate() {
+        let (mut w, mut n) = ([0; 6], [0; 6]);
+        super::bignum_montsqr_p384::bignum_montsqr_p384(&mut w, x);
+        super::bignum_montsqr_p384_narrow::bignum_montsqr_p384(&mut n, x);
+        assert_eq!(w, n, "p384 montsqr {i}");
+        for (j, y) in fe384.iter().enumerate() {
+            super::bignum_montmul_p384::bignum_montmul_p384(&mut w, x, y);
+            super::bignum_montmul_p384_narrow::bignum_montmul_p384(&mut n, x, y);
+            assert_eq!(w, n, "p384 montmul {i},{j}");
+        }
+    }
+    let fe521: [[u64; 9]; 3] = [
+        [0; 9],
+        [1, 0, 0, 0, 0, 0, 0, 0, 0],
+        g521[..9].try_into().unwrap(),
+    ];
+    for (i, x) in fe521.iter().enumerate() {
+        let (mut w, mut n) = ([0; 9], [0; 9]);
+        super::bignum_sqr_p521::bignum_sqr_p521(&mut w, x);
+        super::bignum_sqr_p521_narrow::bignum_sqr_p521(&mut n, x);
+        assert_eq!(w, n, "p521 sqr {i}");
+        for (j, y) in fe521.iter().enumerate() {
+            super::bignum_mul_p521::bignum_mul_p521(&mut w, x, y);
+            super::bignum_mul_p521_narrow::bignum_mul_p521(&mut n, x, y);
+            assert_eq!(w, n, "p521 mul {i},{j}");
+        }
+    }
+    let (mut d256w, mut d256n) = ([0; 12], [0; 12]);
+    super::p256_montjdouble::p256_montjdouble(&mut d256w, &g256);
+    super::p256_montjdouble_narrow::p256_montjdouble(&mut d256n, &g256);
+    assert_eq!(d256w, d256n, "p256 double");
+    let (mut w, mut n) = ([0; 12], [0; 12]);
+    super::p256_montjadd::p256_montjadd(&mut w, &g256, &d256n);
+    super::p256_montjadd_narrow::p256_montjadd(&mut n, &g256, &d256n);
+    assert_eq!(w, n, "p256 add");
+    let (mut d384w, mut d384n) = ([0; 18], [0; 18]);
+    super::p384_montjdouble::p384_montjdouble(&mut d384w, &g384);
+    super::p384_montjdouble_narrow::p384_montjdouble(&mut d384n, &g384);
+    assert_eq!(d384w, d384n, "p384 double");
+    let (mut w, mut n) = ([0; 18], [0; 18]);
+    super::p384_montjadd::p384_montjadd(&mut w, &g384, &d384n);
+    super::p384_montjadd_narrow::p384_montjadd(&mut n, &g384, &d384n);
+    assert_eq!(w, n, "p384 add");
+
     let scalars9 = [
         [0; 9],
         [1, 0, 0, 0, 0, 0, 0, 0, 0],
