@@ -319,4 +319,33 @@ exclude_re = [
   # `is_closing` stays false. `with false` matches every state the tests
   # reach. It is true only for a graceful close from `AwaitApplicationData`.
   'rind-str0m/src/dtls\.rs:\d+:\d+: replace <impl DtlsInstance for Dtls>::is_closing -> bool with false$',
+  # rind-aws-lc-rs's `wipe` feature is off in this campaign
+  # (`features = ["rind/wipe"]` is rind's feature). `Wiped::drop` and
+  # `Buffer::drop` then never zeroise, so replacing either body with `()`
+  # changes nothing a test can see. `tests/zeroing.rs` covers the feature.
+  # `&&` becoming `||` does zeroise a secret buffer, and `tests/surfaces.rs`
+  # catches that.
+  'rind-aws-lc-rs/src/wipe\.rs:\d+:\d+: replace <impl Drop for Wiped<T>>::drop with \(\)$',
+  'rind-aws-lc-rs/src/buffer\.rs:\d+:\d+: replace <impl Drop for Buffer<\x27_, T>>::drop with \(\)$',
+  # `[0; N]` is `[u8; N]`'s `Default`.
+  'rind-aws-lc-rs/src/rand\.rs:\d+:\d+: replace sealed::<impl RandomlyConstructable for \[u8; N\]>::zero -> Self with Default::default\(\)$',
+  # The compressed-point prefix is `0x02` or `0x03`: `0x02` and the Y parity
+  # bit never share a set bit, so `|` and `^` write the same byte.
+  'rind-aws-lc-rs/src/agreement\.rs:\d+:\d+: replace \| with \^ in compress$',
+  # An empty INTEGER, or one whose first byte has the high bit set, is not a
+  # positive DER integer. rind's parser refuses those bytes too, and every
+  # caller asks rind as well, so deleting the arm still returns an error.
+  'rind-aws-lc-rs/src/der\.rs:\d+:\d+: delete match arm \[\] \|\[0x80\.\.= 0xff, \.\.\] in positive_integer$',
+  # rind's encrypting keys already refuse a modulus outside 2048 to 8192
+  # bits, so this check's lower arm never runs, and replacing the function
+  # with `Ok` still accepts exactly the keys rind returns.
+  'rind-aws-lc-rs/src/rsa\.rs:\d+:\d+: replace check_bits -> Result<\(\), KeyRejected> with Ok\(\(\)\)$',
+  'rind-aws-lc-rs/src/rsa\.rs:\d+:\d+: delete match arm 0\.\.= 2047 in check_bits$',
+  # A leading zero is refused by rind's component parser too, so `||`
+  # becoming `&&` still returns an error when either component has one.
+  'rind-aws-lc-rs/src/rsa\.rs:\d+:\d+: replace \|\| with && in PublicKeyComponents<B>::rind$',
+  # Key parsers return `Error::KeyRejected`, including a wrong length.
+  # `Error::WrongLength` is a short output buffer, which this adapter maps
+  # with `unspecified`, not `KeyRejected::rind`.
+  'rind-aws-lc-rs/src/error\.rs:\d+:\d+: delete match arm rind::Error::WrongLength in KeyRejected::rind$',
 ]
