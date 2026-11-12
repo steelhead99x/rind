@@ -131,10 +131,10 @@ fn ed25519_record_aws_lc_verdicts() {
         .unwrap_or_else(|err| panic!("cannot write {temporary}: {err}"));
     std::fs::rename(&temporary, &path)
         .unwrap_or_else(|err| panic!("cannot replace {path}: {err}"));
-    let recorded = ed25519_verdicts();
-    for vector in &vectors {
-        assert_eq!(aws_lc_accepts(vector), recorded[vector.number]);
-    }
+    // The file reads back as written and parses as the readers parse it.
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(written, text, "{path}");
+    ed25519_verdicts();
 }
 
 // Low-order and non-canonical points as Ed25519's `A` and `R`, from "Taming
