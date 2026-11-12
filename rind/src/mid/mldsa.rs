@@ -22,9 +22,7 @@ use crate::Error;
 use crate::error::KeyFormatError;
 use crate::low::{self, Entry, MldsaPoly as Poly};
 use crate::mid::rng::{RandomSource, SystemRandom};
-use crate::mid::sha3::{
-    SHAKE_128_R_BYTES, SHAKE_256_R_BYTES, Shake128x4, Shake256, Shake256Sponge, Shake256x4,
-};
+use crate::mid::sha3::{SHAKE_128_R_BYTES, SHAKE_256_R_BYTES, Shake128x4, Shake256, Shake256x4};
 
 const N: usize = 256;
 const Q: i32 = 8380417;
@@ -296,9 +294,7 @@ impl<P: Params> low::Zeroable for KeyPair<P> {}
 pub(crate) fn tr(pk: &[u8]) -> [u8; TR_LEN] {
     let _entry = Entry::new_public();
     let mut tr = [0u8; TR_LEN];
-    let mut h = Shake256Sponge::new();
-    h.absorb(pk);
-    Shake256::new(&h).read(&mut tr);
+    Shake256::new(&[pk]).read(&mut tr);
     tr
 }
 
@@ -312,12 +308,7 @@ fn tr_of<P: Params>(sk: &[u8]) -> &[u8; TR_LEN] {
 pub(crate) fn mu(tr: &[u8; TR_LEN], context: &[u8], message: &[u8]) -> Result<[u8; MU_LEN], Error> {
     let context_len = u8::try_from(context.len()).map_err(|_| Error::WrongLength)?;
     let mut mu = [0u8; MU_LEN];
-    let mut h = Shake256Sponge::new();
-    h.absorb(tr);
-    h.absorb(&[0, context_len]);
-    h.absorb(context);
-    h.absorb(message);
-    Shake256::new(&h).read(&mut mu);
+    Shake256::new(&[tr, &[0, context_len], context, message]).read(&mut mu);
     Ok(mu)
 }
 
@@ -354,10 +345,7 @@ impl Drop for Scratch {
 /// FIPS 204's `ML-DSA.KeyGen_internal`, writing `pk` and `sk`.
 fn keygen<P: Params>(seed: &[u8; SEED_LEN], pk: &mut [u8], sk: &mut [u8]) {
     let mut expanded = [0u8; 2 * SEED_LEN + 64];
-    let mut h = Shake256Sponge::new();
-    h.absorb(seed);
-    h.absorb(&[P::K as u8, P::L as u8]);
-    Shake256::new(&h).read(&mut expanded);
+    Shake256::new(&[seed, &[P::K as u8, P::L as u8]]).read(&mut expanded);
     let (rho, rest) = expanded.split_at(SEED_LEN);
     let (rho_prime, key) = rest.split_at(64);
     let rho: &[u8; SEED_LEN] = rho.try_into().unwrap();
@@ -387,9 +375,7 @@ fn keygen<P: Params>(seed: &[u8; SEED_LEN], pk: &mut [u8], sk: &mut [u8]) {
 
     sk[..SEED_LEN].copy_from_slice(rho);
     sk[SEED_LEN..2 * SEED_LEN].copy_from_slice(key);
-    let mut h = Shake256Sponge::new();
-    h.absorb(pk);
-    Shake256::new(&h).read(&mut sk[layout.tr]);
+    Shake256::new(&[pk]).read(&mut sk[layout.tr]);
 }
 
 /// Where an expanded private key's parts lie.
@@ -482,9 +468,7 @@ fn public_key_from_secret<P: Params>(sk: &[u8], pk: &mut [u8]) -> bool {
     low::zeroise(&mut t0);
 
     let mut tr = [0u8; TR_LEN];
-    let mut h = Shake256Sponge::new();
-    h.absorb(pk);
-    Shake256::new(&h).read(&mut tr);
+    Shake256::new(&[pk]).read(&mut tr);
     let tr_matches = low::ct_equal(&tr, &sk[layout.tr]);
     low::ct::public_slice(pk);
 
@@ -528,11 +512,7 @@ fn sign_internal<P: Params>(
     }
 
     let mut rho_prime = [0u8; 64];
-    let mut h = Shake256Sponge::new();
-    h.absorb(key);
-    h.absorb(rnd);
-    h.absorb(mu);
-    Shake256::new(&h).read(&mut rho_prime);
+    Shake256::new(&[key, rnd, mu]).read(&mut rho_prime);
     expand_a::<P>(rho, a);
 
     let mut signature = P::Signature::zeroed();
@@ -561,10 +541,7 @@ fn sign_internal<P: Params>(
             pack_w1::<P>(packed, w1);
         }
 
-        let mut h = Shake256Sponge::new();
-        h.absorb(mu);
-        h.absorb(w1_packed);
-        Shake256::new(&h).read(c_tilde);
+        Shake256::new(&[mu, w1_packed]).read(c_tilde);
         low::ct::public_slice(c_tilde);
         sample_in_ball::<P>(&mut c, c_tilde);
         low::mldsa_ntt(&mut c.0);
@@ -686,10 +663,7 @@ fn verify_internal<P: Params>(pk: &[u8], mu: &[u8; MU_LEN], signature: &[u8]) ->
 
     let mut c_tilde_prime = [0u8; 64];
     let c_tilde_prime = &mut c_tilde_prime[..P::CTILDE_LEN];
-    let mut h = Shake256Sponge::new();
-    h.absorb(mu);
-    h.absorb(w1_packed);
-    Shake256::new(&h).read(c_tilde_prime);
+    Shake256::new(&[mu, w1_packed]).read(c_tilde_prime);
     match low::ct_equal(c_tilde, c_tilde_prime) {
         true => Ok(()),
         false => Err(Error::BadSignature),
@@ -866,9 +840,7 @@ fn expand_mask<P: Params>(rho_prime: &[u8; 64], kappa: u16, y: &mut [Poly]) {
 /// SampleInBall: the challenge `c`, with `tau` coefficients of 1 or -1, from
 /// public `c_tilde`.
 fn sample_in_ball<P: Params>(c: &mut Poly, c_tilde: &[u8]) {
-    let mut h = Shake256Sponge::new();
-    h.absorb(c_tilde);
-    let mut xof = Shake256::new(&h);
+    let mut xof = Shake256::new(&[c_tilde]);
     let mut signs = [0u8; 8];
     xof.read(&mut signs);
     let mut signs = u64::from_le_bytes(signs);
@@ -1119,10 +1091,7 @@ mod tests {
         match group.str("signatureInterface") {
             "internal" => {
                 let mut mu = [0u8; MU_LEN];
-                let mut h = Shake256Sponge::new();
-                h.absorb(tr);
-                h.absorb(&test.hex("message"));
-                Shake256::new(&h).read(&mut mu);
+                Shake256::new(&[tr, &test.hex("message")]).read(&mut mu);
                 mu
             }
             "external" => mu(tr, &test.hex("context"), &test.hex("message")).unwrap(),

@@ -24,6 +24,8 @@ theorem bv_append (x y : List U8) : bv (x ++ y) = bv x ++ bv y := List.map_appen
 
 theorem bv_take (x : List U8) (n : Nat) : bv (x.take n) = (bv x).take n := List.map_take ..
 
+theorem bv_length (x : List U8) : (bv x).length = x.length := List.length_map ..
+
 /-- `T(1) | ... | T(j)`. -/
 def blocksOut (T : Nat → List Byte) (j : Nat) : List Byte :=
   (List.range j).flatMap fun i => T (i + 1)

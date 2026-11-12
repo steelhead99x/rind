@@ -525,6 +525,13 @@ def high.hmac.sign (key : high.hmac.Key) (data : Slice Std.U8) : Result high.hma
   let _ ← low.entry.Entry.new_secret
   high.hmac.Keyed.sign key data
 
+/-- `Digest::ct_equal`, quoted in `Rind.X86_64.DigestAlgorithm`. -/
+def high.digest.Digest.ct_equal (self : high.digest.Digest) (other : Slice Std.U8) :
+    Result Bool := do
+  let s ← high.digest.Digest.Insts.CoreConvertAsRefSliceU8.as_ref self
+  let b ← low.generic.ct_equal.ct_equal s other
+  low.ct.into_public b
+
 /-- `verify`. -/
 def high.hmac.verify (key : high.hmac.Key) (data tag : Slice Std.U8) :
     Result (core.result.Result Unit error.Error) := do

@@ -67,19 +67,13 @@ impl RsaPublicKey {
         let c_mont = c.to_montgomery(&self.montifier, &self.n);
 
         // e's top bit is set, so the accumulator starts at c. Each product
-        // goes to the other of these, which becomes the accumulator. A flag
-        // names it rather than swapped references, which Aeneas cannot
-        // translate, so `proofs/` can prove RSA verification.
+        // goes to the other of these, then they swap roles.
         let (mut a, mut b) = (c_mont.clone(), RsaPosInt::zero());
-        let mut in_a = true;
+        let (mut accum, mut spare) = (&mut a, &mut b);
 
         for bit in (0..self.e.ilog2()).rev() {
-            if in_a {
-                a.mont_sqr_into(&mut b, &self.n, self.n0);
-            } else {
-                b.mont_sqr_into(&mut a, &self.n, self.n0);
-            }
-            in_a = !in_a;
+            accum.mont_sqr_into(spare, &self.n, self.n0);
+            core::mem::swap(&mut accum, &mut spare);
 
             // e is odd, so the last step multiplies, and by c itself rather
             // than c_mont it takes the result out of the montgomery domain
@@ -87,16 +81,12 @@ impl RsaPublicKey {
             let mask = 1 << bit;
             if self.e & mask == mask {
                 let term = if bit == 0 { &c } else { &c_mont };
-                if in_a {
-                    a.mont_mul_into(term, &mut b, &self.n, self.n0);
-                } else {
-                    b.mont_mul_into(term, &mut a, &self.n, self.n0);
-                }
-                in_a = !in_a;
+                accum.mont_mul_into(term, spare, &self.n, self.n0);
+                core::mem::swap(&mut accum, &mut spare);
             }
         }
 
-        Ok(if in_a { a } else { b })
+        Ok(accum.clone())
     }
 
     /// a * b mod n, for `a` and `b` below `n`. Constant time in both.

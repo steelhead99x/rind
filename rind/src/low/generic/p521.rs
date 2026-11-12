@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! The s2n-bignum routines `mid::p521` uses, with their contracts, over
-//! fiat-crypto's P-521 field arithmetic on the parent module's limbs, and
-//! rind's arithmetic mod the group order.
+//! fiat-crypto's 32-bit P-521 field arithmetic, and rind's arithmetic mod
+//! the group order.
 //!
 //! fiat-crypto proves each field operation correct, and emits it as
 //! straight-line code with no secret-dependent branch or index.  Mod n,
-//! rind multiplies by Montgomery's method, limb by limb over 576 bits
-//! (CIOS), in loops whose bounds and indices are public: the fiat-crypto
-//! crate has no arithmetic mod n, and for 32-bit limbs, the 17-limb output
-//! fiat-crypto's generator gives overflows rustc's stack in debug builds,
-//! and its 9-word one, in 64-bit words, measured 5x slower on armv7.  The rest
+//! rind multiplies by Montgomery's method, word by word over 18 32-bit
+//! words (CIOS), in loops whose bounds and indices are public: fiat-crypto's
+//! 17-word output for n overflows rustc's stack in debug builds, and its
+//! 9-word one, in 64-bit words, measured 5x slower on armv7.  The rest
 //! composes those: the point formulas repeat s2n-bignum's,
 //! and every coordinate is fully reduced, so results match it word for
 //! word; inversion is Fermat's little theorem, raising to a public exponent
@@ -23,15 +22,9 @@
 //! Arithmetic on secrets wraps: the bounds rule out overflow, and a debug
 //! build's overflow check would branch on secret values.
 
-use super::fiat_p521::fiat_p521_loose_field_element as Loose;
-use super::fiat_p521::fiat_p521_tight_field_element as Fe;
-use super::{Limb, Wide, fiat_p521 as fp};
-
-/// fiat-crypto's limbs in a field element, which are not all full.
-const FE_LIMBS: usize = size_of::<Fe>() / size_of::<Limb>();
-
-/// Limbs in a value mod n, which take 576 bits.
-const LIMBS: usize = (576 / Limb::BITS) as usize;
+use fiat_crypto::p521_32 as fp;
+use fiat_crypto::p521_32::fiat_p521_loose_field_element as Loose;
+use fiat_crypto::p521_32::fiat_p521_tight_field_element as Fe;
 
 /// z := (x * y) mod p_521, assuming x and y reduced
 pub(crate) fn bignum_mul_p521(z: &mut [u64; 9], x: &[u64; 9], y: &[u64; 9]) {
@@ -69,17 +62,16 @@ pub(crate) fn bignum_mod_n521(z: &mut [u64; 9], x: &[u64; 9]) {
     let high = x[8] >> 9;
     let mut r = *x;
     r[8] &= 0x1ff;
-    let mut r: [Limb; LIMBS] = split(&r);
-    let c: [Limb; (320 / Limb::BITS) as usize] = split(&C);
-    // high * C, a limb of high at a time, each a product that a limb and
-    // carry cannot overflow.
-    for shift in 0..(64 / Limb::BITS) as usize {
-        let part = (high >> (Limb::BITS as usize * shift)) as Limb;
-        let mut carry = 0;
+    let mut r: [u32; 18] = split(&r);
+    let c: [u32; 10] = split(&C);
+    // high * C, as two 32-bit halves of high, each a product below 2^64
+    // that a 32-bit word and carry cannot overflow.
+    for (shift, half) in [(0, high as u32), (1, (high >> 32) as u32)] {
+        let mut carry = 0u64;
         for (i, r) in r.iter_mut().enumerate().skip(shift) {
-            let t = mul_add(*r, part, c.get(i - shift).copied().unwrap_or(0), carry);
-            *r = t as Limb;
-            carry = t >> Limb::BITS;
+            let t = mul_add(*r, half, c.get(i - shift).copied().unwrap_or(0), carry);
+            *r = t as u32;
+            carry = t >> 32;
         }
     }
 
@@ -159,7 +151,7 @@ pub(crate) fn p521_jscalarmul(res: &mut [u64; 27], scalar: &[u64; 9], point_in: 
         };
     }
     let lookup = |digit: u8, sign: u8| {
-        let mut r = [Fe([0; FE_LIMBS]); 3];
+        let mut r = [Fe([0; 19]); 3];
         for (i, entry) in (1u8..).zip(&table) {
             let hit = 1u8.wrapping_sub(nonzero_u8(i ^ digit));
             for (r, e) in r.iter_mut().zip(entry) {
@@ -185,7 +177,7 @@ pub(crate) fn p521_jscalarmul(res: &mut [u64; 27], scalar: &[u64; 9], point_in: 
         acc = select_point(nonzero_u8(digit), &acc, &sum);
     }
 
-    let infinity = [Fe([0; FE_LIMBS]); 3];
+    let infinity = [Fe([0; 19]); 3];
     *res = point(&select_point(point_at_infinity, &acc, &infinity));
 }
 
@@ -350,7 +342,7 @@ fn fe_invert(x: &Fe) -> Fe {
 /// by a fixed 4-bit window starting at `e`'s top window.
 ///
 /// The exponent picks the table entries, so it must not be secret.
-fn mont_pow(x: &[Limb; LIMBS], e: &[u64; 9]) -> [Limb; LIMBS] {
+fn mont_pow(x: &[u32; 18], e: &[u64; 9]) -> [u32; 18] {
     let one = mont_mul(&split(&ONE), &split(&MM));
     let mut table = [one; 16];
     for i in 1..table.len() {
@@ -373,83 +365,83 @@ fn mont_pow(x: &[Limb; LIMBS], e: &[u64; 9]) -> [Limb; LIMBS] {
 }
 
 /// `x * y / 2^576 mod n`, for `x` and `y` below n, by Montgomery's method
-/// with the multiplication and reduction interleaved limb by limb (CIOS).
+/// with the multiplication and reduction interleaved word by word (CIOS).
 ///
 /// Each step adds `x * y[i]`, then the multiple of n that zeroes the low
-/// limb, and drops it.  The running value stays below 2n, so the limbs and
-/// the two above them hold it, and one subtraction of n reduces it.
-fn mont_mul(x: &[Limb; LIMBS], y: &[Limb; LIMBS]) -> [Limb; LIMBS] {
-    let n: [Limb; LIMBS] = split(&N);
-    let mut t = [0; LIMBS + 2];
+/// word, and drops it.  The running value stays below 2n, so the 18 words
+/// and the two above them hold it, and one subtraction of n reduces it.
+fn mont_mul(x: &[u32; 18], y: &[u32; 18]) -> [u32; 18] {
+    let n: [u32; 18] = split(&N);
+    let mut t = [0u32; 20];
     for yi in y {
-        let mut carry = 0;
+        let mut carry = 0u64;
         for (t, x) in t.iter_mut().zip(x) {
             let s = mul_add(*t, *x, *yi, carry);
-            *t = s as Limb;
-            carry = s >> Limb::BITS;
+            *t = s as u32;
+            carry = s >> 32;
         }
-        let s = Wide::from(t[LIMBS]).wrapping_add(carry);
-        t[LIMBS] = s as Limb;
-        t[LIMBS + 1] = (s >> Limb::BITS) as Limb;
+        let s = u64::from(t[18]).wrapping_add(carry);
+        t[18] = s as u32;
+        t[19] = (s >> 32) as u32;
 
         let m = t[0].wrapping_mul(N_INV_NEG);
-        let mut carry = mul_add(t[0], m, n[0], 0) >> Limb::BITS;
-        for j in 1..LIMBS {
+        let mut carry = mul_add(t[0], m, n[0], 0) >> 32;
+        for j in 1..18 {
             let s = mul_add(t[j], m, n[j], carry);
-            t[j - 1] = s as Limb;
-            carry = s >> Limb::BITS;
+            t[j - 1] = s as u32;
+            carry = s >> 32;
         }
-        let s = Wide::from(t[LIMBS]).wrapping_add(carry);
-        t[LIMBS - 1] = s as Limb;
-        t[LIMBS] = t[LIMBS + 1].wrapping_add((s >> Limb::BITS) as Limb);
-        t[LIMBS + 1] = 0;
+        let s = u64::from(t[18]).wrapping_add(carry);
+        t[17] = s as u32;
+        t[18] = t[19].wrapping_add((s >> 32) as u32);
+        t[19] = 0;
     }
-    // Below 2n < 2^576, so t[LIMBS] is zero.
-    subtract_n_if_above(&t[..LIMBS].try_into().unwrap())
+    // Below 2n < 2^576, so t[18] is zero.
+    subtract_n_if_above(&t[..18].try_into().unwrap())
 }
 
 /// `x - n` if `x` is at least n, else `x`, for `x` below 2n.
-fn subtract_n_if_above(x: &[Limb; LIMBS]) -> [Limb; LIMBS] {
+fn subtract_n_if_above(x: &[u32; 18]) -> [u32; 18] {
     let (diff, borrow) = sub(x, &split(&N));
     select_words(opaque(borrow as u8), &diff, x)
 }
 
-/// `a + b * c + carry`, which at most fills two limbs.
-fn mul_add(a: Limb, b: Limb, c: Limb, carry: Wide) -> Wide {
-    Wide::from(a)
-        .wrapping_add(Wide::from(b).wrapping_mul(Wide::from(c)))
+/// `a + b * c + carry`, which is at most 2^64 - 1.
+fn mul_add(a: u32, b: u32, c: u32, carry: u64) -> u64 {
+    u64::from(a)
+        .wrapping_add(u64::from(b).wrapping_mul(u64::from(c)))
         .wrapping_add(carry)
 }
 
 /// `x + y`, and the carry out.
-fn add(x: &[Limb; LIMBS], y: &[Limb; LIMBS]) -> ([Limb; LIMBS], Limb) {
-    let mut carry = 0;
+fn add(x: &[u32; 18], y: &[u32; 18]) -> ([u32; 18], u32) {
+    let mut carry = 0u64;
     let r = core::array::from_fn(|i| {
-        let s = Wide::from(x[i])
-            .wrapping_add(Wide::from(y[i]))
+        let s = u64::from(x[i])
+            .wrapping_add(u64::from(y[i]))
             .wrapping_add(carry);
-        carry = s >> Limb::BITS;
-        s as Limb
+        carry = s >> 32;
+        s as u32
     });
-    (r, carry as Limb)
+    (r, carry as u32)
 }
 
 /// `x - y`, and 1 if it borrowed.
-fn sub(x: &[Limb; LIMBS], y: &[Limb; LIMBS]) -> ([Limb; LIMBS], Limb) {
-    let mut borrow = 0;
+fn sub(x: &[u32; 18], y: &[u32; 18]) -> ([u32; 18], u32) {
+    let mut borrow = 0u64;
     let r = core::array::from_fn(|i| {
-        let d = Wide::from(x[i])
-            .wrapping_sub(Wide::from(y[i]))
+        let d = u64::from(x[i])
+            .wrapping_sub(u64::from(y[i]))
             .wrapping_sub(borrow);
-        borrow = d >> (Wide::BITS - 1);
-        d as Limb
+        borrow = d >> 63;
+        d as u32
     });
-    (r, borrow as Limb)
+    (r, borrow as u32)
 }
 
 /// `if_nonzero` if `flag` is 1, else `if_zero`.
-fn select_words(flag: u8, if_zero: &[Limb; LIMBS], if_nonzero: &[Limb; LIMBS]) -> [Limb; LIMBS] {
-    let mask = Limb::from(flag).wrapping_neg();
+fn select_words(flag: u8, if_zero: &[u32; 18], if_nonzero: &[u32; 18]) -> [u32; 18] {
+    let mask = u32::from(flag).wrapping_neg();
     core::array::from_fn(|i| (if_nonzero[i] & mask) | (if_zero[i] & !mask))
 }
 
@@ -457,22 +449,14 @@ fn scalar(x: &[u64]) -> [u64; 9] {
     x.try_into().unwrap()
 }
 
-/// The limbs of `x`, low first.
-fn split<const N: usize, const W: usize>(x: &[u64; N]) -> [Limb; W] {
-    let per_word = (64 / Limb::BITS) as usize;
-    core::array::from_fn(|i| {
-        x.get(i / per_word)
-            .map_or(0, |w| (w >> (Limb::BITS as usize * (i % per_word))) as Limb)
-    })
+/// The 32-bit words of `x`, low first.
+fn split<const N: usize, const W: usize>(x: &[u64; N]) -> [u32; W] {
+    core::array::from_fn(|i| x.get(i / 2).map_or(0, |w| (w >> (32 * (i % 2))) as u32))
 }
 
-/// The 64-bit words of a value mod n's limbs, low first.
-fn join(x: &[Limb; LIMBS]) -> [u64; 9] {
-    let mut r = [0u64; 9];
-    for (i, limb) in x.iter().enumerate() {
-        r[i * 9 / LIMBS] |= u64::from(*limb) << (Limb::BITS as usize * i % 64);
-    }
-    r
+/// The 64-bit words of 18 32-bit ones, low first.
+fn join(x: &[u32; 18]) -> [u64; 9] {
+    core::array::from_fn(|i| u64::from(x[2 * i]) | (u64::from(x[2 * i + 1]) << 32))
 }
 
 /// The words of a fully reduced field element.
@@ -481,7 +465,7 @@ fn fe(x: &[u64; 9]) -> Fe {
     for (chunk, word) in bytes.as_chunks_mut::<8>().0.iter_mut().zip(x) {
         *chunk = word.to_le_bytes();
     }
-    let mut r = Fe([0; FE_LIMBS]);
+    let mut r = Fe([0; 19]);
     fp::fiat_p521_from_bytes(&mut r, bytes[..66].try_into().unwrap());
     r
 }
@@ -495,31 +479,31 @@ fn words(x: &Fe) -> [u64; 9] {
 }
 
 fn relax(x: &Fe) -> Loose {
-    let mut r = Loose([0; FE_LIMBS]);
+    let mut r = Loose([0; 19]);
     fp::fiat_p521_relax(&mut r, x);
     r
 }
 
 fn carry(x: &Loose) -> Fe {
-    let mut r = Fe([0; FE_LIMBS]);
+    let mut r = Fe([0; 19]);
     fp::fiat_p521_carry(&mut r, x);
     r
 }
 
 fn fe_mul(x: &Fe, y: &Fe) -> Fe {
-    let mut r = Fe([0; FE_LIMBS]);
+    let mut r = Fe([0; 19]);
     fp::fiat_p521_carry_mul(&mut r, &relax(x), &relax(y));
     r
 }
 
 fn fe_sqr(x: &Fe) -> Fe {
-    let mut r = Fe([0; FE_LIMBS]);
+    let mut r = Fe([0; 19]);
     fp::fiat_p521_carry_square(&mut r, &relax(x));
     r
 }
 
 fn fe_add(x: &Fe, y: &Fe) -> Fe {
-    let mut r = Loose([0; FE_LIMBS]);
+    let mut r = Loose([0; 19]);
     fp::fiat_p521_add(&mut r, x, y);
     carry(&r)
 }
@@ -529,13 +513,13 @@ fn fe_double(x: &Fe) -> Fe {
 }
 
 fn fe_sub(x: &Fe, y: &Fe) -> Fe {
-    let mut r = Loose([0; FE_LIMBS]);
+    let mut r = Loose([0; 19]);
     fp::fiat_p521_sub(&mut r, x, y);
     carry(&r)
 }
 
 fn fe_opp(x: &Fe) -> Fe {
-    let mut r = Loose([0; FE_LIMBS]);
+    let mut r = Loose([0; 19]);
     fp::fiat_p521_opp(&mut r, x);
     carry(&r)
 }
@@ -553,7 +537,7 @@ fn nonzero_u8(x: u8) -> u8 {
 
 /// `if_nonzero` if `flag` is 1, else `if_zero`.
 fn select(flag: u8, if_zero: &Fe, if_nonzero: &Fe) -> Fe {
-    let mut r = Fe([0; FE_LIMBS]);
+    let mut r = Fe([0; 19]);
     fp::fiat_p521_selectznz(&mut r.0, flag, &if_zero.0, &if_nonzero.0);
     r
 }
@@ -589,7 +573,7 @@ fn point(p: &[Fe; 3]) -> [u64; 27] {
 }
 
 /// n_521, the group order, as little-endian words.
-pub(crate) const N: [u64; 9] = [
+pub(super) const N: [u64; 9] = [
     0xbb6f_b71e_9138_6409,
     0x3bb5_c9b8_899c_47ae,
     0x7fcc_0148_f709_a5d0,
@@ -642,18 +626,8 @@ const MM: [u64; 9] = [
     0x0000_0000_0000_003d,
 ];
 
-/// -n_521^-1 mod 2^b, for b bits a limb: correct to 5 bits, then Newton's
-/// iteration doubles that each time.
-const N_INV_NEG: Limb = {
-    let n = N[0] as Limb;
-    let mut inv = n.wrapping_mul(3) ^ 2;
-    let mut i = 0;
-    while i < 4 {
-        inv = inv.wrapping_mul(Limb::wrapping_sub(2, n.wrapping_mul(inv)));
-        i += 1;
-    }
-    inv.wrapping_neg()
-};
+/// -n_521^-1 mod 2^32.
+const N_INV_NEG: u32 = 0x79a9_95c7;
 
 /// 2^521 - n_521, as little-endian words.
 const C: [u64; 5] = [

@@ -15,18 +15,13 @@ which `admin/import-hacl` imports the routines from:
 - `Vale.AES.AES_s` and `Vale.AES.AES_common_s`: AES's key expansion and cipher;
 - `Vale.Math.Poly2_s`, `Vale.AES.GF128_s`, `Vale.AES.GF128`, and
   `Vale.AES.OptPublic`: GF(2^128) and the GHASH key powers `hkeys_reqs_pub`;
-- `Vale.Def.Types_s`: how bytes, words, and `quad32`s convert;
-- `Vale.AES.GHash_s`, `Vale.AES.GCTR_s`, and `Vale.AES.GCM_s`: AES-GCM.
+- `Vale.Def.Types_s`: how bytes, words, and `quad32`s convert.
 
 Vale leaves AES's round functions assumed (`assume val`): `sub_bytes`,
 `sub_word`, `shift_rows_LE`, `mix_columns_LE`, and `rot_word_LE`. They are
 FIPS 197's here, `sbox` and `mixColumns` opaque, so they are the functions the
-AES-NI instructions compute in `Rind.X86_64.Simd`.
-
-Vale's GCM bounds the message and AAD below 2^32 bytes, the most its routines
-take. rind's own kernels take more, so `gctrEncrypt`, `gcmEncrypt`, and
-`gcmDecrypt` drop that bound, as the composition rule allows for a function a
-proof must compute; Vale's theorems still state it.
+AES-NI instructions compute in `Rind.X86_64.Simd`. `gcm_encrypt_LE`,
+`gcm_decrypt_LE`, and `compute_iv_BE` are opaque: no proof looks inside them.
 -/
 
 namespace rind.vale
@@ -257,119 +252,22 @@ def hkeysReqsPub (hkeys : List Quad32) (hBE : Quad32) : Prop :=
   ofQuad32 hkeys[6]! = gf128Power h 5 ∧
   ofQuad32 hkeys[7]! = gf128Power h 6
 
-/-! ## GHASH, `Vale.AES.GHash_s` -/
-
-/-- `to_quad32`: bit `i` is coefficient `i`, below 128. -/
-noncomputable def toQuad32 (a : Poly) : Quad32 :=
-  BitVec.ofNat 128 (∑ i ∈ Finset.range 128, if a.coeff i ≠ 0 then 2 ^ i else 0)
-
-/-- `gf128_mul_LE`: the product of two blocks laid out as their bytes, least
-significant first, through `gf128_of_quad32` and `gf128_to_quad32`. -/
-noncomputable def gf128MulLE (a b : Quad32) : Quad32 :=
-  let aBE := reverseBytesQuad32 a
-  let bBE := reverseBytesQuad32 b
-  let abBE := toQuad32 (reverse (gf128Mul (reverse (ofQuad32 aBE) 127) (reverse (ofQuad32 bBE) 127)) 127)
-  reverseBytesQuad32 abBE
-
-/-- `ghash_LE_def`: each block XORed into the hash and multiplied by `h`, from
-zero. Vale's recursion on `all_but_last` is this left fold; it requires a
-block, and with none the fold is zero. -/
-noncomputable def ghashLE (h : Quad32) (x : List Quad32) : Quad32 :=
-  x.foldl (fun y xi => gf128MulLE (y ^^^ xi) h) 0
-
-/-! ## GCTR, `Vale.AES.GCTR_s` -/
-
-/-- `inc32`: the low word plus `i`, wrapping. -/
-def inc32 (cb : Quad32) (i : Nat) : Quad32 :=
-  cb.extractLsb' 32 96 ++ (cb.extractLsb' 0 32 + BitVec.ofNat 32 i)
-
-/-- `gctr_encrypt_block`: block `i`'s keystream XORed in. -/
-def gctrEncryptBlock (icbBE plain : Quad32) (alg : Algorithm) (key : List (BitVec 32)) (i : Nat) :
-    Quad32 :=
-  plain ^^^ aesEncrypt alg key (reverseBytesQuad32 (inc32 icbBE i))
-
-/-- `gctr_encrypt_recursive`. -/
-def gctrEncryptRecursive (icbBE : Quad32) (alg : Algorithm) (key : List (BitVec 32)) :
-    List Quad32 → Nat → List Quad32
-  | [], _ => []
-  | p :: ps, i => gctrEncryptBlock icbBE p alg key i :: gctrEncryptRecursive icbBE alg key ps (i + 1)
-
-/-- `pad_to_128_bits`: zeros up to a whole block. -/
-def padTo128Bits (p : List (BitVec 8)) : List (BitVec 8) :=
-  if p.length % 16 = 0 then p else p ++ List.replicate (16 - p.length % 16) 0
-
-/-- `seq_to_seq_four_LE`: each four words as a `quad32`, the first lowest. -/
-def seqToSeqFourLE (x : List (BitVec 32)) : List Quad32 :=
-  (List.range (x.length / 4)).map fun n => mkfour x[n * 4]! x[n * 4 + 1]! x[n * 4 + 2]! x[n * 4 + 3]!
-
-/-- `le_bytes_to_seq_quad32`. -/
-def leBytesToSeqQuad32 (b : List (BitVec 8)) : List Quad32 := seqToSeqFourLE (seqNat8ToSeqNat32LE b)
-
-/-- `gctr_encrypt_LE_def`, without `is_gctr_plain_LE`'s bound of 2^32 bytes. -/
-def gctrEncrypt (icbBE : Quad32) (plain : List (BitVec 8)) (alg : Algorithm) (key : List (BitVec 32)) :
-    List (BitVec 8) :=
-  let numExtra := plain.length % 16
-  if numExtra = 0 then
-    leSeqQuad32ToBytes (gctrEncryptRecursive icbBE alg key (leBytesToSeqQuad32 plain) 0)
-  else
-    let fullBytesLen := plain.length - numExtra
-    let fullBlocks := plain.take fullBytesLen
-    let finalBlock := plain.drop fullBytesLen
-    let fullQuads := leBytesToSeqQuad32 fullBlocks
-    let finalQuad := leBytesToQuad32 (padTo128Bits finalBlock)
-    let cipherQuads := gctrEncryptRecursive icbBE alg key fullQuads 0
-    let finalCipherQuad := gctrEncryptBlock icbBE finalQuad alg key (fullBytesLen / 16)
-    leSeqQuad32ToBytes cipherQuads ++ (leQuad32ToBytes finalCipherQuad).take numExtra
-
 /-! ## GCM, `Vale.AES.GCM_s` -/
 
-/-- `insert_nat64_def q n i`: `q` with its 64-bit half `i` (0 the low) set to `n`. -/
-def insertNat64 (q : Quad32) (n : Nat) (i : Nat) : Quad32 :=
-  if i = 0 then q.extractLsb' 64 64 ++ BitVec.ofNat 64 n else BitVec.ofNat 64 n ++ q.extractLsb' 0 64
+/-- `compute_iv_BE`, the counter block for a nonce, defined in `Vale.AES.GCM_s` at
+https://github.com/hacl-star/hacl-star/blob/f557259007db9933442dde10aa995c1b00bd3446/vale/specs/crypto/Vale.AES.GCM_s.fst#L20 -/
+opaque computeIvBE (hLE : Quad32) (iv : List (BitVec 8)) : Quad32
 
-/-- `compute_iv_BE_def`, the counter block for an IV: a 96-bit one followed by
-1, or else the GHASH of the IV and its bit length. -/
-noncomputable def computeIvBE (hLE : Quad32) (iv : List (BitVec 8)) : Quad32 :=
-  if 8 * iv.length = 96 then
-    let ivLE := leBytesToQuad32 (padTo128Bits iv)
-    let ivBE := reverseBytesQuad32 ivLE
-    ivBE.extractLsb' 32 96 ++ (1 : BitVec 32)
-  else
-    let paddedIvQuads := leBytesToSeqQuad32 (padTo128Bits iv)
-    let lengthBE := insertNat64 (mkfour 0 0 0 0) (8 * iv.length) 0
-    let lengthLE := reverseBytesQuad32 lengthBE
-    reverseBytesQuad32 (ghashLE hLE (paddedIvQuads ++ [lengthLE]))
+/-- `gcm_encrypt_LE`: AES-GCM's ciphertext and tag, defined in `Vale.AES.GCM_s` at
+https://github.com/hacl-star/hacl-star/blob/f557259007db9933442dde10aa995c1b00bd3446/vale/specs/crypto/Vale.AES.GCM_s.fst#L39
+with Vale's AES and GHASH, the round functions read as FIPS 197's. -/
+opaque gcmEncrypt (alg : Algorithm) (key iv plain auth : List (BitVec 8)) :
+  List (BitVec 8) × List (BitVec 8)
 
-/-- The tag's hash, as `gcm_encrypt_LE_def` and `gcm_decrypt_LE_def` compute
-it from the AAD and ciphertext. -/
-noncomputable def gcmHash (hLE : Quad32) (auth cipher : List (BitVec 8)) : Quad32 :=
-  let lengthsBE := insertNat64 (insertNat64 (mkfour 0 0 0 0) (8 * auth.length) 1) (8 * cipher.length) 0
-  let lengthsLE := reverseBytesQuad32 lengthsBE
-  let zeroPaddedC := leBytesToSeqQuad32 (padTo128Bits cipher)
-  let zeroPaddedA := leBytesToSeqQuad32 (padTo128Bits auth)
-  ghashLE hLE (zeroPaddedA ++ (zeroPaddedC ++ [lengthsLE]))
-
-/-- `gcm_encrypt_LE_def`: AES-GCM's ciphertext and tag, with Vale's AES and
-GHASH, the round functions read as FIPS 197's, without its bound of 2^32
-bytes on the message and AAD. -/
-noncomputable def gcmEncrypt (alg : Algorithm) (key iv plain auth : List (BitVec 8)) :
-    List (BitVec 8) × List (BitVec 8) :=
-  let keyLE := seqNat8ToSeqNat32LE key
-  let hLE := aesEncrypt alg keyLE (mkfour 0 0 0 0)
-  let j0BE := computeIvBE hLE iv
-  let c := gctrEncrypt (inc32 j0BE 1) plain alg keyLE
-  let t := gctrEncrypt j0BE (leQuad32ToBytes (gcmHash hLE auth c)) alg keyLE
-  (c, t)
-
-/-- `gcm_decrypt_LE_def`: AES-GCM's plaintext, and whether the tag matches,
-without its bound of 2^32 bytes on the ciphertext and AAD. -/
-noncomputable def gcmDecrypt (alg : Algorithm) (key iv cipher auth tag : List (BitVec 8)) :
-    List (BitVec 8) × Bool :=
-  let keyLE := seqNat8ToSeqNat32LE key
-  let hLE := aesEncrypt alg keyLE (mkfour 0 0 0 0)
-  let j0BE := computeIvBE hLE iv
-  let p := gctrEncrypt (inc32 j0BE 1) cipher alg keyLE
-  let t := gctrEncrypt j0BE (leQuad32ToBytes (gcmHash hLE auth cipher)) alg keyLE
-  (p, t == tag)
+/-- `gcm_decrypt_LE`: AES-GCM's plaintext, and whether the tag matches, defined in
+`Vale.AES.GCM_s` at
+https://github.com/hacl-star/hacl-star/blob/f557259007db9933442dde10aa995c1b00bd3446/vale/specs/crypto/Vale.AES.GCM_s.fst#L69 -/
+opaque gcmDecrypt (alg : Algorithm) (key iv cipher auth tag : List (BitVec 8)) :
+  List (BitVec 8) × Bool
 
 end rind.vale

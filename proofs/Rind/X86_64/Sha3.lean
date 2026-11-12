@@ -381,192 +381,62 @@ theorem getElem!_bv (l : List U8) (j : Nat) : (bv l)[j]! = (l[j]!).bv := by
   simp only [bv, List.getElem!_eq_getElem?_getD, List.getElem?_map]
   cases l[j]? <;> rfl
 
-theorem getElem!_list_set {α : Type} [Inhabited α] (l : List α) (j i : Nat) (v : α)
-    (hi : i < l.length) : (l.set j v)[i]! = if j = i then v else l[i]! := by
-  rw [getElem!_pos (l.set j v) i (by simp; omega), List.getElem_set, getElem!_pos l i hi]
-
-theorem length_toLEBytes64 (x : BitVec 64) : x.toLEBytes.length = 8 := by
-  simp [BitVec.toLEBytes_length]
-
-/-- The first `k` lanes' bytes are the state's first `8 * k`. -/
-theorem sbl_take (L : List U64) (k : Nat) : sbl (L.take k) = (sbl L).take (8 * k) := by
-  induction L generalizing k with
-  | nil => simp [stateBytes]
-  | cons x L ih =>
-    cases k with
-    | zero => simp [stateBytes]
-    | succ k =>
-      have := ih k
-      simp only [stateBytes, List.take_succ_cons, List.map_cons, List.flatMap_cons] at this ⊢
-      rw [this, List.take_append, length_toLEBytes64,
-        List.take_of_length_le (l := x.bv.toLEBytes) (by rw [length_toLEBytes64]; omega),
-        show 8 * (k + 1) - 8 = 8 * k by omega]
-
-/-- The state's bytes from lane `k` on are those lanes'. -/
-theorem sbl_drop (L : List U64) (k : Nat) : sbl (L.drop k) = (sbl L).drop (8 * k) := by
-  induction L generalizing k with
-  | nil => simp [stateBytes]
-  | cons x L ih =>
-    cases k with
-    | zero => simp [stateBytes]
-    | succ k =>
-      have := ih k
-      simp only [stateBytes, List.drop_succ_cons, List.map_cons, List.flatMap_cons] at this ⊢
-      rw [this, List.drop_append, length_toLEBytes64,
-        List.drop_of_length_le (l := x.bv.toLEBytes) (by rw [length_toLEBytes64]; omega),
-        List.nil_append, show 8 * (k + 1) - 8 = 8 * k by omega]
-
-theorem bv_to_le_bytes (x : U64) : bv (core.num.U64.to_le_bytes x).val = x.bv.toLEBytes := by
-  simp [bv, core.num.U64.to_le_bytes, Function.comp_def]
-
-/-- `store_bytes`' loop writes lane `i` of `whole` into chunk `i`. -/
-theorem store_bytes_loop_spec (whole : Slice U64) (iter : core.ops.range.Range Usize)
-    (lanes : Slice (Std.Array U8 8#usize)) (hs : iter.start.val ≤ lanes.length)
-    (he : iter.end.val = lanes.length) (hw : lanes.length ≤ whole.length)
-    (hpre : ∀ i < iter.start.val, bv (lanes.val[i]!).val = (whole.val[i]!).bv.toLEBytes) :
-    mid.sha3.store_bytes_loop iter lanes whole ⦃ r =>
-      r.length = lanes.length ∧
-      ∀ i < lanes.length, bv (r.val[i]!).val = (whole.val[i]!).bv.toLEBytes ⦄ := by
-  unfold mid.sha3.store_bytes_loop
-  apply loop.spec_decr_nat (fun x => lanes.length - x.1.start.val)
-    (fun x => x.1.start.val ≤ lanes.length ∧ x.1.end.val = lanes.length ∧
-      x.2.length = lanes.length ∧
-      ∀ i < x.1.start.val, bv (x.2.val[i]!).val = (whole.val[i]!).bv.toLEBytes)
-  · rintro ⟨it, ls⟩ ⟨hs, he, hl, hst⟩
-    simp only at hs he hl hst ⊢
-    unfold mid.sha3.store_bytes_loop.body
-    by_cases hlt : it.start.val < it.end.val
-    · step with core.iter.range.IteratorRange.next_Usize_some_spec as ⟨o, it', ho, hst', hen⟩
-      subst ho
-      have hen' : it'.end.val = it.end.val := by rw [hen]
-      step as ⟨x, hx⟩
-      step as ⟨a, ha⟩
-      step as ⟨ls', hls'⟩
-      refine ⟨by omega, by omega, by simp [Slice.length, hls']; exact hl, ?_, by omega⟩
-      intro i hi
-      rw [hls', Slice.set_val_eq, getElem!_list_set _ _ _ _ (by
-        have : ls.val.length = lanes.length := hl
-        omega)]
-      split
-      · subst_vars
-        have : it.start.val < whole.val.length := by
-          have : whole.val.length = whole.length := rfl
-          omega
-        rw [ha, getElem!_pos whole.val _ this]
-        simp [bv, Function.comp_def]
-      · exact hst i (by omega)
-    · step with core.iter.range.IteratorRange.next_Usize_none_spec as ⟨o, it', ho, hit⟩
-      subst ho
-      simp only [WP.spec_ok]
-      refine ⟨hl, ?_⟩
-      intro i hi
-      exact hst i (by omega)
-  · exact ⟨hs, he, rfl, hpre⟩
-
-/-- `as_chunks_mut`: `as_chunks`'s views, and a write back that joins them. -/
-theorem as_chunks_mut_spec {T : Type} [Inhabited T] (N : Usize) (s : Slice T) (hN : 0 < N.val) :
-    core.slice.Slice.as_chunks_mut N s ⦃ v back =>
-      v.1.val.length = s.length / N.val ∧
-      (∀ i, i < v.1.val.length → (v.1.val[i]!).val = (s.val.drop (i * N.val)).take N.val) ∧
-      v.2.val = s.val.drop (s.length / N.val * N.val) ∧
-      ∀ c r, (c.val.flatMap (·.val) ++ r.val).length ≤ Usize.max →
-        (back (c, r)).val = c.val.flatMap (·.val) ++ r.val ⦄ := by
-  unfold core.slice.Slice.as_chunks_mut
-  step with as_chunks_spec N s hN as ⟨v, hc, hci, hr⟩
-  refine ⟨hc, hci, hr, ?_⟩
-  intro c' r' hl
-  simp only [hl, ↓reduceDIte, Slice.from_val]
-
 /-- `store_bytes` writes the state's first bytes. -/
 theorem store_bytes_spec (s : Std.Array U64 25#usize) (output : Slice U8) (h : output.length ≤ 200) :
     mid.sha3.store_bytes s output ⦃ r =>
       r.length = output.length ∧ bv r.val = (sbl s.val).take output.length ⦄ := by
-  unfold mid.sha3.store_bytes
-  step with as_chunks_mut_spec 8#usize output (by decide)
-    as ⟨lanes, tail, back, hlen, hci, htail, hback⟩
-  have hol : output.val.length = output.length := rfl
-  have hk : lanes.length = output.length / 8 := hlen
-  have hll : lanes.len.val = lanes.length := by simp [Slice.length]
-  step as ⟨whole, hwhole, hwl⟩
-  step with store_bytes_loop_spec whole { start := 0#usize, «end» := lanes.len } lanes (by simp)
-    hll (by simp only [Slice.length] at hwl hll ⊢; omega) (fun i hi => absurd hi (by simp))
-    as ⟨lanes1, hl1, hlanes1⟩
-  have hs25 : s.val.length = 25 := by simp
-  have hwv : whole.val = s.val.take lanes.length := by
-    rw [hwhole, hll]; simp [List.slice]
-  have hL : bv (lanes1.val.flatMap (·.val)) = (sbl s.val).take (8 * lanes.length) := by
-    have hm : lanes1.val.map (fun a => bv a.val) = whole.val.map (fun x => x.bv.toLEBytes) := by
-      apply List.ext_getElem (by
-        simp only [List.length_map]
-        have : lanes1.val.length = lanes1.length := rfl
-        have : whole.val.length = whole.length := rfl
-        omega)
-      intro i h1 h2
-      simp only [List.length_map] at h1 h2
-      simp only [List.getElem_map]
-      have := hlanes1 i (by have : lanes1.val.length = lanes1.length := rfl; omega)
-      rwa [getElem!_pos _ i h1, getElem!_pos _ i h2] at this
-    rw [← sbl_take, ← hwv, bv, List.map_flatMap, List.flatMap_def]
-    simp only [stateBytes, List.flatMap_def, List.map_map]
-    simp only [bv] at hm
-    rw [hm]; rfl
-  have hLl : (bv (lanes1.val.flatMap (·.val))).length = 8 * lanes.length := by
-    rw [hL, List.length_take, length_sbl, hs25]; omega
-  have hLl' : (lanes1.val.flatMap (·.val)).length = 8 * lanes.length := by
-    simpa [bv] using hLl
-  step as ⟨b, hb⟩
-  split
-  · rename_i hbt
-    have ht0 : tail.val = [] := by
-      have : tail.length = 0 := by rw [← hb]; exact hbt
-      simpa [Slice.length] using this
-    have hlen8 : output.length = 8 * lanes.length := by
-      have := congrArg List.length htail
-      rw [ht0] at this; simp at this; omega
-    have hb' := hback lanes1 tail (by
-      rw [ht0, List.append_nil, hLl']; have := output.property; omega)
-    simp only [WP.spec_ok]
-    refine ⟨?_, ?_⟩
-    · show (back (lanes1, tail)).val.length = _
-      rw [hb', ht0, List.append_nil, hLl']; omega
-    · rw [hb', ht0, List.append_nil, hL, hlen8]
-  · rename_i hbf
-    have hn0 : tail.length ≠ 0 := by rw [hb] at hbf; exact hbf
-    have htl : tail.length = output.length - 8 * lanes.length := by
-      have := congrArg List.length htail
-      simp only [List.length_drop] at this
-      have : tail.val.length = tail.length := rfl
-      rw [hk]; omega
-    have hkl : lanes.length < 25 := by omega
-    have hl1' : lanes1.len.val = lanes.length := by
-      have : lanes1.val.length = lanes1.length := rfl
-      simp [Slice.length] at hl1 ⊢; omega
-    step as ⟨x, hx⟩
-    step as ⟨a, ha⟩
-    have htn : tail.len.val = tail.length := by simp [Slice.length]
-    step with core.slice.index.SliceIndexRangeToUsizeSlice.index.step_spec { «end» := tail.len }
-      a.to_slice (by simp [Slice.length]; scalar_tac) as ⟨s1, hs1, hs1l⟩
-    step with core.slice.Slice.copy_from_slice.step_spec _ tail s1 (by
-      rw [hs1l]; simp [Slice.len, Slice.length]) as ⟨tail1, ht1⟩
-    subst tail1
-    have hbs1 : bv s1.val = x.bv.toLEBytes.take tail.length := by
-      rw [hs1]; simp [List.slice, ha, bv, Function.comp_def, Slice.len, Slice.length]
-    have hb' := hback lanes1 s1 (by
-      rw [List.length_append, hLl']
-      have : s1.val.length = s1.length := rfl
-      have := output.property; omega)
-    have hxs : x = s.val[lanes.length]! := by
-      rw [hx, getElem!_pos s.val _ (by omega)]; simp [hl1']
-    refine ⟨?_, ?_⟩
-    · show (back (lanes1, s1)).val.length = _
-      rw [hb', List.length_append, hLl']
-      have : s1.val.length = s1.length := rfl
-      omega
-    · rw [hb', bv, List.map_append, ← bv, ← bv, hL, hbs1,
-        show output.length = 8 * lanes.length + tail.length by omega, List.take_add,
-        ← sbl_drop, List.drop_eq_getElem_cons (by omega), hxs, getElem!_pos s.val _ (by omega)]
-      simp only [stateBytes, List.map_cons, List.flatMap_cons]
-      rw [List.take_append_of_le_length (by rw [length_toLEBytes64]; omega)]
+  unfold mid.sha3.store_bytes mid.sha3.store_bytes_loop
+  apply loop.spec_decr_nat (fun x => output.length - x.2.val)
+    (fun x => x.1.length = output.length ∧ x.2.val ≤ output.length ∧
+      (x.2.val % 8 = 0 ∨ x.2.val = output.length) ∧
+      ∀ j, j < x.2.val → (bv x.1.val)[j]! = (sbl s.val)[j]!)
+  · rintro ⟨out, done⟩ ⟨hl, hd, hd8, hpre⟩
+    simp only at hl hd hd8 hpre ⊢
+    unfold mid.sha3.store_bytes_loop.body
+    have hlen : out.len.val = output.length := by rw [← hl]; rfl
+    have hol : out.val.length = output.length := hl
+    have hoL : output.length = output.val.length := rfl
+    have hs25 : s.val.length = 25 := by simp
+    simp only []
+    split
+    · rename_i hlt
+      have hdl : done.val < output.length := by
+        have : done.val < out.len.val := hlt
+        omega
+      step*
+      · rw [s1_post1, s2_post1, i3_post]
+        omega
+      · have hn : n.val = min 8 (output.length - done.val) := by
+          rw [n_post, core.cmp.impls.OrdUsize.min_val, i2_post, hlen]; rfl
+        have hd0 : done.val % 8 = 0 := by omega
+        refine ⟨by rw [s1_post2]; simp [hl], by omega, by omega, ?_, by omega⟩
+        intro j hj
+        rw [s1_post2, Slice.setSlice!_val, s3_post]
+        by_cases hjd : j < done.val
+        · rw [getElem!_bv, List.getElem!_setSlice!_prefix _ _ _ _ hjd, ← getElem!_bv, hpre j hjd]
+        · have hs2l : s2.val.length = n.val := s2_post1
+          have hi5 : s.val[i4.val]! = i5 := by rw [i5_post, getElem!_pos s.val i4.val (by omega)]
+          rw [getElem!_bv, List.getElem!_setSlice!_middle _ _ _ _ ⟨by omega, by omega, by omega⟩,
+            s2_post, getElem!_sbl, show j / 8 = i4.val by omega, show j % 8 = j - done.val by omega,
+            hi5]
+          simp only [List.slice, List.drop_zero, Array.val_to_slice, a_post]
+          rw [List.getElem!_eq_getElem?_getD, List.getElem?_take, ite_eq_left (by omega),
+            List.getElem?_map, List.getElem?_eq_getElem (by simp; omega),
+            List.getElem!_eq_getElem?_getD, List.getElem?_eq_getElem (by simp; omega)]
+          rfl
+    · rename_i hnd
+      have hdl : done.val = output.length := by
+        have : ¬ done.val < out.len.val := hnd
+        omega
+      simp only [WP.spec_ok]
+      refine ⟨hl, ?_⟩
+      apply ext_getElem! (by
+        rw [bv, List.length_map, List.length_take, length_sbl, hs25]; omega)
+      intro j hj
+      rw [bv, List.length_map] at hj
+      rw [hpre j (by omega), List.getElem!_eq_getElem?_getD (l := List.take _ _), List.getElem?_take,
+        ite_eq_left (by omega), ← List.getElem!_eq_getElem?_getD]
+  · exact ⟨rfl, by simp, by simp, by simp⟩
 
 /-! ## Keccak-f on the state's bytes -/
 
@@ -990,18 +860,16 @@ theorem absorb_keccakPad (R : Nat) (hR : 0 < R ∧ R ≤ 200) (d : Byte) (P r : 
       rw [length_keccakPad R hR.1, Nat.mod_eq_of_lt hr]; omega),
     xorAt_keccakPad R hR d _ r (length_absorb R _ P (by simp)) hr]
 
-/-- `pad` makes a state that has absorbed `m` the one whose Keccak-f ends
-absorbing `m` padded. -/
-theorem sponge_pad_spec (R : Usize) (PAD : U8) (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0)
-    (st : Std.Array U64 25#usize) (used : Usize) (m : List Byte)
-    (hm : SpongeAbsorbed R.val st used.val m) :
-    mid.sha3.pad R PAD st used ⦃ s =>
+/-- `padded_state` is the state whose Keccak-f ends absorbing the padded message. -/
+theorem padded_state_spec {R : Usize} {PAD : U8} (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0)
+    (sp : mid.sha3.Sponge R PAD) (m : List Byte) (hm : SpongeAbsorbed R.val sp.s sp.used.val m) :
+    mid.sha3.Sponge.padded_state sp ⦃ s =>
       keccakF (sbl s.val) = absorb R.val zeros (keccakPad R.val PAD.bv m) ⦄ := by
   obtain ⟨P, r, rfl, hP, hr, hu, hs⟩ := hm
-  unfold mid.sha3.pad
+  unfold mid.sha3.Sponge.padded_state
   step as ⟨sl, hsl⟩
   have hsl' : sl.val = [PAD] := by rw [hsl]; rfl
-  step with add_bytes_spec st used sl (by simp [Slice.length, hsl']; omega) as ⟨s1, hs1⟩
+  step with add_bytes_spec sp.s sp.used sl (by simp [Slice.length, hsl']; omega) as ⟨s1, hs1⟩
   step*
   have hi2 : i2.val < 25 := by omega
   have hx : i4.bv = (s1.val[i2.val]!).bv ^^^ i.bv := by
@@ -1016,14 +884,6 @@ theorem sponge_pad_spec (R : Usize) (PAD : U8) (hR : 8 ≤ R.val ∧ R.val < 200
   rw [s_post, Std.Array.set_val_eq, sbl_set_xor _ i2.val (by simp; omega) i4 i.bv hx 7 [0x80]
     (by simp) hw, hs1, hs, hu, hbv, absorb_keccakPad R.val ⟨by omega, by omega⟩ PAD.bv P r hP hr,
     show 8 * i2.val + 7 = R.val - 1 by omega]
-
-/-- `padded_state` is the state whose Keccak-f ends absorbing the padded message. -/
-theorem padded_state_spec {R : Usize} {PAD : U8} (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0)
-    (sp : mid.sha3.Sponge R PAD) (m : List Byte) (hm : SpongeAbsorbed R.val sp.s sp.used.val m) :
-    mid.sha3.Sponge.padded_state sp ⦃ s =>
-      keccakF (sbl s.val) = absorb R.val zeros (keccakPad R.val PAD.bv m) ⦄ := by
-  unfold mid.sha3.Sponge.padded_state
-  exact sponge_pad_spec R PAD hR sp.s sp.used m hm
 
 /-! ## SHA-3, `Sha3Context` -/
 
@@ -1792,525 +1652,5 @@ theorem shake256_batch_spec (h : RunsSha3) {P : Usize}
   intro r hr i hi
   rw [hr i hi, shake256, sponge, squeeze_block 136 128 _ (by omega)
     (by rw [length_absorb 136 zeros _ (List.length_replicate ..)]; omega)]
-
-/-! ## ML-DSA's SHAKE
-
-ML-DSA reads SHAKE256 incrementally through `Shake`, and samples its matrix,
-secret vectors, and masks from up to four SHAKE instances at once through
-`Shake4x`. -/
-
-/-- The first `m` bytes squeezed are the same however many follow. -/
-theorem squeeze_take (R m n : Nat) (S : List Byte) (h : m ≤ n) :
-    (squeeze R n S).take m = squeeze R m S := by
-  apply ext_getElem! (by simp [length_squeeze]; omega)
-  intro j hj
-  simp only [List.length_take, length_squeeze] at hj
-  rw [getElem!_pos _ j (by simp [length_squeeze]; omega), getElem!_pos _ j (by
-    rw [length_squeeze]; omega)]
-  simp [squeeze]
-
-/-- Bytes `a` to `c` squeezed are bytes `a` to `b`, then `b` to `c`. -/
-theorem squeeze_drop_append (R a b c : Nat) (S : List Byte) (hab : a ≤ b) (hbc : b ≤ c) :
-    (squeeze R c S).drop a = (squeeze R b S).drop a ++ (squeeze R c S).drop b := by
-  conv_lhs => rw [← List.take_append_drop b (squeeze R c S)]
-  rw [squeeze_take R b c S hbc, List.drop_append_of_le_length (by rw [length_squeeze]; omega)]
-
-/-- Bytes `a` to `b` squeezed, read from further output. -/
-theorem squeeze_drop_take (R a b c : Nat) (S : List Byte) (hbc : b ≤ c) :
-    ((squeeze R c S).drop a).take (b - a) = (squeeze R b S).drop a := by
-  rw [← List.drop_take, squeeze_take R b c S hbc]
-
-theorem shake_pad_bv : (31#u8 : U8).bv = shakePad := rfl
-
-/-- A SHAKE reader at rate `R` that has read the first `t` bytes of SHAKE on
-`M`. It has squeezed `k` blocks, and its buffer holds the last, of which
-`buffer_offset` bytes are read. -/
-def Reading {R : Usize} (x : mid.sha3.Shake R) (M : List Byte) (t : Nat) : Prop :=
-  ∃ k, Squeezing x.sponge shakePad M k ∧ x.buffer_offset.val ≤ R.val ∧
-    t + R.val = R.val * k + x.buffer_offset.val ∧
-    (x.buffer_offset.val < R.val →
-      bv x.buffer.val = (sponge R.val shakePad M (R.val * k)).drop (R.val * k - R.val))
-
-/-- `Shake::new` pads what its sponge absorbed, to read from the start. -/
-theorem shake_new_spec {R : Usize} (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0)
-    (sp : mid.sha3.Sponge R 31#u8) (M : List Byte) (hm : SpongeAbsorbed R.val sp.s sp.used.val M) :
-    mid.sha3.Shake.new sp ⦃ x => Reading x M 0 ⦄ := by
-  unfold mid.sha3.Shake.new
-  step with sponge_finish_spec hR sp M hm as ⟨ss, hss⟩
-  exact ⟨0, hss, le_refl _, by simp, fun h => absurd h (lt_irrefl _)⟩
-
-/-- `Shake::read` writes the next bytes of SHAKE into `output`. -/
-theorem shake_read_spec (h : RunsSha3) {R : Usize} (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0)
-    (x : mid.sha3.Shake R) (M : List Byte) (t : Nat) (hx : Reading x M t) (output : Slice U8) :
-    mid.sha3.Shake.read x output ⦃ x' out =>
-      out.length = output.length ∧
-      bv out.val = (sponge R.val shakePad M (t + output.length)).drop t ∧
-      Reading x' M (t + output.length) ⦄ := by
-  obtain ⟨k, hk, hoff, ht, hbuf⟩ := hx
-  have hol : output.val.length = output.length := rfl
-  unfold mid.sha3.Shake.read
-  step as ⟨i, hi⟩
-  step as ⟨held, hheld⟩
-  step as ⟨s, back, hs, hsl, hback⟩
-  step as ⟨i1, hi1⟩
-  step as ⟨s1, hs1, hs1l⟩
-  have hheld' : held.val = min (R.val - x.buffer_offset.val) output.length := by
-    rw [hheld, core.cmp.impls.OrdUsize.min_val, hi]; simp [Slice.length]
-  step with core.slice.Slice.copy_from_slice.step_spec _ s s1 (by rw [hsl, hs1l, hi1]; omega)
-    as ⟨s2, hs2⟩
-  subst s2
-  have hsp : ∀ n, sponge R.val shakePad M n = squeeze R.val n
-      (absorb R.val zeros (keccakPad R.val shakePad M)) := fun n => rfl
-  -- The bytes left in the buffer are the next.
-  have hA : bv s1.val = (sponge R.val shakePad M (t + held.val)).drop t := by
-    by_cases h0 : held.val = 0
-    · have : s1.val = [] := by
-        have : s1.val.length = s1.length := rfl
-        apply List.eq_nil_of_length_eq_zero; omega
-      rw [this, h0, Nat.add_zero, hsp, List.drop_of_length_le (by rw [length_squeeze])]; rfl
-    · have hlt : x.buffer_offset.val < R.val := by omega
-      have hRk : R.val ≤ R.val * k := by
-        rcases k with _ | k
-        · omega
-        · rw [Nat.mul_succ]; omega
-      have hbl : (bv x.buffer.val).length = R.val := by simp [bv]
-      rw [hs1, Array.val_to_slice, List.slice, show bv (List.take (i1.val - x.buffer_offset.val)
-          (List.drop x.buffer_offset.val x.buffer.val)) =
-          List.take (i1.val - x.buffer_offset.val) (List.drop x.buffer_offset.val (bv x.buffer.val))
-          by simp [bv, List.map_take, List.map_drop],
-        hbuf hlt, List.drop_drop, hsp, hsp, show R.val * k - R.val + x.buffer_offset.val = t by
-          omega, show i1.val - x.buffer_offset.val = t + held.val - t by omega]
-      exact squeeze_drop_take _ _ _ _ _ (by omega)
-  split
-  · -- The buffer held all `output` asks for.
-    rename_i heq
-    have hhl : held.val = output.length := by
-      have := congrArg (·.val) heq; simp [Slice.length] at this ⊢; omega
-    simp only [WP.spec_ok]
-    have hs1v : s1.val.length = output.val.length := by
-      have : s1.val.length = s1.length := rfl
-      omega
-    have hout : (back s1).val = s1.val := by
-      rw [hback, setSlice!_eq _ _ _ (by omega), List.drop_of_length_le (by omega)]
-      simp
-    refine ⟨?_, ?_, ?_⟩
-    · show (back s1).val.length = _
-      rw [hout]; have : s1.val.length = s1.length := rfl; omega
-    · rw [hout, hA, hhl]
-    · refine ⟨k, hk, by simp only; omega, by simp only; omega, fun hlt => ?_⟩
-      exact hbuf (by simp only at hlt; omega)
-  · rename_i hne
-    have hlo : output.len.val = output.length := by simp [Slice.length]
-    have hhl : held.val < output.length := by
-      have : held.val ≠ output.len.val := fun e => hne (UScalar.eq_of_val_eq e)
-      omega
-    have hheq : held.val = R.val - x.buffer_offset.val := by omega
-    have hthk : t + held.val = R.val * k := by omega
-    have hs1v : s1.val.length = held.val := by
-      have : s1.val.length = s1.length := rfl
-      omega
-    have hb1 : (back s1).val = s1.val ++ output.val.drop held.val := by
-      rw [hback, setSlice!_eq _ _ _ (by omega), hs1v]; simp
-    have hb1l : (back s1).length = output.length := by
-      show (back s1).val.length = _
-      rw [hb1, List.length_append, List.length_drop]; omega
-    step as ⟨i2, hi2⟩
-    step as ⟨i3, hi3⟩
-    have hq := Nat.div_mul_le_self i2.val R.val
-    have hmax := output.property
-    have hmax' : output.length ≤ Usize.max := hmax
-    step with UScalar.mul_spec (x := i3) (y := R) (by rw [hi3, UScalar.max_USize_eq]; omega)
-      as ⟨i4, hi4⟩
-    step with UScalar.add_spec (x := held) (y := i4) (by rw [hi4, hi3, UScalar.max_USize_eq]; omega)
-      as ⟨whole, hwhole⟩
-    have hwl : whole.val ≤ output.length := by
-      have := Nat.div_mul_le_self i2.val R.val
-      rw [hwhole, hi4, hi3]; omega
-    step as ⟨s3, back1, hs3, hs3l, hback1⟩
-    step with squeezing_squeeze_spec h ⟨by omega, by omega⟩ x.sponge shakePad M k hk s3
-      as ⟨ss, s4, hs4l, hs4, hss⟩
-    have hm : s3.length = R.val * i3.val := by rw [hs3l, hwhole, hi4, Nat.mul_comm]; omega
-    have hq : (s3.length + R.val - 1) / R.val = i3.val := by
-      rw [hm, show R.val * i3.val + R.val - 1 = R.val * i3.val + (R.val - 1) by omega,
-        Nat.mul_add_div (by omega), Nat.div_eq_of_lt (by omega), Nat.add_zero]
-    rw [hq] at hss
-    have hs4v : s4.val.length = R.val * i3.val := by
-      have : s4.val.length = s4.length := rfl
-      omega
-    have hb2 : (back1 s4).val = s1.val ++ s4.val ++ output.val.drop whole.val := by
-      rw [hback1, Slice.setSlice!_val, hb1, setSlice!_eq _ _ _ (by simp; omega), hs4v]
-      simp only [List.take_append, hs1v, Nat.sub_self,
-        List.take_zero, List.append_nil, List.drop_append, List.drop_of_length_le (show
-          s1.val.length ≤ held.val + R.val * i3.val by omega), List.nil_append, List.drop_drop]
-      rw [List.take_of_length_le (by omega), show held.val + (held.val + R.val * i3.val - held.val)
-        = whole.val by rw [hwhole, hi4, Nat.mul_comm]; omega]
-    -- The whole blocks squeezed follow the buffer's bytes.
-    have hB : bv s4.val = (sponge R.val shakePad M (t + held.val + R.val * i3.val)).drop
-        (t + held.val) := by
-      rw [hs4, hm, hthk]
-    have hsq : ∀ a b c, a ≤ b → b ≤ c → (sponge R.val shakePad M c).drop a =
-        (sponge R.val shakePad M b).drop a ++ (sponge R.val shakePad M c).drop b := by
-      intro a b c hab hbc
-      rw [hsp]
-      exact squeeze_drop_append _ _ _ _ _ hab hbc
-    have hAB : bv s1.val ++ bv s4.val =
-        (sponge R.val shakePad M (t + held.val + R.val * i3.val)).drop t := by
-      rw [hA, hB]; exact (hsq t (t + held.val) _ (by omega) (by omega)).symm
-    split
-    · rename_i hwlt
-      have hwlt' : whole.val < output.length := by
-        have : whole.val < output.len.val := hwlt
-        omega
-      step as ⟨s5, tsb, hs5, htsb⟩
-      have hs5l : s5.length = R.val := by
-        show s5.val.length = _
-        rw [hs5]; simp
-      step with squeezing_squeeze_spec h ⟨by omega, by omega⟩ ss shakePad M (k + i3.val) hss s5
-        as ⟨ss1, s6, hs6l, hs6, hss1⟩
-      have hs6v : s6.val.length = R.val := by
-        have : s6.val.length = s6.length := rfl
-        omega
-      have hbuf' : (tsb s6).val = s6.val := by
-        rw [htsb, Array.from_slice_val _ _ (by simp [hs6v])]
-      have hb2l : (back1 s4).val.length = output.length := by
-        rw [hb2]; simp only [List.length_append, List.length_drop]; omega
-      step as ⟨s7, back2, hs7, hs7l, hback2⟩
-      step as ⟨i5, hi5, _⟩
-      have hRq : t + held.val + R.val * i3.val = R.val * (k + i3.val) := by rw [Nat.mul_add]; omega
-      have hwq : whole.val = held.val + R.val * i3.val := by rw [hwhole, hi4, Nat.mul_comm]
-      have hn : i5.val < R.val := by
-        rw [hi5, hlo, hwq, hi3, hi2, hlo]
-        have := Nat.div_add_mod (output.length - held.val) R.val
-        have := Nat.mod_lt (output.length - held.val) (show 0 < R.val by omega)
-        omega
-      step with core.slice.index.SliceIndexRangeToUsizeSlice.index.step_spec { «end» := i5 }
-        (tsb s6).to_slice (by simp [Slice.length, hbuf', hs6v]; omega) as ⟨s8, hs8, hs8l⟩
-      step with core.slice.Slice.copy_from_slice.step_spec _ s7 s8 (by
-        rw [hs7l, hs8l, hi5, hlo]; have : (back1 s4).length = output.length := hb2l; omega)
-        as ⟨s9, hs9⟩
-      subst s9
-      have hs8v : s8.val.length = i5.val := by
-        have : s8.val.length = s8.length := rfl
-        omega
-      have hl12 : (s1.val ++ s4.val).length = whole.val := by
-        rw [List.length_append, hs1v, hs4v, hwq]
-      have hout : (back2 s8).val = s1.val ++ s4.val ++ s8.val := by
-        rw [hback2, setSlice!_eq _ _ _ (by rw [hb2l, hs8v, hi5, hlo]; omega), hb2,
-          List.take_left' hl12, List.drop_of_length_le (by
-            simp only [List.length_append, List.length_drop, hs8v, hs1v, hs4v]; omega),
-          List.append_nil]
-      have hC : bv s8.val = (sponge R.val shakePad M (t + output.length)).drop
-          (R.val * (k + i3.val)) := by
-        have := squeeze_drop_take R.val (R.val * (k + i3.val)) (R.val * (k + i3.val) + i5.val)
-          (R.val * (k + i3.val) + R.val) (absorb R.val zeros (keccakPad R.val shakePad M)) (by omega)
-        rw [Nat.add_sub_cancel_left] at this
-        have htl : t + output.length = R.val * (k + i3.val) + i5.val := by rw [hi5, hlo, hwq]; omega
-        rw [htl, hs8, Array.val_to_slice, hbuf', List.slice, List.drop_zero, Nat.sub_zero, bv,
-          List.map_take, ← bv, hs6, hs5l, hsp, hsp, this]
-      refine ⟨?_, ?_, ?_⟩
-      · show (back2 s8).val.length = _
-        rw [hout]; simp only [List.length_append]; omega
-      · rw [hout, bv, List.map_append, List.map_append, ← bv, ← bv, ← bv, hAB, hC, hRq,
-          ← hsq t _ _ (by omega) (by
-            have : i5.val = output.length - whole.val := by rw [hi5, hlo]
-            omega)]
-      · refine ⟨k + i3.val + 1, ?_, by simp only; omega, ?_, fun _ => ?_⟩
-        · have : (s5.length + R.val - 1) / R.val = 1 := by
-            rw [hs5l, show R.val + R.val - 1 = R.val * 1 + (R.val - 1) by omega,
-              Nat.mul_add_div (by omega), Nat.div_eq_of_lt (by omega)]
-          rw [this] at hss1; exact hss1
-        · simp only; rw [hi5, hlo, hwq, Nat.mul_add, Nat.mul_add] at *; omega
-        · simp only
-          rw [hbuf', hs6, hs5l, show R.val * (k + i3.val + 1) = R.val * (k + i3.val) + R.val by
-            rw [Nat.mul_add, Nat.mul_one], Nat.add_sub_cancel]
-    · rename_i hwge
-      have hwe : whole.val = output.length := by
-        have : ¬ whole.val < output.len.val := hwge
-        omega
-      simp only [WP.spec_ok]
-      refine ⟨?_, ?_, ?_⟩
-      · show (back1 s4).val.length = _
-        rw [hb2]; simp only [List.length_append, List.length_drop]; omega
-      · rw [hb2, List.drop_of_length_le (by omega), List.append_nil, bv, List.map_append, ← bv,
-          ← bv, hAB, show t + held.val + R.val * i3.val = t + output.length by
-            rw [hwhole, hi4, Nat.mul_comm] at hwe; omega]
-      · refine ⟨k + i3.val, hss, by simp only; omega, ?_, fun hlt => absurd hlt (by simp only; omega)⟩
-        simp only
-        rw [hwhole, hi4, Nat.mul_comm] at hwe
-        rw [Nat.mul_add]; omega
-
-/-! ### `Shake4x` -/
-
-/-- The state of SHAKE at rate `R` on `M` once absorbed. -/
-abbrev shakeAbsorbed (R : Nat) (M : List Byte) : List Byte :=
-  absorb R zeros (keccakPad R shakePad M)
-
-/-- Up to four SHAKE instances at rate `R`, lane `j` on `M j`, that have
-squeezed `k` blocks: the Keccak-f each lane owes yields block `k`. -/
-def Squeezing4 {R : Usize} (x : mid.sha3.Shake4x R) (M : Nat → List Byte) (k : Nat) : Prop :=
-  1 ≤ x.lanes.val ∧ x.lanes.val ≤ 4 ∧
-    ∀ j < x.lanes.val, keccakF (sbl (x.states.val[j]!).val) = keccakF^[k] (shakeAbsorbed R.val (M j))
-
-theorem shake4x_new_loop_spec (R : Usize) (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0)
-    {LEN : Usize} (hLEN : LEN.val < R.val) (inputs : Slice (Std.Array U8 LEN)) (hn4 : inputs.length ≤ 4)
-    (iter : core.ops.range.Range Usize) (a : Std.Array (Std.Array U64 25#usize) 4#usize)
-    (hs : iter.start.val ≤ inputs.length) (he : iter.end.val = inputs.length)
-    (hz : ∀ j, iter.start.val ≤ j → j < 4 → sbl (a.val[j]!).val = zeros)
-    (ha : ∀ j < iter.start.val,
-      keccakF (sbl (a.val[j]!).val) = shakeAbsorbed R.val (bv (inputs.val[j]!).val)) :
-    mid.sha3.Shake4x.new_loop R iter inputs a ⦃ r =>
-      ∀ j < inputs.length,
-        keccakF (sbl (r.val[j]!).val) = shakeAbsorbed R.val (bv (inputs.val[j]!).val) ⦄ := by
-  unfold mid.sha3.Shake4x.new_loop
-  apply loop.spec_decr_nat (fun x => inputs.length - x.1.start.val)
-    (fun x => x.1.start.val ≤ inputs.length ∧ x.1.end.val = inputs.length ∧
-      (∀ j, x.1.start.val ≤ j → j < 4 → sbl (x.2.val[j]!).val = zeros) ∧
-      ∀ j < x.1.start.val,
-        keccakF (sbl (x.2.val[j]!).val) = shakeAbsorbed R.val (bv (inputs.val[j]!).val))
-  · rintro ⟨it, st⟩ ⟨hs, he, hz, hst⟩
-    simp only at hs he hz hst ⊢
-    unfold mid.sha3.Shake4x.new_loop.body
-    by_cases hlt : it.start.val < it.end.val
-    · step with core.iter.range.IteratorRange.next_Usize_some_spec as ⟨o, it', ho, hst', hen⟩
-      subst ho
-      have hen' : it'.end.val = it.end.val := by rw [hen]
-      have hj4 : it.start.val < 4 := by omega
-      step as ⟨a0, back, ha0, hback⟩
-      step as ⟨a1, ha1⟩
-      step as ⟨sl, hsl⟩
-      have hsll : sl.length = LEN.val := by
-        show sl.val.length = _; rw [hsl]; simp
-      step with add_bytes_spec a0 0#usize sl (by simp only [hsll]; scalar_tac) as ⟨a2, ha2⟩
-      step as ⟨a3, back1, ha3, hback1⟩
-      have hm : SpongeAbsorbed R.val a3 LEN.val (bv (inputs.val[it.start.val]!).val) := by
-        have hsv : sl.val.length = sl.length := rfl
-        refine ⟨[], bv sl.val, ?_, by simp, by simp [bv]; omega, by simp [bv]; omega, ?_⟩
-        · rw [hsl, List.nil_append, Array.val_to_slice, ha1, getElem!_pos _ _ (by
-            have : inputs.val.length = inputs.length := rfl
-            omega)]
-        · rw [ha3, ← getElem!_pos (back a2).val it.start.val (by simp; omega), hback,
-            array_set_getElem! _ _ _ _ (by simp; omega), ite_eq_left rfl, ha2, ha0,
-            ← getElem!_pos st.val it.start.val (by simp; omega), hz _ (le_refl _) hj4]
-          simp [absorb, blocks_nil]
-      step with sponge_pad_spec R 31#u8 hR a3 LEN _ hm as ⟨a4, ha4⟩
-      refine ⟨by omega, by omega, ?_, ?_, by omega⟩
-      · intro j hj1 hj2
-        rw [hback1, array_set_getElem! _ _ _ _ (by simp; omega), ite_eq_right (by omega), hback,
-          array_set_getElem! _ _ _ _ (by simp; omega), ite_eq_right (by omega)]
-        exact hz j (by omega) hj2
-      · intro j hj
-        rw [hback1, array_set_getElem! _ _ _ _ (by simp; omega)]
-        split
-        · subst_vars; exact ha4
-        · rw [hback, array_set_getElem! _ _ _ _ (by simp; omega), ite_eq_right (by omega)]
-          exact hst j (by omega)
-    · step with core.iter.range.IteratorRange.next_Usize_none_spec as ⟨o, it', ho, hit⟩
-      subst ho
-      simp only [WP.spec_ok]
-      intro j hj
-      exact hst j (by omega)
-  · exact ⟨hs, he, hz, ha⟩
-
-/-- `Shake4x::new` absorbs each input into its own lane. -/
-theorem shake4x_new_spec (R : Usize) (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0)
-    {LEN : Usize} (hLEN : LEN.val < R.val) (inputs : Slice (Std.Array U8 LEN))
-    (hn : 1 ≤ inputs.length ∧ inputs.length ≤ 4) :
-    mid.sha3.Shake4x.new R inputs ⦃ x =>
-      x.lanes.val = inputs.length ∧ Squeezing4 x (fun j => bv (inputs.val[j]!).val) 0 ⦄ := by
-  unfold mid.sha3.Shake4x.new
-  have hlen : inputs.len.val = inputs.length := by simp [Slice.length]
-  step*
-  step with shake4x_new_loop_spec R hR hLEN inputs hn.2 { start := 0#usize, «end» := inputs.len } _
-    (by simp) hlen (fun j _ hj => by
-      have : (Std.Array.repeat 4#usize (Std.Array.repeat 25#usize 0#u64)).val =
-        List.replicate 4 (Std.Array.repeat 25#usize 0#u64) := rfl
-      rw [this, getElem!_pos _ j (by simp; omega), List.getElem_replicate, sbl_zero])
-    (fun j hj => absurd hj (by simp)) as ⟨st, hst⟩
-  refine ⟨hlen, by simp only; omega, by simp only; omega, fun j hj => ?_⟩
-  rw [Function.iterate_zero_apply]
-  exact hst j (by simp only at hj; omega)
-
-/-- Block `k + b` of the sponge is the first `R` bytes of the state that has
-squeezed `k + b` blocks. -/
-theorem sponge_block (R k b : Nat) (hR : 0 < R ∧ R ≤ 200) (d : Byte) (M : List Byte) :
-    (sponge R d M (R * k + R * b + R)).drop (R * k) =
-      (sponge R d M (R * k + R * b)).drop (R * k) ++
-        (keccakF^[k + b] (absorb R zeros (keccakPad R d M))).take R := by
-  have hS : (absorb R zeros (keccakPad R d M)).length = 200 := length_absorb R _ _ (by simp)
-  rw [show R * k + R * b + R = R * (k + b) + R by rw [Nat.mul_add],
-    show R * k + R * b = R * (k + b) by rw [Nat.mul_add], sponge, sponge,
-    squeeze_append _ _ _ hR.1, List.drop_append_of_le_length (by
-      rw [length_squeeze]; exact Nat.mul_le_mul_left _ (Nat.le_add_right _ _)),
-    squeeze_block R R _ (le_refl _) (by rw [length_iterate_keccakF _ _ hS]; omega)]
-
-/-- Each lane's output in use holds its first `n j` bytes of SHAKE from block `k`. -/
-def ShakeOut4 {N : Usize} (out : Std.Array (Std.Array U8 N) 4#usize) (R : Nat)
-    (M : Nat → List Byte) (lanes k : Nat) (n : Nat → Nat) : Prop :=
-  ∀ j < lanes,
-    (bv (out.val[j]!).val).take (n j) = (sponge R shakePad (M j) (R * k + n j)).drop (R * k)
-
-theorem shake4x_squeeze_inner_spec {R N : Usize} (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0)
-    (a : Std.Array (Std.Array U64 25#usize) 4#usize) (M : Nat → List Byte) (lanes k : Nat)
-    (hl : lanes ≤ 4) (b : Usize) (hb : R.val * b.val + R.val ≤ N.val)
-    (ha : ∀ j < lanes, sbl (a.val[j]!).val = keccakF^[k + b.val] (shakeAbsorbed R.val (M j)))
-    (iter : core.ops.range.Range Usize) (out : Std.Array (Std.Array U8 N) 4#usize)
-    (hs : iter.start.val ≤ lanes) (he : iter.end.val = lanes)
-    (ho : ShakeOut4 out R.val M lanes k fun j =>
-      R.val * b.val + if j < iter.start.val then R.val else 0) :
-    mid.sha3.Shake4x.squeeze_loop0_loop0 R iter a out b ⦃ r =>
-      ShakeOut4 r R.val M lanes k fun _ => R.val * b.val + R.val ⦄ := by
-  unfold mid.sha3.Shake4x.squeeze_loop0_loop0
-  apply loop.spec_decr_nat (fun y => lanes - y.1.start.val)
-    (fun y => y.1.start.val ≤ lanes ∧ y.1.end.val = lanes ∧
-      ShakeOut4 y.2 R.val M lanes k fun j =>
-        R.val * b.val + if j < y.1.start.val then R.val else 0)
-  · rintro ⟨it, o⟩ ⟨hs, he, hst⟩
-    simp only at hs he hst ⊢
-    unfold mid.sha3.Shake4x.squeeze_loop0_loop0.body
-    by_cases hlt : it.start.val < it.end.val
-    · step with core.iter.range.IteratorRange.next_Usize_some_spec as ⟨oj, it', ho, hst', hen⟩
-      subst ho
-      have hen' : it'.end.val = it.end.val := by rw [hen]
-      have hj4 : it.start.val < 4 := by omega
-      step as ⟨a1, ha1⟩
-      step as ⟨a2, back, ha2, hback⟩
-      have hNmax : N.val ≤ Usize.max := by scalar_tac
-      step with UScalar.mul_spec (x := b) (y := R) (by
-        rw [UScalar.max_USize_eq]; have := Nat.mul_comm b.val R.val; omega) as ⟨i, hi⟩
-      have hbR : b.val ≤ R.val * b.val := Nat.le_mul_of_pos_left _ (by omega)
-      step with UScalar.add_spec (x := b) (y := 1#usize) (by rw [UScalar.max_USize_eq]; simp; omega)
-        as ⟨i1, hi1⟩
-      step with UScalar.mul_spec (x := i1) (y := R) (by
-        rw [UScalar.max_USize_eq, hi1, Nat.add_mul, Nat.one_mul, Nat.mul_comm]; omega) as ⟨i2, hi2⟩
-      have hi2' : i2.val = R.val * b.val + R.val := by
-        rw [hi2, hi1, Nat.add_mul, Nat.one_mul, Nat.mul_comm]
-      have hi' : i.val = R.val * b.val := by rw [hi, Nat.mul_comm]
-      have hlen2 : a2.length = N.val := by simp
-      step with Array.index_mut_SliceIndexRangeUsizeSlice.step a2 { start := i, «end» := i2 }
-        (by simp only; scalar_tac) (by simp only; scalar_tac)
-        as ⟨sl, back1, hsl, hsll, hback1⟩
-      have hslR : sl.length = R.val := by rw [hsll, hi2', hi']; omega
-      step with store_bytes_spec a1 sl (by omega) as ⟨s1, hs1l, hs1⟩
-      refine ⟨by omega, by omega, ?_, by omega⟩
-      intro j hj
-      rw [hback, array_set_getElem! _ _ _ _ (by simp; omega)]
-      have hj' := hst j hj
-      split
-      · subst_vars
-        rw [hst']
-        simp only [show it.start.val < it.start.val + 1 by omega, ite_true,
-          show ¬ it.start.val < it.start.val by omega, ite_false, Nat.add_zero] at hj' ⊢
-        have hl : (bv s1.val).length = R.val := by
-          simp only [bv, List.length_map]; rw [show s1.val.length = s1.length from rfl, hs1l]
-          omega
-        have hl' : (bv (o.val[it.start.val]'(by simp; omega)).val).length = N.val := by simp [bv]
-        rw [hback1, bv_setSlice!, ← getElem!_pos o.val _ (by simp; omega)]
-        have key := take_setSlice! (bv (o.val[it.start.val]!).val) (bv s1.val) i.val (by
-          rw [hl, hi']; simp [bv]; omega)
-        rw [hl] at key
-        rw [show R.val * b.val + R.val = i.val + R.val by rw [hi'], key, hi', hj', hs1, hslR, ← getElem!_pos a.val _ (by simp; omega), ha _ hj, ← Nat.add_assoc,
-          sponge_block _ _ _ ⟨by omega, by omega⟩]
-      · have e1 : (j < it'.start.val) = (j < it.start.val) := by
-          apply propext; omega
-        simp only [e1]
-        exact hj'
-    · step with core.iter.range.IteratorRange.next_Usize_none_spec as ⟨oj, it', ho, hit⟩
-      subst ho
-      simp only [WP.spec_ok]
-      intro j hj
-      have := hst j hj
-      simp only [show j < it.start.val by omega, ite_true] at this
-      exact this
-  · exact ⟨hs, he, ho⟩
-
-theorem shake4x_squeeze_loop_spec (h : RunsSha3) {R N : Usize}
-    (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0) (M : Nat → List Byte) (lanes k : Nat)
-    (iter : core.ops.range.Range Usize) (x : mid.sha3.Shake4x R)
-    (out : Std.Array (Std.Array U8 N) 4#usize) (he : iter.end.val = N.val / R.val)
-    (hs : iter.start.val ≤ N.val / R.val) (hl : x.lanes.val = lanes)
-    (hx : Squeezing4 x M (k + iter.start.val))
-    (ho : ShakeOut4 out R.val M lanes k fun _ => R.val * iter.start.val) :
-    mid.sha3.Shake4x.squeeze_loop0 iter x out ⦃ r =>
-      r.1.lanes.val = lanes ∧ Squeezing4 r.1 M (k + N.val / R.val) ∧
-        ShakeOut4 r.2 R.val M lanes k fun _ => R.val * (N.val / R.val) ⦄ := by
-  unfold mid.sha3.Shake4x.squeeze_loop0
-  apply loop.spec_decr_nat (fun y => N.val / R.val - y.1.start.val)
-    (fun y => y.1.start.val ≤ N.val / R.val ∧ y.1.end.val = N.val / R.val ∧
-      y.2.1.lanes.val = lanes ∧ Squeezing4 y.2.1 M (k + y.1.start.val) ∧
-      ShakeOut4 y.2.2 R.val M lanes k fun _ => R.val * y.1.start.val)
-  · rintro ⟨it, st, o⟩ ⟨hs, he, hl, hst, hout⟩
-    simp only at hs he hl hst hout ⊢
-    unfold mid.sha3.Shake4x.squeeze_loop0.body
-    obtain ⟨hl1, hl4, hsq⟩ := hst
-    by_cases hlt : it.start.val < it.end.val
-    · step with core.iter.range.IteratorRange.next_Usize_some_spec as ⟨ob, it', ho, hst', hen⟩
-      subst ho
-      have hen' : it'.end.val = it.end.val := by rw [hen]
-      have hbN : R.val * it.start.val + R.val ≤ N.val := by
-        have := Nat.div_mul_le_self N.val R.val
-        have : R.val * (it.start.val + 1) ≤ R.val * (N.val / R.val) :=
-          Nat.mul_le_mul_left _ (by omega)
-        rw [Nat.mul_comm R.val (N.val / R.val)] at this
-        rw [Nat.mul_add, Nat.mul_one] at this; omega
-      apply WP.spec_bind (Pₘ := fun a => ∀ j < lanes,
-        sbl (a.val[j]!).val = keccakF^[k + it.start.val] (shakeAbsorbed R.val (M j)))
-      · have hn4 : st.lanes.val = 4 ∨ st.lanes.val = 3 ∨ st.lanes.val = 2 ∨ st.lanes.val = 1 := by
-          omega
-        rcases hn4 with e | e | e | e <;> simp only [e]
-        · step with keccak4_f1600_spec h st.states as ⟨r, hr⟩
-          rename_i j hj
-          rw [sbl_states st.states r 4 (by rw [hr, List.map_take]) j (by omega) (by omega),
-            hsq j (by omega)]
-        · step with keccak_nof4_f1600_spec h 3#usize (by decide) st.states as ⟨r, hr⟩
-          rename_i j hj
-          rw [sbl_states st.states r 3 hr j (by omega) (by omega), hsq j (by omega)]
-        · step with keccak_nof4_f1600_spec h 2#usize (by decide) st.states as ⟨r, hr⟩
-          rename_i j hj
-          rw [sbl_states st.states r 2 hr j (by omega) (by omega), hsq j (by omega)]
-        · step with keccak_nof4_f1600_spec h 1#usize (by decide) st.states as ⟨r, hr⟩
-          rename_i j hj
-          rw [sbl_states st.states r 1 hr j (by omega) (by omega), hsq j (by omega)]
-      · intro a ha
-        step with shake4x_squeeze_inner_spec hR a M lanes k (by omega) it.start hbN ha
-          { start := 0#usize, «end» := st.lanes } o (by simp) hl (by
-            intro j hj; simpa using hout j hj) as ⟨o2, ho2⟩
-        refine ⟨by omega, by omega, hl, ⟨hl1, hl4, ?_⟩, ?_, by omega⟩
-        · intro j hj
-          simp only at hj ⊢
-          rw [ha j (by omega), hst', ← Function.iterate_succ_apply' keccakF]
-          rfl
-        · rw [hst', Nat.mul_add, Nat.mul_one]; exact ho2
-    · step with core.iter.range.IteratorRange.next_Usize_none_spec as ⟨ob, it', ho, hit⟩
-      subst ho
-      simp only [WP.spec_ok]
-      have h3 : it.start.val = N.val / R.val := by omega
-      rw [h3] at hsq hout
-      exact ⟨hl, ⟨hl1, hl4, hsq⟩, hout⟩
-  · exact ⟨hs, he, hl, hx, ho⟩
-
-/-- `Shake4x::squeeze` writes each lane's next `N` bytes of SHAKE, a whole
-number of blocks, into its output. -/
-theorem shake4x_squeeze_spec (h : RunsSha3) {R N : Usize}
-    (hR : 8 ≤ R.val ∧ R.val < 200 ∧ R.val % 8 = 0) (hN : N.val % R.val = 0)
-    (x : mid.sha3.Shake4x R) (M : Nat → List Byte) (k : Nat) (hx : Squeezing4 x M k)
-    (outputs : Std.Array (Std.Array U8 N) 4#usize) :
-    mid.sha3.Shake4x.squeeze x outputs ⦃ r =>
-      r.1.lanes = x.lanes ∧ Squeezing4 r.1 M (k + N.val / R.val) ∧
-        ∀ j < x.lanes.val,
-          bv (r.2.val[j]!).val = (sponge R.val shakePad (M j) (R.val * k + N.val)).drop (R.val * k) ⦄ := by
-  unfold mid.sha3.Shake4x.squeeze
-  step as ⟨b, hb⟩
-  step with massert_spec (b = true) (by rw [hb]; simpa using hN)
-  step with sha3_assert_held_spec h
-  step as ⟨n, hn⟩
-  step with shake4x_squeeze_loop_spec h hR M x.lanes.val k { start := 0#usize, «end» := n } x
-    outputs (by simp [hn]) (by simp) rfl (by simpa using hx) (by
-      intro j hj; simp [sponge, length_squeeze]) as ⟨x', hl', hx', ho'⟩
-  refine ⟨UScalar.eq_of_val_eq hl', hx', fun j hj => ?_⟩
-  have := ho' j hj
-  simp only at this
-  rw [Nat.mul_div_cancel' (Nat.dvd_of_mod_eq_zero hN), List.take_of_length_le (by simp [bv])]
-    at this
-  exact this
 
 end rind.x86_64

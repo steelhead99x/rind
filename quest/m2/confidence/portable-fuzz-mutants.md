@@ -10,7 +10,7 @@ Planned from the 2026-11-09 tooling audit. Every architecture m2's targets epic 
 
 - Fuzzing: `TESTING.md:58` says "none: fuzz jobs build the native backends". `fuzz.yml:51-58` builds each target once per runner architecture, and `sh/fuzz-replay.sh:43` refuses any other.
 - Mutation: `admin/mutants` has a campaign for x86_64, aarch64, armv7, and macOS's DIT code, and exits on anything else. cargo-mutants mutates code whatever its `cfg`, so on the 64-bit hosts a mutant in `rind/src/low/portable/` or `rind/src/mid/portable/` is never compiled, and no test can catch it.
-- `admin/mutants --target armv7-unknown-linux-gnueabihf` runs under qemu and reaches what armv7 shares with the portable backend. It skips what armv7's assembly replaces: `rind/src/low/portable/{chacha20,cpu,keccak,sha}.rs`, and `low/generic/mont.rs`'s `mont_sqr` and `mont_mul_limbs`, whose mutants no campaign catches. No campaign reaches those.
+- `admin/mutants --target armv7-unknown-linux-gnueabihf` runs under qemu and reaches what armv7 shares with the portable backend. It skips what armv7's assembly replaces: `rind/src/low/portable/{chacha20,cpu,keccak,sha}.rs`, and `low/generic/bignum.rs`'s `mont_sqr` and `mont_mul_limbs`, whose mutants no campaign catches. No campaign reaches those.
 
 Guidance:
 

@@ -498,12 +498,6 @@ impl<'a> Integer<'a> {
             .unwrap_or_default()
     }
 
-    /// The two's complement bytes, borrowed for as long as what was parsed,
-    /// which `as_ref` through `AsRef` cannot return.
-    pub(crate) fn as_bytes(&self) -> &'a [u8] {
-        self.twos_complement
-    }
-
     pub(crate) fn as_usize(&self) -> Result<usize, Error> {
         if self.is_negative() || self.twos_complement.len() > size_of::<usize>() {
             return Err(Error::IntegerOutOfRange);

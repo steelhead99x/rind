@@ -73,26 +73,9 @@ on = ["kixtop"]
 reason = "DIT: the M4 has it, and rind turns it on and off around every call that handles a secret, which costs about 30 to 55 ns a call there; the other libraries never set it. Keeping it per call was decided with the maintainer from [#387](https://github.com/moq-dev/rind/pull/387)'s findings. Holding `rind::cpu::Dit::hold()` ([#431](https://github.com/moq-dev/rind/pull/431)) across a batch of calls, as MoQ does, pays it once and closes all but one of these gaps: the rind (DIT held) column times that, and on [`9e7f6a5a`](https://github.com/moq-dev/rind/commit/9e7f6a5a9ea59a0cf1251c24af6c5d4f21c2b0fd), the run this report shows, every one measured within 10% of the fastest library except HMAC-SHA-256 at 64 B, at 1.10× RustCrypto's (109.7 ns against 99.4 ns)."
 
 [[gap]]
-operations = ["p521-ecdsa-verify*", "rustls-full-handshake-key/ecdsa-p521*"]
-on = ["portable"]
-quest = "/quest/m3/cold-speed/portable-p521-verify.md"
-
-[[gap]]
-operations = [
-  "rsa3072-pkcs1-sha256-verify*",
-  "rsa4096-*",
-  "rsa6144-*",
-  "rsa8192-*",
-  "rustls-full-handshake-key/rsa-3072*",
-  "rustls-full-handshake-key/rsa-4096*",
-]
-on = ["portable"]
-quest = "/quest/m3/cold-speed/portable-rsa-karatsuba.md"
-
-[[gap]]
 operations = ["p[0-9]*", "rsa*", "jwt-*", "rustls-full-handshake-*"]
 on = ["portable"]
-reason = "Closed in part by [#614](https://github.com/moq-dev/rind/pull/614), after this data, which runs RSA and the NIST curves on 64-bit limbs on 64-bit targets. On a shared x86_64 host it measured, against aws-lc-rs's C without assembly: P-256 and P-384 at 0.44 to 0.76× its time, P-521 ECDH, key generation, and signing at 0.91 to 1.03×, RSA-2048 through 3072 signing at 0.88 to 1.01× and verification at 1.07×, the rustls handshakes at 0.64 to 0.96× but those the entries above name, and every ranked JWT benchmark at 0.55 to 1.06×. The next refresh drops this entry."
+quest = "/quest/m3/cold-speed/portable-limbs.md"
 
 [[gap]]
 operations = ["aes*-gcm*", "rustls-bulk/*", "aes*-ctr/*", "aes*-cbc-*"]

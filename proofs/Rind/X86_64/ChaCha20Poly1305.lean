@@ -1,5 +1,5 @@
 import Rind.X86_64.ChaCha20
-import Rind.X86_64.AesGcmAead
+import Rind.X86_64.AesGcm
 import Rind.X86_64.CtEqual
 open Aeneas Aeneas.Std Result rind.spec
 

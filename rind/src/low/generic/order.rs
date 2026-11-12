@@ -6,8 +6,7 @@
 //! multiplication and its inverse serve only the group orders, and refuse
 //! any other modulus.
 
-use super::bignum;
-use super::limbs::{p256, p384, p521};
+use super::{bignum, p256, p384, p521};
 use crate::low::{bignum_eq, ct};
 
 /// z := x * y / 2^(64k) mod m, for m = n_256, n_384, or n_521 of k words
