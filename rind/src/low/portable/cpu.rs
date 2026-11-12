@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-/// The portable code needs nothing beyond the base instruction set.
-pub(crate) fn missing_cpu_feature() -> Option<&'static str> {
-    None
-}
-
 /// No data-independent timing mode to enable.
 pub(crate) fn enter_cpu_state() -> u32 {
     0

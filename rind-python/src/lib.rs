@@ -246,10 +246,6 @@ fn has_aes_hardware() -> bool {
 #[pymodule]
 #[pyo3(name = "_rind")]
 fn pyrind(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // rind panics on a CPU missing a feature it requires; refuse the import
-    // instead, naming the feature.
-    rind::cpu::check().map_err(|missing| PyImportError::new_err(missing.to_string()))?;
-
     let py = m.py();
     m.add("Error", py.get_type::<Error>())?;
     m.add("WrongLength", py.get_type::<WrongLength>())?;

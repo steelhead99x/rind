@@ -29,7 +29,7 @@ use rind::{Error, aead, agreement, digest, hkdf, hmac, kem, pbkdf2, rsa};
 mod ctgrind;
 
 /// The negative codes a call returns on failure, one per [`Error`] variant
-/// and two of the binding's own.
+/// and one of the binding's own.
 #[repr(isize)]
 enum Status {
     WrongLength = -1,
@@ -40,8 +40,6 @@ enum Status {
     NotEqual = -6,
     Fault = -7,
     Unsupported = -8,
-    /// The CPU lacks a feature rind requires; the message names it.
-    MissingCpuFeature = -9,
     /// An argument the Dart side should never pass, such as an unknown
     /// algorithm id.
     Misuse = -10,
@@ -93,12 +91,8 @@ impl From<Misuse> for Failure {
     }
 }
 
-/// Runs `f` on a CPU rind supports, which otherwise panics, and folds its
-/// result into a return value.
+/// Folds `f`'s result into a return value.
 fn run(f: impl FnOnce() -> Result<usize, Failure>) -> isize {
-    if let Err(missing) = rind::cpu::check() {
-        return fail(Status::MissingCpuFeature, missing);
-    }
     match f() {
         // A length never exceeds isize::MAX: it is the length of a slice.
         Ok(len) => len as isize,

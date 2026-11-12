@@ -1,7 +1,6 @@
 // Written for Graviola by Joe Birr-Pixton, 2024.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-use super::cpu::verify_cpu_features;
 use super::{enter_cpu_state, leave_cpu_state};
 
 #[cfg(all(debug_assertions, not(test)))]
@@ -26,7 +25,6 @@ impl Entry {
     /// Public functions have no secret data in their arguments or return values.
     #[must_use]
     pub(crate) fn new_public() -> Self {
-        verify_cpu_features();
         #[cfg(all(debug_assertions, not(test)))]
         HELD.set(HELD.get() + 1);
 
@@ -42,7 +40,6 @@ impl Entry {
     /// (directly, or transitively).
     #[must_use]
     pub(crate) fn new_secret() -> Self {
-        verify_cpu_features();
         let cpu_state = enter_cpu_state();
         #[cfg(all(debug_assertions, not(test)))]
         HELD.set(HELD.get() + 1);

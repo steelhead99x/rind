@@ -8,8 +8,10 @@ Linux on `armv7`, ARMv6, big-endian `s390x`, `riscv64gc` (glibc and musl),
 `loongarch64`, `powerpc64le`, and big-endian `powerpc64` and `powerpc` under
 qemu. iOS devices' code is only built.
 
-- `aarch64` requires the `neon` CPU feature. Where the CPU has the crypto
-  extension (`aes`, `pmull`, and `sha2`), as the Raspberry Pi 5 and most
+- `aarch64` uses its assembly backend only when the target enables `neon`
+  at compile time. A target without it, such as
+  `aarch64-unknown-none-softfloat`, uses the portable backend. Where the CPU
+  has the crypto extension (`aes`, `pmull`, and `sha2`), as the Raspberry Pi 5 and most
   aarch64 servers and phones do, AES, GHASH, SHA1, and SHA256 run on its
   instructions. Without it, as on the Raspberry Pi 4, CM4, and Zero 2 W, they
   run [aws-lc]'s NEON and scalar assembly instead (see
@@ -90,9 +92,6 @@ qemu. iOS devices' code is only built.
   compile-only: its tests need a JavaScript host. Constant time is unchecked on
   wasm: ctgrind and the trace checks inspect native code, and a wasm engine
   compiles rind again, so its JIT may turn a select into a branch.
-
-Every operation panics on a CPU missing one of these. Call `rind::cpu::check()`
-at startup to get an error naming the missing feature instead.
 
 rind's secret-dependent code divides no secret and does no floating-point
 arithmetic on any architecture, as `admin/ct-vartime` checks, but it multiplies

@@ -2,13 +2,6 @@
 
 use core::sync::atomic::{AtomicU8, Ordering};
 
-/// The portable code needs nothing beyond the base instruction set, so NEON
-/// and the crypto extension speed things up where present but are never
-/// required.
-pub(crate) fn missing_cpu_feature() -> Option<&'static str> {
-    None
-}
-
 /// Proof that the CPU has the ARMv8 Crypto Extension in AArch32: NEON, AES,
 /// PMULL, SHA-1, and SHA-256.
 ///

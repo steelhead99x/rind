@@ -24,8 +24,9 @@ crabgrind = { version = "0.4", optional = true }
 # no C or intrinsics features enabled, fiat-crypto's for the NIST curves, and
 # curve25519-dalek's for X25519 and Ed25519. The cfg is build.rs's choice of
 # the arm or portable backend, which a manifest cannot read, so armv7 builds
-# libcrux-sha2 too, though it runs aws-lc's assembly for SHA-512.
-[target.'cfg(any(rind_portable, target_endian = "big", not(any(target_arch = "x86_64", target_arch = "aarch64"))))'.dependencies]
+# libcrux-sha2 too, though it runs aws-lc's assembly for SHA-512. aarch64
+# without compile-time `neon` is that portable backend as well.
+[target.'cfg(any(rind_portable, target_endian = "big", not(any(target_arch = "x86_64", all(target_arch = "aarch64", target_feature = "neon")))))'.dependencies]
 curve25519-dalek = { version = "5", default-features = false, features = ["precomputed-tables"] }
 fiat-crypto = { version = "0.3", default-features = false }
 libcrux-hacl-rs = { version = "0.0.6", features = ["alloc"] }

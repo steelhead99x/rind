@@ -4,9 +4,12 @@
 //!
 //! The assembly backends assume a little-endian target, so a big-endian
 //! aarch64 or 32-bit ARM target gets the portable backend, as does every
-//! other architecture. The 32-bit ARM assembly is cut for ARMv7, so a target
-//! for an earlier core, such as ARMv6's `arm-unknown-linux-gnueabihf` or
-//! ARMv5TE's `arm-linux-androideabi`, gets the portable backend too.
+//! other architecture. aarch64 gets its assembly backend only when the
+//! target enables `neon` at compile time, so `aarch64-unknown-none-softfloat`
+//! gets the portable backend too. The 32-bit ARM assembly is cut for ARMv7,
+//! so a target for an earlier core, such as ARMv6's
+//! `arm-unknown-linux-gnueabihf` or ARMv5TE's `arm-linux-androideabi`, gets
+//! the portable backend too.
 //! `--cfg rind_portable` forces it anywhere, so CI tests it on x86_64 without
 //! emulation; it is for testing, not for shipping.
 //!
@@ -24,8 +27,11 @@ fn main() {
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
     let forced = env::var_os("CARGO_CFG_RIND_PORTABLE").is_some();
+    let neon = env::var("CARGO_CFG_TARGET_FEATURE")
+        .is_ok_and(|features| features.split(',').any(|feature| feature == "neon"));
     let backend = match arch.as_str() {
-        "x86_64" | "aarch64" if little && !forced => arch.as_str(),
+        "x86_64" if little && !forced => "x86_64",
+        "aarch64" if little && !forced && neon => "aarch64",
         "arm" if little && !forced && armv7_or_later() => "arm",
         _ => "portable",
     };

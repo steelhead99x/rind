@@ -4,7 +4,7 @@ This is one Rust workspace: the `rind` library, its `rind-<consumer>` adapter cr
 
 # Required
 
-- Refuse what is unsupported, never fall back. Exactly one backend compiles per target, the portable one where rind has no assembly, and a CPU missing a required feature fails with an error naming it.
+- Refuse what is unsupported, never fall back. Exactly one backend compiles per target, the portable one where rind has no assembly, and that backend requires only features the target enables at compile time.
 - Treat every input as hostile: keys, signatures, ciphertexts, encodings. Malformed input is an error, never a panic, and its cost is bounded by design.
 - Secret-dependent code runs in constant time: no branch, memory index, or variable-time instruction depends on a secret. New secret-handling paths get a ctgrind test (`admin/ctgrind`).
 - Pick the fastest permissively licensed source for each primitive on each backend. Take a formally verified one (s2n-bignum, libcrux/HACL*, fiat-crypto) only where it measures as fast at every size; otherwise run the fastest and plan its proof. New arithmetic states where its correctness argument comes from.

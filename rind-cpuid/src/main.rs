@@ -43,7 +43,6 @@ fn main() {
     ];
     let has = |name| cpuid.iter().any(|&(n, v)| n == name && v);
 
-    let compatible = rind::cpu::check().is_ok();
     let avx512_aes_gcm = ["avx512f", "avx512bw", "avx512vl", "vaes", "vpclmulqdq"]
         .into_iter()
         .all(has);
@@ -54,8 +53,8 @@ fn main() {
         .collect::<Vec<_>>()
         .join(", ");
     println!(
-        "{{ \"cpuid\": {{ {cpuid} }}, \"compatible\": {}, \"supports_avx512_aes_gcm\": {} }}",
-        compatible as u8, avx512_aes_gcm as u8,
+        "{{ \"cpuid\": {{ {cpuid} }}, \"compatible\": 1, \"supports_avx512_aes_gcm\": {} }}",
+        avx512_aes_gcm as u8,
     );
 }
 
@@ -70,12 +69,10 @@ fn main() {
     let sha2 = is_aarch64_feature_detected!("sha2");
     let sha3 = is_aarch64_feature_detected!("sha3");
 
-    let compatible = rind::cpu::check().is_ok();
-
     println!(
         "{{ \"cpuid\": {{ \"aes\": {}, \"dit\": {}, \"neon\": {}, \"pmull\": {}, \
         \"sha2\": {}, \"sha3\": {} }}, \
-        \"compatible\": {} }}",
-        aes as u8, dit as u8, neon as u8, pmull as u8, sha2 as u8, sha3 as u8, compatible as u8,
+        \"compatible\": 1 }}",
+        aes as u8, dit as u8, neon as u8, pmull as u8, sha2 as u8, sha3 as u8,
     );
 }

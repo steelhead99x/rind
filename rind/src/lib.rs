@@ -558,17 +558,12 @@ pub mod key_wrap {
 
 /// CPU support.
 ///
-/// Every operation panics on a CPU missing a feature rind requires. Check at
-/// startup to refuse cleanly instead:
-///
-/// ```
-/// if let Err(missing) = rind::cpu::check() {
-///     eprintln!("{missing}");
-///     std::process::exit(1);
-/// }
-/// ```
+/// A backend requires only features its target enables at compile time, so a
+/// binary does not start on a CPU that lacks one. [`cpu::has_aes_hardware`]
+/// reports whether AES runs on CPU instructions, and [`cpu::Dit`] holds
+/// data-independent timing on across a batch of calls.
 pub mod cpu {
-    pub use crate::low::cpu::{Dit, MissingFeature, check, has_aes_hardware};
+    pub use crate::low::cpu::{Dit, has_aes_hardware};
 }
 
 /// Random bytes from the system's secure random source.

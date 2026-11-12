@@ -508,14 +508,6 @@ fn test_toggle(id: &str, detected: bool) -> bool {
     }
 }
 
-/// Returns the first CPU feature we require unconditionally that this CPU lacks.
-///
-/// Every feature beyond SSE2, which every x86_64 CPU has, only picks a faster
-/// path, so this refuses no x86_64 CPU.
-pub(crate) fn missing_cpu_feature() -> Option<&'static str> {
-    None
-}
-
 // --- Safe abstractions over common intrinsics operations ---
 
 /// Prefetch both `table` and `table[stride]`

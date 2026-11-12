@@ -18,16 +18,14 @@ const USAGE: &str = "usage:
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let result = rind::cpu::check()
-        .map_err(|missing| missing.to_string())
-        .and_then(|()| match args.first().map(String::as_str) {
-            Some("dudect") => dudect(&args[1..]),
-            Some("marvin") => match &args[1..] {
-                [key, ciphertexts, out] => marvin::run(key, ciphertexts, out),
-                _ => Err(USAGE.into()),
-            },
+    let result = match args.first().map(String::as_str) {
+        Some("dudect") => dudect(&args[1..]),
+        Some("marvin") => match &args[1..] {
+            [key, ciphertexts, out] => marvin::run(key, ciphertexts, out),
             _ => Err(USAGE.into()),
-        });
+        },
+        _ => Err(USAGE.into()),
+    };
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

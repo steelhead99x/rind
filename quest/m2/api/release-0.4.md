@@ -12,7 +12,7 @@ Decided with the maintainer on 2026-11-09:
 - Two of the three merged the same day, while rind's version was hand-set to 0.3.3 and unpublished: the typed CBC IV ([moq-dev/rind#530](https://github.com/moq-dev/rind/pull/530)) and the agreement keys ([moq-dev/rind#529](https://github.com/moq-dev/rind/pull/529)). A version set by hand ahead of the published one is kept as is (`CONTRIBUTING.md:146`), so release PR [moq-dev/rind#511](https://github.com/moq-dev/rind/pull/511) proposed publishing both as rind 0.3.3. On 2026-11-10 the maintainer chose ✅ to return rind's manifest to the published 0.3.2, so release-plz proposes 0.4.0 itself from the `!` commits, and hold the release for the last change (rejected: hand-set 0.4.0; set 0.4.0 and ship it now, with the CPU-check removal as 0.5; revert both and release 0.3.3). [moq-dev/rind#548](https://github.com/moq-dev/rind/pull/548) sets it; any later `!` change to rind then lands inside the same 0.4.0.
 - So the adapter fixes of [Adapters offer exactly their upstream's API](/quest/m0/adapters/README.md) publish in the same release as rind 0.4, not before it, and MoQ's PR moves to both at once.
 
-What remains is [rind needs no runtime CPU check](/quest/m2/api/cpu-check.md), which waits on that epic.
+The runtime CPU check is removed. What remains before 0.4.0 publishes is the benchmark refresh this quest requires, and the maintainer leaving the release PR unmerged until MoQ's PR is ready.
 
 The hold uses only what the release tooling has. Publishing happens only when a release PR merges (`CONTRIBUTING.md:138`, `.release-plz.toml:6`), and one release PR covers every crate. So the hold is the maintainer leaving the release PR unmerged, and while it lasts no adapter fix and no pyrind release publishes either.
 
@@ -28,12 +28,11 @@ The benchmark report is refreshed once before each minor release (maintainer, 20
 
 ## Waiting
 
-- Maintainer: leave the release PR, [moq-dev/rind#511](https://github.com/moq-dev/rind/pull/511) or whichever replaces it, unmerged until the CPU-check removal is on `main` and MoQ's PR is ready, then merge it. An agent cannot: a release PR merges on the maintainer's approval (`CONTRIBUTING.md:118`), and `.release-plz.toml` configures no way to hold one crate back, which is why the hold is the unmerged PR. Check: `cargo search rind` shows 0.4.0.
+- Maintainer: leave the release PR, [moq-dev/rind#511](https://github.com/moq-dev/rind/pull/511) or whichever replaces it, unmerged until MoQ's PR is ready, then merge it. An agent cannot: a release PR merges on the maintainer's approval (`CONTRIBUTING.md:118`), and `.release-plz.toml` configures no way to hold one crate back, which is why the hold is the unmerged PR. Check: `cargo search rind` shows 0.4.0.
 
 ## Required
 
 - [Benchmark report refresh, before rind 0.4](/quest/m2/bench/report-refresh.md) - the report and the README's claims, current for the release
-- [rind needs no runtime CPU check](/quest/m2/api/cpu-check.md) - `cpu::check` and `MissingFeature` removed, the last of the three
 
 ## Related
 

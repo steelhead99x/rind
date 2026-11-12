@@ -77,9 +77,8 @@ macOS, Linux, and Windows on arm64 and x86_64; and Linux on armv7. The build
 fails for any other target, such as Android's 32-bit x86, rather than falling
 back to slower code. There is no web build: rind has no WebAssembly backend.
 
-rind needs NEON on arm64 CPUs, which every Android and Apple device has. On a
-CPU missing a feature rind requires, every call throws an `UnsupportedError`
-naming it.
+rind's arm64 assembly backend is selected when the target enables NEON at
+compile time, which every Android and Apple device does.
 
 ## Use
 

@@ -26,7 +26,6 @@ Pointer<Void> _newHandle(int Function(Pointer<Pointer<Void>> slot) call) {
 // Returns a non-negative [status], or throws for a negative one.
 int _check(int status) {
   if (status >= 0) return status;
-  if (status == -9) throw UnsupportedError(_lastMessage());
   if (status == -10) throw StateError('rind binding bug: ${_lastMessage()}');
   throw RindException(
     RindError.values[-status - 1],
