@@ -9,6 +9,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 
+use zeroize::Zeroize;
+
 use rind::signature::sign::{MlDsa44, MlDsa65, MlDsa87, MlDsaKeyPair};
 
 use crate::encoding::{AsDer, Pkcs8V1Der, PublicKeyX509Der};
@@ -194,8 +196,9 @@ pub const ML_DSA_87_SIGNING: PqdsaSigningAlgorithm = PqdsaSigningAlgorithm(&ML_D
 
 /// An ML-DSA public key's raw bytes, and its `SubjectPublicKeyInfo`.
 ///
-/// Neither is secret, so neither is wiped, as with ECDSA's and Ed25519's
-/// public keys.
+/// A [`PqdsaKeyPair`] wipes the copy it holds when dropped, under the `wipe`
+/// feature, as a key type wipes its whole value. A copy cloned out of it is
+/// the caller's.
 #[derive(Clone)]
 pub struct PqdsaPublicKey {
     octets: Box<[u8]>,
@@ -445,6 +448,18 @@ impl PqdsaKeyPair {
             return Err(Unspecified);
         }
         Ok(self.key.to_pkcs8())
+    }
+}
+
+impl Drop for PqdsaKeyPair {
+    fn drop(&mut self) {
+        // rind wipes the private key, and its own public key, when the last
+        // `Arc` goes. The adapter's copies of the public key are wiped here,
+        // per clone. `cfg!` keeps the wipe type-checked in every build.
+        if cfg!(feature = "wipe") {
+            self.pubkey.octets.zeroize();
+            self.pubkey.spki.zeroize();
+        }
     }
 }
 

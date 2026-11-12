@@ -187,6 +187,26 @@ fn ml_dsa_from_pkcs8() {
     assert_eq!(leaked, 0);
 }
 
+/// An ML-DSA key pair's public key and `SubjectPublicKeyInfo`, which the
+/// key pair wipes with the rest of its value, for each parameter set. The
+/// needle is past `rho`, which the private key also holds.
+#[test]
+fn ml_dsa_public_key() {
+    use rind_aws_lc_rs::signature::KeyPair;
+
+    for algorithm in [
+        &signature::ML_DSA_44_SIGNING,
+        &signature::ML_DSA_65_SIGNING,
+        &signature::ML_DSA_87_SIGNING,
+    ] {
+        let key =
+            Box::new(signature::PqdsaKeyPair::from_seed(algorithm, &distinct::<32>(19)).unwrap());
+        let public = key.public_key().as_ref()[32..].to_vec();
+        let leaked = leaks(&public, move || drop(key));
+        assert_eq!(leaked, 0, "{algorithm:?}");
+    }
+}
+
 /// An expanded ML-DSA private key, loaded raw, which the adapter wraps in
 /// PKCS#8 itself, and loaded from a PKCS#8 document in expanded form. The
 /// needle is FIPS 204's `K`, after `rho`, which the public key repeats.
