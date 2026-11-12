@@ -11,8 +11,8 @@ use std::pin::Pin;
 use rind::Error;
 use rind::acvp::{self, SecretBuf};
 use rind::agreement::{ECDH_P256, PrivateKey};
-use rind::signature::EcdsaKeyPair;
 use rind::signature::sign::ECDSA_P256_SHA256_FIXED;
+use rind::signature::{EcdsaKeyPair, Ed25519KeyPair};
 use rind_acvp::handle;
 
 #[test]
@@ -81,6 +81,16 @@ fn ecdsa_keygen_scalar_is_a_secret() {
     let key = EcdsaKeyPair::from_scalar_and_public_key(&ECDSA_P256_SHA256_FIXED, &reply[0], &point)
         .unwrap();
     assert_eq!(key.public_key().as_ref(), point.as_slice());
+    assert_wiped(reply.take_secret(0).unwrap());
+}
+
+#[test]
+fn ed25519_seed_is_a_secret() {
+    let mut reply = handle("EDDSA/ED-25519/keyGen", &[]).unwrap();
+    assert!(reply.is_secret(0));
+    assert!(!reply.is_secret(1));
+    let key = Ed25519KeyPair::from_seed(&reply[0]).unwrap();
+    assert_eq!(key.public_key().as_ref(), &reply[1]);
     assert_wiped(reply.take_secret(0).unwrap());
 }
 

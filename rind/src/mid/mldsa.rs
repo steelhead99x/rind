@@ -313,6 +313,29 @@ fn tr_of<P: Params>(sk: &[u8]) -> &[u8; TR_LEN] {
     sk[2 * SEED_LEN..2 * SEED_LEN + TR_LEN].try_into().unwrap()
 }
 
+/// `mu = H(tr || message)`, FIPS 204's internal interface, which binds no
+/// context.
+#[cfg(feature = "__acvp")]
+pub(crate) fn mu_internal(tr: &[u8; TR_LEN], message: &[u8]) -> [u8; MU_LEN] {
+    let mut mu = [0u8; MU_LEN];
+    let mut h = Shake256Sponge::new();
+    h.absorb(tr);
+    h.absorb(message);
+    Shake256::new(&h).read(&mut mu);
+    mu
+}
+
+/// Verifies `signature` over an already computed `mu`.
+#[cfg(feature = "__acvp")]
+pub(crate) fn verify_mu<P: Params>(
+    pk: &[u8],
+    mu: &[u8; MU_LEN],
+    signature: &[u8],
+) -> Result<(), Error> {
+    let _entry = Entry::new_public();
+    verify_internal::<P>(pk, mu, signature)
+}
+
 /// `mu = H(tr || 0 || len(context) || context || message)`, pure ML-DSA's
 /// message representative. A context is at most 255 bytes.
 pub(crate) fn mu(tr: &[u8; TR_LEN], context: &[u8], message: &[u8]) -> Result<[u8; MU_LEN], Error> {

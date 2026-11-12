@@ -342,6 +342,9 @@ pub mod vrf {
 /// # }
 /// ```
 pub mod signature {
+    #[cfg(feature = "__acvp")]
+    #[doc(hidden)]
+    pub use crate::high::signature::mldsa_verify_acvp;
     pub use crate::high::signature::{
         EcdsaKeyPair, EcdsaScalar, EcdsaSigningAlgorithm, Ed25519KeyPair, Ed25519Seed, PublicKey,
         RsaKeyPair, RsaPssSaltLength, RsaSigningAlgorithm, RsaVerificationAlgorithm, Signature,

@@ -16,7 +16,7 @@ const MAX_ARGS: usize = 16;
 pub fn serve() -> io::Result<()> {
     let mut input = io::stdin().lock();
     loop {
-        let mut request = match read_request(&mut input) {
+        let request = match read_request(&mut input) {
             Ok(request) => request,
             Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
             Err(err) => return Err(err),
@@ -30,9 +30,6 @@ pub fn serve() -> io::Result<()> {
                 Err(_) => Err(io::Error::other("ACVP command is not UTF-8")),
             }
         };
-        for arg in &mut request {
-            ops::wipe(arg);
-        }
         let reply = reply?;
         // `io::stdout()` is block-buffered on a pipe. A reply with no newline
         // stays there until exit, and the parent still holding stdin never

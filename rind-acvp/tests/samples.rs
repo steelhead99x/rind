@@ -16,6 +16,15 @@ fn set(name: &str) -> Value {
     serde_json::from_reader(std::fs::File::open(&path).unwrap()).unwrap()
 }
 
+fn hex_opt(value: &Value, name: &str) -> Vec<u8> {
+    value
+        .get(name)
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+        .map(|_| hex(value, name))
+        .unwrap_or_default()
+}
+
 fn hex(value: &Value, name: &str) -> Vec<u8> {
     let text = value[name].as_str().unwrap();
     (0..text.len())
@@ -227,6 +236,88 @@ fn ecdsa_keyver_p256() {
             )
             .unwrap();
             assert_eq!(reply[0] == [1], test["testPassed"].as_bool().unwrap());
+            checked += 1;
+        }
+    }
+    assert!(checked > 0);
+}
+
+#[test]
+fn mldsa_sigver() {
+    let set = set("ML-DSA-sigVer-FIPS204");
+    let mut checked = 0;
+    for group in set["testGroups"].as_array().unwrap() {
+        let set_name = group["parameterSet"].as_str().unwrap();
+        let interface = group["signatureInterface"]
+            .as_str()
+            .unwrap()
+            .as_bytes()
+            .to_vec();
+        let external_mu = vec![u8::from(group["externalMu"].as_bool().unwrap())];
+        for test in group["tests"].as_array().unwrap() {
+            let reply = handle(
+                &format!("ML-DSA/{set_name}/sigVer"),
+                &[
+                    hex(test, "signature"),
+                    hex(test, "pk"),
+                    hex_opt(test, "message"),
+                    hex_opt(test, "mu"),
+                    hex_opt(test, "context"),
+                    external_mu.clone(),
+                    interface.clone(),
+                ],
+            )
+            .unwrap();
+            assert_eq!(
+                reply[0] == [1],
+                test["testPassed"].as_bool().unwrap(),
+                "tcId {}",
+                test["tcId"]
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0);
+}
+
+#[test]
+fn rsa_decryption_primitive() {
+    let set = set("RSA-DecryptionPrimitive-Sp800-56Br2");
+    let mut checked = 0;
+    for group in set["testGroups"].as_array().unwrap() {
+        let crt = group["keyMode"] == "crt";
+        let command = if crt {
+            "RSA/decryptionPrimitive/crt"
+        } else {
+            "RSA/decryptionPrimitive"
+        };
+        for test in group["tests"].as_array().unwrap() {
+            let args = if crt {
+                vec![
+                    hex(test, "ct"),
+                    hex(test, "d"),
+                    hex_opt(test, "dmp1"),
+                    hex_opt(test, "dmq1"),
+                    hex_opt(test, "iqmp"),
+                    hex_opt(test, "p"),
+                    hex_opt(test, "q"),
+                    hex(test, "n"),
+                    hex(test, "e"),
+                ]
+            } else {
+                vec![
+                    hex(test, "ct"),
+                    hex(test, "d"),
+                    hex(test, "n"),
+                    hex(test, "e"),
+                ]
+            };
+            let reply = handle(command, &args).unwrap();
+            let passed = test["testPassed"].as_bool().unwrap();
+            assert_eq!(reply[0] == [1], passed, "tcId {}", test["tcId"]);
+            if passed {
+                assert_eq!(reply[1], hex(test, "pt"), "tcId {}", test["tcId"]);
+            }
             checked += 1;
         }
     }

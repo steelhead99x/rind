@@ -143,7 +143,8 @@ pub fn handle(command: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
         "ML-KEM/ML-KEM-768/encapKeyCheck" => mlkem_ek_check(args),
         "ML-KEM/ML-KEM-768/decapKeyCheck" => mlkem_dk_check(args),
         "RSA/signaturePrimitive" => rsa_primitive(args),
-        "RSA/decryptionPrimitive" => rsa_primitive(args),
+        "RSA/decryptionPrimitive" => rsa_decrypt(args, false),
+        "RSA/decryptionPrimitive/crt" => rsa_decrypt(args, true),
         _ => other(command, args),
     }
 }
@@ -335,7 +336,10 @@ fn aes_cbc(encrypt: bool, args: &[Vec<u8>]) -> Result<Reply, String> {
             };
         }
         result.clone_from(&input);
-        let iv_bytes: [u8; 16] = iv.as_slice().try_into().unwrap();
+        let iv_bytes: [u8; 16] = iv
+            .as_slice()
+            .try_into()
+            .map_err(|_| "AES-CBC IV is not 16 bytes".to_string())?;
         if encrypt {
             AesCbcEncryptingKey::new(alg, key_bytes)
                 .map_err(|err| err.to_string())?
@@ -801,10 +805,13 @@ fn der_tl(tag: u8, body: &[u8]) -> Vec<u8> {
 
 fn ed25519_keygen() -> Result<Reply, String> {
     let key = Ed25519KeyPair::generate().map_err(|err| err.to_string())?;
-    public_reply(vec![
-        key.to_seed().as_ref().to_vec(),
-        key.public_key().as_ref().to_vec(),
-    ])
+    let seed = rind::acvp::SecretBuf::from_slice(key.to_seed().as_ref());
+    Ok(Reply {
+        parts: vec![
+            Part::Secret(Box::new(seed)),
+            Part::Public(key.public_key().as_ref().to_vec()),
+        ],
+    })
 }
 
 fn ed25519_keyver(args: &[Vec<u8>]) -> Result<Reply, String> {
@@ -903,21 +910,63 @@ fn pair87(seed: &[u8]) -> Result<(Vec<u8>, rind::acvp::SecretBuf), String> {
 }
 
 fn mldsa_siggen(set: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
-    // sk, message, mu, rnd, context, externalMu flag.
+    // sk, message, mu, rnd, context, externalMu flag, optional interface.
     let sk = arg(args, 0)?;
     let message = arg(args, 1)?;
-    let mu = arg(args, 2)?;
-    let rnd = arg(args, 3)?;
-    let context = arg(args, 4)?;
-    let external = arg(args, 5)?.first().copied().unwrap_or(0) == 1;
-    let mu = external.then_some(mu);
+    let provided = arg(args, 2).unwrap_or(&[]);
+    let rnd = arg(args, 3).unwrap_or(&[]);
+    let context = arg(args, 4).unwrap_or(&[]);
+    let external_mu = args.get(5).map(Vec::as_slice).unwrap_or(&[]);
+    let (mu, internal) = mldsa_mu(
+        external_mu,
+        context,
+        args.get(6).map(Vec::as_slice),
+        provided,
+    )?;
+    let rnd_zeros;
+    let rnd = if rnd.is_empty() {
+        rnd_zeros = [0u8; 32];
+        rnd_zeros.as_slice()
+    } else {
+        rnd
+    };
     let sig = match set {
-        "ML-DSA-44" => sign44(sk, message, mu, rnd, context)?,
-        "ML-DSA-65" => sign65(sk, message, mu, rnd, context)?,
-        "ML-DSA-87" => sign87(sk, message, mu, rnd, context)?,
+        "ML-DSA-44" => sign44(sk, message, mu, internal, rnd, context)?,
+        "ML-DSA-65" => sign65(sk, message, mu, internal, rnd, context)?,
+        "ML-DSA-87" => sign87(sk, message, mu, internal, rnd, context)?,
         _ => return Err(format!("unsupported ML-DSA set {set}")),
     };
     public_reply(vec![sig])
+}
+
+/// How ACVP names the message representative.
+///
+/// A seventh argument, `b"internal"` or `b"external"`, is the group's
+/// `signatureInterface`. `acvptool` does not send it. Without it, a `1` flag
+/// is the supplied `mu`, a non-empty context is the external interface, an
+/// absent flag is external, and a `0` flag with an empty context is the
+/// internal interface, which is what aws-lc's module wrapper does.
+fn mldsa_mu<'a>(
+    external_mu: &'a [u8],
+    context: &[u8],
+    interface: Option<&'a [u8]>,
+    provided: &'a [u8],
+) -> Result<(Option<&'a [u8]>, bool), String> {
+    if let Some(interface) = interface {
+        return match interface {
+            b"internal" if external_mu == [1] => Ok((Some(provided), true)),
+            b"internal" => Ok((None, true)),
+            b"external" => Ok((None, false)),
+            _ => Err("ML-DSA signature interface".into()),
+        };
+    }
+    match external_mu {
+        [1] => Ok((Some(provided), true)),
+        [] => Ok((None, false)),
+        [0] if !context.is_empty() => Ok((None, false)),
+        [0] => Ok((None, true)),
+        _ => Err("ML-DSA externalMu".into()),
+    }
 }
 
 fn load_mldsa<P: sign::MlDsaParameterSet>(sk: &[u8]) -> Result<MlDsaKeyPair<P>, String>
@@ -937,6 +986,7 @@ trait MldsaOps {
         context: &[u8],
         message: &[u8],
         mu: Option<&[u8]>,
+        internal: bool,
         rnd: &[u8],
     ) -> Result<Vec<u8>, String>;
 }
@@ -947,10 +997,11 @@ impl<P: sign::MlDsaParameterSet> MldsaOps for MlDsaKeyPair<P> {
         context: &[u8],
         message: &[u8],
         mu: Option<&[u8]>,
+        internal: bool,
         rnd: &[u8],
     ) -> Result<Vec<u8>, String> {
         Ok(self
-            .sign_acvp(context, message, mu, rnd)
+            .sign_acvp(context, message, mu, internal, rnd)
             .map_err(|err| err.to_string())?
             .as_ref()
             .to_vec())
@@ -961,45 +1012,62 @@ fn sign44(
     sk: &[u8],
     message: &[u8],
     mu: Option<&[u8]>,
+    internal: bool,
     rnd: &[u8],
     context: &[u8],
 ) -> Result<Vec<u8>, String> {
-    load_mldsa::<MlDsa44>(sk)?.sign_fixed(context, message, mu, rnd)
+    load_mldsa::<MlDsa44>(sk)?.sign_fixed(context, message, mu, internal, rnd)
 }
 
 fn sign65(
     sk: &[u8],
     message: &[u8],
     mu: Option<&[u8]>,
+    internal: bool,
     rnd: &[u8],
     context: &[u8],
 ) -> Result<Vec<u8>, String> {
-    load_mldsa::<MlDsa65>(sk)?.sign_fixed(context, message, mu, rnd)
+    load_mldsa::<MlDsa65>(sk)?.sign_fixed(context, message, mu, internal, rnd)
 }
 
 fn sign87(
     sk: &[u8],
     message: &[u8],
     mu: Option<&[u8]>,
+    internal: bool,
     rnd: &[u8],
     context: &[u8],
 ) -> Result<Vec<u8>, String> {
-    load_mldsa::<MlDsa87>(sk)?.sign_fixed(context, message, mu, rnd)
+    load_mldsa::<MlDsa87>(sk)?.sign_fixed(context, message, mu, internal, rnd)
 }
 
 fn mldsa_sigver(set: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
+    // signature, pk, message, mu, context, externalMu, optional interface.
     let signature = arg(args, 0)?;
     let pk = arg(args, 1)?;
     let message = arg(args, 2)?;
-    let alg: &VerificationAlgorithm = match set {
-        "ML-DSA-44" => &verify::ML_DSA_44,
-        "ML-DSA-65" => &verify::ML_DSA_65,
-        "ML-DSA-87" => &verify::ML_DSA_87,
+    let provided = arg(args, 3).unwrap_or(&[]);
+    let context = arg(args, 4).unwrap_or(&[]);
+    let external_mu = args.get(5).map(Vec::as_slice).unwrap_or(&[]);
+    let (mu, internal) = mldsa_mu(
+        external_mu,
+        context,
+        args.get(6).map(Vec::as_slice),
+        provided,
+    )?;
+    let ok = match set {
+        "ML-DSA-44" => rind::signature::mldsa_verify_acvp::<MlDsa44>(
+            pk, message, context, mu, internal, signature,
+        ),
+        "ML-DSA-65" => rind::signature::mldsa_verify_acvp::<MlDsa65>(
+            pk, message, context, mu, internal, signature,
+        ),
+        "ML-DSA-87" => rind::signature::mldsa_verify_acvp::<MlDsa87>(
+            pk, message, context, mu, internal, signature,
+        ),
         _ => return Err(format!("unsupported ML-DSA set {set}")),
-    };
-    let ok = PublicKey::new(alg, pk)
-        .and_then(|key| key.verify(message, signature))
-        .is_ok();
+    }
+    .is_ok();
     public_reply(vec![vec![u8::from(ok)]])
 }
 
@@ -1134,10 +1202,56 @@ fn rsa_primitive(args: &[Vec<u8>]) -> Result<Reply, String> {
     } else {
         return Err("RSA primitive arguments".into());
     };
+    rsa_modexp_reply(base, exp, modulus)
+}
+
+fn rsa_decrypt(args: &[Vec<u8>], crt: bool) -> Result<Reply, String> {
+    // standard: ct, d, n, e. crt: ct, d, dmp1, dmq1, iqmp, p, q, n, e.
+    // The plaintext is still ct^d mod n. SP 800-56B rejects 0, 1, and n−1.
+    let (base, exp, modulus) = if crt {
+        (arg(args, 0)?, arg(args, 1)?, arg(args, 7)?)
+    } else {
+        (arg(args, 0)?, arg(args, 1)?, arg(args, 2)?)
+    };
+    if trivial_rsa_ciphertext(base, modulus) {
+        return public_reply(vec![vec![0], Vec::new()]);
+    }
+    rsa_modexp_reply(base, exp, modulus)
+}
+
+fn rsa_modexp_reply(base: &[u8], exp: &[u8], modulus: &[u8]) -> Result<Reply, String> {
     match rind::acvp::rsa_modexp(base, exp, modulus) {
         Some(out) => Ok(with_secret(vec![vec![1]], out)),
         None => public_reply(vec![vec![0], Vec::new()]),
     }
+}
+
+/// SP 800-56B's decryption primitive refuses a ciphertext of 0, 1, or n−1.
+fn trivial_rsa_ciphertext(base: &[u8], modulus: &[u8]) -> bool {
+    let base = trim_zeros(base);
+    if base.is_empty() || base == [1] {
+        return true;
+    }
+    let modulus = trim_zeros(modulus);
+    if base.len() != modulus.len() || modulus.is_empty() {
+        return false;
+    }
+    let mut predecessor = modulus.to_vec();
+    for byte in predecessor.iter_mut().rev() {
+        if *byte > 0 {
+            *byte -= 1;
+            break;
+        }
+        *byte = 0xff;
+    }
+    base == predecessor
+}
+
+fn trim_zeros(bytes: &[u8]) -> &[u8] {
+    bytes
+        .iter()
+        .position(|byte| *byte != 0)
+        .map_or(&[], |i| &bytes[i..])
 }
 
 /// SP 800-90A HMAC_DRBG as this wrapper implements it.
@@ -1361,6 +1475,20 @@ mod tests {
             .step_by(2)
             .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
             .collect()
+    }
+
+    #[test]
+    fn aes_cbc_refuses_a_long_iterated_message() {
+        let err = handle(
+            "AES-CBC/encrypt",
+            &[
+                vec![0; 16],
+                vec![0; 32],
+                vec![0; 16],
+                2u32.to_ne_bytes().to_vec(),
+            ],
+        );
+        assert!(err.is_err());
     }
 
     /// aws-lc's `testmodulewrapper` HMAC_DRBG vector: the second generate

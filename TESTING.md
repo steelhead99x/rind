@@ -208,7 +208,7 @@ secret names a zeroing test, or says why it has none.
 | Constant-time comparison | `constant_time::verify` | none: no published set | none: it returns whether two slices are equal, which the differential test covers | `crosschecks::slice_comparison_matches_aws_lc_rs` | ctgrind: `high::constant_time::contents_stay_secret`, `low::generic::ct_equal::equiv`; BINSEC: `test::binsec::ct_binsec_constant_time_verify` | none: it keeps nothing |
 | Random bytes | `rand::fill` | none: the operating system's generator, which no vector can check | none, as for vectors | none, as for vectors | none: rind passes the bytes on | none: rind keeps no copy of the bytes |
 
-Exports that are not primitives: `Error`, `KeyRejected`, `doc::inline_assembly_safety`, `cpu::Dit`, `cpu::MissingFeature`, `cpu::check`, `cpu::has_aes_hardware`, `acvp::SecretBuf`, `acvp::mlkem768_keygen`, `acvp::mlkem768_encaps`, `acvp::mlkem768_decaps`, `acvp::mlkem768_ek_ok`, `acvp::mlkem768_dk_ok`, `acvp::rsa_modexp`. The acvp items are the unsupported feature used by the rind-acvp binary, not a primitive.
+Exports that are not primitives: `Error`, `KeyRejected`, `doc::inline_assembly_safety`, `cpu::Dit`, `cpu::MissingFeature`, `cpu::check`, `cpu::has_aes_hardware`, `acvp::SecretBuf`, `acvp::mlkem768_keygen`, `acvp::mlkem768_encaps`, `acvp::mlkem768_decaps`, `acvp::mlkem768_ek_ok`, `acvp::mlkem768_dk_ok`, `acvp::rsa_modexp`, `signature::mldsa_verify_acvp`. The acvp items are the unsupported feature used by the rind-acvp binary, not a primitive.
 
 ## Adapters
 
