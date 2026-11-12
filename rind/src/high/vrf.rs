@@ -1029,11 +1029,18 @@ mod tests {
                 .verify(b"alpha", &Proof::from_bytes(p256, &zero_c).unwrap()),
         );
 
-        let x = group::scalar_checked(p256_key.to_bytes().as_ref()).unwrap();
+        // `from_bytes` marked this seed secret. The cases below splice a
+        // public `s` into a proof, and verify branches on the point sum and
+        // the challenge, so the seed and those `s` bytes are public.
+        let seed = p256_key.to_bytes();
+        ct::public_slice(&seed[..]);
+        let x = group::scalar_checked(&seed).unwrap();
         let c = group::scalar_reduced(&proof_bytes[33..49]).unwrap();
         let cx = group::scalar_mul(&c, &x);
+        let cx_bytes = group::scalar_bytes(&cx);
+        ct::public_slice(&cx_bytes[..]);
         let mut opposite = proof_bytes.clone();
-        opposite[49..].copy_from_slice(&group::scalar_bytes(&cx));
+        opposite[49..].copy_from_slice(&cx_bytes);
         bad_signature(
             p256_key
                 .public_key()
@@ -1044,7 +1051,6 @@ mod tests {
             "this proof's challenge is zero, so s = -c*x does not double"
         );
         let mut neg = order;
-        let cx_bytes = group::scalar_bytes(&cx);
         let mut borrow = 0u16;
         for i in (0..32).rev() {
             let diff = u16::from(neg[i])
@@ -1057,6 +1063,7 @@ mod tests {
         assert!(ct::into_public(
             group::scalar_add(&cx, &neg_scalar).is_zero()
         ));
+        ct::public_slice(&neg[..]);
         let mut doubled = proof_bytes.clone();
         doubled[49..].copy_from_slice(&neg);
         bad_signature(
