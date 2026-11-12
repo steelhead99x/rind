@@ -1075,6 +1075,11 @@ mod tests {
             "a test, whose assembly only reads DIT",
         ),
         (
+            "aarch64/argon2.rs",
+            "blamka2_umlal",
+            "`umlal`s on vector registers the compiler allocates, which no ABI governs",
+        ),
+        (
             "aarch64/aes_cbc.rs",
             "hw_encrypt",
             "one `aese` on registers the compiler allocates, which no ABI governs",

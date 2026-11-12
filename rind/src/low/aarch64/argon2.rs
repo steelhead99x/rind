@@ -10,8 +10,11 @@
 //!
 //! Three changes from that code, none of which moves a lane:
 //!
-//! - BlaMka narrows both halves of a pair with one `uzp1` and multiplies with
-//!   `umull` and `umull2`, where the reference narrows each half alone.
+//! - BlaMka narrows both halves of a pair with one `uzp1`, where the reference
+//!   narrows each half alone. The SHA3 build then accumulates the product into
+//!   each input with `umlal` and `umlal2`; the plain NEON build doubles a
+//!   `umull`, which measured faster on a Cortex-A76 (no SHA3) and slower on an
+//!   Apple M1 Pro.
 //! - The column rounds read `prev ^ reference` straight from the blocks and the
 //!   row rounds XOR and store `next` as they finish, so the 1 KiB state is not
 //!   loaded or stored in passes of its own.
@@ -61,9 +64,11 @@ pub(crate) fn compress(
     }
 }
 
-/// `x + y + 2 * (x mod 2^32) * (y mod 2^32)` for two pairs of lanes at once.
+/// `x + y + 2 * (x mod 2^32) * (y mod 2^32)` for two pairs of lanes at once,
+/// with `umull` and adds. The plain NEON fill's form: on a Cortex-A76 it beat
+/// [`blamka2_umlal`] by about 2.5%.
 #[target_feature(enable = "neon")]
-fn blamka2(
+fn blamka2_umull(
     x0: uint64x2_t,
     x1: uint64x2_t,
     y0: uint64x2_t,
@@ -78,6 +83,42 @@ fn blamka2(
         vaddq_u64(vaddq_u64(x0, y0), vaddq_u64(z0, z0)),
         vaddq_u64(vaddq_u64(x1, y1), vaddq_u64(z1, z1)),
     )
+}
+
+/// As [`blamka2_umull`], with `umlal`: the SHA3 fill's form. On an Apple M1 Pro
+/// it took about 13% less time per block.
+#[target_feature(enable = "neon")]
+fn blamka2_umlal(
+    x0: uint64x2_t,
+    x1: uint64x2_t,
+    y0: uint64x2_t,
+    y1: uint64x2_t,
+) -> (uint64x2_t, uint64x2_t) {
+    // The low words of `x0` then `x1`, and the same for `y`.
+    let x = vuzp1q_u32(vreinterpretq_u32_u64(x0), vreinterpretq_u32_u64(x1));
+    let y = vuzp1q_u32(vreinterpretq_u32_u64(y0), vreinterpretq_u32_u64(y1));
+    // `(x + xy) + (y + xy)`: one `umlal` into each input and an add, so the
+    // product is two instructions deep rather than `umull`, a doubling and two
+    // adds. Written in assembly because LLVM folds two `vmlal`s of one product
+    // back into `umull` and adds.
+    // One block, not four: LLVM's inliner charges each `asm!` as a call, and
+    // four of them per BlaMka left the round out of line.
+    let (mut a0, mut b0, mut a1, mut b1) = (x0, y0, x1, y1);
+    // SAFETY: `umlal` and `umlal2` only read and write the named vector
+    // registers; aarch64 requires NEON. Fixed latency, no data-dependent timing.
+    unsafe {
+        core::arch::asm!(
+            "umlal {a0:v}.2d, {x:v}.2s, {y:v}.2s",
+            "umlal {b0:v}.2d, {x:v}.2s, {y:v}.2s",
+            "umlal2 {a1:v}.2d, {x:v}.4s, {y:v}.4s",
+            "umlal2 {b1:v}.2d, {x:v}.4s, {y:v}.4s",
+            a0 = inout(vreg) a0, b0 = inout(vreg) b0,
+            a1 = inout(vreg) a1, b1 = inout(vreg) b1,
+            x = in(vreg) x, y = in(vreg) y,
+            options(pure, nomem, nostack, preserves_flags)
+        );
+    }
+    (vaddq_u64(a0, b0), vaddq_u64(a1, b1))
 }
 
 /// `vext` by 8 bytes, the NEON form of the reference's SSSE3 `alignr`.
@@ -114,13 +155,13 @@ fn undiagonalize(v: &mut [uint64x2_t; 8]) {
 
 /// The fill, built once per instruction set. The caller's module supplies
 /// `xor_rotr32`, `xor_rotr24`, `xor_rotr16` and `xor_rotr63`, each
-/// `(x ^ y).rotate_right(n)` on both lanes.
+/// `(x ^ y).rotate_right(n)` on both lanes, and `blamka2`.
 macro_rules! fill {
     ($features:literal) => {
         use core::arch::aarch64::*;
         use core::mem::MaybeUninit;
 
-        use super::{blamka2, diagonalize, undiagonalize};
+        use super::{diagonalize, undiagonalize};
         use crate::low::argon2::Block;
 
         /// # Safety
@@ -213,6 +254,8 @@ macro_rules! fill {
 
 /// Plain NEON: the rotations by 32, 24 and 16 are lane shuffles.
 mod neon {
+    use super::blamka2_umull as blamka2;
+
     fill!("neon");
 
     #[target_feature(enable = "neon")]
@@ -245,6 +288,8 @@ mod neon {
 
 /// SHA3's `xar`: one instruction for each XOR and rotation.
 mod sha3 {
+    use super::blamka2_umlal as blamka2;
+
     fill!("neon,sha3");
 
     #[target_feature(enable = "neon,sha3")]
