@@ -17,8 +17,15 @@ mode's, one per line, for the KEMs rind offers. The revision in
 [hpkewg/hpke] repeats them unchanged. They are IETF contributions, under
 [BCP 78].
 
+`rfc9474/test-vectors.json` holds [RFC 9474]'s four RSABSSA vectors, from
+[blind-rsa-signatures] at the revision `admin/sync-vectors` pins, as the
+CFRG draft's repository holds stale ones. They are IETF contributions, under
+[BCP 78].
+
 [aws-lc]: https://github.com/aws/aws-lc
 [BoringSSL]: https://boringssl.googlesource.com/boringssl
 [RFC 9180]: https://www.rfc-editor.org/rfc/rfc9180.html
 [hpkewg/hpke]: https://github.com/hpkewg/hpke
+[RFC 9474]: https://www.rfc-editor.org/rfc/rfc9474.html
+[blind-rsa-signatures]: https://github.com/jedisct1/rust-blind-rsa-signatures
 [BCP 78]: https://www.rfc-editor.org/info/bcp78

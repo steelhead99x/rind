@@ -88,6 +88,13 @@ impl RsaPublicKey {
 
         Ok(accum.clone())
     }
+
+    /// a * b mod n, for `a` and `b` below `n`. Constant time in both.
+    pub(crate) fn mul(&self, a: &RsaPosInt, b: &RsaPosInt) -> RsaPosInt {
+        // a * b * R^-1, then * R^2 * R^-1.
+        a.mont_mul(b, &self.n, self.n0)
+            .mont_mul(&self.montifier, &self.n, self.n0)
+    }
 }
 
 const MAX_PUBLIC_MODULUS_BITS: usize = 8192;

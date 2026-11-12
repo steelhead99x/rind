@@ -661,6 +661,41 @@ impl<'a> Type<'a> for SetOf<'a> {
     const TAG: Tag = Tag(Tag::SET);
 }
 
+/// A `SEQUENCE` kept as its encoded body, which its user compares whole.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Sequence<'a> {
+    body: &'a [u8],
+}
+
+impl<'a> Sequence<'a> {
+    pub(crate) fn new(body: &'a [u8]) -> Self {
+        Self { body }
+    }
+
+    pub(crate) fn body(&self) -> &'a [u8] {
+        self.body
+    }
+}
+
+impl<'a> Type<'a> for Sequence<'a> {
+    fn parse_with_tag(p: &mut Parser<'a>, tag: Tag) -> Result<Self, Error> {
+        let (_, body) = p.take(tag)?;
+        Ok(Self { body })
+    }
+
+    fn encode_with_tag(&self, encoder: &mut Encoder<'_>, tag: Tag) -> Result<usize, Error> {
+        let mut body = encoder.begin(tag, self.body.len())?;
+        body.append_slice(self.body)?;
+        Ok(body.finish())
+    }
+
+    fn encoded_len(&self) -> usize {
+        encoded_length_for(self.body.len())
+    }
+
+    const TAG: Tag = Tag(Tag::SEQUENCE);
+}
+
 /// Whether `bytes` opens with a `SEQUENCE` whose first element is also a
 /// `SEQUENCE`, as a `SubjectPublicKeyInfo` does and an `RSAPublicKey`, which
 /// opens with an `INTEGER`, does not.

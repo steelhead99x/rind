@@ -61,6 +61,8 @@ aws-lc-rs = { version = "1.19", default-features = false, features = ["alloc", "
 aws-lc-sys = { version = "0.47", default-features = false }
 # HPKE, which aws-lc-rs does not expose either; `hazmat` reads its private keys.
 hpke-rs = { version = "0.8", default-features = false, features = ["hazmat", "rustcrypto", "std"] }
+# RSA blind signatures, which aws-lc-rs does not offer.
+blind-rsa-signatures = { version = "0.18", default-features = false }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
