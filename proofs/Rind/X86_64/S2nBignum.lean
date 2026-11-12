@@ -1,6 +1,7 @@
 import Rind.X86_64.Funs
 import Rind.Spec
 import Rind.Ed25519
+import Rind.Keccak
 import Rind.Nist
 open Aeneas Aeneas.Std Result rind.spec
 
@@ -157,6 +158,28 @@ https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f06583
 axiom bignum_cmp_lt_spec (x y : Slice U64) :
     low.x86_64.bignum_cmp_lt.bignum_cmp_lt x y ⦃ r =>
       r.val = if wordsNat x.val < wordsNat y.val then 1 else 0 ⦄
+
+/-! ### Keccak-f[1600]
+
+Each routine permutes the 25-lane states it is given in place, for the round
+constants, and the four-way one's byte-shuffle constants, that rind passes. -/
+
+/-- `SHA3_KECCAK_F1600_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/sha3_keccak_f1600.ml#L736 -/
+axiom sha3_keccak_f1600_spec (a : Std.Array U64 25#usize) (rc : Std.Array U64 24#usize)
+    (hrc : rc.val.map (·.bv) = keccakRoundConstants) :
+    low.x86_64.sha3_keccak_f1600.sha3_keccak_f1600 a rc ⦃ r =>
+      r.val.map (·.bv) = keccak 24 (a.val.map (·.bv)) ⦄
+
+/-- `SHA3_KECCAK4_F1600_ALT_SUBROUTINE_CORRECT`, whose four states are
+consecutive, as an array of them is,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/sha3_keccak4_f1600_alt.ml#L1081 -/
+axiom sha3_keccak4_f1600_alt_spec (a : Std.Array (Std.Array U64 25#usize) 4#usize)
+    (rc : Std.Array U64 24#usize) (rho8 rho56 : Std.Array U64 4#usize)
+    (hrc : rc.val.map (·.bv) = keccakRoundConstants) (h8 : rho8.val.map (·.bv) = keccakRho8)
+    (h56 : rho56.val.map (·.bv) = keccakRho56) :
+    low.x86_64.sha3_keccak4_f1600_alt.sha3_keccak4_f1600 a rc rho8 rho56 ⦃ r =>
+      r.val.map (·.val.map (·.bv)) = (a.val.map (·.val.map (·.bv))).map (keccak 24) ⦄
 
 /-! ### P-384 -/
 

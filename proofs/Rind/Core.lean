@@ -127,6 +127,15 @@ def core.slice.Slice.as_chunks {T : Type _} (N : Std.Usize) (s : Slice T) :
             exact le_trans (Nat.div_le_self _ _) this),
        Slice.from (s.val.drop (k * N.val)) (by have := s.property; simp; omega))
 
+/-- `<[T]>::as_chunks_mut::<N>`: `as_chunks`'s views, which write back to the
+slice the chunks in order, then what is left. -/
+def core.slice.Slice.as_chunks_mut {T : Type _} (N : Std.Usize) (s : Slice T) :
+    Result (((Slice (Array T N)) × (Slice T)) × ((Slice (Array T N)) × (Slice T) → Slice T)) := do
+  let views ← core.slice.Slice.as_chunks N s
+  ok (views, fun (chunks, rest) =>
+    let l := chunks.val.flatMap (·.val) ++ rest.val
+    if h : l.length ≤ Usize.max then Slice.from l h else s)
+
 /-- `<[T]>::last`. -/
 def core.slice.Slice.last {T : Type _} (s : Slice T) : Result (Option T) :=
   Std.Result.ok s.val.getLast?
