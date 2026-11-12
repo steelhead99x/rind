@@ -494,6 +494,40 @@ pub mod hkdf {
     }
 }
 
+/// SPAKE2+ on P-256 with SHA-256, HKDF, and HMAC.
+///
+/// [`RFC9383`](spake2plus::RFC9383) is RFC 9383. [`MATTER_PASE`](spake2plus::MATTER_PASE)
+/// is draft-bar-cfrg-spake2plus-01, the key schedule Matter's commissioning uses.
+/// The group, the points M and N, and the transcript are the same. The suites
+/// are different types, so a share from one does not type-check as the other's.
+/// The caller stretches the password and passes `w0` and `w1`. A verifier
+/// stores `w0` and `L = w1 * G`, not `w1`.
+///
+/// ```
+/// use rind::spake2plus::{ProverSecrets, RFC9383, VerifierRecord};
+///
+/// let w0 = [0x11; 40];
+/// let w1 = [0x22; 40];
+/// let prover = ProverSecrets::new(&w0, &w1).unwrap();
+/// let verifier = VerifierRecord::from_w1(&w0, &w1).unwrap();
+///
+/// let (share_p, prover) = prover
+///     .start(&RFC9383, b"app", b"client", b"server")
+///     .unwrap();
+/// let (share_v, confirm_v, verifier) = verifier
+///     .start(&RFC9383, b"app", b"client", b"server", &share_p)
+///     .unwrap();
+/// let (confirm_p, prover_key) = prover.finish(&share_v, &confirm_v).unwrap();
+/// let verifier_key = verifier.finish(&confirm_p).unwrap();
+/// assert_eq!(prover_key.as_ref(), verifier_key.as_ref());
+/// ```
+pub mod spake2plus {
+    pub use super::high::spake2plus::{
+        Confirm, MATTER_PASE, MatterPase, ProverAwaiting, ProverSecrets, RFC9383, Rfc9383, Share,
+        SharedKey, Suite, VerifierAwaiting, VerifierRecord,
+    };
+}
+
 /// Password-based key derivation with PBKDF2.
 ///
 /// A [`pbkdf2::Secret`] keys HMAC with a password once, then derives a key

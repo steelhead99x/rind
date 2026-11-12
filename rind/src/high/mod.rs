@@ -24,5 +24,6 @@ pub(super) mod pkcs8;
 pub(super) mod rsa;
 pub(super) mod sec1;
 pub(super) mod signature;
+pub(super) mod spake2plus;
 pub(super) mod spki;
 pub(super) mod vrf;
