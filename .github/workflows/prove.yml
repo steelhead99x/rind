@@ -3,10 +3,12 @@ name: prove
 # Checks that the assembly rind imports is the object code its upstream's
 # proofs check, and rind's HOL Light proofs in `proofs/hol-light/`,
 # cosimulates rind's additions to s2n-bignum's x86 model against the runner's
-# CPU, and translates rind's Rust under proof to Lean and checks the proofs in
-# `proofs/`. Too slow for `just ci`, so it runs nightly and on pull requests
-# that change rind's source, the proofs, the checks, s2n-bignum's pin, or the
-# flake that pins their tools.
+# CPU, checks that the NEON vectors the Lean proofs test their aarch64
+# intrinsic models with are what an aarch64 CPU computes, and translates
+# rind's Rust under proof to Lean and checks the proofs in `proofs/`. Too slow
+# for `just ci`, so it runs nightly and on pull requests that change rind's
+# source, the proofs, the checks, s2n-bignum's pin, or the flake that pins
+# their tools.
 on:
   schedule:
     - cron: "0 18 * * *"
@@ -19,6 +21,7 @@ on:
       - admin/prove
       - admin/prove-bytes
       - admin/simd-vectors.rs
+      - admin/neon-vectors.rs
       - admin/upstream
       - ALGORITHMS.md
       - flake.nix
@@ -62,6 +65,24 @@ jobs:
 
       - name: Cosimulate
         run: nix develop .#hol-light --command admin/prove cosim
+
+  neon:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+
+      - name: Vectors
+        run: |
+          rustc --edition 2024 -O -o "$RUNNER_TEMP/neon-vectors" admin/neon-vectors.rs
+          "$RUNNER_TEMP/neon-vectors" | diff - proofs/Rind/Aarch64/NeonVectors.lean
 
   lean:
     runs-on: ubuntu-24.04
