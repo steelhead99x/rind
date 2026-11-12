@@ -2,13 +2,14 @@ module
 public import Aeneas
 public import Rind.X86_64.Types
 public import Rind.X86_64.AesNi
+public import Rind.X86_64.AesGcmModel
 @[expose] public section
 open Aeneas Aeneas.Std Result
 set_option linter.dupNamespace false
 
 /-!
 The rind functions the x86_64 translation leaves opaque, beside those
-`Rind.X86_64.AesNi` models. No proof assumes anything about them beyond what
+`Rind.X86_64.AesNi` and `Rind.X86_64.AesGcmModel` model. No proof assumes anything about them beyond what
 `Rind.X86_64.S2nBignum`, `Rind.X86_64.AwsLc`, and `Rind.X86_64.ValeAesGcm`
 state for s2n-bignum's, aws-lc's, and Vale's routines, what
 `Rind.X86_64.CtEqual` states for the constant-time compares, and what each theorem
@@ -82,13 +83,6 @@ opaque low.x86_64.aes_gcm_avx.aead
   low.x86_64.aes.HwKey → Std.Array core.core_arch.x86.__m128i 8#usize →
     low.x86_64.aes_gcm_avx.Buffers → low.x86_64.cpu.HaveAvxMovbeForAesGcm →
     Result (Std.U64 × low.x86_64.aes_gcm_avx.Buffers)
-
-/-! AES-GCM's other tiers, which the theorems' CPU never runs. -/
-
-opaque low.x86_64.aes_gcm.tagged
-  (ENC : Bool) :
-  low.x86_64.aes.AesKey → low.x86_64.ghash.GhashTable → Std.Array Std.U8 12#usize →
-    Slice Std.U8 → Slice Std.U8 → Result ((Std.Array Std.U8 16#usize) × (Slice Std.U8))
 
 /-! The constant-time compares behind `low::generic::ct_equal`, whose inline
 assembly `Rind.X86_64.CtEqual` states HOL Light's theorems about. -/
