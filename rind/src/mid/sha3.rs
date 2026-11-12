@@ -49,75 +49,58 @@ pub(crate) type Sha3_384Context = Sha3Context<{ (1600 - 768) / 8 }, 48>;
 /// SHA3-512.
 pub(crate) type Sha3_512Context = Sha3Context<{ (1600 - 1024) / 8 }, 64>;
 
-/// This is SHAKE128.
-///
-/// This has one-shot input behaviour (all input must be provided to the
-/// constructor [`Shake128::new`]) and incremental output behaviour.
-///
-/// ML-KEM samples through the sponges directly, so only the tests use this.
-#[cfg(test)]
-pub(crate) struct Shake128 {
-    sponge: SqueezingSponge<SHAKE_128_R_BYTES>,
-    buffer: [u8; SHAKE_128_R_BYTES],
-    buffer_offset: usize,
-}
-
-#[cfg(test)]
-impl Shake128 {
-    /// Create a new SHAKE128 instance using `message` as input.
-    ///
-    /// The items of `message` are processed in order, as if concatenated.
-    pub(crate) fn new(message: &[&[u8]]) -> Self {
-        Self {
-            sponge: Sponge::<SHAKE_128_R_BYTES, SHAKE_PAD_BYTE>::new_for_message(message),
-            buffer: [0u8; SHAKE_128_R_BYTES],
-            buffer_offset: SHAKE_128_R_BYTES,
-        }
-    }
-
-    /// Read data from this instance into `output`.
-    ///
-    /// This does not fail.  It always fills `output`.
-    pub(crate) fn read(&mut self, output: &mut [u8]) {
-        self.sponge
-            .shake_read(output, &mut self.buffer, &mut self.buffer_offset);
-    }
-}
-
 pub(crate) type Shake128Sponge = Sponge<SHAKE_128_R_BYTES, SHAKE_PAD_BYTE>;
 pub(crate) type Shake128SqueezingSponge = SqueezingSponge<SHAKE_128_R_BYTES>;
 pub(crate) type Shake256Sponge = Sponge<SHAKE_256_R_BYTES, SHAKE_PAD_BYTE>;
 
-/// This is SHAKE256.
-///
-/// This has one-shot input behaviour (all input must be provided to the
-/// constructor [`Shake256::new`]) and incremental output behaviour.
+/// SHAKE with rate `R`, read incrementally from a sponge that has absorbed
+/// its input.
 ///
 /// ML-KEM squeezes the sponges directly; ML-DSA reads through this.
-pub(crate) struct Shake256 {
-    sponge: SqueezingSponge<SHAKE_256_R_BYTES>,
-    buffer: [u8; SHAKE_256_R_BYTES],
+pub(crate) struct Shake<const R: usize> {
+    sponge: SqueezingSponge<R>,
+    buffer: [u8; R],
+    /// How much of `buffer` has been read: all of it until a read squeezes
+    /// into it.
     buffer_offset: usize,
 }
 
-impl Shake256 {
-    /// Create a new SHAKE256 instance using `message` as input.
-    ///
-    /// The items of `message` are processed in order, as if concatenated.
-    pub(crate) fn new(message: &[&[u8]]) -> Self {
+/// SHAKE128's reader, which only the tests use.
+#[cfg(test)]
+pub(crate) type Shake128 = Shake<SHAKE_128_R_BYTES>;
+
+/// SHAKE256's reader.
+pub(crate) type Shake256 = Shake<SHAKE_256_R_BYTES>;
+
+impl<const R: usize> Shake<R> {
+    /// Pads what `sponge` has absorbed, to read its output.
+    pub(crate) fn new(sponge: &Sponge<R, SHAKE_PAD_BYTE>) -> Self {
         Self {
-            sponge: Shake256Sponge::new_for_message(message),
-            buffer: [0u8; SHAKE_256_R_BYTES],
-            buffer_offset: SHAKE_256_R_BYTES,
+            sponge: sponge.finish(),
+            buffer: [0; R],
+            buffer_offset: R,
         }
     }
 
-    /// Read data from this instance into `output`.
-    ///
-    /// This does not fail.  It always fills `output`.
+    /// Fills `output` with the next bytes of output.
     pub(crate) fn read(&mut self, output: &mut [u8]) {
-        self.sponge
-            .shake_read(output, &mut self.buffer, &mut self.buffer_offset);
+        let len = output.len();
+        let held = Ord::min(R - self.buffer_offset, len);
+        output[..held].copy_from_slice(&self.buffer[self.buffer_offset..self.buffer_offset + held]);
+        self.buffer_offset += held;
+        if held == len {
+            return;
+        }
+
+        // The buffer is spent: squeeze whole blocks straight into `output`,
+        // and the last partial one through the buffer.
+        let whole = held + (len - held) / R * R;
+        self.sponge.squeeze(&mut output[held..whole]);
+        if whole < len {
+            self.sponge.squeeze(&mut self.buffer);
+            output[whole..].copy_from_slice(&self.buffer[..len - whole]);
+            self.buffer_offset = len - whole;
+        }
     }
 }
 
@@ -173,34 +156,6 @@ impl<const R: usize> SqueezingSponge<R> {
             sha3_keccak_f1600(&mut self.s, &RC);
             store_bytes(&self.s, &mut output[done..done + n]);
             done += n;
-        }
-    }
-
-    fn shake_read(&mut self, output: &mut [u8], buffer: &mut [u8; R], buffer_offset: &mut usize) {
-        let output = match *buffer_offset == buffer.len() {
-            true => output,
-            false => {
-                let chunk = Ord::min(R - *buffer_offset, output.len());
-                let (output, rest) = output.split_at_mut(chunk);
-                output.copy_from_slice(&buffer[*buffer_offset..*buffer_offset + chunk]);
-                *buffer_offset += chunk;
-                rest
-            }
-        };
-
-        if output.is_empty() {
-            return;
-        }
-
-        let whole_chunks = output.len() / R;
-        let (whole, tail) = output.split_at_mut(whole_chunks * R);
-        self.squeeze(whole);
-
-        if !tail.is_empty() {
-            self.squeeze(buffer);
-            let chunk = Ord::min(R, tail.len());
-            tail.copy_from_slice(&buffer[..chunk]);
-            *buffer_offset = chunk;
         }
     }
 }
@@ -268,41 +223,39 @@ pub(crate) type Shake256x4 = Shake4x<SHAKE_256_R_BYTES>;
 
 impl<const R: usize> Shake4x<R> {
     /// Absorbs each of `inputs`, one to four of them, into its own instance.
+    // Indexed rather than zipped, which Aeneas cannot translate.
+    #[allow(clippy::needless_range_loop)]
     pub(crate) fn new<const LEN: usize>(inputs: &[[u8; LEN]]) -> Self {
         const { assert!(LEN < R) };
-        assert!((1..=4).contains(&inputs.len()));
+        let lanes = inputs.len();
+        assert!(lanes != 0 && lanes <= 4);
         let mut states = [[0; 25]; 4];
-        for (s, input) in states.iter_mut().zip(inputs) {
-            add_bytes(s, 0, input);
-            add_bytes(s, LEN, &[SHAKE_PAD_BYTE]);
-            s[R / 8 - 1] ^= 0x80 << 56;
+        for j in 0..lanes {
+            add_bytes(&mut states[j], 0, &inputs[j]);
+            pad::<R, SHAKE_PAD_BYTE>(&mut states[j], LEN);
         }
-        Self {
-            states,
-            lanes: inputs.len(),
-        }
+        Self { states, lanes }
     }
 
     /// Squeezes the next `N` bytes of each instance into its item of
     /// `outputs`, a whole number of blocks. The items for lanes not in use
-    /// are left with unspecified contents.
+    /// are left unchanged.
+    // Indexed rather than zipped, which Aeneas cannot translate.
+    #[allow(clippy::needless_range_loop)]
     pub(crate) fn squeeze<const N: usize>(&mut self, outputs: &mut [[u8; N]; 4]) {
         const { assert!(N.is_multiple_of(R)) };
         Entry::assert_held();
         for block in 0..N / R {
             // A short batch leaves stale states in the unused lanes, whose
-            // outputs are never read.
+            // outputs are never written.
             match self.lanes {
                 4 => sha3_keccak4_f1600(&mut self.states, &RC),
                 3 => sha3_keccak_nof4_f1600::<3>(&mut self.states, &RC),
                 2 => sha3_keccak_nof4_f1600::<2>(&mut self.states, &RC),
                 _ => sha3_keccak_nof4_f1600::<1>(&mut self.states, &RC),
             }
-            for (s, output) in self.states.iter().zip(outputs.iter_mut()) {
-                let output = &mut output[block * R..(block + 1) * R];
-                for (ch, s) in output.as_chunks_mut::<8>().0.iter_mut().zip(s) {
-                    *ch = s.to_le_bytes();
-                }
+            for j in 0..self.lanes {
+                store_bytes(&self.states[j], &mut outputs[j][block * R..(block + 1) * R]);
             }
         }
     }
@@ -320,14 +273,6 @@ pub(crate) struct Sponge<const R: usize, const PAD: u8> {
 impl<const R: usize, const PAD: u8> Sponge<R, PAD> {
     pub(crate) const fn new() -> Self {
         Self { s: [0; _], used: 0 }
-    }
-
-    pub(crate) fn new_for_message(message: &[&[u8]]) -> SqueezingSponge<R> {
-        let mut s = Self::new();
-        for m in message {
-            s.absorb(m);
-        }
-        SqueezingSponge::new(s.padded_state())
     }
 
     pub(crate) fn absorb(&mut self, bytes: &[u8]) {
@@ -362,10 +307,16 @@ impl<const R: usize, const PAD: u8> Sponge<R, PAD> {
     /// The state with the final block's padding added, owing its Keccak-f.
     fn padded_state(&self) -> [u64; 25] {
         let mut s = self.s;
-        add_bytes(&mut s, self.used, &[PAD]);
-        s[R / 8 - 1] ^= 0x80 << 56;
+        pad::<R, PAD>(&mut s, self.used);
         s
     }
+}
+
+/// Pads input absorbed `used` bytes into the state's block, under the rate
+/// `R`: the domain byte `PAD`, then the rate's last bit.
+fn pad<const R: usize, const PAD: u8>(s: &mut [u64; 25], used: usize) {
+    add_bytes(s, used, &[PAD]);
+    s[R / 8 - 1] ^= 0x80 << 56;
 }
 
 /// XORs `bytes` into the state's little-endian lanes from byte `offset`.
@@ -400,12 +351,19 @@ fn padded_block<const R: usize>(input: &[u8; 40]) -> [u64; 25] {
 
 /// Writes the state's first `output.len()` bytes, under the rate, into
 /// `output`: its lanes little-endian.
+// Inlined so that a squeeze of whole blocks stores them as vectors.
+#[inline(always)]
 fn store_bytes(s: &[u64; 25], output: &mut [u8]) {
-    let mut done = 0;
-    while done < output.len() {
-        let n = Ord::min(8, output.len() - done);
-        output[done..done + n].copy_from_slice(&s[done / 8].to_le_bytes()[..n]);
-        done += n;
+    let (lanes, tail) = output.as_chunks_mut::<8>();
+    let whole = &s[..lanes.len()];
+    // Indexed, since Aeneas cannot translate `iter_mut`.
+    #[allow(clippy::needless_range_loop)]
+    for i in 0..lanes.len() {
+        lanes[i] = whole[i].to_le_bytes();
+    }
+    if !tail.is_empty() {
+        let n = tail.len();
+        tail.copy_from_slice(&s[lanes.len()].to_le_bytes()[..n]);
     }
 }
 
@@ -464,6 +422,13 @@ mod tests {
     use super::*;
     use crate::test::*;
 
+    /// SHAKE with rate `R` on `message`, ready to read.
+    fn shake<const R: usize>(message: &[u8]) -> Shake<R> {
+        let mut sponge = Sponge::new();
+        sponge.absorb(message);
+        Shake::new(&sponge)
+    }
+
     #[test]
     fn sha3_256_all_lengths() {
         // see cifra `vector_length` and associated
@@ -509,10 +474,10 @@ mod tests {
         //
         // The outputs must agree.
         let mut long = [0u8; 4096];
-        Shake128::new(&[b"hello"]).read(&mut long);
+        shake::<SHAKE_128_R_BYTES>(b"hello").read(&mut long);
 
         let mut short = [0u8; 511];
-        let mut s = Shake128::new(&[b"hello"]);
+        let mut s = shake::<SHAKE_128_R_BYTES>(b"hello");
         let mut i = 0;
         let mut len = 1;
         while (i + len) < long.len() {
@@ -546,7 +511,7 @@ mod tests {
         for (n, inp) in inputs.iter().enumerate() {
             // the absorbed message is the 33 bytes preceding the pad byte
             let mut single = [0u8; 128];
-            Shake256::new(&[&inp[..33]]).read(&mut single);
+            shake::<SHAKE_256_R_BYTES>(&inp[..33]).read(&mut single);
             assert_eq!(batched[n], single);
         }
     }
@@ -572,7 +537,7 @@ mod tests {
         for (n, (input, mut sponge)) in inputs.iter().zip(sponges).enumerate() {
             // single reference: absorb the 34-byte message, read the same total length.
             let mut single = [0u8; SHAKE_128_R_BYTES * 3 + TAIL];
-            Shake128::new(&[&input[..34]]).read(&mut single);
+            shake::<SHAKE_128_R_BYTES>(&input[..34]).read(&mut single);
 
             // the three eagerly-squeezed blocks must match
             assert_eq!(&batched[n][..], &single[..SHAKE_128_R_BYTES * 3]);
@@ -598,7 +563,7 @@ mod tests {
             x4.squeeze(&mut second);
             for (n, input) in inputs.iter().enumerate() {
                 let mut single = [0u8; SHAKE_256_R_BYTES * 3];
-                Shake256::new(&[input]).read(&mut single);
+                shake::<SHAKE_256_R_BYTES>(input).read(&mut single);
                 assert_eq!(
                     first[n][..],
                     single[..SHAKE_256_R_BYTES * 2],
@@ -618,7 +583,7 @@ mod tests {
             Shake128x4::new(&inputs).squeeze(&mut out);
             for (n, input) in inputs.iter().enumerate() {
                 let mut single = [0u8; SHAKE_128_R_BYTES * 5];
-                Shake128::new(&[input]).read(&mut single);
+                shake::<SHAKE_128_R_BYTES>(input).read(&mut single);
                 assert_eq!(out[n], single, "{lanes} lanes");
             }
         }
@@ -670,12 +635,12 @@ mod tests {
                         Kind::None => {}
                         Kind::Shake128 => {
                             let mut buffer = vec![0; value.bytes().len()];
-                            Shake128::new(&[&self.message[..self.len]]).read(&mut buffer);
+                            shake::<SHAKE_128_R_BYTES>(&self.message[..self.len]).read(&mut buffer);
                             assert_eq!(value.bytes(), buffer);
                         }
                         Kind::Shake256 => {
                             let mut buffer = vec![0; value.bytes().len()];
-                            Shake256::new(&[&self.message[..self.len]]).read(&mut buffer);
+                            shake::<SHAKE_256_R_BYTES>(&self.message[..self.len]).read(&mut buffer);
                             assert_eq!(value.bytes(), buffer);
                         }
                     },
