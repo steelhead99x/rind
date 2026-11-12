@@ -150,6 +150,23 @@ entry guard holds, and `Cached`: a verifying key's lock-free caches of P to
 atomics Aeneas cannot translate, are built from the key's own point or
 scalar.
 
+P-384 ECDH's agreement on x86_64 and aarch64, from the same `PrivateKey` to
+s2n-bignum's routines, in `Rind/X86_64/P384.lean`, which `admin/prove` also
+writes for aarch64:
+
+- `p384_agree`: a peer key is refused unless it is a 97-byte uncompressed
+  point whose coordinates are below p and on the curve, and otherwise the
+  secret is the 48 big-endian bytes of the x-coordinate of the scalar times
+  that point, or a fault unless that is a finite point on the curve;
+- `p384_shared_secret`: the secret's bytes are those.
+
+Key generation, a loaded key, and the public key a key holds run rind's comb
+for k·G, which no theorem covers yet. `p384Pow` is HOL Light's `group_pow
+p384_group`, whose group law `Rind/Nist.lean` defines once for the NIST
+curves, and `Rind/NistGroup.lean` proves it is multiplication in Mathlib's
+group of points on such a curve. `Rind/P384Group.lean` proves p and n prime,
+by Pratt certificates that `Rind/Pratt.lean` checks, and G's order n.
+
 ChaCha20 QUIC header protection on x86_64 and aarch64, from
 `HeaderProtectionKey` to HACL*'s rounds, in `Rind/X86_64/ChaCha20.lean`:
 
