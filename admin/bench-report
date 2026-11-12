@@ -825,7 +825,7 @@ TIER_ROWS = [
     ("AES-CBC", r"aes(128|192|256)-cbc-"),
     ("AES-KW, AES-KWP", r"aes(128|256)-kwp?-"),
     ("ChaCha20 (header protection)", r"quic-header-protection/chacha20/"),
-    ("ChaCha20-Poly1305, XChaCha20-Poly1305", r"x?chacha20poly1305/"),
+    ("ChaCha20-Poly1305, XChaCha20-Poly1305", r"x?chacha20poly1305(-open)?/"),
     ("SHA-1", r"sha1/"),
     ("SHA-256", r"sha256(-updates)?/"),
     ("SHA-384, SHA-512, SHA-512/256", r"sha(384|512|512-256)/"),
