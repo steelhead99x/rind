@@ -22,6 +22,1800 @@ K256:
 .word	0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3
 .word	0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208
 .word	0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+.size	K256,.-K256
+.word	0				@ terminator
+.globl	{sha256_block_data_order_nohw}
+.hidden	{sha256_block_data_order_nohw}
+.type	{sha256_block_data_order_nohw},%function
+{sha256_block_data_order_nohw}:
+	add	r2,r1,r2,lsl#6	@ len to point at the end of inp
+	stmdb	sp!,{{r0,r1,r2,r4-r11,lr}}
+	ldmia	r0,{{r4,r5,r6,r7,r8,r9,r10,r11}}
+	adr	r14,K256
+	sub	sp,sp,#16*4		@ alloca(X[16])
+.Lsha256_oop:
+	ldr	r2,[r1],#4
+	eor	r3,r5,r6		@ magic
+	eor	r12,r12,r12
+	@ ldr	r2,[r1],#4			@ 0
+	eor	r0,r8,r8,ror#5
+	add	r4,r4,r12			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r8,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r12,[r14],#4			@ *K256++
+	add	r11,r11,r2			@ h+=X[i]
+	str	r2,[sp,#0*4]
+	eor	r2,r9,r10
+	add	r11,r11,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r8
+	add	r11,r11,r12			@ h+=K256[i]
+	eor	r2,r2,r10			@ Ch(e,f,g)
+	eor	r0,r4,r4,ror#11
+	add	r11,r11,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r12,r4,r5			@ a^b, b^c in next round
+	eor	r0,r0,r4,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r7,r7,r11			@ d+=h
+	eor	r3,r3,r5			@ Maj(a,b,c)
+	add	r11,r11,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r11,r11,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 1
+	eor	r0,r7,r7,ror#5
+	add	r11,r11,r3			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r7,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r3,[r14],#4			@ *K256++
+	add	r10,r10,r2			@ h+=X[i]
+	str	r2,[sp,#1*4]
+	eor	r2,r8,r9
+	add	r10,r10,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r7
+	add	r10,r10,r3			@ h+=K256[i]
+	eor	r2,r2,r9			@ Ch(e,f,g)
+	eor	r0,r11,r11,ror#11
+	add	r10,r10,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r3,r11,r4			@ a^b, b^c in next round
+	eor	r0,r0,r11,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r6,r6,r10			@ d+=h
+	eor	r12,r12,r4			@ Maj(a,b,c)
+	add	r10,r10,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r10,r10,r12			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 2
+	eor	r0,r6,r6,ror#5
+	add	r10,r10,r12			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r6,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r12,[r14],#4			@ *K256++
+	add	r9,r9,r2			@ h+=X[i]
+	str	r2,[sp,#2*4]
+	eor	r2,r7,r8
+	add	r9,r9,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r6
+	add	r9,r9,r12			@ h+=K256[i]
+	eor	r2,r2,r8			@ Ch(e,f,g)
+	eor	r0,r10,r10,ror#11
+	add	r9,r9,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r12,r10,r11			@ a^b, b^c in next round
+	eor	r0,r0,r10,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r5,r5,r9			@ d+=h
+	eor	r3,r3,r11			@ Maj(a,b,c)
+	add	r9,r9,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r9,r9,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 3
+	eor	r0,r5,r5,ror#5
+	add	r9,r9,r3			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r5,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r3,[r14],#4			@ *K256++
+	add	r8,r8,r2			@ h+=X[i]
+	str	r2,[sp,#3*4]
+	eor	r2,r6,r7
+	add	r8,r8,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r5
+	add	r8,r8,r3			@ h+=K256[i]
+	eor	r2,r2,r7			@ Ch(e,f,g)
+	eor	r0,r9,r9,ror#11
+	add	r8,r8,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r3,r9,r10			@ a^b, b^c in next round
+	eor	r0,r0,r9,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r4,r4,r8			@ d+=h
+	eor	r12,r12,r10			@ Maj(a,b,c)
+	add	r8,r8,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r8,r8,r12			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 4
+	eor	r0,r4,r4,ror#5
+	add	r8,r8,r12			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r4,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r12,[r14],#4			@ *K256++
+	add	r7,r7,r2			@ h+=X[i]
+	str	r2,[sp,#4*4]
+	eor	r2,r5,r6
+	add	r7,r7,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r4
+	add	r7,r7,r12			@ h+=K256[i]
+	eor	r2,r2,r6			@ Ch(e,f,g)
+	eor	r0,r8,r8,ror#11
+	add	r7,r7,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r12,r8,r9			@ a^b, b^c in next round
+	eor	r0,r0,r8,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r11,r11,r7			@ d+=h
+	eor	r3,r3,r9			@ Maj(a,b,c)
+	add	r7,r7,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r7,r7,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 5
+	eor	r0,r11,r11,ror#5
+	add	r7,r7,r3			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r11,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r3,[r14],#4			@ *K256++
+	add	r6,r6,r2			@ h+=X[i]
+	str	r2,[sp,#5*4]
+	eor	r2,r4,r5
+	add	r6,r6,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r11
+	add	r6,r6,r3			@ h+=K256[i]
+	eor	r2,r2,r5			@ Ch(e,f,g)
+	eor	r0,r7,r7,ror#11
+	add	r6,r6,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r3,r7,r8			@ a^b, b^c in next round
+	eor	r0,r0,r7,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r10,r10,r6			@ d+=h
+	eor	r12,r12,r8			@ Maj(a,b,c)
+	add	r6,r6,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r6,r6,r12			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 6
+	eor	r0,r10,r10,ror#5
+	add	r6,r6,r12			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r10,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r12,[r14],#4			@ *K256++
+	add	r5,r5,r2			@ h+=X[i]
+	str	r2,[sp,#6*4]
+	eor	r2,r11,r4
+	add	r5,r5,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r10
+	add	r5,r5,r12			@ h+=K256[i]
+	eor	r2,r2,r4			@ Ch(e,f,g)
+	eor	r0,r6,r6,ror#11
+	add	r5,r5,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r12,r6,r7			@ a^b, b^c in next round
+	eor	r0,r0,r6,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r9,r9,r5			@ d+=h
+	eor	r3,r3,r7			@ Maj(a,b,c)
+	add	r5,r5,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r5,r5,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 7
+	eor	r0,r9,r9,ror#5
+	add	r5,r5,r3			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r9,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r3,[r14],#4			@ *K256++
+	add	r4,r4,r2			@ h+=X[i]
+	str	r2,[sp,#7*4]
+	eor	r2,r10,r11
+	add	r4,r4,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r9
+	add	r4,r4,r3			@ h+=K256[i]
+	eor	r2,r2,r11			@ Ch(e,f,g)
+	eor	r0,r5,r5,ror#11
+	add	r4,r4,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r3,r5,r6			@ a^b, b^c in next round
+	eor	r0,r0,r5,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r8,r8,r4			@ d+=h
+	eor	r12,r12,r6			@ Maj(a,b,c)
+	add	r4,r4,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r4,r4,r12			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 8
+	eor	r0,r8,r8,ror#5
+	add	r4,r4,r12			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r8,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r12,[r14],#4			@ *K256++
+	add	r11,r11,r2			@ h+=X[i]
+	str	r2,[sp,#8*4]
+	eor	r2,r9,r10
+	add	r11,r11,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r8
+	add	r11,r11,r12			@ h+=K256[i]
+	eor	r2,r2,r10			@ Ch(e,f,g)
+	eor	r0,r4,r4,ror#11
+	add	r11,r11,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r12,r4,r5			@ a^b, b^c in next round
+	eor	r0,r0,r4,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r7,r7,r11			@ d+=h
+	eor	r3,r3,r5			@ Maj(a,b,c)
+	add	r11,r11,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r11,r11,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 9
+	eor	r0,r7,r7,ror#5
+	add	r11,r11,r3			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r7,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r3,[r14],#4			@ *K256++
+	add	r10,r10,r2			@ h+=X[i]
+	str	r2,[sp,#9*4]
+	eor	r2,r8,r9
+	add	r10,r10,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r7
+	add	r10,r10,r3			@ h+=K256[i]
+	eor	r2,r2,r9			@ Ch(e,f,g)
+	eor	r0,r11,r11,ror#11
+	add	r10,r10,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r3,r11,r4			@ a^b, b^c in next round
+	eor	r0,r0,r11,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r6,r6,r10			@ d+=h
+	eor	r12,r12,r4			@ Maj(a,b,c)
+	add	r10,r10,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r10,r10,r12			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 10
+	eor	r0,r6,r6,ror#5
+	add	r10,r10,r12			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r6,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r12,[r14],#4			@ *K256++
+	add	r9,r9,r2			@ h+=X[i]
+	str	r2,[sp,#10*4]
+	eor	r2,r7,r8
+	add	r9,r9,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r6
+	add	r9,r9,r12			@ h+=K256[i]
+	eor	r2,r2,r8			@ Ch(e,f,g)
+	eor	r0,r10,r10,ror#11
+	add	r9,r9,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r12,r10,r11			@ a^b, b^c in next round
+	eor	r0,r0,r10,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r5,r5,r9			@ d+=h
+	eor	r3,r3,r11			@ Maj(a,b,c)
+	add	r9,r9,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r9,r9,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 11
+	eor	r0,r5,r5,ror#5
+	add	r9,r9,r3			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r5,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r3,[r14],#4			@ *K256++
+	add	r8,r8,r2			@ h+=X[i]
+	str	r2,[sp,#11*4]
+	eor	r2,r6,r7
+	add	r8,r8,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r5
+	add	r8,r8,r3			@ h+=K256[i]
+	eor	r2,r2,r7			@ Ch(e,f,g)
+	eor	r0,r9,r9,ror#11
+	add	r8,r8,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r3,r9,r10			@ a^b, b^c in next round
+	eor	r0,r0,r9,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r4,r4,r8			@ d+=h
+	eor	r12,r12,r10			@ Maj(a,b,c)
+	add	r8,r8,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r8,r8,r12			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 12
+	eor	r0,r4,r4,ror#5
+	add	r8,r8,r12			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r4,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r12,[r14],#4			@ *K256++
+	add	r7,r7,r2			@ h+=X[i]
+	str	r2,[sp,#12*4]
+	eor	r2,r5,r6
+	add	r7,r7,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r4
+	add	r7,r7,r12			@ h+=K256[i]
+	eor	r2,r2,r6			@ Ch(e,f,g)
+	eor	r0,r8,r8,ror#11
+	add	r7,r7,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r12,r8,r9			@ a^b, b^c in next round
+	eor	r0,r0,r8,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r11,r11,r7			@ d+=h
+	eor	r3,r3,r9			@ Maj(a,b,c)
+	add	r7,r7,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r7,r7,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 13
+	eor	r0,r11,r11,ror#5
+	add	r7,r7,r3			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r11,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r3,[r14],#4			@ *K256++
+	add	r6,r6,r2			@ h+=X[i]
+	str	r2,[sp,#13*4]
+	eor	r2,r4,r5
+	add	r6,r6,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r11
+	add	r6,r6,r3			@ h+=K256[i]
+	eor	r2,r2,r5			@ Ch(e,f,g)
+	eor	r0,r7,r7,ror#11
+	add	r6,r6,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r3,r7,r8			@ a^b, b^c in next round
+	eor	r0,r0,r7,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r10,r10,r6			@ d+=h
+	eor	r12,r12,r8			@ Maj(a,b,c)
+	add	r6,r6,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r6,r6,r12			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 14
+	eor	r0,r10,r10,ror#5
+	add	r6,r6,r12			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r10,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r12,[r14],#4			@ *K256++
+	add	r5,r5,r2			@ h+=X[i]
+	str	r2,[sp,#14*4]
+	eor	r2,r11,r4
+	add	r5,r5,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r10
+	add	r5,r5,r12			@ h+=K256[i]
+	eor	r2,r2,r4			@ Ch(e,f,g)
+	eor	r0,r6,r6,ror#11
+	add	r5,r5,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[r1],#4			@ prefetch
+	eor	r12,r6,r7			@ a^b, b^c in next round
+	eor	r0,r0,r6,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r9,r9,r5			@ d+=h
+	eor	r3,r3,r7			@ Maj(a,b,c)
+	add	r5,r5,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r5,r5,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[r1],#4			@ 15
+	str	r1,[sp,#17*4]			@ make room for r1
+	eor	r0,r9,r9,ror#5
+	add	r5,r5,r3			@ h+=Maj(a,b,c) from the past
+	eor	r0,r0,r9,ror#19	@ Sigma1(e)
+	rev	r2,r2
+	ldr	r3,[r14],#4			@ *K256++
+	add	r4,r4,r2			@ h+=X[i]
+	str	r2,[sp,#15*4]
+	eor	r2,r10,r11
+	add	r4,r4,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r9
+	add	r4,r4,r3			@ h+=K256[i]
+	eor	r2,r2,r11			@ Ch(e,f,g)
+	eor	r0,r5,r5,ror#11
+	add	r4,r4,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#1*4]		@ from future BODY_16_xx
+	eor	r3,r5,r6			@ a^b, b^c in next round
+	ldr	r1,[sp,#14*4]	@ from future BODY_16_xx
+	eor	r0,r0,r5,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r8,r8,r4			@ d+=h
+	eor	r12,r12,r6			@ Maj(a,b,c)
+	add	r4,r4,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r4,r4,r12			@ h+=Maj(a,b,c)
+.Lsha256_rounds_16_xx:
+	@ ldr	r2,[sp,#1*4]		@ 16
+	@ ldr	r1,[sp,#14*4]
+	mov	r0,r2,ror#7
+	add	r4,r4,r12			@ h+=Maj(a,b,c) from the past
+	mov	r12,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r12,r12,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#0*4]
+	eor	r12,r12,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#9*4]
+
+	add	r12,r12,r0
+	eor	r0,r8,r8,ror#5	@ from BODY_00_15
+	add	r2,r2,r12
+	eor	r0,r0,r8,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r12,[r14],#4			@ *K256++
+	add	r11,r11,r2			@ h+=X[i]
+	str	r2,[sp,#0*4]
+	eor	r2,r9,r10
+	add	r11,r11,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r8
+	add	r11,r11,r12			@ h+=K256[i]
+	eor	r2,r2,r10			@ Ch(e,f,g)
+	eor	r0,r4,r4,ror#11
+	add	r11,r11,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#2*4]		@ from future BODY_16_xx
+	eor	r12,r4,r5			@ a^b, b^c in next round
+	ldr	r1,[sp,#15*4]	@ from future BODY_16_xx
+	eor	r0,r0,r4,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r7,r7,r11			@ d+=h
+	eor	r3,r3,r5			@ Maj(a,b,c)
+	add	r11,r11,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r11,r11,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#2*4]		@ 17
+	@ ldr	r1,[sp,#15*4]
+	mov	r0,r2,ror#7
+	add	r11,r11,r3			@ h+=Maj(a,b,c) from the past
+	mov	r3,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r3,r3,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#1*4]
+	eor	r3,r3,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#10*4]
+
+	add	r3,r3,r0
+	eor	r0,r7,r7,ror#5	@ from BODY_00_15
+	add	r2,r2,r3
+	eor	r0,r0,r7,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r3,[r14],#4			@ *K256++
+	add	r10,r10,r2			@ h+=X[i]
+	str	r2,[sp,#1*4]
+	eor	r2,r8,r9
+	add	r10,r10,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r7
+	add	r10,r10,r3			@ h+=K256[i]
+	eor	r2,r2,r9			@ Ch(e,f,g)
+	eor	r0,r11,r11,ror#11
+	add	r10,r10,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#3*4]		@ from future BODY_16_xx
+	eor	r3,r11,r4			@ a^b, b^c in next round
+	ldr	r1,[sp,#0*4]	@ from future BODY_16_xx
+	eor	r0,r0,r11,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r6,r6,r10			@ d+=h
+	eor	r12,r12,r4			@ Maj(a,b,c)
+	add	r10,r10,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r10,r10,r12			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#3*4]		@ 18
+	@ ldr	r1,[sp,#0*4]
+	mov	r0,r2,ror#7
+	add	r10,r10,r12			@ h+=Maj(a,b,c) from the past
+	mov	r12,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r12,r12,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#2*4]
+	eor	r12,r12,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#11*4]
+
+	add	r12,r12,r0
+	eor	r0,r6,r6,ror#5	@ from BODY_00_15
+	add	r2,r2,r12
+	eor	r0,r0,r6,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r12,[r14],#4			@ *K256++
+	add	r9,r9,r2			@ h+=X[i]
+	str	r2,[sp,#2*4]
+	eor	r2,r7,r8
+	add	r9,r9,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r6
+	add	r9,r9,r12			@ h+=K256[i]
+	eor	r2,r2,r8			@ Ch(e,f,g)
+	eor	r0,r10,r10,ror#11
+	add	r9,r9,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#4*4]		@ from future BODY_16_xx
+	eor	r12,r10,r11			@ a^b, b^c in next round
+	ldr	r1,[sp,#1*4]	@ from future BODY_16_xx
+	eor	r0,r0,r10,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r5,r5,r9			@ d+=h
+	eor	r3,r3,r11			@ Maj(a,b,c)
+	add	r9,r9,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r9,r9,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#4*4]		@ 19
+	@ ldr	r1,[sp,#1*4]
+	mov	r0,r2,ror#7
+	add	r9,r9,r3			@ h+=Maj(a,b,c) from the past
+	mov	r3,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r3,r3,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#3*4]
+	eor	r3,r3,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#12*4]
+
+	add	r3,r3,r0
+	eor	r0,r5,r5,ror#5	@ from BODY_00_15
+	add	r2,r2,r3
+	eor	r0,r0,r5,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r3,[r14],#4			@ *K256++
+	add	r8,r8,r2			@ h+=X[i]
+	str	r2,[sp,#3*4]
+	eor	r2,r6,r7
+	add	r8,r8,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r5
+	add	r8,r8,r3			@ h+=K256[i]
+	eor	r2,r2,r7			@ Ch(e,f,g)
+	eor	r0,r9,r9,ror#11
+	add	r8,r8,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#5*4]		@ from future BODY_16_xx
+	eor	r3,r9,r10			@ a^b, b^c in next round
+	ldr	r1,[sp,#2*4]	@ from future BODY_16_xx
+	eor	r0,r0,r9,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r4,r4,r8			@ d+=h
+	eor	r12,r12,r10			@ Maj(a,b,c)
+	add	r8,r8,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r8,r8,r12			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#5*4]		@ 20
+	@ ldr	r1,[sp,#2*4]
+	mov	r0,r2,ror#7
+	add	r8,r8,r12			@ h+=Maj(a,b,c) from the past
+	mov	r12,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r12,r12,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#4*4]
+	eor	r12,r12,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#13*4]
+
+	add	r12,r12,r0
+	eor	r0,r4,r4,ror#5	@ from BODY_00_15
+	add	r2,r2,r12
+	eor	r0,r0,r4,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r12,[r14],#4			@ *K256++
+	add	r7,r7,r2			@ h+=X[i]
+	str	r2,[sp,#4*4]
+	eor	r2,r5,r6
+	add	r7,r7,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r4
+	add	r7,r7,r12			@ h+=K256[i]
+	eor	r2,r2,r6			@ Ch(e,f,g)
+	eor	r0,r8,r8,ror#11
+	add	r7,r7,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#6*4]		@ from future BODY_16_xx
+	eor	r12,r8,r9			@ a^b, b^c in next round
+	ldr	r1,[sp,#3*4]	@ from future BODY_16_xx
+	eor	r0,r0,r8,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r11,r11,r7			@ d+=h
+	eor	r3,r3,r9			@ Maj(a,b,c)
+	add	r7,r7,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r7,r7,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#6*4]		@ 21
+	@ ldr	r1,[sp,#3*4]
+	mov	r0,r2,ror#7
+	add	r7,r7,r3			@ h+=Maj(a,b,c) from the past
+	mov	r3,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r3,r3,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#5*4]
+	eor	r3,r3,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#14*4]
+
+	add	r3,r3,r0
+	eor	r0,r11,r11,ror#5	@ from BODY_00_15
+	add	r2,r2,r3
+	eor	r0,r0,r11,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r3,[r14],#4			@ *K256++
+	add	r6,r6,r2			@ h+=X[i]
+	str	r2,[sp,#5*4]
+	eor	r2,r4,r5
+	add	r6,r6,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r11
+	add	r6,r6,r3			@ h+=K256[i]
+	eor	r2,r2,r5			@ Ch(e,f,g)
+	eor	r0,r7,r7,ror#11
+	add	r6,r6,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#7*4]		@ from future BODY_16_xx
+	eor	r3,r7,r8			@ a^b, b^c in next round
+	ldr	r1,[sp,#4*4]	@ from future BODY_16_xx
+	eor	r0,r0,r7,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r10,r10,r6			@ d+=h
+	eor	r12,r12,r8			@ Maj(a,b,c)
+	add	r6,r6,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r6,r6,r12			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#7*4]		@ 22
+	@ ldr	r1,[sp,#4*4]
+	mov	r0,r2,ror#7
+	add	r6,r6,r12			@ h+=Maj(a,b,c) from the past
+	mov	r12,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r12,r12,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#6*4]
+	eor	r12,r12,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#15*4]
+
+	add	r12,r12,r0
+	eor	r0,r10,r10,ror#5	@ from BODY_00_15
+	add	r2,r2,r12
+	eor	r0,r0,r10,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r12,[r14],#4			@ *K256++
+	add	r5,r5,r2			@ h+=X[i]
+	str	r2,[sp,#6*4]
+	eor	r2,r11,r4
+	add	r5,r5,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r10
+	add	r5,r5,r12			@ h+=K256[i]
+	eor	r2,r2,r4			@ Ch(e,f,g)
+	eor	r0,r6,r6,ror#11
+	add	r5,r5,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#8*4]		@ from future BODY_16_xx
+	eor	r12,r6,r7			@ a^b, b^c in next round
+	ldr	r1,[sp,#5*4]	@ from future BODY_16_xx
+	eor	r0,r0,r6,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r9,r9,r5			@ d+=h
+	eor	r3,r3,r7			@ Maj(a,b,c)
+	add	r5,r5,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r5,r5,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#8*4]		@ 23
+	@ ldr	r1,[sp,#5*4]
+	mov	r0,r2,ror#7
+	add	r5,r5,r3			@ h+=Maj(a,b,c) from the past
+	mov	r3,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r3,r3,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#7*4]
+	eor	r3,r3,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#0*4]
+
+	add	r3,r3,r0
+	eor	r0,r9,r9,ror#5	@ from BODY_00_15
+	add	r2,r2,r3
+	eor	r0,r0,r9,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r3,[r14],#4			@ *K256++
+	add	r4,r4,r2			@ h+=X[i]
+	str	r2,[sp,#7*4]
+	eor	r2,r10,r11
+	add	r4,r4,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r9
+	add	r4,r4,r3			@ h+=K256[i]
+	eor	r2,r2,r11			@ Ch(e,f,g)
+	eor	r0,r5,r5,ror#11
+	add	r4,r4,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#9*4]		@ from future BODY_16_xx
+	eor	r3,r5,r6			@ a^b, b^c in next round
+	ldr	r1,[sp,#6*4]	@ from future BODY_16_xx
+	eor	r0,r0,r5,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r8,r8,r4			@ d+=h
+	eor	r12,r12,r6			@ Maj(a,b,c)
+	add	r4,r4,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r4,r4,r12			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#9*4]		@ 24
+	@ ldr	r1,[sp,#6*4]
+	mov	r0,r2,ror#7
+	add	r4,r4,r12			@ h+=Maj(a,b,c) from the past
+	mov	r12,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r12,r12,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#8*4]
+	eor	r12,r12,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#1*4]
+
+	add	r12,r12,r0
+	eor	r0,r8,r8,ror#5	@ from BODY_00_15
+	add	r2,r2,r12
+	eor	r0,r0,r8,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r12,[r14],#4			@ *K256++
+	add	r11,r11,r2			@ h+=X[i]
+	str	r2,[sp,#8*4]
+	eor	r2,r9,r10
+	add	r11,r11,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r8
+	add	r11,r11,r12			@ h+=K256[i]
+	eor	r2,r2,r10			@ Ch(e,f,g)
+	eor	r0,r4,r4,ror#11
+	add	r11,r11,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#10*4]		@ from future BODY_16_xx
+	eor	r12,r4,r5			@ a^b, b^c in next round
+	ldr	r1,[sp,#7*4]	@ from future BODY_16_xx
+	eor	r0,r0,r4,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r7,r7,r11			@ d+=h
+	eor	r3,r3,r5			@ Maj(a,b,c)
+	add	r11,r11,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r11,r11,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#10*4]		@ 25
+	@ ldr	r1,[sp,#7*4]
+	mov	r0,r2,ror#7
+	add	r11,r11,r3			@ h+=Maj(a,b,c) from the past
+	mov	r3,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r3,r3,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#9*4]
+	eor	r3,r3,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#2*4]
+
+	add	r3,r3,r0
+	eor	r0,r7,r7,ror#5	@ from BODY_00_15
+	add	r2,r2,r3
+	eor	r0,r0,r7,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r3,[r14],#4			@ *K256++
+	add	r10,r10,r2			@ h+=X[i]
+	str	r2,[sp,#9*4]
+	eor	r2,r8,r9
+	add	r10,r10,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r7
+	add	r10,r10,r3			@ h+=K256[i]
+	eor	r2,r2,r9			@ Ch(e,f,g)
+	eor	r0,r11,r11,ror#11
+	add	r10,r10,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#11*4]		@ from future BODY_16_xx
+	eor	r3,r11,r4			@ a^b, b^c in next round
+	ldr	r1,[sp,#8*4]	@ from future BODY_16_xx
+	eor	r0,r0,r11,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r6,r6,r10			@ d+=h
+	eor	r12,r12,r4			@ Maj(a,b,c)
+	add	r10,r10,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r10,r10,r12			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#11*4]		@ 26
+	@ ldr	r1,[sp,#8*4]
+	mov	r0,r2,ror#7
+	add	r10,r10,r12			@ h+=Maj(a,b,c) from the past
+	mov	r12,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r12,r12,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#10*4]
+	eor	r12,r12,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#3*4]
+
+	add	r12,r12,r0
+	eor	r0,r6,r6,ror#5	@ from BODY_00_15
+	add	r2,r2,r12
+	eor	r0,r0,r6,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r12,[r14],#4			@ *K256++
+	add	r9,r9,r2			@ h+=X[i]
+	str	r2,[sp,#10*4]
+	eor	r2,r7,r8
+	add	r9,r9,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r6
+	add	r9,r9,r12			@ h+=K256[i]
+	eor	r2,r2,r8			@ Ch(e,f,g)
+	eor	r0,r10,r10,ror#11
+	add	r9,r9,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#12*4]		@ from future BODY_16_xx
+	eor	r12,r10,r11			@ a^b, b^c in next round
+	ldr	r1,[sp,#9*4]	@ from future BODY_16_xx
+	eor	r0,r0,r10,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r5,r5,r9			@ d+=h
+	eor	r3,r3,r11			@ Maj(a,b,c)
+	add	r9,r9,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r9,r9,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#12*4]		@ 27
+	@ ldr	r1,[sp,#9*4]
+	mov	r0,r2,ror#7
+	add	r9,r9,r3			@ h+=Maj(a,b,c) from the past
+	mov	r3,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r3,r3,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#11*4]
+	eor	r3,r3,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#4*4]
+
+	add	r3,r3,r0
+	eor	r0,r5,r5,ror#5	@ from BODY_00_15
+	add	r2,r2,r3
+	eor	r0,r0,r5,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r3,[r14],#4			@ *K256++
+	add	r8,r8,r2			@ h+=X[i]
+	str	r2,[sp,#11*4]
+	eor	r2,r6,r7
+	add	r8,r8,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r5
+	add	r8,r8,r3			@ h+=K256[i]
+	eor	r2,r2,r7			@ Ch(e,f,g)
+	eor	r0,r9,r9,ror#11
+	add	r8,r8,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#13*4]		@ from future BODY_16_xx
+	eor	r3,r9,r10			@ a^b, b^c in next round
+	ldr	r1,[sp,#10*4]	@ from future BODY_16_xx
+	eor	r0,r0,r9,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r4,r4,r8			@ d+=h
+	eor	r12,r12,r10			@ Maj(a,b,c)
+	add	r8,r8,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r8,r8,r12			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#13*4]		@ 28
+	@ ldr	r1,[sp,#10*4]
+	mov	r0,r2,ror#7
+	add	r8,r8,r12			@ h+=Maj(a,b,c) from the past
+	mov	r12,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r12,r12,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#12*4]
+	eor	r12,r12,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#5*4]
+
+	add	r12,r12,r0
+	eor	r0,r4,r4,ror#5	@ from BODY_00_15
+	add	r2,r2,r12
+	eor	r0,r0,r4,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r12,[r14],#4			@ *K256++
+	add	r7,r7,r2			@ h+=X[i]
+	str	r2,[sp,#12*4]
+	eor	r2,r5,r6
+	add	r7,r7,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r4
+	add	r7,r7,r12			@ h+=K256[i]
+	eor	r2,r2,r6			@ Ch(e,f,g)
+	eor	r0,r8,r8,ror#11
+	add	r7,r7,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#14*4]		@ from future BODY_16_xx
+	eor	r12,r8,r9			@ a^b, b^c in next round
+	ldr	r1,[sp,#11*4]	@ from future BODY_16_xx
+	eor	r0,r0,r8,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r11,r11,r7			@ d+=h
+	eor	r3,r3,r9			@ Maj(a,b,c)
+	add	r7,r7,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r7,r7,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#14*4]		@ 29
+	@ ldr	r1,[sp,#11*4]
+	mov	r0,r2,ror#7
+	add	r7,r7,r3			@ h+=Maj(a,b,c) from the past
+	mov	r3,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r3,r3,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#13*4]
+	eor	r3,r3,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#6*4]
+
+	add	r3,r3,r0
+	eor	r0,r11,r11,ror#5	@ from BODY_00_15
+	add	r2,r2,r3
+	eor	r0,r0,r11,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r3,[r14],#4			@ *K256++
+	add	r6,r6,r2			@ h+=X[i]
+	str	r2,[sp,#13*4]
+	eor	r2,r4,r5
+	add	r6,r6,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r11
+	add	r6,r6,r3			@ h+=K256[i]
+	eor	r2,r2,r5			@ Ch(e,f,g)
+	eor	r0,r7,r7,ror#11
+	add	r6,r6,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#15*4]		@ from future BODY_16_xx
+	eor	r3,r7,r8			@ a^b, b^c in next round
+	ldr	r1,[sp,#12*4]	@ from future BODY_16_xx
+	eor	r0,r0,r7,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r10,r10,r6			@ d+=h
+	eor	r12,r12,r8			@ Maj(a,b,c)
+	add	r6,r6,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r6,r6,r12			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#15*4]		@ 30
+	@ ldr	r1,[sp,#12*4]
+	mov	r0,r2,ror#7
+	add	r6,r6,r12			@ h+=Maj(a,b,c) from the past
+	mov	r12,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r12,r12,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#14*4]
+	eor	r12,r12,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#7*4]
+
+	add	r12,r12,r0
+	eor	r0,r10,r10,ror#5	@ from BODY_00_15
+	add	r2,r2,r12
+	eor	r0,r0,r10,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r12,[r14],#4			@ *K256++
+	add	r5,r5,r2			@ h+=X[i]
+	str	r2,[sp,#14*4]
+	eor	r2,r11,r4
+	add	r5,r5,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r10
+	add	r5,r5,r12			@ h+=K256[i]
+	eor	r2,r2,r4			@ Ch(e,f,g)
+	eor	r0,r6,r6,ror#11
+	add	r5,r5,r2			@ h+=Ch(e,f,g)
+	ldr	r2,[sp,#0*4]		@ from future BODY_16_xx
+	eor	r12,r6,r7			@ a^b, b^c in next round
+	ldr	r1,[sp,#13*4]	@ from future BODY_16_xx
+	eor	r0,r0,r6,ror#20	@ Sigma0(a)
+	and	r3,r3,r12			@ (b^c)&=(a^b)
+	add	r9,r9,r5			@ d+=h
+	eor	r3,r3,r7			@ Maj(a,b,c)
+	add	r5,r5,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r5,r5,r3			@ h+=Maj(a,b,c)
+	@ ldr	r2,[sp,#0*4]		@ 31
+	@ ldr	r1,[sp,#13*4]
+	mov	r0,r2,ror#7
+	add	r5,r5,r3			@ h+=Maj(a,b,c) from the past
+	mov	r3,r1,ror#17
+	eor	r0,r0,r2,ror#18
+	eor	r3,r3,r1,ror#19
+	eor	r0,r0,r2,lsr#3	@ sigma0(X[i+1])
+	ldr	r2,[sp,#15*4]
+	eor	r3,r3,r1,lsr#10	@ sigma1(X[i+14])
+	ldr	r1,[sp,#8*4]
+
+	add	r3,r3,r0
+	eor	r0,r9,r9,ror#5	@ from BODY_00_15
+	add	r2,r2,r3
+	eor	r0,r0,r9,ror#19	@ Sigma1(e)
+	add	r2,r2,r1			@ X[i]
+	ldr	r3,[r14],#4			@ *K256++
+	add	r4,r4,r2			@ h+=X[i]
+	str	r2,[sp,#15*4]
+	eor	r2,r10,r11
+	add	r4,r4,r0,ror#6	@ h+=Sigma1(e)
+	and	r2,r2,r9
+	add	r4,r4,r3			@ h+=K256[i]
+	eor	r2,r2,r11			@ Ch(e,f,g)
+	eor	r0,r5,r5,ror#11
+	add	r4,r4,r2			@ h+=Ch(e,f,g)
+	and	r3,r3,#0xff
+	cmp	r3,#0xf2			@ done?
+	ldr	r2,[sp,#1*4]		@ from future BODY_16_xx
+	eor	r3,r5,r6			@ a^b, b^c in next round
+	ldr	r1,[sp,#14*4]	@ from future BODY_16_xx
+	eor	r0,r0,r5,ror#20	@ Sigma0(a)
+	and	r12,r12,r3			@ (b^c)&=(a^b)
+	add	r8,r8,r4			@ d+=h
+	eor	r12,r12,r6			@ Maj(a,b,c)
+	add	r4,r4,r0,ror#2	@ h+=Sigma0(a)
+	@ add	r4,r4,r12			@ h+=Maj(a,b,c)
+	ite	eq			@ Thumb2 thing, sanity check in ARM
+	ldreq	r3,[sp,#16*4]		@ pull ctx
+	bne	.Lsha256_rounds_16_xx
+
+	add	r4,r4,r12		@ h+=Maj(a,b,c) from the past
+	ldr	r0,[r3,#0]
+	ldr	r2,[r3,#4]
+	ldr	r12,[r3,#8]
+	add	r4,r4,r0
+	ldr	r0,[r3,#12]
+	add	r5,r5,r2
+	ldr	r2,[r3,#16]
+	add	r6,r6,r12
+	ldr	r12,[r3,#20]
+	add	r7,r7,r0
+	ldr	r0,[r3,#24]
+	add	r8,r8,r2
+	ldr	r2,[r3,#28]
+	add	r9,r9,r12
+	ldr	r1,[sp,#17*4]		@ pull inp
+	ldr	r12,[sp,#18*4]		@ pull inp+len
+	add	r10,r10,r0
+	add	r11,r11,r2
+	stmia	r3,{{r4,r5,r6,r7,r8,r9,r10,r11}}
+	cmp	r1,r12
+	sub	r14,r14,#256	@ rewind Ktbl
+	bne	.Lsha256_oop
+
+	add	sp,sp,#19*4	@ destroy frame
+	ldmia	sp!,{{r4,r5,r6,r7,r8,r9,r10,r11,pc}}
+.size	{sha256_block_data_order_nohw},.-{sha256_block_data_order_nohw}
+.Lsha256_K256_shortcut_neon:
+@ PC is 8 bytes ahead in Arm mode and 4 bytes ahead in Thumb mode.
+.word	K256-(.Lsha256_K256_add_neon+8)
+.globl	{sha256_block_data_order_neon}
+.hidden	{sha256_block_data_order_neon}
+.type	{sha256_block_data_order_neon},%function
+.align	5
+.skip	16
+{sha256_block_data_order_neon}:
+	stmdb	sp!,{{r4,r5,r6,r7,r8,r9,r10,r11,r12,lr}}
+
+	sub	r11,sp,#16*4+16
+
+	@ K256 is just at the boundary of being easily referenced by an ADR from
+	@ this function. In Arm mode, when building with 7=6, it does
+	@ not fit. By moving code around, we could make it fit, but this is too
+	@ fragile. For simplicity, just load the offset from
+	@ .Lsha256_K256_shortcut_neon.
+	@
+	@ TODO(davidben): adrl would avoid a load, but clang-assembler does not
+	@ support it. We might be able to emulate it with a macro, but Android's
+	@ did not work when I tried it.
+	@ https://android.googlesource.com/platform/ndk/+/refs/heads/master/docs/ClangMigration.md#arm
+	ldr	r14,.Lsha256_K256_shortcut_neon
+.Lsha256_K256_add_neon:
+	add	r14,pc,r14
+
+	bic	r11,r11,#15		@ align for 128-bit stores
+	mov	r12,sp
+	mov	sp,r11			@ alloca
+	add	r2,r1,r2,lsl#6	@ len to point at the end of inp
+
+	vld1.8	{{q0}},[r1]!
+	vld1.8	{{q1}},[r1]!
+	vld1.8	{{q2}},[r1]!
+	vld1.8	{{q3}},[r1]!
+	vld1.32	{{q8}},[r14,:128]!
+	vld1.32	{{q9}},[r14,:128]!
+	vld1.32	{{q10}},[r14,:128]!
+	vld1.32	{{q11}},[r14,:128]!
+	vrev32.8	q0,q0		@ yes, even on
+	str	r0,[sp,#64]
+	vrev32.8	q1,q1		@ big-endian
+	str	r1,[sp,#68]
+	mov	r1,sp
+	vrev32.8	q2,q2
+	str	r2,[sp,#72]
+	vrev32.8	q3,q3
+	str	r12,[sp,#76]		@ save original sp
+	vadd.i32	q8,q8,q0
+	vadd.i32	q9,q9,q1
+	vst1.32	{{q8}},[r1,:128]!
+	vadd.i32	q10,q10,q2
+	vst1.32	{{q9}},[r1,:128]!
+	vadd.i32	q11,q11,q3
+	vst1.32	{{q10}},[r1,:128]!
+	vst1.32	{{q11}},[r1,:128]!
+
+	ldmia	r0,{{r4,r5,r6,r7,r8,r9,r10,r11}}
+	sub	r1,r1,#64
+	ldr	r2,[sp,#0]
+	eor	r12,r12,r12
+	eor	r3,r5,r6
+	b	.Lsha256__00_48
+
+.align	4
+.Lsha256__00_48:
+	vext.8	q8,q0,q1,#4
+	add	r11,r11,r2
+	eor	r2,r9,r10
+	eor	r0,r8,r8,ror#5
+	vext.8	q9,q2,q3,#4
+	add	r4,r4,r12
+	and	r2,r2,r8
+	eor	r12,r0,r8,ror#19
+	vshr.u32	q10,q8,#7
+	eor	r0,r4,r4,ror#11
+	eor	r2,r2,r10
+	vadd.i32	q0,q0,q9
+	add	r11,r11,r12,ror#6
+	eor	r12,r4,r5
+	vshr.u32	q9,q8,#3
+	eor	r0,r0,r4,ror#20
+	add	r11,r11,r2
+	vsli.32	q10,q8,#25
+	ldr	r2,[sp,#4]
+	and	r3,r3,r12
+	vshr.u32	q11,q8,#18
+	add	r7,r7,r11
+	add	r11,r11,r0,ror#2
+	eor	r3,r3,r5
+	veor	q9,q9,q10
+	add	r10,r10,r2
+	vsli.32	q11,q8,#14
+	eor	r2,r8,r9
+	eor	r0,r7,r7,ror#5
+	vshr.u32	d24,d7,#17
+	add	r11,r11,r3
+	and	r2,r2,r7
+	veor	q9,q9,q11
+	eor	r3,r0,r7,ror#19
+	eor	r0,r11,r11,ror#11
+	vsli.32	d24,d7,#15
+	eor	r2,r2,r9
+	add	r10,r10,r3,ror#6
+	vshr.u32	d25,d7,#10
+	eor	r3,r11,r4
+	eor	r0,r0,r11,ror#20
+	vadd.i32	q0,q0,q9
+	add	r10,r10,r2
+	ldr	r2,[sp,#8]
+	veor	d25,d25,d24
+	and	r12,r12,r3
+	add	r6,r6,r10
+	vshr.u32	d24,d7,#19
+	add	r10,r10,r0,ror#2
+	eor	r12,r12,r4
+	vsli.32	d24,d7,#13
+	add	r9,r9,r2
+	eor	r2,r7,r8
+	veor	d25,d25,d24
+	eor	r0,r6,r6,ror#5
+	add	r10,r10,r12
+	vadd.i32	d0,d0,d25
+	and	r2,r2,r6
+	eor	r12,r0,r6,ror#19
+	vshr.u32	d24,d0,#17
+	eor	r0,r10,r10,ror#11
+	eor	r2,r2,r8
+	vsli.32	d24,d0,#15
+	add	r9,r9,r12,ror#6
+	eor	r12,r10,r11
+	vshr.u32	d25,d0,#10
+	eor	r0,r0,r10,ror#20
+	add	r9,r9,r2
+	veor	d25,d25,d24
+	ldr	r2,[sp,#12]
+	and	r3,r3,r12
+	vshr.u32	d24,d0,#19
+	add	r5,r5,r9
+	add	r9,r9,r0,ror#2
+	eor	r3,r3,r11
+	vld1.32	{{q8}},[r14,:128]!
+	add	r8,r8,r2
+	vsli.32	d24,d0,#13
+	eor	r2,r6,r7
+	eor	r0,r5,r5,ror#5
+	veor	d25,d25,d24
+	add	r9,r9,r3
+	and	r2,r2,r5
+	vadd.i32	d1,d1,d25
+	eor	r3,r0,r5,ror#19
+	eor	r0,r9,r9,ror#11
+	vadd.i32	q8,q8,q0
+	eor	r2,r2,r7
+	add	r8,r8,r3,ror#6
+	eor	r3,r9,r10
+	eor	r0,r0,r9,ror#20
+	add	r8,r8,r2
+	ldr	r2,[sp,#16]
+	and	r12,r12,r3
+	add	r4,r4,r8
+	vst1.32	{{q8}},[r1,:128]!
+	add	r8,r8,r0,ror#2
+	eor	r12,r12,r10
+	vext.8	q8,q1,q2,#4
+	add	r7,r7,r2
+	eor	r2,r5,r6
+	eor	r0,r4,r4,ror#5
+	vext.8	q9,q3,q0,#4
+	add	r8,r8,r12
+	and	r2,r2,r4
+	eor	r12,r0,r4,ror#19
+	vshr.u32	q10,q8,#7
+	eor	r0,r8,r8,ror#11
+	eor	r2,r2,r6
+	vadd.i32	q1,q1,q9
+	add	r7,r7,r12,ror#6
+	eor	r12,r8,r9
+	vshr.u32	q9,q8,#3
+	eor	r0,r0,r8,ror#20
+	add	r7,r7,r2
+	vsli.32	q10,q8,#25
+	ldr	r2,[sp,#20]
+	and	r3,r3,r12
+	vshr.u32	q11,q8,#18
+	add	r11,r11,r7
+	add	r7,r7,r0,ror#2
+	eor	r3,r3,r9
+	veor	q9,q9,q10
+	add	r6,r6,r2
+	vsli.32	q11,q8,#14
+	eor	r2,r4,r5
+	eor	r0,r11,r11,ror#5
+	vshr.u32	d24,d1,#17
+	add	r7,r7,r3
+	and	r2,r2,r11
+	veor	q9,q9,q11
+	eor	r3,r0,r11,ror#19
+	eor	r0,r7,r7,ror#11
+	vsli.32	d24,d1,#15
+	eor	r2,r2,r5
+	add	r6,r6,r3,ror#6
+	vshr.u32	d25,d1,#10
+	eor	r3,r7,r8
+	eor	r0,r0,r7,ror#20
+	vadd.i32	q1,q1,q9
+	add	r6,r6,r2
+	ldr	r2,[sp,#24]
+	veor	d25,d25,d24
+	and	r12,r12,r3
+	add	r10,r10,r6
+	vshr.u32	d24,d1,#19
+	add	r6,r6,r0,ror#2
+	eor	r12,r12,r8
+	vsli.32	d24,d1,#13
+	add	r5,r5,r2
+	eor	r2,r11,r4
+	veor	d25,d25,d24
+	eor	r0,r10,r10,ror#5
+	add	r6,r6,r12
+	vadd.i32	d2,d2,d25
+	and	r2,r2,r10
+	eor	r12,r0,r10,ror#19
+	vshr.u32	d24,d2,#17
+	eor	r0,r6,r6,ror#11
+	eor	r2,r2,r4
+	vsli.32	d24,d2,#15
+	add	r5,r5,r12,ror#6
+	eor	r12,r6,r7
+	vshr.u32	d25,d2,#10
+	eor	r0,r0,r6,ror#20
+	add	r5,r5,r2
+	veor	d25,d25,d24
+	ldr	r2,[sp,#28]
+	and	r3,r3,r12
+	vshr.u32	d24,d2,#19
+	add	r9,r9,r5
+	add	r5,r5,r0,ror#2
+	eor	r3,r3,r7
+	vld1.32	{{q8}},[r14,:128]!
+	add	r4,r4,r2
+	vsli.32	d24,d2,#13
+	eor	r2,r10,r11
+	eor	r0,r9,r9,ror#5
+	veor	d25,d25,d24
+	add	r5,r5,r3
+	and	r2,r2,r9
+	vadd.i32	d3,d3,d25
+	eor	r3,r0,r9,ror#19
+	eor	r0,r5,r5,ror#11
+	vadd.i32	q8,q8,q1
+	eor	r2,r2,r11
+	add	r4,r4,r3,ror#6
+	eor	r3,r5,r6
+	eor	r0,r0,r5,ror#20
+	add	r4,r4,r2
+	ldr	r2,[sp,#32]
+	and	r12,r12,r3
+	add	r8,r8,r4
+	vst1.32	{{q8}},[r1,:128]!
+	add	r4,r4,r0,ror#2
+	eor	r12,r12,r6
+	vext.8	q8,q2,q3,#4
+	add	r11,r11,r2
+	eor	r2,r9,r10
+	eor	r0,r8,r8,ror#5
+	vext.8	q9,q0,q1,#4
+	add	r4,r4,r12
+	and	r2,r2,r8
+	eor	r12,r0,r8,ror#19
+	vshr.u32	q10,q8,#7
+	eor	r0,r4,r4,ror#11
+	eor	r2,r2,r10
+	vadd.i32	q2,q2,q9
+	add	r11,r11,r12,ror#6
+	eor	r12,r4,r5
+	vshr.u32	q9,q8,#3
+	eor	r0,r0,r4,ror#20
+	add	r11,r11,r2
+	vsli.32	q10,q8,#25
+	ldr	r2,[sp,#36]
+	and	r3,r3,r12
+	vshr.u32	q11,q8,#18
+	add	r7,r7,r11
+	add	r11,r11,r0,ror#2
+	eor	r3,r3,r5
+	veor	q9,q9,q10
+	add	r10,r10,r2
+	vsli.32	q11,q8,#14
+	eor	r2,r8,r9
+	eor	r0,r7,r7,ror#5
+	vshr.u32	d24,d3,#17
+	add	r11,r11,r3
+	and	r2,r2,r7
+	veor	q9,q9,q11
+	eor	r3,r0,r7,ror#19
+	eor	r0,r11,r11,ror#11
+	vsli.32	d24,d3,#15
+	eor	r2,r2,r9
+	add	r10,r10,r3,ror#6
+	vshr.u32	d25,d3,#10
+	eor	r3,r11,r4
+	eor	r0,r0,r11,ror#20
+	vadd.i32	q2,q2,q9
+	add	r10,r10,r2
+	ldr	r2,[sp,#40]
+	veor	d25,d25,d24
+	and	r12,r12,r3
+	add	r6,r6,r10
+	vshr.u32	d24,d3,#19
+	add	r10,r10,r0,ror#2
+	eor	r12,r12,r4
+	vsli.32	d24,d3,#13
+	add	r9,r9,r2
+	eor	r2,r7,r8
+	veor	d25,d25,d24
+	eor	r0,r6,r6,ror#5
+	add	r10,r10,r12
+	vadd.i32	d4,d4,d25
+	and	r2,r2,r6
+	eor	r12,r0,r6,ror#19
+	vshr.u32	d24,d4,#17
+	eor	r0,r10,r10,ror#11
+	eor	r2,r2,r8
+	vsli.32	d24,d4,#15
+	add	r9,r9,r12,ror#6
+	eor	r12,r10,r11
+	vshr.u32	d25,d4,#10
+	eor	r0,r0,r10,ror#20
+	add	r9,r9,r2
+	veor	d25,d25,d24
+	ldr	r2,[sp,#44]
+	and	r3,r3,r12
+	vshr.u32	d24,d4,#19
+	add	r5,r5,r9
+	add	r9,r9,r0,ror#2
+	eor	r3,r3,r11
+	vld1.32	{{q8}},[r14,:128]!
+	add	r8,r8,r2
+	vsli.32	d24,d4,#13
+	eor	r2,r6,r7
+	eor	r0,r5,r5,ror#5
+	veor	d25,d25,d24
+	add	r9,r9,r3
+	and	r2,r2,r5
+	vadd.i32	d5,d5,d25
+	eor	r3,r0,r5,ror#19
+	eor	r0,r9,r9,ror#11
+	vadd.i32	q8,q8,q2
+	eor	r2,r2,r7
+	add	r8,r8,r3,ror#6
+	eor	r3,r9,r10
+	eor	r0,r0,r9,ror#20
+	add	r8,r8,r2
+	ldr	r2,[sp,#48]
+	and	r12,r12,r3
+	add	r4,r4,r8
+	vst1.32	{{q8}},[r1,:128]!
+	add	r8,r8,r0,ror#2
+	eor	r12,r12,r10
+	vext.8	q8,q3,q0,#4
+	add	r7,r7,r2
+	eor	r2,r5,r6
+	eor	r0,r4,r4,ror#5
+	vext.8	q9,q1,q2,#4
+	add	r8,r8,r12
+	and	r2,r2,r4
+	eor	r12,r0,r4,ror#19
+	vshr.u32	q10,q8,#7
+	eor	r0,r8,r8,ror#11
+	eor	r2,r2,r6
+	vadd.i32	q3,q3,q9
+	add	r7,r7,r12,ror#6
+	eor	r12,r8,r9
+	vshr.u32	q9,q8,#3
+	eor	r0,r0,r8,ror#20
+	add	r7,r7,r2
+	vsli.32	q10,q8,#25
+	ldr	r2,[sp,#52]
+	and	r3,r3,r12
+	vshr.u32	q11,q8,#18
+	add	r11,r11,r7
+	add	r7,r7,r0,ror#2
+	eor	r3,r3,r9
+	veor	q9,q9,q10
+	add	r6,r6,r2
+	vsli.32	q11,q8,#14
+	eor	r2,r4,r5
+	eor	r0,r11,r11,ror#5
+	vshr.u32	d24,d5,#17
+	add	r7,r7,r3
+	and	r2,r2,r11
+	veor	q9,q9,q11
+	eor	r3,r0,r11,ror#19
+	eor	r0,r7,r7,ror#11
+	vsli.32	d24,d5,#15
+	eor	r2,r2,r5
+	add	r6,r6,r3,ror#6
+	vshr.u32	d25,d5,#10
+	eor	r3,r7,r8
+	eor	r0,r0,r7,ror#20
+	vadd.i32	q3,q3,q9
+	add	r6,r6,r2
+	ldr	r2,[sp,#56]
+	veor	d25,d25,d24
+	and	r12,r12,r3
+	add	r10,r10,r6
+	vshr.u32	d24,d5,#19
+	add	r6,r6,r0,ror#2
+	eor	r12,r12,r8
+	vsli.32	d24,d5,#13
+	add	r5,r5,r2
+	eor	r2,r11,r4
+	veor	d25,d25,d24
+	eor	r0,r10,r10,ror#5
+	add	r6,r6,r12
+	vadd.i32	d6,d6,d25
+	and	r2,r2,r10
+	eor	r12,r0,r10,ror#19
+	vshr.u32	d24,d6,#17
+	eor	r0,r6,r6,ror#11
+	eor	r2,r2,r4
+	vsli.32	d24,d6,#15
+	add	r5,r5,r12,ror#6
+	eor	r12,r6,r7
+	vshr.u32	d25,d6,#10
+	eor	r0,r0,r6,ror#20
+	add	r5,r5,r2
+	veor	d25,d25,d24
+	ldr	r2,[sp,#60]
+	and	r3,r3,r12
+	vshr.u32	d24,d6,#19
+	add	r9,r9,r5
+	add	r5,r5,r0,ror#2
+	eor	r3,r3,r7
+	vld1.32	{{q8}},[r14,:128]!
+	add	r4,r4,r2
+	vsli.32	d24,d6,#13
+	eor	r2,r10,r11
+	eor	r0,r9,r9,ror#5
+	veor	d25,d25,d24
+	add	r5,r5,r3
+	and	r2,r2,r9
+	vadd.i32	d7,d7,d25
+	eor	r3,r0,r9,ror#19
+	eor	r0,r5,r5,ror#11
+	vadd.i32	q8,q8,q3
+	eor	r2,r2,r11
+	add	r4,r4,r3,ror#6
+	eor	r3,r5,r6
+	eor	r0,r0,r5,ror#20
+	add	r4,r4,r2
+	ldr	r2,[r14]
+	and	r12,r12,r3
+	add	r8,r8,r4
+	vst1.32	{{q8}},[r1,:128]!
+	add	r4,r4,r0,ror#2
+	eor	r12,r12,r6
+	teq	r2,#0				@ check for K256 terminator
+	ldr	r2,[sp,#0]
+	sub	r1,r1,#64
+	bne	.Lsha256__00_48
+
+	ldr	r1,[sp,#68]
+	ldr	r0,[sp,#72]
+	sub	r14,r14,#256	@ rewind r14
+	teq	r1,r0
+	it	eq
+	subeq	r1,r1,#64		@ avoid SEGV
+	vld1.8	{{q0}},[r1]!		@ load next input block
+	vld1.8	{{q1}},[r1]!
+	vld1.8	{{q2}},[r1]!
+	vld1.8	{{q3}},[r1]!
+	it	ne
+	strne	r1,[sp,#68]
+	mov	r1,sp
+	add	r11,r11,r2
+	eor	r2,r9,r10
+	eor	r0,r8,r8,ror#5
+	add	r4,r4,r12
+	vld1.32	{{q8}},[r14,:128]!
+	and	r2,r2,r8
+	eor	r12,r0,r8,ror#19
+	eor	r0,r4,r4,ror#11
+	eor	r2,r2,r10
+	vrev32.8	q0,q0
+	add	r11,r11,r12,ror#6
+	eor	r12,r4,r5
+	eor	r0,r0,r4,ror#20
+	add	r11,r11,r2
+	vadd.i32	q8,q8,q0
+	ldr	r2,[sp,#4]
+	and	r3,r3,r12
+	add	r7,r7,r11
+	add	r11,r11,r0,ror#2
+	eor	r3,r3,r5
+	add	r10,r10,r2
+	eor	r2,r8,r9
+	eor	r0,r7,r7,ror#5
+	add	r11,r11,r3
+	and	r2,r2,r7
+	eor	r3,r0,r7,ror#19
+	eor	r0,r11,r11,ror#11
+	eor	r2,r2,r9
+	add	r10,r10,r3,ror#6
+	eor	r3,r11,r4
+	eor	r0,r0,r11,ror#20
+	add	r10,r10,r2
+	ldr	r2,[sp,#8]
+	and	r12,r12,r3
+	add	r6,r6,r10
+	add	r10,r10,r0,ror#2
+	eor	r12,r12,r4
+	add	r9,r9,r2
+	eor	r2,r7,r8
+	eor	r0,r6,r6,ror#5
+	add	r10,r10,r12
+	and	r2,r2,r6
+	eor	r12,r0,r6,ror#19
+	eor	r0,r10,r10,ror#11
+	eor	r2,r2,r8
+	add	r9,r9,r12,ror#6
+	eor	r12,r10,r11
+	eor	r0,r0,r10,ror#20
+	add	r9,r9,r2
+	ldr	r2,[sp,#12]
+	and	r3,r3,r12
+	add	r5,r5,r9
+	add	r9,r9,r0,ror#2
+	eor	r3,r3,r11
+	add	r8,r8,r2
+	eor	r2,r6,r7
+	eor	r0,r5,r5,ror#5
+	add	r9,r9,r3
+	and	r2,r2,r5
+	eor	r3,r0,r5,ror#19
+	eor	r0,r9,r9,ror#11
+	eor	r2,r2,r7
+	add	r8,r8,r3,ror#6
+	eor	r3,r9,r10
+	eor	r0,r0,r9,ror#20
+	add	r8,r8,r2
+	ldr	r2,[sp,#16]
+	and	r12,r12,r3
+	add	r4,r4,r8
+	add	r8,r8,r0,ror#2
+	eor	r12,r12,r10
+	vst1.32	{{q8}},[r1,:128]!
+	add	r7,r7,r2
+	eor	r2,r5,r6
+	eor	r0,r4,r4,ror#5
+	add	r8,r8,r12
+	vld1.32	{{q8}},[r14,:128]!
+	and	r2,r2,r4
+	eor	r12,r0,r4,ror#19
+	eor	r0,r8,r8,ror#11
+	eor	r2,r2,r6
+	vrev32.8	q1,q1
+	add	r7,r7,r12,ror#6
+	eor	r12,r8,r9
+	eor	r0,r0,r8,ror#20
+	add	r7,r7,r2
+	vadd.i32	q8,q8,q1
+	ldr	r2,[sp,#20]
+	and	r3,r3,r12
+	add	r11,r11,r7
+	add	r7,r7,r0,ror#2
+	eor	r3,r3,r9
+	add	r6,r6,r2
+	eor	r2,r4,r5
+	eor	r0,r11,r11,ror#5
+	add	r7,r7,r3
+	and	r2,r2,r11
+	eor	r3,r0,r11,ror#19
+	eor	r0,r7,r7,ror#11
+	eor	r2,r2,r5
+	add	r6,r6,r3,ror#6
+	eor	r3,r7,r8
+	eor	r0,r0,r7,ror#20
+	add	r6,r6,r2
+	ldr	r2,[sp,#24]
+	and	r12,r12,r3
+	add	r10,r10,r6
+	add	r6,r6,r0,ror#2
+	eor	r12,r12,r8
+	add	r5,r5,r2
+	eor	r2,r11,r4
+	eor	r0,r10,r10,ror#5
+	add	r6,r6,r12
+	and	r2,r2,r10
+	eor	r12,r0,r10,ror#19
+	eor	r0,r6,r6,ror#11
+	eor	r2,r2,r4
+	add	r5,r5,r12,ror#6
+	eor	r12,r6,r7
+	eor	r0,r0,r6,ror#20
+	add	r5,r5,r2
+	ldr	r2,[sp,#28]
+	and	r3,r3,r12
+	add	r9,r9,r5
+	add	r5,r5,r0,ror#2
+	eor	r3,r3,r7
+	add	r4,r4,r2
+	eor	r2,r10,r11
+	eor	r0,r9,r9,ror#5
+	add	r5,r5,r3
+	and	r2,r2,r9
+	eor	r3,r0,r9,ror#19
+	eor	r0,r5,r5,ror#11
+	eor	r2,r2,r11
+	add	r4,r4,r3,ror#6
+	eor	r3,r5,r6
+	eor	r0,r0,r5,ror#20
+	add	r4,r4,r2
+	ldr	r2,[sp,#32]
+	and	r12,r12,r3
+	add	r8,r8,r4
+	add	r4,r4,r0,ror#2
+	eor	r12,r12,r6
+	vst1.32	{{q8}},[r1,:128]!
+	add	r11,r11,r2
+	eor	r2,r9,r10
+	eor	r0,r8,r8,ror#5
+	add	r4,r4,r12
+	vld1.32	{{q8}},[r14,:128]!
+	and	r2,r2,r8
+	eor	r12,r0,r8,ror#19
+	eor	r0,r4,r4,ror#11
+	eor	r2,r2,r10
+	vrev32.8	q2,q2
+	add	r11,r11,r12,ror#6
+	eor	r12,r4,r5
+	eor	r0,r0,r4,ror#20
+	add	r11,r11,r2
+	vadd.i32	q8,q8,q2
+	ldr	r2,[sp,#36]
+	and	r3,r3,r12
+	add	r7,r7,r11
+	add	r11,r11,r0,ror#2
+	eor	r3,r3,r5
+	add	r10,r10,r2
+	eor	r2,r8,r9
+	eor	r0,r7,r7,ror#5
+	add	r11,r11,r3
+	and	r2,r2,r7
+	eor	r3,r0,r7,ror#19
+	eor	r0,r11,r11,ror#11
+	eor	r2,r2,r9
+	add	r10,r10,r3,ror#6
+	eor	r3,r11,r4
+	eor	r0,r0,r11,ror#20
+	add	r10,r10,r2
+	ldr	r2,[sp,#40]
+	and	r12,r12,r3
+	add	r6,r6,r10
+	add	r10,r10,r0,ror#2
+	eor	r12,r12,r4
+	add	r9,r9,r2
+	eor	r2,r7,r8
+	eor	r0,r6,r6,ror#5
+	add	r10,r10,r12
+	and	r2,r2,r6
+	eor	r12,r0,r6,ror#19
+	eor	r0,r10,r10,ror#11
+	eor	r2,r2,r8
+	add	r9,r9,r12,ror#6
+	eor	r12,r10,r11
+	eor	r0,r0,r10,ror#20
+	add	r9,r9,r2
+	ldr	r2,[sp,#44]
+	and	r3,r3,r12
+	add	r5,r5,r9
+	add	r9,r9,r0,ror#2
+	eor	r3,r3,r11
+	add	r8,r8,r2
+	eor	r2,r6,r7
+	eor	r0,r5,r5,ror#5
+	add	r9,r9,r3
+	and	r2,r2,r5
+	eor	r3,r0,r5,ror#19
+	eor	r0,r9,r9,ror#11
+	eor	r2,r2,r7
+	add	r8,r8,r3,ror#6
+	eor	r3,r9,r10
+	eor	r0,r0,r9,ror#20
+	add	r8,r8,r2
+	ldr	r2,[sp,#48]
+	and	r12,r12,r3
+	add	r4,r4,r8
+	add	r8,r8,r0,ror#2
+	eor	r12,r12,r10
+	vst1.32	{{q8}},[r1,:128]!
+	add	r7,r7,r2
+	eor	r2,r5,r6
+	eor	r0,r4,r4,ror#5
+	add	r8,r8,r12
+	vld1.32	{{q8}},[r14,:128]!
+	and	r2,r2,r4
+	eor	r12,r0,r4,ror#19
+	eor	r0,r8,r8,ror#11
+	eor	r2,r2,r6
+	vrev32.8	q3,q3
+	add	r7,r7,r12,ror#6
+	eor	r12,r8,r9
+	eor	r0,r0,r8,ror#20
+	add	r7,r7,r2
+	vadd.i32	q8,q8,q3
+	ldr	r2,[sp,#52]
+	and	r3,r3,r12
+	add	r11,r11,r7
+	add	r7,r7,r0,ror#2
+	eor	r3,r3,r9
+	add	r6,r6,r2
+	eor	r2,r4,r5
+	eor	r0,r11,r11,ror#5
+	add	r7,r7,r3
+	and	r2,r2,r11
+	eor	r3,r0,r11,ror#19
+	eor	r0,r7,r7,ror#11
+	eor	r2,r2,r5
+	add	r6,r6,r3,ror#6
+	eor	r3,r7,r8
+	eor	r0,r0,r7,ror#20
+	add	r6,r6,r2
+	ldr	r2,[sp,#56]
+	and	r12,r12,r3
+	add	r10,r10,r6
+	add	r6,r6,r0,ror#2
+	eor	r12,r12,r8
+	add	r5,r5,r2
+	eor	r2,r11,r4
+	eor	r0,r10,r10,ror#5
+	add	r6,r6,r12
+	and	r2,r2,r10
+	eor	r12,r0,r10,ror#19
+	eor	r0,r6,r6,ror#11
+	eor	r2,r2,r4
+	add	r5,r5,r12,ror#6
+	eor	r12,r6,r7
+	eor	r0,r0,r6,ror#20
+	add	r5,r5,r2
+	ldr	r2,[sp,#60]
+	and	r3,r3,r12
+	add	r9,r9,r5
+	add	r5,r5,r0,ror#2
+	eor	r3,r3,r7
+	add	r4,r4,r2
+	eor	r2,r10,r11
+	eor	r0,r9,r9,ror#5
+	add	r5,r5,r3
+	and	r2,r2,r9
+	eor	r3,r0,r9,ror#19
+	eor	r0,r5,r5,ror#11
+	eor	r2,r2,r11
+	add	r4,r4,r3,ror#6
+	eor	r3,r5,r6
+	eor	r0,r0,r5,ror#20
+	add	r4,r4,r2
+	ldr	r2,[sp,#64]
+	and	r12,r12,r3
+	add	r8,r8,r4
+	add	r4,r4,r0,ror#2
+	eor	r12,r12,r6
+	vst1.32	{{q8}},[r1,:128]!
+	ldr	r0,[r2,#0]
+	add	r4,r4,r12			@ h+=Maj(a,b,c) from the past
+	ldr	r12,[r2,#4]
+	ldr	r3,[r2,#8]
+	ldr	r1,[r2,#12]
+	add	r4,r4,r0			@ accumulate
+	ldr	r0,[r2,#16]
+	add	r5,r5,r12
+	ldr	r12,[r2,#20]
+	add	r6,r6,r3
+	ldr	r3,[r2,#24]
+	add	r7,r7,r1
+	ldr	r1,[r2,#28]
+	add	r8,r8,r0
+	str	r4,[r2],#4
+	add	r9,r9,r12
+	str	r5,[r2],#4
+	add	r10,r10,r3
+	str	r6,[r2],#4
+	add	r11,r11,r1
+	str	r7,[r2],#4
+	stmia	r2,{{r8,r9,r10,r11}}
+
+	ittte	ne
+	movne	r1,sp
+	ldrne	r2,[sp,#0]
+	eorne	r12,r12,r12
+	ldreq	sp,[sp,#76]			@ restore original sp
+	itt	ne
+	eorne	r3,r5,r6
+	bne	.Lsha256__00_48
+
+	ldmia	sp!,{{r4,r5,r6,r7,r8,r9,r10,r11,r12,pc}}
+.size	{sha256_block_data_order_neon},.-{sha256_block_data_order_neon}
 .Lsha256_K256_shortcut_hw:
 @ PC is 8 bytes ahead in Arm mode and 4 bytes ahead in Thumb mode.
 .word	K256-(.Lsha256_K256_add_hw+8)
