@@ -285,6 +285,19 @@ fn ecdh() {
 }
 
 #[test]
+fn spake2plus() {
+    use rind::spake2plus::{ProverSecrets, VerifierRecord};
+    // No randomness: the freed blocks are the scalar reduction and L = w1*G.
+    let passwords = [[0x11u8; 40], [0x22u8; 40]];
+    independent("SPAKE2+ prover", passwords, |w0| {
+        ProverSecrets::new(w0, &[0x33; 40]).unwrap()
+    });
+    independent("SPAKE2+ verifier", passwords, |w0| {
+        VerifierRecord::from_w1(w0, &[0x33; 40]).unwrap()
+    });
+}
+
+#[test]
 fn mlkem768() {
     use rind::kem::{DecapsulationKey, ML_KEM_768};
     zeroed("ML-KEM key generation", || {

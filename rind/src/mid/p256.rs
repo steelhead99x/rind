@@ -40,9 +40,9 @@ impl PublicKey {
     /// `x` is below the field prime, and a point on the curve has that `x`.
     pub(crate) fn decompress<'a>(bytes: &[u8], output: &'a mut [u8]) -> Result<&'a [u8], Error> {
         let _entry = low::Entry::new_public();
-        let point = AffineMontPoint::from_x962_compressed(bytes)?;
+        let point = Affine::from_compressed(bytes)?;
         let output = output.get_mut(..Self::BYTES).ok_or(Error::WrongLength)?;
-        output.copy_from_slice(&point.as_bytes_uncompressed());
+        output.copy_from_slice(&point.to_uncompressed());
         Ok(output)
     }
 }
@@ -522,6 +522,95 @@ impl AffineMontPoint {
     }
 }
 
+/// An affine P-256 point in Montgomery coordinates, checked on the curve.
+#[derive(Clone, Copy)]
+pub(crate) struct Affine(AffineMontPoint);
+
+impl Affine {
+    pub(crate) const BYTES: usize = 65;
+
+    /// Decodes an uncompressed X9.62 point.
+    pub(crate) fn from_uncompressed(bytes: &[u8]) -> Result<Self, Error> {
+        low::Entry::assert_held();
+        AffineMontPoint::from_x962_uncompressed(bytes).map(Self)
+    }
+
+    /// Decodes a compressed X9.62 point.
+    ///
+    /// Holds an `Entry`, as [`Self::from_uncompressed`] does.
+    pub(crate) fn from_compressed(bytes: &[u8]) -> Result<Self, Error> {
+        low::Entry::assert_held();
+        AffineMontPoint::from_x962_compressed(bytes).map(Self)
+    }
+
+    /// Uncompressed X9.62 encoding. The coordinates are not declassified.
+    pub(crate) fn to_uncompressed(self) -> [u8; Self::BYTES] {
+        self.0.as_bytes_uncompressed()
+    }
+
+    /// `scalar * self`.
+    pub(crate) fn mul(self, scalar: &Scalar) -> Self {
+        low::Entry::assert_held();
+        Self(self.0.multiply(scalar))
+    }
+
+    /// `scalar * G`.
+    pub(crate) fn mul_base(scalar: &Scalar) -> Self {
+        low::Entry::assert_held();
+        Self(AffineMontPoint::base_multiply(scalar))
+    }
+
+    /// `-self`.
+    pub(crate) fn negate(self) -> Self {
+        let mut point = self.0;
+        point.negate_y();
+        Self(point)
+    }
+
+    /// `self + other`.
+    ///
+    /// Equal points double, and opposite points become the identity. The
+    /// identity's affine image is `(0, 0)`, which is not on the curve.
+    ///
+    /// An input that is `(0, 0)`, such as an earlier sum of opposites, is
+    /// taken as the identity, so chained sums stay correct.
+    pub(crate) fn add(self, other: Self) -> Self {
+        let sum = self.to_jacobian().complete_add(&other.to_jacobian());
+        Self(sum.as_affine())
+    }
+
+    /// Jacobian coordinates, with `(0, 0)` mapped to infinity (`z = 0`) by a
+    /// select rather than a branch.
+    fn to_jacobian(self) -> JacobianMontPoint {
+        let point = JacobianMontPoint::from_affine(&self.0);
+        mux_point(self.identity_mask(), &JacobianMontPoint::infinity(), &point)
+    }
+
+    /// The standard generator.
+    pub(crate) fn generator() -> Self {
+        Self(CURVE_GENERATOR)
+    }
+
+    /// 1 when this is the affine image of the identity, `(0, 0)`.
+    ///
+    /// The mask is 0 or 1 and does not branch on the coordinates.
+    pub(crate) fn identity_mask(self) -> u64 {
+        eq_mask(&self.0.xy[..4], &[0; 4]) & eq_mask(&self.0.xy[4..], &[0; 4])
+    }
+
+    /// `other` when `select` is 1, and `self` when it is 0.
+    pub(crate) fn select(self, other: Self, select: u64) -> Self {
+        let mut xy = [0u64; 8];
+        low::bignum_mux(select, &mut xy, &other.0.xy, &self.0.xy);
+        Self(AffineMontPoint { xy })
+    }
+
+    /// Whether the curve equation holds.
+    pub(crate) fn on_curve(self) -> bool {
+        self.0.on_curve()
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct JacobianMontPoint {
     xyz: [u64; 12],
@@ -768,11 +857,52 @@ impl JacobianMontPoint {
         *self = r;
     }
 
+    /// `self + p` by `p256_montjadd`.
+    ///
+    /// Unspecified when the points are equal, opposite, or at infinity.
+    /// [`Self::complete_add`] covers those inputs. ECDSA's odd multiples
+    /// never hit them: each adds `2P` to a smaller odd multiple.
     #[must_use]
     fn add(&self, p: &Self) -> Self {
         let mut r = Self::infinity();
         low::p256_montjadd(&mut r.xyz, &self.xyz, &p.xyz);
         r
+    }
+
+    /// `self + p` for any Jacobian points, including infinity, equals, and
+    /// opposites.
+    ///
+    /// `p256_montjadd` is unspecified when the points are equal or opposite,
+    /// so those results are computed separately and selected with no branch
+    /// on the coordinates.
+    #[must_use]
+    fn complete_add(&self, p: &Self) -> Self {
+        let mut sum = Self::infinity();
+        low::p256_montjadd(&mut sum.xyz, &self.xyz, &p.xyz);
+        let doubled = self.double();
+        let identity = Self::infinity();
+
+        let z1sq = self.z().mont_sqr();
+        let z2sq = p.z().mont_sqr();
+        let x1 = self.x().mont_mul(&z2sq);
+        let x2 = p.x().mont_mul(&z1sq);
+        let y1 = self.y().mont_mul(&z2sq).mont_mul(&p.z());
+        let y2 = p.y().mont_mul(&z1sq).mont_mul(&self.z());
+        let x_eq = eq_mask(&x1.0, &x2.0);
+        let y_eq = eq_mask(&y1.0, &y2.0);
+        let y_neg = eq_mask(&y1.add(&y2).0, &[0; 4]);
+        let z1_zero = eq_mask(&self.z().0, &[0; 4]);
+        let z2_zero = eq_mask(&p.z().0, &[0; 4]);
+        let finite = (z1_zero ^ 1) & (z2_zero ^ 1);
+        let use_double = x_eq & y_eq & finite;
+        let use_identity = x_eq & y_neg & finite & (use_double ^ 1);
+        let use_self = z2_zero & (z1_zero ^ 1);
+        let use_other = z1_zero;
+
+        let acc = mux_point(use_double, &doubled, &sum);
+        let acc = mux_point(use_identity, &identity, &acc);
+        let acc = mux_point(use_self, self, &acc);
+        mux_point(use_other, p, &acc)
     }
 
     /// Return p0 if select == 0, p1 otherwise
@@ -784,6 +914,26 @@ impl JacobianMontPoint {
         low::bignum_mux(select, &mut r.xyz[..], &p1.xyz[..], &p0.xyz[..]);
         r
     }
+}
+
+/// 1 when the limbs are equal, else 0. The comparison does not branch.
+fn eq_mask(a: &[u64], b: &[u64]) -> u64 {
+    let mut diff = 0u64;
+    for i in 0..a.len().max(b.len()) {
+        diff |= a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0);
+    }
+    let diff = core::hint::black_box(diff);
+    ((diff | diff.wrapping_neg()) >> 63) ^ 1
+}
+
+fn mux_point(
+    select: u64,
+    if_set: &JacobianMontPoint,
+    if_clear: &JacobianMontPoint,
+) -> JacobianMontPoint {
+    let mut point = JacobianMontPoint::zero();
+    low::bignum_mux(select, &mut point.xyz, &if_set.xyz, &if_clear.xyz);
+    point
 }
 
 /// Whether `v` is below p, for public `v`.
@@ -1014,6 +1164,52 @@ impl Scalar {
         BoothRecode::new(self)
     }
 
+    /// Another copy of this scalar.
+    ///
+    /// A type that implements [`Drop`] cannot move its scalar out, so it
+    /// copies one and lets the drop wipe the original.
+    pub(crate) fn copy(&self) -> Self {
+        Self(self.0)
+    }
+
+    /// `bytes` as a big-endian integer, reduced mod n.
+    ///
+    /// `bytes` is at most 128 bytes, which covers a password stretch that
+    /// carries 64 extra bits past n. An empty input is [`Error::WrongLength`].
+    /// Zero after reduction is [`KeyFormatError::ScalarOutOfRange`]. The
+    /// length is public; the value stays secret.
+    pub(crate) fn from_be_reduced(bytes: &[u8]) -> Result<Self, Error> {
+        low::Entry::assert_held();
+        const MAX: usize = 128;
+        if bytes.is_empty() || bytes.len() > MAX {
+            return Err(Error::WrongLength);
+        }
+
+        // Left-pad to a multiple of 32 so each step is `acc * 2^256 + limb`.
+        // `as_mont`'s limbs are that product mod n, as an integer. 32 is a
+        // power of two, so the pad is a mask, not a division.
+        let pad = (32 - (bytes.len() & 31)) & 31;
+        let mut acc = Self::default();
+        let mut done = 0;
+        while done < pad + bytes.len() {
+            let mut chunk = [0u8; 32];
+            for (j, slot) in chunk.iter_mut().enumerate() {
+                let src = done + j;
+                if src >= pad {
+                    *slot = bytes[src - pad];
+                }
+            }
+            let limb = Self::from_bytes_reduced(&chunk)?;
+            acc = acc.as_mont().add(&limb);
+            done += 32;
+        }
+
+        match low::ct::into_public(!acc.is_zero()) {
+            true => Ok(low::ct::into_secret(acc)),
+            false => Err(KeyFormatError::ScalarOutOfRange.into()),
+        }
+    }
+
     /// The width-`W` non-adjacent form of this scalar, by
     /// [`util::public_naf`].
     fn public_naf<const W: u32>(&self) -> [i8; 257] {
@@ -1169,6 +1365,21 @@ const CURVE_ORDER_MM: [u64; 4] = [
     0x2845b2392b6bec59,
     0x66e12d94f3d95620,
 ];
+
+/// The standard generator, Montgomery coordinates. The same limbs are the
+/// first point of the generator table.
+const CURVE_GENERATOR: AffineMontPoint = AffineMontPoint {
+    xy: [
+        0x79e7_30d4_18a9_143c,
+        0x75ba_95fc_5fed_b601,
+        0x79fb_732b_7762_2510,
+        0x1890_5f76_a537_55c6,
+        0xddf2_5357_ce95_560a,
+        0x8b4a_b8e4_ba19_e45c,
+        0xd2e8_8688_dd21_f325,
+        0x8571_ff18_2588_5d85,
+    ],
+};
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -1458,5 +1669,186 @@ mod tests {
             let window = row.as_chunks::<8>().0.len().ilog2() + 1;
             base.double_inplace_n(window as usize);
         }
+    }
+
+    /// `from_be_reduced` keeps the scalar secret. These tests check it
+    /// against public values, so they declassify the encoding first.
+    fn public_bytes(scalar: &Scalar) -> [u8; Scalar::BYTES] {
+        let bytes = scalar.as_bytes();
+        low::ct::public_slice(&bytes);
+        bytes
+    }
+
+    #[test]
+    fn be_reduced_mod_n() {
+        let one = Scalar::from_be_reduced(&[1]).unwrap();
+        assert_eq!(public_bytes(&one)[31], 1);
+
+        let mut n = [0u8; 32];
+        n.copy_from_slice(&util::u64x4_to_big_endian(&CURVE_ORDER));
+        assert!(Scalar::from_be_reduced(&n).is_err());
+        // n + 1, as 33 bytes: a leading 0x01 is 2^256, and 2^256 - n + 1 = (2^256 mod n) + 1?
+        // A 33-byte encoding of n is 0x00 || n, which reduces to 0.
+        let mut wide = [0u8; 33];
+        wide[1..].copy_from_slice(&n);
+        assert!(Scalar::from_be_reduced(&wide).is_err());
+        wide[32] = wide[32].wrapping_add(1);
+        assert_eq!(
+            public_bytes(&Scalar::from_be_reduced(&wide).unwrap()),
+            public_bytes(&one)
+        );
+
+        // 2^256 mod n is `as_mont` of 1, and a 33-byte 0x01 followed by 32 zeros.
+        let mut pow = [0u8; 33];
+        pow[0] = 1;
+        let got = Scalar::from_be_reduced(&pow).unwrap();
+        let expect = Scalar::from_bytes_checked(&[1]).unwrap().as_mont();
+        assert_eq!(public_bytes(&got), public_bytes(&expect));
+
+        assert!(Scalar::from_be_reduced(&[]).is_err());
+        assert!(Scalar::from_be_reduced(&[0u8; 129]).is_err());
+    }
+
+    /// Lengths 1 through 128, including 128 itself, lengths past 33 that are
+    /// not multiples of 32, and `n - 1`, against aws-lc's `BN_div`.
+    ///
+    /// `aws-lc-sys` is a dev-dependency only outside Miri.
+    #[test]
+    #[cfg(not(miri))]
+    fn be_reduced_matches_aws_lc() {
+        let order = util::u64x4_to_big_endian(&CURVE_ORDER);
+        let mut n_minus_1 = order;
+        n_minus_1[31] -= 1;
+        assert_eq!(
+            public_bytes(&Scalar::from_be_reduced(&n_minus_1).unwrap()),
+            n_minus_1
+        );
+        assert_eq!(aws_reduce(&n_minus_1).unwrap(), n_minus_1);
+
+        let mut wide_n = [0u8; 40];
+        wide_n[8..].copy_from_slice(&n_minus_1);
+        assert_eq!(
+            public_bytes(&Scalar::from_be_reduced(&wide_n).unwrap()),
+            n_minus_1
+        );
+
+        let max = [0xffu8; 128];
+        assert_eq!(
+            public_bytes(&Scalar::from_be_reduced(&max).unwrap()),
+            aws_reduce(&max).unwrap()
+        );
+
+        for len in 1..=128 {
+            let zeroes = vec![0u8; len];
+            let ones = vec![0xffu8; len];
+            let mut high = vec![0u8; len];
+            high[0] = 1;
+            let mut low_n = vec![0u8; len];
+            let copy = len.min(32);
+            low_n[len - copy..].copy_from_slice(&n_minus_1[32 - copy..]);
+            for bytes in [&zeroes, &ones, &high, &low_n] {
+                match aws_reduce(bytes) {
+                    Ok(reduced) => assert_eq!(
+                        public_bytes(&Scalar::from_be_reduced(bytes).unwrap()),
+                        reduced,
+                        "len {len}"
+                    ),
+                    Err(()) => assert!(Scalar::from_be_reduced(bytes).is_err(), "len {len}"),
+                }
+            }
+        }
+    }
+
+    /// `bytes mod n` by aws-lc, or `Err` when the residue is zero.
+    #[cfg(not(miri))]
+    #[allow(unsafe_code)]
+    fn aws_reduce(bytes: &[u8]) -> Result<[u8; 32], ()> {
+        use aws_lc_sys::{
+            BN_CTX_free, BN_CTX_new, BN_bin2bn, BN_bn2binpad, BN_div, BN_free, BN_is_zero, BN_new,
+        };
+
+        struct Owned(*mut aws_lc_sys::BIGNUM);
+        impl Drop for Owned {
+            fn drop(&mut self) {
+                // SAFETY: `self.0` was allocated by aws-lc and is not used after this.
+                #[allow(unsafe_code)]
+                unsafe {
+                    BN_free(self.0)
+                }
+            }
+        }
+
+        // SAFETY: each bignum is freed by `Owned`, and the context by the
+        // explicit free below. The inputs are the caller's bytes and n.
+        unsafe {
+            let value = Owned(BN_bin2bn(
+                bytes.as_ptr(),
+                bytes.len(),
+                core::ptr::null_mut(),
+            ));
+            let order = util::u64x4_to_big_endian(&CURVE_ORDER);
+            let n = Owned(BN_bin2bn(
+                order.as_ptr(),
+                order.len(),
+                core::ptr::null_mut(),
+            ));
+            let rem = Owned(BN_new());
+            let ctx = BN_CTX_new();
+            assert!(!value.0.is_null() && !n.0.is_null() && !rem.0.is_null() && !ctx.is_null());
+            assert_eq!(BN_div(core::ptr::null_mut(), rem.0, value.0, n.0, ctx,), 1);
+            BN_CTX_free(ctx);
+            if BN_is_zero(rem.0) == 1 {
+                return Err(());
+            }
+            let mut out = [0u8; 32];
+            assert_eq!(BN_bn2binpad(rem.0, out.as_mut_ptr(), 32), 32);
+            Ok(out)
+        }
+    }
+
+    /// `p256_montjadd` is unspecified for equal or opposite points. Addition
+    /// has to double, return infinity, and pass infinity through.
+    #[test]
+    fn affine_add_handles_equal_opposite_and_infinity() {
+        let g = Affine(CURVE_GENERATOR);
+        let doubled = Affine(
+            JacobianMontPoint::from_affine(&CURVE_GENERATOR)
+                .double()
+                .as_affine(),
+        );
+        assert_eq!(g.add(g).to_uncompressed(), doubled.to_uncompressed());
+
+        let two_g = doubled;
+        let four_g = Affine(
+            JacobianMontPoint::from_affine(&two_g.0)
+                .double()
+                .as_affine(),
+        );
+        assert_eq!(two_g.add(two_g).to_uncompressed(), four_g.to_uncompressed());
+
+        let opposite = g.add(g.negate());
+        let mut identity = [0u8; 65];
+        identity[0] = 0x04;
+        assert_eq!(opposite.to_uncompressed(), identity);
+        assert!(!opposite.on_curve());
+        // `(0, 0)` from a sum of opposites is the identity when added again.
+        assert_eq!(opposite.add(g).to_uncompressed(), g.to_uncompressed());
+        assert_eq!(
+            two_g.add(opposite).to_uncompressed(),
+            two_g.to_uncompressed()
+        );
+        assert_eq!(opposite.add(opposite).to_uncompressed(), identity);
+
+        let jacobian = JacobianMontPoint::from_affine(&CURVE_GENERATOR);
+        let infinity = JacobianMontPoint::infinity();
+        assert_eq!(
+            jacobian.complete_add(&infinity).as_affine().xy,
+            jacobian.as_affine().xy
+        );
+        assert_eq!(
+            infinity.complete_add(&jacobian).as_affine().xy,
+            jacobian.as_affine().xy
+        );
+        assert!(infinity.complete_add(&infinity).public_is_infinity());
     }
 }
