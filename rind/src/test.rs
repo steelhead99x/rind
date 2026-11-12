@@ -216,3 +216,40 @@ pub(crate) fn cctv_value<'a>(record: &'a [(String, Vec<u8>)], name: &str) -> &'a
 pub(crate) mod bignum;
 mod binsec;
 pub(crate) mod file_test;
+
+/// Config for a `proptest!` block that runs `cases` times unless
+/// `PROPTEST_CASES` overrides it.
+///
+/// proptest does not read `PROPTEST_CASES` or `PROPTEST_RNG_SEED` on wasm32:
+/// `contextualize_config` is a no-op there, so a failure aborts before it can
+/// print the seed it drew. On wasm this applies those variables, which
+/// `sh/wasm-run.sh` forwards. On other targets proptest reads the variables
+/// itself, from this config.
+#[cfg(test)]
+pub(crate) fn proptest_cases(cases: u32) -> proptest::test_runner::Config {
+    #[cfg(not(target_family = "wasm"))]
+    {
+        proptest::test_runner::Config::with_cases(cases)
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        let mut config = proptest::test_runner::Config::with_cases(cases);
+        if let Ok(seed) = std::env::var("PROPTEST_RNG_SEED")
+            && let Ok(seed) = seed.parse()
+        {
+            config.rng_seed = proptest::test_runner::RngSeed::Fixed(seed);
+        }
+        if let Ok(cases) = std::env::var("PROPTEST_CASES")
+            && let Ok(cases) = cases.parse()
+        {
+            config.cases = cases;
+        }
+        config
+    }
+}
+
+/// `proptest_cases` at proptest's default case count.
+#[cfg(test)]
+pub(crate) fn proptest_config() -> proptest::test_runner::Config {
+    proptest_cases(proptest::test_runner::Config::default().cases)
+}

@@ -185,6 +185,7 @@ mod tests {
 
         if std::env::var_os("SLOW_TESTS").is_some() {
             // After 1,000,000 iterations: 7c3911e0ab2586fd864497297e575e6f3bc601c0883c30df5f4dd2d24f665424
+            eprintln!("slow-tests: x25519 iterations 1000000");
             for _ in 1000..1_000_000 {
                 let new_u = PublicKey::from_array(&low::ct::into_public(k.secret_bytes()));
                 let res = k.diffie_hellman(&u).unwrap();

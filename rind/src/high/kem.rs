@@ -309,6 +309,7 @@ mod tests {
         } else {
             10_000
         };
+        eprintln!("slow-tests: cctv_accumulated {tests}");
 
         let mut rng = Shake128::new(&[]);
         let mut acc = Shake128Sponge::new();

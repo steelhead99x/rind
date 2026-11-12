@@ -179,6 +179,7 @@ mod tests {
     use super::*;
 
     proptest! {
+        #![proptest_config(crate::test::proptest_config())]
         #[test]
         fn naf(k: [u64; 4]) {
             let mut digits = [0i8; 257];

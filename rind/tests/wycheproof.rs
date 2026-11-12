@@ -304,10 +304,12 @@ fn pbkdf2_tests() {
         let reader = BufReader::new(data_file);
         let tests: TestFile = serde_json::from_reader(reader).expect("invalid test JSON");
         let mut summary = Summary::new();
+        let mut cases = 0usize;
 
         for group in tests.groups {
             summary.group(&group);
             for test in group.tests {
+                cases += 1;
                 summary.start(&test);
 
                 // Every vector is valid: none has a zero count or empty key.
@@ -325,6 +327,7 @@ fn pbkdf2_tests() {
                 assert_eq!(secret.verify(iterations, &test.salt, &test.dk), wanted);
             }
         }
+        eprintln!("slow-tests: pbkdf2 {file} {cases}");
     }
 }
 

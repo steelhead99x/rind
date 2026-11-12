@@ -499,9 +499,11 @@ mod tests {
                         let large = &test["largeMsg"];
                         assert_eq!(large.str("expansionTechnique"), "repeating");
                         let content = large.hex("content");
+                        let full_len_bits = large["fullLength"].as_u64().unwrap();
+                        eprintln!("slow-tests: acvp-ldt {name} bits {full_len_bits}");
                         let chunk = content.repeat((1 << 20) / content.len());
                         // Up to 8 GiB, more than a 32-bit `usize` holds.
-                        let full_len = large["fullLength"].as_u64().unwrap() / 8;
+                        let full_len = full_len_bits / 8;
                         let chunk_len = chunk.len() as u64;
                         assert_eq!(full_len % chunk_len, 0);
                         let mut ctx = Context::new(algorithm);
@@ -770,6 +772,7 @@ mod tests {
         }
 
         if std::env::var_os("SLOW_TESTS").is_some() {
+            eprintln!("slow-tests: cavp_monte_carlo 8");
             for (file, algorithm) in [
                 ("../thirdparty/cavp-sha1/SHA1Monte.rsp", &SHA1),
                 ("../thirdparty/cavp/sha2/SHA256Monte.rsp", &SHA256),

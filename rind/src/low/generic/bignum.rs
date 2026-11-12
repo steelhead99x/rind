@@ -582,6 +582,7 @@ mod tests {
     }
 
     proptest! {
+        #![proptest_config(crate::test::proptest_config())]
         #[test]
         fn plain(x in words(0, 8), y in words(0, 8), p in 0..12usize, index in 0..4u64) {
             let (sx, sy) = (secret(&x), secret(&y));

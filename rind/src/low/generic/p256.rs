@@ -810,6 +810,7 @@ mod fiat_tests {
     }
 
     proptest! {
+        #![proptest_config(crate::test::proptest_config())]
         #[test]
         fn field(x in below(P), y in below(P)) {
             let (x, y) = (Fe(x), Fe(y));
@@ -1010,6 +1011,7 @@ mod tests {
     }
 
     proptest! {
+        #![proptest_config(crate::test::proptest_config())]
         #[test]
         fn field_ops(x in field(), y in field()) {
             let (sx, sy) = (into_secret(x), into_secret(y));
@@ -1097,7 +1099,7 @@ mod tests {
 
     // Each case scalar-multiplies or inverts, which is slow in a debug build.
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(32))]
+        #![proptest_config(crate::test::proptest_cases(32))]
 
         #[test]
         fn scalar_multiply(k in raw(), p in point()) {
