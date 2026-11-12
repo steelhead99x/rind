@@ -7,21 +7,22 @@ import Rind.X86_64.AesGcm
 import Rind.X86_64.ChaCha20Poly1305
 import Rind.X86_64.GcmKey
 import Rind.X86_64.Ed25519
+import Rind.X86_64.RsaDispatch
 import Rind.X86_64.Sha3
 open rind.x86_64
 
 /-!
 The axioms each theorem rests on, beyond Lean's own: s2n-bignum's contracts
-in `Rind.X86_64.S2nBignum` for X25519, P-384 ECDH, Ed25519, and the
-Keccak-f of SHA-3 and ML-KEM's SHAKE, aws-lc's in
+in `Rind.X86_64.S2nBignum` for X25519, P-384 ECDH, Ed25519, RSA
+verification, and the Keccak-f of SHA-3 and ML-KEM's SHAKE, aws-lc's in
 `Rind.X86_64.AwsLc` for the SHA-512 family, for HMAC, HKDF, and PBKDF2, which
 cover SHA-384 and SHA-512, and for Ed25519's hashes, Vale's in
 `Rind.X86_64.ValeAesGcm` for AES-GCM, rind's HOL Light proofs of its
 constant-time compares in `Rind.X86_64.CtEqual` for HMAC's and PBKDF2's
-`verify`, AES-GCM's tag check, and ChaCha20-Poly1305's and
-XChaCha20-Poly1305's tag checks, and nothing else. ChaCha20-Poly1305's
-theorems also take aws-lc's one-pass routines as the hypothesis
-`RunsChaCha20Poly1305`, which no axiom states. A change here is a
+`verify`, AES-GCM's tag check, ChaCha20-Poly1305's and XChaCha20-Poly1305's
+tag checks, and RSASSA-PSS's hash compare, and nothing else.
+ChaCha20-Poly1305's theorems also take aws-lc's one-pass routines as the
+hypothesis `RunsChaCha20Poly1305`, which no axiom states. A change here is a
 change to the trust base.
 -/
 
@@ -372,6 +373,59 @@ change to the trust base.
  edwards25519_scalarmuldouble_spec] -/
 #guard_msgs in
 #print axioms ed25519_public_key_new
+
+/-- info: 'rind.x86_64.rsa_pkcs1_sha256_new_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_bitsize_spec,
+ bignum_cmp_lt_spec,
+ bignum_negmodinv_spec] -/
+#guard_msgs in
+#print axioms rsa_pkcs1_sha256_new_spec
+
+/-- info: 'rind.x86_64.rsa_pss_sha256_new_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_bitsize_spec,
+ bignum_cmp_lt_spec,
+ bignum_negmodinv_spec,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec] -/
+#guard_msgs in
+#print axioms rsa_pss_sha256_new_spec
+
+/-- info: 'rind.x86_64.rsa_pkcs1_sha256_from_components_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_bitsize_spec,
+ bignum_cmp_lt_spec,
+ bignum_negmodinv_spec] -/
+#guard_msgs in
+#print axioms rsa_pkcs1_sha256_from_components_spec
+
+/-- info: 'rind.x86_64.rsa_pss_sha256_from_components_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_bitsize_spec,
+ bignum_cmp_lt_spec,
+ bignum_negmodinv_spec,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec] -/
+#guard_msgs in
+#print axioms rsa_pss_sha256_from_components_spec
+
+/-- info: 'rind.x86_64.rsa2048_mont_products' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_cmp_lt_spec,
+ bignum_emontredc_8n_spec,
+ bignum_kmul_16_32_spec,
+ bignum_kmul_32_64_spec,
+ bignum_ksqr_16_32_spec,
+ bignum_ksqr_32_64_spec,
+ bignum_optsub_spec] -/
+#guard_msgs in
+#print axioms rsa2048_mont_products
 
 /-- info: 'rind.x86_64.sha3_family_digest' depends on axioms: [propext, Classical.choice, Quot.sound, sha3_keccak_f1600_spec] -/
 #guard_msgs in
