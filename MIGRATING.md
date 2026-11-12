@@ -352,7 +352,9 @@ ring has none.
 
 Each published `rind-*` adapter offers the API of the provider its upstream
 ships, so swapping one for the other changes no other code. Its README lists
-only what rind cannot back.
+only what rind cannot back. rind panics on a CPU missing a feature it
+requires. At the start of each binary's `main`, refuse one by exiting with
+the error from `rind::cpu::check()`.
 
 ### rind-ring
 
@@ -399,8 +401,9 @@ as its cipher suite order.
 ### rind-rcgen
 
 `rind_rcgen::KeyPair` offers `rcgen::KeyPair`'s API as rcgen's default `ring`
-backend builds it, so code swaps the type in unchanged. Its [README](rind-rcgen/README.md) lists what it
-leaves out, such as P-521, which rcgen names only with its `aws_lc_rs` feature.
+backend builds it, so code swaps the type in unchanged. Its
+[README](rind-rcgen/README.md) lists what it leaves out, such as P-521,
+which rcgen names only with its `aws_lc_rs` feature.
 
 Without rcgen's `crypto` feature, rcgen needs each certificate's
 `serial_number` set, and writes key identifiers only when
