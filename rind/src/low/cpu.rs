@@ -11,14 +11,16 @@ pub struct MissingFeature(&'static str);
 
 impl fmt::Display for MissingFeature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "rind requires {} CPU support on {}",
-            self.0,
-            std::env::consts::ARCH
-        )
+        write!(f, "rind requires {} CPU support on {}", self.0, ARCH)
     }
 }
+
+#[cfg(not(target_os = "none"))]
+const ARCH: &str = std::env::consts::ARCH;
+#[cfg(all(target_os = "none", target_arch = "arm"))]
+const ARCH: &str = "arm";
+#[cfg(all(target_os = "none", not(target_arch = "arm")))]
+const ARCH: &str = "this target";
 
 impl core::error::Error for MissingFeature {}
 
@@ -118,10 +120,35 @@ impl Drop for Dit {
     }
 }
 
+#[cfg(not(target_os = "none"))]
 std::thread_local! {
     // This thread's live guards, and what the first one's `enter_cpu_state`
     // returned, for the last one to drop to restore.
     static DIT_GUARDS: Cell<(usize, u32)> = const { Cell::new((0, 0)) };
+}
+
+/// Without std there are no threads to keep apart: bare-metal targets use
+/// rind from one context, so one set of guards serves.
+#[cfg(target_os = "none")]
+static DIT_GUARDS: SingleContext = SingleContext(Cell::new((0, 0)));
+
+#[cfg(target_os = "none")]
+struct SingleContext(Cell<(usize, u32)>);
+
+// SAFETY: bare-metal targets call rind from one execution context (see
+// `lib.rs`), so the cell is never shared between threads or interrupts.
+#[cfg(target_os = "none")]
+unsafe impl Sync for SingleContext {}
+
+#[cfg(target_os = "none")]
+impl SingleContext {
+    fn get(&self) -> (usize, u32) {
+        self.0.get()
+    }
+
+    fn set(&self, value: (usize, u32)) {
+        self.0.set(value);
+    }
 }
 
 /// Panics with [`check`]'s error rather than run instructions this CPU lacks.

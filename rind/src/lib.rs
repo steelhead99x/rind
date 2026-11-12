@@ -1,6 +1,7 @@
 // Written for Graviola by Joe Birr-Pixton, 2024.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 #![doc = include_str!("../README.md")]
+#![cfg_attr(target_os = "none", no_std)]
 #![allow(
     clippy::new_without_default,
     clippy::result_unit_err,
@@ -25,6 +26,12 @@
     unused_qualifications
 )]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
+// Bare-metal targets (`target_os = "none"`) build without std, on `alloc`:
+// rind needs a global allocator there, and is used from one thread only.
+#[cfg(target_os = "none")]
+#[macro_use]
+extern crate alloc;
 
 /// Low level operations.
 ///
