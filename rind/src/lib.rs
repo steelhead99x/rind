@@ -47,6 +47,11 @@ mod high;
 /// Errors.  Common to all layers.
 mod error;
 
+/// The FIPS module's random generator, which [`mid::rng`] draws from in the
+/// module's build.
+#[cfg(any(test, rind_fips))]
+mod fips_rng;
+
 /// Test infrastructure.
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
