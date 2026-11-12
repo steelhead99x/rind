@@ -28,11 +28,17 @@ IETF contributions too.
 CFRG draft's repository holds stale ones. They are IETF contributions, under
 [BCP 78].
 
+`rfc9591/` holds [RFC 9591]'s appendix E vectors, the CFRG draft's `poc` JSON
+for FROST(Ed25519, SHA-512), FROST(ristretto255, SHA-512), and FROST(P-256,
+SHA-256), at the revision `admin/sync-vectors` pins. They are IETF
+contributions too.
+
 [aws-lc]: https://github.com/aws/aws-lc
 [BoringSSL]: https://boringssl.googlesource.com/boringssl
 [RFC 9180]: https://www.rfc-editor.org/rfc/rfc9180.html
 [RFC 9380]: https://www.rfc-editor.org/rfc/rfc9380.html
 [hpkewg/hpke]: https://github.com/hpkewg/hpke
 [RFC 9474]: https://www.rfc-editor.org/rfc/rfc9474.html
+[RFC 9591]: https://www.rfc-editor.org/rfc/rfc9591.html
 [blind-rsa-signatures]: https://github.com/jedisct1/rust-blind-rsa-signatures
 [BCP 78]: https://www.rfc-editor.org/info/bcp78

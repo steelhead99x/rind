@@ -207,6 +207,8 @@ secret names a zeroing test, or says why it has none.
 | Constant-time comparison | `constant_time::verify` | none: no published set | none: it returns whether two slices are equal, which the differential test covers | `crosschecks::slice_comparison_matches_aws_lc_rs` | ctgrind: `high::constant_time::contents_stay_secret`, `low::generic::ct_equal::equiv`; BINSEC: `test::binsec::ct_binsec_constant_time_verify` | none: it keeps nothing |
 | Random bytes | `rand::fill` | none: the operating system's generator, which no vector can check | none, as for vectors | none, as for vectors | none: rind passes the bytes on | none: rind keeps no copy of the bytes |
 
+| FROST | `frost::{AggregateError, Commitments, DealerOutput, Signature, SignatureShare, SigningNonces, SigningPackage, SigningShare, Suite, VerifyingKey, VerifyingShare, ED25519_SHA512, P256_SHA256, RISTRETTO255_SHA512}` | RFC 9591 appendix E: `high::frost::vectors::rfc9591_ed25519`, `high::frost::vectors::rfc9591_ristretto255`, `high::frost::vectors::rfc9591_p256` | none: a signature share is a scalar and a commitment is two points, which the differential test and the vectors cover | `high::frost::cross::matches_frost_ed25519`, `high::frost::cross::matches_frost_ristretto255`, `high::frost::cross::matches_frost_p256`, against frost-ed25519, frost-ristretto255, and frost-p256 3.0, as aws-lc-rs has no FROST | ctgrind: `high::frost::api_tests::secret_dealing_and_signing` | `zeroing::frost` |
+
 Exports that are not primitives: `Error`, `KeyRejected`, `doc::inline_assembly_safety`, `cpu::Dit`, `cpu::MissingFeature`, `cpu::check`, `cpu::has_aes_hardware`.
 
 ## Adapters

@@ -70,6 +70,10 @@ aws-lc-sys = { version = "0.47", default-features = false }
 hpke-rs = { version = "0.8", default-features = false, features = ["hazmat", "rustcrypto", "std"] }
 # RSA blind signatures, which aws-lc-rs does not offer.
 blind-rsa-signatures = { version = "0.18", default-features = false }
+# FROST, which aws-lc-rs does not offer. The 3.0 ciphersuites are RFC 9591.
+frost-ed25519 = { version = "3.0.0", default-features = false }
+frost-p256 = { version = "3.0.0", default-features = false }
+frost-ristretto255 = { version = "3.0.0", default-features = false }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [

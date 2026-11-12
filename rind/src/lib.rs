@@ -193,6 +193,49 @@ pub mod hpke {
     };
 }
 
+/// Threshold Schnorr signatures: [RFC 9591]'s two-round FROST.
+///
+/// A trusted dealer splits a signing key. Each participant commits to fresh
+/// nonces and then signs, and a coordinator aggregates the shares or names
+/// the participant whose share does not verify. [`frost::ED25519_SHA512`],
+/// [`frost::RISTRETTO255_SHA512`], and [`frost::P256_SHA256`] are the
+/// ciphersuites. An Ed25519 signature verifies with
+/// [`signature::verify::ED25519`] too.
+///
+/// ```
+/// # fn main() -> Result<(), Box<dyn core::error::Error>> {
+/// use rind::frost::*;
+/// use rind::signature::{PublicKey, verify};
+///
+/// let dealt = ED25519_SHA512.deal(2, 2)?;
+/// let (nonce0, commitment0) = SigningNonces::commit(&dealt.signing_shares[0])?;
+/// let (nonce1, commitment1) = SigningNonces::commit(&dealt.signing_shares[1])?;
+/// let package = SigningPackage::new(vec![commitment0, commitment1], b"hello")?;
+/// let share0 = nonce0.sign(&package, &dealt.signing_shares[0], &dealt.verifying_key)?;
+/// let share1 = nonce1.sign(&package, &dealt.signing_shares[1], &dealt.verifying_key)?;
+/// let signature = ED25519_SHA512.aggregate(
+///     &package,
+///     &[share0, share1],
+///     &dealt.verifying_shares,
+///     &dealt.verifying_key,
+/// )?;
+/// signature.verify(&dealt.verifying_key, b"hello")?;
+///
+/// let key = PublicKey::new(&verify::ED25519, dealt.verifying_key.as_bytes())?;
+/// key.verify(b"hello", signature.as_bytes())?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// [RFC 9591]: https://www.rfc-editor.org/rfc/rfc9591.html
+pub mod frost {
+    pub use crate::high::frost::{
+        AggregateError, Commitments, DealerOutput, ED25519_SHA512, P256_SHA256,
+        RISTRETTO255_SHA512, Signature, SignatureShare, SigningNonces, SigningPackage,
+        SigningShare, Suite, VerifyingKey, VerifyingShare,
+    };
+}
+
 /// RSA encryption: RSA-OAEP with SHA-256, SHA-384, or SHA-512, and SHA-1
 /// under [`rsa::legacy`].
 ///

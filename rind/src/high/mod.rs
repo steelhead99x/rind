@@ -11,6 +11,7 @@ pub(super) mod curve;
 pub(super) mod digest;
 pub(super) mod ecdsa;
 pub(super) mod ed25519;
+pub(super) mod frost;
 pub(super) mod hash;
 pub(super) mod hkdf;
 pub(super) mod hmac;

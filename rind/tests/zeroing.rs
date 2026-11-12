@@ -167,6 +167,16 @@ fn mlkem768() {
 }
 
 #[test]
+fn frost() {
+    use rind::frost::*;
+    let mut dealt = ED25519_SHA512.deal(2, 2).unwrap();
+    let share = dealt.signing_shares.pop().unwrap();
+    let (nonces, _) = SigningNonces::commit(&dealt.signing_shares[0]).unwrap();
+    check_zeroed_on_drop(Box::pin(nonces));
+    check_zeroed_on_drop(Box::pin(share));
+}
+
+#[test]
 fn hpke() {
     use rind::hpke::*;
     let suite = Suite {
