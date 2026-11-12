@@ -123,13 +123,16 @@ with portable Rust in place of the assembly armv7 runs regardless.
   recognise keep the `_alt` schedules. A sandbox that cannot read
   `/proc/cpuinfo`, Android, and Windows on ARM do too: they never see a part
   list, so they do not switch to the narrow schedules. Each imported narrow
-  routine has a HOL Light correctness proof that embeds that object's bytes,
-  which `admin/prove-bytes` compares to rind's `asm!`. The inventory below is
-  a different column: "none" means s2n-bignum publishes no `_SUBROUTINE_SAFE`
-  theorem for that routine. Several narrow rows share that with their `_alt`
-  twins, including `curve25519_x25519`, `p256_scalarmul`, `p256_montjmixadd`,
-  `p521_jadd`, and `p521_jmixadd`. The narrow path has those per-routine
-  correctness proofs and not yet rind's Lean composition: the Lean proofs of
+  routine has a HOL Light correctness proof that embeds that object's bytes.
+  `admin/prove-bytes` checks those bytes against the routine's `asm!` block
+  in rind's release build, the comparison
+  [s2n-bignum's constant-time theorems](#s2n-bignums-constant-time-theorems)
+  describes. The inventory in that section is not that comparison: "none"
+  means s2n-bignum publishes no `_SUBROUTINE_SAFE` theorem for the routine.
+  `curve25519_x25519`, `p256_scalarmul`, `p256_montjmixadd`, `p521_jadd`,
+  and `p521_jmixadd` are "none" on the narrow schedule and on the `_alt`
+  schedule each replaces. The narrow path has a per-routine correctness
+  proof and not yet rind's Lean composition: the Lean proofs of
   X25519, Ed25519, and P-256 name the `_alt` routines, so those benchmark ✓
   marks are the `_alt` cores. The SLOTHY field routines whose proofs are
   equivalences to an asserted base program stay on `_alt`, because that check
