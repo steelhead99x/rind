@@ -924,21 +924,6 @@ mod arch {
         c
     }
 
-    /// How far ahead of an instruction it reads `pc`.
-    #[cfg(target_feature = "thumb-mode")]
-    macro_rules! pc_ahead {
-        () => {
-            "4"
-        };
-    }
-
-    #[cfg(not(target_feature = "thumb-mode"))]
-    macro_rules! pc_ahead {
-        () => {
-            "8"
-        };
-    }
-
     // Saves what the ABI preserves, records the stack pointer, copies the
     // arguments past r0-r3 onto the stack, loads the arguments and canaries,
     // calls, records the registers and stack pointer, restores the stack
@@ -946,14 +931,19 @@ mod arch {
     // d8-d15 only when `STATE.vfp` is set, and `.fpu vfpv3` lets it name them
     // on a soft-float target, leaving `.fpu` as `curve25519` and `sha_armv4`
     // do.
+    //
+    // It finds `STATE` from a literal's own address, which `adr` gives in
+    // both A32 and Thumb, rather than from `pc`, which reads 8 ahead in one
+    // and 4 in the other. Rustc builds this in Thumb on Android, and stable
+    // rustc tells neither `cfg` nor `instruction_set` which it is.
     #[unsafe(naked)]
     unsafe extern "C" fn c(f: Word, args: *const Word, len: Word) -> Word {
         core::arch::naked_asm!(
             ".fpu vfpv3",
             "push {{r4-r11, lr}}",
-            "ldr r12, 5f",
-            "4:",
-            "add r12, pc",
+            "adr r3, 5f",
+            "ldr r12, [r3]",
+            "add r12, r12, r3",
             "ldr r5, [r12, #{vfp}]",
             "cmp r5, #0",
             "beq 1f",
@@ -992,9 +982,9 @@ mod arch {
             "ldm r12, {{r4-r11}}",
             "mov r12, lr",
             "blx r12",
-            "ldr r12, 6f",
-            "7:",
-            "add r12, pc",
+            "adr r3, 6f",
+            "ldr r12, [r3]",
+            "add r12, r12, r3",
             "stm r12, {{r4-r11}}",
             "str sp, [r12, #{sp_after}]",
             "ldr r2, [r12, #{vfp}]",
@@ -1012,8 +1002,8 @@ mod arch {
             "10:",
             "pop {{r4-r11, pc}}",
             ".p2align 2",
-            concat!("5: .word {state} - (4b + ", pc_ahead!(), ")"),
-            concat!("6: .word {state} - (7b + ", pc_ahead!(), ")"),
+            "5: .word {state} - 5b",
+            "6: .word {state} - 6b",
             state = sym STATE,
             d = const offset_of!(State, d),
             vfp = const offset_of!(State, vfp),
