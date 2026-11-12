@@ -40,7 +40,3 @@ Guidance:
 - A `u128` product must compile to multiply instructions, never a call whose time could depend on a secret: add the 64-bit paths to ctgrind on the portable build.
 - Proof status: code that stays fiat-crypto's keeps its proof. Each rind loop that wins runs unproven, and the PR suggests its proof quest for [the verification epic](/quest/m3/verified/README.md).
 - Update ALGORITHMS.md's portable column, PLATFORMS.md, and each generic module's header, and record what remains in `benchmarks/gaps.toml`.
-
-## Related
-
-- [rind builds on every target ring or aws-lc-rs supports](/quest/m2/adoption/targets/README.md) - the targets this speeds up, whose speed non-goal this lifts
