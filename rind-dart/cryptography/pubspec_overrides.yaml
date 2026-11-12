@@ -1,4 +1,0 @@
-# Tests the rind package beside this one rather than the published release.
-dependency_overrides:
-  rind:
-    path: ..

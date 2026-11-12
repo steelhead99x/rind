@@ -1,11 +1,9 @@
 include: package:lints/recommended.yaml
 
 analyzer:
+  # A Flutter app, analyzed only with Flutter.
   exclude:
-    # A Flutter app, analyzed only with Flutter.
     - integration/**
-    # A package of its own, which sh/dart.sh analyzes on its own.
-    - cryptography/**
   language:
     strict-casts: true
     strict-raw-types: true
