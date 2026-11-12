@@ -8,6 +8,14 @@
 //! Khovratovich, Jean-Philippe Aumasson, and Samuel Neves; CC0-1.0). The lane
 //! shuffles are that code's, so a block it returns matches the scalar one.
 //!
+//! Two changes from that code, none of which moves a lane:
+//!
+//! - BlaMka narrows both halves of a pair with one `uzp1` and multiplies with
+//!   `umull` and `umull2`, where the reference narrows each half alone.
+//! - The column rounds read `prev ^ reference` straight from the blocks and the
+//!   row rounds XOR and store `next` as they finish, so the 1 KiB state is not
+//!   loaded or stored in passes of its own.
+//!
 //! aarch64 requires NEON. [`crate::low::cpu::check`] refuses a CPU without it,
 //! naming `neon`, before a public call reaches here. This function does not
 //! run the portable permutation in its place.
@@ -36,251 +44,189 @@ pub(crate) fn compress(
 ) {
     // SAFETY: this backend requires NEON, and the blocks are 1024 bytes each,
     // which the loads and stores stay inside.
-    unsafe { compress_neon(next, prev, reference, with_xor) };
+    unsafe { neon::compress(next, prev, reference, with_xor) };
 }
 
+/// `x + y + 2 * (x mod 2^32) * (y mod 2^32)` for two pairs of lanes at once.
 #[target_feature(enable = "neon")]
-unsafe fn compress_neon(next: &mut Block, prev: &Block, reference: &Block, with_xor: bool) {
-    // SAFETY: `prev` is 1024 bytes, as `load` requires.
-    let mut state = unsafe { load(prev) };
-    let mut xy = [core::mem::MaybeUninit::<uint64x2_t>::uninit(); 64];
-    // SAFETY: each block is 1024 bytes, sixty-four 16-byte lanes. Every `xy`
-    // lane is written before it is read.
-    unsafe {
-        for i in 0..64 {
-            state[i] = veorq_u64(state[i], vld1q_u64(reference.0.as_ptr().add(i * 2)));
-            xy[i].write(if with_xor {
-                veorq_u64(state[i], vld1q_u64(next.0.as_ptr().add(i * 2)))
-            } else {
-                state[i]
-            });
-        }
-        let xy =
-            core::mem::transmute::<[core::mem::MaybeUninit<uint64x2_t>; 64], [uint64x2_t; 64]>(xy);
-        for i in 0..8 {
-            round(
-                &mut state,
-                8 * i,
-                8 * i + 1,
-                8 * i + 2,
-                8 * i + 3,
-                8 * i + 4,
-                8 * i + 5,
-                8 * i + 6,
-                8 * i + 7,
-            );
-        }
-        for i in 0..8 {
-            round(
-                &mut state,
-                i,
-                8 + i,
-                16 + i,
-                24 + i,
-                32 + i,
-                40 + i,
-                48 + i,
-                56 + i,
-            );
-        }
-        for i in 0..64 {
-            state[i] = veorq_u64(state[i], xy[i]);
-            vst1q_u64(next.0.as_mut_ptr().add(i * 2), state[i]);
-        }
-    }
-}
-
-#[target_feature(enable = "neon")]
-unsafe fn load(block: &Block) -> [uint64x2_t; 64] {
-    let mut state = [core::mem::MaybeUninit::<uint64x2_t>::uninit(); 64];
-    // SAFETY: `block` is 1024 bytes, and every lane is written before the
-    // array is read as initialized.
-    unsafe {
-        for (i, lane) in state.iter_mut().enumerate() {
-            lane.write(vld1q_u64(block.0.as_ptr().add(i * 2)));
-        }
-        core::mem::transmute(state)
-    }
-}
-
-#[target_feature(enable = "neon")]
-fn blamka(x: uint64x2_t, y: uint64x2_t) -> uint64x2_t {
-    let z = vmull_u32(vmovn_u64(x), vmovn_u64(y));
-    vaddq_u64(vaddq_u64(x, y), vaddq_u64(z, z))
-}
-
-#[target_feature(enable = "neon")]
-fn rotr32(x: uint64x2_t) -> uint64x2_t {
-    vreinterpretq_u64_u32(vrev64q_u32(vreinterpretq_u32_u64(x)))
-}
-
-#[target_feature(enable = "neon")]
-fn rotr24(x: uint64x2_t) -> uint64x2_t {
-    const TABLE: [u8; 16] = [3, 4, 5, 6, 7, 0, 1, 2, 11, 12, 13, 14, 15, 8, 9, 10];
-    // SAFETY: `TABLE` is 16 bytes.
-    let table = unsafe { vld1q_u8(TABLE.as_ptr()) };
-    vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(x), table))
-}
-
-#[target_feature(enable = "neon")]
-fn rotr16(x: uint64x2_t) -> uint64x2_t {
-    const TABLE: [u8; 16] = [2, 3, 4, 5, 6, 7, 0, 1, 10, 11, 12, 13, 14, 15, 8, 9];
-    // SAFETY: `TABLE` is 16 bytes.
-    let table = unsafe { vld1q_u8(TABLE.as_ptr()) };
-    vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(x), table))
-}
-
-#[target_feature(enable = "neon")]
-fn rotr63(x: uint64x2_t) -> uint64x2_t {
-    veorq_u64(vshrq_n_u64::<63>(x), vaddq_u64(x, x))
-}
-
-#[target_feature(enable = "neon")]
-fn g1(
-    a0: &mut uint64x2_t,
-    b0: &mut uint64x2_t,
-    c0: &mut uint64x2_t,
-    d0: &mut uint64x2_t,
-    a1: &mut uint64x2_t,
-    b1: &mut uint64x2_t,
-    c1: &mut uint64x2_t,
-    d1: &mut uint64x2_t,
-) {
-    *a0 = blamka(*a0, *b0);
-    *a1 = blamka(*a1, *b1);
-    *d0 = rotr32(veorq_u64(*d0, *a0));
-    *d1 = rotr32(veorq_u64(*d1, *a1));
-    *c0 = blamka(*c0, *d0);
-    *c1 = blamka(*c1, *d1);
-    *b0 = rotr24(veorq_u64(*b0, *c0));
-    *b1 = rotr24(veorq_u64(*b1, *c1));
-}
-
-#[target_feature(enable = "neon")]
-fn g2(
-    a0: &mut uint64x2_t,
-    b0: &mut uint64x2_t,
-    c0: &mut uint64x2_t,
-    d0: &mut uint64x2_t,
-    a1: &mut uint64x2_t,
-    b1: &mut uint64x2_t,
-    c1: &mut uint64x2_t,
-    d1: &mut uint64x2_t,
-) {
-    *a0 = blamka(*a0, *b0);
-    *a1 = blamka(*a1, *b1);
-    *d0 = rotr16(veorq_u64(*d0, *a0));
-    *d1 = rotr16(veorq_u64(*d1, *a1));
-    *c0 = blamka(*c0, *d0);
-    *c1 = blamka(*c1, *d1);
-    *b0 = rotr63(veorq_u64(*b0, *c0));
-    *b1 = rotr63(veorq_u64(*b1, *c1));
+fn blamka2(
+    x0: uint64x2_t,
+    x1: uint64x2_t,
+    y0: uint64x2_t,
+    y1: uint64x2_t,
+) -> (uint64x2_t, uint64x2_t) {
+    // The low words of `x0` then `x1`, and the same for `y`.
+    let x = vuzp1q_u32(vreinterpretq_u32_u64(x0), vreinterpretq_u32_u64(x1));
+    let y = vuzp1q_u32(vreinterpretq_u32_u64(y0), vreinterpretq_u32_u64(y1));
+    let z0 = vmull_u32(vget_low_u32(x), vget_low_u32(y));
+    let z1 = vmull_high_u32(x, y);
+    (
+        vaddq_u64(vaddq_u64(x0, y0), vaddq_u64(z0, z0)),
+        vaddq_u64(vaddq_u64(x1, y1), vaddq_u64(z1, z1)),
+    )
 }
 
 /// `vext` by 8 bytes, the NEON form of the reference's SSSE3 `alignr`.
 #[target_feature(enable = "neon")]
-fn diagonalize(
-    b0: &mut uint64x2_t,
-    b1: &mut uint64x2_t,
-    c0: &mut uint64x2_t,
-    c1: &mut uint64x2_t,
-    d0: &mut uint64x2_t,
-    d1: &mut uint64x2_t,
-) {
-    let t0 = vreinterpretq_u64_u8(vextq_u8::<8>(
-        vreinterpretq_u8_u64(*b0),
-        vreinterpretq_u8_u64(*b1),
-    ));
-    let t1 = vreinterpretq_u64_u8(vextq_u8::<8>(
-        vreinterpretq_u8_u64(*b1),
-        vreinterpretq_u8_u64(*b0),
-    ));
-    *b0 = t0;
-    *b1 = t1;
-    core::mem::swap(c0, c1);
-    let t0 = vreinterpretq_u64_u8(vextq_u8::<8>(
-        vreinterpretq_u8_u64(*d0),
-        vreinterpretq_u8_u64(*d1),
-    ));
-    let t1 = vreinterpretq_u64_u8(vextq_u8::<8>(
-        vreinterpretq_u8_u64(*d1),
-        vreinterpretq_u8_u64(*d0),
-    ));
-    *d0 = t1;
-    *d1 = t0;
+fn ext(x: uint64x2_t, y: uint64x2_t) -> uint64x2_t {
+    vreinterpretq_u64_u8(vextq_u8::<8>(
+        vreinterpretq_u8_u64(x),
+        vreinterpretq_u8_u64(y),
+    ))
+}
+
+/// The `(B0, B1, C0, C1, D0, D1)` shuffle between a round's halves.
+#[target_feature(enable = "neon")]
+fn diagonalize(v: &mut [uint64x2_t; 8]) {
+    let [_, _, b0, b1, c0, c1, d0, d1] = *v;
+    v[2] = ext(b0, b1);
+    v[3] = ext(b1, b0);
+    v[4] = c1;
+    v[5] = c0;
+    v[6] = ext(d1, d0);
+    v[7] = ext(d0, d1);
 }
 
 #[target_feature(enable = "neon")]
-fn undiagonalize(
-    b0: &mut uint64x2_t,
-    b1: &mut uint64x2_t,
-    c0: &mut uint64x2_t,
-    c1: &mut uint64x2_t,
-    d0: &mut uint64x2_t,
-    d1: &mut uint64x2_t,
-) {
-    let t0 = vreinterpretq_u64_u8(vextq_u8::<8>(
-        vreinterpretq_u8_u64(*b1),
-        vreinterpretq_u8_u64(*b0),
-    ));
-    let t1 = vreinterpretq_u64_u8(vextq_u8::<8>(
-        vreinterpretq_u8_u64(*b0),
-        vreinterpretq_u8_u64(*b1),
-    ));
-    *b0 = t0;
-    *b1 = t1;
-    core::mem::swap(c0, c1);
-    let t0 = vreinterpretq_u64_u8(vextq_u8::<8>(
-        vreinterpretq_u8_u64(*d1),
-        vreinterpretq_u8_u64(*d0),
-    ));
-    let t1 = vreinterpretq_u64_u8(vextq_u8::<8>(
-        vreinterpretq_u8_u64(*d0),
-        vreinterpretq_u8_u64(*d1),
-    ));
-    *d0 = t1;
-    *d1 = t0;
+fn undiagonalize(v: &mut [uint64x2_t; 8]) {
+    let [_, _, b0, b1, c0, c1, d0, d1] = *v;
+    v[2] = ext(b1, b0);
+    v[3] = ext(b0, b1);
+    v[4] = c1;
+    v[5] = c0;
+    v[6] = ext(d0, d1);
+    v[7] = ext(d1, d0);
 }
 
-/// One `BLAKE2_ROUND`. The indexes are `(A0, A1, B0, B1, C0, C1, D0, D1)`.
-#[target_feature(enable = "neon")]
-fn round(
-    state: &mut [uint64x2_t; 64],
-    a0i: usize,
-    a1i: usize,
-    b0i: usize,
-    b1i: usize,
-    c0i: usize,
-    c1i: usize,
-    d0i: usize,
-    d1i: usize,
-) {
-    let (mut a0, mut a1, mut b0, mut b1, mut c0, mut c1, mut d0, mut d1) = (
-        state[a0i], state[a1i], state[b0i], state[b1i], state[c0i], state[c1i], state[d0i],
-        state[d1i],
-    );
-    g1(
-        &mut a0, &mut b0, &mut c0, &mut d0, &mut a1, &mut b1, &mut c1, &mut d1,
-    );
-    g2(
-        &mut a0, &mut b0, &mut c0, &mut d0, &mut a1, &mut b1, &mut c1, &mut d1,
-    );
-    diagonalize(&mut b0, &mut b1, &mut c0, &mut c1, &mut d0, &mut d1);
-    g1(
-        &mut a0, &mut b0, &mut c0, &mut d0, &mut a1, &mut b1, &mut c1, &mut d1,
-    );
-    g2(
-        &mut a0, &mut b0, &mut c0, &mut d0, &mut a1, &mut b1, &mut c1, &mut d1,
-    );
-    undiagonalize(&mut b0, &mut b1, &mut c0, &mut c1, &mut d0, &mut d1);
-    state[a0i] = a0;
-    state[a1i] = a1;
-    state[b0i] = b0;
-    state[b1i] = b1;
-    state[c0i] = c0;
-    state[c1i] = c1;
-    state[d0i] = d0;
-    state[d1i] = d1;
+/// The fill. The caller's module supplies
+/// `xor_rotr32`, `xor_rotr24`, `xor_rotr16` and `xor_rotr63`, each
+/// `(x ^ y).rotate_right(n)` on both lanes.
+macro_rules! fill {
+    ($features:literal) => {
+        use core::arch::aarch64::*;
+        use core::mem::MaybeUninit;
+
+        use super::{blamka2, diagonalize, undiagonalize};
+        use crate::low::argon2::Block;
+
+        /// # Safety
+        /// The CPU must have every feature this function enables.
+        #[target_feature(enable = $features)]
+        pub(super) unsafe fn compress(
+            next: &mut Block,
+            prev: &Block,
+            reference: &Block,
+            with_xor: bool,
+        ) {
+            let mut state = [MaybeUninit::<uint64x2_t>::uninit(); 64];
+            let mut xy = [MaybeUninit::<uint64x2_t>::uninit(); 64];
+            // SAFETY: each block is 1024 bytes, sixty-four 16-byte lanes, and
+            // every index below is under 64. The column rounds write each
+            // `state` and `xy` lane before the row rounds read it, and they
+            // read `next` before the row rounds overwrite it.
+            unsafe {
+                for col in 0..8 {
+                    let mut v = [vdupq_n_u64(0); 8];
+                    for (k, lane) in v.iter_mut().enumerate() {
+                        let i = 8 * col + k;
+                        let r = veorq_u64(
+                            vld1q_u64(prev.0.as_ptr().add(2 * i)),
+                            vld1q_u64(reference.0.as_ptr().add(2 * i)),
+                        );
+                        xy[i].write(if with_xor {
+                            veorq_u64(r, vld1q_u64(next.0.as_ptr().add(2 * i)))
+                        } else {
+                            r
+                        });
+                        *lane = r;
+                    }
+                    round(&mut v);
+                    for (k, lane) in v.into_iter().enumerate() {
+                        state[8 * col + k].write(lane);
+                    }
+                }
+                for row in 0..8 {
+                    let mut v = [vdupq_n_u64(0); 8];
+                    for (k, lane) in v.iter_mut().enumerate() {
+                        *lane = state[row + 8 * k].assume_init();
+                    }
+                    round(&mut v);
+                    for (k, lane) in v.into_iter().enumerate() {
+                        let i = row + 8 * k;
+                        let out = veorq_u64(lane, xy[i].assume_init());
+                        vst1q_u64(next.0.as_mut_ptr().add(2 * i), out);
+                    }
+                }
+            }
+        }
+
+        /// One `BLAKE2_ROUND` on `(A0, A1, B0, B1, C0, C1, D0, D1)`.
+        #[target_feature(enable = $features)]
+        fn round(v: &mut [uint64x2_t; 8]) {
+            g1(v);
+            g2(v);
+            diagonalize(v);
+            g1(v);
+            g2(v);
+            undiagonalize(v);
+        }
+
+        #[target_feature(enable = $features)]
+        fn g1(v: &mut [uint64x2_t; 8]) {
+            let [a0, a1, b0, b1, c0, c1, d0, d1] = *v;
+            let (a0, a1) = blamka2(a0, a1, b0, b1);
+            let d0 = xor_rotr32(d0, a0);
+            let d1 = xor_rotr32(d1, a1);
+            let (c0, c1) = blamka2(c0, c1, d0, d1);
+            let b0 = xor_rotr24(b0, c0);
+            let b1 = xor_rotr24(b1, c1);
+            *v = [a0, a1, b0, b1, c0, c1, d0, d1];
+        }
+
+        #[target_feature(enable = $features)]
+        fn g2(v: &mut [uint64x2_t; 8]) {
+            let [a0, a1, b0, b1, c0, c1, d0, d1] = *v;
+            let (a0, a1) = blamka2(a0, a1, b0, b1);
+            let d0 = xor_rotr16(d0, a0);
+            let d1 = xor_rotr16(d1, a1);
+            let (c0, c1) = blamka2(c0, c1, d0, d1);
+            let b0 = xor_rotr63(b0, c0);
+            let b1 = xor_rotr63(b1, c1);
+            *v = [a0, a1, b0, b1, c0, c1, d0, d1];
+        }
+    };
+}
+
+/// Plain NEON: the rotations by 32, 24 and 16 are lane shuffles.
+mod neon {
+    fill!("neon");
+
+    #[target_feature(enable = "neon")]
+    fn xor_rotr32(x: uint64x2_t, y: uint64x2_t) -> uint64x2_t {
+        vreinterpretq_u64_u32(vrev64q_u32(vreinterpretq_u32_u64(veorq_u64(x, y))))
+    }
+
+    #[target_feature(enable = "neon")]
+    fn xor_rotr24(x: uint64x2_t, y: uint64x2_t) -> uint64x2_t {
+        const TABLE: [u8; 16] = [3, 4, 5, 6, 7, 0, 1, 2, 11, 12, 13, 14, 15, 8, 9, 10];
+        // SAFETY: `TABLE` is 16 bytes.
+        let table = unsafe { vld1q_u8(TABLE.as_ptr()) };
+        vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(veorq_u64(x, y)), table))
+    }
+
+    #[target_feature(enable = "neon")]
+    fn xor_rotr16(x: uint64x2_t, y: uint64x2_t) -> uint64x2_t {
+        const TABLE: [u8; 16] = [2, 3, 4, 5, 6, 7, 0, 1, 10, 11, 12, 13, 14, 15, 8, 9];
+        // SAFETY: `TABLE` is 16 bytes.
+        let table = unsafe { vld1q_u8(TABLE.as_ptr()) };
+        vreinterpretq_u64_u8(vqtbl1q_u8(vreinterpretq_u8_u64(veorq_u64(x, y)), table))
+    }
+
+    #[target_feature(enable = "neon")]
+    fn xor_rotr63(x: uint64x2_t, y: uint64x2_t) -> uint64x2_t {
+        let z = veorq_u64(x, y);
+        veorq_u64(vshrq_n_u64::<63>(z), vaddq_u64(z, z))
+    }
 }
 
 #[cfg(test)]
@@ -306,11 +252,17 @@ mod tests {
             }
             for with_xor in [false, true] {
                 let mut scalar = next;
-                let mut wide = next;
                 compress_scalar(&mut scalar, &prev, &reference, with_xor);
+                let mut wide = next;
                 // SAFETY: aarch64 requires NEON, and the blocks are 1024 bytes.
-                unsafe { compress_neon(&mut wide, &prev, &reference, with_xor) };
-                assert_eq!(scalar.0, wide.0, "seed={seed:#x} with_xor={with_xor}");
+                unsafe { neon::compress(&mut wide, &prev, &reference, with_xor) };
+                assert_eq!(scalar.0, wide.0, "neon seed={seed:#x} with_xor={with_xor}");
+                let mut selected = next;
+                compress(Fill::select(), &mut selected, &prev, &reference, with_xor);
+                assert_eq!(
+                    scalar.0, selected.0,
+                    "selected seed={seed:#x} with_xor={with_xor}"
+                );
             }
         }
     }
@@ -335,7 +287,7 @@ mod tests {
         let word = ct_qemu::traced(|| {
             let mut wide = next;
             // SAFETY: aarch64 requires NEON, and the blocks are 1024 bytes.
-            unsafe { compress_neon(&mut wide, &prev, &reference, true) };
+            unsafe { neon::compress(&mut wide, &prev, &reference, true) };
             wide.0[0]
         });
         core::hint::black_box(word);
