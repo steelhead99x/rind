@@ -90,12 +90,15 @@ impl Point {
     /// RFC 8032's decoding, or `None` when the encoding is non-canonical or
     /// not a point.
     ///
-    /// dalek branches on whether the encoding is canonical and on the curve,
-    /// so only a public encoding is in constant time. Every encoding rind
-    /// decodes here is a peer's, or a hash of one.
+    /// dalek reduces `y` modulo `p` and takes a set sign bit on `x = 0`, both
+    /// of which RFC 8032 5.1.3 rejects. The point is kept only when its
+    /// canonical encoding is the bytes it was given. Whether that holds is
+    /// public; every encoding rind decodes here is a peer's, or a hash of one.
     pub(crate) fn from_bytes(bytes: &[u8; 32]) -> Option<Self> {
         low::Entry::assert_held();
-        CompressedEdwardsY(*bytes).decompress().map(Self)
+        let point = CompressedEdwardsY(*bytes).decompress()?;
+        let encoded = point.compress().to_bytes();
+        low::ct::into_public(low::ct_equal(&encoded[..], &bytes[..])).then_some(Self(point))
     }
 
     /// RFC 8032's encoding.

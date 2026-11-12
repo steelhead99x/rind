@@ -278,6 +278,8 @@ fn vrf() {
     ];
     let p256 = SecretKey::from_bytes(&ECVRF_P256_SHA256_TAI, &seed).unwrap();
     check_zeroed_on_drop(Box::pin(p256));
+    let generated = SecretKey::generate(&ECVRF_P256_SHA256_TAI).unwrap();
+    check_zeroed_on_drop(Box::pin(generated));
 }
 
 #[test]

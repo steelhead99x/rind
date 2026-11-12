@@ -380,6 +380,7 @@ impl SecretKey {
 
     /// The 32-byte seed. It is still secret.
     pub fn to_bytes(&self) -> [u8; SECRET_LEN] {
+        let _entry = Entry::new_secret();
         self.seed
     }
 
@@ -505,7 +506,8 @@ fn verify_edwards(public: &[u8], alpha: &[u8], proof: &[u8]) -> Result<[u8; ED_O
     let s_bytes: [u8; 32] = proof[48..].try_into().unwrap();
     let s = EdScalar::from_canonical_bytes(&s_bytes).ok_or(Error::BadSignature)?;
     let c_scalar = ed_scalar_short(&challenge)?;
-    let hashed = hash_to_curve_edwards(&pk, alpha)?;
+    // Exhausting the counter is a bad proof, not an internal fault.
+    let hashed = hash_to_curve_edwards(&pk, alpha).map_err(|_| Error::BadSignature)?;
     // The identity encodes, so a nonce of zero still has a challenge point.
     let u = EdPoint::mul_base(&s).add(&y.mul(&c_scalar).negate());
     let v = hashed.mul(&s).add(&gamma.mul(&c_scalar).negate());
@@ -553,7 +555,7 @@ fn verify_p256(public: &[u8], alpha: &[u8], proof: &[u8]) -> Result<[u8; P256_OU
     // `s` may be zero. A value at or above `n` is not canonical.
     let s = group::scalar_canonical(&proof[49..])?;
     let c_scalar = group::scalar_reduced(&challenge)?;
-    let hashed = hash_to_curve_p256(public, alpha)?;
+    let hashed = hash_to_curve_p256(public, alpha).map_err(|_| Error::BadSignature)?;
     let u = P256Point::mul_base_public(&s).add_public(y.mul_public(&c_scalar).negate());
     let v = hashed
         .mul_public(&s)
@@ -599,8 +601,17 @@ fn ed_scalar_short(bytes: &[u8]) -> Result<EdScalar, Error> {
 }
 
 fn hash_to_curve_edwards(public: &[u8], alpha: &[u8]) -> Result<EdPoint, Error> {
+    // The prefix is the same for every counter. Verify hashes a public input
+    // that may be long, so each try clones that prefix instead of hashing it
+    // again. Proving uses the same function; the prefix holds no secret.
+    let mut prefix = Sha512Context::new();
+    prefix.update(&[ED_SUITE, 0x01]);
+    prefix.update(public);
+    prefix.update(alpha);
     for ctr in 0..=255u8 {
-        let hash = sha512(&[&[ED_SUITE, 0x01], public, alpha, &[ctr, 0x00]]);
+        let mut ctx = prefix.clone();
+        ctx.update(&[ctr, 0x00]);
+        let hash = ctx.finish();
         let mut candidate = [0u8; 32];
         candidate.copy_from_slice(&hash[..32]);
         if let Some(point) = EdPoint::from_bytes(&candidate) {
@@ -818,6 +829,70 @@ mod tests {
         }
     }
 
+    fn rejected_because(err: Error, reason: &str) {
+        let Error::KeyRejected(rejected) = err else {
+            panic!("expected a rejected key, got {err:?}");
+        };
+        assert!(rejected.to_string().contains(reason), "{rejected}");
+    }
+
+    fn not_on_curve(err: Error) {
+        rejected_because(err, "not on the curve");
+    }
+
+    fn small_order(err: Error) {
+        rejected_because(err, "small-order");
+    }
+
+    /// Canonical encodings of the eight points whose order divides 8.
+    fn edwards_torsion() -> [[u8; 32]; 8] {
+        [
+            "0100000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "0000000000000000000000000000000000000000000000000000000000000080",
+            "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+            "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",
+            "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+            "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+            "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+        ]
+        .map(|hex_text| decode(hex_text).try_into().unwrap())
+    }
+
+    /// `y + p` as a 255-bit little-endian Edwards coordinate, sign bit clear.
+    /// `y` is at most 18, so the sum does not carry out of the low byte.
+    fn edwards_y_plus_p(y: u8) -> [u8; 32] {
+        let mut bytes = [0xffu8; 32];
+        bytes[0] = 0xed + y;
+        bytes[31] = 0x7f;
+        bytes
+    }
+
+    /// `L`, little-endian, and `L - 1`.
+    fn edwards_order() -> ([u8; 32], [u8; 32]) {
+        let order = [
+            0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9,
+            0xde, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10,
+        ];
+        let mut below = order;
+        below[0] = 0xec;
+        (order, below)
+    }
+
+    /// P-256's field prime and its order, big-endian.
+    fn p256_prime_and_order() -> ([u8; 32], [u8; 32]) {
+        let prime = decode("ffffffff00000001000000000000000000000000ffffffffffffffffffffffff");
+        let order = decode("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
+        (prime.try_into().unwrap(), order.try_into().unwrap())
+    }
+
+    fn bad_signature(result: Result<Output, Error>) {
+        assert!(
+            matches!(result, Err(Error::BadSignature)),
+            "expected BadSignature, got {result:?}"
+        );
+    }
+
     #[test]
     fn refuses_bad_keys_and_proofs() {
         let ed = &ECVRF_EDWARDS25519_SHA512_TAI;
@@ -826,39 +901,59 @@ mod tests {
         assert!(SecretKey::from_bytes(p256, &[0; 32]).is_err());
         assert!(SecretKey::from_bytes(p256, &[0xff; 32]).is_err());
 
-        let mut identity = [0u8; 32];
-        identity[0] = 1;
-        assert!(matches!(
-            PublicKey::from_bytes(ed, &identity),
-            Err(Error::KeyRejected(_))
-        ));
-        // Order 2: `(0, -1)`, `y = 2^255 - 20`.
-        let mut order_two = [0xffu8; 32];
-        order_two[0] = 0xec;
-        order_two[31] = 0x7f;
-        assert!(matches!(
-            PublicKey::from_bytes(ed, &order_two),
-            Err(Error::KeyRejected(_))
-        ));
+        // Identity, both order-4 points, the four order-8 points, and the
+        // order-2 point. Section 5.4.5 refuses every point of order dividing 8.
+        let torsion = edwards_torsion();
+        for point in torsion {
+            small_order(PublicKey::from_bytes(ed, &point).unwrap_err());
+        }
+        let order_two = torsion[7];
         assert!(PublicKey::from_bytes(ed, &[0; 31]).is_err());
-        assert!(PublicKey::from_bytes(p256, &[0x04; 33]).is_err());
-        assert!(PublicKey::from_bytes(p256, &[0xff; 33]).is_err());
+
+        // RFC 8032 rejects `y >= p` and a set sign bit on `x = 0`. dalek's
+        // decompress accepts both; the portable backend must not.
+        let mut negative_zero = [0u8; 32];
+        negative_zero[0] = 1;
+        negative_zero[31] = 0x80;
+        not_on_curve(PublicKey::from_bytes(ed, &negative_zero).unwrap_err());
+        for y in [0, 1, 3, 4, 5, 6, 9, 10, 14, 15, 16, 18] {
+            not_on_curve(PublicKey::from_bytes(ed, &edwards_y_plus_p(y)).unwrap_err());
+        }
 
         let key = SecretKey::from_bytes(ed, &[0x11; 32]).unwrap();
         let (proof, output) = key.prove(b"alpha").unwrap();
-        assert_eq!(
-            key.public_key().verify(b"alpha", &proof).unwrap().as_ref(),
-            output.as_ref()
-        );
+        ct::public_slice(output.as_ref());
+        let checked = key.public_key().verify(b"alpha", &proof).unwrap();
+        ct::public_slice(checked.as_ref());
+        assert_eq!(checked.as_ref(), output.as_ref());
         assert!(key.public_key().verify(b"other", &proof).is_err());
         let mut tampered = proof.as_ref().to_vec();
         tampered[0] ^= 0x01;
         let tampered = Proof::from_bytes(ed, &tampered).unwrap();
-        assert!(key.public_key().verify(b"alpha", &tampered).is_err());
-        let mut high_s = proof.as_ref().to_vec();
-        high_s[48..].fill(0xff);
-        let high_s = Proof::from_bytes(ed, &high_s).unwrap();
-        assert!(key.public_key().verify(b"alpha", &high_s).is_err());
+        bad_signature(key.public_key().verify(b"alpha", &tampered));
+
+        // `s = 0` is in range and fails the equation. `s = L` and above are
+        // not canonical.
+        let (order, order_minus) = edwards_order();
+        for scalar in [[0; 32], order, order_minus, [0xff; 32]] {
+            let mut proof_bytes = proof.as_ref().to_vec();
+            proof_bytes[48..].copy_from_slice(&scalar);
+            let proof = Proof::from_bytes(ed, &proof_bytes).unwrap();
+            bad_signature(key.public_key().verify(b"alpha", &proof));
+        }
+        for gamma in [negative_zero, order_two, edwards_y_plus_p(3)] {
+            let mut proof_bytes = proof.as_ref().to_vec();
+            proof_bytes[..32].copy_from_slice(&gamma);
+            let proof = Proof::from_bytes(ed, &proof_bytes).unwrap();
+            bad_signature(key.public_key().verify(b"alpha", &proof));
+        }
+        for y in [0, 1, 3, 4, 5, 6, 9, 10, 14, 15, 16, 18] {
+            let mut proof_bytes = proof.as_ref().to_vec();
+            proof_bytes[..32].copy_from_slice(&edwards_y_plus_p(y));
+            let proof = Proof::from_bytes(ed, &proof_bytes).unwrap();
+            bad_signature(key.public_key().verify(b"alpha", &proof));
+        }
+
         assert!(Proof::from_bytes(ed, &[0; 79]).is_err());
         let other = Proof::from_bytes(p256, &[0x02; 81]).unwrap();
         assert!(matches!(
@@ -872,48 +967,151 @@ mod tests {
         )
         .unwrap();
         let (proof, _) = p256_key.prove(b"alpha").unwrap();
-        let mut high_s = proof.as_ref().to_vec();
-        high_s[49..].fill(0xff);
-        let high_s = Proof::from_bytes(p256, &high_s).unwrap();
-        assert!(matches!(
-            p256_key.public_key().verify(b"alpha", &high_s),
-            Err(Error::BadSignature)
+        let proof_bytes = proof.as_ref().to_vec();
+        let (prime, order) = p256_prime_and_order();
+        let mut order_minus = order;
+        order_minus[31] -= 1;
+        for scalar in [order, order_minus, [0xff; 32], [0; 32]] {
+            let mut edited = proof_bytes.clone();
+            edited[49..].copy_from_slice(&scalar);
+            let proof = Proof::from_bytes(p256, &edited).unwrap();
+            bad_signature(p256_key.public_key().verify(b"alpha", &proof));
+        }
+
+        let refuse_gamma = |bytes: &[u8]| {
+            let mut edited = proof_bytes.clone();
+            edited[..33].copy_from_slice(bytes);
+            let proof = Proof::from_bytes(p256, &edited).unwrap();
+            bad_signature(p256_key.public_key().verify(b"alpha", &proof));
+        };
+        let mut tagged = [0x04u8; 33];
+        let rejected = PublicKey::from_bytes(p256, &tagged).unwrap_err();
+        let Error::KeyRejected(rejected) = rejected else {
+            panic!("expected a rejected key, got {rejected:?}");
+        };
+        assert!(
+            rejected
+                .to_string()
+                .contains("neither compressed nor uncompressed"),
+            "{rejected}"
+        );
+        refuse_gamma(&tagged);
+        tagged[0] = 0x02;
+        tagged[1..].copy_from_slice(&prime);
+        not_on_curve(PublicKey::from_bytes(p256, &tagged).unwrap_err());
+        refuse_gamma(&tagged);
+        let mut below_prime = prime;
+        below_prime[31] -= 1;
+        tagged[1..].copy_from_slice(&below_prime);
+        not_on_curve(PublicKey::from_bytes(p256, &tagged).unwrap_err());
+        refuse_gamma(&tagged);
+
+        // The other parity is the negation, still a curve point, so it is a
+        // public key. As Gamma it is not this proof's point.
+        let mut flipped = p256_key.public_key().as_ref().to_vec();
+        flipped[0] ^= 1;
+        PublicKey::from_bytes(p256, &flipped).unwrap();
+        let mut gamma = proof_bytes[..33].to_vec();
+        gamma[0] ^= 1;
+        let mut edited = proof_bytes.clone();
+        edited[..33].copy_from_slice(&gamma);
+        let proof = Proof::from_bytes(p256, &edited).unwrap();
+        bad_signature(p256_key.public_key().verify(b"alpha", &proof));
+
+        // `c = 0` takes `add_public`'s identity arm. `s = c*x` adds a point to
+        // its negation, `s = -c*x` doubles, and `Gamma = t*H` with `s = c*t`
+        // does the same for `V`.
+        let mut zero_c = proof_bytes.clone();
+        zero_c[33..49].fill(0);
+        bad_signature(
+            p256_key
+                .public_key()
+                .verify(b"alpha", &Proof::from_bytes(p256, &zero_c).unwrap()),
+        );
+
+        let x = group::scalar_checked(p256_key.to_bytes().as_ref()).unwrap();
+        let c = group::scalar_reduced(&proof_bytes[33..49]).unwrap();
+        let cx = group::scalar_mul(&c, &x);
+        let mut opposite = proof_bytes.clone();
+        opposite[49..].copy_from_slice(&group::scalar_bytes(&cx));
+        bad_signature(
+            p256_key
+                .public_key()
+                .verify(b"alpha", &Proof::from_bytes(p256, &opposite).unwrap()),
+        );
+        assert!(
+            !ct::into_public(cx.is_zero()),
+            "this proof's challenge is zero, so s = -c*x does not double"
+        );
+        let mut neg = order;
+        let cx_bytes = group::scalar_bytes(&cx);
+        let mut borrow = 0u16;
+        for i in (0..32).rev() {
+            let diff = u16::from(neg[i])
+                .wrapping_sub(u16::from(cx_bytes[i]))
+                .wrapping_sub(borrow);
+            neg[i] = diff as u8;
+            borrow = (diff >> 8) & 1;
+        }
+        let neg_scalar = group::scalar_canonical(&neg).unwrap();
+        assert!(ct::into_public(
+            group::scalar_add(&cx, &neg_scalar).is_zero()
         ));
-        let mut zero_s = proof.as_ref().to_vec();
-        zero_s[49..].fill(0);
-        let zero_s = Proof::from_bytes(p256, &zero_s).unwrap();
-        assert!(matches!(
-            p256_key.public_key().verify(b"alpha", &zero_s),
-            Err(Error::BadSignature)
-        ));
+        let mut doubled = proof_bytes.clone();
+        doubled[49..].copy_from_slice(&neg);
+        bad_signature(
+            p256_key
+                .public_key()
+                .verify(b"alpha", &Proof::from_bytes(p256, &doubled).unwrap()),
+        );
+        let hashed = hash_to_curve_p256(p256_key.public_key().as_ref(), b"alpha").unwrap();
+        let t = group::scalar_reduced(&[2]).unwrap();
+        let gamma_t = hashed.mul_public(&t).to_compressed().unwrap();
+        let s_ct = group::scalar_mul(&c, &t);
+        let mut vee = proof_bytes.clone();
+        vee[..33].copy_from_slice(&gamma_t);
+        vee[49..].copy_from_slice(&group::scalar_bytes(&s_ct));
+        bad_signature(
+            p256_key
+                .public_key()
+                .verify(b"alpha", &Proof::from_bytes(p256, &vee).unwrap()),
+        );
+    }
+
+    fn declassified_eq(left: &[u8], right: &[u8]) {
+        ct::public_slice(left);
+        ct::public_slice(right);
+        assert_eq!(left, right);
     }
 
     #[test]
     fn secrets_stay_secret() {
         let seed = [0x11u8; 32];
-        ct::secret_slice(&seed);
+        ct::secret_slice(&seed[..]);
         let key = SecretKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, &seed).unwrap();
-        core::hint::black_box(key.to_bytes());
+        let encoded = key.to_bytes();
+        core::hint::black_box(&encoded[..]);
         let public = key.public_key();
         let (proof, output) = key.prove(b"alpha").unwrap();
-        assert_eq!(
-            public.verify(b"alpha", &proof).unwrap().as_ref(),
-            output.as_ref()
-        );
+        let checked = public.verify(b"alpha", &proof).unwrap();
+        declassified_eq(checked.as_ref(), output.as_ref());
 
         let seed = decode("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
-        ct::secret_slice(&seed);
+        ct::secret_slice(&seed[..]);
         let key = SecretKey::from_bytes(&ECVRF_P256_SHA256_TAI, &seed).unwrap();
-        core::hint::black_box(key.to_bytes());
+        let encoded = key.to_bytes();
+        core::hint::black_box(&encoded[..]);
         let public = key.public_key();
         let (proof, output) = key.prove(b"sample").unwrap();
-        assert_eq!(
-            public.verify(b"sample", &proof).unwrap().as_ref(),
-            output.as_ref()
-        );
+        let checked = public.verify(b"sample", &proof).unwrap();
+        declassified_eq(checked.as_ref(), output.as_ref());
 
-        let generated = SecretKey::generate(&ECVRF_EDWARDS25519_SHA512_TAI).unwrap();
-        core::hint::black_box(generated.prove(b"generated").unwrap());
+        for algorithm in [&ECVRF_EDWARDS25519_SHA512_TAI, &ECVRF_P256_SHA256_TAI] {
+            let generated = SecretKey::generate(algorithm).unwrap();
+            let (proof, output) = generated.prove(b"generated").unwrap();
+            let checked = generated.public_key().verify(b"generated", &proof).unwrap();
+            declassified_eq(checked.as_ref(), output.as_ref());
+        }
     }
 
     proptest! {
@@ -932,48 +1130,118 @@ mod tests {
         }
     }
 
-    #[cfg(not(any(miri, target_family = "wasm")))]
-    #[test]
-    fn matches_akd_core() {
-        use akd_core::ecvrf::{Proof as AkdProof, VRFPrivateKey, VRFPublicKey};
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 16, ..ProptestConfig::default() })]
 
-        let seed = [0x42u8; 32];
-        let alpha = b"key transparency";
-        let key = SecretKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, &seed).unwrap();
-        let (proof, _) = key.prove(alpha).unwrap();
-
-        let akd = VRFPrivateKey::try_from(seed.as_slice()).unwrap();
-        let akd_proof = akd.prove(alpha);
-        assert_eq!(akd_proof.to_bytes().as_slice(), proof.as_ref());
-
-        let akd_public = VRFPublicKey::try_from(key.public_key().as_ref()).unwrap();
-        akd_public.verify(&akd_proof, alpha).unwrap();
-        let imported = AkdProof::try_from(proof.as_ref()).unwrap();
-        akd_public.verify(&imported, alpha).unwrap();
-
-        let parsed =
-            Proof::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, &akd_proof.to_bytes()).unwrap();
-        key.public_key().verify(alpha, &parsed).unwrap();
+        #[test]
+        fn p256_round_trip(seed: [u8; 32], alpha in proptest::collection::vec(any::<u8>(), 0..=64)) {
+            let Ok(key) = SecretKey::from_bytes(&ECVRF_P256_SHA256_TAI, &seed) else {
+                return Ok(());
+            };
+            let (proof, output) = key.prove(&alpha).unwrap();
+            let got = key.public_key().verify(&alpha, &proof).unwrap();
+            ct::public_slice(got.as_ref());
+            ct::public_slice(output.as_ref());
+            prop_assert_eq!(got.as_ref(), output.as_ref());
+        }
     }
 
     #[cfg(not(any(miri, target_family = "wasm")))]
-    #[test]
-    fn matches_vrf_rfc9381() {
-        use vrf_rfc9381::ec::p256::tai::{EcVrfP256Tai, EcVrfP256TaiSecretKey};
-        use vrf_rfc9381::{Prover, VRF};
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 16, ..ProptestConfig::default() })]
 
-        let seed = decode("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721");
-        let alpha = b"sample";
-        let key = SecretKey::from_bytes(&ECVRF_P256_SHA256_TAI, &seed).unwrap();
-        let (proof, output) = key.prove(alpha).unwrap();
+        #[test]
+        fn matches_akd_core(seed: [u8; 32], alpha in proptest::collection::vec(any::<u8>(), 0..=64)) {
+            use akd_core::ecvrf::{Proof as AkdProof, VRFPrivateKey, VRFPublicKey};
 
-        let suite = EcVrfP256Tai;
-        let theirs = EcVrfP256TaiSecretKey::from_slice(&seed).unwrap();
-        let their_proof = suite.prove(&theirs, alpha).unwrap();
-        assert_eq!(their_proof.as_slice(), proof.as_ref());
-        let their_output = suite
-            .verify(&theirs.verifier(), alpha, &their_proof)
-            .unwrap();
-        assert_eq!(their_output.as_slice(), output.as_ref());
+            let key = SecretKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, &seed).unwrap();
+            let (proof, output) = key.prove(&alpha).unwrap();
+            let akd = VRFPrivateKey::try_from(seed.as_slice()).unwrap();
+            let akd_proof = akd.prove(&alpha);
+            let akd_bytes = akd_proof.to_bytes();
+            ct::public_slice(&akd_bytes[..]);
+            ct::public_slice(proof.as_ref());
+            ct::public_slice(output.as_ref());
+            prop_assert_eq!(&akd_bytes[..], proof.as_ref());
+
+            let akd_public = VRFPublicKey::try_from(key.public_key().as_ref()).unwrap();
+            akd_public.verify(&akd_proof, &alpha).unwrap();
+            let parsed = Proof::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, &akd_bytes[..]).unwrap();
+            let checked = key.public_key().verify(&alpha, &parsed).unwrap();
+            ct::public_slice(checked.as_ref());
+            prop_assert_eq!(checked.as_ref(), output.as_ref());
+
+            let mut order_two = [0xffu8; 32];
+            order_two[0] = 0xec;
+            order_two[31] = 0x7f;
+            let mut negative_zero = [0u8; 32];
+            negative_zero[0] = 1;
+            negative_zero[31] = 0x80;
+            let (order, _) = edwards_order();
+            let mut order_plus = order;
+            order_plus[0] = order_plus[0].wrapping_add(1);
+            let mut mutations = Vec::new();
+            for index in [0usize, 16, 31, 32, 40, 47, 48, 64, 79] {
+                let mut edited = akd_bytes;
+                edited[index] ^= 0x01;
+                mutations.push(edited);
+            }
+            for scalar in [order, order_plus, [0xff; 32]] {
+                let mut edited = akd_bytes;
+                edited[48..].copy_from_slice(&scalar);
+                mutations.push(edited);
+            }
+            for gamma in [order_two, negative_zero, edwards_y_plus_p(0), edwards_y_plus_p(3)] {
+                let mut edited = akd_bytes;
+                edited[..32].copy_from_slice(&gamma);
+                mutations.push(edited);
+            }
+            for edited in mutations {
+                let rind_ok = Proof::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, &edited[..])
+                    .and_then(|parsed| key.public_key().verify(&alpha, &parsed))
+                    .is_ok();
+                let akd_ok = AkdProof::try_from(edited.as_slice())
+                    .is_ok_and(|parsed| akd_public.verify(&parsed, &alpha).is_ok());
+                if rind_ok != akd_ok {
+                    let bytes = edited
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>();
+                    return Err(TestCaseError::fail(format!(
+                        "rind {rind_ok}, akd_core {akd_ok}, proof {bytes}"
+                    )));
+                }
+            }
+        }
+
+        #[test]
+        fn matches_vrf_rfc9381(
+            seed: [u8; 32],
+            alpha in proptest::collection::vec(any::<u8>(), 0..=64),
+        ) {
+            use vrf_rfc9381::ec::p256::tai::{EcVrfP256Tai, EcVrfP256TaiSecretKey};
+            use vrf_rfc9381::{Prover, VRF};
+
+            let Ok(key) = SecretKey::from_bytes(&ECVRF_P256_SHA256_TAI, &seed) else {
+                return Ok(());
+            };
+            let suite = EcVrfP256Tai;
+            let Ok(theirs) = EcVrfP256TaiSecretKey::from_slice(&seed[..]) else {
+                return Err(TestCaseError::fail(
+                    "vrf-rfc9381 refused a canonical P-256 scalar",
+                ));
+            };
+            let (proof, output) = key.prove(&alpha).unwrap();
+            let their_bytes = suite.prove(&theirs, &alpha).unwrap();
+            ct::public_slice(&their_bytes[..]);
+            ct::public_slice(proof.as_ref());
+            ct::public_slice(output.as_ref());
+            prop_assert_eq!(&their_bytes[..], proof.as_ref());
+            let their_output = suite
+                .verify(&theirs.verifier(), &alpha, &their_bytes)
+                .unwrap();
+            ct::public_slice(their_output.as_slice());
+            prop_assert_eq!(their_output.as_slice(), output.as_ref());
+        }
     }
 }
