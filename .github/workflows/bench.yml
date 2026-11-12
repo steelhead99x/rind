@@ -15,6 +15,10 @@ env:
 
 jobs:
   bench:
+    # A dispatched run of a branch that carries the pinned X25519 job below
+    # skips the nightly matrix. The default branch has no such job, so its
+    # dispatches still run this one.
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -78,6 +82,7 @@ jobs:
   # assembly, which aws-lc-sys's cc builder builds only below opt-level 3 and
   # its CMake builder, its default without assembly, only at 0.
   native:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     name: native (${{ matrix.target }}${{ matrix.portable && ', portable' || '' }}${{ matrix.cpu && format(', {0}', matrix.cpu) || '' }})
     strategy:
       fail-fast: false
@@ -361,3 +366,59 @@ jobs:
       - name: Gate
         shell: bash
         run: admin/bench-report gate .tmp/run --previous .tmp/previous | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # quest/m3/aarch64-x25519.md: one core, the two benches, every library the
+  # harness times. Runs only when this branch's workflow is dispatched.
+  x25519-pinned:
+    if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+
+      - name: Install OpenSSL
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+
+      - name: Record the CPU
+        run: |
+          {
+            echo "nproc=$(nproc)"
+            lscpu
+            echo "--- affinity of a pinned child ---"
+            taskset -c 0 grep -E 'Cpus_allowed|Pid' /proc/self/status
+          } | tee cpu.txt
+
+      - name: Build the benchmarks
+        run: cargo bench -p rind-bench --bench x25519 --bench ed25519 --features __bench_openssl --no-run
+
+      - name: Measure on one core
+        run: taskset -c 0 cargo bench -p rind-bench --bench x25519 --bench ed25519 --features __bench_openssl -- --noplot
+
+      - name: Summarize
+        run: |
+          find target/criterion -path '*/new/benchmark.json' | sort |
+            while read -r f; do
+              jq -c --slurpfile e "${f%benchmark.json}estimates.json" \
+                '{id: .full_id, ns: ($e[0].slope // $e[0].mean).point_estimate}' "$f"
+            done |
+            jq -s --arg cpu "$(lscpu | sed -n 's/^Model name: *//p' | head -n1)" \
+              --arg commit "$GITHUB_SHA" \
+              '{schema: 1, cpu: $cpu, commit: $commit, results: .}' > bench-results.json
+          jq -r '.results[] | "\(.ns) \(.id)"' bench-results.json | sort -k2 | tee bench-results.txt
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: x25519-aarch64
+          path: |
+            bench-results.json
+            bench-results.txt
+            cpu.txt
