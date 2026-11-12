@@ -295,20 +295,41 @@ fn fill_segment(
             block_index = ct::into_public(block_index);
         }
 
-        let reference = memory[ref_lane as usize * lane_length as usize + block_index as usize];
-        let previous = memory[prev as usize];
+        let reference = ref_lane as usize * lane_length as usize + block_index as usize;
+        let (next, previous, reference) = split(memory, curr as usize, prev as usize, reference);
         let with_xor = pass != 0;
-        compress(
-            fill,
-            &mut memory[curr as usize],
-            &previous,
-            &reference,
-            with_xor,
-        );
+        compress(fill, next, previous, reference, with_xor);
 
         curr += 1;
         prev += 1;
     }
+}
+
+/// The block at `curr`, to overwrite, and the blocks at `prev` and `reference`,
+/// borrowed in place rather than copied out of the matrix.
+///
+/// RFC 9106 never names the block being computed as an input, so neither
+/// index is `curr`; if one were, the index below wraps past the end and the
+/// bounds check panics. Both indexes are public here: the data-dependent half
+/// declassified them above, and the data-independent half computes them from
+/// public parameters, so the comparison with `curr` is not a secret branch.
+fn split(
+    memory: &mut [Block],
+    curr: usize,
+    prev: usize,
+    reference: usize,
+) -> (&mut Block, &Block, &Block) {
+    let (before, rest) = memory.split_at_mut(curr);
+    let (next, after) = rest.split_first_mut().expect("curr is inside the matrix");
+    let (before, after): (&[Block], &[Block]) = (before, after);
+    let pick = |i: usize| {
+        if i < curr {
+            &before[i]
+        } else {
+            &after[i.wrapping_sub(curr + 1)]
+        }
+    };
+    (next, pick(prev), pick(reference))
 }
 
 /// How many blocks of this lane the reference may name, RFC 9106 section 3.4.2.
