@@ -117,12 +117,13 @@ with portable Rust in place of the assembly armv7 runs regardless.
 
 - aarch64 chooses s2n-bignum's schedule by the multiplier for X25519,
   Ed25519, the P-256, P-384, and P-521 scalar multiplications, and RSA's
-  16-word and 32-word products. Linux selects the narrow schedules only when
-  every online core is Cortex-A72, Cortex-A76, or Neoverse N1. Apple, Neoverse
-  V1, V2, V3, and N2, Cobalt 100, a mixed list, and a core rind does not
-  recognise keep the `_alt` schedules. A sandbox that cannot read
-  `/proc/cpuinfo`, Android, and Windows on ARM do too: they never see a part
-  list, so they do not switch to the narrow schedules. Each imported narrow
+  16-word and 32-word products. Linux and Android select the narrow schedules
+  only when every online core is Cortex-A72, Cortex-A76, or Neoverse N1. Apple,
+  Neoverse V1, V2, V3, and N2, Cobalt 100, a mixed list, and a core rind does
+  not recognise keep the `_alt` schedules. A sandbox that cannot read
+  `/proc/cpuinfo` and Windows on ARM do too: they never see a part list, so
+  they do not switch to the narrow schedules, even when `MIDR_EL1` names a
+  narrow core. Each imported narrow
   routine has a HOL Light correctness proof that embeds that object's bytes.
   `admin/prove-bytes` checks those bytes against the routine's `asm!` block
   in rind's release build, the comparison
