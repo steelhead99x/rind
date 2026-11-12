@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! The last block of a SHA-1 or SHA-256 message, padded in registers.
+//! The last block of a SHA-1 message, padded in registers.
 //!
 //! Padding in memory writes the 0x80 and the length with stores narrower
 //! than the routines' 16-byte loads of them, which cannot forward, so the

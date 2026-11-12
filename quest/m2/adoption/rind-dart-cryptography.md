@@ -8,12 +8,8 @@ and its existing code runs on rind.
 
 ## Plan
 
-- Decided with the maintainer on 2026-11-04 (see [rind for Dart](/quest/m2/adoption/rind-dart.md)).
+- Decided with the maintainer on 2026-11-04, when planning [rind for Dart](/rind-dart/README.md).
 - Algorithms rind lacks (BLAKE2, and Argon2 but for Argon2id without a secret key or associated data) throw `cryptography`'s unsupported
   error rather than delegating to its Dart implementation, unless the
   interface itself composes backends at setup; check when starting.
 - Run `cryptography`'s own test suite against it.
-
-## Required
-
-- [rind for Dart and Flutter](/quest/m2/adoption/rind-dart.md) - the package this builds on
