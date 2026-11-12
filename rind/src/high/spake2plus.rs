@@ -385,14 +385,7 @@ impl VerifierRecord {
         let v = secret_point(self.l.mul(&y))?;
         let keys = schedule_keys(
             suite.schedule,
-            &transcript(
-                &labels,
-                prover.as_ref(),
-                share_v.as_ref(),
-                z.as_slice(),
-                v.as_slice(),
-                &self.w0,
-            )?,
+            &transcript(&labels, prover.as_ref(), share_v.as_ref(), &z, &v, &self.w0),
         )?;
         let confirm_v: Confirm<S> = mac(keys.verifier_key(), prover.as_ref());
         let confirm_p: Confirm<S> = mac(keys.prover_key(), share_v.as_ref());
@@ -463,10 +456,10 @@ impl<S> ProverAwaiting<S> {
                 &self.labels,
                 &self.share_p,
                 verifier.as_ref(),
-                z.as_slice(),
-                v.as_slice(),
+                &z,
+                &v,
                 &self.w0,
-            )?,
+            ),
         )?;
         let expect: Confirm<S> = mac(keys.verifier_key(), &self.share_p);
         let confirm_p: Confirm<S> = mac(keys.prover_key(), verifier.as_ref());
@@ -573,28 +566,27 @@ impl Labels {
 impl Zeroable for Label {}
 impl Zeroable for Labels {}
 impl Zeroable for Schedule {}
-impl<S> Zeroable for Confirm<S> {}
 
+/// Both confirmation keys and the shared key. Each is `len` bytes: 32 for
+/// RFC 9383, 16 for draft-01.
 struct Keys {
     prover: [u8; 32],
-    prover_len: usize,
     verifier: [u8; 32],
-    verifier_len: usize,
     shared: [u8; 32],
-    shared_len: usize,
+    len: usize,
 }
 
 impl Keys {
     fn prover_key(&self) -> &[u8] {
-        &self.prover[..self.prover_len]
+        &self.prover[..self.len]
     }
 
     fn verifier_key(&self) -> &[u8] {
-        &self.verifier[..self.verifier_len]
+        &self.verifier[..self.len]
     }
 
     fn shared(&self) -> &[u8] {
-        &self.shared[..self.shared_len]
+        &self.shared[..self.len]
     }
 }
 
@@ -628,21 +620,10 @@ fn random_scalar() -> Result<Scalar, Error> {
     Err(Error::RngFailed)
 }
 
-struct EncodedPoint {
-    bytes: [u8; Affine::BYTES],
-    len: u8,
-}
-
-impl EncodedPoint {
-    fn as_slice(&self) -> &[u8] {
-        &self.bytes[..usize::from(self.len)]
-    }
-}
-
 /// Uncompressed SEC 1 encoding after a curve check. `public` declassifies
 /// the bytes. An off-curve point is a protocol rejection: a hostile share
 /// can produce one, and that is not an internal fault.
-fn encode(point: Affine, public: bool) -> Result<EncodedPoint, Error> {
+fn encode(point: Affine, public: bool) -> Result<[u8; Affine::BYTES], Error> {
     let bytes = point.to_uncompressed();
     if !ct::into_public(point.on_curve()) {
         return Err(Error::BadSignature);
@@ -650,21 +631,17 @@ fn encode(point: Affine, public: bool) -> Result<EncodedPoint, Error> {
     if public {
         ct::public_slice(&bytes);
     }
-    Ok(EncodedPoint {
-        bytes,
-        len: Affine::BYTES as u8,
-    })
+    Ok(bytes)
 }
 
 fn publish<S>(point: Affine) -> Result<Share<S>, Error> {
-    let encoded = encode(point, true)?;
     Ok(Share {
-        bytes: encoded.bytes,
+        bytes: encode(point, true)?,
         _kind: PhantomData,
     })
 }
 
-fn secret_point(point: Affine) -> Result<EncodedPoint, Error> {
+fn secret_point(point: Affine) -> Result<[u8; Affine::BYTES], Error> {
     encode(point, false)
 }
 
@@ -680,14 +657,13 @@ fn transcript(
     z: &[u8],
     v: &[u8],
     w0: &Scalar,
-) -> Result<[u8; 32], Error> {
+) -> [u8; 32] {
     let mut hash = digest::Context::new(&digest::SHA256);
     absorb(&mut hash, labels.context.as_slice());
     absorb(&mut hash, labels.id_prover.as_slice());
     absorb(&mut hash, labels.id_verifier.as_slice());
-    let (m, n) = points()?;
-    absorb(&mut hash, &m.to_uncompressed());
-    absorb(&mut hash, &n.to_uncompressed());
+    absorb(&mut hash, &M_UNCOMPRESSED);
+    absorb(&mut hash, &N_UNCOMPRESSED);
     absorb(&mut hash, share_p);
     absorb(&mut hash, share_v);
     absorb(&mut hash, z);
@@ -696,7 +672,7 @@ fn transcript(
     let digest = hash.finish();
     let mut out = [0u8; 32];
     out.copy_from_slice(digest.as_ref());
-    Ok(out)
+    out
 }
 
 fn expand(prk: &hkdf::Prk, info: &[u8], out: &mut [u8]) -> Result<(), Error> {
@@ -708,11 +684,9 @@ fn expand(prk: &hkdf::Prk, info: &[u8], out: &mut [u8]) -> Result<(), Error> {
 fn schedule_keys(schedule: Schedule, transcript_hash: &[u8; 32]) -> Result<Keys, Error> {
     let mut keys = Keys {
         prover: [0; 32],
-        prover_len: 0,
         verifier: [0; 32],
-        verifier_len: 0,
         shared: [0; 32],
-        shared_len: 0,
+        len: 0,
     };
     match schedule {
         Schedule::Rfc9383 => {
@@ -720,11 +694,9 @@ fn schedule_keys(schedule: Schedule, transcript_hash: &[u8; 32]) -> Result<Keys,
             let mut confirm = [0u8; 64];
             expand(&prk, b"ConfirmationKeys", &mut confirm)?;
             keys.prover.copy_from_slice(&confirm[..32]);
-            keys.prover_len = 32;
             keys.verifier.copy_from_slice(&confirm[32..]);
-            keys.verifier_len = 32;
             expand(&prk, b"SharedKey", &mut keys.shared)?;
-            keys.shared_len = 32;
+            keys.len = 32;
         }
         Schedule::Draft01 => {
             // Appendix B's hash splits as Ka || Ke. Ka is 16 bytes.
@@ -732,11 +704,9 @@ fn schedule_keys(schedule: Schedule, transcript_hash: &[u8; 32]) -> Result<Keys,
             let mut confirm = [0u8; 32];
             expand(&prk, b"ConfirmationKeys", &mut confirm)?;
             keys.prover[..16].copy_from_slice(&confirm[..16]);
-            keys.prover_len = 16;
             keys.verifier[..16].copy_from_slice(&confirm[16..]);
-            keys.verifier_len = 16;
             keys.shared[..16].copy_from_slice(&transcript_hash[16..]);
-            keys.shared_len = 16;
+            keys.len = 16;
         }
     }
     Ok(keys)
@@ -1138,8 +1108,7 @@ mod tests {
             &z.to_uncompressed(),
             &v.to_uncompressed(),
             &w0s,
-        )
-        .unwrap();
+        );
         let keys = schedule_keys(Schedule::Rfc9383, &tt).unwrap();
         let verifier = VerifierRecord::from_w1(&w0, &w1).unwrap();
         let (got_share, got_confirm, state) = verifier
@@ -1182,8 +1151,7 @@ mod tests {
             &z.to_uncompressed(),
             &v.to_uncompressed(),
             &w0s,
-        )
-        .unwrap();
+        );
         let keys = schedule_keys(Schedule::Rfc9383, &tt).unwrap();
         let (confirm_p, key) = prover
             .finish(
