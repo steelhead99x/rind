@@ -13,4 +13,6 @@ acvptool -wrapper target/debug/rind-acvp -json prompts.json
 
 A debug build, and a release build with `--cfg rind_cpu_disable`, honours `RIND_CPU_DISABLE_<feature>`, so one process is one CPU path. The FIPS module's load-time mask is still [its quest](../quest/m4/fips/module.md). AES-GCM with an internal IV is refused until [that quest](../quest/m4/fips/gcm-iv.md). RSA key generation is not advertised: rind has no FIPS 186-5 generation from the server's seeds or candidates.
 
-rind's `__acvp` feature exists only for this binary. A leading `__` marks it internal, as `__ctgrind` is, and it is not a supported API. The binary enables `wipe` as well, so the decapsulation key, the shared secrets, and the expanded ML-DSA private key are wiped on drop.
+rind's `__acvp` feature exists only for this binary. A leading `__` marks it internal, as `__ctgrind` is, and it is not a supported API. The binary enables `wipe` as well, so the decapsulation key, the shared secrets, the expanded ML-DSA private key, an ECDSA private scalar, and an ECDH shared secret are wiped on drop.
+
+`hmacDRBG` is answered by a DRBG in this crate, so those vectors test the wrapper rather than rind. The handler switches to rind's DRBG once [moq-dev/rind#677](https://github.com/moq-dev/rind/pull/677) lands.

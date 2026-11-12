@@ -49,6 +49,24 @@ impl Reply {
             })
             .collect()
     }
+
+    /// Whether span `index` is a [`rind::acvp::SecretBuf`] rather than a plain
+    /// buffer. A private scalar and a shared secret are.
+    pub fn is_secret(&self, index: usize) -> bool {
+        matches!(self.parts.get(index), Some(Part::Secret(_)))
+    }
+
+    /// Moves the wiping buffer at `index` out. The span stays, empty, so
+    /// `Drop` still runs.
+    pub fn take_secret(&mut self, index: usize) -> Option<rind::acvp::SecretBuf> {
+        match self.parts.get_mut(index) {
+            Some(Part::Secret(buf)) => {
+                let empty = Box::new(rind::acvp::SecretBuf::from_slice(&[]));
+                Some(*std::mem::replace(buf, empty))
+            }
+            _ => None,
+        }
+    }
 }
 
 impl std::ops::Index<usize> for Reply {
@@ -584,18 +602,21 @@ fn ecdh(curve: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let key = if private.is_empty() {
         PrivateKey::generate(alg).map_err(|err| err.to_string())?
     } else {
-        PrivateKey::from_scalar(alg, &pad(private, field)?).map_err(|err| err.to_string())?
+        let mut scalar = pad(private, field)?;
+        let key = PrivateKey::from_scalar(alg, &scalar).map_err(|err| err.to_string())?;
+        wipe(&mut scalar);
+        key
     };
     let point = key.public_key().as_ref();
     if point.len() != 1 + field * 2 || point[0] != 0x04 {
         return Err("ECDH public key".into());
     }
-    let shared = key.agree(&peer).map_err(|err| err.to_string())?;
-    public_reply(vec![
-        point[1..1 + field].to_vec(),
-        point[1 + field..].to_vec(),
-        shared.as_ref().to_vec(),
-    ])
+    let agreed = key.agree(&peer).map_err(|err| err.to_string())?;
+    let shared = rind::acvp::SecretBuf::from_slice(agreed.as_ref());
+    Ok(with_secret(
+        vec![point[1..1 + field].to_vec(), point[1 + field..].to_vec()],
+        shared,
+    ))
 }
 
 fn pad(mut bytes: &[u8], len: usize) -> Result<Vec<u8>, String> {
@@ -616,7 +637,14 @@ fn ecdsa_keygen(args: &[Vec<u8>]) -> Result<Reply, String> {
     let alg = ecdsa_signer(curve)?;
     let key = EcdsaKeyPair::generate(alg).map_err(|err| err.to_string())?;
     let (x, y) = split_point(key.public_key().as_ref())?;
-    public_reply(vec![key.to_scalar().as_ref().to_vec(), x, y])
+    let scalar = rind::acvp::SecretBuf::from_slice(key.to_scalar().as_ref());
+    Ok(Reply {
+        parts: vec![
+            Part::Secret(Box::new(scalar)),
+            Part::Public(x),
+            Part::Public(y),
+        ],
+    })
 }
 
 fn ecdsa_keyver(args: &[Vec<u8>]) -> Result<Reply, String> {
@@ -1112,6 +1140,11 @@ fn rsa_primitive(args: &[Vec<u8>]) -> Result<Reply, String> {
     }
 }
 
+/// SP 800-90A HMAC_DRBG as this wrapper implements it.
+///
+/// This is not rind's DRBG, so an ACVP run of these commands tests the
+/// wrapper. Replace it with rind's `HmacDrbg` once moq-dev/rind#677 adds
+/// reseed and generate-with-additional-input.
 struct Drbg {
     hash: &'static hmac::Algorithm,
     k: Vec<u8>,
