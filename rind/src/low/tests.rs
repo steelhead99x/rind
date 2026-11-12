@@ -16,26 +16,6 @@ fn bignum_mux() {
     bignum_mux_equiv(u64::MAX, &[1; 1], &[0; 1]);
 }
 
-#[test]
-fn zero_bytes() {
-    for n in 0..1024 {
-        for offset in 0..4 {
-            zero_bytes_equiv(offset, n);
-        }
-    }
-}
-
-// Zeroes `len` bytes from `offset` in, so the wide stores start unaligned too,
-// and checks the bytes either side are untouched.
-fn zero_bytes_equiv(offset: usize, len: usize) {
-    let mut expect = vec![0xffu8; offset + len + 1];
-    expect[offset..offset + len].fill(0);
-    let mut bytes = vec![0xffu8; offset + len + 1];
-    // SAFETY: `bytes` holds `len` writable bytes from `offset`.
-    unsafe { super::zero_bytes(bytes[offset..].as_mut_ptr(), len) };
-    assert_eq!(expect, bytes);
-}
-
 // ld64 splits a Mach-O object into atoms at each CFI frame, and can
 // dead-strip one that is reached only by branches with no relocation, such as
 // a routine joined into another's naked function.

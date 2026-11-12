@@ -1,8 +1,9 @@
 name: prove
 
 # Checks that the assembly rind imports is the object code its upstream's
-# proofs check, and rind's HOL Light proofs in `proofs/hol-light/`, and
-# translates rind's Rust under proof to Lean and checks the proofs in
+# proofs check, and rind's HOL Light proofs in `proofs/hol-light/`,
+# cosimulates rind's additions to s2n-bignum's x86 model against the runner's
+# CPU, and translates rind's Rust under proof to Lean and checks the proofs in
 # `proofs/`. Too slow for `just ci`, so it runs nightly and on pull requests
 # that change rind's source, the proofs, the checks, s2n-bignum's pin, or the
 # flake that pins their tools.
@@ -48,6 +49,19 @@ jobs:
 
       - name: Prove
         run: nix develop .#hol-light --command admin/prove hol-light
+
+  cosim:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix
+
+      - name: Cosimulate
+        run: nix develop .#hol-light --command admin/prove cosim
 
   lean:
     runs-on: ubuntu-24.04

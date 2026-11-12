@@ -9,6 +9,7 @@ proofs/Rind/*/Funs.lean
 proofs/Rind/*/Kdf/Types.lean
 proofs/Rind/*/Kdf/Funs.lean
 proofs/Rind/Aarch64/X25519.lean
+proofs/Rind/Aarch64/P384.lean
 proofs/Rind/Aarch64/Dispatch.lean
 proofs/Rind/Aarch64/DigestAlgorithm.lean
 proofs/Rind/Aarch64/DigestDispatch.lean
@@ -28,5 +29,6 @@ proofs/Rind/Aarch64/HmacApi.lean
 proofs/Rind/Aarch64/DigestApi.lean
 proofs/Rind/Aarch64/Hkdf.lean
 proofs/Rind/Aarch64/Pbkdf2.lean
+proofs/Rind/Aarch64/Sha3.lean
 patch/*/Cargo.lock
 __pycache__/

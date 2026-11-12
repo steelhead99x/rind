@@ -12,7 +12,7 @@ use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey};
 const AWS_LC: &CryptoProvider = &aws_lc::DEFAULT_PROVIDER;
 
 fn rind() -> &'static CryptoProvider {
-    rind_jsonwebtoken::default_provider().unwrap()
+    &rind_jsonwebtoken::DEFAULT_PROVIDER
 }
 
 const MESSAGE: &[u8] = b"eyJhbGciOiJub25lIn0.eyJzdWIiOiJyaW5kIn0";

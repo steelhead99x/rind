@@ -36,7 +36,6 @@ fn hmac() {
 
     secret(&key);
     let mut context = rind_object_store::default_provider()
-        .unwrap()
         .hmac(DigestAlgorithm::Sha256, &key)
         .unwrap();
     context.update(b"2026");
@@ -54,7 +53,6 @@ fn rs256() {
         &include_bytes!("data/rsa2048.pkcs1.pem")[..],
     ] {
         let signer = rind_object_store::default_provider()
-            .unwrap()
             .sign(SigningAlgorithm::RS256, pem)
             .unwrap();
         let signature = signer.sign(b"message").unwrap();

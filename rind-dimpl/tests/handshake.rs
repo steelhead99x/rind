@@ -56,7 +56,7 @@ struct Side {
 impl Side {
     fn provider(self) -> CryptoProvider {
         match self.rind {
-            true => rind_dimpl::default_provider().unwrap(),
+            true => rind_dimpl::default_provider(),
             false => aws_lc_rs::default_provider(),
         }
     }

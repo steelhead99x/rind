@@ -91,7 +91,7 @@ ring and aws-lc-rs item to rind's.
 
 The `rind` crate's own API covers AES-GCM, ChaCha20-Poly1305, and
 XChaCha20-Poly1305, QUIC header protection, X25519 and ECDH, ML-KEM-768,
-HPKE, ECDSA, Ed25519, ML-DSA, and RSA signatures, RSA-OAEP, SHA-1, SHA-2, and SHA-3,
+HPKE, ECDSA, Ed25519, ML-DSA, and RSA signatures, RSA blind signatures, RSA-OAEP, SHA-1, SHA-2, and SHA-3,
 HMAC, HKDF, PBKDF2, and AES key wrap. Each algorithm is a constant and each key
 type has one role, so misuse fails to compile:
 
@@ -125,12 +125,13 @@ Each crate's README shows its setup.
 | [rind-aws-lc-rs][] | aws-lc-rs 1.x's API, name for name, for every item rind backs |
 | [rind-dimpl][] | DTLS 1.2 and 1.3 through [dimpl](https://github.com/algesten/dimpl) |
 | [rind-str0m][] | WebRTC through [str0m](https://github.com/algesten/str0m) |
+| [rind-openmls][] | MLS through [OpenMLS](https://github.com/openmls/openmls) |
 | [rind-jsonwebtoken][] | JWTs through [jsonwebtoken](https://github.com/Keats/jsonwebtoken) |
 | [rind-object-store][] | S3, Azure, and GCS request signing through [object_store](https://github.com/apache/arrow-rs-object-store) |
 | [rind-rcgen][] | certificates through [rcgen](https://github.com/rustls/rcgen) |
-| [rind-dart][] | Dart and Flutter, through FFI: the `rind` package, unpublished until its first pub.dev release |
+| [rind-dart][] | Dart and Flutter, through FFI, as the `rind` package on [pub.dev](https://pub.dev/packages/rind) |
 | [rind-python][] | Python, as the `pyrind` package on PyPI, with rind's own API |
-| [pyrind-cryptography][] | Python, pyca/cryptography's `hazmat` API on pyrind, unpublished until its first PyPI release |
+| [pyrind-cryptography][] | Python, as the `pyrind-cryptography` package on PyPI, with pyca/cryptography's `hazmat` API on pyrind |
 
 ## Wiping keys
 
@@ -177,16 +178,14 @@ rind-rustls and the other adapters, and does nothing off Apple's platforms.
 ## Platforms
 
 rind has assembly for x86_64, aarch64, and 32-bit arm from ARMv7 on, and runs
-portable Rust on any other architecture (on 32-bit x86, only with Rust 1.94
-rather than its 1.90 MSRV). CI tests Linux (glibc and musl), macOS, and
-Windows on x86_64 and aarch64, Linux and Windows on 32-bit x86, iOS in the
-simulator, Android on aarch64, armv7, ARMv5TE, x86_64, and 32-bit x86, and
-Linux on armv7, ARMv6, big-endian s390x, riscv64gc (glibc and musl),
-loongarch64, powerpc64le, and big-endian powerpc64 and powerpc. Any
-x86_64 CPU runs it,
-little-endian aarch64 needs NEON, and every operation panics on a CPU missing a feature
-rind requires: call `rind::cpu::check()` at startup to get an error naming
-it instead.
+portable Rust on any other architecture. CI tests Linux (glibc and musl),
+macOS, and Windows on x86_64 and aarch64, Linux and Windows on 32-bit x86, iOS
+in the simulator, Android on aarch64, armv7, ARMv5TE, x86_64, and 32-bit x86,
+and Linux on armv7, ARMv6, big-endian s390x, riscv64gc (glibc and musl),
+loongarch64, powerpc64le, and big-endian powerpc64 and powerpc. Any x86_64 CPU
+runs it, little-endian aarch64 needs NEON, and every operation panics on a CPU
+missing a feature rind requires: call `rind::cpu::check()` at startup to get an
+error naming it instead.
 [PLATFORMS.md][platforms] lists what each architecture runs without each
 feature.
 
@@ -255,6 +254,7 @@ from other projects keeps its source's license, which [LICENSE] lists.
 [rind-aws-lc-rs]: https://github.com/moq-dev/rind/tree/main/rind-aws-lc-rs
 [rind-dimpl]: https://github.com/moq-dev/rind/tree/main/rind-dimpl
 [rind-str0m]: https://github.com/moq-dev/rind/tree/main/rind-str0m
+[rind-openmls]: https://github.com/moq-dev/rind/tree/main/rind-openmls
 [rind-jsonwebtoken]: https://github.com/moq-dev/rind/tree/main/rind-jsonwebtoken
 [rind-object-store]: https://github.com/moq-dev/rind/tree/main/rind-object-store
 [rind-rcgen]: https://github.com/moq-dev/rind/tree/main/rind-rcgen

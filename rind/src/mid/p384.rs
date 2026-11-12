@@ -88,12 +88,7 @@ impl VerifyingKey {
         let more = self
             .more_odd_multiples
             .get_or_build(|| AffineMontPoint::public_more_odd_multiples(&odd_multiples));
-        let point = match more {
-            Some(more) => {
-                JacobianMontPoint::public_twin_multiply(&u1, &u2, &[&odd_multiples, more])
-            }
-            None => JacobianMontPoint::public_twin_multiply(&u1, &u2, &[&odd_multiples]),
-        };
+        let point = JacobianMontPoint::public_twin_multiply(&u1, &u2, &odd_multiples, more);
 
         if point.public_is_infinity() {
             return Err(Error::BadSignature);
@@ -283,9 +278,8 @@ impl AffineMontPoint {
         let y = util::big_endian_slice_to_u64x6(y).unwrap();
 
         // A coordinate at or above p would be reduced, giving the point a
-        // second encoding.  Public, so this need not be constant time.
-        let below_p = |v: &[u64; 6]| v.iter().rev().lt(CURVE_PRIME.iter().rev());
-        if !below_p(&x) || !below_p(&y) {
+        // second encoding.
+        if !public_below_p(&x) || !public_below_p(&y) {
             return Err(KeyFormatError::NotOnCurve.into());
         }
 
@@ -311,7 +305,7 @@ impl AffineMontPoint {
             None => return Err(KeyFormatError::WrongLength.into()),
         };
         let x = util::big_endian_slice_to_u64x6(x).ok_or(KeyFormatError::WrongLength)?;
-        if !x.iter().rev().lt(CURVE_PRIME.iter().rev()) {
+        if !public_below_p(&x) {
             return Err(KeyFormatError::NotOnCurve.into());
         }
 
@@ -548,14 +542,11 @@ impl JacobianMontPoint {
     /// added last, each is below `2^380`, so they are unequal mod n too.  At
     /// window 76, equal points would need the accumulator to be
     /// `16 * 2^380 - n`, making `scalar` `2^385 - n`, which is above n.
+    ///
+    /// The windows and tables are indexed rather than zipped, which Aeneas
+    /// cannot translate.
     fn base_multiply(scalar: &Scalar) -> Self {
-        let mut windows = [(0u8, 0u8); 77];
-        for ((digit, sign, _), window) in scalar
-            .reversed_booth_recoded_w5()
-            .zip(windows.iter_mut().rev())
-        {
-            *window = (digit, sign);
-        }
+        let windows = scalar.booth_w5();
 
         let mut result = Self::infinity();
         for tooth in (0..4).rev() {
@@ -563,13 +554,16 @@ impl JacobianMontPoint {
                 result.double_inplace_n(5);
             }
 
-            for (table, &(digit, sign)) in precomp::CURVE_GENERATOR_PRECOMP_COMB
-                .iter()
-                .zip(windows.iter().skip(tooth).step_by(4))
-            {
-                let mut tmp = AffineMontPoint::lookup_comb(table, digit);
-                tmp.maybe_negate_y(sign);
-                result.add_inplace_affine(&tmp, digit);
+            // Only tooth 0 has a window, 76, in the last table.
+            for j in 0..20 {
+                let w = 4 * j + tooth;
+                if w < 77 {
+                    let (digit, sign) = windows[w];
+                    let table = &precomp::CURVE_GENERATOR_PRECOMP_COMB[j];
+                    let mut tmp = AffineMontPoint::lookup_comb(table, digit);
+                    tmp.maybe_negate_y(sign);
+                    result.add_inplace_affine(&tmp, digit);
+                }
             }
         }
 
@@ -598,50 +592,53 @@ impl JacobianMontPoint {
     fn multiply(scalar: &Scalar, point: &AffineMontPoint) -> Self {
         const { assert!(CURVE_ORDER[0] % 32 > 16) };
         let precomp = point.public_precomp_w5();
-        let mut terms = scalar.reversed_booth_recoded_w5();
+        let windows = scalar.booth_w5();
 
-        let (digit, _, _) = terms.next().unwrap();
-        let mut result = Self::lookup_w5(&precomp, digit, 0);
-        result.double_inplace_n(5);
-
-        for (digit, sign, last) in terms {
+        // The top window's digit is never negative.
+        let mut result = Self::lookup_w5(&precomp, windows[76].0, 0);
+        for w in (0..76).rev() {
+            result.double_inplace_n(5);
+            let (digit, sign) = windows[w];
             result.add_inplace(&Self::lookup_w5(&precomp, digit, sign));
-
-            if !last {
-                result.double_inplace_n(5);
-            }
         }
 
         result
     }
 
-    /// `g * G + p * P` for public scalars, given P's odd multiples in rows
-    /// of 8.
+    /// `g * G + p * P` for public scalars, given P, 3P, ..., 15P, and 17P,
+    /// ..., 31P if `more` holds them.
     ///
-    /// One chain of doublings serves both: P's digits are a NAF over
-    /// `odd_multiples`, width 5 for one row and 6 for two, and G's a width-5
-    /// NAF over the first comb table, which holds G to 16G.
+    /// One chain of doublings serves both: P's digits are a NAF over its odd
+    /// multiples, width 5 without `more` and 6 with it, and G's a width-5 NAF
+    /// over the first comb table, which holds G to 16G.
+    ///
+    /// The rows are two arguments, and the digits indexed rather than zipped,
+    /// as Aeneas cannot translate a slice of borrowed rows or the zip.
     fn public_twin_multiply(
         g: &Scalar,
         p: &Scalar,
-        odd_multiples: &[&[AffineMontPoint; 8]],
+        odd_multiples: &[AffineMontPoint; 8],
+        more: Option<&[AffineMontPoint; 8]>,
     ) -> Self {
-        let (mut g_digits, mut p_digits) = ([0; 385], [0; 385]);
-        util::public_naf::<5>(&g.0, &mut g_digits);
-        match odd_multiples.len() {
-            1 => util::public_naf::<5>(&p.0, &mut p_digits),
-            _ => util::public_naf::<6>(&p.0, &mut p_digits),
-        }
+        let g_digits = g.public_naf::<5>();
+        let p_digits = match more {
+            None => p.public_naf::<5>(),
+            Some(_) => p.public_naf::<6>(),
+        };
         let g_multiples = &precomp::CURVE_GENERATOR_PRECOMP_COMB[0];
 
         let mut result = Self::infinity();
-        for (g_digit, p_digit) in g_digits.iter().zip(&p_digits).rev() {
+        for i in (0..g_digits.len()).rev() {
+            let (g_digit, p_digit) = (&g_digits[i], &p_digits[i]);
             if !result.public_is_infinity() {
                 result = result.double();
             }
             if *p_digit != 0 {
                 let i = usize::from(p_digit.unsigned_abs() / 2);
-                let mut tmp = odd_multiples[i / 8][i % 8];
+                let mut tmp = match more {
+                    Some(more) if i >= 8 => more[i - 8],
+                    _ => odd_multiples[i],
+                };
                 if *p_digit < 0 {
                     tmp.negate_y();
                 }
@@ -737,13 +734,13 @@ impl JacobianMontPoint {
         }
         let mut r_plus_n = [0; 6];
         let mut carry = false;
-        for (sum, (r, n)) in r_plus_n.iter_mut().zip(r.0.iter().zip(CURVE_ORDER)) {
-            let (s, c1) = r.overflowing_add(n);
+        for i in 0..6 {
+            let (s, c1) = r.0[i].overflowing_add(CURVE_ORDER[i]);
             let (s, c2) = s.overflowing_add(u64::from(carry));
-            *sum = s;
+            r_plus_n[i] = s;
             carry = c1 | c2;
         }
-        !carry && r_plus_n.iter().rev().lt(CURVE_PRIME.iter().rev()) && is(r_plus_n)
+        !carry && public_below_p(&r_plus_n) && is(r_plus_n)
     }
 
     #[must_use]
@@ -816,6 +813,20 @@ impl JacobianMontPoint {
         let result = FieldElement::select(&y, &neg_y, sign);
         self.xyz[Self::Y].copy_from_slice(&result.0);
     }
+}
+
+/// Whether `v` is below p, for public `v`.
+///
+/// A loop from the top limb rather than `Iterator::lt`, which Aeneas cannot
+/// translate.
+fn public_below_p(v: &[u64; 6]) -> bool {
+    for i in 0..6 {
+        let j = 5 - i;
+        if v[j] != CURVE_PRIME[j] {
+            return v[j] < CURVE_PRIME[j];
+        }
+    }
+    false
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -1041,10 +1052,49 @@ impl Scalar {
         }
     }
 
-    /// Iterator of 76 * 5-bit elements, LSB first, sign bit and final flag is separate
-    fn reversed_booth_recoded_w5(&self) -> BoothRecodeW5 {
-        BoothRecodeW5::new(self)
+    /// The 77 Booth-recoded 5-bit windows of this scalar, lowest first:
+    /// each a digit of at most 16 and its sign, 1 for negative, whose sum
+    /// of `±digit * 32^w` is the scalar.
+    ///
+    /// Window `w` recodes the six bits from bit `5w - 1`, the bit below the
+    /// scalar being zero. Its position is public, so the shifts reveal
+    /// nothing of the scalar.
+    fn booth_w5(&self) -> [(u8, u8); 77] {
+        let mut windows = [(0, 0); 77];
+        windows[0] = booth_recode_w5(((self.0[0] << 1) & 0x3f) as u8);
+        // Indexed rather than `iter_mut`, which Aeneas cannot translate.
+        #[allow(clippy::needless_range_loop)]
+        for w in 1..77 {
+            let bit = 5 * w - 1;
+            let (word, shift) = (bit / 64, bit % 64);
+            let mut value = self.0[word] >> shift;
+            if shift > 58 && word < 5 {
+                value |= self.0[word + 1] << (64 - shift);
+            }
+            windows[w] = booth_recode_w5((value & 0x3f) as u8);
+        }
+        windows
     }
+
+    /// The width-`W` non-adjacent form of this scalar, by
+    /// [`util::public_naf`].
+    fn public_naf<const W: u32>(&self) -> [i8; 385] {
+        let mut digits = [0; 385];
+        util::public_naf::<W>(&self.0, &mut digits);
+        digits
+    }
+}
+
+/// The signed digit and sign of a 6-bit Booth window, as the comment above
+/// BoringSSL's `ec_GFp_nistp_recode_scalar_bits` describes.
+fn booth_recode_w5(v: u8) -> (u8, u8) {
+    let sign = !((v >> 5).wrapping_sub(1));
+
+    let d = (1u16 << 6).wrapping_sub(v as u16).wrapping_sub(1) as u8;
+    let d = (d & sign) | (v & !sign);
+    let d = (d >> 1).wrapping_add(d & 1);
+
+    (d, sign & 1)
 }
 
 #[cfg(test)]
@@ -1072,69 +1122,6 @@ impl Iterator for Bits<'_> {
         }
 
         Some(v as u8)
-    }
-}
-
-struct BoothRecodeW5 {
-    // little endian
-    bytes: [u8; 49],
-    index: usize,
-}
-
-impl BoothRecodeW5 {
-    fn new(scalar: &Scalar) -> Self {
-        let mut bytes = [0u8; 49];
-
-        bytes[0..8].copy_from_slice(&scalar.0[0].to_le_bytes());
-        bytes[8..16].copy_from_slice(&scalar.0[1].to_le_bytes());
-        bytes[16..24].copy_from_slice(&scalar.0[2].to_le_bytes());
-        bytes[24..32].copy_from_slice(&scalar.0[3].to_le_bytes());
-        bytes[32..40].copy_from_slice(&scalar.0[4].to_le_bytes());
-        bytes[40..48].copy_from_slice(&scalar.0[5].to_le_bytes());
-
-        Self { bytes, index: 380 }
-    }
-
-    fn recode(v: u8) -> (u8, u8) {
-        // see the comment above boringssl's `ec_GFp_nistp_recode_scalar_bits` for
-        // references
-        let sign = !((v >> 5).wrapping_sub(1));
-
-        let d = (1u16 << 6).wrapping_sub(v as u16).wrapping_sub(1) as u8;
-        let d = (d & sign) | (v & !sign);
-        let d = (d >> 1).wrapping_add(d & 1);
-
-        (d, sign & 1)
-    }
-}
-
-impl Iterator for BoothRecodeW5 {
-    type Item = (u8, u8, bool);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        const MASK: u8 = (1 << (5 + 1)) - 1;
-
-        match self.index {
-            5..=380 => {
-                let offset = (self.index - 1) / 8;
-                let shift = (self.index - 1) % 8;
-                let value = (((self.bytes[offset] as u16) | ((self.bytes[offset + 1] as u16) << 8))
-                    >> shift) as u8
-                    & MASK;
-                let (digit, sign) = Self::recode(value);
-                self.index -= 5;
-                Some((digit, sign, false))
-            }
-
-            0 => {
-                let value = (self.bytes[0] << 1) & MASK;
-                let (digit, sign) = Self::recode(value);
-                self.index = usize::MAX;
-                Some((digit, sign, true))
-            }
-
-            _ => None,
-        }
     }
 }
 
@@ -1316,15 +1303,15 @@ mod tests {
                 expected
             );
             let zero = Scalar::default();
-            for rows in [&[&odd_multiples][..], &[&odd_multiples, &more]] {
+            for more in [None, Some(&more)] {
                 assert_eq!(
-                    JacobianMontPoint::public_twin_multiply(&zero, &scalar, rows)
+                    JacobianMontPoint::public_twin_multiply(&zero, &scalar, &odd_multiples, more)
                         .as_affine()
                         .xy,
                     expected
                 );
                 assert_eq!(
-                    JacobianMontPoint::public_twin_multiply(&scalar, &zero, rows)
+                    JacobianMontPoint::public_twin_multiply(&scalar, &zero, &odd_multiples, more)
                         .as_affine()
                         .xy,
                     CURVE_GENERATOR.slow_multiply(&scalar).xy
@@ -1355,8 +1342,8 @@ mod tests {
         ] {
             let sum = g.add(&p);
             let expected = CURVE_GENERATOR.slow_multiply(&sum).xy;
-            for rows in [&[&odd_multiples][..], &[&odd_multiples, &more]] {
-                let result = JacobianMontPoint::public_twin_multiply(&g, &p, rows);
+            for more in [None, Some(&more)] {
+                let result = JacobianMontPoint::public_twin_multiply(&g, &p, &odd_multiples, more);
                 assert_eq!(result.as_affine().xy, expected);
                 // Verification refuses a sum at infinity by this check.
                 assert_eq!(result.public_is_infinity(), sum.0 == [0; 6]);
@@ -1373,9 +1360,9 @@ mod tests {
             (Scalar::small_u64(6), Scalar::small_u64(3)),
         ] {
             let expected = CURVE_GENERATOR.slow_multiply(&g.add(&p).add(&p)).xy;
-            for rows in [&[&odd_multiples][..], &[&odd_multiples, &more]] {
+            for more in [None, Some(&more)] {
                 assert_eq!(
-                    JacobianMontPoint::public_twin_multiply(&g, &p, rows)
+                    JacobianMontPoint::public_twin_multiply(&g, &p, &odd_multiples, more)
                         .as_affine()
                         .xy,
                     expected

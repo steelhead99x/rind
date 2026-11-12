@@ -1,6 +1,8 @@
 import Rind.Aarch64.Funs
 import Rind.Spec
 import Rind.Ed25519
+import Rind.Keccak
+import Rind.Nist
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
@@ -10,8 +12,9 @@ Each axiom restates one of s2n-bignum's HOL Light theorems, at the revision
 rind transliterates (b4f17ee7), about the opaque Rust wrapper
 `admin/parse-asm` generates around that routine. rind's aarch64 X25519 runs
 the `_alt` sources under the plain names, and so does its Ed25519 for the
-scalar multiplications, decoding, and `bignum_madd_n25519`. The theorem's preconditions hold
-for every call from safe Rust: the `&mut` result cannot overlap an input or
+scalar multiplications, decoding, and `bignum_madd_n25519`, and its P-384 for
+field multiplication and squaring and the point routines. The theorem's
+preconditions hold for every call from safe Rust: the `&mut` result cannot overlap an input or
 the routine's code or table, the routine's stack lies below the caller's
 frame, and the ABI keeps the stack pointer 16-byte aligned. Its total correctness
 (`ensures`) gives the `ok`.
@@ -257,6 +260,65 @@ axiom p256_montjmixadd_spec (p3 p1 : Std.Array U64 12#usize) (p2 : Std.Array U64
       ∀ P1 P2, p256Represents P1 (tripleNat p1.val) → p256Represents2 P2 (pairNat p2.val) →
         P1 ≠ P2 → p256Represents (p256Add P1 P2) (tripleNat r.val) ⦄
 
+/-! ### P-384 -/
+
+/-- `BIGNUM_TOMONT_P384_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/bignum_tomont_p384.ml#L501 -/
+@[step]
+axiom bignum_tomont_p384_spec (z x : Std.Array U64 6#usize) :
+    low.aarch64.bignum_tomont_p384.bignum_tomont_p384 z x ⦃ r =>
+      wordsNat r.val = 2 ^ 384 * wordsNat x.val % p384 ⦄
+
+/-- `BIGNUM_DEMONT_P384_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/bignum_demont_p384.ml#L424 -/
+@[step]
+axiom bignum_demont_p384_spec (z x : Std.Array U64 6#usize) :
+    low.aarch64.bignum_demont_p384.bignum_demont_p384 z x ⦃ r =>
+      wordsNat x.val < p384 → wordsNat r.val = p384RInv * wordsNat x.val % p384 ⦄
+
+/-- `BIGNUM_ADD_P384_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/bignum_add_p384.ml#L171 -/
+@[step]
+axiom bignum_add_p384_spec (z x y : Std.Array U64 6#usize) :
+    low.aarch64.bignum_add_p384.bignum_add_p384 z x y ⦃ r =>
+      wordsNat x.val < p384 → wordsNat y.val < p384 →
+        wordsNat r.val = (wordsNat x.val + wordsNat y.val) % p384 ⦄
+
+/-- `BIGNUM_MONTMUL_P384_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/bignum_montmul_p384_alt.ml#L447 -/
+@[step]
+axiom bignum_montmul_p384_spec (z x y : Std.Array U64 6#usize) :
+    low.aarch64.bignum_montmul_p384.bignum_montmul_p384 z x y ⦃ r =>
+      wordsNat x.val * wordsNat y.val ≤ 2 ^ 384 * p384 →
+        wordsNat r.val = p384RInv * wordsNat x.val * wordsNat y.val % p384 ⦄
+
+/-- `BIGNUM_MONTSQR_P384_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/bignum_montsqr_p384_alt.ml#L386 -/
+@[step]
+axiom bignum_montsqr_p384_spec (z x : Std.Array U64 6#usize) :
+    low.aarch64.bignum_montsqr_p384.bignum_montsqr_p384 z x ⦃ r =>
+      wordsNat x.val ^ 2 ≤ 2 ^ 384 * p384 →
+        wordsNat r.val = p384RInv * wordsNat x.val ^ 2 % p384 ⦄
+
+/-- `BIGNUM_INV_P384_SUBROUTINE_CORRECT`, with `inverse_mod p_384 n` stated
+as what it is: the number below p that n times is 1 mod p,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/bignum_inv_p384.ml#L3433 -/
+@[step]
+axiom bignum_inv_p384_spec (z x : Std.Array U64 6#usize) :
+    low.aarch64.bignum_inv_p384.bignum_inv_p384 z x ⦃ r =>
+      wordsNat r.val < p384 ∧
+        (wordsNat x.val % p384 = 0 → wordsNat r.val = 0) ∧
+        (wordsNat x.val % p384 ≠ 0 → wordsNat x.val * wordsNat r.val % p384 = 1) ⦄
+
+/-- `P384_MONTJSCALARMUL_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/p384_montjscalarmul_alt.ml#L8917 -/
+@[step]
+axiom p384_montjscalarmul_spec (res : Std.Array U64 18#usize) (scalar : Std.Array U64 6#usize)
+    (point : Std.Array U64 18#usize) :
+    low.aarch64.p384_montjscalarmul.p384_montjscalarmul res scalar point ⦃ r =>
+      ∀ P, p384OnCurve P → p384Represents P (tripleNat6 point.val) →
+        p384Represents (p384Pow P (wordsNat scalar.val)) (tripleNat6 r.val) ⦄
+
 /-! ### Generic modular arithmetic
 
 Each routine reads its inputs at the result's length `k`, so a theorem
@@ -325,6 +387,33 @@ axiom p256_scalarmulbase_spec (res : Std.Array U64 8#usize) (scalar : Std.Array 
     low.aarch64.p256_scalarmulbase.p256_scalarmulbase res scalar table ⦃ r =>
       ∀ P, p256OnCurve P → p256Tabulates P table →
         p256AffineZ (pairNat r.val) (p256Pow P (wordsNat scalar.val)) ⦄
+
+/-! ### Keccak-f[1600]
+
+Each routine permutes the 25-lane states it is given in place, for the round
+constants rind passes. -/
+
+/-- `SHA3_KECCAK_F1600_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/sha3_keccak_f1600.ml#L460 -/
+axiom sha3_keccak_f1600_spec (a : Std.Array U64 25#usize) (rc : Std.Array U64 24#usize)
+    (hrc : rc.val.map (·.bv) = keccakRoundConstants) :
+    low.aarch64.sha3_keccak_f1600.sha3_keccak_f1600 a rc ⦃ r =>
+      r.val.map (·.bv) = keccak 24 (a.val.map (·.bv)) ⦄
+
+/-- `SHA3_KECCAK_F1600_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/sha3_keccak_f1600_alt.ml#L245 -/
+axiom sha3_keccak_f1600_alt_spec (a : Std.Array U64 25#usize) (rc : Std.Array U64 24#usize)
+    (hrc : rc.val.map (·.bv) = keccakRoundConstants) :
+    low.aarch64.sha3_keccak_f1600_alt.sha3_keccak_f1600 a rc ⦃ r =>
+      r.val.map (·.bv) = keccak 24 (a.val.map (·.bv)) ⦄
+
+/-- `SHA3_KECCAK2_F1600_SUBROUTINE_CORRECT`, whose two states are consecutive,
+as an array of them is,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/sha3_keccak2_f1600.ml#L313 -/
+axiom sha3_keccak2_f1600_spec (a : Std.Array (Std.Array U64 25#usize) 2#usize)
+    (rc : Std.Array U64 24#usize) (hrc : rc.val.map (·.bv) = keccakRoundConstants) :
+    low.aarch64.sha3_keccak2_f1600.sha3_keccak2_f1600 a rc ⦃ r =>
+      r.val.map (·.val.map (·.bv)) = (a.val.map (·.val.map (·.bv))).map (keccak 24) ⦄
 
 /-- rind runs on this CPU: its entry guards' CPU-feature checks pass. Neither
 reads an input. -/

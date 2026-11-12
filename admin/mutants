@@ -4,9 +4,15 @@
 # differential tests own, and every module only another architecture compiles,
 # whose mutants no test here can reach.
 #
+# `admin/mutants --target armv7-unknown-linux-gnueabihf ...`, in
+# `nix develop .#armv7`, cross-builds for armv7 instead and runs each test
+# binary under qemu-arm. It builds optimised, keeping a debug build's
+# checks, since debug tests under qemu take about nine times as long.
+#
 # Each test runs on this CPU and again with each row of features below denied,
 # so code only CPUs without them run, such as aws-lc's SSE2 AES, is tested
-# too. The rows are ctgrind.yml's.
+# too. The x86_64 and aarch64 rows are ctgrind.yml's; armv7's also pick
+# qemu's CPU.
 #
 # `admin/mutants --avx512 ...`, on x86_64 in `nix develop .#sde`, runs each
 # test under Intel SDE's Sapphire Rapids model instead, which takes every
@@ -50,10 +56,24 @@ if [ "${1:-}" = --survivors ]; then
     exit 0
 fi
 
+target=
+if [ "${1:-}" = --target ]; then
+    target=$2
+    shift 2
+fi
+
+# Only armv7 and the portable backend compile these.
+portable=(
+    'rind/src/low/portable/**' 'rind/src/mid/portable/**'
+    rind/src/low/generic/order.rs
+)
+runner=()
+profile=()
+base=()
 # Darwin runs only the DIT code, which compiles for Apple's platforms alone;
 # the Linux runs cover the rest.
 only=()
-case $(uname -sm) in
+case ${target:-$(uname -sm)} in
     "Darwin arm64")
         triple=AARCH64_APPLE_DARWIN
         skip=()
@@ -66,8 +86,8 @@ case $(uname -sm) in
     "Linux x86_64")
         triple=X86_64_UNKNOWN_LINUX_GNU
         skip=(
-            'rind/src/low/aarch64/**' 'rind/src/low/arm/**' 'rind/src/mid/arm/**'
-            rind/src/low/generic/mlkem768.rs rind/src/low/generic/order.rs
+            'rind/src/low/aarch64/**' 'rind/src/low/arm/**' "${portable[@]}"
+            rind/src/low/generic/mlkem768.rs
         )
         [ -n "$avx512" ] || skip+=(
             rind/src/low/x86_64/mlkem768_sample_poly_ntt_8x.rs
@@ -83,8 +103,8 @@ case $(uname -sm) in
     "Linux aarch64")
         triple=AARCH64_UNKNOWN_LINUX_GNU
         skip=(
-            'rind/src/low/x86_64/**' 'rind/src/low/arm/**' 'rind/src/mid/arm/**'
-            rind/src/low/generic/mlkem_poly.rs rind/src/low/generic/order.rs
+            'rind/src/low/x86_64/**' 'rind/src/low/arm/**' "${portable[@]}"
+            rind/src/low/generic/mlkem_poly.rs
             rind/src/low/generic/sha1.rs rind/src/low/generic/sha256.rs
         )
         rows=(
@@ -92,8 +112,36 @@ case $(uname -sm) in
             "aes pmull sha2 sha3"
         )
         ;;
+    armv7-unknown-linux-gnueabihf)
+        [ -n "${CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER:-}" ] || {
+            echo "admin/mutants: run armv7 in 'nix develop .#armv7'" >&2
+            exit 1
+        }
+        triple=ARMV7_UNKNOWN_LINUX_GNUEABIHF
+        export CARGO_BUILD_TARGET=$target
+        export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
+        export CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true
+        profile=(--profile release)
+        runner=(qemu-arm)
+        # The portable backend's own modules, which armv7's assembly
+        # replaces, and 64-bit Poly1305.
+        skip=(
+            'rind/src/low/x86_64/**' 'rind/src/low/aarch64/**'
+            rind/src/low/generic/poly1305.rs rind/src/low/portable/chacha20.rs
+            rind/src/low/portable/cpu.rs rind/src/low/portable/keccak.rs
+            rind/src/low/portable/sha.rs
+        )
+        # `sh/armv7.sh`'s tiers: qemu's `max`, with NEON and the crypto
+        # extension, a Cortex-A15, with NEON alone, and one with NEON denied.
+        # RIND_TEST_ARM_* fails the run that detects the wrong features.
+        base=(QEMU_CPU=max RIND_TEST_ARM_NEON=1 RIND_TEST_ARM_CRYPTO_EXT=1)
+        rows=(
+            "QEMU_CPU=cortex-a15 RIND_TEST_ARM_NEON=1 RIND_TEST_ARM_CRYPTO_EXT=0"
+            "neon QEMU_CPU=cortex-a15 RIND_TEST_ARM_NEON=0 RIND_TEST_ARM_CRYPTO_EXT=0"
+        )
+        ;;
     *)
-        echo "admin/mutants: no campaign for $(uname -sm)" >&2
+        echo "admin/mutants: no campaign for ${target:-$(uname -sm)}" >&2
         exit 1
         ;;
 esac
@@ -122,16 +170,20 @@ if [ "${1:-}" = --run ]; then
         esac
         exit 0
     fi
-    "$@"
+    env ${base[@]+"${base[@]}"} ${runner[@]+"${runner[@]}"} "$@"
     for arg in "$@"; do
         [ "$arg" != --list ] || exit 0
     done
+    # A row names features to deny, and any variables to set.
     for row in "${rows[@]}"; do
         deny=()
-        for feature in $row; do
-            deny+=("RIND_CPU_DISABLE_$feature=1")
+        for word in $row; do
+            case $word in
+                *=*) deny+=("$word") ;;
+                *) deny+=("RIND_CPU_DISABLE_$word=1") ;;
+            esac
         done
-        env "${deny[@]}" "$@"
+        env "${deny[@]}" ${runner[@]+"${runner[@]}"} "$@"
     done
     exit 0
 fi
@@ -158,10 +210,10 @@ for arg in "$@"; do
 done
 export NEXTEST_TEST_THREADS=$((($(nproc) + jobs - 1) / jobs))
 
-export "CARGO_TARGET_${triple}_RUNNER=$here/admin/mutants ${avx512:+--avx512 }--run"
+export "CARGO_TARGET_${triple}_RUNNER=$here/admin/mutants ${avx512:+--avx512 }${target:+--target $target }--run"
 # A mutant that hangs the tests until the timeout is caught by them, so only
 # exit 3, timeouts alone, passes beside 0.
 status=0
-cargo mutants "${args[@]}" "$@" || status=$?
+cargo mutants ${profile[@]+"${profile[@]}"} "${args[@]}" "$@" || status=$?
 [ "$status" -ne 3 ] || status=0
 exit "$status"

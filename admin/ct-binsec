@@ -45,6 +45,7 @@ sp = int(gdb.parse_and_eval("(unsigned long)$sp"))
 # the stack's own mapping, so gdb fails to read the mapping and dumps it
 # empty. MADV_GUARD_REMOVE (103) lifts them; on an older kernel the call
 # fails, and the guard is a mapping of its own.
+# See UPSTREAM.md, "gdb dumps a guarded thread stack empty".
 for line in open("/proc/{}/maps".format(pid)):
     lo, hi = (int(x, 16) for x in line.split()[0].split("-"))
     if lo <= sp < hi:
@@ -93,6 +94,7 @@ print("EXIT {}".format(int(gdb.parse_and_eval("$_exitcode"))))
 # every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and
 # SHA instructions, SHA3's, and the `msr` that sets DIT. Denying AES leaves
 # vpaes, whose aarch64 `tbl` BINSEC cannot decode either.
+# See UPSTREAM.md, "BINSEC cannot decode much of what rind runs".
 UNDECODED = {
     "x86_64": ["aes", "vaes", "sha512", "avx512f", "avx512dq", "avx512ifma", "avx512bw"]
     + ["avx512vl", "avx512vbmi", "avx512vbmi2"],
@@ -103,11 +105,13 @@ UNDECODED = {
 # AVX-512, a TSX one that runs `xtest`, or aarch64's SVE one, which BINSEC
 # cannot decode, so the script replaces whichever it picked with a byte loop,
 # as valgrind replaces them.
+# See UPSTREAM.md, "BINSEC cannot decode glibc's string functions".
 LIBC = ["memcpy", "memmove", "memset", "memcmp", "bcmp"]
 
 # Instructions BINSEC cannot decode, but whose effect on its state is short
 # enough to give it: s2n-bignum's P-521 code sets the carry with `stc`, and
 # LLVM tests the portable P-256 and P-384 for zero with `movmskps`.
+# See UPSTREAM.md, "BINSEC cannot decode `stc`, `clc`, or `movmskps`".
 STUBS = {
     "x86_64": """\
 replace opcode f9 by

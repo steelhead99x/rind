@@ -282,3 +282,37 @@ impl Poly1305Neon {
         mac
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    /// Lane 0 of `freeze`'s result, from lane 0's 26-bit limbs.
+    fn frozen(limbs: [u32; 5]) -> [u32; 5] {
+        let mut fe = Fe1305x2 { v: [0; 12] };
+        for (i, limb) in limbs.into_iter().enumerate() {
+            fe.v[2 * i] = limb;
+        }
+        freeze(&mut fe);
+        [fe.v[0], fe.v[2], fe.v[4], fe.v[6], fe.v[8]]
+    }
+
+    // Random inputs leave `h` in `[p, 2^130)` with probability about 2^-128,
+    // so only these reach the subtraction of `p`.
+    #[test]
+    fn freeze_reduces_below_p() {
+        const MAX: u32 = 0x3ffffff;
+        // p is 0, and 2^130 - 1 is 4.
+        assert_eq!(frozen([MAX - 4, MAX, MAX, MAX, MAX]), [0; 5]);
+        assert_eq!(frozen([MAX, MAX, MAX, MAX, MAX]), [4, 0, 0, 0, 0]);
+        // p - 1 stays.
+        assert_eq!(
+            frozen([MAX - 5, MAX, MAX, MAX, MAX]),
+            [MAX - 5, MAX, MAX, MAX, MAX]
+        );
+        // Carries out of each limb, and 2^130 as 5.
+        assert_eq!(frozen([MAX + 1, MAX, MAX, MAX, 0]), [0, 0, 0, 0, 1]);
+        assert_eq!(frozen([0, 0, 0, 0, MAX + 1]), [5, 0, 0, 0, 0]);
+    }
+}

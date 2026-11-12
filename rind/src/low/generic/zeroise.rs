@@ -72,3 +72,29 @@ impl Zeroable for core::arch::x86_64::__m512i {}
 impl Zeroable for core::arch::aarch64::uint8x16_t {}
 #[cfg(rind_backend = "aarch64")]
 impl Zeroable for core::arch::aarch64::uint64x2_t {}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_bytes_clears_only_its_range() {
+        for n in 0..1024 {
+            for offset in 0..4 {
+                zero_bytes_equiv(offset, n);
+            }
+        }
+    }
+
+    // Zeroes `len` bytes from `offset` in, so the wide stores start unaligned
+    // too, and checks the bytes either side are untouched.
+    fn zero_bytes_equiv(offset: usize, len: usize) {
+        let mut expect = vec![0xffu8; offset + len + 1];
+        expect[offset..offset + len].fill(0);
+        let mut bytes = vec![0xffu8; offset + len + 1];
+        // SAFETY: `bytes` holds `len` writable bytes from `offset`.
+        unsafe { zero_bytes(bytes[offset..].as_mut_ptr(), len) };
+        assert_eq!(expect, bytes);
+    }
+}

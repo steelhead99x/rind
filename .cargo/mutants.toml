@@ -15,6 +15,7 @@ exclude_globs = [
   "rind/src/low/*/boringssl/**",
   "rind/src/low/*/openssl/**",
   # Test-only code under a `cfg(test)` cargo-mutants does not recognise.
+  # See UPSTREAM.md, "cargo-mutants misses compound `cfg(test)`s".
   "rind/src/low/tests.rs",
   # Scanner fixtures, compiled only by admin/ct-vartime, never by the tests.
   "rind/src/low/vartime_planted.rs",
@@ -27,6 +28,7 @@ exclude_globs = [
 # Each surviving mutant no test can catch, with why.
 exclude_re = [
   # Test helpers, in `tests` modules whose `cfg` also names an architecture.
+  # See UPSTREAM.md, "cargo-mutants misses compound `cfg(test)`s".
   '\btests::',
   # The negative entries of ML-KEM's constant tables; every unary minus in
   # these files is one.
@@ -41,8 +43,12 @@ exclude_re = [
   'rind/src/high/rsa\.rs:\d+:\d+: replace \| with \^ in (VerifyingKey::encrypt_oaep|public_exponent)$',
   'rind/src/high/sec1\.rs:\d+:\d+: replace \| with \^ in is_public_key$',
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace \| with \^ in (inc32|lengths)$',
+  'rind/src/mid/portable/aes_gcm\.rs:\d+:\d+: replace \| with \^ in (add32|lengths)$',
   'rind/src/low/aarch64/cpu\.rs:149:\d+: replace << with >>$',
-  'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace \| with \^ in (detect|detect_once)$',
+  'rind/src/low/(aarch64|arm)/cpu\.rs:\d+:\d+: replace \| with \^ in (detect|detect_once)$',
+  'rind/src/low/arm/cpu\.rs:(38|70):\d+: replace << with >>( in detect)?$',
+  'rind/src/low/arm/keccak1600_armv4\.rs:\d+:\d+: replace \| with \^ in (deinterleave|evens|interleave|spread)$',
+  'rind/src/low/arm/mont\.rs:\d+:\d+: replace \| with \^ in reduce_limb$',
   'rind/src/low/generic/bignum\.rs:\d+:\d+: replace \| with \^ in (add_masked|bignum_add|bignum_cmp_lt|bignum_modadd|bignum_montredc|bignum_mul|cmp_lt_limbs|gcd_step|join|mod_double|mod_halve|mont_mul|sub_limbs_masked|sub_masked)$',
   'rind/src/low/generic/chacha20\.rs:\d+:\d+: replace \| with \^ in quarter_round$',
   'rind/src/low/generic/mldsa_poly\.rs:\d+:\d+: replace \| with \^ in (mldsa_polyz_unpack_17|mldsa_polyz_unpack_19|mldsa_rej_uniform_vartime)$',
@@ -53,7 +59,10 @@ exclude_re = [
   'rind/src/low/generic/p521\.rs:\d+:\d+: replace \| with \^ in (booth_w5|join|nonzero_u8|select_words)$',
   'rind/src/low/generic/poly1305\.rs:\d+:\d+: replace \| with \^ in (add|full_reduce|mul)$',
   'rind/src/low/posint\.rs:\d+:\d+: replace \| with \^ in (PosInt<N>::from_bytes|PosInt<N>::pub_montifier|mul_word_mod)$',
-  'rind/src/low/x86_64/\.\./generic/ghash_nohw\.rs:\d+:\d+: replace \| with \^ in (NohwTable::ghash|gcm_mul32_nohw)$',
+  'rind/src/low/portable/aes\.rs:\d+:\d+: replace \| with \^ in (aes_keygen_assisti|deinterleave_u8_1|interleave_u16_2|interleave_u16_4|interleave_u16_8|interleave_u8_1|inv_mix_columns_state|inv_shift_row_u16|mix_columns_state|shift_row_u16)$',
+  'rind/src/low/portable/aes\.rs:\d+:\d+: replace \^ with \| in (aes_keygen_assisti|sub_bytes_state)$',
+  'rind/src/low/portable/aes\.rs:\d+:\d+: replace \^= with \|= in aes_keygen_assist[01]::aux$',
+  'rind/src/low/(portable|x86_64)/\.\./generic/ghash_nohw\.rs:\d+:\d+: replace \| with \^ in (NohwTable::ghash|gcm_mul32_nohw)$',
   'rind/src/low/x86_64/aes_gcm\.rs:\d+:\d+: replace \| with \^ in counter_block$',
   'rind/src/low/x86_64/chacha20poly1305\.rs:48:\d+: replace \| with \^$',
   'rind/src/low/x86_64/cpu\.rs:373:\d+: replace << with >>$',
@@ -96,6 +105,7 @@ exclude_re = [
   'rind/src/mid/rsa_priv\.rs:296:44: replace \+ with \*$',
   'rind/src/mid/rsa_priv\.rs:298:\d+: replace \+ with \*$',
   'rind/src/mid/rsa_priv/exponents\.rs:57:\d+: replace \* with \+ in Exponents::derive$',
+  'rind-openmls/src/provider\.rs:201:\d+: replace \+ with \* in <impl OpenMlsCrypto for RustCrypto>::sign$',
   # Equivalent: a comparison whose two forms differ only where both branches
   # give the same result, or a step that computes the same value another way,
   # such as squaring rather than multiplying to the same power.
@@ -106,6 +116,14 @@ exclude_re = [
   # Each call passes the larger value second.
   'rind/src/high/signature\.rs:\d+:\d+: replace > with (==|>=) in max$',
   'rind/src/low/aarch64/aes\.rs:352:\d+: replace - with / in invert_round_keys$',
+  # The NEON Poly1305's `freeze` keeps limbs 1 to 4 of `h - p` only when they
+  # are zero, and the 2^128 bit it leaves on `s` lies above the tag.
+  'rind/src/low/arm/poly1305_arm\.rs:(99|100|101|102):\d+: replace \^= with \|= in freeze$',
+  'rind/src/low/arm/poly1305_arm\.rs:\d+:\d+: replace (\^= with \|=|<< with >>) in Poly1305Neon::finish$',
+  # rind-openmls' `RustCrypto` holds no state, so a new one is the provider's.
+  'rind-openmls/src/lib\.rs:\d+:\d+: replace <impl OpenMlsProvider for OpenMlsRustCrypto>::(crypto|rand) -> &Self::(Crypto|Rand)Provider with Box::leak\(Box::new\(Default::default\(\)\)\)$',
+  # A new state is all zeroes, its `Default`.
+  'rind/src/low/portable/aes\.rs:\d+:\d+: replace new_state -> State with Default::default\(\)$',
   'rind/src/low/generic/p256\.rs:\d+:\d+: replace <<= with >>= in sqr_wide$',
   'rind/src/low/generic/p256\.rs:\d+:\d+: replace > with >= in p256_scalarmulbase$',
   'rind/src/low/generic/p384\.rs:\d+:\d+: replace <<= with >>= in sqr_wide$',
@@ -166,6 +184,11 @@ exclude_re = [
   'rind/src/low/aarch64/bignum_copy_row_from_table_mux\.rs:\d+:\d+: replace match guard width\.is_multiple_of\(8\) with false in bignum_copy_row_from_table$',
   'rind/src/low/aarch64/cpu\.rs:277:\d+: replace prefetch_ro with \(\)$',
   'rind/src/low/aarch64/mont\.rs:\d+:\d+: replace match guard k >= 2 with false in (mont_mul|mont_sqr)$',
+  'rind/src/low/arm/chacha_armv4\.rs:\d+:\d+: replace (match guard len >= NEON_MIN_LEN with (false|true)|>= with <) in chacha20_ctr32$',
+  'rind/src/low/arm/cpu\.rs:40:\d+: replace << with >>$',
+  'rind/src/low/arm/mont\.rs:\d+:\d+: replace (match guard .* with false|> with <|>> with <<) in mont_mul$',
+  'rind/src/low/arm/sha_armv4\.rs:\d+:\d+: replace match guard !blocks\.is_empty\(\) with true in (sha1|sha256)_compress_blocks$',
+  'rind/src/low/generic/order\.rs:\d+:\d+: replace (order -> Option<Order> with None|== with != in order)$',
   'rind/src/low/generic/blockwise\.rs:\d+:\d+: replace > with >= in Blockwise<N>::complete_blocks$',
   'rind/src/low/posint\.rs:\d+:\d+: replace > with < in (PosInt<N>::mod_exp_rsaz|PosInt<N>::reduce_even)$',
   'rind/src/low/posint\.rs:\d+:\d+: replace > with == in PosInt<N>::mod_exp_rsaz$',
@@ -218,12 +241,17 @@ exclude_re = [
   'rind/src/low/x86_64/sha3_keccak_nof4_f1600\.rs:\d+:\d+: replace match guard N > 1 with false in sha3_keccak_nof4_f1600$',
   'rind/src/low/x86_64/sha3_keccak_nof4_f1600\.rs:\d+:\d+: replace match guard N > 1 with true in sha3_keccak_nof4_f1600$',
   # Reached only on a CPU without a feature that every test host has and no
-  # denial row in `admin/mutants` denies alone, or only in a release build,
-  # which tests never are.
+  # denial row in `admin/mutants` denies alone, only in a release build,
+  # which tests never are, or only off Linux.
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace && with \|\| in detect$',
   'rind/src/low/aarch64/cpu\.rs:154:\d+: replace << with >>$',
   'rind/src/low/aarch64/cpu\.rs:258:\d+: replace test_toggle -> bool with false$',
   'rind/src/low/aarch64/cpu\.rs:258:\d+: replace test_toggle -> bool with true$',
+  'rind/src/low/arm/cpu\.rs:(83|85|86|87|88):\d+: replace & with (\||\^) in detect$',
+  'rind/src/low/arm/cpu\.rs:96:\d+: replace detect -> u8 with 1$',
+  'rind/src/low/arm/cpu\.rs:104:\d+: replace test_toggle -> bool with (false|true)$',
+  # armv7 has no CPU state to save, so `leave_cpu_state` ignores it.
+  'rind/src/low/arm/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
   'rind/src/low/x86_64/cpu\.rs:397:38: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:397:45: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:397:52: replace \| with &$',
@@ -241,17 +269,21 @@ exclude_re = [
   'rind/src/low/aarch64/ghash_neon_armv8\.rs:50:\d+: replace <impl Drop for NeonTable>::drop with \(\)$',
   'rind/src/low/aarch64/vpaes_armv8\.rs:131:\d+: replace <impl Drop for VpaesDecKey>::drop with \(\)$',
   'rind/src/low/aarch64/vpaes_armv8\.rs:84:\d+: replace <impl Drop for VpaesKey>::drop with \(\)$',
-  'rind/src/low/x86_64/\.\./generic/ghash_nohw\.rs:69:\d+: replace <impl Drop for NohwTable>::drop with \(\)$',
+  'rind/src/low/arm/aesv8_armx\.rs:\d+:\d+: replace <impl Drop for (AesHwKey|AesHwDecKey)>::drop with \(\)$',
+  'rind/src/low/arm/ghashv8_armx\.rs:\d+:\d+: replace <impl Drop for GhashTable>::drop with \(\)$',
+  'rind/src/low/portable/aes\.rs:\d+:\d+: replace <impl Drop for (AesKey|AesDecKey)>::drop with \(\)$',
+  'rind/src/low/(portable|x86_64)/\.\./generic/ghash_nohw\.rs:69:\d+: replace <impl Drop for NohwTable>::drop with \(\)$',
   'rind/src/low/x86_64/aes\.rs:122:\d+: replace <impl Drop for AesDecKey>::drop with \(\)$',
-  'rind/src/low/x86_64/aes_nohw\.rs:96:\d+: replace <impl Drop for NohwKey>::drop with \(\)$',
+  'rind/src/low/x86_64/\.\./generic/aes_nohw\.rs:950:\d+: replace <impl Drop for NohwKey>::drop with \(\)$',
   'rind/src/low/x86_64/ghash\.rs:103:\d+: replace <impl Drop for GhashTable>::drop with \(\)$',
   'rind/src/low/x86_64/ghash_ssse3_x86_64\.rs:75:\d+: replace <impl Drop for Ssse3Table>::drop with \(\)$',
   'rind/src/low/x86_64/vpaes_x86_64\.rs:135:\d+: replace <impl Drop for VpaesDecKey>::drop with \(\)$',
   'rind/src/low/x86_64/vpaes_x86_64\.rs:86:\d+: replace <impl Drop for VpaesKey>::drop with \(\)$',
   'rind/src/mid/chacha20poly1305\.rs:88:\d+: replace <impl Drop for ChaCha20Poly1305>::drop with \(\)$',
+  'rind/src/mid/portable/aes_gcm\.rs:\d+:\d+: replace <impl Drop for Portable>::drop with \(\)$',
   # Unreachable from a test: a debug-only guard no public function trips, a
   # debugging helper, an impl nothing calls, a limit past 2^48 calls, a fault
-  # only hardware injects, a check of what the next check also refuses, or a
+  # only hardware injects, a check of what another check also refuses, or a
   # case random keys reach with probability below 2^-64.
   'rind/src/high/hkdf\.rs:110:\d+: replace <impl sealed::Len for usize>::len -> usize with 0$',
   'rind/src/high/hkdf\.rs:110:\d+: replace <impl sealed::Len for usize>::len -> usize with 1$',
@@ -266,6 +298,7 @@ exclude_re = [
   'rind/src/low/generic/bignum\.rs:336:\d+: replace >> with << in mont_mul$',
   'rind/src/low/generic/blockwise\.rs:138:24: replace \* with / in pad$',
   'rind/src/low/posint\.rs:143:\d+: replace PosInt<N>::debug with \(\)$',
+  'rind/src/mid/portable/ed25519\.rs:\d+:\d+: replace == with != in VerifyingKey::from_bytes$',
   'rind/src/mid/rsa_priv/exponents\.rs:\d+:\d+: replace >= with < in Exponents::derive$',
   'rind/src/mid/rsa_priv/exponents\.rs:72:\d+: replace \* with \+ in Exponents::derive$',
   'rind/src/mid/rsa_priv/generate\.rs:\d+:\d+: delete ! in MillerRabinParams<\x27a>::check_base$',
@@ -276,12 +309,6 @@ exclude_re = [
   'rind/src/mid/rsa_priv/generate\.rs:\d+:\d+: replace \* with \+ in MillerRabinParams<\x27a>::random_base$',
   'rind/src/mid/rsa_priv/generate\.rs:208:\d+: replace \+ with - in MillerRabinParams<\x27a>::random_base$',
   'rind/src/mid/rsa_priv/generate\.rs:208:\d+: replace \+ with \* in MillerRabinParams<\x27a>::random_base$',
-  # armv7 only: quest/m3/confidence/mutants-armv7.md.
-  'rind/src/mid/p384\.rs:\d+:\d+: delete ! in JacobianMontPoint::multiply$',
-  'rind/src/mid/p384\.rs:457:\d+: replace AffineMontPoint::public_precomp_w5 -> JacobianMontPointTableW5 with Default::default\(\)$',
-  'rind/src/mid/p384\.rs:805:\d+: replace JacobianMontPoint::lookup_w5 -> Self with Default::default\(\)$',
-  'rind/src/mid/p384\.rs:813:\d+: replace JacobianMontPoint::maybe_negate_y with \(\)$',
-  'rind/src/mid/p384\.rs:598:\d+: replace JacobianMontPoint::multiply -> Self with Default::default\(\)$',
   # Untested adapter code: quest/m2/confidence/mutants-adapters.md.
   'rind-dimpl/src/digest\.rs:78:\d+: replace <impl SecureRandom for Random>::fill -> Result<\(\), CryptoError> with Ok\(\(\)\)$',
   'rind-dimpl/src/digest\.rs:28:\d+: replace <impl fmt::Debug for Running>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',

@@ -29,7 +29,7 @@ fn mark<T: ?Sized>(value: &T, state: MemState) {
 }
 
 fn rind() -> CryptoProvider {
-    rind_dimpl::default_provider().unwrap()
+    rind_dimpl::default_provider()
 }
 
 #[test]
@@ -169,5 +169,70 @@ fn signing() {
                 )
                 .unwrap();
         }
+    }
+}
+
+/// Signs with keys loaded from PKCS#8 and SEC1 PEM, under any label, with the base64 that
+/// encodes the private scalar marked secret. The DER structure around it stays
+/// public, as it does for DER keys.
+#[test]
+fn pem_signing() {
+    use ::aws_lc_rs::encoding::AsDer;
+    use ::aws_lc_rs::signature::{ECDSA_P256_SHA256_ASN1_SIGNING, EcdsaKeyPair};
+
+    let pkcs8 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+        .unwrap()
+        .serialize_der();
+    let sec1 = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &pkcs8)
+        .unwrap()
+        .private_key()
+        .as_der()
+        .unwrap();
+    for (label, der) in [
+        ("PRIVATE KEY", &pkcs8[..]),
+        ("EC PRIVATE KEY", sec1.as_ref()),
+        ("UNUSUAL KEY", sec1.as_ref()),
+    ] {
+        let lf = pem::EncodeConfig::new().set_line_ending(pem::LineEnding::LF);
+        let pem = pem::encode_config(&pem::Pem::new(label, der), lf);
+        // ECPrivateKey's version INTEGER 1, then the 32-byte scalar OCTET STRING.
+        let scalar = der
+            .windows(5)
+            .position(|w| w == [0x02, 0x01, 0x01, 0x04, 0x20])
+            .unwrap()
+            + 5;
+        let body = pem.find('\n').unwrap() + 1;
+        // Each base64 character carries 6 bits, 64 characters to a line. Mark
+        // every character whose bits all come from the scalar.
+        for c in (8 * scalar).div_ceil(6)..(8 * (scalar + 32) - 6) / 6 + 1 {
+            secret(&pem.as_bytes()[body + c + c / 64]);
+        }
+        let mut key = rind()
+            .key_provider
+            .load_private_key(pem.as_bytes())
+            .unwrap();
+        let mut signature = Buf::new();
+        key.sign(b"transcript", HashAlgorithm::SHA256, &mut signature)
+            .unwrap();
+        public(signature.as_ref());
+        assert!(!signature.is_empty(), "{label}");
+    }
+}
+
+/// Refuses a DER key of an unsupported algorithm, intact or with a byte
+/// appended, without reading its secret, including when looking for PEM.
+#[test]
+fn unsupported_key() {
+    let ed25519 = rcgen::KeyPair::generate_for(&rcgen::PKCS_ED25519)
+        .unwrap()
+        .serialize_der();
+    // RFC 8410's PKCS#8 ends with the 32-byte seed.
+    secret(&ed25519[ed25519.len() - 32..]);
+    let mut appended = ed25519.clone();
+    appended.push(0);
+    for key in [&ed25519, &appended] {
+        let refused = rind().key_provider.load_private_key(key).is_err();
+        public(&refused);
+        assert!(refused);
     }
 }

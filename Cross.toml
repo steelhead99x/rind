@@ -26,5 +26,7 @@ runner = "native"
 # 32-bit x86 runs the portable backend, which needs no CPU features, so qemu's
 # Atom N270 model serves. Run natively in the container, the binaries die of
 # SIGSYS before the first test.
+# See UPSTREAM.md, "cross's i686 Android image cannot run its binaries
+# natively".
 [target.i686-linux-android]
 image = "ghcr.io/cross-rs/i686-linux-android@sha256:7d8fc923d8aa0645aff4b73815c86effceef7375a6244d31c8e69486395be78d"

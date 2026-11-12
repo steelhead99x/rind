@@ -1,20 +1,26 @@
 import Rind.X86_64.X25519
+import Rind.X86_64.P384
 import Rind.X86_64.Sha512
 import Rind.X86_64.Pbkdf2
 import Rind.X86_64.ChaCha20
 import Rind.X86_64.AesGcm
+import Rind.X86_64.ChaCha20Poly1305
 import Rind.X86_64.GcmKey
 import Rind.X86_64.Ed25519
+import Rind.X86_64.Sha3
 open rind.x86_64
 
 /-!
 The axioms each theorem rests on, beyond Lean's own: s2n-bignum's contracts
-in `Rind.X86_64.S2nBignum` for X25519 and Ed25519, aws-lc's in
+in `Rind.X86_64.S2nBignum` for X25519, P-384 ECDH, Ed25519, and the
+Keccak-f of SHA-3 and ML-KEM's SHAKE, aws-lc's in
 `Rind.X86_64.AwsLc` for the SHA-512 family, for HMAC, HKDF, and PBKDF2, which
 cover SHA-384 and SHA-512, and for Ed25519's hashes, Vale's in
 `Rind.X86_64.ValeAesGcm` for AES-GCM, rind's HOL Light proofs of its
 constant-time compares in `Rind.X86_64.CtEqual` for HMAC's and PBKDF2's
-`verify`, and nothing else. A change here is a
+`verify` and for ChaCha20-Poly1305's and XChaCha20-Poly1305's tag checks, and
+nothing else. ChaCha20-Poly1305's theorems also take aws-lc's one-pass
+routines as the hypothesis `RunsChaCha20Poly1305`, which no axiom states. A change here is a
 change to the trust base.
 -/
 
@@ -50,6 +56,29 @@ change to the trust base.
 /-- info: 'rind.x86_64.x25519_shared_secret' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms x25519_shared_secret
+
+/-- info: 'rind.x86_64.p384_agree' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_add_p384_spec,
+ bignum_demont_p384_alt_spec,
+ bignum_demont_p384_spec,
+ bignum_eq_spec,
+ bignum_inv_p384_spec,
+ bignum_montmul_p384_alt_spec,
+ bignum_montmul_p384_spec,
+ bignum_montsqr_p384_alt_spec,
+ bignum_montsqr_p384_spec,
+ bignum_tomont_p384_alt_spec,
+ bignum_tomont_p384_spec,
+ p384_montjscalarmul_alt_spec,
+ p384_montjscalarmul_spec] -/
+#guard_msgs in
+#print axioms p384_agree
+
+/-- info: 'rind.x86_64.p384_shared_secret' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms p384_shared_secret
 
 /-- info: 'rind.x86_64.sha512_family_digest' depends on axioms: [propext, Classical.choice, Quot.sound, compress_avx_spec] -/
 #guard_msgs in
@@ -120,6 +149,70 @@ change to the trust base.
 /-- info: 'rind.x86_64.chacha20_mask' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms chacha20_mask
+
+/-- info: 'rind.x86_64.chacha20_poly1305_new' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_new
+
+/-- info: 'rind.x86_64.chacha20_poly1305_seal' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_seal
+
+/-- info: 'rind.x86_64.chacha20_poly1305_seal_append_tag' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_seal_append_tag
+
+/-- info: 'rind.x86_64.chacha20_poly1305_seal_append_tag_vec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_seal_append_tag_vec
+
+/-- info: 'rind.x86_64.chacha20_poly1305_open_separate_tag' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_open_separate_tag
+
+/-- info: 'rind.x86_64.chacha20_poly1305_open' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec] -/
+#guard_msgs in
+#print axioms chacha20_poly1305_open
+
+/-- info: 'rind.x86_64.randomized_nonce_key_new' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms randomized_nonce_key_new
+
+/-- info: 'rind.x86_64.randomized_nonce_key_seal_append_tag_vec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms randomized_nonce_key_seal_append_tag_vec
+
+/-- info: 'rind.x86_64.randomized_nonce_key_open' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec] -/
+#guard_msgs in
+#print axioms randomized_nonce_key_open
+
+/-- info: 'rind.x86_64.aes_new' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_new
+
+/-- info: 'rind.x86_64.aes_encrypt_block' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_encrypt_block
+
+/-- info: 'rind.x86_64.aes_header_new' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_header_new
+
+/-- info: 'rind.x86_64.aes_header_mask' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_header_mask
 
 /-- info: 'rind.x86_64.aes_gcm_new' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
@@ -270,3 +363,55 @@ change to the trust base.
  edwards25519_scalarmuldouble_spec] -/
 #guard_msgs in
 #print axioms ed25519_public_key_new
+
+/-- info: 'rind.x86_64.sha3_family_digest' depends on axioms: [propext, Classical.choice, Quot.sound, sha3_keccak_f1600_spec] -/
+#guard_msgs in
+#print axioms sha3_family_digest
+
+/-- info: 'rind.x86_64.sha3_family_context' depends on axioms: [propext, Classical.choice, Quot.sound, sha3_keccak_f1600_spec] -/
+#guard_msgs in
+#print axioms sha3_family_context
+
+/-- info: 'rind.x86_64.sha3Family_fips202' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms sha3Family_fips202
+
+/-- info: 'rind.x86_64.sponge_new_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms sponge_new_spec
+
+/-- info: 'rind.x86_64.sponge_absorb_spec' depends on axioms: [propext, Classical.choice, Quot.sound, sha3_keccak_f1600_spec] -/
+#guard_msgs in
+#print axioms sponge_absorb_spec
+
+/-- info: 'rind.x86_64.sponge_finish_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms sponge_finish_spec
+
+/-- info: 'rind.x86_64.squeezing_squeeze_spec' depends on axioms: [propext, Classical.choice, Quot.sound, sha3_keccak_f1600_spec] -/
+#guard_msgs in
+#print axioms squeezing_squeeze_spec
+
+/-- info: 'rind.x86_64.shake128x4_new_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ sha3_keccak4_f1600_alt_spec,
+ sha3_keccak_f1600_spec] -/
+#guard_msgs in
+#print axioms shake128x4_new_spec
+
+/-- info: 'rind.x86_64.shake128x4_squeeze_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ sha3_keccak4_f1600_alt_spec,
+ sha3_keccak_f1600_spec] -/
+#guard_msgs in
+#print axioms shake128x4_squeeze_spec
+
+/-- info: 'rind.x86_64.shake256_batch_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ sha3_keccak4_f1600_alt_spec,
+ sha3_keccak_f1600_spec] -/
+#guard_msgs in
+#print axioms shake256_batch_spec

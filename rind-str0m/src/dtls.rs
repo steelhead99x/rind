@@ -28,9 +28,7 @@ impl DtlsProvider for RindDtls {
         dtls_version: DtlsVersion,
         mtu: Option<usize>,
     ) -> Result<Box<dyn DtlsInstance>, CryptoError> {
-        // `default_provider` already refused a CPU missing a feature.
-        let provider =
-            rind_dimpl::default_provider().map_err(|e| CryptoError::Other(e.to_string()))?;
+        let provider = rind_dimpl::default_provider();
 
         // dimpl panics on an empty certificate or a key it cannot load, and
         // `RtcConfig::set_dtls_cert` takes both from the caller.

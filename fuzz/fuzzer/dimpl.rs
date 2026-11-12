@@ -99,7 +99,7 @@ enum PeerSignature {
 
 fn rind() -> &'static CryptoProvider {
     static PROVIDER: OnceLock<CryptoProvider> = OnceLock::new();
-    PROVIDER.get_or_init(|| rind_dimpl::default_provider().unwrap())
+    PROVIDER.get_or_init(rind_dimpl::default_provider)
 }
 
 fn baseline() -> &'static CryptoProvider {
@@ -318,7 +318,7 @@ struct Handshake {
 impl Handshake {
     fn run(&self) {
         let builder = Config::builder()
-            .with_crypto_provider(rind_dimpl::default_provider().unwrap())
+            .with_crypto_provider(rind_dimpl::default_provider())
             .kx_groups(&[
                 rind().kx_groups[usize::from(self.group) % rind().kx_groups.len()].name(),
             ]);

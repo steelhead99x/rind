@@ -37,6 +37,7 @@ fn main() {
 /// Stable Rust hides the `v7` target feature from build scripts, so the
 /// triple is all there is. A triple naming no version, such as
 /// `arm-unknown-linux-gnueabi`, is for an earlier core.
+/// See UPSTREAM.md, "Build scripts cannot see ARM's `v7` target feature".
 fn armv7_or_later() -> bool {
     let target = env::var("TARGET").expect("cargo sets the target");
     let arch = target.split('-').next().unwrap_or_default();

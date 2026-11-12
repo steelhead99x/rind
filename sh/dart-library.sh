@@ -42,6 +42,6 @@ for target in "$@"; do
 
     "${cargo[@]}" rustc --release --locked --lib \
         --manifest-path "$package/Cargo.toml" \
-        --target "$triple" --target-dir "$package/target" "${link[@]}"
+        --target "$triple" --target-dir "$package/target" ${link[@]+"${link[@]}"}
     cp "$package/target/$target/release/$file" "$out/rind_dart-$target.$ext"
 done

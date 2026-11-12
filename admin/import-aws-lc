@@ -102,15 +102,25 @@ ARM_IMPORTS = [
         "perlasm": "crypto/fipsmodule/sha/asm/sha1-armv4-large.pl",
         "copyright": "Copyright 2007-2016 The OpenSSL Project Authors. All Rights Reserved.",
         "constants": [(".LK_00_19:.word", 3)],
-        "routines": ["sha1_block_data_order_hw"],
+        "routines": [
+            "sha1_block_data_order_nohw",
+            "sha1_block_data_order_neon",
+            "sha1_block_data_order_hw",
+        ],
     },
     {
         "source": "sha256-armv4.S",
         "tag": "sha256",
         "perlasm": "crypto/fipsmodule/sha/asm/sha256-armv4.pl",
         "copyright": "Copyright 2007-2016 The OpenSSL Project Authors. All Rights Reserved.",
-        "constants": [("K256:", 16), (".LK256_shortcut_hw:", 2)],
-        "routines": ["sha256_block_data_order_hw"],
+        # `sha256_block_data_order_neon` ends its rounds on the zero word
+        # after the table.
+        "constants": [("K256:", 18), (".LK256_shortcut_neon:", 2), (".LK256_shortcut_hw:", 2)],
+        "routines": [
+            "sha256_block_data_order_nohw",
+            "sha256_block_data_order_neon",
+            "sha256_block_data_order_hw",
+        ],
     },
     {
         "source": "sha512-armv4.S",
@@ -625,6 +635,11 @@ def routine(lines, name):
     return lines[start : end + 1]
 
 
+def source_index(lines, piece):
+    """Where `piece`, a run of `lines`, starts in them."""
+    return next(i for i in range(len(lines)) if lines[i : i + len(piece)] == piece)
+
+
 def spelling(lines, name, local):
     """How `lines` label `name`: as is, or with the `local` prefix."""
     for s in (name, local + name):
@@ -777,11 +792,11 @@ def import_arm(aws_lc):
         if spec.get("whole"):
             text = "\n".join(lines).strip("\n").split("\n")
         else:
-            text = []
-            for label, following in spec["constants"]:
-                text += constant(lines, label, following)
-            for name in spec["routines"]:
-                text += routine(lines, name)
+            # In aws-lc's order, which keeps each routine's `adr` and literal
+            # `ldr` within reach of the constants it loads.
+            pieces = [constant(lines, label, following) for label, following in spec["constants"]]
+            pieces += [routine(lines, name) for name in spec["routines"]]
+            text = [line for piece in sorted(pieces, key=lambda p: source_index(lines, p)) for line in piece]
 
         out = os.path.join(out_dir, spec["source"].removesuffix(".S") + ".s")
         operands = {name: (name, 0) for name in spec["routines"]}
