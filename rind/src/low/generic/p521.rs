@@ -533,7 +533,8 @@ const M57: u64 = (1 << 57) - 1;
 ///
 /// `from_bytes` also keeps bits 521..527, the next seven bits of word 8.
 /// Masking the top limb to 57 bits drops them, so this agrees with
-/// `from_bytes` only when those bits are zero. `fe_shifted` checks that.
+/// `from_bytes` only when those bits are zero. Callers pass a reduced
+/// coordinate or the low 521 bits, so those bits are already clear.
 fn unpack_words(w: &[u64; 9]) -> [u64; 9] {
     // `from_bytes` reads 66 bytes. Below 2^521 that is the whole integer.
     let w8 = w[8] & 0xffff;
@@ -554,8 +555,9 @@ fn fe_shifted(x: &[u64; 9]) -> Fe {
     // Bits 521 and above sit in `x[8]` above its low nine. `from_bytes`
     // keeps 521..527; `unpack_words` drops them. Callers pass a reduced
     // coordinate or the low 521 bits. `bignum_inv_p521` splits a larger
-    // input before it calls `fe`, because 2^521 is 1 mod p.
-    debug_assert!(x[8] >> 9 == 0);
+    // input before it calls `fe`, because 2^521 is 1 mod p. No debug
+    // assert on `x[8]`: a branch on that word would depend on a secret
+    // field element in scalar multiplication.
     let limbs = unpack_words(x);
     let mut out = Fe([0; FE_LIMBS]);
     for (dst, src) in out.0.iter_mut().zip(limbs) {
