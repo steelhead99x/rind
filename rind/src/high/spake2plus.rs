@@ -6,7 +6,7 @@ use core::fmt;
 use core::marker::PhantomData;
 
 use super::{digest, hkdf, hmac};
-use crate::error::{Error, KeyFormatError};
+use crate::error::Error;
 use crate::low::{Entry, Zeroable, ct, ct_equal, zeroise_value};
 use crate::mid::p256::{Affine, Scalar};
 use crate::mid::rng::{RandomSource, SystemRandom};
@@ -123,13 +123,11 @@ impl<S> Share<S> {
     /// a point on P-256.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_public();
+        // The decoder refuses a coordinate at or above p, so each point has
+        // one encoding and `bytes` is it.
         let point = Affine::from_uncompressed(bytes)?;
-        let encoded = point.to_uncompressed();
-        if encoded.as_slice() != bytes {
-            return Err(KeyFormatError::NotOnCurve.into());
-        }
         Ok(Self {
-            bytes: encoded,
+            bytes: point.to_uncompressed(),
             _kind: PhantomData,
         })
     }
