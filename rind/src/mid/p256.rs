@@ -570,10 +570,19 @@ impl Affine {
     ///
     /// Equal points double, and opposite points become the identity. The
     /// identity's affine image is `(0, 0)`, which is not on the curve.
+    ///
+    /// An input that is `(0, 0)`, such as an earlier sum of opposites, is
+    /// taken as the identity, so chained sums stay correct.
     pub(crate) fn add(self, other: Self) -> Self {
-        let sum = JacobianMontPoint::from_affine(&self.0)
-            .complete_add(&JacobianMontPoint::from_affine(&other.0));
+        let sum = self.to_jacobian().complete_add(&other.to_jacobian());
         Self(sum.as_affine())
+    }
+
+    /// Jacobian coordinates, with `(0, 0)` mapped to infinity (`z = 0`) by a
+    /// select rather than a branch.
+    fn to_jacobian(self) -> JacobianMontPoint {
+        let point = JacobianMontPoint::from_affine(&self.0);
+        mux_point(self.identity_mask(), &JacobianMontPoint::infinity(), &point)
     }
 
     /// The standard generator.
@@ -1805,6 +1814,13 @@ mod tests {
         identity[0] = 0x04;
         assert_eq!(opposite.to_uncompressed(), identity);
         assert!(!opposite.on_curve());
+        // `(0, 0)` from a sum of opposites is the identity when added again.
+        assert_eq!(opposite.add(g).to_uncompressed(), g.to_uncompressed());
+        assert_eq!(
+            two_g.add(opposite).to_uncompressed(),
+            two_g.to_uncompressed()
+        );
+        assert_eq!(opposite.add(opposite).to_uncompressed(), identity);
 
         let jacobian = JacobianMontPoint::from_affine(&CURVE_GENERATOR);
         let infinity = JacobianMontPoint::infinity();
