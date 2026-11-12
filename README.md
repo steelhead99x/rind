@@ -190,7 +190,7 @@ the adapters are not built for wasm. A target this paragraph does not name
 is not tested. Any x86_64 CPU runs rind, little-endian aarch64 needs NEON,
 and every operation panics on a CPU missing a feature rind requires: call
 `rind::cpu::check()` at startup to get an error naming it instead.
-[PLATFORMS.md][platforms] lists the tested targets, what is only compiled,
+[PLATFORMS.md][platforms] lists the tested targets by triple, what is only compiled,
 and what each architecture runs without each feature.
 
 ## Contributing

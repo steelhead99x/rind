@@ -14,16 +14,19 @@ Start from the default branch with no changes, tracked or ignored, and note
 its commit. If the project commits no `Cargo.lock`, run
 `cargo generate-lockfile` before branching.
 
-A library, a crate other projects depend on, may go rind-only when every
-target it releases is covered, as step 2 defines it. It then follows
-the same steps as a binary: rind replaces the old backend, including the
-default. A library that releases any uncovered target keeps its current
-backend as the default. It gains a non-default feature that builds it on
-rind instead, named like its existing backend features, and tested in CI
-beside them. For that library, everything below applies to the build with
-that feature, and its measurements compare it with the old backend's
-feature in otherwise the same command. A rind-only library measures its
-default build against the old default.
+A library, a crate other projects depend on, may go rind-only only when
+every target its users build is covered, as step 2 defines both. Its own CI's
+targets are not enough: a user who builds it for another target would lose
+it. A rind-only library replaces the old backend, including the default, by
+the steps below for a rind-only library. It adds no `[patch]` and no CPU
+check, which only a binary adds. A library with any uncovered user target
+keeps its current backend as the default. It gains a non-default feature
+that builds it on rind instead, named like its existing backend features,
+and tested in CI beside them on its covered targets only. For that library,
+everything below applies to the build with that feature, and its
+measurements compare it with the old backend's feature in otherwise the same
+command. A rind-only library measures its default build against the old
+default.
 
 1. Find where ring and aws-lc-rs come from, with the default features and
    each feature set the project's release or CI builds:
@@ -53,23 +56,34 @@ default build against the old default.
    the ring patch, but not aws-lc-rs or an older ring. Dev-dependencies may
    keep ring; only what ships must move.
 
-2. Find the release targets: the targets the project's CI, whatever runs it,
-   builds for release, including Docker images' platforms, and any
-   `dist-workspace.toml`, `[workspace.metadata.dist]`, or `Cross.toml`. A
-   library's are the targets its CI builds. A target is covered when
-   [PLATFORMS.md] says rind's CI runs its tests. Those runs include rind
-   and rind-rustls, except where that page limits a target to the `rind`
-   crate. iOS device code is covered only as a build: CI compiles those
-   tests and
-   does not run them. `wasm32-wasip2` is covered for the `rind` crate
-   alone: the nightly run executes its vector tests, with no differential
-   tests and no constant-time check, and the adapters are not built.
-   `wasm32-unknown-unknown` is compile-only, again for the `rind` crate
-   alone. A release target that needs an adapter on wasm is uncovered.
-   Anything [PLATFORMS.md] does not name is uncovered, including big-endian
-   aarch64, big-endian arm, `i586`, `riscv32`, `sparc64`, and MIPS, even
-   where `rind/build.rs` would select the portable backend. Step 3 builds
-   each release target.
+2. List the targets, as full target triples:
+
+   - A binary's release targets: those the project's CI, whatever runs it,
+     builds for release, including Docker images' platforms, and any
+     `dist-workspace.toml`, `[workspace.metadata.dist]`, or `Cross.toml`.
+   - A library's user targets: the union of the targets its CI builds or
+     tests, those its README, docs, or `[package.metadata.docs.rs]` say it
+     supports, and every target the backend it replaces tests: for ring,
+     the targets in ring's `.github/workflows/ci.yml`, and for aws-lc-rs,
+     those in aws-lc-rs's `.github/workflows/tests.yml` and `cross.yml`, each
+     at the tag of the version the lockfile holds. A library that documents
+     a narrower set of supported targets uses that set in place of the
+     backend's.
+
+   Look up each triple in [PLATFORMS.md]'s target table. It is covered when
+   its row says CI runs the tests of every rind crate the project uses: the
+   rows marked "tests" cover the `rind` crate and every adapter, and
+   `wasm32-wasip2` covers the `rind` crate alone. A row marked "built",
+   `aarch64-apple-ios`, is covered, since `aarch64-apple-ios-sim` runs the
+   same aarch64 code on the same OS. A row marked "compiled",
+   `wasm32-unknown-unknown`, is uncovered. A triple the table does not list
+   is uncovered, even when another row differs from it only in vendor, OS,
+   or environment, such as `x86_64-pc-windows-gnu`,
+   `aarch64-pc-windows-gnullvm`, `x86_64-unknown-freebsd`, or
+   `armv7-unknown-linux-musleabihf`, and even where `rind/build.rs` would
+   select the portable backend for it. Note each covered target the table
+   says rind checks no constant time on, such as `wasm32-wasip2`, for the
+   report's rind gaps. Step 3 builds each covered release target.
    Distribution packages and `cargo install` build where the project does
    not; list what they lose under Breaking changes rather than stopping.
 
@@ -83,12 +97,15 @@ default build against the old default.
    `rust-version` to rind's when it is older.
 
 Stop here, before changing anything, if a binary releases an uncovered
-target, a dependency in what ships hard-wires aws-lc-rs, a ring older
+target, a library has no covered target in its own CI to test rind on, a
+dependency in what ships hard-wires aws-lc-rs, a ring older
 than 0.17, or in a library, which cannot patch for its users, any ring, or the
 project calls an item rind lacks: for ring's API, one [rind-ring's README]
 leaves out, and for aws-lc-rs's, one [rind-aws-lc-rs's README] leaves out.
 MIGRATING.md on `main` may name items not yet released, which count as
-missing. Check every condition, then report each that holds in the format of
+missing. A library with an uncovered user target does not stop: it keeps its
+backend as the default, as above, and adds no rind CI job on that target.
+Check every condition, then report each that holds in the format of
 step 5, without the table, naming the target, dependency path, or item, and
 make the offers in step 6. Do not migrate part of the graph: a build that
 still links ring or aws-lc-rs gains nothing.
@@ -213,6 +230,9 @@ Reply with this report, filling in every row:
 
 - **Release targets**: each target, and built, built without linking, not
   built, or failed.
+- **Uncovered targets**: for a library, each user target rind does not
+  cover, and where the list came from, or none. A binary that has one
+  stopped.
 - **How it moved**: each path from the survey, what changed for it, and any
   dependency version Cargo changed.
 - **Still linked**: dev-dependencies that keep ring or aws-lc-rs, or none.
