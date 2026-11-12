@@ -867,6 +867,21 @@ extract aarch64 Aarch64 \
 extract_kdf x86_64 X86_64 --start-from '{impl core::convert::From for crate::aead::Key}'
 extract_kdf aarch64 Aarch64
 
+# The portable backend's Keccak-f, in a third translation: the backend builds
+# only under the cfg CI's portable jobs build with, here on x86_64.
+(cd rind && RUSTFLAGS='--cfg rind_portable --cfg curve25519_dalek_backend="serial"' \
+    charon cargo --preset=aeneas \
+    --start-from crate::low::portable::keccak::sha3_keccak4_f1600 \
+    --start-from crate::low::portable::keccak::sha3_keccak_nof4_f1600 \
+    --dest-file "$PWD/../$out/portable.llbc" \
+    -- -p rind --lib --target x86_64-unknown-linux-gnu)
+rm -rf "$out/lean"
+aeneas -backend lean -split-files -abort-on-error \
+    -no-progress-bar -dest "$out/lean" -subdir Rind/Portable \
+    -namespace rind.portable "$out/portable.llbc"
+mkdir -p proofs/Rind/Portable
+cp "$out/lean/Rind/Portable/Types.lean" "$out/lean/Rind/Portable/Funs.lean" proofs/Rind/Portable/
+
 mkdir -p proofs/Rind/Aarch64/Kdf
 for file in Dispatch X25519 P384 DigestAlgorithm DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
     Blockwise Sha Hmac HmacDispatch HkdfExpand Kdf/TypesExternal Kdf/FunsExternal \
