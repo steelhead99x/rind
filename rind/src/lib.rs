@@ -208,8 +208,8 @@ pub mod hpke {
 ///
 /// ```
 /// # fn main() -> Result<(), rind::Error> {
-/// use rind::oprf::voprf;
 /// use rind::oprf::P256_SHA256;
+/// use rind::oprf::voprf;
 ///
 /// let server = voprf::ServerKey::generate(&P256_SHA256)?;
 /// let (blinded, blind) = voprf::blind(&P256_SHA256, b"token")?;
