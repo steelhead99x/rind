@@ -199,11 +199,13 @@ symbol_bounds() {
 
 # Writes to `dest` an object holding the naked Rust function at `path`, as
 # rind's release build for `arch` Linux emits it: the function's own section,
-# renamed `.text`, its relocations, and the one read-only data section they
-# all refer to, renamed `.rodata`. s2n-bignum's `define_assert_relocs_from_elf`
-# reads it, failing unless its instructions and relocations are the ones the
-# proof lists, and gives the proof that section's bytes. Anything else fails:
-# a function that is not its whole section, or relocations to other sections.
+# renamed `.text`, and, if it has relocations, those and the one read-only
+# data section they all refer to, renamed `.rodata`. s2n-bignum's
+# `define_assert_relocs_from_elf` reads one with relocations, failing unless
+# its instructions and relocations are the ones the proof lists, and gives the
+# proof that section's bytes; `define_assert_from_elf` reads one without.
+# Anything else fails: a function that is not its whole section, or
+# relocations to other sections.
 asm_function() {
     local arch=$1 path=$2 dest=$3
     local found obj sym section size secsize target
@@ -216,6 +218,10 @@ asm_function() {
         return 1
     fi
     target=$(relocations "$obj" "$section" | awk '{ sub(/[-+].*/, "", $3); print $3 }' | sort -u)
+    if [[ -z $target ]]; then
+        "$tools/llvm-objcopy" --only-section="$section" --rename-section="$section=.text" "$obj" "$dest"
+        return
+    fi
     if [[ $(wc -l <<<"$target") != 1 || $target != .rodata.* ]]; then
         echo "admin/prove: $path's relocations refer to other than one .rodata section:" $target >&2
         return 1
@@ -258,13 +264,20 @@ s2n_bignum_model() {
 hol_light_proofs=(
     "aarch64 bignum_eq.bin rind::low::aarch64::bignum_eq::bignum_eq"
     "aarch64 sha256_block_data_order_hw.o rind::low::aarch64::sha256::sha256_block_data_order_hw"
+    "aarch64 sha512_block_data_order_hw.o rind::low::aarch64::sha512::sha512_block_data_order_hw"
     "aarch64 ct_compare_bytes.bin rind::low::aarch64::cpu::ct_compare_bytes"
     "aarch64 ct_compare_16.bin rind::low::aarch64::cpu::ct_compare_16"
     "x86_64 ct_compare_bytes.bin rind::low::x86_64::cpu::ct_compare_bytes"
     "x86_64 ct_compare_16.bin rind::low::x86_64::cpu::ct_compare_16"
+    "x86_64 bn_mul_mont_nohw.o rind::low::x86_64::mont::bn_mul_mont_nohw"
+)
+# The specs that no proof above loads yet, each loaded into the named target's
+# program so its known-answer tests run.
+hol_light_specs=(
+    "x86_64 common/chacha20poly1305.ml"
 )
 hol_light() {
-    local dir=$out/hol-light arches arch file path proof
+    local dir=$out/hol-light arches arch file path proof spec
     s2n_bignum_model
     rm -rf "$dir"
     mkdir -p "$dir"
@@ -281,6 +294,10 @@ hol_light() {
         *.o) asm_function "$arch" "$path" "$dir/$arch/$file" ;;
         esac
         echo "loadt \"$arch/${file%.*}.ml\";;" >>"$dir/$arch.ml"
+    done
+    for spec in "${hol_light_specs[@]}"; do
+        read -r arch file <<<"$spec"
+        echo "needs \"$file\";;" >>"$dir/$arch.ml"
     done
     for arch in $arches; do
         printf 'check_axioms ();; Printf.printf "%s: %%.0f s\\n" (Unix.time () -. prove_start);;\n' "$arch" >>"$dir/$arch.ml"
@@ -459,7 +476,7 @@ p256_items() {
     items rind/src/mid/p256.rs '    pub(crate) fn new_random(' '    pub(crate) fn generate(rng: &mut dyn'
     items rind/src/mid/rng.rs 'impl RandomSource for SystemRandom {'
 }
-check_quote Aarch64/P256Dispatch p256_items
+check_quote X86_64/P256Dispatch p256_items
 ecdsa_items() {
     items rind/src/high/curve.rs 'impl Curve for P256 {'
     items rind/src/mid/p256.rs '    pub(crate) fn generate(rng: &mut dyn'
@@ -480,13 +497,16 @@ check_quote X86_64/DigestAlgorithm items rind/src/high/digest.rs 'pub struct Alg
     'pub static MD5:' 'pub static SHA1:' 'pub static SHA256:' 'pub static SHA384:' 'pub static SHA512:' \
     'pub static SHA512_256:' 'pub static SHA3_256:' 'pub static SHA3_384:' 'pub static SHA3_512:' \
     'pub struct Digest {' 'impl Digest {' 'impl AsRef<[u8]> for Digest {'
-aes_ni_items() {
-    items rind/src/low/x86_64/aes.rs 'const RCON' 'fn aes128_expand(' 'fn aes256_expand(' \
-        'fn sub_rot_word(' 'fn xor_prefix(' 'fn zero()' 'fn aes128_block(' 'fn aes256_block('
-    items rind/src/low/x86_64/ghash.rs 'fn u128_to_m128i(' 'const GF128_POLY_HI:' \
-        'const GF128_POLY_CARRY_MASK:'
+aes_gcm_items() {
+    items rind/src/low/x86_64/ghash.rs 'macro_rules! mul {' 'macro_rules! reduce {' \
+        '    fn add(&self, bytes: &[u8], mut current: __m128i)' '    fn mul_h(' '    fn add_tail(' \
+        '    pub(crate) fn add(&mut self, bytes: &[u8]) {' '    pub(crate) fn tag(' 'pub(crate) fn _mul8(' \
+        'fn byte_reverse(' 'fn load_be(' 'const BYTESWAP:'
+    items rind/src/low/x86_64/aes.rs '    pub(crate) fn round_keys(&self)'
+    items rind/src/low/x86_64/aes_gcm.rs 'fn counter_block(' 'fn by8<' 'impl Counter {' 'const COUNTER_1:' \
+        'const BYTESWAP:' 'const BYTESWAP_EPI64:'
 }
-check_quote X86_64/AesNi aes_ni_items
+check_quote X86_64/AesGcmModel aes_gcm_items
 check_quote X86_64/AeadDispatch items rind/src/aead.rs 'pub struct Algorithm ' 'impl Algorithm {' \
     'pub static AES_128_GCM:' 'pub static AES_192_GCM:' 'pub static AES_256_GCM:' 'pub static CHACHA20_POLY1305:' 'impl Key {' \
     'struct Sealer<' 'type Seal<' 'type Open<' 'struct Ops<' 'impl<C: Cipher> Sealer<C> {' \
@@ -516,6 +536,15 @@ check_quote X86_64/SignatureDispatch items rind/src/high/signature.rs \
     'struct Verifier<K> {' 'impl<K> Verifier<K> {' 'pub struct PublicKey {' 'enum Parsed {' \
     'impl PublicKey {' 'impl AsRef<[u8]> for PublicKey {' 'impl fmt::Debug for PublicKey {' \
     'impl Ed25519KeyPair {' 'fn parse_ed25519(' '    pub static ED25519:'
+check_quote X86_64/RsaDispatch items rind/src/high/signature.rs 'enum HashId {' 'impl HashId {' \
+    'impl<const N: usize> Buffer<N> {' 'pub struct RsaVerificationAlgorithm {' \
+    'impl AsRef<VerificationAlgorithm> for RsaVerificationAlgorithm {' 'enum RsaPadding {' \
+    'struct RsaScheme {' 'type RsaVerify =' 'struct RsaVerifier {' 'impl RsaScheme {' \
+    'enum RsaVerification {' 'impl RsaVerification {' 'struct Rsa {' 'impl fmt::Debug for Rsa {' \
+    'impl Rsa {' 'const fn rsa_verification(' 'const fn rsa_algorithm(' 'const PKCS1_SHA256:' \
+    'const PSS_SHA256:' 'pub(super) const RSA_MIN_BITS:' \
+    '    pub static RSA_PKCS1_SHA256: RsaVerificationAlgorithm' \
+    '    pub static RSA_PSS_SHA256: RsaVerificationAlgorithm'
 # The models' `Ops` hold nothing, since the quoted constructor builds the only
 # one; `Masker<C>` holds only the key, since the quoted `Masker::new` builds
 # each with `C::mask`; and a digest `Algorithm` is which static it is. That
@@ -529,6 +558,10 @@ check_quote X86_64/SignatureDispatch items rind/src/high/signature.rs \
 # SHA-256 and fixed-length signatures, which holds while the quotes have each
 # `Verification::Ecdsa`, `EcdsaP256`, and `EcdsaKey::`, each `EcdsaOps` and
 # `EcdsaPair` built, which `load` alone builds, and each read of their `ops`.
+# An RSA verification algorithm is its `Rsa`'s floor and `verify`, its
+# `parse` being `PublicKey::parse_rsa`, which holds while the quotes have each
+# `Rsa` literal, which `rsa_algorithm` alone builds, and each
+# `Verification::Rsa`.
 # An AEAD `Sealer<C>` is its key, since the quoted `Sealer::expand` builds
 # every `Ops`, of `C`'s own functions, while the quote has each mention of
 # `Ops` in `aead.rs` and each `Algorithm` it builds.
@@ -553,6 +586,9 @@ only_quoted rind/src/high/signature.rs "$out/signature.rs" 'EcdsaP256\b'
 only_quoted rind/src/high/signature.rs "$out/EcdsaDispatch.rs" 'EcdsaKey::'
 only_quoted rind/src/high/signature.rs "$out/EcdsaDispatch.rs" 'Ecdsa(Ops|Pair) \{'
 only_quoted rind/src/high/signature.rs "$out/EcdsaDispatch.rs" '\.ops\b'
+cat "$out/SignatureDispatch.rs" "$out/RsaDispatch.rs" >"$out/rsa-signature.rs"
+only_quoted rind/src/high/signature.rs "$out/rsa-signature.rs" 'Verification::Rsa\('
+only_quoted rind/src/high/signature.rs "$out/RsaDispatch.rs" '\bRsa \{'
 only_quoted rind/src/high/hmac.rs "$out/HmacDispatch.rs" '\.ops\b'
 only_quoted rind/src/high/hmac.rs "$out/HmacDispatch.rs" '(Key|Tag)Ops \{'
 only_quoted rind/src/high/hmac.rs "$out/HmacDispatch.rs" '= Algorithm \{'
@@ -569,8 +605,9 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # are translated. The other curves' functions are opaque; their types are
 # kept, since the agreement enums hold them. Then ChaCha20 header protection
 # from its `Mask` impl down to HACL*'s rounds, which are Rust and translated
-# too, and AES's from `cipher::Aes`, translated on x86_64 down to the AES-NI
-# key expansion and block cipher `AesNi.lean` models, and opaque on aarch64.
+# too, and AES's from `cipher::Aes` down to each target's key expansion and
+# block cipher on the AES instructions, over the intrinsics
+# `proofs/Rind/X86_64/Simd.lean` and `proofs/Rind/Aarch64/Neon.lean` model.
 # Then Ed25519 from
 # `high::signature`'s key pair and `high::ed25519` down to s2n-bignum's
 # routines and the SHA-512 context. On x86_64, ChaCha20-Poly1305 and
@@ -591,17 +628,23 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # reaches it, and `SignatureDispatch.lean` defines it. SHA-1's and SHA-256's
 # padding is translated down to their block functions, which are opaque.
 # SHA-3's sponge is translated down to its Keccak-f routines, which are
-# opaque, from what the digest API and ML-KEM call: ML-DSA's SHAKE readers
-# loop over borrowed slices and zip iterators, which Aeneas cannot translate.
+# opaque, from what the digest API, ML-KEM, and ML-DSA call.
 # MD5, which no proof covers, is opaque.
 # P-256's key generation draws through a `dyn RandomSource`, so it is opaque
-# too, and `proofs/Rind/Aarch64/P256Dispatch.lean` models it above the
+# too, and `proofs/Rind/X86_64/P256Dispatch.lean` models it above the
 # translated `PrivateKey::from_bytes`, as `EcdsaDispatch.lean` does for ECDSA,
 # with the signature API's ECDSA key pairs and statics, which hold function
 # pointers too. The generator table is translated, so
 # `proofs/Rind/Aarch64/P256Table.lean` can prove it holds what s2n-bignum's
-# proof assumes. HMAC's keyed states are translated over any hash, and its
+# proof assumes; x86_64's `base_multiply`, aws-lc's, which no proof covers
+# yet, is opaque. HMAC's keyed states are translated over any hash, and its
 # `Key` and `Context`, which hold function pointers, are not.
+# On x86_64, RSA verification is translated from `high::rsa::VerifyingKey`
+# down to `low::posint` and the Montgomery products' dispatch in
+# `low::x86_64::mont`, whose s2n-bignum and aws-lc routines are opaque. Its
+# DER parsing and encoding, which the ✓ leaves out, are opaque too.
+# x86_64's RSA reaches `Digest::ct_equal`, so aarch64 starts from it, for
+# the HMAC model both share.
 # See UPSTREAM.md, "Aeneas cannot translate several kinds of Rust".
 extract() {
     local arch=$1 dir=$2
@@ -651,6 +694,8 @@ extract() {
         --start-from crate::mid::sha3::Sponge::absorb \
         --start-from crate::mid::sha3::Sponge::finish \
         --start-from 'crate::mid::sha3::Sha3Context::_' \
+        --start-from 'crate::mid::sha3::Shake::_' \
+        --start-from 'crate::mid::sha3::Shake4x::_' \
         --opaque crate::high::agreement::Algorithm \
         --opaque crate::high::agreement::Ops \
         --opaque crate::high::agreement::x25519_from_pkcs8 \
@@ -669,7 +714,6 @@ extract() {
         --opaque crate::high::digest::Digest \
         --opaque 'crate::high::digest::_::zeroed' \
         --opaque 'crate::high::digest::_::as_mut' \
-        --opaque 'crate::high::digest::_::ct_equal' \
         --opaque 'crate::high::digest::_::as_ref' \
         --opaque 'crate::high::digest::_::output_len' \
         --opaque crate::high::digest::MD5 \
@@ -751,8 +795,15 @@ extract_kdf() {
 }
 
 extract x86_64 X86_64 \
-    --opaque '{impl crate::high::agreement::Agree for crate::high::curve::P256}::load' \
-    --opaque 'crate::mid::p256::_::_' \
+    --start-from crate::mid::p256::PrivateKey::from_bytes \
+    --opaque 'crate::mid::p256::_::generate' \
+    --opaque 'crate::mid::p256::_::new_random' \
+    --opaque 'crate::mid::p256::_::base_multiply' \
+    --include crate::low::x86_64::adx_mux::bignum_demont_p256 \
+    --include crate::low::x86_64::adx_mux::bignum_montmul_p256 \
+    --include crate::low::x86_64::adx_mux::bignum_montsqr_p256 \
+    --include crate::low::x86_64::adx_mux::bignum_tomont_p256 \
+    --include crate::low::x86_64::adx_mux::p256_scalarmul \
     --include crate::low::x86_64::adx_mux::bignum_demont_p384 \
     --include crate::low::x86_64::adx_mux::bignum_montmul_p384 \
     --include crate::low::x86_64::adx_mux::bignum_montsqr_p384 \
@@ -790,33 +841,49 @@ extract x86_64 X86_64 \
     --include crate::low::x86_64::chacha20poly1305::open \
     --include 'crate::mid::aes::_' \
     --include crate::low::x86_64::aes \
-    --opaque crate::low::x86_64::aes::aes128_expand \
-    --opaque crate::low::x86_64::aes::aes192_expand \
-    --opaque crate::low::x86_64::aes::aes256_expand \
-    --opaque crate::low::x86_64::aes::aes128_block \
-    --opaque crate::low::x86_64::aes::aes256_block \
-    --opaque crate::low::x86_64::aes::aes_block \
+    --start-from crate::low::x86_64::aes::AesDecKey::new \
+    --start-from crate::low::x86_64::aes::AesDecKey::decrypt_block \
     --opaque crate::low::x86_64::aes::HwKey::round_keys_512 \
     --opaque crate::low::x86_64::aes::RoundKeys512 \
     --include crate::low::x86_64::ghash \
     --opaque '{crate::low::x86_64::ghash::GhashTableAvx512}::new' \
     --opaque 'crate::low::x86_64::ghash::_::from_powers' \
     --opaque 'crate::low::x86_64::ghash::_::add' \
+    --opaque 'crate::low::x86_64::ghash::_::add_by' \
     --opaque 'crate::low::x86_64::ghash::_::add_tail' \
     --opaque 'crate::low::x86_64::ghash::_::mul_h' \
-    --opaque crate::low::x86_64::ghash::Ghash \
-    --opaque crate::low::x86_64::ghash::u128_to_m128i \
-    --opaque crate::low::x86_64::ghash::GF128_POLY_HI \
-    --opaque crate::low::x86_64::ghash::GF128_POLY_CARRY_MASK \
-    --include crate::low::x86_64::aes_gcm::seal \
-    --include crate::low::x86_64::aes_gcm::open \
-    --include crate::low::x86_64::aes_gcm::vale \
-    --include crate::low::x86_64::aes_gcm::AVX_VALE_SEAL_FROM \
-    --include crate::low::x86_64::aes_gcm::VAES_AVX2_VALE_OPEN_BELOW \
-    --include crate::low::x86_64::aes_gcm::VAES_AVX2_VALE_SEAL_BELOW \
+    --opaque 'crate::low::x86_64::ghash::_::tag' \
+    --opaque 'crate::low::x86_64::ghash::_::xi' \
+    --opaque 'crate::low::x86_64::ghash::_::set_xi' \
+    --include crate::low::x86_64::aes_gcm \
+    --opaque crate::low::x86_64::aes_gcm::counter_block \
+    --opaque crate::low::x86_64::aes_gcm::composed \
+    --opaque crate::low::x86_64::aes_gcm::by8 \
+    --opaque crate::low::x86_64::aes_gcm::_cipher_avx512 \
+    --opaque crate::low::x86_64::aes_gcm::Counter \
+    --opaque crate::low::x86_64::aes_gcm::Counter512 \
     --include crate::low::x86_64::aes_gcm_avx \
     --opaque crate::low::x86_64::aes_gcm_avx::counter_block \
-    --opaque crate::low::x86_64::aes_gcm_avx::aead
+    --opaque crate::low::x86_64::aes_gcm_avx::aead \
+    --start-from crate::high::rsa::VerifyingKey::from_components \
+    --start-from crate::high::rsa::VerifyingKey::from_der \
+    --start-from crate::high::rsa::VerifyingKey::to_pkcs1_der \
+    --start-from crate::high::rsa::VerifyingKey::modulus_len_bits \
+    --start-from crate::high::rsa::VerifyingKey::verify_pkcs1_sha1 \
+    --start-from crate::high::rsa::VerifyingKey::verify_pkcs1_sha256 \
+    --start-from crate::high::rsa::VerifyingKey::verify_pkcs1_sha384 \
+    --start-from crate::high::rsa::VerifyingKey::verify_pkcs1_sha512 \
+    --start-from crate::high::rsa::VerifyingKey::verify_pss_sha256 \
+    --start-from crate::high::rsa::VerifyingKey::verify_pss_sha384 \
+    --start-from crate::high::rsa::VerifyingKey::verify_pss_sha512 \
+    --opaque crate::high::rsa::der_components \
+    --opaque 'crate::high::rsa::_::to_pkcs1_der' \
+    --include crate::low::posint \
+    --include crate::low::x86_64::mont::mont_mul \
+    --include crate::low::x86_64::mont::mont_sqr \
+    --include crate::low::x86_64::mont::karatsuba_mul \
+    --include crate::low::x86_64::mont::karatsuba_sqr \
+    --include crate::low::x86_64::mont::redc_8n
 extract aarch64 Aarch64 \
     --start-from crate::mid::p256::PrivateKey::from_bytes \
     --start-from crate::high::ecdsa::VerifyingKey::from_x962_uncompressed \
@@ -846,17 +913,40 @@ extract aarch64 Aarch64 \
     --include crate::low::aarch64::sha3_keccak_nof4_f1600 \
     --include crate::low::aarch64::sha256 \
     --opaque crate::low::aarch64::sha256::compress_hw \
-    --opaque crate::low::aarch64::sha256::compress_nohw
+    --opaque crate::low::aarch64::sha256::compress_nohw \
+    --include 'crate::mid::aes::_' \
+    --include crate::low::aarch64::aes \
+    --start-from crate::low::aarch64::aes::AesDecKey::new \
+    --start-from crate::low::aarch64::aes::AesDecKey::decrypt_block \
+    --opaque crate::low::aarch64::aes::_aes128_8_blocks \
+    --opaque crate::low::aarch64::aes::_aes256_8_blocks \
+    --opaque crate::low::aarch64::aes::_aes_8_blocks \
+    --start-from crate::high::digest::Digest::ct_equal
 
 # The AEAD key's conversion is x86_64's alone: the AEAD API's model and proofs
 # are x86_64's, as AES-GCM's are.
 extract_kdf x86_64 X86_64 --start-from '{impl core::convert::From for crate::aead::Key}'
 extract_kdf aarch64 Aarch64
 
+# The portable backend's Keccak-f, in a third translation: the backend builds
+# only under the cfg CI's portable jobs build with, here on x86_64.
+(cd rind && RUSTFLAGS='--cfg rind_portable --cfg curve25519_dalek_backend="serial"' \
+    charon cargo --preset=aeneas \
+    --start-from crate::low::portable::keccak::sha3_keccak4_f1600 \
+    --start-from crate::low::portable::keccak::sha3_keccak_nof4_f1600 \
+    --dest-file "$PWD/../$out/portable.llbc" \
+    -- -p rind --lib --target x86_64-unknown-linux-gnu)
+rm -rf "$out/lean"
+aeneas -backend lean -split-files -abort-on-error \
+    -no-progress-bar -dest "$out/lean" -subdir Rind/Portable \
+    -namespace rind.portable "$out/portable.llbc"
+mkdir -p proofs/Rind/Portable
+cp "$out/lean/Rind/Portable/Types.lean" "$out/lean/Rind/Portable/Funs.lean" proofs/Rind/Portable/
+
 mkdir -p proofs/Rind/Aarch64/Kdf
-for file in Dispatch X25519 P384 DigestAlgorithm DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
+for file in Dispatch P256Dispatch P256Agree X25519 P384 DigestAlgorithm DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
     Blockwise Sha Hmac HmacDispatch HkdfExpand Kdf/TypesExternal Kdf/FunsExternal \
-    CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3; do
+    CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3 AesCipher HkdfAes; do
     sed 's/X86_64/Aarch64/g; s/x86_64/aarch64/g' "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Aarch64/$file.lean"
 done
 # The AEAD model imports nothing aarch64 has, and no aarch64 translation reaches it.
@@ -865,14 +955,19 @@ sed -i '/-- BEGIN aead/,/-- END aead/d' proofs/Rind/Aarch64/Kdf/FunsExternal.lea
 
 [ "${PROVE_TRANSLATE_ONLY:-}" ] && exit 0
 # Each hand model of a CPU intrinsic, a `core.core_arch` definition but its
-# vector types' own, is tested against the instruction on this CPU:
-# `admin/simd-vectors.rs` runs each and writes `#guard`s that the models
-# compute the same, which Lean checks once the proofs build. Fail on a model
-# it does not test, so a new one cannot go untested.
+# vector types' own, is tested against the instruction: `admin/simd-vectors.rs`
+# runs each x86_64 one on this CPU and writes `#guard`s that the models compute
+# the same, which Lean checks once the proofs build, and
+# `proofs/Rind/Aarch64/NeonVectors.lean` holds what `admin/neon-vectors.rs`
+# printed on an aarch64 CPU, which the `prove` workflow's `neon` job checks is
+# still what it prints. Fail on a model neither tests, so a new one cannot go
+# untested.
 rustc --edition 2024 -O -o "$out/simd-vectors" admin/simd-vectors.rs
 "$out/simd-vectors" >"$out/SimdVectors.lean"
-untested=$(grep -rhoE '^def core\.core_arch\.[^ ]+' proofs/Rind | sed 's/^def //' | grep -v '\.__m' | sort -u |
-    while read -r model; do grep -qF " $model " "$out/SimdVectors.lean" || echo "$model"; done)
+untested=$(grep -rhoE '^def core\.core_arch\.[^ ]+' proofs/Rind | sed 's/^def //' | grep -vE '\.__m|_t\.Insts\.' | sort -u |
+    while read -r model; do
+        grep -qF " $model " "$out/SimdVectors.lean" proofs/Rind/Aarch64/NeonVectors.lean || echo "$model"
+    done)
 if [[ -n $untested ]]; then
     echo "admin/prove: no vectors test these intrinsic models:" $untested >&2
     exit 1

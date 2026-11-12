@@ -394,6 +394,14 @@ theorem buffered_spec {N : Usize} (bw : low.generic.blockwise.Blockwise N) (h : 
 /-- Translated bytes as the spec reads them. -/
 def bv (l : List U8) : List Byte := l.map (·.bv)
 
+theorem bv_length (x : List U8) : (bv x).length = x.length := List.length_map ..
+
+theorem bv_inj (x y : List U8) : bv x = bv y ↔ x = y := by
+  constructor
+  · intro h
+    exact List.map_injective_iff.mpr (fun a b hab => by cases a; cases b; simp_all) h
+  · rintro rfl; rfl
+
 /-- Translated words as the spec reads them. -/
 def words (l : List U32) : List (BitVec 32) := l.map (·.bv)
 

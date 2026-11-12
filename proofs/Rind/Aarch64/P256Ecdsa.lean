@@ -436,9 +436,9 @@ theorem neg_of_same_x (x y1 y2 : Nat) (h1 : p256OnCurve (some (x, y1))) (h2 : p2
   have hsum : (y2 : ZMod p256) + y1 = 0 := by
     have : ((y2 : ZMod p256) - y1) * ((y2 : ZMod p256) + y1) = 0 := by linear_combination e2 - e1
     exact (mul_eq_zero.mp this).resolve_left hne'
-  simp only [p256Neg, Option.some.injEq, Prod.mk.injEq, true_and]
+  simp only [p256Neg, nist.neg, Option.some.injEq, Prod.mk.injEq, true_and]
   have hlt : (p256 - y1 % p256) % p256 < p256 := Nat.mod_lt _ p256_pos
-  rw [← Nat.mod_eq_of_lt h2.2.1, ← Nat.mod_eq_of_lt hlt, ← ZMod.natCast_eq_natCast_iff', natCast_neg_mod]
+  rw [← Nat.mod_eq_of_lt h2.2.1, ← Nat.mod_eq_of_lt hlt, ← ZMod.natCast_eq_natCast_iff', nist.natCast_neg_mod]
   linear_combination hsum
 
 theorem dec_lt (x : Nat) : (dec x).val < p256 := ZMod.val_lt _
@@ -446,7 +446,7 @@ theorem dec_lt (x : Nat) : (dec x).val < p256 := ZMod.val_lt _
 theorem val_inj (a b : ZMod p256) : a.val = b.val ↔ a = b := ⟨fun h => ZMod.val_injective _ h, fun h => h ▸ rfl⟩
 
 @[step]
-theorem add_affine_spec (pt : mid.p256.JacobianMontPoint) (p : mid.p256.AffineMontPoint)
+theorem add_affine_spec (_hr : Runs) (pt : mid.p256.JacobianMontPoint) (p : mid.p256.AffineMontPoint)
     (P1 P2 : P256Point) (hc1 : p256OnCurve P1) (hc2 : p256OnCurve P2) (h1 : jrep P1 pt)
     (h2 : p256Represents2 P2 (pairNat p.xy.val)) :
     mid.p256.JacobianMontPoint.public_add_affine pt p ⦃ r => jrep (p256Add P1 P2) r ⦄ := by
@@ -473,10 +473,10 @@ theorem add_affine_spec (pt : mid.p256.JacobianMontPoint) (p : mid.p256.AffineMo
     have hlt : ∀ x, x % p256 < p256 := fun x => Nat.mod_lt _ p256_pos
     step as ⟨fz, hfz⟩
     have hfzZ : feNat fz = Z := by simp [Z, tripleNat, feNat, hfz]
-    step with mont_sqr_spec fz (by rw [hfzZ]; exact hZ) as ⟨z2, hz2⟩
+    step with mont_sqr_spec _hr fz (by rw [hfzZ]; exact hZ) as ⟨z2, hz2⟩
     step as ⟨fe1, hfe1⟩
     have hfe1x : feNat fe1 = px := by simp [px, pairNat, feNat, hfe1]
-    step with mont_mul_spec fe1 z2 (by rw [hfe1x]; exact hpx) (by rw [hz2]; exact hlt _) as ⟨fe2, hfe2⟩
+    step with mont_mul_spec _hr fe1 z2 (by rw [hfe1x]; exact hpx) (by rw [hz2]; exact hlt _) as ⟨fe2, hfe2⟩
     step as ⟨fe3, hfe3⟩
     have hfe3X : feNat fe3 = X := by simp [X, tripleNat, feNat, hfe3]
     step as ⟨b1, hb1⟩
@@ -489,8 +489,8 @@ theorem add_affine_spec (pt : mid.p256.JacobianMontPoint) (p : mid.p256.AffineMo
       step as ⟨fe4, hfe4⟩
       have hfe4y : feNat fe4 = py := by
         simp [py, pairNat, feNat, hfe4, List.take_of_length_le, hl]
-      step with mont_mul_spec z2 fz (by rw [hz2]; exact hlt _) (by rw [hfzZ]; exact hZ) as ⟨fe5, hfe5⟩
-      step with mont_mul_spec fe4 fe5 (by rw [hfe4y]; exact hpy) (by rw [hfe5]; exact hlt _) as ⟨fe6, hfe6⟩
+      step with mont_mul_spec _hr z2 fz (by rw [hz2]; exact hlt _) (by rw [hfzZ]; exact hZ) as ⟨fe5, hfe5⟩
+      step with mont_mul_spec _hr fe4 fe5 (by rw [hfe4y]; exact hpy) (by rw [hfe5]; exact hlt _) as ⟨fe6, hfe6⟩
       step as ⟨fe7, hfe7⟩
       have hfe7Y : feNat fe7 = Y := by simp [Y, tripleNat, feNat, hfe7]
       step as ⟨b2, hb2⟩
@@ -909,12 +909,12 @@ theorem scalar_naf_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6) (s : mid.p256.S
   exact ⟨by simpa [Array.val_to_slice] using hv2, hd2⟩
 
 theorem neg_val (v : ZMod p256) : (p256 - v.val % p256) % p256 = (-v).val := by
-  have h := natCast_neg_mod v.val
+  have h := nist.natCast_neg_mod (p := p256) v.val
   rw [ZMod.natCast_val, ZMod.cast_id', id] at h
   rw [← h, ZMod.val_natCast, Nat.mod_eq_of_lt (Nat.mod_lt _ p256_pos)]
 
 theorem dec_neg (y : Nat) (hy : y < p256) : dec ((p256 - y) % p256) = -(dec y) := by
-  have := natCast_neg_mod y
+  have := nist.natCast_neg_mod (p := p256) y
   rw [Nat.mod_eq_of_lt hy] at this
   simp only [dec]; rw [this]; ring
 
@@ -1038,7 +1038,7 @@ theorem digit_point (P : P256Point) (hP : p256OnCurve P) (d : I8) (pt : mid.p256
     simp only [WP.spec_ok]
     rwa [← P256Laws.zpow_natCast, show (d.val.natAbs : Int) = d.val by omega] at hpt
 
-theorem twin_loop_spec (t : Std.Array (Std.Array U64 256#usize) 43#usize)
+theorem twin_loop_spec (_hr : Runs) (t : Std.Array (Std.Array U64 256#usize) 43#usize)
     (htab : p256Tabulates p256G t) (Q : P256Point) (hQ : p256OnCurve Q)
     (odd : Std.Array mid.p256.AffineMontPoint 8#usize) (hodd : OddMultiples Q 1 odd)
     (more : Option (Std.Array mid.p256.AffineMontPoint 8#usize))
@@ -1131,7 +1131,7 @@ theorem twin_loop_spec (t : Std.Array (Std.Array U64 256#usize) 43#usize)
                 exact hodd _ h8
           intro tmp htmp
           step with digit_point Q hQ pd tmp htmp as ⟨tmp1, htmp1⟩
-          step with add_affine_spec r1 tmp1 _ _ (hT _ _) (p256Laws.zpow_onCurve Q hQ _) hr1 htmp1 as ⟨r3, hr3⟩
+          step with add_affine_spec _hr r1 tmp1 _ _ (hT _ _) (p256Laws.zpow_onCurve Q hQ _) hr1 htmp1 as ⟨r3, hr3⟩
           rw [p256Laws.twin_add_right p256G Q hGc hQ] at hr3
           exact hr3
         · rename_i hpe
@@ -1171,7 +1171,7 @@ theorem twin_loop_spec (t : Std.Array (Std.Array U64 256#usize) 43#usize)
         have hrep : p256Represents2 (p256Pow p256G gd.val.natAbs) (pairNat tmp.xy.val) := by
           rw [htmp, hgm, ← hi1]; simpa using htab0
         step with digit_point p256G hGc gd tmp hrep as ⟨tmp1, htmp1⟩
-        step with add_affine_spec r2 tmp1 _ _ (hT _ _) (p256Laws.zpow_onCurve p256G hGc _) hr2 htmp1 as
+        step with add_affine_spec _hr r2 tmp1 _ _ (hT _ _) (p256Laws.zpow_onCurve p256G hGc _) hr2 htmp1 as
           ⟨r3, hr3⟩
         rw [p256Laws.twin_add_left p256G Q hGc hQ] at hr3
         have h := hfin r3 hr3
@@ -1188,7 +1188,7 @@ theorem twin_loop_spec (t : Std.Array (Std.Array U64 256#usize) 43#usize)
       rwa [h0, List.drop_zero, List.drop_zero] at hres
   · exact ⟨hs, he, rfl, hres⟩
 
-theorem twin_multiply_spec (g p : mid.p256.Scalar) (Q : P256Point)
+theorem twin_multiply_spec (_hr : Runs) (g p : mid.p256.Scalar) (Q : P256Point)
     (hQ : p256OnCurve Q) (odd : Std.Array mid.p256.AffineMontPoint 8#usize) (hodd : OddMultiples Q 1 odd)
     (more : Option (Std.Array mid.p256.AffineMontPoint 8#usize))
     (hmore : ∀ m, more = some m → OddMultiples Q 17 m) :
@@ -1214,7 +1214,7 @@ theorem twin_multiply_spec (g p : mid.p256.Scalar) (Q : P256Point)
   have hgl : gd.val.length = 257 := gd.property
   have hpl : pd.val.length = 257 := pd.property
   have hend : iter.iter.end.val = 257 := by rw [iter_post]; simp [s_post, Slice.len, hgl]
-  apply WP.spec_mono (twin_loop_spec mid.p256.precomp.CURVE_GENERATOR_PRECOMP htab Q hQ odd hodd more hmore gd pd hgd hpd a1.to_slice
+  apply WP.spec_mono (twin_loop_spec _hr mid.p256.precomp.CURVE_GENERATOR_PRECOMP htab Q hQ odd hodd more hmore gd pd hgd hpd a1.to_slice
     (by rw [Array.val_to_slice, ha1, getElem_eq_getElem! _ _ (by simp)]) iter (by rw [iter_post]; rfl)
     (by omega) result (by
       rw [hend, List.drop_of_length_le (by omega), List.drop_of_length_le (by omega)]
@@ -1311,15 +1311,15 @@ theorem dec_tomont (v : Nat) : dec (2 ^ 256 * v % p256) = v := by
   simp only [dec, cast_mod_p, Nat.cast_mul]
   rw [← mul_assoc, mul_comm (p256RInv : ZMod p256), R_mul_RInv, one_mul]
 
-theorem x_is_closure_spec (pt : mid.p256.JacobianMontPoint) (z2 : mid.p256.FieldElement) (x : Nat)
+theorem x_is_closure_spec (_hr : Runs) (pt : mid.p256.JacobianMontPoint) (z2 : mid.p256.FieldElement) (x : Nat)
     (hx : x < p256) (hX : (tripleNat pt.xyz.val).1 < p256) (hz2 : feNat z2 < p256)
     (heq : ∀ v : Nat, dec (feNat z2) * v = dec (tripleNat pt.xyz.val).1 ↔ (v : ZMod p256) = x)
     (v : Std.Array U64 4#usize) :
     mid.p256.JacobianMontPoint.public_x_is.closure.Insts.CoreOpsFunctionFnTupleArrayU644Bool.call (z2, pt) v
       ⦃ b => b ↔ wordsNat v.val % p256 = x ⦄ := by
   unfold mid.p256.JacobianMontPoint.public_x_is.closure.Insts.CoreOpsFunctionFnTupleArrayU644Bool.call
-  step with as_mont_spec v as ⟨fe1, hfe1⟩
-  step with mont_mul_spec fe1 z2 (by rw [hfe1]; exact Nat.mod_lt _ p256_pos) hz2 as ⟨fe2, hfe2⟩
+  step with as_mont_spec _hr v as ⟨fe1, hfe1⟩
+  step with mont_mul_spec _hr fe1 z2 (by rw [hfe1]; exact Nat.mod_lt _ p256_pos) hz2 as ⟨fe2, hfe2⟩
   step as ⟨fe3, hfe3⟩
   have hfe3X : feNat fe3 = (tripleNat pt.xyz.val).1 := by simp [tripleNat, feNat, hfe3]
   step as ⟨b, hb⟩
@@ -1329,7 +1329,7 @@ theorem x_is_closure_spec (pt : mid.p256.JacobianMontPoint) (z2 : mid.p256.Field
 theorem p256_lt_two_n : p256 < 2 * n256 := by unfold p256 n256; decide
 theorem n256_lt_p256 : n256 < p256 := by unfold p256 n256; decide
 
-theorem x_is_spec (pt : mid.p256.JacobianMontPoint) (x y : Nat) (h : jrep (some (x, y)) pt)
+theorem x_is_spec (_hr : Runs) (pt : mid.p256.JacobianMontPoint) (x y : Nat) (h : jrep (some (x, y)) pt)
     (r : mid.p256.Scalar) (hr : scNat r < n256) :
     mid.p256.JacobianMontPoint.public_x_is pt r ⦃ b => b ↔ x % n256 = scNat r ⦄ := by
   obtain ⟨hX, hY, hZ, hP⟩ := h
@@ -1344,7 +1344,7 @@ theorem x_is_spec (pt : mid.p256.JacobianMontPoint) (x y : Nat) (h : jrep (some 
   unfold mid.p256.JacobianMontPoint.public_x_is
   step as ⟨fz, hfz⟩
   have hfzZ : feNat fz = Z := by simp [Z, tripleNat, feNat, hfz]
-  step with mont_sqr_spec fz (by rw [hfzZ]; exact hZ) as ⟨z2, hz2⟩
+  step with mont_sqr_spec _hr fz (by rw [hfzZ]; exact hZ) as ⟨z2, hz2⟩
   have hz2p : feNat z2 < p256 := by rw [hz2]; exact Nat.mod_lt _ p256_pos
   have heq : ∀ v : Nat, dec (feNat z2) * v = dec X ↔ (v : ZMod p256) = x := by
     intro v
@@ -1361,7 +1361,7 @@ theorem x_is_spec (pt : mid.p256.JacobianMontPoint) (x y : Nat) (h : jrep (some 
     · rintro (rfl | rfl)
       · exact Nat.mod_eq_of_lt hr
       · rw [Nat.add_mod_right, Nat.mod_eq_of_lt hr]
-  step with x_is_closure_spec pt z2 x hx hX hz2p heq r as ⟨b, hb⟩
+  step with x_is_closure_spec _hr pt z2 x hx hX hz2p heq r as ⟨b, hb⟩
   rw [show wordsNat r.val % p256 = scNat r from Nat.mod_eq_of_lt hrp] at hb
   rw [hmod]
   split
@@ -1390,7 +1390,7 @@ theorem x_is_spec (pt : mid.p256.JacobianMontPoint) (x y : Nat) (h : jrep (some 
       split
       · rename_i hb1t
         have hlt := hb1.mp hb1t
-        step with x_is_closure_spec pt z2 x hx hX hz2p heq rpn as ⟨b2, hb2⟩
+        step with x_is_closure_spec _hr pt z2 x hx hX hz2p heq rpn as ⟨b2, hb2⟩
         rw [hrpn, Nat.mod_eq_of_lt hlt] at hb2
         rw [hb2]
         constructor
@@ -1422,21 +1422,21 @@ theorem jrep_some (P : P256Point) (pt : mid.p256.JacobianMontPoint) (h : jrep P 
   rw [ite_eq_right_iff.mpr (fun h => absurd h hZ0)] at hP
   exact ⟨hX, hY, hZ, hZ0, hP.symm⟩
 
-theorem as_affine_by_spec (pt : mid.p256.JacobianMontPoint) (P : P256Point) (h : jrep P pt) (hne : P ≠ none)
+theorem as_affine_by_spec (_hr : Runs) (pt : mid.p256.JacobianMontPoint) (P : P256Point) (h : jrep P pt) (hne : P ≠ none)
     (zi : mid.p256.FieldElement) (hzi : feNat zi < p256)
     (hinv : dec (feNat zi) = (dec (tripleNat pt.xyz.val).2.2)⁻¹) :
     mid.p256.JacobianMontPoint.as_affine_by pt zi ⦃ a => p256Represents2 P (pairNat a.xy.val) ⦄ := by
   obtain ⟨hX, hY, hZ, hZ0, rfl⟩ := jrep_some P pt h hne
   have hlt : ∀ x, x % p256 < p256 := fun x => Nat.mod_lt _ p256_pos
   unfold mid.p256.JacobianMontPoint.as_affine_by
-  step with mont_sqr_spec zi hzi as ⟨z2, hz2⟩
-  step with mont_mul_spec z2 zi (by rw [hz2]; exact hlt _) hzi as ⟨z3, hz3⟩
+  step with mont_sqr_spec _hr zi hzi as ⟨z2, hz2⟩
+  step with mont_mul_spec _hr z2 zi (by rw [hz2]; exact hlt _) hzi as ⟨z3, hz3⟩
   step as ⟨fx, hfx⟩
   have hfxX : feNat fx = (tripleNat pt.xyz.val).1 := by simp [tripleNat, feNat, hfx]
-  step with mont_mul_spec fx z2 (by rw [hfxX]; exact hX) (by rw [hz2]; exact hlt _) as ⟨x, hx⟩
+  step with mont_mul_spec _hr fx z2 (by rw [hfxX]; exact hX) (by rw [hz2]; exact hlt _) as ⟨x, hx⟩
   step as ⟨fy, hfy⟩
   have hfyY : feNat fy = (tripleNat pt.xyz.val).2.1 := by simp [tripleNat, feNat, hfy]
-  step with mont_mul_spec fy z3 (by rw [hfyY]; exact hY) (by rw [hz3]; exact hlt _) as ⟨y, hy⟩
+  step with mont_mul_spec _hr fy z3 (by rw [hfyY]; exact hY) (by rw [hz3]; exact hlt _) as ⟨y, hy⟩
   step as ⟨a, ha⟩
   rw [ha, pairNat_append _ _ x.property y.property]
   refine ⟨by rw [show wordsNat x.val = feNat x from rfl, hx]; exact hlt _,
@@ -1451,7 +1451,7 @@ instance : Inhabited mid.p256.JacobianMontPoint := ⟨⟨Array.repeat 12#usize 0
 abbrev zv (pts : Std.Array mid.p256.JacobianMontPoint 8#usize) (j : Nat) : ZMod p256 :=
   dec (tripleNat (pts.val[j]!).xyz.val).2.2
 
-theorem batch_loop0_spec (pts : Std.Array mid.p256.JacobianMontPoint 8#usize)
+theorem batch_loop0_spec (_hr : Runs) (pts : Std.Array mid.p256.JacobianMontPoint 8#usize)
     (hz : ∀ j < 8, (tripleNat (pts.val[j]!).xyz.val).2.2 < p256)
     (iter : core.ops.range.Range Usize) (pre : Std.Array mid.p256.FieldElement 8#usize)
     (hs1 : 1 ≤ iter.start.val) (hs : iter.start.val ≤ 8) (he : iter.end.val = 8)
@@ -1481,7 +1481,7 @@ theorem batch_loop0_spec (pts : Std.Array mid.p256.JacobianMontPoint 8#usize)
         rw [← hjmp']; simp [tripleNat, feNat, hfz]
       obtain ⟨hfelt, hfev⟩ := hpr (it.start.val - 1) (by omega)
       rw [← hfe'] at hfelt hfev
-      step with mont_mul_spec fe fz hfelt (by rw [hfzv]; exact hz _ (by omega)) as ⟨fe2, hfe2⟩
+      step with mont_mul_spec _hr fe fz hfelt (by rw [hfzv]; exact hz _ (by omega)) as ⟨fe2, hfe2⟩
       step as ⟨a, ha⟩
       refine ⟨by omega, by omega, by rw [he1]; exact he, ?_, by omega⟩
       intro j hj
@@ -1507,7 +1507,7 @@ theorem zv_ne_zero (pts : Std.Array mid.p256.JacobianMontPoint 8#usize) (Ps : Na
     (h : ∀ j < 8, jrep (Ps j) (pts.val[j]!) ∧ Ps j ≠ none) (j : Nat) (hj : j < 8) : zv pts j ≠ 0 :=
   (jrep_some _ _ (h j hj).1 (h j hj).2).2.2.2.1
 
-theorem batch_loop1_spec (pts : Std.Array mid.p256.JacobianMontPoint 8#usize) (Ps : Nat → P256Point)
+theorem batch_loop1_spec (_hr : Runs) (pts : Std.Array mid.p256.JacobianMontPoint 8#usize) (Ps : Nat → P256Point)
     (h : ∀ j < 8, jrep (Ps j) (pts.val[j]!) ∧ Ps j ≠ none) (pre : Std.Array mid.p256.FieldElement 8#usize)
     (hpre : ∀ j < 8, feNat (pre.val[j]!) < p256 ∧ dec (feNat (pre.val[j]!)) = ∏ t ∈ Finset.range j, zv pts t)
     (iter : core.iter.adapters.rev.Rev (core.ops.range.Range Usize)) (hs : iter.iter.start.val = 0)
@@ -1541,7 +1541,7 @@ theorem batch_loop1_spec (pts : Std.Array mid.p256.JacobianMontPoint 8#usize) (P
       have hfe' : fe = pre.val[i]! := by rw [hfe, getElem_eq_getElem! _ _ (by omega)]
       obtain ⟨hfel, hfev⟩ := hpre i hi8
       rw [← hfe'] at hfel hfev
-      step with mont_mul_spec iv fe hivl hfel as ⟨fe1, hfe1⟩
+      step with mont_mul_spec _hr iv fe hivl hfel as ⟨fe1, hfe1⟩
       have hzi : dec (feNat fe1) = (dec (tripleNat jmp.xyz.val).2.2)⁻¹ := by
         rw [hfe1, dec_mont_mul, hiv, hfev, ← he1, Finset.prod_range_succ, hjmp']
         have := zv_ne_zero pts Ps h i hi8
@@ -1550,12 +1550,12 @@ theorem batch_loop1_spec (pts : Std.Array mid.p256.JacobianMontPoint 8#usize) (P
         field_simp
       obtain ⟨hj1, hj2⟩ := h i hi8
       rw [← hjmp'] at hj1
-      step with as_affine_by_spec jmp (Ps i) hj1 hj2 fe1 (by rw [hfe1]; exact hlt _) hzi as ⟨amp, hamp⟩
+      step with as_affine_by_spec _hr jmp (Ps i) hj1 hj2 fe1 (by rw [hfe1]; exact hlt _) hzi as ⟨amp, hamp⟩
       step as ⟨a, ha⟩
       step as ⟨fz, hfz⟩
       have hfzv : feNat fz = (tripleNat jmp.xyz.val).2.2 := by simp [tripleNat, feNat, hfz]
       have hzl : feNat fz < p256 := by rw [hfzv]; exact (jrep_some _ _ hj1 hj2).2.2.1
-      step with mont_mul_spec iv fz hivl hzl as ⟨iv1, hiv1⟩
+      step with mont_mul_spec _hr iv fz hivl hzl as ⟨iv1, hiv1⟩
       have hiv1v : dec (feNat iv1) = (∏ t ∈ Finset.range i, zv pts t)⁻¹ := by
         rw [hiv1, dec_mont_mul, hiv, hfzv, ← he1, Finset.prod_range_succ, hjmp']
         have := zv_ne_zero pts Ps h i hi8
@@ -1582,7 +1582,7 @@ theorem batch_loop1_spec (pts : Std.Array mid.p256.JacobianMontPoint 8#usize) (P
       intro j hj; exact hrr j (by omega) hj
   · exact ⟨hs, he, hinv, hr⟩
 
-theorem batch_spec (pts : Std.Array mid.p256.JacobianMontPoint 8#usize) (Ps : Nat → P256Point)
+theorem batch_spec (_hr : Runs) (pts : Std.Array mid.p256.JacobianMontPoint 8#usize) (Ps : Nat → P256Point)
     (h : ∀ j < 8, jrep (Ps j) (pts.val[j]!) ∧ Ps j ≠ none) :
     mid.p256.JacobianMontPoint.public_batch_as_affine pts ⦃ r =>
       ∀ j < 8, p256Represents2 (Ps j) (pairNat (r.val[j]!).xy.val) ⦄ := by
@@ -1591,7 +1591,7 @@ theorem batch_spec (pts : Std.Array mid.p256.JacobianMontPoint 8#usize) (Ps : Na
   have hptl : pts.val.length = 8 := pts.property
   have hz : ∀ j < 8, (tripleNat (pts.val[j]!).xyz.val).2.2 < p256 := fun j hj => (h j hj).1.2.2.1
   step as ⟨sl, hsl⟩
-  step with batch_loop0_spec pts hz { start := 1#usize, «end» := Slice.len sl }
+  step with batch_loop0_spec _hr pts hz { start := 1#usize, «end» := Slice.len sl }
     (Array.repeat 8#usize mid.p256.CURVE_ONE_MONT) (by simp) (by simp) (by simp [hsl, Slice.len])
     (by
       intro j hj
@@ -1609,12 +1609,12 @@ theorem batch_spec (pts : Std.Array mid.p256.JacobianMontPoint 8#usize) (Ps : Na
   have hfzv : feNat fz = (tripleNat (pts.val[7]!).xyz.val).2.2 := by rw [← hjmp']; simp [tripleNat, feNat, hfz]
   obtain ⟨hfel, hfev⟩ := hpre 7 (by norm_num)
   rw [← hfe'] at hfel hfev
-  step with mont_mul_spec fe fz hfel (by rw [hfzv]; exact hz 7 (by norm_num)) as ⟨pr, hpr⟩
+  step with mont_mul_spec _hr fe fz hfel (by rw [hfzv]; exact hz 7 (by norm_num)) as ⟨pr, hpr⟩
   have hprv : dec (feNat pr) = ∏ t ∈ Finset.range 8, zv pts t := by
     rw [hpr, dec_mont_mul, hfev, hfzv, Finset.prod_range_succ (fun t => zv pts t) 7]
   have hp8 : ∏ t ∈ Finset.range 8, zv pts t ≠ 0 :=
     Finset.prod_ne_zero_iff.mpr fun t ht => zv_ne_zero pts Ps h t (by simp at ht; omega)
-  step with demont_spec pr (by rw [hpr]; exact hlt _) as ⟨f2, hf2⟩
+  step with demont_spec _hr pr (by rw [hpr]; exact hlt _) as ⟨f2, hf2⟩
   have hf2v : ((feNat f2 : Nat) : ZMod p256) = ∏ t ∈ Finset.range 8, zv pts t := by
     rw [hf2, cast_mod_p, ← hprv]; push_cast; rfl
   step as ⟨f3, hf3l, hf3, _⟩
@@ -1624,12 +1624,12 @@ theorem batch_spec (pts : Std.Array mid.p256.JacobianMontPoint 8#usize) (Ps : Na
     have := congrArg (fun x : Nat => (x : ZMod p256)) (hf3 hf2nz)
     simp only [Nat.cast_mul, ZMod.natCast_mod, Nat.cast_one] at this
     rw [← hf2v]; exact (inv_eq_of_mul_eq_one_right this).symm
-  step with as_mont_spec f3 as ⟨iv, hiv⟩
+  step with as_mont_spec _hr f3 as ⟨iv, hiv⟩
   simp only [mid.p256.AffineMontPoint.Insts.CoreDefaultDefault.default, core.default.DefaultArray.default,
     ]
   step as ⟨sl1, hsl1⟩
   step as ⟨it, hit⟩
-  apply batch_loop1_spec pts Ps h pre hpre it (by rw [hit]; rfl) (by rw [hit]; simp [hsl1, Slice.len])
+  apply batch_loop1_spec _hr pts Ps h pre hpre it (by rw [hit]; rfl) (by rw [hit]; simp [hsl1, Slice.len])
     iv ⟨by rw [hiv]; exact hlt _, by rw [hiv, dec_tomont, hf3v, hit]; simp [hsl1, Slice.len]⟩
   intro j hj; rw [hit] at hj; simp [hsl1, Slice.len] at hj; omega
 
@@ -1683,7 +1683,7 @@ theorem odd_loop_spec (Q : P256Point) (hQ : p256OnCurve Q) (hQo : P256OrderOf Q)
       intro j hj; exact hmm j (by omega)
   · exact ⟨hs1, hs, he, hm⟩
 
-theorem odd_multiples_spec (pt : mid.p256.AffineMontPoint) (Q : P256Point)
+theorem odd_multiples_spec (_hr : Runs) (pt : mid.p256.AffineMontPoint) (Q : P256Point)
     (hQ : p256OnCurve Q) (hQo : P256OrderOf Q) (h : p256Represents2 Q (pairNat pt.xy.val)) :
     mid.p256.AffineMontPoint.public_odd_multiples pt ⦃ m => OddMultiples Q 1 m ⦄ := by
   unfold mid.p256.AffineMontPoint.public_odd_multiples
@@ -1702,7 +1702,7 @@ theorem odd_multiples_spec (pt : mid.p256.AffineMontPoint) (Q : P256Point)
       subst hj0
       have : (Array.repeat 8#usize p).val[0]! = p := by simp [Array.repeat]
       rw [this]; simpa using hp) as ⟨m, hm⟩
-  apply WP.spec_mono (batch_spec m (fun j => p256ZPow Q (2 * j + 1))
+  apply WP.spec_mono (batch_spec _hr m (fun j => p256ZPow Q (2 * j + 1))
     (fun j hj => ⟨hm j hj, p256Laws.zpow_ne_none Q hQ hQo _ (by omega) (by omega)⟩))
   intro r hr j hj
   have := hr j hj
@@ -1765,7 +1765,7 @@ theorem map_spec {T F U : Type} [Inhabited T] [Inhabited U] {N : Usize} (inst : 
   simpa [Array.from_val] using this
 
 /-- The odd multiples a key's cache builds: 17Q to 31Q, from its Q to 15Q. -/
-theorem more_odd_spec (Q : P256Point) (hQ : p256OnCurve Q) (hQo : P256OrderOf Q)
+theorem more_odd_spec (_hr : Runs) (Q : P256Point) (hQ : p256OnCurve Q) (hQo : P256OrderOf Q)
     (odd : Std.Array mid.p256.AffineMontPoint 8#usize) (hodd : OddMultiples Q 1 odd) :
     mid.p256.AffineMontPoint.public_more_odd_multiples odd ⦃ m => OddMultiples Q 17 m ⦄ := by
   unfold mid.p256.AffineMontPoint.public_more_odd_multiples
@@ -1800,7 +1800,7 @@ theorem more_odd_spec (Q : P256Point) (hQ : p256OnCurve Q) (hQo : P256OrderOf Q)
     simp only [mid.p256.AffineMontPoint.public_more_odd_multiples.closure.Insts.CoreOpsFunctionFnMutTupleAffineMontPointJacobianMontPoint.call_mut]
     step with hadd x as ⟨r, hr⟩
     exact hr) as ⟨l, hl⟩
-  apply WP.spec_mono (batch_spec l (fun j => p256ZPow Q (16 + (2 * j + 1))) (by
+  apply WP.spec_mono (batch_spec _hr l (fun j => p256ZPow Q (16 + (2 * j + 1))) (by
     intro j hj
     refine ⟨?_, p256Laws.zpow_ne_none Q hQ hQo _ (by omega) (by omega)⟩
     have hj' := hodd j hj
@@ -1863,7 +1863,7 @@ namespace P256
 
 /-- The ECDSA verification a key's raw check computes, for `r`, `s`, and
 `e` the signature's scalars and the hash's. -/
-theorem raw_verify_spec (hc : Cached) (key : mid.p256.VerifyingKey)
+theorem raw_verify_spec (_hr : Runs) (hc : Cached) (key : mid.p256.VerifyingKey)
     (Q : P256Point) (hQ : p256OnCurve Q) (hQo : P256OrderOf Q) (hpt : p256Represents2 Q (pairNat key.point.xy.val))
     (r s e : mid.p256.Scalar) (hr0 : 0 < scNat r) (hr : scNat r < n256) (hs0 : 0 < scNat s)
     (hs : scNat s < n256) (he : scNat e < n256) :
@@ -1881,10 +1881,10 @@ theorem raw_verify_spec (hc : Cached) (key : mid.p256.VerifyingKey)
   step with scalar_as_mont_spec r hr as ⟨rm, hrm⟩
   step with scalar_mont_mul_spec sm rm (by rw [hsm]; exact hlt _) (by rw [hrm]; exact hlt _) as ⟨s5, hs5⟩
   step as ⟨u2, hu2⟩
-  have hodd_spec := odd_multiples_spec key.point Q hQ hQo hpt
+  have hodd_spec := odd_multiples_spec _hr key.point Q hQ hQo hpt
   step with hc.get_or_build_now key _ hodd_spec as ⟨odd, hodd⟩
-  step with hc.get_or_build key odd _ (WP.spec_mono hodd_spec fun o ho => more_odd_spec Q hQ hQo o ho)
-    (more_odd_spec Q hQ hQo odd hodd) as ⟨more, hmore⟩
+  step with hc.get_or_build key odd _ (WP.spec_mono hodd_spec fun o ho => more_odd_spec _hr Q hQ hQo o ho)
+    (more_odd_spec _hr Q hQ hQo odd hodd) as ⟨more, hmore⟩
   have hs' : (scNat s : ZMod n256) ≠ 0 := by
     rw [Ne, ZMod.natCast_eq_zero_iff]; exact Nat.not_dvd_of_pos_of_lt hs0 hs
   have hsinv : (scNat si : ZMod n256) = (scNat s : ZMod n256)⁻¹ := by
@@ -1914,13 +1914,14 @@ theorem raw_verify_spec (hc : Cached) (key : mid.p256.VerifyingKey)
     rcases hmore with h | ⟨m', h, hm'⟩
     · rw [h] at hm; cases hm
     · rw [h] at hm; cases hm; exact hm'
-  step with twin_multiply_spec u1 u2 Q hQ odd hodd more hmore' as ⟨pt, hpt⟩
+  step with twin_multiply_spec _hr u1 u2 Q hQ odd hodd more hmore' as ⟨pt, hpt⟩
   rw [twin, show ((scNat u1 : Nat) : Int) = Int.ofNat (scNat u1) from rfl, show ((scNat u2 : Nat) : Int) = Int.ofNat (scNat u2) from rfl] at hpt
   simp only [p256ZPow] at hpt
   rw [hu1v, hu2v] at hpt
-  unfold ecdsaP256Verifies
-  rcases hT : p256Add (p256Pow p256G ((scNat e : ZMod n256) * (scNat s : ZMod n256)⁻¹).val)
-      (p256Pow Q ((scNat r : ZMod n256) * (scNat s : ZMod n256)⁻¹).val) with _ | ⟨x, y⟩
+  unfold ecdsaP256Verifies nist.ecdsaVerifies
+  dsimp only [p256Add, p256Pow] at hpt
+  rcases hT : nist.add p256 (nist.pow p256 p256G ((scNat e : ZMod n256) * (scNat s : ZMod n256)⁻¹).val)
+      (nist.pow p256 Q ((scNat r : ZMod n256) * (scNat s : ZMod n256)⁻¹).val) with _ | ⟨x, y⟩
   · rw [hT] at hpt
     step with is_infinity_spec pt none hpt as ⟨b, hb⟩
     rw [ite_eq_left (hb.mpr trivial)]
@@ -1931,7 +1932,7 @@ theorem raw_verify_spec (hc : Cached) (key : mid.p256.VerifyingKey)
     step with is_infinity_spec pt _ hpt as ⟨b, hb⟩
     have hbf : ¬ b = true := fun h => by cases hb.mp h
     rw [ite_eq_right hbf]
-    step with x_is_spec pt x y hpt r hr as ⟨b1, hb1⟩
+    step with x_is_spec _hr pt x y hpt r hr as ⟨b1, hb1⟩
     split
     · rename_i h1
       rw [WP.spec_ok]
@@ -2083,7 +2084,7 @@ theorem ecdsa_verify_spec (h : Runs) (hc : Cached) {H Ctx St : Type}
         subst hr4
         simp only [bind_ok, mid.p256.VerifyingKey.Insts.RindHighCurvePublicKeyScalar.raw_ecdsa_verify]
         obtain ⟨hQ, -, hpt⟩ := hk
-        apply WP.spec_mono (raw_verify_spec hc key.public_key Q hQ hQo hpt scr scs e
+        apply WP.spec_mono (raw_verify_spec h hc key.public_key Q hQ hQo hpt scr scs e
           (by unfold scNat; rw [hscr]; exact hra.1) (by unfold scNat; rw [hscr]; exact hra.2)
           (by unfold scNat; rw [hscs]; exact hsa.1) (by unfold scNat; rw [hscs]; exact hsa.2)
           (by rw [he]; exact Nat.mod_lt _ n256_pos))
@@ -2138,7 +2139,7 @@ theorem x_scalar_spec (k : mid.p256.StaticPrivateKey) (h : Runs) (x y : Nat)
   step
   step with public_point_spec h k x y hq hc as ⟨pt, hpt⟩
   have hp : 0 < p256 := p256_pos
-  step with as_bytes_uncompressed_spec pt (by rw [hpt]; exact Nat.mod_lt _ hp)
+  step with as_bytes_uncompressed_spec h pt (by rw [hpt]; exact Nat.mod_lt _ hp)
     (by rw [hpt]; exact Nat.mod_lt _ hp) as ⟨b, hb4, hbc⟩
   rw [hpt] at hbc
   simp only [rinv_tomont _ hc.1, rinv_tomont _ hc.2.1] at hbc
@@ -2264,7 +2265,7 @@ theorem sign_nonces_spec (h : Runs) {T : Type}
         refine ⟨fun rs hrs => ?_, fun err h => by cases h⟩
         cases hrs
         refine ⟨scNat k.scalar, hk0, hk, ?_, hr0, hs0⟩
-        simp only [ecdsaP256Sign, hq, hr1, hs1]
+        simp only [ecdsaP256Sign, nist.ecdsaSign, hq, hr1, hs1]
   · simp only [uncurry, core.result.Result.Insts.CoreOpsTry.branch, bind_tc_ok, bind_ok,
       core.result.Result.Insts.CoreOpsTry_traitFromResidualResult.from_residual, WP.dspec_ok]
     refine ⟨(fun rs h => nomatch h), fun e2 h => ?_⟩

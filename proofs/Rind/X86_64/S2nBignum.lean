@@ -1,6 +1,7 @@
 import Rind.X86_64.Funs
 import Rind.Spec
 import Rind.Ed25519
+import Mathlib.Data.Nat.Size
 import Rind.Keccak
 import Rind.Nist
 open Aeneas Aeneas.Std Result rind.spec
@@ -181,6 +182,94 @@ axiom sha3_keccak4_f1600_alt_spec (a : Std.Array (Std.Array U64 25#usize) 4#usiz
     low.x86_64.sha3_keccak4_f1600_alt.sha3_keccak4_f1600 a rc rho8 rho56 ⦃ r =>
       r.val.map (·.val.map (·.bv)) = (a.val.map (·.val.map (·.bv))).map (keccak 24) ⦄
 
+/-! ### P-256 -/
+
+/-- `BIGNUM_TOMONT_P256_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_tomont_p256.ml#L373 -/
+@[step]
+axiom bignum_tomont_p256_spec (z x : Std.Array U64 4#usize) :
+    low.x86_64.bignum_tomont_p256.bignum_tomont_p256 z x ⦃ r =>
+      wordsNat r.val = 2 ^ 256 * wordsNat x.val % p256 ⦄
+
+/-- `BIGNUM_TOMONT_P256_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_tomont_p256_alt.ml#L329 -/
+@[step]
+axiom bignum_tomont_p256_alt_spec (z x : Std.Array U64 4#usize) :
+    low.x86_64.bignum_tomont_p256_alt.bignum_tomont_p256_alt z x ⦃ r =>
+      wordsNat r.val = 2 ^ 256 * wordsNat x.val % p256 ⦄
+
+/-- `BIGNUM_DEMONT_P256_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_demont_p256.ml#L185 -/
+@[step]
+axiom bignum_demont_p256_spec (z x : Std.Array U64 4#usize) :
+    low.x86_64.bignum_demont_p256.bignum_demont_p256 z x ⦃ r =>
+      wordsNat x.val < p256 → wordsNat r.val = p256RInv * wordsNat x.val % p256 ⦄
+
+/-- `BIGNUM_DEMONT_P256_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_demont_p256_alt.ml#L171 -/
+@[step]
+axiom bignum_demont_p256_alt_spec (z x : Std.Array U64 4#usize) :
+    low.x86_64.bignum_demont_p256_alt.bignum_demont_p256_alt z x ⦃ r =>
+      wordsNat x.val < p256 → wordsNat r.val = p256RInv * wordsNat x.val % p256 ⦄
+
+/-- `BIGNUM_ADD_P256_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_add_p256.ml#L153 -/
+@[step]
+axiom bignum_add_p256_spec (z x y : Std.Array U64 4#usize) :
+    low.x86_64.bignum_add_p256.bignum_add_p256 z x y ⦃ r =>
+      wordsNat x.val < p256 → wordsNat y.val < p256 →
+        wordsNat r.val = (wordsNat x.val + wordsNat y.val) % p256 ⦄
+
+/-- `BIGNUM_MONTMUL_P256_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_montmul_p256.ml#L344 -/
+@[step]
+axiom bignum_montmul_p256_spec (z x y : Std.Array U64 4#usize) :
+    low.x86_64.bignum_montmul_p256.bignum_montmul_p256 z x y ⦃ r =>
+      wordsNat x.val * wordsNat y.val ≤ 2 ^ 256 * p256 →
+        wordsNat r.val = p256RInv * wordsNat x.val * wordsNat y.val % p256 ⦄
+
+/-- `BIGNUM_MONTMUL_P256_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_montmul_p256_alt.ml#L336 -/
+@[step]
+axiom bignum_montmul_p256_alt_spec (z x y : Std.Array U64 4#usize) :
+    low.x86_64.bignum_montmul_p256_alt.bignum_montmul_p256_alt z x y ⦃ r =>
+      wordsNat x.val * wordsNat y.val ≤ 2 ^ 256 * p256 →
+        wordsNat r.val = p256RInv * wordsNat x.val * wordsNat y.val % p256 ⦄
+
+/-- `BIGNUM_MONTSQR_P256_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_montsqr_p256.ml#L324 -/
+@[step]
+axiom bignum_montsqr_p256_spec (z x : Std.Array U64 4#usize) :
+    low.x86_64.bignum_montsqr_p256.bignum_montsqr_p256 z x ⦃ r =>
+      wordsNat x.val ^ 2 ≤ 2 ^ 256 * p256 →
+        wordsNat r.val = p256RInv * wordsNat x.val ^ 2 % p256 ⦄
+
+/-- `BIGNUM_MONTSQR_P256_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_montsqr_p256_alt.ml#L304 -/
+@[step]
+axiom bignum_montsqr_p256_alt_spec (z x : Std.Array U64 4#usize) :
+    low.x86_64.bignum_montsqr_p256_alt.bignum_montsqr_p256_alt z x ⦃ r =>
+      wordsNat x.val ^ 2 ≤ 2 ^ 256 * p256 →
+        wordsNat r.val = p256RInv * wordsNat x.val ^ 2 % p256 ⦄
+
+/-- `P256_SCALARMUL_SUBROUTINE_CORRECT`, whose stack frame is 1368 bytes,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/p256_scalarmul.ml#L11839 -/
+@[step]
+axiom p256_scalarmul_spec (res : Std.Array U64 8#usize) (scalar : Std.Array U64 4#usize)
+    (point : Std.Array U64 8#usize) :
+    low.x86_64.p256_scalarmul.p256_scalarmul res scalar point ⦃ r =>
+      ∀ P, p256OnCurve P → p256Affine (pairNat point.val) P →
+        p256AffineZ (pairNat r.val) (p256Pow P (wordsNat scalar.val)) ⦄
+
+/-- `P256_SCALARMUL_ALT_SUBROUTINE_CORRECT`, whose stack frame is 1368 bytes,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/p256_scalarmul_alt.ml#L11464 -/
+@[step]
+axiom p256_scalarmul_alt_spec (res : Std.Array U64 8#usize) (scalar : Std.Array U64 4#usize)
+    (point : Std.Array U64 8#usize) :
+    low.x86_64.p256_scalarmul_alt.p256_scalarmul_alt res scalar point ⦃ r =>
+      ∀ P, p256OnCurve P → p256Affine (pairNat point.val) P →
+        p256AffineZ (pairNat r.val) (p256Pow P (wordsNat scalar.val)) ⦄
+
 /-! ### P-384 -/
 
 /-- `BIGNUM_TOMONT_P384_SUBROUTINE_CORRECT`,
@@ -279,6 +368,84 @@ axiom p384_montjscalarmul_alt_spec (res : Std.Array U64 18#usize) (scalar : Std.
       ∀ P, p384OnCurve P → p384Represents P (tripleNat6 point.val) →
         p384Represents (p384Pow P (wordsNat scalar.val)) (tripleNat6 r.val) ⦄
 
+/-! ### RSA
+
+Each routine reads its inputs at the lengths its Rust wrapper asserts, so a
+theorem assumes them, and its `&mut` result keeps its length, as Rust's do. -/
+
+/-- `BIGNUM_KMUL_16_32_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_kmul_16_32.ml#L1805 -/
+@[step]
+axiom bignum_kmul_16_32_spec (z x y : Slice U64) (t : Std.Array U64 32#usize)
+    (hz : z.length = 32) (hx : x.length = 16) (hy : y.length = 16) :
+    low.x86_64.bignum_kmul_16_32.bignum_kmul_16_32 z x y t ⦃ r =>
+      r.1.length = 32 ∧ wordsNat r.1.val = wordsNat x.val * wordsNat y.val ⦄
+
+/-- `BIGNUM_KMUL_32_64_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_kmul_32_64.ml#L3145 -/
+@[step]
+axiom bignum_kmul_32_64_spec (z x y : Slice U64) (t : Std.Array U64 96#usize)
+    (hz : z.length = 64) (hx : x.length = 32) (hy : y.length = 32) :
+    low.x86_64.bignum_kmul_32_64.bignum_kmul_32_64 z x y t ⦃ r =>
+      r.1.length = 64 ∧ wordsNat r.1.val = wordsNat x.val * wordsNat y.val ⦄
+
+/-- `BIGNUM_KSQR_16_32_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_ksqr_16_32.ml#L1203 -/
+@[step]
+axiom bignum_ksqr_16_32_spec (z x : Slice U64) (t : Std.Array U64 24#usize)
+    (hz : z.length = 32) (hx : x.length = 16) :
+    low.x86_64.bignum_ksqr_16_32.bignum_ksqr_16_32 z x t ⦃ r =>
+      r.1.length = 32 ∧ wordsNat r.1.val = wordsNat x.val ^ 2 ⦄
+
+/-- `BIGNUM_KSQR_32_64_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_ksqr_32_64.ml#L2065 -/
+@[step]
+axiom bignum_ksqr_32_64_spec (z x : Slice U64) (t : Std.Array U64 72#usize)
+    (hz : z.length = 64) (hx : x.length = 32) :
+    low.x86_64.bignum_ksqr_32_64.bignum_ksqr_32_64 z x t ⦃ r =>
+      r.1.length = 64 ∧ wordsNat r.1.val = wordsNat x.val ^ 2 ⦄
+
+/-- `BIGNUM_EMONTREDC_8N_SUBROUTINE_CORRECT`, for `m`'s length as `k`, which
+returns the carry and leaves the quotient in `z`'s low half and the reduced
+value in its high half,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_emontredc_8n.ml#L1937 -/
+@[step]
+axiom bignum_emontredc_8n_spec (z m : Slice U64) (w : U64) (hz : z.length = 2 * m.length)
+    (h8 : m.length % 8 = 0) :
+    low.x86_64.bignum_emontredc_8n.bignum_emontredc_8n z m w ⦃ r =>
+      r.2.length = z.length ∧
+        ((wordsNat m.val * w.val + 1) % 2 ^ 64 = 0 →
+          wordsNat m.val * wordsNat (r.2.val.take m.length) + wordsNat z.val =
+            2 ^ (64 * m.length) *
+              (2 ^ (64 * m.length) * r.1.val + wordsNat (r.2.val.drop m.length))) ⦄
+
+/-- `BIGNUM_OPTSUB_SUBROUTINE_CORRECT`, whose borrow the wrapper drops,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_optsub.ml#L209 -/
+@[step]
+axiom bignum_optsub_spec (z x y : Slice U64) (p : U64) (hx : x.length = z.length)
+    (hy : y.length = z.length) :
+    low.x86_64.bignum_optsub.bignum_optsub z x y p ⦃ r =>
+      r.length = z.length ∧
+        wordsNat r.val =
+          if p.val = 0 then wordsNat x.val
+          else if wordsNat y.val ≤ wordsNat x.val then wordsNat x.val - wordsNat y.val
+          else 2 ^ (64 * z.length) + wordsNat x.val - wordsNat y.val ⦄
+
+/-- `BIGNUM_BITSIZE_SUBROUTINE_CORRECT`, for the slice's length as `k`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_bitsize.ml#L225 -/
+@[step]
+axiom bignum_bitsize_spec (x : Slice U64) :
+    low.x86_64.bignum_bitsize.bignum_bitsize x ⦃ r => r.val = (wordsNat x.val).size ⦄
+
+/-- `BIGNUM_NEGMODINV_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_negmodinv.ml#L673 -/
+@[step]
+axiom bignum_negmodinv_spec (z x : Slice U64) (hx : x.length = z.length) :
+    low.x86_64.bignum_negmodinv.bignum_negmodinv z x ⦃ r =>
+      r.length = z.length ∧
+        (wordsNat x.val % 2 = 1 →
+          (wordsNat x.val * wordsNat r.val + 1) % 2 ^ (64 * z.length) = 0) ⦄
+
 /-- rind runs on this CPU: its entry guards' CPU-feature checks pass, and its
 BMI2/ADX dispatch reads the CPU. None reads an input. -/
 def Runs : Prop :=
@@ -363,6 +530,55 @@ theorem bignum_madd_n25519_mux_spec (h : Runs) (z x y c : Std.Array U64 4#usize)
       wordsNat r.val = (wordsNat x.val * wordsNat y.val + wordsNat c.val) % n25519 ⦄ := by
   obtain ⟨-, -, t, ht⟩ := h
   unfold low.x86_64.adx_mux.bignum_madd_n25519
+  rw [ht]
+  cases t <;> step*
+
+@[step]
+theorem bignum_tomont_p256_mux_spec (h : Runs) (z x : Std.Array U64 4#usize) :
+    low.x86_64.adx_mux.bignum_tomont_p256 z x ⦃ r =>
+      wordsNat r.val = 2 ^ 256 * wordsNat x.val % p256 ⦄ := by
+  obtain ⟨-, -, t, ht⟩ := h
+  unfold low.x86_64.adx_mux.bignum_tomont_p256
+  rw [ht]
+  cases t <;> step*
+
+@[step]
+theorem bignum_demont_p256_mux_spec (h : Runs) (z x : Std.Array U64 4#usize) :
+    low.x86_64.adx_mux.bignum_demont_p256 z x ⦃ r =>
+      wordsNat x.val < p256 → wordsNat r.val = p256RInv * wordsNat x.val % p256 ⦄ := by
+  obtain ⟨-, -, t, ht⟩ := h
+  unfold low.x86_64.adx_mux.bignum_demont_p256
+  rw [ht]
+  cases t <;> step*
+
+@[step]
+theorem bignum_montmul_p256_mux_spec (h : Runs) (z x y : Std.Array U64 4#usize) :
+    low.x86_64.adx_mux.bignum_montmul_p256 z x y ⦃ r =>
+      wordsNat x.val * wordsNat y.val ≤ 2 ^ 256 * p256 →
+        wordsNat r.val = p256RInv * wordsNat x.val * wordsNat y.val % p256 ⦄ := by
+  obtain ⟨-, -, t, ht⟩ := h
+  unfold low.x86_64.adx_mux.bignum_montmul_p256
+  rw [ht]
+  cases t <;> step*
+
+@[step]
+theorem bignum_montsqr_p256_mux_spec (h : Runs) (z x : Std.Array U64 4#usize) :
+    low.x86_64.adx_mux.bignum_montsqr_p256 z x ⦃ r =>
+      wordsNat x.val ^ 2 ≤ 2 ^ 256 * p256 →
+        wordsNat r.val = p256RInv * wordsNat x.val ^ 2 % p256 ⦄ := by
+  obtain ⟨-, -, t, ht⟩ := h
+  unfold low.x86_64.adx_mux.bignum_montsqr_p256
+  rw [ht]
+  cases t <;> step*
+
+@[step]
+theorem p256_scalarmul_mux_spec (h : Runs) (res : Std.Array U64 8#usize) (scalar : Std.Array U64 4#usize)
+    (point : Std.Array U64 8#usize) :
+    low.x86_64.adx_mux.p256_scalarmul res scalar point ⦃ r =>
+      ∀ P, p256OnCurve P → p256Affine (pairNat point.val) P →
+        p256AffineZ (pairNat r.val) (p256Pow P (wordsNat scalar.val)) ⦄ := by
+  obtain ⟨-, -, t, ht⟩ := h
+  unfold low.x86_64.adx_mux.p256_scalarmul
   rw [ht]
   cases t <;> step*
 

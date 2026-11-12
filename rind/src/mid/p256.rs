@@ -9,6 +9,7 @@ use crate::error::{Error, KeyFormatError};
 use crate::low;
 use crate::mid::rng::{RandomSource, SystemRandom};
 
+pub(crate) mod hash_to_curve;
 mod precomp;
 
 /// A P-256 public key.
@@ -272,6 +273,67 @@ impl StaticPrivateKey {
     }
 }
 
+/// A P-256 point other than infinity, for protocols built on the group,
+/// such as ECVRF.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Point(AffineMontPoint);
+
+// Plain words, so all zeroes is a value it can hold.
+impl low::Zeroable for Point {}
+
+impl Point {
+    /// The length of an X9.62 compressed point.
+    pub(crate) const COMPRESSED_BYTES: usize = 1 + FieldElement::BYTES;
+
+    /// Decodes an X9.62 compressed point, as [`PublicKey::decompress`] does,
+    /// or `None`.
+    ///
+    /// Only public encodings are decoded: whether one decodes is public.
+    pub(crate) fn from_compressed(bytes: &[u8]) -> Option<Self> {
+        AffineMontPoint::from_x962_compressed(bytes).ok().map(Self)
+    }
+
+    /// The X9.62 compressed encoding, in constant time.
+    pub(crate) fn to_compressed(self) -> [u8; Self::COMPRESSED_BYTES] {
+        let mut r = [0u8; Self::COMPRESSED_BYTES];
+        r[0] = 0x02 | (self.0.y().demont().0[0] & 1) as u8;
+        r[1..].copy_from_slice(&util::u64x4_to_big_endian(&self.0.x().demont().0));
+        r
+    }
+
+    /// `scalar * G`, in constant time, for a scalar from 1 to n - 1.
+    pub(crate) fn mul_base(scalar: &Scalar) -> Self {
+        Self(AffineMontPoint::base_multiply(scalar))
+    }
+
+    /// `scalar * self`, in constant time, for a scalar from 1 to n - 1.
+    pub(crate) fn mul(&self, scalar: &Scalar) -> Self {
+        Self(self.0.multiply(scalar))
+    }
+
+    /// `g * G + p * self` for public scalars, or `None` at infinity.
+    pub(crate) fn public_mul_base_add(&self, g: &Scalar, p: &Scalar) -> Option<Self> {
+        let odd_multiples = self.0.public_odd_multiples();
+        let sum = JacobianMontPoint::public_twin_multiply(g, p, &odd_multiples, None);
+        (!sum.public_is_infinity()).then(|| Self(sum.as_affine()))
+    }
+
+    /// `a * self + b * other` for public scalars, or `None` at infinity.
+    ///
+    /// A zero scalar's product, at infinity, is skipped, as the
+    /// multiplications take only points that are not; every other product
+    /// is not, as the group's order is prime.
+    pub(crate) fn public_mul_add(&self, a: &Scalar, other: &Self, b: &Scalar) -> Option<Self> {
+        let mut sum = JacobianMontPoint::infinity();
+        for (point, scalar) in [(self, a), (other, b)] {
+            if !scalar.is_zero() {
+                sum = sum.public_add_affine(&point.0.multiply(scalar));
+            }
+        }
+        (!sum.public_is_infinity()).then(|| Self(sum.as_affine()))
+    }
+}
+
 /// A shared secret output from a P-256 Diffie-Hellman operation.
 ///
 /// It is not wiped on drop: `agreement::SharedSecret` wipes it.
@@ -457,18 +519,18 @@ impl AffineMontPoint {
     }
 
     /// `scalar * self`, by s2n-bignum's `p256_montjscalarmul`.
-    #[cfg(not(rind_backend = "aarch64"))]
+    #[cfg(not(any(rind_backend = "aarch64", rind_backend = "x86_64")))]
     fn multiply(&self, scalar: &Scalar) -> Self {
         JacobianMontPoint::multiply(scalar, self).as_affine()
     }
 
     /// `scalar * self`, by s2n-bignum's `p256_scalarmul`.
     ///
-    /// Its proof covers the aarch64 routine from affine input to affine
+    /// Its proofs cover each routine rind runs, from affine input to affine
     /// output, inversion included, for any scalar and a point on the curve,
     /// which `self` is. It takes and returns plain coordinates, the result
     /// proven only mod p, which `as_mont` reduces.
-    #[cfg(rind_backend = "aarch64")]
+    #[cfg(any(rind_backend = "aarch64", rind_backend = "x86_64"))]
     fn multiply(&self, scalar: &Scalar) -> Self {
         let point = Self::from_xy(self.x().demont(), self.y().demont());
         let mut xy = [0; 8];
@@ -639,7 +701,7 @@ impl JacobianMontPoint {
     }
 
     /// `scalar * point`, by s2n-bignum's `p256_montjscalarmul`.
-    #[cfg(not(rind_backend = "aarch64"))]
+    #[cfg(not(any(rind_backend = "aarch64", rind_backend = "x86_64")))]
     fn multiply(scalar: &Scalar, point: &AffineMontPoint) -> Self {
         let mut r = Self::zero();
         low::p256_montjscalarmul(&mut r.xyz, &scalar.0, &Self::from_affine(point).xyz);
@@ -1029,6 +1091,9 @@ impl FieldElement {
 #[derive(Default)]
 pub(crate) struct Scalar([u64; 4]);
 
+// Plain words, so all zeroes is a value it can hold.
+impl low::Zeroable for Scalar {}
+
 impl Scalar {
     pub(crate) const BYTES: usize = 32;
 
@@ -1053,6 +1118,30 @@ impl Scalar {
             Self(util::big_endian_slice_any_size_to_u64x4(bytes).ok_or(Error::WrongLength)?)
                 .reduce_mod_n(),
         )
+    }
+
+    /// Reads a big-endian scalar of exactly 32 bytes, or `None` unless it
+    /// is below n. Zero is accepted.
+    ///
+    /// Whether it is below n is public; the value stays secret.
+    pub(crate) fn from_bytes_below_n(bytes: &[u8; Self::BYTES]) -> Option<Self> {
+        let full = Self(util::big_endian_to_u64x4(bytes));
+        low::ct::into_public(full.reduce_mod_n().private_eq(&full)).then_some(full)
+    }
+
+    /// `n - self mod n`.
+    pub(crate) fn neg(&self) -> Self {
+        let mut r = Self::default();
+        low::bignum_modsub(&mut r.0, &[0; 4], &self.0, &CURVE_ORDER);
+        r
+    }
+
+    /// `self * other + addend mod n`.
+    pub(crate) fn mul_add(&self, other: &Self, addend: &Self) -> Self {
+        self.as_mont()
+            .mont_mul(&other.as_mont())
+            .demont()
+            .add(addend)
     }
 
     fn into_range_check(self) -> Result<Self, Error> {

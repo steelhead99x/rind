@@ -310,7 +310,7 @@ mod tests {
             10_000
         };
 
-        let mut rng = Shake128::new(&[]);
+        let mut rng = Shake128::new(&Shake128Sponge::new());
         let mut acc = Shake128Sponge::new();
         let hash = |acc: &Shake128Sponge| {
             let mut out = [0u8; 32];

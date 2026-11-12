@@ -37,29 +37,42 @@
 # rind: X25519, P-256 ECDH and ECDSA on aarch64, SHA-256, HMAC-SHA256, and
 # HKDF-SHA256 on aarch64 with the crypto extension, SHA3-256 and SHA3-512,
 # whose Rust sponge `proofs/` proves against SymCrypt's Lean FIPS 202 spec
-# and s2n-bignum's Keccak-f theorems, and SHA-512 and Ed25519
-# where the SHA-512 block routine's proof states the routine's result, whose
+# and s2n-bignum's Keccak-f theorems, and SHA-512 and Ed25519 on aarch64 and
+# where x86_64's SHA-512 block routine has a proof, whose
 # Rust `proofs/` proves against s2n-bignum's and aws-lc-verification's
 # theorems, ChaCha20 header protection, whose Rust `proofs/` proves against
-# RFC 8439, HACL*'s rounds included, AES header protection on x86_64 with AES-NI,
-# whose Rust `proofs/` proves against Vale's FIPS 197 spec, and AES-GCM on x86_64 with AVX and MOVBE but no
-# VAES, whose Rust, key setup included, `proofs/` proves against Vale's
-# theorems for AAD and messages under 2^32 bytes, every size the report
-# times. On aarch64 with the SHA-512 instructions, NSym's proof of aws-lc's
-# routine for them asserts the digest in registers before the store to the
-# state, and on x86_64 CPUs with AVX2, or AMD's, rind runs OpenSSL's or
-# aws-lc's unproven routines, which are faster there, so neither SHA-512 nor
-# Ed25519 earns the ✓ there. Every other rind operation runs unverified code,
+# RFC 8439, HACL*'s rounds included, AES header protection on x86_64 with
+# AES-NI and aarch64 with the crypto extension, whose Rust `proofs/` proves
+# against Vale's FIPS 197 spec, and AES-GCM on x86_64 with AES-NI but no VAES,
+# whose Rust, key setup and by-8 kernels included, `proofs/` proves against
+# Vale's specs, and with AVX and MOVBE against Vale's theorems for its
+# routines. On x86_64 CPUs with AVX2, or AMD's, rind runs OpenSSL's or aws-lc's
+# unproven routines, which are faster there, so neither SHA-512 nor Ed25519
+# earns the ✓ there. Every other rind operation runs unverified code,
 # such as SHA-256's block function on x86_64 or without the crypto extension,
 # under padding and HMAC glue that `proofs/` proves, ChaCha20-Poly1305's
 # aws-lc one-pass routines on x86_64, under glue `proofs/` proves, or x86_64
-# P-256 ECDH's Jacobian-to-affine conversion.
+# P-256's generator multiplication, aws-lc's.
+#
+# rind's RSA-2048 PKCS#1 v1.5 verification earns the ✓ on x86_64 with BMI2
+# and ADX, whose Montgomery products are s2n-bignum's Karatsuba routines; its
+# message hash is its own row. PSS's MGF1 and H' hash inside the scheme, so
+# RSA-2048 PSS verification waits on a proof of x86_64's SHA-256 block
+# function.
 [[verified]]
 library = "rind"
 operations = ["x25519-ecdh"]
 arch = "x86_64"
 proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's dispatch table holds its own curve's functions, the only table rind builds, of its agreement API's X25519 down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of curve25519_x25519, curve25519_x25519base, their _alt forms without BMI2 and ADX, and bignum_eq, of s2n-bignum's own object code, which rind transliterates"
 link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/X25519.lean"
+
+[[verified]]
+library = "rind"
+operations = ["rsa2048-pkcs1-sha256-verify"]
+arch = "x86_64"
+cpu = ["bmi2", "adx"]
+proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's RSASSA-PKCS1-v1_5 SHA-256 verification against RFC 8017, key loading's checks, R^2 mod n, and -n^-1 mod 2^64 included, down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of bignum_kmul_16_32, bignum_kmul_32_64, bignum_ksqr_16_32, bignum_ksqr_32_64, bignum_emontredc_8n, bignum_optsub, bignum_cmp_lt, bignum_bitsize, and bignum_negmodinv, of s2n-bignum's own object code, which rind transliterates"
+link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/RsaDispatch.lean"
 
 [[verified]]
 library = "rind"
@@ -80,8 +93,7 @@ link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/Sha512.lean
 library = "rind"
 operations = ["sha512/*"]
 arch = "aarch64"
-cpu = ["!sha3"]
-proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA-512, padding included, down to aws-lc's sha512_block_data_order_nohw, which rind runs without the SHA-512 instructions, composed with aws-lc-verification's NSym proof of that routine, with its ArmSpecGap caveat, of aws-lc c21d40da, whose SHA-512 code rind's copy from 91c93a8e keeps"
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA-512, padding included, down to aws-lc's sha512_block_data_order_hw, which rind runs with the SHA-512 instructions, and sha512_block_data_order_nohw, which it runs without them, composed with rind's HOL Light proof of the first, of the object code rind's build emits, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's, and aws-lc-verification's NSym proof of the second, with its ArmSpecGap caveat, of aws-lc c21d40da, whose SHA-512 code rind's copy from 91c93a8e keeps"
 link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/Sha512.lean"
 
 [[verified]]
@@ -96,8 +108,7 @@ link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/Ed25519.lea
 library = "rind"
 operations = ["ed25519-sign", "ed25519-verify"]
 arch = "aarch64"
-cpu = ["!sha3"]
-proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's Ed25519 key loading, signing, and verification, small-order key refusal included, down to s2n-bignum's routines and its SHA-512 down to aws-lc's sha512_block_data_order_nohw, which rind runs without the SHA-512 instructions, composed with s2n-bignum's HOL Light proofs of edwards25519_decode_alt, edwards25519_scalarmulbase_alt, edwards25519_scalarmuldouble_alt, bignum_madd_n25519_alt, bignum_mod_n25519, bignum_neg_p25519, and bignum_lt, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of bignum_eq, of the object code rind's build emits, and aws-lc-verification's NSym proof of that SHA-512 routine, with its ArmSpecGap caveat"
+proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's Ed25519 key loading, signing, and verification, small-order key refusal included, down to s2n-bignum's routines and its SHA-512 down to aws-lc's sha512_block_data_order_hw, which rind runs with the SHA-512 instructions, and sha512_block_data_order_nohw, which it runs without them, composed with s2n-bignum's HOL Light proofs of edwards25519_decode_alt, edwards25519_scalarmulbase_alt, edwards25519_scalarmuldouble_alt, bignum_madd_n25519_alt, bignum_mod_n25519, bignum_neg_p25519, and bignum_lt, of s2n-bignum's own object code, which rind transliterates, rind's HOL Light proofs of bignum_eq and of the first SHA-512 routine, of the object code rind's build emits, the latter against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's, and aws-lc-verification's NSym proof of the second, with its ArmSpecGap caveat"
 link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/Ed25519.lean"
 
 [[verified]]
@@ -111,7 +122,7 @@ link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/Aarch64/P256.lean"
 library = "rind"
 operations = ["p256-ecdsa-sign", "p256-ecdsa-verify"]
 arch = "aarch64"
-proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of the nonces' draws through a dyn RandomSource, which Aeneas cannot translate, of its signature API's P-256 ECDSA with SHA-256 and fixed-length signatures, key generation and loading, signing, and verification, down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of p256_scalarmulbase_alt, p256_montjadd_alt, p256_montjdouble_alt, p256_montjmixadd_alt, bignum_inv_p256, bignum_neg_p256, bignum_tomont_p256, bignum_demont_p256, bignum_add_p256, bignum_montmul_p256, bignum_montsqr_p256, bignum_mod_n256_4, bignum_modadd, bignum_montmul, bignum_demont, and bignum_modinv, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of bignum_eq, of the object code rind's build emits, with the group laws its twin multiplication relies on proven from Mathlib's and the generator's order n proven, assuming HOL Light's P256_GROUP_ELEMENT_ORDER, that a point has order n, only for verification with a parsed public key, and proving a signature right when signing returns, as its nonce loop has no bound"
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of the nonces' draws through a dyn RandomSource, which Aeneas cannot translate, of its signature API's P-256 ECDSA with SHA-256 and fixed-length signatures, key generation and loading, signing, and verification, down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of p256_scalarmulbase_alt, p256_montjadd_alt, p256_montjdouble_alt, p256_montjmixadd_alt, bignum_inv_p256, bignum_neg_p256, bignum_tomont_p256, bignum_demont_p256, bignum_add_p256, bignum_montmul_p256, bignum_montsqr_p256, bignum_mod_n256_4, bignum_modadd, bignum_montmul, bignum_demont, and bignum_modinv, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of bignum_eq, of the object code rind's build emits, with the group laws its twin multiplication relies on proven from Mathlib's, the generator's order n proven, and HOL Light's P256_GROUP_ELEMENT_ORDER, that every finite point has order n, proven by counting the curve's points, and proving a signature right when signing returns, as its nonce loop has no bound"
 link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/Aarch64/P256Signature.lean"
 
 [[verified]]
@@ -155,16 +166,32 @@ library = "rind"
 operations = ["quic-header-protection/aes128", "quic-header-protection/aes256"]
 arch = "x86_64"
 cpu = ["aes", "pclmulqdq", "ssse3", "sse4.1"]
-proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, which assumes each key's mask is its own cipher's, the only one rind builds, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its header-protection API's AES-128 and AES-256 against RFC 9001 and Vale's FIPS 197 spec"
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, which assumes each key's mask is its own cipher's, the only one rind builds, and of the SIMD intrinsics as Intel's manual defines them, of its header-protection API's AES-128 and AES-256 against RFC 9001 and Vale's FIPS 197 spec"
 link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/AesCipher.lean"
+
+[[verified]]
+library = "rind"
+operations = ["quic-header-protection/aes128", "quic-header-protection/aes256"]
+arch = "aarch64"
+cpu = ["aes", "pmull", "sha2"]
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, which assumes each key's mask is its own cipher's, the only one rind builds, and of the NEON intrinsics as Arm's manual defines them, tested on an aarch64 CPU, of its header-protection API's AES-128 and AES-256 against RFC 9001 and Vale's FIPS 197 spec"
+link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/Aarch64/AesKey.lean"
 
 [[verified]]
 library = "rind"
 operations = ["aes128-gcm/*", "aes128-gcm-open/*", "aes256-gcm/*", "aes256-gcm-open/*"]
 arch = "x86_64"
 cpu = ["aes", "pclmulqdq", "ssse3", "sse4.1", "avx", "movbe", "!vaes"]
-proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for AAD and messages under 2^32 bytes, down to HACL*'s Vale AES-GCM routines, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports"
-link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/AesGcm.lean"
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the by-8 AES-GCM and PCLMULQDQ GHASH Aeneas cannot translate, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for every AAD and message length it takes, down to HACL*'s Vale AES-GCM routines and, for seals under 129 bytes and AAD or messages of 2^32 bytes or more, rind's by-8 AES-CTR and PCLMULQDQ GHASH against Vale's gcm_encrypt_LE and gcm_decrypt_LE without their bound of 2^32 bytes, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports, and with rind's HOL Light proofs of its constant-time tag compare"
+link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/AesGcmAead.lean"
+
+[[verified]]
+library = "rind"
+operations = ["aes128-gcm/*", "aes128-gcm-open/*", "aes256-gcm/*", "aes256-gcm-open/*"]
+arch = "x86_64"
+cpu = ["aes", "pclmulqdq", "ssse3", "sse4.1", "!avx"]
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the by-8 AES-GCM and PCLMULQDQ GHASH Aeneas cannot translate, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for every AAD and message length it takes, down to its by-8 AES-CTR and PCLMULQDQ GHASH, against Vale's gcm_encrypt_LE and gcm_decrypt_LE without their bound of 2^32 bytes, composed with rind's HOL Light proofs of its constant-time tag compare"
+link = "https://github.com/moq-dev/rind/blob/main/proofs/Rind/X86_64/AesGcmAead.lean"
 
 # aws-lc-rs: SHA-512 on Intel x86_64 alone. On aarch64, NSym's proof of
 # sha512_block_data_order_hw asserts the digest in registers at its loop's

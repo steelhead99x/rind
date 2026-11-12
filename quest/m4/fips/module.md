@@ -24,6 +24,9 @@ From [the scope](/quest/m4/fips/README.md), 2026-11-11.
   hashed); try running aws-lc's `delocate` on rustc's `--emit asm` only once
   a consumer needs a static module, as a second certificate like aws-lc's
   static #5314.
+- Random: the module compiles rind's source with `--cfg rind_fips`, which
+  sends every draw through its SP 800-90A HMAC_DRBG (`rind/src/fips_rng.rs`);
+  the DRBG's CAST runs before its first instantiation and aborts on failure.
 - Integrity: a constructor runs the HMAC-SHA2-256 and SHA2-256 CASTs, then
   compares an HMAC-SHA2-256 over the module's text and rodata with the value
   a post-link step (rind's equivalent of `inject_hash.go`) wrote into the
@@ -51,19 +54,21 @@ From [the scope](/quest/m4/fips/README.md), 2026-11-11.
     PBKDF2's `U` blocks, and expanded AES and GHASH keys on the stack.
   - Moves: a moved Rust value leaves its old bytes behind, so keys live only
     behind the module's heap handles and are never moved.
-  - DRBG state at process exit, as aws-lc's destructor does.
+  - DRBG state at exit: each thread's instance wipes itself as its thread
+    exits (`rind/src/fips_rng.rs`), and glibc runs the main thread's at
+    `exit`. Check that every tested OS runs it, or wipe it from a destructor
+    as aws-lc does.
   Measure what this costs against rind and aws-lc-rs's FIPS build.
+- Decided 2026-11-12 (maintainer, /quest-unblock): ✅ `AGENTS.md`'s wipe
+  rule gains one line saying the FIPS module also wipes SSPs that live only
+  inside a call, as listed above, so the cost stays in `rind-fips` (rejected:
+  wipe temporaries in `rind` too, which slows every consumer). The same day
+  the maintainer made wiping mandatory in `rind`, removing the `wipe` feature
+  ([moq-dev/rind#609](https://github.com/moq-dev/rind/pull/609)), so the
+  module's "always enables `wipe`" needs nothing of its own once that lands.
 - CPU paths: every path the module can select on a tested operational
   environment gets its own ACVP run ([the client](/quest/m4/fips/acvp.md)),
   reached with a load-time CPU mask in the release build (today
   `RIND_CPU_DISABLE_*` works only in debug builds). Paths that run on no
   tested CPU, such as x86_64's SSE2 integer AES, are left out of the module,
   which refuses such CPUs with an error naming the feature.
-
-## Waiting
-
-- Maintainer: approve the module's exception to `AGENTS.md`'s wipe rule, which keeps stack temporaries and copies inside a call unwiped and leaves `wipe` opt-in. FIPS requires zeroizing SSPs once no longer needed, temporaries included. Options: add one line saying the FIPS module always wipes and also wipes SSPs inside a call (recommended: it confines the cost to `rind-fips`); or wipe temporaries in `rind` too, so the module needs no exception (slower for every consumer). An agent cannot change an `AGENTS.md` rule unprompted. Done once the rule is settled in the Plan and this item is deleted.
-
-## Required
-
-- [The DRBG](/quest/m4/fips/drbg.md) - the approved random generator every key generation and internal IV draws from

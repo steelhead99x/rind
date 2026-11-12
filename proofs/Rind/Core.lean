@@ -6,10 +6,10 @@ open Aeneas Aeneas.Std Result
 /-!
 # What the translation calls outside rind and Aeneas's library
 
-Models of the `core` items rind's translation calls that Aeneas's library
-lacks, each following the Rust standard library, and opaque declarations for
-the random source, whose draw the functional spec leaves out, and for
-`core::array::from_fn`, which only AES's header protection calls.
+Models of the standard-library items rind's translation and theorems use that
+Aeneas's library lacks, each following the Rust standard library, and opaque
+declarations for the random source, whose draw the functional spec leaves out,
+and for `core::array::from_fn`, which only AES's header protection calls.
 `Rind.X86_64.Simd` models the x86_64 intrinsics.
 -/
 
@@ -148,6 +148,69 @@ def Shared0U64.Insts.CoreOpsBitShrUsizeU64.shr (x : Std.U64) (y : Std.Usize) : R
 /-- `<&u8 as BitAnd<u8>>::bitand`. -/
 def Shared0U8.Insts.CoreOpsBitBitAndU8U8.bitand (x y : Std.U8) : Result Std.U8 :=
   Std.Result.ok (x &&& y)
+
+/-- `<Vec<T> as AsMut<[T]>>::as_mut`: the whole vector, which writes back to it. -/
+def alloc.vec.Vec.Insts.CoreConvertAsMutSlice.as_mut {T : Type _} (_A : Type _) (v : alloc.vec.Vec T) :
+    Result ((Slice T) × (Slice T → alloc.vec.Vec T)) :=
+  ok (alloc.vec.Vec.deref_mut v)
+
+/-- `impl AsMut<[T]> for Vec<T>`, as Aeneas translates it. -/
+@[reducible]
+def alloc.vec.Vec.Insts.CoreConvertAsMutSlice (T : Type _) (A : Type _) :
+    core.convert.AsMut (alloc.vec.Vec T) (Slice T) := {
+  as_mut := alloc.vec.Vec.Insts.CoreConvertAsMutSlice.as_mut A
+}
+
+/-- `<Vec<T> as Extend<&T>>::extend`: the elements the iterator yields, copied
+and appended in order. It panics past `usize::MAX` elements, as Aeneas's
+`extend_from_slice` does. -/
+def alloc.vec.Vec.Insts.CoreIterTraitsCollectExtendSharedAT.extend {T : Type _} (_A : Type _)
+    {I : Type _} {IntoIter : Type _} (_ : core.marker.Copy T)
+    (inst : core.iter.traits.collect.IntoIterator I T IntoIter) (v : alloc.vec.Vec T) (i : I) :
+    Result (alloc.vec.Vec T) := do
+  let it ← inst.into_iter i
+  let l ← alloc.vec.FromIteratorVec.iterToList inst.iteratorInst it []
+  if h : v.length + l.length ≤ Usize.max then
+    ok (alloc.vec.Vec.from (v.val ++ l) (by simpa [alloc.vec.Vec.length] using h))
+  else fail .panic
+
+/-- `impl Extend<&T> for Vec<T>`, as Aeneas translates it. -/
+@[reducible]
+def alloc.vec.Vec.Insts.CoreIterTraitsCollectExtendSharedAT {T : Type _} (A : Type _)
+    (copyInst : core.marker.Copy T) : core.iter.traits.collect.Extend (alloc.vec.Vec T) T := {
+  extend := fun {I IntoIter} inst =>
+    alloc.vec.Vec.Insts.CoreIterTraitsCollectExtendSharedAT.extend A copyInst (I := I)
+      (IntoIter := IntoIter) inst
+}
+
+/-- `u64::ilog2`, which panics for zero. -/
+def core.num.U64.ilog2 (x : Std.U64) : Result Std.U32 :=
+  if x.val = 0 then Std.Result.fail .panic
+  else Std.Result.ok ⟨BitVec.ofNat 32 x.val.log2⟩
+
+/-- `RangeInclusive::contains`, through `RangeBounds::contains`: the start
+at most the item, and the item at most the end, or below it once the range
+is exhausted. -/
+def core.ops.range.RangeInclusive.contains {Idx U : Type _}
+    (_ : core.cmp.PartialOrd Idx Idx) (startInst : core.cmp.PartialOrd Idx U)
+    (endInst : core.cmp.PartialOrd U Idx) (r : core.ops.range.RangeInclusive Idx) (item : U) :
+    Result Bool := do
+  let above ← startInst.le r.start item
+  if above then
+    if r.exhausted then endInst.lt item r.«end» else endInst.le item r.«end»
+  else Std.Result.ok false
+
+/-- `Option`'s `PartialEq`: both `None`, or both `Some` of equal values. -/
+def core.option.Option.Insts.CoreCmpPartialEqOption.eq {T : Type _}
+    (inst : core.cmp.PartialEq T T) : Option T → Option T → Result Bool
+  | none, none => Std.Result.ok true
+  | some a, some b => inst.eq a b
+  | _, _ => Std.Result.ok false
+
+/-- `<&mut A as PartialEq<&mut B>>::eq`: `A`'s `PartialEq<B>`. -/
+def Mut1A.Insts.CoreCmpPartialEqMut0B.eq {A B : Type _} (inst : core.cmp.PartialEq A B)
+    (a : A) (b : B) : Result Bool :=
+  inst.eq a b
 
 /-- `getrandom`'s error. -/
 opaque getrandom.error.Error : Type

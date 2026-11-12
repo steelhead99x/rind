@@ -495,15 +495,14 @@ theorem chacha20_poly1305_seal_append_tag (h : RunsChaCha20Poly1305) (key : List
     exact (WP.spec_ok _).2 (hlong (by omega))
 
 /-- `Vec<u8>`'s `extend` appends the tag to the ciphertext. -/
-theorem vec_extend_tag (ExtendInst : core.iter.traits.collect.Extend (alloc.vec.Vec U8) U8)
-    (hextend : VecExtend ExtendInst) (ct : Slice U8) (tag : Std.Array U8 16#usize) (n : Nat)
+theorem vec_extend_tag (ct : Slice U8) (tag : Std.Array U8 16#usize) (n : Nat)
     (hct : ct.length = n) (hroom : n + 16 ≤ Usize.max) :
-    ExtendInst.extend (SharedSlice.Insts.CoreIterTraitsCollectIntoIteratorSharedIter U8) ⟨ct⟩ tag.to_slice ⦃ out =>
+    VecExtend.extend (SharedSlice.Insts.CoreIterTraitsCollectIntoIteratorSharedIter U8) ⟨ct⟩ tag.to_slice ⦃ out =>
       out.length = n + 16 ∧ out.val.take n = ct.val ∧ out.val.drop n = tag.val ⦄ := by
   have hct : ct.val.length = n := hct
   have htag : tag.to_slice.val = tag.val := by simp [Std.Array.to_slice]
   have htl : tag.val.length = 16 := by simp
-  rw [hextend]
+  rw [vec_extend]
   unfold alloc.vec.Vec.extend_from_slice
   have hfit : (⟨ct⟩ : alloc.vec.Vec U8).length + tag.to_slice.length ≤ Usize.max := by
     change ct.val.length + tag.to_slice.val.length ≤ Usize.max
@@ -523,18 +522,16 @@ ciphertext followed by the tag, RFC 8439's, or a vector past 2^38 - 64 bytes
 is refused, left as it is. -/
 theorem chacha20_poly1305_seal_append_tag_vec (h : RunsChaCha20Poly1305) (key : List (BitVec 8))
     (k : aead.Key) (hk : ChaChaKeyHolds key k) (nonce : aead.Nonce) (aad : Slice U8)
-    (AsMutInst : core.convert.AsMut (alloc.vec.Vec U8) (Slice U8))
-    (ExtendInst : core.iter.traits.collect.Extend (alloc.vec.Vec U8) U8) (hasmut : VecAsMut AsMutInst)
-    (hextend : VecExtend ExtendInst) (in_out : alloc.vec.Vec U8) (hroom : in_out.length + 16 ≤ Usize.max) :
-    k.seal_in_place_append_tag AsMutInst ExtendInst nonce aad in_out ⦃ r =>
+    (in_out : alloc.vec.Vec U8) (hroom : in_out.length + 16 ≤ Usize.max) :
+    k.seal_in_place_append_tag VecAsMut VecExtend nonce aad in_out ⦃ r =>
       if in_out.length ≤ 2 ^ 38 - 64 then
         r.1 = .Ok () ∧ r.2.length = in_out.length + 16 ∧
           (bvs (r.2.val.take in_out.length), bvs (r.2.val.drop in_out.length)) =
             chacha20poly1305.seal key (bvs nonce.bytes.val) (bvs aad.val) (bvs in_out.val)
       else r.1 = .Err .WrongLength ∧ r.2 = in_out ⦄ := by
   have hl : in_out.slice.length = in_out.length := rfl
-  apply chacha20_poly1305_seal_append_tag h key k hk nonce aad AsMutInst ExtendInst in_out in_out.slice
-    (fun s => ⟨s⟩) (hasmut in_out)
+  apply chacha20_poly1305_seal_append_tag h key k hk nonce aad VecAsMut VecExtend in_out in_out.slice
+    (fun s => ⟨s⟩) (vec_as_mut in_out)
   · intro hlong
     rw [hl] at hlong
     dsimp only
@@ -542,7 +539,7 @@ theorem chacha20_poly1305_seal_append_tag_vec (h : RunsChaCha20Poly1305) (key : 
     exact ⟨rfl, rfl⟩
   · intro ct tag hshort hlen henc
     rw [hl] at hshort hlen
-    apply WP.spec_mono (vec_extend_tag ExtendInst hextend ct tag in_out.length hlen hroom)
+    apply WP.spec_mono (vec_extend_tag ct tag in_out.length hlen hroom)
     rintro out ⟨hol, hot, hod⟩
     dsimp only
     rw [ite_eq_left hshort]
@@ -626,12 +623,10 @@ leaving the vector, and otherwise returns `nonce` and makes the vector the
 ciphertext followed by the tag, draft-irtf-cfrg-xchacha-03's, or refuses a
 vector past 2^38 - 64 bytes, leaving it as it is. -/
 theorem randomized_nonce_key_seal_append_tag_vec (h : RunsChaCha20Poly1305) (k : aead.RandomizedNonceKey)
-    (aad : Slice U8) (AsMutInst : core.convert.AsMut (alloc.vec.Vec U8) (Slice U8))
-    (ExtendInst : core.iter.traits.collect.Extend (alloc.vec.Vec U8) U8) (hasmut : VecAsMut AsMutInst)
-    (hextend : VecExtend ExtendInst) (in_out : alloc.vec.Vec U8) (hroom : in_out.length + 16 ≤ Usize.max)
+    (aad : Slice U8) (in_out : alloc.vec.Vec U8) (hroom : in_out.length + 16 ≤ Usize.max)
     (rr : core.result.Result Unit getrandom.error.Error) (nonce : Slice U8) (hn : nonce.length = 24)
     (hfill : getrandom.fill (Std.Array.repeat 24#usize 0#u8).to_slice = ok (rr, nonce)) :
-    k.seal_in_place_append_tag AsMutInst ExtendInst aad in_out ⦃ r =>
+    k.seal_in_place_append_tag VecAsMut VecExtend aad in_out ⦃ r =>
       (rr = .Ok () →
         if in_out.length ≤ 2 ^ 38 - 64 then
           ∃ n : aead.RandomNonce, r.1 = .Ok n ∧ n.bytes.val = nonce.val ∧ r.2.length = in_out.length + 16 ∧
@@ -650,7 +645,7 @@ theorem randomized_nonce_key_seal_append_tag_vec (h : RunsChaCha20Poly1305) (k :
   subst hs' hb
   rcases rr with ⟨⟨⟩⟩ | e
   · rw [hfill]
-    simp only [core.result.Result.map_err, hasmut in_out]
+    simp only [core.result.Result.map_err, vec_as_mut in_out]
     step*
     dsimp only [alloc.vec.Vec.deref_mut]
     have hl : in_out.slice.length = in_out.length := rfl
@@ -661,7 +656,7 @@ theorem randomized_nonce_key_seal_append_tag_vec (h : RunsChaCha20Poly1305) (k :
     split at hr
     · obtain ⟨rfl, hlen, henc⟩ := hr
       simp only
-      apply WP.spec_bind (vec_extend_tag ExtendInst hextend ct tag in_out.length hlen hroom)
+      apply WP.spec_bind (vec_extend_tag ct tag in_out.length hlen hroom)
       rintro out ⟨hol, hot, hod⟩
       refine (WP.spec_ok _).2 ⟨fun _ => ?_, fun hne => absurd rfl hne⟩
       rw [ite_eq_left (by assumption)]

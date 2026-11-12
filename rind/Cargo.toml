@@ -45,6 +45,11 @@ fiat-crypto = { version = "0.3", default-features = false }
 # CCTV gzips its ML-KEM modulus vectors.
 flate2 = { version = "1.1.11", default-features = false, features = ["rust_backend"] }
 hex = { version = "0.4", features = ["serde"] }
+# The reference for P-521's hash-to-curve, which aws-lc lacks, and for each
+# curve's hash to a scalar, which aws-lc does not export.
+p256 = { version = "0.14", default-features = false, features = ["group-digest"] }
+p384 = { version = "0.14", default-features = false, features = ["group-digest"] }
+p521 = { version = "0.14", default-features = false, features = ["group-digest"] }
 # Without `fork` and `timeout`, which spawn processes wasm cannot.
 proptest = { version = "1.5.0", default-features = false, features = ["std", "bit-set"] }
 serde = { version = "1", features = ["derive"] }
@@ -71,6 +76,10 @@ p256 = { version = "0.14", default-features = false, features = ["arithmetic"] }
 matter-crypto = { version = "0.5.1", default-features = false, features = ["test-support"] }
 # RSA blind signatures, which aws-lc-rs does not offer.
 blind-rsa-signatures = { version = "0.18", default-features = false }
+# ECVRF, which aws-lc-rs does not offer: key transparency's `akd` for
+# Edwards25519, and `vrf-rfc9381` for P-256.
+akd_core = { version = "0.13", default-features = false, features = ["vrf"] }
+vrf-rfc9381 = { version = "0.0.7", default-features = false, features = ["p256"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
@@ -81,6 +90,9 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   "cfg(rind_vartime_planted)",
   # Forces the portable backend, for testing it on x86_64 (see build.rs).
   "cfg(rind_portable)",
+  # Builds the FIPS module's source, which draws every random value from its
+  # DRBG (`src/fips_rng.rs`).
+  "cfg(rind_fips)",
   # curve25519-dalek's backend overrides, which armv7 refuses.
   'cfg(curve25519_dalek_bits, values("32", "64"))',
   'cfg(curve25519_dalek_backend, values("fiat", "serial", "simd", "avx512"))',
