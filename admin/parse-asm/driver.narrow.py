@@ -188,7 +188,12 @@ def expand_register_aliases(path):
 
 
 def emit_fastmul():
-    """Karatsuba multiplication for RSA on a narrow core, as on x86_64."""
+    """Karatsuba multiplication for RSA on a narrow core, as on x86_64.
+
+    The scratch `t` is `MaybeUninit`: s2n-bignum's proofs require nothing
+    of its contents, and Rust never reads it, so the caller need not zero
+    it.
+    """
     extras = {
         "bignum_kmul_16_32": ["proc", "Lbignum_kmul_16_32_local_mul_8_16", "ret"],
         "bignum_kmul_32_64": ["proc", "Lbignum_kmul_32_64_local_mul_8_16", "ret"],
@@ -198,7 +203,7 @@ def emit_fastmul():
     specs = [
         (
             "bignum_kmul_16_32",
-            "fn bignum_kmul_16_32(z: &mut [u64], x: &[u64], y: &[u64], t: &mut [u64; 32])",
+            "fn bignum_kmul_16_32(z: &mut [u64], x: &[u64], y: &[u64], t: &mut [core::mem::MaybeUninit<u64>; 32])",
             [
                 "z.as_mut_ptr() => _",
                 "x.as_ptr() => _",
@@ -209,7 +214,7 @@ def emit_fastmul():
         ),
         (
             "bignum_kmul_32_64",
-            "fn bignum_kmul_32_64(z: &mut [u64], x: &[u64], y: &[u64], t: &mut [u64; 96])",
+            "fn bignum_kmul_32_64(z: &mut [u64], x: &[u64], y: &[u64], t: &mut [core::mem::MaybeUninit<u64>; 96])",
             [
                 "z.as_mut_ptr() => _",
                 "x.as_ptr() => _",
@@ -220,13 +225,13 @@ def emit_fastmul():
         ),
         (
             "bignum_ksqr_16_32",
-            "fn bignum_ksqr_16_32(z: &mut [u64], x: &[u64], t: &mut [u64; 24])",
+            "fn bignum_ksqr_16_32(z: &mut [u64], x: &[u64], t: &mut [core::mem::MaybeUninit<u64>; 24])",
             ["z.as_mut_ptr() => _", "x.as_ptr() => _", "t.as_mut_ptr() => _"],
             ["z.len() == 32", "x.len() == 16"],
         ),
         (
             "bignum_ksqr_32_64",
-            "fn bignum_ksqr_32_64(z: &mut [u64], x: &[u64], t: &mut [u64; 72])",
+            "fn bignum_ksqr_32_64(z: &mut [u64], x: &[u64], t: &mut [core::mem::MaybeUninit<u64>; 72])",
             ["z.as_mut_ptr() => _", "x.as_ptr() => _", "t.as_mut_ptr() => _"],
             ["z.len() == 64", "x.len() == 32"],
         ),

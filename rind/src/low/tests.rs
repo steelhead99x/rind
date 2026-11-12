@@ -200,16 +200,34 @@ fn wrappers_refuse_mismatched_slices() {
                 bignum_coprime::bignum_coprime(&[1; 4], &[1; 4], &mut [0; 7]);
             }),
             ("kmul_16_32", || {
-                bignum_kmul_16_32::bignum_kmul_16_32(&mut [0; 32], &[0; 16], &[0; 15], &mut [0; 32])
+                bignum_kmul_16_32::bignum_kmul_16_32(
+                    &mut [0; 32],
+                    &[0; 16],
+                    &[0; 15],
+                    &mut [core::mem::MaybeUninit::uninit(); 32],
+                )
             }),
             ("kmul_32_64", || {
-                bignum_kmul_32_64::bignum_kmul_32_64(&mut [0; 63], &[0; 32], &[0; 32], &mut [0; 96])
+                bignum_kmul_32_64::bignum_kmul_32_64(
+                    &mut [0; 63],
+                    &[0; 32],
+                    &[0; 32],
+                    &mut [core::mem::MaybeUninit::uninit(); 96],
+                )
             }),
             ("ksqr_16_32", || {
-                bignum_ksqr_16_32::bignum_ksqr_16_32(&mut [0; 32], &[0; 15], &mut [0; 24])
+                bignum_ksqr_16_32::bignum_ksqr_16_32(
+                    &mut [0; 32],
+                    &[0; 15],
+                    &mut [core::mem::MaybeUninit::uninit(); 24],
+                )
             }),
             ("ksqr_32_64", || {
-                bignum_ksqr_32_64::bignum_ksqr_32_64(&mut [0; 64], &[0; 31], &mut [0; 72])
+                bignum_ksqr_32_64::bignum_ksqr_32_64(
+                    &mut [0; 64],
+                    &[0; 31],
+                    &mut [core::mem::MaybeUninit::uninit(); 72],
+                )
             }),
             ("mont_exp", || {
                 mont_exp::mont_exp(&mut [0; 4], &[0; 4], &[0; 3], &[1], &[1; 4], 1)

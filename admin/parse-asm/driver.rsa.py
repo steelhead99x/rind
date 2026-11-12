@@ -174,6 +174,9 @@ if __name__ == "__main__":
         ),
     }
 
+    # The scratch `t` is `MaybeUninit`: s2n-bignum's proofs require nothing
+    # of its contents, and Rust never reads it, so the caller need not zero
+    # it.
     for op, inwidth, tmpwidth in (
         ("ksqr", 16, 24),
         ("kmul", 16, 32),
@@ -200,7 +203,7 @@ if __name__ == "__main__":
                     "y.len() == %d" % inwidth,
                 ]
                 params = (
-                    "z: &mut [u64], x: &[u64], y: &[u64], t: &mut [u64; %d]" % tmpwidth
+                    "z: &mut [u64], x: &[u64], y: &[u64], t: &mut [core::mem::MaybeUninit<u64>; %d]" % tmpwidth
                 )
             elif op == "ksqr":
                 parameter_map = [
@@ -212,7 +215,7 @@ if __name__ == "__main__":
                     "z.len() == %d" % outwidth,
                     "x.len() == %d" % inwidth,
                 ]
-                params = "z: &mut [u64], x: &[u64], t: &mut [u64; %d]" % tmpwidth
+                params = "z: &mut [u64], x: &[u64], t: &mut [core::mem::MaybeUninit<u64>; %d]" % tmpwidth
 
             d = RustDriver(output, Architecture_amd64)
             d.emit_rust_function(

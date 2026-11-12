@@ -64,7 +64,12 @@ macro_rules! m {
 /// This is a Karatsuba-style function multiplying half-sized results
 /// internally and using temporary buffer t for intermediate results.
 #[inline(never)]
-pub(crate) fn bignum_kmul_16_32(z: &mut [u64], x: &[u64], y: &[u64], t: &mut [u64; 32]) {
+pub(crate) fn bignum_kmul_16_32(
+    z: &mut [u64],
+    x: &[u64],
+    y: &[u64],
+    t: &mut [core::mem::MaybeUninit<u64>; 32],
+) {
     assert!(z.len() == 32);
     assert!(x.len() == 16);
     assert!(y.len() == 16);
@@ -916,6 +921,6 @@ fn abi() {
         &mut [0; 32],
         &[1; 16],
         &[2; 16],
-        &mut crate::low::abi::Aligned([0; 32]).0
+        &mut crate::low::abi::Aligned([core::mem::MaybeUninit::uninit(); 32]).0
     );
 }

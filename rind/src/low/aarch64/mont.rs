@@ -22,6 +22,8 @@
 //! and any core Linux does not identify as Cortex-A72, Cortex-A76, or
 //! Neoverse N1. The generic routines run only below two words.
 
+use core::mem::MaybeUninit;
+
 /// `z = x * y / 2^(64k) mod m`, for `x` and `y` below `m`, where `k` is the
 /// length of each and `n0` is `-m^-1 mod 2^64`.
 pub(crate) fn mont_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) {
@@ -54,11 +56,21 @@ pub(crate) fn mont_sqr(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
 fn karatsuba_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) {
     if m.len() == 16 {
         let mut product = [0; 32];
-        super::bignum_kmul_16_32::bignum_kmul_16_32(&mut product, x, y, &mut [0; 32]);
+        super::bignum_kmul_16_32::bignum_kmul_16_32(
+            &mut product,
+            x,
+            y,
+            &mut [MaybeUninit::uninit(); 32],
+        );
         redc_8n(z, &mut product, m, n0);
     } else {
         let mut product = [0; 64];
-        super::bignum_kmul_32_64::bignum_kmul_32_64(&mut product, x, y, &mut [0; 96]);
+        super::bignum_kmul_32_64::bignum_kmul_32_64(
+            &mut product,
+            x,
+            y,
+            &mut [MaybeUninit::uninit(); 96],
+        );
         redc_8n(z, &mut product, m, n0);
     }
 }
@@ -67,11 +79,19 @@ fn karatsuba_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) {
 fn karatsuba_sqr(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
     if m.len() == 16 {
         let mut product = [0; 32];
-        super::bignum_ksqr_16_32::bignum_ksqr_16_32(&mut product, x, &mut [0; 24]);
+        super::bignum_ksqr_16_32::bignum_ksqr_16_32(
+            &mut product,
+            x,
+            &mut [MaybeUninit::uninit(); 24],
+        );
         redc_8n(z, &mut product, m, n0);
     } else {
         let mut product = [0; 64];
-        super::bignum_ksqr_32_64::bignum_ksqr_32_64(&mut product, x, &mut [0; 72]);
+        super::bignum_ksqr_32_64::bignum_ksqr_32_64(
+            &mut product,
+            x,
+            &mut [MaybeUninit::uninit(); 72],
+        );
         redc_8n(z, &mut product, m, n0);
     }
 }

@@ -53,7 +53,11 @@ macro_rules! s {
 /// This is a Karatsuba-style function squaring half-sized results
 /// and using temporary buffer t for intermediate results.
 #[inline(never)]
-pub(crate) fn bignum_ksqr_16_32(z: &mut [u64], x: &[u64], t: &mut [u64; 24]) {
+pub(crate) fn bignum_ksqr_16_32(
+    z: &mut [u64],
+    x: &[u64],
+    t: &mut [core::mem::MaybeUninit<u64>; 24],
+) {
     assert!(z.len() == 32);
     assert!(x.len() == 16);
     // SAFETY: inline assembly. see [crate::low::inline_assembly_safety] for safety info.
@@ -736,6 +740,6 @@ fn abi() {
         bignum_ksqr_16_32,
         &mut [0; 32],
         &[1; 16],
-        &mut crate::low::abi::Aligned([0; 24]).0
+        &mut crate::low::abi::Aligned([core::mem::MaybeUninit::uninit(); 24]).0
     );
 }

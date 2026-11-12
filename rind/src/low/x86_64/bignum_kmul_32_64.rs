@@ -33,7 +33,12 @@ use crate::low::macros::*;
 /// of 96 is an overstatement for compatibility with the ARM version; it
 /// actually only uses 65 elements of t (64 + 1 for a stashed sign).
 #[inline(never)]
-pub(crate) fn bignum_kmul_32_64(z: &mut [u64], x: &[u64], y: &[u64], t: &mut [u64; 96]) {
+pub(crate) fn bignum_kmul_32_64(
+    z: &mut [u64],
+    x: &[u64],
+    y: &[u64],
+    t: &mut [core::mem::MaybeUninit<u64>; 96],
+) {
     assert!(z.len() == 64);
     assert!(x.len() == 32);
     assert!(y.len() == 32);
@@ -1665,6 +1670,6 @@ fn abi() {
         &mut [0; 64],
         &[1; 32],
         &[2; 32],
-        &mut crate::low::abi::Aligned([0; 96]).0
+        &mut crate::low::abi::Aligned([core::mem::MaybeUninit::uninit(); 96]).0
     );
 }
