@@ -96,15 +96,14 @@ mod generic {
     ))]
     pub(crate) mod poly1305;
     pub(super) mod reuse_cache;
-    // The portable backend's SHA1 and SHA256, also built in x86_64 tests to
-    // check the vector paths against.
+    // The portable backend's SHA-1, and both hashes in armv7 and x86_64
+    // tests to check the assembly against.
     #[cfg(any(
-        rind_backend = "arm",
         rind_backend = "portable",
-        all(test, rind_backend = "x86_64")
+        all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha1;
-    #[cfg(any(rind_backend = "arm", all(test, rind_backend = "x86_64")))]
+    #[cfg(all(test, any(rind_backend = "arm", rind_backend = "x86_64")))]
     pub(super) mod sha256;
     pub(super) mod zeroise;
 }

@@ -24,7 +24,7 @@ Found by the 2026-11-09 audit: the backend landed in [moq-dev/rind#458](https://
   - X25519 and Ed25519: curve25519-dalek's serial backend under rind's glue (`low/portable/curve25519.rs`, `mid/portable/ed25519.rs`), in [armv7's Curve25519](/quest/m5/verified-armv7/curve25519.md), whose source of Lean proofs also covers the 64-bit limbs this translation runs;
   - P-256, P-384, and P-521: [armv7's NIST curves](/quest/m5/verified-armv7/nist-curves.md), over field code [the 64-bit limbs quest](/quest/m3/cold-speed/portable-limbs.md) replaces on 64-bit targets;
   - RSA: [verification](/quest/m4/verified/rsa-verify.md) and [signing](/quest/m4/verified/rsa-sign.md), over `low/generic/bignum.rs`'s Montgomery loop, which the 64-bit limbs quest also replaces;
-  - SHA-1 and MD5: `low/generic/sha1.rs` in [armv7's Rust proofs](/quest/m5/verified-armv7/prove.md), and [MD5](/quest/m5/verified/md5.md).
+  - MD5: [its own quest](/quest/m5/verified/md5.md).
 - Whatever still lacks a ✓ on this backend after those is [the re-audit](/quest/m4/verified/re-audit.md)'s to plan.
 
 ## Related

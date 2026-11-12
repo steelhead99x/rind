@@ -55,9 +55,9 @@ qemu. iOS devices' code is only built.
   rind-dimpl prefer ChaCha20-Poly1305, which is faster there: ChaCha20 runs
   aws-lc's assembly, and so does Poly1305 where the CPU has NEON. SHA-384,
   SHA-512, and SHA-512/256 always run aws-lc's assembly, with NEON where the
-  CPU has it, and with NEON, X25519's shared secret runs [BoringSSL]'s
-  assembly. SHA-3's, ML-KEM's, and ML-DSA's Keccak-f runs [OpenSSL]'s assembly, on
-  NEON where the CPU has it.
+  CPU has it, as do SHA-1 and SHA-256 without the crypto extension, and with
+  NEON, X25519's shared secret runs [BoringSSL]'s assembly. SHA-3's, ML-KEM's,
+  and ML-DSA's Keccak-f runs [OpenSSL]'s assembly, on NEON where the CPU has it.
 
 - Builds with `-Z cf-protection=branch` or `-Z branch-protection=bti`, both
   unstable, are unsupported: rind calls aws-lc's x86_64 and aarch64 routines
