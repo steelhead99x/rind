@@ -92,7 +92,13 @@ count_mutants() {
     args+=(--list)
     local bin out n
     bin=${MUTANTS_PLAN_ADMIN:-$root/admin/mutants}
-    out=$("$bin" "${args[@]}")
+    # Command substitution does not inherit `set -e`, and this function runs
+    # inside one, so a failed listing must fail the function explicitly.
+    # Counting the partial output would plan too few shards.
+    if ! out=$("$bin" "${args[@]}"); then
+        echo "sh/mutants-plan.sh: $bin --list failed for $name" >&2
+        return 1
+    fi
     n=$(printf '%s\n' "$out" | grep -cve '^$' || true)
     echo "$n"
 }
@@ -124,12 +130,15 @@ print(json.dumps({
 
 matrix() {
     local diff=$1 list=$2
-    local name mode shards in_diff total=0 os shell args
+    local name mode count shards in_diff total=0 os shell args
     local -a rows=()
     for name in x86_64 aarch64 macos armv7; do
         mode=$(scope_mode "$diff" "$name")
         if [ "$list" = yes ] && [ "$mode" != skip ]; then
-            shards=$(shard_count "$(count_mutants "$name" "$diff" "$mode")")
+            # Checked explicitly: `set -e` is off when matrix runs as a
+            # condition, and a nested substitution's status is dropped.
+            count=$(count_mutants "$name" "$diff" "$mode") || return 1
+            shards=$(shard_count "$count")
         else
             shards=1
         fi
@@ -268,6 +277,34 @@ EOF
     : >"$diff"
     if MUTANTS_PLAN_ADMIN=$stub matrix "$diff" yes >/dev/null; then
         echo "sh/mutants-plan.sh: oversized matrix was accepted" >&2
+        exit 1
+    fi
+
+    # A listing that fails, even after printing some mutants, must fail the
+    # plan rather than fall back to one 300-minute shard.
+    cat >"$stub" <<'EOF'
+#!/usr/bin/env bash
+campaign=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --campaign) campaign=$2; shift 2 ;;
+        *) shift ;;
+    esac
+done
+echo m
+if [ "$campaign" = aarch64 ]; then
+    echo "admin/mutants: listing failed" >&2
+    exit 1
+fi
+EOF
+    chmod +x "$stub"
+    : >"$diff"
+    if MUTANTS_PLAN_ADMIN=$stub matrix "$diff" yes >/dev/null 2>&1; then
+        echo "sh/mutants-plan.sh: failed listing was accepted" >&2
+        exit 1
+    fi
+    if (MUTANTS_PLAN_ADMIN=$stub pull_request "$diff" >/dev/null 2>&1); then
+        echo "sh/mutants-plan.sh: pull-request accepted a failed listing" >&2
         exit 1
     fi
     rm -rf "$tmp"
