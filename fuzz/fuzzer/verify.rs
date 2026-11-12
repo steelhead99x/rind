@@ -1,7 +1,8 @@
 #![no_main]
 
 //! Signature verification under every algorithm against aws-lc-rs's, for any
-//! public key, signature, and message.
+//! public key, signature, and message. Selectors 32 and 33 are ECVRF, which
+//! aws-lc-rs does not implement, checked against akd_core and vrf-rfc9381.
 //!
 //! The first byte picks the algorithm, and the rest is the key and the
 //! signature, each after a big-endian 16-bit length, then the message.
@@ -24,6 +25,12 @@ fuzz_target!(|data: &[u8]| {
     let Some((&selector, rest)) = data.split_first() else {
         return;
     };
+    // ECVRF is not a signature aws-lc-rs verifies. 32 is Edwards against
+    // akd_core, 33 is P-256 against vrf-rfc9381.
+    if selector == 32 || selector == 33 {
+        vrf(selector, rest);
+        return;
+    }
     let Some((key, rest)) = split(rest) else {
         return;
     };
@@ -336,5 +343,66 @@ fn refused(kind: Kind, key: &[u8]) -> bool {
         // aws-lc-rs also takes a `SubjectPublicKeyInfo`; rind takes only the
         // raw key, of which any bytes of its length are one.
         Kind::MlDsa(len) => key.len() != len,
+    }
+}
+
+/// ECVRF verification. The input is a public key, a proof, and alpha, each
+/// length-prefixed as a signature is. rind may refuse a proof the reference
+/// takes when an Edwards point or scalar is non-canonical, or a P-256 point
+/// is uncompressed, and must not take one the reference refuses.
+fn vrf(selector: u8, rest: &[u8]) {
+    let Some((key, rest)) = split(rest) else {
+        return;
+    };
+    let Some((proof, alpha)) = split(rest) else {
+        return;
+    };
+    match selector {
+        32 => vrf_edwards(key, proof, alpha),
+        33 => vrf_p256(key, proof, alpha),
+        _ => {}
+    }
+}
+
+fn vrf_edwards(key: &[u8], proof: &[u8], alpha: &[u8]) {
+    use akd_core::ecvrf::{Proof as AkdProof, VRFPublicKey};
+    use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, Proof, PublicKey};
+
+    let ours = PublicKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, key).and_then(|public| {
+        let proof = Proof::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, proof)?;
+        public.verify(alpha, &proof)
+    });
+    let theirs = match (VRFPublicKey::try_from(key), AkdProof::try_from(proof)) {
+        (Ok(public), Ok(proof)) => public.verify(&proof, alpha).is_ok(),
+        _ => false,
+    };
+    assert!(
+        ours.is_err() || theirs,
+        "rind verified a proof akd_core refused"
+    );
+}
+
+fn vrf_p256(key: &[u8], proof: &[u8], alpha: &[u8]) {
+    use rind::vrf::{ECVRF_P256_SHA256_TAI, Proof, PublicKey};
+    use vrf_rfc9381::ec::p256::tai::{EcVrfP256Tai, EcVrfP256TaiPublicKey};
+    use vrf_rfc9381::{VRF, Verifier};
+
+    let ours = PublicKey::from_bytes(&ECVRF_P256_SHA256_TAI, key).and_then(|public| {
+        let proof = Proof::from_bytes(&ECVRF_P256_SHA256_TAI, proof)?;
+        public.verify(alpha, &proof)
+    });
+    match EcVrfP256TaiPublicKey::from_slice(key) {
+        Ok(public) => match EcVrfP256Tai.verify(&public, alpha, proof) {
+            Ok(output) => {
+                if let Ok(ours) = &ours {
+                    assert_eq!(ours.as_ref(), output.as_slice());
+                }
+            }
+            Err(_) => assert!(ours.is_err(), "rind verified a proof vrf-rfc9381 refused"),
+        },
+        Err(_) => assert!(
+            ours.is_err(),
+            "rind loaded a public key vrf-rfc9381 refused"
+        ),
     }
 }

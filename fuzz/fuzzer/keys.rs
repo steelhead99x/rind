@@ -3,7 +3,9 @@
 //! Every public key loader against aws-lc-rs's: the first byte picks the
 //! loader and the rest is its input. Both must accept and refuse alike, except
 //! where an [`Expect`] names a difference by design, and every key rind loads
-//! must re-encode to input both load again as the same key.
+//! must re-encode to input both load again as the same key. Loaders 55 to 58
+//! are ECVRF, which aws-lc-rs does not implement, checked against akd_core
+//! and vrf-rfc9381.
 
 use aws_lc_rs::agreement::ParsedPublicKeyFormat as Format;
 use aws_lc_rs::encoding::{AsBigEndian, AsDer};
@@ -93,6 +95,10 @@ fuzz_target!(|data: &[u8]| {
         52 => ml_dsa_spki(&MLDSA_44, input),
         53 => ml_dsa_spki(&MLDSA_65, input),
         54 => ml_dsa_spki(&MLDSA_87, input),
+        55 => vrf_edwards_seed(input),
+        56 => vrf_edwards_public(input),
+        57 => vrf_p256_seed(input),
+        58 => vrf_p256_public(input),
         _ => {}
     }
 });
@@ -929,4 +935,82 @@ fn ml_dsa_spki(set: &MlDsa, input: &[u8]) {
     let again = ours::PublicKey::from_spki(set.ours, spki.as_ref()).unwrap();
     assert_eq!(again.as_ref(), ours.as_ref());
     ml_dsa_public(set, ours.as_ref());
+}
+
+/// ECVRF keys. aws-lc-rs has none, so Edwards is checked against akd_core and
+/// P-256 against vrf-rfc9381. rind may refuse an uncompressed P-256 point the
+/// reference takes, and must not take a key the reference refuses.
+fn vrf_edwards_seed(input: &[u8]) {
+    use akd_core::ecvrf::{VRFPrivateKey, VRFPublicKey};
+    use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, PublicKey, SecretKey};
+
+    let ours = SecretKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, input);
+    let theirs = VRFPrivateKey::try_from(input);
+    assert_eq!(ours.is_ok(), theirs.is_ok(), "edwards seed");
+    let (Ok(ours), Ok(theirs)) = (ours, theirs) else {
+        return;
+    };
+    assert_eq!(ours.to_bytes().as_slice(), input);
+    let public = ours.public_key();
+    let theirs = VRFPublicKey::from(&theirs);
+    assert_eq!(public.as_ref(), theirs.as_bytes().as_slice());
+    PublicKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, public.as_ref()).unwrap();
+}
+
+fn vrf_edwards_public(input: &[u8]) {
+    use akd_core::ecvrf::VRFPublicKey;
+    use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, PublicKey};
+
+    let ours = PublicKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, input);
+    let theirs = VRFPublicKey::try_from(input);
+    assert_eq!(
+        ours.is_ok(),
+        theirs.is_ok(),
+        "edwards public key: rind {:?}, akd_core {:?}",
+        ours.as_ref().err(),
+        theirs.as_ref().err()
+    );
+    let Ok(ours) = ours else {
+        return;
+    };
+    assert_eq!(ours.as_ref(), input);
+}
+
+fn vrf_p256_seed(input: &[u8]) {
+    use rind::vrf::{ECVRF_P256_SHA256_TAI, SecretKey};
+    use vrf_rfc9381::Prover as _;
+    use vrf_rfc9381::ec::p256::tai::EcVrfP256TaiSecretKey;
+
+    let ours = SecretKey::from_bytes(&ECVRF_P256_SHA256_TAI, input);
+    let theirs = EcVrfP256TaiSecretKey::from_slice(input);
+    assert_eq!(
+        ours.is_ok(),
+        theirs.is_ok(),
+        "p256 seed: rind {:?}, vrf-rfc9381 {:?}",
+        ours.as_ref().err(),
+        theirs.as_ref().err()
+    );
+    let Ok(ours) = ours else {
+        return;
+    };
+    assert_eq!(ours.to_bytes().as_slice(), input);
+    // Loading agrees, and the reference can derive a verifier from it.
+    let _ = theirs.unwrap().verifier();
+}
+
+fn vrf_p256_public(input: &[u8]) {
+    use rind::vrf::{ECVRF_P256_SHA256_TAI, PublicKey};
+    use vrf_rfc9381::Verifier as _;
+    use vrf_rfc9381::ec::p256::tai::EcVrfP256TaiPublicKey;
+
+    let ours = PublicKey::from_bytes(&ECVRF_P256_SHA256_TAI, input);
+    let theirs = EcVrfP256TaiPublicKey::from_slice(input);
+    assert!(
+        ours.is_err() || theirs.is_ok(),
+        "rind loaded a P-256 public key vrf-rfc9381 refused"
+    );
+    let Ok(ours) = ours else {
+        return;
+    };
+    assert_eq!(ours.as_ref(), input);
 }

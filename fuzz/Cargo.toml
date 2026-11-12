@@ -16,6 +16,10 @@ aws-lc-rs = { version = "1.19", features = ["non-fips", "ring-io"], default-feat
 aws-lc-sys = { version = "0.47", default-features = false }
 # Tells which Ed25519 keys are of small order, which rind refuses.
 curve25519-dalek = { version = "5", default-features = false }
+# ECVRF, which aws-lc-rs does not implement. Edwards against akd_core,
+# P-256 against vrf-rfc9381.
+akd_core = { version = "0.13", default-features = false, features = ["vrf"] }
+vrf-rfc9381 = { version = "0.0.7", default-features = false, features = ["p256"] }
 # The adapters, each compared with its upstream's aws-lc-rs provider.
 arrayvec = "0.7"
 dimpl = { version = "0.9", default-features = false, features = ["aws-lc-rs", "_crypto-common"] }
