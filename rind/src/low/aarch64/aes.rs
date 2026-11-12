@@ -240,38 +240,43 @@ fn zero() -> uint8x16_t {
 const RCON: [u32; 10] = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36];
 
 // The key schedule in vector registers, as aws-lc's `aes_hw_set_encrypt_key`
-// runs it, rather than word by word through general registers.
+// runs it, rather than word by word through general registers. The
+// expansions fill a local array, indexing their loops, and write `out` once:
+// Aeneas translates neither a loop that writes through a reference nor one
+// over an iterator of the round constants.
+#[allow(clippy::needless_range_loop)]
 #[target_feature(enable = "aes")]
 fn aes128_expand(key: &[u8; 16], out: &mut [uint8x16_t; 11]) {
-    // SAFETY: `key` is 16 readable bytes
-    let mut t = unsafe { vld1q_u8(key.as_ptr()) };
-    out[0] = t;
-
-    for (rk, rcon) in out[1..].iter_mut().zip(RCON) {
-        t = veorq_u8(xor_prefix(t), sub_rot_word(t, rcon));
-        *rk = t;
+    let mut t = load(key);
+    let mut rk = [t; 11];
+    for i in 0..10 {
+        t = veorq_u8(xor_prefix(t), sub_rot_word(t, RCON[i]));
+        rk[i + 1] = t;
     }
+    *out = rk;
 }
 
+#[allow(clippy::needless_range_loop)]
 #[target_feature(enable = "aes")]
 fn aes256_expand(key: &[u8; 32], out: &mut [uint8x16_t; 15]) {
-    // SAFETY: `key` is 32 readable bytes
-    let (mut a, mut b) = unsafe { (vld1q_u8(key.as_ptr()), vld1q_u8(key[16..].as_ptr())) };
-    out[0] = a;
-    out[1] = b;
+    let mut a = load(key[..16].try_into().unwrap());
+    let mut b = load(key[16..].try_into().unwrap());
+    let mut rk = [a; 15];
+    rk[1] = b;
 
     // Round keys alternate: the first of each pair takes RotWord and the
     // round constant, as AES-128's do, and the second only SubWord.
-    for (i, rcon) in RCON[..7].iter().enumerate() {
-        a = veorq_u8(xor_prefix(a), sub_rot_word(b, *rcon));
-        out[2 * i + 2] = a;
+    for i in 0..7 {
+        a = veorq_u8(xor_prefix(a), sub_rot_word(b, RCON[i]));
+        rk[2 * i + 2] = a;
         if i == 6 {
             break;
         }
         let w3 = vreinterpretq_u8_u32(vdupq_laneq_u32::<3>(vreinterpretq_u32_u8(a)));
         b = veorq_u8(xor_prefix(b), vaeseq_u8(w3, zero()));
-        out[2 * i + 3] = b;
+        rk[2 * i + 3] = b;
     }
+    *out = rk;
 }
 
 /// AES-192's schedule six words at a time: `a` holds each step's first four
@@ -282,19 +287,16 @@ fn aes256_expand(key: &[u8; 32], out: &mut [uint8x16_t; 15]) {
 #[target_feature(enable = "aes")]
 fn aes192_expand(key: &[u8; 24]) -> [uint8x16_t; 13] {
     const ROT_WORD_1: [u8; 16] = [5, 6, 7, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 6, 7, 4];
-    // SAFETY: `key` is 24 readable bytes, and `ROT_WORD_1` 16
-    let (mut a, mut b, rot_word_1) = unsafe {
-        (
-            vld1q_u8(key.as_ptr()),
-            vcombine_u8(vld1_u8(key[16..].as_ptr()), vdup_n_u8(0)),
-            vld1q_u8(ROT_WORD_1.as_ptr()),
-        )
-    };
+    let mut a = load(key[..16].try_into().unwrap());
+    let mut b = vreinterpretq_u8_p128(u128::from(u64::from_le_bytes(
+        key[16..].try_into().unwrap(),
+    )));
+    let rot_word_1 = load(&ROT_WORD_1);
     let mut out = [a; 13];
-    for (step, rcon) in (1..).zip(&RCON[..8]) {
+    for step in 1..9 {
         let sub = veorq_u8(
             vaeseq_u8(vqtbl1q_u8(b, rot_word_1), zero()),
-            vreinterpretq_u8_u32(vdupq_n_u32(*rcon)),
+            vreinterpretq_u8_u32(vdupq_n_u32(RCON[step - 1])),
         );
         a = veorq_u8(xor_prefix(a), sub);
         if step % 2 == 1 {
@@ -327,8 +329,7 @@ fn sub_rot_word(t: uint8x16_t, rcon: u32) -> uint8x16_t {
     const ROT_WORD_3: [u8; 16] = [
         13, 14, 15, 12, 13, 14, 15, 12, 13, 14, 15, 12, 13, 14, 15, 12,
     ];
-    // SAFETY: `ROT_WORD_3` is 16 readable bytes
-    let rot = vqtbl1q_u8(t, unsafe { vld1q_u8(ROT_WORD_3.as_ptr()) });
+    let rot = vqtbl1q_u8(t, load(&ROT_WORD_3));
     veorq_u8(
         vaeseq_u8(rot, zero()),
         vreinterpretq_u8_u32(vdupq_n_u32(rcon)),
@@ -342,6 +343,21 @@ fn sub_rot_word(t: uint8x16_t, rcon: u32) -> uint8x16_t {
 fn xor_prefix(t: uint8x16_t) -> uint8x16_t {
     let t = veorq_u8(t, vextq_u8::<12>(zero(), t));
     veorq_u8(t, vextq_u8::<8>(zero(), t))
+}
+
+/// `block` as a vector, its first byte in lane 0, as `vld1q_u8` loads it.
+/// A value rather than a pointer, which Aeneas cannot translate.
+#[inline]
+#[target_feature(enable = "aes")]
+fn load(block: &[u8; 16]) -> uint8x16_t {
+    vreinterpretq_u8_p128(u128::from_le_bytes(*block))
+}
+
+/// `v`'s bytes, lane 0 first, as `vst1q_u8` stores them.
+#[inline]
+#[target_feature(enable = "aes")]
+fn store(v: uint8x16_t) -> [u8; 16] {
+    vreinterpretq_p128_u8(v).to_le_bytes()
 }
 
 /// The round keys for `aesd` from those for `aese`.
@@ -358,25 +374,18 @@ fn invert_round_keys<const N: usize>(round_keys: &[uint8x16_t; N]) -> [uint8x16_
 
 #[target_feature(enable = "aes")]
 fn hw_decrypt_block<const N: usize>(round_keys: &[uint8x16_t; N], block_inout: &mut [u8; 16]) {
-    // SAFETY: `block_inout` is 16 bytes and readable
-    let mut block = unsafe { vld1q_u8(block_inout.as_ptr()) };
+    let mut block = load(block_inout);
     block = vaesdq_u8(block, round_keys[0]);
     for round_key in &round_keys[1..N - 1] {
         block = vaesdq_u8(vaesimcq_u8(block), *round_key);
     }
     block = veorq_u8(block, round_keys[N - 1]);
-    // SAFETY: `block_inout` is 16 bytes and writable
-    unsafe { vst1q_u8(block_inout.as_mut_ptr(), block) };
+    *block_inout = store(block);
 }
 
 #[target_feature(enable = "aes")]
 fn aes128_block(round_keys: &[uint8x16_t; 11], block: &[u8; 16]) -> [u8; 16] {
-    // SAFETY: `block` is 16 bytes and readable
-    let block = unsafe { vld1q_u8(block.as_ptr()) };
-    let mut out = [0u8; 16];
-    // SAFETY: `out` is 16 bytes and writable
-    unsafe { vst1q_u8(out.as_mut_ptr(), _aes128_block(round_keys, block)) };
-    out
+    store(_aes128_block(round_keys, load(block)))
 }
 
 #[target_feature(enable = "aes")]
@@ -481,26 +490,17 @@ pub(crate) fn _aes128_8_blocks(
 /// One block under any key size, by its number of round keys.
 #[target_feature(enable = "aes")]
 fn aes_block<const N: usize>(round_keys: &[uint8x16_t; N], block: &[u8; 16]) -> [u8; 16] {
-    // SAFETY: `block` is 16 bytes and readable
-    let mut b = unsafe { vld1q_u8(block.as_ptr()) };
+    let mut b = load(block);
     for rk in &round_keys[..N - 2] {
         b = vaesmcq_u8(vaeseq_u8(b, *rk));
     }
     b = veorq_u8(vaeseq_u8(b, round_keys[N - 2]), round_keys[N - 1]);
-    let mut out = [0u8; 16];
-    // SAFETY: `out` is 16 bytes and writable
-    unsafe { vst1q_u8(out.as_mut_ptr(), b) };
-    out
+    store(b)
 }
 
 #[target_feature(enable = "aes")]
 fn aes256_block(round_keys: &[uint8x16_t; 15], block: &[u8; 16]) -> [u8; 16] {
-    // SAFETY: `block` is 16 bytes and readable
-    let block = unsafe { vld1q_u8(block.as_ptr()) };
-    let mut out = [0u8; 16];
-    // SAFETY: `out` is 16 bytes and writable
-    unsafe { vst1q_u8(out.as_mut_ptr(), _aes256_block(round_keys, block)) };
-    out
+    store(_aes256_block(round_keys, load(block)))
 }
 
 #[target_feature(enable = "aes")]
