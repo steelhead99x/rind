@@ -380,11 +380,14 @@ backs, so a crate on aws-lc-rs swaps it in with `aws-lc-rs = { package =
 "rind-aws-lc-rs", version = "1" }` and no code changes. The rename reaches
 only that crate. It accepts every aws-lc-rs feature but `fips`, and adds only
 a `wipe` feature, since aws-lc-rs always wipes. Its [README](rind-aws-lc-rs/README.md) lists
-the items it leaves out, such as ML-DSA, ML-KEM-512 and ML-KEM-1024, SHA-224,
-and the PKCS#1 v1.5 encryption keys, and where it behaves differently. rustls's
-`aws_lc_rs` provider, rustls-webpki's `aws-lc-rs` feature, and rcgen's
-`aws_lc_rs` feature name ML-DSA, so they do not build on it until it offers
-[ML-DSA](quest/m2/adoption/aws-lc-rs/ml-dsa.md).
+the items it leaves out, such as ML-KEM-512 and ML-KEM-1024,
+`PqdsaPrivateKey::as_raw_bytes`, SHA-224, and the PKCS#1 v1.5 encryption keys,
+and where it behaves differently. It offers ML-DSA
+(`signature::{ML_DSA_44, ML_DSA_65, ML_DSA_87}`, `PqdsaKeyPair`, and the other
+`Pqdsa*` types except `as_raw_bytes`). rustls-webpki's `aws-lc-rs` feature and
+rcgen's `aws_lc_rs` feature build on it. rustls's `aws_lc_rs` provider still
+names `tls_prf`, and from 0.23.46 also `kem::ML_KEM_1024`, so it does not
+build yet.
 
 ### rind-rustls
 

@@ -1,17 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! The s2n-bignum routines `mid::p384` uses, with their contracts, over
-//! rind's 32-bit Montgomery multiplication and squaring, and fiat-crypto's
-//! 32-bit P-384 field and group order arithmetic for the rest.
+//! the parent module's limbs: `p384_mul`'s Montgomery multiplication and
+//! squaring, and fiat-crypto's P-384 field and group order arithmetic for
+//! the rest.
 //!
 //! fiat-crypto proves each operation correct, and emits it as straight-line
-//! code with no secret-dependent branch or index.  Its multiplication runs
-//! interleaved carry chains, which LLVM keeps in the one carry flag on
-//! armv7, saving and restoring it between them, so rind multiplies with
-//! 64-bit accumulators instead (`umaal`), as Montgomery's method in the
-//! textbook form, with no secret-dependent branch or index either.  It is
-//! not proven: the tests check it against fiat-crypto and s2n-bignum.  The
-//! rest composes those: the point formulas repeat s2n-bignum's operation
+//! code with no secret-dependent branch or index.  The rest composes those: the point formulas repeat s2n-bignum's operation
 //! sequences, so results match it word for word; inversion is Fermat's
 //! little theorem, raising to a public exponent by a fixed sequence of
 //! squarings and multiplications; and range reduction is one
@@ -21,10 +16,13 @@
 //! Arithmetic on secrets wraps: the bounds rule out overflow, and a debug
 //! build's overflow check would branch on secret values.
 
-use fiat_crypto::p384_32 as fp;
-use fiat_crypto::p384_32::fiat_p384_montgomery_domain_field_element as Fe;
-use fiat_crypto::p384_scalar_32 as fs;
-use fiat_crypto::p384_scalar_32::fiat_p384_scalar_montgomery_domain_field_element as Fs;
+pub(super) use super::fiat_p384::fiat_p384_montgomery_domain_field_element as Fe;
+pub(super) use super::fiat_p384_scalar::fiat_p384_scalar_montgomery_domain_field_element as Fs;
+use super::p384_mul::{fe_mul, fe_sqr, fs_mul, fs_sqr};
+use super::{Limb, Wide, fiat_p384 as fp, fiat_p384_scalar as fs};
+
+/// Limbs in a field element.
+const LIMBS: usize = (384 / Limb::BITS) as usize;
 
 /// z := x * y / 2^384 mod p_384
 pub(crate) fn bignum_montmul_p384(z: &mut [u64; 6], x: &[u64; 6], y: &[u64; 6]) {
@@ -43,7 +41,7 @@ pub(crate) fn bignum_add_p384(z: &mut [u64; 6], x: &[u64; 6], y: &[u64; 6]) {
 
 /// z := (-x) mod p_384, assuming x reduced
 pub(crate) fn bignum_neg_p384(z: &mut [u64; 6], x: &[u64; 6]) {
-    let mut r = Fe([0; 12]);
+    let mut r = Fe([0; LIMBS]);
     fp::fiat_p384_opp(&mut r, &fe(x));
     *z = join(&r.0);
 }
@@ -55,7 +53,7 @@ pub(crate) fn bignum_tomont_p384(z: &mut [u64; 6], x: &[u64; 6]) {
 
 /// z := (x / 2^384) mod p_384, assuming x reduced
 pub(crate) fn bignum_demont_p384(z: &mut [u64; 6], x: &[u64; 6]) {
-    let mut r = fp::fiat_p384_non_montgomery_domain_field_element([0; 12]);
+    let mut r = fp::fiat_p384_non_montgomery_domain_field_element([0; LIMBS]);
     fp::fiat_p384_from_montgomery(&mut r, &fe(x));
     *z = join(&r.0);
 }
@@ -160,7 +158,7 @@ pub(crate) fn p384_montjmixadd(p3: &mut [u64; 18], p1: &[u64; 18], p2: &[u64; 12
     let z3 = fe_mul(&xd, &z1);
 
     // p1 at infinity makes the result p2, with a z of one.
-    let mut one = Fe([0; 12]);
+    let mut one = Fe([0; LIMBS]);
     fp::fiat_p384_set_one(&mut one);
     let z1_nonzero = nonzero(&z1);
     *p3 = point(
@@ -216,7 +214,7 @@ pub(crate) fn bignum_montmul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64]) {
 /// z := x / 2^384 mod m, for m = n_384, assuming x reduced
 pub(crate) fn bignum_demont(z: &mut [u64], x: &[u64], m: &[u64]) {
     assert_eq!(m, N);
-    let mut r = fs::fiat_p384_scalar_non_montgomery_domain_field_element([0; 12]);
+    let mut r = fs::fiat_p384_scalar_non_montgomery_domain_field_element([0; LIMBS]);
     fs::fiat_p384_scalar_from_montgomery(&mut r, &fs(x));
     z.copy_from_slice(&join(&r.0));
 }
@@ -224,7 +222,7 @@ pub(crate) fn bignum_demont(z: &mut [u64], x: &[u64], m: &[u64]) {
 /// z := (x + y) mod m, for m = n_384, assuming x and y reduced
 pub(crate) fn bignum_modadd(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64]) {
     assert_eq!(m, N);
-    let mut r = Fs([0; 12]);
+    let mut r = Fs([0; LIMBS]);
     fs::fiat_p384_scalar_add(&mut r, &fs(x), &fs(y));
     z.copy_from_slice(&join(&r.0));
 }
@@ -235,7 +233,7 @@ pub(crate) fn bignum_modadd(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64]) {
 pub(crate) fn bignum_modinv(z: &mut [u64], a: &[u64], b: &[u64], _t: &mut [u64]) {
     assert_eq!(b, N);
     let a = reduce(split(a.try_into().unwrap()), &split(&N));
-    let mut a_mont = Fs([0; 12]);
+    let mut a_mont = Fs([0; LIMBS]);
     fs::fiat_p384_scalar_to_montgomery(
         &mut a_mont,
         &fs::fiat_p384_scalar_non_montgomery_domain_field_element(a),
@@ -250,9 +248,9 @@ pub(crate) fn bignum_modinv(z: &mut [u64], a: &[u64], b: &[u64], _t: &mut [u64])
 pub(crate) fn bignum_montifier(z: &mut [u64], m: &[u64], _t: &mut [u64]) {
     assert_eq!(m, N);
     // to_montgomery multiplies by 2^384, so this is 2^384 * (2^384 mod n).
-    let mut one = Fs([0; 12]);
+    let mut one = Fs([0; LIMBS]);
     fs::fiat_p384_scalar_set_one(&mut one);
-    let mut r = Fs([0; 12]);
+    let mut r = Fs([0; LIMBS]);
     fs::fiat_p384_scalar_to_montgomery(
         &mut r,
         &fs::fiat_p384_scalar_non_montgomery_domain_field_element(one.0),
@@ -297,7 +295,7 @@ fn fe_invert(x: &Fe) -> Fe {
 ///
 /// The exponent picks the table entries, so it must not be secret.
 fn fs_pow(x: &Fs, e: &[u64; 6]) -> Fs {
-    let mut one = Fs([0; 12]);
+    let mut one = Fs([0; LIMBS]);
     fs::fiat_p384_scalar_set_one(&mut one);
     let mut table = [one; 16];
     for i in 1..table.len() {
@@ -319,7 +317,7 @@ fn fs_pow(x: &Fs, e: &[u64; 6]) -> Fs {
 /// `x - m` if that does not borrow, else `x`.
 ///
 /// This fully reduces any `x < 2 * m`.
-fn reduce(x: [u32; 12], m: &[u32; 12]) -> [u32; 12] {
+pub(super) fn reduce(x: [Limb; LIMBS], m: &[Limb; LIMBS]) -> [Limb; LIMBS] {
     subtract_if_above(&x, 0, m)
 }
 
@@ -331,18 +329,8 @@ fn fs(x: &[u64]) -> Fs {
     Fs(split(x.try_into().unwrap()))
 }
 
-/// `x * y / 2^384 mod p_384`, for `x` and `y` below p.
-fn fe_mul(x: &Fe, y: &Fe) -> Fe {
-    Fe(reduce_p(&mul_wide(&x.0, &y.0)))
-}
-
-/// `x^2 / 2^384 mod p_384`, for `x` below p.
-fn fe_sqr(x: &Fe) -> Fe {
-    Fe(reduce_p(&sqr_wide(&x.0)))
-}
-
 fn fe_add(x: &Fe, y: &Fe) -> Fe {
-    let mut r = Fe([0; 12]);
+    let mut r = Fe([0; LIMBS]);
     fp::fiat_p384_add(&mut r, x, y);
     r
 }
@@ -352,13 +340,13 @@ fn fe_double(x: &Fe) -> Fe {
 }
 
 fn fe_sub(x: &Fe, y: &Fe) -> Fe {
-    let mut r = Fe([0; 12]);
+    let mut r = Fe([0; LIMBS]);
     fp::fiat_p384_sub(&mut r, x, y);
     r
 }
 
-fn fe_to_mont(x: &[u32; 12]) -> Fe {
-    let mut r = Fe([0; 12]);
+fn fe_to_mont(x: &[Limb; LIMBS]) -> Fe {
+    let mut r = Fe([0; LIMBS]);
     fp::fiat_p384_to_montgomery(
         &mut r,
         &fp::fiat_p384_non_montgomery_domain_field_element(*x),
@@ -366,184 +354,39 @@ fn fe_to_mont(x: &[u32; 12]) -> Fe {
     r
 }
 
-/// `x * y / 2^384 mod n_384`, for `x` and `y` below n.
-fn fs_mul(x: &Fs, y: &Fs) -> Fs {
-    Fs(reduce_n(&mul_wide(&x.0, &y.0)))
-}
-
-/// `x^2 / 2^384 mod n_384`, for `x` below n.
-fn fs_sqr(x: &Fs) -> Fs {
-    Fs(reduce_n(&sqr_wide(&x.0)))
-}
-
-/// The 768-bit `x * y`, a row of `x * y[i]` at a time.
-fn mul_wide(x: &[u32; 12], y: &[u32; 12]) -> [u32; 24] {
-    let mut t = [0; 24];
-    mul_row::<0>(&mut t, x, y[0]);
-    mul_row::<1>(&mut t, x, y[1]);
-    mul_row::<2>(&mut t, x, y[2]);
-    mul_row::<3>(&mut t, x, y[3]);
-    mul_row::<4>(&mut t, x, y[4]);
-    mul_row::<5>(&mut t, x, y[5]);
-    mul_row::<6>(&mut t, x, y[6]);
-    mul_row::<7>(&mut t, x, y[7]);
-    mul_row::<8>(&mut t, x, y[8]);
-    mul_row::<9>(&mut t, x, y[9]);
-    mul_row::<10>(&mut t, x, y[10]);
-    mul_row::<11>(&mut t, x, y[11]);
-    t
-}
-
-/// Adds `x * yi` to `t` at word `I`, where words `I + 12` and up are zero.
-///
-/// Each row is its own instance, so LLVM unrolls all twelve.
-fn mul_row<const I: usize>(t: &mut [u32; 24], x: &[u32; 12], yi: u32) {
-    let mut carry = 0;
-    for (j, x) in x.iter().enumerate() {
-        (t[I + j], carry) = mul_add(*x, yi, t[I + j], carry);
-    }
-    t[I + 12] = carry;
-}
-
-/// The 768-bit `x^2`: each product of two different words once, doubled,
-/// plus the square of each word.
-fn sqr_wide(x: &[u32; 12]) -> [u32; 24] {
-    let mut t = [0; 24];
-    sqr_row::<0>(&mut t, x);
-    sqr_row::<1>(&mut t, x);
-    sqr_row::<2>(&mut t, x);
-    sqr_row::<3>(&mut t, x);
-    sqr_row::<4>(&mut t, x);
-    sqr_row::<5>(&mut t, x);
-    sqr_row::<6>(&mut t, x);
-    sqr_row::<7>(&mut t, x);
-    sqr_row::<8>(&mut t, x);
-    sqr_row::<9>(&mut t, x);
-    sqr_row::<10>(&mut t, x);
-
-    // The products sum to below 2^767, so doubling them cannot overflow.
-    for k in (1..24).rev() {
-        t[k] = (t[k] << 1) | (t[k - 1] >> 31);
-    }
-    t[0] <<= 1;
-
-    let mut carry = 0;
-    for (i, x) in x.iter().enumerate() {
-        let (lo, hi) = mul_add(*x, *x, t[2 * i], carry);
-        t[2 * i] = lo;
-        (t[2 * i + 1], carry) = add(t[2 * i + 1], hi, 0);
-    }
-    t
-}
-
-/// Adds `x[I + 1..] * x[I]` to `t` at word `2I + 1`, where words `I + 12`
-/// and up are zero.
-fn sqr_row<const I: usize>(t: &mut [u32; 24], x: &[u32; 12]) {
-    let mut carry = 0;
-    for j in I + 1..12 {
-        (t[I + j], carry) = mul_add(x[j], x[I], t[I + j], carry);
-    }
-    t[I + 12] = carry;
-}
-
-/// `t / 2^384 mod p_384`, for `t` below 2^384 p, by Montgomery reduction.
-///
-/// p is 2^384 - 2^128 - 2^96 + 2^32 - 1, so -p^-1 mod 2^32 is 1, and step
-/// i adds `m p 2^(32i)` for word i's value m, which zeroes it: m added at
-/// words i + 1 and i + 12, and subtracted at i + 3 and i + 4.  Those gather
-/// in signed 64-bit columns, each carried into the next only when its step
-/// reaches it, so no carry chain runs across another.  Column k holds its
-/// word of t, two words added and two subtracted, and a carry of -2 to 3
-/// from column k - 1, so it stays within [-2^33, 3 * 2^32] and carries -2
-/// to 3 itself.  The result is below 2p < 2^385.
-fn reduce_p(t: &[u32; 24]) -> [u32; 12] {
-    let mut col = t.map(i64::from);
-    for i in 0..12 {
-        let m = i64::from(col[i] as u32);
-        col[i + 1] = col[i + 1].wrapping_add(col[i] >> 32).wrapping_add(m);
-        col[i + 3] = col[i + 3].wrapping_sub(m);
-        col[i + 4] = col[i + 4].wrapping_sub(m);
-        col[i + 12] = col[i + 12].wrapping_add(m);
-    }
-
-    let mut r = [0; 12];
-    let mut carry = 0i64;
-    for (r, col) in r.iter_mut().zip(&col[12..]) {
-        let s = col.wrapping_add(carry);
-        *r = s as u32;
-        carry = s >> 32;
-    }
-    subtract_if_above(&r, carry as u32, &split(&P))
-}
-
-/// `t / 2^384 mod n_384`, for `t` below 2^384 n, by Montgomery reduction:
-/// step i adds the multiple of `n 2^(32i)` that zeroes word i.  The running
-/// value stays below 2^768 + 2^384 n, so the 24 words and a carry above
-/// them hold it, and the result is below 2n.
-fn reduce_n(t: &[u32; 24]) -> [u32; 12] {
-    let n = split(&N);
-    let mut t = *t;
-    let mut top = 0;
-    for i in 0..12 {
-        let m = t[i].wrapping_mul(N_INV_NEG);
-        let (_, mut carry) = mul_add(m, n[0], t[i], 0);
-        for j in 1..12 {
-            (t[i + j], carry) = mul_add(m, n[j], t[i + j], carry);
-        }
-        (t[i + 12], top) = add(t[i + 12], carry, top);
-    }
-    let (_, hi) = t.split_at(12);
-    subtract_if_above(hi.try_into().unwrap(), top, &n)
-}
-
 /// `x + 2^384 top - m` if that is not negative, else `x`, for `x + 2^384
 /// top` below 2m.
-fn subtract_if_above(x: &[u32; 12], top: u32, m: &[u32; 12]) -> [u32; 12] {
+pub(super) fn subtract_if_above(x: &[Limb; LIMBS], top: Limb, m: &[Limb; LIMBS]) -> [Limb; LIMBS] {
     let (diff, borrow) = sub(x, m);
-    let mut r = [0u32; 12];
+    let mut r = [0; LIMBS];
     fp::fiat_p384_selectznz(&mut r, opaque(borrow & !(top as u8)), &diff, x);
     r
 }
 
 /// `x - y` and its borrow out.
-fn sub(x: &[u32; 12], y: &[u32; 12]) -> ([u32; 12], u8) {
-    let mut diff = [0u32; 12];
+fn sub(x: &[Limb; LIMBS], y: &[Limb; LIMBS]) -> ([Limb; LIMBS], u8) {
+    let mut diff = [0; LIMBS];
     let mut borrow = 0;
     for ((d, x), y) in diff.iter_mut().zip(x).zip(y) {
-        let b = borrow;
-        fp::fiat_p384_subborrowx_u32(d, &mut borrow, b, *x, *y);
+        let t = Wide::from(*x)
+            .wrapping_sub(Wide::from(*y))
+            .wrapping_sub(borrow);
+        *d = t as Limb;
+        borrow = t >> (Wide::BITS - 1);
     }
-    (diff, borrow)
-}
-
-/// `a * b + c + d` as its low and high words, which cannot overflow: one
-/// `umaal`, which carries in its 64-bit sum rather than the flags.
-fn mul_add(a: u32, b: u32, c: u32, d: u32) -> (u32, u32) {
-    let s = u64::from(a)
-        .wrapping_mul(u64::from(b))
-        .wrapping_add(u64::from(c))
-        .wrapping_add(u64::from(d));
-    (s as u32, (s >> 32) as u32)
-}
-
-/// `a + b + c` as its low and high words.
-fn add(a: u32, b: u32, c: u32) -> (u32, u32) {
-    let s = u64::from(a)
-        .wrapping_add(u64::from(b))
-        .wrapping_add(u64::from(c));
-    (s as u32, (s >> 32) as u32)
+    (diff, borrow as u8)
 }
 
 /// 1 if `x` is nonzero, else 0.
 fn nonzero(x: &Fe) -> u8 {
     let mut any = 0;
     fp::fiat_p384_nonzero(&mut any, &x.0);
-    opaque(((any | any.wrapping_neg()) >> 31) as u8)
+    opaque(((any | any.wrapping_neg()) >> (Limb::BITS - 1)) as u8)
 }
 
 /// `if_nonzero` if `flag` is 1, else `if_zero`.
 fn select(flag: u8, if_zero: &Fe, if_nonzero: &Fe) -> Fe {
-    let mut r = Fe([0; 12]);
+    let mut r = Fe([0; LIMBS]);
     fp::fiat_p384_selectznz(&mut r.0, flag, &if_zero.0, &if_nonzero.0);
     r
 }
@@ -573,24 +416,22 @@ fn point(x: &Fe, y: &Fe, z: &Fe) -> [u64; 18] {
     r
 }
 
-fn split(x: &[u64; 6]) -> [u32; 12] {
-    let mut r = [0u32; 12];
-    for (pair, word) in r.as_chunks_mut::<2>().0.iter_mut().zip(x) {
-        *pair = [*word as u32, (word >> 32) as u32];
-    }
-    r
+/// `x`'s limbs, low first.
+pub(super) fn split(x: &[u64; 6]) -> [Limb; LIMBS] {
+    core::array::from_fn(|i| (x[i * 6 / LIMBS] >> (Limb::BITS as usize * i % 64)) as Limb)
 }
 
-fn join(x: &[u32; 12]) -> [u64; 6] {
+/// The words of `x`'s limbs, low first.
+fn join(x: &[Limb; LIMBS]) -> [u64; 6] {
     let mut r = [0u64; 6];
-    for (word, pair) in r.iter_mut().zip(x.as_chunks::<2>().0) {
-        *word = u64::from(pair[0]) | (u64::from(pair[1]) << 32);
+    for (i, limb) in x.iter().enumerate() {
+        r[i * 6 / LIMBS] |= u64::from(*limb) << (Limb::BITS as usize * i % 64);
     }
     r
 }
 
 /// p_384, as little-endian words.
-const P: [u64; 6] = [
+pub(super) const P: [u64; 6] = [
     0x0000_0000_ffff_ffff,
     0xffff_ffff_0000_0000,
     0xffff_ffff_ffff_fffe,
@@ -600,7 +441,7 @@ const P: [u64; 6] = [
 ];
 
 /// n_384, the group order, as little-endian words.
-pub(super) const N: [u64; 6] = [
+pub(crate) const N: [u64; 6] = [
     0xecec_196a_ccc5_2973,
     0x581a_0db2_48b0_a77a,
     0xc763_4d81_f437_2ddf,
@@ -608,9 +449,6 @@ pub(super) const N: [u64; 6] = [
     0xffff_ffff_ffff_ffff,
     0xffff_ffff_ffff_ffff,
 ];
-
-/// -n_384^-1 mod 2^32.
-const N_INV_NEG: u32 = 0xe88f_dc45;
 
 const N_MINUS_2: [u64; 6] = [
     0xecec_196a_ccc5_2971,
@@ -620,70 +458,6 @@ const N_MINUS_2: [u64; 6] = [
     0xffff_ffff_ffff_ffff,
     0xffff_ffff_ffff_ffff,
 ];
-
-/// Checks rind's Montgomery multiplication and squaring against
-/// fiat-crypto's, on every target, since armv7 compiles them to different
-/// instructions.
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod fiat_tests {
-    use proptest::prelude::*;
-
-    use super::*;
-
-    /// A value below `m`, from words that are mostly all zeros or all ones,
-    /// to run the carries the length of the value, or random.
-    fn below(m: [u64; 6]) -> impl Strategy<Value = [u32; 12]> {
-        let word = prop_oneof![
-            Just(0),
-            Just(1),
-            Just(u32::MAX - 1),
-            Just(u32::MAX),
-            Just(1 << 31),
-            any::<u32>(),
-        ];
-        let edges = prop_oneof![
-            Just(add_small(m, -1)),
-            Just(add_small(m, -2)),
-            Just([0, 0, 0, 0, 0, 1 << 63]),
-        ];
-        // Every 384-bit value is below 2m, so one subtraction reduces it.
-        prop_oneof![
-            4 => any::<[u32; 12]>(),
-            4 => proptest::array::uniform12(word),
-            1 => edges.prop_map(|x| split(&x)),
-        ]
-        .prop_map(move |x| reduce(x, &split(&m)))
-    }
-
-    /// `x + d`, for a low word that neither carries nor borrows.
-    fn add_small(mut x: [u64; 6], d: i64) -> [u64; 6] {
-        x[0] = x[0].checked_add_signed(d).unwrap();
-        x
-    }
-
-    proptest! {
-        #[test]
-        fn field(x in below(P), y in below(P)) {
-            let (x, y) = (Fe(x), Fe(y));
-            let mut want = Fe([0; 12]);
-            fp::fiat_p384_mul(&mut want, &x, &y);
-            prop_assert_eq!(fe_mul(&x, &y).0, want.0);
-            fp::fiat_p384_square(&mut want, &x);
-            prop_assert_eq!(fe_sqr(&x).0, want.0);
-        }
-
-        #[test]
-        fn scalar(x in below(N), y in below(N)) {
-            let (x, y) = (Fs(x), Fs(y));
-            let mut want = Fs([0; 12]);
-            fs::fiat_p384_scalar_mul(&mut want, &x, &y);
-            prop_assert_eq!(fs_mul(&x, &y).0, want.0);
-            fs::fiat_p384_scalar_square(&mut want, &x);
-            prop_assert_eq!(fs_sqr(&x).0, want.0);
-        }
-    }
-}
 
 /// Checks each routine word for word against s2n-bignum's.
 ///
@@ -955,9 +729,9 @@ mod tests {
     // drop it.
     #[test]
     fn nonzero_at_the_top_bit() {
-        let mut x = Fe([0; 12]);
+        let mut x = Fe([0; LIMBS]);
         assert_eq!(nonzero(&x), 0);
-        x.0[11] = 0x8000_0000;
+        x.0[LIMBS - 1] = 1 << (Limb::BITS - 1);
         assert_eq!(nonzero(&x), 1);
         assert_eq!(mask_nonzero(0), 0);
         assert_eq!(mask_nonzero(1 << 63), u64::MAX);

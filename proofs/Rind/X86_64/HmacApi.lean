@@ -136,11 +136,6 @@ theorem sign_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (key : List Byte)
   rw [he, bind_ok]
   exact this
 
-theorem bv_inj (x y : List U8) : bv x = bv y ↔ x = y := by
-  constructor
-  · intro h; rw [← ofBv_bv x, ← ofBv_bv y, h]
-  · intro h; rw [h]
-
 /-- Every hash's routines need the entry guard held, which `ct_equal` checks. -/
 theorem RunsHmac.held {a : high.hmac.Algorithm} (hr : RunsHmac a) :
     low.entry.Entry.assert_held = ok () := by

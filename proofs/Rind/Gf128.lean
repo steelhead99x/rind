@@ -527,4 +527,146 @@ theorem powers_spec (h : BitVec 128) :
     rfl
   exact ⟨p1, p2, p3, p4, p5, p6⟩
 
+
+/-! ## Products summed before one reduction
+
+`_mul8`, `ClmulTable::add_tail`, and `mul_h` XOR several Karatsuba products'
+terms together and reduce once, `reduceModel`. The reduction is linear, so the
+result is the sum of the products' own reductions (`reduce_sum`), and a
+product of data with a shifted key is Vale's `gf128_mul_rev` of the data and
+the unshifted key (`mul_data`). -/
+
+/-- `reduce!`: the low, middle, and high Karatsuba terms `l`, `m`, and `h`
+folded twice by the reflected modulus. -/
+def reduceModel (l m h : BitVec 128) : BitVec 128 :=
+  let mi5 := m ^^^ l ^^^ h ^^^ swap l ^^^ clmul c64 (lo l)
+  h ^^^ swap mi5 ^^^ clmul c64 (lo mi5)
+
+/-- `mul!`'s three Karatsuba terms of `a` times `b`, given `b`'s halves XORed. -/
+def karaTerms (a b : BitVec 128) : BitVec 128 × BitVec 128 × BitVec 128 :=
+  (clmul (lo a) (lo b), clmul (lo (swap a ^^^ a)) (lo (swap b ^^^ b)), clmul (hi a) (hi b))
+
+theorem mulModel_eq_reduce (a b : BitVec 128) :
+    mulModel a b = reduceModel (karaTerms a b).1 (karaTerms a b).2.1 (karaTerms a b).2.2 := rfl
+
+/-- The product Karatsuba terms stand for. -/
+noncomputable def kara (l m h : BitVec 128) : P :=
+  toPoly l + X ^ 64 * (toPoly m + toPoly l + toPoly h) + X ^ 128 * toPoly h
+
+theorem kara_xor (l m h l' m' h' : BitVec 128) :
+    kara (l ^^^ l') (m ^^^ m') (h ^^^ h') = kara l m h + kara l' m' h' := by
+  simp only [kara, toPoly_xor]; ring
+
+theorem kara_karaTerms (a b : BitVec 128) :
+    kara (karaTerms a b).1 (karaTerms a b).2.1 (karaTerms a b).2.2 = toPoly a * toPoly b := by
+  have hs : ∀ x : BitVec 128, toPoly (lo (swap x ^^^ x)) = toPoly (hi x) + toPoly (lo x) := by
+    intro x; rw [lo_xor, swap, lo_append, toPoly_xor]
+  simp only [kara, karaTerms, toPoly_clmul, hs]
+  rw [toPoly_halves a, toPoly_halves b]
+  linear_combination (X ^ 64 * (toPoly (lo a) * toPoly (lo b) + toPoly (hi a) * toPoly (hi b))) *
+    two_eq_zero_P
+
+theorem reduce_spec (l m h : BitVec 128) :
+    ∃ S, kara l m h + X ^ 128 * toPoly (reduceModel l m h) = Q * S := by
+  have hl := toPoly_halves l
+  have hm : toPoly (lo (m ^^^ l ^^^ h ^^^ swap l ^^^ clmul c64 (lo l))) +
+      X ^ 64 * toPoly (hi (m ^^^ l ^^^ h ^^^ swap l ^^^ clmul c64 (lo l))) =
+      toPoly m + toPoly l + toPoly h + (toPoly (hi l) + X ^ 64 * toPoly (lo l)) +
+        (X ^ 63 + X ^ 62 + X ^ 57) * toPoly (lo l) := by
+    rw [← toPoly_halves]; simp only [toPoly_xor, swap, toPoly_append, toPoly_clmul, toPoly_c64]
+  have hr : toPoly (reduceModel l m h) = toPoly h +
+      (toPoly (hi (m ^^^ l ^^^ h ^^^ swap l ^^^ clmul c64 (lo l))) +
+        X ^ 64 * toPoly (lo (m ^^^ l ^^^ h ^^^ swap l ^^^ clmul c64 (lo l)))) +
+      (X ^ 63 + X ^ 62 + X ^ 57) * toPoly (lo (m ^^^ l ^^^ h ^^^ swap l ^^^ clmul c64 (lo l))) := by
+    simp only [reduceModel, toPoly_xor, swap, toPoly_append, toPoly_clmul, toPoly_c64]
+  generalize toPoly (lo (m ^^^ l ^^^ h ^^^ swap l ^^^ clmul c64 (lo l))) = m0 at hm hr
+  generalize toPoly (hi (m ^^^ l ^^^ h ^^^ swap l ^^^ clmul c64 (lo l))) = m1 at hm hr
+  refine ⟨toPoly (lo l) + X ^ 64 * m0, ?_⟩
+  rw [hr]
+  unfold kara Q
+  linear_combination X ^ 64 * hm + hl + (X ^ 64 * toPoly m + X ^ 64 * toPoly l + X ^ 64 * toPoly h +
+    X ^ 128 * toPoly h - X ^ 64 * m0 + X ^ 64 * toPoly (hi l)) * two_eq_zero_P
+
+/-- The reflected modulus divides nothing of degree below 128 times a power
+of `X` but zero, as it is coprime to `X`. -/
+theorem Q_dvd_of_X_pow_mul {E : P} : ∀ n, Q ∣ X ^ n * E → Q ∣ E
+  | 0, h => by simpa using h
+  | n + 1, h => by
+    refine Q_dvd_of_X_pow_mul n ?_
+    obtain ⟨S, hS⟩ := h
+    have hQ : Q = X * (X ^ 127 + X ^ 126 + X ^ 125 + X ^ 120) + 1 := by unfold Q; ring
+    exact ⟨X ^ n * E - (X ^ 127 + X ^ 126 + X ^ 125 + X ^ 120) * S, by
+      linear_combination (-(X ^ 127 + X ^ 126 + X ^ 125 + X ^ 120)) * hS + (-(X ^ n * E)) * hQ⟩
+
+/-- A Montgomery residue of degree below 128 is unique. -/
+theorem mont_unique {T R1 R2 S1 S2 : P} (h1 : T + X ^ 128 * R1 = Q * S1) (h2 : T + X ^ 128 * R2 = Q * S2)
+    (s1 : Small R1) (s2 : Small R2) : R1 = R2 := by
+  have hd : Q ∣ X ^ 128 * (R1 - R2) := ⟨S1 - S2, by linear_combination h1 - h2⟩
+  have := Polynomial.eq_zero_of_dvd_of_natDegree_lt (Q_dvd_of_X_pow_mul 128 hd) (by
+    rw [natDegree_Q]
+    exact lt_of_le_of_lt (natDegree_sub_le _ _) (by unfold Small at s1 s2; omega))
+  exact sub_eq_zero.1 this
+
+theorem small_sum (l : List P) (h : ∀ p ∈ l, Small p) : Small l.sum := by
+  induction l with
+  | nil => unfold Small; simp
+  | cons p l ih =>
+    rw [List.sum_cons]
+    exact (natDegree_add_le _ _).trans (max_le (h p (by simp)) (ih fun q hq => h q (by simp [hq])))
+
+/-- Karatsuba terms XORed together reduce to the sum of their products' own
+reductions. -/
+theorem reduce_sum (l m h : BitVec 128) (ps : List (BitVec 128 × BitVec 128))
+    (hk : kara l m h = (ps.map fun p => toPoly p.1 * toPoly p.2).sum) :
+    toPoly (reduceModel l m h) = (ps.map fun p => toPoly (mulModel p.1 p.2)).sum := by
+  obtain ⟨S, hS⟩ := reduce_spec l m h
+  have each : ∀ ps : List (BitVec 128 × BitVec 128), ∃ S',
+      (ps.map fun p => toPoly p.1 * toPoly p.2).sum + X ^ 128 * (ps.map fun p => toPoly (mulModel p.1 p.2)).sum =
+        Q * S' := by
+    intro ps
+    induction ps with
+    | nil => exact ⟨0, by simp⟩
+    | cons p ps ih =>
+      obtain ⟨S1, h1⟩ := ih
+      obtain ⟨S2, h2⟩ := mulModel_spec p.1 p.2
+      exact ⟨S1 + S2, by simp only [List.map_cons, List.sum_cons]; linear_combination h1 + h2⟩
+  obtain ⟨S', hS'⟩ := each ps
+  rw [hk] at hS
+  exact mont_unique hS hS' (small_toPoly _)
+    (small_sum _ fun q hq => by obtain ⟨p, -, rfl⟩ := List.mem_map.1 hq; exact small_toPoly _)
+
+/-- rind's multiply of data `a` by a shifted key is Vale's `gf128_mul_rev` of
+the data and the unshifted key. -/
+theorem mul_data (a b : BitVec 128) (y : P) (hy : Small y)
+    (hb : toPoly b = shiftKey1 128 gf128ModulusLowTerms y) :
+    toPoly (mulModel a b) = gf128MulRev (toPoly a) y := by
+  set x := toPoly a
+  have hx : Small x := small_toPoly a
+  have hw : gf128MulRev x y = reflect 127 (gf128Mul (reverse x 127) (reverse y 127)) :=
+    reverse_eq_reflect (small_mod _)
+  have e1 := reflect_mont _ _ _ (small_toPoly a) (small_toPoly b) (small_toPoly _) (mulModel_spec a b)
+  rw [hb] at e1
+  have e3 := dvd_trans (dvd_mul_left gf128Modulus (C (y.coeff 127))) (shiftKey_reflect y hy).symm.dvd
+  have e5 : gf128Modulus ∣ gf128Mul (reverse x 127) (reverse y 127) - reverse x 127 * reverse y 127 := by
+    have := modByMonic_add_div (reverse x 127 * reverse y 127) gf128Modulus
+    exact ⟨-(reverse x 127 * reverse y 127 /ₘ gf128Modulus), by
+      unfold gf128Mul; linear_combination this⟩
+  rw [reverse_eq_reflect hx, reverse_eq_reflect hy] at e5 hw
+  rw [← AdjoinRoot.mk_eq_zero] at e1 e3 e5
+  simp only [map_add, map_mul, map_sub] at e1 e3 e5
+  set m := AdjoinRoot.mk gf128Modulus
+  have key : m (reflect 127 (toPoly (mulModel a b)) - gf128Mul (reflect 127 x) (reflect 127 y)) = 0 := by
+    rw [map_sub]
+    linear_combination e1 - m (reflect 127 x) * e3 - e5
+  rw [AdjoinRoot.mk_eq_zero] at key
+  have := eq_of_dvd (small_reflect (small_toPoly _)) (small_mod _) key
+  rw [hw, show gf128Mul (reflect 127 x) (reflect 127 y) = _ from this.symm, reflect_reflect]
+
+theorem mulRev_add_left (a b c : P) : gf128MulRev (a + b) c = gf128MulRev a c + gf128MulRev b c := by
+  have hr : ∀ p q : P, reverse (p + q) 127 = reverse p 127 + reverse q 127 := by
+    intro p q; ext j; simp only [coeff_reverse, coeff_add]; split_ifs <;> simp
+  simp only [gf128MulRev, gf128Mul, hr, add_mul]
+  rw [← hr]; congr 1
+  exact Polynomial.add_modByMonic _ _
+
 end rind.vale
