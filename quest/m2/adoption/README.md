@@ -13,8 +13,8 @@ Decided with the maintainer on 2026-11-04, in a planning interview. Settled;
 don't ask again (✅ is the chosen option):
 
 - Milestone: m2 ✅ / m3.
-- Targets: rind-str0m, provider-neutral hooks (quinn, opendal), rustls's
-  provider list and 0.24, Bun, Python, and Dart ✅. Node, React Native, Go, Java, .NET,
+- Targets: rind-str0m, opendal's provider-neutral hook, rustls 0.24,
+  Python, and Dart ✅. Node, React Native, Go, Java, .NET,
   Swift, Zig, and C libraries are out: they need OpenSSL's breadth or FIPS,
   which [m4](/quest/m4/README.md) holds, and rind wins there only on
   asymmetric ECC.
@@ -37,8 +37,10 @@ don't ask again (✅ is the chosen option):
 - Patches and issues to downstream projects: drop them and let projects pull
   rind themselves ✅ (rejected: keep preparing them). The maintainer dropped
   llrt, rusty-s3, librespot, Lemmy, tailscale-rs, and Apache Iggy on
-  2026-11-07, and Deno and str0m's upstream fixes on 2026-11-09; Bun and
-  rustls's provider list stay.
+  2026-11-07, and Deno and str0m's upstream fixes on 2026-11-09. Decided
+  2026-11-11 (maintainer, /quest-unblock): rind files no upstream PRs to get
+  itself adopted, so quinn's provider-neutral PR, rustls's provider list, and
+  Bun (asymmetric crypto and SHA-3) are dropped too (rejected: keep them).
 - No rind-graviola ✅: build it only if big crates use graviola directly.
   None does; every notable graviola user (llrt, rusty-s3, wtx, oxish) picks it
   with an optional feature, and `[patch]` cannot swap in a crate of another
