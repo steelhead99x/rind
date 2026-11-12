@@ -93,18 +93,12 @@ impl AlgorithmId {
 /// An ML-DSA verification algorithm.
 #[derive(Debug, Eq, PartialEq)]
 pub struct PqdsaVerificationAlgorithm {
-    id: &'static AlgorithmId,
-}
-
-impl PqdsaVerificationAlgorithm {
-    fn id(&self) -> AlgorithmId {
-        *self.id
-    }
+    id: AlgorithmId,
 }
 
 impl signature::private::Verify for PqdsaVerificationAlgorithm {
     fn parse(&self, public_key: &[u8]) -> Result<rind::signature::PublicKey, KeyRejected> {
-        let algorithm = self.id().verify();
+        let algorithm = self.id.verify();
         // aws-lc-rs tries a `SubjectPublicKeyInfo` first, then the raw key.
         // A raw key has this parameter set's length. Any other length makes
         // the raw parse fail with `Unspecified`, and that error replaces the
@@ -112,7 +106,7 @@ impl signature::private::Verify for PqdsaVerificationAlgorithm {
         if let Ok(key) = rind::signature::PublicKey::from_spki(algorithm, public_key) {
             return Ok(key);
         }
-        if public_key.len() == self.id().public_key_len() {
+        if public_key.len() == self.id.public_key_len() {
             return rind::signature::PublicKey::new(algorithm, public_key)
                 .map_err(KeyRejected::rind);
         }
@@ -149,39 +143,39 @@ impl PqdsaSigningAlgorithm {
     /// The signature's length, in bytes.
     #[must_use]
     pub fn signature_len(&self) -> usize {
-        self.0.id().signature_len()
+        self.0.id.signature_len()
     }
 
     /// The raw public key's length, in bytes.
     #[must_use]
     pub fn public_key_len(&self) -> usize {
-        self.0.id().public_key_len()
+        self.0.id.public_key_len()
     }
 
     /// The seed's length, in bytes. Every ML-DSA parameter set uses 32.
     #[must_use]
     pub fn seed_len(&self) -> usize {
-        self.0.id().seed_len()
+        self.0.id.seed_len()
     }
 
     fn id(&self) -> AlgorithmId {
-        self.0.id()
+        self.0.id
     }
 }
 
 /// Verification of ML-DSA-44 signatures.
 pub const ML_DSA_44: PqdsaVerificationAlgorithm = PqdsaVerificationAlgorithm {
-    id: &AlgorithmId::ML_DSA_44,
+    id: AlgorithmId::ML_DSA_44,
 };
 
 /// Verification of ML-DSA-65 signatures.
 pub const ML_DSA_65: PqdsaVerificationAlgorithm = PqdsaVerificationAlgorithm {
-    id: &AlgorithmId::ML_DSA_65,
+    id: AlgorithmId::ML_DSA_65,
 };
 
 /// Verification of ML-DSA-87 signatures.
 pub const ML_DSA_87: PqdsaVerificationAlgorithm = PqdsaVerificationAlgorithm {
-    id: &AlgorithmId::ML_DSA_87,
+    id: AlgorithmId::ML_DSA_87,
 };
 
 /// Signing with ML-DSA-44.
@@ -491,7 +485,7 @@ impl AsDer<Pkcs8V1Der<'static>> for PqdsaPrivateKey<'_> {
 
 impl fmt::Debug for PqdsaPrivateKey<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PqdsaPrivateKey({:?})", self.0.algorithm.0.id())
+        write!(f, "PqdsaPrivateKey({:?})", self.0.algorithm.id())
     }
 }
 
