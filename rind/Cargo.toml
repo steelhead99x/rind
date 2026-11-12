@@ -76,6 +76,10 @@ fips205 = "0.5"
 # Encodes RustCrypto's SLH-DSA keys.
 pkcs8 = { version = "0.11", default-features = false, features = ["alloc"] }
 slh-dsa = "=0.2.0-rc.5"
+# ECVRF, which aws-lc-rs does not offer: key transparency's `akd` for
+# Edwards25519, and `vrf-rfc9381` for P-256.
+akd_core = { version = "0.13", default-features = false, features = ["vrf"] }
+vrf-rfc9381 = { version = "0.0.7", default-features = false, features = ["p256"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
@@ -86,6 +90,9 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   "cfg(rind_vartime_planted)",
   # Forces the portable backend, for testing it on x86_64 (see build.rs).
   "cfg(rind_portable)",
+  # Builds the FIPS module's source, which draws every random value from its
+  # DRBG (`src/fips_rng.rs`).
+  "cfg(rind_fips)",
   # curve25519-dalek's backend overrides, which armv7 refuses.
   'cfg(curve25519_dalek_bits, values("32", "64"))',
   'cfg(curve25519_dalek_backend, values("fiat", "serial", "simd", "avx512"))',
