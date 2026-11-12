@@ -24,12 +24,12 @@ mod kx;
 mod sign;
 mod suite;
 
-/// Returns a dimpl [`CryptoProvider`] backed by rind.
+/// Returns a dimpl [`CryptoProvider`] backed by rind, with the same shape as
+/// `dimpl::crypto::aws_lc_rs::default_provider()`.
 ///
-/// It negotiates DTLS 1.2 ECDHE-ECDSA and DTLS 1.3 with AES-128-GCM,
-/// AES-256-GCM, and ChaCha20-Poly1305, over X25519, P-256, and P-384, and
-/// signs with ECDSA P-256 or P-384 keys in PKCS#8 or SEC1, as DER or PEM. It prefers
-/// ChaCha20-Poly1305 where rind runs AES without CPU instructions.
+/// AES-128-CCM-8 is not offered. ChaCha20-Poly1305 comes first where rind
+/// runs AES without CPU instructions. A PEM key whose preamble starts with
+/// `0` is refused.
 pub fn default_provider() -> CryptoProvider {
     let (cipher_suites, dtls13_cipher_suites) = if rind::cpu::has_aes_hardware() {
         (suite::DTLS12, suite::DTLS13)

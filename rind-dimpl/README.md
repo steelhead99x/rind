@@ -17,8 +17,13 @@ let config = dimpl::Config::builder()
 
 Or install it for the process with `dimpl::crypto::CryptoProvider::install_default`.
 
-It negotiates DTLS 1.2 ECDHE-ECDSA and DTLS 1.3 with AES-128-GCM, AES-256-GCM, and ChaCha20-Poly1305, over X25519, P-256, and P-384, and signs with ECDSA P-256 or P-384 keys in PKCS#8 or SEC1, as DER or PEM.
-dimpl's PSK suite, AES-128-CCM-8, is not offered.
-A PEM key whose preamble starts with `0` is refused: that byte is the tag every DER key starts with, and a DER key's later bytes are secret, so rind never searches them for PEM.
+`default_provider()` returns dimpl's `CryptoProvider`, as `dimpl::crypto::aws_lc_rs::default_provider()` does, so swapping one for the other changes no other code. rind cannot back:
+
+- The PSK suite AES-128-CCM-8.
+
+Where it behaves differently:
+
+- ChaCha20-Poly1305 comes first on a CPU where rind runs AES without CPU instructions, for speed.
+- A PEM key whose preamble starts with `0` is refused: that byte is the tag every DER key starts with, and a DER key's later bytes are secret, so rind never searches them for PEM.
 
 License: Apache-2.0 OR ISC OR MIT-0

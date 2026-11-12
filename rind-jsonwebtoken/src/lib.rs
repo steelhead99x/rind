@@ -26,8 +26,7 @@ use rind::signature::{
 };
 use rind::{digest, hmac};
 
-/// The jsonwebtoken [`CryptoProvider`] that signs and verifies every algorithm
-/// with rind.
+/// The jsonwebtoken [`CryptoProvider`], as `jsonwebtoken::crypto::aws_lc::DEFAULT_PROVIDER`.
 pub static DEFAULT_PROVIDER: CryptoProvider = CryptoProvider {
     signer_factory: new_signer,
     verifier_factory: new_verifier,

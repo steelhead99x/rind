@@ -350,13 +350,9 @@ ring has none.
 
 ## Adapter crates
 
-Each `rind-*` crate stands in for a crate's aws-lc-rs or ring backend. rind
-panics on a CPU missing a feature it requires, so every adapter function
-that returns a provider refuses one with the adapter's own
-`MissingFeature` instead, which displays rind's message. rind-rustls, whose
-signatures are rustls's provider's, does not. rind-ring, whose signatures
-are ring's, and rind-rcgen's `KeyPair`, whose errors are rcgen's, cannot.
-Call `rind::cpu::check()` before using them.
+Each published `rind-*` adapter offers the API of the provider its upstream
+ships, so swapping one for the other changes no other code. Its README lists
+only what rind cannot back.
 
 ### rind-ring
 
@@ -403,9 +399,7 @@ as its cipher suite order.
 ### rind-rcgen
 
 `rind_rcgen::KeyPair` offers `rcgen::KeyPair`'s API as rcgen's default `ring`
-backend builds it, so code swaps the type in unchanged. It signs with ECDSA
-P-256 and P-384, Ed25519, and RSA with PKCS#1 v1.5, loading only PKCS#8 keys
-and generating no RSA keys. Its [README](rind-rcgen/README.md) lists what it
+backend builds it, so code swaps the type in unchanged. Its [README](rind-rcgen/README.md) lists what it
 leaves out, such as P-521, which rcgen names only with its `aws_lc_rs` feature.
 
 Without rcgen's `crypto` feature, rcgen needs each certificate's

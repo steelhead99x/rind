@@ -27,12 +27,11 @@ mod dtls;
 mod hash;
 mod srtp;
 
-/// Returns a str0m [`CryptoProvider`] backed by rind.
+/// Returns a str0m [`CryptoProvider`] backed by rind, with the same shape as
+/// `str0m_aws_lc_rs::default_provider()`.
 ///
-/// It protects SRTP with AES-128-CM-HMAC-SHA1-80, AEAD-AES-128-GCM, and
-/// AEAD-AES-256-GCM, signs STUN with HMAC-SHA1, hashes certificate
-/// fingerprints with SHA-1 and SHA-256, and runs DTLS 1.2 and 1.3 through
-/// dimpl on rind-dimpl with a self-signed ECDSA P-256 certificate.
+/// An empty DTLS certificate or a private key dimpl cannot load returns an
+/// error, where str0m-aws-lc-rs lets dimpl panic.
 pub fn default_provider() -> CryptoProvider {
     CryptoProvider {
         srtp_provider: &srtp::SRTP,

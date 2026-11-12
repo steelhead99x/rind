@@ -2,7 +2,7 @@
 //! <img width="40%" align="right" src="https://raw.githubusercontent.com/moq-dev/rind/main/admin/logo.png">
 //!
 //! This crate provides a [`CryptoProvider`] for [object_store](https://github.com/apache/arrow-rs-object-store), backed by [rind](https://github.com/moq-dev/rind/), a fork of [Graviola](https://github.com/ctz/graviola/).
-//! It signs S3, Azure, and GCS requests.
+//! [`default_provider`] returns `Arc<dyn CryptoProvider>`. object_store's own providers are `pub(crate)`.
 //!
 //! Build object_store with its `aws-base`, `azure-base`, or `gcp-base` features rather than `aws`, `azure`, or `gcp`, which also compile aws-lc-rs.
 //! Then hand the provider to each store's builder:

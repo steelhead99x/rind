@@ -5,7 +5,7 @@
 [![Documentation](https://img.shields.io/docsrs/rind-rcgen)](https://docs.rs/rind-rcgen/)
 
 This crate provides rcgen's `KeyPair` for [rcgen](https://github.com/rustls/rcgen), backed by [rind](https://github.com/moq-dev/rind/), a fork of [Graviola](https://github.com/ctz/graviola/).
-It generates and loads ECDSA P-256 and P-384 and Ed25519 keys, and loads RSA keys.
+`KeyPair` has the API rcgen's default `ring` backend builds, so code swaps the type in unchanged.
 
 Build rcgen with `default-features = false` so it compiles no other crypto backend,
 and use `rind_rcgen::KeyPair` where rcgen's `crypto` feature would give `rcgen::KeyPair`.

@@ -13,6 +13,6 @@ rind_jsonwebtoken::DEFAULT_PROVIDER.install_default().unwrap();
 ```
 
 And then use jsonwebtoken as normal.
-It signs and verifies HS256/384/512, ES256/384, RS256/384/512, PS256/384/512, and EdDSA, and implements the key utilities jsonwebtoken needs for JWKs.
+`DEFAULT_PROVIDER` is a `CryptoProvider`, as `jsonwebtoken::crypto::aws_lc::DEFAULT_PROVIDER` is, so swapping one for the other changes no other code.
 
 License: Apache-2.0 OR ISC OR MIT-0
