@@ -258,14 +258,13 @@ fn wide_toggle(detected: bool) -> bool {
 ///
 /// Where the kernel sets `HWCAP_CPUID` (Linux 4.11 and later), it emulates
 /// an `mrs` of `MIDR_EL1`, so naming this core takes a trap rather than a
-/// system call, and a sandbox
-/// whose seccomp filter refuses `openat` still gets an answer. A core that
-/// is not narrow settles it, without opening a file. The register names
+/// system call. A core that is not narrow settles it, without opening a
+/// file. The register names
 /// only the core this thread is on, so a narrow one is checked against
 /// every online core in `/proc/cpuinfo`, and any core there that is not
-/// narrow keeps `_alt`, so on a big.LITTLE chip which core the first call
-/// ran on changes the answer only when the listing cannot be read. Without `HWCAP_CPUID` the listing alone decides. See
-/// `wide_from` for the table. A core hotplugged later is not seen.
+/// narrow keeps `_alt`. A listing that cannot be read keeps `_alt` too, so
+/// which core the first call ran on never changes the answer. Without
+/// `HWCAP_CPUID` the listing alone decides. See `wide_from` for the table. A core hotplugged later is not seen.
 /// Windows on ARM and FreeBSD keep `_alt`. Both schedules are correct on
 /// every core.
 fn detect_wide_multiplier() -> bool {
@@ -290,15 +289,17 @@ fn detect_wide_multiplier() -> bool {
 /// | this core | listing | schedules |
 /// |---|---|---|
 /// | not narrow | not read | `_alt` |
-/// | narrow | all narrow, or `None` | narrow |
-/// | narrow | another core | `_alt` |
+/// | narrow | all narrow | narrow |
+/// | narrow | another core, or `None` | `_alt` |
 /// | unknown | all narrow | narrow |
 /// | unknown | another core, or `None` | `_alt` |
 fn wide_from(this_core: Option<u64>, listing: impl FnOnce() -> Option<bool>) -> bool {
     match this_core {
         Some(midr) if !narrow_midr(midr) => true,
-        Some(_) => listing() == Some(false),
-        None => listing() != Some(true),
+        // Only a listing of narrow cores runs narrow: a narrow core whose
+        // listing cannot be read, as under a sandbox, may share the chip
+        // with a core this crate has not measured.
+        _ => listing() != Some(true),
     }
 }
 
@@ -413,8 +414,7 @@ fn narrow_midr(midr: u64) -> bool {
 /// Qualcomm's Kryo 4xx Gold (`0x51` / `0x804`) is a Cortex-A76 derivative,
 /// but it is not listed: it ships beside Kryo 4xx Silver (`0x805`), a
 /// Cortex-A55, which no one has measured here, so a listing naming both
-/// would keep `_alt` anyway, and a sandboxed process would pick by the
-/// core its first call ran on.
+/// would keep `_alt` anyway.
 fn narrow_part(implementer: Option<u64>, part: Option<u64>) -> bool {
     matches!(
         (implementer, part),
@@ -633,11 +633,11 @@ mod tests {
         for midr in [N2, V1, COBALT_100, M1_FIRESTORM, A55, QEMU_MAX] {
             assert!(wide_from(Some(midr), unread), "{midr:#x}");
         }
-        // A narrow core that every listed core agrees with, or whose
-        // listing cannot be read, as under a sandbox, runs narrow.
+        // A narrow core runs narrow only when every listed core agrees. A
+        // listing that cannot be read, as under a sandbox, keeps `_alt`.
         for midr in [PI5_A76, PI4_A72, ALTRA_N1] {
             assert!(!wide_from(Some(midr), || Some(true)), "{midr:#x}");
-            assert!(!wide_from(Some(midr), || None), "{midr:#x}");
+            assert!(wide_from(Some(midr), || None), "{midr:#x}");
             // big.LITTLE, with this thread on the big core.
             assert!(wide_from(Some(midr), || Some(false)), "{midr:#x}");
         }

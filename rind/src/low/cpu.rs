@@ -35,8 +35,8 @@ pub fn check() -> Result<(), MissingFeature> {
 /// On aarch64 Linux and Android the narrow schedules run only on
 /// Cortex-A72, Cortex-A76, or Neoverse N1. The kernel names the core
 /// through `MIDR_EL1`, which it emulates when it sets `HWCAP_CPUID`, and
-/// `/proc/cpuinfo`, which must name no other core, or, under a sandbox,
-/// may be unreadable when `MIDR_EL1` names a narrow core. Apple's cores,
+/// `/proc/cpuinfo`, which must be readable and name no other core. A
+/// listing that cannot be read, as under a sandbox, keeps `_alt`. Apple's cores,
 /// Neoverse V1, V2, V3, and N2, Cobalt 100, a mixed big.LITTLE system,
 /// and a core this crate does not recognise keep the `_alt` schedules, as
 /// does Windows on ARM. The first call detects this, and no other
