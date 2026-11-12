@@ -28,6 +28,8 @@ proofs/Rind/Aarch64/CtEqual.lean
 proofs/Rind/Aarch64/HmacApi.lean
 proofs/Rind/Aarch64/DigestApi.lean
 proofs/Rind/Aarch64/Hkdf.lean
+proofs/Rind/Aarch64/AesCipher.lean
+proofs/Rind/Aarch64/HkdfAes.lean
 proofs/Rind/Aarch64/Pbkdf2.lean
 proofs/Rind/Aarch64/Sha3.lean
 patch/*/Cargo.lock

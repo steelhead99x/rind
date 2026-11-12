@@ -74,7 +74,7 @@ theorem add_lengths_spec (g : low.x86_64.ghash.Ghash) (t : low.x86_64.ghash.Clmu
       have e8 : (8#u128).val = 8 := rfl
       have em : U128.max = 2 ^ 128 - 1 := by rw [U128.max_eq]; norm_num
       rw [e8, em]; omega
-    simp only [low.x86_64.ghash.u128_to_m128i, core.core_arch.x86.sse2._mm_xor_si128, bind_ok]
+    simp only [u128_to_m128i_eq, core.core_arch.x86.sse2._mm_xor_si128, bind_ok]
     apply WP.spec_bind (mul_h_spec H hH t ht _)
     intro y hy
     rw [WP.spec_ok]
@@ -156,7 +156,7 @@ theorem counter_bits (hLE : Quad32) (l : List (BitVec 8)) (hl : l.length = 12) :
 
 theorem counter_block_eq (hLE : Quad32) (nonce : Std.Array U8 12#usize) :
     ∃ y0, low.x86_64.aes_gcm.counter_block nonce = ok y0 ∧
-      low.x86_64.aes.load y0.val = reverseBytesQuad32 (computeIvBE hLE (nonce.val.map (·.bv))) := by
+      loadBytes y0.val = reverseBytesQuad32 (computeIvBE hLE (nonce.val.map (·.bv))) := by
   simp only [low.x86_64.aes_gcm.counter_block, core.core_arch.x86.sse2._mm_set_epi64x, bind_ok]
   refine ⟨_, rfl, ?_⟩
   rw [load_store]
@@ -224,7 +224,7 @@ theorem tagged_from_spec (ENC : Bool) (hk : low.x86_64.aes.HwKey) (alg : Algorit
     (hkey : HwKeyIs alg kw hk) (t : low.x86_64.ghash.ClmulTable)
     (ht : TableFor (polyLE (aesEncrypt alg kw (mkfour 0 0 0 0))) t) (table : low.x86_64.ghash.GhashTable)
     (hg : By8Of table t) (j0 : Quad32) (y0 : Std.Array U8 16#usize)
-    (hy : low.x86_64.aes.load y0.val = reverseBytesQuad32 j0) (aad inout : Slice U8) (hin : inout.length < 2 ^ 61) :
+    (hy : loadBytes y0.val = reverseBytesQuad32 j0) (aad inout : Slice U8) (hin : inout.length < 2 ^ 61) :
     low.x86_64.aes_gcm.tagged_from ENC (.Hw hk) table y0 aad inout ⦃ r =>
       r.2.length = inout.length ∧
       bvs r.2.val = gctrEncrypt (inc32 j0 1) (bvs inout.val) alg kw ∧
@@ -320,7 +320,7 @@ def RunsClmulAesGcm : Prop :=
   low.x86_64.cpu.HaveAvxMovbeForAesGcm.check = ok none ∧
   low.entry.Entry.assert_held = ok ()
 
-theorem RunsClmulAesGcm.aesNi (h : RunsClmulAesGcm) : RunsAesNi :=
+theorem RunsClmulAesGcm.aesNi (h : RunsClmulAesGcm) : RunsAesHw :=
   ⟨h.1, h.2.1, h.2.2.1⟩
 
 /-- An AES-GCM key on rind's SSE tier, for the AES key `kw` and `alg`: FIPS
@@ -346,7 +346,7 @@ theorem aes_gcm_new_clmul_spec (h : RunsClmulAesGcm) (alg : Algorithm) (key : Sl
   apply WP.spec_bind hkey
   rintro _ ⟨hwk, rfl, hwk_is⟩
   obtain ⟨t, ht, htf⟩ := clmul_new_spec (core.num.U128.from_be_bytes
-    (low.x86_64.aes.store (aesEncrypt alg kw (mkfour 0 0 0 0)))) hw
+    (storeBytes (aesEncrypt alg kw (mkfour 0 0 0 0)))) hw
   simp only [encrypt_zero hwk alg kw hwk_is, bind_ok, lift, low.x86_64.ghash.GhashTable.new, hhw, h512,
     hvaes, hmovbe, ht, WP.spec_ok]
   refine ⟨hwk, t, rfl, hwk_is, rfl, ?_⟩
@@ -431,7 +431,7 @@ theorem vale_avx_none (enc : Bool) (alg : Algorithm) (kw : List (BitVec 32)) (hk
   have hil := Slice.len_val inout
   unfold low.x86_64.aes_gcm.vale
   cases hk with
-  | Aes192 k => exact hhk.elim
+  | Aes192 k => cases enc <;> step*
   | Aes128 k | Aes256 k =>
     cases enc <;> step*
     all_goals
