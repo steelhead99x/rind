@@ -127,7 +127,8 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::low::generic::bignum::{bignum_montredc, bignum_mul, bignum_negmodinv};
+    use crate::low::generic::bignum::bignum_negmodinv;
+    use crate::low::generic::limbs::mont::{bignum_montredc, bignum_mul};
     use crate::test::bignum::{below, div_r, mod_mul_vectors, modulus};
 
     /// Each routine's `x * y / 2^(64k) mod m` that takes `m`'s width, not

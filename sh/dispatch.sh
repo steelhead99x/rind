@@ -228,7 +228,28 @@ for module in "${selected[@]}"; do
         # builds.
         check:msrv)
             mapfile -t packages < <(sh/select.sh "$changed" "$all")
-            nix develop .#msrv --command cargo check "${packages[@]}" --locked
+            # An adapter whose upstream needs a newer Rust declares that
+            # rust-version instead, which its users need anyway, so it is
+            # left out.
+            mapfile -t newer < <(cargo metadata --format-version 1 --no-deps --locked |
+                jq -r '(.packages[] | select(.name == "rind") | .rust_version) as $v | .packages[] | select(.rust_version != $v) | .name')
+            args=()
+            for ((i = 0; i < ${#packages[@]}; i++)); do
+                if [[ "${packages[i]}" == -p ]]; then
+                    i=$((i + 1))
+                    if ! printf '%s\n' "${newer[@]}" | grep -qxF "${packages[i]}"; then
+                        args+=(-p "${packages[i]}")
+                    fi
+                elif [[ "${packages[i]}" == --workspace ]]; then
+                    args+=(--workspace)
+                    for name in "${newer[@]}"; do
+                        args+=(--exclude "$name")
+                    done
+                fi
+            done
+            if [[ ${#args[@]} -gt 0 ]]; then
+                nix develop .#msrv --command cargo check "${args[@]}" --locked
+            fi
             for target in aarch64-unknown-linux-gnu armv7-unknown-linux-gnueabihf i686-unknown-linux-gnu; do
                 nix develop .#msrv --command cargo check -p rind -p rind-rustls --lib --locked --target "$target"
             done
