@@ -84,6 +84,9 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   "cfg(rind_vartime_planted)",
   # Forces the portable backend, for testing it on x86_64 (see build.rs).
   "cfg(rind_portable)",
+  # Builds the FIPS module's source, which draws every random value from its
+  # DRBG (`src/fips_rng.rs`).
+  "cfg(rind_fips)",
   # curve25519-dalek's backend overrides, which armv7 refuses.
   'cfg(curve25519_dalek_bits, values("32", "64"))',
   'cfg(curve25519_dalek_backend, values("fiat", "serial", "simd", "avx512"))',
