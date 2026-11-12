@@ -2,13 +2,14 @@ module
 public import Aeneas
 public import Rind.Core
 public import Rind.Aarch64.DigestAlgorithm
+public import Rind.Aarch64.Neon
 @[expose] public section
 open Aeneas Aeneas.Std Result
 set_option linter.dupNamespace false
 
 /-! The rind types the aarch64 translation leaves opaque. `Rind.Aarch64.Dispatch` and
 `Rind.Aarch64.DigestDispatch` model the last five, and `Rind.Aarch64.DigestAlgorithm`
-`Algorithm` and `Digest`. -/
+`Algorithm` and `Digest`, and `Rind.Aarch64.Neon` the vector types. -/
 
 namespace rind.aarch64
 
@@ -30,8 +31,9 @@ opaque low.generic.reuse_cache.ReuseCache (T : Type) : Type
 functional spec leaves out. -/
 opaque high.hmac_drbg.HmacDrbg (H : Type _) (Clause0_Context : Type _) (Clause0_State : Type _) : Type
 
-/-- An AES key, whose header protection no proof covers. -/
-opaque mid.aes.Aes : Type
+/-- The NEON AES keys aarch64 CPUs without the crypto extension run. -/
+opaque low.aarch64.vpaes_armv8.VpaesKey : Type
+opaque low.aarch64.vpaes_armv8.VpaesDecKey : Type
 
 /-- MD5's chaining state, which no proof covers. -/
 opaque mid.md5.Md5State : Type
