@@ -264,6 +264,7 @@ s2n_bignum_model() {
 hol_light_proofs=(
     "aarch64 bignum_eq.bin rind::low::aarch64::bignum_eq::bignum_eq"
     "aarch64 sha256_block_data_order_hw.o rind::low::aarch64::sha256::sha256_block_data_order_hw"
+    "aarch64 sha512_block_data_order_hw.o rind::low::aarch64::sha512::sha512_block_data_order_hw"
     "aarch64 ct_compare_bytes.bin rind::low::aarch64::cpu::ct_compare_bytes"
     "aarch64 ct_compare_16.bin rind::low::aarch64::cpu::ct_compare_16"
     "x86_64 ct_compare_bytes.bin rind::low::x86_64::cpu::ct_compare_bytes"

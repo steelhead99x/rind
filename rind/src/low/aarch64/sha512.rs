@@ -4,9 +4,10 @@
 //! `admin/import-aws-lc`: the SHA-512 instructions where the CPU has them,
 //! and scalar code otherwise.
 //!
-//! aws-lc-verification's NSym proofs cover both routines, as aws-lc builds
-//! them, though the proof of the one for the SHA-512 instructions ends with
-//! the result in registers, before the routine stores it.
+//! rind's HOL Light proof, `proofs/hol-light/aarch64/sha512_block_data_order_hw.ml`,
+//! covers the routine for the SHA-512 instructions as rind's build emits it.
+//! aws-lc-verification's NSym proof covers the scalar routine as aws-lc
+//! builds it, and `admin/prove-bytes` checks rind's build matches.
 
 use super::cpu::HaveSha3;
 

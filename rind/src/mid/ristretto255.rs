@@ -7,7 +7,7 @@
 //! Every operation runs in constant time: the OPRF client maps and blinds its
 //! private input, and the server multiplies by its key.
 
-// ristretto255's consumers (OPRF, FROST, ECVRF, OPAQUE) are their own quests.
+// ristretto255's consumers (OPRF, FROST, OPAQUE) are their own quests.
 #![cfg_attr(not(test), allow(dead_code))]
 
 use crate::low;
