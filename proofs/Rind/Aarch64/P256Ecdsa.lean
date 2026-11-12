@@ -436,9 +436,9 @@ theorem neg_of_same_x (x y1 y2 : Nat) (h1 : p256OnCurve (some (x, y1))) (h2 : p2
   have hsum : (y2 : ZMod p256) + y1 = 0 := by
     have : ((y2 : ZMod p256) - y1) * ((y2 : ZMod p256) + y1) = 0 := by linear_combination e2 - e1
     exact (mul_eq_zero.mp this).resolve_left hne'
-  simp only [p256Neg, Option.some.injEq, Prod.mk.injEq, true_and]
+  simp only [p256Neg, nist.neg, Option.some.injEq, Prod.mk.injEq, true_and]
   have hlt : (p256 - y1 % p256) % p256 < p256 := Nat.mod_lt _ p256_pos
-  rw [← Nat.mod_eq_of_lt h2.2.1, ← Nat.mod_eq_of_lt hlt, ← ZMod.natCast_eq_natCast_iff', natCast_neg_mod]
+  rw [← Nat.mod_eq_of_lt h2.2.1, ← Nat.mod_eq_of_lt hlt, ← ZMod.natCast_eq_natCast_iff', nist.natCast_neg_mod]
   linear_combination hsum
 
 theorem dec_lt (x : Nat) : (dec x).val < p256 := ZMod.val_lt _
@@ -909,12 +909,12 @@ theorem scalar_naf_spec (W : U32) (hW : W.val = 5 ∨ W.val = 6) (s : mid.p256.S
   exact ⟨by simpa [Array.val_to_slice] using hv2, hd2⟩
 
 theorem neg_val (v : ZMod p256) : (p256 - v.val % p256) % p256 = (-v).val := by
-  have h := natCast_neg_mod v.val
+  have h := nist.natCast_neg_mod (p := p256) v.val
   rw [ZMod.natCast_val, ZMod.cast_id', id] at h
   rw [← h, ZMod.val_natCast, Nat.mod_eq_of_lt (Nat.mod_lt _ p256_pos)]
 
 theorem dec_neg (y : Nat) (hy : y < p256) : dec ((p256 - y) % p256) = -(dec y) := by
-  have := natCast_neg_mod y
+  have := nist.natCast_neg_mod (p := p256) y
   rw [Nat.mod_eq_of_lt hy] at this
   simp only [dec]; rw [this]; ring
 
@@ -1918,9 +1918,10 @@ theorem raw_verify_spec (hc : Cached) (key : mid.p256.VerifyingKey)
   rw [twin, show ((scNat u1 : Nat) : Int) = Int.ofNat (scNat u1) from rfl, show ((scNat u2 : Nat) : Int) = Int.ofNat (scNat u2) from rfl] at hpt
   simp only [p256ZPow] at hpt
   rw [hu1v, hu2v] at hpt
-  unfold ecdsaP256Verifies
-  rcases hT : p256Add (p256Pow p256G ((scNat e : ZMod n256) * (scNat s : ZMod n256)⁻¹).val)
-      (p256Pow Q ((scNat r : ZMod n256) * (scNat s : ZMod n256)⁻¹).val) with _ | ⟨x, y⟩
+  unfold ecdsaP256Verifies nist.ecdsaVerifies
+  dsimp only [p256Add, p256Pow] at hpt
+  rcases hT : nist.add p256 (nist.pow p256 p256G ((scNat e : ZMod n256) * (scNat s : ZMod n256)⁻¹).val)
+      (nist.pow p256 Q ((scNat r : ZMod n256) * (scNat s : ZMod n256)⁻¹).val) with _ | ⟨x, y⟩
   · rw [hT] at hpt
     step with is_infinity_spec pt none hpt as ⟨b, hb⟩
     rw [ite_eq_left (hb.mpr trivial)]
@@ -2264,7 +2265,7 @@ theorem sign_nonces_spec (h : Runs) {T : Type}
         refine ⟨fun rs hrs => ?_, fun err h => by cases h⟩
         cases hrs
         refine ⟨scNat k.scalar, hk0, hk, ?_, hr0, hs0⟩
-        simp only [ecdsaP256Sign, hq, hr1, hs1]
+        simp only [ecdsaP256Sign, nist.ecdsaSign, hq, hr1, hs1]
   · simp only [uncurry, core.result.Result.Insts.CoreOpsTry.branch, bind_tc_ok, bind_ok,
       core.result.Result.Insts.CoreOpsTry_traitFromResidualResult.from_residual, WP.dspec_ok]
     refine ⟨(fun rs h => nomatch h), fun e2 h => ?_⟩
