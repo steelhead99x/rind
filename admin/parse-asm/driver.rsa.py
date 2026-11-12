@@ -400,6 +400,26 @@ if __name__ == "__main__":
         parse_file(input, d)
 
     with (
+        open("../../thirdparty/s2n-bignum/arm/generic/bignum_sqr.S") as input,
+        generated("../../rind/src/low/aarch64/bignum_sqr.rs") as output,
+    ):
+        d = RustDriver(output, Architecture_aarch64)
+        d.emit_rust_function(
+            "bignum_sqr",
+            parameter_map=[
+                ("inout", "z.len() => _"),
+                ("inout", "z.as_mut_ptr() => _"),
+                ("inout", "x.len() => _"),
+                ("inout", "x.as_ptr() => _"),
+            ],
+            assertions=[
+                "z.len() >= 2 * x.len()",
+            ],
+            rust_decl="fn bignum_sqr(z: &mut [u64], x: &[u64])",
+        )
+        parse_file(input, d)
+
+    with (
         open("../../thirdparty/s2n-bignum/arm/generic/bignum_add.S") as input,
         generated("../../rind/src/low/aarch64/bignum_add.rs") as output,
     ):

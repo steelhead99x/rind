@@ -76,6 +76,7 @@ pub(crate) mod bignum_neg_p521;
 pub(crate) mod bignum_negmodinv;
 pub(crate) mod bignum_optsub;
 pub(crate) mod bignum_point_select;
+pub(crate) mod bignum_sqr;
 pub(crate) mod bignum_sqr_p25519;
 pub(crate) mod bignum_sqr_p25519_narrow;
 pub(crate) mod bignum_sqr_p521;

@@ -1333,6 +1333,7 @@ ABI_ARGS = {
     "bignum_mux": ["1", "&mut [0; 4]", "&[1; 4]", "&[2; 4]"],
     "bignum_negmodinv": ["&mut [0; 4]", "&[u64::MAX; 4]"],
     "bignum_optsub": ["&mut [0; 4]", "&[1; 4]", "&[2; 4]", "1"],
+    "bignum_sqr": ["&mut [0; 8]", "&[1, 2, 3, 4]"],
     "mlkem_rej_uniform_vartime": [
         None,
         "&[0x55; 168]",

@@ -305,6 +305,7 @@ not cover rind's in-place calls.
 | `bignum_neg_p521` | `bignum_neg_p521`: `BIGNUM_NEG_P521_SUBROUTINE_SAFE` | `bignum_neg_p521`: `BIGNUM_NEG_P521_SUBROUTINE_SAFE` |
 | `bignum_negmodinv` | `bignum_negmodinv`: none | `bignum_negmodinv`: none |
 | `bignum_optsub` | `bignum_optsub`: none | `bignum_optsub`: `BIGNUM_OPTSUB_SUBROUTINE_SAFE` |
+| `bignum_sqr` | not imported | `bignum_sqr`: `BIGNUM_SQR_SUBROUTINE_SAFE` |
 | `bignum_sqr_p521` | `bignum_sqr_p521`: `BIGNUM_SQR_P521_SUBROUTINE_SAFE` | `bignum_sqr_p521_alt`: `BIGNUM_SQR_P521_ALT_SUBROUTINE_SAFE` |
 | `bignum_sqr_p521_alt` | `bignum_sqr_p521_alt`: `BIGNUM_SQR_P521_ALT_SUBROUTINE_SAFE` | not imported |
 | `bignum_sqr_p521_narrow::bignum_sqr_p521` | not imported | `bignum_sqr_p521`: `BIGNUM_SQR_P521_SUBROUTINE_SAFE` |
