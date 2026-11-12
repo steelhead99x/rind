@@ -7,9 +7,12 @@ use super::digest::Digest;
 use super::hash::Hash;
 use super::hmac::HmacKey;
 use crate::Error;
+#[cfg(any(test, rind_fips))]
+use crate::low::zeroise;
 use crate::mid::rng::RandomSource;
 
-/// A limited implementation of SP800-90A -- enough for RFC6979 ECDSA.
+/// SP 800-90A's HMAC_DRBG: RFC 6979's ECDSA nonces, and the FIPS module's
+/// random generator.
 pub(crate) struct HmacDrbg<H: Hash> {
     k: Digest,
     v: Digest,
@@ -30,11 +33,10 @@ impl<H: Hash> HmacDrbg<H> {
 
         // 4. (Key, V) = HMAC_DRBG_Update (seed_material, Key, V).
         // 5. reseed_counter = 1.
-        // (nb. `update()` increments `reseed_counter` to 1)
         let mut r = Self {
             k,
             v,
-            reseed_counter: 0,
+            reseed_counter: 1,
             _h: PhantomData,
         };
         r.update(seed_material);
@@ -56,8 +58,6 @@ impl<H: Hash> HmacDrbg<H> {
         // 2. V = HMAC (K, V).
         self.v = HmacKey::<H>::new(self.k.as_ref()).sign(self.v.as_ref());
 
-        self.reseed_counter += 1;
-
         // 3. If (provided_data = Null), then return K and V.
         if additional_input.is_empty() {
             return;
@@ -78,36 +78,63 @@ impl<H: Hash> HmacDrbg<H> {
         self.v = HmacKey::<H>::new(self.k.as_ref()).sign(self.v.as_ref());
     }
 
-    fn generate_block(&mut self) {
-        // V = HMAC (Key, V).
-        self.v = HmacKey::<H>::new(self.k.as_ref()).sign(self.v.as_ref());
+    /// SP 800-90A section 10.1.2.4's reseed.
+    #[cfg(any(test, rind_fips))]
+    pub(crate) fn reseed(&mut self, entropy_input: &[u8], additional_input: &[u8]) {
+        // 1. seed_material = entropy_input || additional_input.
+        // 2. (Key, V) = HMAC_DRBG_Update (seed_material, Key, V).
+        self.update(&[entropy_input, additional_input]);
+        // 3. reseed_counter = 1.
+        self.reseed_counter = 1;
+    }
+
+    /// SP 800-90A section 10.1.2.5's generate, steps 2 to 7: the caller
+    /// checks the reseed counter and bounds the request.
+    pub(crate) fn generate(&mut self, out: &mut [u8], additional_input: &[u8]) {
+        let hashlen = self.v.as_ref().len();
+        let one = [additional_input];
+        let provided: &[&[u8]] = if additional_input.is_empty() {
+            &[]
+        } else {
+            &one
+        };
+
+        // 2. If additional_input ≠ Null, then (Key, V) =
+        //    HMAC_DRBG_Update (additional_input, Key, V).
+        if !provided.is_empty() {
+            self.update(provided);
+        }
+
+        // 3. - 5. this is a different formulation, but
+        // ends up with all `V` terms being written to `out`.
+        for chunk in out.chunks_mut(hashlen) {
+            // V = HMAC (Key, V).
+            self.v = HmacKey::<H>::new(self.k.as_ref()).sign(self.v.as_ref());
+            chunk.copy_from_slice(&self.v.as_ref()[..chunk.len()]);
+        }
+
+        // 6. (Key, V) = HMAC_DRBG_Update (additional_input, Key, V).
+        self.update(provided);
+        // 7. reseed_counter = reseed_counter + 1.
+        self.reseed_counter += 1;
+    }
+
+    /// Wipes K and V, the secret state, under `wipe`.
+    #[cfg(any(test, rind_fips))]
+    pub(crate) fn zeroise(&mut self) {
+        zeroise(self.k.as_mut());
+        zeroise(self.v.as_mut());
     }
 }
 
 impl<H: Hash> RandomSource for HmacDrbg<H> {
     fn fill(&mut self, out: &mut [u8]) -> Result<(), Error> {
-        let hashlen = self.v.as_ref().len();
-
         // 1. If reseed_counter > reseed_interval, then
         //    return an indication that a reseed is required.
         // nb. in practice, does not happen in our uses
         assert!(self.reseed_counter < 0x1_0000_0000_0000);
 
-        // 2. If additional_input ≠ Null, then (Key, V) =
-        //    HMAC_DRBG_Update (additional_input, Key, V).
-        // nb: we don't accept additional_input here.
-
-        // 3. - 5. this is a different formulation, but
-        // ends up with all `V` terms being written to `out`.
-        for chunk in out.chunks_mut(hashlen) {
-            self.generate_block();
-            chunk.copy_from_slice(&self.v.as_ref()[..chunk.len()]);
-        }
-
-        // 6. (Key, V) = HMAC_DRBG_Update (additional_input, Key, V).
-        // 7. reseed_counter = reseed_counter + 1.
-        self.update(&[]);
-
+        self.generate(out, &[]);
         Ok(())
     }
 }
@@ -118,9 +145,9 @@ mod tests {
     use super::*;
     use crate::high::hash::Sha256;
 
-    /// CAVP's HMAC_DRBG vectors for the hashes ECDSA's nonces use, without
-    /// additional input, as rind's callers give none: each instantiates,
-    /// reseeds, and generates twice, checking the second output.
+    /// CAVP's HMAC_DRBG vectors for the hashes ECDSA's nonces and the FIPS
+    /// module use: each instantiates, reseeds, and generates twice, checking
+    /// the second output.
     #[test]
     fn cavp() {
         use crate::high::hash::{Sha384, Sha512};
@@ -129,45 +156,40 @@ mod tests {
         #[derive(Default)]
         struct State {
             hash: String,
-            additional_input: bool,
             entropy: Vec<u8>,
             nonce: Vec<u8>,
             personalization: Vec<u8>,
             reseed: Vec<u8>,
+            additional_reseed: Vec<u8>,
+            additional: Vec<Vec<u8>>,
             tests: usize,
         }
 
         fn second_output<H: Hash>(state: &State, len: usize) -> Vec<u8> {
             let mut drbg = HmacDrbg::<H>::new(&state.entropy, &state.nonce, &state.personalization);
-            // SP 800-90A section 10.1.2.4: reseeding updates with the new
-            // entropy and restarts the counter.
-            drbg.update(&[&state.reseed]);
-            drbg.reseed_counter = 1;
+            drbg.reseed(&state.reseed, &state.additional_reseed);
             let mut out = vec![0; len];
-            drbg.fill(&mut out).unwrap();
-            drbg.fill(&mut out).unwrap();
+            drbg.generate(&mut out, &state.additional[0]);
+            drbg.generate(&mut out, &state.additional[1]);
             out
         }
 
         impl CavpSink for State {
             fn on_meta(&mut self, meta: &str) {
-                match meta.split_once(" = ") {
-                    Some(("AdditionalInputLen", len)) => self.additional_input = len != "0",
-                    Some(_) => {}
-                    None => self.hash = meta.to_string(),
+                if !meta.contains(" = ") {
+                    self.hash = meta.to_string();
                 }
             }
 
             fn on_value(&mut self, name: &str, value: Value<'_>) {
-                if self.additional_input {
-                    return;
-                }
                 match name {
-                    "COUNT" | "AdditionalInputReseed" | "AdditionalInput" => {}
+                    "COUNT" => self.additional.clear(),
                     "EntropyInput" => self.entropy = value.bytes(),
                     "Nonce" => self.nonce = value.bytes(),
                     "PersonalizationString" => self.personalization = value.bytes(),
                     "EntropyInputReseed" => self.reseed = value.bytes(),
+                    "AdditionalInputReseed" => self.additional_reseed = value.bytes(),
+                    "AdditionalInput" => self.additional.push(value.bytes()),
                     "ReturnedBits" => {
                         let expected = value.bytes();
                         let out = match self.hash.as_str() {
@@ -186,8 +208,44 @@ mod tests {
 
         let mut state = State::default();
         process_cavp("../thirdparty/cavp/drbg/HMAC_DRBG.rsp", &mut state);
-        // Eight groups of 15 per hash lack additional input.
-        assert_eq!(state.tests, 3 * 8 * 15);
+        // Sixteen groups of 15 per hash.
+        assert_eq!(state.tests, 3 * 16 * 15);
+    }
+
+    #[test]
+    fn secret_entropy_and_state() {
+        // Under `admin/ctgrind`, nothing may branch on or index by the
+        // entropy or the state derived from it, through instantiate, reseed,
+        // and a generate of a partial last block.
+        use crate::high::hash::Sha512;
+
+        fn draw(entropy: &[u8], reseed: &[u8]) -> [u8; 100] {
+            let mut drbg = HmacDrbg::<Sha512>::new(entropy, &[0xa5; 16], b"");
+            drbg.reseed(reseed, b"");
+            let mut out = [0u8; 100];
+            drbg.generate(&mut out, b"additional");
+            out
+        }
+
+        let entropy = [0x5a; 32];
+        let reseed = [0x3c; 32];
+        let wanted = draw(&entropy, &reseed);
+        crate::low::ct::secret_slice(&entropy);
+        crate::low::ct::secret_slice(&reseed);
+        assert_eq!(crate::low::ct::into_public(draw(&entropy, &reseed)), wanted);
+    }
+
+    #[test]
+    fn zeroise_wipes_the_state_under_wipe() {
+        let mut drbg = HmacDrbg::<Sha256>::new(&[1; 32], &[2; 16], b"");
+        drbg.zeroise();
+        let wiped = drbg
+            .k
+            .as_ref()
+            .iter()
+            .chain(drbg.v.as_ref())
+            .all(|&b| b == 0);
+        assert_eq!(wiped, cfg!(feature = "wipe"));
     }
 
     #[test]

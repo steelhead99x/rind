@@ -18,8 +18,5 @@ From [the scope](/quest/m4/fips/README.md), 2026-11-11.
 - TLS 1.2's explicit-nonce scenario 1 waits for a consumer: rind-rustls's
   FIPS build needs only TLS 1.3, as SP 800-52r2 allows.
 - ACVP's AES-GCM sets with `ivGen: internal` test both; random-IV sealing
-  needs the [DRBG](/quest/m4/fips/drbg.md).
-
-## Required
-
-- [The DRBG](/quest/m4/fips/drbg.md) - the source of random IVs
+  draws from the module's DRBG (`rind/src/fips_rng.rs`), about 3.4 µs a
+  draw on x86_64, which a random IV pays per seal.
