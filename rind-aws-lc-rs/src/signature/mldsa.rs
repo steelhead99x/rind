@@ -490,36 +490,43 @@ impl fmt::Debug for PqdsaPrivateKey<'_> {
 }
 
 /// Whether `pkcs8` is a private key of a type aws-lc-rs parses that is not
-/// ML-DSA. The OID is public; only the parser for that OID runs, and only a
-/// successful parse is `WrongAlgorithm`.
+/// ML-DSA. The OID, and an EC key's curve, are public; only the parser they
+/// name runs, once, and only a successful parse is `WrongAlgorithm`.
 fn parses_as_other_private_key(pkcs8: &[u8]) -> bool {
-    let Some(oid) = der::pkcs8_algorithm(pkcs8) else {
+    use rind::signature::sign::{
+        ECDSA_P256_SHA256_ASN1, ECDSA_P384_SHA384_ASN1, ECDSA_P521_SHA512_ASN1,
+    };
+
+    let Some((oid, parameters)) = der::pkcs8_algorithm_identifier(pkcs8) else {
         return false;
     };
-    match oid {
+    match (oid, parameters) {
         // RFC 8410 Ed25519.
-        [0x2b, 0x65, 0x70] => rind::signature::Ed25519KeyPair::from_pkcs8(pkcs8).is_ok(),
+        ([0x2b, 0x65, 0x70], _) => rind::signature::Ed25519KeyPair::from_pkcs8(pkcs8).is_ok(),
         // RFC 8410 X25519.
-        [0x2b, 0x65, 0x6e] => {
+        ([0x2b, 0x65, 0x6e], _) => {
             rind::agreement::PrivateKey::from_pkcs8(&rind::agreement::X25519, pkcs8).is_ok()
         }
-        // RFC 5480 `id-ecPublicKey`. The curve is in the parameters. A curve
-        // rind does not implement, such as secp256k1, fails these parsers;
+        // RFC 5480 `id-ecPublicKey`, with the curve's OID as its parameters.
+        // A curve rind does not implement, such as secp256k1, is not parsed;
         // aws-lc-rs can still parse it, and the README lists that difference.
-        [0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01] => {
-            use rind::signature::sign::{
-                ECDSA_P256_SHA256_ASN1, ECDSA_P384_SHA384_ASN1, ECDSA_P521_SHA512_ASN1,
+        ([0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01], parameters) => {
+            let algorithm = match parameters {
+                // secp256r1, 1.2.840.10045.3.1.7
+                [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07] => {
+                    &ECDSA_P256_SHA256_ASN1
+                }
+                // secp384r1, 1.3.132.0.34
+                [0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22] => &ECDSA_P384_SHA384_ASN1,
+                // secp521r1, 1.3.132.0.35
+                [0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x23] => &ECDSA_P521_SHA512_ASN1,
+                _ => return false,
             };
-            [
-                &ECDSA_P256_SHA256_ASN1,
-                &ECDSA_P384_SHA384_ASN1,
-                &ECDSA_P521_SHA512_ASN1,
-            ]
-            .into_iter()
-            .any(|algorithm| rind::signature::EcdsaKeyPair::from_pkcs8(algorithm, pkcs8).is_ok())
+            rind::signature::EcdsaKeyPair::from_pkcs8(algorithm, pkcs8).is_ok()
         }
-        // RFC 8017 `rsaEncryption`.
-        [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01] => {
+        // RFC 8017 `rsaEncryption`. aws-lc-rs's `EVP_parse_private_key` runs
+        // `RSA_check_key` on it too, so the work is the same.
+        ([0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01], _) => {
             rind::signature::RsaKeyPair::from_pkcs8(pkcs8).is_ok()
         }
         _ => false,

@@ -64,13 +64,21 @@ pub(crate) fn rsa_public_key(der: &[u8]) -> Result<(&[u8], &[u8]), Unspecified> 
 /// `privateKeyAlgorithm`, or `None` if its header does not parse. Only the
 /// version and the algorithm identifier are read, never the private key.
 pub(crate) fn pkcs8_algorithm(der: &[u8]) -> Option<&[u8]> {
+    pkcs8_algorithm_identifier(der).map(|(oid, _)| oid)
+}
+
+/// The object identifier's contents in a PKCS#8 document's
+/// `privateKeyAlgorithm`, and the encoded parameters after it (empty when
+/// there are none), as [`pkcs8_algorithm`] reads them.
+pub(crate) fn pkcs8_algorithm_identifier(der: &[u8]) -> Option<(&[u8], &[u8])> {
     let mut outer = untrusted::Reader::new(untrusted::Input::from(der));
     let body = read(&mut outer, SEQUENCE).ok()?;
     let mut body = untrusted::Reader::new(body);
     read(&mut body, INTEGER).ok()?;
     let mut algorithm = untrusted::Reader::new(read(&mut body, SEQUENCE).ok()?);
     let oid = read(&mut algorithm, OBJECT_IDENTIFIER).ok()?;
-    Some(oid.as_slice_less_safe())
+    let parameters = algorithm.read_bytes_to_end();
+    Some((oid.as_slice_less_safe(), parameters.as_slice_less_safe()))
 }
 
 /// Whether `der` is a `SubjectPublicKeyInfo` rather than PKCS#1: its first
