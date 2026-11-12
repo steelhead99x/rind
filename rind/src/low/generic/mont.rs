@@ -73,6 +73,11 @@ fn uninit<const N: usize>() -> [MaybeUninit<Limb>; N] {
 
 /// Zero the first `n` limbs of a stack slot of `N`, run `f` on them, then
 /// wipe them. The tail is not written. `low/generic` does not allocate.
+///
+/// Not inlined. The slot is `N` limbs whatever `n` is, and a caller that
+/// also has a schoolbook path would reserve it on that path too: the frame
+/// is one size.
+#[inline(never)]
 fn with_zeroed<const N: usize, R>(n: usize, f: impl FnOnce(&mut [Limb]) -> R) -> R {
     let mut raw = uninit::<N>();
     for slot in &mut raw[..n] {
@@ -87,6 +92,11 @@ fn with_zeroed<const N: usize, R>(n: usize, f: impl FnOnce(&mut [Limb]) -> R) ->
 }
 
 /// [`with_zeroed`] for a product of `n` limbs and a scratch of `m`.
+///
+/// Not inlined, for the same reason as [`with_zeroed`]: `N + M` is the
+/// widest product and scratch, and inlining it into `bignum_mul`,
+/// `mont_mul`, or `mont_sqr` reserves those bytes on the schoolbook path.
+#[inline(never)]
 fn with_zeroed2<const N: usize, const M: usize, R>(
     n: usize,
     m: usize,
