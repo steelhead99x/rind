@@ -17,6 +17,10 @@ type Limb = u64;
 /// Twice a limb, which holds a product of two and two more limbs.
 type Wide = u128;
 
+/// P-521's 64-bit field element is nine limbs of 58 bits, the top one 57,
+/// so a saturated word converts by shifts. See `p521::fe`.
+pub(super) const P521_WORD_SHIFTS: bool = true;
+
 /// `x`'s limbs, which are its words, so `_buf` goes unused.
 fn limbs<'a, const N: usize>(x: &'a [u64], _buf: &'a mut [Limb; N]) -> &'a [Limb] {
     x

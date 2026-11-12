@@ -75,7 +75,7 @@ reason = "DIT: the M4 has it, and rind turns it on and off around every call tha
 [[gap]]
 operations = ["p521-ecdsa-verify*", "rustls-full-handshake-key/ecdsa-p521*"]
 on = ["portable"]
-quest = "/quest/m3/cold-speed/portable-p521-verify.md"
+reason = "The nightly rows predate keeping P-521 in fiat-crypto's limbs. On a shared Intel Xeon (family 6, model 207, 4 vCPU, KVM) on 2026-11-12, under `--cfg rind_portable` against aws-lc-rs's C without assembly at opt-level 2: a reused key's verify-parsed and verify-digest measured 0.97× aws-lc-rs, and signing, key generation, and ECDH stayed within it (0.94 to 0.99×). A fresh key, `p521-ecdsa-verify`, measured 1.06× (405 µs against 383 µs): the first check builds that key's odd multiples, one field inversion, which a reused key skips. Word shifts alone left the reused key at 1.07×, so the multiplication keeps the limbs. The handshake was not timed apart from that verify. The next refresh rechecks the fresh key and the handshake."
 
 [[gap]]
 operations = [

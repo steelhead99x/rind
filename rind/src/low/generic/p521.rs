@@ -20,6 +20,16 @@
 //! 5-bit windows, after negating a scalar above n / 2 so that no addition
 //! doubles.
 //!
+//! On 64-bit limbs a saturated word and fiat-crypto's element are the same
+//! integer split into 58-bit limbs, the top limb 57 bits, so `fe` and
+//! `words` shift rather than pack bytes. `words` then subtracts p and adds
+//! it back when the value was below p, which is the canonicalization in
+//! fiat-crypto's `to_bytes`, so a tight element whose limb 2 holds an
+//! extra 2^58, or the all-ones representative of zero, still becomes the
+//! unique integer in `0..p`. 32-bit limbs stay on the byte encoding. The
+//! portable backend's public scalar multiplication keeps those limbs for
+//! the whole evaluation; its formulas are still the ones above.
+//!
 //! Arithmetic on secrets wraps: the bounds rule out overflow, and a debug
 //! build's overflow check would branch on secret values.
 
@@ -475,8 +485,29 @@ fn join(x: &[Limb; LIMBS]) -> [u64; 9] {
     r
 }
 
-/// The words of a fully reduced field element.
+/// A saturated little-endian integer as a tight field element.
+///
+/// Below 2^521 this is fiat-crypto's `from_bytes` on the 66-byte encoding.
+/// Callers pass a reduced coordinate, or the low 521 bits of an inverse's
+/// input, so the top word's bits above the low nine are zero.
 fn fe(x: &[u64; 9]) -> Fe {
+    if super::P521_WORD_SHIFTS {
+        fe_shifted(x)
+    } else {
+        fe_bytes(x)
+    }
+}
+
+/// The canonical integer of `x`, in `0..p`, as little-endian words.
+fn words(x: &Fe) -> [u64; 9] {
+    if super::P521_WORD_SHIFTS {
+        words_shifted(x)
+    } else {
+        words_bytes(x)
+    }
+}
+
+fn fe_bytes(x: &[u64; 9]) -> Fe {
     let mut bytes = [0u8; 72];
     for (chunk, word) in bytes.as_chunks_mut::<8>().0.iter_mut().zip(x) {
         *chunk = word.to_le_bytes();
@@ -486,12 +517,115 @@ fn fe(x: &[u64; 9]) -> Fe {
     r
 }
 
-/// The words of `x`, fully reduced.
-fn words(x: &Fe) -> [u64; 9] {
+fn words_bytes(x: &Fe) -> [u64; 9] {
     let mut bytes = [0u8; 72];
     fp::fiat_p521_to_bytes((&mut bytes[..66]).try_into().unwrap(), x);
     let (chunks, _) = bytes.as_chunks::<8>();
     core::array::from_fn(|i| u64::from_le_bytes(chunks[i]))
+}
+
+/// 58 one-bits, and 57, the widths of fiat-crypto's 64-bit P-521 limbs.
+const M58: u64 = (1 << 58) - 1;
+const M57: u64 = (1 << 57) - 1;
+
+/// Limbs of a 521-bit integer: limb i is bits `[58 * i, 58 * i + 58)`,
+/// and the top limb stops at bit 521.
+///
+/// `from_bytes` also keeps bits 521..527, the next seven bits of word 8.
+/// Masking the top limb to 57 bits drops them, so this agrees with
+/// `from_bytes` only when those bits are zero. Callers pass a reduced
+/// coordinate or the low 521 bits, so those bits are already clear.
+fn unpack_words(w: &[u64; 9]) -> [u64; 9] {
+    // `from_bytes` reads 66 bytes. Below 2^521 that is the whole integer.
+    let w8 = w[8] & 0xffff;
+    [
+        w[0] & M58,
+        ((w[0] >> 58) | (w[1] << 6)) & M58,
+        ((w[1] >> 52) | (w[2] << 12)) & M58,
+        ((w[2] >> 46) | (w[3] << 18)) & M58,
+        ((w[3] >> 40) | (w[4] << 24)) & M58,
+        ((w[4] >> 34) | (w[5] << 30)) & M58,
+        ((w[5] >> 28) | (w[6] << 36)) & M58,
+        ((w[6] >> 22) | (w[7] << 42)) & M58,
+        ((w[7] >> 16) | (w8 << 48)) & M57,
+    ]
+}
+
+fn fe_shifted(x: &[u64; 9]) -> Fe {
+    // Bits 521 and above sit in `x[8]` above its low nine. `from_bytes`
+    // keeps 521..527; `unpack_words` drops them. Callers pass a reduced
+    // coordinate or the low 521 bits. `bignum_inv_p521` splits a larger
+    // input before it calls `fe`, because 2^521 is 1 mod p. No debug
+    // assert on `x[8]`: a branch on that word would depend on a secret
+    // field element in scalar multiplication.
+    let limbs = unpack_words(x);
+    let mut out = Fe([0; FE_LIMBS]);
+    for (dst, src) in out.0.iter_mut().zip(limbs) {
+        *dst = src as Limb;
+    }
+    out
+}
+
+/// `(a - borrow - subtrahend)` mod 2^bits, and the borrow out.
+///
+/// The same arithmetic as fiat-crypto's `subborrowx`, including a limb that
+/// holds one bit above its width: the borrow carries that bit into the next
+/// limb instead of dropping it.
+fn subborrow(borrow: u8, a: u64, subtrahend: u64, bits: u32) -> (u64, u8) {
+    let diff = (((a as i128) - i128::from(borrow)) as i64 as i128 - subtrahend as i128) as i64;
+    let shifted = (diff >> bits) as i8;
+    let low = ((diff as i128) & ((1i128 << bits) - 1)) as u64;
+    (low, 0u8.wrapping_sub(shifted as u8))
+}
+
+/// `(carry + a + b)` mod 2^bits, and the carry out.
+fn addcarry(carry: u8, a: u64, b: u64, bits: u32) -> (u64, u8) {
+    let sum = u128::from(carry) + u128::from(a) + u128::from(b);
+    let low = (sum & ((1u128 << bits) - 1)) as u64;
+    (low, (sum >> bits) as u8)
+}
+
+/// The unique representative in `0..p` of a tight element, as 58-bit limbs.
+///
+/// Subtracts p and, when that borrowed, adds p back. An element that is p
+/// itself, every limb full, becomes zero. The mask hides the borrow from
+/// the optimiser, as `select_words` does.
+fn canonicalize(mut limb: [u64; 9]) -> [u64; 9] {
+    let sub = [M58, M58, M58, M58, M58, M58, M58, M58, M57];
+    let bits = [58, 58, 58, 58, 58, 58, 58, 58, 57];
+    let mut borrow = 0;
+    for ((limb, sub), bits) in limb.iter_mut().zip(sub).zip(bits) {
+        (*limb, borrow) = subborrow(borrow, *limb, sub, bits);
+    }
+    let mask = opaque(u64::from(borrow).wrapping_neg());
+    let mut carry = 0;
+    for ((limb, sub), bits) in limb.iter_mut().zip(sub).zip(bits) {
+        (*limb, carry) = addcarry(carry, *limb, mask & sub, bits);
+    }
+    limb
+}
+
+/// Saturated words of canonical 58-bit limbs. Limb i starts at bit `58 * i`.
+fn pack_words(l: [u64; 9]) -> [u64; 9] {
+    [
+        l[0] | (l[1] << 58),
+        (l[1] >> 6) | (l[2] << 52),
+        (l[2] >> 12) | (l[3] << 46),
+        (l[3] >> 18) | (l[4] << 40),
+        (l[4] >> 24) | (l[5] << 34),
+        (l[5] >> 30) | (l[6] << 28),
+        (l[6] >> 36) | (l[7] << 22),
+        (l[7] >> 42) | (l[8] << 16),
+        l[8] >> 48,
+    ]
+}
+
+fn words_shifted(x: &Fe) -> [u64; 9] {
+    let mut limbs = [0u64; 9];
+    for (dst, src) in limbs.iter_mut().zip(x.0.iter()) {
+        *dst = u64::from(*src);
+    }
+    pack_words(canonicalize(limbs))
 }
 
 fn relax(x: &Fe) -> Loose {
@@ -588,6 +722,85 @@ fn point(p: &[Fe; 3]) -> [u64; 27] {
     r
 }
 
+/// `g * G + p * P` for public NAF digits, staying in fiat-crypto's limbs.
+///
+/// `g_digits` and `p_digits` are low digit first, the order
+/// `mid::util::public_naf` writes. `g_table` is the affine points G through
+/// 16G in rows of 18 words, and each of `p_rows` is eight affine odd
+/// multiples of P. The digits are public, as a signature check's scalars
+/// are; a secret scalar goes through `p521_jscalarmul`. Each addition is
+/// s2n-bignum's `jdouble` or `jmixadd`, and infinity, equal points, and
+/// opposite points take the same cases as `mid::p521`'s `public_add_affine`.
+#[cfg(any(test, rind_backend = "portable"))]
+pub(crate) fn p521_public_twin_mul(
+    res: &mut [u64; 27],
+    g_digits: &[i8],
+    p_digits: &[i8],
+    g_table: &[u64],
+    p_rows: &[&[u64]],
+) {
+    fn load_xy(words: &[u64]) -> (Fe, Fe) {
+        let x = words[..9].try_into().unwrap();
+        let y = words[9..18].try_into().unwrap();
+        (fe(&x), fe(&y))
+    }
+    fn load_row<const N: usize>(words: &[u64]) -> [(Fe, Fe); N] {
+        core::array::from_fn(|i| {
+            let start = i * 18;
+            load_xy(&words[start..start + 18])
+        })
+    }
+    /// `acc + (x, y)`, including infinity, the same point, and its opposite.
+    fn public_add(acc: [Fe; 3], x: Fe, y: Fe, one: Fe) -> [Fe; 3] {
+        if nonzero(&acc[2]) == 0 {
+            return [x, y, one];
+        }
+        let z2 = fe_sqr(&acc[2]);
+        // Canonical words, so the two representatives of zero compare equal.
+        // The branch is the public algorithm's, not a secret scalar's.
+        if words(&fe_mul(&x, &z2)) != words(&acc[0]) {
+            return jmixadd(&acc, &x, &y);
+        }
+        let y_scaled = fe_mul(&y, &fe_mul(&z2, &acc[2]));
+        if words(&y_scaled) == words(&acc[1]) {
+            jdouble(&acc)
+        } else {
+            [Fe([0; FE_LIMBS]); 3]
+        }
+    }
+
+    let g_pts: [(Fe, Fe); 16] = load_row(g_table);
+    let zero = Fe([0; FE_LIMBS]);
+    let mut p_pts = [[(zero, zero); 8]; 2];
+    for (row, words) in p_rows.iter().take(p_pts.len()).enumerate() {
+        p_pts[row] = load_row(words);
+    }
+
+    let one = fe(&[1, 0, 0, 0, 0, 0, 0, 0, 0]);
+    let mut acc = [Fe([0; FE_LIMBS]); 3];
+    for (g_digit, p_digit) in g_digits.iter().zip(p_digits).rev() {
+        if nonzero(&acc[2]) == 1 {
+            acc = jdouble(&acc);
+        }
+        if *p_digit != 0 {
+            let i = usize::from(p_digit.unsigned_abs() / 2);
+            let (x, mut y) = p_pts[i / 8][i % 8];
+            if *p_digit < 0 {
+                y = fe_opp(&y);
+            }
+            acc = public_add(acc, x, y, one);
+        }
+        if *g_digit != 0 {
+            let (x, mut y) = g_pts[usize::from(g_digit.unsigned_abs()) - 1];
+            if *g_digit < 0 {
+                y = fe_opp(&y);
+            }
+            acc = public_add(acc, x, y, one);
+        }
+    }
+    *res = point(&acc);
+}
+
 /// n_521, the group order, as little-endian words.
 pub(crate) const N: [u64; 9] = [
     0xbb6f_b71e_9138_6409,
@@ -669,6 +882,8 @@ const C: [u64; 5] = [
 ///
 /// Inputs that are secret in `mid::p521` are marked secret, so under
 /// `admin/ctgrind` these also check each routine is constant time in them.
+// `#[cfg(test)]` is the marker `admin/structure` skips, so this module may name `mid`.
+#[cfg(test)]
 #[cfg(all(test, any(rind_backend = "x86_64", rind_backend = "aarch64")))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -948,6 +1163,269 @@ mod tests {
 
     // Only the top bit set is where an exclusive or of `x` and `-x` would
     // drop it, and only words sharing a bit cancel in an exclusive or.
+    /// The shift conversion is fiat-crypto's byte conversion: the same limbs
+    /// below 2^521, and the same canonical words, including a limb that
+    /// holds one extra bit and the all-ones representative of zero.
+    #[test]
+    fn shift_matches_byte_encoding() {
+        if Limb::BITS != 64 {
+            return;
+        }
+        let check = |words: [u64; 9]| {
+            let shifted = fe_shifted(&words);
+            let bytes = fe_bytes(&words);
+            assert_eq!(shifted.0, bytes.0, "{words:x?}");
+            assert_eq!(words_shifted(&shifted), words_bytes(&bytes));
+        };
+        check([0; 9]);
+        check([1, 0, 0, 0, 0, 0, 0, 0, 0]);
+        check(P);
+        check([1 << 57, 0, 0, 0, 0, 0, 0, 0, 0]);
+        check([0, 1, 0, 0, 0, 0, 0, 0, 0]);
+        check(GENERATOR[..9].try_into().unwrap());
+        let mut state = 0x1234_5678_9abc_def0u64;
+        for _ in 0..64 {
+            let mut words = [0; 9];
+            for word in &mut words {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                *word = state;
+            }
+            words[8] &= 0x1ff;
+            check(words);
+        }
+
+        // Tight bounds allow limb 2 to be 2^58, and every limb full is p,
+        // which is zero. Both have to agree with `to_bytes`.
+        let mut extra = Fe([0; FE_LIMBS]);
+        extra.0[2] = (1u64 << 58) as Limb;
+        assert_eq!(words_shifted(&extra), words_bytes(&extra));
+        let widths = [M58, M58, M58, M58, M58, M58, M58, M58, M57];
+        let mut full = Fe([0; FE_LIMBS]);
+        for (dst, src) in full.0.iter_mut().zip(widths) {
+            *dst = src as Limb;
+        }
+        assert_eq!(words(&full), [0; 9]);
+        assert_eq!(words_shifted(&full), words_bytes(&full));
+    }
+
+    /// Inversion of an input with bits above 521 set. `fe` sees only the low
+    /// 521 bits; the rest is added as a separate field element, since 2^521
+    /// is 1 mod p. s2n-bignum leaves the inverse of a multiple of p unspecified.
+    #[test]
+    fn inv_above_521_matches_s2n() {
+        let mut samples = [
+            [1, 0, 0, 0, 0, 0, 0, 0, 1 << 9],
+            [1, 0, 0, 0, 0, 0, 0, 0, 1 << 15],
+            [0xffff, 0, 0, 0, 0, 0, 0, 0, u64::MAX],
+            [0, 0, 0, 0, 0, 0, 0, 0, 1 << 9],
+            P,
+        ];
+        samples[4][8] |= 1 << 20;
+        let mut state = 0x0f1e_2d3c_4b5a_6978u64;
+        for _ in 0..16 {
+            let mut words = [0; 9];
+            for word in &mut words {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                *word = state;
+            }
+            words[8] |= 1 << 9;
+            samples_check(&words);
+        }
+        for words in samples {
+            samples_check(&words);
+        }
+
+        fn samples_check(x: &[u64; 9]) {
+            let mut low = *x;
+            low[8] &= 0x1ff;
+            let high = [x[8] >> 9, 0, 0, 0, 0, 0, 0, 0, 0];
+            if words(&fe_add(&fe(&low), &fe(&high))) == [0; 9] {
+                return;
+            }
+            let (mut ours, mut theirs) = ([0; 9], [0; 9]);
+            bignum_inv_p521(&mut ours, x);
+            low::bignum_inv_p521(&mut theirs, x);
+            assert_eq!(ours, theirs, "{x:x?}");
+        }
+    }
+
+    /// Public verification's addition chain, against s2n-bignum's scalar
+    /// multiplication. The digits are a width-5 NAF, and the tables are the
+    /// multiples that NAF reads.
+    #[test]
+    fn public_twin_matches_scalarmul() {
+        fn naf5(k: u64, digits: &mut [i8]) {
+            let mut window = (k & 31) as i32;
+            for (i, digit) in digits.iter_mut().enumerate() {
+                *digit = 0;
+                if window & 1 == 1 {
+                    let d = if window < 16 { window } else { window - 32 };
+                    window -= d;
+                    *digit = d as i8;
+                }
+                let bit = if i + 5 < 64 {
+                    ((k >> (i + 5)) & 1) as i32
+                } else {
+                    0
+                };
+                window = (window >> 1) + (bit << 4);
+            }
+        }
+
+        let g_xy = affine(&GENERATOR).unwrap();
+        let mut jac = [GENERATOR; 16];
+        let mut doubled = [0; 27];
+        p521_jdouble(&mut doubled, &GENERATOR);
+        jac[1] = doubled;
+        for i in 2..jac.len() {
+            let mut next = [0; 27];
+            p521_jmixadd(&mut next, &jac[i - 1], &g_xy);
+            jac[i] = next;
+        }
+        let mut g_table = [0; 288];
+        let mut odd = [0; 144];
+        for (i, point) in jac.iter().enumerate() {
+            g_table[i * 18..(i + 1) * 18].copy_from_slice(&affine(point).unwrap());
+            if i % 2 == 0 {
+                let slot = i / 2;
+                odd[slot * 18..(slot + 1) * 18].copy_from_slice(&g_table[i * 18..(i + 1) * 18]);
+            }
+        }
+        let odd: &[u64] = &odd;
+
+        let check = |k: u64, m: u64| {
+            let mut g_digits = [0; 80];
+            let mut p_digits = [0; 80];
+            naf5(k, &mut g_digits);
+            naf5(m, &mut p_digits);
+            let mut got = [0; 27];
+            p521_public_twin_mul(&mut got, &g_digits, &p_digits, &g_table, &[odd]);
+            let mut scalar = [0; 9];
+            scalar[0] = k.wrapping_add(m);
+            let mut expect = [0; 27];
+            low::p521_jscalarmul(&mut expect, &scalar, &GENERATOR);
+            assert!(same_point(&got, &expect), "k={k} m={m}");
+        };
+        for k in [0, 1, 2, 3, 15, 16, 17, 31, 32, 33, 1_000, u64::MAX >> 2] {
+            check(k, 0);
+            check(0, k);
+        }
+        check(1, 1);
+        check(5, 9);
+        check(32, 31);
+
+        // Equal points double, and opposite points are infinity. Digit 1 is G.
+        let mut g_digits = [0; 8];
+        let mut p_digits = [0; 8];
+        g_digits[0] = 1;
+        p_digits[0] = 1;
+        let mut got = [0; 27];
+        p521_public_twin_mul(&mut got, &g_digits, &p_digits, &g_table, &[odd]);
+        let mut expect = [0; 27];
+        low::p521_jscalarmul(&mut expect, &[2, 0, 0, 0, 0, 0, 0, 0, 0], &GENERATOR);
+        assert!(same_point(&got, &expect));
+
+        p_digits[0] = -1;
+        p521_public_twin_mul(&mut got, &g_digits, &p_digits, &g_table, &[odd]);
+        assert!(affine(&got).is_none());
+    }
+
+    /// 1G through 16G, affine, in rows of 18 words.
+    fn generator_table() -> [u64; 288] {
+        let g_xy = affine(&GENERATOR).unwrap();
+        let mut jac = [GENERATOR; 16];
+        let mut doubled = [0; 27];
+        low::p521_jdouble(&mut doubled, &GENERATOR);
+        jac[1] = doubled;
+        for i in 2..jac.len() {
+            let mut next = [0; 27];
+            low::p521_jmixadd(&mut next, &jac[i - 1], &g_xy);
+            jac[i] = next;
+        }
+        let mut table = [0; 288];
+        for (i, point) in jac.iter().enumerate() {
+            table[i * 18..(i + 1) * 18].copy_from_slice(&affine(point).unwrap());
+        }
+        table
+    }
+
+    /// 1P, 3P, ..., 31P as two rows of eight. The second row is what a
+    /// width-6 digit of absolute value 17, 19, ..., 31 reads.
+    fn odd_rows(p: &[u64; 27]) -> ([u64; 144], [u64; 144]) {
+        let mut two = [0; 27];
+        low::p521_jdouble(&mut two, p);
+        let mut odds = [*p; 16];
+        for i in 1..odds.len() {
+            let mut next = [0; 27];
+            low::p521_jadd(&mut next, &odds[i - 1], &two);
+            odds[i] = next;
+        }
+        let mut rows = [[0u64; 144]; 2];
+        for (i, point) in odds.iter().enumerate() {
+            let xy = affine(point).expect("small multiple");
+            let slot = i % 8;
+            rows[i / 8][slot * 18..(slot + 1) * 18].copy_from_slice(&xy);
+        }
+        (rows[0], rows[1])
+    }
+
+    fn mul_mod_n(x: &[u64; 9], y: &[u64; 9]) -> [u64; 9] {
+        let (mut xm, mut ym, mut prod, mut out) = ([0; 9], [0; 9], [0; 9], [0; 9]);
+        low::bignum_montmul(&mut xm, x, &MM, &N);
+        low::bignum_montmul(&mut ym, y, &MM, &N);
+        low::bignum_montmul(&mut prod, &xm, &ym, &N);
+        low::bignum_demont(&mut out, &prod, &N);
+        out
+    }
+
+    fn add_mod_n(x: &[u64; 9], y: &[u64; 9]) -> [u64; 9] {
+        let mut z = [0; 9];
+        low::bignum_modadd(&mut z, x, y, &N);
+        z
+    }
+
+    // Each case is a scalar multiplication, as `scalar_multiply` is.
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(8))]
+
+        /// `g·G + m·P` for full-width scalars and `P = l·G`, against s2n-bignum's
+        /// scalar multiplication. `m`'s width-6 NAF reads the second row of odd
+        /// multiples: a digit of absolute value 17 through 31.
+        #[test]
+        fn public_twin_random_point(g in scalar(), m in scalar(), l in scalar()) {
+            prop_assume!(l != [0; 9]);
+            let mut point = [0; 27];
+            low::p521_jscalarmul(&mut point, &l, &GENERATOR);
+            prop_assume!(affine(&point).is_some());
+
+            let (mut g_digits, mut p_digits) = ([0; 522], [0; 522]);
+            // The production encoder, not a copy of it.
+            crate::mid::util::public_naf::<5>(&g, &mut g_digits);
+            crate::mid::util::public_naf::<6>(&m, &mut p_digits);
+            prop_assume!(
+                p_digits
+                    .iter()
+                    .any(|d| usize::from(d.unsigned_abs()) / 2 >= 8)
+            );
+
+            let g_table = generator_table();
+            let (row0, row1) = odd_rows(&point);
+            let row0: &[u64] = &row0;
+            let row1: &[u64] = &row1;
+            let mut got = [0; 27];
+            p521_public_twin_mul(&mut got, &g_digits, &p_digits, &g_table, &[row0, row1]);
+
+            let sum = add_mod_n(&g, &mul_mod_n(&m, &l));
+            let mut expect = [0; 27];
+            low::p521_jscalarmul(&mut expect, &sum, &GENERATOR);
+            prop_assert!(same_point(&got, &expect));
+        }
+    }
+
     #[test]
     fn nonzero_at_the_top_bit() {
         assert_eq!(nonzero(&fe(&[0; 9])), 0);

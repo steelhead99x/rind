@@ -479,7 +479,15 @@ affine points (a 62KB constant table) over 5-bit Booth windows, as aws-lc
 does. Variable point multiplication is s2n-bignum's `p521_jscalarmul`.
 s2n-bignum's P521 point addition requires points that are not at infinity,
 equal, or opposite, so the comb keeps to that, selecting around the cases
-it reaches.
+it reaches. On 64-bit limbs a saturated word and fiat-crypto's element are
+the same integer split into 58-bit limbs, the top limb 57 bits, so `fe` and
+`words` shift rather than pack bytes. `words` then subtracts p and adds it
+back when the value was below p. 32-bit limbs stay on the byte encoding.
+Portable verification keeps those limbs for the whole public multiplication:
+`p521_public_twin_mul` stays in fiat-crypto's representation, and each
+addition is still s2n-bignum's `jdouble` or `jmixadd`. Infinity, equal
+points, and opposite points are settled before `jmixadd`, the same cases as
+`public_add_affine`. Signing and ECDH still call `p521_jscalarmul`.
 
 ECDSA verification computes `u1 G + u2 Q` in one chain of doublings, as
 aws-lc does, adding terms from width-5 non-adjacent forms of the public
