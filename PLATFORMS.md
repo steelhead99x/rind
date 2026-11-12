@@ -1,15 +1,19 @@
 # Platforms
 
 rind has assembly for `aarch64`, `x86_64`, and 32-bit `arm` from ARMv7 on, and
-a portable Rust backend for every other architecture. CI tests Linux (glibc and musl), macOS, and Windows on `x86_64` and `aarch64`, Linux and Windows on
+a portable Rust backend for every other architecture. CI tests Linux (glibc and
+musl), macOS, and Windows on `x86_64` and `aarch64`, Linux and Windows on
 `i686`, iOS in the simulator on `aarch64`, Android on `aarch64`,
 `armv7`, ARMv5TE, `x86_64`, and `i686`, all but `x86_64` under qemu, and
 Linux on `armv7`, ARMv6, big-endian `s390x`, `riscv64gc` (glibc and musl),
 `loongarch64`, `powerpc64le`, and big-endian `powerpc64` and `powerpc` under
-qemu. iOS devices' code is only built. CI neither compiles nor tests
-big-endian `aarch64`, big-endian `arm`, `i586`, `riscv32`, `sparc64`, or
-MIPS. `rind/build.rs` would select the portable backend for each of them.
-Stable Rust ships no MIPS standard library.
+qemu. Those runs test `rind` and `rind-rustls`. The wasm runs below do
+not: they build, and on `wasm32-wasip2` test, the `rind` library only.
+iOS devices' code is only built, which is not a test, so a device target
+is not covered. CI neither compiles nor tests big-endian `aarch64`,
+big-endian `arm`, `i586`,
+`riscv32`, `sparc64`, or MIPS. `rind/build.rs` would select the portable
+backend for each of them. Stable Rust ships no MIPS standard library.
 
 - `aarch64` requires the `neon` CPU feature. Where the CPU has the crypto
   extension (`aes`, `pmull`, and `sha2`), as the Raspberry Pi 5 and most
@@ -84,21 +88,31 @@ Stable Rust ships no MIPS standard library.
   Raspberry Pi 1 and Zero), on `arm-linux-androideabi`, which Rust builds for
   ARMv5TE, on `powerpc64le` and big-endian `powerpc64` and `powerpc` Linux,
   and on `x86_64`,
-  where `--cfg rind_portable` forces it. The merge gate compiles the `rind`
-  library, and not the adapters, for `wasm32-wasip2` and
-  `wasm32-unknown-unknown`, with and without `wipe`, when the diff touches
-  `rind`'s build (`src`, `tests`, `build.rs`, or its manifest), the workspace
-  manifest or lockfile, or the flake. A push to `main` compiles both every
-  time. The latter enables `getrandom/wasm_js` for JavaScript randomness; the
-  WASI target uses its system random source. The nightly `build.yml` runs the
-  vector tests on `wasm32-wasip2` under wasmtime (`just wasm`), without the
-  differential tests, since aws-lc does not build for wasm. `wasm32-unknown-unknown` stays
-  compile-only: its tests need a JavaScript host. Constant time is unchecked on
-  wasm: ctgrind and the trace checks inspect native code, and a wasm engine
-  compiles rind again, so its JIT may turn a select into a branch.
+  where `--cfg rind_portable` forces it. The merge gate's `cross` module
+  compiles the `rind` library, and not the adapters, for `wasm32-wasip2`
+  and `wasm32-unknown-unknown`, with and without `wipe`
+  (`sh/dispatch.sh:257-263`), when the diff matches that module's path
+  (`sh/dispatch.sh:65`: `rind`'s `src`, `tests`, `build.rs`, or manifest,
+  the workspace manifest or lockfile, or the flake). A push to `main` runs
+  `just ci --all`, which compiles both every time. The latter enables
+  `getrandom/wasm_js` for JavaScript randomness; the WASI target uses its
+  system random source. The nightly `build.yml` runs the vector tests on
+  `wasm32-wasip2` under wasmtime (`just wasm`), without the differential
+  tests, since aws-lc does not build for wasm.
+  `wasm32-unknown-unknown` stays compile-only: its tests need a JavaScript
+  host. Constant time is unchecked on wasm, and the portable targets' own
+  binaries are not checked either: ctgrind of that backend is the x86_64
+  build forced with `--cfg rind_portable`. A wasm engine compiles rind
+  again, so its JIT may turn a select into a branch.
 
-Every operation panics on a CPU missing one of these. Call `rind::cpu::check()`
-at startup to get an error naming the missing feature instead.
+`missing_cpu_feature` returns `None` on x86_64, 32-bit arm, and the portable
+backend. On little-endian aarch64 it names `neon` only when runtime detection
+does not see it, and every aarch64 target with `std` enables `neon` at compile
+time (`rustc --print cfg --target aarch64-unknown-linux-gnu` lists
+`target_feature="neon"`). `rind::cpu::check()` therefore cannot fail on a
+target rind builds for, and rind 0.4 removes it: do not add that call. A debug
+build can still deny `neon` with `RIND_CPU_DISABLE_neon`, which is a test
+toggle, not a target.
 
 rind's secret-dependent code divides no secret and does no floating-point
 arithmetic on any architecture, as `admin/ct-vartime` checks, but it multiplies

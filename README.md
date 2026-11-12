@@ -99,9 +99,6 @@ type has one role, so misuse fails to compile:
 use rind::signature::{EcdsaKeyPair, PublicKey, sign, verify};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // An error naming the missing CPU feature, rather than a panic later.
-    rind::cpu::check()?;
-
     let key_pair = EcdsaKeyPair::generate(&sign::ECDSA_P256_SHA256_ASN1)?;
     let signature = key_pair.sign(b"hello")?;
 
@@ -182,14 +179,19 @@ other architecture gets the portable Rust backend. CI runs the tests on Linux
 Windows for i686, in the aarch64 iOS simulator, on Android for aarch64,
 armv7, ARMv5TE, x86_64, and i686, and on Linux for armv7, ARMv6, big-endian
 s390x, riscv64gc (glibc and musl), loongarch64, powerpc64le, and big-endian
-powerpc64 and powerpc. iOS device code is built and not run. The merge gate
-compiles the rind library for wasm32 when that build's inputs change, and a
-push to main compiles it every time. The nightly run executes the library's
-vector tests on wasm32-wasip2. wasm32-unknown-unknown is compile-only, and
-the adapters are not built for wasm. A target this paragraph does not name
-is not tested. Any x86_64 CPU runs rind, little-endian aarch64 needs NEON,
-and every operation panics on a CPU missing a feature rind requires: call
-`rind::cpu::check()` at startup to get an error naming it instead.
+powerpc64 and powerpc. Those runs test rind and rind-rustls. iOS device
+code is only built, so a device target is not covered. The merge gate's
+`cross` module compiles the rind library for wasm32 when the diff matches
+`sh/dispatch.sh:65`, and the clippy is `sh/dispatch.sh:257-263`. A push to
+main compiles it every time. The nightly run executes the library's vector
+tests on wasm32-wasip2. wasm32-unknown-unknown is compile-only, and the
+adapters are not built for wasm. A target this paragraph does not name is
+not tested, and a target it only compiles is not tested either. Any x86_64
+CPU runs rind. Little-endian aarch64 needs NEON, which every aarch64 target
+with `std` enables at compile time, and `missing_cpu_feature` is `None` on
+x86_64, 32-bit arm, and the portable backend. Do not add a call to
+`rind::cpu::check()`: it cannot fail on a target rind builds for, and rind
+0.4 removes it.
 [PLATFORMS.md][platforms] lists the tested targets, what is only compiled,
 and what each architecture runs without each feature.
 

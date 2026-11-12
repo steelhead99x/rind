@@ -57,21 +57,19 @@ default build against the old default.
    builds for release, including Docker images' platforms, and any
    `dist-workspace.toml`, `[workspace.metadata.dist]`, or `Cross.toml`. A
    library's are the targets its CI builds. A target is covered when
-   [PLATFORMS.md] says rind's CI runs its tests. Those runs include rind
-   and rind-rustls, except where that page limits a target to the `rind`
-   crate. iOS device code is covered only as a build: CI compiles those
-   tests and
-   does not run them. `wasm32-wasip2` is covered for the `rind` crate
-   alone: the nightly run executes its vector tests, with no differential
-   tests and no constant-time check, and the adapters are not built.
-   `wasm32-unknown-unknown` is compile-only, again for the `rind` crate
-   alone. A release target that needs an adapter on wasm is uncovered.
-   Anything [PLATFORMS.md] does not name is uncovered, including big-endian
-   aarch64, big-endian arm, `i586`, `riscv32`, `sparc64`, and MIPS, even
-   where `rind/build.rs` would select the portable backend. Step 3 builds
-   each release target.
-   Distribution packages and `cargo install` build where the project does
-   not; list what they lose under Breaking changes rather than stopping.
+   [PLATFORMS.md] says rind's CI runs its tests of `rind` and
+   `rind-rustls`. Wasm is the exception that page names: only the `rind`
+   crate. `wasm32-wasip2` is covered for that crate alone. The nightly run
+   executes its vector tests, with no differential tests and no
+   constant-time check, and the adapters are not built. A target CI only
+   compiles is not covered. iOS device code is built and not run, and
+   `wasm32-unknown-unknown` is compile-only. A release target that needs
+   an adapter on wasm is uncovered. Anything [PLATFORMS.md] does not name
+   is uncovered, including big-endian aarch64, big-endian arm, `i586`,
+   `riscv32`, `sparc64`, and MIPS, even where `rind/build.rs` would select
+   the portable backend. Step 3 builds each release target. Distribution
+   packages and `cargo install` build where the project does not; list
+   what they lose under Breaking changes rather than stopping.
 
 3. Compare the project's `rust-version`, or without one the oldest
    toolchain its CI runs, with the latest rind release's, which
@@ -148,10 +146,9 @@ For each way the survey found:
   ring's API. A dependency that then fails to build calls an item
   [rind-ring's README] leaves out: stop, and report it as a rind gap.
 
-rind panics on a CPU missing a feature it requires. At the start of each
-binary's `main`, refuse one by exiting with the error from an adapter's
-`default_provider()` or `rind::cpu::check()`.
-A library leaves this to the binaries that use it, and says so in its docs.
+An adapter's `default_provider()` returns the provider its upstream returns,
+so no call site changes. Do not add a call to `rind::cpu::check()`: it cannot
+fail on any target rind builds for, and rind 0.4 removes it.
 
 Commit as you go, with messages in the project's style.
 
