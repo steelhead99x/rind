@@ -938,8 +938,9 @@ fn ml_dsa_spki(set: &MlDsa, input: &[u8]) {
 }
 
 /// ECVRF keys. aws-lc-rs has none, so Edwards is checked against akd_core and
-/// P-256 against vrf-rfc9381. rind may refuse an uncompressed P-256 point the
-/// reference takes, and must not take a key the reference refuses.
+/// P-256 against vrf-rfc9381. rind may refuse a non-canonical Edwards point
+/// or an uncompressed P-256 point the reference takes, and must not take a
+/// key the reference refuses.
 fn vrf_edwards_seed(input: &[u8]) {
     use akd_core::ecvrf::{VRFPrivateKey, VRFPublicKey};
     use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, PublicKey, SecretKey};
@@ -963,11 +964,11 @@ fn vrf_edwards_public(input: &[u8]) {
 
     let ours = PublicKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, input);
     let theirs = VRFPublicKey::try_from(input);
-    assert_eq!(
-        ours.is_ok(),
-        theirs.is_ok(),
-        "edwards public key: rind {:?}, akd_core {:?}",
-        ours.as_ref().err(),
+    // akd_core decompresses and accepts a non-canonical `y` or a sign bit on
+    // `x = 0`. rind rejects those. It must not accept a key akd rejects.
+    assert!(
+        ours.is_err() || theirs.is_ok(),
+        "rind loaded an Edwards public key akd_core refused: {:?}",
         theirs.as_ref().err()
     );
     let Ok(ours) = ours else {
