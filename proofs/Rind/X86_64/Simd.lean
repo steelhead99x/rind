@@ -1,6 +1,8 @@
 module
 public import Aeneas
 public import Rind.Vale
+public import Rind.AesInverse
+public import Rind.Lanes
 @[expose] public section
 set_option linter.style.nameCheck false
 open Aeneas Aeneas.Std Result
@@ -15,7 +17,8 @@ immediate: masked to the bits the instruction reads. `__m128i` is its 128 bits,
 lane 0 lowest.
 
 The AES instructions run FIPS 197's rounds, `Rind.Vale`'s `subBytes`,
-`shiftRows`, and opaque `mixColumns`, the functions Vale's AES spec assumes.
+`shiftRows`, and opaque `mixColumns`, the functions Vale's AES spec assumes,
+and their inverses in `Rind.AesInverse`.
 That these models are what the CPU computes is trusted, as an instruction
 model is for s2n-bignum's and Vale's own proofs.
 -/
@@ -24,22 +27,6 @@ model is for s2n-bignum's and Vale's own proofs.
 @[reducible] def core.core_arch.x86.__m128i : Type := BitVec 128
 
 namespace rind.simd
-
-/-- 64-bit lane `i`. -/
-def lane64 (x : BitVec 128) (i : Nat) : BitVec 64 := x.extractLsb' (64 * i) 64
-
-/-- 32-bit lane `i`. -/
-def lane32 (x : BitVec 128) (i : Nat) : BitVec 32 := x.extractLsb' (32 * i) 32
-
-/-- The vector of four 32-bit lanes, lane 0 lowest. -/
-def ofLanes32 (f : Nat → BitVec 32) : BitVec 128 := f 3 ++ f 2 ++ f 1 ++ f 0
-
-/-- 16-bit lane `i`. -/
-def lane16 (x : BitVec 128) (i : Nat) : BitVec 16 := x.extractLsb' (16 * i) 16
-
-/-- The vector of eight 16-bit lanes, lane 0 lowest. -/
-def ofLanes16 (f : Nat → BitVec 16) : BitVec 128 :=
-  f 7 ++ f 6 ++ f 5 ++ f 4 ++ f 3 ++ f 2 ++ f 1 ++ f 0
 
 /-- Carry-less multiplication's first `k` partial products: `a` shifted left by
 each of `b`'s set bits below `k`, XORed. -/
@@ -184,3 +171,31 @@ round key XORed. -/
 def core.core_arch.x86.aes._mm_aesenclast_si128 (a roundKey : core.core_arch.x86.__m128i) :
     Result core.core_arch.x86.__m128i :=
   ok (subBytes (shiftRows a) ^^^ roundKey)
+
+/-- `_mm_aesdec_si128`, `AESDEC`: `InvShiftRows`, `InvSubBytes`, and
+`InvMixColumns`, then the round key XORed. -/
+def core.core_arch.x86.aes._mm_aesdec_si128 (a roundKey : core.core_arch.x86.__m128i) :
+    Result core.core_arch.x86.__m128i :=
+  ok (invMixColumns (invSubBytes (invShiftRows a)) ^^^ roundKey)
+
+/-- `_mm_aesdeclast_si128`, `AESDECLAST`: `InvShiftRows` and `InvSubBytes`,
+then the round key XORed. -/
+def core.core_arch.x86.aes._mm_aesdeclast_si128 (a roundKey : core.core_arch.x86.__m128i) :
+    Result core.core_arch.x86.__m128i :=
+  ok (invSubBytes (invShiftRows a) ^^^ roundKey)
+
+/-- `_mm_aesimc_si128`, `AESIMC`: `InvMixColumns`. -/
+def core.core_arch.x86.aes._mm_aesimc_si128 (a : core.core_arch.x86.__m128i) :
+    Result core.core_arch.x86.__m128i :=
+  ok (invMixColumns a)
+
+/-- `_mm_unpacklo_epi64`, `PUNPCKLQDQ`: the low 64-bit lanes of `a` then `b`, `a`'s lowest. -/
+def core.core_arch.x86.sse2._mm_unpacklo_epi64 (a b : core.core_arch.x86.__m128i) :
+    Result core.core_arch.x86.__m128i :=
+  ok (lane64 b 0 ++ lane64 a 0)
+
+/-- `_mm_alignr_epi8::<IMM8>`, `PALIGNR`: the 16 bytes from byte `IMM8` of
+`a`:`b`, `b` lowest, or zero past 31. -/
+def core.core_arch.x86.ssse3._mm_alignr_epi8 (IMM8 : Std.I32) (a b : core.core_arch.x86.__m128i) :
+    Result core.core_arch.x86.__m128i :=
+  ok (((a ++ b) >>> (8 * (IMM8.bv.toNat % 256))).setWidth 128)

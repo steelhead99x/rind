@@ -1,6 +1,7 @@
 module
 public import Aeneas
 public import Rind.Aarch64.Types
+public import Rind.Aarch64.Neon
 @[expose] public section
 open Aeneas Aeneas.Std Result
 set_option linter.dupNamespace false
@@ -213,6 +214,10 @@ opaque low.generic.zeroise.zeroise
   {T : Type _} (ZeroableInst : low.generic.zeroise.Zeroable T) :
   Slice T → Result (Slice T)
 
+/-- Wiping a value, which no proof observes: the translation ignores drops. -/
+opaque low.generic.zeroise.zeroise_value {T : Type} (ZeroableInst : low.generic.zeroise.Zeroable T) :
+  T → Result T
+
 /-- `ZeroableRef::new`, as `Rind.Aarch64.Dispatch` models a `ZeroableRef`: its
 value. -/
 def low.generic.zeroise.ZeroableRef.new {T : Type} (value : T) :
@@ -339,16 +344,19 @@ opaque mid.p521.PrivateKey.diffie_hellman
 opaque mid.p521.PublicKey.from_x962_uncompressed
   : Slice Std.U8 → Result (core.result.Result mid.p521.PublicKey error.Error)
 
-/-! AES, whose key expansion, block cipher, and header protection no proof covers on aarch64. -/
+/-! NEON's AES, which CPUs without the crypto extension run, and which no proof covers. -/
 
-opaque mid.aes.Aes.new
-  : cipher.Algorithm → Slice Std.U8 → Result (core.result.Result mid.aes.Aes error.Error)
+opaque low.aarch64.vpaes_armv8.VpaesKey.new
+  : Slice Std.U8 → Result low.aarch64.vpaes_armv8.VpaesKey
 
-opaque mid.aes.Aes.encrypt_block
-  : mid.aes.Aes → Array Std.U8 16#usize → Result (Array Std.U8 16#usize)
+opaque low.aarch64.vpaes_armv8.VpaesKey.encrypt_block
+  : low.aarch64.vpaes_armv8.VpaesKey → Array Std.U8 16#usize → Result (Array Std.U8 16#usize)
 
-opaque mid.aes.Aes.header_protection_mask
-  : mid.aes.Aes → Array Std.U8 16#usize → Result (Array Std.U8 5#usize)
+opaque low.aarch64.vpaes_armv8.VpaesDecKey.new
+  : Slice Std.U8 → Result low.aarch64.vpaes_armv8.VpaesDecKey
+
+opaque low.aarch64.vpaes_armv8.VpaesDecKey.decrypt_block
+  : low.aarch64.vpaes_armv8.VpaesDecKey → Array Std.U8 16#usize → Result (Array Std.U8 16#usize)
 
 /-! MD5, which no proof covers. -/
 
