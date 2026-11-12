@@ -108,8 +108,8 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | PBKDF2 | rind |  |  |  |
 | X25519 | s2n-bignum ✓ |  | BoringSSL ⚡ + curve25519-dalek ⚡ | curve25519-dalek ⚡ |
 | Ed25519 | s2n-bignum ✓ + Graviola |  | curve25519-dalek ⚡ + rind ⚡ |  |
-| P-256 ECDH, ECDSA | s2n-bignum ✓ + Graviola |  | fiat-crypto ✓ + rind ⚡ + Graviola ⚡ |  |
-| P-384 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ + Graviola ⚡ |  | fiat-crypto ✓ + rind ⚡ |  |
+| P-256 ECDH, ECDSA | s2n-bignum ✓ + Graviola |  | fiat-crypto ✓ + rind ⚡ + Graviola ⚡ | fiat-crypto ✓ + rind + Graviola ⚡ |
+| P-384 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ + Graviola ⚡ |  | fiat-crypto ✓ + rind ⚡ | fiat-crypto ✓ + rind |
 | P-521 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ |  | fiat-crypto ✓ + rind ⚡ |  |
 | ML-KEM-768 | s2n-bignum ✓ + Graviola ⚡ |  | mlkem-native ⚡ + OpenSSL ⚡ + Graviola ⚡ | mlkem-native ⚡ + HACL* + Graviola ⚡ |
 | ML-DSA-44, ML-DSA-65, ML-DSA-87 | s2n-bignum ✓ + mldsa-native ⚡ |  | mldsa-native ⚡ + OpenSSL ⚡ | mldsa-native ⚡ + HACL* |
@@ -126,8 +126,17 @@ with portable Rust in place of the assembly armv7 runs regardless.
   32-bit length that a 64-bit AEAD can overflow. SHA-3's, ML-KEM's, and
   ML-DSA's Keccak-f is a hand port of HACL*'s, outside its proofs, as libcrux-sha3 is
   unverified and exposes no permutation. RSA's Montgomery multiplication is
-  rind's 32-bit-limb loop, which wipes its scratch, rather than HACL*'s,
-  which leaves scratch unwiped on the heap.
+  rind's loop, which wipes its scratch, rather than HACL*'s, which leaves
+  scratch unwiped on the heap.
+- portable: RSA and the NIST curves run on 64-bit limbs on 64-bit targets,
+  and on wasm32 built with the `wide-arithmetic` target feature (stable from
+  Rust 1.101), and on armv7's 32-bit limbs on other 32-bit targets, where a
+  64-bit limb's product would be a library call. On 64-bit limbs P-256 and
+  P-384 run fiat-crypto's field and scalar arithmetic whole: LLVM keeps its
+  carry chains in registers there, and on x86_64 armv7's P-256 loop widened
+  to `u128` ran ECDH and verification no faster end to end. The 64-bit columns
+  are the ones this table's portable column describes; 32-bit portable
+  targets run armv7's sources.
 - P-521 on armv7: rind and aws-lc-rs both run [fiat-crypto]'s field
   arithmetic, which spills no carry flag there. A `umaal` multiply ran more
   instructions in [#281], so rind keeps the verified code.
@@ -362,8 +371,12 @@ armv7 runs the same exponentiation over aws-lc's 32-bit ARM `bn_mul_mont`
 routines as aws-lc picks them (`bn_mul8x_mont_neon` with NEON for moduli whose
 width in 32-bit words is a multiple of eight, and `bn_mul_mont_nohw`
 otherwise), and the rest of the arithmetic in rind's portable Rust. The
-portable backend runs it all in that Rust, its Montgomery products by rind's
-32-bit-limb loop.
+portable backend runs it all in that Rust, its Montgomery products by
+rind's loop (Koç, Acar, and Kaliski's CIOS method) and its squarings by
+forming each cross product once before reducing, over 64-bit limbs on
+64-bit targets and 32-bit ones elsewhere. RSA-2048 signing measured level
+with aws-lc's C without assembly on x86_64, and 4096 bits and up slower,
+where aws-lc switches to Karatsuba.
 On x86_64 CPUs with AVX2 but without ADX, the private operation's exponentiation modulo each 1024-bit
 prime of RSA-2048 runs aws-lc's RSAZ, as aws-lc does there: Montgomery
 products on AVX2 over 29-bit limbs, and a 5-bit fixed window whose table
@@ -451,7 +464,9 @@ accumulators (`umaal`) instead, in 560 instructions run to fiat-crypto's
 its bounds checks fail at every 32-bit limb count from 9 to 16. armv7's
 P384 runs rind's Montgomery multiplication and squaring the same way, in
 1,151 instructions to fiat-crypto's 2,254, over fiat-crypto's other field
-and scalar arithmetic.
+and scalar arithmetic. The portable backend runs the same on 32-bit
+targets, and on 64-bit ones over fiat-crypto's 64-bit arithmetic whole, its
+multiplication included.
 
 P384 base point multiplication uses a comb of 20 tables of 16 affine points
 (a 30KB constant table) over 5-bit Booth windows, as aws-lc does. Variable
@@ -561,6 +576,8 @@ On an AMD Ryzen 9 9950X shared with other jobs, so noisy, rind took
 verification at each parameter set. libcrux's, RustCrypto's, and
 OpenSSL's ML-DSA were slower than aws-lc-rs's with AVX2, and libcrux's
 portable ML-DSA was no faster than aws-lc-rs without assembly.
+rind-aws-lc-rs offers the same three parameter sets through aws-lc-rs's
+`PqdsaKeyPair` and `ML_DSA_*` items.
 
 ### Symmetric cryptography
 SHA1 and SHA256 have straightforward implementations using hashing intrinsics

@@ -199,8 +199,8 @@ secret names a zeroing test, or says why it has none.
 | ECDSA verification | `signature::{PublicKey, Signature, VerificationAlgorithm}`, `signature::verify::{ECDSA_P256_SHA256_ASN1, ECDSA_P256_SHA256_FIXED, ECDSA_P256_SHA384_ASN1, ECDSA_P256_SHA512_ASN1, ECDSA_P384_SHA256_ASN1, ECDSA_P384_SHA384_ASN1, ECDSA_P384_SHA384_FIXED, ECDSA_P384_SHA512_ASN1, ECDSA_P521_SHA256_ASN1, ECDSA_P521_SHA384_ASN1, ECDSA_P521_SHA512_ASN1, ECDSA_P521_SHA512_FIXED}` | `ecdsa_secp*_test`, `cavp/ecdsa`, `high::ecdsa::aws_lc_verify`, `aws_lc::evp`, ACVP: `high::ecdsa::acvp_key_ver`, `high::ecdsa::acvp_sig_ver` | `fuzz::verify`, `fuzz::keys` | `crosschecks::public_key_forms`, `crosschecks::ecdsa_digest::ours_verify_theirs` | | |
 | RSA signing and key generation | `signature::{RsaKeyPair, RsaPssSaltLength, RsaSigningAlgorithm}`, `signature::sign::{RSA_PKCS1_SHA256, RSA_PKCS1_SHA384, RSA_PKCS1_SHA512, RSA_PSS_SHA256, RSA_PSS_SHA384, RSA_PSS_SHA512}`, `rsa::KeySize` | `rsa_pkcs1_*_sig_gen_test`, Wycheproof's primality tests: `mid::rsa_priv::generate::test_valid_primes`, `aws_lc::evp`, `mid::rsa_priv::generate::aws_lc_miller_rabin`, modular products: `low::posint::aws_lc_mod_mul`, `low::x86_64::mont::aws_lc_mod_mul`, `low::aarch64::mont::aws_lc_mod_mul`, `low::arm::mont::aws_lc_mod_mul`, exponentiation: `low::posint::aws_lc_mod_exp`, `low::x86_64::mont_exp::aws_lc_mod_exp`, `low::x86_64::rsaz::aws_lc_mod_exp`, `low::x86_64::rsaz_avx512::aws_lc_mod_exp`, ACVP: `high::rsa::acvp_sig_gen`, `mid::rsa_priv::acvp_signature_primitive` | `fuzz::sign`, which also checks that aws-lc-rs loads the key rind generates as it starts; its keys load in `fuzz::keys` | `crosschecks::rsa::sign_verify`, `crosschecks::rsa::pss_salt_lengths`, `crosschecks::rsa::key_generation_2048`, `crosschecks::rsa::key_generation_2048_soak`, `crosschecks::rsa::key_generation_3072`, `crosschecks::rsa::key_generation_4096`, `crosschecks::rsa::key_generation_6144`, `crosschecks::rsa::key_generation_8192`, `crosschecks::rsa::pkcs8_algorithms_agree` | ctgrind: private keys are marked when loaded, `mid::rsa_priv::generate::random_prime_one`; SDE: `low::x86_64::rsaz_avx512::ct_sde_rsa2048`, `low::x86_64::rsaz_avx512::ct_sde_rsa3072`, `low::x86_64::rsaz_avx512::ct_sde_rsa4096`; BINSEC of the Montgomery products and the key check's reduction, not the whole private operation, [planned](/quest/m2/confidence/binsec.md): `test::binsec::ct_binsec_mont_mul`, `test::binsec::ct_binsec_reduce_even` | `zeroing::rsa` |
 | RSA verification | `signature::{PublicKey, RsaVerificationAlgorithm, Signature}`, `signature::verify::{RSA_PKCS1_SHA256, RSA_PKCS1_SHA384, RSA_PKCS1_SHA512, RSA_PSS_SHA256, RSA_PSS_SHA256_ANY_SALT, RSA_PSS_SHA384, RSA_PSS_SHA384_ANY_SALT, RSA_PSS_SHA512, RSA_PSS_SHA512_ANY_SALT}`, `signature::verify::legacy::{RSA_PKCS1_1024_SHA1, RSA_PKCS1_1024_SHA256, RSA_PKCS1_1024_SHA512, RSA_PKCS1_3072_SHA384, RSA_PKCS1_SHA1}`, `rsa::PublicKeyComponents` | `rsa_signature_*_test`, `rsa_pss_*_test`, `rsa_pkcs1_*_sig_gen_test`, `aws_lc::evp`, ACVP: `high::rsa::acvp_sig_ver` | `fuzz::verify`, `fuzz::keys` | `crosschecks::rsa::verification_agrees`, `crosschecks::rsa::refuses_modulus_below_2048_bits`, `crosschecks::rsa::refuses_exponent_over_33_bits`, `crosschecks::rsa::spki_forms_agree` | | |
-| ML-DSA signing | `signature::sign::{MlDsaKeyPair, MlDsaParameterSet, MlDsaSeed, MlDsaSignature, MlDsa44, MlDsa65, MlDsa87}` | `mldsa_*_sign_seed_test`, `mldsa_*_sign_noseed_test`, ACVP: `mid::mldsa::acvp_key_gen`, `mid::mldsa::acvp_sig_gen`; the portable arithmetic against the AVX2 and Neon routines: `low::generic::mldsa_poly::backend_matches_port` | `fuzz::keys`, which signs with each key it loads | `crosschecks::ml_dsa_44::sign_verify`, `crosschecks::ml_dsa_44::expanded`, and their ML-DSA-65 and ML-DSA-87 twins | ctgrind: the seed `mid::mldsa::from_seed`, the expanded key `mid::mldsa::from_secret_key`, and the randomness `mid::mldsa::sign` draws, and every value derived from them; proof: s2n-bignum's _SAFE theorems, but not for x86_64's NTT and inverse NTT, for the routines [ALGORITHMS.md](ALGORITHMS.md#s2n-bignums-constant-time-theorems) lists with one | `zeroing::ml_dsa` |
-| ML-DSA verification | `signature::{PublicKey, VerificationAlgorithm}`, `signature::verify::{ML_DSA_44, ML_DSA_65, ML_DSA_87}` | `mldsa_*_verify_test`, ACVP: `mid::mldsa::acvp_sig_ver` | `fuzz::verify`, `fuzz::keys` | `crosschecks::ml_dsa_44::sign_verify` and its twins, both ways | | |
+| ML-DSA signing | `signature::sign::{MlDsaKeyPair, MlDsaParameterSet, MlDsaSeed, MlDsaSignature, MlDsa44, MlDsa65, MlDsa87}` | `mldsa_*_sign_seed_test`, `mldsa_*_sign_noseed_test`, ACVP: `mid::mldsa::acvp_key_gen`, `mid::mldsa::acvp_sig_gen`; the portable arithmetic against the AVX2 and Neon routines: `low::generic::mldsa_poly::backend_matches_port` | `fuzz::keys`, which signs with each key it loads | `crosschecks::ml_dsa_44::sign_verify`, `crosschecks::ml_dsa_44::expanded`, and their ML-DSA-65 and ML-DSA-87 twins. rind-aws-lc-rs's keys.rs tests ml_dsa, ml_dsa_rejected, and ml_dsa_malformed check the same items, generated keys, and wrong-length, mismatched, and malformed inputs | ctgrind: the seed `mid::mldsa::from_seed`, the expanded key `mid::mldsa::from_secret_key`, and the randomness `mid::mldsa::sign` draws, and every value derived from them; rind-aws-lc-rs's ctgrind tests ml_dsa, which wraps an expanded key, and ml_dsa_pkcs8_sign_export, which loads PKCS#8 in seed and expanded form, signs, and exports; proof: s2n-bignum's _SAFE theorems, but not for x86_64's NTT and inverse NTT, for the routines [ALGORITHMS.md](ALGORITHMS.md#s2n-bignums-constant-time-theorems) lists with one | `zeroing::ml_dsa`. rind-aws-lc-rs's zeroing tests ml_dsa, ml_dsa_generated, ml_dsa_from_pkcs8, and ml_dsa_expanded check the adapter's copies from a seed, a generated key, PKCS#8, and an expanded key |
+| ML-DSA verification | `signature::{PublicKey, VerificationAlgorithm}`, `signature::verify::{ML_DSA_44, ML_DSA_65, ML_DSA_87}` | `mldsa_*_verify_test`, ACVP: `mid::mldsa::acvp_sig_ver` | `fuzz::verify`, `fuzz::keys` | `crosschecks::ml_dsa_44::sign_verify` and its twins, both ways. rind-aws-lc-rs's keys.rs test ml_dsa also checks raw keys, SPKI, and parsed public keys | | |
 | RSA-OAEP | `rsa::{Ciphertext, DecryptingKey, EncryptingKey, OaepAlgorithm, Plaintext, OAEP_SHA256, OAEP_SHA384, OAEP_SHA512}`, `rsa::legacy::OAEP_SHA1` | `rsa_oaep_*_test`, `aws_lc::evp`, ACVP's decryption primitive: `mid::rsa_priv::acvp_decryption_primitive` | `fuzz::oaep` | `crosschecks::rsa::encrypt_decrypt`, `crosschecks::rsa::decrypt_agrees` | ctgrind: private keys are marked when loaded, `high::oaep::stays_secret`, `high::pkcs1::encode_oaep`; SDE: as RSA signing; BINSEC of the padding check: `test::binsec::ct_binsec_rsa_oaep_padding`, and of the Montgomery products, as RSA signing | `zeroing::rsa_oaep` |
 | RSA blind signatures | `blind_rsa::{Algorithm, BlindSignature, BlindedMessage, Blinding, KeyPair, PublicKey, Signature, RSABSSA_SHA384_PSS_DETERMINISTIC, RSABSSA_SHA384_PSS_RANDOMIZED, RSABSSA_SHA384_PSSZERO_DETERMINISTIC, RSABSSA_SHA384_PSSZERO_RANDOMIZED}` | `rsa_pss_2048_sha384_mgf1_48_test`, `rsa_pss_4096_sha384_mgf1_48_test`, RFC 9474: `high::blind_rsa::rfc9474_vectors`, RFC 9578's token: `high::blind_rsa::rfc9578_token` | `fuzz::blind_rsa`, against itself, as no reference runs on aws-lc | `crosschecks::blind_rsa::matches_blind_rsa_signatures`, against blind-rsa-signatures, as aws-lc-rs has no blind RSA | ctgrind: private keys are marked when loaded, `high::blind_rsa::stays_secret`; SDE and BINSEC: as RSA signing | `zeroing::blind_rsa` |
 | Key encodings | `encoding::{Pkcs8, Sec1, Spki}` | `aws_lc::evp` (PKCS#8, SPKI); the other keys in the files above | `fuzz::keys` | `crosschecks::encodings` | none: a key is marked once parsed, and its DER's lengths are not secret | `zeroing::ecdh`, `zeroing::ecdsa`, `zeroing::ed25519`, `zeroing::rsa` |
@@ -220,6 +220,43 @@ fails the run, as does a failed open that leaves plaintext in the caller's
 buffer.
 
 Adapter fuzz targets: `fuzz::rustls`, `fuzz::dimpl`, `fuzz::str0m`.
+
+## Running the tools
+
+On Linux, `just armv7` runs the nightly armv7 job: it builds and lints for
+32-bit ARM, then runs the tests under qemu with the ARMv8 crypto extension,
+with NEON alone, and with NEON denied. `just qemu <shell>` runs an entry of
+the nightly `qemu` job, which lints and tests the portable backend: `s390x`
+(big-endian), `riscv64`, `riscv64-musl`, `loongarch64`, `armv6` and
+`armv6-softfloat` (the Raspberry Pi 1's core), or `powerpc64le`, `powerpc64`,
+and `powerpc` (the last two big-endian) under qemu, or `i686` (32-bit x86)
+natively.
+`just miri` runs the nightly `miri` job, the portable backend's tests under
+Miri, on x86_64, and `just miri s390x-unknown-linux-gnu` big-endian.
+`nix develop .#ctgrind --command admin/ctgrind` runs the nightly
+constant-time checks under valgrind, `nix develop .#sde --command
+admin/ct-sde` those of the AVX-512, VAES, SHA extension, and SHA512 code
+valgrind cannot run, under Intel SDE, and `nix develop .#ct-qemu --command
+admin/ct-qemu` those of the armv7 crypto extension code valgrind hides, under
+qemu; on an aarch64 host, `nix develop .#ct-qemu-aarch64 --command
+admin/ct-qemu --target aarch64-unknown-linux-gnu` those of the aarch64 code
+that runs only with SHA3, and `nix develop .#binsec --command admin/ct-binsec
+[--exact] [test]` has BINSEC prove the region of each `ct_binsec_...` test
+constant time for every secret, symbolically. None of them but BINSEC, which
+sees divisions, can see an instruction whose timing depends on its
+operands, so `admin/ct-vartime`, which `just check` runs when rind changes,
+scans its release builds for every architecture it builds for, and its
+portable backend's on x86_64 and armv7, for divisions and floating-point arithmetic, and fails on one that `admin/ct-vartime.toml` does
+not list as taking only public operands.
+`nix develop .#dudect --command admin/timing dudect` times each secret
+operation whose secret the API lets it set (not key generation, encapsulation,
+or varied ML-KEM decapsulation keys) on two classes of secret, as dudect does,
+and `admin/timing marvin` runs the Marvin toolkit against RSA-OAEP decryption. They need quiet
+hardware: the weekly `timing` workflow runs them on GitHub's runners, and a
+shared host adds noise that no gate removes.
+`nix develop .#prove --command admin/prove` checks rind's HOL Light proofs of
+its assembly, then translates the Rust under proof to Lean with Aeneas and
+checks the proofs in [`proofs/`](proofs/README.md).
 
 [Wycheproof]: https://github.com/C2SP/wycheproof
 [CCTV]: https://github.com/C2SP/CCTV

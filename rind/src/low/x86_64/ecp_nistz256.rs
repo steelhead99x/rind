@@ -148,7 +148,7 @@ mod tests {
 
     use super::super::adx_mux::tests::Rng;
     use super::*;
-    use crate::low::generic::p256;
+    use crate::low::generic::limb64::p256;
     use crate::test::bignum::below;
 
     // aws-lc's point additions whose `B` or `A` is affine, which rind's
