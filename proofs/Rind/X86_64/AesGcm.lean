@@ -2,7 +2,7 @@ import Rind.X86_64.AesGcmGlue
 import Rind.X86_64.AesCipher
 import Rind.X86_64.Ghash
 import Rind.X86_64.AeadDispatch
-open Aeneas Aeneas.Std Result rind.vale
+open Aeneas Aeneas.Std Result rind.vale rind.simd
 
 namespace rind.x86_64
 
@@ -17,7 +17,7 @@ def RunsValeAesGcm : Prop :=
   low.x86_64.cpu.HaveVaesAvx2ForAesGcm.check = ok none ∧
   (∃ t, low.x86_64.cpu.HaveAvxMovbeForAesGcm.check = ok (some t))
 
-theorem RunsValeAesGcm.aesNi (h : RunsValeAesGcm) : RunsAesNi :=
+theorem RunsValeAesGcm.aesNi (h : RunsValeAesGcm) : RunsAesHw :=
   ⟨h.1, h.2.1, h.2.2.1⟩
 
 /-- An AES-GCM key on Vale's tier, for the AES key `kw` and `alg`. -/
@@ -27,7 +27,7 @@ def Ready (alg : Algorithm) (kw : List (BitVec 32)) (g : mid.aes_gcm.AesGcm) : P
 theorem encrypt_zero (hk : low.x86_64.aes.HwKey) (alg : Algorithm) (kw : List (BitVec 32))
     (h : HwKeyIs alg kw hk) :
     low.x86_64.aes.AesKey.encrypt_block (.Hw hk) (Std.Array.repeat 16#usize 0#u8) =
-      ok (low.x86_64.aes.store (aesEncrypt alg kw (mkfour 0 0 0 0))) := by
+      ok (storeBytes (aesEncrypt alg kw (mkfour 0 0 0 0))) := by
   rw [hw_encrypt_block hk alg kw h, load_zero]
 
 @[step]
