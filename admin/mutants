@@ -184,7 +184,7 @@ if [ "${1:-}" = --portable ]; then
         --file rind/src/low/portable/keccak.rs
         --file rind/src/low/portable/sha.rs
         --file rind/src/low/generic/bignum.rs
-        --re 'rind/src/low/portable/(chacha20|cpu|keccak|sha)\.rs:| in mont_(sqr|mul_limbs)$'
+        --re 'rind/src/low/portable/(chacha20|cpu|keccak|sha)\.rs:|mont_sqr|mont_mul_limbs'
     )
     rows=()
     base=()

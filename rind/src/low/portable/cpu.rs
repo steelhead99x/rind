@@ -52,3 +52,36 @@ pub(in crate::low) fn ct_compare_16(a: &[u8; 16], b: &[u8; 16]) -> usize {
     let diff = diff as u64 | (diff >> 64) as u64;
     (diff as u32 | (diff >> 32) as u32) as usize
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn needs_nothing_and_keeps_no_state() {
+        assert_eq!(missing_cpu_feature(), None);
+        assert_eq!(enter_cpu_state(), 0);
+        leave_cpu_state(0);
+        leave_cpu_state(1);
+    }
+
+    #[test]
+    fn zero_and_compare() {
+        let mut buf = [1u8, 2, 3, 4];
+        // SAFETY: `buf` is four writable bytes.
+        unsafe { zero_bytes(buf.as_mut_ptr(), 3) };
+        assert_eq!(buf, [0, 0, 0, 4]);
+
+        assert_eq!(ct_compare_bytes(b"", b"ab"), 0);
+        assert_eq!(ct_compare_bytes(b"ab", b"ab"), 0);
+        assert_eq!(ct_compare_bytes(b"ab", b"a"), 0);
+        assert_ne!(ct_compare_bytes(b"ab", b"ac"), 0);
+        assert_ne!(ct_compare_bytes(b"ab", b"xb"), 0);
+
+        assert_eq!(ct_compare_16(&[0; 16], &[0; 16]), 0);
+        let mut other = [0u8; 16];
+        other[15] = 1;
+        assert_ne!(ct_compare_16(&[0; 16], &other), 0);
+    }
+}

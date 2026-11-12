@@ -47,7 +47,7 @@ exclude_re = [
   'rind/src/low/arm/cpu\.rs:(38|70):\d+: replace << with >>( in detect)?$',
   'rind/src/low/arm/keccak1600_armv4\.rs:\d+:\d+: replace \| with \^ in (deinterleave|evens|interleave|spread)$',
   'rind/src/low/arm/mont\.rs:\d+:\d+: replace \| with \^ in reduce_limb$',
-  'rind/src/low/generic/bignum\.rs:\d+:\d+: replace \| with \^ in (add_masked|bignum_add|bignum_cmp_lt|bignum_modadd|bignum_montredc|bignum_mul|cmp_lt_limbs|gcd_step|join|mod_double|mod_halve|mont_mul|sub_limbs_masked|sub_masked)$',
+  'rind/src/low/generic/bignum\.rs:\d+:\d+: replace \| with \^ in (add_masked|bignum_add|bignum_cmp_lt|bignum_modadd|bignum_montredc|bignum_mul|cmp_lt_limbs|gcd_step|join|mod_double|mod_halve|mont_mul|mont_mul_limbs|sub_limbs_masked|sub_masked)$',
   'rind/src/low/generic/chacha20\.rs:\d+:\d+: replace \| with \^ in quarter_round$',
   'rind/src/low/generic/mldsa_poly\.rs:\d+:\d+: replace \| with \^ in (mldsa_polyz_unpack_17|mldsa_polyz_unpack_19|mldsa_rej_uniform_vartime)$',
   'rind/src/low/generic/mlkem\.rs:\d+:\d+: replace \| with \^ in (mlkem_compress_d10|mlkem_compress_d4|mlkem_frombytes)$',
@@ -97,6 +97,9 @@ exclude_re = [
   'rind/src/high/sec1\.rs:14:\d+: replace \+ with \*$',
   'rind/src/high/signature\.rs:(229|1683):\d+: replace \+ with \*$',
   'rind/src/low/generic/bignum\.rs:331:\d+: replace \+ with \* in mont_mul$',
+  # `n + 2` and `n * 2` are the same at two limbs, and a longer modulus only
+  # adds zero limbs past the window the loop uses.
+  'rind/src/low/generic/bignum\.rs:363:\d+: replace \+ with \* in mont_mul_limbs$',
   'rind/src/low/x86_64/mlkem768_sample_poly_ntt_8x\.rs:229:\d+: replace \+ with \* in _squeeze_rate_and_reject$',
   'rind/src/mid/mldsa\.rs:(354|447|492):\d+: replace \+ with \* in (keygen|public_key_from_secret|sign_internal)$',
   'rind/src/mid/rsa_priv\.rs:311:\d+: replace / with \*$',

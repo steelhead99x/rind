@@ -116,4 +116,26 @@ mod tests {
         );
         assert_eq!(s[24], 0x20d06cd26a8fbf5c);
     }
+
+    #[test]
+    fn widths() {
+        let mut single = [0u64; 25];
+        sha3_keccak_f1600(&mut single, &RC);
+
+        let mut one = [[0u64; 25]; 4];
+        sha3_keccak_nof4_f1600::<1>(&mut one, &RC);
+        assert_eq!(one[0], single);
+        assert_eq!(one[1], [0; 25]);
+        assert_eq!(one[3], [0; 25]);
+
+        let mut four = [[1u64; 25]; 4];
+        let mut each = [1u64; 25];
+        sha3_keccak_f1600(&mut each, &RC);
+        sha3_keccak4_f1600(&mut four, &RC);
+        assert_eq!(four, [each; 4]);
+
+        let mut none = [[7u64; 25]; 4];
+        sha3_keccak_nof4_f1600::<0>(&mut none, &RC);
+        assert_eq!(none, [[7u64; 25]; 4]);
+    }
 }

@@ -739,3 +739,67 @@ mod tests {
         assert_eq!((nonzero(0), nonzero(1), nonzero(1 << 63)), (0, 1, 1));
     }
 }
+
+/// `mont_sqr` and `mont_mul_limbs` compile only for the portable backend.
+/// The x86_64 and aarch64 tests above call `mont_mul` and compare it with
+/// assembly, which this backend does not have.
+#[cfg(all(test, rind_backend = "portable"))]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod portable_mont {
+    use super::*;
+
+    /// `x * y * 2^{-64} mod m` for one limb, by inverting `2^64` directly.
+    fn reference(x: u64, y: u64, m: u64) -> u64 {
+        fn inv(a: u128, m: u128) -> u128 {
+            let (mut t, mut new_t) = (0i128, 1i128);
+            let (mut r, mut new_r) = (m as i128, a as i128);
+            while new_r != 0 {
+                let q = r / new_r;
+                (t, new_t) = (new_t, t - q * new_t);
+                (r, new_r) = (new_r, r - q * new_r);
+            }
+            if t < 0 {
+                t += m as i128;
+            }
+            t as u128
+        }
+        let m = m as u128;
+        let r = (1u128 << 64) % m;
+        let prod = (x as u128 * y as u128) % m;
+        (prod * inv(r, m) % m) as u64
+    }
+
+    #[test]
+    fn one_limb_matches_the_definition() {
+        let m = [0xffff_ffff_ffff_ffc5u64];
+        let mut n0 = [0u64];
+        bignum_negmodinv(&mut n0, &m);
+        for (x, y) in [
+            (1u64, 1u64),
+            (3, 3),
+            (u64::MAX - 4, 9),
+            (m[0] - 1, m[0] - 2),
+        ] {
+            let mut got = [0u64];
+            mont_mul(&mut got, &[x], &[y], &m, n0[0]);
+            assert_eq!(got[0], reference(x, y, m[0]), "{x} * {y}");
+            let mut sqr = [0u64];
+            mont_sqr(&mut sqr, &[x], &m, n0[0]);
+            assert_eq!(sqr[0], reference(x, x, m[0]));
+        }
+    }
+
+    #[test]
+    fn two_limbs_square_matches_product() {
+        let m = [0xffff_ffff_ffff_ffc5u64, 0x0000_0000_0000_0001];
+        let x = [0x0123_4567_89ab_cdef, 0x0fed_cba9_8765_4321];
+        let mut n0 = [0u64];
+        bignum_negmodinv(&mut n0, &m[..1]);
+        let mut mul = [0u64; 2];
+        let mut sqr = [0u64; 2];
+        mont_mul(&mut mul, &x, &x, &m, n0[0]);
+        mont_sqr(&mut sqr, &x, &m, n0[0]);
+        assert_eq!(sqr, mul);
+        assert_ne!(sqr, [0, 0]);
+    }
+}
