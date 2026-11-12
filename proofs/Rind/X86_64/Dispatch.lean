@@ -298,8 +298,7 @@ The model departs from the Rust in seven ways, and adds no axiom:
   `PublicKey::new` and `from_spki` read, is left out: no theorem is about
   loading a peer's key, and `agree` takes the peer's bytes.
 - P-256's `random` is `p256::PrivateKey::generate`, which
-  `Rind.X86_64.P256Dispatch` names: the translation's opaque `new_random` on
-  a target with no P-256 theorem, and otherwise a model of its draws.
+  `Rind.X86_64.P256Dispatch` models by its draws.
 - `Ops<K::Key>` holds nothing, and `Keyed::agree` calls `K::agree` directly: `Ops`
   is private to `high::agreement`, whose only value of one is
   `Keyed::private_key`'s, of `K`'s own functions. `admin/prove` checks that
