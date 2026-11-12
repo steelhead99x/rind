@@ -47,6 +47,11 @@ mod high;
 /// Errors.  Common to all layers.
 mod error;
 
+/// The FIPS module's random generator, which [`mid::rng`] draws from in the
+/// module's build.
+#[cfg(any(test, rind_fips))]
+mod fips_rng;
+
 /// Test infrastructure.
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -317,6 +322,43 @@ pub mod blind_rsa {
         Algorithm, BlindSignature, BlindedMessage, Blinding, KeyPair, PublicKey,
         RSABSSA_SHA384_PSS_DETERMINISTIC, RSABSSA_SHA384_PSS_RANDOMIZED,
         RSABSSA_SHA384_PSSZERO_DETERMINISTIC, RSABSSA_SHA384_PSSZERO_RANDOMIZED, Signature,
+    };
+}
+
+/// Verifiable random functions: ECVRF ([RFC 9381]) on edwards25519 and P-256.
+///
+/// The holder of a secret key proves an output for any input; anyone with
+/// the public key verifies the proof and recovers the same output, which is
+/// pseudorandom to anyone without the secret key. Key transparency uses them
+/// to map identities to positions in its tree.
+///
+/// Each suite encodes its input to the curve by try-and-increment, whose
+/// running time depends on the input, so an input that must stay secret
+/// from an observer of timing needs another suite (RFC 9381 section 5.4.1.1).
+/// [`PublicKey::verify`](vrf::PublicKey::verify) always validates the key
+/// (`validate_key = TRUE`).
+///
+/// ```
+/// # fn main() -> Result<(), rind::Error> {
+/// use rind::vrf::*;
+///
+/// let secret_key = SecretKey::generate(&ECVRF_EDWARDS25519_SHA512_TAI)?;
+/// let (proof, output) = secret_key.prove(b"alice@example.com");
+///
+/// // A verifier parses the public key and recovers the same output.
+/// let encoded = secret_key.public_key().as_ref();
+/// let public_key = PublicKey::new(&ECVRF_EDWARDS25519_SHA512_TAI, encoded)?;
+/// let verified = public_key.verify(b"alice@example.com", proof.as_ref())?;
+/// assert_eq!(verified.as_ref(), output.as_ref());
+/// # Ok(())
+/// # }
+/// ```
+///
+/// [RFC 9381]: https://www.rfc-editor.org/rfc/rfc9381.html
+pub mod vrf {
+    pub use crate::high::vrf::{
+        Algorithm, ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI, Output, Proof, PublicKey,
+        SecretKey, SecretKeyBytes,
     };
 }
 

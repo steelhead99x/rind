@@ -71,11 +71,11 @@ pub(super) struct ShareBytes {
 
 impl Zeroable for ShareBytes {}
 
+// Portable and armv7 implement `Zeroable` on the dalek scalar in
+// `mid::portable::edwards25519`. `p256::Scalar` implements it in `mid::p256`.
+// Ristretto255 re-exports the edwards25519 scalar, so it is covered here.
+#[cfg(not(any(rind_backend = "arm", rind_backend = "portable")))]
 impl Zeroable for crate::mid::edwards25519::Scalar {}
-impl Zeroable for crate::mid::p256::Scalar {}
-// Native ristretto255 re-exports edwards25519's scalar. The portable one is its own type.
-#[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
-impl Zeroable for crate::mid::ristretto255::Scalar {}
 
 /// Heap buffer of secret `T`, wiped on drop, capacity included.
 ///

@@ -97,6 +97,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "akd_core"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce56523cc567545912841354a5efe22db939f87eb4e817372466491c7845053f"
+dependencies = [
+ "async-trait",
+ "curve25519-dalek 4.1.3",
+ "ed25519-dalek 2.2.0",
+ "hex",
+ "protobuf-codegen",
+ "protobuf-parse",
+ "zeroize",
+]
+
+[[package]]
 name = "alloca"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -212,7 +227,7 @@ dependencies = [
  "nom 7.1.3",
  "num-traits",
  "rusticata-macros",
- "thiserror",
+ "thiserror 2.0.21",
  "time",
 ]
 
@@ -1398,6 +1413,7 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "sha2 0.10.9",
+ "signature 2.2.0",
  "subtle",
  "zeroize",
 ]
@@ -1609,7 +1625,7 @@ dependencies = [
  "hex",
  "itertools 0.14.0",
  "rand_core 0.6.4",
- "thiserror",
+ "thiserror 2.0.21",
  "visibility",
  "zeroize",
  "zeroize_derive",
@@ -1770,9 +1786,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 6.0.0",
  "rand_core 0.10.1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2030,6 +2048,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66de62217b456dfbbba2bed965a134a4df57c48f0eac4c772018aee528e72244"
 dependencies = [
  "digest 0.11.3",
+]
+
+[[package]]
+name = "home"
+version = "0.5.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3180,6 +3207,12 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "linux-raw-sys"
+version = "0.4.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
+
+[[package]]
+name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
@@ -3419,7 +3452,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "thiserror",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "url",
@@ -3481,7 +3514,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "thiserror",
+ "thiserror 2.0.21",
  "tls_codec",
  "wasm-bindgen-test",
  "zeroize",
@@ -3515,7 +3548,7 @@ dependencies = [
  "openmls_traits",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3541,7 +3574,7 @@ dependencies = [
  "rand_core 0.10.1",
  "rand_core 0.6.4",
  "sha2 0.11.1",
- "thiserror",
+ "thiserror 2.0.21",
  "tls_codec",
 ]
 
@@ -3554,7 +3587,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -4044,6 +4077,57 @@ dependencies = [
 ]
 
 [[package]]
+name = "protobuf"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d65a1d4ddae7d8b5de68153b48f6aa3bba8cb002b243dbdbc55a5afbc98f99f4"
+dependencies = [
+ "once_cell",
+ "protobuf-support",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "protobuf-codegen"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d3976825c0014bbd2f3b34f0001876604fe87e0c86cd8fa54251530f1544ace"
+dependencies = [
+ "anyhow",
+ "once_cell",
+ "protobuf",
+ "protobuf-parse",
+ "regex",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "protobuf-parse"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4aeaa1f2460f1d348eeaeed86aea999ce98c1bded6f089ff8514c9d9dbdc973"
+dependencies = [
+ "anyhow",
+ "indexmap",
+ "log",
+ "protobuf",
+ "protobuf-support",
+ "tempfile",
+ "thiserror 1.0.69",
+ "which",
+]
+
+[[package]]
+name = "protobuf-support"
+version = "3.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e36c2f31e0a47f9280fb347ef5e461ffcd2c52dd520d8e216b52f93b0b0d7d6"
+dependencies = [
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "pyo3"
 version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4317,6 +4401,7 @@ dependencies = [
 name = "rind"
 version = "0.3.2"
 dependencies = [
+ "akd_core",
  "aws-lc-rs",
  "aws-lc-sys",
  "blind-rsa-signatures",
@@ -4343,6 +4428,7 @@ dependencies = [
  "serde",
  "serde_json",
  "subtle",
+ "vrf-rfc9381",
 ]
 
 [[package]]
@@ -4648,6 +4734,19 @@ dependencies = [
 
 [[package]]
 name = "rustix"
+version = "0.38.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdb5bc1ae2baa591800df16c9ca78619bf65c0488b41b96ccec5d11220d8c154"
+dependencies = [
+ "bitflags",
+ "errno",
+ "libc",
+ "linux-raw-sys 0.4.15",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rustix"
 version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
@@ -4655,7 +4754,7 @@ dependencies = [
  "bitflags",
  "errno",
  "libc",
- "linux-raw-sys",
+ "linux-raw-sys 0.12.1",
  "windows-sys 0.61.2",
 ]
 
@@ -4792,7 +4891,7 @@ dependencies = [
  "rand 0.9.5",
  "rustc-hash",
  "slab",
- "thiserror",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -5201,8 +5300,17 @@ dependencies = [
  "fastrand",
  "getrandom 0.4.3",
  "once_cell",
- "rustix",
+ "rustix 1.1.6",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "thiserror"
+version = "1.0.69"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
+dependencies = [
+ "thiserror-impl 1.0.69",
 ]
 
 [[package]]
@@ -5211,7 +5319,18 @@ version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09e52cb86a36cede5cb101bf8908837b3e4c6e5e59fe7fd85c23fb56200d189e"
 dependencies = [
- "thiserror-impl",
+ "thiserror-impl 2.0.21",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "1.0.69"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -5551,6 +5670,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "vrf-rfc9381"
+version = "0.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca0491d13f5be35d0c97ba64619908993b9165f0cfa1f2575f47623a2b2f5642"
+dependencies = [
+ "digest 0.11.3",
+ "getrandom 0.4.3",
+ "hash2curve",
+ "p256 0.14.0",
+ "rfc6979 0.6.0",
+ "sha2 0.11.1",
+ "signature 3.0.0",
+ "subtle",
+ "thiserror 2.0.21",
+ "zeroize",
+]
+
+[[package]]
 name = "wait-timeout"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5704,6 +5841,18 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "which"
+version = "4.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87ba24419a2078cd2b0f2ede2691b6c66d8e47836da3b6db8265ebad47afbfc7"
+dependencies = [
+ "either",
+ "home",
+ "once_cell",
+ "rustix 0.38.44",
 ]
 
 [[package]]
@@ -5973,7 +6122,7 @@ dependencies = [
  "nom 7.1.3",
  "oid-registry",
  "rusticata-macros",
- "thiserror",
+ "thiserror 2.0.21",
  "time",
 ]
 
