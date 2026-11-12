@@ -270,8 +270,13 @@ hol_light_proofs=(
     "x86_64 ct_compare_16.bin rind::low::x86_64::cpu::ct_compare_16"
     "x86_64 bn_mul_mont_nohw.o rind::low::x86_64::mont::bn_mul_mont_nohw"
 )
+# The specs that no proof above loads yet, each loaded into the named target's
+# program so its known-answer tests run.
+hol_light_specs=(
+    "x86_64 common/chacha20poly1305.ml"
+)
 hol_light() {
-    local dir=$out/hol-light arches arch file path proof
+    local dir=$out/hol-light arches arch file path proof spec
     s2n_bignum_model
     rm -rf "$dir"
     mkdir -p "$dir"
@@ -288,6 +293,10 @@ hol_light() {
         *.o) asm_function "$arch" "$path" "$dir/$arch/$file" ;;
         esac
         echo "loadt \"$arch/${file%.*}.ml\";;" >>"$dir/$arch.ml"
+    done
+    for spec in "${hol_light_specs[@]}"; do
+        read -r arch file <<<"$spec"
+        echo "needs \"$file\";;" >>"$dir/$arch.ml"
     done
     for arch in $arches; do
         printf 'check_axioms ();; Printf.printf "%s: %%.0f s\\n" (Unix.time () -. prove_start);;\n' "$arch" >>"$dir/$arch.ml"
