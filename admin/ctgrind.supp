@@ -1,14 +1,5 @@
 # Memcheck findings in dependencies that rind cannot fix in its own code.
 
-# libcrux decides whether a tag verified, then branches on that decision. The
-# outcome is public, but libcrux does not declassify it for memcheck.
-{
-   libcrux-aes-gcm-decrypt-outcome
-   Memcheck:Cond
-   src:aes_gcm.rs:99
-   fun:*libcrux_aes*
-}
-
 # On armv7 without NEON, memcheck reports aws-lc's integer SHA-512 at the
 # `beq` at sha512_block_data_order_nohw+460, which reads only the Z flag of
 # `tst r14,#1` (the K512 pointer) at +456. That `tst` takes its carry from the
@@ -18,10 +9,96 @@
 # the default layout. With one instruction per superblock it flagged only the
 # readers of tests on round constants and pointers, even the `bne` after
 # `teq r1,r2`, which compares two public pointers.
+# See UPSTREAM.md, "Memcheck blames a public flag on a secret carry".
 {
    aws-lc-sha512-armv4-nohw-flags
    Memcheck:Cond
    fun:rind_*_sha512_block_data_order_nohw
+}
+
+# rustls-pki-types parses PEM a line at a time: it finds each line's end and
+# tests each line for a `-----BEGIN`/`-----END` boundary, comparing secret
+# base64 characters with public delimiters. Whether a byte is a delimiter is
+# public by that crate's design. Frames are v0-mangled, or short names where a
+# release build inlined them; each entry ends in a rustls-pki-types PEM frame.
+{
+   rustls-pki-types-pem-line-scan
+   Memcheck:Cond
+   fun:*16rustls_pki_types3pem*
+}
+{
+   rustls-pki-types-pem-line-compare
+   Memcheck:Cond
+   fun:bcmp
+   ...
+   fun:*16rustls_pki_types3pem*
+}
+{
+   rustls-pki-types-pem-line-slice
+   Memcheck:Cond
+   fun:*4core5slice*
+   ...
+   fun:*16rustls_pki_types3pem*
+}
+{
+   rustls-pki-types-pem-line-scan-inlined
+   Memcheck:Cond
+   fun:position<u8, rustls_pki_types::pem::*
+   ...
+   fun:*16rustls_pki_types3pem*
+}
+{
+   rustls-pki-types-pem-line-scan-inlined-from-pem-slice
+   Memcheck:Cond
+   fun:position<u8, rustls_pki_types::pem::*
+   ...
+   fun:*16rustls_pki_types*3pem9PemObject14from_pem_slice*
+}
+{
+   rustls-pki-types-pem-read-until-newline-inlined
+   Memcheck:Cond
+   fun:{closure#0}<u8, rustls_pki_types::pem::read_until_newline::*
+   ...
+   fun:*16rustls_pki_types3pem*
+}
+{
+   rustls-pki-types-pem-line-end-inlined
+   Memcheck:Cond
+   fun:{closure#0}
+   fun:read_section<*
+   ...
+   fun:*16rustls_pki_types3pem*
+}
+{
+   rustls-pki-types-pem-boundary-prefix-inlined
+   Memcheck:Cond
+   fun:strip_prefix<u8, *
+   fun:is_end
+   ...
+   fun:*16rustls_pki_types3pem*
+}
+{
+   rustls-pki-types-pem-boundary-inlined
+   Memcheck:Cond
+   fun:is_end
+   ...
+   fun:*16rustls_pki_types3pem*
+}
+
+# Its secret base64 decoder branches on each character's class (whitespace,
+# padding, invalid, or data), which PEM framing makes public, then maps data
+# characters to values without branching or indexing on them. Only those
+# branches are suppressed; a secret-dependent address there still reports.
+{
+   rustls-pki-types-base64-character-class
+   Memcheck:Cond
+   fun:*16rustls_pki_types6base646decode*13decode_secret*
+}
+{
+   rustls-pki-types-base64-character-class-inlined
+   Memcheck:Cond
+   fun:decode<fn(u8) -> rustls_pki_types::base64::CodePoint>
+   fun:*16rustls_pki_types6base6413decode_secret
 }
 
 # rind-rcgen's PEM codec (`rind-rcgen/src/pem.rs`) frames base64ct's, whose

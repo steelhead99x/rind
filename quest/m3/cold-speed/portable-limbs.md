@@ -8,7 +8,7 @@ On the portable backend's 64-bit targets (riscv64, loongarch64, s390x, powerpc64
 
 Planned from the 2026-11-09 speed audit. Decided with the maintainer that day:
 
-- Scope: correctness tooling, speed measurement, and portable speed ✅ (rejected: no portable speed work, correctness only). This lifts [the targets epic](/quest/m2/adoption/targets/README.md)'s non-goal that speed on the new architectures waits for a consumer.
+- Scope: correctness tooling, speed measurement, and portable speed ✅ (rejected: no portable speed work, correctness only). This lifts the targets epic's non-goal that speed on the new architectures waits for a consumer.
 - Milestone: cold-tier speed work joins m3 ✅ (rejected: m2 beside the targets, m4).
 - AGENTS.md's speed rule: run the fastest permissively licensed source; take a formally verified one only where it measures as fast at every size; otherwise run the fastest and plan its proof ✅ (rejected: verified code within about 10% on cold tiers only, or everywhere, as AGENTS.md said).
 
@@ -40,8 +40,3 @@ Guidance:
 - A `u128` product must compile to multiply instructions, never a call whose time could depend on a secret: add the 64-bit paths to ctgrind on the portable build.
 - Proof status: code that stays fiat-crypto's keeps its proof. Each rind loop that wins runs unproven, and the PR suggests its proof quest for [the verification epic](/quest/m3/verified/README.md).
 - Update ALGORITHMS.md's portable column, PLATFORMS.md, and each generic module's header, and record what remains in `benchmarks/gaps.toml`.
-
-## Related
-
-- [Portable AES bitslices several blocks at once](/quest/m3/cold-speed/portable-aes-nohw.md) - the portable row's other large gap
-- [rind builds on every target ring or aws-lc-rs supports](/quest/m2/adoption/targets/README.md) - the targets this speeds up, whose speed non-goal this lifts

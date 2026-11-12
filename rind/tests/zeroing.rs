@@ -67,6 +67,17 @@ fn rsa_oaep() {
 }
 
 #[test]
+fn blind_rsa() {
+    use rind::blind_rsa::*;
+    let key = KeyPair::from_pkcs8(
+        &RSABSSA_SHA384_PSS_RANDOMIZED,
+        include_bytes!("../src/high/rsa/rsa8192.pkcs8.der"),
+    )
+    .unwrap();
+    check_zeroed_on_drop(Box::pin(key));
+}
+
+#[test]
 fn ecdsa() {
     use rind::signature::{EcdsaKeyPair, sign};
     for (algorithm, pkcs8) in [

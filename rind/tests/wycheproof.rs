@@ -1158,6 +1158,49 @@ fn test_rsa_pss_verify() {
     }
 }
 
+/// A finalized RSABSSA-SHA384-PSS signature is an RSASSA-PSS signature with
+/// SHA-384 and a 48-byte salt, which these hold.
+#[test]
+fn test_blind_rsa_verify() {
+    use rind::blind_rsa::{PublicKey, RSABSSA_SHA384_PSS_DETERMINISTIC};
+    for file in &[
+        "rsa_pss_2048_sha384_mgf1_48_test.json",
+        "rsa_pss_4096_sha384_mgf1_48_test.json",
+    ] {
+        let data_file = File::open(vectors(file)).expect("failed to open data file");
+        let tests: TestFile =
+            serde_json::from_reader(BufReader::new(data_file)).expect("invalid test JSON");
+        let mut summary = Summary::new();
+
+        for group in tests.groups {
+            summary.group(&group);
+            assert_eq!(
+                (group.sha.as_ref(), group.mgf_sha.as_ref(), group.salt_len),
+                ("SHA-384", "SHA-384", 48)
+            );
+            let components = rind::rsa::PublicKeyComponents {
+                n: group.public_key.modulus.strip_prefix(&[0]).unwrap(),
+                e: &group.public_key.public_exponent[..],
+            };
+            let key =
+                PublicKey::from_components(&RSABSSA_SHA384_PSS_DETERMINISTIC, &components).unwrap();
+
+            for test in group.tests {
+                summary.start(&test);
+                let result = key.verify(&test.msg, &test.sig);
+                match (test.result, &result) {
+                    (ExpectedResult::Valid, Ok(())) => {}
+                    (
+                        ExpectedResult::Invalid | ExpectedResult::Acceptable,
+                        Err(Error::BadSignature),
+                    ) => {}
+                    _ => panic!("expected {:?} got {:?}", test.result, result.err()),
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn test_ed25519_verify() {
     let data_file = File::open(vectors("ed25519_test.json")).expect("failed to open data file");

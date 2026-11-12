@@ -33,7 +33,7 @@ fn mark<T: ?Sized>(value: &T, state: MemState) {
 
 #[test]
 fn sign_and_verify() {
-    let provider = rind_jsonwebtoken::default_provider().unwrap();
+    let provider = &rind_jsonwebtoken::DEFAULT_PROVIDER;
     for key in common::all() {
         if common::HMAC.contains(&key.algorithm) {
             secret(key.encoding.as_bytes());
@@ -55,7 +55,7 @@ fn sign_and_verify() {
 
 #[test]
 fn public_components() {
-    let provider = rind_jsonwebtoken::default_provider().unwrap();
+    let provider = &rind_jsonwebtoken::DEFAULT_PROVIDER;
     let utils = &provider.key_utils;
     for key in common::all() {
         let der = key.encoding.as_bytes();

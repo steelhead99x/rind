@@ -1,6 +1,6 @@
 [package]
 name = "rind-dimpl"
-version = "0.9.3"
+version = "0.9.4"
 edition = "2024"
 repository = "https://github.com/moq-dev/rind"
 license = "Apache-2.0 OR ISC OR MIT-0"
@@ -16,6 +16,7 @@ readme = "README.md"
 # parsers this crate already needs to read certificates.
 dimpl = { version = "0.9", default-features = false, features = ["_crypto-common"] }
 rind = { version = "0.3.2", path = "../rind" }
+rustls-pki-types = { version = "1.9", default-features = false, features = ["std"] }
 x509-cert = { version = "0.3", default-features = false }
 
 [dev-dependencies]
@@ -24,4 +25,5 @@ aws-lc-rs = { version = "1.16", default-features = false, features = ["alloc", "
 # features, as `admin/ctgrind` does; otherwise they build as no-ops.
 crabgrind = { version = "0.4", default-features = false }
 dimpl = { version = "0.9", default-features = false, features = ["aws-lc-rs", "_crypto-common"] }
+pem = { version = "4", default-features = false, features = ["std"] }
 rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }

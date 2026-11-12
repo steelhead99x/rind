@@ -1,4 +1,4 @@
-# Adapters offer exactly their upstream's API
+# [XS] Adapters offer exactly their upstream's API
 
 ## Goal
 

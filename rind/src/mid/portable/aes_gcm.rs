@@ -2,13 +2,11 @@
 
 use super::aes::{check_gcm_iv, check_gcm_lengths};
 use crate::Error;
-use crate::low::{self, AesKey, Entry, NohwTable, ct_equal};
+use crate::low::{self, Entry, NohwTable, PortableAesKey, ct_equal};
 #[cfg(rind_backend = "arm")]
 use crate::low::{AesHwKey, GhashTable, HaveCryptoExt};
 
 /// An AES-GCM key.
-// A process only ever builds one variant, so boxing would buy nothing.
-#[cfg_attr(rind_backend = "arm", expect(clippy::large_enum_variant))]
 pub(crate) enum AesGcm {
     Portable(Portable),
     /// armv7's crypto extension's, which the key picks when the CPU has it.
@@ -174,16 +172,16 @@ impl AesGcm {
     }
 }
 
-/// The bitsliced AES rind copies from libcrux and aws-lc's integer GHASH,
-/// for CPUs without the crypto extension. Both wipe themselves on drop.
+/// aws-lc's bitsliced AES and integer GHASH, for CPUs without the crypto
+/// extension. Both wipe themselves on drop.
 pub(crate) struct Portable {
-    key: AesKey,
+    key: PortableAesKey,
     table: NohwTable,
 }
 
 impl Portable {
     fn new(key: &[u8]) -> Self {
-        let key = AesKey::new(key);
+        let key = PortableAesKey::new(key);
         let h = key.encrypt_block(&[0; 16]);
         let table = NohwTable::new(&h);
         Self { key, table }
@@ -222,9 +220,10 @@ trait Parts {
     #[must_use]
     fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16];
 
-    /// XORs the keystream from counter block `ivec` into `blocks`,
-    /// incrementing its last four bytes with 32-bit wrapping.
-    fn ctr32(&self, ivec: &[u8; 16], blocks: &mut [[u8; 16]]);
+    /// XORs the keystream from counter block `ivec` into `inout`, its last
+    /// four bytes incremented with 32-bit wrapping, returning the next
+    /// counter block.
+    fn ctr(&self, ivec: &[u8; 16], inout: &mut [u8]) -> [u8; 16];
 
     /// Encrypts (if `ENC`) or decrypts `inout` in place under `iv`, of any
     /// length, and returns its tag.
@@ -264,23 +263,6 @@ trait Parts {
         }
         xi
     }
-
-    /// XORs the keystream from counter block `ivec` into `inout`, returning
-    /// the next counter block.
-    fn ctr(&self, ivec: &[u8; 16], inout: &mut [u8]) -> [u8; 16] {
-        let (blocks, tail) = inout.as_chunks_mut::<16>();
-        self.ctr32(ivec, blocks);
-        let ivec = add32(ivec, blocks.len() as u32);
-        if tail.is_empty() {
-            return ivec;
-        }
-
-        let next = add32(&ivec, 1);
-        for (b, k) in tail.iter_mut().zip(self.encrypt_block(&ivec)) {
-            *b ^= k;
-        }
-        next
-    }
 }
 
 /// GHASH over whole blocks.
@@ -313,8 +295,18 @@ impl Parts for Hw {
         self.key.encrypt_block(block)
     }
 
-    fn ctr32(&self, ivec: &[u8; 16], blocks: &mut [[u8; 16]]) {
+    fn ctr(&self, ivec: &[u8; 16], inout: &mut [u8]) -> [u8; 16] {
+        let (blocks, tail) = inout.as_chunks_mut::<16>();
         self.key.ctr32(ivec, blocks);
+        let ivec = add32(ivec, blocks.len() as u32);
+        if tail.is_empty() {
+            return ivec;
+        }
+
+        for (b, k) in tail.iter_mut().zip(self.key.encrypt_block(&ivec)) {
+            *b ^= k;
+        }
+        add32(&ivec, 1)
     }
 }
 
@@ -329,15 +321,10 @@ impl Parts for Portable {
         self.key.encrypt_block(block)
     }
 
-    fn ctr32(&self, ivec: &[u8; 16], blocks: &mut [[u8; 16]]) {
-        for (i, block) in (0u32..).zip(blocks) {
-            for (b, k) in block
-                .iter_mut()
-                .zip(self.key.encrypt_block(&add32(ivec, i)))
-            {
-                *b ^= k;
-            }
-        }
+    fn ctr(&self, ivec: &[u8; 16], inout: &mut [u8]) -> [u8; 16] {
+        // The final partial block shares the last batch.
+        self.key.ctr32(ivec, inout);
+        add32(ivec, inout.len().div_ceil(16) as u32)
     }
 }
 

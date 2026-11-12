@@ -1,7 +1,7 @@
 // Written for Graviola by Joe Birr-Pixton, 2024.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-use super::{Encoder, Error, OctetString, Parser, SetOf, Tag, Type};
+use super::{Encoder, Error, OctetString, Parser, Sequence, SetOf, Tag, Type};
 
 asn1_struct! {
     RSAPublicKey ::= SEQUENCE {
@@ -67,6 +67,15 @@ asn1_enum! {
 asn1_struct! {
     SubjectPublicKeyInfo ::= SEQUENCE {
         algorithm         AlgorithmIdentifier REF,
+        subjectPublicKey  BIT STRING
+    }
+}
+
+// A `SubjectPublicKeyInfo` whose algorithm identifier, such as
+// `id-RSASSA-PSS` with its parameters, has one valid encoding.
+asn1_struct! {
+    FixedAlgorithmPublicKeyInfo ::= SEQUENCE {
+        algorithm         Sequence REF,
         subjectPublicKey  BIT STRING
     }
 }

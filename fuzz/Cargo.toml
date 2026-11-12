@@ -153,6 +153,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "blind_rsa"
+path = "fuzzer/blind_rsa.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "oaep"
 path = "fuzzer/oaep.rs"
 test = false

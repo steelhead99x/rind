@@ -8,6 +8,7 @@ use dimpl::{CryptoError, CryptoOperation};
 use rind::signature::{
     EcdsaKeyPair, EcdsaSigningAlgorithm, PublicKey, VerificationAlgorithm, sign, verify,
 };
+use rustls_pki_types::pem;
 use x509_cert::Certificate;
 use x509_cert::der::Decode;
 use x509_cert::spki::ObjectIdentifier;
@@ -41,14 +42,27 @@ pub(crate) static KEYS: Keys = Keys;
 impl KeyProvider for Keys {
     fn load_private_key(&self, der: &[u8]) -> Result<Box<dyn SigningKey>, CryptoError> {
         type Load = fn(&'static EcdsaSigningAlgorithm, &[u8]) -> Result<EcdsaKeyPair, rind::Error>;
-        let load = |load: Load| {
+        let load = |load: Load, der: &[u8]| {
             CURVES.into_iter().find_map(|(group, hash, algorithm)| {
                 let key = load(algorithm, der).ok()?;
                 Some(Box::new(Key { key, group, hash }) as Box<dyn SigningKey>)
             })
         };
-        load(EcdsaKeyPair::from_pkcs8)
-            .or_else(|| load(EcdsaKeyPair::from_sec1))
+        let der_key = |der: &[u8]| {
+            load(EcdsaKeyPair::from_pkcs8, der).or_else(|| load(EcdsaKeyPair::from_sec1, der))
+        };
+        // dimpl's own providers also take a PEM-wrapped key, under any label.
+        der_key(der)
+            .or_else(|| {
+                let relabeled = relabel(der)?;
+                let mut rest = relabeled.as_slice();
+                let (_, key) = pem::from_buf(&mut rest).ok()??;
+                // A second footer would otherwise outlive the section.
+                if !rest.is_empty() {
+                    return None;
+                }
+                der_key(&key)
+            })
             .ok_or(CryptoError::InvalidPrivateKey)
     }
 }
@@ -164,4 +178,60 @@ impl SignatureVerifier for Verifier {
                 group,
             })
     }
+}
+
+/// Rewrites a PEM key's label to `PRIVATE KEY`, which rustls-pki-types
+/// decodes as a secret; it skips sections whose label it does not know.
+///
+/// Like dimpl's pem-rfc7468, it takes one section ending the input, up to one
+/// line ending, after an optional preamble that holds no NUL and ends in a line
+/// feed. Input starting with the DER SEQUENCE tag is refused first, since a DER
+/// key's later bytes are secret, and the searches stop at the boundaries, so
+/// none reads key bytes.
+fn relabel(pem: &[u8]) -> Option<Vec<u8>> {
+    const BEGIN: &[u8] = b"-----BEGIN ";
+    const DASHES: &[u8] = b"-----";
+    if pem.first() == Some(&0x30) {
+        return None;
+    }
+    let start = match pem.starts_with(BEGIN) {
+        true => 0,
+        false => {
+            pem.windows(BEGIN.len() + 1)
+                .position(|w| w == b"\n-----BEGIN ")?
+                + 1
+        }
+    };
+    let preamble = &pem[..start];
+    if preamble.contains(&0) || str::from_utf8(preamble).is_err() {
+        return None;
+    }
+    let rest = &pem[start + BEGIN.len()..];
+    let label_len = rest.windows(DASHES.len()).position(|w| w == DASHES)?;
+    let (label, rest) = rest.split_at(label_len);
+    // pem-rfc7468's label grammar: printable characters other than hyphens,
+    // with single spaces or tabs between or after them.
+    let mut separated = true;
+    for &c in label {
+        let separator = matches!(c, b' ' | b'\t');
+        if c == b'-' || !(separator || (0x21..=0x7e).contains(&c)) || (separator && separated) {
+            return None;
+        }
+        separated = separator;
+    }
+    let rest = &rest[DASHES.len()..];
+    let rest = [&b"\r\n"[..], b"\n", b"\r"]
+        .into_iter()
+        .find_map(|eol| rest.strip_suffix(eol))
+        .unwrap_or(rest);
+    let end = [b"-----END ", label, DASHES].concat();
+    let body = rest.strip_suffix(end.as_slice())?;
+    Some(
+        [
+            b"-----BEGIN PRIVATE KEY-----",
+            body,
+            b"-----END PRIVATE KEY-----",
+        ]
+        .concat(),
+    )
 }

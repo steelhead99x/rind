@@ -5,7 +5,7 @@
 use str0m::crypto::{AeadAes128Gcm, SrtpProvider};
 
 fn srtp() -> &'static dyn SrtpProvider {
-    rind_str0m::default_provider().unwrap().srtp_provider
+    rind_str0m::default_provider().srtp_provider
 }
 
 fn hex(s: &str) -> Vec<u8> {

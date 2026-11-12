@@ -20,11 +20,11 @@ Found by the 2026-11-09 audit: the backend landed in [moq-dev/rind#458](https://
 - Not this quest's, and listed in `proofs/README.md` with the quest that proves the code, each of whose proofs then runs on this translation:
   - SHA-3 and ML-KEM: [the portable Keccak-f](/quest/m4/verified/keccak-portable.md), [the sponge](/quest/m4/verified/sha3-sponge.md), [the construction](/quest/m4/verified/mlkem-construction.md), and [the portable arithmetic](/quest/m4/verified/mlkem-portable.md);
   - ChaCha20-Poly1305: [Graviola's Poly1305 and the separate-pass glue](/quest/m5/verified/chacha20-poly1305-portable.md);
-  - AES and AES-GCM: libcrux's bitsliced cipher and rind's `gcm_nohw.c` port, in [armv7's Rust proofs](/quest/m5/verified-armv7/prove.md) and [x86_64 without AES-NI](/quest/m5/verified/x86-no-aesni.md), which [the portable AES rework](/quest/m3/cold-speed/portable-aes-nohw.md) may replace first;
+  - AES and AES-GCM: rind's `aes_nohw.c` and `gcm_nohw.c` ports, in [armv7's Rust proofs](/quest/m5/verified-armv7/prove.md) and [x86_64 without AES-NI](/quest/m5/verified/x86-no-aesni.md), which share one source file across word widths;
   - X25519 and Ed25519: curve25519-dalek's serial backend under rind's glue (`low/portable/curve25519.rs`, `mid/portable/ed25519.rs`), in [armv7's Curve25519](/quest/m5/verified-armv7/curve25519.md), whose source of Lean proofs also covers the 64-bit limbs this translation runs;
   - P-256, P-384, and P-521: [armv7's NIST curves](/quest/m5/verified-armv7/nist-curves.md), over field code [the 64-bit limbs quest](/quest/m3/cold-speed/portable-limbs.md) replaces on 64-bit targets;
   - RSA: [verification](/quest/m4/verified/rsa-verify.md) and [signing](/quest/m4/verified/rsa-sign.md), over `low/generic/bignum.rs`'s Montgomery loop, which the 64-bit limbs quest also replaces;
-  - SHA-1 and MD5: `low/generic/sha1.rs` in [armv7's Rust proofs](/quest/m5/verified-armv7/prove.md), and [MD5](/quest/m5/verified/md5.md).
+  - MD5: [its own quest](/quest/m5/verified/md5.md).
 - Whatever still lacks a ✓ on this backend after those is [the re-audit](/quest/m4/verified/re-audit.md)'s to plan.
 
 ## Related

@@ -11,10 +11,9 @@ Build object_store with its `aws-base`, `azure-base`, or `gcp-base` features rat
 Then hand the provider to each store's builder:
 
 ```rust,no_run
-// Refuses a CPU missing a feature rind requires.
 let store = object_store::gcp::GoogleCloudStorageBuilder::new()
     .with_bucket_name("bucket")
-    .with_crypto_provider(rind_object_store::default_provider()?)
+    .with_crypto_provider(rind_object_store::default_provider())
     .build()?;
 ```
 

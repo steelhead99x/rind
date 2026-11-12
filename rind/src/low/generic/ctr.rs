@@ -32,6 +32,7 @@ pub(crate) fn by8(counter: u32, inout: &mut [u8], mut apply_8: impl FnMut(u32, &
 /// XORs AES-CTR keystream into `inout` with `ctr32`, which XORs it into
 /// whole blocks from the counter block given: every whole block in one call,
 /// then a final partial block in a copy.
+#[cfg(not(rind_backend = "portable"))]
 pub(crate) fn blocks(
     nonce: &[u8; 12],
     counter: u32,

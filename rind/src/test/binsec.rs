@@ -36,12 +36,6 @@ fn ct_binsec_aes_gcm() {
             let tag = key
                 .seal_in_place_separate_tag(nonce(), &[4; 21], &mut msg)
                 .unwrap();
-            // libcrux's AES-128 and AES-256 open branch on whether the tag
-            // verified before rind can declassify it, as `admin/ctgrind.supp`
-            // allows, so BINSEC checks only AES-192's open there.
-            if cfg!(rind_backend = "portable") && algorithm.key_len() != 24 {
-                continue;
-            }
             black_box(
                 key.open_in_place_separate_tag(nonce(), &[4; 21], tag, &mut msg)
                     .is_ok(),
@@ -133,6 +127,7 @@ fn ct_binsec_aes_cbc() {
 
 // One block, since BINSEC cannot decode the `vinsertf128` that LLVM emits
 // for the AVX2 kernel longer messages take; ctgrind checks that one.
+// See UPSTREAM.md, "BINSEC cannot decode much of what rind runs".
 #[test]
 #[ignore = "admin/ct-binsec runs it under BINSEC"]
 fn ct_binsec_chacha20() {

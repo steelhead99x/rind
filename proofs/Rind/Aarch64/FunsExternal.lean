@@ -240,6 +240,76 @@ opaque low.aarch64.sha256.compress_hw
 opaque low.aarch64.sha256.compress_nohw
   : Array Std.U32 8#usize → Slice Std.U8 → Result (Array Std.U32 8#usize)
 
+/-! P-384's s2n-bignum routines, its table select, and `bignum_mux`. -/
+
+opaque low.aarch64.bignum_add_p384.bignum_add_p384
+  :
+  Array Std.U64 6#usize → Array Std.U64 6#usize → Array Std.U64 6#usize →
+    Result (Array Std.U64 6#usize)
+
+opaque low.aarch64.bignum_demont_p384.bignum_demont_p384
+  :
+  Array Std.U64 6#usize → Array Std.U64 6#usize → Result (Array Std.U64
+    6#usize)
+
+opaque low.aarch64.bignum_inv_p384.bignum_inv_p384
+  :
+  Array Std.U64 6#usize → Array Std.U64 6#usize → Result (Array Std.U64
+    6#usize)
+
+opaque low.aarch64.bignum_montmul_p384.bignum_montmul_p384
+  :
+  Array Std.U64 6#usize → Array Std.U64 6#usize → Array Std.U64 6#usize →
+    Result (Array Std.U64 6#usize)
+
+opaque low.aarch64.bignum_montsqr_p384.bignum_montsqr_p384
+  :
+  Array Std.U64 6#usize → Array Std.U64 6#usize → Result (Array Std.U64
+    6#usize)
+
+opaque low.aarch64.bignum_mux.bignum_mux
+  :
+  Std.U64 → Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Result
+    (Slice Std.U64)
+
+opaque low.aarch64.bignum_neg_p384.bignum_neg_p384
+  :
+  Array Std.U64 6#usize → Array Std.U64 6#usize → Result (Array Std.U64
+    6#usize)
+
+opaque low.aarch64.bignum_point_select.bignum_aff_point_select_p384
+  :
+  Array Std.U64 12#usize → Slice Std.U64 → Std.U8 → Result (Array Std.U64
+    12#usize)
+
+opaque low.aarch64.bignum_tomont_p384.bignum_tomont_p384
+  :
+  Array Std.U64 6#usize → Array Std.U64 6#usize → Result (Array Std.U64
+    6#usize)
+
+opaque low.aarch64.p384_montjdouble.p384_montjdouble
+  :
+  Array Std.U64 18#usize → Array Std.U64 18#usize → Result (Array Std.U64
+    18#usize)
+
+opaque low.aarch64.p384_montjmixadd.p384_montjmixadd
+  :
+  Array Std.U64 18#usize → Array Std.U64 18#usize → Array Std.U64 12#usize
+    → Result (Array Std.U64 18#usize)
+
+opaque low.aarch64.p384_montjscalarmul.p384_montjscalarmul
+  :
+  Array Std.U64 18#usize → Array Std.U64 6#usize → Array Std.U64 18#usize
+    → Result (Array Std.U64 18#usize)
+
+opaque low.aarch64.bignum_mod_n384.bignum_mod_n384
+  :
+  Array Std.U64 6#usize → Array Std.U64 6#usize → Result (Array Std.U64
+    6#usize)
+
+opaque high.curve.P384.Insts.RindHighCurveCurveStaticPrivateKeyVerifyingKeyScalar.oid
+  : Result high.asn1.ObjectId
+
 /-! The other curves, which X25519's and P-256's results never depend on. -/
 
 opaque mid.p521.PrivateKey.new_random
@@ -251,9 +321,6 @@ opaque mid.p384.PrivateKey.new_random
 opaque mid.p521.PrivateKey.public_key_uncompressed
   : mid.p521.PrivateKey → Result (Array Std.U8 133#usize)
 
-opaque mid.p384.PrivateKey.public_key_uncompressed
-  : mid.p384.PrivateKey → Result (Array Std.U8 97#usize)
-
 opaque mid.p521.PrivateKey.diffie_hellman
   :
   mid.p521.PrivateKey → mid.p521.PublicKey → Result (core.result.Result
@@ -261,14 +328,6 @@ opaque mid.p521.PrivateKey.diffie_hellman
 
 opaque mid.p521.PublicKey.from_x962_uncompressed
   : Slice Std.U8 → Result (core.result.Result mid.p521.PublicKey error.Error)
-
-opaque mid.p384.PrivateKey.diffie_hellman
-  :
-  mid.p384.PrivateKey → mid.p384.PublicKey → Result (core.result.Result
-    mid.p384.SharedSecret error.Error)
-
-opaque mid.p384.PublicKey.from_x962_uncompressed
-  : Slice Std.U8 → Result (core.result.Result mid.p384.PublicKey error.Error)
 
 /-! AES, whose header protection no proof covers. -/
 
@@ -348,10 +407,6 @@ opaque high.curve.P521.Insts.RindHighAgreementAgreePrivateKey.encode_pkcs8
 opaque high.curve.P521.Insts.RindHighAgreementAgreePrivateKey.encode_scalar
   : mid.p521.PrivateKey → Slice Std.U8 →
     Result ((core.result.Result (Slice Std.U8) error.Error) × (Slice Std.U8))
-
-opaque high.curve.P384.Insts.RindHighAgreementAgreePrivateKey.load
-  : high.agreement.Algorithm → high.agreement.Source →
-    Result (core.result.Result (mid.p384.PrivateKey × high.agreement.PublicKey) error.Error)
 
 opaque high.curve.P521.Insts.RindHighAgreementAgreePrivateKey.load
   : high.agreement.Algorithm → high.agreement.Source →

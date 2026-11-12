@@ -8,7 +8,7 @@ use dimpl::crypto::{
 use dimpl::{CryptoError, CryptoOperation};
 
 fn rind() -> CryptoProvider {
-    rind_dimpl::default_provider().unwrap()
+    rind_dimpl::default_provider()
 }
 
 fn certificate(algorithm: &'static rcgen::SignatureAlgorithm) -> (Vec<u8>, Vec<u8>) {
@@ -301,17 +301,23 @@ fn signatures_are_checked_against_the_certificate() {
 }
 
 #[test]
-fn only_ecdsa_der_keys_load() {
+fn only_ecdsa_keys_load() {
     let provider = rind();
     let (_, ed25519) = certificate(&rcgen::PKCS_ED25519);
     let (_, p256) = certificate(&rcgen::PKCS_ECDSA_P256_SHA256);
     let pem = rcgen::KeyPair::try_from(p256.as_slice())
         .unwrap()
         .serialize_pem();
+    assert!(
+        provider
+            .key_provider
+            .load_private_key(pem.as_bytes())
+            .is_ok()
+    );
 
     for (key, what) in [
         (&ed25519[..], "Ed25519"),
-        (pem.as_bytes(), "PEM"),
+        (&pem.as_bytes()[..pem.len() - 30], "truncated PEM"),
         (&p256[..p256.len() - 1], "truncated"),
         (&[], "empty"),
     ] {
@@ -320,5 +326,86 @@ fn only_ecdsa_der_keys_load() {
             Some(CryptoError::InvalidPrivateKey),
             "{what}"
         );
+    }
+}
+
+#[test]
+fn ecdsa_key_encodings_load_as_aws_lc() {
+    use ::aws_lc_rs::encoding::AsDer;
+    use ::aws_lc_rs::signature::{
+        ECDSA_P256_SHA256_ASN1_SIGNING, ECDSA_P384_SHA384_ASN1_SIGNING, EcdsaKeyPair,
+    };
+
+    let reference = aws_lc_rs::default_provider();
+    let lf = pem::EncodeConfig::new().set_line_ending(pem::LineEnding::LF);
+    for (algorithm, signing) in [
+        (
+            &rcgen::PKCS_ECDSA_P256_SHA256,
+            &ECDSA_P256_SHA256_ASN1_SIGNING,
+        ),
+        (
+            &rcgen::PKCS_ECDSA_P384_SHA384,
+            &ECDSA_P384_SHA384_ASN1_SIGNING,
+        ),
+    ] {
+        let (_, pkcs8) = certificate(algorithm);
+        let sec1 = EcdsaKeyPair::from_pkcs8(signing, &pkcs8)
+            .unwrap()
+            .private_key()
+            .as_der()
+            .unwrap()
+            .as_ref()
+            .to_vec();
+        // dimpl's providers ignore the label, so unusual ones load too.
+        for (label, der) in [
+            ("PRIVATE KEY", pkcs8.clone()),
+            ("EC PRIVATE KEY", sec1.clone()),
+            ("UNUSUAL KEY", pkcs8),
+            ("CERTIFICATE", sec1),
+        ] {
+            let pem = pem::encode_config(&pem::Pem::new(label, der.clone()), lf);
+            let mut bad_base64 = pem.clone().into_bytes();
+            bad_base64[label.len() + 20] = b'!';
+            let trailing = format!("{pem}garbage\n");
+            let leading = format!("text\n{pem}");
+            let unterminated = format!("text {pem}");
+            let crlf = format!("{}\r\n", pem.trim_end());
+            let blank_line = format!("{pem}\n");
+            let space = format!("{pem} ");
+            let nul = format!("\0\n{pem}");
+            let second_footer = format!("{pem}-----END {label}-----\n");
+            for (key, loads, what) in [
+                (&der[..], true, "DER"),
+                (pem.as_bytes(), true, "PEM"),
+                (&pem.as_bytes()[..pem.len() - 30], false, "truncated PEM"),
+                (&bad_base64[..], false, "invalid base64"),
+                (trailing.as_bytes(), false, "trailing garbage"),
+                (leading.as_bytes(), true, "leading text"),
+                (
+                    unterminated.as_bytes(),
+                    false,
+                    "preamble without a line feed",
+                ),
+                (crlf.as_bytes(), true, "CRLF ending"),
+                (blank_line.as_bytes(), false, "trailing blank line"),
+                (space.as_bytes(), false, "trailing space"),
+                (nul.as_bytes(), false, "NUL in the preamble"),
+                (second_footer.as_bytes(), false, "second footer"),
+                (&der[..der.len() - 1], false, "truncated DER"),
+            ] {
+                let rind = rind().key_provider.load_private_key(key).is_ok();
+                let aws_lc = reference.key_provider.load_private_key(key).is_ok();
+                assert_eq!((rind, aws_lc), (loads, loads), "{label} {what}");
+            }
+            for bad in ["PRIVATE  KEY", " KEY", "KEY \t", "A-B", "K\x01EY"] {
+                let key = pem::encode_config(&pem::Pem::new(bad, der.clone()), lf);
+                let rind = rind().key_provider.load_private_key(key.as_bytes()).is_ok();
+                let aws_lc = reference
+                    .key_provider
+                    .load_private_key(key.as_bytes())
+                    .is_ok();
+                assert_eq!((rind, aws_lc), (false, false), "label {bad:?}");
+            }
+        }
     }
 }

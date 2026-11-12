@@ -40,6 +40,8 @@ libc = { version = "0.2", default-features = false }
 [dev-dependencies]
 # Argon2id's differential tests, since aws-lc-rs has no Argon2.
 argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
+# ristretto255's differential reference; aws-lc-rs has no ristretto255.
+curve25519-dalek = { version = "5", default-features = false, features = ["precomputed-tables"] }
 # Checks armv7's NIST curve arithmetic against s2n-bignum's on the other arches.
 fiat-crypto = { version = "0.3", default-features = false }
 # CCTV gzips its ML-KEM modulus vectors.
@@ -63,6 +65,8 @@ aws-lc-rs = { version = "1.19", default-features = false, features = ["alloc", "
 aws-lc-sys = { version = "0.47", default-features = false }
 # HPKE, which aws-lc-rs does not expose either; `hazmat` reads its private keys.
 hpke-rs = { version = "0.8", default-features = false, features = ["hazmat", "rustcrypto", "std"] }
+# RSA blind signatures, which aws-lc-rs does not offer.
+blind-rsa-signatures = { version = "0.18", default-features = false }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [

@@ -22,9 +22,11 @@ hand, fastest of five runs:
 | ECDSA P-256 verify, 21 B | 31.9 µs | 47.0 µs | 1.5x |
 | RSA-2048 PKCS#1 sign, 21 B | 352 µs | 424 µs | 1.2x |
 
-It is not on PyPI yet.
-
 ## Use
+
+```shell
+pip install pyrind-cryptography
+```
 
 Import `pyrind_cryptography` where code imports `cryptography`:
 

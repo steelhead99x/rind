@@ -7,8 +7,10 @@ use super::aesv8_armx::{AesHwDecKey, AesHwKey};
 use super::cpu::HaveCryptoExt;
 use crate::low::{self, portable::aes as portable};
 
-// Keep all-zero valid when drop wipes the whole enum.
+// Keep all-zero valid when drop wipes the whole enum. A process only ever
+// builds one variant, so boxing the bitsliced round keys would buy nothing.
 #[repr(u8)]
+#[expect(clippy::large_enum_variant)]
 pub(crate) enum AesKey {
     Portable(portable::AesKey),
     /// The crypto extension's, which the key picks when the CPU has it.
@@ -53,6 +55,7 @@ impl low::Zeroable for AesKey {}
 
 /// An AES key that decrypts, on the path [`AesKey`] picks for the CPU.
 #[repr(u8)]
+#[expect(clippy::large_enum_variant)]
 pub(crate) enum AesDecKey {
     Portable(portable::AesDecKey),
     Hw(AesHwDecKey),
