@@ -3,6 +3,8 @@
 # emulator, under its ARM translation, in which Flutter's debug JIT crashes.
 # Release builds leave out integration_test's plugin, so the result comes from
 # the test reporter's log rather than from flutter drive.
+# See UPSTREAM.md, "Flutter's debug JIT crashes under the Android emulator's
+# ARM translation".
 #
 # Usage: rind-dart/integration/android-arm.sh
 set -euo pipefail

@@ -456,6 +456,7 @@ jobs:
       # aws-lc-rs's C, which the tests link, targets the SDK's own iOS
       # version unless told otherwise, and then needs symbols rustc's
       # default iOS version lacks; this gives both rustc's default.
+      # See UPSTREAM.md, "aws-lc-sys targets the SDK's iOS version".
       - name: Build tests (device)
         run: |
           export "$(rustc --print deployment-target --target aarch64-apple-ios)"

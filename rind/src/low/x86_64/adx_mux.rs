@@ -54,6 +54,13 @@ mux! {
     curve25519_x25519base / curve25519_x25519base_alt(res: &mut [u64; 4], scalar: &[u64; 4]);
     edwards25519_decode / edwards25519_decode_alt(z: &mut [u64; 8], c: &[u8; 32]) -> bool;
     edwards25519_scalarmulbase / edwards25519_scalarmulbase_alt(res: &mut [u64; 8], scalar: &[u64; 4]);
+
+    bignum_invsqrt_p25519 / bignum_invsqrt_p25519_alt(z: &mut [u64; 4], x: &[u64; 4]) -> u64;
+    bignum_mul_p25519 / bignum_mul_p25519_alt(z: &mut [u64; 4], x: &[u64; 4], y: &[u64; 4]);
+    bignum_sqr_p25519 / bignum_sqr_p25519_alt(z: &mut [u64; 4], x: &[u64; 4]);
+    edwards25519_epadd / edwards25519_epadd_alt(p3: &mut [u64; 16], p1: &[u64; 16], p2: &[u64; 16]);
+    edwards25519_epdouble / edwards25519_epdouble_alt(p3: &mut [u64; 16], p1: &[u64; 12]);
+    edwards25519_pdouble / edwards25519_pdouble_alt(p3: &mut [u64; 12], p1: &[u64; 12]);
 }
 
 /// Ed25519 verification's `[scalar]point + [bscalar]B`, for scalars below
@@ -258,6 +265,45 @@ pub(super) mod tests {
                 edwards25519_scalarmulbase::edwards25519_scalarmulbase,
                 edwards25519_scalarmulbase_alt::edwards25519_scalarmulbase_alt,
             );
+
+            same2(
+                &mut rng,
+                254,
+                bignum_mul_p25519::bignum_mul_p25519,
+                bignum_mul_p25519_alt::bignum_mul_p25519_alt,
+            );
+            same1(
+                &mut rng,
+                254,
+                bignum_sqr_p25519::bignum_sqr_p25519,
+                bignum_sqr_p25519_alt::bignum_sqr_p25519_alt,
+            );
+            same2(
+                &mut rng,
+                254,
+                edwards25519_epadd::edwards25519_epadd,
+                edwards25519_epadd_alt::edwards25519_epadd_alt,
+            );
+            same1(
+                &mut rng,
+                254,
+                edwards25519_epdouble::edwards25519_epdouble,
+                edwards25519_epdouble_alt::edwards25519_epdouble_alt,
+            );
+            same1(
+                &mut rng,
+                254,
+                edwards25519_pdouble::edwards25519_pdouble,
+                edwards25519_pdouble_alt::edwards25519_pdouble_alt,
+            );
+
+            let x = rng.field::<4>(254);
+            let (mut want, mut got) = ([0; 4], [0; 4]);
+            assert_eq!(
+                bignum_invsqrt_p25519::bignum_invsqrt_p25519(&mut want, &x),
+                bignum_invsqrt_p25519_alt::bignum_invsqrt_p25519_alt(&mut got, &x)
+            );
+            assert_eq!(want, got);
 
             let (x, y, c) = (
                 rng.words::<4>(256),

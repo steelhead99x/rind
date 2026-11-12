@@ -6,6 +6,7 @@
 // libcrux exposes whole operations rather than the field and bignum
 // arithmetic these build on, so the portable backend, which armv7 builds on,
 // swaps them at this layer. cargo-mutants follows `path` but not `cfg_attr`.
+// See UPSTREAM.md, "cargo-mutants cannot see into `cfg_if!`".
 #[cfg(not(any(rind_backend = "arm", rind_backend = "portable")))]
 pub(super) mod aes_gcm;
 #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
@@ -16,18 +17,27 @@ pub(super) mod ed25519;
 #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
 #[path = "portable/ed25519.rs"]
 pub(super) mod ed25519;
+#[cfg_attr(
+    any(rind_backend = "arm", rind_backend = "portable"),
+    path = "portable/ristretto255.rs"
+)]
+pub(super) mod ristretto255;
 
 pub(super) mod aes;
 pub(super) mod aes_cbc;
 pub(super) mod aes_kw;
 pub(super) mod chacha20;
 pub(super) mod chacha20poly1305;
+#[cfg(not(any(rind_backend = "arm", rind_backend = "portable")))]
+pub(super) mod edwards25519;
 pub(super) mod md5;
 pub(super) mod mldsa;
 pub(super) mod mlkem768;
 pub(super) mod p256;
 pub(super) mod p384;
 pub(super) mod p521;
+#[cfg(test)]
+mod ristretto255_tests;
 pub(super) mod rng;
 pub(super) mod rsa_key_size;
 pub(super) mod rsa_priv;

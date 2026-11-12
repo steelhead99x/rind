@@ -596,6 +596,7 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # `proofs/Rind/Aarch64/P256Table.lean` can prove it holds what s2n-bignum's
 # proof assumes. HMAC's keyed states are translated over any hash, and its
 # `Key` and `Context`, which hold function pointers, are not.
+# See UPSTREAM.md, "Aeneas cannot translate several kinds of Rust".
 extract() {
     local arch=$1 dir=$2
     shift 2
@@ -726,6 +727,7 @@ extract_kdf() {
     # Aeneas names both of `ZeroablePrimitive`'s `Copy` clauses, which
     # `NonZeroU32::get` brings in, `markerCopyInst`, which Lean refuses as a
     # duplicate field. Nothing reads them, so rename the second.
+    # See UPSTREAM.md, "Aeneas emits a duplicate `markerCopyInst` field".
     sed 's/"markerCopyInst", "markerCopyInst"/"markerCopyInst", "markerCopyInst1"/;
         s/^  markerCopyInst : core.marker.Copy Self_NonZeroInner$/  markerCopyInst1 : core.marker.Copy Self_NonZeroInner/' \
         "$out/lean/Rind/$dir/Kdf/Types.lean" >"proofs/Rind/$dir/Kdf/Types.lean"

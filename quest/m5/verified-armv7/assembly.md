@@ -8,7 +8,7 @@ Every assembly routine armv7 runs is proven on [the AArch32 model](/quest/m5/ver
 
 Runs, each in `low/arm/`, in rough order of use:
 
-- aws-lc's `sha_armv4`: SHA-256 and SHA-1 with the crypto extension, SHA-512 on NEON and without;
+- aws-lc's `sha_armv4`: SHA-256 and SHA-1 with the crypto extension, and SHA-256, SHA-1, and SHA-512 on NEON and without;
 - aws-lc's `chacha-armv4` (integer below 192 bytes, NEON above) and its NEON Poly1305, under rind's port of `poly1305_arm.c`;
 - aws-lc's `aesv8-armx` and `ghashv8-armx`, under rind's AES-GCM composition;
 - OpenSSL's `keccak1600-armv4`, integer and NEON, under ML-KEM and SHA-3;
