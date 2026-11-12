@@ -33,7 +33,6 @@ pub(super) mod edwards25519;
 #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
 #[path = "portable/edwards25519.rs"]
 pub(super) mod edwards25519;
-pub(super) mod hash_to_curve;
 pub(super) mod md5;
 pub(super) mod mldsa;
 pub(super) mod mlkem768;
