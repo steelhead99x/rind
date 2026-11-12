@@ -4,9 +4,10 @@ name: fuzz
 # Actions cache, then replays the corpus on every CPU tier of x86_64, aarch64,
 # and armv7 (see sh/fuzz-replay.sh). The same targets are also fuzzed on the
 # portable backend, forced on x86_64, with that corpus kept apart from the
-# native one, and the native corpus is replayed on the portable build. A
-# crash, timeout, or out-of-memory fails the run, which alert.yml reports, and
-# the input that caused it is uploaded as an artifact.
+# native one, alongside the native fuzz rather than after it; each portable
+# run starts by replaying the latest saved native corpus. A crash, timeout,
+# or out-of-memory fails the run, which alert.yml reports, and the input that
+# caused it is uploaded as an artifact.
 
 on:
   schedule:
@@ -368,13 +369,17 @@ jobs:
           path: bin/
           retention-days: 1
 
-  # Fuzz the portable build, corpus kept apart from the native one, then
-  # replay the native corpus on it. Those inputs are free, and libFuzzer's
+  # Fuzz the portable build, corpus kept apart from the native one, starting
+  # from the latest native corpus too. Those inputs are free, and libFuzzer's
   # coverage sees inside this backend, which it cannot in the assembly ones.
+  # It runs beside the native fuzz rather than after it, so the night is no
+  # longer: it takes the native corpus the last run saved, which is tonight's
+  # only if that target's native job has already finished. An input the
+  # native job finds tonight is replayed here tomorrow.
   fuzz-portable:
     name: Fuzz ${{ matrix.target }} (portable)
-    needs: [build, build-portable, fuzz]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.build.result == 'success' && needs.build-portable.result == 'success' }}
+    needs: [build, build-portable]
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -400,19 +405,25 @@ jobs:
           path: bin/
 
       # Held aside so the portable corpus can use the same path the seed
-      # script and the native job use. The key is this run's native corpus.
+      # script and the native job use. A target with no native corpus saved
+      # yet, such as a new one, or one whose native job timed out before
+      # saving on its first night, starts from the seeds alone.
       - name: Restore the native corpus
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.CORPUS }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
-          fail-on-cache-miss: true
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
 
       - name: Set the native corpus aside
         run: |
-          mkdir -p "$RUNNER_TEMP"
           rm -rf "$RUNNER_TEMP/native-corpus"
-          mv "$CORPUS" "$RUNNER_TEMP/native-corpus"
+          if [ -d "$CORPUS" ]; then
+            mv "$CORPUS" "$RUNNER_TEMP/native-corpus"
+          else
+            echo "No native corpus for $TARGET yet; fuzzing from the seeds."
+            mkdir -p "$RUNNER_TEMP/native-corpus"
+          fi
 
       - name: Restore the portable corpus
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -424,19 +435,27 @@ jobs:
       - name: Seed the corpus
         run: sh/fuzz-seed.sh
 
-      # Twenty minutes per target, with every input bounded to 30 seconds.
-      - name: Fuzz
+      # libFuzzer first runs every input in both directories, which replays
+      # the native corpus on this build, then fuzzes for the rest of the
+      # twenty minutes, writing new inputs only to the first. Every input is
+      # bounded to 30 seconds. The step's own limit leaves the minimize and
+      # save steps their time inside the job's hour even if the replay runs
+      # long.
+      - name: Fuzz, replaying the native corpus first
+        timeout-minutes: 35
         run: |
           chmod +x "bin/$TARGET"
           mkdir -p "$CORPUS" "$ARTIFACTS"
-          "bin/$TARGET" "$CORPUS" -max_total_time=1200 -timeout=30 -rss_limit_mb=2048 \
-            -artifact_prefix="$ARTIFACTS/" -print_final_stats=1
+          "bin/$TARGET" "$CORPUS" "$RUNNER_TEMP/native-corpus" -max_total_time=1200 -timeout=30 \
+            -rss_limit_mb=2048 -artifact_prefix="$ARTIFACTS/" -print_final_stats=1
 
-      # Drops inputs that add no coverage, so the corpus stays small.
+      # Drops inputs that add no coverage, so the corpus stays small. Native
+      # inputs that add coverage on this build join the portable corpus.
       - name: Minimize the corpus
+        timeout-minutes: 10
         run: |
           mkdir minimized
-          "bin/$TARGET" -merge=1 minimized "$CORPUS"
+          "bin/$TARGET" -merge=1 minimized "$CORPUS" "$RUNNER_TEMP/native-corpus"
           rm -r "$CORPUS"
           mv minimized "$CORPUS"
 
@@ -446,12 +465,6 @@ jobs:
         with:
           path: ${{ env.CORPUS }}
           key: fuzz-corpus-portable-${{ matrix.target }}-${{ github.run_id }}
-
-      - name: Replay the native corpus
-        run: |
-          mkdir -p "$ARTIFACTS"
-          "bin/$TARGET" -runs=0 -timeout=30 -rss_limit_mb=2048 \
-            -artifact_prefix="$ARTIFACTS/" "$RUNNER_TEMP/native-corpus"
 
       - name: Upload the crashing input
         if: failure()

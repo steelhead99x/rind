@@ -12,8 +12,9 @@ A primitive is checked five ways:
   files](thirdparty/vectors/README.md), run by `cargo test`.
 - **Fuzz target**: a `fuzz/fuzzer/` target that compares rind with aws-lc-rs
   on fuzzed input. `fuzz.yml` runs each nightly on the native backends and,
-  forced on x86_64, on the portable backend, which keeps its own corpus, then
-  replays the native corpus on every tier and on that portable build.
+  forced on x86_64, on the portable backend, which keeps its own corpus. It
+  replays the native corpus on every tier, and the latest saved native corpus
+  on that portable build.
 - **Differential test**: a `rind/tests/crosschecks.rs` test that compares rind
   with aws-lc-rs, run by `cargo test`.
 - **Constant time**: a test that marks the secrets. `admin/ctgrind` runs the
@@ -75,8 +76,10 @@ constant-time checks. A primitive's cell on a tier is its row in the
 as `build.yml`, `ctgrind.yml`, and `sh/fuzz-replay.sh` set them; an SDE tier is
 an Intel SDE CPU model, as `x86-cpu.yml` names them. `mutants.yml`
 mutation-tests the Rust each of those architectures compiles. On x86_64,
-`--cfg rind_portable` adds the modules only the portable backend compiles,
-which the other campaigns skip.
+`--cfg rind_portable` adds what only a 64-bit portable build compiles, which
+the other campaigns skip: the portable modules armv7's assembly replaces,
+`mont_sqr` and `mont_mul_limbs`, the AES fallback's 64-bit word module, and
+`cpu::has_aes_hardware`'s portable arm.
 
 | Backend | Tier | Vectors and differential tests | Fuzz targets | Constant time |
 |---|---|---|---|---|
@@ -96,13 +99,13 @@ which the other campaigns skip.
 | armv7 | crypto extension (most 32-bit Android) | `just armv7`: qemu `max` | the arm64 runner, which runs armv7 natively | `admin/ct-qemu`: AES, AES-CBC, AES-KW, AES-GCM, HMAC |
 | armv7 | NEON without the crypto extension | `just armv7`: qemu Cortex-A15 | denied | ctgrind on the arm64 runner, which valgrind hides the crypto extension from |
 | armv7 | no NEON | `just armv7`: qemu Cortex-A15, denied | denied | ctgrind: denied (`no-neon`) |
-| portable | forced on x86_64 (`--cfg rind_portable`) | `just portable`: clippy and release vectors and differential tests | `fuzz.yml`: each target on this build, and the native corpus replayed on it | ctgrind: the `portable` job forces this backend |
-| portable | 32-bit x86 (`i686`) | `just qemu i686`: clippy and release vectors and differential tests, natively on an x86_64 host; `build.yml`'s `i686-windows` and `android` jobs | the forced x86_64 portable fuzz, of the same code built for x86_64 | ctgrind's forced run, of the same code built for x86_64 |
-| portable | big-endian s390x | `just qemu s390x`: clippy and release vectors and differential tests under qemu | the forced x86_64 portable fuzz, of the same code built for x86_64 | ctgrind's forced run, of the same code built for x86_64 |
-| portable | riscv64gc Linux, glibc and musl | `just qemu riscv64` and `just qemu riscv64-musl`: as s390x | as s390x | as s390x |
-| portable | PowerPC Linux: powerpc64le, big-endian powerpc64 and powerpc | `just qemu powerpc64le`, `just qemu powerpc64`, and `just qemu powerpc`: as s390x | as s390x | as s390x |
-| portable | ARM before ARMv7 (Raspberry Pi 1 and Zero) | `just qemu armv6` and `just qemu armv6-softfloat`: as s390x, on qemu's ARM1176; `build.yml`'s `android` job: ARMv5TE Android | as s390x | as s390x |
-| portable | wasm32-wasip2 | `just wasm`: release vectors under wasmtime, in the nightly `build.yml`; no differential tests, since aws-lc does not build for wasm, and `just portable` runs the same Rust against it | the forced x86_64 portable fuzz, of the 64-bit code | unchecked: a wasm engine compiles rind again, and its JIT may turn a select into a branch |
+| portable | forced on x86_64 (`--cfg rind_portable`) | `just portable`: clippy and release vectors and differential tests | `fuzz.yml`: each target on this build, and the latest saved native corpus replayed on it | ctgrind: the `portable` job forces this backend |
+| portable | 32-bit x86 (`i686`) | `just qemu i686`: clippy and release vectors and differential tests, natively on an x86_64 host; `build.yml`'s `i686-windows` and `android` jobs | the forced x86_64 portable fuzz, of the code shared with 64-bit targets; not the 32-bit word and limb paths | ctgrind's forced run, of the same code built for x86_64 |
+| portable | big-endian s390x | `just qemu s390x`: clippy and release vectors and differential tests under qemu | the forced x86_64 portable fuzz, of the same 64-bit code but little-endian; not the big-endian byte order | ctgrind's forced run, of the same code built for x86_64 |
+| portable | riscv64gc Linux, glibc and musl | `just qemu riscv64` and `just qemu riscv64-musl`: as s390x | the forced x86_64 portable fuzz, of the same 64-bit little-endian code | as s390x |
+| portable | PowerPC Linux: powerpc64le, big-endian powerpc64 and powerpc | `just qemu powerpc64le`, `just qemu powerpc64`, and `just qemu powerpc`: as s390x | powerpc64le: as riscv64; powerpc64 and powerpc: as s390x, and powerpc as i686 | as s390x |
+| portable | ARM before ARMv7 (Raspberry Pi 1 and Zero) | `just qemu armv6` and `just qemu armv6-softfloat`: as s390x, on qemu's ARM1176; `build.yml`'s `android` job: ARMv5TE Android | as i686 | as s390x |
+| portable | wasm32-wasip2 | `just wasm`: release vectors under wasmtime, in the nightly `build.yml`; no differential tests, since aws-lc does not build for wasm, and `just portable` runs the same Rust against it | as i686 | unchecked: a wasm engine compiles rind again, and its JIT may turn a select into a branch |
 
 ## Vector suites
 
