@@ -11,7 +11,7 @@ mod p256;
 mod protocol;
 mod ristretto;
 
-#[cfg(test)]
+#[cfg(all(test, not(any(miri, target_family = "wasm"))))]
 mod cross;
 #[cfg(test)]
 mod vectors;
@@ -148,26 +148,24 @@ impl Suite {
     }
 
     fn output(&self, min_signers: u16, max_signers: u16, dealt: protocol::Dealt) -> DealerOutput {
-        let signing_shares = dealt
-            .shares
-            .iter()
-            .map(|share| SigningShare {
+        // One allocation each. Growth would free the previous block with the
+        // signing share still in it, and `Vec` does not drop elements it moves.
+        let mut signing_shares = Vec::with_capacity(dealt.shares.len());
+        let mut verifying_shares = Vec::with_capacity(dealt.shares.len());
+        for share in dealt.shares.iter() {
+            signing_shares.push(SigningShare {
                 scalar: share.scalar,
                 identifier: share.identifier,
                 min_signers,
                 max_signers,
                 kind: self.kind,
-            })
-            .collect();
-        let verifying_shares = dealt
-            .shares
-            .iter()
-            .map(|share| VerifyingShare {
+            });
+            verifying_shares.push(VerifyingShare {
                 kind: self.kind,
                 identifier: share.identifier,
                 element: share.verifying,
-            })
-            .collect();
+            });
+        }
         DealerOutput {
             signing_shares,
             verifying_shares,
@@ -224,7 +222,7 @@ impl SigningShare {
     }
 
     /// The secret share. Tests use it to feed the Zcash crates.
-    #[cfg(test)]
+    #[cfg(all(test, not(any(miri, target_family = "wasm"))))]
     pub(in crate::high::frost) fn scalar_bytes(&self) -> &[u8; 32] {
         &self.scalar
     }
@@ -656,7 +654,7 @@ fn cmp_identifier(kind: Kind, left: &[u8; 32], right: &[u8; 32]) -> Ordering {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(any(miri, target_family = "wasm"))))]
 pub(in crate::high::frost) fn signature_from_bytes(
     suite: &Suite,
     bytes: Vec<u8>,
@@ -784,6 +782,95 @@ mod api_tests {
         assert_eq!(
             err,
             AggregateError::InvalidShare(*dealt.signing_shares[0].identifier())
+        );
+    }
+
+    /// Edges the appendix E vectors do not hit: a scalar at the group order,
+    /// a non-canonical point, a duplicate identifier, mixed suites, and fewer
+    /// signers than the dealer required.
+    #[test]
+    fn hostile_input_is_refused() {
+        // RFC 8032's L, little-endian. The first integer Ed25519 and
+        // ristretto255 refuse.
+        let order_l = [
+            0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9,
+            0xde, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x10,
+        ];
+        // FIPS 186-4's n, big-endian.
+        let order_n = [
+            0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xbc, 0xe6, 0xfa, 0xad, 0xa7, 0x17, 0x9e, 0x84, 0xf3, 0xb9, 0xca, 0xc2,
+            0xfc, 0x63, 0x25, 0x51,
+        ];
+        // 2^255 - 19, little-endian: a non-canonical field element.
+        let mut noncanonical_y = [0xffu8; 32];
+        noncanonical_y[0] = 0xed;
+        noncanonical_y[31] = 0x7f;
+        // P-256's p, big-endian, with the compressed-point tag. `x` is not below p.
+        let mut noncanonical_p256 = [0u8; 33];
+        noncanonical_p256[0] = 0x02;
+        noncanonical_p256[1..].copy_from_slice(&[
+            0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff,
+        ]);
+
+        for (suite, order, point) in [
+            (&ED25519_SHA512, &order_l, &noncanonical_y[..]),
+            (&RISTRETTO255_SHA512, &order_l, &noncanonical_y[..]),
+            (&P256_SHA256, &order_n, &noncanonical_p256[..]),
+        ] {
+            let mut identifier = [0u8; 32];
+            if suite.element_len() == 33 {
+                identifier[31] = 1;
+            } else {
+                identifier[0] = 1;
+            }
+            let err = SignatureShare::from_bytes(suite, &identifier, order).unwrap_err();
+            assert_eq!(err, KeyFormatError::ScalarOutOfRange.into(), "{suite}");
+            assert_eq!(
+                Commitments::from_bytes(suite, &[0; 10]).unwrap_err(),
+                Error::WrongLength,
+                "{suite}"
+            );
+            let mut commitment = identifier.to_vec();
+            commitment.extend_from_slice(point);
+            commitment.extend_from_slice(point);
+            // Rejected on every backend. Ed25519's variant is not the same
+            // on s2n-bignum and dalek, so this checks only the refusal.
+            let err = Commitments::from_bytes(suite, &commitment).unwrap_err();
+            assert!(matches!(err, Error::KeyRejected(_)), "{suite}: {err:?}");
+
+            let dealt = suite.deal(2, 2).unwrap();
+            let (nonces, commitment) = SigningNonces::commit(&dealt.signing_shares[0]).unwrap();
+            let err = SigningPackage::new(vec![commitment.clone(), commitment.clone()], b"frost")
+                .unwrap_err();
+            assert_eq!(err, Error::Unsupported, "{suite}");
+            let package = SigningPackage::new(vec![commitment], b"frost").unwrap();
+            let err = nonces
+                .sign(&package, &dealt.signing_shares[0], &dealt.verifying_key)
+                .unwrap_err();
+            assert_eq!(err, Error::Unsupported, "{suite}");
+        }
+
+        // ristretto255's identity is 32 zero bytes. P-256's point at infinity
+        // has no compressed encoding. Ed25519's identity is
+        // `refuses_a_bad_commitment`.
+        let mut identity = [0u8; 96];
+        identity[0] = 1;
+        assert_eq!(
+            Commitments::from_bytes(&RISTRETTO255_SHA512, &identity).unwrap_err(),
+            KeyFormatError::SmallOrder.into()
+        );
+
+        let dealt_ed = ED25519_SHA512.deal(2, 2).unwrap();
+        let dealt_p256 = P256_SHA256.deal(2, 2).unwrap();
+        let (_, ed) = SigningNonces::commit(&dealt_ed.signing_shares[0]).unwrap();
+        let (_, p256) = SigningNonces::commit(&dealt_p256.signing_shares[0]).unwrap();
+        assert_eq!(
+            SigningPackage::new(vec![ed, p256], b"frost").unwrap_err(),
+            Error::Unsupported
         );
     }
 }

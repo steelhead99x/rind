@@ -276,7 +276,8 @@ impl Point {
 
     /// Whether this is the identity `(0 : 1)`, in any scale `Z`.
     ///
-    /// The coordinates are public. A secret point is not compared here.
+    /// The identity bit is declassified. A caller may branch on it, as
+    /// `serialize` does for `[scalar]B`. The coordinates stay secret.
     pub(crate) fn is_identity(&self) -> bool {
         let [x, y, z, _] = self.coordinates();
         low::ct::into_public(x.ct_eq(&Fe::ZERO) & y.ct_eq(&z)) == 1

@@ -134,7 +134,7 @@ impl Element {
         Self(self.0.mul(scalar))
     }
 
-    /// Whether this is the identity. The element is public.
+    /// Whether this is the identity. The identity bit is declassified.
     pub(crate) fn is_identity(&self) -> bool {
         self.0.is_identity()
     }

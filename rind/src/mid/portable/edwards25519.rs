@@ -11,6 +11,7 @@
 use curve25519_dalek::constants::ED25519_BASEPOINT_TABLE;
 use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 use curve25519_dalek::traits::Identity;
+use subtle::ConstantTimeEq;
 
 use crate::low;
 
@@ -92,13 +93,12 @@ impl Point {
         Self(self.0 + other.0)
     }
 
-    pub(crate) fn neg(&self) -> Self {
-        Self(-self.0)
-    }
-
-    /// Whether this is the identity. The point is public.
+    /// Whether this is the identity. The answer is public.
     pub(crate) fn is_identity(&self) -> bool {
-        self.0 == EdwardsPoint::identity()
+        // dalek 5.0.0's `==` is `ct_eq().into()`. Declassify the choice before
+        // that conversion, which `serialize` then branches on.
+        let equal = self.0.ct_eq(&EdwardsPoint::identity());
+        bool::from(low::ct::into_public(equal))
     }
 
     /// RFC 8032's compressed Edwards `y`.
@@ -116,6 +116,6 @@ impl Point {
     ///
     /// dalek multiplies by the group order. The point is public.
     pub(crate) fn is_torsion_free(&self) -> bool {
-        bool::from(self.0.is_torsion_free())
+        self.0.is_torsion_free()
     }
 }

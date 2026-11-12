@@ -9,6 +9,7 @@
 use curve25519_dalek::constants::RISTRETTO_BASEPOINT_TABLE;
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use curve25519_dalek::traits::Identity;
+use subtle::ConstantTimeEq;
 
 use crate::low;
 
@@ -113,9 +114,12 @@ impl Element {
         Self(self.0 * scalar.0)
     }
 
-    /// Whether this is the identity. The element is public.
+    /// Whether this is the identity. The answer is public.
     pub(crate) fn is_identity(&self) -> bool {
-        self.0 == RistrettoPoint::identity()
+        // dalek 5.0.0's `==` is `ct_eq().into()`. Declassify the choice before
+        // that conversion, which `serialize` then branches on.
+        let equal = self.0.ct_eq(&RistrettoPoint::identity());
+        bool::from(low::ct::into_public(equal))
     }
 
     pub(crate) fn equals(&self, other: &Self) -> bool {

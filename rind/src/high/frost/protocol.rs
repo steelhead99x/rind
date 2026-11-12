@@ -4,9 +4,10 @@
 //! ciphersuite's group.
 
 use core::cmp::Ordering;
+use core::ops::Deref;
 
 use crate::error::{Error, KeyFormatError};
-use crate::low::{ct, ct_equal};
+use crate::low::{Zeroable, ct, ct_equal, zeroise};
 use crate::mid::rng::RandomSource;
 
 /// One FROST ciphersuite's group and hash functions.
@@ -17,7 +18,8 @@ pub(super) trait Group {
     /// Scalars compare as integers in this byte order.
     const SCALAR_BE: bool;
 
-    type Scalar: Copy;
+    /// All-zero bytes are the scalar zero, so a wiped buffer is still a `Scalar`.
+    type Scalar: Copy + Zeroable;
     type Element: Clone;
 
     fn scalar_from_canonical(bytes: &[u8; 32]) -> Option<Self::Scalar>;
@@ -60,14 +62,66 @@ pub(super) struct Party {
     pub binding: [u8; 33],
 }
 
+#[derive(Clone, Copy)]
 pub(super) struct ShareBytes {
     pub identifier: [u8; 32],
     pub scalar: [u8; 32],
     pub verifying: [u8; 33],
 }
 
+impl Zeroable for ShareBytes {}
+
+impl Zeroable for crate::mid::edwards25519::Scalar {}
+impl Zeroable for crate::mid::p256::Scalar {}
+// Native ristretto255 re-exports edwards25519's scalar. The portable one is its own type.
+#[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
+impl Zeroable for crate::mid::ristretto255::Scalar {}
+
+/// Heap buffer of secret `T`, wiped on drop, capacity included.
+///
+/// `reserve_exact` runs before any secret is written, and `push` stores by
+/// index, so the buffer never grows. Growth would free the previous
+/// allocation still holding the secret. Drop wipes every byte of the one
+/// allocation through `low::zeroise`, which does nothing without `wipe`.
+pub(super) struct Wiped<T: Zeroable> {
+    values: Vec<T>,
+    len: usize,
+}
+
+impl<T: Copy + Zeroable> Wiped<T> {
+    fn with_capacity(slots: usize, zero: T) -> Self {
+        let mut values = Vec::new();
+        if slots > 0 {
+            values.reserve_exact(slots);
+            // The spare slots are the zero `T`, so the allocation is
+            // initialized out to its capacity and a later wipe covers it.
+            values.resize(values.capacity(), zero);
+        }
+        Self { values, len: 0 }
+    }
+
+    fn push(&mut self, value: T) {
+        self.values[self.len] = value;
+        self.len += 1;
+    }
+}
+
+impl<T: Zeroable> Drop for Wiped<T> {
+    fn drop(&mut self) {
+        zeroise(&mut self.values);
+    }
+}
+
+impl<T: Zeroable> Deref for Wiped<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &[T] {
+        &self.values[..self.len]
+    }
+}
+
 pub(super) struct Dealt {
-    pub shares: Vec<ShareBytes>,
+    pub shares: Wiped<ShareBytes>,
     pub group: [u8; 33],
 }
 
@@ -94,8 +148,9 @@ pub(super) fn deal<G: Group>(
         return Err(Error::Unsupported);
     }
     for _ in 0..64 {
-        let secret = G::random_scalar(rng)?;
-        let mut coefficients = vec![secret];
+        let mut coefficients =
+            Wiped::with_capacity(usize::from(min_signers), G::scalar_from_u64(0));
+        coefficients.push(G::random_scalar(rng)?);
         for _ in 1..min_signers {
             coefficients.push(G::random_scalar(rng)?);
         }
@@ -116,8 +171,8 @@ pub(super) fn deal_from_coefficients<G: Group>(
     if max_signers == 0 {
         return Err(Error::Unsupported);
     }
-    let secret = scalar::<G>(secret)?;
-    let mut polynomial = vec![secret];
+    let mut polynomial = Wiped::with_capacity(1 + coefficients.len(), G::scalar_from_u64(0));
+    polynomial.push(scalar::<G>(secret)?);
     for coefficient in coefficients {
         polynomial.push(scalar::<G>(coefficient)?);
     }
@@ -316,7 +371,14 @@ fn shares_of<G: Group>(
     coefficients: &[G::Scalar],
     max_signers: u16,
 ) -> Result<Option<Dealt>, Error> {
-    let mut shares = Vec::with_capacity(usize::from(max_signers));
+    let mut shares = Wiped::with_capacity(
+        usize::from(max_signers),
+        ShareBytes {
+            identifier: [0; 32],
+            scalar: [0; 32],
+            verifying: [0; 33],
+        },
+    );
     for identifier in 1..=max_signers {
         let x = G::scalar_from_u64(u64::from(identifier));
         let y = evaluate::<G>(&x, coefficients);

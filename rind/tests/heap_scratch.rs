@@ -200,6 +200,16 @@ fn ed25519() {
 }
 
 #[test]
+fn frost_deal() {
+    use rind::frost::{ED25519_SHA512, P256_SHA256, RISTRETTO255_SHA512};
+    for suite in [&ED25519_SHA512, &RISTRETTO255_SHA512, &P256_SHA256] {
+        zeroed("FROST deal", || suite.deal(2, 3).unwrap());
+    }
+}
+
+// aws-lc does not build for wasm, and Miri cannot run it.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
 fn ml_dsa() {
     use aws_lc_rs::signature::{ML_DSA_44_SIGNING, ML_DSA_65_SIGNING, ML_DSA_87_SIGNING};
     use rind::signature::sign::{MlDsa44, MlDsa65, MlDsa87};
@@ -208,6 +218,7 @@ fn ml_dsa() {
     ml_dsa_set::<MlDsa87>(&ML_DSA_87_SIGNING);
 }
 
+#[cfg(not(any(miri, target_family = "wasm")))]
 fn ml_dsa_set<P: rind::signature::sign::MlDsaParameterSet>(
     theirs: &'static aws_lc_rs::signature::PqdsaSigningAlgorithm,
 ) {
@@ -235,6 +246,7 @@ fn ml_dsa_set<P: rind::signature::sign::MlDsaParameterSet>(
 
 /// The key `seed` expands to, as PKCS#8 in RFC 9881's expanded form, which
 /// rind writes only for a key loaded from it, so aws-lc-rs expands it.
+#[cfg(not(any(miri, target_family = "wasm")))]
 fn ml_dsa_expanded_pkcs8(
     algorithm: &'static aws_lc_rs::signature::PqdsaSigningAlgorithm,
     seed: &[u8; 32],
@@ -252,6 +264,7 @@ fn ml_dsa_expanded_pkcs8(
 }
 
 /// A DER element of `tag` holding `body`, under 64 KiB.
+#[cfg(not(any(miri, target_family = "wasm")))]
 fn der(tag: u8, body: &[u8]) -> Vec<u8> {
     let len = match body.len() {
         len @ 0..=0x7f => vec![len as u8],
