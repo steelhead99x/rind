@@ -90,9 +90,6 @@ qemu. iOS devices' code is only built.
   compile-only: its tests need a JavaScript host. Constant time is unchecked on
   wasm: ctgrind and the trace checks inspect native code, and a wasm engine
   compiles rind again, so its JIT may turn a select into a branch.
-  On 32-bit `x86` it needs Rust 1.94 rather than the 1.90 MSRV, since
-  libcrux-platform 0.0.4 calls `__cpuid` outside `unsafe`
-  ([libcrux#1646](https://github.com/celabshq/libcrux/issues/1646)).
 
 Every operation panics on a CPU missing one of these. Call `rind::cpu::check()`
 at startup to get an error naming the missing feature instead.
