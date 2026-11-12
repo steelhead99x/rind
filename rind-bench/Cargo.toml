@@ -163,3 +163,7 @@ harness = false
 [[bench]]
 name = "rustls"
 harness = false
+
+[[bench]]
+name = "rsa_sizes"
+harness = false
