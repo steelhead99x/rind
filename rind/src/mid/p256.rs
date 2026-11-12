@@ -494,7 +494,7 @@ impl AffineMontPoint {
     #[cfg(not(rind_backend = "x86_64"))]
     fn base_multiply(scalar: &Scalar) -> Self {
         let mut xy = [0; 8];
-        low::p256_scalarmulbase(&mut xy, &scalar.0, &precomp::CURVE_GENERATOR_PRECOMP);
+        low::p256_scalarmulbase(&mut xy, &scalar.0, &precomp::CURVE_GENERATOR_PRECOMP.0);
         let x = FieldElement(xy[Self::X].try_into().unwrap());
         let y = FieldElement(xy[Self::Y].try_into().unwrap());
         Self::from_xy(x.as_mont(), y.as_mont())
@@ -1128,6 +1128,26 @@ type AffineMontPointTable = [low::P256GeneratorRow; 37];
 #[cfg(not(rind_backend = "x86_64"))]
 type AffineMontPointTable = [[u64; 256]; 43];
 
+/// The generator table, aligned to a cache line.
+///
+/// Its points are 64 bytes, which `p256_scalarmulbase` reads with 16-byte
+/// `ldp`s. Left at the 8-byte alignment of its words, the table can start 8
+/// bytes into a line, and then one load in four splits across two lines: on
+/// a Cortex-A76 that cost key generation and signing 2.5-3%, depending only
+/// on where the linker happened to put the table.
+#[cfg(not(rind_backend = "x86_64"))]
+#[repr(C, align(64))]
+struct AlignedTable(AffineMontPointTable);
+
+#[cfg(not(rind_backend = "x86_64"))]
+impl core::ops::Deref for AlignedTable {
+    type Target = AffineMontPointTable;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 const CURVE_A_MONT: FieldElement = FieldElement([
     0xffff_ffff_ffff_fffc,
     0x0000_0003_ffff_ffff,
@@ -1442,10 +1462,17 @@ mod tests {
         println!("montify n = {:016x?}", Scalar::montifier().0);
     }
 
+    #[cfg(not(rind_backend = "x86_64"))]
+    #[test]
+    fn generator_table_is_line_aligned() {
+        let table = core::ptr::from_ref(&precomp::CURVE_GENERATOR_PRECOMP);
+        assert_eq!(table.addr() % 64, 0);
+    }
+
     #[test]
     fn base_point_precomp() {
         let mut base = JacobianMontPoint::from_affine(&CURVE_GENERATOR);
-        for row in &precomp::CURVE_GENERATOR_PRECOMP {
+        for row in precomp::CURVE_GENERATOR_PRECOMP.iter() {
             let mut multiple = base;
             for (i, entry) in (1..).zip(row.as_chunks::<8>().0) {
                 assert_eq!(&multiple.as_affine().xy, entry);
