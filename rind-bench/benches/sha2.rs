@@ -22,18 +22,21 @@ fn test_ring_sha512_256(data: &[u8]) {
     black_box(ctx.finish());
 }
 
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 fn test_aws_sha256(data: &[u8]) {
     let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA256);
     ctx.update(data);
     black_box(ctx.finish());
 }
 
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 fn test_aws_sha512(data: &[u8]) {
     let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA512);
     ctx.update(data);
     black_box(ctx.finish());
 }
 
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 fn test_aws_sha512_256(data: &[u8]) {
     let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA512_256);
     ctx.update(data);
@@ -85,6 +88,7 @@ fn sha256(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("ring", size_name), &input, |b, input| {
             b.iter(|| test_ring_sha256(input))
         });
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_with_input(
             BenchmarkId::new("aws-lc-rs", size_name),
             &input,
@@ -135,6 +139,7 @@ fn sha512(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("ring", size_name), &input, |b, input| {
             b.iter(|| test_ring_sha512(input))
         });
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_with_input(
             BenchmarkId::new("aws-lc-rs", size_name),
             &input,
@@ -185,6 +190,7 @@ fn sha512_256(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("ring", size_name), &input, |b, input| {
             b.iter(|| test_ring_sha512_256(input))
         });
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_with_input(
             BenchmarkId::new("aws-lc-rs", size_name),
             &input,
@@ -207,6 +213,7 @@ fn sha256_updates(c: &mut Criterion) {
     let input = vec![0u8; 4096];
     group.throughput(Throughput::Bytes(input.len() as u64));
     for (chunk, chunk_name) in [(1, "1B"), (16, "16B")] {
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_with_input(
             BenchmarkId::new("aws-lc-rs", chunk_name),
             &input,

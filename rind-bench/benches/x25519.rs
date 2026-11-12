@@ -45,6 +45,7 @@ fn x25519(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{agreement, error, rand};
         let rng = rand::SystemRandom::new();
@@ -136,6 +137,7 @@ fn keygen(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{agreement, rand};
         let rng = rand::SystemRandom::new();
@@ -190,6 +192,7 @@ fn stored(c: &mut Criterion) {
     let public_key: &[u8] = PUBLIC_KEY;
     let scalar = [1u8; 32];
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{agreement, error};
         let key = agreement::PrivateKey::from_private_key(&agreement::X25519, &scalar).unwrap();

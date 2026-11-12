@@ -4,6 +4,19 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use hmac::{KeyInit, Mac};
 
+/// An aws-lc-rs path, or `()` on Xtensa, which aws-lc builds for no target
+/// of: there its rows are left out, and its algorithms passed as `()`.
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+macro_rules! aws {
+    ($($path:tt)+) => { aws_lc_rs::$($path)+ };
+}
+#[cfg(any(target_arch = "xtensa", target_os = "none"))]
+macro_rules! aws {
+    ($($path:tt)+) => {
+        ()
+    };
+}
+
 /// A library's one-shot MAC: key, then message.
 type OneShot = fn(&[u8], &[u8]);
 
@@ -34,7 +47,7 @@ fn bench(
     c: &mut Criterion,
     name: &str,
     ring: ring::hmac::Algorithm,
-    aws: aws_lc_rs::hmac::Algorithm,
+    aws: aws!(hmac::Algorithm),
     ours: &'static rind::hmac::Algorithm,
     key: &[u8],
     others: &[(&str, OneShot)],
@@ -52,6 +65,7 @@ fn bench(
                 black_box(ctx.sign())
             })
         });
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_with_input(
             BenchmarkId::new("aws-lc-rs", size_name),
             &input,
@@ -81,7 +95,9 @@ fn bench(
             &input,
             |b, input| b.iter(|| black_box(ring::hmac::sign(&ring_key, input))),
         );
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         let aws_key = aws_lc_rs::hmac::Key::new(aws, key);
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_with_input(
             BenchmarkId::new("aws-lc-rs/reused-key", size_name),
             &input,
@@ -148,7 +164,7 @@ fn hmac(c: &mut Criterion) {
         c,
         "hmac-sha1",
         ring::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
-        aws_lc_rs::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
+        aws!(hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY),
         &rind::hmac::legacy::HMAC_SHA1,
         &[0xff; 20],
         &sha1,
@@ -157,7 +173,7 @@ fn hmac(c: &mut Criterion) {
         c,
         "hmac-sha256",
         ring::hmac::HMAC_SHA256,
-        aws_lc_rs::hmac::HMAC_SHA256,
+        aws!(hmac::HMAC_SHA256),
         &rind::hmac::HMAC_SHA256,
         &[0xff; 32],
         &sha256,
@@ -166,7 +182,7 @@ fn hmac(c: &mut Criterion) {
         c,
         "hmac-sha384",
         ring::hmac::HMAC_SHA384,
-        aws_lc_rs::hmac::HMAC_SHA384,
+        aws!(hmac::HMAC_SHA384),
         &rind::hmac::HMAC_SHA384,
         &[0xff; 48],
         &sha384,
