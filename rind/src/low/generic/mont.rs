@@ -29,6 +29,8 @@
 //! that product are masks. The schoolbook loops stay, for shorter inputs and
 //! for proofs of this file.
 
+use core::mem::MaybeUninit;
+
 use super::super::bignum::{MAX_WORDS, nonzero, select, word};
 use super::{Limb, Wide, join, limbs};
 use crate::low::ct;
@@ -63,6 +65,54 @@ fn karatsuba(n: usize, crossover: usize) -> bool {
     n >= crossover && n & 1 == 0
 }
 
+/// A stack slot of `N` limbs. Nothing is written: `MaybeUninit` is valid
+/// uninitialized, so this is not a zero-fill of the widest modulus.
+fn uninit<const N: usize>() -> [MaybeUninit<Limb>; N] {
+    [const { MaybeUninit::uninit() }; N]
+}
+
+/// Zero the first `n` limbs of a stack slot of `N`, run `f` on them, then
+/// wipe them. The tail is not written. `low/generic` does not allocate.
+fn with_zeroed<const N: usize, R>(n: usize, f: impl FnOnce(&mut [Limb]) -> R) -> R {
+    let mut raw = uninit::<N>();
+    for slot in &mut raw[..n] {
+        slot.write(0);
+    }
+    // SAFETY: the loop wrote the first `n` limbs. `n > N` panics on the
+    // slice above, before this.
+    let buf = unsafe { core::slice::from_raw_parts_mut(raw.as_mut_ptr().cast::<Limb>(), n) };
+    let result = f(buf);
+    crate::low::zeroise(buf);
+    result
+}
+
+/// [`with_zeroed`] for a product of `n` limbs and a scratch of `m`.
+fn with_zeroed2<const N: usize, const M: usize, R>(
+    n: usize,
+    m: usize,
+    f: impl FnOnce(&mut [Limb], &mut [Limb]) -> R,
+) -> R {
+    let mut a = uninit::<N>();
+    let mut b = uninit::<M>();
+    for slot in &mut a[..n] {
+        slot.write(0);
+    }
+    for slot in &mut b[..m] {
+        slot.write(0);
+    }
+    // SAFETY: as in `with_zeroed`, for each prefix.
+    let (a, b) = unsafe {
+        (
+            core::slice::from_raw_parts_mut(a.as_mut_ptr().cast::<Limb>(), n),
+            core::slice::from_raw_parts_mut(b.as_mut_ptr().cast::<Limb>(), m),
+        )
+    };
+    let result = f(a, b);
+    crate::low::zeroise(a);
+    crate::low::zeroise(b);
+    result
+}
+
 /// Compute "montification" constant z := 2^{128k} mod m
 ///
 /// Input m[k]; output z[k]; temporary buffer t[>=k]
@@ -72,7 +122,10 @@ fn karatsuba(n: usize, crossover: usize) -> bool {
 /// depends on, and so reveals, m's width in limbs, as aws-lc's reveals its
 /// width in bits: an RSA key's encoding gives its primes' widths.
 pub(crate) fn bignum_montifier(z: &mut [u64], m: &[u64], _t: &mut [u64]) {
-    let mut m_limbs = [0; MAX_LIMBS];
+    // Uninitialized: `limbs` writes the prefix it returns, and on 64-bit
+    // limbs does not touch the slot. Zeroing `MAX_LIMBS` here would clear
+    // an 8192-bit buffer for every modulus.
+    let mut m_limbs = uninit::<MAX_LIMBS>();
     let m = limbs(m, &mut m_limbs);
     let n = m.len();
     let n0 = neg_inverse(m[0]);
@@ -115,7 +168,7 @@ pub(crate) fn bignum_montifier(z: &mut [u64], m: &[u64], _t: &mut [u64]) {
 /// p-fold Montgomery reduction w.r.t. a k-digit modulus m giving a k-digit
 /// answer.
 pub(crate) fn bignum_montredc(z: &mut [u64], x: &[u64], m: &[u64], p: u64) {
-    let mut m_limbs = [0; MAX_LIMBS];
+    let mut m_limbs = uninit::<MAX_LIMBS>();
     let m = limbs(m, &mut m_limbs);
     let p = p as usize * PER_WORD;
     let mut t = [0; MAX_LIMBS * 2];
@@ -133,22 +186,31 @@ pub(crate) fn bignum_montredc(z: &mut [u64], x: &[u64], m: &[u64], p: u64) {
 ///
 /// Truncates the result in general unless k >= m + n
 pub(crate) fn bignum_mul(z: &mut [u64], x: &[u64], y: &[u64]) {
-    let (mut x_limbs, mut y_limbs) = ([0; MAX_LIMBS], [0; MAX_LIMBS]);
+    // The slots are `MAX_LIMBS` because a stack array's length is static and
+    // 32-bit `limbs` writes `2 * words` into caller storage, up to the widest
+    // modulus. They are not zeroed: 64-bit `limbs` ignores them, and 32-bit
+    // `limbs` overwrites the prefix it returns.
+    let mut x_limbs = uninit::<MAX_LIMBS>();
+    let mut y_limbs = uninit::<MAX_LIMBS>();
     let (x, y) = (limbs(x, &mut x_limbs), limbs(y, &mut y_limbs));
-    // The product is `x.len() + y.len()` limbs, not the maximum: zeroing a
-    // fixed `MAX_LIMBS * 2` buffer made every width pay for an 8192-bit
-    // product.
-    let mut product = vec![0; x.len() + y.len()];
+    let wide = x.len() + y.len();
     if x.len() == y.len() && karatsuba(x.len(), MUL_KARATSUBA) {
-        let mut scratch = vec![0; 4 * x.len()];
-        mul_karatsuba(&mut product, x, y, &mut scratch, MUL_KARATSUBA);
-        crate::low::zeroise(&mut scratch);
+        with_zeroed2::<{ MAX_LIMBS * 2 }, { MAX_LIMBS * 4 }, ()>(
+            wide,
+            4 * x.len(),
+            |product, scratch| {
+                mul_karatsuba(product, x, y, scratch, MUL_KARATSUBA);
+                z.fill(0);
+                join(product, z);
+            },
+        );
     } else {
-        mul_schoolbook(&mut product, x, y);
+        with_zeroed::<{ MAX_LIMBS * 2 }, ()>(wide, |product| {
+            mul_schoolbook(product, x, y);
+            z.fill(0);
+            join(product, z);
+        });
     }
-    z.fill(0);
-    join(&product, z);
-    crate::low::zeroise(&mut product);
 }
 
 /// `z = x * y / 2^(64k) mod m`, for `x` and `y` below the odd `m`, where `k`
@@ -164,9 +226,14 @@ pub(crate) fn bignum_mul(z: &mut [u64], x: &[u64], y: &[u64]) {
 pub(crate) fn mont_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) {
     let k = m.len();
     assert!(k >= 1 && z.len() == k && x.len() == k && y.len() == k);
-    let mut buf = [[0; MAX_LIMBS]; 3];
-    let [x_limbs, y_limbs, m_limbs] = &mut buf;
-    let (x, y, m) = (limbs(x, x_limbs), limbs(y, y_limbs), limbs(m, m_limbs));
+    let mut x_limbs = uninit::<MAX_LIMBS>();
+    let mut y_limbs = uninit::<MAX_LIMBS>();
+    let mut m_limbs = uninit::<MAX_LIMBS>();
+    let (x, y, m) = (
+        limbs(x, &mut x_limbs),
+        limbs(y, &mut y_limbs),
+        limbs(m, &mut m_limbs),
+    );
     // The low limb of `-m^-1 mod 2^64` is `-m^-1` mod a limb.
     let n0 = n0 as Limb;
     if karatsuba(m.len(), MUL_KARATSUBA) {
@@ -186,7 +253,8 @@ pub(crate) fn mont_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) 
 pub(crate) fn mont_sqr(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
     let k = m.len();
     assert!(k >= 1 && z.len() == k && x.len() == k);
-    let (mut x_limbs, mut m_limbs) = ([0; MAX_LIMBS], [0; MAX_LIMBS]);
+    let mut x_limbs = uninit::<MAX_LIMBS>();
+    let mut m_limbs = uninit::<MAX_LIMBS>();
     let (x, m) = (limbs(x, &mut x_limbs), limbs(m, &mut m_limbs));
     let n = m.len();
     let n0 = n0 as Limb;
@@ -551,29 +619,25 @@ fn sqr_karatsuba(z: &mut [Limb], x: &[Limb], t: &mut [Limb], crossover: usize) {
 /// and one reduction brings it below `2m`, which [`redc`] finishes.
 fn mont_mul_karatsuba(z: &mut [u64], x: &[Limb], y: &[Limb], m: &[Limb], n0: Limb) {
     let n = m.len();
-    // `2n` and `4n` limbs, not `MAX_LIMBS`. A fixed buffer zeroed every call
-    // was about 6 KiB on 64-bit limbs whatever `n` was, which is most of a
-    // short product and pushed the crossover out past RSA's primes.
-    let mut product = vec![0; 2 * n];
-    let mut scratch = vec![0; 4 * n];
-    mul_karatsuba(&mut product, x, y, &mut scratch, MUL_KARATSUBA);
-    redc(&mut product, m, n0);
-    join(&product[n..], z);
-    // Heap scratch from a private operation is as good as the prime.
-    crate::low::zeroise(&mut product);
-    crate::low::zeroise(&mut scratch);
+    // Stack slots of the widest product and scratch. Only the `2n` and `4n`
+    // limbs this call uses are zeroed, then wiped. `low/generic` does not
+    // allocate: a `Vec` here would run on every Montgomery step above the
+    // crossover, and on targets built without `std`.
+    with_zeroed2::<{ MAX_LIMBS * 2 }, { MAX_LIMBS * 4 }, ()>(2 * n, 4 * n, |product, scratch| {
+        mul_karatsuba(product, x, y, scratch, MUL_KARATSUBA);
+        redc(product, m, n0);
+        join(&product[n..], z);
+    });
 }
 
 /// `z = x^2 / 2^bn mod m` by a Karatsuba square and [`redc`].
 fn mont_sqr_karatsuba(z: &mut [u64], x: &[Limb], m: &[Limb], n0: Limb) {
     let n = m.len();
-    let mut square = vec![0; 2 * n];
-    let mut scratch = vec![0; 4 * n];
-    sqr_karatsuba(&mut square, x, &mut scratch, SQR_KARATSUBA);
-    redc(&mut square, m, n0);
-    join(&square[n..], z);
-    crate::low::zeroise(&mut square);
-    crate::low::zeroise(&mut scratch);
+    with_zeroed2::<{ MAX_LIMBS * 2 }, { MAX_LIMBS * 4 }, ()>(2 * n, 4 * n, |square, scratch| {
+        sqr_karatsuba(square, x, scratch, SQR_KARATSUBA);
+        redc(square, m, n0);
+        join(&square[n..], z);
+    });
 }
 
 /// `r := 2r mod m`, for `r` below `m`.
@@ -800,9 +864,9 @@ mod tests {
         }
     }
 
-    /// `m - 1`, an all-ones value still below `m`, and a value whose halves
-    /// match, so the Karatsuba half-difference is zero. Lengths are the
-    /// production crossovers, in words.
+    /// `m - 1`, an all-ones value still below `m`, a value whose halves
+    /// match (so the half-difference is zero), and a random odd modulus
+    /// with its top bit set. Lengths are the production crossovers, in words.
     fn crossover_edges(seed: u64) -> Vec<(Vec<u64>, Vec<u64>, Vec<u64>)> {
         let mut words = vec![MUL_KARATSUBA / PER_WORD, SQR_KARATSUBA / PER_WORD];
         words.sort_unstable();
@@ -832,6 +896,29 @@ mod tests {
             let mut y = other.clone();
             y.extend_from_slice(&other);
             out.push((m, x, y));
+
+            // A random odd modulus with its top bit set, and two operands
+            // with that bit clear, so this is not the `2^(64k) - 1` modulus
+            // whose `n0` is 1.
+            let mut m = vec![0u64; k];
+            let mut s = seed.wrapping_mul(k as u64 | 1).wrapping_add(0xA5A5_A5A5);
+            for w in &mut m {
+                s = s.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(1);
+                *w = s;
+            }
+            m[0] |= 1;
+            m[k - 1] |= 1 << 63;
+            let operand = |mix: u64| {
+                let mut v = vec![0u64; k];
+                let mut t = s ^ mix;
+                for w in &mut v {
+                    t = t.wrapping_mul(0x6C62_272E_07BB_0142).wrapping_add(1);
+                    *w = t;
+                }
+                v[k - 1] &= !(1 << 63);
+                v
+            };
+            out.push((m, operand(1), operand(2)));
         }
         out
     }
