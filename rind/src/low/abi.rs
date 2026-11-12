@@ -104,26 +104,71 @@ macro_rules! narrow_args {
 
 narrow_args!(bool u8 u32 i32);
 
+/// Eight bytes, which the Rust ABI passes in one register, as an integer.
+impl Arg for [u8; 8] {
+    fn pass(self, words: &mut Words) {
+        words.push(u64::from_ne_bytes(self) as Word);
+    }
+}
+
+/// A CPU feature token, which is zero-sized, so the Rust ABI passes nothing.
+#[cfg(target_arch = "x86_64")]
+impl Arg for crate::low::x86_64::cpu::HaveSha256 {
+    fn pass(self, _: &mut Words) {}
+}
+
 #[cfg(target_pointer_width = "64")]
 narrow_args!(u64);
 
 /// A return value the trampoline can hand back.
 pub(crate) trait Ret {
+    /// Calls the routine through `call` with `words`, its arguments, and
+    /// returns what it returned.
+    fn returned(words: Words, call: impl FnOnce(&Words) -> Word) -> Self;
+}
+
+/// A return value the routine leaves in the return register.
+trait InRegister {
     /// The value a routine returning `Self` leaves in the return register.
     fn from_word(word: Word) -> Self;
 }
 
-impl Ret for () {
+impl<T: InRegister> Ret for T {
+    fn returned(words: Words, call: impl FnOnce(&Words) -> Word) -> Self {
+        T::from_word(call(&words))
+    }
+}
+
+/// A SHA-256 digest, which the Rust ABI returns through a hidden pointer
+/// passed before the arguments.
+#[cfg(target_arch = "x86_64")]
+impl Ret for [u8; 32] {
+    fn returned(words: Words, call: impl FnOnce(&Words) -> Word) -> Self {
+        let mut out = [0; 32];
+        let mut all = Words {
+            words: [0; MAX_WORDS],
+            len: 0,
+        };
+        all.push(out.as_mut_ptr().expose_provenance());
+        for &word in &words.words[..words.len] {
+            all.push(word);
+        }
+        call(&all);
+        out
+    }
+}
+
+impl InRegister for () {
     fn from_word(_: Word) -> Self {}
 }
 
-impl Ret for bool {
+impl InRegister for bool {
     fn from_word(word: Word) -> Self {
         word as u8 != 0
     }
 }
 
-impl Ret for usize {
+impl InRegister for usize {
     fn from_word(word: Word) -> Self {
         word
     }
@@ -131,7 +176,7 @@ impl Ret for usize {
 
 macro_rules! narrow_rets {
     ($($ty:ty)*) => {$(
-        impl Ret for $ty {
+        impl InRegister for $ty {
             fn from_word(word: Word) -> Self {
                 word as Self
             }
@@ -179,7 +224,7 @@ macro_rules! routine {
             unsafe fn call(self, name: &str, ($($arg,)*): Self::Args) -> R {
                 let mut _words = Words { words: [0; MAX_WORDS], len: 0 };
                 $($arg.pass(&mut _words);)*
-                R::from_word(run($conv, self as Word, &_words, name))
+                R::returned(_words, |words| run($conv, self as Word, words, name))
             }
         }
     };
