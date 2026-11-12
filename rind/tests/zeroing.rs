@@ -262,6 +262,25 @@ fn aead() {
 }
 
 #[test]
+fn vrf() {
+    use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI, SecretKey};
+
+    let edwards = SecretKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, &[0xff; 32]).unwrap();
+    check_zeroed_on_drop(Box::pin(edwards));
+    let generated = SecretKey::generate(&ECVRF_EDWARDS25519_SHA512_TAI).unwrap();
+    check_zeroed_on_drop(Box::pin(generated));
+
+    // RFC 9381 B.1's scalar, in `[1, n)`.
+    let seed = [
+        0xc9, 0xaf, 0xa9, 0xd8, 0x45, 0xba, 0x75, 0x16, 0x6b, 0x5c, 0x21, 0x57, 0x67, 0xb1, 0xd6,
+        0x93, 0x4e, 0x50, 0xc3, 0xdb, 0x36, 0xe8, 0x9b, 0x12, 0x7b, 0x8a, 0x62, 0x2b, 0x12, 0x0f,
+        0x67, 0x21,
+    ];
+    let p256 = SecretKey::from_bytes(&ECVRF_P256_SHA256_TAI, &seed).unwrap();
+    check_zeroed_on_drop(Box::pin(p256));
+}
+
+#[test]
 fn cipher() {
     use rind::cipher::{
         AES_128, AES_192, AES_256, Aes, AesCbcDecryptingKey, AesCbcEncryptingKey, AesCtr, ChaCha20,

@@ -250,6 +250,30 @@ fn signature() {
 }
 
 #[test]
+fn vrf() {
+    use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI, SecretKey};
+
+    let edwards = SecretKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, &[0xff; 32]).unwrap();
+    let shown = format!("{edwards:?}");
+    assert_eq!(
+        shown,
+        "SecretKey { algorithm: ECVRF-EDWARDS25519-SHA512-TAI, .. }"
+    );
+    assert!(!shown.contains("255, 255"), "{shown}");
+
+    let seed = [
+        0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xbc, 0xe6, 0xfa, 0xad, 0xa7, 0x17, 0x9e, 0x84, 0xf3, 0xb9, 0xca, 0xc2, 0xfc, 0x63,
+        0x25, 0x50,
+    ];
+    // One below the P-256 order, so it is a key, and it is full of 0xff bytes.
+    let p256 = SecretKey::from_bytes(&ECVRF_P256_SHA256_TAI, &seed).unwrap();
+    let shown = format!("{p256:?}");
+    assert_eq!(shown, "SecretKey { algorithm: ECVRF-P256-SHA256-TAI, .. }");
+    assert!(!shown.contains("255, 255"), "{shown}");
+}
+
+#[test]
 fn agreement() {
     use rind::agreement::{ECDH_P256, PrivateKey};
     assert_eq!(format!("{ECDH_P256:?}"), "EcdhP256");

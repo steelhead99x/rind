@@ -29,6 +29,9 @@ pub(super) mod chacha20;
 pub(super) mod chacha20poly1305;
 #[cfg(not(any(rind_backend = "arm", rind_backend = "portable")))]
 pub(super) mod edwards25519;
+#[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
+#[path = "portable/edwards25519.rs"]
+pub(super) mod edwards25519;
 pub(super) mod md5;
 pub(super) mod mldsa;
 pub(super) mod mlkem768;

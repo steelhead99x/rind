@@ -132,6 +132,14 @@ impl Fe {
         self.negate_if(self.is_negative())
     }
 
+    /// `1 / self`, or 0 when `self` is 0.
+    ///
+    /// `self^(p - 2) = self^((p - 5) / 8 * 8 + 3)`.
+    pub(crate) fn invert(&self) -> Self {
+        let z3 = self.square().mul(self);
+        self.pow_p58().square_times(3).mul(&z3)
+    }
+
     /// `(1, 1 / sqrt(self))`, the non-negative root, if `self` is a nonzero
     /// square, else 0 and an unspecified element.
     pub(crate) fn invsqrt(&self) -> (u64, Self) {
@@ -284,6 +292,52 @@ impl Point {
         let [x, y, z, t] = Self(p).coordinates();
         Self::from_coordinates(&x.negate_if(negative), &y, &z, &t.negate_if(negative))
     }
+
+    /// `-(x, y) = (-x, y)`.
+    pub(crate) fn negate(&self) -> Self {
+        let [x, y, z, t] = self.coordinates();
+        Self::from_coordinates(&x.neg(), &y, &z, &t.neg())
+    }
+
+    /// `8 * self`, three doublings.
+    pub(crate) fn mul_cofactor(&self) -> Self {
+        self.double().double().double()
+    }
+
+    /// Whether this is the identity, `(0, 1)`.
+    ///
+    /// The answer is public. Callers use it on points a peer sent or on a
+    /// hash of public inputs, never on a secret scalar's product.
+    pub(crate) fn is_identity(&self) -> bool {
+        let [x, y, z, _] = self.coordinates();
+        let yes = x.ct_eq(&Fe::ZERO) & y.ct_eq(&z);
+        low::ct::into_public(yes) == 1
+    }
+
+    /// RFC 8032's decoding, or `None` when the encoding is non-canonical or
+    /// not a point. The branch is on that public fact.
+    pub(crate) fn from_bytes(bytes: &[u8; 32]) -> Option<Self> {
+        let mut affine = [0u64; 8];
+        if !low::edwards25519_decode(&mut affine, bytes) {
+            return None;
+        }
+        let x = Fe(affine[0..4].try_into().unwrap());
+        let y = Fe(affine[4..8].try_into().unwrap());
+        Some(Self::from_coordinates(&x, &y, &Fe::ONE, &x.mul(&y)))
+    }
+
+    /// RFC 8032's encoding. Inversion of `Z` is a fixed chain.
+    pub(crate) fn to_bytes(self) -> [u8; 32] {
+        let [x, y, z, _] = self.coordinates();
+        let zinv = z.invert();
+        let x = x.mul(&zinv);
+        let y = y.mul(&zinv);
+        let mut out = y.to_le_bytes();
+        // `y` is below `2^255`. The top bit carries the sign of `x`.
+        out[31] &= 0x7f;
+        out[31] |= (x.is_negative() as u8) << 7;
+        out
+    }
 }
 
 /// An integer modulo the prime order of edwards25519's base point,
@@ -325,6 +379,14 @@ impl Scalar {
     pub(crate) fn mul(&self, other: &Self) -> Self {
         let mut z = Self([0; 4]);
         low::bignum_madd_n25519(&mut z.0, &self.0, &other.0, &[0; 4]);
+        z
+    }
+
+    /// `self + other mod L`.
+    pub(crate) fn add(&self, other: &Self) -> Self {
+        let one = [1, 0, 0, 0];
+        let mut z = Self([0; 4]);
+        low::bignum_madd_n25519(&mut z.0, &self.0, &one, &other.0);
         z
     }
 
@@ -433,5 +495,31 @@ mod tests {
             let want: Vec<i32> = want.iter().flat_map(|b| [b & 15, b >> 4]).collect();
             assert_eq!(nibbles.to_vec(), want);
         }
+    }
+
+    #[test]
+    fn field_invert_and_point_encoding() {
+        assert_eq!(Fe::ONE.invert().0, Fe::ONE.0);
+        let two = Fe([2, 0, 0, 0]);
+        assert_eq!(two.invert().mul(&two).0, Fe::ONE.0);
+
+        let zero = Scalar::from_canonical_bytes(&[0; 32]).unwrap();
+        let id = Point::mul_base(&zero);
+        assert!(id.is_identity());
+        assert_eq!(id.to_bytes()[0], 1);
+        assert!(id.to_bytes()[1..].iter().all(|b| *b == 0));
+        assert!(id.mul(&zero).is_identity());
+
+        // Ed25519's base point.
+        let base = *b"\x58\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66\x66";
+        let point = Point::from_bytes(&base).unwrap();
+        assert_eq!(point.to_bytes(), base);
+        let one = Scalar::from_canonical_bytes(&[
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ])
+        .unwrap();
+        assert_eq!(Point::mul_base(&one).to_bytes(), base);
+        assert!(!point.mul_cofactor().is_identity());
     }
 }

@@ -65,6 +65,9 @@ aws-lc-sys = { version = "0.47", default-features = false }
 hpke-rs = { version = "0.8", default-features = false, features = ["hazmat", "rustcrypto", "std"] }
 # RSA blind signatures, which aws-lc-rs does not offer.
 blind-rsa-signatures = { version = "0.18", default-features = false }
+# ECVRF. aws-lc-rs has none. akd proves the Edwards suite; vrf-rfc9381 the P-256 one.
+akd_core = { version = "0.13", default-features = false, features = ["vrf"] }
+vrf-rfc9381 = { version = "0.0.7", default-features = false, features = ["p256"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [

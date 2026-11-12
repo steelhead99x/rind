@@ -9,6 +9,8 @@ use crate::error::{Error, KeyFormatError};
 use crate::low;
 use crate::mid::rng::{RandomSource, SystemRandom};
 
+#[path = "p256_group.rs"]
+pub(crate) mod group;
 mod precomp;
 
 /// A P-256 public key.

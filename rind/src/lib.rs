@@ -277,6 +277,37 @@ pub mod blind_rsa {
     };
 }
 
+/// ECVRF from RFC 9381, the verifiable random function key transparency uses.
+///
+/// [`ECVRF_EDWARDS25519_SHA512_TAI`](vrf::ECVRF_EDWARDS25519_SHA512_TAI) is the
+/// suite Meta's `akd` runs. [`ECVRF_P256_SHA256_TAI`](vrf::ECVRF_P256_SHA256_TAI)
+/// is the other suite draft-ietf-keytrans-protocol names. A secret key proves
+/// an output for an input. A public key returns that output only when the
+/// proof checks.
+///
+/// Try-and-increment's running time depends on the input and not on the
+/// secret key, so a secret input leaks through how long proving takes. RFC
+/// 9381 says not to use these suites when the input must stay secret, and a
+/// proof hides nothing about its input either way.
+///
+/// ```
+/// # fn main() -> Result<(), rind::Error> {
+/// use rind::vrf::{SecretKey, ECVRF_EDWARDS25519_SHA512_TAI};
+///
+/// let key = SecretKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, &[1; 32])?;
+/// let (proof, output) = key.prove(b"alpha")?;
+/// let checked = key.public_key().verify(b"alpha", &proof)?;
+/// assert_eq!(checked.as_ref(), output.as_ref());
+/// # Ok(())
+/// # }
+/// ```
+pub mod vrf {
+    pub use crate::high::vrf::{
+        Algorithm, ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI, Output, Proof, PublicKey,
+        SecretKey,
+    };
+}
+
 /// Public key signatures: ECDSA on P-256, P-384, and P-521, RSA, and Ed25519.
 ///
 /// A key pair signs with a [`signature::sign`] algorithm, and a peer's

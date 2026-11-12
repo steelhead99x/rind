@@ -45,6 +45,7 @@ SHA-512.
 | PBKDF2 | rind |  |  |  |  |
 | X25519 | s2n-bignum ✓ |  |  |  |  |
 | Ed25519 | s2n-bignum ✓ + Graviola |  |  |  |  |
+| ECVRF | rind, over edwards25519 and P-256 |  |  |  |  |
 | P-256 ECDH, ECDSA | s2n-bignum ✓ + aws-lc ⚡ + Graviola ⚡ |  |  |  |  |
 | P-384 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ + Graviola ⚡ |  |  |  |  |
 | P-521 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ |  |  |  |  |
@@ -108,6 +109,7 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | PBKDF2 | rind |  |  |  |
 | X25519 | s2n-bignum ✓ |  | BoringSSL ⚡ + curve25519-dalek ⚡ | curve25519-dalek ⚡ |
 | Ed25519 | s2n-bignum ✓ + Graviola |  | curve25519-dalek ⚡ + rind ⚡ |  |
+| ECVRF | rind, over edwards25519 and P-256 |  | edwards25519 via curve25519-dalek; P-256 as its row |  |
 | P-256 ECDH, ECDSA | s2n-bignum ✓ + Graviola |  | fiat-crypto ✓ + rind ⚡ + Graviola ⚡ |  |
 | P-384 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ + Graviola ⚡ |  | fiat-crypto ✓ + rind ⚡ |  |
 | P-521 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ |  | fiat-crypto ✓ + rind ⚡ |  |
@@ -439,7 +441,12 @@ aarch64 it is s2n-bignum's `p256_scalarmulbase`, over 6-bit Booth windows and
 a table of each window's 32 multiples (an 88KB constant table). Variable
 point multiplication is s2n-bignum's `p256_montjscalarmul` on x86_64, and on
 aarch64 its `p256_scalarmul`, whose proof covers the conversion back to
-affine coordinates.
+affine coordinates. ECVRF's P-256 products are those same multiplications.
+Its Edwards products are edwards25519's `Point::mul` on x86_64 and aarch64,
+and curve25519-dalek's on armv7 and the portable backend, as Ed25519's are.
+Try-and-increment, the hash onto the curve, repeats until a candidate is a
+point. How many tries it takes depends on the VRF input, which is public
+to the protocol, and not on the secret key.
 
 armv7 runs the aarch64 algorithms for P256 in portable Rust, over
 fiat-crypto's field and scalar arithmetic, except its Montgomery
