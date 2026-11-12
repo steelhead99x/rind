@@ -91,14 +91,6 @@ fn with_secret(head: Vec<Vec<u8>>, secret: rind::acvp::SecretBuf) -> Reply {
     Reply { parts }
 }
 
-pub(crate) fn wipe(bytes: &mut [u8]) {
-    for byte in bytes {
-        // SAFETY: `byte` points at a writable byte of `bytes`, and a volatile
-        // write is one the compiler must keep.
-        unsafe { core::ptr::write_volatile(byte, 0) };
-    }
-}
-
 pub fn handle(command: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     if command == "getConfig" {
         return public_reply(vec![CONFIG.as_bytes().to_vec()]);
@@ -606,10 +598,8 @@ fn ecdh(curve: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let key = if private.is_empty() {
         PrivateKey::generate(alg).map_err(|err| err.to_string())?
     } else {
-        let mut scalar = pad(private, field)?;
-        let key = PrivateKey::from_scalar(alg, &scalar).map_err(|err| err.to_string())?;
-        wipe(&mut scalar);
-        key
+        let scalar = pad(private, field)?;
+        PrivateKey::from_scalar(alg, &scalar).map_err(|err| err.to_string())?
     };
     let point = key.public_key().as_ref();
     if point.len() != 1 + field * 2 || point[0] != 0x04 {
@@ -844,7 +834,6 @@ fn mlkem_keygen(args: &[Vec<u8>]) -> Result<Reply, String> {
     seed.extend_from_slice(d);
     seed.extend_from_slice(z);
     let (ek, dk) = rind::acvp::mlkem768_keygen(&seed).map_err(|err| err.to_string())?;
-    wipe(&mut seed);
     Ok(with_secret(vec![ek], dk))
 }
 
@@ -1254,108 +1243,6 @@ fn trim_zeros(bytes: &[u8]) -> &[u8] {
         .map_or(&[], |i| &bytes[i..])
 }
 
-/// SP 800-90A HMAC_DRBG as this wrapper implements it.
-///
-/// This is not rind's DRBG, so an ACVP run of these commands tests the
-/// wrapper. Replace it with rind's `HmacDrbg` once moq-dev/rind#677 adds
-/// reseed and generate-with-additional-input.
-struct Drbg {
-    hash: &'static hmac::Algorithm,
-    k: Vec<u8>,
-    v: Vec<u8>,
-}
-
-impl Drbg {
-    fn new(
-        hash: &'static hmac::Algorithm,
-        entropy: &[u8],
-        nonce: &[u8],
-        personalisation: &[u8],
-    ) -> Self {
-        let out = hmac::sign(&HmacKey::new(hash, &[]), &[]).as_ref().len();
-        let mut drbg = Self {
-            hash,
-            k: vec![0u8; out],
-            v: vec![1u8; out],
-        };
-        let mut seed = Vec::with_capacity(entropy.len() + nonce.len() + personalisation.len());
-        seed.extend_from_slice(entropy);
-        seed.extend_from_slice(nonce);
-        seed.extend_from_slice(personalisation);
-        drbg.update(&seed);
-        wipe(&mut seed);
-        drbg
-    }
-
-    fn hmac(&self, key: &[u8], data: &[u8]) -> Vec<u8> {
-        hmac::sign(&HmacKey::new(self.hash, key), data)
-            .as_ref()
-            .to_vec()
-    }
-
-    fn update(&mut self, data: &[u8]) {
-        let mut msg = Vec::with_capacity(self.v.len() + 1 + data.len());
-        msg.extend_from_slice(&self.v);
-        msg.push(0);
-        msg.extend_from_slice(data);
-        let next_k = self.hmac(&self.k, &msg);
-        self.assign_k(next_k);
-        let next_v = self.hmac(&self.k, &self.v);
-        self.assign_v(next_v);
-        if !data.is_empty() {
-            msg.clear();
-            msg.extend_from_slice(&self.v);
-            msg.push(1);
-            msg.extend_from_slice(data);
-            let next_k = self.hmac(&self.k, &msg);
-            self.assign_k(next_k);
-            let next_v = self.hmac(&self.k, &self.v);
-            self.assign_v(next_v);
-        }
-        wipe(&mut msg);
-    }
-
-    fn assign_k(&mut self, next: Vec<u8>) {
-        wipe(&mut self.k);
-        self.k = next;
-    }
-
-    fn assign_v(&mut self, next: Vec<u8>) {
-        wipe(&mut self.v);
-        self.v = next;
-    }
-
-    fn reseed(&mut self, entropy: &[u8], additional: &[u8]) {
-        let mut seed = Vec::with_capacity(entropy.len() + additional.len());
-        seed.extend_from_slice(entropy);
-        seed.extend_from_slice(additional);
-        self.update(&seed);
-        wipe(&mut seed);
-    }
-
-    fn generate(&mut self, out: &mut [u8], additional: &[u8]) {
-        if !additional.is_empty() {
-            self.update(additional);
-        }
-        let mut filled = 0;
-        while filled < out.len() {
-            let next_v = self.hmac(&self.k, &self.v);
-            self.assign_v(next_v);
-            let n = (out.len() - filled).min(self.v.len());
-            out[filled..filled + n].copy_from_slice(&self.v[..n]);
-            filled += n;
-        }
-        self.update(additional);
-    }
-}
-
-impl Drop for Drbg {
-    fn drop(&mut self) {
-        wipe(&mut self.k);
-        wipe(&mut self.v);
-    }
-}
-
 fn hmac_drbg(rest: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let (kind, hash_name) = if let Some(hash) = rest.strip_prefix("-pr/") {
         ("pr", hash)
@@ -1366,13 +1253,6 @@ fn hmac_drbg(rest: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     } else {
         return Err(format!("unsupported DRBG command {rest}"));
     };
-    let hash = match hash_name {
-        "SHA-1" => &hmac::legacy::HMAC_SHA1,
-        "SHA2-256" => &hmac::HMAC_SHA256,
-        "SHA2-384" => &hmac::HMAC_SHA384,
-        "SHA2-512" => &hmac::HMAC_SHA512,
-        _ => return Err(format!("unsupported DRBG hash {hash_name}")),
-    };
     let out_len = u32_arg(arg(args, 0)?).ok_or("DRBG length")? as usize;
     if out_len > MAX_DRBG {
         return Err("DRBG output is too long".into());
@@ -1380,36 +1260,32 @@ fn hmac_drbg(rest: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let entropy = arg(args, 1)?;
     let personalisation = arg(args, 2)?;
     let mut out = vec![0u8; out_len];
+    let mut drbg = match kind {
+        "generate" => {
+            let nonce = arg(args, 5)?;
+            rind::acvp::AcvpDrbg::new(hash_name, entropy, nonce, personalisation)
+        }
+        "reseed" | "pr" => {
+            let nonce = arg(args, 7)?;
+            rind::acvp::AcvpDrbg::new(hash_name, entropy, nonce, personalisation)
+        }
+        _ => unreachable!(),
+    }
+    .ok_or_else(|| format!("unsupported DRBG hash {hash_name}"))?;
     match kind {
         "generate" => {
-            let ad1 = arg(args, 3)?;
-            let ad2 = arg(args, 4)?;
-            let nonce = arg(args, 5)?;
-            let mut drbg = Drbg::new(hash, entropy, nonce, personalisation);
-            drbg.generate(&mut out, ad1);
-            drbg.generate(&mut out, ad2);
+            drbg.generate(&mut out, arg(args, 3)?);
+            drbg.generate(&mut out, arg(args, 4)?);
         }
         "reseed" => {
-            let reseed_ad = arg(args, 3)?;
-            let reseed_entropy = arg(args, 4)?;
-            let ad1 = arg(args, 5)?;
-            let ad2 = arg(args, 6)?;
-            let nonce = arg(args, 7)?;
-            let mut drbg = Drbg::new(hash, entropy, nonce, personalisation);
-            drbg.reseed(reseed_entropy, reseed_ad);
-            drbg.generate(&mut out, ad1);
-            drbg.generate(&mut out, ad2);
+            drbg.reseed(arg(args, 4)?, arg(args, 3)?);
+            drbg.generate(&mut out, arg(args, 5)?);
+            drbg.generate(&mut out, arg(args, 6)?);
         }
         "pr" => {
-            let ad1 = arg(args, 3)?;
-            let entropy1 = arg(args, 4)?;
-            let ad2 = arg(args, 5)?;
-            let entropy2 = arg(args, 6)?;
-            let nonce = arg(args, 7)?;
-            let mut drbg = Drbg::new(hash, entropy, nonce, personalisation);
-            drbg.reseed(entropy1, ad1);
+            drbg.reseed(arg(args, 4)?, arg(args, 3)?);
             drbg.generate(&mut out, &[]);
-            drbg.reseed(entropy2, ad2);
+            drbg.reseed(arg(args, 6)?, arg(args, 5)?);
             drbg.generate(&mut out, &[]);
         }
         _ => unreachable!(),

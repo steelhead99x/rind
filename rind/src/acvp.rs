@@ -8,6 +8,8 @@
 //! `__` prefix, matching `__ctgrind`, is what marks this one internal.
 
 use crate::error::{Error, KeyFormatError};
+use crate::high::hash::{LegacySha1, Sha256, Sha384, Sha512};
+use crate::high::hmac_drbg::HmacDrbg;
 use crate::low::PosInt;
 use crate::low::{Zeroable, zeroise, zeroise_value};
 use crate::mid::mlkem768::{Ciphertext, DecapKey, EncapKey, Message};
@@ -182,4 +184,89 @@ pub fn rsa_modexp(base: &[u8], exp: &[u8], modulus: &[u8]) -> Option<SecretBuf> 
     let secret = SecretBuf::from_slice(&bytes);
     zeroise(&mut bytes);
     Some(secret)
+}
+
+/// rind's SP 800-90A HMAC_DRBG, for the unpublished `rind-acvp` binary.
+///
+/// Not a supported API. The state is wiped on drop under `wipe`.
+#[doc(hidden)]
+pub struct AcvpDrbg(DrbgKind);
+
+enum DrbgKind {
+    Sha1(HmacDrbg<LegacySha1>),
+    Sha256(HmacDrbg<Sha256>),
+    Sha384(HmacDrbg<Sha384>),
+    Sha512(HmacDrbg<Sha512>),
+}
+
+impl AcvpDrbg {
+    /// Instantiates from `entropy`, `nonce`, and `personalization`.
+    ///
+    /// `hash` is `SHA-1`, `SHA2-256`, `SHA2-384`, or `SHA2-512`.
+    pub fn new(hash: &str, entropy: &[u8], nonce: &[u8], personalization: &[u8]) -> Option<Self> {
+        let _entry = crate::low::Entry::new_secret();
+        let kind = match hash {
+            "SHA-1" => DrbgKind::Sha1(HmacDrbg::new(entropy, nonce, personalization)),
+            "SHA2-256" => DrbgKind::Sha256(HmacDrbg::new(entropy, nonce, personalization)),
+            "SHA2-384" => DrbgKind::Sha384(HmacDrbg::new(entropy, nonce, personalization)),
+            "SHA2-512" => DrbgKind::Sha512(HmacDrbg::new(entropy, nonce, personalization)),
+            _ => return None,
+        };
+        Some(Self(kind))
+    }
+
+    /// SP 800-90A's reseed.
+    pub fn reseed(&mut self, entropy: &[u8], additional: &[u8]) {
+        let _entry = crate::low::Entry::new_secret();
+        match &mut self.0 {
+            DrbgKind::Sha1(drbg) => drbg.reseed(entropy, additional),
+            DrbgKind::Sha256(drbg) => drbg.reseed(entropy, additional),
+            DrbgKind::Sha384(drbg) => drbg.reseed(entropy, additional),
+            DrbgKind::Sha512(drbg) => drbg.reseed(entropy, additional),
+        }
+    }
+
+    /// SP 800-90A's generate, with `additional` empty when there is none.
+    pub fn generate(&mut self, out: &mut [u8], additional: &[u8]) {
+        let _entry = crate::low::Entry::new_secret();
+        match &mut self.0 {
+            DrbgKind::Sha1(drbg) => drbg.generate(out, additional),
+            DrbgKind::Sha256(drbg) => drbg.generate(out, additional),
+            DrbgKind::Sha384(drbg) => drbg.generate(out, additional),
+            DrbgKind::Sha512(drbg) => drbg.generate(out, additional),
+        }
+    }
+}
+
+impl Drop for AcvpDrbg {
+    fn drop(&mut self) {
+        match &mut self.0 {
+            DrbgKind::Sha1(drbg) => drbg.zeroise(),
+            DrbgKind::Sha256(drbg) => drbg.zeroise(),
+            DrbgKind::Sha384(drbg) => drbg.zeroise(),
+            DrbgKind::Sha512(drbg) => drbg.zeroise(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SecretBuf;
+
+    /// Under `admin/ctgrind`, copying into a [`SecretBuf`] does not branch
+    /// on the secret.
+    #[test]
+    fn secret_buf_copy_does_not_branch() {
+        let bytes = [0xa5u8; 32];
+        let wanted = copy32(&SecretBuf::from_slice(&bytes));
+        crate::low::ct::secret_slice(&bytes);
+        let got = copy32(&SecretBuf::from_slice(&bytes));
+        assert_eq!(crate::low::ct::into_public(got), wanted);
+    }
+
+    fn copy32(buf: &SecretBuf) -> [u8; 32] {
+        let mut out = [0u8; 32];
+        out.copy_from_slice(buf.as_slice());
+        out
+    }
 }

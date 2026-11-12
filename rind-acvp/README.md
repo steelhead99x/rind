@@ -15,4 +15,4 @@ A debug build, and a release build with `--cfg rind_cpu_disable`, honours `RIND_
 
 rind's `__acvp` feature exists only for this binary. A leading `__` marks it internal, as `__ctgrind` is, and it is not a supported API. The binary enables `wipe` as well, so the decapsulation key, the shared secrets, the expanded ML-DSA private key, an ECDSA private scalar, and an ECDH shared secret are wiped on drop.
 
-`hmacDRBG` is answered by a DRBG in this crate, so those vectors test the wrapper rather than rind. The handler switches to rind's DRBG once [moq-dev/rind#677](https://github.com/moq-dev/rind/pull/677) lands.
+`hmacDRBG` is rind's `HmacDrbg`.

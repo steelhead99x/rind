@@ -17,7 +17,7 @@ From [the scope](/quest/m4/fips/README.md), 2026-11-11.
 - ✅ No TLS 1.3 KDF command. rind-rustls gives rustls an HMAC (`HkdfUsingHmac` in `rind-rustls/src/cipher_suite.rs`); rustls derives the traffic secrets, outside rind. Nothing to answer until a FIPS build of rind-rustls derives them through rind.
 - AES-GCM with `ivGen: internal` is refused. Sealing with an IV the module generates is [its quest](/quest/m4/fips/gcm-iv.md), which is not done. External nonces are answered, and that is what the sample sets contain.
 - One process is one CPU path. A debug build, and a release build with `--cfg rind_cpu_disable`, honours `RIND_CPU_DISABLE_<feature>`. The module's load-time mask in a release build is still [the module quest](/quest/m4/fips/module.md); this wrapper calls rind until that crate exists. The paths were not each run here.
-- `hmacDRBG` (generate, reseed, prediction resistance) for SHA-1 and SHA-2 is answered by a DRBG written in `rind-acvp`, not by rind. A vector run tests the wrapper. Switch the handler to rind's DRBG once [moq-dev/rind#677](https://github.com/moq-dev/rind/pull/677) lands: that pull adds reseed and generate-with-additional-input to `HmacDrbg`. The known-answer check is aws-lc's `testmodulewrapper` vector, not a sample file: `admin/sync-acvp` does not fetch an `hmacDRBG` set.
+- `hmacDRBG` (generate, reseed, prediction resistance) for SHA-1 and SHA-2 is rind's `HmacDrbg` ([moq-dev/rind#677](https://github.com/moq-dev/rind/pull/677)). The known-answer check is aws-lc's `testmodulewrapper` vector, not a sample file: `admin/sync-acvp` does not fetch an `hmacDRBG` set.
 
 ## Waiting
 

@@ -7,7 +7,7 @@ use super::digest::Digest;
 use super::hash::Hash;
 use super::hmac::HmacKey;
 use crate::Error;
-#[cfg(any(test, rind_fips))]
+#[cfg(any(test, rind_fips, feature = "__acvp"))]
 use crate::low::zeroise;
 use crate::mid::rng::RandomSource;
 
@@ -79,7 +79,7 @@ impl<H: Hash> HmacDrbg<H> {
     }
 
     /// SP 800-90A section 10.1.2.4's reseed.
-    #[cfg(any(test, rind_fips))]
+    #[cfg(any(test, rind_fips, feature = "__acvp"))]
     pub(crate) fn reseed(&mut self, entropy_input: &[u8], additional_input: &[u8]) {
         // 1. seed_material = entropy_input || additional_input.
         // 2. (Key, V) = HMAC_DRBG_Update (seed_material, Key, V).
@@ -120,7 +120,7 @@ impl<H: Hash> HmacDrbg<H> {
     }
 
     /// Wipes K and V, the secret state, under `wipe`.
-    #[cfg(any(test, rind_fips))]
+    #[cfg(any(test, rind_fips, feature = "__acvp"))]
     pub(crate) fn zeroise(&mut self) {
         zeroise(self.k.as_mut());
         zeroise(self.v.as_mut());

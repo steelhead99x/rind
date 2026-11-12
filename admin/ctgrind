@@ -72,7 +72,7 @@ export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUNNER="$self --run"
 # rind's unit tests mark its secrets through the `__ctgrind` hooks. Wycheproof
 # runs without them, since its harness compares secret outputs directly.
 if [ "$suite" = all ] || [ "$suite" = unit ]; then
-    cargo test -p rind --lib --features __ctgrind "$@"
+    cargo test -p rind --lib --features __ctgrind,__acvp "$@"
 fi
 if [ "$suite" = all ] || [ "$suite" = wycheproof ]; then
     cargo test -p rind --test wycheproof "$@"
