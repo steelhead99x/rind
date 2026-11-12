@@ -1,7 +1,6 @@
 module
 public import Aeneas
 public import Rind.X86_64.Types
-public import Rind.X86_64.AesNi
 public import Rind.X86_64.AesGcmModel
 @[expose] public section
 open Aeneas Aeneas.Std Result
@@ -9,7 +8,7 @@ set_option linter.dupNamespace false
 
 /-!
 The rind functions the x86_64 translation leaves opaque, beside those
-`Rind.X86_64.AesNi` and `Rind.X86_64.AesGcmModel` model. No proof assumes anything about them beyond what
+`Rind.X86_64.AesGcmModel` models. No proof assumes anything about them beyond what
 `Rind.X86_64.S2nBignum`, `Rind.X86_64.AwsLc`, and `Rind.X86_64.ValeAesGcm`
 state for s2n-bignum's, aws-lc's, and Vale's routines, what
 `Rind.X86_64.CtEqual` states for the constant-time compares, and what each theorem
@@ -98,16 +97,16 @@ opaque low.x86_64.vpaes_x86_64.VpaesKey.new
 opaque low.x86_64.vpaes_x86_64.VpaesKey.encrypt_block
   : low.x86_64.vpaes_x86_64.VpaesKey → Std.Array Std.U8 16#usize → Result (Std.Array Std.U8 16#usize)
 
-/-! AES-192's key expansion and block cipher. Vale has no AES-192 routine, so
-no proof reaches them. -/
+opaque low.x86_64.vpaes_x86_64.VpaesDecKey.new
+  : Slice Std.U8 → low.x86_64.cpu.HaveSsse3 → Result low.x86_64.vpaes_x86_64.VpaesDecKey
 
-opaque low.x86_64.aes.aes192_expand
-  : Std.Array Std.U8 24#usize → Result (Std.Array core.core_arch.x86.__m128i 13#usize)
-
-opaque low.x86_64.aes.aes_block {N : Std.Usize}
-  : Std.Array core.core_arch.x86.__m128i N → Std.Array Std.U8 16#usize → Result (Std.Array Std.U8 16#usize)
+opaque low.x86_64.vpaes_x86_64.VpaesDecKey.decrypt_block
+  : low.x86_64.vpaes_x86_64.VpaesDecKey → Std.Array Std.U8 16#usize → Result (Std.Array Std.U8 16#usize)
 
 opaque low.x86_64.aes_nohw.NohwKey.new : Slice Std.U8 → Result low.x86_64.aes_nohw.NohwKey
+
+opaque low.x86_64.aes_nohw.NohwKey.decrypt_block
+  : low.x86_64.aes_nohw.NohwKey → Std.Array Std.U8 16#usize → Result (Std.Array Std.U8 16#usize)
 
 opaque low.x86_64.aes_nohw.NohwKey.encrypt_block
   : low.x86_64.aes_nohw.NohwKey → Std.Array Std.U8 16#usize → Result (Std.Array Std.U8 16#usize)

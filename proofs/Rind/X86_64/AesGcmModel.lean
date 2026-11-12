@@ -1,7 +1,7 @@
 module
 public import Aeneas
 public import Rind.X86_64.Types
-public import Rind.X86_64.AesNi
+public import Rind.X86_64.Simd
 @[expose] public section
 open Aeneas Aeneas.Std Result
 set_option linter.dupNamespace false
@@ -38,12 +38,12 @@ macro_rules! reduce {
         let $mi = _mm_xor_si128($mi, $hi);
 
         let ls = _mm_shuffle_epi32($lo, 0b01_00_11_10);
-        let $lo = _mm_clmulepi64_si128(GF128_POLY_HI, $lo, 0x00);
+        let $lo = _mm_clmulepi64_si128(u128_to_m128i(GF128_POLY_HI), $lo, 0x00);
         let $mi = _mm_xor_si128($mi, ls);
         let $mi = _mm_xor_si128($mi, $lo);
 
         let ms = _mm_shuffle_epi32($mi, 0b01_00_11_10);
-        let $mi = _mm_clmulepi64_si128(GF128_POLY_HI, $mi, 0x00);
+        let $mi = _mm_clmulepi64_si128(u128_to_m128i(GF128_POLY_HI), $mi, 0x00);
         let $hi = _mm_xor_si128($hi, ms);
         let $hi = _mm_xor_si128($hi, $mi);
         $hi
@@ -398,9 +398,11 @@ The model departs from the Rust in these ways, and adds no axiom:
 
 - A load of 16 bytes, `_mm_loadu_si128` or `_mm_lddqu_si128`, is the vector
   of its bytes, the first lowest, and `_mm_storeu_si128` writes the vector's
-  bytes the same way, as `Rind.X86_64.AesNi` reads them.
+  bytes the same way: `Rind.Lanes`'s `loadBytes` and `storeBytes`.
 - `zero()` is `_mm_setzero_si128()`, its body, and `mul!` and `reduce!` are
-  functions of the terms they update.
+  functions of the terms they update. `reduce!`'s `u128_to_m128i(GF128_POLY_HI)`
+  is its value, `polyHi`, which `Rind.X86_64.GhashClmul`'s `polyHi_eq` proves
+  the translation computes.
 - `as_chunks` and `as_chunks_mut` split a slice into its whole chunks and the
   rest; a loop over the chunks, or over zipped iterators, is a recursion.
 - `ghash::load_partial` is the zero-padded block, and `ghash::store_partial`
@@ -414,7 +416,7 @@ The model departs from the Rust in these ways, and adds no axiom:
 
 namespace rind.x86_64
 
-open rind.vale
+open rind.vale rind.simd
 
 /-- `as_chunks`: the whole chunks of `k` elements, in order. -/
 def chunksOf {α : Type} (k : Nat) (l : List α) : List (List α) :=
@@ -430,11 +432,11 @@ def low.x86_64.ghash.BYTESWAP : Result core.core_arch.x86.__m128i :=
 /-- `load_be`. -/
 def low.x86_64.ghash.load_be (block : List U8) : Result core.core_arch.x86.__m128i := do
   let s ← low.x86_64.ghash.BYTESWAP
-  core.core_arch.x86.ssse3._mm_shuffle_epi8 (low.x86_64.aes.load block) s
+  core.core_arch.x86.ssse3._mm_shuffle_epi8 (loadBytes block) s
 
 /-- `ghash::load_partial`: fewer than 16 bytes, zero-padded to a block. -/
 def low.x86_64.ghash.loadPadded (bytes : List U8) : core.core_arch.x86.__m128i :=
-  low.x86_64.aes.load (bytes ++ List.replicate (16 - bytes.length) 0#u8)
+  loadBytes (bytes ++ List.replicate (16 - bytes.length) 0#u8)
 
 /-- `byte_reverse`. -/
 def low.x86_64.ghash.byte_reverse (x : core.core_arch.x86.__m128i) :
@@ -460,13 +462,16 @@ def low.x86_64.ghash.mul (lo mi hi x h hx : core.core_arch.x86.__m128i) :
   let mi ← core.core_arch.x86.sse2._mm_xor_si128 tmi mi
   ok (lo, mi, hi)
 
+/-- `u128_to_m128i(GF128_POLY_HI)`. -/
+def low.x86_64.ghash.polyHi : core.core_arch.x86.__m128i := 0xc2000000_00000000#128
+
 /-- `reduce!`. -/
 def low.x86_64.ghash.reduce (lo mi hi : core.core_arch.x86.__m128i) :
     Result core.core_arch.x86.__m128i := do
   let mi ← core.core_arch.x86.sse2._mm_xor_si128 mi lo
   let mi ← core.core_arch.x86.sse2._mm_xor_si128 mi hi
   let ls ← core.core_arch.x86.sse2._mm_shuffle_epi32 78#i32 lo
-  let p ← low.x86_64.ghash.GF128_POLY_HI
+  let p := low.x86_64.ghash.polyHi
   let lo ← core.core_arch.x86.pclmulqdq._mm_clmulepi64_si128 0#i32 p lo
   let mi ← core.core_arch.x86.sse2._mm_xor_si128 mi ls
   let mi ← core.core_arch.x86.sse2._mm_xor_si128 mi lo
@@ -588,8 +593,8 @@ def low.x86_64.ghash.Ghash.add (self : low.x86_64.ghash.Ghash) (bytes : Slice U8
 def low.x86_64.ghash.Ghash.tag (self : low.x86_64.ghash.Ghash) (mask : Std.Array U8 16#usize) :
     Result (Std.Array U8 16#usize) := do
   let r ← low.x86_64.ghash.byte_reverse self.current
-  let t ← core.core_arch.x86.sse2._mm_xor_si128 r (low.x86_64.aes.load mask.val)
-  ok (low.x86_64.aes.store t)
+  let t ← core.core_arch.x86.sse2._mm_xor_si128 r (loadBytes mask.val)
+  ok (storeBytes t)
 
 /-- `HwKey::round_keys`. -/
 def low.x86_64.aes.HwKey.round_keys : low.x86_64.aes.HwKey →
@@ -605,7 +610,7 @@ def low.x86_64.aes_gcm.counter_block (nonce : Std.Array U8 12#usize) :
   let hi : BitVec 64 :=
     ((BitVec.fromLEBytes ((nonce.val.drop 8).map (·.bv))).setWidth 32).setWidth 64 ||| 1#64 <<< 56
   let y0 ← core.core_arch.x86.sse2._mm_set_epi64x ⟨hi⟩ ⟨lo⟩
-  ok (low.x86_64.aes.store y0)
+  ok (storeBytes y0)
 
 /-- `aes_gcm::COUNTER_1`. -/
 def low.x86_64.aes_gcm.COUNTER_1 : Result core.core_arch.x86.__m128i :=
@@ -623,7 +628,7 @@ def low.x86_64.aes_gcm.BYTESWAP_EPI64 : Result core.core_arch.x86.__m128i :=
 def low.x86_64.aes_gcm.Counter.new (bytes : Std.Array U8 16#usize) :
     Result core.core_arch.x86.__m128i := do
   let s ← low.x86_64.aes_gcm.BYTESWAP_EPI64
-  let c ← core.core_arch.x86.ssse3._mm_shuffle_epi8 (low.x86_64.aes.load bytes.val) s
+  let c ← core.core_arch.x86.ssse3._mm_shuffle_epi8 (loadBytes bytes.val) s
   let one ← low.x86_64.aes_gcm.COUNTER_1
   core.core_arch.x86.sse2._mm_add_epi32 c one
 
@@ -668,7 +673,7 @@ def low.x86_64.aes_gcm.ctr_blocks (rk_first : core.core_arch.x86.__m128i)
     ok (c :: cs, counter)
 
 /-- A vector's bytes, as `_mm_storeu_si128` writes them. -/
-def low.x86_64.aes_gcm.bytes (v : core.core_arch.x86.__m128i) : List U8 := (low.x86_64.aes.store v).val
+def low.x86_64.aes_gcm.bytes (v : core.core_arch.x86.__m128i) : List U8 := (storeBytes v).val
 
 /-- `by8`'s loop over the 128-byte chunks: the counter and hash after them,
 and their output. -/
@@ -679,7 +684,7 @@ def low.x86_64.aes_gcm.by8_loop (ENC : Bool) (table : low.x86_64.ghash.ClmulTabl
     Result (core.core_arch.x86.__m128i × core.core_arch.x86.__m128i × List U8)
   | [], counter, current => ok (counter, current, [])
   | blocks :: chunks, counter, current => do
-    let ps := (chunksOf 16 blocks).map low.x86_64.aes.load
+    let ps := (chunksOf 16 blocks).map loadBytes
     let (cs, counter) ← low.x86_64.aes_gcm.ctr_blocks rk_first rks rk_last ps counter
     let hs := if ENC then cs else ps
     let s ← low.x86_64.aes_gcm.BYTESWAP
@@ -711,7 +716,7 @@ def low.x86_64.aes_gcm.by8 (ENC : Bool) (key : low.x86_64.aes.HwKey)
   let rest := chunksRest 128 cipher_inout.val
   let ghash ← if ENC then ok ghash else low.x86_64.ghash.Ghash.addBytes ghash rest
   let (blocks, counter) ← low.x86_64.aes_gcm.ctr_blocks rk_first rks rk_last
-    ((chunksOf 16 rest).map low.x86_64.aes.load) counter
+    ((chunksOf 16 rest).map loadBytes) counter
   let tail := chunksRest 16 rest
   let last ← if tail.isEmpty then ok [] else do
     let (c, _) ← low.x86_64.aes_gcm.ctr_block counter rk_first rks rk_last
