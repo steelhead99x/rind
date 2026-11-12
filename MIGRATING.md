@@ -351,10 +351,14 @@ ring has none.
 ## Adapter crates
 
 Each published `rind-*` adapter offers the API of the provider its upstream
-ships, so swapping one for the other changes no other code. Its README lists
-only what rind cannot back. rind panics on a CPU missing a feature it
-requires. At the start of each binary's `main`, refuse one by exiting with
-the error from `rind::cpu::check()`.
+ships, so swapping one for the other changes no other code.
+rind-object-store is the one without an upstream shape to copy, since
+object_store's own providers are `pub(crate)`. Each adapter's README lists
+what rind cannot back, and where the adapter behaves differently, such as an
+input it refuses or its cipher suite order. No adapter returns a
+`MissingFeature`, and none needs a CPU check first:
+`rind::cpu::check()` cannot fail on any target rind builds for, and rind 0.4
+removes it ([rind needs no runtime CPU check](quest/m2/api/cpu-check.md)).
 
 ### rind-ring
 
@@ -401,9 +405,10 @@ as its cipher suite order.
 ### rind-rcgen
 
 `rind_rcgen::KeyPair` offers `rcgen::KeyPair`'s API as rcgen's default `ring`
-backend builds it, so code swaps the type in unchanged. Its
-[README](rind-rcgen/README.md) lists what it leaves out, such as P-521,
-which rcgen names only with its `aws_lc_rs` feature.
+backend builds it, so code swaps the type in unchanged. It signs with ECDSA
+P-256 and P-384, Ed25519, and RSA with PKCS#1 v1.5, loading only PKCS#8 keys
+and generating no RSA keys. Its [README](rind-rcgen/README.md) lists what it
+leaves out, such as P-521, which rcgen names only with its `aws_lc_rs` feature.
 
 Without rcgen's `crypto` feature, rcgen needs each certificate's
 `serial_number` set, and writes key identifiers only when
