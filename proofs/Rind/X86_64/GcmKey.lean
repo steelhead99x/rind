@@ -1,4 +1,4 @@
-import Rind.X86_64.AesGcm
+import Rind.X86_64.AesGcmAead
 import Rind.X86_64.AeadDispatch
 open Aeneas Aeneas.Std Result rind.vale
 
@@ -210,8 +210,9 @@ The model departs from the Rust in these ways, and adds no axiom:
   precondition, so an `Iv` here is its bytes.
 - The arm for an IV that is not 12 bytes, which runs `encrypt_any` or
   `decrypt_any`, and `open`'s arm for a tag that is not 16 bytes, are opaque.
-  They run rind's by-8 kernels, which no proof covers (`proofs/README.md`), so
-  no theorem here reads them.
+  `encrypt_any` and `decrypt_any` are not translated, since their J0 for
+  other IV lengths and their truncated tags have no proof yet, so no theorem
+  here reads them.
 - `Tag::as_ref`'s `[..len]` is `take len`: a tag's `len` is one of the lengths
   `TagLength` names, all within its 16 bytes.
 -/
@@ -277,7 +278,7 @@ def aead.gcm.Key.new (algorithm : cipher.Algorithm) (key : Slice U8) (tag_len : 
     | .Ok k => ok (.Ok { key := k, tag_length := tag_len })
 
 /-- The arm of `seal_in_place_separate_tag` for an IV that is not 12 bytes,
-which runs `encrypt_any`. Opaque: rind's by-8 path, which no proof covers. -/
+which runs `encrypt_any`. Opaque: no proof covers it yet. -/
 opaque aead.gcm.Key.seal_other_iv (self : aead.gcm.Key) (iv : aead.gcm.Iv) (aad in_out : Slice U8) :
     Result ((core.result.Result aead.gcm.Tag error.Error) × Slice U8)
 
@@ -312,7 +313,7 @@ def aead.gcm.Key.seal_in_place_append_tag {InOut : Type}
   | .Err e => ok (.Err e, in_out)
 
 /-- The arm of `open` for an IV that is not 12 bytes or a tag that is not 16,
-which runs `decrypt_any`. Opaque: rind's by-8 path, which no proof covers. -/
+which runs `decrypt_any`. Opaque: no proof covers it yet. -/
 opaque aead.gcm.Key.open_other (self : aead.gcm.Key) (iv : aead.gcm.Iv) (aad tag in_out : Slice U8) :
     Result ((core.result.Result Unit error.Error) × Slice U8)
 
@@ -374,8 +375,8 @@ theorem try_from_len (N : Usize) (s : Slice U8) (h : s.length = N.val) :
   simp [Std.Array.from_val]
 
 /-- `Key::new` for AES-128 or AES-256: a key of the algorithm's length holds
-AES-GCM on Vale's tier, and any other length is refused. -/
-theorem gcm_key_new (h : RunsValeAesGcm) (algorithm : cipher.Algorithm) (alg : Algorithm)
+AES-GCM, and any other length is refused. -/
+theorem gcm_key_new (h : RunsAesGcm) (algorithm : cipher.Algorithm) (alg : Algorithm)
     (halg : (algorithm.key_len = 16#usize ∧ alg = .AES_128) ∨
       (algorithm.key_len = 32#usize ∧ alg = .AES_256))
     (tag_len : aead.gcm.TagLength) (key : Slice U8) :
@@ -421,13 +422,12 @@ theorem gcm_key_new (h : RunsValeAesGcm) (algorithm : cipher.Algorithm) (alg : A
       exact (WP.spec_ok _).2 (by simp [hl])
 
 /-- Sealing with a 12-byte IV on a key whose tags are full: the ciphertext in
-place and the 16-byte tag are AES-GCM's, for AAD and messages under 2^32 bytes
-and messages of 129 bytes and more. -/
+place and the 16-byte tag are AES-GCM's, for AAD under 2^61 bytes and
+messages rind takes. -/
 theorem gcm_key_seal (he : ∃ e, low.entry.Entry.new_secret = ok e) (alg : Algorithm)
     (key : List (BitVec 8)) (k : aead.gcm.Key) (hk : KeyReady alg key k.key)
     (htag : k.tag_length = .Full) (iv : aead.gcm.Iv) (hiv : iv.bytes.length = 12)
-    (aad in_out : Slice U8) (haad : aad.length < 2 ^ 32) (hin : in_out.length < 2 ^ 32)
-    (hlong : 129 ≤ in_out.length) :
+    (aad in_out : Slice U8) (haad : aad.length < 2 ^ 61) (hin : in_out.length ≤ 2 ^ 36 - 32) :
     k.seal_in_place_separate_tag iv aad in_out ⦃ r =>
       ∃ tag, r.1 = .Ok tag ∧ tag.len = 16#usize ∧ r.2.length = in_out.length ∧
         (bvs r.2.val, bvs tag.bytes.val) =
@@ -435,7 +435,7 @@ theorem gcm_key_seal (he : ∃ e, low.entry.Entry.new_secret = ok e) (alg : Algo
   obtain ⟨a, ha, hav⟩ := try_from_len 12#usize iv.bytes hiv
   unfold aead.gcm.Key.seal_in_place_separate_tag
   simp only [ha, bind_ok]
-  apply WP.spec_bind (aes_gcm_seal he alg key k.key hk ⟨a⟩ aad in_out haad hin hlong)
+  apply WP.spec_bind (aes_gcm_seal he alg key k.key hk ⟨a⟩ aad in_out haad hin)
   rintro ⟨r, out⟩ ⟨tag, hr, hlen, henc⟩
   simp only at hr hlen henc
   subst hr
@@ -462,7 +462,7 @@ theorem gcm_key_seal_append_tag (he : ∃ e, low.entry.Entry.new_secret = ok e) 
     {InOut : Type} (AsMutInst : core.convert.AsMut InOut (Slice U8))
     (ExtendInst : core.iter.traits.collect.Extend InOut U8) (in_out : InOut) (view : Slice U8)
     (back : Slice U8 → InOut) (hview : AsMutInst.as_mut in_out = ok (view, back))
-    (haad : aad.length < 2 ^ 32) (hin : view.length < 2 ^ 32) (hlong : 129 ≤ view.length)
+    (haad : aad.length < 2 ^ 61) (hin : view.length ≤ 2 ^ 36 - 32)
     (Q : (core.result.Result Unit error.Error) × InOut → Prop)
     (hext : ∀ (ct : Slice U8) (tag : Std.Array U8 16#usize), ct.length = view.length →
       (bvs ct.val, bvs tag.val) = gcmEncrypt alg key (bvs iv.bytes.val) (bvs view.val) (bvs aad.val) →
@@ -471,7 +471,7 @@ theorem gcm_key_seal_append_tag (he : ∃ e, low.entry.Entry.new_secret = ok e) 
     k.seal_in_place_append_tag AsMutInst ExtendInst iv aad in_out ⦃ Q ⦄ := by
   unfold aead.gcm.Key.seal_in_place_append_tag
   simp only [hview, bind_ok]
-  apply WP.spec_bind (gcm_key_seal he alg key k hk htag iv hiv aad view haad hin hlong)
+  apply WP.spec_bind (gcm_key_seal he alg key k hk htag iv hiv aad view haad hin)
   rintro ⟨r, ct⟩ ⟨tag, hr, htl, hlen, henc⟩
   simp only at hr hlen henc
   rw [hr]
@@ -484,10 +484,11 @@ theorem gcm_key_seal_append_tag (he : ∃ e, low.entry.Entry.new_secret = ok e) 
 
 /-- `Key::open` for a 12-byte IV and a 16-byte tag: as `aes_gcm_open_separate_tag`,
 it succeeds exactly when AES-GCM's tag verifies, and otherwise fails, leaving zeros. -/
-theorem gcm_key_open_chain (he : ∃ e, low.entry.Entry.new_secret = ok e) (alg : Algorithm)
+theorem gcm_key_open_chain (he : ∃ e, low.entry.Entry.new_secret = ok e)
+    (hheld : low.entry.Entry.assert_held = ok ()) (alg : Algorithm)
     (key : List (BitVec 8)) (k : aead.gcm.Key) (hk : KeyReady alg key k.key)
     (iv : aead.gcm.Iv) (hiv : iv.bytes.length = 12) (aad tag in_out : Slice U8)
-    (htl : tag.length = 16) (haad : aad.length < 2 ^ 32) (hin : in_out.length < 2 ^ 32) :
+    (htl : tag.length = 16) (haad : aad.length < 2 ^ 61) (hin : in_out.length ≤ 2 ^ 36 - 32) :
     k.open iv aad tag in_out ⦃ r =>
       let out := gcmDecrypt alg key (bvs iv.bytes.val) (bvs in_out.val) (bvs aad.val) (bvs tag.val)
       if out.2 then r.1 = .Ok () ∧ bvs r.2.val = out.1
@@ -496,7 +497,7 @@ theorem gcm_key_open_chain (he : ∃ e, low.entry.Entry.new_secret = ok e) (alg 
   obtain ⟨n, hn, hnv⟩ := try_from_len 12#usize iv.bytes hiv
   unfold aead.gcm.Key.open
   simp only [hn, ha, bind_ok]
-  apply WP.spec_bind (aes_gcm_open_separate_tag he alg key k.key hk ⟨n⟩ aad ⟨a⟩ in_out haad hin)
+  apply WP.spec_bind (aes_gcm_open_separate_tag he hheld alg key k.key hk ⟨n⟩ aad ⟨a⟩ in_out haad hin)
   rintro ⟨r', out'⟩ hr'
   simp only [hav, hnv] at hr'
   by_cases hc : (gcmDecrypt alg key (bvs iv.bytes.val) (bvs in_out.val) (bvs aad.val) (bvs tag.val)).2 = true
@@ -513,11 +514,12 @@ theorem gcm_key_open_chain (he : ∃ e, low.entry.Entry.new_secret = ok e) (alg 
 
 /-- `Key::open_in_place_separate_tag` for a 12-byte IV and a 16-byte tag: as
 `aes_gcm_open_separate_tag`. -/
-theorem gcm_key_open_separate_tag (he : ∃ e, low.entry.Entry.new_secret = ok e) (alg : Algorithm)
+theorem gcm_key_open_separate_tag (he : ∃ e, low.entry.Entry.new_secret = ok e)
+    (hheld : low.entry.Entry.assert_held = ok ()) (alg : Algorithm)
     (key : List (BitVec 8)) (k : aead.gcm.Key) (hk : KeyReady alg key k.key)
     (htag : k.tag_length = .Full) (iv : aead.gcm.Iv) (hiv : iv.bytes.length = 12)
-    (aad tag in_out : Slice U8) (htl : tag.length = 16) (haad : aad.length < 2 ^ 32)
-    (hin : in_out.length < 2 ^ 32) :
+    (aad tag in_out : Slice U8) (htl : tag.length = 16) (haad : aad.length < 2 ^ 61)
+    (hin : in_out.length ≤ 2 ^ 36 - 32) :
     k.open_in_place_separate_tag iv aad tag in_out ⦃ r =>
       let out := gcmDecrypt alg key (bvs iv.bytes.val) (bvs in_out.val) (bvs aad.val) (bvs tag.val)
       if out.2 then r.1 = .Ok r.2 ∧ bvs r.2.val = out.1
@@ -531,7 +533,7 @@ theorem gcm_key_open_separate_tag (he : ∃ e, low.entry.Entry.new_secret = ok e
     scalar_tac
   unfold aead.gcm.Key.open_in_place_separate_tag
   rw [ite_eq_right hlen]
-  apply WP.spec_bind (gcm_key_open_chain he alg key k hk iv hiv aad tag in_out htl haad hin)
+  apply WP.spec_bind (gcm_key_open_chain he hheld alg key k hk iv hiv aad tag in_out htl haad hin)
   rintro ⟨r', out'⟩ hr'
   by_cases hc : (gcmDecrypt alg key (bvs iv.bytes.val) (bvs in_out.val) (bvs aad.val) (bvs tag.val)).2 = true
   · simp only [hc, ↓reduceIte] at hr'
@@ -548,10 +550,11 @@ theorem gcm_key_open_separate_tag (he : ∃ e, low.entry.Entry.new_secret = ok e
 /-- `Key::open_in_place` for a 12-byte IV on a key whose tags are full: as
 `aes_gcm_open`, it is refused if `in_out` is shorter than a tag, and otherwise
 opens the bytes before the last 16, which must verify. -/
-theorem gcm_key_open (he : ∃ e, low.entry.Entry.new_secret = ok e) (alg : Algorithm)
+theorem gcm_key_open (he : ∃ e, low.entry.Entry.new_secret = ok e)
+    (hheld : low.entry.Entry.assert_held = ok ()) (alg : Algorithm)
     (key : List (BitVec 8)) (k : aead.gcm.Key) (hk : KeyReady alg key k.key)
     (htag : k.tag_length = .Full) (iv : aead.gcm.Iv) (hiv : iv.bytes.length = 12)
-    (aad in_out : Slice U8) (haad : aad.length < 2 ^ 32) (hin : in_out.length < 2 ^ 32) :
+    (aad in_out : Slice U8) (haad : aad.length < 2 ^ 61) (hin : in_out.length ≤ 2 ^ 36 - 16) :
     k.open_in_place iv aad in_out ⦃ r =>
       if in_out.length < 16 then r.1 = .Err .DecryptFailed else
       let out := gcmDecrypt alg key (bvs iv.bytes.val) (bvs (in_out.val.take (in_out.length - 16)))
@@ -575,9 +578,9 @@ theorem gcm_key_open (he : ∃ e, low.entry.Entry.new_secret = ok e) (alg : Algo
       have := in_out.property; simp only [List.length_drop]; scalar_tac
     have hwt : (Slice.from (in_out.val.drop (in_out.length - 16)) hd).length = 16 := by
       simp only [Slice.length, Slice.from_val, List.length_drop]; omega
-    have hwin : (Slice.from (in_out.val.take (in_out.length - 16)) hb).length < 2 ^ 32 := by
-      simp only [Slice.length, Slice.from_val, List.length_take]; scalar_tac
-    apply WP.spec_bind (gcm_key_open_chain he alg key ⟨kk, .Full⟩ hk iv hiv aad
+    have hwin : (Slice.from (in_out.val.take (in_out.length - 16)) hb).length ≤ 2 ^ 36 - 32 := by
+      simp only [Slice.length, Slice.from_val, List.length_take]; simp only [Slice.length] at hin; omega
+    apply WP.spec_bind (gcm_key_open_chain he hheld alg key ⟨kk, .Full⟩ hk iv hiv aad
       (Slice.from (in_out.val.drop (in_out.length - 16)) hd)
       (Slice.from (in_out.val.take (in_out.length - 16)) hb) hwt haad hwin)
     rintro ⟨r', out'⟩ hr'
