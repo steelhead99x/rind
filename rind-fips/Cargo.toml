@@ -1,0 +1,12 @@
+[package]
+name = "rind-fips"
+version = "0.0.0"
+edition = "2024"
+rust-version.workspace = true
+publish = false
+license = "Apache-2.0 OR ISC OR MIT-0"
+description = "rind's FIPS module: the SP 800-90A DRBG"
+
+[dependencies]
+getrandom = "0.4"
+rind = { path = "../rind" }

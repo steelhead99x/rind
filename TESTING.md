@@ -133,8 +133,8 @@ rejection case is embedded in `high::ecdsa::rfc6979_test_vectors`.
 The `acvp_...` unit tests read NIST's ACVP sample sets in `thirdparty/acvp/`,
 which `admin/sync-acvp` trims to the groups rind runs; a group a test does not
 expect fails it. The SHA-2 and SHA-3 sets' 1 to 8 GiB messages run only with
-`SLOW_TESTS=1`. HMAC_DRBG and ECDH read CAVP's files, as ACVP's samples test
-neither as rind uses them.
+`SLOW_TESTS=1`. HMAC_DRBG reads CAVP's `drbg` file and ACVP's hmacDRBG samples.
+ECDH reads CAVP's files, as ACVP's samples test no NIST curve rind offers.
 
 These suites run wherever the [tier table](#tiers) runs `cargo test`, including
 the forced portable backend. The nightly `build.yml` runs the million-case
@@ -206,6 +206,7 @@ secret names a zeroing test, or says why it has none.
 | Key encodings | `encoding::{Pkcs8, Sec1, Spki}` | `aws_lc::evp` (PKCS#8, SPKI); the other keys in the files above | `fuzz::keys` | `crosschecks::encodings` | none: a key is marked once parsed, and its DER's lengths are not secret | `zeroing::ecdh`, `zeroing::ecdsa`, `zeroing::ed25519`, `zeroing::rsa` |
 | Constant-time comparison | `constant_time::verify` | none: no published set | none: it returns whether two slices are equal, which the differential test covers | `crosschecks::slice_comparison_matches_aws_lc_rs` | ctgrind: `high::constant_time::contents_stay_secret`, `low::generic::ct_equal::equiv`; BINSEC: `test::binsec::ct_binsec_constant_time_verify` | none: it keeps nothing |
 | Random bytes | `rand::fill` | none: the operating system's generator, which no vector can check | none, as for vectors | none, as for vectors | none: rind passes the bytes on | none: rind keeps no copy of the bytes |
+| HMAC_DRBG | `drbg::HmacDrbg` | CAVP: `cavp/drbg`, `high::hmac_drbg::cavp`; ACVP: `high::hmac_drbg::acvp`; SP 800-90A steps against Python's hmac: `high::drbg::spec_steps` | none: no peer encoding | none: aws-lc-rs exposes no HMAC_DRBG | ctgrind: `high::drbg::secret_generate`, `high::hmac_drbg::secret_generate` | `zeroing::hmac_drbg` |
 
 Exports that are not primitives: `Error`, `KeyRejected`, `doc::inline_assembly_safety`, `cpu::Dit`, `cpu::MissingFeature`, `cpu::check`, `cpu::has_aes_hardware`.
 

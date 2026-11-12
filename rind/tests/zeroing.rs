@@ -277,6 +277,19 @@ fn cipher() {
 }
 
 #[test]
+fn hmac_drbg() {
+    use rind::drbg::HmacDrbg;
+    check_zeroed_on_drop(Box::pin(HmacDrbg::new(
+        &[0x11; 32],
+        &[0x22; 16],
+        b"personal",
+    )));
+    let mut drbg = HmacDrbg::new(&[0x33; 48], &[0x44; 16], &[]);
+    drbg.reseed(&[0x55; 64], Some(&[0x66; 8]));
+    check_zeroed_on_drop(Box::pin(drbg));
+}
+
+#[test]
 fn key_wrap() {
     use rind::key_wrap::{AES_128, AES_192, AES_256, AesKek};
     for (algorithm, len) in [(&AES_128, 16), (&AES_192, 24), (&AES_256, 32)] {

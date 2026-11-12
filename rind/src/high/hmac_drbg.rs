@@ -9,7 +9,16 @@ use super::hmac::HmacKey;
 use crate::Error;
 use crate::mid::rng::RandomSource;
 
-/// A limited implementation of SP800-90A -- enough for RFC6979 ECDSA.
+/// SP 800-90A Table 2: one HMAC_DRBG generate returns at most 2^19 bits.
+pub(crate) const MAX_GENERATE_BYTES: usize = 1 << 16;
+
+/// SP 800-90A Table 2: reseed after more than 2^48 generates.
+const MAX_RESEED_INTERVAL: u64 = 1 << 48;
+
+/// SP 800-90A HMAC_DRBG without a derivation function.
+///
+/// ECDSA's nonces use it with no additional input. The FIPS module's
+/// [`crate::drbg::HmacDrbg`] is this construction over SHA-512, with reseeding.
 pub(crate) struct HmacDrbg<H: Hash> {
     k: Digest,
     v: Digest,
@@ -30,7 +39,6 @@ impl<H: Hash> HmacDrbg<H> {
 
         // 4. (Key, V) = HMAC_DRBG_Update (seed_material, Key, V).
         // 5. reseed_counter = 1.
-        // (nb. `update()` increments `reseed_counter` to 1)
         let mut r = Self {
             k,
             v,
@@ -38,7 +46,58 @@ impl<H: Hash> HmacDrbg<H> {
             _h: PhantomData,
         };
         r.update(seed_material);
+        r.reseed_counter = 1;
         r
+    }
+
+    /// Mixes new `entropy` into the state. `additional` of `None` is the
+    /// standard's Null; an empty slice is still provided data.
+    pub(crate) fn reseed(&mut self, entropy: &[u8], additional: Option<&[u8]>) {
+        match additional {
+            Some(extra) => self.update(&[entropy, extra]),
+            None => self.update(&[entropy]),
+        }
+        self.reseed_counter = 1;
+    }
+
+    /// Writes one generate, at most [`MAX_GENERATE_BYTES`], into `out`.
+    ///
+    /// `additional` of `None` is Null. A generate past [`MAX_RESEED_INTERVAL`]
+    /// returns [`Error::RngFailed`] and leaves the state unchanged, so the
+    /// caller can reseed.
+    pub(crate) fn generate(
+        &mut self,
+        out: &mut [u8],
+        additional: Option<&[u8]>,
+    ) -> Result<(), Error> {
+        if self.reseed_counter > MAX_RESEED_INTERVAL {
+            return Err(Error::RngFailed);
+        }
+        if out.len() > MAX_GENERATE_BYTES {
+            return Err(Error::WrongLength);
+        }
+
+        // 2. If additional_input ≠ Null, then
+        //    (Key, V) = HMAC_DRBG_Update (additional_input, Key, V).
+        if let Some(extra) = additional {
+            self.update(&[extra]);
+        }
+
+        // 3-5. V = HMAC(Key, V), repeated, and the output is the leading bytes.
+        let hashlen = self.v.as_ref().len();
+        for chunk in out.chunks_mut(hashlen) {
+            self.generate_block();
+            chunk.copy_from_slice(&self.v.as_ref()[..chunk.len()]);
+        }
+
+        // 6. (Key, V) = HMAC_DRBG_Update (additional_input, Key, V).
+        // 7. reseed_counter = reseed_counter + 1.
+        match additional {
+            Some(extra) => self.update(&[extra]),
+            None => self.update(&[]),
+        }
+        self.reseed_counter += 1;
+        Ok(())
     }
 
     fn update(&mut self, additional_input: &[&[u8]]) {
@@ -55,8 +114,6 @@ impl<H: Hash> HmacDrbg<H> {
 
         // 2. V = HMAC (K, V).
         self.v = HmacKey::<H>::new(self.k.as_ref()).sign(self.v.as_ref());
-
-        self.reseed_counter += 1;
 
         // 3. If (provided_data = Null), then return K and V.
         if additional_input.is_empty() {
@@ -86,29 +143,38 @@ impl<H: Hash> HmacDrbg<H> {
 
 impl<H: Hash> RandomSource for HmacDrbg<H> {
     fn fill(&mut self, out: &mut [u8]) -> Result<(), Error> {
-        let hashlen = self.v.as_ref().len();
-
-        // 1. If reseed_counter > reseed_interval, then
-        //    return an indication that a reseed is required.
-        // nb. in practice, does not happen in our uses
-        assert!(self.reseed_counter < 0x1_0000_0000_0000);
-
-        // 2. If additional_input ≠ Null, then (Key, V) =
-        //    HMAC_DRBG_Update (additional_input, Key, V).
-        // nb: we don't accept additional_input here.
-
-        // 3. - 5. this is a different formulation, but
-        // ends up with all `V` terms being written to `out`.
-        for chunk in out.chunks_mut(hashlen) {
-            self.generate_block();
-            chunk.copy_from_slice(&self.v.as_ref()[..chunk.len()]);
+        // ECDSA and RSA key generation pass no additional input. A buffer
+        // longer than one generate is several generates, each under the cap.
+        let mut rest = &mut *out;
+        if rest.is_empty() {
+            return self.generate(rest, None);
         }
-
-        // 6. (Key, V) = HMAC_DRBG_Update (additional_input, Key, V).
-        // 7. reseed_counter = reseed_counter + 1.
-        self.update(&[]);
-
+        while !rest.is_empty() {
+            let n = rest.len().min(MAX_GENERATE_BYTES);
+            let (head, tail) = rest.split_at_mut(n);
+            self.generate(head, None)?;
+            rest = tail;
+        }
         Ok(())
+    }
+}
+
+impl HmacDrbg<super::hash::Sha512> {
+    pub(crate) fn from_parts(k: &[u8; 64], v: &[u8; 64], reseed_counter: u64) -> Self {
+        Self {
+            k: Digest::new(super::hash::Sha512::ALGORITHM, k),
+            v: Digest::new(super::hash::Sha512::ALGORITHM, v),
+            reseed_counter,
+            _h: PhantomData,
+        }
+    }
+
+    pub(crate) fn to_parts(&self) -> ([u8; 64], [u8; 64], u64) {
+        let mut k = [0u8; 64];
+        let mut v = [0u8; 64];
+        k.copy_from_slice(self.k.as_ref());
+        v.copy_from_slice(self.v.as_ref());
+        (k, v, self.reseed_counter)
     }
 }
 
@@ -116,11 +182,46 @@ impl<H: Hash> RandomSource for HmacDrbg<H> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use crate::high::hash::Sha256;
+    use crate::Error;
+    use crate::high::hash::{Hash, Sha256};
+    use crate::test::Acvp;
 
-    /// CAVP's HMAC_DRBG vectors for the hashes ECDSA's nonces use, without
-    /// additional input, as rind's callers give none: each instantiates,
-    /// reseeds, and generates twice, checking the second output.
+    fn provided(bytes: &[u8]) -> Option<&[u8]> {
+        if bytes.is_empty() { None } else { Some(bytes) }
+    }
+
+    fn acvp_run<H: Hash>(
+        test: &serde_json::Value,
+        prediction_resistance: bool,
+        bits: usize,
+    ) -> Vec<u8> {
+        let mut drbg = HmacDrbg::<H>::new(
+            &test.hex("entropyInput"),
+            &test.hex("nonce"),
+            &test.hex("persoString"),
+        );
+        let steps = test["otherInput"].as_array().expect("otherInput");
+        let mut out = vec![0u8; bits / 8];
+        for step in steps {
+            let additional = hex::decode(step["additionalInput"].as_str().unwrap()).unwrap();
+            let entropy = hex::decode(step["entropyInput"].as_str().unwrap()).unwrap();
+            let extra = provided(&additional);
+            match step["intendedUse"].as_str() {
+                Some("reSeed") => drbg.reseed(&entropy, extra),
+                Some("generate") if prediction_resistance => {
+                    drbg.reseed(&entropy, extra);
+                    drbg.generate(&mut out, None).unwrap();
+                }
+                Some("generate") => drbg.generate(&mut out, extra).unwrap(),
+                other => panic!("unexpected intendedUse {other:?}"),
+            }
+        }
+        out
+    }
+
+    /// CAVP's HMAC_DRBG vectors for SHA-256, SHA-384, and SHA-512. Each count
+    /// instantiates, reseeds, and generates twice; the file's empty additional
+    /// input is the standard's Null. The second generate is the returned bits.
     #[test]
     fn cavp() {
         use crate::high::hash::{Sha384, Sha512};
@@ -129,41 +230,42 @@ mod tests {
         #[derive(Default)]
         struct State {
             hash: String,
-            additional_input: bool,
             entropy: Vec<u8>,
             nonce: Vec<u8>,
             personalization: Vec<u8>,
             reseed: Vec<u8>,
+            reseed_additional: Vec<u8>,
+            additional: Vec<Vec<u8>>,
             tests: usize,
+        }
+
+        fn provided(bytes: &[u8]) -> Option<&[u8]> {
+            if bytes.is_empty() { None } else { Some(bytes) }
         }
 
         fn second_output<H: Hash>(state: &State, len: usize) -> Vec<u8> {
             let mut drbg = HmacDrbg::<H>::new(&state.entropy, &state.nonce, &state.personalization);
-            // SP 800-90A section 10.1.2.4: reseeding updates with the new
-            // entropy and restarts the counter.
-            drbg.update(&[&state.reseed]);
-            drbg.reseed_counter = 1;
+            drbg.reseed(&state.reseed, provided(&state.reseed_additional));
             let mut out = vec![0; len];
-            drbg.fill(&mut out).unwrap();
-            drbg.fill(&mut out).unwrap();
+            drbg.generate(&mut out, provided(&state.additional[0]))
+                .unwrap();
+            drbg.generate(&mut out, provided(&state.additional[1]))
+                .unwrap();
             out
         }
 
         impl CavpSink for State {
             fn on_meta(&mut self, meta: &str) {
-                match meta.split_once(" = ") {
-                    Some(("AdditionalInputLen", len)) => self.additional_input = len != "0",
-                    Some(_) => {}
-                    None => self.hash = meta.to_string(),
+                if meta.split_once(" = ").is_none() {
+                    self.hash = meta.to_string();
                 }
             }
 
             fn on_value(&mut self, name: &str, value: Value<'_>) {
-                if self.additional_input {
-                    return;
-                }
                 match name {
-                    "COUNT" | "AdditionalInputReseed" | "AdditionalInput" => {}
+                    "COUNT" => self.additional.clear(),
+                    "AdditionalInput" => self.additional.push(value.bytes()),
+                    "AdditionalInputReseed" => self.reseed_additional = value.bytes(),
                     "EntropyInput" => self.entropy = value.bytes(),
                     "Nonce" => self.nonce = value.bytes(),
                     "PersonalizationString" => self.personalization = value.bytes(),
@@ -186,8 +288,82 @@ mod tests {
 
         let mut state = State::default();
         process_cavp("../thirdparty/cavp/drbg/HMAC_DRBG.rsp", &mut state);
-        // Eight groups of 15 per hash lack additional input.
-        assert_eq!(state.tests, 3 * 8 * 15);
+        // Sixteen groups of 15 for each of SHA-256, SHA-384, and SHA-512.
+        assert_eq!(state.tests, 3 * 16 * 15);
+    }
+
+    /// ACVP's hmacDRBG samples, no derivation function, for the hashes this
+    /// DRBG implements. Prediction resistance reseeds with that step's entropy
+    /// and additional input, then generates with Null additional input.
+    #[test]
+    fn acvp() {
+        use crate::high::hash::{Sha384, Sha512};
+        use crate::test::Acvp;
+
+        for name in ["hmacDRBG-1.0", "hmacDRBG-SP800-90Ar1"] {
+            let mut tests = 0usize;
+            for group in crate::test::acvp(name) {
+                assert!(!group.flag("derFunc"));
+                assert!(group.flag("reSeed"));
+                let pr = group.flag("predResistance");
+                let bits = group.int("returnedBitsLen");
+                assert_eq!(bits % 8, 0, "returnedBitsLen is whole bytes");
+                let mode = group.str("mode");
+                for test in group.tests() {
+                    let out = match mode {
+                        "SHA2-256" => acvp_run::<Sha256>(test, pr, bits),
+                        "SHA2-384" => acvp_run::<Sha384>(test, pr, bits),
+                        "SHA2-512" => acvp_run::<Sha512>(test, pr, bits),
+                        other => panic!("unexpected hmacDRBG mode {other}"),
+                    };
+                    assert_eq!(out, hex::decode(test.str("returnedBits")).unwrap());
+                    tests += 1;
+                }
+            }
+            let expected = match name {
+                "hmacDRBG-1.0" => 90,
+                "hmacDRBG-SP800-90Ar1" => 180,
+                _ => unreachable!(),
+            };
+            assert_eq!(tests, expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn reseed_interval_refuses_without_changing_state() {
+        let mut drbg = HmacDrbg::<Sha256>::new(&[1, 2, 3, 4], &[5, 6], &[]);
+        drbg.reseed_counter = MAX_RESEED_INTERVAL + 1;
+        let mut out = [0u8; 16];
+        assert_eq!(drbg.generate(&mut out, None), Err(Error::RngFailed));
+        assert_eq!(out, [0u8; 16]);
+        assert_eq!(drbg.reseed_counter, MAX_RESEED_INTERVAL + 1);
+
+        drbg.reseed_counter = MAX_RESEED_INTERVAL;
+        assert!(drbg.generate(&mut out, None).is_ok());
+    }
+
+    #[test]
+    fn secret_generate() {
+        // Under `admin/ctgrind`, entropy, the nonce, and additional input stay
+        // secret through instantiate, reseed, and generate. The output is
+        // declassified only for the comparison.
+        let entropy = [0x11u8; 32];
+        let nonce = [0x22u8; 16];
+        let additional = [0x33, 0x44, 0x55, 0x66];
+        let mut wanted = [0u8; 32];
+        let mut drbg = HmacDrbg::<Sha256>::new(&entropy, &nonce, &[]);
+        drbg.reseed(&entropy, Some(&additional));
+        drbg.generate(&mut wanted, Some(&additional)).unwrap();
+
+        crate::low::ct::secret_slice(&entropy);
+        crate::low::ct::secret_slice(&nonce);
+        crate::low::ct::secret_slice(&additional);
+        let mut drbg = HmacDrbg::<Sha256>::new(&entropy, &nonce, &[]);
+        drbg.reseed(&entropy, Some(&additional));
+        let mut out = [0u8; 32];
+        drbg.generate(&mut out, Some(&additional)).unwrap();
+        crate::low::ct::public_slice(&out);
+        assert_eq!(out, wanted);
     }
 
     #[test]

@@ -3464,6 +3464,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rind-fips"
+version = "0.0.0"
+dependencies = [
+ "getrandom 0.4.3",
+ "rind",
+]
+
+[[package]]
 name = "rind-fuzz"
 version = "0.0.0"
 dependencies = [

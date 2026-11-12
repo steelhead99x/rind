@@ -16,7 +16,8 @@ run time. [MIGRATING.md][migrating] maps each ring and aws-lc-rs item to it.
   allocations. Keys wipe their secrets on drop under the `wipe` feature, and
   their `Debug` shows only their algorithm.
 - No call takes a random source: rind draws from the system's when it needs
-  one, and `rand::fill` gives callers the same.
+  one, and `rand::fill` gives callers the same. `drbg` is the FIPS module's
+  HMAC_DRBG; rind's own key generation does not call it.
 - Fallible calls return `rind::Error`, whose variant says which kind of call
   failed, such as `KeyRejected` or `BadSignature`.
 
@@ -61,6 +62,8 @@ The modules:
   types export.
 - `constant_time`: comparing secrets such as MACs without a timing leak.
 - `rand`: random bytes from the system.
+- `drbg`: SP 800-90A HMAC_DRBG over SHA-512, for the FIPS module. rind's own
+  operations do not draw from it.
 - `cpu`: the startup check for required CPU features, whether AES runs
   in hardware, and `Dit`, which holds data-independent timing on across a
   batch of calls.

@@ -63,6 +63,9 @@ sets=(
     ML-DSA-keyGen-FIPS204 'true'
     ML-DSA-sigGen-FIPS204 '.preHash != "preHash"'
     ML-DSA-sigVer-FIPS204 '.preHash != "preHash"'
+    # HMAC_DRBG without a derivation function, for the hashes rind implements.
+    hmacDRBG-1.0 '.derFunc == false and (.mode | IN("SHA2-256", "SHA2-384", "SHA2-512"))'
+    hmacDRBG-SP800-90Ar1 '.derFunc == false and (.mode | IN("SHA2-256", "SHA2-384", "SHA2-512"))'
 )
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../thirdparty/acvp"

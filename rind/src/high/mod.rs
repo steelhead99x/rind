@@ -9,6 +9,7 @@ pub(super) mod blind_rsa;
 pub(super) mod constant_time;
 pub(super) mod curve;
 pub(super) mod digest;
+pub(super) mod drbg;
 pub(super) mod ecdsa;
 pub(super) mod ed25519;
 pub(super) mod hash;

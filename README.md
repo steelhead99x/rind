@@ -112,6 +112,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+`drbg` is an SP 800-90A HMAC_DRBG for the FIPS module in `rind-fips`. rind's
+own key generation does not use it.
+
 [docs.rs][docs] documents every module, and [ARCHITECTURE.md][architecture]
 describes the API's shape.
 

@@ -6,6 +6,7 @@ members = [
   "rind-bench",
   "rind-cpuid",
   "rind-dart",
+  "rind-fips",
   "rind-timing",
   "rind-dimpl",
   "rind-object-store",

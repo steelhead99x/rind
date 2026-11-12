@@ -485,6 +485,18 @@ We do this to avoid the theoretical fragility of RFC6979 under fault conditions.
 This is allowed for by RFC6979, and the HMAC-DRBG that it builds on.
 The code is structured such that we pass the RFC6979 test vectors.
 
+### HMAC_DRBG
+
+The FIPS module's generator is SP 800-90A's HMAC_DRBG over SHA-512, with no
+derivation function. It is rind's HMAC, not new arithmetic: the standard's
+update, reseed, and generate, checked by CAVP's `HMAC_DRBG.rsp` and by ACVP's
+hmacDRBG samples for SHA-256, SHA-384, and SHA-512. rind's own key generation
+does not call it. `rind-fips` keeps one generator per thread, seeded from a
+process-wide generator, and reseeds each after 4096 generates, which is
+aws-lc's `kCtrDrbgReseedInterval`. Entropy is 64 bytes and the nonce is 32,
+from `getrandom` for the process generator and from that generator for each
+thread. A failed read is an error.
+
 The code which selects a term from a table of points is non-verified,
 and is written in AVX2, SSE2, or Neon intrinsics, or for P256 on x86_64 is
 aws-lc's SSE2 and AVX2 assembly, or on armv7 is portable Rust. aarch64's P256

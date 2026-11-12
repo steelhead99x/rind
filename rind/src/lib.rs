@@ -574,7 +574,8 @@ pub mod cpu {
 /// Random bytes from the system's secure random source.
 ///
 /// No rind API takes a random source, so [`rand::fill`] is all a caller
-/// needs.
+/// needs. The FIPS module's generator is [`drbg`], which rind itself does
+/// not call.
 ///
 /// ```
 /// let mut nonce = [0u8; 16];
@@ -586,4 +587,18 @@ pub mod rand {
         use crate::mid::rng::{RandomSource, SystemRandom};
         SystemRandom.fill(out)
     }
+}
+
+/// SP 800-90A HMAC_DRBG over SHA-512, for rind's FIPS module.
+///
+/// rind's own key generation keeps calling [`rand`]. A caller that holds one
+/// of these is the FIPS wrapper, which seeds it from the operating system.
+///
+/// ```
+/// let mut drbg = rind::drbg::HmacDrbg::new(&[1u8; 32], &[2u8; 16], b"");
+/// let mut out = [0u8; 16];
+/// drbg.generate(&mut out, None).unwrap();
+/// ```
+pub mod drbg {
+    pub use crate::high::drbg::HmacDrbg;
 }
