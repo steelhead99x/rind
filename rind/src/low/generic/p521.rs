@@ -880,6 +880,8 @@ const C: [u64; 5] = [
 ///
 /// Inputs that are secret in `mid::p521` are marked secret, so under
 /// `admin/ctgrind` these also check each routine is constant time in them.
+// `#[cfg(test)]` is the marker `admin/structure` skips, so this module may name `mid`.
+#[cfg(test)]
 #[cfg(all(test, any(rind_backend = "x86_64", rind_backend = "aarch64")))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -1330,29 +1332,6 @@ mod tests {
         assert!(affine(&got).is_none());
     }
 
-    /// Width-`w` NAF of a full-width scalar, low digit first, as `mid::util::public_naf`.
-    fn naf_digits(k: &[u64; 9], w: u32) -> [i8; 522] {
-        let mut digits = [0; 522];
-        let mut window = (k[0] & ((1u64 << w) - 1)) as i32;
-        for (i, digit) in digits.iter_mut().enumerate() {
-            if window & 1 == 1 {
-                let d = if window < (1 << (w - 1)) {
-                    window
-                } else {
-                    window - (1 << w)
-                };
-                window -= d;
-                *digit = d as i8;
-            }
-            let at = i + w as usize;
-            let bit = k
-                .get(at / 64)
-                .map_or(0, |word| ((word >> (at % 64)) & 1) as i32);
-            window = (window >> 1) + (bit << (w - 1));
-        }
-        digits
-    }
-
     /// 1G through 16G, affine, in rows of 18 words.
     fn generator_table() -> [u64; 288] {
         let g_xy = affine(&GENERATOR).unwrap();
@@ -1421,8 +1400,10 @@ mod tests {
             low::p521_jscalarmul(&mut point, &l, &GENERATOR);
             prop_assume!(affine(&point).is_some());
 
-            let g_digits = naf_digits(&g, 5);
-            let p_digits = naf_digits(&m, 6);
+            let (mut g_digits, mut p_digits) = ([0; 522], [0; 522]);
+            // The production encoder, not a copy of it.
+            crate::mid::util::public_naf::<5>(&g, &mut g_digits);
+            crate::mid::util::public_naf::<6>(&m, &mut p_digits);
             prop_assume!(
                 p_digits
                     .iter()
