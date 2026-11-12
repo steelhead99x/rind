@@ -227,6 +227,16 @@ impl Algorithm {
     }
 }
 
+pub static AES_128: Algorithm = Algorithm {
+    id: AlgorithmId::Aes128,
+    new: |key| Ok(Key::Aes(Masker::new(Aes::new(&cipher::AES_128, key)?))),
+};
+
+pub static AES_256: Algorithm = Algorithm {
+    id: AlgorithmId::Aes256,
+    new: |key| Ok(Key::Aes(Masker::new(Aes::new(&cipher::AES_256, key)?))),
+};
+
 pub static CHACHA20: Algorithm = Algorithm {
     id: AlgorithmId::ChaCha20,
     new: |key| {
@@ -272,6 +282,10 @@ impl<C: Mask> Masker<C> {
     }
 }
 
+pub static AES_128: Algorithm = Algorithm { key_len: 16 };
+
+pub static AES_256: Algorithm = Algorithm { key_len: 32 };
+
 ```
 
 The model departs from the Rust in seven ways, and adds no axiom:
@@ -300,8 +314,9 @@ The model departs from the Rust in seven ways, and adds no axiom:
 - `?` is a `match`, since each error it passes on is already an `Error`, and
   `map_err(|_| Error::WrongLength)?` a `match` returning that error.
 
-Drops are not modelled, as everywhere in the translation. Of the
-header-protection statics, only `CHACHA20` is here.
+Drops are not modelled, as everywhere in the translation. The last two
+quotes are `cipher`'s AES statics, which the AES header-protection statics
+name; `cipher::Algorithm` itself is translated.
 
 As in the translation, `Keyed` and `Agree` take the curve marker `K` and its
 associated key type as separate type parameters.
@@ -445,6 +460,34 @@ def aead.quic.Masker.new {C : Type} (key : C) : Result (aead.quic.Masker C) :=
 def aead.quic.Masker.mask {C : Type} (MaskInst : aead.quic.Mask C) (self : aead.quic.Masker C)
     (sample : Array Std.U8 16#usize) : Result (Array Std.U8 5#usize) :=
   MaskInst.mask self sample
+
+/-- `cipher`'s `AES_128` static. -/
+def cipher.AES_128 : cipher.Algorithm := { key_len := 16#usize }
+
+/-- `cipher`'s `AES_256` static. -/
+def cipher.AES_256 : cipher.Algorithm := { key_len := 32#usize }
+
+/-- The `AES_128` static. -/
+def aead.quic.AES_128 : aead.quic.Algorithm where
+  id := .Aes128
+  new key := do
+    let r ← mid.aes.Aes.new cipher.AES_128 key
+    match r with
+    | .Ok a =>
+      let m ← aead.quic.Masker.new a
+      ok (.Ok (.Aes m))
+    | .Err e => ok (.Err e)
+
+/-- The `AES_256` static. -/
+def aead.quic.AES_256 : aead.quic.Algorithm where
+  id := .Aes256
+  new key := do
+    let r ← mid.aes.Aes.new cipher.AES_256 key
+    match r with
+    | .Ok a =>
+      let m ← aead.quic.Masker.new a
+      ok (.Ok (.Aes m))
+    | .Err e => ok (.Err e)
 
 /-- The `CHACHA20` static. -/
 def aead.quic.CHACHA20 : aead.quic.Algorithm where

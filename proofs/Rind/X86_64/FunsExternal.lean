@@ -29,6 +29,13 @@ opaque low.x86_64.curve25519_x25519base.curve25519_x25519base
   Array Std.U64 4#usize → Array Std.U64 4#usize → Result (Array Std.U64
     4#usize)
 
+opaque low.x86_64.sha3_keccak_f1600.sha3_keccak_f1600
+  : Array Std.U64 25#usize → Array Std.U64 24#usize → Result (Array Std.U64 25#usize)
+
+opaque low.x86_64.sha3_keccak4_f1600_alt.sha3_keccak4_f1600
+  : Array (Array Std.U64 25#usize) 4#usize → Array Std.U64 24#usize → Array Std.U64 4#usize →
+    Array Std.U64 4#usize → Result (Array (Array Std.U64 25#usize) 4#usize)
+
 opaque low.x86_64.bignum_eq.bignum_eq
   : Slice Std.U64 → Slice Std.U64 → Result Bool
 
@@ -436,11 +443,6 @@ opaque mid.p256.PrivateKey.diffie_hellman
 opaque mid.p256.PublicKey.from_x962_uncompressed
   : Slice Std.U8 → Result (core.result.Result mid.p256.PublicKey error.Error)
 
-/-! AES, whose header protection no proof covers. -/
-
-opaque mid.aes.Aes.header_protection_mask
-  : mid.aes.Aes → Array Std.U8 16#usize → Result (Array Std.U8 5#usize)
-
 /-! MD5, which no proof covers. -/
 
 opaque mid.md5.Md5State.new : Result mid.md5.Md5State
@@ -455,20 +457,6 @@ opaque mid.md5.Md5Context.update : mid.md5.Md5Context → Slice Std.U8 → Resul
 opaque mid.md5.Md5Context.finish : mid.md5.Md5Context → Result (Array Std.U8 16#usize)
 
 opaque mid.md5.Md5Context.Insts.CoreCloneClone.clone : mid.md5.Md5Context → Result mid.md5.Md5Context
-
-/-! SHA-3, whose sponge no proof covers. -/
-
-opaque mid.sha3.Sha3Context.new
-  (R : Std.Usize) (OUT : Std.Usize) : Result (mid.sha3.Sha3Context R OUT)
-
-opaque mid.sha3.Sha3Context.update {R : Std.Usize} {OUT : Std.Usize}
-  : mid.sha3.Sha3Context R OUT → Slice Std.U8 → Result (mid.sha3.Sha3Context R OUT)
-
-opaque mid.sha3.Sha3Context.finish {R : Std.Usize} {OUT : Std.Usize}
-  : mid.sha3.Sha3Context R OUT → Result (Array Std.U8 OUT)
-
-opaque mid.sha3.Sha3Context.Insts.CoreCloneClone.clone {R : Std.Usize} {OUT : Std.Usize}
-  : mid.sha3.Sha3Context R OUT → Result (mid.sha3.Sha3Context R OUT)
 
 /-! Agreement key encodings, and loading on the curves no theorem loads a key
 on, whose DER no proof covers. -/
