@@ -192,8 +192,8 @@ with `std` enables at compile time, and `missing_cpu_feature` is `None` on
 x86_64, 32-bit arm, and the portable backend. Do not add a call to
 `rind::cpu::check()`: it cannot fail on a target rind builds for, and rind
 0.4 removes it.
-[PLATFORMS.md][platforms] lists the tested targets, what is only compiled,
-and what each architecture runs without each feature.
+[PLATFORMS.md][platforms] lists the tested targets by triple, what is only
+compiled, and what each architecture runs without each feature.
 
 ## Contributing
 

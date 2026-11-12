@@ -11,9 +11,40 @@ qemu. Those runs test `rind` and `rind-rustls`. The wasm runs below do
 not: they build, and on `wasm32-wasip2` test, the `rind` library only.
 iOS devices' code is only built, which is not a test, so a device target
 is not covered. CI neither compiles nor tests big-endian `aarch64`,
-big-endian `arm`, `i586`,
-`riscv32`, `sparc64`, or MIPS. `rind/build.rs` would select the portable
+big-endian `arm`, `i586`, `riscv32`, `sparc64`, or MIPS. `rind/build.rs` would select the portable
 backend for each of them. Stable Rust ships no MIPS standard library.
+
+## Targets by triple
+
+Each target triple CI builds, and what it checks there. "Tests" runs the
+tests of `rind` and every adapter, `rind-rustls` included; "built" compiles
+them without running; "compiled" builds the `rind` library alone. Constant
+time is checked natively on `x86_64` and `aarch64` Linux and on `armv7`, as
+[TESTING.md](TESTING.md) details; the other native-code rows run the same
+Rust or assembly as one of those.
+
+| Triple | CI | Crates | Constant time |
+|---|---|---|---|
+| `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` | tests | all | ctgrind |
+| `armv7-unknown-linux-gnueabihf` | tests, under qemu | all | ctgrind |
+| `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` | tests | all | as the same architecture's Linux row |
+| `x86_64-apple-darwin`, `aarch64-apple-darwin` | tests | all | as the same architecture's Linux row |
+| `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`, `i686-pc-windows-msvc` | tests | all | as the same architecture's Linux row |
+| `i686-unknown-linux-gnu` | tests | all | as the portable backend's |
+| `aarch64-apple-ios-sim` | tests, in the simulator | all | as the same architecture's Linux row |
+| `aarch64-apple-ios` | built | all | as the same architecture's Linux row |
+| `aarch64-linux-android`, `armv7-linux-androideabi`, `x86_64-linux-android`, `i686-linux-android`, `arm-linux-androideabi` | tests, under qemu but `x86_64` | all | as the same architecture's Linux row |
+| `arm-unknown-linux-gnueabi`, `arm-unknown-linux-gnueabihf` | tests, under qemu's ARM1176 | all | as the portable backend's |
+| `s390x-unknown-linux-gnu`, `riscv64gc-unknown-linux-gnu`, `riscv64gc-unknown-linux-musl`, `loongarch64-unknown-linux-gnu`, `powerpc64le-unknown-linux-gnu`, `powerpc64-unknown-linux-gnu`, `powerpc-unknown-linux-gnu` | tests, under qemu | all | as the portable backend's |
+| `wasm32-wasip2` | tests: the vector tests, nightly, under wasmtime | `rind` only | unchecked |
+| `wasm32-unknown-unknown` | compiled | `rind` only | unchecked |
+
+"As the portable backend's" means ctgrind's forced portable run on x86_64,
+which checks the same Rust built for another architecture, not its machine
+code. A triple not in this table is untested, even when a row differs from it
+only in vendor, OS, or environment, such as `x86_64-pc-windows-gnu`,
+`aarch64-pc-windows-gnullvm`, `x86_64-unknown-freebsd`, or
+`armv7-unknown-linux-musleabihf`.
 
 - `aarch64` requires the `neon` CPU feature. Where the CPU has the crypto
   extension (`aes`, `pmull`, and `sha2`), as the Raspberry Pi 5 and most
@@ -93,17 +124,21 @@ backend for each of them. Stable Rust ships no MIPS standard library.
   and `wasm32-unknown-unknown`, with and without `wipe`
   (`sh/dispatch.sh:257-263`), when the diff matches that module's path
   (`sh/dispatch.sh:65`: `rind`'s `src`, `tests`, `build.rs`, or manifest,
-  the workspace manifest or lockfile, or the flake). A push to `main` runs
+  the workspace manifest or lockfile, or the flake) or the gate's own
+  orchestration (`justfile`, `sh/dispatch.sh`, `sh/changed.sh`, or
+  `sh/select.sh`), which runs every check. A push to `main` runs
   `just ci --all`, which compiles both every time. The latter enables
   `getrandom/wasm_js` for JavaScript randomness; the WASI target uses its
   system random source. The nightly `build.yml` runs the vector tests on
   `wasm32-wasip2` under wasmtime (`just wasm`), without the differential
   tests, since aws-lc does not build for wasm.
   `wasm32-unknown-unknown` stays compile-only: its tests need a JavaScript
-  host. Constant time is unchecked on wasm, and the portable targets' own
-  binaries are not checked either: ctgrind of that backend is the x86_64
-  build forced with `--cfg rind_portable`. A wasm engine compiles rind
-  again, so its JIT may turn a select into a branch.
+  host. Constant time is unchecked on wasm, `wasm32-wasip2` included,
+  though its tests run: ctgrind and the trace checks inspect native code,
+  and a wasm engine compiles rind again, so its JIT may turn a select into
+  a branch. The portable rows' own machine code is not checked either:
+  ctgrind of that backend is the x86_64 build forced with
+  `--cfg rind_portable`.
 
 `missing_cpu_feature` returns `None` on x86_64, 32-bit arm, and the portable
 backend. On little-endian aarch64 it names `neon` only when runtime detection
