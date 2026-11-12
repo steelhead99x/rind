@@ -115,6 +115,16 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | ML-DSA-44, ML-DSA-65, ML-DSA-87 | s2n-bignum ✓ + mldsa-native ⚡ |  | mldsa-native ⚡ + OpenSSL ⚡ | mldsa-native ⚡ + HACL* |
 | RSA signatures, OAEP, blind signatures, key generation | s2n-bignum ✓ + aws-lc ⚡ + Graviola ⚡ |  | aws-lc ⚡ + Graviola ⚡ + rind ⚡ | Graviola ⚡ + rind ⚡ |
 
+- aarch64 chooses s2n-bignum's schedule by the multiplier for X25519,
+  Ed25519, the P-256, P-384, and P-521 scalar multiplications, and RSA's
+  16-word and 32-word products. Apple's cores and Neoverse V1, V2, V3, and N2
+  run the `_alt` schedules. Cortex-A72, Cortex-A76, Neoverse N1, and a core
+  rind does not recognise run the other schedules. Each of those has a HOL
+  Light proof that embeds the object's bytes, which `admin/prove-bytes`
+  checks. The SLOTHY field routines whose proofs are equivalences to an
+  asserted base program stay on `_alt`, because that check needs the byte
+  list. rind's Lean proofs of X25519, Ed25519, and P-256 name the `_alt`
+  routines, so those benchmark ✓ marks are the wide-multiplier cores.
 - AES header protection on aarch64 pays the same indirect call as AES-GCM
   key setup on x86_64.
 - armv7 without crypto: SHA-256 and SHA-1 run aws-lc's NEON routines, or
@@ -195,6 +205,7 @@ aarch64 AES-GCM theorems assume separate input and output buffers, so they do
 not cover rind's in-place calls.
 
 <!-- admin/prove-bytes inventory -->
+
 | Function | x86_64 | aarch64 |
 |---|---|---|
 | `aes128_gcm_dec` | not imported | `aes128_gcm_dec`: `AES128_GCM_DEC_NOIBT_SUBROUTINE_SAFE` |
@@ -223,18 +234,19 @@ not cover rind's in-place calls.
 | `bignum_demont_p384` | `bignum_demont_p384`: none | `bignum_demont_p384`: none |
 | `bignum_demont_p384_alt` | `bignum_demont_p384_alt`: none | not imported |
 | `bignum_digitsize` | `bignum_digitsize`: none | `bignum_digitsize`: none |
-| `bignum_emontredc_8n` | `bignum_emontredc_8n`: none | not imported |
+| `bignum_emontredc_8n` | `bignum_emontredc_8n`: none | `bignum_emontredc_8n`: `BIGNUM_EMONTREDC_8N_SUBROUTINE_SAFE` |
 | `bignum_eq` | `bignum_eq`: none | `bignum_eq`: none |
 | `bignum_inv_p25519` | `bignum_inv_p25519`: `BIGNUM_INV_P25519_SUBROUTINE_SAFE` | not imported |
 | `bignum_inv_p256` | `bignum_inv_p256`: none | `bignum_inv_p256`: none |
 | `bignum_inv_p384` | `bignum_inv_p384`: none | `bignum_inv_p384`: none |
 | `bignum_inv_p521` | `bignum_inv_p521`: `BIGNUM_INV_P521_SUBROUTINE_SAFE` | `bignum_inv_p521`: `BIGNUM_INV_P521_SUBROUTINE_SAFE` |
-| `bignum_kmul_16_32` | `bignum_kmul_16_32`: none | not imported |
-| `bignum_kmul_32_64` | `bignum_kmul_32_64`: none | not imported |
-| `bignum_ksqr_16_32` | `bignum_ksqr_16_32`: none | not imported |
-| `bignum_ksqr_32_64` | `bignum_ksqr_32_64`: none | not imported |
+| `bignum_kmul_16_32` | `bignum_kmul_16_32`: none | `bignum_kmul_16_32`: `BIGNUM_KMUL_16_32_SUBROUTINE_SAFE` |
+| `bignum_kmul_32_64` | `bignum_kmul_32_64`: none | `bignum_kmul_32_64`: `BIGNUM_KMUL_32_64_SUBROUTINE_SAFE` |
+| `bignum_ksqr_16_32` | `bignum_ksqr_16_32`: none | `bignum_ksqr_16_32`: `BIGNUM_KSQR_16_32_SUBROUTINE_SAFE` |
+| `bignum_ksqr_32_64` | `bignum_ksqr_32_64`: none | `bignum_ksqr_32_64`: `BIGNUM_KSQR_32_64_SUBROUTINE_SAFE` |
 | `bignum_madd_n25519` | `bignum_madd_n25519`: `BIGNUM_MADD_N25519_SUBROUTINE_SAFE` | `bignum_madd_n25519_alt`: `BIGNUM_MADD_N25519_ALT_SUBROUTINE_SAFE` |
 | `bignum_madd_n25519_alt` | `bignum_madd_n25519_alt`: `BIGNUM_MADD_N25519_ALT_SUBROUTINE_SAFE` | not imported |
+| `bignum_madd_n25519_narrow::bignum_madd_n25519` | not imported | `bignum_madd_n25519`: `BIGNUM_MADD_N25519_SUBROUTINE_SAFE` |
 | `bignum_mod_n25519` | `bignum_mod_n25519`: `BIGNUM_MOD_N25519_SUBROUTINE_SAFE` | `bignum_mod_n25519`: `BIGNUM_MOD_N25519_SUBROUTINE_SAFE` |
 | `bignum_mod_n256` | `bignum_mod_n256_4`: none | `bignum_mod_n256_4`: none |
 | `bignum_mod_n384` | `bignum_mod_n384_6`: none | `bignum_mod_n384_6`: none |
@@ -274,14 +286,19 @@ not cover rind's in-place calls.
 | `bignum_tomont_p384_alt` | `bignum_tomont_p384_alt`: `BIGNUM_TOMONT_P384_ALT_SUBROUTINE_SAFE` | not imported |
 | `curve25519_x25519` | `curve25519_x25519`: `CURVE25519_X25519_SUBROUTINE_SAFE` | `curve25519_x25519_alt`: none |
 | `curve25519_x25519_alt` | `curve25519_x25519_alt`: `CURVE25519_X25519_ALT_SUBROUTINE_SAFE` | not imported |
+| `curve25519_x25519_narrow::curve25519_x25519` | not imported | `curve25519_x25519`: none |
 | `curve25519_x25519base` | `curve25519_x25519base`: `CURVE25519_X25519BASE_SUBROUTINE_SAFE` | `curve25519_x25519base_alt`: none |
 | `curve25519_x25519base_alt` | `curve25519_x25519base_alt`: `CURVE25519_X25519BASE_ALT_SUBROUTINE_SAFE` | not imported |
+| `curve25519_x25519base_narrow::curve25519_x25519base` | not imported | `curve25519_x25519base`: none |
 | `edwards25519_decode` | `edwards25519_decode`: `EDWARDS25519_DECODE_SUBROUTINE_SAFE` | `edwards25519_decode_alt`: `EDWARDS25519_DECODE_ALT_SUBROUTINE_SAFE` |
 | `edwards25519_decode_alt` | `edwards25519_decode_alt`: `EDWARDS25519_DECODE_ALT_SUBROUTINE_SAFE` | not imported |
+| `edwards25519_decode_narrow::edwards25519_decode` | not imported | `edwards25519_decode`: `EDWARDS25519_DECODE_SUBROUTINE_SAFE` |
 | `edwards25519_scalarmulbase` | `edwards25519_scalarmulbase`: `EDWARDS25519_SCALARMULBASE_SUBROUTINE_SAFE` | `edwards25519_scalarmulbase_alt`: `EDWARDS25519_SCALARMULBASE_ALT_SUBROUTINE_SAFE` |
 | `edwards25519_scalarmulbase_alt` | `edwards25519_scalarmulbase_alt`: `EDWARDS25519_SCALARMULBASE_ALT_SUBROUTINE_SAFE` | not imported |
+| `edwards25519_scalarmulbase_narrow::edwards25519_scalarmulbase` | not imported | `edwards25519_scalarmulbase`: `EDWARDS25519_SCALARMULBASE_SUBROUTINE_SAFE` |
 | `edwards25519_scalarmuldouble` | `edwards25519_scalarmuldouble`: `EDWARDS25519_SCALARMULDOUBLE_SUBROUTINE_SAFE` | `edwards25519_scalarmuldouble_alt`: `EDWARDS25519_SCALARMULDOUBLE_ALT_SUBROUTINE_SAFE` |
 | `edwards25519_scalarmuldouble_alt` | `edwards25519_scalarmuldouble_alt`: `EDWARDS25519_SCALARMULDOUBLE_ALT_SUBROUTINE_SAFE` | not imported |
+| `edwards25519_scalarmuldouble_narrow::edwards25519_scalarmuldouble` | not imported | `edwards25519_scalarmuldouble`: `EDWARDS25519_SCALARMULDOUBLE_SUBROUTINE_SAFE` |
 | `mldsa_caddq` | `mldsa_caddq`: `MLDSA_CADDQ_SUBROUTINE_SAFE` | `mldsa_caddq`: `MLDSA_CADDQ_SUBROUTINE_SAFE` |
 | `mldsa_chknorm` | `mldsa_chknorm`: `MLDSA_CHKNORM_SUBROUTINE_SAFE` | `mldsa_chknorm`: `MLDSA_CHKNORM_SUBROUTINE_SAFE` |
 | `mldsa_decompose_32` | `mldsa_decompose_32`: `MLDSA_DECOMPOSE_32_SUBROUTINE_SAFE` | `mldsa_decompose_32`: `MLDSA_DECOMPOSE_32_SUBROUTINE_SAFE` |
@@ -317,30 +334,40 @@ not cover rind's in-place calls.
 | `p256_montjdouble_alt` | `p256_montjdouble_alt`: `P256_MONTJDOUBLE_ALT_SUBROUTINE_SAFE` | not imported |
 | `p256_montjmixadd` | `p256_montjmixadd`: none | `p256_montjmixadd_alt`: none |
 | `p256_montjmixadd_alt` | `p256_montjmixadd_alt`: none | not imported |
+| `p256_montjmixadd_narrow::p256_montjmixadd` | not imported | `p256_montjmixadd`: none |
 | `p256_montjscalarmul` | `p256_montjscalarmul`: `P256_MONTJSCALARMUL_SUBROUTINE_SAFE` | not imported |
 | `p256_montjscalarmul_alt` | `p256_montjscalarmul_alt`: `P256_MONTJSCALARMUL_ALT_SUBROUTINE_SAFE` | not imported |
 | `p256_scalarmul` | not imported | `p256_scalarmul_alt`: none |
+| `p256_scalarmul_narrow::p256_scalarmul` | not imported | `p256_scalarmul`: none |
 | `p256_scalarmulbase` | not imported | `p256_scalarmulbase_alt`: none |
+| `p256_scalarmulbase_narrow::p256_scalarmulbase` | not imported | `p256_scalarmulbase`: none |
 | `p384_montjadd` | `p384_montjadd`: `P384_MONTJADD_SUBROUTINE_SAFE` | `p384_montjadd_alt`: `P384_MONTJADD_ALT_SUBROUTINE_SAFE` |
 | `p384_montjadd_alt` | `p384_montjadd_alt`: `P384_MONTJADD_ALT_SUBROUTINE_SAFE` | not imported |
 | `p384_montjdouble` | `p384_montjdouble`: `P384_MONTJDOUBLE_SUBROUTINE_SAFE` | `p384_montjdouble_alt`: `P384_MONTJDOUBLE_ALT_SUBROUTINE_SAFE` |
 | `p384_montjdouble_alt` | `p384_montjdouble_alt`: `P384_MONTJDOUBLE_ALT_SUBROUTINE_SAFE` | not imported |
 | `p384_montjmixadd` | `p384_montjmixadd`: none | `p384_montjmixadd_alt`: none |
 | `p384_montjmixadd_alt` | `p384_montjmixadd_alt`: none | not imported |
+| `p384_montjmixadd_narrow::p384_montjmixadd` | not imported | `p384_montjmixadd`: none |
 | `p384_montjscalarmul` | `p384_montjscalarmul`: `P384_MONTJSCALARMUL_SUBROUTINE_SAFE` | `p384_montjscalarmul_alt`: `P384_MONTJSCALARMUL_ALT_SUBROUTINE_SAFE` |
 | `p384_montjscalarmul_alt` | `p384_montjscalarmul_alt`: `P384_MONTJSCALARMUL_ALT_SUBROUTINE_SAFE` | not imported |
+| `p384_montjscalarmul_narrow::p384_montjscalarmul` | not imported | `p384_montjscalarmul`: `P384_MONTJSCALARMUL_SUBROUTINE_SAFE` |
 | `p521_jadd` | `p521_jadd`: `P521_JADD_SUBROUTINE_SAFE` | `p521_jadd_alt`: none |
 | `p521_jadd_alt` | `p521_jadd_alt`: `P521_JADD_ALT_SUBROUTINE_SAFE` | not imported |
+| `p521_jadd_narrow::p521_jadd` | not imported | `p521_jadd`: none |
 | `p521_jdouble` | `p521_jdouble`: `P521_JDOUBLE_SUBROUTINE_SAFE` | `p521_jdouble_alt`: `P521_JDOUBLE_ALT_SUBROUTINE_SAFE` |
 | `p521_jdouble_alt` | `p521_jdouble_alt`: `P521_JDOUBLE_ALT_SUBROUTINE_SAFE` | not imported |
+| `p521_jdouble_narrow::p521_jdouble` | not imported | `p521_jdouble`: `P521_JDOUBLE_SUBROUTINE_SAFE` |
 | `p521_jmixadd` | `p521_jmixadd`: none | `p521_jmixadd_alt`: none |
 | `p521_jmixadd_alt` | `p521_jmixadd_alt`: none | not imported |
+| `p521_jmixadd_narrow::p521_jmixadd` | not imported | `p521_jmixadd`: none |
 | `p521_jscalarmul` | `p521_jscalarmul`: `P521_JSCALARMUL_SUBROUTINE_SAFE` | `p521_jscalarmul_alt`: `P521_JSCALARMUL_ALT_SUBROUTINE_SAFE` |
 | `p521_jscalarmul_alt` | `p521_jscalarmul_alt`: `P521_JSCALARMUL_ALT_SUBROUTINE_SAFE` | not imported |
+| `p521_jscalarmul_narrow::p521_jscalarmul` | not imported | `p521_jscalarmul`: `P521_JSCALARMUL_SUBROUTINE_SAFE` |
 | `sha3_keccak2_f1600` | not imported | `sha3_keccak2_f1600`: `SHA3_KECCAK2_F1600_SUBROUTINE_SAFE` |
 | `sha3_keccak4_f1600_alt::sha3_keccak4_f1600` | `sha3_keccak4_f1600_alt`: none | not imported |
 | `sha3_keccak_f1600` | `sha3_keccak_f1600`: none | `sha3_keccak_f1600`: `SHA3_KECCAK_F1600_SUBROUTINE_SAFE` |
 | `sha3_keccak_f1600_alt::sha3_keccak_f1600` | not imported | `sha3_keccak_f1600_alt`: `SHA3_KECCAK_F1600_ALT_SUBROUTINE_SAFE` |
+
 <!-- end admin/prove-bytes inventory -->
 
 ## Implementation details

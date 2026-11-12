@@ -154,7 +154,20 @@ const CRYPTO_EXT: u8 = 1 << 1;
 const SHA3: u8 = 1 << 2;
 #[cfg(target_vendor = "apple")]
 const DIT: u8 = 1 << 3;
+/// s2n-bignum's `_alt` schedules, for a core whose 64×64→128 multiply is wide.
+const WIDE_MUL: u8 = 1 << 4;
 const DETECTED: u8 = 1 << 7;
+
+/// Whether this core should run s2n-bignum's `_alt` schedules.
+///
+/// Those are written for cores that issue `umulh` widely. The other
+/// schedules are for cores whose high multiply is lightly pipelined, such
+/// as Cortex-A72, Cortex-A76, and Neoverse N1. Both are correct everywhere;
+/// a core this function does not recognise runs the other schedule.
+#[inline]
+pub(crate) fn wide_multiplier() -> bool {
+    features() & WIDE_MUL != 0
+}
 
 static FEATURES: AtomicU8 = AtomicU8::new(0);
 
@@ -185,9 +198,11 @@ fn detect() -> u8 {
         // Rust's `sha2` covers the SHA-1 instructions too.
         && test_toggle("sha2", detected!("sha2"));
     let sha3 = test_toggle("sha3", detected!("sha3"));
+    let wide = wide_toggle(detect_wide_multiplier());
     let features = (if neon { NEON } else { 0 })
         | (if crypto_ext { CRYPTO_EXT } else { 0 })
-        | (if sha3 { SHA3 } else { 0 });
+        | (if sha3 { SHA3 } else { 0 })
+        | (if wide { WIDE_MUL } else { 0 });
     #[cfg(target_vendor = "apple")]
     let features = features
         | if test_toggle("dit", detected!("dit")) {
@@ -196,6 +211,85 @@ fn detect() -> u8 {
             0
         };
     features
+}
+
+/// `RIND_CPU_DISABLE_wide_mul` selects the narrow schedules, and
+/// `RIND_CPU_FORCE_wide_mul` the `_alt` ones, in a debug build or a release
+/// build with `--cfg rind_cpu_disable`.
+fn wide_toggle(detected: bool) -> bool {
+    #[cfg(any(debug_assertions, rind_cpu_disable))]
+    {
+        if std::env::var_os("RIND_CPU_DISABLE_wide_mul").is_some() {
+            println!("DEBUG: denying cpuid \"wide_mul\"");
+            return false;
+        }
+        if std::env::var_os("RIND_CPU_FORCE_wide_mul").is_some() {
+            println!("DEBUG: forcing cpuid \"wide_mul\"");
+            return true;
+        }
+    }
+    detected
+}
+
+/// Apple's cores, and the Arm and Microsoft parts whose `umulh` is wide.
+fn detect_wide_multiplier() -> bool {
+    if cfg!(target_vendor = "apple") {
+        return true;
+    }
+    if cfg!(target_os = "linux") {
+        return std::fs::read_to_string("/proc/cpuinfo")
+            .map(|text| wide_from_cpuinfo(&text))
+            .unwrap_or(false);
+    }
+    false
+}
+
+/// Every `CPU part` in `text` is a wide-multiplier core.
+///
+/// A heterogeneous list, or a part this crate does not recognise, is narrow:
+/// the narrow schedules are the ones s2n-bignum writes for that case, and
+/// they are correct on a wide core too.
+fn wide_from_cpuinfo(text: &str) -> bool {
+    let mut saw = false;
+    let mut all_wide = true;
+    let mut implementer = None;
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let (key, value) = (key.trim(), value.trim());
+        if key == "processor" {
+            implementer = None;
+        } else if key.eq_ignore_ascii_case("CPU implementer") {
+            implementer = parse_cpu_id(value);
+        } else if key.eq_ignore_ascii_case("CPU part") {
+            saw = true;
+            all_wide &= wide_part(implementer, parse_cpu_id(value));
+        }
+    }
+    saw && all_wide
+}
+
+fn parse_cpu_id(value: &str) -> Option<u64> {
+    let value = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    u64::from_str_radix(value, 16).ok()
+}
+
+/// MIDR implementer and part, as Linux prints them in `/proc/cpuinfo`.
+///
+/// The Arm parts are Neoverse V1 (`0xd40`), N2 (`0xd49`), V2 (`0xd4f`), and
+/// V3 (`0xd84`). Microsoft's Cobalt 100 reports implementer `0x6d` and N2's
+/// part. Apple's implementer is `0x61`.
+fn wide_part(implementer: Option<u64>, part: Option<u64>) -> bool {
+    match (implementer, part) {
+        (Some(0x61), Some(_)) => true,
+        (Some(0x41), Some(0xd40 | 0xd49 | 0xd4f | 0xd84)) => true,
+        (Some(0x6d), Some(0xd49)) => true,
+        _ => false,
+    }
 }
 
 // DIT changes what runs only on Apple's cores, where from the M3 it turns off
@@ -348,6 +442,51 @@ mod tests {
         if let Some(expected) = std::env::var_os("RIND_TEST_ARM_SHA3") {
             assert_eq!(HaveSha3::check().is_some(), expected == "1");
         }
+        if let Some(expected) = std::env::var_os("RIND_TEST_ARM_WIDE_MUL") {
+            assert_eq!(wide_multiplier(), expected == "1");
+        }
+    }
+
+    #[test]
+    fn cpuinfo_names_the_wide_cores() {
+        let pi5 = "\
+processor	: 0
+CPU implementer	: 0x41
+CPU part	: 0xd0b
+processor	: 1
+CPU implementer	: 0x41
+CPU part	: 0xd0b
+";
+        assert!(!wide_from_cpuinfo(pi5));
+        assert!(!wide_from_cpuinfo(
+            "CPU implementer	: 0x41\nCPU part	: 0xd08\n"
+        ));
+        assert!(!wide_from_cpuinfo(
+            "CPU implementer	: 0x41\nCPU part	: 0xd0c\n"
+        ));
+        for part in ["0xd40", "0xd49", "0xd4f", "0xd84"] {
+            let text = format!("CPU implementer	: 0x41\nCPU part	: {part}\n");
+            assert!(wide_from_cpuinfo(&text), "{part}");
+        }
+        assert!(wide_from_cpuinfo(
+            "CPU implementer	: 0x61\nCPU part	: 0x023\n"
+        ));
+        assert!(wide_from_cpuinfo(
+            "CPU implementer	: 0x6d\nCPU part	: 0xd49\n"
+        ));
+        // One narrow core in the list keeps the narrow schedules.
+        assert!(!wide_from_cpuinfo(
+            "\
+processor	: 0
+CPU implementer	: 0x41
+CPU part	: 0xd40
+processor	: 1
+CPU implementer	: 0x41
+CPU part	: 0xd0b
+"
+        ));
+        assert!(!wide_from_cpuinfo(""));
+        assert!(!wide_from_cpuinfo("processor	: 0\n"));
     }
 
     // A core that runs `mrs DIT` has DIT, whatever the OS reports, so a child

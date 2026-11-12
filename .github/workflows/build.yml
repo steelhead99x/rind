@@ -161,6 +161,9 @@ jobs:
           # without the crypto extension, such as the Raspberry Pi 4's; the
           # last variable fails the run that lands on the wrong path
           tier RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha2=1 RIND_TEST_ARM_CRYPTO_EXT=0
+          # test s2n-bignum's non-alt curve schedules and the Karatsuba RSA
+          # product, which Cortex-A76, Cortex-A72, and Neoverse N1 run
+          tier RIND_CPU_DISABLE_wide_mul=1 RIND_TEST_ARM_WIDE_MUL=0 RIND_TEST_ARM_CRYPTO_EXT=1
 
   # musl runs the glibc build's code, so these test the packages consumers
   # link, without the CPU feature passes. The bench and fuzz crates need C++

@@ -358,8 +358,8 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::bignum_inv_p256::bignum_inv_p256;
         pub(crate) use aarch64::bignum_inv_p384::bignum_inv_p384;
         pub(crate) use aarch64::bignum_inv_p521::bignum_inv_p521;
-        pub(crate) use aarch64::bignum_invsqrt_p25519::bignum_invsqrt_p25519;
-        pub(crate) use aarch64::bignum_madd_n25519::bignum_madd_n25519;
+        pub(crate) use aarch64::wide_mux::bignum_invsqrt_p25519;
+        pub(crate) use aarch64::wide_mux::bignum_madd_n25519;
         pub(crate) use aarch64::bignum_mod_n25519::bignum_mod_n25519;
         pub(crate) use aarch64::bignum_mod_n256::bignum_mod_n256;
         pub(crate) use aarch64::bignum_mod_n384::bignum_mod_n384;
@@ -375,7 +375,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::bignum_montsqr_p256::bignum_montsqr_p256;
         pub(crate) use aarch64::bignum_montsqr_p384::bignum_montsqr_p384;
         pub(crate) use aarch64::bignum_mul::bignum_mul;
-        pub(crate) use aarch64::bignum_mul_p25519::bignum_mul_p25519;
+        pub(crate) use aarch64::wide_mux::bignum_mul_p25519;
         pub(crate) use aarch64::bignum_mul_p521::bignum_mul_p521;
         pub(crate) use aarch64::bignum_mux::bignum_mux;
         pub(crate) use aarch64::bignum_neg_p25519::bignum_neg_p25519;
@@ -384,19 +384,19 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::bignum_neg_p521::bignum_neg_p521;
         pub(crate) use aarch64::bignum_negmodinv::bignum_negmodinv;
         pub(crate) use aarch64::bignum_optsub::bignum_optsub;
-        pub(crate) use aarch64::bignum_sqr_p25519::bignum_sqr_p25519;
+        pub(crate) use aarch64::wide_mux::bignum_sqr_p25519;
         pub(crate) use aarch64::bignum_sqr_p521::bignum_sqr_p521;
         pub(crate) use aarch64::bignum_sub_p25519::bignum_sub_p25519;
         pub(crate) use aarch64::bignum_tomont_p256::bignum_tomont_p256;
         pub(crate) use aarch64::bignum_tomont_p384::bignum_tomont_p384;
-        pub(crate) use aarch64::curve25519_x25519::curve25519_x25519;
-        pub(crate) use aarch64::curve25519_x25519base::curve25519_x25519base;
-        pub(crate) use aarch64::edwards25519_decode::edwards25519_decode;
-        pub(crate) use aarch64::edwards25519_epadd::edwards25519_epadd;
-        pub(crate) use aarch64::edwards25519_epdouble::edwards25519_epdouble;
-        pub(crate) use aarch64::edwards25519_pdouble::edwards25519_pdouble;
-        pub(crate) use aarch64::edwards25519_scalarmulbase::edwards25519_scalarmulbase;
-        pub(crate) use aarch64::edwards25519_scalarmuldouble::edwards25519_scalarmuldouble;
+        pub(crate) use aarch64::wide_mux::curve25519_x25519;
+        pub(crate) use aarch64::wide_mux::curve25519_x25519base;
+        pub(crate) use aarch64::wide_mux::edwards25519_decode;
+        pub(crate) use aarch64::wide_mux::edwards25519_epadd;
+        pub(crate) use aarch64::wide_mux::edwards25519_epdouble;
+        pub(crate) use aarch64::wide_mux::edwards25519_pdouble;
+        pub(crate) use aarch64::wide_mux::edwards25519_scalarmulbase;
+        pub(crate) use aarch64::wide_mux::edwards25519_scalarmuldouble;
         pub(crate) use aarch64::mldsa::{
             mldsa_ntt, mldsa_intt, mldsa_nttunpack, mldsa_pointwise, mldsa_pointwise_acc,
             mldsa_reduce, mldsa_caddq, mldsa_chknorm, mldsa_decompose_32, mldsa_decompose_88,
@@ -418,17 +418,17 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::ghash;
         pub(crate) use aarch64::p256_montjadd::p256_montjadd;
         pub(crate) use aarch64::p256_montjdouble::p256_montjdouble;
-        pub(crate) use aarch64::p256_montjmixadd::p256_montjmixadd;
-        pub(crate) use aarch64::p256_scalarmul::p256_scalarmul;
-        pub(crate) use aarch64::p256_scalarmulbase::p256_scalarmulbase;
+        pub(crate) use aarch64::wide_mux::p256_montjmixadd;
+        pub(crate) use aarch64::wide_mux::p256_scalarmul;
+        pub(crate) use aarch64::wide_mux::p256_scalarmulbase;
         pub(crate) use aarch64::p384_montjadd::p384_montjadd;
-        pub(crate) use aarch64::p384_montjmixadd::p384_montjmixadd;
+        pub(crate) use aarch64::wide_mux::p384_montjmixadd;
         pub(crate) use aarch64::p384_montjdouble::p384_montjdouble;
-        pub(crate) use aarch64::p384_montjscalarmul::p384_montjscalarmul;
-        pub(crate) use aarch64::p521_jadd::p521_jadd;
-        pub(crate) use aarch64::p521_jdouble::p521_jdouble;
-        pub(crate) use aarch64::p521_jmixadd::p521_jmixadd;
-        pub(crate) use aarch64::p521_jscalarmul::p521_jscalarmul;
+        pub(crate) use aarch64::wide_mux::p384_montjscalarmul;
+        pub(crate) use aarch64::wide_mux::p521_jadd;
+        pub(crate) use aarch64::wide_mux::p521_jdouble;
+        pub(crate) use aarch64::wide_mux::p521_jmixadd;
+        pub(crate) use aarch64::wide_mux::p521_jscalarmul;
         pub(crate) use aarch64::sha1::{sha1_compress_blocks, sha1_compress_padded};
         pub(crate) use aarch64::sha256::{sha256_compress_blocks, sha256_finish};
         pub(crate) use aarch64::sha3_keccak_f1600_mux::sha3_keccak_f1600;

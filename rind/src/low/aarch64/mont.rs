@@ -1,20 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! Montgomery multiplication modulo an RSA modulus or prime: from two words,
-//! aws-lc's `bn_mul_mont`, which picks its own squaring or 4x routine by the
-//! width as aws-lc does. On a Neoverse-N2 it measured faster than
-//! s2n-bignum's generic `bignum_montmul` and `bignum_montsqr` in every width
-//! class it branches on: 1.15x at 17 and 33 words, 1.6x at 20, and twice as
-//! fast at 24, 48, 64, 96, and 128. It replaces s2n-bignum's Karatsuba
-//! routines at 16 and 32 words too, where it signs RSA-2048 1.75x and
-//! RSA-4096 1.6x as fast, and verifies RSA-1024 and RSA-2048 1.5x as fast.
-//! The generic routines run only below two words.
+//! Montgomery multiplication modulo an RSA modulus or prime.
+//!
+//! From two words, aws-lc's `bn_mul_mont`, which picks its own squaring or
+//! 4x routine by the width as aws-lc does. On a Neoverse-N2, a wide
+//! multiplier, it measured faster than s2n-bignum's generic routines in
+//! every width class it branches on: 1.15x at 17 and 33 words, 1.6x at 20,
+//! and twice as fast at 24, 48, 64, 96, and 128. It was also faster there
+//! than s2n-bignum's Karatsuba routines at 16 and 32 words.
+//!
+//! On a narrow multiplier the comparison reverses, which is the choice
+//! aws-lc makes: at 16 and 32 words, RSA-2048's prime and modulus, this
+//! runs s2n-bignum's Karatsuba product and its 8n reduction. The generic
+//! routines run only below two words.
 
 /// `z = x * y / 2^(64k) mod m`, for `x` and `y` below `m`, where `k` is the
 /// length of each and `n0` is `-m^-1 mod 2^64`.
 pub(crate) fn mont_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) {
     assert!(z.len() == m.len() && x.len() == m.len() && y.len() == m.len());
     match m.len() {
+        16 | 32 if !super::cpu::wide_multiplier() => karatsuba_mul(z, x, y, m, n0),
         k if k >= 2 => mul_mont(z, x, y, m, n0),
         _ => super::bignum_montmul::bignum_montmul(z, x, y, m),
     }
@@ -25,9 +30,44 @@ pub(crate) fn mont_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) 
 pub(crate) fn mont_sqr(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
     assert!(z.len() == m.len() && x.len() == m.len());
     match m.len() {
+        16 | 32 if !super::cpu::wide_multiplier() => karatsuba_sqr(z, x, m, n0),
         k if k >= 2 => mul_mont(z, x, x, m, n0),
         _ => super::bignum_montsqr::bignum_montsqr(z, x, m),
     }
+}
+
+/// `mont_mul` for 16 or 32 words on a narrow multiplier.
+fn karatsuba_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) {
+    if m.len() == 16 {
+        let mut product = [0; 32];
+        super::bignum_kmul_16_32::bignum_kmul_16_32(&mut product, x, y, &mut [0; 32]);
+        redc_8n(z, &mut product, m, n0);
+    } else {
+        let mut product = [0; 64];
+        super::bignum_kmul_32_64::bignum_kmul_32_64(&mut product, x, y, &mut [0; 96]);
+        redc_8n(z, &mut product, m, n0);
+    }
+}
+
+/// `mont_sqr` for 16 or 32 words on a narrow multiplier.
+fn karatsuba_sqr(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
+    if m.len() == 16 {
+        let mut product = [0; 32];
+        super::bignum_ksqr_16_32::bignum_ksqr_16_32(&mut product, x, &mut [0; 24]);
+        redc_8n(z, &mut product, m, n0);
+    } else {
+        let mut product = [0; 64];
+        super::bignum_ksqr_32_64::bignum_ksqr_32_64(&mut product, x, &mut [0; 72]);
+        redc_8n(z, &mut product, m, n0);
+    }
+}
+
+/// Reduces the `2k`-word `product` into the `k`-word `z`, fully, modulo `m`.
+fn redc_8n(z: &mut [u64], product: &mut [u64], m: &[u64], n0: u64) {
+    let carry = super::bignum_emontredc_8n::bignum_emontredc_8n(product, m, n0);
+    let (_, reduced) = product.split_at(m.len());
+    let ge = carry | (1 - super::bignum_cmp_lt::bignum_cmp_lt(reduced, m));
+    super::bignum_optsub::bignum_optsub(z, reduced, m, ge);
 }
 
 /// `mont_mul` for any width from two words. It squares by its own routine
@@ -74,6 +114,12 @@ mod tests {
         let (mut mul, mut sqr) = (vec![0; m.len()], vec![0; m.len()]);
         mul_mont(&mut mul, x, y, m, n0[0]);
         mul_mont(&mut sqr, x, x, m, n0[0]);
+        if matches!(m.len(), 16 | 32) {
+            let (mut kmul, mut ksqr) = (vec![0; m.len()], vec![0; m.len()]);
+            karatsuba_mul(&mut kmul, x, y, m, n0[0]);
+            karatsuba_sqr(&mut ksqr, x, m, n0[0]);
+            assert_eq!((mul.clone(), sqr.clone()), (kmul, ksqr));
+        }
         [mul, sqr]
     }
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Other
+
+- *(aarch64)* run s2n-bignum's narrow-multiplier schedules for the elliptic curves and for RSA-2048 on Cortex-A76-class cores
+
 ## [0.3.2](https://github.com/moq-dev/rind/compare/rind-v0.3.1...rind-v0.3.2) - 2026-11-08
 
 ### Other
