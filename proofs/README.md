@@ -38,6 +38,15 @@ hol-light` checks them alone, in nixpkgs' HOL Light.
   with its relocations and the read-only data they reach, here the round
   constants, which `admin/prove` extracts as an object file; the proof checks
   the constants against FIPS 180-4's.
+- `x86_64/bn_mul_mont_nohw.ml`: `BN_MUL_MONT_NOHW_SUBROUTINE_CORRECT`, rind's
+  proof that the naked function `low::x86_64::mont::bn_mul_mont_nohw`,
+  aws-lc's word-serial Montgomery multiplication, writes the Montgomery
+  product `x * y / 2^(64k) mod m` of its `k`-word operands, from two words up,
+  as s2n-bignum's `bignum_montmul` states it, given `-m^-1 mod 2^64` and
+  `x * y <= 2^(64k) * m`. The theorem covers the whole function: its stack
+  frame of up to `8k + 1088` bytes below the stack pointer, aligned and probed
+  a page at a time, and the callee-saved registers it restores. The function
+  has no relocations, so its object is its section alone.
 - `<arch>/ct_compare_16.ml` and `<arch>/ct_compare_bytes.ml`, on x86_64 and
   aarch64: `CT_COMPARE_16_CORRECT` and `CT_COMPARE_BYTES_CORRECT`, that the
   blocks in `low::<arch>::cpu::ct_compare_16` and `ct_compare_bytes` return
