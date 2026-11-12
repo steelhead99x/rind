@@ -465,11 +465,12 @@ impl<S> ProverAwaiting<S> {
         let confirm_p: Confirm<S> = mac(keys.prover_key(), verifier.as_ref());
         let key = SharedKey::new(keys.shared());
         // `identity` is 1 exactly when Y = w0*N. The confirmation check
-        // declassifies that bit together with the tag comparison.
-        let ok = ct_equal(expect.as_ref(), confirm.as_ref()) & (identity == 0);
+        // declassifies that bit together with the tag comparison, combined
+        // as masks so nothing compares the secret-derived bit before then.
+        let ok = u64::from(ct_equal(expect.as_ref(), confirm.as_ref())) & (identity ^ 1);
         match ct::into_public(ok) {
-            true => Ok((confirm_p, key)),
-            false => Err(Error::BadSignature),
+            1 => Ok((confirm_p, key)),
+            _ => Err(Error::BadSignature),
         }
     }
 }
