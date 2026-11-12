@@ -125,6 +125,7 @@ Each crate's README shows its setup.
 | [rind-aws-lc-rs][] | aws-lc-rs 1.x's API, name for name, for every item rind backs |
 | [rind-dimpl][] | DTLS 1.2 and 1.3 through [dimpl](https://github.com/algesten/dimpl) |
 | [rind-str0m][] | WebRTC through [str0m](https://github.com/algesten/str0m) |
+| [rind-openmls][] | MLS through [OpenMLS](https://github.com/openmls/openmls) |
 | [rind-jsonwebtoken][] | JWTs through [jsonwebtoken](https://github.com/Keats/jsonwebtoken) |
 | [rind-object-store][] | S3, Azure, and GCS request signing through [object_store](https://github.com/apache/arrow-rs-object-store) |
 | [rind-rcgen][] | certificates through [rcgen](https://github.com/rustls/rcgen) |
@@ -253,6 +254,7 @@ from other projects keeps its source's license, which [LICENSE] lists.
 [rind-aws-lc-rs]: https://github.com/moq-dev/rind/tree/main/rind-aws-lc-rs
 [rind-dimpl]: https://github.com/moq-dev/rind/tree/main/rind-dimpl
 [rind-str0m]: https://github.com/moq-dev/rind/tree/main/rind-str0m
+[rind-openmls]: https://github.com/moq-dev/rind/tree/main/rind-openmls
 [rind-jsonwebtoken]: https://github.com/moq-dev/rind/tree/main/rind-jsonwebtoken
 [rind-object-store]: https://github.com/moq-dev/rind/tree/main/rind-object-store
 [rind-rcgen]: https://github.com/moq-dev/rind/tree/main/rind-rcgen

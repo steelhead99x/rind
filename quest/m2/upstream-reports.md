@@ -14,7 +14,3 @@ Planned with the maintainer on 2026-11-10: ✅ report once rind is more mature, 
 ## Waiting
 
 - Maintainer: say rind is mature enough to start reporting upstream. An agent can't judge this; it is the maintainer's view of rind's standing. Clear it by removing this item.
-
-## Required
-
-- [UPSTREAM.md lists every workaround](/quest/m2/upstream-workarounds.md) - the list to report from

@@ -12,6 +12,13 @@
 //!
 //! Cargo.toml's portable dependencies repeat this choice, since a manifest
 //! cannot read a build script's cfgs.
+//!
+//! It also picks `rind_limb`, the width in bits of the limbs the portable
+//! backend's public-key arithmetic runs on: 64 where a 64-bit product is
+//! one or two instructions, on 64-bit targets and on wasm32 with the
+//! `wide-arithmetic` feature, and 32 elsewhere, where it would be a library
+//! call. `--cfg rind_limb="32"` forces 32-bit limbs on a 64-bit target, so
+//! CI checks both widths on x86_64; like `rind_portable`, it is for testing.
 
 use std::env;
 
@@ -20,6 +27,8 @@ fn main() {
     println!(
         r#"cargo::rustc-check-cfg=cfg(rind_backend, values("x86_64", "aarch64", "arm", "portable"))"#
     );
+
+    println!(r#"cargo::rustc-check-cfg=cfg(rind_limb, values("32", "64"))"#);
 
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
@@ -30,6 +39,15 @@ fn main() {
         _ => "portable",
     };
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
+
+    let wide = env::var("CARGO_CFG_TARGET_POINTER_WIDTH").is_ok_and(|w| w == "64")
+        || (arch == "wasm32"
+            && env::var("CARGO_CFG_TARGET_FEATURE")
+                .is_ok_and(|f| f.split(',').any(|f| f == "wide-arithmetic")));
+    if env::var_os("CARGO_CFG_RIND_LIMB").is_none() {
+        let limb = if wide { 64 } else { 32 };
+        println!(r#"cargo::rustc-cfg=rind_limb="{limb}""#);
+    }
 }
 
 /// Whether the 32-bit ARM target's triple names ARMv7 or later, as in
@@ -37,6 +55,7 @@ fn main() {
 /// Stable Rust hides the `v7` target feature from build scripts, so the
 /// triple is all there is. A triple naming no version, such as
 /// `arm-unknown-linux-gnueabi`, is for an earlier core.
+/// See UPSTREAM.md, "Build scripts cannot see ARM's `v7` target feature".
 fn armv7_or_later() -> bool {
     let target = env::var("TARGET").expect("cargo sets the target");
     let arch = target.split('-').next().unwrap_or_default();
