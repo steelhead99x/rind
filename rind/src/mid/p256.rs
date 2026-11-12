@@ -11,6 +11,7 @@ use crate::mid::rng::{RandomSource, SystemRandom};
 
 #[path = "p256_group.rs"]
 pub(crate) mod group;
+pub(crate) mod hash_to_curve;
 mod precomp;
 
 /// A P-256 public key.
@@ -658,8 +659,6 @@ impl JacobianMontPoint {
         Self { xyz }
     }
 
-    // aarch64's `p256_scalarmul` makes its result affine itself.
-    #[cfg(any(test, not(rind_backend = "aarch64")))]
     fn as_affine(&self) -> AffineMontPoint {
         // inversion calculated outside montgomery domain
         // (benchmarked vs addition chain in montgomery)
