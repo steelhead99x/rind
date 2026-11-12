@@ -119,8 +119,10 @@ with portable Rust in place of the assembly armv7 runs regardless.
   Ed25519, the P-256, P-384, and P-521 scalar multiplications, and RSA's
   16-word and 32-word products. Linux selects the narrow schedules only when
   every online core is Cortex-A72, Cortex-A76, or Neoverse N1. Apple, Neoverse
-  V1, V2, V3, and N2, Cobalt 100, a mixed list, a core rind does not recognise,
-  and every OS but Linux keep the `_alt` schedules. Each imported routine has
+  V1, V2, V3, and N2, Cobalt 100, a mixed list, and a core rind does not
+  recognise keep the `_alt` schedules. A sandbox that cannot read
+  `/proc/cpuinfo`, Android, and Windows on ARM do too: they never see a part
+  list, so they do not switch to the narrow schedules. Each imported routine has
   a HOL Light proof that embeds the object's bytes, which `admin/prove-bytes`
   checks. The narrow path has those routine proofs and not yet rind's Lean
   composition: the Lean proofs of X25519, Ed25519, and P-256 name the `_alt`

@@ -242,9 +242,11 @@ fn wide_toggle(detected: bool) -> bool {
 ///
 /// Detection reads `/proc/cpuinfo` on Linux only, and only the parts online
 /// at that moment: a core hotplugged later is not seen. Apple's platforms
-/// name the vendor in the target, so they need no file. Android, Windows,
-/// FreeBSD, a sandbox with no `/proc`, and an unreadable file stay on
-/// `_alt`. Both schedules are correct on every core.
+/// name the vendor in the target, so they need no file. A sandbox that
+/// cannot read the file, Android (`target_os` is not `linux`, including a
+/// build that cannot open the file), and Windows on ARM never see a part
+/// list, so they stay on `_alt` rather than guessing a narrow core. FreeBSD
+/// does too. Both schedules are correct on every core.
 fn detect_wide_multiplier() -> bool {
     if cfg!(target_vendor = "apple") {
         return true;

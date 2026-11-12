@@ -35,10 +35,12 @@ pub fn check() -> Result<(), MissingFeature> {
 /// On aarch64 the narrow schedules run only when Linux's `/proc/cpuinfo`
 /// names every online core as Cortex-A72, Cortex-A76, or Neoverse N1.
 /// Apple's cores, Neoverse V1, V2, V3, and N2, Cobalt 100, a mixed
-/// big.LITTLE list, a core this crate does not recognise, an unreadable
-/// cpuinfo, and every operating system but Linux keep the `_alt`
-/// schedules. On every other architecture this is false: those builds have
-/// no such choice.
+/// big.LITTLE list, and a core this crate does not recognise keep the
+/// `_alt` schedules. So does a sandbox whose `/proc/cpuinfo` cannot be
+/// read, Android (the target is not Linux, and a failed read on a Linux
+/// Android build), and Windows on ARM, which never reads a part list.
+/// On every other architecture this is false: those builds have no such
+/// choice.
 #[must_use]
 pub fn wide_multiplier() -> bool {
     #[cfg(rind_backend = "aarch64")]
