@@ -89,41 +89,47 @@ impl<const N: usize> PosInt<N> {
         Ok(r)
     }
 
+    // Indexes rather than taking `rchunks_exact` and returning early from
+    // its loop, which Aeneas cannot translate, so `proofs/` can prove RSA's
+    // encoding.
+    #[allow(clippy::needless_range_loop)]
     pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        let mut r = Self::zero();
-
         let bytes = trim_leading_zeroes(bytes);
-
         if bytes.len() > N * 8 {
             return Err(Error::WrongLength);
         }
 
-        let mut words = bytes.rchunks_exact(8);
-
-        for word_bytes in words.by_ref() {
-            r.push_word(u64::from_be_bytes(word_bytes.try_into().unwrap()))?;
+        let mut r = Self::zero();
+        let full = bytes.len() / 8;
+        for i in 0..full {
+            let end = bytes.len() - i * 8;
+            r.words[i] = u64::from_be_bytes(bytes[end - 8..end].try_into().unwrap());
         }
+        r.used = full;
 
-        let remainder = words.remainder();
-        let mut final_word = 0;
-        for byte in remainder.iter() {
-            final_word = (final_word << 8) | (*byte as u64);
+        // The rest is the top word, whose leading byte is nonzero.
+        let mut top = 0;
+        for i in 0..bytes.len() % 8 {
+            top = (top << 8) | (bytes[i] as u64);
         }
-
-        if final_word != 0 {
-            r.push_word(final_word)?;
+        if top != 0 {
+            r.push_word(top)?;
         }
 
         Ok(r)
     }
 
+    // Indexes rather than zipping reversed `as_chunks_mut`, which Aeneas
+    // cannot translate, so `proofs/` can prove RSA's encoding.
     pub(crate) fn to_bytes<'a>(&self, out: &'a mut [u8]) -> Result<&'a [u8], Error> {
         let required_bytes = self.used * 8;
-        let out = out.get_mut(..required_bytes).ok_or(Error::WrongLength)?;
+        let Some(out) = out.get_mut(..required_bytes) else {
+            return Err(Error::WrongLength);
+        };
 
-        let (chunks, _) = out.as_chunks_mut::<8>();
-        for (chunk, word) in chunks.iter_mut().rev().zip(self.as_words().iter()) {
-            chunk.copy_from_slice(&word.to_be_bytes());
+        for i in 0..self.used {
+            let end = required_bytes - i * 8;
+            out[end - 8..end].copy_from_slice(&self.words[i].to_be_bytes());
         }
 
         Ok(out)
@@ -259,32 +265,36 @@ impl<const N: usize> PosInt<N> {
     /// `self`, each of width + 1 steps of long division multiplies by 2^64,
     /// ending at M^2 mod `self`.
     #[must_use]
+    // Indexes, and shifts word pairs as `u128`s, rather than calling
+    // closures, which Aeneas cannot translate, so `proofs/` can prove RSA's
+    // key loading.
     pub(crate) fn pub_montifier(&self) -> Self {
         let k = self.used;
-        let Some(&top) = self.as_words().last().filter(|top| **top != 0) else {
+        if k == 0 || self.words[k - 1] == 0 {
             return Self::zero();
-        };
+        }
 
         // Shift both so the divisor's top bit is set, as `mul_word_mod` needs.
-        let shift = top.leading_zeros();
+        let shift = self.words[k - 1].leading_zeros();
         let mut d = Self::zero();
         d.used = k;
         for i in 0..k {
-            let below = i.checked_sub(1).map_or(0, |i| self.words[i]);
-            d.words[i] = self.words[i] << shift | below.checked_shr(64 - shift).unwrap_or(0);
+            let below = if i > 0 { self.words[i - 1] } else { 0 };
+            let pair = (u128::from(self.words[i]) << 64) | u128::from(below);
+            d.words[i] = ((pair << shift) >> 64) as u64;
         }
         let mut r = Self::zero();
         r.used = k;
         r.words[k - 1] = 1 << shift;
 
-        for _ in 0..=k {
+        for _ in 0..k + 1 {
             mul_word_mod(r.as_mut_words(), d.as_words());
         }
 
         for i in 0..k {
-            let above = r.words.get(i + 1).copied().filter(|_| i + 1 < k);
-            r.words[i] = r.words[i] >> shift
-                | above.map_or(0, |above| above.checked_shl(64 - shift).unwrap_or(0));
+            let above = if i + 1 < k { r.words[i + 1] } else { 0 };
+            let pair = (u128::from(above) << 64) | u128::from(r.words[i]);
+            r.words[i] = (pair >> shift) as u64;
         }
         r
     }
@@ -753,16 +763,20 @@ fn window_bits(e: &[u64], lsb: usize, width: usize) -> u64 {
     bits & ((1 << width) - 1)
 }
 
-fn trim_leading_zeroes(mut bytes: &[u8]) -> &[u8] {
-    while let Some((first, rest)) = bytes.split_first() {
-        if *first == 0x00 {
-            bytes = rest;
-        } else {
-            return bytes;
-        }
+fn trim_leading_zeroes(bytes: &[u8]) -> &[u8] {
+    let mut start = 0;
+    while start < bytes.len() && bytes[start] == 0x00 {
+        start += 1;
     }
+    &bytes[start..]
+}
 
-    bytes
+/// The word `i` from the top of `x`, or zero if it is not that wide.
+fn word_below(x: &[u64], i: usize) -> u64 {
+    match x.len().checked_sub(i) {
+        Some(j) => x[j],
+        None => 0,
+    }
 }
 
 /// Replaces `u` with `u * 2^64 mod d`, in variable time.
@@ -773,26 +787,31 @@ fn trim_leading_zeroes(mut bytes: &[u8]) -> &[u8] {
 // function rather than its callers.
 #[inline(never)]
 fn mul_word_mod(u: &mut [u64], d: &[u64]) {
+    // Indexes rather than zipping or calling closures, which Aeneas cannot
+    // translate, so `proofs/` can prove RSA's key loading.
     let k = d.len();
-    let (Some(&d1), Some(&u2)) = (d.last(), u.last()) else {
+    if k == 0 {
         return;
-    };
-    let d0 = k.checked_sub(2).map_or(0, |i| d[i]);
-    let u1 = k.checked_sub(2).map_or(0, |i| u[i]);
-    let u0 = k.checked_sub(3).map_or(0, |i| u[i]);
-    u.copy_within(..k - 1, 1);
+    }
+    let (d1, d0) = (d[k - 1], word_below(d, 2));
+    let (u2, u1, u0) = (word_below(u, 1), word_below(u, 2), word_below(u, 3));
+    for j in 1..k {
+        let i = k - j;
+        u[i] = u[i - 1];
+    }
     u[0] = 0;
 
     // Estimate the quotient word from the top words, then refine it with
     // the next, after which it is at most one too large. `u` is below `d`,
     // so u2 <= d1.
-    let num = u128::from(u2) << 64 | u128::from(u1);
-    let mut q = match u2 < d1 {
-        true => num / u128::from(d1),
-        false => u128::from(u64::MAX),
+    let num = (u128::from(u2) << 64) | u128::from(u1);
+    let mut q = if u2 < d1 {
+        num / u128::from(d1)
+    } else {
+        u128::from(u64::MAX)
     };
     let mut rem = num - q * u128::from(d1);
-    while rem >> 64 == 0 && q * u128::from(d0) > (rem << 64 | u128::from(u0)) {
+    while rem >> 64 == 0 && q * u128::from(d0) > ((rem << 64) | u128::from(u0)) {
         q -= 1;
         rem += u128::from(d1);
     }
@@ -800,20 +819,20 @@ fn mul_word_mod(u: &mut [u64], d: &[u64]) {
     // (u2, u) -= q * d, then add d back if that went negative.
     let mut carry = 0u64;
     let mut borrow = false;
-    for (u, d) in u.iter_mut().zip(d) {
-        let product = q * u128::from(*d) + u128::from(carry);
+    for i in 0..k {
+        let product = q * u128::from(d[i]) + u128::from(carry);
         carry = (product >> 64) as u64;
-        let (diff, b1) = u.overflowing_sub(product as u64);
+        let (diff, b1) = u[i].overflowing_sub(product as u64);
         let (diff, b2) = diff.overflowing_sub(u64::from(borrow));
-        *u = diff;
+        u[i] = diff;
         borrow = b1 | b2;
     }
     if u2 < carry || (u2 == carry && borrow) {
         let mut carry = false;
-        for (u, d) in u.iter_mut().zip(d) {
-            let (sum, c1) = u.overflowing_add(*d);
+        for i in 0..k {
+            let (sum, c1) = u[i].overflowing_add(d[i]);
             let (sum, c2) = sum.overflowing_add(u64::from(carry));
-            *u = sum;
+            u[i] = sum;
             carry = c1 | c2;
         }
     }
