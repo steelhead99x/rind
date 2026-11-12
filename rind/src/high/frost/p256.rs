@@ -6,14 +6,13 @@
 //! RFC 9380's `hash_to_field`. The group is rind's P-256, s2n-bignum on
 //! x86_64 and aarch64 and fiat-crypto on armv7 and the portable backend.
 
+use super::protocol::Group;
 use crate::error::Error;
 use crate::low::ct;
 use crate::mid::p256::hash_to_curve::hash_to_scalar;
 use crate::mid::p256::{PublicKey, Scalar};
 use crate::mid::rng::RandomSource;
 use crate::mid::sha2::Sha256Context;
-
-use super::protocol::Group;
 
 pub(super) struct P256;
 

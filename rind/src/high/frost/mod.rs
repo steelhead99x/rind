@@ -19,11 +19,11 @@ mod vectors;
 use core::cmp::Ordering;
 use core::fmt;
 
+use protocol::{Group, Party};
+
 use crate::error::{Error, KeyFormatError};
 use crate::low::{Entry, Zeroable, zeroise_value};
 use crate::mid::rng::SystemRandom;
-
-use protocol::{Group, Party};
 
 macro_rules! suites {
     ($kind:expr, |$G:ident| $body:expr) => {{
@@ -124,7 +124,7 @@ impl Suite {
             .iter()
             .map(|share| (share.identifier, share.share))
             .collect();
-        signature_shares.sort_by(|left, right| cmp_identifier(self.kind, &left.0, &right.0));
+        sort_by_identifier(self.kind, &mut signature_shares, |share| &share.0);
         let verifying: Vec<([u8; 32], [u8; 33])> = verifying_shares
             .iter()
             .map(|share| (share.identifier, share.element))
@@ -480,11 +480,7 @@ impl SigningPackage {
         if commitments.iter().any(|commitment| commitment.kind != kind) {
             return Err(Error::Unsupported);
         }
-        suites!(kind, |G| {
-            commitments.sort_by(|left, right| {
-                protocol::cmp_identifiers::<G>(&left.identifier, &right.identifier)
-            });
-        });
+        sort_by_identifier(kind, &mut commitments, |commitment| &commitment.identifier);
         for pair in commitments.windows(2) {
             if pair[0].identifier == pair[1].identifier {
                 return Err(Error::Unsupported);
@@ -651,6 +647,21 @@ fn cmp_identifier(kind: Kind, left: &[u8; 32], right: &[u8; 32]) -> Ordering {
         left.cmp(right)
     } else {
         left.iter().rev().cmp(right.iter().rev())
+    }
+}
+
+/// Insertion sort by public identifier. The standard library's sort
+/// divides in its merge path, which `admin/ct-vartime` rejects.
+fn sort_by_identifier<T>(kind: Kind, items: &mut [T], identifier: impl Fn(&T) -> &[u8; 32]) {
+    for i in 1..items.len() {
+        let mut j = i;
+        while j > 0
+            && cmp_identifier(kind, identifier(&items[j - 1]), identifier(&items[j]))
+                == Ordering::Greater
+        {
+            items.swap(j - 1, j);
+            j -= 1;
+        }
     }
 }
 

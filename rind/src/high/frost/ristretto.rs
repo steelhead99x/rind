@@ -4,13 +4,12 @@
 //!
 //! Scalars are edwards25519's. Elements are the crate-internal ristretto255.
 
+use super::protocol::Group;
 use crate::error::{Error, KeyFormatError};
 use crate::low::ct;
 use crate::mid::ristretto255::{Element, Scalar};
 use crate::mid::rng::RandomSource;
 use crate::mid::sha2::Sha512Context;
-
-use super::protocol::Group;
 
 pub(super) struct Ristretto;
 

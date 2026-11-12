@@ -6,13 +6,12 @@
 //! and the portable backend it is curve25519-dalek's, behind the same module
 //! name.
 
+use super::protocol::Group;
 use crate::error::{Error, KeyFormatError};
 use crate::low::ct;
 use crate::mid::edwards25519::{Point, Scalar};
 use crate::mid::rng::RandomSource;
 use crate::mid::sha2::Sha512Context;
-
-use super::protocol::Group;
 
 pub(super) struct Ed25519;
 
