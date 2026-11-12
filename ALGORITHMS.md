@@ -73,12 +73,16 @@ SHA-512.
   46.7 ms with SSSE3, and 47.1 ms for the scalar permutation, against 43.8 ms
   for RustCrypto's AVX2; at 1 MiB and three passes, 0.37 ms, 0.63 ms, 1.07 ms,
   and 1.16 ms, against 0.88 ms. On an Apple M1 Pro the same 64 MiB pass took
-  19.7 ms with SHA3 and 24.1 ms with NEON alone, against 30.1 ms for
-  RustCrypto's portable code; at 1 MiB and three passes, 0.62 ms and 0.80 ms,
-  against 1.05 ms. The SHA3 build's BlaMka accumulates with `umlal`, the NEON
-  build's doubles a `umull`: on a Raspberry Pi 5 (Cortex-A76, no SHA3) the
-  `umlal` form was 2.5% slower, and the NEON fill took 4.73 ms at 1 MiB and
-  124 ms at 64 MiB against RustCrypto's 4.20 ms and 118 ms. HACL\*'s verified BLAKE2b does not implement
+  20.5 ms with SHA3 and 23.7 ms with NEON alone, against 32.5 ms for
+  RustCrypto's portable code; at 1 MiB and three passes, 0.56 ms and 0.73 ms,
+  against 1.07 ms, timed on a loaded host. On a Raspberry Pi 5 (Cortex-A76,
+  no SHA3, clocked at 1.5 GHz) the NEON fill took 3.11 ms at 1 MiB and
+  90.4 ms at 64 MiB against RustCrypto's 4.20 ms and 118 ms. Each pass runs
+  two rounds at once: with one, the A76 spent about two thirds of its cycles
+  stalled waiting on the round's single dependency chain, and the fill took
+  4.73 ms and 124 ms. The SHA3 build's BlaMka accumulates with `umlal`, the
+  NEON build's doubles a `umull`: on the A76 the `umlal` form took 4% to 5%
+  longer. HACL\*'s verified BLAKE2b does not implement
   BlaMka, and the hash is negligible beside the fill, so no verified
   permutation was available to time. A proof of the permutation is future
   work. The tests check each fill against RFC 9106's vector, the reference

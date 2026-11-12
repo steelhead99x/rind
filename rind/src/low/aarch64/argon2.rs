@@ -8,7 +8,7 @@
 //! Khovratovich, Jean-Philippe Aumasson, and Samuel Neves; CC0-1.0). The lane
 //! shuffles are that code's, so a block it returns matches the scalar one.
 //!
-//! Three changes from that code, none of which moves a lane:
+//! Four changes from that code, none of which moves a lane:
 //!
 //! - BlaMka narrows both halves of a pair with one `uzp1`, where the reference
 //!   narrows each half alone. The SHA3 build then accumulates the product into
@@ -19,6 +19,10 @@
 //!   row rounds XOR and store `next` as they finish, so the 1 KiB state is not
 //!   loaded or stored in passes of its own.
 //! - With SHA3, `xar` does each round's XOR and rotation in one instruction.
+//! - Each pass runs two of its eight rounds at once, step by step. One round
+//!   is a single dependency chain two vectors wide: on a Cortex-A76 the
+//!   one-round fill spent about two thirds of its cycles stalled in the back
+//!   end, and two rounds at once took a third fewer cycles per block.
 //!
 //! aarch64 requires NEON. [`crate::low::cpu::check`] refuses a CPU without it,
 //! naming `neon`, before a public call reaches here. This function does not
@@ -65,8 +69,8 @@ pub(crate) fn compress(
 }
 
 /// `x + y + 2 * (x mod 2^32) * (y mod 2^32)` for two pairs of lanes at once,
-/// with `umull` and adds. The plain NEON fill's form: on a Cortex-A76 it beat
-/// [`blamka2_umlal`] by about 2.5%.
+/// with `umull` and adds. The plain NEON fill's form: on a Cortex-A76 the fill
+/// took 4% to 5% longer with [`blamka2_umlal`].
 #[target_feature(enable = "neon")]
 fn blamka2_umull(
     x0: uint64x2_t,
@@ -153,6 +157,23 @@ fn undiagonalize(v: &mut [uint64x2_t; 8]) {
     v[7] = ext(d1, d0);
 }
 
+/// Two `BLAKE2_ROUND`s, each on `(A0, A1, B0, B1, C0, C1, D0, D1)`, step by
+/// step, with the fill's `g1` and `g2`. A macro, not a function: LLVM would
+/// leave a function called from both passes out of line, and pass the 16
+/// vectors through the stack.
+macro_rules! round {
+    ($v:ident) => {
+        g1(&mut $v);
+        g2(&mut $v);
+        diagonalize(&mut $v[0]);
+        diagonalize(&mut $v[1]);
+        g1(&mut $v);
+        g2(&mut $v);
+        undiagonalize(&mut $v[0]);
+        undiagonalize(&mut $v[1]);
+    };
+}
+
 /// The fill, built once per instruction set. The caller's module supplies
 /// `xor_rotr32`, `xor_rotr24`, `xor_rotr16` and `xor_rotr63`, each
 /// `(x ^ y).rotate_right(n)` on both lanes, and `blamka2`.
@@ -180,74 +201,97 @@ macro_rules! fill {
             // `state` and `xy` lane before the row rounds read it, and they
             // read `next` before the row rounds overwrite it.
             unsafe {
-                for col in 0..8 {
-                    let mut v = [vdupq_n_u64(0); 8];
-                    for (k, lane) in v.iter_mut().enumerate() {
-                        let i = 8 * col + k;
-                        let r = veorq_u64(
-                            vld1q_u64(prev.0.as_ptr().add(2 * i)),
-                            vld1q_u64(reference.0.as_ptr().add(2 * i)),
-                        );
-                        xy[i].write(if with_xor {
-                            veorq_u64(r, vld1q_u64(next.0.as_ptr().add(2 * i)))
-                        } else {
-                            r
-                        });
-                        *lane = r;
+                // Two independent rounds at a time: one round's G steps form a
+                // single dependency chain, which a narrow core waits on.
+                for col in (0..8).step_by(2) {
+                    let mut v = [[vdupq_n_u64(0); 8]; 2];
+                    for (j, half) in v.iter_mut().enumerate() {
+                        for (k, lane) in half.iter_mut().enumerate() {
+                            let i = 8 * (col + j) + k;
+                            let r = veorq_u64(
+                                vld1q_u64(prev.0.as_ptr().add(2 * i)),
+                                vld1q_u64(reference.0.as_ptr().add(2 * i)),
+                            );
+                            xy[i].write(if with_xor {
+                                veorq_u64(r, vld1q_u64(next.0.as_ptr().add(2 * i)))
+                            } else {
+                                r
+                            });
+                            *lane = r;
+                        }
                     }
-                    round(&mut v);
-                    for (k, lane) in v.into_iter().enumerate() {
-                        state[8 * col + k].write(lane);
+                    round!(v);
+                    for (j, half) in v.into_iter().enumerate() {
+                        for (k, lane) in half.into_iter().enumerate() {
+                            state[8 * (col + j) + k].write(lane);
+                        }
                     }
                 }
-                for row in 0..8 {
-                    let mut v = [vdupq_n_u64(0); 8];
-                    for (k, lane) in v.iter_mut().enumerate() {
-                        *lane = state[row + 8 * k].assume_init();
+                for row in (0..8).step_by(2) {
+                    let mut v = [[vdupq_n_u64(0); 8]; 2];
+                    for (j, half) in v.iter_mut().enumerate() {
+                        for (k, lane) in half.iter_mut().enumerate() {
+                            *lane = state[row + j + 8 * k].assume_init();
+                        }
                     }
-                    round(&mut v);
-                    for (k, lane) in v.into_iter().enumerate() {
-                        let i = row + 8 * k;
-                        let out = veorq_u64(lane, xy[i].assume_init());
-                        vst1q_u64(next.0.as_mut_ptr().add(2 * i), out);
+                    round!(v);
+                    for (j, half) in v.into_iter().enumerate() {
+                        for (k, lane) in half.into_iter().enumerate() {
+                            let i = row + j + 8 * k;
+                            let out = veorq_u64(lane, xy[i].assume_init());
+                            vst1q_u64(next.0.as_mut_ptr().add(2 * i), out);
+                        }
                     }
                 }
             }
         }
 
-        /// One `BLAKE2_ROUND` on `(A0, A1, B0, B1, C0, C1, D0, D1)`.
         #[target_feature(enable = $features)]
-        fn round(v: &mut [uint64x2_t; 8]) {
-            g1(v);
-            g2(v);
-            diagonalize(v);
-            g1(v);
-            g2(v);
-            undiagonalize(v);
-        }
-
-        #[target_feature(enable = $features)]
-        fn g1(v: &mut [uint64x2_t; 8]) {
-            let [a0, a1, b0, b1, c0, c1, d0, d1] = *v;
+        fn g1(v: &mut [[uint64x2_t; 8]; 2]) {
+            let [
+                [a0, a1, b0, b1, c0, c1, d0, d1],
+                [e0, e1, f0, f1, g0, g1, h0, h1],
+            ] = *v;
             let (a0, a1) = blamka2(a0, a1, b0, b1);
+            let (e0, e1) = blamka2(e0, e1, f0, f1);
             let d0 = xor_rotr32(d0, a0);
+            let h0 = xor_rotr32(h0, e0);
             let d1 = xor_rotr32(d1, a1);
+            let h1 = xor_rotr32(h1, e1);
             let (c0, c1) = blamka2(c0, c1, d0, d1);
+            let (g0, g1) = blamka2(g0, g1, h0, h1);
             let b0 = xor_rotr24(b0, c0);
+            let f0 = xor_rotr24(f0, g0);
             let b1 = xor_rotr24(b1, c1);
-            *v = [a0, a1, b0, b1, c0, c1, d0, d1];
+            let f1 = xor_rotr24(f1, g1);
+            *v = [
+                [a0, a1, b0, b1, c0, c1, d0, d1],
+                [e0, e1, f0, f1, g0, g1, h0, h1],
+            ];
         }
 
         #[target_feature(enable = $features)]
-        fn g2(v: &mut [uint64x2_t; 8]) {
-            let [a0, a1, b0, b1, c0, c1, d0, d1] = *v;
+        fn g2(v: &mut [[uint64x2_t; 8]; 2]) {
+            let [
+                [a0, a1, b0, b1, c0, c1, d0, d1],
+                [e0, e1, f0, f1, g0, g1, h0, h1],
+            ] = *v;
             let (a0, a1) = blamka2(a0, a1, b0, b1);
+            let (e0, e1) = blamka2(e0, e1, f0, f1);
             let d0 = xor_rotr16(d0, a0);
+            let h0 = xor_rotr16(h0, e0);
             let d1 = xor_rotr16(d1, a1);
+            let h1 = xor_rotr16(h1, e1);
             let (c0, c1) = blamka2(c0, c1, d0, d1);
+            let (g0, g1) = blamka2(g0, g1, h0, h1);
             let b0 = xor_rotr63(b0, c0);
+            let f0 = xor_rotr63(f0, g0);
             let b1 = xor_rotr63(b1, c1);
-            *v = [a0, a1, b0, b1, c0, c1, d0, d1];
+            let f1 = xor_rotr63(f1, g1);
+            *v = [
+                [a0, a1, b0, b1, c0, c1, d0, d1],
+                [e0, e1, f0, f1, g0, g1, h0, h1],
+            ];
         }
     };
 }
