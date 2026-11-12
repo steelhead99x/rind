@@ -1,4 +1,5 @@
 import Rind.X86_64.X25519
+import Rind.X86_64.P384
 import Rind.X86_64.Sha512
 import Rind.X86_64.Pbkdf2
 import Rind.X86_64.ChaCha20
@@ -9,7 +10,7 @@ open rind.x86_64
 
 /-!
 The axioms each theorem rests on, beyond Lean's own: s2n-bignum's contracts
-in `Rind.X86_64.S2nBignum` for X25519 and Ed25519, aws-lc's in
+in `Rind.X86_64.S2nBignum` for X25519, P-384 ECDH, and Ed25519, aws-lc's in
 `Rind.X86_64.AwsLc` for the SHA-512 family, for HMAC, HKDF, and PBKDF2, which
 cover SHA-384 and SHA-512, and for Ed25519's hashes, Vale's in
 `Rind.X86_64.ValeAesGcm` for AES-GCM, rind's HOL Light proofs of its
@@ -50,6 +51,29 @@ change to the trust base.
 /-- info: 'rind.x86_64.x25519_shared_secret' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms x25519_shared_secret
+
+/-- info: 'rind.x86_64.p384_agree' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_add_p384_spec,
+ bignum_demont_p384_alt_spec,
+ bignum_demont_p384_spec,
+ bignum_eq_spec,
+ bignum_inv_p384_spec,
+ bignum_montmul_p384_alt_spec,
+ bignum_montmul_p384_spec,
+ bignum_montsqr_p384_alt_spec,
+ bignum_montsqr_p384_spec,
+ bignum_tomont_p384_alt_spec,
+ bignum_tomont_p384_spec,
+ p384_montjscalarmul_alt_spec,
+ p384_montjscalarmul_spec] -/
+#guard_msgs in
+#print axioms p384_agree
+
+/-- info: 'rind.x86_64.p384_shared_secret' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms p384_shared_secret
 
 /-- info: 'rind.x86_64.sha512_family_digest' depends on axioms: [propext, Classical.choice, Quot.sound, compress_avx_spec] -/
 #guard_msgs in

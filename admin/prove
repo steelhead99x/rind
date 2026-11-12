@@ -581,7 +581,6 @@ extract() {
         --opaque crate::high::sec1::encode_pkcs8 \
         --opaque 'crate::high::agreement::_::encode_pkcs8' \
         --opaque 'crate::high::agreement::_::encode_scalar' \
-        --opaque '{impl crate::high::agreement::Agree for crate::high::curve::P384}::load' \
         --opaque '{impl crate::high::agreement::Agree for crate::high::curve::P521}::load' \
         --opaque crate::aead::quic::Masker \
         --opaque crate::mid::aes \
@@ -605,7 +604,9 @@ extract() {
         --opaque crate::mid::md5 \
         --opaque crate::mid::sha3 \
         --opaque crate::low \
-        --opaque 'crate::mid::p384::_::_' \
+        --opaque 'crate::mid::p384::_::generate' \
+        --opaque 'crate::high::curve::_::oid' \
+        --opaque 'crate::mid::p384::_::new_random' \
         --opaque 'crate::mid::p521::_::_' \
         --include 'crate::mid::p521::_::BYTES' \
         --include crate::low::ct \
@@ -672,6 +673,14 @@ extract_kdf() {
 extract x86_64 X86_64 \
     --opaque '{impl crate::high::agreement::Agree for crate::high::curve::P256}::load' \
     --opaque 'crate::mid::p256::_::_' \
+    --include crate::low::x86_64::adx_mux::bignum_demont_p384 \
+    --include crate::low::x86_64::adx_mux::bignum_montmul_p384 \
+    --include crate::low::x86_64::adx_mux::bignum_montsqr_p384 \
+    --include crate::low::x86_64::adx_mux::bignum_tomont_p384 \
+    --include crate::low::x86_64::adx_mux::p384_montjadd \
+    --include crate::low::x86_64::adx_mux::p384_montjdouble \
+    --include crate::low::x86_64::adx_mux::p384_montjmixadd \
+    --include crate::low::x86_64::adx_mux::p384_montjscalarmul \
     --include crate::low::x86_64::adx_mux::curve25519_x25519 \
     --include crate::low::x86_64::adx_mux::curve25519_x25519base \
     --include crate::low::x86_64::adx_mux::edwards25519_decode \
@@ -745,7 +754,6 @@ extract aarch64 Aarch64 \
     --start-from '{impl crate::high::curve::Scalar for crate::mid::p256::Scalar}' \
     --start-from crate::mid::p256::StaticPrivateKey::from_bytes \
     --opaque 'crate::high::curve::_::generate_random_key' \
-    --opaque 'crate::high::curve::_::oid' \
     --opaque 'crate::mid::p256::_::generate' \
     --opaque 'crate::mid::p256::_::new_random' \
     --include crate::low::aarch64::sha1::sha1_compress_padded \
@@ -759,7 +767,7 @@ extract_kdf x86_64 X86_64 --start-from '{impl core::convert::From for crate::aea
 extract_kdf aarch64 Aarch64
 
 mkdir -p proofs/Rind/Aarch64/Kdf
-for file in Dispatch X25519 DigestAlgorithm DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
+for file in Dispatch X25519 P384 DigestAlgorithm DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
     Blockwise Sha Hmac HmacDispatch HkdfExpand Kdf/TypesExternal Kdf/FunsExternal \
     CtEqual HmacApi DigestApi Hkdf Pbkdf2; do
     sed 's/X86_64/Aarch64/g; s/x86_64/aarch64/g' "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Aarch64/$file.lean"
