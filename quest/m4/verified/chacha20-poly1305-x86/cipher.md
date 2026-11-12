@@ -6,4 +6,8 @@
 
 ## Plan
 
-- Prove rind's AVX2 kernels with Aeneas over modelled intrinsics, and aws-lc's `ChaCha20_ctr32_ssse3_4x` (486 instructions, all decoded under `x86.patch`) in HOL Light against `proofs/hol-light/s2n-bignum/common/chacha20poly1305.ml`'s `chacha20_encrypt`, and compose them with the HACL* rounds' proof.
+- Prove rind's AVX2 kernels with Aeneas over modelled intrinsics, and aws-lc's `ChaCha20_ctr32_ssse3_4x` (486 instructions, all decoded under `x86.patch`) in HOL Light on the [specs](/quest/m4/verified/chacha20-poly1305-x86/specs.md), and compose them with the HACL* rounds' proof.
+
+## Required
+
+- [Specs](/quest/m4/verified/chacha20-poly1305-x86/specs.md) - the HOL Light ChaCha20 spec the SSSE3 routine is proven against

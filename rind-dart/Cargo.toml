@@ -9,9 +9,8 @@ rust-version.workspace = true
 # Only the Dart package beside this manifest is published; its build hook
 # compiles this crate.
 publish = false
-# Neither the Flutter app that runs the Dart tests on mobile nor the
-# rind_cryptography package beside it is part of the package.
-exclude = ["integration", "cryptography"]
+# The Flutter app that runs the Dart tests on mobile is not part of the package.
+exclude = ["integration"]
 
 [lib]
 name = "rind_dart"

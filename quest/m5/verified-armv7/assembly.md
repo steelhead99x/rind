@@ -22,4 +22,5 @@ Route: prove each against the HOL Light or Lean specs the x86_64 and aarch64 que
 
 - [An AArch32 instruction model checks armv7's assembly](/quest/m5/verified-armv7/model.md) - the model the proofs run on
 - [armv7 runs the Rust proofs](/quest/m5/verified-armv7/prove.md) - the armv7 translation these routines' theorems compose with
+- [HOL Light specs of ChaCha20-Poly1305 equal the Lean ones](/quest/m4/verified/chacha20-poly1305-x86/specs.md) - the RFC 8439 ChaCha20 and Poly1305 specs
 - [x86_64 SHA-512 on AVX2 is proven](/quest/m4/verified/sha512-x86-avx2.md) - the pinned FIPS 180-4 SHA-512 spec and its Lean axiom shape

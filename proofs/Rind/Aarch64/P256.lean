@@ -346,7 +346,7 @@ theorem mont_on_curve (X Y : Nat) :
     have := congrArg (fun n : Nat => (n : ZMod p256)) p256RInv_spec.2
     simpa only [Nat.cast_mul, ZMod.natCast_mod, Nat.cast_one] using this
   generalize (2 : Nat) ^ 256 = R at hRr ⊢
-  simp only [p256OnCurve, nist.OnCurve, Nat.mod_lt _ hp, true_and]
+  simp only [p256OnCurve, Nat.mod_lt _ hp, true_and]
   rw [← ZMod.natCast_eq_natCast_iff', ← ZMod.natCast_eq_natCast_iff']
   push_cast [ZMod.natCast_mod]
   constructor
@@ -639,7 +639,7 @@ theorem multiply_spec (pt : mid.p256.AffineMontPoint) (k : mid.p256.Scalar) (P :
       exact Prod.ext fe4_post fe5_post
 
 theorem not_onCurve_zero : ¬ p256OnCurve (some (0, 0)) := by
-  simp [p256OnCurve, nist.OnCurve, p256, b256]
+  simp [p256OnCurve, p256, b256]
 
 @[step]
 theorem diffie_hellman_spec (h : Runs) (k : mid.p256.PrivateKey) (peer : mid.p256.PublicKey) (P : P256Point)
