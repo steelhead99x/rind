@@ -59,7 +59,7 @@ fn out(f: impl FnOnce(*mut u8, usize) -> isize) -> Vec<u8> {
 }
 
 #[test]
-fn aead() {
+fn symmetric() {
     for algorithm in 0..4 {
         let key = [7u8; 32];
         let key = &key[..[16, 24, 32, 32][algorithm as usize]];
@@ -121,7 +121,111 @@ fn aead() {
         ));
         public(&in_out);
         assert_eq!(in_out[..len], [9; 5]);
+
+        let nonce = [4u8; 24];
+        in_out[..5].copy_from_slice(&[9; 5]);
+        secret(&in_out[..5]);
+        ok(rind_dart_randomized_nonce_key_seal_with_nonce(
+            handle,
+            nonce.as_ptr(),
+            24,
+            ptr::null(),
+            0,
+            in_out.as_mut_ptr(),
+            in_out.len(),
+        ));
+        public(&in_out);
+        let len = ok(rind_dart_randomized_nonce_key_open(
+            handle,
+            nonce.as_ptr(),
+            24,
+            ptr::null(),
+            0,
+            in_out.as_mut_ptr(),
+            in_out.len(),
+        ));
+        public(&in_out);
+        assert_eq!(in_out[..len], [9; 5]);
         rind_dart_randomized_nonce_key_free(handle);
+    }
+
+    let key = [8u8; 32];
+    secret(&key);
+    let iv = [2u8; 16];
+    let mut block = [3u8; 16];
+    secret(&block);
+    unsafe {
+        ok(rind_dart_aes_cbc(
+            0,
+            key.as_ptr(),
+            32,
+            iv.as_ptr(),
+            16,
+            block.as_mut_ptr(),
+            block.len(),
+        ));
+        public(&block);
+        ok(rind_dart_aes_cbc(
+            1,
+            key.as_ptr(),
+            32,
+            iv.as_ptr(),
+            16,
+            block.as_mut_ptr(),
+            block.len(),
+        ));
+        public(&block);
+        assert_eq!(block, [3; 16]);
+
+        let counter = [1u8; 16];
+        let mut stream = *b"ctr-message!!";
+        secret(&stream);
+        ok(rind_dart_aes_ctr(
+            key.as_ptr(),
+            32,
+            64,
+            counter.as_ptr(),
+            16,
+            stream.as_mut_ptr(),
+            stream.len(),
+        ));
+        public(&stream);
+        ok(rind_dart_aes_ctr(
+            key.as_ptr(),
+            32,
+            64,
+            counter.as_ptr(),
+            16,
+            stream.as_mut_ptr(),
+            stream.len(),
+        ));
+        public(&stream);
+        assert_eq!(&stream, b"ctr-message!!");
+
+        let nonce = [6u8; 12];
+        let mut stream = *b"chacha";
+        secret(&stream);
+        ok(rind_dart_chacha20(
+            key.as_ptr(),
+            32,
+            nonce.as_ptr(),
+            12,
+            0,
+            stream.as_mut_ptr(),
+            stream.len(),
+        ));
+        public(&stream);
+        ok(rind_dart_chacha20(
+            key.as_ptr(),
+            32,
+            nonce.as_ptr(),
+            12,
+            0,
+            stream.as_mut_ptr(),
+            stream.len(),
+        ));
+        public(&stream);
+        assert_eq!(&stream, b"chacha");
     }
 }
 
@@ -298,6 +402,16 @@ fn signatures() {
             ));
             rind_dart_public_key_free(public_key);
         }
+        let pss = out(|o, n| rind_dart_rsa_sign_pss(reloaded, 0, 16, b"msg".as_ptr(), 3, o, n));
+        let public_key = new(|out| rind_dart_key_pair_public_key(2, reloaded.cast(), 6, out));
+        ok(rind_dart_public_key_verify(
+            public_key,
+            b"msg".as_ptr(),
+            3,
+            pss.as_ptr(),
+            pss.len(),
+        ));
+        rind_dart_public_key_free(public_key);
         rind_dart_rsa_key_pair_free(reloaded);
         rind_dart_rsa_key_pair_free(pair);
     }

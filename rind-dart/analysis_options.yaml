@@ -4,6 +4,7 @@ analyzer:
   # A Flutter app, analyzed only with Flutter.
   exclude:
     - integration/**
+    - cryptography/**
   language:
     strict-casts: true
     strict-raw-types: true

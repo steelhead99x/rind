@@ -893,6 +893,111 @@ external int _encryptingKeyExport(
   int outLen,
 );
 
+@Native<
+  IntPtr Function(
+    Uint32,
+    Pointer<Uint8>,
+    Size,
+    Pointer<Uint8>,
+    Size,
+    Pointer<Uint8>,
+    Size,
+  )
+>(symbol: 'rind_dart_aes_cbc', isLeaf: true)
+external int _aesCbc(
+  int decrypt,
+  Pointer<Uint8> key,
+  int keyLen,
+  Pointer<Uint8> iv,
+  int ivLen,
+  Pointer<Uint8> inOut,
+  int inOutLen,
+);
+
+@Native<
+  IntPtr Function(
+    Pointer<Uint8>,
+    Size,
+    Uint32,
+    Pointer<Uint8>,
+    Size,
+    Pointer<Uint8>,
+    Size,
+  )
+>(symbol: 'rind_dart_aes_ctr', isLeaf: true)
+external int _aesCtr(
+  Pointer<Uint8> key,
+  int keyLen,
+  int counterBits,
+  Pointer<Uint8> counter,
+  int counterLen,
+  Pointer<Uint8> inOut,
+  int inOutLen,
+);
+
+@Native<
+  IntPtr Function(
+    Pointer<Uint8>,
+    Size,
+    Pointer<Uint8>,
+    Size,
+    Uint32,
+    Pointer<Uint8>,
+    Size,
+  )
+>(symbol: 'rind_dart_chacha20', isLeaf: true)
+external int _chacha20(
+  Pointer<Uint8> key,
+  int keyLen,
+  Pointer<Uint8> nonce,
+  int nonceLen,
+  int counter,
+  Pointer<Uint8> inOut,
+  int inOutLen,
+);
+
+@Native<
+  IntPtr Function(
+    Pointer<Void>,
+    Pointer<Uint8>,
+    Size,
+    Pointer<Uint8>,
+    Size,
+    Pointer<Uint8>,
+    Size,
+  )
+>(symbol: 'rind_dart_randomized_nonce_key_seal_with_nonce', isLeaf: true)
+external int _randomizedNonceKeySealWithNonce(
+  Pointer<Void> key,
+  Pointer<Uint8> nonce,
+  int nonceLen,
+  Pointer<Uint8> aad,
+  int aadLen,
+  Pointer<Uint8> inOut,
+  int len,
+);
+
+@Native<
+  IntPtr Function(
+    Pointer<Void>,
+    Uint32,
+    Uint32,
+    Pointer<Uint8>,
+    Size,
+    Pointer<Uint8>,
+    Size,
+  )
+>(symbol: 'rind_dart_rsa_sign_pss')
+external int _rsaSignPss(
+  Pointer<Void> pair,
+  int hash,
+  int saltLen,
+  Pointer<Uint8> message,
+  int messageLen,
+  Pointer<Uint8> out,
+  int outLen,
+);
+
 @Native<IntPtr Function(Pointer<Void>)>(
   symbol: 'rind_dart_encrypting_key_max_message_len',
   isLeaf: true,

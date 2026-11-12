@@ -336,6 +336,10 @@ jobs:
           RIND_DART_CROSS_TARGETS: ${{ matrix.cross }}
         run: dart test
 
+      - name: Test the cryptography backend
+        working-directory: rind-dart/cryptography
+        run: dart test
+
   # rind-dart's tests on an Android emulator, through the Flutter app in
   # rind-dart/integration. The x86_64 image runs x86_64 natively, and armv7,
   # for its 32-bit pointers, under its ARM translation.

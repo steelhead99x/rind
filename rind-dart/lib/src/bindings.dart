@@ -10,6 +10,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 part 'aead.dart';
+part 'cipher.dart';
 part 'agreement.dart';
 part 'digest.dart';
 part 'error.dart';

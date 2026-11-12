@@ -471,6 +471,30 @@ impl RandomizedNonceKey {
         Ok(RandomNonce(nonce))
     }
 
+    /// Encrypts `in_out` in place under `nonce`, which the caller promises
+    /// never to repeat with this key, and appends the tag.
+    ///
+    /// Repeating a nonce loses confidentiality and lets anyone forge
+    /// messages, as with [`Nonce::assume_unique_for_key`]. Prefer
+    /// [`Self::seal_in_place_append_tag`], which picks the nonce.
+    ///
+    /// Fails with [`Error::WrongLength`], leaving `in_out` unchanged, if it
+    /// is longer than 2^38 - 64 bytes.
+    pub fn seal_in_place_append_tag_with_nonce<InOut>(
+        &self,
+        nonce: RandomNonce,
+        aad: &[u8],
+        in_out: &mut InOut,
+    ) -> Result<(), Error>
+    where
+        InOut: AsMut<[u8]> + for<'a> Extend<&'a u8>,
+    {
+        let mut tag = [0u8; TAG_LEN];
+        self.0.encrypt(&nonce.0, aad, in_out.as_mut(), &mut tag)?;
+        in_out.extend(&tag);
+        Ok(())
+    }
+
     /// Decrypts and verifies `in_out`, the ciphertext followed by its tag,
     /// sealed under `nonce`, and returns the plaintext at its front.
     ///
@@ -619,6 +643,19 @@ mod tests {
         assert_eq!(
             key.open_in_place(nonce, &[], &mut [0u8; TAG_LEN - 1]),
             Err(Error::DecryptFailed)
+        );
+
+        let chosen = RandomNonce::from([9u8; 24]);
+        let mut with_nonce = b"ticket".to_vec();
+        key.seal_in_place_append_tag_with_nonce(chosen, b"name", &mut with_nonce)
+            .unwrap();
+        let mut again = b"ticket".to_vec();
+        key.seal_in_place_append_tag_with_nonce(chosen, b"name", &mut again)
+            .unwrap();
+        assert_eq!(with_nonce, again);
+        assert_eq!(
+            key.open_in_place(chosen, b"name", &mut with_nonce).unwrap(),
+            b"ticket"
         );
     }
 }

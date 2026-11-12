@@ -113,6 +113,14 @@ The API is rind's own: each algorithm is a constant, and each key type has one
 role. Failures throw a `RindException` whose `error` says what failed, as
 rind's `Error` does, and a refused key says why in its `reason`. SHA-1, MD5,
 and RSA keys below 2048 bits are in `package:rind/legacy.dart`.
+AES-CBC, AES-CTR, and ChaCha20 without a MAC are `AesCbc`, `AesCtr`, and
+`ChaCha20`; prefer an `AeadKey`. `XChaCha20-Poly1305` with a caller-chosen
+nonce is `RandomizedNonceKey.sealWithNonce`, and that nonce must never repeat
+under one key.
+
+[`rind_cryptography`](cryptography) is the `cryptography` package's interface
+on this one: `RindCryptography.enable()` makes `Sha256()`, `AesGcm`, and the
+rest run here.
 
 Keys live in native memory, which Dart frees without wiping: this package
 builds rind without its `wipe` feature. To wipe keys, use rind from Rust with

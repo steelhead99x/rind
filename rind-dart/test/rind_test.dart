@@ -508,6 +508,39 @@ void main() {
     );
     expect(hasAesHardware(), isA<bool>());
   });
+
+  group('unauthenticated ciphers', () {
+    test('AES-CBC, AES-CTR, and ChaCha20 round-trip', () {
+      final key = Uint8List(32);
+      final block = Uint8List(32)..[0] = 1;
+      final iv = Uint8List(16)..[0] = 2;
+      expect(
+        AesCbc.decryptBlocks(key, iv, AesCbc.encryptBlocks(key, iv, block)),
+        block,
+      );
+
+      final counter = Uint8List(16)..[15] = 1;
+      final data = ascii('ctr and chacha');
+      final ctr = AesCtr.apply(key, counter, data);
+      expect(ctr, isNot(data));
+      expect(AesCtr.apply(key, counter, ctr), data);
+
+      final nonce = Uint8List(12)..[0] = 3;
+      final stream = ChaCha20.apply(key, nonce, data);
+      expect(stream, isNot(data));
+      expect(ChaCha20.apply(key, nonce, stream), data);
+    });
+
+    test('XChaCha20-Poly1305 honors a caller nonce', () {
+      final key = RandomizedNonceKey(Uint8List(32));
+      final nonce = Uint8List(24)..[0] = 4;
+      final message = ascii('nonce');
+      final first = key.sealWithNonce(nonce, message);
+      final second = key.sealWithNonce(nonce, message);
+      expect(second, first);
+      expect(key.open(nonce, first), message);
+    });
+  });
 }
 
 /// The modulus and exponent of a PKCS#1 `RSAPublicKey`.

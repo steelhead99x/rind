@@ -129,6 +129,32 @@ final class RandomizedNonceKey extends _Handle {
     return (nonce: nonce, sealed: inOut);
   }
 
+  /// Encrypts [plaintext] under [nonce], which must be 24 bytes and never
+  /// repeat with this key, and returns the ciphertext followed by its tag.
+  ///
+  /// Repeating a nonce loses confidentiality and lets anyone forge messages.
+  /// [seal] picks a random nonce instead.
+  Uint8List sealWithNonce(
+    Uint8List nonce,
+    Uint8List plaintext, {
+    Uint8List? aad,
+  }) {
+    aad ??= Uint8List(0);
+    final inOut = Uint8List(plaintext.length + 16)..setAll(0, plaintext);
+    _check(
+      _randomizedNonceKeySealWithNonce(
+        _pointer,
+        nonce.address,
+        nonce.length,
+        aad.address,
+        aad.length,
+        inOut.address,
+        inOut.length,
+      ),
+    );
+    return inOut;
+  }
+
   /// Decrypts and verifies [sealed], sealed under [nonce], and returns the
   /// plaintext, throwing [RindError.decryptFailed] if it does not verify.
   Uint8List open(Uint8List nonce, Uint8List sealed, {Uint8List? aad}) {

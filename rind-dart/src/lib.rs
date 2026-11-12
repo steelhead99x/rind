@@ -19,11 +19,12 @@ use core::cell::RefCell;
 use core::slice;
 use std::num::NonZeroU32;
 
+use rind::signature::RsaPssSaltLength;
 use rind::signature::{
     EcdsaKeyPair, EcdsaSigningAlgorithm, Ed25519KeyPair, PublicKey, RsaKeyPair,
     RsaSigningAlgorithm, RsaVerificationAlgorithm, VerificationAlgorithm, sign, verify,
 };
-use rind::{Error, aead, agreement, digest, hkdf, hmac, kem, pbkdf2, rsa};
+use rind::{Error, aead, agreement, cipher, digest, hkdf, hmac, kem, pbkdf2, rsa};
 
 #[cfg(test)]
 mod ctgrind;
@@ -1495,4 +1496,168 @@ pub unsafe extern "C" fn rind_dart_encrypting_key_max_message_len(
 ) -> isize {
     // SAFETY: forwarded from the caller.
     run(|| Ok(unsafe { handle(key) }.max_message_len()))
+}
+
+fn aes_algorithm(key_len: usize) -> Result<&'static cipher::Algorithm, Failure> {
+    match key_len {
+        16 => Ok(&cipher::AES_128),
+        24 => Ok(&cipher::AES_192),
+        32 => Ok(&cipher::AES_256),
+        _ => Err(Error::WrongLength.into()),
+    }
+}
+
+/// Encrypts (`decrypt` 0) or decrypts (`decrypt` 1) whole AES-CBC blocks in
+/// place. The caller applies padding. `iv` is 16 bytes the caller promises
+/// an attacker cannot predict.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_aes_cbc(
+    decrypt: u32,
+    key: *const u8,
+    key_len: usize,
+    iv: *const u8,
+    iv_len: usize,
+    in_out: *mut u8,
+    in_out_len: usize,
+) -> isize {
+    run(|| {
+        // SAFETY: forwarded from the caller.
+        let (key, iv, in_out) = unsafe {
+            (
+                input(key, key_len),
+                input(iv, iv_len),
+                output(in_out, in_out_len),
+            )
+        };
+        let iv: &[u8; 16] = iv.try_into().map_err(|_| Error::WrongLength)?;
+        let algorithm = aes_algorithm(key.len())?;
+        if decrypt == 0 {
+            cipher::AesCbcEncryptingKey::new(algorithm, key)?
+                .encrypt_blocks(cipher::CbcIv::assume_unpredictable(*iv), in_out)?;
+        } else {
+            cipher::AesCbcDecryptingKey::new(algorithm, key)?.decrypt_blocks(iv, in_out)?;
+        }
+        Ok(0)
+    })
+}
+
+/// XORs AES-CTR keystream from the 16-byte `counter` block into `in_out`.
+/// `counter_bits` is how many low bits of that block count, 1 to 128.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_aes_ctr(
+    key: *const u8,
+    key_len: usize,
+    counter_bits: u32,
+    counter: *const u8,
+    counter_len: usize,
+    in_out: *mut u8,
+    in_out_len: usize,
+) -> isize {
+    run(|| {
+        // SAFETY: forwarded from the caller.
+        let (key, counter, in_out) = unsafe {
+            (
+                input(key, key_len),
+                input(counter, counter_len),
+                output(in_out, in_out_len),
+            )
+        };
+        let counter: &[u8; 16] = counter.try_into().map_err(|_| Error::WrongLength)?;
+        let bits = u8::try_from(counter_bits).map_err(|_| Error::WrongLength)?;
+        cipher::AesCtr::new(aes_algorithm(key.len())?, key, bits)?
+            .apply_keystream(counter, in_out)?;
+        Ok(0)
+    })
+}
+
+/// XORs ChaCha20 keystream for a 12-byte `nonce`, from block `counter`, into
+/// `in_out`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_chacha20(
+    key: *const u8,
+    key_len: usize,
+    nonce: *const u8,
+    nonce_len: usize,
+    counter: u32,
+    in_out: *mut u8,
+    in_out_len: usize,
+) -> isize {
+    run(|| {
+        // SAFETY: forwarded from the caller.
+        let (key, nonce, in_out) = unsafe {
+            (
+                input(key, key_len),
+                input(nonce, nonce_len),
+                output(in_out, in_out_len),
+            )
+        };
+        let key: &[u8; 32] = key.try_into().map_err(|_| Error::WrongLength)?;
+        let nonce: &[u8; 12] = nonce.try_into().map_err(|_| Error::WrongLength)?;
+        cipher::ChaCha20::new(key).apply_keystream(nonce, counter, in_out)?;
+        Ok(0)
+    })
+}
+
+/// Seals as [`rind_dart_randomized_nonce_key_seal`] does, under the 24-byte
+/// `nonce` the caller promises never to repeat with this key.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_randomized_nonce_key_seal_with_nonce(
+    key: *const aead::RandomizedNonceKey,
+    nonce: *const u8,
+    nonce_len: usize,
+    aad: *const u8,
+    aad_len: usize,
+    in_out: *mut u8,
+    in_out_len: usize,
+) -> isize {
+    run(|| {
+        // SAFETY: forwarded from the caller.
+        let (key, nonce, aad, in_out) = unsafe {
+            (
+                handle(key),
+                input(nonce, nonce_len),
+                input(aad, aad_len),
+                output(in_out, in_out_len),
+            )
+        };
+        let nonce: [u8; 24] = nonce.try_into().map_err(|_| Error::WrongLength)?;
+        let len = in_out_len
+            .checked_sub(16)
+            .ok_or(Misuse("no room for the tag"))?;
+        key.seal_in_place_append_tag_with_nonce(nonce.into(), aad, &mut Room { buf: in_out, len })?;
+        Ok(in_out_len)
+    })
+}
+
+/// Signs with RSASSA-PSS. `hash` is 0 for SHA-256, 1 for SHA-384, and 2 for
+/// SHA-512. `salt_len` is the salt's length in bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_rsa_sign_pss(
+    pair: *const RsaKeyPair,
+    hash: u32,
+    salt_len: u32,
+    message: *const u8,
+    message_len: usize,
+    out: *mut u8,
+    out_len: usize,
+) -> isize {
+    run(|| {
+        let salt = u16::try_from(salt_len).map_err(|_| Error::WrongLength)?;
+        let salt = RsaPssSaltLength::Custom(salt);
+        let algorithm = match hash {
+            0 => RsaSigningAlgorithm::pss_sha256(salt),
+            1 => RsaSigningAlgorithm::pss_sha384(salt),
+            2 => RsaSigningAlgorithm::pss_sha512(salt),
+            _ => return Err(Misuse("unknown PSS hash").into()),
+        };
+        // SAFETY: forwarded from the caller.
+        let (pair, message, out) = unsafe {
+            (
+                handle(pair),
+                input(message, message_len),
+                output(out, out_len),
+            )
+        };
+        write(out, pair.sign(&algorithm, message)?.as_ref())
+    })
 }

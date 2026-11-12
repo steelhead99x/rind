@@ -499,6 +499,28 @@ final class RsaKeyPair extends _Handle {
     _newHandle((out) => _keyPairPublicKey(2, _pointer, algorithm._id, out)),
   );
 
+  /// Signs [message] with RSASSA-PSS.
+  ///
+  /// [hash] is 0 for SHA-256, 1 for SHA-384, and 2 for SHA-512. [saltLength]
+  /// is the salt's length in bytes.
+  Uint8List signPss(int hash, int saltLength, Uint8List message) =>
+      _native(message, (input) {
+        return _native(Uint8List(_modulusLength), (out) {
+          final len = _check(
+            _rsaSignPss(
+              _pointer,
+              hash,
+              saltLength,
+              input,
+              message.length,
+              out,
+              _modulusLength,
+            ),
+          );
+          return Uint8List.fromList(out.asTypedList(len));
+        });
+      });
+
   /// Signs [message] with [algorithm].
   Uint8List sign(RsaSigningAlgorithm algorithm, Uint8List message) =>
       _native(message, (input) {

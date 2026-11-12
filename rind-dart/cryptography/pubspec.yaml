@@ -1,0 +1,39 @@
+name: rind_cryptography
+publish_to: none
+description: >-
+  The cryptography package's Cryptography interface on rind, for the
+  algorithms rind implements.
+version: 0.1.0
+repository: https://github.com/moq-dev/rind/tree/main/rind-dart/cryptography
+issue_tracker: https://github.com/moq-dev/rind/issues
+topics:
+  - cryptography
+  - crypto
+
+environment:
+  sdk: ^3.10.0
+
+dependencies:
+  cryptography: ^2.9.0
+  rind:
+    path: ..
+
+dev_dependencies:
+  crypto: ^3.0.3
+  # Not published. Its dependency_overrides apply only when it is the root
+  # package, so depending on it here uses the published cryptography package.
+  cryptography_test:
+    git:
+      url: https://github.com/dint-dev/cryptography.git
+      path: cryptography_test
+      ref: 87f42fad6f7f120feb8e47854164016ceac3dfd0
+  lints: ^6.0.0
+  test: ^1.33.0
+
+# pub reads user-defines only from the root package. Tests of this package
+# build rind from source; a published app pins rind's prebuilt library unless
+# it sets the same flag.
+hooks:
+  user_defines:
+    rind:
+      build_from_source: true
