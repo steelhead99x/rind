@@ -6,7 +6,7 @@ use core::fmt;
 use core::marker::PhantomData;
 
 use super::{digest, hkdf, hmac};
-use crate::error::{Error, KeyFormatError};
+use crate::error::Error;
 use crate::low::{Entry, Zeroable, ct, ct_equal, zeroise_value};
 use crate::mid::p256::{Affine, Scalar};
 use crate::mid::rng::{RandomSource, SystemRandom};
@@ -123,13 +123,11 @@ impl<S> Share<S> {
     /// a point on P-256.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_public();
+        // The decoder refuses a coordinate at or above p, so each point has
+        // one encoding and `bytes` is it.
         let point = Affine::from_uncompressed(bytes)?;
-        let encoded = point.to_uncompressed();
-        if encoded.as_slice() != bytes {
-            return Err(KeyFormatError::NotOnCurve.into());
-        }
         Ok(Self {
-            bytes: encoded,
+            bytes: point.to_uncompressed(),
             _kind: PhantomData,
         })
     }
@@ -333,7 +331,18 @@ impl VerifierRecord {
         Ok(Self { w0, l })
     }
 
-    /// Loads a stored record: reduced `w0`, and uncompressed `l`.
+    /// `L`, uncompressed: the public half of the record.
+    ///
+    /// RFC 9383 has the verifier store `w0` and `L` and never `w1`. Store
+    /// the `w0` passed to [`Self::from_w1`] with these bytes, and load both
+    /// with [`Self::from_record`].
+    pub fn l(&self) -> [u8; Affine::BYTES] {
+        let _entry = Entry::new_public();
+        self.l.to_uncompressed()
+    }
+
+    /// Loads a stored record: `w0`, reduced as [`ProverSecrets::new`]
+    /// reduces it, and `l`, uncompressed, as [`Self::l`] returns it.
     ///
     /// Fails with [`Error::KeyRejected`] when `l` is not on the curve.
     pub fn from_record(w0: &[u8], l: &[u8]) -> Result<Self, Error> {
@@ -387,14 +396,7 @@ impl VerifierRecord {
         let v = secret_point(self.l.mul(&y))?;
         let keys = schedule_keys(
             suite.schedule,
-            &transcript(
-                &labels,
-                prover.as_ref(),
-                share_v.as_ref(),
-                z.as_slice(),
-                v.as_slice(),
-                &self.w0,
-            )?,
+            &transcript(&labels, prover.as_ref(), share_v.as_ref(), &z, &v, &self.w0),
         )?;
         let confirm_v: Confirm<S> = sent(mac(keys.verifier_key(), prover.as_ref()));
         let confirm_p: Confirm<S> = mac(keys.prover_key(), share_v.as_ref());
@@ -465,20 +467,21 @@ impl<S> ProverAwaiting<S> {
                 &self.labels,
                 &self.share_p,
                 verifier.as_ref(),
-                z.as_slice(),
-                v.as_slice(),
+                &z,
+                &v,
                 &self.w0,
-            )?,
+            ),
         )?;
         let expect: Confirm<S> = mac(keys.verifier_key(), &self.share_p);
         let confirm_p: Confirm<S> = sent(mac(keys.prover_key(), verifier.as_ref()));
         let key = SharedKey::new(keys.shared());
         // `identity` is 1 exactly when Y = w0*N. The confirmation check
-        // declassifies that bit together with the tag comparison.
-        let ok = ct_equal(expect.as_ref(), confirm.as_ref()) & (identity == 0);
+        // declassifies that bit together with the tag comparison, combined
+        // as masks so nothing compares the secret-derived bit before then.
+        let ok = u64::from(ct_equal(expect.as_ref(), confirm.as_ref())) & (identity ^ 1);
         match ct::into_public(ok) {
-            true => Ok((confirm_p, key)),
-            false => Err(Error::BadSignature),
+            1 => Ok((confirm_p, key)),
+            _ => Err(Error::BadSignature),
         }
     }
 }
@@ -575,28 +578,27 @@ impl Labels {
 impl Zeroable for Label {}
 impl Zeroable for Labels {}
 impl Zeroable for Schedule {}
-impl<S> Zeroable for Confirm<S> {}
 
+/// Both confirmation keys and the shared key. Each is `len` bytes: 32 for
+/// RFC 9383, 16 for draft-01.
 struct Keys {
     prover: [u8; 32],
-    prover_len: usize,
     verifier: [u8; 32],
-    verifier_len: usize,
     shared: [u8; 32],
-    shared_len: usize,
+    len: usize,
 }
 
 impl Keys {
     fn prover_key(&self) -> &[u8] {
-        &self.prover[..self.prover_len]
+        &self.prover[..self.len]
     }
 
     fn verifier_key(&self) -> &[u8] {
-        &self.verifier[..self.verifier_len]
+        &self.verifier[..self.len]
     }
 
     fn shared(&self) -> &[u8] {
-        &self.shared[..self.shared_len]
+        &self.shared[..self.len]
     }
 }
 
@@ -630,22 +632,11 @@ fn random_scalar() -> Result<Scalar, Error> {
     Err(Error::RngFailed)
 }
 
-struct EncodedPoint {
-    bytes: [u8; Affine::BYTES],
-    len: u8,
-}
-
-impl EncodedPoint {
-    fn as_slice(&self) -> &[u8] {
-        &self.bytes[..usize::from(self.len)]
-    }
-}
-
 /// Uncompressed SEC 1 encoding after a curve check. `public` declassifies
 /// the bytes. Every point encoded here is computed from on-curve inputs (a
 /// peer's share is checked when it is decoded), so an off-curve result is an
 /// internal fault, as in [`VerifierRecord::from_w1`].
-fn encode(point: Affine, public: bool) -> Result<EncodedPoint, Error> {
+fn encode(point: Affine, public: bool) -> Result<[u8; Affine::BYTES], Error> {
     let bytes = point.to_uncompressed();
     if !ct::into_public(point.on_curve()) {
         return Err(Error::Fault);
@@ -653,10 +644,7 @@ fn encode(point: Affine, public: bool) -> Result<EncodedPoint, Error> {
     if public {
         ct::public_slice(&bytes);
     }
-    Ok(EncodedPoint {
-        bytes,
-        len: Affine::BYTES as u8,
-    })
+    Ok(bytes)
 }
 
 /// Declassifies a tag this side sends to the peer.
@@ -666,14 +654,13 @@ fn sent<S>(confirm: Confirm<S>) -> Confirm<S> {
 }
 
 fn publish<S>(point: Affine) -> Result<Share<S>, Error> {
-    let encoded = encode(point, true)?;
     Ok(Share {
-        bytes: encoded.bytes,
+        bytes: encode(point, true)?,
         _kind: PhantomData,
     })
 }
 
-fn secret_point(point: Affine) -> Result<EncodedPoint, Error> {
+fn secret_point(point: Affine) -> Result<[u8; Affine::BYTES], Error> {
     encode(point, false)
 }
 
@@ -689,14 +676,13 @@ fn transcript(
     z: &[u8],
     v: &[u8],
     w0: &Scalar,
-) -> Result<[u8; 32], Error> {
+) -> [u8; 32] {
     let mut hash = digest::Context::new(&digest::SHA256);
     absorb(&mut hash, labels.context.as_slice());
     absorb(&mut hash, labels.id_prover.as_slice());
     absorb(&mut hash, labels.id_verifier.as_slice());
-    let (m, n) = points()?;
-    absorb(&mut hash, &m.to_uncompressed());
-    absorb(&mut hash, &n.to_uncompressed());
+    absorb(&mut hash, &M_UNCOMPRESSED);
+    absorb(&mut hash, &N_UNCOMPRESSED);
     absorb(&mut hash, share_p);
     absorb(&mut hash, share_v);
     absorb(&mut hash, z);
@@ -705,7 +691,7 @@ fn transcript(
     let digest = hash.finish();
     let mut out = [0u8; 32];
     out.copy_from_slice(digest.as_ref());
-    Ok(out)
+    out
 }
 
 fn expand(prk: &hkdf::Prk, info: &[u8], out: &mut [u8]) -> Result<(), Error> {
@@ -717,11 +703,9 @@ fn expand(prk: &hkdf::Prk, info: &[u8], out: &mut [u8]) -> Result<(), Error> {
 fn schedule_keys(schedule: Schedule, transcript_hash: &[u8; 32]) -> Result<Keys, Error> {
     let mut keys = Keys {
         prover: [0; 32],
-        prover_len: 0,
         verifier: [0; 32],
-        verifier_len: 0,
         shared: [0; 32],
-        shared_len: 0,
+        len: 0,
     };
     match schedule {
         Schedule::Rfc9383 => {
@@ -729,11 +713,9 @@ fn schedule_keys(schedule: Schedule, transcript_hash: &[u8; 32]) -> Result<Keys,
             let mut confirm = [0u8; 64];
             expand(&prk, b"ConfirmationKeys", &mut confirm)?;
             keys.prover.copy_from_slice(&confirm[..32]);
-            keys.prover_len = 32;
             keys.verifier.copy_from_slice(&confirm[32..]);
-            keys.verifier_len = 32;
             expand(&prk, b"SharedKey", &mut keys.shared)?;
-            keys.shared_len = 32;
+            keys.len = 32;
         }
         Schedule::Draft01 => {
             // Appendix B's hash splits as Ka || Ke. Ka is 16 bytes.
@@ -741,11 +723,9 @@ fn schedule_keys(schedule: Schedule, transcript_hash: &[u8; 32]) -> Result<Keys,
             let mut confirm = [0u8; 32];
             expand(&prk, b"ConfirmationKeys", &mut confirm)?;
             keys.prover[..16].copy_from_slice(&confirm[..16]);
-            keys.prover_len = 16;
             keys.verifier[..16].copy_from_slice(&confirm[16..]);
-            keys.verifier_len = 16;
             keys.shared[..16].copy_from_slice(&transcript_hash[16..]);
-            keys.shared_len = 16;
+            keys.len = 16;
         }
     }
     Ok(keys)
@@ -797,10 +777,7 @@ mod tests {
         let prover = ProverSecrets::new(&hex(vector.w0), &hex(vector.w1)).unwrap();
         let from_w1 = VerifierRecord::from_w1(&hex(vector.w0), &hex(vector.w1)).unwrap();
         let loaded = VerifierRecord::from_record(&hex(vector.w0), &hex(vector.l)).unwrap();
-        assert_eq!(
-            from_w1.l.to_uncompressed().as_slice(),
-            hex(vector.l).as_slice()
-        );
+        assert_eq!(from_w1.l().as_slice(), hex(vector.l).as_slice());
 
         let (share_p, prover) = prover
             .start_at(
@@ -1154,8 +1131,7 @@ mod tests {
             &z.to_uncompressed(),
             &v.to_uncompressed(),
             &w0s,
-        )
-        .unwrap();
+        );
         let keys = schedule_keys(Schedule::Rfc9383, &tt).unwrap();
         let verifier = VerifierRecord::from_w1(&w0, &w1).unwrap();
         let (got_share, got_confirm, state) = verifier
@@ -1200,8 +1176,7 @@ mod tests {
             &z.to_uncompressed(),
             &v.to_uncompressed(),
             &w0s,
-        )
-        .unwrap();
+        );
         let keys = schedule_keys(Schedule::Rfc9383, &tt).unwrap();
         let (confirm_p, key) = prover
             .finish(
@@ -1229,6 +1204,71 @@ mod tests {
                 .err(),
             Some(Error::BadSignature)
         );
+    }
+
+    /// Hostile share and record encodings are refused: SEC 1's identity,
+    /// `(0, 0)`, compressed and hybrid forms, wrong lengths, an off-curve
+    /// point, and coordinates at or above p. So are `w0` and `w1` values
+    /// that are empty, past 128 bytes, or zero mod n.
+    #[test]
+    fn refuses_malformed_encodings() {
+        const P: &str = "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff";
+        const N: &str = "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551";
+        let g = hex(
+            "046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5",
+        );
+        let p = hex(P);
+        let with = |at: usize, bytes: &[u8]| {
+            let mut out = g.clone();
+            out[at..at + bytes.len()].copy_from_slice(bytes);
+            out
+        };
+        let mut off_curve = g.clone();
+        off_curve[64] ^= 1;
+        let bad: Vec<Vec<u8>> = vec![
+            vec![],
+            vec![0x00],
+            [&[0x00][..], &[0; 64]].concat(),
+            [&[0x04][..], &[0; 64]].concat(),
+            [&[0x02][..], &g[1..33]].concat(),
+            [&[0x03][..], &g[1..33]].concat(),
+            with(0, &[0x06]),
+            with(0, &[0x07]),
+            g[..64].to_vec(),
+            [&g[..], &[0][..]].concat(),
+            off_curve,
+            with(1, &p),
+            with(33, &p),
+            with(1, &[0xff; 32]),
+            with(33, &[0xff; 32]),
+        ];
+        for bytes in &bad {
+            assert!(Share::<Rfc9383>::from_bytes(bytes).is_err(), "{bytes:02x?}");
+            assert!(
+                Share::<MatterPase>::from_bytes(bytes).is_err(),
+                "{bytes:02x?}"
+            );
+            assert!(
+                VerifierRecord::from_record(&[0x11; 32], bytes).is_err(),
+                "{bytes:02x?}"
+            );
+        }
+
+        let n = hex(N);
+        let wide_n = [&[0u8; 8][..], &n].concat();
+        for w in [&[][..], &[0; 32][..], &n, &wide_n, &[0x11; 129][..]] {
+            assert!(ProverSecrets::new(w, &[0x22; 32]).is_err());
+            assert!(ProverSecrets::new(&[0x22; 32], w).is_err());
+            assert!(VerifierRecord::from_w1(w, &[0x22; 32]).is_err());
+            assert!(VerifierRecord::from_w1(&[0x22; 32], w).is_err());
+            assert!(VerifierRecord::from_record(w, &g).is_err());
+        }
+
+        // The stored form round-trips: `l` is a point `from_record` loads.
+        let record = VerifierRecord::from_w1(&[0x11; 40], &[0x22; 40]).unwrap();
+        let l = record.l();
+        let loaded = VerifierRecord::from_record(&[0x11; 40], &l).unwrap();
+        assert_eq!(loaded.l(), l);
     }
 
     #[test]
@@ -1390,7 +1430,7 @@ mod tests {
         ct::secret_slice(&w1);
         fn one<S: 'static>(suite: &'static Suite<S>, w0: &[u8], w1: &[u8]) {
             let verifier = VerifierRecord::from_w1(w0, w1).unwrap();
-            let l = verifier.l.to_uncompressed();
+            let l = verifier.l();
             ct::public_slice(&l);
             exchange(suite, ProverSecrets::new(w0, w1).unwrap(), verifier);
             exchange(
