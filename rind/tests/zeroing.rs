@@ -285,6 +285,45 @@ fn key_wrap() {
     }
 }
 
+#[test]
+fn oprf() {
+    use rind::oprf::{P256_SHA256, P384_SHA384, P521_SHA512, RISTRETTO255_SHA512, oprf, voprf};
+    let seed = [0x42u8; 32];
+    let info = b"wipe";
+    check_zeroed_on_drop(Box::pin(
+        oprf::ServerKey::derive_key_pair(&RISTRETTO255_SHA512, &seed, info).unwrap(),
+    ));
+    check_zeroed_on_drop(Box::pin(
+        voprf::ServerKey::derive_key_pair(&RISTRETTO255_SHA512, &seed, info).unwrap(),
+    ));
+    check_zeroed_on_drop(Box::pin(
+        oprf::ServerKey::derive_key_pair(&P256_SHA256, &seed, info).unwrap(),
+    ));
+    check_zeroed_on_drop(Box::pin(
+        voprf::ServerKey::derive_key_pair(&P256_SHA256, &seed, info).unwrap(),
+    ));
+    check_zeroed_on_drop(Box::pin(
+        oprf::ServerKey::derive_key_pair(&P384_SHA384, &seed, info).unwrap(),
+    ));
+    check_zeroed_on_drop(Box::pin(
+        voprf::ServerKey::derive_key_pair(&P384_SHA384, &seed, info).unwrap(),
+    ));
+    check_zeroed_on_drop(Box::pin(
+        oprf::ServerKey::derive_key_pair(&P521_SHA512, &seed, info).unwrap(),
+    ));
+    check_zeroed_on_drop(Box::pin(
+        voprf::ServerKey::derive_key_pair(&P521_SHA512, &seed, info).unwrap(),
+    ));
+    let (_element, blind) = oprf::blind(&RISTRETTO255_SHA512, b"input").unwrap();
+    check_zeroed_on_drop(Box::pin(blind));
+    let (_element, blind) = voprf::blind(&P256_SHA256, b"input").unwrap();
+    check_zeroed_on_drop(Box::pin(blind));
+    let (_element, blind) = oprf::blind(&P384_SHA384, b"input").unwrap();
+    check_zeroed_on_drop(Box::pin(blind));
+    let (_element, blind) = voprf::blind(&P521_SHA512, b"input").unwrap();
+    check_zeroed_on_drop(Box::pin(blind));
+}
+
 fn check_zeroed_on_drop<T: Unpin>(value: Pin<Box<T>>) {
     let ptr = value.deref() as *const T as *const u8;
     let len = size_of::<T>();

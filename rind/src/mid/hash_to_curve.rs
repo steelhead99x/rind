@@ -13,9 +13,6 @@
 //!
 //! [RFC 9380]: https://www.rfc-editor.org/rfc/rfc9380.html
 
-// Nothing hashes to a curve yet: the OPRF is the first consumer.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use crate::error::Error;
 use crate::mid::sha2::{Sha256Context, Sha384Context, Sha512Context};
 

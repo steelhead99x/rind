@@ -7,8 +7,8 @@
 //! module composes from them (the ladder, the square root of a ratio, and the
 //! signed recoding) is rind's own, covered by tests only.
 
-// ristretto255's consumers (OPRF, FROST, ECVRF, OPAQUE) are their own quests.
-#![cfg_attr(not(test), allow(dead_code))]
+// FROST, ECVRF, and OPAQUE are their own quests. The OPRF calls ristretto255,
+// which calls this module.
 
 use crate::low;
 use crate::mid::util;
@@ -325,6 +325,13 @@ impl Scalar {
     pub(crate) fn mul(&self, other: &Self) -> Self {
         let mut z = Self([0; 4]);
         low::bignum_madd_n25519(&mut z.0, &self.0, &other.0, &[0; 4]);
+        z
+    }
+
+    /// `self - other mod L`.
+    pub(crate) fn sub(&self, other: &Self) -> Self {
+        let mut z = Self([0; 4]);
+        low::bignum_modsub(&mut z.0, &self.0, &other.0, &Self::ORDER);
         z
     }
 

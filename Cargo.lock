@@ -1206,6 +1206,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive-where"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e2b94854e8576378ccda7c8de8a66ed8b4e8acbd2c50ec3418ea6c8aaf4b567"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+]
+
+[[package]]
 name = "derive_arbitrary"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4224,8 +4235,10 @@ dependencies = [
  "p384 0.14.0",
  "p521",
  "proptest",
+ "rand 0.10.3",
  "serde",
  "serde_json",
+ "voprf",
 ]
 
 [[package]]
@@ -5421,6 +5434,25 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "voprf"
+version = "0.6.0-pre.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bdbec5804fff4ed1fbbf7ca7aaa433b6f105d4622e3b134186fdad2be6e6392"
+dependencies = [
+ "curve25519-dalek 5.0.0",
+ "derive-where",
+ "digest 0.11.3",
+ "displaydoc",
+ "elliptic-curve 0.14.3",
+ "hash2curve",
+ "hybrid-array",
+ "rand_core 0.10.1",
+ "sha2 0.11.1",
+ "subtle",
+ "zeroize",
+]
 
 [[package]]
 name = "wait-timeout"

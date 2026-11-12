@@ -193,6 +193,37 @@ pub mod hpke {
     };
 }
 
+/// Oblivious pseudorandom functions: [RFC 9497]'s OPRF and VOPRF modes on
+/// P-256, P-384, P-521, and ristretto255.
+///
+/// [`oprf::oprf`] is the mode whose server returns an evaluation and no
+/// proof. [`oprf::voprf`] is the verifiable mode: the client checks that the
+/// server used the public key it published, for one input or a batch. POPRF
+/// is not implemented.
+///
+/// ```
+/// # fn main() -> Result<(), rind::Error> {
+/// use rind::oprf::voprf;
+/// use rind::oprf::P256_SHA256;
+///
+/// let server = voprf::ServerKey::generate(&P256_SHA256)?;
+/// let (blinded, blind) = voprf::blind(&P256_SHA256, b"token")?;
+/// let mut evaluated = [blinded];
+/// let proof = server.evaluate(std::slice::from_ref(&blinded), &mut evaluated)?;
+/// let output = blind.finalize(b"token", &evaluated[0], &proof, &server.public_key())?;
+/// assert_eq!(output.as_ref().len(), 32);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// [RFC 9497]: https://www.rfc-editor.org/rfc/rfc9497.html
+pub mod oprf {
+    pub use crate::high::oprf::{
+        BlindedElement, Output, P256_SHA256, P384_SHA384, P521_SHA512, Proof, PublicKey,
+        RISTRETTO255_SHA512, Suite, oprf, voprf,
+    };
+}
+
 /// RSA encryption: RSA-OAEP with SHA-256, SHA-384, or SHA-512, and SHA-1
 /// under [`rsa::legacy`].
 ///

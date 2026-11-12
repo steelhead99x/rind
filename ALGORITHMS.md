@@ -45,6 +45,8 @@ SHA-512.
 | PBKDF2 | rind |  |  |  |  |
 | X25519 | s2n-bignum ✓ |  |  |  |  |
 | Ed25519 | s2n-bignum ✓ + Graviola |  |  |  |  |
+| ristretto255 | s2n-bignum ✓ + rind |  |  |  |  |
+| OPRF, VOPRF | rind, over ristretto255 and the NIST curves |  |  |  |  |
 | P-256 ECDH, ECDSA | s2n-bignum ✓ + aws-lc ⚡ + Graviola ⚡ |  |  |  |  |
 | P-384 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ + Graviola ⚡ |  |  |  |  |
 | P-521 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ |  |  |  |  |
@@ -108,6 +110,8 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | PBKDF2 | rind |  |  |  |
 | X25519 | s2n-bignum ✓ |  | BoringSSL ⚡ + curve25519-dalek ⚡ | curve25519-dalek ⚡ |
 | Ed25519 | s2n-bignum ✓ + Graviola |  | curve25519-dalek ⚡ + rind ⚡ |  |
+| ristretto255 | s2n-bignum ✓ + rind |  | curve25519-dalek ⚡ | curve25519-dalek ⚡ |
+| OPRF, VOPRF | rind, over ristretto255 and the NIST curves |  |  |  |
 | P-256 ECDH, ECDSA | s2n-bignum ✓ + Graviola |  | fiat-crypto ✓ + rind ⚡ + Graviola ⚡ | fiat-crypto ✓ + rind + Graviola ⚡ |
 | P-384 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ + Graviola ⚡ |  | fiat-crypto ✓ + rind ⚡ | fiat-crypto ✓ + rind |
 | P-521 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ |  | fiat-crypto ✓ + rind ⚡ |  |
@@ -141,6 +145,12 @@ with portable Rust in place of the assembly armv7 runs regardless.
 - P-521 on armv7: rind and aws-lc-rs both run [fiat-crypto]'s field
   arithmetic, which spills no carry flag there. A `umaal` multiply ran more
   instructions in [#281], so rind keeps the verified code.
+- OPRF and VOPRF, on every backend: the DLEQ proof adds points with Renes,
+  Costello, and Batina's complete formula for `a = -3` (EFD `add-2015-rcb-3`),
+  over the field arithmetic the NIST curves already run. s2n-bignum's point
+  addition is proven only for unequal finite points, and a batch can force
+  the other cases while the server's key is in use. ristretto255 uses the
+  complete Edwards addition its group already runs.
 
 The table describes `main`, and changes alongside the code it describes. The
 tests use [Wycheproof]'s vectors.

@@ -11,10 +11,6 @@
 //! Coordinates are projective `(X : Y : Z)` for the affine point `(X/Z, Y/Z)`,
 //! in Montgomery form, the same representation the field arithmetic uses.
 
-// The public OPRF is the caller. Until it lands, nothing outside this
-// module's tests reaches these functions.
-#![allow(dead_code)]
-
 use super::{AffineMontPoint, CURVE_B_MONT, CURVE_ONE_MONT, CURVE_ORDER, FieldElement, Scalar};
 use crate::error::{Error, KeyFormatError};
 use crate::low;
@@ -33,7 +29,9 @@ pub(crate) fn hash_to_scalar(msg: &[u8], dst: &[u8]) -> Result<[u8; SCALAR], Err
 }
 
 pub(crate) fn random_scalar(rng: &mut dyn RandomSource) -> Result<[u8; SCALAR], Error> {
-    for _ in 0..64 {
+    // P-256's order sits just below 2^256, so a candidate is almost always
+    // in range. The cap is the same one the wider scalars use.
+    for _ in 0..8192 {
         let mut bytes = [0u8; SCALAR];
         rng.fill(&mut bytes)?;
         low::ct::secret_slice(&bytes);
@@ -57,7 +55,7 @@ pub(crate) fn scalar_any(bytes: &[u8]) -> Result<[u8; SCALAR], Error> {
     Ok(scalar_words(bytes)?.as_bytes())
 }
 
-pub(crate) fn scalar_is_zero(bytes: &[u8; SCALAR]) -> bool {
+pub(crate) fn scalar_is_zero(bytes: &[u8]) -> bool {
     // Whether a derived key candidate is zero is the loop condition RFC 9497
     // publishes by retrying. The value stays secret. A byte string that is
     // not a scalar is not zero.
@@ -73,7 +71,7 @@ pub(crate) fn generator() -> [u8; ELEMENT] {
     base_mul(&one).expect("1 is a scalar")
 }
 
-pub(crate) fn base_mul(scalar: &[u8; SCALAR]) -> Result<[u8; ELEMENT], Error> {
+pub(crate) fn base_mul(scalar: &[u8]) -> Result<[u8; ELEMENT], Error> {
     let scalar = scalar_words(scalar)?;
     if low::ct::into_public(scalar.is_zero()) {
         return Err(KeyFormatError::ScalarOutOfRange.into());
@@ -81,7 +79,7 @@ pub(crate) fn base_mul(scalar: &[u8; SCALAR]) -> Result<[u8; ELEMENT], Error> {
     Ok(compress(&checked(AffineMontPoint::base_multiply(&scalar))?))
 }
 
-pub(crate) fn mul(element: &[u8; ELEMENT], scalar: &[u8; SCALAR]) -> Result<[u8; ELEMENT], Error> {
+pub(crate) fn mul(element: &[u8], scalar: &[u8]) -> Result<[u8; ELEMENT], Error> {
     let scalar = scalar_words(scalar)?;
     if low::ct::into_public(scalar.is_zero()) {
         return Err(KeyFormatError::ScalarOutOfRange.into());
@@ -90,7 +88,7 @@ pub(crate) fn mul(element: &[u8; ELEMENT], scalar: &[u8; SCALAR]) -> Result<[u8;
     Ok(compress(&checked(point.multiply(&scalar))?))
 }
 
-pub(crate) fn invert(scalar: &[u8; SCALAR]) -> Result<[u8; SCALAR], Error> {
+pub(crate) fn invert(scalar: &[u8]) -> Result<[u8; SCALAR], Error> {
     let scalar = scalar_words(scalar)?;
     if low::ct::into_public(scalar.is_zero()) {
         return Err(KeyFormatError::ScalarOutOfRange.into());
@@ -98,13 +96,13 @@ pub(crate) fn invert(scalar: &[u8; SCALAR]) -> Result<[u8; SCALAR], Error> {
     Ok(scalar.inv().as_bytes())
 }
 
-pub(crate) fn mul_scalars(a: &[u8; SCALAR], b: &[u8; SCALAR]) -> Result<[u8; SCALAR], Error> {
+pub(crate) fn mul_scalars(a: &[u8], b: &[u8]) -> Result<[u8; SCALAR], Error> {
     let (a, b) = (scalar_words(a)?, scalar_words(b)?);
     // `a` in Montgomery form times plain `b` is the product, plain.
     Ok(a.as_mont().mont_mul(&b).as_bytes())
 }
 
-pub(crate) fn sub_scalars(a: &[u8; SCALAR], b: &[u8; SCALAR]) -> Result<[u8; SCALAR], Error> {
+pub(crate) fn sub_scalars(a: &[u8], b: &[u8]) -> Result<[u8; SCALAR], Error> {
     let (a, b) = (scalar_words(a)?, scalar_words(b)?);
     let mut r = Scalar::default();
     low::bignum_modsub(&mut r.0, &a.0, &b.0, &CURVE_ORDER);

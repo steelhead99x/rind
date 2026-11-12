@@ -2,8 +2,6 @@
 
 //! RFC 9380's `P256_XMD:SHA-256_SSWU_RO_`, and hashing to a scalar mod n.
 
-#![cfg_attr(not(test), allow(dead_code))]
-
 use super::{
     CURVE_A_MONT, CURVE_B_MONT, CURVE_ONE_MONT, CURVE_ORDER_MM, FieldElement, JacobianMontPoint,
     PublicKey, Scalar, util,

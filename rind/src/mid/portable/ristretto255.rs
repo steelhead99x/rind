@@ -3,8 +3,7 @@
 //! ristretto255 (RFC 9496) over curve25519-dalek's, whose operations run in
 //! constant time.
 
-// ristretto255's consumers (OPRF, FROST, ECVRF, OPAQUE) are their own quests.
-#![cfg_attr(not(test), allow(dead_code))]
+// FROST, ECVRF, and OPAQUE are their own quests. The OPRF is the caller.
 
 use curve25519_dalek::constants::RISTRETTO_BASEPOINT_TABLE;
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
@@ -38,6 +37,11 @@ impl Scalar {
     /// `self * other mod L`.
     pub(crate) fn mul(&self, other: &Self) -> Self {
         Self(self.0 * other.0)
+    }
+
+    /// `self - other mod L`.
+    pub(crate) fn sub(&self, other: &Self) -> Self {
+        Self(self.0 - other.0)
     }
 
     /// `1 / self mod L`, or `None` for zero, which has no inverse.

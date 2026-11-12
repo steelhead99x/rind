@@ -2,8 +2,6 @@
 
 //! RFC 9380's `P521_XMD:SHA-512_SSWU_RO_`, and hashing to a scalar mod n.
 
-#![cfg_attr(not(test), allow(dead_code))]
-
 use super::{
     CURVE_A, CURVE_B, CURVE_ONE, CURVE_ORDER_MM, FieldElement, JacobianPoint, PublicKey, Scalar,
     util,

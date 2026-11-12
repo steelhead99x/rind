@@ -39,6 +39,7 @@ pub(super) mod p384;
 pub(super) mod p521;
 #[cfg(test)]
 mod ristretto255_tests;
+pub(super) mod ristretto_oprf;
 pub(super) mod rng;
 pub(super) mod rsa_key_size;
 pub(super) mod rsa_priv;
