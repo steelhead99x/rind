@@ -67,11 +67,15 @@ SHA-512.
   the CPU has it, the AVX2 set (`HaveAvx2`: AVX, AVX2, BMI1, BMI2, POPCNT, and
   SSSE3) otherwise, and SSSE3 when that set is absent. The portable permutation
   runs only without SSSE3. aarch64 runs the NEON permutation, which this
-  backend requires; a CPU without NEON is refused, naming it. On this host one
+  backend requires, with SHA3's `xar` for the rotations when the CPU has
+  it; a CPU without NEON is refused, naming it. On an x86_64 host one
   pass of 64 MiB and one lane took 27.5 ms with AVX-512F, 36.7 ms with AVX2,
   46.7 ms with SSSE3, and 47.1 ms for the scalar permutation, against 43.8 ms
   for RustCrypto's AVX2; at 1 MiB and three passes, 0.37 ms, 0.63 ms, 1.07 ms,
-  and 1.16 ms, against 0.88 ms. HACL\*'s verified BLAKE2b does not implement
+  and 1.16 ms, against 0.88 ms. On an Apple M1 Pro the same 64 MiB pass took
+  22.5 ms with SHA3 and 23.9 ms with NEON alone, against 29.8 ms for
+  RustCrypto's portable code; at 1 MiB and three passes, 0.72 ms and 0.80 ms,
+  against 1.05 ms. HACL\*'s verified BLAKE2b does not implement
   BlaMka, and the hash is negligible beside the fill, so no verified
   permutation was available to time. A proof of the permutation is future
   work. The tests check each fill against RFC 9106's vector, the reference

@@ -8,13 +8,14 @@
 //! Khovratovich, Jean-Philippe Aumasson, and Samuel Neves; CC0-1.0). The lane
 //! shuffles are that code's, so a block it returns matches the scalar one.
 //!
-//! Two changes from that code, none of which moves a lane:
+//! Three changes from that code, none of which moves a lane:
 //!
 //! - BlaMka narrows both halves of a pair with one `uzp1` and multiplies with
 //!   `umull` and `umull2`, where the reference narrows each half alone.
 //! - The column rounds read `prev ^ reference` straight from the blocks and the
 //!   row rounds XOR and store `next` as they finish, so the 1 KiB state is not
 //!   loaded or stored in passes of its own.
+//! - With SHA3, `xar` does each round's XOR and rotation in one instruction.
 //!
 //! aarch64 requires NEON. [`crate::low::cpu::check`] refuses a CPU without it,
 //! naming `neon`, before a public call reaches here. This function does not
@@ -22,29 +23,42 @@
 
 use core::arch::aarch64::*;
 
+use super::cpu::HaveSha3;
 use crate::low::argon2::Block;
 
-/// The only permutation on this backend. Chosen once per derivation.
+/// The permutation for this CPU. Chosen once per derivation.
 #[derive(Clone, Copy)]
-pub(crate) struct Fill;
+pub(crate) enum Fill {
+    Sha3,
+    Neon,
+}
 
 impl Fill {
+    /// SHA3's `xar`, then plain NEON. A CPU without SHA3 does not run it.
     pub(crate) fn select() -> Self {
-        Self
+        if HaveSha3::check().is_some() {
+            Self::Sha3
+        } else {
+            Self::Neon
+        }
     }
 }
 
-/// `G(prev, reference)`, the NEON permutation.
+/// `G(prev, reference)` with a permutation [`Fill::select`] already chose.
 pub(crate) fn compress(
-    _fill: Fill,
+    fill: Fill,
     next: &mut Block,
     prev: &Block,
     reference: &Block,
     with_xor: bool,
 ) {
-    // SAFETY: this backend requires NEON, and the blocks are 1024 bytes each,
-    // which the loads and stores stay inside.
-    unsafe { neon::compress(next, prev, reference, with_xor) };
+    match fill {
+        // SAFETY: `Fill::Sha3` is proof of SHA3, aarch64 requires NEON, and
+        // the blocks are 1024 bytes each, which the loads and stores stay inside.
+        Fill::Sha3 => unsafe { sha3::compress(next, prev, reference, with_xor) },
+        // SAFETY: this backend requires NEON, and the blocks are 1024 bytes.
+        Fill::Neon => unsafe { neon::compress(next, prev, reference, with_xor) },
+    }
 }
 
 /// `x + y + 2 * (x mod 2^32) * (y mod 2^32)` for two pairs of lanes at once.
@@ -98,7 +112,7 @@ fn undiagonalize(v: &mut [uint64x2_t; 8]) {
     v[7] = ext(d1, d0);
 }
 
-/// The fill. The caller's module supplies
+/// The fill, built once per instruction set. The caller's module supplies
 /// `xor_rotr32`, `xor_rotr24`, `xor_rotr16` and `xor_rotr63`, each
 /// `(x ^ y).rotate_right(n)` on both lanes.
 macro_rules! fill {
@@ -229,6 +243,31 @@ mod neon {
     }
 }
 
+/// SHA3's `xar`: one instruction for each XOR and rotation.
+mod sha3 {
+    fill!("neon,sha3");
+
+    #[target_feature(enable = "neon,sha3")]
+    fn xor_rotr32(x: uint64x2_t, y: uint64x2_t) -> uint64x2_t {
+        vxarq_u64::<32>(x, y)
+    }
+
+    #[target_feature(enable = "neon,sha3")]
+    fn xor_rotr24(x: uint64x2_t, y: uint64x2_t) -> uint64x2_t {
+        vxarq_u64::<24>(x, y)
+    }
+
+    #[target_feature(enable = "neon,sha3")]
+    fn xor_rotr16(x: uint64x2_t, y: uint64x2_t) -> uint64x2_t {
+        vxarq_u64::<16>(x, y)
+    }
+
+    #[target_feature(enable = "neon,sha3")]
+    fn xor_rotr63(x: uint64x2_t, y: uint64x2_t) -> uint64x2_t {
+        vxarq_u64::<63>(x, y)
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -257,6 +296,12 @@ mod tests {
                 // SAFETY: aarch64 requires NEON, and the blocks are 1024 bytes.
                 unsafe { neon::compress(&mut wide, &prev, &reference, with_xor) };
                 assert_eq!(scalar.0, wide.0, "neon seed={seed:#x} with_xor={with_xor}");
+                if HaveSha3::check().is_some() {
+                    let mut wide = next;
+                    // SAFETY: checked for SHA3 just above; the blocks are 1024 bytes.
+                    unsafe { sha3::compress(&mut wide, &prev, &reference, with_xor) };
+                    assert_eq!(scalar.0, wide.0, "sha3 seed={seed:#x} with_xor={with_xor}");
+                }
                 let mut selected = next;
                 compress(Fill::select(), &mut selected, &prev, &reference, with_xor);
                 assert_eq!(
@@ -288,6 +333,10 @@ mod tests {
             let mut wide = next;
             // SAFETY: aarch64 requires NEON, and the blocks are 1024 bytes.
             unsafe { neon::compress(&mut wide, &prev, &reference, true) };
+            if HaveSha3::check().is_some() {
+                // SAFETY: checked for SHA3 just above; the blocks are 1024 bytes.
+                unsafe { sha3::compress(&mut wide, &prev, &reference, true) };
+            }
             wide.0[0]
         });
         core::hint::black_box(word);

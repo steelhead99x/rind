@@ -86,7 +86,7 @@ an Intel SDE CPU model, as `x86-cpu.yml` names them.
 | x86_64 | AES-NI without AVX (Westmere, Silvermont, Goldmont) | SDE: Westmere, Goldmont; denied | denied | ctgrind: denied (`no-avx`) |
 | x86_64 | SSSE3 without AES-NI (Core 2, Nehalem) | SDE: Merom, Nehalem; denied | denied | ctgrind: denied (`no-aes`) |
 | x86_64 | SSE2 (Pentium 4, `qemu64`) | SDE: Prescott; denied | denied | ctgrind: denied (`no-ssse3`) |
-| aarch64 | crypto extension, SHA-512 and SHA-3 instructions (Graviton 3, Apple M, Cobalt 100) | `build.yml` on the arm64 runners | the arm64 runner | `admin/ct-qemu`: AES-GCM, HMAC-SHA384 and HMAC-SHA512, ML-KEM, for SHA3's Keccak kernels, and Argon2id's NEON permutation; ctgrind for the rest, as the next row |
+| aarch64 | crypto extension, SHA-512 and SHA-3 instructions (Graviton 3, Apple M, Cobalt 100) | `build.yml` on the arm64 runners | the arm64 runner | `admin/ct-qemu`: AES-GCM, HMAC-SHA384 and HMAC-SHA512, ML-KEM, for SHA3's Keccak kernels, and Argon2id's NEON permutations, with and without SHA3; ctgrind for the rest, as the next row |
 | aarch64 | crypto extension without SHA-3 (Graviton 2, Raspberry Pi 5) | denied | denied | ctgrind on the arm64 runner, which valgrind hides SHA3 from |
 | aarch64 | no crypto extension (Raspberry Pi 4) | denied | denied | ctgrind: denied (`aarch64-portable`); `admin/ct-binsec`: denied |
 | armv7 | crypto extension (most 32-bit Android) | `just armv7`: qemu `max` | the arm64 runner, which runs armv7 natively | `admin/ct-qemu`: AES, AES-CBC, AES-KW, AES-GCM, HMAC |
