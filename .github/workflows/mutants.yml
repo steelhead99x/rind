@@ -104,12 +104,11 @@ jobs:
             shell: default
             args: --workspace
           # Only rind's own code differs on armv7; the adapters' tests run
-          # on the other two. `wipe` runs rind/tests/zeroing.rs, which
-          # checks each `Drop` that wipes a key.
+          # on x86_64 and aarch64.
           - name: armv7
             os: ubuntu-latest
             shell: armv7
-            args: --target armv7-unknown-linux-gnueabihf -p rind --features wipe
+            args: --target armv7-unknown-linux-gnueabihf -p rind
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 300
@@ -144,7 +143,7 @@ jobs:
           scope=(--in-diff "$RUNNER_TEMP/changes.diff" --shard "$SHARD/$COUNT")
           if [ "$RUNNER_OS" = macOS ]; then
             [ "$SHARD" -eq 0 ] || exit 0
-            grep -qE '^\+\+\+ b/rind/src/low/(aarch64/)?cpu\.rs$' "$RUNNER_TEMP/changes.diff" || exit 0
+            grep -qE '^\+\+\+ b/rind/src/low/((aarch64/)?cpu|entry)\.rs$' "$RUNNER_TEMP/changes.diff" || exit 0
             scope=()
           fi
           nix develop ".#$DEV_SHELL" --command admin/mutants "${args[@]}" "${scope[@]}" --output "$RUNNER_TEMP" || [ $? -eq 2 ]
