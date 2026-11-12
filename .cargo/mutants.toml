@@ -15,6 +15,7 @@ exclude_globs = [
   "rind/src/low/*/boringssl/**",
   "rind/src/low/*/openssl/**",
   # Test-only code under a `cfg(test)` cargo-mutants does not recognise.
+  # See UPSTREAM.md, "cargo-mutants misses compound `cfg(test)`s".
   "rind/src/low/tests.rs",
   # Scanner fixtures, compiled only by admin/ct-vartime, never by the tests.
   "rind/src/low/vartime_planted.rs",
@@ -27,6 +28,7 @@ exclude_globs = [
 # Each surviving mutant no test can catch, with why.
 exclude_re = [
   # Test helpers, in `tests` modules whose `cfg` also names an architecture.
+  # See UPSTREAM.md, "cargo-mutants misses compound `cfg(test)`s".
   '\btests::',
   # The negative entries of ML-KEM's constant tables; every unary minus in
   # these files is one.

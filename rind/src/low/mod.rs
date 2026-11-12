@@ -146,6 +146,7 @@ pub(crate) mod abi;
 // A bounds test, not a constant-time one: valgrind does not fault guard
 // pages on every target, so ctgrind builds leave it out, and Miri cannot run
 // the PROT_NONE mappings it faults on.
+// See UPSTREAM.md, "Valgrind on ARM does not fault guard pages".
 #[cfg(all(test, unix, not(feature = "__ctgrind"), not(miri)))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod guard_pages;
@@ -203,6 +204,7 @@ pub(crate) use portable::{
 };
 
 // Declared outside `cfg_if!`, which cargo-mutants cannot see into.
+// See UPSTREAM.md, "cargo-mutants cannot see into `cfg_if!`".
 #[cfg(rind_backend = "aarch64")]
 mod aarch64;
 #[cfg(rind_backend = "arm")]

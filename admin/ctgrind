@@ -15,17 +15,20 @@ set -e
 # the armv7 build never takes its ARMv8 crypto extension path here;
 # `admin/ct-qemu` checks that under qemu-arm. It passes `AT_HWCAP`, so the
 # NEON code is checked.
+# See UPSTREAM.md, "Valgrind hides the ARM crypto extension and SHA3".
 #
 # Valgrind (through 3.27) decodes no AVX-512, VAES, VPCLMULQDQ, or SHA
 # instruction and hides them from `cpuid`, so rind's AES-GCM on VAES, SHA-1
 # and SHA-256 on the SHA extensions, SHA-384 and SHA-512 on the SHA512
 # instructions, and AVX-512 ML-KEM and RSA go unchecked here. `admin/ct-sde` checks them under Intel SDE, all but ML-KEM, whose
 # AVX-512 code samples only the public matrix.
+# See UPSTREAM.md, "Valgrind cannot run x86_64's newest extensions".
 #
 # On aarch64 it hides SHA3, which rind takes for its eight-way AES-GCM
 # kernels, SHA-384 and SHA-512 on the SHA-512 instructions, and its SHA3
 # Keccak kernels, so `admin/ct-qemu --target aarch64-unknown-linux-gnu`
 # checks those.
+# See UPSTREAM.md, "Valgrind hides the ARM crypto extension and SHA3".
 #
 # Release builds keep line tables so memcheck names inlined frames, which
 # the suppressions match.
@@ -58,6 +61,7 @@ esac
 # makes rind check s2n-bignum's ADX routines rather than their `_alt` twins;
 # deny `adx` with `RIND_CPU_DISABLE_adx`, building with
 # `RUSTFLAGS='--cfg rind_cpu_disable'` for `--release`, for those.
+# See UPSTREAM.md, "Valgrind hides ADX from `cpuid`".
 export VALGRIND_BUG_494162=1
 export CARGO_PROFILE_RELEASE_DEBUG=line-tables-only
 

@@ -127,6 +127,7 @@ fn ct_binsec_aes_cbc() {
 
 // One block, since BINSEC cannot decode the `vinsertf128` that LLVM emits
 // for the AVX2 kernel longer messages take; ctgrind checks that one.
+// See UPSTREAM.md, "BINSEC cannot decode much of what rind runs".
 #[test]
 #[ignore = "admin/ct-binsec runs it under BINSEC"]
 fn ct_binsec_chacha20() {
