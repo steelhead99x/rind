@@ -1188,6 +1188,71 @@ mod tests {
         );
     }
 
+    /// Hostile share and record encodings are refused: SEC 1's identity,
+    /// `(0, 0)`, compressed and hybrid forms, wrong lengths, an off-curve
+    /// point, and coordinates at or above p. So are `w0` and `w1` values
+    /// that are empty, past 128 bytes, or zero mod n.
+    #[test]
+    fn refuses_malformed_encodings() {
+        const P: &str = "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff";
+        const N: &str = "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551";
+        let g = hex(
+            "046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5",
+        );
+        let p = hex(P);
+        let with = |at: usize, bytes: &[u8]| {
+            let mut out = g.clone();
+            out[at..at + bytes.len()].copy_from_slice(bytes);
+            out
+        };
+        let mut off_curve = g.clone();
+        off_curve[64] ^= 1;
+        let bad: Vec<Vec<u8>> = vec![
+            vec![],
+            vec![0x00],
+            [&[0x00][..], &[0; 64]].concat(),
+            [&[0x04][..], &[0; 64]].concat(),
+            [&[0x02][..], &g[1..33]].concat(),
+            [&[0x03][..], &g[1..33]].concat(),
+            with(0, &[0x06]),
+            with(0, &[0x07]),
+            g[..64].to_vec(),
+            [&g[..], &[0][..]].concat(),
+            off_curve,
+            with(1, &p),
+            with(33, &p),
+            with(1, &[0xff; 32]),
+            with(33, &[0xff; 32]),
+        ];
+        for bytes in &bad {
+            assert!(Share::<Rfc9383>::from_bytes(bytes).is_err(), "{bytes:02x?}");
+            assert!(
+                Share::<MatterPase>::from_bytes(bytes).is_err(),
+                "{bytes:02x?}"
+            );
+            assert!(
+                VerifierRecord::from_record(&[0x11; 32], bytes).is_err(),
+                "{bytes:02x?}"
+            );
+        }
+
+        let n = hex(N);
+        let wide_n = [&[0u8; 8][..], &n].concat();
+        for w in [&[][..], &[0; 32][..], &n, &wide_n, &[0x11; 129][..]] {
+            assert!(ProverSecrets::new(w, &[0x22; 32]).is_err());
+            assert!(ProverSecrets::new(&[0x22; 32], w).is_err());
+            assert!(VerifierRecord::from_w1(w, &[0x22; 32]).is_err());
+            assert!(VerifierRecord::from_w1(&[0x22; 32], w).is_err());
+            assert!(VerifierRecord::from_record(w, &g).is_err());
+        }
+
+        // The stored form round-trips: `l` is a point `from_record` loads.
+        let record = VerifierRecord::from_w1(&[0x11; 40], &[0x22; 40]).unwrap();
+        let l = record.l();
+        let loaded = VerifierRecord::from_record(&[0x11; 40], &l).unwrap();
+        assert_eq!(loaded.l(), l);
+    }
+
     #[test]
     fn m_and_n_match_their_compressed_form() {
         let _entry = Entry::new_public();
