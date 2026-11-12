@@ -630,9 +630,9 @@
             # other CI job would download.
             armv7 = pkgs.mkShell armv7-shell;
 
-            # `just wasm` enters it to run rind's vector tests on
-            # wasm32-wasip2 under wasmtime. A separate shell so the other CI
-            # jobs do not download wasmtime.
+            # `just wasm` enters it to lint rind and run its tests, including
+            # the slow vectors, on wasm32-wasip2 under wasmtime. A separate
+            # shell so the other CI jobs do not download wasmtime.
             wasm = pkgs.mkShell {
               packages = [
                 rust-toolchain

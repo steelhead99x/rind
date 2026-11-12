@@ -84,10 +84,16 @@ qemu, and `wasm32-wasip2` under wasmtime. iOS devices' code is only built.
   `wasm32-wasip2` and `wasm32-unknown-unknown`, with and without `wipe`. The
   latter enables `getrandom/wasm_js` for JavaScript randomness; the WASI target
   uses its system random source. The nightly `just wasm` job runs rind's
-  vector tests on `wasm32-wasip2` under wasmtime. `wasm32-unknown-unknown`
-  stays a compile check: its tests need a JavaScript host. Constant-time
-  behavior is unchecked under a wasm engine, which compiles rind again and
-  may turn a select into a branch.
+  tests on `wasm32-wasip2` under wasmtime with `SLOW_TESTS=1`, so the slow
+  vector sets run there too. Ed25519 CCTV verdicts are compared with a file
+  recorded from aws-lc. The live differential tests stay on `just portable`,
+  because aws-lc-rs does not build for wasm. Tests that catch a panic do not
+  run, and neither does `ReuseCache`'s threaded test: this target has no
+  threads, and its standard library aborts on panic. `wasm32-unknown-unknown`
+  stays a compile check: its tests need a JavaScript host. Every pull request
+  clippy-checks `rind-ring` on that target with `wasm32_unknown_unknown_js`.
+  Constant-time behavior is unchecked under a wasm engine, which compiles
+  rind again and may turn a select into a branch.
   On 32-bit `x86` it needs Rust 1.94 rather than the 1.90 MSRV, since
   libcrux-platform 0.0.4 calls `__cpuid` outside `unsafe`
   ([libcrux#1646](https://github.com/celabshq/libcrux/issues/1646)).

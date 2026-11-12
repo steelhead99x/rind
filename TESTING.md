@@ -98,7 +98,7 @@ an Intel SDE CPU model, as `x86-cpu.yml` names them.
 | portable | riscv64gc Linux, glibc and musl | `just qemu riscv64` and `just qemu riscv64-musl`: as s390x | none, as above | as s390x |
 | portable | PowerPC Linux: powerpc64le, big-endian powerpc64 and powerpc | `just qemu powerpc64le`, `just qemu powerpc64`, and `just qemu powerpc`: as s390x | none, as above | as s390x |
 | portable | ARM before ARMv7 (Raspberry Pi 1 and Zero) | `just qemu armv6` and `just qemu armv6-softfloat`: as s390x, on qemu's ARM1176; `build.yml`'s `android` job: ARMv5TE Android | none, as above | as s390x |
-| portable | wasm32-wasip2 | `just wasm`: release vectors under wasmtime. Differential tests stay on `just portable`: aws-lc-rs does not build for wasm. `wasm32-unknown-unknown` is compile-only | none, as above | unchecked: a wasm engine compiles rind again and may turn a select into a branch |
+| portable | wasm32-wasip2 | `just wasm`: release tests under wasmtime, with `SLOW_TESTS=1` (PBKDF2, CAVP Monte Carlo, ACVP's 1 to 8 GiB SHA messages, the million-case ML-KEM accumulation, X25519's million iterations, ECDSA's extra ASN.1 loop, `heap_scratch::rsa_generate`). Ed25519 CCTV verdicts are checked against `rind/tests/cctv/ed25519-verdicts.txt`, recorded from aws-lc; live differential tests stay on `just portable`. Panic-catching tests and `reuse_cache::shared_across_threads` do not run. `wasm32-unknown-unknown` is compile-only | none, as above | unchecked: a wasm engine compiles rind again and may turn a select into a branch |
 
 ## Vector suites
 
@@ -137,10 +137,18 @@ expect fails it. The SHA-2 and SHA-3 sets' 1 to 8 GiB messages run only with
 neither as rind uses them.
 
 These suites run wherever the [tier table](#tiers) runs `cargo test`, including
-the forced portable backend and `wasm32-wasip2`. On wasm the comparisons with
-aws-lc inside a vector test are left out, because aws-lc-rs does not build
-there; the vectors themselves run. Tests that catch a panic do not run
-there either: the wasip2 standard library aborts on panic. The nightly `build.yml` runs the million-case
+the forced portable backend and `wasm32-wasip2`. On wasm the live comparisons
+with aws-lc are left out, because aws-lc-rs does not build there; the vectors
+themselves run. Ed25519's CCTV verdicts are the exception that still has an
+oracle: `tests/cctv/ed25519-verdicts.txt` records aws-lc's accept or reject,
+`ed25519_verdicts_match_aws_lc` checks that file against aws-lc on targets
+that build it, and `ed25519_edge_cases` checks rind against the file,
+including on wasm. Tests that catch a panic do not run on wasm: the wasip2
+standard library aborts on panic. `low::generic::reuse_cache::shared_across_threads`
+does not run there either: wasm32-wasip2 has no threads.
+`just wasm` sets `SLOW_TESTS=1`, so the wasm run includes the million-case
+accumulation, the 1 to 8 GiB SHA messages, and the other slow sets named in
+the tier table. The nightly `build.yml` also runs the million-case
 accumulation in native release builds, on every denied x86_64/aarch64 tier,
 and through `just portable`. `just armv7` and `x86-cpu.yml`'s SDE models use
 the default 10,000 cases, even though they build in release mode.
@@ -162,9 +170,11 @@ tests `sh/miri.sh` lists as slow, which are the vector sets, RSA beyond
 `debug::rsa`'s one decryption, and the tests that run many scalar
 multiplications. Every primitive keeps a test that builds, uses, and drops its
 keys. Miri cannot run aws-lc's C, so its builds leave out aws-lc-rs and the
-differential tests, `tests/crosschecks.rs` among them. `tests/cctv.rs` compares
-with aws-lc only where aws-lc builds; Miri does not run that file. wasm cannot
-build aws-lc either, so it runs `tests/cctv.rs` without that comparison.
+differential tests, `tests/crosschecks.rs` among them. `tests/cctv.rs` is
+`cfg(not(miri))`: Miri does not run that file. The comment at the top of the
+file says the same. wasm cannot build aws-lc either; it runs the file and
+compares Ed25519 verdicts with the recorded aws-lc results, not with aws-lc
+itself.
 `tests/wycheproof.rs` and `tests/aws_lc.rs` are vector sets too, and
 `tests/zeroing.rs` reads a dropped value on purpose.
 

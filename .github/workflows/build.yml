@@ -273,9 +273,11 @@ jobs:
       - name: Build, lint, and test
         run: just qemu ${{ matrix.shell }}
 
-  # rind's vector tests on wasm32-wasip2, under wasmtime, on the portable
-  # backend. aws-lc-rs does not build for wasm, so the differential tests
-  # stay on `just portable`. wasm32-unknown-unknown stays compile-only.
+  # rind's tests on wasm32-wasip2, under wasmtime, on the portable backend,
+  # including the slow vectors. aws-lc-rs does not build for wasm, so the
+  # live differential tests stay on `just portable`. Ed25519 CCTV verdicts
+  # are compared with a file recorded from aws-lc. wasm32-unknown-unknown
+  # stays compile-only.
   wasm:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest

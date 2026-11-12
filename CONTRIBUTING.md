@@ -54,9 +54,17 @@ the nightly `qemu` job, which lints and tests the portable backend: `s390x`
 and `powerpc` (the last two big-endian) under qemu, or `i686` (32-bit x86)
 natively.
 `just wasm` runs the nightly wasm job: it lints and tests rind on
-`wasm32-wasip2` under wasmtime. The vectors run; aws-lc-rs does not build
-for wasm, so the differential tests stay on `just portable`.
-`wasm32-unknown-unknown` stays a compile check.
+`wasm32-wasip2` under wasmtime, with `SLOW_TESTS=1`. The vectors run,
+including the slow sets; aws-lc-rs does not build for wasm, so the live
+differential tests stay on `just portable`. Ed25519's CCTV verdicts are
+compared with a file recorded from aws-lc, and a native test checks that
+file against aws-lc. proptest does not read `PROPTEST_RNG_SEED` on wasm32,
+so the wasm `proptest!` blocks apply the seed the script prints. A failure
+does not shrink, because the wasip2 standard library aborts on panic; rerun
+with that seed. Panic-catching tests and the
+threaded `ReuseCache` test do not run. `wasm32-unknown-unknown` stays a
+compile check. The pull-request gate clippy-checks `rind-ring` there with
+`wasm32_unknown_unknown_js`.
 `just miri` runs the nightly `miri` job, the portable backend's tests under
 Miri, on x86_64, and `just miri s390x-unknown-linux-gnu` big-endian.
 `nix develop .#ctgrind --command admin/ctgrind` runs the nightly
