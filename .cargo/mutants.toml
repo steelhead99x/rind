@@ -262,6 +262,10 @@ exclude_re = [
   # Wipes a thread's DRBG as the thread exits, where no test can read it;
   # `high::hmac_drbg::tests::zeroise_wipes_the_state_under_wipe` checks the wipe.
   'rind/src/fips_rng\.rs:\d+:\d+: replace <impl Drop for ThreadDrbg>::drop with \(\)$',
+  # The campaign builds without `--cfg rind_fips`, so this impl is not in the
+  # test binary. `fips_rng::tests` checks the DRBG fill it calls, and
+  # `rng::tests::fill_writes_every_byte` checks the impl the campaign builds.
+  'rind/src/mid/rng\.rs:29:\d+: replace <impl RandomSource for SystemRandom>::fill -> Result<(), Error> with Ok\(\(\))$',
   # Wipes a key inside a type whose own `Drop` wipes all of it, which
   # rind/tests/zeroing.rs checks.
   'rind/src/low/aarch64/aes\.rs:131:\d+: replace <impl Drop for AesDecKey>::drop with \(\)$',

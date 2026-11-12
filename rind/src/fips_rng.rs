@@ -27,6 +27,9 @@ const ENTROPY_LEN: usize = 32;
 /// the same source (SP 800-90A section 8.6.7).
 const NONCE_LEN: usize = 16;
 
+/// Entropy and nonce, drawn in one OS read.
+const SEED_LEN: usize = ENTROPY_LEN + NONCE_LEN;
+
 /// SP 800-90A's `max_number_of_bits_per_request` for HMAC_DRBG, in bytes.
 const MAX_REQUEST_LEN: usize = 1 << 16;
 
@@ -76,7 +79,7 @@ fn instantiate() -> Result<HmacDrbg<Sha512>, Error> {
         }
     });
 
-    let mut seed = [0u8; ENTROPY_LEN + NONCE_LEN];
+    let mut seed = [0u8; SEED_LEN];
     getrandom::fill(&mut seed).map_err(|_| Error::RngFailed)?;
     let (entropy, nonce) = seed.split_at(ENTROPY_LEN);
     Ok(HmacDrbg::new(entropy, nonce, b""))
@@ -123,6 +126,13 @@ mod tests {
     #[test]
     fn cast_passes() {
         assert!(cast());
+    }
+
+    #[test]
+    fn seed_len_is_entropy_plus_nonce() {
+        // `ENTROPY_LEN * NONCE_LEN` is 512. A buffer of that size still fills
+        // with bytes the nonzero checks accept, so the sum is checked here.
+        assert_eq!(SEED_LEN, ENTROPY_LEN + NONCE_LEN);
     }
 
     #[test]
