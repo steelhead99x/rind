@@ -61,6 +61,9 @@ impl Params {
 
 /// Fills `out` with the key Argon2id derives from `password` and `salt`.
 ///
+/// Give each password its own `salt`, such as 16 random bytes stored with
+/// the key, so an attacker's guesses at one cannot be reused on another.
+///
 /// `out` must be at least the 4 bytes RFC 9106 allows, or this fails to
 /// compile. The lanes are filled one after another, on the calling thread.
 ///
@@ -81,10 +84,10 @@ pub fn derive<const N: usize>(
     argon2id(params.cost(), password, salt, &[], &[], out)
 }
 
-/// Checks in constant time that `previously_derived` is what [`derive`] makes from `password` and `salt`.
+/// Checks in constant time that `previously_derived` is what [`derive`](fn@derive) makes from `password` and `salt`.
 ///
 /// Fails with [`Error::BadSignature`] if the keys differ, and otherwise as
-/// [`derive`] does.
+/// [`derive`](fn@derive) does.
 pub fn verify<const N: usize>(
     params: Params,
     password: &[u8],

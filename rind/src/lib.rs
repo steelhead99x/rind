@@ -504,6 +504,7 @@ pub mod pbkdf2 {
 ///
 /// let params = argon2::Params::SECOND_RECOMMENDED;
 /// let mut stored = [0u8; 32];
+/// // Each account's salt is its own, stored beside its key.
 /// argon2::derive(params, b"password", b"per-user salt", &mut stored).unwrap();
 ///
 /// argon2::verify(params, b"password", b"per-user salt", &stored).unwrap();

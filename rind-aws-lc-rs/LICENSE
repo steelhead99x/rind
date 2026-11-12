@@ -31,6 +31,15 @@ Graviola <https://github.com/ctz/graviola>
   License: Apache-2.0 OR ISC OR MIT-0, the same choice as rind's own code.
   Graviola has no NOTICE file.
 
+Argon2's reference implementation <https://github.com/P-H-C/phc-winner-argon2>
+
+  What: rind/src/low/x86_64/argon2.rs, a Rust port of its AVX2 BlaMka
+  rounds, blamka-round-opt.h.
+  Copyright 2015 Daniel Dinu, Dmitry Khovratovich, Jean-Philippe
+  Aumasson, and Samuel Neves
+  License: CC0-1.0 OR Apache-2.0, taken under CC0-1.0, so the port
+  carries rind's own license.
+
 s2n-bignum <https://github.com/awslabs/s2n-bignum>
 
   What: the files under rind/src/low/x86_64 and rind/src/low/aarch64
