@@ -13,10 +13,6 @@ Decided with the maintainer on 2026-11-08:
 - Delete the runtime check and make requirements compile-time ✅ (rejected: keep `check()` documented as never failing; leave it). rind's removal ships in 0.4.
 - `rind/build.rs` selects the aarch64 backend only when `CARGO_CFG_TARGET_FEATURE` has `neon`, and the portable backend otherwise, which is one backend per target, chosen at build time.
 - AGENTS.md's Required rule changes from "a CPU missing a required feature fails with an error naming it" to say a backend requires only its target's compile-time features. The maintainer asked for this edit; follow `quest guide prompting`.
-- The adapters stop calling `check()` and drop their `MissingFeature` in [Adapters offer exactly their upstream's API](/quest/m0/adapters/README.md), since their upstreams have no such error. That epic also replaces this quest's earlier decision to break the adapters in patch releases for this quest alone.
+- The adapters no longer call `check()` or have a `MissingFeature`, since their upstreams have no such error. Their fixes ship with rind 0.4 in [rind 0.4 ships once](/quest/m2/api/release-0.4.md), so this quest removes only rind's own check.
 - Delete what only existed for the check: `verify_cpu_features` and its per-operation atomic load in `low::entry`, `rind/tests/cpu.rs`'s per-feature panic test, and `RIND_CPU_DISABLE_neon` if nothing else uses it. Keep the optional-feature toggles that select tiers.
-- Update README, PLATFORMS.md, MIGRATING.md, and ARCHITECTURE.md's `cpu` line, which tell callers to check first. Keep `cpu::has_aes_hardware` and `cpu::Dit`.
-
-## Required
-
-- [Adapters offer exactly their upstream's API](/quest/m0/adapters/README.md) - the adapters stop calling `check()` first
+- Update README, PLATFORMS.md, MIGRATING.md, MIGRATE.md, TESTING.md, and ARCHITECTURE.md's `cpu` line, which tell callers to check first. Keep `cpu::has_aes_hardware` and `cpu::Dit`.
