@@ -114,10 +114,7 @@ impl DecapKey {
 
         // 7. K‾ <- J(z || c)
         let mut k_bar = SharedSecret([0u8; 32]);
-        let mut j = sha3::Shake256Sponge::new();
-        j.absorb(&self.z);
-        j.absorb(&c.0);
-        j.finish().squeeze(&mut k_bar.0);
+        sha3::Shake256::new(&[&self.z, &c.0]).read(&mut k_bar.0);
 
         // 8. c' <- K-PKE.Encrypt(ekPKE, m', r')
         let c_prime = self.ek_pke.kpke_encrypt(m_prime, r_prime);
@@ -742,7 +739,7 @@ fn sample_poly_cbd<'a, const P: usize>(
         buf[33] = sha3::SHAKE_PAD_BYTE;
     }
 
-    sha3::shake256_batch(&bufs, &mut samples);
+    sha3::Shake256::one_shot_batch(&bufs, &mut samples);
 
     for (sample, poly) in samples.iter().zip(polys.by_ref()) {
         sample_cbd2(sample, poly);

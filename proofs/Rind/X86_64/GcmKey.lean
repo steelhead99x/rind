@@ -13,6 +13,16 @@ are still the Rust they model, so a change to that Rust is a change to this
 model:
 
 ```rust
+pub struct Algorithm {
+    pub(crate) key_len: usize,
+}
+
+pub static AES_128: Algorithm = Algorithm { key_len: 16 };
+
+pub static AES_192: Algorithm = Algorithm { key_len: 24 };
+
+pub static AES_256: Algorithm = Algorithm { key_len: 32 };
+
 pub enum TagLength {
     /// The whole 128-bit tag.
     Full,
@@ -217,6 +227,11 @@ The model departs from the Rust in these ways, and adds no axiom:
 -/
 
 namespace rind.x86_64
+
+/-- `cipher::Algorithm`, an AES key length in bytes; its statics are 16, 24,
+and 32, and no other value is built. -/
+structure cipher.Algorithm where
+  key_len : Usize
 
 /-- `TagLength`. -/
 inductive aead.gcm.TagLength where

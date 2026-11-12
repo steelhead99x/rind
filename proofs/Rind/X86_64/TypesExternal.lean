@@ -31,11 +31,17 @@ opaque low.x86_64.cpu.HaveSsse3 : Type
 opaque low.x86_64.cpu.HaveSha512 : Type
 opaque low.x86_64.cpu.HaveSse41 : Type
 
+/-- An AES key, whose header protection no proof covers. -/
+opaque mid.aes.Aes : Type
+
 /-- MD5's chaining state, which no proof covers. -/
 opaque mid.md5.Md5State : Type
 
 /-- An MD5 context, which no proof covers. -/
 opaque mid.md5.Md5Context : Type
+
+/-- A SHA-3 context, whose sponge no proof covers. -/
+opaque mid.sha3.Sha3Context (R : Std.Usize) (OUT : Std.Usize) : Type
 
 /-- The token proving the CPU has AES-NI, PCLMULQDQ, SSSE3, and SSE4.1. -/
 opaque low.x86_64.cpu.HaveAesHardware : Type

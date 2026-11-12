@@ -144,11 +144,7 @@ SECTIONS = [
     (
         "Hashes and KDFs",
         [
-            *(
-                f"{hash}/{{lib}}/{size}"
-                for hash in ["sha256", "sha512", "sha3-256", "sha3-512"]
-                for size in ["64B", "1350B", "16KB"]
-            ),
+            *(f"{hash}/{{lib}}/{size}" for hash in ["sha256", "sha512"] for size in ["64B", "1350B", "16KB"]),
             "hmac-sha256/{lib}/64B",
             "hmac-sha256/{lib}/1350B",
             "hkdf-sha256/extract-expand/{lib}",
@@ -728,8 +724,6 @@ NAMES = {
     "p256-ecdsa-verify": "P-256 ECDSA verify",
     "sha256": "SHA-256",
     "sha512": "SHA-512",
-    "sha3-256": "SHA3-256",
-    "sha3-512": "SHA3-512",
     "hmac-sha256": "HMAC-SHA256",
     "hkdf-sha256/extract-expand": "HKDF-SHA256 extract and expand",
     "hkdf-sha256/expand": "HKDF-SHA256 expand",

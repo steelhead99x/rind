@@ -37,11 +37,9 @@ const supported = [
   'windows-x64',
 ];
 
-// A cold build on a slow runner, such as macos-15-intel, or a cross build,
-// outlasts the default 30 seconds.
-const _coldBuild = Timeout(Duration(minutes: 5));
-
 void main() {
+  // A cold build on a slow runner, such as macos-15-intel, outlasts the
+  // default 30 seconds.
   test('builds from source for the host, listing its sources', () async {
     await testCodeBuildHook(
       mainMethod: hook.main,
@@ -61,7 +59,7 @@ void main() {
         );
       },
     );
-  }, timeout: _coldBuild);
+  }, timeout: const Timeout(Duration(minutes: 5)));
 
   test('refuses to download in an unreleased copy', () async {
     await expectLater(
@@ -178,7 +176,6 @@ void main() {
     test(
       'builds from source for $target',
       () => _testTarget(target, userDefines: fromSource),
-      timeout: _coldBuild,
     );
   }
 }
