@@ -99,11 +99,13 @@ impl Suite {
 
     /// Aggregate the participants' signature shares into one signature.
     ///
-    /// When the signature does not verify, this reports the first participant,
-    /// in identifier order, whose share does not either. Shares that all
-    /// verify while the signature does not — fewer than the threshold, or a
-    /// verifying share that is not the signer's — are [`AggregateError::Failed`]
-    /// with [`Error::BadSignature`].
+    /// When a share does not verify, this reports the first such participant,
+    /// in identifier order, as [`AggregateError::InvalidShare`]. That includes
+    /// a verifying share that is not the signer's. Fewer participants than the
+    /// threshold, or more than the dealer created, is
+    /// [`AggregateError::Failed`] with [`Error::Unsupported`].
+    /// [`Error::BadSignature`] is only returned, as [`AggregateError::Failed`],
+    /// when every share verifies and the combined signature does not.
     pub fn aggregate(
         &self,
         package: &SigningPackage,
