@@ -134,8 +134,8 @@ For each way the survey found:
   [rind-ring's README] leaves out: stop, and report it as a rind gap.
 
 rind panics on a CPU missing a feature it requires. At the start of each
-binary's `main`, refuse one by exiting with the error from an adapter's
-`default_provider()` or `rind::cpu::check()`.
+binary's `main`, refuse one by exiting with the error from
+`rind::cpu::check()`.
 A library leaves this to the binaries that use it, and says so in its docs.
 
 Commit as you go, with messages in the project's style.
