@@ -53,6 +53,13 @@ the nightly `qemu` job, which lints and tests the portable backend: `s390x`
 `armv6-softfloat` (the Raspberry Pi 1's core), or `powerpc64le`, `powerpc64`,
 and `powerpc` (the last two big-endian) under qemu, or `i686` (32-bit x86)
 natively.
+`just wasm` runs the nightly wasm job: it tests rind on `wasm32-wasip2`
+under wasmtime, with `SLOW_TESTS=1`. aws-lc-rs does not build for wasm, so
+the live differential tests stay on `just portable`. Ed25519's CCTV verdicts
+are compared with a file recorded from aws-lc, and a native test checks that
+file against aws-lc. `ReuseCache`'s threaded test does not run there.
+`wasm32-unknown-unknown` stays a compile check. The pull-request gate
+clippy-checks `rind-ring` there with `wasm32_unknown_unknown_js`.
 `just miri` runs the nightly `miri` job, the portable backend's tests under
 Miri, on x86_64, and `just miri s390x-unknown-linux-gnu` big-endian.
 `nix develop .#ctgrind --command admin/ctgrind` runs the nightly

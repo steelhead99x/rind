@@ -24,52 +24,68 @@ use freed::freed;
 #[global_allocator]
 static ALLOCATOR: freed::Record = freed::Record;
 
+/// The blocks `op` frees under each of `keys`, after one unrecorded run so
+/// one-time setup, such as CPU detection, stays out of the record.
+fn freed_blocks<K, R>(keys: [K; 2], op: impl Fn(&K) -> R) -> [Vec<Vec<u8>>; 2] {
+    op(&keys[0]);
+    keys.map(|key| freed(|| op(&key)).1)
+}
+
+/// Whether the freed blocks differ, in count, length, or bytes.
+fn blocks_differ(left: &[Vec<u8>], right: &[Vec<u8>]) -> bool {
+    left.len() != right.len()
+        || left
+            .iter()
+            .zip(right)
+            .any(|(a, b)| a.len() != b.len() || a != b)
+}
+
 /// Fails if `op` frees a block under one of `keys` whose bytes differ from
 /// those of the block it frees at the same point under the other.
 fn independent<K, R>(what: &str, keys: [K; 2], op: impl Fn(&K) -> R) {
-    // A first, unrecorded run keeps one-time setup out of the record, such
-    // as CPU detection, which frees the names it reads.
-    op(&keys[0]);
-    let [(_a, a), (_b, b)] = keys.map(|key| freed(|| op(&key)));
-    assert_eq!(
-        a.iter().map(Vec::len).collect::<Vec<_>>(),
-        b.iter().map(Vec::len).collect::<Vec<_>>(),
-        "{what}: the blocks freed depend on the key",
+    let [left, right] = freed_blocks(keys, op);
+    assert!(
+        !blocks_differ(&left, &right),
+        "{what}: holds bytes of the key",
     );
-    for (i, (a, b)) in a.iter().zip(&b).enumerate() {
-        assert!(a == b, "{what}: freed block {i} holds bytes of the key");
-    }
+}
+
+/// Whether `op` frees a block that is not all zero, after one unrecorded run.
+fn frees_nonzero<R>(op: impl Fn() -> R) -> bool {
+    op();
+    freed(&op)
+        .1
+        .iter()
+        .any(|block| block.iter().any(|&byte| byte != 0))
 }
 
 /// Fails if `op` frees a block that is not all zero.
 fn zeroed<R>(what: &str, op: impl Fn() -> R) {
-    // Unrecorded first, as `independent` does.
-    op();
-    let (_result, blocks) = freed(op);
-    for (i, block) in blocks.iter().enumerate() {
-        assert!(
-            block.iter().all(|&b| b == 0),
-            "{what}: freed block {i} holds bytes of the key",
-        );
-    }
+    assert!(!frees_nonzero(op), "{what}: holds bytes of the key");
 }
 
 /// The check sees key-derived bytes left on the heap, so a clean result
-/// means something.
+/// means something. The canaries return that fact instead of panicking:
+/// wasm32-wasip2 aborts on panic, and a `should_panic` test cannot run there.
 #[test]
-#[should_panic(expected = "holds bytes of the key")]
 fn detects_a_leak() {
-    independent("planted", [[1u8; 32], [2u8; 32]], |key| {
-        drop(key.map(|b| b ^ 0x5a).to_vec())
+    let [left, right] = freed_blocks([[1u8; 32], [2u8; 32]], |key| {
+        drop(black_box(key.map(|b| b ^ 0x5a).to_vec()))
     });
+    assert!(
+        blocks_differ(&left, &right),
+        "planted key bytes were not visible in a freed block",
+    );
 }
 
 #[test]
-#[should_panic(expected = "holds bytes of the key")]
 fn detects_a_leak_in_key_generation() {
     // Without black_box, the optimizer can drop the unused allocation, and
     // the check then has nothing to find.
-    zeroed("planted", || drop(black_box(vec![1u8; 32])));
+    assert!(
+        frees_nonzero(|| drop(black_box(vec![1u8; 32]))),
+        "planted key bytes were not visible in a freed block",
+    );
 }
 
 /// Two distinct PKCS#8 RSA keys of each size.
@@ -199,6 +215,10 @@ fn ed25519() {
     });
 }
 
+// aws-lc expands the key. It does not build for wasm or under Miri, so this
+// comparison stays on the targets that build it. The canaries and the other
+// wipe checks in this file still compile everywhere.
+#[cfg(not(any(miri, target_family = "wasm")))]
 #[test]
 fn ml_dsa() {
     use aws_lc_rs::signature::{ML_DSA_44_SIGNING, ML_DSA_65_SIGNING, ML_DSA_87_SIGNING};
@@ -208,6 +228,7 @@ fn ml_dsa() {
     ml_dsa_set::<MlDsa87>(&ML_DSA_87_SIGNING);
 }
 
+#[cfg(not(any(miri, target_family = "wasm")))]
 fn ml_dsa_set<P: rind::signature::sign::MlDsaParameterSet>(
     theirs: &'static aws_lc_rs::signature::PqdsaSigningAlgorithm,
 ) {
@@ -235,6 +256,7 @@ fn ml_dsa_set<P: rind::signature::sign::MlDsaParameterSet>(
 
 /// The key `seed` expands to, as PKCS#8 in RFC 9881's expanded form, which
 /// rind writes only for a key loaded from it, so aws-lc-rs expands it.
+#[cfg(not(any(miri, target_family = "wasm")))]
 fn ml_dsa_expanded_pkcs8(
     algorithm: &'static aws_lc_rs::signature::PqdsaSigningAlgorithm,
     seed: &[u8; 32],
@@ -252,6 +274,7 @@ fn ml_dsa_expanded_pkcs8(
 }
 
 /// A DER element of `tag` holding `body`, under 64 KiB.
+#[cfg(not(any(miri, target_family = "wasm")))]
 fn der(tag: u8, body: &[u8]) -> Vec<u8> {
     let len = match body.len() {
         len @ 0..=0x7f => vec![len as u8],

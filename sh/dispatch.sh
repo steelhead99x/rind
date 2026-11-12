@@ -61,8 +61,9 @@ declare -A scope=(
     # Dependents may build with the workspace's declared rust-version.
     [msrv]='^(rind[^/]*/|fuzz/|Cargo\.(toml|lock)$|flake\.(nix|lock)$)'
     # rind's aarch64, armv7, portable, and wasm32 builds, which the host's
-    # own build skips, and which a toolchain bump can break.
-    [cross]='^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|flake\.(nix|lock)$)'
+    # own build skips, and which a toolchain bump can break. rind-ring's
+    # browser feature is one of those builds.
+    [cross]='^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|rind-ring/(src/|Cargo\.toml$)|Cargo\.(toml|lock)$|flake\.(nix|lock)$)'
     # Variable-time instructions in rind's release builds, which a change to
     # its code, dependencies, toolchain, or the scan itself can bring.
     [vartime]='^(rind/(src/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|flake\.(nix|lock)$|admin/ct-vartime)'
@@ -261,6 +262,11 @@ for module in "${selected[@]}"; do
                 cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
                     --features "$features,getrandom/wasm_js" -- --deny warnings
             done
+            # The nightly wasm job does not build rind-ring. A pull request must
+            # clippy-check it too: `wasm32_unknown_unknown_js` selects getrandom's
+            # JavaScript backend, and the host build never compiles that target.
+            cargo clippy -p rind-ring --lib --locked --target wasm32-unknown-unknown \
+                --features wasm32_unknown_unknown_js -- --deny warnings
             ;;
         check:structure) admin/structure ;;
         check:vartime) nix develop .#ct-vartime --command admin/ct-vartime ;;
