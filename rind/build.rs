@@ -30,6 +30,12 @@ fn main() {
         _ => "portable",
     };
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
+
+    // See UPSTREAM.md, "Thumb targets omit `thumb-mode`".
+    println!("cargo::rustc-check-cfg=cfg(rind_arm_thumb)");
+    if arm_thumb_codegen() {
+        println!("cargo::rustc-cfg=rind_arm_thumb");
+    }
 }
 
 /// Whether the 32-bit ARM target's triple names ARMv7 or later, as in
@@ -48,4 +54,18 @@ fn armv7_or_later() -> bool {
         .unwrap_or_default();
     let digits = version.bytes().take_while(u8::is_ascii_digit).count();
     version[..digits].parse::<u32>().is_ok_and(|v| v >= 7)
+}
+
+/// Thumb codegen that does not advertise `target_feature = "thumb-mode"`.
+///
+/// A triple whose arch starts with `thumb` is Thumb. So is
+/// `armv7-linux-androideabi`: rustc 1.98 emits `.code 16` and a 16-bit
+/// `add r12, pc` for it. `armv7-unknown-linux-gnueabihf` and
+/// `arm-linux-androideabi` stay ARM.
+fn arm_thumb_codegen() -> bool {
+    let target = env::var("TARGET").expect("cargo sets the target");
+    let arch = target.split('-').next().unwrap_or_default();
+    // `armv7-linux-androideabi` has no separate `android` component: the
+    // abi is `androideabi`, which still contains `android`.
+    arch.starts_with("thumb") || (arch == "armv7" && target.contains("android"))
 }

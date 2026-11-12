@@ -75,6 +75,8 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   "cfg(rind_vartime_planted)",
   # Forces the portable backend, for testing it on x86_64 (see build.rs).
   "cfg(rind_portable)",
+  # Thumb codegen that does not set `thumb-mode`. See build.rs.
+  "cfg(rind_arm_thumb)",
   # curve25519-dalek's backend overrides, which armv7 refuses.
   'cfg(curve25519_dalek_bits, values("32", "64"))',
   'cfg(curve25519_dalek_backend, values("fiat", "serial", "simd", "avx512"))',

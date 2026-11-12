@@ -880,14 +880,21 @@ mod arch {
     }
 
     /// How far ahead of an instruction it reads `pc`.
-    #[cfg(target_feature = "thumb-mode")]
+    ///
+    /// Thumb reads `pc` as this instruction's address plus 4. Android's
+    /// `armv7-linux-androideabi` lowers to Thumb without `thumb-mode` in
+    /// cfg, which `build.rs` records as `rind_arm_thumb` (see UPSTREAM.md,
+    /// "Thumb targets omit `thumb-mode`"). The ARM constant 8 then addresses
+    /// `STATE` four bytes low, so the captured stack pointer lands in
+    /// `sp_before` and `sp_after` stays 0.
+    #[cfg(any(target_feature = "thumb-mode", rind_arm_thumb))]
     macro_rules! pc_ahead {
         () => {
             "4"
         };
     }
 
-    #[cfg(not(target_feature = "thumb-mode"))]
+    #[cfg(not(any(target_feature = "thumb-mode", rind_arm_thumb)))]
     macro_rules! pc_ahead {
         () => {
             "8"
