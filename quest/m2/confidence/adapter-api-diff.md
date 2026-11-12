@@ -8,7 +8,7 @@
 
 Planned from the 2026-11-09 tooling audit. The exact-API rule has no machine check:
 
-- A one-off comparison of rustdoc surfaces on 2026-11-08 found additions, changed signatures, and renamed items in every adapter ([the adapters epic](/quest/m0/adapters/README.md) records it). The PRs that fix them add no check, so the next drift is found by the next hand audit.
+- A one-off comparison of rustdoc surfaces on 2026-11-08 found additions, changed signatures, and renamed items in every adapter. [moq-dev/rind#522](https://github.com/moq-dev/rind/pull/522), [moq-dev/rind#521](https://github.com/moq-dev/rind/pull/521), [moq-dev/rind#516](https://github.com/moq-dev/rind/pull/516), [moq-dev/rind#515](https://github.com/moq-dev/rind/pull/515), and [moq-dev/rind#519](https://github.com/moq-dev/rind/pull/519) fixed them and add no check, so the next drift is found by the next hand audit.
 - `sh/adapter-versions.sh` checks only that an adapter's version begins with its upstream's breaking part.
 - cargo-semver-checks, through release-plz, compares an adapter with its own last release, not with upstream.
 - No job builds an adapter's features one at a time: rind-aws-lc-rs declares 13 and rind-ring 3, and only the default set, `--no-default-features`, and `wipe` are built.
@@ -22,7 +22,3 @@ Guidance:
 - rustdoc's JSON output is unstable. Pin the toolchain that writes it in the flake, so a new release cannot fail the gate.
 - Scope it in `sh/dispatch.sh` to an adapter's sources, its manifest, and `Cargo.lock`, as the `versions` module is scoped (`sh/dispatch.sh:57`). An upstream release reaches rind only through a lockfile change, so no nightly run is needed.
 - If the doc builds make it too slow for the gate, run it in `lints.yml` nightly and on pull requests that touch an adapter.
-
-## Required
-
-- [Adapters offer exactly their upstream's API](/quest/m0/adapters/README.md) - every adapter matches its upstream, so the diff starts green
