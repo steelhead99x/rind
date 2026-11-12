@@ -19,6 +19,10 @@ type Limb = u32;
 /// Twice a limb, which holds a product of two and two more limbs.
 type Wide = u64;
 
+/// The 32-bit element is 19 limbs of 27 and 28 bits. It keeps fiat-crypto's
+/// byte conversion; the shifts in `p521` are for the 64-bit element.
+pub(super) const P521_WORD_SHIFTS: bool = false;
+
 /// `x`'s limbs, low first, which `buf` holds.
 fn limbs<'a, const N: usize>(x: &[u64], buf: &'a mut [Limb; N]) -> &'a [Limb] {
     let buf = &mut buf[..2 * x.len()];

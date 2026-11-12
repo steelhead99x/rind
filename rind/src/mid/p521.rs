@@ -418,7 +418,11 @@ impl AffinePoint {
         r
     }
 
-    /// Returns table[i - 1] for a public index > 0
+    /// Returns table[i - 1] for a public index > 0.
+    ///
+    /// The portable backend evaluates the same table inside
+    /// `p521_public_twin_mul`, so this stays for the other backends.
+    #[cfg_attr(rind_backend = "portable", allow(dead_code))]
     fn public_lookup_comb(table: &[u64; 288], index: u8) -> Self {
         let offs = (index - 1) as usize * 18;
         let mut r = Self::default();
@@ -426,6 +430,7 @@ impl AffinePoint {
         r
     }
 
+    #[cfg_attr(rind_backend = "portable", allow(dead_code))]
     fn negate_y(&mut self) {
         let neg_y = self.y().negate();
         self.xy[Self::Y].copy_from_slice(&neg_y.0);
@@ -463,6 +468,16 @@ impl AffinePoint {
         let multiples = odd_multiples.map(|multiple| p16.add_affine(&multiple));
         JacobianPoint::public_batch_as_affine(&multiples)
     }
+}
+
+/// One row of affine points, as the 18-word records `p521_public_twin_mul` reads.
+#[cfg(rind_backend = "portable")]
+fn affine_row_words(row: &[AffinePoint; 8]) -> [u64; 144] {
+    let mut words = [0; 144];
+    for (i, point) in row.iter().enumerate() {
+        words[i * 18..(i + 1) * 18].copy_from_slice(&point.xy);
+    }
+    words
 }
 
 /// A point in Jacobian coordinates, at infinity when z is zero.
@@ -578,35 +593,70 @@ impl JacobianPoint {
         }
         let g_multiples = &precomp::CURVE_GENERATOR_PRECOMP_COMB[0];
 
-        let mut result = Self::infinity();
-        for (g_digit, p_digit) in g_digits.iter().zip(&p_digits).rev() {
-            // `p521_jdouble` requires a nonzero z.
-            if !result.public_is_infinity() {
-                result = result.double();
-            }
-            if *p_digit != 0 {
-                let i = usize::from(p_digit.unsigned_abs() / 2);
-                let mut term = odd_multiples[i / 8][i % 8];
-                if *p_digit < 0 {
-                    term.negate_y();
+        // The portable field element is not the saturated words the other
+        // backends pass through `low`, so keep it for the whole evaluation.
+        #[cfg(rind_backend = "portable")]
+        {
+            let row0 = affine_row_words(odd_multiples[0]);
+            let row0: &[u64] = &row0;
+            let mut result = Self::infinity();
+            match odd_multiples.get(1) {
+                None => low::p521_public_twin_mul(
+                    &mut result.xyz,
+                    &g_digits,
+                    &p_digits,
+                    g_multiples,
+                    &[row0],
+                ),
+                Some(row) => {
+                    let row1 = affine_row_words(row);
+                    let row1: &[u64] = &row1;
+                    low::p521_public_twin_mul(
+                        &mut result.xyz,
+                        &g_digits,
+                        &p_digits,
+                        g_multiples,
+                        &[row0, row1],
+                    );
                 }
-                result = result.public_add_affine(&term);
             }
-            if *g_digit != 0 {
-                let mut term = AffinePoint::public_lookup_comb(g_multiples, g_digit.unsigned_abs());
-                if *g_digit < 0 {
-                    term.negate_y();
-                }
-                result = result.public_add_affine(&term);
-            }
+            result
         }
-        result
+        #[cfg(not(rind_backend = "portable"))]
+        {
+            let mut result = Self::infinity();
+            for (g_digit, p_digit) in g_digits.iter().zip(&p_digits).rev() {
+                // `p521_jdouble` requires a nonzero z.
+                if !result.public_is_infinity() {
+                    result = result.double();
+                }
+                if *p_digit != 0 {
+                    let i = usize::from(p_digit.unsigned_abs() / 2);
+                    let mut term = odd_multiples[i / 8][i % 8];
+                    if *p_digit < 0 {
+                        term.negate_y();
+                    }
+                    result = result.public_add_affine(&term);
+                }
+                if *g_digit != 0 {
+                    let mut term =
+                        AffinePoint::public_lookup_comb(g_multiples, g_digit.unsigned_abs());
+                    if *g_digit < 0 {
+                        term.negate_y();
+                    }
+                    result = result.public_add_affine(&term);
+                }
+            }
+            result
+        }
     }
 
     /// `self + p`, for any points, including at infinity, equal, or opposite.
     ///
     /// `p521_jmixadd` is proven only for unequal points, so points with the
-    /// same x never reach it.
+    /// same x never reach it. The portable backend does this inside
+    /// `p521_public_twin_mul`; the other backends, and the tests, call it here.
+    #[cfg_attr(rind_backend = "portable", allow(dead_code))]
     fn public_add_affine(&self, p: &AffinePoint) -> Self {
         if self.public_is_infinity() {
             return Self::from_affine(p);

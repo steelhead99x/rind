@@ -165,6 +165,8 @@ pub(crate) use generic::mldsa_poly::MldsaPoly;
 // The portable backend, which armv7 builds on, and what both run alike.
 #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
 mod portable;
+#[cfg(rind_backend = "portable")]
+pub(crate) use generic::limbs::p521::p521_public_twin_mul;
 #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
 pub(crate) use generic::{
     bignum::{
