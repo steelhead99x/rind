@@ -56,21 +56,23 @@ fn ed25519_verdicts() -> Vec<bool> {
         .lines()
         .enumerate()
         .map(|(i, line)| {
+            // Messages name the line as editors and grep number it.
+            let at = i + 1;
             let mut parts = line.split(' ');
             let number: usize = parts
                 .next()
-                .unwrap_or_else(|| panic!("{path}:{i}: missing number"))
+                .unwrap_or_else(|| panic!("{path}:{at}: missing number"))
                 .parse()
-                .unwrap_or_else(|_| panic!("{path}:{i}: bad number"));
+                .unwrap_or_else(|_| panic!("{path}:{at}: bad number"));
             let verdict = parts
                 .next()
-                .unwrap_or_else(|| panic!("{path}:{i}: missing verdict"));
-            assert!(parts.next().is_none(), "{path}:{i}: trailing text");
-            assert_eq!(number, i, "{path}:{i}");
+                .unwrap_or_else(|| panic!("{path}:{at}: missing verdict"));
+            assert!(parts.next().is_none(), "{path}:{at}: trailing text");
+            assert_eq!(number, i, "{path}:{at}");
             match verdict {
                 "accept" => true,
                 "reject" => false,
-                other => panic!("{path}:{i}: {other}"),
+                other => panic!("{path}:{at}: {other}"),
             }
         })
         .collect();
