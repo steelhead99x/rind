@@ -127,6 +127,15 @@ def core.slice.Slice.as_chunks {T : Type _} (N : Std.Usize) (s : Slice T) :
             exact le_trans (Nat.div_le_self _ _) this),
        Slice.from (s.val.drop (k * N.val)) (by have := s.property; simp; omega))
 
+/-- `<[T]>::as_chunks_mut::<N>`: `as_chunks`'s views, which write back to the
+slice the chunks in order, then what is left. -/
+def core.slice.Slice.as_chunks_mut {T : Type _} (N : Std.Usize) (s : Slice T) :
+    Result (((Slice (Array T N)) × (Slice T)) × ((Slice (Array T N)) × (Slice T) → Slice T)) := do
+  let views ← core.slice.Slice.as_chunks N s
+  ok (views, fun (chunks, rest) =>
+    let l := chunks.val.flatMap (·.val) ++ rest.val
+    if h : l.length ≤ Usize.max then Slice.from l h else s)
+
 /-- `<[T]>::last`. -/
 def core.slice.Slice.last {T : Type _} (s : Slice T) : Result (Option T) :=
   Std.Result.ok s.val.getLast?
@@ -139,6 +148,35 @@ def Shared0U64.Insts.CoreOpsBitShrUsizeU64.shr (x : Std.U64) (y : Std.Usize) : R
 /-- `<&u8 as BitAnd<u8>>::bitand`. -/
 def Shared0U8.Insts.CoreOpsBitBitAndU8U8.bitand (x y : Std.U8) : Result Std.U8 :=
   Std.Result.ok (x &&& y)
+
+/-- `u64::ilog2`, which panics for zero. -/
+def core.num.U64.ilog2 (x : Std.U64) : Result Std.U32 :=
+  if x.val = 0 then Std.Result.fail .panic
+  else Std.Result.ok ⟨BitVec.ofNat 32 x.val.log2⟩
+
+/-- `RangeInclusive::contains`, through `RangeBounds::contains`: the start
+at most the item, and the item at most the end, or below it once the range
+is exhausted. -/
+def core.ops.range.RangeInclusive.contains {Idx U : Type _}
+    (_ : core.cmp.PartialOrd Idx Idx) (startInst : core.cmp.PartialOrd Idx U)
+    (endInst : core.cmp.PartialOrd U Idx) (r : core.ops.range.RangeInclusive Idx) (item : U) :
+    Result Bool := do
+  let above ← startInst.le r.start item
+  if above then
+    if r.exhausted then endInst.lt item r.«end» else endInst.le item r.«end»
+  else Std.Result.ok false
+
+/-- `Option`'s `PartialEq`: both `None`, or both `Some` of equal values. -/
+def core.option.Option.Insts.CoreCmpPartialEqOption.eq {T : Type _}
+    (inst : core.cmp.PartialEq T T) : Option T → Option T → Result Bool
+  | none, none => Std.Result.ok true
+  | some a, some b => inst.eq a b
+  | _, _ => Std.Result.ok false
+
+/-- `<&mut A as PartialEq<&mut B>>::eq`: `A`'s `PartialEq<B>`. -/
+def Mut1A.Insts.CoreCmpPartialEqMut0B.eq {A B : Type _} (inst : core.cmp.PartialEq A B)
+    (a : A) (b : B) : Result Bool :=
+  inst.eq a b
 
 /-- `getrandom`'s error. -/
 opaque getrandom.error.Error : Type

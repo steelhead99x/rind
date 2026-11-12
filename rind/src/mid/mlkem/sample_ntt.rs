@@ -50,7 +50,7 @@ pub(super) fn sample_ntt(rho: &[u8; 32], transposed: bool, out: &mut [Poly]) {
 
     for output in rest {
         let input = next();
-        Shake128ForMlKem::new(&[&input[..34]]).sample_into(output);
+        Shake128ForMlKem::new(rho, &[input[32], input[33]]).sample_into(output);
     }
 }
 
@@ -93,9 +93,13 @@ struct Shake128ForMlKem {
 }
 
 impl Shake128ForMlKem {
-    fn new(message: &[&[u8]]) -> Self {
+    /// The XOF `rho || ij`.
+    fn new(rho: &[u8; 32], ij: &[u8; 2]) -> Self {
+        let mut sponge = sha3::Shake128Sponge::new();
+        sponge.absorb(rho);
+        sponge.absorb(ij);
         Self {
-            sponge: sha3::Shake128Sponge::new_for_message(message),
+            sponge: sponge.finish(),
         }
     }
 

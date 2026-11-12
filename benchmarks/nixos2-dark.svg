@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="931" height="1586" viewBox="0 0 931 1586" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img">
+<svg xmlns="http://www.w3.org/2000/svg" width="931" height="1826" viewBox="0 0 931 1826" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img">
 <title>Times on nixos2, by operation and library</title>
 <rect x="12.0" y="8.0" width="12.0" height="12.0" rx="2" fill="#1a9641"/>
 <text x="28.0" y="18.0" font-size="11" text-anchor="start" font-weight="normal" fill="#c3c2b7">fastest, or within 10%</text>
@@ -128,7 +128,7 @@
 <text x="12.0" y="298.0" font-size="12" text-anchor="start" font-weight="bold" fill="#f0efec">AEADs</text>
 <line x1="12.0" y1="302.0" x2="919.2" y2="302.0" stroke="#383835"/>
 <text x="12.0" y="320.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-128-GCM seal, 32 B</text>
-<rect x="277.2" y="307.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM seal, 32 B, rind: 43 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for AAD and messages under 2^32 bytes, down to HACL*'s Vale AES-GCM routines, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports</title></rect>
+<rect x="277.2" y="307.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM seal, 32 B, rind: 43 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for every AAD and message length it takes, down to HACL*'s Vale AES-GCM routines and, for seals under 129 bytes and AAD or messages of 2^32 bytes or more, rind's by-8 AES-CTR and PCLMULQDQ GHASH against Vale's gcm_encrypt_LE and gcm_decrypt_LE without their bound of 2^32 bytes, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports, and with rind's HOL Light proofs of its constant-time tag compare</title></rect>
 <text x="314.2" y="320.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">43 ns</text>
 <g transform="translate(333.7 310.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="369.2" y="307.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>AES-128-GCM seal, 32 B, aws-lc-rs: 89 ns, 2.06× the fastest</title></rect>
@@ -144,7 +144,7 @@
 <rect x="829.2" y="307.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>AES-128-GCM seal, 32 B, OpenSSL: 156 ns, 3.62× the fastest</title></rect>
 <text x="873.2" y="320.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">156 ns</text>
 <text x="12.0" y="340.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-128-GCM seal, 1350 B</text>
-<rect x="277.2" y="327.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM seal, 1350 B, rind: 246 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for AAD and messages under 2^32 bytes, down to HACL*'s Vale AES-GCM routines, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports</title></rect>
+<rect x="277.2" y="327.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM seal, 1350 B, rind: 246 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for every AAD and message length it takes, down to HACL*'s Vale AES-GCM routines and, for seals under 129 bytes and AAD or messages of 2^32 bytes or more, rind's by-8 AES-CTR and PCLMULQDQ GHASH against Vale's gcm_encrypt_LE and gcm_decrypt_LE without their bound of 2^32 bytes, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports, and with rind's HOL Light proofs of its constant-time tag compare</title></rect>
 <text x="314.2" y="340.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">246 ns</text>
 <g transform="translate(337.0 330.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="369.2" y="327.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>AES-128-GCM seal, 1350 B, aws-lc-rs: 285 ns, 1.16× the fastest</title></rect>
@@ -160,7 +160,7 @@
 <rect x="829.2" y="327.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>AES-128-GCM seal, 1350 B, OpenSSL: 352 ns, 1.43× the fastest</title></rect>
 <text x="873.2" y="340.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">352 ns</text>
 <text x="12.0" y="360.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-128-GCM seal, 16 KB</text>
-<rect x="277.2" y="347.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM seal, 16 KB, rind: 2.33 µs, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for AAD and messages under 2^32 bytes, down to HACL*'s Vale AES-GCM routines, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports</title></rect>
+<rect x="277.2" y="347.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM seal, 16 KB, rind: 2.33 µs, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for every AAD and message length it takes, down to HACL*'s Vale AES-GCM routines and, for seals under 129 bytes and AAD or messages of 2^32 bytes or more, rind's by-8 AES-CTR and PCLMULQDQ GHASH against Vale's gcm_encrypt_LE and gcm_decrypt_LE without their bound of 2^32 bytes, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports, and with rind's HOL Light proofs of its constant-time tag compare</title></rect>
 <text x="314.2" y="360.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.33 µs</text>
 <g transform="translate(340.3 350.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="369.2" y="347.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM seal, 16 KB, aws-lc-rs: 2.42 µs, 1.04× the fastest</title></rect>
@@ -176,7 +176,7 @@
 <rect x="829.2" y="347.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM seal, 16 KB, OpenSSL: 2.45 µs, 1.05× the fastest</title></rect>
 <text x="873.2" y="360.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.45 µs</text>
 <text x="12.0" y="380.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-128-GCM open, 32 B</text>
-<rect x="277.2" y="367.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM open, 32 B, rind: 38 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for AAD and messages under 2^32 bytes, down to HACL*'s Vale AES-GCM routines, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports</title></rect>
+<rect x="277.2" y="367.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM open, 32 B, rind: 38 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for every AAD and message length it takes, down to HACL*'s Vale AES-GCM routines and, for seals under 129 bytes and AAD or messages of 2^32 bytes or more, rind's by-8 AES-CTR and PCLMULQDQ GHASH against Vale's gcm_encrypt_LE and gcm_decrypt_LE without their bound of 2^32 bytes, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports, and with rind's HOL Light proofs of its constant-time tag compare</title></rect>
 <text x="314.2" y="380.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">38 ns</text>
 <g transform="translate(333.7 370.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="369.2" y="367.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>AES-128-GCM open, 32 B, aws-lc-rs: 90 ns, 2.41× the fastest</title></rect>
@@ -192,7 +192,7 @@
 <rect x="829.2" y="367.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>AES-128-GCM open, 32 B, OpenSSL: 159 ns, 4.24× the fastest</title></rect>
 <text x="873.2" y="380.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">159 ns</text>
 <text x="12.0" y="400.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-128-GCM open, 1350 B</text>
-<rect x="277.2" y="387.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM open, 1350 B, rind: 236 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for AAD and messages under 2^32 bytes, down to HACL*'s Vale AES-GCM routines, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports</title></rect>
+<rect x="277.2" y="387.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM open, 1350 B, rind: 236 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for every AAD and message length it takes, down to HACL*'s Vale AES-GCM routines and, for seals under 129 bytes and AAD or messages of 2^32 bytes or more, rind's by-8 AES-CTR and PCLMULQDQ GHASH against Vale's gcm_encrypt_LE and gcm_decrypt_LE without their bound of 2^32 bytes, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports, and with rind's HOL Light proofs of its constant-time tag compare</title></rect>
 <text x="314.2" y="400.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">236 ns</text>
 <g transform="translate(337.0 390.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="369.2" y="387.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>AES-128-GCM open, 1350 B, aws-lc-rs: 285 ns, 1.21× the fastest</title></rect>
@@ -208,7 +208,7 @@
 <rect x="829.2" y="387.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>AES-128-GCM open, 1350 B, OpenSSL: 355 ns, 1.50× the fastest</title></rect>
 <text x="873.2" y="400.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">355 ns</text>
 <text x="12.0" y="420.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-128-GCM open, 16 KB</text>
-<rect x="277.2" y="407.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM open, 16 KB, rind: 2.52 µs, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for AAD and messages under 2^32 bytes, down to HACL*'s Vale AES-GCM routines, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports</title></rect>
+<rect x="277.2" y="407.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM open, 16 KB, rind: 2.52 µs, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for every AAD and message length it takes, down to HACL*'s Vale AES-GCM routines and, for seals under 129 bytes and AAD or messages of 2^32 bytes or more, rind's by-8 AES-CTR and PCLMULQDQ GHASH against Vale's gcm_encrypt_LE and gcm_decrypt_LE without their bound of 2^32 bytes, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports, and with rind's HOL Light proofs of its constant-time tag compare</title></rect>
 <text x="314.2" y="420.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.52 µs</text>
 <g transform="translate(340.3 410.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="369.2" y="407.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128-GCM open, 16 KB, aws-lc-rs: 2.60 µs, 1.03× the fastest</title></rect>
@@ -224,7 +224,7 @@
 <rect x="829.2" y="407.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>AES-128-GCM open, 16 KB, OpenSSL: 2.85 µs, 1.13× the fastest</title></rect>
 <text x="873.2" y="420.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.85 µs</text>
 <text x="12.0" y="440.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-256-GCM seal, 32 B</text>
-<rect x="277.2" y="427.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM seal, 32 B, rind: 49 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for AAD and messages under 2^32 bytes, down to HACL*'s Vale AES-GCM routines, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports</title></rect>
+<rect x="277.2" y="427.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM seal, 32 B, rind: 49 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for every AAD and message length it takes, down to HACL*'s Vale AES-GCM routines and, for seals under 129 bytes and AAD or messages of 2^32 bytes or more, rind's by-8 AES-CTR and PCLMULQDQ GHASH against Vale's gcm_encrypt_LE and gcm_decrypt_LE without their bound of 2^32 bytes, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports, and with rind's HOL Light proofs of its constant-time tag compare</title></rect>
 <text x="314.2" y="440.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">49 ns</text>
 <g transform="translate(333.7 430.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="369.2" y="427.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>AES-256-GCM seal, 32 B, aws-lc-rs: 95 ns, 1.96× the fastest</title></rect>
@@ -240,7 +240,7 @@
 <rect x="829.2" y="427.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>AES-256-GCM seal, 32 B, OpenSSL: 161 ns, 3.32× the fastest</title></rect>
 <text x="873.2" y="440.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">161 ns</text>
 <text x="12.0" y="460.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-256-GCM seal, 1350 B</text>
-<rect x="277.2" y="447.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM seal, 1350 B, rind: 325 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for AAD and messages under 2^32 bytes, down to HACL*'s Vale AES-GCM routines, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports</title></rect>
+<rect x="277.2" y="447.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM seal, 1350 B, rind: 325 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for every AAD and message length it takes, down to HACL*'s Vale AES-GCM routines and, for seals under 129 bytes and AAD or messages of 2^32 bytes or more, rind's by-8 AES-CTR and PCLMULQDQ GHASH against Vale's gcm_encrypt_LE and gcm_decrypt_LE without their bound of 2^32 bytes, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports, and with rind's HOL Light proofs of its constant-time tag compare</title></rect>
 <text x="314.2" y="460.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">325 ns</text>
 <g transform="translate(337.0 450.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="369.2" y="447.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>AES-256-GCM seal, 1350 B, aws-lc-rs: 363 ns, 1.12× the fastest</title></rect>
@@ -256,7 +256,7 @@
 <rect x="829.2" y="447.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>AES-256-GCM seal, 1350 B, OpenSSL: 437 ns, 1.34× the fastest</title></rect>
 <text x="873.2" y="460.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">437 ns</text>
 <text x="12.0" y="480.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-256-GCM seal, 16 KB</text>
-<rect x="277.2" y="467.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM seal, 16 KB, rind: 3.22 µs, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for AAD and messages under 2^32 bytes, down to HACL*'s Vale AES-GCM routines, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports</title></rect>
+<rect x="277.2" y="467.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM seal, 16 KB, rind: 3.22 µs, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for every AAD and message length it takes, down to HACL*'s Vale AES-GCM routines and, for seals under 129 bytes and AAD or messages of 2^32 bytes or more, rind's by-8 AES-CTR and PCLMULQDQ GHASH against Vale's gcm_encrypt_LE and gcm_decrypt_LE without their bound of 2^32 bytes, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports, and with rind's HOL Light proofs of its constant-time tag compare</title></rect>
 <text x="314.2" y="480.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.22 µs</text>
 <g transform="translate(340.3 470.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="369.2" y="467.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM seal, 16 KB, aws-lc-rs: 3.30 µs, 1.03× the fastest</title></rect>
@@ -272,7 +272,7 @@
 <rect x="829.2" y="467.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM seal, 16 KB, OpenSSL: 3.34 µs, 1.04× the fastest</title></rect>
 <text x="873.2" y="480.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.34 µs</text>
 <text x="12.0" y="500.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-256-GCM open, 32 B</text>
-<rect x="277.2" y="487.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM open, 32 B, rind: 45 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for AAD and messages under 2^32 bytes, down to HACL*'s Vale AES-GCM routines, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports</title></rect>
+<rect x="277.2" y="487.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM open, 32 B, rind: 45 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for every AAD and message length it takes, down to HACL*'s Vale AES-GCM routines and, for seals under 129 bytes and AAD or messages of 2^32 bytes or more, rind's by-8 AES-CTR and PCLMULQDQ GHASH against Vale's gcm_encrypt_LE and gcm_decrypt_LE without their bound of 2^32 bytes, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports, and with rind's HOL Light proofs of its constant-time tag compare</title></rect>
 <text x="314.2" y="500.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">45 ns</text>
 <g transform="translate(333.7 490.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="369.2" y="487.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>AES-256-GCM open, 32 B, aws-lc-rs: 101 ns, 2.26× the fastest</title></rect>
@@ -288,7 +288,7 @@
 <rect x="829.2" y="487.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>AES-256-GCM open, 32 B, OpenSSL: 172 ns, 3.84× the fastest</title></rect>
 <text x="873.2" y="500.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">172 ns</text>
 <text x="12.0" y="520.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-256-GCM open, 1350 B</text>
-<rect x="277.2" y="507.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM open, 1350 B, rind: 328 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for AAD and messages under 2^32 bytes, down to HACL*'s Vale AES-GCM routines, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports</title></rect>
+<rect x="277.2" y="507.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM open, 1350 B, rind: 328 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for every AAD and message length it takes, down to HACL*'s Vale AES-GCM routines and, for seals under 129 bytes and AAD or messages of 2^32 bytes or more, rind's by-8 AES-CTR and PCLMULQDQ GHASH against Vale's gcm_encrypt_LE and gcm_decrypt_LE without their bound of 2^32 bytes, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports, and with rind's HOL Light proofs of its constant-time tag compare</title></rect>
 <text x="314.2" y="520.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">328 ns</text>
 <g transform="translate(337.0 510.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="369.2" y="507.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>AES-256-GCM open, 1350 B, aws-lc-rs: 422 ns, 1.29× the fastest</title></rect>
@@ -304,7 +304,7 @@
 <rect x="829.2" y="507.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>AES-256-GCM open, 1350 B, OpenSSL: 643 ns, 1.96× the fastest</title></rect>
 <text x="873.2" y="520.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">643 ns</text>
 <text x="12.0" y="540.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-256-GCM open, 16 KB</text>
-<rect x="277.2" y="527.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM open, 16 KB, rind: 3.62 µs, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for AAD and messages under 2^32 bytes, down to HACL*'s Vale AES-GCM routines, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports</title></rect>
+<rect x="277.2" y="527.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM open, 16 KB, rind: 3.62 µs, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its AEAD API's AES-GCM key setup, seal, and open, for every AAD and message length it takes, down to HACL*'s Vale AES-GCM routines and, for seals under 129 bytes and AAD or messages of 2^32 bytes or more, rind's by-8 AES-CTR and PCLMULQDQ GHASH against Vale's gcm_encrypt_LE and gcm_decrypt_LE without their bound of 2^32 bytes, composed with Vale's F* proofs of Gcm_blocks_stdcall, Gcm_blocks_decrypt_stdcall, and Compute_iv_stdcall, of the code Vale prints at HACL* f557259007db, which rind imports, and with rind's HOL Light proofs of its constant-time tag compare</title></rect>
 <text x="314.2" y="540.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.62 µs</text>
 <g transform="translate(340.3 530.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="369.2" y="527.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256-GCM open, 16 KB, aws-lc-rs: 3.69 µs, 1.02× the fastest</title></rect>
@@ -403,15 +403,17 @@
 <text x="12.0" y="684.0" font-size="12" text-anchor="start" font-weight="bold" fill="#f0efec">QUIC header protection</text>
 <line x1="12.0" y1="688.0" x2="919.2" y2="688.0" stroke="#383835"/>
 <text x="12.0" y="706.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-128 header protection</text>
-<rect x="277.2" y="693.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128 header protection, rind: 5 ns, 1.00× the fastest</title></rect>
-<text x="321.2" y="706.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">5 ns</text>
+<rect x="277.2" y="693.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-128 header protection, rind: 5 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, which assumes each key's mask is its own cipher's, the only one rind builds, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its header-protection API's AES-128 and AES-256 against RFC 9001 and Vale's FIPS 197 spec</title></rect>
+<text x="314.2" y="706.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">5 ns</text>
+<g transform="translate(330.4 696.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="369.2" y="693.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>AES-128 header protection, aws-lc-rs: 9 ns, 1.95× the fastest</title></rect>
 <text x="413.2" y="706.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">9 ns</text>
 <rect x="461.2" y="693.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>AES-128 header protection, ring: 8 ns, 1.73× the fastest</title></rect>
 <text x="505.2" y="706.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">8 ns</text>
 <text x="12.0" y="726.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-256 header protection</text>
-<rect x="277.2" y="713.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256 header protection, rind: 8 ns, 1.00× the fastest</title></rect>
-<text x="321.2" y="726.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">8 ns</text>
+<rect x="277.2" y="713.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>AES-256 header protection, rind: 8 ns, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, which assumes each key's mask is its own cipher's, the only one rind builds, of the AES-NI key expansion and block cipher's raw-pointer loads, and of the SIMD intrinsics as Intel's manual defines them, of its header-protection API's AES-128 and AES-256 against RFC 9001 and Vale's FIPS 197 spec</title></rect>
+<text x="314.2" y="726.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">8 ns</text>
+<g transform="translate(330.4 716.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="369.2" y="713.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>AES-256 header protection, aws-lc-rs: 10 ns, 1.25× the fastest</title></rect>
 <text x="413.2" y="726.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">10 ns</text>
 <rect x="461.2" y="713.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>AES-256 header protection, ring: 10 ns, 1.24× the fastest</title></rect>
@@ -626,238 +628,251 @@
 <g transform="translate(803.6 1054.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#f9d64a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
 <rect x="829.2" y="1051.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>SHA-512, 16 KB, OpenSSL: 18.99 µs, 1.02× the fastest</title></rect>
 <text x="873.2" y="1064.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">18.99 µs</text>
-<text x="12.0" y="1084.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">HMAC-SHA256, 64 B</text>
-<rect x="277.2" y="1071.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>HMAC-SHA256, 64 B, rind: 628 ns, 1.00× the fastest</title></rect>
-<text x="321.2" y="1084.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">628 ns</text>
-<rect x="369.2" y="1071.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>HMAC-SHA256, 64 B, aws-lc-rs: 811 ns, 1.29× the fastest</title></rect>
-<text x="413.2" y="1084.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">811 ns</text>
-<rect x="461.2" y="1071.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>HMAC-SHA256, 64 B, ring: 707 ns, 1.13× the fastest</title></rect>
-<text x="505.2" y="1084.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">707 ns</text>
-<rect x="553.2" y="1071.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>HMAC-SHA256, 64 B, RustCrypto + dalek: 1.19 µs, 1.89× the fastest</title></rect>
-<text x="597.2" y="1084.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.19 µs</text>
-<rect x="645.2" y="1071.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HMAC-SHA256, 64 B, graviola: 1.44 µs, 2.30× the fastest</title></rect>
-<text x="689.2" y="1084.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.44 µs</text>
-<rect x="737.2" y="1071.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>HMAC-SHA256, 64 B, libcrux: 1.20 µs, 1.92× the fastest; verified: HACL*'s F* proof of Hacl.HMAC's compute_sha2_256, compiled to Rust by an unverified step</title></rect>
-<text x="774.2" y="1084.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.20 µs</text>
-<g transform="translate(800.3 1074.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#f9d64a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
-<rect x="829.2" y="1071.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>HMAC-SHA256, 64 B, OpenSSL: 3.69 µs, 5.88× the fastest</title></rect>
-<text x="873.2" y="1084.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.69 µs</text>
-<text x="12.0" y="1104.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">HMAC-SHA256, 1350 B</text>
-<rect x="277.2" y="1091.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>HMAC-SHA256, 1350 B, rind: 2.79 µs, 1.00× the fastest</title></rect>
-<text x="321.2" y="1104.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.79 µs</text>
-<rect x="369.2" y="1091.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>HMAC-SHA256, 1350 B, aws-lc-rs: 3.30 µs, 1.18× the fastest</title></rect>
-<text x="413.2" y="1104.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.30 µs</text>
-<rect x="461.2" y="1091.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>HMAC-SHA256, 1350 B, ring: 3.19 µs, 1.14× the fastest</title></rect>
-<text x="505.2" y="1104.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.19 µs</text>
-<rect x="553.2" y="1091.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HMAC-SHA256, 1350 B, RustCrypto + dalek: 5.80 µs, 2.08× the fastest</title></rect>
-<text x="597.2" y="1104.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">5.80 µs</text>
-<rect x="645.2" y="1091.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HMAC-SHA256, 1350 B, graviola: 7.05 µs, 2.53× the fastest</title></rect>
-<text x="689.2" y="1104.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">7.05 µs</text>
-<rect x="737.2" y="1091.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HMAC-SHA256, 1350 B, libcrux: 6.02 µs, 2.16× the fastest; verified: HACL*'s F* proof of Hacl.HMAC's compute_sha2_256, compiled to Rust by an unverified step</title></rect>
-<text x="774.2" y="1104.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">6.02 µs</text>
-<g transform="translate(800.3 1094.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#f6a03c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
-<rect x="829.2" y="1091.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HMAC-SHA256, 1350 B, OpenSSL: 5.94 µs, 2.13× the fastest</title></rect>
-<text x="873.2" y="1104.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">5.94 µs</text>
-<text x="12.0" y="1124.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">HKDF-SHA256 extract and expand</text>
-<rect x="277.2" y="1111.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>HKDF-SHA256 extract and expand, rind: 1.15 µs, 1.00× the fastest</title></rect>
-<text x="321.2" y="1124.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.15 µs</text>
-<rect x="369.2" y="1111.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>HKDF-SHA256 extract and expand, aws-lc-rs: 1.44 µs, 1.25× the fastest</title></rect>
-<text x="413.2" y="1124.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.44 µs</text>
-<rect x="461.2" y="1111.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>HKDF-SHA256 extract and expand, ring: 1.31 µs, 1.14× the fastest</title></rect>
-<text x="505.2" y="1124.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.31 µs</text>
-<rect x="553.2" y="1111.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>HKDF-SHA256 extract and expand, RustCrypto + dalek: 1.98 µs, 1.72× the fastest</title></rect>
-<text x="597.2" y="1124.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.98 µs</text>
-<rect x="737.2" y="1111.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>HKDF-SHA256 extract and expand, libcrux: 2.04 µs, 1.77× the fastest; verified: HACL*'s F* proof of Hacl.HKDF's extract_sha2_256 and expand_sha2_256, compiled to Rust by an unverified step</title></rect>
-<text x="774.2" y="1124.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.04 µs</text>
-<g transform="translate(800.3 1114.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#f9d64a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
-<rect x="829.2" y="1111.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HKDF-SHA256 extract and expand, OpenSSL: 4.33 µs, 3.76× the fastest</title></rect>
-<text x="873.2" y="1124.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">4.33 µs</text>
-<text x="12.0" y="1144.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">HKDF-SHA256 expand</text>
-<rect x="277.2" y="1131.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>HKDF-SHA256 expand, rind: 300 ns, 1.00× the fastest</title></rect>
-<text x="321.2" y="1144.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">300 ns</text>
-<rect x="369.2" y="1131.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HKDF-SHA256 expand, aws-lc-rs: 636 ns, 2.12× the fastest</title></rect>
-<text x="413.2" y="1144.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">636 ns</text>
-<rect x="461.2" y="1131.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>HKDF-SHA256 expand, ring: 337 ns, 1.12× the fastest</title></rect>
-<text x="505.2" y="1144.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">337 ns</text>
-<rect x="553.2" y="1131.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>HKDF-SHA256 expand, RustCrypto + dalek: 512 ns, 1.71× the fastest</title></rect>
-<text x="597.2" y="1144.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">512 ns</text>
-<rect x="737.2" y="1131.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HKDF-SHA256 expand, libcrux: 1.01 µs, 3.37× the fastest; verified: HACL*'s F* proof of Hacl.HKDF's extract_sha2_256 and expand_sha2_256, compiled to Rust by an unverified step</title></rect>
-<text x="774.2" y="1144.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.01 µs</text>
-<g transform="translate(800.3 1134.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#f6a03c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
-<rect x="829.2" y="1131.0" width="88.0" height="18.0" rx="2" fill="#a50f15"><title>HKDF-SHA256 expand, OpenSSL: 2.87 µs, 9.58× the fastest</title></rect>
-<text x="873.2" y="1144.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">2.87 µs</text>
-<text x="12.0" y="1168.0" font-size="12" text-anchor="start" font-weight="bold" fill="#f0efec">RSA</text>
-<line x1="12.0" y1="1172.0" x2="919.2" y2="1172.0" stroke="#383835"/>
-<text x="12.0" y="1190.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">RSA-2048 PKCS#1 sign</text>
-<rect x="277.2" y="1177.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PKCS#1 sign, rind: 447.43 µs, 1.03× the fastest</title></rect>
-<text x="321.2" y="1190.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">447.43 µs</text>
-<rect x="369.2" y="1177.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PKCS#1 sign, aws-lc-rs: 448.68 µs, 1.03× the fastest</title></rect>
-<text x="413.2" y="1190.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">448.68 µs</text>
-<rect x="461.2" y="1177.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PKCS#1 sign, ring: 434.47 µs, 1.00× the fastest</title></rect>
-<text x="505.2" y="1190.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">434.47 µs</text>
-<rect x="553.2" y="1177.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>RSA-2048 PKCS#1 sign, RustCrypto + dalek: 1.14 ms, 2.63× the fastest</title></rect>
-<text x="597.2" y="1190.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.14 ms</text>
-<rect x="645.2" y="1177.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PKCS#1 sign, graviola: 445.92 µs, 1.03× the fastest</title></rect>
-<text x="689.2" y="1190.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">445.92 µs</text>
-<rect x="829.2" y="1177.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PKCS#1 sign, OpenSSL: 453.81 µs, 1.04× the fastest</title></rect>
-<text x="873.2" y="1190.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">453.81 µs</text>
-<text x="12.0" y="1210.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">RSA-2048 PKCS#1 verify</text>
-<rect x="277.2" y="1197.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PKCS#1 verify, rind: 12.88 µs, 1.00× the fastest</title></rect>
-<text x="321.2" y="1210.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">12.88 µs</text>
-<rect x="369.2" y="1197.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>RSA-2048 PKCS#1 verify, aws-lc-rs: 15.88 µs, 1.23× the fastest</title></rect>
-<text x="413.2" y="1210.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">15.88 µs</text>
-<rect x="461.2" y="1197.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>RSA-2048 PKCS#1 verify, ring: 16.51 µs, 1.28× the fastest</title></rect>
-<text x="505.2" y="1210.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">16.51 µs</text>
-<rect x="553.2" y="1197.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>RSA-2048 PKCS#1 verify, RustCrypto + dalek: 57.81 µs, 4.49× the fastest</title></rect>
-<text x="597.2" y="1210.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">57.81 µs</text>
-<rect x="645.2" y="1197.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>RSA-2048 PKCS#1 verify, graviola: 19.05 µs, 1.48× the fastest</title></rect>
-<text x="689.2" y="1210.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">19.05 µs</text>
-<rect x="829.2" y="1197.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>RSA-2048 PKCS#1 verify, OpenSSL: 24.54 µs, 1.91× the fastest</title></rect>
-<text x="873.2" y="1210.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">24.54 µs</text>
-<text x="12.0" y="1230.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">RSA-2048 PSS sign</text>
-<rect x="277.2" y="1217.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PSS sign, rind: 445.92 µs, 1.02× the fastest</title></rect>
-<text x="321.2" y="1230.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">445.92 µs</text>
-<rect x="369.2" y="1217.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PSS sign, aws-lc-rs: 461.87 µs, 1.06× the fastest</title></rect>
-<text x="413.2" y="1230.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">461.87 µs</text>
-<rect x="461.2" y="1217.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PSS sign, ring: 437.28 µs, 1.00× the fastest</title></rect>
-<text x="505.2" y="1230.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">437.28 µs</text>
-<rect x="553.2" y="1217.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>RSA-2048 PSS sign, RustCrypto + dalek: 1.15 ms, 2.63× the fastest</title></rect>
-<text x="597.2" y="1230.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.15 ms</text>
-<rect x="645.2" y="1217.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PSS sign, graviola: 450.24 µs, 1.03× the fastest</title></rect>
-<text x="689.2" y="1230.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">450.24 µs</text>
-<rect x="737.2" y="1217.0" width="88.0" height="18.0" rx="2" fill="#a50f15"><title>RSA-2048 PSS sign, libcrux: 7.22 ms, 16.51× the fastest; verified: HACL*'s F* proof of Hacl.RSAPSS's rsapss_skey_sign and rsapss_pkey_verify, signing without the CRT, compiled to Rust by an unverified step</title></rect>
-<text x="774.2" y="1230.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">7.22 ms</text>
-<g transform="translate(800.3 1220.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#ffffff"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#a50f15" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
-<rect x="829.2" y="1217.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PSS sign, OpenSSL: 456.55 µs, 1.04× the fastest</title></rect>
-<text x="873.2" y="1230.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">456.55 µs</text>
-<text x="12.0" y="1250.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">RSA-2048 PSS verify</text>
-<rect x="277.2" y="1237.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PSS verify, rind: 14.36 µs, 1.00× the fastest</title></rect>
-<text x="321.2" y="1250.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">14.36 µs</text>
-<rect x="369.2" y="1237.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>RSA-2048 PSS verify, aws-lc-rs: 17.01 µs, 1.18× the fastest</title></rect>
-<text x="413.2" y="1250.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">17.01 µs</text>
-<rect x="461.2" y="1237.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>RSA-2048 PSS verify, ring: 18.22 µs, 1.27× the fastest</title></rect>
-<text x="505.2" y="1250.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">18.22 µs</text>
-<rect x="553.2" y="1237.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>RSA-2048 PSS verify, RustCrypto + dalek: 70.02 µs, 4.88× the fastest</title></rect>
-<text x="597.2" y="1250.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">70.02 µs</text>
-<rect x="645.2" y="1237.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>RSA-2048 PSS verify, graviola: 21.85 µs, 1.52× the fastest</title></rect>
-<text x="689.2" y="1250.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">21.85 µs</text>
-<rect x="737.2" y="1237.0" width="88.0" height="18.0" rx="2" fill="#a50f15"><title>RSA-2048 PSS verify, libcrux: 377.87 µs, 26.32× the fastest; verified: HACL*'s F* proof of Hacl.RSAPSS's rsapss_skey_sign and rsapss_pkey_verify, signing without the CRT, compiled to Rust by an unverified step</title></rect>
-<text x="774.2" y="1250.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">377.87 µs</text>
-<g transform="translate(806.9 1240.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#ffffff"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#a50f15" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
-<rect x="829.2" y="1237.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>RSA-2048 PSS verify, OpenSSL: 27.16 µs, 1.89× the fastest</title></rect>
-<text x="873.2" y="1250.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">27.16 µs</text>
-<text x="12.0" y="1274.0" font-size="12" text-anchor="start" font-weight="bold" fill="#f0efec">ML-KEM</text>
-<line x1="12.0" y1="1278.0" x2="919.2" y2="1278.0" stroke="#383835"/>
-<text x="12.0" y="1296.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM-768 key generation</text>
-<rect x="277.2" y="1283.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>ML-KEM-768 key generation, rind: 10.24 µs, 1.00× the fastest</title></rect>
-<text x="321.2" y="1296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">10.24 µs</text>
-<rect x="369.2" y="1283.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>ML-KEM-768 key generation, aws-lc-rs: 18.44 µs, 1.80× the fastest</title></rect>
-<text x="413.2" y="1296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">18.44 µs</text>
-<rect x="553.2" y="1283.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>ML-KEM-768 key generation, RustCrypto + dalek: 59.97 µs, 5.86× the fastest</title></rect>
-<text x="597.2" y="1296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">59.97 µs</text>
-<rect x="645.2" y="1283.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>ML-KEM-768 key generation, graviola: 10.41 µs, 1.02× the fastest</title></rect>
-<text x="689.2" y="1296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">10.41 µs</text>
-<rect x="737.2" y="1283.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>ML-KEM-768 key generation, libcrux: 20.05 µs, 1.96× the fastest</title></rect>
-<text x="781.2" y="1296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">20.05 µs</text>
-<rect x="829.2" y="1283.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>ML-KEM-768 key generation, OpenSSL: 40.63 µs, 3.97× the fastest</title></rect>
-<text x="873.2" y="1296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">40.63 µs</text>
-<text x="12.0" y="1316.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM-768 encapsulate</text>
-<rect x="277.2" y="1303.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>ML-KEM-768 encapsulate, rind: 10.61 µs, 1.00× the fastest</title></rect>
-<text x="321.2" y="1316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">10.61 µs</text>
-<rect x="369.2" y="1303.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>ML-KEM-768 encapsulate, aws-lc-rs: 18.73 µs, 1.76× the fastest</title></rect>
-<text x="413.2" y="1316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">18.73 µs</text>
-<rect x="553.2" y="1303.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>ML-KEM-768 encapsulate, RustCrypto + dalek: 67.03 µs, 6.31× the fastest</title></rect>
-<text x="597.2" y="1316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">67.03 µs</text>
-<rect x="645.2" y="1303.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>ML-KEM-768 encapsulate, graviola: 11.12 µs, 1.05× the fastest</title></rect>
-<text x="689.2" y="1316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">11.12 µs</text>
-<rect x="737.2" y="1303.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>ML-KEM-768 encapsulate, libcrux: 18.13 µs, 1.71× the fastest</title></rect>
-<text x="781.2" y="1316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">18.13 µs</text>
-<rect x="829.2" y="1303.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>ML-KEM-768 encapsulate, OpenSSL: 41.18 µs, 3.88× the fastest</title></rect>
-<text x="873.2" y="1316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">41.18 µs</text>
-<text x="12.0" y="1336.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM-768 decapsulate</text>
-<rect x="277.2" y="1323.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>ML-KEM-768 decapsulate, rind: 7.07 µs, 1.00× the fastest</title></rect>
-<text x="321.2" y="1336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">7.07 µs</text>
-<rect x="369.2" y="1323.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>ML-KEM-768 decapsulate, aws-lc-rs: 16.01 µs, 2.26× the fastest</title></rect>
-<text x="413.2" y="1336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">16.01 µs</text>
-<rect x="553.2" y="1323.0" width="88.0" height="18.0" rx="2" fill="#a50f15"><title>ML-KEM-768 decapsulate, RustCrypto + dalek: 84.37 µs, 11.93× the fastest</title></rect>
-<text x="597.2" y="1336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">84.37 µs</text>
-<rect x="645.2" y="1323.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>ML-KEM-768 decapsulate, graviola: 7.42 µs, 1.05× the fastest</title></rect>
-<text x="689.2" y="1336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">7.42 µs</text>
-<rect x="737.2" y="1323.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>ML-KEM-768 decapsulate, libcrux: 19.04 µs, 2.69× the fastest</title></rect>
-<text x="781.2" y="1336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">19.04 µs</text>
-<rect x="829.2" y="1323.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>ML-KEM-768 decapsulate, OpenSSL: 31.67 µs, 4.48× the fastest</title></rect>
-<text x="873.2" y="1336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">31.67 µs</text>
-<text x="12.0" y="1360.0" font-size="12" text-anchor="start" font-weight="bold" fill="#f0efec">ML-DSA</text>
-<line x1="12.0" y1="1364.0" x2="919.2" y2="1364.0" stroke="#383835"/>
-<text x="12.0" y="1382.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-DSA-65 key generation</text>
-<text x="12.0" y="1402.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-DSA-65 sign</text>
-<text x="12.0" y="1422.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-DSA-65 verify</text>
-<text x="12.0" y="1446.0" font-size="12" text-anchor="start" font-weight="bold" fill="#f0efec">P-384 and P-521</text>
-<line x1="12.0" y1="1450.0" x2="919.2" y2="1450.0" stroke="#383835"/>
-<text x="12.0" y="1468.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-384 ECDH</text>
-<rect x="277.2" y="1455.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-384 ECDH, rind: 150.97 µs, 1.00× the fastest</title></rect>
-<text x="321.2" y="1468.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">150.97 µs</text>
-<rect x="369.2" y="1455.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>P-384 ECDH, aws-lc-rs: 174.62 µs, 1.16× the fastest</title></rect>
-<text x="413.2" y="1468.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">174.62 µs</text>
-<rect x="461.2" y="1455.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>P-384 ECDH, ring: 645.54 µs, 4.28× the fastest</title></rect>
-<text x="505.2" y="1468.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">645.54 µs</text>
-<rect x="553.2" y="1455.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>P-384 ECDH, RustCrypto + dalek: 769.61 µs, 5.10× the fastest</title></rect>
-<text x="597.2" y="1468.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">769.61 µs</text>
-<rect x="645.2" y="1455.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>P-384 ECDH, graviola: 245.24 µs, 1.62× the fastest</title></rect>
-<text x="689.2" y="1468.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">245.24 µs</text>
-<rect x="829.2" y="1455.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-384 ECDH, OpenSSL: 483.50 µs, 3.20× the fastest</title></rect>
-<text x="873.2" y="1468.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">483.50 µs</text>
-<text x="12.0" y="1488.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-384 ECDSA sign</text>
-<rect x="277.2" y="1475.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-384 ECDSA sign, rind: 39.62 µs, 1.00× the fastest</title></rect>
-<text x="321.2" y="1488.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">39.62 µs</text>
-<rect x="369.2" y="1475.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-384 ECDSA sign, aws-lc-rs: 82.65 µs, 2.09× the fastest</title></rect>
-<text x="413.2" y="1488.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">82.65 µs</text>
-<rect x="461.2" y="1475.0" width="88.0" height="18.0" rx="2" fill="#a50f15"><title>P-384 ECDSA sign, ring: 343.16 µs, 8.66× the fastest</title></rect>
-<text x="505.2" y="1488.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">343.16 µs</text>
-<rect x="553.2" y="1475.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>P-384 ECDSA sign, RustCrypto + dalek: 170.64 µs, 4.31× the fastest</title></rect>
-<text x="597.2" y="1488.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">170.64 µs</text>
-<rect x="645.2" y="1475.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-384 ECDSA sign, graviola: 128.64 µs, 3.25× the fastest</title></rect>
-<text x="689.2" y="1488.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">128.64 µs</text>
-<rect x="829.2" y="1475.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>P-384 ECDSA sign, OpenSSL: 164.53 µs, 4.15× the fastest</title></rect>
-<text x="873.2" y="1488.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">164.53 µs</text>
-<text x="12.0" y="1508.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-384 ECDSA verify</text>
-<rect x="277.2" y="1495.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-384 ECDSA verify, rind: 141.44 µs, 1.00× the fastest</title></rect>
-<text x="321.2" y="1508.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">141.44 µs</text>
-<rect x="369.2" y="1495.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>P-384 ECDSA verify, aws-lc-rs: 175.92 µs, 1.24× the fastest</title></rect>
-<text x="413.2" y="1508.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">175.92 µs</text>
-<rect x="461.2" y="1495.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>P-384 ECDSA verify, ring: 622.90 µs, 4.40× the fastest</title></rect>
-<text x="505.2" y="1508.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">622.90 µs</text>
-<rect x="553.2" y="1495.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>P-384 ECDSA verify, RustCrypto + dalek: 695.04 µs, 4.91× the fastest</title></rect>
-<text x="597.2" y="1508.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">695.04 µs</text>
-<rect x="645.2" y="1495.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>P-384 ECDSA verify, graviola: 239.41 µs, 1.69× the fastest</title></rect>
-<text x="689.2" y="1508.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">239.41 µs</text>
-<rect x="829.2" y="1495.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-384 ECDSA verify, OpenSSL: 399.63 µs, 2.83× the fastest</title></rect>
-<text x="873.2" y="1508.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">399.63 µs</text>
-<text x="12.0" y="1528.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-521 ECDH</text>
-<rect x="277.2" y="1515.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-521 ECDH, rind: 233.76 µs, 1.00× the fastest</title></rect>
-<text x="321.2" y="1528.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">233.76 µs</text>
-<rect x="369.2" y="1515.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>P-521 ECDH, aws-lc-rs: 262.34 µs, 1.12× the fastest</title></rect>
-<text x="413.2" y="1528.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">262.34 µs</text>
-<rect x="553.2" y="1515.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-521 ECDH, RustCrypto + dalek: 841.50 µs, 3.60× the fastest</title></rect>
-<text x="597.2" y="1528.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">841.50 µs</text>
-<rect x="829.2" y="1515.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-521 ECDH, OpenSSL: 497.39 µs, 2.13× the fastest</title></rect>
-<text x="873.2" y="1528.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">497.39 µs</text>
-<text x="12.0" y="1548.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-521 ECDSA sign</text>
-<rect x="277.2" y="1535.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-521 ECDSA sign, rind: 64.26 µs, 1.00× the fastest</title></rect>
-<text x="321.2" y="1548.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">64.26 µs</text>
-<rect x="369.2" y="1535.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-521 ECDSA sign, aws-lc-rs: 158.67 µs, 2.47× the fastest</title></rect>
-<text x="413.2" y="1548.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">158.67 µs</text>
-<rect x="553.2" y="1535.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-521 ECDSA sign, RustCrypto + dalek: 185.93 µs, 2.89× the fastest</title></rect>
-<text x="597.2" y="1548.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">185.93 µs</text>
-<rect x="829.2" y="1535.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-521 ECDSA sign, OpenSSL: 221.00 µs, 3.44× the fastest</title></rect>
-<text x="873.2" y="1548.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">221.00 µs</text>
-<text x="12.0" y="1568.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-521 ECDSA verify</text>
-<rect x="277.2" y="1555.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-521 ECDSA verify, rind: 214.43 µs, 1.00× the fastest</title></rect>
-<text x="321.2" y="1568.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">214.43 µs</text>
-<rect x="369.2" y="1555.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>P-521 ECDSA verify, aws-lc-rs: 303.23 µs, 1.41× the fastest</title></rect>
-<text x="413.2" y="1568.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">303.23 µs</text>
-<rect x="553.2" y="1555.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-521 ECDSA verify, RustCrypto + dalek: 636.37 µs, 2.97× the fastest</title></rect>
-<text x="597.2" y="1568.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">636.37 µs</text>
-<rect x="829.2" y="1555.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-521 ECDSA verify, OpenSSL: 460.02 µs, 2.15× the fastest</title></rect>
-<text x="873.2" y="1568.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">460.02 µs</text>
+<text x="12.0" y="1084.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">SHA3-256, 64 B</text>
+<text x="12.0" y="1104.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">SHA3-256, 1350 B</text>
+<text x="12.0" y="1124.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">SHA3-256, 16 KB</text>
+<text x="12.0" y="1144.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">SHA3-512, 64 B</text>
+<text x="12.0" y="1164.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">SHA3-512, 1350 B</text>
+<text x="12.0" y="1184.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">SHA3-512, 16 KB</text>
+<text x="12.0" y="1204.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">HMAC-SHA256, 64 B</text>
+<rect x="277.2" y="1191.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>HMAC-SHA256, 64 B, rind: 628 ns, 1.00× the fastest</title></rect>
+<text x="321.2" y="1204.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">628 ns</text>
+<rect x="369.2" y="1191.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>HMAC-SHA256, 64 B, aws-lc-rs: 811 ns, 1.29× the fastest</title></rect>
+<text x="413.2" y="1204.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">811 ns</text>
+<rect x="461.2" y="1191.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>HMAC-SHA256, 64 B, ring: 707 ns, 1.13× the fastest</title></rect>
+<text x="505.2" y="1204.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">707 ns</text>
+<rect x="553.2" y="1191.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>HMAC-SHA256, 64 B, RustCrypto + dalek: 1.19 µs, 1.89× the fastest</title></rect>
+<text x="597.2" y="1204.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.19 µs</text>
+<rect x="645.2" y="1191.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HMAC-SHA256, 64 B, graviola: 1.44 µs, 2.30× the fastest</title></rect>
+<text x="689.2" y="1204.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.44 µs</text>
+<rect x="737.2" y="1191.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>HMAC-SHA256, 64 B, libcrux: 1.20 µs, 1.92× the fastest; verified: HACL*'s F* proof of Hacl.HMAC's compute_sha2_256, compiled to Rust by an unverified step</title></rect>
+<text x="774.2" y="1204.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.20 µs</text>
+<g transform="translate(800.3 1194.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#f9d64a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="829.2" y="1191.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>HMAC-SHA256, 64 B, OpenSSL: 3.69 µs, 5.88× the fastest</title></rect>
+<text x="873.2" y="1204.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.69 µs</text>
+<text x="12.0" y="1224.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">HMAC-SHA256, 1350 B</text>
+<rect x="277.2" y="1211.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>HMAC-SHA256, 1350 B, rind: 2.79 µs, 1.00× the fastest</title></rect>
+<text x="321.2" y="1224.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.79 µs</text>
+<rect x="369.2" y="1211.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>HMAC-SHA256, 1350 B, aws-lc-rs: 3.30 µs, 1.18× the fastest</title></rect>
+<text x="413.2" y="1224.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.30 µs</text>
+<rect x="461.2" y="1211.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>HMAC-SHA256, 1350 B, ring: 3.19 µs, 1.14× the fastest</title></rect>
+<text x="505.2" y="1224.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.19 µs</text>
+<rect x="553.2" y="1211.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HMAC-SHA256, 1350 B, RustCrypto + dalek: 5.80 µs, 2.08× the fastest</title></rect>
+<text x="597.2" y="1224.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">5.80 µs</text>
+<rect x="645.2" y="1211.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HMAC-SHA256, 1350 B, graviola: 7.05 µs, 2.53× the fastest</title></rect>
+<text x="689.2" y="1224.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">7.05 µs</text>
+<rect x="737.2" y="1211.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HMAC-SHA256, 1350 B, libcrux: 6.02 µs, 2.16× the fastest; verified: HACL*'s F* proof of Hacl.HMAC's compute_sha2_256, compiled to Rust by an unverified step</title></rect>
+<text x="774.2" y="1224.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">6.02 µs</text>
+<g transform="translate(800.3 1214.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#f6a03c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="829.2" y="1211.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HMAC-SHA256, 1350 B, OpenSSL: 5.94 µs, 2.13× the fastest</title></rect>
+<text x="873.2" y="1224.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">5.94 µs</text>
+<text x="12.0" y="1244.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">HKDF-SHA256 extract and expand</text>
+<rect x="277.2" y="1231.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>HKDF-SHA256 extract and expand, rind: 1.15 µs, 1.00× the fastest</title></rect>
+<text x="321.2" y="1244.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.15 µs</text>
+<rect x="369.2" y="1231.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>HKDF-SHA256 extract and expand, aws-lc-rs: 1.44 µs, 1.25× the fastest</title></rect>
+<text x="413.2" y="1244.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.44 µs</text>
+<rect x="461.2" y="1231.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>HKDF-SHA256 extract and expand, ring: 1.31 µs, 1.14× the fastest</title></rect>
+<text x="505.2" y="1244.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.31 µs</text>
+<rect x="553.2" y="1231.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>HKDF-SHA256 extract and expand, RustCrypto + dalek: 1.98 µs, 1.72× the fastest</title></rect>
+<text x="597.2" y="1244.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.98 µs</text>
+<rect x="737.2" y="1231.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>HKDF-SHA256 extract and expand, libcrux: 2.04 µs, 1.77× the fastest; verified: HACL*'s F* proof of Hacl.HKDF's extract_sha2_256 and expand_sha2_256, compiled to Rust by an unverified step</title></rect>
+<text x="774.2" y="1244.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.04 µs</text>
+<g transform="translate(800.3 1234.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#f9d64a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="829.2" y="1231.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HKDF-SHA256 extract and expand, OpenSSL: 4.33 µs, 3.76× the fastest</title></rect>
+<text x="873.2" y="1244.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">4.33 µs</text>
+<text x="12.0" y="1264.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">HKDF-SHA256 expand</text>
+<rect x="277.2" y="1251.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>HKDF-SHA256 expand, rind: 300 ns, 1.00× the fastest</title></rect>
+<text x="321.2" y="1264.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">300 ns</text>
+<rect x="369.2" y="1251.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HKDF-SHA256 expand, aws-lc-rs: 636 ns, 2.12× the fastest</title></rect>
+<text x="413.2" y="1264.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">636 ns</text>
+<rect x="461.2" y="1251.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>HKDF-SHA256 expand, ring: 337 ns, 1.12× the fastest</title></rect>
+<text x="505.2" y="1264.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">337 ns</text>
+<rect x="553.2" y="1251.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>HKDF-SHA256 expand, RustCrypto + dalek: 512 ns, 1.71× the fastest</title></rect>
+<text x="597.2" y="1264.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">512 ns</text>
+<rect x="737.2" y="1251.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>HKDF-SHA256 expand, libcrux: 1.01 µs, 3.37× the fastest; verified: HACL*'s F* proof of Hacl.HKDF's extract_sha2_256 and expand_sha2_256, compiled to Rust by an unverified step</title></rect>
+<text x="774.2" y="1264.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.01 µs</text>
+<g transform="translate(800.3 1254.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#f6a03c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="829.2" y="1251.0" width="88.0" height="18.0" rx="2" fill="#a50f15"><title>HKDF-SHA256 expand, OpenSSL: 2.87 µs, 9.58× the fastest</title></rect>
+<text x="873.2" y="1264.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">2.87 µs</text>
+<text x="12.0" y="1288.0" font-size="12" text-anchor="start" font-weight="bold" fill="#f0efec">RSA</text>
+<line x1="12.0" y1="1292.0" x2="919.2" y2="1292.0" stroke="#383835"/>
+<text x="12.0" y="1310.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">RSA-2048 PKCS#1 sign</text>
+<rect x="277.2" y="1297.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PKCS#1 sign, rind: 447.43 µs, 1.03× the fastest</title></rect>
+<text x="321.2" y="1310.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">447.43 µs</text>
+<rect x="369.2" y="1297.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PKCS#1 sign, aws-lc-rs: 448.68 µs, 1.03× the fastest</title></rect>
+<text x="413.2" y="1310.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">448.68 µs</text>
+<rect x="461.2" y="1297.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PKCS#1 sign, ring: 434.47 µs, 1.00× the fastest</title></rect>
+<text x="505.2" y="1310.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">434.47 µs</text>
+<rect x="553.2" y="1297.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>RSA-2048 PKCS#1 sign, RustCrypto + dalek: 1.14 ms, 2.63× the fastest</title></rect>
+<text x="597.2" y="1310.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.14 ms</text>
+<rect x="645.2" y="1297.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PKCS#1 sign, graviola: 445.92 µs, 1.03× the fastest</title></rect>
+<text x="689.2" y="1310.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">445.92 µs</text>
+<rect x="829.2" y="1297.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PKCS#1 sign, OpenSSL: 453.81 µs, 1.04× the fastest</title></rect>
+<text x="873.2" y="1310.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">453.81 µs</text>
+<text x="12.0" y="1330.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">RSA-2048 PKCS#1 verify</text>
+<rect x="277.2" y="1317.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PKCS#1 verify, rind: 12.88 µs, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's RSASSA-PKCS1-v1_5 SHA-256 verification against RFC 8017, key loading's checks, R^2 mod n, and -n^-1 mod 2^64 included, down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of bignum_kmul_16_32, bignum_kmul_32_64, bignum_ksqr_16_32, bignum_ksqr_32_64, bignum_emontredc_8n, bignum_optsub, bignum_cmp_lt, bignum_bitsize, and bignum_negmodinv, of s2n-bignum's own object code, which rind transliterates</title></rect>
+<text x="314.2" y="1330.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">12.88 µs</text>
+<g transform="translate(343.6 1320.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="369.2" y="1317.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>RSA-2048 PKCS#1 verify, aws-lc-rs: 15.88 µs, 1.23× the fastest</title></rect>
+<text x="413.2" y="1330.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">15.88 µs</text>
+<rect x="461.2" y="1317.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>RSA-2048 PKCS#1 verify, ring: 16.51 µs, 1.28× the fastest</title></rect>
+<text x="505.2" y="1330.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">16.51 µs</text>
+<rect x="553.2" y="1317.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>RSA-2048 PKCS#1 verify, RustCrypto + dalek: 57.81 µs, 4.49× the fastest</title></rect>
+<text x="597.2" y="1330.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">57.81 µs</text>
+<rect x="645.2" y="1317.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>RSA-2048 PKCS#1 verify, graviola: 19.05 µs, 1.48× the fastest</title></rect>
+<text x="689.2" y="1330.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">19.05 µs</text>
+<rect x="829.2" y="1317.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>RSA-2048 PKCS#1 verify, OpenSSL: 24.54 µs, 1.91× the fastest</title></rect>
+<text x="873.2" y="1330.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">24.54 µs</text>
+<text x="12.0" y="1350.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">RSA-2048 PSS sign</text>
+<rect x="277.2" y="1337.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PSS sign, rind: 445.92 µs, 1.02× the fastest</title></rect>
+<text x="321.2" y="1350.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">445.92 µs</text>
+<rect x="369.2" y="1337.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PSS sign, aws-lc-rs: 461.87 µs, 1.06× the fastest</title></rect>
+<text x="413.2" y="1350.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">461.87 µs</text>
+<rect x="461.2" y="1337.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PSS sign, ring: 437.28 µs, 1.00× the fastest</title></rect>
+<text x="505.2" y="1350.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">437.28 µs</text>
+<rect x="553.2" y="1337.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>RSA-2048 PSS sign, RustCrypto + dalek: 1.15 ms, 2.63× the fastest</title></rect>
+<text x="597.2" y="1350.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.15 ms</text>
+<rect x="645.2" y="1337.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PSS sign, graviola: 450.24 µs, 1.03× the fastest</title></rect>
+<text x="689.2" y="1350.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">450.24 µs</text>
+<rect x="737.2" y="1337.0" width="88.0" height="18.0" rx="2" fill="#a50f15"><title>RSA-2048 PSS sign, libcrux: 7.22 ms, 16.51× the fastest; verified: HACL*'s F* proof of Hacl.RSAPSS's rsapss_skey_sign and rsapss_pkey_verify, signing without the CRT, compiled to Rust by an unverified step</title></rect>
+<text x="774.2" y="1350.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">7.22 ms</text>
+<g transform="translate(800.3 1340.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#ffffff"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#a50f15" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="829.2" y="1337.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PSS sign, OpenSSL: 456.55 µs, 1.04× the fastest</title></rect>
+<text x="873.2" y="1350.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">456.55 µs</text>
+<text x="12.0" y="1370.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">RSA-2048 PSS verify</text>
+<rect x="277.2" y="1357.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>RSA-2048 PSS verify, rind: 14.36 µs, 1.00× the fastest</title></rect>
+<text x="321.2" y="1370.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">14.36 µs</text>
+<rect x="369.2" y="1357.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>RSA-2048 PSS verify, aws-lc-rs: 17.01 µs, 1.18× the fastest</title></rect>
+<text x="413.2" y="1370.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">17.01 µs</text>
+<rect x="461.2" y="1357.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>RSA-2048 PSS verify, ring: 18.22 µs, 1.27× the fastest</title></rect>
+<text x="505.2" y="1370.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">18.22 µs</text>
+<rect x="553.2" y="1357.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>RSA-2048 PSS verify, RustCrypto + dalek: 70.02 µs, 4.88× the fastest</title></rect>
+<text x="597.2" y="1370.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">70.02 µs</text>
+<rect x="645.2" y="1357.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>RSA-2048 PSS verify, graviola: 21.85 µs, 1.52× the fastest</title></rect>
+<text x="689.2" y="1370.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">21.85 µs</text>
+<rect x="737.2" y="1357.0" width="88.0" height="18.0" rx="2" fill="#a50f15"><title>RSA-2048 PSS verify, libcrux: 377.87 µs, 26.32× the fastest; verified: HACL*'s F* proof of Hacl.RSAPSS's rsapss_skey_sign and rsapss_pkey_verify, signing without the CRT, compiled to Rust by an unverified step</title></rect>
+<text x="774.2" y="1370.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">377.87 µs</text>
+<g transform="translate(806.9 1360.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#ffffff"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#a50f15" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="829.2" y="1357.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>RSA-2048 PSS verify, OpenSSL: 27.16 µs, 1.89× the fastest</title></rect>
+<text x="873.2" y="1370.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">27.16 µs</text>
+<text x="12.0" y="1394.0" font-size="12" text-anchor="start" font-weight="bold" fill="#f0efec">ML-KEM</text>
+<line x1="12.0" y1="1398.0" x2="919.2" y2="1398.0" stroke="#383835"/>
+<text x="12.0" y="1416.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM-768 key generation</text>
+<rect x="277.2" y="1403.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>ML-KEM-768 key generation, rind: 10.24 µs, 1.00× the fastest</title></rect>
+<text x="321.2" y="1416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">10.24 µs</text>
+<rect x="369.2" y="1403.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>ML-KEM-768 key generation, aws-lc-rs: 18.44 µs, 1.80× the fastest</title></rect>
+<text x="413.2" y="1416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">18.44 µs</text>
+<rect x="553.2" y="1403.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>ML-KEM-768 key generation, RustCrypto + dalek: 59.97 µs, 5.86× the fastest</title></rect>
+<text x="597.2" y="1416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">59.97 µs</text>
+<rect x="645.2" y="1403.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>ML-KEM-768 key generation, graviola: 10.41 µs, 1.02× the fastest</title></rect>
+<text x="689.2" y="1416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">10.41 µs</text>
+<rect x="737.2" y="1403.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>ML-KEM-768 key generation, libcrux: 20.05 µs, 1.96× the fastest</title></rect>
+<text x="781.2" y="1416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">20.05 µs</text>
+<rect x="829.2" y="1403.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>ML-KEM-768 key generation, OpenSSL: 40.63 µs, 3.97× the fastest</title></rect>
+<text x="873.2" y="1416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">40.63 µs</text>
+<text x="12.0" y="1436.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM-768 encapsulate</text>
+<rect x="277.2" y="1423.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>ML-KEM-768 encapsulate, rind: 10.61 µs, 1.00× the fastest</title></rect>
+<text x="321.2" y="1436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">10.61 µs</text>
+<rect x="369.2" y="1423.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>ML-KEM-768 encapsulate, aws-lc-rs: 18.73 µs, 1.76× the fastest</title></rect>
+<text x="413.2" y="1436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">18.73 µs</text>
+<rect x="553.2" y="1423.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>ML-KEM-768 encapsulate, RustCrypto + dalek: 67.03 µs, 6.31× the fastest</title></rect>
+<text x="597.2" y="1436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">67.03 µs</text>
+<rect x="645.2" y="1423.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>ML-KEM-768 encapsulate, graviola: 11.12 µs, 1.05× the fastest</title></rect>
+<text x="689.2" y="1436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">11.12 µs</text>
+<rect x="737.2" y="1423.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>ML-KEM-768 encapsulate, libcrux: 18.13 µs, 1.71× the fastest</title></rect>
+<text x="781.2" y="1436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">18.13 µs</text>
+<rect x="829.2" y="1423.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>ML-KEM-768 encapsulate, OpenSSL: 41.18 µs, 3.88× the fastest</title></rect>
+<text x="873.2" y="1436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">41.18 µs</text>
+<text x="12.0" y="1456.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM-768 decapsulate</text>
+<rect x="277.2" y="1443.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>ML-KEM-768 decapsulate, rind: 7.07 µs, 1.00× the fastest</title></rect>
+<text x="321.2" y="1456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">7.07 µs</text>
+<rect x="369.2" y="1443.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>ML-KEM-768 decapsulate, aws-lc-rs: 16.01 µs, 2.26× the fastest</title></rect>
+<text x="413.2" y="1456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">16.01 µs</text>
+<rect x="553.2" y="1443.0" width="88.0" height="18.0" rx="2" fill="#a50f15"><title>ML-KEM-768 decapsulate, RustCrypto + dalek: 84.37 µs, 11.93× the fastest</title></rect>
+<text x="597.2" y="1456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">84.37 µs</text>
+<rect x="645.2" y="1443.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>ML-KEM-768 decapsulate, graviola: 7.42 µs, 1.05× the fastest</title></rect>
+<text x="689.2" y="1456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">7.42 µs</text>
+<rect x="737.2" y="1443.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>ML-KEM-768 decapsulate, libcrux: 19.04 µs, 2.69× the fastest</title></rect>
+<text x="781.2" y="1456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">19.04 µs</text>
+<rect x="829.2" y="1443.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>ML-KEM-768 decapsulate, OpenSSL: 31.67 µs, 4.48× the fastest</title></rect>
+<text x="873.2" y="1456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">31.67 µs</text>
+<text x="12.0" y="1476.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM-1024 key generation</text>
+<text x="12.0" y="1496.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM-1024 encapsulate</text>
+<text x="12.0" y="1516.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM-1024 decapsulate</text>
+<text x="12.0" y="1536.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM-512 key generation</text>
+<text x="12.0" y="1556.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM-512 encapsulate</text>
+<text x="12.0" y="1576.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM-512 decapsulate</text>
+<text x="12.0" y="1600.0" font-size="12" text-anchor="start" font-weight="bold" fill="#f0efec">ML-DSA</text>
+<line x1="12.0" y1="1604.0" x2="919.2" y2="1604.0" stroke="#383835"/>
+<text x="12.0" y="1622.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-DSA-65 key generation</text>
+<text x="12.0" y="1642.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-DSA-65 sign</text>
+<text x="12.0" y="1662.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-DSA-65 verify</text>
+<text x="12.0" y="1686.0" font-size="12" text-anchor="start" font-weight="bold" fill="#f0efec">P-384 and P-521</text>
+<line x1="12.0" y1="1690.0" x2="919.2" y2="1690.0" stroke="#383835"/>
+<text x="12.0" y="1708.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-384 ECDH</text>
+<rect x="277.2" y="1695.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-384 ECDH, rind: 150.97 µs, 1.00× the fastest</title></rect>
+<text x="321.2" y="1708.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">150.97 µs</text>
+<rect x="369.2" y="1695.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>P-384 ECDH, aws-lc-rs: 174.62 µs, 1.16× the fastest</title></rect>
+<text x="413.2" y="1708.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">174.62 µs</text>
+<rect x="461.2" y="1695.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>P-384 ECDH, ring: 645.54 µs, 4.28× the fastest</title></rect>
+<text x="505.2" y="1708.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">645.54 µs</text>
+<rect x="553.2" y="1695.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>P-384 ECDH, RustCrypto + dalek: 769.61 µs, 5.10× the fastest</title></rect>
+<text x="597.2" y="1708.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">769.61 µs</text>
+<rect x="645.2" y="1695.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>P-384 ECDH, graviola: 245.24 µs, 1.62× the fastest</title></rect>
+<text x="689.2" y="1708.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">245.24 µs</text>
+<rect x="829.2" y="1695.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-384 ECDH, OpenSSL: 483.50 µs, 3.20× the fastest</title></rect>
+<text x="873.2" y="1708.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">483.50 µs</text>
+<text x="12.0" y="1728.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-384 ECDSA sign</text>
+<rect x="277.2" y="1715.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-384 ECDSA sign, rind: 39.62 µs, 1.00× the fastest</title></rect>
+<text x="321.2" y="1728.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">39.62 µs</text>
+<rect x="369.2" y="1715.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-384 ECDSA sign, aws-lc-rs: 82.65 µs, 2.09× the fastest</title></rect>
+<text x="413.2" y="1728.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">82.65 µs</text>
+<rect x="461.2" y="1715.0" width="88.0" height="18.0" rx="2" fill="#a50f15"><title>P-384 ECDSA sign, ring: 343.16 µs, 8.66× the fastest</title></rect>
+<text x="505.2" y="1728.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">343.16 µs</text>
+<rect x="553.2" y="1715.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>P-384 ECDSA sign, RustCrypto + dalek: 170.64 µs, 4.31× the fastest</title></rect>
+<text x="597.2" y="1728.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">170.64 µs</text>
+<rect x="645.2" y="1715.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-384 ECDSA sign, graviola: 128.64 µs, 3.25× the fastest</title></rect>
+<text x="689.2" y="1728.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">128.64 µs</text>
+<rect x="829.2" y="1715.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>P-384 ECDSA sign, OpenSSL: 164.53 µs, 4.15× the fastest</title></rect>
+<text x="873.2" y="1728.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">164.53 µs</text>
+<text x="12.0" y="1748.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-384 ECDSA verify</text>
+<rect x="277.2" y="1735.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-384 ECDSA verify, rind: 141.44 µs, 1.00× the fastest</title></rect>
+<text x="321.2" y="1748.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">141.44 µs</text>
+<rect x="369.2" y="1735.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>P-384 ECDSA verify, aws-lc-rs: 175.92 µs, 1.24× the fastest</title></rect>
+<text x="413.2" y="1748.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">175.92 µs</text>
+<rect x="461.2" y="1735.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>P-384 ECDSA verify, ring: 622.90 µs, 4.40× the fastest</title></rect>
+<text x="505.2" y="1748.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">622.90 µs</text>
+<rect x="553.2" y="1735.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>P-384 ECDSA verify, RustCrypto + dalek: 695.04 µs, 4.91× the fastest</title></rect>
+<text x="597.2" y="1748.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">695.04 µs</text>
+<rect x="645.2" y="1735.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>P-384 ECDSA verify, graviola: 239.41 µs, 1.69× the fastest</title></rect>
+<text x="689.2" y="1748.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">239.41 µs</text>
+<rect x="829.2" y="1735.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-384 ECDSA verify, OpenSSL: 399.63 µs, 2.83× the fastest</title></rect>
+<text x="873.2" y="1748.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">399.63 µs</text>
+<text x="12.0" y="1768.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-521 ECDH</text>
+<rect x="277.2" y="1755.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-521 ECDH, rind: 233.76 µs, 1.00× the fastest</title></rect>
+<text x="321.2" y="1768.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">233.76 µs</text>
+<rect x="369.2" y="1755.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>P-521 ECDH, aws-lc-rs: 262.34 µs, 1.12× the fastest</title></rect>
+<text x="413.2" y="1768.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">262.34 µs</text>
+<rect x="553.2" y="1755.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-521 ECDH, RustCrypto + dalek: 841.50 µs, 3.60× the fastest</title></rect>
+<text x="597.2" y="1768.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">841.50 µs</text>
+<rect x="829.2" y="1755.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-521 ECDH, OpenSSL: 497.39 µs, 2.13× the fastest</title></rect>
+<text x="873.2" y="1768.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">497.39 µs</text>
+<text x="12.0" y="1788.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-521 ECDSA sign</text>
+<rect x="277.2" y="1775.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-521 ECDSA sign, rind: 64.26 µs, 1.00× the fastest</title></rect>
+<text x="321.2" y="1788.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">64.26 µs</text>
+<rect x="369.2" y="1775.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-521 ECDSA sign, aws-lc-rs: 158.67 µs, 2.47× the fastest</title></rect>
+<text x="413.2" y="1788.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">158.67 µs</text>
+<rect x="553.2" y="1775.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-521 ECDSA sign, RustCrypto + dalek: 185.93 µs, 2.89× the fastest</title></rect>
+<text x="597.2" y="1788.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">185.93 µs</text>
+<rect x="829.2" y="1775.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-521 ECDSA sign, OpenSSL: 221.00 µs, 3.44× the fastest</title></rect>
+<text x="873.2" y="1788.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">221.00 µs</text>
+<text x="12.0" y="1808.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-521 ECDSA verify</text>
+<rect x="277.2" y="1795.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-521 ECDSA verify, rind: 214.43 µs, 1.00× the fastest</title></rect>
+<text x="321.2" y="1808.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">214.43 µs</text>
+<rect x="369.2" y="1795.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>P-521 ECDSA verify, aws-lc-rs: 303.23 µs, 1.41× the fastest</title></rect>
+<text x="413.2" y="1808.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">303.23 µs</text>
+<rect x="553.2" y="1795.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-521 ECDSA verify, RustCrypto + dalek: 636.37 µs, 2.97× the fastest</title></rect>
+<text x="597.2" y="1808.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">636.37 µs</text>
+<rect x="829.2" y="1795.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-521 ECDSA verify, OpenSSL: 460.02 µs, 2.15× the fastest</title></rect>
+<text x="873.2" y="1808.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">460.02 µs</text>
 </svg>

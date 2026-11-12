@@ -61,6 +61,23 @@ mod generic {
     pub(super) mod ctr;
     #[cfg(test)]
     pub(crate) mod ghash;
+    // The portable backend's public-key arithmetic on limbs of `rind_limb`
+    // bits, whose 32-bit form armv7 shares, also built on both widths in
+    // x86_64 and aarch64 tests to check each against s2n-bignum.
+    #[cfg(any(
+        all(any(rind_backend = "arm", rind_backend = "portable"), rind_limb = "32"),
+        all(test, any(rind_backend = "x86_64", rind_backend = "aarch64"))
+    ))]
+    pub(crate) mod limb32;
+    #[cfg(any(
+        all(rind_backend = "portable", rind_limb = "64"),
+        all(test, any(rind_backend = "x86_64", rind_backend = "aarch64"))
+    ))]
+    pub(crate) mod limb64;
+    #[cfg(all(any(rind_backend = "arm", rind_backend = "portable"), rind_limb = "32"))]
+    pub(crate) use limb32 as limbs;
+    #[cfg(all(rind_backend = "portable", rind_limb = "64"))]
+    pub(crate) use limb64 as limbs;
     // Every target's MD5: no CPU has instructions for it.
     pub(super) mod md5;
     // ML-DSA arithmetic for the portable backend and x86_64 CPUs without
@@ -78,14 +95,6 @@ mod generic {
     // The portable backend's group orders, picked from by modulus.
     #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
     pub(crate) mod order;
-    // The portable backend's P-256, P-384, and P-521, also built in tests
-    // elsewhere to check them against s2n-bignum.
-    #[cfg(any(rind_backend = "arm", rind_backend = "portable", test))]
-    pub(crate) mod p256;
-    #[cfg(any(rind_backend = "arm", rind_backend = "portable", test))]
-    pub(crate) mod p384;
-    #[cfg(any(rind_backend = "arm", rind_backend = "portable", test))]
-    pub(crate) mod p521;
     // x86_64's separate-pass Poly1305 and the 64-bit portable backend's.
     // aarch64 runs Poly1305 only in aws-lc's one-pass ChaCha20-Poly1305,
     // whose tests check it against this.
@@ -160,10 +169,26 @@ mod portable;
 pub(crate) use generic::{
     bignum::{
         bignum_add, bignum_bitsize, bignum_cmp_lt, bignum_coprime, bignum_copy_row_from_table,
-        bignum_ctz, bignum_digitsize, bignum_modsub, bignum_montifier, bignum_montredc, bignum_mul,
-        bignum_negmodinv, bignum_optsub,
+        bignum_ctz, bignum_digitsize, bignum_modsub, bignum_negmodinv, bignum_optsub,
     },
     chacha20poly1305,
+    limbs::mont::{bignum_montifier, bignum_montredc, bignum_mul},
+    limbs::p256::{
+        bignum_add_p256, bignum_demont_p256, bignum_inv_p256, bignum_mod_n256, bignum_montmul_p256,
+        bignum_montsqr_p256, bignum_neg_p256, bignum_tomont_p256, p256_montjadd, p256_montjdouble,
+        p256_montjmixadd, p256_montjscalarmul, p256_scalarmulbase,
+    },
+    limbs::p384::{
+        bignum_add_p384, bignum_aff_point_select_p384, bignum_demont_p384, bignum_inv_p384,
+        bignum_jac_point_select_p384, bignum_mod_n384, bignum_montmul_p384, bignum_montsqr_p384,
+        bignum_mux, bignum_neg_p384, bignum_tomont_p384, p384_montjadd, p384_montjdouble,
+        p384_montjmixadd,
+    },
+    limbs::p521::{
+        bignum_add_p521, bignum_aff_point_select_p521, bignum_inv_p521, bignum_mod_n521,
+        bignum_mul_p521, bignum_neg_p521, bignum_sqr_p521, p521_jadd, p521_jdouble, p521_jmixadd,
+        p521_jscalarmul,
+    },
     mldsa_poly::{
         mldsa_caddq, mldsa_chknorm, mldsa_decompose_32, mldsa_decompose_88, mldsa_intt, mldsa_ntt,
         mldsa_nttunpack, mldsa_pointwise, mldsa_pointwise_acc, mldsa_poly_use_hint_32,
@@ -183,22 +208,6 @@ pub(crate) use generic::{
     // sign, it exports P-384 only as ECDH, and it has no P-521, so rind
     // composes their arithmetic itself.
     order::{bignum_demont, bignum_modadd, bignum_modinv, bignum_montmul},
-    p256::{
-        bignum_add_p256, bignum_demont_p256, bignum_inv_p256, bignum_mod_n256, bignum_montmul_p256,
-        bignum_montsqr_p256, bignum_neg_p256, bignum_tomont_p256, p256_montjadd, p256_montjdouble,
-        p256_montjmixadd, p256_montjscalarmul, p256_scalarmulbase,
-    },
-    p384::{
-        bignum_add_p384, bignum_aff_point_select_p384, bignum_demont_p384, bignum_inv_p384,
-        bignum_jac_point_select_p384, bignum_mod_n384, bignum_montmul_p384, bignum_montsqr_p384,
-        bignum_mux, bignum_neg_p384, bignum_tomont_p384, p384_montjadd, p384_montjdouble,
-        p384_montjmixadd,
-    },
-    p521::{
-        bignum_add_p521, bignum_aff_point_select_p521, bignum_inv_p521, bignum_mod_n521,
-        bignum_mul_p521, bignum_neg_p521, bignum_sqr_p521, p521_jadd, p521_jdouble, p521_jmixadd,
-        p521_jscalarmul,
-    },
 };
 #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
 pub(crate) use portable::{
@@ -480,7 +489,7 @@ cfg_if::cfg_if! {
         pub(crate) use portable::aes_ctr;
         pub(crate) use portable::chacha20;
         pub(crate) use portable::curve25519::curve25519_x25519;
-        pub(crate) use generic::bignum::{mont_mul, mont_sqr};
+        pub(crate) use generic::limbs::mont::{mont_mul, mont_sqr};
         pub(crate) use portable::keccak::{
             sha3_keccak4_f1600, sha3_keccak_f1600, sha3_keccak_nof4_f1600,
         };

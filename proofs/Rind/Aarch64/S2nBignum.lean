@@ -1,6 +1,7 @@
 import Rind.Aarch64.Funs
 import Rind.Spec
 import Rind.Ed25519
+import Rind.Keccak
 import Rind.Nist
 open Aeneas Aeneas.Std Result rind.spec
 
@@ -386,6 +387,33 @@ axiom p256_scalarmulbase_spec (res : Std.Array U64 8#usize) (scalar : Std.Array 
     low.aarch64.p256_scalarmulbase.p256_scalarmulbase res scalar table ⦃ r =>
       ∀ P, p256OnCurve P → p256Tabulates P table →
         p256AffineZ (pairNat r.val) (p256Pow P (wordsNat scalar.val)) ⦄
+
+/-! ### Keccak-f[1600]
+
+Each routine permutes the 25-lane states it is given in place, for the round
+constants rind passes. -/
+
+/-- `SHA3_KECCAK_F1600_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/sha3_keccak_f1600.ml#L460 -/
+axiom sha3_keccak_f1600_spec (a : Std.Array U64 25#usize) (rc : Std.Array U64 24#usize)
+    (hrc : rc.val.map (·.bv) = keccakRoundConstants) :
+    low.aarch64.sha3_keccak_f1600.sha3_keccak_f1600 a rc ⦃ r =>
+      r.val.map (·.bv) = keccak 24 (a.val.map (·.bv)) ⦄
+
+/-- `SHA3_KECCAK_F1600_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/sha3_keccak_f1600_alt.ml#L245 -/
+axiom sha3_keccak_f1600_alt_spec (a : Std.Array U64 25#usize) (rc : Std.Array U64 24#usize)
+    (hrc : rc.val.map (·.bv) = keccakRoundConstants) :
+    low.aarch64.sha3_keccak_f1600_alt.sha3_keccak_f1600 a rc ⦃ r =>
+      r.val.map (·.bv) = keccak 24 (a.val.map (·.bv)) ⦄
+
+/-- `SHA3_KECCAK2_F1600_SUBROUTINE_CORRECT`, whose two states are consecutive,
+as an array of them is,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/sha3_keccak2_f1600.ml#L313 -/
+axiom sha3_keccak2_f1600_spec (a : Std.Array (Std.Array U64 25#usize) 2#usize)
+    (rc : Std.Array U64 24#usize) (hrc : rc.val.map (·.bv) = keccakRoundConstants) :
+    low.aarch64.sha3_keccak2_f1600.sha3_keccak2_f1600 a rc ⦃ r =>
+      r.val.map (·.val.map (·.bv)) = (a.val.map (·.val.map (·.bv))).map (keccak 24) ⦄
 
 /-- rind runs on this CPU: its entry guards' CPU-feature checks pass. Neither
 reads an input. -/
