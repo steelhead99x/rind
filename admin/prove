@@ -487,6 +487,16 @@ aes_ni_items() {
         'const GF128_POLY_CARRY_MASK:'
 }
 check_quote X86_64/AesNi aes_ni_items
+aes_gcm_items() {
+    items rind/src/low/x86_64/ghash.rs 'macro_rules! mul {' 'macro_rules! reduce {' \
+        '    fn add(&self, bytes: &[u8], mut current: __m128i)' '    fn mul_h(' '    fn add_tail(' \
+        '    pub(crate) fn add(&mut self, bytes: &[u8]) {' '    pub(crate) fn tag(' 'pub(crate) fn _mul8(' \
+        'fn byte_reverse(' 'fn load_be(' 'const BYTESWAP:'
+    items rind/src/low/x86_64/aes.rs '    pub(crate) fn round_keys(&self)'
+    items rind/src/low/x86_64/aes_gcm.rs 'fn counter_block(' 'fn by8<' 'impl Counter {' 'const COUNTER_1:' \
+        'const BYTESWAP:' 'const BYTESWAP_EPI64:'
+}
+check_quote X86_64/AesGcmModel aes_gcm_items
 check_quote X86_64/AeadDispatch items rind/src/aead.rs 'pub struct Algorithm ' 'impl Algorithm {' \
     'pub static AES_128_GCM:' 'pub static AES_192_GCM:' 'pub static AES_256_GCM:' 'pub static CHACHA20_POLY1305:' 'impl Key {' \
     'struct Sealer<' 'type Seal<' 'type Open<' 'struct Ops<' 'impl<C: Cipher> Sealer<C> {' \
@@ -802,18 +812,22 @@ extract x86_64 X86_64 \
     --opaque '{crate::low::x86_64::ghash::GhashTableAvx512}::new' \
     --opaque 'crate::low::x86_64::ghash::_::from_powers' \
     --opaque 'crate::low::x86_64::ghash::_::add' \
+    --opaque 'crate::low::x86_64::ghash::_::add_by' \
     --opaque 'crate::low::x86_64::ghash::_::add_tail' \
     --opaque 'crate::low::x86_64::ghash::_::mul_h' \
-    --opaque crate::low::x86_64::ghash::Ghash \
+    --opaque 'crate::low::x86_64::ghash::_::tag' \
+    --opaque 'crate::low::x86_64::ghash::_::xi' \
+    --opaque 'crate::low::x86_64::ghash::_::set_xi' \
     --opaque crate::low::x86_64::ghash::u128_to_m128i \
     --opaque crate::low::x86_64::ghash::GF128_POLY_HI \
     --opaque crate::low::x86_64::ghash::GF128_POLY_CARRY_MASK \
-    --include crate::low::x86_64::aes_gcm::seal \
-    --include crate::low::x86_64::aes_gcm::open \
-    --include crate::low::x86_64::aes_gcm::vale \
-    --include crate::low::x86_64::aes_gcm::AVX_VALE_SEAL_FROM \
-    --include crate::low::x86_64::aes_gcm::VAES_AVX2_VALE_OPEN_BELOW \
-    --include crate::low::x86_64::aes_gcm::VAES_AVX2_VALE_SEAL_BELOW \
+    --include crate::low::x86_64::aes_gcm \
+    --opaque crate::low::x86_64::aes_gcm::counter_block \
+    --opaque crate::low::x86_64::aes_gcm::composed \
+    --opaque crate::low::x86_64::aes_gcm::by8 \
+    --opaque crate::low::x86_64::aes_gcm::_cipher_avx512 \
+    --opaque crate::low::x86_64::aes_gcm::Counter \
+    --opaque crate::low::x86_64::aes_gcm::Counter512 \
     --include crate::low::x86_64::aes_gcm_avx \
     --opaque crate::low::x86_64::aes_gcm_avx::counter_block \
     --opaque crate::low::x86_64::aes_gcm_avx::aead

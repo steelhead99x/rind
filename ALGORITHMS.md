@@ -647,8 +647,10 @@ measured 0.94-1.19x its time there on Coffee Lake (medians 1.04-1.06x). rind com
 in the layout Vale's proof assumes, since Vale's own setup measured twice as
 slow, and `proofs/` proves them and the Rust around Vale's routines end to
 end. Vale's proof stops at 2^32 bytes of message or AAD, so longer ones run
-the by-8 code, which no proof covers, as do those short seals, IVs other than 96 bits, and the
-opening of truncated tags, whose tag check Vale's routine does not take. Every 256- and 512-bit kernel rind runs ends with
+the by-8 code, as do those short seals, IVs other than 96 bits, and the
+opening of truncated tags, whose tag check Vale's routine does not take.
+`proofs/` proves the by-8 code against Vale's AES-GCM spec without that
+bound, for 96-bit IVs and full tags, with AES-128 and AES-256. Every 256- and 512-bit kernel rind runs ends with
 `vzeroupper`, so SSE code after one pays no AVX-SSE transition or false
 dependency. There is also an optional AVX-512 by-16 AES-CTR
 and GHASH.  It uses dynamic CPU feature detection, so AVX-512 is not required at runtime.

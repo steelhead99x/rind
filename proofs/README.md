@@ -235,9 +235,9 @@ and `Rind/X86_64/HkdfAead.lean` on x86_64:
   under the algorithm with the `tag_len` bytes of HKDF-Expand;
 - `header_key_from_spec`: ChaCha20 header protection holds the 32 bytes of
   HKDF-Expand, through `header_new_spec` over `chacha20_new`;
-- `aead_key_from_spec`: an AES-128-GCM or AES-256-GCM key holds AES-GCM on
-  Vale's tier for the `4 * nk` bytes of HKDF-Expand, under `RunsValeAesGcm`,
-  through `aead_key_new_spec` over `aes_gcm_new`;
+- `aead_key_from_spec`: an AES-128-GCM or AES-256-GCM key holds AES-GCM for
+  the `4 * nk` bytes of HKDF-Expand, under `RunsAesGcm`, through
+  `aead_key_new_spec` over `aes_gcm_new`;
 - `aead_key_from_chacha20_poly1305_spec`: a ChaCha20-Poly1305 key holds the
   32 bytes of HKDF-Expand, through `aead_key_new_chacha20_poly1305_spec` over
   `chacha20_poly1305_new`;
@@ -384,17 +384,20 @@ run `aes192_expand` and `aes_block`, and aarch64, whose intrinsics nothing
 models yet, have no proof: [the AES header-protection
 quest](/quest/m4/verified/aes-header-protection.md) owns them.
 
-AES-128-GCM and AES-256-GCM on x86_64 CPUs with AVX and MOVBE but no VAES,
-from the AEAD API's `Key` to HACL*'s Vale AES-GCM routines, in
-`Rind/X86_64/AesGcm.lean`:
+AES-128-GCM and AES-256-GCM on x86_64 CPUs with AES-NI and PCLMULQDQ, from
+the AEAD API's `Key` down to HACL*'s Vale AES-GCM routines on CPUs with AVX and
+MOVBE but no VAES, and to rind's own by-8 AES-CTR and GHASH on CPUs without
+AVX and for what Vale's routines do not take, in
+`Rind/X86_64/AesGcmAead.lean`:
 
 - `aes_gcm_new`: a key that is not the algorithm's length is refused, and
   otherwise the key holds FIPS 197's round keys for its bytes, as Vale's
   `key_to_round_keys_LE` lays them out, and the GHASH key powers Vale's
-  `hkeys_reqs_pub` requires of `E_K(0)`;
-- `aes_gcm_seal`: for AAD under 2^32 bytes and messages of 129 bytes up to
-  that, the ciphertext in place and the tag are Vale's `gcm_encrypt_LE` of the
-  key, nonce, message, and AAD;
+  `hkeys_reqs_pub` requires of `E_K(0)`, or by-8's table of its first eight
+  powers;
+- `aes_gcm_seal`: for AAD under 2^61 bytes and messages up to 2^36 - 32
+  bytes, the lengths rind takes, the ciphertext in place and the tag are
+  Vale's `gcm_encrypt_LE` of the key, nonce, message, and AAD;
 - `aes_gcm_seal_append_tag`: the same for a seal that appends the tag to any
   buffer: the ciphertext lands in the view its `as_mut` gives, and the call
   returns what its `extend` makes of that, handed the tag; and
@@ -402,36 +405,52 @@ from the AEAD API's `Key` to HACL*'s Vale AES-GCM routines, in
   the ciphertext followed by the tag, assuming `VecAsMut` and `VecExtend`,
   that std's impls view the whole vector and append the tag as
   `extend_from_slice` does;
-- `aes_gcm_open_separate_tag` and `aes_gcm_open`: for AAD and messages under
-  2^32 bytes, the call succeeds exactly when Vale's `gcm_decrypt_LE` accepts
-  the tag, leaving its plaintext in place, and otherwise fails, leaving zeros.
+- `aes_gcm_open_separate_tag` and `aes_gcm_open`: for the same lengths, the
+  call succeeds exactly when Vale's `gcm_decrypt_LE` accepts the tag, leaving
+  its plaintext in place, and otherwise fails, leaving zeros.
 
-Longer AAD or messages run the by-8 code, which no proof covers, as do
-seals of messages under 129 bytes, where it is faster, and AES-192 keys, for
-which Vale has no routine. The key setup is rind's: its AES-NI key expansion and block cipher, and its
+Vale's `gcm_encrypt_LE` and `gcm_decrypt_LE` bound the AAD and message under
+2^32 bytes, so `Rind/Vale.lean` transliterates them without it. Vale's
+routines run seals of 129 bytes and more and AAD and messages under 2^32
+bytes (`aes_gcm_encrypt_vale`, `aes_gcm_decrypt_vale` in
+`Rind/X86_64/AesGcm.lean`), and by-8 the rest. `Rind/X86_64/AesGcmBy8.lean`
+proves by-8, as `Rind/X86_64/AesGcmModel.lean` models it by hand, is Vale's `gctr_encrypt_LE` and `ghash_LE` without their bound:
+its counter is the block's 64-bit halves swapped, which `PADDD` steps as
+`inc32` does, its rounds FIPS 197's, and its GHASH the Horner rule on the
+padded blocks, with the eight-block loop's sum of descending powers of the
+key `Rind/X86_64/GhashClmul.lean` proves equal to it.
+`Rind/X86_64/AesGcmClmul.lean` proves `tagged` is `gcm_encrypt_LE` and
+`gcm_decrypt_LE` for a 96-bit nonce: the counter block is
+`compute_iv_BE`'s, the length block `gcm_hash`'s, and the tag GCTR on the
+hash under it, which by-8's `open` compares through `ct_equal`, so the opens
+rest on `Rind/X86_64/CtEqual.lean`'s contracts too. AES-192 keys run by-8 as
+well, which no proof covers, since Vale's AES spec has no AES-192. The key
+setup is rind's: its AES-NI key expansion and block cipher, which
+`Rind/X86_64/AesCipher.lean` proves for AES header protection too, and its
 PCLMULQDQ GHASH key powers, whose Karatsuba product and reduction
 `Rind/Gf128.lean` proves to be Vale's `gf128_mul_rev` of the shifted keys
-(`mul_shiftKey1`). The rest is the Rust around Vale's routines, which
-zero-pads the partial blocks and picks the six-block loop's share, as
-EverCrypt's proven Low* wrapper does. It pads them with GHASH's
-`load_partial` and `store_partial`, whose overlapping loads and stores
-`Rind/X86_64/PartialBlock.lean` proves are the bytes at every length. The theorems assume `RunsValeAesGcm`: rind's CPU-feature
-checks pick Vale's tier. `Rind/X86_64/AeadDispatch.lean` models the AEAD API's
-function pointers (`Algorithm`'s `expand` and `Sealer`'s `Ops`), and
-`seal_in_place_append_tag`, which is generic over its buffer.
+(`mul_shiftKey1`). Around Vale's routines, the Rust zero-pads the partial
+blocks and picks the six-block loop's share, as EverCrypt's proven Low*
+wrapper does. It pads them with GHASH's `load_partial` and `store_partial`,
+whose overlapping loads and stores `Rind/X86_64/PartialBlock.lean` proves are
+the bytes at every length. The theorems assume `RunsAesGcm`: rind's
+CPU-feature checks pick Vale's tier (`RunsValeAesGcm`) or the SSE tier
+(`RunsClmulAesGcm`), and the opens that `ct_equal`'s entry guard passes.
+`Rind/X86_64/AeadDispatch.lean` models the AEAD API's function pointers
+(`Algorithm`'s `expand` and `Sealer`'s `Ops`), and `seal_in_place_append_tag`,
+which is generic over its buffer.
 
 `aead::gcm::Key`, which takes an IV of any length, is proven on the same
-tier for a 12-byte IV and full 16-byte tags, in `Rind/X86_64/GcmKey.lean`, a
+tiers for a 12-byte IV and full 16-byte tags, in `Rind/X86_64/GcmKey.lean`, a
 hand model over `AeadDispatch` that quotes `rind/src/aead/gcm.rs`. Its
 `new` for AES-128 or AES-256 holds the `aead::Key` for the algorithm, which
 refuses a key of another length, and its `seal_in_place_separate_tag`,
 `seal_in_place_append_tag`, `open_in_place`, and `open_in_place_separate_tag`
 are `aead::Key`'s: `gcm_key_new`, `gcm_key_seal`, `gcm_key_seal_append_tag`,
-`gcm_key_open`, and `gcm_key_open_separate_tag`. The seals take messages of 129
-bytes and more, as `aes_gcm_seal` does, and every theorem bounds AAD and
-messages under 2^32 bytes. The other IV lengths and truncated tags run
-`encrypt_any` and `decrypt_any`, which no proof covers; the model leaves those
-arms opaque, and [the by-8 intrinsics quest](/quest/m4/verified/aes-gcm-x86-intrinsics.md)
+`gcm_key_open`, and `gcm_key_open_separate_tag`, for the same lengths. The
+other IV lengths and truncated tags run `encrypt_any` and `decrypt_any`,
+which no proof covers; the model leaves those arms opaque, and
+[the by-8 intrinsics quest](/quest/m4/verified/aes-gcm-x86-intrinsics.md)
 owns them.
 
 ChaCha20-Poly1305 and XChaCha20-Poly1305 on x86_64 CPUs with SSE4.1, from
@@ -486,8 +505,12 @@ dispatch models' quotes, if it builds a digest `Algorithm` outside
   `Rind/X86_64/ValeAesGcm.lean`: s2n-bignum's, aws-lc-verification's, and
   Vale's theorems, restated as axioms about the routines' Rust wrappers.
 - `Rind/X86_64/Simd.lean` and `Rind/X86_64/AesNi.lean`: models of the x86_64
-  intrinsics rind's AES-GCM setup and partial blocks call, and of its AES-NI
-  key expansion and block cipher, which load and store through raw pointers.
+  intrinsics rind's AES-GCM setup, partial blocks, and by-8 kernels call, and
+  of its AES-NI key expansion and block cipher, which load and store through
+  raw pointers; `Rind/X86_64/AesGcmModel.lean`: a hand model, over those
+  intrinsics, of its PCLMULQDQ GHASH and by-8 AES-GCM, whose raw pointers,
+  `transmute` constants, `as_chunks`, and zipped iterators Aeneas cannot
+  translate.
 - `Rind/Spec.lean` and `Rind/Bytes.lean`: the elliptic-curve, ChaCha20,
   Poly1305, and ChaCha20-Poly1305 specs and byte-conversion lemmas, and
   `Rind/ChaCha20Poly1305Test.lean`, the AEAD specs' known-answer tests; `Rind/Sha2.lean` and
@@ -508,7 +531,7 @@ dispatch models' quotes, if it builds a digest `Algorithm` outside
   and PBKDF2 APIs'; `Rind/X86_64/HkdfAead.lean`, HKDF's conversion to AES-GCM,
   ChaCha20-Poly1305, and AES header-protection keys;
   `Rind/X86_64/AesCipher.lean`, `cipher::Aes` and AES header protection, and
-  `Rind/X86_64/{AesKey,Ghash,PartialBlock,AesGcmGlue,AesGcm}.lean`:
+  `Rind/X86_64/{AesKey,Ghash,PartialBlock,AesGcmGlue,AesGcm,GhashClmul,AesGcmBy8,AesGcmClmul,AesGcmAead}.lean`:
   the AES-GCM proof, on x86_64 alone; `Rind/X86_64/GcmKey.lean`, the hand model
   of `aead::gcm::Key` and its proofs; `Rind/X86_64/ChaCha20Poly1305.lean`, the
   ChaCha20-Poly1305 and XChaCha20-Poly1305 proof above aws-lc's routines.
