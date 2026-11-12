@@ -397,4 +397,21 @@ exclude_re = [
   'rind-rustls/src/ticketer\.rs:133:\d+: replace \* with /$',
   'rind-rustls/src/ticketer\.rs:133:\d+: replace \* with \+$',
   'rind-rustls/src/verify\.rs:164:\d+: replace <impl fmt::Debug for Verify>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  # The first pass writes each block once, into memory that started zero, so
+  # xoring G into the block and storing G are the same bytes.
+  'rind/src/mid/argon2\.rs:\d+:\d+: replace > with >= in Geometry::fill_segment$',
+  # A slice is 0..SYNC_POINTS. slice == SYNC_POINTS + 1 and
+  # slice == SYNC_POINTS / 1 are never true, so the last slice takes the other
+  # start, one lane length, which reference_index reduces to the same column
+  # as a start of 0.
+  'rind/src/mid/argon2\.rs:208:\d+: replace - with \+ in Geometry::reference_index$',
+  'rind/src/mid/argon2\.rs:208:\d+: replace - with / in Geometry::reference_index$',
+  # three() is only called with read indices other than the block it writes.
+  # i == out panics for both comparisons.
+  'rind/src/mid/argon2\.rs:\d+:\d+: replace < with <= in three$',
+  # Every hashed message is shorter than 2^64 bytes, so the high half of
+  # BLAKE2b's counter is 0 whether it is shifted right or left, and xoring or
+  # or-ing 0 into v[13] leaves it unchanged.
+  'rind/src/mid/blake2b\.rs:105:\d+: replace \^= with \|= in compress$',
+  'rind/src/mid/blake2b\.rs:105:\d+: replace >> with << in compress$',
 ]
