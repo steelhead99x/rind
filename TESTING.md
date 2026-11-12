@@ -146,11 +146,11 @@ checks rind against the file, including on wasm. Regenerate the file from
 aws-lc, then commit it, with
 `cargo test -p rind --test cctv -- --ignored ed25519_record_aws_lc_verdicts`.
 That test is ignored, so a normal run only checks the recorded file.
-`just wasm` sets `SLOW_TESTS=1`, so that run includes the slow sets. The nightly `build.yml`
-runs the million-case accumulation in native release builds, on every denied
-x86_64/aarch64 tier, and through `just portable`. `just armv7` and
-`x86-cpu.yml`'s SDE models use the default 10,000 cases, even though they
-build in release mode.
+`just wasm` sets `SLOW_TESTS=1`, so that run includes the slow sets. The
+nightly `build.yml` runs the million-case accumulation in native release
+builds, on every denied x86_64/aarch64 tier, and through `just portable`.
+`just armv7` and `x86-cpu.yml`'s SDE models use the default 10,000 cases,
+even though they build in release mode.
 
 ## Undefined behavior
 
