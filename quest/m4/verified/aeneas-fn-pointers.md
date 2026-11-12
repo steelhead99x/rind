@@ -21,7 +21,7 @@ The models, each quoting the Rust it models, which `admin/prove:443-552` checks 
 - `'static` borrows ([AeneasVerif/aeneas#727](https://github.com/AeneasVerif/aeneas/issues/727), open): `DigestAlgorithm.lean` models `Digest`, whose `&'static Algorithm` (`rind/src/high/digest.rs:387`) Aeneas cannot end a borrow of `Digest` across.
 - Nested borrows ([AeneasVerif/aeneas#1186](https://github.com/AeneasVerif/aeneas/issues/1186), open, a slice of slice references read in a loop):
   - `proofs/Rind/X86_64/HkdfExpand.lean`: `Prk::expand_into`'s `info: &[&[u8]]` (`rind/src/high/hkdf.rs:76`);
-  - the `Drbg` hypothesis (`proofs/Rind/Aarch64/P256Ecdsa.lean:2303`): `HmacDrbg::update` takes the same shape (`rind/src/high/hmac_drbg.rs:46`), so `admin/prove:891` leaves the module opaque and the ECDSA theorems assume it seeds and draws without panicking.
+  - the `Drbg` hypothesis (`proofs/Rind/Aarch64/P256Ecdsa.lean:2303`): `HmacDrbg::update` takes the same shape (`rind/src/high/hmac_drbg.rs:46`), so `admin/prove:899` leaves the module opaque and the ECDSA theorems assume it seeds and draws without panicking.
 - A closure that returns a borrow of its argument (no issue found): `EcdsaDispatch.lean` takes `Buffer::write`'s `write` (`rind/src/high/signature.rs:91`) as a Lean function.
 - Atomics and interior mutability (no request for support found; [AeneasVerif/aeneas#1525](https://github.com/AeneasVerif/aeneas/issues/1525), open, reports `Cell::set` and `Atomic*::fetch_add` modelled as pure):
   - the `Cached` hypothesis (`P256Ecdsa.lean:1828`): `ReuseCache`'s `AtomicU8` and `UnsafeCell` (`rind/src/low/generic/reuse_cache.rs:19`);
