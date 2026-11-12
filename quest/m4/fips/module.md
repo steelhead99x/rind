@@ -53,16 +53,19 @@ From [the scope](/quest/m4/fips/README.md), 2026-11-11.
     behind the module's heap handles and are never moved.
   - DRBG state at process exit, as aws-lc's destructor does.
   Measure what this costs against rind and aws-lc-rs's FIPS build.
+- Decided 2026-11-12 (maintainer, /quest-unblock): ✅ `AGENTS.md`'s wipe
+  rule gains one line saying the FIPS module also wipes SSPs that live only
+  inside a call, as listed above, so the cost stays in `rind-fips` (rejected:
+  wipe temporaries in `rind` too, which slows every consumer). The same day
+  the maintainer made wiping mandatory in `rind`, removing the `wipe` feature
+  ([moq-dev/rind#609](https://github.com/moq-dev/rind/pull/609)), so the
+  module's "always enables `wipe`" needs nothing of its own once that lands.
 - CPU paths: every path the module can select on a tested operational
   environment gets its own ACVP run ([the client](/quest/m4/fips/acvp.md)),
   reached with a load-time CPU mask in the release build (today
   `RIND_CPU_DISABLE_*` works only in debug builds). Paths that run on no
   tested CPU, such as x86_64's SSE2 integer AES, are left out of the module,
   which refuses such CPUs with an error naming the feature.
-
-## Waiting
-
-- Maintainer: approve the module's exception to `AGENTS.md`'s wipe rule, which keeps stack temporaries and copies inside a call unwiped and leaves `wipe` opt-in. FIPS requires zeroizing SSPs once no longer needed, temporaries included. Options: add one line saying the FIPS module always wipes and also wipes SSPs inside a call (recommended: it confines the cost to `rind-fips`); or wipe temporaries in `rind` too, so the module needs no exception (slower for every consumer). An agent cannot change an `AGENTS.md` rule unprompted. Done once the rule is settled in the Plan and this item is deleted.
 
 ## Required
 
