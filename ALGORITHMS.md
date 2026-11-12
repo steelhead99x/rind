@@ -534,8 +534,8 @@ aws-lc does, adding terms from width-5 non-adjacent forms of the public
 scalars: `u2`'s over the public key's odd multiples, computed when the key is
 parsed and made affine by one batched inversion, and `u1`'s over the first
 row of the base point table, at width 6 for P256, as its aarch64 row holds 32
-multiples, or at width 7 for P384 over its own table of G to 63G's 32 odd
-multiples (3KB), so every addition is a mixed one. A key's second verification
+multiples, or at width 7 for P384 and P521 over their own tables of G to
+63G's 32 odd multiples (3KB and 4.5KB), so every addition is a mixed one. A key's second verification
 also builds 17Q to 31Q, so that `u2`'s digits widen to 6 from then on: a key
 verified once never pays for them. s2n-bignum's point
 additions are proven only for unequal points, so each addition first

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 #
-# Writes rind/src/mid/p521/precomp.rs, the P-521 generator table, from
+# Writes rind/src/mid/p521/precomp.rs, the P-521 generator tables, from
 # Python's integers rather than rind's arithmetic, which the
-# `p521::tests::base_point_precomp_comb` test then checks it against.
+# `p521::tests::base_point_precomp_comb` and
+# `p521::tests::generator_odd_multiples` tests then check them against.
 #
-# Table j holds i * 2^(20 * j) * G for i in 1..=16, as affine points, each
-# coordinate 9 little-endian 64-bit words.
+# Table j of the comb holds i * 2^(20 * j) * G for i in 1..=16, and the odd
+# multiples G, 3G, ..., 63G that verification's width-7 NAF digits pick, as
+# affine points, each coordinate 9 little-endian 64-bit words.
 
 import pathlib
 
@@ -15,6 +17,8 @@ GY = 0x11839296A789A3BC0045C8A5FB42C7D1BD998F54449579B446817AFBD17273E662C97EE72
 
 TABLES = 27
 POINTS = 16
+# Odd multiples, in rows of POINTS, as the comb's tables are.
+ODD_ROWS = 2
 
 
 def add(p1, p2):
@@ -53,6 +57,23 @@ for j in range(TABLES):
     out.append("    ],")
     for _ in range(20):
         base = add(base, base)
+out.append("];")
+out.append("")
+
+out.append(
+    f"pub(super) static CURVE_GENERATOR_ODD_MULTIPLES: [[u64; {POINTS * 18}]; {ODD_ROWS}] = ["
+)
+g2 = add((GX, GY), (GX, GY))
+point = (GX, GY)
+for j in range(ODD_ROWS):
+    first = 2 * POINTS * j + 1
+    out.append(f"    // {first}G, {first + 2}G, ..., {first + 2 * POINTS - 2}G")
+    out.append("    [")
+    for _ in range(POINTS):
+        for coord in point:
+            out.extend(f"        0x{w:016x}," for w in words(coord))
+        point = add(point, g2)
+    out.append("    ],")
 out.append("];")
 
 path = pathlib.Path(__file__).resolve().parent.parent / "rind/src/mid/p521/precomp.rs"
