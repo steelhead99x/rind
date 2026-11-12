@@ -17,7 +17,7 @@ use std::borrow::Cow;
 use std::mem::MaybeUninit;
 
 use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyImportError, PyMemoryError};
+use pyo3::exceptions::{PyException, PyMemoryError};
 use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};

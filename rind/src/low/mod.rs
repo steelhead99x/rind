@@ -214,7 +214,7 @@ mod x86_64;
 
 cfg_if::cfg_if! {
     if #[cfg(rind_backend = "x86_64")] {
-        pub(in crate::low) use x86_64::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state, };
+        pub(in crate::low) use x86_64::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
         pub(crate) use x86_64::chacha20;
         pub(crate) use x86_64::chacha20poly1305;
         pub(crate) use x86_64::aes::{AesDecKey, AesKey};
@@ -331,7 +331,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::sha3_keccak_nof4_f1600::sha3_keccak_nof4_f1600;
 
     } else if #[cfg(rind_backend = "aarch64")] {
-        pub(in crate::low) use aarch64::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state, };
+        pub(in crate::low) use aarch64::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
         pub(crate) use aarch64::aes::{AesDecKey, AesKey};
         pub(crate) use aarch64::aes_cbc;
         pub(crate) use aarch64::aes_ctr;
@@ -441,7 +441,7 @@ cfg_if::cfg_if! {
         pub(crate) use generic::mlkem::{mlkem_compress_d4, mlkem_compress_d10, mlkem_frombytes, mlkem_unpack};
         pub(crate) use generic::mlkem768::mlkem768_sample_poly_ntt_8x;
     } else if #[cfg(rind_backend = "arm")] {
-        pub(in crate::low) use arm::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state, };
+        pub(in crate::low) use arm::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
         pub(crate) use arm::aes::{AesDecKey, AesKey};
         pub(crate) use arm::aes_cbc;
         pub(crate) use arm::aes_ctr;
@@ -465,7 +465,7 @@ cfg_if::cfg_if! {
             sha512_compress_blocks,
         };
     } else if #[cfg(rind_backend = "portable")] {
-        pub(in crate::low) use portable::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state, };
+        pub(in crate::low) use portable::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
         pub(crate) use portable::aes::{AesDecKey, AesKey};
         pub(crate) use portable::aes_cbc;
         pub(crate) use portable::aes_ctr;
