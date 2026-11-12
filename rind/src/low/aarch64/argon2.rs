@@ -8,7 +8,7 @@
 //! Khovratovich, Jean-Philippe Aumasson, and Samuel Neves; CC0-1.0). The lane
 //! shuffles are that code's, so a block it returns matches the scalar one.
 //!
-//! Four changes from that code, none of which moves a lane:
+//! Five changes from that code, none of which moves a lane:
 //!
 //! - BlaMka narrows both halves of a pair with one `uzp1`, where the reference
 //!   narrows each half alone. The SHA3 build then accumulates the product into
@@ -23,6 +23,11 @@
 //!   is a single dependency chain two vectors wide: on a Cortex-A76 the
 //!   one-round fill spent about two thirds of its cycles stalled in the back
 //!   end, and two rounds at once took a third fewer cycles per block.
+//! - The plain NEON fill runs rounds 6 and 7 of each pass as scalar code,
+//!   one beside each of the first two vector pairs, on the integer units the
+//!   vector rounds leave idle. On the A76 that took a further 17% fewer cycles
+//!   per block. The SHA3 fill does not: on an Apple M1 Pro the scalar rounds
+//!   made the 64 MiB fill about 6% slower.
 //!
 //! aarch64 requires NEON. [`crate::low::cpu::check`] refuses a CPU without it,
 //! naming `neon`, before a public call reaches here. This function does not
@@ -174,11 +179,61 @@ macro_rules! round {
     };
 }
 
-/// The fill, built once per instruction set. The caller's module supplies
+/// As `round!`, with a third, scalar round on `$s` (sixteen words, in the
+/// lane order the vectors hold) between the vector steps, for the integer
+/// units the vector rounds leave idle.
+macro_rules! round_with_scalar {
+    ($v:ident, $s:ident) => {
+        g1(&mut $v);
+        super::scalar::half(&mut $s, &super::scalar::COLUMNS, 32, 24);
+        g2(&mut $v);
+        super::scalar::half(&mut $s, &super::scalar::COLUMNS, 16, 63);
+        diagonalize(&mut $v[0]);
+        diagonalize(&mut $v[1]);
+        g1(&mut $v);
+        super::scalar::half(&mut $s, &super::scalar::DIAGONALS, 32, 24);
+        g2(&mut $v);
+        super::scalar::half(&mut $s, &super::scalar::DIAGONALS, 16, 63);
+        undiagonalize(&mut $v[0]);
+        undiagonalize(&mut $v[1]);
+    };
+}
+
+/// The scalar `BLAKE2_ROUND` the fill runs beside two vector rounds.
+mod scalar {
+    /// The `(a, b, c, d)` words of each G, by column and then by diagonal.
+    pub(super) const COLUMNS: [[usize; 4]; 4] =
+        [[0, 4, 8, 12], [1, 5, 9, 13], [2, 6, 10, 14], [3, 7, 11, 15]];
+    pub(super) const DIAGONALS: [[usize; 4]; 4] =
+        [[0, 5, 10, 15], [1, 6, 11, 12], [2, 7, 8, 13], [3, 4, 9, 14]];
+
+    /// `x + y + 2 * (x mod 2^32) * (y mod 2^32)`.
+    #[inline(always)]
+    fn blamka(x: u64, y: u64) -> u64 {
+        let product = (x & 0xFFFF_FFFF) * (y & 0xFFFF_FFFF);
+        x.wrapping_add(y)
+            .wrapping_add(product.wrapping_add(product))
+    }
+
+    /// Half of each of four G steps: the rotations by 32 and 24, or by 16
+    /// and 63.
+    #[inline(always)]
+    pub(super) fn half(s: &mut [u64; 16], gs: &[[usize; 4]; 4], r1: u32, r2: u32) {
+        for &[a, b, c, d] in gs {
+            s[a] = blamka(s[a], s[b]);
+            s[d] = (s[d] ^ s[a]).rotate_right(r1);
+            s[c] = blamka(s[c], s[d]);
+            s[b] = (s[b] ^ s[c]).rotate_right(r2);
+        }
+    }
+}
+
+/// The fill, built once per instruction set, with or without the scalar
+/// rider rounds of `round_with_scalar!`. The caller's module supplies
 /// `xor_rotr32`, `xor_rotr24`, `xor_rotr16` and `xor_rotr63`, each
 /// `(x ^ y).rotate_right(n)` on both lanes, and `blamka2`.
 macro_rules! fill {
-    ($features:literal) => {
+    ($features:literal, $scalar_rider:literal) => {
         use core::arch::aarch64::*;
         use core::mem::MaybeUninit;
 
@@ -201,9 +256,12 @@ macro_rules! fill {
             // `state` and `xy` lane before the row rounds read it, and they
             // read `next` before the row rounds overwrite it.
             unsafe {
-                // Two independent rounds at a time: one round's G steps form a
-                // single dependency chain, which a narrow core waits on.
-                for col in (0..8).step_by(2) {
+                // Two independent vector rounds at a time: one round's G
+                // steps form a single dependency chain, which a narrow core
+                // waits on. With `$scalar_rider`, rounds 6 and 7 of each pass
+                // run in scalar registers beside the first two pairs.
+                let words = |lanes: *mut MaybeUninit<uint64x2_t>| lanes.cast::<u64>();
+                for col in (0..if $scalar_rider { 6 } else { 8 }).step_by(2) {
                     let mut v = [[vdupq_n_u64(0); 8]; 2];
                     for (j, half) in v.iter_mut().enumerate() {
                         for (k, lane) in half.iter_mut().enumerate() {
@@ -220,21 +278,58 @@ macro_rules! fill {
                             *lane = r;
                         }
                     }
-                    round!(v);
+                    if $scalar_rider && col < 4 {
+                        // Column 6 + col / 2: words 16 * c onwards.
+                        let base = 16 * (6 + col / 2);
+                        let mut s = [0u64; 16];
+                        for (k, word) in s.iter_mut().enumerate() {
+                            let r = *prev.0.get_unchecked(base + k)
+                                ^ *reference.0.get_unchecked(base + k);
+                            words(xy.as_mut_ptr()).add(base + k).write(if with_xor {
+                                r ^ *next.0.get_unchecked(base + k)
+                            } else {
+                                r
+                            });
+                            *word = r;
+                        }
+                        round_with_scalar!(v, s);
+                        for (k, word) in s.into_iter().enumerate() {
+                            words(state.as_mut_ptr()).add(base + k).write(word);
+                        }
+                    } else {
+                        round!(v);
+                    }
                     for (j, half) in v.into_iter().enumerate() {
                         for (k, lane) in half.into_iter().enumerate() {
                             state[8 * (col + j) + k].write(lane);
                         }
                     }
                 }
-                for row in (0..8).step_by(2) {
+                for row in (0..if $scalar_rider { 6 } else { 8 }).step_by(2) {
                     let mut v = [[vdupq_n_u64(0); 8]; 2];
                     for (j, half) in v.iter_mut().enumerate() {
                         for (k, lane) in half.iter_mut().enumerate() {
                             *lane = state[row + j + 8 * k].assume_init();
                         }
                     }
-                    round!(v);
+                    if $scalar_rider && row < 4 {
+                        // Row 6 + row / 2: lanes r, r + 8, ..., two words each.
+                        let r = 6 + row / 2;
+                        let mut s = [0u64; 16];
+                        for (k, word) in s.iter_mut().enumerate() {
+                            *word = words(state.as_mut_ptr())
+                                .add(2 * (r + 8 * (k / 2)) + k % 2)
+                                .read();
+                        }
+                        round_with_scalar!(v, s);
+                        for (k, word) in s.into_iter().enumerate() {
+                            let w = 2 * (r + 8 * (k / 2)) + k % 2;
+                            *next.0.get_unchecked_mut(w) =
+                                word ^ words(xy.as_mut_ptr()).add(w).read();
+                        }
+                    } else {
+                        round!(v);
+                    }
                     for (j, half) in v.into_iter().enumerate() {
                         for (k, lane) in half.into_iter().enumerate() {
                             let i = row + j + 8 * k;
@@ -300,7 +395,7 @@ macro_rules! fill {
 mod neon {
     use super::blamka2_umull as blamka2;
 
-    fill!("neon");
+    fill!("neon", true);
 
     #[target_feature(enable = "neon")]
     fn xor_rotr32(x: uint64x2_t, y: uint64x2_t) -> uint64x2_t {
@@ -334,7 +429,7 @@ mod neon {
 mod sha3 {
     use super::blamka2_umlal as blamka2;
 
-    fill!("neon,sha3");
+    fill!("neon,sha3", false);
 
     #[target_feature(enable = "neon,sha3")]
     fn xor_rotr32(x: uint64x2_t, y: uint64x2_t) -> uint64x2_t {

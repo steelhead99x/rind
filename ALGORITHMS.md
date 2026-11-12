@@ -76,11 +76,15 @@ SHA-512.
   20.5 ms with SHA3 and 23.7 ms with NEON alone, against 32.5 ms for
   RustCrypto's portable code; at 1 MiB and three passes, 0.56 ms and 0.73 ms,
   against 1.07 ms, timed on a loaded host. On a Raspberry Pi 5 (Cortex-A76,
-  no SHA3, clocked at 1.5 GHz) the NEON fill took 3.11 ms at 1 MiB and
-  90.4 ms at 64 MiB against RustCrypto's 4.20 ms and 118 ms. Each pass runs
+  no SHA3, clocked at 1.5 GHz) the NEON fill took 2.58 ms at 1 MiB and
+  84.6 ms at 64 MiB against RustCrypto's 4.22 ms and 119 ms. Each pass runs
   two rounds at once: with one, the A76 spent about two thirds of its cycles
   stalled waiting on the round's single dependency chain, and the fill took
-  4.73 ms and 124 ms. The SHA3 build's BlaMka accumulates with `umlal`, the
+  4.73 ms and 124 ms. The NEON fill also runs two of each pass's eight rounds
+  as scalar code beside the vector pairs, on integer units the vector code
+  leaves idle; without that it took 3.12 ms and 92.2 ms. The SHA3 fill does
+  not, since on the M1 Pro the scalar rounds made the 64 MiB fill about 6%
+  slower. The SHA3 build's BlaMka accumulates with `umlal`, the
   NEON build's doubles a `umull`: on the A76 the `umlal` form took 4% to 5%
   longer. HACL\*'s verified BLAKE2b does not implement
   BlaMka, and the hash is negligible beside the fill, so no verified
