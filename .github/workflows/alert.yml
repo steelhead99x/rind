@@ -25,6 +25,7 @@ on:
       - miri
       - mutants
       - prove
+      - Pullfrog
       - python
       - quality lints
       - Queue
