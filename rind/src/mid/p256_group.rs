@@ -6,11 +6,10 @@
 //! products ECDH already uses. Verification adds public points with the
 //! complete sum, which has to accept a peer forcing equal or opposite inputs.
 
+pub(crate) use super::Scalar;
 use super::{AffineMontPoint, JacobianMontPoint};
 use crate::error::Error;
 use crate::low;
-
-pub(crate) use super::Scalar;
 
 /// A P-256 point, or the identity, which the compressed encoding cannot hold.
 #[derive(Clone, Copy)]

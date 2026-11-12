@@ -292,7 +292,7 @@ pub mod blind_rsa {
 ///
 /// ```
 /// # fn main() -> Result<(), rind::Error> {
-/// use rind::vrf::{SecretKey, ECVRF_EDWARDS25519_SHA512_TAI};
+/// use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, SecretKey};
 ///
 /// let key = SecretKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, &[1; 32])?;
 /// let (proof, output) = key.prove(b"alpha")?;
