@@ -507,7 +507,7 @@
             # The nightly MSRV job builds in it. The workspace's rust-version
             # names a minor release, which resolves to its latest patch, as
             # rustup does. The extra targets let it check rind's other
-            # backends, which `check` does without a C toolchain.
+            # backends and 32-bit x86, which `check` does without a C toolchain.
             msrv = pkgs.mkShell {
               packages = [
                 (pkgs.rust-bin.fromRustupToolchain {
@@ -516,6 +516,7 @@
                   targets = [
                     "aarch64-unknown-linux-gnu"
                     "armv7-unknown-linux-gnueabihf"
+                    "i686-unknown-linux-gnu"
                   ];
                 })
               ];

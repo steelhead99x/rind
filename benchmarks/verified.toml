@@ -48,8 +48,9 @@
 # aws-lc's unproven routines, which are faster there, so neither SHA-512 nor
 # Ed25519 earns the ✓ there. Every other rind operation runs unverified code,
 # such as SHA-256's block function on x86_64 or without the crypto extension,
-# under padding and HMAC glue that `proofs/` proves, or x86_64 P-256 ECDH's
-# Jacobian-to-affine conversion.
+# under padding and HMAC glue that `proofs/` proves, ChaCha20-Poly1305's
+# aws-lc one-pass routines on x86_64, under glue `proofs/` proves, or x86_64
+# P-256 ECDH's Jacobian-to-affine conversion.
 [[verified]]
 library = "rind"
 operations = ["x25519-ecdh"]

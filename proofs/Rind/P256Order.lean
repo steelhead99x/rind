@@ -1,190 +1,23 @@
+import Rind.NistGroup
 import Rind.P256Multiples
 import Mathlib.Algebra.Polynomial.Div
-import Mathlib.Data.Fintype.EquivFin
 import Mathlib.FieldTheory.Finite.Basic
-import Mathlib.GroupTheory.Perm.Cycle.Type
 
 /-!
 # Every finite point of P-256 has order n
 
-`P256Order` is no longer a hypothesis. The group has n points: at most two
-affine points share an x-coordinate, so with the point at infinity there are
-at most 2p + 1, which is less than 3n, and n divides the order because G has
-order n and n is prime. The only other possibility is 2n, which would hold a
-point of order 2, a root of x³ − 3x + b. A remainder of xᵖ modulo that cubic,
-and Bézout coefficients against it, show the cubic has no root.
-
-The counting steps are stated for any odd prime field and any b, so P-384 and
-P-521 apply them with their own no-root certificates.
+`P256Order` is no longer a hypothesis. The count is `nist.order` in
+`Rind.NistGroup`: at most 2p + 1 points, n divides that order, and 2n would
+hold a root of x³ − 3x + b. This file is P-256's certificate that the cubic
+has no root, a remainder of xᵖ and Bézout coefficients against it. P-384 and
+P-521 reuse `nist.order` with their own certificates.
 -/
 
 noncomputable section
 
-open Polynomial WeierstrassCurve WeierstrassCurve.Affine
+open Polynomial
 
 namespace rind.spec
-
-/-! ## y² = x³ − 3x + b -/
-
-/-- The curve y² = x³ − 3x + `b` over `ZMod p`. -/
-def nistCurve {p : ℕ} [Fact p.Prime] (b : ZMod p) : WeierstrassCurve.Affine (ZMod p) :=
-  ({ a₁ := 0, a₂ := 0, a₃ := 0, a₄ := -3, a₆ := b } : WeierstrassCurve (ZMod p)).toAffine
-
-theorem p256Curve_eq : p256Curve = nistCurve (b256 : ZMod p256) := rfl
-
-variable {p : ℕ} [Fact p.Prime]
-
-theorem y_sq (b : ZMod p) {x y : ZMod p} (h : (nistCurve b).Equation x y) :
-    y ^ 2 = x ^ 3 - 3 * x + b := by
-  rw [equation_iff] at h
-  simp only [nistCurve, toAffine] at h
-  linear_combination h
-
-/-- Which half of the field a representative lies in. For an odd prime, `y` and
-`-y` lie in different halves whenever they are distinct. -/
-def halfBit (y : ZMod p) : Fin 2 :=
-  if y.val ≤ (p - 1) / 2 then 0 else 1
-
-theorem halfBit_neg {y : ZMod p} (hp : p ≠ 2) (hy : y ≠ -y) : halfBit y ≠ halfBit (-y) := by
-  have hy0 : y ≠ 0 := by
-    rintro rfl
-    exact hy (by simp)
-  have : NeZero y := ⟨hy0⟩
-  have hval : (-y).val = p - y.val := ZMod.val_neg_of_ne_zero y
-  have hodd : p % 2 = 1 := by
-    rcases Nat.Prime.eq_two_or_odd (Fact.out : Nat.Prime p) with h | h
-    · exact absurd h hp
-    · exact h
-  unfold halfBit
-  by_cases hyh : y.val ≤ (p - 1) / 2
-  · have hgt : ¬p - y.val ≤ (p - 1) / 2 := by
-      have hyv : y.val < p := y.val_lt
-      omega
-    simp [hval, hyh, hgt]
-  · have hle : p - y.val ≤ (p - 1) / 2 := by
-      have hyv : y.val < p := y.val_lt
-      have hpos : 0 < y.val := Nat.pos_of_ne_zero fun h => hy0 ((ZMod.val_eq_zero y).mp h)
-      omega
-    simp [hval, hyh, hle]
-
-/-- Infinity, or an affine point's x-coordinate and which half its y lies in. -/
-def pack (b : ZMod p) : (nistCurve b).Point → Option (ZMod p × Fin 2)
-  | .zero => none
-  | .some x y _ => some (x, halfBit y)
-
-theorem pack_injective (b : ZMod p) (hp : p ≠ 2) : Function.Injective (pack b) := by
-  intro P Q hPQ
-  cases P with
-  | zero =>
-    cases Q with
-    | zero => rfl
-    | some _ _ _ => simp [pack] at hPQ
-  | some x y h =>
-    cases Q with
-    | zero => simp [pack] at hPQ
-    | some x' y' h' =>
-      simp only [pack, Option.some.injEq, Prod.mk.injEq] at hPQ
-      rcases hPQ with ⟨rfl, hbit⟩
-      have hy2 : y ^ 2 = y' ^ 2 := by
-        linear_combination y_sq b h.1 - y_sq b h'.1
-      have hfac : (y - y') * (y + y') = 0 := by linear_combination hy2
-      rcases mul_eq_zero.mp hfac with hsub | hadd
-      · have hyy : y = y' := sub_eq_zero.mp hsub
-        subst hyy
-        congr
-      · have hyneg : y = -y' := (eq_neg_iff_add_eq_zero).2 hadd
-        by_cases hsame : y = y'
-        · subst hsame
-          congr
-        · have hne : y ≠ -y := by
-            intro hyy
-            apply hsame
-            apply neg_injective
-            rw [← hyneg]
-            exact hyy.symm
-          have : halfBit y = halfBit (-y) := by simpa [hyneg] using hbit
-          exact absurd this (halfBit_neg hp hne)
-
-theorem nist_finite (b : ZMod p) (hp : p ≠ 2) : Finite (nistCurve b).Point :=
-  Finite.of_injective (pack b) (pack_injective b hp)
-
-theorem nist_card_le (b : ZMod p) (hp : p ≠ 2) : Nat.card (nistCurve b).Point ≤ 2 * p + 1 := by
-  have := nist_finite b hp
-  have := Fintype.ofFinite (nistCurve b).Point
-  rw [Nat.card_eq_fintype_card]
-  refine (Fintype.card_le_of_injective (pack b) (pack_injective b hp)).trans ?_
-  rw [Fintype.card_option, Fintype.card_prod, ZMod.card, Fintype.card_fin]
-  omega
-
-theorem no_two_torsion (b : ZMod p) (hp : p ≠ 2)
-    (hnoroot : ∀ x : ZMod p, x ^ 3 - 3 * x + b ≠ 0) (Q : (nistCurve b).Point) :
-    addOrderOf Q ≠ 2 := by
-  intro hQ
-  have h2 : (2 : ℕ) • Q = 0 :=
-    (addOrderOf_dvd_iff_nsmul_eq_zero).mp (by simp [hQ])
-  have hneg : Q = -Q := eq_neg_of_add_eq_zero_left (by simpa [two_nsmul] using h2)
-  cases Q with
-  | zero =>
-    rw [show Point.zero = (0 : (nistCurve b).Point) from rfl, addOrderOf_zero] at hQ
-    omega
-  | some x y hns =>
-    have hform : -(.some x y hns : (nistCurve b).Point) =
-        (.some x ((nistCurve b).negY x y) ((nonsingular_neg x y).mpr hns) : (nistCurve b).Point) :=
-      rfl
-    have hcoord : y = (nistCurve b).negY x y := by
-      have hpts := hneg.trans hform
-      injection hpts with _ hy
-    have hy0 : y = 0 := by
-      have hny : (nistCurve b).negY x y = -y := by simp [negY, nistCurve, toAffine]
-      rw [hny] at hcoord
-      have : (2 : ZMod p) * y = 0 := by linear_combination hcoord
-      have h2ne : (2 : ZMod p) ≠ 0 := by
-        intro h
-        have hp2 : p ∣ 2 := (ZMod.natCast_eq_zero_iff 2 p).mp (by simpa using h)
-        have : p = 2 := by
-          have hle : p ≤ 2 := Nat.le_of_dvd (by decide) hp2
-          have hge : 2 ≤ p := (Fact.out : Nat.Prime p).two_le
-          omega
-        exact hp this
-      exact (mul_eq_zero.mp this).resolve_left h2ne
-    have he := y_sq b hns.1
-    rw [hy0, zero_pow (by decide)] at he
-    exact hnoroot x he.symm
-
-theorem nist_order (b : ZMod p) (n : ℕ) [Fact n.Prime] (hp : p ≠ 2) (hbound : 2 * p + 1 < 3 * n)
-    (G : (nistCurve b).Point) (hG : addOrderOf G = n)
-    (hnoroot : ∀ x : ZMod p, x ^ 3 - 3 * x + b ≠ 0) (P : (nistCurve b).Point) (hP : P ≠ 0) :
-    addOrderOf P = n := by
-  have := nist_finite b hp
-  have hcard_le := nist_card_le b hp
-  have hdvd : n ∣ Nat.card (nistCurve b).Point := by
-    rw [← hG]
-    exact addOrderOf_dvd_natCard G
-  obtain ⟨k, hk⟩ := hdvd
-  have hcard_pos : 0 < Nat.card (nistCurve b).Point := by
-    have : Nonempty (nistCurve b).Point := ⟨0⟩
-    exact Nat.card_pos
-  have hk_pos : 0 < k := by
-    have : 0 < n * k := by simpa [hk] using hcard_pos
-    exact Nat.pos_of_mul_pos_left this
-  have hk_lt : k < 3 := by
-    have hkn : k * n < 3 * n := by
-      have : k * n ≤ 2 * p + 1 := by simpa [hk, Nat.mul_comm] using hcard_le
-      exact lt_of_le_of_lt this hbound
-    exact Nat.lt_of_mul_lt_mul_right hkn
-  have hk_cases : k = 1 ∨ k = 2 := by omega
-  rcases hk_cases with rfl | rfl
-  · have hdiv : addOrderOf P ∣ n := by simpa [hk, Nat.mul_comm] using addOrderOf_dvd_natCard P
-    have h1 : addOrderOf P ≠ 1 := fun h => hP ((AddMonoid.addOrderOf_eq_one_iff).mp h)
-    rcases (Nat.dvd_prime (Fact.out : Nat.Prime n)).mp hdiv with h | h
-    · exact absurd h h1
-    · exact h
-  · have h2dvd : 2 ∣ Nat.card (nistCurve b).Point := by
-      rw [hk, Nat.mul_comm]
-      exact dvd_mul_right 2 n
-    have : Fact (Nat.Prime 2) := ⟨Nat.prime_two⟩
-    obtain ⟨Q, hQo⟩ := exists_prime_addOrderOf_dvd_card' 2 h2dvd
-    exact absurd hQo (no_two_torsion b hp hnoroot Q)
 
 /-! ## x³ − 3x + b has no root in P-256's field -/
 
@@ -458,7 +291,7 @@ theorem p256Order_holds : P256Order := by
       intro h
       simp [h, fromM, p256G] at hG)
   have hord : addOrderOf X = n256 :=
-    nist_order (b256 : ZMod p256) n256 (by decide) (by decide) G hGord p256_no_root X hX0
+    nist.order (p := p256) b256 n256 (by decide) (by decide) G hGord p256_no_root X hX0
   simpa [hX] using order_fromM X hord
 
 end rind.spec

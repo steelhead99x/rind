@@ -156,6 +156,12 @@ theorem wordsNat_four (w : List U64) (hl : w.length = 4) :
   match w, hl with
   | [a, b, c, d], _ => simp [wordsNat, Nat.ofDigits]
 
+theorem wordsNat_six (w : List U64) (hl : w.length = 6) :
+    wordsNat w = w[0]!.val + 2 ^ 64 * (w[1]!.val + 2 ^ 64 * (w[2]!.val + 2 ^ 64 *
+      (w[3]!.val + 2 ^ 64 * (w[4]!.val + 2 ^ 64 * w[5]!.val)))) := by
+  match w, hl with
+  | [a, b, c, d, e, f], _ => simp [wordsNat, Nat.ofDigits]
+
 theorem slice_append_slice {α : Type _} (l : List α) (a b c : Nat) (hab : a ≤ b) (hbc : b ≤ c) :
     l.slice a b ++ l.slice b c = l.slice a c := by
   simp only [List.slice]
@@ -180,6 +186,26 @@ theorem beNat_32 (b : List U8) (hl : b.length = 32) :
   conv_lhs => rw [hb]
   simp only [beNat_append, length_slice b _ _ (by omega : 32 ≤ b.length), length_slice b _ _ (by omega : 24 ≤ b.length),
     length_slice b _ _ (by omega : 16 ≤ b.length)]
+  ring
+
+/-- 48 big-endian bytes encode the number their 8-byte chunks do as limbs, most
+significant first. -/
+theorem beNat_48 (b : List U8) (hl : b.length = 48) :
+    beNat b = beNat (b.slice 40 48) + 2 ^ 64 * (beNat (b.slice 32 40) +
+      2 ^ 64 * (beNat (b.slice 24 32) + 2 ^ 64 * (beNat (b.slice 16 24) +
+      2 ^ 64 * (beNat (b.slice 8 16) + 2 ^ 64 * beNat (b.slice 0 8))))) := by
+  have hb : b = b.slice 0 8 ++ b.slice 8 16 ++ b.slice 16 24 ++ b.slice 24 32 ++ b.slice 32 40 ++
+      b.slice 40 48 := by
+    rw [slice_append_slice _ 0 8 16 (by omega) (by omega),
+      slice_append_slice _ 0 16 24 (by omega) (by omega),
+      slice_append_slice _ 0 24 32 (by omega) (by omega),
+      slice_append_slice _ 0 32 40 (by omega) (by omega),
+      slice_append_slice _ 0 40 48 (by omega) (by omega)]
+    simp [List.slice, List.take_of_length_le, hl]
+  conv_lhs => rw [hb]
+  simp only [beNat_append, length_slice b _ _ (by omega : 48 ≤ b.length),
+    length_slice b _ _ (by omega : 40 ≤ b.length), length_slice b _ _ (by omega : 32 ≤ b.length),
+    length_slice b _ _ (by omega : 24 ≤ b.length), length_slice b _ _ (by omega : 16 ≤ b.length)]
   ring
 
 theorem setSlice!_append {α : Type _} (A B C B' : List α) (h : B'.length = B.length) :

@@ -47,14 +47,13 @@ hol-light` checks them alone, in nixpkgs' HOL Light.
   bounds. Both functions are `#[inline(never)]` with fixed registers, so the
   proof covers their one copy.
 
-`hol-light/s2n-bignum/` holds, at their paths in s2n-bignum, the specs these
-proofs need from s2n-bignum pull requests not yet merged, ahead of the
-submodule on HOL Light's load path. Each is the pull request's file unchanged,
-so a submodule bump past its merge deletes it:
-
-- `x86/proofs/utils/sha256_spec.ml`: SHA-256's, from
-  [awslabs/s2n-bignum#415](https://github.com/awslabs/s2n-bignum/pull/415) at
-  `79120e64ed55e37c9652565ff272b7ef17f76738`.
+`hol-light/s2n-bignum/` holds what these proofs add to s2n-bignum, ahead of
+the submodule on HOL Light's load path: specs from s2n-bignum pull requests
+not yet merged, and `x86.patch`, rind's additions to the x86 model, which
+`x86-cosim.ml` checks against the CPU. Its
+[README](hol-light/s2n-bignum/README.md) lists each, so they can be offered
+upstream. `nix develop .#hol-light --command admin/prove cosim` runs the
+cosimulation, on an x86_64 CPU with AVX2.
 
 ## What is proven
 
@@ -132,9 +131,10 @@ over `p256Pow` and `p256Add`. `Rind/P256Multiples.lean` proves, from
 windowed sum is e/s·G + r/s·Q, and `Rind/N256Prime.lean` that n is prime, so
 every nonzero scalar has an inverse. The sum also needs Q's order n. A key
 pair's Q is its scalar times G, whose order follows from G's. A parsed public
-key's point is any finite point of the curve; `Rind/P256Order.lean` proves
-each has order n, by the counting argument: at most 2p + 1 points, n divides
-that order, and 2n is impossible because the cubic x³ − 3x + b has no root.
+key's point is any finite point of the curve; `Rind/NistGroup.lean`'s `nist.order`
+proves each has order n, by the counting argument: at most 2p + 1 points, n
+divides that order, and 2n is impossible because the cubic x³ − 3x + b has no
+root, which `Rind/P256Order.lean` checks for P-256.
 Key generation and signing need only G's order. The message's
 SHA-256 is FIPS 180-4's (`sha256E`), through the SHA-256 proof below, so
 signing and verification take its `Sha256Blocks` and messages of at most
@@ -149,6 +149,23 @@ entry guard holds, and `Cached`: a verifying key's lock-free caches of P to
 15P and 17P to 31P, and a signing key's of its encoded public key, whose
 atomics Aeneas cannot translate, are built from the key's own point or
 scalar.
+
+P-384 ECDH's agreement on x86_64 and aarch64, from the same `PrivateKey` to
+s2n-bignum's routines, in `Rind/X86_64/P384.lean`, which `admin/prove` also
+writes for aarch64:
+
+- `p384_agree`: a peer key is refused unless it is a 97-byte uncompressed
+  point whose coordinates are below p and on the curve, and otherwise the
+  secret is the 48 big-endian bytes of the x-coordinate of the scalar times
+  that point, or a fault unless that is a finite point on the curve;
+- `p384_shared_secret`: the secret's bytes are those.
+
+Key generation, a loaded key, and the public key a key holds run rind's comb
+for k·G, which no theorem covers yet. `p384Pow` is HOL Light's `group_pow
+p384_group`, whose group law `Rind/Nist.lean` defines once for the NIST
+curves, and `Rind/NistGroup.lean` proves it is multiplication in Mathlib's
+group of points on such a curve. `Rind/P384Group.lean` proves p and n prime,
+by Pratt certificates that `Rind/Pratt.lean` checks, and G's order n.
 
 ChaCha20 QUIC header protection on x86_64 and aarch64, from
 `HeaderProtectionKey` to HACL*'s rounds, in `Rind/X86_64/ChaCha20.lean`:
@@ -221,10 +238,13 @@ and `Rind/X86_64/HkdfAead.lean` on x86_64:
   HKDF-Expand, through `header_new_spec` over `chacha20_new`;
 - `aead_key_from_spec`: an AES-128-GCM or AES-256-GCM key holds AES-GCM on
   Vale's tier for the `4 * nk` bytes of HKDF-Expand, under `RunsValeAesGcm`,
-  through `aead_key_new_spec` over `aes_gcm_new`.
+  through `aead_key_new_spec` over `aes_gcm_new`;
+- `aead_key_from_chacha20_poly1305_spec`: a ChaCha20-Poly1305 key holds the
+  32 bytes of HKDF-Expand, through `aead_key_new_chacha20_poly1305_spec` over
+  `chacha20_poly1305_new`.
 
-The other keys `From<Okm>` converts to, AES-192-GCM, ChaCha20-Poly1305, and
-AES header protection, have no proof. `Rind/X86_64/Kdf/FunsExternal.lean`'s
+The other keys `From<Okm>` converts to, AES-192-GCM and AES header
+protection, have no proof. `Rind/X86_64/Kdf/FunsExternal.lean`'s
 `new` wrappers turn a model's refusal into the panic its `expect` makes, so
 each conversion panics exactly where its `expect` does.
 
@@ -359,6 +379,36 @@ messages under 2^32 bytes. The other IV lengths and truncated tags run
 arms opaque, and [the by-8 intrinsics quest](/quest/m4/verified/aes-gcm-x86-intrinsics.md)
 owns them.
 
+ChaCha20-Poly1305 and XChaCha20-Poly1305 on x86_64 CPUs with SSE4.1, from
+the AEAD API's `Key` and `RandomizedNonceKey` down to the call of aws-lc's
+one-pass routines, in `Rind/X86_64/ChaCha20Poly1305.lean`:
+
+- `chacha20_poly1305_new`: a key that is not 32 bytes is refused, and
+  otherwise the key holds its bytes;
+- `chacha20_poly1305_seal`, `chacha20_poly1305_seal_append_tag`, and
+  `chacha20_poly1305_seal_append_tag_vec`: a message past 2^38 - 64 bytes, as
+  many as the 32-bit block counter covers from block 1, is refused and left as
+  it is, and otherwise the ciphertext and the tag are RFC 8439 section 2.8's;
+- `chacha20_poly1305_open_separate_tag` and `chacha20_poly1305_open`: past
+  2^38 - 64 bytes the same refusal, and otherwise the call succeeds exactly
+  when RFC 8439's tag is the one given, leaving the plaintext in place, and
+  otherwise fails, leaving zeros;
+- `randomized_nonce_key_new`, `randomized_nonce_key_seal_append_tag_vec`,
+  and `randomized_nonce_key_open`: the same for draft-irtf-cfrg-xchacha-03's
+  XChaCha20-Poly1305, under the nonce the system's random source fills, whose
+  failure the seal returns as `RngFailed`.
+
+HChaCha20, which derives XChaCha20's subkey, runs HACL*'s rounds, which
+`hchacha20_spec` proves. The theorems assume `RunsChaCha20Poly1305`: rind's
+CPU-feature checks find SSE4.1, and `OnePass`, that aws-lc's one-pass
+routines compute RFC 8439's AEAD, which no proof covers yet;
+[the ChaCha20-Poly1305 quest](/quest/m4/verified/chacha20-poly1305-x86/aead.md)
+owns their HOL Light proofs. CPUs without SSE4.1 run the separate ChaCha20
+and Poly1305 passes, which the model leaves opaque. `AeadDispatch` models
+`RandomizedNonceKey`, which reaches the system's random source, and
+`Rind/ChaCha20Poly1305Test.lean` checks `Rind/Spec.lean`'s transliterations
+against RFC 8439's and draft-irtf-cfrg-xchacha-03's test vectors.
+
 `admin/prove` fails if a hand model's quote no longer matches the source, if
 the source names `Ops`, builds a `Masker`, or writes its `mask` outside the
 dispatch models' quotes, if it builds a digest `Algorithm` outside
@@ -370,7 +420,8 @@ dispatch models' quotes, if it builds a digest `Algorithm` outside
 ## Layout
 
 - `hol-light/<arch>/`: rind's HOL Light proofs, one file per routine, and
-  `hol-light/s2n-bignum/`, the unmerged s2n-bignum specs they use.
+  `hol-light/s2n-bignum/`, what they add to s2n-bignum: unmerged specs and
+  rind's additions to the x86 model, with its cosimulation.
 - `Rind/<Arch>/{Types,Funs}.lean`: Aeneas's translation, which `admin/prove`
   writes and git ignores.
 - `Rind/<Arch>/{Types,Funs}External.lean` and `Rind/Core.lean`: what the
@@ -382,8 +433,9 @@ dispatch models' quotes, if it builds a digest `Algorithm` outside
 - `Rind/X86_64/Simd.lean` and `Rind/X86_64/AesNi.lean`: models of the x86_64
   intrinsics rind's AES-GCM setup and partial blocks call, and of its AES-NI
   key expansion and block cipher, which load and store through raw pointers.
-- `Rind/Spec.lean` and `Rind/Bytes.lean`: the elliptic-curve and ChaCha20
-  specs and byte-conversion lemmas; `Rind/Sha2.lean` and
+- `Rind/Spec.lean` and `Rind/Bytes.lean`: the elliptic-curve, ChaCha20,
+  Poly1305, and ChaCha20-Poly1305 specs and byte-conversion lemmas, and
+  `Rind/ChaCha20Poly1305Test.lean`, the AEAD specs' known-answer tests; `Rind/Sha2.lean` and
   `Rind/Sha2Lemmas.lean`: SHA-512's; `Rind/Ed25519.lean`: Ed25519's;
   `Rind/HashSpec.lean`: SHA-1's, SHA-256's, HMAC's, HKDF's, and PBKDF2's, and
   `Rind/HashSpecTest.lean`, their known-answer tests; `Rind/Vale.lean`,
@@ -399,9 +451,10 @@ dispatch models' quotes, if it builds a digest `Algorithm` outside
   SHA-1's, SHA-256's, and HMAC's, and
   `Rind/X86_64/{DigestApi,HmacApi,Hkdf,Pbkdf2}.lean`, the digest, HMAC, HKDF,
   and PBKDF2 APIs'; `Rind/X86_64/HkdfAead.lean`, HKDF's conversion to AES-GCM
-  keys; `Rind/X86_64/{AesKey,Ghash,PartialBlock,AesGcmGlue,AesGcm}.lean`:
+  and ChaCha20-Poly1305 keys; `Rind/X86_64/{AesKey,Ghash,PartialBlock,AesGcmGlue,AesGcm}.lean`:
   the AES-GCM proof, on x86_64 alone; `Rind/X86_64/GcmKey.lean`, the hand model
-  of `aead::gcm::Key` and its proofs.
+  of `aead::gcm::Key` and its proofs; `Rind/X86_64/ChaCha20Poly1305.lean`, the
+  ChaCha20-Poly1305 and XChaCha20-Poly1305 proof above aws-lc's routines.
 - `Rind/<Arch>/ShaBlocks.lean`: SHA-1 and SHA-256's block functions on each
   target, SHA-1's padded last blocks, and SHA-256's padded last blocks and
   finish; `Rind/Aarch64/Sha256Hw.lean`, the axiom for aarch64's routine with
@@ -447,8 +500,9 @@ Beyond Lean's kernel:
 - That `Rind/Sha2.lean` restates cryptol-specs' SHA-512 around
   `processBlock_Common`, and `Rind/S2nSha256.lean` transliterates
   s2n-bignum's SHA-256 spec.
-- That `Rind/Spec.lean`'s ChaCha20 transliterates RFC 8439 and RFC 9001, its
-  ECDSA FIPS 186-5, and
+- That `Rind/Spec.lean`'s ChaCha20, Poly1305, and ChaCha20-Poly1305
+  transliterate RFC 8439 and RFC 9001, its HChaCha20 and XChaCha20-Poly1305
+  draft-irtf-cfrg-xchacha-03, its ECDSA FIPS 186-5, and
   `Rind/Ed25519.lean` RFC 8032 and s2n-bignum's encoding and decoding of
   edwards25519 points, whose `ed25519_decode` picks by Hilbert's choice as
   Lean's `Classical.epsilon` does.
@@ -467,7 +521,9 @@ Beyond Lean's kernel:
   code, as for `benchmarks/verified.toml`'s other entries, except where a
   proof in `hol-light/` covers the bytes rind's build emits. For those, HOL
   Light's kernel and s2n-bignum's instruction models, as for s2n-bignum's
-  own theorems.
+  own theorems, with rind's additions in `hol-light/s2n-bignum/x86.patch`,
+  which `admin/prove cosim` checks against the CPU as s2n-bignum checks its
+  own.
 - The translation ignores drops, which here wipe keys and keyed state under
   the `wipe` feature and restore CPU state, and computes nothing an output
   depends on.
