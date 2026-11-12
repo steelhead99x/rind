@@ -221,6 +221,43 @@ buffer.
 
 Adapter fuzz targets: `fuzz::rustls`, `fuzz::dimpl`, `fuzz::str0m`.
 
+## Running the tools
+
+On Linux, `just armv7` runs the nightly armv7 job: it builds and lints for
+32-bit ARM, then runs the tests under qemu with the ARMv8 crypto extension,
+with NEON alone, and with NEON denied. `just qemu <shell>` runs an entry of
+the nightly `qemu` job, which lints and tests the portable backend: `s390x`
+(big-endian), `riscv64`, `riscv64-musl`, `loongarch64`, `armv6` and
+`armv6-softfloat` (the Raspberry Pi 1's core), or `powerpc64le`, `powerpc64`,
+and `powerpc` (the last two big-endian) under qemu, or `i686` (32-bit x86)
+natively.
+`just miri` runs the nightly `miri` job, the portable backend's tests under
+Miri, on x86_64, and `just miri s390x-unknown-linux-gnu` big-endian.
+`nix develop .#ctgrind --command admin/ctgrind` runs the nightly
+constant-time checks under valgrind, `nix develop .#sde --command
+admin/ct-sde` those of the AVX-512, VAES, SHA extension, and SHA512 code
+valgrind cannot run, under Intel SDE, and `nix develop .#ct-qemu --command
+admin/ct-qemu` those of the armv7 crypto extension code valgrind hides, under
+qemu; on an aarch64 host, `nix develop .#ct-qemu-aarch64 --command
+admin/ct-qemu --target aarch64-unknown-linux-gnu` those of the aarch64 code
+that runs only with SHA3, and `nix develop .#binsec --command admin/ct-binsec
+[--exact] [test]` has BINSEC prove the region of each `ct_binsec_...` test
+constant time for every secret, symbolically. None of them but BINSEC, which
+sees divisions, can see an instruction whose timing depends on its
+operands, so `admin/ct-vartime`, which `just check` runs when rind changes,
+scans its release builds for every architecture it builds for, and its
+portable backend's on x86_64 and armv7, for divisions and floating-point arithmetic, and fails on one that `admin/ct-vartime.toml` does
+not list as taking only public operands.
+`nix develop .#dudect --command admin/timing dudect` times each secret
+operation whose secret the API lets it set (not key generation, encapsulation,
+or varied ML-KEM decapsulation keys) on two classes of secret, as dudect does,
+and `admin/timing marvin` runs the Marvin toolkit against RSA-OAEP decryption. They need quiet
+hardware: the weekly `timing` workflow runs them on GitHub's runners, and a
+shared host adds noise that no gate removes.
+`nix develop .#prove --command admin/prove` checks rind's HOL Light proofs of
+its assembly, then translates the Rust under proof to Lean with Aeneas and
+checks the proofs in [`proofs/`](proofs/README.md).
+
 [Wycheproof]: https://github.com/C2SP/wycheproof
 [CCTV]: https://github.com/C2SP/CCTV
 [Miri]: https://github.com/rust-lang/miri
