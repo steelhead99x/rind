@@ -380,11 +380,14 @@ backs, so a crate on aws-lc-rs swaps it in with `aws-lc-rs = { package =
 "rind-aws-lc-rs", version = "1" }` and no code changes. The rename reaches
 only that crate. It accepts every aws-lc-rs feature but `fips`, and adds only
 a `wipe` feature, since aws-lc-rs always wipes. Its [README](rind-aws-lc-rs/README.md) lists
-the items it leaves out, such as ML-DSA, ML-KEM-512 and ML-KEM-1024, SHA-224,
-and the PKCS#1 v1.5 encryption keys, and where it behaves differently. rustls's
-`aws_lc_rs` provider, rustls-webpki's `aws-lc-rs` feature, and rcgen's
-`aws_lc_rs` feature name ML-DSA, so they do not build on it until it offers
-[ML-DSA](quest/m2/adoption/aws-lc-rs/ml-dsa.md).
+the items it leaves out, such as ML-KEM-512 and ML-KEM-1024,
+`PqdsaPrivateKey::as_raw_bytes`, SHA-224, and the PKCS#1 v1.5 encryption keys,
+and where it behaves differently. It offers ML-DSA
+(`signature::{ML_DSA_44, ML_DSA_65, ML_DSA_87}`, `PqdsaKeyPair`, and the other
+`Pqdsa*` types except `as_raw_bytes`). rustls-webpki's `aws-lc-rs` feature and
+rcgen's `aws_lc_rs` feature build on it. rustls's `aws_lc_rs` provider still
+names `tls_prf`, and from 0.23.46 also `kem::ML_KEM_1024`, so it does not
+build yet.
 
 ### rind-rustls
 
@@ -423,6 +426,17 @@ what rcgen's default `KeyIdMethod::Sha256` computes.
 | `str0m_aws_lc_rs::dimpl_crypto_provider()` | `rind_str0m::dimpl_crypto_provider()` |
 | object_store's `aws`, `azure`, and `gcp` features | the `*-base` features, with `with_crypto_provider(rind_object_store::default_provider())` |
 | jsonwebtoken's `crypto::aws_lc::DEFAULT_PROVIDER` | `rind_jsonwebtoken::DEFAULT_PROVIDER` |
+
+### rind-openmls
+
+rind-openmls offers openmls_rust_crypto's API, item for item, so only the
+dependency and its `use` lines change. It offers the same ciphersuites; its
+[README](rind-openmls/README.md) lists the draft features rind cannot back.
+
+| openmls_rust_crypto | rind |
+|---|---|
+| `OpenMlsRustCrypto`, `RustCrypto`, `RandError`, `MemoryStorage`, `MemoryStorageError` | the same names in `rind_openmls` |
+| the `test-utils` and `extensions-draft` features | the same features |
 
 ## Crates with their own crypto backend
 
@@ -541,6 +555,7 @@ install ring's if nothing is installed first.
 | russh 0.65 | default `aws-lc-rs`, or `ring`, for its AES-GCM and ChaCha20-Poly1305 transport | Unsupported: its cipher trait is private, and its `ring` calls `chacha20_poly1305_openssh`, which rind refuses |
 | scram 0.6 | ring 0.16, unconditionally | Unsupported |
 | ethereum_hashing 0.8 | default `ring` for SHA-256 | **Pure Rust** on x86_64; other targets need ring |
+| openmls 0.9 | a provider crate, openmls_rust_crypto or openmls_libcrux_crypto | **rind-openmls**, in place of openmls_rust_crypto |
 
 ## Adapters
 

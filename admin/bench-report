@@ -1637,7 +1637,23 @@ def report(hosts, tiers, verified, gaps):
     for e in verified:
         ops = ", ".join(f"`{p}`" for p in e["operations"])
         md.append(f"| {COLUMNS[e['library']]} | {ops} | {platform_of(e)} | [{e['proof']}]({e['link']}) |")
-    md.append("")
+    md += [
+        "",
+        "## Updating this report",
+        "",
+        "`admin/bench-report collect` runs the report's benchmarks, then",
+        "`admin/build-cost`, on each benchmark host in turn over ssh, in the Nix dev",
+        "shell and under `quest gate`, which waits for the host to have room but",
+        "shares it with other gated work, so its numbers are noisier than the nightly",
+        "`bench` workflow's runners, which give the clean ones; it skips any host that is still busy, and writes their results and the hosts' details as JSON under",
+        "`.tmp/bench-report/`. `admin/bench-report nightly` saves the latest nightly",
+        "`bench` run's results, and `admin/bench-report render --from DIR` copies a",
+        "collection's measured hosts into `benchmarks/data/` and writes",
+        "`BENCHMARKS.md` and its SVGs, which the README shows too, from them, `benchmarks/verified.toml`, and",
+        "`benchmarks/gaps.toml`, which must hold a quest or a reason for every gap",
+        "over 10%.",
+        "",
+    ]
     files = {os.path.join(REPORT_DIR, k): v for k, v in files.items()}
     files[REPORT] = "\n".join(md)
     return files
