@@ -38,6 +38,12 @@ hol-light` checks them alone, in nixpkgs' HOL Light.
   with its relocations and the read-only data they reach, here the round
   constants, which `admin/prove` extracts as an object file; the proof checks
   the constants against FIPS 180-4's.
+- `aarch64/sha512_block_data_order_hw.ml`: `SHA512_HW_SUBROUTINE_CORRECT`,
+  rind's proof that the naked function
+  `low::aarch64::sha512::sha512_block_data_order_hw`, aws-lc's routine for
+  the SHA-512 instructions, computes s2n-bignum's FIPS 180-4 spec,
+  `sha512_hash_blocks`, and stores it to the state, as `sha256`'s above; the
+  proof checks its round constants against FIPS 180-4's.
 - `x86_64/bn_mul_mont_nohw.ml`: `BN_MUL_MONT_NOHW_SUBROUTINE_CORRECT`, rind's
   proof that the naked function `low::x86_64::mont::bn_mul_mont_nohw`,
   aws-lc's word-serial Montgomery multiplication, writes the Montgomery
@@ -303,10 +309,16 @@ aarch64:
   finished, returns its hash, for messages under 2^64 bytes.
 
 The hash is cryptol-specs' FIPS 180-4 SHA-512, in `Rind/Sha2.lean`, with its
-block compression `processBlock_Common` opaque. Each theorem assumes
+block compression `processBlock_Common` transliterated from FIPS 180-4 and
+checked by `Rind/Sha2Test.lean` against its examples. Each theorem assumes
 `RunsSha512`: on x86_64 that rind picks aws-lc's AVX routine, on an Intel CPU
-with AVX but without AVX2, and on aarch64 its scalar routine, on a CPU without the SHA-512
-instructions; those are the routines whose proofs state their result. The
+with AVX but without AVX2, the routine whose proof states its result; on
+aarch64 only that rind's checks pass, as both of aws-lc's routines there have
+proofs: aws-lc-verification's of its scalar routine, and rind's HOL Light proof
+above of its routine for the SHA-512 instructions, which
+`Rind/Aarch64/AwsLc.lean` restates as the axiom
+`sha512_block_data_order_hw_spec` and `Rind/S2nSha512.lean` proves
+`Rind/Sha2.lean`'s. The
 digest API reaches each hash through function pointers too, which
 `Rind/X86_64/DigestDispatch.lean` models, and `Rind/X86_64/DigestAlgorithm.lean`
 models the `Algorithm` statics that hold them, and `Digest`, whose
@@ -615,7 +627,10 @@ mentions `Verification::Rsa(` or builds an `Rsa` outside them.
 - `Rind/Spec.lean` and `Rind/Bytes.lean`: the elliptic-curve, ChaCha20,
   Poly1305, and ChaCha20-Poly1305 specs and byte-conversion lemmas, and
   `Rind/ChaCha20Poly1305Test.lean`, the AEAD specs' known-answer tests; `Rind/Sha2.lean` and
-  `Rind/Sha2Lemmas.lean`: SHA-512's; `Rind/Ed25519.lean`: Ed25519's;
+  `Rind/Sha2Lemmas.lean`: SHA-512's, and `Rind/Sha2Test.lean`, its
+  known-answer tests; `Rind/S2nSha512.lean`, s2n-bignum's SHA-512 spec,
+  transliterated, and its proof that it is `Rind/Sha2.lean`'s;
+  `Rind/Ed25519.lean`: Ed25519's;
   `Rind/HashSpec.lean`: SHA-1's, SHA-256's, HMAC's, HKDF's, and PBKDF2's, and
   `Rind/HashSpecTest.lean`, their known-answer tests; `Rind/Vale.lean`,
   `Rind/ValeBytes.lean`, and `Rind/Gf128.lean`: Vale's AES and GF(2^128) specs
@@ -711,10 +726,10 @@ Beyond Lean's kernel:
 - That `Rind/SymCrypt/MlKem.lean` is FIPS 203, as SymCrypt's authors state,
   and that `Rind/S2nMlKem.lean` transliterates the s2n-bignum ML-KEM specs it
   names.
-- That `Rind/Sha2.lean` restates cryptol-specs' SHA-512 around
-  `processBlock_Common`, `Rind/S2nSha256.lean` transliterates
-  s2n-bignum's SHA-256 spec, and `Rind/S2nChaCha20Poly1305.lean` rind's
-  HOL Light ChaCha20-Poly1305 spec.
+- That `Rind/Sha2.lean` restates cryptol-specs' SHA-512, its
+  `processBlock_Common` as FIPS 180-4's, `Rind/S2nSha256.lean` and
+  `Rind/S2nSha512.lean` transliterate s2n-bignum's SHA-256 and SHA-512 specs,
+  and `Rind/S2nChaCha20Poly1305.lean` rind's HOL Light ChaCha20-Poly1305 spec.
 - That `Rind/Rsa.lean` transliterates RFC 8017's RSASSA-PKCS1-v1_5 and
   RSASSA-PSS verification.
 - That `Rind/Spec.lean`'s ChaCha20, Poly1305, and ChaCha20-Poly1305
