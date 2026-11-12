@@ -463,8 +463,14 @@ pub(crate) mod tests {
     }
 
     /// `sum` doubles equal points and gives infinity for opposite ones,
-    /// whatever `Z` each has.
-    pub(crate) fn check_sum<C: Curve>(affine: impl Fn(&[C; 3]) -> Vec<u8>) {
+    /// whatever `Z` each has. `doubled` is the Jacobian doubling
+    /// `double_point` calls, so this does not compare that method with
+    /// itself. Points that share `Y` and `Z` and differ in `X` are added;
+    /// `same_x | same_y` would double the first instead.
+    pub(crate) fn check_sum<C: Curve>(
+        affine: impl Fn(&[C; 3]) -> Vec<u8>,
+        doubled: impl Fn(&[C; 3]) -> [C; 3],
+    ) {
         let _entry = low::Entry::new_public();
         let q = map_to_curve(&C::from_wide(&[7; MAX_L][..C::L]));
         let r = map_to_curve(&C::from_wide(&[9; MAX_L][..C::L]));
@@ -474,10 +480,17 @@ pub(crate) mod tests {
         let scaled = [q[0].mul(&k2), q[1].mul(&k3), q[2].mul(&k)];
         let neg = [scaled[0], scaled[1].neg(), scaled[2]];
 
-        assert_eq!(affine(&sum(&q, &scaled)), affine(&C::double_point(&q)));
+        assert_eq!(affine(&sum(&q, &scaled)), affine(&doubled(&q)));
         assert!(sum(&q, &neg)[2].ct_eq(&C::ZERO));
         assert_eq!(affine(&sum(&q, &r)), affine(&C::add_points(&q, &r)));
         assert_eq!(affine(&sum(&q, &r)), affine(&sum(&r, &q)));
+
+        assert!(!q[0].ct_eq(&r[0]));
+        let mut shifted = q;
+        shifted[0] = r[0];
+        let got = sum(&q, &shifted);
+        let expect = C::add_points(&q, &shifted);
+        assert!(got.iter().zip(expect).all(|(a, b)| a.ct_eq(&b)));
     }
 
     /// `pow_c1` raises to `(p - 3) / 4`: one more factor gives

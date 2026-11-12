@@ -158,6 +158,10 @@ mod tests {
         jacobian(p).as_affine().as_bytes_uncompressed().to_vec()
     }
 
+    fn doubled(p: &[FieldElement; 3]) -> [FieldElement; 3] {
+        coordinates(&jacobian(p).double())
+    }
+
     #[test]
     fn rfc9380() {
         tests::check_suite::<FieldElement, Sha256Context>("P256_XMD_SHA-256_SSWU_RO_", 32, affine);
@@ -165,7 +169,7 @@ mod tests {
 
     #[test]
     fn sum() {
-        tests::check_sum::<FieldElement>(affine);
+        tests::check_sum::<FieldElement>(affine, doubled);
     }
 
     #[test]
