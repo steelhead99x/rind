@@ -154,12 +154,15 @@ mod tests {
     fn make_generator() {
         let g = make_ticket_generator().unwrap();
         assert!(g.enabled());
-        // The literal is aws-lc-rs's six-hour rotation, not this module's
-        // constant: a mutant of `6 * 60 * 60` would still match that constant.
-        assert_eq!(g.lifetime(), 6 * 60 * 60);
+        // aws-lc-rs's `Ticketer` is a rotator of two of these generators, so
+        // one generator's lifetime is half of that rotator's. A change to
+        // `ONE_TICKET_LIFETIME_SECS` no longer matches aws-lc-rs.
+        let theirs = rustls::crypto::aws_lc_rs::Ticketer::new().unwrap();
+        let one_ticket = theirs.lifetime() / 2;
+        assert_eq!(g.lifetime(), one_ticket);
         let rendered = format!("{g:?}");
         assert!(rendered.contains("XChaCha20Ticketer"), "{rendered}");
-        assert!(rendered.contains("21600"), "{rendered}");
+        assert!(rendered.contains(&one_ticket.to_string()), "{rendered}");
     }
 
     #[test]
