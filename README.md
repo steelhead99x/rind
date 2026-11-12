@@ -130,6 +130,7 @@ Each crate's README shows its setup.
 | [rind-object-store][] | S3, Azure, and GCS request signing through [object_store](https://github.com/apache/arrow-rs-object-store) |
 | [rind-rcgen][] | certificates through [rcgen](https://github.com/rustls/rcgen) |
 | [rind-dart][] | Dart and Flutter, through FFI, as the `rind` package on [pub.dev](https://pub.dev/packages/rind) |
+| [rind_cryptography][] | Dart and Flutter, as the `rind_cryptography` package, with the `cryptography` package's API on rind |
 | [rind-python][] | Python, as the `pyrind` package on PyPI, with rind's own API |
 | [pyrind-cryptography][] | Python, as the `pyrind-cryptography` package on PyPI, with pyca/cryptography's `hazmat` API on pyrind |
 
@@ -259,6 +260,7 @@ from other projects keeps its source's license, which [LICENSE] lists.
 [rind-object-store]: https://github.com/moq-dev/rind/tree/main/rind-object-store
 [rind-rcgen]: https://github.com/moq-dev/rind/tree/main/rind-rcgen
 [rind-dart]: https://github.com/moq-dev/rind/tree/main/rind-dart
+[rind_cryptography]: https://github.com/moq-dev/rind/tree/main/rind-dart/cryptography
 [rind-python]: https://github.com/moq-dev/rind/tree/main/rind-python
 [pyrind-cryptography]: https://github.com/moq-dev/rind/tree/main/rind-python/cryptography
 [quests]: https://github.com/moq-dev/rind/blob/main/quest/README.md
