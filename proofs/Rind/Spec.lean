@@ -10,8 +10,9 @@ open Aeneas Aeneas.Std
 
 The functional spec the proofs state rind's results against: how bytes and
 limbs encode numbers, X25519 itself, and the P-256 group, each as HOL Light
-defines it for s2n-bignum's theorems, and ChaCha20's block function and QUIC
-header protection, transliterated from their RFCs.
+defines it for s2n-bignum's theorems, and ChaCha20, QUIC header protection,
+Poly1305, ChaCha20-Poly1305, and XChaCha20-Poly1305, transliterated from their
+RFCs and draft-irtf-cfrg-xchacha-03.
 -/
 
 namespace rind.spec
@@ -214,6 +215,92 @@ rest as the nonce. -/
 def headerProtectionMask (key sample : List (BitVec 8)) : List (BitVec 8) :=
   (block key (le32 sample[0]! sample[1]! sample[2]! sample[3]!) (sample.drop 4)).take 5
 
+/-- RFC 8439 section 2.4's ChaCha20 encryption: `msg` XOR the keystream from
+block `counter` on, a block per 64 bytes, the last one cut to the message. -/
+def encrypt (key : List (BitVec 8)) (counter : Word) (nonce msg : List (BitVec 8)) : List (BitVec 8) :=
+  (List.range ((msg.length + 63) / 64)).flatMap fun j =>
+    List.zipWith (· ^^^ ·) ((msg.drop (64 * j)).take 64) (block key (counter + BitVec.ofNat 32 j) nonce)
+
+/-- draft-irtf-cfrg-xchacha-03 section 2.2's HChaCha20: ChaCha20's rounds
+over the key and a 16-byte nonce in place of the counter and nonce, without
+the block function's final addition, keeping words 0 to 3 and 12 to 15. -/
+def hchacha20 (key nonce : List (BitVec 8)) : List (BitVec 8) :=
+  let working := innerBlock^[10] ([0x61707865, 0x3320646e, 0x79622d32, 0x6b206574] ++ words key ++
+    words nonce)
+  (working.take 4 ++ working.drop 12).flatMap BitVec.toLEBytes
+
 end chacha20
+
+/-! ## Poly1305 and ChaCha20-Poly1305 -/
+
+namespace poly1305
+
+/-- The number that little-endian bytes encode. -/
+def leNum (bytes : List (BitVec 8)) : Nat :=
+  Nat.ofDigits 256 (bytes.map (·.toNat))
+
+/-- Poly1305's prime, 2^130 - 5. -/
+def p : Nat := 2 ^ 130 - 5
+
+/-- RFC 8439 section 2.5's `clamp`. -/
+def clamp (r : Nat) : Nat := r &&& 0x0ffffffc0ffffffc0ffffffc0fffffff
+
+/-- RFC 8439 section 2.5.1's `poly1305_mac`: the accumulator over each 16-byte
+block of `msg` with a one byte after it, the last one cut to the message, then
+the low 128 bits of it plus `s`, little-endian. -/
+def mac (key msg : List (BitVec 8)) : List (BitVec 8) :=
+  let r := clamp (leNum (key.take 16))
+  let s := leNum (key.drop 16)
+  let a := (List.range ((msg.length + 15) / 16)).foldl (fun a i =>
+    let block := (msg.drop (16 * i)).take 16
+    (a + leNum block + 2 ^ (8 * block.length)) * r % p) 0
+  (BitVec.ofNat 128 (a + s)).toLEBytes
+
+end poly1305
+
+namespace chacha20poly1305
+
+/-- RFC 8439 section 2.8.1's `pad16`: the zeros that fill `x` to a multiple
+of 16 bytes. -/
+def pad16 (x : List (BitVec 8)) : List (BitVec 8) :=
+  List.replicate ((16 - x.length % 16) % 16) 0
+
+/-- RFC 8439 section 2.8.1's `mac_data`: the AAD, the ciphertext, each padded,
+then their lengths as 64-bit little-endian numbers. -/
+def macData (aad ct : List (BitVec 8)) : List (BitVec 8) :=
+  aad ++ pad16 aad ++ ct ++ pad16 ct ++ (BitVec.ofNat 64 aad.length).toLEBytes ++
+    (BitVec.ofNat 64 ct.length).toLEBytes
+
+/-- RFC 8439 section 2.6's `poly1305_key_gen`: the first 32 bytes of the block
+with counter zero. -/
+def otk (key nonce : List (BitVec 8)) : List (BitVec 8) :=
+  (chacha20.block key 0 nonce).take 32
+
+/-- RFC 8439 section 2.8's AEAD_CHACHA20_POLY1305 encryption of `msg`: the
+ciphertext, ChaCha20 from block 1, and the tag over the AAD and it. -/
+def «seal» (key nonce aad msg : List (BitVec 8)) : List (BitVec 8) × List (BitVec 8) :=
+  let ct := chacha20.encrypt key 1 nonce msg
+  (ct, poly1305.mac (otk key nonce) (macData aad ct))
+
+/-- RFC 8439 section 2.8's decryption of `ct`: the plaintext, and whether the
+tag over the AAD and `ct` is `tag`. -/
+def «open» (key nonce aad ct tag : List (BitVec 8)) : List (BitVec 8) × Bool :=
+  (chacha20.encrypt key 1 nonce ct, poly1305.mac (otk key nonce) (macData aad ct) == tag)
+
+/-- draft-irtf-cfrg-xchacha-03 section 2.3's XChaCha20-Poly1305 key and nonce
+for a 24-byte nonce: HChaCha20 of the key and the nonce's first 16 bytes, and
+four zero bytes then its last 8. -/
+def xKeyNonce (key nonce : List (BitVec 8)) : List (BitVec 8) × List (BitVec 8) :=
+  (chacha20.hchacha20 key (nonce.take 16), [0, 0, 0, 0] ++ nonce.drop 16)
+
+/-- XChaCha20-Poly1305 encryption: ChaCha20-Poly1305's, under `xKeyNonce`. -/
+def xseal (key nonce aad msg : List (BitVec 8)) : List (BitVec 8) × List (BitVec 8) :=
+  «seal» (xKeyNonce key nonce).1 (xKeyNonce key nonce).2 aad msg
+
+/-- XChaCha20-Poly1305 decryption: ChaCha20-Poly1305's, under `xKeyNonce`. -/
+def xopen (key nonce aad ct tag : List (BitVec 8)) : List (BitVec 8) × Bool :=
+  «open» (xKeyNonce key nonce).1 (xKeyNonce key nonce).2 aad ct tag
+
+end chacha20poly1305
 
 end rind.spec
