@@ -1,4 +1,4 @@
-# Adapters offer exactly their upstream's API
+# [XS] Adapters offer exactly their upstream's API
 
 ## Goal
 
@@ -21,3 +21,9 @@ Decided with the maintainer on 2026-11-09:
 - The children change calls MoQ's `main` makes: `default_provider()` in rind-rustls, rind-jsonwebtoken, and rind-object-store, and `KeyPair::generate` and `to_pkcs8` in rind-rcgen. MoQ requires those adapters by caret (moq-dev/moq's `Cargo.toml:218-221`), so its first lockfile update after the patch releases stops building until its calls change. No crate MoQ has published names a rind adapter yet, so only `main` and its next cut are exposed.
 - The adapter patch releases therefore publish only once MoQ's PR adapting those calls is ready to merge. Publishing happens only when a release PR merges (`CONTRIBUTING.md:138`), so the maintainer leaves the release PR that carries them unmerged until then, and MoQ's PR merges the day they publish. That PR is a quest in moq-dev/moq's own tree.
 - Since rind 0.4 is pending on `main` ([moq-dev/rind#548](https://github.com/moq-dev/rind/pull/548) leaves release-plz to propose it), these fixes publish in the same release as rind 0.4, each adapter requiring it, so MoQ's PR moves to both at once.
+
+The provider signatures are restored. What remains is publishing them.
+
+## Waiting
+
+- Maintainer: leave the release PR that carries these adapter patch releases unmerged until MoQ's PR adapting the provider calls is ready to merge, then publish them with rind 0.4. An agent cannot merge that release PR. Check that `cargo search rind` shows 0.4.0 and that the adapter crates published with it no longer return `MissingFeature` from `default_provider()`.

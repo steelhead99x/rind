@@ -40,17 +40,35 @@ pub(crate) static KEYS: Keys = Keys;
 
 impl KeyProvider for Keys {
     fn load_private_key(&self, der: &[u8]) -> Result<Box<dyn SigningKey>, CryptoError> {
-        type Load = fn(&'static EcdsaSigningAlgorithm, &[u8]) -> Result<EcdsaKeyPair, rind::Error>;
-        let load = |load: Load| {
-            CURVES.into_iter().find_map(|(group, hash, algorithm)| {
-                let key = load(algorithm, der).ok()?;
-                Some(Box::new(Key { key, group, hash }) as Box<dyn SigningKey>)
-            })
-        };
-        load(EcdsaKeyPair::from_pkcs8)
-            .or_else(|| load(EcdsaKeyPair::from_sec1))
+        load_der(der)
+            .or_else(|| load_pem(der))
             .ok_or(CryptoError::InvalidPrivateKey)
     }
+}
+
+fn load_der(der: &[u8]) -> Option<Box<dyn SigningKey>> {
+    type Load = fn(&'static EcdsaSigningAlgorithm, &[u8]) -> Result<EcdsaKeyPair, rind::Error>;
+    let load = |load: Load| {
+        CURVES.into_iter().find_map(|(group, hash, algorithm)| {
+            let key = load(algorithm, der).ok()?;
+            Some(Box::new(Key { key, group, hash }) as Box<dyn SigningKey>)
+        })
+    };
+    load(EcdsaKeyPair::from_pkcs8).or_else(|| load(EcdsaKeyPair::from_sec1))
+}
+
+/// One PEM document, then the DER loader, as both of dimpl's providers do.
+///
+/// A nested PEM is refused. Decoding again would let a hostile encoding recurse
+/// in proportion to its size. The decoded bytes are the private key;
+/// `SecretDocument` wipes them on drop.
+fn load_pem(bytes: &[u8]) -> Option<Box<dyn SigningKey>> {
+    let pem = core::str::from_utf8(bytes).ok()?;
+    if !pem.contains("-----BEGIN") {
+        return None;
+    }
+    let (_label, doc) = pkcs8::SecretDocument::from_pem(pem).ok()?;
+    load_der(doc.as_bytes())
 }
 
 struct Key {

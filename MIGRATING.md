@@ -346,12 +346,10 @@ ring has none.
 ## Adapter crates
 
 Each `rind-*` crate stands in for a crate's aws-lc-rs or ring backend. rind
-panics on a CPU missing a feature it requires, so every adapter function
-that returns a provider refuses one with the adapter's own
-`MissingFeature` instead, which displays rind's message. rind-rustls, whose
-signatures are rustls's provider's, does not. rind-ring, whose signatures
-are ring's, and rind-rcgen's `KeyPair`, whose errors are rcgen's, cannot.
-Call `rind::cpu::check()` before using them.
+panics on a CPU missing a feature it requires. The adapters match their
+upstream's signatures, which have no such error, so they do not check.
+Call `rind::cpu::check()` first when the process should exit with that
+error instead of panicking on the first operation.
 
 ### rind-ring
 
@@ -412,10 +410,13 @@ what rcgen's default `KeyIdMethod::Sha256` computes.
 
 | aws-lc-rs backend | rind |
 |---|---|
-| dimpl's `crypto::aws_lc_rs::default_provider()` | `rind_dimpl::default_provider()?` |
-| str0m's default `aws-lc-rs` feature, or `str0m_aws_lc_rs::default_provider()` | `default-features = false`, with `set_crypto_provider(Arc::new(rind_str0m::default_provider()?))` |
-| object_store's `aws`, `azure`, and `gcp` features | the `*-base` features, with `with_crypto_provider(rind_object_store::default_provider()?)` |
-| jsonwebtoken's `crypto::aws_lc::DEFAULT_PROVIDER` | `rind_jsonwebtoken::default_provider()?` |
+| dimpl's `crypto::aws_lc_rs::default_provider()` | `rind_dimpl::default_provider()` |
+| str0m's default `aws-lc-rs` feature, or `str0m_aws_lc_rs::default_provider()` | `default-features = false`, with `set_crypto_provider(Arc::new(rind_str0m::default_provider()))` |
+| `str0m_aws_lc_rs::dimpl_crypto_provider()` | `rind_str0m::dimpl_crypto_provider()` |
+| object_store's `aws`, `azure`, and `gcp` features | the `*-base` features, with `with_crypto_provider(rind_object_store::default_provider())` |
+| jsonwebtoken's `crypto::aws_lc::DEFAULT_PROVIDER` | `rind_jsonwebtoken::DEFAULT_PROVIDER` |
+
+Each adapter's README lists what rind cannot back and where it behaves differently. rind-dimpl leaves out AES-128-CCM-8. rind-str0m returns an error for an empty certificate or a key it cannot load, where str0m-aws-lc-rs lets dimpl panic. rind-object-store hashes with SHA-256 and signs with RS256 only.
 
 ## Crates with their own crypto backend
 

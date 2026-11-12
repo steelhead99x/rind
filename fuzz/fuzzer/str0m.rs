@@ -61,7 +61,7 @@ enum Input {
 
 fn rind() -> &'static CryptoProvider {
     static PROVIDER: OnceLock<CryptoProvider> = OnceLock::new();
-    PROVIDER.get_or_init(|| rind_str0m::default_provider().unwrap())
+    PROVIDER.get_or_init(rind_str0m::default_provider)
 }
 
 fn baseline() -> &'static CryptoProvider {

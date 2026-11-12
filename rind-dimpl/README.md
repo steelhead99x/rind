@@ -10,15 +10,22 @@ Build dimpl with `default-features = false`, since its default features compile 
 Then hand the provider to each config:
 
 ```rust
-// Refuses a CPU missing a feature rind requires.
 let config = dimpl::Config::builder()
-    .with_crypto_provider(rind_dimpl::default_provider()?)
+    .with_crypto_provider(rind_dimpl::default_provider())
     .build()?;
 ```
 
 Or install it for the process with `dimpl::crypto::CryptoProvider::install_default`.
 
-It negotiates DTLS 1.2 ECDHE-ECDSA and DTLS 1.3 with AES-128-GCM, AES-256-GCM, and ChaCha20-Poly1305, over X25519, P-256, and P-384, and signs with ECDSA P-256 or P-384 keys in PKCS#8 or SEC1 DER.
-dimpl's PSK suite, AES-128-CCM-8, is not offered.
+Its API is `dimpl::crypto::aws_lc_rs`'s, so swapping one for the other changes no other code.
+It negotiates DTLS 1.2 ECDHE-ECDSA and DTLS 1.3 with AES-128-GCM, AES-256-GCM, and ChaCha20-Poly1305, over X25519, P-256, and P-384, and signs with ECDSA P-256 or P-384 keys in PKCS#8 or SEC1 DER, or one PEM document wrapping either.
+
+rind cannot back yet:
+
+- dimpl's PSK suite, AES-128-CCM-8.
+
+Where it behaves differently:
+
+- `default_provider()` puts ChaCha20-Poly1305 first on a CPU where rind runs AES without CPU instructions, for speed.
 
 License: Apache-2.0 OR ISC OR MIT-0

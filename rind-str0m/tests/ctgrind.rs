@@ -30,7 +30,7 @@ fn mark<T: ?Sized>(value: &T, state: MemState) {
 }
 
 fn rind() -> CryptoProvider {
-    rind_str0m::default_provider().unwrap()
+    rind_str0m::default_provider()
 }
 
 fn hex(s: &str) -> Vec<u8> {

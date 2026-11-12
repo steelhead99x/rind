@@ -9,11 +9,11 @@ This crate provides an integration between [jsonwebtoken](https://github.com/Kea
 Use it like:
 
 ```rust
-rind_jsonwebtoken::default_provider()?.install_default().unwrap();
+rind_jsonwebtoken::DEFAULT_PROVIDER.install_default().unwrap();
 ```
 
 And then use jsonwebtoken as normal.
-rind panics on a CPU missing a feature it requires, so `default_provider()` checks first and returns an error naming it instead.
+Its API is `jsonwebtoken::crypto::aws_lc`'s, so swapping one for the other changes no other code.
 It signs and verifies HS256/384/512, ES256/384, RS256/384/512, PS256/384/512, and EdDSA, and implements the key utilities jsonwebtoken needs for JWKs.
 
 License: Apache-2.0 OR ISC OR MIT-0

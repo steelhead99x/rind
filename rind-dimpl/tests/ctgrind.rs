@@ -29,7 +29,7 @@ fn mark<T: ?Sized>(value: &T, state: MemState) {
 }
 
 fn rind() -> CryptoProvider {
-    rind_dimpl::default_provider().unwrap()
+    rind_dimpl::default_provider()
 }
 
 #[test]
@@ -148,26 +148,26 @@ fn signing() {
             .unwrap()
             .self_signed(&key)
             .unwrap();
-        let mut key = provider
-            .key_provider
-            .load_private_key(&key.serialize_der())
-            .unwrap();
+        let pem = key.serialize_pem().into_bytes();
+        for encoding in [key.serialize_der(), pem] {
+            let mut key = provider.key_provider.load_private_key(&encoding).unwrap();
 
-        for hash in key.supported_hash_algorithms().to_vec() {
-            let mut signature = Buf::new();
-            key.sign(b"transcript", hash, &mut signature).unwrap();
-            public(signature.as_ref());
+            for hash in key.supported_hash_algorithms().to_vec() {
+                let mut signature = Buf::new();
+                key.sign(b"transcript", hash, &mut signature).unwrap();
+                public(signature.as_ref());
 
-            provider
-                .signature_verification
-                .verify_signature(
-                    cert.der(),
-                    b"transcript",
-                    &signature,
-                    hash,
-                    SignatureAlgorithm::ECDSA,
-                )
-                .unwrap();
+                provider
+                    .signature_verification
+                    .verify_signature(
+                        cert.der(),
+                        b"transcript",
+                        &signature,
+                        hash,
+                        SignatureAlgorithm::ECDSA,
+                    )
+                    .unwrap();
+            }
         }
     }
 }

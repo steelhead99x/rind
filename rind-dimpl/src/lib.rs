@@ -9,15 +9,13 @@
 //! ```rust
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = dimpl::Config::builder()
-//!     .with_crypto_provider(rind_dimpl::default_provider()?)
+//!     .with_crypto_provider(rind_dimpl::default_provider())
 //!     .build()?;
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! Or install it for the process with [`CryptoProvider::install_default`].
-
-use core::fmt;
 
 use dimpl::crypto::CryptoProvider;
 
@@ -26,33 +24,20 @@ mod kx;
 mod sign;
 mod suite;
 
-/// A CPU feature rind requires that this CPU lacks.
-#[derive(Debug)]
-pub struct MissingFeature(rind::cpu::MissingFeature);
-
-impl fmt::Display for MissingFeature {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl std::error::Error for MissingFeature {}
-
-/// Returns a dimpl [`CryptoProvider`] backed by rind, or the CPU feature rind
-/// requires that this CPU lacks.
+/// Returns a dimpl [`CryptoProvider`] backed by rind.
 ///
 /// It negotiates DTLS 1.2 ECDHE-ECDSA and DTLS 1.3 with AES-128-GCM,
 /// AES-256-GCM, and ChaCha20-Poly1305, over X25519, P-256, and P-384, and
-/// signs with ECDSA P-256 or P-384 keys in PKCS#8 or SEC1 DER. It prefers
-/// ChaCha20-Poly1305 where rind runs AES without CPU instructions.
-pub fn default_provider() -> Result<CryptoProvider, MissingFeature> {
-    rind::cpu::check().map_err(MissingFeature)?;
+/// signs with ECDSA P-256 or P-384 keys in PKCS#8 or SEC1 DER, or one PEM
+/// document wrapping either. It prefers ChaCha20-Poly1305 where rind runs AES
+/// without CPU instructions.
+pub fn default_provider() -> CryptoProvider {
     let (cipher_suites, dtls13_cipher_suites) = if rind::cpu::has_aes_hardware() {
         (suite::DTLS12, suite::DTLS13)
     } else {
         (suite::DTLS12_CHACHA20_FIRST, suite::DTLS13_CHACHA20_FIRST)
     };
-    Ok(CryptoProvider {
+    CryptoProvider {
         kx_groups: kx::ALL,
         signature_verification: &sign::VERIFIER,
         key_provider: &sign::KEYS,
@@ -61,5 +46,5 @@ pub fn default_provider() -> Result<CryptoProvider, MissingFeature> {
         hmac_provider: &digest::HMAC,
         cipher_suites,
         dtls13_cipher_suites,
-    })
+    }
 }

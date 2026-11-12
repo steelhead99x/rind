@@ -1,6 +1,6 @@
 [package]
 name = "rind-dimpl"
-version = "0.9.3"
+version = "0.9.4"
 edition = "2024"
 repository = "https://github.com/moq-dev/rind"
 license = "Apache-2.0 OR ISC OR MIT-0"
@@ -15,6 +15,8 @@ readme = "README.md"
 # Without it a custom provider cannot enforce that, and it adds only the DER
 # parsers this crate already needs to read certificates.
 dimpl = { version = "0.9", default-features = false, features = ["_crypto-common"] }
+# PEM private keys, decoded the way dimpl's own providers decode them.
+pkcs8 = { version = "0.11", default-features = false, features = ["pem"] }
 rind = { version = "0.3.2", path = "../rind" }
 x509-cert = { version = "0.3", default-features = false }
 

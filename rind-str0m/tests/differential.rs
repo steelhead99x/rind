@@ -4,7 +4,7 @@ use str0m::crypto::{AeadAes128Gcm, Aes128CmSha1_80, CryptoProvider};
 
 fn providers() -> (CryptoProvider, CryptoProvider) {
     (
-        rind_str0m::default_provider().unwrap(),
+        rind_str0m::default_provider(),
         str0m_aws_lc_rs::default_provider(),
     )
 }

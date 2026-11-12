@@ -11,11 +11,13 @@ Build object_store with its `aws-base`, `azure-base`, or `gcp-base` features rat
 Then hand the provider to each store's builder:
 
 ```rust,no_run
-// Refuses a CPU missing a feature rind requires.
 let store = object_store::gcp::GoogleCloudStorageBuilder::new()
     .with_bucket_name("bucket")
-    .with_crypto_provider(rind_object_store::default_provider()?)
+    .with_crypto_provider(rind_object_store::default_provider())
     .build()?;
 ```
+
+object_store's own providers are `pub(crate)`, so this crate keeps `default_provider()`, which returns `Arc<dyn CryptoProvider>`.
+Digests and HMAC are SHA-256, and signing is RS256, which is what S3, Azure, and GCS ask for. Any other algorithm returns `Error::NotSupported`.
 
 License: Apache-2.0 OR ISC OR MIT-0

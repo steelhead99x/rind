@@ -18,7 +18,7 @@ use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey};
 fn providers() -> [(&'static str, &'static CryptoProvider); 2] {
     [
         ("aws-lc-rs", &aws_lc::DEFAULT_PROVIDER),
-        ("rind", rind_jsonwebtoken::default_provider().unwrap()),
+        ("rind", &rind_jsonwebtoken::DEFAULT_PROVIDER),
     ]
 }
 

@@ -8,7 +8,7 @@ use dimpl::crypto::{
 use dimpl::{CryptoError, CryptoOperation};
 
 fn rind() -> CryptoProvider {
-    rind_dimpl::default_provider().unwrap()
+    rind_dimpl::default_provider()
 }
 
 fn certificate(algorithm: &'static rcgen::SignatureAlgorithm) -> (Vec<u8>, Vec<u8>) {
@@ -301,19 +301,66 @@ fn signatures_are_checked_against_the_certificate() {
 }
 
 #[test]
-fn only_ecdsa_der_keys_load() {
+fn pem_pkcs8_loads_and_other_keys_are_refused() {
     let provider = rind();
-    let (_, ed25519) = certificate(&rcgen::PKCS_ED25519);
-    let (_, p256) = certificate(&rcgen::PKCS_ECDSA_P256_SHA256);
+    let (cert, p256) = certificate(&rcgen::PKCS_ECDSA_P256_SHA256);
     let pem = rcgen::KeyPair::try_from(p256.as_slice())
+        .unwrap()
+        .serialize_pem();
+    let mut key = provider
+        .key_provider
+        .load_private_key(pem.as_bytes())
+        .expect("PEM PKCS#8");
+    let mut signature = Buf::new();
+    key.sign(b"transcript", HashAlgorithm::SHA256, &mut signature)
+        .unwrap();
+    provider
+        .signature_verification
+        .verify_signature(
+            &cert,
+            b"transcript",
+            &signature,
+            HashAlgorithm::SHA256,
+            SignatureAlgorithm::ECDSA,
+        )
+        .unwrap();
+
+    let (cert384, p384) = certificate(&rcgen::PKCS_ECDSA_P384_SHA384);
+    let pem384 = rcgen::KeyPair::try_from(p384.as_slice())
+        .unwrap()
+        .serialize_pem();
+    let mut key = provider
+        .key_provider
+        .load_private_key(pem384.as_bytes())
+        .expect("P-384 PEM PKCS#8");
+    let mut signature = Buf::new();
+    key.sign(b"transcript", HashAlgorithm::SHA384, &mut signature)
+        .unwrap();
+    provider
+        .signature_verification
+        .verify_signature(
+            &cert384,
+            b"transcript",
+            &signature,
+            HashAlgorithm::SHA384,
+            SignatureAlgorithm::ECDSA,
+        )
+        .unwrap();
+
+    let (_, ed25519) = certificate(&rcgen::PKCS_ED25519);
+    let ed_pem = rcgen::KeyPair::try_from(ed25519.as_slice())
         .unwrap()
         .serialize_pem();
 
     for (key, what) in [
-        (&ed25519[..], "Ed25519"),
-        (pem.as_bytes(), "PEM"),
+        (ed25519.as_slice(), "Ed25519"),
+        (ed_pem.as_bytes(), "Ed25519 PEM"),
         (&p256[..p256.len() - 1], "truncated"),
-        (&[], "empty"),
+        (b"".as_slice(), "empty"),
+        (
+            b"-----BEGIN PRIVATE KEY-----\n!!!!\n-----END PRIVATE KEY-----\n".as_slice(),
+            "bad PEM",
+        ),
     ] {
         assert_eq!(
             provider.key_provider.load_private_key(key).err(),

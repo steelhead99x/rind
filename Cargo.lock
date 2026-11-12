@@ -3325,11 +3325,12 @@ dependencies = [
 
 [[package]]
 name = "rind-dimpl"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "aws-lc-rs",
  "crabgrind 0.4.0",
  "dimpl",
+ "pkcs8 0.11.0",
  "rcgen",
  "rind",
  "x509-cert",
@@ -3358,7 +3359,7 @@ dependencies = [
 
 [[package]]
 name = "rind-jsonwebtoken"
-version = "11.0.3"
+version = "11.0.4"
 dependencies = [
  "aws-lc-rs",
  "crabgrind 0.4.0",
@@ -3370,7 +3371,7 @@ dependencies = [
 
 [[package]]
 name = "rind-object-store"
-version = "0.14.3"
+version = "0.14.4"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
@@ -3438,7 +3439,7 @@ dependencies = [
 
 [[package]]
 name = "rind-str0m"
-version = "0.25.3"
+version = "0.25.4"
 dependencies = [
  "crabgrind 0.4.0",
  "dimpl",

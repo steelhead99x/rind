@@ -105,7 +105,7 @@ fn run(a: &mut Peer, b: &mut Peer, now: &mut Instant, done: impl Fn(&Peer, &Peer
 
 fn connect(rind_active: bool, version: DtlsVersion) {
     let mut now = Instant::now();
-    let mut a = Peer::new(rind_str0m::default_provider().unwrap(), version, 1000, now);
+    let mut a = Peer::new(rind_str0m::default_provider(), version, 1000, now);
     let mut b = Peer::new(str0m_aws_lc_rs::default_provider(), version, 2000, now);
 
     let ca = Candidate::host(a.addr, "udp").unwrap();
@@ -191,7 +191,7 @@ fn dtls13_rind_server() {
 /// The generated certificate's fingerprint is its SHA-256, as browsers check.
 #[test]
 fn generated_certificate() {
-    let provider = rind_str0m::default_provider().unwrap();
+    let provider = rind_str0m::default_provider();
     let cert = provider.dtls_provider.generate_certificate().unwrap();
     let again = provider.dtls_provider.generate_certificate().unwrap();
     assert_ne!(cert.certificate, again.certificate);
@@ -213,7 +213,7 @@ fn generated_certificate() {
 /// A caller's certificate or key that dimpl cannot use is an error, not a panic.
 #[test]
 fn unusable_certificate_is_an_error() {
-    let provider = rind_str0m::default_provider().unwrap();
+    let provider = rind_str0m::default_provider();
     let dtls = provider.dtls_provider;
     let cert = dtls.generate_certificate().unwrap();
 
