@@ -5,8 +5,9 @@
 //! `Hacl_Hash_SHA2`, as libcrux-sha2 ships it. HACL*'s SHA-256 took 0.67-0.93
 //! of `generic`'s time at 16 KB on x86_64.
 
+use libcrux_sha2::hacl::sha256_update_nblocks;
 #[cfg(target_pointer_width = "64")]
-use libcrux_sha2::hacl::{sha256_update_nblocks, sha512_update_nblocks};
+use libcrux_sha2::hacl::sha512_update_nblocks;
 
 pub(crate) use crate::low::generic::sha1::sha1_compress_blocks;
 
@@ -19,11 +20,22 @@ pub(crate) fn sha256_compress_blocks(state: &mut [u32; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(64));
     // HACL*'s `sha256_update` is fully unrolled (~12 KiB on Xtensa), which
     // fills a 16 KiB instruction cache and makes short inputs and HMAC/HKDF
-    // pay a large miss cost. On 32-bit targets use the rolled compression
-    // in `generic::sha256`. 64-bit portable keeps HACL*.
+    // pay a large miss cost. On 32-bit targets, short calls (HMAC pads,
+    // HKDF, 32-64 byte hashes) use the rolled `generic::sha256`; longer
+    // calls use HACL*, which is faster once that 12 KiB stays hot.
+    // Cutover is 256 bytes (4 blocks): on the ESP32-S3, rolled was 0.77×
+    // at 32 B and 0.99× at 64 B, and HACL* was 0.78× rolled at 1200 B
+    // and 0.68× at 16 KB. 64-bit portable always keeps HACL*.
     #[cfg(target_pointer_width = "32")]
     {
-        crate::low::generic::sha256::sha256_compress_blocks(state, blocks);
+        const SHORT: usize = 256;
+        if blocks.len() <= SHORT {
+            crate::low::generic::sha256::sha256_compress_blocks(state, blocks);
+        } else {
+            for piece in blocks.chunks(PIECE) {
+                sha256_update_nblocks(piece.len() as u32, piece, state);
+            }
+        }
     }
     #[cfg(target_pointer_width = "64")]
     {
