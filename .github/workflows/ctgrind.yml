@@ -337,13 +337,14 @@ jobs:
             tests: --exact ct_binsec_x25519 ct_binsec_mont_mul ct_binsec_chacha20 ct_binsec_constant_time_verify
           # The row above follows this runner's core, which is wide, so its
           # X25519 and Montgomery product are `_alt` and `bn_mul_mont`. This
-          # row forces the narrow schedules. ECDH, Ed25519, and ECDSA stay
-          # with `admin/ct-qemu`: BINSEC cannot decode `mrs` of `tpidr_el0`
-          # in glibc's malloc or `tbl`, the same limit as the wide row.
+          # row forces the narrow schedules. X25519, ECDH, Ed25519, and ECDSA
+          # stay with `admin/ct-qemu`: BINSEC 0.11.3 cannot decode the
+          # narrow X25519's `fcsel`, nor `mrs` of `tpidr_el0` in glibc's
+          # malloc or `tbl`, the same limit as the wide row.
           - backend: aarch64-narrow
             os: ubuntu-24.04-arm
             rustflags: --cfg rind_cpu_disable
-            tests: --exact ct_binsec_x25519 ct_binsec_mont_mul
+            tests: --exact ct_binsec_mont_mul
             disable_wide: 1
     runs-on: ${{ matrix.os }}
     steps:
