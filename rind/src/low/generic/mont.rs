@@ -63,6 +63,10 @@ const MUL_KARATSUBA: usize = match Limb::BITS {
     64 => 48,
     _ => 96,
 };
+#[cfg(any(
+    rind_backend = "portable",
+    all(test, any(rind_backend = "x86_64", rind_backend = "aarch64"))
+))]
 const SQR_KARATSUBA: usize = match Limb::BITS {
     64 => 96,
     _ => 128,
@@ -410,6 +414,10 @@ fn mul_schoolbook(z: &mut [Limb], x: &[Limb], y: &[Limb]) {
 /// `z = x^2`, schoolbook, each cross product once, for a `z` of `2 x.len()`
 /// limbs. The products of distinct limbs sum to below `x^2 / 2`, so doubling
 /// them cannot overflow a `2n`-limb buffer.
+#[cfg(any(
+    rind_backend = "portable",
+    all(test, any(rind_backend = "x86_64", rind_backend = "aarch64"))
+))]
 fn sqr_schoolbook(z: &mut [Limb], x: &[Limb]) {
     let n = x.len();
     let z = &mut z[..2 * n];
@@ -597,6 +605,10 @@ fn mul_karatsuba(z: &mut [Limb], x: &[Limb], y: &[Limb], t: &mut [Limb], crossov
 /// `a0^2 + a1^2 - 2 a0 a1` whichever half is larger, and [`abs_sub`] still
 /// picks that absolute value by a mask. `t` and `z` are laid out as in
 /// [`mul_karatsuba`].
+#[cfg(any(
+    rind_backend = "portable",
+    all(test, any(rind_backend = "x86_64", rind_backend = "aarch64"))
+))]
 fn sqr_karatsuba(z: &mut [Limb], x: &[Limb], t: &mut [Limb], crossover: usize) {
     let n = x.len();
     if !karatsuba(n, crossover) {
@@ -631,6 +643,10 @@ fn sqr_karatsuba(z: &mut [Limb], x: &[Limb], t: &mut [Limb], crossover: usize) {
 ///
 /// `x` and `y` are below the odd `m`, so their product is below `2^bn * m`
 /// and one reduction brings it below `2m`, which [`redc`] finishes.
+#[cfg(any(
+    rind_backend = "portable",
+    all(test, any(rind_backend = "x86_64", rind_backend = "aarch64"))
+))]
 fn mont_mul_karatsuba(z: &mut [u64], x: &[Limb], y: &[Limb], m: &[Limb], n0: Limb) {
     let n = m.len();
     // Stack slots of the widest product and scratch. Only the `2n` and `4n`
@@ -645,6 +661,10 @@ fn mont_mul_karatsuba(z: &mut [u64], x: &[Limb], y: &[Limb], m: &[Limb], n0: Lim
 }
 
 /// `z = x^2 / 2^bn mod m` by a Karatsuba square and [`redc`].
+#[cfg(any(
+    rind_backend = "portable",
+    all(test, any(rind_backend = "x86_64", rind_backend = "aarch64"))
+))]
 fn mont_sqr_karatsuba(z: &mut [u64], x: &[Limb], m: &[Limb], n0: Limb) {
     let n = m.len();
     with_zeroed2::<{ MAX_LIMBS * 2 }, { MAX_LIMBS * 4 }, ()>(2 * n, 4 * n, |square, scratch| {
