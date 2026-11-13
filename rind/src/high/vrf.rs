@@ -3,9 +3,17 @@
 //! ECVRF (RFC 9381): ECVRF-EDWARDS25519-SHA512-TAI and ECVRF-P256-SHA256-TAI.
 //!
 //! Each suite's steps are RFC 9381 section 5's, over the group code in `mid`.
-//! Proving multiplies by the secret key and the nonce in constant time;
-//! try-and-increment (section 5.4.1.1) loops on the public key and the input,
-//! never on a secret.
+//! Proving multiplies by the secret key and the accepted nonce in constant
+//! time. Try-and-increment (section 5.4.1.1) loops on the public key and the
+//! input, never on a secret. P-256's nonce is RFC 6979 section 3.2's: a
+//! candidate not from 1 to n - 1, probability about 2^-32, draws another
+//! HMAC_DRBG block. [`p256::Scalar::from_bytes_checked`] declassifies that
+//! test, as ECDSA's nonce does in [`p256::PrivateKey::generate`], so the
+//! retry is not constant time. A rejection says nothing of the nonce that
+//! was accepted. Edwards25519 reduces a 64-byte hash and does not retry.
+//!
+//! An Edwards25519 seed must be dedicated. It is an RFC 8032 seed, and
+//! signing with it reuses this suite's nonce; see [`SecretKey`].
 //!
 //! The SSWU and ELL2 suites are left out: no RFC 9381 consumer uses them, and
 //! Cardano's and Algorand's VRFs follow an incompatible pre-RFC draft.
@@ -62,6 +70,20 @@ pub static ECVRF_P256_SHA256_TAI: Algorithm = Algorithm {
 /// The secret key that proves outputs, wiped on drop under the `wipe` feature.
 ///
 /// It keeps its public key, computed once when it is generated or loaded.
+///
+/// An Edwards25519 seed is an RFC 8032 seed, the same 32 bytes
+/// [`Ed25519KeyPair::from_seed`](crate::signature::Ed25519KeyPair::from_seed)
+/// and [`Ed25519Seed`](crate::signature::Ed25519Seed) hold, and it has to be
+/// this key's alone. This suite's nonce is Ed25519's,
+/// `SHA-512(prefix || h_string) mod L`: `prefix` is the upper half of
+/// `SHA-512(seed)`, and `h_string` is the try-and-increment point, which
+/// anyone recomputes from the public key and the input. An Ed25519 signature
+/// on that `h_string` under the same seed reuses the nonce. The signature's
+/// response `S` and the proof's response `s` then give the scalar,
+/// `x = (S - s) * inv(c_sig - c_vrf) mod L`, where `c_sig` and `c_vrf` are
+/// the two challenges. Generate the seed for this key, or load bytes that
+/// have never been an Ed25519 signing key. A P-256 key is a group scalar,
+/// not an Ed25519 seed, and this does not apply to it.
 pub struct SecretKey {
     secret: Secret,
     public: PublicKey,
@@ -91,6 +113,9 @@ impl low::Zeroable for SecretKey {}
 
 impl SecretKey {
     /// Generates a secret key for `algorithm` from the system random source.
+    ///
+    /// The bytes belong to this key. Reusing an Edwards25519 seed as an
+    /// Ed25519 signing key reveals the scalar; see [`SecretKey`].
     pub fn generate(algorithm: &'static Algorithm) -> Result<Self, Error> {
         let _entry = Entry::new_secret();
         let mut bytes = [0u8; 32];
@@ -108,6 +133,10 @@ impl SecretKey {
     /// Loads a secret key for `algorithm`: Edwards25519's 32-byte RFC 8032
     /// seed, any value, or P-256's 32-byte big-endian scalar, refused unless
     /// it is from 1 to n - 1.
+    ///
+    /// The Edwards25519 seed must be dedicated, not an Ed25519 signing seed
+    /// such as [`Ed25519Seed`](crate::signature::Ed25519Seed). See
+    /// [`SecretKey`].
     pub fn from_bytes(algorithm: &'static Algorithm, bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_secret();
         let bytes: &[u8; 32] = bytes.try_into().map_err(|_| KeyFormatError::WrongLength)?;
@@ -175,8 +204,17 @@ impl SecretKey {
     ///
     /// The time taken depends on `alpha`, as try-and-increment's loop does
     /// (RFC 9381 section 5.4.1.1), so a VRF whose input must stay secret from
-    /// an observer of its timing needs another suite.
-    pub fn prove(&self, alpha: &[u8]) -> (Proof, Output) {
+    /// an observer of its timing needs another suite. P-256's nonce follows
+    /// RFC 6979: a candidate not from 1 to n - 1, probability about 2^-32,
+    /// draws another block, and that retry is not constant time.
+    /// Multiplication by the accepted nonce is constant time.
+    ///
+    /// Returns [`Error::Fault`] if try-and-increment finds no point. Each
+    /// candidate is a point with probability about 1/2, over 256 counters,
+    /// so that has probability about 2^-256 and no input is known that
+    /// produces it. [`PublicKey::verify`] reports the same event as
+    /// [`Error::BadSignature`]: a proof it cannot check does not verify.
+    pub fn prove(&self, alpha: &[u8]) -> Result<(Proof, Output), Error> {
         let _entry = Entry::new_secret();
         let mut proof = Proof {
             bytes: [0; Proof::MAX_LEN],
@@ -185,8 +223,8 @@ impl SecretKey {
         let output = match (&self.secret, &self.public.0) {
             (Secret::Edwards25519 { x, prefix, .. }, Public::Edwards25519 { bytes, .. }) => {
                 proof.len = EDWARDS25519_PROOF_LEN;
-                let (h, h_string) = edwards25519_encode_to_curve(bytes, alpha)
-                    .expect("each candidate decodes with a chance of about 1/2");
+                let (h, h_string) =
+                    edwards25519_encode_to_curve(bytes, alpha).ok_or(Error::Fault)?;
                 let gamma_point = h.mul(x);
                 let gamma = gamma_point.to_bytes();
                 // RFC 9381 5.4.2.2's nonce, keyed by the seed's hash.
@@ -211,8 +249,7 @@ impl SecretKey {
             }
             (Secret::P256 { x }, Public::P256 { bytes, .. }) => {
                 proof.len = P256_PROOF_LEN;
-                let (h, h_string) = p256_encode_to_curve(bytes, alpha)
-                    .expect("each candidate decodes with a chance of about 1/2");
+                let (h, h_string) = p256_encode_to_curve(bytes, alpha).ok_or(Error::Fault)?;
                 let gamma = h.mul(x).to_compressed();
                 let k = p256_nonce(x, &h_string);
                 let u = p256::Point::mul_base(&k).to_compressed();
@@ -235,7 +272,7 @@ impl SecretKey {
             }
             _ => unreachable!("a key's halves share their algorithm"),
         };
-        (ct::into_public(proof), ct::into_public(output))
+        Ok((ct::into_public(proof), ct::into_public(output)))
     }
 }
 
@@ -490,6 +527,8 @@ const P256_PROOF_LEN: usize = p256::Point::COMPRESSED_BYTES + CHALLENGE_LEN + 32
 ///
 /// Each candidate decodes with a chance of about 1/2, so `None` has a chance
 /// of about 2^-256: no input can be found that gives it.
+/// [`SecretKey::prove`] reports that as [`Error::Fault`]; [`PublicKey::verify`]
+/// reports it as [`Error::BadSignature`].
 fn edwards25519_encode_to_curve(
     public_key: &[u8; 32],
     alpha: &[u8],
@@ -556,6 +595,15 @@ fn p256_encode_to_curve(
 
 /// RFC 9381 5.4.2.1's nonce: RFC 6979 section 3.2's, with `h_string` as the
 /// message and no check that it suits ECDSA.
+///
+/// A candidate not from 1 to n - 1 is discarded and another block is drawn.
+/// The range test is [`p256::Scalar::from_bytes_checked`], which declassifies
+/// through `into_range_check`: whether the candidate is in range is treated
+/// as public, and a rejection says nothing of the nonce that was accepted.
+/// ECDSA's nonces take the same branch in [`p256::PrivateKey::generate`].
+/// The accepted nonce is then used in constant time. Keeping the retry is
+/// what makes the nonce RFC 6979's; reducing a candidate that is out of
+/// range, or stopping after one draw, would not be.
 fn p256_nonce(x: &p256::Scalar, h_string: &[u8]) -> p256::Scalar {
     // `bits2octets(H(m))`: qlen and hlen are both 256 bits, so the hash is
     // only reduced.
@@ -678,7 +726,7 @@ mod tests {
             // `to_bytes` is the secret key, still secret under ctgrind.
             assert_eq!(ct::into_public(key.to_bytes().0), &h(v.secret_key)[..]);
             assert_eq!(key.public_key().as_ref(), h(v.public_key));
-            let (proof, output) = key.prove(&h(v.alpha));
+            let (proof, output) = key.prove(&h(v.alpha)).unwrap();
             assert_eq!(proof.as_ref(), h(v.proof), "{}", v.proof);
             assert_eq!(output.as_ref(), h(v.output));
 
@@ -814,21 +862,70 @@ mod tests {
             assert_eq!(loaded.public_key().as_ref(), key.public_key().as_ref());
             let public_key = PublicKey::new(algorithm, key.public_key().as_ref()).unwrap();
             assert_eq!(public_key.algorithm(), algorithm);
-            let (proof, output) = key.prove(b"input");
+            let (proof, output) = key.prove(b"input").unwrap();
             let verified = public_key.verify(b"input", proof.as_ref()).unwrap();
             assert_eq!(verified.as_ref(), output.as_ref());
         }
     }
 
+    /// The Edwards25519 suite's nonce is Ed25519's, so the seed has to be
+    /// dedicated. An Ed25519 signature on `h_string` reuses it, and the two
+    /// responses give the scalar: `x = (S - s) * inv(c_sig - c_vrf) mod L`.
+    #[test]
+    fn ed25519_signature_on_h_string_reveals_the_scalar() {
+        let v = &VECTORS[3];
+        let seed: [u8; 32] = h(v.secret_key).try_into().unwrap();
+        let key = SecretKey::from_bytes(v.algorithm, &seed).unwrap();
+        let public: [u8; 32] = key.public_key().as_ref().try_into().unwrap();
+        let alpha = h(v.alpha);
+        let (proof, _) = key.prove(&alpha).unwrap();
+        let (_, h_string) = edwards25519_encode_to_curve(&public, &alpha).unwrap();
+
+        let hashed = sha512(&[&seed]);
+        let mut wide = [0u8; 64];
+        wide[..32].copy_from_slice(&hashed[..32]);
+        wide[0] &= 248;
+        wide[31] &= 127;
+        wide[31] |= 64;
+        let x = edwards25519::Scalar::from_uniform_bytes(&wide);
+        let k = edwards25519::Scalar::from_uniform_bytes(&sha512(&[&hashed[32..], &h_string]));
+
+        let sig = crate::mid::ed25519::SigningKey::from_seed(&seed).sign(&h_string);
+        assert_eq!(sig[..32], edwards25519::Point::mul_base(&k).to_bytes());
+
+        let c_sig =
+            edwards25519::Scalar::from_uniform_bytes(&sha512(&[&sig[..32], &public, &h_string]));
+        let c_vrf = edwards25519_challenge(&proof.as_ref()[32..48]);
+        let s_vrf =
+            edwards25519::Scalar::from_canonical_bytes(proof.as_ref()[48..].try_into().unwrap())
+                .unwrap();
+        let s_sig =
+            edwards25519::Scalar::from_canonical_bytes(sig[32..].try_into().unwrap()).unwrap();
+        let recovered = sub_mod_l(s_sig, s_vrf).mul(&sub_mod_l(c_sig, c_vrf).invert().unwrap());
+        assert_eq!(recovered.to_bytes(), x.to_bytes());
+        assert_eq!(edwards25519::Point::mul_base(&recovered).to_bytes(), public);
+    }
+
+    /// `a - b mod L`, with `L` the edwards25519 order.
+    fn sub_mod_l(a: edwards25519::Scalar, b: edwards25519::Scalar) -> edwards25519::Scalar {
+        let mut one = [0u8; 32];
+        one[0] = 1;
+        let one = edwards25519::Scalar::from_canonical_bytes(&one).unwrap();
+        b.neg().mul_add(&one, &a)
+    }
+
     /// Under `admin/ctgrind`, memcheck fails this if loading a key or
     /// proving branches on or indexes by the secret key or the nonce.
+    ///
+    /// P-256's nonce retry is not covered here: `Scalar::into_range_check`
+    /// declassifies the range test before the branch. See [`p256_nonce`].
     #[test]
     fn stays_secret() {
         for v in &VECTORS {
             let secret = h(v.secret_key);
             ct::secret_slice(&secret);
             let key = SecretKey::from_bytes(v.algorithm, &secret).unwrap();
-            let (proof, output) = key.prove(&h(v.alpha));
+            let (proof, output) = key.prove(&h(v.alpha)).unwrap();
             assert_eq!(proof.as_ref(), h(v.proof));
             assert_eq!(output.as_ref(), h(v.output));
         }
