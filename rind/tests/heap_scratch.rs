@@ -201,16 +201,25 @@ fn ed25519() {
 
 #[test]
 fn ml_dsa() {
-    use aws_lc_rs::signature::{ML_DSA_44_SIGNING, ML_DSA_65_SIGNING, ML_DSA_87_SIGNING};
     use rind::signature::sign::{MlDsa44, MlDsa65, MlDsa87};
-    ml_dsa_set::<MlDsa44>(&ML_DSA_44_SIGNING);
-    ml_dsa_set::<MlDsa65>(&ML_DSA_65_SIGNING);
-    ml_dsa_set::<MlDsa87>(&ML_DSA_87_SIGNING);
+    ml_dsa_set::<MlDsa44>();
+    ml_dsa_set::<MlDsa65>();
+    ml_dsa_set::<MlDsa87>();
 }
 
-fn ml_dsa_set<P: rind::signature::sign::MlDsaParameterSet>(
-    theirs: &'static aws_lc_rs::signature::PqdsaSigningAlgorithm,
-) {
+/// The expanded-form load, whose key aws-lc-rs expands, so builds without
+/// aws-lc (Miri, wasm) leave it out.
+#[test]
+#[cfg(not(any(miri, target_family = "wasm")))]
+fn ml_dsa_expanded() {
+    use aws_lc_rs::signature::{ML_DSA_44_SIGNING, ML_DSA_65_SIGNING, ML_DSA_87_SIGNING};
+    use rind::signature::sign::{MlDsa44, MlDsa65, MlDsa87};
+    ml_dsa_expanded_set::<MlDsa44>(&ML_DSA_44_SIGNING);
+    ml_dsa_expanded_set::<MlDsa65>(&ML_DSA_65_SIGNING);
+    ml_dsa_expanded_set::<MlDsa87>(&ML_DSA_87_SIGNING);
+}
+
+fn ml_dsa_set<P: rind::signature::sign::MlDsaParameterSet>() {
     use rind::signature::sign::MlDsaKeyPair;
     zeroed("ML-DSA key generation", || {
         MlDsaKeyPair::<P>::generate().unwrap()
@@ -221,11 +230,6 @@ fn ml_dsa_set<P: rind::signature::sign::MlDsaParameterSet>(
     });
     let keys = seeds.map(|seed| MlDsaKeyPair::<P>::from_seed(&seed).unwrap());
     independent("ML-DSA export", keys.each_ref(), |key| key.to_pkcs8());
-    // The expanded form, whose load checks the key.
-    let expanded = seeds.map(|seed| ml_dsa_expanded_pkcs8(theirs, &seed));
-    independent("ML-DSA expanded load", expanded, |der| {
-        MlDsaKeyPair::<P>::from_pkcs8(der).unwrap()
-    });
     // Signing is hedged, so even under one key its randomness varies: every
     // block it frees must be wiped.
     for key in &keys {
@@ -259,8 +263,22 @@ fn slh_dsa_set<P: rind::signature::sign::SlhDsaParameterSet>() {
     }
 }
 
+/// The expanded form, whose load checks the key.
+#[cfg(not(any(miri, target_family = "wasm")))]
+fn ml_dsa_expanded_set<P: rind::signature::sign::MlDsaParameterSet>(
+    theirs: &'static aws_lc_rs::signature::PqdsaSigningAlgorithm,
+) {
+    use rind::signature::sign::MlDsaKeyPair;
+    let seeds = [[1u8; 32], [2u8; 32]];
+    let expanded = seeds.map(|seed| ml_dsa_expanded_pkcs8(theirs, &seed));
+    independent("ML-DSA expanded load", expanded, |der| {
+        MlDsaKeyPair::<P>::from_pkcs8(der).unwrap()
+    });
+}
+
 /// The key `seed` expands to, as PKCS#8 in RFC 9881's expanded form, which
 /// rind writes only for a key loaded from it, so aws-lc-rs expands it.
+#[cfg(not(any(miri, target_family = "wasm")))]
 fn ml_dsa_expanded_pkcs8(
     algorithm: &'static aws_lc_rs::signature::PqdsaSigningAlgorithm,
     seed: &[u8; 32],
@@ -278,6 +296,7 @@ fn ml_dsa_expanded_pkcs8(
 }
 
 /// A DER element of `tag` holding `body`, under 64 KiB.
+#[cfg(not(any(miri, target_family = "wasm")))]
 fn der(tag: u8, body: &[u8]) -> Vec<u8> {
     let len = match body.len() {
         len @ 0..=0x7f => vec![len as u8],
