@@ -24,6 +24,16 @@
 # secret in `rind/src/low/vartime_planted.rs`. Each must be found, so a scan
 # that finds nothing fails.
 #
+# The `+mul16` target is armv7's portable build with `--cfg rind_mul16`, which
+# build.rs sets for the Cortex-M3 and the cores without `umull` (see
+# `rind/src/low/generic/mul16.rs`), where Poly1305 builds each secret product
+# from 32x32->32-bit multiplies. That target has no standard library to
+# build against, and its multiplies are the ones armv7's code generator
+# picks, so this checks them there instead: from each function in MUL16, it
+# follows calls as above and fails on a 32x32->64-bit multiply or a call to
+# a multiply routine, which is all it looks for on that target. It must find
+# the one planted.
+#
 # Run it in `nix develop .#ct-vartime`, which has llvm-objdump and each
 # target's standard library.
 
@@ -37,6 +47,8 @@ TARGETS = [
     # `sh/dispatch.sh` forces it, at 64 and 32 bits.
     "x86_64-unknown-linux-gnu+portable",
     "armv7-unknown-linux-gnueabihf+portable",
+    # And armv7's portable build with Poly1305's products from 16-bit halves.
+    "armv7-unknown-linux-gnueabihf+mul16",
     # The architectures whose only backend is the portable one. ARMv6 is
     # 32-bit ARM before ARMv7, and big-endian powerpc64 the ELFv1 ABI, whose
     # calls reach a function through its descriptor in `.opd`.
@@ -55,6 +67,8 @@ ARCH = {
     "powerpc64le": "powerpc", "riscv64gc": "riscv64",
 }
 PORTABLE = '--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
+# The flags of each backend a target's `+` suffix names.
+BACKENDS = {"": [], "portable": [PORTABLE], "mul16": [PORTABLE, "--cfg rind_mul16"]}
 
 # Instructions whose latency may depend on their operands: integer division,
 # and floating-point arithmetic, whose subnormal operands take a slow path.
@@ -196,6 +210,29 @@ HELPERS = re.compile(
     r"__aeabi_u?[il]?div(mod)?|__aeabi_[fd]div|__u?(div|mod|divmod)[sdt]i[34]|__div[sdt]f3"
 )
 
+# What the `+mul16` target refuses: A32 and T32's 32x32->64-bit multiplies,
+# which a Cortex-M3 ends early on small operands (Arm DDI 0337, "Cortex-M3
+# instructions"), as it does `umlal` and `smlal`, with the DSP extension's
+# long multiply-accumulates, and the compiler's 64-bit multiply routines,
+# which cores without `umull` would call.
+COND = "(eq|ne|hs|cs|lo|cc|mi|pl|vs|vc|hi|ls|ge|lt|gt|le|al)?"
+LONG_MULTIPLY = re.compile(
+    r"([us]mull|[us]mlal)s?" + COND + r"|(umaal|smlal(bb|bt|tb|tt)|sml[as]ldx?)" + COND
+)
+MUL_HELPERS = re.compile(r"__aeabi_lmul|__mul[dt]i3")
+LONG_MULTIPLY_SAMPLES = (
+    "umull smull umlal smlal umullne umulls smlalseq umaal smlalbb smlald smlsldx",
+    "mul muls mla mls mulne smulbb smlabb smmul umul16 adds",
+)
+# The functions the `+mul16` target checks, each with whether it is planted,
+# so must hold a long multiply. Poly1305's block function is never inlined,
+# so it keeps its name, and holds each of Poly1305's products; `finish`
+# multiplies only by 5, in 32 bits.
+MUL16 = {
+    "<rind::low::generic::poly1305_32::Poly1305>::blocks": False,
+    "rind::low::vartime_planted::planted_long_multiply": True,
+}
+
 # Where a failed check panics or aborts, by name, as the standard library
 # names them. Nothing after one handles a secret.
 PANICS = re.compile(r".*(panic|_fail(ed)?$|handle_alloc_error|capacity_overflow|raw_vec::handle_error)")
@@ -257,7 +294,7 @@ def build(targets):
         for triple in triples:
             cmd += ["--target", triple]
         flags = [os.environ.get("RUSTFLAGS", ""), "--cfg rind_vartime_planted"]
-        flags += [PORTABLE] if backend else []
+        flags += BACKENDS[backend]
         env = dict(os.environ, RUSTFLAGS=" ".join(flags).strip())
         for line in run(cmd, env=env).splitlines():
             js = json.loads(line)
@@ -389,16 +426,16 @@ class Objects:
         return defined
 
 
-def scan(objects, roots, arch):
-    """Every finding as {function: Counter(what)}, with a path from a root to
-    each, and how many sections were reached."""
-    vartime = VARTIME[arch]
+def scan(objects, starts, vartime, helpers):
+    """Every finding, an instruction matching `vartime` or a call to a routine
+    matching `helpers`, in the code reached from the sections `starts`, as
+    {function: Counter(what)}, with a path from a start to each, and how many
+    sections were reached."""
     parent = {}
     queue = collections.deque()
-    for node in objects.insns:
-        if node[0] in roots and any("rind::" in objects.name(l) for _, l in objects.labels[node]):
-            parent[node] = None
-            queue.append(node)
+    for node in starts:
+        parent[node] = None
+        queue.append(node)
 
     findings = collections.defaultdict(collections.Counter)
     paths = {}
@@ -411,7 +448,7 @@ def scan(objects, roots, arch):
                 paths.setdefault(function, node)
         for offset, target in objects.relocs.get(node, ()):
             name = objects.name(target)
-            if HELPERS.fullmatch(name):
+            if helpers.fullmatch(name):
                 function = objects.function(node, offset)
                 findings[function]["calls " + name] += 1
                 paths.setdefault(function, node)
@@ -438,13 +475,51 @@ def describe(counts):
     )
 
 
+def check_mul16(objects, target):
+    """Scans the `+mul16` target's MUL16 functions for long multiplies: its
+    report's lines, and whether it failed."""
+    lines = []
+    failed = False
+    for function, planted in MUL16.items():
+        starts = [
+            node for node, labels in objects.labels.items()
+            if any(objects.name(l) == function for _, l in labels)
+        ]
+        if not starts:
+            lines.append("FAIL {}: not found".format(function))
+            failed = True
+            continue
+        findings, paths, reached = scan(objects, starts, LONG_MULTIPLY, MUL_HELPERS)
+        found = "; ".join("{}: {}".format(f, describe(c)) for f, c in sorted(findings.items()))
+        if planted and findings:
+            lines.append("ok   planted {}: {}".format(function, found))
+        elif planted:
+            lines.append("FAIL {}: found nothing planted".format(function))
+            failed = True
+        elif findings:
+            lines.append("FAIL {}: reaches {}".format(function, found))
+            for f in sorted(findings):
+                for caller in paths[f][:12]:
+                    lines.append("       from " + caller)
+            failed = True
+        else:
+            lines.append("ok   {}: no long multiply in {} sections".format(function, reached))
+    return ["{}: checked {} functions for long multiplies".format(target, len(MUL16))] + lines, failed
+
+
 def check(tool, target, rind, others, public):
     """Scans one target: its report's lines, and whether it failed."""
     arch = target.split("-")[0]
     arch = ARCH.get(arch, arch)
     objects = Objects(tool, arch, rind + others)
+    if target.endswith("+mul16"):
+        return check_mul16(objects, target)
     roots = {m for m, _ in objects.insns if m.startswith(os.path.basename(rind[0]) + "(")}
-    findings, paths, reached = scan(objects, roots, arch)
+    starts = [
+        node for node in objects.insns
+        if node[0] in roots and any("rind::" in objects.name(l) for _, l in objects.labels[node])
+    ]
+    findings, paths, reached = scan(objects, starts, VARTIME[arch], HELPERS)
     lines = ["{}: reached {} sections".format(target, reached)]
     failed = False
 
@@ -493,6 +568,11 @@ def main():
             assert VARTIME[arch].fullmatch(mnemonic), (arch, mnemonic)
         for mnemonic in allowed.split():
             assert not VARTIME[arch].fullmatch(mnemonic), (arch, mnemonic)
+    refused, allowed = LONG_MULTIPLY_SAMPLES
+    for mnemonic in refused.split():
+        assert LONG_MULTIPLY.fullmatch(mnemonic), mnemonic
+    for mnemonic in allowed.split():
+        assert not LONG_MULTIPLY.fullmatch(mnemonic), mnemonic
 
     tool = objdump()
     libs = build(targets)

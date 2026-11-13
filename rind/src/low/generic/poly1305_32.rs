@@ -167,6 +167,11 @@ impl Poly1305 {
     /// h = (h + block) * r for each block, where `hibit` is 2^24 in the top
     /// limb, the 2^128 RFC 8439 sets above a whole block, or 0 for a padded
     /// last block, which carries its own 1.
+    ///
+    /// Never inlined, so `admin/ct-vartime` finds it by name to check that
+    /// with `rind_mul16` it holds no 32x32->64-bit multiply. It runs once per
+    /// update, over every block of it.
+    #[inline(never)]
     fn blocks(&mut self, blocks: &[[u8; 16]], hibit: u32) {
         let [r0, r1, r2, r3, r4] = self.r;
         // 2^130 = 5 (mod p), so a product's part at or above 2^130 folds
