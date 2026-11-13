@@ -9,26 +9,33 @@ use std::process::Command;
 
 use rind_bench_report::fnmatchcase;
 
+const PAIRS: [(&str, &str, bool); 8] = [
+    ("sha256", "sha256", true),
+    ("sha256/64B", "sha256/*", true),
+    ("SHA256", "sha256", false),
+    ("Sha256/64B", "sha256/*", false),
+    ("x25519-ecdh", "X25519-ecdh", false),
+    ("AES256-gcm/16KB", "aes256-gcm/*", false),
+    ("p256-ecdh", "p[0-9]*", true),
+    ("P256-ecdh", "p[0-9]*", false),
+];
+
 #[test]
 fn case_differs_from_macos_fnmatch_and_matches_fnmatchcase() {
-    let pairs = [
-        ("sha256", "sha256", true),
-        ("sha256/64B", "sha256/*", true),
-        ("SHA256", "sha256", false),
-        ("Sha256/64B", "sha256/*", false),
-        ("x25519-ecdh", "X25519-ecdh", false),
-        ("AES256-gcm/16KB", "aes256-gcm/*", false),
-        ("p256-ecdh", "p[0-9]*", true),
-        ("P256-ecdh", "p[0-9]*", false),
-    ];
-    for (name, pattern, expect) in pairs {
+    for (name, pattern, expect) in PAIRS {
         assert_eq!(
             fnmatchcase(name, pattern),
             expect,
             "{name:?} against {pattern:?}"
         );
     }
+}
 
+// It runs python3, which a workspace `cargo test` cannot count on, as on
+// Windows, so `just check`'s bench check runs it after checking for python3.
+#[test]
+#[ignore = "needs python3; just check's bench check runs it"]
+fn matches_python_fnmatchcase() {
     let script = r#"
 import fnmatch, json, sys
 pairs = json.loads(sys.argv[1])
@@ -36,7 +43,7 @@ pairs = json.loads(sys.argv[1])
 print(json.dumps([[n, p, fnmatch.fnmatchcase(n, p)] for n, p, _ in pairs]))
 "#;
     let payload = serde_json::to_string(
-        &pairs
+        &PAIRS
             .iter()
             .map(|(n, p, e)| (*n, *p, *e))
             .collect::<Vec<_>>(),

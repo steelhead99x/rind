@@ -78,7 +78,7 @@ declare -A scope=(
     [compat]='^(COMPATIBILITY\.md$|admin/x86-cpus?(/|$))'
     # BENCHMARKS.md is generated from the results, the verified-code table,
     # and the gap decisions, which link the quests that close them.
-    [bench]='^(BENCHMARKS\.md$|benchmarks/|admin/bench-report|quest/)'
+    [bench]='^(BENCHMARKS\.md$|benchmarks/|admin/bench-report|rind-bench-report/|quest/)'
     # admin/build-cost builds these against rind's API, so they break with it.
     [fixtures]='^(rind/|rind-rustls/|Cargo\.toml$|admin/build-cost-fixtures/(rind|rustls)/)'
     # The fixture builds this checkout's rind-ring under the rind-patch shim.
@@ -302,8 +302,16 @@ for module in "${selected[@]}"; do
         check:compat) python3 admin/x86-cpu markdown-table | diff -u COMPATIBILITY.md - ;;
         fix:compat) python3 admin/x86-cpu markdown-table >COMPATIBILITY.md ;;
         check:bench)
+            # admin/bench-report needs tomllib, new in Python 3.11.
+            if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
+                echo "check:bench: needs python3 3.11 or later on PATH" >&2
+                exit 1
+            fi
             python3 admin/bench-report-test
             python3 admin/bench-report render --check
+            # rind-bench-report's comparisons with the Python script, which a
+            # plain `cargo test` ignores since it cannot count on python3.
+            cargo test -p rind-bench-report --locked -- --ignored
             ;;
         # Each fixture is its own workspace and resolves its own lockfile.
         check:fixtures)
