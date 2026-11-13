@@ -974,6 +974,21 @@ if [[ -n $untested ]]; then
 fi
 
 cd proofs
-lake exe cache get
+# Mathlib's cache unpacks a copy into each checkout, so take Mathlib and Aeneas
+# from Lake's artifact cache, which `lakefile.toml` turns on, when another
+# checkout already put them there. `--no-cache` keeps Lake from unpacking a
+# copy of Aeneas's release archive. Otherwise start from clean, so Lake fetches
+# that archive rather than building Aeneas's modules the cache lacks, and put
+# all of Mathlib and Aeneas in the cache for the next checkout. See
+# UPSTREAM.md, "Mathlib's cache unpacks a copy into each checkout".
+status=0
+lake build --no-build --no-cache Mathlib Aeneas || status=$?
+if ((status == 3)); then
+    lake clean
+    lake exe cache get
+    lake build Mathlib Aeneas
+elif ((status != 0)); then
+    exit "$status"
+fi
 lake build
 lake env lean "../$out/SimdVectors.lean"
