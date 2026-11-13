@@ -46,10 +46,7 @@ exclude_re = [
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace \| with \^ in (inc32|lengths)$',
   'rind/src/mid/portable/aes_gcm\.rs:\d+:\d+: replace \| with \^ in (add32|lengths)$',
   'rind/src/low/aarch64/cpu\.rs:152:\d+: replace << with >>$',
-  'rind/src/low/(aarch64|arm)/cpu\.rs:\d+:\d+: replace \| with \^ in (detect|detect_once)$',
-  'rind/src/low/arm/cpu\.rs:(38|70):\d+: replace << with >>( in detect)?$',
-  'rind/src/low/arm/keccak1600_armv4\.rs:\d+:\d+: replace \| with \^ in (deinterleave|evens|interleave|spread)$',
-  'rind/src/low/arm/mont\.rs:\d+:\d+: replace \| with \^ in reduce_limb$',
+  'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace \| with \^ in (detect|detect_once)$',
   'rind/src/low/generic/bignum\.rs:\d+:\d+: replace \| with \^ in (add_masked|bignum_add|bignum_cmp_lt|bignum_modadd|gcd_step|mod_halve|sub_masked)$',
   'rind/src/low/generic/mont\.rs:\d+:\d+: replace \| with \^ in (bignum_montredc|bignum_mul|cmp_lt_limbs|mod_double|mont_mul|mont_mul_limbs|sub_limbs_masked)$',
   'rind/src/low/generic/limb(32|64)\.rs:\d+:\d+: replace \| with \^ in join$',
@@ -71,7 +68,7 @@ exclude_re = [
   'rind/src/low/x86_64/cpu\.rs:378:\d+: replace << with >>$',
   'rind/src/low/x86_64/cpu\.rs:402:\d+: replace \| with \^$',
   'rind/src/low/x86_64/cpu\.rs:407:\d+: replace \| with \^$',
-  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAesHardware::check|HaveAvx::check|HaveAvx512ForAesGcm::check|HaveAvx512ForMlKem::check|HaveAvx512ForRsa::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveSha1::check|HaveSha256::check|HaveSha512::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
+  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAesHardware::check|HaveAvx::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveSha1::check|HaveSha256::check|HaveSha512::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
   'rind/src/low/x86_64/edwards25519_scalarmuldouble_avx2\.rs:21[678]:\d+: replace \| with \^$',
   'rind/src/low/x86_64/edwards25519_scalarmuldouble_avx2\.rs:\d+:\d+: replace \| with \^ in (Fe4::diff_sum|Fe4::split|non_adjacent_form)$',
   'rind/src/low/x86_64/ghash\.rs:340:\d+: replace \| with \^ in Ghash<\x27a>::add_lengths$',
@@ -79,7 +76,7 @@ exclude_re = [
   'rind/src/low/x86_64/ghash\.rs:632:\d+: replace \| with \^ in store_partial$',
   'rind/src/low/x86_64/ghash_ssse3_x86_64\.rs:\d+:\d+: replace \| with \^ in times_x$',
   'rind/src/low/x86_64/mont\.rs:\d+:\d+: replace \| with \^ in redc_8n$',
-  'rind/src/low/x86_64/rsaz(_avx512)?\.rs:\d+:\d+: replace \| with \^ in mod_exp$',
+  'rind/src/low/x86_64/rsaz\.rs:\d+:\d+: replace \| with \^ in mod_exp$',
   'rind/src/mid/aes\.rs:\d+:\d+: replace \| with \^ in AesCtr::apply_keystream$',
   'rind/src/mid/aes_cbc\.rs:\d+:\d+: replace \| with \^ in AesCbcDecryptingKey::decrypt$',
   'rind/src/mid/ed25519\.rs:\d+:\d+: replace \| with \^ in EdwardsPoint::compress$',
@@ -101,7 +98,6 @@ exclude_re = [
   'rind/src/high/sec1\.rs:14:\d+: replace \+ with \*$',
   'rind/src/high/signature\.rs:(229|1683):\d+: replace \+ with \*$',
   'rind/src/low/generic/mont\.rs:131:\d+: replace \+ with \* in mont_mul$',
-  'rind/src/low/x86_64/mlkem768_sample_poly_ntt_8x\.rs:229:\d+: replace \+ with \* in _squeeze_rate_and_reject$',
   'rind/src/mid/mldsa\.rs:(368|463|510):\d+: replace \+ with \* in (keygen|public_key_from_secret|sign_internal)$',
   'rind/src/mid/rsa_priv\.rs:311:\d+: replace / with \*$',
   'rind/src/mid/rsa_priv\.rs:296:44: replace \+ with \*$',
@@ -118,10 +114,6 @@ exclude_re = [
   # Each call passes the larger value second.
   'rind/src/high/signature\.rs:\d+:\d+: replace > with (==|>=) in max$',
   'rind/src/low/aarch64/aes\.rs:368:\d+: replace - with / in invert_round_keys$',
-  # The NEON Poly1305's `freeze` keeps limbs 1 to 4 of `h - p` only when they
-  # are zero, and the 2^128 bit it leaves on `s` lies above the tag.
-  'rind/src/low/arm/poly1305_arm\.rs:(99|100|101|102):\d+: replace \^= with \|= in freeze$',
-  'rind/src/low/arm/poly1305_arm\.rs:\d+:\d+: replace (\^= with \|=|<< with >>) in Poly1305Neon::finish$',
   # rind-openmls' `RustCrypto` holds no state, so a new one is the provider's.
   'rind-openmls/src/lib\.rs:\d+:\d+: replace <impl OpenMlsProvider for OpenMlsRustCrypto>::(crypto|rand) -> &Self::(Crypto|Rand)Provider with Box::leak\(Box::new\(Default::default\(\)\)\)$',
   'rind/src/low/generic/p256_mul32\.rs:\d+:\d+: replace <<= with >>= in sqr_wide$',
@@ -146,9 +138,6 @@ exclude_re = [
   'rind/src/low/x86_64/ghash\.rs:641:41: replace / with % in store_partial$',
   'rind/src/low/x86_64/mldsa\.rs:\d+:\d+: replace < with <= in rej_uniform_table$',
   'rind/src/low/x86_64/rsaz\.rs:\d+:\d+: replace < with <= in mod_exp$',
-  'rind/src/low/x86_64/rsaz_avx512\.rs:\d+:\d+: replace < with <= in (from_limbs|to_limbs)$',
-  'rind/src/low/x86_64/rsaz_avx512\.rs:\d+:\d+: delete match arm 0 in mod_exp$',
-  'rind/src/low/x86_64/rsaz_avx512\.rs:198:\d+: replace % with (/|\+) in mod_exp$',
   'rind/src/low/x86_64/sha1\.rs:401:\d+: replace == with != in sha1_avx2$',
   'rind/src/low/x86_64/sha1\.rs:408:\d+: replace == with != in sha1_avx2$',
   'rind/src/low/x86_64/sha1\.rs:468:\d+: replace < with <= in Expander<\x27a>::step$',
@@ -182,9 +171,6 @@ exclude_re = [
   'rind/src/low/aarch64/bignum_copy_row_from_table_mux\.rs:\d+:\d+: replace match guard width\.is_multiple_of\(8\) with false in bignum_copy_row_from_table$',
   'rind/src/low/aarch64/cpu\.rs:280:\d+: replace prefetch_ro with \(\)$',
   'rind/src/low/aarch64/mont\.rs:\d+:\d+: replace match guard k >= 2 with false in (mont_mul|mont_sqr)$',
-  'rind/src/low/arm/chacha_armv4\.rs:\d+:\d+: replace (match guard len >= NEON_MIN_LEN with (false|true)|>= with <) in chacha20_ctr32$',
-  'rind/src/low/arm/cpu\.rs:40:\d+: replace << with >>$',
-  'rind/src/low/arm/mont\.rs:\d+:\d+: replace (match guard .* with false|> with <|>> with <<) in mont_mul$',
   'rind/src/low/generic/order\.rs:\d+:\d+: replace (order -> Option<Order> with None|== with != in order)$',
   'rind/src/low/generic/blockwise\.rs:\d+:\d+: replace > with >= in Blockwise<N>::complete_blocks$',
   'rind/src/low/posint\.rs:\d+:\d+: replace > with < in (PosInt<N>::mod_exp_rsaz|PosInt<N>::reduce_even)$',
@@ -237,6 +223,16 @@ exclude_re = [
   'rind/src/low/x86_64/sha3_keccak_nof4_f1600\.rs:\d+:\d+: replace > with >= in sha3_keccak_nof4_f1600$',
   'rind/src/low/x86_64/sha3_keccak_nof4_f1600\.rs:\d+:\d+: replace match guard N > 1 with false in sha3_keccak_nof4_f1600$',
   'rind/src/low/x86_64/sha3_keccak_nof4_f1600\.rs:\d+:\d+: replace match guard N > 1 with true in sha3_keccak_nof4_f1600$',
+  # Run only on AVX-512 CPUs, which no campaign's runner is: the x86_64
+  # campaign skips the files only they run, and these are the rest.
+  # x86-cpu.yml's SDE tiers test them.
+  'rind/src/low/x86_64/(aes|aes_gcm|aes_gcm_vaes|cpu|ghash)\.rs:\d+:\d+: (replace (HwKey::round_keys_512|RoundKeys512::split|_cipher_avx512|Counter512::\w+|VaesKernel::avx512|HaveAvx512For\w+::check|GhashTableAvx512::\w+|_mul16|_mul_tail)( -> .*)? with .*|.* in (_cipher_avx512|Counter512::\w+|HaveAvx512For\w+::check|GhashTableAvx512::\w+|_mul16|_mul_tail))$',
+  'rind/src/low/x86_64/aes_gcm\.rs:512:\d+: replace \* with (\+|/)$',
+  'rind/src/low/posint\.rs:\d+:\d+: (replace PosInt<N>::mod_exp_pair_rsaz -> .*|.* in PosInt<N>::mod_exp_pair_rsaz)$',
+  # Compiled only for armv7, which no campaign runs: `abi`'s armv7 `arch`
+  # module and the portable AES-GCM's crypto-extension half.
+  'rind/src/low/abi\.rs:(895|897|898|904|905|911|914|924):\d+: ',
+  'rind/src/mid/portable/aes_gcm\.rs:\d+:\d+: (replace (<impl Ghash for GhashTable>::ghash|<impl Parts for Hw>::\w+)( -> .*)? with .*|.* in <impl Parts for Hw>::\w+)$',
   # Reached only on a CPU without a feature that every test host has and no
   # denial row in `admin/mutants` denies alone, only in a release build,
   # which tests never are, or only off Linux.
@@ -244,12 +240,9 @@ exclude_re = [
   'rind/src/low/aarch64/cpu\.rs:157:\d+: replace << with >>$',
   'rind/src/low/aarch64/cpu\.rs:261:\d+: replace test_toggle -> bool with false$',
   'rind/src/low/aarch64/cpu\.rs:261:\d+: replace test_toggle -> bool with true$',
-  'rind/src/low/arm/cpu\.rs:(83|85|86|87|88):\d+: replace & with (\||\^) in detect$',
-  'rind/src/low/arm/cpu\.rs:96:\d+: replace detect -> u8 with 1$',
-  'rind/src/low/arm/cpu\.rs:104:\d+: replace test_toggle -> bool with (false|true)$',
-  # armv7 and the portable backend have no CPU state to save, so
-  # `leave_cpu_state` ignores it.
-  'rind/src/low/(arm|portable)/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
+  # The portable backend has no CPU state to save, so `leave_cpu_state`
+  # ignores it.
+  'rind/src/low/portable/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
   'rind/src/low/x86_64/cpu\.rs:402:38: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:402:45: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:402:52: replace \| with &$',
@@ -273,8 +266,6 @@ exclude_re = [
   'rind/src/low/aarch64/ghash_neon_armv8\.rs:\d+:\d+: replace <impl Drop for NeonTable>::drop with \(\)$',
   'rind/src/low/aarch64/vpaes_armv8\.rs:\d+:\d+: replace <impl Drop for VpaesDecKey>::drop with \(\)$',
   'rind/src/low/aarch64/vpaes_armv8\.rs:\d+:\d+: replace <impl Drop for VpaesKey>::drop with \(\)$',
-  'rind/src/low/arm/aesv8_armx\.rs:\d+:\d+: replace <impl Drop for (AesHwKey|AesHwDecKey)>::drop with \(\)$',
-  'rind/src/low/arm/ghashv8_armx\.rs:\d+:\d+: replace <impl Drop for GhashTable>::drop with \(\)$',
   'rind/src/low/portable/aes\.rs:\d+:\d+: replace <impl Drop for (AesKey|AesDecKey)>::drop with \(\)$',
   'rind/src/low/(portable|x86_64)/\.\./generic/ghash_nohw\.rs:\d+:\d+: replace <impl Drop for NohwTable>::drop with \(\)$',
   'rind/src/low/x86_64/aes\.rs:\d+:\d+: replace <impl Drop for AesDecKey>::drop with \(\)$',

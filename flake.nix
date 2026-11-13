@@ -108,9 +108,6 @@
               })
               armv7-cc
               pkgs.qemu-user
-              # admin/mutants --target armv7-unknown-linux-gnueabihf.
-              pkgs.cargo-mutants
-              pkgs.cargo-nextest
             ];
 
             env = {
@@ -360,7 +357,10 @@
           # `tools/build-proof.sh` does, the Rust whose build emits the object
           # code they are of, with llvm-objdump to read it, the Python that
           # compares that code with the code upstream's proofs check, and the
-          # cross tools that assemble Vale's and aws-lc's.
+          # cross tools that assemble Vale's and aws-lc's, with flock, which
+          # keeps runs in one worktree from rewriting each other's files. On
+          # Linux, `admin/prove session` checkpoints and restores HOL Light
+          # with DMTCP.
           hol-light = pkgs.mkShell {
             packages = [
               (rust-stable.minimal.override {
@@ -377,7 +377,9 @@
               pkgs.git
               pkgs.python3
               debian-cross-tools
-            ];
+              pkgs.flock
+            ]
+            ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.dmtcp;
           };
 
           sde-certs = ''
@@ -651,10 +653,9 @@
             };
 
             # `just armv7` enters it to lint and test the armv7 build under
-            # qemu, and the mutants workflow to mutate it. A separate shell
-            # because the ARM C toolchain, qemu-user, and the armv7 standard
-            # libraries add about 700 MB, which every other CI job would
-            # download.
+            # qemu. A separate shell because the ARM C toolchain, qemu-user,
+            # and the armv7 standard libraries add about 700 MB, which every
+            # other CI job would download.
             armv7 = pkgs.mkShell armv7-shell;
 
             # `just qemu aarch64` tests the aarch64 build under qemu in it, and
@@ -775,8 +776,7 @@
             };
           }
           # `x86-cpu.yml` and `admin/x86-cpu sde-scan` run the tests and
-          # `rind-cpuid` under `sde` in it, `admin/ct-sde` traces them, and
-          # `admin/mutants --avx512` mutates under it.
+          # `rind-cpuid` under `sde` in it, and `admin/ct-sde` traces them.
           # SDE runs only on x86_64.
           // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
             sde = pkgs.mkShell {
@@ -788,8 +788,6 @@
                 openssl
                 python3
                 sde
-                cargo-mutants
-                cargo-nextest
                 # `admin/ct-sde` runs SDE without ASLR by its `setarch`.
                 util-linux
               ];
