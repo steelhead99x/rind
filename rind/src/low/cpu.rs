@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
+#[cfg(not(target_os = "none"))]
 use core::cell::Cell;
 use core::fmt;
 use core::marker::PhantomData;
@@ -94,16 +95,19 @@ pub struct Dit {
 impl Dit {
     /// Turns DIT on for this thread, if rind sets it here, until the guard drops.
     pub fn hold() -> Self {
-        let (guards, cpu_state) = DIT_GUARDS.get();
-        let cpu_state = if guards == 0 {
-            super::enter_cpu_state()
-        } else {
-            cpu_state
-        };
-        // Saturating, here and in `drop`: past `usize::MAX` guards the count
-        // is inexact and DIT may turn off early, which costs speed but never
-        // safety, since every rind call sets DIT itself.
-        DIT_GUARDS.set((guards.saturating_add(1), cpu_state));
+        #[cfg(not(target_os = "none"))]
+        {
+            let (guards, cpu_state) = DIT_GUARDS.get();
+            let cpu_state = if guards == 0 {
+                super::enter_cpu_state()
+            } else {
+                cpu_state
+            };
+            // Saturating, here and in `drop`: past `usize::MAX` guards the
+            // count is inexact and DIT may turn off early, which costs speed
+            // but never safety, since every rind call sets DIT itself.
+            DIT_GUARDS.set((guards.saturating_add(1), cpu_state));
+        }
         Self {
             _thread: PhantomData,
         }
@@ -112,10 +116,13 @@ impl Dit {
 
 impl Drop for Dit {
     fn drop(&mut self) {
-        let (guards, cpu_state) = DIT_GUARDS.get();
-        DIT_GUARDS.set((guards.saturating_sub(1), cpu_state));
-        if guards == 1 {
-            super::leave_cpu_state(cpu_state);
+        #[cfg(not(target_os = "none"))]
+        {
+            let (guards, cpu_state) = DIT_GUARDS.get();
+            DIT_GUARDS.set((guards.saturating_sub(1), cpu_state));
+            if guards == 1 {
+                super::leave_cpu_state(cpu_state);
+            }
         }
     }
 }
@@ -127,29 +134,17 @@ std::thread_local! {
     static DIT_GUARDS: Cell<(usize, u32)> = const { Cell::new((0, 0)) };
 }
 
-/// Without std there are no threads to keep apart: bare-metal targets use
-/// rind from one context, so one set of guards serves.
-#[cfg(target_os = "none")]
-static DIT_GUARDS: SingleContext = SingleContext(Cell::new((0, 0)));
-
-#[cfg(target_os = "none")]
-struct SingleContext(Cell<(usize, u32)>);
-
-// SAFETY: bare-metal targets call rind from one execution context (see
-// `lib.rs`), so the cell is never shared between threads or interrupts.
-#[cfg(target_os = "none")]
-unsafe impl Sync for SingleContext {}
-
-#[cfg(target_os = "none")]
-impl SingleContext {
-    fn get(&self) -> (usize, u32) {
-        self.0.get()
-    }
-
-    fn set(&self, value: (usize, u32)) {
-        self.0.set(value);
-    }
-}
+// A bare-metal target (`target_os = "none"`) has no thread-local storage for
+// the count, and one count shared by every core and interrupt handler would
+// race: a guard dropped in one could turn DIT off under another's operation.
+// So there the guard keeps no count and does nothing, which is sound only
+// because build.rs gives those targets the arm or portable backend, neither
+// of which sets any CPU state for a guard to hold.
+#[cfg(all(
+    target_os = "none",
+    not(any(rind_backend = "arm", rind_backend = "portable"))
+))]
+compile_error!("`Dit` keeps no count on bare metal, so its backend must set no CPU state");
 
 /// Panics with [`check`]'s error rather than run instructions this CPU lacks.
 pub(crate) fn verify_cpu_features() {

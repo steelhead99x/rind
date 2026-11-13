@@ -3,6 +3,8 @@
 //! RFC 9497's VOPRF mode: the OPRF, with the server proving it evaluated
 //! every blinded element in a batch with the key it published.
 
+#[cfg(target_os = "none")]
+use alloc::vec::Vec;
 use core::fmt;
 
 use super::{

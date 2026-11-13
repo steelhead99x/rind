@@ -8,7 +8,10 @@
 //! for an earlier core, such as ARMv6's `arm-unknown-linux-gnueabihf` or
 //! ARMv5TE's `arm-linux-androideabi`, gets the portable backend too, and so
 //! does a microcontroller (M-profile) target such as `thumbv7em-none-eabihf`,
-//! which has no ARM state or NEON for that assembly to run in.
+//! which has no ARM state or NEON for that assembly to run in. A bare-metal
+//! x86_64 or aarch64 target (`target_os = "none"`, such as
+//! `x86_64-unknown-none`) gets the portable backend as well: those backends
+//! detect CPU features through std, which such a target lacks.
 //! `--cfg rind_portable` forces it anywhere, so CI tests it on x86_64 without
 //! emulation; it is for testing, not for shipping.
 //!
@@ -22,7 +25,9 @@
 //! call. `--cfg rind_limb="32"` forces 32-bit limbs on a 64-bit target, so
 //! CI checks both widths on x86_64; like `rind_portable`, it is for testing.
 //!
-//! And it sets `rind_mul16` for the microcontroller cores whose
+//! And it sets `rind_reg_asm` on the architectures whose `asm!` with a `reg`
+//! operand is stable Rust, which the portable MD5 uses as an optimisation
+//! barrier. It sets `rind_mul16` for the microcontroller cores whose
 //! 32x32->64-bit multiply takes a time that depends on its operands, or that
 //! have none: ARMv7-M's Cortex-M3, whose `umull` ends early on small
 //! operands, and ARMv6-M's and ARMv8-M Baseline's Cortex-M0, M0+, M1, and
@@ -41,16 +46,38 @@ fn main() {
 
     println!(r#"cargo::rustc-check-cfg=cfg(rind_limb, values("32", "64"))"#);
     println!("cargo::rustc-check-cfg=cfg(rind_mul16)");
+    println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
 
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
     let forced = env::var_os("CARGO_CFG_RIND_PORTABLE").is_some();
+    let bare_metal = env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "none");
     let backend = match arch.as_str() {
-        "x86_64" | "aarch64" if little && !forced => arch.as_str(),
+        "x86_64" | "aarch64" if little && !forced && !bare_metal => arch.as_str(),
         "arm" if little && !forced && armv7_or_later() && !m_profile() => "arm",
         _ => "portable",
     };
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
+
+    // Stable Rust's `asm!` with a `reg` operand, allow-listed so an
+    // architecture whose inline assembly is unstable, such as Xtensa or MIPS,
+    // falls back to `black_box` instead of failing to build.
+    let reg_asm = matches!(
+        arch.as_str(),
+        "x86"
+            | "x86_64"
+            | "arm"
+            | "aarch64"
+            | "riscv32"
+            | "riscv64"
+            | "loongarch64"
+            | "s390x"
+            | "powerpc"
+            | "powerpc64"
+    );
+    if reg_asm {
+        println!("cargo::rustc-cfg=rind_reg_asm");
+    }
 
     let wide = env::var("CARGO_CFG_TARGET_POINTER_WIDTH").is_ok_and(|w| w == "64")
         || (arch == "wasm32"
@@ -100,14 +127,20 @@ fn armv7_or_later() -> bool {
 }
 
 /// Whether the 32-bit ARM target is for a microcontroller (M-profile) core,
-/// as in `thumbv7m-none-eabi`, `thumbv7em-none-eabihf` or
-/// `thumbv8m.main-none-eabihf`: Thumb only, without NEON.
+/// as in `thumbv7m-none-eabi`, `thumbv7em-none-eabihf`,
+/// `thumbv8m.main-none-eabihf` or `thumbv8.1m.main-none-eabihf`: Thumb only,
+/// without NEON.
 fn m_profile() -> bool {
     let target = env::var("TARGET").expect("cargo sets the target");
     let arch = target.split('-').next().unwrap_or_default();
     let Some(version) = arch.strip_prefix("thumbv") else {
         return false;
     };
-    let rest = version.trim_start_matches(|c: char| c.is_ascii_digit());
+    fn skip_digits(s: &str) -> &str {
+        s.trim_start_matches(|c: char| c.is_ascii_digit())
+    }
+    // The major version, then an optional minor one, as in v8.1m.
+    let rest = skip_digits(version);
+    let rest = rest.strip_prefix('.').map_or(rest, skip_digits);
     rest.starts_with('m') || rest.starts_with("em")
 }

@@ -28,7 +28,9 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 // Bare-metal targets (`target_os = "none"`) build without std, on `alloc`:
-// rind needs a global allocator there, and is used from one thread only.
+// rind needs a global allocator there, and a getrandom backend. Nothing in
+// rind assumes one execution context: it may be shared between cores and
+// interrupt handlers as between threads.
 #[cfg(target_os = "none")]
 #[macro_use]
 extern crate alloc;
