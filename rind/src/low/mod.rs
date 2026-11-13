@@ -97,28 +97,13 @@ mod generic {
     pub(crate) mod order;
     // x86_64's separate-pass Poly1305 and the 64-bit portable backend's.
     // aarch64 runs Poly1305 only in aws-lc's one-pass ChaCha20-Poly1305,
-    // whose tests check it against this, and every backend's tests check
-    // `poly1305_32` against it.
+    // whose tests check it against this.
     #[cfg(any(
         rind_backend = "x86_64",
-        all(
-            rind_backend = "portable",
-            target_pointer_width = "64",
-            not(rind_limb = "32")
-        ),
-        test
+        all(rind_backend = "portable", target_pointer_width = "64"),
+        all(rind_backend = "aarch64", test)
     ))]
     pub(crate) mod poly1305;
-    // The portable backend's Poly1305 on 32-bit targets, in 26-bit limbs,
-    // and on 64-bit ones forced to 32-bit limbs, so CI checks it on x86_64.
-    #[cfg(any(
-        all(
-            rind_backend = "portable",
-            any(target_pointer_width = "32", rind_limb = "32")
-        ),
-        test
-    ))]
-    pub(crate) mod poly1305_32;
     pub(super) mod reuse_cache;
     // The portable backend's SHA-1, and both hashes in armv7 and x86_64
     // tests to check the assembly against.
