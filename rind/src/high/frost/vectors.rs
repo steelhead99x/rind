@@ -50,10 +50,10 @@ fn vector<G: Group>(name: &str) -> Vec<u8> {
 
     for share in file["inputs"]["participant_shares"].as_array().unwrap() {
         let identifier = share["identifier"].as_u64().unwrap() as usize;
-        assert_eq!(
-            dealt.shares[identifier - 1].scalar,
-            hex32(share["participant_share"].as_str().unwrap())
-        );
+        // The signing share stays secret. Declassify only this comparison with the vector.
+        let scalar = dealt.shares[identifier - 1].scalar;
+        ct::public_slice(&scalar);
+        assert_eq!(scalar, hex32(share["participant_share"].as_str().unwrap()));
     }
 
     let message = hex_bytes(file["inputs"]["message"].as_str().unwrap());
@@ -236,7 +236,9 @@ fn encoding_vector(suite: &'static Suite, name: &str) {
         };
         let signing = SigningShare::from_bytes(suite, &id, min, max, &scalar).unwrap();
         let encoded = signing.to_bytes();
+        // from_bytes marks the input share secret. Declassify only this comparison.
         ct::public_slice(&encoded);
+        ct::public_slice(&scalar);
         assert_eq!(encoded, scalar);
         let element = dealt.shares[usize::from(identifier) - 1].verifying;
         let len = suite.element_len();

@@ -1076,13 +1076,18 @@ mod api_tests {
                 Error::WrongLength,
                 "{suite}"
             );
+            // `load_secret` marks the caller's slice secret, so pass owned
+            // copies. Reusing `order` or an interned `[0u8; 32]` would taint
+            // later public encodings in this test and others in the process.
+            let out_of_range = *order;
             assert_eq!(
-                SigningShare::from_bytes(suite, &identifier, 2, 2, order).unwrap_err(),
+                SigningShare::from_bytes(suite, &identifier, 2, 2, &out_of_range).unwrap_err(),
                 KeyFormatError::ScalarOutOfRange.into(),
                 "{suite}"
             );
+            let zero_share = [0u8; 32];
             assert_eq!(
-                SigningShare::from_bytes(suite, &identifier, 2, 2, &[0u8; 32]).unwrap_err(),
+                SigningShare::from_bytes(suite, &identifier, 2, 2, &zero_share).unwrap_err(),
                 KeyFormatError::ScalarOutOfRange.into(),
                 "{suite}"
             );
@@ -1167,15 +1172,17 @@ mod api_tests {
             );
         }
 
-        // ristretto255's identity is 32 zero bytes.
+        // ristretto255's identity is 32 zero bytes. A fresh local keeps this
+        // public encoding off any slice `load_secret` marked secret.
         let mut id = [0u8; 32];
         id[0] = 1;
+        let identity = [0u8; 32];
         assert_eq!(
-            VerifyingShare::from_bytes(&RISTRETTO255_SHA512, &id, &[0u8; 32]).unwrap_err(),
+            VerifyingShare::from_bytes(&RISTRETTO255_SHA512, &id, &identity).unwrap_err(),
             KeyFormatError::SmallOrder.into()
         );
         assert_eq!(
-            VerifyingKey::from_bytes(&RISTRETTO255_SHA512, 2, 2, &[0u8; 32]).unwrap_err(),
+            VerifyingKey::from_bytes(&RISTRETTO255_SHA512, 2, 2, &identity).unwrap_err(),
             KeyFormatError::SmallOrder.into()
         );
         let mut identity_sig = vec![0u8; 64];
