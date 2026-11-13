@@ -4485,7 +4485,7 @@ dependencies = [
 
 [[package]]
 name = "rind-python"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "pyo3",
  "rind",
