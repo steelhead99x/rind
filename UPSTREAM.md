@@ -140,14 +140,6 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Reported:** no.
 - **Goes when:** s2n-bignum's model decodes each, instruction by instruction.
 
-### dmtcp_command fails a checkpoint that succeeds
-
-- **Breaks:** `dmtcp_command --kcheckpoint` sends a blocking checkpoint and then a checkpoint, which the coordinator refuses once the first has killed the computation, so DMTCP 4.1.1's command prints `Computation was checkpointed and killed.` and exits 2. It prints the same when the computation dies during the checkpoint, having written nothing.
-- **Reproduce:** `dmtcp_launch --new-coordinator --port-file port sleep 100 &`, then `dmtcp_command --coord-port "$(<port)" --kcheckpoint; echo $?` prints 2 beside the checkpoint it wrote.
-- **Workaround:** `admin/prove`'s `session_image` ignores the exit status and requires the checkpoint file once the computation has exited.
-- **Reported:** no.
-- **Goes when:** `dmtcp_command --kcheckpoint` exits 0 once it has checkpointed and killed the computation.
-
 ### Mathlib's cache unpacks a copy into each checkout
 
 - **Breaks:** `lake exe cache get` decompresses all of Mathlib, about 6.7 GB, into each checkout's `proofs/.lake/packages`, and Lake unpacks Aeneas's release archive the same way, neither into Lake's artifact cache, so worktrees share none of it. Reservoir serves no Lake cache outputs for Mathlib's releases that `lake cache get` could fetch instead.
