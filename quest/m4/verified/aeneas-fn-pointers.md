@@ -37,7 +37,7 @@ Not this quest's, and they stay:
 
 Route:
 
-- For the rest, find out what Aeneas's and Charon's maintainers plan, and contribute support upstream if they welcome it. There is no standing approval to post: stop and ask the maintainer before posting outside the moq-dev and kixelated orgs (decided with the maintainer on 2026-11-07 on [moq-dev/rind#448](https://github.com/moq-dev/rind/pull/448)).
+- For the rest, find out what Aeneas's and Charon's maintainers plan, and contribute support upstream if they welcome it. There is no standing approval to post: stop and ask the maintainer before posting outside the moq-dev and kixelated orgs (decided with the maintainer on 2026-11-07 on [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
 - If upstream won't take a feature, report the options, such as restructuring rind's dispatch into something Aeneas translates without losing speed, and let the maintainer pick. The AES-NI key expansion and block cipher retired that way rather than waiting on Aeneas's raw-pointer model, which is merged only into a side branch ([AeneasVerif/aeneas#1428](https://github.com/AeneasVerif/aeneas/pull/1428)): they load through `u128::from_le_bytes` and fill a local array over indexed loops, and their key setup measured as fast as before.
 - Retire each model as its limitation lifts: move the Aeneas pin, translate the Rust, re-prove the theorems over it, delete the model and its `check_quote` and `only_quoted` lines, and update `proofs/README.md`'s trust base and `benchmarks/verified.toml`'s entries, which name the hand models.
 

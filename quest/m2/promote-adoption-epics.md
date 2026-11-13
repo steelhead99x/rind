@@ -22,6 +22,6 @@ under the old path first. Then run
 
 ## Waiting
 
-- moq-dev/rind: the open PRs under the epic land or close. Check with
-  `gh pr list -R moq-dev/rind --search "head:quest/m2/adoption/aws-lc-rs"`
+- kixel-ai/rind: the open PRs under the epic land or close. Check with
+  `gh pr list -R kixel-ai/rind --search "head:quest/m2/adoption/aws-lc-rs"`
   listing none.

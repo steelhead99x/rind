@@ -813,13 +813,13 @@ HACL*'s verified Poly1305 without NEON.
 [SUPERCOP]: https://bench.cr.yp.to/supercop.html
 [curve25519-dalek]: https://github.com/dalek-cryptography/curve25519-dalek
 [Wycheproof]: https://github.com/C2SP/wycheproof
-[run 41550703300]: https://github.com/moq-dev/rind/actions/runs/41550703300
-[run 41585945720]: https://github.com/moq-dev/rind/actions/runs/41585945720
-[run 41657617706]: https://github.com/moq-dev/rind/actions/runs/41657617706
-[run 41678532920]: https://github.com/moq-dev/rind/actions/runs/41678532920
-[run 41697909102]: https://github.com/moq-dev/rind/actions/runs/41697909102
-[run 41861521276]: https://github.com/moq-dev/rind/actions/runs/41861521276
-[run 41861526675]: https://github.com/moq-dev/rind/actions/runs/41861526675
-[#224]: https://github.com/moq-dev/rind/pull/224
-[#281]: https://github.com/moq-dev/rind/pull/281
+[run 41550703300]: https://github.com/kixel-ai/rind/actions/runs/41550703300
+[run 41585945720]: https://github.com/kixel-ai/rind/actions/runs/41585945720
+[run 41657617706]: https://github.com/kixel-ai/rind/actions/runs/41657617706
+[run 41678532920]: https://github.com/kixel-ai/rind/actions/runs/41678532920
+[run 41697909102]: https://github.com/kixel-ai/rind/actions/runs/41697909102
+[run 41861521276]: https://github.com/kixel-ai/rind/actions/runs/41861521276
+[run 41861526675]: https://github.com/kixel-ai/rind/actions/runs/41861526675
+[#224]: https://github.com/kixel-ai/rind/pull/224
+[#281]: https://github.com/kixel-ai/rind/pull/281
 [LICENSE]: LICENSE

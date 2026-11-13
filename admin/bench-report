@@ -674,7 +674,7 @@ REPORT_DIR = os.path.join(ROOT, "benchmarks")
 DATA_DIR = os.path.join(REPORT_DIR, "data")
 VERIFIED = os.path.join(REPORT_DIR, "verified.toml")
 GAPS = os.path.join(REPORT_DIR, "gaps.toml")
-REPO = "moq-dev/rind"
+REPO = "kixel-ai/rind"
 
 # The report's columns, in order, by library.
 COLUMNS = {

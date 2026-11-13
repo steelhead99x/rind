@@ -1,10 +1,10 @@
 <h1 align="center">rind-aws-lc-rs</h1>
-<img width="40%" align="right" src="https://raw.githubusercontent.com/moq-dev/rind/main/admin/logo.png">
+<img width="40%" align="right" src="https://raw.githubusercontent.com/kixel-ai/rind/main/admin/logo.png">
 
 [![Latest release](https://img.shields.io/crates/v/rind-aws-lc-rs)](https://crates.io/crates/rind-aws-lc-rs)
 [![Documentation](https://img.shields.io/docsrs/rind-aws-lc-rs)](https://docs.rs/rind-aws-lc-rs/)
 
-This crate offers [aws-lc-rs](https://github.com/aws/aws-lc-rs) 1.x's API, name for name, for every item [rind](https://github.com/moq-dev/rind/) backs.
+This crate offers [aws-lc-rs](https://github.com/aws/aws-lc-rs) 1.x's API, name for name, for every item [rind](https://github.com/kixel-ai/rind/) backs.
 rind is a pure-Rust fork of [Graviola](https://github.com/ctz/graviola/), so this needs no C compiler, CMake, or NASM.
 A crate on aws-lc-rs swaps it in by renaming its dependency, with no code changes:
 

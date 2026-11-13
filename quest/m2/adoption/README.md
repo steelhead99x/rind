@@ -28,11 +28,11 @@ don't ask again (✅ is the chosen option):
   packet about 3x, AES-GCM about 2x). Decided 2026-11-09 (maintainer,
   /quest-unblock): Deno and snow are dropped, Deno because it is
   deprecated and rind-snow by closing
-  [#470](https://github.com/moq-dev/rind/pull/470) on purpose.
+  [#470](https://github.com/kixel-ai/rind/pull/470) on purpose.
   Considered and left out: RustFS
   (already links aws-lc-rs), YARA-X, age, Turso, rustic (needs a raw
   Poly1305 API), Kanidm and Servo (forbid AI-written contributions; Servo
-  dropped on 2026-11-07 in [#475](https://github.com/moq-dev/rind/pull/475)),
+  dropped on 2026-11-07 in [#475](https://github.com/kixel-ai/rind/pull/475)),
   Arti (security bar), and Bitwarden and Matrix (need wasm).
 - Patches and issues to downstream projects: drop them and let projects pull
   rind themselves ✅ (rejected: keep preparing them). The maintainer dropped
@@ -57,7 +57,7 @@ don't ask again (✅ is the chosen option):
   API and a second package with the popular library's interface ✅.
 - rind-rustls's `default_provider()` keeps aws-lc-rs's algorithm list,
   P-521 included ✅ / drop P-521 as ring does (decided 2026-11-05 on
-  [#375](https://github.com/moq-dev/rind/pull/375), which has the sizes): it
+  [#375](https://github.com/kixel-ai/rind/pull/375), which has the sizes): it
   is already smaller than aws-lc-rs's provider.
 - Whatever these consumers need from rind itself is planned now: the
   WebCrypto set (AES-192, MD5, RSA-OAEP key labels and SPKI export, AES key

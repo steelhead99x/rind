@@ -8,7 +8,7 @@ The 103 mutants in the `rind-<consumer>` adapters that no test catches are kille
 
 - Where the upstream crate has the same value, such as ring's or rustls' aws-lc-rs provider's, test against it rather than a literal.
 - Run `admin/mutants -p <crate>` on each adapter to confirm none survive.
-- Start from the list as the adapter PRs leave it. Those PRs rewrite the adapters to their upstreams' exact APIs, and [moq-dev/rind#521](https://github.com/moq-dev/rind/pull/521) and [moq-dev/rind#515](https://github.com/moq-dev/rind/pull/515) already edit this block of `exclude_re`, so recount the survivors, and drop each entry that no longer matches a mutant, before writing tests.
+- Start from the list as the adapter PRs leave it. Those PRs rewrite the adapters to their upstreams' exact APIs, and [kixel-ai/rind#521](https://github.com/kixel-ai/rind/pull/521) and [kixel-ai/rind#515](https://github.com/kixel-ai/rind/pull/515) already edit this block of `exclude_re`, so recount the survivors, and drop each entry that no longer matches a mutant, before writing tests.
 
 ## Required
 

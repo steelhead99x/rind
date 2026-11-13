@@ -2,7 +2,7 @@
 name = "rind-aws-lc-rs"
 version = "1.0.3"
 edition = "2024"
-repository = "https://github.com/moq-dev/rind"
+repository = "https://github.com/kixel-ai/rind"
 license = "Apache-2.0 OR ISC OR MIT-0"
 description = "aws-lc-rs 1.x's API backed by rind"
 categories = ["cryptography"]
