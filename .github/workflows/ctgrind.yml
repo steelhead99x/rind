@@ -14,6 +14,7 @@ on:
       - "**/tests/ctgrind.rs"
       - admin/ctgrind
       - admin/ctgrind.supp
+      - admin/ct-binsec
       - Cargo.lock
       - flake.nix
       - flake.lock
@@ -314,13 +315,9 @@ jobs:
   # BINSEC proves each `ct_binsec` test's region constant time for every
   # secret at once, symbolically, on the code the runner's CPU takes short of
   # the instructions it cannot decode (see `admin/ct-binsec`). The portable
-  # row forces the portable backend, as the `portable` job does. The aarch64
-  # row runs only the tests whose paths BINSEC decodes there: the `mrs` of
-  # the thread pointer in glibc's `malloc`, and the `tbl` of vpaes and NEON
-  # ChaCha20, stop the rest, as
-  # `quest/m2/confidence/binsec.md` plans to fix. armv7 is left to valgrind
-  # and `admin/ct-qemu`: BINSEC decodes none of its NEON table lookups or
-  # crypto extension.
+  # row forces the portable backend, as the `portable` job does. armv7 is
+  # left to valgrind and `admin/ct-qemu`: BINSEC decodes none of its NEON
+  # table lookups or crypto extension.
   binsec:
     name: binsec (${{ matrix.backend }})
     strategy:
@@ -334,12 +331,9 @@ jobs:
             rustflags: --cfg rind_portable --cfg curve25519_dalek_backend="serial"
           - backend: aarch64
             os: ubuntu-24.04-arm
-            tests: --exact ct_binsec_x25519 ct_binsec_mont_mul ct_binsec_chacha20 ct_binsec_constant_time_verify
           # The row above follows this runner's core, which is wide, so its
           # X25519 and Montgomery product are `_alt` and `bn_mul_mont`. This
-          # row forces the narrow schedules. ECDH, Ed25519, and ECDSA stay
-          # with `admin/ct-qemu`: BINSEC cannot decode `mrs` of `tpidr_el0`
-          # in glibc's malloc or `tbl`, the same limit as the wide row.
+          # row forces the narrow schedules and checks those two.
           - backend: aarch64-narrow
             os: ubuntu-24.04-arm
             rustflags: --cfg rind_cpu_disable
@@ -360,8 +354,12 @@ jobs:
             export RIND_CPU_DISABLE_wide_mul=1
             export RIND_TEST_ARM_WIDE_MUL=0
           fi
-          read -ra tests <<< "$TESTS"
-          nix develop .#binsec --command admin/ct-binsec --timeout 480 "${tests[@]}"
+          if [ -n "${TESTS:-}" ]; then
+            read -ra tests <<< "$TESTS"
+            nix develop .#binsec --command admin/ct-binsec --timeout 480 "${tests[@]}"
+          else
+            nix develop .#binsec --command admin/ct-binsec --timeout 480
+          fi
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
           TESTS: ${{ matrix.tests }}
