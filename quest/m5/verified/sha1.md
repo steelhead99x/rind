@@ -14,4 +14,4 @@ Runs, block function by tier, under padding and HMAC glue that `proofs/` already
 - aarch64 without it: aws-lc's `sha1_block_data_order_nohw`. Route: HOL Light in s2n-bignum's aarch64 model.
 
 Each enters as the `ShaBlocks` hypothesis's SHA-1 half does today, which this retires.
-- Upstream: offering this work to awslabs/s2n-bignum is optional, and there is no standing approval: stop and ask the maintainer before posting there or anywhere outside the moq-dev and kixelated orgs (decided with the maintainer on 2026-11-07 on [moq-dev/rind#448](https://github.com/moq-dev/rind/pull/448)).
+- Upstream: offering this work to awslabs/s2n-bignum is optional, and there is no standing approval: stop and ask the maintainer before posting there or anywhere outside the moq-dev and kixelated orgs (decided with the maintainer on 2026-11-07 on [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).

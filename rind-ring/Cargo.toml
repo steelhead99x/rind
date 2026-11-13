@@ -2,7 +2,7 @@
 name = "rind-ring"
 version = "0.17.4"
 edition = "2024"
-repository = "https://github.com/moq-dev/rind"
+repository = "https://github.com/kixel-ai/rind"
 license = "Apache-2.0 OR ISC OR MIT-0"
 description = "ring 0.17's API backed by rind"
 categories = ["cryptography"]

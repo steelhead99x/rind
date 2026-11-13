@@ -2,7 +2,7 @@
 name = "rind"
 version = "0.3.2"
 edition = "2024"
-repository = "https://github.com/moq-dev/rind"
+repository = "https://github.com/kixel-ai/rind"
 license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause"
 readme = "README.md"
 description = "Pure-Rust cryptography for MoQ, forked from graviola"
