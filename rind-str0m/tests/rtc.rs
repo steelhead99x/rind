@@ -234,3 +234,31 @@ fn unusable_certificate_is_an_error() {
             .is_ok()
     );
 }
+
+/// A fresh connection reports dimpl's state through str0m's trait. This stays
+/// out of the crate's unit tests: `admin/ctgrind` runs those under valgrind,
+/// and building a dimpl config runs dimpl's own key-exchange self-test, which
+/// compares the two throwaway shared secrets with `!=`.
+#[test]
+fn fresh_connection_reports_dimpl_state() {
+    let dtls = rind_str0m::default_provider().dtls_provider;
+    let cert = dtls.generate_certificate().unwrap();
+    let mut dtls12 = dtls
+        .new_dtls(&cert, Instant::now(), DtlsVersion::Dtls12, None)
+        .unwrap();
+    let rendered = format!("{dtls12:?}");
+    assert!(rendered.contains("Dtls"), "{rendered}");
+    assert!(!dtls12.is_active());
+    assert_eq!(format!("{:?}", dtls12.protocol_version()), "Some(DTLS1_2)");
+    let dtls13 = dtls
+        .new_dtls(&cert, Instant::now(), DtlsVersion::Dtls13, None)
+        .unwrap();
+    assert_eq!(format!("{:?}", dtls13.protocol_version()), "Some(DTLS1_3)");
+    assert!(!dtls12.is_closing());
+    assert!(!dtls12.is_closed());
+    dtls12.set_active(true);
+    assert!(dtls12.is_active());
+    assert_eq!(dtls12.send_application_data(&[0x11; 8]).unwrap(), 8);
+    dtls12.close().unwrap();
+    assert!(dtls12.is_closing() || dtls12.is_closed());
+}

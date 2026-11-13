@@ -155,9 +155,7 @@ impl DtlsInstance for Dtls {
 
 #[cfg(test)]
 mod tests {
-    use str0m::crypto::dtls::{DtlsProvider, DtlsVersion};
-
-    use super::{DTLS, generate_certificate};
+    use super::generate_certificate;
 
     #[test]
     fn certificate_serial_stays_positive_and_the_span_is_a_year() {
@@ -176,29 +174,6 @@ mod tests {
             assert!(after > before, "{before} .. {after}");
         }
         assert!(saw_unforced_low_bits);
-    }
-
-    #[test]
-    fn fresh_connection_reports_dimpl_state() {
-        let cert = generate_certificate().unwrap();
-        let mut dtls = DTLS
-            .new_dtls(&cert, std::time::Instant::now(), DtlsVersion::Dtls12, None)
-            .unwrap();
-        let rendered = format!("{dtls:?}");
-        assert!(rendered.contains("Dtls"), "{rendered}");
-        assert!(!dtls.is_active());
-        assert_eq!(format!("{:?}", dtls.protocol_version()), "Some(DTLS1_2)");
-        let dtls13 = DTLS
-            .new_dtls(&cert, std::time::Instant::now(), DtlsVersion::Dtls13, None)
-            .unwrap();
-        assert_eq!(format!("{:?}", dtls13.protocol_version()), "Some(DTLS1_3)");
-        assert!(!dtls.is_closing());
-        assert!(!dtls.is_closed());
-        dtls.set_active(true);
-        assert!(dtls.is_active());
-        assert_eq!(dtls.send_application_data(&[0x11; 8]).unwrap(), 8);
-        dtls.close().unwrap();
-        assert!(dtls.is_closing() || dtls.is_closed());
     }
 
     fn serial_integer(cert: &[u8]) -> Vec<u8> {
