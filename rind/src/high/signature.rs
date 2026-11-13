@@ -1711,14 +1711,6 @@ impl<P: MlDsaParameterSet> MlDsaKeyPair<P> {
         self.0.seed().map(|seed| MlDsaSeed(*seed))
     }
 
-    /// Whether the key still has the seed [`Self::to_seed`] returns.
-    ///
-    /// A key loaded from its expanded form does not. Unlike [`Self::to_seed`],
-    /// this does not copy the seed.
-    pub fn has_seed(&self) -> bool {
-        self.0.seed().is_some()
-    }
-
     /// Loads a PKCS#8 ML-DSA key (RFC 9881), refused if it carries a public
     /// key (v2, RFC 5958) that does not match.
     ///
@@ -2624,7 +2616,6 @@ mod tests {
                 let key = load(&der).unwrap();
                 assert_eq!(key.public_key().as_ref(), pk);
                 assert_eq!(key.to_seed().is_some(), has_seed);
-                assert_eq!(key.has_seed(), has_seed);
                 let written = key.to_pkcs8();
                 let want = if has_seed { &seed_form } else { &expanded_form };
                 assert_eq!(written.as_ref(), want);
