@@ -14,7 +14,3 @@ The survivors came from code that landed after `0f4e45f0`. The nightly that woul
 - Two are equivalent `|` to `^` mutants: in `Point::to_compressed` (`p256.rs:299`), `0x02` and the parity bit `y & 1` never share a bit, and in `store` (`x86_64/aes.rs:510`), `hi << 64` and `lo` never do. Add both to the "Equivalent: an OR of values that never share a set bit" block of `exclude_re` in `.cargo/mutants.toml`, matching by function name, as its other entries do, rather than by line.
 - Confirm with `admin/mutants --file` on the three files, which counts as scoped on the agent hosts. `aes.rs` is x86_64-only, so run that one on an x86_64 host.
 - [kixel-ai/rind#722](https://github.com/kixel-ai/rind/pull/722) also edits `vrf.rs`. Whichever lands second takes the other's line numbers.
-
-## Related
-
-- [Whole mutation campaigns run on GitHub-hosted runners](/quest/m0/mutants-hosted.md) - the dispatch that found these

@@ -232,11 +232,21 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Reported:** no.
 - **Goes when:** nixpkgs builds release-plz on Darwin.
 
+## CI tools
+
+### actionlint rejects `concurrency.queue`
+
+- **Breaks:** actionlint 1.7.12 errors on `queue: max`, which GitHub's concurrency groups accept since May 2026, as `unexpected key "queue" for "concurrency" section`.
+- **Reproduce:** `actionlint .github/workflows/mutants.yml` without the ignore below.
+- **Workaround:** `.github/actionlint.yaml` ignores that error in `mutants.yml`.
+- **Reported:** [rhysd/actionlint#657](https://github.com/rhysd/actionlint/issues/657), with a fix in [rhysd/actionlint#654](https://github.com/rhysd/actionlint/pull/654).
+- **Goes when:** an actionlint release in nixpkgs accepts `queue`.
+
 ## CI runner images
 
 ### Ubuntu's AppArmor denies Intel SDE's sandbox
 
 - **Breaks:** the flake's `sde` runs Intel's unmodified binaries in a bubblewrap sandbox, which needs the unprivileged user namespaces Ubuntu's AppArmor denies a program it has no profile for.
-- **Workaround:** each job that runs `sde` (`coverage.yml`, `ctgrind.yml`, `fuzz.yml`, `mutants.yml`, `x86-cpu.yml`) first sets `kernel.apparmor_restrict_unprivileged_userns=0`.
+- **Workaround:** each job that runs `sde` (`coverage.yml`, `ctgrind.yml`, `fuzz.yml`, `x86-cpu.yml`) first sets `kernel.apparmor_restrict_unprivileged_userns=0`.
 - **Reported:** no.
 - **Goes when:** the runner image allows the Nix store's bubblewrap a user namespace.
