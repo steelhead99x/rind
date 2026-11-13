@@ -126,6 +126,82 @@ fn aead() {
 }
 
 #[test]
+fn ciphers() {
+    let iv = [1u8; 16];
+    for algorithm in 0..3 {
+        let key = [7u8; 32];
+        let key = &key[..[16, 24, 32][algorithm as usize]];
+        secret(key);
+        unsafe {
+            let encrypting = new(|out| {
+                rind_dart_aes_cbc_encrypting_key_new(algorithm, key.as_ptr(), key.len(), out)
+            });
+            let decrypting = new(|out| {
+                rind_dart_aes_cbc_decrypting_key_new(algorithm, key.as_ptr(), key.len(), out)
+            });
+            for (pad, len) in [(1, 21), (0, 32)] {
+                let mut in_out = [9u8; 32];
+                secret(&in_out[..len]);
+                let encrypted = ok(rind_dart_aes_cbc_encrypt(
+                    encrypting,
+                    iv.as_ptr(),
+                    16,
+                    pad,
+                    in_out.as_mut_ptr(),
+                    32,
+                    len,
+                ));
+                assert_eq!(encrypted, 32);
+                public(&in_out);
+                let decrypted = ok(rind_dart_aes_cbc_decrypt(
+                    decrypting,
+                    iv.as_ptr(),
+                    16,
+                    pad,
+                    in_out.as_mut_ptr(),
+                    32,
+                ));
+                public(&in_out);
+                assert_eq!(in_out[..decrypted], [9; 32][..len]);
+            }
+            rind_dart_aes_cbc_encrypting_key_free(encrypting);
+            rind_dart_aes_cbc_decrypting_key_free(decrypting);
+
+            let ctr = new(|out| rind_dart_aes_ctr_new(algorithm, key.as_ptr(), key.len(), 64, out));
+            let mut in_out = [9u8; 40];
+            secret(&in_out);
+            ok(rind_dart_aes_ctr_apply_keystream(
+                ctr,
+                iv.as_ptr(),
+                16,
+                in_out.as_mut_ptr(),
+                in_out.len(),
+            ));
+            public(&in_out);
+            rind_dart_aes_ctr_free(ctr);
+        }
+    }
+
+    let key = [7u8; 32];
+    secret(&key);
+    let mut in_out = [9u8; 100];
+    secret(&in_out);
+    unsafe {
+        let chacha = new(|out| rind_dart_chacha20_new(key.as_ptr(), 32, out));
+        ok(rind_dart_chacha20_apply_keystream(
+            chacha,
+            iv.as_ptr(),
+            12,
+            1,
+            in_out.as_mut_ptr(),
+            in_out.len(),
+        ));
+        public(&in_out);
+        rind_dart_chacha20_free(chacha);
+    }
+}
+
+#[test]
 fn macs_and_key_derivation() {
     let key = [3u8; 40];
     secret(&key);
