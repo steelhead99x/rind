@@ -1233,14 +1233,23 @@ type AffineMontPointTable = [[u64; 256]; 43];
 
 /// The generator table, aligned to a cache line.
 ///
-/// Its points are 64 bytes, which `p256_scalarmulbase` reads with 16-byte
-/// `ldp`s. Left at the 8-byte alignment of its words, the table can start 8
-/// bytes into a line, and then one load in four splits across two lines: on
-/// a Cortex-A76 that cost key generation and signing 2.5-3%, depending only
-/// on where the linker happened to put the table.
+/// Its points are 64 bytes, which aarch64's `p256_scalarmulbase` reads with
+/// 16-byte `ldp`s. Left at the 8-byte alignment of its words, the table can
+/// start 8 bytes into a line, and then one load in four splits across two
+/// lines: on a Cortex-A76 that cost key generation and signing 2.5-3%,
+/// depending only on where the linker happened to put the table.
+///
+/// The arm and portable backends share this table layout, so they get the
+/// alignment too, which costs them at most 56 bytes of padding. Their
+/// `p256_scalarmulbase` is generic Rust, and no speedup was measured there.
 #[cfg(not(rind_backend = "x86_64"))]
 #[repr(C, align(64))]
 struct AlignedTable(AffineMontPointTable);
+
+// Checked at build time on every backend that has the table, including
+// cross builds that never run their tests.
+#[cfg(not(rind_backend = "x86_64"))]
+const _: () = assert!(align_of::<AlignedTable>() == 64);
 
 #[cfg(not(rind_backend = "x86_64"))]
 impl core::ops::Deref for AlignedTable {
@@ -1563,13 +1572,6 @@ mod tests {
         println!("R * R = {:x?}", one.as_mont().as_mont());
 
         println!("montify n = {:016x?}", Scalar::montifier().0);
-    }
-
-    #[cfg(not(rind_backend = "x86_64"))]
-    #[test]
-    fn generator_table_is_line_aligned() {
-        let table = core::ptr::from_ref(&precomp::CURVE_GENERATOR_PRECOMP);
-        assert_eq!(table.addr() % 64, 0);
     }
 
     #[test]
