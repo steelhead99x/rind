@@ -63,7 +63,7 @@ The modules:
 - `rand`: random bytes from the system.
 - `cpu`: the startup check for required CPU features, whether AES runs
   in hardware, and `Dit`, which holds data-independent timing on across a
-  batch of calls.
+  batch of calls (a no-op without the `std` feature).
 
 The public modules wrap three private layers:
 

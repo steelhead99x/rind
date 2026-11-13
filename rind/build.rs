@@ -31,6 +31,8 @@ fn main() {
     println!(r#"cargo::rustc-check-cfg=cfg(rind_limb, values("32", "64"))"#);
 
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
+    // `low::cpu`'s name for the architecture, where std's isn't there.
+    println!("cargo::rustc-env=RIND_TARGET_ARCH={arch}");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
     let forced = env::var_os("CARGO_CFG_RIND_PORTABLE").is_some();
     let backend = match arch.as_str() {

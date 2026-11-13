@@ -15,6 +15,7 @@
 // cannot pass as `as_chunks`'s const argument in generic code.
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
+use alloc::vec::Vec;
 use core::fmt;
 use core::panic::{RefUnwindSafe, UnwindSafe};
 

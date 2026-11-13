@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
+#[cfg(feature = "std")]
 use core::cell::Cell;
 use core::fmt;
 use core::marker::PhantomData;
@@ -11,14 +12,17 @@ pub struct MissingFeature(&'static str);
 
 impl fmt::Display for MissingFeature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "rind requires {} CPU support on {}",
-            self.0,
-            std::env::consts::ARCH
-        )
+        write!(f, "rind requires {} CPU support on {}", self.0, ARCH)
     }
 }
+
+/// The target's architecture, as `std::env::consts::ARCH` names it.
+#[cfg(feature = "std")]
+const ARCH: &str = std::env::consts::ARCH;
+/// The target's architecture, as `std::env::consts::ARCH` would name it:
+/// `build.rs` passes on cargo's `target_arch`.
+#[cfg(not(feature = "std"))]
+const ARCH: &str = env!("RIND_TARGET_ARCH");
 
 impl core::error::Error for MissingFeature {}
 
@@ -52,6 +56,9 @@ pub fn has_aes_hardware() -> bool {
 /// holding a guard across a batch of calls pays it once instead, for calls
 /// made directly or through an adapter such as rind-rustls. Everywhere else
 /// rind sets no DIT, and the guard does nothing.
+///
+/// Without the `std` feature there is no thread-local to count guards in, so
+/// the guard does nothing, and every rind call sets DIT itself.
 ///
 /// Everything the thread runs while a guard is held runs with DIT, rind's
 /// code or not. DIT stays on until the thread's last guard drops, in
@@ -92,16 +99,19 @@ pub struct Dit {
 impl Dit {
     /// Turns DIT on for this thread, if rind sets it here, until the guard drops.
     pub fn hold() -> Self {
-        let (guards, cpu_state) = DIT_GUARDS.get();
-        let cpu_state = if guards == 0 {
-            super::enter_cpu_state()
-        } else {
-            cpu_state
-        };
-        // Saturating, here and in `drop`: past `usize::MAX` guards the count
-        // is inexact and DIT may turn off early, which costs speed but never
-        // safety, since every rind call sets DIT itself.
-        DIT_GUARDS.set((guards.saturating_add(1), cpu_state));
+        #[cfg(feature = "std")]
+        {
+            let (guards, cpu_state) = DIT_GUARDS.get();
+            let cpu_state = if guards == 0 {
+                super::enter_cpu_state()
+            } else {
+                cpu_state
+            };
+            // Saturating, here and in `drop`: past `usize::MAX` guards the
+            // count is inexact and DIT may turn off early, which costs speed
+            // but never safety, since every rind call sets DIT itself.
+            DIT_GUARDS.set((guards.saturating_add(1), cpu_state));
+        }
         Self {
             _thread: PhantomData,
         }
@@ -110,14 +120,18 @@ impl Dit {
 
 impl Drop for Dit {
     fn drop(&mut self) {
-        let (guards, cpu_state) = DIT_GUARDS.get();
-        DIT_GUARDS.set((guards.saturating_sub(1), cpu_state));
-        if guards == 1 {
-            super::leave_cpu_state(cpu_state);
+        #[cfg(feature = "std")]
+        {
+            let (guards, cpu_state) = DIT_GUARDS.get();
+            DIT_GUARDS.set((guards.saturating_sub(1), cpu_state));
+            if guards == 1 {
+                super::leave_cpu_state(cpu_state);
+            }
         }
     }
 }
 
+#[cfg(feature = "std")]
 std::thread_local! {
     // This thread's live guards, and what the first one's `enter_cpu_state`
     // returned, for the last one to drop to restore.

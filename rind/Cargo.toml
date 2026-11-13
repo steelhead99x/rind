@@ -10,7 +10,15 @@ categories = ["network-programming", "cryptography"]
 rust-version.workspace = true
 
 [features]
-default = []
+default = ["std"]
+# The standard library: thread-local DIT guards, and the run-time CPU feature
+# detection the x86_64 and aarch64 backends need. Without it rind is
+# `#![no_std]` on `alloc`, for the portable backend's bare-metal targets such
+# as `thumbv6m-none-eabi`.
+std = ["alloc"]
+# The heap, which rind needs: without `std`, the binary supplies a global
+# allocator.
+alloc = []
 # Wipes keys, keyed state, and private-key heap scratch on drop.
 wipe = []
 __ctgrind = ["dep:crabgrind"]
@@ -32,6 +40,12 @@ libcrux-hacl-rs = { version = "0.0.6", features = ["alloc"] }
 libcrux-macros = "0.0.4"
 libcrux-poly1305 = { version = "0.0.7", features = ["expose-hacl"] }
 libcrux-sha2 = { version = "0.0.9", features = ["expose-hacl"] }
+
+# `ReuseCache`'s compare-and-swap, on targets such as ARMv6-M that lack one:
+# the binary implements `critical-section` (on a single-core part such as
+# the RP2040, by turning interrupts off).
+[target.'cfg(not(target_has_atomic = "8"))'.dependencies]
+portable-atomic = { version = "1.15", default-features = false, features = ["critical-section"] }
 
 # Reads the AArch32 crypto extension's HWCAP2 bits.
 [target.'cfg(all(target_arch = "arm", target_endian = "little", not(rind_portable), any(target_os = "linux", target_os = "android")))'.dependencies]

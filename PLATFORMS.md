@@ -98,6 +98,19 @@ qemu. iOS devices' code is only built.
   libcrux-platform 0.0.4 calls `__cpuid` outside `unsafe`
   ([libcrux#1646](https://github.com/celabshq/libcrux/issues/1646)).
 
+- Bare-metal targets, such as the RP2040's `thumbv6m-none-eabi` (Cortex-M0+),
+  build the portable backend without std: turn off rind's default `std`
+  feature and turn on `alloc` (`default-features = false, features =
+  ["alloc"]`). rind is then `#![no_std]` on `core` and `alloc`, so the binary
+  supplies a global allocator, and a getrandom custom backend
+  (`--cfg getrandom_backend="custom"`) for rind's random source. Without std,
+  `rind::cpu::Dit` does nothing. The x86_64 and aarch64 backends detect CPU
+  features through std, so they need it. On targets without compare-and-swap,
+  such as ARMv6-M, the one value cache that needs it runs on `portable-atomic`
+  inside a `critical-section`, which the binary implements: on a single-core
+  part such as the RP2040, by turning interrupts off. This builds, but nothing
+  tests it on a device yet.
+
 Every operation panics on a CPU missing one of these. Call `rind::cpu::check()`
 at startup to get an error naming the missing feature instead.
 

@@ -3,7 +3,15 @@
 use core::cell::UnsafeCell;
 use core::fmt;
 use core::panic::{RefUnwindSafe, UnwindSafe};
-use core::sync::atomic::{AtomicU8, Ordering};
+#[cfg(target_has_atomic = "8")]
+use core::sync::atomic::AtomicU8;
+use core::sync::atomic::Ordering;
+
+// ARMv6-M, the RP2040's core, has atomic loads and stores but no
+// compare-and-swap, which `fetch_max` and `compare_exchange` need, so there
+// `portable-atomic` runs them inside the binary's `critical-section`.
+#[cfg(not(target_has_atomic = "8"))]
+use portable_atomic::AtomicU8;
 
 // Each use only raises the state. Zero is a fresh cache, so a wiped one is too.
 const UNUSED: u8 = 0;

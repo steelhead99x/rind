@@ -145,6 +145,7 @@ impl<const N: usize> PosInt<N> {
     }
 
     #[allow(dead_code)]
+    #[cfg(any(feature = "std", test))]
     pub(crate) fn debug(&self, why: &str) {
         let mut bytes = [0u8; 1024];
         let bytes = self.to_bytes(&mut bytes).unwrap();

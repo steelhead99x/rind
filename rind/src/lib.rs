@@ -1,6 +1,9 @@
 // Written for Graviola by Joe Birr-Pixton, 2024.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 #![doc = include_str!("../README.md")]
+// Without the `std` feature rind builds on `core` and `alloc` alone, for
+// bare-metal targets such as `thumbv6m-none-eabi`. Unit tests always have std.
+#![cfg_attr(not(any(feature = "std", test)), no_std)]
 #![allow(
     clippy::new_without_default,
     clippy::result_unit_err,
@@ -25,6 +28,23 @@
     unused_qualifications
 )]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
+#[cfg(not(feature = "alloc"))]
+compile_error!("rind needs its `alloc` feature, or `std`, which turns it on");
+
+// The x86_64 and aarch64 backends detect CPU features at run time, through
+// std; without it, only the portable backend builds.
+#[cfg(all(
+    not(feature = "std"),
+    not(test),
+    any(rind_backend = "x86_64", rind_backend = "aarch64")
+))]
+compile_error!("rind's x86_64 and aarch64 backends need its `std` feature");
+
+// The heap types come from `alloc`, with or without std, and so does `vec!`
+// without it.
+#[cfg_attr(not(any(feature = "std", test)), macro_use)]
+extern crate alloc;
 
 /// Low level operations.
 ///
