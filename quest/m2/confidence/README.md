@@ -21,6 +21,8 @@ The 2026-11-09 audit found no exploitable bug and no panic reachable from public
 
 Three coverage children joined on 2026-11-12, with the maintainer, from the nightly `coverage.yml` report: it measures only published code under the tests that call it, rind-aws-lc-rs runs aws-lc-rs's own tests, and every published function then runs under a test.
 
+Two constant-time children joined on 2026-11-12, with the maintainer, from reading pyca/verified-garbage: Intel's MXCSR-dependent timing and DOITM, and Apple's DIT barrier.
+
 [The proof job's time limit](/quest/m2/confidence/prove-time-limit.md) joined on 2026-11-13, found while landing a PR: the `hol-light` job is cancelled at its limit on runs that prove nothing new, so the check fails when no proof has.
 
 - Fix what a check finds in its own quest's PR when it's small; otherwise plan a follow-up.

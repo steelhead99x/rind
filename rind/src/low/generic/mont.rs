@@ -18,10 +18,16 @@
 //!
 //! The algorithms are the textbook ones, each stated with its bound where
 //! it is defined: Montgomery multiplication by Koç, Acar, and Kaliski's CIOS
-//! method, and Montgomery reduction (HAC 14.32). A square is the cross
-//! products once, doubled, plus the diagonal (HAC 14.16). On 64-bit limbs,
-//! a 128-limb square is Karatsuba (Knuth, TAOCP vol. 2) down to an
-//! eight-limb square.
+//! method, and Montgomery reduction (HAC 14.32) of a square formed with
+//! each cross product once (HAC 14.16). From `SEPARATE` limbs,
+//! multiplication forms the whole product and reduces it as squaring does,
+//! and from `KARATSUBA_MUL` and `KARATSUBA_SQR` limbs, products and
+//! squares split by Karatsuba's method (Knuth, TAOCP 4.3.3), as aws-lc's C
+//! does. Their loops add two rows a pass, in two carry chains, where one
+//! chain's latency would bound them.
+//!
+//! The crossovers are where each measured faster on x86_64 at both limb
+//! widths, and are the same in limbs for both.
 
 use super::super::bignum::{MAX_WORDS, nonzero, select, word};
 use super::{Limb, Wide, join, limbs};
@@ -32,6 +38,30 @@ const PER_WORD: usize = (u64::BITS / Limb::BITS) as usize;
 
 /// `MAX_WORDS` in limbs.
 const MAX_LIMBS: usize = MAX_WORDS * PER_WORD;
+
+/// The fewest limbs Montgomery multiplication forms the product of before
+/// reducing it, below which CIOS's interleaving runs faster.
+#[cfg(any(
+    rind_backend = "portable",
+    all(test, any(rind_backend = "x86_64", rind_backend = "aarch64"))
+))]
+const SEPARATE: usize = 16;
+
+/// The fewest limbs a product splits by Karatsuba's method.
+#[cfg(any(
+    rind_backend = "portable",
+    all(test, any(rind_backend = "x86_64", rind_backend = "aarch64"))
+))]
+const KARATSUBA_MUL: usize = 32;
+
+/// The fewest limbs a square splits by Karatsuba's method, above a
+/// product's, as the schoolbook square forms half the products.
+const KARATSUBA_SQR: usize = 64;
+
+/// Karatsuba's scratch for `MAX_LIMBS`: each split of `n` limbs into a low
+/// half of `h = ceil(n / 2)` takes at most `4h` and its halves' scratch,
+/// which sums to below `4n` and four limbs a level.
+const SCRATCH: usize = 4 * MAX_LIMBS + 64;
 
 /// Compute "montification" constant z := 2^{128k} mod m
 ///
@@ -130,10 +160,26 @@ pub(crate) fn mont_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) 
     let mut buf = [[0; MAX_LIMBS]; 3];
     let [x_limbs, y_limbs, m_limbs] = &mut buf;
     let (x, y, m) = (limbs(x, x_limbs), limbs(y, y_limbs), limbs(m, m_limbs));
-    let mut t = [0; MAX_LIMBS + 2];
+    let n = m.len();
     // The low limb of `-m^-1 mod 2^64` is `-m^-1` mod a limb.
-    mont_mul_limbs(&mut t[..m.len() + 2], x, y, m, n0 as Limb);
-    join(&t, z);
+    let n0 = n0 as Limb;
+    if n < SEPARATE {
+        let mut t = [0; MAX_LIMBS + 2];
+        mont_mul_limbs(&mut t[..n + 2], x, y, m, n0);
+        join(&t, z);
+    } else {
+        // x * y is below m^2, so below 2^bn * m.
+        let mut t = [0; MAX_LIMBS * 2];
+        let t = &mut t[..2 * n];
+        // The limb count is public, so this branch leaks nothing.
+        if n < KARATSUBA_MUL {
+            mul_limbs(t, x, y, &mut []);
+        } else {
+            mul_limbs(t, x, y, &mut [0; SCRATCH]);
+        }
+        redc(t, m, n0);
+        join(&t[n..], z);
+    }
 }
 
 /// `z = x^2 / 2^(64k) mod m`, as [`mont_mul`] takes them.
@@ -188,228 +234,173 @@ fn mont_mul_limbs(t: &mut [Limb], x: &[Limb], y: &[Limb], m: &[Limb], n0: Limb) 
 }
 
 /// `t[n..] := x^2 / 2^bn mod m`, for `x` below the odd `m`, each `n` limbs
-/// of `b` bits, where `t` is `2n` zero limbs and `n0` is `-m^-1 mod 2^b`.
-///
-/// The square takes each product of two different limbs once, doubled, plus
-/// the square of each limb: n(n + 1) / 2 products where a multiplication
-/// takes n^2. A 128-limb square on 64-bit limbs splits instead:
-/// `2 a0 a1 = a0^2 + a1^2 - (a0 - a1)^2`, down to eight limbs. Shorter
-/// squares, and every square on 32-bit limbs, stay schoolbook: the split
-/// was slower or within the noise there.
+/// of `b` bits, where `t` is `2n` limbs and `n0` is `-m^-1 mod 2^b`.
 fn mont_sqr_limbs(t: &mut [Limb], x: &[Limb], m: &[Limb], n0: Limb) {
-    let n = x.len();
-    let t = &mut t[..2 * n];
-    sqr_product(t, x);
+    let t = &mut t[..2 * x.len()];
+    if x.len() < KARATSUBA_SQR {
+        sqr_limbs(t, x, &mut []);
+    } else {
+        sqr_limbs(t, x, &mut [0; SCRATCH]);
+    }
     // x^2 is below m^2, so below 2^bn * m.
     redc(t, m, n0);
 }
 
-/// `t[..2n] = x^2`. A 128-limb square on 64-bit limbs uses [`sqr_pow2`];
-/// every other length uses the schoolbook square.
-#[inline]
-fn sqr_product(t: &mut [Limb], x: &[Limb]) {
-    if split_square_128(x.len()) {
-        sqr128(t, x);
-    } else {
-        sqr_schoolbook(t, x);
-    }
-}
-
-/// Whether a square of `n` limbs takes the split path.
+/// `z := x * y`, for `x` and `y` of `n` limbs and `z` of `2n`.
 ///
-/// 64-bit limbs only, and only at 128. Shorter squares were slower split,
-/// and at 32-bit limbs 128 and 256 were within the noise of the schoolbook
-/// square. A function, so the 32-bit module's false result is a value rather
-/// than a dead branch.
-#[inline(always)]
-fn split_square_128(n: usize) -> bool {
-    Limb::BITS == 64 && n == 128
-}
-
-/// 128-limb square in its own frame, so a shorter square does not reserve
-/// this scratch.
-#[inline(never)]
-fn sqr128(t: &mut [Limb], x: &[Limb]) {
-    let mut scratch = [0; sqr_scratch(128)];
-    sqr_pow2(t, x, &mut scratch);
-}
-
-/// Scratch a power-of-two square of `n > 8` limbs needs. Eight limbs need none.
-const fn sqr_scratch(n: usize) -> usize {
-    if n <= 8 {
-        0
-    } else {
-        // The difference, its square, the middle term, and one half's scratch.
-        n / 2 + 2 * n + sqr_scratch(n / 2)
-    }
-}
-
-/// `r[..2n] = a^2` for a power-of-two `a` of at least 8 limbs.
-///
-/// `t` has [`sqr_scratch`]`(n)` limbs. Halves of eight limbs are [`sqr8`].
-fn sqr_pow2(r: &mut [Limb], a: &[Limb], t: &mut [Limb]) {
-    let n = a.len();
-    debug_assert!(r.len() >= 2 * n);
-    if n == 8 {
-        sqr8(&mut r[..16], a);
+/// From `KARATSUBA_MUL` limbs, it splits each at `h = ceil(n / 2)` limbs, as
+/// `x1 2^bh + x0`, and forms three products of `h` limbs or fewer in place of
+/// four: `x0 y0`, `x1 y1`, and `|x0 - x1| |y1 - y0|`, which `add_middle`
+/// adds to or subtracts from the first two by the sign of `(x0 - x1)(y1 -
+/// y0)`, giving `x0 y1 + x1 y0`. `scratch` holds the differences and their
+/// product, and what the halves need.
+#[cfg(any(
+    rind_backend = "portable",
+    all(test, any(rind_backend = "x86_64", rind_backend = "aarch64"))
+))]
+fn mul_limbs(z: &mut [Limb], x: &[Limb], y: &[Limb], scratch: &mut [Limb]) {
+    let n = x.len();
+    let z = &mut z[..2 * n];
+    if n < KARATSUBA_MUL {
+        z.fill(0);
+        let pairs = x.as_chunks::<2>();
+        for (i, [u, v]) in pairs.0.iter().enumerate() {
+            let i = 2 * i;
+            let rest = mul_add2(&mut z[i..i + n], y, *u, *v, 0);
+            z[i + n] = rest as Limb;
+            z[i + n + 1] = (rest >> Limb::BITS) as Limb;
+        }
+        if let [u] = pairs.1 {
+            z[2 * n - 1] = mul_add(&mut z[n - 1..2 * n - 1], y, *u) as Limb;
+        }
         return;
     }
-    let h = n / 2;
-    let (a0, a1) = a.split_at(h);
-    sqr_pow2(&mut r[..n], a0, t);
-    sqr_pow2(&mut r[n..2 * n], a1, t);
-
-    let (diff, rest) = t.split_at_mut(h);
-    abs_diff(diff, &mut rest[..h], a0, a1);
-    let (mid, rest) = rest.split_at_mut(n);
-    let (term, scratch) = rest.split_at_mut(n);
-    sqr_pow2(mid, diff, scratch);
-    // `(a0^2 + a1^2) - |a0 - a1|^2 = 2 a0 a1`, added at limb `h`.
-    // The difference's top bit is zero or one and lands at limb `h + n`.
-    let high = sub_middle(term, &r[..n], &r[n..2 * n], mid);
-    add_middle(r, h, term, high);
+    let h = n.div_ceil(2);
+    let (dx, rest) = scratch.split_at_mut(h);
+    let (dy, rest) = rest.split_at_mut(h);
+    let (d, rest) = rest.split_at_mut(2 * h);
+    let ((x0, x1), (y0, y1)) = (x.split_at(h), y.split_at(h));
+    let negative = abs_diff(dx, x0, x1) ^ abs_diff(dy, y1, y0);
+    mul_limbs(d, dx, dy, rest);
+    let (z0, z2) = z.split_at_mut(2 * h);
+    mul_limbs(z0, x0, y0, rest);
+    mul_limbs(z2, x1, y1, rest);
+    add_middle(z, d, h, negative);
 }
 
-/// One schoolbook row: `r[at + i] += u * b[i]`, carry stored just past them.
-macro_rules! cross_row {
-    ($r:ident, $at:expr, $u:expr, $($b:expr),+ $(,)?) => {{
+/// `z := x^2`, for `x` of `n` limbs and `z` of `2n`.
+///
+/// Below `KARATSUBA_SQR` limbs, it takes each product of two different limbs
+/// once, doubled, plus the square of each limb: n(n + 1) / 2 products where
+/// a multiplication takes n^2. From there it splits as `mul_limbs` does,
+/// into `x0^2`, `x1^2`, and `(x0 - x1)^2`, which is always subtracted.
+fn sqr_limbs(z: &mut [Limb], x: &[Limb], scratch: &mut [Limb]) {
+    let n = x.len();
+    let z = &mut z[..2 * n];
+    if n < KARATSUBA_SQR {
+        // Each pair of rows, x[i] and x[i + 1] times the limbs above them.
+        z.fill(0);
+        for i in (0..n.saturating_sub(1)).step_by(2) {
+            let s = mul_add_limb(x[i], x[i + 1], z[2 * i + 1], 0);
+            z[2 * i + 1] = s as Limb;
+            let rest = mul_add2(
+                &mut z[2 * i + 2..i + n],
+                &x[i + 2..],
+                x[i],
+                x[i + 1],
+                s >> Limb::BITS,
+            );
+            z[i + n] = rest as Limb;
+            z[i + n + 1] = (rest >> Limb::BITS) as Limb;
+        }
+
+        // The products sum to below x^2 / 2, so doubling them cannot
+        // overflow.
+        let mut out = 0;
+        for z in z.iter_mut() {
+            let next = *z >> (Limb::BITS - 1);
+            *z = *z << 1 | out;
+            out = next;
+        }
+
         let mut carry = 0;
-        let mut i = $at;
-        $(
-            carry = mac_limb(&mut $r[i], $b, $u, carry);
-            i += 1;
-        )+
-        $r[i] = carry;
-    }};
-}
-
-/// `*x += u * y + carry`, returning the new carry. It fits a limb.
-#[inline(always)]
-fn mac_limb(x: &mut Limb, y: Limb, u: Limb, carry: Limb) -> Limb {
-    let t = mul_add_limb(u, y, *x, Wide::from(carry));
-    *x = t as Limb;
-    (t >> Limb::BITS) as Limb
-}
-
-/// Eight-limb square. The cross products are straight-line, which is the
-/// base the split above bottoms out in.
-fn sqr8(r: &mut [Limb], a: &[Limb]) {
-    let [a0, a1, a2, a3, a4, a5, a6, a7] = [a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]];
-    r[..16].fill(0);
-    // Row i adds a[i] times the limbs above it, starting at limb 2i + 1.
-    cross_row!(r, 1, a0, a1, a2, a3, a4, a5, a6, a7);
-    cross_row!(r, 3, a1, a2, a3, a4, a5, a6, a7);
-    cross_row!(r, 5, a2, a3, a4, a5, a6, a7);
-    cross_row!(r, 7, a3, a4, a5, a6, a7);
-    cross_row!(r, 9, a4, a5, a6, a7);
-    cross_row!(r, 11, a5, a6, a7);
-    cross_row!(r, 13, a6, a7);
-
-    // The products sum to below a^2 / 2, so doubling them cannot overflow.
-    let mut bit = 0;
-    for limb in &mut r[..16] {
-        let next = *limb >> (Limb::BITS - 1);
-        *limb = (*limb << 1) | bit;
-        bit = next;
+        for (i, x) in x.iter().enumerate() {
+            let s = mul_add_limb(*x, *x, z[2 * i], carry);
+            z[2 * i] = s as Limb;
+            let s = Wide::from(z[2 * i + 1]).wrapping_add(s >> Limb::BITS);
+            z[2 * i + 1] = s as Limb;
+            carry = s >> Limb::BITS;
+        }
+        return;
     }
-    let mut carry = 0;
-    for (i, a) in [a0, a1, a2, a3, a4, a5, a6, a7].into_iter().enumerate() {
-        let s = mul_add_limb(a, a, r[2 * i], carry);
-        r[2 * i] = s as Limb;
-        let s = Wide::from(r[2 * i + 1]).wrapping_add(s >> Limb::BITS);
-        r[2 * i + 1] = s as Limb;
-        carry = s >> Limb::BITS;
-    }
+    let h = n.div_ceil(2);
+    let (dx, rest) = scratch.split_at_mut(h);
+    let (d, rest) = rest.split_at_mut(2 * h);
+    let (x0, x1) = x.split_at(h);
+    abs_diff(dx, x0, x1);
+    sqr_limbs(d, dx, rest);
+    let (z0, z2) = z.split_at_mut(2 * h);
+    sqr_limbs(z0, x0, rest);
+    sqr_limbs(z2, x1, rest);
+    add_middle(z, d, h, 1);
 }
 
-/// `out = |a - b|`. The sign is a mask, not a branch: `a` is a secret square.
-fn abs_diff(out: &mut [Limb], tmp: &mut [Limb], a: &[Limb], b: &[Limb]) {
-    let neg = limb_mask(sub_limbs(tmp, a, b));
-    sub_limbs(out, b, a);
-    for i in 0..a.len() {
-        out[i] = tmp[i] ^ ((out[i] ^ tmp[i]) & neg);
-    }
-}
-
-/// All ones when `bit` is one, else zero.
-fn limb_mask(bit: Limb) -> Limb {
-    core::hint::black_box(Limb::wrapping_neg(bit))
-}
-
-/// `r = a - b`, returning the borrow, which is zero or one.
-fn sub_limbs(r: &mut [Limb], a: &[Limb], b: &[Limb]) -> Limb {
+/// `z := |x - y|` over `z`'s length, which `x` and `y` fit, returning one
+/// where `x < y` and zero otherwise.
+fn abs_diff(z: &mut [Limb], x: &[Limb], y: &[Limb]) -> Limb {
     let mut borrow = 0;
-    for i in 0..a.len() {
-        let (diff, b1) = a[i].overflowing_sub(b[i]);
+    for (i, z) in z.iter_mut().enumerate() {
+        let x = x.get(i).copied().unwrap_or(0);
+        let y = y.get(i).copied().unwrap_or(0);
+        let (diff, b1) = x.overflowing_sub(y);
         let (diff, b2) = diff.overflowing_sub(borrow);
-        r[i] = diff;
+        *z = diff;
         borrow = Limb::from(b1 | b2);
+    }
+    // x - y wrapped to 2^bk + x - y where x < y; its complement plus one
+    // is y - x.
+    let flip = Limb::wrapping_sub(0, borrow);
+    let mut carry = Wide::from(borrow);
+    for z in z.iter_mut() {
+        let s = Wide::from(*z ^ flip).wrapping_add(carry);
+        *z = s as Limb;
+        carry = s >> Limb::BITS;
     }
     borrow
 }
 
-/// `term = (lo + hi) - mid`, returning the limb above `term`. `lo + hi` is
-/// `n` limbs plus a bit, and the difference is `2 a0 a1`, so that bit is
-/// zero or one and the subtraction does not borrow out.
-fn sub_middle(term: &mut [Limb], lo: &[Limb], hi: &[Limb], mid: &[Limb]) -> Limb {
-    let mut sum_carry = 0;
-    let mut borrow = 0;
-    for i in 0..lo.len() {
-        let (sum, c1) = lo[i].overflowing_add(hi[i]);
-        let (sum, c2) = sum.overflowing_add(sum_carry);
-        sum_carry = Limb::from(c1 | c2);
-        let (diff, b1) = sum.overflowing_sub(mid[i]);
-        let (diff, b2) = diff.overflowing_sub(borrow);
-        term[i] = diff;
-        borrow = Limb::from(b1 | b2);
-    }
-    // `2 a0 a1` is non-negative, so this is zero or one and not a borrow.
-    sum_carry.wrapping_sub(borrow)
-}
-
-/// Adds the `n`-limb `m` into `r` at limb `h`, then `high` at limb `h + n`.
-/// `m` with `high` is `2 a0 a1`, and the square fits in `2n` limbs.
-fn add_middle(r: &mut [Limb], h: usize, m: &[Limb], high: Limb) {
-    let n = m.len();
-    let mut carry = 0;
-    for i in 0..n {
-        let sum = Wide::from(r[h + i])
-            .wrapping_add(Wide::from(m[i]))
+/// Completes a Karatsuba product `z` split at `h` limbs, which holds
+/// `z0 = x0 y0` in its low `2h` limbs and `z2 = x1 y1` above, by adding
+/// `z0 + z2 - d` at limb `h` where `negative` is one, and `z0 + z2 + d`
+/// where it is zero, for the `2h` limbs `d`, which it overwrites.
+///
+/// The sum is `x0 y1 + x1 y0`, below `2^(2bh + 1)`: `2h` limbs and a top
+/// limb of zero or one. `d` is subtracted as its complement plus one, which
+/// adds `2^2bh` that the top limb takes back.
+fn add_middle(z: &mut [Limb], d: &mut [Limb], h: usize, negative: Limb) {
+    let flip = Limb::wrapping_sub(0, negative);
+    let mut carry = Wide::from(negative);
+    for (i, d) in d.iter_mut().enumerate() {
+        let z2 = z.get(2 * h + i).copied().unwrap_or(0);
+        let s = Wide::from(z[i])
+            .wrapping_add(Wide::from(z2))
+            .wrapping_add(Wide::from(*d ^ flip))
             .wrapping_add(carry);
-        r[h + i] = sum as Limb;
-        carry = sum >> Limb::BITS;
+        *d = s as Limb;
+        carry = s >> Limb::BITS;
     }
-    carry = carry.wrapping_add(Wide::from(high));
-    for limb in &mut r[h + n..2 * n] {
-        let sum = Wide::from(*limb).wrapping_add(carry);
-        *limb = sum as Limb;
-        carry = sum >> Limb::BITS;
-    }
-}
+    let top = carry.wrapping_sub(Wide::from(negative));
 
-/// Writes `x^2` into `t[..2n]`, `n` the length of `x`. `t`'s limbs start at
-/// zero.
-#[inline]
-fn sqr_schoolbook(t: &mut [Limb], x: &[Limb]) {
-    let n = x.len();
-    for i in 0..n {
-        t[i + n] = mul_add(&mut t[2 * i + 1..i + n], &x[i + 1..], x[i]) as Limb;
-    }
-
-    // The products sum to below x^2 / 2, so doubling them cannot overflow.
-    let mut out = 0;
-    for t in &mut t[..2 * n] {
-        let next = *t >> (Limb::BITS - 1);
-        *t = *t << 1 | out;
-        out = next;
-    }
-
+    // The whole product fits `z`, so the last carry is zero.
     let mut carry = 0;
-    for (i, x) in x.iter().enumerate() {
-        let s = mul_add_limb(*x, *x, t[2 * i], carry);
-        t[2 * i] = s as Limb;
-        let s = Wide::from(t[2 * i + 1]).wrapping_add(s >> Limb::BITS);
-        t[2 * i + 1] = s as Limb;
+    for (i, z) in z[h..].iter_mut().enumerate() {
+        let add = match i.cmp(&d.len()) {
+            core::cmp::Ordering::Less => Wide::from(d[i]),
+            core::cmp::Ordering::Equal => top,
+            core::cmp::Ordering::Greater => 0,
+        };
+        let s = Wide::from(*z).wrapping_add(add).wrapping_add(carry);
+        *z = s as Limb;
         carry = s >> Limb::BITS;
     }
 }
@@ -418,25 +409,67 @@ fn sqr_schoolbook(t: &mut [Limb], x: &[Limb]) {
 /// limbs of `t` beyond `m`'s, each of `b` bits, and `n0` is `-m^-1 mod
 /// 2^b`.
 ///
-/// Each step clears the lowest limb by adding a multiple of m. The carry out
-/// of the top of a step's sum waits in `top` for the next, as it lands where
-/// the next step's sum ends. The result is below 2m, as the multiples are
-/// below 2^bp * m too, so one subtraction reduces it.
+/// Each step clears the lowest limb by adding a multiple of m, two steps a
+/// pass: the second's multiple comes from the next limb as the first leaves
+/// it. The carry out of the top of a pass's sum waits in `top` for the
+/// next, as it lands where the next pass's sum ends. The result is below
+/// 2m, as the multiples are below 2^bp * m too, so one subtraction reduces
+/// it.
 fn redc(t: &mut [Limb], m: &[Limb], n0: Limb) {
     let k = m.len();
     let p = t.len() - k;
     let mut top = 0;
-    for i in 0..p {
+    let mut i = 0;
+    // For a one-limb m, `top` lands on the limb the second step's multiple
+    // comes from, so each pass takes one step.
+    while k > 1 && i + 1 < p {
+        let u = t[i].wrapping_mul(n0);
+        let low = mul_add_limb(u, m[0], t[i], 0) >> Limb::BITS;
+        let next = mul_add_limb(u, m[1], t[i + 1], low);
+        let v = (next as Limb).wrapping_mul(n0);
+        let rest = mul_add2(&mut t[i..i + k], m, u, v, 0);
+        let sum = Wide::from(t[i + k])
+            .wrapping_add(Wide::from(rest as Limb))
+            .wrapping_add(top);
+        t[i + k] = sum as Limb;
+        let sum = Wide::from(t[i + k + 1])
+            .wrapping_add(rest >> Limb::BITS)
+            .wrapping_add(sum >> Limb::BITS);
+        t[i + k + 1] = sum as Limb;
+        top = sum >> Limb::BITS;
+        i += 2;
+    }
+    while i < p {
         let u = t[i].wrapping_mul(n0);
         let carry = mul_add(&mut t[i..i + k], m, u);
         let sum = Wide::from(t[i + k]).wrapping_add(carry).wrapping_add(top);
         t[i + k] = sum as Limb;
         top = sum >> Limb::BITS;
+        i += 1;
     }
 
     let r = &mut t[p..];
     let below = cmp_lt_limbs(r, m);
     sub_limbs_masked(r, m, Limb::wrapping_sub(0, top as Limb | (below ^ 1)));
+}
+
+/// `x += y * (u + v 2^b) + c` over `x`'s limbs, as many as `y`'s, for a `c`
+/// that fits a limb, returning what lands above them, which fits `Wide`.
+///
+/// Its two products a limb are summed in two carry chains, which run side
+/// by side where one chain's latency would bound `mul_add`.
+fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Wide) -> Wide {
+    let (mut c0, mut c1, mut prev) = (c, 0, 0);
+    for (x, y) in x.iter_mut().zip(y) {
+        let s0 = mul_add_limb(u, *y, *x, c0);
+        c0 = s0 >> Limb::BITS;
+        let s1 = mul_add_limb(v, prev, s0 as Limb, c1);
+        *x = s1 as Limb;
+        c1 = s1 >> Limb::BITS;
+        prev = *y;
+    }
+    // At most (2^b - 1)^2 + 2 (2^b - 1).
+    mul_add_limb(v, prev, c0 as Limb, c1)
 }
 
 /// `x += y * u`, returning the carry out of the top limb.
@@ -529,8 +562,32 @@ mod tests {
             prop_assert_eq!(public(&ours), theirs);
         }
 
+        /// Karatsuba's products and squares, at every width to the widest,
+        /// against s2n-bignum's schoolbook product.
         #[test]
-        fn modular((m, x, y) in modulus(), extra in words(0, 4)) {
+        fn karatsuba((x, y) in (1..=MAX_WORDS).prop_flat_map(|k| (words(k, k), words(k, k)))) {
+            let k = x.len();
+            let (sx, sy) = (secret(&x), secret(&y));
+            let (mut x_limbs, mut y_limbs) = ([0; MAX_LIMBS], [0; MAX_LIMBS]);
+            let (xl, yl) = (limbs(&sx, &mut x_limbs), limbs(&sy, &mut y_limbs));
+            let mut z = [0; MAX_LIMBS * 2];
+            let (mut ours, mut theirs) = (vec![0; 2 * k], vec![0; 2 * k]);
+
+            mul_limbs(&mut z, xl, yl, &mut [0; SCRATCH]);
+            join(&z, &mut ours);
+            low::bignum_mul(&mut theirs, &x, &y);
+            prop_assert_eq!(public(&ours), theirs.clone());
+
+            sqr_limbs(&mut z, xl, &mut [0; SCRATCH]);
+            join(&z, &mut ours);
+            low::bignum_mul(&mut theirs, &x, &x);
+            prop_assert_eq!(public(&ours), theirs);
+        }
+
+        /// Moduli to three times `KARATSUBA_MUL`'s width, so Montgomery
+        /// multiplication splits twice and squaring once, at odd widths too.
+        #[test]
+        fn modular((m, x, y) in modulus(3 * KARATSUBA_MUL / PER_WORD), extra in words(0, 4)) {
             let k = m.len();
             let (sm, sx, sy) = (secret(&m), secret(&x), secret(&y));
             let (mut ours, mut theirs) = (vec![0; k], vec![0; k]);
@@ -587,42 +644,5 @@ mod tests {
         assert_eq!(ours, theirs);
         mont_sqr(&mut ours, &x, &m, 1);
         assert_eq!(ours, theirs);
-    }
-}
-
-/// The split square against the schoolbook one, at every width it can take.
-#[cfg(test)]
-mod sqr_split {
-    use super::{Limb, MAX_LIMBS, sqr_product, sqr_schoolbook};
-
-    #[test]
-    fn matches_schoolbook() {
-        let mut state = 0x1234_5678_9abc_def0u64;
-        let mut next = || {
-            state = state
-                .wrapping_mul(0x5851_f42d_4c95_7f2d)
-                .wrapping_add(0x1405_7b7e_f767_814f);
-            state as Limb
-        };
-        let mut ns: Vec<usize> = (1..=128).collect();
-        if MAX_LIMBS >= 256 {
-            ns.push(256);
-        }
-        for n in ns {
-            for _ in 0..3 {
-                let a: Vec<Limb> = (0..n).map(|_| next()).collect();
-                let mut got = vec![0; 2 * n];
-                let mut want = vec![0; 2 * n];
-                sqr_product(&mut got, &a);
-                sqr_schoolbook(&mut want, &a);
-                assert_eq!(got, want, "n={n}");
-            }
-            let ones = vec![Limb::MAX; n];
-            let mut got = vec![0; 2 * n];
-            let mut want = vec![0; 2 * n];
-            sqr_product(&mut got, &ones);
-            sqr_schoolbook(&mut want, &ones);
-            assert_eq!(got, want, "ones n={n}");
-        }
     }
 }
