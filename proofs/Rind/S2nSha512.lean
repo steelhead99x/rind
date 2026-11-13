@@ -6,8 +6,8 @@ open Aeneas Aeneas.Std
 
 s2n-bignum's FIPS 180-4 spec of SHA-512's block function, from
 `x86/proofs/utils/sha512_spec.ml` in awslabs/s2n-bignum#420 at 7ef7ba7c,
-which `proofs/hol-light/s2n-bignum/` holds, transliterated: HOL Light's `EL n l`
-is `l[n]!`, `word_ror` is `rotateRight`, `word_ushr` is `>>>`, and `word_add` is
+which rind's fork, `thirdparty/s2n-bignum`, holds, transliterated: HOL Light's
+`EL n l` is `l[n]!`, `word_ror` is `rotateRight`, `word_ushr` is `>>>`, and `word_add` is
 `+`, each grouped as the HOL Light is. The theorems rind's HOL Light proofs
 state are about these, and `hashBlocks_eq` proves this hash of blocks is
 `Rind.Sha2`'s `compress`.

@@ -1,0 +1,1469 @@
+(*
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
+ *)
+
+(* ========================================================================= *)
+(* Simplified model of aarch64 (64-bit ARM) semantics.                       *)
+(* ========================================================================= *)
+
+let arm_print_log = ref false;;
+
+(* ------------------------------------------------------------------------- *)
+(* Stating assumptions about instruction decoding. For ARM we                *)
+(* currently go all the way to the semantics in one jump, no asm.            *)
+(* ------------------------------------------------------------------------- *)
+
+let arm_decode = new_definition `arm_decode s pc inst <=>
+  ?i:int32. aligned_bytes_loaded s pc (bytelist_of_num 4 (val i)) /\
+            decode i = SOME inst`;;
+
+let ARM_DECODE_EQ_DECODE32 = prove
+ (`arm_decode s pc inst <=> decode32 decode s pc inst`,
+  REWRITE_TAC[arm_decode; decode32]);;
+
+let ARM_DECODE_CONS = prove
+ (`!s pc l i inst l'. aligned_bytes_loaded s (word pc) l ==>
+   read_int32 l = SOME (i, l') ==> decode i = SOME inst ==>
+   arm_decode s (word pc) inst /\
+   aligned_bytes_loaded s (word (pc + 4)) l'`,
+  REWRITE_TAC[ARM_DECODE_EQ_DECODE32] THEN
+  MATCH_ACCEPT_TAC DECODE32_CONS);;
+
+let arm_decode_unique = prove
+ (`!s pc x y. arm_decode s pc x ==> arm_decode s pc y ==> x = y`,
+  REWRITE_TAC[ARM_DECODE_EQ_DECODE32] THEN
+  MESON_TAC[decode32_unique]);;
+
+let ARM_DECODES_THM =
+  let pth = (UNDISCH_ALL o prove)
+   (`i = i' ==> pc + 4 = pc' ==>
+     aligned_bytes_loaded s (word pc) l ==>
+     read_int32 l = SOME (a, l') ==> decode a = SOME i ==>
+     arm_decode s (word pc) i' /\
+     aligned_bytes_loaded s (word pc') l'`,
+    REPEAT (DISCH_THEN (SUBST1_TAC o SYM)) THEN
+    MATCH_ACCEPT_TAC ARM_DECODE_CONS)
+  and pth_pc = (UNDISCH o ARITH_RULE) `n + 4 = p ==> (pc + n) + 4 = pc + p`
+  and r32,dec,n4 = `read_int32`,`decode`,`4`
+  and ei,ei' = `i:armstate->armstate->bool`,`i':armstate->armstate->bool`
+  and pl,el,el' = `(+):num->num->num`,`l:byte list`,`l':byte list`
+  and ea,en,ep,epc,epc' = `a:int32`,`n:num`,`p:num`,`pc:num`,`pc':num` in
+  (* go returns a list of pairs of arm_decode theorem and its PC offset. *)
+  let rec go th: (thm*term) list =
+    let pc,l = (rand o rand F_F I) (dest_comb (concl th)) in
+    let th1 = READ_WORD_CONV (mk_comb (r32, l)) in
+    let a,l' = dest_pair (rand (rhs (concl th1))) in
+    let th2 = DECODE_CONV (mk_comb (dec, a)) in
+    let i = rand (rhs (concl th2)) in
+    let th3 = REWRITE_CONV (invert_condition :: ARM_INSTRUCTION_ALIASES) i in
+    let i' = rhs (concl th3) in
+    let th4,pcofs = match pc with
+    | Comb(Comb(Const("+",_),pc),a) ->
+      let th = NUM_ADD_CONV (mk_comb (mk_comb (pl, a), n4)) in
+      PROVE_HYP th (INST [pc,epc; a,en; rhs (concl th),ep] pth_pc),a
+    | _ -> REFL (mk_comb (mk_comb (pl, pc), n4)),`0` in
+    let pc' = rhs (concl th4) in
+    let th' = itlist PROVE_HYP [th3; th4; th; th1; th2]
+      (INST [i,ei; i',ei'; pc,epc; pc',epc'; l,el; a,ea; l',el'] pth) in
+    match l' with
+    | Const("NIL",_) -> [CONJUNCT1 th',pcofs]
+    | _ -> let dth,bth = CONJ_PAIR th' in (dth,pcofs)::(go bth) in
+  fun th ->
+    let decodes:(thm*term) list = (go o
+      (fun dth -> EQ_MP dth (ASSUME (lhs (concl dth)))) o
+      AP_TERM `aligned_bytes_loaded s (word pc)`) th in
+    map (fun th,pcofs -> ((GENL [`s:armstate`; `pc:num`] o DISCH_ALL) th, pcofs))
+      decodes;;
+
+let ARM_MK_EXEC_RULE th0: thm * (thm option array) =
+  let reloc_op_convert_th = prove(
+    `forall (x:num) y.
+      CONS (word (x MOD 256):(8)word)
+        (CONS (word ((x DIV 256) MOD 256):(8)word)
+          (CONS (word ((x DIV 256 DIV 256) MOD 256):(8)word)
+            (CONS (word ((x DIV 256 DIV 256 DIV 256) MOD 256):(8)word)
+              y)))
+      = APPEND (bytelist_of_num 4 x) y`,
+    REPEAT GEN_TAC THEN
+    CONV_TAC (RAND_CONV (TOP_DEPTH_CONV num_CONV)) THEN
+    REWRITE_TAC[bytelist_of_num;APPEND]) in
+
+  let th0 = INST [`pc':num`,`pc:num`] (SPEC_ALL
+    (PURE_REWRITE_RULE[reloc_op_convert_th] th0)) in
+  GEN_MK_EXEC_RULE
+    [LENGTH_BYTELIST_OF_NUM; LENGTH_BYTELIST_OF_INT;
+     LENGTH; LENGTH_APPEND]
+    ARM_DECODES_THM th0;;
+
+
+(* Take a slice of a machine code using SUB_LIST.
+   Returns a new definition of sliced machine code nmaed new_mc_name,
+   its SUB_LIST_CONV-reduced version, and
+   its EXEC version created by ARM_MK_EXEC_RULE. *)
+let mk_sublist_of_mc (new_mc_name:string) (mc_th:thm)
+    (ofs_and_len:term*term) (mc_length_th:thm): thm * thm * (thm * thm option array) =
+  let type_check (t:term) (ty:hol_type): unit =
+    if type_of t <> ty then
+      failwith (Printf.sprintf "`%s` must have type `%s` but has `%s`"
+          (string_of_term t) (string_of_type ty)
+          (string_of_type (type_of t)))
+    else
+      () in
+  let _ = type_check (fst ofs_and_len) `:num` in
+  let _ = type_check (snd ofs_and_len) `:num` in
+  let mc = fst (dest_eq (concl mc_th)) in
+  let new_mc = mk_var(new_mc_name,`:((8)word)list`) in
+  let new_mc_def = define (mk_eq (new_mc,
+    list_mk_comb (`SUB_LIST:num#num->((8)word)list->((8)word)list`,
+      [mk_pair ofs_and_len;mc]))) in
+  let new_mc = CONV_RULE (REWRITE_CONV [mc_length_th] THENC
+               ONCE_DEPTH_CONV NUM_SUB_CONV THENC
+               REWRITE_CONV [mc_th] THENC
+               RAND_CONV SUB_LIST_CONV) new_mc_def in
+  new_mc_def,new_mc,(ARM_MK_EXEC_RULE new_mc);;
+
+(* ------------------------------------------------------------------------- *)
+(* For ARM this is a trivial function.                                       *)
+(* ------------------------------------------------------------------------- *)
+
+let arm_execute = define
+ `arm_execute = \i:(armstate->armstate->bool). i`;;
+
+(* ------------------------------------------------------------------------- *)
+(* Now the basic fetch-decode-execute cycle.                                 *)
+(* ------------------------------------------------------------------------- *)
+
+let arm = define
+ `arm s s' <=>
+    ?instr. arm_decode s (read PC s) instr /\
+            (PC := word_add (read PC s) (word 4) ,,
+             arm_execute instr) s s'`;;
+
+(* ------------------------------------------------------------------------- *)
+(* Normalize an address in the same style as x86 bsid.                       *)
+(* ------------------------------------------------------------------------- *)
+
+let OFFSET_ADDRESS_CLAUSES = prove
+ (`offset_address (Register_Offset r) s = word(val(read r s)) /\
+   offset_address (Shiftreg_Offset r 1) s = word(2 * val(read r s)) /\
+   offset_address (Shiftreg_Offset r 2) s = word(4 * val(read r s)) /\
+   offset_address (Shiftreg_Offset r 3) s = word(8 * val(read r s)) /\
+   offset_address (Shiftreg_Offset r 4) s = word(16 * val(read r s)) /\
+   offset_address (Postreg_Offset r) s = word 0 /\
+   offset_address (Immediate_Offset w) s = w /\
+   offset_address (Preimmediate_Offset w) s = w /\
+   offset_address (Postimmediate_Offset w) s = word 0`,
+  REWRITE_TAC[offset_address; word_shl; WORD_VAL] THEN
+  CONV_TAC NUM_REDUCE_CONV THEN REWRITE_TAC[MULT_AC]);;
+
+(* ------------------------------------------------------------------------- *)
+(* Basic execution of ARM instruction into sequence of state updates.        *)
+(* ------------------------------------------------------------------------- *)
+
+let WREG_EXPAND_CLAUSES = prove
+ (`W0 = X0 :> zerotop_32 /\
+   W1 = X1 :> zerotop_32 /\
+   W2 = X2 :> zerotop_32 /\
+   W3 = X3 :> zerotop_32 /\
+   W4 = X4 :> zerotop_32 /\
+   W5 = X5 :> zerotop_32 /\
+   W6 = X6 :> zerotop_32 /\
+   W7 = X7 :> zerotop_32 /\
+   W8 = X8 :> zerotop_32 /\
+   W9 = X9 :> zerotop_32 /\
+   W10 = X10 :> zerotop_32 /\
+   W11 = X11 :> zerotop_32 /\
+   W12 = X12 :> zerotop_32 /\
+   W13 = X13 :> zerotop_32 /\
+   W14 = X14 :> zerotop_32 /\
+   W15 = X15 :> zerotop_32 /\
+   W16 = X16 :> zerotop_32 /\
+   W17 = X17 :> zerotop_32 /\
+   W18 = X18 :> zerotop_32 /\
+   W19 = X19 :> zerotop_32 /\
+   W20 = X20 :> zerotop_32 /\
+   W21 = X21 :> zerotop_32 /\
+   W22 = X22 :> zerotop_32 /\
+   W23 = X23 :> zerotop_32 /\
+   W24 = X24 :> zerotop_32 /\
+   W25 = X25 :> zerotop_32 /\
+   W26 = X26 :> zerotop_32 /\
+   W27 = X27 :> zerotop_32 /\
+   W28 = X28 :> zerotop_32 /\
+   W29 = X29 :> zerotop_32 /\
+   W30 = X30 :> zerotop_32`,
+  REWRITE_TAC(!component_alias_thms));;
+
+let DREG_EXPAND_CLAUSES = prove
+ (`D0 = Q0 :> zerotop_64 /\
+   D1 = Q1 :> zerotop_64 /\
+   D2 = Q2 :> zerotop_64 /\
+   D3 = Q3 :> zerotop_64 /\
+   D4 = Q4 :> zerotop_64 /\
+   D5 = Q5 :> zerotop_64 /\
+   D6 = Q6 :> zerotop_64 /\
+   D7 = Q7 :> zerotop_64 /\
+   D8 = Q8 :> zerotop_64 /\
+   D9 = Q9 :> zerotop_64 /\
+   D10 = Q10 :> zerotop_64 /\
+   D11 = Q11 :> zerotop_64 /\
+   D12 = Q12 :> zerotop_64 /\
+   D13 = Q13 :> zerotop_64 /\
+   D14 = Q14 :> zerotop_64 /\
+   D15 = Q15 :> zerotop_64 /\
+   D16 = Q16 :> zerotop_64 /\
+   D17 = Q17 :> zerotop_64 /\
+   D18 = Q18 :> zerotop_64 /\
+   D19 = Q19 :> zerotop_64 /\
+   D20 = Q20 :> zerotop_64 /\
+   D21 = Q21 :> zerotop_64 /\
+   D22 = Q22 :> zerotop_64 /\
+   D23 = Q23 :> zerotop_64 /\
+   D24 = Q24 :> zerotop_64 /\
+   D25 = Q25 :> zerotop_64 /\
+   D26 = Q26 :> zerotop_64 /\
+   D27 = Q27 :> zerotop_64 /\
+   D28 = Q28 :> zerotop_64 /\
+   D29 = Q29 :> zerotop_64 /\
+   D30 = Q30 :> zerotop_64 /\
+   D31 = Q31 :> zerotop_64`,
+  REWRITE_TAC(!component_alias_thms));;
+
+let READ_SHIFTEDREG_CLAUSES = prove
+ (`read (Shiftedreg Rn LSL n) s = word_shl (read Rn s) n /\
+   read (Shiftedreg Rn LSR n) s = word_ushr (read Rn s) n /\
+   read (Shiftedreg Rn ASR n) s = word_ishr (read Rn s) n /\
+   read (Shiftedreg Rn ROR n) s = word_ror (read Rn s) n`,
+  REWRITE_TAC[Shiftedreg_DEF; read; regshift_operation; ETA_AX]);;
+
+let READ_EXTENDEDREG_CLAUSES = prove
+ (`read (Extendedreg Rn UXTB) s = word_zx (word_zx (read Rn s):byte) /\
+   read (Extendedreg Rn UXTH) s = word_zx (word_zx (read Rn s):int16) /\
+   read (Extendedreg Rn UXTW) s = word_zx (word_zx (read Rn s):int32) /\
+   read (Extendedreg Rn UXTX) s = word_zx (word_zx (read Rn s):int64) /\
+   read (Extendedreg Rn SXTB) s = word_sx (word_zx (read Rn s):byte) /\
+   read (Extendedreg Rn SXTH) s = word_sx (word_zx (read Rn s):int16) /\
+   read (Extendedreg Rn SXTW) s = word_sx (word_zx (read Rn s):int32) /\
+   read (Extendedreg Rn SXTX) s = word_sx (word_zx (read Rn s):int64)`,
+  REWRITE_TAC[Extendedreg_DEF; read; extendreg_operation; ETA_AX]);;
+
+let READ_LANE_CLAUSES = prove
+ (`read (Rn :> LANE_B i) (s:armstate) =
+   word_duplicate(word_subword (read Rn s:int128) (8*i,8):byte) /\
+   read (Rn :> LANE_H i) (s:armstate) =
+   word_duplicate(word_subword (read Rn s:int128) (16*i,16):int16) /\
+   read (Rn :> LANE_S i) (s:armstate) =
+   word_duplicate(word_subword (read Rn s:int128) (32*i,32):int32) /\
+   read (Rn :> LANE_D i) (s:armstate) =
+   word_duplicate(word_subword (read Rn s:int128) (64*i,64):int64)`,
+  REWRITE_TAC[READ_COMPONENT_COMPOSE; LANE_B; LANE_H; LANE_S; LANE_D;
+              through; read]);;
+
+let ARM_EXEC_CONV =
+  let qth = prove(`bytes64 (word_add a (word 0)) = bytes64 a /\
+                   bytes128 (word_add b (word 0)) = bytes128 b`,
+                  REWRITE_TAC[WORD_ADD_0])
+  and rth = prove
+   (`word_add (x:(N)word) (iword (-- &n)) =
+     word_sub x (word n)`, CONV_TAC WORD_RULE) in
+  ((GEN_REWRITE_CONV I ARM_LOAD_STORE_CLAUSES THENC
+    REWRITE_CONV [offset_writesback; offset_writeback;
+                  no_offset; OFFSET_ADDRESS_CLAUSES] THENC
+    ONCE_DEPTH_CONV(EQT_INTRO o ORTHOGONAL_COMPONENTS_CONV) THENC
+    REWRITE_CONV[] THENC
+    ONCE_DEPTH_CONV(LAND_CONV DIMINDEX_CONV THENC NUM_DIV_CONV) THENC
+    GEN_REWRITE_CONV ONCE_DEPTH_CONV
+     [GSYM BYTES8_WBYTES; GSYM BYTES16_WBYTES;
+      GSYM BYTES32_WBYTES; GSYM BYTES64_WBYTES;
+      GSYM BYTES128_WBYTES; GSYM BYTES256_WBYTES] THENC
+    GEN_REWRITE_CONV ONCE_DEPTH_CONV [qth] THENC
+    GEN_REWRITE_CONV ONCE_DEPTH_CONV [rth] THENC
+    GEN_REWRITE_CONV ONCE_DEPTH_CONV [CONJUNCT2 SEQ_ID]) ORELSEC
+   (GEN_REWRITE_CONV I ARM_OPERATION_CLAUSES THENC
+    REWRITE_CONV [condition_semantics])) THENC
+  REWRITE_CONV[WREG_EXPAND_CLAUSES; DREG_EXPAND_CLAUSES] THENC
+  REWRITE_CONV[READ_RVALUE; ARM_ZERO_REGISTER;
+               ASSIGN_ZEROTOP_32; ASSIGN_ZEROTOP_64;
+               READ_ZEROTOP_32; WRITE_ZEROTOP_32;
+               READ_ZEROTOP_64; WRITE_ZEROTOP_64;
+               READ_SHIFTEDREG_CLAUSES; READ_EXTENDEDREG_CLAUSES;
+               READ_LANE_CLAUSES] THENC
+  DEPTH_CONV(WORD_NUM_RED_CONV ORELSEC WORD_WORD_OPERATION_CONV);;
+
+(* ------------------------------------------------------------------------- *)
+(* Additional proof support for SP restriction to "aligned 16".              *)
+(* ------------------------------------------------------------------------- *)
+
+let XREG_NE_SP = prove
+ (`~(X0 = SP) /\ ~(X1 = SP) /\ ~(X2 = SP) /\ ~(X3 = SP) /\ ~(X4 = SP) /\
+   ~(X5 = SP) /\ ~(X6 = SP) /\ ~(X7 = SP) /\ ~(X8 = SP) /\ ~(X9 = SP) /\
+   ~(X10 = SP) /\ ~(X11 = SP) /\ ~(X12 = SP) /\ ~(X13 = SP) /\ ~(X14 = SP) /\
+   ~(X15 = SP) /\ ~(X16 = SP) /\ ~(X17 = SP) /\ ~(X18 = SP) /\ ~(X19 = SP) /\
+   ~(X20 = SP) /\ ~(X21 = SP) /\ ~(X22 = SP) /\ ~(X23 = SP) /\ ~(X24 = SP) /\
+   ~(X25 = SP) /\ ~(X26 = SP) /\ ~(X27 = SP) /\ ~(X28 = SP) /\ ~(X29 = SP) /\
+   ~(X30 = SP)`,
+  REPEAT CONJ_TAC THEN DISCH_THEN(MP_TAC o MATCH_MP (MESON[]
+   `c = d
+    ==> !y z s. read c (write c y (write d z s)) =
+                read c (write d y (write c z s))`)) THEN
+  DISCH_THEN(MP_TAC o SPECL [`word 0:int64`; `word 1:int64`]) THEN
+  CONV_TAC(DEPTH_CONV COMPONENT_READ_OVER_WRITE_CONV) THEN
+  REWRITE_TAC[WORD_NE_10]);;
+
+(* ------------------------------------------------------------------------- *)
+(* Support for the "forward symbolic execution" proof style.                 *)
+(* ------------------------------------------------------------------------- *)
+
+let ARM_THM =
+  let pth = prove
+   (`read PC s = word pc ==> arm_decode s (word pc) instr ==>
+     (arm s s' <=> (PC := word (pc + 4) ,, instr) s s')`,
+    REPEAT STRIP_TAC THEN REWRITE_TAC [arm] THEN
+    ASM_REWRITE_TAC[GSYM WORD_ADD; arm_execute] THEN
+    ASM_MESON_TAC[arm_decode_unique]) in
+  (* pc_th: `|- ... = word <pc_expr>` *)
+  fun (execth2:thm option array) loaded_mc_th pc_th ->
+    let th = MATCH_MP pth pc_th in
+    let pc_ofs:int =
+      let pc_expr = snd (dest_comb (snd (dest_eq (concl pc_th)))) in
+      if is_var pc_expr then 0
+      else try
+        let pc_base,ofs = dest_binary "+" pc_expr in
+        dest_small_numeral ofs
+      with Failure _ ->
+        failwith ("ARM_THM: Cannot decompose PC expression: " ^ (string_of_term (concl pc_th))) in
+    let _ = if !arm_print_log then
+      let opt = option_get execth2.(pc_ofs) in
+      (* opt: |- forall ... aligned_bytes_loaded ..
+                 ==> arm_decode .. (arm_INST ..) *)
+      let t = snd (strip_forall (concl (opt))) in
+      let t = snd (dest_imp t) in
+      let term = snd (dest_comb t) in
+      Printf.printf "Instruction at `pc + %d (%#x)`: `%s`\n" pc_ofs pc_ofs
+          (string_of_term term)
+    in
+    MATCH_MP th (MATCH_MP (option_get execth2.(pc_ofs)) loaded_mc_th);;
+
+let ARM_ENSURES_SUBLEMMA_TAC =
+  ENSURES_SUBLEMMA_TAC o MATCH_MP aligned_bytes_loaded_update o CONJUNCT1;;
+
+let ARM_ENSURES_SUBSUBLEMMA_TAC =
+  ENSURES_SUBSUBLEMMA_TAC o
+  map (MATCH_MP aligned_bytes_loaded_update o CONJUNCT1);;
+
+(* returns true if t is `read PC <state>`. *)
+let is_read_pc = is_read_named_component "PC";;
+
+(* returns true if t is `read events <state>`. *)
+let is_read_events = is_read_named_component "events";;
+
+(*** decode_ths is an array from int offset i to
+ ***   Some `|- !s pc. aligned_bytes_loaded s pc *_mc
+ ***            ==> arm_decode s (word (pc+i)) (..inst..)`
+ *** .. if it is a valid byte sequence, or None otherwise.
+ ***)
+
+let ARM_CONV (decode_ths:thm option array) (ths:thm list) tm =
+  (* Find `read PC .. = ..` from ths (assumptions). *)
+  let pc_th = try find
+    (fun th -> (* do not use term_match because it is slow. *)
+      let c = concl th in
+      is_eq c && is_read_pc (fst (dest_eq c)))
+    ths with Failure _ -> failwith "ARM_CONV: can't find `read PC .. = ..` from ths" in
+
+  (* Find `aligned_bytes_loaded ..`. *)
+  let aligned_bytes_loaded_mc_ths:thm list =
+    (* Pick the _mc const from decode_ths, if decode_ths[0] != None, which is
+       likely to be true. *)
+    let the_mc:term option = option_bind decode_ths.(0)
+      (fun th ->
+        (* th is `forall .., bytes_loaded ... _mc ==> arm_decode ..`. *)
+        let t = concl th in
+        let bytes_loaded_term = fst (dest_imp (snd (strip_forall t))) in
+        let the_mc = last (snd (strip_comb bytes_loaded_term)) in
+        (* if _mc contains relocations, the_mc is `.._mc args`. In this
+           case, return None. *)
+        if is_const the_mc then Some the_mc else None) in
+    let aligned_bytes_loaded_tm = `aligned_bytes_loaded` in
+    let res = filter (fun th ->
+        let cc = concl th in is_comb cc && (
+        let c,args = strip_comb (concl th) in
+        c = aligned_bytes_loaded_tm &&
+          (the_mc = None || last args = option_get the_mc)))
+      ths in
+    if res = [] then failwith
+        ("ARM_CONV: can't find `aligned_bytes_loaded .. .. " ^
+          (if the_mc <> None then string_of_term (option_get the_mc) else "..")
+          ^ "` from ths")
+    else res in
+
+  let eth = try
+    tryfind (fun loaded_mc_th ->
+      GEN_REWRITE_CONV I [ARM_THM decode_ths loaded_mc_th pc_th] tm)
+      aligned_bytes_loaded_mc_ths
+    with Failure s ->
+      let pcstr = string_of_term (concl pc_th) in
+      failwith ("ARM_CONV: can't find aligned_bytes_loaded (pc: `" ^
+          pcstr ^ "`)") in
+ (K eth THENC
+  ONCE_DEPTH_CONV ARM_EXEC_CONV THENC
+  REWRITE_CONV[XREG_NE_SP; SEQ; condition_semantics] THENC
+  ALIGNED_WORD_CONV ths THENC
+  REWRITE_CONV[SEQ; condition_semantics] THENC
+  GEN_REWRITE_CONV ONCE_DEPTH_CONV [assign] THENC
+  REWRITE_CONV[] THENC
+  TOP_DEPTH_CONV COMPONENT_READ_OVER_WRITE_CONV THENC
+  GEN_REWRITE_CONV TOP_DEPTH_CONV [WRITE_RVALUE] THENC
+  ONCE_REWRITE_CONV [WORD_SUB_ADD] THENC
+  ONCE_DEPTH_CONV
+   (REWR_CONV (GSYM ADD_ASSOC) THENC RAND_CONV NUM_REDUCE_CONV) THENC
+  ONCE_DEPTH_CONV
+   (GEN_REWRITE_CONV I [GSYM WORD_ADD] THENC
+    GEN_REWRITE_CONV (RAND_CONV o TOP_DEPTH_CONV) [GSYM ADD_ASSOC] THENC
+    RAND_CONV NUM_REDUCE_CONV) THENC
+  TOP_DEPTH_CONV COMPONENT_WRITE_OVER_WRITE_CONV THENC
+  GEN_REWRITE_CONV (SUB_COMPONENTS_CONV o TOP_DEPTH_CONV) ths THENC
+  GEN_REWRITE_CONV TOP_DEPTH_CONV [WORD_VAL] THENC
+  ONCE_DEPTH_CONV WORD_PC_PLUS_CONV THENC
+  ONCE_DEPTH_CONV NORMALIZE_RELATIVE_ADDRESS_CONV THENC
+  ONCE_DEPTH_CONV NORMALIZE_RELATIVE_ADDRESS_CONV
+ ) tm;;
+
+let ARM_BASIC_STEP_TAC =
+  GEN_BASIC_STEP_TAC "ARM" `arm` `:armstate` ARM_CONV ALL_TAC;;
+
+let ARM_STEP_TAC (mc_length_th,decode_ths) (subths:thm list) sname
+      (store_inst_term_to: term ref option)
+      (strip_component_tac: thm_tactic) =
+  GEN_STEP_TAC ARM_BASIC_STEP_TAC ALL_TAC aligned_bytes_loaded_update
+    (fun _ _ -> ()) (mc_length_th,decode_ths) subths sname
+    store_inst_term_to strip_component_tac;;
+
+let ARM_VERBOSE_STEP_TAC =
+  GEN_VERBOSE_STEP_TAC ARM_STEP_TAC;;
+
+let ARM_VERBOSE_SUBSTEP_TAC =
+  GEN_VERBOSE_SUBSTEP_TAC ARM_STEP_TAC;;
+
+(* ------------------------------------------------------------------------- *)
+(* Throw away assumptions according to patterns.                             *)
+(* ------------------------------------------------------------------------- *)
+
+let DISCARD_FLAGS_TAC =
+  DISCARD_MATCHING_ASSUMPTIONS
+   [`read CF s = y`; `read ZF s = y`;
+    `read NF s = y`; `read VF s = y`];;
+
+let DISCARD_STATE_TAC =
+  GEN_DISCARD_STATE_TAC `:armstate`;;
+
+let DISCARD_OLDSTATE_TAC =
+  GEN_DISCARD_OLDSTATE_TAC `:armstate` arm_print_log;;
+
+(* ------------------------------------------------------------------------- *)
+(* More convenient stepping tactics, optionally with accumulation.           *)
+(* ------------------------------------------------------------------------- *)
+
+let ARM_SINGLE_STEP_TAC =
+  GEN_SINGLE_STEP_TAC ARM_VERBOSE_STEP_TAC DISCARD_OLDSTATE_TAC;;
+
+let ARM_VACCSTEP_TAC =
+  GEN_VACCSTEP_TAC ARM_VERBOSE_STEP_TAC;;
+
+let ARM_XACCSTEP_TAC =
+  GEN_XACCSTEP_TAC ARM_SINGLE_STEP_TAC;;
+
+(* ARM_GEN_ACCSTEP_TAC runs acc_preproc before ACCUMULATE_ARITH_TAC. This is
+   useful when the output goal of ARM_SINGLE_STEP_TAC needs additional rewrites
+   for accumulator to recognize it. *)
+let ARM_GEN_ACCSTEP_TAC =
+  GEN_ACCSTEP_TAC ARM_SINGLE_STEP_TAC;;
+
+let ARM_ACCSTEP_TAC th aflag s = ARM_GEN_ACCSTEP_TAC ALL_TAC th aflag s;;
+
+let ARM_VSTEPS_TAC =
+  GEN_VSTEPS_TAC ARM_VERBOSE_STEP_TAC;;
+
+let ARM_STEPS_TAC =
+  GEN_STEPS_TAC ARM_SINGLE_STEP_TAC;;
+
+let ARM_VACCSTEPS_TAC =
+  GEN_VACCSTEPS_TAC ARM_VACCSTEP_TAC;;
+
+let ARM_XACCSTEPS_TAC =
+  GEN_XACCSTEPS_TAC ARM_XACCSTEP_TAC;;
+
+(* ARM_GEN_ACCSTEPS_TAC runs acc_preproc before ACCUMULATE_ARITH_TAC.
+   acc_preproc is a function from string (which is a state name) to tactic. *)
+let ARM_GEN_ACCSTEPS_TAC =
+  GEN_ACCSTEPS_TAC ARM_GEN_ACCSTEP_TAC;;
+
+let ARM_ACCSTEPS_TAC th anums snums =
+  ARM_XACCSTEPS_TAC th [`SP`] anums snums;;
+
+let ARM_QUICKSTEP_TAC th pats =
+  let pats' =
+   [`nonoverlapping_modulo a b c`; `aligned_bytes_loaded a b c`;
+    `MAYCHANGE a b c`; `(a ,, b) c d`; `read PC s = x`] @ pats in
+  fun s -> time (ARM_VERBOSE_STEP_TAC th s) THEN
+           DISCARD_NONMATCHING_ASSUMPTIONS pats' THEN
+           DISCARD_OLDSTATE_TAC s THEN CLARIFY_TAC;;
+
+let ARM_QUICKSTEPS_TAC th pats snums =
+  MAP_EVERY (ARM_QUICKSTEP_TAC th pats) (statenames "s" snums);;
+
+let ARM_QUICKSIM_TAC execth pats snums =
+  REWRITE_TAC(!simulation_precanon_thms) THEN
+  ENSURES_INIT_TAC "s0" THEN ARM_QUICKSTEPS_TAC execth pats snums THEN
+  ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[] THEN
+  REWRITE_TAC[VAL_WORD_SUB_EQ_0] THEN ASM_REWRITE_TAC[];;
+
+(* ------------------------------------------------------------------------- *)
+(* More convenient wrappings of basic simulation flow.                       *)
+(* ------------------------------------------------------------------------- *)
+
+let ARM_SIM_TAC ?(preprocess_tac:tactic option) ?(canonicalize_pc_diff=true)
+    execth snums =
+  REWRITE_TAC(!simulation_precanon_thms) THEN
+  ENSURES_INIT_TAC "s0" THEN
+  (match preprocess_tac with Some t -> t | None -> ALL_TAC) THEN
+  ARM_STEPS_TAC execth snums THEN
+  ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[] THEN
+  (if canonicalize_pc_diff then
+    REWRITE_TAC[VAL_WORD_SUB_EQ_0] THEN ASM_REWRITE_TAC[]
+   else ALL_TAC);;
+
+let ARM_ACCSIM_TAC execth anums snums =
+  REWRITE_TAC(!simulation_precanon_thms) THEN
+  ENSURES_INIT_TAC "s0" THEN ARM_ACCSTEPS_TAC execth anums snums THEN
+  ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[] THEN
+  REWRITE_TAC[VAL_WORD_SUB_EQ_0] THEN ASM_REWRITE_TAC[];;
+
+(* ------------------------------------------------------------------------- *)
+(* Simulate through a lemma in ?- ensures step P Q C ==> eventually R s      *)
+(* ------------------------------------------------------------------------- *)
+
+let (ARM_BIGSTEP_TAC:(thm*thm option array)->string->tactic) =
+  GEN_BIGSTEP_TAC
+    "ARM" aligned_bytes_loaded_update DISCARD_OLDSTATE_TAC;;
+
+(* ------------------------------------------------------------------------- *)
+(* Go from |- aligned_bytes_loaded s (word pc) mc or the equivalent          *)
+(*         |- aligned_bytes_loaded s (word(pc + 0)) mc                       *)
+(* to      |- aligned_bytes_loaded s (word(pc + n)) mc'                      *)
+(* where mc' is an appropriate sublist of the list mc.                       *)
+(* ------------------------------------------------------------------------- *)
+
+let ALIGNED_BYTES_LOADED_OFFSET_RULE =
+  let pth = prove
+   (`aligned_bytes_loaded s (word(pc + n))
+      (CONS h0 (CONS h1 (CONS h2 (CONS h3 t))))
+     ==> aligned_bytes_loaded s (word(pc + n + 4)) t`,
+    ONCE_REWRITE_TAC[GSYM(REWRITE_CONV[APPEND] `APPEND [h0;h1;h2;h3] t`)] THEN
+    W(MP_TAC o PART_MATCH (lhand o rand)
+      aligned_bytes_loaded_append o lhand o snd) THEN
+    REWRITE_TAC[LENGTH; ARITH; DIVIDES_REFL] THEN SIMP_TAC[WORD_RULE
+     `word_add (word(pc + n)) (word 4) = word(pc + n + 4)`]) in
+  let rule4 = CONV_RULE (LAND_CONV(RAND_CONV(RAND_CONV NUM_ADD_CONV))) o
+              MATCH_MP pth in
+  let rec rule offset th =
+    if offset >= 4 then rule (offset - 4) (rule4 th)
+    else th in
+  fun n th ->
+    if n mod 4 <> 0 then
+    failwith "ALIGNED_BYTES_LOADED_OFFSET_RULE: offset not multiple of 4" else
+    try rule n (CONV_RULE (TRY_CONV TWEAK_PC_OFFSET_CONV) th)
+    with Failure _ ->
+      failwith "ALIGNED_BYTES_LOADED_OFFSET_RULE: code too short";;
+
+(* ------------------------------------------------------------------------- *)
+(* Prove |- aligned_bytes_loaded s wpc mc ==> aligned_bytes_loaded s wpc mc' *)
+(*  where  mc' is a sublist of mc, modulo arithmetic simplifications.        *)
+(* ------------------------------------------------------------------------- *)
+
+let ALIGNED_BYTES_LOADED_SUBLIST_RULE =
+  let prule = (PART_MATCH rand o prove)
+   (`(?r. l = APPEND t r)
+     ==> aligned_bytes_loaded s wpc l ==> aligned_bytes_loaded s wpc t`,
+    SIMP_TAC[LEFT_IMP_EXISTS_THM; aligned_bytes_loaded; bytes_loaded_append]) in
+  fun tm1 tm2 ->
+    let th = prule(mk_imp(tm1,tm2)) in
+    MP th (BYTELIST_SUBLIST_CONV(lhand(concl th)));;
+
+(* ------------------------------------------------------------------------- *)
+(* Given two machine code definitions of the form                            *)
+(* |- [forall pc, args1] mc1 pc args1 = [b1; ...; bn]                        *)
+(* |- [forall pc, args2] mc2 pc args2 = [b1; ...; bn]                        *)
+(* and an offset value, creates a theorem of the form                        *)
+(* |- aligned_bytes_loaded (word pc) (mc1 pc args1)                          *)
+(*    ==> aligned_bytes_loaded (word(pc + offset)) (mc2 s args2)             *)
+(* If the input theorems are not quantified, it's assumed that               *)
+(* the left-hand sides are already fully instantiated.                       *)
+(* ------------------------------------------------------------------------- *)
+
+let ALIGNED_BYTES_LOADED_SUBPROGRAM_RULE =
+  let abl_tm = `aligned_bytes_loaded s`
+  and wpc_tm = `word pc:int64`
+  and pc_tm = `pc:num`
+  and pcp_tm = `(+) (pc:num)`
+  and wd_tm = `word:num->int64`
+  and s_tm = `s:armstate` in
+  let topvars = [s_tm; pc_tm] in
+  fun mc1 mc2 offset ->
+    let nptm = mk_comb(pcp_tm,mk_small_numeral offset) in
+    let wnptm = mk_comb(wd_tm,nptm) in
+    let th1 = if is_forall(concl mc1) then SPEC_ALL(SPEC pc_tm mc1) else mc1
+    and th2 =
+      if is_forall(concl mc2) then
+      SPEC_ALL(SPEC nptm mc2) else mc2 in
+    let eth1 = AP_TERM (mk_comb(abl_tm,wpc_tm)) th1
+    and eth2 = AP_TERM (mk_comb(abl_tm,wnptm)) th2 in
+    let ath1 = UNDISCH(fst(EQ_IMP_RULE eth1)) in
+    let oth1 = ALIGNED_BYTES_LOADED_OFFSET_RULE offset ath1 in
+    let sth = ALIGNED_BYTES_LOADED_SUBLIST_RULE
+               (concl oth1) (rand(concl eth2)) in
+    let ith = DISCH_ALL(EQ_MP (SYM eth2) (MP sth oth1)) in
+    let avs = subtract (frees(concl ith)) topvars in
+    GENL (topvars @ avs) ith;;
+
+(* ------------------------------------------------------------------------- *)
+(* Simulate a subroutine, instantiating it from the state.                   *)
+(* ------------------------------------------------------------------------- *)
+
+let PC_PLUS_CONV =
+  GEN_REWRITE_CONV I [MESON[ADD_ASSOC]
+      `read PC s = word((pc + m) + n) <=>
+       read PC s = word(pc + m + n)`] THENC
+  funpow 3 RAND_CONV NUM_ADD_CONV;;
+
+let ARM_SUBROUTINE_SIM_TAC ?(is_safety_thm=false) =
+  let auxth = METIS[] `(a:(A)list) = b /\ LENGTH b = n ==> LENGTH a = n`
+  and len_tm = `LENGTH:((8)word)list->num` in
+  fun (machinecode,execth,offset,submachinecode,subth) ->
+    let subimpth =
+      try
+        ALIGNED_BYTES_LOADED_SUBPROGRAM_RULE machinecode submachinecode offset
+      with Failure _ ->
+        failwith ("ARM_SUBROUTINE_SIM_TAC: submachinecode (4th of input tuple) isn't " ^
+          "at offset " ^ (string_of_int offset) ^ " of machinecode (1st of tuple)") in
+    (* Replace 'LENGTH .._mc' with its actual constant. This frequently appears
+       at nonoverlapping criteria of subth. *)
+    let subth =
+      if is_const (fst (dest_eq (concl submachinecode))) then
+      let len_submc_th = LENGTH_CONV
+        (mk_comb (len_tm,snd (dest_eq (concl submachinecode)))) in
+      let main_th = MATCH_MP auxth (CONJ submachinecode len_submc_th) in
+      REWRITE_RULE[main_th] subth
+    else subth in
+    fun ilist0 n ->
+      let sname = "s"^string_of_int(n-1)
+      and sname' = "s"^string_of_int n in
+      let svar = mk_var(sname,`:armstate`)
+      and svar0 = mk_var("s",`:armstate`) in
+      let ilist = map (vsubst[svar,svar0]) ilist0 in
+      let subth_specl =
+        try SPECL ilist subth with Failure _ -> begin
+          (if (!arm_print_log) then
+            (Printf.printf "ilist and subth's forall vars do not match\n";
+            Printf.printf "ilist: [%s]\n" (end_itlist
+              (fun s s2 -> s ^ "; " ^ s2) (map string_of_term ilist));
+             Printf.printf "subth's forall vars: [%s]\n"
+                (end_itlist (fun s s2 -> s ^ "; " ^ s2)
+                  (map string_of_term (fst (strip_forall (concl subth)))))));
+          failwith "ARM_SUBROUTINE_SIM_TAC: subth vars don't not match ilist0"
+        end in
+      MP_TAC(TWEAK_PC_OFFSET subth_specl) THEN
+      ASM_REWRITE_TAC[C_ARGUMENTS; C_RETURN; SOME_FLAGS;
+                      MAYCHANGE_REGS_AND_FLAGS_PERMITTED_BY_ABI;
+                      MODIFIABLE_SIMD_REGS; MODIFIABLE_GPRS;
+                      MODIFIABLE_UPPER_SIMD_REGS; fst execth] THEN
+      REWRITE_TAC[ALLPAIRS; ALL; PAIRWISE; NONOVERLAPPING_CLAUSES] THEN
+      (if is_safety_thm then
+        (* Turn '(forall e_stack_spill. ..) ==> ...' to
+          'exists e_stack_spill. .. ==> ...' *)
+        ONCE_REWRITE_TAC[GSYM LEFT_EXISTS_IMP_THM] THEN
+        META_EXISTS_TAC
+       else ALL_TAC) THEN
+      (* at this point, there must be no universal quantification at LHS of
+        '==>' in conclusion. *)
+      (W (fun (_,w) ->
+        if is_forall (fst (dest_imp w)) then
+          PRINT_GOAL_TAC THEN
+          failwith ("Universal quantification still exists at LHS of '==>'. " ^
+              "Did you forget to pass ~is_safety_thm:true?")
+        else ALL_TAC)) THEN
+
+      TRY(ANTS_TAC THENL
+       [CONV_TAC(ONCE_DEPTH_CONV NORMALIZE_RELATIVE_ADDRESS_CONV) THEN
+        ALIGNED_WORD_TAC THEN REPEAT CONJ_TAC THEN
+        TRY(CONV_TAC(DEPTH_CONV WORD_NUM_RED_CONV) THEN NO_TAC) THEN
+        (NONOVERLAPPING_TAC ORELSE
+         DISJ1_TAC THEN NONOVERLAPPING_TAC ORELSE
+         DISJ2_TAC THEN NONOVERLAPPING_TAC);
+        ALL_TAC]) THEN
+      CONV_TAC(LAND_CONV(ONCE_DEPTH_CONV NORMALIZE_RELATIVE_ADDRESS_CONV)) THEN
+      CONV_TAC(LAND_CONV(ONCE_DEPTH_CONV PC_PLUS_CONV)) THEN
+      ASM_REWRITE_TAC[] THEN
+      ARM_BIGSTEP_TAC execth sname' THENL
+       [(* Precondition of subth *)
+        FIRST_X_ASSUM(MATCH_ACCEPT_TAC o MATCH_MP subimpth) ORELSE
+        (CONJ_TAC THENL [
+            FIRST_X_ASSUM(MATCH_ACCEPT_TAC o MATCH_MP subimpth);
+            ALL_TAC]) ORELSE
+        (PRINT_GOAL_TAC THEN FAIL_TAC
+          "Could not discharge precond (subgoal after ARM_BIGSTEP_TAC)");
+
+        RULE_ASSUM_TAC(CONV_RULE(TRY_CONV PC_PLUS_CONV))];;
+
+let ARM_SUBROUTINE_SIM_ABBREV_TAC tupper ilist0 =
+  let tac = ARM_SUBROUTINE_SIM_TAC tupper ilist0 in
+  fun comp0 abn n (asl,w) ->
+    let svar0 = mk_var("s",`:armstate`)
+    and svar0' = mk_var("s'",`:armstate`)
+    and svar = mk_var("s"^string_of_int(n-1),`:armstate`)
+    and svar' = mk_var("s"^string_of_int n,`:armstate`) in
+    let comp1 =
+      rand(concl(PURE_ONCE_REWRITE_CONV (map snd asl)
+        (vsubst[svar,svar0;svar',svar0'] comp0))) in
+    (tac n THEN
+     ABBREV_TAC(mk_eq(mk_var(abn,type_of comp1),comp1))) (asl,w);;
+
+(* ------------------------------------------------------------------------- *)
+(* Simulate a macro, generating subgoal from a template                      *)
+(* The state variable of template's postcondition must be 's'.               *)
+(* ------------------------------------------------------------------------- *)
+
+let ARM_MACRO_SIM_ABBREV_TAC =
+  let dest_pc tm =
+    match tm with
+      Comb(Const("word",_),Var("pc",_)) -> 0
+    | Comb(Const("word",_),Comb(Comb(Const("+",_),Var("pc",_)),n)) ->
+          dest_small_numeral n
+    | _ -> failwith "dest_pc"
+  and mk_pc =
+    let pat0 = `word pc:int64`
+    and patn = `word(pc + n):int64`
+    and pan = `n:num` in
+    fun n ->  if n = 0 then pat0
+              else vsubst[mk_small_numeral n,pan] patn
+  and grab_dest =
+    let pat = `read (memory :> bytes(p,8 * n)) s` in
+    fun th ->
+      let cortm = rand(body(lhand(repeat (snd o dest_imp) (concl th)))) in
+      let matched = find_terms (can (term_match [] pat)) cortm in
+      (* only consider state variable 's' of the postcondition *)
+      let matched = filter (fun t -> rand t = `s:armstate`) matched in
+      rator(hd(matched)) in
+  let get_statenpc =
+    let fils = can (term_match [] `read PC s = word n`) o concl o snd in
+    fun asl ->
+      let rips = concl(snd(find fils asl)) in
+      rand(lhand rips),dest_pc(rand rips) in
+  let simprule =
+    CONV_RULE (ONCE_DEPTH_CONV NORMALIZE_ADD_SUBTRACT_WORD_CONV) o
+    GEN_REWRITE_RULE ONCE_DEPTH_CONV
+     [WORD_RULE `word_add z (word 0):int64 = z`] in
+  fun mc ->
+    let execth = ARM_MK_EXEC_RULE mc in
+    fun codelen localvars template core_tac prep ilist ->
+      (* Rewrite 'LENGTH ..._mc = ..' *)
+      let _,template = dest_eq(concl(REWRITE_CONV[fst execth] template)) in
+      let main_tac (asl,w) =
+        let svp,pc = get_statenpc asl in
+        let gv = genvar(type_of svp) in
+        let n = int_of_string(implode(tl(explode(fst(dest_var svp))))) + 1 in
+        let svn = mk_var("s"^string_of_int n,`:armstate`) in
+        let pc' = pc + 4 * codelen in
+        let svs = svp::(mk_pc pc)::(mk_pc pc')::
+                  end_itlist (@) (map (C assoc localvars) ilist) in
+        let rawsg = simprule(SPECL svs (ASSUME template)) in
+        let asimprule = PURE_REWRITE_RULE
+         (filter (is_eq o concl) (map snd asl)) in
+        let insig = (asimprule o simprule o asimprule) rawsg in
+        let subg = mk_forall(gv,vsubst[gv,svp] (concl(simprule insig))) in
+        let avoids = itlist (union o thm_frees o snd) asl (frees w) in
+        let abv = mk_primed_var avoids (mk_var(hd ilist,`:num`)) in
+        (SUBGOAL_THEN subg MP_TAC THENL
+         [X_GEN_TAC gv THEN POP_ASSUM_LIST(K ALL_TAC) THEN
+          REPEAT(GEN_TAC THEN DISCH_THEN(K ALL_TAC o SYM)) THEN
+          core_tac THEN NO_TAC;
+          ALL_TAC] THEN
+         DISCH_THEN(MP_TAC o SPEC svp) THEN
+         GEN_REWRITE_TAC (REPEATC o LAND_CONV) [FORALL_UNWIND_THM1] THEN
+         DISCH_THEN(fun subth ->
+          let dest = grab_dest subth in
+          ARM_SUBROUTINE_SIM_TAC(mc,execth,0,mc,subth) [] n THEN
+          let dest_abbrev_eq = mk_eq(abv,mk_comb(dest,svn)) in
+          let _ = if !arm_print_log then
+            Printf.printf "ARM_MACRO_SIM_ABBREV_TAC: destination buffer is `%s`"
+              (string_of_term dest_abbrev_eq)
+          in
+          ABBREV_TAC (dest_abbrev_eq)))
+        (asl,w) in
+     fun (asl,w) ->
+        let sv,_ = get_statenpc asl in
+        let n = int_of_string(implode(tl(explode(fst(dest_var sv))))) in
+        (ARM_STEPS_TAC execth ((n+1)--(n+prep)) THEN main_tac) (asl,w);;
+
+(* ------------------------------------------------------------------------- *)
+(* Refinment of ENSURES_PRESERVED_TAC for special D register handling.       *)
+(* ------------------------------------------------------------------------- *)
+
+let ENSURES_PRESERVED_DREG_TAC =
+  let pth = prove
+   (`read (Q8 :> bottomhalf) s = word_zx(read Q8 s) /\
+     read (Q9 :> bottomhalf) s = word_zx (read Q9 s) /\
+     read (Q10 :> bottomhalf) s = word_zx (read Q10 s) /\
+     read (Q11 :> bottomhalf) s = word_zx (read Q11 s) /\
+     read (Q12 :> bottomhalf) s = word_zx (read Q12 s) /\
+     read (Q13 :> bottomhalf) s = word_zx (read Q13 s) /\
+     read (Q14 :> bottomhalf) s = word_zx (read Q14 s) /\
+     read (Q15 :> bottomhalf) s = word_zx (read Q15 s)`,
+    CONV_TAC(ONCE_DEPTH_CONV COMPONENT_CANON_CONV) THEN
+    REWRITE_TAC[READ_COMPONENT_COMPOSE; READ_ZEROTOP_64;
+                bottomhalf; subword; read; FUN_EQ_THM] THEN
+    REWRITE_TAC[word_zx; DIV_1; EXP; WORD_MOD_SIZE])
+  and sth = prove
+   (`valid_component c /\
+     R ,, R = R /\
+     MAYCHANGE [c :> tophalf] subsumed R /\
+     ensures step P Q (R ,, MAYCHANGE [c])
+     ==> ensures step P Q (R ,, MAYCHANGE [c :> bottomhalf])`,
+    REWRITE_TAC[MAYCHANGE_SING] THEN
+    REPEAT(DISCH_THEN(CONJUNCTS_THEN2 ASSUME_TAC MP_TAC)) THEN
+    MATCH_MP_TAC(REWRITE_RULE[IMP_CONJ] ENSURES_FRAME_SUBSUMED) THEN
+    FIRST_ASSUM(fun th ->
+      GEN_REWRITE_TAC (RAND_CONV o ONCE_DEPTH_CONV) [SYM th]) THEN
+    REWRITE_TAC[GSYM SEQ_ASSOC] THEN MATCH_MP_TAC SUBSUMED_SEQ THEN
+    REWRITE_TAC[SUBSUMED_REFL] THEN
+    FIRST_ASSUM(SUBST1_TAC o SYM o MATCH_MP ASSIGNS_TOPHALF_BOTTOMHALF) THEN
+    MATCH_MP_TAC SUBSUMED_SEQ THEN ASM_REWRITE_TAC[SUBSUMED_REFL]) in
+  let alist = zip [`D8`; `D9`; `D10`; `D11`; `D12`; `D13`; `D14`; `D15`]
+                  (map (lhand o lhand o concl) (CONJUNCTS pth)) in
+  let dregs = map fst alist in
+  fun pname ctm ->
+    if not (mem ctm dregs) then ENSURES_PRESERVED_TAC pname ctm else
+    let ctm' = assoc ctm alist in
+    ENSURES_PRESERVED_TAC pname ctm' THEN REWRITE_TAC[pth] THEN
+    TRY(REWRITE_TAC[SEQ_ASSOC] THEN MATCH_MP_TAC sth THEN
+        CONJ_TAC THENL [CONV_TAC VALID_COMPONENT_CONV; ALL_TAC] THEN
+        CONJ_TAC THENL [MAYCHANGE_IDEMPOT_TAC; ALL_TAC] THEN
+        CONJ_TAC THENL [SUBSUMED_MAYCHANGE_TAC THEN NO_TAC; ALL_TAC] THEN
+        REWRITE_TAC[GSYM SEQ_ASSOC]);;
+
+(* ------------------------------------------------------------------------- *)
+(* Fix up call/return boilerplate given core correctness.                    *)
+(* ------------------------------------------------------------------------- *)
+
+(* The return address, event trace, and stack pointer are recovered from
+   initial-state equations during ABI promotion. Require their names to be
+   explicit outer quantifiers before the promotion tactic reorders them. *)
+let check_forallvars_tac:tactic =
+  GEN_CHECK_FORALLVARS_TAC
+    [`read X30 s`; `read events s`; `read SP s`];;
+
+(* Useful lemmas *)
+let swap_forall = prove
+   (`(forall (e_stack_spill:A) (y:B). P e_stack_spill y) <=>
+     (forall y e_stack_spill. P e_stack_spill y)`,
+    MESON_TAC[SWAP_FORALL_THM]) and
+  swap_forall3 = prove
+   (`(forall (e_stack_spill:A) (y:B) (z:C). P e_stack_spill y z) <=>
+     (forall y e_stack_spill z. P e_stack_spill y z)`,
+    MESON_TAC[SUBROUTINE_SWAP_FORALL3]) and
+  append_lemma = prove
+   (`(forall (e:(A)list). P e) <=>
+     (forall e_stack_spill e. P (APPEND e_stack_spill e))`,
+    MESON_TAC[SUBROUTINE_APPEND_FORALL]) and
+  mono2lemma = prove
+   (`(!(x:A). (!(y:B). P x y) ==> (!(z:C). Q x z))
+     ==> (!x y. P x y) ==> (!x z. Q x z)`,
+    MESON_TAC[SUBROUTINE_MONO_FORALL2]) and
+  mono3lemma = prove
+   (`(!(x:A). (!(y:B) (y':C). P x y y') ==>
+      (!(z:D) (z':E). Q x z z'))
+     ==> (!x y y'. P x y y') ==> (!x z z'. Q x z z')`,
+    MESON_TAC[SUBROUTINE_MONO_FORALL3]) and
+  append_e2_nil = prove
+   (`forall (e:(uarch_event)list) e2.
+       e = APPEND e2 e <=> APPEND [] e = APPEND e2 e`,
+    MESON_TAC[SUBROUTINE_APPEND_PREFIX_NIL]);;
+
+let ARM_ADD_RETURN_NOSTACK_TAC =
+  fun execth coreth ->
+    let is_coreth_safety = is_exists (concl coreth) in
+
+    (* is_coreth_safety must hold iff the current goalstate is
+       `exists ...`. *)
+    (fun (asl,w) ->
+      if is_coreth_safety <> (is_exists w) then
+        failwith "coreth must be `exists ..` iff the conclusion is"
+      else ALL_TAC (asl,w)) THEN
+
+    (if is_coreth_safety then
+      ASSUME_CALLEE_SAFETY_TAC coreth "" THEN
+      (* f_events of the current goal will have additional args, compared to
+         f_events of coreth: returnaddress and stackpointer. This will be
+         filled in later. *)
+      META_EXISTS_TAC THEN
+      check_forallvars_tac THEN
+      FIRST_X_ASSUM (fun th -> MP_TAC (ONCE_REWRITE_RULE[append_lemma]th)) THEN
+      (* push e_stack_spill to the innermost var of forall *)
+      REPEAT(CONV_TAC (LAND_CONV (ONCE_REWRITE_CONV[swap_forall])) THEN
+             MATCH_MP_TAC mono2lemma THEN GEN_TAC)
+     else
+      (* th is functional correctness *)
+      check_forallvars_tac THEN
+      MP_TAC coreth THEN
+      REPEAT(MATCH_MP_TAC MONO_FORALL THEN GEN_TAC)) THEN
+
+    REWRITE_TAC[MAYCHANGE_REGS_AND_FLAGS_PERMITTED_BY_ABI;
+                MODIFIABLE_SIMD_REGS; MODIFIABLE_GPRS;
+                MODIFIABLE_UPPER_SIMD_REGS] THEN
+    REWRITE_TAC[NONOVERLAPPING_CLAUSES; ALLPAIRS; ALL] THEN
+    REWRITE_TAC[C_ARGUMENTS; C_RETURN; SOME_FLAGS;
+      MAYCHANGE_REGS_AND_FLAGS_PERMITTED_BY_ABI; MODIFIABLE_SIMD_REGS;
+      MODIFIABLE_GPRS; MODIFIABLE_UPPER_SIMD_REGS] THEN
+    DISCH_THEN(fun th ->
+      REPEAT GEN_TAC THEN
+      TRY(DISCH_THEN(REPEAT_TCL CONJUNCTS_THEN ASSUME_TAC)) THEN
+      MP_TAC th) THEN
+    ASM_REWRITE_TAC[] THEN
+    (if is_coreth_safety then
+      (* Finally turn '(forall e_stack_spill. ..) ==> ...' to
+         'exists e_stack_spill. .. ==> ...' *)
+      ONCE_REWRITE_TAC[GSYM LEFT_EXISTS_IMP_THM] THEN
+      META_EXISTS_TAC
+     else
+      ALL_TAC) THEN
+    TRY(ANTS_TAC THENL
+     [REPEAT CONJ_TAC THEN ALIGNED_WORD_TAC THEN
+      TRY DISJ2_TAC THEN NONOVERLAPPING_TAC;
+      ALL_TAC]) THEN
+    DISCH_THEN (fun th ->
+      REWRITE_TAC(!simulation_precanon_thms) THEN
+      ENSURES_INIT_TAC "s0" THEN MP_TAC th) THEN
+    ARM_BIGSTEP_TAC execth "s1" THEN
+    (* ARM_BIGSTEP_TAC may leave an additional subgoal about precondition.
+       If the precondition is about event trace, solve here. *)
+    (if is_coreth_safety then
+      TRY
+        (TRY (GEN_REWRITE_TAC I [append_e2_nil]) THEN
+        TRY (CONV_TAC (LAND_CONV CONS_TO_APPEND_CONV)) THEN
+        BINOP_TAC THENL [ UNIFY_REFL_TAC; REFL_TAC ] THEN
+        NO_TAC)
+    else ALL_TAC) THEN
+    ARM_STEPS_TAC execth [2] THEN (* the ret *)
+    ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[];;
+
+(* ------------------------------------------------------------------------- *)
+(* Version with register save/restore and stack adjustment.                  *)
+(* ------------------------------------------------------------------------- *)
+
+let ARM_ADD_RETURN_STACK_TAC =
+  let sp_tm = `SP` and x30_tm = `X30`
+  and dqd_thm = WORD_BLAST `(word_zx:int128->int64)(word_zx(x:int64)) = x` in
+
+  fun ?(pre_post_nsteps:(int*int) option) execth coreth reglist stackoff ->
+    let is_coreth_safety = is_exists (concl coreth) in
+    let regs = dest_list reglist in
+
+    (* is_coreth_safety must hold iff the current goalstate is
+       `exists ...`. *)
+    (fun (asl,w) ->
+      if is_coreth_safety <> (is_exists w) then
+        failwith "coreth must be `exists ..` iff the conclusion is"
+      else ALL_TAC (asl,w)) THEN
+
+    (* The number of steps that ARM_STEPS will take before/after BIGSTEP. *)
+    let pre_n,post_n =
+      match pre_post_nsteps with
+      | Some (a,b) -> a,b
+      | None ->
+        let n = let n0 = (length regs + 1 (* +1 if len is odd *)) / 2 in
+                    if 16 * n0 = stackoff then n0 else n0 + 1 in
+        (n,n) in
+    (if is_coreth_safety then
+      ASSUME_CALLEE_SAFETY_TAC coreth "" THEN
+      (* f_events of the current goal will have additional args, compared to
+         f_events of coreth: returnaddress and stackpointer. This will be
+         filled in later. *)
+      META_EXISTS_TAC THEN
+      check_forallvars_tac THEN
+      FIRST_X_ASSUM (fun th -> MP_TAC (ONCE_REWRITE_RULE[append_lemma]th))
+     else
+      (* th is functional correctness *)
+      check_forallvars_tac THEN
+      MP_TAC coreth) THEN
+
+    REWRITE_TAC [MAYCHANGE_REGS_AND_FLAGS_PERMITTED_BY_ABI;
+                 MODIFIABLE_SIMD_REGS; MODIFIABLE_GPRS;
+                 MODIFIABLE_UPPER_SIMD_REGS;
+                 fst execth (* Length of mc *)] THEN
+    (if is_coreth_safety then
+      (* push e_stack_spill to the innermost var of forall *)
+      REPEAT(CONV_TAC (LAND_CONV (ONCE_REWRITE_CONV[swap_forall])) THEN
+             MATCH_MP_TAC mono3lemma THEN GEN_TAC) THEN
+      CONV_TAC (LAND_CONV (ONCE_REWRITE_CONV[swap_forall]))
+     else
+      REPEAT(MATCH_MP_TAC mono2lemma THEN GEN_TAC)) THEN
+    (if vfree_in sp_tm (concl coreth) then
+      DISCH_THEN(fun th -> WORD_FORALL_OFFSET_TAC stackoff THEN MP_TAC th) THEN
+      MATCH_MP_TAC MONO_FORALL THEN GEN_TAC
+     else
+      MATCH_MP_TAC MONO_FORALL THEN GEN_TAC THEN
+      DISCH_THEN(fun th ->
+        WORD_FORALL_OFFSET_TAC stackoff THEN MP_TAC th)) THEN
+    REWRITE_TAC[NONOVERLAPPING_CLAUSES; PAIRWISE; ALLPAIRS; ALL] THEN
+    REWRITE_TAC[C_ARGUMENTS; C_RETURN; SOME_FLAGS] THEN
+    DISCH_THEN(fun th ->
+      REPEAT GEN_TAC THEN
+      TRY(DISCH_THEN(REPEAT_TCL CONJUNCTS_THEN ASSUME_TAC)) THEN
+      MP_TAC th) THEN
+    ASM_REWRITE_TAC[] THEN
+    (if is_coreth_safety then
+      (* Finally turn '(forall e_stack_spill. ..) ==> ...' to
+         'exists e_stack_spill. .. ==> ...' *)
+      ONCE_REWRITE_TAC[GSYM LEFT_EXISTS_IMP_THM] THEN
+      META_EXISTS_TAC
+     else
+      ALL_TAC) THEN
+    TRY(ANTS_TAC THENL
+     [REPEAT CONJ_TAC THEN ALIGNED_WORD_TAC THEN
+      TRY DISJ2_TAC THEN NONOVERLAPPING_TAC;
+      ALL_TAC]) THEN
+    DISCH_THEN(fun th ->
+      ((ENSURES_EXISTING_PRESERVED_TAC sp_tm THEN
+       (if mem x30_tm regs then ENSURES_EXISTING_PRESERVED_TAC x30_tm
+        else ALL_TAC) THEN
+       MAP_EVERY (fun c -> ENSURES_PRESERVED_DREG_TAC
+                             ("init_"^fst(dest_const c)) c)
+                 (subtract regs [x30_tm]))
+        ORELSE
+        FAIL_TAC ("callee-save registers are still in MAYCHANGE, or " ^
+          "`read X30 s` does not exist in precondition")) THEN
+      REWRITE_TAC(!simulation_precanon_thms) THEN ENSURES_INIT_TAC "s0" THEN
+      ARM_STEPS_TAC execth (1--pre_n) THEN
+      MP_TAC th) THEN
+    ARM_BIGSTEP_TAC execth ("s"^string_of_int(pre_n+1)) THEN
+    (* ARM_BIGSTEP_TAC may leave an additional subgoal about precondition.
+       If the precondition is about event trace, solve here. *)
+    (if is_coreth_safety then
+      TRY
+        (TRY (GEN_REWRITE_TAC I [append_e2_nil]) THEN
+         TRY (CONV_TAC (LAND_CONV CONS_TO_APPEND_CONV)) THEN
+         BINOP_TAC THENL [ UNIFY_REFL_TAC; REFL_TAC ] THEN
+         NO_TAC)
+     else ALL_TAC) THEN
+    REWRITE_TAC(!simulation_precanon_thms) THEN
+    ARM_STEPS_TAC execth ((pre_n+2)--(pre_n+post_n+2)) THEN
+    ENSURES_FINAL_STATE_TAC THEN ASM_REWRITE_TAC[] THEN
+    REWRITE_TAC[dqd_thm];;
+
+(* ------------------------------------------------------------------------- *)
+(* Version with a program defined as SUB_LIST of a bigger program.           *)
+(* ------------------------------------------------------------------------- *)
+
+(* Given a goal which is
+  `!<vars> pc.
+      <assumptions on program_mc, vars and pc>
+      ==> ensures arm
+        (\s. aligned_bytes_loaded s (word pc) program_mc /\
+             read PC s = word (pc + begin_ofs) /\ <precondition>(s))
+        (\s. read PC s = word (pc + (begin_ofs + n) /\
+             <postcondition>(s))
+        (<maychange>)`,
+  prove it using core_th which is
+    `|- !<vars> pc.
+      <assumptions on program_sub_mc, vars and pc>
+      ==> ensures arm
+        (\s. aligned_bytes_loaded s (word pc) program_sub_mc /\
+             read PC s = word pc /\ <precondition>(s))
+        (\s. read PC s = word (pc + n) /\
+             <postcondition>(s))
+        (<maychange>)`
+  where program_sub_mc is SUB_LIST(begin_ofs,n) program_mc.
+  length_ths contains `|- LENGTH program_mc = ...` and that of program_sub_mc. *)
+let ARM_SUB_LIST_OF_MC_TAC (core_th:thm) (program_sub_mc_def:thm)
+    (length_ths:thm list): tactic =
+  let is_coreth_safety = is_exists (concl core_th) in
+  let begin_ofs,n =
+    let rhs = snd (dest_eq (concl program_sub_mc_def)) in
+    dest_pair (rand(rator rhs)) in
+  let f_events_callee = ref `T` in
+
+    (* is_coreth_safety must hold iff the current goalstate is
+       `exists ...`. *)
+  (fun (asl,w) ->
+    if is_coreth_safety <> (is_exists w) then
+      failwith "coreth must be `exists ..` iff the conclusion is"
+    else ALL_TAC (asl,w)) THEN
+
+  (if is_coreth_safety then
+    ASSUME_CALLEE_SAFETY_TAC core_th "" THEN
+    META_EXISTS_TAC THEN
+    FIRST_X_ASSUM MP_TAC
+    else
+    (* th is functional correctness *)
+    MP_TAC core_th) THEN
+
+  W (fun (asl,w) ->
+    let core_th_vars =
+      let xs = fst (strip_forall ((snd o dest_imp) w)) in
+      if List.exists (fun t -> t = `pc:num`) xs
+      then
+        List.map
+          (fun t -> if t = `pc:num` then mk_binary "+" (t,begin_ofs) else t) xs
+      else
+        let xs,pc = butlast xs, last xs in
+        xs @ [mk_binary "+" (pc,begin_ofs)] in
+
+    if !arm_print_log then begin
+      Printf.printf "ARM_SUB_LIST_OF_MC_TAC: begin_ofs: %s, n: %s\n"
+        (string_of_term begin_ofs) (string_of_term n);
+      Printf.printf "\tvars: %s\n"
+        (String.concat "," (map string_of_term core_th_vars))
+    end else ();
+    DISCH_THEN (fun core_th ->
+      REPEAT STRIP_TAC THEN MP_TAC (ISPECL core_th_vars core_th)) THEN
+    (* Prove antecedent of core_th *)
+    ANTS_TAC THENL [
+      (REPEAT (POP_ASSUM MP_TAC) THEN
+      REWRITE_TAC(length_ths @ [ALL;NONOVERLAPPING_CLAUSES]) THEN
+      REPEAT STRIP_TAC THEN
+      ASM_REWRITE_TAC[] THEN NONOVERLAPPING_TAC) ORELSE ALL_TAC;
+      (* Leave it to user *)
+
+      MATCH_MP_TAC ENSURES_SUBLEMMA_THM THEN
+      REWRITE_TAC[] THEN
+      REPEAT CONJ_TAC THENL [
+        REPEAT STRIP_TAC THEN ASM_REWRITE_TAC[ADD_0] THEN
+        REWRITE_TAC[program_sub_mc_def;WORD_ADD] THEN
+        IMP_REWRITE_TAC(CONJUNCTS ALIGNED_BYTES_LOADED_SUB_LIST) THEN
+        CONV_TAC NUM_DIVIDES_CONV;
+
+        SUBSUMED_MAYCHANGE_TAC;
+
+        (if is_coreth_safety then
+          REPEAT GEN_TAC THEN STRIP_TAC THEN
+          REPEAT CONJ_TAC THEN TRY (ASM_METIS_TAC[ADD_ASSOC;ADD_0]) THEN
+
+          (* exists e2.
+              read events s' = APPEND e2 e /\
+              e2 = f_events x z pc /\
+              memaccess_inbounds e2 [x,72; z,72] [z,72] *)
+          X_META_EXISTS_TAC `e2':(uarch_event)list` THEN
+          REPEAT CONJ_TAC THENL [
+            FIRST_X_ASSUM (UNIFY_ACCEPT_TAC [`e2':(uarch_event)list`]);
+            ASM_REWRITE_TAC[] THEN UNIFY_REFL_TAC;
+            FIRST_X_ASSUM MATCH_ACCEPT_TAC
+          ]
+        else
+          MESON_TAC[ADD_ASSOC;ADD_0] ORELSE
+          FAIL_TAC ("Could not prove the third precondition of " ^
+                  "ENSURES_SUBLEMMA_THM " ^
+                  "`(!s s'. P s /\ Q' s' /\ R' s s' ==> Q s')`"))
+      ]
+    ]);;
+
+(* ------------------------------------------------------------------------- *)
+(* Handling more general branch targets                                      *)
+(* ------------------------------------------------------------------------- *)
+
+let BL_TARGET_CONV =
+  let pth = prove
+   (`pc < 0x8000000 /\ tgt < 0x8000000 /\ 4 divides pc /\ 4 divides tgt ==>
+     word_add (word pc) (word_sx (word (val (iword
+      ((&tgt - &pc) div &4):26 word) * 4):28 word)):int64 = word tgt`,
+    STRIP_TAC THEN SUBGOAL_THEN
+    `word (val (iword ((&tgt - &pc) div &4):26 word) * 4) =
+      iword (&tgt - &pc):28 word` (fun th ->
+      IMP_REWRITE_TAC [
+        th; word_sx; IVAL_IWORD; WORD_VAL; WORD_IWORD; IWORD_IVAL;
+        GSYM IWORD_INT_ADD; INT_SUB_ADD2] THEN
+      CONV_TAC (ONCE_DEPTH_CONV DIMINDEX_CONV THENC
+        NUM_REDUCE_CONV THENC INT_REDUCE_CONV) THEN ASM_ARITH_TAC) THEN
+    let arith = ARITH_RULE `~(&2 = &0:int) /\ ~(&4 = &0:int)` in
+    SUBGOAL_THEN `&tgt - &pc = ((&tgt - &pc) div &4) * &4` (fun th ->
+      CONV_TAC (RAND_CONV (ONCE_REWRITE_CONV [th]))) THENL
+     [REPEAT (POP_ASSUM
+        (SUBST1_TAC o SYM o REWRITE_RULE [DIVIDES_DIV_MULT])) THEN
+      IMP_REWRITE_TAC [GSYM INT_OF_NUM_MUL; GSYM INT_SUB_RDISTRIB;
+        INT_DIV_MUL; arith]; ALL_TAC] THEN
+    REWRITE_TAC [iword; VAL_WORD] THEN AP_TERM_TAC THEN
+    CONV_TAC (ONCE_DEPTH_CONV DIMINDEX_CONV) THEN
+    IMP_REWRITE_TAC [GSYM INT_OF_NUM_EQ; INT_OF_NUM_OF_INT;
+      GSYM INT_OF_NUM_MUL; GSYM INT_OF_NUM_REM; GSYM INT_OF_NUM_POW;
+      INT_REM_REM; INT_REM_POS; INT_POW_EQ_0; INT_REM_MUL_REM;
+      INT_POW_LE; INT_POS; arith;
+      ARITH_RULE `&2:int pow 28 = &4 * &2 pow 26`;
+      INT_DIV_MUL; INT_REM_MUL; INT_ADD_RID; INT_MUL_SYM])
+
+  and pth2 = METIS [aligned_bytes_loaded_word]
+   `aligned_bytes_loaded s (word pc) v ==> 4 divides pc` in
+
+  fun asl ->
+    let rec prover = function
+    | Comb(Comb(Const("/\\",_),a),b) -> CONJ (prover a) (prover b)
+    | Comb(Comb(Const("num_divides",_),_),
+        Comb(Comb(Const("+",_),_),_)) as tm ->
+      let th = PART_MATCH rand DIVIDES_ADD tm in
+      MP th (prover (lhand (concl th)))
+    | Comb(Comb(Const("num_divides",_),_),n) as tm when is_numeral n ->
+      EQT_ELIM (NUM_DIVIDES_CONV tm)
+    | Comb(Comb(Const("num_divides",_),_),pc) ->
+      let pth' = INST [pc,`pc:num`] pth2
+      and lconsts = frees pc in
+      let tm' = lhand (concl pth') in
+      tryfind (fun h ->
+        MP (INSTANTIATE (term_match lconsts tm' (concl h)) pth') h) asl
+    | Comb(Comb(Const("<",_),pc),_) as tm ->
+      let pc = repeat lhand pc in
+      tryfind (fun h ->
+        match concl h with
+        | Comb(Comb(Const("<",_),pc'),_)
+        | Comb(Comb(Const("<=",_),pc'),_) when pc' = pc ->
+          MP (ARITH_RULE (list_mk_comb (`==>`, [concl h; tm]))) h
+        | _ -> fail ()) asl
+    | t -> failwith ("BL_TARGET_TAC " ^ string_of_term t) in
+    fun tm ->
+      let th = PART_MATCH (lhs o rand) pth tm in
+      MP th (prover (lhand (concl th)));;
+
+let BL_TARGET_TAC =
+  ASSUM_LIST (CONV_TAC o CHANGED_CONV o ONCE_DEPTH_CONV o BL_TARGET_CONV) THEN
+  REWRITE_TAC [];;
+
+(* ------------------------------------------------------------------------- *)
+(* Handling PC-relative offsets (ADRP + ADD, which is ADRL pseudo-instr)     *)
+(* ------------------------------------------------------------------------- *)
+
+let adrp_within_bounds = new_definition (
+  `adrp_within_bounds (x:int64) (pc:int64) =
+    let xhi = word_subword x (12,54):(54)word in
+    let pchi = word_subword pc (12,54):(54)word in
+    // -2^20 <= xhi - pchi < 2^20
+    (word_uge xhi pchi /\ word_ult (word_sub xhi pchi) (word (2 EXP 20))) \/
+    (word_ult xhi pchi /\ word_ule (word_sub pchi xhi) (word (2 EXP 20)))`);;
+
+let ADRP_ADD_FOLD = prove(`forall (pc:int64) (x:int64).
+  adrp_within_bounds x pc
+  ==>
+  word_add
+    (word_add
+        (word_and pc (word 0xFFFFFFFFFFFFF000))
+        (word_sx
+            (word_join
+                (word_join
+                    (word_subword
+                        (word_sub
+                            (word_and x (word 0xFFFFFFFFFFFFF000))
+                            (word_and pc (word 0xFFFFFFFFFFFFF000)):(64)word)
+                        (14,19):(19)word)
+                    (word_subword
+                        (word_sub
+                            (word_and x (word 0xFFFFFFFFFFFFF000))
+                            (word_and pc (word 0xFFFFFFFFFFFFF000)):(64)word)
+                        (12,2):(2)word)
+                    :(21)word)
+                (word 0:(12)word)
+            :(33)word)
+        :(64)word)
+    )
+    (word (val (word_subword x (0,12):(12)word)):(64)word)
+    = x`,
+
+  REWRITE_TAC[adrp_within_bounds] THEN
+  BITBLAST_TAC);;
+
+(* ========================================================================= *)
+(* Lifting a theorem about BTI-trimmed code to the full code carrying its    *)
+(* leading `BTI c` landing pad.  Arm counterpart of the x86 ADD_IBT_RULE.    *)
+(* `bti c` = 0xd503245f, i.e. bytes 95 36 3 213 little-endian.               *)
+(*                                                                           *)
+(* Naming: BTI names the Arm instruction (cf. arm_BTI); IBT names this       *)
+(* machinery and the build it selects (cf. the NO_IBT flag and the _NOIBT_   *)
+(* theorem suffix), matching the x86 originals.                              *)
+(* ========================================================================= *)
+
+(* Decode table for the landing pad: the instruction at pc is arm_BTI.  The  *)
+(* wrap theorem is generic in `mc`, so ARM_MK_EXEC_RULE cannot be used; this *)
+(* supplies the single entry ARM_SIM_TAC needs to step the pad.              *)
+let ARM_BTI_DECODE = prove
+ (`!s pc. aligned_bytes_loaded s (word pc)
+            (APPEND [word 95; word 36; word 3; word 213] mc)
+          ==> arm_decode s (word pc) arm_BTI`,
+  let dth = match (snd(ARM_MK_EXEC_RULE
+      (REFL `[word 95; word 36; word 3; word 213]:byte list`))).(0) with
+    | Some t -> t | None -> failwith "no decode at offset 0" in
+  REPEAT GEN_TAC THEN
+  DISCH_THEN(MP_TAC o MATCH_MP aligned_bytes_loaded_append_left) THEN
+  REWRITE_TAC[dth]);;
+
+(* The loaded-code half of the split: `[bti c] ++ mc` at pc gives `mc` at    *)
+(* pc+4, which is the inner theorem's precondition.  A lemma rather than an  *)
+(* inline rewrite because aligned_bytes_loaded_append is guarded by          *)
+(* `4 divides LENGTH l1` (x86's bytes_loaded_append is unconditional).       *)
+let ARM_BTI_LOADED_SPLIT = prove
+ (`!s pc. aligned_bytes_loaded s (word pc)
+            (APPEND [word 95; word 36; word 3; word 213] mc)
+          ==> aligned_bytes_loaded s (word (pc + 4)) mc`,
+  SUBGOAL_THEN `4 divides LENGTH [word 95:byte; word 36; word 3; word 213]`
+    (fun th -> REWRITE_TAC[MATCH_MP aligned_bytes_loaded_append th]) THENL
+  [ REWRITE_TAC[LENGTH] THEN CONV_TAC NUM_DIVIDES_CONV; ALL_TAC] THEN
+  REWRITE_TAC[LENGTH] THEN CONV_TAC NUM_REDUCE_CONV THEN
+  REWRITE_TAC[WORD_ADD] THEN MESON_TAC[]);;
+
+(* The lift itself: given an `ensures` for `mc` at pc+4, conclude one for    *)
+(* `[bti c] ++ mc` at pc. Proved by widening the frame to MAYCHANGE [PC] ,,  *)
+(* R (the pad writes PC), splitting the execution at pc+4 with               *)
+(* ENSURES_TRANS, and simulating the one pad instruction. The three side     *)
+(* conditions are discharged by ARM_IBT_WRAP_TAC.                            *)
+let ARM_IBT_WRAP_THM = prove
+ (`R ,, R = R /\ MAYCHANGE [PC] subsumed R /\
+   (!s y. P(write PC y s) <=> P s) /\
+   ensures arm
+    (\s. aligned_bytes_loaded s (word (pc + 4)) mc /\
+         read PC s = word (pc + 4) /\ P s) Q R
+   ==> ensures arm
+        (\s. aligned_bytes_loaded s (word pc)
+               (APPEND [word 95; word 36; word 3; word 213] mc) /\
+             read PC s = word pc /\ P s) Q R`,
+  let execlen =
+    REWRITE_CONV[LENGTH_APPEND; LENGTH; ARITH]
+     `LENGTH(APPEND [word 95:byte; word 36; word 3; word 213] mc)` in
+  let execth = (execlen,[|Some ARM_BTI_DECODE; None; None; None|]) in
+  REPEAT STRIP_TAC THEN MATCH_MP_TAC ENSURES_FRAME_SUBSUMED THEN
+  EXISTS_TAC `(MAYCHANGE [PC] ,, R):armstate->armstate->bool` THEN
+  ASM_SIMP_TAC[SUBSUMED_FOR_SEQ; SUBSUMED_REFL] THEN
+  MATCH_MP_TAC ENSURES_TRANS THEN
+  EXISTS_TAC `\s. aligned_bytes_loaded s (word (pc + 4)) mc /\
+                  read PC s = word (pc + 4) /\ P s` THEN
+  ASM_REWRITE_TAC[] THEN ARM_SIM_TAC execth [1] THEN CONJ_TAC THENL
+   [FIRST_X_ASSUM(MP_TAC o MATCH_MP ARM_BTI_LOADED_SPLIT) THEN REWRITE_TAC[];
+    FIRST_X_ASSUM(MP_TAC o GEN_REWRITE_RULE
+      (RATOR_CONV o RATOR_CONV) [MAYCHANGE_SING]) THEN
+    REWRITE_TAC[ASSIGNS; assign] THEN ASM_MESON_TAC[]]);;
+
+(* If the goal is `exists f_events. ..`, instantiate f_events from the one   *)
+(* in `th_noexists`, with pc replaced by pc + 4. Term surgery only, so this  *)
+(* is the x86 WITNESS_F_EVENTS_TAC unchanged.                                *)
+let ARM_WITNESS_F_EVENTS_TAC (th_noexists:thm): tactic =
+  W (fun (asl,w) ->
+    if not (is_exists w) then ALL_TAC else
+    let f_events_term = find_term (fun t ->
+      is_comb t && name_of(fst(strip_comb t)) = "f_events")
+      (concl th_noexists) in
+    let f_events,args = strip_comb f_events_term in
+    let new_argdecls,new_args = unzip (map (fun t ->
+      if is_var t && name_of t = "pc" then (t,mk_binary "+" (t,`4`))
+      else let newvar = genvar(type_of t) in (newvar,newvar)) args) in
+    let new_f_events = list_mk_abs
+      (new_argdecls,list_mk_comb(f_events,new_args)) in
+    EXISTS_TAC new_f_events);;
+
+(* Strip a leading `exists f_events.` from `th`, instantiate the goal's      *)
+(* existential to match, and run [k] on the body. Correctness theorems (no   *)
+(* leading `exists`) go straight to [k].                                     *)
+let ARM_ADD_IBT_OPEN_EXISTS th (k:thm->tactic): tactic =
+  if is_exists (concl th) then
+    MP_TAC th THEN STRIP_TAC THEN
+    FIRST_X_ASSUM (fun th_noexists ->
+      ARM_WITNESS_F_EVENTS_TAC th_noexists THEN k th_noexists)
+  else
+    k th;;
+
+(* `extra` supplies the definitions of any state predicate appearing in the  *)
+(* precondition.  Obligation (3) below needs `write PC` to be visibly inert  *)
+(* on the precondition, and COMPONENT_READ_OVER_WRITE_CONV cannot see inside *)
+(* an opaque constant: `Pred args (write PC y s)` would never reduce to      *)
+(* `Pred args s`, so REFL_TAC would fail.                                    *)
+let ARM_IBT_WRAP_TAC ?(extra:thm list = []) (discharge_inner:tactic): tactic =
+  MATCH_MP_TAC ARM_IBT_WRAP_THM THEN REPEAT CONJ_TAC THENL [
+    (* (1) the frame is idempotent *)
+    MAYCHANGE_IDEMPOT_TAC;
+    (* (2) the frame permits the pad writing PC *)
+    SUBSUMED_MAYCHANGE_TAC;
+    (* (3) writing PC leaves the precondition alone *)
+    REPEAT GEN_TAC THEN
+    REWRITE_TAC(extra @ [C_ARGUMENTS; C_RETURN; aligned_bytes_loaded;
+                         bytes_loaded; SOME_FLAGS]) THEN
+    REWRITE_TAC(!simulation_precanon_thms) THEN
+    CONV_TAC(TOP_DEPTH_CONV COMPONENT_READ_OVER_WRITE_CONV) THEN REFL_TAC;
+    (* (4) caller-supplied: the inner `ensures` at pc+4 *)
+    discharge_inner ];;
+
+(* Proves the full-code goal from the trimmed-code theorem: re-express `mc`  *)
+(* as `APPEND [bti c] tmc`, respecialise the theorem with pc -> pc+4, repair *)
+(* the nonoverlapping hypotheses for the 4-byte-longer code region, then     *)
+(* apply ARM_IBT_WRAP_TAC.                                                   *)
+let ARM_ADD_IBT_TAC =
+  let tweak = subst[`pc + 4`,`pc:num`]
+  and EXPAND_TRIMMED_RULE =
+    let pth = prove
+     (`CONS (a:byte) (CONS b (CONS c (CONS d l))) = APPEND [a;b;c;d] l`,
+      REWRITE_TAC[APPEND]) in
+    fun fullmc trimc ->
+     GEN_REWRITE_RULE (RAND_CONV o RAND_CONV) [GSYM trimc]
+     (GEN_REWRITE_RULE RAND_CONV [pth] fullmc) in
+  fun ?(extra:thm list = []) fullmc trimc th ->
+    let expth = EXPAND_TRIMMED_RULE fullmc trimc in
+    ARM_ADD_IBT_OPEN_EXISTS th (fun th_inner ->
+      MP_TAC th_inner THEN
+      DISCH_THEN (fun th -> W(fun (asl,w) ->
+        let avs = fst(strip_forall w) in
+        MAP_EVERY X_GEN_TAC avs THEN
+        MP_TAC(SPECL (map tweak avs) th))) THEN
+      REWRITE_TAC(!simulation_precanon_thms) THEN
+      (* PAIRWISE as well as ALL/ALLPAIRS: several Arm _SUBROUTINE_CORRECT   *)
+      (* statements put the code region inside a PAIRWISE list, and the      *)
+      (* MONO_AND splitting below cannot reach through an unexpanded         *)
+      (* PAIRWISE. SOME_FLAGS and the MODIFIABLE_* lists are new_definition  *)
+      (* constants that MAYCHANGE_CANON_CONV does not unfold, so a frame     *)
+      (* mentioning them would leave obligations 1 and 2 stuck.              *)
+      REWRITE_TAC[C_ARGUMENTS; C_RETURN; ALL; ALLPAIRS; PAIRWISE;
+                  MAYCHANGE_REGS_AND_FLAGS_PERMITTED_BY_ABI; SOME_FLAGS;
+                  MODIFIABLE_SIMD_REGS; MODIFIABLE_UPPER_SIMD_REGS;
+                  MODIFIABLE_GPRS] THEN
+      TRY(MATCH_MP_TAC MONO_IMP THEN CONJ_TAC THENL
+       [REPEAT(REWRITE_TAC[] THEN
+               ((MATCH_MP_TAC MONO_AND THEN CONJ_TAC) ORELSE
+                (MATCH_MP_TAC MONO_OR THEN CONJ_TAC))) THEN
+        REWRITE_TAC[expth; LENGTH; ARITH; LENGTH_APPEND] THEN
+        REWRITE_TAC[NONOVERLAPPING_CLAUSES] THEN
+        MATCH_MP_TAC(ONCE_REWRITE_RULE [IMP_CONJ_ALT]
+          NONOVERLAPPING_MODULO_SUBREGIONS) THEN
+        REWRITE_TAC[CONTAINED_MODULO_REFL; LE_REFL] THEN
+        MATCH_MP_TAC CONTAINED_MODULO_SIMPLE THEN ARITH_TAC;
+        ALL_TAC]) THEN
+      DISCH_TAC THEN REWRITE_TAC[expth; GSYM APPEND_ASSOC] THEN
+      ARM_IBT_WRAP_TAC ~extra
+        (FIRST_X_ASSUM ACCEPT_TAC ORELSE
+         (FIRST_X_ASSUM MP_TAC THEN
+          REWRITE_TAC[LENGTH_APPEND] THEN
+          CONV_TAC (ONCE_DEPTH_CONV LENGTH_CONV) THEN
+          ASM_REWRITE_TAC[ADD_ASSOC] THEN NO_TAC)));;
+
+(* Entry point.  Takes the two machine-code definitions and a theorem about  *)
+(* the trimmed one, and returns the same theorem restated over the full      *)
+(* code. Nothing is re-proved: the lift adds a single simulated instruction. *)
+let ARM_ADD_IBT_RULE ?(extra:thm list = []) fullmc trimc th =
+  let mc = lhs(concl fullmc) and tmc = lhs(concl trimc) in
+  (* Build the full-code goal from the trimmed-code theorem. As well as      *)
+  (* swapping tmc for mc, every code-region size written as a NUMERAL must   *)
+  (* grow by 4: `nonoverlapping (word pc,0xe0) X` describes the trimmed      *)
+  (* code, and the full code is one instruction longer. Statements that      *)
+  (* write `LENGTH foo_tmc` instead need no adjustment -- the substitution   *)
+  (* turns them into `LENGTH foo_mc`, which is already the larger value.     *)
+  (* Mirrors the `adjust` in x86's ADD_IBT_RULE.                             *)
+  let rec adjust tm =
+    match tm with
+      Comb(Comb(Const(",",_),Comb(Const("word",_),Var("pc",_))) as rat,off)
+          when is_numeral off ->
+        mk_comb(rat,mk_numeral(num 4 +/ dest_numeral off))
+    | Comb(s,t) -> mk_comb(adjust s,adjust t)
+    | Abs(x,t) -> mk_abs(x,adjust t)
+    | _ -> if tm = tmc then mc else tm in
+  prove(adjust (concl th), ARM_ADD_IBT_TAC ~extra fullmc trimc th);;
+
