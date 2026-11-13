@@ -1,3 +1,9 @@
+## Unreleased
+
+- The unauthenticated ciphers: AES-CBC (`AesCbcEncryptingKey`,
+  `AesCbcDecryptingKey`, `CbcIv`), AES-CTR (`AesCtr`), and ChaCha20
+  (`ChaCha20`), sized by `CipherAlgorithm`.
+
 ## 0.1.0
 
 - rind's AEADs, digests, HMAC, HKDF, PBKDF2, key agreement, signatures,
