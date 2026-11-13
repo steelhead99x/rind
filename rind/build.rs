@@ -8,7 +8,10 @@
 //! for an earlier core, such as ARMv6's `arm-unknown-linux-gnueabihf` or
 //! ARMv5TE's `arm-linux-androideabi`, gets the portable backend too, and so
 //! does a microcontroller (M-profile) target such as `thumbv7em-none-eabihf`,
-//! which has no ARM state or NEON for that assembly to run in.
+//! which has no ARM state or NEON for that assembly to run in. A bare-metal
+//! x86_64 or aarch64 target (`target_os = "none"`, such as
+//! `x86_64-unknown-none`) gets the portable backend as well: those backends
+//! detect CPU features through std, which such a target lacks.
 //! `--cfg rind_portable` forces it anywhere, so CI tests it on x86_64 without
 //! emulation; it is for testing, not for shipping.
 //!
@@ -35,8 +38,9 @@ fn main() {
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
     let forced = env::var_os("CARGO_CFG_RIND_PORTABLE").is_some();
+    let bare_metal = env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "none");
     let backend = match arch.as_str() {
-        "x86_64" | "aarch64" if little && !forced => arch.as_str(),
+        "x86_64" | "aarch64" if little && !forced && !bare_metal => arch.as_str(),
         "arm" if little && !forced && armv7_or_later() && !m_profile() => "arm",
         _ => "portable",
     };
