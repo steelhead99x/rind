@@ -31,6 +31,13 @@ pub(crate) fn declassify(value: *mut u8, len: usize) {
     rind_ct_binsec_public(value, len);
 }
 
+/// A public length: `max` when run, and every length up to `max` at once
+/// under BINSEC, which then explores the path each takes.
+#[inline]
+pub(crate) fn length(max: usize) -> usize {
+    rind_ct_binsec_length(max)
+}
+
 // The symbols `admin/ct-binsec` finds. Each does nothing when run, but
 // differently, so that no two are folded into one.
 
@@ -56,6 +63,12 @@ extern "C" fn rind_ct_binsec_secret(value: *mut u8, len: usize) {
 #[inline(never)]
 extern "C" fn rind_ct_binsec_public(value: *mut u8, len: usize) {
     core::hint::black_box((value, len, 4u8));
+}
+
+#[unsafe(no_mangle)]
+#[inline(never)]
+extern "C" fn rind_ct_binsec_length(max: usize) -> usize {
+    core::hint::black_box(max)
 }
 
 #[cfg(test)]
