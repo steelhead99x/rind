@@ -176,8 +176,8 @@ files Graviola wrote keep their `Written for Graviola by ...` header. The
 (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause`. The
 adapter crates copy nothing under another license, so they stay
 `Apache-2.0 OR ISC OR MIT-0`.
-rind-ring runs ring's own tests, which keep ring's licenses and stay out of
-the published crate.
+rind-ring runs ring's own tests, and rind-aws-lc-rs aws-lc-rs's, which keep
+their sources' licenses and stay out of the published crates.
 
 A change that copies code from a new source, or moves an algorithm to a
 different one, updates this table and [LICENSE] in the same PR.
