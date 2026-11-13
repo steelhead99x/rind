@@ -454,6 +454,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
 dependencies = [
  "hybrid-array",
+ "zeroize",
 ]
 
 [[package]]
@@ -1288,6 +1289,7 @@ dependencies = [
  "const-oid 0.10.2",
  "crypto-common 0.2.2",
  "ctutils",
+ "zeroize",
 ]
 
 [[package]]
@@ -3144,6 +3146,45 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
+name = "matter-cert"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4952b3fc9ef028781bea73ddb3ce4ceeb9b408f0e25d3160a76513efb06d5c01"
+dependencies = [
+ "bitflags",
+ "der 0.7.10",
+ "matter-codec",
+ "ring",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "matter-codec"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8abffdf066b9d8e10f5c68796c5d2dad27a728d40206ac983391dffed3f3ccb0"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "matter-crypto"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "466d8f4e5a26d47ecba82ee83d3fbe1405a3053dd37db2fdde56ca5a6a2602bf"
+dependencies = [
+ "aes 0.9.4",
+ "ccm",
+ "matter-cert",
+ "matter-codec",
+ "p256 0.14.0",
+ "ring",
+ "subtle",
+ "thiserror 2.0.21",
+ "zeroize",
+]
+
+[[package]]
 name = "md-5"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3642,6 +3683,49 @@ checksum = "30d5b2194ed13191c1999ae0704b7839fb18384fa22e49b57eeaa97d79ce40da"
 dependencies = [
  "libc",
  "winapi",
+]
+
+[[package]]
+name = "pakery-core"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb44dd31ee1e4efba330cb49a1867812ab6cce7c5d650c12238b610b8750c7a4"
+dependencies = [
+ "pkg-config",
+ "rand_core 0.10.1",
+ "rustversion",
+ "subtle",
+ "zeroize",
+ "zeroize_derive",
+]
+
+[[package]]
+name = "pakery-crypto"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48f27010d725662c3ebc16678db85739b67590f7b847b3fe75ee0e9805100a47"
+dependencies = [
+ "digest 0.11.3",
+ "hkdf 0.13.0",
+ "hmac 0.13.0",
+ "p256 0.14.0",
+ "pakery-core",
+ "rand_core 0.10.1",
+ "sha2 0.11.1",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "pakery-spake2plus"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cc5b0ab63faeb66b6ad1e152f2322baf04756f89dbfbf67ab3ad20410b48bf7"
+dependencies = [
+ "pakery-core",
+ "rand_core 0.10.1",
+ "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -4329,12 +4413,15 @@ dependencies = [
  "libcrux-macros 0.0.4",
  "libcrux-poly1305 0.0.7",
  "libcrux-sha2 0.0.9",
+ "matter-crypto",
  "p256 0.13.2",
  "p256 0.14.0",
  "p384 0.13.1",
  "p384 0.14.0",
  "p521 0.13.3",
  "p521 0.14.0",
+ "pakery-crypto",
+ "pakery-spake2plus",
  "proptest",
  "rand_core 0.6.4",
  "serde",
