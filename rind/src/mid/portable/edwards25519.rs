@@ -171,14 +171,19 @@ impl Scalar {
 
     /// Whether this scalar is zero. The answer is public.
     pub(crate) fn is_zero(&self) -> bool {
-        low::ct::into_public(self.0 == curve25519_dalek::Scalar::ZERO)
+        // dalek 5.0.0's `==` is `ct_eq().into()`. Declassify the choice before
+        // that conversion.
+        let equal = self.0.ct_eq(&curve25519_dalek::Scalar::ZERO);
+        bool::from(low::ct::into_public(equal))
     }
 
     /// `1 / self mod L`, or `None` for zero, which has no inverse.
     ///
     /// Whether `self` is zero is public; the value stays secret.
     pub(crate) fn invert(&self) -> Option<Self> {
-        let zero = low::ct::into_public(self.0 == curve25519_dalek::Scalar::ZERO);
+        // Same as `is_zero`: declassify the `Choice` before converting to `bool`.
+        let equal = self.0.ct_eq(&curve25519_dalek::Scalar::ZERO);
+        let zero = bool::from(low::ct::into_public(equal));
         (!zero).then(|| Self(self.0.invert()))
     }
 }

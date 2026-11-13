@@ -199,7 +199,6 @@ fn ed25519() {
     });
 }
 
-
 #[test]
 fn frost_deal() {
     use rind::frost::{ED25519_SHA512, P256_SHA256, RISTRETTO255_SHA512};
