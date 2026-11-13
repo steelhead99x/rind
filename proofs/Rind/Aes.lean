@@ -63,7 +63,7 @@ def aesBlockDecrypt (alg : Algorithm) (key block : List (BitVec 8)) : List (BitV
 
 /-- The key length `alg` takes, which rind's AES supports. -/
 def KeyLen (alg : Algorithm) (n : Nat) : Prop :=
-  (alg = .AES_128 ∧ n = 16) ∨ (alg = .AES_256 ∧ n = 32)
+  (alg = .AES_128 ∧ n = 16) ∨ (alg = .AES_192 ∧ n = 24) ∨ (alg = .AES_256 ∧ n = 32)
 
 /-! ## Bytes and lanes -/
 
