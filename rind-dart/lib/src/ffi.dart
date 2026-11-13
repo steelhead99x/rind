@@ -225,6 +225,141 @@ external int _randomizedNonceKeyOpen(
   int len,
 );
 
+// --- Ciphers ---
+
+@Native<_Free>(symbol: 'rind_dart_aes_cbc_encrypting_key_free')
+external void _aesCbcEncryptingKeyFree(Pointer<Void> key);
+final _aesCbcEncryptingKeyFinalizer = _finalizer(
+  Native.addressOf(_aesCbcEncryptingKeyFree),
+);
+
+@Native<IntPtr Function(Uint32, Pointer<Uint8>, Size, Pointer<Pointer<Void>>)>(
+  symbol: 'rind_dart_aes_cbc_encrypting_key_new',
+  isLeaf: true,
+)
+external int _aesCbcEncryptingKeyNew(
+  int algorithm,
+  Pointer<Uint8> key,
+  int keyLen,
+  Pointer<Pointer<Void>> out,
+);
+
+@Native<
+  IntPtr Function(
+    Pointer<Void>,
+    Pointer<Uint8>,
+    Size,
+    Uint32,
+    Pointer<Uint8>,
+    Size,
+    Size,
+  )
+>(symbol: 'rind_dart_aes_cbc_encrypt', isLeaf: true)
+external int _aesCbcEncrypt(
+  Pointer<Void> key,
+  Pointer<Uint8> iv,
+  int ivLen,
+  int pad,
+  Pointer<Uint8> inOut,
+  int inOutLen,
+  int len,
+);
+
+@Native<_Free>(symbol: 'rind_dart_aes_cbc_decrypting_key_free')
+external void _aesCbcDecryptingKeyFree(Pointer<Void> key);
+final _aesCbcDecryptingKeyFinalizer = _finalizer(
+  Native.addressOf(_aesCbcDecryptingKeyFree),
+);
+
+@Native<IntPtr Function(Uint32, Pointer<Uint8>, Size, Pointer<Pointer<Void>>)>(
+  symbol: 'rind_dart_aes_cbc_decrypting_key_new',
+  isLeaf: true,
+)
+external int _aesCbcDecryptingKeyNew(
+  int algorithm,
+  Pointer<Uint8> key,
+  int keyLen,
+  Pointer<Pointer<Void>> out,
+);
+
+@Native<
+  IntPtr Function(
+    Pointer<Void>,
+    Pointer<Uint8>,
+    Size,
+    Uint32,
+    Pointer<Uint8>,
+    Size,
+  )
+>(symbol: 'rind_dart_aes_cbc_decrypt', isLeaf: true)
+external int _aesCbcDecrypt(
+  Pointer<Void> key,
+  Pointer<Uint8> iv,
+  int ivLen,
+  int pad,
+  Pointer<Uint8> inOut,
+  int len,
+);
+
+@Native<_Free>(symbol: 'rind_dart_aes_ctr_free')
+external void _aesCtrFree(Pointer<Void> key);
+final _aesCtrFinalizer = _finalizer(Native.addressOf(_aesCtrFree));
+
+@Native<
+  IntPtr Function(Uint32, Pointer<Uint8>, Size, Uint32, Pointer<Pointer<Void>>)
+>(symbol: 'rind_dart_aes_ctr_new', isLeaf: true)
+external int _aesCtrNew(
+  int algorithm,
+  Pointer<Uint8> key,
+  int keyLen,
+  int counterBits,
+  Pointer<Pointer<Void>> out,
+);
+
+@Native<
+  IntPtr Function(Pointer<Void>, Pointer<Uint8>, Size, Pointer<Uint8>, Size)
+>(symbol: 'rind_dart_aes_ctr_apply_keystream', isLeaf: true)
+external int _aesCtrApplyKeystream(
+  Pointer<Void> key,
+  Pointer<Uint8> counterBlock,
+  int counterBlockLen,
+  Pointer<Uint8> inOut,
+  int len,
+);
+
+@Native<_Free>(symbol: 'rind_dart_chacha20_free')
+external void _chacha20Free(Pointer<Void> key);
+final _chacha20Finalizer = _finalizer(Native.addressOf(_chacha20Free));
+
+@Native<IntPtr Function(Pointer<Uint8>, Size, Pointer<Pointer<Void>>)>(
+  symbol: 'rind_dart_chacha20_new',
+  isLeaf: true,
+)
+external int _chacha20New(
+  Pointer<Uint8> key,
+  int keyLen,
+  Pointer<Pointer<Void>> out,
+);
+
+@Native<
+  IntPtr Function(
+    Pointer<Void>,
+    Pointer<Uint8>,
+    Size,
+    Uint32,
+    Pointer<Uint8>,
+    Size,
+  )
+>(symbol: 'rind_dart_chacha20_apply_keystream', isLeaf: true)
+external int _chacha20ApplyKeystream(
+  Pointer<Void> key,
+  Pointer<Uint8> nonce,
+  int nonceLen,
+  int counter,
+  Pointer<Uint8> inOut,
+  int len,
+);
+
 // --- Digests ---
 
 @Native<IntPtr Function(Uint32, Pointer<Uint8>, Size, Pointer<Uint8>, Size)>(
