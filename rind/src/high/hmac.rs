@@ -62,7 +62,13 @@ impl<H: Hash> HmacKey<H> {
     /// The tag of `message`, finished straight from the keyed states.
     pub(crate) fn sign(&self, message: &[u8]) -> Digest {
         let inner = self.inner.finish_with(message);
-        self.outer.finish_with(inner.as_ref())
+        // After a long inner SHA-256, the outer 32-byte hash stays on
+        // HACL* so a 16 KiB I-cache is not evicted between tags.
+        if H::State::finish_uses_long(message) {
+            self.outer.finish_with_after_long(inner.as_ref())
+        } else {
+            self.outer.finish_with(inner.as_ref())
+        }
     }
 
     /// Starts a tag computation for a message given in pieces.

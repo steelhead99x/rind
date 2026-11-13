@@ -43,6 +43,37 @@ impl Sha256State {
         crate::low::sha256_finish(&self.h, message, length)
     }
 
+    /// Like [`Self::finish_with`], but stays on the long compressor.
+    ///
+    /// Used for HMAC's outer hash after a long inner, so a 16 KiB I-cache
+    /// keeps HACL*'s SHA-256 body. On backends with no such split this is
+    /// `finish_with`.
+    pub(crate) fn finish_with_long(&self, message: &[u8]) -> [u8; Sha256Context::OUTPUT_SZ] {
+        #[cfg(rind_backend = "portable")]
+        {
+            let length = self.length(message.len());
+            Entry::assert_held();
+            crate::low::sha256_finish_long(&self.h, message, length)
+        }
+        #[cfg(not(rind_backend = "portable"))]
+        {
+            self.finish_with(message)
+        }
+    }
+
+    /// Whether [`Self::finish_with`] will use the long compressor for `message`.
+    pub(crate) fn finish_uses_long(message: &[u8]) -> bool {
+        #[cfg(rind_backend = "portable")]
+        {
+            crate::low::sha256_finish_uses_long(message)
+        }
+        #[cfg(not(rind_backend = "portable"))]
+        {
+            let _ = message;
+            false
+        }
+    }
+
     /// The padding's length field for the input so far followed by `more` bytes.
     fn length(&self, more: usize) -> [u8; 8] {
         const BLOCK_SZ: usize = Sha256Context::BLOCK_SZ;
@@ -390,6 +421,39 @@ mod tests {
         assert_eq!(&outer.finish(),
                    b"\x55\x7b\xfd\xd5\xef\xda\xfd\x63\x06\x5e\xb7\x98\x87\xde\x86\xdb\x54\xc3\xfe\xdf\x7b\xcc\xcb\x97\x08\xfa\x87\xf0\x11\x87\x61\xdc");
     }
+    #[test]
+    fn sha256_finish_long_matches_finish_with() {
+        // The long path is only a compressor choice; every length must
+        // match the ordinary finish, including HMAC's 32-byte outer hash.
+        let prefix = [0x5au8; 128];
+        let mut state = Sha256State::new();
+        state.update_blocks(&prefix);
+        for len in 0..=400 {
+            let message: Vec<u8> = (0..len).map(|i| i as u8).collect();
+            assert_eq!(
+                state.finish_with(&message),
+                state.finish_with_long(&message),
+                "{len} bytes after 128-byte prefix"
+            );
+            let fresh = Sha256State::new();
+            assert_eq!(
+                fresh.finish_with(&message),
+                fresh.finish_with_long(&message),
+                "{len} bytes from the initial state"
+            );
+        }
+        #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+        {
+            assert!(Sha256State::finish_uses_long(&[0u8; 320]));
+            assert!(!Sha256State::finish_uses_long(&[0u8; 256]));
+            assert!(!Sha256State::finish_uses_long(&[0u8; 32]));
+        }
+        #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+        {
+            assert!(!Sha256State::finish_uses_long(&[0u8; 320]));
+        }
+    }
+
     #[test]
     fn sha512_all_lengths() {
         let mut outer = Sha512Context::new();

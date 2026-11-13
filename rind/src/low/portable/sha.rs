@@ -15,6 +15,11 @@ pub(crate) use crate::low::generic::sha1::sha1_compress_blocks;
 /// blocks below it.
 const PIECE: usize = 1 << 31;
 
+/// Byte length at or below which 32-bit portable SHA-256 uses the rolled
+/// compressor. Shared by `sha256_compress_blocks` and `sha256_finish`.
+#[cfg(target_pointer_width = "32")]
+const SHORT: usize = 256;
+
 /// Compresses whole 64-byte `blocks` into `state`.
 pub(crate) fn sha256_compress_blocks(state: &mut [u32; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(64));
@@ -28,20 +33,21 @@ pub(crate) fn sha256_compress_blocks(state: &mut [u32; 8], blocks: &[u8]) {
     // and 0.68× at 16 KB. 64-bit portable always keeps HACL*.
     #[cfg(target_pointer_width = "32")]
     {
-        const SHORT: usize = 256;
         if blocks.len() <= SHORT {
             crate::low::generic::sha256::sha256_compress_blocks(state, blocks);
         } else {
-            for piece in blocks.chunks(PIECE) {
-                sha256_update_nblocks(piece.len() as u32, piece, state);
-            }
+            sha256_hacl_nblocks(state, blocks);
         }
     }
     #[cfg(target_pointer_width = "64")]
     {
-        for piece in blocks.chunks(PIECE) {
-            sha256_update_nblocks(piece.len() as u32, piece, state);
-        }
+        sha256_hacl_nblocks(state, blocks);
+    }
+}
+
+fn sha256_hacl_nblocks(state: &mut [u32; 8], blocks: &[u8]) {
+    for piece in blocks.chunks(PIECE) {
+        sha256_update_nblocks(piece.len() as u32, piece, state);
     }
 }
 
@@ -55,13 +61,71 @@ pub(crate) fn sha1_compress_padded(state: &mut [u32; 5], message: &[u8], length:
 }
 
 /// The digest of `state` followed by `message`, padded and closed by `length`.
+///
+/// On 32-bit targets, once the whole-block part of `message` is long enough
+/// to use HACL*, the padding stays on HACL* too. Switching to the 477-byte
+/// rolled loop after HACL*'s 12 KiB body evicts that body from a 16 KiB
+/// 8-way I-cache when the two functions' offsets in a 16 KiB page overlap,
+/// and the next call then refills 12 KiB from flash. HMAC's reused-key
+/// path (two `finish_with` calls per tag) is what showed this on the
+/// ESP32-S3: 13–14% slower at 1200–1350 B after a layout shift, with
+/// identical machine code.
 #[inline]
 pub(crate) fn sha256_finish(state: &[u32; 8], message: &[u8], length: [u8; 8]) -> [u8; 32] {
+    sha256_finish_on(state, message, length, false)
+}
+
+/// Like [`sha256_finish`], but uses HACL* even for a short `message`.
+///
+/// HMAC's outer hash is 32 bytes. After a long inner hash already brought
+/// HACL* into a 16 KiB I-cache, staying on it avoids evicting that body
+/// with the rolled loop before the next tag.
+#[inline]
+pub(crate) fn sha256_finish_long(state: &[u32; 8], message: &[u8], length: [u8; 8]) -> [u8; 32] {
+    sha256_finish_on(state, message, length, true)
+}
+
+/// Whether [`sha256_finish`] will use HACL* for `message` on this target.
+pub(crate) fn sha256_finish_uses_long(message: &[u8]) -> bool {
+    #[cfg(target_pointer_width = "32")]
+    {
+        let (blocks, _) = crate::low::split_tail::<64, 8>(message);
+        blocks.len() > SHORT
+    }
+    #[cfg(target_pointer_width = "64")]
+    {
+        let _ = message;
+        false
+    }
+}
+
+fn sha256_finish_on(
+    state: &[u32; 8],
+    message: &[u8],
+    length: [u8; 8],
+    force_long: bool,
+) -> [u8; 32] {
     let mut h = *state;
     let (blocks, rest) = crate::low::split_tail::<64, 8>(message);
-    sha256_compress_blocks(&mut h, blocks);
     let mut last = [[0u8; 64]; 2];
-    sha256_compress_blocks(&mut h, crate::low::pad(rest, length, &mut last));
+    let padded = crate::low::pad(rest, length, &mut last);
+
+    #[cfg(target_pointer_width = "32")]
+    {
+        if !force_long && blocks.len() <= SHORT {
+            crate::low::generic::sha256::sha256_compress_blocks(&mut h, blocks);
+            crate::low::generic::sha256::sha256_compress_blocks(&mut h, padded);
+        } else {
+            sha256_hacl_nblocks(&mut h, blocks);
+            sha256_hacl_nblocks(&mut h, padded);
+        }
+    }
+    #[cfg(target_pointer_width = "64")]
+    {
+        let _ = force_long;
+        sha256_hacl_nblocks(&mut h, blocks);
+        sha256_hacl_nblocks(&mut h, padded);
+    }
     crate::low::sha256_digest(&h)
 }
 

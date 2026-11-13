@@ -510,7 +510,7 @@ cfg_if::cfg_if! {
         };
         pub(crate) use portable::sha::{
             sha1_compress_blocks, sha1_compress_padded, sha256_compress_blocks, sha256_finish,
-            sha512_compress_blocks,
+            sha256_finish_long, sha256_finish_uses_long, sha512_compress_blocks,
         };
     } else {
         compile_error!("build.rs sets rind_backend");
