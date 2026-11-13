@@ -261,9 +261,7 @@ pub(super) fn sign<G: Group>(
         &G::scalar_mul(&G::scalar_mul(&lambda, &share), &challenge),
     );
     // The share is sent to the coordinator, so it is public from here.
-    let z = G::scalar_to_bytes(&z);
-    ct::public_slice(&z);
-    Ok(z)
+    Ok(ct::into_public(G::scalar_to_bytes(&z)))
 }
 
 #[cfg(test)]
@@ -386,19 +384,17 @@ fn shares_of<G: Group>(
         if G::scalar_is_zero(&y) {
             return Ok(None);
         }
-        let verifying = write_point::<G>(G::base(&y))?;
+        // The verifying share is published. The signing share stays secret.
+        let verifying = ct::into_public(write_point::<G>(G::base(&y))?);
         let mut id = [0u8; 32];
         id.copy_from_slice(&G::scalar_to_bytes(&x));
-        // The verifying share is published. The signing share stays secret.
-        ct::public_slice(&verifying);
         shares.push(ShareBytes {
             identifier: id,
             scalar: G::scalar_to_bytes(&y),
             verifying,
         });
     }
-    let group = write_point::<G>(G::base(&coefficients[0]))?;
-    ct::public_slice(&group);
+    let group = ct::into_public(write_point::<G>(G::base(&coefficients[0]))?);
     Ok(Some(Dealt { shares, group }))
 }
 
@@ -421,11 +417,9 @@ fn commit_from_random<G: Group>(
     if G::scalar_is_zero(&hiding) || G::scalar_is_zero(&binding) {
         return Ok(None);
     }
-    let hiding_commitment = write_point::<G>(G::base(&hiding))?;
-    let binding_commitment = write_point::<G>(G::base(&binding))?;
     // Commitments are sent to the coordinator. The nonces stay secret.
-    ct::public_slice(&hiding_commitment);
-    ct::public_slice(&binding_commitment);
+    let hiding_commitment = ct::into_public(write_point::<G>(G::base(&hiding))?);
+    let binding_commitment = ct::into_public(write_point::<G>(G::base(&binding))?);
     Ok(Some(NonceBytes {
         hiding: G::scalar_to_bytes(&hiding),
         binding: G::scalar_to_bytes(&binding),

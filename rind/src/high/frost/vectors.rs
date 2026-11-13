@@ -51,8 +51,7 @@ fn vector<G: Group>(name: &str) -> Vec<u8> {
     for share in file["inputs"]["participant_shares"].as_array().unwrap() {
         let identifier = share["identifier"].as_u64().unwrap() as usize;
         // The signing share stays secret. Declassify only this comparison with the vector.
-        let scalar = dealt.shares[identifier - 1].scalar;
-        ct::public_slice(&scalar);
+        let scalar = ct::into_public(dealt.shares[identifier - 1].scalar);
         assert_eq!(scalar, hex32(share["participant_share"].as_str().unwrap()));
     }
 
@@ -69,10 +68,8 @@ fn vector<G: Group>(name: &str) -> Vec<u8> {
         )
         .unwrap();
         // The nonces are secret. Declassify only this comparison with the vector.
-        let hiding = nonces.hiding;
-        let binding = nonces.binding;
-        ct::public_slice(&hiding);
-        ct::public_slice(&binding);
+        let hiding = ct::into_public(nonces.hiding);
+        let binding = ct::into_public(nonces.binding);
         assert_eq!(hiding, hex32(output["hiding_nonce"].as_str().unwrap()));
         assert_eq!(binding, hex32(output["binding_nonce"].as_str().unwrap()));
         assert_eq!(
@@ -235,9 +232,8 @@ fn encoding_vector(suite: &'static Suite, name: &str) {
             identifier_bytes::<Ristretto>(identifier)
         };
         let signing = SigningShare::from_bytes(suite, &id, min, max, &scalar).unwrap();
-        let encoded = signing.to_bytes();
         // from_bytes marks the input share secret. Declassify only this comparison.
-        ct::public_slice(&encoded);
+        let encoded = ct::into_public(signing.to_bytes());
         ct::public_slice(&scalar);
         assert_eq!(encoded, scalar);
         let element = dealt.shares[usize::from(identifier) - 1].verifying;
