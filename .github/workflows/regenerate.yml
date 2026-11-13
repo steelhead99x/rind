@@ -1,9 +1,10 @@
 name: regenerate
 
 # Re-runs every importer and generator at the upstream revision it pins and
-# fails on any difference from the committed code. Too slow for `just ci`, so
-# it runs nightly and on pull requests that change a generator, a pin, or the
-# flake that pins its tools.
+# fails on any difference from the committed code, or on an unlisted change in
+# rind's fork of s2n-bignum. Too slow for `just ci`, so it runs nightly and on
+# pull requests that change a generator, a pin, the fork, or the flake that
+# pins its tools.
 on:
   schedule:
     - cron: "0 18 * * *"
@@ -12,7 +13,7 @@ on:
     branches: [main]
     paths:
       - admin/**
-      - thirdparty/s2n-bignum
+      - thirdparty/s2n-bignum/**
       - flake.nix
       - flake.lock
       - .github/workflows/regenerate.yml
