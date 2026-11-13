@@ -245,9 +245,40 @@ fn redc(t: &mut [Limb], m: &[Limb], n0: Limb) {
 }
 
 /// `x += y * u`, returning the carry out of the top limb.
+///
+/// Four limbs at a time: the products do not depend on the carry, so they
+/// issue before the chain that adds them. The length is public. The shorter
+/// of the two slices is what a `zip` takes, so a length that is not a
+/// multiple of four stays correct.
+#[inline(always)]
 fn mul_add(x: &mut [Limb], y: &[Limb], u: Limb) -> Wide {
-    let mut carry = 0;
-    for (x, y) in x.iter_mut().zip(y) {
+    let mut carry: Wide = 0;
+    let uu = Wide::from(u);
+    let n = x.len().min(y.len());
+    let (xb, xr) = x[..n].as_chunks_mut::<4>();
+    let (yb, yr) = y[..n].as_chunks::<4>();
+    for (xb, yb) in xb.iter_mut().zip(yb) {
+        let p0 = uu.wrapping_mul(Wide::from(yb[0]));
+        let p1 = uu.wrapping_mul(Wide::from(yb[1]));
+        let p2 = uu.wrapping_mul(Wide::from(yb[2]));
+        let p3 = uu.wrapping_mul(Wide::from(yb[3]));
+        let s0 = p0.wrapping_add(Wide::from(xb[0])).wrapping_add(carry);
+        xb[0] = s0 as Limb;
+        let s1 = p1
+            .wrapping_add(Wide::from(xb[1]))
+            .wrapping_add(s0 >> Limb::BITS);
+        xb[1] = s1 as Limb;
+        let s2 = p2
+            .wrapping_add(Wide::from(xb[2]))
+            .wrapping_add(s1 >> Limb::BITS);
+        xb[2] = s2 as Limb;
+        let s3 = p3
+            .wrapping_add(Wide::from(xb[3]))
+            .wrapping_add(s2 >> Limb::BITS);
+        xb[3] = s3 as Limb;
+        carry = s3 >> Limb::BITS;
+    }
+    for (x, y) in xr.iter_mut().zip(yr) {
         let t = mul_add_limb(u, *y, *x, carry);
         *x = t as Limb;
         carry = t >> Limb::BITS;

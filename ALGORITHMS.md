@@ -385,9 +385,11 @@ otherwise), and the rest of the arithmetic in rind's portable Rust. The
 portable backend runs it all in that Rust, its Montgomery products by
 rind's loop (Koç, Acar, and Kaliski's CIOS method) and its squarings by
 forming each cross product once before reducing, over 64-bit limbs on
-64-bit targets and 32-bit ones elsewhere. RSA-2048 signing measured level
-with aws-lc's C without assembly on x86_64, and 4096 bits and up slower,
-where aws-lc switches to Karatsuba.
+64-bit targets and 32-bit ones elsewhere. The row multiply-add that both
+use issues four products before the carry chain, the products being
+independent of it. RSA-2048 signing measured level with aws-lc's C
+without assembly on x86_64, and 4096 bits and up slower, where aws-lc
+switches to Karatsuba.
 On x86_64 CPUs with AVX2 but without ADX, the private operation's exponentiation modulo each 1024-bit
 prime of RSA-2048 runs aws-lc's RSAZ, as aws-lc does there: Montgomery
 products on AVX2 over 29-bit limbs, and a 5-bit fixed window whose table
