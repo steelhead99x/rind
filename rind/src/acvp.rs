@@ -129,17 +129,16 @@ pub fn mlkem768_encaps(ek: &[u8], m: &[u8]) -> Result<(Vec<u8>, SecretBuf), Erro
 /// The shared secret is wiped on drop.
 pub fn mlkem768_decaps(dk: &[u8], ciphertext: &[u8]) -> Result<SecretBuf, Error> {
     let _entry = crate::low::Entry::new_secret();
-    let mut dk: [u8; MLKEM_DK] = dk.try_into().map_err(|_| Error::WrongLength)?;
+    let dk: [u8; MLKEM_DK] = dk.try_into().map_err(|_| Error::WrongLength)?;
     let ciphertext: [u8; MLKEM_C] = ciphertext.try_into().map_err(|_| Error::WrongLength)?;
     // `dk` is `dk_pke || ek || H(ek) || z`. Mark the two secret parts, as
     // rind marks the keys it parses, so `admin/ctgrind` checks decapsulation
     // with this key. `ek` and `H(ek)` stay public: the key check branches on
-    // them.
+    // them. The stack copy itself stays: `DecapKey` wipes its own value on
+    // drop, and a copy inside the call is not wiped.
     crate::low::ct::secret_slice(&dk[..MLKEM_DK_PKE]);
     crate::low::ct::secret_slice(&dk[MLKEM_DK - 32..]);
-    let key = DecapKey::from_bytes(&dk);
-    zeroise(&mut dk);
-    let key = key.ok_or(KeyFormatError::MlKemModulus)?;
+    let key = DecapKey::from_bytes(&dk).ok_or(KeyFormatError::MlKemModulus)?;
     Ok(secret_array(
         *key.decaps(&Ciphertext::from(ciphertext)).as_ref(),
     ))
