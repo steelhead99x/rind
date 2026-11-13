@@ -18,5 +18,4 @@ Decided with the maintainer on 2026-11-12, from read-only audits of the maintain
 
 ## Related
 
-- [Every mutants exclusion matches a mutant](/quest/m2/confidence/mutants-pins.md) - also changes `admin/mutants`, in [kixel-ai/rind#699](https://github.com/kixel-ai/rind/pull/699)
 - [Apple-silicon nightlies run on the Mac mini](/quest/m2/confidence/apple-nightlies.md) - may move the macOS DIT campaign to a self-hosted runner, which stays allowed since `admin/mutants` scopes it to named files itself
