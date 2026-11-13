@@ -318,7 +318,7 @@ x86_64:
   under the algorithm with the `tag_len` bytes of HKDF-Expand;
 - `header_key_from_spec`: ChaCha20 header protection holds the 32 bytes of
   HKDF-Expand, through `header_new_spec` over `chacha20_new`;
-- `aead_key_from_spec`: an AES-128-GCM or AES-256-GCM key holds AES-GCM for
+- `aead_key_from_spec`: an AES-128-GCM, AES-192-GCM, or AES-256-GCM key holds AES-GCM for
   the `4 * nk` bytes of HKDF-Expand, under `RunsAesGcm`, through
   `aead_key_new_spec` over `aes_gcm_new`;
 - `aead_key_from_chacha20_poly1305_spec`: a ChaCha20-Poly1305 key holds the
@@ -328,8 +328,7 @@ x86_64:
   FIPS 197's round keys for the `4 * nk` bytes of HKDF-Expand, under
   `RunsAesHw`, through `aes_header_new_spec` over `aes_header_new`.
 
-The other key `From<Okm>` converts to, AES-192-GCM, has no proof. `Rind/X86_64/Kdf/FunsExternal.lean`'s
-`new` wrappers turn a model's refusal into the panic its `expect` makes, so
+`Rind/X86_64/Kdf/FunsExternal.lean`'s `new` wrappers turn a model's refusal into the panic its `expect` makes, so
 each conversion panics exactly where its `expect` does.
 
 `hmac::Key` and `Context` reach each hash through function pointers, which
@@ -509,10 +508,10 @@ CPU-feature checks find AES-NI, or on aarch64 the crypto extension, which no
 input affects. AES-CBC decrypts through its own routines over the same round keys,
 which [the AES modes quest](/quest/m4/verified/aes-modes.md) owns.
 
-AES-128-GCM and AES-256-GCM on x86_64 CPUs with AES-NI and PCLMULQDQ, from
-the AEAD API's `Key` down to HACL*'s Vale AES-GCM routines on CPUs with AVX and
-MOVBE but no VAES, and to rind's own by-8 AES-CTR and GHASH on CPUs without
-AVX and for what Vale's routines do not take, in
+AES-128-GCM, AES-192-GCM, and AES-256-GCM on x86_64 CPUs with AES-NI and
+PCLMULQDQ, from the AEAD API's `Key` down to HACL*'s Vale AES-GCM routines on
+CPUs with AVX and MOVBE but no VAES, and to rind's own by-8 AES-CTR and GHASH
+on CPUs without AVX and for what Vale's routines do not take, in
 `Rind/X86_64/AesGcmAead.lean`:
 
 - `aes_gcm_new`: a key that is not the algorithm's length is refused, and
@@ -548,9 +547,9 @@ key `Rind/X86_64/GhashClmul.lean` proves equal to it.
 `gcm_decrypt_LE` for a 96-bit nonce: the counter block is
 `compute_iv_BE`'s, the length block `gcm_hash`'s, and the tag GCTR on the
 hash under it, which by-8's `open` compares through `ct_equal`, so the opens
-rest on `Rind/X86_64/CtEqual.lean`'s contracts too. AES-192 keys run by-8 as
-well, which no proof covers yet: [the x86_64 AES-GCM
-quest](/quest/m4/verified/aes-gcm-x86-intrinsics.md) owns them. The key
+rest on `Rind/X86_64/CtEqual.lean`'s contracts too. AES-192 keys run by-8 on
+both tiers, since Vale's routines take only AES-128 and AES-256
+(`vale_192_none`). The key
 setup is rind's: its AES-NI key expansion and block cipher, which
 `Rind/X86_64/AesKey.lean` proves for AES header protection too, and its
 PCLMULQDQ GHASH key powers, whose Karatsuba product and reduction
@@ -566,17 +565,36 @@ CPU-feature checks pick Vale's tier (`RunsValeAesGcm`) or the SSE tier
 (`Algorithm`'s `expand` and `Sealer`'s `Ops`), and `seal_in_place_append_tag`,
 which is generic over its buffer.
 
-`aead::gcm::Key`, which takes an IV of any length, is proven on the same
-tiers for a 12-byte IV and full 16-byte tags, in `Rind/X86_64/GcmKey.lean`, a
-hand model over `AeadDispatch` that quotes `rind/src/aead/gcm.rs`. Its
-`new` for AES-128 or AES-256 holds the `aead::Key` for the algorithm, which
-refuses a key of another length, and its `seal_in_place_separate_tag`,
-`seal_in_place_append_tag`, `open_in_place`, and `open_in_place_separate_tag`
-are `aead::Key`'s: `gcm_key_new`, `gcm_key_seal`, `gcm_key_seal_append_tag`,
-`gcm_key_open`, and `gcm_key_open_separate_tag`, for the same lengths. The
-other IV lengths and truncated tags run `encrypt_any` and `decrypt_any`,
-which no proof covers; the model leaves those arms opaque, and
-[the by-8 intrinsics quest](/quest/m4/verified/aes-gcm-x86-intrinsics.md)
+`aead::gcm::Key`, which takes an IV of any length and tags of any
+`TagLength`, is proven on the same tiers, in `Rind/X86_64/GcmKey.lean`, a
+hand model over `AeadDispatch` that quotes `rind/src/aead/gcm.rs`. Its `new`
+for AES-128, AES-192, or AES-256 holds the `aead::Key` for the algorithm,
+which refuses a key of another length (`gcm_key_new`). For an IV of 1 to
+2^61 - 1 bytes and the same AAD and message lengths, its
+`seal_in_place_separate_tag` leaves AES-GCM's ciphertext and returns the
+first `tag_len` bytes of its tag (`gcm_key_seal`), and
+`seal_in_place_append_tag` returns what its `extend` makes of that, handed
+the tag (`gcm_key_seal_append_tag`), and `open_in_place` and
+`open_in_place_separate_tag` succeed exactly when the tag is those bytes,
+leaving the plaintext, and otherwise fail (`gcm_key_open`,
+`gcm_key_open_separate_tag`). Only an authentication failure clears the
+ciphertext to zeros; a refusal, of an input shorter than the tag or a
+separate tag that is not the key's length, leaves the buffer unchanged. SP 800-38D's MSB_t truncation is the first bytes of Vale's tag, which
+`gcmDecryptTrunc` compares. A seal under a 12-byte IV runs `aead::Key`'s path
+and truncates its tag, and an open runs that path only under a 12-byte IV
+with a 16-byte tag; the model's other arms run `AesGcm::encrypt_any` and `decrypt_any`, which
+`Rind/X86_64/AesGcmAny.lean` proves: `initial_counter` is `compute_iv_BE`: the
+96-bit counter block for a 12-byte IV, and otherwise the GHASH branch,
+through by-8's table and the IV's length block, and the
+tag's prefix is compared through `ct_equal`. They refuse an empty IV, one of
+2^61 bytes or more, and AAD and messages past GCM's bounds with
+`WrongLength`, leaving the buffer as it was (`check_gcm_iv_spec`,
+`check_gcm_lengths_eq`), but those refusals are stated only for
+`encrypt_any` and `decrypt_any`: the 96-bit path's theorems, and the
+`gcm::Key` theorems above both, still take the AAD and message bounds as
+hypotheses.
+The AVX-512 tier's by-16 AES-CTR and GHASH, from 256 bytes to 2 KB, have no
+proof yet: [the AVX-512 by-16 quest](/quest/m4/verified/aes-gcm-x86-intrinsics.md)
 owns them.
 
 ChaCha20-Poly1305 and XChaCha20-Poly1305 on x86_64 CPUs with SSE4.1, from
@@ -710,7 +728,7 @@ mentions `Verification::Rsa(` or builds an `Rsa` outside them.
   key schedule word by word; `Rind/<Arch>/AesKey.lean`, each target's key
   expansion and block cipher on the AES instructions;
   `Rind/X86_64/AesCipher.lean`, `cipher::Aes` and AES header protection, and
-  `Rind/X86_64/{Ghash,PartialBlock,AesGcmGlue,AesGcm,GhashClmul,AesGcmBy8,AesGcmClmul,AesGcmAead}.lean`:
+  `Rind/X86_64/{Ghash,PartialBlock,AesGcmGlue,AesGcm,GhashClmul,AesGcmBy8,AesGcmClmul,AesGcmAead,AesGcmAny}.lean`:
   the AES-GCM proof, on x86_64 alone; `Rind/X86_64/GcmKey.lean`, the hand model
   of `aead::gcm::Key` and its proofs; `Rind/X86_64/ChaCha20Poly1305.lean`, the
   ChaCha20-Poly1305 and XChaCha20-Poly1305 proof above aws-lc's routines.
