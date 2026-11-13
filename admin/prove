@@ -10,23 +10,33 @@
 # x86_64 ones with the target renamed, which this writes too, all but each
 # target's own `ShaBlocks.lean` and `HashAxioms.lean`.
 #
-# Usage: admin/prove [bytes | hol-light | cosim | lean | session <arch> [<file>]]
+# Usage: admin/prove [bytes | hol-light [<arch>] | cosim | lean | session <arch> [<file>]]
 #
 # An argument checks only those proofs, `bytes` only that the assembly rind
 # imports is the object code its upstream's proofs checked, and declares
-# each register they let it change. `cosim`, which no other run includes
+# each register they let it change. `hol-light <arch>` checks only that
+# target's HOL Light proofs, so CI runs each target in its own job.
+# `cosim`, which no other run includes
 # since it needs an x86_64 CPU with AVX2, checks the instructions rind adds
-# to s2n-bignum's x86 model against this CPU. `session` checks nothing: it
-# starts a HOL Light session for developing the proofs of `arch`, `x86_64`
-# or `aarch64`, which `session` below describes. Run it in the flake's
+# to s2n-bignum's x86 model, in its fork in `thirdparty/s2n-bignum`, against
+# this CPU. `session` checks nothing: it starts a HOL Light session for
+# developing the proofs of `arch`, `x86_64` or `aarch64`, which `session`
+# below describes. Run it in the flake's
 # `prove` dev shell: `nix develop .#prove --command admin/prove`, or for the
 # HOL Light proofs, the cosimulation, the bytes alone, or a session, `nix
 # develop .#hol-light --command admin/prove hol-light`.
 set -euo pipefail
 
-usage="usage: admin/prove [bytes | hol-light | cosim | lean | session <x86_64 | aarch64> [<file>]]"
+usage="usage: admin/prove [bytes | hol-light [x86_64 | aarch64] | cosim | lean | session <x86_64 | aarch64> [<file>]]"
 case "${1:-}" in
-'' | bytes | hol-light | cosim | lean) only=${1:-} ;;
+'' | bytes | cosim | lean) only=${1:-} ;;
+hol-light)
+    if [[ $# -gt 2 || ($# -eq 2 && $2 != x86_64 && $2 != aarch64) ]]; then
+        echo "$usage" >&2
+        exit 2
+    fi
+    only=hol-light hol_light_arch=${2:-}
+    ;;
 session)
     if [[ $# -lt 2 || $# -gt 3 || ($2 != x86_64 && $2 != aarch64) ]]; then
         echo "$usage" >&2
@@ -209,6 +219,25 @@ symbol_bounds() {
         b[m] == s && a[n] != "*UND*" { print a[n], a[1], b[1] }'
 }
 
+# Writes to `dest` the bytes of the static at `path`, as rind's release build
+# for `arch` Linux emits them, failing if a relocation falls in them, which
+# would leave bytes for the linker to fill.
+rind_static() {
+    local arch=$1 path=$2 dest=$3 found obj sym section value size off
+    found=$(rind_symbol "$arch" "$path")
+    read -r obj sym <<<"$found"
+    read -r section value size < <(symbol_bounds "$obj" "$sym")
+    while read -r off _ _; do
+        if ((16#$off >= 16#$value && 16#$off < 16#$value + 16#$size)); then
+            echo "admin/prove: $path has a relocation" >&2
+            return 1
+        fi
+    done < <(relocations "$obj" "$section")
+    "$tools/llvm-objcopy" --dump-section="$section=$dest.section" "$obj" "$dest.o"
+    tail -c +$((16#$value + 1)) "$dest.section" | head -c $((16#$size)) >"$dest"
+    rm "$dest.section" "$dest.o"
+}
+
 # Writes to `dest` an object holding the naked Rust function at `path`, as
 # rind's release build for `arch` Linux emits it: the function's own section,
 # renamed `.text`, and, if it has relocations, those and the one read-only
@@ -245,10 +274,10 @@ asm_function() {
 
 # Takes `$out/<name>.lock`, waiting while another run in this worktree holds
 # it, until `release <name>` or exit. Taking it again reuses this run's
-# descriptor, which holds it already rather than waiting on itself. `scratch` guards what every run and
-# session rewrites: the asm build and its symbol index, and the submodule's
-# checkout. `hol-light` and `cosim` guard their own directories under `$out`
-# for a whole run. Everything else a run writes is its own.
+# descriptor, which holds it already rather than waiting on itself. `scratch`
+# guards what every run and session rewrites: the asm build and its symbol
+# index. `hol-light` and `cosim` guard their own directories under `$out` for
+# a whole run. Everything else a run writes is its own.
 declare -A held
 hold() {
     local fd
@@ -262,31 +291,9 @@ release() {
     flock -u "${held[$1]}"
 }
 
-# Writes to `model` the files of s2n-bignum's x86 model that
-# `proofs/hol-light/s2n-bignum/x86.patch` changes, each the copy that
-# directory vendors or else the submodule's, with the patch applied, which
-# fails unless every hunk applies exactly. HOL Light loads them ahead of both.
-# The caller holds `scratch`, since this checks the submodule out.
-s2n_bignum_model() {
-    local model=$1 carried=proofs/hol-light/s2n-bignum file
-    git submodule update --init --depth 1 thirdparty/s2n-bignum
-    rm -rf "$model"
-    while read -r file; do
-        mkdir -p "$model/$(dirname "$file")"
-        if [[ -f $carried/$file ]]; then
-            cp "$carried/$file" "$model/$file"
-        else
-            cp "thirdparty/s2n-bignum/$file" "$model/$file"
-        fi
-    done < <(sed -n 's|^+++ b/||p' "$carried/x86.patch")
-    patch --quiet --fuzz=0 --no-backup-if-mismatch -p1 -d "$model" <"$carried/x86.patch"
-}
-
 # rind's own HOL Light proofs, each of the `asm!` block in a Rust function or
-# of a naked one, on s2n-bignum's model, tactics, and specs at its submodule's
-# commit, the revision rind's transliteration pins, with what
-# `proofs/hol-light/s2n-bignum/` carries: the specs of s2n-bignum pull
-# requests not yet merged, and rind's additions to the x86 model.
+# of a naked one, on the model, tactics, and specs of rind's fork of
+# s2n-bignum in `thirdparty/s2n-bignum`, which `RIND.md` there describes.
 # Each `<arch>/<file>.ml` reads its object code from `<arch>/<file>.bin`, the
 # block's bytes, which `asm_block` writes, or `<arch>/<file>.o`, the naked
 # function's object, which `asm_function` writes, and asserts it is what it
@@ -303,6 +310,14 @@ hol_light_proofs=(
     "x86_64 ct_compare_bytes.bin rind::low::x86_64::cpu::ct_compare_bytes"
     "x86_64 ct_compare_16.bin rind::low::x86_64::cpu::ct_compare_16"
     "x86_64 bn_mul_mont_nohw.o rind::low::x86_64::mont::bn_mul_mont_nohw"
+    "x86_64 sha256_compress_blocks_shaext.bin rind::low::x86_64::sha256::sha256_compress_blocks_shaext"
+    "x86_64 sha256_finish_shaext.bin rind::low::x86_64::sha256::sha256_finish_shaext"
+)
+# The statics the proofs above read through a register, each `<arch>/<file>`
+# the static's bytes, which `rind_static` writes and the proof asserts are
+# what it lists.
+hol_light_data=(
+    "x86_64 sha256_shaext_k.bin rind::low::x86_64::sha256::K"
 )
 # The specs that no proof above loads yet, each loaded into the named target's
 # program so its known-answer tests run.
@@ -314,8 +329,7 @@ hol_light() {
     hold hol-light
     hold scratch
     rm -rf "$dir"
-    s2n_bignum_model "$dir/s2n-bignum"
-    arches=$(printf '%s\n' "${hol_light_proofs[@]}" | cut -d' ' -f1 | sort -u)
+    arches=${hol_light_arch:-$(printf '%s\n' "${hol_light_proofs[@]}" | cut -d' ' -f1 | sort -u)}
     for arch in $arches; do
         hol_light_objects "$arch" "$dir/$arch"
         echo 'let prove_start = Unix.time ();;' >"$dir/$arch.ml"
@@ -323,10 +337,14 @@ hol_light() {
     release scratch
     for proof in "${hol_light_proofs[@]}"; do
         read -r arch file _ <<<"$proof"
-        echo "loadt \"$arch/${file%.*}.ml\";;" >>"$dir/$arch.ml"
+        [[ -f $dir/$arch.ml ]] || continue
+        # Each proof's time, so the log shows where a job's limit goes.
+        printf 'let proof_start = Unix.time ();;\nloadt "%s";;\nPrintf.printf "%s: %%.0f s\\n%%!" (Unix.time () -. proof_start);;\n' \
+            "$arch/${file%.*}.ml" "$arch/${file%.*}" >>"$dir/$arch.ml"
     done
     for spec in "${hol_light_specs[@]}"; do
         read -r arch file <<<"$spec"
+        [[ -f $dir/$arch.ml ]] || continue
         echo "needs \"$file\";;" >>"$dir/$arch.ml"
     done
     for arch in $arches; do
@@ -337,7 +355,8 @@ hol_light() {
 }
 
 # Writes to `dir` the object code each of `arch`'s proofs reads, the bytes
-# `asm_block` writes or the object `asm_function` writes. The caller holds
+# `asm_block` writes or the object `asm_function` writes, and the statics
+# they read, which `rind_static` writes. The caller holds
 # `scratch`, since this rebuilds the asm.
 hol_light_objects() {
     local arch=$1 dir=$2 proof parch file path
@@ -352,16 +371,20 @@ hol_light_objects() {
         *.o) asm_function "$arch" "$path" "$dir/$file" ;;
         esac
     done
+    for data in "${hol_light_data[@]}"; do
+        read -r parch file path <<<"$data"
+        [[ $parch == "$arch" ]] || continue
+        rind_static "$arch" "$path" "$dir/$file"
+    done
 }
 
 # Compiles `dir/name.ml` into `dir/name.native`, as s2n-bignum's
 # `tools/build-proof.sh` compiles each of its proofs, with rind's HOL Light
-# files, the model `s2n_bignum_model` writes to `dir/s2n-bignum`, what
-# `proofs/hol-light/s2n-bignum/` carries, and the submodule on the load path,
-# in that order.
+# files, what the run generates in `dir/generated`, and rind's fork of
+# s2n-bignum on the load path, in that order.
 hol_light_compile() {
     local dir=$1 name=$2 root=$PWD
-    (cd "$dir" && HOLLIGHT_LOAD_PATH="$root/proofs/hol-light:$root/$dir/s2n-bignum:$root/proofs/hol-light/s2n-bignum:$root/thirdparty/s2n-bignum" \
+    (cd "$dir" && HOLLIGHT_LOAD_PATH="$root/proofs/hol-light:$root/$dir/generated:$root/thirdparty/s2n-bignum" \
         ocaml "$HOLLIGHT_DIR/inline_load.ml" "$name.ml" "$name-inlined.ml")
     OCAMLRUNPARAM=l=2000000000 ocamlopt.byte -pp "$("$HOLLIGHT_DIR/hol.sh" -pp)" \
         -I "$HOLLIGHT_DIR" -I +unix -c hol_lib.cmxa "$dir/$name-inlined.ml" -o "$dir/$name.cmx" -w -a
@@ -370,26 +393,27 @@ hol_light_compile() {
 }
 
 # Cosimulates rind's additions to s2n-bignum's x86 model against this CPU with
-# `proofs/hol-light/s2n-bignum/x86-cosim.ml`, on s2n-bignum's simulator, whose
+# the fork's `x86/proofs/rind_cosim.ml`, on s2n-bignum's simulator, whose
 # executor assembles each case with the C toolchain. The simulator's list of
 # s2n-bignum's own instructions is empty, so the one case of s2n-bignum's own
-# campaign that loading it runs is one of those it adds by hand.
+# campaign that loading it runs is one of those it adds by hand. The SHA
+# extensions' instructions run only where the CPU has them.
 cosim() {
-    local dir=$out/cosim root=$PWD
+    local dir=$out/cosim root=$PWD sha=0
     if [[ $(uname -m) != x86_64 ]] || ! grep -qw avx2 /proc/cpuinfo; then
         echo "admin/prove: cosim needs an x86_64 CPU with AVX2" >&2
         return 1
     fi
+    if grep -qw sha_ni /proc/cpuinfo; then
+        sha=1
+    fi
     hold cosim
-    hold scratch
     rm -rf "$dir"
-    s2n_bignum_model "$dir/s2n-bignum"
-    release scratch
-    mkdir -p "$dir/tmp" "$dir/s2n-bignum/x86"
-    printf 'let iclasses_regreg = [];;\nlet iclasses_simplemem = [];;\n' >"$dir/s2n-bignum/x86/x86-insns.ml"
-    echo 'loadt "x86-cosim.ml";;' >"$dir/cosim.ml"
+    mkdir -p "$dir/tmp" "$dir/generated/x86"
+    printf 'let iclasses_regreg = [];;\nlet iclasses_simplemem = [];;\n' >"$dir/generated/x86/x86-insns.ml"
+    echo 'loadt "x86/proofs/rind_cosim.ml";;' >"$dir/cosim.ml"
     hol_light_compile "$dir" cosim
-    (cd "$dir" && TMPDIR="$root/$dir/tmp" S2N_BIGNUM_SEMATEST_CASES=1 \
+    (cd "$dir" && TMPDIR="$root/$dir/tmp" S2N_BIGNUM_SEMATEST_CASES=1 RIND_COSIM_SHA=$sha \
         S2N_BIGNUM_X86_64_EXECUTOR="$root/thirdparty/s2n-bignum/tools/simulate-persistent x86" \
         ./cosim.native)
 }
@@ -408,25 +432,16 @@ declare -A hol_light_base=([x86_64]=x86/proofs/base.ml [aarch64]=arm/proofs/base
 # checkpointed after it, in under a second. It holds `scratch` only while it
 # prepares, so it runs beside other sessions and proof runs.
 session() {
-    local arch=$1 file=$2 root=$PWD setup changes
+    local arch=$1 file=$2 root=$PWD setup
     hold scratch
-    git submodule update --init --depth 1 thirdparty/s2n-bignum
-    # Assigned on its own line, so a failed `git status` stops the session.
-    changes=$(git -C thirdparty/s2n-bignum status --porcelain)
-    if [[ -n $changes ]]; then
-        echo "admin/prove: thirdparty/s2n-bignum has uncommitted changes, which its commit does not name" >&2
-        return 1
-    fi
     session_dir=$(mktemp -d "$root/$out/session.XXXXXX")
     trap 'rm -rf "$session_dir"' EXIT
     hol_light_objects "$arch" "$session_dir/$arch"
     session_image "$arch"
     release scratch
     # The image keeps the load path it was built with, so this rebinds it to
-    # this worktree's, in `hol_light_compile`'s order, with the image's copy of
-    # the patched model, whose contents the image's key fixes.
+    # this worktree's, in `hol_light_compile`'s order.
     setup="load_path := [\".\"; \"\$\"; $(ocaml_string "$root/proofs/hol-light");"
-    setup+=" $(ocaml_string "$image/s2n-bignum"); $(ocaml_string "$root/proofs/hol-light/s2n-bignum");"
     setup+=" $(ocaml_string "$root/thirdparty/s2n-bignum")];;"
     setup+=" Sys.chdir $(ocaml_string "$session_dir");;"
     # HOL Light colors what it prints, which only a terminal shows.
@@ -460,13 +475,12 @@ ocaml_string() {
 }
 
 # Sets `image` to the directory of the image `session` restores for `arch`:
-# HOL Light, checkpointed by DMTCP once the target's base file has loaded,
-# beside the patched model `s2n_bignum_model` writes for it. It sets a
-# variable rather than printing, since a command substitution would not exit
-# on a failure while it builds the image. It builds the image unless
+# HOL Light, checkpointed by DMTCP once the target's base file has loaded. It
+# sets a variable rather than printing, since a command substitution would not
+# exit on a failure while it builds the image. It builds the image unless
 # one has the same inputs: HOL Light, DMTCP, the kernel, whose vDSO DMTCP
-# checks on restore, the submodule's commit, and what
-# `proofs/hol-light/s2n-bignum/` carries. Images live outside the worktree, so
+# checks on restore, and every file of the fork of s2n-bignum, since the
+# image holds those the base file loads. Images live outside the worktree, so
 # worktrees on the same inputs share one, and building one removes those of
 # `arch` no session has used in a week.
 session_image() {
@@ -485,14 +499,11 @@ let loads s = if s <> \"update_database.ml\" then loads s;;
 let () = needs \"$base\"; ignore (input_line stdin); Gc.compact (); print_endline \"$marker\";;"
     # Each input is read on its own line, where a failure stops the session,
     # rather than inside the substitution below, which would hash around it.
-    local dmtcp kernel commit
+    local dmtcp kernel fork
     dmtcp=$(command -v dmtcp_restart)
     kernel=$(uname -r)
-    commit=$(git -C thirdparty/s2n-bignum rev-parse HEAD)
-    key=$({
-        printf '%s\n' "$HOLLIGHT_DIR" "$dmtcp" "$kernel" "$commit" "$init"
-        cd proofs/hol-light/s2n-bignum && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
-    } | sha256sum)
+    fork=$(cd thirdparty/s2n-bignum && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+    key=$(printf '%s\n' "$HOLLIGHT_DIR" "$dmtcp" "$kernel" "$init" "$fork" | sha256sum)
     cache=${XDG_CACHE_HOME:-$HOME/.cache}/rind/hol-light
     image=$cache/$arch-${key:0:16}
     build=$image.build
@@ -503,8 +514,6 @@ let () = needs \"$base\"; ignore (input_line stdin); Gc.compact (); print_endlin
         session_evict "$arch"
         rm -rf "$build"
         mkdir -p "$build"
-        s2n_bignum_model "$build/s2n-bignum"
-        cp -r proofs/hol-light/s2n-bignum "$build/carried"
         printf '%s\n' "$init" >"$build/init.ml"
         mkfifo "$build/stdin"
         exec {stdin}<>"$build/stdin"
@@ -528,7 +537,7 @@ let () = needs \"$base\"; ignore (input_line stdin); Gc.compact (); print_endlin
             fi
         done < <(scratch=${held[scratch]} && exec {scratch}>&- {lock}>&- && cd "$build" &&
             HOL_ML_PATH=init.ml LINE_EDITOR=exec \
-                HOLLIGHT_LOAD_PATH="$build/s2n-bignum:$build/carried:$root/thirdparty/s2n-bignum" \
+                HOLLIGHT_LOAD_PATH="$root/thirdparty/s2n-bignum" \
                 exec dmtcp_launch --new-coordinator --coord-port 0 --port-file port --interval 0 --no-gzip \
                 --ckptdir ckpt hol_light <stdin 2>&1)
         # HOL Light exits nonzero whether it failed or was checkpointed.
@@ -613,7 +622,6 @@ routine_layout() {
 bytes() {
     local dir=$out/bytes arch kind path name obj sym target found
     hold scratch
-    git submodule update --init --depth 1 thirdparty/s2n-bignum
     rm -rf "$dir"
     for arch in x86_64 aarch64; do
         build_asm "$arch"

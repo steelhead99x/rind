@@ -23,7 +23,5 @@ Three coverage children joined on 2026-11-12, with the maintainer, from the nigh
 
 Two constant-time children joined on 2026-11-12, with the maintainer, from reading pyca/verified-garbage: Intel's MXCSR-dependent timing and DOITM, and Apple's DIT barrier.
 
-[The proof job's time limit](/quest/m2/confidence/prove-time-limit.md) joined on 2026-11-13, found while landing a PR: the `hol-light` job is cancelled at its limit on runs that prove nothing new, so the check fails when no proof has.
-
 - Fix what a check finds in its own quest's PR when it's small; otherwise plan a follow-up.
 - Slow suites run in their own workflows, not in `just ci`.

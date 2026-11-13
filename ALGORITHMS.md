@@ -193,8 +193,9 @@ s2n-bignum's `_SAFE` theorems prove, for every input, that the instructions a
 routine executes and the addresses it accesses depend on no secret, and that
 it runs no instruction whose timing depends on its operands. `admin/prove
 bytes`, in the `prove` workflow, checks that each routine's `asm!` block in
-rind's release build holds the instructions its proof lists, at the
-submodule's commit, so those theorems are about the code rind runs. A block
+rind's release build holds the instructions its proof lists, upstream's
+proof at the base commit of rind's fork, `thirdparty/s2n-bignum`, so those
+theorems are about the code rind runs. A block
 differs from its proof's code only as `admin/prove-bytes` lists, none of the
 changes altering the result the proof states or making a branch, address, or
 timing depend on a secret: the final `ret` is gone, as the Rust function
