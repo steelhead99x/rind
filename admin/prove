@@ -10,29 +10,41 @@
 # x86_64 ones with the target renamed, which this writes too, all but each
 # target's own `ShaBlocks.lean` and `HashAxioms.lean`.
 #
-# Usage: admin/prove [bytes | hol-light | cosim | lean]
+# Usage: admin/prove [bytes | hol-light | cosim | lean | session <arch> [<file>]]
 #
 # An argument checks only those proofs, `bytes` only that the assembly rind
 # imports is the object code its upstream's proofs checked, and declares
 # each register they let it change. `cosim`, which no other run includes
 # since it needs an x86_64 CPU with AVX2, checks the instructions rind adds
-# to s2n-bignum's x86 model against this CPU. Run it in the flake's `prove`
-# dev shell: `nix develop .#prove --command admin/prove`, or for the HOL
-# Light proofs, the cosimulation, or the bytes alone, `nix develop
-# .#hol-light --command admin/prove hol-light`.
+# to s2n-bignum's x86 model against this CPU. `session` checks nothing: it
+# starts a HOL Light session for developing the proofs of `arch`, `x86_64`
+# or `aarch64`, which `session` below describes. Run it in the flake's
+# `prove` dev shell: `nix develop .#prove --command admin/prove`, or for the
+# HOL Light proofs, the cosimulation, the bytes alone, or a session, `nix
+# develop .#hol-light --command admin/prove hol-light`.
 set -euo pipefail
 
+usage="usage: admin/prove [bytes | hol-light | cosim | lean | session <x86_64 | aarch64> [<file>]]"
+case "${1:-}" in
+'' | bytes | hol-light | cosim | lean) only=${1:-} ;;
+session)
+    if [[ $# -lt 2 || $# -gt 3 || ($2 != x86_64 && $2 != aarch64) ]]; then
+        echo "$usage" >&2
+        exit 2
+    fi
+    only=session session_arch=$2 session_file=
+    # Before the `cd` below, since the path is the caller's.
+    [[ $# -lt 3 ]] || session_file=$(realpath -e "$3")
+    ;;
+*)
+    echo "$usage" >&2
+    exit 2
+    ;;
+esac
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 out=.tmp/prove
 mkdir -p "$out"
 tools=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin
-case "${1:-}" in
-'' | bytes | hol-light | cosim | lean) only=${1:-} ;;
-*)
-    echo "usage: admin/prove [bytes | hol-light | cosim | lean]" >&2
-    exit 2
-    ;;
-esac
 
 # Builds rind's release library for `arch` Linux with its assembly, for
 # `asm_block` and `relocation_data` to read.
@@ -231,12 +243,32 @@ asm_function() {
         "$obj" "$dest"
 }
 
-# Writes to `$out/s2n-bignum` the files of s2n-bignum's x86 model that
+# Takes `$out/<name>.lock`, waiting while another run in this worktree holds
+# it, until `release <name>` or exit. Taking it again reuses this run's
+# descriptor, which holds it already rather than waiting on itself. `scratch` guards what every run and
+# session rewrites: the asm build and its symbol index, and the submodule's
+# checkout. `hol-light` and `cosim` guard their own directories under `$out`
+# for a whole run. Everything else a run writes is its own.
+declare -A held
+hold() {
+    local fd
+    if [[ -z ${held[$1]:-} ]]; then
+        exec {fd}>"$out/$1.lock"
+        held[$1]=$fd
+    fi
+    flock "${held[$1]}"
+}
+release() {
+    flock -u "${held[$1]}"
+}
+
+# Writes to `model` the files of s2n-bignum's x86 model that
 # `proofs/hol-light/s2n-bignum/x86.patch` changes, each the copy that
 # directory vendors or else the submodule's, with the patch applied, which
 # fails unless every hunk applies exactly. HOL Light loads them ahead of both.
+# The caller holds `scratch`, since this checks the submodule out.
 s2n_bignum_model() {
-    local model=$out/s2n-bignum carried=proofs/hol-light/s2n-bignum file
+    local model=$1 carried=proofs/hol-light/s2n-bignum file
     git submodule update --init --depth 1 thirdparty/s2n-bignum
     rm -rf "$model"
     while read -r file; do
@@ -277,22 +309,19 @@ hol_light_specs=(
     "x86_64 common/chacha20poly1305.ml"
 )
 hol_light() {
-    local dir=$out/hol-light arches arch file path proof spec
-    s2n_bignum_model
+    local dir=$out/hol-light arches arch file proof spec
+    hold hol-light
+    hold scratch
     rm -rf "$dir"
-    mkdir -p "$dir"
+    s2n_bignum_model "$dir/s2n-bignum"
     arches=$(printf '%s\n' "${hol_light_proofs[@]}" | cut -d' ' -f1 | sort -u)
     for arch in $arches; do
-        build_asm "$arch"
-        mkdir -p "$dir/$arch"
+        hol_light_objects "$arch" "$dir/$arch"
         echo 'let prove_start = Unix.time ();;' >"$dir/$arch.ml"
     done
+    release scratch
     for proof in "${hol_light_proofs[@]}"; do
-        read -r arch file path <<<"$proof"
-        case $file in
-        *.bin) asm_block "$arch" "$path" "$dir/$arch/$file" ;;
-        *.o) asm_function "$arch" "$path" "$dir/$arch/$file" ;;
-        esac
+        read -r arch file _ <<<"$proof"
         echo "loadt \"$arch/${file%.*}.ml\";;" >>"$dir/$arch.ml"
     done
     for spec in "${hol_light_specs[@]}"; do
@@ -306,14 +335,32 @@ hol_light() {
     done
 }
 
+# Writes to `dir` the object code each of `arch`'s proofs reads, the bytes
+# `asm_block` writes or the object `asm_function` writes. The caller holds
+# `scratch`, since this rebuilds the asm.
+hol_light_objects() {
+    local arch=$1 dir=$2 proof parch file path
+    build_asm "$arch"
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    for proof in "${hol_light_proofs[@]}"; do
+        read -r parch file path <<<"$proof"
+        [[ $parch == "$arch" ]] || continue
+        case $file in
+        *.bin) asm_block "$arch" "$path" "$dir/$file" ;;
+        *.o) asm_function "$arch" "$path" "$dir/$file" ;;
+        esac
+    done
+}
+
 # Compiles `dir/name.ml` into `dir/name.native`, as s2n-bignum's
 # `tools/build-proof.sh` compiles each of its proofs, with rind's HOL Light
-# files, the model `s2n_bignum_model` writes, what
+# files, the model `s2n_bignum_model` writes to `dir/s2n-bignum`, what
 # `proofs/hol-light/s2n-bignum/` carries, and the submodule on the load path,
 # in that order.
 hol_light_compile() {
     local dir=$1 name=$2 root=$PWD
-    (cd "$dir" && HOLLIGHT_LOAD_PATH="$root/proofs/hol-light:$root/$out/s2n-bignum:$root/proofs/hol-light/s2n-bignum:$root/thirdparty/s2n-bignum" \
+    (cd "$dir" && HOLLIGHT_LOAD_PATH="$root/proofs/hol-light:$root/$dir/s2n-bignum:$root/proofs/hol-light/s2n-bignum:$root/thirdparty/s2n-bignum" \
         ocaml "$HOLLIGHT_DIR/inline_load.ml" "$name.ml" "$name-inlined.ml")
     OCAMLRUNPARAM=l=2000000000 ocamlopt.byte -pp "$("$HOLLIGHT_DIR/hol.sh" -pp)" \
         -I "$HOLLIGHT_DIR" -I +unix -c hol_lib.cmxa "$dir/$name-inlined.ml" -o "$dir/$name.cmx" -w -a
@@ -332,15 +379,188 @@ cosim() {
         echo "admin/prove: cosim needs an x86_64 CPU with AVX2" >&2
         return 1
     fi
-    s2n_bignum_model
+    hold cosim
+    hold scratch
     rm -rf "$dir"
-    mkdir -p "$dir/tmp" "$out/s2n-bignum/x86"
-    printf 'let iclasses_regreg = [];;\nlet iclasses_simplemem = [];;\n' >"$out/s2n-bignum/x86/x86-insns.ml"
+    s2n_bignum_model "$dir/s2n-bignum"
+    release scratch
+    mkdir -p "$dir/tmp" "$dir/s2n-bignum/x86"
+    printf 'let iclasses_regreg = [];;\nlet iclasses_simplemem = [];;\n' >"$dir/s2n-bignum/x86/x86-insns.ml"
     echo 'loadt "x86-cosim.ml";;' >"$dir/cosim.ml"
     hol_light_compile "$dir" cosim
     (cd "$dir" && TMPDIR="$root/$dir/tmp" S2N_BIGNUM_SEMATEST_CASES=1 \
         S2N_BIGNUM_X86_64_EXECUTOR="$root/thirdparty/s2n-bignum/tools/simulate-persistent x86" \
         ./cosim.native)
+}
+
+# The file each target's proofs load first, which its session images hold
+# loaded.
+declare -A hol_light_base=([x86_64]=x86/proofs/base.ml [aarch64]=arm/proofs/base.ml)
+
+# Starts a HOL Light session for `arch` in which a proof in
+# `proofs/hol-light/<arch>/` loads as `admin/prove hol-light` compiles it: the
+# target's base file loaded, on `hol_light_compile`'s load path, in a
+# directory of its own holding the object code `hol_light_objects` writes for
+# the proofs to read. With `file`, it loads the file and exits, failing if any
+# of it fails; otherwise it reads OCaml from stdin. Loading the base file
+# takes minutes, so the session restores an image `session_image`
+# checkpointed after it, in under a second. It holds `scratch` only while it
+# prepares, so it runs beside other sessions and proof runs.
+session() {
+    local arch=$1 file=$2 root=$PWD setup changes
+    hold scratch
+    git submodule update --init --depth 1 thirdparty/s2n-bignum
+    # Assigned on its own line, so a failed `git status` stops the session.
+    changes=$(git -C thirdparty/s2n-bignum status --porcelain)
+    if [[ -n $changes ]]; then
+        echo "admin/prove: thirdparty/s2n-bignum has uncommitted changes, which its commit does not name" >&2
+        return 1
+    fi
+    session_dir=$(mktemp -d "$root/$out/session.XXXXXX")
+    trap 'rm -rf "$session_dir"' EXIT
+    hol_light_objects "$arch" "$session_dir/$arch"
+    session_image "$arch"
+    release scratch
+    # The image keeps the load path it was built with, so this rebinds it to
+    # this worktree's, in `hol_light_compile`'s order, with the image's copy of
+    # the patched model, whose contents the image's key fixes.
+    setup="load_path := [\".\"; \"\$\"; $(ocaml_string "$root/proofs/hol-light");"
+    setup+=" $(ocaml_string "$image/s2n-bignum"); $(ocaml_string "$root/proofs/hol-light/s2n-bignum");"
+    setup+=" $(ocaml_string "$root/thirdparty/s2n-bignum")];;"
+    setup+=" Sys.chdir $(ocaml_string "$session_dir");;"
+    # HOL Light colors what it prints, which only a terminal shows.
+    if [[ ! -t 1 ]]; then
+        setup+=" set_color_printer false;;"
+    fi
+    # A session never checkpoints itself: `--interval 0` overrides any
+    # `DMTCP_CHECKPOINT_INTERVAL`, and a checkpoint would go to its own
+    # directory rather than over the shared image.
+    # The forwarder of stdin may still be waiting on a terminal once the
+    # session exits, so it is stopped then, and the session's status kept.
+    local status=0
+    dmtcp_restart --new-coordinator --coord-port 0 --interval 0 --ckptdir "$session_dir/ckpt" \
+        --quiet "$image"/ckpt/ckpt_*.dmtcp < <(
+            printf '%s\n' "$setup"
+            if [[ -n $file ]]; then
+                printf 'let () = try loadt %s; exit 0 with e -> print_endline (Printexc.to_string e); exit 1;;\n' \
+                    "$(ocaml_string "$file")"
+            else
+                exec cat
+            fi
+        ) || status=$?
+    kill $! 2>/dev/null || true
+    return $status
+}
+
+# Prints `s` as an OCaml string literal.
+ocaml_string() {
+    local s=${1//\\/\\\\}
+    printf '"%s"' "${s//\"/\\\"}"
+}
+
+# Sets `image` to the directory of the image `session` restores for `arch`:
+# HOL Light, checkpointed by DMTCP once the target's base file has loaded,
+# beside the patched model `s2n_bignum_model` writes for it. It sets a
+# variable rather than printing, since a command substitution would not exit
+# on a failure while it builds the image. It builds the image unless
+# one has the same inputs: HOL Light, DMTCP, the kernel, whose vDSO DMTCP
+# checks on restore, the submodule's commit, and what
+# `proofs/hol-light/s2n-bignum/` carries. Images live outside the worktree, so
+# worktrees on the same inputs share one, and building one removes those of
+# `arch` no session has used in a week.
+session_image() {
+    local arch=$1 base=${hol_light_base[$1]} root=$PWD cache key build lock line images
+    local marker="rind: $base loaded"
+    # The base file's `loads "update_database.ml"` is skipped, as HOL Light's
+    # `inline_load.ml` skips it for `hol_light_compile`. An error in a file
+    # `needs` loads only prints and returns unless `use_file_raise_failure` is
+    # set, so the marker prints only once the base file has loaded without
+    # one. The line this reads is `exit 1;;`, which the toplevel reads instead
+    # when any phrase fails, so a failed load exits rather than waiting to be
+    # checkpointed.
+    local init="#use \"hol.ml\";;
+use_file_raise_failure := true;;
+let loads s = if s <> \"update_database.ml\" then loads s;;
+let () = needs \"$base\"; ignore (input_line stdin); Gc.compact (); print_endline \"$marker\";;"
+    # Each input is read on its own line, where a failure stops the session,
+    # rather than inside the substitution below, which would hash around it.
+    local dmtcp kernel commit
+    dmtcp=$(command -v dmtcp_restart)
+    kernel=$(uname -r)
+    commit=$(git -C thirdparty/s2n-bignum rev-parse HEAD)
+    key=$({
+        printf '%s\n' "$HOLLIGHT_DIR" "$dmtcp" "$kernel" "$commit" "$init"
+        cd proofs/hol-light/s2n-bignum && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+    } | sha256sum)
+    cache=${XDG_CACHE_HOME:-$HOME/.cache}/rind/hol-light
+    image=$cache/$arch-${key:0:16}
+    build=$image.build
+    mkdir -p "$cache"
+    exec {lock}>"$image.lock"
+    flock "$lock"
+    if [[ ! -d $image ]]; then
+        session_evict "$arch"
+        rm -rf "$build"
+        mkdir -p "$build"
+        s2n_bignum_model "$build/s2n-bignum"
+        cp -r proofs/hol-light/s2n-bignum "$build/carried"
+        printf '%s\n' "$init" >"$build/init.ml"
+        mkfifo "$build/stdin"
+        exec {stdin}<>"$build/stdin"
+        echo 'exit 1;;' >&"$stdin"
+        echo "admin/prove: loading $base into a HOL Light image, logging to $build/log" >&2
+        # The only checkpoint is the one taken here, after the marker:
+        # `--interval 0` overrides any `DMTCP_CHECKPOINT_INTERVAL`. HOL Light
+        # holds none of this shell's locks. It holds its stdin open for writing
+        # itself, so it never reads an end of file, and a session the
+        # checkpoint did not kill is killed here. `dmtcp_command
+        # --kcheckpoint` exits 2 once it has checkpointed and killed the
+        # session and prints the same when the session died instead, so the
+        # image file, once the session has exited, says whether it succeeded.
+        # See UPSTREAM.md, "dmtcp_command fails a checkpoint that succeeds".
+        local message=''
+        while IFS= read -r line; do
+            printf '%s\n' "$line" >>"$build/log"
+            if [[ $line == *"$marker" ]]; then
+                message=$(dmtcp_command --coord-port "$(<"$build/port")" --kcheckpoint 2>&1 || true)
+                [[ $message == "Computation was checkpointed and killed." ]] || kill $! 2>/dev/null || true
+            fi
+        done < <(scratch=${held[scratch]} && exec {scratch}>&- {lock}>&- && cd "$build" &&
+            HOL_ML_PATH=init.ml LINE_EDITOR=exec \
+                HOLLIGHT_LOAD_PATH="$build/s2n-bignum:$build/carried:$root/thirdparty/s2n-bignum" \
+                exec dmtcp_launch --new-coordinator --coord-port 0 --port-file port --interval 0 --no-gzip \
+                --ckptdir ckpt hol_light <stdin 2>&1)
+        # HOL Light exits nonzero whether it failed or was checkpointed.
+        wait $! || true
+        exec {stdin}>&-
+        images=("$build"/ckpt/ckpt_*.dmtcp)
+        if [[ $message != "Computation was checkpointed and killed." || ! -f ${images[0]} ]]; then
+            tail -n 20 "$build/log" >&2
+            echo "admin/prove: HOL Light did not load $base and checkpoint (${message:-no marker}); see $build/log" >&2
+            return 1
+        fi
+        rm "$build/stdin" "$build/port"
+        mv -T "$build" "$image"
+    fi
+    # Marks the image used while it is locked, so `session_evict` keeps it.
+    touch "$image"
+    exec {lock}>&-
+}
+
+# Removes the images of `arch`, and the builds of them left by a failed run,
+# that no session has used in a week, each only while its lock is free.
+# Lock files stay, since removing one a session holds would let another
+# lock a new file of the same name.
+session_evict() {
+    local arch=$1 entry old
+    for entry in "$cache/$arch"-*; do
+        [[ $entry != *.lock && -n $(find "$entry" -maxdepth 0 -mtime +7) ]] || continue
+        exec {old}>"${entry%.build}.lock"
+        if flock -n "$old" && [[ -n $(find "$entry" -maxdepth 0 -mtime +7) ]]; then
+            rm -rf "$entry"
+        fi
+        exec {old}>&-
+    done
 }
 
 # Writes to `dest` the bytes of the routine at the symbol `sym` in the object
@@ -391,6 +611,7 @@ routine_layout() {
 # proofs, with the GNU assembler.
 bytes() {
     local dir=$out/bytes arch kind path name obj sym target found
+    hold scratch
     git submodule update --init --depth 1 thirdparty/s2n-bignum
     rm -rf "$dir"
     for arch in x86_64 aarch64; do
@@ -429,6 +650,7 @@ bytes() {
         relocation_data "${found%% *}" "$dir/$arch/$name.bin.relocs" "$dir/$arch/$name.bin.data" "$arch"
     done <"$dir/routines"
     admin/prove-bytes check "$dir"
+    release scratch
 }
 if [[ -z $only || $only == bytes ]]; then
     bytes
@@ -438,6 +660,9 @@ if [[ -z $only || $only == hol-light ]]; then
 fi
 if [[ $only == cosim ]]; then
     cosim
+fi
+if [[ $only == session ]]; then
+    session "$session_arch" "$session_file"
 fi
 if [[ -n $only && $only != lean ]]; then
     exit 0

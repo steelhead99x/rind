@@ -354,7 +354,10 @@
           # `tools/build-proof.sh` does, the Rust whose build emits the object
           # code they are of, with llvm-objdump to read it, the Python that
           # compares that code with the code upstream's proofs check, and the
-          # cross tools that assemble Vale's and aws-lc's.
+          # cross tools that assemble Vale's and aws-lc's, with flock, which
+          # keeps runs in one worktree from rewriting each other's files. On
+          # Linux, `admin/prove session` checkpoints and restores HOL Light
+          # with DMTCP.
           hol-light = pkgs.mkShell {
             packages = [
               (rust-stable.minimal.override {
@@ -371,7 +374,9 @@
               pkgs.git
               pkgs.python3
               debian-cross-tools
-            ];
+              pkgs.flock
+            ]
+            ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.dmtcp;
           };
 
           sde-certs = ''
