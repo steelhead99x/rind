@@ -368,6 +368,57 @@ axiom p384_montjscalarmul_alt_spec (res : Std.Array U64 18#usize) (scalar : Std.
       ∀ P, p384OnCurve P → p384Represents P (tripleNat6 point.val) →
         p384Represents (p384Pow P (wordsNat scalar.val)) (tripleNat6 r.val) ⦄
 
+/-- `P384_MONTJDOUBLE_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/p384_montjdouble.ml#L4854 -/
+@[step]
+axiom p384_montjdouble_spec (p3 p1 : Std.Array U64 18#usize) :
+    low.x86_64.p384_montjdouble.p384_montjdouble p3 p1 ⦃ r =>
+      ∀ P, p384Represents P (tripleNat6 p1.val) → p384Represents (p384Add P P) (tripleNat6 r.val) ⦄
+
+/-- `P384_MONTJDOUBLE_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/p384_montjdouble_alt.ml#L4845 -/
+@[step]
+axiom p384_montjdouble_alt_spec (p3 p1 : Std.Array U64 18#usize) :
+    low.x86_64.p384_montjdouble_alt.p384_montjdouble_alt p3 p1 ⦃ r =>
+      ∀ P, p384Represents P (tripleNat6 p1.val) → p384Represents (p384Add P P) (tripleNat6 r.val) ⦄
+
+/-- `P384_MONTJMIXADD_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/p384_montjmixadd.ml#L5505 -/
+@[step]
+axiom p384_montjmixadd_spec (p3 p1 : Std.Array U64 18#usize) (p2 : Std.Array U64 12#usize) :
+    low.x86_64.p384_montjmixadd.p384_montjmixadd p3 p1 p2 ⦃ r =>
+      ∀ P1 P2, p384Represents P1 (tripleNat6 p1.val) → p384Represents2 P2 (pairNat6 p2.val) →
+        P1 ≠ P2 → p384Represents (p384Add P1 P2) (tripleNat6 r.val) ⦄
+
+/-- `P384_MONTJMIXADD_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/p384_montjmixadd_alt.ml#L5607 -/
+@[step]
+axiom p384_montjmixadd_alt_spec (p3 p1 : Std.Array U64 18#usize) (p2 : Std.Array U64 12#usize) :
+    low.x86_64.p384_montjmixadd_alt.p384_montjmixadd_alt p3 p1 p2 ⦃ r =>
+      ∀ P1 P2, p384Represents P1 (tripleNat6 p1.val) → p384Represents2 P2 (pairNat6 p2.val) →
+        P1 ≠ P2 → p384Represents (p384Add P1 P2) (tripleNat6 r.val) ⦄
+
+/-- `BIGNUM_NEG_P384_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_neg_p384.ml#L131 -/
+@[step]
+axiom bignum_neg_p384_spec (z x : Std.Array U64 6#usize) :
+    low.x86_64.bignum_neg_p384.bignum_neg_p384 z x ⦃ r =>
+      wordsNat x.val ≤ p384 → wordsNat r.val = (p384 - wordsNat x.val) % p384 ⦄
+
+/-- `BIGNUM_MOD_N384_6_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_mod_n384_6.ml#L162 -/
+@[step]
+axiom bignum_mod_n384_spec (z x : Std.Array U64 6#usize) :
+    low.x86_64.bignum_mod_n384.bignum_mod_n384 z x ⦃ r => wordsNat r.val = wordsNat x.val % n384 ⦄
+
+/-- `BIGNUM_MUX_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/bignum_mux.ml#L141 -/
+@[step]
+axiom bignum_mux_spec (p : U64) (z x y : Slice U64) (hx : x.length = z.length)
+    (hy : y.length = z.length) :
+    low.x86_64.bignum_mux.bignum_mux p z x y ⦃ r =>
+      r.length = z.length ∧ wordsNat r.val = if p.val ≠ 0 then wordsNat x.val else wordsNat y.val ⦄
+
 /-! ### RSA
 
 Each routine reads its inputs at the lengths its Rust wrapper asserts, so a
@@ -631,6 +682,25 @@ theorem p384_montjscalarmul_mux_spec (h : Runs) (res : Std.Array U64 18#usize) (
         p384Represents (p384Pow P (wordsNat scalar.val)) (tripleNat6 r.val) ⦄ := by
   obtain ⟨-, -, t, ht⟩ := h
   unfold low.x86_64.adx_mux.p384_montjscalarmul
+  rw [ht]
+  cases t <;> step*
+
+@[step]
+theorem p384_montjdouble_mux_spec (h : Runs) (p3 p1 : Std.Array U64 18#usize) :
+    low.x86_64.adx_mux.p384_montjdouble p3 p1 ⦃ r =>
+      ∀ P, p384Represents P (tripleNat6 p1.val) → p384Represents (p384Add P P) (tripleNat6 r.val) ⦄ := by
+  obtain ⟨-, -, t, ht⟩ := h
+  unfold low.x86_64.adx_mux.p384_montjdouble
+  rw [ht]
+  cases t <;> step*
+
+@[step]
+theorem p384_montjmixadd_mux_spec (h : Runs) (p3 p1 : Std.Array U64 18#usize) (p2 : Std.Array U64 12#usize) :
+    low.x86_64.adx_mux.p384_montjmixadd p3 p1 p2 ⦃ r =>
+      ∀ P1 P2, p384Represents P1 (tripleNat6 p1.val) → p384Represents2 P2 (pairNat6 p2.val) →
+        P1 ≠ P2 → p384Represents (p384Add P1 P2) (tripleNat6 r.val) ⦄ := by
+  obtain ⟨-, -, t, ht⟩ := h
+  unfold low.x86_64.adx_mux.p384_montjmixadd
   rw [ht]
   cases t <;> step*
 
