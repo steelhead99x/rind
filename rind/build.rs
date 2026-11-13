@@ -21,6 +21,15 @@
 //! `wide-arithmetic` feature, and 32 elsewhere, where it would be a library
 //! call. `--cfg rind_limb="32"` forces 32-bit limbs on a 64-bit target, so
 //! CI checks both widths on x86_64; like `rind_portable`, it is for testing.
+//!
+//! And it sets `rind_mul16` for the microcontroller cores whose
+//! 32x32->64-bit multiply takes a time that depends on its operands, or that
+//! have none: ARMv7-M's Cortex-M3, whose `umull` ends early on small
+//! operands, and ARMv6-M's and ARMv8-M Baseline's Cortex-M0, M0+, M1, and
+//! M23, which would call a library routine. There, Poly1305 builds each
+//! secret product from 32x32->32-bit multiplies of 16-bit halves
+//! (`low::generic::mul16`). `--cfg rind_mul16` forces it, so CI checks that
+//! code on other targets; it too is for testing.
 
 use std::env;
 
@@ -31,6 +40,7 @@ fn main() {
     );
 
     println!(r#"cargo::rustc-check-cfg=cfg(rind_limb, values("32", "64"))"#);
+    println!("cargo::rustc-check-cfg=cfg(rind_mul16)");
 
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
@@ -50,6 +60,25 @@ fn main() {
         let limb = if wide { 64 } else { 32 };
         println!(r#"cargo::rustc-cfg=rind_limb="{limb}""#);
     }
+
+    if env::var_os("CARGO_CFG_RIND_MUL16").is_none() && variable_time_long_multiply() {
+        println!("cargo::rustc-cfg=rind_mul16");
+    }
+}
+
+/// Whether the target is for a microcontroller core whose 32x32->64-bit
+/// multiply may take a time that depends on its operands, or that has none:
+/// `thumbv7m-none-eabi`'s Cortex-M3, whose `umull` takes 3 to 5 cycles by the
+/// size of its operands (Arm DDI 0337, "Cortex-M3 instructions"), and the
+/// ARMv6-M and ARMv8-M Baseline cores of `thumbv6m-none-eabi` and
+/// `thumbv8m.base-none-eabi`, which have no `umull`. Each one's
+/// 32x32->32-bit `mul` takes the same time for every operand. ARMv7E-M's
+/// Cortex-M4 and M7, as in `thumbv7em-none-eabihf`, take one cycle for
+/// `umull`. As for `armv7_or_later`, the triple is all a build script sees.
+fn variable_time_long_multiply() -> bool {
+    let target = env::var("TARGET").expect("cargo sets the target");
+    let arch = target.split('-').next().unwrap_or_default();
+    matches!(arch, "thumbv6m" | "thumbv7m" | "thumbv8m.base")
 }
 
 /// Whether the 32-bit ARM target's triple names ARMv7 or later, as in

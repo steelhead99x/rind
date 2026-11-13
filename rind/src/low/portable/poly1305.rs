@@ -2,7 +2,8 @@
 
 //! The portable backend's Poly1305: rind's 26-bit limbs in
 //! `generic::poly1305_32` on 32-bit targets, where each limb product is one
-//! 32x32->64-bit multiply, and rind's 64-bit limbs in `generic::poly1305` on
+//! 32x32->64-bit multiply, or four 32x32->32-bit ones where build.rs sets
+//! `rind_mul16`, and rind's 64-bit limbs in `generic::poly1305` on
 //! 64-bit ones, as x86_64 runs without SSE4.1. Neither counts its input, so
 //! neither limits the AEADs' message length.
 //!
@@ -12,11 +13,6 @@
 //! spends most of its time in 64-bit multiplies and adds, and it takes at
 //! most `u32::MAX` bytes.
 
-#[cfg(all(
-    rind_backend = "portable",
-    any(target_pointer_width = "32", rind_limb = "32")
-))]
-pub(crate) use crate::low::generic::poly1305_32::Poly1305;
 #[cfg(any(rind_backend = "arm", test))]
 use libcrux_hacl_rs::streaming_types::error_code;
 #[cfg(any(rind_backend = "arm", test))]
@@ -28,6 +24,11 @@ use libcrux_poly1305::hacl::mac_poly1305::{self, state_t};
     not(rind_limb = "32")
 ))]
 pub(crate) use crate::low::generic::poly1305::Poly1305;
+#[cfg(all(
+    rind_backend = "portable",
+    any(target_pointer_width = "32", rind_limb = "32")
+))]
+pub(crate) use crate::low::generic::poly1305_32::Poly1305;
 
 #[cfg(any(rind_backend = "arm", test))]
 pub(crate) struct Hacl([state_t; 1]);

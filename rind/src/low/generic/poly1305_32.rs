@@ -16,8 +16,12 @@
 //! It adds, multiplies, shifts and masks, and branches on no secret: the final
 //! choice between `h` and `h - p` is a mask. Its time depends on no secret on
 //! a core whose 32x32->64-bit multiply takes the same time for every operand,
-//! as the ESP32-S3's and Cortex-M4's do; a Cortex-M3's `umull` ends early on
-//! small operands.
+//! as the ESP32-S3's and Cortex-M4's do. A Cortex-M3's `umull` ends early on
+//! small operands, and the Cortex-M0, M0+, M1, and M23 have no `umull`, so on
+//! the targets for them, which `rind_mul16` names (see build.rs), each limb
+//! product is four 32x32->32-bit multiplies of 16-bit halves instead
+//! (`generic::mul16`), which those cores do in the same time for every
+//! operand.
 
 use super::blockwise::Blockwise;
 use crate::low::ct;
@@ -252,11 +256,17 @@ impl Poly1305 {
 }
 
 /// The 64-bit product of two 32-bit limbs: one `mull`/`muluh` pair on
-/// Xtensa, one `umull` on Cortex-M.
+/// Xtensa, one `umull` on a Cortex-M4 or 32-bit ARM application core.
+#[cfg(not(rind_mul16))]
 #[inline(always)]
 fn mul(a: u32, b: u32) -> u64 {
     u64::from(a).wrapping_mul(u64::from(b))
 }
+
+// Where the 32x32->64-bit multiply ends early or is missing, four
+// 32x32->32-bit multiplies of 16-bit halves.
+#[cfg(rind_mul16)]
+use super::mul16::mul16 as mul;
 
 fn read32(bytes: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())

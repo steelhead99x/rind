@@ -139,6 +139,16 @@ some operands, so it is not constant-time on them:
   ([XScale] Table 10-6), and ARMv4T's ARM7TDMI and ARM9TDMI ([BearSSL ctmul]).
   ARMv6's ARM1176 does not terminate early ([ARM1176 TRM] Table 3-46), nor does
   the ARM926EJ-S.
+- 32-bit `arm` M-profile: Arm's Cortex-M3, whose `umull`, `smull`, `umlal`,
+  and `smlal` end early "depending on the size of the source values" (Arm
+  DDI 0337, "Cortex-M3 instructions"), as when an operand fits in 16 bits, is
+  zero, or is a power of two ([BearSSL ctmul]). On its target,
+  `thumbv7m-none-eabi`, and on `thumbv6m-none-eabi` and
+  `thumbv8m.base-none-eabi`, whose cores have no `umull`, Poly1305 builds
+  each product from 32x32->32-bit multiplies of 16-bit halves, which those
+  cores do in one fixed time, so ChaCha20-Poly1305's MAC is constant time
+  there. The rest of rind's secret arithmetic on 32-bit limbs still takes
+  whole 32x32->64-bit products. The Cortex-M4's `umull` takes one cycle.
 - `x86_64` and 32-bit `x86`: VIA's Nano 2000 series ([BearSSL ctmul]). Intel
   lists `mul` and `imul` as data-independent-time ([Intel DOIT]).
 
