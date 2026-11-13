@@ -108,9 +108,41 @@ fn state(key: &[u8; 32], nonce: &[u8; 16]) -> [u32; 16] {
 /// draft-irtf-cfrg-xchacha-03 specifies.
 //
 // Indexes, as `state` does, so `proofs/` can prove it.
+// On 32-bit targets with a small instruction cache, a fully unrolled
+// `rounds` is ~5 KiB and misses on every XChaCha short input. A 10-iteration
+// loop is the same 10 double-rounds; `rounds` itself is left unrolled so
+// `proofs/` and the ChaCha20 cipher path stay as they are.
+#[cfg(target_pointer_width = "32")]
+#[inline(never)]
+fn hchacha20_double_round(st: &mut [u32]) {
+    // A separate function so LLVM cannot unroll ten copies of the
+    // inlined double-round into hchacha20 (~5 KiB, same as `rounds`).
+    double_round(st);
+}
+
+#[cfg(target_pointer_width = "32")]
+fn hchacha20_rounds(st: &mut [u32]) {
+    for _ in 0..10 {
+        hchacha20_double_round(st);
+    }
+}
+
+#[cfg(target_pointer_width = "32")]
+#[inline(never)]
+pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
+    let mut st = state(key, nonce);
+    hchacha20_rounds(&mut st);
+    hchacha20_out(&st)
+}
+
+#[cfg(not(target_pointer_width = "32"))]
 pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
     let mut st = state(key, nonce);
     rounds(&mut st);
+    hchacha20_out(&st)
+}
+
+fn hchacha20_out(st: &[u32; 16]) -> [u8; 32] {
     let mut out = [0u8; 32];
     for i in 0..8 {
         let w = if i < 4 { st[i] } else { st[i + 8] };
@@ -167,6 +199,21 @@ pub(crate) fn cipher(key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rolled_hchacha_rounds_match_unrolled() {
+        let mut a = [0u32; 16];
+        let mut b = [0u32; 16];
+        for i in 0..16 {
+            a[i] = 0x9e37_79b9u32.wrapping_mul(i as u32 + 1);
+            b[i] = a[i];
+        }
+        for _ in 0..10 {
+            double_round(&mut a);
+        }
+        rounds(&mut b);
+        assert_eq!(a, b);
+    }
 
     #[test]
     fn hchacha_test_vectors() {
