@@ -7,6 +7,7 @@ use core::marker::PhantomData;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 /// A CPU feature rind requires that this CPU lacks.
+/// `Display` names that feature.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MissingFeature(&'static str);
 
