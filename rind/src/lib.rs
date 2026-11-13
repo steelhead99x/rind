@@ -553,7 +553,9 @@ pub mod hkdf {
 /// The group, the points M and N, and the transcript are the same. The suites
 /// are different types, so a share from one does not type-check as the other's.
 /// The caller stretches the password and passes `w0` and `w1`. A verifier
-/// stores `w0` and `L = w1 * G`, not `w1`.
+/// stores `w0` and `L = w1 * G` ([`VerifierRecord::l`](spake2plus::VerifierRecord::l)),
+/// not `w1`, and loads them with
+/// [`VerifierRecord::from_record`](spake2plus::VerifierRecord::from_record).
 ///
 /// ```
 /// use rind::spake2plus::{ProverSecrets, RFC9383, VerifierRecord};
