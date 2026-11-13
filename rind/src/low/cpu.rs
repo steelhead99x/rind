@@ -40,7 +40,7 @@ pub fn check() -> Result<(), MissingFeature> {
 /// read, Android (the target is not Linux, and a failed read on a Linux
 /// Android build), and Windows on ARM, which never reads a part list.
 /// On every other architecture this is false: those builds have no such
-/// choice.
+/// choice. The non-aarch64 body returns `false` without a feature read.
 #[must_use]
 pub fn wide_multiplier() -> bool {
     #[cfg(rind_backend = "aarch64")]
