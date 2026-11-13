@@ -2,8 +2,6 @@
 
 //! RFC 9380's `P256_XMD:SHA-256_SSWU_RO_`, and hashing to a scalar mod n.
 
-#![cfg_attr(not(test), allow(dead_code))]
-
 use super::{
     CURVE_A_MONT, CURVE_B_MONT, CURVE_ONE_MONT, CURVE_ORDER_MM, FieldElement, JacobianMontPoint,
     PublicKey, Scalar, util,
@@ -32,7 +30,7 @@ pub(crate) fn hash_to_curve(msg: &[u8], dst: &[u8]) -> Result<PublicKey, Error> 
 /// Hashes `msg` to a scalar mod n, by RFC 9380's `hash_to_field` over
 /// `expand_message_xmd` with SHA-256 and the domain separation tag `dst`,
 /// as RFC 9497's and RFC 9591's P-256 suites do. It may be zero.
-pub(crate) fn hash_to_scalar(msg: &[u8], dst: &[u8]) -> Result<Scalar, Error> {
+pub(crate) fn hash_to_scalar(msg: &[&[u8]], dst: &[u8]) -> Result<Scalar, Error> {
     let _entry = low::Entry::new_secret();
     let mut uniform = [0; 48];
     hash_to_curve::expand_message_xmd::<Sha256Context>(msg, dst, &mut uniform)?;
@@ -205,7 +203,7 @@ mod tests {
             let theirs = crate::test::aws_lc_hash_to_curve(256, &msg, &dst);
             assert_eq!(ours.point.as_bytes_uncompressed()[..], theirs[..]);
 
-            let ours = hash_to_scalar(&msg, &dst).unwrap();
+            let ours = hash_to_scalar(&[&msg], &dst).unwrap();
             let theirs = rustcrypto::hash_to_scalar::<
                 NistP256,
                 <NistP256 as GroupDigest>::ExpandMsg,
@@ -219,9 +217,10 @@ mod tests {
     #[test]
     fn scalar_in_constant_time() {
         let msg = low::ct::into_secret(*b"password");
-        let scalar = hash_to_scalar(&msg, b"QUUX-V01-CS02").unwrap();
+        let scalar = hash_to_scalar(&[&msg], b"QUUX-V01-CS02").unwrap();
         low::ct::public_slice(&scalar.0);
-        let again = hash_to_scalar(b"password", b"QUUX-V01-CS02").unwrap();
+        // The message is hashed whole, however it is split.
+        let again = hash_to_scalar(&[b"pass", b"word"], b"QUUX-V01-CS02").unwrap();
         assert_eq!(scalar.0, again.0);
     }
 }
