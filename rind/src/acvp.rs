@@ -106,7 +106,10 @@ pub fn mlkem768_encaps(ek: &[u8], m: &[u8]) -> Result<(Vec<u8>, SecretBuf), Erro
     let m: [u8; 32] = m.try_into().map_err(|_| Error::WrongLength)?;
     let key = EncapKey::from_bytes(ek)?;
     let (secret, ciphertext) = key.encaps_internal(Message(m));
-    Ok((ciphertext.as_ref().to_vec(), SecretBuf::from_slice(secret.as_ref())))
+    Ok((
+        ciphertext.as_ref().to_vec(),
+        SecretBuf::from_slice(secret.as_ref()),
+    ))
 }
 
 /// ML-KEM-768 decapsulation of an expanded decapsulation key.
@@ -264,6 +267,10 @@ mod tests {
     fn secret_buf_copy_does_not_branch() {
         let bytes = [0xa5u8; 32];
         let wanted = copy32(&SecretBuf::from_slice(&bytes));
+        // `from_slice` marks its copy secret, so the bytes `copy32` wrote are
+        // secret until this names them public. Comparing them otherwise is a
+        // branch on a secret.
+        public_slice(&wanted);
         secret_slice(&bytes);
         let got = copy32(&SecretBuf::from_slice(&bytes));
         assert_eq!(into_public(got), wanted);

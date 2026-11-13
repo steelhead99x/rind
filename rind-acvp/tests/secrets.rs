@@ -115,8 +115,13 @@ fn assert_wiped(secret: SecretBuf) {
     let value = Box::pin(secret);
     let ptr = &*value as *const SecretBuf as *const u8;
     let len = size_of::<SecretBuf>();
-    // SAFETY: `ptr` points at the pinned box, which is still alive.
-    assert_ne!(unsafe { ptr.read_volatile() }, 0);
+    let mut before = 0usize;
+    for i in 0..len {
+        // SAFETY: `ptr` points at the pinned box, which is still alive.
+        // A secret can start with a zero byte, so the check is the whole value.
+        before |= unsafe { ptr.add(i).read_volatile() } as usize;
+    }
+    assert_ne!(before, 0);
     // SAFETY: the pin is consumed here and nothing moves the value before
     // `drop_in_place`. The read below happens before `dealloc`.
     let addr = Box::into_raw(unsafe { Pin::into_inner_unchecked(value) });
