@@ -80,6 +80,31 @@
 
           quest-cli = quest.packages.${system}.default;
 
+          # admin/ scripts, and `sh/python.sh test`, which `admin/coverage`
+          # also runs.
+          python-shell = {
+            packages = [
+              # pyrind's tests and benchmarks check it against
+              # pyca/cryptography, and its type stubs with mypy's stubtest.
+              # pytest runs pyjwt's and joserfc's suites against
+              # pyrind-cryptography.
+              (pkgs.python3.withPackages (ps: [
+                ps.cryptography
+                ps.mypy
+                ps.pytest
+              ]))
+              # Builds pyrind (rind-python).
+              pkgs.maturin
+              pkgs.jq
+            ];
+            # The releases whose test suites `sh/python.sh test` runs against
+            # pyrind-cryptography, pinned with nixpkgs.
+            env = {
+              PYJWT_SRC = pkgs.python3Packages.pyjwt.src;
+              JOSERFC_SRC = pkgs.python3Packages.joserfc.src;
+            };
+          };
+
           timing-shell = {
             packages = [
               rust-stable.minimal
@@ -416,17 +441,6 @@
                   # sh/alert.sh reads the workflows.
                   yq-go
                   nixfmt
-                  # admin/ scripts, and pyrind's tests and benchmarks: they
-                  # check it against pyca/cryptography, and its type stubs
-                  # with mypy's stubtest. pytest runs pyjwt's and joserfc's
-                  # suites against pyrind-cryptography.
-                  (python3.withPackages (ps: [
-                    ps.cryptography
-                    ps.mypy
-                    ps.pytest
-                  ]))
-                  # Builds pyrind (rind-python).
-                  maturin
                   # admin/bench-report-test runs the script that holds a
                   # leased host.
                   flock
@@ -434,6 +448,7 @@
                   rustfmt-unstable
                   quest-cli
                 ]
+                ++ python-shell.packages
                 ++ pkgs.lib.optionals (!pkgs.stdenv.hostPlatform.isDarwin) [
                   # Marked broken on Darwin in nixpkgs.
                   # See UPSTREAM.md, "nixpkgs marks release-plz broken on
@@ -443,13 +458,12 @@
                   valgrind
                 ];
 
-              # What sh/dispatch.sh checks before a scoped `just check` or `just
-              # fix`. IN_NIX_SHELL would also pass inside another project's shell.
-              env.IN_RIND_DEV_SHELL = "1";
-              # The releases whose test suites `sh/python.sh compat` runs
-              # against pyrind-cryptography, pinned with nixpkgs.
-              env.PYJWT_SRC = pkgs.python3Packages.pyjwt.src;
-              env.JOSERFC_SRC = pkgs.python3Packages.joserfc.src;
+              env = python-shell.env // {
+                # What sh/dispatch.sh checks before a scoped `just check` or
+                # `just fix`. IN_NIX_SHELL would also pass inside another
+                # project's shell.
+                IN_RIND_DEV_SHELL = "1";
+              };
             };
 
             # dudect needs only Rust, without Marvin's Python and toolkit fetches.
@@ -558,8 +572,14 @@
                 pkgs.cmake
                 pkgs.pkg-config
                 pkgs.openssl
+                # rind-dart's tests.
+                pkgs.dart
+                pkgs.git
               ]
+              ++ python-shell.packages
               ++ pkgs.lib.optionals (system == "x86_64-linux") [ sde ];
+
+              inherit (python-shell) env;
 
               shellHook = pkgs.lib.optionalString (system == "x86_64-linux") sde-certs;
             };
