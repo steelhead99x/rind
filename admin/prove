@@ -1062,6 +1062,8 @@ extract x86_64 X86_64 \
     --include crate::low::x86_64::sha3_keccak4_f1600_shim \
     --include crate::low::x86_64::sha3_keccak_nof4_f1600 \
     --start-from '{impl crate::aead::Cipher for crate::mid::aes_gcm::AesGcm}' \
+    --start-from crate::mid::aes_gcm::AesGcm::encrypt_any \
+    --start-from crate::mid::aes_gcm::AesGcm::decrypt_any \
     --start-from crate::aead::Key \
     --start-from crate::aead::AlgorithmId \
     --opaque crate::aead::Algorithm \
