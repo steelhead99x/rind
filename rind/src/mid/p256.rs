@@ -41,9 +41,9 @@ impl PublicKey {
     /// `x` is below the field prime, and a point on the curve has that `x`.
     pub(crate) fn decompress<'a>(bytes: &[u8], output: &'a mut [u8]) -> Result<&'a [u8], Error> {
         let _entry = low::Entry::new_public();
-        let point = Affine::from_compressed(bytes)?;
+        let point = AffineMontPoint::from_x962_compressed(bytes)?;
         let output = output.get_mut(..Self::BYTES).ok_or(Error::WrongLength)?;
-        output.copy_from_slice(&point.to_uncompressed());
+        output.copy_from_slice(&point.as_bytes_uncompressed());
         Ok(output)
     }
 }
@@ -594,48 +594,88 @@ impl AffineMontPoint {
 }
 
 /// An affine P-256 point in Montgomery coordinates, checked on the curve.
-#[derive(Clone, Copy)]
+///
+/// `Clone` is written out, with `#[inline]`, rather than derived. A derived
+/// method is its own object in this crate; these wrappers exist for SPAKE2+
+/// and must not be, or the compiler merges the crate's codegen units
+/// differently and unrelated functions get worse code.
+///
+/// The methods are `#[inline]` too, and they call routines that already have
+/// a symbol (`PublicKey::from_x962_uncompressed`, `Point::mul_base`,
+/// `AffineMontPoint::multiply`) or `low` directly. Calling a private helper
+/// that this module had been inlining (`base_multiply`, `negate_y`,
+/// `from_affine`, `as_mont`, `from_x962_uncompressed`) from an inlined
+/// function makes that helper externally reachable, so LLVM stops inlining it
+/// into the callers it had before.
+#[derive(Copy)]
 pub(crate) struct Affine(AffineMontPoint);
+
+#[allow(clippy::derivable_impls)]
+impl Clone for Affine {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
 
 impl Affine {
     pub(crate) const BYTES: usize = 65;
 
     /// Decodes an uncompressed X9.62 point.
+    ///
+    /// [`PublicKey::from_x962_uncompressed`] already has a symbol and holds
+    /// the entry, so this does not call the private decoder that function
+    /// inlines.
+    #[inline]
     pub(crate) fn from_uncompressed(bytes: &[u8]) -> Result<Self, Error> {
-        low::Entry::assert_held();
-        AffineMontPoint::from_x962_uncompressed(bytes).map(Self)
+        PublicKey::from_x962_uncompressed(bytes).map(|key| Self(key.point))
     }
 
-    /// Decodes a compressed X9.62 point.
+    /// Decodes a compressed X9.62 point. The caller holds an `Entry`.
     ///
-    /// Holds an `Entry`, as [`Self::from_uncompressed`] does.
+    /// Tests are the only caller. A release build does not compile this, so
+    /// it does not name the private decoder [`PublicKey::decompress`] inlines.
+    #[cfg(test)]
+    #[inline]
     pub(crate) fn from_compressed(bytes: &[u8]) -> Result<Self, Error> {
         low::Entry::assert_held();
         AffineMontPoint::from_x962_compressed(bytes).map(Self)
     }
 
     /// Uncompressed X9.62 encoding. The coordinates are not declassified.
+    #[inline]
     pub(crate) fn to_uncompressed(self) -> [u8; Self::BYTES] {
         self.0.as_bytes_uncompressed()
     }
 
     /// `scalar * self`.
+    #[inline]
     pub(crate) fn mul(self, scalar: &Scalar) -> Self {
         low::Entry::assert_held();
         Self(self.0.multiply(scalar))
     }
 
     /// `scalar * G`.
+    ///
+    /// [`Point::mul_base`] is the symbol that already inlines the generator
+    /// multiplication, on every backend.
+    #[inline]
     pub(crate) fn mul_base(scalar: &Scalar) -> Self {
         low::Entry::assert_held();
-        Self(AffineMontPoint::base_multiply(scalar))
+        Self(Point::mul_base(scalar).0)
     }
 
     /// `-self`.
+    ///
+    /// Negates `y` with [`low::bignum_neg_p256`] rather than `negate_y`,
+    /// which the ECDSA multiples inline.
+    #[inline]
     pub(crate) fn negate(self) -> Self {
-        let mut point = self.0;
-        point.negate_y();
-        Self(point)
+        let mut xy = self.0.xy;
+        let mut neg = [0u64; 4];
+        low::bignum_neg_p256(&mut neg, (&xy[4..8]).try_into().unwrap());
+        xy[4..8].copy_from_slice(&neg);
+        Self(AffineMontPoint { xy })
     }
 
     /// `self + other`.
@@ -645,6 +685,7 @@ impl Affine {
     ///
     /// An input that is `(0, 0)`, such as an earlier sum of opposites, is
     /// taken as the identity, so chained sums stay correct.
+    #[inline]
     pub(crate) fn add(self, other: Self) -> Self {
         let sum = self.to_jacobian().complete_add(&other.to_jacobian());
         Self(sum.as_affine())
@@ -652,12 +693,24 @@ impl Affine {
 
     /// Jacobian coordinates, with `(0, 0)` mapped to infinity (`z = 0`) by a
     /// select rather than a branch.
+    ///
+    /// Written out, rather than [`JacobianMontPoint::from_affine`]: that
+    /// helper is inlined into the ECDSA multiples, and a call from this
+    /// inlined function would keep a copy of it.
+    #[inline]
     fn to_jacobian(self) -> JacobianMontPoint {
-        let point = JacobianMontPoint::from_affine(&self.0);
-        mux_point(self.identity_mask(), &JacobianMontPoint::infinity(), &point)
+        let mut xyz = [0u64; 12];
+        xyz[..8].copy_from_slice(&self.0.xy);
+        xyz[8..12].copy_from_slice(&CURVE_ONE_MONT.0);
+        let point = JacobianMontPoint { xyz };
+        let infinity = JacobianMontPoint {
+            xyz: [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        };
+        mux_point(self.identity_mask(), &infinity, &point)
     }
 
     /// The standard generator.
+    #[inline]
     pub(crate) fn generator() -> Self {
         Self(CURVE_GENERATOR)
     }
@@ -666,6 +719,7 @@ impl Affine {
     ///
     /// Not a curve point. [`Self::add`] treats it as infinity, and a scalar
     /// multiplication is unspecified on it.
+    #[inline]
     pub(crate) fn identity() -> Self {
         Self(AffineMontPoint::default())
     }
@@ -673,11 +727,13 @@ impl Affine {
     /// 1 when this is the affine image of the identity, `(0, 0)`.
     ///
     /// The mask is 0 or 1 and does not branch on the coordinates.
+    #[inline]
     pub(crate) fn identity_mask(self) -> u64 {
         u64::from(low::bignum_eq(&self.0.xy, &[0; 8]))
     }
 
     /// `other` when `select` is 1, and `self` when it is 0.
+    #[inline]
     pub(crate) fn select(self, other: Self, select: u64) -> Self {
         let mut xy = [0u64; 8];
         low::bignum_mux(select, &mut xy, &other.0.xy, &self.0.xy);
@@ -685,6 +741,7 @@ impl Affine {
     }
 
     /// Whether the curve equation holds.
+    #[inline]
     pub(crate) fn on_curve(self) -> bool {
         self.0.on_curve()
     }
@@ -954,6 +1011,7 @@ impl JacobianMontPoint {
     /// [`mid::hash_to_curve::sum`] covers equal and opposite finite points; a
     /// point at infinity selects the other, with no branch on the coordinates.
     #[must_use]
+    #[inline]
     fn complete_add(&self, p: &Self) -> Self {
         let sum = hash_to_curve::jacobian(&mid::hash_to_curve::sum(
             &hash_to_curve::coordinates(self),
@@ -976,6 +1034,7 @@ impl JacobianMontPoint {
     }
 }
 
+#[inline]
 fn mux_point(
     select: u64,
     if_set: &JacobianMontPoint,
@@ -1175,11 +1234,13 @@ impl Scalar {
     ///
     /// The mask stays secret. A caller that cannot multiply by zero folds it
     /// into one declassified decision, after the work a nonzero scalar does.
+    #[inline]
     pub(crate) fn zero_mask(&self) -> u64 {
         u64::from(self.is_zero())
     }
 
     /// `other` when `select` is nonzero, and `self` when it is zero.
+    #[inline]
     pub(crate) fn select(&self, other: &Self, select: u64) -> Self {
         let mut limbs = [0u64; 4];
         low::bignum_mux(select, &mut limbs, &other.0, &self.0);
@@ -1187,6 +1248,7 @@ impl Scalar {
     }
 
     /// The scalar 1, in range for the scalar multiplication.
+    #[inline]
     pub(crate) fn one() -> Self {
         Self([1, 0, 0, 0])
     }
@@ -1271,6 +1333,7 @@ impl Scalar {
     ///
     /// A type that implements [`Drop`] cannot move its scalar out, so it
     /// copies one and lets the drop wipe the original.
+    #[inline]
     pub(crate) fn copy(&self) -> Self {
         Self(self.0)
     }
@@ -1282,6 +1345,7 @@ impl Scalar {
     /// The length is public. The residue stays secret, zero included:
     /// [`Self::zero_mask`] reports that without a branch. Rejecting it here
     /// would publish that a password is 0 mod n.
+    #[inline]
     pub(crate) fn from_be_reduced(bytes: &[u8]) -> Result<Self, Error> {
         low::Entry::assert_held();
         const MAX: usize = 128;
@@ -1304,7 +1368,11 @@ impl Scalar {
                 }
             }
             let limb = Self::from_bytes_reduced(&chunk)?;
-            acc = acc.as_mont().add(&limb);
+            // `as_mont` is inlined into ECDSA. Naming it here would emit a
+            // copy and stop that. This is the same multiplication.
+            let mut mont = [0u64; 4];
+            low::bignum_montmul(&mut mont, &acc.0, &CURVE_ORDER_MM, &CURVE_ORDER);
+            acc = Self(mont).add(&limb);
             done += 32;
         }
 

@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! SPAKE2+ on P-256 (RFC 9383 and Matter's draft-01 key schedule).
+//!
+//! Every function here is `#[inline]`, and [`RFC9383`] and [`MATTER_PASE`] are
+//! consts. At opt-level above zero an inlined function is a local copy, and a
+//! const is not an object, so this module adds nothing for the compiler to
+//! place in a codegen unit. A function that is not inlined, a derived method,
+//! or a static would be its own object and the compiler would merge the
+//! crate's units differently. That merge is what changed the code of AES-CBC
+//! and P-256, which this module does not call.
 
 use core::fmt;
 use core::marker::PhantomData;
@@ -51,7 +59,7 @@ const N_UNCOMPRESSED: [u8; 65] = [
 ];
 
 /// Which key schedule a [`Suite`] runs. The transcript is the same for both.
-#[derive(Clone, Copy, Debug)]
+#[derive(Copy)]
 enum Schedule {
     /// RFC 9383: HKDF over the whole transcript hash.
     Rfc9383,
@@ -59,14 +67,85 @@ enum Schedule {
     Draft01,
 }
 
+// Not derived: see the module docs. `derivable_impls` wants `#[derive(Clone)]`,
+// which would emit a separate object.
+#[allow(clippy::derivable_impls)]
+impl Clone for Schedule {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl fmt::Debug for Schedule {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Rfc9383 => "Rfc9383",
+            Self::Draft01 => "Draft01",
+        })
+    }
+}
+
 /// Marker for [`RFC9383`]. A [`Share`] or [`Confirm`] of this suite is not a
 /// [`MatterPase`] value, so a mixed handshake does not compile.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Copy)]
 pub struct Rfc9383;
 
 /// Marker for [`MATTER_PASE`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Copy)]
 pub struct MatterPase;
+
+// Not derived: see the module docs.
+#[allow(clippy::derivable_impls)]
+impl Clone for Rfc9383 {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+#[allow(clippy::derivable_impls)]
+impl PartialEq for Rfc9383 {
+    #[inline]
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for Rfc9383 {}
+
+impl fmt::Debug for Rfc9383 {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Rfc9383")
+    }
+}
+
+#[allow(clippy::derivable_impls)]
+impl Clone for MatterPase {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+#[allow(clippy::derivable_impls)]
+impl PartialEq for MatterPase {
+    #[inline]
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for MatterPase {}
+
+impl fmt::Debug for MatterPase {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("MatterPase")
+    }
+}
 
 /// A SPAKE2+ ciphersuite. Only this module's constants build one.
 ///
@@ -92,7 +171,7 @@ pub struct Suite<S> {
 }
 
 /// RFC 9383's P-256, SHA-256, HKDF-SHA256, HMAC-SHA256 suite.
-pub static RFC9383: Suite<Rfc9383> = Suite {
+pub const RFC9383: Suite<Rfc9383> = Suite {
     schedule: Schedule::Rfc9383,
     _kind: PhantomData,
 };
@@ -105,7 +184,7 @@ pub static RFC9383: Suite<Rfc9383> = Suite {
 /// Matter's context is SHA-256 over "CHIP PAKE V1 Commissioning", the
 /// PBKDFParamRequest, and the PBKDFParamResponse, and both identities are
 /// empty.
-pub static MATTER_PASE: Suite<MatterPase> = Suite {
+pub const MATTER_PASE: Suite<MatterPase> = Suite {
     schedule: Schedule::Draft01,
     _kind: PhantomData,
 };
@@ -125,6 +204,7 @@ impl<S> Share<S> {
     ///
     /// Fails with [`Error::KeyRejected`] when `bytes` is not that encoding of
     /// a point on P-256.
+    #[inline]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_public();
         // The decoder refuses a coordinate at or above p, so each point has
@@ -138,12 +218,14 @@ impl<S> Share<S> {
 }
 
 impl<S> AsRef<[u8]> for Share<S> {
+    #[inline]
     fn as_ref(&self) -> &[u8] {
         &self.bytes
     }
 }
 
 impl<S> fmt::Debug for Share<S> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Share").field(&self.bytes).finish()
     }
@@ -166,6 +248,7 @@ impl<S> Confirm<S> {
     /// Copies `bytes` when they are [`Self::BYTES`] long.
     ///
     /// Fails with [`Error::WrongLength`] otherwise.
+    #[inline]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_public();
         let bytes: [u8; 32] = bytes.try_into().map_err(|_| Error::WrongLength)?;
@@ -177,12 +260,14 @@ impl<S> Confirm<S> {
 }
 
 impl<S> AsRef<[u8]> for Confirm<S> {
+    #[inline]
     fn as_ref(&self) -> &[u8] {
         &self.bytes
     }
 }
 
 impl<S> PartialEq for Confirm<S> {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         let _entry = Entry::new_secret();
         ct::into_public(ct_equal(self.as_ref(), other.as_ref()))
@@ -190,6 +275,7 @@ impl<S> PartialEq for Confirm<S> {
 }
 
 impl<S> fmt::Debug for Confirm<S> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Confirm").finish_non_exhaustive()
     }
@@ -202,6 +288,7 @@ pub struct SharedKey {
 }
 
 impl SharedKey {
+    #[inline]
     fn new(bytes: &[u8]) -> Self {
         let mut stored = [0u8; 32];
         stored[..bytes.len()].copy_from_slice(bytes);
@@ -213,12 +300,14 @@ impl SharedKey {
 }
 
 impl AsRef<[u8]> for SharedKey {
+    #[inline]
     fn as_ref(&self) -> &[u8] {
         &self.bytes[..usize::from(self.len)]
     }
 }
 
 impl fmt::Debug for SharedKey {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SharedKey")
             .field("len", &self.len)
@@ -227,6 +316,7 @@ impl fmt::Debug for SharedKey {
 }
 
 impl Drop for SharedKey {
+    #[inline]
     fn drop(&mut self) {
         zeroise_value(self);
     }
@@ -253,6 +343,7 @@ impl ProverSecrets {
     /// treats it as the identity and [`ProverAwaiting::finish`] returns
     /// [`Error::BadSignature`] after the same work as a bad confirmation tag.
     /// Returning that from here would publish that the password is 0 mod n.
+    #[inline]
     pub fn new(w0: &[u8], w1: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_secret();
         let (w0, w0_zero) = password_scalar(w0)?;
@@ -270,6 +361,7 @@ impl ProverSecrets {
     /// `context`, `id_prover`, and `id_verifier` go into the transcript under
     /// an 8-byte little-endian length, including when empty. Each is at most
     /// 1024 bytes. The secrets stay usable for another handshake.
+    #[inline]
     pub fn start<S: 'static>(
         &self,
         suite: &'static Suite<S>,
@@ -280,6 +372,7 @@ impl ProverSecrets {
         self.start_at(suite, context, id_prover, id_verifier, None)
     }
 
+    #[inline]
     fn start_at<S: 'static>(
         &self,
         suite: &'static Suite<S>,
@@ -314,12 +407,14 @@ impl ProverSecrets {
 }
 
 impl fmt::Debug for ProverSecrets {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ProverSecrets").finish_non_exhaustive()
     }
 }
 
 impl Drop for ProverSecrets {
+    #[inline]
     fn drop(&mut self) {
         zeroise_value(self);
     }
@@ -343,6 +438,7 @@ impl VerifierRecord {
     /// The scalar rules are [`ProverSecrets::new`]'s. A zero `w1` stores the
     /// identity as `L`. [`Self::from_record`] rejects that encoding; this
     /// in-memory record still fails the handshake at confirmation.
+    #[inline]
     pub fn from_w1(w0: &[u8], w1: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_secret();
         let (w0, w0_zero) = password_scalar(w0)?;
@@ -366,6 +462,7 @@ impl VerifierRecord {
     /// Store `L` as carefully as `w0`. It is half the stored record, and
     /// with Matter's short passcodes it is enough to recover the passcode
     /// offline.
+    #[inline]
     pub fn l(&self) -> [u8; 65] {
         let _entry = Entry::new_public();
         self.l.to_uncompressed()
@@ -378,6 +475,7 @@ impl VerifierRecord {
     /// `w0` loads; the handshake then fails as [`ProverSecrets::new`] describes.
     /// The identity encoding of a zero `w1` is not a curve point, so it is
     /// rejected here rather than reloaded as some other scalar.
+    #[inline]
     pub fn from_record(w0: &[u8], l: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_secret();
         let (w0, w0_zero) = password_scalar(w0)?;
@@ -395,6 +493,7 @@ impl VerifierRecord {
     ///
     /// The labels are the same strings the prover passed to [`ProverSecrets::start`].
     /// The record stays usable for another handshake.
+    #[inline]
     pub fn start<S: 'static>(
         &self,
         suite: &'static Suite<S>,
@@ -406,6 +505,7 @@ impl VerifierRecord {
         self.start_at(suite, context, id_prover, id_verifier, prover, None)
     }
 
+    #[inline]
     fn start_at<S: 'static>(
         &self,
         suite: &'static Suite<S>,
@@ -464,12 +564,14 @@ impl VerifierRecord {
 }
 
 impl fmt::Debug for VerifierRecord {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("VerifierRecord").finish_non_exhaustive()
     }
 }
 
 impl Drop for VerifierRecord {
+    #[inline]
     fn drop(&mut self) {
         zeroise_value(self);
     }
@@ -499,6 +601,7 @@ impl<S> ProverAwaiting<S> {
     /// tag over this prover's share, when the verifier's share makes a derived
     /// point the identity, and when `w0` or `w1` reduced to zero. The shared
     /// key is not returned on failure.
+    #[inline]
     pub fn finish(
         self,
         verifier: &Share<S>,
@@ -517,6 +620,7 @@ impl<S> ProverAwaiting<S> {
         }
     }
 
+    #[inline]
     fn compute(
         &self,
         verifier: &Share<S>,
@@ -554,12 +658,14 @@ impl<S> ProverAwaiting<S> {
 }
 
 impl<S> fmt::Debug for ProverAwaiting<S> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ProverAwaiting").finish_non_exhaustive()
     }
 }
 
 impl<S> Drop for ProverAwaiting<S> {
+    #[inline]
     fn drop(&mut self) {
         zeroise_value(self);
     }
@@ -582,6 +688,7 @@ impl<S> VerifierAwaiting<S> {
     ///
     /// Fails with [`Error::BadSignature`] when it is not, and when `w0` or
     /// `w1` reduced to zero. The key is wiped on failure.
+    #[inline]
     pub fn finish(self, confirm: &Confirm<S>) -> Result<SharedKey, Error> {
         let _entry = Entry::new_secret();
         let key = SharedKey::new(&self.shared[..usize::from(self.shared_len)]);
@@ -594,12 +701,14 @@ impl<S> VerifierAwaiting<S> {
 }
 
 impl<S> fmt::Debug for VerifierAwaiting<S> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("VerifierAwaiting").finish_non_exhaustive()
     }
 }
 
 impl<S> Drop for VerifierAwaiting<S> {
+    #[inline]
     fn drop(&mut self) {
         zeroise_value(self);
     }
@@ -613,6 +722,7 @@ struct Label {
 }
 
 impl Label {
+    #[inline]
     fn new(bytes: &[u8]) -> Result<Self, Error> {
         if bytes.len() > MAX_LABEL {
             return Err(Error::WrongLength);
@@ -625,6 +735,7 @@ impl Label {
         })
     }
 
+    #[inline]
     fn as_slice(&self) -> &[u8] {
         &self.bytes[..usize::from(self.len)]
     }
@@ -637,6 +748,7 @@ struct Labels {
 }
 
 impl Labels {
+    #[inline]
     fn new(context: &[u8], id_prover: &[u8], id_verifier: &[u8]) -> Result<Self, Error> {
         Ok(Self {
             context: Label::new(context)?,
@@ -661,19 +773,23 @@ struct Keys {
 }
 
 impl Keys {
+    #[inline]
     fn prover_key(&self) -> &[u8] {
         &self.prover[..self.len]
     }
 
+    #[inline]
     fn verifier_key(&self) -> &[u8] {
         &self.verifier[..self.len]
     }
 
+    #[inline]
     fn shared(&self) -> &[u8] {
         &self.shared[..self.len]
     }
 }
 
+#[inline]
 fn points() -> Result<(Affine, Affine), Error> {
     Ok((
         Affine::from_uncompressed(&M_UNCOMPRESSED)?,
@@ -686,6 +802,7 @@ fn points() -> Result<(Affine, Affine), Error> {
 /// Returns the point to multiply and 1 when `point` was the identity.
 /// `(0, 0)` is not a curve point, and the scalar multiplication is
 /// unspecified on it. The mask stays secret.
+#[inline]
 fn defined(point: Affine) -> (Affine, u64) {
     let identity = point.identity_mask();
     (point.select(Affine::generator(), identity), identity)
@@ -693,6 +810,7 @@ fn defined(point: Affine) -> (Affine, u64) {
 
 /// `scalar * point`, with the generator standing in for the identity, as
 /// [`defined`] picks it, and 1 when `point` was the identity.
+#[inline]
 fn mul_defined(point: Affine, scalar: &Scalar) -> (Affine, u64) {
     let (base, identity) = defined(point);
     (base.mul(scalar), identity)
@@ -701,6 +819,7 @@ fn mul_defined(point: Affine, scalar: &Scalar) -> (Affine, u64) {
 /// Reduces `bytes` and reports whether the residue is zero.
 ///
 /// The mask stays secret. [`Scalar::from_be_reduced`] does not branch on it.
+#[inline]
 fn password_scalar(bytes: &[u8]) -> Result<(Scalar, u64), Error> {
     let scalar = Scalar::from_be_reduced(bytes)?;
     let zero = scalar.zero_mask();
@@ -712,6 +831,7 @@ fn password_scalar(bytes: &[u8]) -> Result<(Scalar, u64), Error> {
 /// A zero residue selects the identity after the multiplication. Off-curve
 /// here is a fault in that routine: the scalar it sees is never zero, so the
 /// check does not reveal the residue.
+#[inline]
 fn base_for_record(scalar: &Scalar, zero: u64) -> Result<Affine, Error> {
     let point = Affine::mul_base(&scalar.select(&Scalar::one(), zero));
     if !ct::into_public(point.on_curve()) {
@@ -726,6 +846,7 @@ fn base_for_record(scalar: &Scalar, zero: u64) -> Result<Affine, Error> {
 /// point and a scalar in `1..n-1`, so a zero scalar substitutes both and
 /// the product is replaced. `point` itself may be the identity only when
 /// `zero` is already 1, as a stored `L` from [`VerifierRecord::from_w1`].
+#[inline]
 fn mul_or_identity(point: Affine, scalar: &Scalar, zero: u64) -> Affine {
     let safe_point = point.select(Affine::generator(), zero);
     let safe_scalar = scalar.select(&Scalar::one(), zero);
@@ -739,6 +860,7 @@ fn mul_or_identity(point: Affine, scalar: &Scalar, zero: u64) -> Affine {
 /// A normal product is on the curve and `identity_ok` is 0. The identity is
 /// off the curve and `identity_ok` is 1. Both leave the fault bit clear, so
 /// rejecting an unexpected off-curve point does not reveal a zero residue.
+#[inline]
 fn encode_maybe_identity(point: Affine, identity_ok: u64) -> Result<EncodedPoint, Error> {
     let bytes = point.to_uncompressed();
     let on_curve = u64::from(point.on_curve());
@@ -752,6 +874,7 @@ fn encode_maybe_identity(point: Affine, identity_ok: u64) -> Result<EncodedPoint
     })
 }
 
+#[inline]
 fn random_scalar() -> Result<Scalar, Error> {
     let mut rng = SystemRandom;
     for _ in 0..64 {
@@ -771,6 +894,7 @@ struct EncodedPoint {
 }
 
 impl EncodedPoint {
+    #[inline]
     fn as_slice(&self) -> &[u8] {
         &self.bytes[..usize::from(self.len)]
     }
@@ -780,6 +904,7 @@ impl EncodedPoint {
 /// the bytes. Every point encoded here is computed from on-curve inputs (a
 /// peer's share is checked when it is decoded), so an off-curve result is an
 /// internal fault, as in [`VerifierRecord::from_w1`].
+#[inline]
 fn encode(point: Affine, public: bool) -> Result<EncodedPoint, Error> {
     let bytes = point.to_uncompressed();
     if !ct::into_public(point.on_curve()) {
@@ -795,11 +920,13 @@ fn encode(point: Affine, public: bool) -> Result<EncodedPoint, Error> {
 }
 
 /// Declassifies a tag this side sends to the peer.
+#[inline]
 fn sent<S>(confirm: Confirm<S>) -> Confirm<S> {
     ct::public_slice(&confirm.bytes);
     confirm
 }
 
+#[inline]
 fn publish<S>(point: Affine) -> Result<Share<S>, Error> {
     let encoded = encode(point, true)?;
     Ok(Share {
@@ -808,15 +935,18 @@ fn publish<S>(point: Affine) -> Result<Share<S>, Error> {
     })
 }
 
+#[inline]
 fn secret_point(point: Affine) -> Result<EncodedPoint, Error> {
     encode(point, false)
 }
 
+#[inline]
 fn absorb(hash: &mut digest::Context, data: &[u8]) {
     hash.update(&(data.len() as u64).to_le_bytes());
     hash.update(data);
 }
 
+#[inline]
 fn transcript(
     labels: &Labels,
     share_p: &[u8],
@@ -843,12 +973,14 @@ fn transcript(
     out
 }
 
+#[inline]
 fn expand(prk: &hkdf::Prk, info: &[u8], out: &mut [u8]) -> Result<(), Error> {
     prk.expand(&[info], out.len())
         .fill(out)
         .map_err(|_| Error::Fault)
 }
 
+#[inline]
 fn schedule_keys(schedule: Schedule, transcript_hash: &[u8; 32]) -> Result<Keys, Error> {
     let mut keys = Keys {
         prover: [0; 32],
@@ -882,6 +1014,7 @@ fn schedule_keys(schedule: Schedule, transcript_hash: &[u8; 32]) -> Result<Keys,
 
 /// The tag stays secret. A tag this side sends is declassified by [`sent`];
 /// one it only compares against the peer's stays secret through `ct_equal`.
+#[inline]
 fn mac<S>(key: &[u8], message: &[u8]) -> Confirm<S> {
     let tag = hmac::sign(&hmac::Key::new(&hmac::HMAC_SHA256, key), message);
     let mut bytes = [0u8; 32];
@@ -897,10 +1030,12 @@ fn mac<S>(key: &[u8], message: &[u8]) -> Confirm<S> {
 mod tests {
     use super::*;
 
+    #[inline]
     fn hex(s: &str) -> Vec<u8> {
         hex::decode(s).unwrap()
     }
 
+    #[inline]
     fn scalar(s: &str) -> Scalar {
         Scalar::from_be_reduced(&hex(s)).unwrap()
     }
@@ -922,6 +1057,7 @@ mod tests {
         shared: &'static str,
     }
 
+    #[inline]
     fn run<S: 'static>(vector: &Vector<S>) {
         let prover = ProverSecrets::new(&hex(vector.w0), &hex(vector.w1)).unwrap();
         let from_w1 = VerifierRecord::from_w1(&hex(vector.w0), &hex(vector.w1)).unwrap();
@@ -977,6 +1113,7 @@ mod tests {
     }
 
     #[test]
+    #[inline]
     fn rfc9383() {
         run(&Vector {
             suite: &RFC9383,
@@ -997,6 +1134,7 @@ mod tests {
     }
 
     #[test]
+    #[inline]
     fn draft01() {
         run(&Vector {
             suite: &MATTER_PASE,
@@ -1038,6 +1176,7 @@ mod tests {
     /// That is the set Matter's PASE tests run. The first two are also
     /// draft-01 appendix B, covered by [`draft01`].
     #[test]
+    #[inline]
     fn connectedhomeip() {
         let context: &[u8] = b"SPAKE2+-P256-SHA256-HKDF draft-01";
         let w0 = "e6887cf9bdfb7579c69bf47928a84514b5e355ac034863f7ffaf4390e67d798c";
@@ -1113,6 +1252,7 @@ mod tests {
     /// A handshake pakery-spake2plus has not published as a vector.
     #[test]
     #[cfg(not(any(miri, target_family = "wasm")))]
+    #[inline]
     fn matches_pakery() {
         use p256::elliptic_curve::ff::PrimeField;
         use pakery_crypto::{
@@ -1133,6 +1273,7 @@ mod tests {
             const N_BYTES: &'static [u8] = &SPAKE2_P256_N_COMPRESSED;
         }
 
+        #[inline]
         fn sc(bytes: &[u8; 32]) -> p256::Scalar {
             p256::Scalar::from_repr((*bytes).into()).unwrap()
         }
@@ -1203,6 +1344,7 @@ mod tests {
     /// A stored record, and the prover's secrets, serve more than one
     /// handshake, each with its own key.
     #[test]
+    #[inline]
     fn a_record_serves_many_handshakes() {
         let w0 = [0x11; 40];
         let w1 = [0x22; 40];
@@ -1230,6 +1372,7 @@ mod tests {
     }
 
     #[test]
+    #[inline]
     fn rejects_a_bad_confirmation_and_a_bad_share() {
         let w0 = [0x11; 40];
         let w1 = [0x22; 40];
@@ -1279,6 +1422,7 @@ mod tests {
     /// A share loads only as the uncompressed encoding of a point on P-256,
     /// and a label of exactly `MAX_LABEL` bytes is accepted.
     #[test]
+    #[inline]
     fn share_and_label_edges() {
         let prover = ProverSecrets::new(&[0x11; 40], &[0x22; 40]).unwrap();
         let (share_p, _) = prover.start(&RFC9383, b"ctx", b"a", b"b").unwrap();
@@ -1343,6 +1487,7 @@ mod tests {
     /// A zero `w0` is a residue, not a malformed encoding. `zero_residue_fails_closed`
     /// rejects it at confirmation.
     #[test]
+    #[inline]
     fn from_record_rejects_a_malformed_record() {
         let w0 = [0x11; 40];
         let l = VerifierRecord::from_w1(&w0, &[0x22; 40]).unwrap().l();
@@ -1372,6 +1517,7 @@ mod tests {
     /// that tag would match. A zero scalar's messages are the identity's, so
     /// they are not the messages of scalar 1.
     #[test]
+    #[inline]
     fn zero_residue_fails_closed() {
         let zero = [0u8; 40];
         let normal = [0x22u8; 40];
@@ -1477,6 +1623,7 @@ mod tests {
         assert_eq!(identity_l, identity);
     }
 
+    #[inline]
     fn identity_point() -> [u8; 65] {
         let mut bytes = [0u8; 65];
         bytes[0] = 4;
@@ -1487,6 +1634,7 @@ mod tests {
     /// handshake still fails. `z` and `v` are the identity arithmetic, so a
     /// wrong product (scalar 1, or a negation of `(0, 0)` that is not the
     /// identity) fails this before the mask does.
+    #[inline]
     fn tags_match_transcript(w0: &[u8], w1: &[u8], x: &Scalar, y: &Scalar, z: &[u8], v: &[u8]) {
         let (share_p, prover) = ProverSecrets::new(w0, w1)
             .unwrap()
@@ -1515,6 +1663,7 @@ mod tests {
         assert_eq!(verifier.finish(&confirm_p).err(), Some(Error::BadSignature));
     }
 
+    #[inline]
     fn refuses_alias(pw0: &[u8], pw1: &[u8], vw0: &[u8], vw1: &[u8], x: &Scalar, y: &Scalar) {
         let (share_p, prover) = ProverSecrets::new(pw0, pw1)
             .unwrap()
@@ -1536,6 +1685,7 @@ mod tests {
     /// generator standing in for that difference, and a tag that matches them
     /// is still refused.
     #[test]
+    #[inline]
     fn exceptional_peer_share_follows_rfc9383() {
         let w0 = [0x31u8; 40];
         let w1 = [0x41u8; 40];
@@ -1657,6 +1807,7 @@ mod tests {
     /// that are empty or past 128 bytes. A `w0` or `w1` that is zero mod n
     /// still loads; `zero_residue_fails_closed` covers its handshake.
     #[test]
+    #[inline]
     fn refuses_malformed_encodings() {
         const P: &str = "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff";
         const N: &str = "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551";
@@ -1727,6 +1878,7 @@ mod tests {
     }
 
     #[test]
+    #[inline]
     fn m_and_n_match_their_compressed_form() {
         let _entry = Entry::new_public();
         assert_eq!(
@@ -1743,6 +1895,7 @@ mod tests {
         );
     }
 
+    #[inline]
     fn point_share<S>(bytes: [u8; 65]) -> Share<S> {
         // Built from secret scalars, then parsed as a public share. The
         // encoding check branches; the bytes are public by the time it runs.
@@ -1753,6 +1906,7 @@ mod tests {
         }
     }
 
+    #[inline]
     fn confirm_of<S>(bytes: [u8; 32]) -> Confirm<S> {
         Confirm {
             bytes,
@@ -1761,11 +1915,13 @@ mod tests {
     }
 
     #[test]
+    #[inline]
     fn suites_do_not_agree() {
         let w0 = [0x31; 32];
         let w1 = [0x41; 32];
         let x = scalar("0000000000000000000000000000000000000000000000000000000000000007");
         let y = scalar("000000000000000000000000000000000000000000000000000000000000000b");
+        #[inline]
         fn exchange<S: 'static>(
             suite: &'static Suite<S>,
             w0: &[u8],
@@ -1799,6 +1955,7 @@ mod tests {
     /// and both identities are empty.
     #[test]
     #[cfg(not(any(miri, target_family = "wasm")))]
+    #[inline]
     fn matches_matter_crypto() {
         use core::num::NonZeroU32;
 
@@ -1874,6 +2031,7 @@ mod tests {
     }
 
     #[test]
+    #[inline]
     fn secrets_stay_secret() {
         // Under `admin/ctgrind`, nothing may branch on w0, w1, or the
         // ephemeral scalars until the confirmation tags and, in this test,
@@ -1884,6 +2042,7 @@ mod tests {
         let w1 = [0xa5; 40];
         ct::secret_slice(&w0);
         ct::secret_slice(&w1);
+        #[inline]
         fn one<S: 'static>(suite: &'static Suite<S>, w0: &[u8], w1: &[u8]) {
             let verifier = VerifierRecord::from_w1(w0, w1).unwrap();
             let l = verifier.l();
@@ -1895,6 +2054,7 @@ mod tests {
                 VerifierRecord::from_record(w0, &l).unwrap(),
             );
         }
+        #[inline]
         fn exchange<S: 'static>(
             suite: &'static Suite<S>,
             prover: ProverSecrets,
