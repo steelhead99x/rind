@@ -10,11 +10,13 @@
 # x86_64 ones with the target renamed, which this writes too, all but each
 # target's own `ShaBlocks.lean` and `HashAxioms.lean`.
 #
-# Usage: admin/prove [bytes | hol-light | cosim | lean | session <arch> [<file>]]
+# Usage: admin/prove [bytes | hol-light [<arch>] | cosim | lean | session <arch> [<file>]]
 #
 # An argument checks only those proofs, `bytes` only that the assembly rind
 # imports is the object code its upstream's proofs checked, and declares
-# each register they let it change. `cosim`, which no other run includes
+# each register they let it change. `hol-light <arch>` checks only that
+# target's HOL Light proofs, so CI runs each target in its own job.
+# `cosim`, which no other run includes
 # since it needs an x86_64 CPU with AVX2, checks the instructions rind adds
 # to s2n-bignum's x86 model, in its fork in `thirdparty/s2n-bignum`, against
 # this CPU. `session` checks nothing: it starts a HOL Light session for
@@ -25,9 +27,16 @@
 # develop .#hol-light --command admin/prove hol-light`.
 set -euo pipefail
 
-usage="usage: admin/prove [bytes | hol-light | cosim | lean | session <x86_64 | aarch64> [<file>]]"
+usage="usage: admin/prove [bytes | hol-light [x86_64 | aarch64] | cosim | lean | session <x86_64 | aarch64> [<file>]]"
 case "${1:-}" in
-'' | bytes | hol-light | cosim | lean) only=${1:-} ;;
+'' | bytes | cosim | lean) only=${1:-} ;;
+hol-light)
+    if [[ $# -gt 2 || ($# -eq 2 && $2 != x86_64 && $2 != aarch64) ]]; then
+        echo "$usage" >&2
+        exit 2
+    fi
+    only=hol-light hol_light_arch=${2:-}
+    ;;
 session)
     if [[ $# -lt 2 || $# -gt 3 || ($2 != x86_64 && $2 != aarch64) ]]; then
         echo "$usage" >&2
@@ -320,7 +329,7 @@ hol_light() {
     hold hol-light
     hold scratch
     rm -rf "$dir"
-    arches=$(printf '%s\n' "${hol_light_proofs[@]}" | cut -d' ' -f1 | sort -u)
+    arches=${hol_light_arch:-$(printf '%s\n' "${hol_light_proofs[@]}" | cut -d' ' -f1 | sort -u)}
     for arch in $arches; do
         hol_light_objects "$arch" "$dir/$arch"
         echo 'let prove_start = Unix.time ();;' >"$dir/$arch.ml"
@@ -328,10 +337,14 @@ hol_light() {
     release scratch
     for proof in "${hol_light_proofs[@]}"; do
         read -r arch file _ <<<"$proof"
-        echo "loadt \"$arch/${file%.*}.ml\";;" >>"$dir/$arch.ml"
+        [[ -f $dir/$arch.ml ]] || continue
+        # Each proof's time, so the log shows where a job's limit goes.
+        printf 'let proof_start = Unix.time ();;\nloadt "%s";;\nPrintf.printf "%s: %%.0f s\\n%%!" (Unix.time () -. proof_start);;\n' \
+            "$arch/${file%.*}.ml" "$arch/${file%.*}" >>"$dir/$arch.ml"
     done
     for spec in "${hol_light_specs[@]}"; do
         read -r arch file <<<"$spec"
+        [[ -f $dir/$arch.ml ]] || continue
         echo "needs \"$file\";;" >>"$dir/$arch.ml"
     done
     for arch in $arches; do
