@@ -116,7 +116,7 @@ asm_block() {
         done >"$dest.insns"
     fi
     "$tools/llvm-objcopy" --dump-section="$section=$dest.section" "$obj" "$dest.o"
-    tail -c +$((start + 1)) "$dest.section" | head -c $((end - start)) >"$dest"
+    head -c $((end)) "$dest.section" | tail -c +$((start + 1)) >"$dest"
     rm "$dest.section" "$dest.o"
 }
 
@@ -192,7 +192,7 @@ relocation_data() {
         fi
         "$tools/llvm-objcopy" --dump-section="$section=$dir/section" "$tobj" "$dir/copy.o"
         if [[ -n "$size" ]]; then
-            tail -c +$((16#$value + 1)) "$dir/section" | head -c $((16#$size)) >"$dir/$target"
+            head -c $((16#$value + 16#$size)) "$dir/section" | tail -c +$((16#$value + 1)) >"$dir/$target"
             touch "$dir/$target.sized"
         else
             mv "$dir/section" "$dir/$target"
@@ -601,7 +601,7 @@ routine_layout() {
         fi
     done < <(relocations "$obj" "$section")
     "$tools/llvm-objcopy" --dump-section="$section=$dest.section" "$obj" "$dest.o"
-    tail -c +$((start + 1)) "$dest.section" | head -c $((end - start)) >"$dest"
+    head -c $((end)) "$dest.section" | tail -c +$((start + 1)) >"$dest"
     rm "$dest.section" "$dest.o"
 }
 
