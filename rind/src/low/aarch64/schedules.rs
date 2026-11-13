@@ -326,10 +326,11 @@ fn trace_ecdh(algorithm: &'static crate::agreement::Algorithm, len: usize) {
     let peer = PrivateKey::from_scalar(algorithm, &peer_scalar).unwrap();
     let peer = peer.public_key().as_ref().to_vec();
     // The low bytes carry the seed. The rest stay zero, so the scalar is
-    // below every curve order `from_scalar` accepts.
+    // below every curve order `from_scalar` accepts. The scalar is big
+    // endian, so its low bytes are its last.
     let mut scalar = vec![0u8; len];
     let seed = qemu_seed(8);
-    scalar[..seed.len()].copy_from_slice(&seed);
+    scalar[len - seed.len()..].copy_from_slice(&seed);
     super::ct_qemu::traced(|| {
         let key = PrivateKey::from_scalar(algorithm, &scalar).unwrap();
         key.agree(&peer).is_ok()
