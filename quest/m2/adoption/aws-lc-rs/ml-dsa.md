@@ -6,10 +6,9 @@ rind-aws-lc-rs offers aws-lc-rs 1.x's ML-DSA items, backed by rind's: `signature
 
 ## Plan
 
-- aws-lc-rs picks the parameter set at run time, through a `&'static PqdsaSigningAlgorithm`, where rind's `signature::sign::MlDsaKeyPair<P>` takes it as a type, so the adapter's key pair holds an enum of the three. Verification maps onto `rind::signature::verify::ML_DSA_*` through the adapter's existing `ParsedPublicKey` and `UnparsedPublicKey`.
-- aws-lc-rs's `to_pkcs8` and `to_pkcs8v1` fail for a key loaded without its seed, where rind's `to_pkcs8` emits the expanded form; the adapter returns aws-lc-rs's error there. `from_raw_private_key` can wrap the expanded key in the PKCS#8 form rind loads. `PqdsaPrivateKey::as_raw_bytes`, which reads the expanded key back, has no rind counterpart and stays in the README's list.
-- Test each item against aws-lc-rs, as the adapter's other algorithms are.
-- Vendor aws-lc-rs's `tests/pqdsa_test.rs` and its `MLDSA_*` vectors into `rind-aws-lc-rs/tests/aws-lc-rs/`, which leaves them out until this lands, and drop them from its README's "What is left out".
+- Done, restored from fork main `f95af317`: the adapter's key pair holds an enum of the three parameter sets, verification maps onto `rind::signature::verify::ML_DSA_*`, and the tests cover aws-lc-rs's items. `to_pkcs8` and `to_pkcs8v1` fail for a key loaded without its seed. `from_raw_private_key` wraps an expanded key. README and MIGRATING.md list ML-DSA as offered.
+- Still out: `PqdsaPrivateKey::as_raw_bytes` and `encoding::PqdsaPrivateKeyRaw`, which read the expanded key back. rind does not export that.
+- rustls's `aws_lc_rs` provider still does not build: it names `tls_prf`, and rustls 0.23.46 also names `kem::ML_KEM_1024`. rustls-webpki's `aws-lc-rs` feature and rcgen's `aws_lc_rs` feature do build.
 
 ## Related
 
