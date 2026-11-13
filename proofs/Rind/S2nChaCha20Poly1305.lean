@@ -5,7 +5,7 @@ open rind.spec
 # rind's HOL Light ChaCha20-Poly1305 spec
 
 The RFC 8439 spec of ChaCha20, Poly1305, and AEAD_CHACHA20_POLY1305 in
-`proofs/hol-light/s2n-bignum/common/chacha20poly1305.ml`, which rind's HOL
+`thirdparty/s2n-bignum/common/chacha20poly1305.ml`, which rind's HOL
 Light proofs of aws-lc's routines state their results against, with
 s2n-bignum's `num_of_bytelist` and `bytelist_of_num` (`common/words2.ml`) and
 HOL Light's `MAP2` (`lists.ml`) it uses, transliterated:
