@@ -213,9 +213,10 @@ fn rsa_generate() {
     if std::env::var_os("SLOW_TESTS").is_none() {
         return;
     }
-    // Larger sizes take the same paths, much more slowly. Under wasmtime,
-    // where `just wasm` sets SLOW_TESTS, the portable backend runs under a
-    // JIT and every freed block is copied, so RSA-2048 alone covers them.
+    // Under wasmtime, where `just wasm` sets SLOW_TESTS, the portable
+    // backend runs under a JIT and every freed block is copied, so larger
+    // sizes would take far longer: wasm generates RSA-2048 keys only, and
+    // `just portable` checks every size on the same 32-bit limbs natively.
     let sizes: &[KeySize] = if cfg!(target_family = "wasm") {
         &[KeySize::Rsa2048]
     } else {

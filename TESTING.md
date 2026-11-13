@@ -98,7 +98,7 @@ an Intel SDE CPU model, as `x86-cpu.yml` names them.
 | portable | riscv64gc Linux, glibc and musl | `just qemu riscv64` and `just qemu riscv64-musl`: as s390x | as above | as s390x |
 | portable | PowerPC Linux: powerpc64le, big-endian powerpc64 and powerpc | `just qemu powerpc64le`, `just qemu powerpc64`, and `just qemu powerpc`: as s390x | as above | as s390x |
 | portable | ARM before ARMv7 (Raspberry Pi 1 and Zero) | `just qemu armv6` and `just qemu armv6-softfloat`: as s390x, on qemu's ARM1176; `build.yml`'s `android` job: ARMv5TE Android | as above | as s390x |
-| portable | wasm32-wasip2 | `just wasm`: release tests under wasmtime, with `SLOW_TESTS=1`, in the nightly `build.yml`. Ed25519 CCTV verdicts are checked against `rind/tests/cctv/ed25519-verdicts.txt`, recorded from aws-lc. Live differential tests stay on `just portable`, since aws-lc does not build for wasm. `heap_scratch::rsa_generate` checks RSA-2048 key generation only. `low::generic::reuse_cache::shared_across_threads` does not run | as above | unchecked: a wasm engine compiles rind again, and its JIT may turn a select into a branch |
+| portable | wasm32-wasip2 | `just wasm`: release tests under wasmtime, with `SLOW_TESTS=1`, in the nightly `build.yml`. Ed25519 CCTV verdicts are checked against `rind/tests/cctv/ed25519-verdicts.txt`, recorded from aws-lc. Live differential tests stay on `just portable`, since aws-lc does not build for wasm. `heap_scratch::rsa_generate` checks RSA-2048 key generation only; `just portable` checks RSA-3072 and RSA-4096 on the same 32-bit limbs. `low::generic::reuse_cache::shared_across_threads` does not run | as above | unchecked: a wasm engine compiles rind again, and its JIT may turn a select into a branch |
 
 ## Vector suites
 
