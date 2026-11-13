@@ -4,7 +4,8 @@
 //!
 //! [`serve`] speaks the byte protocol of BoringSSL's and aws-lc's `acvptool`
 //! on stdin and stdout. `acvptool` keeps ACVP's sessions and JSON; this
-//! process only runs the per-algorithm operations.
+//! process only runs the per-algorithm operations. It does not keep the
+//! ACVP session.
 
 mod ops;
 mod protocol;
