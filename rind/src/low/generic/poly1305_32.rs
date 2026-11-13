@@ -14,7 +14,8 @@
 //! Graviola's 64-bit one over random keys, messages and splits.
 //!
 //! It adds, multiplies, shifts and masks, and branches on no secret: the final
-//! choice between `h` and `h - p` is a mask. Its time depends on no secret on
+//! choice between `h` and `h - p` is a mask. How many blocks run follows
+//! the message length. Its time depends on no secret on
 //! a core whose 32x32->64-bit multiply takes the same time for every operand,
 //! as the ESP32-S3's and Cortex-M4's do. A Cortex-M3's `umull` ends early on
 //! small operands, and the Cortex-M0, M0+, M1, and M23 have no `umull`, so on
