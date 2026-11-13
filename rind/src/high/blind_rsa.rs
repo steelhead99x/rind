@@ -666,8 +666,11 @@ mod tests {
         // The top byte holds one bit of a 2049-bit modulus, so 0xff is
         // masked to below it, and only a draw above it is refused.
         let expected = blind(&[]);
-        assert_eq!(blind(&[&[0; 257]]).as_ref(), expected.as_ref());
-        assert_eq!(blind(&[&[0xff; 257]]).as_ref(), expected.as_ref());
+        // Miri, which is slow, runs only the last case, which holds both.
+        if !cfg!(miri) {
+            assert_eq!(blind(&[&[0; 257]]).as_ref(), expected.as_ref());
+            assert_eq!(blind(&[&[0xff; 257]]).as_ref(), expected.as_ref());
+        }
         assert_eq!(
             blind(&[&[0xff; 257], &[0; 257], &[0xff; 257]]).as_ref(),
             expected.as_ref()

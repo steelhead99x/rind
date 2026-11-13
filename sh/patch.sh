@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Lint, build, and run patch/fixture with ring patched from moq-dev/rind-patch,
+# Lint, build, and run patch/fixture with ring patched from kixel-ai/rind-patch,
 # the way a binary patches it, and rind-ring patched to this checkout, so a
 # rind-ring change runs through the shim before its release. Then check that
 # ring resolves to the shim alone and rind-ring to this checkout.
@@ -26,7 +26,7 @@ cargo generate-lockfile "${args[@]}"
 # build of any would.
 packages=$(cargo metadata "${args[@]}" --format-version 1 |
     jq -r '.packages[] | select(.name == "ring" or .name == "rind-ring") | "\(.name) \(.source)"' | sort)
-expected=$'^rind-ring null\nring git\\+https://github\\.com/moq-dev/rind-patch#[0-9a-f]{40}$'
+expected=$'^rind-ring null\nring git\\+https://github\\.com/kixel-ai/rind-patch#[0-9a-f]{40}$'
 if [[ ! "$packages" =~ $expected ]]; then
     echo "error: expected the rind-patch shim's ring and this checkout's rind-ring, got:" >&2
     echo "$packages" >&2

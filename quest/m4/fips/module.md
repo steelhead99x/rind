@@ -64,7 +64,7 @@ From [the scope](/quest/m4/fips/README.md), 2026-11-11.
   inside a call, as listed above, so the cost stays in `rind-fips` (rejected:
   wipe temporaries in `rind` too, which slows every consumer). The same day
   the maintainer made wiping mandatory in `rind`, removing the `wipe` feature
-  ([moq-dev/rind#609](https://github.com/moq-dev/rind/pull/609)), so the
+  ([kixel-ai/rind#609](https://github.com/kixel-ai/rind/pull/609)), so the
   module's "always enables `wipe`" needs nothing of its own once that lands.
 - CPU paths: every path the module can select on a tested operational
   environment gets its own ACVP run ([the client](/quest/m4/fips/acvp.md)),
