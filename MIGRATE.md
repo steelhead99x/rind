@@ -2,7 +2,7 @@
 
 These are instructions for a coding agent. The user's prompt sent you here to
 move their Rust repository from ring or aws-lc-rs to
-[rind](https://github.com/moq-dev/rind), on a local branch, and to report
+[rind](https://github.com/kixel-ai/rind), on a local branch, and to report
 what changed. Follow them in order.
 
 Never push, open a PR, or file an issue unless the user agrees when you offer
@@ -124,7 +124,7 @@ For each way the survey found:
 
   ```toml
   [patch.crates-io]
-  ring = { git = "https://github.com/moq-dev/rind-patch" }
+  ring = { git = "https://github.com/kixel-ai/rind-patch" }
   ```
 
   This moves every crate in the tree on ring 0.17, the project's own ring
@@ -220,15 +220,15 @@ Ask the user, and do each only if they agree:
 
 1. **Open a PR on their repository** from the `rind` branch, with the report
    as its description.
-2. **File an issue on [moq-dev/rind](https://github.com/moq-dev/rind/issues)**
+2. **File an issue on [kixel-ai/rind](https://github.com/kixel-ai/rind/issues)**
    for each rind gap. First search its open issues, and the plans under
-   [`quest/`](https://github.com/moq-dev/rind/tree/main/quest): comment on a
+   [`quest/`](https://github.com/kixel-ai/rind/tree/main/quest): comment on a
    matching issue instead of filing a duplicate, and for a gap a quest
    already plans, name the quest in the report instead. Each issue names the
    repository, the item or target, and how the project uses it, and ends
    with `(Written by <your model>)`.
 
-[PLATFORMS.md]: https://raw.githubusercontent.com/moq-dev/rind/main/PLATFORMS.md
-[MIGRATING.md]: https://raw.githubusercontent.com/moq-dev/rind/main/MIGRATING.md
-[rind-ring's README]: https://raw.githubusercontent.com/moq-dev/rind/main/rind-ring/README.md
-[rind-aws-lc-rs's README]: https://raw.githubusercontent.com/moq-dev/rind/main/rind-aws-lc-rs/README.md
+[PLATFORMS.md]: https://raw.githubusercontent.com/kixel-ai/rind/main/PLATFORMS.md
+[MIGRATING.md]: https://raw.githubusercontent.com/kixel-ai/rind/main/MIGRATING.md
+[rind-ring's README]: https://raw.githubusercontent.com/kixel-ai/rind/main/rind-ring/README.md
+[rind-aws-lc-rs's README]: https://raw.githubusercontent.com/kixel-ai/rind/main/rind-aws-lc-rs/README.md

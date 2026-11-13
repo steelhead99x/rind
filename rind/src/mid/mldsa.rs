@@ -1362,6 +1362,10 @@ mod tests {
         }
         check::<MlDsa44>();
         check::<MlDsa65>();
-        check::<MlDsa87>();
+        // ML-DSA-44 and -65 between them take each branch on `ETA`,
+        // `GAMMA1`, and `GAMMA2`, so Miri, which is slow, leaves out -87.
+        if !cfg!(miri) {
+            check::<MlDsa87>();
+        }
     }
 }

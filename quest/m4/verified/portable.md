@@ -6,7 +6,7 @@
 
 ## Plan
 
-Found by the 2026-11-09 audit: the backend landed in [moq-dev/rind#458](https://github.com/moq-dev/rind/pull/458) hours after the 2026-11-07 audit, so [the epic](/quest/m4/verified/README.md)'s "every backend" had no quest for it beyond its Keccak-f, which `Rind/Portable/Keccak.lean` now proves.
+Found by the 2026-11-09 audit: the backend landed in [kixel-ai/rind#458](https://github.com/kixel-ai/rind/pull/458) hours after the 2026-11-07 audit, so [the epic](/quest/m4/verified/README.md)'s "every backend" had no quest for it beyond its Keccak-f, which `Rind/Portable/Keccak.lean` now proves.
 
 - Runs: `low/portable/` and `mid/portable/`, pure Rust for every architecture without rind assembly, with rind's shared arithmetic in `low/generic/`. It has no CPU tiers (`low/portable/cpu.rs:4`), so its theorems take no `Runs` hypothesis about dispatch.
 - Translation: Charon on x86_64 under `--cfg rind_portable --cfg curve25519_dalek_backend="serial"`, the flags CI's portable jobs build with (`.github/workflows/ctgrind.yml:109`), into `Rind/Portable/`, extending the translation `admin/prove` already makes there of `low/portable/keccak.rs` alone, with the hand models copied as `admin/prove` copies them to `Rind/Aarch64/`. That is the 64-bit configuration. Where the code picks by pointer width (Poly1305 in `low/portable/poly1305.rs`, `gcm_nohw`'s configuration, curve25519-dalek's limbs, and `low/generic/limb64.rs` over `limb32.rs` for RSA and the NIST curves), the ✓ says which it covers; the 32-bit forms are the code [the armv7 epic](/quest/m5/verified-armv7/README.md) proves.

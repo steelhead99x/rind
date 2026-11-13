@@ -9,6 +9,7 @@ rind-aws-lc-rs offers aws-lc-rs 1.x's ML-DSA items, backed by rind's: `signature
 - aws-lc-rs picks the parameter set at run time, through a `&'static PqdsaSigningAlgorithm`, where rind's `signature::sign::MlDsaKeyPair<P>` takes it as a type, so the adapter's key pair holds an enum of the three. Verification maps onto `rind::signature::verify::ML_DSA_*` through the adapter's existing `ParsedPublicKey` and `UnparsedPublicKey`.
 - aws-lc-rs's `to_pkcs8` and `to_pkcs8v1` fail for a key loaded without its seed, where rind's `to_pkcs8` emits the expanded form; the adapter returns aws-lc-rs's error there. `from_raw_private_key` can wrap the expanded key in the PKCS#8 form rind loads. `PqdsaPrivateKey::as_raw_bytes`, which reads the expanded key back, has no rind counterpart and stays in the README's list.
 - Test each item against aws-lc-rs, as the adapter's other algorithms are.
+- Vendor aws-lc-rs's `tests/pqdsa_test.rs` and its `MLDSA_*` vectors into `rind-aws-lc-rs/tests/aws-lc-rs/`, which leaves them out until this lands, and drop them from its README's "What is left out".
 
 ## Related
 

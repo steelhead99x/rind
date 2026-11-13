@@ -112,7 +112,7 @@ VERIFIED = [
 TIERS = {
     "schema": 1,
     "run": 1,
-    "url": "https://github.com/moq-dev/rind/actions/runs/1",
+    "url": "https://github.com/kixel-ai/rind/actions/runs/1",
     "commit": "fedcba9876543210fedcba9876543210fedcba98",
     "date": "2026-11-02T18:00:00Z",
     "tiers": [
@@ -206,6 +206,10 @@ class Render(unittest.TestCase):
         self.assertEqual(cells[("AES-GCM", "no AES-NI")][1][0], 0.5)
         self.assertNotIn(("RSA signatures", "x86_64"), cells)
         self.assertEqual(len(cells), 2)
+
+    def test_ranks_every_aead_open_benchmark(self):
+        for key in ["aes256-gcm-open/*/16KB", "chacha20poly1305-open/*/16KB"]:
+            self.assertIsNotNone(br.tier_row(key), key)
 
     def test_refuses_a_benchmark_neither_ranked_nor_unranked(self):
         with self.assertRaises(SystemExit):

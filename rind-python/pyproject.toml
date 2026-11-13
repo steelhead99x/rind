@@ -22,8 +22,8 @@ classifiers = [
 dynamic = ["version"]
 
 [project.urls]
-Repository = "https://github.com/moq-dev/rind"
-Documentation = "https://github.com/moq-dev/rind/tree/main/rind-python"
+Repository = "https://github.com/kixel-ai/rind"
+Documentation = "https://github.com/kixel-ai/rind/tree/main/rind-python"
 
 [tool.maturin]
 python-source = "python"

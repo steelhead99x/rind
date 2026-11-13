@@ -11,7 +11,7 @@ usage="usage: sh/dart-prebuilt.sh PACKAGE_DIR LIB_DIR"
 package=${1:?$usage}
 libs=${2:?$usage}
 version=$(yq .version "$package/pubspec.yaml")
-release=https://github.com/moq-dev/rind/releases/download/rind-dart-v$version
+release=https://github.com/kixel-ai/rind/releases/download/rind-dart-v$version
 
 shopt -s nullglob
 files=("$libs"/rind_dart-*)

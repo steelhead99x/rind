@@ -1,7 +1,7 @@
 name: Alert
 
 # Posts nightly, landing, and release failures to the Discord #alerts channel,
-# since those runs have no pull request to turn red. Reads the moq-dev
+# since those runs have no pull request to turn red. Reads the kixel-ai
 # organization's DISCORD_WEBHOOK secret.
 
 permissions:
