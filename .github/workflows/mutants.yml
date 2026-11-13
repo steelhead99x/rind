@@ -1,70 +1,63 @@
 name: mutants
 
-# Nightly, mutates the Rust that changed in the last day with cargo-mutants,
-# through `admin/mutants`, on each architecture rind has a runner for, on
-# armv7 under qemu, and on the portable backend forced on x86_64. A mutant no
-# run's tests catch fails the run, which alert.yml reports: kill it with a
-# test, or list it under `exclude_re` in .cargo/mutants.toml with why no test
-# can. The x86_64 run's survivors are tried again under Intel SDE, on the
-# AVX-512 paths no runner takes. Dispatched on a branch, it mutates what the
-# branch changed since `base`. Like fuzzing, it never runs on pull requests:
-# a large diff's mutants take hours of every architecture's runners.
+# Mutation testing with cargo-mutants, through `admin/mutants`, on each
+# architecture rind has a runner for, and on the portable backend forced on
+# x86_64. A mutant no run's tests catch fails the run, which alert.yml
+# reports: kill it with a test, or list it under `exclude_re` in
+# .cargo/mutants.toml with why no test can.
+#
+# Nightly, it mutates the Rust that changed in the last day. Dispatched, it
+# runs a whole campaign, which `admin/mutants` refuses off GitHub-hosted
+# runners: every architecture's over the workspace, or one crate's, one
+# architecture's, or the changes since `base`, as in
+# `gh workflow run mutants.yml --ref <branch> -f package=rind-rustls`.
+# Like fuzzing, it never runs on pull requests: a large diff's mutants take
+# hours of every architecture's runners.
+#
+# `shards` lists each campaign's mutants and splits them into jobs of about
+# `SHARD_SECONDS` each, by the seconds a mutant took on that campaign's runner.
 
 on:
   schedule:
     - cron: "0 18 * * *"
   workflow_dispatch:
     inputs:
+      campaign:
+        description: Run only this architecture's campaign
+        type: choice
+        default: all
+        options: [all, x86_64, aarch64, macos, portable]
+      package:
+        description: Mutate only this crate, such as rind-rustls, rather than the workspace
+        required: false
+        default: ""
       base:
-        description: Mutate the changes since this revision, rather than the last day's
+        description: Mutate only the changes since this revision
         required: false
         default: ""
 
+# One dispatched campaign runs at a time, so `max-parallel` caps them all; the
+# rest wait without holding a runner. Nightlies queue apart.
 concurrency:
-  group: mutants-${{ github.ref }}
-  cancel-in-progress: true
+  group: mutants-${{ github.event_name }}
+  queue: max
 
 permissions:
   contents: read
 
 env:
   CARGO_TERM_COLOR: always
+  # Each shard's estimated mutant time, leaving the 300-minute job limit room
+  # for setup, the baseline build and test, and mutants slower than the mean.
+  SHARD_SECONDS: 10800
 
 jobs:
-  mutants:
-    strategy:
-      fail-fast: false
-      matrix:
-        name: [x86_64, aarch64, macos, armv7, portable]
-        include:
-          - name: x86_64
-            os: ubuntu-latest
-            shell: default
-            args: --workspace
-          - name: aarch64
-            os: ubuntu-24.04-arm
-            shell: default
-            args: --workspace
-          # macos-latest is Apple silicon, the only cores rind sets DIT on.
-          - name: macos
-            os: macos-latest
-            shell: default
-            args: --workspace
-          # Only rind's own code differs on armv7; the adapters' tests run
-          # on x86_64 and aarch64.
-          - name: armv7
-            os: ubuntu-latest
-            shell: armv7
-            args: --target armv7-unknown-linux-gnueabihf -p rind
-          # What only the portable backend compiles, and what armv7's assembly
-          # replaces. Its adapters' code is the same as on x86_64.
-          - name: portable
-            os: ubuntu-latest
-            shell: default
-            args: --portable -p rind
-
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 300
+  shards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      mutants: ${{ steps.count.outputs.mutants }}
+      diff: ${{ steps.diff.outputs.diff }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -72,56 +65,103 @@ jobs:
           # The diff's base can lie anywhere in the history.
           fetch-depth: 0
 
-      - uses: ./.github/actions/vectors
-
       - uses: ./.github/actions/nix
 
+      # Taken once, so a shard that waits hours for a runner mutates the same
+      # diff as the rest.
       - name: Diff
+        id: diff
         run: |
-          if [ -z "$BASE" ]; then
+          if [ "$EVENT" = schedule ]; then
             BASE=$(git rev-list -1 --before="24 hours ago" HEAD)
           fi
-          git diff "$(git merge-base "$BASE" HEAD)" HEAD -- '*.rs' > "$RUNNER_TEMP/changes.diff"
+          if [ -n "$BASE" ]; then
+            git diff "$(git merge-base "$BASE" HEAD)" HEAD -- '*.rs' > "$RUNNER_TEMP/changes.diff"
+            echo diff=true >> "$GITHUB_OUTPUT"
+          fi
         env:
+          EVENT: ${{ github.event_name }}
           BASE: ${{ inputs.base }}
 
-      # Exit 2, a missed mutant, may be code only another architecture
-      # compiles, so `survivors` decides.
-      # macOS mutates only the DIT code, all of it whenever its files
-      # changed, since a test change there can let any of its mutants survive.
-      - name: Mutate
-        run: |
-          read -ra args <<<"$ARGS"
-          scope=(--in-diff "$RUNNER_TEMP/changes.diff")
-          if [ "$RUNNER_OS" = macOS ]; then
-            grep -qE '^\+\+\+ b/rind/src/low/((aarch64/)?cpu|entry)\.rs$' "$RUNNER_TEMP/changes.diff" || exit 0
-            scope=()
-          fi
-          nix develop ".#$DEV_SHELL" --command admin/mutants "${args[@]}" "${scope[@]}" --output "$RUNNER_TEMP" || [ $? -eq 2 ]
-        env:
-          DEV_SHELL: ${{ matrix.shell }}
-          ARGS: ${{ matrix.args }}
-
-      # The avx512 job mutates the same diff.
-      - name: Keep the diff
-        if: always()
-        run: |
-          mkdir -p "$RUNNER_TEMP/mutants.out"
-          cp "$RUNNER_TEMP/changes.diff" "$RUNNER_TEMP/mutants.out/"
-
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
+        if: steps.diff.outputs.diff
         with:
-          name: mutants-${{ matrix.name }}
-          path: ${{ runner.temp }}/mutants.out
+          name: changes
+          path: ${{ runner.temp }}/changes.diff
           retention-days: 14
-          if-no-files-found: ignore
 
-  # Retests what the x86_64 run missed, and the files only AVX-512 runs,
-  # under SDE's Sapphire Rapids model.
-  avx512:
-    needs: mutants
-    runs-on: ubuntu-latest
+      # Seconds a mutant takes on each runner: the higher of two diffs' means
+      # in the shards' `outcomes.json`, measured in November 2026, since a
+      # diff's mean varies by twice that, by which tests its code has.
+      # macOS mutates only the DIT code, all of it whenever its files changed,
+      # since a test change there can let any of its mutants survive: few
+      # enough mutants for one job.
+      - name: Count
+        id: count
+        run: |
+          # So a failed listing fails the step rather than counting none.
+          set -o pipefail
+          [[ "$PACKAGE" =~ ^[A-Za-z0-9_-]*$ ]] || { echo "::error::no crate is named '$PACKAGE'"; exit 1; }
+          # cargo-mutants only warns of a crate it can't find, and lists nothing.
+          [ -z "$PACKAGE" ] || nix develop --command cargo metadata --no-deps --format-version 1 |
+            jq -e --arg p "$PACKAGE" 'any(.packages[]; .name == $p)' > /dev/null ||
+            { echo "::error::no workspace crate is named '$PACKAGE'"; exit 1; }
+          scope=()
+          [ -z "$DIFF" ] || scope=(--in-diff "$RUNNER_TEMP/changes.diff")
+          crate=(--workspace)
+          [ -z "$PACKAGE" ] || crate=(-p "$PACKAGE")
+          matrix='[]'
+          add() {
+            local name=$1 os=$2 seconds=$3
+            shift 3
+            [ "$CAMPAIGN" = all ] || [ "$CAMPAIGN" = "$name" ] || return 0
+            # Only rind's own code differs on these; the adapters' tests run on
+            # x86_64 and aarch64.
+            if [ "$name" != x86_64 ] && [ "$name" != aarch64 ] && [ -n "$PACKAGE" ] && [ "$PACKAGE" != rind ]; then
+              [ "$CAMPAIGN" = all ] || { echo "::error::the $name campaign mutates only rind"; exit 1; }
+              return 0
+            fi
+            if [ "$name" = macos ]; then
+              count=0
+              if [ -z "$DIFF" ] || grep -qE '^\+\+\+ b/rind/src/low/((aarch64/)?cpu|entry)\.rs$' "$RUNNER_TEMP/changes.diff"; then
+                count=$(nix develop --command admin/mutants "$@" --list | wc -l)
+              fi
+              shards=$((count > 0))
+            else
+              count=$(nix develop --command admin/mutants "$@" ${scope[@]+"${scope[@]}"} --list | wc -l)
+              shards=$(((count * seconds + SHARD_SECONDS - 1) / SHARD_SECONDS))
+            fi
+            echo "$name: $count mutants in $shards jobs" | tee -a "$GITHUB_STEP_SUMMARY"
+            matrix=$(jq -c --arg name "$name" --arg os "$os" --arg args "$*" --argjson shards "$shards" \
+              '. + [range($shards) | {name: $name, os: $os, args: $args, shard: ., shards: $shards}]' <<<"$matrix")
+          }
+          # `--target` lets this x86_64 runner list another's campaign.
+          add x86_64 ubuntu-latest 68 --target x86_64-unknown-linux-gnu "${crate[@]}"
+          add aarch64 ubuntu-24.04-arm 24 --target aarch64-unknown-linux-gnu "${crate[@]}"
+          # macos-latest is Apple silicon, the only cores rind sets DIT on.
+          add macos macos-latest 0 --target aarch64-apple-darwin -p rind
+          # What only the portable backend compiles, and what armv7's assembly
+          # replaces. Its adapters' code is the same as on x86_64.
+          add portable ubuntu-latest 66 --portable -p rind
+          jobs=$(jq length <<<"$matrix")
+          [ "$jobs" -le 256 ] || { echo "::error::$jobs jobs, more than a matrix's 256"; exit 1; }
+          echo "mutants=$matrix" >> "$GITHUB_OUTPUT"
+        env:
+          CAMPAIGN: ${{ inputs.campaign || 'all' }}
+          PACKAGE: ${{ inputs.package }}
+          DIFF: ${{ steps.diff.outputs.diff }}
+
+  mutants:
+    needs: shards
+    if: needs.shards.outputs.mutants != '[]'
+    strategy:
+      fail-fast: false
+      # A campaign holds at most 10 of the organisation's 60 hosted jobs.
+      max-parallel: 10
+      matrix:
+        include: ${{ fromJSON(needs.shards.outputs.mutants) }}
+    name: mutants (${{ matrix.name }}, ${{ matrix.shard }}/${{ matrix.shards }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 300
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -132,39 +172,39 @@ jobs:
 
       - uses: ./.github/actions/nix
 
-      # The dev shell's `sde` runs Intel's binaries in a bubblewrap sandbox,
-      # which needs the unprivileged user namespaces Ubuntu's AppArmor denies
-      # an unprofiled program.
-      # See UPSTREAM.md, "Ubuntu's AppArmor denies Intel SDE's sandbox".
-      - name: Allow user namespaces
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.shards.outputs.diff
         with:
-          name: mutants-x86_64
-          path: ${{ runner.temp }}/x86_64
+          name: changes
+          path: ${{ runner.temp }}
 
-      # `--iterate` skips what the x86_64 run caught, read from its
-      # `caught.txt` and `unviable.txt`.
+      # Exit 2, a missed mutant, may be code only another architecture
+      # compiles, so `survivors` decides.
       - name: Mutate
         run: |
-          mkdir "$RUNNER_TEMP/mutants.out"
-          for outcome in caught unviable; do
-            find "$RUNNER_TEMP/x86_64" -name "$outcome.txt" -exec cat /dev/null {} + > "$RUNNER_TEMP/mutants.out/$outcome.txt"
-          done
-          find "$RUNNER_TEMP/x86_64" -name changes.diff -exec cp {} "$RUNNER_TEMP/" \; -quit
-          nix develop .#sde --command admin/mutants --avx512 --workspace --iterate --in-diff "$RUNNER_TEMP/changes.diff" --output "$RUNNER_TEMP" || [ $? -eq 2 ]
+          read -ra args <<<"$ARGS"
+          scope=()
+          [ -z "$DIFF" ] || [ "$RUNNER_OS" = macOS ] || scope=(--in-diff "$RUNNER_TEMP/changes.diff")
+          nix develop --command admin/mutants "${args[@]}" ${scope[@]+"${scope[@]}"} \
+            --shard "$SHARD/$SHARDS" --sharding round-robin --output "$RUNNER_TEMP" || [ $? -eq 2 ]
+        env:
+          ARGS: ${{ matrix.args }}
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ matrix.shards }}
+          DIFF: ${{ needs.shards.outputs.diff }}
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: mutants-avx512
+          name: mutants-${{ matrix.name }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/mutants.out
           retention-days: 14
           if-no-files-found: ignore
 
+  # Runs once every shard has passed, or when there was nothing to mutate.
   survivors:
-    needs: [mutants, avx512]
+    needs: mutants
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -174,6 +214,7 @@ jobs:
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          pattern: mutants-*
           path: ${{ runner.temp }}/mutants
 
       # One artifact downloads into `mutants` itself, several into a

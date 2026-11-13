@@ -4,27 +4,26 @@
 # differential tests own, and every module only another architecture compiles,
 # whose mutants no test here can reach.
 #
-# `admin/mutants --target armv7-unknown-linux-gnueabihf ...`, in
-# `nix develop .#armv7`, cross-builds for armv7 instead and runs each test
-# binary under qemu-arm. It builds optimised, keeping a debug build's
-# checks, since debug tests under qemu take about nine times as long.
+# Off GitHub-hosted runners it mutates only a diff (`--in-diff`) or named
+# files (`--file`): a whole campaign, over the workspace, a crate, or a
+# backend, takes hours of every core, so it runs as a dispatch of
+# .github/workflows/mutants.yml, which shards it across hosted runners.
+# `--list` runs anywhere, and `--target TRIPLE` lists another
+# architecture's campaign, such as `aarch64-unknown-linux-gnu`'s.
 #
 # Each test runs on this CPU and again with each row of features below denied,
 # so code only CPUs without them run, such as aws-lc's SSE2 AES, is tested
-# too. The x86_64 and aarch64 rows are ctgrind.yml's; armv7's also pick
-# qemu's CPU.
+# too. The rows are ctgrind.yml's.
 #
 # `admin/mutants --portable ...`, on x86_64 Linux, forces the portable backend
 # with `--cfg rind_portable`, as `just portable` does, so the files only it
-# and armv7 compile, and those armv7's assembly replaces, are mutated without
-# an emulator. It reads no CPU features, so it has no rows.
+# and armv7 compile, and those armv7's assembly replaces, are mutated. It
+# reads no CPU features, so it has no rows.
 #
-# `admin/mutants --avx512 ...`, on x86_64 in `nix develop .#sde`, runs each
-# test under Intel SDE's Sapphire Rapids model instead, which takes every
-# AVX-512 path, though no campaign host has one. Each mutant's tests take
-# minutes there, so the other campaign leaves out the files only AVX-512
-# runs, and this one retests what that one missed: give it `--iterate` over
-# its `mutants.out`.
+# No campaign runs armv7's own code or the AVX-512 paths: no runner takes
+# them natively, and under qemu or Intel SDE a campaign took too long for
+# what it found. The x86_64 campaign skips the files only AVX-512 runs, and
+# .cargo/mutants.toml excludes the rest of both.
 #
 # cargo-mutants mutates code whatever its `cfg`, so a function only another
 # architecture compiles is missed here. `admin/mutants --survivors DIR...`
@@ -52,12 +51,6 @@ for p in stale:
 sys.exit(1 if stale else 0)
 '
     exit
-fi
-
-avx512=
-if [ "${1:-}" = --avx512 ]; then
-    shift
-    avx512=1
 fi
 
 portable_backend=
@@ -96,27 +89,48 @@ if [ "${1:-}" = --target ]; then
     shift 2
 fi
 
+# The options choosing what to mutate, ahead of the test arguments after `--`.
+listing=
+scoped=
+package=
+prev=
+for arg in "$@"; do
+    [ "$arg" != -- ] || break
+    case $arg in
+        --list | --list-files) listing=1 ;;
+        --in-diff | --in-diff=* | -D | -D?* | --file | --file=* | -f | -f?*) scoped=1 ;;
+        --package=*) package=${arg#--package=} ;;
+        -p?*) package=${arg#-p} ;;
+    esac
+    case $prev in -p | --package) package=$arg ;; esac
+    prev=$arg
+done
+
+case $(uname -sm) in
+    "Linux x86_64") host=x86_64-unknown-linux-gnu ;;
+    "Linux aarch64") host=aarch64-unknown-linux-gnu ;;
+    "Darwin arm64") host=aarch64-apple-darwin ;;
+    *) host="$(uname -sm)" ;;
+esac
+
 # Only armv7 and the portable backend compile these.
 portable=(
     'rind/src/low/portable/**' 'rind/src/mid/portable/**'
     rind/src/low/generic/order.rs
 )
-runner=()
-profile=()
-base=()
 # Darwin runs only the DIT code, which compiles for Apple's platforms alone;
 # the Linux runs cover the rest.
 only=()
-campaign=${target:-$(uname -sm)}
+campaign=${target:-$host}
 if [ -n "$portable_backend" ]; then
-    [ -z "$target" ] && [ "$campaign" = "Linux x86_64" ] || {
+    [ -z "$target" ] && [ "$campaign" = x86_64-unknown-linux-gnu ] || {
         echo "admin/mutants: --portable runs only on Linux x86_64, without --target" >&2
         exit 1
     }
     campaign=portable
 fi
 case $campaign in
-    "Darwin arm64")
+    aarch64-apple-darwin)
         triple=AARCH64_APPLE_DARWIN
         skip=()
         only=(
@@ -126,13 +140,11 @@ case $campaign in
         )
         rows=("dit")
         ;;
-    "Linux x86_64")
+    x86_64-unknown-linux-gnu)
         triple=X86_64_UNKNOWN_LINUX_GNU
         skip=(
             'rind/src/low/aarch64/**' 'rind/src/low/arm/**' "${portable[@]}"
             rind/src/low/generic/mlkem768.rs
-        )
-        [ -n "$avx512" ] || skip+=(
             rind/src/low/x86_64/mlkem768_sample_poly_ntt_8x.rs
             rind/src/low/x86_64/rsaz_avx512.rs
         )
@@ -143,7 +155,7 @@ case $campaign in
             "adx ssse3"
         )
         ;;
-    "Linux aarch64")
+    aarch64-unknown-linux-gnu)
         triple=AARCH64_UNKNOWN_LINUX_GNU
         skip=(
             'rind/src/low/x86_64/**' 'rind/src/low/arm/**' "${portable[@]}"
@@ -155,34 +167,6 @@ case $campaign in
             "aes pmull sha2 sha3"
         )
         ;;
-    armv7-unknown-linux-gnueabihf)
-        [ -n "${CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER:-}" ] || {
-            echo "admin/mutants: run armv7 in 'nix develop .#armv7'" >&2
-            exit 1
-        }
-        triple=ARMV7_UNKNOWN_LINUX_GNUEABIHF
-        export CARGO_BUILD_TARGET=$target
-        export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
-        export CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true
-        profile=(--profile release)
-        runner=(qemu-arm)
-        # The portable backend's own modules, which armv7's assembly
-        # replaces, and 64-bit Poly1305.
-        skip=(
-            'rind/src/low/x86_64/**' 'rind/src/low/aarch64/**'
-            rind/src/low/generic/poly1305.rs rind/src/low/portable/chacha20.rs
-            rind/src/low/portable/cpu.rs rind/src/low/portable/keccak.rs
-            rind/src/low/portable/sha.rs
-        )
-        # `sh/armv7.sh`'s tiers: qemu's `max`, with NEON and the crypto
-        # extension, a Cortex-A15, with NEON alone, and one with NEON denied.
-        # RIND_TEST_ARM_* fails the run that detects the wrong features.
-        base=(QEMU_CPU=max RIND_TEST_ARM_NEON=1 RIND_TEST_ARM_CRYPTO_EXT=1)
-        rows=(
-            "QEMU_CPU=cortex-a15 RIND_TEST_ARM_NEON=1 RIND_TEST_ARM_CRYPTO_EXT=0"
-            "neon QEMU_CPU=cortex-a15 RIND_TEST_ARM_NEON=0 RIND_TEST_ARM_CRYPTO_EXT=0"
-        )
-        ;;
     portable)
         triple=X86_64_UNKNOWN_LINUX_GNU
         # The explicit target keeps these builds apart from the host's, and
@@ -191,7 +175,7 @@ case $campaign in
         export RUSTFLAGS='--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
         # The assembly backends, SHA-256 that only armv7 and x86_64's tests
         # compile, and the 32-bit limbs a 64-bit target doesn't, which the
-        # x86_64 and armv7 campaigns reach.
+        # x86_64 campaign's tests reach.
         skip=(
             'rind/src/low/x86_64/**' 'rind/src/low/aarch64/**' 'rind/src/low/arm/**'
             rind/src/low/generic/sha256.rs rind/src/low/generic/limb32.rs
@@ -204,47 +188,45 @@ case $campaign in
         exit 1
         ;;
 esac
-[ -z "$avx512" ] || { [ "$triple" = X86_64_UNKNOWN_LINUX_GNU ] && [ -z "$portable_backend" ]; } || {
-    echo "admin/mutants: --avx512 runs only on Linux x86_64" >&2
+# The portable backend runs on the x86_64 host checked above; any other
+# architecture's campaign only lists here.
+[ "$campaign" = "$host" ] || [ -n "$portable_backend" ] || [ -n "$listing" ] || {
+    echo "admin/mutants: $campaign's campaign runs only on its own architecture; here it only lists" >&2
     exit 1
 }
 
 # The test runner: runs one test binary on each row, failing if any fails.
 # Nextest lists a binary's tests through the runner too, which needs one run.
+# A crashing mutant fails its test either way, and its core dumps would
+# pile up in the host's coredump store.
 if [ "${1:-}" = --run ]; then
     shift
-    if [ -n "$avx512" ]; then
-        # The tests' CPU check fails unless the model takes each AVX-512 path.
-        env RIND_TEST_X86_AVX512_AES_GCM=1 RIND_TEST_X86_AVX512_ML_KEM=1 \
-            RIND_TEST_X86_AVX512_RSA=1 sde -spr -- "$@"
-        # Each AVX-512 check must also refuse a CPU without any one feature it
-        # names, which no SDE model lacks alone. Only this test can tell.
-        case " $* " in
-            *::checks_need_their_features" "*)
-                for feature in avx512f avx512dq avx512ifma avx512bw avx512vl \
-                    avx512vbmi avx512vbmi2 vaes vpclmulqdq bmi2; do
-                    env "RIND_CPU_DISABLE_$feature=1" sde -spr -- "$@"
-                done
-                ;;
-        esac
-        exit 0
-    fi
-    env ${base[@]+"${base[@]}"} ${runner[@]+"${runner[@]}"} "$@"
+    ulimit -c 0
+    "$@"
     for arg in "$@"; do
         [ "$arg" != --list ] || exit 0
     done
-    # A row names features to deny, and any variables to set.
+    # A row names features to deny.
     for row in ${rows[@]+"${rows[@]}"}; do
         deny=()
         for word in $row; do
-            case $word in
-                *=*) deny+=("$word") ;;
-                *) deny+=("RIND_CPU_DISABLE_$word=1") ;;
-            esac
+            deny+=("RIND_CPU_DISABLE_$word=1")
         done
-        env "${deny[@]}" ${runner[@]+"${runner[@]}"} "$@"
+        env "${deny[@]}" "$@"
     done
     exit 0
+fi
+
+# A diff, named files, or a listing runs anywhere, as does the Darwin
+# campaign, which names its files itself.
+if [ -z "$listing$scoped" ] && [ ${#only[@]} -eq 0 ] && [ "${RUNNER_ENVIRONMENT:-}" != github-hosted ]; then
+    name=${campaign%%-*}
+    [ -z "$portable_backend" ] || name=portable
+    branch=$(git -C "$here" branch --show-current)
+    echo "admin/mutants: a whole campaign runs only on GitHub-hosted runners." >&2
+    echo "Mutate a diff with --in-diff or files with --file here, or push the branch and dispatch it:" >&2
+    echo "  gh workflow run mutants.yml --ref ${branch:-<branch>} -f campaign=$name${package:+ -f package=$package}" >&2
+    exit 1
 fi
 
 cd "$here"
@@ -269,10 +251,10 @@ for arg in "$@"; do
 done
 export NEXTEST_TEST_THREADS=$((($(nproc) + jobs - 1) / jobs))
 
-export "CARGO_TARGET_${triple}_RUNNER=$here/admin/mutants ${avx512:+--avx512 }${portable_backend:+--portable }${target:+--target $target }--run"
+export "CARGO_TARGET_${triple}_RUNNER=$here/admin/mutants ${portable_backend:+--portable }${target:+--target $target }--run"
 # A mutant that hangs the tests until the timeout is caught by them, so only
 # exit 3, timeouts alone, passes beside 0.
 status=0
-cargo mutants ${profile[@]+"${profile[@]}"} "${args[@]}" "$@" || status=$?
+cargo mutants "${args[@]}" "$@" || status=$?
 [ "$status" -ne 3 ] || status=0
 exit "$status"
