@@ -62,7 +62,7 @@ declare -A scope=(
     [msrv]='^(rind[^/]*/|fuzz/|Cargo\.(toml|lock)$|flake\.(nix|lock)$)'
     # rind's aarch64, armv7, portable, wasm32, and bare-metal builds, which
     # the host's own build skips, and which a toolchain bump can break.
-    [cross]='^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|sh/bare-metal\.sh$|Cargo\.(toml|lock)$|flake\.(nix|lock)$)'
+    [cross]='^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|rind-bench/Cargo\.toml$|sh/bare-metal\.sh$|Cargo\.(toml|lock)$|flake\.(nix|lock)$)'
     # Variable-time instructions in rind's release builds, which a change to
     # its code, dependencies, toolchain, or the scan itself can bring.
     [vartime]='^(rind/(src/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|flake\.(nix|lock)$|admin/ct-vartime)'

@@ -95,8 +95,11 @@ qemu. iOS devices' code is only built.
   Every PR lints it for `thumbv6m-none-eabi` and `riscv32imc-unknown-none-elf`,
   which lack compare-and-swap and so keep no reuse cache, for
   `thumbv7em-none-eabihf`, and for `x86_64-unknown-none`, in debug and release,
-  with and without `wipe` (`just bare-metal`). None of them runs a test or a
-  constant-time check.
+  with and without `wipe` (`just bare-metal`), and the nightly `build.yml` does
+  the same for the ESP32's Xtensa targets (`just xtensa`): bare metal
+  (`xtensa-esp32-none-elf` and `xtensa-esp32s3-none-elf`) and ESP-IDF
+  (`xtensa-esp32s3-espidf`, which has std and is only compiled). None of them
+  runs a test or a constant-time check.
   RSA and the NIST curves run on 64-bit limbs on 64-bit targets and on
   `wasm32` built with `-C target-feature=+wide-arithmetic` (stable from Rust
   1.101), whose 128-bit products take one or two multiply instructions, and
