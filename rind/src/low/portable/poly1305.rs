@@ -12,11 +12,6 @@
 //! spends most of its time in 64-bit multiplies and adds, and it takes at
 //! most `u32::MAX` bytes.
 
-#[cfg(all(
-    rind_backend = "portable",
-    any(target_pointer_width = "32", rind_limb = "32")
-))]
-pub(crate) use crate::low::generic::poly1305_32::Poly1305;
 #[cfg(any(rind_backend = "arm", test))]
 use libcrux_hacl_rs::streaming_types::error_code;
 #[cfg(any(rind_backend = "arm", test))]
@@ -28,7 +23,11 @@ use libcrux_poly1305::hacl::mac_poly1305::{self, state_t};
     not(rind_limb = "32")
 ))]
 pub(crate) use crate::low::generic::poly1305::Poly1305;
-
+#[cfg(all(
+    rind_backend = "portable",
+    any(target_pointer_width = "32", rind_limb = "32")
+))]
+pub(crate) use crate::low::generic::poly1305_32::Poly1305;
 #[cfg(any(rind_backend = "arm", test))]
 pub(crate) struct Hacl([state_t; 1]);
 
