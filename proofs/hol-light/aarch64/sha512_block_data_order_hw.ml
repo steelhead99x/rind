@@ -12,7 +12,7 @@
    sha512-armv8.pl, the ARMv8.2 path), which reads its round constants from
    the K512 table beside it. Its result is s2n-bignum's FIPS 180-4 spec,
    sha512_hash_blocks, from s2n-bignum pull request #420, which
-   proofs/hol-light/s2n-bignum/ holds until it merges. The loop body runs the
+   rind's fork of s2n-bignum holds until it merges. The loop body runs the
    80 rounds as 40 steps of two, each a SHA512H/SHA512H2 pair whose working
    state rotates through five registers, and the message schedule as 32
    SHA512SU0/SHA512SU1 pairs. The proof steps it symbolically, rewriting each
