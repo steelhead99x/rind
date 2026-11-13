@@ -2,7 +2,7 @@
 
 The [`cryptography`](https://pub.dev/packages/cryptography) package's
 `Cryptography` on [rind](https://pub.dev/packages/rind), for what
-[rind](https://github.com/moq-dev/rind), a pure-Rust library, covers. One
+[rind](https://github.com/kixel-ai/rind), a pure-Rust library, covers. One
 line moves an app's existing code onto rind's assembly.
 
 Its Dart layer costs part of rind's lead, most on small messages, since each
@@ -27,8 +27,8 @@ call loads the key it is given. On an AMD Ryzen 9 9950X, Linux 7.3, Dart
 dart pub add rind_cryptography
 ```
 
-rind's [setup](https://github.com/moq-dev/rind/tree/main/rind-dart#setup)
-and [platforms](https://github.com/moq-dev/rind/tree/main/rind-dart#platforms)
+rind's [setup](https://github.com/kixel-ai/rind/tree/main/rind-dart#setup)
+and [platforms](https://github.com/kixel-ai/rind/tree/main/rind-dart#platforms)
 apply: Android, iOS, macOS, Linux, and Windows, and no web.
 
 Make rind the default before the app's first cryptography call, and the

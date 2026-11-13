@@ -31,7 +31,7 @@ SHA-256 23% over its integer code on a Cortex-A8 and 50% on a Snapdragon S4.
 Both assembly routines beat the Rust here by more than any of those spreads,
 so the pick should hold on ARMv7 cores, though their ratios will differ.
 
-The [run](https://github.com/moq-dev/rind/actions/runs/43103564386) holds the
+The [run](https://github.com/kixel-ai/rind/actions/runs/43103564386) holds the
 logs and the workflow, which builds the Rust variant by patching the dispatch
 back to `low::generic`.
 
@@ -49,6 +49,6 @@ also loses to the assembly, by 2.8× and more.
 
 The HACL* variant replaced the Rust fallback with
 `libcrux_sha2::hacl::sha256_update_nblocks` from libcrux-sha2 0.0.9. The
-[run](https://github.com/moq-dev/rind/actions/runs/42496769936) and its
-[workflow](https://github.com/moq-dev/rind/blob/c2a9a1edb43d454d9a275fbb8d98a6274c23d91c/.github/workflows/bench.yml)
+[run](https://github.com/kixel-ai/rind/actions/runs/42496769936) and its
+[workflow](https://github.com/kixel-ai/rind/blob/c2a9a1edb43d454d9a275fbb8d98a6274c23d91c/.github/workflows/bench.yml)
 record the build and invocation.
