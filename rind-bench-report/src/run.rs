@@ -472,10 +472,10 @@ fn output(args: &[&str], env: &std::collections::HashMap<String, String>) -> Res
 fn cpu_model() -> Result<String> {
     #[cfg(target_os = "macos")]
     {
-        return output(
+        output(
             &["sysctl", "-n", "machdep.cpu.brand_string"],
             &std::env::vars().collect(),
-        );
+        )
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -498,7 +498,7 @@ fn os_name() -> Result<String> {
         let ver = output(&["sw_vers", "-productVersion"], &std::env::vars().collect())
             .unwrap_or_default();
         let release = output(&["uname", "-r"], &std::env::vars().collect()).unwrap_or_default();
-        return Ok(format!("macOS {ver} ({release})"));
+        Ok(format!("macOS {ver} ({release})"))
     }
     #[cfg(not(target_os = "macos"))]
     {

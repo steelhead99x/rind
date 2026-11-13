@@ -24,6 +24,7 @@ pub fn cpu_times() -> Result<(u64, u64)> {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn linux_cpu_times() -> Result<(u64, u64)> {
     let text = std::fs::read_to_string("/proc/stat").map_err(|err| Error::new(err.to_string()))?;
     let line = text.lines().next().unwrap_or("");
