@@ -121,6 +121,28 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | ML-DSA-44, ML-DSA-65, ML-DSA-87 | s2n-bignum ✓ + mldsa-native ⚡ |  | mldsa-native ⚡ + OpenSSL ⚡ | mldsa-native ⚡ + rind |
 | RSA signatures, OAEP, blind signatures, key generation | s2n-bignum ✓ + aws-lc ⚡ + Graviola ⚡ |  | aws-lc ⚡ + Graviola ⚡ + rind ⚡ | Graviola ⚡ + rind ⚡ |
 
+- aarch64 chooses s2n-bignum's schedule by the multiplier for X25519,
+  Ed25519, the P-256, P-384, and P-521 scalar multiplications, and RSA's
+  16-word and 32-word products. Linux selects the narrow schedules only when
+  every online core is Cortex-A72, Cortex-A76, or Neoverse N1. Apple, Neoverse
+  V1, V2, V3, and N2, Cobalt 100, a mixed list, and a core rind does not
+  recognise keep the `_alt` schedules. A sandbox that cannot read
+  `/proc/cpuinfo`, Android, and Windows on ARM do too: they never see a part
+  list, so they do not switch to the narrow schedules. Each imported narrow
+  routine has a HOL Light correctness proof that embeds that object's bytes.
+  `admin/prove-bytes` checks those bytes against the routine's `asm!` block
+  in rind's release build, the comparison
+  [s2n-bignum's constant-time theorems](#s2n-bignums-constant-time-theorems)
+  describes. The inventory in that section is not that comparison: "none"
+  means s2n-bignum publishes no `_SUBROUTINE_SAFE` theorem for the routine.
+  `curve25519_x25519`, `p256_scalarmul`, `p256_montjmixadd`, `p521_jadd`,
+  and `p521_jmixadd` are "none" on the narrow schedule and on the `_alt`
+  schedule each replaces. The narrow path has a per-routine correctness
+  proof and not yet rind's Lean composition: the Lean proofs of
+  X25519, Ed25519, and P-256 name the `_alt` routines, so those benchmark ✓
+  marks are the `_alt` cores. The SLOTHY field routines whose proofs are
+  equivalences to an asserted base program stay on `_alt`, because that check
+  needs the byte list.
 - AES header protection on aarch64 pays the same indirect call as AES-GCM
   key setup on x86_64.
 - armv7 without crypto: SHA-256 and SHA-1 run aws-lc's NEON routines, or
@@ -240,7 +262,7 @@ not cover rind's in-place calls.
 | `bignum_demont_p384` | `bignum_demont_p384`: none | `bignum_demont_p384`: none |
 | `bignum_demont_p384_alt` | `bignum_demont_p384_alt`: none | not imported |
 | `bignum_digitsize` | `bignum_digitsize`: none | `bignum_digitsize`: none |
-| `bignum_emontredc_8n` | `bignum_emontredc_8n`: none | not imported |
+| `bignum_emontredc_8n` | `bignum_emontredc_8n`: none | `bignum_emontredc_8n`: `BIGNUM_EMONTREDC_8N_SUBROUTINE_SAFE` |
 | `bignum_eq` | `bignum_eq`: none | `bignum_eq`: none |
 | `bignum_inv_p25519` | `bignum_inv_p25519`: `BIGNUM_INV_P25519_SUBROUTINE_SAFE` | not imported |
 | `bignum_inv_p256` | `bignum_inv_p256`: none | `bignum_inv_p256`: none |
@@ -248,12 +270,14 @@ not cover rind's in-place calls.
 | `bignum_inv_p521` | `bignum_inv_p521`: `BIGNUM_INV_P521_SUBROUTINE_SAFE` | `bignum_inv_p521`: `BIGNUM_INV_P521_SUBROUTINE_SAFE` |
 | `bignum_invsqrt_p25519` | `bignum_invsqrt_p25519`: none | `bignum_invsqrt_p25519_alt`: none |
 | `bignum_invsqrt_p25519_alt` | `bignum_invsqrt_p25519_alt`: none | not imported |
-| `bignum_kmul_16_32` | `bignum_kmul_16_32`: none | not imported |
-| `bignum_kmul_32_64` | `bignum_kmul_32_64`: none | not imported |
-| `bignum_ksqr_16_32` | `bignum_ksqr_16_32`: none | not imported |
-| `bignum_ksqr_32_64` | `bignum_ksqr_32_64`: none | not imported |
+| `bignum_invsqrt_p25519_narrow::bignum_invsqrt_p25519` | not imported | `bignum_invsqrt_p25519`: none |
+| `bignum_kmul_16_32` | `bignum_kmul_16_32`: none | `bignum_kmul_16_32`: `BIGNUM_KMUL_16_32_SUBROUTINE_SAFE` |
+| `bignum_kmul_32_64` | `bignum_kmul_32_64`: none | `bignum_kmul_32_64`: `BIGNUM_KMUL_32_64_SUBROUTINE_SAFE` |
+| `bignum_ksqr_16_32` | `bignum_ksqr_16_32`: none | `bignum_ksqr_16_32`: `BIGNUM_KSQR_16_32_SUBROUTINE_SAFE` |
+| `bignum_ksqr_32_64` | `bignum_ksqr_32_64`: none | `bignum_ksqr_32_64`: `BIGNUM_KSQR_32_64_SUBROUTINE_SAFE` |
 | `bignum_madd_n25519` | `bignum_madd_n25519`: `BIGNUM_MADD_N25519_SUBROUTINE_SAFE` | `bignum_madd_n25519_alt`: `BIGNUM_MADD_N25519_ALT_SUBROUTINE_SAFE` |
 | `bignum_madd_n25519_alt` | `bignum_madd_n25519_alt`: `BIGNUM_MADD_N25519_ALT_SUBROUTINE_SAFE` | not imported |
+| `bignum_madd_n25519_narrow::bignum_madd_n25519` | not imported | `bignum_madd_n25519`: `BIGNUM_MADD_N25519_SUBROUTINE_SAFE` |
 | `bignum_mod_n25519` | `bignum_mod_n25519`: `BIGNUM_MOD_N25519_SUBROUTINE_SAFE` | `bignum_mod_n25519`: `BIGNUM_MOD_N25519_SUBROUTINE_SAFE` |
 | `bignum_mod_n256` | `bignum_mod_n256_4`: none | `bignum_mod_n256_4`: none |
 | `bignum_mod_n384` | `bignum_mod_n384_6`: none | `bignum_mod_n384_6`: none |
@@ -277,6 +301,7 @@ not cover rind's in-place calls.
 | `bignum_mul` | `bignum_mul`: none | `bignum_mul`: `BIGNUM_MUL_SUBROUTINE_SAFE` |
 | `bignum_mul_p25519` | `bignum_mul_p25519`: none | `bignum_mul_p25519_alt`: none |
 | `bignum_mul_p25519_alt` | `bignum_mul_p25519_alt`: none | not imported |
+| `bignum_mul_p25519_narrow::bignum_mul_p25519` | not imported | `bignum_mul_p25519`: none |
 | `bignum_mul_p521` | `bignum_mul_p521`: `BIGNUM_MUL_P521_SUBROUTINE_SAFE` | `bignum_mul_p521_alt`: `BIGNUM_MUL_P521_ALT_SUBROUTINE_SAFE` |
 | `bignum_mul_p521_alt` | `bignum_mul_p521_alt`: `BIGNUM_MUL_P521_ALT_SUBROUTINE_SAFE` | not imported |
 | `bignum_mux` | `bignum_mux`: none | `bignum_mux`: none |
@@ -288,6 +313,7 @@ not cover rind's in-place calls.
 | `bignum_optsub` | `bignum_optsub`: none | `bignum_optsub`: `BIGNUM_OPTSUB_SUBROUTINE_SAFE` |
 | `bignum_sqr_p25519` | `bignum_sqr_p25519`: none | `bignum_sqr_p25519_alt`: none |
 | `bignum_sqr_p25519_alt` | `bignum_sqr_p25519_alt`: none | not imported |
+| `bignum_sqr_p25519_narrow::bignum_sqr_p25519` | not imported | `bignum_sqr_p25519`: none |
 | `bignum_sqr_p521` | `bignum_sqr_p521`: `BIGNUM_SQR_P521_SUBROUTINE_SAFE` | `bignum_sqr_p521_alt`: `BIGNUM_SQR_P521_ALT_SUBROUTINE_SAFE` |
 | `bignum_sqr_p521_alt` | `bignum_sqr_p521_alt`: `BIGNUM_SQR_P521_ALT_SUBROUTINE_SAFE` | not imported |
 | `bignum_sub_p25519` | `bignum_sub_p25519`: none | `bignum_sub_p25519`: none |
@@ -297,20 +323,28 @@ not cover rind's in-place calls.
 | `bignum_tomont_p384_alt` | `bignum_tomont_p384_alt`: `BIGNUM_TOMONT_P384_ALT_SUBROUTINE_SAFE` | not imported |
 | `curve25519_x25519` | `curve25519_x25519`: `CURVE25519_X25519_SUBROUTINE_SAFE` | `curve25519_x25519_alt`: none |
 | `curve25519_x25519_alt` | `curve25519_x25519_alt`: `CURVE25519_X25519_ALT_SUBROUTINE_SAFE` | not imported |
+| `curve25519_x25519_narrow::curve25519_x25519` | not imported | `curve25519_x25519`: none |
 | `curve25519_x25519base` | `curve25519_x25519base`: `CURVE25519_X25519BASE_SUBROUTINE_SAFE` | `curve25519_x25519base_alt`: none |
 | `curve25519_x25519base_alt` | `curve25519_x25519base_alt`: `CURVE25519_X25519BASE_ALT_SUBROUTINE_SAFE` | not imported |
+| `curve25519_x25519base_narrow::curve25519_x25519base` | not imported | `curve25519_x25519base`: none |
 | `edwards25519_decode` | `edwards25519_decode`: `EDWARDS25519_DECODE_SUBROUTINE_SAFE` | `edwards25519_decode_alt`: `EDWARDS25519_DECODE_ALT_SUBROUTINE_SAFE` |
 | `edwards25519_decode_alt` | `edwards25519_decode_alt`: `EDWARDS25519_DECODE_ALT_SUBROUTINE_SAFE` | not imported |
+| `edwards25519_decode_narrow::edwards25519_decode` | not imported | `edwards25519_decode`: `EDWARDS25519_DECODE_SUBROUTINE_SAFE` |
 | `edwards25519_epadd` | `edwards25519_epadd`: none | `edwards25519_epadd_alt`: none |
 | `edwards25519_epadd_alt` | `edwards25519_epadd_alt`: none | not imported |
+| `edwards25519_epadd_narrow::edwards25519_epadd` | not imported | `edwards25519_epadd`: none |
 | `edwards25519_epdouble` | `edwards25519_epdouble`: none | `edwards25519_epdouble_alt`: none |
 | `edwards25519_epdouble_alt` | `edwards25519_epdouble_alt`: none | not imported |
+| `edwards25519_epdouble_narrow::edwards25519_epdouble` | not imported | `edwards25519_epdouble`: none |
 | `edwards25519_pdouble` | `edwards25519_pdouble`: none | `edwards25519_pdouble_alt`: none |
 | `edwards25519_pdouble_alt` | `edwards25519_pdouble_alt`: none | not imported |
+| `edwards25519_pdouble_narrow::edwards25519_pdouble` | not imported | `edwards25519_pdouble`: none |
 | `edwards25519_scalarmulbase` | `edwards25519_scalarmulbase`: `EDWARDS25519_SCALARMULBASE_SUBROUTINE_SAFE` | `edwards25519_scalarmulbase_alt`: `EDWARDS25519_SCALARMULBASE_ALT_SUBROUTINE_SAFE` |
 | `edwards25519_scalarmulbase_alt` | `edwards25519_scalarmulbase_alt`: `EDWARDS25519_SCALARMULBASE_ALT_SUBROUTINE_SAFE` | not imported |
+| `edwards25519_scalarmulbase_narrow::edwards25519_scalarmulbase` | not imported | `edwards25519_scalarmulbase`: `EDWARDS25519_SCALARMULBASE_SUBROUTINE_SAFE` |
 | `edwards25519_scalarmuldouble` | `edwards25519_scalarmuldouble`: `EDWARDS25519_SCALARMULDOUBLE_SUBROUTINE_SAFE` | `edwards25519_scalarmuldouble_alt`: `EDWARDS25519_SCALARMULDOUBLE_ALT_SUBROUTINE_SAFE` |
 | `edwards25519_scalarmuldouble_alt` | `edwards25519_scalarmuldouble_alt`: `EDWARDS25519_SCALARMULDOUBLE_ALT_SUBROUTINE_SAFE` | not imported |
+| `edwards25519_scalarmuldouble_narrow::edwards25519_scalarmuldouble` | not imported | `edwards25519_scalarmuldouble`: `EDWARDS25519_SCALARMULDOUBLE_SUBROUTINE_SAFE` |
 | `mldsa_caddq` | `mldsa_caddq`: `MLDSA_CADDQ_SUBROUTINE_SAFE` | `mldsa_caddq`: `MLDSA_CADDQ_SUBROUTINE_SAFE` |
 | `mldsa_chknorm` | `mldsa_chknorm`: `MLDSA_CHKNORM_SUBROUTINE_SAFE` | `mldsa_chknorm`: `MLDSA_CHKNORM_SUBROUTINE_SAFE` |
 | `mldsa_decompose_32` | `mldsa_decompose_32`: `MLDSA_DECOMPOSE_32_SUBROUTINE_SAFE` | `mldsa_decompose_32`: `MLDSA_DECOMPOSE_32_SUBROUTINE_SAFE` |
@@ -346,25 +380,34 @@ not cover rind's in-place calls.
 | `p256_montjdouble_alt` | `p256_montjdouble_alt`: `P256_MONTJDOUBLE_ALT_SUBROUTINE_SAFE` | not imported |
 | `p256_montjmixadd` | `p256_montjmixadd`: none | `p256_montjmixadd_alt`: none |
 | `p256_montjmixadd_alt` | `p256_montjmixadd_alt`: none | not imported |
+| `p256_montjmixadd_narrow::p256_montjmixadd` | not imported | `p256_montjmixadd`: none |
 | `p256_scalarmul` | `p256_scalarmul`: none | `p256_scalarmul_alt`: none |
 | `p256_scalarmul_alt` | `p256_scalarmul_alt`: none | not imported |
+| `p256_scalarmul_narrow::p256_scalarmul` | not imported | `p256_scalarmul`: none |
 | `p256_scalarmulbase` | not imported | `p256_scalarmulbase_alt`: none |
+| `p256_scalarmulbase_narrow::p256_scalarmulbase` | not imported | `p256_scalarmulbase`: none |
 | `p384_montjadd` | `p384_montjadd`: `P384_MONTJADD_SUBROUTINE_SAFE` | `p384_montjadd_alt`: `P384_MONTJADD_ALT_SUBROUTINE_SAFE` |
 | `p384_montjadd_alt` | `p384_montjadd_alt`: `P384_MONTJADD_ALT_SUBROUTINE_SAFE` | not imported |
 | `p384_montjdouble` | `p384_montjdouble`: `P384_MONTJDOUBLE_SUBROUTINE_SAFE` | `p384_montjdouble_alt`: `P384_MONTJDOUBLE_ALT_SUBROUTINE_SAFE` |
 | `p384_montjdouble_alt` | `p384_montjdouble_alt`: `P384_MONTJDOUBLE_ALT_SUBROUTINE_SAFE` | not imported |
 | `p384_montjmixadd` | `p384_montjmixadd`: none | `p384_montjmixadd_alt`: none |
 | `p384_montjmixadd_alt` | `p384_montjmixadd_alt`: none | not imported |
+| `p384_montjmixadd_narrow::p384_montjmixadd` | not imported | `p384_montjmixadd`: none |
 | `p384_montjscalarmul` | `p384_montjscalarmul`: `P384_MONTJSCALARMUL_SUBROUTINE_SAFE` | `p384_montjscalarmul_alt`: `P384_MONTJSCALARMUL_ALT_SUBROUTINE_SAFE` |
 | `p384_montjscalarmul_alt` | `p384_montjscalarmul_alt`: `P384_MONTJSCALARMUL_ALT_SUBROUTINE_SAFE` | not imported |
+| `p384_montjscalarmul_narrow::p384_montjscalarmul` | not imported | `p384_montjscalarmul`: `P384_MONTJSCALARMUL_SUBROUTINE_SAFE` |
 | `p521_jadd` | `p521_jadd`: `P521_JADD_SUBROUTINE_SAFE` | `p521_jadd_alt`: none |
 | `p521_jadd_alt` | `p521_jadd_alt`: `P521_JADD_ALT_SUBROUTINE_SAFE` | not imported |
+| `p521_jadd_narrow::p521_jadd` | not imported | `p521_jadd`: none |
 | `p521_jdouble` | `p521_jdouble`: `P521_JDOUBLE_SUBROUTINE_SAFE` | `p521_jdouble_alt`: `P521_JDOUBLE_ALT_SUBROUTINE_SAFE` |
 | `p521_jdouble_alt` | `p521_jdouble_alt`: `P521_JDOUBLE_ALT_SUBROUTINE_SAFE` | not imported |
+| `p521_jdouble_narrow::p521_jdouble` | not imported | `p521_jdouble`: `P521_JDOUBLE_SUBROUTINE_SAFE` |
 | `p521_jmixadd` | `p521_jmixadd`: none | `p521_jmixadd_alt`: none |
 | `p521_jmixadd_alt` | `p521_jmixadd_alt`: none | not imported |
+| `p521_jmixadd_narrow::p521_jmixadd` | not imported | `p521_jmixadd`: none |
 | `p521_jscalarmul` | `p521_jscalarmul`: `P521_JSCALARMUL_SUBROUTINE_SAFE` | `p521_jscalarmul_alt`: `P521_JSCALARMUL_ALT_SUBROUTINE_SAFE` |
 | `p521_jscalarmul_alt` | `p521_jscalarmul_alt`: `P521_JSCALARMUL_ALT_SUBROUTINE_SAFE` | not imported |
+| `p521_jscalarmul_narrow::p521_jscalarmul` | not imported | `p521_jscalarmul`: `P521_JSCALARMUL_SUBROUTINE_SAFE` |
 | `sha3_keccak2_f1600` | not imported | `sha3_keccak2_f1600`: `SHA3_KECCAK2_F1600_SUBROUTINE_SAFE` |
 | `sha3_keccak4_f1600_alt::sha3_keccak4_f1600` | `sha3_keccak4_f1600_alt`: none | not imported |
 | `sha3_keccak_f1600` | `sha3_keccak_f1600`: none | `sha3_keccak_f1600`: `SHA3_KECCAK_F1600_SUBROUTINE_SAFE` |

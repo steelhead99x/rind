@@ -773,7 +773,7 @@ CPU_FEATURES = {
         "avx", "avx2", "avx512f", "avx512dq", "avx512ifma", "avx512bw", "avx512vl", "avx512vbmi", "avx512vbmi2",
         "sha",
     },
-    "aarch64": {"aes", "dit", "neon", "pmull", "sha2", "sha3"},
+    "aarch64": {"aes", "dit", "neon", "pmull", "sha2", "sha3", "wide_mul"},
 }
 
 # The nightly bench's columns, by target, portability, and denied tier, as
