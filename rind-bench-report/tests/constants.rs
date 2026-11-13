@@ -278,7 +278,11 @@ fn same(expect: &Value, got: &Value, path: &str) -> std::result::Result<(), Stri
     }
 }
 
+// It runs `admin/bench-report` under python3 (3.11 or later, for
+// `tomllib`), which a workspace `cargo test` cannot count on, as on Windows,
+// so `just check`'s bench check runs it after checking for python3.
 #[test]
+#[ignore = "needs python3 and admin/bench-report; just check's bench check runs it"]
 fn tables_match_the_python_script() {
     if let Err(diff) = same(&python_tables(), &rust_tables(), "$") {
         panic!("table drift at {diff}");
