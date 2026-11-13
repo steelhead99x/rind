@@ -100,7 +100,7 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | ChaCha20-Poly1305, XChaCha20-Poly1305 | aws-lc ⚡ |  |  | HACL* ✓ + Graviola |
 | MD5 | rind |  |  |  |
 | SHA-1 | rind | aws-lc |  | rind |
-| SHA-256 | aws-lc ⚡ | aws-lc |  | HACL* ✓ |
+| SHA-256 | aws-lc ⚡ | aws-lc |  | HACL* ✓; rolled rind on 32-bit |
 | SHA-384, SHA-512, SHA-512/256 | aws-lc | aws-lc ✓ | aws-lc ⚡ | HACL* ✓; rolled rind on 32-bit |
 | SHA3-256, SHA3-384, SHA3-512 | s2n-bignum ✓ + Graviola |  | OpenSSL ⚡ + Graviola | rind + Graviola |
 | HMAC | Graviola ⚡ |  |  |  |

@@ -5,9 +5,8 @@
 //! `Hacl_Hash_SHA2`, as libcrux-sha2 ships it. HACL*'s SHA-256 took 0.67-0.93
 //! of `generic`'s time at 16 KB on x86_64.
 
-use libcrux_sha2::hacl::sha256_update_nblocks;
 #[cfg(target_pointer_width = "64")]
-use libcrux_sha2::hacl::sha512_update_nblocks;
+use libcrux_sha2::hacl::{sha256_update_nblocks, sha512_update_nblocks};
 
 pub(crate) use crate::low::generic::sha1::sha1_compress_blocks;
 
@@ -18,8 +17,19 @@ const PIECE: usize = 1 << 31;
 /// Compresses whole 64-byte `blocks` into `state`.
 pub(crate) fn sha256_compress_blocks(state: &mut [u32; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(64));
-    for piece in blocks.chunks(PIECE) {
-        sha256_update_nblocks(piece.len() as u32, piece, state);
+    // HACL*'s `sha256_update` is fully unrolled (~12 KiB on Xtensa), which
+    // fills a 16 KiB instruction cache and makes short inputs and HMAC/HKDF
+    // pay a large miss cost. On 32-bit targets use the rolled compression
+    // in `generic::sha256`. 64-bit portable keeps HACL*.
+    #[cfg(target_pointer_width = "32")]
+    {
+        crate::low::generic::sha256::sha256_compress_blocks(state, blocks);
+    }
+    #[cfg(target_pointer_width = "64")]
+    {
+        for piece in blocks.chunks(PIECE) {
+            sha256_update_nblocks(piece.len() as u32, piece, state);
+        }
     }
 }
 

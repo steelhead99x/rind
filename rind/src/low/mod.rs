@@ -112,7 +112,12 @@ mod generic {
         all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha1;
-    #[cfg(all(test, any(rind_backend = "arm", rind_backend = "x86_64")))]
+    // Also the 32-bit portable SHA-256: HACL*'s unrolled form is ~12 KiB
+    // and misses a 16 KiB instruction cache on short inputs.
+    #[cfg(any(
+        all(rind_backend = "portable", target_pointer_width = "32"),
+        all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
+    ))]
     pub(super) mod sha256;
     // Rolled SHA-512 for 32-bit portable targets, where HACL*'s unrolled
     // form misses small instruction caches, and in tests against FIPS 180-4.

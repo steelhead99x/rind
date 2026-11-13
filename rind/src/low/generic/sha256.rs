@@ -37,6 +37,7 @@ macro_rules! SSIG1 {
     };
 }
 
+#[inline(never)]
 fn sha256_compress_block(state: &mut [u32; 8], block: &[u8]) {
     let mut a = state[0];
     let mut b = state[1];
