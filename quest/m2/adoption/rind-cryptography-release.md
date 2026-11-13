@@ -10,8 +10,11 @@ rind's.
 ## Plan
 
 - Publish from `rind-dart/cryptography` without its `pubspec_overrides.yaml`,
-  so it depends on rind 0.1.0 from pub.dev. Its `hooks` user-define reaches no
+  so it depends on rind from pub.dev. Its `hooks` user-define reaches no
   dependent app, as rind's pubspec explains.
+- Its AES-CBC, AES-CTR, and ChaCha20 use rind API newer than rind 0.1.0, so
+  first release rind with them (recommended 0.1.1, since they only add API)
+  and raise rind_cryptography's `rind` constraint to that release.
 - Add a job that publishes it on a `rind-cryptography-v{{version}}` tag
   through pub.dev's automated publishing, with the run's OIDC token in the
   `pub.dev` environment and no stored credential, after checking the tag
@@ -20,7 +23,12 @@ rind's.
 
 ## Waiting
 
-- Maintainer: publish 0.1.0 by hand (`cd rind-dart/cryptography && rm
+- Maintainer: first release rind-dart with its AES-CBC, AES-CTR, and
+  ChaCha20, as 0.1.1 (recommended: they only add API) or 0.2.0, by pushing
+  its `rind-dart-v{{version}}` tag; then raise rind_cryptography's `rind`
+  constraint to it. The version and tag are the maintainer's call. Done when
+  https://pub.dev/packages/rind lists that release.
+- Maintainer: then publish 0.1.0 by hand (`cd rind-dart/cryptography && rm
   pubspec_overrides.yaml && dart pub publish`), since pub.dev creates a new
   package only from an uploader's account, as it did for rind; then, on its
   admin page, enable automated publishing from kixel-ai/rind for

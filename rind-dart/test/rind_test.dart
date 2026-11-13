@@ -225,6 +225,157 @@ void main() {
     });
   });
 
+  group('cipher', () {
+    // NIST SP 800-38A's AES-128 key and first two plaintext blocks.
+    final key = hex('2b7e151628aed2a6abf7158809cf4f3c');
+    final plaintext = hex(
+      '6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51',
+    );
+
+    test('AES-CBC known answer, with and without padding', () {
+      // SP 800-38A F.2.1, and the full padding block it implies.
+      final iv = hex('000102030405060708090a0b0c0d0e0f');
+      final blocks = hex(
+        '7649abac8119b246cee98e9b12e9197d5086cb9b507219ee95db113a917678b2',
+      );
+      final encrypting = AesCbcEncryptingKey(CipherAlgorithm.aes128, key);
+      final decrypting = AesCbcDecryptingKey(CipherAlgorithm.aes128, key);
+      expect(
+        encrypting.encryptBlocks(CbcIv.assumeUnpredictable(iv), plaintext),
+        blocks,
+      );
+      expect(decrypting.decryptBlocks(iv, blocks), plaintext);
+
+      final padded = encrypting.encrypt(
+        CbcIv.assumeUnpredictable(iv),
+        plaintext,
+      );
+      expect(padded, [...blocks, ...hex('55e21d7100b988ffec32feeafaf23538')]);
+      expect(decrypting.decrypt(iv, padded), plaintext);
+    });
+
+    test('AES-CBC pads every length and refuses malformed input', () {
+      for (final algorithm in CipherAlgorithm.values) {
+        final keyBytes = Uint8List(algorithm.keyLength)..[0] = 7;
+        final encrypting = AesCbcEncryptingKey(algorithm, keyBytes);
+        final decrypting = AesCbcDecryptingKey(algorithm, keyBytes);
+        for (final length in [0, 1, 15, 16, 17, 32]) {
+          final iv = CbcIv.random();
+          final message = Uint8List(length)..fillRange(0, length, 9);
+          final ciphertext = encrypting.encrypt(iv, message);
+          expect(ciphertext.length, length ~/ 16 * 16 + 16);
+          expect(decrypting.decrypt(iv.bytes, ciphertext), message);
+        }
+      }
+      final encrypting = AesCbcEncryptingKey(CipherAlgorithm.aes128, key);
+      final decrypting = AesCbcDecryptingKey(CipherAlgorithm.aes128, key);
+      final iv = Uint8List(16);
+      // A last block that decrypts to a zero padding byte.
+      final badPadding = encrypting.encryptBlocks(
+        CbcIv.assumeUnpredictable(iv),
+        Uint8List(16),
+      );
+      for (final ciphertext in [Uint8List(0), Uint8List(15), badPadding]) {
+        expect(
+          () => decrypting.decrypt(iv, ciphertext),
+          throwsRind(RindError.decryptFailed),
+        );
+      }
+      expect(
+        () => decrypting.decryptBlocks(iv, Uint8List(17)),
+        throwsRind(RindError.decryptFailed),
+      );
+      expect(
+        () => encrypting.encryptBlocks(
+          CbcIv.assumeUnpredictable(iv),
+          Uint8List(17),
+        ),
+        throwsRind(RindError.wrongLength),
+      );
+      expect(
+        () => decrypting.decrypt(Uint8List(8), Uint8List(16)),
+        throwsRind(RindError.wrongLength),
+      );
+      expect(
+        () => CbcIv.assumeUnpredictable(Uint8List(8)),
+        throwsRind(RindError.wrongLength),
+      );
+      expect(
+        () => AesCbcEncryptingKey(CipherAlgorithm.aes256, key),
+        throwsRind(RindError.wrongLength),
+      );
+    });
+
+    test('AES-CTR known answer, and refuses a counter that wraps', () {
+      // SP 800-38A F.5.1.
+      final counterBlock = hex('f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
+      final ciphertext = hex(
+        '874d6191b620e3261bef6864990db6ce9806f66b7970fdff8617187bb9fffdff',
+      );
+      final ctr = AesCtr(CipherAlgorithm.aes128, key, 128);
+      expect(ctr.applyKeystream(counterBlock, plaintext), ciphertext);
+      expect(ctr.applyKeystream(counterBlock, ciphertext), plaintext);
+
+      // One counter bit counts two blocks.
+      final narrow = AesCtr(CipherAlgorithm.aes128, key, 1);
+      expect(narrow.applyKeystream(counterBlock, Uint8List(32)), hasLength(32));
+      expect(
+        () => narrow.applyKeystream(counterBlock, Uint8List(33)),
+        throwsRind(RindError.wrongLength),
+      );
+      for (final bits in [0, 129, 256 + 64]) {
+        expect(
+          () => AesCtr(CipherAlgorithm.aes128, key, bits),
+          throwsRind(RindError.wrongLength),
+        );
+      }
+      expect(
+        () => AesCtr(CipherAlgorithm.aes128, key, 1 << 32 | 64),
+        throwsRangeError,
+      );
+      expect(
+        () => ctr.applyKeystream(Uint8List(12), plaintext),
+        throwsRind(RindError.wrongLength),
+      );
+    });
+
+    test('ChaCha20 known answer, and refuses a counter that wraps', () {
+      // RFC 8439, section 2.4.2.
+      final chacha = ChaCha20(Uint8List.fromList(List.generate(32, (i) => i)));
+      final nonce = hex('000000000000004a00000000');
+      final message = ascii(
+        "Ladies and Gentlemen of the class of '99: If I could offer you only "
+        'one tip for the future, sunscreen would be it.',
+      );
+      final ciphertext = hex(
+        '6e2e359a2568f98041ba0728dd0d6981e97e7aec1d4360c20a27afccfd9fae0b'
+        'f91b65c5524733ab8f593dabcd62b3571639d624e65152ab8f530c359f0861d8'
+        '07ca0dbf500d6a6156a38e088a22b65e52bc514d16ccf806818ce91ab7793736'
+        '5af90bbf74a35be6b40b8eedf2785e42874d',
+      );
+      expect(chacha.applyKeystream(nonce, 1, message), ciphertext);
+      expect(chacha.applyKeystream(nonce, 1, ciphertext), message);
+
+      expect(
+        chacha.applyKeystream(nonce, 0xffffffff, Uint8List(64)),
+        hasLength(64),
+      );
+      expect(
+        () => chacha.applyKeystream(nonce, 0xffffffff, Uint8List(65)),
+        throwsRind(RindError.wrongLength),
+      );
+      expect(
+        () => chacha.applyKeystream(nonce, 1 << 32, Uint8List(1)),
+        throwsRangeError,
+      );
+      expect(
+        () => chacha.applyKeystream(Uint8List(8), 0, Uint8List(1)),
+        throwsRind(RindError.wrongLength),
+      );
+      expect(() => ChaCha20(Uint8List(16)), throwsRind(RindError.wrongLength));
+    });
+  });
+
   group('agreement', () {
     test('X25519 known answer', () {
       // RFC 7748 section 6.1.
