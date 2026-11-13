@@ -419,7 +419,11 @@ impl AffinePoint {
         r
     }
 
-    /// Returns table[i - 1] for a public index > 0
+    /// Returns table[i - 1] for a public index > 0.
+    ///
+    /// x86_64 and aarch64 verification looks terms up this way. The portable
+    /// backend and 32-bit ARM do it inside `p521_public_twin_mul`.
+    #[cfg_attr(any(rind_backend = "arm", rind_backend = "portable"), allow(dead_code))]
     fn public_lookup_comb(table: &[u64; 288], index: u8) -> Self {
         let offs = (index - 1) as usize * 18;
         let mut r = Self::default();
@@ -427,6 +431,10 @@ impl AffinePoint {
         r
     }
 
+    #[cfg_attr(
+        all(any(rind_backend = "arm", rind_backend = "portable"), not(test)),
+        allow(dead_code)
+    )]
     fn negate_y(&mut self) {
         let neg_y = self.y().negate();
         self.xy[Self::Y].copy_from_slice(&neg_y.0);
@@ -577,37 +585,70 @@ impl JacobianPoint {
             1 => util::public_naf::<5>(&p.0, &mut p_digits),
             _ => util::public_naf::<6>(&p.0, &mut p_digits),
         }
-        let g_multiples = &precomp::CURVE_GENERATOR_PRECOMP_COMB[0];
-
-        let mut result = Self::infinity();
-        for (g_digit, p_digit) in g_digits.iter().zip(&p_digits).rev() {
-            // `p521_jdouble` requires a nonzero z.
-            if !result.public_is_infinity() {
-                result = result.double();
-            }
-            if *p_digit != 0 {
-                let i = usize::from(p_digit.unsigned_abs() / 2);
-                let mut term = odd_multiples[i / 8][i % 8];
-                if *p_digit < 0 {
-                    term.negate_y();
+        // Each doubling and mixed addition on these backends otherwise
+        // converts every coordinate into fiat-crypto's limbs and back.
+        // The scalars and the point are public, as is the arithmetic below.
+        #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
+        {
+            let mut odd = [[0; 18]; 16];
+            let mut n = 0;
+            for row in odd_multiples {
+                for point in row.iter() {
+                    odd[n] = point.xy;
+                    n += 1;
                 }
-                result = result.public_add_affine(&term);
             }
-            if *g_digit != 0 {
-                let mut term = AffinePoint::public_lookup_comb(g_multiples, g_digit.unsigned_abs());
-                if *g_digit < 0 {
-                    term.negate_y();
-                }
-                result = result.public_add_affine(&term);
-            }
+            let mut xyz = [0; 27];
+            low::p521_public_twin_mul(
+                &mut xyz,
+                &g_digits,
+                &p_digits,
+                &precomp::CURVE_GENERATOR_PRECOMP_COMB[0],
+                &odd[..n],
+            );
+            Self { xyz }
         }
-        result
+
+        #[cfg(not(any(rind_backend = "arm", rind_backend = "portable")))]
+        {
+            let g_multiples = &precomp::CURVE_GENERATOR_PRECOMP_COMB[0];
+            let mut result = Self::infinity();
+            for (g_digit, p_digit) in g_digits.iter().zip(&p_digits).rev() {
+                // `p521_jdouble` requires a nonzero z.
+                if !result.public_is_infinity() {
+                    result = result.double();
+                }
+                if *p_digit != 0 {
+                    let i = usize::from(p_digit.unsigned_abs() / 2);
+                    let mut term = odd_multiples[i / 8][i % 8];
+                    if *p_digit < 0 {
+                        term.negate_y();
+                    }
+                    result = result.public_add_affine(&term);
+                }
+                if *g_digit != 0 {
+                    let mut term =
+                        AffinePoint::public_lookup_comb(g_multiples, g_digit.unsigned_abs());
+                    if *g_digit < 0 {
+                        term.negate_y();
+                    }
+                    result = result.public_add_affine(&term);
+                }
+            }
+            result
+        }
     }
 
     /// `self + p`, for any points, including at infinity, equal, or opposite.
     ///
     /// `p521_jmixadd` is proven only for unequal points, so points with the
-    /// same x never reach it.
+    /// same x never reach it. x86_64 and aarch64 verification adds this way.
+    /// The portable backend and 32-bit ARM fold the comparison into the
+    /// addition, in `p521_public_twin_mul`.
+    #[cfg_attr(
+        all(any(rind_backend = "arm", rind_backend = "portable"), not(test)),
+        allow(dead_code)
+    )]
     fn public_add_affine(&self, p: &AffinePoint) -> Self {
         if self.public_is_infinity() {
             return Self::from_affine(p);

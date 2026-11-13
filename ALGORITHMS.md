@@ -504,6 +504,13 @@ Those checks cost a key parsed and verified once, as TLS does with each
 certificate key, about 5-6% against verifying without them (aarch64 and
 x86_64 P-256 runs 41907443804 and 41907448202); keys verified more than once
 are faster than before.
+On the portable backend and on 32-bit ARM, where the field arithmetic is
+fiat-crypto's unsaturated limbs, that chain stays in those limbs: a doubling
+or mixed addition no longer converts every coordinate to 64-bit words and
+back, and the comparison of x is the mixed addition's own scaled x. The
+scalars and the point are public, so the chain branches on the cases the
+assembly routines refuse. x86_64 and aarch64 keep calling those routines,
+one doubling or addition at a time.
 
 ECDSA follows RFC6979 for generation of `k`, but adds additional non-critical random input.
 We do this to avoid the theoretical fragility of RFC6979 under fault conditions.

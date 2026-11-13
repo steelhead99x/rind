@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Portable and 32-bit ARM P-521 ECDSA verification keeps Jacobian coordinates in fiat-crypto's field representation across `u1·G + u2·Q`, instead of converting every coordinate to words at each doubling and mixed addition. The comparison of x is that addition's own scaled x. x86_64 and aarch64 are unchanged: they still call s2n-bignum's point routines.
+
 ## [0.3.2](https://github.com/moq-dev/rind/compare/rind-v0.3.1...rind-v0.3.2) - 2026-11-08
 
 ### Other

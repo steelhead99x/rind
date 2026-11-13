@@ -13,8 +13,11 @@
 //! and its 9-word one, in 64-bit words, measured 5x slower on armv7.  The rest
 //! composes those: the point formulas repeat s2n-bignum's,
 //! and every coordinate is fully reduced, so results match it word for
-//! word; inversion is Fermat's little theorem, raising to a public exponent
-//! by a fixed sequence of squarings and multiplications; reduction mod n
+//! word. Verification's public `u1·G + u2·Q` keeps those coordinates in
+//! this representation across the whole chain of doublings, converting
+//! back to words only for the resulting point. Inversion is Fermat's
+//! little theorem, raising to a public exponent by a fixed sequence of
+//! squarings and multiplications; reduction mod n
 //! folds the bits above 2^521 into 2^521 mod n, which is below 2^260, then
 //! subtracts n at most once; and scalar multiplication is by Booth-recoded
 //! 5-bit windows, after negating a scalar above n / 2 so that no addition
@@ -240,19 +243,120 @@ fn jmixadd([x1, y1, z1]: &[Fe; 3], x2: &Fe, y2: &Fe) -> [Fe; 3] {
     let z1sq = fe_sqr(z1);
     let y2a = fe_mul(&z1sq, &fe_mul(z1, y2));
     let x2a = fe_mul(&z1sq, x2);
+    mixadd_scaled(x1, y1, z1, &x2a, &y2a)
+}
 
-    let xd = fe_sub(&x2a, x1);
-    let yd = fe_sub(&y2a, y1);
+/// `jmixadd` from an affine point already scaled by `z1`: `x2a = x2 * z1^2`
+/// and `y2a = y2 * z1^3`. The points must not be equal or opposite.
+fn mixadd_scaled(x1: &Fe, y1: &Fe, z1: &Fe, x2a: &Fe, y2a: &Fe) -> [Fe; 3] {
+    let xd = fe_sub(x2a, x1);
+    let yd = fe_sub(y2a, y1);
     let zz = fe_sqr(&xd);
     let ww = fe_sqr(&yd);
     let zzx1 = fe_mul(&zz, x1);
-    let zzx2 = fe_mul(&zz, &x2a);
+    let zzx2 = fe_mul(&zz, x2a);
 
     let x3 = fe_sub(&fe_sub(&ww, &zzx1), &zzx2);
     let t1 = fe_mul(&fe_sub(&zzx2, &zzx1), y1);
     let y3 = fe_sub(&fe_mul(&yd, &fe_sub(&zzx1, &x3)), &t1);
     let z3 = fe_mul(&xd, z1);
     [x3, y3, z3]
+}
+
+/// `acc + (x, y)`, including infinity, equal points, and opposite points.
+///
+/// `x` and `y` are public, and so is `acc`: this branches on whether the
+/// points meet. The scaled `x` is the mixed addition's own, so an unequal
+/// pair does not multiply by `z^2` twice.
+fn add_mixed(acc: &mut [Fe; 3], at_infinity: &mut bool, x: &Fe, y: &Fe, one: &Fe) {
+    if *at_infinity {
+        acc[0] = *x;
+        acc[1] = *y;
+        acc[2] = *one;
+        *at_infinity = false;
+        return;
+    }
+
+    let (x1, y1, z1) = (acc[0], acc[1], acc[2]);
+    let z1sq = fe_sqr(&z1);
+    let x2a = fe_mul(&z1sq, x);
+    if nonzero(&fe_sub(&x2a, &x1)) == 0 {
+        let y2a = fe_mul(&z1sq, &fe_mul(&z1, y));
+        if nonzero(&fe_sub(&y2a, &y1)) == 0 {
+            *acc = jdouble(acc);
+        } else {
+            *acc = [Fe([0; FE_LIMBS]); 3];
+            *at_infinity = true;
+        }
+        return;
+    }
+    let y2a = fe_mul(&z1sq, &fe_mul(&z1, y));
+    *acc = mixadd_scaled(&x1, &y1, &z1, &x2a, &y2a);
+}
+
+/// `g_digits · G + p_digits · P` for public NAF digits, low digit first.
+///
+/// `g_row` is G through 16G, sixteen affine points. `odd` is P's odd
+/// multiples, eight or sixteen affine points, and a width-6 digit of
+/// `p_digits` indexes the sixteen. Coordinates stay in fiat-crypto's
+/// representation until the result, instead of converting at every
+/// doubling and mixed addition.
+///
+/// The digits and the points are public, and the additions branch on them.
+#[cfg_attr(
+    not(any(rind_backend = "arm", rind_backend = "portable")),
+    allow(dead_code)
+)]
+pub(crate) fn p521_public_twin_mul(
+    res: &mut [u64; 27],
+    g_digits: &[i8],
+    p_digits: &[i8],
+    g_row: &[u64; 288],
+    odd: &[[u64; 18]],
+) {
+    let one = fe(&[1, 0, 0, 0, 0, 0, 0, 0, 0]);
+    let mut g_pts = [(one, one); 16];
+    for (i, pt) in g_pts.iter_mut().enumerate() {
+        let mut xy = [0; 18];
+        xy.copy_from_slice(&g_row[i * 18..(i + 1) * 18]);
+        *pt = affine_fe(&xy);
+    }
+    let mut p_pts = [(one, one); 16];
+    for (pt, xy) in p_pts.iter_mut().zip(odd) {
+        *pt = affine_fe(xy);
+    }
+
+    let mut acc = [Fe([0; FE_LIMBS]); 3];
+    let mut at_infinity = true;
+    for (g_digit, p_digit) in g_digits.iter().zip(p_digits).rev() {
+        if !at_infinity {
+            acc = jdouble(&acc);
+        }
+        if *p_digit != 0 {
+            let i = usize::from(p_digit.unsigned_abs() / 2);
+            let (x, mut y) = p_pts[i];
+            if *p_digit < 0 {
+                y = fe_opp(&y);
+            }
+            add_mixed(&mut acc, &mut at_infinity, &x, &y, &one);
+        }
+        if *g_digit != 0 {
+            let i = usize::from(g_digit.unsigned_abs()) - 1;
+            let (x, mut y) = g_pts[i];
+            if *g_digit < 0 {
+                y = fe_opp(&y);
+            }
+            add_mixed(&mut acc, &mut at_infinity, &x, &y, &one);
+        }
+    }
+
+    *res = if at_infinity { [0; 27] } else { point(&acc) };
+}
+
+/// The affine point `xy` in fiat-crypto's representation.
+fn affine_fe(xy: &[u64; 18]) -> (Fe, Fe) {
+    let (words, _) = xy.as_chunks::<9>();
+    (fe(&words[0]), fe(&words[1]))
 }
 
 /// The point formulas of s2n-bignum's `p521_jdouble`.

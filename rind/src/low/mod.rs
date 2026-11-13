@@ -187,7 +187,7 @@ pub(crate) use generic::{
     limbs::p521::{
         bignum_add_p521, bignum_aff_point_select_p521, bignum_inv_p521, bignum_mod_n521,
         bignum_mul_p521, bignum_neg_p521, bignum_sqr_p521, p521_jadd, p521_jdouble, p521_jmixadd,
-        p521_jscalarmul,
+        p521_jscalarmul, p521_public_twin_mul,
     },
     mldsa_poly::{
         mldsa_caddq, mldsa_chknorm, mldsa_decompose_32, mldsa_decompose_88, mldsa_intt, mldsa_ntt,
