@@ -291,6 +291,53 @@ pub mod blind_rsa {
     };
 }
 
+/// Oblivious pseudorandom functions ([RFC 9497]) over ristretto255, P-256,
+/// P-384, and P-521.
+///
+/// A client learns the server's PRF of an input without the server learning
+/// the input or the client learning the server's key. The client blinds the
+/// input, the server evaluates the blinded element, and the client finalizes
+/// the evaluated element into the output. The [`voprf`](oprf::voprf) mode
+/// adds a proof that the server used the key it published, for one input or
+/// a batch; Privacy Pass's privately verifiable tokens run it on
+/// [`P384_SHA384`](oprf::P384_SHA384) and their batched ones on
+/// [`RISTRETTO255_SHA512`](oprf::RISTRETTO255_SHA512). The POPRF mode is not
+/// offered.
+///
+/// Everything holding the input, the blind, or the server's key runs in
+/// constant time.
+///
+/// ```
+/// # fn main() -> Result<(), rind::Error> {
+/// use rind::oprf::{RISTRETTO255_SHA512, voprf};
+///
+/// let server = voprf::ServerKey::generate(&RISTRETTO255_SHA512)?;
+/// let public_key = voprf::PublicKey::new(&RISTRETTO255_SHA512, server.public_key().as_ref())?;
+///
+/// let (blind, blinded_element) = voprf::Blind::new(&RISTRETTO255_SHA512, b"password")?;
+/// let (evaluated, proof) = server.blind_evaluate(blinded_element.as_ref())?;
+/// let output = blind.finalize(evaluated.as_ref(), proof.as_ref(), &public_key)?;
+///
+/// // The server, holding the input, computes the same output directly.
+/// assert_eq!(output.as_ref(), server.evaluate(b"password")?.as_ref());
+/// # Ok(())
+/// # }
+/// ```
+///
+/// [RFC 9497]: https://www.rfc-editor.org/rfc/rfc9497.html
+pub mod oprf {
+    pub use crate::high::oprf::{
+        Blind, BlindedElement, EvaluatedElement, Output, P256_SHA256, P384_SHA384, P521_SHA512,
+        RISTRETTO255_SHA512, ServerKey, ServerKeyBytes, Suite,
+    };
+
+    /// RFC 9497's VOPRF mode: the OPRF, with a proof that the server
+    /// evaluated every blinded element in a batch with the key it published.
+    pub mod voprf {
+        pub use crate::high::oprf::voprf::{Blind, EvaluatedElements, Proof, PublicKey, ServerKey};
+    }
+}
+
 /// Verifiable random functions: ECVRF ([RFC 9381]) on edwards25519 and P-256.
 ///
 /// The holder of a secret key proves an output for any input; anyone with

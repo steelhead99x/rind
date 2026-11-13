@@ -3,12 +3,11 @@
 //! The edwards25519 group over curve25519-dalek's, whose operations run in
 //! constant time, for Ed25519, ristretto255, and ECVRF.
 
-// ristretto255's consumers (OPRF, FROST, OPAQUE) are their own quests.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 
+use crate::error::Error;
 use crate::low;
+use crate::mid::rng::{RandomSource, SystemRandom};
 
 // Both are plain integer arrays in every dalek backend, so all zeroes is a
 // value they can hold.
@@ -115,6 +114,8 @@ impl Scalar {
     }
 
     /// `self * other mod L`.
+    // Only tests multiply scalars alone until FROST does.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn mul(&self, other: &Self) -> Self {
         Self(self.0 * other.0)
     }
@@ -130,5 +131,33 @@ impl Scalar {
     pub(crate) fn invert(&self) -> Option<Self> {
         let zero = low::ct::into_public(self.0 == curve25519_dalek::Scalar::ZERO);
         (!zero).then(|| Self(self.0.invert()))
+    }
+
+    /// `-self mod L`.
+    pub(crate) fn neg(&self) -> Self {
+        Self(-self.0)
+    }
+
+    /// Whether this is zero, computed in constant time: dalek compares
+    /// scalars with `ct_eq`.
+    pub(crate) fn is_zero(&self) -> bool {
+        self.0 == curve25519_dalek::Scalar::ZERO
+    }
+
+    /// A uniformly random nonzero scalar: 64 bytes from the system's random
+    /// source, reduced modulo `L`.
+    pub(crate) fn random() -> Result<Self, Error> {
+        let _entry = low::Entry::new_secret();
+        // Zero has a chance of 2^-252 a draw, so only a broken source fails.
+        for _ in 0..64 {
+            let mut bytes = [0u8; 64];
+            SystemRandom.fill(&mut bytes)?;
+            low::ct::secret_slice(&bytes);
+            let scalar = Self::from_uniform_bytes(&bytes);
+            if !low::ct::into_public(scalar.is_zero()) {
+                return Ok(scalar);
+            }
+        }
+        Err(Error::RngFailed)
     }
 }
