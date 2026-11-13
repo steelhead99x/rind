@@ -292,7 +292,7 @@ fn unranked_regexes() -> &'static [Regex] {
     .as_slice()
 }
 
-fn times(results: &[crate::schema::TimingRow]) -> Vec<(String, IndexMap<String, f64>)> {
+pub(crate) fn times(results: &[crate::schema::TimingRow]) -> Vec<(String, IndexMap<String, f64>)> {
     let mut rows: Vec<(String, IndexMap<String, f64>)> = Vec::new();
     for result in results {
         let row = row_name(&result.operation);
@@ -338,6 +338,45 @@ fn baseline_ratio(libs: &IndexMap<String, f64>) -> Option<(f64, String)> {
     Some((rind / best_ns, best_lib))
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct TierPoint {
+    pub ratio: f64,
+    pub rind: f64,
+    pub best: String,
+    pub best_ns: f64,
+}
+
+/// Nightly ids that have both rind and a baseline, in file order.
+pub(crate) fn tier_points(tier: &Tier) -> Vec<(String, TierPoint)> {
+    let mut out = Vec::new();
+    for (key, libs) in &tier.benchmarks {
+        let Some(&rind) = libs.get("rind") else {
+            continue;
+        };
+        let mut best_lib = None;
+        let mut best_ns = f64::INFINITY;
+        for (lib, ns) in libs {
+            if BASELINES.contains(&lib.as_str()) && *ns < best_ns {
+                best_ns = *ns;
+                best_lib = Some(lib.clone());
+            }
+        }
+        let Some(best) = best_lib else {
+            continue;
+        };
+        out.push((
+            key.clone(),
+            TierPoint {
+                ratio: rind / best_ns,
+                rind,
+                best,
+                best_ns,
+            },
+        ));
+    }
+    out
+}
+
 fn str_array(value: &toml::Value, where_: &str, key: &str) -> Result<Vec<String>> {
     let array = value
         .as_array()
@@ -348,6 +387,42 @@ fn str_array(value: &toml::Value, where_: &str, key: &str) -> Result<Vec<String>
             .as_str()
             .ok_or_else(|| Error::new(format!("{where_}: {key} must be an array of strings")))?;
         out.push(text.to_string());
+    }
+    Ok(out)
+}
+
+/// A `benchmarks/gaps.toml` row, without checking that it covers a measured gap.
+/// `gate` uses this: a decision counts even when tonight's run does not show the gap.
+#[derive(Debug, Clone)]
+pub struct GapPattern {
+    pub operations: Vec<String>,
+    pub on: Vec<String>,
+}
+
+pub fn load_gap_patterns(path: &Path) -> Result<Vec<GapPattern>> {
+    let text =
+        fs::read_to_string(path).map_err(|err| Error::new(format!("{}: {err}", path.display())))?;
+    let doc: toml::Value =
+        toml::from_str(&text).map_err(|err| Error::new(format!("{}: {err}", path.display())))?;
+    let Some(entries) = doc.get("gap").and_then(toml::Value::as_array) else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for entry in entries {
+        let Some(table) = entry.as_table() else {
+            continue;
+        };
+        let operations = table
+            .get("operations")
+            .map(|value| str_array(value, path.to_str().unwrap_or("gaps.toml"), "operations"))
+            .transpose()?
+            .unwrap_or_default();
+        let on = table
+            .get("on")
+            .map(|value| str_array(value, path.to_str().unwrap_or("gaps.toml"), "on"))
+            .transpose()?
+            .unwrap_or_default();
+        out.push(GapPattern { operations, on });
     }
     Ok(out)
 }

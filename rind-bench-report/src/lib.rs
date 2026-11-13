@@ -11,17 +11,27 @@
 mod error;
 mod format;
 mod gaps;
+mod gate;
 mod paths;
+mod prose;
+mod report;
 mod schema;
+mod svg;
 mod tables;
 mod verified;
+
+#[cfg(test)]
+mod behavior;
 
 pub use error::{Error, Result};
 pub use format::{fnmatchcase, human, significant};
 pub use gaps::{
-    DecidedGap, GapHit, gaps_of, load_gaps, parse_gaps, tier_column, tier_name, tier_row,
+    DecidedGap, GapHit, GapPattern, gaps_of, load_gap_patterns, load_gaps, parse_gaps, tier_column,
+    tier_name, tier_row,
 };
+pub use gate::{GateReport, gate};
 pub use paths::{Paths, relpath, workspace_root};
+pub use report::{host_table, platform_of, render_check, render_files, render_write};
 pub use schema::{
     BenchArtifact, BenchPoint, BuildCost, CpuInfo, HostResult, Loaded, Patch, Tier, TierDocument,
     TimingRow, Toolchain, load_bench_artifact, load_host_file, load_hosts, load_tier_file,

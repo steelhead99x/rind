@@ -61,6 +61,10 @@ openmls *ARGS:
 audit:
     cargo deny check
 
+# Compare admin/bench-report with rind-bench-report. DIR is a data or artifact directory.
+bench-parity DIR="":
+    sh/bench-parity.sh {{DIR}}
+
 # Open or update the release PR, then publish a release PR landed since BEFORE.
 release $BEFORE="":
     sh/release.sh "$BEFORE"

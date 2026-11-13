@@ -1,0 +1,42 @@
+name: Bench parity
+
+# Python admin/bench-report and rind-bench-report on the same inputs.
+# Pull requests only, so a failure shows on the PR.
+
+on:
+  pull_request:
+    paths:
+      - admin/bench-report
+      - admin/bench-report-test
+      - rind-bench-report/**
+      - benchmarks/**
+      - BENCHMARKS.md
+      - sh/bench-parity.sh
+      - sh/dispatch.sh
+      - .github/workflows/bench-parity.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  parity:
+    name: Python and Rust
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: 1.90.0
+
+      - name: Compare both implementations
+        run: sh/bench-parity.sh

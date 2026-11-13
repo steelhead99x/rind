@@ -78,7 +78,7 @@ declare -A scope=(
     [compat]='^(COMPATIBILITY\.md$|admin/x86-cpus?(/|$))'
     # BENCHMARKS.md is generated from the results, the verified-code table,
     # and the gap decisions, which link the quests that close them.
-    [bench]='^(BENCHMARKS\.md$|benchmarks/|admin/bench-report|quest/)'
+    [bench]='^(BENCHMARKS\.md$|benchmarks/|admin/bench-report|rind-bench-report/|sh/bench-parity\.sh$|quest/)'
     # admin/build-cost builds these against rind's API, so they break with it.
     [fixtures]='^(rind/|rind-rustls/|Cargo\.toml$|admin/build-cost-fixtures/(rind|rustls)/)'
     # The fixture builds this checkout's rind-ring under the rind-patch shim.
@@ -118,7 +118,7 @@ declare -A tools=(
     [mutants]='cargo-mutants python3'
     [testing]='python3'
     [compat]='python3'
-    [bench]='python3'
+    [bench]='python3 cargo'
     [fixtures]='cargo'
     [patch]='cargo jq git'
     [py]='cargo jq maturin python3'
@@ -303,7 +303,8 @@ for module in "${selected[@]}"; do
         fix:compat) python3 admin/x86-cpu markdown-table >COMPATIBILITY.md ;;
         check:bench)
             python3 admin/bench-report-test
-            python3 admin/bench-report render --check
+            cargo test -p rind-bench-report --locked
+            sh/bench-parity.sh
             ;;
         # Each fixture is its own workspace and resolves its own lockfile.
         check:fixtures)
