@@ -37,12 +37,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  hol-light:
+  # Each target's HOL Light proofs run in their own job, so the wall time is
+  # the slower target's rather than the sum. Each limit only catches a hang:
+  # it sits well above the target's measured time, with room for the proofs
+  # queued next, and `admin/prove` prints each proof's time to show where it
+  # goes.
+  hol-light-aarch64:
     runs-on: ubuntu-24.04
-    # The limit only catches a hang: x86_64's SHA-NI proofs took the job past
-    # 30 minutes on slower runners. quest/m2/confidence/prove-time-limit.md
-    # splits it.
-    timeout-minutes: 60
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -54,7 +56,20 @@ jobs:
         run: nix develop .#hol-light --command admin/prove bytes
 
       - name: Prove
-        run: nix develop .#hol-light --command admin/prove hol-light
+        run: nix develop .#hol-light --command admin/prove hol-light aarch64
+
+  hol-light-x86_64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix
+
+      - name: Prove
+        run: nix develop .#hol-light --command admin/prove hol-light x86_64
 
   cosim:
     runs-on: ubuntu-24.04
