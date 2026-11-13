@@ -217,7 +217,8 @@ ring has no `kem`.
 | `rsa::KeySize`, `RsaKeyPair::generate(size)` | the same; `KeySize` adds `Rsa6144` |
 | `EcdsaKeyPair::private_key().as_be_bytes()` (not in ring) | `to_scalar()`, an `EcdsaScalar` wiped on drop under `wipe` |
 | `Ed25519KeyPair::seed()?.as_be_bytes()` (not in ring) | `to_seed()`, an `Ed25519Seed` wiped on drop under `wipe` |
-| `public_modulus_len()`, `algorithm()`, `generate_fips` | none |
+| `public_modulus_len()`, `algorithm()` | none |
+| `RsaKeyPair::generate_fips(size)` | `generate(size)`, which follows FIPS 186-5 A.1.3; rind-fips's also runs the pairwise consistency test |
 | `ED25519_PUBLIC_KEY_LEN` | none: always 32 |
 | `rsa::PublicKey::from_der` | `PublicKey::new(&verify::RSA_PKCS1_SHA256, der)`, for one algorithm and PKCS#1 or `SubjectPublicKeyInfo` DER |
 | `rsa::PublicKey::{modulus, exponent, modulus_len}`, `PublicKeyComponents::from(&key)` | none |
