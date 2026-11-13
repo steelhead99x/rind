@@ -1111,7 +1111,7 @@ mod tests {
         ),
         (
             "aarch64/aes_cbc.rs",
-            "hw_encrypt",
+            "aese_chained",
             "one `aese` on registers the compiler allocates, which no ABI governs",
         ),
         (
