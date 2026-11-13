@@ -18,5 +18,4 @@ Decided 2026-11-12 (maintainer, /quest-audit): ✅ write the package. No audit i
 
 ## Related
 
-- [The coverage report measures the published code under its own tests](/quest/m2/confidence/coverage-report.md) - the source for what no test reaches
 - [rind runs in OSS-Fuzz](/quest/m4/oss-fuzz.md) - continuous fuzzing, which a reviewer will ask about
