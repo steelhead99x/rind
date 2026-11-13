@@ -28,6 +28,7 @@ Decided by the maintainer on 2026-10-30:
 - An OpenSSL provider, once out of reach, is planned in
   [m4](/quest/m4/README.md), and FIPS validation scoped there (maintainer,
   2026-11-04).
-- Each new primitive follows `AGENTS.md`: a verified source where one
-  exists, Wycheproof vectors, differential tests against aws-lc-rs, ctgrind,
-  and a benchmark, on every backend.
+- Each new primitive follows `AGENTS.md`: the fastest permissively licensed
+  source, a verified one only where it measures as fast at every size,
+  Wycheproof vectors, differential tests against aws-lc-rs, ctgrind, and a
+  benchmark, on every backend.

@@ -17,4 +17,4 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 
 # The line a binary adds. sh/patch.sh also patches rind-ring to this checkout.
 [patch.crates-io]
-ring = { git = "https://github.com/moq-dev/rind-patch" }
+ring = { git = "https://github.com/kixel-ai/rind-patch" }
