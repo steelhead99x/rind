@@ -7,8 +7,8 @@ name: prove
 # intrinsic models with are what an aarch64 CPU computes, and translates
 # rind's Rust under proof to Lean and checks the proofs in `proofs/`. Too slow
 # for `just ci`, so it runs nightly and on pull requests that change rind's
-# source, the proofs, the checks, s2n-bignum's pin, or the flake that pins
-# their tools.
+# source, the proofs, the checks, rind's fork of s2n-bignum, or the flake
+# that pins their tools.
 on:
   schedule:
     - cron: "0 18 * * *"
@@ -26,7 +26,7 @@ on:
       - ALGORITHMS.md
       - flake.nix
       - flake.lock
-      - thirdparty/s2n-bignum
+      - thirdparty/s2n-bignum/**
       - .github/workflows/prove.yml
 
 permissions:

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Re-runs every importer and generator at the upstream revision it pins, and
 # fails if the generated code differs from the committed code or a committed
-# file is one nothing generates.
+# file is one nothing generates, or if a file of rind's fork of s2n-bignum
+# differs from upstream's at the fork's base, or one of them lacks it, without
+# the fork's `RIND.md` listing it.
 #
 # Usage: admin/regenerate
 #
@@ -14,11 +16,25 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 upstream=.tmp/upstream
 
-for name in aws-lc boringssl openssl hacl-star; do
+for name in aws-lc boringssl openssl hacl-star s2n-bignum; do
     admin/upstream "$name"
 done
-# s2n-bignum's pin is its submodule commit.
-git submodule update --init --depth 1 thirdparty/s2n-bignum
+
+# The files of the fork or upstream that differ between them, or that one
+# lacks, and those the fork's `RIND.md` lists under "Changed files", one path
+# a bullet.
+fork=thirdparty/s2n-bignum
+changed=$({
+    find "$fork" -type f ! -path "$fork/RIND.md" -printf '%P\n'
+    git -C "$upstream/s2n-bignum" ls-files
+} | LC_ALL=C sort -u | while read -r file; do
+    cmp -s "$fork/$file" "$upstream/s2n-bignum/$file" 2>/dev/null || echo "$file"
+done)
+listed=$(sed -n '/^## Changed files$/,/^## /s/^- `\([^`]*\)`.*/\1/p' "$fork/RIND.md" | LC_ALL=C sort)
+if ! diff -u --label "$fork/RIND.md" --label "changed from upstream" <(echo "$listed") <(echo "$changed") >&2; then
+    echo "admin/regenerate: $fork/RIND.md lists other files than those that differ from upstream's" >&2
+    exit 1
+fi
 
 # Deleted first, so a file nothing regenerates shows as deleted.
 find rind/src/low/*/aws_lc rind/src/low/*/boringssl rind/src/low/*/openssl rind/src/low/*/hacl -type f -delete
