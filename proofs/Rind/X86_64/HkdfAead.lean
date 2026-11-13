@@ -22,7 +22,7 @@ namespace rind.x86_64.kdf
 through the translation's wrapper: the key holds AES-GCM for the
 bytes, as `aes_gcm_new` states, and the wrapper refuses only what `new` does. -/
 theorem aead_key_new_spec (h : RunsAesGcm) (alg : Algorithm) (algorithm : aead.Algorithm)
-    (halg : (algorithm = aead.AES_128_GCM ∧ alg = .AES_128) ∨
+    (halg : (algorithm = aead.AES_128_GCM ∧ alg = .AES_128) ∨ (algorithm = aead.AES_192_GCM ∧ alg = .AES_192) ∨
       (algorithm = aead.AES_256_GCM ∧ alg = .AES_256))
     (key : Slice U8) (hk : key.length = 4 * nk alg) :
     aead.Key.new algorithm key ⦃ r => ∃ k, r = .Ok k ∧ KeyReady alg (bv key.val) k ⦄ := by
@@ -34,18 +34,18 @@ theorem aead_key_new_spec (h : RunsAesGcm) (alg : Algorithm) (algorithm : aead.A
   exact (WP.spec_ok _).mpr ⟨k, rfl, hk'⟩
 
 /-- `aead::Key`'s conversion from `Okm` holds AES-GCM for the `4 * nk` bytes
-of HKDF-Expand, for AES-128-GCM and AES-256-GCM. -/
+of HKDF-Expand, for AES-128-GCM, AES-192-GCM, and AES-256-GCM. -/
 theorem aead_key_from_spec (h : RunsAesGcm) (a : high.hmac.Algorithm) (hr : RunsHmac a)
     (prk : List Byte) (k : high.hmac.Key) (hk : KeyOf a prk k) (info : Slice (Slice U8))
     (hinfo : hmacBlock a + tagLen a + (infoBytes info).length + 1 ≤ maxInput)
     (alg : Algorithm) (algorithm : aead.Algorithm)
-    (halg : (algorithm = aead.AES_128_GCM ∧ alg = .AES_128) ∨
+    (halg : (algorithm = aead.AES_128_GCM ∧ alg = .AES_128) ∨ (algorithm = aead.AES_192_GCM ∧ alg = .AES_192) ∨
       (algorithm = aead.AES_256_GCM ∧ alg = .AES_256)) :
     aead.Key.Insts.CoreConvertFromOkm0SharedStaticAlgorithm.from
       { prk := k, info := info, len := algorithm } ⦃ key =>
       KeyReady alg (hkdfExpand (hmacOf a) (tagLen a) prk (bv (infoBytes info)) (4 * nk alg)) key ⦄ := by
   have hkl : (rind.x86_64.aead.Algorithm.key_len algorithm).val = 4 * nk alg := by
-    rcases halg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> rfl
+    rcases halg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> rfl
   have hnk : nk alg ≤ 8 := by cases alg <;> decide
   have hpos := tagLen_pos a
   unfold aead.Key.Insts.CoreConvertFromOkm0SharedStaticAlgorithm.from
