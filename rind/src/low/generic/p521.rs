@@ -731,7 +731,10 @@ fn point(p: &[Fe; 3]) -> [u64; 27] {
 /// are; a secret scalar goes through `p521_jscalarmul`. Each addition is
 /// s2n-bignum's `jdouble` or `jmixadd`, and infinity, equal points, and
 /// opposite points take the same cases as `mid::p521`'s `public_add_affine`.
-#[cfg(any(test, rind_backend = "portable"))]
+#[cfg(any(
+    rind_backend = "portable",
+    all(test, any(rind_backend = "x86_64", rind_backend = "aarch64"))
+))]
 pub(crate) fn p521_public_twin_mul(
     res: &mut [u64; 27],
     g_digits: &[i8],
