@@ -63,3 +63,33 @@ don't ask again (✅ is the chosen option):
   WebCrypto set (AES-192, MD5, RSA-OAEP key labels and SPKI export, AES key
   wrap with padding, all landed) and platform coverage. RSA-2048 signing, which JWT's RS256 needs, is level with the
   fastest library on x86_64 in [BENCHMARKS.md](/BENCHMARKS.md).
+- Decided 2026-11-12 (maintainer, /quest-audit), after an audit of what keeps
+  a project from choosing rind. The maintainer picked four bets ✅: RustCrypto's
+  traits and a `[patch]` spike, which are
+  [their own epic](/quest/m2/rustcrypto/README.md), and here
+  [a `no_std` build](/quest/m2/adoption/no-std.md) and
+  [adapters on wasm32](/quest/m2/adoption/wasm-adapters.md), which Bitwarden
+  and Matrix were left out for above. An npm package was offered and not
+  picked, so Node stays out as decided on 2026-11-04. Considered and left out,
+  so don't raise them again without new evidence:
+  - An adapter for rustls's 0.24 pre-releases: the
+    [rustls 0.24 adapter](/quest/m2/adoption/rind-rustls-0.24.md) waits for
+    the release, and the newest that day was 0.24.0-dev.3, whose provider API
+    may still change.
+  - SSH (russh, ssh-key): no consumer has asked, and OpenSSH's
+    ChaCha20-Poly1305 needs raw ChaCha20 and Poly1305, the API rustic was left
+    out for above.
+  - X.509 and PKCS#12 for the Python package: `cryptography`'s largest
+    surface, and none of it is where rind is faster.
+  - The primitives the most-downloaded crates would need next, in the order
+    the audit read off crates.io that day: BLAKE3, BLAKE2, secp256k1, scrypt,
+    AES-GCM-SIV, and AES-CCM. An algorithm outside the planned set gets a
+    quest when a consumer asks, as
+    [aws-lc-rs's extras](/quest/m3/parity/aws-lc-extras.md) do, and this
+    order is where to start when one does.
+  - A watch list of projects that add a provider hook: nothing to build, and
+    rind files no upstream PRs.
+  - Distribution packages (Debian, Fedora, nixpkgs): no consumer has asked,
+    and a library crate reaches them through whatever application ships it.
+  - A C ABI, and Go, JVM, Swift, and .NET packages: out on 2026-11-04 for
+    needing OpenSSL's breadth, and nothing has changed.
