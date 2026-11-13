@@ -479,8 +479,15 @@ mod tests {
 
     /// SHAKE with rate `R` on `message`, ready to read.
     fn shake<const R: usize>(message: &[u8]) -> Shake<R> {
+        shake_parts(&[message])
+    }
+
+    /// SHAKE with rate `R` on `parts` in turn, ready to read.
+    fn shake_parts<const R: usize>(parts: &[&[u8]]) -> Shake<R> {
         let mut sponge = Sponge::new();
-        sponge.absorb(message);
+        for part in parts {
+            sponge.absorb(part);
+        }
         Shake::new(&sponge)
     }
 
@@ -660,7 +667,7 @@ mod tests {
                 shake256_x4(&inputs, &mut outputs);
                 for (input, output) in inputs.iter().zip(&outputs) {
                     let mut single = [0u8; 40];
-                    Shake256::new(input).read(&mut single);
+                    shake_parts::<SHAKE_256_R_BYTES>(input).read(&mut single);
                     assert_eq!(*output, single, "{len} bytes, {lanes} lanes");
                 }
             }
