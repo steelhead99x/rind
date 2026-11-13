@@ -41,7 +41,7 @@ pub(crate) fn hash_to_scalar(msg: &[&[u8]], dst: &[u8]) -> Result<Scalar, Error>
     Ok(lo.add(&hi.mont_mul(&Scalar(CURVE_ORDER_MM))))
 }
 
-fn jacobian([x, y, z]: &[FieldElement; 3]) -> JacobianMontPoint {
+pub(super) fn jacobian([x, y, z]: &[FieldElement; 3]) -> JacobianMontPoint {
     let mut xyz = [0; 12];
     xyz[JacobianMontPoint::X].copy_from_slice(&x.0);
     xyz[JacobianMontPoint::Y].copy_from_slice(&y.0);
@@ -138,7 +138,7 @@ impl Curve for FieldElement {
     }
 }
 
-fn coordinates(p: &JacobianMontPoint) -> [FieldElement; 3] {
+pub(super) fn coordinates(p: &JacobianMontPoint) -> [FieldElement; 3] {
     [p.x(), p.y(), p.z()]
 }
 

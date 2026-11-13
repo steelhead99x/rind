@@ -258,7 +258,7 @@ fn sqrt_ratio<C: Curve>(u: &C, v: &C) -> (bool, C) {
 /// The curves' additions are proven only for points neither equal nor,
 /// for P-521's, opposite, so equal points take the doubling and opposite
 /// ones infinity, compared by their coordinates scaled to a common `Z`.
-fn sum<C: Curve>(q0: &[C; 3], q1: &[C; 3]) -> [C; 3] {
+pub(crate) fn sum<C: Curve>(q0: &[C; 3], q1: &[C; 3]) -> [C; 3] {
     let [x0, y0, z0] = q0;
     let [x1, y1, z1] = q1;
     let (z0z0, z1z1) = (z0.sqr(), z1.sqr());
