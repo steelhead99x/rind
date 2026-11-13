@@ -14,7 +14,7 @@ Guidance:
 
 - Source: `aws-lc-rs/tests/` and `aws-lc-rs/tests/data/` in [aws/aws-lc-rs](https://github.com/aws/aws-lc-rs), at the tag matching the version `rind-aws-lc-rs/Cargo.toml` tracks (v1.19.0 on 2026-11-12). The published crate ships no tests, so take them from the repository. Keep the license headers, and confirm the license terms the way rind-ring did for ring's.
 - Exclude the vendored tests from the published package, as `rind-ring/Cargo.toml` does with `exclude = ["tests/ring"]`.
-- Expect failures, which are divergences. Under the adapter rule each one is a bug: fix it in this PR when it is small, otherwise plan a follow-up. `pqdsa_test.rs` stays skipped until [ML-DSA](/quest/m2/adoption/aws-lc-rs/ml-dsa.md) lands, and FIPS-only tests stay skipped, since the adapter refuses `fips`.
+- Expect failures, which are divergences. Under the adapter rule each one is a bug: fix it in this PR when it is small, otherwise plan a follow-up. ML-DSA is offered (`signature::{ML_DSA_44, ML_DSA_65, ML_DSA_87}` and `PqdsaKeyPair`; see [ALGORITHMS.md](/ALGORITHMS.md)), so `pqdsa_test.rs` is in scope. FIPS-only tests stay skipped, since the adapter refuses `fips`.
 - Record how to re-vendor on an aws-lc-rs bump next to where rind-ring records it, if it does.
 
 ## Related
