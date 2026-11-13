@@ -1,5 +1,5 @@
-//! Public key signatures: ECDSA on P-256, P-384, and P-521, RSA, Ed25519,
-//! and ML-DSA.
+//! Public key signatures: ECDSA on P-256, P-384, and P-521, RSA, and
+//! Ed25519.
 //!
 //! Calls that take a [`rand::SecureRandom`] to sign draw from the system
 //! random source inside rind, which `rng`, the only `SecureRandom`, also is.
@@ -959,10 +959,3 @@ impl AsDer<PublicKeyX509Der<'static>> for Ed25519PublicKey {
         Ok(PublicKeyX509Der::new(der))
     }
 }
-
-mod mldsa;
-pub use mldsa::{
-    ML_DSA_44, ML_DSA_44_SIGNING, ML_DSA_65, ML_DSA_65_SIGNING, ML_DSA_87, ML_DSA_87_SIGNING,
-    PqdsaKeyPair, PqdsaPrivateKey, PqdsaPublicKey, PqdsaSigningAlgorithm,
-    PqdsaVerificationAlgorithm,
-};
