@@ -8,12 +8,22 @@
 # benchmarks/data directory, a collect output directory, or a nightly artifact
 # directory that contains bench-*/bench-results.json. A difference in stdout,
 # stderr, exit status, or rendered files fails the script.
+#
+# First it runs rind-bench-report's tests that compare it with Python, which
+# are ignored by a plain `cargo test`, since they need python3 (3.11 or later,
+# for `tomllib`) and admin/bench-report.
 set -euo pipefail
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 dir=${1:-}
 
+if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null; then
+    echo "bench-parity: needs python3 3.11 or later on PATH" >&2
+    exit 1
+fi
+
+cargo test -p rind-bench-report --locked --quiet -- --ignored
 cargo build -p rind-bench-report --locked --quiet
 bin=$root/target/debug/rind-bench-report
 work=$(mktemp -d)
@@ -117,7 +127,7 @@ def write(path, sha, chacha, avx):
 write(os.path.join(base, "now", "bench-x"), 100.0, 100.0, True)
 write(os.path.join(base, "then", "bench-x"), 100.0, 80.0, False)
 PY
-    run_both_in "gate fixture" "$fixture" gate now --previous then
+    run_both_in "gate fixture" "$fixture" gate now --previous "then"
 fi
 
 if [[ $checkout_mode -eq 0 ]]; then
