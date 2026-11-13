@@ -1,0 +1,11 @@
+[package]
+name = "rind-admin"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+publish = false
+description = "First-party admin checkers and generators, ported from admin/ scripts."
+
+[[bin]]
+name = "scan-license"
+path = "src/bin/scan-license.rs"

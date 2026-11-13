@@ -4315,6 +4315,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rind-admin"
+version = "0.1.0"
+
+[[package]]
 name = "rind-aws-lc-rs"
 version = "1.0.3"
 dependencies = [
