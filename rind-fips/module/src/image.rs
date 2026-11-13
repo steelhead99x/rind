@@ -99,7 +99,9 @@ pub(crate) fn kind(arch: Arch, kind: u32) -> Option<Kind> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Arch {
+    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
     X86_64,
+    #[cfg_attr(not(target_arch = "aarch64"), allow(dead_code))]
     Aarch64,
 }
 
