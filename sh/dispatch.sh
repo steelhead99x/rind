@@ -60,9 +60,9 @@ declare -A scope=(
     [license]='^(rind/src/|rind/LICENSE$|rind-python/LICENSE$|admin/scan-license$)'
     # Dependents may build with the workspace's declared rust-version.
     [msrv]='^(rind[^/]*/|fuzz/|Cargo\.(toml|lock)$|flake\.(nix|lock)$)'
-    # rind's aarch64, armv7, portable, and wasm32 builds, which the host's
-    # own build skips, and which a toolchain bump can break.
-    [cross]='^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|flake\.(nix|lock)$)'
+    # rind's aarch64, armv7, portable, wasm32, and bare-metal builds, which
+    # the host's own build skips, and which a toolchain bump can break.
+    [cross]='^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|rind-bench/Cargo\.toml$|sh/bare-metal\.sh$|Cargo\.(toml|lock)$|flake\.(nix|lock)$)'
     # Variable-time instructions in rind's release builds, which a change to
     # its code, dependencies, toolchain, or the scan itself can bring.
     [vartime]='^(rind/(src/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|flake\.(nix|lock)$|admin/ct-vartime)'
@@ -288,6 +288,8 @@ for module in "${selected[@]}"; do
                 cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
                     --features "$features,getrandom/wasm_js" -- --deny warnings
             done
+            # And without std, on bare metal, with and without compare-and-swap.
+            sh/bare-metal.sh
             ;;
         check:structure) admin/structure ;;
         check:vartime) nix develop .#ct-vartime --command admin/ct-vartime ;;
