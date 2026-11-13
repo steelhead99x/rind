@@ -7,27 +7,30 @@
 # to crates.io, so pyrind builds from that tag. release-plz does not know
 # pyrind-cryptography, whose version is bumped by hand in
 # rind-python/cryptography, so any version PyPI lacks is released and builds
-# from HEAD. release.yml publishes what this names, and retries on a later
-# push if publishing failed.
+# from HEAD, once release-plz releases a pyrind it requires.
+# release.yml publishes what this names, and retries on a later push if
+# publishing failed.
 set -euo pipefail
 
 package=${1:?usage: sh/pypi-unpublished.sh pyrind|pyrind-cryptography}
 
 cd "$(git rev-parse --show-toplevel)"
 
+pyrind=$(cargo metadata --format-version 1 --no-deps --locked |
+    jq -r '.packages[] | select(.name == "rind-python") | .version')
+# Exit status 2 means no such tag: this pyrind is unreleased.
+tagged=0
+git ls-remote --exit-code --tags origin "refs/tags/rind-python-v$pyrind" >/dev/null || tagged=$?
+case "$tagged" in
+    0 | 2) ;;
+    *) exit "$tagged" ;;
+esac
+
 case "$package" in
     pyrind)
-        version=$(cargo metadata --format-version 1 --no-deps --locked |
-            jq -r '.packages[] | select(.name == "rind-python") | .version')
+        [ "$tagged" = 0 ] || exit 0
+        version=$pyrind
         ref="rind-python-v$version"
-        # Exit status 2 means no such tag: this version is unreleased.
-        status=0
-        git ls-remote --exit-code --tags origin "refs/tags/$ref" >/dev/null || status=$?
-        case "$status" in
-            0) ;;
-            2) exit 0 ;;
-            *) exit "$status" ;;
-        esac
         ;;
     pyrind-cryptography)
         # flit reads the version from __version__.
@@ -35,6 +38,14 @@ case "$package" in
         if [ -z "$version" ]; then
             echo "error: no __version__ in pyrind_cryptography" >&2
             exit 1
+        fi
+        # release.yml installs it with this commit's pyrind, so it waits for
+        # release-plz to release a pyrind its requirement takes, rather than
+        # fail every push to main until then. One past pyrind still builds,
+        # so that install fails loudly without stopping pyrind's own release.
+        pin=$(python3 rind-python/cryptography/pin.py "$pyrind")
+        if [ "$pin" = below ] || [ "$tagged" != 0 ]; then
+            exit 0
         fi
         ref=$(git rev-parse HEAD)
         ;;
