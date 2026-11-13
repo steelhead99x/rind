@@ -2,7 +2,7 @@
 
 The [`cryptography`](https://pub.dev/packages/cryptography) package's
 `Cryptography` on [rind](https://pub.dev/packages/rind), for what
-[rind](https://github.com/moq-dev/rind), a pure-Rust library, covers. One
+[rind](https://github.com/kixel-ai/rind), a pure-Rust library, covers. One
 line moves an app's existing code onto rind's assembly.
 
 Its Dart layer costs part of rind's lead, most on small messages, since each
@@ -27,8 +27,8 @@ call loads the key it is given. On an AMD Ryzen 9 9950X, Linux 7.3, Dart
 dart pub add rind_cryptography
 ```
 
-rind's [setup](https://github.com/moq-dev/rind/tree/main/rind-dart#setup)
-and [platforms](https://github.com/moq-dev/rind/tree/main/rind-dart#platforms)
+rind's [setup](https://github.com/kixel-ai/rind/tree/main/rind-dart#setup)
+and [platforms](https://github.com/kixel-ai/rind/tree/main/rind-dart#platforms)
 apply: Android, iOS, macOS, Linux, and Windows, and no web.
 
 Make rind the default before the app's first cryptography call, and the
@@ -57,15 +57,16 @@ Future<void> main() async {
 | `Hkdf`, `Pbkdf2` | with those HMACs |
 | `AesGcm` | 128, 192, and 256-bit keys, 12-byte nonces |
 | `Chacha20.poly1305Aead`, `Xchacha20.poly1305Aead` | all of it, but XChaCha20-Poly1305 picks its own nonces |
+| `AesCbc`, `AesCtr` | 128, 192, and 256-bit keys, with any MAC and padding |
+| `Chacha20` | with any MAC that uses none of its keystream, such as `Hmac` |
 | `X25519`, `Ed25519` | all of it |
 | `Ecdh` | P-256, P-384, P-521 |
 | `Ecdsa` | P-256 with SHA-256, P-384 with SHA-384, P-521 with SHA-512 |
 | `RsaSsaPkcs1v15`, `RsaPss` | 2048 to 8192 bits, e = 65537, SHA-256, SHA-384, SHA-512 |
 
 Everything else throws `UnsupportedError` where it is constructed, never
-falling back to the package's Dart implementation: AES-CBC, AES-CTR,
-ChaCha20 and XChaCha20 without Poly1305, Poly1305 and HChaCha20 alone,
-BLAKE2, Argon2id, and SHA-224, as does an unsupported pairing such as
+falling back to the package's Dart implementation: XChaCha20 without
+Poly1305, Poly1305 and HChaCha20 alone, BLAKE2, Argon2id, and SHA-224, as does an unsupported pairing such as
 `Ecdsa.p256(Sha512())`. `toSync()` still returns the package's Dart
 implementation, as it does under every backend.
 
@@ -73,6 +74,9 @@ Within what works, it differs from the Dart implementation and WebCrypto in
 these ways:
 
 - `AesGcm` takes only 12-byte nonces.
+- `AesCtr` counts over the whole 16-byte counter block, as the Dart
+  implementation does, while WebCrypto counts over only its last
+  `counterBits` bits. They differ only once those bits wrap.
 - `Xchacha20.poly1305Aead().encrypt` picks a random nonce itself and
   throws `UnsupportedError` when given one, as does `encryptStream`, which
   always passes one. It decrypts under any nonce.
@@ -86,6 +90,16 @@ these ways:
   curve.
 - Each operation is one native call, which never yields to the event loop:
   seal large messages off the UI isolate, as with `Isolate.run`.
+
+`AesCbc`, `AesCtr`, and `Chacha20` pass the ciphertext and nonce to their
+MAC, as the package does, keyed with the cipher's own secret key. `Hmac`
+ignores the nonce (CBC's IV), so under it changing a nonce changes the
+decrypted text undetected, all of it under CTR and ChaCha20 and the first
+block under CBC; `Chacha20.poly1305Aead()` authenticates the nonce. Store integrity-sensitive data
+with an AEAD such as `AesGcm`, or under a MAC that also covers the nonce.
+With `MacAlgorithm.empty`, nothing is authenticated, and AES-CBC's padding
+error is an oracle that decrypts. Under `Hmac` it is one too for a one-block
+AES-CBC ciphertext, since changing the unauthenticated IV changes its padding.
 
 ## Tested against
 

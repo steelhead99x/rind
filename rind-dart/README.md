@@ -1,10 +1,11 @@
 # rind for Dart and Flutter
 
 Fast, misuse-resistant cryptography for Dart and Flutter, through FFI to
-[rind](https://github.com/moq-dev/rind), a pure-Rust library: AES-GCM,
+[rind](https://github.com/kixel-ai/rind), a pure-Rust library: AES-GCM,
 ChaCha20-Poly1305, and XChaCha20-Poly1305, SHA-2 and SHA-3, HMAC, HKDF,
 PBKDF2, X25519 and ECDH, Ed25519, ECDSA, and RSA signatures, RSA-OAEP, and
-ML-KEM-768.
+ML-KEM-768, and the unauthenticated AES-CBC, AES-CTR, and ChaCha20 for
+protocols that pair them with their own MAC.
 
 It is 7 to 2800 times faster than pure-Dart cryptography. On an
 Intel i7-8700, in microseconds per operation (`dart run
@@ -46,7 +47,7 @@ dart pub add rind
 
 The package's build hook downloads rind's prebuilt library for each target the
 app builds for from this version's
-[GitHub release](https://github.com/moq-dev/rind/releases), and refuses one
+[GitHub release](https://github.com/kixel-ai/rind/releases), and refuses one
 whose SHA-256 differs from the one the package pins. It honors the
 `HTTPS_PROXY` environment variable.
 

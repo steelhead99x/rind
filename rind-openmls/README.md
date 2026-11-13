@@ -1,10 +1,10 @@
 <h1 align="center">rind-openmls</h1>
-<img width="40%" align="right" src="https://raw.githubusercontent.com/moq-dev/rind/main/admin/logo.png">
+<img width="40%" align="right" src="https://raw.githubusercontent.com/kixel-ai/rind/main/admin/logo.png">
 
 [![Latest release](https://img.shields.io/crates/v/rind-openmls)](https://crates.io/crates/rind-openmls)
 [![Documentation](https://img.shields.io/docsrs/rind-openmls)](https://docs.rs/rind-openmls/)
 
-This crate provides a crypto provider for [OpenMLS](https://github.com/openmls/openmls), backed by [rind](https://github.com/moq-dev/rind/), a fork of [Graviola](https://github.com/ctz/graviola/).
+This crate provides a crypto provider for [OpenMLS](https://github.com/openmls/openmls), backed by [rind](https://github.com/kixel-ai/rind/), a fork of [Graviola](https://github.com/ctz/graviola/).
 
 It offers exactly the API of [openmls_rust_crypto](https://docs.rs/openmls_rust_crypto), item for item, so replacing that dependency and its `use` lines is the whole migration:
 

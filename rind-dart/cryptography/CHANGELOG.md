@@ -1,3 +1,8 @@
+## Unreleased
+
+- `AesCbc`, `AesCtr`, and `Chacha20` with a MAC, such as `Hmac`, on rind's
+  ciphers, which need the rind release after 0.1.0.
+
 ## 0.1.0
 
 - The cryptography package's `Cryptography` on rind 0.1.0: SHA-1 and
