@@ -190,7 +190,7 @@ fn rfc9497_oprf() {
     ] {
         let input = hex::decode(input).unwrap();
         let mut uniform = [0u8; 64];
-        expand_message_xmd::<Sha512Context>(&input, DST, &mut uniform).unwrap();
+        expand_message_xmd::<Sha512Context>(&[&input], DST, &mut uniform).unwrap();
         let point = Element::from_uniform_bytes(&uniform);
         let blinded_element = point.mul(&blind).to_bytes();
         assert_eq!(blinded_element, bytes(blinded));
