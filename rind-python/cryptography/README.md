@@ -1,8 +1,8 @@
 # pyrind-cryptography
 
 [pyca/cryptography](https://cryptography.io)'s `hazmat` API on
-[pyrind](https://github.com/moq-dev/rind/tree/main/rind-python), for what
-[rind](https://github.com/moq-dev/rind), a pure-Rust library, covers. Code
+[pyrind](https://github.com/kixel-ai/rind/tree/main/rind-python), for what
+[rind](https://github.com/kixel-ai/rind), a pure-Rust library, covers. Code
 switches by changing an import, and runs on rind's assembly.
 
 Its Python layer costs part of pyrind's lead over pyca on small messages.

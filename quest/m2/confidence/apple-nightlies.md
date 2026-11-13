@@ -2,13 +2,13 @@
 
 ## Goal
 
-The nightly jobs that need Apple silicon, starting with `mutants.yml`'s macOS DIT campaign, run on the maintainer's Mac mini instead of GitHub's `macos-latest` runners, wherever that is faster or lets a job run more often or more completely.
+The scheduled jobs that need Apple silicon run on the maintainer's Mac mini instead of GitHub's `macos-latest` runners, wherever that is faster or lets a job run more often or more completely.
 
 ## Plan
 
 Planned with the maintainer on 2026-11-10 ([the runner quest](/quest/m0/mac-mini-runner.md) holds the shared decisions).
 
-- Survey the workflows' macOS jobs (`mutants.yml`, `build.yml`'s macOS and iOS rows, `dart` rows) and move each one that gains from the machine; leave hosted runners where a clean VM matters, such as release builds.
+- Survey the workflows' macOS jobs (`build.yml`'s macOS and iOS rows, `dart` rows; [the mutants slim-down](/quest/m0/ci-speed/mutants-slim.md) drops `mutants.yml`'s macOS campaign) and move each one that gains from the machine; leave hosted runners where a clean VM matters, such as release builds.
 - Keep each moved job under `quest gate` so it shares the machine with the queue and agents.
 
 ## Required
