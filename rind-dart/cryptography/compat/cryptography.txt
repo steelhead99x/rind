@@ -3,13 +3,9 @@
 # directory, and single tests by full name.
 
 # Algorithms rind lacks, which these files construct while loading:
-# AES-CBC, AES-CTR, BLAKE2, ChaCha20 and XChaCha20 without Poly1305, and
-# Poly1305 alone.
-algorithms/aes_cbc_test.dart
-algorithms/aes_ctr_test.dart
+# BLAKE2, XChaCha20 without Poly1305, and Poly1305 alone.
 algorithms/blake2b_test.dart
 algorithms/blake2s_test.dart
-algorithms/chacha20_test.dart
 algorithms/poly1305_test.dart
 algorithms/xchacha20_test.dart
 cryptography_with_seeded_random_test.dart
@@ -24,9 +20,6 @@ SHA1/2 functions: DartCryptography: sha224: blockLength
 SHA1/2 functions: DartCryptography: sha224: hashLengthInBytes
 SHA1/2 functions: DartCryptography: sha224: hashSync(input0)
 SHA1/2 functions: DartCryptography: sha224: hashSync(_): input1
-
-# ChaCha20 with HMAC.
-Chacha20.poly1305Aead(): == / hashCode
 
 # Poly1305 alone.
 SecretBox: checkMac()
@@ -51,6 +44,13 @@ Chacha20.poly1305Aead(): toString
 AesGcm: DartCryptography: information: 128 bits
 AesGcm: DartCryptography: information: 192 bits
 AesGcm: DartCryptography: information: 256 bits
+AesCbc: DartCryptography: information: 128 bits
+AesCbc: DartCryptography: information: 192 bits
+AesCbc: DartCryptography: information: 256 bits
+AesCtr: DartCryptography: information: 128 bits
+AesCtr: DartCryptography: information: 192 bits
+AesCtr: DartCryptography: information: 256 bits
+Chacha20: toString
 
 # Yielding to the event loop while encrypting 16 MiB: rind seals and opens
 # in one native call.
