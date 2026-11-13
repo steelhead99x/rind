@@ -11,6 +11,7 @@ import 'package:ffi/ffi.dart';
 
 part 'aead.dart';
 part 'agreement.dart';
+part 'cipher.dart';
 part 'digest.dart';
 part 'error.dart';
 part 'ffi.dart';
