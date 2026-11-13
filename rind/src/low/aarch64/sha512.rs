@@ -5,9 +5,10 @@
 //! and scalar code otherwise.
 //!
 //! rind's HOL Light proof, `proofs/hol-light/aarch64/sha512_block_data_order_hw.ml`,
-//! covers the routine for the SHA-512 instructions as rind's build emits it.
+//! covers the SHA-512-instruction routine as rind's Linux build emits it.
 //! aws-lc-verification's NSym proof covers the scalar routine as aws-lc
-//! builds it, and `admin/prove-bytes` checks rind's build matches.
+//! builds it for Linux, and `admin/prove-bytes` checks that rind's Linux
+//! build matches. Neither comparison includes the Apple variant.
 
 use super::cpu::HaveSha3;
 
