@@ -24,6 +24,7 @@ So splitting alone, recommended here before these numbers, gives an aarch64 job 
 - When x86_64 alone nears its limit, sharding its proofs across jobs is the next step; each shard pays the `base.ml` load again (about 4 minutes on the maintainer's host). Not needed now.
 - Whether the proofs a pull request does not touch need to run on it at all is a wider question. If the timing says the split is not enough, bring that to the maintainer with the numbers and do not decide it here.
 - [kixel-ai/rind#693](https://github.com/kixel-ai/rind/pull/693) did the same for `miri.yml`; follow what it settled about pull-request triggers where it applies.
+- [kixel-ai/rind#701](https://github.com/kixel-ai/rind/pull/701), x86_64 SHA-NI SHA-256, raises the limit to 60 minutes, as #629 does on its branch: on its run the job spent 2 minutes on Nix and the bytes, aarch64 took 402 s, and x86_64 was still running when the job hit 30 minutes. The split and per-job limits remain this quest's.
 - #629 also edits the job's `timeout-minutes`; whichever of the two lands second merges the other's change.
 
 ## Related
