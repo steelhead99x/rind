@@ -97,7 +97,7 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | AES block, AES-CTR | Graviola + rind | aws-lc |  | aws-lc |
 | AES-KW, AES-KWP, AES-CBC | Graviola + rind | aws-lc + rind |  | aws-lc + rind |
 | ChaCha20 (header protection) | HACL* ✓ + rind |  |  |  |
-| ChaCha20-Poly1305, XChaCha20-Poly1305 | aws-lc ⚡ |  |  | HACL* ✓ + Graviola |
+| ChaCha20-Poly1305, XChaCha20-Poly1305 | aws-lc ⚡ |  |  | HACL* ✓ + Graviola + rind |
 | MD5 | rind |  |  |  |
 | SHA-1 | rind | aws-lc |  | rind |
 | SHA-256 | aws-lc ⚡ | aws-lc |  | HACL* ✓; rolled rind on 32-bit |
@@ -124,8 +124,12 @@ with portable Rust in place of the assembly armv7 runs regardless.
   measured them 1.2 to 2.2× faster than Graviola's SHA-256 and rind's SHA-1,
   which in turn ran SHA-256 28–30% faster than HACL*.
 - portable: ChaCha20-Poly1305's Poly1305 is Graviola's on 64-bit targets
-  and HACL*'s ✓ on 32-bit ones, whose streaming state counts its input in a
-  32-bit length that a 64-bit AEAD can overflow. SHA-3's, ML-KEM's, and
+  and rind's on 32-bit ones, in poly1305-donna-32's five 26-bit limbs, so
+  each limb product is one 32x32->64-bit multiply. HACL*'s verified one,
+  which armv7 runs without NEON, also has 26-bit limbs but keeps them in
+  `u64`s, and on a 32-bit core without NEON spends most of its time in
+  64-bit multiplies and adds; nothing proves rind's, whose tests check it
+  against HACL*'s. SHA-3's, ML-KEM's, and
   ML-DSA's Keccak-f is rind's, s2n-bignum's Keccak spec in Rust, which
   [`proofs/`](proofs/README.md) proves is FIPS 202's KECCAK-f[1600]; it
   measured as fast as RustCrypto's and libcrux-sha3's, which nothing proves.
