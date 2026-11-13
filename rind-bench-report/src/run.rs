@@ -37,7 +37,7 @@ pub fn run(
         "cpu".to_string(),
         J::obj([
             ("model", J::Str(cpu)),
-            ("arch", J::Str(std::env::consts::ARCH.to_string())),
+            ("arch", J::Str(machine())),
             ("logical_cpus", J::Int(cpu_count() as i64)),
         ]),
     ));
@@ -247,6 +247,22 @@ fn build_only<'a>(bench: &[&'a str]) -> Vec<&'a str> {
     let mut build = bench.to_vec();
     build.push("--no-run");
     build
+}
+
+/// The machine name `uname -m` prints, as Python's `platform.machine()`
+/// reads it: `arm64` on Apple silicon, where Rust's target says `aarch64`.
+/// The report maps both to one architecture.
+fn machine() -> String {
+    let mut uname = Command::new("uname");
+    uname.arg("-m");
+    command_stdout(uname).unwrap_or_else(|| std::env::consts::ARCH.to_string())
+}
+
+fn command_stdout(mut command: Command) -> Option<String> {
+    let output = command.output().ok()?;
+    let text = String::from_utf8(output.stdout).ok()?;
+    let text = text.trim();
+    (output.status.success() && !text.is_empty()).then(|| text.to_string())
 }
 
 fn finish(out: &Path, base: &[(String, J)], status: &str, extra: Vec<(String, J)>) -> Result<()> {
@@ -625,5 +641,15 @@ mod tests {
         assert_eq!(build.last(), Some(&"--no-run"));
         assert_eq!(build[..BENCH.len()], BENCH);
         assert!(!BENCH.contains(&"--no-run"));
+    }
+
+    // Python's `platform.machine()` is `uname -m`, which names the host's
+    // architecture whatever this binary was built for.
+    #[cfg(unix)]
+    #[test]
+    fn machine_is_uname() {
+        let mut uname = Command::new("uname");
+        uname.arg("-m");
+        assert_eq!(Some(machine()), command_stdout(uname));
     }
 }
