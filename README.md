@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/moq-dev/rind/main/admin/wordmark.svg">
-    <img width="280" src="https://raw.githubusercontent.com/moq-dev/rind/main/admin/wordmark-light.svg" alt="rind: a curled strip of green graviola peel forms the r, followed by ind">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/kixel-ai/rind/main/admin/wordmark.svg">
+    <img width="280" src="https://raw.githubusercontent.com/kixel-ai/rind/main/admin/wordmark-light.svg" alt="rind: a curled strip of green graviola peel forms the r, followed by ind">
   </picture>
 </p>
 
@@ -13,7 +13,7 @@
 <p align="center">
   <a href="https://crates.io/crates/rind"><img alt="Latest release" src="https://img.shields.io/crates/v/rind"></a>
   <a href="https://docs.rs/rind/"><img alt="Documentation" src="https://img.shields.io/docsrs/rind"></a>
-  <a href="https://github.com/moq-dev/rind/actions/workflows/build.yml?query=branch%3Amain"><img alt="Build Status" src="https://img.shields.io/github/actions/workflow/status/moq-dev/rind/build.yml"></a>
+  <a href="https://github.com/kixel-ai/rind/actions/workflows/build.yml?query=branch%3Amain"><img alt="Build Status" src="https://img.shields.io/github/actions/workflow/status/kixel-ai/rind/build.yml"></a>
 </p>
 
 - 🏎️ **As fast as aws-lc-rs and ring.** rind matches or beats both on
@@ -31,8 +31,8 @@
 ## Every benchmark, on every CPU
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/moq-dev/rind/main/benchmarks/overview-dark.svg">
-  <img alt="Time over the fastest library's, by operation, library, and host" src="https://raw.githubusercontent.com/moq-dev/rind/main/benchmarks/overview.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/kixel-ai/rind/main/benchmarks/overview-dark.svg">
+  <img alt="Time over the fastest library's, by operation, library, and host" src="https://raw.githubusercontent.com/kixel-ai/rind/main/benchmarks/overview.svg">
 </picture>
 
 Each row is an operation and each column a library, with one square per
@@ -79,7 +79,7 @@ Paste this into your coding agent, in your repository:
 
 ```text
 Move this repository from ring or aws-lc-rs to rind, following
-https://raw.githubusercontent.com/moq-dev/rind/main/MIGRATE.md
+https://raw.githubusercontent.com/kixel-ai/rind/main/MIGRATE.md
 ```
 
 It migrates on a local branch, reports the build time, binary size,
@@ -241,7 +241,7 @@ from other projects keeps its source's license, which [LICENSE] lists.
 
 [Graviola]: https://github.com/ctz/graviola
 [graviola-logo]: https://github.com/ctz/graviola/blob/main/admin/picture.png
-[rind-wordmark]: https://raw.githubusercontent.com/moq-dev/rind/main/admin/wordmark.svg
+[rind-wordmark]: https://raw.githubusercontent.com/kixel-ai/rind/main/admin/wordmark.svg
 [aws-lc-rs]: https://github.com/aws/aws-lc-rs
 [s2n-bignum]: https://github.com/awslabs/s2n-bignum
 [HACL\*]: https://github.com/hacl-star/hacl-star
@@ -249,31 +249,31 @@ from other projects keeps its source's license, which [LICENSE] lists.
 [fiat-crypto]: https://github.com/mit-plv/fiat-crypto
 [docs]: https://docs.rs/rind/
 [quest-setup]: https://github.com/moq-dev/quest/blob/main/SETUP.md
-[LICENSE]: https://github.com/moq-dev/rind/blob/main/LICENSE
-[rind-rustls]: https://github.com/moq-dev/rind/tree/main/rind-rustls
-[rind-ring]: https://github.com/moq-dev/rind/tree/main/rind-ring
-[rind-aws-lc-rs]: https://github.com/moq-dev/rind/tree/main/rind-aws-lc-rs
-[rind-dimpl]: https://github.com/moq-dev/rind/tree/main/rind-dimpl
-[rind-str0m]: https://github.com/moq-dev/rind/tree/main/rind-str0m
-[rind-openmls]: https://github.com/moq-dev/rind/tree/main/rind-openmls
-[rind-jsonwebtoken]: https://github.com/moq-dev/rind/tree/main/rind-jsonwebtoken
-[rind-object-store]: https://github.com/moq-dev/rind/tree/main/rind-object-store
-[rind-rcgen]: https://github.com/moq-dev/rind/tree/main/rind-rcgen
-[rind-dart]: https://github.com/moq-dev/rind/tree/main/rind-dart
-[rind_cryptography]: https://github.com/moq-dev/rind/tree/main/rind-dart/cryptography
-[rind-python]: https://github.com/moq-dev/rind/tree/main/rind-python
-[pyrind-cryptography]: https://github.com/moq-dev/rind/tree/main/rind-python/cryptography
-[quests]: https://github.com/moq-dev/rind/blob/main/quest/README.md
+[LICENSE]: https://github.com/kixel-ai/rind/blob/main/LICENSE
+[rind-rustls]: https://github.com/kixel-ai/rind/tree/main/rind-rustls
+[rind-ring]: https://github.com/kixel-ai/rind/tree/main/rind-ring
+[rind-aws-lc-rs]: https://github.com/kixel-ai/rind/tree/main/rind-aws-lc-rs
+[rind-dimpl]: https://github.com/kixel-ai/rind/tree/main/rind-dimpl
+[rind-str0m]: https://github.com/kixel-ai/rind/tree/main/rind-str0m
+[rind-openmls]: https://github.com/kixel-ai/rind/tree/main/rind-openmls
+[rind-jsonwebtoken]: https://github.com/kixel-ai/rind/tree/main/rind-jsonwebtoken
+[rind-object-store]: https://github.com/kixel-ai/rind/tree/main/rind-object-store
+[rind-rcgen]: https://github.com/kixel-ai/rind/tree/main/rind-rcgen
+[rind-dart]: https://github.com/kixel-ai/rind/tree/main/rind-dart
+[rind_cryptography]: https://github.com/kixel-ai/rind/tree/main/rind-dart/cryptography
+[rind-python]: https://github.com/kixel-ai/rind/tree/main/rind-python
+[pyrind-cryptography]: https://github.com/kixel-ai/rind/tree/main/rind-python/cryptography
+[quests]: https://github.com/kixel-ai/rind/blob/main/quest/README.md
 [launch-post]: https://moq.dev/blog/rind/
-[contributing]: https://github.com/moq-dev/rind/blob/main/CONTRIBUTING.md
-[migrating]: https://github.com/moq-dev/rind/blob/main/MIGRATING.md
-[benchmarks]: https://github.com/moq-dev/rind/blob/main/BENCHMARKS.md
-[gaps]: https://github.com/moq-dev/rind/blob/main/BENCHMARKS.md#known-gaps
-[build-cost]: https://github.com/moq-dev/rind/blob/main/BENCHMARKS.md#build-cost
-[verified]: https://github.com/moq-dev/rind/blob/main/BENCHMARKS.md#verified-code
-[testing]: https://github.com/moq-dev/rind/blob/main/TESTING.md#primitives
-[proofs]: https://github.com/moq-dev/rind/blob/main/proofs/README.md
-[algorithms]: https://github.com/moq-dev/rind/blob/main/ALGORITHMS.md
-[sources]: https://github.com/moq-dev/rind/blob/main/ALGORITHMS.md#sources
-[platforms]: https://github.com/moq-dev/rind/blob/main/PLATFORMS.md
-[architecture]: https://github.com/moq-dev/rind/blob/main/ARCHITECTURE.md
+[contributing]: https://github.com/kixel-ai/rind/blob/main/CONTRIBUTING.md
+[migrating]: https://github.com/kixel-ai/rind/blob/main/MIGRATING.md
+[benchmarks]: https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md
+[gaps]: https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#known-gaps
+[build-cost]: https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost
+[verified]: https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code
+[testing]: https://github.com/kixel-ai/rind/blob/main/TESTING.md#primitives
+[proofs]: https://github.com/kixel-ai/rind/blob/main/proofs/README.md
+[algorithms]: https://github.com/kixel-ai/rind/blob/main/ALGORITHMS.md
+[sources]: https://github.com/kixel-ai/rind/blob/main/ALGORITHMS.md#sources
+[platforms]: https://github.com/kixel-ai/rind/blob/main/PLATFORMS.md
+[architecture]: https://github.com/kixel-ai/rind/blob/main/ARCHITECTURE.md

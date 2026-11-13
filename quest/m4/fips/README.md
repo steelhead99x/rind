@@ -11,7 +11,7 @@ rind. The default `rind` build pays nothing for it.
 
 ## Plan
 
-Scoped in [moq-dev/rind#638](https://github.com/moq-dev/rind/pull/638)
+Scoped in [kixel-ai/rind#638](https://github.com/kixel-ai/rind/pull/638)
 (2026-11-11), whose body is the report: boundary, changes, lab, cost, and
 timeline, against aws-lc's validated module
 ([cert #5298](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5298)).
@@ -32,5 +32,5 @@ timeline, against aws-lc's validated module
 - The children build the module, ready for a lab to test. The lab contract
   and the CMVP submission are dropped until a consumer needs or funds a
   certificate, as the maintainer decided on 2026-11-12;
-  [moq-dev/rind#638](https://github.com/moq-dev/rind/pull/638)'s body keeps
+  [kixel-ai/rind#638](https://github.com/kixel-ai/rind/pull/638)'s body keeps
   their cost (about $70k to $100k) and timeline (about 18 to 24 months).

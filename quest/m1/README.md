@@ -10,3 +10,5 @@ measurement in [m3](/quest/m3/quic-path.md) (maintainer, 2026-11-09: ✅ m3;
 rejected: keep it here, where it held m1 open).
 The Bun half was dropped on 2026-11-11 (maintainer, /quest-unblock): rind
 files no upstream PRs to get itself adopted.
+m1 also holds the agent hosts' smaller costs that slow every proof task
+(maintainer, 2026-11-12).

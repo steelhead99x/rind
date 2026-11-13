@@ -6,7 +6,7 @@ A backend requires only its target's compile-time features, so no CPU that runs 
 
 ## Plan
 
-`check()` can no longer fail on any target rind builds for. `missing_cpu_feature()` returns `None` on x86_64, arm, and portable, and aarch64 checks only `neon`, which every aarch64 target with `std` enables at compile time (`rustc --print cfg`, 2026-11-08); only the `no_std` `*-none-softfloat` targets lack it. The check dates from [moq-dev/rind#12](https://github.com/moq-dev/rind/pull/12), when x86_64 required AVX2, ADX, BMI2, and AES-NI, requirements that later tiers removed ([moq-dev/rind#172](https://github.com/moq-dev/rind/pull/172), [moq-dev/rind#178](https://github.com/moq-dev/rind/pull/178)).
+`check()` can no longer fail on any target rind builds for. `missing_cpu_feature()` returns `None` on x86_64, arm, and portable, and aarch64 checks only `neon`, which every aarch64 target with `std` enables at compile time (`rustc --print cfg`, 2026-11-08); only the `no_std` `*-none-softfloat` targets lack it. The check dates from [kixel-ai/rind#12](https://github.com/kixel-ai/rind/pull/12), when x86_64 required AVX2, ADX, BMI2, and AES-NI, requirements that later tiers removed ([kixel-ai/rind#172](https://github.com/kixel-ai/rind/pull/172), [kixel-ai/rind#178](https://github.com/kixel-ai/rind/pull/178)).
 
 Decided with the maintainer on 2026-11-08:
 

@@ -21,7 +21,7 @@
 [[gap]]
 operations = ["sha256/64B"]
 on = ["nixos"]
-reason = "Narrowed by [#352](https://github.com/moq-dev/rind/pull/352): on the SHA extensions the last block is padded and the digest written in registers, and `digest::Context::finish` takes `&mut self`, so it no longer copies the context. Closed by [#394](https://github.com/moq-dev/rind/pull/394), after this data, which drops the context's wipe on drop: on GitHub's AMD EPYC 9V45 runner it measured rind at 0.84× main's time at 64 B and 0.86× RustCrypto's. The next refresh drops this entry."
+reason = "Narrowed by [#352](https://github.com/kixel-ai/rind/pull/352): on the SHA extensions the last block is padded and the digest written in registers, and `digest::Context::finish` takes `&mut self`, so it no longer copies the context. Closed by [#394](https://github.com/kixel-ai/rind/pull/394), after this data, which drops the context's wipe on drop: on GitHub's AMD EPYC 9V45 runner it measured rind at 0.84× main's time at 64 B and 0.86× RustCrypto's. The next refresh drops this entry."
 
 [[gap]]
 operations = ["rsa2048-pkcs1-sha256-sign"]
@@ -31,7 +31,7 @@ reason = "Noise: other work kept 5 CPUs busy during this run, in which PSS signi
 [[gap]]
 operations = ["ed25519-verify"]
 on = ["ovh-iad", "ovh-sea"]
-reason = "These VPSes' virtual CPUs hide ADX, and there rind ran s2n-bignum's verified `_alt` routines, which RustCrypto's AVX2 backend beats. Closed by [#415](https://github.com/moq-dev/rind/pull/415), after this data, which runs a port of that backend there: its collection measured rind at 1.08× RustCrypto's time on both VPSes. The next refresh drops this entry."
+reason = "These VPSes' virtual CPUs hide ADX, and there rind ran s2n-bignum's verified `_alt` routines, which RustCrypto's AVX2 backend beats. Closed by [#415](https://github.com/kixel-ai/rind/pull/415), after this data, which runs a port of that backend there: its collection measured rind at 1.08× RustCrypto's time on both VPSes. The next refresh drops this entry."
 
 [[gap]]
 operations = ["ed25519-sign"]
@@ -70,7 +70,7 @@ operations = [
   "hkdf-sha256/expand",
 ]
 on = ["kixtop"]
-reason = "DIT: the M4 has it, and rind turns it on and off around every call that handles a secret, which costs about 30 to 55 ns a call there; the other libraries never set it. Keeping it per call was decided with the maintainer from [#387](https://github.com/moq-dev/rind/pull/387)'s findings. Holding `rind::cpu::Dit::hold()` ([#431](https://github.com/moq-dev/rind/pull/431)) across a batch of calls, as MoQ does, pays it once and closes all but one of these gaps: the rind (DIT held) column times that, and on [`9e7f6a5a`](https://github.com/moq-dev/rind/commit/9e7f6a5a9ea59a0cf1251c24af6c5d4f21c2b0fd), the run this report shows, every one measured within 10% of the fastest library except HMAC-SHA-256 at 64 B, at 1.10× RustCrypto's (109.7 ns against 99.4 ns)."
+reason = "DIT: the M4 has it, and rind turns it on and off around every call that handles a secret, which costs about 30 to 55 ns a call there; the other libraries never set it. Keeping it per call was decided with the maintainer from [#387](https://github.com/kixel-ai/rind/pull/387)'s findings. Holding `rind::cpu::Dit::hold()` ([#431](https://github.com/kixel-ai/rind/pull/431)) across a batch of calls, as MoQ does, pays it once and closes all but one of these gaps: the rind (DIT held) column times that, and on [`9e7f6a5a`](https://github.com/kixel-ai/rind/commit/9e7f6a5a9ea59a0cf1251c24af6c5d4f21c2b0fd), the run this report shows, every one measured within 10% of the fastest library except HMAC-SHA-256 at 64 B, at 1.10× RustCrypto's (109.7 ns against 99.4 ns)."
 
 [[gap]]
 operations = ["p521-ecdsa-verify*", "rustls-full-handshake-key/ecdsa-p521*"]
@@ -92,12 +92,12 @@ quest = "/quest/m3/cold-speed/portable-rsa-karatsuba.md"
 [[gap]]
 operations = ["p[0-9]*", "rsa*", "jwt-*", "rustls-full-handshake-*"]
 on = ["portable"]
-reason = "Closed in part by [#614](https://github.com/moq-dev/rind/pull/614), after this data, which runs RSA and the NIST curves on 64-bit limbs on 64-bit targets. On a shared x86_64 host it measured, against aws-lc-rs's C without assembly: P-256 and P-384 at 0.44 to 0.76× its time, P-521 ECDH, key generation, and signing at 0.91 to 1.03×, RSA-2048 through 3072 signing at 0.88 to 1.01× and verification at 1.07×, the rustls handshakes at 0.64 to 0.96× but those the entries above name, and every ranked JWT benchmark at 0.55 to 1.06×. The next refresh drops this entry."
+reason = "Closed in part by [#614](https://github.com/kixel-ai/rind/pull/614), after this data, which runs RSA and the NIST curves on 64-bit limbs on 64-bit targets. On a shared x86_64 host it measured, against aws-lc-rs's C without assembly: P-256 and P-384 at 0.44 to 0.76× its time, P-521 ECDH, key generation, and signing at 0.91 to 1.03×, RSA-2048 through 3072 signing at 0.88 to 1.01× and verification at 1.07×, the rustls handshakes at 0.64 to 0.96× but those the entries above name, and every ranked JWT benchmark at 0.55 to 1.06×. The next refresh drops this entry."
 
 [[gap]]
 operations = ["aes*-gcm*", "rustls-bulk/*", "aes*-ctr/*", "aes*-cbc-*"]
 on = ["portable"]
-reason = "Narrowed by [#621](https://github.com/moq-dev/rind/pull/621), after this data, which runs aws-lc's `aes_nohw.c` in its 64-bit configuration, four blocks a pass, in place of the one-block libcrux cipher: on a shared x86_64 host under `--cfg rind_portable` AES-GCM measured 0.18× its previous time and 0.93 to 1.11× aws-lc's from 1200 B, and 0.5 to 0.9× below that, and CBC encryption 0.55 to 0.67×. AES-CTR and CBC decryption remain 1.08 to 1.23× aws-lc's: this row builds aws-lc's C for x86_64, where it bitslices eight blocks into SSE2 registers, while rind's portable backend runs the configuration aws-lc itself runs on the other 64-bit targets the backend is for. The next refresh rechecks it."
+reason = "Narrowed by [#621](https://github.com/kixel-ai/rind/pull/621), after this data, which runs aws-lc's `aes_nohw.c` in its 64-bit configuration, four blocks a pass, in place of the one-block libcrux cipher: on a shared x86_64 host under `--cfg rind_portable` AES-GCM measured 0.18× its previous time and 0.93 to 1.11× aws-lc's from 1200 B, and 0.5 to 0.9× below that, and CBC encryption 0.55 to 0.67×. AES-CTR and CBC decryption remain 1.08 to 1.23× aws-lc's: this row builds aws-lc's C for x86_64, where it bitslices eight blocks into SSE2 registers, while rind's portable backend runs the configuration aws-lc itself runs on the other 64-bit targets the backend is for. The next refresh rechecks it."
 
 [[gap]]
 operations = ["sha1/*", "hmac-sha1/*", "sha512*", "hmac-sha384/*", "hmac-sha512/*"]
@@ -107,19 +107,19 @@ reason = "rind's portable SHA-1 and HACL*'s verified SHA-384/512, through libcru
 [[gap]]
 operations = ["aes*-cbc-encrypt/*"]
 on = ["aarch64"]
-reason = "Closed by [moq-dev/rind#612](https://github.com/moq-dev/rind/pull/612), whose [bench run 43016732906](https://github.com/moq-dev/rind/actions/runs/43016732906) times every AES-KW and AES-CBC case within 1.03× of aws-lc-rs on every tier; this nightly data predates it, and the import of a later nightly drops this entry."
+reason = "Closed by [kixel-ai/rind#612](https://github.com/kixel-ai/rind/pull/612), whose [bench run 43016732906](https://github.com/kixel-ai/rind/actions/runs/43016732906) times every AES-KW and AES-CBC case within 1.03× of aws-lc-rs on every tier; this nightly data predates it, and the import of a later nightly drops this entry."
 
 [[gap]]
 operations = ["aes*-kw-wrap/*", "aes*-kwp-wrap/*"]
 on = ["x86_64", "no AVX2", "no AES-NI"]
-reason = "Closed by [moq-dev/rind#612](https://github.com/moq-dev/rind/pull/612), whose [bench run 43016732906](https://github.com/moq-dev/rind/actions/runs/43016732906) times every AES-KW and AES-CBC case within 1.03× of aws-lc-rs on every tier; this nightly data predates it, and the import of a later nightly drops this entry."
+reason = "Closed by [kixel-ai/rind#612](https://github.com/kixel-ai/rind/pull/612), whose [bench run 43016732906](https://github.com/kixel-ai/rind/actions/runs/43016732906) times every AES-KW and AES-CBC case within 1.03× of aws-lc-rs on every tier; this nightly data predates it, and the import of a later nightly drops this entry."
 
 [[gap]]
 operations = ["aes*-cbc-decrypt/*/32B", "aes192-cbc-decrypt/*/1200B"]
 on = ["x86_64", "no AVX"]
-reason = "Closed by [moq-dev/rind#612](https://github.com/moq-dev/rind/pull/612), whose [bench run 43016732906](https://github.com/moq-dev/rind/actions/runs/43016732906) times every AES-KW and AES-CBC case within 1.03× of aws-lc-rs on every tier; this nightly data predates it, and the import of a later nightly drops this entry."
+reason = "Closed by [kixel-ai/rind#612](https://github.com/kixel-ai/rind/pull/612), whose [bench run 43016732906](https://github.com/kixel-ai/rind/actions/runs/43016732906) times every AES-KW and AES-CBC case within 1.03× of aws-lc-rs on every tier; this nightly data predates it, and the import of a later nightly drops this entry."
 
 [[gap]]
 operations = ["rustls-full-handshake-key/ecdsa-p521/*"]
 on = ["x86_64"]
-reason = "Noise: 1.10× aws-lc-rs's time on the EPYC 9V45 of [run 42734638175](https://github.com/moq-dev/rind/actions/runs/42734638175), and 0.69× on the EPYC 7763 the night before; rind signs with P-521 in about half aws-lc-rs's time on both."
+reason = "Noise: 1.10× aws-lc-rs's time on the EPYC 9V45 of [run 42734638175](https://github.com/kixel-ai/rind/actions/runs/42734638175), and 0.69× on the EPYC 7763 the night before; rind signs with P-521 in about half aws-lc-rs's time on both."
