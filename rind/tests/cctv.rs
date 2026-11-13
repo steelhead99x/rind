@@ -1,6 +1,7 @@
 //! C2SP's CCTV vectors that need only rind's public API. The ML-KEM vectors
 //! inject randomness, so they run in `src/high/kem.rs`, and RFC 6979's
-//! rejection vector in `src/high/ecdsa.rs`.
+//! rejection vector in `src/high/ecdsa.rs`. A mismatch with
+//! `ed25519-verdicts.txt` fails the test.
 
 // Miri does not run this file (`cfg(not(miri))`): its native tests call
 // aws-lc's C, which Miri cannot execute, and checking all 914 vectors against
