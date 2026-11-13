@@ -10,7 +10,7 @@
 use core::hint::black_box;
 
 use crate::low::ct;
-use crate::low::ct_binsec::checked;
+use crate::low::ct_binsec::{checked, length};
 
 /// `N` bytes of `fill`, marked secret.
 fn secret<const N: usize>(fill: u8) -> [u8; N] {
@@ -20,9 +20,14 @@ fn secret<const N: usize>(fill: u8) -> [u8; N] {
 }
 
 // Messages take a whole block, then a partial one, through each cipher's
-// tail handling, at a length that keeps BINSEC's search short.
+// tail handling. ChaCha20's take every length up to that; BINSEC cannot
+// explore each length of the others in a nightly's time, where it reaches
+// software AES, `malloc`, or a hash's buffering.
 const MESSAGE: usize = 75;
 
+// Not on aarch64, where BINSEC cannot finish the NEON GHASH that runs
+// without PMULL in a nightly's time.
+#[cfg(not(rind_backend = "aarch64"))]
 #[test]
 #[ignore = "admin/ct-binsec runs it under BINSEC"]
 fn ct_binsec_aes_gcm() {
@@ -53,11 +58,12 @@ fn ct_binsec_chacha20_poly1305() {
         let key = Key::new(&CHACHA20_POLY1305, &secret::<32>(1)).unwrap();
         let nonce = || Nonce::assume_unique_for_key([2; 12]);
         let mut msg = secret::<MESSAGE>(3);
+        let msg = &mut msg[..length(MESSAGE)];
         let tag = key
-            .seal_in_place_separate_tag(nonce(), &[4; 21], &mut msg)
+            .seal_in_place_separate_tag(nonce(), &[4; 21], msg)
             .unwrap();
         black_box(
-            key.open_in_place_separate_tag(nonce(), &[4; 21], tag, &mut msg)
+            key.open_in_place_separate_tag(nonce(), &[4; 21], tag, msg)
                 .is_ok(),
         );
     });
@@ -125,17 +131,19 @@ fn ct_binsec_aes_cbc() {
     });
 }
 
-// One block, since BINSEC cannot decode the `vinsertf128` that LLVM emits
-// for the AVX2 kernel longer messages take; ctgrind checks that one.
-// See UPSTREAM.md, "BINSEC cannot decode much of what rind runs".
 #[test]
 #[ignore = "admin/ct-binsec runs it under BINSEC"]
 fn ct_binsec_chacha20() {
     use crate::cipher::*;
 
     checked(|| {
+        // Eight blocks through x86_64's AVX2 kernel and a tail, then every
+        // shorter length, each of which takes its own path.
         let key = ChaCha20::new(&secret(1));
-        key.apply_keystream(&[2; 12], 3, &mut secret::<64>(4))
+        key.apply_keystream(&[2; 12], 3, &mut secret::<{ 512 + MESSAGE }>(4))
+            .unwrap();
+        let mut msg = secret::<MESSAGE>(4);
+        key.apply_keystream(&[2; 12], 3, &mut msg[..length(MESSAGE)])
             .unwrap();
     });
 }
@@ -320,65 +328,28 @@ fn ct_binsec_ecdsa_p521() {
     );
 }
 
-// The Montgomery products RSA's private operation runs at its CRT widths,
-// 16, 24, and 32 words: s2n-bignum's Karatsuba routines and aws-lc's
+// The Montgomery products RSA-4096's private operation runs at its CRT
+// width, 32 words: s2n-bignum's Karatsuba routines and aws-lc's
 // `bn_mul4x_mont` and `bn_sqr8x_mont` on x86_64. BINSEC cannot finish the
-// exponentiation that runs thousands of them.
+// exponentiation that runs thousands of them, whose other code
+// `ct_binsec_rsa2048_sign` checks at 16 words.
 #[test]
 #[ignore = "admin/ct-binsec runs it under BINSEC"]
 fn ct_binsec_mont_mul() {
     use crate::low::{mont_mul, mont_sqr};
 
     checked(|| {
-        for k in [16, 24, 32] {
-            let (x, mut y, mut z) = ([1u64; 32], [2u64; 32], [0u64; 32]);
-            // CRT's modulus is a private prime, and its `-m^-1 mod 2^64`
-            // with it; the concrete values are an odd modulus and its 1.
-            let m = [u64::MAX; 32];
-            ct::secret_slice(&x[..k]);
-            ct::secret_slice(&y[..k]);
-            ct::secret_slice(&m[..k]);
-            let n0 = ct::into_secret(1u64);
-            mont_mul(&mut z[..k], &x[..k], &y[..k], &m[..k], n0);
-            mont_sqr(&mut y[..k], &z[..k], &m[..k], n0);
-            black_box(&y);
-        }
-    });
-}
-
-// The reduction RSA's key check runs on the private exponent, whose loop
-// calls `bignum_modadd` where LLVM may inline it, out of `admin/prove
-// bytes`'s reach.
-#[test]
-#[ignore = "admin/ct-binsec runs it under BINSEC"]
-fn ct_binsec_reduce_even() {
-    use crate::low::PosInt;
-
-    checked(|| {
-        let d = PosInt::<33>::from_words(&[1; 32]).unwrap();
-        let p_1 = PosInt::<16>::from_words(&[3; 16]).unwrap();
-        ct::secret_slice(d.as_words());
-        ct::secret_slice(p_1.as_words());
-        black_box(d.reduce_even(&p_1));
-    });
-}
-
-// RSA's padding check, on a decrypted message: BINSEC cannot finish the
-// private operation that decrypts it, at 2048 bits, in a nightly's time.
-#[test]
-#[ignore = "admin/ct-binsec runs it under BINSEC"]
-fn ct_binsec_rsa_oaep_padding() {
-    use crate::high::hash::Sha256;
-    use crate::high::pkcs1::{decode_oaep, encode_oaep};
-    use crate::mid::rng::SliceRandomSource;
-
-    let mut em = [0; 256];
-    encode_oaep::<Sha256>(&mut em, &mut SliceRandomSource(&[2; 32]), &[1; 40], b"").unwrap();
-    checked(|| {
-        let mut em = em;
-        ct::secret_slice(&em);
-        let mut out = [0; 256];
-        black_box(decode_oaep::<Sha256>(&mut em, b"", &mut out).is_ok());
+        let (x, mut y, mut z) = ([1u64; 32], [2u64; 32], [0u64; 32]);
+        // CRT's modulus is a private prime, and its `-m^-1 mod 2^64` with
+        // it; the concrete values are an odd modulus and its 1.
+        let m = [u64::MAX; 32];
+        ct::secret_slice(&x);
+        ct::secret_slice(&y);
+        ct::secret_slice(&m);
+        let n0 = ct::into_secret(1u64);
+        mont_mul(&mut z, &x, &y, &m, n0);
+        mont_sqr(&mut y, &z, &m, n0);
+        black_box(&y);
     });
 }
 
@@ -388,4 +359,64 @@ fn ct_binsec_constant_time_verify() {
     black_box(checked(|| {
         crate::constant_time::verify(&secret::<33>(1), &secret::<33>(2)).is_ok()
     }));
+}
+
+// RSA's whole private operation, from loading the key, whose check reduces
+// the private exponent, through the CRT exponentiations and recombination to
+// the padding. RSA-2048's 16-word primes take x86_64's Karatsuba products
+// and AVX2 gather, and RSA-3072's 24 its `bn_power5`.
+fn rsa_sign(pkcs8: &[u8]) {
+    use crate::signature::*;
+
+    checked(|| {
+        let key = RsaKeyPair::from_pkcs8(pkcs8).unwrap();
+        black_box(key.sign(&sign::RSA_PKCS1_SHA256, &[1; 40]).is_ok());
+    });
+}
+
+#[test]
+#[ignore = "admin/ct-binsec runs it under BINSEC"]
+fn ct_binsec_rsa2048_sign() {
+    rsa_sign(include_bytes!("../high/rsa/rsa2048.pkcs8.der"));
+}
+
+// Only x86_64 runs other code at 24 words than at 16.
+#[cfg(rind_backend = "x86_64")]
+#[test]
+#[ignore = "admin/ct-binsec runs it under BINSEC"]
+fn ct_binsec_rsa3072_sign() {
+    rsa_sign(include_bytes!("../high/rsa/rsa3072.pkcs8.der"));
+}
+
+#[test]
+#[ignore = "admin/ct-binsec runs it under BINSEC"]
+fn ct_binsec_rsa2048_oaep() {
+    use crate::rsa::*;
+
+    let der = include_bytes!("../high/rsa/rsa2048.pkcs8.der");
+    let key = DecryptingKey::from_pkcs8(&OAEP_SHA256, der).unwrap();
+    let ciphertext = key.public_key().encrypt(&[1; 40], b"").unwrap();
+    checked(|| {
+        let key = DecryptingKey::from_pkcs8(&OAEP_SHA256, der).unwrap();
+        black_box(key.decrypt(ciphertext.as_ref(), b"").is_ok());
+    });
+}
+
+// Not on aarch64, where BINSEC cannot finish it in a nightly's time.
+#[cfg(not(rind_backend = "aarch64"))]
+#[test]
+#[ignore = "admin/ct-binsec runs it under BINSEC"]
+fn ct_binsec_mldsa() {
+    use crate::signature::sign::*;
+
+    fn sign<P: MlDsaParameterSet>() {
+        let key = MlDsaKeyPair::<P>::from_seed(&secret::<32>(1)).unwrap();
+        black_box(key.sign(&[2; 40]).is_ok());
+    }
+
+    checked(|| {
+        sign::<MlDsa44>();
+        sign::<MlDsa65>();
+        sign::<MlDsa87>();
+    });
 }
