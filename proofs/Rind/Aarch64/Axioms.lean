@@ -1,5 +1,6 @@
 import Rind.Aarch64.X25519
 import Rind.Aarch64.P384
+import Rind.Aarch64.P384Keygen
 import Rind.Aarch64.Sha512
 import Rind.Aarch64.Pbkdf2
 import Rind.Aarch64.P256
@@ -11,15 +12,16 @@ open rind.aarch64
 
 /-!
 The axioms each theorem rests on, beyond Lean's own: s2n-bignum's contracts
-in `Rind.Aarch64.S2nBignum` for X25519, P-256, P-384 ECDH, Ed25519, and
-the Keccak-f of SHA-3 and ML-KEM's SHAKE; for the SHA-512 family, for HMAC,
+in `Rind.Aarch64.S2nBignum` for X25519, P-256, P-384, Ed25519, and the
+Keccak-f of SHA-3 and ML-KEM's SHAKE; for the SHA-512 family, for HMAC,
 HKDF, and PBKDF2, which cover SHA-384 and SHA-512, and for Ed25519's hashes,
 aws-lc's scalar routine's in `Rind.Aarch64.AwsLc` and rind's HOL Light proof
 there of aws-lc's routine for the SHA-512 instructions; rind's HOL Light proof
 of SHA-256's routine for the crypto extension in `Rind.Aarch64.Sha256Hw`, for
 the theorems over every HMAC algorithm; rind's HOL Light proofs of its
 constant-time compares in `Rind.Aarch64.CtEqual` for HMAC's and PBKDF2's
-`verify`; and nothing else.
+`verify`; and nothing else. P-384's key generation also takes its table
+select as the hypothesis `AffSelect`, which no axiom states.
 A change here is a change to the trust base.
 -/
 
@@ -95,6 +97,46 @@ A change here is a change to the trust base.
 /-- info: 'rind.aarch64.p256_shared_secret' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms p256_shared_secret
+
+/-- info: 'rind.aarch64.p384_generate' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_add_p384_spec,
+ bignum_demont_p384_spec,
+ bignum_eq_spec,
+ bignum_inv_p384_spec,
+ bignum_mod_n384_spec,
+ bignum_montmul_p384_spec,
+ bignum_montsqr_p384_spec,
+ bignum_mux_spec,
+ bignum_neg_p384_spec,
+ bignum_tomont_p384_spec,
+ p384_montjdouble_spec,
+ p384_montjmixadd_spec] -/
+#guard_msgs in
+#print axioms p384_generate
+
+/-- info: 'rind.aarch64.p384_from_scalar' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_add_p384_spec,
+ bignum_demont_p384_spec,
+ bignum_eq_spec,
+ bignum_inv_p384_spec,
+ bignum_mod_n384_spec,
+ bignum_montmul_p384_spec,
+ bignum_montsqr_p384_spec,
+ bignum_mux_spec,
+ bignum_neg_p384_spec,
+ bignum_tomont_p384_spec,
+ p384_montjdouble_spec,
+ p384_montjmixadd_spec] -/
+#guard_msgs in
+#print axioms p384_from_scalar
+
+/-- info: 'rind.aarch64.p384_public_key' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms p384_public_key
 
 /-- info: 'rind.aarch64.p384_agree' depends on axioms: [propext,
  Classical.choice,

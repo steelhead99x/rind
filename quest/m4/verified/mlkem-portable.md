@@ -13,3 +13,4 @@ ML-KEM-768 earns the ✓ on x86_64 CPUs without AVX2: rind's Rust port of mlkem-
 ## Required
 
 - [ML-KEM-768's construction is proven](/quest/m4/verified/mlkem-construction.md) - the spec and contracts this meets
+- [VG measured](/quest/m2/verified-garbage/bench.md) - whether pyca/verified-garbage's proven code beats what this would prove; if a switch replaces it, this quest is deleted or rewritten (maintainer, 2026-11-12)
