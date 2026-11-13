@@ -51,7 +51,8 @@ impl Group for Ristretto {
     }
 
     fn scalar_is_zero(scalar: &Self::Scalar) -> bool {
-        scalar.is_zero()
+        // Zero is public: a rejected share or nonce says nothing of the one kept.
+        ct::into_public(scalar.is_zero())
     }
 
     fn random_scalar(rng: &mut dyn RandomSource) -> Result<Self::Scalar, Error> {
@@ -60,7 +61,8 @@ impl Group for Ristretto {
             rng.fill(&mut wide)?;
             ct::secret_slice(&wide);
             let scalar = Scalar::from_uniform_bytes(&wide);
-            if !scalar.is_zero() {
+            // Zero is public and discarded. It says nothing of the next draw.
+            if !ct::into_public(scalar.is_zero()) {
                 return Ok(scalar);
             }
         }
@@ -68,7 +70,7 @@ impl Group for Ristretto {
     }
 
     fn base(scalar: &Self::Scalar) -> Option<Self::Element> {
-        if scalar.is_zero() {
+        if ct::into_public(scalar.is_zero()) {
             None
         } else {
             Some(Element::mul_base(scalar))
@@ -76,7 +78,7 @@ impl Group for Ristretto {
     }
 
     fn mul(point: &Self::Element, scalar: &Self::Scalar) -> Option<Self::Element> {
-        if scalar.is_zero() {
+        if ct::into_public(scalar.is_zero()) {
             None
         } else {
             Some(point.mul(scalar))

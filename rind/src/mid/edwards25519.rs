@@ -463,11 +463,6 @@ impl Scalar {
         z
     }
 
-    /// Whether this scalar is zero. The answer is public.
-    pub(crate) fn is_zero(&self) -> bool {
-        low::ct::into_public(low::bignum_eq(&self.0, &[0; 4]))
-    }
-
     /// `1 / self mod L`, or `None` for zero, which has no inverse.
     ///
     /// Whether `self` is zero is public; the value stays secret.

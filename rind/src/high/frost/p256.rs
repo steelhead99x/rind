@@ -104,15 +104,15 @@ impl Group for P256 {
     }
 
     fn h1(msg: &[u8]) -> Result<Self::Scalar, Error> {
-        hash_to_scalar(msg, &dst(b"rho"))
+        hash_to_scalar(&[msg], &dst(b"rho"))
     }
 
     fn h2(msg: &[u8]) -> Result<Self::Scalar, Error> {
-        hash_to_scalar(msg, &dst(b"chal"))
+        hash_to_scalar(&[msg], &dst(b"chal"))
     }
 
     fn h3(msg: &[u8]) -> Result<Self::Scalar, Error> {
-        hash_to_scalar(msg, &dst(b"nonce"))
+        hash_to_scalar(&[msg], &dst(b"nonce"))
     }
 
     fn h4(msg: &[u8]) -> [u8; 64] {
