@@ -1,6 +1,37 @@
 //! Python `str` formatting, `fnmatch.fnmatchcase`, and `re.escape` as CPython 3.12 does them.
 
-/// `admin/bench-report`'s `human`: `ns`, `µs`, or `ms`.
+/// CPython `json.dumps` of a finite float, which matches `repr` with a signed two-digit exponent.
+pub fn py_float(n: f64) -> String {
+    if n.is_nan() {
+        return "NaN".to_string();
+    }
+    if n.is_infinite() {
+        return if n.is_sign_negative() {
+            "-Infinity".to_string()
+        } else {
+            "Infinity".to_string()
+        };
+    }
+    let mut text = format!("{n:?}");
+    if let Some(index) = text.find('e') {
+        let (mantissa, exponent) = text.split_at(index);
+        let exponent = &exponent[1..];
+        let (sign, digits) = if let Some(rest) = exponent.strip_prefix('-') {
+            ("-", rest)
+        } else if let Some(rest) = exponent.strip_prefix('+') {
+            ("+", rest)
+        } else {
+            ("+", exponent)
+        };
+        let digits = if digits.len() < 2 {
+            format!("0{digits}")
+        } else {
+            digits.to_string()
+        };
+        text = format!("{mantissa}e{sign}{digits}");
+    }
+    text
+}
 pub fn human(ns: f64) -> String {
     if ns < 1e3 {
         format!("{ns:.0} ns")

@@ -8,14 +8,19 @@
 //! Operation globs use [`fnmatchcase`]: Linux CPython semantics, which do not
 //! casefold. macOS `fnmatch.fnmatch` would.
 
+mod collect;
 mod error;
 mod format;
 mod gaps;
 mod gate;
+mod idle;
+mod nightly;
 mod paths;
 mod prose;
 mod report;
+mod run;
 mod schema;
+mod summary;
 mod svg;
 mod tables;
 mod verified;
@@ -23,6 +28,7 @@ mod verified;
 #[cfg(test)]
 mod behavior;
 
+pub use collect::{collect, host_script, shell_quote};
 pub use error::{Error, Result};
 pub use format::{fnmatchcase, human, significant};
 pub use gaps::{
@@ -30,13 +36,16 @@ pub use gaps::{
     tier_name, tier_row,
 };
 pub use gate::{GateReport, gate};
+pub use nightly::nightly;
 pub use paths::{Paths, relpath, workspace_root};
 pub use report::{host_table, platform_of, render_check, render_files, render_write};
+pub use run::run;
 pub use schema::{
     BenchArtifact, BenchPoint, BuildCost, CpuInfo, HostResult, Loaded, Patch, Tier, TierDocument,
     TimingRow, Toolchain, load_bench_artifact, load_host_file, load_hosts, load_tier_file,
     parse_host, parse_tier,
 };
+pub use summary::summary;
 pub use tables::{
     BASELINES, BUSY_SHARE, COPY_FAILED, CRITERION_ARGS, FONT, LEASE_HELD, REMOTE_DIR, REPO, SLOWER,
     SPEED_BINS, SPEED_COLORS, SPEED_LABELS, THEMES, TIER_BINS, TIER_LABELS, TIER_ROWS, UNRANKED,

@@ -86,6 +86,7 @@ fi
 
 if [[ $checkout_mode -eq 1 ]]; then
     run_both_here "render --check" render --check
+    run_both_here "summary" summary "$root/benchmarks/data"
     fixture=$work/gate
     mkdir -p "$fixture/admin" "$fixture/benchmarks" "$fixture/now/bench-x" "$fixture/then/bench-x" "$fixture/quest"
     cp "$root/admin/bench-report" "$fixture/admin/bench-report"
@@ -131,6 +132,7 @@ if [[ $checkout_mode -eq 0 ]]; then
     rs=$?
     set -e
     compare_streams "render $dir" "$py" "$rs"
+    run_both_here "summary $dir" summary "$dir"
     if [[ $py -eq 0 ]]; then
         if ! diff -rq "$py_tree/BENCHMARKS.md" "$rs_tree/BENCHMARKS.md" >"$work/diff" \
             || ! diff -rq "$py_tree/benchmarks" "$rs_tree/benchmarks" >>"$work/diff"; then

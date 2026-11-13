@@ -263,6 +263,36 @@ fn report_states_what_is_not_measured() {
 }
 
 #[test]
+fn host_script_matches_python() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    let py = Command::new("python3")
+        .current_dir(&root)
+        .arg("-c")
+        .arg(
+            "import importlib.machinery,importlib.util\n\
+             loader=importlib.machinery.SourceFileLoader('b','admin/bench-report')\n\
+             spec=importlib.util.spec_from_loader('b',loader)\n\
+             m=importlib.util.module_from_spec(spec); loader.exec_module(m)\n\
+             print(m.host_script('nixos','/tmp/work','echo hi'), end='')\n\
+             print('---')\n\
+             print(m.host_script('ovh-iad','/tmp/work dir','echo hi'), end='')\n",
+        )
+        .output()
+        .unwrap();
+    assert!(
+        py.status.success(),
+        "{}",
+        String::from_utf8_lossy(&py.stderr)
+    );
+    let text = String::from_utf8(py.stdout).unwrap();
+    let mut parts = text.split("---\n");
+    let nixos = crate::host_script("nixos", "/tmp/work", "echo hi").unwrap();
+    let leased = crate::host_script("ovh-iad", "/tmp/work dir", "echo hi").unwrap();
+    assert_eq!(parts.next().unwrap(), nixos);
+    assert_eq!(parts.next().unwrap(), leased);
+}
+
+#[test]
 fn fastest_bin_holds_within_ten_percent() {
     assert_eq!(bin_of(1.0, SPEED_BINS), 0);
     assert_eq!(bin_of(1.1, SPEED_BINS), 0);

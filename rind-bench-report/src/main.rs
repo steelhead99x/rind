@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use rind_bench_report::{Paths, gate, render_check, render_write};
+use rind_bench_report::{Paths, collect, gate, nightly, render_check, render_write, run, summary};
 
 #[derive(Parser)]
 #[command(
@@ -18,6 +18,35 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// The host side of collect.
+    Run {
+        #[arg(long)]
+        host: String,
+        #[arg(long)]
+        commit: String,
+        #[arg(long)]
+        jobs: u32,
+        #[arg(long)]
+        target_dir: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Run the benchmarks on each host.
+    Collect {
+        /// The commit to measure (default HEAD).
+        #[arg(long, default_value = "HEAD")]
+        commit: String,
+        /// A host to measure (default: all, in order).
+        #[arg(long)]
+        host: Vec<String>,
+        /// The results directory (default .tmp/bench-report/<commit>).
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Save the latest nightly bench's results as the CPU tiers.
+    Nightly,
+    /// Print a collection's rind-versus-fastest table.
+    Summary { dir: PathBuf },
     /// Write BENCHMARKS.md and its SVGs from benchmarks/data.
     Render {
         /// First import a collection's measured hosts.
@@ -41,6 +70,16 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let paths = Paths::discover();
     let result = match cli.command {
+        Command::Run {
+            host,
+            commit,
+            jobs,
+            target_dir,
+            out,
+        } => run(&paths, &host, &commit, jobs, &target_dir, &out),
+        Command::Collect { commit, host, out } => collect(&paths, &commit, &host, out.as_deref()),
+        Command::Nightly => nightly(&paths),
+        Command::Summary { dir } => summary(&dir).map(|text| print!("{text}")),
         Command::Render { from, check } => {
             if check {
                 render_check(&paths)
