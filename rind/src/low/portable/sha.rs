@@ -3,9 +3,16 @@
 //! SHA-1 on rind's portable code in `generic`, as armv7 runs it without the
 //! crypto extension, and the SHA-2 family on HACL*'s verified
 //! `Hacl_Hash_SHA2`, as libcrux-sha2 ships it. HACL*'s SHA-256 took 0.67-0.93
-//! of `generic`'s time at 16 KB on x86_64.
+//! of `generic`'s time at 16 KB on x86_64. ARMv6-M takes `generic`'s rolled
+//! SHA-512 instead: HACL*'s unrolled one overflows an RP2040's 16 KB XIP
+//! cache and ran about 10x slower there.
 
-use libcrux_sha2::hacl::{sha256_update_nblocks, sha512_update_nblocks};
+use libcrux_sha2::hacl::sha256_update_nblocks;
+#[cfg(not(all(target_arch = "arm", not(target_has_atomic = "ptr"))))]
+use libcrux_sha2::hacl::sha512_update_nblocks;
+
+#[cfg(all(target_arch = "arm", not(target_has_atomic = "ptr")))]
+pub(crate) use crate::low::generic::sha512::sha512_compress_blocks;
 
 pub(crate) use crate::low::generic::sha1::sha1_compress_blocks;
 
@@ -42,6 +49,7 @@ pub(crate) fn sha256_finish(state: &[u32; 8], message: &[u8], length: [u8; 8]) -
 }
 
 /// Compresses whole 128-byte `blocks` into `state`.
+#[cfg(not(all(target_arch = "arm", not(target_has_atomic = "ptr"))))]
 pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(128));
     for piece in blocks.chunks(PIECE) {

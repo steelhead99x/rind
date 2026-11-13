@@ -114,6 +114,17 @@ mod generic {
     pub(super) mod sha1;
     #[cfg(all(test, any(rind_backend = "arm", rind_backend = "x86_64")))]
     pub(super) mod sha256;
+    // The SHA-512 of Arm without CAS atomics (ARMv6-M, and the tier-3
+    // ARMv4T and ARMv5TE bare-metal targets), and in tests.
+    #[cfg(any(
+        test,
+        all(
+            rind_backend = "portable",
+            target_arch = "arm",
+            not(target_has_atomic = "ptr")
+        )
+    ))]
+    pub(super) mod sha512;
     pub(super) mod zeroise;
 }
 
