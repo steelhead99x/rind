@@ -13,6 +13,7 @@ fn bench_aes_ctr(c: &mut Criterion) {
             let mut buf = vec![0u8; size];
             group.throughput(Throughput::Bytes(size as u64));
 
+            #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
             group.bench_function(BenchmarkId::new("aws-lc-rs", size_name), |b| {
                 use aws_lc_rs::cipher::{
                     AES_128, AES_192, AES_256, EncryptingKey, EncryptionContext, UnboundCipherKey,
@@ -60,6 +61,7 @@ fn bench_aes_cbc(c: &mut Criterion) {
                 let mut buf = Vec::with_capacity(size + 16);
                 group.throughput(Throughput::Bytes(size as u64));
 
+                #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
                 group.bench_function(BenchmarkId::new("aws-lc-rs", size_name), |b| {
                     use aws_lc_rs::cipher::{
                         AES_128, AES_192, AES_256, DecryptionContext, EncryptionContext,
@@ -121,6 +123,7 @@ fn bench_header_protection(c: &mut Criterion) {
             let key = HeaderProtectionKey::new(algorithm, key).unwrap();
             b.iter(|| key.new_mask(&sample).unwrap());
         });
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_function(format!("{name}/aws-lc-rs"), |b| {
             use aws_lc_rs::aead::quic::{AES_128, AES_256, CHACHA20, HeaderProtectionKey};
             let algorithm = match name {
