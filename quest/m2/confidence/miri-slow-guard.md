@@ -9,10 +9,8 @@ Miri run.
 ## Plan
 
 Decided 2026-11-12 (user, /quest-plan), from rind's trimmed Pullfrog
-learnings. The matching guard for `.cargo/mutants.toml`'s exclusions is
-[mutants-pins](/quest/m2/confidence/mutants-pins.md)'s, in open PR
-[moq-dev/rind#699](https://github.com/moq-dev/rind/pull/699), so this quest
-covers only the Miri list.
+learnings. `.cargo/mutants.toml`'s exclusions already have their guard,
+`admin/mutants --pins`, so this quest covers only the Miri list.
 
 Open PR [moq-dev/rind#693](https://github.com/moq-dev/rind/pull/693) rewrites
 the list and moves Miri to nightly; build on whatever it lands.
