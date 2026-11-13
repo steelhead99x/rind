@@ -14,3 +14,4 @@ On x86_64 CPUs with AVX-512 IFMA (Ice Lake and later, Zen 4 and later), where bo
 ## Required
 
 - [RSA signing, decryption, and key generation are proven](/quest/m4/verified/rsa-sign.md) - the CRT glue this exponentiation slots into
+- [VG measured](/quest/m2/verified-garbage/bench.md) - whether pyca/verified-garbage's proven code beats what this would prove; if a switch replaces it, this quest is deleted or rewritten (maintainer, 2026-11-12)

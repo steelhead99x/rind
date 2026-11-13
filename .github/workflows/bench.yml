@@ -14,8 +14,16 @@ env:
   VALGRIND_BUG_494162: 1
 
 jobs:
-  bench:
+  # CodSpeed refuses an upload with too many benchmarks, so each shard builds
+  # and uploads every third bench target; shards of one workflow run merge
+  # into one report.
+  codspeed:
+    name: codspeed (${{ matrix.shard }}/3)
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     permissions:
       contents: read
       # CodSpeed authenticates the upload with the job's OIDC token.
@@ -37,7 +45,14 @@ jobs:
         run: cargo binstall -y cargo-codspeed
 
       - name: Build benchmarks
-        run: cargo codspeed build -p rind-bench --features __bench_codspeed
+        run: |
+          mapfile -t benches < <(cargo metadata --format-version 1 --no-deps |
+            jq -r --argjson shard ${{ matrix.shard }} '[.packages[] | select(.name == "rind-bench").targets[]
+              | select(.kind == ["bench"]).name] | sort | to_entries[]
+              | select(.key % 3 == $shard - 1) | "--bench", .value')
+          # Without --bench, cargo codspeed builds every target into one upload.
+          [ ${#benches[@]} -gt 0 ] || { echo "no bench targets for shard ${{ matrix.shard }}"; exit 1; }
+          cargo codspeed build -p rind-bench --features __bench_codspeed "${benches[@]}"
 
       - name: Run benchmarks
         uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5.6.3
