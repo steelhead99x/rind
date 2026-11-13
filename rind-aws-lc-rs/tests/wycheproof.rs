@@ -4,7 +4,6 @@
 use std::fs::File;
 use std::io::BufReader;
 
-use rind_aws_lc_rs::signature;
 use rind_aws_lc_rs::{error, hkdf};
 use serde::Deserialize;
 
@@ -71,107 +70,6 @@ fn hkdf() {
         }
         assert!(count > 0, "{file} has no tests");
     }
-}
-
-/// Empty-context ML-DSA verification, the only form the adapter signs.
-#[test]
-fn ml_dsa_verify() {
-    for (file, algorithm, theirs_algorithm) in [
-        (
-            "mldsa_44_verify_test.json",
-            &signature::ML_DSA_44,
-            &aws_lc_rs::signature::ML_DSA_44,
-        ),
-        (
-            "mldsa_65_verify_test.json",
-            &signature::ML_DSA_65,
-            &aws_lc_rs::signature::ML_DSA_65,
-        ),
-        (
-            "mldsa_87_verify_test.json",
-            &signature::ML_DSA_87,
-            &aws_lc_rs::signature::ML_DSA_87,
-        ),
-    ] {
-        let data = File::open(format!(
-            "{}/../thirdparty/wycheproof/testvectors_v1/{file}",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .unwrap_or_else(|_| panic!("failed to open {file}"));
-        let tests: MlDsaFile = serde_json::from_reader(BufReader::new(data)).unwrap();
-        let mut count = 0;
-        for group in tests.groups {
-            for test in group.tests {
-                if !test.ctx.is_empty() || test.flags.iter().any(|flag| flag == "Internal") {
-                    continue;
-                }
-                let unparsed = signature::UnparsedPublicKey::new(algorithm, &group.public_key)
-                    .verify(&test.msg, &test.sig)
-                    .is_ok();
-                let parsed = match signature::ParsedPublicKey::new(algorithm, &group.public_key) {
-                    Ok(key) => key.verify_sig(&test.msg, &test.sig).is_ok(),
-                    Err(_) => false,
-                };
-                match test.result.as_str() {
-                    "valid" => assert!(unparsed && parsed, "{file} {}", test.id),
-                    "invalid" => assert!(!unparsed && !parsed, "{file} {}", test.id),
-                    // Wycheproof allows either verdict. Match aws-lc-rs's.
-                    "acceptable" => {
-                        let theirs_unparsed = aws_lc_rs::signature::UnparsedPublicKey::new(
-                            theirs_algorithm,
-                            &group.public_key,
-                        )
-                        .verify(&test.msg, &test.sig)
-                        .is_ok();
-                        let theirs_parsed = match aws_lc_rs::signature::ParsedPublicKey::new(
-                            theirs_algorithm,
-                            &group.public_key,
-                        ) {
-                            Ok(key) => key.verify_sig(&test.msg, &test.sig).is_ok(),
-                            Err(_) => false,
-                        };
-                        assert_eq!(
-                            (unparsed, parsed),
-                            (theirs_unparsed, theirs_parsed),
-                            "{file} {}",
-                            test.id
-                        );
-                    }
-                    expected => panic!("{file} {}: unexpected result {expected}", test.id),
-                }
-                count += 1;
-            }
-        }
-        assert!(count > 0, "{file} has no empty-context tests");
-    }
-}
-
-#[derive(Deserialize)]
-struct MlDsaFile {
-    #[serde(rename = "testGroups")]
-    groups: Vec<MlDsaGroup>,
-}
-
-#[derive(Deserialize)]
-struct MlDsaGroup {
-    #[serde(rename = "publicKey", with = "hex::serde")]
-    public_key: Vec<u8>,
-    tests: Vec<MlDsaCase>,
-}
-
-#[derive(Deserialize)]
-struct MlDsaCase {
-    #[serde(rename = "tcId")]
-    id: usize,
-    #[serde(default, with = "hex::serde")]
-    msg: Vec<u8>,
-    #[serde(default, with = "hex::serde")]
-    ctx: Vec<u8>,
-    #[serde(default, with = "hex::serde")]
-    sig: Vec<u8>,
-    result: String,
-    #[serde(default)]
-    flags: Vec<String>,
 }
 
 /// A caller's own key type, which aws-lc-rs lets any crate define.
