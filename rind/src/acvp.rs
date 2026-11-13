@@ -85,13 +85,6 @@ impl Drop for SecretBuf {
 
 impl Zeroable for SecretBuf {}
 
-/// Copies `bytes` into a [`SecretBuf`] and wipes the array it took.
-fn secret_array<const N: usize>(mut bytes: [u8; N]) -> SecretBuf {
-    let secret = SecretBuf::from_slice(&bytes);
-    zeroise(&mut bytes);
-    secret
-}
-
 /// ML-KEM-768 key generation from FIPS 203's 64-byte seed `d || z`.
 ///
 /// Returns `(ek, dk)`. `dk` is wiped on drop.
@@ -100,7 +93,7 @@ pub fn mlkem768_keygen(seed: &[u8]) -> Result<(Vec<u8>, SecretBuf), Error> {
     let seed: &[u8; 64] = seed.try_into().map_err(|_| Error::WrongLength)?;
     let key = DecapKey::keygen_internal(seed);
     let ek = key.encapsulation_key().as_bytes().to_vec();
-    let dk = secret_array(key.as_bytes());
+    let dk = SecretBuf::from_slice(&key.as_bytes());
     Ok((ek, dk))
 }
 
@@ -113,7 +106,7 @@ pub fn mlkem768_encaps(ek: &[u8], m: &[u8]) -> Result<(Vec<u8>, SecretBuf), Erro
     let m: [u8; 32] = m.try_into().map_err(|_| Error::WrongLength)?;
     let key = EncapKey::from_bytes(ek)?;
     let (secret, ciphertext) = key.encaps_internal(Message(m));
-    Ok((ciphertext.as_ref().to_vec(), secret_array(*secret.as_ref())))
+    Ok((ciphertext.as_ref().to_vec(), SecretBuf::from_slice(secret.as_ref())))
 }
 
 /// ML-KEM-768 decapsulation of an expanded decapsulation key.
@@ -139,9 +132,8 @@ pub fn mlkem768_decaps(dk: &[u8], ciphertext: &[u8]) -> Result<SecretBuf, Error>
     crate::low::ct::secret_slice(&dk[..MLKEM_DK_PKE]);
     crate::low::ct::secret_slice(&dk[MLKEM_DK - 32..]);
     let key = DecapKey::from_bytes(&dk).ok_or(KeyFormatError::MlKemModulus)?;
-    Ok(secret_array(
-        *key.decaps(&Ciphertext::from(ciphertext)).as_ref(),
-    ))
+    let shared = key.decaps(&Ciphertext::from(ciphertext));
+    Ok(SecretBuf::from_slice(shared.as_ref()))
 }
 
 /// Whether `ek` passes FIPS 203's encapsulation-key check.
