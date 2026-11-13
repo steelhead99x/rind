@@ -69,6 +69,20 @@ with uncommitted changes, which that commit does not name.
   the SHA-512 instructions, computes s2n-bignum's FIPS 180-4 spec,
   `sha512_hash_blocks`, and stores it to the state, as `sha256`'s above; the
   proof checks its round constants against FIPS 180-4's.
+- `aarch64/bn_mul_mont.ml`: `BN_MUL_MONT_GENERIC_SUBROUTINE_CORRECT`, rind's
+  proof that the naked function `low::aarch64::mont::bn_mul_mont`, aws-lc's
+  Montgomery multiplication, writes the Montgomery product
+  `x * y / 2^(64k) mod m` of its `k`-word operands, as s2n-bignum's
+  `bignum_montmul` states it, given `-m^-1 mod 2^64` and
+  `x * y <= 2^(64k) * m`, for every width from two up that is not a multiple
+  of four: those its width-generic path runs, for `k < 2^58`, a 16-aligned
+  stack pointer, and `z` and the stack frame disjoint from the code and the
+  inputs, so `z` may not alias `x`. The theorem covers the dispatch,
+  the stack frame of up to `8k + 72` bytes below the stack pointer, and the
+  callee-saved registers it restores. The widths that run `__bn_mul4x_mont`
+  and `__bn_sqr8x_mont`, which include every standard RSA size and its CRT
+  primes, are not proven yet, and no axiom in `Rind/` restates the theorem
+  yet. The function has no relocations.
 - `x86_64/bn_mul_mont_nohw.ml`: `BN_MUL_MONT_NOHW_SUBROUTINE_CORRECT`, rind's
   proof that the naked function `low::x86_64::mont::bn_mul_mont_nohw`,
   aws-lc's word-serial Montgomery multiplication, writes the Montgomery
@@ -207,11 +221,31 @@ writes for aarch64:
   that point, or a fault unless that is a finite point on the curve;
 - `p384_shared_secret`: the secret's bytes are those.
 
-Key generation, a loaded key, and the public key a key holds run rind's comb
-for k·G, which no theorem covers yet. `p384Pow` is HOL Light's `group_pow
-p384_group`, whose group law `Rind/Spec.lean` defines once for the NIST
-curves, and `Rind/NistGroup.lean` proves it is multiplication in Mathlib's
-group of points on such a curve. `Rind/P384Group.lean` proves p and n prime,
+P-384's key generation on x86_64 and aarch64, in `Rind/X86_64/P384Keygen.lean`,
+which `admin/prove` also writes for aarch64, as P-256's is on aarch64:
+
+- `p384_generate`: the key's scalar is the first of up to 64 draws from the
+  system source whose bytes, read big-endian, are in [1, n), and generation is
+  refused if a draw fails first or none is;
+- `p384_from_scalar`: a scalar that is not 48 bytes is refused, so is one
+  outside [1, n), and otherwise the key's scalar is the scalar;
+- `p384_public_key`: a key's public key is the X9.62 uncompressed encoding of
+  its scalar times G.
+
+rind computes k·G with its own comb in Rust, aws-lc's layout: 77 Booth-recoded
+5-bit windows added from 20 tables of 1 to 16 times 2^(20j)·G, with five
+doublings between the four teeth. `Rind/P384Comb.lean` proves the windows'
+digits sum to the scalar and that no mixed addition meets the equal points
+s2n-bignum's `p384_montjmixadd` excludes, for a scalar below n, and
+`Rind/X86_64/P384Table.lean` has the kernel check the translated tables
+against G. The draws are modelled in `Rind/X86_64/P384Dispatch.lean`, as
+P-256's are. The theorems take `AffSelect`, what the table lookup computes, as
+a hypothesis: rind's AVX2, SSE2, and NEON selects load through raw pointers,
+which Aeneas cannot translate, and are not modelled yet.
+
+`p384Pow` is HOL Light's `group_pow p384_group`, whose group law
+`Rind/Spec.lean` defines once for the NIST curves, and `Rind/NistGroup.lean`
+proves it is multiplication in Mathlib's group of points on such a curve. `Rind/P384Group.lean` proves p and n prime,
 by Pratt certificates that `Rind/Pratt.lean` checks, and G's order n.
 
 ChaCha20 QUIC header protection on x86_64 and aarch64, from
