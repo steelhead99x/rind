@@ -19,6 +19,10 @@
 //! `wide-arithmetic` feature, and 32 elsewhere, where it would be a library
 //! call. `--cfg rind_limb="32"` forces 32-bit limbs on a 64-bit target, so
 //! CI checks both widths on x86_64; like `rind_portable`, it is for testing.
+//!
+//! And it sets `rind_reg_asm` on the architectures whose `asm!` with a `reg`
+//! operand is stable Rust, which the portable MD5 uses as an optimisation
+//! barrier.
 
 use std::env;
 
@@ -29,6 +33,7 @@ fn main() {
     );
 
     println!(r#"cargo::rustc-check-cfg=cfg(rind_limb, values("32", "64"))"#);
+    println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
 
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
@@ -39,6 +44,26 @@ fn main() {
         _ => "portable",
     };
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
+
+    // Stable Rust's `asm!` with a `reg` operand, allow-listed so an
+    // architecture whose inline assembly is unstable, such as Xtensa or MIPS,
+    // falls back to `black_box` instead of failing to build.
+    let reg_asm = matches!(
+        arch.as_str(),
+        "x86"
+            | "x86_64"
+            | "arm"
+            | "aarch64"
+            | "riscv32"
+            | "riscv64"
+            | "loongarch64"
+            | "s390x"
+            | "powerpc"
+            | "powerpc64"
+    );
+    if reg_asm {
+        println!("cargo::rustc-cfg=rind_reg_asm");
+    }
 
     let wide = env::var("CARGO_CFG_TARGET_POINTER_WIDTH").is_ok_and(|w| w == "64")
         || (arch == "wasm32"
