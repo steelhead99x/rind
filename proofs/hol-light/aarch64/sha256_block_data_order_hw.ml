@@ -12,7 +12,7 @@
    sha256-armv8.pl, the ARMv8 path), which reads its round constants from the
    K256 table beside it. Its result is s2n-bignum's FIPS 180-4 spec,
    sha256_hash_blocks, from s2n-bignum pull request #415, which
-   proofs/hol-light/s2n-bignum/ holds until it merges. The proof steps the
+   rind's fork of s2n-bignum holds until it merges. The proof steps the
    loop body's 115 instructions symbolically, rewriting each SHA256H/SHA256H2
    pair to four rounds and each SHA256SU0/SHA256SU1 pair to four message
    schedule words, so no case split on the data is needed. *)
