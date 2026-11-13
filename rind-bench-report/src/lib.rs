@@ -4,6 +4,9 @@
 //! This crate parses schema 1, the report's tables, and `benchmarks/gaps.toml`
 //! / `benchmarks/verified.toml` the way that script does. Later stages add
 //! `render`, `gate`, `run`, and `collect` behind the same CLI.
+//!
+//! Operation globs use [`fnmatchcase`]: Linux CPython semantics, which do not
+//! casefold. macOS `fnmatch.fnmatch` would.
 
 mod error;
 mod format;

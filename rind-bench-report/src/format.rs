@@ -120,11 +120,19 @@ pub fn re_escape(text: &str) -> String {
     out
 }
 
-/// `fnmatch.fnmatchcase`: `*`, `?`, and `[seq]` / `[!seq]`, case-sensitive.
+/// Shell pattern match using Linux CPython's case-sensitive rules.
 ///
-/// CPython's `fnmatch.fnmatch` (used by `fnmatch.filter`) casefolds on macOS.
-/// Operation names in this report are lowercase, and Linux — where the report
-/// is checked — does not casefold, so this matches the script there.
+/// `*` matches any string, `?` one byte, `[seq]` a class, and `[!seq]` its
+/// complement. The comparison does not casefold: `SHA256` does not match
+/// `sha256`.
+///
+/// `admin/bench-report` uses `fnmatch.fnmatchcase` for gap and proof rows, and
+/// `fnmatch.filter` when a verified pattern must name an operation. On Linux
+/// `fnmatch.fnmatch` (what `filter` calls) is case-sensitive, the same as
+/// `fnmatchcase`. On macOS `fnmatch.fnmatch` casefolds both sides first, so a
+/// pattern that differs only by case would match. This crate always uses the
+/// Linux / `fnmatchcase` rule. That is what `just ci` checks, and the report's
+/// operation names are lowercase.
 pub fn fnmatchcase(name: &str, pat: &str) -> bool {
     fnmatch_bytes(name.as_bytes(), pat.as_bytes())
 }
