@@ -229,6 +229,19 @@ buffer.
 
 Adapter fuzz targets: `fuzz::rustls`, `fuzz::dimpl`, `fuzz::str0m`.
 
+## Coverage
+
+`nix develop .#coverage --command admin/coverage` measures how much of the
+published code its own tests run: the `rind` crate and its adapters under
+`cargo test`, rind-dart under `dart test`, and pyrind under
+`sh/python.sh test`, leaving out the tools (rind-bench, rind-cpuid,
+rind-timing, and the fuzzer). A function it lists as never run is published
+code no test reaches. It runs the suites as the nightly jobs do, with the
+vector submodules, `SLOW_TESTS=1`, and again with CPU features denied (on
+x86_64, under Intel SDE too), so a plain `cargo llvm-cov` reports less. The
+nightly `coverage` workflow runs it on Linux and macOS; the summary table in
+its "Measure coverage" step's log is the report.
+
 ## Running the tools
 
 On Linux, `just armv7` runs the nightly armv7 job: it builds and lints for
