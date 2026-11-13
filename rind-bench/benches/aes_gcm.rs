@@ -1,22 +1,10 @@
+#[macro_use]
 mod criterion;
 #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
 mod ossl_aead;
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-
-/// An aws-lc-rs path, or `()` on Xtensa, which aws-lc builds for no target
-/// of: there its rows are left out, and its algorithms passed as `()`.
-#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-macro_rules! aws {
-    ($($path:tt)+) => { aws_lc_rs::$($path)+ };
-}
-#[cfg(any(target_arch = "xtensa", target_os = "none"))]
-macro_rules! aws {
-    ($($path:tt)+) => {
-        ()
-    };
-}
 
 fn test_ring_aes_gcm(key: &ring::aead::LessSafeKey, nonce: &[u8; 12], aad: &[u8], buf: &mut [u8]) {
     let _tag = key
@@ -69,6 +57,8 @@ fn key_setup(
     aws: &'static aws!(aead::Algorithm),
     ours: &'static rind::aead::Algorithm,
 ) {
+    #[cfg(any(target_arch = "xtensa", target_os = "none"))]
+    let _ = aws;
     group.bench_function(BenchmarkId::new("ring", "key"), |b| {
         b.iter(|| ring::aead::UnboundKey::new(ring, black_box(key)).unwrap())
     });
@@ -280,6 +270,8 @@ fn open<K: KeySize>(
     aws: &'static aws!(aead::Algorithm),
     ours: &'static rind::aead::Algorithm,
 ) {
+    #[cfg(any(target_arch = "xtensa", target_os = "none"))]
+    let _ = aws;
     let nonce = [0u8; 12];
     let ring_key = ring::aead::LessSafeKey::new(ring::aead::UnboundKey::new(ring, key).unwrap());
     #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]

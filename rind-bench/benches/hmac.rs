@@ -1,21 +1,9 @@
+#[macro_use]
 mod criterion;
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use hmac::{KeyInit, Mac};
-
-/// An aws-lc-rs path, or `()` on Xtensa, which aws-lc builds for no target
-/// of: there its rows are left out, and its algorithms passed as `()`.
-#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-macro_rules! aws {
-    ($($path:tt)+) => { aws_lc_rs::$($path)+ };
-}
-#[cfg(any(target_arch = "xtensa", target_os = "none"))]
-macro_rules! aws {
-    ($($path:tt)+) => {
-        ()
-    };
-}
 
 /// A library's one-shot MAC: key, then message.
 type OneShot = fn(&[u8], &[u8]);
@@ -52,6 +40,8 @@ fn bench(
     key: &[u8],
     others: &[(&str, OneShot)],
 ) {
+    #[cfg(any(target_arch = "xtensa", target_os = "none"))]
+    let _ = aws;
     let mut group = c.benchmark_group(name);
 
     for (size, size_name) in criterion::HASH_SIZES {
