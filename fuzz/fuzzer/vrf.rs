@@ -32,7 +32,9 @@ struct Input {
 fuzz_target!(|input: Input| {
     let index = usize::from(input.algorithm % 2);
     let secret_key = &KEYS[index];
-    let (proof, output) = secret_key.prove(&input.alpha);
+    let (proof, output) = secret_key
+        .prove(&input.alpha)
+        .expect("try-and-increment finds a point");
 
     let mut public_key = secret_key.public_key().as_ref().to_vec();
     let mut changed = input.public_key.apply(&mut public_key);

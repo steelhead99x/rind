@@ -3067,7 +3067,7 @@ mod vrf {
             let their_public = VRFPublicKey::from(&theirs);
             prop_assert_eq!(ours.public_key().as_ref(), their_public.as_bytes());
 
-            let (proof, output) = ours.prove(&alpha);
+            let (proof, output) = ours.prove(&alpha).unwrap();
             let their_proof = theirs.prove(&alpha);
             prop_assert_eq!(proof.as_ref(), their_proof.to_bytes());
             their_public.verify(&their_proof, &alpha).unwrap();
@@ -3084,7 +3084,7 @@ mod vrf {
             let theirs = EcVrfP256TaiSecretKey::from_slice(ours.to_bytes().as_ref()).unwrap();
             let their_public = theirs.verifier();
 
-            let (proof, output) = ours.prove(&alpha);
+            let (proof, output) = ours.prove(&alpha).unwrap();
             let their_proof = theirs.prove(&alpha).unwrap();
             prop_assert_eq!(proof.as_ref(), &their_proof.encode_to_pi()[..]);
             prop_assert!(

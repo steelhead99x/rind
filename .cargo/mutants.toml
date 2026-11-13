@@ -97,7 +97,7 @@ exclude_re = [
   'rind/src/high/rsa\.rs:20:\d+: replace \+ with \*$',
   'rind/src/high/sec1\.rs:14:\d+: replace \+ with \*$',
   'rind/src/high/signature\.rs:(229|1683):\d+: replace \+ with \*$',
-  'rind/src/low/generic/mont\.rs:131:\d+: replace \+ with \* in mont_mul$',
+  'rind/src/low/generic/mont\.rs:167:\d+: replace \+ with \* in mont_mul$',
   'rind/src/mid/mldsa\.rs:(368|463|510):\d+: replace \+ with \* in (keygen|public_key_from_secret|sign_internal)$',
   'rind/src/mid/rsa_priv\.rs:311:\d+: replace / with \*$',
   'rind/src/mid/rsa_priv\.rs:296:44: replace \+ with \*$',
