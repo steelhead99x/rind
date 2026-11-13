@@ -23,7 +23,7 @@ use rind::signature::{
     EcdsaKeyPair, EcdsaSigningAlgorithm, Ed25519KeyPair, PublicKey, RsaKeyPair,
     RsaSigningAlgorithm, RsaVerificationAlgorithm, VerificationAlgorithm, sign, verify,
 };
-use rind::{Error, aead, agreement, digest, hkdf, hmac, kem, pbkdf2, rsa};
+use rind::{Error, aead, agreement, cipher, digest, hkdf, hmac, kem, pbkdf2, rsa};
 
 #[cfg(test)]
 mod ctgrind;
@@ -167,6 +167,10 @@ macro_rules! free {
 free! {
     rind_dart_aead_key_free: aead::Key;
     rind_dart_randomized_nonce_key_free: aead::RandomizedNonceKey;
+    rind_dart_aes_cbc_encrypting_key_free: cipher::AesCbcEncryptingKey;
+    rind_dart_aes_cbc_decrypting_key_free: cipher::AesCbcDecryptingKey;
+    rind_dart_aes_ctr_free: cipher::AesCtr;
+    rind_dart_chacha20_free: cipher::ChaCha20;
     rind_dart_digest_context_free: digest::Context;
     rind_dart_hmac_key_free: hmac::Key;
     rind_dart_hmac_context_free: hmac::Context;
@@ -193,6 +197,15 @@ fn aead_algorithm(id: u32) -> Result<&'static aead::Algorithm, Misuse> {
         2 => &aead::AES_256_GCM,
         3 => &aead::CHACHA20_POLY1305,
         _ => return Err(Misuse("unknown AEAD algorithm")),
+    })
+}
+
+fn cipher_algorithm(id: u32) -> Result<&'static cipher::Algorithm, Misuse> {
+    Ok(match id {
+        0 => &cipher::AES_128,
+        1 => &cipher::AES_192,
+        2 => &cipher::AES_256,
+        _ => return Err(Misuse("unknown cipher algorithm")),
     })
 }
 
@@ -541,7 +554,7 @@ pub unsafe extern "C" fn rind_dart_randomized_nonce_key_open(
 }
 
 /// The plaintext at the front of `buf`, which a seal extends in place with
-/// its tag.
+/// its tag, and AES-CBC with its padding.
 struct Room<'a> {
     buf: &'a mut [u8],
     len: usize,
@@ -556,11 +569,191 @@ impl AsMut<[u8]> for Room<'_> {
 impl<'b> Extend<&'b u8> for Room<'_> {
     fn extend<I: IntoIterator<Item = &'b u8>>(&mut self, bytes: I) {
         for &byte in bytes {
-            // The caller sized `buf` for the tag.
+            // The caller sized `buf` for the tag or padding.
             self.buf[self.len] = byte;
             self.len += 1;
         }
     }
+}
+
+// --- Ciphers ---
+
+/// A 16-byte IV or counter block.
+fn block(bytes: &[u8]) -> Result<&[u8; 16], Error> {
+    bytes.try_into().map_err(|_| Error::WrongLength)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_aes_cbc_encrypting_key_new(
+    algorithm: u32,
+    key: *const u8,
+    key_len: usize,
+    out: *mut *mut cipher::AesCbcEncryptingKey,
+) -> isize {
+    run(|| {
+        let algorithm = cipher_algorithm(algorithm)?;
+        // SAFETY: forwarded from the caller.
+        let key = cipher::AesCbcEncryptingKey::new(algorithm, unsafe { input(key, key_len) })?;
+        // SAFETY: forwarded from the caller.
+        Ok(unsafe { store(out, key) })
+    })
+}
+
+/// Encrypts the `len` bytes of plaintext at the front of `in_out` in place
+/// under `iv`, padded with PKCS#7 when `pad` is nonzero, and returns the
+/// ciphertext's length, which padding makes the next multiple of 16 above
+/// `len`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_aes_cbc_encrypt(
+    key: *const cipher::AesCbcEncryptingKey,
+    iv: *const u8,
+    iv_len: usize,
+    pad: u32,
+    in_out: *mut u8,
+    in_out_len: usize,
+    len: usize,
+) -> isize {
+    run(|| {
+        // SAFETY: forwarded from the caller.
+        let (key, iv, in_out) =
+            unsafe { (handle(key), input(iv, iv_len), output(in_out, in_out_len)) };
+        let iv = cipher::CbcIv::assume_unpredictable(*block(iv)?);
+        let padded_len = match pad {
+            0 => Some(len),
+            _ => (len / 16 + 1).checked_mul(16),
+        }
+        .filter(|&padded_len| padded_len <= in_out_len)
+        .ok_or(Misuse("no room for the plaintext and padding"))?;
+        if pad == 0 {
+            key.encrypt_blocks(iv, &mut in_out[..len])?;
+        } else {
+            key.encrypt(iv, &mut Room { buf: in_out, len });
+        }
+        Ok(padded_len)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_aes_cbc_decrypting_key_new(
+    algorithm: u32,
+    key: *const u8,
+    key_len: usize,
+    out: *mut *mut cipher::AesCbcDecryptingKey,
+) -> isize {
+    run(|| {
+        let algorithm = cipher_algorithm(algorithm)?;
+        // SAFETY: forwarded from the caller.
+        let key = cipher::AesCbcDecryptingKey::new(algorithm, unsafe { input(key, key_len) })?;
+        // SAFETY: forwarded from the caller.
+        Ok(unsafe { store(out, key) })
+    })
+}
+
+/// Decrypts `in_out` in place under `iv`, checking and removing its PKCS#7
+/// padding when `pad` is nonzero, and returns the plaintext's length.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_aes_cbc_decrypt(
+    key: *const cipher::AesCbcDecryptingKey,
+    iv: *const u8,
+    iv_len: usize,
+    pad: u32,
+    in_out: *mut u8,
+    in_out_len: usize,
+) -> isize {
+    run(|| {
+        // SAFETY: forwarded from the caller.
+        let (key, iv, in_out) =
+            unsafe { (handle(key), input(iv, iv_len), output(in_out, in_out_len)) };
+        let iv = block(iv)?;
+        if pad == 0 {
+            key.decrypt_blocks(iv, in_out)?;
+            return Ok(in_out_len);
+        }
+        Ok(key.decrypt(iv, in_out)?.len())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_aes_ctr_new(
+    algorithm: u32,
+    key: *const u8,
+    key_len: usize,
+    counter_bits: u32,
+    out: *mut *mut cipher::AesCtr,
+) -> isize {
+    run(|| {
+        let algorithm = cipher_algorithm(algorithm)?;
+        // rind refuses a width over 128 as wrong, so one over 255 is too.
+        let counter_bits = u8::try_from(counter_bits).map_err(|_| Error::WrongLength)?;
+        // SAFETY: forwarded from the caller.
+        let key = cipher::AesCtr::new(algorithm, unsafe { input(key, key_len) }, counter_bits)?;
+        // SAFETY: forwarded from the caller.
+        Ok(unsafe { store(out, key) })
+    })
+}
+
+/// XORs the keystream from `counter_block` into `in_out`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_aes_ctr_apply_keystream(
+    key: *const cipher::AesCtr,
+    counter_block: *const u8,
+    counter_block_len: usize,
+    in_out: *mut u8,
+    in_out_len: usize,
+) -> isize {
+    run(|| {
+        // SAFETY: forwarded from the caller.
+        let (key, counter_block, in_out) = unsafe {
+            (
+                handle(key),
+                input(counter_block, counter_block_len),
+                output(in_out, in_out_len),
+            )
+        };
+        key.apply_keystream(block(counter_block)?, in_out)?;
+        Ok(in_out_len)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_chacha20_new(
+    key: *const u8,
+    key_len: usize,
+    out: *mut *mut cipher::ChaCha20,
+) -> isize {
+    run(|| {
+        // SAFETY: forwarded from the caller.
+        let key: &[u8; 32] = unsafe { input(key, key_len) }
+            .try_into()
+            .map_err(|_| Error::WrongLength)?;
+        // SAFETY: forwarded from the caller.
+        Ok(unsafe { store(out, cipher::ChaCha20::new(key)) })
+    })
+}
+
+/// XORs the keystream for `nonce`, from block `counter`, into `in_out`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_dart_chacha20_apply_keystream(
+    key: *const cipher::ChaCha20,
+    nonce: *const u8,
+    nonce_len: usize,
+    counter: u32,
+    in_out: *mut u8,
+    in_out_len: usize,
+) -> isize {
+    run(|| {
+        // SAFETY: forwarded from the caller.
+        let (key, nonce, in_out) = unsafe {
+            (
+                handle(key),
+                input(nonce, nonce_len),
+                output(in_out, in_out_len),
+            )
+        };
+        let nonce = nonce.try_into().map_err(|_| Error::WrongLength)?;
+        key.apply_keystream(nonce, counter, in_out)?;
+        Ok(in_out_len)
+    })
 }
 
 // --- Digests ---

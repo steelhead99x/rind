@@ -196,10 +196,10 @@ for module in "${selected[@]}"; do
         check:rs)
             # The tests read these vectors, and otherwise fail partway through.
             # s2n-bignum only feeds admin/parse-asm, so it is not required.
-            unfetched=$(git submodule status -- thirdparty/cavp thirdparty/cctv thirdparty/wycheproof | sed -n 's/^-[0-9a-f]* //p')
-            if [[ -n "$unfetched" ]]; then
-                echo "error: test vectors not checked out; run: git submodule update --init ${unfetched//$'\n'/ }" >&2
-                exit 1
+            # Only uninitialized ones, so a local submodule bump stays put.
+            mapfile -t unfetched < <(git submodule status -- thirdparty/cavp thirdparty/cctv thirdparty/wycheproof | sed -n 's/^-[0-9a-f]* //p')
+            if ((${#unfetched[@]} > 0)); then
+                git submodule update --init --depth 1 -- "${unfetched[@]}"
             fi
             mapfile -t packages < <(sh/select.sh "$changed" "$all")
             cargo fmt --all --check
@@ -342,6 +342,11 @@ for module in "${selected[@]}"; do
         fix:patch) cargo fmt --manifest-path patch/fixture/Cargo.toml ;;
         check:gh)
             actionlint
+            # See queue-build.yml: main's copy runs against every group's tree.
+            if grep -nE '^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]*\./' .github/workflows/queue-build.yml; then
+                echo "error: queue-build.yml must use no local action; put the setup in \`just ci\`" >&2
+                exit 1
+            fi
             sh/alert.sh check
             sh/pins.sh
             ;;

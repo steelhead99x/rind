@@ -4,7 +4,9 @@ name: Queue build
 # queue.yml calls it. Once queue.yml calls it at main and the rind-queue runner
 # group admits only this workflow at refs/heads/main, no other workflow can
 # reach the runner, an approved fork run's included; a PR's edit to this file
-# then runs only after it lands.
+# then runs only after it lands. For the same reason it uses no local action:
+# main's copy runs against every group's tree, so a PR that moved or deleted one
+# could not land. The tree's own setup belongs in `just ci`.
 on:
   workflow_call:
 
@@ -28,6 +30,5 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: ./.github/actions/vectors
       - name: Check and test the merge group
         run: nix develop --command quest gate just ci "$BASE"

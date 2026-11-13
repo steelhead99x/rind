@@ -38,14 +38,14 @@ final class RindCryptography extends Cryptography {
     required MacAlgorithm macAlgorithm,
     PaddingAlgorithm paddingAlgorithm = PaddingAlgorithm.pkcs7,
     int secretKeyLength = 32,
-  }) => throw _unsupported('AES-CBC');
+  }) => _AesCbc(macAlgorithm, paddingAlgorithm, secretKeyLength, _random);
 
   @override
   AesCtr aesCtr({
     required MacAlgorithm macAlgorithm,
     int secretKeyLength = 32,
     int counterBits = 64,
-  }) => throw _unsupported('AES-CTR');
+  }) => _AesCtr(macAlgorithm, secretKeyLength, counterBits, _random);
 
   @override
   AesGcm aesGcm({int secretKeyLength = 32, int nonceLength = 12}) =>
@@ -69,7 +69,9 @@ final class RindCryptography extends Cryptography {
 
   @override
   Chacha20 chacha20({required MacAlgorithm macAlgorithm}) =>
-      throw _unsupported('ChaCha20 without Poly1305');
+      macAlgorithm is DartChacha20Poly1305AeadMacAlgorithm
+      ? _Chacha20Poly1305(_random)
+      : _Chacha20(macAlgorithm, _random);
 
   @override
   Chacha20 chacha20Poly1305Aead() => _Chacha20Poly1305(_random);
