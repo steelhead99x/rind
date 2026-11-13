@@ -262,7 +262,10 @@ fn report_states_what_is_not_measured() {
     assert!(md.contains("| X25519 | 30.00 µs ✓ | - | 33.00 µs ✓ | 300.00 µs |"));
 }
 
+// It runs `admin/bench-report` under python3, which a workspace `cargo test`
+// cannot count on, as on Windows, so `sh/bench-parity.sh` runs it.
 #[test]
+#[ignore = "needs python3 and admin/bench-report; sh/bench-parity.sh runs it"]
 fn host_script_matches_python() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     let py = Command::new("python3")
@@ -421,11 +424,14 @@ fn write_run(dir: &std::path::Path, sha256: f64, chacha: f64, avx512: bool) {
     .unwrap();
 }
 
-#[test]
-fn json_ensure_ascii_matches_python_and_the_fixture() {
-    let model = "Apple M4 — café";
-    let note = "DIT ~30 µs; shield ✓; snowman ☃; emoji 😀; line\nbreak; quote\"; back\\slash; bell\u{0007}; del\u{007f}";
-    let dumped = crate::run::J::Object(vec![
+const NON_ASCII_MODEL: &str = "Apple M4 — café";
+const NON_ASCII_NOTE: &str = "DIT ~30 µs; shield ✓; snowman ☃; emoji 😀; line\nbreak; quote\"; back\\slash; bell\u{0007}; del\u{007f}";
+
+/// A run record holding the characters `json.dumps` escapes, as `run`
+/// writes it.
+fn non_ascii_dump() -> String {
+    let (model, note) = (NON_ASCII_MODEL, NON_ASCII_NOTE);
+    crate::run::J::Object(vec![
         ("schema".into(), crate::run::J::Int(1)),
         ("host".into(), crate::run::J::Str("kixtop".into())),
         (
@@ -446,10 +452,25 @@ fn json_ensure_ascii_matches_python_and_the_fixture() {
             ]),
         ),
     ])
-    .dump(0);
-    let fixture = include_str!("../tests/fixtures/non-ascii.json");
-    assert_eq!(dumped, fixture, "committed fixture");
+    .dump(0)
+}
 
+#[test]
+fn json_ensure_ascii_matches_the_fixture() {
+    // A checkout that converts line endings, as Git on Windows does by
+    // default, has CRLF in the fixture where the encoder writes LF.
+    let fixture = include_str!("../tests/fixtures/non-ascii.json").replace("\r\n", "\n");
+    assert_eq!(non_ascii_dump(), fixture, "committed fixture");
+}
+
+// The fixture above is a `json.dumps` of the same values; this re-runs it
+// under python3, which a workspace `cargo test` cannot count on, so
+// `sh/bench-parity.sh` runs it.
+#[test]
+#[ignore = "needs python3; sh/bench-parity.sh runs it"]
+fn json_ensure_ascii_matches_python() {
+    let (model, note) = (NON_ASCII_MODEL, NON_ASCII_NOTE);
+    let dumped = non_ascii_dump();
     let spec =
         serde_json::to_vec(&json!({"model": model, "note": note, "tags": ["µ", "×"]})).unwrap();
     let py = Command::new("python3")
