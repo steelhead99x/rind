@@ -229,3 +229,358 @@ final class _Xchacha20Poly1305 extends Xchacha20 {
     );
   }
 }
+
+/// The AES key size of a [secretKeyLength]-byte key.
+rind.CipherAlgorithm _aes(int secretKeyLength) => switch (secretKeyLength) {
+  16 => rind.CipherAlgorithm.aes128,
+  24 => rind.CipherAlgorithm.aes192,
+  32 => rind.CipherAlgorithm.aes256,
+  _ => throw ArgumentError.value(
+    secretKeyLength,
+    'secretKeyLength',
+    'Must be 16, 24, or 32',
+  ),
+};
+
+/// [secretKey]'s bytes, once the package's own checks of it and the other
+/// parameters pass for [cipher].
+Future<Uint8List> _checkedKey(
+  Cipher cipher,
+  SecretKey secretKey, {
+  required int length,
+  required List<int> nonce,
+  required List<int> aad,
+  int keyStreamIndex = 0,
+}) async {
+  if (keyStreamIndex < 0) {
+    throw ArgumentError.value(keyStreamIndex, 'keyStreamIndex');
+  }
+  final data = await secretKey.extract();
+  cipher.checkParameters(
+    length: length,
+    secretKey: data,
+    nonceLength: nonce.length,
+    aadLength: aad.length,
+    keyStreamIndex: keyStreamIndex,
+  );
+  return _bytes(data.bytes);
+}
+
+/// The package's MAC of [cipherText] as the [SecretBox] it seals.
+Future<SecretBox> _boxed(
+  Cipher cipher,
+  Uint8List cipherText,
+  SecretKey secretKey,
+  List<int> nonce,
+  List<int> aad,
+) async {
+  final mac = await cipher.macAlgorithm.calculateMac(
+    cipherText,
+    secretKey: secretKey,
+    nonce: nonce,
+    aad: aad,
+  );
+  return SecretBox(cipherText, nonce: nonce, mac: mac);
+}
+
+/// [input] XORed with a keystream of [blockLength]-byte blocks from byte
+/// [keyStreamIndex], where [apply] XORs the keystream from a block's start.
+Uint8List _xorFrom(
+  int blockLength,
+  int keyStreamIndex,
+  List<int> input,
+  Uint8List Function(int block, Uint8List data) apply,
+) {
+  final skip = keyStreamIndex % blockLength;
+  final data = Uint8List(skip + input.length)..setAll(skip, input);
+  // A copy, not a view: the skipped prefix holds raw keystream.
+  return apply(keyStreamIndex ~/ blockLength, data).sublist(skip);
+}
+
+/// AES-CBC with the package's MAC over its ciphertext, as `DartAesCbc`
+/// composes them.
+final class _AesCbc extends AesCbc {
+  _AesCbc(
+    this.macAlgorithm,
+    this.paddingAlgorithm,
+    this.secretKeyLength,
+    Random? random,
+  ) : _algorithm = _aes(secretKeyLength),
+      super.constructor(random: random);
+
+  @override
+  final MacAlgorithm macAlgorithm;
+
+  @override
+  final PaddingAlgorithm paddingAlgorithm;
+
+  @override
+  final int secretKeyLength;
+
+  final rind.CipherAlgorithm _algorithm;
+
+  // rind pads with PKCS#7 itself, and checks it in constant time; any other
+  // padding is the package's, around rind's unpadded blocks.
+  bool get _pkcs7 => identical(paddingAlgorithm, PaddingAlgorithm.pkcs7);
+
+  @override
+  Future<SecretBox> encrypt(
+    List<int> clearText, {
+    required SecretKey secretKey,
+    List<int>? nonce,
+    List<int> aad = const <int>[],
+    Uint8List? possibleBuffer,
+  }) async {
+    nonce ??= newNonce();
+    final key = rind.AesCbcEncryptingKey(
+      _algorithm,
+      await _checkedKey(
+        this,
+        secretKey,
+        length: clearText.length,
+        nonce: nonce,
+        // DartAesCbc leaves AAD to the MAC, which MacAlgorithm.empty ignores.
+        aad: macAlgorithm.supportsAad ? aad : const <int>[],
+      ),
+    );
+    final iv = rind.CbcIv.assumeUnpredictable(_bytes(nonce));
+    if (_pkcs7) {
+      return _boxed(
+        this,
+        key.encrypt(iv, _bytes(clearText)),
+        secretKey,
+        nonce,
+        aad,
+      );
+    }
+    const blockLength = AesCbc.blockLengthInBytes;
+    final padded = Uint8List(
+      clearText.length +
+          paddingAlgorithm.paddingLength(blockLength, clearText.length),
+    )..setAll(0, clearText);
+    paddingAlgorithm.setBlockPadding(blockLength, padded, clearText.length);
+    return _boxed(this, key.encryptBlocks(iv, padded), secretKey, nonce, aad);
+  }
+
+  @override
+  Future<List<int>> decrypt(
+    SecretBox secretBox, {
+    required SecretKey secretKey,
+    List<int> aad = const <int>[],
+    Uint8List? possibleBuffer,
+  }) async {
+    final cipherText = _bytes(secretBox.cipherText);
+    final key = rind.AesCbcDecryptingKey(
+      _algorithm,
+      await _checkedKey(
+        this,
+        secretKey,
+        length: cipherText.length,
+        nonce: secretBox.nonce,
+        // DartAesCbc leaves AAD to the MAC, which MacAlgorithm.empty ignores.
+        aad: macAlgorithm.supportsAad ? aad : const <int>[],
+      ),
+    );
+    // Before decrypting, so that a forged ciphertext never reaches the
+    // padding check.
+    await secretBox.checkMac(
+      macAlgorithm: macAlgorithm,
+      secretKey: secretKey,
+      aad: aad,
+    );
+    const blockLength = AesCbc.blockLengthInBytes;
+    if (cipherText.length % blockLength != 0) {
+      throw ArgumentError.value(
+        secretBox,
+        'secretBox',
+        'Invalid cipherText length: ${cipherText.length}',
+      );
+    }
+    final iv = _bytes(secretBox.nonce);
+    if (_pkcs7) {
+      try {
+        return key.decrypt(iv, cipherText);
+      } on rind.RindException catch (e) {
+        if (e.error == rind.RindError.decryptFailed) {
+          throw SecretBoxPaddingError();
+        }
+        rethrow;
+      }
+    }
+    final clearText = key.decryptBlocks(iv, cipherText);
+    final padding = paddingAlgorithm.getBlockPadding(blockLength, clearText);
+    if (padding < 0) throw SecretBoxPaddingError();
+    return Uint8List.sublistView(clearText, 0, clearText.length - padding);
+  }
+}
+
+/// AES-CTR with the package's MAC over its ciphertext, as `DartAesCtr`
+/// composes them.
+///
+/// It counts over the whole 16-byte counter block, whatever [counterBits]
+/// says, as `DartAesCtr` does, so that their ciphertexts match.
+final class _AesCtr extends AesCtr {
+  _AesCtr(
+    this.macAlgorithm,
+    this.secretKeyLength,
+    this.counterBits,
+    Random? random,
+  ) : _algorithm = _aes(secretKeyLength),
+      super.constructor(random: random);
+
+  @override
+  final MacAlgorithm macAlgorithm;
+
+  @override
+  final int secretKeyLength;
+
+  @override
+  final int counterBits;
+
+  final rind.CipherAlgorithm _algorithm;
+
+  // Takes a nonce of up to 16 bytes and zero fills the rest of the counter
+  // block, as the package does.
+  Uint8List _xor(
+    Uint8List key,
+    List<int> nonce,
+    int keyStreamIndex,
+    List<int> input,
+  ) {
+    if (nonce.length > 16) {
+      throw ArgumentError.value(nonce, 'nonce', 'Must be at most 16 bytes');
+    }
+    final ctr = rind.AesCtr(_algorithm, key, 128);
+    return _xorFrom(16, keyStreamIndex, input, (block, data) {
+      final counterBlock = Uint8List(16)..setAll(0, nonce);
+      for (var i = 15; i >= 0 && block != 0; i--) {
+        block += counterBlock[i];
+        counterBlock[i] = block & 0xff;
+        block >>= 8;
+      }
+      return ctr.applyKeystream(counterBlock, data);
+    });
+  }
+
+  @override
+  Future<SecretBox> encrypt(
+    List<int> clearText, {
+    required SecretKey secretKey,
+    List<int>? nonce,
+    List<int> aad = const <int>[],
+    int keyStreamIndex = 0,
+    Uint8List? possibleBuffer,
+  }) async {
+    nonce ??= newNonce();
+    final key = await _checkedKey(
+      this,
+      secretKey,
+      length: clearText.length,
+      nonce: nonce,
+      aad: aad,
+      keyStreamIndex: keyStreamIndex,
+    );
+    final cipherText = _xor(key, nonce, keyStreamIndex, clearText);
+    return _boxed(this, cipherText, secretKey, nonce, aad);
+  }
+
+  @override
+  Future<List<int>> decrypt(
+    SecretBox secretBox, {
+    required SecretKey secretKey,
+    List<int> aad = const <int>[],
+    int keyStreamIndex = 0,
+    Uint8List? possibleBuffer,
+  }) async {
+    final key = await _checkedKey(
+      this,
+      secretKey,
+      length: secretBox.cipherText.length,
+      nonce: secretBox.nonce,
+      aad: aad,
+      keyStreamIndex: keyStreamIndex,
+    );
+    await secretBox.checkMac(
+      macAlgorithm: macAlgorithm,
+      secretKey: secretKey,
+      aad: aad,
+    );
+    return _xor(key, secretBox.nonce, keyStreamIndex, secretBox.cipherText);
+  }
+}
+
+/// ChaCha20 with the package's MAC over its ciphertext, as `DartChacha20`
+/// composes them, for a MAC that uses none of the keystream. Poly1305 in
+/// ChaCha20-Poly1305 uses its first block, and is [_Chacha20Poly1305].
+final class _Chacha20 extends Chacha20 {
+  _Chacha20(this.macAlgorithm, Random? random)
+    : super.constructor(random: random) {
+    if (macAlgorithm.keyStreamUsed != 0) {
+      throw _unsupported('ChaCha20 with $macAlgorithm');
+    }
+  }
+
+  @override
+  final MacAlgorithm macAlgorithm;
+
+  static Uint8List _xor(
+    Uint8List key,
+    List<int> nonce,
+    int keyStreamIndex,
+    List<int> input,
+  ) {
+    final chacha = rind.ChaCha20(key);
+    return _xorFrom(
+      64,
+      keyStreamIndex,
+      input,
+      (block, data) => chacha.applyKeystream(_bytes(nonce), block, data),
+    );
+  }
+
+  @override
+  Future<SecretBox> encrypt(
+    List<int> clearText, {
+    required SecretKey secretKey,
+    List<int>? nonce,
+    List<int> aad = const <int>[],
+    int keyStreamIndex = 0,
+    Uint8List? possibleBuffer,
+  }) async {
+    nonce ??= newNonce();
+    final key = await _checkedKey(
+      this,
+      secretKey,
+      length: clearText.length,
+      nonce: nonce,
+      aad: aad,
+      keyStreamIndex: keyStreamIndex,
+    );
+    final cipherText = _xor(key, nonce, keyStreamIndex, clearText);
+    return _boxed(this, cipherText, secretKey, nonce, aad);
+  }
+
+  @override
+  Future<List<int>> decrypt(
+    SecretBox secretBox, {
+    required SecretKey secretKey,
+    List<int> aad = const <int>[],
+    int keyStreamIndex = 0,
+    Uint8List? possibleBuffer,
+  }) async {
+    final key = await _checkedKey(
+      this,
+      secretKey,
+      length: secretBox.cipherText.length,
+      nonce: secretBox.nonce,
+      aad: aad,
+      keyStreamIndex: keyStreamIndex,
+    );
+    await secretBox.checkMac(
+      macAlgorithm: macAlgorithm,
+      secretKey: secretKey,
+      aad: aad,
+    );
+    return _xor(key, secretBox.nonce, keyStreamIndex, secretBox.cipherText);
+  }
+}
