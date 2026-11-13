@@ -602,11 +602,12 @@ theorem sha1_hashSpec (hb : Sha1Blocks) :
     refine ⟨by rw [hd1]; rfl, ?_⟩
     rw [hd2, s_post, Array.val_to_slice, hr]
   finish_uses_long := fun m => by
-    simp only [high.hash.Sha1State.Insts.RindHighHashHashStateSha1Context.finish_uses_long]
+    -- SHA-1 keeps the trait default; Aeneas extracts
+    -- `HashState.finish_uses_long.default`, not a specialized instance lemma.
+    simp only [high.hash.HashState.finish_uses_long.default]
     step*
   finish_with_after_long := fun p s m hs hm => by
-    simp only [high.hash.Sha1State.Insts.RindHighHashHashStateSha1Context.finish_with_after_long]
-    try simp only [high.hash.HashState.finish_with_after_long.default]
+    simp only [high.hash.HashState.finish_with_after_long.default]
     simp only [high.hash.Sha1State.Insts.RindHighHashHashStateSha1Context.finish_with,
       high.hash.LegacySha1.Insts.RindHighHashHashSha1ContextSha1State.ALGORITHM, high.digest.SHA1]
     step with sha1_finish_with_spec hb p s m hs (by unfold maxInput at hm; omega) as ⟨r, hr⟩

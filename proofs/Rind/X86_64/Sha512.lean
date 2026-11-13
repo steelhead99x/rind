@@ -621,11 +621,12 @@ theorem sha512_hashSpec (h : RunsSha512) :
     refine ⟨by rw [hd1]; rfl, ?_⟩
     rw [hd2, hsl, Array.val_to_slice, hr, sha512Bytes, ofBv_bv, sha512]
   finish_uses_long := fun m => by
-    simp only [high.hash.Sha512State.Insts.RindHighHashHashStateSha512Context.finish_uses_long]
+    -- SHA-512 keeps the trait default; Aeneas extracts
+    -- `HashState.finish_uses_long.default`, not a specialized instance lemma.
+    simp only [high.hash.HashState.finish_uses_long.default]
     step*
   finish_with_after_long := fun p s m hs hm => by
-    simp only [high.hash.Sha512State.Insts.RindHighHashHashStateSha512Context.finish_with_after_long]
-    try simp only [high.hash.HashState.finish_with_after_long.default]
+    simp only [high.hash.HashState.finish_with_after_long.default]
     simp only [high.hash.Sha512State.Insts.RindHighHashHashStateSha512Context.finish_with,
       high.hash.Sha512.Insts.RindHighHashHashSha512ContextSha512State.ALGORITHM, high.digest.SHA512]
     step with absorbed_finish_with_spec h _ p s m hs as ⟨r, hr⟩
@@ -691,11 +692,12 @@ theorem sha384_hashSpec (h : RunsSha512) :
     refine ⟨by rw [hd1]; rfl, ?_⟩
     rw [hd2, hsl, Array.val_to_slice, ht, hr, sha384Bytes, ofBv_bv, sha384]
   finish_uses_long := fun m => by
-    simp only [high.hash.Sha384State.Insts.RindHighHashHashStateSha384Context.finish_uses_long]
+    -- SHA-384 keeps the trait default; Aeneas extracts
+    -- `HashState.finish_uses_long.default`, not a specialized instance lemma.
+    simp only [high.hash.HashState.finish_uses_long.default]
     step*
   finish_with_after_long := fun p s m hs hm => by
-    simp only [high.hash.Sha384State.Insts.RindHighHashHashStateSha384Context.finish_with_after_long]
-    try simp only [high.hash.HashState.finish_with_after_long.default]
+    simp only [high.hash.HashState.finish_with_after_long.default]
     simp only [high.hash.Sha384State.Insts.RindHighHashHashStateSha384Context.finish_with,
       high.hash.Sha384.Insts.RindHighHashHashSha384ContextSha384State.ALGORITHM, high.digest.SHA384]
     step with absorbed_finish_with_spec h _ p s m hs as ⟨r, hr⟩
