@@ -6,7 +6,12 @@
 //! aarch64 or 32-bit ARM target gets the portable backend, as does every
 //! other architecture. The 32-bit ARM assembly is cut for ARMv7, so a target
 //! for an earlier core, such as ARMv6's `arm-unknown-linux-gnueabihf` or
-//! ARMv5TE's `arm-linux-androideabi`, gets the portable backend too.
+//! ARMv5TE's `arm-linux-androideabi`, gets the portable backend too, and so
+//! does a microcontroller (M-profile) target such as `thumbv7em-none-eabihf`,
+//! which has no ARM state or NEON for that assembly to run in. A bare-metal
+//! x86_64 or aarch64 target (`target_os = "none"`, such as
+//! `x86_64-unknown-none`) gets the portable backend as well: those backends
+//! detect optional CPU features through std, which such a target lacks.
 //! `--cfg rind_portable` forces it anywhere, so CI tests it on x86_64 without
 //! emulation; it is for testing, not for shipping.
 //!
@@ -38,9 +43,10 @@ fn main() {
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
     let forced = env::var_os("CARGO_CFG_RIND_PORTABLE").is_some();
+    let bare_metal = env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "none");
     let backend = match arch.as_str() {
-        "x86_64" | "aarch64" if little && !forced => arch.as_str(),
-        "arm" if little && !forced && armv7_or_later() => "arm",
+        "x86_64" | "aarch64" if little && !forced && !bare_metal => arch.as_str(),
+        "arm" if little && !forced && armv7_or_later() && !m_profile() => "arm",
         _ => "portable",
     };
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
@@ -91,4 +97,23 @@ fn armv7_or_later() -> bool {
         .unwrap_or_default();
     let digits = version.bytes().take_while(u8::is_ascii_digit).count();
     version[..digits].parse::<u32>().is_ok_and(|v| v >= 7)
+}
+
+/// Whether the 32-bit ARM target is for a microcontroller (M-profile) core,
+/// as in `thumbv7m-none-eabi`, `thumbv7em-none-eabihf`,
+/// `thumbv8m.main-none-eabihf` or `thumbv8.1m.main-none-eabihf`: Thumb only,
+/// without NEON.
+fn m_profile() -> bool {
+    let target = env::var("TARGET").expect("cargo sets the target");
+    let arch = target.split('-').next().unwrap_or_default();
+    let Some(version) = arch.strip_prefix("thumbv") else {
+        return false;
+    };
+    fn skip_digits(s: &str) -> &str {
+        s.trim_start_matches(|c: char| c.is_ascii_digit())
+    }
+    // The major version, then an optional minor one, as in v8.1m.
+    let rest = skip_digits(version);
+    let rest = rest.strip_prefix('.').map_or(rest, skip_digits);
+    rest.starts_with('m') || rest.starts_with("em")
 }
