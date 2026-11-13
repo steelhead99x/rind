@@ -34,6 +34,9 @@ void main() {
     for (final algorithm in <Object>[
       AesGcm.with256bits(),
       Chacha20.poly1305Aead(),
+      AesCbc.with256bits(macAlgorithm: Hmac.sha256()),
+      AesCtr.with256bits(macAlgorithm: Hmac.sha256()),
+      Chacha20(macAlgorithm: Hmac.sha256()),
       Sha256(),
       Hmac.sha256(),
       Ed25519(),
@@ -46,8 +49,6 @@ void main() {
   test('what rind lacks throws where it is constructed', () {
     final hmac = _rind.hmac(_rind.sha256());
     final constructors = <Object Function()>[
-      () => _rind.aesCbc(macAlgorithm: hmac),
-      () => _rind.aesCtr(macAlgorithm: hmac),
       () => _rind.aesGcm(nonceLength: 16),
       () => _rind.argon2id(
         memory: 1,
@@ -57,7 +58,6 @@ void main() {
       ),
       () => _rind.blake2b(),
       () => _rind.blake2s(),
-      () => _rind.chacha20(macAlgorithm: hmac),
       () => _rind.hchacha20(),
       () => _rind.poly1305(),
       () => _rind.sha224(),
@@ -401,6 +401,238 @@ void main() {
           secretKey: secretKey,
         ),
         _throwsAuthentication,
+      );
+    });
+  });
+
+  group('cipher with a MAC', () {
+    final rindHmac = _rind.hmac(_rind.sha256());
+    final dartHmac = DartHmac.sha256();
+    final pairs = <Cipher, Cipher>{
+      for (final length in [16, 24, 32]) ...{
+        _rind.aesCbc(macAlgorithm: rindHmac, secretKeyLength: length):
+            DartAesCbc(macAlgorithm: dartHmac, secretKeyLength: length),
+        _rind.aesCtr(macAlgorithm: rindHmac, secretKeyLength: length):
+            DartAesCtr(macAlgorithm: dartHmac, secretKeyLength: length),
+      },
+      _rind.aesCbc(
+        macAlgorithm: MacAlgorithm.empty,
+        paddingAlgorithm: PaddingAlgorithm.zero,
+      ): const DartAesCbc(
+        macAlgorithm: MacAlgorithm.empty,
+        paddingAlgorithm: PaddingAlgorithm.zero,
+      ),
+      _rind.aesCtr(macAlgorithm: MacAlgorithm.empty): const DartAesCtr(
+        macAlgorithm: MacAlgorithm.empty,
+      ),
+      _rind.chacha20(macAlgorithm: rindHmac): DartChacha20(
+        macAlgorithm: dartHmac,
+      ),
+      _rind.chacha20(macAlgorithm: MacAlgorithm.empty): DartChacha20(
+        macAlgorithm: MacAlgorithm.empty,
+      ),
+    };
+
+    test('matches the Dart implementation both ways', () async {
+      for (final MapEntry(key: cipher, value: dart) in pairs.entries) {
+        expect(cipher, dart);
+        final secretKey = await cipher.newSecretKey();
+        for (final length in _lengths) {
+          final clearText = _bytes(length);
+          final nonce = cipher.newNonce();
+          final box = await cipher.encrypt(
+            clearText,
+            secretKey: secretKey,
+            nonce: nonce,
+          );
+          final dartBox = await dart.encrypt(
+            clearText,
+            secretKey: secretKey,
+            nonce: nonce,
+          );
+          expect(box, dartBox, reason: '$cipher, $length bytes');
+          final decrypted = await cipher.decrypt(box, secretKey: secretKey);
+          // Zero padding is not removed, as the package's is not.
+          expect(decrypted.take(length), clearText);
+          expect(decrypted, await dart.decrypt(box, secretKey: secretKey));
+        }
+      }
+    });
+
+    test(
+      'takes the stream ciphers\' key stream index and short nonces',
+      () async {
+        final ciphers = <StreamingCipher, StreamingCipher>{
+          _rind.aesCtr(macAlgorithm: rindHmac): DartAesCtr(
+            macAlgorithm: dartHmac,
+          ),
+          _rind.chacha20(macAlgorithm: rindHmac): DartChacha20(
+            macAlgorithm: dartHmac,
+          ),
+        };
+        for (final MapEntry(key: cipher, value: dart) in ciphers.entries) {
+          final secretKey = await cipher.newSecretKey();
+          final nonces = [
+            cipher.newNonce(),
+            // A counter that carries across the whole block, and wraps.
+            if (cipher is AesCtr) ...[
+              List.filled(16, 0xff),
+              List.filled(12, 1),
+            ],
+          ];
+          for (final nonce in nonces) {
+            for (final keyStreamIndex in [0, 1, 17, 63, 64, 65, 1000]) {
+              final clearText = _bytes(200);
+              final box = await cipher.encrypt(
+                clearText,
+                secretKey: secretKey,
+                nonce: nonce,
+                keyStreamIndex: keyStreamIndex,
+              );
+              expect(
+                box,
+                await dart.encrypt(
+                  clearText,
+                  secretKey: secretKey,
+                  nonce: nonce,
+                  keyStreamIndex: keyStreamIndex,
+                ),
+                reason: '$cipher, $nonce, $keyStreamIndex',
+              );
+              expect(
+                await cipher.decrypt(
+                  box,
+                  secretKey: secretKey,
+                  keyStreamIndex: keyStreamIndex,
+                ),
+                clearText,
+              );
+            }
+          }
+        }
+      },
+    );
+
+    test('checks the MAC before decrypting', () async {
+      for (final cipher in [
+        _rind.aesCbc(macAlgorithm: rindHmac),
+        _rind.aesCtr(macAlgorithm: rindHmac),
+        _rind.chacha20(macAlgorithm: rindHmac),
+      ]) {
+        final secretKey = await cipher.newSecretKey();
+        final box = await cipher.encrypt(_bytes(20), secretKey: secretKey);
+        final tampered = [
+          SecretBox(
+            [...box.cipherText]..[0] ^= 1,
+            nonce: box.nonce,
+            mac: box.mac,
+          ),
+          // A ciphertext no padding fits, which the MAC refuses first.
+          SecretBox(_bytes(17), nonce: box.nonce, mac: box.mac),
+          SecretBox(box.cipherText, nonce: box.nonce, mac: Mac(_bytes(32))),
+          SecretBox(box.cipherText, nonce: box.nonce, mac: Mac.empty),
+        ];
+        for (final box in tampered) {
+          await expectLater(
+            cipher.decrypt(box, secretKey: secretKey),
+            _throwsAuthentication,
+          );
+        }
+      }
+    });
+
+    test('AES-CBC without a MAC ignores AAD, as the Dart one does', () async {
+      final cipher = _rind.aesCbc(macAlgorithm: MacAlgorithm.empty);
+      const dart = DartAesCbc(macAlgorithm: MacAlgorithm.empty);
+      final secretKey = await cipher.newSecretKey();
+      final nonce = cipher.newNonce();
+      final box = await cipher.encrypt(
+        [1, 2, 3],
+        secretKey: secretKey,
+        nonce: nonce,
+        aad: [1],
+      );
+      expect(
+        box,
+        await dart.encrypt(
+          [1, 2, 3],
+          secretKey: secretKey,
+          nonce: nonce,
+          aad: [1],
+        ),
+      );
+      expect(await cipher.decrypt(box, secretKey: secretKey, aad: [2]), [
+        1,
+        2,
+        3,
+      ]);
+    });
+
+    test('AES-CBC without a MAC refuses malformed padding', () async {
+      final cipher = _rind.aesCbc(macAlgorithm: MacAlgorithm.empty);
+      final secretKey = await cipher.newSecretKey();
+      final nonce = cipher.newNonce();
+      // A block of zeros, whose padding byte decrypts to anything.
+      final blocks = await _rind
+          .aesCbc(
+            macAlgorithm: MacAlgorithm.empty,
+            paddingAlgorithm: PaddingAlgorithm.zero,
+          )
+          .encrypt(Uint8List(16), secretKey: secretKey, nonce: nonce);
+      for (final cipherText in [<int>[], blocks.cipherText]) {
+        await expectLater(
+          cipher.decrypt(
+            SecretBox(cipherText, nonce: nonce, mac: Mac.empty),
+            secretKey: secretKey,
+          ),
+          throwsA(isA<SecretBoxPaddingError>()),
+        );
+      }
+      await expectLater(
+        cipher.decrypt(
+          SecretBox(_bytes(17), nonce: nonce, mac: Mac.empty),
+          secretKey: secretKey,
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('refuses wrong key, nonce, and AAD', () async {
+      for (final cipher in [
+        _rind.aesCbc(macAlgorithm: rindHmac),
+        _rind.aesCtr(macAlgorithm: rindHmac),
+        _rind.chacha20(macAlgorithm: rindHmac),
+      ]) {
+        final secretKey = await cipher.newSecretKey();
+        final calls = <Future<Object?> Function()>[
+          () => cipher.encrypt([1], secretKey: SecretKey(_bytes(20))),
+          () => cipher.encrypt(
+            [1],
+            secretKey: secretKey,
+            nonce: _bytes(cipher is AesCtr ? 17 : 8),
+          ),
+          () => cipher.encrypt([1], secretKey: secretKey, aad: [1]),
+          () => cipher.decrypt(
+            SecretBox([1], nonce: cipher.newNonce(), mac: Mac.empty),
+            secretKey: SecretKey(_bytes(20)),
+          ),
+        ];
+        for (final call in calls) {
+          await expectLater(call(), throwsArgumentError, reason: '$cipher');
+        }
+      }
+    });
+
+    test('refuses a MAC that uses the ChaCha20 keystream', () {
+      expect(
+        () => _rind.chacha20(macAlgorithm: const _KeyStreamMac()),
+        _throwsUnsupported,
+      );
+      expect(
+        _rind.chacha20(
+          macAlgorithm: const DartChacha20Poly1305AeadMacAlgorithm(),
+        ),
+        _rind.chacha20Poly1305Aead(),
       );
     });
   });
@@ -780,4 +1012,27 @@ void main() {
       );
     });
   });
+}
+
+/// A MAC that keys itself from the cipher's first keystream block, as
+/// Poly1305 in ChaCha20-Poly1305 does.
+final class _KeyStreamMac extends MacAlgorithm {
+  const _KeyStreamMac();
+
+  @override
+  int get keyStreamUsed => 64;
+
+  @override
+  int get macLength => 16;
+
+  @override
+  Future<Mac> calculateMac(
+    List<int> bytes, {
+    required SecretKey secretKey,
+    List<int> nonce = const <int>[],
+    List<int> aad = const <int>[],
+  }) => throw UnimplementedError();
+
+  @override
+  DartMacAlgorithm toSync() => throw UnimplementedError();
 }

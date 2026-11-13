@@ -1,5 +1,12 @@
 name = "rind"
 defaultTargets = ["Rind"]
+# Lake's artifact cache, which every checkout of the user on a host shares, so
+# a new worktree takes the dependencies and unchanged modules another already
+# fetched or built from it as hard links rather than unpacking or building
+# copies of its own. Restore every artifact, not just the `.ilean` files Lake
+# needs itself, since `lake env lean` reads `.olean` files from `.lake/build`.
+enableArtifactCache = true
+restoreAllArtifacts = true
 
 [[require]]
 name = "aeneas"

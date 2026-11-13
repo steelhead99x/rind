@@ -8,6 +8,8 @@ description = "aws-lc-rs 1.x's API backed by rind"
 categories = ["cryptography"]
 rust-version.workspace = true
 readme = "README.md"
+# aws-lc-rs's own tests and test vectors, under their own licenses.
+exclude = ["tests/aws-lc-rs"]
 
 # The aws-lc-rs version whose API this crate offers, which its own version
 # tracks (sh/adapter-versions.sh), since it implements aws-lc-rs rather than
@@ -52,3 +54,7 @@ hex = { version = "0.4", features = ["serde"] }
 proptest = "1.5.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[lints.rust]
+# aws-lc-rs's own tests (tests/aws-lc-rs) skip their slow cases under it.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(disable_slow_tests)"] }

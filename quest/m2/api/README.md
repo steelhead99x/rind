@@ -2,7 +2,7 @@
 
 ## Goal
 
-rind's public API steers callers away from the misuse and wasted work a 2026-11-08 security and performance audit found: chained HKDF expands written by hand, public keys recomputed on every call, caller-chosen AES-CBC IVs, and hazards nothing documents, and a startup CPU check every caller must make although it can no longer fail. Adapters change only to drop the workarounds they carry today.
+rind's public API steers callers away from the misuse and wasted work a 2026-11-08 security and performance audit found: chained HKDF expands written by hand, public keys recomputed on every call, caller-chosen AES-CBC IVs, and hazards nothing documents, and a startup CPU check every caller must make although it can no longer fail. Its modules also take one shape, so a caller who has learned one key type can guess the next one's constructors and accessors. Adapters change only to drop the workarounds they carry today.
 
 ## Plan
 
@@ -16,7 +16,11 @@ The audit checked every module of `rind` against AGENTS.md's rules and found not
   - Collapsing `constant_time::verify`'s `WrongLength` and `NotEqual` into one error. Matching only `NotEqual` is a contrived misuse, and every caller uses `?`.
   - Pinning the key's hash in `verify_digest` and `sign_digest`, as aws-lc-rs does (maintainer, 2026-11-09: ✅ leave it as documented; rejected: refuse a mismatched digest in 0.4). The digest's hash replacing the algorithm's is deliberate and documented, WebCrypto permits any hash with any curve, and the adapters that promise aws-lc-rs's or ring's behaviour add the check themselves.
 - Milestone: m2 ✅ (rejected: m1, m3). None of this blocks MoQ.
-- Releases, decided with the maintainer on 2026-11-09: one rind 0.4 that carries all three breaking changes, and a MoQ-side PR ready before the m0 adapter patch releases publish ✅ (rejected: the 0.4 quest alone, accepting that MoQ's build breaks until fixed; leaving both to release-plz). The third is the cached agreement keys, whose `public_key()` returns a borrow in [kixel-ai/rind#529](https://github.com/kixel-ai/rind/pull/529) though this epic planned them as additive. [rind 0.4 ships once](/quest/m2/api/release-0.4.md) holds the release.
+- Releases, decided with the maintainer on 2026-11-09: one rind 0.4 that carries all three breaking changes, and a MoQ-side PR ready before the adapter patch releases publish ✅ (rejected: the 0.4 quest alone, accepting that MoQ's build breaks until fixed; leaving both to release-plz). The third is the cached agreement keys, whose `public_key()` returns a borrow in [kixel-ai/rind#529](https://github.com/kixel-ai/rind/pull/529) though this epic planned them as additive. [rind 0.4 ships once](/quest/m2/api/release-0.4.md) holds the release.
+- Decided 2026-11-12 (maintainer, /quest-audit), after a second audit that read the modules side by side instead of one at a time. It found no misuse hazard, but the modules disagree with each other, and three adapters each carry their own HKDF-Expand:
+  - 0.4 waits for every breaking change planned by then ✅ (rejected: only ML-KEM and wiping, with the API fixes in 0.5; ship the first three as planned). [Its quest](/quest/m2/api/release-0.4.md) lists them.
+  - Shape: spike per-algorithm modules as a draft PR for the maintainer to accept or reject, and fold the naming fixes into whichever shape wins ✅ (rejected: keep today's modules and fix names only; commit to per-algorithm modules without a spike). [Its quest](/quest/m2/api/shape.md) has the findings.
+  - A record nonce: add `Nonce::from_sequence` ✅ (rejected: a typed key that owns the counter; leave MIGRATING.md's "no `NonceSequence`" as decided). [Its quest](/quest/m2/api/nonce-sequence.md) has the evidence, which is thinner than the interview said.
 - Dropped as not worth a quest:
   - Fixed buffers sized for RSA (`PublicKey` 3584 B, `encoding::Pkcs8` 4.8 KB, `Signature` 1032 B). They sit on no hot path, and fixed capacity is ARCHITECTURE.md's design.
   - `RandomizedNonceKey`'s `getrandom` call per seal. Its only consumer seals rustls tickets.
