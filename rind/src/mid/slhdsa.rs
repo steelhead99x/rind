@@ -31,7 +31,7 @@ use crate::low::{self, Entry, UpdateBlocks};
 use crate::mid::mldsa::Array;
 use crate::mid::rng::{RandomSource, SystemRandom};
 use crate::mid::sha2::{Sha256Context, Sha256State, Sha512Context, Sha512State};
-use crate::mid::sha3::{Shake256, shake256_x4};
+use crate::mid::sha3::{Shake256Sponge, shake256_x4};
 
 /// The largest `n`, the hash output length.
 const MAX_N: usize = 32;
@@ -425,7 +425,7 @@ fn hash_message<P: Params>(
     let m = digest_len::<P>();
     let mut digest = [0u8; MAX_M];
     if P::SHAKE {
-        Shake256::new(&[r, pk_seed, pk_root, prefix, message]).read(&mut digest[..m]);
+        shake256(&[r, pk_seed, pk_root, prefix, message], &mut digest[..m]);
     } else {
         // MGF1-SHA-X(R || PK.seed || SHA-X(R || PK.seed || PK.root || M), m)
         let (inner, len) = sha2::<P>(&[r, pk_seed, pk_root, prefix, message]);
@@ -445,6 +445,15 @@ fn hash_message<P: Params>(
     (digest, tree, leaf as u32)
 }
 
+/// SHAKE256 of `parts` in turn, filling `output`.
+fn shake256(parts: &[&[u8]], output: &mut [u8]) {
+    let mut sponge = Shake256Sponge::new();
+    for part in parts {
+        sponge.absorb(part);
+    }
+    sponge.finish().squeeze(output);
+}
+
 /// `PRF_msg(SK.prf, opt_rand, prefix || message)`: `R`, the randomiser.
 fn prf_msg<P: Params>(
     sk_prf: &[u8],
@@ -454,7 +463,7 @@ fn prf_msg<P: Params>(
 ) -> [u8; MAX_N] {
     let mut r = [0u8; MAX_N];
     if P::SHAKE {
-        Shake256::new(&[sk_prf, opt_rand, prefix, message]).read(&mut r[..P::N]);
+        shake256(&[sk_prf, opt_rand, prefix, message], &mut r[..P::N]);
     } else {
         // HMAC-SHA-X(SK.prf, opt_rand || prefix || message), whose key is
         // shorter than a block.
@@ -1067,7 +1076,7 @@ impl<P: Params> Hasher<P> {
             if let [input] = inputs {
                 // Verification's paths up the trees hash one lane at a
                 // time, which one state does with less to set up.
-                Shake256::new(&[pk_seed, &addrs[0].0, input]).read(&mut out[0][..P::N]);
+                shake256(&[pk_seed, &addrs[0].0, input], &mut out[0][..P::N]);
                 return;
             }
             let parts: [[&[u8]; 3]; 4] = core::array::from_fn(|j| {
