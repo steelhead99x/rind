@@ -229,7 +229,7 @@ mod tests {
     fn empty_dst() {
         tests::check_empty_dst(
             hash_to_curve(b"msg", b"").map(|_| ()),
-            hash_to_scalar(b"msg", b"").map(|_| ()),
+            hash_to_scalar(&[b"msg"], b"").map(|_| ()),
             None,
         );
     }
