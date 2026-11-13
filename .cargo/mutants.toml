@@ -291,7 +291,7 @@ exclude_re = [
   'rind/src/low/entry\.rs:\d+:\d+: replace - with / in <impl Drop for Entry>::drop$',
   'rind/src/low/entry\.rs:\d+:\d+: replace - with \+ in <impl Drop for Entry>::drop$',
   'rind/src/low/entry\.rs:64:\d+: replace Entry::assert_held with \(\)$',
-  'rind/src/low/generic/blockwise\.rs:154:24: replace \* with / in pad$',
+  'rind/src/low/generic/blockwise\.rs:138:24: replace \* with / in pad$',
   'rind/src/low/posint\.rs:150:\d+: replace PosInt<N>::debug with \(\)$',
   'rind/src/mid/rsa_priv/exponents\.rs:\d+:\d+: replace >= with < in Exponents::derive$',
   'rind/src/mid/rsa_priv/exponents\.rs:72:\d+: replace \* with \+ in Exponents::derive$',
