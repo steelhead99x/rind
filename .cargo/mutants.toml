@@ -169,7 +169,7 @@ exclude_re = [
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace <= with > in tagged_from$',
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace \+ with \* in tagged_from$',
   'rind/src/low/aarch64/bignum_copy_row_from_table_mux\.rs:\d+:\d+: replace match guard width\.is_multiple_of\(8\) with false in bignum_copy_row_from_table$',
-  'rind/src/low/aarch64/cpu\.rs:280:\d+: replace prefetch_ro with \(\)$',
+  'rind/src/low/aarch64/cpu\.rs:395:\d+: replace prefetch_ro with \(\)$',
   'rind/src/low/aarch64/mont\.rs:\d+:\d+: replace match guard k >= 2 with false in (mont_mul|mont_sqr)$',
   'rind/src/low/generic/order\.rs:\d+:\d+: replace (order -> Option<Order> with None|== with != in order)$',
   'rind/src/low/generic/blockwise\.rs:\d+:\d+: replace > with >= in Blockwise<N>::complete_blocks$',
@@ -237,9 +237,9 @@ exclude_re = [
   # denial row in `admin/mutants` denies alone, only in a release build,
   # which tests never are, or only off Linux.
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace && with \|\| in detect$',
-  'rind/src/low/aarch64/cpu\.rs:157:\d+: replace << with >>$',
-  'rind/src/low/aarch64/cpu\.rs:261:\d+: replace test_toggle -> bool with false$',
-  'rind/src/low/aarch64/cpu\.rs:261:\d+: replace test_toggle -> bool with true$',
+  'rind/src/low/aarch64/cpu\.rs:159:\d+: replace << with >>$',
+  'rind/src/low/aarch64/cpu\.rs:376:\d+: replace test_toggle -> bool with false$',
+  'rind/src/low/aarch64/cpu\.rs:376:\d+: replace test_toggle -> bool with true$',
   # The portable backend has no CPU state to save, so `leave_cpu_state`
   # ignores it.
   'rind/src/low/portable/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
