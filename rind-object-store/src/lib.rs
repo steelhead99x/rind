@@ -1,7 +1,7 @@
 //! <h1 align="center">rind-object-store</h1>
-//! <img width="40%" align="right" src="https://raw.githubusercontent.com/moq-dev/rind/main/admin/logo.png">
+//! <img width="40%" align="right" src="https://raw.githubusercontent.com/kixel-ai/rind/main/admin/logo.png">
 //!
-//! This crate provides a [`CryptoProvider`] for [object_store](https://github.com/apache/arrow-rs-object-store), backed by [rind](https://github.com/moq-dev/rind/), a fork of [Graviola](https://github.com/ctz/graviola/).
+//! This crate provides a [`CryptoProvider`] for [object_store](https://github.com/apache/arrow-rs-object-store), backed by [rind](https://github.com/kixel-ai/rind/), a fork of [Graviola](https://github.com/ctz/graviola/).
 //! It signs S3, Azure, and GCS requests.
 //!
 //! Build object_store with its `aws-base`, `azure-base`, or `gcp-base` features rather than `aws`, `azure`, or `gcp`, which also compile aws-lc-rs.

@@ -1,7 +1,7 @@
 //! <h1 align="center">rind-dimpl</h1>
-//! <img width="40%" align="right" src="https://raw.githubusercontent.com/moq-dev/rind/main/admin/logo.png">
+//! <img width="40%" align="right" src="https://raw.githubusercontent.com/kixel-ai/rind/main/admin/logo.png">
 //!
-//! This crate provides a [`CryptoProvider`] for [dimpl](https://github.com/algesten/dimpl), backed by [rind](https://github.com/moq-dev/rind/), a fork of [Graviola](https://github.com/ctz/graviola/).
+//! This crate provides a [`CryptoProvider`] for [dimpl](https://github.com/algesten/dimpl), backed by [rind](https://github.com/kixel-ai/rind/), a fork of [Graviola](https://github.com/ctz/graviola/).
 //!
 //! Build dimpl with `default-features = false`, since its default features compile aws-lc-rs.
 //! Then hand the provider to each config:

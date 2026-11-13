@@ -1,17 +1,12 @@
 name: miri
 
+# Nightly only. A Miri run takes hours, longer than a pull request should
+# wait, and a cancelled check blocks the merge queue. Run `just miri TARGET`
+# locally, or dispatch this workflow, to check a change before it lands.
 on:
   schedule:
     - cron: "0 18 * * *"
   workflow_dispatch:
-  pull_request:
-    branches: [main]
-    paths:
-      - rind/src/low/portable/**
-      - sh/miri.sh
-      - flake.nix
-      - flake.lock
-      - .github/workflows/miri.yml
 
 permissions:
   contents: read
