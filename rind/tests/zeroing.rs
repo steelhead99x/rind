@@ -153,6 +153,30 @@ fn ecdh() {
 }
 
 #[test]
+fn oprf() {
+    use rind::oprf::*;
+    for suite in [
+        &RISTRETTO255_SHA512,
+        &P256_SHA256,
+        &P384_SHA384,
+        &P521_SHA512,
+    ] {
+        let key = ServerKey::generate(suite).unwrap();
+        let (blind, _) = Blind::new(suite, b"input").unwrap();
+        check_zeroed_on_drop(Box::pin(key.evaluate(b"input").unwrap()));
+        check_zeroed_on_drop(Box::pin(key.to_bytes()));
+        check_zeroed_on_drop(Box::pin(blind));
+        check_zeroed_on_drop(Box::pin(key));
+
+        let key = voprf::ServerKey::generate(suite).unwrap();
+        let (blind, _) = voprf::Blind::new(suite, b"input").unwrap();
+        check_zeroed_on_drop(Box::pin(key.to_bytes()));
+        check_zeroed_on_drop(Box::pin(blind));
+        check_zeroed_on_drop(Box::pin(key));
+    }
+}
+
+#[test]
 fn vrf() {
     use rind::vrf::*;
     for algorithm in [&ECVRF_EDWARDS25519_SHA512_TAI, &ECVRF_P256_SHA256_TAI] {

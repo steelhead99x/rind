@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copy aws-lc's and BoringSSL's vector files that rind's tests run, RFC
-# 9180's HPKE, RFC 9380's hash-to-curve, and RFC 9474's blind RSA vectors,
-# into thirdparty/vectors, from the revisions pinned here. Both repositories are
+# 9180's HPKE, RFC 9380's hash-to-curve, RFC 9474's blind RSA, and RFC 9497's
+# OPRF vectors, into thirdparty/vectors, from the revisions pinned here. Both repositories are
 # hundreds of megabytes, so rind keeps copies of the files rather than
 # submodules. Bump a revision and rerun to update them.
 set -euo pipefail
@@ -16,6 +16,8 @@ HASH_TO_CURVE=664b13592116cecc9e52fb192dcde0ade36f904e
 # blind-rsa-signatures 0.18.0, whose JSON holds all four of RFC 9474's
 # vectors; the CFRG draft's repository holds stale ones.
 BLIND_RSA=45d0abfa829c3623389daae30bc35e9b2f3b550c
+# RFC 9497's repository, whose `poc/vectors/allVectors.json` is its Appendix A.
+VOPRF=5d7d94c8dc7589dc3baa116c1b9c169a7c33ac4e
 
 # aws-lc's copy of each file BoringSSL also has holds every BoringSSL vector
 # for rind's algorithms, so BoringSSL contributes only its own files.
@@ -95,3 +97,11 @@ rm -rf rfc9474
 mkdir rfc9474
 curl --fail --silent --show-error --location --output rfc9474/test-vectors.json \
     "https://raw.githubusercontent.com/jedisct1/rust-blind-rsa-signatures/$BLIND_RSA/tests/test_vectors_rfc9474.json"
+
+# The OPRF and VOPRF modes of the suites rind offers, short of decaf448 and
+# the POPRF mode.
+rm -rf rfc9497
+mkdir rfc9497
+curl --fail --silent --show-error --location \
+    "https://raw.githubusercontent.com/cfrg/draft-irtf-cfrg-voprf/$VOPRF/poc/vectors/allVectors.json" |
+    jq '[.[] | select(.mode != 2 and .identifier != "decaf448-SHAKE256")]' >rfc9497/allVectors.json
