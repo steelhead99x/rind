@@ -372,19 +372,28 @@ impl Point {
         (!sum.public_is_infinity()).then(|| Self(sum.as_affine()))
     }
 
-    /// `a * self + b * other` for public scalars, or `None` at infinity.
+    /// The sum of `scalar * point` over `terms`, for public scalars and
+    /// points, or `None` at infinity.
     ///
     /// A zero scalar's product, at infinity, is skipped, as the
     /// multiplications take only points that are not; every other product
     /// is not, as the group's order is prime.
-    pub(crate) fn public_mul_add(&self, a: &Scalar, other: &Self, b: &Scalar) -> Option<Self> {
+    pub(crate) fn public_mul_sum<'a>(
+        terms: impl IntoIterator<Item = (&'a Self, &'a Scalar)>,
+    ) -> Option<Self> {
         let mut sum = JacobianMontPoint::infinity();
-        for (point, scalar) in [(self, a), (other, b)] {
+        for (point, scalar) in terms {
             if !scalar.is_zero() {
                 sum = sum.public_add_affine(&point.0.multiply(scalar));
             }
         }
         (!sum.public_is_infinity()).then(|| Self(sum.as_affine()))
+    }
+}
+
+impl From<PublicKey> for Point {
+    fn from(key: PublicKey) -> Self {
+        Self(key.point)
     }
 }
 
@@ -1072,6 +1081,12 @@ impl Scalar {
             .add(addend)
     }
 
+    /// A uniformly random scalar from 1 to n - 1, from the system's random
+    /// source.
+    pub(crate) fn random() -> Result<Self, Error> {
+        PrivateKey::generate(&mut SystemRandom).map(|key| key.scalar)
+    }
+
     fn into_range_check(self) -> Result<Self, Error> {
         let reduced = self.reduce_mod_n();
 
@@ -1142,8 +1157,8 @@ impl Scalar {
         r
     }
 
-    /// Find the multiplicative inverse of `self` mod n
-    fn inv(&self) -> Self {
+    /// Find the multiplicative inverse of `self` mod n, in constant time
+    pub(crate) fn inv(&self) -> Self {
         let mut r = Self::default();
         let mut temp = [0u64; 4 * 3];
         low::bignum_modinv(&mut r.0, &self.0, &CURVE_ORDER, &mut temp);

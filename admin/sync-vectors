@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Copy aws-lc's and BoringSSL's vector files that rind's tests run, RFC
-# 9180's HPKE, RFC 9380's hash-to-curve, RFC 9474's blind RSA, and RFC 9591's
-# FROST vectors, into thirdparty/vectors, from the revisions pinned here. Both repositories are
+# 9180's HPKE, RFC 9380's hash-to-curve, RFC 9474's blind RSA, RFC 9591's
+# FROST, and RFC 9497's OPRF vectors, into thirdparty/vectors, from the
+# revisions pinned here. Both repositories are
 # hundreds of megabytes, so rind keeps copies of the files rather than
 # submodules. Bump a revision and rerun to update them.
 set -euo pipefail
@@ -19,6 +20,8 @@ BLIND_RSA=45d0abfa829c3623389daae30bc35e9b2f3b550c
 # RFC 9591's repository. Its `poc` JSON is appendix E for the ciphersuites
 # rind offers.
 FROST=127452b93acb3094a6f659d059550df5618c2714
+# RFC 9497's repository, whose `poc/vectors/allVectors.json` is its Appendix A.
+VOPRF=5d7d94c8dc7589dc3baa116c1b9c169a7c33ac4e
 
 # aws-lc's copy of each file BoringSSL also has holds every BoringSSL vector
 # for rind's algorithms, so BoringSSL contributes only its own files.
@@ -105,3 +108,10 @@ for file in frost-ed25519-sha512 frost-ristretto255-sha512 frost-p256-sha256; do
     curl --fail --silent --show-error --location --output "rfc9591/$file.json" \
         "https://raw.githubusercontent.com/cfrg/draft-irtf-cfrg-frost/$FROST/poc/$file.json"
 done
+# The OPRF and VOPRF modes of the suites rind offers, short of decaf448 and
+# the POPRF mode.
+rm -rf rfc9497
+mkdir rfc9497
+curl --fail --silent --show-error --location \
+    "https://raw.githubusercontent.com/cfrg/draft-irtf-cfrg-voprf/$VOPRF/poc/vectors/allVectors.json" |
+    jq '[.[] | select(.mode != 2 and .identifier != "decaf448-SHAKE256")]' >rfc9497/allVectors.json

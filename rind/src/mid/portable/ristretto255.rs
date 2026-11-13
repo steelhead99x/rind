@@ -3,9 +3,6 @@
 //! ristretto255 (RFC 9496) over curve25519-dalek's, whose operations run in
 //! constant time.
 
-// ristretto255's consumers (OPRF, FROST, OPAQUE) are their own quests.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use curve25519_dalek::constants::RISTRETTO_BASEPOINT_TABLE;
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use curve25519_dalek::traits::Identity;

@@ -80,6 +80,14 @@ vrf-rfc9381 = { version = "0.0.7", default-features = false, features = ["p256"]
 frost-ed25519 = { version = "3.0.0", default-features = false }
 frost-p256 = { version = "3.0.0", default-features = false }
 frost-ristretto255 = { version = "3.0.0", default-features = false }
+# RFC 9497's OPRF and VOPRF, which aws-lc-rs does not offer: `voprf`, with
+# the 0.13 RustCrypto curves its NIST suites run on, and the `rand_core` its
+# blinds and proofs draw from.
+voprf = { version = "0.5", default-features = false, features = ["alloc", "ristretto255-ciphersuite"] }
+p256-voprf = { package = "p256", version = "0.13", default-features = false, features = ["hash2curve", "voprf"] }
+p384-voprf = { package = "p384", version = "0.13", default-features = false, features = ["hash2curve", "voprf"] }
+p521-voprf = { package = "p521", version = "0.13.3", default-features = false, features = ["hash2curve", "voprf"] }
+rand_core-voprf = { package = "rand_core", version = "0.6", features = ["getrandom"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [

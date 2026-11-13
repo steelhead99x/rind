@@ -8,10 +8,9 @@
 //! module composes from them (the ladder, the square root of a ratio, the
 //! inversion, and the signed recoding) is rind's own, covered by tests only.
 
-// ristretto255's consumers (OPRF, FROST, OPAQUE) are their own quests.
-#![cfg_attr(not(test), allow(dead_code))]
-
+use crate::error::Error;
 use crate::low;
+use crate::mid::rng::{RandomSource, SystemRandom};
 use crate::mid::util;
 
 /// An element of GF(p), `p = 2^255 - 19`, as little-endian words, reduced.
@@ -451,6 +450,8 @@ impl Scalar {
     }
 
     /// `self * other mod L`.
+    // Only tests multiply scalars alone until FROST does.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn mul(&self, other: &Self) -> Self {
         self.mul_add(other, &Self([0; 4]))
     }
@@ -478,6 +479,35 @@ impl Scalar {
         let mut temp = [0u64; 4 * 3];
         low::bignum_modinv(&mut z.0, &self.0, &Self::ORDER, &mut temp);
         Some(z)
+    }
+
+    /// `-self mod L`.
+    pub(crate) fn neg(&self) -> Self {
+        let mut z = Self([0; 4]);
+        low::bignum_modsub(&mut z.0, &[0; 4], &self.0, &Self::ORDER);
+        z
+    }
+
+    /// Whether this is zero, computed in constant time.
+    pub(crate) fn is_zero(&self) -> bool {
+        low::bignum_eq(&self.0, &[0; 4])
+    }
+
+    /// A uniformly random nonzero scalar: 64 bytes from the system's random
+    /// source, reduced modulo `L`.
+    pub(crate) fn random() -> Result<Self, Error> {
+        let _entry = low::Entry::new_secret();
+        // Zero has a chance of 2^-252 a draw, so only a broken source fails.
+        for _ in 0..64 {
+            let mut bytes = [0u8; 64];
+            SystemRandom.fill(&mut bytes)?;
+            low::ct::secret_slice(&bytes);
+            let scalar = Self::from_uniform_bytes(&bytes);
+            if !low::ct::into_public(scalar.is_zero()) {
+                return Ok(scalar);
+            }
+        }
+        Err(Error::RngFailed)
     }
 
     /// The scalar as 64 signed digits in `-8..=8`, least significant first,
