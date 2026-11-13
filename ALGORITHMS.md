@@ -395,7 +395,8 @@ width in 32-bit words is a multiple of eight, and `bn_mul_mont_nohw`
 otherwise), and the rest of the arithmetic in rind's portable Rust. The
 portable backend runs it all in that Rust, over 64-bit limbs on 64-bit
 targets and 32-bit ones elsewhere: its Montgomery products below 16 limbs by
-rind's loop (Koç, Acar, and Kaliski's CIOS method), and wider ones and its
+rind's loop (Koç, Acar, and Kaliski's CIOS method), whose row multiply-add
+issues four products before the carry chain, and wider ones and its
 squarings by forming the product, each square's cross products once, then
 reducing it, adding two rows a pass in two carry chains. Products split by
 Karatsuba's method from 32 limbs and squares from 64, as aws-lc's C does
