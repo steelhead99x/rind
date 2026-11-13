@@ -1036,13 +1036,21 @@ A ✓ means a published, machine-checked proof shows that all the code computing
 ## Updating this report
 
 `admin/bench-report collect` runs the report's benchmarks, then
-`admin/build-cost`, on each benchmark host in turn over ssh, in the Nix dev
+`admin/build-cost`, on each machine in `COLLECT_HOSTS` in turn over ssh, in the Nix dev
 shell and under `quest gate`, which waits for the host to have room but
 shares it with other gated work, so its numbers are noisier than the nightly
 `bench` workflow's runners, which give the clean ones; it skips any host that is still busy, and writes their results and the hosts' details as JSON under
 `.tmp/bench-report/`. `admin/bench-report nightly` saves the latest nightly
-`bench` run's results, and `admin/bench-report render --from DIR` copies a
-collection's measured hosts into `benchmarks/data/` and writes
+`bench` run's results, and `admin/bench-report render --from DIR` copies every
+measured host JSON from that directory into `benchmarks/data/` and writes
 `BENCHMARKS.md` and its SVGs, which the README shows too, from them, `benchmarks/verified.toml`, and
 `benchmarks/gaps.toml`, which must hold a quest or a reason for every gap
 over 10%.
+
+`admin/bench-report run` measures the machine it is on. Anyone can run it: there is
+no host list to edit. The result's name is a slug of the CPU model, such as
+`intel-core-ultra-9-275hx`, unless `--host` sets another filesystem-safe name, and
+the JSON records the raw CPU string, that slug, the core counts, and the OS.
+`summary` and `render --from` read every `<host>.json` in the directory. `collect`
+reaches only the maintainer's machines. A gap's `on` may name any host with a
+result, or any nightly tier.

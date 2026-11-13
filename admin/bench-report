@@ -1,40 +1,50 @@
 #!/usr/bin/env python3
-"""Times rind and the libraries it is compared with on the report's hosts.
+"""Times rind and the libraries it is compared with.
 
 Usage:
+  admin/bench-report run [--host NAME] --commit REV --jobs N --target-dir DIR --out FILE
   admin/bench-report collect [--commit REV] [--host NAME]... [--out DIR]
   admin/bench-report nightly
   admin/bench-report render [--from DIR] [--check]
   admin/bench-report gate DIR [--previous DIR]
   admin/bench-report summary DIR
 
-`collect` copies one commit to each host in turn, waits for room under
-`quest gate` and for any lease it has, builds rind-bench there in the commit's Nix dev shell with
-its pinned toolchain, and times every operation in OPERATIONS for every
-library that offers it, then measures each library's build cost with
-admin/build-cost. It runs here for the host this is, and over ssh for the
-others. A host that is busy, unreachable, or fails is recorded and skipped,
-never measured. DIR (default `.tmp/bench-report/<commit>`) gets one
-`<host>.json` per host, with its CPU, OS, toolchain, and library versions.
+`run` measures the machine it is on. The result's host name is a
+filesystem-safe slug of the CPU model (`intel-core-ultra-9-275hx`,
+`amd-ryzen-9-7950x`, `apple-m3-max`) unless `--host` sets another sane name.
+The JSON records the raw CPU string, that slug, the logical and physical core
+counts, and the OS. Name the file `<host>.json` to feed it to `summary` or
+`render --from`.
+
+`collect` is the maintainer path. It copies one commit to each machine in
+COLLECT_HOSTS in turn, waits for room under `quest gate` and for any lease it
+has, builds rind-bench there in the commit's Nix dev shell with its pinned
+toolchain, and times every operation in OPERATIONS for every library that
+offers it, then measures each library's build cost with admin/build-cost. It
+runs here for the host this is, and over ssh for the others. A host that is
+busy, unreachable, or fails is recorded and skipped, never measured. DIR
+(default `.tmp/bench-report/<commit>`) gets one `<host>.json` per host, with
+its CPU, OS, toolchain, and library versions. A machine that is not in
+COLLECT_HOSTS is measured with `run`, not `collect`.
 
 `nightly` saves the latest nightly `bench` run's results on main, with gh, as
 the report's CPU tiers. `render` writes BENCHMARKS.md and its SVGs, among
 them the overview the README shows, from benchmarks/data, the verified code in
 benchmarks/verified.toml, and the decision on each gap in
-benchmarks/gaps.toml, first importing each measured host of a collection
+benchmarks/gaps.toml, first importing every measured host JSON of a collection
 given by `--from`. It fails on a gap over 10% without a
 decision, or a decision that covers no gap the data measures. `--check` fails if they are out of
-date instead.
+date instead. A gap's `on` may name any host that has a result, and any nightly
+tier.
 
 `gate` fails on a gap over 10% in a nightly run's downloaded artifacts that
 benchmarks/gaps.toml holds no decision for, counting only a gap the previous
 run, given by `--previous`, showed too. The nightly bench runs it.
 
-`summary` prints a Markdown table of a collection: rind's time per operation
-and host, against the fastest other library's.
+`summary` prints a Markdown table of every host JSON in a directory: rind's
+time per operation and host, against the fastest other library's.
 
-`run` is the host side of `collect`, run from the copied checkout. Results
-written to DIR are measurements, not history: rerun `collect` to refresh them.
+Results written by `run` are measurements, not history.
 """
 
 import argparse
@@ -55,14 +65,21 @@ import sys
 import time
 import tomllib
 
-# The report's hosts, in the order they run. `jobs` caps the build: nixos2 is
-# a shared 15 GB machine that more jobs run out of memory. `ssh` is the
-# destination where it isn't the name, and `note` describes the machine in the
-# report. Other work on a host with a `lease` holds that lock file with
-# flock(1) for its whole run, so collect holds it too, or skips the host as
-# busy, and leaves no copy, build, or download cache behind.
+# Machines `collect` can reach, in the order they run. This is the maintainer's
+# ssh list, not a gate. `run` takes any filesystem-safe host name. `summary`,
+# `render`, and `load_gaps` take every host JSON on disk, and a nightly tier
+# stays a valid gaps.toml `on`. `render` reads a `note` from here
+# only when that host's JSON has none, and shows these names first so the
+# published report keeps its order; every other host keeps the order it was
+# given. `load_hosts` sorts those files by name.
+# `jobs` caps the build: nixos2 is a shared 15 GB machine that more jobs run
+# out of memory. `ssh` is the destination where it isn't the name, and `note`
+# describes the machine in the report. Other work on a host with a `lease`
+# holds that lock file with flock(1) for its whole run, so collect holds it
+# too, or skips the host as busy, and leaves no copy, build, or download cache
+# behind.
 VPS_NOTE = "OVH VPS in {}, 4 shared vCPUs: other tenants add noise that a dedicated host's times lack."
-HOSTS = {
+COLLECT_HOSTS = {
     "nixos": {"jobs": 16},
     "desktop": {"jobs": 12},
     "nixos2": {"jobs": 3},
@@ -340,14 +357,161 @@ def output(cmd, env=None):
     return subprocess.run(cmd, capture_output=True, text=True, check=True, env=env).stdout.strip()
 
 
+def try_output(cmd):
+    try:
+        return output(cmd)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return ""
+
+
+def cpu_model_from_cpuinfo(text):
+    """The brand string from Linux /proc/cpuinfo, ignoring the numeric `model`."""
+    for line in text.splitlines():
+        if line.startswith(("model name", "Model")):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
+def cpu_model_from_lscpu(text):
+    for line in text.splitlines():
+        key, sep, value = line.partition(":")
+        if sep and key.strip().lower() == "model name" and value.strip():
+            return value.strip()
+    return ""
+
+
 def cpu_model():
+    """The raw CPU brand string: macOS sysctl, Linux /proc/cpuinfo, lscpu, then
+    platform.processor()."""
     if sys.platform == "darwin":
-        return output(["sysctl", "-n", "machdep.cpu.brand_string"])
-    with open("/proc/cpuinfo") as f:
-        for line in f:
-            if line.startswith(("model name", "Model")):
-                return line.split(":", 1)[1].strip()
-    return platform.processor()
+        brand = try_output(["sysctl", "-n", "machdep.cpu.brand_string"])
+        if brand:
+            return brand
+    else:
+        try:
+            with open("/proc/cpuinfo") as f:
+                found = cpu_model_from_cpuinfo(f.read())
+            if found:
+                return found
+        except OSError:
+            pass
+        found = cpu_model_from_lscpu(try_output(["lscpu"]))
+        if found:
+            return found
+    return platform.processor() or platform.machine() or "unknown"
+
+
+# Words and suffixes that are not part of the CPU's name: trademarks, a clock,
+# a core count, and a trailing "CPU" or "Processor".
+_SLUG_SKIP = {"cpu", "processor", "processors"}
+
+
+def cpu_slug(model):
+    """A filesystem-safe host name for a CPU brand string.
+
+    `Intel(R) Core(TM) Ultra 9 275HX` becomes `intel-core-ultra-9-275hx`,
+    `AMD Ryzen 9 7950X 16-Core Processor` becomes `amd-ryzen-9-7950x`, and
+    `Apple M3 Max` becomes `apple-m3-max`.
+    """
+    text = model.lower()
+    text = re.sub(r"\((?:r|tm|c)\)|[®™]", " ", text)
+    text = re.sub(r"@?\s*\d+(?:\.\d+)?\s*ghz\b", " ", text)
+    text = re.sub(r"\b\d+\s*-?\s*cores?\b", " ", text)
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    parts = [part for part in text.split() if part not in _SLUG_SKIP]
+    slug = "-".join(parts)
+    if len(slug) > 80:
+        slug = slug[:80].rsplit("-", 1)[0] or slug[:80]
+    return slug or "unknown"
+
+
+def physical_from_cpuinfo(text):
+    """How many (socket, core) pairs /proc/cpuinfo lists, or None."""
+    cores = set()
+    phys = core = None
+
+    def flush():
+        nonlocal phys, core
+        if phys is not None and core is not None:
+            cores.add((phys, core))
+        phys = core = None
+
+    for line in text.splitlines():
+        if not line.strip():
+            flush()
+            continue
+        key, sep, value = line.partition(":")
+        if not sep:
+            continue
+        key = key.strip()
+        if key == "physical id":
+            phys = value.strip()
+        elif key == "core id":
+            core = value.strip()
+    flush()
+    return len(cores) or None
+
+
+def physical_from_lscpu(text):
+    vals = {}
+    for line in text.splitlines():
+        key, sep, value = line.partition(":")
+        if sep:
+            vals[key.strip().lower()] = value.strip()
+    try:
+        cores = int(vals["core(s) per socket"].split()[0])
+        sockets = int(vals.get("socket(s)", "1").split()[0])
+    except (KeyError, ValueError):
+        return None
+    return cores * sockets or None
+
+
+def physical_cpus():
+    """Physical cores, when the OS reports them."""
+    if sys.platform == "darwin":
+        text = try_output(["sysctl", "-n", "hw.physicalcpu"])
+        return int(text) if text.isdigit() else None
+    try:
+        with open("/proc/cpuinfo") as f:
+            count = physical_from_cpuinfo(f.read())
+        if count:
+            return count
+    except OSError:
+        pass
+    return physical_from_lscpu(try_output(["lscpu"]))
+
+
+def cpu_metadata():
+    """The CPU fields a result records: the raw brand string, its slug, and
+    the logical and (when known) physical core counts."""
+    model = cpu_model()
+    info = {
+        "model": model,
+        "slug": cpu_slug(model),
+        "arch": platform.machine(),
+        "logical_cpus": cpu_count(),
+    }
+    physical = physical_cpus()
+    if physical:
+        info["physical_cpus"] = physical
+    return info
+
+
+def check_host_name(name):
+    """A host name is one path component. Nightly tier names and `tiers` are
+    reserved, because `tiers.json` and gaps.toml's `on` already use them."""
+    reserved = set(dict(TIERS).values()) | {"tiers"}
+    if name in reserved:
+        fail(f"host name {name!r} is reserved; pass a different --host")
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}", name):
+        fail(f"host name {name!r} is not a filesystem-safe name of letters, digits, '.', '_' and '-'")
+
+
+def resolve_host(name, model):
+    """The name `run` records: `--host` when it is given, otherwise the CPU slug."""
+    host = name or cpu_slug(model)
+    check_host_name(host)
+    return host
 
 
 def os_name():
@@ -384,12 +548,14 @@ def toolchain(env):
 
 def run(args):
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    cpu = cpu_metadata()
+    host = resolve_host(args.host, cpu["model"])
     result = {
         "schema": 1,
-        "host": args.host,
+        "host": host,
         "commit": args.commit,
         "started": started,
-        "cpu": {"model": cpu_model(), "arch": platform.machine(), "logical_cpus": cpu_count()},
+        "cpu": cpu,
         "os": os_name(),
     }
 
@@ -403,7 +569,7 @@ def run(args):
         idle_before_build = check_idle("before the build")
     except Busy as e:
         finish("busy", reason=str(e))
-        fail(f"{args.host}: {e}")
+        fail(f"{host}: {e}")
 
     env = dict(os.environ, CARGO_BUILD_JOBS=str(args.jobs), CARGO_TERM_COLOR="never")
     env["CARGO_TARGET_DIR"] = os.path.abspath(args.target_dir)
@@ -432,7 +598,7 @@ def run(args):
         idle_before_run = check_idle("before the benchmarks")
     except Busy as e:
         finish("busy", reason=str(e))
-        fail(f"{args.host}: {e}")
+        fail(f"{host}: {e}")
 
     criterion_dir = os.path.join(env["CARGO_TARGET_DIR"], "criterion")
     shutil.rmtree(criterion_dir, ignore_errors=True)
@@ -518,7 +684,7 @@ def ssh(host):
     # ServerAlive ends a session whose link died, which would otherwise hang
     # collect.
     options = ["BatchMode=yes", "ConnectTimeout=10", "ServerAliveInterval=15", "ServerAliveCountMax=4"]
-    return ["ssh", *(arg for o in options for arg in ("-o", o)), HOSTS[host].get("ssh", host)]
+    return ["ssh", *(arg for o in options for arg in ("-o", o)), COLLECT_HOSTS[host].get("ssh", host)]
 
 
 def on_host(host, script, **kwargs):
@@ -547,12 +713,12 @@ def host_script(host, work, cmd):
         f'(cd "$src" && {cmd}) </dev/null >&2\n'
         'cat "$src/result.json"; code=$?; rm -rf "$src"; exit $code\n'
     )
-    if "lease" not in HOSTS[host]:
+    if "lease" not in COLLECT_HOSTS[host]:
         return script
     # The script's processes inherit the descriptor holding the lock. Python
     # closes it in its own children, but subprocess.run kills its child when
     # Python fails, so no child outlives the lease.
-    lock = f"exec 9>{q(HOSTS[host]['lease'])} && {{ flock -n -E {LEASE_HELD} 9 || exit; }}\n"
+    lock = f"exec 9>{q(COLLECT_HOSTS[host]['lease'])} && {{ flock -n -E {LEASE_HELD} 9 || exit; }}\n"
     return lock + f"trap 'rm -rf {w}' EXIT\n" + script
 
 
@@ -576,7 +742,7 @@ def collect_host(host, commit, out_dir):
     archive = subprocess.run(["git", "-C", ROOT, "archive", "--format=tar", commit], capture_output=True, check=True)
     cmd = (
         f'nix develop "path:$PWD" --command python3 admin/bench-report run '
-        f"--host {q(host)} --commit {q(commit)} --jobs {HOSTS[host]['jobs']} "
+        f"--host {q(host)} --commit {q(commit)} --jobs {COLLECT_HOSTS[host]['jobs']} "
         f"--target-dir ../target --out result.json"
     )
     # The gate admits the run only while the host has room, but other gated
@@ -586,7 +752,7 @@ def collect_host(host, commit, out_dir):
     with open(os.path.join(ROOT, "flake.lock")) as f:
         quest = json.load(f)["nodes"]["quest"]["locked"]
     cmd = f"nix shell github:{quest['owner']}/{quest['repo']}/{quest['rev']} --command quest gate {cmd}"
-    if "lease" in HOSTS[host]:
+    if "lease" in COLLECT_HOSTS[host]:
         # Crate downloads too, so that removing the work directory leaves nothing.
         cmd = f'CARGO_HOME="$PWD/../cargo" {cmd}'
     # A macOS ssh session runs no login shell, which is what puts Nix on PATH.
@@ -598,10 +764,16 @@ def collect_host(host, commit, out_dir):
         return record("failed", "could not copy the commit")
     if ran.returncode != 0:
         return record("failed", "the run wrote no result; see its output above")
-    with open(out, "wb") as f:
-        f.write(ran.stdout)
-    status = json.loads(ran.stdout)["status"]
-    print(f"bench-report: {host}: {status}", file=sys.stderr)
+    payload = json.loads(ran.stdout)
+    # The note lives with the result, so a later render does not need this
+    # checkout's collect list to describe the machine.
+    note = COLLECT_HOSTS[host].get("note")
+    if note and not payload.get("note"):
+        payload["note"] = note
+    with open(out, "w") as f:
+        json.dump(payload, f, indent=1)
+        f.write("\n")
+    print(f"bench-report: {host}: {payload['status']}", file=sys.stderr)
 
 
 def collect(args):
@@ -609,11 +781,16 @@ def collect(args):
     # skip its own gate.
     if os.environ.get("QUEST_GATE_ADMITTED") == "1":
         fail("run collect outside quest gate: it gates each host's run itself")
-    commit = output(["git", "-C", ROOT, "rev-parse", f"{args.commit}^{{commit}}"])
-    hosts = args.host or list(HOSTS)
+    if not COLLECT_HOSTS:
+        fail("no collect hosts configured")
+    hosts = args.host or list(COLLECT_HOSTS)
     for host in hosts:
-        if host not in HOSTS:
-            fail(f"unknown host {host}; known: {', '.join(HOSTS)}")
+        if host not in COLLECT_HOSTS:
+            fail(
+                f"unknown collect host {host}; known: {', '.join(COLLECT_HOSTS)} "
+                "(other machines use `admin/bench-report run`)"
+            )
+    commit = output(["git", "-C", ROOT, "rev-parse", f"{args.commit}^{{commit}}"])
     out_dir = args.out or os.path.join(ROOT, ".tmp", "bench-report", commit[:12])
     os.makedirs(out_dir, exist_ok=True)
     # One host at a time, so no run shares a machine or a network with another.
@@ -631,29 +808,25 @@ def human(ns):
 
 
 def summary(args):
-    hosts = []
-    for host in HOSTS:
-        path = os.path.join(args.dir, f"{host}.json")
-        if os.path.exists(path):
-            with open(path) as f:
-                hosts.append(json.load(f))
-    measured = [h for h in hosts if h["status"] == "ok"]
-    for h in hosts:
-        if h["status"] == "ok":
-            noisy = " (noisy)" if h["load"].get("noisy") else ""
-            print(f"- `{h['host']}`: {h['cpu']['model']}, {h['os']}, {h['toolchain']['rustc']}{noisy}")
+    loaded = load_hosts(args.dir)
+    measured = []
+    for name, h in loaded.items():
+        if h.get("status") == "ok":
+            noisy = " (noisy)" if h.get("load", {}).get("noisy") else ""
+            print(f"- `{name}`: {h['cpu']['model']}, {h['os']}, {h['toolchain']['rustc']}{noisy}")
+            measured.append((name, h))
         else:
-            print(f"- `{h['host']}`: not measured, {h['status']}: {h['reason']}")
+            print(f"- `{name}`: not measured, {h.get('status', 'unmeasured')}: {h.get('reason', '')}")
     if not measured:
         return
     print()
     print("Each cell is rind's time, then that over the fastest other library's, and which library that is.")
     print()
-    print("| operation | " + " | ".join(h["host"] for h in measured) + " |")
+    print("| operation | " + " | ".join(name for name, _ in measured) + " |")
     print("|---|" + "---|" * len(measured))
     for op in OPERATIONS:
         cells = []
-        for h in measured:
+        for _, h in measured:
             times = {r["library"]: r["ns"] for r in h["results"] if r["operation"] == op}
             others = {lib: ns for lib, ns in times.items() if lib != "rind" and lib not in VARIANTS}
             if "rind" not in times or not others:
@@ -942,14 +1115,38 @@ def proof_for(verified, library, row, host):
     return None
 
 
+def shown_names(hosts):
+    """Every measured host. Maintainer machines stay in COLLECT_HOSTS order so
+    the published report does not move; every other name keeps the order of
+    `hosts`. COLLECT_HOSTS does not drop a host."""
+    known = [name for name in COLLECT_HOSTS if name in hosts]
+    return known + [name for name in hosts if name not in COLLECT_HOSTS]
+
+
+def host_note(name, host):
+    """Prose for a host section: the result's own note, or the collect list's
+    for a machine measured before notes were stored in the JSON."""
+    return host.get("note") or COLLECT_HOSTS.get(name, {}).get("note")
+
+
 def load_hosts(directory):
-    hosts = {}
-    for name in HOSTS:
-        path = os.path.join(directory, f"{name}.json")
-        if os.path.exists(path):
-            with open(path) as f:
-                hosts[name] = json.load(f)
-    return hosts
+    """Every host result in `directory`, keyed by file name. `tiers.json` is
+    the nightly CPU tiers, not a host."""
+    found = {}
+    for path in glob.glob(os.path.join(directory, "*.json")):
+        name = os.path.splitext(os.path.basename(path))[0]
+        if name == "tiers":
+            continue
+        with open(path) as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            fail(f"{os.path.basename(path)} is not a host result")
+        found[name] = data
+    # Glob order is not stable. Collect machines stay in COLLECT_HOSTS order
+    # and every other file follows by name.
+    names = [name for name in COLLECT_HOSTS if name in found]
+    names += sorted(name for name in found if name not in COLLECT_HOSTS)
+    return {name: found[name] for name in names}
 
 
 def times(host):
@@ -1071,11 +1268,12 @@ def load_gaps(hosts, tiers, path=GAPS):
             fail(f"{where}: needs a quest or a reason, not both")
         if "quest" in e and not (e["quest"].startswith("/quest/") and os.path.isfile(ROOT + e["quest"])):
             fail(f"{where}: no quest at {e['quest']}")
+        # A nightly tier stays valid when this run did not draw it. Any other
+        # name must be a host the data actually measured.
+        tier_names = set(dict(TIERS).values())
         for place in e["on"]:
-            if place not in HOSTS and place not in dict(TIERS).values():
+            if place not in tier_names and place not in hosts:
                 fail(f"{where}: no host or tier {place}")
-            if place in HOSTS and place not in hosts:
-                fail(f"{where}: {place} is not measured; update or remove the entry")
         covered = {k: v for k, v in found.items() if covers(e, *k)}
         if not covered and measured & set(e["on"]):
             fail(f"{where}: names no gap over 10%; update or remove the entry")
@@ -1098,10 +1296,11 @@ def quest_title(path):
 
 def gap_table(gaps):
     rows = {row_name(op) for op in OPERATIONS}
+    tier_names = set(dict(TIERS).values())
     lines = ["| Operation | On | rind's time over the fastest | Decision |", "|---|---|---|---|"]
     for e, covered in gaps:
         ops = ", ".join(label(op) if op in rows else f"`{op}`" for op in e["operations"])
-        on = ", ".join(f"`{p}`" if p in HOSTS else f"{p} tier" for p in e["on"])
+        on = ", ".join(f"{p} tier" if p in tier_names else f"`{p}`" for p in e["on"])
         ratios = [ratio for ratio, _ in covered.values()]
         spread = f"{min(ratios):.2f}×" + (f" to {max(ratios):.2f}×" if max(ratios) - min(ratios) >= 0.005 else "")
         fastest = ", ".join(sorted({COLUMNS[lib] for _, lib in covered.values()}))
@@ -1249,7 +1448,7 @@ def overview_svg(hosts, verified, theme):
     """Operations by library, each cell a square per host, colored by its time
     over the fastest library's on that host, under how often rind leads."""
     svg = Svg(theme)
-    shown = [name for name in HOSTS if name in hosts]
+    shown = shown_names(hosts)
     libs_shown = columns(*hosts.values())
     names = [COLUMNS[lib] for lib in libs_shown]
     squares = len(shown) * SQUARE + (len(shown) - 1) * GAP
@@ -1463,8 +1662,7 @@ def tier_table(tiers):
 def report(hosts, tiers, verified, gaps):
     """BENCHMARKS.md and its SVGs, by path."""
     files = {}
-    shown = [name for name in HOSTS if name in hosts]
-    missing = [f"`{name}`" for name in HOSTS if name not in hosts]
+    shown = shown_names(hosts)
     words = ["no", "one", "two", "three", "four", "five", "six"]
     count = words[len(shown)] if len(shown) < len(words) else str(len(shown))
     md = [
@@ -1485,8 +1683,6 @@ def report(hosts, tiers, verified, gaps):
         md += ["| Host | CPU | OS | Measured |", "|---|---|---|---|"]
         md += [f"| `{n}` | {hosts[n]['cpu']['model']} | {hosts[n]['os']} | {measured(hosts[n])} |" for n in shown]
         md.append("")
-    if missing:
-        md += [f"Not measured yet: {', '.join(missing)}.", ""]
     md += [
         "Each host builds with the pinned toolchain in the Nix dev shell, and runs "
         "`admin/bench-report` only when idle. Times are criterion's estimates.",
@@ -1518,17 +1714,16 @@ def report(hosts, tiers, verified, gaps):
         ]
         for theme, suffix in (("light", ""), ("dark", "-dark")):
             files[f"overview{suffix}.svg"] = overview_svg(hosts, verified, theme)
-    for name in HOSTS:
-        if name not in hosts:
-            continue
+    for name in shown:
         h = hosts[name]
+        note = host_note(name, h)
         untimed = [label(row_name(op)) for op in OPERATIONS if row_name(op) not in times(h)]
         md += [
             f"### `{name}`: {h['cpu']['model']}",
             "",
             f"Measured {measured(h)}, on {h['os']} with {h['toolchain']['rustc']}.",
             "",
-            *([HOSTS[name]["note"], ""] if "note" in HOSTS[name] else []),
+            *([note, ""] if note else []),
             *([f"Not timed on `{name}`: {', '.join(untimed)}.", ""] if untimed else []),
             *(
                 f"{COLUMNS[lib]} isn't timed on `{name}`: it requires {and_list([f.upper() for f in missing])}, "
@@ -1642,16 +1837,24 @@ def report(hosts, tiers, verified, gaps):
         "## Updating this report",
         "",
         "`admin/bench-report collect` runs the report's benchmarks, then",
-        "`admin/build-cost`, on each benchmark host in turn over ssh, in the Nix dev",
+        "`admin/build-cost`, on each machine in `COLLECT_HOSTS` in turn over ssh, in the Nix dev",
         "shell and under `quest gate`, which waits for the host to have room but",
         "shares it with other gated work, so its numbers are noisier than the nightly",
         "`bench` workflow's runners, which give the clean ones; it skips any host that is still busy, and writes their results and the hosts' details as JSON under",
         "`.tmp/bench-report/`. `admin/bench-report nightly` saves the latest nightly",
-        "`bench` run's results, and `admin/bench-report render --from DIR` copies a",
-        "collection's measured hosts into `benchmarks/data/` and writes",
+        "`bench` run's results, and `admin/bench-report render --from DIR` copies every",
+        "measured host JSON from that directory into `benchmarks/data/` and writes",
         "`BENCHMARKS.md` and its SVGs, which the README shows too, from them, `benchmarks/verified.toml`, and",
         "`benchmarks/gaps.toml`, which must hold a quest or a reason for every gap",
         "over 10%.",
+        "",
+        "`admin/bench-report run` measures the machine it is on. Anyone can run it: there is",
+        "no host list to edit. The result's name is a slug of the CPU model, such as",
+        "`intel-core-ultra-9-275hx`, unless `--host` sets another filesystem-safe name, and",
+        "the JSON records the raw CPU string, that slug, the core counts, and the OS.",
+        "`summary` and `render --from` read every `<host>.json` in the directory. `collect`",
+        "reaches only the maintainer's machines. A gap's `on` may name any host with a",
+        "result, or any nightly tier.",
         "",
     ]
     files = {os.path.join(REPORT_DIR, k): v for k, v in files.items()}
@@ -1662,16 +1865,14 @@ def report(hosts, tiers, verified, gaps):
 def import_hosts(directory):
     """Copies a collection's measured hosts into the report's data."""
     os.makedirs(DATA_DIR, exist_ok=True)
-    for name in HOSTS:
-        path = os.path.join(directory, f"{name}.json")
-        if not os.path.exists(path):
+    for name, host in load_hosts(directory).items():
+        if host.get("status") != "ok":
+            print(
+                f"bench-report: {name}: not imported, {host.get('status', 'unmeasured')}: {host.get('reason', '')}",
+                file=sys.stderr,
+            )
             continue
-        with open(path) as f:
-            host = json.load(f)
-        if host["status"] != "ok":
-            print(f"bench-report: {name}: not imported, {host['status']}: {host['reason']}", file=sys.stderr)
-            continue
-        shutil.copy(path, os.path.join(DATA_DIR, f"{name}.json"))
+        shutil.copy(os.path.join(directory, f"{name}.json"), os.path.join(DATA_DIR, f"{name}.json"))
 
 
 def render(args):
@@ -1831,18 +2032,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("collect", help="run the benchmarks on each host")
+    p = sub.add_parser("collect", help="run the benchmarks on the maintainer's machines")
     p.add_argument("--commit", default="HEAD", help="the commit to measure (default HEAD)")
-    p.add_argument("--host", action="append", help="a host to measure (default: all, in order)")
+    p.add_argument("--host", action="append", help="a COLLECT_HOSTS machine to measure (default: all, in order)")
     p.add_argument("--out", help="the results directory (default .tmp/bench-report/<commit>)")
     p.set_defaults(func=collect)
 
-    p = sub.add_parser("summary", help="print a collection's rind-versus-fastest table")
+    p = sub.add_parser("summary", help="print rind-versus-fastest for every host JSON in a directory")
     p.add_argument("dir")
     p.set_defaults(func=summary)
 
     p = sub.add_parser("render", help="write BENCHMARKS.md and its SVGs from benchmarks/data")
-    p.add_argument("--from", dest="collection", metavar="DIR", help="first import a collection's measured hosts")
+    p.add_argument("--from", dest="collection", metavar="DIR", help="first import every measured host JSON from DIR")
     p.add_argument("--check", action="store_true", help="fail if BENCHMARKS.md or its SVGs are out of date")
     p.set_defaults(func=render)
 
@@ -1854,8 +2055,8 @@ def main():
     p.add_argument("--previous", metavar="DIR", help="the previous run's, to fail only on a gap both show")
     p.set_defaults(func=gate)
 
-    p = sub.add_parser("run", help="the host side of collect")
-    p.add_argument("--host", required=True)
+    p = sub.add_parser("run", help="measure this machine")
+    p.add_argument("--host", help="name for this machine (default: a slug of its CPU model)")
     p.add_argument("--commit", required=True)
     p.add_argument("--jobs", type=int, required=True)
     p.add_argument("--target-dir", required=True)
