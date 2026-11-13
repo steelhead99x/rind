@@ -1,0 +1,1126 @@
+(*
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
+ *)
+
+(* ========================================================================= *)
+(*            Common tactics for proving program equivalence.                *)
+(*  Assumes that this file will be loaded after necessary assembly semantics *)
+(*  is loaded ({arm,x86}/proofs/...), as common/bignum.ml does).             *)
+(* ========================================================================= *)
+
+needs "common/relational2.ml";;
+needs "common/maychange.ml";;
+
+let equiv_print_log = ref false;;
+
+
+(* ------------------------------------------------------------------------- *)
+(* Memory read expression rewriter. This is useful when there is no exactly  *)
+(* matching `read (memory :> bytesXX ...) = ..` equality in assumptions but  *)
+(* can be somehow inferred from it. MK_MEMORY_READ_EQ_BIGDIGIT_CONV examples *)
+(* demonstrate a few useful cases.                                           *)
+(* ------------------------------------------------------------------------- *)
+
+(** See the examples below.
+    Input: a term 'read (memory :> ...)' as well as assumptions list.
+    Returns: a pair of (the main rewrite rule theorem `t = ...`,
+      auxiliary equality rules on memory reads that were needed to derive the
+      equality but did not exist in the assumptions. **)
+let rec MK_MEMORY_READ_EQ_BIGDIGIT_CONV =
+  (* return (pointer, (baseptr and ofs), size, "constructor name", state var) *)
+  let get_full_info t =
+    match t with
+    | Comb (Comb (Const ("read", _), comp), state_var) ->
+      begin match get_memory_read_info comp with
+      | Some (x,size,constrname) ->
+        let memory_component = fst(dest_binary ":>" comp) in
+        Some (memory_component,x,get_base_ptr_and_ofs x,size,
+              constrname,state_var)
+      | _ -> None
+      end
+    | _ -> None in
+
+  let const_num_opt (t:term): int option =
+    try if is_numeral t then Some (dest_small_numeral t)
+        else Some (dest_small_numeral (rhs (concl (NUM_RED_CONV t))))
+    with Failure _ -> None in
+  let eight = `8` in
+  let rec divide_by_8 t: term option =
+    try Some (mk_small_numeral ((option_get (const_num_opt t)) / 8))
+    with Failure _ -> try
+      let l,r = dest_binary "*" t in
+      if l = eight then Some r else if r = eight then Some l else None
+    with Failure _ -> try
+      let l,r = dest_binary "+" t in
+      match (divide_by_8 l),(divide_by_8 r) with
+      | Some l', Some r' -> Some (mk_binary "+" (l',r'))
+      | _ -> None
+    with Failure _ -> try
+      let l,r = dest_binary "-" t in
+      match (divide_by_8 l),(divide_by_8 r) with
+      | Some l', Some r' -> Some (mk_binary "-" (l',r'))
+      | _ -> None
+    with Failure _ -> None
+    in
+  let is_multiple_of_8 t = divide_by_8 t <> None in
+  let subtract_num t1 t2: term option =
+    if t2 = `0` then Some t1
+    else if t1 = t2 then Some `0`
+    else
+      (* returns: ((sym expr, coeff) list, constant) *)
+      let rec decompose_adds t: ((term * int) list) * int =
+        try ([], dest_small_numeral t) with Failure _ ->
+        try let l,r = dest_binary "+" t in
+          let lsyms,lconst = decompose_adds l in
+          let rsyms,rconst = decompose_adds r in
+          let syms = itlist (fun (lsym,lcoeff) rsyms ->
+            if not (exists (fun (rsym,_) -> rsym=lsym) rsyms)
+            then rsyms @ [lsym,lcoeff]
+            else map (fun (rsym,rcoeff) ->
+              if rsym = lsym then (lsym,lcoeff + rcoeff) else (rsym,rcoeff))
+              rsyms) lsyms rsyms in
+          (syms,lconst+rconst) with Failure _ ->
+        try (* note that num's subtraction is a bit complicated because
+               num cannot be negative. However, there is a chance
+               that even if the intermediate constants are negative the
+               final subtracted result is non-negative. Let's hope a good
+               luck and anticipate that SIMPLE_ARITH_TAC will solve it
+               in the end. *)
+          let l,r = dest_binary "-" t in
+          let lsyms,lconst = decompose_adds l in
+          let rsyms,rconst = decompose_adds r in
+          let syms = itlist (fun (lsym,lcoeff) rsyms ->
+            if not (exists (fun (rsym,_) -> rsym=lsym) rsyms)
+            then rsyms @ [lsym,lcoeff]
+            else map (fun (rsym,rcoeff) ->
+              if rsym = lsym then (lsym,lcoeff - rcoeff) else (rsym,-rcoeff))
+              rsyms) lsyms rsyms in
+          (syms,lconst-rconst) with Failure _ ->
+        try let l,r = dest_binary "*" t in
+          let lconst = dest_small_numeral l in
+          let rsyms,rconst = decompose_adds r in
+          (map (fun (sym,coeff) -> (sym,coeff * lconst)) rsyms,
+           rconst * lconst)
+        with Failure _ -> ([t,1],0)
+      in
+      let syms1,const1 = decompose_adds t1 in
+      let syms2,const2 = decompose_adds t2 in
+      if syms1 = syms2 && const1 >= const2
+      then Some (mk_small_numeral (const1 - const2))
+      else None in
+
+  let rec mk_word_add ptrofs imm =
+    let rec num_add expr (imm:int) =
+      if is_numeral expr then
+        mk_small_numeral(imm + dest_small_numeral expr)
+      else if is_binary "+" expr then
+        let l,r = dest_binary "+" expr in
+        mk_binary "+" (l,num_add r imm)
+      else mk_binary "+" (expr,mk_small_numeral imm) in
+    let address_index_ty = dest_word_ty (type_of ptrofs) in
+    let word_tm = inst [address_index_ty,`:A`] `word:num->A word`
+    and word_add_tm =
+      inst [address_index_ty,`:A`] `word_add:A word->A word->A word` in
+    if is_binary "word_add" ptrofs then
+      let ptr,ofs = dest_binary "word_add" ptrofs in
+      mk_binop word_add_tm ptr (mk_word_add ofs imm)
+    else if is_comb ptrofs && is_const (fst (dest_comb ptrofs)) &&
+            name_of (fst (dest_comb ptrofs)) = "word" then
+      let expr = snd (dest_comb ptrofs) in
+      mk_comb(word_tm,num_add expr imm)
+    else
+      mk_binop word_add_tm ptrofs
+        (mk_comb(word_tm,mk_small_numeral imm)) in
+  let mk_read_mem_bytes64 memory_component ptrofs state_var =
+    let accessor =
+      mk_icomb
+        (`bytes64:A word->((A word->byte),int64)component`,ptrofs) in
+    let memory_accessor =
+      list_mk_icomb ":>" [memory_component;accessor] in
+    mk_comb(mk_icomb(`read`,memory_accessor),state_var) in
+  let mk_word_join_128 =
+    let wj = `word_join:int64->int64->int128` in
+    (fun high low -> (mk_comb ((mk_comb (wj,high)),low))) in
+
+  (* if ptrofs is word_add p (word_sub (word x) (word y)),
+      return 'word_add p (word (x - y))' *)
+  let canonicalize_word_add_sub ptrofs =
+    if not (is_binary "word_add" ptrofs) then None else
+    let w,the_rhs = dest_comb ptrofs in
+    let the_wordadd,base = dest_comb w in
+    if not (is_binary "word_sub" the_rhs) then None else
+    let x,y = dest_binary "word_sub" the_rhs in
+    if name_of (fst (dest_comb x)) <> "word" ||
+       name_of (fst (dest_comb y)) <> "word" then None else
+    let (the_word,x),y = dest_comb x,snd (dest_comb y) in
+    Some (mk_binop the_wordadd base (mk_comb(the_word,mk_binary "-" (x,y)))) in
+
+  fun (t:term) (assumptions:(string * thm) list): (thm * (thm list)) ->
+    match get_full_info t with
+    | Some (memory_component,ptrofs,(ptr, ofs),size,
+            constr_name,state_var) ->
+      (* if ptrofs is word_add p (word_sub (word x) (word y)), try to make it
+        'word_add p (word (x - y))' *)
+      let canon_wordsub_rule = ref None in
+      let ptr,ofs = match canonicalize_word_add_sub ptrofs with
+      | None -> ptr,ofs
+      | Some ptrofs' ->
+        try
+          let _ = canon_wordsub_rule := Some
+            (TAC_PROOF((assumptions,mk_eq(ptrofs,ptrofs')),
+              IMP_REWRITE_TAC[WORD_SUB2] THEN SIMPLE_ARITH_TAC)) in
+          get_base_ptr_and_ofs ptrofs'
+        with Failure _ -> (ptr,ofs)
+      in
+
+      if not (is_multiple_of_8 ofs) then
+        failwith ("offset is not divisible by 8: `" ^ (string_of_term ofs) ^ "`") else
+      (if !equiv_print_log then
+        Printf.printf "digitizing read %s: (`%s`,`%s`), sz=`%s`\n"
+          constr_name (string_of_term ptr) (string_of_term ofs)
+          (string_of_term size));
+      let ofs_opt = const_num_opt ofs in
+
+      if constr_name = "bytes64" then
+        let _ = assert (size = eight) in
+        let larger_reads = filter_map (fun (_,ath) ->
+          try
+            let c = concl ath in
+            if not (is_eq c) then None else
+            let c = lhs c in
+            let c_access_info = get_full_info c in
+            begin match c_access_info with
+            | Some (memory_component2,ptrofs2,(ptr2,ofs2),size2,
+                    "bytes",state_var2) ->
+              begin
+              (if !equiv_print_log then
+                Printf.printf "read bytes assum: (`%s`,`%s`), sz=`%s`\n"
+                  (string_of_term ptr2) (string_of_term ofs2) (string_of_term size2));
+              if (memory_component = memory_component2 &&
+                  ptr = ptr2 && state_var = state_var2 &&
+
+              begin match ofs_opt,(const_num_opt size2),(const_num_opt ofs2) with
+              | Some ofs,Some size2,Some ofs2 ->
+                (* everything is constant; easy to determine *)
+                (* size must be `8` here *)
+                ofs2 <= ofs && ofs + 8 <= ofs2 + size2
+              | Some ofs,None,Some ofs2 ->
+                (* offsets are constant! *)
+                (* size must be `8` here *)
+                not (ofs + 8 <= ofs2)
+              | _ -> true
+              end) then
+                Some (ath,option_get c_access_info)
+              else None
+              end
+            | _ -> None
+            end
+          with Failure _ ->
+            let _ = Printf.printf "Warning: MK_MEMORY_READ_EQ_BIGDIGIT_CONV: unexpected failure: `%s`\n" (string_of_term (concl ath))in
+            None) assumptions in
+        if larger_reads = []
+        then failwith ("No memory read assumption that encompasses `" ^ (string_of_term t) ^ "`") else
+        (if !equiv_print_log then (
+          Printf.printf "MK_MEMORY_READ_EQ_BIGDIGIT_CONV: found:\n";
+          List.iter (fun th,_ -> Printf.printf "  `%s`\n" (string_of_term (concl th))) larger_reads));
+
+        let extracted_reads = filter_map
+          (fun larger_read_th,
+               (_,ptrofs2,(ptr2,ofs2),size2,_,_) ->
+          try
+            let larger_read = lhs (concl larger_read_th) in
+            if not (is_multiple_of_8 ofs2) then
+              let _ = if !equiv_print_log then
+                Printf.printf "not multiple of 8: `%s`\n"
+                  (string_of_term ofs2) in None else
+
+            let ofsdiff = subtract_num ofs ofs2 in
+            let reldigitofs = option_bind ofsdiff divide_by_8 in
+            let nwords = divide_by_8 size2 in
+
+            begin match reldigitofs, nwords with
+            | Some reldigitofs, Some nwords ->
+
+              (* t = bigdigit t' ofs *)
+              let the_goal = mk_eq(t,mk_comb
+                (`word:num->int64`,list_mk_comb (`bigdigit`,[larger_read;reldigitofs]))) in
+              begin try
+
+                let eq_th = TAC_PROOF((assumptions,the_goal),
+                  (* If t was 'word_add ptr (word_sub ...)', convert it into
+                    'word_add (word (.. - ..))'. *)
+                  (match !canon_wordsub_rule with | None -> ALL_TAC
+                    | Some th -> REWRITE_TAC[th]) THEN
+                  SUBGOAL_THEN (subst [size2,`size2:num`;nwords,`nwords:num`] `8 * nwords = size2`) MP_TAC
+                  THENL [ ARITH_TAC; DISCH_THEN (LABEL_TAC "H_NWORDS") ] THEN
+                  USE_THEN "H_NWORDS" (fun hth -> REWRITE_TAC[REWRITE_RULE[hth]
+                    (SPECL [nwords;ptrofs2] (GSYM BIGNUM_FROM_MEMORY_BYTES))]) THEN
+                  REWRITE_TAC[BIGDIGIT_BIGNUM_FROM_MEMORY] THEN
+                  COND_CASES_TAC THENL [ALL_TAC; SIMPLE_ARITH_TAC (* index must be within bounds *) ] THEN
+                  (* read (memory :> bytes64 (expr1)) s =
+                     read (memory :> bytes64 (expr2)) s *)
+                  REWRITE_TAC[WORD_VAL; WORD_ADD_ASSOC_CONSTS; WORD_ADD_0;
+                      MULT_0; LEFT_SUB_DISTRIB; LEFT_ADD_DISTRIB; GSYM ADD_ASSOC] THEN
+                  (* get the 'expr1 = expr2' *)
+                  AP_THM_TAC THEN AP_TERM_TAC THEN AP_TERM_TAC THEN AP_TERM_TAC
+                  THEN
+                  (SIMPLE_ARITH_TAC ORELSE
+                    (* strip word_add *)
+                    (AP_TERM_TAC THEN AP_TERM_TAC THEN SIMPLE_ARITH_TAC))) in
+                Some (REWRITE_RULE[larger_read_th] eq_th,[])
+              with Failure _ ->
+                (if !equiv_print_log then
+                  Printf.printf "Could not prove `%s`\n" (string_of_term the_goal)); None
+              end
+            | _, _ -> begin
+              (if !equiv_print_log then
+              Printf.printf "cannot simplify offset difference or nwords; (`%s`-`%s`)/8, `%s`/8\n"
+                (string_of_term ofs) (string_of_term ofs2) (string_of_term size2));
+              None
+            end
+            end
+          with Failure _ -> begin
+            Printf.printf "Warning: MK_MEMORY_READ_EQ_BIGDIGIT_CONV: failed while processing `%s`\n" (string_of_term (concl larger_read_th)); None
+          end) larger_reads in
+
+        let _ = if length extracted_reads > 1 then
+          Printf.printf "Warning: There are more than one memory read assumption that encompasses `%s`\n"
+              (string_of_term t) in
+        (if !equiv_print_log then begin
+          Printf.printf "MK_MEMORY_READ_EQ_BIGDIGIT_CONV: extracted:\n";
+          List.iter (fun th,_ ->
+            Printf.printf "  `%s`\n" (string_of_term (concl th))) extracted_reads
+        end);
+        List.hd extracted_reads
+
+      else if constr_name = "bytes128" then
+        (* bytes128 to word_join of two bytes64 reads *)
+        let readl =
+          mk_read_mem_bytes64 memory_component ptrofs state_var in
+        let readh =
+          mk_read_mem_bytes64 memory_component
+            (mk_word_add ptrofs 8) state_var in
+        let construct_bigdigit_rule t =
+          match List.find_opt (fun _,asm -> let c = concl asm in is_eq c && lhs c = t) assumptions with
+          | None -> MK_MEMORY_READ_EQ_BIGDIGIT_CONV t assumptions
+          | Some (_,ath) -> (ath,[]) in
+        let readl_th,extra_ths1 = construct_bigdigit_rule readl in
+        let readh_th,extra_ths2 = construct_bigdigit_rule readh in
+        (* word_join readh_th readl_th *)
+        let the_goal =
+          let readl = rhs (concl readl_th) and readh = rhs (concl readh_th) in
+          mk_eq (t,mk_word_join_128 readh readl) in
+        let result =
+          let new_assums = readl_th::readh_th::(extra_ths1 @ extra_ths2) in
+          TAC_PROOF((map (fun th -> ("",th)) new_assums,the_goal),
+            REWRITE_TAC[el 1 (CONJUNCTS READ_MEMORY_BYTESIZED_SPLIT)] THEN
+            REWRITE_TAC[WORD_ADD_ASSOC_CONSTS] THEN
+            REWRITE_TAC[GSYM ADD_ASSOC] THEN
+            RULE_ASSUM_TAC (REWRITE_RULE[GSYM ADD_ASSOC]) THEN
+            RULE_ASSUM_TAC (CONV_RULE (DEPTH_CONV NUM_ADD_CONV)) THEN
+            CONV_TAC (DEPTH_CONV NUM_ADD_CONV) THEN
+            ASM_REWRITE_TAC[] THEN
+            (if !equiv_print_log then
+              (PRINT_TAC "could not synthesize bytes128 from join(bytes64,bytes64)" THEN
+               PRINT_GOAL_TAC) else ALL_TAC)
+            THEN
+            FAIL_TAC "could not synthesize bytes128 from join(bytes64,bytes64)") in
+        (* Eliminate the assumptions that are readl_th and readh_th, and put assumptions
+           that readl_th and readh_th were relying on. *)
+        let result = PROVE_HYP readh_th (PROVE_HYP readl_th result) in
+        (result, readl_th::readh_th::(extra_ths1 @ extra_ths2))
+
+      else failwith ("cannot deal with size `" ^ (string_of_term size) ^ "`")
+    | None -> failwith "not memory read";;
+
+(*** examples ***)
+
+MK_MEMORY_READ_EQ_BIGDIGIT_CONV `read (memory :> bytes64 x) s`
+    ["",mk_fthm([], `read (memory :> bytes (x,32)) s = k`)];;
+(* (_FALSITY_ |- read (memory :> bytes64 x) s = word (bigdigit k 0), []) *)
+
+MK_MEMORY_READ_EQ_BIGDIGIT_CONV `read (memory :> bytes64 (word_add x (word 16))) s`
+    ["",mk_fthm([], `read (memory :> bytes (word_add x (word 8),32)) s = k`)];;
+(* (_FALSITY_ |- read (memory :> bytes64 (word_add x (word 16))) s = word (bigdigit k 1), []) *)
+
+MK_MEMORY_READ_EQ_BIGDIGIT_CONV `read (memory :> bytes64 (word_add x (word 16))) s`
+    ["",mk_fthm([], `read (memory :> bytes (word_add x (word 8),8 * 4)) s = k`)];;
+(* (_FALSITY_ |- read (memory :> bytes64 (word_add x (word 16))) s = word (bigdigit k 1), []) *)
+
+MK_MEMORY_READ_EQ_BIGDIGIT_CONV `read (memory :> bytes64 (word_add x (word 16))) s`
+    ["",mk_fthm([], `read (memory :> bytes (word_add x (word 8),8 * n)) s = k`);
+     "",mk_fthm([], `n > 3`)];;
+(* (_FALSITY_ |- read (memory :> bytes64 (word_add x (word 16))) s = word (bigdigit k 1), []) *)
+
+MK_MEMORY_READ_EQ_BIGDIGIT_CONV `read (memory :> bytes64 (word_add x (word (8 * 2)))) s`
+    ["",mk_fthm([], `read (memory :> bytes (word_add x (word (8 * 1)),8 * n)) s = k`);
+     "",mk_fthm([], `n > 3`)];;
+(* (_FALSITY_ |- read (memory :> bytes64 (word_add x (word (8 * 2)))) s = word (bigdigit k 1), []) *)
+
+MK_MEMORY_READ_EQ_BIGDIGIT_CONV `read (memory :> bytes64 (word_add x (word (8 * 2)))) s`
+    ["",mk_fthm([], `read (memory :> bytes (x,8 * 2)) s = k`);
+     "",mk_fthm([], `read (memory :> bytes (word_add x (word (8 * 2)),8 * n)) s = k2`);
+     "",mk_fthm([], `read (memory :> bytes (word_add x (word (8 * 4)),8 * n)) s = k2`);
+     "",mk_fthm([], `n > 3`)];;
+(* (_FALSITY_ |- read (memory :> bytes64 (word_add x (word (8 * 2)))) s = word (bigdigit k2 0), []) *)
+
+MK_MEMORY_READ_EQ_BIGDIGIT_CONV `read (memory :> bytes64 (word_add x (word (8 * i)))) s`
+    ["",mk_fthm ([],`read (memory :> bytes (x,8 * n)) s = k`);
+     "",mk_fthm ([],`i < n`)];;
+(* (_FALSITY_ |- read (memory :> bytes64 (word_add x (word (8 * i)))) s =
+    word (bigdigit k i),
+ []) *)
+
+MK_MEMORY_READ_EQ_BIGDIGIT_CONV
+    `read (memory :> bytes64 (word_add z (word (8 * (4 * k4 - 4) + 24)))) s`
+    ["",mk_fthm([], `read (memory :> bytes (word_add z (word (8 * (4 * k4 - 4))),8 * 4)) s = a`);
+     "",mk_fthm([], `read (memory :> bytes (z,8 * (4 * k4 - 4))) s = b`)];;
+(* (_FALSITY_ |- read (memory :> bytes64 (word_add z (word (8 * (4 * k4 - 4) + 24)))) s =
+    word (bigdigit a 3),
+ []) *)
+
+MK_MEMORY_READ_EQ_BIGDIGIT_CONV
+    `read (memory :> bytes64
+      (word_add m_precalc (word_sub (word (8 * 12 * (k4 - 1))) (word 8))))
+     s`
+    ["",mk_fthm([],`read (memory :> bytes (m_precalc,8 * 12 * (k4 - 1))) s = k`);
+     "",mk_fthm([],`1 < k4`)];;
+(* (_FALSITY_
+ |- read
+    (memory :>
+     bytes64
+     (word_add m_precalc (word_sub (word (8 * 12 * (k4 - 1))) (word 8))))
+    s =
+    word (bigdigit k (12 * (k4 - 1) - 1)),
+ [])
+*)
+
+MK_MEMORY_READ_EQ_BIGDIGIT_CONV
+  `read (memory :> bytes64 (word_add z (word (8 * 4 * (i' + 1) + 24)))) s`
+  ["", mk_fthm([],`read (memory :> bytes (word_add z (word (8 * 4 * (i' + 1))),32)) s =
+     a`)];;
+(* (_FALSITY_
+ |- read (memory :> bytes64 (word_add z (word (8 * 4 * (i' + 1) + 24)))) s =
+    word (bigdigit a 3),
+ [])
+*)
+
+(** bytes128 **)
+
+MK_MEMORY_READ_EQ_BIGDIGIT_CONV `read (memory :> bytes128 (word_add x (word (8 * 2)))) s`
+    ["",mk_fthm ([],`read (memory :> bytes (x,8 * 2)) s = k`);
+     "",mk_fthm ([],`read (memory :> bytes (word_add x (word (8 * 2)),8 * n)) s = k2`);
+     "",mk_fthm ([],`read (memory :> bytes (word_add x (word (8 * 4)),8 * n)) s = k2`);
+     "",mk_fthm ([],`n > 3`)];;
+(* (_FALSITY_
+ |- read (memory :> bytes128 (word_add x (word (8 * 2)))) s =
+    word_join (word (bigdigit k2 1)) (word (bigdigit k2 0)),
+ [_FALSITY_
+  |- read (memory :> bytes64 (word_add x (word (8 * 2)))) s =
+     word (bigdigit k2 0);
+  _FALSITY_
+  |- read (memory :> bytes64 (word_add x (word (8 * 2 + 8)))) s =
+     word (bigdigit k2 1)])
+*)
+
+MK_MEMORY_READ_EQ_BIGDIGIT_CONV `read (memory :> bytes128 (word_add m (word ((8 * 4 * i + 32) + 16)))) s`
+    ["",mk_fthm ([],`read (memory :> bytes64 (word_add m (word ((8 * 4 * i + 32) + 24))))
+      s =
+      k1`);
+     "",mk_fthm ([],`read (memory :> bytes64 (word_add m (word ((8 * 4 * i + 32) + 16))))
+      s =
+      k2`)];;
+(* (_FALSITY_
+ |- read (memory :> bytes128 (word_add m (word ((8 * 4 * i + 32) + 16)))) s =
+    word_join k1 k2,
+ [_FALSITY_
+  |- read (memory :> bytes64 (word_add m (word ((8 * 4 * i + 32) + 16)))) s =
+     k2;
+  _FALSITY_
+  |- read (memory :> bytes64 (word_add m (word ((8 * 4 * i + 32) + 24)))) s =
+     k1]) *)
+
+(** DIGITIZE_MEMORY_READS will return (thm * (thm option)) where
+    1. the first thm is the simplified read statements using bigdigit and
+       conjoined with /\
+    2. newly constructed equalities between memory reads and bigdigits, returned
+       as the second component of MK_MEMORY_READ_EQ_BIGDIGIT_CONV, and conjoined
+       with /\. **)
+let DIGITIZE_MEMORY_READS th state_update_th =
+  fun (asl,w):(thm * (thm option)) ->
+    let new_memory_reads: thm list ref = ref [] in
+    let ths = map (fun th2 ->
+      try
+        (* rhs is the memory read to digitize *)
+        let the_rhs = rhs (concl th2) in
+        let th2',smaller_read_ths = MK_MEMORY_READ_EQ_BIGDIGIT_CONV the_rhs asl in
+        let _ = new_memory_reads := th2'::(smaller_read_ths @ !new_memory_reads) in
+        GEN_REWRITE_RULE RAND_CONV [th2'] th2
+      with Failure _ -> th2) (CONJUNCTS th) in
+
+    (* new_memory_reads will still use the 'previous' state. update it. *)
+    new_memory_reads := map
+      (fun th -> try STATE_UPDATE_RULE ([NONOVERLAPPING_SIMPLE_64],[])
+                         state_update_th th with Failure _ -> th)
+      !new_memory_reads;
+
+    let res_th = end_itlist CONJ ths in
+    let newmems_th = if !new_memory_reads = [] then None
+      else Some (end_itlist CONJ !new_memory_reads) in
+    let _ = if !equiv_print_log then
+       (Printf.printf "original th: %s\n" (string_of_term (concl th));
+        Printf.printf "rewritten th: %s\n" (string_of_term (concl res_th));
+        Printf.printf "new_memory_reads th: %s\n"
+          (if newmems_th = None then "None" else
+            ("Some " ^ (string_of_term (concl (option_get newmems_th)))))) in
+    res_th,newmems_th;;
+
+
+(* ------------------------------------------------------------------------- *)
+(* Manipulates assumptions.                                                  *)
+(* ------------------------------------------------------------------------- *)
+
+(* A variant of DISCARD_OLDSTATE_TAC which receives a list of state names
+   to preserve, 'ss'.
+   If clean_old_abbrevs is true, transitively remove assumptions that
+   were using the removed variables (rhs of the removed assumptions) *)
+let DISCARD_OLDSTATE_AGGRESSIVELY_TAC ss (clean_old_abbrevs:bool) =
+  let rec unbound_statevars_of_read bound_svars tm =
+    match tm with
+      Comb(Comb(Const("read",_),cmp),s) ->
+      let sname = name_of s in
+      if mem sname bound_svars then [] else [sname]
+    | Comb(a,b) -> union (unbound_statevars_of_read bound_svars a)
+                         (unbound_statevars_of_read bound_svars b)
+    | Abs(v,t) ->
+      let vname = name_of v in
+      unbound_statevars_of_read (vname::bound_svars) t
+    | _ -> [] in
+  let is_read (tm:term): bool =
+    match tm with
+    Comb(Comb(Const("read",_),_),_) -> true
+    | _ -> false in
+  let old_abbrevs: term list ref = ref [] in
+  (* Erase all 'read c s' equations from assumptions whose s does not
+     belong to ss. *)
+  DISCARD_ASSUMPTIONS_TAC(
+    fun thm ->
+      let us = unbound_statevars_of_read [] (concl thm) in
+      if us = [] || subset us ss then false
+      else
+        (* Accumulate rhses of old equalities that are abbreviations *)
+        ((if clean_old_abbrevs && is_eq (concl thm) then
+          let lhs, rhs = dest_eq (concl thm) in
+          if is_var rhs then old_abbrevs := rhs::!old_abbrevs
+          else ()
+        else (); true))) THEN
+  (if not clean_old_abbrevs then ALL_TAC else
+   (* Transitively remove assumptions that use variables in old_abbrevs. *)
+   W(fun (_,_) ->
+    MAP_EVERY (fun (old_abbrev_var:term) ->
+      fun (asl,g) ->
+        (* If the old abbrev var is used by another 'read', don't remove it. *)
+        if List.exists (fun _,asm ->
+              let asm = concl asm in
+              is_eq asm && is_read (fst (dest_eq asm)) && vfree_in old_abbrev_var asm)
+            asl then
+          ALL_TAC (asl,g)
+        else
+          DISCARD_ASSUMPTIONS_TAC(fun thm -> vfree_in old_abbrev_var (concl thm)) (asl,g))
+      !old_abbrevs));;
+
+(* Assumption stash/recovery tactic. *)
+let stashed_asms: (string * thm) list list ref = ref [];;
+
+let reads_state (c:term) (store_state_name:string ref): bool =
+  match c with
+  | Comb (Comb (Const ("=",_),
+      Comb (Comb (Const ("read", _),_), Var (stname, _))),
+      _) -> store_state_name := stname; true
+  | Comb (Comb (Const
+      ("read", _),_),
+      Var (stname, _)) ->
+    (* flags are boolean *)
+    store_state_name := stname; true
+  | Comb (Const ("~", _),
+      Comb
+        (Comb (Const ("read", _),
+          _), Var (stname, _))) ->
+    store_state_name := stname; true
+  | Comb (Comb (Comb
+    (Const ("aligned_bytes_loaded",_), Var (stname, _)),_),_) ->
+    store_state_name := stname; true
+  | Comb (Comb (Comb
+    (Const ("bytes_loaded",_), Var (stname, _)),_),_) ->
+    store_state_name := stname; true
+  | _ ->
+    maychange_term c &&
+      (let s' = snd (dest_comb c) in is_var s' &&
+        (store_state_name := name_of s'; true));;
+
+(* Stash `read e s = r`, `aligned_bytes_loaded s ...` and `(MAYCHANGE ...) ... s`
+   where s is a member of stnames. *)
+let STASH_ASMS_OF_READ_STATES (stnames:string list): tactic =
+  fun (asl,g) ->
+    let matched_asms, others = List.partition (fun (name,th) ->
+        let s = ref "" in
+        reads_state (concl th) s && mem !s stnames)
+      asl in
+    stashed_asms := matched_asms::!stashed_asms;
+    ALL_TAC (others,g);;
+
+let RECOVER_ASMS_OF_READ_STATES: tactic =
+  fun (asl,g) ->
+    let a = List.hd !stashed_asms in
+    stashed_asms := List.tl !stashed_asms;
+    ALL_TAC (asl @ a, g);;
+
+
+let mk_fresh_temp_name =
+  let counter: int ref = ref 0 in
+  fun () ->
+    let i = !counter in
+    counter := (i + 1);
+    "temp_" ^ (string_of_int i);;
+
+(* Given readth,readth2 = (`|- read c s = e1`, `|- read c' s' = e2`),
+   prove e1 = e2 using WORD_RULE, abbreviate e1 and e2 as a
+   fresh variable, and assume the abbreviated readth and readth2 as well as
+   `e1 = freshvar` (if forget_expr is false).
+   If forget_expr is set, do not add 'e1 = abbrev_var' as an assumption.
+   Note that forget_expr is rarely false; it is false in special cases
+   like when `c` is the SP register.
+   For flag reads, which are simply `|- read ...`, just assumes them.
+
+   If e1 is not equal to e2, but e1 is `word_join x e1'` and e2 is `word_join y
+   e2'`, try to solve `e1' = e2'` and abbreviate `e1' = freshvar`. This happens
+   in the cases like SSE registers whose updates only affect the lower bits and
+   a user only wants to state that equivalence of upper bits in their inputs is
+   not guaranteed.
+*)
+let ABBREV_READS_TAC (readth,readth2:thm*thm) (forget_expr:bool):tactic =
+  W(fun (asl,g) ->
+    let eq,eq2 = concl readth,concl readth2 in
+    if not (is_eq eq)
+    then (* the flag reads case *)
+      MAP_EVERY STRIP_ASSUME_TAC [readth;readth2]
+    else
+      (* eq is: `read elem s = e` *)
+      let lhs,rhs = dest_eq eq in
+      let _,rhs2 = dest_eq eq2 in
+      (* If lhs is PC update, don't abbreviate it. Or, if rhs is already a
+        variable, don't abbreviate it again. Don't try to prove the rhs of
+        eq2. *)
+      if is_read_pc lhs || is_read_events lhs || is_var rhs
+      then MAP_EVERY STRIP_ASSUME_TAC [readth;readth2]
+      else
+        let vname = mk_fresh_temp_name() in
+        let _ = if !equiv_print_log then
+          Printf.printf "Abbreviating `%s` (which is `%s`) as \"%s\".. (forget_expr: %b)\n"
+            (string_of_term rhs) (string_of_term lhs) vname forget_expr
+          in
+
+        (* Abbreviate the RHS of readth2 *)
+        let readth2,abbreviating_expr =
+          (if rhs2 = rhs then readth2,rhs else
+          try
+            let r = WORD_RULE (mk_eq(rhs2,rhs)) in
+            let _ = if !equiv_print_log then
+              Printf.printf "\t- Abbreviating `%s` as \"%s\" as well\n"
+                (string_of_term rhs2) vname in
+            (REWRITE_RULE[r] readth2),rhs
+          with Failure _ ->
+            (* Inspect if this is the result of updating lower bits of the
+               registers. *)
+          (try
+            let wj1,whi1,wlo1 =
+              match strip_ncomb 2 rhs with
+                wj1,[whi1;wlo1] -> wj1,whi1,wlo1
+              | _ -> failwith "" in
+            let wj2,whi2,wlo2 =
+              match strip_ncomb 2 rhs2 with
+                wj2,[whi2;wlo2] -> wj2,whi2,wlo2
+              | _ -> failwith "" in
+            if wj1 <> wj2 then failwith "" else
+            if wlo1 = wlo2 then readth2,wlo1 else
+            let r = WORD_RULE (mk_eq(wlo2,wlo1)) in
+            let _ = if !equiv_print_log then
+              Printf.printf "\t- Abbreviating `%s` as \"%s\" instead\n"
+                (string_of_term wlo2) vname in
+            (REWRITE_RULE[r] readth2),wlo1
+          with Failure _ ->
+            Printf.printf "\t- Error: WORD_RULE could not prove `%s = %s`\n"
+              (string_of_term rhs2) (string_of_term rhs);
+            Printf.printf "If the two expressions seem semantically equivalent,";
+            Printf.printf " please consider adding a conversion or rewrite rule";
+            Printf.printf " to extra_word_CONV:\n";
+            Printf.printf "e.g.,  extra_word_CONV := [GEN_REWRITE_CONV I [my_thm]] @ !extra_word_CONV;;\n";
+            Printf.printf "e.g.2, extra_word_CONV := [WORD_SIMPLE_SUBWORD_CONV] @ !extra_word_CONV;;\n";
+            failwith "ABBREV_READS_TAC")) in
+        (* Now introduce abbreviated writes, eventually *)
+        let fresh_var = mk_var (vname,type_of abbreviating_expr) in
+        let abbrev_th = prove(mk_exists(fresh_var,mk_eq(abbreviating_expr,fresh_var)),
+          EXISTS_TAC abbreviating_expr THEN REFL_TAC) in
+        CHOOSE_THEN (fun abbrev_th ->
+            ASSUME_TAC (REWRITE_RULE[abbrev_th] readth) THEN
+            ASSUME_TAC (REWRITE_RULE[abbrev_th] readth2) THEN
+            (if forget_expr then ALL_TAC else ASSUME_TAC abbrev_th))
+          abbrev_th);;
+
+let get_read_component (targ:term): term option =
+  let targ = if is_eq targ then lhand targ else targ in
+  match targ with
+  | Comb(Comb(Const("read",_),comp),_) -> Some comp
+  | _ -> None;;
+
+(* Given eqth = (`|- read c s = rhs`), abbreviate rhs as a fresh variable.
+   assume the abbreviated eqth, and add the abbreviation `rhs = fresh_var`
+   to append_to.
+   append_to is a list of `rhs = fresh_var` equalities.
+   The abbreviated formula `rhs = x_fresh` is not added as assumption.
+*)
+let ABBREV_READ_TAC (eqth:thm) (append_to:thm list ref):tactic =
+  W(fun (asl,g) ->
+    let eq = concl eqth in
+    if not (is_eq eq) then
+      (Printf.printf "ABBREV_READ_TAC: not equality, passing..: `%s`\n"
+          (string_of_term eq);
+       ASSUME_TAC eqth) else
+    (* eq is: `read elem s = e` *)
+    let lhs,rhs = dest_eq eq in
+    (* If lhs is PC update, don't abbreviate it *)
+    if is_read_pc lhs || is_read_events lhs then ASSUME_TAC eqth
+    else
+      if get_read_component lhs = None then failwith "LHS is not read ..?" else
+      let vname = mk_fresh_temp_name() in
+      if !equiv_print_log then begin
+        Printf.printf "Abbreviating `%s` (which is `%s`) as \"%s\"..\n"
+            (string_of_term rhs) (string_of_term lhs) vname
+      end;
+
+      let fresh_var = mk_var (vname,type_of rhs) in
+      let abbrev_th = prove(mk_exists(fresh_var,mk_eq(rhs,fresh_var)),
+        EXISTS_TAC rhs THEN REFL_TAC) in
+      CHOOSE_THEN (fun abbrev_th ->
+        ASSUME_TAC (REWRITE_RULE[abbrev_th] eqth) THEN
+        (fun (asl,g) ->
+          append_to := abbrev_th::!append_to;
+          ALL_TAC(asl,g))) abbrev_th);;
+
+
+(* Clear unused abbreviations in assumptions.
+   Do not clear it if its name ends with "DO_NOT_CLEAR". *)
+let CLEAR_UNUSED_ABBREVS =
+  fun (asl,w) ->
+    (* asl_with_flags: (keep it?, (abbrev var, asm name, th)) array *)
+    let asl_with_flags = ref (Array.of_list (map
+      (fun (asmname,th) -> true, (None, asmname, th)) asl)) in
+
+    (* From assumptions, find those that abbreviates to the_var *)
+    let find_indices (the_var:term): int list =
+      let res = ref [] in
+      for i = 0 to Array.length !asl_with_flags - 1 do
+        let _,(abbrev_var,_,_) = !asl_with_flags.(i) in
+        if abbrev_var = Some the_var then
+          res := i::!res
+      done;
+      !res in
+
+    (* do BFS to mark assumptions that must not be cleared *)
+    let alive_queue = ref [] in
+    for i = 0 to Array.length !asl_with_flags - 1 do
+      let _,(_,asmname,th) = !asl_with_flags.(i) in
+      let dummy_ref = ref "" in
+      if reads_state (concl th) dummy_ref then
+        (* assumptions that read states should not be removed *)
+        alive_queue := i::!alive_queue
+      else if is_eq (concl th) && is_var (rand (concl th)) &&
+              not (ends_with "DO_NOT_CLEAR" asmname) then
+        (* if th is 'e = var', mark it as initially dead & extract rhs var *)
+        !asl_with_flags.(i) <- (false, (Some (rand (concl th)), asmname, th))
+      else
+        (* if th is not 'e = var', don't remove this because
+           we don't know what this is *)
+        alive_queue := i::!alive_queue
+    done;
+
+    (* Start BFS *)
+    while List.length !alive_queue <> 0 do
+      let i = List.hd !alive_queue in
+      alive_queue := List.tl !alive_queue;
+      let itm = !asl_with_flags.(i) in
+      if fst itm then begin
+        (* mark i'th item as alive, and propagate this aliveness to the
+           used variables *)
+        !asl_with_flags.(i) <- (true, snd itm);
+        let _,_,asm = snd itm in
+        let freevars = frees (concl asm) in
+        List.iter (fun fvar ->
+            let next_asms = find_indices fvar in
+            alive_queue := !alive_queue @ next_asms)
+          freevars
+      end
+    done;
+
+    let new_asl = ref [] in
+    for i = Array.length !asl_with_flags - 1 downto 0 do
+      let is_alive,(_,name,th) = !asl_with_flags.(i) in
+      if is_alive then
+        new_asl := (name,th)::!new_asl
+    done;
+
+    Printf.printf "CLEAR_UNUSED_ABBREVS: cleared %d/%d assumptions\n%!"
+      (List.length asl - List.length !new_asl) (List.length asl);
+
+    ALL_TAC (!new_asl,w);;
+
+
+(* ------------------------------------------------------------------------- *)
+(* Tactics that do not perform symbolic execution but are necessary to       *)
+(* initiate/finalize program equivalence proofs.                             *)
+(* ------------------------------------------------------------------------- *)
+
+(* Given a goal whose conclusion is `read (write ...) .. = v`, apply
+   COMPONENT_READ_OVER_WRITE_CONV to its LHS. *)
+let COMPONENT_READ_OVER_WRITE_LHS_TAC: tactic =
+  fun (asl,g) ->
+    ONCE_REWRITE_TAC[COMPONENT_READ_OVER_WRITE_CONV (fst (dest_eq g))] (asl,g);;
+
+
+let WRITE_ELEMENT_BYTES8 = prove(
+  `!loc (z:(8)word) s. write (element loc) z s = write (bytes8 loc) z s`,
+  REWRITE_TAC[bytes8;WRITE_COMPONENT_COMPOSE;asword;through;write;ARITH_RULE`1=SUC 0`;bytes;WORD_ADD_0;limb] THEN
+  CONV_TAC NUM_REDUCE_CONV THEN
+  IMP_REWRITE_TAC[DIV_1;MOD_LT] THEN
+  REWRITE_TAC[WORD_VAL;ARITH_RULE`256=2 EXP 8`;VAL_BOUND;GSYM DIMINDEX_8]);;
+
+(* A bytelist is recursively an element at loc followed by a bytelist at
+   loc + 1. A read-after-write proof therefore needs the head element to be
+   orthogonal to the tail. Since word addresses wrap, that separation depends
+   on the list fitting within the address space. The helper below proves the
+   orthogonality needed by the inductive step.
+
+   The read-after-write theorems retain the existing strict length premise.
+   For a nonempty list, it implies the helper's
+
+     1 + LENGTH tail <= 2 EXP dimindex(:N)
+
+   premise. The _GEN theorems derive this modulus from the address type.
+   The MEMORY variants lift the result through any valid memory component.
+   The APPEND variants state that reading the prefix after writing an appended
+   list returns the original prefix.
+
+   The unsuffixed theorems specialize these results to the existing memory or
+   int64 address type and reduce dimindex(:64) to the literal 64, preserving
+   the previous theorem statements used by ARM and x86 automation. *)
+let ORTHOGONAL_COMPONENTS_ELEMENT_BYTELIST = prove
+ (`!(loc:N word) n.
+      1 + n <= 2 EXP dimindex(:N)
+      ==> orthogonal_components
+            (element loc)
+            (bytelist(word_add loc (word 1),n))`,
+  REPEAT STRIP_TAC THEN
+  REWRITE_TAC[GSYM BYTES8_ELEMENT; bytes8; bytelist] THEN
+  MATCH_MP_TAC ORTHOGONAL_COMPONENTS_COMPOSE_LEFT THEN
+  REWRITE_TAC[ORTHOGONAL_COMPONENTS_BYTES] THEN
+  REWRITE_TAC[VAL_WORD_ADD;VAL_WORD_1;NONOVERLAPPING_MODULO_RMOD] THEN
+  MATCH_MP_TAC NONOVERLAPPING_MODULO_OFFSET_SIMPLE_RIGHT THEN
+  ASM_ARITH_TAC);;
+
+let READ_OVER_WRITE_BYTELIST_GEN =
+  prove(`!s (loc:N word) (l:((8)word)list).
+      LENGTH l < 2 EXP dimindex(:N)
+      ==> read (bytelist (loc,LENGTH l))
+        (write (bytelist (loc,LENGTH l)) l s) = l`,
+    REPEAT GEN_TAC THEN
+    MAP_EVERY SPEC_TAC [
+      `loc:N word`,`loc:N word`;`s:N word->(8)word`,`s:N word->(8)word`;
+      `l:((8)word)list`,`l:((8)word)list`] THEN
+    MATCH_MP_TAC list_INDUCT THEN
+    CONJ_TAC THENL [
+      REWRITE_TAC[LENGTH;READ_COMPONENT_COMPOSE;bytelist_clauses];
+
+      REPEAT GEN_TAC THEN STRIP_TAC THEN
+      REWRITE_TAC[LENGTH;bytelist_clauses] THEN
+      REPEAT GEN_TAC THEN STRIP_TAC THEN
+      REWRITE_TAC[CONS_11] THEN
+      CONJ_TAC THENL [
+        REWRITE_TAC[element;write];
+
+        REWRITE_TAC[WRITE_ELEMENT_BYTES8] THEN
+        IMP_REWRITE_TAC[READ_WRITE_ORTHOGONAL_COMPONENTS] THEN
+        CONJ_TAC THENL [ASM_ARITH_TAC; ALL_TAC] THEN
+        ONCE_REWRITE_TAC[ORTHOGONAL_COMPONENTS_SYM] THEN
+        MATCH_MP_TAC ORTHOGONAL_COMPONENTS_ELEMENT_BYTELIST THEN
+        ASM_ARITH_TAC
+      ]
+    ]);;
+
+let READ_OVER_WRITE_BYTELIST =
+  CONV_RULE (ONCE_DEPTH_CONV DIMINDEX_CONV)
+    (INST_TYPE [`:64`,`:N`] READ_OVER_WRITE_BYTELIST_GEN);;
+
+let READ_OVER_WRITE_MEMORY_BYTELIST_GEN =
+  prove(`!mem:(S,N word->byte)component.
+      valid_component mem
+      ==> !s (loc:N word) (l:((8)word)list).
+          LENGTH l < 2 EXP dimindex(:N)
+          ==> read (mem :> bytelist (loc,LENGTH l))
+            (write (mem :> bytelist (loc,LENGTH l)) l s) = l`,
+  REPEAT STRIP_TAC THEN
+  REWRITE_TAC[component_compose;read;write;o_THM] THEN
+  IMP_REWRITE_TAC[READ_WRITE_VALID_COMPONENT;
+                  READ_OVER_WRITE_BYTELIST_GEN]);;
+
+let READ_OVER_WRITE_MEMORY_BYTELIST =
+  CONV_RULE (ONCE_DEPTH_CONV DIMINDEX_CONV)
+    (MATCH_MP
+      (ISPEC `memory` READ_OVER_WRITE_MEMORY_BYTELIST_GEN)
+      (VALID_COMPONENT_RULE `memory`));;
+
+let READ_OVER_WRITE_APPEND_BYTELIST_GEN =
+  prove(`!s (loc:N word) (l:((8)word)list) (l':((8)word)list).
+      LENGTH (APPEND l l') < 2 EXP dimindex(:N)
+      ==> read (bytelist (loc,LENGTH l))
+        (write (bytelist (loc,LENGTH (APPEND l l'))) (APPEND l l') s) = l`,
+    REPEAT GEN_TAC THEN
+    MAP_EVERY SPEC_TAC [
+      `loc:N word`,`loc:N word`;`s:N word->(8)word`,`s:N word->(8)word`;
+      `l:((8)word)list`,`l:((8)word)list`] THEN
+    MATCH_MP_TAC list_INDUCT THEN
+    CONJ_TAC THENL [
+      REWRITE_TAC[APPEND;LENGTH;READ_COMPONENT_COMPOSE;bytelist_clauses];
+
+      REPEAT GEN_TAC THEN STRIP_TAC THEN
+      REWRITE_TAC[APPEND;LENGTH;bytelist_clauses] THEN
+      REPEAT GEN_TAC THEN
+      GEN_REWRITE_TAC (ONCE_DEPTH_CONV o LAND_CONV) [ARITH_RULE`SUC n=1+n`] THEN
+      STRIP_TAC THEN
+      REWRITE_TAC[CONS_11] THEN
+      CONJ_TAC THENL [
+        REWRITE_TAC[element;write];
+
+        REWRITE_TAC[WRITE_ELEMENT_BYTES8] THEN
+        IMP_REWRITE_TAC[READ_WRITE_ORTHOGONAL_COMPONENTS] THEN
+        CONJ_TAC THENL [ASM_ARITH_TAC; ALL_TAC] THEN
+        RULE_ASSUM_TAC(REWRITE_RULE[LENGTH_APPEND]) THEN
+        ONCE_REWRITE_TAC[ORTHOGONAL_COMPONENTS_SYM] THEN
+        MATCH_MP_TAC ORTHOGONAL_COMPONENTS_ELEMENT_BYTELIST THEN
+        ASM_ARITH_TAC
+      ]
+    ]);;
+
+let READ_OVER_WRITE_APPEND_BYTELIST =
+  CONV_RULE (ONCE_DEPTH_CONV DIMINDEX_CONV)
+    (INST_TYPE [`:64`,`:N`] READ_OVER_WRITE_APPEND_BYTELIST_GEN);;
+
+let READ_OVER_WRITE_MEMORY_APPEND_BYTELIST_GEN =
+  prove(`!mem:(S,N word->byte)component.
+      valid_component mem
+      ==> !s (loc:N word) (l:((8)word)list) (l':((8)word)list).
+          LENGTH (APPEND l l') < 2 EXP dimindex(:N)
+          ==> read (mem :> bytelist (loc,LENGTH l))
+            (write (mem :> bytelist (loc,LENGTH (APPEND l l')))
+              (APPEND l l') s) = l`,
+  REPEAT STRIP_TAC THEN
+  REWRITE_TAC[component_compose;read;write;o_THM] THEN
+  IMP_REWRITE_TAC[READ_WRITE_VALID_COMPONENT;
+                  READ_OVER_WRITE_APPEND_BYTELIST_GEN]);;
+
+let READ_OVER_WRITE_MEMORY_APPEND_BYTELIST =
+  CONV_RULE (ONCE_DEPTH_CONV DIMINDEX_CONV)
+    (MATCH_MP
+      (ISPEC `memory` READ_OVER_WRITE_MEMORY_APPEND_BYTELIST_GEN)
+      (VALID_COMPONENT_RULE `memory`));;
+
+
+let prove_conj_of_eq_reads_unfold_rules = ref [bytes_loaded];;
+
+(* An ad-hoc tactic for proving a goal
+    `read c1 s = .. /\ read c2 s = .. /\ ...`. This also accepts
+   a clause which is a predicate 'aligned_bytes_loaded'.
+   Clauses which cannot not be proven with this tactic will remain as a goal. *)
+let PROVE_CONJ_OF_EQ_READS_TAC execth =
+  (* Given a goal `read c (updated state) = e`, EXPAND_RHS_TAC tries to find assumption
+     `e' = e`. If there are multiple such assumptions. find
+     `read c' s' = e` such that the 'root' state of updated state is s', and
+     and expands e as follows: `read c (updated state) = read c' s'`.
+     If e is a variable and there is `e' = e`, just use this regardless of s'. *)
+  let EXPAND_RHS_TAC: tactic =
+    (* t must be always `read ...` or a state variable *)
+    let rec get_root_state t =
+      if is_comb t then get_root_state (snd (dest_comb t))
+      else if is_var t then t
+      else failwith ("get_root_state: unknown form: " ^ (string_of_term t)) in
+    fun (asl,w) ->
+      let rhs_expr = rhs w in
+      let eqths = filter (fun _,th -> let c = concl th in
+        is_eq c && rhs c = rhs_expr) asl in
+      match eqths with
+      | [] -> failwith "PROVE_CONJ_OF_EQ_READS_TAC"
+      | (_,eqth)::[] ->       GEN_REWRITE_TAC RAND_CONV [GSYM eqth] (asl,w)
+      | eqths ->
+        let state = get_root_state (lhs w) in
+        let _,eqth = find (fun _,th -> let c = concl th in
+          let the_lhs = lhs c in snd (dest_comb the_lhs) = state) eqths in
+        GEN_REWRITE_TAC RAND_CONV [GSYM eqth] (asl,w) in
+
+  REPEAT CONJ_TAC THEN
+  let main_tac =
+    (* for register updates *)
+    (REPEAT COMPONENT_READ_OVER_WRITE_LHS_TAC THEN
+      (REFL_TAC ORELSE (ASM_REWRITE_TAC[] THEN NO_TAC))) ORELSE
+    (* for register updates, with rhses abbreviated *)
+    (EXPAND_RHS_TAC THEN REPEAT COMPONENT_READ_OVER_WRITE_LHS_TAC THEN REFL_TAC)
+    ORELSE
+    (* for memory updates *)
+    (ASM_REWRITE_TAC(!prove_conj_of_eq_reads_unfold_rules) THEN
+      (EXPAND_RHS_TAC THEN
+       ((REWRITE_TAC([LENGTH_APPEND;fst execth;
+                     PAIR_EQ;BIGNUM_FROM_MEMORY_BYTES] @
+                     !prove_conj_of_eq_reads_unfold_rules) THEN
+         REPEAT CONJ_TAC THEN READ_OVER_WRITE_ORTHOGONAL_TAC) ORELSE
+        (* sometimes the rewrites are not necessary.. *)
+        READ_OVER_WRITE_ORTHOGONAL_TAC))
+      (* sometimes EXPAND_RHS_TAC is not necessary.. *)
+      ORELSE
+        (REWRITE_TAC([LENGTH_APPEND;fst execth;
+                     PAIR_EQ;BIGNUM_FROM_MEMORY_BYTES] @
+                     !prove_conj_of_eq_reads_unfold_rules) THEN
+        REPEAT CONJ_TAC THEN READ_OVER_WRITE_ORTHOGONAL_TAC)) ORELSE
+    (* for aligned_bytes_loaded *)
+    (ASM_REWRITE_TAC(!prove_conj_of_eq_reads_unfold_rules) THEN
+      (MATCH_MP_TAC READ_OVER_WRITE_MEMORY_APPEND_BYTELIST ORELSE
+      MATCH_MP_TAC READ_OVER_WRITE_MEMORY_BYTELIST) THEN
+      REWRITE_TAC([LENGTH_APPEND;fst execth] @ !prove_conj_of_eq_reads_unfold_rules) THEN
+      ARITH_TAC) in
+  TRY (main_tac ORELSE (MATCH_MP_TAC EQ_SYM THEN main_tac));;
+
+
+(* ------------------------------------------------------------------------- *)
+(* Functions that create statements that are related to program equivalence. *)
+(* ------------------------------------------------------------------------- *)
+
+(* mk_equiv_statement creates a term
+   `!pc pc2 <other quantifiers>.
+      assum ==> ensures2 [opsem_const]
+        (\(s,s2). [bytes_loaded_pred] s (word pc) mc1 /\
+                  read [pc_component] s = word (pc+pc_ofs1) /\
+                  [bytes_loaded_pred] s2 (word pc2) mc2 /\
+                  read [pc_component] s2 = word (pc2+pc_ofs2) /\
+                  equiv_in (s,s2))
+        (\(s,s2). [bytes_loaded_pred] s (word pc) mc1 /\
+                  read [pc_component] s = word (pc+pc_ofs1_to) /\
+                  [bytes_loaded_pred] s2 (word pc2) mc2 /\
+                  read [pc_component] s2 = word (pc2+pc_ofs2_to) /\
+                  equiv_out (s,s2))
+        (\(s,s2) (s',s2'). maychange1 s s' /\ maychange2 s2 s2')
+        fnsteps1
+        fnsteps2`
+  equiv_in and equiv_out's first two universal quantifiers must be state_ty.
+
+  Enable equiv_print_log := true for debugging.
+
+  mc1_data and mc2_data are set to 'Some ...' if mc1 or mc2 has constant data
+  appended at the text section after mc1 and mc2.
+*)
+let mk_equiv_statement_template
+    (* These inputs are architecture-specific *)
+    (state_ty:hol_type) (opsem_const:term) (bytes_loaded_const:term)
+    (pc_reg_comp:term)
+
+    (assum:term) (equiv_in:thm) (equiv_out:thm)
+    (mc1:thm) (data1:thm option) (pc_ofs1:int) (pc_ofs1_to:int)
+    (maychange1:term)
+    (mc2:thm) (data2:thm option) (pc_ofs2:int) (pc_ofs2_to:int)
+    (maychange2:term)
+    (fnsteps1:term) (fnsteps2:term):term =
+  let maychange_ty = itlist mk_fun_ty [state_ty;state_ty] `:bool` in
+  let _ = List.map2 type_check
+      [assum;maychange1;maychange2]
+      [`:bool`;maychange_ty;maychange_ty] in
+  let _,pc_component_tys = dest_type (type_of pc_reg_comp) in
+  let pc_ty = last pc_component_tys in
+  let pc_index_ty = dest_word_ty pc_ty in
+  let word_pc = inst [pc_index_ty,`:A`] `word:num->A word` in
+
+  let quants_in,equiv_in_body = strip_forall (concl equiv_in) in
+  let quants_out,equiv_out_body = strip_forall (concl equiv_out) in
+  let _ = if !equiv_print_log then
+    Printf.printf "quants_in: %s\nquants_out: %s\n%!"
+      (String.concat ", " (List.map string_of_term quants_in))
+      (String.concat ", " (List.map string_of_term quants_out)) in
+  (* equiv_in and equiv_out's first two universal quantifiers must be states. *)
+  let quants_in_states,quants_in = takedrop 2 quants_in in
+  let quants_out_states,quants_out = takedrop 2 quants_out in
+  let _ = List.map2 type_check
+    (quants_in_states @ quants_out_states)
+    [state_ty;state_ty;state_ty;state_ty] in
+  let quants = union quants_in quants_out in
+  let quants = [`pc:num`;`pc2:num`] @ quants in
+  (* There might be more free variables in 'assum'. Let's add them too. *)
+  let quants = quants @
+    (List.filter (fun t -> not (mem t quants)) (frees assum)) in
+  let _ = if !equiv_print_log then
+    Printf.printf "quantifiers: %s\n%!" (String.concat ", "
+      (List.map string_of_term quants)) in
+
+  (* Now build 'ensures2' *)
+  let mk_bytes_loaded (s:term) (pc_var:term) (mc:term) (data:term option) =
+    let _ = List.map2 type_check [s;pc_var;mc] [state_ty;`:num`;`:((8)word)list`] in
+    let mc_all = if data = None then mc else
+      let data = option_get data in
+      let _ = type_check data `:((8)word)list` in
+      list_mk_icomb "APPEND" [mc;data]
+    in
+    list_mk_comb (bytes_loaded_const,[s;mk_comb(word_pc,pc_var);mc_all])
+  in
+  let mk_read_pc (s:term) (pc_var:term) (pc_ofs:int):term =
+    let _ = List.map2 type_check [s;pc_var] [state_ty;`:num`] in
+    if pc_ofs = 0 then
+      mk_eq (list_mk_icomb "read" [pc_reg_comp;s],
+             mk_comb(word_pc,pc_var))
+    else
+      mk_eq (list_mk_icomb "read" [pc_reg_comp;s],
+             mk_comb(word_pc,
+              mk_binary "+" (pc_var,mk_small_numeral(pc_ofs))))
+  in
+  let s = mk_var("s",state_ty) and s2 = mk_var("s2",state_ty) in
+  let spair = mk_pair(s,s2) in
+  let pc = `pc:num` and pc2 = `pc2:num` in
+  let equiv_in_pred = fst (strip_comb (fst (dest_eq equiv_in_body))) in
+  let equiv_out_pred = fst (strip_comb (fst (dest_eq equiv_out_body))) in
+
+  let data1_name = option_map (fun x -> (lhs (concl x))) data1 in
+  let data2_name = option_map (fun x -> (lhs (concl x))) data2 in
+  let precond = mk_gabs (spair,
+    (list_mk_conj [
+      mk_bytes_loaded s pc (lhs (concl mc1)) data1_name;
+      mk_read_pc s pc pc_ofs1;
+      mk_bytes_loaded s2 pc2 (lhs (concl mc2)) data2_name;
+      mk_read_pc s2 pc2 pc_ofs2;
+      list_mk_comb (equiv_in_pred, (spair::quants_in))
+    ])) in
+  let postcond = mk_gabs (spair,
+    (list_mk_conj [
+      mk_bytes_loaded s pc (lhs (concl mc1)) data1_name;
+      mk_read_pc s pc pc_ofs1_to;
+      mk_bytes_loaded s2 pc2 (lhs (concl mc2)) data2_name;
+      mk_read_pc s2 pc2 pc_ofs2_to;
+      list_mk_comb (equiv_out_pred, (spair::quants_out))
+    ])) in
+  let s' = mk_var("s'",state_ty) and s2' = mk_var("s2'",state_ty) in
+  let maychange = list_mk_gabs (
+    [spair;mk_pair(s',s2')],
+    mk_conj
+      (list_mk_comb (maychange1,[s;s']),
+       list_mk_comb (maychange2,[s2;s2']))) in
+
+  let _ = List.iter (fun t -> Printf.printf "\t%s\n" (string_of_term t))
+    [precond;postcond;maychange;fnsteps1;fnsteps2] in
+  let ensures2_pred = list_mk_icomb
+      "ensures2"
+     [opsem_const;precond;postcond;maychange;fnsteps1;fnsteps2] in
+  let imp = mk_imp (assum,ensures2_pred) in
+  list_mk_forall (quants, imp);;
