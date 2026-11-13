@@ -90,6 +90,13 @@ qemu. iOS devices' code is only built.
   compile-only: its tests need a JavaScript host. Constant time is unchecked on
   wasm: ctgrind and the trace checks inspect native code, and a wasm engine
   compiles rind again, so its JIT may turn a select into a branch.
+  Bare-metal targets (`target_os = "none"`) build the library without std, on
+  `alloc`: the program supplies a global allocator and a getrandom backend.
+  Every PR lints it for `thumbv6m-none-eabi` and `riscv32imc-unknown-none-elf`,
+  which lack compare-and-swap and so keep no reuse cache, for
+  `thumbv7em-none-eabihf`, and for `x86_64-unknown-none`, in debug and release,
+  with and without `wipe` (`just bare-metal`). None of them runs a test or a
+  constant-time check.
   RSA and the NIST curves run on 64-bit limbs on 64-bit targets and on
   `wasm32` built with `-C target-feature=+wide-arithmetic` (stable from Rust
   1.101), whose 128-bit products take one or two multiply instructions, and
