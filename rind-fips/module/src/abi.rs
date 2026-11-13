@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! The C ABI's conventions, and the services that belong to no algorithm.
+//! A status is a `u32`: 0, or an `ids::error` code.
 //!
 //! - A fallible service returns a status: 0 for success, otherwise the
 //!   error's code (`rind::fips::error_code`).
