@@ -4318,6 +4318,7 @@ dependencies = [
 name = "rind-acvp"
 version = "0.1.0"
 dependencies = [
+ "crabgrind 0.4.0",
  "rind",
  "serde_json",
 ]

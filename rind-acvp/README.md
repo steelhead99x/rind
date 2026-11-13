@@ -16,3 +16,5 @@ A debug build, and a release build with `--cfg rind_cpu_disable`, honours `RIND_
 rind's `__acvp` feature exists only for this binary. A leading `__` marks it internal, as `__ctgrind` is, and it is not a supported API. The binary enables `wipe` as well, so the decapsulation key, the shared secrets, the expanded ML-DSA private key, an ECDSA private scalar, and an ECDH shared secret are wiped on drop.
 
 `hmacDRBG` is rind's `HmacDrbg`.
+
+`admin/ctgrind` checks the secret paths this binary adds. rind's unit suite, built with `__acvp`, runs the `acvp` module's tests: the HMAC_DRBG for every hash ACVP names, seeded ML-KEM-768 key generation, encapsulation, and decapsulation of a parsed key, the RSA primitive's exponent, and ML-DSA signing with a fixed `rnd`. The adapter suite runs `tests/ctgrind.rs`, which marks the secret arguments `acvptool` sends to each of those commands and to ECDH. Valgrind is Linux-only.

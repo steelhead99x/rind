@@ -1850,7 +1850,9 @@ impl<P: MlDsaParameterSet> MlDsaKeyPair<P> {
             None => self.0.mu(context, message)?,
         };
         let rnd: &[u8; 32] = rnd.try_into().map_err(|_| Error::WrongLength)?;
-        self.0.sign_internal(&mu, rnd).map(MlDsaSignature)
+        // `rnd` is secret, as the hedged `sign` marks its own draw.
+        let rnd = low::ct::into_secret(*rnd);
+        self.0.sign_internal(&mu, &rnd).map(MlDsaSignature)
     }
 }
 

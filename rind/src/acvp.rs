@@ -10,12 +10,14 @@
 use crate::error::{Error, KeyFormatError};
 use crate::high::hash::{LegacySha1, Sha256, Sha384, Sha512};
 use crate::high::hmac_drbg::HmacDrbg;
-use crate::low::PosInt;
+use crate::low::{PosInt, SecretPosInt};
 use crate::low::{Zeroable, zeroise, zeroise_value};
 use crate::mid::mlkem768::{Ciphertext, DecapKey, EncapKey, Message};
 
 const RSA_WORDS: usize = 8192 / 64;
 const MLKEM_DK: usize = 2400;
+/// `dk_pke`, the start of an ML-KEM-768 decapsulation key.
+const MLKEM_DK_PKE: usize = 1152;
 const MLKEM_EK: usize = 1184;
 const MLKEM_C: usize = 1088;
 
@@ -127,9 +129,17 @@ pub fn mlkem768_encaps(ek: &[u8], m: &[u8]) -> Result<(Vec<u8>, SecretBuf), Erro
 /// The shared secret is wiped on drop.
 pub fn mlkem768_decaps(dk: &[u8], ciphertext: &[u8]) -> Result<SecretBuf, Error> {
     let _entry = crate::low::Entry::new_secret();
-    let dk: &[u8; MLKEM_DK] = dk.try_into().map_err(|_| Error::WrongLength)?;
+    let mut dk: [u8; MLKEM_DK] = dk.try_into().map_err(|_| Error::WrongLength)?;
     let ciphertext: [u8; MLKEM_C] = ciphertext.try_into().map_err(|_| Error::WrongLength)?;
-    let key = DecapKey::from_bytes(dk).ok_or(KeyFormatError::MlKemModulus)?;
+    // `dk` is `dk_pke || ek || H(ek) || z`. Mark the two secret parts, as
+    // rind marks the keys it parses, so `admin/ctgrind` checks decapsulation
+    // with this key. `ek` and `H(ek)` stay public: the key check branches on
+    // them.
+    crate::low::ct::secret_slice(&dk[..MLKEM_DK_PKE]);
+    crate::low::ct::secret_slice(&dk[MLKEM_DK - 32..]);
+    let key = DecapKey::from_bytes(&dk);
+    zeroise(&mut dk);
+    let key = key.ok_or(KeyFormatError::MlKemModulus)?;
     Ok(secret_array(
         *key.decaps(&Ciphertext::from(ciphertext)).as_ref(),
     ))
@@ -170,7 +180,10 @@ pub fn mlkem768_dk_ok(dk: &[u8]) -> bool {
 pub fn rsa_modexp(base: &[u8], exp: &[u8], modulus: &[u8]) -> Option<SecretBuf> {
     let _entry = crate::low::Entry::new_secret();
     let base = PosInt::<RSA_WORDS>::from_bytes(base).ok()?;
-    let mut exp = PosInt::<RSA_WORDS>::from_bytes(exp).ok()?;
+    // Parsing trims the exponent's leading zero bytes, so its encoded length
+    // is public, as an RSA key's DER length is. Its words are then secret,
+    // as rind's RSA keys are, and wiped on drop.
+    let mut exp = SecretPosInt::from(PosInt::<RSA_WORDS>::from_bytes(exp).ok()?);
     let modulus_n = PosInt::<RSA_WORDS>::from_bytes(modulus).ok()?;
     if modulus_n.is_even() || !base.less_than(&modulus_n) {
         return None;
@@ -178,7 +191,7 @@ pub fn rsa_modexp(base: &[u8], exp: &[u8], modulus: &[u8]) -> Option<SecretBuf> 
     exp.widen_to(&modulus_n);
     let mont = modulus_n.montifier();
     let n0 = modulus_n.mont_neg_inverse();
-    let out = base.mod_exp(&exp, &modulus_n, &mont, n0);
+    let out = base.mod_exp(&*exp, &modulus_n, &mont, n0);
     let mut bytes = vec![0u8; modulus.len()];
     out.to_bytes(&mut bytes).ok()?;
     let secret = SecretBuf::from_slice(&bytes);
@@ -251,7 +264,8 @@ impl Drop for AcvpDrbg {
 
 #[cfg(test)]
 mod tests {
-    use super::SecretBuf;
+    use super::{AcvpDrbg, SecretBuf};
+    use crate::low::ct::{into_public, public_slice, secret_slice};
 
     /// Under `admin/ctgrind`, copying into a [`SecretBuf`] does not branch
     /// on the secret.
@@ -259,14 +273,117 @@ mod tests {
     fn secret_buf_copy_does_not_branch() {
         let bytes = [0xa5u8; 32];
         let wanted = copy32(&SecretBuf::from_slice(&bytes));
-        crate::low::ct::secret_slice(&bytes);
+        secret_slice(&bytes);
         let got = copy32(&SecretBuf::from_slice(&bytes));
-        assert_eq!(crate::low::ct::into_public(got), wanted);
+        assert_eq!(into_public(got), wanted);
     }
 
     fn copy32(buf: &SecretBuf) -> [u8; 32] {
         let mut out = [0u8; 32];
         out.copy_from_slice(buf.as_slice());
         out
+    }
+
+    /// A [`SecretBuf`]'s bytes, marked public so the test may compare them.
+    fn reveal(buf: &SecretBuf) -> Vec<u8> {
+        let out = buf.as_slice().to_vec();
+        public_slice(&out);
+        out
+    }
+
+    /// Under `admin/ctgrind`, nothing may branch on or index by the entropy
+    /// or the K and V derived from it, for any hash ACVP names, through
+    /// instantiate, reseed, and a generate with a partial last block, both
+    /// with and without additional input.
+    #[test]
+    fn drbg_secret_entropy_every_hash() {
+        fn draw(hash: &str, entropy: &[u8], reseed: &[u8]) -> [u8; 100] {
+            let mut drbg = AcvpDrbg::new(hash, entropy, &[0xa5; 16], b"personal").unwrap();
+            drbg.reseed(reseed, b"reseed");
+            let mut out = [0u8; 100];
+            drbg.generate(&mut out, b"additional");
+            drbg.generate(&mut out, b"");
+            out
+        }
+
+        for hash in ["SHA-1", "SHA2-256", "SHA2-384", "SHA2-512"] {
+            let entropy = [0x5a; 32];
+            let reseed = [0x3c; 32];
+            let wanted = draw(hash, &entropy, &reseed);
+            secret_slice(&entropy);
+            secret_slice(&reseed);
+            assert_eq!(into_public(draw(hash, &entropy, &reseed)), wanted, "{hash}");
+        }
+        assert!(AcvpDrbg::new("SHA3-256", &[0; 32], &[0; 16], b"").is_none());
+    }
+
+    /// Under `admin/ctgrind`, seeded key generation, encapsulation of a given
+    /// message, and decapsulation of a parsed key, for a ciphertext it
+    /// accepts and one it rejects, do not branch on the seed, the message,
+    /// or the key's `dk_pke` and `z`, which these functions mark.
+    #[test]
+    fn mlkem768_secret_seed_message_and_key() {
+        let (ek, dk) = super::mlkem768_keygen(&[0x5a; 64]).unwrap();
+        public_slice(&ek);
+        let dk = reveal(&dk);
+        let (mut ciphertext, sent) = super::mlkem768_encaps(&ek, &[0xa5; 32]).unwrap();
+        public_slice(&ciphertext);
+        let opened = super::mlkem768_decaps(&dk, &ciphertext).unwrap();
+        assert_eq!(reveal(&opened), reveal(&sent));
+
+        ciphertext[0] ^= 1;
+        let rejected = super::mlkem768_decaps(&dk, &ciphertext).unwrap();
+        assert_ne!(reveal(&rejected), reveal(&sent));
+    }
+
+    /// Under `admin/ctgrind`, the RSA primitive does not branch on or index
+    /// by the exponent, which it marks once parsed, at the modulus's width
+    /// or widened up to it.
+    #[test]
+    fn rsa_modexp_secret_exponent() {
+        let mut modulus = [0xc3u8; 256];
+        modulus[255] = 0xc5;
+        let base = [0x11u8; 256];
+        let wide = super::rsa_modexp(&base, &[0x5a; 256], &modulus).unwrap();
+        assert_eq!(wide.as_slice().len(), 256);
+        let short = super::rsa_modexp(&base, &[0x5a; 3], &modulus).unwrap();
+        let mut exp = [0u8; 256];
+        exp[253..].fill(0x5a);
+        let padded = super::rsa_modexp(&base, &exp, &modulus).unwrap();
+        assert_eq!(reveal(&short), reveal(&padded));
+        assert_ne!(reveal(&short), reveal(&wide));
+    }
+
+    /// Under `admin/ctgrind`, ACVP's ML-DSA signing does not branch on the
+    /// key or on `rnd`, for a key from a seed and one loaded from its
+    /// expanded form, with a computed `mu` and a supplied one.
+    #[test]
+    fn mldsa_sign_acvp_secret_key_and_rnd() {
+        use crate::high::signature::{MlDsaKeyPair, mldsa_verify_acvp};
+        use crate::mid::mldsa::MlDsa44;
+
+        let seeded = MlDsaKeyPair::<MlDsa44>::from_seed(&[0x5a; 32]).unwrap();
+        let expanded = reveal(&seeded.expanded_secret());
+        let loaded = MlDsaKeyPair::<MlDsa44>::from_expanded(&expanded).unwrap();
+        let public_key = seeded.public_key();
+        let rnd = [0xa5; 32];
+        for (mu, internal) in [(None, false), (None, true), (Some(&[0x3c; 64][..]), true)] {
+            let a = seeded
+                .sign_acvp(b"context", b"message", mu, internal, &rnd)
+                .unwrap();
+            let b = loaded
+                .sign_acvp(b"context", b"message", mu, internal, &rnd)
+                .unwrap();
+            assert_eq!(a.as_ref(), b.as_ref());
+            mldsa_verify_acvp::<MlDsa44>(
+                public_key.as_ref(),
+                b"message",
+                b"context",
+                mu,
+                internal,
+                a.as_ref(),
+            )
+            .unwrap();
+        }
     }
 }

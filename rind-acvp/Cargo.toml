@@ -10,4 +10,7 @@ description = "Unpublished ACVP module wrapper for rind"
 rind = { path = "../rind", features = ["__acvp", "wipe"] }
 
 [dev-dependencies]
+# Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
+# features, as `admin/ctgrind` does; otherwise they build as no-ops.
+crabgrind = { version = "0.4", default-features = false }
 serde_json = "1"
