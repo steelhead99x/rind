@@ -30,8 +30,29 @@
 # architecture compiles is missed here. `admin/mutants --survivors DIR...`
 # combines runs' `mutants.out` directories: it prints each mutant some run
 # missed and none caught, and fails if there is one.
+#
+# `admin/mutants --pins` fails naming each `exclude_re` entry in
+# .cargo/mutants.toml that matches no mutant, such as a `file:line` pin its
+# code moved away from. cargo-mutants lists mutants whatever their `cfg`, so
+# one listing covers every campaign.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+if [ "${1:-}" = --pins ]; then
+    cd "$here"
+    # Without the config, so its exclusions don't hide what they match.
+    cargo mutants --list --no-config | python3 -I -c '
+import re, sys, tomllib
+mutants = sys.stdin.read().splitlines()
+with open(".cargo/mutants.toml", "rb") as f:
+    patterns = tomllib.load(f)["exclude_re"]
+stale = [p for p in patterns if not any(re.search(p, m) for m in mutants)]
+for p in stale:
+    print(f"admin/mutants: exclude_re matches no mutant: {p}", file=sys.stderr)
+sys.exit(1 if stale else 0)
+'
+    exit
+fi
 
 avx512=
 if [ "${1:-}" = --avx512 ]; then
