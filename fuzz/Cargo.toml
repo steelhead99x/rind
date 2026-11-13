@@ -151,6 +151,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "oprf"
+path = "fuzzer/oprf.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "vrf"
 path = "fuzzer/vrf.rs"
 test = false
