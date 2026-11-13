@@ -430,4 +430,29 @@ opaque low.aarch64.cpu.ct_compare_16
 
 opaque low.aarch64.cpu.ct_compare_bytes : Slice Std.U8 → Slice Std.U8 → Result Std.U8
 
+
+/-! `low::aarch64::wide_mux` picks each routine's `_alt` or narrow schedule by
+the core's multiplier, which the translation cannot see. s2n-bignum proves
+both schedules against the same specification, so either pick computes the
+same function: the `_alt` one's, which `Rind.Aarch64.S2nBignum` specifies. -/
+
+abbrev low.aarch64.wide_mux.bignum_madd_n25519 := @low.aarch64.bignum_madd_n25519.bignum_madd_n25519
+abbrev low.aarch64.wide_mux.bignum_montmul_p256 := @low.aarch64.bignum_montmul_p256.bignum_montmul_p256
+abbrev low.aarch64.wide_mux.bignum_montmul_p384 := @low.aarch64.bignum_montmul_p384.bignum_montmul_p384
+abbrev low.aarch64.wide_mux.bignum_montsqr_p256 := @low.aarch64.bignum_montsqr_p256.bignum_montsqr_p256
+abbrev low.aarch64.wide_mux.bignum_montsqr_p384 := @low.aarch64.bignum_montsqr_p384.bignum_montsqr_p384
+abbrev low.aarch64.wide_mux.curve25519_x25519 := @low.aarch64.curve25519_x25519.curve25519_x25519
+abbrev low.aarch64.wide_mux.curve25519_x25519base := @low.aarch64.curve25519_x25519base.curve25519_x25519base
+abbrev low.aarch64.wide_mux.edwards25519_decode := @low.aarch64.edwards25519_decode.edwards25519_decode
+abbrev low.aarch64.wide_mux.edwards25519_scalarmulbase := @low.aarch64.edwards25519_scalarmulbase.edwards25519_scalarmulbase
+abbrev low.aarch64.wide_mux.edwards25519_scalarmuldouble := @low.aarch64.edwards25519_scalarmuldouble.edwards25519_scalarmuldouble
+abbrev low.aarch64.wide_mux.p256_montjadd := @low.aarch64.p256_montjadd.p256_montjadd
+abbrev low.aarch64.wide_mux.p256_montjdouble := @low.aarch64.p256_montjdouble.p256_montjdouble
+abbrev low.aarch64.wide_mux.p256_montjmixadd := @low.aarch64.p256_montjmixadd.p256_montjmixadd
+abbrev low.aarch64.wide_mux.p256_scalarmul := @low.aarch64.p256_scalarmul.p256_scalarmul
+abbrev low.aarch64.wide_mux.p256_scalarmulbase := @low.aarch64.p256_scalarmulbase.p256_scalarmulbase
+abbrev low.aarch64.wide_mux.p384_montjdouble := @low.aarch64.p384_montjdouble.p384_montjdouble
+abbrev low.aarch64.wide_mux.p384_montjmixadd := @low.aarch64.p384_montjmixadd.p384_montjmixadd
+abbrev low.aarch64.wide_mux.p384_montjscalarmul := @low.aarch64.p384_montjscalarmul.p384_montjscalarmul
+
 end rind.aarch64
