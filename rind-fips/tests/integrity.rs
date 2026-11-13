@@ -76,7 +76,9 @@ fn tampering_fails_the_integrity_test() {
         (
             ".data.rel.ro",
             in_section(".data.rel.ro", &|o, s| {
-                (o..o + s).find(|&at| module[at] != 0 && !relocated.iter().any(|&r| at >= r && at < r + 8))
+                (o..o + s).find(|&at| {
+                    module[at] != 0 && !relocated.iter().any(|&r| at >= r && at < r + 8)
+                })
             }),
         ),
     ];
@@ -102,7 +104,11 @@ impl Elf {
         let u32_at = |at: usize| u32::from_le_bytes(file[at..at + 4].try_into().unwrap());
         let u64_at = |at: usize| u64::from_le_bytes(file[at..at + 8].try_into().unwrap());
         let shoff = u64_at(0x28) as usize;
-        let (shentsize, shnum, shstrndx) = (u16_at(0x3a) as usize, u16_at(0x3c) as usize, u16_at(0x3e) as usize);
+        let (shentsize, shnum, shstrndx) = (
+            u16_at(0x3a) as usize,
+            u16_at(0x3c) as usize,
+            u16_at(0x3e) as usize,
+        );
         let header = |i: usize| shoff + i * shentsize;
         let names = u64_at(header(shstrndx) + 0x18) as usize;
         let sections = (0..shnum)
@@ -133,7 +139,9 @@ impl Elf {
         let to_offset = |vaddr: u64| {
             self.sections
                 .iter()
-                .find(|(_, _, _, size, addr)| *addr != 0 && vaddr >= *addr && vaddr < addr + *size as u64)
+                .find(|(_, _, _, size, addr)| {
+                    *addr != 0 && vaddr >= *addr && vaddr < addr + *size as u64
+                })
                 .map(|(_, _, offset, _, addr)| offset + (vaddr - addr) as usize)
         };
         self.sections

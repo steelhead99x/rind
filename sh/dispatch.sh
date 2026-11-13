@@ -212,6 +212,17 @@ for module in "${selected[@]}"; do
             if ((${#packages[@]} == 0)) || printf '%s\n' "${packages[@]}" | grep -qxE 'rind-aws-lc-rs|--workspace'; then
                 cargo nextest run -p rind-aws-lc-rs --features wipe --test zeroing --locked
             fi
+            # The FIPS module's own code compiles only under its cfg, which a
+            # workspace build leaves off. Its break build checks, on every
+            # call, the stack each service zeroes, and fails each self-test.
+            if printf '%s\n' "${packages[@]}" | grep -qxE 'rind-fips|--workspace' &&
+                ! printf '%s\n' "${packages[@]}" | grep -qxF -- --exclude; then
+                RUSTFLAGS='--cfg rind_fips --cfg rind_cpu_disable' cargo clippy -p rind-fips-module \
+                    --locked --target-dir target/fips-module -- --deny warnings
+                if [[ -n "$all" ]] || grep -q '^rind-fips/' "$changed"; then
+                    cargo nextest run -p rind-fips --features __break_tests --locked
+                fi
+            fi
             # Doc tests need a library. No packages at all means the workspace.
             mapfile -t libs < <(sh/select.sh "$changed" "$all" --lib)
             if ((${#libs[@]} > 0 || ${#packages[@]} == 0)); then
@@ -245,6 +256,9 @@ for module in "${selected[@]}"; do
                     for name in "${newer[@]}"; do
                         args+=(--exclude "$name")
                     done
+                elif [[ "${packages[i]}" == --exclude ]]; then
+                    i=$((i + 1))
+                    args+=(--exclude "${packages[i]}")
                 fi
             done
             if [[ ${#args[@]} -gt 0 ]]; then

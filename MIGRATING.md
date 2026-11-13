@@ -346,7 +346,9 @@ ring has none.
 | `pkcs8::Document` | `encoding::Pkcs8`, `encoding::Spki` |
 | `encoding`'s `AsDer`, `AsBigEndian`, and `AsRawBytes` | `to_pkcs8()` and `to_spki()`; an ECDSA key pair's `to_sec1()` and `to_scalar()`, and an Ed25519 key pair's `to_pkcs8v1()` and `to_seed()`; other raw keys none |
 | `io::Positive`, `io::der`, `iv::FixedLength`, `test`, `test_file!`, `unstable`, and ring's `deprecated_test` | none |
-| `init`, `try_fips_mode`, `fips_mode`, `try_fips_self_test`, `fips_version`, `try_fips_cpu_jitter_entropy`, `fips_cpu_jitter_entropy`, `awslc_version` | none: rind has no C library to initialize and no FIPS module |
+| The `fips` feature, `try_fips_mode`, `fips_mode` | [rind-fips](rind-fips/README.md), rind's API less what FIPS 140-3 does not approve: `use rind_fips as rind`; every call it offers is approved |
+| `try_fips_self_test`, `fips_version` | rind-fips's `self_test()`, which aborts on a failure, and `version()` |
+| `init`, `try_fips_cpu_jitter_entropy`, `fips_cpu_jitter_entropy`, `awslc_version` | none: rind has no C library to initialize, and its FIPS module takes entropy from the OS |
 
 ## Adapter crates
 

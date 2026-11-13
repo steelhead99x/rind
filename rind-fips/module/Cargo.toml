@@ -10,5 +10,10 @@ license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apach
 crate-type = ["cdylib"]
 
 [dependencies]
-rind = { path = "../../rind", features = ["wipe"] }
+# `rind-fips`'s build script turns on `wipe`, so a workspace build does not.
+rind = { path = "../../rind" }
 libc = { version = "0.2", default-features = false }
+
+[lints.rust]
+# Set by `rind-fips`'s build script: the module's build, and its break build.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(rind_fips)", "cfg(rind_fips_break)"] }

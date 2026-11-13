@@ -2,7 +2,19 @@
 
 use core::fmt;
 
-use crate::ffi::{self, DigestContext, Handle, ids};
+use crate::ffi::{Handle, ids, opaque};
+
+opaque! {
+    DigestContext => rind_fips_digest_free,
+}
+
+unsafe extern "C" {
+    fn rind_fips_digest(id: u32, data: *const u8, len: usize, out: *mut u8) -> usize;
+    fn rind_fips_digest_new(id: u32) -> *mut DigestContext;
+    fn rind_fips_digest_update(context: *mut DigestContext, data: *const u8, len: usize);
+    fn rind_fips_digest_finish(context: *mut DigestContext, out: *mut u8) -> usize;
+    fn rind_fips_digest_clone(context: *const DigestContext) -> *mut DigestContext;
+}
 
 /// A hash function, chosen by one of this module's constants.
 pub struct Algorithm {
@@ -81,7 +93,14 @@ pub static SHA3_512: Algorithm = Algorithm {
 pub fn digest(algorithm: &'static Algorithm, data: &[u8]) -> Digest {
     let mut digest = Digest::zeroed(algorithm);
     // SAFETY: `data` is readable, and `digest.value` is 64 writable bytes.
-    unsafe { ffi::rind_fips_digest(algorithm.id, data.as_ptr(), data.len(), digest.value.as_mut_ptr()) };
+    unsafe {
+        rind_fips_digest(
+            algorithm.id,
+            data.as_ptr(),
+            data.len(),
+            digest.value.as_mut_ptr(),
+        )
+    };
     digest
 }
 
@@ -97,21 +116,21 @@ impl Context {
     /// Starts hashing with `algorithm`.
     pub fn new(algorithm: &'static Algorithm) -> Self {
         // SAFETY: no pointers.
-        let handle = Handle::new(unsafe { ffi::rind_fips_digest_new(algorithm.id) });
+        let handle = Handle::new(unsafe { rind_fips_digest_new(algorithm.id) });
         Self { algorithm, handle }
     }
 
     /// Adds `data` to the message.
     pub fn update(&mut self, data: &[u8]) {
         // SAFETY: the handle is live, and `data` readable.
-        unsafe { ffi::rind_fips_digest_update(self.handle.ptr(), data.as_ptr(), data.len()) }
+        unsafe { rind_fips_digest_update(self.handle.ptr(), data.as_ptr(), data.len()) }
     }
 
     /// Returns the digest of the message, and starts a new one with the same algorithm.
     pub fn finish(&mut self) -> Digest {
         let mut digest = Digest::zeroed(self.algorithm);
         // SAFETY: the handle is live, and `digest.value` is 64 writable bytes.
-        unsafe { ffi::rind_fips_digest_finish(self.handle.ptr(), digest.value.as_mut_ptr()) };
+        unsafe { rind_fips_digest_finish(self.handle.ptr(), digest.value.as_mut_ptr()) };
         digest
     }
 }
@@ -119,7 +138,7 @@ impl Context {
 impl Clone for Context {
     fn clone(&self) -> Self {
         // SAFETY: the handle is live.
-        let handle = Handle::new(unsafe { ffi::rind_fips_digest_clone(self.handle.ptr()) });
+        let handle = Handle::new(unsafe { rind_fips_digest_clone(self.handle.ptr()) });
         Self {
             algorithm: self.algorithm,
             handle,

@@ -21,13 +21,18 @@
 #![cfg(rind_fips)]
 
 mod abi;
+mod aes;
+mod agreement;
 mod alloc;
 mod digest;
 mod ids;
 mod image;
 mod integrity;
+mod kem;
+mod mac;
 mod scrub;
 mod selftest;
+mod signature;
 
 #[global_allocator]
 static ALLOCATOR: alloc::Zeroing = alloc::Zeroing;
@@ -50,4 +55,19 @@ extern "C" fn init() {
     if !integrity::check() {
         rind::fips::fail("integrity");
     }
+}
+
+/// Runs as the process exits, after the exiting thread's destructors: wipes
+/// the DRBG of every thread still running, whose own never run.
+#[used]
+#[unsafe(link_section = ".fini_array")]
+static FINI: extern "C" fn() = fini;
+
+extern "C" fn fini() {
+    let wiped = rind::fips::zeroise_drbgs();
+    // The break build shows the lab that it ran.
+    #[cfg(rind_fips_break)]
+    std::eprintln!("rind-fips: zeroised {wiped} DRBG instances at exit");
+    #[cfg(not(rind_fips_break))]
+    let _ = wiped;
 }

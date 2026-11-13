@@ -195,6 +195,12 @@ errors! {
     ],
 }
 
+/// Wipes every thread's DRBG, returning how many, and fails every draw
+/// after: the module's destructor, as the process exits.
+pub fn zeroise_drbgs() -> usize {
+    crate::fips_rng::zeroise_all()
+}
+
 /// The name of the first CPU feature the module requires that this CPU
 /// lacks, as [`crate::cpu::check`] reports it.
 pub fn missing_cpu_feature() -> Option<&'static str> {
@@ -211,6 +217,31 @@ pub fn error_code(error: Error) -> u32 {
 /// The error whose code is `code`.
 pub fn error_from_code(code: u32) -> Option<Error> {
     ERRORS.get((code as usize).checked_sub(1)?).copied()
+}
+
+/// A digest of `algorithm` holding `value`, as the caller computed it, for
+/// signing or verifying a digest; `None` unless `value` is its length.
+pub fn digest(
+    algorithm: &'static crate::digest::Algorithm,
+    value: &[u8],
+) -> Option<crate::digest::Digest> {
+    (value.len() == algorithm.output_len()).then(|| crate::digest::Digest::new(algorithm, value))
+}
+
+/// Refuses an RSA key whose modulus FIPS 186-5 does not approve, as
+/// aws-lc's service indicator does: an even length of 2048 bits or more,
+/// or exactly 1024 bits if `legacy_1024`, for verifying old signatures. A
+/// key that is not RSA passes.
+pub fn check_rsa_modulus(
+    key: &crate::signature::PublicKey,
+    legacy_1024: bool,
+) -> Result<(), Error> {
+    match key.rsa_modulus_bits() {
+        Some(bits) if !((bits >= 2048 && bits % 2 == 0) || (legacy_1024 && bits == 1024)) => {
+            Err(KeyFormatError::RsaModulus.into())
+        }
+        _ => Ok(()),
+    }
 }
 
 /// The known answers, from the standards' own examples where they give one.
@@ -233,13 +264,6 @@ mod kat {
 
     fn check(test: &'static str, passed: bool) -> Result<(), &'static str> {
         passed.then_some(()).ok_or(test)
-    }
-
-    /// Constant-time compare. A self-test's match bit is public: it is the
-    /// module's pass or fail, and [`crate::constant_time::verify`] declassifies
-    /// only that bit.
-    fn same(got: &[u8], expected: &[u8]) -> bool {
-        crate::constant_time::verify(got, expected).is_ok()
     }
 
     // FIPS 180's example, "abc", for each hash.
@@ -294,8 +318,7 @@ mod kat {
         let tag = sign(&key, b"what do ya want for nothing?");
         check(
             "hmac",
-            tag.as_ref()
-                == hex("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"),
+            tag.as_ref() == hex("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"),
         )
     }
 
@@ -421,10 +444,9 @@ mod kat {
         )?;
 
         let message = input("ecdsa_verify", *b"rind-fips ECDSA self-test");
-        let verified = VerifyingKey::<P256>::from_x962_uncompressed(
-            key.public_key_uncompressed().as_ref(),
-        )
-        .and_then(|k| k.verify::<Sha256>(&message, &signature));
+        let verified =
+            VerifyingKey::<P256>::from_x962_uncompressed(key.public_key_uncompressed().as_ref())
+                .and_then(|k| k.verify::<Sha256>(&message, &signature));
         check("ecdsa_verify", verified.is_ok())
     }
 
@@ -443,10 +465,8 @@ mod kat {
         check(
             "ecdh",
             secret.is_ok_and(|s| {
-                same(
-                    s.as_ref(),
-                    &hex("46fc62106420ff012e54a434fbdd2d25ccc5852060561e68040dd7778997bd7b"),
-                )
+                *s.as_ref()
+                    == hex("46fc62106420ff012e54a434fbdd2d25ccc5852060561e68040dd7778997bd7b")
             }),
         )
     }
@@ -467,7 +487,8 @@ mod kat {
 
         let public_key = hex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
         let signature = input("ed25519_verify", signature);
-        let verified = PublicKey::new(&ED25519, &public_key).and_then(|k| k.verify(b"", &signature));
+        let verified =
+            PublicKey::new(&ED25519, &public_key).and_then(|k| k.verify(b"", &signature));
         check("ed25519_verify", verified.is_ok())
     }
 
@@ -508,15 +529,15 @@ mod kat {
         let ek = key.encapsulation_key();
         check(
             "ml_kem_keygen",
-            same(&sha256_of(&ek.as_bytes()), &hex(ML_KEM_EK_SHA256))
-                && same(&sha256_of(&key.as_bytes()), &hex(ML_KEM_DK_SHA256)),
+            sha256_of(&ek.as_bytes())[..] == hex(ML_KEM_EK_SHA256)
+                && sha256_of(&key.as_bytes())[..] == hex(ML_KEM_DK_SHA256),
         )?;
 
         let (secret, ciphertext) = ek.encaps_internal(Message(input("ml_kem_encaps", [0x5a; 32])));
         check(
             "ml_kem_encaps",
-            same(&sha256_of(ciphertext.as_ref()), &hex(ML_KEM_CIPHERTEXT_SHA256))
-                && same(&sha256_of(secret.as_ref()), &hex(ML_KEM_SECRET_SHA256)),
+            sha256_of(ciphertext.as_ref())[..] == hex(ML_KEM_CIPHERTEXT_SHA256)
+                && sha256_of(secret.as_ref())[..] == hex(ML_KEM_SECRET_SHA256),
         )?;
 
         let ciphertext = input("ml_kem_decaps", *ciphertext.as_ref());
@@ -526,8 +547,8 @@ mod kat {
         let rejected = key.decaps(&Ciphertext::from(corrupted));
         check(
             "ml_kem_decaps",
-            same(&sha256_of(decapsulated.as_ref()), &hex(ML_KEM_SECRET_SHA256))
-                && same(&sha256_of(rejected.as_ref()), &hex(ML_KEM_REJECTED_SHA256)),
+            sha256_of(decapsulated.as_ref())[..] == hex(ML_KEM_SECRET_SHA256)
+                && sha256_of(rejected.as_ref())[..] == hex(ML_KEM_REJECTED_SHA256),
         )
     }
 
@@ -540,8 +561,8 @@ mod kat {
         let key = KeyPair::<MlDsa44>::from_seed(&input("ml_dsa_keygen", seed));
         check(
             "ml_dsa_keygen",
-            same(&sha256_of(key.public_key().as_ref()), &hex(ML_DSA_PK_SHA256))
-                && same(&sha256_of(key.secret_key().as_ref()), &hex(ML_DSA_SK_SHA256)),
+            sha256_of(key.public_key().as_ref())[..] == hex(ML_DSA_PK_SHA256)
+                && sha256_of(key.secret_key().as_ref())[..] == hex(ML_DSA_SK_SHA256),
         )?;
 
         let message = *b"rind-fips ML-DSA self-test";
@@ -656,8 +677,8 @@ mod tests {
     fn rsa_and_ecdsa_answers_match_aws_lc() {
         use aws_lc_rs::signature::{self, KeyPair};
 
-        let key =
-            signature::RsaKeyPair::from_pkcs8(include_bytes!("high/rsa/rsa2048.pkcs8.der")).unwrap();
+        let key = signature::RsaKeyPair::from_pkcs8(include_bytes!("high/rsa/rsa2048.pkcs8.der"))
+            .unwrap();
         let mut sig = vec![0; key.public_modulus_len()];
         key.sign(
             &signature::RSA_PKCS1_SHA256,

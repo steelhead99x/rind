@@ -24,6 +24,9 @@ exclude_globs = [
   "rind-bench/**",
   "rind-cpuid/**",
   "fuzz/**",
+  # The FIPS module, which refuses the CPUs admin/mutants masks features on;
+  # its differential and break tests cover what it adds to rind.
+  "rind-fips/**",
 ]
 
 # Each surviving mutant no test can catch, with why.

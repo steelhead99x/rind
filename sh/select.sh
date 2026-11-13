@@ -5,7 +5,7 @@
 # Usage: sh/select.sh CHANGED_FILE [ALL] [--lib]
 # A change outside any crate's directory (the root manifest, the lockfile,
 # thirdparty/ test vectors) can reach every crate, so it selects --workspace,
-# as does a non-empty ALL. --lib keeps only the crates with a library, which
+# as does a non-empty ALL, less rind-fips on a host it does not build for. --lib keeps only the crates with a library, which
 # `cargo test --doc` requires.
 set -euo pipefail
 
@@ -18,8 +18,21 @@ if [[ $# -gt 3 || (-n "$lib" && "$lib" != --lib) ]]; then
     exit 2
 fi
 
-if [[ -n "$all" ]]; then
+# rind-fips's module builds only for glibc Linux on x86_64 and aarch64, so
+# elsewhere it is left out.
+host=$(rustc -vV | sed -n 's/^host: //p')
+fips=
+[[ "$host" =~ ^(x86_64|aarch64)-unknown-linux-gnu$ ]] || fips=rind-fips
+
+workspace() {
     echo --workspace
+    if [[ -n "$fips" ]]; then
+        printf -- '--exclude\n%s\n' "$fips"
+    fi
+}
+
+if [[ -n "$all" ]]; then
+    workspace
     exit
 fi
 
@@ -38,7 +51,7 @@ while IFS= read -r path; do
     if [[ "$path" == */* && -n "${dirs[$dir]:-}" ]]; then
         selected[${dirs[$dir]}]=1
     elif grep -qE '^(thirdparty/|Cargo\.(toml|lock)$|\.rustfmt(\.unstable)?\.toml$)' <<<"$path"; then
-        echo --workspace
+        workspace
         exit
     fi
 done <"$changed"
@@ -58,6 +71,9 @@ done
 
 libs=$(jq -r '.packages[] | select(any(.targets[]; .kind | index("lib"))) | .name' <<<"$metadata")
 for name in "${!selected[@]}"; do
+    if [[ "$name" == "$fips" ]]; then
+        continue
+    fi
     if [[ -z "$lib" ]] || grep -qxF "$name" <<<"$libs"; then
         printf -- '-p\n%s\n' "$name"
     fi

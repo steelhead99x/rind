@@ -124,8 +124,7 @@ pub(crate) fn hash(
     relas: &mut [Rela],
     mut update: impl FnMut(&[u8]),
 ) -> Result<(), &'static str> {
-    let in_segment =
-        |s: &Segment, vaddr: u64| vaddr >= s.vaddr && vaddr - s.vaddr < s.filesz;
+    let in_segment = |s: &Segment, vaddr: u64| vaddr >= s.vaddr && vaddr - s.vaddr < s.filesz;
 
     for segment in segments {
         if segment.kind == PT_LOAD && segment.flags & PF_W == 0 {
@@ -144,7 +143,10 @@ pub(crate) fn hash(
     relas.sort_unstable_by_key(|r| r.offset);
     let mut at = relro.vaddr;
     let end = relro.vaddr + relro.filesz;
-    let mut relas = relas.iter().filter(|r| in_segment(relro, r.offset)).peekable();
+    let mut relas = relas
+        .iter()
+        .filter(|r| in_segment(relro, r.offset))
+        .peekable();
     while at < end {
         // The dynamic section, which the loader may adjust in place, is
         // left out.

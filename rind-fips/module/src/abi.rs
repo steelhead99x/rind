@@ -86,7 +86,9 @@ pub(crate) unsafe fn byte_list<'a>(ptr: *const Bytes, len: usize) -> Vec<&'a [u8
     // SAFETY: the caller's contract.
     let list = unsafe { core::slice::from_raw_parts(ptr, len) };
     // SAFETY: the caller's contract.
-    list.iter().map(|b| unsafe { bytes(b.ptr, b.len) }).collect()
+    list.iter()
+        .map(|b| unsafe { bytes(b.ptr, b.len) })
+        .collect()
 }
 
 /// Boxes `value` as a handle.
@@ -145,6 +147,35 @@ macro_rules! free {
 }
 pub(crate) use free;
 
+/// An encoding a service made, such as a key's PKCS#8 or a ciphertext:
+/// rind's own type, so a private one wipes itself when freed, behind a
+/// handle the caller reads it through.
+pub(crate) struct Encoded(Box<dyn AsRef<[u8]> + Send + Sync>);
+
+/// Boxes `value` as an [`Encoded`] handle.
+pub(crate) fn encoded(value: impl AsRef<[u8]> + Send + Sync + 'static) -> *mut Encoded {
+    handle(Encoded(Box::new(value)))
+}
+
+/// The bytes of `encoded`, writing their length to `len`; they live as
+/// long as the handle.
+///
+/// # Safety
+/// `encoded` must be live, and `len` valid for a write.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_fips_encoded_bytes(
+    encoded: *const Encoded,
+    len: *mut usize,
+) -> *const u8 {
+    // SAFETY: the caller's contract.
+    let bytes = unsafe { (*(*encoded).0).as_ref() };
+    // SAFETY: the caller's contract.
+    unsafe { put(len, bytes.len()) };
+    bytes.as_ptr()
+}
+
+free!(rind_fips_encoded_free, Encoded);
+
 /// The module's name and version, writing its length to `len`. The string
 /// lives as long as the module.
 ///
@@ -176,7 +207,11 @@ pub extern "C" fn rind_fips_self_test() {
 /// # Safety
 /// `out` must be valid for `cap` writes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rind_fips_error_message(status: Status, out: *mut u8, cap: usize) -> usize {
+pub unsafe extern "C" fn rind_fips_error_message(
+    status: Status,
+    out: *mut u8,
+    cap: usize,
+) -> usize {
     let message = match rind::fips::error_from_code(status >> 8) {
         Some(Error::KeyRejected(reason)) => reason.to_string(),
         Some(error) => error.to_string(),
@@ -196,7 +231,9 @@ pub unsafe extern "C" fn rind_fips_error_message(status: Status, out: *mut u8, c
 pub unsafe extern "C" fn rind_fips_rand_fill(out: *mut u8, len: usize) -> Status {
     // The DRBG runs its own self-test before its first instantiation.
     // SAFETY: the caller's contract.
-    scrubbed(Depth::Medium, || status(rind::rand::fill(unsafe { bytes_mut(out, len) })))
+    scrubbed(Depth::Medium, || {
+        status(rind::rand::fill(unsafe { bytes_mut(out, len) }))
+    })
 }
 
 /// The first CPU feature the module requires that this CPU lacks, writing

@@ -72,14 +72,19 @@ jobs:
           - os: ubuntu-latest
             rustc: nightly
           # macos-latest is aarch64; macos-15-intel is the x86_64 runner.
+          # rind-fips's module builds only for glibc Linux.
           - os: macos-latest
             rustc: stable
+            packages: --workspace --exclude rind-fips
           - os: macos-15-intel
             rustc: stable
+            packages: --workspace --exclude rind-fips
           - os: windows-latest
             rustc: stable
+            packages: --workspace --exclude rind-fips
           - os: windows-11-arm
             rustc: stable
+            packages: --workspace --exclude rind-fips
           - os: ubuntu-24.04-arm
             rustc: stable
 
@@ -99,9 +104,9 @@ jobs:
       - name: Build (debug)
         run: cargo build -p rind
       - name: Run tests (debug)
-        run: cargo test
+        run: cargo test ${{ matrix.packages }}
       - name: Run tests (debug, --no-default-features)
-        run: cargo test --no-default-features
+        run: cargo test ${{ matrix.packages }} --no-default-features
       - name: Run zeroing tests (debug, --features wipe)
         run: cargo test -p rind -p rind-aws-lc-rs -p rind-rcgen --features rind/wipe,rind-aws-lc-rs/wipe,rind-rcgen/wipe --test zeroing
       - name: Run heap scratch tests (release, --features wipe)
@@ -110,7 +115,12 @@ jobs:
       - name: Build (release)
         run: cargo build -p rind --release
       - name: Run tests (release)
-        run: env SLOW_TESTS=1 cargo test --release
+        run: env SLOW_TESTS=1 cargo test ${{ matrix.packages }} --release
+      # Each self-test's failure, and on every call, that each service's
+      # stack stays within what it zeroes.
+      - name: Run FIPS break tests
+        if: runner.os == 'Linux'
+        run: cargo test -p rind-fips --features __break_tests
 
       - name: Artificial CPU feature tests (x86_64)
         if: runner.arch == 'X64'
@@ -119,7 +129,9 @@ jobs:
           # Each tier runs the tests and the zeroing tests, then CCTV's million ML-KEM vectors in a
           # release build, which honours the tier's denials only with
           # `--cfg rind_cpu_disable`, alongside the check that they took effect
-          tier() { env "$@" cargo test; env "$@" cargo test -p rind --features wipe --test zeroing --test heap_scratch; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
+          # rind-fips is left out: its module refuses a CPU masked below its
+          # baseline.
+          tier() { env "$@" cargo test --workspace --exclude rind-fips; env "$@" cargo test -p rind --features wipe --test zeroing --test heap_scratch; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
           # test rind's AVX2 SHA-1 and OpenSSL's AVX2 SHA-256 for CPUs without
           # the SHA extensions
           tier RIND_CPU_DISABLE_sha=1 RIND_CPU_DISABLE_intel=1
@@ -157,7 +169,7 @@ jobs:
         if: runner.arch == 'ARM64'
         shell: bash
         run: |
-          tier() { env "$@" cargo test; env "$@" cargo test -p rind --features wipe --test zeroing --test heap_scratch; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
+          tier() { env "$@" cargo test --workspace --exclude rind-fips; env "$@" cargo test -p rind --features wipe --test zeroing --test heap_scratch; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
           # test the by-4 AES-GCM and Keccak-f kernels for cores without SHA3,
           # failing a run whose OS hides the crypto extension
           tier RIND_CPU_DISABLE_sha3=1 RIND_TEST_ARM_CRYPTO_EXT=1

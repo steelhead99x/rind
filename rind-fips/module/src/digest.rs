@@ -36,7 +36,12 @@ pub(crate) fn algorithm(id: u32) -> Option<&'static digest::Algorithm> {
 /// # Safety
 /// `data` must be valid for `len` reads, and `out` for 64 writes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rind_fips_digest(id: u32, data: *const u8, len: usize, out: *mut u8) -> usize {
+pub unsafe extern "C" fn rind_fips_digest(
+    id: u32,
+    data: *const u8,
+    len: usize,
+    out: *mut u8,
+) -> usize {
     let Some(algorithm) = algorithm(id) else {
         return 0;
     };
@@ -58,7 +63,11 @@ pub extern "C" fn rind_fips_digest_new(id: u32) -> *mut Context {
 /// # Safety
 /// `context` must be live, and `data` valid for `len` reads.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rind_fips_digest_update(context: *mut Context, data: *const u8, len: usize) {
+pub unsafe extern "C" fn rind_fips_digest_update(
+    context: *mut Context,
+    data: *const u8,
+    len: usize,
+) {
     // SAFETY: the caller's contract.
     unsafe { (*context).update(bytes(data, len)) }
 }

@@ -11,9 +11,14 @@
 //!
 //! It lives at the crate root, not in `mid` beside [`crate::mid::rng`], which
 //! draws from it in the module's build, because HMAC lives in `high`.
+//!
+//! Each thread's instance wipes itself as its thread exits. A process's
+//! `exit` runs only the exiting thread's destructors, so the module's own
+//! destructor wipes the rest with [`zeroise_all`], as aws-lc's
+//! `rand_thread_state_clear_all` does.
 
 use core::cell::RefCell;
-use std::sync::Once;
+use std::sync::{Once, PoisonError, RwLock};
 
 use crate::Error;
 use crate::high::hash::Sha512;
@@ -40,8 +45,38 @@ struct ThreadDrbg(HmacDrbg<Sha512>);
 
 impl Drop for ThreadDrbg {
     fn drop(&mut self) {
+        let mut live = LIVE.write().unwrap_or_else(PoisonError::into_inner);
+        let address = core::ptr::from_mut(self) as usize;
+        live.instances.retain(|&a| a != address);
         self.0.zeroise();
     }
+}
+
+/// Every thread's instance, by address, once instantiated: a draw holds it
+/// for reading, and [`zeroise_all`] for writing.
+struct Live {
+    instances: Vec<usize>,
+    /// Whether [`zeroise_all`] has run, after which every draw fails.
+    zeroised: bool,
+}
+
+static LIVE: RwLock<Live> = RwLock::new(Live {
+    instances: Vec::new(),
+    zeroised: false,
+});
+
+/// Wipes every thread's instance, returning how many, and fails every draw
+/// after: the module's destructor runs it as the process exits.
+pub(crate) fn zeroise_all() -> usize {
+    let mut live = LIVE.write().unwrap_or_else(PoisonError::into_inner);
+    for &address in &live.instances {
+        // SAFETY: each address is a live thread's instance, which its thread
+        // drops only after removing it here, and uses only under a read of
+        // `LIVE`, which this write excludes.
+        unsafe { (*(address as *mut ThreadDrbg)).0.zeroise() };
+    }
+    live.zeroised = true;
+    live.instances.len()
 }
 
 /// Fills `out` from this thread's DRBG, instantiating it on first use.
@@ -55,8 +90,17 @@ pub(crate) fn fill(out: &mut [u8]) -> Result<(), Error> {
         let mut drbg = drbg.try_borrow_mut().map_err(|_| Error::RngFailed)?;
         let ThreadDrbg(drbg) = match &mut *drbg {
             Some(drbg) => drbg,
-            None => drbg.insert(ThreadDrbg(instantiate()?)),
+            None => {
+                let instance = drbg.insert(ThreadDrbg(instantiate()?));
+                let mut live = LIVE.write().map_err(|_| Error::RngFailed)?;
+                live.instances.push(core::ptr::from_mut(instance) as usize);
+                instance
+            }
         };
+        let live = LIVE.read().map_err(|_| Error::RngFailed)?;
+        if live.zeroised {
+            return Err(Error::RngFailed);
+        }
         for request in out.chunks_mut(MAX_REQUEST_LEN) {
             generate(drbg, request)?;
         }

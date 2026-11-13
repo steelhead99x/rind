@@ -69,7 +69,9 @@ impl fmt::Display for KeyRejected {
 
 impl fmt::Debug for KeyRejected {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("KeyRejected").field(&message(self.0)).finish()
+        f.debug_tuple("KeyRejected")
+            .field(&message(self.0))
+            .finish()
     }
 }
 

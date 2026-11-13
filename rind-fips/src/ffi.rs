@@ -3,7 +3,6 @@
 //! The module's C ABI (`module/src/abi.rs` describes its conventions), and
 //! the handles that own what it allocates.
 
-use core::marker::PhantomData;
 use core::ptr::NonNull;
 
 use crate::Error;
@@ -66,6 +65,11 @@ impl<T: Opaque> Handle<T> {
     pub(crate) fn ptr(&self) -> *mut T {
         self.0.as_ptr()
     }
+
+    /// Gives up ownership, for a service that frees the handle itself.
+    pub(crate) fn into_ptr(self) -> *mut T {
+        core::mem::ManuallyDrop::new(self).0.as_ptr()
+    }
 }
 
 impl<T: Opaque> Drop for Handle<T> {
@@ -81,17 +85,18 @@ unsafe impl<T: Opaque> Send for Handle<T> {}
 // SAFETY: as for `Send`.
 unsafe impl<T: Opaque> Sync for Handle<T> {}
 
-/// Declares opaque handle types and the functions that free them.
+/// Declares opaque handle types, and the extern functions that free them,
+/// in the calling module.
 macro_rules! opaque {
     ($($name:ident => $free:ident),* $(,)?) => {
         $(
             #[repr(C)]
             pub(crate) struct $name {
                 _private: [u8; 0],
-                _not_send: PhantomData<*mut u8>,
+                _not_send: core::marker::PhantomData<*mut u8>,
             }
 
-            impl Opaque for $name {
+            impl $crate::ffi::Opaque for $name {
                 unsafe fn free(handle: *mut Self) {
                     // SAFETY: the caller's contract.
                     unsafe { $free(handle) }
@@ -104,9 +109,10 @@ macro_rules! opaque {
         }
     };
 }
+pub(crate) use opaque;
 
 opaque! {
-    DigestContext => rind_fips_digest_free,
+    Encoded => rind_fips_encoded_free,
 }
 
 unsafe extern "C" {
@@ -122,10 +128,5 @@ unsafe extern "C" {
         b: *const u8,
         b_len: usize,
     ) -> Status;
-
-    pub(crate) fn rind_fips_digest(id: u32, data: *const u8, len: usize, out: *mut u8) -> usize;
-    pub(crate) fn rind_fips_digest_new(id: u32) -> *mut DigestContext;
-    pub(crate) fn rind_fips_digest_update(context: *mut DigestContext, data: *const u8, len: usize);
-    pub(crate) fn rind_fips_digest_finish(context: *mut DigestContext, out: *mut u8) -> usize;
-    pub(crate) fn rind_fips_digest_clone(context: *const DigestContext) -> *mut DigestContext;
+    pub(crate) fn rind_fips_encoded_bytes(encoded: *const Encoded, len: *mut usize) -> *const u8;
 }

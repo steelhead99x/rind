@@ -9,7 +9,9 @@ use core::ffi::{c_int, c_void};
 
 use rind::hmac;
 
-use crate::image::{self, Arch, EXPECTED_PLACEHOLDER, Image, LAYOUT_MAGIC, Layout, Marked, Rela, Segment};
+use crate::image::{
+    self, Arch, EXPECTED_PLACEHOLDER, Image, LAYOUT_MAGIC, Layout, Marked, Rela, Segment,
+};
 
 /// The expected HMAC. Interior mutability puts it in a writable segment,
 /// which the hash leaves out, so writing it changes nothing hashed.
@@ -108,7 +110,11 @@ fn find_self() -> Option<Loaded> {
     found
 }
 
-unsafe extern "C" fn visit(info: *mut libc::dl_phdr_info, _size: usize, data: *mut c_void) -> c_int {
+unsafe extern "C" fn visit(
+    info: *mut libc::dl_phdr_info,
+    _size: usize,
+    data: *mut c_void,
+) -> c_int {
     // SAFETY: the loader passes a valid `info`, and `data` is `find_self`'s.
     let (info, found) = unsafe { (&*info, &mut *data.cast::<Option<Loaded>>()) };
     let base = info.dlpi_addr;

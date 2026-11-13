@@ -46,14 +46,24 @@ fn main() {
         "rind-fips builds only for glibc Linux, not {target}"
     );
 
-    for path in ["build.rs", "module", "../rind/src", "../rind/build.rs", "../rind/Cargo.toml", "../Cargo.lock"] {
+    for path in [
+        "build.rs",
+        "module",
+        "../rind/src",
+        "../rind/build.rs",
+        "../rind/Cargo.toml",
+        "../Cargo.lock",
+    ] {
         println!("cargo::rerun-if-changed={}", manifest.join(path).display());
     }
 
     let built = build(&manifest, &out, &target);
     let mut library = fs::read(&built).unwrap();
     if let Err(error) = inject(&mut library, arch) {
-        panic!("cannot write the module's integrity value into {}: {error}", built.display());
+        panic!(
+            "cannot write the module's integrity value into {}: {error}",
+            built.display()
+        );
     }
 
     let lib = out.join("lib");
@@ -78,7 +88,14 @@ fn build(manifest: &Path, out: &Path, target: &str) -> PathBuf {
 
     let mut command = Command::new(env::var_os("CARGO").unwrap());
     command
-        .args(["build", "--release", "--locked", "--offline", "--target", target])
+        .args([
+            "build",
+            "--release",
+            "--locked",
+            "--offline",
+            "--target",
+            target,
+        ])
         .arg("--manifest-path")
         .arg(manifest.join("module/Cargo.toml"))
         .arg("--target-dir")
@@ -102,7 +119,9 @@ fn build(manifest: &Path, out: &Path, target: &str) -> PathBuf {
         .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("CARGO_TARGET_DIR")
         .env_remove("CARGO_BUILD_TARGET");
-    let status = command.status().expect("cannot run cargo to build the module");
+    let status = command
+        .status()
+        .expect("cannot run cargo to build the module");
     assert!(status.success(), "building the FIPS module failed");
     target_dir.join(target).join("release").join(MODULE)
 }
@@ -142,7 +161,9 @@ impl File<'_> {
     fn offset(&self, vaddr: u64) -> Option<usize> {
         self.segments
             .iter()
-            .find(|(s, _)| s.kind == image::PT_LOAD && vaddr >= s.vaddr && vaddr - s.vaddr < s.filesz)
+            .find(|(s, _)| {
+                s.kind == image::PT_LOAD && vaddr >= s.vaddr && vaddr - s.vaddr < s.filesz
+            })
             .map(|(s, offset)| (offset + vaddr - s.vaddr) as usize)
     }
 
@@ -150,14 +171,18 @@ impl File<'_> {
     fn segment_at(&self, offset: usize) -> Option<&Segment> {
         self.segments
             .iter()
-            .find(|(s, o)| s.kind == image::PT_LOAD && offset as u64 >= *o && offset as u64 - o < s.filesz)
+            .find(|(s, o)| {
+                s.kind == image::PT_LOAD && offset as u64 >= *o && offset as u64 - o < s.filesz
+            })
             .map(|(s, _)| s)
     }
 }
 
 impl Image for File<'_> {
     fn bytes(&self, vaddr: u64, len: u64) -> &[u8] {
-        let at = self.offset(vaddr).expect("hashing outside the loaded segments");
+        let at = self
+            .offset(vaddr)
+            .expect("hashing outside the loaded segments");
         &self.bytes[at..at + len as usize]
     }
 
@@ -179,10 +204,15 @@ fn inject(library: &mut [u8], arch: Arch) -> Result<(), String> {
         .iter()
         .find(|(s, _)| s.kind == image::PT_DYNAMIC)
         .ok_or("no dynamic section")?;
-    let dynamic_at = file.offset(dynamic.vaddr).ok_or("the dynamic section is not loaded")?;
+    let dynamic_at = file
+        .offset(dynamic.vaddr)
+        .ok_or("the dynamic section is not loaded")?;
     let mut layout = Layout::default();
     let (mut rela_size, mut jmprel_size) = (0, 0);
-    for entry in library[dynamic_at..dynamic_at + dynamic.filesz as usize].as_chunks::<16>().0 {
+    for entry in library[dynamic_at..dynamic_at + dynamic.filesz as usize]
+        .as_chunks::<16>()
+        .0
+    {
         let (tag, value) = (u64_at(entry, 0)?, u64_at(entry, 8)?);
         match tag {
             0 => break,
@@ -207,9 +237,14 @@ fn inject(library: &mut [u8], arch: Arch) -> Result<(), String> {
     layout.jmprel_count = jmprel_size / 24;
 
     let mut relas = Vec::new();
-    for (table, count) in [(layout.rela, layout.rela_count), (layout.jmprel, layout.jmprel_count)] {
+    for (table, count) in [
+        (layout.rela, layout.rela_count),
+        (layout.jmprel, layout.jmprel_count),
+    ] {
         for i in 0..count {
-            let at = file.offset(table + i * 24).ok_or("a relocation table is not loaded")?;
+            let at = file
+                .offset(table + i * 24)
+                .ok_or("a relocation table is not loaded")?;
             let rela = Rela {
                 offset: u64_at(library, at)?,
                 info: u64_at(library, at + 8)?,
@@ -242,9 +277,14 @@ fn inject(library: &mut [u8], arch: Arch) -> Result<(), String> {
     }
 
     let at = layout_at + LAYOUT_MAGIC.len();
-    for (i, value) in [layout.rela, layout.rela_count, layout.jmprel, layout.jmprel_count]
-        .into_iter()
-        .enumerate()
+    for (i, value) in [
+        layout.rela,
+        layout.rela_count,
+        layout.jmprel,
+        layout.jmprel_count,
+    ]
+    .into_iter()
+    .enumerate()
     {
         library[at + 8 * i..at + 8 * (i + 1)].copy_from_slice(&value.to_le_bytes());
     }
@@ -256,7 +296,9 @@ fn inject(library: &mut [u8], arch: Arch) -> Result<(), String> {
     let only_segments: Vec<Segment> = segments.iter().map(|(s, _)| *s).collect();
     let key = rind::hmac::Key::new(&rind::hmac::HMAC_SHA256, &image::HMAC_KEY);
     let mut context = rind::hmac::Context::with_key(&key);
-    image::hash(&file, arch, &only_segments, &mut relas, |bytes| context.update(bytes))?;
+    image::hash(&file, arch, &only_segments, &mut relas, |bytes| {
+        context.update(bytes)
+    })?;
     let tag = context.sign();
     library[expected_at..expected_at + 32].copy_from_slice(tag.as_ref());
     Ok(())
@@ -269,21 +311,44 @@ fn find_once(haystack: &[u8], needle: &[u8]) -> Result<usize, String> {
         .enumerate()
         .filter(|(_, w)| *w == needle)
         .map(|(i, _)| i);
-    let first = found.next().ok_or_else(|| format!("{:?} is missing", String::from_utf8_lossy(needle)))?;
+    let first = found
+        .next()
+        .ok_or_else(|| format!("{:?} is missing", String::from_utf8_lossy(needle)))?;
     if found.next().is_some() {
-        return Err(format!("{:?} appears twice", String::from_utf8_lossy(needle)));
+        return Err(format!(
+            "{:?} appears twice",
+            String::from_utf8_lossy(needle)
+        ));
     }
     Ok(first)
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> Result<u16, &'static str> {
-    Ok(u16::from_le_bytes(bytes.get(at..at + 2).ok_or("truncated ELF")?.try_into().unwrap()))
+    Ok(u16::from_le_bytes(
+        bytes
+            .get(at..at + 2)
+            .ok_or("truncated ELF")?
+            .try_into()
+            .unwrap(),
+    ))
 }
 
 fn u32_at(bytes: &[u8], at: usize) -> Result<u32, &'static str> {
-    Ok(u32::from_le_bytes(bytes.get(at..at + 4).ok_or("truncated ELF")?.try_into().unwrap()))
+    Ok(u32::from_le_bytes(
+        bytes
+            .get(at..at + 4)
+            .ok_or("truncated ELF")?
+            .try_into()
+            .unwrap(),
+    ))
 }
 
 fn u64_at(bytes: &[u8], at: usize) -> Result<u64, &'static str> {
-    Ok(u64::from_le_bytes(bytes.get(at..at + 8).ok_or("truncated ELF")?.try_into().unwrap()))
+    Ok(u64::from_le_bytes(
+        bytes
+            .get(at..at + 8)
+            .ok_or("truncated ELF")?
+            .try_into()
+            .unwrap(),
+    ))
 }

@@ -398,6 +398,18 @@ impl PublicKey {
     }
 }
 
+#[cfg(any(test, rind_fips))]
+impl PublicKey {
+    /// An RSA key's modulus length in bits, or `None` for another kind of
+    /// key: what the FIPS module checks against FIPS 186-5's sizes.
+    pub(crate) fn rsa_modulus_bits(&self) -> Option<usize> {
+        match &self.key {
+            Parsed::Rsa(key, _) => Some(key.key.modulus_len_bits()),
+            _ => None,
+        }
+    }
+}
+
 /// The bytes of `digest`, refused unless a signature takes its hash.
 fn signed_digest(digest: &Digest) -> Result<&[u8], Error> {
     match digest.signs() {
