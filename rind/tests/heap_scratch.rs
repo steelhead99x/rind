@@ -443,20 +443,20 @@ fn spake2plus() {
     // use different pairs, so scratch from either scalar differs.
     let w0s = [[0x11u8; 40], [0x22u8; 40]];
     let w1s = [[0x33u8; 40], [0x44u8; 40]];
-    independent("SPAKE2+ prover w0", w0s, |w0| {
+    assert_independent("SPAKE2+ prover w0", w0s, |w0| {
         ProverSecrets::new(w0, &[0x33; 40]).unwrap()
     });
-    independent("SPAKE2+ prover w1", w1s, |w1| {
+    assert_independent("SPAKE2+ prover w1", w1s, |w1| {
         ProverSecrets::new(&[0x11; 40], w1).unwrap()
     });
-    independent("SPAKE2+ verifier w0", w0s, |w0| {
+    assert_independent("SPAKE2+ verifier w0", w0s, |w0| {
         VerifierRecord::from_w1(w0, &[0x33; 40]).unwrap()
     });
-    independent("SPAKE2+ verifier w1", w1s, |w1| {
+    assert_independent("SPAKE2+ verifier w1", w1s, |w1| {
         VerifierRecord::from_w1(&[0x11; 40], w1).unwrap()
     });
     let handshakes = [(w0s[0], w1s[0]), (w0s[1], w1s[1])];
-    independent("SPAKE2+ handshake", handshakes, |(w0, w1)| {
+    assert_independent("SPAKE2+ handshake", handshakes, |(w0, w1)| {
         let prover = ProverSecrets::new(w0, w1).unwrap();
         let record = VerifierRecord::from_w1(w0, w1).unwrap();
         let (share_p, prover) = prover.start(&RFC9383, b"ctx", b"a", b"b").unwrap();
