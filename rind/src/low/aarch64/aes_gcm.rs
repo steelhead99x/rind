@@ -130,6 +130,11 @@ const SHORT_OPEN_BLOCKS: usize = 31;
 /// its tag: its counter blocks and `y0` encrypt together, and one GHASH
 /// reduction per eight blocks hashes the AAD, the message, and the lengths
 /// block, where the kernels' path hashes each of them in a separate call.
+///
+/// Cortex-A78 issues two AES instructions a cycle and fuses an adjacent
+/// `AESE`/`AESMC` pair that shares a register, so the counters go out up to
+/// four at a time. One block at a time leaves the second pipeline idle,
+/// which is most of a 32-byte seal: the tag mask and two message blocks.
 #[target_feature(enable = "aes")]
 fn short<const ENC: bool, const ROUND_KEYS: usize>(
     round_keys: &[uint8x16_t; ROUND_KEYS],
@@ -142,32 +147,183 @@ fn short<const ENC: bool, const ROUND_KEYS: usize>(
     let mut ghash = Aggregate::new(table, blocks);
 
     let y0_block = load(&y0);
-    let tag_mask = encrypt(round_keys, y0_block);
     for chunk in aad.chunks(16) {
         ghash.add(load(chunk));
     }
 
     let y0_ctr = u32::from_be_bytes([y0[12], y0[13], y0[14], y0[15]]);
     let y0_words = vreinterpretq_u32_u8(y0_block);
-    for (i, chunk) in (1u32..).zip(cipher_inout.chunks_mut(16)) {
-        let counter = vsetq_lane_u32::<3>(y0_ctr.wrapping_add(i).to_be(), y0_words);
-        let keystream = encrypt(round_keys, vreinterpretq_u8_u32(counter));
-        let input = load(chunk);
-        if !ENC {
-            ghash.add(input);
+    let msg_len = cipher_inout.len();
+    let mut index = 1u32;
+    let mut rest = cipher_inout;
+    let mut tag_mask = y0_block;
+    let mut tag_left = true;
+    loop {
+        let data_blocks = rest.len().div_ceil(16);
+        if data_blocks == 0 {
+            if tag_left {
+                let mut block = [y0_block];
+                encrypt_lanes(round_keys, &mut block);
+                tag_mask = block[0];
+            }
+            break;
         }
-        let output = veorq_u8(input, keystream);
-        store(chunk, output);
-        if ENC {
-            // The keystream past a short chunk is no ciphertext.
-            ghash.add(vandq_u8(output, load(&KEEP[16 - chunk.len()..][..16])));
+        // The tag mask takes a free lane of a short group. A full group of
+        // four message blocks keeps every lane, and the mask joins the tail.
+        // `TAG` is const so each arm's counters and block loop unroll.
+        if tag_left && data_blocks < 4 {
+            let n = data_blocks;
+            let take = rest.len().min(n * 16);
+            let (chunk, tail) = rest.split_at_mut(take);
+            rest = tail;
+            tag_mask = match n {
+                1 => crypt_batch::<ENC, ROUND_KEYS, 2, true>(
+                    round_keys, &mut ghash, y0_block, y0_words, y0_ctr, index, chunk,
+                ),
+                2 => crypt_batch::<ENC, ROUND_KEYS, 3, true>(
+                    round_keys, &mut ghash, y0_block, y0_words, y0_ctr, index, chunk,
+                ),
+                _ => crypt_batch::<ENC, ROUND_KEYS, 4, true>(
+                    round_keys, &mut ghash, y0_block, y0_words, y0_ctr, index, chunk,
+                ),
+            };
+            tag_left = false;
+            index += n as u32;
+        } else {
+            let n = data_blocks.min(4);
+            let take = rest.len().min(n * 16);
+            let (chunk, tail) = rest.split_at_mut(take);
+            rest = tail;
+            match n {
+                1 => crypt_batch::<ENC, ROUND_KEYS, 1, false>(
+                    round_keys, &mut ghash, y0_block, y0_words, y0_ctr, index, chunk,
+                ),
+                2 => crypt_batch::<ENC, ROUND_KEYS, 2, false>(
+                    round_keys, &mut ghash, y0_block, y0_words, y0_ctr, index, chunk,
+                ),
+                3 => crypt_batch::<ENC, ROUND_KEYS, 3, false>(
+                    round_keys, &mut ghash, y0_block, y0_words, y0_ctr, index, chunk,
+                ),
+                _ => crypt_batch::<ENC, ROUND_KEYS, 4, false>(
+                    round_keys, &mut ghash, y0_block, y0_words, y0_ctr, index, chunk,
+                ),
+            };
+            index += n as u32;
         }
     }
-    ghash.add(load(&lengths(aad.len(), cipher_inout.len())));
+    ghash.add(load(&lengths(aad.len(), msg_len)));
 
     let mut tag = [0u8; 16];
     store(&mut tag, veorq_u8(tag_mask, ghash.finish()));
     tag
+}
+
+/// Encrypts the tag mask (when `TAG`) and `data`'s counter blocks, `N` of
+/// them together, then folds `data` into `ghash`. Returns the tag mask when
+/// `TAG`, and an unused lane otherwise.
+#[target_feature(enable = "aes")]
+#[inline]
+fn crypt_batch<const ENC: bool, const KEYS: usize, const N: usize, const TAG: bool>(
+    round_keys: &[uint8x16_t; KEYS],
+    ghash: &mut Aggregate<'_>,
+    y0_block: uint8x16_t,
+    y0_words: uint32x4_t,
+    y0_ctr: u32,
+    index: u32,
+    data: &mut [u8],
+) -> uint8x16_t {
+    let mut counters = [y0_block; N];
+    let start = usize::from(TAG);
+    let mut ctr = index;
+    for counter in &mut counters[start..] {
+        *counter = gcm_counter(y0_words, y0_ctr, ctr);
+        ctr = ctr.wrapping_add(1);
+    }
+    encrypt_lanes(round_keys, &mut counters);
+
+    let (blocks, rest) = data.as_chunks_mut::<16>();
+    let mut streams = counters[start..].iter().copied();
+    for (chunk, keystream) in blocks.iter_mut().zip(streams.by_ref()) {
+        apply_block::<ENC>(ghash, chunk, keystream);
+    }
+    if !rest.is_empty() {
+        // `N - start` is the block count, so a short tail has a lane.
+        let Some(keystream) = streams.next() else {
+            unreachable!()
+        };
+        apply_block::<ENC>(ghash, rest, keystream);
+    }
+    counters[0]
+}
+
+/// Xors one counter block into `chunk` and folds the ciphertext into `ghash`.
+#[target_feature(enable = "aes")]
+#[inline]
+fn apply_block<const ENC: bool>(
+    ghash: &mut Aggregate<'_>,
+    chunk: &mut [u8],
+    keystream: uint8x16_t,
+) {
+    let input = load(chunk);
+    if !ENC {
+        ghash.add(input);
+    }
+    let output = veorq_u8(input, keystream);
+    store(chunk, output);
+    if ENC {
+        // The keystream past a short chunk is no ciphertext.
+        let width = chunk.len();
+        let block = if width == 16 {
+            output
+        } else {
+            vandq_u8(output, load(&KEEP[16 - width..][..16]))
+        };
+        ghash.add(block);
+    }
+}
+
+/// The counter block `i` after `y0`, GCM's big-endian increment of its last word.
+#[target_feature(enable = "neon")]
+#[inline]
+fn gcm_counter(y0_words: uint32x4_t, y0_ctr: u32, i: u32) -> uint8x16_t {
+    vreinterpretq_u8_u32(vsetq_lane_u32::<3>(
+        y0_ctr.wrapping_add(i).to_be(),
+        y0_words,
+    ))
+}
+
+/// AES of `N` independent blocks under any key size.
+///
+/// Each round is an `AESE`/`AESMC` pair per block before the next round, the
+/// shape Cortex-A78 fuses and dual-issues. `N` is 1, 2, 3, or 4.
+///
+/// Out of line so the round keys and the lanes get the register file to
+/// themselves. Inlined into [`short`], the live GHASH state made LLVM spill
+/// the lanes to the stack between rounds.
+#[target_feature(enable = "aes")]
+#[inline(never)]
+fn encrypt_lanes<const KEYS: usize, const N: usize>(
+    round_keys: &[uint8x16_t; KEYS],
+    block: &mut [uint8x16_t; N],
+) {
+    // A local copy, so the rounds stay in registers. Writing each round
+    // through `block` reloads it.
+    let mut lanes = *block;
+    let [rounds @ .., penultimate, last] = round_keys.as_slice() else {
+        unreachable!()
+    };
+    let penultimate = *penultimate;
+    let last = *last;
+    for rk in rounds {
+        let rk = *rk;
+        for lane in &mut lanes {
+            *lane = vaesmcq_u8(vaeseq_u8(*lane, rk));
+        }
+    }
+    for lane in &mut lanes {
+        *lane = veorq_u8(vaeseq_u8(*lane, penultimate), last);
+    }
+    *block = lanes;
 }
 
 /// Sixteen ones then sixteen zeros: the 16 bytes from `16 - n` keep the
@@ -181,19 +337,6 @@ static KEEP: [u8; 32] = {
     }
     keep
 };
-
-/// AES of `block` under any key size, by its number of round keys.
-#[target_feature(enable = "aes")]
-#[inline]
-fn encrypt<const N: usize>(round_keys: &[uint8x16_t; N], mut block: uint8x16_t) -> uint8x16_t {
-    let [rounds @ .., penultimate, last] = round_keys.as_slice() else {
-        unreachable!()
-    };
-    for rk in rounds {
-        block = vaesmcq_u8(vaeseq_u8(block, *rk));
-    }
-    veorq_u8(vaeseq_u8(block, *penultimate), *last)
-}
 
 /// Loads up to 16 bytes, zero-padded.
 #[target_feature(enable = "neon")]
