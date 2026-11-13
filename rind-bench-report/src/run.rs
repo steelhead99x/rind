@@ -562,7 +562,7 @@ impl J {
             J::Bool(v) => v.to_string(),
             J::Int(v) => v.to_string(),
             J::Float(v) => py_float(*v),
-            J::Str(v) => serde_json::to_string(v).unwrap_or_else(|_| "\"\"".to_string()),
+            J::Str(v) => crate::format::py_string(v),
             J::Array(items) if items.is_empty() => "[]".to_string(),
             J::Object(pairs) if pairs.is_empty() => "{}".to_string(),
             J::Array(items) => {
@@ -583,7 +583,7 @@ impl J {
                 let mut out = String::from("{\n");
                 for (i, (key, value)) in pairs.iter().enumerate() {
                     out.push_str(&" ".repeat(level + 1));
-                    out.push_str(&serde_json::to_string(key).unwrap_or_default());
+                    out.push_str(&crate::format::py_string(key));
                     out.push_str(": ");
                     out.push_str(&value.dump(level + 1));
                     if i + 1 != pairs.len() {

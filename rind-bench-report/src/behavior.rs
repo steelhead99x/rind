@@ -420,3 +420,62 @@ fn write_run(dir: &std::path::Path, sha256: f64, chacha: f64, avx512: bool) {
     )
     .unwrap();
 }
+
+#[test]
+fn json_ensure_ascii_matches_python_and_the_fixture() {
+    let model = "Apple M4 — café";
+    let note = "DIT ~30 µs; shield ✓; snowman ☃; emoji 😀; line\nbreak; quote\"; back\\slash; bell\u{0007}; del\u{007f}";
+    let dumped = crate::run::J::Object(vec![
+        ("schema".into(), crate::run::J::Int(1)),
+        ("host".into(), crate::run::J::Str("kixtop".into())),
+        (
+            "cpu".into(),
+            crate::run::J::Object(vec![
+                ("model".into(), crate::run::J::Str(model.into())),
+                ("arch".into(), crate::run::J::Str("aarch64".into())),
+            ]),
+        ),
+        ("note".into(), crate::run::J::Str(note.into())),
+        ("ns".into(), crate::run::J::Float(1.5)),
+        ("ok".into(), crate::run::J::Bool(true)),
+        (
+            "tags".into(),
+            crate::run::J::Array(vec![
+                crate::run::J::Str("µ".into()),
+                crate::run::J::Str("×".into()),
+            ]),
+        ),
+    ])
+    .dump(0);
+    let fixture = include_str!("../tests/fixtures/non-ascii.json");
+    assert_eq!(dumped, fixture, "committed fixture");
+
+    let spec =
+        serde_json::to_vec(&json!({"model": model, "note": note, "tags": ["µ", "×"]})).unwrap();
+    let py = Command::new("python3")
+        .arg("-c")
+        .arg(
+            "import json,sys\n\
+             spec=json.load(sys.stdin)\n\
+             obj={'schema':1,'host':'kixtop','cpu':{'model':spec['model'],'arch':'aarch64'},\n\
+             'note':spec['note'],'ns':1.5,'ok':True,'tags':spec['tags']}\n\
+             sys.stdout.write(json.dumps(obj, indent=1))",
+        )
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let output = {
+        use std::io::Write;
+        let mut child = py;
+        child.stdin.take().unwrap().write_all(&spec).unwrap();
+        child.wait_with_output().unwrap()
+    };
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(dumped, String::from_utf8(output.stdout).unwrap());
+}

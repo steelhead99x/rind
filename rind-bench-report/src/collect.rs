@@ -6,6 +6,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::error::{Error, Result};
+use crate::format::py_string;
 use crate::paths::Paths;
 use crate::tables::{COPY_FAILED, LEASE_HELD, REMOTE_DIR, host, hosts};
 
@@ -99,8 +100,11 @@ fn collect_host(paths: &Paths, name: &str, commit: &str, out_dir: &Path) -> Resu
     };
     let record = |status: &str, reason: &str| -> Result<()> {
         let body = format!(
-            "{{\n \"schema\": 1,\n \"host\": \"{name}\",\n \"commit\": \"{commit}\",\n \"status\": \"{status}\",\n \"reason\": {}\n}}\n",
-            py_escape(reason)
+            "{{\n \"schema\": 1,\n \"host\": {},\n \"commit\": {},\n \"status\": {},\n \"reason\": {}\n}}\n",
+            py_string(name),
+            py_string(commit),
+            py_string(status),
+            py_string(reason)
         );
         fs::write(&out, body).map_err(|err| Error::new(err.to_string()))?;
         eprintln!("bench-report: {name}: {status}: {reason}");
@@ -241,8 +245,4 @@ fn quest_locked(paths: &Paths) -> Result<(String, String, String)> {
         locked["repo"].as_str().unwrap_or("").to_string(),
         locked["rev"].as_str().unwrap_or("").to_string(),
     ))
-}
-
-fn py_escape(text: &str) -> String {
-    serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string())
 }

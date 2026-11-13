@@ -1,0 +1,15 @@
+{
+ "schema": 1,
+ "host": "kixtop",
+ "cpu": {
+  "model": "Apple M4 \u2014 caf\u00e9",
+  "arch": "aarch64"
+ },
+ "note": "DIT ~30 \u00b5s; shield \u2713; snowman \u2603; emoji \ud83d\ude00; line\nbreak; quote\"; back\\slash; bell\u0007; del\u007f",
+ "ns": 1.5,
+ "ok": true,
+ "tags": [
+  "\u00b5",
+  "\u00d7"
+ ]
+}

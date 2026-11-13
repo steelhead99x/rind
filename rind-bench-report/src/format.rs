@@ -32,6 +32,45 @@ pub fn py_float(n: f64) -> String {
     }
     text
 }
+
+/// A JSON string as CPython `json.dumps` writes it (`ensure_ascii=True`).
+///
+/// Non-ASCII is `\uXXXX` (a surrogate pair above U+FFFF). Controls use the
+/// short escapes `\b`, `\f`, `\n`, `\r`, `\t`, and `\u00XX` otherwise. `/` is
+/// left as is. The key separator used with `indent=1` is `": "` and the item
+/// separator is `","`, matching `json.dumps(..., indent=1)`.
+pub fn py_string(text: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{0008}' => out.push_str("\\b"),
+            '\u{000c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 || (c as u32) >= 0x7f => out.push_str(&py_unicode_escape(c)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn py_unicode_escape(ch: char) -> String {
+    let n = ch as u32;
+    if n < 0x10000 {
+        format!("\\u{n:04x}")
+    } else {
+        let n = n - 0x10000;
+        let high = 0xd800 | ((n >> 10) & 0x3ff);
+        let low = 0xdc00 | (n & 0x3ff);
+        format!("\\u{high:04x}\\u{low:04x}")
+    }
+}
+
+/// `admin/bench-report`'s `human`: `ns`, `µs`, or `ms`.
 pub fn human(ns: f64) -> String {
     if ns < 1e3 {
         format!("{ns:.0} ns")
