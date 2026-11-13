@@ -406,6 +406,11 @@ mod tests {
                 .derive(p, b"saltsalt", pepper, b"ad", &mut wanted)
                 .unwrap();
 
+            // Mark copies: the literals are shared, read-only data, and
+            // marking them would taint every other test that uses
+            // `b"password"`, whichever runs after this one.
+            let (password, pepper) = (password.to_vec(), pepper.to_vec());
+            let (password, pepper) = (password.as_slice(), pepper.as_slice());
             ct::secret_slice(password);
             ct::secret_slice(pepper);
             let secret = Secret::new(password).unwrap();
