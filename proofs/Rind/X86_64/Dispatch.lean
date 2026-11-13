@@ -1,5 +1,6 @@
 module
 public import Rind.X86_64.P256Dispatch
+public import Rind.X86_64.P384Dispatch
 @[expose] public section
 open Aeneas Aeneas.Std Result
 
@@ -363,6 +364,11 @@ def high.agreement.Keyed.agree {K Key : Type} (AgreeInst : high.agreement.Agree 
 def high.agreement.p256Agree : high.agreement.Agree high.curve.P256 mid.p256.PrivateKey :=
   { high.curve.P256.Insts.RindHighAgreementAgreePrivateKey with random := mid.p256.PrivateKey.generate }
 
+/-- P-384's `Agree` impl, with `random` the `p384::PrivateKey::new_random` that
+`Rind.X86_64.P384Dispatch` models. -/
+def high.agreement.p384Agree : high.agreement.Agree high.curve.P384 mid.p384.PrivateKey :=
+  { high.curve.P384.Insts.RindHighAgreementAgreePrivateKey with random := mid.p384.PrivateKey.generate }
+
 /-- An `Algorithm`'s `generate`, given the static itself, as `PrivateKey::generate`
 passes it. -/
 def high.agreement.Algorithm.generate (algorithm : high.agreement.Algorithm) :
@@ -370,7 +376,7 @@ def high.agreement.Algorithm.generate (algorithm : high.agreement.Algorithm) :
   match algorithm with
   | .X25519 => high.agreement.Keyed.generate high.agreement.X25519Curve.Insts.RindHighAgreementAgreePrivateKey algorithm
   | .ECDH_P256 => high.agreement.Keyed.generate high.agreement.p256Agree algorithm
-  | .ECDH_P384 => high.agreement.Keyed.generate high.curve.P384.Insts.RindHighAgreementAgreePrivateKey algorithm
+  | .ECDH_P384 => high.agreement.Keyed.generate high.agreement.p384Agree algorithm
   | .ECDH_P521 => high.agreement.Keyed.generate high.curve.P521.Insts.RindHighAgreementAgreePrivateKey algorithm
 
 /-- An `Algorithm`'s `load`, given the static itself, as `PrivateKey`'s loaders
@@ -382,8 +388,7 @@ def high.agreement.Algorithm.load (algorithm : high.agreement.Algorithm)
   | .X25519 =>
     high.agreement.Keyed.load high.agreement.X25519Curve.Insts.RindHighAgreementAgreePrivateKey algorithm source
   | .ECDH_P256 => high.agreement.Keyed.load high.agreement.p256Agree algorithm source
-  | .ECDH_P384 =>
-    high.agreement.Keyed.load high.curve.P384.Insts.RindHighAgreementAgreePrivateKey algorithm source
+  | .ECDH_P384 => high.agreement.Keyed.load high.agreement.p384Agree algorithm source
   | .ECDH_P521 =>
     high.agreement.Keyed.load high.curve.P521.Insts.RindHighAgreementAgreePrivateKey algorithm source
 
