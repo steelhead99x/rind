@@ -62,11 +62,11 @@
         "quest-pinned": "quest-pinned"
       },
       "locked": {
-        "lastModified": 1794455008,
-        "narHash": "sha256-Ze/cQysZ7QEGRMaHjmNTwcS3XjnGZm0Dmz/Yt6pAwmU=",
+        "lastModified": 1794608732,
+        "narHash": "sha256-e44UX7gvMJlmgZbk290NkEM4WbQ1TjYcYxgNjy0d1TQ=",
         "owner": "moq-dev",
         "repo": "quest",
-        "rev": "93c9c2ef65f074e82094bf5272076db44ac19030",
+        "rev": "b79569f3d09ec38d6845d208bc8e813391e55d88",
         "type": "github"
       },
       "original": {

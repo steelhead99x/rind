@@ -908,26 +908,10 @@ mod tests {
 
     /// `a - b mod L`, with `L` the edwards25519 order.
     fn sub_mod_l(a: edwards25519::Scalar, b: edwards25519::Scalar) -> edwards25519::Scalar {
-        let order = h("edd3f55c1a631258d69cf7a2def9de1400000000000000000000000000000010");
-        let a = a.to_bytes();
-        let b = b.to_bytes();
-        let mut diff = [0u8; 32];
-        let mut borrow = 0u16;
-        for i in 0..32 {
-            let d = u16::from(a[i]) + 256 - u16::from(b[i]) - borrow;
-            diff[i] = d as u8;
-            borrow = u16::from(d < 256);
-        }
-        if borrow == 1 {
-            let mut carry = 0u16;
-            for (out, l) in diff.iter_mut().zip(&order) {
-                let sum = u16::from(*out) + u16::from(*l) + carry;
-                *out = sum as u8;
-                carry = sum >> 8;
-            }
-            assert_eq!(carry, 0);
-        }
-        edwards25519::Scalar::from_canonical_bytes(&diff).unwrap()
+        let mut one = [0u8; 32];
+        one[0] = 1;
+        let one = edwards25519::Scalar::from_canonical_bytes(&one).unwrap();
+        b.neg().mul_add(&one, &a)
     }
 
     /// Under `admin/ctgrind`, memcheck fails this if loading a key or

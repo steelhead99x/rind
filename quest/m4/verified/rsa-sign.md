@@ -10,3 +10,7 @@ RSA's private operation and everything around it, PKCS#1 v1.5 and PSS signing, O
 - Route: Aeneas to Lean against RFC 8017. The AVX2 gather is intrinsics, modelled as `Rind/X86_64/Simd.lean` models AES-GCM's.
 - Key generation's spec is the key it returns, not how it found it: the components satisfy RFC 8017's relations at the requested size with e = 65537, and d is reduced mod lcm(p - 1, q - 1). Primality is probabilistic and outside a functional spec, as randomness is.
 - Products elsewhere enter as a hypothesis, as `MontProducts` and `AwsLcMont` in `proofs/Rind/X86_64/RsaMont.lean` do for verification.
+
+## Required
+
+- [VG measured](/quest/m2/verified-garbage/bench.md) - whether pyca/verified-garbage's proven code beats what this would prove; if a switch replaces it, this quest is deleted or rewritten (maintainer, 2026-11-12)

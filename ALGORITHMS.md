@@ -135,8 +135,9 @@ with portable Rust in place of the assembly armv7 runs regardless.
   ML-DSA's Keccak-f is rind's, s2n-bignum's Keccak spec in Rust, which
   [`proofs/`](proofs/README.md) proves is FIPS 202's KECCAK-f[1600]; it
   measured as fast as RustCrypto's and libcrux-sha3's, which nothing proves.
-  RSA's Montgomery multiplication is rind's loop, which wipes its scratch,
-  rather than HACL*'s, which leaves scratch unwiped on the heap.
+  RSA's Montgomery multiplication is rind's own: an interleaved loop below 16
+  limbs, then a separate product and reduction, with Karatsuba from 32 limbs.
+  Its scratch is on the stack, never on the heap as HACL*'s is.
 - portable: RSA and the NIST curves run on 64-bit limbs on 64-bit targets,
   and on wasm32 built with the `wide-arithmetic` target feature (stable from
   Rust 1.101), and on armv7's 32-bit limbs on other 32-bit targets, where a
@@ -190,8 +191,9 @@ s2n-bignum's `_SAFE` theorems prove, for every input, that the instructions a
 routine executes and the addresses it accesses depend on no secret, and that
 it runs no instruction whose timing depends on its operands. `admin/prove
 bytes`, in the `prove` workflow, checks that each routine's `asm!` block in
-rind's release build holds the instructions its proof lists, at the
-submodule's commit, so those theorems are about the code rind runs. A block
+rind's release build holds the instructions its proof lists, upstream's
+proof at the base commit of rind's fork, `thirdparty/s2n-bignum`, so those
+theorems are about the code rind runs. A block
 differs from its proof's code only as `admin/prove-bytes` lists, none of the
 changes altering the result the proof states or making a branch, address, or
 timing depend on a secret: the final `ret` is gone, as the Rust function
@@ -392,12 +394,14 @@ armv7 runs the same exponentiation over aws-lc's 32-bit ARM `bn_mul_mont`
 routines as aws-lc picks them (`bn_mul8x_mont_neon` with NEON for moduli whose
 width in 32-bit words is a multiple of eight, and `bn_mul_mont_nohw`
 otherwise), and the rest of the arithmetic in rind's portable Rust. The
-portable backend runs it all in that Rust, its Montgomery products by
-rind's loop (Koç, Acar, and Kaliski's CIOS method) and its squarings by
-forming each cross product once before reducing, over 64-bit limbs on
-64-bit targets and 32-bit ones elsewhere. RSA-2048 signing measured level
-with aws-lc's C without assembly on x86_64, and 4096 bits and up slower,
-where aws-lc switches to Karatsuba.
+portable backend runs it all in that Rust, over 64-bit limbs on 64-bit
+targets and 32-bit ones elsewhere: its Montgomery products below 16 limbs by
+rind's loop (Koç, Acar, and Kaliski's CIOS method), and wider ones and its
+squarings by forming the product, each square's cross products once, then
+reducing it, adding two rows a pass in two carry chains. Products split by
+Karatsuba's method from 32 limbs and squares from 64, as aws-lc's C does
+from 16 words. RSA signing and verification at 2048 to 8192 bits measured
+at 0.85 to 0.97× aws-lc's C time without assembly on x86_64.
 On x86_64 CPUs with AVX2 but without ADX, the private operation's exponentiation modulo each 1024-bit
 prime of RSA-2048 runs aws-lc's RSAZ, as aws-lc does there: Montgomery
 products on AVX2 over 29-bit limbs, and a 5-bit fixed window whose table
