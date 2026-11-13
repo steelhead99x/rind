@@ -25,7 +25,11 @@ fi
 
 cargo test -p rind-bench-report --locked --quiet -- --ignored
 cargo build -p rind-bench-report --locked --quiet
-bin=$root/target/debug/rind-bench-report
+# Cargo's target directory, which CARGO_TARGET_DIR may move, relative to
+# the workspace root when it is relative.
+target_dir=${CARGO_TARGET_DIR:-target}
+[[ $target_dir == /* ]] || target_dir=$root/$target_dir
+bin=$target_dir/debug/rind-bench-report
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
