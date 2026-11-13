@@ -139,9 +139,17 @@ pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
 pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
     let mut st = state(key, nonce);
     rounds(&mut st);
-    hchacha20_out(&st)
+    // Keep the output loop in this function so Aeneas still extracts
+    // `hchacha20_loop`, which `proofs/` already proves.
+    let mut out = [0u8; 32];
+    for i in 0..8 {
+        let w = if i < 4 { st[i] } else { st[i + 8] };
+        out[4 * i..4 * (i + 1)].copy_from_slice(&w.to_le_bytes());
+    }
+    out
 }
 
+#[cfg(target_pointer_width = "32")]
 fn hchacha20_out(st: &[u32; 16]) -> [u8; 32] {
     let mut out = [0u8; 32];
     for i in 0..8 {
