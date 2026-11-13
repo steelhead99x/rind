@@ -5,7 +5,11 @@ fn render_matches_committed_files() {
     let paths = Paths::discover();
     let files = render_files(&paths).unwrap();
     for (path, content) in files {
-        let disk = std::fs::read_to_string(&path).unwrap_or_default();
+        // A checkout that converts line endings, as Git on Windows does by
+        // default, has CRLF on disk where the renderer writes LF.
+        let disk = std::fs::read_to_string(&path)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
         if disk == content {
             continue;
         }

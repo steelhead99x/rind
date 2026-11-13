@@ -336,7 +336,11 @@ fn operation_regex_drops_a_refused_library() {
     }
 }
 
+// It runs `admin/bench-report` under python3 (3.11 or later, for
+// `tomllib`), which a workspace `cargo test` cannot count on, as on Windows,
+// so `sh/bench-parity.sh` runs it with the other Python comparisons.
 #[test]
+#[ignore = "needs python3 and admin/bench-report; sh/bench-parity.sh runs it"]
 fn gate_stdout_matches_python_on_the_script_fixture() {
     let dir = std::env::temp_dir().join(format!("rind-gate-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
