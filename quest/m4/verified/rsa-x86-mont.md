@@ -11,3 +11,7 @@ Every RSA Montgomery product x86_64 runs outside s2n-bignum's Karatsuba routines
 - Route: HOL Light proofs in s2n-bignum's x86_64 model against the same statement as `bn_mul_mont_nohw`'s; the 4x routines share its frame and probe prologue, so its lemmas for those (`FRAME_ALIGN`, `PROBE_SPAN`, the probe loop) carry over. RSAZ AVX2 needs the 29-bit-limb representation's lemmas and any AVX2 instruction the model lacks.
 - Import the theorems as axioms, retiring for these paths the `AwsLcMont` hypothesis `proofs/Rind/X86_64/RsaMont.lean`'s `mont_products` takes for RSA verification. `bn_mul_mont_nohw`'s can go in now: an axiom on the opaque `low.x86_64.mont.nohw` drops `AwsLcMont`'s first conjunct, once `MontArgs` bounds the width below `2^32`, which the routine's `mov r9d, r9d` needs and RSA's key-size limit gives.
 - Upstream: offering this work to awslabs/s2n-bignum is optional, and there is no standing approval: stop and ask the maintainer before posting there or anywhere outside the moq-dev and kixelated orgs (decided with the maintainer on 2026-11-07 on [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
+
+## Required
+
+- [VG measured](/quest/m2/verified-garbage/bench.md) - whether pyca/verified-garbage's proven code beats what this would prove; if a switch replaces it, this quest is deleted or rewritten (maintainer, 2026-11-12)
