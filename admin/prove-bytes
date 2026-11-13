@@ -26,7 +26,8 @@ harness in `rind/src/low/abi.rs` checks that it does.
 
 s2n-bignum's proofs each assert the bytes of the object code they are about,
 as a list in the proof's source, which `define_assert_from_elf` checks
-against s2n-bignum's build. `check` reads that list at the submodule's commit.
+against s2n-bignum's build. `check` reads that list in rind's fork, whose
+proofs of routines are upstream's at its base commit.
 Vale's proofs are of the code its printer writes, and aws-lc-verification's
 of aws-lc's build at the revision it pins, so `admin/prove` assembles that
 text with the GNU assembler. rind's code must hold the same instructions, in

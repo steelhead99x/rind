@@ -6,7 +6,7 @@ open rind.spec
 
 s2n-bignum's FIPS 180-4 spec of SHA-256's block function, from
 `x86/proofs/utils/sha256_spec.ml` in awslabs/s2n-bignum#415 at 79120e64,
-which `proofs/hol-light/s2n-bignum/` holds, and `arm/proofs/sha256.ml`'s round
+which rind's fork, `thirdparty/s2n-bignum`, holds, and `arm/proofs/sha256.ml`'s round
 functions it reuses, transliterated: HOL Light's `EL n l` is `l[n]!`, `word_ror`
 is `rotateRight`, `word_ushr` is `>>>`, and `word_add` is `+`, each grouped as
 the HOL Light is. The theorems rind's HOL Light proofs state are about these,
