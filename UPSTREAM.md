@@ -82,17 +82,18 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 
 ### BINSEC cannot decode much of what rind runs
 
-- **Breaks:** BINSEC 0.11.3 stops at instructions it cannot decode: on x86_64, AES-NI, VAES, the SHA512 instructions, every EVEX encoding, and the `vinsertf128` LLVM emits for the AVX2 ChaCha20 kernel; on aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's, the `msr` that sets DIT, `tbl` (vpaes and NEON ChaCha20), and the `mrs` of `tpidr_el0` in glibc's `malloc`; on armv7, the NEON table lookups and the crypto extension.
-- **Workaround:** `admin/ct-binsec`'s `UNDECODED` denies those features, leaving their paths to `admin/ctgrind`, `admin/ct-sde`, and `admin/ct-qemu`; `ct_binsec_chacha20` (`rind/src/test/binsec.rs`) checks one block; `ctgrind.yml`'s aarch64 `binsec` row runs only the harnesses BINSEC decodes, and armv7 has none. [The BINSEC quest](/quest/m2/confidence/binsec.md) plans stubs for some.
+- **Breaks:** BINSEC 0.11.3 stops at instructions it cannot decode: on x86_64, AES-NI, VAES, the SHA512 instructions, and every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's, and the `msr` that sets DIT; on armv7, the NEON table lookups and the crypto extension.
+- **Workaround:** `admin/ct-binsec`'s `UNDECODED` denies those features, leaving their paths to `admin/ctgrind`, `admin/ct-sde`, and `admin/ct-qemu`, and armv7 has no `binsec` row in `ctgrind.yml`.
 - **Reported:** no.
 - **Goes when:** a BINSEC release decodes each, feature by feature.
 
-### BINSEC cannot decode `stc`, `clc`, or `movmskps`
+### BINSEC cannot decode instructions `admin/ct-binsec` stubs
 
-- **Breaks:** BINSEC 0.11.3 stops at the `stc` that s2n-bignum's P-521 code sets the carry with, and at the `movmskps` LLVM tests the portable P-256 and P-384 for zero with.
-- **Workaround:** `admin/ct-binsec`'s `STUBS` gives each its effect in BINSEC's script language.
+- **Breaks:** BINSEC 0.11.3 stops with `uninterpreted` at these instructions rind's code or glibc runs: on x86_64, `stc` (`f9`), `clc` (`f8`), `movmskps` and VEX `vmovmskps`, `vinsertf128` (VEX.256 0F3A 18), `vpermpd` (VEX.256.W1 0F3A 01), `vmovshdup` (VEX F3 0F 16), and the `syscall` in glibc's `mprotect`; on aarch64, `mrs xN, tpidr_el0` (glibc's `malloc`), `tbl` with one to four table registers (8B and 16B), and `cnt` (8B and 16B).
+- **Reproduce:** `admin/ct-binsec` with `STUBS` emptied stops at the first one its harnesses reach, such as `stc` in `ct_binsec_ecdh_p521` on x86_64 or `tbl` in `ct_binsec_aes` on aarch64.
+- **Workaround:** `admin/ct-binsec`'s `STUBS` gives each its effect in BINSEC's script language, generated per encoding from objdump's disassembly of the test binary and glibc, since `replace opcode` matches exact bytes; `tbl`, a constant-time table lookup, becomes a shift of the whole table, which needs no branch. Its script makes `mprotect` succeed without its system call.
 - **Reported:** no.
-- **Goes when:** a BINSEC release decodes them.
+- **Goes when:** a BINSEC release decodes them, or `replace opcode` matches an encoding by mask, so one stub covers every encoding of an instruction.
 
 ### BINSEC cannot decode glibc's string functions
 
@@ -232,11 +233,21 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Reported:** no.
 - **Goes when:** nixpkgs builds release-plz on Darwin.
 
+## CI tools
+
+### actionlint rejects `concurrency.queue`
+
+- **Breaks:** actionlint 1.7.12 errors on `queue: max`, which GitHub's concurrency groups accept since May 2026, as `unexpected key "queue" for "concurrency" section`.
+- **Reproduce:** `actionlint .github/workflows/mutants.yml` without the ignore below.
+- **Workaround:** `.github/actionlint.yaml` ignores that error in `mutants.yml`.
+- **Reported:** [rhysd/actionlint#657](https://github.com/rhysd/actionlint/issues/657), with a fix in [rhysd/actionlint#654](https://github.com/rhysd/actionlint/pull/654).
+- **Goes when:** an actionlint release in nixpkgs accepts `queue`.
+
 ## CI runner images
 
 ### Ubuntu's AppArmor denies Intel SDE's sandbox
 
 - **Breaks:** the flake's `sde` runs Intel's unmodified binaries in a bubblewrap sandbox, which needs the unprivileged user namespaces Ubuntu's AppArmor denies a program it has no profile for.
-- **Workaround:** each job that runs `sde` (`coverage.yml`, `ctgrind.yml`, `fuzz.yml`, `mutants.yml`, `x86-cpu.yml`) first sets `kernel.apparmor_restrict_unprivileged_userns=0`.
+- **Workaround:** each job that runs `sde` (`coverage.yml`, `ctgrind.yml`, `fuzz.yml`, `x86-cpu.yml`) first sets `kernel.apparmor_restrict_unprivileged_userns=0`.
 - **Reported:** no.
 - **Goes when:** the runner image allows the Nix store's bubblewrap a user namespace.
