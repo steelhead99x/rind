@@ -17,25 +17,27 @@ namespace rind.x86_64
 def RunsAesGcm : Prop := RunsValeAesGcm ∨ RunsClmulAesGcm
 
 /-- An AES-GCM key for the AES key `kw` and `alg`, on Vale's tier or the SSE
-tier. -/
+tier: FIPS 197's round keys, by-8's table of the GHASH key's powers, and, on
+Vale's tier, the GHASH key powers `hkeys_reqs_pub` requires, unless the key is
+AES-192, which Vale's routines do not take. -/
 def GcmReady (alg : Algorithm) (kw : List (BitVec 32)) (g : mid.aes_gcm.AesGcm) : Prop :=
-  ReadyClmul alg kw g ∨ (Ready alg kw g ∧ ∃ t kernel, g.gh = .Avx t kernel ∧
-    TableFor (polyLE (aesEncrypt alg kw (mkfour 0 0 0 0))) t)
+  ∃ hk t, g.key = .Hw hk ∧ HwKeyIs alg kw hk ∧ By8Of g.gh t ∧
+    TableFor (polyLE (aesEncrypt alg kw (mkfour 0 0 0 0))) t ∧
+    ∀ kernel, g.gh = .Avx t kernel → alg = .AES_192 ∨ KernelKeys alg hk kw kernel
 
 /-- `AesGcm::new` on Vale's tier sets up Vale's AES-GCM: FIPS 197's round
-keys and the GHASH key powers `hkeys_reqs_pub` requires, which `by8`'s table
-holds too. -/
+keys, `by8`'s table of the GHASH key's powers, and, unless the key is AES-192,
+which Vale's routines do not take, the powers `hkeys_reqs_pub` requires. -/
 theorem aes_gcm_new_vale_spec (h : RunsValeAesGcm) (alg : Algorithm) (key : Slice U8)
     (hk : KeyLen alg key.length) :
-    mid.aes_gcm.AesGcm.new key ⦃ g => Ready alg (seqNat8ToSeqNat32LE (bvs key.val)) g ∧
-      ∃ t kernel, g.gh = .Avx t kernel ∧
-        TableFor (polyLE (aesEncrypt alg (seqNat8ToSeqNat32LE (bvs key.val)) (mkfour 0 0 0 0))) t ⦄ := by
+    mid.aes_gcm.AesGcm.new key ⦃ g => GcmReady alg (seqNat8ToSeqNat32LE (bvs key.val)) g ⦄ := by
   have h' := h
   obtain ⟨⟨e, he⟩, ⟨hw, hhw⟩, -, h512, hvaes, ⟨tok, htok⟩⟩ := h'
   set kw := seqNat8ToSeqNat32LE (bvs key.val)
   have hkey : mid.aes.expand_key key ⦃ k => ∃ hwk, k = .Hw hwk ∧ HwKeyIs alg kw hwk ⦄ := by
-    rcases hk with ⟨rfl, hl⟩ | ⟨rfl, hl⟩
+    rcases hk with ⟨rfl, hl⟩ | ⟨rfl, hl⟩ | ⟨rfl, hl⟩
     · exact WP.spec_mono (expand_key128_spec h.aesNi key hl) fun k ⟨k128, hk1, hk2⟩ => ⟨_, hk1, rfl, hk2⟩
+    · exact WP.spec_mono (expand_key192_spec h.aesNi key hl) fun k ⟨k192, hk1, hk2⟩ => ⟨_, hk1, rfl, hk2⟩
     · exact WP.spec_mono (expand_key256_spec h.aesNi key hl) fun k ⟨k256, hk1, hk2⟩ => ⟨_, hk1, rfl, hk2⟩
   unfold mid.aes_gcm.AesGcm.new
   rw [he, bind_ok]
@@ -52,23 +54,61 @@ theorem aes_gcm_new_vale_spec (h : RunsValeAesGcm) (alg : Algorithm) (key : Slic
   subst ht'
   rw [from_be_bytes_store] at htf
   simp only [hpx, bind_ok, kernel_new_eq, WP.spec_ok]
-  refine ⟨⟨hwk, _, _, rfl, rfl, ?_, ?_, ?_⟩, _, _, rfl, htf⟩
-  · rcases hk with ⟨rfl, hl⟩ | ⟨rfl, hl⟩ <;> simp [kw, seqNat8ToSeqNat32LE_length, hl, nk]
-  · cases hwk with
-    | Aes128 k => exact hwk_is
-    | Aes192 k => rcases hk with ⟨h1, -⟩ | ⟨h1, -⟩ <;> exact absurd (hwk_is.1.symm.trans h1) (by decide)
-    | Aes256 k => exact hwk_is
-  · simp only [Std.Array.make_val]
-    have := valeHkeys_spec (core.num.U128.from_be_bytes
-      (storeBytes (aesEncrypt alg kw (mkfour 0 0 0 0)))).bv
-    rw [from_be_bytes_store] at this ⊢; assumption
+  refine ⟨hwk, _, rfl, hwk_is, Or.inr ⟨_, rfl⟩, htf, ?_⟩
+  rintro kernel hkernel
+  cases hkernel
+  cases hwk with
+  | Aes192 k => exact Or.inl hwk_is.1
+  | Aes128 k | Aes256 k =>
+    refine Or.inr ⟨?_, hwk_is, ?_⟩
+    · rcases hk with ⟨rfl, hl⟩ | ⟨rfl, hl⟩ | ⟨rfl, hl⟩ <;>
+        first
+        | exact absurd hwk_is.1 (by decide)
+        | simp [kw, seqNat8ToSeqNat32LE_length, hl, nk]
+    · simp only [Std.Array.make_val]
+      have := valeHkeys_spec (core.num.U128.from_be_bytes
+        (storeBytes (aesEncrypt alg kw (mkfour 0 0 0 0)))).bv
+      rw [from_be_bytes_store] at this ⊢; assumption
 
 /-- `AesGcm::new` sets up AES-GCM on either tier. -/
 theorem aes_gcm_new_spec (h : RunsAesGcm) (alg : Algorithm) (key : Slice U8) (hk : KeyLen alg key.length) :
     mid.aes_gcm.AesGcm.new key ⦃ g => GcmReady alg (seqNat8ToSeqNat32LE (bvs key.val)) g ⦄ := by
   rcases h with h | h
-  · exact WP.spec_mono (aes_gcm_new_vale_spec h alg key hk) fun g hg => Or.inr hg
-  · exact WP.spec_mono (aes_gcm_new_clmul_spec h alg key hk) fun g hg => Or.inl hg
+  · exact aes_gcm_new_vale_spec h alg key hk
+  · refine WP.spec_mono (aes_gcm_new_clmul_spec h alg key hk) ?_
+    rintro g ⟨hk, t, hkey, hhk, hgt, ht⟩
+    exact ⟨hk, t, hkey, hhk, Or.inl hgt, ht, fun kernel h => by rw [hgt] at h; cases h⟩
+
+/-- `aes_gcm::seal` and `open` never run Vale's routines for an AES-192 key,
+which they do not take. -/
+theorem vale_192_none (enc : Bool) (k : low.x86_64.aes.AesKey192) (gh : low.x86_64.ghash.GhashTable)
+    (aad inout : Slice U8) :
+    low.x86_64.aes_gcm.vale enc (.Hw (.Aes192 k)) gh aad inout ⦃ o => o = none ⦄ := by
+  unfold low.x86_64.aes_gcm.vale
+  cases enc <;> step*
+
+/-- On a key `GcmReady` holds of, `seal` or `open` runs Vale's routine, on its
+tier, or else hands `by8` its key and table. -/
+theorem GcmReady.cases {alg : Algorithm} {kw : List (BitVec 32)} {g : mid.aes_gcm.AesGcm}
+    (hg : GcmReady alg kw g) (enc : Bool) (aad inout : Slice U8) :
+    (Ready alg kw g ∧ aad.length < 2 ^ 32 ∧ inout.length < 2 ^ 32 ∧ (enc = true → 129 ≤ inout.length)) ∨
+    ∃ hk t, g.key = .Hw hk ∧ HwKeyIs alg kw hk ∧ By8Of g.gh t ∧
+      TableFor (polyLE (aesEncrypt alg kw (mkfour 0 0 0 0))) t ∧
+      low.x86_64.aes_gcm.vale enc g.key g.gh aad inout ⦃ o => o = none ⦄ := by
+  obtain ⟨hk, t, hkey, hhk, hgt, ht, hkern⟩ := hg
+  rcases hgt with hgt | ⟨kernel, hgt⟩
+  · refine Or.inr ⟨hk, t, hkey, hhk, Or.inl hgt, ht, ?_⟩
+    rw [hkey, hgt]; exact vale_clmul _ _ _ _ _
+  · rcases hkern kernel hgt with h192 | hkk
+    · refine Or.inr ⟨hk, t, hkey, hhk, Or.inr ⟨kernel, hgt⟩, ht, ?_⟩
+      cases hk with
+      | Aes192 k => rw [hkey]; exact vale_192_none _ _ _ _ _
+      | Aes128 k | Aes256 k => exact absurd (hhk.1.symm.trans h192) (by decide)
+    · by_cases hv : aad.length < 2 ^ 32 ∧ inout.length < 2 ^ 32 ∧ (enc = true → 129 ≤ inout.length)
+      · exact Or.inl ⟨⟨hk, t, kernel, hkey, hgt, hkk⟩, hv⟩
+      · refine Or.inr ⟨hk, t, hkey, hhk, Or.inr ⟨kernel, hgt⟩, ht, ?_⟩
+        rw [hkey, hgt]
+        exact vale_avx_none enc alg kw hk hhk t kernel aad inout hv
 
 /-- `AesGcm::encrypt` on either tier, for AAD under 2^61 bytes and messages
 rind takes: the ciphertext in place and the tag are AES-GCM's. -/
@@ -79,19 +119,9 @@ theorem aes_gcm_encrypt_spec (he : ∃ e, low.entry.Entry.new_secret = ok e) (al
     mid.aes_gcm.AesGcm.encrypt g nonce aad inout tag ⦃ r =>
       r.1 = .Ok () ∧ r.2.1.length = inout.length ∧ (bvs r.2.1.val, bvs r.2.2.val) =
         gcmEncrypt alg (seqNat32ToSeqNat8LE kw) (bvs nonce.val) (bvs inout.val) (bvs aad.val) ⦄ := by
-  rcases hg with ⟨hk, t, hkey, hhk, hgt, ht⟩ | ⟨hr, t, kernel, hgt, ht⟩
-  · refine aes_gcm_encrypt_by8 he alg kw g hk t hkey hhk (Or.inl hgt) ht nonce aad inout tag ?_ haad hin
-    rw [hkey, hgt]; exact vale_clmul _ _ _ _ _
-  · by_cases hv : aad.length < 2 ^ 32 ∧ inout.length < 2 ^ 32 ∧ 129 ≤ inout.length
-    · exact aes_gcm_encrypt_vale he alg kw g hr nonce aad inout tag hv.1 hv.2.1 hv.2.2
-    · obtain ⟨hk, table, kernel', hkey, hgh, hkk⟩ := hr
-      have hhk : HwKeyIs alg kw hk := by
-        cases hk with
-        | Aes192 k => exact hkk.2.1.elim
-        | Aes128 k | Aes256 k => exact hkk.2.1
-      refine aes_gcm_encrypt_by8 he alg kw g hk t hkey hhk (Or.inr ⟨kernel, hgt⟩) ht nonce aad inout tag ?_ haad hin
-      rw [hkey, hgt]
-      exact vale_avx_none true alg kw hk hhk t kernel aad inout fun h => hv ⟨h.1, h.2.1, h.2.2 rfl⟩
+  rcases hg.cases true aad inout with ⟨hr, h1, h2, h3⟩ | ⟨hk, t, hkey, hhk, hgt, ht, hv⟩
+  · exact aes_gcm_encrypt_vale he alg kw g hr nonce aad inout tag h1 h2 (h3 rfl)
+  · exact aes_gcm_encrypt_by8 he alg kw g hk t hkey hhk hgt ht nonce aad inout tag hv haad hin
 
 /-- `AesGcm::decrypt` on either tier, for AAD under 2^61 bytes and messages
 rind takes: it succeeds exactly when the tag is AES-GCM's, leaving the
@@ -106,20 +136,9 @@ theorem aes_gcm_decrypt_spec (he : ∃ e, low.entry.Entry.new_secret = ok e)
         (bvs tag.val)
       if out.2 then r.1 = .Ok () ∧ bvs r.2.val = out.1
       else r.1 = .Err .DecryptFailed ∧ r.2.val = List.replicate inout.length 0#u8 ⦄ := by
-  rcases hg with ⟨hk, t, hkey, hhk, hgt, ht⟩ | ⟨hr, t, kernel, hgt, ht⟩
-  · refine aes_gcm_decrypt_by8 he hheld alg kw g hk t hkey hhk (Or.inl hgt) ht nonce aad inout tag ?_ haad hin
-    rw [hkey, hgt]; exact vale_clmul _ _ _ _ _
-  · by_cases hv : aad.length < 2 ^ 32 ∧ inout.length < 2 ^ 32
-    · exact aes_gcm_decrypt_vale he alg kw g hr nonce aad inout tag hv.1 hv.2
-    · obtain ⟨hk, table, kernel', hkey, hgh, hkk⟩ := hr
-      have hhk : HwKeyIs alg kw hk := by
-        cases hk with
-        | Aes192 k => exact hkk.2.1.elim
-        | Aes128 k | Aes256 k => exact hkk.2.1
-      refine aes_gcm_decrypt_by8 he hheld alg kw g hk t hkey hhk (Or.inr ⟨kernel, hgt⟩) ht nonce aad inout tag ?_
-        haad hin
-      rw [hkey, hgt]
-      exact vale_avx_none false alg kw hk hhk t kernel aad inout fun h => hv ⟨h.1, h.2.1⟩
+  rcases hg.cases false aad inout with ⟨hr, h1, h2, -⟩ | ⟨hk, t, hkey, hhk, hgt, ht, hv⟩
+  · exact aes_gcm_decrypt_vale he alg kw g hr nonce aad inout tag h1 h2
+  · exact aes_gcm_decrypt_by8 he hheld alg kw g hk t hkey hhk hgt ht nonce aad inout tag hv haad hin
 
 /-! ## The AEAD API -/
 
@@ -128,22 +147,23 @@ def KeyReady (alg : Algorithm) (key : List (BitVec 8)) (k : aead.Key) : Prop :=
   key.length = 4 * nk alg ∧ ∃ g, k = .AesGcm g ∧ GcmReady alg (seqNat8ToSeqNat32LE key) g
 
 theorem aes_gcm_new (h : RunsAesGcm) (alg : Algorithm) (algorithm : aead.Algorithm)
-    (halg : (algorithm = aead.AES_128_GCM ∧ alg = .AES_128) ∨ (algorithm = aead.AES_256_GCM ∧ alg = .AES_256))
+    (halg : (algorithm = aead.AES_128_GCM ∧ alg = .AES_128) ∨ (algorithm = aead.AES_192_GCM ∧ alg = .AES_192) ∨
+      (algorithm = aead.AES_256_GCM ∧ alg = .AES_256))
     (key : Slice U8) :
     aead.Key.new algorithm key ⦃ r =>
       if key.length = 4 * nk alg then ∃ k, r = .Ok k ∧ KeyReady alg (bvs key.val) k
       else r = .Err .WrongLength ⦄ := by
   have hlen : algorithm.key_len.val = 4 * nk alg := by
-    rcases halg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> rfl
+    rcases halg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> rfl
   unfold aead.Key.new
   by_cases hk : key.length = 4 * nk alg
   · have hne : ¬ key.len ≠ algorithm.key_len := by
       intro hne; apply hne; scalar_tac
     rw [ite_eq_right hne]
     have hexp : algorithm.expand = aead.Sealer.expand mid.aes_gcm.AesGcm.Insts.RindAeadCipher := by
-      rcases halg with ⟨rfl, -⟩ | ⟨rfl, -⟩ <;> rfl
+      rcases halg with ⟨rfl, -⟩ | ⟨rfl, -⟩ | ⟨rfl, -⟩ <;> rfl
     have hkl : KeyLen alg key.length := by
-      rcases halg with ⟨-, rfl⟩ | ⟨-, rfl⟩ <;> simp_all [nk, KeyLen]
+      rcases halg with ⟨-, rfl⟩ | ⟨-, rfl⟩ | ⟨-, rfl⟩ <;> simp_all [nk, KeyLen]
     have hx : aead.Sealer.expand mid.aes_gcm.AesGcm.Insts.RindAeadCipher key ⦃ i =>
         ∃ g, i = .AesGcm g ∧ GcmReady alg (seqNat8ToSeqNat32LE (bvs key.val)) g ⦄ := by
       unfold aead.Sealer.expand
