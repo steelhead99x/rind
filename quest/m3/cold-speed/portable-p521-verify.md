@@ -6,7 +6,7 @@ On the nightly's portable row, P-521 ECDSA verification takes no more than aws-l
 
 ## Plan
 
-Found by [the 64-bit limbs work](https://github.com/moq-dev/rind/pull/614), after which P-521 ECDH, key generation, and signing measured 0.91 to 1.03× aws-lc-rs's time on a shared x86_64 host under `--cfg rind_portable`, and verification 1.23 to 1.31×.
+Found by [the 64-bit limbs work](https://github.com/kixel-ai/rind/pull/614), after which P-521 ECDH, key generation, and signing measured 0.91 to 1.03× aws-lc-rs's time on a shared x86_64 host under `--cfg rind_portable`, and verification 1.23 to 1.31×.
 
 Both run fiat-crypto's `p521_64` field arithmetic, so the gap is in rind's composition over it:
 

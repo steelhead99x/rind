@@ -112,7 +112,7 @@ VERIFIED = [
 TIERS = {
     "schema": 1,
     "run": 1,
-    "url": "https://github.com/moq-dev/rind/actions/runs/1",
+    "url": "https://github.com/kixel-ai/rind/actions/runs/1",
     "commit": "fedcba9876543210fedcba9876543210fedcba98",
     "date": "2026-11-02T18:00:00Z",
     "tiers": [

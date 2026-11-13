@@ -46,7 +46,7 @@ jobs:
   build:
     name: Queue build
     if: github.event_name == 'merge_group'
-    uses: moq-dev/rind/.github/workflows/queue-build.yml@main
+    uses: kixel-ai/rind/.github/workflows/queue-build.yml@main
 
   # The required context. A reusable workflow's jobs report as
   # `Queue build / Build`, so this job reports the build's result under the
