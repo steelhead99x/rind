@@ -39,7 +39,9 @@ concurrency:
 jobs:
   hol-light:
     runs-on: ubuntu-24.04
-    # The suite on the SHA-512 proof run took 27m46s. A 30 minute cap cancels it.
+    # A 30 minute cap cancelled hol-light jobs 131492986844, 131508164264,
+    # 131506346712, and 131485677249. This change's own hol-light job
+    # 131536343560 ran 32m38s.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
