@@ -100,14 +100,20 @@ fn armv7_or_later() -> bool {
 }
 
 /// Whether the 32-bit ARM target is for a microcontroller (M-profile) core,
-/// as in `thumbv7m-none-eabi`, `thumbv7em-none-eabihf` or
-/// `thumbv8m.main-none-eabihf`: Thumb only, without NEON.
+/// as in `thumbv7m-none-eabi`, `thumbv7em-none-eabihf`,
+/// `thumbv8m.main-none-eabihf` or `thumbv8.1m.main-none-eabihf`: Thumb only,
+/// without NEON.
 fn m_profile() -> bool {
     let target = env::var("TARGET").expect("cargo sets the target");
     let arch = target.split('-').next().unwrap_or_default();
     let Some(version) = arch.strip_prefix("thumbv") else {
         return false;
     };
-    let rest = version.trim_start_matches(|c: char| c.is_ascii_digit());
+    fn skip_digits(s: &str) -> &str {
+        s.trim_start_matches(|c: char| c.is_ascii_digit())
+    }
+    // The major version, then an optional minor one, as in v8.1m.
+    let rest = skip_digits(version);
+    let rest = rest.strip_prefix('.').map_or(rest, skip_digits);
     rest.starts_with('m') || rest.starts_with("em")
 }
