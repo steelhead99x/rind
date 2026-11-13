@@ -37,24 +37,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # One job per target, since each compiles its proofs into its own program
-  # and they share only s2n-bignum's model. Each limit is sized from the
-  # job's measured time with room for the proofs queued next, as it only
-  # catches a hang: on 2026-11-13 aarch64's proofs took 295 to 406 s and
-  # x86_64's 1010 to 1079 s, which x86_64 SHA-384/512 on AVX2 takes to about
-  # 2000 s.
-  hol-light:
-    name: hol-light (${{ matrix.arch }})
+  # Each target's HOL Light proofs run in their own job, so the wall time is
+  # the slower target's rather than the sum. Each limit only catches a hang:
+  # it sits well above the target's measured time, with room for the proofs
+  # queued next, and `admin/prove` prints each proof's time to show where it
+  # goes.
+  hol-light-aarch64:
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ matrix.timeout }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: aarch64
-            timeout: 20
-          - arch: x86_64
-            timeout: 60
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,13 +52,24 @@ jobs:
 
       - uses: ./.github/actions/nix
 
-      # It checks both targets' imported assembly, so one job runs it.
       - name: Bytes
-        if: matrix.arch == 'aarch64'
         run: nix develop .#hol-light --command admin/prove bytes
 
       - name: Prove
-        run: nix develop .#hol-light --command admin/prove hol-light ${{ matrix.arch }}
+        run: nix develop .#hol-light --command admin/prove hol-light aarch64
+
+  hol-light-x86_64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix
+
+      - name: Prove
+        run: nix develop .#hol-light --command admin/prove hol-light x86_64
 
   cosim:
     runs-on: ubuntu-24.04
