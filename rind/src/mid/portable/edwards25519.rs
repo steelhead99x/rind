@@ -130,7 +130,9 @@ impl Scalar {
     /// Whether it is below `L` is public; the value stays secret.
     pub(crate) fn from_canonical_bytes(bytes: &[u8; 32]) -> Option<Self> {
         let s = curve25519_dalek::Scalar::from_canonical_bytes(*bytes);
-        let canonical = low::ct::into_public(bool::from(s.is_some()));
+        // dalek's `CtOption::is_some` is a `Choice`. Declassify it before
+        // converting to `bool`.
+        let canonical = bool::from(low::ct::into_public(s.is_some()));
         // `unwrap_or` selects in constant time, where `unwrap` branches.
         canonical.then(|| Self(s.unwrap_or(curve25519_dalek::Scalar::ZERO)))
     }
