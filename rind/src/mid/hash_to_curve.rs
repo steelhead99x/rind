@@ -13,9 +13,6 @@
 //!
 //! [RFC 9380]: https://www.rfc-editor.org/rfc/rfc9380.html
 
-// Nothing hashes to a curve yet: the OPRF is the first consumer.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use crate::error::Error;
 use crate::mid::sha2::{Sha256Context, Sha384Context, Sha512Context};
 
@@ -89,13 +86,13 @@ impl Xmd for Sha512Context {
 }
 
 /// Fills `out` with RFC 9380's `expand_message_xmd(msg, dst, out.len())`
-/// over `H` (section 5.3.1).
+/// over `H` (section 5.3.1), for `msg` the concatenation of its parts.
 ///
 /// A `dst` over 255 bytes is hashed down, as section 5.3.3 says. An empty
 /// `dst`, which the RFC forbids, and an `out` longer than 255 hashes are
 /// refused, as aws-lc refuses them.
 pub(crate) fn expand_message_xmd<H: Xmd>(
-    msg: &[u8],
+    msg: &[&[u8]],
     dst: &[u8],
     out: &mut [u8],
 ) -> Result<(), Error> {
@@ -120,7 +117,9 @@ pub(crate) fn expand_message_xmd<H: Xmd>(
 
     let mut h = H::new();
     h.update(&[0; 128][..H::BLOCK]);
-    h.update(msg);
+    for part in msg {
+        h.update(part);
+    }
     h.update(&len.to_be_bytes());
     h.update(&[0]);
     h.update(dst);
@@ -209,7 +208,7 @@ const MAX_L: usize = 98;
 pub(crate) fn hash_to_curve<C: Curve, H: Xmd>(msg: &[u8], dst: &[u8]) -> Result<[C; 3], Error> {
     let mut uniform = [0u8; 2 * MAX_L];
     let uniform = &mut uniform[..2 * C::L];
-    expand_message_xmd::<H>(msg, dst, uniform)?;
+    expand_message_xmd::<H>(&[msg], dst, uniform)?;
     let (u0, u1) = uniform.split_at(C::L);
     let q0 = map_to_curve(&C::from_wide(u0));
     let q1 = map_to_curve(&C::from_wide(u1));
@@ -310,9 +309,9 @@ pub(crate) mod tests {
     fn expand(hash: &str, msg: &[u8], dst: &[u8], out: &mut [u8]) -> Result<(), Error> {
         let _entry = low::Entry::new_public();
         match hash {
-            "SHA256" => expand_message_xmd::<Sha256Context>(msg, dst, out),
-            "SHA384" => expand_message_xmd::<Sha384Context>(msg, dst, out),
-            "SHA512" => expand_message_xmd::<Sha512Context>(msg, dst, out),
+            "SHA256" => expand_message_xmd::<Sha256Context>(&[msg], dst, out),
+            "SHA384" => expand_message_xmd::<Sha384Context>(&[msg], dst, out),
+            "SHA512" => expand_message_xmd::<Sha512Context>(&[msg], dst, out),
             _ => unreachable!(),
         }
     }
@@ -383,9 +382,9 @@ pub(crate) mod tests {
         let mut h = Sha256Context::new();
         h.update(b"H2C-OVERSIZE-DST-");
         h.update(&dst);
-        expand_message_xmd::<Sha256Context>(b"msg", &h.finish(), &mut hashed).unwrap();
-        expand_message_xmd::<Sha256Context>(b"msg", &dst, &mut long).unwrap();
-        expand_message_xmd::<Sha256Context>(b"msg", &dst[..255], &mut short).unwrap();
+        expand_message_xmd::<Sha256Context>(&[b"msg"], &h.finish(), &mut hashed).unwrap();
+        expand_message_xmd::<Sha256Context>(&[b"msg"], &dst, &mut long).unwrap();
+        expand_message_xmd::<Sha256Context>(&[b"msg"], &dst[..255], &mut short).unwrap();
         assert_eq!(long, hashed);
         assert_ne!(short, hashed);
     }
@@ -444,7 +443,8 @@ pub(crate) mod tests {
         let _entry = low::Entry::new_public();
         for v in &file.vectors {
             let mut uniform = vec![0; 2 * C::L];
-            expand_message_xmd::<H>(v.msg.as_bytes(), file.dst.as_bytes(), &mut uniform).unwrap();
+            expand_message_xmd::<H>(&[v.msg.as_bytes()], file.dst.as_bytes(), &mut uniform)
+                .unwrap();
             let u: Vec<_> = uniform.chunks(C::L).map(C::from_wide).collect();
             for (u, expect) in u.iter().zip(&v.u) {
                 // `(u, u)` is not on the curve, but encodes `u` all the same.

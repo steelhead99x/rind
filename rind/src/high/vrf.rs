@@ -388,8 +388,7 @@ impl PublicKey {
                 let u = point
                     .public_mul_base_add(&s, &minus_c)
                     .ok_or(Error::BadSignature)?;
-                let v = h
-                    .public_mul_add(&s, &gamma, &minus_c)
+                let v = p256::Point::public_mul_sum([(&h, &s), (&gamma, &minus_c)])
                     .ok_or(Error::BadSignature)?;
                 let want = sha256(&[
                     &[P256_SUITE, CHALLENGE],
