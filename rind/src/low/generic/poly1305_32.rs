@@ -91,9 +91,13 @@ impl Poly1305 {
         let [mut h0, mut h1, mut h2, mut h3, mut h4] = self.h;
 
         // Carry fully: each limb below 2^26, and h4's carry folded into h0
-        // as 5, since 2^130 = 5 (mod p). The second carry from h0 can leave
-        // h1 at 2^26, so the chain runs again to h4, which then exceeds
-        // 2^26 - 1 only when h >= 2^130 > p, the case `g` below replaces.
+        // as 5, since 2^130 = 5 (mod p), as poly1305-donna-32 does. One pass
+        // is enough. `blocks` leaves h0, h2, h3 and h4 under 2^26 and h1
+        // under 2^26 + 2^6, so h1's carry is 0 or 1, and h4 carries only if
+        // h1 did, leaving h1 under 2^6. h0 then exceeds 2^26 - 1 only by
+        // that carry's 5, so its carry is 0 or 1, and 1 only when h1 is
+        // under 2^6, so adding it leaves h1 under 2^26. `finish_carries_far`
+        // takes every carry here.
         let mut c;
         c = h1 >> 26;
         h1 &= MASK;
@@ -110,15 +114,7 @@ impl Poly1305 {
         c = h0 >> 26;
         h0 &= MASK;
         h1 = h1.wrapping_add(c);
-        c = h1 >> 26;
-        h1 &= MASK;
-        h2 = h2.wrapping_add(c);
-        c = h2 >> 26;
-        h2 &= MASK;
-        h3 = h3.wrapping_add(c);
-        c = h3 >> 26;
-        h3 &= MASK;
-        h4 = h4.wrapping_add(c);
+        debug_assert!(ct::into_public(h0 | h1 | h2 | h3 | h4) < 1 << 26);
 
         // g = h + 5 - 2^130, which is h - p, and is not negative exactly
         // when h >= p. Its sign is the top bit of g4, so the mask picks g
@@ -355,6 +351,57 @@ mod tests {
             "e33594d7505e43b900000000000000003394d7505e4379cd010000000000000000000000000000000000000000000000",
             "13000000000000000000000000000000",
         );
+    }
+
+    // Blocks that leave the accumulator as [2^26 - 5, 2^26, 2^26 - 1,
+    // 2^26 - 1, 2^26 - 1] before `finish`, 2^130 + 2^26 - 5, so `finish`
+    // carries out of every limb, folds h4's carry into h0 as 5, and carries
+    // out of h0 into h1, and as [4, 2^26, 2^26 - 1, 2^26 - 1, 2^26 - 1],
+    // whose fold carries no further. No other test takes the carry out of
+    // h0. Each tag is (h mod p + s) mod 2^128, which Python's integers
+    // computed, with s zero and all ones, so adding s carries through every
+    // word too.
+    #[test]
+    fn finish_carries_far() {
+        const M: u32 = MASK;
+        let cases: [(&str, &str, [u32; 5], &str, &str); 2] = [
+            (
+                "00000008fcff0f000000000000000000",
+                "24fcb28d4e41852590bd93a959856f84",
+                [M - 4, M + 1, M, M, M],
+                "00000004000000000000000000000000",
+                "ffffff03000000000000000000000000",
+            ),
+            (
+                "00000004000000000000000000000000",
+                "feffffffffffffffffffcccc8c999999ffffffffffffffffffffffffff000000",
+                [4, M + 1, M, M, M],
+                "09000000000000000000000000000000",
+                "08000000000000000000000000000000",
+            ),
+        ];
+        for (r, msg, h, with_zero, with_ones) in cases {
+            for (s, tag) in [("00", with_zero), ("ff", with_ones)] {
+                let mut key = [0u8; 32];
+                hex_into(r, &mut key[..16]);
+                key[16..].fill(u8::from_str_radix(s, 16).unwrap());
+                let msg = hex(msg);
+                let mut p = Poly1305::new(&key);
+                p.add_bytes(&msg);
+                assert_eq!(p.h, h, "{r}");
+                assert_eq!(p.finish(), hex16(tag), "{r} {s}");
+
+                let mut generic = crate::low::generic::poly1305::Poly1305::new(&key);
+                generic.add_bytes(&msg);
+                assert_eq!(generic.finish(), hex16(tag), "generic {r} {s}");
+                #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
+                {
+                    let mut hacl = Hacl::new(&key);
+                    hacl.add_bytes(&msg);
+                    assert_eq!(hacl.finish(), hex16(tag), "HACL* {r} {s}");
+                }
+            }
+        }
     }
 
     // Each split of a message, so updates start partway into a block and
