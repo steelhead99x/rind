@@ -126,7 +126,7 @@ def write(path, sha, chacha, avx):
 write(os.path.join(base, "now", "bench-x"), 100.0, 100.0, True)
 write(os.path.join(base, "then", "bench-x"), 100.0, 80.0, False)
 PY
-    run_both_in "gate fixture" "$fixture" gate now --previous then
+    run_both_in "gate fixture" "$fixture" gate now --previous "then"
 fi
 
 if [[ $checkout_mode -eq 0 ]]; then
