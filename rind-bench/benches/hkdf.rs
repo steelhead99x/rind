@@ -1,3 +1,4 @@
+#[macro_use]
 mod criterion;
 use std::hint::black_box;
 
@@ -6,6 +7,7 @@ use criterion::{BenchmarkGroup, Criterion, criterion_group, criterion_main};
 
 struct Len(usize);
 
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 impl aws_lc_rs::hkdf::KeyType for Len {
     fn len(&self) -> usize {
         self.0
@@ -24,10 +26,12 @@ fn bench(
     c: &mut Criterion,
     name: &str,
     ring: ring::hkdf::Algorithm,
-    aws: aws_lc_rs::hkdf::Algorithm,
+    aws: aws!(hkdf::Algorithm),
     ours: &'static rind::hkdf::Algorithm,
     hash: Hash,
 ) {
+    #[cfg(any(target_arch = "xtensa", target_os = "none"))]
+    let _ = aws;
     let mut group = c.benchmark_group(name);
     let secret = [0x5a; 32];
     let info: [&[u8]; 1] = [b"label"];
@@ -46,6 +50,7 @@ fn bench(
             black_box(out)
         })
     });
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("extract-expand/aws-lc-rs", |b| {
         b.iter(|| {
             let mut out = [0u8; 32];
@@ -91,11 +96,14 @@ fn bench(
 
     // aws-lc-rs's `extract` defers extraction to each expansion, so its PRK
     // is computed here instead.
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     let prk_bytes = aws_lc_rs::hmac::sign(
         &aws_lc_rs::hmac::Key::new(aws.hmac_algorithm(), b"salt"),
         &secret,
     );
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     let prk = aws_lc_rs::hkdf::Prk::new_less_safe(aws, prk_bytes.as_ref());
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("expand/aws-lc-rs", |b| {
         b.iter(|| {
             let mut out = [0u8; 32];
@@ -103,6 +111,7 @@ fn bench(
             black_box(out)
         })
     });
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("expand-aes-256-gcm-key/aws-lc-rs", |b| {
         b.iter(|| {
             black_box(aws_lc_rs::aead::UnboundKey::from(
@@ -251,7 +260,7 @@ fn hkdf(c: &mut Criterion) {
         c,
         "hkdf-sha1",
         ring::hkdf::HKDF_SHA1_FOR_LEGACY_USE_ONLY,
-        aws_lc_rs::hkdf::HKDF_SHA1_FOR_LEGACY_USE_ONLY,
+        aws!(hkdf::HKDF_SHA1_FOR_LEGACY_USE_ONLY),
         &rind::hkdf::legacy::HKDF_SHA1,
         Hash::Sha1,
     );
@@ -259,7 +268,7 @@ fn hkdf(c: &mut Criterion) {
         c,
         "hkdf-sha256",
         ring::hkdf::HKDF_SHA256,
-        aws_lc_rs::hkdf::HKDF_SHA256,
+        aws!(hkdf::HKDF_SHA256),
         &rind::hkdf::HKDF_SHA256,
         Hash::Sha256,
     );
@@ -267,7 +276,7 @@ fn hkdf(c: &mut Criterion) {
         c,
         "hkdf-sha384",
         ring::hkdf::HKDF_SHA384,
-        aws_lc_rs::hkdf::HKDF_SHA384,
+        aws!(hkdf::HKDF_SHA384),
         &rind::hkdf::HKDF_SHA384,
         Hash::Sha384,
     );
@@ -275,7 +284,7 @@ fn hkdf(c: &mut Criterion) {
         c,
         "hkdf-sha512",
         ring::hkdf::HKDF_SHA512,
-        aws_lc_rs::hkdf::HKDF_SHA512,
+        aws!(hkdf::HKDF_SHA512),
         &rind::hkdf::HKDF_SHA512,
         Hash::Sha512,
     );
