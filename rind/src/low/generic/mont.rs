@@ -477,7 +477,7 @@ fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Wide) -> Wide {
 /// Four limbs at a time: the products do not depend on the carry, so they
 /// issue before the chain that adds them. The length is public. The shorter
 /// of the two slices is what a `zip` takes, so a length that is not a
-/// multiple of four stays correct.
+/// multiple of four stays correct. The tail loop adds the leftover limbs.
 #[inline(always)]
 fn mul_add(x: &mut [Limb], y: &[Limb], u: Limb) -> Wide {
     let mut carry: Wide = 0;
