@@ -4,6 +4,7 @@ members = [
   "rind",
   "rind-aws-lc-rs",
   "rind-bench",
+  "rind-bench-report",
   "rind-cpuid",
   "rind-dart",
   "rind-timing",
