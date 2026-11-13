@@ -5,7 +5,7 @@
 # `tst r14,#1` (the K512 pointer) at +456. That `tst` takes its carry from the
 # `adds` of secret words before it, and memcheck counts that carry against the
 # condition when a superblock boundary falls between the two, as the caller's
-# code layout decides. Run 41557470707 (moq-dev/rind#254) found no report at
+# code layout decides. Run 41557470707 (kixel-ai/rind#254) found no report at
 # the default layout. With one instruction per superblock it flagged only the
 # readers of tests on round constants and pointers, even the `bne` after
 # `teq r1,r2`, which compares two public pointers.

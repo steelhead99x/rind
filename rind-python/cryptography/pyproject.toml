@@ -19,8 +19,8 @@ dependencies = ["pyrind>=0.1.3,<0.2"]
 dynamic = ["version"]
 
 [project.urls]
-Repository = "https://github.com/moq-dev/rind"
-Documentation = "https://github.com/moq-dev/rind/tree/main/rind-python/cryptography"
+Repository = "https://github.com/kixel-ai/rind"
+Documentation = "https://github.com/kixel-ai/rind/tree/main/rind-python/cryptography"
 
 [tool.flit.module]
 name = "pyrind_cryptography"
