@@ -524,7 +524,11 @@ or mixed addition no longer converts every coordinate to 64-bit words and
 back, and the comparison of x is the mixed addition's own scaled x. The
 scalars and the point are public, so the chain branches on the cases the
 assembly routines refuse. x86_64 and aarch64 keep calling those routines,
-one doubling or addition at a time.
+one doubling or addition at a time. On 64-bit limbs a saturated word and
+fiat-crypto's element are the same integer split into 58-bit limbs, the top
+limb 57 bits, so `fe` and `words` shift rather than pack bytes. `words` then
+subtracts p and adds it back when the value was below p. 32-bit limbs,
+including 32-bit ARM, stay on the byte encoding.
 
 ECDSA follows RFC6979 for generation of `k`, but adds additional non-critical random input.
 We do this to avoid the theoretical fragility of RFC6979 under fault conditions.

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Portable and 32-bit ARM P-521 ECDSA verification keeps Jacobian coordinates in fiat-crypto's field representation across `u1·G + u2·Q`, instead of converting every coordinate to words at each doubling and mixed addition. The comparison of x is that addition's own scaled x. x86_64 and aarch64 are unchanged: they still call s2n-bignum's point routines.
+- Portable and 32-bit ARM P-521 ECDSA verification keeps Jacobian coordinates in fiat-crypto's field representation across `u1·G + u2·Q`, instead of converting every coordinate to words at each doubling and mixed addition. The comparison of x is that addition's own scaled x. On 64-bit limbs a saturated word converts to that representation by shifts; 32-bit limbs, including 32-bit ARM, keep the byte encoding. x86_64 and aarch64 are unchanged: they still call s2n-bignum's point routines.
 
 ## [0.3.2](https://github.com/kixel-ai/rind/compare/rind-v0.3.1...rind-v0.3.2) - 2026-11-08
 
