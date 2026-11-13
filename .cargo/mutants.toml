@@ -100,7 +100,7 @@ exclude_re = [
   'rind/src/high/rsa\.rs:20:\d+: replace \+ with \*$',
   'rind/src/high/sec1\.rs:14:\d+: replace \+ with \*$',
   'rind/src/high/signature\.rs:(229|1683):\d+: replace \+ with \*$',
-  'rind/src/low/generic/mont\.rs:131:\d+: replace \+ with \* in mont_mul$',
+  'rind/src/low/generic/mont\.rs:133:\d+: replace \+ with \* in mont_mul$',
   'rind/src/low/x86_64/mlkem768_sample_poly_ntt_8x\.rs:229:\d+: replace \+ with \* in _squeeze_rate_and_reject$',
   'rind/src/mid/mldsa\.rs:(366|461|508):\d+: replace \+ with \* in (keygen|public_key_from_secret|sign_internal)$',
   'rind/src/mid/rsa_priv\.rs:311:\d+: replace / with \*$',
