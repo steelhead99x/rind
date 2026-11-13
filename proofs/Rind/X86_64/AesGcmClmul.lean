@@ -338,8 +338,9 @@ theorem aes_gcm_new_clmul_spec (h : RunsClmulAesGcm) (alg : Algorithm) (key : Sl
   obtain ⟨⟨e, he⟩, ⟨hw, hhw⟩, -, h512, hvaes, hmovbe, -⟩ := h
   set kw := seqNat8ToSeqNat32LE (bvs key.val)
   have hkey : mid.aes.expand_key key ⦃ k => ∃ hwk, k = .Hw hwk ∧ HwKeyIs alg kw hwk ⦄ := by
-    rcases hk with ⟨rfl, hl⟩ | ⟨rfl, hl⟩
+    rcases hk with ⟨rfl, hl⟩ | ⟨rfl, hl⟩ | ⟨rfl, hl⟩
     · exact WP.spec_mono (expand_key128_spec hni key hl) fun k ⟨k128, hk1, hk2⟩ => ⟨_, hk1, rfl, hk2⟩
+    · exact WP.spec_mono (expand_key192_spec hni key hl) fun k ⟨k192, hk1, hk2⟩ => ⟨_, hk1, rfl, hk2⟩
     · exact WP.spec_mono (expand_key256_spec hni key hl) fun k ⟨k256, hk1, hk2⟩ => ⟨_, hk1, rfl, hk2⟩
   unfold mid.aes_gcm.AesGcm.new
   rw [he, bind_ok]
