@@ -69,15 +69,8 @@ pub fn run(
     doc.push(("toolchain".to_string(), versions));
     doc.push(("libraries".to_string(), locked_libraries(paths, &env)?));
     let cargo = "cargo";
-    let bench = [
-        cargo,
-        "bench",
-        "-p",
-        "rind-bench",
-        "--features",
-        "__bench_openssl",
-    ];
-    run_cmd(&bench, &env, false)?;
+    let bench = BENCH;
+    run_cmd(&build_only(&bench), &env, false)?;
     let cpuid_raw = output(&[cargo, "run", "-q", "--release", "-p", "rind-cpuid"], &env)?;
     let rind_cpu: Value =
         serde_json::from_str(&cpuid_raw).map_err(|err| Error::new(err.to_string()))?;
@@ -233,6 +226,27 @@ fn walk(dir: &Path, files: &mut Vec<PathBuf>) {
             files.push(path);
         }
     }
+}
+
+/// The benchmarks, as Python's `run` runs them.
+const BENCH: [&str; 6] = [
+    "cargo",
+    "bench",
+    "-p",
+    "rind-bench",
+    "--features",
+    "__bench_openssl",
+];
+
+/// `bench` with `--no-run`, which builds the benchmarks without running them,
+/// as Python does before it reads the CPU and checks the host is idle. Run
+/// there, they would take the whole suite's time before that check, and their
+/// results would be deleted with the criterion directory before the timed
+/// run.
+fn build_only<'a>(bench: &[&'a str]) -> Vec<&'a str> {
+    let mut build = bench.to_vec();
+    build.push("--no-run");
+    build
 }
 
 fn finish(out: &Path, base: &[(String, J)], status: &str, extra: Vec<(String, J)>) -> Result<()> {
@@ -596,5 +610,20 @@ impl J {
                 out
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The build step builds the benchmarks without running them, and the
+    // timed step runs them, as Python's `run` does.
+    #[test]
+    fn builds_before_it_times() {
+        let build = build_only(&BENCH);
+        assert_eq!(build.last(), Some(&"--no-run"));
+        assert_eq!(build[..BENCH.len()], BENCH);
+        assert!(!BENCH.contains(&"--no-run"));
     }
 }
