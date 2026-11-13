@@ -23,7 +23,7 @@ rind's.
 - Maintainer: publish 0.1.0 by hand (`cd rind-dart/cryptography && rm
   pubspec_overrides.yaml && dart pub publish`), since pub.dev creates a new
   package only from an uploader's account, as it did for rind; then, on its
-  admin page, enable automated publishing from moq-dev/rind for
+  admin page, enable automated publishing from kixel-ai/rind for
   `rind-cryptography-v{{version}}` tags in the `pub.dev` environment, and let
   that environment deploy those tags. Done when
   https://pub.dev/packages/rind_cryptography lists 0.1.0. No workflow can

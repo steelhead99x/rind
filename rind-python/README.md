@@ -1,6 +1,6 @@
 # pyrind
 
-Cryptography for Python from [rind](https://github.com/moq-dev/rind), a
+Cryptography for Python from [rind](https://github.com/kixel-ai/rind), a
 pure-Rust library: AEADs, hashes, HMAC, HKDF, PBKDF2, X25519, Ed25519, ECDSA
 and ECDH, RSA, and ML-KEM, with rind's own misuse-resistant API.
 [pyrind-cryptography](cryptography) offers pyca/cryptography's API on it

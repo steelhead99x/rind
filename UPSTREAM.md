@@ -13,7 +13,7 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 
 - **Breaks:** Rust links `powerpc64-unknown-linux-gnu` with its bundled rust-lld, which supports only ELFv2, so every link fails with `ABI version 1 is not supported` on glibc's `Scrt1.o`.
 - **Reproduce:** `cargo build --target powerpc64-unknown-linux-gnu` of any binary with Rust 1.98 in `nix develop .#powerpc64`, without the flag below.
-- **Workaround:** the `powerpc64` shell in `flake.nix` passes `-C link-arg=-fuse-ld=bfd`, which gcc obeys over rustc's own `-fuse-ld`, so GNU ld links. Found in [moq-dev/rind#554](https://github.com/moq-dev/rind/pull/554).
+- **Workaround:** the `powerpc64` shell in `flake.nix` passes `-C link-arg=-fuse-ld=bfd`, which gcc obeys over rustc's own `-fuse-ld`, so GNU ld links. Found in [kixel-ai/rind#554](https://github.com/kixel-ai/rind/pull/554).
 - **Reported:** no (rust-lang/rust, for the target's default linker).
 - **Goes when:** Rust's powerpc64 target links with the system linker by default, or lld supports ELFv1.
 
@@ -21,7 +21,7 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 
 - **Breaks:** nixpkgs' `pkgsCross.ppc32` gcc is built without `--enable-secureplt`, so its objects, its `crtbeginS.o` included, use the BSS PLT. lld supports only the Secure PLT, yet links those objects without error into a binary that crashes. GNU ld detects them and copes.
 - **Reproduce:** `int main(void) { return 0; }` built with that gcc and `-fuse-ld=lld` crashes at exit under qemu-ppc, and runs with GNU ld.
-- **Workaround:** the `powerpc` shell in `flake.nix` passes `-C link-arg=-fuse-ld=bfd`, as for powerpc64. Diagnosed in [moq-dev/rind#580](https://github.com/moq-dev/rind/pull/580).
+- **Workaround:** the `powerpc` shell in `flake.nix` passes `-C link-arg=-fuse-ld=bfd`, as for powerpc64. Diagnosed in [kixel-ai/rind#580](https://github.com/kixel-ai/rind/pull/580).
 - **Reported:** no (llvm/llvm-project, for lld to refuse BSS-PLT objects; NixOS/nixpkgs, for a Secure PLT gcc).
 - **Goes when:** lld refuses or handles BSS-PLT objects and nixpkgs' ppc32 gcc emits the Secure PLT, or Rust links powerpc with the system linker.
 
@@ -76,7 +76,7 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 ### Valgrind on ARM does not fault guard pages
 
 - **Breaks:** under valgrind on ARM, reading a `PROT_NONE` guard page does not fault, so `low::guard_pages`'s `planted_over_read_faults` fails.
-- **Workaround:** `rind/src/low/mod.rs` leaves the `low::guard_pages` tests out of `__ctgrind` builds; plain `cargo test` still runs them. Added in [moq-dev/rind#607](https://github.com/moq-dev/rind/pull/607).
+- **Workaround:** `rind/src/low/mod.rs` leaves the `low::guard_pages` tests out of `__ctgrind` builds; plain `cargo test` still runs them. Added in [kixel-ai/rind#607](https://github.com/kixel-ai/rind/pull/607).
 - **Reported:** no.
 - **Goes when:** valgrind faults the read on ARM, if the bounds tests are ever wanted under ctgrind.
 
@@ -97,7 +97,7 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 ### BINSEC cannot decode glibc's string functions
 
 - **Breaks:** glibc picks `memcpy` and friends for the CPU, and BINSEC 0.11.3 cannot decode the `xtest` in its TSX `_rtm` variants, the EVEX encodings of its AVX-512 ones, or aarch64's SVE `memcpy`.
-- **Workaround:** `admin/ct-binsec`'s `LIBC` replaces whichever `memcpy`, `memmove`, `memset`, `memcmp`, and `bcmp` glibc picked with byte loops, as valgrind replaces them. Added in [moq-dev/rind#604](https://github.com/moq-dev/rind/pull/604).
+- **Workaround:** `admin/ct-binsec`'s `LIBC` replaces whichever `memcpy`, `memmove`, `memset`, `memcmp`, and `bcmp` glibc picked with byte loops, as valgrind replaces them. Added in [kixel-ai/rind#604](https://github.com/kixel-ai/rind/pull/604).
 - **Reported:** no.
 - **Goes when:** BINSEC decodes them; the byte loops then only shorten the search.
 
@@ -140,6 +140,14 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Reported:** no.
 - **Goes when:** s2n-bignum's model decodes each, instruction by instruction.
 
+### Mathlib's cache unpacks a copy into each checkout
+
+- **Breaks:** `lake exe cache get` decompresses all of Mathlib, about 6.7 GB, into each checkout's `proofs/.lake/packages`, and Lake unpacks Aeneas's release archive the same way, neither into Lake's artifact cache, so worktrees share none of it. Reservoir serves no Lake cache outputs for Mathlib's releases that `lake cache get` could fetch instead.
+- **Reproduce:** `lake cache get --package=mathlib --repo=leanprover-community/mathlib4` in `proofs/` finds no outputs in 100 revisions.
+- **Workaround:** `admin/prove` restores Mathlib and Aeneas from Lake's artifact cache with `lake build --no-build --no-cache` and falls back to Mathlib's cache and Aeneas's archive only when that misses, then puts both in Lake's cache for the next checkout.
+- **Reported:** no.
+- **Goes when:** Mathlib's cache and Lake's release archives unpack through Lake's artifact cache, or Reservoir serves Mathlib's outputs.
+
 ## Mutation testing
 
 ### cargo-mutants cannot see into `cfg_if!`
@@ -176,7 +184,7 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 
 ### libcrux-platform calls `__cpuid` outside `unsafe`
 
-- **Breaks:** libcrux-platform 0.0.4, which libcrux-aes pulled in, calls `__cpuid` outside `unsafe`, which compiles only since `__cpuid` became safe in Rust 1.94. rind dropped libcrux-aes with [moq-dev/rind#613](https://github.com/moq-dev/rind/pull/613), but README.md and PLATFORMS.md still state a 1.94 exception on 32-bit x86.
+- **Breaks:** libcrux-platform 0.0.4, which libcrux-aes pulled in, calls `__cpuid` outside `unsafe`, which compiles only since `__cpuid` became safe in Rust 1.94. rind dropped libcrux-aes with [kixel-ai/rind#613](https://github.com/kixel-ai/rind/pull/613), but README.md and PLATFORMS.md still state a 1.94 exception on 32-bit x86.
 - **Workaround:** README.md and PLATFORMS.md state the exception, and CI checks i686 only on stable.
 - **Reported:** [celabshq/libcrux#1646](https://github.com/celabshq/libcrux/issues/1646).
 - **Goes when:** [the x86 quest](/quest/m2/adoption/targets/x86.md) checks i686 on the MSRV and drops the exception.

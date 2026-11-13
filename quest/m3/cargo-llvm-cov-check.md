@@ -6,7 +6,7 @@
 
 ## Plan
 
-Planned with the maintainer on 2026-11-02 from [moq-dev/rind#236](https://github.com/moq-dev/rind/pull/236).
+Planned with the maintainer on 2026-11-02 from [kixel-ai/rind#236](https://github.com/kixel-ai/rind/pull/236).
 
 ## Waiting
 
