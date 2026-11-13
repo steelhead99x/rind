@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   libraries:
-    if: ${{ github.repository_owner == 'moq-dev' }}
+    if: ${{ github.repository_owner == 'kixel-ai' }}
     permissions:
       contents: read
     uses: ./.github/workflows/dart-libraries.yml

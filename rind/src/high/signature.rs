@@ -2725,8 +2725,12 @@ mod tests {
             );
         }
         check::<MlDsa44>(&asn1::oid::id_ml_dsa_65);
-        check::<MlDsa65>(&asn1::oid::id_ml_dsa_87);
-        check::<MlDsa87>(&asn1::oid::id_ml_dsa_44);
+        // The other parameter sets run the same encoding code, too slowly
+        // for Miri.
+        if !cfg!(miri) {
+            check::<MlDsa65>(&asn1::oid::id_ml_dsa_87);
+            check::<MlDsa87>(&asn1::oid::id_ml_dsa_44);
+        }
     }
 
     #[test]

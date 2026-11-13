@@ -17,7 +17,7 @@ On the 2026-11-12 macOS run, before the port of aws-lc-rs's tests and the report
 
 Guidance:
 
-- Start from the report as its two required quests leave it, and recount: they change what is measured and reach much of the adapters.
+- Start from the report as its required quest and the port of aws-lc-rs's tests leave it, and recount: they change what is measured and reach much of the adapters.
 - Test behavior a caller can see, such as an error path on malformed input or an accessor compared with the upstream crate's value. A `Debug` or `Display` impl needs a test only where callers rely on its output.
 - Where a function is unreachable from any public path, delete it rather than test it.
 - Where only a CPU feature neither runner has reaches a function, say so in [TESTING.md](/TESTING.md) instead of leaving it silent.
@@ -25,7 +25,7 @@ Guidance:
 ## Required
 
 - [The coverage report measures the published code under its own tests](/quest/m2/confidence/coverage-report.md) - the list of unrun functions this works through
-- [rind-aws-lc-rs passes aws-lc-rs's own test suite](/quest/m2/confidence/aws-lc-rs-upstream-tests.md) - closes most of the adapters' gap first, so no test is written twice
+- [rind-aws-lc-rs runs aws-lc-rs's in-crate tests of its public API](/quest/m2/confidence/aws-lc-rs-unit-tests.md) - closes most of rind-aws-lc-rs's remaining gap first, so no test is written twice
 
 ## Related
 

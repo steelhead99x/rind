@@ -3,8 +3,8 @@ description: >-
   The cryptography package's Cryptography on rind, a pure-Rust library, for
   what rind covers: one line moves an app's existing code onto rind.
 version: 0.1.0
-repository: https://github.com/moq-dev/rind/tree/main/rind-dart/cryptography
-issue_tracker: https://github.com/moq-dev/rind/issues
+repository: https://github.com/kixel-ai/rind/tree/main/rind-dart/cryptography
+issue_tracker: https://github.com/kixel-ai/rind/issues
 topics:
   - cryptography
   - crypto

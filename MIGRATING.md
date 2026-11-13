@@ -363,9 +363,9 @@ in with `ring = { package = "rind-ring", version = "0.17" }` and no code
 changes. The rename reaches only that crate. A binary moves every crate in
 its tree on ring 0.17, such as rustls or quinn-proto on their `ring`
 features, by adding `[patch.crates-io] ring = { git =
-"https://github.com/moq-dev/rind-patch" }` to its workspace's root
+"https://github.com/kixel-ai/rind-patch" }` to its workspace's root
 `Cargo.toml` and running `cargo update -p ring`. That builds
-[rind-patch](https://github.com/moq-dev/rind-patch)'s unpublished crate named
+[rind-patch](https://github.com/kixel-ai/rind-patch)'s unpublished crate named
 `ring`, which re-exports rind-ring, and `cargo tree -i ring` then prints only
 `ring v0.17.999` from rind-patch. It panics wherever ring
 panics, so its signatures stay ring's, and adds nothing to ring's API. Its [README](rind-ring/README.md) lists the
