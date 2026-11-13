@@ -11,7 +11,11 @@ mod p256;
 mod protocol;
 mod ristretto;
 
-#[cfg(all(test, not(any(miri, target_family = "wasm"))))]
+#[cfg(all(
+    test,
+    not(any(miri, target_family = "wasm")),
+    not(feature = "__ctgrind")
+))]
 mod cross;
 #[cfg(test)]
 mod vectors;
