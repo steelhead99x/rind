@@ -894,7 +894,20 @@ mod tests {
 
     use super::*;
     use crate::low;
-    use crate::low::ct::{into_public, into_secret};
+    use crate::low::ct::{into_public, into_secret, public_slice};
+
+    /// Both arrays, marked public, as the copies a comparison will read.
+    ///
+    /// `into_public`, and `public_slice` on the result alone, leave the
+    /// release build's addition comparison reading the secret from
+    /// `into_secret`. This is not inlined, so the caller compares what it
+    /// returns.
+    #[inline(never)]
+    fn declassified(a: [u64; 9], b: [u64; 9]) -> ([u64; 9], [u64; 9]) {
+        public_slice(&a);
+        public_slice(&b);
+        (a, b)
+    }
 
     const P: [u64; 9] = [
         u64::MAX,
@@ -1019,19 +1032,23 @@ mod tests {
 
             bignum_mul_p521(&mut ours, &sx, &sy);
             low::bignum_mul_p521(&mut theirs, &x, &y);
-            prop_assert_eq!(into_public(ours), theirs);
+            let (ours_p, theirs_p) = declassified(ours, theirs);
+            prop_assert_eq!(ours_p, theirs_p);
 
             bignum_sqr_p521(&mut ours, &sx);
             low::bignum_sqr_p521(&mut theirs, &x);
-            prop_assert_eq!(into_public(ours), theirs);
+            let (ours_p, theirs_p) = declassified(ours, theirs);
+            prop_assert_eq!(ours_p, theirs_p);
 
             bignum_add_p521(&mut ours, &sx, &sy);
             low::bignum_add_p521(&mut theirs, &x, &y);
-            prop_assert_eq!(into_public(ours), theirs);
+            let (ours_p, theirs_p) = declassified(ours, theirs);
+            prop_assert_eq!(ours_p, theirs_p);
 
             bignum_neg_p521(&mut ours, &sx);
             low::bignum_neg_p521(&mut theirs, &x);
-            prop_assert_eq!(into_public(ours), theirs);
+            let (ours_p, theirs_p) = declassified(ours, theirs);
+            prop_assert_eq!(ours_p, theirs_p);
         }
 
         #[test]
