@@ -3104,3 +3104,169 @@ mod vrf {
         }
     }
 }
+
+mod oprf {
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use rand_core_voprf::OsRng;
+    use rind::oprf::voprf as rind_voprf;
+    use rind::oprf::{P256_SHA256, P384_SHA384, P521_SHA512, RISTRETTO255_SHA512};
+    use voprf::{
+        BlindedElement, EvaluationElement, Group, OprfClient, OprfServer, Proof, VoprfClient,
+        VoprfServer,
+    };
+
+    /// Each suite against the `voprf` crate: the same key from one seed,
+    /// rind's clients finalizing the crate's evaluations and proofs, the
+    /// crate's clients finalizing rind's, and both servers' direct outputs.
+    macro_rules! matches_voprf {
+        ($cs:ty, $suite:expr, $seed:expr, $info:expr, $inputs:expr) => {{
+            let (seed, info, inputs): ([u8; 32], Vec<u8>, Vec<Vec<u8>>) = ($seed, $info, $inputs);
+            type G = <$cs as voprf::CipherSuite>::Group;
+            let suite = $suite;
+
+            // The OPRF mode.
+            let ours = rind::oprf::ServerKey::derive(suite, &seed, &info).unwrap();
+            let theirs = OprfServer::<$cs>::new_from_seed(&seed, &info).unwrap();
+            // The crate derives the same key: loaded from rind's
+            // encoding, it evaluates as the key it derived.
+            let loaded = OprfServer::<$cs>::new_with_key(ours.to_bytes().as_ref()).unwrap();
+            prop_assert_eq!(
+                &loaded.evaluate(b"key").unwrap()[..],
+                &theirs.evaluate(b"key").unwrap()[..]
+            );
+            for input in &inputs {
+                let direct = theirs.evaluate(input).unwrap();
+                let output = ours.evaluate(input).unwrap();
+                prop_assert_eq!(output.as_ref(), &direct[..]);
+
+                let (blind, blinded) = rind::oprf::Blind::new(suite, input).unwrap();
+                let evaluated =
+                    theirs.blind_evaluate(&BlindedElement::deserialize(blinded.as_ref()).unwrap());
+                let output = blind.finalize(&evaluated.serialize()).unwrap();
+                prop_assert_eq!(output.as_ref(), &direct[..]);
+
+                let blinded = OprfClient::<$cs>::blind(input, &mut OsRng).unwrap();
+                let evaluated = ours.blind_evaluate(&blinded.message.serialize()).unwrap();
+                let output = blinded
+                    .state
+                    .finalize(
+                        input,
+                        &EvaluationElement::deserialize(evaluated.as_ref()).unwrap(),
+                    )
+                    .unwrap();
+                prop_assert_eq!(&output[..], &direct[..]);
+            }
+
+            // The VOPRF mode, batched.
+            let ours = rind_voprf::ServerKey::derive(suite, &seed, &info).unwrap();
+            let theirs = VoprfServer::<$cs>::new_from_seed(&seed, &info).unwrap();
+            prop_assert_eq!(
+                ours.public_key().as_ref(),
+                &G::serialize_elem(theirs.get_public_key())[..]
+            );
+            let direct = inputs
+                .iter()
+                .map(|input| theirs.evaluate(input).unwrap().to_vec())
+                .collect::<Vec<_>>();
+            for (input, direct) in inputs.iter().zip(&direct) {
+                let output = ours.evaluate(input).unwrap();
+                prop_assert_eq!(output.as_ref(), &direct[..]);
+            }
+
+            let mut blinds = Vec::new();
+            let mut blinded = Vec::new();
+            for input in &inputs {
+                let (blind, element) = rind_voprf::Blind::new(suite, input).unwrap();
+                blinds.push(blind);
+                blinded.push(BlindedElement::<$cs>::deserialize(element.as_ref()).unwrap());
+            }
+            let evaluated = theirs.batch_blind_evaluate(&mut OsRng, &blinded).unwrap();
+            let messages = evaluated
+                .messages
+                .iter()
+                .flat_map(|message| message.serialize())
+                .collect::<Vec<_>>();
+            let public_key =
+                rind_voprf::PublicKey::new(suite, &G::serialize_elem(theirs.get_public_key()))
+                    .unwrap();
+            let outputs = rind_voprf::Blind::finalize_batch(
+                blinds,
+                &messages,
+                &evaluated.proof.serialize(),
+                &public_key,
+            )
+            .unwrap();
+            for (output, direct) in outputs.iter().zip(&direct) {
+                prop_assert_eq!(output.as_ref(), &direct[..]);
+            }
+
+            let mut clients = Vec::new();
+            let mut blinded = Vec::new();
+            for input in &inputs {
+                let result = VoprfClient::<$cs>::blind(input, &mut OsRng).unwrap();
+                clients.push(result.state);
+                blinded.extend_from_slice(&result.message.serialize());
+            }
+            let (evaluated, proof) = ours.blind_evaluate(&blinded).unwrap();
+            let element_len = evaluated.as_ref().len() / inputs.len();
+            let messages = evaluated
+                .as_ref()
+                .chunks(element_len)
+                .map(|bytes| EvaluationElement::<$cs>::deserialize(bytes).unwrap())
+                .collect::<Vec<_>>();
+            let proof = Proof::<$cs>::deserialize(proof.as_ref()).unwrap();
+            let outputs = VoprfClient::batch_finalize(
+                &inputs,
+                &clients,
+                &messages,
+                &proof,
+                theirs.get_public_key(),
+            )
+            .unwrap();
+            for (output, direct) in outputs.zip(&direct) {
+                prop_assert_eq!(&output.unwrap()[..], &direct[..]);
+            }
+        }};
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(16))]
+
+        #[test]
+        fn ristretto255_matches_voprf(
+            seed in any::<[u8; 32]>(),
+            info in vec(any::<u8>(), 0..40),
+            inputs in vec(vec(any::<u8>(), 0..100), 1..4),
+        ) {
+            matches_voprf!(voprf::Ristretto255, &RISTRETTO255_SHA512, seed, info, inputs);
+        }
+
+        #[test]
+        fn p256_matches_voprf(
+            seed in any::<[u8; 32]>(),
+            info in vec(any::<u8>(), 0..40),
+            inputs in vec(vec(any::<u8>(), 0..100), 1..4),
+        ) {
+            matches_voprf!(p256_voprf::NistP256, &P256_SHA256, seed, info, inputs);
+        }
+
+        #[test]
+        fn p384_matches_voprf(
+            seed in any::<[u8; 32]>(),
+            info in vec(any::<u8>(), 0..40),
+            inputs in vec(vec(any::<u8>(), 0..100), 1..4),
+        ) {
+            matches_voprf!(p384_voprf::NistP384, &P384_SHA384, seed, info, inputs);
+        }
+
+        #[test]
+        fn p521_matches_voprf(
+            seed in any::<[u8; 32]>(),
+            info in vec(any::<u8>(), 0..40),
+            inputs in vec(vec(any::<u8>(), 0..100), 1..4),
+        ) {
+            matches_voprf!(p521_voprf::NistP521, &P521_SHA512, seed, info, inputs);
+        }
+    }
+}
