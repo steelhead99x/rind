@@ -30,7 +30,7 @@ jobs:
   release:
     name: Plz
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'moq-dev' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.repository_owner == 'kixel-ai' && github.ref == 'refs/heads/main' }}
     # The environment, which only `main` can deploy to, holds the App key, and
     # crates.io trusts only this workflow in it, so a workflow on another
     # branch can neither read the key nor publish.
