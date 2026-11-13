@@ -308,6 +308,7 @@ hol_light_proofs=(
     "aarch64 bignum_eq.bin rind::low::aarch64::bignum_eq::bignum_eq"
     "aarch64 sha256_block_data_order_hw.o rind::low::aarch64::sha256::sha256_block_data_order_hw"
     "aarch64 sha512_block_data_order_hw.o rind::low::aarch64::sha512::sha512_block_data_order_hw"
+    "aarch64 bn_mul_mont.o rind::low::aarch64::mont::bn_mul_mont"
     "aarch64 ct_compare_bytes.bin rind::low::aarch64::cpu::ct_compare_bytes"
     "aarch64 ct_compare_16.bin rind::low::aarch64::cpu::ct_compare_16"
     "x86_64 ct_compare_bytes.bin rind::low::x86_64::cpu::ct_compare_bytes"
@@ -723,6 +724,11 @@ p256_items() {
     items rind/src/mid/rng.rs 'impl RandomSource for SystemRandom {'
 }
 check_quote X86_64/P256Dispatch p256_items
+p384_items() {
+    items rind/src/mid/p384.rs '    pub(crate) fn new_random(' '    fn generate(rng: &mut dyn'
+    items rind/src/mid/rng.rs 'impl RandomSource for SystemRandom {'
+}
+check_quote X86_64/P384Dispatch p384_items
 ecdsa_items() {
     items rind/src/high/curve.rs 'impl Curve for P256 {'
     items rind/src/mid/p256.rs '    pub(crate) fn generate(rng: &mut dyn'
@@ -883,7 +889,10 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # pointers too. The generator table is translated, so
 # `proofs/Rind/Aarch64/P256Table.lean` can prove it holds what s2n-bignum's
 # proof assumes; x86_64's `base_multiply`, aws-lc's, which no proof covers
-# yet, is opaque. HMAC's keyed states are translated over any hash, and its
+# yet, is opaque. P-384's key generation draws through a `dyn RandomSource`
+# too, so it is opaque, and `proofs/Rind/X86_64/P384Dispatch.lean` models it
+# on both targets; its comb tables are translated, which `P384Table.lean`
+# checks. HMAC's keyed states are translated over any hash, and its
 # `Key` and `Context`, which hold function pointers, are not.
 # On x86_64, RSA verification is translated from `high::rsa::VerifyingKey`
 # down to `low::posint` and the Montgomery products' dispatch in
@@ -1190,7 +1199,8 @@ mkdir -p proofs/Rind/Portable
 cp "$out/lean/Rind/Portable/Types.lean" "$out/lean/Rind/Portable/Funs.lean" proofs/Rind/Portable/
 
 mkdir -p proofs/Rind/Aarch64/Kdf
-for file in Dispatch P256Dispatch P256Agree X25519 P384 DigestAlgorithm DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
+for file in Dispatch P256Dispatch P256Agree P384Dispatch X25519 P384 P384Table P384Keygen DigestAlgorithm \
+    DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
     Blockwise Sha Hmac HmacDispatch HkdfExpand Kdf/TypesExternal Kdf/FunsExternal \
     CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3 AesCipher HkdfAes; do
     sed 's/X86_64/Aarch64/g; s/x86_64/aarch64/g' "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Aarch64/$file.lean"
