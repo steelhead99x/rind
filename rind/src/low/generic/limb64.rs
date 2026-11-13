@@ -7,8 +7,6 @@
 //!
 //! Each module here is also `limb32`'s, over 32-bit limbs.
 
-use core::mem::MaybeUninit;
-
 use fiat_crypto::{
     p256_64 as fiat_p256, p256_scalar_64 as fiat_p256_scalar, p384_64 as fiat_p384,
     p384_scalar_64 as fiat_p384_scalar, p521_64 as fiat_p521,
@@ -19,8 +17,8 @@ type Limb = u64;
 /// Twice a limb, which holds a product of two and two more limbs.
 type Wide = u128;
 
-/// `x`'s limbs, which are its words, so `_buf` goes unused and unwritten.
-fn limbs<'a>(x: &'a [u64], _buf: &mut [MaybeUninit<Limb>]) -> &'a [Limb] {
+/// `x`'s limbs, which are its words, so `_buf` goes unused.
+fn limbs<'a, const N: usize>(x: &'a [u64], _buf: &'a mut [Limb; N]) -> &'a [Limb] {
     x
 }
 

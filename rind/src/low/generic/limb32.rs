@@ -9,8 +9,6 @@
 //!
 //! Each module here is also [`super::limb64`]'s, over 64-bit limbs.
 
-use core::mem::MaybeUninit;
-
 use fiat_crypto::{
     p256_32 as fiat_p256, p256_scalar_32 as fiat_p256_scalar, p384_32 as fiat_p384,
     p384_scalar_32 as fiat_p384_scalar, p521_32 as fiat_p521,
@@ -21,18 +19,13 @@ type Limb = u32;
 /// Twice a limb, which holds a product of two and two more limbs.
 type Wide = u64;
 
-/// `x`'s limbs, low first, written into the first `2 * x.len()` slots of `buf`.
-///
-/// The tail is left untouched, so a caller can keep one `MAX_LIMBS` slot and
-/// not zero the limbs this modulus does not use.
-fn limbs<'a>(x: &[u64], buf: &'a mut [MaybeUninit<Limb>]) -> &'a [Limb] {
+/// `x`'s limbs, low first, which `buf` holds.
+fn limbs<'a, const N: usize>(x: &[u64], buf: &'a mut [Limb; N]) -> &'a [Limb] {
     let buf = &mut buf[..2 * x.len()];
     for (pair, word) in buf.as_chunks_mut::<2>().0.iter_mut().zip(x) {
-        pair[0].write(*word as u32);
-        pair[1].write((*word >> 32) as u32);
+        *pair = [*word as u32, (*word >> 32) as u32];
     }
-    // SAFETY: the loop wrote every limb of `buf`.
-    unsafe { core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast::<Limb>(), buf.len()) }
+    buf
 }
 
 /// Joins pairs of `x`'s limbs into the words of `z`, as far as both go.
