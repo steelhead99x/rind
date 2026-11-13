@@ -267,6 +267,77 @@ impl StaticPrivateKey {
 /// It is not wiped on drop: `agreement::SharedSecret` wipes it.
 pub(crate) struct SharedSecret(pub(crate) [u8; FieldElement::BYTES]);
 
+/// A P-521 point other than infinity, for protocols built on the group,
+/// such as the OPRF.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Point(AffinePoint);
+
+// Plain words, so all zeroes is a value it can hold.
+impl low::Zeroable for Point {}
+
+impl Point {
+    /// The length of an X9.62 compressed point.
+    pub(crate) const COMPRESSED_BYTES: usize = 1 + FieldElement::BYTES;
+
+    /// Decodes an X9.62 compressed point, as [`PublicKey::decompress`] does,
+    /// or `None`.
+    ///
+    /// Only public encodings are decoded: whether one decodes is public.
+    pub(crate) fn from_compressed(bytes: &[u8]) -> Option<Self> {
+        AffinePoint::from_x962_compressed(bytes).ok().map(Self)
+    }
+
+    /// The X9.62 compressed encoding, in constant time.
+    pub(crate) fn to_compressed(self) -> [u8; Self::COMPRESSED_BYTES] {
+        let mut r = [0u8; Self::COMPRESSED_BYTES];
+        r[0] = 0x02 | (self.0.y().0[0] & 1) as u8;
+        r[1..].copy_from_slice(&self.0.x().as_bytes());
+        r
+    }
+
+    /// `scalar * G`, in constant time, for a scalar from 1 to n - 1.
+    pub(crate) fn mul_base(scalar: &Scalar) -> Self {
+        Self(JacobianPoint::base_multiply(scalar).as_affine())
+    }
+
+    /// `scalar * self`, in constant time, for a scalar from 1 to n - 1.
+    pub(crate) fn mul(&self, scalar: &Scalar) -> Self {
+        Self(JacobianPoint::multiply(scalar, &self.0).as_affine())
+    }
+
+    /// `g * G + p * self` for public scalars, or `None` at infinity.
+    pub(crate) fn public_mul_base_add(&self, g: &Scalar, p: &Scalar) -> Option<Self> {
+        let odd_multiples = self.0.public_odd_multiples();
+        let sum = JacobianPoint::public_twin_multiply(g, p, &[&odd_multiples]);
+        (!sum.public_is_infinity()).then(|| Self(sum.as_affine()))
+    }
+
+    /// The sum of `scalar * point` over `terms`, for public scalars and
+    /// points, or `None` at infinity.
+    ///
+    /// A zero scalar's product, at infinity, is skipped, as the
+    /// multiplications take only points that are not; every other product
+    /// is not, as the group's order is prime.
+    pub(crate) fn public_mul_sum<'a>(
+        terms: impl IntoIterator<Item = (&'a Self, &'a Scalar)>,
+    ) -> Option<Self> {
+        let mut sum = JacobianPoint::infinity();
+        for (point, scalar) in terms {
+            if !scalar.is_zero() {
+                let product = JacobianPoint::multiply(scalar, &point.0).as_affine();
+                sum = sum.public_add_affine(&product);
+            }
+        }
+        (!sum.public_is_infinity()).then(|| Self(sum.as_affine()))
+    }
+}
+
+impl From<PublicKey> for Point {
+    fn from(key: PublicKey) -> Self {
+        Self(key.point)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct AffinePoint {
     xy: [u64; 18],
@@ -835,6 +906,9 @@ impl FieldElement {
 #[derive(Default)]
 pub(crate) struct Scalar([u64; 9]);
 
+// Plain words, so all zeroes is a value it can hold.
+impl low::Zeroable for Scalar {}
+
 impl Scalar {
     pub(crate) const BYTES: usize = 66;
 
@@ -862,6 +936,37 @@ impl Scalar {
             Self(util::big_endian_slice_any_size_to_u64x9(bytes).ok_or(Error::WrongLength)?)
                 .reduce_mod_n(),
         )
+    }
+
+    /// Reads a big-endian scalar of exactly 66 bytes, or `None` unless it
+    /// is below n. Zero is accepted.
+    ///
+    /// Whether it is below n is public; the value stays secret.
+    pub(crate) fn from_bytes_below_n(bytes: &[u8; Self::BYTES]) -> Option<Self> {
+        let full = Self(util::big_endian_slice_any_size_to_u64x9(bytes).unwrap());
+        low::ct::into_public(full.reduce_mod_n().private_eq(&full)).then_some(full)
+    }
+
+    /// A uniformly random scalar from 1 to n - 1, from the system's random
+    /// source.
+    pub(crate) fn random() -> Result<Self, Error> {
+        let _entry = low::Entry::new_secret();
+        PrivateKey::generate(&mut SystemRandom).map(|key| key.scalar)
+    }
+
+    /// `n - self mod n`.
+    pub(crate) fn neg(&self) -> Self {
+        let mut r = Self::default();
+        low::bignum_modsub(&mut r.0, &[0; 9], &self.0, &CURVE_ORDER);
+        r
+    }
+
+    /// `self * other + addend mod n`.
+    pub(crate) fn mul_add(&self, other: &Self, addend: &Self) -> Self {
+        self.as_mont()
+            .mont_mul(&other.as_mont())
+            .demont()
+            .add(addend)
     }
 
     fn into_range_check(self) -> Result<Self, Error> {
@@ -941,8 +1046,8 @@ impl Scalar {
         r
     }
 
-    /// Find the multiplicative inverse of `self` mod n
-    fn inv(&self) -> Self {
+    /// Find the multiplicative inverse of `self` mod n, in constant time
+    pub(crate) fn inv(&self) -> Self {
         let mut r = Self::default();
         let mut temp = [0u64; 9 * 3];
         low::bignum_modinv(&mut r.0, &self.0, &CURVE_ORDER, &mut temp);
