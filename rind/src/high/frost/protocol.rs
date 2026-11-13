@@ -243,7 +243,7 @@ pub(super) fn sign<G: Group>(
         &binding_commitment[..G::ELEMENT_LEN],
         &mine.binding[..G::ELEMENT_LEN],
     )) {
-        return Err(KeyFormatError::MismatchedPublicKey.into());
+        return Err(Error::MismatchedCommitment);
     }
 
     if group_public.len() != G::ELEMENT_LEN {
@@ -660,4 +660,42 @@ fn same<G: Group>(left: Option<G::Element>, right: Option<G::Element>) -> bool {
         (Some(left), Some(right)) => G::equals(&left, &right),
         _ => false,
     }
+}
+
+pub(super) fn validate_identifier<G: Group>(bytes: &[u8; 32]) -> Result<u16, Error> {
+    let value = identifier_value::<G>(bytes)?;
+    if value == 0 {
+        return Err(KeyFormatError::ScalarOutOfRange.into());
+    }
+    Ok(value)
+}
+
+pub(super) fn parse_element_bytes<G: Group>(bytes: &[u8]) -> Result<[u8; 33], Error> {
+    if bytes.len() != G::ELEMENT_LEN {
+        return Err(Error::WrongLength);
+    }
+    G::deserialize(bytes)?;
+    let mut out = [0u8; 33];
+    out[..bytes.len()].copy_from_slice(bytes);
+    Ok(out)
+}
+
+pub(super) fn parse_secret_share_bytes<G: Group>(bytes: &[u8]) -> Result<[u8; 32], Error> {
+    let bytes: &[u8; 32] = bytes.try_into().map_err(|_| Error::WrongLength)?;
+    let scalar = load_secret::<G>(bytes)?;
+    if G::scalar_is_zero(&scalar) {
+        return Err(KeyFormatError::ScalarOutOfRange.into());
+    }
+    Ok(*bytes)
+}
+
+pub(super) fn parse_signature_bytes<G: Group>(bytes: &[u8]) -> Result<Vec<u8>, Error> {
+    if bytes.len() != G::ELEMENT_LEN + 32 {
+        return Err(Error::WrongLength);
+    }
+    let (encoded_r, encoded_z) = bytes.split_at(G::ELEMENT_LEN);
+    G::deserialize(encoded_r)?;
+    let encoded_z: &[u8; 32] = encoded_z.try_into().unwrap();
+    G::scalar_from_canonical(encoded_z).ok_or(KeyFormatError::ScalarOutOfRange)?;
+    Ok(bytes.to_vec())
 }

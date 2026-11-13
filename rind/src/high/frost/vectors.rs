@@ -3,7 +3,10 @@
 //! RFC 9591 appendix E, from the CFRG draft's `poc` JSON.
 
 use super::protocol::{self, Group, Party, commit_with_randomness, deal_from_coefficients};
-use super::{ed25519::Ed25519, p256::P256, ristretto::Ristretto};
+use super::{
+    ED25519_SHA512, P256_SHA256, RISTRETTO255_SHA512, Signature, SigningShare, Suite, VerifyingKey,
+    VerifyingShare, ed25519::Ed25519, p256::P256, ristretto::Ristretto,
+};
 use crate::error::Error;
 use crate::low::{Entry, ct};
 
@@ -178,13 +181,73 @@ fn hex_bytes(value: &str) -> Vec<u8> {
 #[test]
 fn refuses_a_bad_commitment() {
     let _entry = Entry::new_public();
-    let err = super::Commitments::from_bytes(&super::ED25519_SHA512, &[0; 10]).unwrap_err();
+    let err = super::Commitments::from_bytes(&ED25519_SHA512, &[0; 10]).unwrap_err();
     assert_eq!(err, Error::WrongLength);
     // The identity element, which RFC 9591 refuses.
     let mut bytes = vec![0u8; 96];
     bytes[0] = 1;
     bytes[32] = 1;
     bytes[64] = 1;
-    let err = super::Commitments::from_bytes(&super::ED25519_SHA512, &bytes).unwrap_err();
+    let err = super::Commitments::from_bytes(&ED25519_SHA512, &bytes).unwrap_err();
     assert!(matches!(err, Error::KeyRejected(_)));
+}
+
+#[test]
+fn rfc9591_encodings_match_the_vectors() {
+    let _entry = Entry::new_secret();
+    encoding_vector(&ED25519_SHA512, "frost-ed25519-sha512.json");
+    encoding_vector(&RISTRETTO255_SHA512, "frost-ristretto255-sha512.json");
+    encoding_vector(&P256_SHA256, "frost-p256-sha256.json");
+}
+
+fn encoding_vector(suite: &'static Suite, name: &str) {
+    let file = read(name);
+    let max = number(&file["config"]["MAX_PARTICIPANTS"]);
+    let min = number(&file["config"]["MIN_PARTICIPANTS"]);
+    let group = hex_bytes(file["inputs"]["group_public_key"].as_str().unwrap());
+    let verifying_key = VerifyingKey::from_bytes(suite, min, max, &group).unwrap();
+    assert_eq!(verifying_key.to_bytes(), group);
+    assert_eq!(verifying_key.as_bytes(), group.as_slice());
+
+    let secret = hex32(file["inputs"]["group_secret_key"].as_str().unwrap());
+    let coefficients: Vec<[u8; 32]> = file["inputs"]["share_polynomial_coefficients"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|coefficient| hex32(coefficient.as_str().unwrap()))
+        .collect();
+    let dealt = if suite.element_len() == 33 {
+        deal_from_coefficients::<P256>(&secret, &coefficients, max).unwrap()
+    } else if core::ptr::eq(suite, &ED25519_SHA512) {
+        deal_from_coefficients::<Ed25519>(&secret, &coefficients, max).unwrap()
+    } else {
+        deal_from_coefficients::<Ristretto>(&secret, &coefficients, max).unwrap()
+    };
+
+    for share in file["inputs"]["participant_shares"].as_array().unwrap() {
+        let identifier = share["identifier"].as_u64().unwrap() as u16;
+        let scalar = hex32(share["participant_share"].as_str().unwrap());
+        let id = if suite.element_len() == 33 {
+            identifier_bytes::<P256>(identifier)
+        } else if core::ptr::eq(suite, &ED25519_SHA512) {
+            identifier_bytes::<Ed25519>(identifier)
+        } else {
+            identifier_bytes::<Ristretto>(identifier)
+        };
+        let signing = SigningShare::from_bytes(suite, &id, min, max, &scalar).unwrap();
+        let encoded = signing.to_bytes();
+        ct::public_slice(&encoded);
+        assert_eq!(encoded, scalar);
+        let element = dealt.shares[usize::from(identifier) - 1].verifying;
+        let len = suite.element_len();
+        let verifying = VerifyingShare::from_bytes(suite, &id, &element[..len]).unwrap();
+        assert_eq!(verifying.to_bytes(), element[..len]);
+        assert_eq!(verifying.identifier(), &id);
+    }
+
+    let signature_bytes = hex_bytes(file["final_output"]["sig"].as_str().unwrap());
+    let signature = Signature::from_bytes(suite, &signature_bytes).unwrap();
+    assert_eq!(signature.to_bytes(), signature_bytes);
+    let message = hex_bytes(file["inputs"]["message"].as_str().unwrap());
+    signature.verify(&verifying_key, &message).unwrap();
 }

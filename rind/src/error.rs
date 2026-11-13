@@ -40,6 +40,10 @@ pub enum Error {
     /// A call was given an algorithm it does not take, such as a SHA-1
     /// digest to sign, or a digest for a key that verifies only messages.
     Unsupported,
+
+    /// The signer's nonces do not match the commitment in the signing
+    /// package.
+    MismatchedCommitment,
 }
 
 /// Why a key was refused, which its `Display` describes.
@@ -147,6 +151,10 @@ impl core::fmt::Display for Error {
             Self::Fault => write!(f, "an internal consistency check failed"),
             Self::MessageLimitReached => write!(f, "a context reached its message limit"),
             Self::Unsupported => write!(f, "an algorithm the call does not take"),
+            Self::MismatchedCommitment => write!(
+                f,
+                "the signer's nonces do not match the commitment in the signing package"
+            ),
         }
     }
 }

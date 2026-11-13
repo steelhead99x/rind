@@ -223,6 +223,47 @@ impl SigningShare {
         &self.identifier
     }
 
+    /// The RFC 9591 scalar encoding of this share.
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.scalar
+    }
+
+    /// Parse a signing share from its RFC 9591 scalar encoding.
+    ///
+    /// `identifier` is that encoding of a participant index in
+    /// `1..=max_signers`. A non-canonical scalar or identifier, a zero
+    /// share, an identifier outside that range, or `min_signers` of zero
+    /// or greater than `max_signers`, is refused. The share is secret;
+    /// whether it was accepted is public.
+    pub fn from_bytes(
+        suite: &'static Suite,
+        identifier: &[u8; 32],
+        min_signers: u16,
+        max_signers: u16,
+        bytes: &[u8],
+    ) -> Result<Self, Error> {
+        let _entry = Entry::new_secret();
+        if min_signers == 0 || min_signers > max_signers {
+            return Err(Error::Unsupported);
+        }
+        let identifier_value = suites!(suite.kind, |G| protocol::validate_identifier::<G>(
+            identifier
+        ))?;
+        if identifier_value > max_signers {
+            return Err(KeyFormatError::ScalarOutOfRange.into());
+        }
+        let scalar = suites!(suite.kind, |G| protocol::parse_secret_share_bytes::<G>(
+            bytes
+        ))?;
+        Ok(Self {
+            scalar,
+            identifier: *identifier,
+            min_signers,
+            max_signers,
+            kind: suite.kind,
+        })
+    }
+
     /// The secret share. Tests use it to feed the Zcash crates.
     #[cfg(all(test, not(any(miri, target_family = "wasm"))))]
     pub(in crate::high::frost) fn scalar_bytes(&self) -> &[u8; 32] {
@@ -282,6 +323,34 @@ impl VerifyingShare {
     pub fn as_bytes(&self) -> &[u8] {
         &self.element[..suite(self.kind).element_len()]
     }
+
+    /// The RFC 9591 element encoding of this share.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.as_bytes().to_vec()
+    }
+
+    /// Parse a verifying share from its RFC 9591 element encoding.
+    ///
+    /// `identifier` is the ciphersuite's scalar encoding of a non-zero
+    /// participant index. A malformed identifier, or an invalid or
+    /// identity element, is refused. Ed25519 elements must be in the
+    /// prime-order subgroup.
+    pub fn from_bytes(
+        suite: &'static Suite,
+        identifier: &[u8; 32],
+        bytes: &[u8],
+    ) -> Result<Self, Error> {
+        let _entry = Entry::new_public();
+        suites!(suite.kind, |G| protocol::validate_identifier::<G>(
+            identifier
+        ))?;
+        let element = suites!(suite.kind, |G| protocol::parse_element_bytes::<G>(bytes))?;
+        Ok(Self {
+            kind: suite.kind,
+            identifier: *identifier,
+            element,
+        })
+    }
 }
 
 /// The group's verifying key.
@@ -304,6 +373,35 @@ impl VerifyingKey {
     /// For [`ED25519_SHA512`] this is an Ed25519 public key.
     pub fn as_bytes(&self) -> &[u8] {
         &self.element[..suite(self.kind).element_len()]
+    }
+
+    /// The RFC 9591 element encoding of this key.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.as_bytes().to_vec()
+    }
+
+    /// Parse a verifying key from its RFC 9591 element encoding.
+    ///
+    /// An invalid or identity element is refused, and so is `min_signers`
+    /// of zero or greater than `max_signers`. Ed25519 elements must be in
+    /// the prime-order subgroup.
+    pub fn from_bytes(
+        suite: &'static Suite,
+        min_signers: u16,
+        max_signers: u16,
+        bytes: &[u8],
+    ) -> Result<Self, Error> {
+        let _entry = Entry::new_public();
+        if min_signers == 0 || min_signers > max_signers {
+            return Err(Error::Unsupported);
+        }
+        let element = suites!(suite.kind, |G| protocol::parse_element_bytes::<G>(bytes))?;
+        Ok(Self {
+            kind: suite.kind,
+            element,
+            min_signers,
+            max_signers,
+        })
     }
 }
 
@@ -346,9 +444,10 @@ impl SigningNonces {
 
     /// Sign `package`'s message with `share`.
     ///
-    /// `package` must contain this participant's commitment. Fewer
-    /// participants than the dealer required, or more than it created, is
-    /// refused.
+    /// `package` must contain this participant's commitment. Nonces that
+    /// do not match that commitment fail with
+    /// [`Error::MismatchedCommitment`]. Fewer participants than the dealer
+    /// required, or more than it created, is refused.
     pub fn sign(
         self,
         package: &SigningPackage,
@@ -603,9 +702,24 @@ impl Signature {
         ))
     }
 
-    /// The signature encoding.
+    /// The signature encoding, `R || z` as RFC 9591 appendix A encodes it.
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes[..self.len]
+    }
+
+    /// The RFC 9591 encoding, `R || z`.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.as_bytes().to_vec()
+    }
+
+    /// Parse a signature from its RFC 9591 encoding, `R || z`.
+    ///
+    /// A wrong length, a non-canonical scalar, or an invalid or identity
+    /// `R` is refused. Ed25519's `R` must be in the prime-order subgroup.
+    pub fn from_bytes(suite: &'static Suite, bytes: &[u8]) -> Result<Self, Error> {
+        let _entry = Entry::new_public();
+        let bytes = suites!(suite.kind, |G| protocol::parse_signature_bytes::<G>(bytes))?;
+        Self::new(suite.kind, bytes)
     }
 }
 
@@ -669,10 +783,10 @@ fn sort_by_identifier<T>(kind: Kind, items: &mut [T], identifier: impl Fn(&T) ->
 
 #[cfg(all(test, not(any(miri, target_family = "wasm"))))]
 pub(in crate::high::frost) fn signature_from_bytes(
-    suite: &Suite,
+    suite: &'static Suite,
     bytes: Vec<u8>,
 ) -> Result<Signature, Error> {
-    Signature::new(suite.kind, bytes)
+    Signature::from_bytes(suite, &bytes)
 }
 
 fn suite(kind: Kind) -> &'static Suite {
@@ -739,29 +853,58 @@ mod api_tests {
     fn each_suite_signs_and_verifies() {
         for suite in [&ED25519_SHA512, &RISTRETTO255_SHA512, &P256_SHA256] {
             let dealt = suite.deal(2, 3).unwrap();
-            let (left_nonces, left) = SigningNonces::commit(&dealt.signing_shares[0]).unwrap();
-            let (right_nonces, right) = SigningNonces::commit(&dealt.signing_shares[2]).unwrap();
+            // Import over the RFC encodings, as a dealer, signer, and
+            // coordinator in separate processes would.
+            let left_signing = SigningShare::from_bytes(
+                suite,
+                dealt.signing_shares[0].identifier(),
+                2,
+                3,
+                &dealt.signing_shares[0].to_bytes(),
+            )
+            .unwrap();
+            let right_signing = SigningShare::from_bytes(
+                suite,
+                dealt.signing_shares[2].identifier(),
+                2,
+                3,
+                &dealt.signing_shares[2].to_bytes(),
+            )
+            .unwrap();
+            let verifying_key =
+                VerifyingKey::from_bytes(suite, 2, 3, &dealt.verifying_key.to_bytes()).unwrap();
+            let verifying_shares: Vec<VerifyingShare> = dealt
+                .verifying_shares
+                .iter()
+                .map(|share| {
+                    VerifyingShare::from_bytes(suite, share.identifier(), &share.to_bytes())
+                        .unwrap()
+                })
+                .collect();
+            let (left_nonces, left) = SigningNonces::commit(&left_signing).unwrap();
+            let (right_nonces, right) = SigningNonces::commit(&right_signing).unwrap();
             // Passed in reverse identifier order; the package sorts them.
             let package = SigningPackage::new(vec![right, left], b"frost").unwrap();
             let left_share = left_nonces
-                .sign(&package, &dealt.signing_shares[0], &dealt.verifying_key)
+                .sign(&package, &left_signing, &verifying_key)
                 .unwrap();
             let right_share = right_nonces
-                .sign(&package, &dealt.signing_shares[2], &dealt.verifying_key)
+                .sign(&package, &right_signing, &verifying_key)
                 .unwrap();
             let signature = suite
                 .aggregate(
                     &package,
                     &[right_share, left_share],
-                    &dealt.verifying_shares,
-                    &dealt.verifying_key,
+                    &verifying_shares,
+                    &verifying_key,
                 )
                 .unwrap();
-            signature.verify(&dealt.verifying_key, b"frost").unwrap();
+            let signature = Signature::from_bytes(suite, &signature.to_bytes()).unwrap();
+            signature.verify(&verifying_key, b"frost").unwrap();
             if core::ptr::eq(suite, &ED25519_SHA512) {
                 let key = crate::signature::PublicKey::new(
                     &crate::signature::verify::ED25519,
-                    dealt.verifying_key.as_bytes(),
+                    verifying_key.as_bytes(),
                 )
                 .unwrap();
                 key.verify(b"frost", signature.as_bytes()).unwrap();
@@ -884,6 +1027,175 @@ mod api_tests {
         assert_eq!(
             SigningPackage::new(vec![ed, p256], b"frost").unwrap_err(),
             Error::Unsupported
+        );
+    }
+
+    #[test]
+    fn encodings_reject_malformed_inputs() {
+        let order_l = [
+            0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9,
+            0xde, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x10,
+        ];
+        let order_n = [
+            0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xbc, 0xe6, 0xfa, 0xad, 0xa7, 0x17, 0x9e, 0x84, 0xf3, 0xb9, 0xca, 0xc2,
+            0xfc, 0x63, 0x25, 0x51,
+        ];
+        let mut noncanonical_y = [0xffu8; 32];
+        noncanonical_y[0] = 0xed;
+        noncanonical_y[31] = 0x7f;
+        let mut noncanonical_p256 = [0u8; 33];
+        noncanonical_p256[0] = 0x02;
+        noncanonical_p256[1..].copy_from_slice(&[
+            0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff,
+        ]);
+
+        for (suite, order, point) in [
+            (&ED25519_SHA512, &order_l, &noncanonical_y[..]),
+            (&RISTRETTO255_SHA512, &order_l, &noncanonical_y[..]),
+            (&P256_SHA256, &order_n, &noncanonical_p256[..]),
+        ] {
+            let mut identifier = [0u8; 32];
+            if suite.element_len() == 33 {
+                identifier[31] = 1;
+            } else {
+                identifier[0] = 1;
+            }
+            let dealt = suite.deal(2, 2).unwrap();
+            let share = &dealt.signing_shares[0];
+
+            assert_eq!(
+                SigningShare::from_bytes(suite, &identifier, 2, 2, &[0u8; 16]).unwrap_err(),
+                Error::WrongLength,
+                "{suite}"
+            );
+            assert_eq!(
+                SigningShare::from_bytes(suite, &identifier, 2, 2, order).unwrap_err(),
+                KeyFormatError::ScalarOutOfRange.into(),
+                "{suite}"
+            );
+            assert_eq!(
+                SigningShare::from_bytes(suite, &identifier, 2, 2, &[0u8; 32]).unwrap_err(),
+                KeyFormatError::ScalarOutOfRange.into(),
+                "{suite}"
+            );
+            let mut bad_id = [0u8; 32];
+            assert_eq!(
+                SigningShare::from_bytes(suite, &bad_id, 2, 2, &share.to_bytes()).unwrap_err(),
+                KeyFormatError::ScalarOutOfRange.into(),
+                "{suite}"
+            );
+            if suite.element_len() == 33 {
+                bad_id[31] = 3;
+            } else {
+                bad_id[0] = 3;
+            }
+            assert_eq!(
+                SigningShare::from_bytes(suite, &bad_id, 2, 2, &share.to_bytes()).unwrap_err(),
+                KeyFormatError::ScalarOutOfRange.into(),
+                "{suite}"
+            );
+            assert_eq!(
+                SigningShare::from_bytes(suite, &identifier, 0, 2, &share.to_bytes()).unwrap_err(),
+                Error::Unsupported,
+                "{suite}"
+            );
+            assert_eq!(
+                SigningShare::from_bytes(suite, &identifier, 3, 2, &share.to_bytes()).unwrap_err(),
+                Error::Unsupported,
+                "{suite}"
+            );
+
+            assert_eq!(
+                VerifyingShare::from_bytes(suite, &identifier, &[0u8; 8]).unwrap_err(),
+                Error::WrongLength,
+                "{suite}"
+            );
+            assert!(
+                matches!(
+                    VerifyingShare::from_bytes(suite, &identifier, point).unwrap_err(),
+                    Error::KeyRejected(_)
+                ),
+                "{suite}"
+            );
+            assert_eq!(
+                VerifyingKey::from_bytes(suite, 2, 2, &[0u8; 8]).unwrap_err(),
+                Error::WrongLength,
+                "{suite}"
+            );
+            assert!(
+                matches!(
+                    VerifyingKey::from_bytes(suite, 2, 2, point).unwrap_err(),
+                    Error::KeyRejected(_)
+                ),
+                "{suite}"
+            );
+            assert_eq!(
+                VerifyingKey::from_bytes(suite, 0, 2, &dealt.verifying_key.to_bytes()).unwrap_err(),
+                Error::Unsupported,
+                "{suite}"
+            );
+
+            let mut signature = dealt.verifying_key.to_bytes();
+            signature.extend_from_slice(order);
+            assert_eq!(
+                Signature::from_bytes(suite, &signature).unwrap_err(),
+                KeyFormatError::ScalarOutOfRange.into(),
+                "{suite}"
+            );
+            // A valid-looking length whose R is not a point.
+            let mut bad_r = point.to_vec();
+            bad_r.extend_from_slice(&[1u8; 32]);
+            assert!(
+                matches!(
+                    Signature::from_bytes(suite, &bad_r).unwrap_err(),
+                    Error::KeyRejected(_)
+                ),
+                "{suite}"
+            );
+            assert_eq!(
+                Signature::from_bytes(suite, &[0u8; 8]).unwrap_err(),
+                Error::WrongLength,
+                "{suite}"
+            );
+        }
+
+        // ristretto255's identity is 32 zero bytes.
+        let mut id = [0u8; 32];
+        id[0] = 1;
+        assert_eq!(
+            VerifyingShare::from_bytes(&RISTRETTO255_SHA512, &id, &[0u8; 32]).unwrap_err(),
+            KeyFormatError::SmallOrder.into()
+        );
+        assert_eq!(
+            VerifyingKey::from_bytes(&RISTRETTO255_SHA512, 2, 2, &[0u8; 32]).unwrap_err(),
+            KeyFormatError::SmallOrder.into()
+        );
+        let mut identity_sig = vec![0u8; 64];
+        identity_sig[32] = 1;
+        assert_eq!(
+            Signature::from_bytes(&RISTRETTO255_SHA512, &identity_sig).unwrap_err(),
+            KeyFormatError::SmallOrder.into()
+        );
+    }
+
+    #[test]
+    fn sign_reports_a_nonce_commitment_mismatch() {
+        let dealt = ED25519_SHA512.deal(2, 2).unwrap();
+        let (_first_nonces, first) = SigningNonces::commit(&dealt.signing_shares[0]).unwrap();
+        let (second_nonces, _second) = SigningNonces::commit(&dealt.signing_shares[0]).unwrap();
+        let (_, other) = SigningNonces::commit(&dealt.signing_shares[1]).unwrap();
+        let package = SigningPackage::new(vec![first, other], b"frost").unwrap();
+        let err = second_nonces
+            .sign(&package, &dealt.signing_shares[0], &dealt.verifying_key)
+            .unwrap_err();
+        assert_eq!(err, Error::MismatchedCommitment);
+        assert_eq!(
+            err.to_string(),
+            "the signer's nonces do not match the commitment in the signing package"
         );
     }
 }
