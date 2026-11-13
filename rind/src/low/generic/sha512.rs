@@ -236,13 +236,10 @@ mod tests {
     }
 
     fn digest_hex(message: &[u8], hex: &str) {
-        let want = hex.as_bytes();
-        assert_eq!(want.len(), 128, "hex length");
+        assert_eq!(hex.len(), 128, "hex length");
         let mut expected = [0u8; 64];
         for i in 0..64 {
-            expected[i] =
-                u8::from_str_radix(std::str::from_utf8(&want[i * 2..i * 2 + 2]).unwrap(), 16)
-                    .unwrap();
+            expected[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap();
         }
         assert_eq!(hash(message), expected);
     }
