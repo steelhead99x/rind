@@ -10,7 +10,7 @@ pub const BUSY_SHARE: f64 = 0.1;
 pub const LEASE_HELD: i32 = 73;
 pub const COPY_FAILED: i32 = 74;
 pub const REMOTE_DIR: &str = ".cache/rind-bench-report";
-pub const REPO: &str = "moq-dev/rind";
+pub const REPO: &str = "kixel-ai/rind";
 pub const CRITERION_ARGS: &[&str] = &["--noplot", "--warm-up-time", "1", "--measurement-time", "3"];
 pub const FONT: &str =
     "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif";
