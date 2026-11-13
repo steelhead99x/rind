@@ -54,12 +54,18 @@ jobs:
       # select the same set, per the scans `admin/x86-cpu sde-scan` saves in
       # `admin/x86-cpus`.
 
+      # rind-fips aborts in its load constructor unless the CPU has AES,
+      # PCLMUL, SSSE3, SSE4.1, POPCNT, MOVBE, AVX, AVX2, BMI1, BMI2, and ADX
+      # (`missing_cpu_feature` under `rind_fips`). Models through Haswell lack
+      # one of those, so they skip that package. Skylake server and later have
+      # them and still run it.
+
       # Prescott, a Pentium 4, lacks SSSE3, so it runs every slowest path:
       # aws-lc's SSE2 AES and integer GHASH, SHA-1, and SHA-256, HACL*'s
       # ChaCha20 rounds, the portable ML-KEM arithmetic, s2n-bignum's `_alt` routines, and aws-lc's
       # Montgomery multiplication.
       - name: Check Prescott
-        run: nix develop .#sde --command cargo test --release --features rind/wipe
+        run: nix develop .#sde --command cargo test --release --features rind/wipe --exclude rind-fips
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "sde -p4p --"
           RIND_TEST_X86_SSSE3: 0
@@ -80,7 +86,7 @@ jobs:
       # runs aws-lc's vpaes and SSSE3 GHASH, ChaCha20, SHA-1, and SHA-256,
       # beside Prescott's other paths. Saltwell selects the same paths.
       - name: Check Merom
-        run: nix develop .#sde --command cargo test --release --features rind/wipe
+        run: nix develop .#sde --command cargo test --release --features rind/wipe --exclude rind-fips
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "sde -mrm --"
           RIND_TEST_X86_SSSE3: 1
@@ -101,7 +107,7 @@ jobs:
       # lacks AES-NI, so it otherwise runs Merom's paths. Penryn selects the
       # same paths.
       - name: Check Nehalem
-        run: nix develop .#sde --command cargo test --release --features rind/wipe
+        run: nix develop .#sde --command cargo test --release --features rind/wipe --exclude rind-fips
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "sde -nhm --"
           RIND_TEST_X86_SSSE3: 1
@@ -122,7 +128,7 @@ jobs:
       # GHASH intrinsics run without VEX encoding. Silvermont selects the same
       # paths.
       - name: Check Westmere
-        run: nix develop .#sde --command cargo test --release --features rind/wipe
+        run: nix develop .#sde --command cargo test --release --features rind/wipe --exclude rind-fips
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "sde -wsm --"
           RIND_TEST_X86_SSSE3: 1
@@ -143,7 +149,7 @@ jobs:
       # its SHA extensions. Goldmont Plus, Tremont, and Snow Ridge select the
       # same paths.
       - name: Check Goldmont
-        run: nix develop .#sde --command cargo test --release --features rind/wipe
+        run: nix develop .#sde --command cargo test --release --features rind/wipe --exclude rind-fips
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "sde -glm --"
           RIND_TEST_X86_SSSE3: 1
@@ -165,7 +171,7 @@ jobs:
       # ML-KEM arithmetic, s2n-bignum's `_alt` routines, and aws-lc's
       # Montgomery multiplication run. Ivy Bridge selects the same paths.
       - name: Check Sandy Bridge
-        run: nix develop .#sde --command cargo test --release --features rind/wipe
+        run: nix develop .#sde --command cargo test --release --features rind/wipe --exclude rind-fips
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "sde -snb --"
           RIND_TEST_X86_SSSE3: 1
@@ -186,7 +192,7 @@ jobs:
       # Montgomery multiplication, its RSAZ exponentiation for RSA-2048, and
       # its AVX AES-GCM run, beside the AVX2 kernels.
       - name: Check Haswell
-        run: nix develop .#sde --command cargo test --release --features rind/wipe
+        run: nix develop .#sde --command cargo test --release --features rind/wipe --exclude rind-fips
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "sde -hsw --"
           RIND_TEST_X86_SSSE3: 1

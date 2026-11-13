@@ -235,6 +235,13 @@ mod kat {
         passed.then_some(()).ok_or(test)
     }
 
+    /// Constant-time compare. A self-test's match bit is public: it is the
+    /// module's pass or fail, and [`crate::constant_time::verify`] declassifies
+    /// only that bit.
+    fn same(got: &[u8], expected: &[u8]) -> bool {
+        crate::constant_time::verify(got, expected).is_ok()
+    }
+
     // FIPS 180's example, "abc", for each hash.
     fn digest(
         test: &'static str,
@@ -436,7 +443,10 @@ mod kat {
         check(
             "ecdh",
             secret.is_ok_and(|s| {
-                *s.as_ref() == hex("46fc62106420ff012e54a434fbdd2d25ccc5852060561e68040dd7778997bd7b")
+                same(
+                    s.as_ref(),
+                    &hex("46fc62106420ff012e54a434fbdd2d25ccc5852060561e68040dd7778997bd7b"),
+                )
             }),
         )
     }
@@ -498,15 +508,15 @@ mod kat {
         let ek = key.encapsulation_key();
         check(
             "ml_kem_keygen",
-            sha256_of(&ek.as_bytes())[..] == hex(ML_KEM_EK_SHA256)
-                && sha256_of(&key.as_bytes())[..] == hex(ML_KEM_DK_SHA256),
+            same(&sha256_of(&ek.as_bytes()), &hex(ML_KEM_EK_SHA256))
+                && same(&sha256_of(&key.as_bytes()), &hex(ML_KEM_DK_SHA256)),
         )?;
 
         let (secret, ciphertext) = ek.encaps_internal(Message(input("ml_kem_encaps", [0x5a; 32])));
         check(
             "ml_kem_encaps",
-            sha256_of(ciphertext.as_ref())[..] == hex(ML_KEM_CIPHERTEXT_SHA256)
-                && sha256_of(secret.as_ref())[..] == hex(ML_KEM_SECRET_SHA256),
+            same(&sha256_of(ciphertext.as_ref()), &hex(ML_KEM_CIPHERTEXT_SHA256))
+                && same(&sha256_of(secret.as_ref()), &hex(ML_KEM_SECRET_SHA256)),
         )?;
 
         let ciphertext = input("ml_kem_decaps", *ciphertext.as_ref());
@@ -516,8 +526,8 @@ mod kat {
         let rejected = key.decaps(&Ciphertext::from(corrupted));
         check(
             "ml_kem_decaps",
-            sha256_of(decapsulated.as_ref())[..] == hex(ML_KEM_SECRET_SHA256)
-                && sha256_of(rejected.as_ref())[..] == hex(ML_KEM_REJECTED_SHA256),
+            same(&sha256_of(decapsulated.as_ref()), &hex(ML_KEM_SECRET_SHA256))
+                && same(&sha256_of(rejected.as_ref()), &hex(ML_KEM_REJECTED_SHA256)),
         )
     }
 
@@ -530,8 +540,8 @@ mod kat {
         let key = KeyPair::<MlDsa44>::from_seed(&input("ml_dsa_keygen", seed));
         check(
             "ml_dsa_keygen",
-            sha256_of(key.public_key().as_ref())[..] == hex(ML_DSA_PK_SHA256)
-                && sha256_of(key.secret_key().as_ref())[..] == hex(ML_DSA_SK_SHA256),
+            same(&sha256_of(key.public_key().as_ref()), &hex(ML_DSA_PK_SHA256))
+                && same(&sha256_of(key.secret_key().as_ref()), &hex(ML_DSA_SK_SHA256)),
         )?;
 
         let message = *b"rind-fips ML-DSA self-test";

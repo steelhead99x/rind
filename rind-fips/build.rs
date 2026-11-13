@@ -182,7 +182,7 @@ fn inject(library: &mut [u8], arch: Arch) -> Result<(), String> {
     let dynamic_at = file.offset(dynamic.vaddr).ok_or("the dynamic section is not loaded")?;
     let mut layout = Layout::default();
     let (mut rela_size, mut jmprel_size) = (0, 0);
-    for entry in library[dynamic_at..dynamic_at + dynamic.filesz as usize].chunks_exact(16) {
+    for entry in library[dynamic_at..dynamic_at + dynamic.filesz as usize].as_chunks::<16>().0 {
         let (tag, value) = (u64_at(entry, 0)?, u64_at(entry, 8)?);
         match tag {
             0 => break,
