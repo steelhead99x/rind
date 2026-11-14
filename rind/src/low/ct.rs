@@ -30,6 +30,19 @@ cfg_if::cfg_if! {
             }
         }
 
+        /// `bytes`, after [`public_slice`].
+        ///
+        /// The client request takes the address as an integer, so LLVM does
+        /// not treat it as a write. Inlined into a caller, a function that
+        /// marks its argument and returns it hands back the unmarked original,
+        /// and a later compare branches on whatever still taints that original.
+        /// This stays a call, and the copy below is loaded after the request.
+        #[inline(never)]
+        pub(crate) fn defined_bytes<const N: usize>(bytes: [u8; N]) -> [u8; N] {
+            public_slice(&bytes);
+            bytes
+        }
+
         #[inline]
         #[must_use]
         pub(crate) fn into_secret<T>(v: T) -> T {

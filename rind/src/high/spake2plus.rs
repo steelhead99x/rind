@@ -921,16 +921,23 @@ fn encode(point: Affine, public: bool) -> Result<EncodedPoint, Error> {
 
 /// Declassifies a tag this side sends to the peer.
 ///
-/// Not inlined, and the bytes pass through `black_box` after the mark.
-/// Otherwise a release build returns the secret copy `mac` wrote, and a
-/// caller that compares the tag branches on it.
-#[inline(never)]
+/// Stays `#[inline]` so a normal build still adds no codegen-unit root.
+/// Under ctgrind the client request takes the address as an integer, and an
+/// inlined mark returns the unmarked tag `mac` wrote. `ct::defined_bytes`
+/// copies that tag out after the request, and it exists only in that build.
+#[inline]
 fn sent<S>(confirm: Confirm<S>) -> Confirm<S> {
-    let bytes = core::hint::black_box(confirm.bytes);
-    ct::public_slice(&bytes);
-    Confirm {
-        bytes: core::hint::black_box(bytes),
-        _kind: PhantomData,
+    #[cfg(feature = "__ctgrind")]
+    {
+        return Confirm {
+            bytes: ct::defined_bytes(confirm.bytes),
+            _kind: PhantomData,
+        };
+    }
+    #[cfg(not(feature = "__ctgrind"))]
+    {
+        ct::public_slice(&confirm.bytes);
+        confirm
     }
 }
 
@@ -1341,11 +1348,16 @@ mod tests {
         assert_eq!(share_v.as_ref(), their_v.as_slice());
         assert_eq!(confirm_v.as_ref(), their_confirm_v.as_slice());
         let their_out = their_prover.finish(&their_v, &their_confirm_v).unwrap();
+        // pakery's tags are HMAC from the `sha2` crate. Memcheck follows an
+        // uninitialized slot in that HMAC into the tag, so mark the public
+        // outputs before the compares. pakery's own declassify is off here.
+        ct::public_slice(their_out.confirm_p.as_slice());
+        ct::public_slice(their_out.session_key.as_bytes());
         assert_eq!(confirm_p.as_ref(), their_out.confirm_p.as_slice());
-        // pakery's session key is public test output. Declassify ours first.
         ct::public_slice(key.as_ref());
         assert_eq!(key.as_ref(), their_out.session_key.as_bytes());
         let their_key = their_verifier.finish(confirm_p.as_ref()).unwrap();
+        ct::public_slice(their_key.session_key.as_bytes());
         assert_eq!(key.as_ref(), their_key.session_key.as_bytes());
     }
 
