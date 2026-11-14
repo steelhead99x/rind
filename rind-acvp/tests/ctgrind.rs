@@ -4,7 +4,7 @@
 //! Secret arguments are marked undefined, so memcheck flags any branch or
 //! memory index that depends on them. Replies are marked defined before the
 //! test checks them. rind itself marks the keys it generates or parses: an
-//! RSA exponent once parsed, since parsing trims its leading zero bytes, and
+//! RSA exponent at its public length, before the load, and
 //! an ML-KEM decapsulation key's `dk_pke` and `z`, since its check reads
 //! `ek` and `H(ek)`.
 
@@ -63,6 +63,16 @@ fn ecdh_given_scalar() {
             run(&format!("ECDH/{curve}"), &args(scalar)),
             wanted,
             "{curve}"
+        );
+        // One public padding byte, then the same field. The prefix length is
+        // public; the field bytes stay secret.
+        let mut padded = vec![0u8];
+        padded.extend(std::iter::repeat_n(0x02, field));
+        secret(padded.as_slice());
+        assert_eq!(
+            run(&format!("ECDH/{curve}"), &args(padded)),
+            wanted,
+            "{curve} padded"
         );
     }
 }
@@ -171,11 +181,27 @@ fn rsa_primitives() {
     let d = vec![0x5a; 256];
     let e = vec![0x01, 0x00, 0x01];
     let message = vec![0x11; 256];
+    secret(d.as_slice());
     let signed = run(
         "RSA/signaturePrimitive",
         &[d.clone(), n.clone(), e.clone(), message.clone()],
     );
     assert_eq!(signed[0], [1]);
+    let mut leading = vec![0u8; 256];
+    leading[253..].fill(0x5a);
+    secret(leading.as_slice());
+    let from_leading = run(
+        "RSA/signaturePrimitive",
+        &[leading, n.clone(), e.clone(), message.clone()],
+    );
+    assert_eq!(from_leading[0], [1]);
+    let short = vec![0x5a; 3];
+    secret(short.as_slice());
+    let from_short = run(
+        "RSA/signaturePrimitive",
+        &[short, n.clone(), e.clone(), message.clone()],
+    );
+    assert_eq!(from_leading[1], from_short[1]);
     let decrypted = run("RSA/decryptionPrimitive", &[message, d, n, e]);
     assert_eq!(decrypted, signed);
 }

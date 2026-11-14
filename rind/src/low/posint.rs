@@ -52,16 +52,32 @@ impl<const N: usize> PosInt<N> {
         self.used = other.used;
     }
 
-    /// Widens `self` up to `other` when `self` is shorter.
+    /// Loads `bytes` at a width fixed by public lengths.
     ///
-    /// A wider `self` is left alone. [`Self::expand`] would replace `used`,
-    /// and the high words would drop out of the value. `__acvp`'s RSA
-    /// primitive uses this so a short exponent's trace follows the modulus.
+    /// `bytes.len()` and `min`'s width are public. Leading zero bytes stay in
+    /// the value, so they do not change `used`. `used` is the maximum of
+    /// `min`'s width and the limb count of that length. `__acvp`'s RSA
+    /// primitive uses this so an exponent's trace follows those lengths.
     #[cfg(feature = "__acvp")]
-    pub(crate) fn widen_to(&mut self, other: &Self) {
-        if self.used < other.used {
-            self.expand(other);
+    pub(crate) fn from_public_width(bytes: &[u8], min: &Self) -> Result<Self, Error> {
+        let limbs = bytes.len().div_ceil(8).max(min.used);
+        if limbs > N {
+            return Err(Error::WrongLength);
         }
+        let mut out = Self::zero();
+        out.used = limbs;
+        for limb in 0..limbs {
+            let mut word = 0u64;
+            for byte in 0..8 {
+                let from_end = limb * 8 + byte;
+                if from_end < bytes.len() {
+                    let index = bytes.len() - 1 - from_end;
+                    word |= u64::from(bytes[index]) << (8 * byte);
+                }
+            }
+            out.words[limb] = word;
+        }
+        Ok(out)
     }
 
     /// Replaces top word with `word` and increases `used`.

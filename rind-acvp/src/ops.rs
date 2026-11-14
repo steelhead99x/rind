@@ -365,7 +365,9 @@ fn aes_ctr(args: &[Vec<u8>]) -> Result<Reply, String> {
     let counter: [u8; 16] = arg(args, 2)?
         .try_into()
         .map_err(|_| "AES-CTR counter is not 16 bytes".to_string())?;
-    AesCtr::new(aes_alg(key.len())?, key, 32)
+    // aws-lc's wrapper calls AES_ctr128_encrypt, which carries through all 128
+    // bits. The sample groups are RFC 3686 and do not carry out of the low 32.
+    AesCtr::new(aes_alg(key.len())?, key, 128)
         .map_err(|err| err.to_string())?
         .apply_keystream(&counter, &mut out)
         .map_err(|err| err.to_string())?;
@@ -603,7 +605,7 @@ fn ecdh(curve: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let key = if private.is_empty() {
         PrivateKey::generate(alg).map_err(|err| err.to_string())?
     } else {
-        let scalar = pad(private, field)?;
+        let scalar = pad_secret(private, field)?;
         PrivateKey::from_scalar(alg, &scalar).map_err(|err| err.to_string())?
     };
     let point = key.public_key().as_ref();
@@ -619,7 +621,7 @@ fn ecdh(curve: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
 }
 
 fn pad(mut bytes: &[u8], len: usize) -> Result<Vec<u8>, String> {
-    // ACVP writes a coordinate with a leading zero when its top bit is set.
+    // ACVP writes a public coordinate with a leading zero when its top bit is set.
     while bytes.len() > len && bytes[0] == 0 {
         bytes = &bytes[1..];
     }
@@ -629,6 +631,16 @@ fn pad(mut bytes: &[u8], len: usize) -> Result<Vec<u8>, String> {
     let mut out = vec![0u8; len - bytes.len()];
     out.extend_from_slice(bytes);
     Ok(out)
+}
+
+/// A secret scalar at exactly `len` bytes.
+///
+/// A longer encoding's extra prefix has a public length. Every byte of that
+/// prefix is read, and the scalar is rejected when any of them is nonzero.
+/// The field bytes themselves are not scanned.
+fn pad_secret(bytes: &[u8], len: usize) -> Result<Vec<u8>, String> {
+    rind::acvp::field_bytes(bytes, len)
+        .ok_or_else(|| format!("value is {} bytes, above {len}", bytes.len()))
 }
 
 fn ecdsa_keygen(args: &[Vec<u8>]) -> Result<Reply, String> {
@@ -674,7 +686,8 @@ fn x_from_scalar(curve: &str, scalar: &[u8]) -> Result<Vec<u8>, String> {
         "P-521" => (&ECDH_P521, 66),
         _ => return Err(format!("unsupported curve {curve}")),
     };
-    let key = PrivateKey::from_scalar(alg, &pad(scalar, field)?).map_err(|err| err.to_string())?;
+    let key =
+        PrivateKey::from_scalar(alg, &pad_secret(scalar, field)?).map_err(|err| err.to_string())?;
     Ok(key.public_key().as_ref().to_vec())
 }
 
@@ -697,7 +710,9 @@ fn ecdsa_sigver(args: &[Vec<u8>]) -> Result<Reply, String> {
     let curve = std::str::from_utf8(arg(args, 0)?).map_err(|_| "ECDSA curve")?;
     let hash = std::str::from_utf8(arg(args, 1)?).map_err(|_| "ECDSA hash")?;
     let message = arg(args, 2)?;
-    let point = uncompressed(curve, arg(args, 3)?, arg(args, 4)?)?;
+    let Ok(point) = uncompressed(curve, arg(args, 3)?, arg(args, 4)?) else {
+        return public_reply(vec![vec![0]]);
+    };
     let r = arg(args, 5)?;
     let s = arg(args, 6)?;
     let alg = ecdsa_verifier(curve, hash)?;
@@ -1300,24 +1315,20 @@ fn hmac_drbg(rest: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
         return Err(format!("unsupported DRBG command {rest}"));
     };
     let out_len = u32_arg(arg(args, 0)?).ok_or("DRBG length")? as usize;
-    if out_len > MAX_DRBG {
-        return Err("DRBG output is too long".into());
-    }
     let entropy = arg(args, 1)?;
     let personalisation = arg(args, 2)?;
-    let mut out = vec![0u8; out_len];
-    let mut drbg = match kind {
-        "generate" => {
-            let nonce = arg(args, 5)?;
-            rind::acvp::AcvpDrbg::new(hash_name, entropy, nonce, personalisation)
-        }
-        "reseed" | "pr" => {
-            let nonce = arg(args, 7)?;
-            rind::acvp::AcvpDrbg::new(hash_name, entropy, nonce, personalisation)
-        }
+    let nonce_at = match kind {
+        "generate" => 5,
+        "reseed" | "pr" => 7,
         _ => unreachable!(),
+    };
+    let nonce = arg(args, nonce_at)?;
+    if !drbg_lengths(hash_name, kind, args, out_len) {
+        return Err("DRBG input length".into());
     }
-    .ok_or_else(|| format!("unsupported DRBG hash {hash_name}"))?;
+    let mut out = vec![0u8; out_len];
+    let mut drbg = rind::acvp::AcvpDrbg::new(hash_name, entropy, nonce, personalisation)
+        .ok_or_else(|| format!("unsupported DRBG hash {hash_name}"))?;
     match kind {
         "generate" => {
             drbg.generate(&mut out, arg(args, 3)?);
@@ -1340,6 +1351,36 @@ fn hmac_drbg(rest: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
 }
 
 const MAX_DRBG: usize = 1 << 16;
+
+/// Lengths `getConfig` advertises for `hash`, in bytes. SHA-1's strength is
+/// 128 bits, and each SHA-2 hash here is used at 256. The nonce is half of
+/// that. Personalization and additional input may be empty. The output cap is
+/// SP 800-90A's 2^19 bits for HMAC_DRBG.
+fn drbg_lengths(hash: &str, kind: &str, args: &[Vec<u8>], out_len: usize) -> bool {
+    let (entropy_min, nonce_min) = match hash {
+        "SHA-1" => (16, 8),
+        "SHA2-256" | "SHA2-384" | "SHA2-512" => (32, 16),
+        _ => return false,
+    };
+    let within = |index: usize, min: usize| {
+        args.get(index)
+            .is_some_and(|bytes| (min..=MAX_DRBG).contains(&bytes.len()))
+    };
+    // generate: entropy, personalisation, two additional inputs, nonce.
+    // reseed: those, with the reseed additional input and reseed entropy
+    // inserted before the two additional inputs. Prediction resistance uses
+    // the same slots; its two entropy inputs are the reseed entropies.
+    let (entropies, additionals, nonce_at): (&[_], &[_], _) = match kind {
+        "generate" => (&[1], &[2, 3, 4], 5),
+        "reseed" => (&[1, 4], &[2, 3, 5, 6], 7),
+        "pr" => (&[1, 4, 6], &[2, 3, 5], 7),
+        _ => return false,
+    };
+    (1..=MAX_DRBG).contains(&out_len)
+        && entropies.iter().all(|&index| within(index, entropy_min))
+        && additionals.iter().all(|&index| within(index, 0))
+        && within(nonce_at, nonce_min)
+}
 
 /// Algorithms `acvptool` knows. A name it does not is refused before any
 /// vector is read. RSA key generation is absent: rind has no seeded or
@@ -1385,7 +1426,12 @@ const CONFIG: &str = r#"[
   {"algorithm": "RSA", "mode": "sigVer", "revision": "FIPS186-5"},
   {"algorithm": "RSA", "mode": "signaturePrimitive", "revision": "2.0"},
   {"algorithm": "RSA", "mode": "decryptionPrimitive", "revision": "Sp800-56Br2"},
-  {"algorithm": "hmacDRBG", "revision": "1.0", "predResistanceEnabled": [true, false]}
+  {"algorithm": "hmacDRBG", "revision": "1.0", "predResistanceEnabled": [true, false], "reseedImplemented": true, "capabilities": [
+    {"mode": "SHA-1", "derFuncEnabled": false, "entropyInputLen": [{"min": 128, "max": 524288, "increment": 8}], "nonceLen": [{"min": 64, "max": 524288, "increment": 8}], "persoStringLen": [{"min": 0, "max": 524288, "increment": 8}], "additionalInputLen": [{"min": 0, "max": 524288, "increment": 8}], "returnedBitsLen": [{"min": 8, "max": 524288, "increment": 8}]},
+    {"mode": "SHA2-256", "derFuncEnabled": false, "entropyInputLen": [{"min": 256, "max": 524288, "increment": 8}], "nonceLen": [{"min": 128, "max": 524288, "increment": 8}], "persoStringLen": [{"min": 0, "max": 524288, "increment": 8}], "additionalInputLen": [{"min": 0, "max": 524288, "increment": 8}], "returnedBitsLen": [{"min": 8, "max": 524288, "increment": 8}]},
+    {"mode": "SHA2-384", "derFuncEnabled": false, "entropyInputLen": [{"min": 256, "max": 524288, "increment": 8}], "nonceLen": [{"min": 128, "max": 524288, "increment": 8}], "persoStringLen": [{"min": 0, "max": 524288, "increment": 8}], "additionalInputLen": [{"min": 0, "max": 524288, "increment": 8}], "returnedBitsLen": [{"min": 8, "max": 524288, "increment": 8}]},
+    {"mode": "SHA2-512", "derFuncEnabled": false, "entropyInputLen": [{"min": 256, "max": 524288, "increment": 8}], "nonceLen": [{"min": 128, "max": 524288, "increment": 8}], "persoStringLen": [{"min": 0, "max": 524288, "increment": 8}], "additionalInputLen": [{"min": 0, "max": 524288, "increment": 8}], "returnedBitsLen": [{"min": 8, "max": 524288, "increment": 8}]}
+  ]}
 ]"#;
 
 #[cfg(test)]
@@ -1489,5 +1535,90 @@ mod tests {
         )
         .unwrap();
         assert_eq!(once[0], repeated[0]);
+    }
+
+    /// A coordinate that is still too long after a leading zero is a failed
+    /// verification, not a dead wrapper.
+    #[test]
+    fn ecdsa_sigver_rejects_a_long_coordinate() {
+        let mut qx = vec![0x80];
+        qx.resize(33, 0);
+        let reply = handle(
+            "ECDSA/sigVer",
+            &[
+                b"P-256".to_vec(),
+                b"SHA2-256".to_vec(),
+                b"message".to_vec(),
+                qx,
+                vec![1; 32],
+                vec![1; 32],
+                vec![1; 32],
+            ],
+        )
+        .unwrap();
+        assert_eq!(reply[0], [0]);
+    }
+
+    /// The counter carries out of the low 32 bits, as AES_ctr128_encrypt does.
+    #[test]
+    fn aes_ctr_carries_into_the_high_bits() {
+        let key = vec![0x11; 16];
+        let mut counter = vec![0u8; 16];
+        counter[12..].fill(0xff);
+        let reply = handle(
+            "AES-CTR/encrypt",
+            &[
+                key.clone(),
+                vec![0; 32],
+                counter.clone(),
+                1u32.to_ne_bytes().to_vec(),
+            ],
+        )
+        .unwrap();
+        let block: [u8; 16] = counter.as_slice().try_into().unwrap();
+        let mut full = vec![0u8; 32];
+        rind::cipher::AesCtr::new(&rind::cipher::AES_128, &key, 128)
+            .unwrap()
+            .apply_keystream(&block, &mut full)
+            .unwrap();
+        assert_eq!(reply[0], full);
+        let mut low = vec![0u8; 32];
+        rind::cipher::AesCtr::new(&rind::cipher::AES_128, &key, 32)
+            .unwrap()
+            .apply_keystream(&block, &mut low)
+            .unwrap();
+        assert_ne!(reply[0], low);
+    }
+
+    #[test]
+    fn drbg_config_names_lengths_and_refuses_a_short_nonce() {
+        let reply = handle("getConfig", &[]).unwrap();
+        let config: serde_json::Value = serde_json::from_slice(&reply[0]).unwrap();
+        let drbg = config
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["algorithm"] == "hmacDRBG")
+            .unwrap();
+        assert_eq!(drbg["reseedImplemented"], true);
+        let modes: Vec<_> = drbg["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["mode"].as_str().unwrap())
+            .collect();
+        assert_eq!(modes, ["SHA-1", "SHA2-256", "SHA2-384", "SHA2-512"]);
+        let err = handle(
+            "hmacDRBG/SHA2-256",
+            &[
+                16u32.to_ne_bytes().to_vec(),
+                vec![0x5a; 32],
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                vec![0; 8],
+            ],
+        );
+        assert!(err.is_err());
     }
 }

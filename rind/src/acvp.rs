@@ -155,6 +155,31 @@ pub fn mlkem768_dk_ok(dk: &[u8]) -> bool {
     DecapKey::from_bytes(dk).is_some()
 }
 
+/// A big-endian integer as exactly `len` bytes.
+///
+/// The lengths are public. A longer `bytes` is accepted when every byte of
+/// its prefix is zero. That check reads the whole prefix, and the accept or
+/// reject is public: it is the error.
+#[cfg(feature = "__acvp")]
+pub fn field_bytes(bytes: &[u8], len: usize) -> Option<Vec<u8>> {
+    let body = if bytes.len() > len {
+        let extra = bytes.len() - len;
+        let mut acc = 0u8;
+        for &byte in &bytes[..extra] {
+            acc |= byte;
+        }
+        if crate::low::ct::into_public(acc) != 0 {
+            return None;
+        }
+        &bytes[extra..]
+    } else {
+        bytes
+    };
+    let mut out = vec![0u8; len - body.len()];
+    out.extend_from_slice(body);
+    Some(out)
+}
+
 /// `base` ^ `exp` mod `modulus`, at `modulus`'s byte length, or `None`.
 ///
 /// `None` covers a `base` that is not below the modulus, a modulus that is
@@ -166,23 +191,22 @@ pub fn mlkem768_dk_ok(dk: &[u8]) -> bool {
 /// for decryption, and `m^d mod n` is then as good as `d`. It is returned in
 /// a [`SecretBuf`] and is not marked public.
 ///
-/// The exponentiation's trace follows the exponent's width. A shorter
-/// exponent is widened to the modulus, so that trace follows the public
-/// modulus length rather than how many leading zeros the exponent's encoding
-/// had. An exponent wider than the modulus is left as it is: widening it
-/// would drop its high words, and its trace stays that wider length.
+/// The exponentiation's trace follows public lengths. `exp.len()` fixes the
+/// exponent's limb count, and a shorter exponent is widened to the modulus,
+/// whose length is public too. Leading zero bytes stay in the value: they are
+/// not a separate length. An exponent whose public length is already wider
+/// than the modulus keeps that width, so its high words are not dropped.
 pub fn rsa_modexp(base: &[u8], exp: &[u8], modulus: &[u8]) -> Option<SecretBuf> {
     let _entry = crate::low::Entry::new_secret();
     let base = PosInt::<RSA_WORDS>::from_bytes(base).ok()?;
-    // Parsing trims the exponent's leading zero bytes, so its encoded length
-    // is public, as an RSA key's DER length is. Its words are then secret,
-    // as rind's RSA keys are, and wiped on drop.
-    let mut exp = SecretPosInt::from(PosInt::<RSA_WORDS>::from_bytes(exp).ok()?);
     let modulus_n = PosInt::<RSA_WORDS>::from_bytes(modulus).ok()?;
     if modulus_n.is_even() || !base.less_than(&modulus_n) {
         return None;
     }
-    exp.widen_to(&modulus_n);
+    // Mark the exponent before it is loaded. Its byte length is public; the
+    // bytes, including leading zeros, are secret. The words are wiped on drop.
+    crate::low::ct::secret_slice(exp);
+    let exp = SecretPosInt::from(PosInt::<RSA_WORDS>::from_public_width(exp, &modulus_n).ok()?);
     let mont = modulus_n.montifier();
     let n0 = modulus_n.mont_neg_inverse();
     let out = base.mod_exp(&*exp, &modulus_n, &mont, n0);
@@ -335,21 +359,34 @@ mod tests {
     }
 
     /// Under `admin/ctgrind`, the RSA primitive does not branch on or index
-    /// by the exponent, which it marks once parsed, at the modulus's width
-    /// or widened up to it.
+    /// by the exponent, including its leading zero bytes. The raw buffer is
+    /// marked. A short exponent, one the modulus's width, and one of that
+    /// width whose first bytes are zero all run.
     #[test]
     fn rsa_modexp_secret_exponent() {
         let mut modulus = [0xc3u8; 256];
         modulus[255] = 0xc5;
         let base = [0x11u8; 256];
-        let wide = super::rsa_modexp(&base, &[0x5a; 256], &modulus).unwrap();
-        assert_eq!(wide.as_slice().len(), 256);
-        let short = super::rsa_modexp(&base, &[0x5a; 3], &modulus).unwrap();
-        let mut exp = [0u8; 256];
-        exp[253..].fill(0x5a);
-        let padded = super::rsa_modexp(&base, &exp, &modulus).unwrap();
-        assert_eq!(reveal(&short), reveal(&padded));
-        assert_ne!(reveal(&short), reveal(&wide));
+        let wide_exp = [0x5a; 256];
+        let short_exp = [0x5a; 3];
+        let mut leading = [0u8; 256];
+        leading[253..].fill(0x5a);
+        let wanted_wide = super::rsa_modexp(&base, &wide_exp, &modulus).unwrap();
+        let wanted_short = super::rsa_modexp(&base, &short_exp, &modulus).unwrap();
+        let wanted_leading = super::rsa_modexp(&base, &leading, &modulus).unwrap();
+        assert_eq!(wanted_wide.as_slice().len(), 256);
+        assert_eq!(reveal(&wanted_short), reveal(&wanted_leading));
+        assert_ne!(reveal(&wanted_short), reveal(&wanted_wide));
+
+        secret_slice(&wide_exp);
+        secret_slice(&short_exp);
+        secret_slice(&leading);
+        let wide = super::rsa_modexp(&base, &wide_exp, &modulus).unwrap();
+        let short = super::rsa_modexp(&base, &short_exp, &modulus).unwrap();
+        let padded = super::rsa_modexp(&base, &leading, &modulus).unwrap();
+        assert_eq!(reveal(&wide), reveal(&wanted_wide));
+        assert_eq!(reveal(&short), reveal(&wanted_short));
+        assert_eq!(reveal(&padded), reveal(&wanted_leading));
     }
 
     /// Under `admin/ctgrind`, ACVP's ML-DSA signing does not branch on the
