@@ -511,9 +511,13 @@ fn hkdf(hash: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let out_len = u32_arg(arg(args, 3)?).ok_or("HKDF length")? as usize;
     let (alg, _) = hkdf_alg(hash)?;
     let mut out = vec![0u8; out_len];
+    // Extract and expand return `Result` so rind-fips can refuse an empty
+    // salt or info. rind accepts both, and the errors still propagate.
     rind::hkdf::Salt::new(alg, salt)
         .extract(key)
+        .map_err(|err| err.to_string())?
         .expand(&[info], out_len)
+        .map_err(|err| err.to_string())?
         .fill(&mut out)
         .map_err(|err| err.to_string())?;
     public_reply(vec![out])
@@ -1390,6 +1394,28 @@ mod tests {
             reply[0],
             hex(
                 "76fc79fe9b50beccc991a11b5635783a83536add03c157fb30645e611c2898bb2b1bc215000209208cd506cb28da2a51bdb03826aaf2bd2335d576d519160842e7158ad0949d1a9ec3e66ea1b1a064b005de914eac2e9d4f2d72a8616a80225422918250ff66a41bd2f864a6a38cc5b6499dc43f7f2bd09e1e0f8f5885935124"
+            )
+        );
+    }
+
+    /// RFC 5869 A.1. Extract and expand both return `Result` since the FIPS
+    /// module landed; this is the chain `KDA/HKDF` runs.
+    #[test]
+    fn hkdf_sha256_rfc5869_case_1() {
+        let reply = handle(
+            "KDA/HKDF/SHA2-256",
+            &[
+                hex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b"),
+                hex("000102030405060708090a0b0c"),
+                hex("f0f1f2f3f4f5f6f7f8f9"),
+                42u32.to_ne_bytes().to_vec(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            reply[0],
+            hex(
+                "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
             )
         );
     }
