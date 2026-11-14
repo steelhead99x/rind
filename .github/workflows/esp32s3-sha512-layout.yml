@@ -9,8 +9,6 @@ on:
       - rind/src/low/generic/sha512.rs
       - rind/src/low/portable/sha.rs
       - rind/Cargo.toml
-      - rind/build.rs
-      - rind/esp32s3-sha256-align.py
       - admin/esp32s3-sha512-layout
       - .github/workflows/esp32s3-sha512-layout.yml
   workflow_dispatch:

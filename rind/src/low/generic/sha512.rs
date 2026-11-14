@@ -11,19 +11,17 @@
 //! is placed in IRAM (`.iram1.text`, literal pool included) and its `K`
 //! table in internal DRAM. The layout check verifies that the board's
 //! release build adds no flash text and calls nothing from this body.
-//! Building for `xtensa-esp32s3-espidf` also raises libcrux-sha2's
-//! `.text.*sha256_update*` alignment to 8192 bytes. Every ESP32-S3
-//! instruction-cache set stride divides 8192, so flash text linked ahead
-//! of HACL* SHA-256 moves it only by a multiple of those strides. That is
-//! not a cycle measurement; board timing is unmeasured. `lto` rebuilds
-//! those sections and drops the alignment. The
-//! `esp32s3-sha512-flash` feature leaves the ordinary flash sections, for an
-//! image whose IRAM is already full. The ESP32, the ESP32-S2, `*-none-elf`,
-//! and every other target are unchanged. The round functions and the eighty
-//! `K` constants are FIPS 180-4 §4.1.3 and §4.2.3. The unit tests check
-//! FIPS 180-4's SHA-512 vectors and, on every backend except 32-bit
-//! portable, the same compression the backend ships (HACL* or aws-lc).
-//! On 64-bit portable targets, HACL*'s unrolled form is still used.
+//! The `esp32s3-sha512-flash` feature leaves the ordinary flash sections,
+//! for an image whose IRAM is already full. The ESP32, the ESP32-S2,
+//! `*-none-elf`, and every other target are unchanged. ESP-IDF Xtensa
+//! SHA-256 is rind's own IRAM body in `sha256_iram`, so this placement
+//! leaves libcrux-sha2's sections as that crate built them. The round
+//! functions and the eighty `K` constants are FIPS 180-4 §4.1.3 and
+//! §4.2.3. The unit tests check FIPS 180-4's SHA-512 vectors, mark the
+//! block secret so ctgrind checks this loop, and, on every backend except
+//! 32-bit portable, compare with the compression the backend ships (HACL*
+//! or aws-lc). On 64-bit portable targets, HACL*'s unrolled form is still
+//! used.
 
 macro_rules! CH {
     ($x:expr, $y:expr, $z:expr) => {
@@ -66,14 +64,14 @@ macro_rules! SSIG1 {
 // `esp32s3-sha512-flash` feature). ESP-IDF's `soc.lf` puts `.iram1` and
 // `.iram1.*` in instruction RAM. The flash catch-all
 // `*(.literal .literal.* .text .text.*)` is applied per input file, so a
-// `.text.*` body here would precede later objects such as HACL* SHA-256.
+// `.text.*` body here would sit in flash text ahead of later objects.
 // The Xtensa backend names the literal pool `.iram1.text.literal`, and
 // `l32r` reads that pool from IRAM. `K` is in `.dram1.rodata` (internal
 // DRAM). The checked opt-level=3 build loads nothing from flash and makes
 // no call from this body; other optimization profiles are not a cache-off
 // guarantee. The length check in `sha512_compress_blocks` stays in ordinary
-// flash text. The ESP32,
-// the ESP32-S2, and `*-none-elf` keep the ordinary text section.
+// flash text. The ESP32, the ESP32-S2, and `*-none-elf` keep the ordinary
+// text section. ESP-IDF Xtensa SHA-256 is `sha256_iram`, already in IRAM.
 //
 // SAFETY: the attribute only selects the output section. The instructions
 // match the ordinary text placement, and ESP-IDF maps `.iram1` as executable.
@@ -299,8 +297,12 @@ mod tests {
     fn hash(message: &[u8]) -> [u8; 64] {
         let padded = padded(message);
         let mut state = IV;
+        // The block is the secret (a message, or an HMAC key block). Mark it
+        // before this rolled loop, which 64-bit builds compile only in tests,
+        // so ctgrind sees it. The state is public again before a comparison.
+        crate::low::ct::secret_slice(&padded);
         sha512_compress_blocks(&mut state, &padded);
-        encode(state)
+        encode(crate::low::ct::into_public(state))
     }
 
     fn digest_hex(message: &[u8], hex: &str) {
