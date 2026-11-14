@@ -5,8 +5,9 @@
 test_tool = "nextest"
 
 # Turns on the zeroing and heap scratch tests, without which a wiping `Drop`
-# does nothing a test can see.
-features = ["rind/wipe"]
+# does nothing a test can see. rind-rcgen's `wipe` and `zeroize` build its
+# `Wiped::drop` and `Zeroize for KeyPair`, which `tests/zeroing.rs` checks.
+features = ["rind/wipe", "rind-rcgen/wipe", "rind-rcgen/zeroize"]
 
 exclude_globs = [
   # Constants imported with aws-lc's, BoringSSL's, and OpenSSL's assembly,
@@ -330,12 +331,6 @@ exclude_re = [
   'rind-rustls/src/sign\.rs:247:\d+: replace <impl fmt::Debug for RsaSigner>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
   'rind-rustls/src/ticketer\.rs:127:\d+: replace <impl fmt::Debug for XChaCha20Ticketer>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   'rind-rustls/src/verify\.rs:164:\d+: replace <impl fmt::Debug for Verify>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  # rind-rcgen's `wipe` and `zeroize` features are off in this campaign
-  # (`features = ["rind/wipe"]` is rind's feature). `Wiped::drop` then does
-  # nothing, and `Zeroize for KeyPair` is not compiled. `tests/zeroing.rs`
-  # covers the wipe feature.
-  'rind-rcgen/src/lib\.rs:\d+:\d+: replace <impl Drop for Wiped>::drop with \(\)$',
-  'rind-rcgen/src/lib\.rs:\d+:\d+: replace <impl zeroize::Zeroize for KeyPair>::zeroize with \(\)$',
   # One AAD, concatenated, is that AAD. Deleting the one-element arm still
   # feeds `open` the same bytes.
   'rind-str0m/src/srtp\.rs:\d+:\d+: delete match arm \[aad\] in Gcm::open$',
