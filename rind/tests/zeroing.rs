@@ -242,7 +242,7 @@ fn hkdf() {
     use rind::hkdf::*;
 
     let salt = Salt::new(&HKDF_SHA256, b"salt");
-    check_zeroed_on_drop(Box::pin(salt.extract(b"ikm")));
+    check_zeroed_on_drop(Box::pin(salt.extract(b"ikm").unwrap()));
     check_zeroed_on_drop(Box::pin(salt));
 }
 

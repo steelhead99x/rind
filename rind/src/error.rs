@@ -48,7 +48,7 @@ pub enum Error {
 
 /// Why a key was refused, which its `Display` describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct KeyRejected(KeyFormatError);
+pub struct KeyRejected(pub(crate) KeyFormatError);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum KeyFormatError {

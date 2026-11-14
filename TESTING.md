@@ -160,9 +160,10 @@ Miri runs each test hundreds of times slower than a native build, so it runs a
 subset: the unit tests and `tests/cpu.rs` and `tests/debug.rs`, without the
 tests `sh/miri.sh` lists as slow, which are the vector sets and long loops
 over inputs, RSA private-key operations beyond one for each key type, and the
-tests that run many scalar multiplications. A test that repeats one code path
-over parameter sets or cases runs only those that take each branch under
-`cfg(miri)`, as ML-DSA's do. Every primitive keeps a test that builds, uses,
+tests that run many scalar multiplications. `sh/miri.sh` fails on an entry
+that names no test, so a rename cannot slip a slow test back in. A test that
+repeats one code path over parameter sets or cases runs only those that take
+each branch under `cfg(miri)`, as ML-DSA's do. Every primitive keeps a test that builds, uses,
 and drops its keys. Miri cannot run aws-lc's C, so its builds leave out
 aws-lc-rs and the differential tests, `tests/crosschecks.rs` and
 `tests/cctv.rs` among them.
@@ -217,7 +218,7 @@ secret names a zeroing test, or says why it has none.
 | Random bytes | `rand::fill` | none: the operating system's generator, which no vector can check | none, as for vectors | none, as for vectors | none: rind passes the bytes on | none: rind keeps no copy of the bytes |
 | FROST | `frost::{AggregateError, Commitments, DealerOutput, Signature, SignatureShare, SigningNonces, SigningPackage, SigningShare, Suite, VerifyingKey, VerifyingShare, ED25519_SHA512, P256_SHA256, RISTRETTO255_SHA512}` | RFC 9591 appendix E: `high::frost::vectors::rfc9591_ed25519`, `high::frost::vectors::rfc9591_ristretto255`, `high::frost::vectors::rfc9591_p256` | none: a signature share is a scalar and a commitment is two points, which the differential test and the vectors cover | `high::frost::cross::matches_frost_ed25519`, `high::frost::cross::matches_frost_ristretto255`, `high::frost::cross::matches_frost_p256`, against frost-ed25519, frost-ristretto255, and frost-p256 3.0, as aws-lc-rs has no FROST | ctgrind: `high::frost::secret_dealing_and_signing` | `zeroing::frost` |
 
-Exports that are not primitives: `Error`, `KeyRejected`, `doc::inline_assembly_safety`, `cpu::Dit`, `cpu::MissingFeature`, `cpu::check`, `cpu::has_aes_hardware`.
+Exports that are not primitives: `Error`, `KeyRejected`, `doc::inline_assembly_safety`, `cpu::Dit`, `cpu::MissingFeature`, `cpu::check`, `cpu::has_aes_hardware`, and the hooks the FIPS module builds on: `fips::DrbgHold`, `fips::SelfTest`, `fips::broken`, `fips::check_rsa_modulus`, `fips::digest`, `fips::error_code`, `fips::error_from_code`, `fips::fail`, `fips::hold_drbgs`, `fips::missing_cpu_feature`, `fips::zeroise_drbgs`.
 
 ## Adapters
 
