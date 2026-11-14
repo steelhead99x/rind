@@ -175,6 +175,53 @@ fn client_config(provider: Arc<CryptoProvider>, key_type: KeyType) -> Arc<Client
         .into()
 }
 
+/// Moves one `write_tls` to the peer. A short `read_tls` is not a complete
+/// delivery: rustls reads once into its deframer, and the unread tail would
+/// otherwise be overwritten on the next write.
+macro_rules! transfer {
+    ($from:expr, $to:expr, $buf:expr) => {{
+        let wr = $from.write_tls(&mut &mut $buf[..]).unwrap();
+        let mut off = 0;
+        while off < wr {
+            let n = $to.read_tls(&mut &$buf[off..wr]).unwrap();
+            assert!(
+                n > 0,
+                "TLS peer read none of the {} bytes still queued",
+                wr - off
+            );
+            off += n;
+            // An incomplete record stays buffered. Process after each read so a
+            // full deframer cannot refuse the rest of this write.
+            $to.process_new_packets().unwrap();
+        }
+    }};
+}
+
+macro_rules! write_all {
+    ($conn:expr, $bytes:expr) => {{
+        let bytes: &[u8] = $bytes;
+        let mut sent = 0;
+        while sent < bytes.len() {
+            let n = $conn.writer().write(&bytes[sent..]).unwrap();
+            assert!(n > 0, "plaintext write made no progress at {sent}");
+            sent += n;
+        }
+    }};
+}
+
+/// Drains both directions. A confidentiality limit of zero keeps `wants_write`
+/// set, and this fails at the cap instead of spinning.
+fn drain(client: &mut ClientConnection, server: &mut ServerConnection, what: &str) {
+    let mut rounds = 0;
+    while client.wants_write() || server.wants_write() {
+        rounds += 1;
+        assert!(rounds <= 64, "{what} did not finish");
+        let mut buf = [0u8; 1024];
+        transfer!(client, server, buf);
+        transfer!(server, client, buf);
+    }
+}
+
 fn exercise(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>) -> HandshakeKind {
     let mut client = ClientConnection::new(client_config, "localhost".try_into().unwrap()).unwrap();
     let mut server = ServerConnection::new(server_config).unwrap();
@@ -193,33 +240,28 @@ fn exercise(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>) 
         rounds += 1;
         assert!(rounds <= 64, "handshake did not finish");
         let mut buf = [0u8; 1024];
-        let wr = client.write_tls(&mut &mut buf[..]).unwrap();
-        if wr > 0 {
-            server.read_tls(&mut &buf[..wr]).unwrap();
-            server.process_new_packets().unwrap();
-        }
-        let wr = server.write_tls(&mut &mut buf[..]).unwrap();
-        if wr > 0 {
-            client.read_tls(&mut &buf[..wr]).unwrap();
-            client.process_new_packets().unwrap();
-        }
+        transfer!(client, server, buf);
+        transfer!(server, client, buf);
     }
 
-    let _ = client.writer().write(b"hello world").unwrap();
+    write_all!(client, b"hello world");
     client.send_close_notify();
-    let mut buf = [0u8; 1024];
-    let wr = client.write_tls(&mut &mut buf[..]).unwrap();
-    server.read_tls(&mut &buf[..wr]).unwrap();
-    server.process_new_packets().unwrap();
+    drain(&mut client, &mut server, "application exchange");
 
     let mut out = vec![];
     server.reader().read_to_end(&mut out).unwrap();
     assert_eq!(out, b"hello world");
 
-    let _ = server.writer().write(b"goodbye").unwrap();
-    let wr = server.write_tls(&mut &mut buf[..]).unwrap();
-    client.read_tls(&mut &buf[..wr]).unwrap();
-    client.process_new_packets().unwrap();
+    write_all!(server, b"goodbye");
+    drain(&mut client, &mut server, "server reply");
+    let mut got = Vec::new();
+    while got.len() < b"goodbye".len() {
+        let mut buf = [0u8; 16];
+        let n = client.reader().read(&mut buf).unwrap();
+        assert!(n > 0, "client read none of the server reply");
+        got.extend_from_slice(&buf[..n]);
+    }
+    assert_eq!(got, b"goodbye");
 
     server.handshake_kind().unwrap()
 }
