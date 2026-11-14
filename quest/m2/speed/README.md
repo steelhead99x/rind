@@ -6,7 +6,7 @@ On the tiers rind already runs assembly for, each speedup the 2026-11-12 audit f
 
 ## Plan
 
-Decided 2026-11-12 (maintainer, /quest-audit). None of the three shows as a gap in BENCHMARKS.md: no report host has the cores the first is about, the second is past what aws-lc-rs does, and the report times ML-DSA on no host. The cold tiers' speed is [m3's](/quest/m3/cold-speed/README.md), and measuring is [the bench epic's](/quest/m2/bench/README.md).
+Decided 2026-11-12 (maintainer, /quest-audit). None of the three shows as a gap in BENCHMARKS.md: no report host has the cores the first is about, the second is past what aws-lc-rs does, and the report times ML-DSA on no host. The cold tiers' speed was m3's, and has landed; measuring is [the bench epic's](/quest/m2/bench/README.md).
 
 - ✅ Adopt the rule that keeps 512-bit kernels off Intel cores that downclock for them, now and unmeasured (rejected: measure first, which needs an Ice Lake or Tiger Lake host nobody has; no quest).
 - ✅ Ed25519 verification with half-size scalars, for single signatures only (rejected: a batch verification API too; neither). Nothing rind serves verifies in batches, and a batch API accepts a different set of signatures unless it is built with care.

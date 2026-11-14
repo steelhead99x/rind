@@ -32,7 +32,7 @@ The benchmark report is refreshed once before each minor release (maintainer, 20
 
 ## Waiting
 
-- Maintainer: leave the release PR, [kixel-ai/rind#511](https://github.com/kixel-ai/rind/pull/511) or whichever replaces it, unmerged until every quest under `Required` is on `main` and MoQ's PR is ready, then merge it. An agent cannot: a release PR merges on the maintainer's approval (`CONTRIBUTING.md`'s Reviews section), and leaving rind alone out of the release (`release = false`) would not hold it, since every adapter's fix requires rind 0.4, which is why the hold is the unmerged PR. Check: `cargo search rind` shows 0.4.0.
+- Maintainer: leave the release PR, [kixel-ai/rind#511](https://github.com/kixel-ai/rind/pull/511) or whichever replaces it, unmerged until every quest under `Required` is on `main` and MoQ's PR is ready, then merge it once `just release-check` passes at its head. An agent cannot: a release PR merges on the maintainer's approval (`CONTRIBUTING.md`'s Reviews section), and leaving rind alone out of the release (`release = false`) would not hold it, since every adapter's fix requires rind 0.4, which is why the hold is the unmerged PR. Check: `cargo search rind` shows 0.4.0.
 
 ## Required
 
@@ -42,4 +42,3 @@ The benchmark report is refreshed once before each minor release (maintainer, 20
 - [HKDF PRKs load from bytes and fill a slice](/quest/m2/api/hkdf-prk.md) - `expand(info, usize)` replaced by `fill`
 - [Benchmark report refresh, before rind 0.4](/quest/m2/bench/report-refresh.md) - the report and the README's claims, current for the release
 - [rind needs no runtime CPU check](/quest/m2/api/cpu-check.md) - `cpu::check` and `MissingFeature` removed, the last of the three
-- [Releases publish only after the full suite passes locally](/quest/m0/ci-speed/release-check.md) - the local full-suite run every release PR now passes before it merges
