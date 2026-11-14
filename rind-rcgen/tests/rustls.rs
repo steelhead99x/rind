@@ -242,11 +242,21 @@ fn der_load_and_accessors() {
         assert!(rendered.contains("KeyPair"), "{rendered}");
     }
 
-    let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).unwrap();
-    let pkcs1 = PrivateKeyDer::Pkcs1(rustls::pki_types::PrivatePkcs1KeyDer::from(vec![
-        0x30, 0x00,
-    ]));
-    assert!(KeyPair::from_der_and_sign_algo(&pkcs1, key.algorithm()).is_err());
+    let pkcs1 = PrivateKeyDer::Pkcs1(rustls::pki_types::PrivatePkcs1KeyDer::from(
+        &include_bytes!("../../rind/src/high/rsa/rsa2048.der")[..],
+    ));
+    // aws-lc's rcgen provider accepts this RSA key. rind-rcgen refuses its
+    // PKCS#1 encoding, even for the matching algorithm, but accepts PKCS#8.
+    let reference = rcgen::KeyPair::from_der_and_sign_algo(&pkcs1, &PKCS_RSA_SHA256).unwrap();
+    let pkcs8 = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+        &include_bytes!("../../rind/src/high/rsa/rsa2048.pkcs8.der")[..],
+    ));
+    let accepted = KeyPair::from_der_and_sign_algo(&pkcs8, &PKCS_RSA_SHA256).unwrap();
+    assert_eq!(accepted.public_key_raw(), reference.public_key_raw());
+    assert!(matches!(
+        KeyPair::from_der_and_sign_algo(&pkcs1, &PKCS_RSA_SHA256),
+        Err(Error::CouldNotParseKeyPair)
+    ));
 }
 
 fn load(provider: &CryptoProvider, cert: &CertificateDer<'_>, key: &KeyPair) {

@@ -350,6 +350,7 @@ pub(crate) mod padding {
 #[cfg(test)]
 mod tests {
     use super::PublicKey;
+    use crate::der::tests::tlv;
 
     #[test]
     fn modulus_bits_counts_a_top_byte_below_0x80() {
@@ -361,12 +362,5 @@ mod tests {
         let der = tlv(0x30, &[modulus, exponent].concat());
         let key = PublicKey::new(&der).unwrap();
         assert_eq!(key.modulus_bits(), 9);
-    }
-
-    fn tlv(tag: u8, body: &[u8]) -> Vec<u8> {
-        assert!(body.len() < 128);
-        let mut out = vec![tag, body.len() as u8];
-        out.extend_from_slice(body);
-        out
     }
 }

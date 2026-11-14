@@ -179,7 +179,7 @@ pub(crate) fn ed25519_pkcs8(der: &[u8], v1: bool) -> Result<Ed25519Pkcs8<'_>, Ke
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{ed25519_pkcs8, rsa_public_key};
 
     #[test]
@@ -229,7 +229,7 @@ mod tests {
         let seed = tlv(0x04, &tlv(0x04, &[0x11; 32]));
         let mut body = [tlv(0x02, &[version]), algorithm, seed].concat();
         if with_public_key {
-            // [1] IMPLICIT OCTET STRING: a leading 0x00, then the 32-byte key.
+            // [1] IMPLICIT BIT STRING: zero unused bits, then the 32-byte key.
             let mut public = vec![0x00];
             public.extend_from_slice(&[0x22; 32]);
             body.extend(tlv(0x81, &public));
@@ -237,7 +237,7 @@ mod tests {
         tlv(0x30, &body)
     }
 
-    fn tlv(tag: u8, body: &[u8]) -> Vec<u8> {
+    pub(crate) fn tlv(tag: u8, body: &[u8]) -> Vec<u8> {
         assert!(body.len() < 128);
         let mut out = vec![tag, body.len() as u8];
         out.extend_from_slice(body);

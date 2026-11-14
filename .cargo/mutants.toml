@@ -5,9 +5,8 @@
 test_tool = "nextest"
 
 # Turns on the zeroing and heap scratch tests, without which a wiping `Drop`
-# does nothing a test can see. rind-rcgen's `wipe` and `zeroize` build its
-# `Wiped::drop` and `Zeroize for KeyPair`, which `tests/zeroing.rs` checks.
-features = ["rind/wipe", "rind-rcgen/wipe", "rind-rcgen/zeroize"]
+# does nothing a test can see.
+features = ["rind/wipe"]
 
 exclude_globs = [
   # Constants imported with aws-lc's, BoringSSL's, and OpenSSL's assembly,

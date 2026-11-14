@@ -40,6 +40,8 @@ rustls-pki-types = "1.12"
 zeroize = "1.9"
 
 [dev-dependencies]
+# Exercise both zeroing paths in package-scoped mutation campaigns too.
+rind-rcgen = { path = ".", default-features = false, features = ["wipe", "zeroize"] }
 # Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
 # features, as `admin/ctgrind` does; otherwise they build as no-ops.
 crabgrind = { version = "0.4", default-features = false }
