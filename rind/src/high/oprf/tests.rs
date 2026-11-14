@@ -220,17 +220,24 @@ fn round_trips() {
         &P521_SHA512,
     ] {
         let server = ServerKey::generate(suite).unwrap();
-        let loaded = ServerKey::from_bytes(suite, server.to_bytes().as_ref()).unwrap();
+        let encoded = server.to_bytes();
+        assert_eq!(format!("{encoded:?}"), "ServerKeyBytes(..)");
+        let loaded = ServerKey::from_bytes(suite, encoded.as_ref()).unwrap();
         for input in [&b""[..], b"input", &[0x5a; MAX_INPUT]] {
             let (blind, blinded) = Blind::new(suite, input).unwrap();
             assert_eq!(blind.suite(), suite);
+            assert!(format!("{blind:?}").starts_with("Blind"));
             let evaluated = loaded.blind_evaluate(blinded.as_ref()).unwrap();
             let output = blind.finalize(evaluated.as_ref()).unwrap();
             let direct = server.evaluate(input).unwrap();
+            // `as_ref` is the public view of the output. Compare it to the
+            // direct evaluation's bytes, which a replaced `as_ref` does not
+            // return.
             assert_eq!(
-                ct::into_public(output.0.clone()).as_ref(),
+                ct::into_public(output.as_ref().to_vec()).as_slice(),
                 ct::into_public(direct.0.clone()).as_ref()
             );
+            assert_eq!(format!("{output:?}"), "Output(..)");
         }
         assert!(format!("{server:?}").starts_with("ServerKey"));
     }
