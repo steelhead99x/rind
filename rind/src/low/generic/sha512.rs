@@ -13,6 +13,10 @@
 //! this loop, and, on every backend except 32-bit portable, compare with
 //! the compression the backend ships (HACL* or aws-lc). On 64-bit portable
 //! targets, HACL*'s unrolled form is still used.
+//! On Xtensa the compressor jumps over a pad in its own `.text`. The
+//! stride residue is `4096 - (1252 mod 4096) = 2844`. Emitting the jump
+//! also grows the leading literal pool by 4, so the pad is 2840 and the
+//! two together are one stride.
 
 macro_rules! CH {
     ($x:expr, $y:expr, $z:expr) => {
@@ -108,6 +112,26 @@ fn sha512_compress_block(state: &mut [u64; 8], block: &[u8]) {
     state[5] = state[5].wrapping_add(f);
     state[6] = state[6].wrapping_add(g);
     state[7] = state[7].wrapping_add(h);
+    // Inside this function, so the bytes are placed with it and dropped
+    // with it. A separate retained section is not: the linker can leave
+    // it after SHA-256, or keep it after this function is discarded.
+    #[cfg(target_arch = "xtensa")]
+    // SAFETY: one unconditional `j` over the pad. It names no register,
+    // reads and writes neither memory nor the stack, and leaves condition
+    // flags alone. The bytes that follow are not executed.
+    unsafe {
+        core::arch::asm!(
+            "j 1f",
+            ".local rind_sha512_icache_pad",
+            ".type rind_sha512_icache_pad, @object",
+            ".set rind_sha512_icache_pad, .",
+            ".space {len}, 0xA5",
+            ".size rind_sha512_icache_pad, {len}",
+            "1:",
+            len = const XTENSA_ICACHE_PAD_BODY,
+            options(nomem, nostack, preserves_flags),
+        );
+    }
 }
 
 pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
@@ -118,6 +142,68 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
         sha512_compress_block(state, block);
     }
 }
+
+/// Set stride that is a multiple of every 16 KiB ESP32-S3 I-cache stride.
+///
+/// The default is 16 KiB, 8-way, 32-byte lines: 64 sets, address bits
+/// `[10:5]`, stride 2048. Four ways is 128 sets and stride 4096. Sixteen-byte
+/// lines give those same two strides. 4096 is a multiple of each of them.
+const XTENSA_ICACHE_SET_STRIDE: usize = 4096;
+
+/// Bytes `sha256_update` moved on the sha2 image, head `ef58672` minus fork
+/// main `8dfb7942`: `0x4201b8c8 - 0x4201b3e4`.
+const XTENSA_SHA256_MEASURED_SHIFT: usize = 0x4e4;
+
+/// Bytes the sha2 image's leading literal pool grew when this jump was
+/// added, `5547ec07` minus #69 `a01b2b9e`. The pool is linked ahead of
+/// every function, so it shifts SHA-256 before the pad does.
+const XTENSA_LITERAL_POOL_GROWTH: usize = 4;
+
+/// Bytes inserted into `sha512_compress_block`. The stride residue is
+/// 2844; the pool growth above already supplies 4 of them.
+const XTENSA_ICACHE_PAD_LEN: usize = XTENSA_ICACHE_SET_STRIDE
+    - (XTENSA_SHA256_MEASURED_SHIFT % XTENSA_ICACHE_SET_STRIDE)
+    - XTENSA_LITERAL_POOL_GROWTH;
+
+/// Size of Xtensa `j`, the 24-bit relative jump (`op0 = 6`).
+///
+/// The Code Density Option has no 16-bit form. A target inside ±128 KiB
+/// assembles as this one instruction, so the pad body is three bytes shorter
+/// than [`XTENSA_ICACHE_PAD_LEN`].
+const XTENSA_J_LEN: usize = 3;
+
+/// `.space` skipped by that jump.
+const XTENSA_ICACHE_PAD_BODY: usize = XTENSA_ICACHE_PAD_LEN - XTENSA_J_LEN;
+
+const _: () = {
+    assert!(XTENSA_SHA256_MEASURED_SHIFT == 0x4201_b8c8 - 0x4201_b3e4);
+    assert!(XTENSA_LITERAL_POOL_GROWTH == 4);
+    assert!(
+        (XTENSA_SHA256_MEASURED_SHIFT + XTENSA_LITERAL_POOL_GROWTH + XTENSA_ICACHE_PAD_LEN)
+            .is_multiple_of(XTENSA_ICACHE_SET_STRIDE)
+    );
+    // A multiple of 4, matching Xtensa's 4-byte function alignment, so this
+    // growth does not by itself open a gap in front of the next function.
+    assert!(XTENSA_ICACHE_PAD_LEN.is_multiple_of(4));
+    assert!(XTENSA_ICACHE_PAD_BODY + XTENSA_J_LEN == XTENSA_ICACHE_PAD_LEN);
+};
+
+// Head `ef58672` links this compressor ahead of the hash libraries, so HACL*
+// `sha256_update` sits 1252 bytes (39 sets) above main while the bench
+// harness stays put. The SHA-256 instructions are unchanged. A uniform shift
+// of the whole image, harness included, does not reproduce the regression, so
+// the set map against the harness is what moved.
+//
+// The jump and the pad are in this function's own `.text`. On the sha2
+// image the separate section left `sha256_update` at #69's `0x4201b8c8`.
+// A 2844-byte pad in this function moved it to `0x4201c3e8` (4 past main's
+// `0x4201b3e4`), because the literal pool grew by 4 at the same time. The
+// pad is 2840 so the pool and the pad add to one stride. That image places
+// `sha256_update` at `0x4201c3e4`, `sha256_update_last` at `0x4202b15c`, and
+// `sha256_update_nblocks` at `0x4202b3f8`: the same address mod 4096, and
+// the same size, as main. The jump is unconditional. Nothing falls into the
+// pad. Board timing is a separate measurement; these addresses come from
+// the linked image.
 
 // FIPS 180-4 §4.2.3.
 static K: [u64; 80] = [
@@ -205,7 +291,10 @@ static K: [u64; 80] = [
 
 #[cfg(test)]
 mod tests {
-    use super::sha512_compress_blocks;
+    use super::{
+        XTENSA_ICACHE_PAD_BODY, XTENSA_ICACHE_PAD_LEN, XTENSA_ICACHE_SET_STRIDE, XTENSA_J_LEN,
+        XTENSA_LITERAL_POOL_GROWTH, XTENSA_SHA256_MEASURED_SHIFT, sha512_compress_blocks,
+    };
 
     /// SHA-512's IV, FIPS 180-4 §5.3.5.
     const IV: [u64; 8] = [
@@ -258,6 +347,23 @@ mod tests {
             expected[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap();
         }
         assert_eq!(hash(message), expected);
+    }
+
+    #[test]
+    fn xtensa_icache_pad_is_one_set_stride() {
+        assert_eq!(
+            XTENSA_SHA256_MEASURED_SHIFT,
+            0x4201_b8c8 - 0x4201_b3e4,
+            "sha256_update moved 1252 bytes on the sha2 image"
+        );
+        assert!(
+            (XTENSA_SHA256_MEASURED_SHIFT + XTENSA_LITERAL_POOL_GROWTH + XTENSA_ICACHE_PAD_LEN)
+                .is_multiple_of(XTENSA_ICACHE_SET_STRIDE)
+        );
+        assert_eq!(XTENSA_LITERAL_POOL_GROWTH, 4);
+        assert_eq!(XTENSA_ICACHE_PAD_LEN, 2840);
+        assert_eq!(XTENSA_J_LEN, 3);
+        assert_eq!(XTENSA_ICACHE_PAD_BODY + XTENSA_J_LEN, XTENSA_ICACHE_PAD_LEN);
     }
 
     #[test]

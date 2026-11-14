@@ -7,7 +7,9 @@
 //! the rolled loop in `generic::sha512` on 32-bit targets, where the unrolled
 //! body is about 47 KiB and misses a 16 KiB instruction cache. SHA-256 stays
 //! on HACL* at every length: a rolled loop beside that ~12 KiB body made long
-//! hashes slower on an ESP32-S3.
+//! hashes slower on an ESP32-S3. On Xtensa that compressor carries a pad
+//! in its own `.text`. With the 4-byte literal-pool growth that pad causes,
+//! the move of the SHA-256 after it is one instruction-cache set stride.
 
 use libcrux_sha2::hacl::sha256_update_nblocks;
 #[cfg(target_pointer_width = "64")]
