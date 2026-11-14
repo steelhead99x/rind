@@ -280,28 +280,13 @@ theorem hmac_sign_spec (hs : HashSpec inst H B L max Abs CAbs) (key : List Byte)
   unfold high.hmac.HmacKey.sign
   apply WP.spec_bind (hs.finish_with ki k.inner m hi (by omega))
   rintro d1 ⟨hd1l, hd1⟩
-  -- After a long inner, the outer hash may stay on the long compressor so a
-  -- 16 KiB I-cache is not evicted. Both paths compute the same digest.
-  apply WP.spec_bind (hs.finish_uses_long m)
-  intro b _
-  have outer : ∀ fin : S → Slice U8 → Result high.digest.Digest,
-      (∀ (p : List U8) (st : S) (msg : Slice U8), Abs p st → p.length + msg.length ≤ max →
-        fin st msg ⦃ d => outLen d.algorithm = L ∧ digestBytes d = H (bv (p ++ msg.val)) ⦄) →
-      (do
-        let s ← high.digest.Digest.Insts.CoreConvertAsRefSliceU8.as_ref d1
-        fin k.outer s) ⦃ d =>
-          outLen d.algorithm = L ∧ digestBytes d = hmac H B key (bv m.val) ⦄ := by
-    intro fin hfin
-    step with digest_as_ref_spec d1 as ⟨s, hsl, hsb⟩
-    apply WP.spec_mono (hfin ko k.outer s ho (by omega))
-    rintro d ⟨hdl, hd⟩
-    refine ⟨hdl, ?_⟩
-    rw [hd, hmac_def, ← hbo, ← hbi]
-    simp only [bv, List.map_append] at hsb hd1 ⊢
-    rw [hsb, hd1]
-  split
-  · exact outer _ hs.finish_with_after_long
-  · exact outer _ hs.finish_with
+  step with digest_as_ref_spec d1 as ⟨s, hsl, hsb⟩
+  apply WP.spec_mono (hs.finish_with ko k.outer s ho (by omega))
+  rintro d ⟨hdl, hd⟩
+  refine ⟨hdl, ?_⟩
+  rw [hd, hmac_def, ← hbo, ← hbi]
+  simp only [bv, List.map_append] at hsb hd1 ⊢
+  rw [hsb, hd1]
 
 /-- `h` is a tag computation under `key` that has been given `p`. -/
 def HmacCtx (CAbs : List U8 → C → Prop) (Abs : List U8 → S → Prop) (H : List Byte → List Byte)

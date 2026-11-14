@@ -620,21 +620,6 @@ theorem sha512_hashSpec (h : RunsSha512) :
     rintro d ⟨hd1, hd2⟩
     refine ⟨by rw [hd1]; rfl, ?_⟩
     rw [hd2, hsl, Array.val_to_slice, hr, sha512Bytes, ofBv_bv, sha512]
-  finish_uses_long := fun m => by
-    -- SHA-512 keeps the trait default; Aeneas extracts
-    -- `HashState.finish_uses_long.default`, not a specialized instance lemma.
-    simp only [high.hash.HashState.finish_uses_long.default]
-    step*
-  finish_with_after_long := fun p s m hs hm => by
-    simp only [high.hash.HashState.finish_with_after_long.default]
-    simp only [high.hash.Sha512State.Insts.RindHighHashHashStateSha512Context.finish_with,
-      high.hash.Sha512.Insts.RindHighHashHashSha512ContextSha512State.ALGORITHM, high.digest.SHA512]
-    step with absorbed_finish_with_spec h _ p s m hs as ⟨r, hr⟩
-    step as ⟨sl, hsl⟩
-    apply WP.spec_mono (digest_new_spec _ sl (by rw [hsl]; simp [outLen]))
-    rintro d ⟨hd1, hd2⟩
-    refine ⟨by rw [hd1]; rfl, ?_⟩
-    rw [hd2, hsl, Array.val_to_slice, hr, sha512Bytes, ofBv_bv, sha512]
   clone := fun p s hs => by
     simp only [high.hash.Sha512State.Insts.CoreCloneClone.clone]
     step with absorbed_clone_spec _ p s hs as ⟨s', h'⟩
@@ -682,22 +667,6 @@ theorem sha384_hashSpec (h : RunsSha512) :
     step with absorbed_update_blocks_spec h _ p s b hs hb hm as ⟨s', h'⟩
     exact h'
   finish_with := fun p s m hs _ => by
-    simp only [high.hash.Sha384State.Insts.RindHighHashHashStateSha384Context.finish_with,
-      high.hash.Sha384.Insts.RindHighHashHashSha384ContextSha384State.ALGORITHM, high.digest.SHA384]
-    step with absorbed_finish_with_spec h _ p s m hs as ⟨r, hr⟩
-    step with sha384_truncate_spec as ⟨t, ht⟩
-    step as ⟨sl, hsl⟩
-    apply WP.spec_mono (digest_new_spec _ sl (by rw [hsl]; simp [outLen]))
-    rintro d ⟨hd1, hd2⟩
-    refine ⟨by rw [hd1]; rfl, ?_⟩
-    rw [hd2, hsl, Array.val_to_slice, ht, hr, sha384Bytes, ofBv_bv, sha384]
-  finish_uses_long := fun m => by
-    -- SHA-384 keeps the trait default; Aeneas extracts
-    -- `HashState.finish_uses_long.default`, not a specialized instance lemma.
-    simp only [high.hash.HashState.finish_uses_long.default]
-    step*
-  finish_with_after_long := fun p s m hs hm => by
-    simp only [high.hash.HashState.finish_with_after_long.default]
     simp only [high.hash.Sha384State.Insts.RindHighHashHashStateSha384Context.finish_with,
       high.hash.Sha384.Insts.RindHighHashHashSha384ContextSha384State.ALGORITHM, high.digest.SHA384]
     step with absorbed_finish_with_spec h _ p s m hs as ⟨r, hr⟩

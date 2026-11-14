@@ -31,60 +31,16 @@ impl Sha256State {
         }
     }
 
-    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
     fn compress(h: &mut [u32; 8], blocks: &[u8]) {
         Entry::assert_held();
         crate::low::sha256_compress_blocks(h, blocks);
     }
 
     /// The hash of the input so far followed by `message`, leaving this state as it was.
-    ///
-    /// On 32-bit portable the body is the compressor choice, and it stays out
-    /// of line so a long HMAC tag does not fetch the rolled loop.
-    #[cfg_attr(
-        all(rind_backend = "portable", target_pointer_width = "32"),
-        inline(never)
-    )]
     pub(crate) fn finish_with(&self, message: &[u8]) -> [u8; Sha256Context::OUTPUT_SZ] {
         let length = self.length(message.len());
         Entry::assert_held();
         crate::low::sha256_finish(&self.h, message, length)
-    }
-
-    /// Like [`Self::finish_with`], but stays on the long compressor.
-    ///
-    /// Used for HMAC's outer hash after a long inner, so a 16 KiB I-cache
-    /// keeps HACL*'s SHA-256 body. On backends with no such split this is
-    /// `finish_with`. Out of line on 32-bit portable for the same reason as
-    /// [`Self::finish_with`].
-    #[cfg_attr(
-        all(rind_backend = "portable", target_pointer_width = "32"),
-        inline(never)
-    )]
-    pub(crate) fn finish_with_long(&self, message: &[u8]) -> [u8; Sha256Context::OUTPUT_SZ] {
-        #[cfg(rind_backend = "portable")]
-        {
-            let length = self.length(message.len());
-            Entry::assert_held();
-            crate::low::sha256_finish_long(&self.h, message, length)
-        }
-        #[cfg(not(rind_backend = "portable"))]
-        {
-            self.finish_with(message)
-        }
-    }
-
-    /// Whether [`Self::finish_with`] will use the long compressor for `message`.
-    pub(crate) fn finish_uses_long(message: &[u8]) -> bool {
-        #[cfg(rind_backend = "portable")]
-        {
-            crate::low::sha256_finish_uses_long(message)
-        }
-        #[cfg(not(rind_backend = "portable"))]
-        {
-            let _ = message;
-            false
-        }
     }
 
     /// The padding's length field for the input so far followed by `more` bytes.
@@ -100,67 +56,14 @@ impl Sha256State {
     }
 }
 
-/// 32-bit portable SHA-256 that has already chosen HACL*.
-///
-/// `Blockwise` monomorphizes on this instead of [`Sha256State`] for a long
-/// one-shot, so that `complete_blocks` names [`crate::low::sha256_hacl_nblocks`]
-/// and not the rolled compressor. The cutover on [`Sha256State::update_blocks`]
-/// is per flush and still names both.
-#[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
-struct Sha256Hacl<'a>(&'a mut Sha256State);
-
-#[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
-impl UpdateBlocks for Sha256Hacl<'_> {
-    // Inline so the long `complete_blocks` calls `sha256_hacl_nblocks`
-    // itself. That function stays out of line: one copy, shared with finish.
-    #[inline(always)]
-    fn update_blocks(&mut self, blocks: &[u8]) {
-        debug_assert!(blocks.len().is_multiple_of(Sha256Context::BLOCK_SZ));
-        if blocks.is_empty() {
-            return;
-        }
-        let _entry = Entry::new_secret();
-        crate::low::sha256_hacl_nblocks(&mut self.0.h, blocks);
-        self.0.nblocks = self
-            .0
-            .nblocks
-            .saturating_add((blocks.len() / Sha256Context::BLOCK_SZ) as u64);
-    }
-}
-
 impl UpdateBlocks for Sha256State {
-    // Out of line on 32-bit portable so `Blockwise::complete_blocks` for a
-    // short or streaming update stays the buffering glue. The long one-shot
-    // does not use this impl.
-    #[cfg_attr(
-        all(rind_backend = "portable", target_pointer_width = "32"),
-        inline(never)
-    )]
     fn update_blocks(&mut self, blocks: &[u8]) {
         debug_assert!(blocks.len().is_multiple_of(Sha256Context::BLOCK_SZ));
         if !blocks.is_empty() {
             // `digest::Context::update` and `hmac::Context::update` leave
             // entering to here.
             let _entry = Entry::new_secret();
-            #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
-            {
-                // Per-call `len <= 256` sent every 64-byte streaming flush
-                // down the rolled compressor. Count bytes already compressed
-                // too, so a long `sha256-updates` run uses HACL* for every
-                // block after the first 256, the same `sha256_hacl_nblocks`
-                // a long one-shot calls, and the short arm does not go
-                // through the function that also names HACL*.
-                let seen = self.nblocks.saturating_mul(Sha256Context::BLOCK_SZ as u64);
-                if seen.saturating_add(blocks.len() as u64) <= crate::low::SHA256_SHORT as u64 {
-                    crate::low::sha256_compress_rolled(&mut self.h, blocks);
-                } else {
-                    crate::low::sha256_hacl_nblocks(&mut self.h, blocks);
-                }
-            }
-            #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
-            {
-                Self::compress(&mut self.h, blocks);
-            }
+            Self::compress(&mut self.h, blocks);
             self.nblocks = self
                 .nblocks
                 .saturating_add((blocks.len() / Sha256Context::BLOCK_SZ) as u64);
@@ -190,65 +93,13 @@ impl Sha256Context {
     }
 
     /// Add `bytes` to the ongoing hash computation.
-    ///
-    /// Proofs unfold this body. The 32-bit portable variant is a second
-    /// definition, so this one stays the call those proofs name.
-    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
     pub(crate) fn update(&mut self, bytes: &[u8]) {
         self.blockwise.update(bytes, &mut self.state);
     }
 
-    /// Add `bytes` to the ongoing hash computation.
-    ///
-    /// A fresh message whose whole-block prefix is longer than
-    /// [`crate::low::SHA256_SHORT`] takes [`Sha256Hacl`]. That
-    /// monomorphization of `Blockwise::complete_blocks` calls
-    /// `sha256_hacl_nblocks` only. A shorter write, or one that continues a
-    /// buffered block, uses [`Sha256State`], whose cutover counts bytes
-    /// already compressed so a stream of 16-byte updates does not stay on
-    /// the rolled loop for the whole message.
-    #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
-    pub(crate) fn update(&mut self, bytes: &[u8]) {
-        let bulk = if bytes.is_empty() {
-            0
-        } else {
-            (bytes.len() - 1) / Self::BLOCK_SZ * Self::BLOCK_SZ
-        };
-        if self.blockwise.buffered().is_empty() && bulk > crate::low::SHA256_SHORT {
-            self.blockwise
-                .update(bytes, &mut Sha256Hacl(&mut self.state));
-        } else {
-            self.blockwise.update(bytes, &mut self.state);
-        }
-    }
-
     /// Complete the SHA256 computation, returning the hash output.
-    ///
-    /// Proofs unfold this body. The 32-bit portable variant is a second
-    /// definition, so this one stays the call those proofs name.
-    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
     pub(crate) fn finish(&self) -> [u8; Self::OUTPUT_SZ] {
         self.state.finish_with(self.blockwise.buffered())
-    }
-
-    /// Complete the SHA256 computation, returning the hash output.
-    ///
-    /// `Blockwise` has already compressed every block but the tail, and that
-    /// tail is at most one block, so its length cannot see which compressor
-    /// ran. Past four blocks the tail stays on HACL*: a one-shot update of
-    /// that size already took it, and the rolled loop would evict its ~12 KiB
-    /// body from a 16 KiB I-cache. A stream of short updates that adds up
-    /// past the same cutover finishes once on HACL* too.
-    #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
-    pub(crate) fn finish(&self) -> [u8; Self::OUTPUT_SZ] {
-        let buffered = self.blockwise.buffered();
-        if self.state.nblocks.saturating_mul(Self::BLOCK_SZ as u64)
-            > crate::low::SHA256_SHORT as u64
-        {
-            self.state.finish_with_long(buffered)
-        } else {
-            self.state.finish_with(buffered)
-        }
     }
 
     /// The internal block size of SHA256.
@@ -539,82 +390,6 @@ mod tests {
         assert_eq!(&outer.finish(),
                    b"\x55\x7b\xfd\xd5\xef\xda\xfd\x63\x06\x5e\xb7\x98\x87\xde\x86\xdb\x54\xc3\xfe\xdf\x7b\xcc\xcb\x97\x08\xfa\x87\xf0\x11\x87\x61\xdc");
     }
-    #[test]
-    fn sha256_finish_long_matches_finish_with() {
-        // The long path is only a compressor choice; every length must
-        // match the ordinary finish, including HMAC's 32-byte outer hash.
-        let prefix = [0x5au8; 128];
-        let mut state = Sha256State::new();
-        state.update_blocks(&prefix);
-        for len in 0..=400 {
-            let message: Vec<u8> = (0..len).map(|i| i as u8).collect();
-            assert_eq!(
-                state.finish_with(&message),
-                state.finish_with_long(&message),
-                "{len} bytes after 128-byte prefix"
-            );
-            let fresh = Sha256State::new();
-            assert_eq!(
-                fresh.finish_with(&message),
-                fresh.finish_with_long(&message),
-                "{len} bytes from the initial state"
-            );
-        }
-        // `split_tail` holds the last block when the padding fits after it.
-        // A 320-byte message therefore has a 256-byte prefix, which is the
-        // cutover and still rolled; 376 bytes leaves a 56-byte tail that
-        // does not fit the padding, so its 320-byte prefix is long, and so
-        // is a 384-byte message.
-        let prefix = |n: usize| split_tail::<64, 8>(&vec![0u8; n]).0.len();
-        assert_eq!(prefix(256), 192);
-        assert_eq!(prefix(320), 256);
-        assert_eq!(prefix(375), 256);
-        assert_eq!(prefix(376), 320);
-        assert_eq!(prefix(384), 320);
-        #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
-        {
-            assert!(!Sha256State::finish_uses_long(&[0u8; 32]));
-            assert!(!Sha256State::finish_uses_long(&[0u8; 256]));
-            assert!(!Sha256State::finish_uses_long(&[0u8; 320]));
-            assert!(!Sha256State::finish_uses_long(&[0u8; 375]));
-            assert!(Sha256State::finish_uses_long(&[0u8; 376]));
-            assert!(Sha256State::finish_uses_long(&[0u8; 384]));
-            assert!(Sha256State::finish_uses_long(&[0u8; 1200]));
-        }
-        #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
-        {
-            assert!(!Sha256State::finish_uses_long(&[0u8; 384]));
-        }
-    }
-
-    #[test]
-    fn sha256_context_finish_matches_one_shot() {
-        // One update then finish is the digest bench. The tail is short of
-        // a block; the digest must still match hashing the whole message,
-        // including lengths where 32-bit portable finishes that tail on HACL*.
-        for len in [
-            0, 1, 32, 63, 64, 65, 192, 256, 320, 375, 376, 384, 1200, 8192,
-        ] {
-            let message: Vec<u8> = (0..len).map(|i| (i * 3) as u8).collect();
-            let mut ctx = Sha256Context::new();
-            ctx.update(&message);
-            assert_eq!(
-                ctx.finish(),
-                Sha256State::new().finish_with(&message),
-                "{len} bytes in one update"
-            );
-            let mut keyed = Sha256State::new();
-            keyed.update_blocks(&[0x36; 64]);
-            let mut resumed = Sha256Context::resume(keyed.clone());
-            resumed.update(&message);
-            assert_eq!(
-                resumed.finish(),
-                keyed.finish_with(&message),
-                "{len} bytes after one keyed block"
-            );
-        }
-    }
-
     #[test]
     fn sha512_all_lengths() {
         let mut outer = Sha512Context::new();

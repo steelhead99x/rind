@@ -112,12 +112,7 @@ mod generic {
         all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha1;
-    // Also the 32-bit portable SHA-256: HACL*'s unrolled form is ~12 KiB
-    // and misses a 16 KiB instruction cache on short inputs.
-    #[cfg(any(
-        all(rind_backend = "portable", target_pointer_width = "32"),
-        all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
-    ))]
+    #[cfg(all(test, any(rind_backend = "arm", rind_backend = "x86_64")))]
     pub(super) mod sha256;
     // Rolled SHA-512 for 32-bit portable targets, where HACL*'s unrolled
     // form misses small instruction caches, and in tests against FIPS 180-4.
@@ -496,14 +491,8 @@ cfg_if::cfg_if! {
             sha3_keccak4_f1600, sha3_keccak_f1600, sha3_keccak_nof4_f1600,
         };
         pub(crate) use portable::sha::{
-            sha1_compress_blocks, sha1_compress_padded, sha256_finish, sha256_finish_long,
-            sha256_finish_uses_long, sha512_compress_blocks,
-        };
-        #[cfg(any(target_pointer_width = "64", test))]
-        pub(crate) use portable::sha::sha256_compress_blocks;
-        #[cfg(target_pointer_width = "32")]
-        pub(crate) use portable::sha::{
-            SHA256_SHORT, sha256_compress_rolled, sha256_hacl_nblocks,
+            sha1_compress_blocks, sha1_compress_padded, sha256_compress_blocks, sha256_finish,
+            sha512_compress_blocks,
         };
     } else {
         compile_error!("build.rs sets rind_backend");

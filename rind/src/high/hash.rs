@@ -109,21 +109,6 @@ pub(crate) trait HashState: Clone {
     /// The digest of the input so far followed by `message`, leaving this state as it was.
     fn finish_with(&self, message: &[u8]) -> Digest;
 
-    /// Whether [`Self::finish_with`] uses the long compressor for `message`.
-    ///
-    /// SHA-256 on 32-bit portable is the only hash that splits this way.
-    fn finish_uses_long(_message: &[u8]) -> bool {
-        false
-    }
-
-    /// Like [`Self::finish_with`], staying on the long compressor.
-    ///
-    /// HMAC's outer hash after a long inner uses this. The default is
-    /// `finish_with`.
-    fn finish_with_after_long(&self, message: &[u8]) -> Digest {
-        self.finish_with(message)
-    }
-
     /// A context continuing from this state.
     fn resume(&self) -> Self::Context;
 }
@@ -238,14 +223,6 @@ impl HashState for Sha256State {
 
     fn finish_with(&self, message: &[u8]) -> Digest {
         Digest::new(Sha256::ALGORITHM, &self.0.finish_with(message))
-    }
-
-    fn finish_uses_long(message: &[u8]) -> bool {
-        sha2::Sha256State::finish_uses_long(message)
-    }
-
-    fn finish_with_after_long(&self, message: &[u8]) -> Digest {
-        Digest::new(Sha256::ALGORITHM, &self.0.finish_with_long(message))
     }
 
     fn resume(&self) -> Self::Context {
