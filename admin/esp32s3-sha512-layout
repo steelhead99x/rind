@@ -1,0 +1,293 @@
+#!/bin/sh
+#
+# Checks the ESP32-S3 placement of the rolled SHA-512 compressor.
+#
+# On xtensa-esp32s3-espidf the body must land in .iram1.text (literal pool
+# included) and K in .dram1.rodata, so neither is part of the flash
+# catch-all that shifts later objects. The esp32s3-sha512-flash feature, the
+# ESP32, and xtensa-esp32s3-none-elf keep the ordinary sections. The
+# instructions of the two ESP32-S3 ESP-IDF builds must match.
+#
+# Needs the espup rustc that the board uses (1.97.0.0, 8ea53bcd7) and the
+# xtensa-esp-elf binutils. Defaults are under $HOME/.espressif, which is
+# where .github/workflows/esp32s3-sha512-layout.yml installs them.
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+esp=${RIND_ESP_ROOT:-"$HOME/.espressif"}
+rustc=${RIND_ESP_RUSTC:-"$esp/rust-nightly-x86_64-unknown-linux-gnu/rustc/bin/rustc"}
+cargo=${RIND_ESP_CARGO:-"$esp/rust-nightly-x86_64-unknown-linux-gnu/cargo/bin/cargo"}
+xtensa_bin=${RIND_XTENSA_BIN:-"$esp/xtensa-esp-elf/bin"}
+objdump=$xtensa_bin/xtensa-esp32s3-elf-objdump
+readelf=$xtensa_bin/xtensa-esp32s3-elf-readelf
+nm=$xtensa_bin/xtensa-esp32s3-elf-nm
+ar=$xtensa_bin/xtensa-esp32s3-elf-ar
+gcc=$xtensa_bin/xtensa-esp32s3-elf-gcc
+ld=$xtensa_bin/xtensa-esp32s3-elf-ld
+
+for tool in "$rustc" "$cargo" "$objdump" "$readelf" "$nm" "$ar" "$gcc" "$ld"; do
+  if [ ! -x "$tool" ]; then
+    printf 'missing %s\ninstall the toolchain as .github/workflows/esp32s3-sha512-layout.yml does\n' "$tool" >&2
+    exit 1
+  fi
+done
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+# The real compressor, tests stripped, plus an entry so the block is live.
+# The feature name matches rind's, so the cfg in the source applies.
+awk '
+  /^#!\[cfg\(test\)\]/ { exit }
+  { print }
+' "$root/rind/src/low/generic/sha512.rs" > "$work/body.rs"
+
+mkdir -p "$work/probe/src"
+{
+  printf '%s\n' '#![no_std]' '#![allow(dead_code, rustdoc::broken_intra_doc_links)]'
+  cat "$work/body.rs"
+  cat << 'EOF'
+
+#[unsafe(no_mangle)]
+pub fn sha512_entry(state: &mut [u64; 8], blocks: &[u8]) {
+    sha512_compress_blocks(state, blocks);
+}
+EOF
+} > "$work/probe/src/lib.rs"
+
+cat > "$work/probe/Cargo.toml" << 'EOF'
+[package]
+name = "sha512_layout"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+esp32s3-sha512-flash = []
+
+[profile.release]
+opt-level = 3
+lto = false
+codegen-units = 1
+panic = "abort"
+EOF
+
+export PATH="$xtensa_bin:$(dirname "$cargo"):$(dirname "$rustc"):$PATH"
+export CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"}
+# cargo's nightly -Z is the esp cargo; do not let rustup's stable cargo win.
+hash -r
+
+build() {
+  name=$1
+  target=$2
+  extra=$3
+  # shellcheck disable=SC2086
+  CARGO_TARGET_DIR="$work/target-$name" \
+    "$cargo" build --manifest-path "$work/probe/Cargo.toml" \
+      --release --target "$target" -Z build-std=core --offline $extra \
+      >/tmp/sha512-layout-$name.log 2>&1 \
+    || {
+      printf 'build %s failed\n' "$name" >&2
+      cat "/tmp/sha512-layout-$name.log" >&2
+      exit 1
+    }
+  rlib=$(find "$work/target-$name/$target/release/deps" -name 'libsha512_layout-*.rlib' | head -1)
+  mkdir -p "$work/obj/$name"
+  (cd "$work/obj/$name" && "$ar" x "$rlib")
+  find "$work/obj/$name" -name 'sha512_layout-*.o' -exec mv {} "$work/obj/$name.o" \;
+}
+
+build s3 xtensa-esp32s3-espidf ''
+build flash xtensa-esp32s3-espidf '--features esp32s3-sha512-flash'
+build esp32 xtensa-esp32-espidf ''
+build none xtensa-esp32s3-none-elf ''
+
+sections() {
+  "$objdump" -h "$1" | awk 'NR > 3 && $2 ~ /^\./ { print $2, $3 }'
+}
+
+fail() {
+  printf 'esp32s3-sha512-layout: %s\n' "$1" >&2
+  exit 1
+}
+
+section_size() {
+  sections "$1" | awk -v name="$2" '$1 == name { print $2; found = 1 } END { if (!found) exit 1 }'
+}
+
+has_section() {
+  sections "$1" | awk -v name="$2" '$1 == name { found = 1 } END { exit !found }'
+}
+
+# $1 object, $2 section name that must exist, $3 1 if .iram1/.dram1 are required.
+expect_placed() {
+  obj=$1
+  if has_section "$obj" .iram1.text && has_section "$obj" .iram1.text.literal; then
+    :
+  else
+    fail "$obj is missing .iram1.text or its literal pool"
+  fi
+  if ! has_section "$obj" .dram1.rodata; then
+    fail "$obj is missing .dram1.rodata for K"
+  fi
+  ksize=$(section_size "$obj" .dram1.rodata)
+  if [ "$ksize" != "00000280" ]; then
+    fail "$obj K section is $ksize, want 00000280"
+  fi
+  if sections "$obj" | awk '$1 ~ /^\.text\./ && $1 ~ /compress_block/ { found = 1 } END { exit !found }'; then
+    fail "$obj still has the compressor in a .text section"
+  fi
+  if sections "$obj" | awk '$1 ~ /^\.rodata\./ && $1 ~ /[^.]K$/ { found = 1 } END { exit !found }'; then
+    fail "$obj still has K in .rodata"
+  fi
+}
+
+expect_ordinary() {
+  obj=$1
+  label=$2
+  if has_section "$obj" .iram1.text || has_section "$obj" .dram1.rodata; then
+    fail "$label placed IRAM or DRAM sections"
+  fi
+  if ! sections "$obj" | awk '$1 ~ /^\.text\./ && $1 ~ /compress_block/ { found = 1 } END { exit !found }'; then
+    fail "$label has no .text compressor"
+  fi
+  if ! sections "$obj" | awk '$1 ~ /^\.literal\./ && $1 ~ /compress_block/ { found = 1 } END { exit !found }'; then
+    fail "$label has no .literal pool for the compressor"
+  fi
+  if ! sections "$obj" | awk '$1 ~ /^\.rodata\./ { found = 1 } END { exit !found }'; then
+    fail "$label has no .rodata for K"
+  fi
+}
+
+expect_placed "$work/obj/s3.o"
+expect_ordinary "$work/obj/flash.o" 'esp32s3-sha512-flash'
+expect_ordinary "$work/obj/esp32.o" 'xtensa-esp32-espidf'
+expect_ordinary "$work/obj/none.o" 'xtensa-esp32s3-none-elf'
+
+# The block's own relocations point at its IRAM literal pool, and that pool
+# points at K in DRAM. A flash .rodata reference here would fault with the
+# cache off.
+# Quote-terminated so `.rela.iram1.text` does not also match the literal
+# section. `.dram1.rodata` contains the letters `.rodata`, so that name is
+# allowed; a flash `.rodata` symbol is not. `memset` is not either.
+"$readelf" -rW "$work/obj/s3.o" | awk '
+  /\.rela\.iram1\.text\.literal'\''/ { inlit = 1; intext = 0; next }
+  /\.rela\.iram1\.text'\''/ { intext = 1; inlit = 0; next }
+  /^Relocation section/ { intext = 0; inlit = 0 }
+  intext && /R_XTENSA_/ && $0 !~ /\.iram1\.text\.literal/ { bad = 1; print > "/dev/stderr" }
+  inlit && /memset/ { bad = 1; print > "/dev/stderr" }
+  inlit && /\.rodata/ && $0 !~ /\.dram1\.rodata/ { bad = 1; print > "/dev/stderr" }
+  inlit && /\.dram1\.rodata/ { sawk = 1 }
+  END { if (bad || !sawk) exit 1 }
+' || fail 'IRAM relocations are not (literal pool, DRAM K)'
+
+text_of() {
+  "$objdump" -h "$1" | awk -v pat="$2" '$2 ~ pat { print $2; exit }'
+}
+
+s3_text=$(text_of "$work/obj/s3.o" '^\.iram1\.text$')
+flash_text=$(text_of "$work/obj/flash.o" 'compress_block')
+# text_of for flash matches the literal too if it comes first. Take .text.
+flash_text=$(
+  "$objdump" -h "$work/obj/flash.o" | awk '$2 ~ /^\.text\./ && $2 ~ /compress_block/ { print $2; exit }'
+)
+"$xtensa_bin/xtensa-esp32s3-elf-objcopy" -O binary -j "$s3_text" "$work/obj/s3.o" "$work/s3.bin"
+"$xtensa_bin/xtensa-esp32s3-elf-objcopy" -O binary -j "$flash_text" "$work/obj/flash.o" "$work/flash.bin"
+cmp "$work/s3.bin" "$work/flash.bin" || fail 'IRAM and flash-feature instruction bytes differ'
+
+# Harness linked first, as the bench image is. The stand-in for HACL* SHA-256
+# moves by exactly the bytes that left .flash.text, and the harness does not.
+cat > "$work/harness.c" << 'EOF'
+void sha256_update(void);
+void harness_loop(void) { sha256_update(); }
+EOF
+cat > "$work/sha256.c" << 'EOF'
+int sha256_update(void) {
+    volatile int x = 0;
+    for (int i = 0; i < 32; i++) x += i;
+    return x;
+}
+EOF
+"$gcc" -c -O2 -o "$work/harness.o" "$work/harness.c"
+"$gcc" -c -O2 -o "$work/sha256.o" "$work/sha256.c"
+
+{
+  printf '%s\n' 'void *memset(void *s, int c, unsigned long n) {'
+  printf '%s\n' '    unsigned char *p = s;'
+  printf '%s\n' '    for (unsigned long i = 0; i < n; i++) p[i] = (unsigned char)c;'
+  printf '%s\n' '    return s;'
+  printf '%s\n' '}'
+  "$nm" -u "$work/obj/s3.o" "$work/obj/flash.o" | awk '$1 == "U" && $2 != "memset" { print $2 }' | sort -u |
+    while read -r sym; do
+      printf 'void %s(void) {}\n' "$sym"
+    done
+} > "$work/stubs.c"
+"$gcc" -c -O2 -o "$work/stubs.o" "$work/stubs.c"
+
+cat > "$work/link.ld" << 'EOF'
+MEMORY {
+  iram0_0_seg (RX) : ORIGIN = 0x40378000, LENGTH = 0x50000
+  default_code_seg (RX) : ORIGIN = 0x42000000, LENGTH = 0x400000
+  dram0_0_seg (RW) : ORIGIN = 0x3FC88000, LENGTH = 0x50000
+}
+SECTIONS {
+  .iram0.text : { *(.iram1 .iram1.*) } > iram0_0_seg
+  .flash.text : {
+    *harness.o(.literal .literal.* .text .text.*)
+    *(.literal .literal.* .text .text.*)
+  } > default_code_seg
+  .dram0.data : { *(.dram1 .dram1.*) *(.data .data.*) } > dram0_0_seg
+  .flash.rodata : { *(.rodata .rodata.*) } > default_code_seg
+  .dram0.bss (NOLOAD) : { *(.bss .bss.*) } > dram0_0_seg
+}
+EOF
+
+link_one() {
+  "$ld" --relax -e harness_loop -T "$work/link.ld" -o "$1" \
+    "$work/harness.o" "$2" "$work/sha256.o" "$work/stubs.o"
+}
+
+link_one "$work/s3.elf" "$work/obj/s3.o"
+link_one "$work/flash.elf" "$work/obj/flash.o"
+
+sym_addr() {
+  "$nm" -n "$1" | awk -v name="$2" '$3 == name && $2 ~ /[Tt]/ { print $1; exit }'
+}
+
+h_s3=$(sym_addr "$work/s3.elf" harness_loop)
+h_flash=$(sym_addr "$work/flash.elf" harness_loop)
+s_s3=$(sym_addr "$work/s3.elf" sha256_update)
+s_flash=$(sym_addr "$work/flash.elf" sha256_update)
+[ "$h_s3" = "$h_flash" ] || fail "harness moved ($h_flash -> $h_s3)"
+[ -n "$s_s3" ] && [ -n "$s_flash" ] || fail 'sha256 stand-in missing'
+# sha256 in the flash build is at a higher address by the IRAM contribution.
+python3 - "$s_flash" "$s_s3" << 'PY'
+import sys
+delta = int(sys.argv[1], 16) - int(sys.argv[2], 16)
+if delta <= 0:
+    raise SystemExit(f"sha256 did not move back ({delta:#x})")
+print(f"sha256 flash-iram delta {delta:#x}")
+PY
+
+# Literal pool before the code, which is the direction l32r requires.
+block=$("$nm" -n "$work/s3.elf" | awk '/compress_block/ { print $1; exit }')
+iram_addr=$("$objdump" -h "$work/s3.elf" | awk '/\.iram0\.text/ { print $4; exit }')
+python3 - "$iram_addr" "$block" << 'PY'
+import sys
+base, block = int(sys.argv[1], 16), int(sys.argv[2], 16)
+if block <= base:
+    raise SystemExit("literal pool is not before the compressor")
+print(f"literal pool leads the block by {block - base:#x}")
+PY
+
+# The caller stays an absolute callx8 under relaxation, in both placements.
+for elf in "$work/s3.elf" "$work/flash.elf"; do
+  if ! "$objdump" -d "$elf" | awk '/<sha512_entry>:/{f=1} f && /^$/{exit} f' | grep -q callx8; then
+    fail "sha512_entry in $elf has no callx8"
+  fi
+  if "$objdump" -d "$elf" | awk '/<sha512_entry>:/{f=1} f && /^$/{exit} f' | grep -q 'call8'; then
+    fail "sha512_entry in $elf relaxed to call8"
+  fi
+done
+
+printf 'esp32s3-sha512-layout: ok\n'

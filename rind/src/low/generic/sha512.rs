@@ -7,10 +7,14 @@
 //! the ESP32-S3's 16 KiB instruction cache — so every block streams its
 //! code from flash, about 33× ring's compact loop. This implementation
 //! follows [`sha256`](sha256.rs): one 16-word window and an 80-round loop,
-//! which stays in a few kilobytes. On Xtensa ESP-IDF that loop is placed in
-//! IRAM (`.iram1.text`, literal pool included) so it sits outside
-//! `.flash.text` and HACL* SHA-256 keeps the flash address it has when this
-//! body is absent. The round functions and the eighty
+//! which stays in a few kilobytes. On the ESP32-S3 under ESP-IDF that loop
+//! is placed in IRAM (`.iram1.text`, literal pool included) and its `K`
+//! table in internal DRAM, so this body adds no flash text and calls nothing.
+//! A `.text` input linked ahead of libcrux can still move HACL* SHA-256;
+//! this only removes the shift this object was adding. The
+//! `esp32s3-sha512-flash` feature leaves the ordinary flash sections, for an
+//! image whose IRAM is already full. The ESP32, the ESP32-S2, `*-none-elf`,
+//! and every other target are unchanged. The round functions and the eighty
 //! `K` constants are FIPS 180-4 §4.1.3 and §4.2.3. The unit tests check
 //! FIPS 180-4's SHA-512 vectors and, on every backend except 32-bit
 //! portable, the same compression the backend ships (HACL* or aws-lc).
@@ -53,22 +57,27 @@ macro_rules! SSIG1 {
     };
 }
 
-#[inline(never)]
-// ESP-IDF collects `.iram1` and `.iram1.*` into instruction RAM (`soc.lf`,
-// the `iram` section). Its flash-text catch-all,
-// `*(.literal .literal.* .text .text.*)`, is applied per input file, which
-// puts a `.text.*` body in this object ahead of later objects such as
-// HACL* SHA-256. The Xtensa backend names the literal pool
-// `.iram1.text.literal`, and `l32r` reads that pool from IRAM. `K` stays
-// in `.rodata`, on the data bus. The attribute applies only for Xtensa
-// ESP-IDF (`xtensa-esp32-espidf`, `xtensa-esp32s2-espidf`,
-// `xtensa-esp32s3-espidf`). `*-none-elf` and every other target keep the
-// ordinary text section, so a linker that does not map `.iram1` is unchanged.
+// ESP32-S3 ESP-IDF only (`xtensa-esp32s3-espidf`, and not the
+// `esp32s3-sha512-flash` feature). ESP-IDF's `soc.lf` puts `.iram1` and
+// `.iram1.*` in instruction RAM. The flash catch-all
+// `*(.literal .literal.* .text .text.*)` is applied per input file, so a
+// `.text.*` body here would precede later objects such as HACL* SHA-256.
+// The Xtensa backend names the literal pool `.iram1.text.literal`, and
+// `l32r` reads that pool from IRAM. `K` is in `.dram1.rodata` (internal
+// DRAM). The body loads nothing from flash and makes no call; the length
+// check in `sha512_compress_blocks` stays in ordinary flash text. The ESP32,
+// the ESP32-S2, and `*-none-elf` keep the ordinary text section.
 //
 // SAFETY: the attribute only selects the output section. The instructions
-// match the ordinary text placement, and ESP-IDF's IRAM mapping is executable.
+// match the ordinary text placement, and ESP-IDF maps `.iram1` as executable.
+#[inline(never)]
 #[cfg_attr(
-    all(target_arch = "xtensa", target_os = "espidf"),
+    all(
+        target_arch = "xtensa",
+        target_os = "espidf",
+        target_feature = "esp32s3ops",
+        not(feature = "esp32s3-sha512-flash"),
+    ),
     unsafe(link_section = ".iram1.text")
 )]
 fn sha512_compress_block(state: &mut [u64; 8], block: &[u8]) {
@@ -81,8 +90,11 @@ fn sha512_compress_block(state: &mut [u64; 8], block: &[u8]) {
     let mut g = state[6];
     let mut h = state[7];
 
-    // A 16-word window into the whole W array, as in sha256.rs.
-    let mut w: [u64; 16] = [0; 16];
+    // A 16-word window into the whole W array, as in sha256.rs. Left
+    // uninitialized: a `[0; 16]` is a `memset`, and on the ESP32-S3 this
+    // body is in IRAM, where a call into flash faults while the cache is
+    // off. Rounds 0..16 write every word before a later round reads it.
+    let mut w = [const { core::mem::MaybeUninit::<u64>::uninit() }; 16];
 
     for t in 0..80 {
         // W[0..16] comes from the block; W[16..80] is
@@ -92,14 +104,18 @@ fn sha512_compress_block(state: &mut [u64; 8], block: &[u8]) {
         // with every index reduced mod 16 into the window.
         let w_t = if t < 16 {
             let w_t = u64::from_be_bytes(block[t * 8..(t + 1) * 8].try_into().unwrap());
-            w[t] = w_t;
+            w[t].write(w_t);
             w_t
         } else {
-            let w_t = SSIG1!(w[(t - 2) % 16])
-                .wrapping_add(w[(t - 7) % 16])
-                .wrapping_add(SSIG0!(w[(t - 15) % 16]))
-                .wrapping_add(w[(t - 16) % 16]);
-            w[t % 16] = w_t;
+            // SAFETY: rounds 0..16 wrote every word, and each later round
+            // reads a word written at least one round earlier.
+            let w_t = unsafe {
+                SSIG1!(w[(t - 2) % 16].assume_init())
+                    .wrapping_add(w[(t - 7) % 16].assume_init())
+                    .wrapping_add(SSIG0!(w[(t - 15) % 16].assume_init()))
+                    .wrapping_add(w[(t - 16) % 16].assume_init())
+            };
+            w[t % 16].write(w_t);
             w_t
         };
 
@@ -138,7 +154,21 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     }
 }
 
-// FIPS 180-4 §4.2.3.
+// FIPS 180-4 §4.2.3. On the ESP32-S3 ESP-IDF placement, internal DRAM rather
+// than flash `.rodata`: `.iram1` code is expected not to touch flash while
+// the cache is off. Same cfg as `sha512_compress_block`.
+//
+// SAFETY: the attribute only selects the output section. The bytes are these
+// constants, and ESP-IDF maps `.dram1` into internal DRAM.
+#[cfg_attr(
+    all(
+        target_arch = "xtensa",
+        target_os = "espidf",
+        target_feature = "esp32s3ops",
+        not(feature = "esp32s3-sha512-flash"),
+    ),
+    unsafe(link_section = ".dram1.rodata")
+)]
 static K: [u64; 80] = [
     0x428a2f98d728ae22,
     0x7137449123ef65cd,

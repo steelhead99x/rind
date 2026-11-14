@@ -13,6 +13,11 @@ rust-version.workspace = true
 default = []
 # Wipes keys, keyed state, and private-key heap scratch on drop.
 wipe = []
+# Keeps the ESP32-S3 rolled SHA-512 compressor, and its K table, in flash.
+# The default on `xtensa-esp32s3-espidf` places the compressor in IRAM and K
+# in internal DRAM, so that body does not shift later flash text. Enable
+# this when the image's IRAM is already full. It does nothing elsewhere.
+esp32s3-sha512-flash = []
 __ctgrind = ["dep:crabgrind"]
 
 [dependencies]
@@ -103,6 +108,9 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   # Builds the FIPS module so `RIND_FIPS_BREAK` corrupts the self-test it
   # names, as a lab checks each failure path (`src/fips.rs`).
   "cfg(rind_fips_break)",
+  # Set by the ESP32-S3 Xtensa target. The host's built-in list does not
+  # name it, and this build is what places rolled SHA-512 in IRAM.
+  'cfg(target_feature, values("esp32s3ops"))',
   # curve25519-dalek's backend overrides, which armv7 refuses.
   'cfg(curve25519_dalek_bits, values("32", "64"))',
   'cfg(curve25519_dalek_backend, values("fiat", "serial", "simd", "avx512"))',
