@@ -55,6 +55,7 @@ if [[ "${1:-}" == xtensa ]]; then
     # the ESP32 (LX6) and ESP32-S3 (LX7) bare metal, then ESP-IDF's std. That
     # one is compiled, not linted: there clippy's `missing_const_for_thread_local`
     # flags thread-locals whose initializers are already `const`.
+    # See UPSTREAM.md's "Clippy flags const thread-local initializers".
     for target in xtensa-esp32-none-elf xtensa-esp32s3-none-elf; do
         lint "$target" -Zbuild-std=core,alloc
     done
