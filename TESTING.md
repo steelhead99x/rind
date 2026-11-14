@@ -100,7 +100,7 @@ an Intel SDE CPU model, as `x86-cpu.yml` names them.
 | portable | PowerPC Linux: powerpc64le, big-endian powerpc64 and powerpc | `just qemu powerpc64le`, `just qemu powerpc64`, and `just qemu powerpc`: as s390x | as above | as s390x |
 | portable | ARM before ARMv7 (Raspberry Pi 1 and Zero) | `just qemu armv6` and `just qemu armv6-softfloat`: as s390x, on qemu's ARM1176; `build.yml`'s `android` job: ARMv5TE Android | as above | as s390x |
 | portable | wasm32-wasip2 | `just wasm`: release vectors under wasmtime, in the nightly `build.yml`; no differential tests, since aws-lc does not build for wasm, and `just portable` runs the same Rust against it | as above | unchecked: a wasm engine compiles rind again, and its JIT may turn a select into a branch |
-| portable | bare metal without std: ARMv6-M (`thumbv6m-none-eabi`, the RP2040) and RV32IMC (`riscv32imc-unknown-none-elf`), without compare-and-swap; ARMv7E-M (`thumbv7em-none-eabihf`); `x86_64-unknown-none` | `just bare-metal`, in `just check`'s cross module: clippy only, debug and release, with and without `wipe`; no vectors run | unchecked | unchecked: no test runs on these cores |
+| portable | bare metal without std: ARMv6-M (`thumbv6m-none-eabi`, the RP2040) and RV32IMC (`riscv32imc-unknown-none-elf`), without compare-and-swap; ARMv7E-M (`thumbv7em-none-eabihf`); `x86_64-unknown-none`; the ESP32's Xtensa bare metal, plus ESP-IDF (`xtensa-esp32s3-espidf`), which has std | `just bare-metal`, in `just check`'s cross module, and `just xtensa`, in the nightly `build.yml`: clippy for the `none` targets, debug and release, with and without `wipe`, and a check of the ESP-IDF library; no vectors run | unchecked | unchecked: no test runs on these cores |
 
 ## Vector suites
 

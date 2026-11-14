@@ -9,6 +9,14 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 
 ## Compilers and linkers
 
+### Clippy flags const thread-local initializers
+
+- **Breaks:** Espressif Rust 1.98.1.0's `missing_const_for_thread_local` flags `DIT_GUARDS` in `rind/src/low/cpu.rs` and `HELD` in `rind/src/low/entry.rs` on `xtensa-esp32s3-espidf`, although both initializers are already `const` blocks.
+- **Reproduce:** with that version installed as `esp`, run `cargo +esp clippy -Zbuild-std=std,panic_abort -p rind --lib --locked --target xtensa-esp32s3-espidf -- --deny warnings`.
+- **Workaround:** `sh/bare-metal.sh` compiles the ESP-IDF library with `cargo check`; its bare-metal targets still run Clippy.
+- **Reported:** [rust-lang/rust-clippy#17566](https://github.com/rust-lang/rust-clippy/issues/17566), the same false positive on targets without native thread-local support.
+- **Goes when:** the pinned Espressif toolchain's Clippy accepts those const initializers, so the ESP-IDF row can run Clippy too.
+
 ### rust-lld cannot link ELFv1
 
 - **Breaks:** Rust links `powerpc64-unknown-linux-gnu` with its bundled rust-lld, which supports only ELFv2, so every link fails with `ABI version 1 is not supported` on glibc's `Scrt1.o`.

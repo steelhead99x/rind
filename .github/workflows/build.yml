@@ -276,6 +276,28 @@ jobs:
       - name: Build and test
         run: just wasm
 
+  # The ESP32's Xtensa targets, bare metal and ESP-IDF: tier 3, on Espressif's
+  # fork of rustc, so outside the dev shell. Compile and lint only. The other
+  # bare-metal targets run in `just check`'s cross module.
+  xtensa:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/just
+      # The release of the dev shell's pinned rustc, 1.98.1.
+      - uses: esp-rs/xtensa-toolchain@ec6d36527049a7f4fb2cb0c1a644668c1bb8a2a4 # v1.7.0
+        with:
+          version: 1.98.1.0
+          buildtargets: esp32,esp32s3
+          override: false
+
+      - name: Lint
+        run: just xtensa
+
   # Targets with no rind assembly, on the portable backend, under qemu-user
   # where the runner cannot run them natively. Each entry names the flake dev
   # shell that holds its target's toolchain. s390x, powerpc64, and powerpc are
