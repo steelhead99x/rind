@@ -9,7 +9,7 @@ On x86_64 CPUs with AVX-512 IFMA (Ice Lake and later, Zen 4 and later), where bo
 - Runs (`low/x86_64/rsaz_avx512.rs`): `rsaz_amm52x{20,30,40}_x2_ifma256`, almost-Montgomery products over 52-bit limbs two moduli at a time, and `extract_multiplier_2x{20,30,40}_win5`, gathering by masking all 32 window entries, under rind's Rust port of aws-lc's driving C.
 - Route: add AVX-512F, AVX-512VL, and IFMA (`vpmadd52luq`, `vpmadd52huq`, opmask registers) to s2n-bignum's x86_64 model, prove the routines against an almost-Montgomery specification, and prove the Rust driver with Aeneas.
 - Taking the proven Karatsuba path on IFMA hosts instead is not a route unless it measures as fast.
-- Upstream: offering this work to awslabs/s2n-bignum is optional, and there is no standing approval: stop and ask the maintainer before posting there or anywhere outside the moq-dev and kixelated orgs (decided with the maintainer on 2026-11-07 on [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
+- Upstream: offering this work to awslabs/s2n-bignum is optional, and there is no standing approval: stop and ask the maintainer before posting there or anywhere outside [the orgs AGENTS.md lists](/AGENTS.md#development) (decided with the maintainer on 2026-11-07 on [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
 
 ## Required
 
