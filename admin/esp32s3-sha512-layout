@@ -73,9 +73,30 @@ panic = "abort"
 EOF
 
 export PATH="$xtensa_bin:$(dirname "$cargo"):$(dirname "$rustc"):$PATH"
-export CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"}
 # cargo's nightly -Z is the esp cargo; do not let rustup's stable cargo win.
 hash -r
+
+# -Z build-std resolves the sysroot's proc_macro crate, which depends on
+# rustc-literal-escaper. That crate is in the rust-src vendor tree. A
+# project .cargo/config is not visible to the std resolution, and --offline
+# against an empty registry fails before it looks there. A cargo home that
+# only replaces crates.io with that vendor tree resolves it.
+sysroot=$("$rustc" --print sysroot)
+vendor="$sysroot/lib/rustlib/src/rust/library/vendor"
+set -- "$vendor"/rustc-literal-escaper-*
+if [ ! -d "$1" ]; then
+  printf 'missing vendored std sources under %s\n' "$vendor" >&2
+  exit 1
+fi
+mkdir -p "$work/cargo-home"
+cat > "$work/cargo-home/config.toml" << EOF
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "$vendor"
+EOF
+export CARGO_HOME="$work/cargo-home"
 
 build() {
   name=$1
