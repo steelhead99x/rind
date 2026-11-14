@@ -19,7 +19,8 @@
 # `cosim`, which no other run includes
 # since it needs an x86_64 CPU with AVX2, checks the instructions rind adds
 # to s2n-bignum's x86 model, in its fork in `thirdparty/s2n-bignum`, against
-# this CPU. `session` checks nothing: it starts a HOL Light session for
+# this CPU. The Lean proofs need an x86_64 CPU with AVX2 too, to test the
+# intrinsic models. `session` checks nothing: it starts a HOL Light session for
 # developing the proofs of `arch`, `x86_64` or `aarch64`, which `session`
 # below describes. Run it in the flake's
 # `prove` dev shell: `nix develop .#prove --command admin/prove`, or for the
@@ -731,7 +732,7 @@ ecdsa_items() {
         'impl EcdsaKeyPair {' '    pub static ECDSA_P256_SHA256_FIXED: EcdsaSigningAlgorithm' \
         '    pub static ECDSA_P256_SHA256_FIXED: VerificationAlgorithm'
 }
-check_quote Aarch64/EcdsaDispatch ecdsa_items
+check_quote X86_64/EcdsaDispatch ecdsa_items
 check_quote X86_64/DigestAlgorithm items rind/src/high/digest.rs 'pub struct Algorithm ' 'impl Algorithm {' \
     'pub static MD5:' 'pub static SHA1:' 'pub static SHA256:' 'pub static SHA384:' 'pub static SHA512:' \
     'pub static SHA512_256:' 'pub static SHA3_256:' 'pub static SHA3_384:' 'pub static SHA3_512:' \
@@ -746,6 +747,13 @@ aes_gcm_items() {
         'const BYTESWAP:' 'const BYTESWAP_EPI64:'
 }
 check_quote X86_64/AesGcmModel aes_gcm_items
+select_items() {
+    items rind/src/low/x86_64/bignum_point_select.rs 'pub(crate) fn bignum_aff_point_select_p384(' \
+        'pub(crate) fn bignum_aff_point_select_p256(' 'pub(crate) fn bignum_aff_point_select_p521(' \
+        'fn select_avx2<' '#[target_feature(enable = "avx,avx2")]' '#[target_feature(enable = "sse2")]'
+    items rind/src/low/x86_64/cpu.rs 'pub(crate) fn prefetch<'
+}
+check_quote X86_64/PointSelectModel select_items
 check_quote X86_64/AeadDispatch items rind/src/aead.rs 'pub struct Algorithm ' 'impl Algorithm {' \
     'pub static AES_128_GCM:' 'pub static AES_192_GCM:' 'pub static AES_256_GCM:' 'pub static CHACHA20_POLY1305:' 'impl Key {' \
     'struct Sealer<' 'type Seal<' 'type Open<' 'struct Ops<' 'impl<C: Cipher> Sealer<C> {' \
@@ -873,13 +881,15 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # too, and `proofs/Rind/X86_64/P256Dispatch.lean` models it above the
 # translated `PrivateKey::from_bytes`, as `EcdsaDispatch.lean` does for ECDSA,
 # with the signature API's ECDSA key pairs and statics, which hold function
-# pointers too. The generator table is translated, so
+# pointers too. Each target's generator table is translated, so
 # `proofs/Rind/Aarch64/P256Table.lean` can prove it holds what s2n-bignum's
-# proof assumes; x86_64's `base_multiply`, aws-lc's, which no proof covers
-# yet, is opaque. P-384's key generation draws through a `dyn RandomSource`
-# too, so it is opaque, and `proofs/Rind/X86_64/P384Dispatch.lean` models it
-# on both targets; its comb tables are translated, which `P384Table.lean`
-# checks. HMAC's keyed states are translated over any hash, and its
+# proof assumes, and `proofs/Rind/X86_64/P256Table.lean` what x86_64's
+# Booth driver, which is translated, reads, and each target's `P256Base.lean`
+# that its first row holds G to 32G, which ECDSA verification looks up.
+# P-384's key generation draws through a `dyn RandomSource` too, so it is
+# opaque, and `proofs/Rind/X86_64/P384Dispatch.lean` models it on both
+# targets; its comb tables are translated, which `P384Table.lean` checks.
+# HMAC's keyed states are translated over any hash, and its
 # `Key` and `Context`, which hold function pointers, are not.
 # On x86_64, RSA verification is translated from `high::rsa::VerifyingKey`
 # down to `low::posint` and the Montgomery products' dispatch in
@@ -983,8 +993,10 @@ extract() {
         --dest-file "$PWD/../$out/$arch.llbc" \
         -- -p rind --lib --target "$arch-unknown-linux-gnu")
     rm -rf "$out/lean"
+    # x86_64's generator table rows are 512-word literals, which elaborate
+    # past Aeneas's default recursion depth of 2048.
     aeneas -backend lean -split-files -abort-on-error \
-        -no-progress-bar -dest "$out/lean" -subdir "Rind/$dir" \
+        -no-progress-bar -max-recdepth 4096 -dest "$out/lean" -subdir "Rind/$dir" \
         -namespace "rind.$arch" "$out/$arch.llbc"
     cp "$out/lean/Rind/$dir/Types.lean" "$out/lean/Rind/$dir/Funs.lean" "proofs/Rind/$dir/"
 }
@@ -1038,9 +1050,30 @@ extract_kdf() {
 
 extract x86_64 X86_64 \
     --start-from crate::mid::p256::PrivateKey::from_bytes \
+    --start-from crate::high::ecdsa::VerifyingKey::from_x962_uncompressed \
+    --start-from crate::high::ecdsa::VerifyingKey::verify \
+    --start-from crate::high::ecdsa::SigningKey::new \
+    --start-from crate::high::ecdsa::SigningKey::generate \
+    --start-from '{impl core::clone::Clone for crate::high::ecdsa::VerifyingKey<_>}' \
+    --start-from '{impl core::clone::Clone for crate::mid::p256::VerifyingKey}' \
+    --start-from '{impl crate::high::hash::SignatureHash for crate::high::hash::Sha256}' \
+    --start-from crate::high::ecdsa::SigningKey::from_private_key_and_public_key \
+    --start-from crate::high::ecdsa::SigningKey::public_key_uncompressed \
+    --start-from '{impl core::convert::AsRef for crate::high::ecdsa::EncodedPoint}' \
+    --start-from crate::high::ecdsa::SigningKey::sign \
+    --opaque crate::high::hmac_drbg \
+    --start-from crate::high::ecdsa::hash_to_scalar \
+    --start-from '{impl crate::high::curve::Curve for crate::high::curve::P256}' \
+    --start-from '{impl crate::high::curve::PrivateKey for crate::mid::p256::StaticPrivateKey}' \
+    --start-from '{impl crate::high::curve::PublicKey for crate::mid::p256::VerifyingKey}' \
+    --start-from '{impl crate::high::curve::Scalar for crate::mid::p256::Scalar}' \
+    --start-from crate::mid::p256::StaticPrivateKey::from_bytes \
+    --opaque 'crate::high::curve::_::generate_random_key' \
     --opaque 'crate::mid::p256::_::generate' \
     --opaque 'crate::mid::p256::_::new_random' \
-    --opaque 'crate::mid::p256::_::base_multiply' \
+    --include crate::low::x86_64::adx_mux::p256_montjadd \
+    --include crate::low::x86_64::adx_mux::p256_montjdouble \
+    --include crate::low::x86_64::adx_mux::p256_montjmixadd \
     --include crate::low::x86_64::adx_mux::bignum_demont_p256 \
     --include crate::low::x86_64::adx_mux::bignum_montmul_p256 \
     --include crate::low::x86_64::adx_mux::bignum_montsqr_p256 \
@@ -1188,10 +1221,13 @@ mkdir -p proofs/Rind/Portable
 cp "$out/lean/Rind/Portable/Types.lean" "$out/lean/Rind/Portable/Funs.lean" proofs/Rind/Portable/
 
 mkdir -p proofs/Rind/Aarch64/Kdf
+# P-256's generator multiplication and its table differ per target, so each
+# target has its own `P256Base` stating it, and `P256KeyCheck` for the key
+# check x86_64 shortcuts; key generation and ECDSA above them are shared.
 for file in Dispatch P256Dispatch P256Agree P384Dispatch X25519 P384 P384Table P384Keygen DigestAlgorithm \
     DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
     Blockwise Sha Hmac HmacDispatch HkdfExpand Kdf/TypesExternal Kdf/FunsExternal \
-    CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3 AesCipher HkdfAes; do
+    CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3 AesCipher HkdfAes P256 EcdsaDispatch P256Ecdsa P256Signature; do
     sed 's/X86_64/Aarch64/g; s/x86_64/aarch64/g' "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Aarch64/$file.lean"
 done
 # The AEAD model imports nothing aarch64 has, and no aarch64 translation reaches it.

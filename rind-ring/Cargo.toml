@@ -16,6 +16,22 @@ exclude = ["tests/ring"]
 [package.metadata.rind]
 upstream = "0.17"
 
+# The provider admin/adapter-api diffs this crate's API against.
+[package.metadata.rind.api]
+crate = "ring"
+module = ""
+# Items rind cannot back, which the README names.
+omitted = [
+  "aead::chacha20_poly1305_openssh",
+  "io",
+  "test",
+  "deprecated_test",
+  "test_file",
+  "rsa::KeyPair::from_components",
+  "rsa::KeyPairComponents",
+  "signature::RsaEncoding::encode",
+]
+
 # ring's feature names, so a manifest naming them builds unchanged. rind-ring
 # always has `alloc` and `std`, rind's random source already falls back to
 # `/dev/urandom`, and the rest pick platforms, code paths, or tests rind lacks.

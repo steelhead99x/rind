@@ -21,6 +21,67 @@ upstream = "1"
 # `ring-io` and `ring-sig-verify` gate what they gate there; the rest change
 # nothing. `fips` is left out, so a manifest asking for it fails to
 # resolve: rind is not FIPS validated.
+# The provider admin/adapter-api diffs this crate's API against.
+[package.metadata.rind.api]
+crate = "aws-lc-rs"
+module = ""
+# aws-lc-rs fails to build without one of its C libraries.
+features = ["aws-lc-sys"]
+skip = { fips = "builds AWS-LC's FIPS module, which rind does not offer", asan = "builds AWS-LC under AddressSanitizer", bindgen = "generates AWS-LC's bindings with libclang" }
+# Items rind cannot back, which the README names.
+omitted = [
+  "aead::AES_*_GCM_SIV",
+  "aead::chacha20_poly1305_openssh",
+  "agreement::*::generate_for_test",
+  "awslc_version",
+  "cipher::AES_CFB_IV_LEN",
+  "cipher::AES_OFB_IV_LEN",
+  "cipher::*::cfb*",
+  "cipher::*::ofb",
+  "cipher::*::ecb",
+  "cipher::*::ecb_pkcs7",
+  "cipher::OperatingMode::CFB*",
+  "cipher::OperatingMode::ECB",
+  "cipher::OperatingMode::OFB",
+  "cipher::PaddedBlockDecryptingKey::cbc_iso10126",
+  "cipher::DES_*",
+  "cipher::AlgorithmId::Des*",
+  "cipher::*Context::Iv64",
+  "cipher::BufferUpdate",
+  "cipher::Streaming*",
+  "cmac",
+  "kdf",
+  "tls_prf",
+  "digest::Digest::import_less_safe",
+  "digest::SHA224*",
+  "hmac::HMAC_SHA224",
+  "encoding::PqdsaPrivateKeyRaw",
+  "kem::AlgorithmId::MlKem512",
+  "kem::AlgorithmId::MlKem1024",
+  "kem::ML_KEM_512",
+  "kem::ML_KEM_1024",
+  "kem::DecapsulationKey::new",
+  "kem::DecapsulationKey::key_bytes",
+  "kem::DecapsulationKeyBytes",
+  "rand::unsealed",
+  "rsa::KeyPair::from_components",
+  "signature::RsaKeyPair::from_components",
+  "rsa::KeyPairComponents",
+  "rsa::KeyPair::sign_digest",
+  "signature::RsaKeyPair::sign_digest",
+  "rsa::Pkcs1*",
+  "signature::ECDSA_P256K1_*",
+  "signature::ECDSA_*_SHA1_*",
+  "signature::ECDSA_*_SHA3_*",
+  "signature::ECDSA_P521_SHA224_*",
+  "signature::PqdsaPrivateKey::as_raw_bytes",
+  "io::der",
+  "test",
+  "test_file",
+  "try_fips_self_test",
+  "unstable",
+]
+
 [features]
 default = ["aws-lc-sys", "alloc", "ring-io", "ring-sig-verify"]
 alloc = []

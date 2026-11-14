@@ -8,13 +8,13 @@ set_option linter.style.nameCheck false
 open Aeneas Aeneas.Std Result
 
 /-!
-# x86_64's 128-bit vectors and the intrinsics rind's AES-GCM calls
+# x86_64's vectors and the intrinsics rind's AES-GCM and point select call
 
 `core::arch` implements each intrinsic with an LLVM builtin, which Aeneas
 cannot translate, so these model them by hand, each as Intel's Software
 Developer's Manual defines its instruction, and as `core::arch` passes its
-immediate: masked to the bits the instruction reads. `__m128i` is its 128 bits,
-lane 0 lowest.
+immediate: masked to the bits the instruction reads. `__m128i` and `__m256i`
+are their 128 and 256 bits, lane 0 lowest.
 
 The AES instructions run FIPS 197's rounds, `Rind.Vale`'s `subBytes`,
 `shiftRows`, and opaque `mixColumns`, the functions Vale's AES spec assumes,
@@ -26,7 +26,17 @@ model is for s2n-bignum's and Vale's own proofs.
 /-- `__m128i`: 128 bits, lane 0 lowest. -/
 @[reducible] def core.core_arch.x86.__m128i : Type := BitVec 128
 
+/-- `__m256i`: 256 bits, lane 0 lowest. -/
+@[reducible] def core.core_arch.x86.__m256i : Type := BitVec 256
+
 namespace rind.simd
+
+/-- A 256-bit vector's 32-bit lane `i`. -/
+def lane32x8 (x : BitVec 256) (i : Nat) : BitVec 32 := x.extractLsb' (32 * i) 32
+
+/-- The 256-bit vector of eight 32-bit lanes, lane 0 lowest. -/
+def ofLanes32x8 (f : Nat → BitVec 32) : BitVec 256 :=
+  f 7 ++ f 6 ++ f 5 ++ f 4 ++ f 3 ++ f 2 ++ f 1 ++ f 0
 
 /-- Carry-less multiplication's first `k` partial products: `a` shifted left by
 each of `b`'s set bits below `k`, XORed. -/
@@ -199,3 +209,43 @@ def core.core_arch.x86.sse2._mm_unpacklo_epi64 (a b : core.core_arch.x86.__m128i
 def core.core_arch.x86.ssse3._mm_alignr_epi8 (IMM8 : Std.I32) (a b : core.core_arch.x86.__m128i) :
     Result core.core_arch.x86.__m128i :=
   ok (((a ++ b) >>> (8 * (IMM8.bv.toNat % 256))).setWidth 128)
+
+/-- `_mm_cmpeq_epi32`, `PCMPEQD`: each 32-bit lane all ones where the lanes
+are equal, and zero where not. -/
+def core.core_arch.x86.sse2._mm_cmpeq_epi32 (a b : core.core_arch.x86.__m128i) :
+    Result core.core_arch.x86.__m128i :=
+  ok (ofLanes32 fun i => if lane32 a i = lane32 b i then BitVec.allOnes 32 else 0)
+
+/-- `_mm256_setzero_si256`. -/
+def core.core_arch.x86.avx._mm256_setzero_si256 : Result core.core_arch.x86.__m256i :=
+  ok 0
+
+/-- `_mm256_set1_epi32`: each 32-bit lane `a`. -/
+def core.core_arch.x86.avx._mm256_set1_epi32 (a : Std.I32) : Result core.core_arch.x86.__m256i :=
+  ok (ofLanes32x8 fun _ => a.bv)
+
+/-- `_mm256_castsi256_si128`: the low 128 bits. -/
+def core.core_arch.x86.avx._mm256_castsi256_si128 (a : core.core_arch.x86.__m256i) :
+    Result core.core_arch.x86.__m128i :=
+  ok (a.setWidth 128)
+
+/-- `_mm256_cmpeq_epi32`, `VPCMPEQD`: each 32-bit lane all ones where the
+lanes are equal, and zero where not. -/
+def core.core_arch.x86.avx2._mm256_cmpeq_epi32 (a b : core.core_arch.x86.__m256i) :
+    Result core.core_arch.x86.__m256i :=
+  ok (ofLanes32x8 fun i => if lane32x8 a i = lane32x8 b i then BitVec.allOnes 32 else 0)
+
+/-- `_mm256_add_epi32`, `VPADDD`: each 32-bit lane's sum, wrapping. -/
+def core.core_arch.x86.avx2._mm256_add_epi32 (a b : core.core_arch.x86.__m256i) :
+    Result core.core_arch.x86.__m256i :=
+  ok (ofLanes32x8 fun i => lane32x8 a i + lane32x8 b i)
+
+/-- `_mm256_and_si256`, `VPAND`. -/
+def core.core_arch.x86.avx2._mm256_and_si256 (a b : core.core_arch.x86.__m256i) :
+    Result core.core_arch.x86.__m256i :=
+  ok (a &&& b)
+
+/-- `_mm256_xor_si256`, `VPXOR`. -/
+def core.core_arch.x86.avx2._mm256_xor_si256 (a b : core.core_arch.x86.__m256i) :
+    Result core.core_arch.x86.__m256i :=
+  ok (a ^^^ b)

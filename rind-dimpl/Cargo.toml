@@ -9,6 +9,12 @@ categories = ["network-programming", "cryptography"]
 rust-version.workspace = true
 readme = "README.md"
 
+# The provider admin/adapter-api diffs this crate's API against.
+[package.metadata.rind.api]
+crate = "dimpl"
+module = "crypto::aws_lc_rs"
+features = ["aws-lc-rs"]
+
 [dependencies]
 # `_crypto-common` turns on dimpl's DTLS 1.3 check that a CertificateVerify
 # scheme's curve matches the peer's certificate (RFC 8446 section 4.4.3).

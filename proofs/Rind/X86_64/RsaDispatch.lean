@@ -282,17 +282,6 @@ Drops are not modelled, as everywhere in the translation.
 
 namespace rind.x86_64
 
-/-- `Buffer::write`, with `write` a Lean function. -/
-def high.signature.Buffer.write (N : Std.Usize)
-    (write : Slice Std.U8 → Result (core.result.Result (Slice Std.U8) error.Error × Slice Std.U8)) :
-    Result (core.result.Result (high.signature.Buffer N) error.Error) := do
-  let buffer ← high.signature.Buffer.new N
-  let (s, to_slice_mut_back) ← lift (Array.to_slice_mut buffer.bytes)
-  let r ← write s
-  match r.1 with
-  | .Ok span => ok (.Ok { bytes := to_slice_mut_back r.2, len := span.len })
-  | .Err e => ok (.Err e)
-
 /-- `Rsa`: the smallest modulus it accepts, and its `verify` with its
 `verification.salt()` passed, as `(key, signature, message)`. -/
 structure high.signature.Rsa where

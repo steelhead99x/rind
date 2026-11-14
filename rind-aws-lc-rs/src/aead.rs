@@ -196,6 +196,7 @@ impl<A: AsRef<[u8]>> AsRef<[u8]> for Aad<A> {
 
 /// An authentication tag.
 #[must_use]
+#[repr(C)]
 pub struct Tag([u8; TAG_LEN]);
 
 impl AsRef<[u8]> for Tag {

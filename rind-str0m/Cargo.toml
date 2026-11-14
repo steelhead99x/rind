@@ -9,6 +9,11 @@ categories = ["network-programming", "cryptography"]
 rust-version.workspace = true
 readme = "README.md"
 
+# The provider admin/adapter-api diffs this crate's API against.
+[package.metadata.rind.api]
+crate = "str0m-aws-lc-rs"
+module = ""
+
 [dependencies]
 dimpl = { version = "0.9", default-features = false }
 rcgen = { version = "0.14", default-features = false }
