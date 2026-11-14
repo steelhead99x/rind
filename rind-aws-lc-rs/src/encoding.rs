@@ -37,5 +37,6 @@ generated_encodings!(
     ),
     (Pkcs8V1Der, Pkcs8V1DerType, true),
     (Pkcs8V2Der, Pkcs8V2DerType, true),
+    (PqdsaSeedRaw, PqdsaSeedRawType, true),
     (PublicKeyX509Der, PublicKeyX509DerType, false),
 );
