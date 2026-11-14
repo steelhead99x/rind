@@ -920,10 +920,18 @@ fn encode(point: Affine, public: bool) -> Result<EncodedPoint, Error> {
 }
 
 /// Declassifies a tag this side sends to the peer.
-#[inline]
+///
+/// Not inlined, and the bytes pass through `black_box` after the mark.
+/// Otherwise a release build returns the secret copy `mac` wrote, and a
+/// caller that compares the tag branches on it.
+#[inline(never)]
 fn sent<S>(confirm: Confirm<S>) -> Confirm<S> {
-    ct::public_slice(&confirm.bytes);
-    confirm
+    let bytes = core::hint::black_box(confirm.bytes);
+    ct::public_slice(&bytes);
+    Confirm {
+        bytes: core::hint::black_box(bytes),
+        _kind: PhantomData,
+    }
 }
 
 #[inline]
