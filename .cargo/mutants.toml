@@ -24,6 +24,9 @@ exclude_globs = [
   "rind-bench/**",
   "rind-cpuid/**",
   "fuzz/**",
+  # The FIPS module, which refuses the CPUs admin/mutants masks features on;
+  # its differential and break tests cover what it adds to rind.
+  "rind-fips/**",
 ]
 
 # Each surviving mutant no test can catch, with why.
@@ -45,7 +48,7 @@ exclude_re = [
   'rind/src/high/sec1\.rs:\d+:\d+: replace \| with \^ in is_public_key$',
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace \| with \^ in (inc32|lengths)$',
   'rind/src/mid/portable/aes_gcm\.rs:\d+:\d+: replace \| with \^ in (add32|lengths)$',
-  'rind/src/low/aarch64/cpu\.rs:152:\d+: replace << with >>$',
+  'rind/src/low/aarch64/cpu\.rs:162:\d+: replace << with >>$',
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace \| with \^ in (detect|detect_once)$',
   'rind/src/low/generic/bignum\.rs:\d+:\d+: replace \| with \^ in (add_masked|bignum_add|bignum_cmp_lt|bignum_modadd|gcd_step|mod_halve|sub_masked)$',
   'rind/src/low/generic/mont\.rs:\d+:\d+: replace \| with \^ in (bignum_montredc|bignum_mul|cmp_lt_limbs|mod_double|mont_mul|mont_mul_limbs|sub_limbs_masked)$',
@@ -98,7 +101,7 @@ exclude_re = [
   'rind/src/high/sec1\.rs:14:\d+: replace \+ with \*$',
   'rind/src/high/signature\.rs:(229|1683):\d+: replace \+ with \*$',
   'rind/src/low/generic/mont\.rs:167:\d+: replace \+ with \* in mont_mul$',
-  'rind/src/mid/mldsa\.rs:(366|461|508):\d+: replace \+ with \* in (keygen|public_key_from_secret|sign_internal)$',
+  'rind/src/mid/mldsa\.rs:(367|462|509):\d+: replace \+ with \* in (keygen|public_key_from_secret|sign_internal)$',
   'rind/src/mid/rsa_priv\.rs:311:\d+: replace / with \*$',
   'rind/src/mid/rsa_priv\.rs:296:44: replace \+ with \*$',
   'rind/src/mid/rsa_priv\.rs:298:\d+: replace \+ with \*$',
@@ -144,7 +147,7 @@ exclude_re = [
   'rind/src/low/x86_64/sha1\.rs:\d+:\d+: replace match guard i == pairs\.len\(\) with true in sha1_avx2$',
   'rind/src/mid/aes\.rs:\d+:\d+: replace < with <= in AesCtr::apply_keystream$',
   'rind/src/mid/aes_kw\.rs:187:\d+: replace - with / in AesKek::unwrap_padded$',
-  'rind/src/mid/mldsa\.rs:840:\d+: replace < with <= in expand_s$',
+  'rind/src/mid/mldsa\.rs:841:\d+: replace < with <= in expand_s$',
   'rind/src/mid/mlkem768\.rs:487:\d+: replace \+ with \* in Coeffs<\{K \*K \*N\}, Ntt>::transpose$',
   'rind/src/mid/p256\.rs:\d+:\d+: replace < with <= in (<impl Iterator for BoothRecode<W>>::next|JacobianMontPoint::public_twin_multiply|public_below_p)$',
   'rind/src/mid/p384\.rs:\d+:\d+: replace < with <= in JacobianMontPoint::public_twin_multiply$',
@@ -160,16 +163,16 @@ exclude_re = [
   'rind/src/low/generic/mldsa_poly\.rs:206:\d+: replace - with [+/] in decompose$',
   'rind/src/low/x86_64/mldsa\.rs:(209|211|213|215|237|239|241|243|245|247|249|251|257|259|269|277|283|285|287|293|295|537|539|541|543|549|551|565|569|571|575|577|579|581|583|587):5: delete -$',
   'rind/src/mid/mldsa\.rs:89:52: replace - with [+/]$',
-  'rind/src/mid/mldsa\.rs:(712|719):\d+: replace - with [+/] in (decompose|use_hint)$',
-  'rind/src/mid/mldsa\.rs:772:\d+: replace \* with / in expand_a$',
-  'rind/src/mid/mldsa\.rs:776:\d+: replace - with [+/] in expand_a$',
+  'rind/src/mid/mldsa\.rs:(713|720):\d+: replace - with [+/] in (decompose|use_hint)$',
+  'rind/src/mid/mldsa\.rs:773:\d+: replace \* with / in expand_a$',
+  'rind/src/mid/mldsa\.rs:777:\d+: replace - with [+/] in expand_a$',
   # Speed only: which of several implementations runs, or how far ahead it
   # prefetches. Each implementation is tested on its own against the others.
   'rind/src/low/x86_64/mldsa\.rs:\d+:\d+: delete match arm \(Some\(_\), [457]\) in mldsa_pointwise_acc$',
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace <= with > in tagged_from$',
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace \+ with \* in tagged_from$',
   'rind/src/low/aarch64/bignum_copy_row_from_table_mux\.rs:\d+:\d+: replace match guard width\.is_multiple_of\(8\) with false in bignum_copy_row_from_table$',
-  'rind/src/low/aarch64/cpu\.rs:395:\d+: replace prefetch_ro with \(\)$',
+  'rind/src/low/aarch64/cpu\.rs:408:\d+: replace prefetch_ro with \(\)$',
   'rind/src/low/aarch64/mont\.rs:\d+:\d+: replace match guard k >= 2 with false in (mont_mul|mont_sqr)$',
   'rind/src/low/generic/order\.rs:\d+:\d+: replace (order -> Option<Order> with None|== with != in order)$',
   'rind/src/low/generic/blockwise\.rs:\d+:\d+: replace > with >= in Blockwise<N>::complete_blocks$',
@@ -198,7 +201,7 @@ exclude_re = [
   'rind/src/low/x86_64/chacha20\.rs:\d+:\d+: delete match arm \(Some\(_\), _, 65\.\.\) in ChaCha20::cipher$',
   'rind/src/low/x86_64/chacha20poly1305\.rs:48:\d+: replace << with >>$',
   'rind/src/low/x86_64/chacha20poly1305\.rs:48:\d+: replace \| with &$',
-  'rind/src/low/x86_64/cpu\.rs:529:\d+: replace prefetch with \(\)$',
+  'rind/src/low/x86_64/cpu\.rs:554:\d+: replace prefetch with \(\)$',
   'rind/src/low/x86_64/mont\.rs:\d+:\d+: delete match arm \(Some\(_\), 16 \| 32\) in (mont_mul|mont_sqr)$',
   'rind/src/low/x86_64/mont\.rs:40:\d+: replace >= with < in mont_sqr$',
   'rind/src/low/x86_64/mont\.rs:\d+:\d+: replace match guard k >= 2 with false in (mont_mul|mont_sqr)$',
@@ -237,9 +240,9 @@ exclude_re = [
   # denial row in `admin/mutants` denies alone, only in a release build,
   # which tests never are, or only off Linux.
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace && with \|\| in detect$',
-  'rind/src/low/aarch64/cpu\.rs:159:\d+: replace << with >>$',
-  'rind/src/low/aarch64/cpu\.rs:376:\d+: replace test_toggle -> bool with false$',
-  'rind/src/low/aarch64/cpu\.rs:376:\d+: replace test_toggle -> bool with true$',
+  'rind/src/low/aarch64/cpu\.rs:169:\d+: replace << with >>$',
+  'rind/src/low/aarch64/cpu\.rs:386:\d+: replace test_toggle -> bool with false$',
+  'rind/src/low/aarch64/cpu\.rs:386:\d+: replace test_toggle -> bool with true$',
   # The portable backend has no CPU state to save, so `leave_cpu_state`
   # ignores it.
   'rind/src/low/portable/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
@@ -282,11 +285,12 @@ exclude_re = [
   # debugging helper, an impl nothing calls, a limit past 2^48 calls, a fault
   # only hardware injects, a check of what another check also refuses, or a
   # case random keys reach with probability below 2^-64.
+  'rind/src/high/hkdf\.rs:\d+:\d+: replace <impl sealed::Sealed for &[^>]+>::len -> usize with [01]$',
   'rind/src/fips_rng\.rs:\d+:\d+: replace cast -> bool with true$',
   'rind/src/high/hmac_drbg\.rs:\d+:\d+: replace \+= with \*= in HmacDrbg<H>::generate$',
   'rind/src/high/rsa\.rs:\d+:\d+: delete match arm Error::Fault in SigningKey::decrypt_oaep$',
-  'rind/src/mid/mldsa\.rs:546:\d+: replace - with [+/] in sign_internal$',
-  'rind/src/mid/mldsa\.rs:788:\d+: replace < with > in expand_a$',
+  'rind/src/mid/mldsa\.rs:547:\d+: replace - with [+/] in sign_internal$',
+  'rind/src/mid/mldsa\.rs:789:\d+: replace < with > in expand_a$',
   'rind/src/low/aarch64/sha1\.rs:\d+:\d+: replace match guard blocks\.is_empty\(\) with false in sha1_compress_blocks$',
   'rind/src/low/entry\.rs:\d+:\d+: replace - with / in <impl Drop for Entry>::drop$',
   'rind/src/low/entry\.rs:\d+:\d+: replace - with \+ in <impl Drop for Entry>::drop$',

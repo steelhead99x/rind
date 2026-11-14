@@ -5,13 +5,14 @@ on:
     - cron: "0 18 * * *"
   workflow_dispatch:
   # A pull request runs only the x86_64 release row of `build`, the one that
-  # fails fastest; the nightly runs the rest.
+  # fails fastest, and `binsec`; the nightly runs the rest.
   pull_request:
     branches: [main]
     paths:
       - rind/src/**
       - rind/Cargo.toml
       - "**/tests/ctgrind.rs"
+      - rind-fips/**
       - admin/ctgrind
       - admin/ctgrind.supp
       - admin/ct-binsec
@@ -56,6 +57,8 @@ jobs:
 
       - name: ctgrind tests
         run: nix develop .#ctgrind --command admin/ctgrind ${{ matrix.build }}
+      - name: ctgrind FIPS module tests
+        run: nix develop .#ctgrind --command admin/ctgrind fips ${{ matrix.build }}
 
       # Denies the wide-multiplier schedules, so the ones Cortex-A76 runs are
       # checked on this runner too, whichever core it is. The row above checks
