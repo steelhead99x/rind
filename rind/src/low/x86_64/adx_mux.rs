@@ -343,6 +343,51 @@ pub(super) mod tests {
             );
             assert_eq!(want, got);
         }
+
+        // `same2(..., 255, ...)` clears bit 255, so it never reaches
+        // `p256_scalarmul_alt`'s high-bit scalar path. `n - 1` has that bit
+        // set, and `(n - 1)·G = -G`. Both implementations run on the
+        // generator, a valid point, and the result is checked against `G`.
+        let n_minus_1 = [
+            0xf3b9_cac2_fc63_2550,
+            0xbce6_faad_a717_9e84,
+            0xffff_ffff_ffff_ffff,
+            0xffff_ffff_0000_0000,
+        ];
+        // Affine NIST P-256 generator, little-endian limbs, not Montgomery.
+        let generator = [
+            0xf4a1_3945_d898_c296,
+            0x7703_7d81_2deb_33a0,
+            0xf8bc_e6e5_63a4_40f2,
+            0x6b17_d1f2_e12c_4247,
+            0x8ee7_eb4a_7c0f_9e16,
+            0xcbb6_4068_37bf_51f5,
+            0x2bce_3357_6b31_5ece,
+            0x4fe3_42e2_fe1a_7f9b,
+        ];
+        let (mut want, mut got) = ([0; 8], [0; 8]);
+        p256_scalarmul::p256_scalarmul(&mut want, &n_minus_1, &generator);
+        p256_scalarmul_alt::p256_scalarmul_alt(&mut got, &n_minus_1, &generator);
+        assert_eq!(want, got);
+        assert_eq!(want[..4], generator[..4]);
+        // `Y(-G) + Y(G) = p`.
+        let mut sum = [0u64; 4];
+        let mut carry = 0u128;
+        for i in 0..4 {
+            carry += u128::from(want[4 + i]) + u128::from(generator[4 + i]);
+            sum[i] = carry as u64;
+            carry >>= 64;
+        }
+        assert_eq!(
+            sum,
+            [
+                0xffff_ffff_ffff_ffff,
+                0x0000_0000_ffff_ffff,
+                0x0000_0000_0000_0000,
+                0xffff_ffff_0000_0001,
+            ]
+        );
+        assert_eq!(carry, 0);
     }
 
     fn same1<const N: usize, const M: usize>(
