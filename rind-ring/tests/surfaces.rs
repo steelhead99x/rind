@@ -2,6 +2,8 @@
 //! equality, `Debug`, and `Display`. Checked against ring, which rind-ring
 //! offers. aws-lc-rs has changed some of those `Debug` strings.
 
+use core::num::NonZeroU32;
+
 use rind_ring as ours;
 use ring as theirs;
 
@@ -138,8 +140,16 @@ fn hmac_and_pbkdf2_algorithms_match_ring() {
             theirs::pbkdf2::PBKDF2_HMAC_SHA512,
         ),
     ];
-    for (ours_alg, _theirs_alg) in pbkdf2 {
+    // `PartialEq` compares the HMAC handle only, so a swapped rind algorithm
+    // still compares equal to itself. One derived block has to match ring.
+    let iterations = NonZeroU32::new(1).unwrap();
+    for (ours_alg, theirs_alg) in pbkdf2 {
         assert!(ours_alg == ours_alg);
+        let mut ours_out = [0u8; 16];
+        let mut theirs_out = [0u8; 16];
+        ours::pbkdf2::derive(ours_alg, iterations, b"salt", b"secret", &mut ours_out);
+        theirs::pbkdf2::derive(theirs_alg, iterations, b"salt", b"secret", &mut theirs_out);
+        assert_eq!(ours_out, theirs_out);
     }
     assert!(ours::pbkdf2::PBKDF2_HMAC_SHA256 != ours::pbkdf2::PBKDF2_HMAC_SHA512);
 }
