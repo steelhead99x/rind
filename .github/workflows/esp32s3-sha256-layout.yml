@@ -7,6 +7,8 @@ name: ESP32-S3 SHA-256 layout
 on:
   pull_request:
     paths:
+      - rind/src/lib.rs
+      - rind/src/low/mod.rs
       - rind/src/low/portable/sha.rs
       - rind/src/low/portable/sha256_iram.rs
       - rind/src/low/generic/sha256_k.rs

@@ -1,5 +1,6 @@
+// Written for Graviola by Joe Birr-Pixton, 2024.
 // The values are FIPS 180-4 §4.2.2. Their arrangement in a `[u32; 64]`
-// follows `sha256.rs`, written for Graviola by Joe Birr-Pixton, 2024.
+// follows `sha256.rs`.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! SHA-256's sixty-four round constants.

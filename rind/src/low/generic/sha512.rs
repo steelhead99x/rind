@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! A rolled SHA-512 compression, for 32-bit portable targets.
+//! A rolled SHA-512 compression, for portable targets whose pointer is not
+//! 64 bits.
 //!
 //! The portable backend otherwise calls HACL*'s `sha512_update`, which is
 //! fully unrolled. On Xtensa that function is about 47 KiB — several times
 //! the ESP32-S3's 16 KiB instruction cache — so every block streams its
-//! code from flash, about 33× ring's compact loop. This implementation
+//! code from flash. On that board the rolled loop takes about 0.033×
+//! main's unrolled HACL* body, about 30×. This implementation
 //! follows [`sha256`](sha256.rs): one 16-word window and an 80-round loop,
 //! which stays in a few kilobytes. On the ESP32-S3 under ESP-IDF that loop
 //! is placed in IRAM (`.iram1.text`, literal pool included) and its `K`
@@ -19,9 +21,9 @@
 //! functions and the eighty `K` constants are FIPS 180-4 §4.1.3 and
 //! §4.2.3. The unit tests check FIPS 180-4's SHA-512 vectors, mark the
 //! block secret so ctgrind checks this loop, and, on every backend except
-//! 32-bit portable, compare with the compression the backend ships (HACL*
-//! or aws-lc). On 64-bit portable targets, HACL*'s unrolled form is still
-//! used.
+//! portable with a pointer that is not 64 bits, compare with the
+//! compression the backend ships (HACL* or aws-lc). On 64-bit portable
+//! targets, HACL*'s unrolled form is still used.
 
 macro_rules! CH {
     ($x:expr, $y:expr, $z:expr) => {
@@ -107,8 +109,10 @@ fn be_u32<const BYTE: usize>(block: &[u8; 128]) -> u32 {
     // `XCHAL_UNALIGNED_LOAD_HW` to 1 and `XCHAL_UNALIGNED_LOAD_EXCEPTION`
     // to 0 on ESP32, ESP32-S2, and ESP32-S3, so `l32i` does not trap and
     // does not call a helper when `block` is not word-aligned. The sequence
-    // writes SAR, `a14`, and `y`, and does not use the stack. SAR is
-    // written and consumed before the block ends. The address is the public
+    // writes SAR, `a14`, and `y`, and does not use the stack. esp rustc
+    // 1.97 lists `sar` as a clobber-only register, the same class
+    // `sha256_iram` names with `out("sar") _`. The `ssai 8` is consumed by
+    // the three `src` before the block ends. The address is the public
     // block cursor. The loaded bytes are the message, and none of these
     // instructions branches or loops on them.
     unsafe {
@@ -123,6 +127,7 @@ fn be_u32<const BYTE: usize>(block: &[u8; 128]) -> u32 {
             byte = const BYTE,
             y = lateout(reg) y,
             out("a14") _,
+            out("sar") _,
             options(nostack, readonly),
         );
     }
@@ -407,14 +412,10 @@ mod tests {
 
     fn padded(message: &[u8]) -> Vec<u8> {
         let bits = (message.len() as u128).checked_mul(8).unwrap();
-        let mut padded = message.to_vec();
-        padded.push(0x80);
-        // SHA-512's length field is 16 bytes; pad so the total is a
-        // multiple of 128 and the length sits in the last 16.
-        while padded.len() % 128 != 112 {
-            padded.push(0);
-        }
-        padded.extend_from_slice(&bits.to_be_bytes());
+        let (blocks, rest) = crate::low::split_tail::<128, 16>(message);
+        let mut padded = blocks.to_vec();
+        let mut last = [[0u8; 128]; 2];
+        padded.extend_from_slice(crate::low::pad(rest, bits.to_be_bytes(), &mut last));
         padded
     }
 
@@ -437,13 +438,9 @@ mod tests {
         encode(crate::low::ct::into_public(state))
     }
 
-    fn digest_hex(message: &[u8], hex: &str) {
-        assert_eq!(hex.len(), 128, "hex length");
-        let mut expected = [0u8; 64];
-        for i in 0..64 {
-            expected[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap();
-        }
-        assert_eq!(hash(message), expected);
+    fn digest_hex(message: &[u8], hex_digest: &str) {
+        let expected = hex::decode(hex_digest).unwrap();
+        assert_eq!(hash(message).as_slice(), expected.as_slice());
     }
 
     #[test]
@@ -464,9 +461,10 @@ mod tests {
         );
     }
 
-    /// The 32-bit portable backend *is* this compression, so that
-    /// comparison would call itself. Everywhere else it is HACL* or aws-lc.
-    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+    /// A portable backend whose pointer is not 64 bits *is* this compression,
+    /// so that comparison would call itself. Everywhere else it is HACL* or
+    /// aws-lc.
+    #[cfg(not(all(rind_backend = "portable", not(target_pointer_width = "64"))))]
     #[test]
     fn matches_backend_compression() {
         for len in [0usize, 1, 3, 55, 111, 112, 113, 127, 128, 239, 1000] {
