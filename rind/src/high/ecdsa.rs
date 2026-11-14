@@ -121,8 +121,11 @@ impl<C: Curve> SigningKey<C> {
     /// has one.
     fn is_public_key(&self, encoded: &[u8]) -> bool {
         // Kept as the public key once it matches, so it is not derived again.
+        // Indexed rather than matched on a slice pattern, which Aeneas cannot
+        // translate.
         #[cfg(rind_backend = "x86_64")]
-        if let [0x04, ..] = encoded
+        if !encoded.is_empty()
+            && encoded[0] == 0x04
             && let Some(matches) = self.private_key.public_key_is_uncompressed(encoded)
         {
             if matches {
