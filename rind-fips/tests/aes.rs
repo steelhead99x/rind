@@ -600,3 +600,146 @@ fn hkdf_derives_the_keys_rind_does() {
         }
     }
 }
+
+/// A random 96-bit IV, and a TLS 1.3 sequence counter that refuses a repeat.
+#[test]
+fn aes_gcm_seals_with_an_internal_iv() {
+    use aead::{
+        AES_128_GCM, AES_192_GCM, AES_256_GCM, Nonce, RandomizedNonceKey, TlsProtocolId,
+        TlsRecordOpeningKey, TlsRecordSealingKey,
+    };
+
+    for algorithm in [&AES_128_GCM, &AES_192_GCM, &AES_256_GCM] {
+        assert_eq!(
+            RandomizedNonceKey::new(algorithm, &vec![0; algorithm.key_len() - 1]).err(),
+            Some(Error::WrongLength)
+        );
+        let key = bytes("key", algorithm.key_len());
+        let sealer = RandomizedNonceKey::new(algorithm, &key).unwrap();
+        assert_eq!(sealer.algorithm().key_len(), algorithm.key_len());
+        let plain = bytes("plain", 24);
+        let aad = bytes("aad", 5);
+        let mut separate = plain.clone();
+        let (nonce, tag) = sealer
+            .seal_in_place_separate_tag(&aad, &mut separate)
+            .unwrap();
+        let reference = rind::aead::Key::new(rind_aead(algorithm), &key).unwrap();
+        let nonce_bytes: [u8; 12] = nonce.as_ref().try_into().unwrap();
+        let mut opened = separate.clone();
+        assert_eq!(
+            reference
+                .open_in_place_separate_tag(
+                    rind::aead::Nonce::assume_unique_for_key(nonce_bytes),
+                    &aad,
+                    rind::aead::Tag::try_from(tag.as_ref()).unwrap(),
+                    &mut opened,
+                )
+                .unwrap(),
+            plain
+        );
+        let mut appended = plain.clone();
+        let nonce = sealer
+            .seal_in_place_append_tag(&aad, &mut appended)
+            .unwrap();
+        assert_ne!(nonce.as_ref(), &nonce_bytes);
+        assert_eq!(
+            sealer.open_in_place(nonce, &aad, &mut appended).unwrap(),
+            plain
+        );
+        let _ = format!("{sealer:?}");
+    }
+
+    assert_eq!(
+        TlsRecordSealingKey::new(&AES_192_GCM, TlsProtocolId::TLS13, &[0; 24]).err(),
+        Some(Error::Unsupported)
+    );
+    assert_eq!(
+        TlsRecordOpeningKey::new(&AES_128_GCM, TlsProtocolId::TLS12, &[0; 16]).err(),
+        Some(Error::Unsupported)
+    );
+    assert_eq!(
+        TlsRecordSealingKey::new(&AES_128_GCM, TlsProtocolId::TLS13, &[0; 15]).err(),
+        Some(Error::WrongLength)
+    );
+
+    let key = bytes("tls", 16);
+    let mut sealing = TlsRecordSealingKey::new(&AES_128_GCM, TlsProtocolId::TLS13, &key).unwrap();
+    let opening = TlsRecordOpeningKey::new(&AES_128_GCM, TlsProtocolId::TLS13, &key).unwrap();
+    assert_eq!(sealing.tls_protocol_id(), TlsProtocolId::TLS13);
+    assert_eq!(opening.algorithm().key_len(), 16);
+    let _ = format!("{sealing:?}{opening:?}");
+    let reference = rind::aead::Key::new(&rind::aead::AES_128_GCM, &key).unwrap();
+    let nonce = |seq: u64| {
+        let mut bytes = [0x10, 0x32, 0x54, 0x76, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mixed = (u64::from_be_bytes(bytes[4..].try_into().unwrap()) ^ seq).to_be_bytes();
+        bytes[4..].copy_from_slice(&mixed);
+        bytes
+    };
+    let plain = b"record".to_vec();
+    let aad = b"aad";
+    let mut sealed = plain.clone();
+    sealing
+        .seal_in_place_append_tag(Nonce::assume_unique_for_key(nonce(0)), aad, &mut sealed)
+        .unwrap();
+    let mut expected = plain.clone();
+    reference
+        .seal_in_place_append_tag(
+            rind::aead::Nonce::assume_unique_for_key(nonce(0)),
+            aad,
+            &mut expected,
+        )
+        .unwrap();
+    assert_eq!(sealed, expected);
+    assert_eq!(
+        opening
+            .open_in_place(Nonce::assume_unique_for_key(nonce(0)), aad, &mut sealed)
+            .unwrap(),
+        plain
+    );
+
+    let mut replay = plain.clone();
+    assert_eq!(
+        sealing
+            .seal_in_place_separate_tag(Nonce::assume_unique_for_key(nonce(0)), aad, &mut replay)
+            .unwrap_err(),
+        Error::Unsupported
+    );
+    assert_eq!(replay, vec![0; plain.len()]);
+    let mut replay = plain.clone();
+    assert_eq!(
+        sealing.seal_in_place_append_tag(Nonce::assume_unique_for_key(nonce(0)), aad, &mut replay),
+        Err(Error::Unsupported)
+    );
+    assert_eq!(replay, vec![0; plain.len() + 16]);
+
+    // A gap is allowed. The refused replay did not consume sequence 1.
+    let mut next = plain.clone();
+    let tag = sealing
+        .seal_in_place_separate_tag(Nonce::assume_unique_for_key(nonce(2)), aad, &mut next)
+        .unwrap();
+    let mut expected = plain.clone();
+    let expected_tag = reference
+        .seal_in_place_separate_tag(
+            rind::aead::Nonce::assume_unique_for_key(nonce(2)),
+            aad,
+            &mut expected,
+        )
+        .unwrap();
+    assert_eq!(expected, next);
+    assert_eq!(tag.as_ref(), expected_tag.as_ref());
+    next.extend_from_slice(tag.as_ref());
+    assert_eq!(
+        opening
+            .open_in_place(Nonce::assume_unique_for_key(nonce(2)), aad, &mut next)
+            .unwrap(),
+        plain
+    );
+}
+
+fn rind_aead(algorithm: &'static aead::Algorithm) -> &'static rind::aead::Algorithm {
+    match algorithm.key_len() {
+        16 => &rind::aead::AES_128_GCM,
+        24 => &rind::aead::AES_192_GCM,
+        _ => &rind::aead::AES_256_GCM,
+    }
+}

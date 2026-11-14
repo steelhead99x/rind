@@ -48,8 +48,8 @@ mod high;
 mod error;
 
 /// The FIPS module's random generator, which [`mid::rng`] draws from in the
-/// module's build.
-#[cfg(any(test, rind_fips))]
+/// module's build. `__acvp` draws AES-GCM's internal IVs from it too.
+#[cfg(any(test, rind_fips, feature = "__acvp"))]
 mod fips_rng;
 
 /// What the FIPS module (`rind-fips`) needs beyond the public API: its

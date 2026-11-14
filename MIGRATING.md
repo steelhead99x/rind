@@ -97,10 +97,10 @@ reuses it. `verify` refuses a stored value shorter than the HMAC output with
 | `AES_128_GCM`, `AES_192_GCM`, `AES_256_GCM`, `CHACHA20_POLY1305` | the same |
 | `AES_128_GCM_SIV`, `AES_256_GCM_SIV` | none; [aws-lc-rs extras](quest/m3/parity/aws-lc-extras.md) |
 | none | `gcm::Key::new(&cipher::AES_128, key, TagLength::Full)?`, for AES-GCM under an IV of any length, or with a tag cut to one of `TagLength`'s, as WebCrypto takes; its methods are `Key`'s, with an `Iv` for the nonce: `Iv::assume_unique_for_key(iv)?`, which refuses an empty IV |
-| `RandomizedNonceKey::new(&AES_256_GCM, key)`, with 96-bit random nonces | `RandomizedNonceKey::new(&key)`, XChaCha20-Poly1305 with 192-bit random nonces, which never collide in practice |
-| `RandomizedNonceKey::{seal_in_place_append_tag, open_in_place}` | the same, with the nonce a `RandomNonce` |
-| `RandomizedNonceKey::seal_in_place_separate_tag` | none |
-| `TlsRecordSealingKey`, `TlsRecordOpeningKey`, `TlsProtocolId` | `Key`; rind has no FIPS mode whose nonce rules they check |
+| `RandomizedNonceKey::new(&AES_256_GCM, key)`, with 96-bit random nonces | `RandomizedNonceKey::new(&key)`, XChaCha20-Poly1305 with 192-bit random nonces, which never collide in practice. `rind-fips::aead::RandomizedNonceKey` is the AES-GCM one, and it draws the IV |
+| `RandomizedNonceKey::{seal_in_place_append_tag, open_in_place}` | the same, with the nonce a `RandomNonce`. `rind-fips` returns the 96-bit `Nonce` and opens with it |
+| `RandomizedNonceKey::seal_in_place_separate_tag` | none in `rind`. `rind-fips` has it, and returns the nonce and the tag |
+| `TlsRecordSealingKey`, `TlsRecordOpeningKey`, `TlsProtocolId` | `rind-fips::aead` has the TLS 1.3 forms. The sealing key owns the sequence counter and refuses a repeat or a wrap. TLS 1.2 is not offered. `rind`'s `Key` still takes the caller's nonce |
 | `open_separate_gather`, `seal_in_place_scatter`, `seal_out_of_place_scatter`, `prepare_nonce`, `SealingKeyPreparedNonce`, `OpeningKeyPreparedNonce`, `seal_in_place` (deprecated) | none |
 | `chacha20_poly1305_openssh::{SealingKey, OpeningKey, KEY_LEN, TAG_LEN}` | none: only SSH transports use it, and rind has no SSH consumer |
 

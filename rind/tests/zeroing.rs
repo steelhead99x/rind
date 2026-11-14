@@ -297,6 +297,16 @@ fn pbkdf2() {
 }
 
 #[test]
+fn tls13_counter() {
+    use rind::aead::tls13::Counter;
+    let mut counter = Counter::new();
+    let mut nonce = [0u8; 12];
+    nonce[11] = 0x5a;
+    assert!(counter.accept(&nonce));
+    check_zeroed_on_drop(Box::pin(counter));
+}
+
+#[test]
 fn aead() {
     use rind::aead::{
         AES_128_GCM, AES_192_GCM, AES_256_GCM, CHACHA20_POLY1305, Key, RandomizedNonceKey,

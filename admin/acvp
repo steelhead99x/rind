@@ -26,6 +26,11 @@
 #     passes the interface and checks the signatures.
 #   * XECDH and DetECDSA. This wrapper does not advertise them.
 #
+# AES-GCM sample groups are `ivGen: external`. A synthetic `ivGen: internal`
+# group (SP 800-38D section 8.2.2) is run after them: acvptool must accept
+# ciphertext || tag || 12-byte IV, and opening that IV must return the
+# plaintext. There is no published ciphertext to compare.
+#
 # KDA groups store a hybrid shared secret as z and t. acvptool forwards
 # only z, so the script concatenates t onto z first. A live NIST session
 # still drops t until acvptool concatenates it. rind's acvp_kda test covers
@@ -59,6 +64,7 @@ export RIND_ACVP_SAMPLES="${RIND_ACVP_SAMPLES:-$PWD/thirdparty/acvp}"
 
 python3 - "$RIND_ACVP_WRAPPER" "$(command -v acvptool)" "$RIND_ACVP_SAMPLES" <<'PY'
 import json
+import struct
 import subprocess
 import sys
 from copy import deepcopy
@@ -299,12 +305,116 @@ def run_set(name, keep, adapt, strip, compare):
     return 0
 
 
+def wrapper_call(args):
+    header = struct.pack("=" + "I" * (1 + len(args)), len(args), *[len(arg) for arg in args])
+    proc = subprocess.run(
+        [WRAPPER], input=header + b"".join(args), stdout=subprocess.PIPE, check=False
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"wrapper exited {proc.returncode}")
+    data = proc.stdout
+    (count,) = struct.unpack_from("=I", data, 0)
+    lengths = struct.unpack_from("=" + "I" * count, data, 4)
+    offset = 4 * (1 + count)
+    parts = []
+    for length in lengths:
+        parts.append(data[offset : offset + length])
+        offset += length
+    return parts
+
+
+def run_gcm_internal():
+    # acvptool sends an empty nonce and reads ciphertext || tag || 12-byte IV.
+    groups = []
+    expected = []
+    tg = 1
+    for key_len, tag_len, pt, aad in (
+        (128, 128, "", "00"),
+        (128, 32, "000102", ""),
+        (192, 128, "aa" * 17, "bb" * 3),
+        (256, 96, "cc" * 8, "dd"),
+    ):
+        key = "11" * (key_len // 8)
+        groups.append(
+            {
+                "tgId": tg,
+                "testType": "AFT",
+                "direction": "encrypt",
+                "keyLen": key_len,
+                "ivLen": 96,
+                "ivGen": "internal",
+                "ivGenMode": "8.2.2",
+                "tagLen": tag_len,
+                "tests": [
+                    {
+                        "tcId": 1,
+                        "pt": pt,
+                        "key": key,
+                        "aad": aad,
+                        "iv": "",
+                    }
+                ],
+            }
+        )
+        expected.append((tg, bytes.fromhex(pt), bytes.fromhex(key), bytes.fromhex(aad), tag_len // 8))
+        tg += 1
+    prompt = {
+        "vsId": 0,
+        "algorithm": "ACVP-AES-GCM",
+        "revision": "1.0",
+        "isSample": False,
+        "testGroups": groups,
+    }
+    proc = subprocess.run(
+        [TOOL, "-wrapper", WRAPPER, "-json", "/dev/stdin"],
+        input=json.dumps([prompt]).encode(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stderr.decode(errors="replace")[-4000:])
+        sys.stderr.write(proc.stdout.decode(errors="replace")[-2000:])
+        print(f"ACVP-AES-GCM internal: acvptool exited {proc.returncode}", file=sys.stderr)
+        return 1
+    got = json.loads(proc.stdout)[0]["testGroups"]
+    by_id = {group["tgId"]: group["tests"][0] for group in got}
+    for tg, pt, key, aad, tag_bytes in expected:
+        test = by_id[tg]
+        ct = bytes.fromhex(test["ct"])
+        tag = bytes.fromhex(test["tag"])
+        iv = bytes.fromhex(test["iv"])
+        if len(ct) != len(pt) or len(tag) != tag_bytes or len(iv) != 12:
+            print(
+                f"ACVP-AES-GCM internal: tg {tg} lengths ct {len(ct)} tag {len(tag)} iv {len(iv)}",
+                file=sys.stderr,
+            )
+            return 1
+        opened = wrapper_call(
+            [
+                b"AES-GCM/open",
+                struct.pack("=I", tag_bytes),
+                key,
+                ct + tag,
+                iv,
+                aad,
+            ]
+        )
+        if opened[0] != b"\x01" or opened[1] != pt:
+            print(f"ACVP-AES-GCM internal: tg {tg} did not open", file=sys.stderr)
+            return 1
+    print(f"ACVP-AES-GCM internal: {len(expected)}")
+    return 0
+
+
 def main():
     names = sys.argv[4:]
     selected = [item for item in SETS if not names or item[0] in names]
     failed = 0
     for item in selected:
         failed += run_set(*item)
+    if not names or "ACVP-AES-GCM-1.0" in names:
+        failed += run_gcm_internal()
     return 1 if failed else 0
 
 

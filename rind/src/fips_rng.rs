@@ -18,6 +18,7 @@
 //! `rand_thread_state_clear_all` does.
 
 use core::cell::RefCell;
+use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Once, PoisonError, RwLock, RwLockWriteGuard};
 
 use crate::Error;
@@ -81,6 +82,7 @@ static LIVE: RwLock<Live> = RwLock::new(Live {
 
 /// Wipes every thread's instance, returning how many, and fails every draw
 /// after: the module's destructor runs it as the process exits.
+#[cfg_attr(not(any(test, rind_fips)), allow(dead_code))]
 pub(crate) fn zeroise_all() -> usize {
     let mut live = LIVE.write().unwrap_or_else(PoisonError::into_inner);
     for &address in &live.instances {
@@ -96,11 +98,13 @@ pub(crate) fn zeroise_all() -> usize {
 
 /// The registry held for writing, so no draw, instantiation, or wipe runs
 /// until it drops.
+#[cfg_attr(not(any(test, rind_fips)), allow(dead_code))]
 pub(crate) struct Hold(RwLockWriteGuard<'static, Live>);
 
 /// Waits for every draw in progress, then holds the registry, as the module
 /// does across `fork`: the child then inherits no instance mid-draw and no
 /// lock held by a thread it lacks.
+#[cfg_attr(not(any(test, rind_fips)), allow(dead_code))]
 pub(crate) fn hold() -> Hold {
     Hold(LIVE.write().unwrap_or_else(PoisonError::into_inner))
 }
@@ -110,6 +114,7 @@ pub(crate) fn hold() -> Hold {
 /// thread. The child holds a copy of each, but no thread that would
 /// unregister or free it, so a process that forks and forks again would
 /// otherwise accumulate them.
+#[cfg_attr(not(any(test, rind_fips)), allow(dead_code))]
 pub(crate) fn forked(hold: Hold) {
     let Hold(mut live) = hold;
     // This thread called `fork`, so it is inside no draw, and its instance
@@ -169,11 +174,20 @@ pub(crate) fn fill(out: &mut [u8]) -> Result<(), Error> {
 
 fn instantiate() -> Result<HmacDrbg<Sha512>, Error> {
     static CAST: Once = Once::new();
+    static CAST_OK: AtomicBool = AtomicBool::new(true);
     CAST.call_once(|| {
-        if !cast() {
+        let passed = cast();
+        CAST_OK.store(passed, Ordering::Release);
+        // The module aborts: a failed health test is its error state.
+        // `__acvp` is not the module, so a failed test is `RngFailed`.
+        #[cfg(any(test, rind_fips))]
+        if !passed {
             crate::fips::fail("drbg");
         }
     });
+    if !CAST_OK.load(Ordering::Acquire) {
+        return Err(Error::RngFailed);
+    }
 
     let mut entropy = [0u8; ENTROPY_LEN];
     let mut nonce = [0u8; NONCE_LEN];
@@ -207,7 +221,12 @@ pub(crate) fn cast() -> bool {
     const ADDITIONAL_2: [u8; 32] = *b"\x20\x89\xd4\x9d\x63\xe0\xc4\xdf\x58\x87\x9d\x0c\xb1\xba\x99\x8e\x5b\x3d\x1a\x77\x86\xb7\x85\xe7\xcf\x13\xca\x5e\xa5\xe3\x3c\xfd";
     const EXPECTED: [u8; 64] = *b"\x5b\x70\xf3\xe4\xda\x95\x26\x42\x33\xef\xba\xb1\x55\xb8\x28\xd4\xe2\x31\xb6\x7c\xc9\x27\x57\xfe\xca\x40\x7c\xc9\x61\x5a\x66\x08\x71\xcb\x07\xad\x1a\x2e\x9a\x99\x41\x2f\xed\xa8\xee\x34\xdc\x9c\x57\xfa\x08\xd3\xf8\x22\x5b\x30\xd2\x98\x87\xd2\x09\x07\xd1\x23";
 
+    // The break build corrupts this input so the module's error state is
+    // visible. That hook lives in `fips`, which `__acvp` does not compile,
+    // so the binding is mutable only when the hook is.
+    #[cfg_attr(not(any(test, rind_fips)), allow(unused_mut))]
     let mut entropy = ENTROPY;
+    #[cfg(any(test, rind_fips))]
     if crate::fips::broken("drbg") {
         entropy[0] ^= 1;
     }

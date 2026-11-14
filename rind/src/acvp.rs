@@ -256,6 +256,29 @@ impl Drop for AcvpDrbg {
     }
 }
 
+/// Seals `in_out` under a fresh 96-bit IV from the module DRBG and appends
+/// the tag and that IV.
+///
+/// `acvptool` reads this layout for AES-GCM with `ivGen: internal`:
+/// ciphertext, then the tag, then the 12-byte IV. The draw is
+/// [`crate::fips_rng`], the same generator the FIPS module seals with.
+pub fn gcm_seal_random(
+    algorithm: &'static crate::cipher::Algorithm,
+    key: &[u8],
+    tag_len: crate::aead::gcm::TagLength,
+    aad: &[u8],
+    in_out: &mut Vec<u8>,
+) -> Result<(), Error> {
+    let mut iv_bytes = [0u8; 12];
+    crate::fips_rng::fill(&mut iv_bytes)?;
+    let sealer = crate::aead::gcm::Key::new(algorithm, key, tag_len)?;
+    let iv = crate::aead::gcm::Iv::assume_unique_for_key(&iv_bytes)?;
+    let tag = sealer.seal_in_place_separate_tag(iv, aad, in_out)?;
+    in_out.extend_from_slice(tag.as_ref());
+    in_out.extend_from_slice(&iv_bytes);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{AcvpDrbg, SecretBuf};

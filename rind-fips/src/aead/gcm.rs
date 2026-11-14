@@ -99,9 +99,11 @@ impl fmt::Debug for Iv<'_> {
 /// [`TagLength`], as WebCrypto's AES-GCM does; held in the module, which
 /// wipes it on drop.
 ///
-/// Prefer [`super::Key`], whose 96-bit nonces and full tags are what
-/// protocols use; GCM hashes an IV of any other length into its counter,
-/// which weakens its bounds. It opens only, as [`super::Key`] does.
+/// Prefer [`super::Key`] and [`super::RandomizedNonceKey`], whose 96-bit
+/// nonces and full tags are what protocols use; GCM hashes an IV of any
+/// other length into its counter, which weakens its bounds. It opens only,
+/// as [`super::Key`] does. Sealing with an IV the module generates is
+/// [`super::RandomizedNonceKey`].
 pub struct Key {
     algorithm: &'static Algorithm,
     tag_len: TagLength,

@@ -391,11 +391,18 @@ fn gcm_seal(args: &[Vec<u8>]) -> Result<Reply, String> {
     let mut text = arg(args, 2)?.to_vec();
     let nonce = arg(args, 3)?;
     let aad = arg(args, 4)?;
+    // An empty nonce is `ivGen: internal`. acvptool then reads ciphertext ||
+    // tag || a 12-byte IV, drawn here from the module DRBG.
     if nonce.is_empty() {
-        return Err(
-            "AES-GCM with an internal IV waits on quest/m4/fips/gcm-iv.md; this wrapper seals only a given nonce"
-                .into(),
-        );
+        rind::acvp::gcm_seal_random(
+            aes_alg(key_bytes.len())?,
+            key_bytes,
+            tag_length(tag_bytes)?,
+            aad,
+            &mut text,
+        )
+        .map_err(|err| err.to_string())?;
+        return public_reply(vec![text]);
     }
     let key = gcm::Key::new(aes_alg(key_bytes.len())?, key_bytes, tag_length(tag_bytes)?)
         .map_err(|err| err.to_string())?;
@@ -1344,7 +1351,9 @@ const MAX_DRBG: usize = 1 << 16;
 /// Algorithms `acvptool` knows. A name it does not is refused before any
 /// vector is read. RSA key generation is absent: rind has no seeded or
 /// candidate-prime FIPS 186-5 key generation, and the quest allows keeping
-/// it out of the module. AES-GCM internal IVs wait on their own quest.
+/// it out of the module. AES-GCM `ivGen: internal` is SP 800-38D's random
+/// construction (8.2.2), a 96-bit IV from the module DRBG. GMAC stays
+/// external: the sample sets and aws-lc's wrapper advertise only that.
 const CONFIG: &str = r#"[
   {"algorithm": "SHA-1", "revision": "1.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}]},
   {"algorithm": "SHA2-256", "revision": "1.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}]},
@@ -1357,7 +1366,7 @@ const CONFIG: &str = r#"[
   {"algorithm": "ACVP-AES-ECB", "revision": "1.0", "direction": ["encrypt"], "keyLen": [128, 192, 256]},
   {"algorithm": "ACVP-AES-CBC", "revision": "1.0", "direction": ["encrypt", "decrypt"], "keyLen": [128, 192, 256]},
   {"algorithm": "ACVP-AES-CTR", "revision": "1.0", "direction": ["encrypt", "decrypt"], "keyLen": [128, 192, 256]},
-  {"algorithm": "ACVP-AES-GCM", "revision": "1.0", "direction": ["encrypt", "decrypt"], "keyLen": [128, 192, 256], "tagLen": [128, 120, 112, 104, 96, 64, 32], "ivLen": [96], "ivGen": ["external"]},
+  {"algorithm": "ACVP-AES-GCM", "revision": "1.0", "direction": ["encrypt", "decrypt"], "keyLen": [128, 192, 256], "tagLen": [128, 120, 112, 104, 96, 64, 32], "ivLen": [96], "ivGen": ["external", "internal"], "ivGenMode": "8.2.2"},
   {"algorithm": "ACVP-AES-GMAC", "revision": "1.0", "direction": ["encrypt", "decrypt"], "keyLen": [128, 192, 256], "tagLen": [128, 120, 112, 104, 96, 64, 32], "ivLen": [96], "ivGen": ["external"]},
   {"algorithm": "ACVP-AES-KW", "revision": "1.0", "direction": ["encrypt", "decrypt"], "kwCipher": ["cipher"], "keyLen": [128, 192, 256]},
   {"algorithm": "ACVP-AES-KWP", "revision": "1.0", "direction": ["encrypt", "decrypt"], "kwCipher": ["cipher"], "keyLen": [128, 192, 256]},

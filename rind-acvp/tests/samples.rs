@@ -109,6 +109,61 @@ fn aes_gcm_external() {
     assert!(checked > 0);
 }
 
+/// `ivGen: internal`: an empty nonce, and the reply is ciphertext || tag ||
+/// the 12-byte IV `acvptool` splits off. The sample file has no such group.
+#[test]
+fn aes_gcm_internal_iv() {
+    for (key_len, tag_bits, pt) in [
+        (16, 128u32, &b""[..]),
+        (24, 128, b"hello"),
+        (32, 32, b"internal-iv"),
+        (32, 120, b"x"),
+    ] {
+        let tag_bytes = tag_bits / 8;
+        let key = vec![0x3c; key_len];
+        let aad = b"aad".to_vec();
+        let reply = handle(
+            "AES-GCM/seal",
+            &[
+                u32_ne(tag_bytes),
+                key.clone(),
+                pt.to_vec(),
+                Vec::new(),
+                aad.clone(),
+            ],
+        )
+        .unwrap();
+        let buf = &reply[0];
+        let split = buf.len() - 12;
+        let (tagged, iv) = buf.split_at(split);
+        let (ct, tag) = tagged.split_at(tagged.len() - tag_bytes as usize);
+        assert_eq!(ct.len(), pt.len(), "key {key_len} tag {tag_bits}");
+        assert_eq!(iv.len(), 12);
+        assert_eq!(tag.len(), tag_bytes as usize);
+        let mut combined = ct.to_vec();
+        combined.extend_from_slice(tag);
+        let opened = handle(
+            "AES-GCM/open",
+            &[u32_ne(tag_bytes), key, combined, iv.to_vec(), aad],
+        )
+        .unwrap();
+        assert_eq!(opened[0], vec![1]);
+        assert_eq!(&opened[1], pt);
+    }
+
+    let key = vec![0x11; 16];
+    let seal = |pt: &[u8]| {
+        handle(
+            "AES-GCM/seal",
+            &[u32_ne(16), key.clone(), pt.to_vec(), Vec::new(), Vec::new()],
+        )
+        .unwrap()
+    };
+    let one = seal(b"a");
+    let two = seal(b"a");
+    assert_ne!(&one[0][one[0].len() - 12..], &two[0][two[0].len() - 12..]);
+}
+
 #[test]
 fn mlkem768_keygen_from_seed() {
     let set = set("ML-KEM-keyGen-FIPS203");

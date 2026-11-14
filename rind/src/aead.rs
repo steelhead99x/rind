@@ -51,6 +51,9 @@ pub mod quic;
 /// ```
 pub mod gcm;
 
+#[doc(hidden)]
+pub mod tls13;
+
 const NONCE_LEN: usize = 12;
 const TAG_LEN: usize = 16;
 

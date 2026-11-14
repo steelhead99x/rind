@@ -208,3 +208,35 @@ fn mldsa_siggen() {
     secret(rnd.as_slice());
     assert_eq!(sign(sk, rnd), wanted);
 }
+
+/// AES-GCM `ivGen: internal`. The key is secret; the IV and ciphertext are
+/// public, and opening them returns the plaintext.
+#[test]
+fn aes_gcm_internal_iv() {
+    let key = vec![0x3c; 32];
+    let pt = b"plaintext".to_vec();
+    let aad = b"aad".to_vec();
+    let sealing_key = key.clone();
+    secret(sealing_key.as_slice());
+    let sealed = run(
+        "AES-GCM/seal",
+        &[
+            16u32.to_ne_bytes().to_vec(),
+            sealing_key,
+            pt.clone(),
+            Vec::new(),
+            aad.clone(),
+        ],
+    );
+    let buf = &sealed[0];
+    let iv = buf[buf.len() - 12..].to_vec();
+    let tagged = buf[..buf.len() - 12].to_vec();
+    let opening_key = key;
+    secret(opening_key.as_slice());
+    let opened = run(
+        "AES-GCM/open",
+        &[16u32.to_ne_bytes().to_vec(), opening_key, tagged, iv, aad],
+    );
+    assert_eq!(opened[0], vec![1]);
+    assert_eq!(opened[1], pt);
+}

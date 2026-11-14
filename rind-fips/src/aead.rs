@@ -48,6 +48,9 @@ pub mod quic;
 /// ```
 pub mod gcm;
 
+mod seal;
+pub use seal::{RandomizedNonceKey, TlsProtocolId, TlsRecordOpeningKey, TlsRecordSealingKey};
+
 opaque! {
     AeadKey => rind_fips_aead_key_free,
 }
@@ -135,8 +138,10 @@ pub static AES_256_GCM: Algorithm = Algorithm {
 /// An AES-GCM key that opens messages sealed under the sender's nonces;
 /// held in the module, which wipes it on drop.
 ///
-/// It does not seal: FIPS 140-3 approves AES-GCM encryption only under an
-/// IV the module generates (IG C.H), which this crate does not offer yet.
+/// It does not seal. FIPS 140-3 approves AES-GCM encryption only under an
+/// IV the module generates (IG C.H): [`RandomizedNonceKey`] draws a random
+/// 96-bit IV, and [`TlsRecordSealingKey`] seals TLS 1.3 records under the
+/// sequence counter it owns.
 pub struct Key {
     algorithm: &'static Algorithm,
     handle: Handle<AeadKey>,
@@ -221,6 +226,12 @@ impl Nonce {
 impl fmt::Debug for Nonce {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Nonce").finish_non_exhaustive()
+    }
+}
+
+impl AsRef<[u8]> for Nonce {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
     }
 }
 

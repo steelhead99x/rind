@@ -456,6 +456,60 @@ fn aes_gcm() {
     }
 }
 
+/// A module-drawn IV opens under aws-lc, and a TLS 1.3 nonce seals to the
+/// same ciphertext aws-lc produces for that nonce.
+#[test]
+fn aes_gcm_internal_iv() {
+    use aws_lc_rs::aead::{Aad, LessSafeKey, Nonce, UnboundKey};
+    use rind_fips::aead::{
+        AES_128_GCM, AES_256_GCM, RandomizedNonceKey, TlsProtocolId, TlsRecordSealingKey,
+    };
+
+    for (ours, theirs) in [
+        (&AES_128_GCM, &aws_lc_rs::aead::AES_128_GCM),
+        (&AES_256_GCM, &aws_lc_rs::aead::AES_256_GCM),
+    ] {
+        let key = random(ours.key_len());
+        let sealer = RandomizedNonceKey::new(ours, &key).unwrap();
+        let plain = random(48);
+        let aad = random(9);
+        let mut sealed = plain.clone();
+        let nonce = sealer.seal_in_place_append_tag(&aad, &mut sealed).unwrap();
+        let nonce_bytes: [u8; 12] = nonce.as_ref().try_into().unwrap();
+        let opener = LessSafeKey::new(UnboundKey::new(theirs, &key).unwrap());
+        assert_eq!(
+            opener
+                .open_in_place(
+                    Nonce::assume_unique_for_key(nonce_bytes),
+                    Aad::from(&aad),
+                    &mut sealed
+                )
+                .unwrap(),
+            plain
+        );
+
+        let mut ours_tls = TlsRecordSealingKey::new(ours, TlsProtocolId::TLS13, &key).unwrap();
+        let static_iv = random(12).try_into().unwrap();
+        let mut ours_buf = plain.clone();
+        ours_tls
+            .seal_in_place_append_tag(
+                rind_fips::aead::Nonce::assume_unique_for_key(static_iv),
+                &aad,
+                &mut ours_buf,
+            )
+            .unwrap();
+        let mut theirs_buf = plain.clone();
+        opener
+            .seal_in_place_append_tag(
+                Nonce::assume_unique_for_key(static_iv),
+                Aad::from(&aad),
+                &mut theirs_buf,
+            )
+            .unwrap();
+        assert_eq!(ours_buf, theirs_buf);
+    }
+}
+
 #[test]
 fn digest() {
     use aws_lc_rs::digest as theirs;

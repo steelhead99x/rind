@@ -219,6 +219,40 @@ fn aes() {
     }
 }
 
+/// A random IV and a TLS 1.3 record nonce, with the key secret. The IV,
+/// ciphertext, and opened plaintext are public.
+#[test]
+fn aes_gcm_internal_iv() {
+    let key = [0x42; 32];
+    secret(&key);
+    let sealer = aead::RandomizedNonceKey::new(&aead::AES_256_GCM, &key).unwrap();
+    let mut message = MESSAGE.to_vec();
+    let nonce = sealer
+        .seal_in_place_append_tag(b"aad", &mut message)
+        .unwrap();
+    public(nonce.as_ref());
+    public(&message);
+    let opened = sealer.open_in_place(nonce, b"aad", &mut message).unwrap();
+    public(&*opened);
+    assert_eq!(opened, MESSAGE);
+
+    let tls_key = [0x24; 16];
+    secret(&tls_key);
+    let mut sealing =
+        aead::TlsRecordSealingKey::new(&aead::AES_128_GCM, aead::TlsProtocolId::TLS13, &tls_key)
+            .unwrap();
+    let mut record = MESSAGE.to_vec();
+    sealing
+        .seal_in_place_append_tag(
+            aead::Nonce::assume_unique_for_key([9; 12]),
+            b"aad",
+            &mut record,
+        )
+        .unwrap();
+    public(&record);
+    assert!(record.len() == MESSAGE.len() + 16);
+}
+
 #[test]
 fn agreement_and_kem() {
     let peer = agreement::PrivateKey::generate(&agreement::ECDH_P256).unwrap();

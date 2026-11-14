@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! AES: the block cipher, CTR, and CBC (SP 800-38A), key wrapping (SP
-//! 800-38F), QUIC header protection, and AES-GCM opening (SP 800-38D).
+//! 800-38F), QUIC header protection, and AES-GCM (SP 800-38D).
 //!
 //! AES-GCM seals here only with an IV the module generates, as IG C.H
-//! requires, which is not offered yet, so these services only open.
+//! requires: a random 96-bit IV from the DRBG (scenario 2), or a TLS 1.3
+//! record nonce whose sequence counter the key owns (scenario 5). Opening
+//! takes the peer's nonce.
 
 use rind::aead::{self, gcm, quic};
 use rind::cipher::{self, Aes, AesCbcDecryptingKey, AesCbcEncryptingKey, AesCtr, CbcIv};
@@ -504,6 +506,140 @@ pub unsafe extern "C" fn rind_fips_gcm_open(
 }
 
 free!(rind_fips_gcm_key_free, gcm::Key);
+
+/// A TLS 1.3 AES-GCM sealing key: the expanded key and the sequence counter
+/// it owns. The counter's mask is the static IV, so dropping the handle
+/// wipes both, and the allocator zeroes the block.
+///
+/// Public so the C ABI can name it. Callers only see the pointer.
+pub struct TlsSeal {
+    key: aead::Key,
+    counter: rind::aead::tls13::Counter,
+}
+
+/// An AES-GCM sealing key for the algorithm `id` names, from the `len` bytes
+/// at `key`, for TLS 1.3. AES-192 is not a TLS cipher.
+///
+/// # Safety
+/// `key` must be valid for `len` reads, and `out` for a write.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_fips_tls_seal_new(
+    id: u32,
+    key: *const u8,
+    len: usize,
+    out: *mut *mut TlsSeal,
+) -> Status {
+    let Some(algorithm) = aead_algorithm(id) else {
+        return status(Err(Error::Unsupported));
+    };
+    if algorithm.key_len() == 24 {
+        return status(Err(Error::Unsupported));
+    }
+    // SAFETY: the caller's contract.
+    let key = unsafe { bytes(key, len) };
+    // SAFETY: the caller's contract.
+    unsafe { new_handle(out, || tls_seal(algorithm, key)) }
+}
+
+fn tls_seal(algorithm: &'static aead::Algorithm, key: &[u8]) -> Result<TlsSeal, Error> {
+    Ok(TlsSeal {
+        key: aead::Key::new(algorithm, key)?,
+        counter: rind::aead::tls13::Counter::new(),
+    })
+}
+
+/// Seals the `len` bytes at `in_out` under `nonce` if that nonce's TLS 1.3
+/// sequence is one this key still allows, writing the tag to `tag`.
+///
+/// A refused sequence zeroes `in_out` and leaves the counter where it was.
+/// A length the cipher refuses has already consumed the sequence.
+///
+/// # Safety
+/// `key` must be live and not used concurrently, `nonce` valid for 12 reads,
+/// `aad` for `aad_len`, `in_out` for `len` reads and writes, and `tag` for
+/// a 16-byte write.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn rind_fips_tls_seal(
+    key: *mut TlsSeal,
+    nonce: *const [u8; 12],
+    aad: *const u8,
+    aad_len: usize,
+    in_out: *mut u8,
+    len: usize,
+    tag: *mut [u8; 16],
+) -> Status {
+    // SAFETY: the caller's contract.
+    let (key, nonce, aad, in_out) = unsafe {
+        (
+            &mut *key,
+            *nonce,
+            bytes(aad, aad_len),
+            bytes_mut(in_out, len),
+        )
+    };
+    scrubbed(Depth::Small, || {
+        if !key.counter.accept(&nonce) {
+            in_out.fill(0);
+            return status(Err(Error::Unsupported));
+        }
+        status(
+            key.key
+                .seal_in_place_separate_tag(aead::Nonce::assume_unique_for_key(nonce), aad, in_out)
+                .map(|sealed| {
+                    let mut bytes = [0u8; 16];
+                    bytes.copy_from_slice(sealed.as_ref());
+                    // SAFETY: the caller's contract.
+                    unsafe { put(tag, bytes) };
+                }),
+        )
+    })
+}
+
+free!(rind_fips_tls_seal_free, TlsSeal);
+
+/// Seals the `len` bytes at `in_out` under a 96-bit IV drawn from the module
+/// DRBG, writing that IV to `nonce` and the tag to `tag`.
+///
+/// The draw is `rind::rand::fill`, which in this build is `rind::fips_rng`.
+/// One key should seal fewer than 2^32 messages: the IV is random, and
+/// SP 800-38D's collision bound is that.
+///
+/// # Safety
+/// `key` must be live, `aad` valid for `aad_len` reads, `in_out` for `len`
+/// reads and writes, and `nonce` and `tag` for writes of 12 and 16 bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_fips_aead_seal_random(
+    key: *const aead::Key,
+    aad: *const u8,
+    aad_len: usize,
+    in_out: *mut u8,
+    len: usize,
+    nonce: *mut [u8; 12],
+    tag: *mut [u8; 16],
+) -> Status {
+    // SAFETY: the caller's contract.
+    let (key, aad, in_out) = unsafe { (&*key, bytes(aad, aad_len), bytes_mut(in_out, len)) };
+    // The DRBG's own service is Medium; this call draws before it seals.
+    scrubbed(Depth::Medium, || {
+        let mut iv = [0u8; 12];
+        status(rind::rand::fill(&mut iv).and_then(|()| {
+            let sealed = key.seal_in_place_separate_tag(
+                aead::Nonce::assume_unique_for_key(iv),
+                aad,
+                in_out,
+            )?;
+            let mut tag_bytes = [0u8; 16];
+            tag_bytes.copy_from_slice(sealed.as_ref());
+            // SAFETY: the caller's contract.
+            unsafe {
+                put(nonce, iv);
+                put(tag, tag_bytes);
+            }
+            Ok(())
+        }))
+    })
+}
 
 /// A QUIC header-protection key for the AES key size `id`, from the `len`
 /// bytes at `key`.

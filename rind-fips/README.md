@@ -57,5 +57,7 @@ These are in `rind` but not here, since FIPS 140-3 does not approve them:
   verifying legacy signatures
 - HPKE, RSA-OAEP, RSA blind signatures, and ECVRF
 - RSA-PSS verification of any salt length (`RSA_PSS_*_ANY_SALT`)
-- AES-GCM sealing with a caller's nonce: FIPS 140-3 approves sealing only
-  with an IV the module generates, which is not offered yet
+- AES-GCM sealing with a caller's nonce. Sealing is
+  `aead::RandomizedNonceKey`, a random 96-bit IV from the module DRBG, and
+  `aead::TlsRecordSealingKey`, TLS 1.3 with the module's sequence counter.
+  TLS 1.2's explicit nonce is not offered
