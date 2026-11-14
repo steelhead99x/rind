@@ -1716,6 +1716,16 @@ impl<P: MlDsaParameterSet> MlDsaKeyPair<P> {
         Ok(Self(mldsa::KeyPair::from_seed(seed)))
     }
 
+    /// Loads FIPS 204's expanded private key.
+    ///
+    /// Not a supported API. It exists for the unpublished `rind-acvp` binary,
+    /// behind the `__acvp` feature.
+    #[cfg(feature = "__acvp")]
+    #[doc(hidden)]
+    pub fn from_expanded(sk: &[u8]) -> Result<Self, Error> {
+        mldsa::KeyPair::from_secret_key(sk).map(Self)
+    }
+
     /// Returns the private key's 32-byte seed, which [`Self::from_seed`]
     /// loads, unless the key was loaded from its expanded form, which has
     /// none.
@@ -1814,6 +1824,73 @@ impl<P: MlDsaParameterSet> MlDsaKeyPair<P> {
     pub fn sign(&self, message: &[u8]) -> Result<MlDsaSignature<P>, Error> {
         self.0.sign(&[], message).map(MlDsaSignature)
     }
+
+    /// The expanded private key, FIPS 204's `sk`, wiped on drop.
+    ///
+    /// Not a supported API. It exists for the unpublished `rind-acvp` binary,
+    /// behind the `__acvp` feature.
+    #[cfg(feature = "__acvp")]
+    #[doc(hidden)]
+    pub fn expanded_secret(&self) -> crate::acvp::SecretBuf {
+        crate::acvp::SecretBuf::from_slice(self.0.secret_key_bytes())
+    }
+
+    /// Signs with ACVP's `mu`, `rnd`, and context.
+    ///
+    /// `mu` replaces the message representative when the vector set computes
+    /// it outside the module. With no `mu`, `internal` selects FIPS 204's
+    /// internal interface (`H(tr || message)`); otherwise the representative
+    /// binds `context`. `rnd` is FIPS 204's per-signature randomness; all
+    /// zeros is the deterministic mode.
+    ///
+    /// Not a supported API. It exists for the unpublished `rind-acvp` binary,
+    /// behind the `__acvp` feature.
+    #[cfg(feature = "__acvp")]
+    #[doc(hidden)]
+    pub fn sign_acvp(
+        &self,
+        context: &[u8],
+        message: &[u8],
+        mu: Option<&[u8]>,
+        internal: bool,
+        rnd: &[u8],
+    ) -> Result<MlDsaSignature<P>, Error> {
+        let _entry = low::Entry::new_secret();
+        let mu = match mu {
+            Some(mu) => mu.try_into().map_err(|_| Error::WrongLength)?,
+            None if internal => mldsa::mu_internal(self.0.tr(), message),
+            None => self.0.mu(context, message)?,
+        };
+        let rnd: &[u8; 32] = rnd.try_into().map_err(|_| Error::WrongLength)?;
+        // `rnd` is secret, as the hedged `sign` marks its own draw.
+        let rnd = low::ct::into_secret(*rnd);
+        self.0.sign_internal(&mu, &rnd).map(MlDsaSignature)
+    }
+}
+
+/// Verifies an ML-DSA signature the way ACVP's sigVer groups do.
+///
+/// `mu` is the representative the vector set computed. With no `mu`,
+/// `internal` selects FIPS 204's internal interface; otherwise verification
+/// binds `context`. Not a supported API.
+#[cfg(feature = "__acvp")]
+#[doc(hidden)]
+pub fn mldsa_verify_acvp<P: MlDsaParameterSet>(
+    public_key: &[u8],
+    message: &[u8],
+    context: &[u8],
+    mu: Option<&[u8]>,
+    internal: bool,
+    signature: &[u8],
+) -> Result<(), Error> {
+    let _entry = low::Entry::new_public();
+    let tr = mldsa::tr(public_key);
+    let mu = match mu {
+        Some(mu) => mu.try_into().map_err(|_| Error::WrongLength)?,
+        None if internal => mldsa::mu_internal(&tr, message),
+        None => mldsa::mu(&tr, context, message)?,
+    };
+    mldsa::verify_mu::<P>(public_key, &mu, signature)
 }
 
 impl<P: MlDsaParameterSet> fmt::Debug for MlDsaKeyPair<P> {

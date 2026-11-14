@@ -52,6 +52,34 @@ impl<const N: usize> PosInt<N> {
         self.used = other.used;
     }
 
+    /// Loads `bytes` at a width fixed by public lengths.
+    ///
+    /// `bytes.len()` and `min`'s width are public. Leading zero bytes stay in
+    /// the value, so they do not change `used`. `used` is the maximum of
+    /// `min`'s width and the limb count of that length. `__acvp`'s RSA
+    /// primitive uses this so an exponent's trace follows those lengths.
+    #[cfg(feature = "__acvp")]
+    pub(crate) fn from_public_width(bytes: &[u8], min: &Self) -> Result<Self, Error> {
+        let limbs = bytes.len().div_ceil(8).max(min.used);
+        if limbs > N {
+            return Err(Error::WrongLength);
+        }
+        let mut out = Self::zero();
+        out.used = limbs;
+        for limb in 0..limbs {
+            let mut word = 0u64;
+            for byte in 0..8 {
+                let from_end = limb * 8 + byte;
+                if from_end < bytes.len() {
+                    let index = bytes.len() - 1 - from_end;
+                    word |= u64::from(bytes[index]) << (8 * byte);
+                }
+            }
+            out.words[limb] = word;
+        }
+        Ok(out)
+    }
+
     /// Replaces top word with `word` and increases `used`.
     ///
     /// This means `Self::zero().push_word(1)` == `Self::one()`,
@@ -452,7 +480,7 @@ impl<const N: usize> PosInt<N> {
     ///
     /// This is done in a side-channel-free way, with respect to the values of `self`, `e`,
     /// `n` and `n_0`.  The instruction trace depends only on `e.used` and `n.used`.
-    fn mod_exp(&self, e: &Self, n: &Self, n_montifier: &Self, n_0: u64) -> Self {
+    pub(crate) fn mod_exp(&self, e: &Self, n: &Self, n_montifier: &Self, n_0: u64) -> Self {
         #[cfg(rind_backend = "x86_64")]
         if let Some(r) = self.mod_exp_rsaz(e, n, n_montifier, n_0) {
             return r;

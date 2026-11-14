@@ -64,6 +64,15 @@ pub mod fips;
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test;
 
+/// Operations the unpublished `rind-acvp` binary needs.
+///
+/// Not a supported API. `__acvp` exists so that binary can answer NIST's
+/// seeded tests. rind's callers generate keys from the system RNG and sign
+/// with fresh randomness.
+#[cfg(feature = "__acvp")]
+#[doc(hidden)]
+pub mod acvp;
+
 // vvv Public API
 pub use error::{Error, KeyRejected};
 
@@ -395,6 +404,9 @@ pub mod vrf {
 /// # }
 /// ```
 pub mod signature {
+    #[cfg(feature = "__acvp")]
+    #[doc(hidden)]
+    pub use crate::high::signature::mldsa_verify_acvp;
     pub use crate::high::signature::{
         EcdsaKeyPair, EcdsaScalar, EcdsaSigningAlgorithm, Ed25519KeyPair, Ed25519Seed, PublicKey,
         RsaKeyPair, RsaPssSaltLength, RsaSigningAlgorithm, RsaVerificationAlgorithm, Signature,

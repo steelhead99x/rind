@@ -38,19 +38,37 @@ impl RsaPrivateKey {
         n: RsaPosIntModN,
         e: u64,
     ) -> Result<Self, Error> {
-        let (p_len, q_len) = (p.len_bytes(), q.len_bytes());
-        if n.len_bits() < MIN_MODULUS_BITS {
+        Self::from_components(p, q, d, dp, dq, iqmp, RsaPublicKey::new(n, e)?)
+    }
+
+    /// Validates private components against an already validated public key.
+    pub(crate) fn from_components(
+        p: RsaPosIntModP,
+        q: RsaPosIntModP,
+        d: RsaPosIntD,
+        dp: RsaPosIntModP,
+        dq: RsaPosIntModP,
+        iqmp: RsaPosIntModP,
+        public: RsaPublicKey,
+    ) -> Result<Self, Error> {
+        if public.modulus_len_bits() < MIN_MODULUS_BITS {
             return Err(KeyFormatError::RsaModulus.into());
         }
-        if p.is_even()
-            || q.is_even()
-            || q.len_bits() < 2
-            || !(MIN_PRIVATE_MODULUS_BYTES..=MAX_PRIVATE_MODULUS_BYTES).contains(&p_len)
-        {
+        // The arithmetic needs nonzero top words. Only this format verdict
+        // is public; the actual prime lengths and parity stay secret.
+        let p_bytes = p.len_bytes();
+        let valid = !p.is_even()
+            & !q.is_even()
+            & (q.len_bits() >= 2)
+            & (p_bytes >= MIN_PRIVATE_MODULUS_BYTES)
+            & (p.as_words().last().copied().unwrap_or(0) != 0)
+            & (q.as_words().last().copied().unwrap_or(0) != 0);
+        if !low::ct::into_public(valid) {
             return Err(KeyFormatError::RsaPrimes.into());
         }
-
-        let public = RsaPublicKey::new(n, e)?;
+        // Widths come from the encodings, not a scan of the secret primes.
+        let (p_len, q_len) = (p.as_words().len(), q.as_words().len());
+        let e = public.e;
 
         let mut p: SecretRsaPosIntModP = p.into();
         let mut q: SecretRsaPosIntModP = q.into();

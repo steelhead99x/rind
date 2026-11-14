@@ -396,6 +396,34 @@ fn check_zeroed_on_drop<T: Unpin>(value: Pin<Box<T>>) {
     }
 }
 
+/// ACVP's keys and derived material live in a `SecretBuf`, so this sees
+/// every byte after `Drop`, including a truncated buffer's discarded tail.
+#[cfg(feature = "__acvp")]
+#[test]
+fn acvp_secret_buf() {
+    let short = rind::acvp::SecretBuf::from_slice(&[0xff; 32]);
+    check_zeroed_on_drop(Box::pin(short));
+    let full = rind::acvp::SecretBuf::from_slice(&[0xff; 255 * 64]);
+    check_zeroed_on_drop(Box::pin(full));
+    let mut derived = rind::acvp::SecretBuf::zeroed(255 * 64).unwrap();
+    derived.as_mut_slice().fill(0xff);
+    derived.truncate(32).unwrap();
+    check_zeroed_on_drop(Box::pin(derived));
+}
+
+/// ACVP's long-lived DRBG wipes its whole value, including the hash choice.
+#[cfg(feature = "__acvp")]
+#[test]
+fn acvp_drbg() {
+    for hash in ["SHA-1", "SHA2-256", "SHA2-384", "SHA2-512"] {
+        let mut drbg =
+            rind::acvp::AcvpDrbg::new(hash, &[0xff; 32], &[0xff; 16], b"personal").unwrap();
+        drbg.reseed(&[0xff; 32], b"reseed");
+        drbg.generate(&mut [0; 80], b"additional");
+        check_zeroed_on_drop(Box::pin(drbg));
+    }
+}
+
 fn read_into_vec(ptr: *const u8, len: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(len);
 

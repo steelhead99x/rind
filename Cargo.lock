@@ -4431,6 +4431,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rind-acvp"
+version = "0.1.0"
+dependencies = [
+ "crabgrind 0.4.0",
+ "rind",
+ "serde_json",
+]
+
+[[package]]
 name = "rind-aws-lc-rs"
 version = "1.0.3"
 dependencies = [

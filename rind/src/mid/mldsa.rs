@@ -272,9 +272,15 @@ impl<P: Params> KeyPair<P> {
         mu(self.tr(), context, message)
     }
 
-    /// FIPS 204's `ML-DSA.Sign_internal`, for tests and the FIPS module's
-    /// self-test to fix `rnd` and `mu`.
-    #[cfg(any(test, rind_fips))]
+    /// The expanded private key, FIPS 204's `sk`.
+    #[cfg(feature = "__acvp")]
+    pub(crate) fn secret_key_bytes(&self) -> &[u8] {
+        self.secret_key.as_ref()
+    }
+
+    /// FIPS 204's `ML-DSA.Sign_internal`, for tests, `rind-acvp`, and the
+    /// FIPS module's self-test to fix `rnd` and `mu`.
+    #[cfg(any(test, feature = "__acvp", rind_fips))]
     pub(crate) fn sign_internal(
         &self,
         mu: &[u8; MU_LEN],
@@ -306,6 +312,29 @@ pub(crate) fn tr(pk: &[u8]) -> [u8; TR_LEN] {
 /// The `tr` stored in expanded private key `sk`.
 fn tr_of<P: Params>(sk: &[u8]) -> &[u8; TR_LEN] {
     sk[2 * SEED_LEN..2 * SEED_LEN + TR_LEN].try_into().unwrap()
+}
+
+/// `mu = H(tr || message)`, FIPS 204's internal interface, which binds no
+/// context.
+#[cfg(feature = "__acvp")]
+pub(crate) fn mu_internal(tr: &[u8; TR_LEN], message: &[u8]) -> [u8; MU_LEN] {
+    let mut mu = [0u8; MU_LEN];
+    let mut h = Shake256Sponge::new();
+    h.absorb(tr);
+    h.absorb(message);
+    Shake256::new(&h).read(&mut mu);
+    mu
+}
+
+/// Verifies `signature` over an already computed `mu`.
+#[cfg(feature = "__acvp")]
+pub(crate) fn verify_mu<P: Params>(
+    pk: &[u8],
+    mu: &[u8; MU_LEN],
+    signature: &[u8],
+) -> Result<(), Error> {
+    let _entry = Entry::new_public();
+    verify_internal::<P>(pk, mu, signature)
 }
 
 /// `mu = H(tr || 0 || len(context) || context || message)`, pure ML-DSA's

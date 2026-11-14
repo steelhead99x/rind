@@ -1,0 +1,519 @@
+#!/usr/bin/env bash
+# Run rind-acvp against the vendored ACVP sample sets.
+#
+# Needs aws-lc's acvptool on PATH:
+#
+#   go build -o acvptool ./util/fipstools/acvp/acvptool
+#
+# ACVP_SKIP_TOOL=1 runs the crate tests and stops, for a machine that has
+# not built acvptool.
+# Optional arguments select sample or supplemental set names.
+#
+# The sample files are internalProjection.json and carry answers. This
+# script turns each one into the prompt acvptool expects, then compares
+# the replies to those answers. Groups that stay out:
+#
+#   * hash LDT samples (8 GiB and larger). The client and wrapper support
+#     up to 8 GiB; this run uses a short LDT crate test instead.
+#   * SHA-2's alternate Monte Carlo, which acvptool does not drive.
+#   * AES-CTR tests whose payloadLen is not a whole number of bytes.
+#     acvptool rejects them. mid::aes::acvp_ctr covers the mask.
+#   * ECDSA keyGen whose secretGenerationMode is not "testing candidates".
+#   * RSA sigVer groups whose public exponent is above 33 bits. rind
+#     refuses those, matching aws-lc-rs. The in-process sample test skips
+#     them the same way.
+#   * XECDH and DetECDSA. This wrapper does not advertise them.
+#
+# Legacy ML-DSA external-interface samples contain externalMu: false.
+# That field only applies to the internal interface; remove it so acvptool
+# sends its empty flag for the external interface, including empty contexts.
+#
+# KDA groups store a hybrid shared secret as z and t. acvptool forwards
+# only z, so the script concatenates t onto z first. A live NIST session
+# still drops t until acvptool concatenates it. rind's acvp_kda test covers
+# the hybrid path without acvptool.
+#
+# ECDSA, EdDSA, and RSA sigGen answers are fresh keys. The script checks
+# that acvptool accepts the replies. acvptool self-verifies ECDSA and RSA
+# signatures. RSA sigGen keeps one key per modulus, hash, and padding for
+# the wrapper context's lifetime, which is what acvptool needs for a group.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+cargo test -p rind-acvp --locked
+
+if [ "${ACVP_SKIP_TOOL:-}" = 1 ]; then
+  exit 0
+fi
+
+if ! command -v acvptool >/dev/null; then
+  echo "acvptool is not on PATH." >&2
+  echo "From a checkout of aws-lc:" >&2
+  echo "  go build -o acvptool ./util/fipstools/acvp/acvptool" >&2
+  exit 1
+fi
+
+cargo build -p rind-acvp --locked
+
+target_dir=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+export RIND_ACVP_WRAPPER="${RIND_ACVP_WRAPPER:-$target_dir/debug/rind-acvp}"
+export RIND_ACVP_SAMPLES="${RIND_ACVP_SAMPLES:-$PWD/thirdparty/acvp}"
+
+python3 - "$RIND_ACVP_WRAPPER" "$(command -v acvptool)" "$RIND_ACVP_SAMPLES" "$@" <<'PY'
+import hashlib
+import hmac
+import json
+import subprocess
+import sys
+from copy import deepcopy
+from pathlib import Path
+
+WRAPPER = sys.argv[1]
+TOOL = sys.argv[2]
+BASE = sys.argv[3]
+
+def fold(value):
+    if isinstance(value, str):
+        return value.lower()
+    if isinstance(value, list):
+        return [fold(item) for item in value]
+    if isinstance(value, dict):
+        return {key: fold(item) for key, item in value.items()}
+    return value
+
+
+def same(expected, got):
+    if isinstance(expected, list) and expected and isinstance(expected[0], dict):
+        if not isinstance(got, list) or len(expected) != len(got):
+            return False
+        keys = ("md", "pt", "ct", "key", "iv")
+        for left, right in zip(expected, got):
+            if not isinstance(right, dict):
+                return False
+            for key in keys:
+                if key in left and (key not in right or not same(left[key], right[key])):
+                    return False
+        return True
+    if type(expected) is not type(got):
+        return False
+    return fold(expected) == fold(got)
+
+
+def result_fields(src, group, test):
+    algorithm, mode = src["algorithm"], src.get("mode")
+    if group.get("testType") == "MCT":
+        return ["resultsArray"]
+    if algorithm.startswith("SHA"):
+        return ["md"]
+    if algorithm.startswith("HMAC-"):
+        return ["mac"]
+    if algorithm.startswith("ACVP-AES-"):
+        if group["direction"] == "encrypt":
+            return ["ct", "tag"] if algorithm.endswith(("-GCM", "-GMAC")) else ["ct"]
+        if algorithm.endswith(("-GCM", "-GMAC", "-KW", "-KWP")):
+            return ["testPassed"] + (["pt"] if test["testPassed"] else [])
+        return ["pt"]
+    if algorithm == "KDA":
+        if group["testType"] == "VAL":
+            return ["testPassed"]
+        return ["dkms"] if group.get("multiExpansion") else ["dkm"]
+    if algorithm == "PBKDF":
+        return ["derivedKey"]
+    if algorithm == "hmacDRBG":
+        return ["returnedBits"]
+    if algorithm == "KAS-ECC-SSC":
+        return ["testPassed"]
+    if algorithm == "ECDSA":
+        return {"keyGen": ["d", "qx", "qy"], "sigGen": ["r", "s"]}.get(mode, ["testPassed"])
+    if algorithm == "EDDSA":
+        return {"keyGen": ["d", "q"], "sigGen": ["signature"]}.get(mode, ["testPassed"])
+    if algorithm == "ML-KEM":
+        if mode == "keyGen":
+            return ["ek", "dk"]
+        return {
+            "encapsulation": ["c", "k"],
+            "decapsulation": ["k"],
+        }.get(group["function"], ["testPassed"])
+    if algorithm == "ML-DSA":
+        return {"keyGen": ["pk", "sk"], "sigGen": ["signature"]}.get(mode, ["testPassed"])
+    if algorithm == "RSA":
+        if mode == "sigGen":
+            return ["signature"]
+        if mode in ("signaturePrimitive", "decryptionPrimitive") and test["testPassed"]:
+            return ["testPassed", "signature" if mode == "signaturePrimitive" else "pt"]
+        return ["testPassed"]
+    raise ValueError(f"no result schema for {algorithm}/{mode}")
+
+
+def nonempty_hex(value):
+    return isinstance(value, str) and bool(value) and bool(bytes.fromhex(value))
+
+
+def keep_hash(group):
+    kind = group.get("testType")
+    if kind == "LDT":
+        return False
+    if kind == "MCT":
+        return group.get("mctVersion") == "standard"
+    return kind == "AFT"
+
+
+def keep_ctr(group):
+    group["tests"] = [
+        test for test in group["tests"] if test.get("payloadLen", 0) % 8 == 0
+    ]
+    return bool(group["tests"])
+
+
+def keep_ecdsa_keygen(group):
+    return group.get("secretGenerationMode") == "testing candidates"
+
+
+def e_bits(hex_e):
+    return int(hex_e, 16).bit_length()
+
+
+def keep_rsa_sigver(group):
+    # rind's PublicKey refuses a public exponent above 33 bits.
+    return e_bits(group["e"]) <= 33
+
+
+def adapt_hmac(group):
+    # UPSTREAM.md, "acvptool expects older sample formats".
+    out = []
+    for test in group["tests"]:
+        one = {
+            "tgId": group["tgId"],
+            "testType": group["testType"],
+            "msgLen": test["msgLen"],
+            "keyLen": test["keyLen"],
+            "macLen": test["macLen"],
+            "tests": [test],
+        }
+        out.append(one)
+    return out
+
+
+def adapt_kda(group):
+    # UPSTREAM.md, "acvptool expects older sample formats": it sends only z.
+    if group.get("usesHybridSharedSecret"):
+        for test in group["tests"]:
+            params = test["kdfParameter"]
+            params["z"] = params.get("z", "") + params.get("t", "")
+            params.pop("t", None)
+        group["usesHybridSharedSecret"] = False
+        group["zLength"] += group.pop("auxSharedSecretLen")
+    return [group]
+
+
+def adapt_mldsa_signature(group):
+    # UPSTREAM.md, "acvptool expects older sample formats".
+    # acvptool preserves presence: absent externalMu becomes an empty flag;
+    # false/true become [0]/[1], identifying the internal interface.
+    if group.get("signatureInterface") == "external":
+        if group.get("externalMu"):
+            raise ValueError("external ML-DSA interface cannot use externalMu")
+        group.pop("externalMu", None)
+    return [group]
+
+
+def strip_aead(group):
+    for test in group["tests"]:
+        if group.get("direction") == "encrypt":
+            test.pop("ct", None)
+            test.pop("tag", None)
+        else:
+            test.pop("pt", None)
+            test.pop("testPassed", None)
+
+
+# name, keep, adapt, strip, compare
+SETS = [
+    ("SHA2-256-1.0", keep_hash, None, None, True),
+    ("SHA2-384-1.0", keep_hash, None, None, True),
+    ("SHA2-512-1.0", keep_hash, None, None, True),
+    ("SHA2-512-256-1.0", keep_hash, None, None, True),
+    ("SHA3-256-2.0", keep_hash, None, None, True),
+    ("SHA3-384-2.0", keep_hash, None, None, True),
+    ("SHA3-512-2.0", keep_hash, None, None, True),
+    ("HMAC-SHA-1-2.0", None, adapt_hmac, None, True),
+    ("HMAC-SHA2-256-2.0", None, adapt_hmac, None, True),
+    ("HMAC-SHA2-384-2.0", None, adapt_hmac, None, True),
+    ("HMAC-SHA2-512-2.0", None, adapt_hmac, None, True),
+    ("ACVP-AES-ECB-1.0", None, None, None, True),
+    ("ACVP-AES-CBC-1.0", None, None, None, True),
+    ("ACVP-AES-CTR-1.0", keep_ctr, None, None, True),
+    ("ACVP-AES-GCM-1.0", None, None, strip_aead, True),
+    ("ACVP-AES-GMAC-1.0", None, None, strip_aead, True),
+    ("ACVP-AES-KW-1.0", None, None, strip_aead, True),
+    ("ACVP-AES-KWP-1.0", None, None, strip_aead, True),
+    ("KDA-HKDF-Sp800-56Cr2", None, adapt_kda, None, True),
+    ("ECDSA-KeyVer-FIPS186-5", None, None, None, True),
+    ("ECDSA-SigVer-FIPS186-5", None, None, None, True),
+    ("ECDSA-KeyGen-FIPS186-5", keep_ecdsa_keygen, None, None, False),
+    ("ECDSA-SigGen-FIPS186-5", None, None, None, False),
+    ("EDDSA-KeyVer-1.0", None, None, None, True),
+    ("EDDSA-SigVer-1.0", None, None, None, True),
+    ("EDDSA-KeyGen-1.0", None, None, None, False),
+    ("EDDSA-SigGen-1.0", None, None, None, False),
+    ("ML-KEM-keyGen-FIPS203", None, None, None, True),
+    ("ML-KEM-encapDecap-FIPS203-tr1", None, None, None, True),
+    ("ML-DSA-keyGen-FIPS204", None, None, None, True),
+    ("ML-DSA-sigGen-FIPS204", None, adapt_mldsa_signature, None, True),
+    ("ML-DSA-sigVer-FIPS204", None, adapt_mldsa_signature, None, True),
+    ("RSA-DecryptionPrimitive-Sp800-56Br2", None, None, None, True),
+    ("RSA-SignaturePrimitive-2.0", None, None, None, True),
+    ("RSA-SigVer-FIPS186-5", keep_rsa_sigver, None, None, True),
+    ("RSA-SigGen-FIPS186-5", None, None, None, False),
+]
+
+
+def run_set(name, keep=None, adapt=None, strip=None, compare=True, src=None):
+    if src is None:
+        with open(f"{BASE}/{name}.json") as handle:
+            src = json.load(handle)
+    prompt = deepcopy(src)
+    expected = {}
+    groups = []
+    next_id = 1
+    for group in prompt["testGroups"]:
+        if keep is not None and not keep(group):
+            continue
+        produced = adapt(group) if adapt else [group]
+        for item in produced:
+            item = deepcopy(item)
+            item["tgId"] = next_id
+            metadata = {key: value for key, value in item.items() if key != "tests"}
+            for test in item["tests"]:
+                key = (next_id, test["tcId"])
+                if key in expected:
+                    raise ValueError(f"{name}: duplicate prompt test {key}")
+                expected[key] = (metadata, deepcopy(test))
+            if strip:
+                strip(item)
+            groups.append(item)
+            next_id += 1
+    if not groups:
+        print(f"{name}: nothing to run")
+        return 0
+    prompt["testGroups"] = groups
+    proc = subprocess.run(
+        [TOOL, "-wrapper", WRAPPER, "-json", "/dev/stdin"],
+        input=json.dumps([prompt]).encode(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stderr.decode(errors="replace")[-4000:])
+        sys.stderr.write(proc.stdout.decode(errors="replace")[-2000:])
+        print(f"{name}: acvptool exited {proc.returncode}", file=sys.stderr)
+        return 1
+    got = json.loads(proc.stdout)[0]["testGroups"]
+    checked = 0
+    mismatches = []
+    seen = set()
+    group_ids = {key[0] for key in expected}
+    seen_groups = set()
+    for group in got:
+        group_id = group["tgId"]
+        if group_id not in group_ids or group_id in seen_groups:
+            mismatches.append(((group_id, None), "tgId", "one requested group", "unexpected or duplicate"))
+            continue
+        seen_groups.add(group_id)
+        if not compare and src.get("mode") == "sigGen":
+            fields = {"ECDSA": ["qx", "qy"], "EDDSA": ["q"], "RSA": ["n", "e"]}[src["algorithm"]]
+            for field in fields:
+                if not nonempty_hex(group.get(field)):
+                    mismatches.append(((group["tgId"], None), field, "a public key", group.get(field)))
+        for test in group["tests"]:
+            key = (group["tgId"], test["tcId"])
+            if key not in expected or key in seen:
+                mismatches.append((key, "tcId", "one requested result", "unexpected or duplicate"))
+                continue
+            seen.add(key)
+            original_group, exp = expected[key]
+            for field in result_fields(src, original_group, exp):
+                value = test.get(field)
+                if field not in test:
+                    mismatches.append((key, field, "a result", "missing"))
+                elif compare and not same(exp[field], value):
+                    mismatches.append((key, field, exp[field], value))
+                elif not compare and not nonempty_hex(value):
+                    mismatches.append((key, field, "nonempty hex", value))
+            checked += 1
+    missing = [key for key in expected if key not in seen]
+    if missing or mismatches:
+        print(
+            f"{name}: {len(mismatches)} mismatches, {len(missing)} missing",
+            file=sys.stderr,
+        )
+        for item in mismatches[:8]:
+            key, field, exp, value = item
+            print(f"  {key} {field}", file=sys.stderr)
+            print(f"    expected {str(exp)[:180]}", file=sys.stderr)
+            print(f"    got      {str(value)[:180]}", file=sys.stderr)
+        if missing[:4]:
+            print(f"  missing {missing[:4]}", file=sys.stderr)
+        return 1
+    print(f"{name}: {checked}")
+    return 0
+
+
+HASHES = {"SHA-1": "sha1", "SHA2-256": "sha256", "SHA2-384": "sha384", "SHA2-512": "sha512"}
+
+
+def hkdf_expand(prk, info, length, digest):
+    out, previous = b"", b""
+    for counter in range(1, 256):
+        if len(out) >= length:
+            break
+        previous = hmac.digest(prk, previous + info + bytes([counter]), digest)
+        out += previous
+    if len(out) < length:
+        raise ValueError("HKDF output exceeds 255 blocks")
+    return out[:length]
+
+
+def drbg_answer(digest, entropy, nonce, personal, other, out_len):
+    # SP 800-90A 10.1.2, independent of rind and the wrapper.
+    size = hashlib.new(digest).digest_size
+    key, value = bytes(size), bytes([1]) * size
+
+    def update(data):
+        nonlocal key, value
+        key = hmac.digest(key, value + b"\0" + data, digest)
+        value = hmac.digest(key, value, digest)
+        if data:
+            key = hmac.digest(key, value + b"\1" + data, digest)
+            value = hmac.digest(key, value, digest)
+
+    update(entropy + nonce + personal)
+    for operation in other:
+        additional = bytes.fromhex(operation["additionalInput"])
+        fresh = bytes.fromhex(operation["entropyInput"])
+        if operation["intendedUse"] == "reSeed":
+            update(fresh + additional)
+            continue
+        if fresh:
+            update(fresh + additional)
+            additional = b""
+        if additional:
+            update(additional)
+        out = b""
+        while len(out) < out_len:
+            value = hmac.digest(key, value, digest)
+            out += value
+        update(additional)
+    return out[:out_len].hex()
+
+
+def supplemental_sets():
+    # The vendored ACVP sets omit these supported operations. Use Python's
+    # standard-library oracle and the already-vendored CAVP ECDH answers.
+    # SHA-1 is registered, and thirdparty/acvp has no SHA-1 file.
+    pbkdf, drbg, kda = [], [], []
+    for hash_name, digest in HASHES.items():
+        tests = []
+        for i, (length, iterations) in enumerate([(112, 1), (256, 2), (4096, 3), (112, 10000)], 1):
+            password = "password" if i % 2 else "p" * 128
+            salt = bytes(range(16)) if i % 2 else bytes(range(256)) * 2
+            tests.append(dict(tcId=i, password=password, salt=salt.hex(), keyLen=length,
+                              iterationCount=iterations,
+                              derivedKey=hashlib.pbkdf2_hmac(digest, password.encode(), salt, iterations, length // 8).hex()))
+        pbkdf.append(dict(tgId=len(pbkdf) + 1, testType="AFT", hmacAlg=hash_name, tests=tests))
+        for nonempty in (False, True):
+            entropy, nonce = bytes(range(32)), bytes(range(16))
+            personal = b"p" * 32 if nonempty else b""
+            additional = b"a" * 32 if nonempty else b""
+            for kind in ("generate", "reseed", "pr"):
+                other = []
+                if kind == "reseed":
+                    other.append(dict(intendedUse="reSeed", additionalInput=additional.hex(), entropyInput=bytes(range(32, 64)).hex()))
+                for start in (64, 96):
+                    other.append(dict(intendedUse="generate", additionalInput=additional.hex(),
+                                      entropyInput=bytes(range(start, start + 32)).hex() if kind == "pr" else ""))
+                answer = drbg_answer(digest, entropy, nonce, personal, other, 128)
+                drbg.append(dict(tgId=len(drbg) + 1, testType="AFT", mode=hash_name, derFunc=False,
+                                 predResistance=kind == "pr", reSeed=kind == "reseed", entropyInputLen=256,
+                                 nonceLen=128, persoStringLen=len(personal) * 8, additionalInputLen=len(additional) * 8,
+                                 returnedBitsLen=1024, tests=[dict(tcId=1, entropyInput=entropy.hex(), nonce=nonce.hex(),
+                                                                 persoString=personal.hex(), otherInput=other, returnedBits=answer)]))
+        ikm, salt = bytes(range(32)), bytes(range(16))
+        prk = hmac.digest(salt, ikm, digest)
+        sizes = [1, 256, 255 * hashlib.new(digest).digest_size]
+        iterations = [dict(l=size * 8, fixedInfo=bytes([i]).hex()) for i, size in enumerate(sizes)]
+        answers = [hkdf_expand(prk, bytes([i]), size, digest).hex() for i, size in enumerate(sizes)]
+        params = dict(kdfType="hkdf", z=ikm.hex(), salt=salt.hex(), hmacAlg=hash_name, iterationParameters=iterations)
+        config = dict(kdfType="hkdf", saltMethod="random", saltLen=128, hmacAlg=hash_name)
+        kda.append(dict(tgId=len(kda) + 1, testType="AFT", multiExpansion=True, kdfMultiExpansionConfiguration=config,
+                        tests=[dict(tcId=1, kdfMultiExpansionParameter=params, dkms=answers)]))
+
+    by_curve = {curve: [] for curve in ("P-256", "P-384", "P-521")}
+    cavp = Path("thirdparty/vectors/aws-lc/crypto/ecdh_extra/ecdh_tests.txt").read_text()
+    for block in cavp.split("\n\n"):
+        fields = dict(line.split(" = ", 1) for line in block.splitlines() if " = " in line)
+        if fields.get("Curve") in by_curve:
+            by_curve[fields["Curve"]].append(fields)
+    kas = []
+    for curve, vectors in by_curve.items():
+        if len(vectors) != 25:
+            raise ValueError(f"{curve}: expected 25 CAVP vectors, got {len(vectors)}")
+        for scheme in ("ephemeralUnified", "staticUnified", "onePassDh"):
+            for role in ("initiator", "responder"):
+                peer = "ephemeral" if scheme == "ephemeralUnified" or (scheme == "onePassDh" and role == "responder") else "static"
+                private = "ephemeral" if scheme == "ephemeralUnified" or (scheme == "onePassDh" and role == "initiator") else "static"
+                tests = []
+                for vector in vectors:
+                    tests.append(dict(tcId=len(tests) + 1, **{peer + "PublicServerX": vector["PeerX"], peer + "PublicServerY": vector["PeerY"],
+                                                            private + "PrivateIut": vector["Private"], "z": vector["Z"], "testPassed": True}))
+                bad = deepcopy(tests[0])
+                bad.update(tcId=len(tests) + 1, z="00" * (len(bad["z"]) // 2), testPassed=False)
+                tests.append(bad)
+                kas.append(dict(tgId=len(kas) + 1, testType="VAL", domainParameterGenerationMode=curve,
+                                kasRole=role, scheme=scheme, tests=tests))
+    messages = [b"", b"abc", bytes([0xFF]), bytes(range(256)) * 4]
+    sha1 = [
+        dict(
+            tgId=1,
+            testType="AFT",
+            tests=[
+                dict(
+                    tcId=i,
+                    msg=msg.hex(),
+                    len=len(msg) * 8,
+                    md=hashlib.sha1(msg).hexdigest(),
+                )
+                for i, msg in enumerate(messages, 1)
+            ],
+        )
+    ]
+    return {
+        "SHA-1-1.0": dict(algorithm="SHA-1", revision="1.0", testGroups=sha1),
+        "PBKDF-1.0": dict(algorithm="PBKDF", revision="1.0", testGroups=pbkdf),
+        "hmacDRBG-1.0": dict(algorithm="hmacDRBG", revision="1.0", testGroups=drbg),
+        "KAS-ECC-SSC-Sp800-56Ar3": dict(algorithm="KAS-ECC-SSC", revision="Sp800-56Ar3", testGroups=kas),
+        "KDA-HKDF-multi-expansion": dict(algorithm="KDA", mode="HKDF", revision="Sp800-56Cr2", testGroups=kda),
+    }
+
+
+def main():
+    names = sys.argv[4:]
+    supplemental = supplemental_sets()
+    known = {item[0] for item in SETS} | supplemental.keys()
+    unknown = set(names) - known
+    if unknown:
+        raise ValueError(f"unknown sets: {', '.join(sorted(unknown))}")
+    selected = [item for item in SETS if not names or item[0] in names]
+    failed = 0
+    for item in selected:
+        failed += run_set(*item)
+    for name, prompt in supplemental.items():
+        if not names or name in names:
+            failed += run_set(name, src=prompt)
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+PY
