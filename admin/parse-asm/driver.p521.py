@@ -114,5 +114,6 @@ if __name__ == "__main__":
     emit_all(Architecture_amd64, "x86", "x86_64", "")
     # For CPUs without BMI2 and ADX, chosen at run time.
     emit_all(Architecture_amd64, "x86", "x86_64", "_alt", suffix="_alt", only_mulx=True)
-    # The `_alt` routines measured faster on aarch64 (Neoverse N2).
+    # The `_alt` routines, for cores with a wide multiplier. `driver.narrow.py`
+    # imports the others, and `wide_mux` chooses.
     emit_all(Architecture_aarch64, "arm", "aarch64", "_alt")

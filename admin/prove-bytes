@@ -539,13 +539,23 @@ OPERAND = re.compile(r'\b(?:out|inout|lateout|inlateout)\("(\w+)"\)')
 # Registers a proof lets its routine change that the code never writes, so
 # its block need not declare them. `clobbers` fails once one is declared or
 # named in the block, so that this list stays exact.
+# Keyed by `(arch, module, function, register)`. The module is the Rust
+# file, so `bignum_madd_n25519`'s exemption does not cover
+# `bignum_madd_n25519_narrow`, whose block does name X17.
 LOOSE = {
-    ("x86_64", "mlkem_unpack", "RAX"),
-    ("aarch64", "bignum_demont", "X12"),
-    ("aarch64", "bignum_demont", "X13"),
-    ("aarch64", "bignum_demont_p384", "X11"),
-    ("aarch64", "bignum_demont_p384", "X12"),
-    ("aarch64", "bignum_madd_n25519", "X17"),
+    ("x86_64", "mlkem_unpack", "mlkem_unpack", "RAX"),
+    ("aarch64", "bignum_demont", "bignum_demont", "X12"),
+    ("aarch64", "bignum_demont", "bignum_demont", "X13"),
+    ("aarch64", "bignum_demont_p384", "bignum_demont_p384", "X11"),
+    ("aarch64", "bignum_demont_p384", "bignum_demont_p384", "X12"),
+    ("aarch64", "bignum_madd_n25519", "bignum_madd_n25519", "X17"),
+}
+
+# `arm/proofs/instruction.ml`. Q8-Q15's upper halves are the part of the
+# callee-saved SIMD registers the AAPCS64 lets a routine change.
+SIMD_SETS = {
+    "MODIFIABLE_SIMD_REGS": {f"Q{i}" for i in (*range(8), *range(16, 32))},
+    "MODIFIABLE_UPPER_SIMD_REGS": {f"Q{i}" for i in range(8, 16)},
 }
 
 
@@ -587,6 +597,9 @@ def maychange(arch, source):
     for item in re.findall(r"\bMAYCHANGE\b\s*(\[[^\]]*\]|\w+)", m.group(1)):
         if item == "SOME_FLAGS":
             continue
+        if item in SIMD_SETS:
+            regs |= SIMD_SETS[item]
+            continue
         if not item.startswith("["):
             raise Check(f"its proof's MAYCHANGE {item} is not a list")
         regs |= set(re.findall(REGISTER[arch], item))
@@ -608,11 +621,12 @@ def clobbers(arch, path, source):
     named = {register(arch, r) for r in re.findall(r"\b[a-z]+\d*\b", body)}
     if 'clobber_abi("C")' in body:
         return True
+    key = (arch, module[-1], name)
     for reg in sorted(regs - UNDECLARED[arch] - declared):
-        if (arch, name, reg) not in LOOSE:
+        if (*key, reg) not in LOOSE:
             raise Check(f"its proof lets it change {reg}, which its block does not declare")
-    for a, n, reg in LOOSE:
-        if (a, n) == (arch, name) and (reg in declared or reg in named or reg not in regs):
+    for a, mod, n, reg in LOOSE:
+        if (a, mod, n) == key and (reg in declared or reg in named or reg not in regs):
             raise Check(f"LOOSE lists {reg}, which its block names or its proof keeps")
     return True
 

@@ -38,6 +38,25 @@ pub fn check() -> Result<(), MissingFeature> {
     }
 }
 
+/// Whether this CPU runs s2n-bignum's wide-multiplier schedules.
+///
+/// On aarch64 the narrow schedules run only when Linux's `/proc/cpuinfo`
+/// names every online core as Cortex-A72, Cortex-A76, or Neoverse N1.
+/// Apple's cores, Neoverse V1, V2, V3, and N2, Cobalt 100, a mixed
+/// big.LITTLE list, and a core this crate does not recognise keep the
+/// `_alt` schedules. So does a sandbox whose `/proc/cpuinfo` cannot be
+/// read, Android (the target is not Linux, and a failed read on a Linux
+/// Android build), and Windows on ARM, which never reads a part list.
+/// On every other architecture this is false: those builds have no such
+/// choice. The non-aarch64 body returns `false` without a feature read.
+#[must_use]
+pub fn wide_multiplier() -> bool {
+    #[cfg(rind_backend = "aarch64")]
+    return crate::low::aarch64::cpu::wide_multiplier();
+    #[cfg(not(rind_backend = "aarch64"))]
+    false
+}
+
 /// Reports whether rind runs AES on CPU instructions, as aws-lc's `EVP_has_aes_hardware` does.
 ///
 /// Where it doesn't, ChaCha20-Poly1305 is faster than AES-GCM, so a protocol

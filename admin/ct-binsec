@@ -124,7 +124,8 @@ LIBC = ["memcpy", "memmove", "memset", "memcmp", "bcmp"]
 # ChaCha20 state with `vinsertf128` and `vpermpd`, and aws-lc's AVX2 ML-DSA
 # moves lanes with `vmovshdup` and samples with `vmovmskps`. glibc's `malloc`
 # reads the thread pointer with `mrs`, vpaes and aws-lc's NEON ChaCha20 look
-# up bytes with `tbl`, and ML-KEM's rejection sampling counts bits with `cnt`.
+# up bytes with `tbl`, ML-KEM's rejection sampling counts bits with `cnt`,
+# and s2n-bignum's narrow X25519 selects a lane with `fcsel`.
 # See UPSTREAM.md, "BINSEC cannot decode instructions `admin/ct-binsec` stubs".
 GP = {"e" + r[1:]: r for r in ["rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi"]}
 GP.update(("r{}d".format(n), "r{}".format(n)) for n in range(8, 16))
@@ -210,6 +211,51 @@ def tbl(ops, _):
     return "q{} := {}".format(dst, " :: ".join(out))
 
 
+def fcsel(ops, _):
+    """Select one scalar FP register from the flags and zero the rest of its
+    Q register. BINSEC decodes `fcsel` and then stops, because its DBA has no
+    execute for it. The select is a mux of the flags, so this is an `ite`,
+    not a jump: a statement `if` would be a branch `checkct` instruments."""
+    letters = {"d": 64, "s": 32, "h": 16}
+    if len(ops) != 4:
+        return None
+    parsed = []
+    for reg in ops[:3]:
+        match = re.fullmatch(r"([dsh])([0-9]|[12][0-9]|3[01])", reg)
+        if not match:
+            return None
+        parsed.append(match)
+    if len({item[1] for item in parsed}) != 1:
+        return None
+    cond = {
+        "eq": "z",
+        "ne": "!z",
+        "cs": "c",
+        "hs": "c",
+        "cc": "!c",
+        "lo": "!c",
+        "mi": "n",
+        "pl": "!n",
+        "vs": "v",
+        "vc": "!v",
+        "hi": "(c && !z)",
+        "ls": "(!c || z)",
+        "ge": "(n = v)",
+        "lt": "(n <> v)",
+        "gt": "(!z && (n = v))",
+        "le": "(z || (n <> v))",
+        "al": "true",
+        "nv": "true",
+    }.get(ops[3])
+    if cond is None:
+        return None
+    # `::` binds tighter than `? :`, so the select stays in the low lane.
+    high = 128 - letters[parsed[0][1]]
+    return "q{} := 0<{}> :: ({} ? {} : {})".format(
+        parsed[0][2], high, cond, parsed[1][0], parsed[2][0]
+    )
+
+
 def cnt(ops, _):
     """Each lane's count of set bits."""
     m = re.fullmatch(r"v(\d+)\.(8|16)b, v(\d+)\.(?:8|16)b", ", ".join(ops))
@@ -228,7 +274,7 @@ def cnt(ops, _):
 STUBS = {
     "x86_64": {"stc": lambda *_: "cf := true", "clc": lambda *_: "cf := false"}
     | {"movmskps": movmskps, "vmovmskps": movmskps, "vinsertf128": vinsertf128, "vpermpd": vpermpd, "vmovshdup": vmovshdup},
-    "aarch64": {"mrs": mrs, "tbl": tbl, "cnt": cnt},
+    "aarch64": {"mrs": mrs, "tbl": tbl, "cnt": cnt, "fcsel": fcsel},
 }
 
 

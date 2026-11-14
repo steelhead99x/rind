@@ -60,6 +60,24 @@ jobs:
       - name: ctgrind FIPS module tests
         run: nix develop .#ctgrind --command admin/ctgrind fips ${{ matrix.build }}
 
+      # Denies the wide-multiplier schedules, so the ones Cortex-A76 runs are
+      # checked on this runner too, whichever core it is. The row above checks
+      # the schedules the runner's own core selects.
+      - name: ctgrind tests, narrow multiplier
+        if: runner.arch == 'ARM64'
+        run: nix develop .#ctgrind --command admin/ctgrind ${{ matrix.build }}
+        env:
+          RUSTFLAGS: --cfg rind_cpu_disable
+          RIND_CPU_DISABLE_wide_mul: 1
+          RIND_TEST_ARM_WIDE_MUL: 0
+      - name: ctgrind FIPS module tests, narrow multiplier
+        if: runner.arch == 'ARM64'
+        run: nix develop .#ctgrind --command admin/ctgrind fips ${{ matrix.build }}
+        env:
+          RUSTFLAGS: --cfg rind_cpu_disable
+          RIND_CPU_DISABLE_wide_mul: 1
+          RIND_TEST_ARM_WIDE_MUL: 0
+
   # Valgrind hides ADX, which `admin/ctgrind`'s build switch overrides to
   # check s2n-bignum's ADX routines, so this job denies it to check what
   # CPUs without ADX run: their `_alt` twins, and aws-lc's Montgomery
@@ -295,6 +313,15 @@ jobs:
       - name: ct-qemu
         run: nix develop .#ct-qemu-aarch64 --command admin/ct-qemu --target aarch64-unknown-linux-gnu
 
+      # This runner is a wide core, so the step above traces `_alt`. The
+      # narrow schedules are what Cortex-A72, Cortex-A76, and Neoverse N1 run.
+      - name: ct-qemu, narrow multiplier
+        run: nix develop .#ct-qemu-aarch64 --command admin/ct-qemu --target aarch64-unknown-linux-gnu
+        env:
+          RUSTFLAGS: --cfg rind_cpu_disable
+          RIND_CPU_DISABLE_wide_mul: 1
+          RIND_TEST_ARM_WIDE_MUL: 0
+
   # BINSEC proves each `ct_binsec` test's region constant time for every
   # secret at once, symbolically, on the code the runner's CPU takes short of
   # the instructions it cannot decode (see `admin/ct-binsec`). The portable
@@ -314,6 +341,14 @@ jobs:
             rustflags: --cfg rind_portable --cfg curve25519_dalek_backend="serial"
           - backend: aarch64
             os: ubuntu-24.04-arm
+          # The row above follows this runner's core, which is wide, so its
+          # X25519 and Montgomery product are `_alt` and `bn_mul_mont`. This
+          # row forces the narrow schedules and checks those two.
+          - backend: aarch64-narrow
+            os: ubuntu-24.04-arm
+            rustflags: --cfg rind_cpu_disable
+            tests: --exact ct_binsec_x25519 ct_binsec_mont_mul
+            disable_wide: 1
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -323,6 +358,19 @@ jobs:
       - uses: ./.github/actions/nix
 
       - name: ct-binsec
-        run: nix develop .#binsec --command admin/ct-binsec --timeout 480
+        run: |
+          # An empty value still counts as set, and would force every row narrow.
+          if [ "${DISABLE_WIDE:-}" = 1 ]; then
+            export RIND_CPU_DISABLE_wide_mul=1
+            export RIND_TEST_ARM_WIDE_MUL=0
+          fi
+          if [ -n "${TESTS:-}" ]; then
+            read -ra tests <<< "$TESTS"
+            nix develop .#binsec --command admin/ct-binsec --timeout 480 "${tests[@]}"
+          else
+            nix develop .#binsec --command admin/ct-binsec --timeout 480
+          fi
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
+          TESTS: ${{ matrix.tests }}
+          DISABLE_WIDE: ${{ matrix.disable_wide }}
