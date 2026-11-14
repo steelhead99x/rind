@@ -14,24 +14,29 @@
 //! Returning the working variables in rotated order keeps the loop edge from
 //! moving them.
 //!
-//! LLVM's Xtensa backend (rustc 1.97.0.0, LLVM 21.1.3) does not emit
-//! `ssai`/`src` for a rotate, so the rotate and the block-word load stay
-//! asm. Each rotate is its own asm block so that block's SAR write cannot
-//! interleave with another. ESP-IDF collects `.iram1.*` into IRAM. The
-//! round constants are `.dram1.*`: a variable index cannot use a
-//! PC-relative literal, and an IRAM instruction address is not a data
-//! address. No branch or memory index depends on the message or the state.
-//! Release builds of every other target leave this module out.
+//! Two asm blocks stay, for different reasons. A rotate stays asm because
+//! this backend does not emit `ssai`/`src` for one. The block-word load
+//! stays asm because a misaligned `i32` load is illegal and `BSWAP` is
+//! Expand, so fixing the rotate does not make the load pure Rust. Each
+//! rotate is its own asm block so that block's SAR write cannot interleave
+//! with another. ESP-IDF collects `.iram1.*` into IRAM. The round
+//! constants are `.dram1.*`: a variable index cannot use a PC-relative
+//! literal, and an IRAM instruction address is not a data address. No
+//! branch or memory index depends on the message or the state. Release
+//! builds of every other target leave this module out.
 //!
-//! The formulations below were compiled for `xtensa-esp32s3-espidf` at
-//! opt-level 3 (`lto` off) and objdumped. Counts are dynamic instructions
-//! in `sha256_compress_block`: the first sixteen rounds, the schedule body
-//! three times, then the epilogue, plus one cycle when a load's result is
-//! used by the next instruction. `ssai`/`src` is not an extra stall. IRAM
-//! is the `.iram1` text plus its literal pool in the object file, before
-//! the linker's alignment. None of this was timed on a board.
+//! `model` is one compiler's instruction count, not a board timing. It is
+//! rustc 1.97.0.0 (LLVM 21.1.3), `xtensa-esp32s3-espidf`, opt-level 3,
+//! `lto` off: dynamic instructions in `sha256_compress_block` (the first
+//! sixteen rounds, the schedule body three times, the epilogue) plus one
+//! when a load's result is used by the next instruction. `ssai`/`src` is
+//! not an extra stall. IRAM is the `.iram1` text plus its literal pool in
+//! the object file, before the linker aligns it. The model omits taken
+//! branches, IRAM fetch, and DRAM hits. Nothing in CI rebuilds it, so a
+//! newer LLVM can make the table stale. It records why this compiler kept
+//! the asm.
 //!
-//! | rotate | block word | IRAM | cycles |
+//! | rotate | block word | IRAM | model |
 //! |---|---|---:|---:|
 //! | `ssai`/`src` asm | `l32i` + `ssai 8` asm | 4,324 | 3,545 |
 //! | `u32::rotate_right`, `(x >> n) \| (x << (32 - n))`, or `unchecked_funnel_shr` | asm load | 5,253 | 4,421 |
@@ -41,35 +46,47 @@
 //! | `rotate_right` | `from_be_bytes` | 6,118 | 4,841 |
 //! | `u64` funnel | `from_be_bytes` | 6,098 | 5,303 |
 //!
-//! `u32::rotate_right` (the stable wrapper of `core::intrinsics::rotate_right`),
-//! `(x >> n) | (x << (32 - n))`, and the unstable `unchecked_funnel_shr`
-//! all become `llvm.fshl.i32(x, x, 32 - n)`. `SelectionDAGBuilder` rewrites
-//! equal inputs to `ROTL` without asking whether `ROTL` is legal. This
-//! backend expands `ROTL`/`ROTR`, so isel emits `srli` or `extui`, `slli`,
-//! and `or`: three instructions, and a shift of 16 or more is `extui`. The
-//! custom `FSHL` lowering, which would use `src`, never sees a rotate.
-//! The `u64` form is a 64-bit shift, so it does become `movi.n` + `ssl` +
-//! `src`, but the extra register pressure spills and the block is slower.
-//! `ssai` has an empty TableGen pattern. No target feature or rustc flag
+//! `u32::rotate_right` lowers to `llvm.fshr.i32(x, x, n)`. InstCombine
+//! rewrites that to `llvm.fshl.i32(x, x, 32 - n)`; a dump from before that
+//! pass still shows the `fshr`. The shift-or and the unstable
+//! `unchecked_funnel_shr` reach the same `fshl`. `SelectionDAGBuilder`
+//! then rewrites equal inputs to `ROTL` without asking whether `ROTL` is
+//! legal. This backend expands `ROTL`/`ROTR`, so isel emits `srli` or
+//! `extui`, `slli`, and `or`: three instructions, and a shift of 16 or
+//! more is `extui`. The custom `FSHL` lowering, which would use `src`,
+//! never sees a rotate. The `u64` form is a 64-bit logical shift. A
+//! rotate right by 7 objdumps as `movi.n` of 25, `ssl`, `src`: `ssl`
+//! writes `SAR = 32 - 25`, so the funnel amount is 7. It is not `ssr`.
+//! The extra register pressure spills, and the block is slower. `ssai`
+//! has an empty TableGen pattern. No target feature or rustc flag
 //! selects it.
 //!
 //! `from_be_bytes`, `read_unaligned` plus `swap_bytes`, and the pre-pass
 //! all become `load i32 align 1` plus `llvm.bswap`. The backend does not
 //! allow a misaligned `i32` load, so that is four `l8ui`, and `BSWAP` is
 //! Expand, so the swap is a second byte permute and an `l32r` of `0xFF00`.
-//! ESP32-S3 hardware does perform an unaligned `l32i`
-//! (`XCHAL_UNALIGNED_LOAD_HW`).
+//! The `l32i` in the load asm has the same premise as that asm's SAFETY
+//! comment. ESP-IDF v5.5.1 sets `XCHAL_UNALIGNED_LOAD_HW` and clears
+//! `XCHAL_UNALIGNED_LOAD_EXCEPTION` in `core-isa.h` for ESP32
+//! (`esp32_v3_49_prod`), ESP32-S2, and ESP32-S3. The toolchain's generic
+//! Xtensa default leaves the hardware flag clear, and such a core returns
+//! the aligned word instead of trapping, so this asm is for those three
+//! cores. The table was objdumped for ESP32-S3 only.
 //!
 //! GCC already selects `ssai`/`src` for a constant rotate (`rotrsi3` in
-//! `gcc/config/xtensa/xtensa.md`). A backend patch that would let this
-//! file drop both asm blocks: mark `ROTL`/`ROTR` Custom and lower a
-//! constant rotate to `ssai`/`src` (marking only `FSHL` Custom is not
-//! enough), select `SSAI` for a constant funnel amount rather than
-//! `MOVI` followed by `SSL` or `SSR`, allow misaligned `i32` loads on
-//! cores with that hardware, and custom-lower `BSWAP` to the `ssai 8`
-//! sequence. The request for `src` on `llvm.fshl`/`llvm.fshr` is
-//! <https://github.com/espressif/llvm-project/issues/21>, closed by the
-//! `ssl`/`ssr` path, which is not this sequence.
+//! `gcc/config/xtensa/xtensa.md`). Dropping both asm blocks takes four
+//! backend changes, not a rotate fix alone. Mark `ROTL`/`ROTR` Custom and
+//! lower a constant rotate to `ssai`/`src`. Marking only `FSHL` Custom is
+//! not enough, because InstCombine has turned `fshr` into `fshl` and the
+//! builder then makes `ROTL`. Select `SSAI` when an `SSL` or `SSR` amount
+//! is constant. The measured `u64` rotate uses `SSL` with `32 - n`, so a
+//! matcher that only looks for `SSR` misses it. Allow misaligned `i32`
+//! loads on the cores whose HAL sets `XCHAL_UNALIGNED_LOAD_HW`, and
+//! custom-lower `BSWAP` to the `ssai 8` sequence. Espressif issue 21
+//! asked for `src` on `llvm.fshl`/`llvm.fshr` and was closed by
+//! `6fbc60664a7a6c63451d7c64b2963cf616635143` ("Implement lowering llvm
+//! intrinsics fshr/fshl"), which is the `ssl`/`ssr` path. That is not
+//! `ssai`, and a rotate never reaches it.
 
 // FIPS 180-4 §4.1.2. `g ^ (e & (f ^ g))` is `(e & f) ^ (!e & g)`.
 #[inline(always)]
