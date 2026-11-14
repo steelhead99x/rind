@@ -36,8 +36,9 @@ them, which `admin/prove` extracts, so no transliteration is trusted: the
 proof lists the bytes and fails unless the build's are the same. An axiom in
 `Rind/<Arch>/` that restates one of these theorems names the file, whose
 revision is rind's commit. `nix develop .#hol-light --command admin/prove
-hol-light` checks them alone, in nixpkgs' HOL Light, and `admin/prove
-hol-light x86_64` or `aarch64` one target's, as each CI job does.
+hol-light` checks them alone, in nixpkgs' HOL Light. `admin/prove hol-light
+x86_64` or `admin/prove hol-light aarch64` checks that target's HOL Light
+proofs, as the `hol-light-x86_64` and `hol-light-aarch64` jobs do.
 
 To develop one, `nix develop .#hol-light --command admin/prove session
 <arch> [<file>]` starts a HOL Light session, on Linux, in which a proof
