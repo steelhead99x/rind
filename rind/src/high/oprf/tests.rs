@@ -4,6 +4,67 @@ use serde_json::Value;
 
 use super::*;
 
+// Keep the real group's arithmetic and real point conversion. Only the
+// hash output is forced to an opposite-point sum: finding such a message
+// would require a hash preimage, which is unsuitable for a regression test.
+nist_group!(
+    IdentityP256,
+    p256,
+    Sha256Context,
+    b"P256-SHA256",
+    P256_SHA256,
+    p256::hash_to_curve::hash_to_infinity
+);
+nist_group!(
+    IdentityP384,
+    p384,
+    Sha384Context,
+    b"P384-SHA384",
+    P384_SHA384,
+    p384::hash_to_curve::hash_to_infinity
+);
+nist_group!(
+    IdentityP521,
+    p521,
+    Sha512Context,
+    b"P521-SHA512",
+    P521_SHA512,
+    p521::hash_to_curve::hash_to_infinity
+);
+
+fn refuses_identity_hash<G: Group>() {
+    let _entry = Entry::new_secret();
+    let input = ct::into_secret(*b"identity");
+    let mut key = vec![0; G::SCALAR_LEN];
+    key[G::SCALAR_LEN - 1] = 2;
+    ct::secret_slice(&key);
+    for mode in [Mode::Oprf, Mode::Voprf] {
+        assert_eq!(
+            ClientState::<G>::blind(mode, &input, scalar::<G>(&key)).err(),
+            Some(identity())
+        );
+        assert_eq!(
+            evaluate::<G>(mode, &scalar::<G>(&key), &input).err(),
+            Some(identity())
+        );
+    }
+}
+
+#[test]
+fn p256_refuses_identity_hash_at_oprf_boundaries() {
+    refuses_identity_hash::<IdentityP256>();
+}
+
+#[test]
+fn p384_refuses_identity_hash_at_oprf_boundaries() {
+    refuses_identity_hash::<IdentityP384>();
+}
+
+#[test]
+fn p521_refuses_identity_hash_at_oprf_boundaries() {
+    refuses_identity_hash::<IdentityP521>();
+}
+
 pub(super) fn h(hex: &str) -> Vec<u8> {
     hex::decode(hex).unwrap()
 }

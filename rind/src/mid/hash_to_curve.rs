@@ -464,6 +464,14 @@ pub(crate) mod tests {
         assert_eq!(file.vectors.len(), 5);
     }
 
+    /// An actual sum at infinity, without needing a hash preimage for it.
+    /// Its coordinates stay secret through the wrappers' validation.
+    pub(crate) fn opposite_sum<C: Curve>() -> [C; 3] {
+        let q = low::ct::into_secret(map_to_curve(&C::from_wide(&[7; MAX_L][..C::L])));
+        let neg = [q[0], q[1].neg(), q[2]];
+        sum(&q, &neg)
+    }
+
     /// `sum` doubles equal points and gives infinity for opposite ones,
     /// whatever `Z` each has. `doubled` is the Jacobian doubling
     /// `double_point` calls, so this does not compare that method with

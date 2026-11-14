@@ -6,7 +6,7 @@ use super::{
     CURVE_A_MONT, CURVE_B_MONT, CURVE_ONE_MONT, CURVE_ORDER_MM, FieldElement, JacobianMontPoint,
     PublicKey, Scalar, util,
 };
-use crate::error::Error;
+use crate::error::{Error, KeyFormatError};
 use crate::low;
 use crate::mid::hash_to_curve::{self, Curve};
 use crate::mid::sha2::Sha384Context;
@@ -15,16 +15,32 @@ use crate::mid::sha2::Sha384Context;
 /// the domain separation tag `dst`.
 ///
 /// The two map outputs are added in constant time. Opposite outputs would
-/// sum to infinity (`Z = 0`); no message is known to reach that. This
-/// selects a 1 for `Z` in that case so `as_affine` inverts a nonzero
-/// element, and neither declassifies nor branches on the bit.
+/// sum to infinity (`Z = 0`); no message is known to reach that. Conversion
+/// inverts a nonzero element unconditionally, then exposes only the
+/// validation verdict: infinity is refused as a small-order point.
 pub(crate) fn hash_to_curve(msg: &[u8], dst: &[u8]) -> Result<PublicKey, Error> {
     let _entry = low::Entry::new_secret();
-    let mut point = hash_to_curve::hash_to_curve::<FieldElement, Sha384Context>(msg, dst)?;
-    point[2] = point[2].select(&FieldElement::ONE, point[2].ct_eq(&FieldElement::ZERO));
-    Ok(PublicKey {
-        point: jacobian(&point).as_affine(),
-    })
+    public_key(hash_to_curve::hash_to_curve::<FieldElement, Sha384Context>(
+        msg, dst,
+    )?)
+}
+
+fn public_key(mut point: [FieldElement; 3]) -> Result<PublicKey, Error> {
+    let infinity = point[2].ct_eq(&FieldElement::ZERO);
+    point[2] = point[2].select(&FieldElement::ONE, infinity);
+    let point = jacobian(&point).as_affine();
+    // This error verdict is public, as with private-key range validation;
+    // the coordinates remain secret, including the discarded conversion.
+    match low::ct::into_public(infinity) {
+        true => Err(KeyFormatError::SmallOrder.into()),
+        false => Ok(PublicKey { point }),
+    }
+}
+
+/// Converts an opposite-point sum for the OPRF boundary tests.
+#[cfg(test)]
+pub(crate) fn hash_to_infinity(_msg: &[u8], _dst: &[u8]) -> Result<PublicKey, Error> {
+    public_key(hash_to_curve::tests::opposite_sum::<FieldElement>())
 }
 
 /// Hashes `msg` to a scalar mod n, by RFC 9380's `hash_to_field` over
@@ -174,6 +190,17 @@ mod tests {
     #[test]
     fn sum() {
         tests::check_sum::<FieldElement>(affine, doubled);
+    }
+
+    #[test]
+    fn opposite_points_are_refused() {
+        let _entry = low::Entry::new_secret();
+        let point = tests::opposite_sum::<FieldElement>();
+        assert!(low::ct::into_public(point[2].ct_eq(&FieldElement::ZERO)));
+        assert_eq!(
+            public_key(point).map(|_| ()),
+            Err(KeyFormatError::SmallOrder.into())
+        );
     }
 
     #[test]
