@@ -38,7 +38,7 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
 // It reads `len` bytes at `blocks` and eight `u64`s at `state`.
 #[cfg(sha512_asm_slot)]
 unsafe extern "C" {
-    #[link_name = concat!("rind_", env!("CARGO_PKG_VERSION_MAJOR"), "_", env!("CARGO_PKG_VERSION_MINOR"), "_", env!("CARGO_PKG_VERSION_PATCH"), "_sha512_compress_blocks")]
+    #[link_name = concat!(env!("RIND_SLOT_PREFIX"), "_sha512_compress_blocks")]
     fn rind_sha512_compress_blocks(state: *mut u64, blocks: *const u8, len: usize);
 }
 

@@ -26,6 +26,7 @@
 
 use std::env;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -227,12 +228,13 @@ impl<'a> SlotCompiler<'a> {
                         .to_string_lossy()
                         .starts_with("libcore-")
                 });
-        let prefix = format!(
-            "rind_{}_{}_{}",
-            env!("CARGO_PKG_VERSION_MAJOR"),
-            env!("CARGO_PKG_VERSION_MINOR"),
-            env!("CARGO_PKG_VERSION_PATCH")
-        );
+        // Cargo gives distinct crate instances separate output directories,
+        // including equal versions from different sources. Version components
+        // alone would give those instances colliding C exports.
+        let mut identity = std::hash::DefaultHasher::new();
+        out.hash(&mut identity);
+        let prefix = format!("rind_{:016x}", identity.finish());
+        println!("cargo::rustc-env=RIND_SLOT_PREFIX={prefix}");
         Self {
             rustc,
             target,

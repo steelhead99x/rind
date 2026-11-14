@@ -97,7 +97,7 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
 // writes 32 bytes at `out`.
 #[cfg(sha512_asm_slot)]
 unsafe extern "C" {
-    #[link_name = concat!("rind_", env!("CARGO_PKG_VERSION_MAJOR"), "_", env!("CARGO_PKG_VERSION_MINOR"), "_", env!("CARGO_PKG_VERSION_PATCH"), "_sha256_finish_one")]
+    #[link_name = concat!(env!("RIND_SLOT_PREFIX"), "_sha256_finish_one")]
     fn rind_sha256_finish_one(
         state: *const u32,
         message: *const u8,
