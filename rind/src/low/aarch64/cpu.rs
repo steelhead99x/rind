@@ -581,6 +581,7 @@ CPU part	: 0xd0b
         const CHILD: &str = "RIND_TEST_WIDE_TOGGLE";
         if let Some(mode) = std::env::var_os(CHILD) {
             assert_eq!(wide_multiplier(), mode == "wide");
+            println!("{CHILD} done");
             return;
         }
         for (mode, disable, force) in [
@@ -605,14 +606,17 @@ CPU part	: 0xd0b
             }
             let output = cmd.output().unwrap();
             let stdout = String::from_utf8_lossy(&output.stdout);
-            // Disable wins, so a child with both set prints the denial.
+            // The marker proves the child ran even when FIPS suppresses CPU
+            // logging. Outside FIPS, disable wins and prints the denial.
             let line = if disable {
                 "DEBUG: denying cpuid \"wide_mul\""
             } else {
                 "DEBUG: forcing cpuid \"wide_mul\""
             };
             assert!(
-                output.status.success() && stdout.contains(line),
+                output.status.success()
+                    && stdout.contains(&format!("{CHILD} done"))
+                    && (cfg!(rind_fips) || stdout.contains(line)),
                 "{mode}: {line}\n{stdout}{}",
                 String::from_utf8_lossy(&output.stderr)
             );
