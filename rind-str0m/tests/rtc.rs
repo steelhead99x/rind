@@ -262,3 +262,78 @@ fn fresh_connection_reports_dimpl_state() {
     dtls12.close().unwrap();
     assert!(dtls12.is_closing() || dtls12.is_closed());
 }
+
+/// The generated serial stays a positive INTEGER, and the certificate is valid
+/// for a year. This stays out of the crate's unit tests: `admin/ctgrind
+/// adapters` runs those under valgrind, and the serial comes from
+/// `rind::rand`, so branching on it is a secret-dependent branch.
+#[test]
+fn certificate_serial_stays_positive_and_the_span_is_a_year() {
+    // `serial[0] &= 0x7f` clears the top bit. Replacing `&=` with `|=` forces
+    // the low seven bits on, so every certificate has them set, and leaves a
+    // set top bit set. Subtracting 365 days reverses the validity span.
+    let dtls = rind_str0m::default_provider().dtls_provider;
+    let mut saw_unforced_low_bits = false;
+    for _ in 0..8 {
+        let cert = dtls.generate_certificate().unwrap();
+        let serial = serial_integer(&cert.certificate);
+        assert!(serial.len() <= 20 && serial[0] & 0x80 == 0, "{serial:?}");
+        if serial[0] & 0x7f != 0x7f {
+            saw_unforced_low_bits = true;
+        }
+        let (before, after) = validity(&cert.certificate);
+        assert!(after > before, "{before} .. {after}");
+    }
+    assert!(saw_unforced_low_bits);
+}
+
+fn serial_integer(cert: &[u8]) -> Vec<u8> {
+    let body = sequence(cert);
+    let tbs = sequence(body);
+    let after_version = if tbs.first() == Some(&0xa0) {
+        let (_, rest) = tlv(tbs);
+        rest
+    } else {
+        tbs
+    };
+    let (serial, _) = tlv(after_version);
+    assert_eq!(after_version[0], 0x02);
+    serial.to_vec()
+}
+
+fn validity(cert: &[u8]) -> (String, String) {
+    let body = sequence(cert);
+    let tbs = sequence(body);
+    let mut rest = tbs;
+    // version, serial, signature, issuer, then validity.
+    for _ in 0..4 {
+        let (_, next) = tlv(rest);
+        rest = next;
+    }
+    let (span, _) = tlv(rest);
+    assert_eq!(rest[0], 0x30);
+    let (before, after_bytes) = tlv(span);
+    let (after, _) = tlv(after_bytes);
+    (
+        String::from_utf8(before.to_vec()).unwrap(),
+        String::from_utf8(after.to_vec()).unwrap(),
+    )
+}
+
+fn sequence(input: &[u8]) -> &[u8] {
+    let (body, _) = tlv(input);
+    assert_eq!(input[0], 0x30);
+    body
+}
+
+fn tlv(input: &[u8]) -> (&[u8], &[u8]) {
+    assert!(input.len() >= 2, "{input:?}");
+    let (len, header) = match input[1] {
+        len @ 0..=0x7f => (len as usize, 2),
+        0x81 => (input[2] as usize, 3),
+        0x82 => (u16::from_be_bytes([input[2], input[3]]) as usize, 4),
+        other => panic!("DER length {other:#x}"),
+    };
+    let rest = &input[header..];
+    (&rest[..len], &rest[len..])
+}

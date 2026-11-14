@@ -6,7 +6,7 @@ use rind_ring as ours;
 use ring as theirs;
 
 #[test]
-fn aead_algorithms_match_aws_lc() {
+fn aead_algorithms_match_ring() {
     let pairs = [
         (&ours::aead::AES_128_GCM, &theirs::aead::AES_128_GCM),
         (&ours::aead::AES_256_GCM, &theirs::aead::AES_256_GCM),
@@ -33,7 +33,7 @@ fn aead_algorithms_match_aws_lc() {
 }
 
 #[test]
-fn quic_algorithms_match_aws_lc() {
+fn quic_algorithms_match_ring() {
     let pairs = [
         (&ours::aead::quic::AES_128, &theirs::aead::quic::AES_128),
         (&ours::aead::quic::AES_256, &theirs::aead::quic::AES_256),
@@ -50,7 +50,7 @@ fn quic_algorithms_match_aws_lc() {
 }
 
 #[test]
-fn agreement_algorithms_and_public_keys_match_aws_lc() {
+fn agreement_algorithms_and_public_keys_match_ring() {
     let pairs = [
         (&ours::agreement::X25519, &theirs::agreement::X25519),
         (&ours::agreement::ECDH_P256, &theirs::agreement::ECDH_P256),
@@ -77,7 +77,7 @@ fn agreement_algorithms_and_public_keys_match_aws_lc() {
 }
 
 #[test]
-fn digest_algorithms_match_aws_lc() {
+fn digest_algorithms_match_ring() {
     let pairs = [
         (
             &ours::digest::SHA1_FOR_LEGACY_USE_ONLY,
@@ -100,7 +100,7 @@ fn digest_algorithms_match_aws_lc() {
 }
 
 #[test]
-fn hmac_and_pbkdf2_algorithms_match_aws_lc() {
+fn hmac_and_pbkdf2_algorithms_match_ring() {
     let hmac = [
         (
             ours::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
@@ -222,7 +222,7 @@ fn signature_algorithms_match_ring() {
 }
 
 #[test]
-fn unspecified_matches_aws_lc() {
+fn unspecified_matches_ring() {
     assert_eq!(
         ours::error::Unspecified.to_string(),
         theirs::error::Unspecified.to_string()

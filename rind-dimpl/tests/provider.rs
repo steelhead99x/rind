@@ -481,3 +481,14 @@ fn p384_sha256_verification_reaches_the_verifier() {
         "{error:?}"
     );
 }
+
+#[test]
+fn random_fill_replaces_the_buffer() {
+    // Replacing `Random::fill` with `Ok(())` leaves the caller's bytes.
+    // This stays out of the crate's unit tests: `admin/ctgrind adapters` runs
+    // those under valgrind, and comparing the filled buffer branches on secret
+    // bytes.
+    let mut buf = [0x5a; 32];
+    rind().secure_random.fill(&mut buf).unwrap();
+    assert_ne!(buf, [0x5a; 32]);
+}

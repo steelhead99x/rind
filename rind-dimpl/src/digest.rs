@@ -81,17 +81,9 @@ impl SecureRandom for Random {
 
 #[cfg(test)]
 mod tests {
-    use dimpl::crypto::SecureRandom;
     use rind::digest;
 
-    use super::{RANDOM, Running};
-
-    #[test]
-    fn random_fill_replaces_the_buffer() {
-        let mut buf = [0x5a; 32];
-        RANDOM.fill(&mut buf).unwrap();
-        assert_ne!(buf, [0x5a; 32]);
-    }
+    use super::Running;
 
     #[test]
     fn running_debug_names_the_type() {

@@ -303,6 +303,27 @@ exclude_re = [
   'rind/src/mid/rsa_priv/generate\.rs:\d+:\d+: replace \* with \+ in MillerRabinParams<\x27a>::random_base$',
   'rind/src/mid/rsa_priv/generate\.rs:208:\d+: replace \+ with - in MillerRabinParams<\x27a>::random_base$',
   'rind/src/mid/rsa_priv/generate\.rs:208:\d+: replace \+ with \* in MillerRabinParams<\x27a>::random_base$',
+  # `Debug` and `Display` stay excluded. The quest calls them low-value,
+  # so the campaign does not spend a run on them. Tests still check the
+  # strings those impls write.
+  'rind-dimpl/src/digest\.rs:28:\d+: replace <impl fmt::Debug for Running>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-dimpl/src/kx\.rs:55:\d+: replace <impl fmt::Debug for Exchange>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-dimpl/src/sign\.rs:78:\d+: replace <impl fmt::Debug for Key>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-dimpl/src/suite\.rs:70:\d+: replace <impl fmt::Debug for Aead>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/aead/quic\.rs:40:\d+: replace <impl fmt::Debug for Algorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/agreement\.rs:120:\d+: replace <impl fmt::Debug for PublicKey>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/error\.rs:95:\d+: replace <impl fmt::Display for KeyRejected>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/error\.rs:11:\d+: replace <impl fmt::Display for Unspecified>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/hmac\.rs:23:\d+: replace <impl fmt::Debug for Algorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/rsa\.rs:199:\d+: replace <impl fmt::Debug for RsaParameters>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/rsa\.rs:309:\d+: replace padding::<impl fmt::Debug for Padding>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/signature\.rs:246:\d+: replace <impl fmt::Debug for EcdsaSigningAlgorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/signature\.rs:186:\d+: replace <impl fmt::Debug for EcdsaVerificationAlgorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-rustls/src/sign\.rs:307:\d+: replace <impl fmt::Debug for Ecdsa>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
+  'rind-rustls/src/sign\.rs:220:\d+: replace <impl fmt::Debug for RsaSigningKey>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
+  'rind-rustls/src/sign\.rs:247:\d+: replace <impl fmt::Debug for RsaSigner>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
+  'rind-rustls/src/ticketer\.rs:127:\d+: replace <impl fmt::Debug for XChaCha20Ticketer>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-rustls/src/verify\.rs:164:\d+: replace <impl fmt::Debug for Verify>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   # rind-rcgen's `wipe` and `zeroize` features are off in this campaign
   # (`features = ["rind/wipe"]` is rind's feature). `Wiped::drop` then does
   # nothing, and `Zeroize for KeyPair` is not compiled. `tests/zeroing.rs`
