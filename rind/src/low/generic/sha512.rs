@@ -198,9 +198,12 @@ const _: () = {
 // image the separate section left `sha256_update` at #69's `0x4201b8c8`.
 // A 2844-byte pad in this function moved it to `0x4201c3e8` (4 past main's
 // `0x4201b3e4`), because the literal pool grew by 4 at the same time. The
-// pad is 2840 so the pool and the pad add to one stride. The jump is
-// unconditional. Nothing falls into the pad. Board timing is a separate
-// measurement; these addresses come from the linked image.
+// pad is 2840 so the pool and the pad add to one stride. That image places
+// `sha256_update` at `0x4201c3e4`, `sha256_update_last` at `0x4202b15c`, and
+// `sha256_update_nblocks` at `0x4202b3f8`: the same address mod 4096, and
+// the same size, as main. The jump is unconditional. Nothing falls into the
+// pad. Board timing is a separate measurement; these addresses come from
+// the linked image.
 
 // FIPS 180-4 §4.2.3.
 static K: [u64; 80] = [
