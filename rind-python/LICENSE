@@ -27,6 +27,10 @@ Graviola <https://github.com/ctz/graviola>
   Graviola by ..." header. Its aarch64 ChaCha20 and its Poly1305 began
   as cifra <https://github.com/ctz/cifra>, by the same author under
   CC0-1.0.
+  rind/src/low/portable/sha256_iram.rs is rind's own ESP-IDF Xtensa
+  SHA-256 compression. Its 16-word window and its round constants follow
+  generic/sha256.rs, which Joe Birr-Pixton wrote for Graviola; the
+  rotates and the block load do not.
   Copyright 2024 Joe Birr-Pixton
   License: Apache-2.0 OR ISC OR MIT-0, the same choice as rind's own code.
   Graviola has no NOTICE file.
