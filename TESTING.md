@@ -217,7 +217,7 @@ secret names a zeroing test, or says why it has none.
 | Constant-time comparison | `constant_time::verify` | none: no published set | none: it returns whether two slices are equal, which the differential test covers | `crosschecks::slice_comparison_matches_aws_lc_rs` | ctgrind: `high::constant_time::contents_stay_secret`, `low::generic::ct_equal::equiv`; BINSEC: `test::binsec::ct_binsec_constant_time_verify` | none: it keeps nothing |
 | Random bytes | `rand::fill` | none: the operating system's generator, which no vector can check | none, as for vectors | none, as for vectors | none: rind passes the bytes on | none: rind keeps no copy of the bytes |
 
-Exports that are not primitives: `Error`, `KeyRejected`, `doc::inline_assembly_safety`, `cpu::Dit`, `cpu::MissingFeature`, `cpu::check`, `cpu::has_aes_hardware`.
+Exports that are not primitives: `Error`, `KeyRejected`, `doc::inline_assembly_safety`, `cpu::Dit`, `cpu::MissingFeature`, `cpu::check`, `cpu::has_aes_hardware`, and the hooks the FIPS module builds on: `fips::DrbgHold`, `fips::SelfTest`, `fips::broken`, `fips::check_rsa_modulus`, `fips::digest`, `fips::error_code`, `fips::error_from_code`, `fips::fail`, `fips::hold_drbgs`, `fips::missing_cpu_feature`, `fips::zeroise_drbgs`.
 
 ## Adapters
 

@@ -108,6 +108,14 @@ qemu. iOS devices' code is only built.
 Every operation panics on a CPU missing one of these. Call `rind::cpu::check()`
 at startup to get an error naming the missing feature instead.
 
+[rind-fips](rind-fips/README.md)'s FIPS 140-3 module builds only for glibc
+Linux on `x86_64` and `aarch64`, and runs only the fastest paths there: on
+`x86_64` it requires `aes`, `pclmulqdq`, `ssse3`, `sse4.1`, `popcnt`,
+`movbe`, `avx`, `avx2`, `bmi1`, `bmi2`, and `adx`, as on Broadwell, Zen, and
+later cores, and on `aarch64` the crypto extension. It refuses to load on a
+CPU without them, naming the first missing, so each path it can take gets its
+own ACVP run and no other path is in it.
+
 rind's secret-dependent code divides no secret and does no floating-point
 arithmetic on any architecture, as `admin/ct-vartime` checks, but it multiplies
 secrets, so it runs in constant time only where the integer multiplier does.
