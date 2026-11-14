@@ -777,10 +777,6 @@ def collect_host(host, commit, out_dir):
 
 
 def collect(args):
-    # A gate nested in a gated command runs at once, so this host's run would
-    # skip its own gate.
-    if os.environ.get("QUEST_GATE_ADMITTED") == "1":
-        fail("run collect outside quest gate: it gates each host's run itself")
     if not COLLECT_HOSTS:
         fail("no collect hosts configured")
     hosts = args.host or list(COLLECT_HOSTS)
@@ -790,6 +786,11 @@ def collect(args):
                 f"unknown collect host {host}; known: {', '.join(COLLECT_HOSTS)} "
                 "(other machines use `admin/bench-report run`)"
             )
+    # A gate nested in a gated command runs at once, so this host's run would
+    # skip its own gate. An unknown host is refused above, including when this
+    # check itself runs under `quest gate`.
+    if os.environ.get("QUEST_GATE_ADMITTED") == "1":
+        fail("run collect outside quest gate: it gates each host's run itself")
     commit = output(["git", "-C", ROOT, "rev-parse", f"{args.commit}^{{commit}}"])
     out_dir = args.out or os.path.join(ROOT, ".tmp", "bench-report", commit[:12])
     os.makedirs(out_dir, exist_ok=True)
