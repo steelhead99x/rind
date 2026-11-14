@@ -366,6 +366,7 @@ fn ml_dsa_expanded_fixtures_match_aws_lc() {
 
 /// Rewrites the expanded-form PKCS#8 fixtures from aws-lc when
 /// `RIND_RECORD_MLDSA_FIXTURES=1`. aws-lc does not build for wasm or Miri.
+/// Readers may run beside it, so each file is replaced whole by a rename.
 #[cfg(not(any(miri, target_family = "wasm")))]
 #[test]
 #[ignore = "rewrites rind/tests/heap_scratch/ml-dsa-*.pkcs8 from aws-lc"]
@@ -385,7 +386,15 @@ fn record_ml_dsa_expanded_fixtures() {
         for seed_byte in [1u8, 2] {
             let path = format!("{dir}/ml-dsa-{set}-{seed_byte}.pkcs8");
             let der = ml_dsa_expanded_pkcs8(alg, &[seed_byte; 32]);
-            std::fs::write(&path, &der).unwrap_or_else(|err| panic!("cannot write {path}: {err}"));
+            // A process-specific temporary file keeps readers on a complete
+            // fixture, including when another recording process runs beside us.
+            let temporary = format!("{path}.{}.tmp", std::process::id());
+            let published =
+                std::fs::write(&temporary, &der).and_then(|()| std::fs::rename(&temporary, &path));
+            if let Err(err) = published {
+                let _ = std::fs::remove_file(&temporary);
+                panic!("cannot replace {path}: {err}");
+            }
         }
     }
 }
