@@ -7,7 +7,10 @@
 //! the ESP32-S3's 16 KiB instruction cache — so every block streams its
 //! code from flash, about 33× ring's compact loop. This implementation
 //! follows [`sha256`](sha256.rs): one 16-word window and an 80-round loop,
-//! which stays in a few kilobytes. The round functions and the eighty
+//! which stays in a few kilobytes. On Xtensa ESP-IDF that loop is placed in
+//! IRAM (`.iram1.text`, literal pool included) so it sits outside
+//! `.flash.text` and HACL* SHA-256 keeps the flash address it has when this
+//! body is absent. The round functions and the eighty
 //! `K` constants are FIPS 180-4 §4.1.3 and §4.2.3. The unit tests check
 //! FIPS 180-4's SHA-512 vectors, mark the block secret so ctgrind checks
 //! this loop, and, on every backend except 32-bit portable, compare with
@@ -52,6 +55,23 @@ macro_rules! SSIG1 {
 }
 
 #[inline(never)]
+// ESP-IDF collects `.iram1` and `.iram1.*` into instruction RAM (`soc.lf`,
+// the `iram` section). Its flash-text catch-all,
+// `*(.literal .literal.* .text .text.*)`, is applied per input file, which
+// puts a `.text.*` body in this object ahead of later objects such as
+// HACL* SHA-256. The Xtensa backend names the literal pool
+// `.iram1.text.literal`, and `l32r` reads that pool from IRAM. `K` stays
+// in `.rodata`, on the data bus. The attribute applies only for Xtensa
+// ESP-IDF (`xtensa-esp32-espidf`, `xtensa-esp32s2-espidf`,
+// `xtensa-esp32s3-espidf`). `*-none-elf` and every other target keep the
+// ordinary text section, so a linker that does not map `.iram1` is unchanged.
+//
+// SAFETY: the attribute only selects the output section. The instructions
+// match the ordinary text placement, and ESP-IDF's IRAM mapping is executable.
+#[cfg_attr(
+    all(target_arch = "xtensa", target_os = "espidf"),
+    unsafe(link_section = ".iram1.text")
+)]
 fn sha512_compress_block(state: &mut [u64; 8], block: &[u8]) {
     let mut a = state[0];
     let mut b = state[1];
