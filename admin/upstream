@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Checks out, into .tmp/upstream/<name>, the revision of the upstream that
-# `admin/import-<name>` pins as its REV, or into .tmp/upstream/<name>@<rev>
-# the revision `rev`, fetching it shallowly unless it is already there.
+# `admin/import-<name>` pins as its REV, or for s2n-bignum the base its fork's
+# `RIND.md` names, or into .tmp/upstream/<name>@<rev> the revision `rev`,
+# fetching it shallowly unless it is already there.
 #
-# Usage: admin/upstream <aws-lc | boringssl | openssl | hacl-star> [rev]
+# Usage: admin/upstream <aws-lc | boringssl | openssl | hacl-star | s2n-bignum> [rev]
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -12,8 +13,9 @@ aws-lc) url=https://github.com/aws/aws-lc script=admin/import-aws-lc ;;
 boringssl) url=https://github.com/google/boringssl script=admin/import-boringssl ;;
 openssl) url=https://github.com/openssl/openssl script=admin/import-openssl ;;
 hacl-star) url=https://github.com/hacl-star/hacl-star script=admin/import-hacl ;;
+s2n-bignum) url=https://github.com/awslabs/s2n-bignum script=thirdparty/s2n-bignum/RIND.md ;;
 *)
-    echo "usage: admin/upstream <aws-lc | boringssl | openssl | hacl-star> [rev]" >&2
+    echo "usage: admin/upstream <aws-lc | boringssl | openssl | hacl-star | s2n-bignum> [rev]" >&2
     exit 2
     ;;
 esac
@@ -21,7 +23,7 @@ if [[ -n "${2:-}" ]]; then
     dir=.tmp/upstream/$1@$2 rev=$2
 else
     dir=.tmp/upstream/$1
-    rev=$(sed -n 's/^REV = "\([0-9a-f]\{40\}\)"$/\1/p' "$script")
+    rev=$(sed -n 's/^REV = "\([0-9a-f]\{40\}\)"$/\1/p; s/^Base: `\([0-9a-f]\{40\}\)`$/\1/p' "$script")
 fi
 if [[ -z "$rev" ]]; then
     echo "admin/upstream: $script pins no REV" >&2
