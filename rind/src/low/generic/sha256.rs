@@ -37,7 +37,12 @@ macro_rules! SSIG1 {
     };
 }
 
-fn sha256_compress_block(state: &mut [u32; 8], block: &[u8]) {
+#[cfg_attr(sha_slot_driver, inline(never))]
+#[cfg_attr(sha_slot_driver, unsafe(link_section = ".text.rind_rolled_slot"))]
+// `pub(crate)` so the slot driver, a separate crate that includes this file,
+// can call it. Inside rind only `sha256_compress_blocks` does.
+#[allow(unreachable_pub)]
+pub(crate) fn sha256_compress_block(state: &mut [u32; 8], block: &[u8; 64]) {
     let mut a = state[0];
     let mut b = state[1];
     let mut c = state[2];
@@ -58,15 +63,15 @@ fn sha256_compress_block(state: &mut [u32; 8], block: &[u8]) {
         //
         // But all W indices are reduced mod 16 into our window.
         let w_t = if t < 16 {
-            let w_t = u32::from_be_bytes(block[t * 4..(t + 1) * 4].try_into().unwrap());
+            let w_t = load_be_u32(block, t);
             w[t] = w_t;
             w_t
         } else {
-            let w_t = SSIG1!(w[(t - 2) % 16])
-                .wrapping_add(w[(t - 7) % 16])
-                .wrapping_add(SSIG0!(w[(t - 15) % 16]))
-                .wrapping_add(w[(t - 16) % 16]);
-            w[t % 16] = w_t;
+            let w_t = SSIG1!(w[(t - 2) & 15])
+                .wrapping_add(w[(t - 7) & 15])
+                .wrapping_add(SSIG0!(w[(t - 15) & 15]))
+                .wrapping_add(w[(t - 16) & 15]);
+            w[t & 15] = w_t;
             w_t
         };
 
@@ -96,6 +101,16 @@ fn sha256_compress_block(state: &mut [u32; 8], block: &[u8]) {
     state[7] = state[7].wrapping_add(h);
 }
 
+/// Four big-endian bytes of a 64-byte block at word `t`.
+#[inline(always)]
+fn load_be_u32(block: &[u8; 64], t: usize) -> u32 {
+    // SAFETY: `t < 16` and `block` is one 64-byte SHA-256 block, so these
+    // four bytes are in range. `t` is the public round index.
+    let bytes = unsafe { block.as_ptr().add(t * 4).cast::<[u8; 4]>().read_unaligned() };
+    u32::from_be_bytes(bytes)
+}
+
+#[cfg(not(sha_slot_driver))]
 pub(crate) fn sha256_compress_blocks(state: &mut [u32; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(64));
 

@@ -50,7 +50,12 @@ fn quarter_round(st: &mut [u32], a: u32, b: u32, c: u32, d: u32) {
     st[b as usize] = std22
 }
 
-#[inline]
+// On 32-bit the double-round is one body. Inlining ten copies is about
+// 5 KiB, which misses a 16 KiB instruction cache. ChaCha20 and HChaCha20
+// both call this body. 64-bit keeps it inlined: `proofs/` extracts that
+// form, and the code stays cached.
+#[cfg_attr(target_pointer_width = "32", inline(never))]
+#[cfg_attr(not(target_pointer_width = "32"), inline)]
 fn double_round(st: &mut [u32]) {
     quarter_round(st, 0u32, 4u32, 8u32, 12u32);
     quarter_round(st, 1u32, 5u32, 9u32, 13u32);
@@ -62,7 +67,11 @@ fn double_round(st: &mut [u32]) {
     quarter_round(st, 3u32, 4u32, 9u32, 14u32)
 }
 
-#[inline]
+// Ten calls. On 32-bit `double_round` is not inlined, so this is one
+// short function rather than ten copies of the round. On 64-bit it
+// inlines, as `proofs/` extracts.
+#[cfg_attr(target_pointer_width = "32", inline(never))]
+#[cfg_attr(not(target_pointer_width = "32"), inline)]
 fn rounds(st: &mut [u32]) {
     double_round(st);
     double_round(st);
@@ -103,64 +112,15 @@ fn state(key: &[u8; 32], nonce: &[u8; 16]) -> [u32; 16] {
     st
 }
 
-// On 32-bit targets with a small instruction cache, a fully unrolled
-// `rounds` is ~5 KiB and misses on every XChaCha short input. A 10-iteration
-// loop is the same 10 double-rounds. `rounds` itself stays unrolled so
-// `proofs/` and the ChaCha20 cipher path stay as they are. The rolled body
-// is `hchacha20_rolled`, which 32-bit `hchacha20` calls. 64-bit builds
-// compile that body only in tests, so ctgrind sees it; their `hchacha20`
-// keeps the output loop inside the function.
-#[cfg(any(target_pointer_width = "32", test))]
-#[inline(never)]
-fn hchacha20_double_round(st: &mut [u32]) {
-    // A separate function so LLVM cannot unroll ten copies of the
-    // inlined double-round into the caller (~5 KiB, same as `rounds`).
-    double_round(st);
-}
-
-#[cfg(any(target_pointer_width = "32", test))]
-fn hchacha20_rounds(st: &mut [u32]) {
-    for _ in 0..10 {
-        hchacha20_double_round(st);
-    }
-}
-
-#[cfg(any(target_pointer_width = "32", test))]
-fn hchacha20_out(st: &[u32; 16]) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    for i in 0..8 {
-        let w = if i < 4 { st[i] } else { st[i + 8] };
-        out[4 * i..4 * (i + 1)].copy_from_slice(&w.to_le_bytes());
-    }
-    out
-}
-
-#[cfg(any(target_pointer_width = "32", test))]
-#[inline(never)]
-fn hchacha20_rolled(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
-    let mut st = state(key, nonce);
-    hchacha20_rounds(&mut st);
-    hchacha20_out(&st)
-}
-
 /// HChaCha20 of `key` and `nonce`, for XChaCha20's subkey: the ChaCha20
 /// rounds without the final addition, keeping words 0-3 and 12-15, as
 /// draft-irtf-cfrg-xchacha-03 specifies.
-#[cfg(target_pointer_width = "32")]
-#[inline(never)]
-pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
-    hchacha20_rolled(key, nonce)
-}
-
-/// HChaCha20 of `key` and `nonce`, for XChaCha20's subkey: the ChaCha20
-/// rounds without the final addition, keeping words 0-3 and 12-15, as
-/// draft-irtf-cfrg-xchacha-03 specifies.
-#[cfg(not(target_pointer_width = "32"))]
+//
+// Indexes, as `state` does, so `proofs/` can prove it. The output loop
+// stays in this function so Aeneas still extracts `hchacha20_loop`.
 pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
     let mut st = state(key, nonce);
     rounds(&mut st);
-    // Keep the output loop in this function so Aeneas still extracts
-    // `hchacha20_loop`, which `proofs/` already proves.
     let mut out = [0u8; 32];
     for i in 0..8 {
         let w = if i < 4 { st[i] } else { st[i + 8] };
@@ -234,10 +194,9 @@ mod tests {
     }
 
     #[test]
-    fn rolled_hchacha_matches_rounds() {
-        // The key is the secret. Mark it, run the rolled body (what 32-bit
-        // `hchacha20` calls, and what 64-bit builds compile only in tests),
-        // and compare with unrolled `rounds` plus the same output selection.
+    fn hchacha_matches_rounds() {
+        // Both pointer widths share these rounds. Mark the key before the
+        // public entry point and declassify only its output for comparison.
         let key = [
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
             0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
@@ -255,7 +214,7 @@ mod tests {
             expected[4 * i..4 * (i + 1)].copy_from_slice(&w.to_le_bytes());
         }
         crate::low::ct::secret_slice(&key);
-        let got = crate::low::ct::into_public(hchacha20_rolled(&key, &nonce));
+        let got = crate::low::ct::into_public(hchacha20(&key, &nonce));
         assert_eq!(got, expected);
     }
 

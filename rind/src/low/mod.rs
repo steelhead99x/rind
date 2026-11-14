@@ -118,6 +118,8 @@ mod generic {
     // form misses small instruction caches, and in tests against FIPS 180-4.
     #[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
     pub(super) mod sha512;
+    #[cfg(test)]
+    mod slot_driver;
     pub(super) mod zeroise;
 }
 

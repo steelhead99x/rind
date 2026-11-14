@@ -94,6 +94,17 @@ impl Sha256Context {
 
     /// Add `bytes` to the ongoing hash computation.
     pub(crate) fn update(&mut self, bytes: &[u8]) {
+        // One byte and sixteen bytes are the sha256-updates rows. A store,
+        // or a fixed 16-byte copy, stays here; anything longer, and a byte
+        // that arrives when the buffer already holds a block, takes the
+        // general path. The length is public.
+        if let [byte] = bytes {
+            if self.blockwise.absorb_byte(*byte) {
+                return;
+            }
+        } else if bytes.len() == 16 && self.blockwise.absorb_sixteen(bytes) {
+            return;
+        }
         self.blockwise.update(bytes, &mut self.state);
     }
 
@@ -370,6 +381,29 @@ mod tests {
                 107, 166, 226, 49, 98, 10, 19, 11, 86, 108
             ]
         );
+    }
+
+    #[test]
+    fn sha256_short_updates() {
+        for len in [0, 1, 15, 16, 17, 55, 56, 63, 64, 65, 127, 128, 129, 4096] {
+            for prefix in [0, 1, 15, 16, 17, 48, 63, 64] {
+                let message: Vec<u8> = (0..len + prefix).map(|i| (i * 17 + 3) as u8).collect();
+                let expected = Sha256State::new().finish_with(&message);
+                crate::low::ct::secret_slice(&message);
+                for chunk in [1, 16] {
+                    let mut context = Sha256Context::new();
+                    context.update(&message[..prefix]);
+                    for bytes in message[prefix..].chunks(chunk) {
+                        context.update(bytes);
+                    }
+                    let got = crate::low::ct::into_public(context.finish());
+                    assert_eq!(
+                        got, expected,
+                        "{prefix} + {len} bytes in {chunk}-byte updates"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
