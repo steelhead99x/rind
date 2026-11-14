@@ -12,6 +12,9 @@
 //! FIPS 180-4's SHA-512 vectors and, on every backend except 32-bit
 //! portable, the same compression the backend ships (HACL* or aws-lc).
 //! On 64-bit portable targets, HACL*'s unrolled form is still used.
+//! On Xtensa this object also carries a retained `.text` pad, so the
+//! bytes it adds are a multiple of the ESP32-S3 instruction-cache set
+//! stride and SHA-256 keeps the cache sets it has on main.
 
 macro_rules! CH {
     ($x:expr, $y:expr, $z:expr) => {
@@ -107,6 +110,25 @@ fn sha512_compress_block(state: &mut [u64; 8], block: &[u8]) {
     state[5] = state[5].wrapping_add(f);
     state[6] = state[6].wrapping_add(g);
     state[7] = state[7].wrapping_add(h);
+    // Directives only: the assembler switches section, so this function's
+    // instruction bytes stay as they are. The pad is in this object, which
+    // the sha2 image links ahead of HACL* SHA-256.
+    #[cfg(target_arch = "xtensa")]
+    // SAFETY: the template is section directives. It emits no machine
+    // instructions and does not read or write registers or memory.
+    unsafe {
+        core::arch::asm!(
+            ".pushsection .text.rind_sha512_icache_pad,\"axR\",@progbits",
+            ".globl rind_sha512_icache_pad",
+            ".type rind_sha512_icache_pad, @function",
+            ".set rind_sha512_icache_pad, .",
+            ".space {len}, 0xA5",
+            ".size rind_sha512_icache_pad, {len}",
+            ".popsection",
+            len = const XTENSA_ICACHE_PAD_LEN,
+            options(nomem, nostack, preserves_flags),
+        );
+    }
 }
 
 pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
@@ -117,6 +139,44 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
         sha512_compress_block(state, block);
     }
 }
+
+/// Set stride that is a multiple of every 16 KiB ESP32-S3 I-cache stride.
+///
+/// The default is 16 KiB, 8-way, 32-byte lines: 64 sets, address bits
+/// `[10:5]`, stride 2048. Four ways is 128 sets and stride 4096. Sixteen-byte
+/// lines give those same two strides. 4096 is a multiple of each of them.
+const XTENSA_ICACHE_SET_STRIDE: usize = 4096;
+
+/// Bytes `sha256_update` moved on the sha2 image, head `ef58672` minus fork
+/// main `8dfb7942`: `0x4201b8c8 - 0x4201b3e4`.
+const XTENSA_SHA256_MEASURED_SHIFT: usize = 0x4e4;
+
+/// `.text` added so the net shift is one [`XTENSA_ICACHE_SET_STRIDE`].
+const XTENSA_ICACHE_PAD_LEN: usize =
+    XTENSA_ICACHE_SET_STRIDE - (XTENSA_SHA256_MEASURED_SHIFT % XTENSA_ICACHE_SET_STRIDE);
+
+const _: () = {
+    assert!(XTENSA_SHA256_MEASURED_SHIFT == 0x4201_b8c8 - 0x4201_b3e4);
+    assert!(
+        (XTENSA_SHA256_MEASURED_SHIFT + XTENSA_ICACHE_PAD_LEN)
+            .is_multiple_of(XTENSA_ICACHE_SET_STRIDE)
+    );
+    // A multiple of 4, so a 4-aligned Xtensa instruction does not grow a gap.
+    assert!(XTENSA_ICACHE_PAD_LEN.is_multiple_of(4));
+};
+
+// Head `ef58672` links this compressor ahead of the hash libraries, so HACL*
+// `sha256_update` sits 1252 bytes (39 sets) above main while the bench
+// harness stays put. The SHA-256 instructions are unchanged. A uniform shift
+// of the whole image, harness included, does not reproduce the regression, so
+// the set map against the harness is what moved.
+//
+// `sha512_compress_block` emits `rind_sha512_icache_pad` into that same
+// object. The net shift is 4096, one stride, which puts every pre-existing
+// instruction back on main's set. A linker fill shorter than one 32-byte
+// line cannot change the set. Nothing branches to the pad. Its alignment is
+// 1, so the linker does not insert bytes in front of it; the length is a
+// multiple of 4, so the following 4-aligned code keeps the gap it already had.
 
 // FIPS 180-4 §4.2.3.
 static K: [u64; 80] = [
@@ -204,7 +264,10 @@ static K: [u64; 80] = [
 
 #[cfg(test)]
 mod tests {
-    use super::sha512_compress_blocks;
+    use super::{
+        XTENSA_ICACHE_PAD_LEN, XTENSA_ICACHE_SET_STRIDE, XTENSA_SHA256_MEASURED_SHIFT,
+        sha512_compress_blocks,
+    };
 
     /// SHA-512's IV, FIPS 180-4 §5.3.5.
     const IV: [u64; 8] = [
@@ -253,6 +316,20 @@ mod tests {
             expected[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap();
         }
         assert_eq!(hash(message), expected);
+    }
+
+    #[test]
+    fn xtensa_icache_pad_is_one_set_stride() {
+        assert_eq!(
+            XTENSA_SHA256_MEASURED_SHIFT,
+            0x4201_b8c8 - 0x4201_b3e4,
+            "sha256_update moved 1252 bytes on the sha2 image"
+        );
+        assert!(
+            (XTENSA_SHA256_MEASURED_SHIFT + XTENSA_ICACHE_PAD_LEN)
+                .is_multiple_of(XTENSA_ICACHE_SET_STRIDE)
+        );
+        assert_eq!(XTENSA_ICACHE_PAD_LEN, 2844);
     }
 
     #[test]
