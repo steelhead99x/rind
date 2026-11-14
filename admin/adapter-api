@@ -19,7 +19,9 @@
 # - `skip`: upstream features left unbuilt, each with its reason.
 # - `omitted`: the items rind cannot back, as paths under the provider, `*`
 #   matching within a path. Each must still be missing, and must be named in
-#   backticks in the adapter's README.
+#   backticks in the adapter's README. A trait impl whose type argument is an
+#   omitted item is omitted with it, so leaving out a type also leaves out the
+#   impl that only exists to return it.
 #
 # admin/adapter-api.drift lists the divergences that are bugs, pending the fix
 # quest/m2/confidence/adapter-api-drift.md plans: each exact difference and
@@ -565,6 +567,43 @@ def covers(pattern, path):
     return fnmatch.fnmatchcase(path, pattern) or fnmatch.fnmatchcase(path, pattern + "::*")
 
 
+def trait_arg_omitted(sig, omitted):
+    """Whether a trait impl's type argument is an item the adapter cannot back.
+
+    `AsRawBytes<PqdsaPrivateKeyRaw>` is that shape. A bound that merely names
+    an omitted module, such as `rand::unsealed`, is a separate difference.
+    """
+    trait = json.loads(sig.removeprefix("impl ")).get("trait") or {}
+    args = ((trait.get("args") or {}).get("angle_bracketed") or {}).get("args") or []
+    for arg in args:
+        path = ((arg.get("type") or {}).get("resolved_path") or {}).get("path")
+        if (
+            isinstance(path, str)
+            and path.startswith("$::")
+            and any(covers(pattern, path[3:]) for pattern in omitted)
+        ):
+            return True
+    return False
+
+
+def without_omitted_impls(diffs, omitted):
+    """Drops trait impls that only exist to return an omitted item.
+
+    Several impls share one `{impl}` path. Omitting the returned type does not
+    by itself omit that path when the type's other impls stay, so the extra
+    impl would be drift. It is the same omission. The recorded shape stays
+    `changed`, including a side that is empty.
+    """
+    out = []
+    for path, what, upstream, adapter in diffs:
+        if what == "changed" and path.endswith("::{impl}"):
+            upstream = {sig for sig in upstream if not trait_arg_omitted(sig, omitted)}
+            if not upstream and not adapter:
+                continue
+        out.append((path, what, upstream, adapter))
+    return out
+
+
 DRIFT = ROOT / "admin" / "adapter-api.drift"
 
 
@@ -642,6 +681,7 @@ def main():
             diffs = compare(
                 package, cfg, mirror, set(package["features"]), up_pkg["features"], label, default, features
             )
+            diffs = without_omitted_impls(diffs, omitted)
             for path, what, a, b in diffs:
                 hits = [o for o in omitted if what == "missing" and covers(o, path)]
                 if hits:
