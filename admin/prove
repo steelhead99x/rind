@@ -1230,6 +1230,11 @@ for file in Dispatch P256Dispatch P256Agree P384Dispatch X25519 P384 P384Table P
     CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3 AesCipher HkdfAes P256 EcdsaDispatch P256Ecdsa P256Signature; do
     sed 's/X86_64/Aarch64/g; s/x86_64/aarch64/g' "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Aarch64/$file.lean"
 done
+# aarch64's generator table is the aligned wrapper. Indexing it in
+# `public_twin_multiply` unfolds Deref before the array index the shared
+# proof steps. x86_64's table is the array, so only the copy names the unfold.
+sed -i 's/simp only \[core.array.Array.index, core.ops.index.IndexSlice, core.slice.index.Slice.index,/simp only [mid.p256.AlignedTable.Insts.CoreOpsDerefDerefArrayArrayU6425643.deref,\n    core.array.Array.index, core.ops.index.IndexSlice, core.slice.index.Slice.index,/' \
+    proofs/Rind/Aarch64/P256Ecdsa.lean
 # The AEAD model imports nothing aarch64 has, and no aarch64 translation reaches it.
 sed -i '/Rind.Aarch64.AeadDispatch/d' proofs/Rind/Aarch64/Kdf/TypesExternal.lean
 sed -i '/-- BEGIN aead/,/-- END aead/d' proofs/Rind/Aarch64/Kdf/FunsExternal.lean
