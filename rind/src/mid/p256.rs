@@ -1398,7 +1398,7 @@ type AffineMontPointTable = [[u64; 256]; 43];
 /// depending only on where the linker happened to put the table.
 ///
 /// The arm and portable backends share this table layout, so they get the
-/// alignment too, which costs them at most 56 bytes of padding. Their
+/// alignment too, which costs them less than 64 bytes of padding. Their
 /// `p256_scalarmulbase` is generic Rust, and no speedup was measured there.
 #[cfg(not(rind_backend = "x86_64"))]
 #[repr(C, align(64))]
