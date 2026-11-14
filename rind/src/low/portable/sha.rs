@@ -9,6 +9,7 @@
 //! on HACL* at every length: a rolled loop beside that ~12 KiB body made long
 //! hashes slower on an ESP32-S3.
 
+#[cfg(not(any(all(target_arch = "xtensa", target_os = "espidf"), test)))]
 use libcrux_sha2::hacl::sha256_update_nblocks;
 #[cfg(target_pointer_width = "64")]
 use libcrux_sha2::hacl::sha512_update_nblocks;
@@ -17,6 +18,8 @@ pub(crate) use crate::low::generic::sha1::sha1_compress_blocks;
 
 /// HACL* takes a 32-bit length, so longer input goes in pieces of whole
 /// blocks below it.
+#[cfg_attr(all(target_arch = "xtensa", target_os = "espidf"), allow(dead_code))]
+#[cfg(any(target_pointer_width = "64", not(test)))]
 const PIECE: usize = 1 << 31;
 
 /// Compresses whole 64-byte `blocks` into `state`.
@@ -26,10 +29,21 @@ const PIECE: usize = 1 << 31;
 /// ESP32-S3 that second body made long hashes slower.
 pub(crate) fn sha256_compress_blocks(state: &mut [u32; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(64));
+    // Portable host tests run the ESP-IDF body too, including the digest and
+    // HMAC vectors and their secret-input checks.
+    #[cfg(any(all(target_arch = "xtensa", target_os = "espidf"), test))]
+    {
+        iram::sha256_update_nblocks(state, blocks);
+    }
+    #[cfg(not(any(all(target_arch = "xtensa", target_os = "espidf"), test)))]
     for piece in blocks.chunks(PIECE) {
         sha256_update_nblocks(piece.len() as u32, piece, state);
     }
 }
+
+#[cfg(any(all(target_arch = "xtensa", target_os = "espidf"), test))]
+#[path = "sha256_iram.rs"]
+mod iram;
 
 /// Compresses `message`, padded and closed by the big-endian bit `length`.
 #[inline(never)]
@@ -66,6 +80,80 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     {
         for piece in blocks.chunks(PIECE) {
             sha512_update_nblocks(piece.len() as u32, piece, state);
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use crate::low::ct;
+
+    #[test]
+    fn iram_compression_matches_references() {
+        // Arbitrary chaining states cover HMAC's keyed states as well as a
+        // fresh digest. Empty and split block runs check the IRAM driver.
+        for case in 0..64u32 {
+            let mut state = core::array::from_fn(|i| {
+                case.wrapping_mul(0x9e37_79b9)
+                    .rotate_left(i as u32 * 3)
+                    .wrapping_add(i as u32)
+            });
+            if case < 2 {
+                state.fill(if case == 0 { 0 } else { u32::MAX });
+            }
+            let blocks: [u8; 64 * 17] = core::array::from_fn(|i| match case {
+                0 => 0,
+                1 => 0xff,
+                _ => (i as u32).wrapping_mul(197).wrapping_add(case) as u8,
+            });
+            ct::secret_slice(&state);
+            ct::secret_slice(&blocks);
+            for count in [0, 1, 2, 3, 8, 17] {
+                let input = &blocks[..count * 64];
+                let mut got = state;
+                sha256_compress_blocks(&mut got, input);
+
+                let mut split = state;
+                for block in input.chunks(64) {
+                    sha256_compress_blocks(&mut split, block);
+                }
+                let mut generic = state;
+                crate::low::generic::sha256::sha256_compress_blocks(&mut generic, input);
+                let mut hacl = state;
+                libcrux_sha2::hacl::sha256_update_nblocks(input.len() as u32, input, &mut hacl);
+                let got = ct::into_public(got);
+                assert_eq!(got, ct::into_public(split), "split {case}, {count}");
+                assert_eq!(got, ct::into_public(generic), "generic {case}, {count}");
+                assert_eq!(got, ct::into_public(hacl), "HACL* {case}, {count}");
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(not(any(miri, target_family = "wasm")))]
+    fn iram_digest_matches_aws_lc() {
+        // Both padding boundaries and updates across them go through the
+        // production compression/finish entry points, with a secret message.
+        let message: [u8; 1200] = core::array::from_fn(|i| i.wrapping_mul(197) as u8);
+        ct::secret_slice(&message);
+        for len in [
+            0, 1, 31, 32, 55, 56, 63, 64, 65, 119, 120, 127, 128, 129, 1200,
+        ] {
+            let input = &message[..len];
+            let want =
+                ct::into_public(aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, input));
+            let got = ct::into_public(crate::digest::digest(&crate::digest::SHA256, input));
+            assert_eq!(got.as_ref(), want.as_ref(), "one shot, {len}");
+            for chunk in [1, 16, 64, 65] {
+                let mut context = crate::digest::Context::new(&crate::digest::SHA256);
+                for piece in input.chunks(chunk) {
+                    context.update(piece);
+                }
+                let got = ct::into_public(context.finish());
+                assert_eq!(got.as_ref(), want.as_ref(), "{len}, chunks of {chunk}");
+            }
         }
     }
 }

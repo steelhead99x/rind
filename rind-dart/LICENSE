@@ -71,6 +71,9 @@ HACL* <https://github.com/hacl-star/hacl-star>, through libcrux
 
   What: rind/src/low/arm/chacha20.rs, the ChaCha20 block function that
   libcrux-chacha20poly1305 0.0.10 compiles from HACL*'s Hacl_Chacha20.
+  Also rind/src/low/portable/sha256_iram.rs, the SHA-256 block function
+  from libcrux-sha2 0.0.9 (src/hacl.rs), adapted to fixed-size arrays
+  and placed in internal RAM on ESP-IDF Xtensa.
   Copyright (c) 2016-2022 INRIA, CMU and Microsoft Corporation
   Copyright (c) 2022-2023 HACL* Contributors
   Copyright 2023 Cryspen Sarl
