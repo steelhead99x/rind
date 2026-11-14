@@ -473,9 +473,45 @@ fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Wide) -> Wide {
 }
 
 /// `x += y * u`, returning the carry out of the top limb.
+///
+/// Four limbs at a time. Each product depends only on `u` and `y`, so the
+/// four multiplies issue before the carry chain that adds them. Lengths are
+/// public. It stops at the shorter slice, and a remainder of one to three
+/// limbs takes the one-limb step.
+///
+/// Each partial sum, the product plus a limb plus the carry, is at most
+/// `2^2b - 1`, and that value is `Wide`'s maximum. The carry in fits a
+/// limb: it starts at zero, and the high half of such a sum is at most
+/// `2^b - 1`.
+#[inline(always)]
 fn mul_add(x: &mut [Limb], y: &[Limb], u: Limb) -> Wide {
-    let mut carry = 0;
-    for (x, y) in x.iter_mut().zip(y) {
+    let mut carry: Wide = 0;
+    let uu = Wide::from(u);
+    let n = x.len().min(y.len());
+    let (xb, xr) = x[..n].as_chunks_mut::<4>();
+    let (yb, yr) = y[..n].as_chunks::<4>();
+    for (xb, yb) in xb.iter_mut().zip(yb) {
+        let p0 = uu.wrapping_mul(Wide::from(yb[0]));
+        let p1 = uu.wrapping_mul(Wide::from(yb[1]));
+        let p2 = uu.wrapping_mul(Wide::from(yb[2]));
+        let p3 = uu.wrapping_mul(Wide::from(yb[3]));
+        let s0 = p0.wrapping_add(Wide::from(xb[0])).wrapping_add(carry);
+        xb[0] = s0 as Limb;
+        let s1 = p1
+            .wrapping_add(Wide::from(xb[1]))
+            .wrapping_add(s0 >> Limb::BITS);
+        xb[1] = s1 as Limb;
+        let s2 = p2
+            .wrapping_add(Wide::from(xb[2]))
+            .wrapping_add(s1 >> Limb::BITS);
+        xb[2] = s2 as Limb;
+        let s3 = p3
+            .wrapping_add(Wide::from(xb[3]))
+            .wrapping_add(s2 >> Limb::BITS);
+        xb[3] = s3 as Limb;
+        carry = s3 >> Limb::BITS;
+    }
+    for (x, y) in xr.iter_mut().zip(yr) {
         let t = mul_add_limb(u, *y, *x, carry);
         *x = t as Limb;
         carry = t >> Limb::BITS;
@@ -548,7 +584,7 @@ mod tests {
     use super::super::super::bignum::tests::{modulus, public, secret};
     use super::*;
     use crate::low;
-    use crate::low::ct::into_secret;
+    use crate::low::ct::{into_public, into_secret, public_slice, secret_slice};
     use crate::test::bignum::words;
 
     proptest! {
@@ -618,6 +654,30 @@ mod tests {
             mont_sqr(&mut ours, &sx, &sm, into_secret(n0[0]));
             low::mont_mul(&mut theirs, &x, &x, &m, n0[0]);
             prop_assert_eq!(public(&ours), theirs);
+        }
+    }
+
+    /// All-ones rows, which fill each partial sum to `2^2b - 1`, from an
+    /// empty row through two blocks of four, against the one-limb recurrence.
+    #[test]
+    fn mul_add_ones() {
+        for n in 0..=8 {
+            let (x, y) = (vec![Limb::MAX; n], vec![Limb::MAX; n]);
+            let (mut got, ys) = (x.clone(), y.clone());
+            secret_slice(&got);
+            secret_slice(&ys);
+            let carry = mul_add(&mut got, &ys, into_secret(Limb::MAX));
+
+            let mut expect = x;
+            let mut c = 0;
+            for (acc, factor) in expect.iter_mut().zip(&y) {
+                let t = mul_add_limb(Limb::MAX, *factor, *acc, c);
+                *acc = t as Limb;
+                c = t >> Limb::BITS;
+            }
+            public_slice(&got);
+            assert_eq!(got, expect);
+            assert_eq!(into_public(carry), c);
         }
     }
 

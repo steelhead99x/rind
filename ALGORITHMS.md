@@ -398,10 +398,12 @@ portable backend runs it all in that Rust, over 64-bit limbs on 64-bit
 targets and 32-bit ones elsewhere: its Montgomery products below 16 limbs by
 rind's loop (Koç, Acar, and Kaliski's CIOS method), and wider ones and its
 squarings by forming the product, each square's cross products once, then
-reducing it, adding two rows a pass in two carry chains. Products split by
-Karatsuba's method from 32 limbs and squares from 64, as aws-lc's C does
-from 16 words. RSA signing and verification at 2048 to 8192 bits measured
-at 0.85 to 0.97× aws-lc's C time without assembly on x86_64.
+reducing it, adding two rows a pass in two carry chains. A single-row
+`x += y * u` issues each block of four products before that block's carry
+chain, and finishes a remainder of one to three limbs one limb at a time.
+Products split by Karatsuba's method from 32 limbs and squares from 64, as
+aws-lc's C does from 16 words. RSA signing and verification at 2048 to 8192
+bits measured at 0.85 to 0.97× aws-lc's C time without assembly on x86_64.
 On x86_64 CPUs with AVX2 but without ADX, the private operation's exponentiation modulo each 1024-bit
 prime of RSA-2048 runs aws-lc's RSAZ, as aws-lc does there: Montgomery
 products on AVX2 over 29-bit limbs, and a 5-bit fixed window whose table
