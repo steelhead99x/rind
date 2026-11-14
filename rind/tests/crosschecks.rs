@@ -271,7 +271,8 @@ mod cipher {
             let theirs_dec = PaddedBlockDecryptingKey::cbc_pkcs7(aws_aes_key(&key)).unwrap();
 
             let mut ours = msg.clone();
-            enc.encrypt(CbcIv::assume_unpredictable(iv), &mut ours);
+            enc.encrypt(CbcIv::assume_unpredictable(iv), &mut ours)
+                .unwrap();
             let mut theirs = msg.clone();
             PaddedBlockEncryptingKey::cbc_pkcs7(aws_aes_key(&key))
                 .unwrap()
@@ -638,8 +639,8 @@ mod hkdf {
             let info: Vec<&[u8]> = info.iter().map(Vec::as_slice).collect();
 
             let mut ours_out = vec![0u8; len];
-            let prk = hkdf::Salt::new(ours, &salt).extract(&ikm);
-            let result = prk.expand(&info, len).fill(&mut ours_out);
+            let prk = hkdf::Salt::new(ours, &salt).extract(&ikm).unwrap();
+            let result = prk.expand(&info, len).and_then(|okm| okm.fill(&mut ours_out));
 
             let prk = theirs::Salt::new(their_alg, &salt).extract(&ikm);
             match prk.expand(&info, Len(len)) {
@@ -667,7 +668,7 @@ mod hkdf {
         ) {
             let (ours_prk_alg, theirs_prk_alg, _) = algorithms()[algorithm];
             let info: Vec<&[u8]> = info.iter().map(Vec::as_slice).collect();
-            let ours = hkdf::Salt::new(ours_prk_alg, b"salt").extract(&ikm);
+            let ours = hkdf::Salt::new(ours_prk_alg, b"salt").extract(&ikm).unwrap();
             let theirs = theirs::Salt::new(theirs_prk_alg, b"salt").extract(&ikm);
 
             for (ours_alg, theirs_alg) in [
@@ -675,7 +676,7 @@ mod hkdf {
                 (&aead::AES_256_GCM, &their_aead::AES_256_GCM),
                 (&aead::CHACHA20_POLY1305, &their_aead::CHACHA20_POLY1305),
             ] {
-                let ours_key = aead::Key::from(ours.expand(&info, ours_alg));
+                let ours_key = aead::Key::from(ours.expand(&info, ours_alg).unwrap());
                 let mut ours_sealed = msg.clone();
                 ours_key
                     .seal_in_place_append_tag(
@@ -705,17 +706,17 @@ mod hkdf {
                 (&hmac::HMAC_SHA384, their_hmac::HMAC_SHA384),
                 (&hmac::HMAC_SHA512, their_hmac::HMAC_SHA512),
             ] {
-                let ours_key = hmac::Key::from(ours.expand(&info, ours_alg));
+                let ours_key = hmac::Key::from(ours.expand(&info, ours_alg).unwrap());
                 let theirs_key = their_hmac::Key::from(theirs.expand(&info, theirs_alg).unwrap());
                 let ours_tag = hmac::sign(&ours_key, &msg);
                 let theirs_tag = their_hmac::sign(&theirs_key, &msg);
                 prop_assert_eq!(ours_tag.as_ref(), theirs_tag.as_ref());
             }
 
-            let ours = hkdf::Prk::from(ours.expand(&info, ours_prk_alg));
+            let ours = hkdf::Prk::from(ours.expand(&info, ours_prk_alg).unwrap());
             let theirs = theirs::Prk::from(theirs.expand(&info, theirs_prk_alg).unwrap());
             let mut ours_out = [0u8; 100];
-            ours.expand(&info, ours_out.len()).fill(&mut ours_out).unwrap();
+            ours.expand(&info, ours_out.len()).unwrap().fill(&mut ours_out).unwrap();
             let mut theirs_out = [0u8; 100];
             theirs.expand(&info, Len(theirs_out.len())).unwrap().fill(&mut theirs_out).unwrap();
             prop_assert_eq!(ours_out, theirs_out);
