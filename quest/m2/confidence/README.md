@@ -23,5 +23,7 @@ Three coverage children joined on 2026-11-12, with the maintainer, from the nigh
 
 Two constant-time children joined on 2026-11-12, with the maintainer, from reading pyca/verified-garbage: Intel's MXCSR-dependent timing and DOITM, and Apple's DIT barrier.
 
+[Constant-time RSA key loading](/quest/m2/confidence/rsa-der-ct.md) joined on 2026-11-13, with the maintainer, from the FIPS module's ctgrind test: memcheck sees rind's DER checks read three bytes of each RSA private integer, so the test leaves them public.
+
 - Fix what a check finds in its own quest's PR when it's small; otherwise plan a follow-up.
 - Slow suites run in their own workflows, not in `just ci`.
