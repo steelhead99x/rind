@@ -139,22 +139,6 @@ theorem sha256_finish_with_spec (hb : Sha256Blocks) (P : List U8) (s : mid.sha2.
   rw [hr, sha256Finished, hl, pad_bv P message.val bits hP (by rw [hbits, hml])]
   rfl
 
-/-- On this backend the long-path flag is false: only 32-bit portable SHA-256
-sets it. -/
-theorem sha256_finish_uses_long_spec (message : Slice U8) :
-    mid.sha2.Sha256State.finish_uses_long message ⦃ _ => True ⦄ := by
-  unfold mid.sha2.Sha256State.finish_uses_long
-  step*
-
-/-- On this backend `finish_with_long` is `finish_with`. -/
-theorem sha256_finish_with_long_spec (hb : Sha256Blocks) (P : List U8) (s : mid.sha2.Sha256State)
-    (message : Slice U8) (hs : Sha256Absorbed P s)
-    (hlen : 8 * (P.length + message.length) ≤ U64.max) :
-    mid.sha2.Sha256State.finish_with_long s message ⦃ r =>
-      bv r.val = sha256.hash (bv (P ++ message.val)) ⦄ := by
-  unfold mid.sha2.Sha256State.finish_with_long
-  exact sha256_finish_with_spec hb P s message hs hlen
-
 theorem saturating_add_val (x y : U64) (h : x.val + y.val ≤ U64.max) :
     (core.num.U64.saturating_add x y).val = x.val + y.val := by
   simp only [core.num.U64.saturating_add, UScalar.saturating_add]
@@ -308,14 +292,6 @@ structure HashSpec {Self C S : Type} (inst : high.hash.Hash Self C S)
   finish_with : ∀ p s (m : Slice U8), Abs p s → p.length + m.length ≤ max →
     inst.HashStateInst.finish_with s m ⦃ d =>
       outLen d.algorithm = L ∧ digestBytes d = H (bv (p ++ m.val)) ⦄
-  /-- Whether `finish_with` takes the long compressor for `m`. Only 32-bit
-  portable SHA-256 ever returns true; other hashes return false. -/
-  finish_uses_long : ∀ (m : Slice U8), inst.HashStateInst.finish_uses_long m ⦃ _ => True ⦄
-  /-- Like `finish_with`, staying on the long compressor. Semantically the
-  same digest; HMAC's outer hash uses this after a long inner. -/
-  finish_with_after_long : ∀ p s (m : Slice U8), Abs p s → p.length + m.length ≤ max →
-    inst.HashStateInst.finish_with_after_long s m ⦃ d =>
-      outLen d.algorithm = L ∧ digestBytes d = H (bv (p ++ m.val)) ⦄
   clone : ∀ p s, Abs p s → inst.HashStateInst.corecloneCloneInst.clone s ⦃ s' => Abs p s' ⦄
   resume : ∀ p s, Abs p s → inst.HashStateInst.resume s ⦃ c => CAbs p c ⦄
   update : ∀ p c (b : Slice U8), CAbs p c → p.length + b.length ≤ max →
@@ -390,18 +366,6 @@ theorem sha256_hashSpec (hb : Sha256Blocks) :
     simp only [high.hash.Sha256State.Insts.RindHighHashHashStateSha256Context.finish_with,
       high.hash.Sha256.Insts.RindHighHashHashSha256ContextSha256State.ALGORITHM, high.digest.SHA256]
     step with sha256_finish_with_spec hb p s m hs (by unfold maxInput at hm; omega) as ⟨r, hr⟩
-    step*
-    apply WP.spec_mono (digest_new_spec _ s (by rw [s_post]; simp [outLen]))
-    rintro d ⟨hd1, hd2⟩
-    refine ⟨by rw [hd1]; rfl, ?_⟩
-    rw [hd2, s_post, Array.val_to_slice, hr]
-  finish_uses_long := fun m => by
-    simp only [high.hash.Sha256State.Insts.RindHighHashHashStateSha256Context.finish_uses_long]
-    exact sha256_finish_uses_long_spec m
-  finish_with_after_long := fun p s m hs hm => by
-    simp only [high.hash.Sha256State.Insts.RindHighHashHashStateSha256Context.finish_with_after_long,
-      high.hash.Sha256.Insts.RindHighHashHashSha256ContextSha256State.ALGORITHM, high.digest.SHA256]
-    step with sha256_finish_with_long_spec hb p s m hs (by unfold maxInput at hm; omega) as ⟨r, hr⟩
     step*
     apply WP.spec_mono (digest_new_spec _ s (by rw [s_post]; simp [outLen]))
     rintro d ⟨hd1, hd2⟩
@@ -593,21 +557,6 @@ theorem sha1_hashSpec (hb : Sha1Blocks) :
     step with sha1_update_blocks_spec hb p s b hs hl (by unfold maxInput at hm; omega) as ⟨s', h⟩
     exact h
   finish_with := fun p s m hs hm => by
-    simp only [high.hash.Sha1State.Insts.RindHighHashHashStateSha1Context.finish_with,
-      high.hash.LegacySha1.Insts.RindHighHashHashSha1ContextSha1State.ALGORITHM, high.digest.SHA1]
-    step with sha1_finish_with_spec hb p s m hs (by unfold maxInput at hm; omega) as ⟨r, hr⟩
-    step*
-    apply WP.spec_mono (digest_new_spec _ s (by rw [s_post]; simp [outLen]))
-    rintro d ⟨hd1, hd2⟩
-    refine ⟨by rw [hd1]; rfl, ?_⟩
-    rw [hd2, s_post, Array.val_to_slice, hr]
-  finish_uses_long := fun m => by
-    -- SHA-1 keeps the trait default; Aeneas extracts
-    -- `HashState.finish_uses_long.default`, not a specialized instance lemma.
-    simp only [high.hash.HashState.finish_uses_long.default]
-    step*
-  finish_with_after_long := fun p s m hs hm => by
-    simp only [high.hash.HashState.finish_with_after_long.default]
     simp only [high.hash.Sha1State.Insts.RindHighHashHashStateSha1Context.finish_with,
       high.hash.LegacySha1.Insts.RindHighHashHashSha1ContextSha1State.ALGORITHM, high.digest.SHA1]
     step with sha1_finish_with_spec hb p s m hs (by unfold maxInput at hm; omega) as ⟨r, hr⟩
