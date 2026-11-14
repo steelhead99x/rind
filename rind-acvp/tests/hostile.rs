@@ -136,6 +136,15 @@ fn hex(test: &Value, field: &str) -> Vec<u8> {
 }
 
 #[test]
+fn empty_rsa_primitives_are_failed_tests() {
+    for command in ["RSA/signaturePrimitive", "RSA/decryptionPrimitive"] {
+        let reply = handle(command, &[Vec::new(), Vec::new(), Vec::new(), Vec::new()]).unwrap();
+        assert_eq!(reply[0], [0], "{command}");
+        assert!(reply[1].is_empty(), "{command}");
+    }
+}
+
+#[test]
 fn rsa_standard_primitives_validate_the_public_key_and_private_result() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../thirdparty/acvp/RSA-SignaturePrimitive-2.0.json");

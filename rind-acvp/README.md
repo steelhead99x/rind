@@ -17,7 +17,26 @@ The runner also sends supplemental prompts through `acvptool`: SHA-1 against Pyt
 
 `prompts.json` for a direct `acvptool` invocation is a JSON array of vector sets, prompts only. `cargo test -p rind-acvp` checks sample answers by calling handlers and exercises the executable's byte framing with published SHA, HMAC, PBKDF, DRBG, and ECDH vectors. The standard Monte Carlo groups also run. The vendored SHA-256 set has the alternate Monte Carlo, which `acvptool` does not drive. Each framed reply explicitly flushes stdout, so the client receives it while keeping the same wrapper process open.
 
-`acvptool -wrapper <binary> -regcap` emits the registration. Its domains follow NIST's [symmetric](https://pages.nist.gov/ACVP/draft-celi-acvp-symmetric.html), [MAC](https://pages.nist.gov/ACVP/draft-fussell-acvp-mac.html), [PBKDF](https://pages.nist.gov/ACVP/draft-celi-acvp-pbkdf.html), [HKDF](https://pages.nist.gov/ACVP/draft-hammett-acvp-kas-kdf-hkdf.html), [ECDSA](https://pages.nist.gov/ACVP/draft-fussell-acvp-ecdsa.html), [EdDSA](https://pages.nist.gov/ACVP/draft-celi-acvp-eddsa.html), [KAS-ECC-SSC](https://pages.nist.gov/ACVP/draft-hammett-acvp-kas-ssc-ecc.html), [RSA](https://pages.nist.gov/ACVP/draft-celi-acvp-rsa.html), [ML-KEM](https://pages.nist.gov/ACVP/draft-celi-acvp-ml-kem.html), [DRBG](https://pages.nist.gov/ACVP/draft-vassilev-acvp-drbg.html), and [ML-DSA](https://pages.nist.gov/ACVP/draft-celi-acvp-ml-dsa.html) registration tables. HMAC registers revision 1.0, whose group-level lengths this client reads. HKDF requests non-hybrid secrets because the client drops `t`. ML-KEM encapDecap registers `FIPS203-tr1` with expanded keys and all four encapsulation, decapsulation, and key-check functions. ML-DSA sigGen registers `FIPS204-tr1`, expanded keys, deterministic and randomized signing, and pure external and internal interfaces; HashML-DSA is unadvertised. RSA signatures use SHA-256/384/512, and PSS uses MGF1 with a salt as long as its hash output. RSA sigVer requests exponent 65537. Capability metadata is checked locally; a live NIST registration still needs the maintainer's credentials.
+`acvptool -wrapper <binary> -regcap` emits the registration. Its domains follow NIST's [symmetric](https://pages.nist.gov/ACVP/draft-celi-acvp-symmetric.html), [MAC](https://pages.nist.gov/ACVP/draft-fussell-acvp-mac.html), [PBKDF](https://pages.nist.gov/ACVP/draft-celi-acvp-pbkdf.html), [HKDF](https://pages.nist.gov/ACVP/draft-hammett-acvp-kas-kdf-hkdf.html), [ECDSA](https://pages.nist.gov/ACVP/draft-fussell-acvp-ecdsa.html), [EdDSA](https://pages.nist.gov/ACVP/draft-celi-acvp-eddsa.html), [KAS-ECC-SSC](https://pages.nist.gov/ACVP/draft-hammett-acvp-kas-ssc-ecc.html), [RSA](https://pages.nist.gov/ACVP/draft-celi-acvp-rsa.html), [ML-KEM](https://pages.nist.gov/ACVP/draft-celi-acvp-ml-kem.html), [DRBG](https://pages.nist.gov/ACVP/draft-vassilev-acvp-drbg.html), and [ML-DSA](https://pages.nist.gov/ACVP/draft-celi-acvp-ml-dsa.html) registration tables. HMAC registers revision 1.0, whose group-level lengths this client reads. HKDF requests non-hybrid secrets because the client drops `t`. ML-KEM encapDecap registers `FIPS203-tr1` with expanded keys and all four encapsulation, decapsulation, and key-check functions. ML-DSA sigGen registers `FIPS204-tr1`, expanded keys, deterministic and randomized signing, and pure external and internal interfaces; HashML-DSA is unadvertised. RSA signatures use SHA-256/384/512, and PSS uses MGF1 with a salt as long as its hash output. RSA sigVer requests exponent 65537. SHA-1, HMAC-SHA-1, PBKDF and HKDF with SHA-1, and hmacDRBG-SHA-1 are registered only so the offline runner can exercise rind's `legacy` implementations. ECDSA and RSA signatures stay on SHA-2, and SHA-1 PKCS#1 verification is not a wrapper command. Capability metadata is checked locally; a live NIST registration still needs the maintainer's credentials.
+
+A live demo uses this same `acvptool`. It defaults to `https://demo.acvts.nist.gov/` and reads a config file:
+
+```json
+{
+  "CertPEMFile": "certs/acvp.pem",
+  "PrivateKeyFile": "certs/acvp.key",
+  "TOTPSecret": "<base64 TOTP secret from NIST; the secret itself, not a path>"
+}
+```
+
+`PrivateKeyDERFile` may replace `PrivateKeyFile`. `ACVPServer` overrides the demo host. Leave `LogFile` unset so `acvptool` does not retain prompts.
+
+```shell
+cargo build -p rind-acvp --release --locked
+acvptool -config config.json -wrapper target/release/rind-acvp
+```
+
+`-run SHA2-256` (or another registered name) limits the session. Hash registrations include `performLargeDataTest` for 1, 2, 4, and 8 GiB. Those groups are real work, and `admin/acvp` does not request them.
 
 A debug build, and a release build with `--cfg rind_cpu_disable`, honours `RIND_CPU_DISABLE_<feature>`, so one process is one CPU path. `rind-fips` applies that mask as the module loads; this binary calls rind, which is where `__acvp` lives. AES-GCM with an internal IV is refused until [that quest](../quest/m4/fips/gcm-iv.md). RSA key generation is not advertised: rind has no FIPS 186-5 generation from the server's seeds or candidates.
 

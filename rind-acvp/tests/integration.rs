@@ -70,6 +70,22 @@ fn config() -> Vec<Value> {
 }
 
 #[test]
+fn empty_rsa_primitive_replies_and_keeps_the_session() {
+    let digest = hex("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    let empty = vec![Vec::new(); 4];
+    let replies = transact(&[
+        ("RSA/signaturePrimitive", empty.clone()),
+        ("SHA2-256", vec![b"abc".to_vec()]),
+        ("RSA/decryptionPrimitive", empty),
+        ("SHA2-256", vec![b"abc".to_vec()]),
+    ]);
+    for pair in replies.as_chunks::<2>().0 {
+        assert_eq!(pair[0], vec![vec![0], Vec::new()]);
+        assert_eq!(pair[1], vec![digest.clone()]);
+    }
+}
+
+#[test]
 fn malformed_ecdsa_coordinates_keep_the_wrapper_session_alive() {
     let mut requests = Vec::new();
     for (curve, hash, field) in [
@@ -120,7 +136,11 @@ fn registration_describes_the_client_supported_capabilities() {
                 &["keyLen", "macLen"]
             }
             ("ACVP-AES-CTR", _) => {
+                // The last incomplete block, not the message length. A longer
+                // message is still a valid counter operation.
+                assert_eq!(entry["payloadLen"][0]["min"], 8);
                 assert_eq!(entry["payloadLen"][0]["max"], 128);
+                assert_eq!(entry["payloadLen"][0]["increment"], 8);
                 &[
                     "payloadLen",
                     "incrementalCounter",
@@ -139,7 +159,11 @@ fn registration_describes_the_client_supported_capabilities() {
             ("ACVP-AES-KW" | "ACVP-AES-KWP", _) => &["payloadLen"],
             ("KDA", "HKDF") => {
                 // acvptool omits t from Z || T; do not request hybrid vectors.
+                // The schema maximum is 2048 bits. The handler can produce more.
                 assert_eq!(entry["usesHybridSharedSecret"], false);
+                assert_eq!(entry["l"], 2048);
+                assert_eq!(entry["z"][0]["min"], 224);
+                assert_eq!(entry["z"][0]["max"], 65536);
                 &[
                     "fixedInfoPattern",
                     "encoding",
@@ -171,6 +195,10 @@ fn registration_describes_the_client_supported_capabilities() {
                     serde_json::json!(["internal", "external"])
                 );
                 assert_eq!(entry["preHash"], serde_json::json!(["pure"]));
+                // Schema minimum is 8 bits. An empty message still verifies.
+                assert_eq!(entry["capabilities"][0]["messageLength"][0]["min"], 8);
+                assert_eq!(entry["capabilities"][0]["messageLength"][0]["max"], 65536);
+                assert_eq!(entry["capabilities"][0]["contextLength"][0]["max"], 2040);
                 assert!(entry["capabilities"][0]["contextLength"].is_array());
                 if mode == "sigGen" {
                     assert_eq!(entry["revision"], "FIPS204-tr1");
@@ -201,6 +229,20 @@ fn registration_describes_the_client_supported_capabilities() {
                     assert_eq!(capability["nonceLen"][0]["max"], 65536);
                 }
                 &["capabilities", "reseedImplemented", "predResistanceEnabled"]
+            }
+            (
+                "SHA-1" | "SHA2-256" | "SHA2-384" | "SHA2-512" | "SHA2-512/256" | "SHA3-256"
+                | "SHA3-384" | "SHA3-512",
+                _,
+            ) => {
+                assert_eq!(entry["messageLength"][0]["min"], 0);
+                assert_eq!(entry["messageLength"][0]["max"], 65536);
+                assert_eq!(entry["messageLength"][0]["increment"], 8);
+                assert_eq!(
+                    entry["performLargeDataTest"],
+                    serde_json::json!([1, 2, 4, 8])
+                );
+                &["messageLength", "performLargeDataTest"]
             }
             _ => &[],
         };

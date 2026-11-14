@@ -1078,11 +1078,10 @@ fn rsa_siggen(keys: &mut Vec<CachedSigGen>, rest: &str, args: &[Vec<u8>]) -> Res
     let bits = u32_arg(arg(args, 0)?).ok_or("RSA modulus bits")?;
     let message = arg(args, 1)?;
     let size = match bits {
+        // 6144 and 8192 are not in the FIPS 186-5 registration.
         2048 => KeySize::Rsa2048,
         3072 => KeySize::Rsa3072,
         4096 => KeySize::Rsa4096,
-        6144 => KeySize::Rsa6144,
-        8192 => KeySize::Rsa8192,
         _ => return Err(format!("unsupported RSA modulus {bits}")),
     };
     let alg = rsa_sign_alg(hash, pad)?;
@@ -1146,10 +1145,11 @@ fn rsa_verify_alg(
     pad: &str,
 ) -> Result<&'static rind::signature::RsaVerificationAlgorithm, String> {
     Ok(match (hash, pad) {
+        // SHA-1 PKCS#1 is not registered. Hash, HMAC, PBKDF, HKDF, and
+        // hmacDRBG register SHA-1; RSA and ECDSA signatures stay on SHA-2.
         ("SHA2-256", "pkcs1v1.5") => &verify::RSA_PKCS1_SHA256,
         ("SHA2-384", "pkcs1v1.5") => &verify::RSA_PKCS1_SHA384,
         ("SHA2-512", "pkcs1v1.5") => &verify::RSA_PKCS1_SHA512,
-        ("SHA-1", "pkcs1v1.5") => &verify::legacy::RSA_PKCS1_SHA1,
         ("SHA2-256", "pss") => &verify::RSA_PSS_SHA256,
         ("SHA2-384", "pss") => &verify::RSA_PSS_SHA384,
         ("SHA2-512", "pss") => &verify::RSA_PSS_SHA512,
@@ -1338,10 +1338,12 @@ fn hmac_drbg(rest: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
 
 const MAX_DRBG: usize = 1 << 16;
 
-/// Lengths `getConfig` advertises for `hash`, in bytes. SHA-1's strength is
-/// 128 bits, and each SHA-2 hash here is used at 256. The nonce is half of
-/// that. Personalization and additional input may be empty. The output cap is
-/// SP 800-90A's 2^19 bits for HMAC_DRBG.
+/// Byte lengths for the bit domains `getConfig` advertises. SHA-1's strength
+/// is 128 bits, so its entropy minimum is 16 bytes and its nonce minimum is
+/// half of that. Each SHA-2 hash here is used at 256 bits. Personalization
+/// and additional input may be empty. The output cap is SP 800-90A's 2^19
+/// bits. Entropy and the other inputs use that same byte cap, which is wider
+/// than their 65536-bit registration maximum.
 fn drbg_lengths(hash: &str, kind: &str, args: &[Vec<u8>], out_len: usize) -> bool {
     let (entropy_min, nonce_min) = match hash {
         "SHA-1" => (16, 8),
@@ -1372,17 +1374,25 @@ fn drbg_lengths(hash: &str, kind: &str, args: &[Vec<u8>], out_len: usize) -> boo
 /// vector is read. RSA key generation is absent: rind has no seeded or
 /// candidate-prime FIPS 186-5 key generation, and the quest allows keeping
 /// it out of the module. AES-GCM internal IVs wait on their own quest.
+///
+/// Length domains are in bits, except PBKDF's password, which ACVP counts in
+/// bytes. Hash AFT messages stop at the registration maximum of 65536 bits.
+/// `performLargeDataTest` is the separate 1/2/4/8 GiB path `hash_ldt` accepts.
+/// AES-CTR `payloadLen` is the final partial block, at most one AES block, not
+/// the message length. HKDF registers `l` at the schema maximum of 2048 bits.
+/// ML-DSA messages start at 8 bits, the schema minimum; an empty message still
+/// verifies.
 // The registration follows the subset understood by the pinned acvptool.
 // See UPSTREAM.md, "acvptool expects older sample formats", for adaptations.
 const CONFIG: &str = r#"[
-  {"algorithm": "SHA-1", "revision": "1.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}]},
-  {"algorithm": "SHA2-256", "revision": "1.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}]},
-  {"algorithm": "SHA2-384", "revision": "1.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}]},
-  {"algorithm": "SHA2-512", "revision": "1.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}]},
-  {"algorithm": "SHA2-512/256", "revision": "1.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}]},
-  {"algorithm": "SHA3-256", "revision": "2.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}]},
-  {"algorithm": "SHA3-384", "revision": "2.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}]},
-  {"algorithm": "SHA3-512", "revision": "2.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}]},
+  {"algorithm": "SHA-1", "revision": "1.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}], "performLargeDataTest": [1, 2, 4, 8]},
+  {"algorithm": "SHA2-256", "revision": "1.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}], "performLargeDataTest": [1, 2, 4, 8]},
+  {"algorithm": "SHA2-384", "revision": "1.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}], "performLargeDataTest": [1, 2, 4, 8]},
+  {"algorithm": "SHA2-512", "revision": "1.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}], "performLargeDataTest": [1, 2, 4, 8]},
+  {"algorithm": "SHA2-512/256", "revision": "1.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}], "performLargeDataTest": [1, 2, 4, 8]},
+  {"algorithm": "SHA3-256", "revision": "2.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}], "performLargeDataTest": [1, 2, 4, 8]},
+  {"algorithm": "SHA3-384", "revision": "2.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}], "performLargeDataTest": [1, 2, 4, 8]},
+  {"algorithm": "SHA3-512", "revision": "2.0", "messageLength": [{"min": 0, "max": 65536, "increment": 8}], "performLargeDataTest": [1, 2, 4, 8]},
   {"algorithm": "ACVP-AES-ECB", "revision": "1.0", "direction": ["encrypt"], "keyLen": [128, 192, 256]},
   {"algorithm": "ACVP-AES-CBC", "revision": "1.0", "direction": ["encrypt", "decrypt"], "keyLen": [128, 192, 256]},
   {
@@ -1742,6 +1752,55 @@ mod tests {
         Ok(reply)
     }
 
+    /// One AES-CBC Monte Carlo iteration chain, beside the handler so a
+    /// flipped loop condition cannot satisfy the test by construction.
+    fn cbc_monte_carlo(
+        encrypt: bool,
+        key: &[u8],
+        mut input: Vec<u8>,
+        mut iv: Vec<u8>,
+    ) -> (Vec<u8>, Vec<u8>) {
+        let mut result = vec![0u8; input.len()];
+        let mut prev_result = result.clone();
+        let mut prev_input = Vec::new();
+        let original_iv = iv.clone();
+        for j in 0..1000 {
+            prev_result.clone_from(&result);
+            if j > 0 {
+                iv.clone_from(if encrypt { &result } else { &prev_input });
+            }
+            result.clone_from(&input);
+            let iv_bytes: [u8; 16] = iv.as_slice().try_into().unwrap();
+            if encrypt {
+                AesCbcEncryptingKey::new(&AES_128, key)
+                    .unwrap()
+                    .encrypt_blocks(CbcIv::assume_unpredictable(iv_bytes), &mut result)
+                    .unwrap();
+            } else {
+                AesCbcDecryptingKey::new(&AES_128, key)
+                    .unwrap()
+                    .decrypt_blocks(&iv_bytes, &mut result)
+                    .unwrap();
+            }
+            if !encrypt {
+                prev_input.clone_from(&input);
+            }
+            if j == 0 {
+                input.clone_from(&original_iv);
+            } else {
+                input.clone_from(&prev_result);
+            }
+        }
+        (result, prev_result)
+    }
+
+    fn failure(command: &str, args: &[Vec<u8>]) -> String {
+        match handle(command, args) {
+            Err(err) => err,
+            Ok(_) => panic!("{command} succeeded"),
+        }
+    }
+
     fn hex(s: &str) -> Vec<u8> {
         (0..s.len())
             .step_by(2)
@@ -1962,12 +2021,27 @@ mod tests {
                 .is_err()
             );
         }
-        assert!(
-            handle(
+        // Empty content and a zero repetition are rejected before the loop.
+        // A product that overflows `u64` is the over-cap stand-in: a repetition
+        // count past 8 GiB would make the flipped `<=` mutant hash for the
+        // whole test timeout. The short LDT test catches that flip.
+        assert_eq!(
+            failure("SHA2-256/LDT", &[Vec::new(), 1u64.to_ne_bytes().to_vec()]),
+            "LDT content is empty"
+        );
+        assert_eq!(
+            failure(
                 "SHA2-256/LDT",
-                &[vec![0; 3], (1u64 << 32).to_ne_bytes().to_vec()]
-            )
-            .is_err()
+                &[b"abc".to_vec(), 0u64.to_ne_bytes().to_vec()]
+            ),
+            "LDT content is empty"
+        );
+        assert_eq!(
+            failure(
+                "SHA2-256/LDT",
+                &[vec![1, 2], u64::MAX.to_ne_bytes().to_vec()]
+            ),
+            "LDT message is longer than 8 GiB"
         );
     }
 
@@ -2068,5 +2142,858 @@ mod tests {
             ],
         );
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn rsa_sigver_refuses_unregistered_sha1() {
+        let err = handle(
+            "RSA/sigVer/SHA-1/pkcs1v1.5",
+            &[
+                vec![0xff; 256],
+                vec![0x01, 0x00, 0x01],
+                b"m".to_vec(),
+                vec![0; 256],
+            ],
+        );
+        assert!(err.is_err());
+    }
+
+    /// Advertised edges: the handler accepts each registered extreme and
+    /// rejects the step just outside it.
+    #[test]
+    fn capability_edges_match_the_handlers() {
+        // `payloadLen` is the final partial block. One byte and one block are
+        // the registered edges; a longer message is still accepted.
+        for len in [1usize, 16, 32] {
+            let reply = handle(
+                "AES-CTR/encrypt",
+                &[
+                    vec![0x11; 16],
+                    vec![0x22; len],
+                    vec![0x33; 16],
+                    1u32.to_ne_bytes().to_vec(),
+                ],
+            )
+            .unwrap();
+            assert_eq!(reply[0].len(), len);
+        }
+
+        let pbkdf = |password: usize, salt: usize, iterations: u32, bits: u32| {
+            handle(
+                "PBKDF",
+                &[
+                    vec![b'p'; password],
+                    vec![0x5a; salt],
+                    iterations.to_ne_bytes().to_vec(),
+                    b"SHA2-256".to_vec(),
+                    bits.to_ne_bytes().to_vec(),
+                ],
+            )
+        };
+        assert_eq!(pbkdf(8, 16, 1, 112).unwrap()[0].len(), 14);
+        assert_eq!(pbkdf(128, 512, 1, 4096).unwrap()[0].len(), 512);
+        assert!(pbkdf(7, 16, 1, 112).is_err());
+        assert!(pbkdf(129, 16, 1, 112).is_err());
+        assert!(pbkdf(8, 15, 1, 112).is_err());
+        assert!(pbkdf(8, 513, 1, 112).is_err());
+        assert!(pbkdf(8, 16, 10_000, 112).is_ok());
+        assert!(pbkdf(8, 16, 10_001, 112).is_err());
+
+        let kw = |command: &str, payload: usize| {
+            handle(
+                command,
+                &[
+                    Vec::new(),
+                    vec![0x11; 16],
+                    vec![0x22; payload],
+                    Vec::new(),
+                    Vec::new(),
+                ],
+            )
+        };
+        assert_eq!(kw("AES-KW/seal", 16).unwrap()[0].len(), 24);
+        assert_eq!(kw("AES-KW/seal", 512).unwrap()[0].len(), 520);
+        assert!(kw("AES-KW/seal", 8).is_err());
+        assert!(kw("AES-KW/seal", 513).is_err());
+        assert_eq!(kw("AES-KWP/seal", 1).unwrap()[0].len(), 16);
+        assert_eq!(kw("AES-KWP/seal", 512).unwrap()[0].len(), 520);
+        assert!(kw("AES-KWP/seal", 0).is_err());
+        assert!(kw("AES-KWP/seal", 513).is_err());
+
+        let drbg = |hash: &str, out: u32, entropy: usize, nonce: usize| {
+            handle(
+                &format!("hmacDRBG/{hash}"),
+                &[
+                    out.to_ne_bytes().to_vec(),
+                    vec![0x5a; entropy],
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    vec![0xa5; nonce],
+                ],
+            )
+        };
+        assert_eq!(drbg("SHA-1", 1, 16, 8).unwrap()[0].len(), 1);
+        assert_eq!(drbg("SHA2-256", 65536, 32, 16).unwrap()[0].len(), 65536);
+        assert!(drbg("SHA-1", 1, 15, 8).is_err());
+        assert!(drbg("SHA-1", 1, 16, 7).is_err());
+        assert!(drbg("SHA2-256", 0, 32, 16).is_err());
+        assert!(drbg("SHA2-256", 65537, 32, 16).is_err());
+        assert!(drbg("SHA2-512", 16, 31, 16).is_err());
+        assert!(drbg("SHA2-384", 16, 32, 15).is_err());
+
+        let generated = handle("ML-DSA/ML-DSA-44/keyGen", &[vec![9; 32]]).unwrap();
+        let (pk, sk) = (generated[0].to_vec(), generated[1].to_vec());
+        let sign = |message: &[u8], context: &[u8]| {
+            handle(
+                "ML-DSA/ML-DSA-44/sigGen",
+                &[
+                    sk.clone(),
+                    message.to_vec(),
+                    Vec::new(),
+                    Vec::new(),
+                    context.to_vec(),
+                    Vec::new(),
+                ],
+            )
+        };
+        // The schema will not register a zero-length message. The handler
+        // still verifies one, and the registered minimum is one byte.
+        let signature = sign(&[], &[]).unwrap();
+        let verified = handle(
+            "ML-DSA/ML-DSA-44/sigVer",
+            &[
+                signature[0].to_vec(),
+                pk.clone(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(verified[0], [1]);
+        let signature = sign(&[0x01], &[]).unwrap();
+        let verified = handle(
+            "ML-DSA/ML-DSA-44/sigVer",
+            &[
+                signature[0].to_vec(),
+                pk.clone(),
+                vec![0x01],
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(verified[0], [1]);
+        let context = vec![0x3c; 255];
+        let signature = sign(b"m", &context).unwrap();
+        let verified = handle(
+            "ML-DSA/ML-DSA-44/sigVer",
+            &[
+                signature[0].to_vec(),
+                pk,
+                b"m".to_vec(),
+                Vec::new(),
+                context,
+                Vec::new(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(verified[0], [1]);
+        assert!(sign(b"m", &[0; 256]).is_err());
+    }
+
+    #[test]
+    fn every_hash_matches_abc() {
+        let digests = [
+            ("SHA-1", "a9993e364706816aba3e25717850c26c9cd0d89d"),
+            (
+                "SHA2-256",
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            ),
+            (
+                "SHA2-384",
+                "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7",
+            ),
+            (
+                "SHA2-512",
+                "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f",
+            ),
+            (
+                "SHA2-512/256",
+                "53048e2681941ef99b2e29b76b4c7dabe4c2d0c634fc6d46e0e2f13107e7af23",
+            ),
+            (
+                "SHA3-256",
+                "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532",
+            ),
+            (
+                "SHA3-384",
+                "ec01498288516fc926459f58e2c6ad8df9b473cb0fc08c2596da7cf0e49be4b298d88cea927ac7f539f1edf228376d25",
+            ),
+            (
+                "SHA3-512",
+                "b751850b1a57168a5693cd924b6b096e08f621827444f70d884f5d0240d2712e10e116e9192af3c91a7ec57647e3934057340b4cf408d5a56592f8274eec53f0",
+            ),
+        ];
+        for (name, digest) in digests {
+            assert_eq!(
+                handle(name, &[b"abc".to_vec()]).unwrap()[0],
+                hex(digest),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn hmac_and_kdf_hashes_round_trip() {
+        for (name, len) in [
+            ("HMAC-SHA-1", 20),
+            ("HMAC-SHA2-256", 32),
+            ("HMAC-SHA2-384", 48),
+            ("HMAC-SHA2-512", 64),
+        ] {
+            assert_eq!(
+                handle(name, &[b"message".to_vec(), b"key".to_vec()]).unwrap()[0].len(),
+                len,
+                "{name}"
+            );
+        }
+        for hash in ["SHA-1", "SHA2-256", "SHA2-384", "SHA2-512"] {
+            assert_eq!(
+                handle(
+                    "PBKDF",
+                    &[
+                        b"password".to_vec(),
+                        vec![0x5a; 16],
+                        1u32.to_ne_bytes().to_vec(),
+                        hash.as_bytes().to_vec(),
+                        112u32.to_ne_bytes().to_vec(),
+                    ],
+                )
+                .unwrap()[0]
+                    .len(),
+                14,
+                "{hash}"
+            );
+            let prk = handle(
+                &format!("HKDF/{hash}/extract"),
+                &[b"ikm".to_vec(), b"salt".to_vec()],
+            )
+            .unwrap();
+            assert!(!prk[0].is_empty(), "{hash} extract");
+            assert_eq!(
+                handle(
+                    &format!("HKDF/{hash}/expand"),
+                    &[
+                        32u32.to_ne_bytes().to_vec(),
+                        prk[0].to_vec(),
+                        b"info".to_vec(),
+                    ],
+                )
+                .unwrap()[0]
+                    .len(),
+                32,
+                "{hash} expand"
+            );
+            assert_eq!(
+                handle(
+                    &format!("KDA/HKDF/{hash}"),
+                    &[
+                        vec![0x0b; 32],
+                        b"salt".to_vec(),
+                        b"info".to_vec(),
+                        32u32.to_ne_bytes().to_vec(),
+                    ],
+                )
+                .unwrap()[0]
+                    .len(),
+                32,
+                "{hash} kda"
+            );
+        }
+    }
+
+    #[test]
+    fn aes_dispatch_and_block_edges() {
+        assert_eq!(
+            failure(
+                "AES/decrypt",
+                &[vec![0; 16], vec![0; 16], 1u32.to_ne_bytes().to_vec()],
+            ),
+            "AES-ECB decryption is outside the module"
+        );
+        for key in [vec![0x11; 16], vec![0x11; 24], vec![0x11; 32]] {
+            let plain = vec![0x22; 32];
+            let once = handle(
+                "AES/encrypt",
+                &[key.clone(), plain.clone(), 1u32.to_ne_bytes().to_vec()],
+            )
+            .unwrap();
+            assert_eq!(once[0].len(), 32);
+            assert_eq!(once[1], plain);
+            assert_ne!(once[0], plain);
+            let many = handle(
+                "AES/encrypt",
+                &[key.clone(), vec![0x22; 16], 1000u32.to_ne_bytes().to_vec()],
+            )
+            .unwrap();
+            assert_ne!(many[0], many[1]);
+            assert_ne!(many[1], vec![0x22; 16]);
+            // `prev` is the input of the last iteration, so one more
+            // encryption is the final ciphertext.
+            let mut last = many[1].to_vec();
+            let block: &mut [u8; 16] = last.as_mut_slice().try_into().unwrap();
+            Aes::new(aes_alg(key.len()).unwrap(), &key)
+                .unwrap()
+                .encrypt_block(block);
+            assert_eq!(last, many[0]);
+        }
+        assert!(
+            handle(
+                "AES/encrypt",
+                &[vec![0; 16], vec![0; 15], 1u32.to_ne_bytes().to_vec()],
+            )
+            .is_err()
+        );
+
+        let key = vec![0x11; 16];
+        let iv = vec![0x22; 16];
+        let plain = vec![0x33; 32];
+        let sealed = handle(
+            "AES-CBC/encrypt",
+            &[
+                key.clone(),
+                plain.clone(),
+                iv.clone(),
+                1u32.to_ne_bytes().to_vec(),
+            ],
+        )
+        .unwrap();
+        let mut expected = plain.clone();
+        AesCbcEncryptingKey::new(&AES_128, &key)
+            .unwrap()
+            .encrypt_blocks(
+                CbcIv::assume_unpredictable(iv.as_slice().try_into().unwrap()),
+                &mut expected,
+            )
+            .unwrap();
+        assert_eq!(sealed[0], expected);
+        let opened = handle(
+            "AES-CBC/decrypt",
+            &[
+                key.clone(),
+                sealed[0].to_vec(),
+                iv.clone(),
+                1u32.to_ne_bytes().to_vec(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(opened[0], plain);
+        let iterated = handle(
+            "AES-CBC/encrypt",
+            &[
+                key.clone(),
+                vec![0x33; 16],
+                iv.clone(),
+                1000u32.to_ne_bytes().to_vec(),
+            ],
+        )
+        .unwrap();
+        let (ciphertext, previous) = cbc_monte_carlo(true, &key, vec![0x33; 16], iv.clone());
+        assert_eq!(iterated[0], ciphertext);
+        assert_eq!(iterated[1], previous);
+        let decrypted = handle(
+            "AES-CBC/decrypt",
+            &[
+                key.clone(),
+                vec![0x33; 16],
+                iv.clone(),
+                1000u32.to_ne_bytes().to_vec(),
+            ],
+        )
+        .unwrap();
+        let (plaintext, previous) = cbc_monte_carlo(false, &key, vec![0x33; 16], iv.clone());
+        assert_eq!(decrypted[0], plaintext);
+        assert_eq!(decrypted[1], previous);
+
+        let rejected = [
+            vec![0x33; 0],
+            vec![0x33; 15],
+            vec![0x33; 16],
+            vec![0x33; 32],
+        ];
+        let ivs = [iv.clone(), iv.clone(), vec![0x22; 15], iv.clone()];
+        let counts = [1u32, 1, 1, 1000];
+        // empty, partial block, short IV, and a multi-block Monte Carlo.
+        let cases = [
+            (rejected[0].clone(), ivs[0].clone(), counts[0]),
+            (rejected[1].clone(), ivs[1].clone(), counts[1]),
+            (vec![0x33; 16], ivs[2].clone(), counts[2]),
+            (rejected[3].clone(), ivs[3].clone(), counts[3]),
+            (vec![0x33; 16], iv.clone(), 2),
+        ];
+        for (input, nonce, iterations) in cases {
+            assert_eq!(
+                failure(
+                    "AES-CBC/encrypt",
+                    &[key.clone(), input, nonce, iterations.to_ne_bytes().to_vec()],
+                ),
+                "AES-CBC input"
+            );
+        }
+
+        for tag in [16u32, 15, 14, 13, 12, 8, 4] {
+            let sealed = handle(
+                "AES-GCM/seal",
+                &[
+                    tag.to_ne_bytes().to_vec(),
+                    key.clone(),
+                    b"hello".to_vec(),
+                    vec![0x44; 12],
+                    b"aad".to_vec(),
+                ],
+            )
+            .unwrap();
+            assert_eq!(sealed[0].len(), b"hello".len() + tag as usize);
+            let opened = handle(
+                "AES-GCM/open",
+                &[
+                    tag.to_ne_bytes().to_vec(),
+                    key.clone(),
+                    sealed[0].to_vec(),
+                    vec![0x44; 12],
+                    b"aad".to_vec(),
+                ],
+            )
+            .unwrap();
+            assert_eq!(opened[0], [1]);
+            assert_eq!(opened[1], b"hello"[..]);
+        }
+    }
+
+    #[test]
+    fn ecdsa_ed25519_and_ecdh_cover_every_curve() {
+        let curves = [
+            ("P-256", "SHA2-256", 32),
+            ("P-384", "SHA2-384", 48),
+            ("P-521", "SHA2-512", 66),
+        ];
+        for (curve, hash, field) in curves {
+            let key = handle("ECDSA/keyGen", &[curve.as_bytes().to_vec()]).unwrap();
+            assert_eq!(key[1].len(), field, "{curve} x");
+            assert_eq!(key[2].len(), field, "{curve} y");
+            let mut padded = vec![0];
+            padded.extend_from_slice(&key[1]);
+            assert_eq!(
+                handle(
+                    "ECDSA/keyVer",
+                    &[curve.as_bytes().to_vec(), padded, key[2].to_vec()],
+                )
+                .unwrap()[0],
+                [1]
+            );
+            let signature = handle(
+                "ECDSA/sigGen",
+                &[
+                    curve.as_bytes().to_vec(),
+                    key[0].to_vec(),
+                    hash.as_bytes().to_vec(),
+                    b"message".to_vec(),
+                ],
+            )
+            .unwrap();
+            assert_eq!(
+                handle(
+                    "ECDSA/sigVer",
+                    &[
+                        curve.as_bytes().to_vec(),
+                        hash.as_bytes().to_vec(),
+                        b"message".to_vec(),
+                        key[1].to_vec(),
+                        key[2].to_vec(),
+                        signature[0].to_vec(),
+                        signature[1].to_vec(),
+                    ],
+                )
+                .unwrap()[0],
+                [1]
+            );
+            for other in ["SHA2-256", "SHA2-384", "SHA2-512"] {
+                assert_eq!(
+                    handle(
+                        "ECDSA/sigVer",
+                        &[
+                            curve.as_bytes().to_vec(),
+                            other.as_bytes().to_vec(),
+                            b"message".to_vec(),
+                            vec![0xff; 4],
+                            vec![0xff; 4],
+                            vec![1; 8],
+                            vec![1; 8],
+                        ],
+                    )
+                    .unwrap()[0],
+                    [0],
+                    "{curve} {other}"
+                );
+            }
+            let shared = handle(
+                &format!("ECDH/{curve}"),
+                &[key[1].to_vec(), key[2].to_vec(), key[0].to_vec()],
+            )
+            .unwrap();
+            assert_eq!(shared[0].len(), field);
+            assert_eq!(shared[2].len(), field);
+        }
+        assert_eq!(
+            failure(
+                "ECDSA/sigGen/componentTest",
+                &[
+                    b"P-256".to_vec(),
+                    vec![1; 32],
+                    b"SHA2-256".to_vec(),
+                    b"message".to_vec(),
+                ],
+            ),
+            "ECDSA component sigGen is not in the module's capability"
+        );
+
+        let key = handle("EDDSA/ED-25519/keyGen", &[]).unwrap();
+        assert_eq!(
+            handle("EDDSA/ED-25519/keyVer", &[key[1].to_vec()]).unwrap()[0],
+            [1]
+        );
+        let signature = handle(
+            "EDDSA/ED-25519/sigGen",
+            &[key[0].to_vec(), b"message".to_vec()],
+        )
+        .unwrap();
+        assert_eq!(
+            handle(
+                "EDDSA/ED-25519/sigVer",
+                &[b"message".to_vec(), key[1].to_vec(), signature[0].to_vec()],
+            )
+            .unwrap()[0],
+            [1]
+        );
+    }
+
+    #[test]
+    fn rsa_signatures_use_only_the_registered_sizes() {
+        let mut wrapper = Wrapper::default();
+        let sign = |wrapper: &mut Wrapper, bits: u32, hash: &str, pad: &str| {
+            wrapper
+                .handle(
+                    &format!("RSA/sigGen/{hash}/{pad}"),
+                    &[bits.to_ne_bytes().to_vec(), b"message".to_vec()],
+                )
+                .unwrap()
+        };
+        let first = sign(&mut wrapper, 2048, "SHA2-256", "pkcs1v1.5");
+        let again = sign(&mut wrapper, 2048, "SHA2-256", "pkcs1v1.5");
+        assert_eq!(first[0], again[0]);
+        for hash in ["SHA2-256", "SHA2-384", "SHA2-512"] {
+            for pad in ["pkcs1v1.5", "pss"] {
+                let signed = sign(&mut wrapper, 2048, hash, pad);
+                let verified = wrapper
+                    .handle(
+                        &format!("RSA/sigVer/{hash}/{pad}"),
+                        &[
+                            signed[0].to_vec(),
+                            signed[1].to_vec(),
+                            b"message".to_vec(),
+                            signed[2].to_vec(),
+                        ],
+                    )
+                    .unwrap();
+                assert_eq!(verified[0], [1], "{hash} {pad}");
+            }
+        }
+        for bits in [3072u32, 4096] {
+            let signed = sign(&mut wrapper, bits, "SHA2-256", "pkcs1v1.5");
+            assert!(signed[0].len() > 256, "{bits}");
+            assert_eq!(
+                wrapper
+                    .handle(
+                        "RSA/sigVer/SHA2-256/pkcs1v1.5",
+                        &[
+                            signed[0].to_vec(),
+                            signed[1].to_vec(),
+                            b"message".to_vec(),
+                            signed[2].to_vec(),
+                        ],
+                    )
+                    .unwrap()[0],
+                [1]
+            );
+        }
+        for bits in [6144u32, 8192] {
+            assert!(
+                wrapper
+                    .handle(
+                        "RSA/sigGen/SHA2-256/pkcs1v1.5",
+                        &[bits.to_ne_bytes().to_vec(), b"message".to_vec()],
+                    )
+                    .is_err(),
+                "{bits}"
+            );
+        }
+    }
+
+    #[test]
+    fn mldsa_sets_and_interfaces_round_trip() {
+        for set in ["ML-DSA-44", "ML-DSA-65", "ML-DSA-87"] {
+            let key = handle(&format!("ML-DSA/{set}/keyGen"), &[vec![9; 32]]).unwrap();
+            let sign = |external: Vec<u8>, interface: Option<&[u8]>, mu: &[u8]| {
+                let mut args = vec![
+                    key[1].to_vec(),
+                    b"message".to_vec(),
+                    mu.to_vec(),
+                    vec![0; 32],
+                    Vec::new(),
+                    external,
+                ];
+                if let Some(interface) = interface {
+                    args.push(interface.to_vec());
+                }
+                handle(&format!("ML-DSA/{set}/sigGen"), &args).unwrap()
+            };
+            let verify =
+                |signature: &[u8], external: Vec<u8>, interface: Option<&[u8]>, mu: &[u8]| {
+                    let mut args = vec![
+                        signature.to_vec(),
+                        key[0].to_vec(),
+                        b"message".to_vec(),
+                        mu.to_vec(),
+                        Vec::new(),
+                        external,
+                    ];
+                    if let Some(interface) = interface {
+                        args.push(interface.to_vec());
+                    }
+                    handle(&format!("ML-DSA/{set}/sigVer"), &args).unwrap()[0].to_vec()
+                };
+            let signature = sign(Vec::new(), None, &[]);
+            assert_eq!(verify(&signature[0], Vec::new(), None, &[]), [1]);
+            let signature = sign(vec![0], Some(b"internal"), &[]);
+            assert_eq!(verify(&signature[0], vec![0], Some(b"internal"), &[]), [1]);
+            let signature = sign(Vec::new(), Some(b"external"), &[]);
+            assert_eq!(
+                verify(&signature[0], Vec::new(), Some(b"external"), &[]),
+                [1]
+            );
+            let mu = vec![0x5a; 64];
+            let signature = sign(vec![1], Some(b"internal"), &mu);
+            assert_eq!(verify(&signature[0], vec![1], Some(b"internal"), &mu), [1]);
+            let signature = sign(vec![1], None, &mu);
+            assert_eq!(verify(&signature[0], vec![1], None, &mu), [1]);
+            // `external` with a supplied `mu` is not the external interface.
+            // A guard that is always true would sign it.
+            assert_eq!(
+                failure(
+                    &format!("ML-DSA/{set}/sigGen"),
+                    &[
+                        key[1].to_vec(),
+                        b"message".to_vec(),
+                        mu,
+                        vec![0; 32],
+                        Vec::new(),
+                        vec![1],
+                        b"external".to_vec(),
+                    ],
+                ),
+                "ML-DSA signature interface"
+            );
+        }
+        assert!(failure("ML-DSA/ML-DSA-44/sigGen", &[vec![0; 32]]).contains("six"));
+    }
+
+    #[test]
+    fn mlkem_checks_and_drbg_modes() {
+        let key = handle(
+            "ML-KEM/ML-KEM-768/keyGen",
+            &[vec![0x5a; 32], vec![0x3c; 32]],
+        )
+        .unwrap();
+        assert_eq!(
+            handle("ML-KEM/ML-KEM-768/encapKeyCheck", &[key[0].to_vec()]).unwrap()[0],
+            [1]
+        );
+        assert_eq!(
+            handle("ML-KEM/ML-KEM-768/decapKeyCheck", &[key[1].to_vec()]).unwrap()[0],
+            [1]
+        );
+        assert!(
+            failure(
+                "ML-KEM/ML-KEM-768/keyGen",
+                &[vec![0x5a; 32], vec![0x3c; 31]],
+            )
+            .contains("32-byte")
+        );
+
+        let generate = |hash: &str, entropy: usize, nonce: usize| {
+            handle(
+                &format!("hmacDRBG/{hash}"),
+                &[
+                    16u32.to_ne_bytes().to_vec(),
+                    vec![0x11; entropy],
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    vec![0x22; nonce],
+                ],
+            )
+            .unwrap()
+        };
+        assert_eq!(generate("SHA-1", 16, 8)[0].len(), 16);
+        assert_eq!(generate("SHA2-256", 32, 16)[0].len(), 16);
+        assert_eq!(generate("SHA2-384", 32, 16)[0].len(), 16);
+        assert_eq!(generate("SHA2-512", 32, 16)[0].len(), 16);
+        let entropy = vec![0x11; 32];
+        let nonce = vec![0x22; 16];
+        assert_eq!(
+            handle(
+                "hmacDRBG-reseed/SHA2-256",
+                &[
+                    16u32.to_ne_bytes().to_vec(),
+                    entropy.clone(),
+                    Vec::new(),
+                    Vec::new(),
+                    entropy.clone(),
+                    Vec::new(),
+                    Vec::new(),
+                    nonce.clone(),
+                ],
+            )
+            .unwrap()[0]
+                .len(),
+            16
+        );
+        assert_eq!(
+            handle(
+                "hmacDRBG-pr/SHA2-384",
+                &[
+                    16u32.to_ne_bytes().to_vec(),
+                    entropy.clone(),
+                    Vec::new(),
+                    Vec::new(),
+                    entropy.clone(),
+                    Vec::new(),
+                    entropy,
+                    nonce,
+                ],
+            )
+            .unwrap()[0]
+                .len(),
+            16
+        );
+    }
+
+    #[test]
+    fn der_and_point_parsers_honor_their_bounds() {
+        let (x, y) = split_point(&[0x04, 1, 2, 3, 4]).unwrap();
+        assert_eq!(
+            (x.as_slice(), y.as_slice()),
+            ([1, 2].as_slice(), [3, 4].as_slice())
+        );
+        assert!(split_point(&[0x00, 1, 2]).is_err());
+        assert!(split_point(&[0x04, 1, 2, 3]).is_err());
+        assert_eq!(pad(&[0x00, 0x01], 1).unwrap(), [0x01]);
+        assert_eq!(pad(&[0x00, 0x00, 0x02], 1).unwrap(), [0x02]);
+        assert_eq!(pad(&[0x01], 2).unwrap(), [0x00, 0x01]);
+        assert!(pad(&[0x01, 0x02], 1).is_err());
+
+        let encoded = pkcs1_encode(&[0xff; 256], &[0x01, 0x00, 0x01]);
+        let (n, e) = pkcs1_public(&encoded).unwrap();
+        assert_eq!(n, vec![0xff; 256]);
+        assert_eq!(e, vec![0x01, 0x00, 0x01]);
+        let encoded = pkcs1_encode(&[0x80], &[0x01]);
+        let (n, e) = pkcs1_public(&encoded).unwrap();
+        assert_eq!(n, vec![0x80]);
+        assert_eq!(e, vec![0x01]);
+        let wide = pkcs1_encode(&[0x11; 128], &[0x03]);
+        let (n, _) = pkcs1_public(&wide).unwrap();
+        assert_eq!(n, vec![0x11; 128]);
+
+        let mut body = vec![0u8; 65536];
+        body[0] = 0x5a;
+        let mut der = vec![0x04, 0x83, 0x01, 0x00, 0x00];
+        der.extend_from_slice(&body);
+        let mut input = der.as_slice();
+        assert_eq!(der_read(&mut input, 0x04).unwrap(), body);
+        assert!(input.is_empty());
+        assert!(der_read(&mut &[0x04, 0x80][..], 0x04).is_err());
+        assert!(der_read(&mut &[0x04, 0x84, 0, 0, 0, 1][..], 0x04).is_err());
+        assert!(der_read(&mut &[0x04, 0x02, 0x01][..], 0x04).is_err());
+        // The long-form length itself is truncated. A comparison that only
+        // rejects an exact length slices past the buffer.
+        assert!(der_read(&mut &[0x04, 0x82, 0x01][..], 0x04).is_err());
+        // Four length bytes and a complete body. `n > 3` still rejects it;
+        // turning that `||` into `&&` parses the body.
+        assert!(der_read(&mut &[0x04, 0x84, 0, 0, 0, 1, 0xaa][..], 0x04).is_err());
+        // Exactly `n` length bytes and an empty value. `<` accepts it; `<=` does not.
+        assert_eq!(
+            der_read(&mut &[0x04, 0x81, 0x00][..], 0x04).unwrap(),
+            Vec::<u8>::new()
+        );
+    }
+
+    #[test]
+    fn trivial_rsa_ciphertext_borrows_across_a_zero_byte() {
+        // 512 − 1 = 0x01ff. The predecessor walk has to borrow through the 0.
+        let reply = handle(
+            "RSA/decryptionPrimitive",
+            &[vec![0x01, 0xff], vec![3], vec![0x02, 0x00], vec![1]],
+        )
+        .unwrap();
+        assert_eq!(reply[0], [0]);
+        assert!(reply[1].is_empty());
+    }
+
+    #[test]
+    fn key_wrap_open_honors_the_length_bounds() {
+        let key = vec![0x11; 16];
+        let sealed = handle(
+            "AES-KW/seal",
+            &[
+                Vec::new(),
+                key.clone(),
+                vec![0x22; 16],
+                Vec::new(),
+                Vec::new(),
+            ],
+        )
+        .unwrap();
+        let opened = handle(
+            "AES-KW/open",
+            &[
+                Vec::new(),
+                key.clone(),
+                sealed[0].to_vec(),
+                Vec::new(),
+                Vec::new(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(opened[0], [1]);
+        assert_eq!(opened[1], vec![0x22; 16]);
+        assert_eq!(
+            handle(
+                "AES-KW/open",
+                &[Vec::new(), key.clone(), vec![0; 7], Vec::new(), Vec::new()],
+            )
+            .unwrap()[0],
+            [0]
+        );
+        assert!(
+            failure(
+                "AES-KW/open",
+                &[Vec::new(), key, vec![0; 521], Vec::new(), Vec::new()],
+            )
+            .contains("exceeds")
+        );
     }
 }
