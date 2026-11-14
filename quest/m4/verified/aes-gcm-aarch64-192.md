@@ -13,7 +13,7 @@ Found by the 2026-11-09 audit: [kixel-ai/rind#460](https://github.com/kixel-ai/r
 - Route: HOL Light proofs of rind's two routines in `proofs/hol-light/`, built on those shared files once #490 is in the pin, for 12 rounds, with the precondition rind's call meets (a nonzero whole number of blocks, `in_p = out_p`). aws-lc's routines also take a partial last block, masked in their tail, where the s2n-bignum forms return at once for one; rind passes whole blocks, so the theorem is stated for those, and the tail's masking is the code that differs most from the proven forms. Then an axiom per routine in `proofs/Rind/Aarch64/`, and the two match arms join the Lean proof of `aes_gcm.rs`.
 - Sized XL on the pinned proofs' length. If #490's shared proof takes a 12-round instance cheaply, this is far smaller: re-size it from the calibration in [kixel-ai/rind#552](https://github.com/kixel-ai/rind/pull/552) and from #490 as merged.
 - Traffic is low: no TLS 1.3 or QUIC cipher suite uses AES-192, so this ranks behind every AES-128 and AES-256 proof.
-- Upstream: offering this work to awslabs/s2n-bignum is optional, and there is no standing approval: stop and ask the maintainer before posting there or anywhere outside the moq-dev and kixelated orgs (decided with the maintainer on 2026-11-07 on [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
+- Upstream: offering this work to awslabs/s2n-bignum is optional, and there is no standing approval: stop and ask the maintainer before posting there or anywhere outside [the orgs AGENTS.md lists](/AGENTS.md#development) (decided with the maintainer on 2026-11-07 on [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
 
 ## Required
 
