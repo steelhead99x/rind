@@ -474,15 +474,15 @@ fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Wide) -> Wide {
 
 /// `x += y * u`, returning the carry out of the top limb.
 ///
-/// Four limbs at a time: the products do not depend on the carry, so they
-/// issue before the chain that adds them. Lengths are public. It stops at
-/// the shorter slice, and a remainder of one to three limbs takes the
-/// one-limb step.
+/// Four limbs at a time. Each product depends only on `u` and `y`, so the
+/// four multiplies issue before the carry chain that adds them. Lengths are
+/// public. It stops at the shorter slice, and a remainder of one to three
+/// limbs takes the one-limb step.
 ///
 /// Each partial sum, the product plus a limb plus the carry, is at most
-/// `2^2b - 1`, so it fits in `Wide` with nothing to spare, and adding one
-/// more term would wrap. The carry in fits a limb: it starts at zero, and
-/// the high half of such a sum is at most `2^b - 1`.
+/// `2^2b - 1`, and that value is `Wide`'s maximum. The carry in fits a
+/// limb: it starts at zero, and the high half of such a sum is at most
+/// `2^b - 1`.
 #[inline(always)]
 fn mul_add(x: &mut [Limb], y: &[Limb], u: Limb) -> Wide {
     let mut carry: Wide = 0;
@@ -657,9 +657,8 @@ mod tests {
         }
     }
 
-    /// All-ones rows, which fill each partial sum to `2^2b - 1`, at every
-    /// length through two blocks of four and a remainder, against the
-    /// one-limb recurrence.
+    /// All-ones rows, which fill each partial sum to `2^2b - 1`, from an
+    /// empty row through two blocks of four, against the one-limb recurrence.
     #[test]
     fn mul_add_ones() {
         for n in 0..=8 {
