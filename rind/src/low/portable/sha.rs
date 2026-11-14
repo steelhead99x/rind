@@ -2,12 +2,14 @@
 
 //! SHA-1 on rind's portable code in `generic`, as armv7 runs it without the
 //! crypto extension, and SHA-256 on HACL*'s verified `Hacl_Hash_SHA2`, as
-//! libcrux-sha2 ships it. HACL*'s SHA-256 took 0.67-0.93 of `generic`'s time
-//! at 16 KB on x86_64. SHA-384/512 is that HACL* body on 64-bit targets and
-//! the rolled loop in `generic::sha512` on 32-bit targets, where the unrolled
-//! body is about 47 KiB and misses a 16 KiB instruction cache. SHA-256 stays
-//! on HACL* at every length: a rolled loop beside that ~12 KiB body made long
-//! hashes slower on an ESP32-S3.
+//! libcrux-sha2 ships it, except on ESP-IDF Xtensa. HACL*'s SHA-256 took
+//! 0.67-0.93 of `generic`'s time at 16 KB on x86_64. SHA-384/512 is that
+//! HACL* body on 64-bit targets and the rolled loop in `generic::sha512` on
+//! 32-bit targets, where the unrolled body is about 47 KiB and misses a
+//! 16 KiB instruction cache. On ESP-IDF Xtensa, SHA-256 is the rolled loop
+//! in `sha256_iram`, placed in internal RAM. Other portable targets keep
+//! HACL* at every length: a second rolled body beside that ~12 KiB function
+//! made long hashes slower on an ESP32-S3.
 
 #[cfg(not(any(all(target_arch = "xtensa", target_os = "espidf"), test)))]
 use libcrux_sha2::hacl::sha256_update_nblocks;
@@ -24,9 +26,11 @@ const PIECE: usize = 1 << 31;
 
 /// Compresses whole 64-byte `blocks` into `state`.
 ///
-/// One loop of HACL*'s `sha256_update_nblocks` on every pointer width.
-/// 32-bit portable does not keep a rolled compressor beside it: on an
-/// ESP32-S3 that second body made long hashes slower.
+/// One loop of HACL*'s `sha256_update_nblocks` on every pointer width,
+/// except ESP-IDF Xtensa, which runs the rolled loop in `sha256_iram` from
+/// internal RAM. 32-bit portable does not keep a rolled compressor beside
+/// HACL*: on an ESP32-S3 that second body made long hashes slower. Xtensa
+/// replaces HACL* for SHA-256 instead of adding one.
 pub(crate) fn sha256_compress_blocks(state: &mut [u32; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(64));
     // Portable host tests run the ESP-IDF body too, including the digest and
@@ -89,6 +93,49 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
 mod tests {
     use super::*;
     use crate::low::ct;
+
+    /// SHA-256's IV, FIPS 180-4 §5.3.3.
+    const IV: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
+    ];
+
+    fn fips_digest(message: &[u8]) -> [u8; 32] {
+        let bits = (message.len() as u64).checked_mul(8).unwrap();
+        sha256_finish(&IV, message, bits.to_be_bytes())
+    }
+
+    #[test]
+    fn fips180_sha256() {
+        // FIPS 180-4 SHA-256: the empty message, "abc", and the 56-byte
+        // message whose padding fills a second block. The message is secret
+        // so ctgrind checks this rolled body, which host builds compile only
+        // in tests.
+        let cases: [(&[u8], &str); 3] = [
+            (
+                b"",
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            ),
+            (
+                b"abc",
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            ),
+            (
+                b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+                "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+            ),
+        ];
+        for (message, hex) in cases {
+            let secret = message.to_vec();
+            ct::secret_slice(&secret);
+            let got = ct::into_public(fips_digest(&secret));
+            let mut expected = [0u8; 32];
+            for (byte, pair) in expected.iter_mut().zip(hex.as_bytes().chunks(2)) {
+                *byte = u8::from_str_radix(core::str::from_utf8(pair).unwrap(), 16).unwrap();
+            }
+            assert_eq!(got, expected, "{}", secret.len());
+        }
+    }
 
     #[test]
     fn iram_compression_matches_references() {
