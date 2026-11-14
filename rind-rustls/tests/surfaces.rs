@@ -32,6 +32,10 @@ fn random_fill_replaces_the_buffer() {
 
 #[test]
 fn hpke_debug_names_the_suite() {
+    assert_eq!(
+        rind_rustls::hpke::ALL_SUPPORTED_SUITES.len(),
+        aws_lc_rs::hpke::ALL_SUPPORTED_SUITES.len()
+    );
     for (ours, theirs) in rind_rustls::hpke::ALL_SUPPORTED_SUITES
         .iter()
         .zip(aws_lc_rs::hpke::ALL_SUPPORTED_SUITES)
