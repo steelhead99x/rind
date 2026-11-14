@@ -794,7 +794,7 @@ fn labeled_expand(
         .to_be_bytes();
     let mut parts: [&[u8]; 6] = [&len, VERSION, suite_id, label, &[], &[]];
     parts[4..4 + info.len()].copy_from_slice(info);
-    prk.expand(&parts[..4 + info.len()], out.len()).fill(out)
+    prk.expand(&parts[..4 + info.len()], out.len())?.fill(out)
 }
 
 const VERSION: &[u8] = b"HPKE-v1";

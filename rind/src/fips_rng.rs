@@ -18,7 +18,7 @@
 //! `rand_thread_state_clear_all` does.
 
 use core::cell::RefCell;
-use std::sync::{Once, PoisonError, RwLock};
+use std::sync::{Once, PoisonError, RwLock, RwLockWriteGuard};
 
 use crate::Error;
 use crate::high::hash::Sha512;
@@ -41,20 +41,34 @@ std::thread_local! {
 
 /// A thread's DRBG, whose state is wiped as the thread exits: unlike ECDSA's,
 /// it outlives the call that seeded it.
-struct ThreadDrbg(HmacDrbg<Sha512>);
+///
+/// The state has its own allocation, which every access reaches through
+/// this pointer or the registry's copy of it, under [`LIVE`]: so the exit
+/// wipe, writing it while the thread waits in this drop, aliases no
+/// reference the thread holds.
+struct ThreadDrbg(*mut HmacDrbg<Sha512>);
+
+impl ThreadDrbg {
+    fn new(drbg: HmacDrbg<Sha512>) -> Self {
+        Self(Box::into_raw(Box::new(drbg)))
+    }
+}
 
 impl Drop for ThreadDrbg {
     fn drop(&mut self) {
         let mut live = LIVE.write().unwrap_or_else(PoisonError::into_inner);
-        let address = core::ptr::from_mut(self) as usize;
-        live.instances.retain(|&a| a != address);
-        self.0.zeroise();
+        live.instances.retain(|&a| a != self.0 as usize);
+        // SAFETY: `new` allocated it, only this drop frees it, and the write
+        // excludes every other access.
+        let mut drbg = unsafe { Box::from_raw(self.0) };
+        drbg.zeroise();
     }
 }
 
-/// Every thread's instance, by address, once instantiated: a draw holds it
-/// for reading, and [`zeroise_all`] for writing.
-struct Live {
+/// Every thread's instance, by the address of its state, once instantiated:
+/// a draw holds it for reading, and instantiation, [`zeroise_all`], and
+/// [`hold`] for writing.
+pub(crate) struct Live {
     instances: Vec<usize>,
     /// Whether [`zeroise_all`] has run, after which every draw fails.
     zeroised: bool,
@@ -71,12 +85,51 @@ pub(crate) fn zeroise_all() -> usize {
     let mut live = LIVE.write().unwrap_or_else(PoisonError::into_inner);
     for &address in &live.instances {
         // SAFETY: each address is a live thread's instance, which its thread
-        // drops only after removing it here, and uses only under a read of
-        // `LIVE`, which this write excludes.
-        unsafe { (*(address as *mut ThreadDrbg)).0.zeroise() };
+        // registers under a write of `LIVE`, frees only after removing it
+        // here, and otherwise touches only under a read, which this write
+        // excludes.
+        unsafe { (*(address as *mut HmacDrbg<Sha512>)).zeroise() };
     }
     live.zeroised = true;
     live.instances.len()
+}
+
+/// The registry held for writing, so no draw, instantiation, or wipe runs
+/// until it drops.
+pub(crate) struct Hold(RwLockWriteGuard<'static, Live>);
+
+/// Waits for every draw in progress, then holds the registry, as the module
+/// does across `fork`: the child then inherits no instance mid-draw and no
+/// lock held by a thread it lacks.
+pub(crate) fn hold() -> Hold {
+    Hold(LIVE.write().unwrap_or_else(PoisonError::into_inner))
+}
+
+/// In a forked child, under the hold its parent's `fork` took: wipes, frees,
+/// and forgets the instance of every thread but this one, the child's only
+/// thread. The child holds a copy of each, but no thread that would
+/// unregister or free it, so a process that forks and forks again would
+/// otherwise accumulate them.
+pub(crate) fn forked(hold: Hold) {
+    let Hold(mut live) = hold;
+    // This thread called `fork`, so it is inside no draw, and its instance
+    // is not borrowed.
+    let own = DRBG
+        .try_with(|drbg| Some(drbg.try_borrow().ok()?.as_ref()?.0 as usize))
+        .ok()
+        .flatten();
+    for &address in &live.instances {
+        if Some(address) != own {
+            // SAFETY: the parent registered `address` as a live thread's
+            // instance, allocated by `ThreadDrbg::new`, under a write of
+            // `LIVE`, and its `fork` held that lock, so the child's copy is
+            // whole. No thread of the child holds its `ThreadDrbg`, so
+            // nothing else frees or uses it.
+            let mut drbg = unsafe { Box::from_raw(address as *mut HmacDrbg<Sha512>) };
+            drbg.zeroise();
+        }
+    }
+    live.instances.retain(|&address| Some(address) == own);
 }
 
 /// Fills `out` from this thread's DRBG, instantiating it on first use.
@@ -88,19 +141,24 @@ pub(crate) fn fill(out: &mut [u8]) -> Result<(), Error> {
     let _entry = Entry::new_secret();
     DRBG.try_with(|drbg| {
         let mut drbg = drbg.try_borrow_mut().map_err(|_| Error::RngFailed)?;
-        let ThreadDrbg(drbg) = match &mut *drbg {
-            Some(drbg) => drbg,
-            None => {
-                let instance = drbg.insert(ThreadDrbg(instantiate()?));
-                let mut live = LIVE.write().map_err(|_| Error::RngFailed)?;
-                live.instances.push(core::ptr::from_mut(instance) as usize);
-                instance
+        if drbg.is_none() {
+            // Instantiated and registered under one write, so the exit wipe
+            // either finds the instance or has already run and refuses it.
+            let mut live = LIVE.write().map_err(|_| Error::RngFailed)?;
+            if live.zeroised {
+                return Err(Error::RngFailed);
             }
-        };
+            let instance = drbg.insert(ThreadDrbg::new(instantiate()?));
+            live.instances.push(instance.0 as usize);
+        }
         let live = LIVE.read().map_err(|_| Error::RngFailed)?;
         if live.zeroised {
             return Err(Error::RngFailed);
         }
+        let &mut ThreadDrbg(drbg) = drbg.as_mut().ok_or(Error::RngFailed)?;
+        // SAFETY: this thread's instance, which only the holder of a write
+        // of `LIVE` touches otherwise, and this read excludes that.
+        let drbg = unsafe { &mut *drbg };
         for request in out.chunks_mut(MAX_REQUEST_LEN) {
             generate(drbg, request)?;
         }

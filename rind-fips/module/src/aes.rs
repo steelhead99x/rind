@@ -548,7 +548,7 @@ free!(rind_fips_quic_hp_free, quic::HeaderProtectionKey);
 
 /// The AES-GCM key for the algorithm `id` names that `prk` expands to for
 /// the concatenation of the `info_len` strings at `info`, or null for an
-/// unknown `id`.
+/// unknown `id` or an empty `info`.
 ///
 /// # Safety
 /// `prk` must be live, and `info` valid as `abi::byte_list` requires.
@@ -564,14 +564,15 @@ pub unsafe extern "C" fn rind_fips_hkdf_expand_aead(
     };
     // SAFETY: the caller's contract.
     let (prk, info) = unsafe { (&*prk, byte_list(info, info_len)) };
-    scrubbed(Depth::Small, || {
-        handle(aead::Key::from(prk.expand(&info, algorithm)))
-    })
+    let Ok(okm) = crate::mac::expand(prk, &info, algorithm) else {
+        return core::ptr::null_mut();
+    };
+    scrubbed(Depth::Small, || handle(aead::Key::from(okm)))
 }
 
 /// The QUIC header-protection key for the AES key size `id` that `prk`
 /// expands to for `info`, as [`rind_fips_hkdf_expand_aead`] takes it, or
-/// null for an unknown `id`.
+/// null for an unknown `id` or an empty `info`.
 ///
 /// # Safety
 /// As for [`rind_fips_hkdf_expand_aead`].
@@ -587,9 +588,10 @@ pub unsafe extern "C" fn rind_fips_hkdf_expand_quic_hp(
     };
     // SAFETY: the caller's contract.
     let (prk, info) = unsafe { (&*prk, byte_list(info, info_len)) };
+    let Ok(okm) = crate::mac::expand(prk, &info, algorithm) else {
+        return core::ptr::null_mut();
+    };
     scrubbed(Depth::Small, || {
-        handle(quic::HeaderProtectionKey::from(
-            prk.expand(&info, algorithm),
-        ))
+        handle(quic::HeaderProtectionKey::from(okm))
     })
 }

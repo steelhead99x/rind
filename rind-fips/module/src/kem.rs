@@ -14,7 +14,7 @@ use rind::{Error, constant_time};
 use crate::abi::{Encoded, Status, bytes, bytes_mut, encoded, free, handle, put, status};
 use crate::ids;
 use crate::scrub::{Depth, scrubbed};
-use crate::selftest::{SelfTest, ensure, pct};
+use crate::selftest::{SelfTest, ensure, pct_drawing};
 
 /// An encapsulation key's length.
 const ENCAPSULATION_KEY_LEN: usize = 1184;
@@ -46,18 +46,19 @@ pub unsafe extern "C" fn rind_fips_kem_generate(
         return status(Err(Error::Unsupported));
     };
     scrubbed(Depth::Large, || {
-        let key = DecapsulationKey::generate(algorithm).map(|key| {
-            pct("pct_ml_kem", || {
-                key.public_key()
-                    .encapsulate()
-                    .is_ok_and(|(ciphertext, secret)| {
-                        key.decapsulate(ciphertext.as_ref()).is_ok_and(|again| {
-                            constant_time::verify(again.as_ref(), secret.as_ref()).is_ok()
-                        })
+        let key = DecapsulationKey::generate(algorithm).and_then(|key| {
+            pct_drawing(
+                "pct_ml_kem",
+                || key.public_key().encapsulate(),
+                |(ciphertext, secret)| {
+                    key.decapsulate(ciphertext.as_ref()).is_ok_and(|again| {
+                        constant_time::verify(again.as_ref(), secret.as_ref()).is_ok()
                     })
-            });
+                },
+            )?;
             // SAFETY: the caller's contract.
-            unsafe { put(out, handle(key)) }
+            unsafe { put(out, handle(key)) };
+            Ok(())
         });
         status(key)
     })

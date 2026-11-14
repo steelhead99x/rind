@@ -217,10 +217,12 @@ for module in "${selected[@]}"; do
                 cargo nextest run -p rind-aws-lc-rs --features wipe --test zeroing --locked
             fi
             # The FIPS module's own code compiles only under its cfg, which a
-            # workspace build leaves off. Its break build checks, on every
-            # call, the stack each service zeroes, and fails each self-test.
+            # workspace build leaves off, and only for glibc Linux on x86_64
+            # and aarch64, where rind-fips is not empty. Its break build
+            # checks, on every call, the stack each service zeroes, and fails
+            # each self-test.
             if printf '%s\n' "${packages[@]}" | grep -qxE 'rind-fips|--workspace' &&
-                ! printf '%s\n' "${packages[@]}" | grep -qxF -- --exclude; then
+                [[ "$(rustc -vV | sed -n 's/^host: //p')" =~ ^(x86_64|aarch64)-unknown-linux-gnu$ ]]; then
                 RUSTFLAGS='--cfg rind_fips --cfg rind_cpu_disable' cargo clippy -p rind-fips-module \
                     --locked --target-dir target/fips-module -- --deny warnings
                 if [[ -n "$all" ]] || grep -q '^rind-fips/' "$changed"; then
@@ -260,9 +262,6 @@ for module in "${selected[@]}"; do
                     for name in "${newer[@]}"; do
                         args+=(--exclude "$name")
                     done
-                elif [[ "${packages[i]}" == --exclude ]]; then
-                    i=$((i + 1))
-                    args+=(--exclude "${packages[i]}")
                 fi
             done
             if [[ ${#args[@]} -gt 0 ]]; then

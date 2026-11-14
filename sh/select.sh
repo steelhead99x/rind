@@ -47,7 +47,12 @@ done < <(jq -r --arg root "$root/" '.packages[] | [(.manifest_path | ltrimstr($r
 
 declare -A selected=()
 while IFS= read -r path; do
-    dir=${path%%/*}
+    # The innermost crate directory holding the path, so a nested crate such
+    # as rind-fips/module is selected rather than its parent.
+    dir=${path%/*}
+    while [[ "$dir" == */* && -z "${dirs[$dir]:-}" ]]; do
+        dir=${dir%/*}
+    done
     if [[ "$path" == */* && -n "${dirs[$dir]:-}" ]]; then
         selected[${dirs[$dir]}]=1
     elif grep -qE '^(thirdparty/|Cargo\.(toml|lock)$|\.rustfmt(\.unstable)?\.toml$)' <<<"$path"; then
@@ -56,8 +61,11 @@ while IFS= read -r path; do
     fi
 done <"$changed"
 
-# Add workspace dependents until nothing new appears.
+# Add workspace dependents until nothing new appears. rind-fips's build
+# script builds rind-fips-module with a cargo of its own, an edge the
+# metadata does not show.
 edges=$(jq -r '.packages[] | .name as $n | .dependencies[] | select(.path != null) | [.name, $n] | @tsv' <<<"$metadata")
+edges+=$'\nrind-fips-module\trind-fips'
 grew=1
 while [[ -n "$grew" ]]; do
     grew=

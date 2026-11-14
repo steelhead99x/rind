@@ -3,15 +3,16 @@
 //! HMAC, HKDF, and PBKDF2, over SHA-1 and SHA-2. SHA-1 serves all three,
 //! as aws-lc approves it, since none relies on its collision resistance.
 //!
-//! PBKDF2 refuses what SP 800-132 and aws-lc's service indicator do not
-//! approve: a salt under 16 bytes, fewer than 1000 iterations, a derived
-//! key under 112 bits, or a password under 14 bytes.
+//! HKDF refuses an empty salt or info, which aws-lc's service indicator
+//! does not approve. PBKDF2 refuses what SP 800-132 and aws-lc's service
+//! indicator do not approve: a salt under 16 bytes, fewer than 1000
+//! iterations, a derived key under 112 bits, or a password under 14 bytes.
 
 use core::num::NonZeroU32;
 
 use rind::{Error, hkdf, hmac, pbkdf2};
 
-use crate::abi::{Bytes, Status, byte_list, bytes, bytes_mut, free, handle, status};
+use crate::abi::{Bytes, Status, byte_list, bytes, bytes_mut, free, handle, put, status};
 use crate::ids::hash;
 use crate::scrub::{Depth, scrubbed};
 use crate::selftest::{SelfTest, ensure};
@@ -207,6 +208,12 @@ pub unsafe extern "C" fn rind_fips_hmac_context_sign(
 free!(rind_fips_hmac_key_free, hmac::Key);
 free!(rind_fips_hmac_context_free, hmac::Context);
 
+/// An HKDF salt, and whether it is empty, which extracting refuses.
+pub(crate) struct Salt {
+    salt: hkdf::Salt,
+    empty: bool,
+}
+
 /// An HKDF salt for the hash `id` names, from the `len` bytes at `value`,
 /// or null for an unknown `id`.
 ///
@@ -217,32 +224,59 @@ pub unsafe extern "C" fn rind_fips_hkdf_salt_new(
     id: u32,
     value: *const u8,
     len: usize,
-) -> *mut hkdf::Salt {
+) -> *mut Salt {
     let Some(algorithm) = hkdf_algorithm(id) else {
         return core::ptr::null_mut();
     };
     // SAFETY: the caller's contract.
     let value = unsafe { bytes(value, len) };
-    new_handle(|| hkdf::Salt::new(algorithm, value))
+    new_handle(|| Salt {
+        salt: hkdf::Salt::new(algorithm, value),
+        empty: value.is_empty(),
+    })
 }
 
-/// The pseudorandom key `salt` extracts from the `len` bytes at `secret`.
+/// Writes the handle of the pseudorandom key `salt` extracts from the `len`
+/// bytes at `secret` to `out`, refusing an empty salt.
 ///
 /// # Safety
-/// `salt` must be live, and `secret` valid for `len` reads.
+/// `salt` must be live, `secret` valid for `len` reads, and `out` for a
+/// write.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rind_fips_hkdf_extract(
-    salt: *const hkdf::Salt,
+    salt: *const Salt,
     secret: *const u8,
     len: usize,
-) -> *mut hkdf::Prk {
+    out: *mut *mut hkdf::Prk,
+) -> Status {
     // SAFETY: the caller's contract.
     let (salt, secret) = unsafe { (&*salt, bytes(secret, len)) };
-    new_handle(|| salt.extract(secret))
+    if salt.empty {
+        return status(Err(Error::WrongLength));
+    }
+    scrubbed(Depth::Small, || {
+        status(salt.salt.extract(secret).map(|prk| {
+            // SAFETY: the caller's contract.
+            unsafe { put(out, handle(prk)) }
+        }))
+    })
+}
+
+/// `prk.expand`, refusing an empty `info`.
+pub(crate) fn expand<'a, L: hkdf::KeyType>(
+    prk: &'a hkdf::Prk,
+    info: &'a [&'a [u8]],
+    len: L,
+) -> Result<hkdf::Okm<'a, L>, Error> {
+    if info.iter().all(|part| part.is_empty()) {
+        return Err(Error::WrongLength);
+    }
+    prk.expand(info, len)
 }
 
 /// Fills the `len` bytes at `out` with what `prk` expands to for the
-/// concatenation of the `info_len` strings at `info`.
+/// concatenation of the `info_len` strings at `info`, refusing an empty
+/// one.
 ///
 /// # Safety
 /// `prk` must be live, `info` valid as `abi::byte_list` requires, and `out`
@@ -258,12 +292,13 @@ pub unsafe extern "C" fn rind_fips_hkdf_fill(
     // SAFETY: the caller's contract.
     let (prk, info, out) = unsafe { (&*prk, byte_list(info, info_len), bytes_mut(out, len)) };
     scrubbed(Depth::Small, || {
-        status(prk.expand(&info, out.len()).fill(out))
+        status(expand(prk, &info, out.len()).and_then(|okm| okm.fill(out)))
     })
 }
 
 /// The HMAC key for the hash `id` names that `prk` expands to for `info`,
-/// as [`rind_fips_hkdf_fill`] takes it, or null for an unknown `id`.
+/// as [`rind_fips_hkdf_fill`] takes it, or null for an unknown `id` or an
+/// empty `info`.
 ///
 /// # Safety
 /// As for [`rind_fips_hkdf_fill`].
@@ -279,11 +314,15 @@ pub unsafe extern "C" fn rind_fips_hkdf_expand_hmac(
     };
     // SAFETY: the caller's contract.
     let (prk, info) = unsafe { (&*prk, byte_list(info, info_len)) };
-    new_handle(|| hmac::Key::from(prk.expand(&info, algorithm)))
+    let Ok(okm) = expand(prk, &info, algorithm) else {
+        return core::ptr::null_mut();
+    };
+    new_handle(|| hmac::Key::from(okm))
 }
 
 /// The pseudorandom key for the hash `id` names that `prk` expands to for
-/// `info`, as [`rind_fips_hkdf_fill`] takes it, or null for an unknown `id`.
+/// `info`, as [`rind_fips_hkdf_fill`] takes it, or null for an unknown `id`
+/// or an empty `info`.
 ///
 /// # Safety
 /// As for [`rind_fips_hkdf_fill`].
@@ -299,10 +338,13 @@ pub unsafe extern "C" fn rind_fips_hkdf_expand_prk(
     };
     // SAFETY: the caller's contract.
     let (prk, info) = unsafe { (&*prk, byte_list(info, info_len)) };
-    new_handle(|| hkdf::Prk::from(prk.expand(&info, algorithm)))
+    let Ok(okm) = expand(prk, &info, algorithm) else {
+        return core::ptr::null_mut();
+    };
+    new_handle(|| hkdf::Prk::from(okm))
 }
 
-free!(rind_fips_hkdf_salt_free, hkdf::Salt);
+free!(rind_fips_hkdf_salt_free, Salt);
 free!(rind_fips_hkdf_prk_free, hkdf::Prk);
 
 /// A PBKDF2 secret, and whether it is long enough to derive with.

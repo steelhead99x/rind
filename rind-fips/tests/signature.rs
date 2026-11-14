@@ -5,6 +5,7 @@
 //! cross between the two, deterministic signatures match byte for byte, and
 //! malformed input fails with the same error. The module refuses the RSA
 //! moduli FIPS 186-5 does not approve, which rind takes.
+#![cfg(rind_fips_module)]
 
 use rind::signature as theirs;
 use rind_fips::rsa::{KeySize, PublicKeyComponents};

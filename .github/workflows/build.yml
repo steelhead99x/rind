@@ -72,19 +72,14 @@ jobs:
           - os: ubuntu-latest
             rustc: nightly
           # macos-latest is aarch64; macos-15-intel is the x86_64 runner.
-          # rind-fips's module builds only for glibc Linux.
           - os: macos-latest
             rustc: stable
-            packages: --workspace --exclude rind-fips
           - os: macos-15-intel
             rustc: stable
-            packages: --workspace --exclude rind-fips
           - os: windows-latest
             rustc: stable
-            packages: --workspace --exclude rind-fips
           - os: windows-11-arm
             rustc: stable
-            packages: --workspace --exclude rind-fips
           - os: ubuntu-24.04-arm
             rustc: stable
 
@@ -104,9 +99,9 @@ jobs:
       - name: Build (debug)
         run: cargo build -p rind
       - name: Run tests (debug)
-        run: cargo test ${{ matrix.packages }}
+        run: cargo test
       - name: Run tests (debug, --no-default-features)
-        run: cargo test ${{ matrix.packages }} --no-default-features
+        run: cargo test --no-default-features
       - name: Run zeroing tests (debug, --features wipe)
         run: cargo test -p rind -p rind-aws-lc-rs -p rind-rcgen --features rind/wipe,rind-aws-lc-rs/wipe,rind-rcgen/wipe --test zeroing
       - name: Run heap scratch tests (release, --features wipe)
@@ -115,7 +110,7 @@ jobs:
       - name: Build (release)
         run: cargo build -p rind --release
       - name: Run tests (release)
-        run: env SLOW_TESTS=1 cargo test ${{ matrix.packages }} --release
+        run: env SLOW_TESTS=1 cargo test --release
       # Each self-test's failure, and on every call, that each service's
       # stack stays within what it zeroes.
       - name: Run FIPS break tests

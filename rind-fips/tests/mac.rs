@@ -3,6 +3,7 @@
 //! HMAC, HKDF, and PBKDF2 through the module agree with rind's, which its
 //! own tests check against Wycheproof and aws-lc-rs, and PBKDF2 refuses
 //! what SP 800-132 does not approve.
+#![cfg(rind_fips_module)]
 
 use std::num::NonZeroU32;
 
@@ -96,17 +97,40 @@ fn hkdf_matches_rind() {
             let reference_salt = rind::hkdf::Salt::new(theirs, &salt_value);
             for secret_len in [0, 22, 100] {
                 let secret = bytes("secret", secret_len);
-                let prk = salt.extract(&secret);
-                let reference = reference_salt.extract(&secret);
+                let reference = reference_salt.extract(&secret).unwrap();
+                // FIPS 140-3 approves no empty salt, which rind takes.
+                if salt_len == 0 {
+                    assert_eq!(salt.extract(&secret).unwrap_err(), Error::WrongLength);
+                    continue;
+                }
+                let prk = salt.extract(&secret).unwrap();
+
+                // Nor an empty info, however it is split.
+                for info in [&[][..], &[&[][..]], &[&[][..], &[][..]]] {
+                    assert_eq!(prk.expand(info, 16).unwrap_err(), Error::WrongLength);
+                    assert_eq!(
+                        prk.expand(info, &hmac::HMAC_SHA256).unwrap_err(),
+                        Error::WrongLength
+                    );
+                    assert_eq!(
+                        prk.expand(info, &hkdf::HKDF_SHA256).unwrap_err(),
+                        Error::WrongLength
+                    );
+                    assert!(reference.expand(info, 16).is_ok());
+                }
 
                 let (a, b) = (bytes("a", 10), bytes("b", 300));
-                let infos: [&[&[u8]]; 3] = [&[], &[&a], &[&a, &b]];
+                let infos: [&[&[u8]]; 3] = [&[&a], &[&[], &a], &[&a, &b]];
                 for info in infos {
                     for len in [1, hash_len, hash_len + 1, 255 * hash_len] {
                         let mut out = vec![0; len];
                         let mut expected = vec![0; len];
-                        prk.expand(info, len).fill(&mut out).unwrap();
-                        reference.expand(info, len).fill(&mut expected).unwrap();
+                        prk.expand(info, len).unwrap().fill(&mut out).unwrap();
+                        reference
+                            .expand(info, len)
+                            .unwrap()
+                            .fill(&mut expected)
+                            .unwrap();
                         assert_eq!(
                             out, expected,
                             "{ours:?}, salt {salt_len}, secret {secret_len}"
@@ -115,22 +139,23 @@ fn hkdf_matches_rind() {
 
                     // Into an HMAC key, and into a further PRK.
                     for (hmac_ours, hmac_theirs) in HMACS {
-                        let key = hmac::Key::from(prk.expand(info, hmac_ours));
+                        let key = hmac::Key::from(prk.expand(info, hmac_ours).unwrap());
                         let reference_key =
-                            rind::hmac::Key::from(reference.expand(info, hmac_theirs));
+                            rind::hmac::Key::from(reference.expand(info, hmac_theirs).unwrap());
                         assert_eq!(
                             hmac::sign(&key, b"message").as_ref(),
                             rind::hmac::sign(&reference_key, b"message").as_ref()
                         );
                     }
                     for (next_ours, next_theirs, _) in HKDFS {
-                        let next = hkdf::Prk::from(prk.expand(info, next_ours));
+                        let next = hkdf::Prk::from(prk.expand(info, next_ours).unwrap());
                         let reference_next =
-                            rind::hkdf::Prk::from(reference.expand(info, next_theirs));
+                            rind::hkdf::Prk::from(reference.expand(info, next_theirs).unwrap());
                         let (mut out, mut expected) = ([0; 42], [0; 42]);
-                        next.expand(&[b"next"], 42).fill(&mut out).unwrap();
+                        next.expand(&[b"next"], 42).unwrap().fill(&mut out).unwrap();
                         reference_next
                             .expand(&[b"next"], 42)
+                            .unwrap()
                             .fill(&mut expected)
                             .unwrap();
                         assert_eq!(out, expected);
@@ -138,13 +163,13 @@ fn hkdf_matches_rind() {
                 }
 
                 // Beyond 255 blocks, or not the length expanded for.
-                let mut out = vec![0; 255 * hash_len + 1];
+                let info: [&[u8]; 1] = [b"info"];
                 assert_eq!(
-                    prk.expand(&[], out.len()).fill(&mut out),
-                    Err(Error::WrongLength)
+                    prk.expand(&info, 255 * hash_len + 1).unwrap_err(),
+                    Error::WrongLength
                 );
                 assert_eq!(
-                    prk.expand(&[], 31).fill(&mut [0; 32]),
+                    prk.expand(&info, 31).unwrap().fill(&mut [0; 32]),
                     Err(Error::WrongLength)
                 );
             }

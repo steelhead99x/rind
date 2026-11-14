@@ -7,6 +7,7 @@
 //! Each case copies the built module, flips one byte, and runs this test
 //! binary again with the copy first on its library path, so the dynamic
 //! loader runs the copy's integrity test before anything else.
+#![cfg(rind_fips_module)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};

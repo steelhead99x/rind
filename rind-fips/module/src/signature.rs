@@ -20,7 +20,7 @@ use rind::signature::{
 use crate::abi::{Encoded, Status, bytes, bytes_mut, copy_out, encoded, free, handle, put, status};
 use crate::ids::{self, signature as id};
 use crate::scrub::{Depth, scrubbed};
-use crate::selftest::{SelfTest as T, ensure, pct};
+use crate::selftest::{SelfTest as T, ensure, pct, pct_drawing};
 
 /// What every pairwise consistency test signs.
 const PCT_MESSAGE: &[u8] = b"rind-fips pairwise consistency test";
@@ -339,12 +339,16 @@ free!(rind_fips_public_key_free, PublicKey);
 
 // ECDSA.
 
-fn ecdsa_pct(key: &EcdsaKeyPair) -> bool {
-    key.sign(PCT_MESSAGE).is_ok_and(|signature| {
-        key.public_key()
-            .verify(PCT_MESSAGE, signature.as_ref())
-            .is_ok()
-    })
+fn ecdsa_pct(key: &EcdsaKeyPair) -> Result<(), Error> {
+    pct_drawing(
+        "pct_ecdsa",
+        || key.sign(PCT_MESSAGE),
+        |signature| {
+            key.public_key()
+                .verify(PCT_MESSAGE, signature.as_ref())
+                .is_ok()
+        },
+    )
 }
 
 /// Loads an ECDSA key pair for signing algorithm `id` with `load`, boxing
@@ -377,7 +381,7 @@ pub unsafe extern "C" fn rind_fips_ecdsa_generate(id: u32, out: *mut *mut EcdsaK
     unsafe {
         ecdsa_load(id, out, |algorithm| {
             let key = EcdsaKeyPair::generate(algorithm)?;
-            pct("pct_ecdsa", || ecdsa_pct(&key));
+            ecdsa_pct(&key)?;
             Ok(key)
         })
     }
@@ -722,6 +726,7 @@ free!(rind_fips_ed25519_free, Ed25519KeyPair);
 // RSA.
 
 fn rsa_pct(key: &RsaKeyPair) -> bool {
+    // PKCS#1 v1.5 signs without drawing.
     let algorithm = &sign::RSA_PKCS1_SHA256;
     key.sign(algorithm, PCT_MESSAGE).is_ok_and(|signature| {
         key.public_key(algorithm)
@@ -918,12 +923,16 @@ macro_rules! ml_dsa_load {
 }
 
 impl MlDsa {
-    fn pct(&self) -> bool {
-        on_ml_dsa!(self, |key| key.sign(PCT_MESSAGE).is_ok_and(|signature| {
-            key.public_key()
-                .verify(PCT_MESSAGE, signature.as_ref())
-                .is_ok()
-        }))
+    fn pct(&self) -> Result<(), Error> {
+        on_ml_dsa!(self, |key| pct_drawing(
+            "pct_ml_dsa",
+            || key.sign(PCT_MESSAGE),
+            |signature| {
+                key.public_key()
+                    .verify(PCT_MESSAGE, signature.as_ref())
+                    .is_ok()
+            }
+        ))
     }
 }
 
@@ -948,10 +957,8 @@ unsafe fn ml_dsa_put(key: Option<Result<MlDsa, Error>>, out: *mut *mut MlDsa) ->
 pub unsafe extern "C" fn rind_fips_ml_dsa_generate(set: u32, out: *mut *mut MlDsa) -> Status {
     ensure(&[T::MlDsa]);
     scrubbed(Depth::Large, || {
-        let key = ml_dsa_load!(set, |P| MlDsaKeyPair::<P>::generate());
-        if let Some(Ok(key)) = &key {
-            pct("pct_ml_dsa", || key.pct());
-        }
+        let key = ml_dsa_load!(set, |P| MlDsaKeyPair::<P>::generate())
+            .map(|key| key.and_then(|key| key.pct().map(|()| key)));
         // SAFETY: the caller's contract.
         unsafe { ml_dsa_put(key, out) }
     })

@@ -20,4 +20,6 @@ This is one Rust workspace: the `rind` library, its `rind-<consumer>` adapter cr
 
 PRs target `main`.
 
+Agents may post in the kixel-ai, kixelated, and moq-dev orgs; anywhere else, ask the maintainer first, with no standing approval.
+
 Quests: before any work, run `quest context` and follow it, unless this session already holds its rules.

@@ -64,10 +64,25 @@ pub(crate) fn check() -> bool {
         (layout.rela, layout.rela_count),
         (layout.jmprel, layout.jmprel_count),
     ] {
+        // The layout is checked only by the hash below, so a corrupted one
+        // must fail the test rather than send these reads off the module.
+        let end =
+            (count.checked_mul(size_of::<Rela>() as u64)).and_then(|len| table.checked_add(len));
+        let mapped = end.is_some_and(|end| {
+            loaded.segments.iter().any(|s| {
+                s.kind == image::PT_LOAD
+                    && s.flags & image::PF_W == 0
+                    && table >= s.vaddr
+                    && end <= s.vaddr + s.filesz
+            })
+        });
+        if count > 0 && !mapped {
+            return false;
+        }
         for i in 0..count {
             let at = loaded.base + table + i * size_of::<Rela>() as u64;
-            // SAFETY: the build script found these tables in a read-only
-            // segment, which is mapped while the module is loaded.
+            // SAFETY: the table lies within a read-only segment, as checked
+            // above, which is mapped while the module is loaded.
             relas.push(unsafe { core::ptr::read_unaligned(at as *const Rela) });
         }
     }

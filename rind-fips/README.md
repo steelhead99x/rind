@@ -24,11 +24,15 @@ lab to test.
   or a PBKDF2 salt under 16 bytes, is absent or refused.
 - **Zeroization.** Keys live only behind the module's handles and never
   move. Every service that handles a secret zeroes the stack it used, and
-  the module's allocator zeroes every block it frees.
+  the module's allocator zeroes every block it frees. So a thread calling
+  the module needs up to 160 KiB of stack free beyond its own: what RSA,
+  ML-DSA, and the self-tests reach, which Rust's 2 MiB default and glibc's
+  8 MiB leave room for.
 - **Random.** Every random value comes from an SP 800-90A HMAC_DRBG seeded
   from the OS, outside the module's boundary: one per thread, which wipes
   itself as its thread exits, and as the process exits, the module wipes
-  those of threads still running.
+  those of threads still running. A forked child wipes its copies of the
+  DRBGs of its parent's other threads, which it does not run.
 
 ## Running
 

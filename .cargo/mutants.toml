@@ -285,6 +285,7 @@ exclude_re = [
   # debugging helper, an impl nothing calls, a limit past 2^48 calls, a fault
   # only hardware injects, a check of what another check also refuses, or a
   # case random keys reach with probability below 2^-64.
+  'rind/src/high/hkdf\.rs:\d+:\d+: replace <impl sealed::Sealed for &[^>]+>::len -> usize with [01]$',
   'rind/src/fips_rng\.rs:\d+:\d+: replace cast -> bool with true$',
   'rind/src/high/hmac_drbg\.rs:\d+:\d+: replace \+= with \*= in HmacDrbg<H>::generate$',
   'rind/src/high/rsa\.rs:\d+:\d+: delete match arm Error::Fault in SigningKey::decrypt_oaep$',

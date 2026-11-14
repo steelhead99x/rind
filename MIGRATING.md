@@ -54,11 +54,11 @@ renames [rind-aws-lc-rs](#rind-aws-lc-rs) to `aws-lc-rs` the same way.
 
 | aws-lc-rs | rind |
 |---|---|
-| `Salt::new(HKDF_SHA256, salt)`, `extract` | `Salt::new(&HKDF_SHA256, salt)`, `extract` |
+| `Salt::new(HKDF_SHA256, salt)`, `extract(secret)` | `Salt::new(&HKDF_SHA256, salt)`, `extract(secret)?`, which never fails in rind; rind-fips refuses an empty salt |
 | `Salt::none(alg)` | `Salt::new(&alg, &[])`, which extracts the same key as RFC 5869's absent salt |
 | `HKDF_SHA256`, `HKDF_SHA384`, `HKDF_SHA512` | the same |
 | `HKDF_SHA1_FOR_LEGACY_USE_ONLY` | `legacy::HKDF_SHA1` |
-| `prk.expand(info, len)?` | `prk.expand(info, len)`, which cannot fail; `Okm::fill` checks a byte length |
+| `prk.expand(info, len)?` | the same, failing with `Error::WrongLength` beyond 255 hash outputs; rind-fips also refuses an empty `info` |
 | your own `KeyType` | none: it is sealed, for a `usize` byte length or an `aead`, `aead::quic`, `hmac`, or `hkdf` algorithm |
 | `UnboundKey::from(okm)`, `HeaderProtectionKey::from(okm)`, `hmac::Key::from(okm)`, `Prk::from(okm)` | `aead::Key::from(okm)`, `HeaderProtectionKey::from(okm)`, `hmac::Key::from(okm)`, `Prk::from(okm)` with `&HKDF_SHA256` |
 | `Okm::fill(out)` | the same, for a `usize` length only |
@@ -123,7 +123,7 @@ protocols with their own integrity protection need. ring has none.
 |---|---|
 | `UnboundCipherKey::new(&AES_128, key)` and `EncryptingKey::ctr` or `DecryptingKey::ctr` | `AesCtr::new(&AES_128, key, 128)?`, whose last argument is how many of the counter block's rightmost bits count, as WebCrypto's `length` |
 | `less_safe_encrypt(in_out, EncryptionContext::Iv128(iv))`, `decrypt` | `apply_keystream(&iv, in_out)?`, with `iv` the `[u8; 16]` counter block |
-| `PaddedBlockEncryptingKey::cbc_pkcs7(key)` and `less_safe_encrypt(in_out, EncryptionContext::Iv128(iv))` | `AesCbcEncryptingKey::new(&AES_128, key)?` and `encrypt(CbcIv::assume_unpredictable(iv), in_out)`, which cannot fail |
+| `PaddedBlockEncryptingKey::cbc_pkcs7(key)` and `less_safe_encrypt(in_out, EncryptionContext::Iv128(iv))` | `AesCbcEncryptingKey::new(&AES_128, key)?` and `encrypt(CbcIv::assume_unpredictable(iv), in_out)?`, which refuses, as aws-lc-rs does, a buffer whose `extend` leaves `as_mut` short of whole blocks |
 | `PaddedBlockDecryptingKey::cbc_pkcs7(key)` and `decrypt(in_out, DecryptionContext::Iv128(iv))` | `AesCbcDecryptingKey::new(&AES_128, key)?` and `decrypt(&iv, in_out)?`, which clears `in_out` if the padding is malformed |
 | `EncryptingKey::cbc`, `DecryptingKey::cbc`, unpadded | `encrypt_blocks(CbcIv::assume_unpredictable(iv), in_out)?` and `decrypt_blocks(&iv, in_out)?` on the keys above |
 | `AES_128`, `AES_192`, `AES_256` | the same |

@@ -100,12 +100,10 @@ pub mod doc {
 /// let mut alice_key = [0u8; 32];
 /// let mut bob_key = [0u8; 32];
 /// salt.extract(alice_secret.as_ref())
-///     .expand(&[b"key"], alice_key.len())
-///     .fill(&mut alice_key)
+///     .and_then(|prk| prk.expand(&[b"key"], alice_key.len())?.fill(&mut alice_key))
 ///     .unwrap();
 /// salt.extract(bob_secret.as_ref())
-///     .expand(&[b"key"], bob_key.len())
-///     .fill(&mut bob_key)
+///     .and_then(|prk| prk.expand(&[b"key"], bob_key.len())?.fill(&mut bob_key))
 ///     .unwrap();
 /// assert_eq!(alice_key, bob_key);
 /// ```
@@ -136,14 +134,14 @@ pub mod agreement {
 /// let recipient_secret = decapsulation_key.decapsulate(ciphertext.as_ref())?;
 ///
 /// // Each side derives its keys from the secret with a KDF.
-/// let salt = rind::hkdf::Salt::new(&rind::hkdf::HKDF_SHA256, b"");
+/// let salt = rind::hkdf::Salt::new(&rind::hkdf::HKDF_SHA256, b"session salt");
 /// let mut sender_key = [0u8; 32];
 /// let mut recipient_key = [0u8; 32];
-/// salt.extract(sender_secret.as_ref())
-///     .expand(&[b"key"], sender_key.len())
+/// salt.extract(sender_secret.as_ref())?
+///     .expand(&[b"key"], sender_key.len())?
 ///     .fill(&mut sender_key)?;
-/// salt.extract(recipient_secret.as_ref())
-///     .expand(&[b"key"], recipient_key.len())
+/// salt.extract(recipient_secret.as_ref())?
+///     .expand(&[b"key"], recipient_key.len())?
 ///     .fill(&mut recipient_key)?;
 /// assert_eq!(sender_key, recipient_key);
 /// # Ok(())
@@ -536,16 +534,19 @@ pub mod constant_time {
 /// into any number of keys, each exactly as long as what it becomes.
 ///
 /// ```
+/// # fn main() -> Result<(), rind::Error> {
 /// use rind::{aead, hkdf, hmac};
 ///
-/// let prk = hkdf::Salt::new(&hkdf::HKDF_SHA256, b"salt").extract(b"input key material");
+/// let prk = hkdf::Salt::new(&hkdf::HKDF_SHA256, b"salt").extract(b"input key material")?;
 ///
-/// let aead_key = aead::Key::from(prk.expand(&[b"aead"], &aead::AES_256_GCM));
-/// let hmac_key = hmac::Key::from(prk.expand(&[b"hmac"], &hmac::HMAC_SHA256));
+/// let aead_key = aead::Key::from(prk.expand(&[b"aead"], &aead::AES_256_GCM)?);
+/// let hmac_key = hmac::Key::from(prk.expand(&[b"hmac"], &hmac::HMAC_SHA256)?);
 ///
 /// let info: [&[u8]; 2] = [b"label", b"context"];
 /// let mut bytes = [0u8; 16];
-/// prk.expand(&info, bytes.len()).fill(&mut bytes).unwrap();
+/// prk.expand(&info, bytes.len())?.fill(&mut bytes)?;
+/// # Ok(())
+/// # }
 /// ```
 pub mod hkdf {
     pub use super::high::hkdf::{

@@ -12,8 +12,12 @@ opaque! {
 
 unsafe extern "C" {
     fn rind_fips_hkdf_salt_new(id: u32, value: *const u8, len: usize) -> *mut HkdfSalt;
-    fn rind_fips_hkdf_extract(salt: *const HkdfSalt, secret: *const u8, len: usize)
-    -> *mut HkdfPrk;
+    fn rind_fips_hkdf_extract(
+        salt: *const HkdfSalt,
+        secret: *const u8,
+        len: usize,
+        out: *mut *mut HkdfPrk,
+    ) -> ffi::Status;
     fn rind_fips_hkdf_fill(
         prk: *const HkdfPrk,
         info: *const Bytes,
@@ -83,15 +87,19 @@ impl Salt {
     }
 
     /// Extracts a pseudorandom key from `secret` (HKDF-Extract).
-    #[must_use]
-    pub fn extract(&self, secret: &[u8]) -> Prk {
-        // SAFETY: the handle is live, and `secret` readable.
-        let handle =
-            unsafe { rind_fips_hkdf_extract(self.handle.ptr(), secret.as_ptr(), secret.len()) };
-        Prk {
+    ///
+    /// Fails with [`Error::WrongLength`] for an empty salt, which FIPS 140-3
+    /// does not approve.
+    pub fn extract(&self, secret: &[u8]) -> Result<Prk, Error> {
+        let mut out = core::ptr::null_mut();
+        // SAFETY: the handle is live, `secret` readable, and `out` writable.
+        let status = unsafe {
+            rind_fips_hkdf_extract(self.handle.ptr(), secret.as_ptr(), secret.len(), &mut out)
+        };
+        Ok(Prk {
             algorithm: self.algorithm,
-            handle: Handle::new(handle),
-        }
+            handle: Handle::from_status(status, out)?,
+        })
     }
 }
 
@@ -112,12 +120,23 @@ pub struct Prk {
 
 impl Prk {
     /// Derives key material for the concatenation of `info` (HKDF-Expand), as long as `len` says.
-    pub fn expand<'a, L: KeyType>(&'a self, info: &'a [&'a [u8]], len: L) -> Okm<'a, L> {
-        Okm {
+    ///
+    /// Fails with [`Error::WrongLength`] for an empty `info`, which FIPS
+    /// 140-3 does not approve, or if `len` is more than 255 hash outputs, as
+    /// far as HKDF-Expand's one-byte block counter reaches.
+    pub fn expand<'a, L: KeyType>(
+        &'a self,
+        info: &'a [&'a [u8]],
+        len: L,
+    ) -> Result<Okm<'a, L>, Error> {
+        if info.iter().all(|part| part.is_empty()) || len.len() > 255 * self.algorithm.0.tag_len() {
+            return Err(Error::WrongLength);
+        }
+        Ok(Okm {
             prk: self,
             info,
             len,
-        }
+        })
     }
 }
 
@@ -130,22 +149,37 @@ impl fmt::Debug for Prk {
 }
 
 pub(crate) mod sealed {
-    pub trait Sealed {}
+    pub trait Sealed {
+        /// The output length in bytes.
+        fn len(&self) -> usize;
+    }
 }
 
 /// A length of HKDF output: a plain `usize`, or the algorithm of the key it becomes.
 pub trait KeyType: sealed::Sealed {}
 
 /// Raw key material of this many bytes, for [`Okm::fill`].
-impl sealed::Sealed for usize {}
+impl sealed::Sealed for usize {
+    fn len(&self) -> usize {
+        *self
+    }
+}
 impl KeyType for usize {}
 
 /// A key of the algorithm's [`hmac::Algorithm::tag_len`].
-impl sealed::Sealed for &'static hmac::Algorithm {}
+impl sealed::Sealed for &'static hmac::Algorithm {
+    fn len(&self) -> usize {
+        self.tag_len()
+    }
+}
 impl KeyType for &'static hmac::Algorithm {}
 
 /// The pseudorandom key of a further [`Prk::expand`], the hash's output length.
-impl sealed::Sealed for &'static Algorithm {}
+impl sealed::Sealed for &'static Algorithm {
+    fn len(&self) -> usize {
+        self.0.tag_len()
+    }
+}
 impl KeyType for &'static Algorithm {}
 
 /// Key material from [`Prk::expand`], sized by `L`: fill a buffer for a `usize` length, or convert it into the key an algorithm names.
@@ -175,8 +209,7 @@ impl Okm<'_, usize> {
     /// Writes the key material into `out`.
     ///
     /// Fails with [`Error::WrongLength`], leaving `out` unchanged, unless
-    /// `out` is the length [`Prk::expand`] was given and at most 255 hash
-    /// outputs.
+    /// `out` is the length [`Prk::expand`] was given.
     pub fn fill(self, out: &mut [u8]) -> Result<(), Error> {
         if out.len() != self.len {
             return Err(Error::WrongLength);
@@ -223,5 +256,51 @@ impl From<Okm<'_, &'static Algorithm>> for Prk {
             algorithm: okm.len,
             handle: Handle::new(handle),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `Prk::expand` refuses an empty info before reaching the module, which
+    // must refuse one too, as the boundary.
+    #[test]
+    fn module_refuses_empty_info() {
+        let prk = Salt::new(&HKDF_SHA256, b"salt").extract(b"secret").unwrap();
+        let info = Bytes::list(&[b""]);
+        let mut out = [0u8; 16];
+        // SAFETY: the handle is live, `info` lists readable strings, and
+        // `out` is writable.
+        let status = unsafe {
+            rind_fips_hkdf_fill(
+                prk.handle.ptr(),
+                info.as_ptr(),
+                info.len(),
+                out.as_mut_ptr(),
+                out.len(),
+            )
+        };
+        assert_eq!(ffi::check(status), Err(Error::WrongLength));
+        // SAFETY: as above.
+        let key = unsafe {
+            rind_fips_hkdf_expand_hmac(
+                prk.handle.ptr(),
+                info.as_ptr(),
+                info.len(),
+                hmac::HMAC_SHA256.id,
+            )
+        };
+        assert!(key.is_null());
+        // SAFETY: as above.
+        let next = unsafe {
+            rind_fips_hkdf_expand_prk(
+                prk.handle.ptr(),
+                info.as_ptr(),
+                info.len(),
+                HKDF_SHA256.0.id,
+            )
+        };
+        assert!(next.is_null());
     }
 }

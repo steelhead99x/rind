@@ -3,6 +3,7 @@
 //! ML-KEM-768 through the module interoperates with rind's, which its own
 //! tests check against Wycheproof, CCTV, and aws-lc-rs, and refuses every
 //! malformed key and ciphertext with rind's error.
+#![cfg(rind_fips_module)]
 
 use rind_fips::kem::{DecapsulationKey, EncapsulationKey, ML_KEM_768};
 

@@ -229,14 +229,17 @@ impl AesCbcEncryptingKey {
 
     /// Pads `in_out` with PKCS#7, 1 to 16 bytes each holding the count, and
     /// encrypts it in place under `iv`.
-    pub fn encrypt<InOut>(&self, iv: CbcIv, in_out: &mut InOut)
+    ///
+    /// Fails with [`Error::WrongLength`], leaving it padded but unencrypted,
+    /// if `in_out` is a buffer whose `extend` does not grow what `as_mut`
+    /// returns to whole blocks, as aws-lc-rs's `encrypt` refuses it.
+    pub fn encrypt<InOut>(&self, iv: CbcIv, in_out: &mut InOut) -> Result<(), Error>
     where
         InOut: AsMut<[u8]> + for<'a> Extend<&'a u8>,
     {
         let pad = 16 - in_out.as_mut().len() % 16;
         in_out.extend(&[pad as u8; 16][..pad]);
         self.encrypt_blocks(iv, in_out.as_mut())
-            .expect("padding makes whole blocks");
     }
 
     /// Encrypts `in_out` in place under `iv`, without padding.

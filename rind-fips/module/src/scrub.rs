@@ -120,12 +120,35 @@ fn stack<const WORDS: usize>(op: Op) -> usize {
 #[cfg(rind_fips_break)]
 #[inline(never)]
 fn lowest_written(bottom: usize) -> usize {
-    let words = bottom as *const u64;
     let untouched = (0..PAINTED / 8)
-        // SAFETY: the painted stack is mapped, since `stack` wrote it, and
-        // word-aligned. Reading a dead frame's bytes is the point, so
-        // through volatile loads the compiler keeps.
-        .take_while(|&i| unsafe { core::ptr::read_volatile(words.add(i)) } == PAINT)
+        .take_while(|&i| dead_word(bottom + 8 * i) == PAINT)
         .count();
     bottom + 8 * untouched
+}
+
+/// The word at `address`, in stack no live frame holds. Rust has no
+/// defined way to reach memory whose allocation has ended, so the load and
+/// its address arithmetic are assembly, which the compiler cannot elide.
+#[cfg(rind_fips_break)]
+fn dead_word(address: usize) -> u64 {
+    let word: u64;
+    // SAFETY: `address` is word-aligned stack that `stack` painted, so it
+    // is mapped, and the load writes nothing.
+    unsafe {
+        #[cfg(target_arch = "x86_64")]
+        core::arch::asm!(
+            "mov {word}, qword ptr [{address}]",
+            address = in(reg) address,
+            word = lateout(reg) word,
+            options(nostack, readonly, preserves_flags),
+        );
+        #[cfg(target_arch = "aarch64")]
+        core::arch::asm!(
+            "ldr {word}, [{address}]",
+            address = in(reg) address,
+            word = lateout(reg) word,
+            options(nostack, readonly, preserves_flags),
+        );
+    }
+    word
 }

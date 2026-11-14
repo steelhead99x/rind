@@ -3,6 +3,7 @@
 //! AES through the module agrees with rind's, which its own tests check
 //! against Wycheproof and aws-lc-rs: the block cipher, CTR, CBC, key
 //! wrapping, QUIC header protection, and AES-GCM opening what rind seals.
+#![cfg(rind_fips_module)]
 
 use rind_fips::{Error, aead, cipher, hkdf, key_wrap};
 
@@ -362,8 +363,10 @@ fn cbc_matches_rind() {
             // Padded, both ways.
             let mut ours_buf = plaintext.clone();
             let mut theirs_buf = plaintext.clone();
-            encrypting.encrypt(ours_iv(), &mut ours_buf);
-            theirs_encrypting.encrypt(theirs_iv(), &mut theirs_buf);
+            same(
+                &encrypting.encrypt(ours_iv(), &mut ours_buf),
+                &theirs_encrypting.encrypt(theirs_iv(), &mut theirs_buf),
+            );
             assert_eq!(ours_buf, theirs_buf);
             assert_eq!(decrypting.decrypt(&iv, &mut ours_buf).unwrap(), plaintext);
 
@@ -401,6 +404,49 @@ fn cbc_matches_rind() {
     );
     assert_ne!(a.as_bytes(), b.as_bytes());
     same_debug(&a, &rind::cipher::CbcIv::assume_unpredictable([0; 16]));
+}
+
+/// A buffer that shows a fixed window, `extend` notwithstanding.
+struct Window(Vec<u8>, usize);
+
+impl AsMut<[u8]> for Window {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.0[..self.1]
+    }
+}
+
+impl<'a> Extend<&'a u8> for Window {
+    fn extend<I: IntoIterator<Item = &'a u8>>(&mut self, iter: I) {
+        self.0.extend(iter);
+    }
+}
+
+#[test]
+fn cbc_refuses_a_buffer_padding_cannot_grow() {
+    // Padding leaves a window of 1 or 17 bytes as it was, which then holds
+    // no whole block, or one and a byte. Each is refused, as rind and
+    // aws-lc-rs refuse it, and its plaintext stays as it was.
+    let (ours, theirs, key_len) = CIPHERS[0];
+    let key_value = bytes("key", key_len);
+    let encrypting = cipher::AesCbcEncryptingKey::new(ours, &key_value).unwrap();
+    let theirs_encrypting = rind::cipher::AesCbcEncryptingKey::new(theirs, &key_value).unwrap();
+    for window in [1, 17] {
+        let plaintext = bytes("plaintext", window);
+        let mut ours_buf = Window(plaintext.clone(), window);
+        let mut theirs_buf = Window(plaintext.clone(), window);
+        let result =
+            encrypting.encrypt(cipher::CbcIv::assume_unpredictable([3; 16]), &mut ours_buf);
+        assert_eq!(result, Err(Error::WrongLength), "{window}");
+        same(
+            &result,
+            &theirs_encrypting.encrypt(
+                rind::cipher::CbcIv::assume_unpredictable([3; 16]),
+                &mut theirs_buf,
+            ),
+        );
+        assert_eq!(ours_buf.0[..window], plaintext);
+        assert_eq!(ours_buf.0, theirs_buf.0);
+    }
 }
 
 #[test]
@@ -506,14 +552,26 @@ fn hkdf_derives_the_keys_rind_does() {
         (&aead::quic::AES_256, &rind::aead::quic::AES_256),
     ];
     for (ours, theirs) in hkdfs {
-        let prk = hkdf::Salt::new(ours, b"salt").extract(b"secret");
-        let reference = rind::hkdf::Salt::new(theirs, b"salt").extract(b"secret");
+        let prk = hkdf::Salt::new(ours, b"salt").extract(b"secret").unwrap();
+        let reference = rind::hkdf::Salt::new(theirs, b"salt")
+            .extract(b"secret")
+            .unwrap();
+        // FIPS 140-3 approves no empty info.
+        assert_eq!(
+            prk.expand(&[], &aead::AES_128_GCM).unwrap_err(),
+            Error::WrongLength
+        );
+        assert_eq!(
+            prk.expand(&[], &aead::quic::AES_128).unwrap_err(),
+            Error::WrongLength
+        );
         let (a, b) = (bytes("a", 10), bytes("b", 300));
-        let infos: [&[&[u8]]; 3] = [&[], &[&a], &[&a, &b]];
+        let infos: [&[&[u8]]; 2] = [&[&a], &[&a, &b]];
         for info in infos {
             for (aead_ours, aead_theirs) in AEADS {
-                let key = aead::Key::from(prk.expand(info, aead_ours));
-                let reference_key = rind::aead::Key::from(reference.expand(info, aead_theirs));
+                let key = aead::Key::from(prk.expand(info, aead_ours).unwrap());
+                let reference_key =
+                    rind::aead::Key::from(reference.expand(info, aead_theirs).unwrap());
                 same_debug(&key, &reference_key);
                 let mut sealed = b"hello".to_vec();
                 reference_key
@@ -530,9 +588,10 @@ fn hkdf_derives_the_keys_rind_does() {
                 );
             }
             for (quic_ours, quic_theirs) in quics {
-                let key = aead::quic::HeaderProtectionKey::from(prk.expand(info, quic_ours));
+                let key =
+                    aead::quic::HeaderProtectionKey::from(prk.expand(info, quic_ours).unwrap());
                 let reference_key = rind::aead::quic::HeaderProtectionKey::from(
-                    reference.expand(info, quic_theirs),
+                    reference.expand(info, quic_theirs).unwrap(),
                 );
                 same_debug(&key, &reference_key);
                 let sample = [0x5a; 16];

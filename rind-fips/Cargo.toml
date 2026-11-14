@@ -2,7 +2,7 @@
 name = "rind-fips"
 version = "0.1.0"
 edition = "2024"
-repository = "https://github.com/moq-dev/rind"
+repository = "https://github.com/kixel-ai/rind"
 license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause"
 description = "rind's approved algorithms from a FIPS 140-3 module"
 categories = ["cryptography"]
@@ -17,6 +17,9 @@ default = []
 # Builds the module so `RIND_FIPS_BREAK` corrupts the self-test it names,
 # and checks every service's stack use; for testing only.
 __break_tests = []
+# Builds the module with rind's `__ctgrind` hooks, for `admin/ctgrind fips`,
+# which also turns on `rind/__ctgrind` so the test's own marks reach valgrind.
+__ctgrind = []
 
 [build-dependencies]
 # Hashes the built module for its integrity test.
@@ -25,3 +28,14 @@ rind = { path = "../rind" }
 [dev-dependencies]
 # The reference the services are checked against.
 rind = { path = "../rind" }
+# Wycheproof's vectors, read by `tests/wycheproof.rs`.
+hex = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
+# features, as `admin/ctgrind fips` does; otherwise they build as no-ops.
+crabgrind = { version = "0.4", default-features = false }
+# The differential reference of `tests/crosschecks.rs`, as rind's is. aws-lc
+# does not build for wasm, where the module does not build either.
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+aws-lc-rs = { version = "1.19", default-features = false, features = ["alloc", "prebuilt-nasm", "non-fips"] }

@@ -48,17 +48,30 @@ impl fmt::Debug for Pkcs8 {
 
 /// A public key encoded as a `SubjectPublicKeyInfo` in DER.
 #[derive(Clone)]
-pub struct Spki(Vec<u8>);
+pub struct Spki {
+    bytes: [u8; SPKI_MAX_LEN],
+    len: usize,
+}
+
+/// ML-DSA-87's 2592-byte public key, the longest the module encodes, and its
+/// framing, as rind bounds its `Spki`.
+const SPKI_MAX_LEN: usize = 2592 + 32;
 
 impl From<Encoded> for Spki {
     fn from(encoded: Encoded) -> Self {
-        Self(encoded.bytes().to_vec())
+        let bytes = encoded.bytes();
+        let mut spki = Self {
+            bytes: [0; SPKI_MAX_LEN],
+            len: bytes.len(),
+        };
+        spki.bytes[..bytes.len()].copy_from_slice(bytes);
+        spki
     }
 }
 
 impl AsRef<[u8]> for Spki {
     fn as_ref(&self) -> &[u8] {
-        &self.0
+        &self.bytes[..self.len]
     }
 }
 

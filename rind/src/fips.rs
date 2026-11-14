@@ -201,6 +201,26 @@ pub fn zeroise_drbgs() -> usize {
     crate::fips_rng::zeroise_all()
 }
 
+/// Waits for every draw in progress, then holds every thread's DRBG still
+/// until the hold drops. The module holds one across `fork`, so the child
+/// inherits no draw in progress and no lock that only a thread it lacks
+/// would release.
+pub fn hold_drbgs() -> DrbgHold {
+    DrbgHold(crate::fips_rng::hold())
+}
+
+/// What [`hold_drbgs`] returns.
+pub struct DrbgHold(crate::fips_rng::Hold);
+
+impl DrbgHold {
+    /// Releases the hold in a forked child, after wiping and forgetting the
+    /// DRBG of every thread but this one: the child copied them but runs
+    /// none of their threads, so none would unregister or wipe its own.
+    pub fn release_in_child(self) {
+        crate::fips_rng::forked(self.0);
+    }
+}
+
 /// The name of the first CPU feature the module requires that this CPU
 /// lacks, as [`crate::cpu::check`] reports it.
 pub fn missing_cpu_feature() -> Option<&'static str> {
@@ -249,8 +269,18 @@ mod kat {
     use super::broken;
     use crate::high::hash::{Hash, Sha256};
 
+    /// The SHA-256 of a self-test's output, which the test compares with
+    /// the expected answer's.
     fn sha256_of(data: &[u8]) -> [u8; 32] {
-        Sha256::hash(data).as_ref().try_into().unwrap()
+        known(Sha256::hash(data).as_ref()).try_into().unwrap()
+    }
+
+    /// `value`, marked public for ctgrind: a self-test computes from fixed
+    /// inputs, so comparing its output reveals nothing, though rind marks
+    /// the keys and secrets it derives as secret.
+    fn known(value: &[u8]) -> &[u8] {
+        crate::low::ct::public_slice(value);
+        value
     }
 
     /// `input` with its first bit flipped if `test` is broken.
@@ -264,13 +294,6 @@ mod kat {
 
     fn check(test: &'static str, passed: bool) -> Result<(), &'static str> {
         passed.then_some(()).ok_or(test)
-    }
-
-    /// Constant-time compare. A self-test's match bit is public: it is the
-    /// module's pass or fail, and [`crate::constant_time::verify`] declassifies
-    /// only that bit.
-    fn same(got: &[u8], expected: &[u8]) -> bool {
-        crate::constant_time::verify(got, expected).is_ok()
     }
 
     // FIPS 180's example, "abc", for each hash.
@@ -333,10 +356,11 @@ mod kat {
     pub(super) fn hkdf() -> Result<(), &'static str> {
         use crate::high::hkdf::{HKDF_SHA256, Salt};
         let salt = Salt::new(&HKDF_SHA256, &hex("000102030405060708090a0b0c"));
-        let prk = salt.extract(&input("hkdf", [0x0b; 22]));
         let mut okm = [0u8; 42];
         let info = hex("f0f1f2f3f4f5f6f7f8f9");
-        let filled = prk.expand(&[&info], okm.len()).fill(&mut okm);
+        let filled = salt
+            .extract(&input("hkdf", [0x0b; 22]))
+            .and_then(|prk| prk.expand(&[&info], okm.len())?.fill(&mut okm));
         check(
             "hkdf",
             filled.is_ok()
@@ -348,20 +372,25 @@ mod kat {
         )
     }
 
-    // RFC 7914's PBKDF2-HMAC-SHA256 example with one iteration.
+    // aws-lc's PBKDF2-HMAC-SHA256 vector: two iterations, as IG 10.3.A
+    // asks, so the chained HMACs run, with a password and salt the
+    // service's floors admit.
     pub(super) fn pbkdf2() -> Result<(), &'static str> {
         use crate::high::pbkdf2::{PBKDF2_HMAC_SHA256, Secret};
-        let secret = Secret::new(&PBKDF2_HMAC_SHA256, &input("pbkdf2", *b"passwd"));
-        let mut out = [0u8; 64];
-        let derived = secret.derive(core::num::NonZeroU32::MIN, b"salt", &mut out);
+        let secret = Secret::new(
+            &PBKDF2_HMAC_SHA256,
+            &input("pbkdf2", *b"AWS-LCFIPSpassword"),
+        );
+        let mut out = [0u8; 25];
+        let iterations = core::num::NonZeroU32::MIN.saturating_add(1);
+        let derived = secret.derive(
+            iterations,
+            b"saltSALTsaltSALTsaltSALTsaltSALTsalt",
+            &mut out,
+        );
         check(
             "pbkdf2",
-            derived.is_ok()
-                && out[..]
-                    == hex(concat!(
-                        "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc",
-                        "49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783"
-                    )),
+            derived.is_ok() && out[..] == hex("c6ac0779e4a117c922287f5e10e7ee6ba74d8b19519b4cc738"),
         )
     }
 
@@ -472,10 +501,8 @@ mod kat {
         check(
             "ecdh",
             secret.is_ok_and(|s| {
-                same(
-                    s.as_ref(),
-                    &hex("46fc62106420ff012e54a434fbdd2d25ccc5852060561e68040dd7778997bd7b"),
-                )
+                known(s.as_ref())
+                    == hex("46fc62106420ff012e54a434fbdd2d25ccc5852060561e68040dd7778997bd7b")
             }),
         )
     }
@@ -538,17 +565,15 @@ mod kat {
         let ek = key.encapsulation_key();
         check(
             "ml_kem_keygen",
-            same(&sha256_of(&ek.as_bytes()), &hex(ML_KEM_EK_SHA256))
-                && same(&sha256_of(&key.as_bytes()), &hex(ML_KEM_DK_SHA256)),
+            sha256_of(&ek.as_bytes())[..] == hex(ML_KEM_EK_SHA256)
+                && sha256_of(&key.as_bytes())[..] == hex(ML_KEM_DK_SHA256),
         )?;
 
         let (secret, ciphertext) = ek.encaps_internal(Message(input("ml_kem_encaps", [0x5a; 32])));
         check(
             "ml_kem_encaps",
-            same(
-                &sha256_of(ciphertext.as_ref()),
-                &hex(ML_KEM_CIPHERTEXT_SHA256),
-            ) && same(&sha256_of(secret.as_ref()), &hex(ML_KEM_SECRET_SHA256)),
+            sha256_of(ciphertext.as_ref())[..] == hex(ML_KEM_CIPHERTEXT_SHA256)
+                && sha256_of(secret.as_ref())[..] == hex(ML_KEM_SECRET_SHA256),
         )?;
 
         let ciphertext = input("ml_kem_decaps", *ciphertext.as_ref());
@@ -558,10 +583,8 @@ mod kat {
         let rejected = key.decaps(&Ciphertext::from(corrupted));
         check(
             "ml_kem_decaps",
-            same(
-                &sha256_of(decapsulated.as_ref()),
-                &hex(ML_KEM_SECRET_SHA256),
-            ) && same(&sha256_of(rejected.as_ref()), &hex(ML_KEM_REJECTED_SHA256)),
+            sha256_of(decapsulated.as_ref())[..] == hex(ML_KEM_SECRET_SHA256)
+                && sha256_of(rejected.as_ref())[..] == hex(ML_KEM_REJECTED_SHA256),
         )
     }
 
@@ -574,13 +597,8 @@ mod kat {
         let key = KeyPair::<MlDsa44>::from_seed(&input("ml_dsa_keygen", seed));
         check(
             "ml_dsa_keygen",
-            same(
-                &sha256_of(key.public_key().as_ref()),
-                &hex(ML_DSA_PK_SHA256),
-            ) && same(
-                &sha256_of(key.secret_key().as_ref()),
-                &hex(ML_DSA_SK_SHA256),
-            ),
+            sha256_of(key.public_key().as_ref())[..] == hex(ML_DSA_PK_SHA256)
+                && sha256_of(key.secret_key().as_ref())[..] == hex(ML_DSA_SK_SHA256),
         )?;
 
         let message = *b"rind-fips ML-DSA self-test";

@@ -224,6 +224,14 @@ impl PrivateKey {
     }
 }
 
+// The module wipes the key; this wipes the copy of its public key kept
+// outside the module, as rind's `PrivateKey` wipes its whole value.
+impl Drop for PrivateKey {
+    fn drop(&mut self) {
+        ffi::wipe(&mut self.public.bytes);
+    }
+}
+
 impl fmt::Debug for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PrivateKey")

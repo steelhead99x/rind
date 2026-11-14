@@ -13,6 +13,15 @@ pub(crate) mod ids;
 
 pub(crate) type Status = u32;
 
+/// Zeroes `bytes` with writes the compiler cannot drop as dead, though the
+/// value holding them is freed next.
+pub(crate) fn wipe(bytes: &mut [u8]) {
+    for byte in bytes {
+        // SAFETY: `byte` is a valid, aligned `u8`.
+        unsafe { core::ptr::write_volatile(byte, 0) };
+    }
+}
+
 /// `status` as a result.
 pub(crate) fn check(status: Status) -> Result<(), Error> {
     match status {

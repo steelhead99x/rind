@@ -55,6 +55,79 @@ extern "C" fn init() {
     if !integrity::check() {
         rind::fips::fail("integrity");
     }
+    // SAFETY: the handlers are `extern "C"` and never unwind.
+    if unsafe { pthread_atfork(Some(fork_prepare), Some(fork_parent), Some(fork_child)) } != 0 {
+        // Only out of memory, at load.
+        std::eprintln!("rind-fips: cannot register its fork handlers");
+        std::process::abort();
+    }
+}
+
+unsafe extern "C" {
+    fn pthread_atfork(
+        prepare: Option<extern "C" fn()>,
+        parent: Option<extern "C" fn()>,
+        child: Option<extern "C" fn()>,
+    ) -> core::ffi::c_int;
+}
+
+/// What a `fork` holds, from this thread's prepare handler to its parent's
+/// or child's handler.
+struct ForkHold {
+    // A self-test may draw, so the self-tests are held first.
+    #[allow(dead_code)]
+    self_tests: selftest::Hold,
+    drbgs: rind::fips::DrbgHold,
+}
+
+/// The hold of the `fork` in progress. Only a thread holding both of its
+/// locks touches it, from its prepare handler to its parent or child
+/// handler, and those locks admit one such thread at a time. A static,
+/// unlike a thread local, still holds for a thread whose locals are torn
+/// down, as when a destructor forks.
+struct ForkSlot(core::cell::UnsafeCell<Option<ForkHold>>);
+
+// SAFETY: the locks it holds serialize every access, as above; the guards
+// it holds are released by the thread that took them, or by the child's
+// copy of it.
+unsafe impl Sync for ForkSlot {}
+
+static FORK: ForkSlot = ForkSlot(core::cell::UnsafeCell::new(None));
+
+impl ForkSlot {
+    /// Swaps the hold in the slot for `hold`.
+    ///
+    /// # Safety
+    /// This thread must hold the locks of the hold it takes or puts.
+    unsafe fn replace(&self, hold: Option<ForkHold>) -> Option<ForkHold> {
+        // SAFETY: the caller's contract, so no other thread accesses it.
+        unsafe { core::mem::replace(&mut *self.0.get(), hold) }
+    }
+}
+
+/// Holds the self-tests and the DRBGs across `fork`, so a child of a process
+/// whose other threads were testing or drawing inherits neither half done,
+/// and can still test, draw, and wipe its DRBGs at exit.
+extern "C" fn fork_prepare() {
+    let self_tests = selftest::hold();
+    let drbgs = rind::fips::hold_drbgs();
+    // SAFETY: this thread now holds both locks.
+    unsafe { FORK.replace(Some(ForkHold { self_tests, drbgs })) };
+}
+
+extern "C" fn fork_parent() {
+    // SAFETY: this thread's prepare handler took both locks.
+    drop(unsafe { FORK.replace(None) });
+}
+
+/// Also wipes and forgets the DRBGs of the parent's other threads, which the
+/// child copied but does not run.
+extern "C" fn fork_child() {
+    // SAFETY: the parent's forking thread, which this one copies, took both
+    // locks in its prepare handler.
+    if let Some(hold) = unsafe { FORK.replace(None) } {
+        hold.drbgs.release_in_child();
+    }
 }
 
 /// Runs as the process exits, after the exiting thread's destructors: wipes
