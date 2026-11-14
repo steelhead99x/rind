@@ -33,6 +33,14 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Reported:** no.
 - **Goes when:** the `v7` target feature is stable.
 
+### Cargo hides custom target paths from build scripts
+
+- **Breaks:** [Cargo sets `TARGET` to a custom JSON file's stem](https://github.com/rust-lang/cargo/blob/c980f4866141969fab6254a680546a277789d6f0/src/cargo/core/compiler/custom_build.rs), so a JSON named after a built-in target is indistinguishable by name. Compiling rind's hash-slot helper for that built-in can select a different ISA or ABI.
+- **Reproduce:** save `rustc -Zunstable-options --print target-spec-json --target riscv32i-unknown-none-elf` as `riscv32imac-unknown-none-elf.json`, then build for its path. Cargo reports the IMAC name while compiling RV32I.
+- **Workaround:** `rind/build.rs` requires every `CARGO_CFG_TARGET_*` value to match the built-in target under the same Rust flags before enabling the native hash slot. A mismatch keeps ordinary Rust. Cfg-identical custom specs must preserve the built-in ABI and data layout; those properties are not fully exposed to build scripts.
+- **Reported:** [rust-lang/cargo#14208](https://github.com/rust-lang/cargo/issues/14208).
+- **Goes when:** Cargo exposes the actual target JSON path to build scripts, so the helper can compile for it.
+
 ### No AddressSanitizer for 32-bit ARM Linux
 
 - **Breaks:** rustc has no AddressSanitizer for `armv7-unknown-linux-gnueabihf`.

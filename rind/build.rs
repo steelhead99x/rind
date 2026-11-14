@@ -20,10 +20,12 @@
 //! call. `--cfg rind_limb="32"` forces 32-bit limbs on a 64-bit target, so
 //! CI checks both widths on x86_64; like `rind_portable`, it is for testing.
 //!
-//! On built-in ELF x86, RISC-V32, and Xtensa portable targets it assembles the rolled SHA-512 block and
+//! On ELF x86, RISC-V32, and Xtensa portable targets with built-in-compatible
+//! target cfgs it assembles the rolled SHA-512 block and
 //! the one-block SHA-256 finish into `.text.rind_rolled_slot`, padded so the
 //! slot plus measured out-of-slot slack is a multiple of 2048 bytes.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -105,16 +107,7 @@ fn emit_rolled_slot(backend: &str) {
     }
     let target = env::var("TARGET").expect("cargo sets TARGET");
     let rustc = env::var("RUSTC").expect("cargo sets RUSTC");
-    let mut target_list = Command::new(&rustc);
-    target_list.args(["--print", "target-list"]);
-    let targets = checked_output(&mut target_list, "target list");
-    // Cargo exposes a custom target's name here, not the path to its JSON.
-    // Compile that target through the outer Cargo invocation's Rust path.
-    if !String::from_utf8(targets)
-        .expect("target names are UTF-8")
-        .lines()
-        .any(|name| name == target)
-    {
+    if !builtin_target_cfg_matches(&rustc, &target) {
         return;
     }
     println!("cargo::rustc-cfg=sha512_asm_slot");
@@ -166,6 +159,56 @@ fn emit_rolled_slot(backend: &str) {
             linked.rem_euclid(stride)
         );
     }
+}
+
+/// Whether the helper's built-in target has the outer compilation's target cfgs.
+fn builtin_target_cfg_matches(rustc: &str, target: &str) -> bool {
+    let mut cmd = Command::new(rustc);
+    cmd.args(["--print", "target-list"]);
+    let targets = checked_output(&mut cmd, "target list");
+    if !String::from_utf8(targets)
+        .expect("target names are UTF-8")
+        .lines()
+        .any(|name| name == target)
+    {
+        return false;
+    }
+
+    // Cargo exposes a custom JSON's basename even if it names a built-in.
+    // Compare every target cfg, including features and ABI, before compiling
+    // the helper for that built-in. Cfg-identical custom specs must keep its
+    // ABI: Cargo does not expose their layout or JSON path to build scripts.
+    // See UPSTREAM.md, "Cargo hides custom target paths from build scripts".
+    let mut cmd = Command::new(rustc);
+    cmd.args(["--print", "cfg", "--target", target])
+        .args(encoded_rustflags());
+    let output = checked_output(&mut cmd, "target cfg");
+    let output = String::from_utf8(output).expect("target cfg is UTF-8");
+    let mut builtin = BTreeMap::<String, BTreeSet<String>>::new();
+    for line in output.lines().filter(|line| line.starts_with("target_")) {
+        let (key, value) = line.split_once('=').unwrap_or((line, ""));
+        let key = format!("CARGO_CFG_{}", key.to_ascii_uppercase().replace('-', "_"));
+        let values = builtin.entry(key).or_default();
+        let value = value.trim_matches('"');
+        if !value.is_empty() {
+            values.insert(value.to_owned());
+        }
+    }
+    let outer = env::vars_os()
+        .filter_map(|(key, value)| {
+            let key = key.into_string().ok()?;
+            key.starts_with("CARGO_CFG_TARGET_").then(|| {
+                let value = value.into_string().expect("cargo target cfg is UTF-8");
+                let values = value
+                    .split(',')
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                (key, values)
+            })
+        })
+        .collect();
+    builtin == outer
 }
 
 /// Bytes of `.text` outside the slot, versus main `8dfb7942`, in a release
