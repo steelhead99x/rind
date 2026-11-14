@@ -112,8 +112,20 @@ mod generic {
         all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha1;
-    #[cfg(all(test, any(rind_backend = "arm", rind_backend = "x86_64")))]
+    #[cfg(all(
+        test,
+        any(
+            rind_backend = "arm",
+            rind_backend = "portable",
+            rind_backend = "x86_64"
+        )
+    ))]
     pub(super) mod sha256;
+    // FIPS 180-4 §4.2.2, one copy. The ESP-IDF Xtensa compressor and the
+    // test compressor above both read it. Host builds that do not compile
+    // either leave it out.
+    #[cfg(any(all(target_arch = "xtensa", target_os = "espidf"), test))]
+    pub(super) mod sha256_k;
     // Rolled SHA-512 for 32-bit portable targets, where HACL*'s unrolled
     // form misses small instruction caches, and in tests against FIPS 180-4.
     #[cfg(any(all(rind_backend = "portable", target_pointer_width = "32"), test))]
