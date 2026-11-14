@@ -11,7 +11,11 @@
 use crabgrind::memcheck::{self, MemState};
 use crabgrind::valgrind::{self, RunningMode};
 use rind::agreement::{ECDH_P256, ECDH_P384, ECDH_P521, PrivateKey};
-use rind_acvp::{Reply, handle};
+use rind_acvp::{Reply, Wrapper};
+
+fn handle(command: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
+    Wrapper::default().handle(command, args)
+}
 
 /// Marks `value`'s bytes secret. Pass the bytes, not a `Vec`: its header
 /// holds the public length.
@@ -204,6 +208,68 @@ fn hmac_drbg_entropy() {
     }
 }
 
+/// Raw and extracted HKDF keys and PBKDF passwords remain secret through
+/// the adapter's owned output buffers.
+#[test]
+fn kdf_secret_inputs() {
+    for hash in ["SHA-1", "SHA2-256", "SHA2-384", "SHA2-512"] {
+        let key = vec![0x35; 32];
+        let salt = vec![0x57; 16];
+        let info = b"derived key".to_vec();
+        let extract = format!("HKDF/{hash}/extract");
+        let wanted = run(&extract, &[key.clone(), salt.clone()]);
+        secret(key.as_slice());
+        assert_eq!(run(&extract, &[key.clone(), salt.clone()]), wanted);
+        let prk = wanted[0].clone();
+        let kda = format!("KDA/HKDF/{hash}");
+        let len = 100u32.to_ne_bytes().to_vec();
+        let derived = run(
+            &kda,
+            &[key.clone(), salt.clone(), info.clone(), len.clone()],
+        );
+        secret(prk.as_slice());
+        assert_eq!(
+            run(&format!("HKDF/{hash}/expand"), &[len, prk, info]),
+            derived
+        );
+        let args = [
+            b"password".to_vec(),
+            salt,
+            2u32.to_ne_bytes().to_vec(),
+            hash.as_bytes().to_vec(),
+            112u32.to_ne_bytes().to_vec(),
+        ];
+        let wanted = run("PBKDF", &args);
+        secret(args[0].as_slice());
+        assert_eq!(run("PBKDF", &args), wanted);
+    }
+}
+
+#[test]
+fn key_wrap_secret_inputs() {
+    for (algorithm, len) in [("AES-KW", 16), ("AES-KWP", 9)] {
+        let args = [
+            Vec::new(),
+            vec![0x57; 16],
+            vec![0xa5; len],
+            Vec::new(),
+            Vec::new(),
+        ];
+        let seal = format!("{algorithm}/seal");
+        let wanted = run(&seal, &args);
+        secret(args[1].as_slice());
+        secret(args[2].as_slice());
+        assert_eq!(run(&seal, &args), wanted);
+        let mut opening = args;
+        opening[2] = wanted[0].clone();
+        let opened = run(&format!("{algorithm}/open"), &opening);
+        assert_eq!(opened[0], [1]);
+        assert_eq!(opened[1], vec![0xa5; len]);
+        opening[2][0] ^= 1;
+        assert_eq!(run(&format!("{algorithm}/open"), &opening)[0], [0]);
+    }
+}
+
 /// ML-KEM-768 keyGen from secret `d` and `z`, encap of a secret message, and
 /// decap with a key ACVP hands over, for a ciphertext the key accepts and
 /// one it rejects.
@@ -236,34 +302,43 @@ fn mlkem768() {
 /// marks before loading it at its public width.
 #[test]
 fn rsa_primitives() {
-    let mut n = vec![0xc3u8; 256];
-    n[255] = 0xc5;
-    let d = vec![0x5a; 256];
-    let e = vec![0x01, 0x00, 0x01];
-    let message = vec![0x11; 256];
+    let set: serde_json::Value = serde_json::from_str(include_str!(
+        "../../thirdparty/acvp/RSA-SignaturePrimitive-2.0.json"
+    ))
+    .unwrap();
+    let test = set["testGroups"][0]["tests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|test| test["testPassed"] == true)
+        .unwrap();
+    let hex = |field: &str| {
+        let text = test[field].as_str().unwrap();
+        (0..text.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
+            .collect::<Vec<_>>()
+    };
+    let (n, d, e, message) = (hex("n"), hex("d"), hex("e"), hex("message"));
     secret(d.as_slice());
     let signed = run(
         "RSA/signaturePrimitive",
         &[d.clone(), n.clone(), e.clone(), message.clone()],
     );
     assert_eq!(signed[0], [1]);
-    let mut leading = vec![0u8; 256];
-    leading[253..].fill(0x5a);
-    secret(leading.as_slice());
-    let from_leading = run(
-        "RSA/signaturePrimitive",
-        &[leading, n.clone(), e.clone(), message.clone()],
-    );
-    assert_eq!(from_leading[0], [1]);
-    let short = vec![0x5a; 3];
-    secret(short.as_slice());
-    let from_short = run(
-        "RSA/signaturePrimitive",
-        &[short, n.clone(), e.clone(), message.clone()],
-    );
-    assert_eq!(from_leading[1], from_short[1]);
+    assert_eq!(signed[1], hex("signature"));
     let decrypted = run("RSA/decryptionPrimitive", &[message, d, n, e]);
     assert_eq!(decrypted, signed);
+
+    // Equal private exponents with short, limb-wide, and wider-than-modulus
+    // encodings. This toy pair is valid: 5 * 5 = 1 mod (13 - 1).
+    for len in [1, 8, 256] {
+        let mut d = vec![0; len];
+        d[len - 1] = 5;
+        secret(d.as_slice());
+        let reply = run("RSA/signaturePrimitive", &[d, vec![13], vec![5], vec![2]]);
+        assert_eq!(reply, vec![vec![1], vec![6]]);
+    }
 }
 
 /// ML-DSA sigGen with a secret expanded key and a secret `rnd`, against the

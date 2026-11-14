@@ -18,16 +18,29 @@ impl low::Zeroable for RsaPublicKey {}
 
 impl RsaPublicKey {
     pub(crate) fn new(n: RsaPosInt, e: u64) -> Result<Self, Error> {
+        Self::construct::<MIN_PUBLIC_MODULUS_BITS>(n, e, (1 << MAX_PUBLIC_EXPONENT_BITS) - 1)
+    }
+
+    /// ACVP's primitive tests supply public exponents wider than the
+    /// supported API's 33-bit limit; a u64 still bounds the public operation.
+    /// Tiny arithmetic fixtures are accepted, but `e` must be below `n`.
+    #[cfg(feature = "__acvp")]
+    pub(crate) fn new_acvp(n: RsaPosInt, e: u64) -> Result<Self, Error> {
+        if !RsaPosInt::word(e).less_than(&n) {
+            return Err(KeyFormatError::RsaExponent.into());
+        }
+        Self::construct::<2>(n, e, u64::MAX)
+    }
+
+    fn construct<const MIN_BITS: usize>(n: RsaPosInt, e: u64, max_e: u64) -> Result<Self, Error> {
         low::Entry::assert_held();
-        if n.is_even()
-            || !(MIN_PUBLIC_MODULUS_BITS..=MAX_PUBLIC_MODULUS_BITS).contains(&n.len_bits())
-        {
+        if n.is_even() || !(MIN_BITS..=MAX_PUBLIC_MODULUS_BITS).contains(&n.len_bits()) {
             return Err(KeyFormatError::RsaModulus.into());
         }
         // As aws-lc requires: an even e has no inverse mod the even
-        // (p - 1)(q - 1), e = 1 makes every message its own signature, and
-        // 33 bits bounds the public operation's cost.
-        if e.is_multiple_of(2) || e == 1 || e >> MAX_PUBLIC_EXPONENT_BITS != 0 {
+        // (p - 1)(q - 1), and e = 1 makes every message its own signature.
+        // The caller bounds the public operation's cost.
+        if e.is_multiple_of(2) || e == 1 || e > max_e {
             return Err(KeyFormatError::RsaExponent.into());
         }
 

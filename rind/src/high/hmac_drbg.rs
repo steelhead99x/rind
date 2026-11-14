@@ -7,7 +7,7 @@ use super::digest::Digest;
 use super::hash::Hash;
 use super::hmac::HmacKey;
 use crate::Error;
-#[cfg(any(test, rind_fips, feature = "__acvp"))]
+#[cfg(any(test, rind_fips))]
 use crate::low::zeroise;
 use crate::mid::rng::RandomSource;
 
@@ -120,7 +120,7 @@ impl<H: Hash> HmacDrbg<H> {
     }
 
     /// Wipes K and V, the secret state, under `wipe`.
-    #[cfg(any(test, rind_fips, feature = "__acvp"))]
+    #[cfg(any(test, rind_fips))]
     pub(crate) fn zeroise(&mut self) {
         zeroise(self.k.as_mut());
         zeroise(self.v.as_mut());

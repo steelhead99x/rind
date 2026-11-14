@@ -103,9 +103,9 @@ exclude_re = [
   'rind/src/high/signature\.rs:(229|1683):\d+: replace \+ with \*$',
   'rind/src/low/generic/mont\.rs:167:\d+: replace \+ with \* in mont_mul$',
   'rind/src/mid/mldsa\.rs:(396|491|538):\d+: replace \+ with \* in (keygen|public_key_from_secret|sign_internal)$',
-  'rind/src/mid/rsa_priv\.rs:311:\d+: replace / with \*$',
-  'rind/src/mid/rsa_priv\.rs:296:44: replace \+ with \*$',
-  'rind/src/mid/rsa_priv\.rs:298:\d+: replace \+ with \*$',
+  'rind/src/mid/rsa_priv\.rs:329:\d+: replace / with \*$',
+  'rind/src/mid/rsa_priv\.rs:314:44: replace \+ with \*$',
+  'rind/src/mid/rsa_priv\.rs:316:\d+: replace \+ with \*$',
   'rind/src/mid/rsa_priv/exponents\.rs:57:\d+: replace \* with \+ in Exponents::derive$',
   'rind-openmls/src/provider\.rs:201:\d+: replace \+ with \* in <impl OpenMlsCrypto for RustCrypto>::sign$',
   # Equivalent: a comparison whose two forms differ only where both branches

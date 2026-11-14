@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-use std::fs::File;
 use std::io::{self, Read, Write};
-use std::mem::ManuallyDrop;
-use std::os::fd::{AsRawFd, FromRawFd};
 
 use crate::ops;
 
@@ -15,36 +12,38 @@ const MAX_ARGS: usize = 16;
 
 pub fn serve() -> io::Result<()> {
     let mut input = io::stdin().lock();
+    let mut output = io::stdout().lock();
+    let mut wrapper = ops::Wrapper::default();
     loop {
-        let request = match read_request(&mut input) {
-            Ok(request) => request,
-            Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
-            Err(err) => return Err(err),
+        let Some(request) = read_request(&mut input)? else {
+            return Ok(());
         };
         let reply = {
             let Some((command, args)) = request.split_first() else {
                 return Err(io::Error::other("empty ACVP request"));
             };
             match std::str::from_utf8(command) {
-                Ok(command) => ops::handle(command, args).map_err(io::Error::other),
+                Ok(command) => wrapper.handle(command, args).map_err(io::Error::other),
                 Err(_) => Err(io::Error::other("ACVP command is not UTF-8")),
             }
         };
         let reply = reply?;
-        // `io::stdout()` is block-buffered on a pipe. A reply with no newline
-        // stays there until exit, and the parent still holding stdin never
-        // sees it. Write the fd directly. `ManuallyDrop` keeps the drop from
-        // closing the process's stdout.
-        // SAFETY: the fd is stdout, which outlives this process. `ManuallyDrop`
-        // keeps `File`'s destructor from closing it.
-        let mut output = ManuallyDrop::new(unsafe { File::from_raw_fd(io::stdout().as_raw_fd()) });
         let spans = reply.slices();
-        write_reply(&mut *output, &spans)?;
+        write_reply(&mut output, &spans)?;
     }
 }
 
-fn read_request(input: &mut impl Read) -> io::Result<Vec<Vec<u8>>> {
-    let count = read_u32(input)? as usize;
+fn read_request(input: &mut impl Read) -> io::Result<Option<Vec<Vec<u8>>>> {
+    let mut count = [0u8; 4];
+    // EOF between requests is clean shutdown. Once one byte arrives, the
+    // whole frame must arrive, including its header and every argument.
+    match input.read_exact(&mut count[..1]) {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(err) => return Err(err),
+    }
+    input.read_exact(&mut count[1..])?;
+    let count = u32::from_ne_bytes(count) as usize;
     if count == 0 || count > MAX_ARGS {
         return Err(io::Error::other("ACVP request argument count"));
     }
@@ -64,7 +63,7 @@ fn read_request(input: &mut impl Read) -> io::Result<Vec<Vec<u8>>> {
         input.read_exact(&mut buf)?;
         args.push(buf);
     }
-    Ok(args)
+    Ok(Some(args))
 }
 
 fn write_reply(output: &mut impl Write, spans: &[&[u8]]) -> io::Result<()> {
@@ -80,7 +79,9 @@ fn write_reply(output: &mut impl Write, spans: &[&[u8]]) -> io::Result<()> {
     for span in spans {
         output.write_all(span)?;
     }
-    Ok(())
+    // The client waits for this reply with stdin still open. Flush even
+    // when a pipe buffers the bytes and the reply contains no newline.
+    output.flush()
 }
 
 fn read_u32(input: &mut impl Read) -> io::Result<u32> {
@@ -92,4 +93,29 @@ fn read_u32(input: &mut impl Read) -> io::Result<u32> {
 pub(crate) fn u32_arg(bytes: &[u8]) -> Option<u32> {
     let bytes: [u8; 4] = bytes.try_into().ok()?;
     Some(u32::from_ne_bytes(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eof_is_clean_only_between_requests() {
+        let mut frame = Vec::new();
+        for n in [2u32, 8, 3] {
+            frame.extend_from_slice(&n.to_ne_bytes());
+        }
+        frame.extend_from_slice(b"SHA2-256abc");
+        for end in 1..frame.len() {
+            let err = read_request(&mut &frame[..end]).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof, "{end}");
+        }
+        assert!(read_request(&mut &[][..]).unwrap().is_none());
+        let mut input = frame.as_slice();
+        assert_eq!(
+            read_request(&mut input).unwrap(),
+            Some(vec![b"SHA2-256".to_vec(), b"abc".to_vec()])
+        );
+        assert!(read_request(&mut input).unwrap().is_none());
+    }
 }

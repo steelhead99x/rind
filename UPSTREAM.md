@@ -228,6 +228,14 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 
 ## CI tools
 
+### acvptool expects older sample formats
+
+- **Breaks:** aws-lc's `acvptool` at [`5ed12cce`](https://github.com/aws/aws-lc/tree/5ed12cce0fd4453f2f63300d44325ed14f845d6f/util/fipstools/acvp/acvptool/subprocess) reads HMAC lengths from groups, while revision 2.0 samples put them on tests; its `hkdfParameters.extract` ignores a hybrid secret's `t`. Legacy ML-DSA samples also put `externalMu: false` on external-interface groups, though NIST's current schema reserves that field for the internal interface. The client's nullable boolean preserves the distinction: absent means external, false or true means internal.
+- **Reproduce:** pass the unadapted HMAC 2.0, hybrid KDA, or external-interface ML-DSA sample files from `thirdparty/acvp` to that tool's `-json` input, after removing answer fields where needed. HMAC errors on the length, and KDA and ML-DSA return mismatched answers.
+- **Workaround:** `admin/acvp` gives each HMAC test its own length group, concatenates `t` onto `z`, and removes the inapplicable ML-DSA `externalMu` field. `rind-acvp` advertises HMAC revision 1.0 and non-hybrid HKDF for fresh sessions. Its README links NIST's registration tables; the client-side contracts are in [`hmac.go`](https://github.com/aws/aws-lc/blob/5ed12cce0fd4453f2f63300d44325ed14f845d6f/util/fipstools/acvp/acvptool/subprocess/hmac.go), [`hkdf.go`](https://github.com/aws/aws-lc/blob/5ed12cce0fd4453f2f63300d44325ed14f845d6f/util/fipstools/acvp/acvptool/subprocess/hkdf.go), and [`ml_dsa.go`](https://github.com/aws/aws-lc/blob/5ed12cce0fd4453f2f63300d44325ed14f845d6f/util/fipstools/acvp/acvptool/subprocess/ml_dsa.go).
+- **Reported:** no.
+- **Goes when:** the client reads HMAC revision 2.0 and forwards hybrid `t`, and refreshed ML-DSA samples omit `externalMu` from external-interface groups. Remove each adaptation when its corresponding format changes.
+
 ### actionlint rejects `concurrency.queue`
 
 - **Breaks:** actionlint 1.7.12 errors on `queue: max`, which GitHub's concurrency groups accept since May 2026, as `unexpected key "queue" for "concurrency" section`.

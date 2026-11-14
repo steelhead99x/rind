@@ -10,5 +10,5 @@
 mod ops;
 mod protocol;
 
-pub use ops::{Reply, handle};
+pub use ops::{Reply, Wrapper};
 pub use protocol::serve;

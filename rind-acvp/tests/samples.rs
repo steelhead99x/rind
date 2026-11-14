@@ -6,7 +6,11 @@
 
 use std::path::PathBuf;
 
-use rind_acvp::handle;
+use rind_acvp::{Reply, Wrapper};
+
+fn handle(command: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
+    Wrapper::default().handle(command, args)
+}
 use serde_json::Value;
 
 fn set(name: &str) -> Value {
