@@ -226,9 +226,8 @@ IMPORTS_64 = [
             "sha256_block_data_order_nohw",
         ],
     },
-    # P-256's generator multiplication, as aws-lc's
-    # `ecp_nistz256_point_mul_base` runs it: a constant-time row scan, with
-    # SSE2 or AVX2, and a mixed addition, with `mulq` or with BMI2 and ADX.
+    # The mixed addition of P-256's generator multiplication, as aws-lc's
+    # `ecp_nistz256_point_mul_base` runs it, with `mulq` or with BMI2 and ADX.
     {
         "arch": "x86_64",
         "source": "p256-x86_64-asm.S",
@@ -240,10 +239,8 @@ IMPORTS_64 = [
             "Copyright (c) 2015 CloudFlare, Inc.",
             "SPDX-License-Identifier: Apache-2.0",
         ],
-        "tables": ["poly", "One", "ONE_mont"],
+        "tables": ["poly", "ONE_mont"],
         "routines": [
-            "ecp_nistz256_select_w7",
-            "ecp_nistz256_avx2_select_w7",
             "ecp_nistz256_point_add_affine",
             "ecp_nistz256_point_add_affinex",
         ],
@@ -257,7 +254,7 @@ IMPORTS_64 = [
             "__ecp_nistz256_sub_fromx",
             "__ecp_nistz256_subx",
         ],
-        "dispatches": ["ecp_nistz256_select_w7", "ecp_nistz256_point_add_affine"],
+        "dispatches": ["ecp_nistz256_point_add_affine"],
     },
     # The rest of the x86_64 imports are for CPUs without AVX2.
     {
