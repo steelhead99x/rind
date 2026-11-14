@@ -53,6 +53,9 @@ fn _sample_ntt<const TRANSPOSED: bool>(rho: &[u8; 32]) -> [i16; K * K * N] {
     r
 }
 
+// Inlined into keygen and `from_bytes` on the portable backend. Outlined,
+// those two shrink and this setup is its own root.
+#[cfg_attr(rind_backend = "portable", inline(always))]
 fn sample_poly_ntt_8x(rho: &[u8; 32], inputs: &[[u8; 2]; 8], outputs: &mut [i16; N * 8]) {
     let mut buf = [0; 40];
     buf[..32].copy_from_slice(rho);
@@ -69,6 +72,9 @@ fn sample_poly_ntt_8x(rho: &[u8; 32], inputs: &[[u8; 2]; 8], outputs: &mut [i16;
     low::mlkem768_sample_poly_ntt_8x(&inputs, outputs, _sample_poly_ntt_8x, _sample_poly_ntt_tail)
 }
 
+// Function pointers. On the portable backend LLVM otherwise inlines these
+// into the setup root above, and keygen and `from_bytes` shrink.
+#[cfg_attr(rind_backend = "portable", inline(never))]
 fn _sample_poly_ntt_8x(inputs: &[[u8; 40]; 8], outputs: &mut [i16; N * 8]) {
     let (input_quads, _) = inputs.as_chunks::<4>();
     let (output_quads, _) = outputs.as_chunks_mut::<{ N * 4 }>();
@@ -96,6 +102,7 @@ fn _sample_poly_ntt_8x(inputs: &[[u8; 40]; 8], outputs: &mut [i16; N * 8]) {
     }
 }
 
+#[cfg_attr(rind_backend = "portable", inline(never))]
 fn _sample_poly_ntt_tail(tail_sponge: &mut [u64; 25], tail: &mut [i16]) {
     Shake128ForMlKem {
         sponge: SqueezingSponge::new(*tail_sponge),
