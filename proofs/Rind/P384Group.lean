@@ -207,14 +207,14 @@ theorem b384_ne_two : (b384 + 2) % p384 ≠ 0 ∧ (b384 + (p384 - 2)) % p384 ≠
 theorem p384OnCurve_G : p384OnCurve p384G := by
   simp only [p384OnCurve, nist.OnCurve, p384G, p384, b384]; decide
 
-theorem fromM_of_onCurve {x y : Nat} (h : p384OnCurve (some (x, y))) :
+theorem p384_fromM_of_onCurve {x y : Nat} (h : p384OnCurve (some (x, y))) :
     ∃ X : p384Curve.Point, nist.fromM X = some (x, y) :=
   nist.fromM_of_onCurve b384_ne_two.1 b384_ne_two.2 h
 
-theorem exists_fromM (P : nist.Point) (hP : p384OnCurve P) : ∃ X : p384Curve.Point, nist.fromM X = P := by
+theorem p384_exists_fromM (P : nist.Point) (hP : p384OnCurve P) : ∃ X : p384Curve.Point, nist.fromM X = P := by
   match P, hP with
   | none, _ => exact ⟨0, rfl⟩
-  | some (x, y), h => exact fromM_of_onCurve h
+  | some (x, y), h => exact p384_fromM_of_onCurve h
 
 /-- n·G is infinity: the kernel computes (n - 1)·G and finds -G. -/
 theorem n384_nsmul_G (X : p384Curve.Point) (hX : nist.fromM X = p384G) : n384 • X = 0 := by
@@ -227,21 +227,21 @@ theorem n384_nsmul_G (X : p384Curve.Point) (hX : nist.fromM X = p384G) : n384 �
     decide +kernel
   exact nist.nsmul_G (by simp [n384]) hm hN X (hX.trans hG)
 
-theorem fromM_G : ∃ X : p384Curve.Point, nist.fromM X = p384G ∧ X ≠ 0 ∧ n384 • X = 0 := by
-  obtain ⟨X, hX⟩ := exists_fromM p384G p384OnCurve_G
+theorem p384_fromM_G : ∃ X : p384Curve.Point, nist.fromM X = p384G ∧ X ≠ 0 ∧ n384 • X = 0 := by
+  obtain ⟨X, hX⟩ := p384_exists_fromM p384G p384OnCurve_G
   exact ⟨X, hX, by rintro rfl; simp [nist.fromM, p384G] at hX, n384_nsmul_G X hX⟩
 
 /-- A multiple of G by a scalar in [1, n) has order n, as G does. -/
-theorem g_mult_order (d : Nat) (hd0 : 0 < d) (hd : d < n384) :
+theorem p384_g_mult_order (d : Nat) (hd0 : 0 < d) (hd : d < n384) :
     nist.OrderOf p384 n384 (p384Pow p384G d) := by
-  obtain ⟨X, hX, hX0, hn⟩ := fromM_G
+  obtain ⟨X, hX, hX0, hn⟩ := p384_fromM_G
   rw [← hX]
   exact nist.mult_order X hX0 hn d hd0 hd
 
 /-- A multiple of G by a scalar in [1, n) is a finite point of the curve. -/
-theorem g_mult (k : Nat) (hk0 : 0 < k) (hk : k < n384) :
+theorem p384_g_mult (k : Nat) (hk0 : 0 < k) (hk : k < n384) :
     ∃ x y, p384Pow p384G k = some (x, y) ∧ p384OnCurve (some (x, y)) := by
-  obtain ⟨X, hX, hX0, hn⟩ := fromM_G
+  obtain ⟨X, hX, hX0, hn⟩ := p384_fromM_G
   rw [← hX]
   exact nist.mult_finite X hX0 hn k hk0 hk
 

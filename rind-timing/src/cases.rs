@@ -140,11 +140,11 @@ fn kdf_cases(cases: &mut Vec<Case>) {
     }));
     cases.push(case("hkdf/sha256/expand", move |config| {
         let salt = salt();
-        let extract = |secret: &Vec<u8>| salt.extract(secret);
+        let extract = |secret: &Vec<u8>| salt.extract(secret).unwrap();
         measure_built(config, &secrets(32), extract, |prk| {
             let mut out = [0; 32];
             prk.expand(&[b"public info"], out.len())
-                .fill(&mut out)
+                .and_then(|okm| okm.fill(&mut out))
                 .map(|()| out)
         })
     }));

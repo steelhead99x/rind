@@ -1,0 +1,13 @@
+# [XL] aarch64's 4x RSA Montgomery product is proven
+
+## Goal
+
+aws-lc's aarch64 `__bn_mul4x_mont`, which `bn_mul_mont` runs for widths that are a multiple of four unless it squares at a multiple of eight, is proven in HOL Light against s2n-bignum's `bignum_montmul` specification, through `bn_mul_mont`'s dispatch to it. RSA verification and every non-squaring product at RSA's sizes run it.
+
+## Plan
+
+- Runs: the `__bn_mul4x_mont` part of `low/aarch64/aws_lc/bn_mul_mont.*.s` (aws-lc's `armv8-mont.pl`), about 380 instructions, entered from offset 0xc. It measured 1.15 to 2 times as fast as s2n-bignum's generic routines on a Neoverse-N2, and faster than its Karatsuba routines at RSA-2048's sizes, so switching fails the speed rule.
+- Route: extend `proofs/hol-light/aarch64/bn_mul_mont.ml` in s2n-bignum's aarch64 model, scalar instructions only, with the generic path's `BN_MUL_MONT_GENERIC_SUBROUTINE_CORRECT` statement for widths that are a multiple of four, except the squaring case (a multiple of eight with `x = y`), and two changes the routine forces: its frame is the 128-byte save area plus `8k + 32` bytes of scratch, `8k + 160` bytes below the stack pointer, with nonoverlap hypotheses to match, and it saves and restores x19 to x28. It reuses its carry lemmas (`PROD_BOUND`, `CARRY_ZERO_TAC`), frame lemmas (`FRAME_TP`, `SUBFRAME`, `SUBFRAME_DISJ`), and composition tactics (`USE_ENSURES_TAC`, `REAL_EQS_TAC`, `GEN_BODY`'s shape for the loops). That theorem's proof is the template for the top level: `WORD_FORALL_OFFSET_TAC` by the frame-save size, the frame's subregions derived up front, the body as one `ARM_BIGSTEP_TAC`, and the frame's `MAYCHANGE` rewritten to offsets from the frame's base for `MONOTONE_MAYCHANGE_TAC`.
+- Simulator pitfalls the generic path hit: the nonoverlapping prover stalls on the flag facts the dispatch's `TST` leaves, so drop them before a big step; the code length must be a numeral (`fst BN_MUL_MONT_EXEC`) for the simulator's stack-store checks; and a lemma used through `ARM_BIGSTEP_TAC` must not state `aligned_bytes_loaded` in its postcondition.
+- Decided 2026-11-12 (maintainer, /quest-unblock): ✅ its own quest, after the generic path and before `__bn_sqr8x_mont` (rejected: one quest for all of `bn_mul_mont`). The theorem takes `n * n0 + 1 == 0 (mod 2^64)` as a hypothesis, matching `MontArgs` in `proofs/Rind/X86_64/RsaMont.lean`.
+- Upstream: offering this work to awslabs/s2n-bignum is optional, and there is no standing approval: stop and ask the maintainer before posting there or anywhere outside [the orgs AGENTS.md lists](/AGENTS.md#development) (decided with the maintainer on 2026-11-07 on [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
