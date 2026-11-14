@@ -9,7 +9,8 @@
 //! follows [`sha256`](sha256.rs): one 16-word window and an 80-round loop,
 //! which stays in a few kilobytes. On the ESP32-S3 under ESP-IDF that loop
 //! is placed in IRAM (`.iram1.text`, literal pool included) and its `K`
-//! table in internal DRAM, so this body adds no flash text and calls nothing.
+//! table in internal DRAM. The layout check verifies that the board's
+//! release build adds no flash text and calls nothing from this body.
 //! A `.text` input linked ahead of libcrux can still move HACL* SHA-256;
 //! this only removes the shift this object was adding. The
 //! `esp32s3-sha512-flash` feature leaves the ordinary flash sections, for an
@@ -64,8 +65,10 @@ macro_rules! SSIG1 {
 // `.text.*` body here would precede later objects such as HACL* SHA-256.
 // The Xtensa backend names the literal pool `.iram1.text.literal`, and
 // `l32r` reads that pool from IRAM. `K` is in `.dram1.rodata` (internal
-// DRAM). The body loads nothing from flash and makes no call; the length
-// check in `sha512_compress_blocks` stays in ordinary flash text. The ESP32,
+// DRAM). The checked opt-level=3 build loads nothing from flash and makes
+// no call from this body; other optimization profiles are not a cache-off
+// guarantee. The length check in `sha512_compress_blocks` stays in ordinary
+// flash text. The ESP32,
 // the ESP32-S2, and `*-none-elf` keep the ordinary text section.
 //
 // SAFETY: the attribute only selects the output section. The instructions
@@ -80,7 +83,7 @@ macro_rules! SSIG1 {
     ),
     unsafe(link_section = ".iram1.text")
 )]
-fn sha512_compress_block(state: &mut [u64; 8], block: &[u8]) {
+fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
     let mut a = state[0];
     let mut b = state[1];
     let mut c = state[2];

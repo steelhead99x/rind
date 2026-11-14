@@ -13,7 +13,7 @@
 # where .github/workflows/esp32s3-sha512-layout.yml installs them.
 set -eu
 
-root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 esp=${RIND_ESP_ROOT:-"$HOME/.espressif"}
 rustc=${RIND_ESP_RUSTC:-"$esp/rust-nightly-x86_64-unknown-linux-gnu/rustc/bin/rustc"}
 cargo=${RIND_ESP_CARGO:-"$esp/rust-nightly-x86_64-unknown-linux-gnu/cargo/bin/cargo"}
@@ -32,7 +32,8 @@ for tool in "$rustc" "$cargo" "$objdump" "$readelf" "$nm" "$ar" "$gcc" "$ld"; do
   fi
 done
 
-work=$(mktemp -d)
+mkdir -p "$root/.tmp"
+work=$(mktemp -d "$root/.tmp/sha512-layout.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
 # The real compressor, tests stripped, plus an entry so the block is live.
@@ -62,6 +63,8 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[workspace]
+
 [features]
 esp32s3-sha512-flash = []
 
@@ -72,7 +75,8 @@ codegen-units = 1
 panic = "abort"
 EOF
 
-export PATH="$xtensa_bin:$(dirname "$cargo"):$(dirname "$rustc"):$PATH"
+PATH="$xtensa_bin:$(dirname "$cargo"):$(dirname "$rustc"):$PATH"
+export PATH
 # cargo's nightly -Z is the esp cargo; do not let rustup's stable cargo win.
 hash -r
 
@@ -106,10 +110,10 @@ build() {
   CARGO_TARGET_DIR="$work/target-$name" \
     "$cargo" build --manifest-path "$work/probe/Cargo.toml" \
       --release --target "$target" -Z build-std=core --offline $extra \
-      >/tmp/sha512-layout-$name.log 2>&1 \
+      >"$work/$name.log" 2>&1 \
     || {
       printf 'build %s failed\n' "$name" >&2
-      cat "/tmp/sha512-layout-$name.log" >&2
+      cat "$work/$name.log" >&2
       exit 1
     }
   rlib=$(find "$work/target-$name/$target/release/deps" -name 'libsha512_layout-*.rlib' | head -1)
@@ -189,26 +193,22 @@ expect_ordinary "$work/obj/none.o" 'xtensa-esp32s3-none-elf'
 # points at K in DRAM. A flash .rodata reference here would fault with the
 # cache off.
 # Quote-terminated so `.rela.iram1.text` does not also match the literal
-# section. `.dram1.rodata` contains the letters `.rodata`, so that name is
-# allowed; a flash `.rodata` symbol is not. `memset` is not either.
+# section. Allow only these two section targets, so any function reference
+# (including a panic, not just memset) or other data reference fails.
 "$readelf" -rW "$work/obj/s3.o" | awk '
   /\.rela\.iram1\.text\.literal'\''/ { inlit = 1; intext = 0; next }
   /\.rela\.iram1\.text'\''/ { intext = 1; inlit = 0; next }
   /^Relocation section/ { intext = 0; inlit = 0 }
-  intext && /R_XTENSA_/ && $0 !~ /\.iram1\.text\.literal/ { bad = 1; print > "/dev/stderr" }
-  inlit && /memset/ { bad = 1; print > "/dev/stderr" }
-  inlit && /\.rodata/ && $0 !~ /\.dram1\.rodata/ { bad = 1; print > "/dev/stderr" }
-  inlit && /\.dram1\.rodata/ { sawk = 1 }
+  intext && /R_XTENSA_/ && $5 != ".iram1.text.literal" { bad = 1; print > "/dev/stderr" }
+  inlit && /R_XTENSA_/ && $5 != ".dram1.rodata" { bad = 1; print > "/dev/stderr" }
+  inlit && /R_XTENSA_/ && $5 == ".dram1.rodata" { sawk = 1 }
   END { if (bad || !sawk) exit 1 }
 ' || fail 'IRAM relocations are not (literal pool, DRAM K)'
+if "$objdump" -d -j .iram1.text "$work/obj/s3.o" | grep -Eq '[[:space:]]callx?(0|4|8|12)[[:space:]]'; then
+  fail 'IRAM compressor contains a call instruction'
+fi
 
-text_of() {
-  "$objdump" -h "$1" | awk -v pat="$2" '$2 ~ pat { print $2; exit }'
-}
-
-s3_text=$(text_of "$work/obj/s3.o" '^\.iram1\.text$')
-flash_text=$(text_of "$work/obj/flash.o" 'compress_block')
-# text_of for flash matches the literal too if it comes first. Take .text.
+s3_text=.iram1.text
 flash_text=$(
   "$objdump" -h "$work/obj/flash.o" | awk '$2 ~ /^\.text\./ && $2 ~ /compress_block/ { print $2; exit }'
 )
@@ -217,7 +217,9 @@ flash_text=$(
 cmp "$work/s3.bin" "$work/flash.bin" || fail 'IRAM and flash-feature instruction bytes differ'
 
 # Harness linked first, as the bench image is. The stand-in for HACL* SHA-256
-# moves by exactly the bytes that left .flash.text, and the harness does not.
+# checks that this object contributes less flash text. This synthetic link
+# cannot establish the real HACL* address or performance: other text inputs
+# still move it, so board benchmarks remain an acceptance requirement.
 cat > "$work/harness.c" << 'EOF'
 void sha256_update(void);
 void harness_loop(void) { sha256_update(); }
