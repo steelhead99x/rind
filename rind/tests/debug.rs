@@ -116,9 +116,12 @@ fn hmac() {
 
     let salt = hkdf::Salt::new(&hkdf::HKDF_SHA256, &[0xff; 32]);
     assert_eq!(show(&salt), "Salt { algorithm: Sha256, .. }");
-    let prk = salt.extract(&[0xff; 32]);
+    let prk = salt.extract(&[0xff; 32]).unwrap();
     assert_eq!(show(&prk), "Prk { algorithm: Sha256, .. }");
-    assert_eq!(show(&prk.expand(&[], 16)), "Okm { algorithm: Sha256, .. }");
+    assert_eq!(
+        show(&prk.expand(&[], 16).unwrap()),
+        "Okm { algorithm: Sha256, .. }"
+    );
 
     let secret = pbkdf2::Secret::new(&pbkdf2::PBKDF2_HMAC_SHA512, &[0xff; 8]);
     assert_eq!(show(&secret), "Secret { algorithm: Sha512, .. }");

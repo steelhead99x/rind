@@ -991,7 +991,7 @@ fn transcript(
 #[inline]
 fn expand(prk: &hkdf::Prk, info: &[u8], out: &mut [u8]) -> Result<(), Error> {
     prk.expand(&[info], out.len())
-        .fill(out)
+        .and_then(|okm| okm.fill(out))
         .map_err(|_| Error::Fault)
 }
 
@@ -1005,7 +1005,7 @@ fn schedule_keys(schedule: Schedule, transcript_hash: &[u8; 32]) -> Result<Keys,
     };
     match schedule {
         Schedule::Rfc9383 => {
-            let prk = hkdf::Salt::new(&hkdf::HKDF_SHA256, b"").extract(transcript_hash);
+            let prk = hkdf::Salt::new(&hkdf::HKDF_SHA256, b"").extract(transcript_hash)?;
             let mut confirm = [0u8; 64];
             expand(&prk, b"ConfirmationKeys", &mut confirm)?;
             keys.prover.copy_from_slice(&confirm[..32]);
@@ -1015,7 +1015,7 @@ fn schedule_keys(schedule: Schedule, transcript_hash: &[u8; 32]) -> Result<Keys,
         }
         Schedule::Draft01 => {
             // Appendix B's hash splits as Ka || Ke. Ka is 16 bytes.
-            let prk = hkdf::Salt::new(&hkdf::HKDF_SHA256, b"").extract(&transcript_hash[..16]);
+            let prk = hkdf::Salt::new(&hkdf::HKDF_SHA256, b"").extract(&transcript_hash[..16])?;
             let mut confirm = [0u8; 32];
             expand(&prk, b"ConfirmationKeys", &mut confirm)?;
             keys.prover[..16].copy_from_slice(&confirm[..16]);

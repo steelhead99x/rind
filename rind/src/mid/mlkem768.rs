@@ -57,8 +57,8 @@ impl DecapKey {
 
     /// Encode the key as bytes.
     ///
-    /// This is used for testing.
-    #[cfg(test)]
+    /// This is used for testing, and by the FIPS module's self-test.
+    #[cfg(any(test, rind_fips))]
     pub(crate) fn as_bytes(&self) -> [u8; K * 768 + 96] {
         let _entry = low::Entry::new_secret();
         let mut out = [0u8; K * 768 + 96];
