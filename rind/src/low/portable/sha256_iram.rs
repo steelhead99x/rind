@@ -4,90 +4,197 @@
 //!
 //! The portable backend otherwise calls HACL*'s unrolled `sha256_update`
 //! through libcrux-sha2. That body is about 12 KiB, so on an ESP32-S3 it
-//! fills most of the 16 KiB flash instruction cache and an unrelated move of
-//! the caller changes its speed. This module is rind's own rolled
-//! compression, the same 16-word window as `generic::sha256`: FIPS 180-4
-//! §4.1.2's functions and §6.2.2's schedule and rounds, over fixed-size
-//! arrays. ESP-IDF collects `.iram1.*` into IRAM, fetched without that
-//! cache. The round constants are a separate table: a variable index cannot
-//! use Xtensa's PC-relative literal load, and an IRAM instruction address is
-//! not a data address, so on this target the table is `.dram1.*`, which
-//! ESP-IDF already collects into internal data RAM. No branch or memory
-//! index depends on the message or the state. Release builds of every other
-//! target leave this module out.
+//! fills most of the 16 KiB flash instruction cache. This is FIPS 180-4
+//! §4.1.2's functions and §6.2.2's schedule and rounds. The 16-word window
+//! and the round constants follow `generic::sha256`, written for Graviola by
+//! Joe Birr-Pixton; that module is compiled only in tests, so this file keeps
+//! its own copy. The rotates, the block load, and the 16-round body are
+//! written for this target. The first sixteen rounds load the block. One
+//! sixteen-round schedule body then runs three times, for rounds 16..64.
+//! Returning the working variables in rotated order keeps the loop edge from
+//! moving them.
+//!
+//! LLVM's Xtensa backend expands `rotate_right` into a shift pair and an
+//! `or`. `ssai` plus `src` is the two-instruction rotate, and each rotate is
+//! its own asm block so that block's SAR write cannot interleave with
+//! another. A big-endian word is an `l32i` plus the same byte swap GCC emits:
+//! this target's hardware performs an unaligned `l32i`, and LLVM otherwise
+//! emits a byte load. ESP-IDF collects `.iram1.*` into IRAM. The round
+//! constants are `.dram1.*`: a variable index cannot use a PC-relative
+//! literal, and an IRAM instruction address is not a data address. No branch
+//! or memory index depends on the message or the state. Release builds of
+//! every other target leave this module out.
 
-// FIPS 180-4 §4.1.2. Macros, so a round stays in the caller's IRAM section
-// instead of calling a helper the linker can place in flash.
-macro_rules! ch {
-    ($x:expr, $y:expr, $z:expr) => {
-        ($x & $y) ^ (!$x & $z)
+// FIPS 180-4 §4.1.2. `g ^ (e & (f ^ g))` is `(e & f) ^ (!e & g)`.
+#[inline(always)]
+fn ch(e: u32, f: u32, g: u32) -> u32 {
+    g ^ (e & (f ^ g))
+}
+
+// `(a & b) ^ (c & (a ^ b))` is `(a & b) ^ (a & c) ^ (b & c)`.
+#[inline(always)]
+fn maj(a: u32, b: u32, c: u32) -> u32 {
+    (a & b) ^ (c & (a ^ b))
+}
+
+// `ssai` writes SAR and `src` reads it, both inside this block. The block
+// does not depend on SAR's previous value.
+#[cfg(target_arch = "xtensa")]
+#[inline(always)]
+fn rotr<const N: u32>(x: u32) -> u32 {
+    let y;
+    // SAFETY: `ssai` and `src` are base Xtensa instructions. `N` is one of
+    // 2, 6, 7, 11, 13, 17, 18, 19, 22, 25, each in `ssai`'s 0..32 range.
+    // The only registers written are SAR and `y`. Nothing is loaded or stored.
+    unsafe {
+        core::arch::asm!(
+            "ssai {n}",
+            "src {y}, {x}, {x}",
+            n = const N,
+            x = in(reg) x,
+            y = lateout(reg) y,
+            options(pure, nomem, nostack),
+        );
+    }
+    y
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+#[inline(always)]
+fn rotr<const N: u32>(x: u32) -> u32 {
+    x.rotate_right(N)
+}
+
+#[inline(always)]
+fn bsig0(x: u32) -> u32 {
+    rotr::<2>(x) ^ rotr::<13>(x) ^ rotr::<22>(x)
+}
+
+#[inline(always)]
+fn bsig1(x: u32) -> u32 {
+    rotr::<6>(x) ^ rotr::<11>(x) ^ rotr::<25>(x)
+}
+
+#[inline(always)]
+fn ssig0(x: u32) -> u32 {
+    rotr::<7>(x) ^ rotr::<18>(x) ^ (x >> 3)
+}
+
+#[inline(always)]
+fn ssig1(x: u32) -> u32 {
+    rotr::<17>(x) ^ rotr::<19>(x) ^ (x >> 10)
+}
+
+/// One round. The tuple is the rotated working state
+/// `(T1+T2, a, b, c, d+T1, e, f, g)`.
+#[inline(always)]
+fn round(
+    w: u32,
+    k: u32,
+    a: u32,
+    b: u32,
+    c: u32,
+    d: u32,
+    e: u32,
+    f: u32,
+    g: u32,
+    h: u32,
+) -> (u32, u32, u32, u32, u32, u32, u32, u32) {
+    let t1 = h
+        .wrapping_add(bsig1(e))
+        .wrapping_add(ch(e, f, g))
+        .wrapping_add(k)
+        .wrapping_add(w);
+    let new_e = d.wrapping_add(t1);
+    let new_a = t1.wrapping_add(bsig0(a).wrapping_add(maj(a, b, c)));
+    (new_a, a, b, c, new_e, e, f, g)
+}
+
+// `K[base + I]`, with `I` a literal so the load is a constant offset.
+#[inline(always)]
+fn round_constant<const I: usize>(kp: *const u32) -> u32 {
+    // SAFETY: callers pass `I` in `0..16` and a `kp` at `K[0]`, `K[16]`,
+    // `K[32]`, or `K[48]`, so `kp.add(I)` stays inside `K`. `K` is aligned
+    // for `u32`, and `I` is a constant.
+    unsafe { *kp.add(I) }
+}
+
+// Big-endian word `BYTE / 4` of the block. `BYTE` is a literal offset.
+#[cfg(target_arch = "xtensa")]
+#[inline(always)]
+fn message_word<const BYTE: usize>(block: &[u8; 64]) -> u32 {
+    let y;
+    // SAFETY: `BYTE` is `0, 4, ..., 60`, so the four bytes lie in `block`.
+    // ESP-IDF's Xtensa cores (ESP32, ESP32-S2, ESP32-S3) set
+    // `XCHAL_UNALIGNED_LOAD_HW`, so `l32i` does not trap when `block` is not
+    // word-aligned. The sequence is a byte swap of that little-endian load:
+    // `ssai 8`, shift the high half down, then three `src`. It writes SAR,
+    // `a14`, and `y`, and does not use the stack. The windowed ABI gives this
+    // function its own `a14`; the operand list names it so the result cannot
+    // land there. SAR is written and consumed before the block ends.
+    unsafe {
+        core::arch::asm!(
+            "l32i a14, {p}, {byte}",
+            "ssai 8",
+            "srli {y}, a14, 16",
+            "src {y}, {y}, a14",
+            "src {y}, {y}, {y}",
+            "src {y}, a14, {y}",
+            p = in(reg) block.as_ptr(),
+            byte = const BYTE,
+            y = lateout(reg) y,
+            out("a14") _,
+            options(nostack, readonly),
+        );
+    }
+    y
+}
+
+#[cfg(not(target_arch = "xtensa"))]
+#[inline(always)]
+fn message_word<const BYTE: usize>(block: &[u8; 64]) -> u32 {
+    let (words, _) = block.as_chunks::<4>();
+    u32::from_be_bytes(words[BYTE / 4])
+}
+
+// `W[t] = σ1(W[t-2]) + W[t-7] + σ0(W[t-15]) + W[t-16]`, `SLOT = t mod 16`.
+// The slot is the round number, not the message.
+#[inline(always)]
+fn schedule<const SLOT: usize>(w: &mut [u32; 16]) -> u32 {
+    let w_t = ssig1(w[(SLOT + 14) & 15])
+        .wrapping_add(w[(SLOT + 9) & 15])
+        .wrapping_add(ssig0(w[(SLOT + 1) & 15]))
+        .wrapping_add(w[SLOT]);
+    w[SLOT] = w_t;
+    w_t
+}
+
+// `$i` is a literal, so the word index and the constant's offset both fold.
+macro_rules! message_rounds {
+    ($w:ident, $block:ident, $kp:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $($i:literal),*) => {
+        $(
+            {
+                let kk = round_constant::<$i>($kp);
+                let ww = message_word::<{ $i * 4 }>($block);
+                $w[$i] = ww;
+                ($a, $b, $c, $d, $e, $f, $g, $h) =
+                    round(ww, kk, $a, $b, $c, $d, $e, $f, $g, $h);
+            }
+        )*
     };
 }
 
-macro_rules! maj {
-    ($x:expr, $y:expr, $z:expr) => {
-        ($x & $y) ^ ($x & $z) ^ ($y & $z)
+macro_rules! schedule_rounds {
+    ($w:ident, $kp:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $($i:literal),*) => {
+        $(
+            {
+                let kk = round_constant::<$i>($kp);
+                let ww = schedule::<$i>(&mut $w);
+                ($a, $b, $c, $d, $e, $f, $g, $h) =
+                    round(ww, kk, $a, $b, $c, $d, $e, $f, $g, $h);
+            }
+        )*
     };
-}
-
-macro_rules! bsig0 {
-    ($x:expr) => {
-        $x.rotate_right(2) ^ $x.rotate_right(13) ^ $x.rotate_right(22)
-    };
-}
-
-macro_rules! bsig1 {
-    ($x:expr) => {
-        $x.rotate_right(6) ^ $x.rotate_right(11) ^ $x.rotate_right(25)
-    };
-}
-
-macro_rules! ssig0 {
-    ($x:expr) => {
-        $x.rotate_right(7) ^ $x.rotate_right(18) ^ ($x >> 3)
-    };
-}
-
-macro_rules! ssig1 {
-    ($x:expr) => {
-        $x.rotate_right(17) ^ $x.rotate_right(19) ^ ($x >> 10)
-    };
-}
-
-// `words[index mod 16]`. The mask is the round counter, not the message.
-macro_rules! window {
-    ($words:expr, $index:expr) => {{
-        // SAFETY: `$index & 15` is in `0..16`, and `$words` has 16 elements.
-        unsafe { *$words.get_unchecked($index & 15) }
-    }};
-}
-
-macro_rules! round_constant {
-    ($t:expr) => {{
-        // SAFETY: `$t` is a round number in `0..64`, and `K` has one word per round.
-        unsafe { *K.get_unchecked($t) }
-    }};
-}
-
-// One FIPS 180-4 §6.2.2 round. A macro, not a function, so it stays in the
-// caller's IRAM section instead of being outlined into flash.
-macro_rules! round {
-    ($a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $w_t:expr, $t:expr) => {{
-        let t1 = $h
-            .wrapping_add(bsig1!($e))
-            .wrapping_add(ch!($e, $f, $g))
-            .wrapping_add(round_constant!($t))
-            .wrapping_add($w_t);
-        let t2 = bsig0!($a).wrapping_add(maj!($a, $b, $c));
-        $h = $g;
-        $g = $f;
-        $f = $e;
-        $e = $d.wrapping_add(t1);
-        $d = $c;
-        $c = $b;
-        $b = $a;
-        $a = t1.wrapping_add(t2);
-    }};
 }
 
 #[inline(never)]
@@ -105,30 +212,28 @@ fn sha256_compress_block(state: &mut [u32; 8], block: &[u8; 64]) {
     let mut g = state[6];
     let mut h = state[7];
 
-    // The message schedule, kept as a 16-word window. The first 16 words are
-    // the block; each later word replaces the one sixteen rounds behind it.
+    // The message schedule, a 16-word window. The first 16 words are the
+    // block; each later word replaces the one sixteen rounds behind it.
     let mut w = [0u32; 16];
-    let (be_words, _) = block.as_chunks::<4>();
-    for (slot, be) in w.iter_mut().zip(be_words) {
-        *slot = u32::from_be_bytes(*be);
+    let kp = K.as_ptr();
+    message_rounds!(
+        w, block, kp, a, b, c, d, e, f, g, h, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    );
+    // SAFETY: `K` has 64 words. Each step below starts at word 16, 32, or 48.
+    let mut kp = unsafe { kp.add(16) };
+    let mut n = 0u32;
+    while n < 3 {
+        schedule_rounds!(
+            w, kp, a, b, c, d, e, f, g, h, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+        );
+        // SAFETY: the next start is word 32, 48, or 64. The last pointer is
+        // not dereferenced; the loop ends first.
+        kp = unsafe { kp.add(16) };
+        n += 1;
     }
 
-    for t in 0..16 {
-        round!(a, b, c, d, e, f, g, h, window!(&w, t), t);
-    }
-
-    for t in 16..64 {
-        // Read the four schedule words before the store: the new word lands
-        // on W[t - 16].
-        let w_t = ssig1!(window!(&w, t - 2))
-            .wrapping_add(window!(&w, t - 7))
-            .wrapping_add(ssig0!(window!(&w, t - 15)))
-            .wrapping_add(window!(&w, t - 16));
-        // SAFETY: `t & 15` is in `0..16`.
-        unsafe { *w.get_unchecked_mut(t & 15) = w_t };
-        round!(a, b, c, d, e, f, g, h, w_t, t);
-    }
-
+    // Add the chaining value from memory, so those eight words are not live
+    // across the rounds.
     state[0] = state[0].wrapping_add(a);
     state[1] = state[1].wrapping_add(b);
     state[2] = state[2].wrapping_add(c);
