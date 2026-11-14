@@ -14,16 +14,62 @@
 //! Returning the working variables in rotated order keeps the loop edge from
 //! moving them.
 //!
-//! LLVM's Xtensa backend expands `rotate_right` into a shift pair and an
-//! `or`. `ssai` plus `src` is the two-instruction rotate, and each rotate is
-//! its own asm block so that block's SAR write cannot interleave with
-//! another. A big-endian word is an `l32i` plus the same byte swap GCC emits:
-//! this target's hardware performs an unaligned `l32i`, and LLVM otherwise
-//! emits a byte load. ESP-IDF collects `.iram1.*` into IRAM. The round
-//! constants are `.dram1.*`: a variable index cannot use a PC-relative
-//! literal, and an IRAM instruction address is not a data address. No branch
-//! or memory index depends on the message or the state. Release builds of
-//! every other target leave this module out.
+//! LLVM's Xtensa backend (rustc 1.97.0.0, LLVM 21.1.3) does not emit
+//! `ssai`/`src` for a rotate, so the rotate and the block-word load stay
+//! asm. Each rotate is its own asm block so that block's SAR write cannot
+//! interleave with another. ESP-IDF collects `.iram1.*` into IRAM. The
+//! round constants are `.dram1.*`: a variable index cannot use a
+//! PC-relative literal, and an IRAM instruction address is not a data
+//! address. No branch or memory index depends on the message or the state.
+//! Release builds of every other target leave this module out.
+//!
+//! The formulations below were compiled for `xtensa-esp32s3-espidf` at
+//! opt-level 3 (`lto` off) and objdumped. Counts are dynamic instructions
+//! in `sha256_compress_block`: the first sixteen rounds, the schedule body
+//! three times, then the epilogue, plus one cycle when a load's result is
+//! used by the next instruction. `ssai`/`src` is not an extra stall. IRAM
+//! is the `.iram1` text plus its literal pool in the object file, before
+//! the linker's alignment. None of this was timed on a board.
+//!
+//! | rotate | block word | IRAM | cycles |
+//! |---|---|---:|---:|
+//! | `ssai`/`src` asm | `l32i` + `ssai 8` asm | 4,324 | 3,545 |
+//! | `u32::rotate_right`, `(x >> n) \| (x << (32 - n))`, or `unchecked_funnel_shr` | asm load | 5,253 | 4,421 |
+//! | `u64` concatenation, then `>> n` | asm load | 5,364 | 4,998 |
+//! | asm rotate | `from_be_bytes` or `read_unaligned` + `swap_bytes` | 5,107 | 3,917 |
+//! | asm rotate | pre-pass `from_be_bytes` into the window | 5,171 | 3,983 |
+//! | `rotate_right` | `from_be_bytes` | 6,118 | 4,841 |
+//! | `u64` funnel | `from_be_bytes` | 6,098 | 5,303 |
+//!
+//! `u32::rotate_right` (the stable wrapper of `core::intrinsics::rotate_right`),
+//! `(x >> n) | (x << (32 - n))`, and the unstable `unchecked_funnel_shr`
+//! all become `llvm.fshl.i32(x, x, 32 - n)`. `SelectionDAGBuilder` rewrites
+//! equal inputs to `ROTL` without asking whether `ROTL` is legal. This
+//! backend expands `ROTL`/`ROTR`, so isel emits `srli` or `extui`, `slli`,
+//! and `or`: three instructions, and a shift of 16 or more is `extui`. The
+//! custom `FSHL` lowering, which would use `src`, never sees a rotate.
+//! The `u64` form is a 64-bit shift, so it does become `movi.n` + `ssl` +
+//! `src`, but the extra register pressure spills and the block is slower.
+//! `ssai` has an empty TableGen pattern. No target feature or rustc flag
+//! selects it.
+//!
+//! `from_be_bytes`, `read_unaligned` plus `swap_bytes`, and the pre-pass
+//! all become `load i32 align 1` plus `llvm.bswap`. The backend does not
+//! allow a misaligned `i32` load, so that is four `l8ui`, and `BSWAP` is
+//! Expand, so the swap is a second byte permute and an `l32r` of `0xFF00`.
+//! ESP32-S3 hardware does perform an unaligned `l32i`
+//! (`XCHAL_UNALIGNED_LOAD_HW`).
+//!
+//! GCC already selects `ssai`/`src` for a constant rotate (`rotrsi3` in
+//! `gcc/config/xtensa/xtensa.md`). A backend patch that would let this
+//! file drop both asm blocks: mark `ROTL`/`ROTR` Custom and lower a
+//! constant rotate to `ssai`/`src` (marking only `FSHL` Custom is not
+//! enough), select `SSAI` for a constant funnel amount rather than
+//! `MOVI` followed by `SSL` or `SSR`, allow misaligned `i32` loads on
+//! cores with that hardware, and custom-lower `BSWAP` to the `ssai 8`
+//! sequence. The request for `src` on `llvm.fshl`/`llvm.fshr` is
+//! <https://github.com/espressif/llvm-project/issues/21>, closed by the
+//! `ssl`/`ssr` path, which is not this sequence.
 
 // FIPS 180-4 §4.1.2. `g ^ (e & (f ^ g))` is `(e & f) ^ (!e & g)`.
 #[inline(always)]
