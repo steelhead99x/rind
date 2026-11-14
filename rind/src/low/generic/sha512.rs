@@ -13,9 +13,9 @@
 //! this loop, and, on every backend except 32-bit portable, compare with
 //! the compression the backend ships (HACL* or aws-lc). On 64-bit portable
 //! targets, HACL*'s unrolled form is still used.
-//! On Xtensa this object also carries a retained `.text` pad, so the
-//! bytes it adds are a multiple of the ESP32-S3 instruction-cache set
-//! stride and SHA-256 keeps the cache sets it has on main.
+//! On Xtensa the compressor jumps over the residue
+//! `4096 - (1252 mod 4096)` in its own `.text`. That residue is not
+//! itself a stride; added to the measured shift, the move is one stride.
 
 macro_rules! CH {
     ($x:expr, $y:expr, $z:expr) => {
@@ -111,22 +111,23 @@ fn sha512_compress_block(state: &mut [u64; 8], block: &[u8]) {
     state[5] = state[5].wrapping_add(f);
     state[6] = state[6].wrapping_add(g);
     state[7] = state[7].wrapping_add(h);
-    // Directives only: the assembler switches section, so this function's
-    // instruction bytes stay as they are. The pad is in this object, which
-    // the sha2 image links ahead of HACL* SHA-256.
+    // Inside this function, so the bytes are placed with it and dropped
+    // with it. A separate retained section is not: the linker can leave
+    // it after SHA-256, or keep it after this function is discarded.
     #[cfg(target_arch = "xtensa")]
-    // SAFETY: the template is section directives. It emits no machine
-    // instructions and does not read or write registers or memory.
+    // SAFETY: one unconditional `j` over the pad. It names no register,
+    // reads and writes neither memory nor the stack, and leaves condition
+    // flags alone. The bytes that follow are not executed.
     unsafe {
         core::arch::asm!(
-            ".pushsection .text.rind_sha512_icache_pad,\"axR\",@progbits",
+            "j 1f",
             ".local rind_sha512_icache_pad",
-            ".type rind_sha512_icache_pad, @function",
+            ".type rind_sha512_icache_pad, @object",
             ".set rind_sha512_icache_pad, .",
             ".space {len}, 0xA5",
             ".size rind_sha512_icache_pad, {len}",
-            ".popsection",
-            len = const XTENSA_ICACHE_PAD_LEN,
+            "1:",
+            len = const XTENSA_ICACHE_PAD_BODY,
             options(nomem, nostack, preserves_flags),
         );
     }
@@ -152,9 +153,20 @@ const XTENSA_ICACHE_SET_STRIDE: usize = 4096;
 /// main `8dfb7942`: `0x4201b8c8 - 0x4201b3e4`.
 const XTENSA_SHA256_MEASURED_SHIFT: usize = 0x4e4;
 
-/// `.text` added so the net shift is one [`XTENSA_ICACHE_SET_STRIDE`].
+/// Bytes inserted into `sha512_compress_block` so the net shift is one
+/// [`XTENSA_ICACHE_SET_STRIDE`]. This residue is not itself a stride.
 const XTENSA_ICACHE_PAD_LEN: usize =
     XTENSA_ICACHE_SET_STRIDE - (XTENSA_SHA256_MEASURED_SHIFT % XTENSA_ICACHE_SET_STRIDE);
+
+/// Size of Xtensa `j`, the 24-bit relative jump (`op0 = 6`).
+///
+/// The Code Density Option has no 16-bit form. A target inside ±128 KiB
+/// assembles as this one instruction, so the pad body is three bytes shorter
+/// than [`XTENSA_ICACHE_PAD_LEN`].
+const XTENSA_J_LEN: usize = 3;
+
+/// `.space` skipped by that jump.
+const XTENSA_ICACHE_PAD_BODY: usize = XTENSA_ICACHE_PAD_LEN - XTENSA_J_LEN;
 
 const _: () = {
     assert!(XTENSA_SHA256_MEASURED_SHIFT == 0x4201_b8c8 - 0x4201_b3e4);
@@ -162,8 +174,10 @@ const _: () = {
         (XTENSA_SHA256_MEASURED_SHIFT + XTENSA_ICACHE_PAD_LEN)
             .is_multiple_of(XTENSA_ICACHE_SET_STRIDE)
     );
-    // A multiple of 4, so a 4-aligned Xtensa instruction does not grow a gap.
+    // A multiple of 4, matching Xtensa's 4-byte function alignment, so this
+    // growth does not by itself open a gap in front of the next function.
     assert!(XTENSA_ICACHE_PAD_LEN.is_multiple_of(4));
+    assert!(XTENSA_ICACHE_PAD_BODY + XTENSA_J_LEN == XTENSA_ICACHE_PAD_LEN);
 };
 
 // Head `ef58672` links this compressor ahead of the hash libraries, so HACL*
@@ -172,12 +186,12 @@ const _: () = {
 // of the whole image, harness included, does not reproduce the regression, so
 // the set map against the harness is what moved.
 //
-// `sha512_compress_block` emits `rind_sha512_icache_pad` into that same
-// object. The net shift is 4096, one stride, which puts every pre-existing
-// instruction back on main's set. A linker fill shorter than one 32-byte
-// line cannot change the set. Nothing branches to the pad. Its alignment is
-// 1, so the linker does not insert bytes in front of it; the length is a
-// multiple of 4, so the following 4-aligned code keeps the gap it already had.
+// The jump and the pad are in this function's own `.text`. Growing that
+// function by 2844 bytes moves every later instruction by 2844 when the
+// function stays ahead of them, which is the measured link. The net shift
+// is then 4096, one stride. A later insertion between this function and
+// `sha256_update` changes that address, so the board has to measure it.
+// The jump is unconditional. Nothing falls into the pad.
 
 // FIPS 180-4 §4.2.3.
 static K: [u64; 80] = [
@@ -266,8 +280,8 @@ static K: [u64; 80] = [
 #[cfg(test)]
 mod tests {
     use super::{
-        XTENSA_ICACHE_PAD_LEN, XTENSA_ICACHE_SET_STRIDE, XTENSA_SHA256_MEASURED_SHIFT,
-        sha512_compress_blocks,
+        XTENSA_ICACHE_PAD_BODY, XTENSA_ICACHE_PAD_LEN, XTENSA_ICACHE_SET_STRIDE, XTENSA_J_LEN,
+        XTENSA_SHA256_MEASURED_SHIFT, sha512_compress_blocks,
     };
 
     /// SHA-512's IV, FIPS 180-4 §5.3.5.
@@ -335,6 +349,8 @@ mod tests {
                 .is_multiple_of(XTENSA_ICACHE_SET_STRIDE)
         );
         assert_eq!(XTENSA_ICACHE_PAD_LEN, 2844);
+        assert_eq!(XTENSA_J_LEN, 3);
+        assert_eq!(XTENSA_ICACHE_PAD_BODY + XTENSA_J_LEN, XTENSA_ICACHE_PAD_LEN);
     }
 
     #[test]
