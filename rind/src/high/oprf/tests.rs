@@ -232,11 +232,11 @@ fn round_trips() {
             let direct = server.evaluate(input).unwrap();
             // `as_ref` is the public view of the output. Compare it to the
             // direct evaluation's bytes, which a replaced `as_ref` does not
-            // return.
-            assert_eq!(
-                ct::into_public(output.as_ref().to_vec()).as_slice(),
-                ct::into_public(direct.0.clone()).as_ref()
-            );
+            // return. `into_public` on a `Vec` marks only the header, so
+            // declassify the slice itself before `assert_eq!` reads it.
+            let got = output.as_ref();
+            ct::public_slice(got);
+            assert_eq!(got, ct::into_public(direct.0.clone()).as_ref());
             assert_eq!(format!("{output:?}"), "Output(..)");
         }
         assert!(format!("{server:?}").starts_with("ServerKey"));
