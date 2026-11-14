@@ -9,7 +9,7 @@
 //! on HACL* at every length: a rolled loop beside that ~12 KiB body made long
 //! hashes slower on an ESP32-S3.
 
-#[cfg(not(all(target_arch = "xtensa", target_os = "espidf")))]
+#[cfg(not(any(all(target_arch = "xtensa", target_os = "espidf"), test)))]
 use libcrux_sha2::hacl::sha256_update_nblocks;
 #[cfg(target_pointer_width = "64")]
 use libcrux_sha2::hacl::sha512_update_nblocks;
@@ -19,6 +19,7 @@ pub(crate) use crate::low::generic::sha1::sha1_compress_blocks;
 /// HACL* takes a 32-bit length, so longer input goes in pieces of whole
 /// blocks below it.
 #[cfg_attr(all(target_arch = "xtensa", target_os = "espidf"), allow(dead_code))]
+#[cfg(any(target_pointer_width = "64", not(test)))]
 const PIECE: usize = 1 << 31;
 
 /// Compresses whole 64-byte `blocks` into `state`.
@@ -28,109 +29,21 @@ const PIECE: usize = 1 << 31;
 /// ESP32-S3 that second body made long hashes slower.
 pub(crate) fn sha256_compress_blocks(state: &mut [u32; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(64));
-    #[cfg(all(target_arch = "xtensa", target_os = "espidf"))]
+    // Portable host tests run the ESP-IDF body too, including the digest and
+    // HMAC vectors and their secret-input checks.
+    #[cfg(any(all(target_arch = "xtensa", target_os = "espidf"), test))]
     {
         iram::sha256_update_nblocks(state, blocks);
     }
-    #[cfg(not(all(target_arch = "xtensa", target_os = "espidf")))]
+    #[cfg(not(any(all(target_arch = "xtensa", target_os = "espidf"), test)))]
     for piece in blocks.chunks(PIECE) {
         sha256_update_nblocks(piece.len() as u32, piece, state);
     }
 }
 
-/// HACL*'s SHA-256 block function from libcrux-sha2 0.0.9 (`hacl.rs`,
-/// `sha256_update`, Apache-2.0), in internal RAM on ESP-IDF Xtensa.
-///
-/// The ESP32-S3 runs flash code through a 16 KiB instruction cache, and the
-/// unrolled HACL* body is about 12 KiB of it, so its speed there depends on
-/// where the linker happens to put it relative to the caller: an unrelated
-/// 1.2 KiB change elsewhere in the image made 16-byte `update` calls 1.7×
-/// slower with the same instructions. ESP-IDF maps `.iram1.*` sections into
-/// IRAM, which is fetched without the cache. The rounds, the message schedule
-/// and their order are HACL*'s; only the slices are fixed-size arrays, so the
-/// body has no bounds checks and calls nothing outside IRAM. No branch or
-/// index depends on the message or the state.
-#[cfg(all(target_arch = "xtensa", target_os = "espidf"))]
-mod iram {
-    use libcrux_macros as krml;
-    use libcrux_sha2::hacl::k224_256;
-
-    // The unrolled schedule's last rewrite of `ws` is never read, as in HACL*.
-    #[allow(unused_assignments)]
-    #[inline(never)]
-    #[unsafe(link_section = ".iram1.rind_sha256_update")]
-    fn sha256_update(b: &[u8; 64], hash: &mut [u32; 8]) {
-        let hash_old: [u32; 8] = *hash;
-        let mut ws: [u32; 16] = [0u32; 16];
-        krml::unroll_for!(16, "i", 0u32, 1u32, {
-            let o = 4 * i as usize;
-            ws[i as usize] = u32::from_be_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
-        });
-        krml::unroll_for!(4, "i", 0u32, 1u32, {
-            krml::unroll_for!(16, "i0", 0u32, 1u32, {
-                let k_t: u32 = k224_256[16u32.wrapping_mul(i).wrapping_add(i0) as usize];
-                let ws_t: u32 = ws[i0 as usize];
-                let a0: u32 = hash[0];
-                let b0: u32 = hash[1];
-                let c0: u32 = hash[2];
-                let d0: u32 = hash[3];
-                let e0: u32 = hash[4];
-                let f0: u32 = hash[5];
-                let g0: u32 = hash[6];
-                let h02: u32 = hash[7];
-                let t1: u32 = h02
-                    .wrapping_add(
-                        (e0.wrapping_shl(26u32) | e0.wrapping_shr(6u32))
-                            ^ ((e0.wrapping_shl(21u32) | e0.wrapping_shr(11u32))
-                                ^ (e0.wrapping_shl(7u32) | e0.wrapping_shr(25u32))),
-                    )
-                    .wrapping_add(e0 & f0 ^ !e0 & g0)
-                    .wrapping_add(k_t)
-                    .wrapping_add(ws_t);
-                let t2: u32 = ((a0.wrapping_shl(30u32) | a0.wrapping_shr(2u32))
-                    ^ ((a0.wrapping_shl(19u32) | a0.wrapping_shr(13u32))
-                        ^ (a0.wrapping_shl(10u32) | a0.wrapping_shr(22u32))))
-                .wrapping_add(a0 & b0 ^ (a0 & c0 ^ b0 & c0));
-                hash[0] = t1.wrapping_add(t2);
-                hash[1] = a0;
-                hash[2] = b0;
-                hash[3] = c0;
-                hash[4] = d0.wrapping_add(t1);
-                hash[5] = e0;
-                hash[6] = f0;
-                hash[7] = g0
-            });
-            if i < 3u32 {
-                krml::unroll_for!(16, "i0", 0u32, 1u32, {
-                    let t16: u32 = ws[i0 as usize];
-                    let t15: u32 = ws[i0.wrapping_add(1u32).wrapping_rem(16u32) as usize];
-                    let t7: u32 = ws[i0.wrapping_add(9u32).wrapping_rem(16u32) as usize];
-                    let t2: u32 = ws[i0.wrapping_add(14u32).wrapping_rem(16u32) as usize];
-                    let s1: u32 = (t2.wrapping_shl(15u32) | t2.wrapping_shr(17u32))
-                        ^ ((t2.wrapping_shl(13u32) | t2.wrapping_shr(19u32))
-                            ^ t2.wrapping_shr(10u32));
-                    let s0: u32 = (t15.wrapping_shl(25u32) | t15.wrapping_shr(7u32))
-                        ^ ((t15.wrapping_shl(14u32) | t15.wrapping_shr(18u32))
-                            ^ t15.wrapping_shr(3u32));
-                    ws[i0 as usize] = s1.wrapping_add(t7).wrapping_add(s0).wrapping_add(t16)
-                })
-            }
-        });
-        krml::unroll_for!(8, "i", 0u32, 1u32, {
-            hash[i as usize] = hash[i as usize].wrapping_add(hash_old[i as usize]);
-        })
-    }
-
-    /// HACL*'s `sha256_update_nblocks` over whole blocks, also in IRAM.
-    #[inline(never)]
-    #[unsafe(link_section = ".iram1.rind_sha256_nblocks")]
-    pub(super) fn sha256_update_nblocks(st: &mut [u32; 8], blocks: &[u8]) {
-        let (blocks, _) = blocks.as_chunks::<64>();
-        for b in blocks {
-            sha256_update(b, st);
-        }
-    }
-}
+#[cfg(any(all(target_arch = "xtensa", target_os = "espidf"), test))]
+#[path = "sha256_iram.rs"]
+mod iram;
 
 /// Compresses `message`, padded and closed by the big-endian bit `length`.
 #[inline(never)]
@@ -167,6 +80,80 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     {
         for piece in blocks.chunks(PIECE) {
             sha512_update_nblocks(piece.len() as u32, piece, state);
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use crate::low::ct;
+
+    #[test]
+    fn iram_compression_matches_references() {
+        // Arbitrary chaining states cover HMAC's keyed states as well as a
+        // fresh digest. Empty and split block runs check the IRAM driver.
+        for case in 0..64u32 {
+            let mut state = core::array::from_fn(|i| {
+                case.wrapping_mul(0x9e37_79b9)
+                    .rotate_left(i as u32 * 3)
+                    .wrapping_add(i as u32)
+            });
+            if case < 2 {
+                state.fill(if case == 0 { 0 } else { u32::MAX });
+            }
+            let blocks: [u8; 64 * 17] = core::array::from_fn(|i| match case {
+                0 => 0,
+                1 => 0xff,
+                _ => (i as u32).wrapping_mul(197).wrapping_add(case) as u8,
+            });
+            ct::secret_slice(&state);
+            ct::secret_slice(&blocks);
+            for count in [0, 1, 2, 3, 8, 17] {
+                let input = &blocks[..count * 64];
+                let mut got = state;
+                sha256_compress_blocks(&mut got, input);
+
+                let mut split = state;
+                for block in input.chunks(64) {
+                    sha256_compress_blocks(&mut split, block);
+                }
+                let mut generic = state;
+                crate::low::generic::sha256::sha256_compress_blocks(&mut generic, input);
+                let mut hacl = state;
+                libcrux_sha2::hacl::sha256_update_nblocks(input.len() as u32, input, &mut hacl);
+                let got = ct::into_public(got);
+                assert_eq!(got, ct::into_public(split), "split {case}, {count}");
+                assert_eq!(got, ct::into_public(generic), "generic {case}, {count}");
+                assert_eq!(got, ct::into_public(hacl), "HACL* {case}, {count}");
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(not(any(miri, target_family = "wasm")))]
+    fn iram_digest_matches_aws_lc() {
+        // Both padding boundaries and updates across them go through the
+        // production compression/finish entry points, with a secret message.
+        let message: [u8; 1200] = core::array::from_fn(|i| i.wrapping_mul(197) as u8);
+        ct::secret_slice(&message);
+        for len in [
+            0, 1, 31, 32, 55, 56, 63, 64, 65, 119, 120, 127, 128, 129, 1200,
+        ] {
+            let input = &message[..len];
+            let want =
+                ct::into_public(aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, input));
+            let got = ct::into_public(crate::digest::digest(&crate::digest::SHA256, input));
+            assert_eq!(got.as_ref(), want.as_ref(), "one shot, {len}");
+            for chunk in [1, 16, 64, 65] {
+                let mut context = crate::digest::Context::new(&crate::digest::SHA256);
+                for piece in input.chunks(chunk) {
+                    context.update(piece);
+                }
+                let got = ct::into_public(context.finish());
+                assert_eq!(got.as_ref(), want.as_ref(), "{len}, chunks of {chunk}");
+            }
         }
     }
 }

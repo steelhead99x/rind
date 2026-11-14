@@ -112,7 +112,14 @@ mod generic {
         all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha1;
-    #[cfg(all(test, any(rind_backend = "arm", rind_backend = "x86_64")))]
+    #[cfg(all(
+        test,
+        any(
+            rind_backend = "arm",
+            rind_backend = "portable",
+            rind_backend = "x86_64"
+        )
+    ))]
     pub(super) mod sha256;
     // Rolled SHA-512 for 32-bit portable targets, where HACL*'s unrolled
     // form misses small instruction caches, and in tests against FIPS 180-4.
