@@ -274,16 +274,37 @@ struct DtlsEvents {
 
 fn transfer_dtls(from: &mut dyn DtlsInstance, to: &mut dyn DtlsInstance) -> DtlsEvents {
     let mut events = DtlsEvents::default();
-    let mut buffer = [0u8; 2048];
-    loop {
+    // dimpl's default MTU is 1150. A short buffer is a retry, not a failure:
+    // `BufferTooSmall` keeps the packet queued until the buffer fits it.
+    let mut buffer = vec![0u8; 2048];
+    // One poll cycle ends with Timeout. A cycle that never does would spin
+    // under the caller's one-minute deadline, which is only checked between
+    // transfers.
+    for _ in 0..64 {
         match from.poll_output(&mut buffer) {
             DtlsOutput::Packet(packet) => {
                 to.handle_packet(packet).unwrap();
                 events.packets += 1;
             }
+            DtlsOutput::BufferTooSmall { needed } => {
+                assert!(
+                    needed > buffer.len() && needed <= 65_536,
+                    "DTLS output asked for {needed} bytes after a {}-byte buffer",
+                    buffer.len()
+                );
+                buffer.resize(needed, 0);
+            }
             DtlsOutput::Connected => events.connected = true,
             DtlsOutput::CloseNotify => events.close_notify = true,
             DtlsOutput::PeerCert(_) | DtlsOutput::KeyingMaterial(_, _) => {}
+            // These handshakes send no application data. Swallowing a record
+            // here would let the close assertions pass without seeing it.
+            DtlsOutput::ApplicationData(data) => {
+                panic!(
+                    "application data during handshake or close: {} bytes",
+                    data.len()
+                );
+            }
             DtlsOutput::Timeout(at) => {
                 events.timeout = Some(at);
                 return events;
@@ -291,6 +312,7 @@ fn transfer_dtls(from: &mut dyn DtlsInstance, to: &mut dyn DtlsInstance) -> Dtls
             other => panic!("unexpected DTLS output: {other:?}"),
         }
     }
+    panic!("DTLS poll did not reach Timeout");
 }
 
 /// Graceful close must be visible while close_notify still needs polling,
@@ -369,7 +391,8 @@ fn certificate_serial_stays_positive_and_the_span_is_a_year() {
     let dtls = rind_str0m::default_provider().dtls_provider;
     let cert = dtls.generate_certificate().unwrap();
     let serial = serial_integer(&cert.certificate);
-    assert!(serial.len() <= 20 && serial[0] & 0x80 == 0, "{serial:?}");
+    assert!(!serial.is_empty() && serial.len() <= 20, "{serial:?}");
+    assert_eq!(serial[0] & 0x80, 0, "{serial:?}");
     let (before, after) = validity(&cert.certificate);
     assert_eq!(
         certificate_time(&after) - certificate_time(&before),
@@ -419,9 +442,25 @@ fn validity(cert: &[u8]) -> (String, String) {
         rest = next;
     }
     let (span, _) = tlv(rest);
-    assert_eq!(rest[0], 0x30);
+    assert_eq!(rest[0], 0x30, "validity is a SEQUENCE");
     let (before, after_bytes) = tlv(span);
-    let (after, _) = tlv(after_bytes);
+    // UTCTime is 0x17, GeneralizedTime is 0x18. A mis-aimed skip that lands
+    // on another field must not be read as a time.
+    assert!(
+        matches!(span[0], 0x17 | 0x18),
+        "notBefore tag {:#x}",
+        span[0]
+    );
+    let (after, rest) = tlv(after_bytes);
+    assert!(
+        matches!(after_bytes[0], 0x17 | 0x18),
+        "notAfter tag {:#x}",
+        after_bytes[0]
+    );
+    assert!(
+        rest.is_empty(),
+        "validity holds two times, leftover {rest:?}"
+    );
     (
         String::from_utf8(before.to_vec()).unwrap(),
         String::from_utf8(after.to_vec()).unwrap(),
