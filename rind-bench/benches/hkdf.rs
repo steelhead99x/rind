@@ -31,7 +31,7 @@ fn bench(
     hash: Hash,
 ) {
     #[cfg(any(target_arch = "xtensa", target_os = "none"))]
-    let _ = aws;
+    let _ = &aws;
     let mut group = c.benchmark_group(name);
     let secret = [0x5a; 32];
     let info: [&[u8]; 1] = [b"label"];

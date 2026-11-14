@@ -58,7 +58,7 @@ fn key_setup(
     ours: &'static rind::aead::Algorithm,
 ) {
     #[cfg(any(target_arch = "xtensa", target_os = "none"))]
-    let _ = aws;
+    let _ = &aws;
     group.bench_function(BenchmarkId::new("ring", "key"), |b| {
         b.iter(|| ring::aead::UnboundKey::new(ring, black_box(key)).unwrap())
     });
@@ -271,7 +271,7 @@ fn open<K: KeySize>(
     ours: &'static rind::aead::Algorithm,
 ) {
     #[cfg(any(target_arch = "xtensa", target_os = "none"))]
-    let _ = aws;
+    let _ = &aws;
     let nonce = [0u8; 12];
     let ring_key = ring::aead::LessSafeKey::new(ring::aead::UnboundKey::new(ring, key).unwrap());
     #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]

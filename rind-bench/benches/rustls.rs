@@ -18,8 +18,10 @@ use rustls::{
 /// The providers this build and CPU have. The setup below runs every
 /// provider, whatever criterion's filter, so it can't leave Graviola to it.
 fn providers() -> impl Iterator<Item = &'static str> {
-    ["ring", "aws-lc-rs", "rind"]
+    ["ring"]
         .into_iter()
+        .chain(cfg!(not(any(target_arch = "xtensa", target_os = "none"))).then_some("aws-lc-rs"))
+        .chain(["rind"])
         .chain(graviola_runs().then_some("graviola"))
         .chain(cfg!(all(feature = "__bench_openssl", target_family = "unix")).then_some("openssl"))
 }
@@ -46,6 +48,7 @@ fn graviola_runs() -> bool {
 fn provider(name: &str) -> CryptoProvider {
     match name {
         "ring" => rustls::crypto::ring::default_provider(),
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         "aws-lc-rs" => rustls::crypto::aws_lc_rs::default_provider(),
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         "graviola" => rustls_graviola::default_provider(),
@@ -59,6 +62,7 @@ fn provider(name: &str) -> CryptoProvider {
 fn with_group(name: &str, group: NamedGroup) -> Option<CryptoProvider> {
     let all = match name {
         "ring" => rustls::crypto::ring::ALL_KX_GROUPS.to_vec(),
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         "aws-lc-rs" => rustls::crypto::aws_lc_rs::ALL_KX_GROUPS.to_vec(),
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         "graviola" => rustls_graviola::kx::ALL_KX_GROUPS.to_vec(),

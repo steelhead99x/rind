@@ -41,7 +41,7 @@ fn bench(
     others: &[(&str, OneShot)],
 ) {
     #[cfg(any(target_arch = "xtensa", target_os = "none"))]
-    let _ = aws;
+    let _ = &aws;
     let mut group = c.benchmark_group(name);
 
     for (size, size_name) in criterion::HASH_SIZES {

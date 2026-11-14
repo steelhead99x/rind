@@ -22,6 +22,7 @@ fn bench_key_wrap(c: &mut Criterion) {
                     // aws-lc-rs's padded wrap wants 15 bytes of room
                     let mut out = vec![0u8; key_len + 15];
 
+                    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
                     group.bench_function(BenchmarkId::new("aws-lc-rs", &size_name), |b| {
                         use aws_lc_rs::key_wrap::{
                             AES_128, AES_256, AesKek, KeyWrap, KeyWrapPadded,

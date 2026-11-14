@@ -25,6 +25,19 @@ lint() {
     done
 }
 
+# aws-lc builds for none of these, so rind-bench must leave it out of its
+# dependencies there, as its benches leave out aws-lc-rs's rows.
+no_aws_lc() {
+    local target=$1
+    local crates
+    crates=$(cargo tree -p rind-bench -e normal,build,dev --locked --target "$target" \
+        --prefix none --format '{p}')
+    if grep -E '^aws-lc' <<<"$crates"; then
+        echo "error: rind-bench depends on aws-lc for $target" >&2
+        exit 1
+    fi
+}
+
 # ARMv6-M (Cortex-M0+, the RP2040) and RV32IMC (the ESP32-C3) have no
 # compare-and-swap, so they build `reuse_cache_without_cas`; ARMv7E-M
 # (Cortex-M4 and M7, such as the nRF52840) has it, on the portable backend;
@@ -33,3 +46,4 @@ lint() {
 for target in thumbv6m-none-eabi riscv32imc-unknown-none-elf thumbv7em-none-eabihf x86_64-unknown-none; do
     lint "$target"
 done
+no_aws_lc thumbv7em-none-eabihf
