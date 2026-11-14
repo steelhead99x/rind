@@ -431,28 +431,85 @@ opaque low.aarch64.cpu.ct_compare_16
 opaque low.aarch64.cpu.ct_compare_bytes : Slice Std.U8 → Slice Std.U8 → Result Std.U8
 
 
-/-! `low::aarch64::wide_mux` picks each routine's `_alt` or narrow schedule by
-the core's multiplier, which the translation cannot see. s2n-bignum proves
-both schedules against the same specification, so either pick computes the
-same function: the `_alt` one's, which `Rind.Aarch64.S2nBignum` specifies. -/
+/-! Field and curve routines `low::aarch64::wide_mux` also exports. The
+translation leaves `crate::low` opaque, so each is named here for the abbrev
+below. The type is the one Aeneas gives the Rust signature: a `&mut` buffer
+is an argument and the result, and a returned word is the result's first
+component. -/
 
+opaque low.aarch64.bignum_invsqrt_p25519.bignum_invsqrt_p25519
+  :
+  Array Std.U64 4#usize → Array Std.U64 4#usize → Result (Std.U64 × (Array
+    Std.U64 4#usize))
+
+opaque low.aarch64.bignum_mul_p25519.bignum_mul_p25519
+  :
+  Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
+    Result (Array Std.U64 4#usize)
+
+opaque low.aarch64.bignum_sqr_p25519.bignum_sqr_p25519
+  : Array Std.U64 4#usize → Array Std.U64 4#usize → Result (Array Std.U64 4#usize)
+
+opaque low.aarch64.edwards25519_epadd.edwards25519_epadd
+  :
+  Array Std.U64 16#usize → Array Std.U64 16#usize → Array Std.U64 16#usize →
+    Result (Array Std.U64 16#usize)
+
+opaque low.aarch64.edwards25519_epdouble.edwards25519_epdouble
+  :
+  Array Std.U64 16#usize → Array Std.U64 12#usize → Result (Array Std.U64
+    16#usize)
+
+opaque low.aarch64.edwards25519_pdouble.edwards25519_pdouble
+  :
+  Array Std.U64 12#usize → Array Std.U64 12#usize → Result (Array Std.U64
+    12#usize)
+
+opaque low.aarch64.p521_jadd.p521_jadd
+  :
+  Array Std.U64 27#usize → Array Std.U64 27#usize → Array Std.U64 27#usize →
+    Result (Array Std.U64 27#usize)
+
+opaque low.aarch64.p521_jdouble.p521_jdouble
+  :
+  Array Std.U64 27#usize → Array Std.U64 27#usize → Result (Array Std.U64
+    27#usize)
+
+opaque low.aarch64.p521_jmixadd.p521_jmixadd
+  :
+  Array Std.U64 27#usize → Array Std.U64 27#usize → Array Std.U64 18#usize →
+    Result (Array Std.U64 27#usize)
+
+opaque low.aarch64.p521_jscalarmul.p521_jscalarmul
+  :
+  Array Std.U64 27#usize → Array Std.U64 9#usize → Array Std.U64 27#usize →
+    Result (Array Std.U64 27#usize)
+
+/-! `low::aarch64::wide_mux` picks each routine's `_alt` or narrow schedule by
+the core's multiplier, which the translation cannot see. This model is the
+wide schedule: each mux name is the `_alt` function. The narrow schedules are
+outside this claim. -/
+
+abbrev low.aarch64.wide_mux.bignum_invsqrt_p25519 := @low.aarch64.bignum_invsqrt_p25519.bignum_invsqrt_p25519
 abbrev low.aarch64.wide_mux.bignum_madd_n25519 := @low.aarch64.bignum_madd_n25519.bignum_madd_n25519
-abbrev low.aarch64.wide_mux.bignum_montmul_p256 := @low.aarch64.bignum_montmul_p256.bignum_montmul_p256
-abbrev low.aarch64.wide_mux.bignum_montmul_p384 := @low.aarch64.bignum_montmul_p384.bignum_montmul_p384
-abbrev low.aarch64.wide_mux.bignum_montsqr_p256 := @low.aarch64.bignum_montsqr_p256.bignum_montsqr_p256
-abbrev low.aarch64.wide_mux.bignum_montsqr_p384 := @low.aarch64.bignum_montsqr_p384.bignum_montsqr_p384
+abbrev low.aarch64.wide_mux.bignum_mul_p25519 := @low.aarch64.bignum_mul_p25519.bignum_mul_p25519
+abbrev low.aarch64.wide_mux.bignum_sqr_p25519 := @low.aarch64.bignum_sqr_p25519.bignum_sqr_p25519
 abbrev low.aarch64.wide_mux.curve25519_x25519 := @low.aarch64.curve25519_x25519.curve25519_x25519
 abbrev low.aarch64.wide_mux.curve25519_x25519base := @low.aarch64.curve25519_x25519base.curve25519_x25519base
 abbrev low.aarch64.wide_mux.edwards25519_decode := @low.aarch64.edwards25519_decode.edwards25519_decode
+abbrev low.aarch64.wide_mux.edwards25519_epadd := @low.aarch64.edwards25519_epadd.edwards25519_epadd
+abbrev low.aarch64.wide_mux.edwards25519_epdouble := @low.aarch64.edwards25519_epdouble.edwards25519_epdouble
+abbrev low.aarch64.wide_mux.edwards25519_pdouble := @low.aarch64.edwards25519_pdouble.edwards25519_pdouble
 abbrev low.aarch64.wide_mux.edwards25519_scalarmulbase := @low.aarch64.edwards25519_scalarmulbase.edwards25519_scalarmulbase
 abbrev low.aarch64.wide_mux.edwards25519_scalarmuldouble := @low.aarch64.edwards25519_scalarmuldouble.edwards25519_scalarmuldouble
-abbrev low.aarch64.wide_mux.p256_montjadd := @low.aarch64.p256_montjadd.p256_montjadd
-abbrev low.aarch64.wide_mux.p256_montjdouble := @low.aarch64.p256_montjdouble.p256_montjdouble
 abbrev low.aarch64.wide_mux.p256_montjmixadd := @low.aarch64.p256_montjmixadd.p256_montjmixadd
 abbrev low.aarch64.wide_mux.p256_scalarmul := @low.aarch64.p256_scalarmul.p256_scalarmul
 abbrev low.aarch64.wide_mux.p256_scalarmulbase := @low.aarch64.p256_scalarmulbase.p256_scalarmulbase
-abbrev low.aarch64.wide_mux.p384_montjdouble := @low.aarch64.p384_montjdouble.p384_montjdouble
 abbrev low.aarch64.wide_mux.p384_montjmixadd := @low.aarch64.p384_montjmixadd.p384_montjmixadd
 abbrev low.aarch64.wide_mux.p384_montjscalarmul := @low.aarch64.p384_montjscalarmul.p384_montjscalarmul
+abbrev low.aarch64.wide_mux.p521_jadd := @low.aarch64.p521_jadd.p521_jadd
+abbrev low.aarch64.wide_mux.p521_jdouble := @low.aarch64.p521_jdouble.p521_jdouble
+abbrev low.aarch64.wide_mux.p521_jmixadd := @low.aarch64.p521_jmixadd.p521_jmixadd
+abbrev low.aarch64.wide_mux.p521_jscalarmul := @low.aarch64.p521_jscalarmul.p521_jscalarmul
 
 end rind.aarch64
