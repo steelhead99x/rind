@@ -57,6 +57,10 @@ declare -A scope=(
     [deny]='(^|/)Cargo\.(toml|lock)$|^deny\.toml$'
     # An adapter's manifest holds both its version and its upstream requirement.
     [versions]='^(rind-[^/]+/Cargo\.toml$|sh/adapter-versions\.sh$)'
+    # Each adapter's API against its upstream's, which reaches rind only
+    # through a lockfile change, as read by the flake's rustdoc.
+    # rind-object-store has none to copy.
+    [adapters]='^(rind/(src/|Cargo\.toml$)|rind-(aws-lc-rs|ring|rustls|rcgen|jsonwebtoken|dimpl|str0m|openmls)/(src/|Cargo\.toml$|README\.md$)|Cargo\.lock$|flake\.(nix|lock)$|admin/adapter-api(\.drift)?$)'
     [license]='^(rind/src/|rind/LICENSE$|rind-python/LICENSE$|admin/scan-license$)'
     # Dependents may build with the workspace's declared rust-version.
     [msrv]='^(rind[^/]*/|fuzz/|Cargo\.(toml|lock)$|flake\.(nix|lock)$)'
@@ -110,6 +114,7 @@ declare -A tools=(
     [structure]='cargo cargo-modules'
     [deny]='cargo-deny'
     [versions]='cargo jq'
+    [adapters]='cargo python3'
     [license]='find grep'
     [msrv]='nix cargo jq'
     [cross]='cargo'
@@ -133,7 +138,7 @@ verb=$action
 [[ "$verb" != ci ]] || verb=check
 
 case "$verb" in
-    check) modules=(rs structure msrv cross vartime deny versions license inplace mutants testing compat bench fixtures patch py dart quest gh shell nix) ;;
+    check) modules=(rs structure msrv cross vartime deny versions adapters license inplace mutants testing compat bench fixtures patch py dart quest gh shell nix) ;;
     fix) modules=(rs compat patch dart nix) ;;
 esac
 
@@ -216,6 +221,19 @@ for module in "${selected[@]}"; do
             if ((${#packages[@]} == 0)) || printf '%s\n' "${packages[@]}" | grep -qxE 'rind-aws-lc-rs|--workspace'; then
                 cargo nextest run -p rind-aws-lc-rs --features wipe --test zeroing --locked
             fi
+            # The FIPS module's own code compiles only under its cfg, which a
+            # workspace build leaves off, and only for glibc Linux on x86_64
+            # and aarch64, where rind-fips is not empty. Its break build
+            # checks, on every call, the stack each service zeroes, and fails
+            # each self-test.
+            if printf '%s\n' "${packages[@]}" | grep -qxE 'rind-fips|--workspace' &&
+                [[ "$(rustc -vV | sed -n 's/^host: //p')" =~ ^(x86_64|aarch64)-unknown-linux-gnu$ ]]; then
+                RUSTFLAGS='--cfg rind_fips --cfg rind_cpu_disable' cargo clippy -p rind-fips-module \
+                    --locked --target-dir target/fips-module -- --deny warnings
+                if [[ -n "$all" ]] || grep -q '^rind-fips/' "$changed"; then
+                    cargo nextest run -p rind-fips --features __break_tests --locked
+                fi
+            fi
             # Doc tests need a library. No packages at all means the workspace.
             mapfile -t libs < <(sh/select.sh "$changed" "$all" --lib)
             if ((${#libs[@]} > 0 || ${#packages[@]} == 0)); then
@@ -293,6 +311,17 @@ for module in "${selected[@]}"; do
         check:vartime) nix develop .#ct-vartime --command admin/ct-vartime ;;
         check:deny) cargo deny --locked check ;;
         check:versions) sh/adapter-versions.sh ;;
+        # The drift list only shrinks against the diff's merge base, even
+        # when an orchestration change forces a full run. Only an explicit
+        # --all has no diff to shrink from.
+        check:adapters)
+            if [[ "$base" != --all ]]; then
+                drift_base=$(sh/changed.sh --merge-base "$base")
+                python3 admin/adapter-api --base "$drift_base"
+            else
+                python3 admin/adapter-api
+            fi
+            ;;
         check:quest) quest check ;;
         check:license) bash admin/scan-license ;;
         check:mutants) admin/mutants --pins ;;

@@ -124,7 +124,7 @@ fn ct_binsec_aes_cbc() {
             let mut msg = secret::<MESSAGE>(2).to_vec();
             let iv = CbcIv::assume_unpredictable([3; 16]);
             let encrypting = AesCbcEncryptingKey::new(algorithm, key).unwrap();
-            encrypting.encrypt(iv, &mut msg);
+            encrypting.encrypt(iv, &mut msg).unwrap();
             let decrypting = AesCbcDecryptingKey::new(algorithm, key).unwrap();
             black_box(decrypting.decrypt(&[3; 16], &mut msg).is_ok());
         }
@@ -201,9 +201,14 @@ fn ct_binsec_hkdf() {
     use crate::hkdf::*;
 
     checked(|| {
-        let prk = Salt::new(&HKDF_SHA256, &[1; 32]).extract(&secret::<32>(2));
+        let prk = Salt::new(&HKDF_SHA256, &[1; 32])
+            .extract(&secret::<32>(2))
+            .unwrap();
         let mut okm = [0; 80];
-        prk.expand(&[b"info"], okm.len()).fill(&mut okm).unwrap();
+        prk.expand(&[b"info"], okm.len())
+            .unwrap()
+            .fill(&mut okm)
+            .unwrap();
     });
 }
 

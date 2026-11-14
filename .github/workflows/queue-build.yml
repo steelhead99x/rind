@@ -14,10 +14,14 @@ permissions:
   contents: read
 
 jobs:
+  # Its context, `Queue build / Build`, is the one main's ruleset requires, so
+  # the group's result is this job's own: a failed, cancelled, or timed-out
+  # build fails the group with no job after it waiting on a hosted runner.
   build:
     name: Build
-    # A caller's own event decides this, so a pull request's workflow that
-    # calls this file still gets no runner.
+    # A caller's own event decides this. On a pull request the job skips
+    # without a runner, which reports the required context as passed so GitHub
+    # admits the PR to the queue.
     if: github.event_name == 'merge_group'
     runs-on: [self-hosted, rind-queue]
     # Below the queue's 90-minute response window, so a hung build reports
@@ -31,4 +35,8 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Check and test the merge group
+        # Every group waits on this build, so it waits only for memory, never
+        # behind the host's agent load.
+        env:
+          QUEST_GATE_PRIORITY: 1
         run: nix develop --command quest gate just ci "$BASE"
