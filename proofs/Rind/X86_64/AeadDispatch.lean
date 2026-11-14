@@ -301,8 +301,7 @@ Aeneas reads it as, and the tag through the slice iterator that `&[u8]`'s
 `IntoIterator` impl makes.
 
 `RandomizedNonceKey`'s draws its nonce through `SystemRandom`'s
-`RandomSource` impl, which the translation holds. Of the algorithm statics,
-`AES_192_GCM`'s key is the only one no theorem is about.
+`RandomSource` impl, which the translation holds.
 -/
 
 namespace rind.x86_64

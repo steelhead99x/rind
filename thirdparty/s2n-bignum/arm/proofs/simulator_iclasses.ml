@@ -1,0 +1,831 @@
+(*
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
+ *)
+
+(* ------------------------------------------------------------------------- *)
+(* The iclasses to simulate.                                                 *)
+(* ------------------------------------------------------------------------- *)
+
+let iclasses =
+ [(*** CCMN immediate ***)
+  (*** CCMN register ***)
+  "x0111010010xxxxxxxxx10xxxxx0xxxx";
+  "x0111010010xxxxxxxxx00xxxxx0xxxx";
+
+  (*** CCMP immediate ***)
+  (*** CCMP register ***)
+  "x1111010010xxxxxxxxx10xxxxx0xxxx";
+  "x1111010010xxxxxxxxx00xxxxx0xxxx";
+
+  (*** ADC, ADCS, SBC, SBCS with register-register operands ***)
+  "xxx11010000xxxxx000000xxxxxxxxxx";
+
+  (*** ADD, ADDS, SUB, SUBS with immediate operand ***)
+
+  (*** We want to avoid any use of SP since our crude simulation
+   *** framework doesn't work in such cases. While it misses a
+   *** bit of the state space, we force both registers to have
+   *** zero bits in their encoding.
+   ***)
+  "xx0100010xxxxxxxxxxxxxxxxx0xxxx0";
+  "xx0100010xxxxxxxxxxxxxxxx0xxxx0x";
+  "xx0100010xxxxxxxxxxxxxxx0xxxx0xx";
+  "xx0100010xxxxxxxxxxxxxx0xxxx0xxx";
+  "xx0100010xxxxxxxxxxxxx0xxxx0xxxx";
+
+  (*** ADD, SUB immediate: further non-SP register pairs whose encodings do not
+   *** share a zero-bit position with the templates above (e.g. add w19, w13, n).
+   *** Rn bit1 and one Rd bit forced to 0 keep both registers clear of SP.     ***)
+  "xx0100010xxxxxxxxxxxxxxxx0xxx0xx";
+  "xx0100010xxxxxxxxxxxxxxxx0xx0xxx";
+  "xx0100010xxxxxxxxxxxxxxxx0xxxxx0";
+  "10010001000000001000001100110110"; (* unmatched case... *)
+  "1001000100xxxxxxxxxxxx1110100010"; (* another: add x2, x29, #xxx *)
+  (*** Rd of ADDS/SUBS cannot be SP *)
+  "xx1100010xxxxxxxxxxxxxxxxx0xxxxx";
+  "xx1100010xxxxxxxxxxxxxxxx0xxxxxx";
+  "xx1100010xxxxxxxxxxxxxxx0xxxxxxx";
+  "xx1100010xxxxxxxxxxxxxx0xxxxxxxx";
+  "xx1100010xxxxxxxxxxxxx0xxxxxxxxx";
+
+  (*** ADD, ADDS, SUB, SUBS, shifted registers ***)
+  "xxx01011xx0xxxxxxxxxxxxxxxxxxxxx";
+
+  (*** ADD, extended registers. No SP registers ***)
+  "10001011001xxxxx010000xxxx0xxxx0"; (* uxtw *)
+  "10001011001xxxxx010000xxx0xxxx0x"; (* uxtw *)
+  "10001011001xxxxx010000xx0xxxx0xx"; (* uxtw *)
+  "10001011001xxxxx010000x0xxxx0xxx"; (* uxtw *)
+  "10001011001xxxxx0100000xxxx0xxxx"; (* uxtw *)
+
+  (*** AND, ANDS, EOR, ORR with immediate operand, no negated forms ***)
+  (*** Again we want to avoid using SP except for in ANDS ***)
+
+  "x00100100xxxxxxxxxxxxxxxxxxxxxx0";
+  "x00100100xxxxxxxxxxxxxxxxxxxxx0x";
+  "x00100100xxxxxxxxxxxxxxxxxxxx0xx";
+  "x00100100xxxxxxxxxxxxxxxxxxx0xxx";
+  "x00100100xxxxxxxxxxxxxxxxxx0xxxx";
+
+  "x01100100xxxxxxxxxxxxxxxxxxxxxx0";
+  "x01100100xxxxxxxxxxxxxxxxxxxxx0x";
+  "x01100100xxxxxxxxxxxxxxxxxxxx0xx";
+  "x01100100xxxxxxxxxxxxxxxxxxx0xxx";
+  "x01100100xxxxxxxxxxxxxxxxxx0xxxx";
+
+  "x10100100xxxxxxxxxxxxxxxxxx0xxxx";
+  "x10100100xxxxxxxxxxxxxxxxxxxxxx0";
+  "x11100100xxxxxxxxxxxxxxxxxxxxxxx";
+
+  (*** BFM ***)
+  "x01100110xxxxxxxxxxxxxxxxxxxxxxx";
+
+  (*** CSEL, CSINC, CSINV, CSNEG register-register ***)
+  "xx011010100xxxxxxxxx0xxxxxxxxxxx";
+
+  (*** AND, BIC, ..., ORN, shifted registers ***)
+  "xxx01010xxxxxxxxxxxxxxxxxxxxxxxx";
+
+  (*** MOVN, MOVZ, MOVK ***)
+  "xxx100101xxxxxxxxxxxxxxxxxxxxxxx";
+
+  (*** Extr ***)
+  "x00100111x0xxxxxxxxxxxxxxxxxxxxx";
+
+  (*** LSLV, LSRV ***)
+  "x0011010110xxxxx0010xxxxxxxxxxxx";
+
+  (*** UBFM, SBFM ***)
+  "xx0100110xxxxxxxxxxxxxxxxxxxxxxx";
+
+  (*** CLZ ***)
+  "x101101011000000000100xxxxxxxxxx";
+
+  (*** MADD, MSUB ***)
+  "x0011011000xxxxxxxxxxxxxxxxxxxxx";
+
+  (*** UMULH ***)
+  "10011011110xxxxx011111xxxxxxxxxx";
+
+  (*** SMULH ***)
+  "10011011010xxxxx011111xxxxxxxxxx";
+
+  (*** UMADDL, UMSUBL ***)
+  "10011011101xxxxxxxxxxxxxxxxxxxxx";
+
+  (****** NEON INSTRUCTIONS *****)
+  (*** ADD ***)
+  "0x001110xx1xxxxx100001xxxxxxxxxx";
+
+  (*** ABS ***)
+  "0x001110xx100000101110xxxxxxxxxx";
+
+  (*** AND ***)
+  "0x001110001xxxxx000111xxxxxxxxxx";
+
+  (*** BIC (vector registers) ***)
+  "0x001110011xxxxx000111xxxxxxxxxx";
+
+  (*** BIC (vector immediate, 8h) ***)
+  "0x10111100000xxx10x101xxxxxxxxxx"; (* 8h, cmode=10x1 *)
+
+  (*** BIT ***)
+  "0x101110101xxxxx000111xxxxxxxxxx";
+
+  (*** BIF ***)
+  "0x101110111xxxxx000111xxxxxxxxxx";
+
+  (*** CMGT, vector, register, signed ***)
+  "0x001110xx1xxxxx001101xxxxxxxxxx";
+
+  (*** CMHI, vector ***)
+  "0x101110xx1xxxxx001101xxxxxxxxxx";
+
+  (*** CMGE, vector ***)
+  "0x001110xx1xxxxx001111xxxxxxxxxx";
+
+  (*** CMLE, vector, zero ***)
+  "0x101110xx100000100110xxxxxxxxxx";
+
+  (*** CNT, bias to defined size = 0 ***)
+  "0x00111000100000010110xxxxxxxxxx";
+  "0x001110xx100000010110xxxxxxxxxx";
+
+  (*** DUP (general, from Xn) ***)
+  "01001110000x1000000011xxxxxxxxxx"; (* original DUP Vd.2d, xn *)
+  "0x001110000xxxxx000011xxxxxxxxxx"; (* other variants too     *)
+
+  (*** DUP (element): broadcast Vn.<T>[index] across Vd ***)
+  "0x001110000xxxxx000001xxxxxxxxxx";
+
+  (*** DUP (element), scalar form: mov Dd, Vn.<T>[index] ***)
+  "01011110000xxxxx000001xxxxxxxxxx";
+
+  (*** EOR ***)
+  "0x101110001xxxxx000111xxxxxxxxxx";
+
+  (*** EXT ***)
+  "01101110000xxxxx0xxxx0xxxxxxxxxx"; (* q=1, 128 bits *)
+  "00101110000xxxxx0xxxx0xxxxxxxxxx"; (* q=0, 64 bits or UNDEFINED *)
+
+  (*** FCSEL, 32 and 64 bits ***)
+  "00011110001xxxxxxxxx11xxxxxxxxxx";
+  "00011110011xxxxxxxxx11xxxxxxxxxx";
+
+  (*** FMOV, double precision ***)
+  "100111101010111x000000xxxxxxxxxx";
+  "100111100110011x000000xxxxxxxxxx";
+
+  (*** FMOV to general, single ***)
+  "0001111000100110000000xxxxxxxxxx";
+
+  (*** INS, or MOV (element) ***)
+  "01101110000xxxx10xxxx1xxxxxxxxxx";
+  "01101110000xxx100xxxx1xxxxxxxxxx";
+  "01101110000xx1000xxxx1xxxxxxxxxx";
+  "01101110000x10000xxxx1xxxxxxxxxx";
+  "01101110000x00000xxxx1xxxxxxxxxx";
+
+  (*** INS (general, i.e. GPR -> VEC) ***)
+  "01001110000xxxx1000111xxxxxxxxxx";
+  "01001110000xxx10000111xxxxxxxxxx";
+  "01001110000xx100000111xxxxxxxxxx";
+  "01001110000x1000000111xxxxxxxxxx";
+  "01001110000x0000000111xxxxxxxxxx";
+
+  (*** MLS (by element; focus on defined sizes) ***)
+  "0x10111101xxxxxx0100x0xxxxxxxxxx";
+  "0x10111110xxxxxx0100x0xxxxxxxxxx";
+  "0x101111xxxxxxxx0100x0xxxxxxxxxx";
+
+  (*** MLS (vector) ***)
+  "0x101110xx1xxxxx100101xxxxxxxxxx";
+
+  (*** MLA (by element; focus on defined sizes) ***)
+  "0x10111101xxxxxx0000x0xxxxxxxxxx";
+  "0x10111110xxxxxx0000x0xxxxxxxxxx";
+  "0x101111xxxxxxxx0000x0xxxxxxxxxx";
+
+  (*** MLA (vector) ***)
+  "0x001110xx1xxxxx100101xxxxxxxxxx";
+
+  (*** MOVI ***)
+  "0110111100000xxx111001xxxxxxxxxx"; (* q=1, cmode=1110, 64-bit *)
+  "0x00111100000xxx000001xxxxxxxxxx"; (* 32-bit MOVI, immh=0 *)
+  "0100111100000xxx010001xxxxxxxxxx"; (* q=1, op=0, cmode=0100, LSL #16 *)
+  "0100111100000xxx110101xxxxxxxxxx"; (* q=1, op=0, cmode=1101, MSL #16 *)
+
+  (*** MOVI (op=0, cmode=1110, byte) ***)
+  "0x00111100000xxx111001xxxxxxxxxx";
+
+  (*** MOVI (op=0, cmode=1000, 16-bit, q=1 only) -- shares opcode with SHRN ***)
+  "0100111100000xxx100001xxxxxxxxxx";
+
+  (*** MOVI (op=0, cmode=1010, 16-bit shifted, q=1 only) -- shares opcode with SSHLL ***)
+  "0100111100000xxx101001xxxxxxxxxx";
+
+  (*** ORR (vector, immediate, 32-bit) ***)
+  "0x00111100000xxx000101xxxxxxxxxx"; (* 32-bit ORR imm, immh=0 *)
+
+  (*** MUL (by element; focus on defined sizes) ***)
+  "0x00111101xxxxxx1000x0xxxxxxxxxx";
+  "0x00111110xxxxxx1000x0xxxxxxxxxx";
+  "0x001111xxxxxxxx1000x0xxxxxxxxxx";
+
+  (*** MUL (vector) ***)
+  "0x001110xx1xxxxx100111xxxxxxxxxx";
+
+  (*** PMUL (vector, size = 00) ***)
+  "0x101110001xxxxx100111xxxxxxxxxx";
+
+  (*** PMULL (size = 00, i.e. 8-bit) ***)
+  "00001110001xxxxx111000xxxxxxxxxx";
+
+  (*** PMULL2 (size = 00, i.e. 8-bit) ***)
+  "01001110001xxxxx111000xxxxxxxxxx";
+
+  (*** PMULL (size = 11, i.e. 64-bit) ***)
+  "00001110111xxxxx111000xxxxxxxxxx";
+
+  (*** PMULL2 (size = 11, i.e. 64-bit) ***)
+  "01001110111xxxxx111000xxxxxxxxxx";
+
+  (*** NOP ***)
+  "11010101000000110010000000011111";
+
+  (*** ORR ***)
+  "0x001110101xxxxx000111xxxxxxxxxx";
+
+  (*** REV, 32 and 64 bits ***)
+  "0101101011000000000010xxxxxxxxxx";
+  "1101101011000000000011xxxxxxxxxx";
+
+  (*** REV64 ***)
+  "01001110xx100000000010xxxxxxxxxx";
+
+  (*** REV32 ***)
+  "01101110xx100000000010xxxxxxxxxx";
+
+  (*** SADDW ***)
+  "00001110xx1xxxxx000100xxxxxxxxxx";
+
+  (*** SADDW2 ***)
+  "01001110xx1xxxxx000100xxxxxxxxxx";
+
+  (*** SSUBL ***)
+  "00001110xx1xxxxx001000xxxxxxxxxx";
+
+  (*** SSUBL2 ***)
+  "01001110xx1xxxxx001000xxxxxxxxxx";
+
+  (*** SSUBW ***)
+  "00001110xx1xxxxx001100xxxxxxxxxx";
+
+  (*** SSUBW2 ***)
+  "01001110xx1xxxxx001100xxxxxxxxxx";
+
+  (*** USUBL ***)
+  "00101110xx1xxxxx001000xxxxxxxxxx";
+
+  (*** USUBL2 ***)
+  "01101110xx1xxxxx001000xxxxxxxxxx";
+
+  (*** USUBW ***)
+  "00101110xx1xxxxx001100xxxxxxxxxx";
+
+  (*** USUBW2 ***)
+  "01101110xx1xxxxx001100xxxxxxxxxx";
+
+  (*** ADDV (across-vector add reduction) ***)
+  "0x001110xx110001101110xxxxxxxxxx";
+
+  (*** SMAX (signed element-wise maximum) ***)
+  "0x001110xx1xxxxx011001xxxxxxxxxx";
+
+  (*** SHA256 Intrinsics ***)
+  (*** SHA256H ***)
+  "01011110000xxxxx010000xxxxxxxxxx";
+
+  (*** SHA256H2 ***)
+  "01011110000xxxxx010100xxxxxxxxxx";
+
+  (*** SHA256SU0 ***)
+  "0101111000101000001010xxxxxxxxxx";
+
+  (*** SHA256SU1 ***)
+  "01011110000xxxxx011000xxxxxxxxxx";
+
+  (*** SHA512H ***)
+  "11001110011xxxxx100000xxxxxxxxxx";
+
+  (*** SHA512H2 ***)
+  "11001110011xxxxx100001xxxxxxxxxx";
+
+  (*** SHA512SU0 ***)
+  "1100111011000000100000xxxxxxxxxx";
+
+  (*** SHA512SU1 ***)
+  "11001110011xxxxx100010xxxxxxxxxx";
+
+  (*** SHL (make sure immh is nonzero) ***)
+  "0x00111101xxxxxx010101xxxxxxxxxx";
+  "0x001111001xxxxx010101xxxxxxxxxx";
+  "0x0011110001xxxx010101xxxxxxxxxx";
+  "0x00111100001xxx010101xxxxxxxxxx";
+
+  (*** SHL (scalar): 64-bit form only, immh bit 3 set ***)
+  "0101111101xxxxxx010101xxxxxxxxxx";
+
+  (*** SHRN ***)
+  "00001111001xxxxx100001xxxxxxxxxx"; (* q=0, immh!=0 *)
+  "000011110001xxxx100001xxxxxxxxxx"; (* q=0, immh!=0 *)
+  "0000111100001xxx100001xxxxxxxxxx"; (* q=0, immh!=0 *)
+
+  (*** SHRN2 (make sure immh is nonzero) ***)
+  "0100111101xxxxxx100001xxxxxxxxxx"; (* immh<3> = 1, UNDEFINED *)
+  "01001111001xxxxx100001xxxxxxxxxx"; (* q=1, immh!=0 *)
+  "010011110001xxxx100001xxxxxxxxxx"; (* q=1, immh!=0 *)
+  "0100111100001xxx100001xxxxxxxxxx"; (* q=1, immh!=0 *)
+
+  (*** SQSHRUN / SQSHRUN2 (make sure immh is nonzero) ***)
+  "0x10111101xxxxxx100001xxxxxxxxxx";
+  "0x101111001xxxxx100001xxxxxxxxxx";
+  "0x1011110001xxxx100001xxxxxxxxxx";
+  "0x10111100001xxx100001xxxxxxxxxx";
+
+  (*** SQRSHRUN / SQRSHRUN2 ***)
+  "0x1011110xxxxxxx100011xxxxxxxxxx";
+
+  (*** RSHRN / RSHRN2 ***)
+  "0x0011110xxxxxxx100011xxxxxxxxxx";
+
+  (*** SMLAL ***)
+  "00001110xx1xxxxx100000xxxxxxxxxx";
+
+  (*** SMLAL2 ***)
+  "01001110xx1xxxxx100000xxxxxxxxxx";
+
+  (*** SMLAL / SMLAL2 (by element) ***)
+  "0x001111xxxxxxxx0010x0xxxxxxxxxx";
+
+  (*** UMULL / UMULL2 (by element) ***)
+  "0x101111xxxxxxxx1010x0xxxxxxxxxx";
+
+  (*** UMLSL / UMLSL2 (by element) ***)
+  "0x101111xxxxxxxx0110x0xxxxxxxxxx";
+
+  (*** SMLSL ***)
+  "00001110xx1xxxxx101000xxxxxxxxxx";
+
+  (*** SMLSL2 ***)
+  "01001110xx1xxxxx101000xxxxxxxxxx";
+
+  (*** SMULL ***)
+  "00001110xx1xxxxx110000xxxxxxxxxx";
+
+  (*** SMULL2 ***)
+  "01001110xx1xxxxx110000xxxxxxxxxx";
+
+  (*** SQDMULH ***)
+  "0x001111xxxxxxxx1100x0xxxxxxxxxx";
+
+  (*** SQDMULH (vector) ***)
+  "0x001110xx1xxxxx101101xxxxxxxxxx";
+
+  (*** SQRDMULH (by element) ***)
+  "0x001111xxxxxxxx1101x0xxxxxxxxxx";
+
+  (*** SQRDMULH (vector) ***)
+  "0x101110xx1xxxxx101101xxxxxxxxxx";
+
+  (*** SRSHR (make sure immh is nonzero) ***)
+  "0x00111101xxxxxx001001xxxxxxxxxx";
+  "0x001111001xxxxx001001xxxxxxxxxx";
+  "0x0011110001xxxx001001xxxxxxxxxx";
+  "0x00111100001xxx001001xxxxxxxxxx";
+
+  (*** SSHR (make sure immh is nonzero) ***)
+  "0x00111101xxxxxx000001xxxxxxxxxx";
+  "0x001111001xxxxx000001xxxxxxxxxx";
+  "0x0011110001xxxx000001xxxxxxxxxx";
+  "0x00111100001xxx000001xxxxxxxxxx";
+
+  (*** SLI (vector) ***)
+  "0x10111101xxxxxx010101xxxxxxxxxx"; (* immh!=0 *)
+  "0x101111001xxxxx010101xxxxxxxxxx"; (* immh!=0 *)
+  "0x1011110001xxxx010101xxxxxxxxxx"; (* immh!=0 *)
+  "0x10111100001xxx010101xxxxxxxxxx"; (* immh!=0 *)
+
+  (*** SRI (vector) ***)
+  "0x10111101xxxxxx010001xxxxxxxxxx"; (* immh!=0 *)
+  "0x101111001xxxxx010001xxxxxxxxxx"; (* immh!=0 *)
+  "0x1011110001xxxx010001xxxxxxxxxx"; (* immh!=0 *)
+  "0x10111100001xxx010001xxxxxxxxxx"; (* immh!=0 *)
+
+  (*** SUB ***)
+  "0x101110xx1xxxxx100001xxxxxxxxxx";
+
+  (*** TBL ***)
+  "0x001110000xxxxx000000xxxxxxxxxx";
+
+  (*** TBL2 ***)
+  "0x001110000xxxxx001000xxxxxxxxxx";
+
+  (*** TBL3 (3-register table, len = 2) ***)
+  "0x001110000xxxxx010000xxxxxxxxxx";
+
+  (*** TRN1 and TRN2 ***)
+  "0x001110xx0xxxxx0x1010xxxxxxxxxx";
+
+  (*** UADALP (unsigned pairwise add and accumulate long) ***)
+  "0x101110xx100000011010xxxxxxxxxx";
+
+  (*** UADDLP ***)
+  "01101110xx100000001010xxxxxxxxxx";
+
+  (*** UADDLV ***)
+  "0x101110xx110000001110xxxxxxxxxx";
+
+  (*** UMAX (unsigned element-wise maximum) ***)
+  "0x101110xx1xxxxx011001xxxxxxxxxx";
+
+  (*** UMAXV ***)
+  "0x101110xx110000101010xxxxxxxxxx";
+
+  (*** URHADD (unsigned rounding halving add) ***)
+  "0x101110xx1xxxxx000101xxxxxxxxxx";
+
+  (*** UMIN, vector ***)
+  "0x101110xx1xxxxx011011xxxxxxxxxx";
+
+  (*** UMOV (.d, .s) ***)
+  "01001110000x1000001111xxxxxxxxxx";
+  "00001110000xx100001111xxxxxxxxxx";
+
+  (*** UMADDL, UMSUBL ***)
+  "10011011101xxxxxxxxxxxxxxxxxxxxx";
+
+  (*** UMLAL ***)
+  "00101110xx1xxxxx100000xxxxxxxxxx";
+
+  (*** UMLAL2 ***)
+  "01101110xx1xxxxx100000xxxxxxxxxx";
+
+  (*** UMLSL ***)
+  "00101110xx1xxxxx101000xxxxxxxxxx";
+
+  (*** UMLSL2 ***)
+  "01101110xx1xxxxx101000xxxxxxxxxx";
+
+  (*** UMULL ***)
+  "00101110xx1xxxxx110000xxxxxxxxxx";
+
+  (*** UMULL2 ***)
+  "01101110xx1xxxxx110000xxxxxxxxxx";
+
+  (*** USHL ***)
+  "0x101110xx1xxxxx010001xxxxxxxxxx";
+
+  (*** USHLL / USHLL2 (make sure immh is nonzero) ***)
+  "0x10111101xxxxxx101001xxxxxxxxxx";
+  "0x101111001xxxxx101001xxxxxxxxxx";
+  "0x1011110001xxxx101001xxxxxxxxxx";
+  "0x10111100001xxx101001xxxxxxxxxx";
+
+  (*** SSHLL (make sure immh is nonzero) ***)
+  "0x001111001xxxxx101001xxxxxxxxxx";
+  "0x0011110001xxxx101001xxxxxxxxxx";
+  "0x00111100001xxx101001xxxxxxxxxx";
+
+  (*** USHR (make sure immh is nonzero) ***)
+  "0x10111101xxxxxx000001xxxxxxxxxx";
+  "0x101111001xxxxx000001xxxxxxxxxx";
+  "0x1011110001xxxx000001xxxxxxxxxx";
+  "0x10111100001xxx000001xxxxxxxxxx";
+
+  (*** USRA ***)
+  "0110111101xxxxxx000101xxxxxxxxxx"; (* q=1 *)
+  "01101111001xxxxx000101xxxxxxxxxx"; (* q=1 *)
+  "011011110001xxxx000101xxxxxxxxxx"; (* q=1 *)
+  "0110111100001xxx000101xxxxxxxxxx"; (* q=1 *)
+  "00101111001xxxxx000101xxxxxxxxxx"; (* q=0 *)
+  "001011110001xxxx000101xxxxxxxxxx"; (* q=0 *)
+  "0010111100001xxx000101xxxxxxxxxx"; (* q=0 *)
+
+  (*** UZP1 ***)
+  "01001110xx0xxxxx000110xxxxxxxxxx";
+
+  (*** UZP2 ***)
+  "01001110xx0xxxxx010110xxxxxxxxxx";
+
+  (*** XTN (q=0, low half) ***)
+  "00001110xx100001001010xxxxxxxxxx";
+
+  (*** XTN2 (q=1, high half) ***)
+  "01001110xx100001001010xxxxxxxxxx";
+
+  (*** ZIP1 ***)
+  "0x001110xx0xxxxx001110xxxxxxxxxx";
+
+  (*** ZIP2 ***)
+  "0x001110xx0xxxxx011110xxxxxxxxxx";
+
+  (*** EOR3 ***)
+  "11001110000xxxxx0xxxxxxxxxxxxxxx";
+
+
+  (*** BCAX ***)
+  "11001110001xxxxx0xxxxxxxxxxxxxxx";
+
+  (*** RAX1 ***)
+  "11001110011xxxxx100011xxxxxxxxxx";
+
+  (*** XAR ***)
+  "11001110100xxxxxxxxxxxxxxxxxxxxx";
+
+  (*** AESE ***)
+  "0100111000101000010010xxxxxxxxxx";
+
+  (*** AESMC ***)
+  "0100111000101000011010xxxxxxxxxx";
+
+  (*** AESD ***)
+  "0100111000101000010110xxxxxxxxxx";
+
+  (*** AESIMC ***)
+  "0100111000101000011110xxxxxxxxxx";
+];;
+
+
+let match_bitpattern =
+  let idxs = List.init 32 (fun x->x) in
+  fun (opcode:int) (bitpat:string) ->
+    List.for_all (fun i ->
+        let bitpat = bitpat.[31 - i] and
+            bit = (opcode lsr i) land 1 in
+        bitpat = 'x' ||
+        (bit = 1 && bitpat = '1') ||
+        (bit = 0 && bitpat = '0'))
+      idxs;;
+
+(* Check that assembly instructions in s2n-bignum object files appear at
+   iclasses. *)
+
+let check_insns () =
+  (* These commands are not going to be simulated. *)
+  let skipping_iclasses = [
+    (*** adr ***)
+    "0xx10000xxxxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** adrp ***)
+    "1xx10000xxxxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** b ***)
+    "000101xxxxxxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** bl ***)
+    "100101xxxxxxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** b.cond ***)
+    "01010100xxxxxxxxxxxxxxxxxxx0xxxx";
+
+    (*** cbz, cbnz ***)
+    "10110100xxxxxxxxxxxxxxxxxxxxxxxx";
+    "10110101xxxxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** tbz, tbnz ***)
+    "x0110110xxxxxxxxxxxxxxxxxxxxxxxx";
+    "x0110111xxxxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** ldp ***)
+    "x010100x1xxxxxxxxxxxxxxxxxxxxxxx"; (* Preimmediate_Offset or Postimmediate_Offset *)
+    "x01010010xxxxxxxxxxxxxxxxxxxxxxx"; (* Immediate_Offset *)
+
+    (*** ldp (SIMD & FP) ***)
+    "xx10110011xxxxxxxxxxxxxxxxxxxxxx";
+    "xx10110111xxxxxxxxxxxxxxxxxxxxxx";
+    "xx10110101xxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** ldr (immediate ofs) ***)
+    "1x111000010xxxxxxxxx01xxxxxxxxxx";
+    "1x111000010xxxxxxxxx11xxxxxxxxxx";
+    "1x11100101xxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** ldr (immediate ofs, SIMD & FP) ***)
+    "xx111100x10xxxxxxxxx01xxxxxxxxxx";
+    "xx111100x10xxxxxxxxx11xxxxxxxxxx";
+    "xx111101x1xxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** ldr (register ofs) ***)
+    "1x111000011xxxxxxxxx10xxxxxxxxxx";
+
+    (*** ldr / str, shifted register, size 128 no extensions ***)
+    "001111001x1xxxxx011x10xxxxxxxxxx";
+
+    (*** ldrb (immediate ofs) ***)
+    "00111000010xxxxxxxxx01xxxxxxxxxx";
+    "00111000010xxxxxxxxx11xxxxxxxxxx";
+    "0011100101xxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** ldrb / strb (shifted register, no shift S = 0) ***)
+    "001110000x1xxxxxxxx010xxxxxxxxxx";
+
+    (*** ld1 (1 register, Post-immediate offset) ***)
+    "0x001100110111110111xxxxxxxxxxxx";
+
+    (*** st1 (1 register, Post-immediate offset) ***)
+    "0x001100100111110111xxxxxxxxxxxx";
+
+    (*** ld1 (1 register, Post-register offset) ***)
+    "0x001100110xxxxx0111xxxxxxxxxxxx";
+
+    (*** st1 (1 register, Post-register offset) ***)
+    "0x001100100xxxxx0111xxxxxxxxxxxx";
+
+    (*** ld1 (1 register, no Post-immediate offset) ***)
+    "0x001100010000000111xxxxxxxxxxxx";
+
+    (*** st1 (1 register, no Post-immediate offset) ***)
+    "0x001100000000000111xxxxxxxxxxxx";
+
+    (*** ld1 (2 registers, Post-immediate and register offset) 128-bit ***)
+    "01001100110xxxxx1010xxxxxxxxxxxx";
+
+    (*** st1 (2 registers, Post-immediate and register offset) 128-bit ***)
+    "01001100100xxxxx1010xxxxxxxxxxxx";
+
+    (*** ld1 (2 registers, no offset) 128-bit ***)
+    "01001100010000001010xxxxxxxxxxxx";
+
+    (*** st1 (2 registers, no offset) 128-bit ***)
+    "01001100000000001010xxxxxxxxxxxx";
+
+    (*** ld1 (2 registers, no offset) 128-bit ***)
+    "01001100010000001010xxxxxxxxxxxx";
+
+    (*** st1 (2 registers, no offset) 128-bit ***)
+    "01001100000000001010xxxxxxxxxxxx";
+
+    (*** ld1 (4 registers, Post-immediate and register offset) 128-bit ***)
+    "01001100110xxxxx0010xxxxxxxxxxxx";
+
+    (*** st1 (4 registers, Post-immediate and register offset) 128-bit ***)
+    "01001100100xxxxx0010xxxxxxxxxxxx";
+
+    (*** ld1 (4 registers, no offset) 128-bit ***)
+    "01001100010000000010xxxxxxxxxxxx";
+
+    (*** st1 (4 registers, no offset) 128-bit ***)
+    "01001100000000000010xxxxxxxxxxxx";
+
+    (*** ld1 (4 registers, Post-immediate and register offset) 64-bit ***)
+    "00001100110xxxxx0010xxxxxxxxxxxx";
+
+    (*** st1 (4 registers, Post-immediate and register offset) 64-bit ***)
+    "00001100100xxxxx0010xxxxxxxxxxxx";
+
+    (*** ld1 (4 registers, no offset) 64-bit ***)
+    "00001100010000000010xxxxxxxxxxxx";
+
+    (*** st1 (4 registers, no offset) 64-bit ***)
+    "00001100000000000010xxxxxxxxxxxx";
+
+    (*** ld2 (2 register, Post-immediate offset) ***)
+    "0x001100110111111000xxxxxxxxxxxx";
+
+    (*** st2 (2 register, Post-immediate offset) ***)
+    "0x001100100111111000xxxxxxxxxxxx";
+
+    (*** ld1r (post immediate ofs) ***)
+    "0x001101110111111100xxxxxxxxxxxx";
+
+    (*** ldur / stur, immediate, size 128 only ***)
+    "001111001x0xxxxxxxxx00xxxxxxxxxx";
+
+    (*** ld3 / st3, multiple structures, 3 reg, post-imm and register ***)
+    "0x0011001x0xxxxx0100xxxxxxxxxxxx";
+
+    (*** stp ***)
+    "x010100010xxxxxxxxxxxxxxxxxxxxxx";
+    "x010100110xxxxxxxxxxxxxxxxxxxxxx";
+    "x010100100xxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** stp (SIMD & FP) ***)
+    "xx10110010xxxxxxxxxxxxxxxxxxxxxx";
+    "xx10110110xxxxxxxxxxxxxxxxxxxxxx";
+    "xx10110100xxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** str (immediate ofs) ***)
+    "1x111000000xxxxxxxxx01xxxxxxxxxx";
+    "1x111000000xxxxxxxxx11xxxxxxxxxx";
+    "1x11100100xxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** str (immediate ofs, SIMD & FP) ***)
+    "xx111100x00xxxxxxxxx01xxxxxxxxxx";
+    "xx111100x00xxxxxxxxx11xxxxxxxxxx";
+    "xx111101x0xxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** str (register) ***)
+    "1x111000001xxxxxxxxx10xxxxxxxxxx";
+
+    (*** strb (immediate ofs) ***)
+    "00111000000xxxxxxxxx01xxxxxxxxxx";
+    "00111000000xxxxxxxxx11xxxxxxxxxx";
+    "0011100100xxxxxxxxxxxxxxxxxxxxxx";
+
+    (*** sub/add with sp regs ***)
+    "xx0100010xxxxxxxxxxxxxxxxxx11111";
+    "xx0100010xxxxxxxxxxxxx11111xxxxx";
+    "11001011001xxxxxxxxxxx11111xxxxx";
+
+    (*** ret ***)
+    "1101011001011111000000xxxxx00000";
+
+    (*** bti c: the BTI landing pad at the head of an indirectly-called   ***)
+    (*** subroutine.  A hint with no register or memory effect, so there  ***)
+    (*** is nothing to simulate; arm_BTI models it as a no-op.            ***)
+    "11010101000000110010010001011111";
+  ] in
+
+  (* Check that iclasses and skipping_iclasses has no overlapping bitpattern. *)
+  if let char_overlap c1 c2 = c1 = c2 || c1 = 'x' || c2 = 'x' in
+      List.exists (fun bitpat1 ->
+        List.exists (fun bitpat2 ->
+            let range = List.init 32 (fun x->x) in
+            if List.for_all (fun i -> char_overlap bitpat1.[i] bitpat2.[i]) range
+            then begin
+              Printf.eprintf "iclasses and skipping_iclasses overlap!!\n";
+              Printf.eprintf "- iclass entry: %s\n" bitpat1;
+              Printf.eprintf "- skipping_iclasses entry: %s\n%!" bitpat2;
+              true
+            end else false)
+          skipping_iclasses)
+        iclasses
+  then failwith "check_insns" else
+
+  let rec traverse_objs dirpath (checkfn:string->unit):unit =
+    let dirs = Sys.readdir dirpath in
+    Array.iter (fun p ->
+        let p = (Filename.concat dirpath p) in
+        if Sys.is_directory p then
+          traverse_objs p checkfn
+        else if Filename.extension p = ".o" && p <> "arm/proofs/simulator.o" then
+          checkfn p
+        else ()
+      ) dirs in
+
+  (* Check whether l (a line of objdump output) is an assembly instruction
+     covered by iclasses. *)
+  let check_asmline (l:string):bool =
+    match String.index_opt l ':' with
+    | None -> true
+    | Some idx ->
+      let l = String.sub l (idx+1) (String.length l - idx - 1) in
+      let l = String.trim l in
+      match String.index_opt l ' ' with
+      | None -> true (* defines label *)
+      | Some idx ->
+        let hexcode = "0x" ^ (String.sub l 0 idx) in
+        let desc = String.trim (String.sub l (idx+1) (String.length l - idx - 1)) in
+        if starts_with ".word" desc then true (* defines a constant *)
+        else
+          try
+            let opcode = int_of_string hexcode in
+            if List.exists (match_bitpattern opcode) skipping_iclasses then
+              true (* Check passes *)
+            else
+              List.exists (match_bitpattern opcode) iclasses
+          with Failure _ -> false
+    in
+
+  let tmppath = Filename.temp_file "objdump" ".txt" in
+  let checkfn objpath =
+    let cmd = "objdump -d \"" ^ objpath ^ "\" -j .text >" ^ tmppath in
+    let exitcode = Sys.command cmd in
+    if exitcode <> 0 then begin
+      Printf.eprintf "Cannot objdump %s\n%!" objpath;
+      failwith "check_insns"
+    end else
+      (* Read the lines of objdump *)
+      let fin = open_in tmppath in
+      try
+        (* Pass first 6 lines *)
+        let count = ref 0 in
+        while true; do
+          let l = input_line fin in
+          count := !count + 1;
+          if !count >= 6 then
+            if not (check_asmline l) then begin
+              Printf.eprintf "Found an assembly that is not covered by iclasses!\n";
+              Printf.eprintf "  File: %s\n" objpath;
+              Printf.eprintf "  objdump line: %s\n%!" l;
+              failwith "check_insns"
+            end
+        done;
+      with End_of_file -> begin
+        Printf.printf "Passed: %s\n%!" objpath;
+        close_in fin
+      end in
+  (* Makefile will run this script from the root dir of s2n-bignum/. *)
+  traverse_objs "arm/" checkfn;;

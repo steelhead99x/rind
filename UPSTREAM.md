@@ -134,12 +134,12 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Reported:** no.
 - **Goes when:** Lean compiles the whole comb as one literal.
 
-### s2n-bignum's x86_64 model lacks instructions aws-lc's routines use
+### s2n-bignum lacks instructions and specs rind's proofs use
 
-- **Breaks:** s2n-bignum's HOL Light x86_64 model cannot decode some instructions of aws-lc's ChaCha20-Poly1305 and ChaCha20 routines, so they cannot be proven on it.
-- **Workaround:** `proofs/hol-light/s2n-bignum/x86.patch` adds them, cosimulated against the CPU by `x86-cosim.ml`; [that directory's README](/proofs/hol-light/s2n-bignum/README.md) lists each, with the unmerged upstream specs rind vendors.
-- **Reported:** no.
-- **Goes when:** s2n-bignum's model decodes each, instruction by instruction.
+- **Breaks:** s2n-bignum's HOL Light x86_64 model cannot decode some instructions of aws-lc's ChaCha20-Poly1305 and ChaCha20 routines, or the SHA extensions rind's SHA-256 blocks run, and its SHA-256 and SHA-512 specs are in pull requests not yet merged, so those routines cannot be proven on it.
+- **Workaround:** rind forks s2n-bignum in `thirdparty/s2n-bignum` (maintainer, 2026-11-13, on [kixel-ai/rind#701](https://github.com/kixel-ai/rind/pull/701)). Each change, with its upstream pull request, is in [its `RIND.md`](/thirdparty/s2n-bignum/RIND.md), which `admin/regenerate` checks lists every file that differs from upstream's: the model additions of [awslabs/s2n-bignum#450](https://github.com/awslabs/s2n-bignum/pull/450), the SHA extensions among them, rind's own additions, both cosimulated against the CPU, and the specs of [awslabs/s2n-bignum#415](https://github.com/awslabs/s2n-bignum/pull/415) and [#420](https://github.com/awslabs/s2n-bignum/pull/420).
+- **Reported:** found #415, #420, and #450, all open; rind's own additions are not offered, which needs the maintainer's approval ([kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
+- **Goes when:** s2n-bignum merges each change and the fork's base moves past it.
 
 ### dmtcp_command fails a checkpoint that succeeds
 
