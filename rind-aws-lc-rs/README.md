@@ -56,7 +56,6 @@ These items are left out, so code using them fails to build:
 - An RSASSA-PSS PKCS#8 key whose parameters name a hash or a mask generation function is `InvalidEncoding` when loaded as ML-DSA. aws-lc-rs parses it and reports `WrongAlgorithm`.
 - ECDSA and ECDH public keys in the X9.62 hybrid form are refused.
 - An RSA public key, from `rsa::PublicKey::from_der` or elsewhere, must have a modulus of 1024 to 8192 bits, the range rind verifies with.
-  One outside an algorithm's narrower range is refused when parsed for it, by `ParsedPublicKey::new` or `to_parsed_public_key`, rather than when verifying.
 - An RSA-OAEP private key is bound to one algorithm in rind, so a `rsa::PrivateDecryptingKey` loads the key again the first time it decrypts with each other algorithm, and keeps it.
 
 License: Apache-2.0 OR ISC OR MIT-0
