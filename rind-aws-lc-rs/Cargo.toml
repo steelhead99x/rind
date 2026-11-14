@@ -74,7 +74,6 @@ omitted = [
   "signature::ECDSA_*_SHA1_*",
   "signature::ECDSA_*_SHA3_*",
   "signature::ECDSA_P521_SHA224_*",
-  "signature::PqdsaPrivateKey::as_raw_bytes",
   "io::der",
   "test",
   "test_file",

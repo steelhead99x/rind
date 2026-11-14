@@ -9,9 +9,10 @@
 //! follows [`sha256`](sha256.rs): one 16-word window and an 80-round loop,
 //! which stays in a few kilobytes. The round functions and the eighty
 //! `K` constants are FIPS 180-4 §4.1.3 and §4.2.3. The unit tests check
-//! FIPS 180-4's SHA-512 vectors and, on every backend except 32-bit
-//! portable, the same compression the backend ships (HACL* or aws-lc).
-//! On 64-bit portable targets, HACL*'s unrolled form is still used.
+//! FIPS 180-4's SHA-512 vectors, mark the block secret so ctgrind checks
+//! this loop, and, on every backend except 32-bit portable, compare with
+//! the compression the backend ships (HACL* or aws-lc). On 64-bit portable
+//! targets, HACL*'s unrolled form is still used.
 //! On Xtensa this object also carries a retained `.text` pad, so the
 //! bytes it adds are a multiple of the ESP32-S3 instruction-cache set
 //! stride and SHA-256 keeps the cache sets it has on main.
@@ -119,7 +120,7 @@ fn sha512_compress_block(state: &mut [u64; 8], block: &[u8]) {
     unsafe {
         core::arch::asm!(
             ".pushsection .text.rind_sha512_icache_pad,\"axR\",@progbits",
-            ".globl rind_sha512_icache_pad",
+            ".local rind_sha512_icache_pad",
             ".type rind_sha512_icache_pad, @function",
             ".set rind_sha512_icache_pad, .",
             ".space {len}, 0xA5",
@@ -305,8 +306,12 @@ mod tests {
     fn hash(message: &[u8]) -> [u8; 64] {
         let padded = padded(message);
         let mut state = IV;
+        // The block is the secret (a message, or an HMAC key block). Mark it
+        // before this rolled loop, which 64-bit builds compile only in tests,
+        // so ctgrind sees it. The state is public again before a comparison.
+        crate::low::ct::secret_slice(&padded);
         sha512_compress_blocks(&mut state, &padded);
-        encode(state)
+        encode(crate::low::ct::into_public(state))
     }
 
     fn digest_hex(message: &[u8], hex: &str) {
