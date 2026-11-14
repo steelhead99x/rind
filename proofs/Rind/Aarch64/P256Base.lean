@@ -39,9 +39,9 @@ theorem base_multiply_spec (_hr : Runs) (k : mid.p256.Scalar) (_hk : wordsNat k.
     subst r1_post
     obtain ⟨ha1, -⟩ := r1_post
     have h8 : (xy1.val).length = 8 := xy1.property
-    have hxa : feNat a = (pairNat xy1.val).1 := by
+    have hxa : feNat a1 = (pairNat xy1.val).1 := by
       simp [feNat, ha, s_post, mid.p256.AffineMontPoint.X, List.slice, pairNat]
-    have hya : feNat a1 = (pairNat xy1.val).2 := by
+    have hya : feNat a2 = (pairNat xy1.val).2 := by
       rw [pairNat_drop _ h8]
       simp [feNat, ha1, s1_post, mid.p256.AffineMontPoint.Y, List.slice, List.take_of_length_le, h8]
     refine ⟨(pairNat xy1.val).1, (pairNat xy1.val).2, xy1_post _ p256OnCurve_G tabulated, ?_⟩

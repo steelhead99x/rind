@@ -565,7 +565,7 @@ impl AffineMontPoint {
     #[cfg(not(rind_backend = "x86_64"))]
     fn base_multiply(scalar: &Scalar) -> Self {
         let mut xy = [0; 8];
-        low::p256_scalarmulbase(&mut xy, &scalar.0, &precomp::CURVE_GENERATOR_PRECOMP);
+        low::p256_scalarmulbase(&mut xy, &scalar.0, &precomp::CURVE_GENERATOR_PRECOMP.0);
         let x = FieldElement(xy[Self::X].try_into().unwrap());
         let y = FieldElement(xy[Self::Y].try_into().unwrap());
         Self::from_xy(x.as_mont(), y.as_mont())
@@ -790,7 +790,7 @@ impl JacobianMontPoint {
             None => p.public_naf::<5>(),
             Some(_) => p.public_naf::<6>(),
         };
-        let g_multiples = &precomp::CURVE_GENERATOR_PRECOMP[0][..];
+        let g_multiples = &generator_table()[0][..];
 
         let mut result = Self::infinity();
         for i in (0..g_digits.len()).rev() {
@@ -1389,6 +1389,38 @@ type AffineMontPointTable = [[u64; 512]; 37];
 #[cfg(not(rind_backend = "x86_64"))]
 type AffineMontPointTable = [[u64; 256]; 43];
 
+/// The generator table, aligned to a cache line.
+///
+/// Its points are 64 bytes, which aarch64's `p256_scalarmulbase` reads with
+/// 16-byte `ldp`s. Left at the 8-byte alignment of its words, the table can
+/// start 8 bytes into a line, and then one load in four splits across two
+/// lines: on a Cortex-A76 that cost key generation and signing 2.5-3%,
+/// depending only on where the linker happened to put the table.
+///
+/// The arm and portable backends share this table layout, so they get the
+/// alignment too, which costs them less than 64 bytes of padding. Their
+/// `p256_scalarmulbase` is generic Rust, and no speedup was measured there.
+#[cfg(not(rind_backend = "x86_64"))]
+#[repr(C, align(64))]
+struct AlignedTable(AffineMontPointTable);
+
+// Checked at build time on every backend that has the table, including
+// cross builds that never run their tests.
+#[cfg(not(rind_backend = "x86_64"))]
+const _: () = assert!(align_of::<AlignedTable>() == 64);
+
+/// The generator table's rows on either backend layout.
+fn generator_table() -> &'static AffineMontPointTable {
+    #[cfg(rind_backend = "x86_64")]
+    {
+        &precomp::CURVE_GENERATOR_PRECOMP
+    }
+    #[cfg(not(rind_backend = "x86_64"))]
+    {
+        &precomp::CURVE_GENERATOR_PRECOMP.0
+    }
+}
+
 const CURVE_A_MONT: FieldElement = FieldElement([
     0xffff_ffff_ffff_fffc,
     0x0000_0003_ffff_ffff,
@@ -1721,7 +1753,7 @@ mod tests {
     #[test]
     fn base_point_precomp() {
         let mut base = JacobianMontPoint::from_affine(&CURVE_GENERATOR);
-        for row in &precomp::CURVE_GENERATOR_PRECOMP {
+        for row in generator_table().iter() {
             let mut multiple = base;
             for (i, entry) in (1..).zip(row.as_chunks::<8>().0) {
                 assert_eq!(&multiple.as_affine().xy, entry);
