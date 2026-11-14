@@ -61,6 +61,10 @@ openmls *ARGS:
 audit:
     cargo deny check
 
+# Dispatch every scheduled workflow on the release PR (default: the open one), wait, and record the result on its head.
+release-check *ARGS:
+    nix develop --command sh/release-check.sh {{ARGS}}
+
 # Open or update the release PR, then publish a release PR landed since BEFORE.
 release $BEFORE="":
     sh/release.sh "$BEFORE"
