@@ -29,6 +29,12 @@ impl DecapKey {
     /// Generate a random [`DecapKey`] (which contains the corresponding [`EncapKey`]).
     ///
     /// This fails only if random material generation fails.
+    ///
+    /// Out of line, with [`Self::decaps`], [`EncapKey::encaps`], and
+    /// [`EncapKey::from_bytes`]. In the same codegen unit as `high::kem`,
+    /// LLVM inlines these into those wrappers, and on Xtensa that combined
+    /// function is the decapsulation regression.
+    #[inline(never)]
     pub(crate) fn generate() -> Result<Self, Error> {
         let _entry = low::Entry::new_secret();
         let mut seed = [0u8; 64];
@@ -37,6 +43,7 @@ impl DecapKey {
     }
 
     /// Decapsulate ciphertext `c`, yielding a [`SharedSecret`].
+    #[inline(never)]
     pub(crate) fn decaps(&self, c: &Ciphertext) -> SharedSecret {
         let _entry = low::Entry::new_secret();
         self.decaps_internal(c)
@@ -220,6 +227,7 @@ pub(crate) struct EncapKey {
 
 impl EncapKey {
     /// Create a new [`EncapKey`] from bytes.
+    #[inline(never)]
     pub(crate) fn from_bytes(input: &[u8; K * 384 + 32]) -> Result<Self, Error> {
         let _entry = low::Entry::new_public();
         let (t_hat, rho) = input.split_at(K * 384);
@@ -253,6 +261,7 @@ impl EncapKey {
     ///
     /// The ciphertext can be returned to the holder of the [`DecapKey`] who can then
     /// derive the same [`SharedSecret`].
+    #[inline(never)]
     pub(crate) fn encaps(&self) -> Result<(SharedSecret, Ciphertext), Error> {
         let _entry = low::Entry::new_secret();
         let mut m = Message([0; 32]);

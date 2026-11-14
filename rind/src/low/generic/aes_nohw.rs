@@ -1007,11 +1007,6 @@ impl Schedule {
     }
 
     /// Decrypts one block in place.
-    ///
-    /// Inlined on the portable backend, with [`Self::cbc_decrypt`]. A 32-bit
-    /// build otherwise outlines both, and the extra call is the decrypt
-    /// regression.
-    #[cfg_attr(rind_backend = "portable", inline)]
     pub(crate) fn decrypt_block(&self, inout: &mut [u8; 16]) {
         let inout = core::slice::from_mut(inout);
         let mut batch = to_batch(inout);
@@ -1066,7 +1061,6 @@ impl Schedule {
 
     /// Decrypts whole blocks in place in CBC mode, the first chained from
     /// `iv`.
-    #[cfg_attr(rind_backend = "portable", inline)]
     pub(crate) fn cbc_decrypt(&self, iv: &[u8; 16], blocks: &mut [[u8; 16]]) {
         let mut prev = *iv;
         for chunk in blocks.chunks_mut(BATCH_SIZE) {
