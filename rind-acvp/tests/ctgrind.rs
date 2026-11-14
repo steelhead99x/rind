@@ -10,7 +10,7 @@
 
 use crabgrind::memcheck::{self, MemState};
 use crabgrind::valgrind::{self, RunningMode};
-use rind::agreement::{ECDH_P256, ECDH_P384, PrivateKey};
+use rind::agreement::{ECDH_P256, ECDH_P384, ECDH_P521, PrivateKey};
 use rind_acvp::{Reply, handle};
 
 /// Marks `value`'s bytes secret. Pass the bytes, not a `Vec`: its header
@@ -47,8 +47,8 @@ fn run(command: &str, args: &[Vec<u8>]) -> Vec<Vec<u8>> {
     reveal(&handle(command, args).unwrap())
 }
 
-/// ECDH with ACVP's given private scalar, at the field's width, which
-/// `pad` passes through without reading.
+/// ECDH with ACVP's given private scalar, at the field's width and with a
+/// zero prefix whose public length fixes how many bytes are checked.
 #[test]
 fn ecdh_given_scalar() {
     for (curve, alg, field) in [("P-256", &ECDH_P256, 32), ("P-384", &ECDH_P384, 48)] {
@@ -73,6 +73,66 @@ fn ecdh_given_scalar() {
             run(&format!("ECDH/{curve}"), &args(padded)),
             wanted,
             "{curve} padded"
+        );
+    }
+}
+
+/// ECDSA signing normalizes a secret scalar once for both key loaders.
+/// Every accepted encoding signs for the same public key.
+#[test]
+fn ecdsa_given_scalar() {
+    for (curve, alg, field, hash) in [
+        ("P-256", &ECDH_P256, 32, "SHA2-256"),
+        ("P-384", &ECDH_P384, 48, "SHA2-384"),
+        ("P-521", &ECDH_P521, 66, "SHA2-512"),
+    ] {
+        let mut canonical = vec![0u8; field];
+        canonical[field - 1] = 2;
+        let key = PrivateKey::from_scalar(alg, &canonical).unwrap();
+        let point = key.public_key().as_ref();
+        let (x, y) = point[1..].split_at(field);
+        let mut padded = vec![0u8; 2];
+        padded.extend_from_slice(&canonical);
+        for scalar in [canonical, vec![2], padded] {
+            secret(scalar.as_slice());
+            let signature = run(
+                "ECDSA/sigGen",
+                &[
+                    curve.as_bytes().to_vec(),
+                    scalar,
+                    hash.as_bytes().to_vec(),
+                    b"message".to_vec(),
+                ],
+            );
+            let verified = run(
+                "ECDSA/sigVer",
+                &[
+                    curve.as_bytes().to_vec(),
+                    hash.as_bytes().to_vec(),
+                    b"message".to_vec(),
+                    x.to_vec(),
+                    y.to_vec(),
+                    signature[0].clone(),
+                    signature[1].clone(),
+                ],
+            );
+            assert_eq!(verified[0], [1], "{curve}");
+        }
+        let mut overlong = vec![1u8];
+        overlong.resize(field + 1, 0);
+        secret(overlong.as_slice());
+        assert!(
+            handle(
+                "ECDSA/sigGen",
+                &[
+                    curve.as_bytes().to_vec(),
+                    overlong,
+                    hash.as_bytes().to_vec(),
+                    b"message".to_vec(),
+                ],
+            )
+            .is_err(),
+            "{curve} nonzero prefix"
         );
     }
 }
@@ -173,7 +233,7 @@ fn mlkem768() {
 }
 
 /// The RSA signature and decryption primitives with a secret `d`, which rind
-/// marks once it has parsed it.
+/// marks before loading it at its public width.
 #[test]
 fn rsa_primitives() {
     let mut n = vec![0xc3u8; 256];

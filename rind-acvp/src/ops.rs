@@ -679,23 +679,21 @@ fn ecdsa_siggen(args: &[Vec<u8>], component: bool) -> Result<Reply, String> {
     ecdsa_sign(curve, scalar, hash, message)
 }
 
-fn x_from_scalar(curve: &str, scalar: &[u8]) -> Result<Vec<u8>, String> {
-    let (alg, field) = match curve {
+fn ecdsa_sign(curve: &str, scalar: &[u8], hash: &str, message: &[u8]) -> Result<Reply, String> {
+    let (agreement, field) = match curve {
         "P-256" => (&ECDH_P256, 32),
         "P-384" => (&ECDH_P384, 48),
         "P-521" => (&ECDH_P521, 66),
         _ => return Err(format!("unsupported curve {curve}")),
     };
-    let key =
-        PrivateKey::from_scalar(alg, &pad_secret(scalar, field)?).map_err(|err| err.to_string())?;
-    Ok(key.public_key().as_ref().to_vec())
-}
-
-fn ecdsa_sign(curve: &str, scalar: &[u8], hash: &str, message: &[u8]) -> Result<Reply, String> {
-    let point = x_from_scalar(curve, scalar)?;
+    // Both loaders need the same field-width scalar. The signing loader
+    // requires that exact width even when the original encoding was padded.
+    let scalar = pad_secret(scalar, field)?;
+    let agreement = PrivateKey::from_scalar(agreement, &scalar).map_err(|err| err.to_string())?;
     let alg = ecdsa_signer(curve)?;
-    let key = EcdsaKeyPair::from_scalar_and_public_key(alg, scalar, &point)
-        .map_err(|err| err.to_string())?;
+    let key =
+        EcdsaKeyPair::from_scalar_and_public_key(alg, &scalar, agreement.public_key().as_ref())
+            .map_err(|err| err.to_string())?;
     let hashed = digest::digest(hash_of(hash)?, message);
     let sig = key.sign_digest(&hashed).map_err(|err| err.to_string())?;
     let sig = sig.as_ref();
