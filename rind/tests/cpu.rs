@@ -41,7 +41,22 @@ fn missing_feature_is_named() {
         .iter()
         .flat_map(|feature| OPERATIONS.iter().map(move |operation| (feature, operation)))
     {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
+        // Under qemu-user, cargo runs this binary through
+        // `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER`. The child is the
+        // same aarch64 image, so it has to go through that runner too, as
+        // `low::aarch64::cpu::reexec` does for the in-crate override tests.
+        let exe = std::env::current_exe().unwrap();
+        let mut cmd = match std::env::var("CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER") {
+            Ok(runner) => {
+                let mut parts = runner.split_whitespace();
+                let mut cmd = std::process::Command::new(parts.next().unwrap());
+                cmd.args(parts);
+                cmd.arg(exe);
+                cmd
+            }
+            Err(_) => std::process::Command::new(exe),
+        };
+        let output = cmd
             .args(["--exact", "missing_feature_is_named", "--nocapture"])
             .env(CHILD, operation)
             .env(format!("RIND_CPU_DISABLE_{feature}"), "1")
