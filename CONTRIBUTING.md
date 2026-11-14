@@ -49,7 +49,7 @@ Run `just ci` before every push.
 The platform workflows inherited from graviola run nightly or on demand with `gh workflow run <name> --ref <branch>`, and on a pull request that touches their inputs, a cheap subset each: one ctgrind row, the armv7, portable, and Dart jobs of `build`, and a timing build. `mutants` never runs on a pull request; mutate its diff with `admin/mutants --in-diff`, and dispatch a whole campaign, which `admin/mutants` runs only on GitHub-hosted runners. These runs are advisory, since a path-filtered workflow cannot be a required check, but fix a red one before merging.
 PRs land on `main` through GitHub's merge queue, one PR at a time, as squash commits.
 Queue the reviewed head with `quest merge <pr> --land <sha>` (`/quest-merge` does this).
-The required `Queue` check skips on pull requests; the merge group runs `just ci` against the merge group's base on the self-hosted runner.
+The required `Queue build / Build` check skips on pull requests; the merge group runs `just ci` against the merge group's base on the self-hosted runner, and that job's own result decides the group.
 That build lives in `.github/workflows/queue-build.yml`, which the merge group calls from `main`, so a PR's edit to it runs only after the PR lands.
 A PR the queue drops for a failed build or a conflict gets a Codex fixer, which requeues it or hands it back with a diagnosis.
 The admin bypass of `main`'s ruleset is for emergencies.
