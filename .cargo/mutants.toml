@@ -126,7 +126,11 @@ exclude_re = [
   'rind/src/low/generic/p521\.rs:\d+:\d+: replace == with != in mont_pow$',
   'rind/src/low/generic/p521\.rs:480:\d+: replace >> with << in mont_mul$',
   'rind/src/low/generic/p521\.rs:491:\d+: replace >> with << in mont_mul$',
-  'rind/src/low/generic/sha256\.rs:68:\d+: replace - with \+ in sha256_compress_block$',
+  # `(t - 16) % 16` and `(t + 16) % 16` are the same window slot. The line is
+  # the subtraction: a use above it moves the pin, and pinning the `(t - 7)`
+  # line instead would skip a mutant the tests can kill.
+  'rind/src/low/generic/sha256\.rs:70:\d+: replace - with \+ in sha256_compress_block$',
+  'rind/src/low/generic/sha512\.rs:89:\d+: replace - with \+ in sha512_compress_block$',
   'rind/src/low/posint\.rs:\d+:\d+: delete match arm 0 in PosInt<N>::mont_exp$',
   'rind/src/low/posint\.rs:533:\d+: replace % with / in PosInt<N>::mont_exp$',
   'rind/src/low/posint\.rs:533:\d+: replace % with \+ in PosInt<N>::mont_exp$',

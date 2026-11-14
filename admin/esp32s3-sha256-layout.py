@@ -25,6 +25,9 @@ CALL = re.compile(r"\bcallx?(?:0|4|8|12)\b")
 INSN = re.compile(
     r"^\s*([0-9a-fA-F]+):\s+[0-9a-fA-F ]+\s+([a-z][a-z0-9.]*)\b(.*)$"
 )
+# FIPS 180-4 SHA-256 rotate distances. 8 is the byte swap, not a rotate.
+ROTATE_SAR = {2, 6, 7, 11, 13, 17, 18, 19, 22, 25}
+REG_NAME = re.compile(r"\b[a-zA-Z]+[0-9]+\b")
 
 
 class Fail(Exception):
@@ -141,28 +144,50 @@ def disassemble(objdump, path, start, size, section):
     return insns
 
 
+def immediates(rest):
+    """Integer operands, after register names such as `a14` are removed."""
+    return [int(n) for n in re.findall(r"\d+", REG_NAME.sub(" ", rest))]
+
+
 def check_ssai(insns):
-    """Every ssai is consumed before the next unrelated instruction."""
+    """Every ssai is a FIPS rotate or the big-endian byte swap.
+
+    A rotate is `ssai` of 2, 6, 7, 11, 13, 17, 18, 19, 22, or 25, then
+    `src`. The byte swap is `l32i`, `ssai 8`, `srli` or `extui` by 16,
+    then three `src`. Pairing alone would accept `ssai 12` or an `src`
+    that consumes an older SAR.
+    """
     i = 0
     while i < len(insns):
-        _addr, mnem, _rest = insns[i]
+        _addr, mnem, rest = insns[i]
         if mnem != "ssai":
             i += 1
             continue
+        found = immediates(rest)
+        if len(found) != 1:
+            raise Fail(f"ssai has no single immediate: {rest}")
+        n = found[0]
         window = insns[i + 1 : i + 5]
         mnems = [item[1] for item in window]
-        if mnems[:1] == ["src"]:
+        if n in ROTATE_SAR and mnems[:1] == ["src"]:
             i += 2
             continue
         # The byte swap's `srli` by 16 is the same extract the Xtensa
         # backend prints as `extui`. Neither reads SAR.
-        if len(mnems) >= 4 and mnems[0] in ("srli", "extui") and mnems[1:4] == ["src", "src", "src"]:
+        shift = immediates(window[0][2]) if window else []
+        if (
+            n == 8
+            and i > 0
+            and insns[i - 1][1] == "l32i"
+            and len(mnems) >= 4
+            and mnems[0] in ("srli", "extui")
+            and 16 in shift
+            and mnems[1:4] == ["src", "src", "src"]
+        ):
             i += 5
             continue
-        raise Fail(
-            "ssai is not paired with its src: "
-            + " ".join(f"{item[1]}" for item in insns[i : i + 5])
-        )
+        shown = " ".join(f"{item[1]} {item[2]}".strip() for item in insns[max(0, i - 1) : i + 5])
+        raise Fail(f"ssai {n} is not a FIPS rotate or the byte swap: {shown}")
     return None
 
 
@@ -366,7 +391,7 @@ def expect_image(objdump, path, map_path):
             raise Fail(f"{label} was relocated into {out}")
     if "dram" not in k_out or "flash" in k_out:
         raise Fail(f"K is in {k_out}, not DRAM")
-    if ksize not in (0, 0x100):
+    if ksize != 0x100:
         raise Fail(f"K symbol is {ksize:#x} bytes, want 0x100")
     placed = parse_map(map_path)
     for name, want in (

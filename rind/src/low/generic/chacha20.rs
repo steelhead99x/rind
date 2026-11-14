@@ -103,14 +103,16 @@ fn state(key: &[u8; 32], nonce: &[u8; 16]) -> [u32; 16] {
     st
 }
 
-// On 32-bit targets with a small instruction cache, a fully unrolled
-// `rounds` is ~5 KiB and misses on every XChaCha short input. A 10-iteration
+// On 32-bit portable targets a fully unrolled `rounds` is ~5 KiB and misses
+// a small instruction cache on every short XChaCha input. A 10-iteration
 // loop is the same 10 double-rounds. `rounds` itself stays unrolled so
-// `proofs/` and the ChaCha20 cipher path stay as they are. The rolled body
-// is `hchacha20_rolled`, which 32-bit `hchacha20` calls. 64-bit builds
-// compile that body only in tests, so ctgrind sees it; their `hchacha20`
-// keeps the output loop inside the function.
-#[cfg(any(target_pointer_width = "32", test))]
+// `proofs/` and the ChaCha20 cipher path stay as they are. armv7's assembly
+// backend keeps that unrolled `hchacha20`: it was not the cache this loop
+// is for, and ALGORITHMS.md describes the unrolled rounds there. 64-bit
+// builds compile the rolled body only in tests, so ctgrind sees it; their
+// `hchacha20` keeps the output loop inside the function, which is what
+// Aeneas names `hchacha20_loop`.
+#[cfg(any(all(target_pointer_width = "32", rind_backend = "portable"), test))]
 #[inline(never)]
 fn hchacha20_double_round(st: &mut [u32]) {
     // A separate function so LLVM cannot unroll ten copies of the
@@ -118,14 +120,18 @@ fn hchacha20_double_round(st: &mut [u32]) {
     double_round(st);
 }
 
-#[cfg(any(target_pointer_width = "32", test))]
+#[cfg(any(all(target_pointer_width = "32", rind_backend = "portable"), test))]
 fn hchacha20_rounds(st: &mut [u32]) {
     for _ in 0..10 {
         hchacha20_double_round(st);
     }
 }
 
-#[cfg(any(target_pointer_width = "32", test))]
+// The same word selection as the unrolled `hchacha20` below. It stays a
+// separate function here so the rolled body can call it, and it stays
+// written out inside the unrolled function so Aeneas still extracts
+// `hchacha20_loop`. Pulling that loop into this function changes the proof.
+#[cfg(any(all(target_pointer_width = "32", rind_backend = "portable"), test))]
 fn hchacha20_out(st: &[u32; 16]) -> [u8; 32] {
     let mut out = [0u8; 32];
     for i in 0..8 {
@@ -135,7 +141,7 @@ fn hchacha20_out(st: &[u32; 16]) -> [u8; 32] {
     out
 }
 
-#[cfg(any(target_pointer_width = "32", test))]
+#[cfg(any(all(target_pointer_width = "32", rind_backend = "portable"), test))]
 #[inline(never)]
 fn hchacha20_rolled(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
     let mut st = state(key, nonce);
@@ -146,16 +152,17 @@ fn hchacha20_rolled(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
 /// HChaCha20 of `key` and `nonce`, for XChaCha20's subkey: the ChaCha20
 /// rounds without the final addition, keeping words 0-3 and 12-15, as
 /// draft-irtf-cfrg-xchacha-03 specifies.
-#[cfg(target_pointer_width = "32")]
-#[inline(never)]
+#[cfg(all(target_pointer_width = "32", rind_backend = "portable"))]
+#[inline(always)]
 pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
+    // `hchacha20_rolled` is the frame. Inlining this wrapper avoids a second.
     hchacha20_rolled(key, nonce)
 }
 
 /// HChaCha20 of `key` and `nonce`, for XChaCha20's subkey: the ChaCha20
 /// rounds without the final addition, keeping words 0-3 and 12-15, as
 /// draft-irtf-cfrg-xchacha-03 specifies.
-#[cfg(not(target_pointer_width = "32"))]
+#[cfg(not(all(target_pointer_width = "32", rind_backend = "portable")))]
 pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
     let mut st = state(key, nonce);
     rounds(&mut st);
@@ -249,10 +256,12 @@ mod tests {
         ];
         let mut st = state(&key, &nonce);
         rounds(&mut st);
+        // Words 0-3 and 12-15, written out so this expected value is not a
+        // third copy of `hchacha20_out` or of the loop inside `hchacha20`.
+        let words = [st[0], st[1], st[2], st[3], st[12], st[13], st[14], st[15]];
         let mut expected = [0u8; 32];
-        for i in 0..8 {
-            let w = if i < 4 { st[i] } else { st[i + 8] };
-            expected[4 * i..4 * (i + 1)].copy_from_slice(&w.to_le_bytes());
+        for (i, w) in words.into_iter().enumerate() {
+            expected[4 * i..4 * i + 4].copy_from_slice(&w.to_le_bytes());
         }
         crate::low::ct::secret_slice(&key);
         let got = crate::low::ct::into_public(hchacha20_rolled(&key, &nonce));

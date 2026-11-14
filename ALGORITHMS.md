@@ -133,12 +133,23 @@ with portable Rust in place of the assembly armv7 runs regardless.
   sixteen rounds unrolled and the schedule body run three times, in IRAM
   (`.iram1`). `K` is in `.dram1`. HACL*'s check mark does not cover this
   target. The body replaces libcrux's SHA-256 so the image does not carry
-  it, and nothing proves the replacement. The 16-word window and the round
-  constants follow Graviola's `generic::sha256` (Joe Birr-Pixton); the
-  rotates and the block load are Xtensa `asm!`. Host tests check it against
+  it, and nothing proves the replacement. The 16-word window follows
+  Graviola's `generic::sha256`, and the round constants are
+  `generic::sha256_k` (Joe Birr-Pixton); the rotates and the block load
+  are Xtensa `asm!`. Host tests check it against
   FIPS 180-4, `generic::sha256`, HACL*, aws-lc, CAVP, and ACVP. A fully
-  rolled loop here was slower than HACL* in IRAM on an ESP32-S3. This
-  unrolled body has not been timed on a board. `admin/esp32s3-sha256-layout`
+  rolled loop here was slower than HACL* in IRAM on an ESP32-S3. At
+  `3aaa3c6a`, on a Seeed XIAO ESP32-S3 with 80 MHz flash and three runs,
+  long SHA-256 takes about 0.76× that HACL*-in-IRAM image and about
+  0.65–0.74× main's flash HACL* from 1200 B to 16 KB. In that sha2 image
+  the block symbol is 4,412 bytes, `.iram0.text` is 4,516 bytes above
+  main, `K` is 256 bytes in DRAM, and the hold-style heap is 282,856
+  bytes against main's 287,464. A standalone object probe of the same
+  tree reported a 4,256-byte block and 4,357 bytes of IRAM sections; that
+  probe is not the firmware image, and it is not a 156-byte shrink of it.
+  HMAC and HKDF were not in that pass. Host tests of this body run the
+  Rust `rotate_right` and `from_be_bytes` fallbacks, not the Xtensa asm.
+  `admin/esp32s3-sha256-layout`
   requires, in the linked image at opt-level 3, the block and the driver in
   IRAM, `K` in `.dram1`, no call from the block, and no relocation into
   flash text. A debug build is not that promise. Every other portable
@@ -825,11 +836,12 @@ Graviola's NEON block, on aarch64, and 0.79 of aws-lc's `chacha-armv4` on
 armv7, in [run 41861521276] against [run 41861526675].
 
 HChaCha20, for XChaCha20, runs HACL*'s verified rounds in general-purpose
-registers on every architecture, as aws-lc does: one block in vector
-registers is a single serial chain, which Zen 5's two-cycle vector latency
-doubles. On an EPYC 9V45, sealing 32 B with XChaCha20-Poly1305 natively takes
-0.99 of aws-lc-rs's time in [run 41585945720], against 1.11 with SSSE3 rounds
-in [run 41550703300].
+registers, as aws-lc does, except on 32-bit portable. There the unrolled
+body is about 5 KiB, so ten calls to one double-round replace it. armv7
+keeps the unrolled rounds. One block in vector registers is a single serial
+chain, which Zen 5's two-cycle vector latency doubles. On an EPYC 9V45,
+sealing 32 B with XChaCha20-Poly1305 natively takes 0.99 of aws-lc-rs's time
+in [run 41585945720], against 1.11 with SSSE3 rounds in [run 41550703300].
 
 ChaCha20-Poly1305, and XChaCha20-Poly1305 after HChaCha20, run aws-lc's
 `chacha20_poly1305` assembly, which interleaves ChaCha20 with Poly1305 in one
