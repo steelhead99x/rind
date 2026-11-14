@@ -21,6 +21,7 @@ on:
       - coverage
       - ctgrind
       - ctgrind debug
+      - ESP32-S3 SHA-256 layout
       - fuzz
       - miri
       - mutants

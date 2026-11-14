@@ -6,13 +6,38 @@
 //! 0.67-0.93 of `generic`'s time at 16 KB on x86_64. SHA-384/512 is that
 //! HACL* body on 64-bit targets and the rolled loop in `generic::sha512` on
 //! 32-bit targets, where the unrolled body is about 47 KiB and misses a
-//! 16 KiB instruction cache. On ESP-IDF Xtensa, SHA-256 is the rolled loop
-//! in `sha256_iram`, placed in internal RAM. Other portable targets keep
-//! HACL* at every length: a second rolled body beside that ~12 KiB function
-//! made long hashes slower on an ESP32-S3.
+//! 16 KiB instruction cache. On ESP-IDF Xtensa, SHA-256 is rind's own
+//! FIPS 180-4 compression in `sha256_iram`: sixteen rounds unrolled, the
+//! schedule body run three times, placed in internal RAM. It is not HACL*
+//! and nothing proves it. A fully rolled SHA-256 was slower than HACL* in
+//! IRAM on an ESP32-S3, which is why this body is unrolled by sixteen.
+//! This head has not been timed on a board. Other portable targets keep
+//! HACL* at every length: a second body beside that ~12 KiB function made
+//! long hashes slower on that chip.
 
-#[cfg(not(any(all(target_arch = "xtensa", target_os = "espidf"), test)))]
-use libcrux_sha2::hacl::sha256_update_nblocks;
+/// ESP-IDF Xtensa runs the IRAM body. Host tests compile it too.
+macro_rules! iram_sha256 {
+    ($($item:item)*) => {
+        $(
+            #[cfg(any(all(target_arch = "xtensa", target_os = "espidf"), test))]
+            $item
+        )*
+    };
+}
+
+/// Every other build keeps HACL* through libcrux-sha2.
+macro_rules! hacl_sha256 {
+    ($($item:item)*) => {
+        $(
+            #[cfg(not(any(all(target_arch = "xtensa", target_os = "espidf"), test)))]
+            $item
+        )*
+    };
+}
+
+hacl_sha256! {
+    use libcrux_sha2::hacl::sha256_update_nblocks;
+}
 #[cfg(target_pointer_width = "64")]
 use libcrux_sha2::hacl::sha512_update_nblocks;
 
@@ -27,27 +52,38 @@ const PIECE: usize = 1 << 31;
 /// Compresses whole 64-byte `blocks` into `state`.
 ///
 /// One loop of HACL*'s `sha256_update_nblocks` on every pointer width,
-/// except ESP-IDF Xtensa, which runs the rolled loop in `sha256_iram` from
-/// internal RAM. 32-bit portable does not keep a rolled compressor beside
-/// HACL*: on an ESP32-S3 that second body made long hashes slower. Xtensa
-/// replaces HACL* for SHA-256 instead of adding one.
+/// except ESP-IDF Xtensa, which runs the 16-round body in `sha256_iram`
+/// from internal RAM. 32-bit portable does not keep a second compressor
+/// beside HACL*: on an ESP32-S3 that second body made long hashes slower.
+/// Xtensa replaces HACL* for SHA-256 instead of adding one. The HACL*
+/// proof does not cover the replacement.
 pub(crate) fn sha256_compress_blocks(state: &mut [u32; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(64));
-    // Portable host tests run the ESP-IDF body too, including the digest and
-    // HMAC vectors and their secret-input checks.
-    #[cfg(any(all(target_arch = "xtensa", target_os = "espidf"), test))]
-    {
+    sha256_compress_blocks_inner(state, blocks);
+}
+
+// Portable host tests run the ESP-IDF body too, including the digest and
+// HMAC vectors and their secret-input checks. The predicate lives in
+// `iram_sha256` / `hacl_sha256` so the target cannot drift between the
+// import, the module, and the two bodies.
+iram_sha256! {
+    fn sha256_compress_blocks_inner(state: &mut [u32; 8], blocks: &[u8]) {
         iram::sha256_update_nblocks(state, blocks);
-    }
-    #[cfg(not(any(all(target_arch = "xtensa", target_os = "espidf"), test)))]
-    for piece in blocks.chunks(PIECE) {
-        sha256_update_nblocks(piece.len() as u32, piece, state);
     }
 }
 
-#[cfg(any(all(target_arch = "xtensa", target_os = "espidf"), test))]
-#[path = "sha256_iram.rs"]
-mod iram;
+hacl_sha256! {
+    fn sha256_compress_blocks_inner(state: &mut [u32; 8], blocks: &[u8]) {
+        for piece in blocks.chunks(PIECE) {
+            sha256_update_nblocks(piece.len() as u32, piece, state);
+        }
+    }
+}
+
+iram_sha256! {
+    #[path = "sha256_iram.rs"]
+    mod iram;
+}
 
 /// Compresses `message`, padded and closed by the big-endian bit `length`.
 #[inline(never)]
@@ -109,7 +145,7 @@ mod tests {
     fn fips180_sha256() {
         // FIPS 180-4 SHA-256: the empty message, "abc", and the 56-byte
         // message whose padding fills a second block. The message is secret
-        // so ctgrind checks this rolled body, which host builds compile only
+        // so ctgrind checks this IRAM body, which host builds compile only
         // in tests.
         let cases: [(&[u8], &str); 3] = [
             (
