@@ -75,7 +75,7 @@ reason = "DIT: the M4 has it, and rind turns it on and off around every call tha
 [[gap]]
 operations = ["p521-ecdsa-verify*", "rustls-full-handshake-key/ecdsa-p521*"]
 on = ["portable"]
-quest = "/quest/m3/cold-speed/portable-p521-verify.md"
+reason = "Closed by [#700](https://github.com/kixel-ai/rind/pull/700), after this data, which keeps the portable backend's verification in fiat-crypto's limbs across the whole twin multiplication, converts between them and words by shifts, and compares x without an inversion: on an otherwise idle Ryzen 9 5900XT under `--cfg rind_portable`, verification measured 0.80 to 0.97× aws-lc's C time, from 1.07 to 1.16× before, and every other P-521 benchmark at most 0.95×. The next refresh drops this entry."
 
 [[gap]]
 operations = ["p[0-9]*", "rsa*", "jwt-*", "rustls-full-handshake-*"]
