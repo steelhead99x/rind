@@ -496,11 +496,15 @@ cfg_if::cfg_if! {
             sha3_keccak4_f1600, sha3_keccak_f1600, sha3_keccak_nof4_f1600,
         };
         pub(crate) use portable::sha::{
-            sha1_compress_blocks, sha1_compress_padded, sha256_compress_blocks, sha256_finish,
-            sha256_finish_long, sha256_finish_uses_long, sha512_compress_blocks,
+            sha1_compress_blocks, sha1_compress_padded, sha256_finish, sha256_finish_long,
+            sha256_finish_uses_long, sha512_compress_blocks,
         };
+        #[cfg(any(target_pointer_width = "64", test))]
+        pub(crate) use portable::sha::sha256_compress_blocks;
         #[cfg(target_pointer_width = "32")]
-        pub(crate) use portable::sha::SHA256_SHORT;
+        pub(crate) use portable::sha::{
+            SHA256_SHORT, sha256_compress_rolled, sha256_hacl_nblocks,
+        };
     } else {
         compile_error!("build.rs sets rind_backend");
     }
