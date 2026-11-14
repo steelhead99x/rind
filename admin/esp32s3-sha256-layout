@@ -70,6 +70,21 @@ if [ -n "$image" ]; then
   exit 0
 fi
 
+# The probe below sets `asm_experimental_arch` in its own crate and
+# compiles the two SHA-256 files outside rind. These lines are what keep
+# that feature, and the round-constant table, on the crate the firmware
+# builds. Dropping either would otherwise leave this script green.
+grep -F '#![cfg_attr(target_arch = "xtensa", feature(asm_experimental_arch))]' \
+  "$root/rind/src/lib.rs" >/dev/null || {
+  printf 'esp32s3-sha256-layout: rind/src/lib.rs no longer enables asm_experimental_arch on Xtensa\n' >&2
+  exit 1
+}
+grep -F 'all(target_arch = "xtensa", target_os = "espidf")' \
+  "$root/rind/src/low/mod.rs" >/dev/null || {
+  printf 'esp32s3-sha256-layout: sha256_k is no longer built for ESP-IDF Xtensa\n' >&2
+  exit 1
+}
+
 for tool in "$rustc" "$cargo" "$objdump" "$readelf" "$nm" "$ar" "$gcc" "$ld" "$py"; do
   if [ ! -e "$tool" ]; then
     printf 'missing %s\ninstall the toolchain as .github/workflows/esp32s3-sha256-layout.yml does\n' "$tool" >&2
@@ -196,9 +211,9 @@ check_object "$work/obj/esp32.o" placed
 printf 'none-elf\n'
 check_object "$work/obj/none.o" ordinary
 
-# The s3 and size-optimized instruction streams of the block must not grow a
-# call. The bytes need not match: s and z may schedule differently.
-cmp "$work/obj/s3.o" "$work/obj/s.o" >/dev/null 2>&1 || true
+# opt-level s and z may schedule differently from opt-level 3, so the object
+# bytes are not compared. `check_no_calls` in the python `object` pass above
+# is what rejects a call in each of those streams, and it exits non-zero.
 
 cat >"$work/link.ld" <<'EOF'
 MEMORY {
@@ -233,9 +248,15 @@ EOF
 
 python3 "$py" image "$objdump" "$work/s3.elf" "$work/s3.map" || exit 1
 
-# The linked block still has no relocation recorded against flash text.
-if "$objdump" -d -j .iram0.text "$work/s3.elf" | grep -Eq '[[:space:]]callx?(0|4|8|12)[[:space:]].*flash'; then
-  fail 'IRAM text calls into flash'
+# objdump prints a target address, not the word "flash". link.ld puts flash
+# at 0x42000000 for 0x400000 bytes, so an operand in 0x42000000..0x423fffff
+# is a call or an l32r out of IRAM. `callxN aR` has no address of its own;
+# the python image pass checks the l32r that feeds it.
+iram_text=$("$objdump" -d -j .iram0.text "$work/s3.elf") || fail 'objdump of IRAM text failed'
+if printf '%s\n' "$iram_text" |
+  grep -E '[[:space:]](call(0|4|8|12)|callx(0|4|8|12)|l32r)[[:space:]].*42[0-3][0-9a-fA-F]{5}'
+then
+  fail 'IRAM text refers to a flash address'
 fi
 
 printf 'esp32s3-sha256-layout: ok\n'

@@ -13,8 +13,16 @@
 //! rounds load the block. One sixteen-round schedule body then runs three
 //! times, for rounds 16..64. Returning the working variables in rotated
 //! order keeps the loop edge from moving them. A fully rolled 64-round
-//! loop was slower than HACL* in IRAM on an ESP32-S3; this head has not
-//! been timed on a board.
+//! loop was slower than HACL* in IRAM on an ESP32-S3. This 16-round body,
+//! at `3aaa3c6a`, takes about 0.76× that HACL*-in-IRAM time on a Seeed
+//! XIAO ESP32-S3 (80 MHz flash, three runs), and about 0.65–0.74× main
+//! from 1200 B to 16 KB. In that sha2 image the block symbol is 4,412
+//! bytes, `.iram0.text` is 4,516 bytes above main, and the hold-style
+//! heap is 282,856 bytes against main's 287,464. A standalone object
+//! probe of the same tree reported a 4,256-byte block and 4,357 bytes of
+//! IRAM sections; that probe is not the firmware image. HMAC and HKDF
+//! were not in that pass. Host tests take the Rust fallbacks below, not
+//! this asm.
 //!
 //! LLVM's Xtensa backend expands `rotate_right` into a shift pair and an
 //! `or`. `ssai` plus `src` is the two-instruction rotate, and each rotate
@@ -58,18 +66,20 @@ fn maj(a: u32, b: u32, c: u32) -> u32 {
     (a & b) ^ (c & (a ^ b))
 }
 
-// `ssai` writes SAR and `src` reads it, both inside this block, so a SAR
-// value left by other code is never consumed. `src y, x, x` is a rotate
-// right by SAR: the 64-bit value `{x, x}` shifted right by `N`, low 32
-// bits kept. The distance is a const generic in `ssai`'s 0..32 immediate
-// range, not data, so the two instructions are constant time.
+// `ssai` writes SAR and `src` reads it, both inside this block. `src y, x, x`
+// is a rotate right by SAR: the 64-bit value `{x, x}` shifted right by `N`,
+// low 32 bits kept. The distance is a const generic in `ssai`'s 0..32
+// immediate range, not data, so the two instructions are constant time.
 //
-// This target's `asm!` register file has no SAR class, so the block cannot
-// name SAR as a clobber. Each rotate writes SAR and consumes it before the
-// block ends, and the only other shifts in this module are the constant
-// `>> 3` and `>> 10` in `ssig0` and `ssig1`, which the backend lowers to
-// `srli` and which do not read SAR. The layout check rejects a block where
-// an `ssai` is separated from the `src` that consumes it.
+// esp rustc 1.97.0.0 lists `sar` as a clobber-only `sreg` (caller-saved,
+// like the other non-privileged special registers except LITBASE). The
+// block names that write with `out("sar") _`. It is not `pure`: `pure`
+// would tell LLVM the block has no side effects, and a later backend could
+// keep a SAR value across it. The only other shifts in this module are the
+// constant `>> 3` and `>> 10` in `ssig0` and `ssig1`, which the backend
+// lowers to `srli` and which do not read SAR. The layout check requires
+// each `ssai` immediate to be one of 2, 6, 7, 11, 13, 17, 18, 19, 22, 25
+// followed by `src`, or the byte swap's `ssai 8`.
 #[cfg(target_arch = "xtensa")]
 #[inline(always)]
 fn rotr<const N: u32>(x: u32) -> u32 {
@@ -79,6 +89,7 @@ fn rotr<const N: u32>(x: u32) -> u32 {
     // The only registers written are SAR and `y`. Nothing is loaded or
     // stored, and the block does not use the stack. `lateout` writes `y`
     // after `x` has been read, so the two may be the same register.
+    // `out("sar") _` is a clobber: that class has no typed operand.
     unsafe {
         core::arch::asm!(
             "ssai {n}",
@@ -86,7 +97,8 @@ fn rotr<const N: u32>(x: u32) -> u32 {
             n = const N,
             x = in(reg) x,
             y = lateout(reg) y,
-            options(pure, nomem, nostack),
+            out("sar") _,
+            options(nomem, nostack),
         );
     }
     y
@@ -166,8 +178,10 @@ fn message_word<const BYTE: usize>(block: &[u8; 64]) -> u32 {
     // SAFETY: `BYTE` is `0, 4, ..., 60`, so the four bytes lie in `block`.
     // ESP-IDF v5.5.1 sets `XCHAL_UNALIGNED_LOAD_HW` to 1 and
     // `XCHAL_UNALIGNED_LOAD_EXCEPTION` to 0 in
-    // `components/xtensa/{esp32,esp32s2,esp32s3}/include/xtensa/config/core-isa.h`.
-    // Those are the cores this section runs on, so `l32i` does not trap and
+    // `components/xtensa/{esp32,esp32s3}/include/xtensa/config/core-isa.h`.
+    // `admin/esp32s3-sha256-layout` builds those two targets. ESP32-S2's
+    // header sets the same flags; this probe does not build it, so `l32i`
+    // is checked here only for ESP32 and ESP32-S3. It does not trap and
     // does not call a helper when `block` is not word-aligned. The sequence
     // is a byte swap of that little-endian load: `ssai 8`, shift the high
     // half down (`srli` in this block; the backend may emit `extui`), then
@@ -175,8 +189,10 @@ fn message_word<const BYTE: usize>(block: &[u8; 64]) -> u32 {
     // stack. The windowed ABI and the call0 ABI both give this
     // function `a14` as a temporary; the operand list names it so the
     // compiler will not assign `p` or `y` there and will not keep a live
-    // value in it. SAR is written and consumed before the block ends, in
-    // the same way as [`rotr`]. The address is the public block cursor.
+    // value in it. SAR is the same clobber-only `sreg` as in [`rotr`],
+    // named here with `out("sar") _`, and the `ssai 8` is consumed by the
+    // three `src` before the block ends. The address is the public block
+    // cursor.
     // The loaded bytes are the message, and none of these instructions
     // branches or loops on them.
     unsafe {
@@ -191,6 +207,7 @@ fn message_word<const BYTE: usize>(block: &[u8; 64]) -> u32 {
             byte = const BYTE,
             y = lateout(reg) y,
             out("a14") _,
+            out("sar") _,
             options(nostack, readonly),
         );
     }
