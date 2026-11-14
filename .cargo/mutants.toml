@@ -338,8 +338,4 @@ exclude_re = [
   # One AAD, concatenated, is that AAD. Deleting the one-element arm still
   # feeds `open` the same bytes.
   'rind-str0m/src/srtp\.rs:\d+:\d+: delete match arm \[aad\] in Gcm::open$',
-  # Before the handshake, dimpl's `close` aborts straight to closed, so
-  # `is_closing` stays false. `with false` matches every state the tests
-  # reach. It is true only for a graceful close from `AwaitApplicationData`.
-  'rind-str0m/src/dtls\.rs:\d+:\d+: replace <impl DtlsInstance for Dtls>::is_closing -> bool with false$',
 ]

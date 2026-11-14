@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use str0m::crypto::CryptoProvider;
-use str0m::crypto::dtls::DtlsVersion;
+use str0m::crypto::dtls::{DtlsInstance, DtlsOutput, DtlsVersion};
 use str0m::format::Codec;
 use str0m::media::{MediaKind, Mid};
 use str0m::net::{Protocol, Receive};
@@ -260,7 +260,82 @@ fn fresh_connection_reports_dimpl_state() {
     assert!(dtls12.is_active());
     assert_eq!(dtls12.send_application_data(&[0x11; 8]).unwrap(), 8);
     dtls12.close().unwrap();
-    assert!(dtls12.is_closing() || dtls12.is_closed());
+    assert!(!dtls12.is_closing());
+    assert!(dtls12.is_closed());
+}
+
+#[derive(Default)]
+struct DtlsEvents {
+    connected: bool,
+    close_notify: bool,
+    packets: usize,
+}
+
+fn transfer_dtls(from: &mut dyn DtlsInstance, to: &mut dyn DtlsInstance) -> DtlsEvents {
+    let mut events = DtlsEvents::default();
+    let mut buffer = [0u8; 2048];
+    loop {
+        match from.poll_output(&mut buffer) {
+            DtlsOutput::Packet(packet) => {
+                to.handle_packet(packet).unwrap();
+                events.packets += 1;
+            }
+            DtlsOutput::Connected => events.connected = true,
+            DtlsOutput::CloseNotify => events.close_notify = true,
+            DtlsOutput::PeerCert(_) | DtlsOutput::KeyingMaterial(_, _) => {}
+            DtlsOutput::Timeout(_) => return events,
+            other => panic!("unexpected DTLS output: {other:?}"),
+        }
+    }
+}
+
+/// Graceful close must be visible while close_notify still needs polling,
+/// through the same provider trait str0m uses for an established connection.
+#[test]
+fn established_connection_reports_graceful_close() {
+    for version in [DtlsVersion::Dtls12, DtlsVersion::Dtls13] {
+        for rind_active in [false, true] {
+            let mut now = Instant::now();
+            let rind = rind_str0m::default_provider().dtls_provider;
+            let aws = str0m_aws_lc_rs::default_provider().dtls_provider;
+            let mut a = rind
+                .new_dtls(&rind.generate_certificate().unwrap(), now, version, None)
+                .unwrap();
+            let mut b = aws
+                .new_dtls(&aws.generate_certificate().unwrap(), now, version, None)
+                .unwrap();
+            a.set_active(rind_active);
+            b.set_active(!rind_active);
+            let mut connected = [false; 2];
+            for _ in 0..20 {
+                a.handle_timeout(now).unwrap();
+                b.handle_timeout(now).unwrap();
+                connected[0] |= transfer_dtls(&mut *a, &mut *b).connected;
+                connected[1] |= transfer_dtls(&mut *b, &mut *a).connected;
+                if connected == [true; 2] {
+                    break;
+                }
+                now += Duration::from_millis(10);
+            }
+            assert_eq!(
+                connected, [true; 2],
+                "{version:?}, rind active={rind_active}"
+            );
+            assert!(!a.is_closing());
+            assert!(!a.is_closed());
+            a.close().unwrap();
+            assert!(a.is_closing(), "{version:?}, rind active={rind_active}");
+            assert!(!a.is_closed());
+            assert!(transfer_dtls(&mut *a, &mut *b).packets > 0);
+            assert!(transfer_dtls(&mut *b, &mut *a).close_notify);
+            b.close().unwrap();
+            transfer_dtls(&mut *b, &mut *a);
+            transfer_dtls(&mut *a, &mut *b);
+            assert!(a.is_closed());
+            assert!(!a.is_closing());
+            assert!(b.is_closed());
+        }
+    }
 }
 
 /// The generated serial stays a positive INTEGER, and the certificate is valid
