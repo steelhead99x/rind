@@ -20,6 +20,12 @@ upstream = "0.6"
 # has, `draft-ietf-mls-pq-ciphersuites`, `targeted-messages-draft`, and
 # `virtual-clients-draft`, need primitives rind lacks, so a manifest naming one
 # fails to resolve instead.
+# The provider admin/adapter-api diffs this crate's API against.
+[package.metadata.rind.api]
+crate = "openmls_rust_crypto"
+module = ""
+skip = { draft-ietf-mls-pq-ciphersuites = "needs a post-quantum HPKE KEM rind lacks", targeted-messages-draft = "needs HPKE's PSK mode, which rind lacks", virtual-clients-draft = "needs FF1, which rind lacks" }
+
 [features]
 extensions-draft = [
   "openmls_traits/extensions-draft",
