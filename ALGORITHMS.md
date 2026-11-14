@@ -397,9 +397,10 @@ otherwise), and the rest of the arithmetic in rind's portable Rust. The
 portable backend runs it all in that Rust, over 64-bit limbs on 64-bit
 targets and 32-bit ones elsewhere: its Montgomery products below 16 limbs by
 rind's loop (Koç, Acar, and Kaliski's CIOS method), whose multiply row
-issues four products before the carry chain, and wider ones and its
-squarings by forming the product, each square's cross products once, then
-reducing it, adding two rows a pass in two carry chains. Products split by
+issues four products before the carry chain only for a row of four or more
+limbs (a row of one to three limbs takes the one-limb tail), and wider ones
+and its squarings by forming the product, each square's cross products once,
+then reducing it, adding two rows a pass in two carry chains. Products split by
 Karatsuba's method from 32 limbs and squares from 64, as aws-lc's C does
 from 16 words. RSA signing and verification at 2048 to 8192 bits measured
 at 0.85 to 0.97× aws-lc's C time without assembly on x86_64.

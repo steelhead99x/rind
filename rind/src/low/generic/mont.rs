@@ -478,6 +478,11 @@ fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Wide) -> Wide {
 /// issue before the chain that adds them. Lengths are public. It stops at
 /// the shorter slice, and a remainder of one to three limbs takes the
 /// one-limb step.
+///
+/// Each partial sum, the product plus a limb plus the carry, is at most
+/// `2^2b - 1`, so it fits in `Wide` with nothing to spare, and adding one
+/// more term would wrap. The carry in fits a limb: it starts at zero, and
+/// the high half of such a sum is at most `2^b - 1`.
 #[inline(always)]
 fn mul_add(x: &mut [Limb], y: &[Limb], u: Limb) -> Wide {
     let mut carry: Wide = 0;
@@ -579,7 +584,7 @@ mod tests {
     use super::super::super::bignum::tests::{modulus, public, secret};
     use super::*;
     use crate::low;
-    use crate::low::ct::into_secret;
+    use crate::low::ct::{into_public, into_secret, public_slice, secret_slice};
     use crate::test::bignum::words;
 
     proptest! {
@@ -649,6 +654,31 @@ mod tests {
             mont_sqr(&mut ours, &sx, &sm, into_secret(n0[0]));
             low::mont_mul(&mut theirs, &x, &x, &m, n0[0]);
             prop_assert_eq!(public(&ours), theirs);
+        }
+    }
+
+    /// All-ones rows, which fill each partial sum to `2^2b - 1`, at every
+    /// length through two blocks of four and a remainder, against the
+    /// one-limb recurrence.
+    #[test]
+    fn mul_add_ones() {
+        for n in 0..=8 {
+            let (x, y) = (vec![Limb::MAX; n], vec![Limb::MAX; n]);
+            let (mut got, ys) = (x.clone(), y.clone());
+            secret_slice(&got);
+            secret_slice(&ys);
+            let carry = mul_add(&mut got, &ys, into_secret(Limb::MAX));
+
+            let mut expect = x;
+            let mut c = 0;
+            for (acc, factor) in expect.iter_mut().zip(&y) {
+                let t = mul_add_limb(Limb::MAX, *factor, *acc, c);
+                *acc = t as Limb;
+                c = t >> Limb::BITS;
+            }
+            public_slice(&got);
+            assert_eq!(got, expect);
+            assert_eq!(into_public(carry), c);
         }
     }
 
