@@ -26,7 +26,7 @@ impl Group for P256 {
     type Element = PublicKey;
 
     fn scalar_from_canonical(bytes: &[u8; 32]) -> Option<Self::Scalar> {
-        Scalar::from_bytes_canonical(bytes).ok()
+        Scalar::from_bytes_below_n(bytes)
     }
 
     fn scalar_to_bytes(scalar: &Self::Scalar) -> [u8; 32] {

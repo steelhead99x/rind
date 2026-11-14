@@ -188,10 +188,14 @@ impl Scalar {
         Self(-self.0)
     }
 
-    /// Whether this is zero, computed in constant time: dalek compares
-    /// scalars with `ct_eq`.
+    /// Whether this is zero. The bit is public.
+    ///
+    /// dalek 5.0.0's `==` is `ct_eq().into()`, which converts the `Choice`
+    /// to `bool` inside the comparison. Declassify the choice first, as
+    /// `invert` does, so the conversion runs on a public bit.
     pub(crate) fn is_zero(&self) -> bool {
-        self.0 == curve25519_dalek::Scalar::ZERO
+        let equal = self.0.ct_eq(&curve25519_dalek::Scalar::ZERO);
+        bool::from(low::ct::into_public(equal))
     }
 
     /// A uniformly random nonzero scalar: 64 bytes from the system's random

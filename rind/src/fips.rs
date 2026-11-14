@@ -117,23 +117,28 @@ pub fn broken(test: &str) -> bool {
 }
 
 /// Lists every [`Error`], each with its code: its place in the list, from 1.
+///
+/// `added` is appended. A code already assigned does not move when a variant
+/// is added.
 macro_rules! errors {
     (
         plain: [$($plain:ident),* $(,)?],
         key: [$($key:ident),* $(,)?],
-        asn1: [$($asn1:ident),* $(,)?] $(,)?
+        asn1: [$($asn1:ident),* $(,)?],
+        added: [$($added:ident),* $(,)?] $(,)?
     ) => {
         const ERRORS: &[Error] = &[
             $(Error::$plain,)*
             $(Error::KeyRejected(KeyRejected(KeyFormatError::$key)),)*
             $(Error::KeyRejected(KeyRejected(KeyFormatError::Asn1(asn1::Error::$asn1))),)*
+            $(Error::$added,)*
         ];
 
         // Fails to compile when a variant is added but not listed.
         #[allow(dead_code)]
         fn exhaustive(error: Error) {
             match error {
-                $(Error::$plain)|* => {}
+                $(Error::$plain)|* | $(Error::$added)|* => {}
                 Error::KeyRejected(KeyRejected(reason)) => match reason {
                     $(KeyFormatError::$key)|* => {}
                     KeyFormatError::Asn1(error) => match error {
@@ -193,6 +198,7 @@ errors! {
         UnsupportedLargeObjectLength,
         UnhandledBitString,
     ],
+    added: [MismatchedCommitment],
 }
 
 /// Wipes every thread's DRBG, returning how many, and fails every draw

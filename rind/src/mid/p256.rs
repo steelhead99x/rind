@@ -1156,23 +1156,6 @@ impl Scalar {
     ///
     /// This returns an error if the scalar is zero or larger than
     /// the curve order.
-    /// A big-endian scalar in `0..n`, zero included.
-    ///
-    /// [`Self::from_bytes_checked`] refuses zero, which a private key cannot
-    /// be. A FROST signature share may be zero.
-    pub(crate) fn from_bytes_canonical(bytes: &[u8]) -> Result<Self, Error> {
-        let full = Self(
-            util::big_endian_slice_any_size_to_u64x4(bytes)
-                .ok_or(KeyFormatError::ScalarOutOfRange)?,
-        );
-        let reduced = full.reduce_mod_n();
-        if low::ct::into_public(reduced.private_eq(&full)) {
-            Ok(full)
-        } else {
-            Err(KeyFormatError::ScalarOutOfRange.into())
-        }
-    }
-
     pub(crate) fn from_bytes_checked(bytes: &[u8]) -> Result<Self, Error> {
         let full = Self(
             util::big_endian_slice_any_size_to_u64x4(bytes)
