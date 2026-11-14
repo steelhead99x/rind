@@ -3921,8 +3921,10 @@ const TABLE_19: [u64; 192] = [
     0xa4b057a736708ea7,
 ];
 
-pub(super) static CURVE_GENERATOR_PRECOMP_COMB: super::AffineMontPointTableComb = [
+pub(super) static CURVE_GENERATOR_PRECOMP_COMB: super::super::AlignedTable<
+    super::AffineMontPointTableComb,
+> = super::super::AlignedTable([
     TABLE_0, TABLE_1, TABLE_2, TABLE_3, TABLE_4, TABLE_5, TABLE_6, TABLE_7, TABLE_8, TABLE_9,
     TABLE_10, TABLE_11, TABLE_12, TABLE_13, TABLE_14, TABLE_15, TABLE_16, TABLE_17, TABLE_18,
     TABLE_19,
-];
+]);

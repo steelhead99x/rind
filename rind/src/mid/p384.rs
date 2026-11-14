@@ -630,7 +630,7 @@ impl JacobianMontPoint {
                 let w = 4 * j + tooth;
                 if w < 77 {
                     let (digit, sign) = windows[w];
-                    let table = &precomp::CURVE_GENERATOR_PRECOMP_COMB[j];
+                    let table = &precomp::CURVE_GENERATOR_PRECOMP_COMB.0[j];
                     let mut tmp = AffineMontPoint::lookup_comb(table, digit);
                     tmp.maybe_negate_y(sign);
                     result.add_inplace_affine(&tmp, digit);
@@ -696,7 +696,7 @@ impl JacobianMontPoint {
             None => p.public_naf::<5>(),
             Some(_) => p.public_naf::<6>(),
         };
-        let g_multiples = &precomp::CURVE_GENERATOR_PRECOMP_COMB[0];
+        let g_multiples = &precomp::CURVE_GENERATOR_PRECOMP_COMB.0[0];
 
         let mut result = Self::infinity();
         for i in (0..g_digits.len()).rev() {
@@ -1576,8 +1576,13 @@ mod tests {
     /// Python's integers, against rind's own arithmetic.
     #[test]
     fn base_point_precomp_comb() {
+        assert_eq!(align_of_val(&precomp::CURVE_GENERATOR_PRECOMP_COMB), 64);
+        assert_eq!(
+            precomp::CURVE_GENERATOR_PRECOMP_COMB.0.as_ptr() as usize % 64,
+            0
+        );
         let mut base = JacobianMontPoint::from_affine(&CURVE_GENERATOR);
-        for table in &precomp::CURVE_GENERATOR_PRECOMP_COMB {
+        for table in &precomp::CURVE_GENERATOR_PRECOMP_COMB.0 {
             let mut multiple = base;
             for (i, entry) in (1..).zip(table.as_chunks::<12>().0) {
                 assert_eq!(&multiple.as_affine().xy, entry);

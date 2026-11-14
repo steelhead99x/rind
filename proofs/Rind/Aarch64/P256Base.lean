@@ -35,17 +35,17 @@ theorem base_multiply_spec (_hr : Runs) (k : mid.p256.Scalar) (_hk : wordsNat k.
     · exact ⟨a, rfl⟩
     · exact absurd (by simp [s1_post1, mid.p256.AffineMontPoint.Y]) r1_post
   · subst r_post
-    obtain ⟨ha, -⟩ := r_post
+    obtain ⟨hx_words, -⟩ := r_post
     subst r1_post
-    obtain ⟨ha1, -⟩ := r1_post
+    obtain ⟨hy_words, -⟩ := r1_post
     have h8 : (xy1.val).length = 8 := xy1.property
-    have hxa : feNat a1 = (pairNat xy1.val).1 := by
-      simp [feNat, ha, s_post, mid.p256.AffineMontPoint.X, List.slice, pairNat]
-    have hya : feNat a2 = (pairNat xy1.val).2 := by
+    have hx : feNat a1 = (pairNat xy1.val).1 := by
+      simp [feNat, hx_words, s_post, mid.p256.AffineMontPoint.X, List.slice, pairNat]
+    have hy : feNat a2 = (pairNat xy1.val).2 := by
       rw [pairNat_drop _ h8]
-      simp [feNat, ha1, s1_post, mid.p256.AffineMontPoint.Y, List.slice, List.take_of_length_le, h8]
+      simp [feNat, hy_words, s1_post, mid.p256.AffineMontPoint.Y, List.slice, List.take_of_length_le, h8]
     refine ⟨(pairNat xy1.val).1, (pairNat xy1.val).2, xy1_post _ p256OnCurve_G tabulated, ?_⟩
-    rw [q_post, pairNat_append _ _ fe.property fe1.property, ← hxa, ← hya]
+    rw [q_post, pairNat_append _ _ fe.property fe1.property, ← hx, ← hy]
     exact Prod.ext fe_post fe1_post
 
 /-- The generator table's first row holds G to 32G, which `tabulated` states

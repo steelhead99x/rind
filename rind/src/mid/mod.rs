@@ -52,3 +52,11 @@ pub(super) mod sha3;
 pub(super) mod util;
 pub(super) mod x25519;
 pub(super) mod xchacha20poly1305;
+
+/// Static point tables aligned so linker placement cannot make vector loads
+/// cross cache lines. This adds less than 64 bytes before each table.
+#[repr(C, align(64))]
+struct AlignedTable<T>(T);
+
+// Also checked by cross builds that cannot run the table tests.
+const _: () = assert!(align_of::<AlignedTable<u8>>() == 64);

@@ -40,8 +40,7 @@ def words(v):
     return [(v >> (64 * i)) & (2**64 - 1) for i in range(4)]
 
 
-def table(cfg, window, row_type, wrapper=None):
-    # `wrapper` names the tuple struct in p256.rs that holds the rows, if any.
+def table(cfg, window, row_type):
     # Booth recoding carries into a window above the top bit.
     rows, points = 256 // window + 1, 2 ** (window - 1)
     out = []
@@ -63,21 +62,18 @@ def table(cfg, window, row_type, wrapper=None):
         for _ in range(window):
             base = add(base, base)
     out.append(f"#[cfg({cfg})]")
-    if wrapper:
-        ty, opening, closing = wrapper, f"super::{wrapper}([", "]);"
-    else:
-        ty, opening, closing = "AffineMontPointTable", "[", "];"
-    out.append(f"pub(super) static CURVE_GENERATOR_PRECOMP: super::{ty} = {opening}")
+    out.append("pub(super) static CURVE_GENERATOR_PRECOMP: super::super::AlignedTable<super::AffineMontPointTable> =")
+    out.append("    super::super::AlignedTable([")
     # Packed as rustfmt packs them.
-    line = "   "
+    line = "       "
     for j in range(rows):
         item = f" ROW_{j},"
         if len(line) + len(item) > 100:
             out.append(line)
-            line = "   "
+            line = "       "
         line += item
     out.append(line)
-    out.append(closing)
+    out.append("    ]);")
     return out
 
 
@@ -87,7 +83,7 @@ out = [
     "",
     *table('rind_backend = "x86_64"', 7, "[u64; 512]"),
     "",
-    *table('not(rind_backend = "x86_64")', 6, "[u64; 256]", wrapper="AlignedTable"),
+    *table('not(rind_backend = "x86_64")', 6, "[u64; 256]"),
 ]
 
 path = pathlib.Path(__file__).resolve().parent.parent / "rind/src/mid/p256/precomp.rs"

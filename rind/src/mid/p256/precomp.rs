@@ -19131,11 +19131,13 @@ const ROW_36: [u64; 512] = [
 ];
 
 #[cfg(rind_backend = "x86_64")]
-pub(super) static CURVE_GENERATOR_PRECOMP: super::AffineMontPointTable = [
-    ROW_0, ROW_1, ROW_2, ROW_3, ROW_4, ROW_5, ROW_6, ROW_7, ROW_8, ROW_9, ROW_10, ROW_11, ROW_12,
-    ROW_13, ROW_14, ROW_15, ROW_16, ROW_17, ROW_18, ROW_19, ROW_20, ROW_21, ROW_22, ROW_23, ROW_24,
-    ROW_25, ROW_26, ROW_27, ROW_28, ROW_29, ROW_30, ROW_31, ROW_32, ROW_33, ROW_34, ROW_35, ROW_36,
-];
+pub(super) static CURVE_GENERATOR_PRECOMP: super::super::AlignedTable<super::AffineMontPointTable> =
+    super::super::AlignedTable([
+        ROW_0, ROW_1, ROW_2, ROW_3, ROW_4, ROW_5, ROW_6, ROW_7, ROW_8, ROW_9, ROW_10, ROW_11,
+        ROW_12, ROW_13, ROW_14, ROW_15, ROW_16, ROW_17, ROW_18, ROW_19, ROW_20, ROW_21, ROW_22,
+        ROW_23, ROW_24, ROW_25, ROW_26, ROW_27, ROW_28, ROW_29, ROW_30, ROW_31, ROW_32, ROW_33,
+        ROW_34, ROW_35, ROW_36,
+    ]);
 
 #[cfg(not(rind_backend = "x86_64"))]
 /// 1G..32G << 0
@@ -30361,9 +30363,10 @@ const ROW_42: [u64; 256] = [
 ];
 
 #[cfg(not(rind_backend = "x86_64"))]
-pub(super) static CURVE_GENERATOR_PRECOMP: super::AlignedTable = super::AlignedTable([
-    ROW_0, ROW_1, ROW_2, ROW_3, ROW_4, ROW_5, ROW_6, ROW_7, ROW_8, ROW_9, ROW_10, ROW_11, ROW_12,
-    ROW_13, ROW_14, ROW_15, ROW_16, ROW_17, ROW_18, ROW_19, ROW_20, ROW_21, ROW_22, ROW_23, ROW_24,
-    ROW_25, ROW_26, ROW_27, ROW_28, ROW_29, ROW_30, ROW_31, ROW_32, ROW_33, ROW_34, ROW_35, ROW_36,
-    ROW_37, ROW_38, ROW_39, ROW_40, ROW_41, ROW_42,
-]);
+pub(super) static CURVE_GENERATOR_PRECOMP: super::super::AlignedTable<super::AffineMontPointTable> =
+    super::super::AlignedTable([
+        ROW_0, ROW_1, ROW_2, ROW_3, ROW_4, ROW_5, ROW_6, ROW_7, ROW_8, ROW_9, ROW_10, ROW_11,
+        ROW_12, ROW_13, ROW_14, ROW_15, ROW_16, ROW_17, ROW_18, ROW_19, ROW_20, ROW_21, ROW_22,
+        ROW_23, ROW_24, ROW_25, ROW_26, ROW_27, ROW_28, ROW_29, ROW_30, ROW_31, ROW_32, ROW_33,
+        ROW_34, ROW_35, ROW_36, ROW_37, ROW_38, ROW_39, ROW_40, ROW_41, ROW_42,
+    ]);

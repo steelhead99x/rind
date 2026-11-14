@@ -57,7 +57,9 @@ for j in range(TABLES):
     out.append("")
     for _ in range(20):
         base = add(base, base)
-out.append("pub(super) static CURVE_GENERATOR_PRECOMP_COMB: super::AffineMontPointTableComb = [")
+out.append("pub(super) static CURVE_GENERATOR_PRECOMP_COMB: super::super::AlignedTable<")
+out.append("    super::AffineMontPointTableComb,")
+out.append("> = super::super::AlignedTable([")
 # Packed as rustfmt packs them.
 line = "   "
 for j in range(TABLES):
@@ -67,7 +69,7 @@ for j in range(TABLES):
         line = "   "
     line += item
 out.append(line)
-out.append("];")
+out.append("]);")
 
 path = pathlib.Path(__file__).resolve().parent.parent / "rind/src/mid/p384/precomp.rs"
 # Renamed into place, so a failure partway leaves the committed file whole.
