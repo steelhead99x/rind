@@ -7,8 +7,8 @@
 //! the rolled loop in `generic::sha512` on 32-bit targets, where the unrolled
 //! body is about 47 KiB and misses a 16 KiB instruction cache. A message of
 //! at most 55 bytes, one padded block, finishes through the same rolled slot
-//! on 32-bit. Longer SHA-256 stays on HACL*: a second compressor on every
-//! block made long hashes slower on an ESP32-S3.
+//! on targets that build the native slot. Longer SHA-256 stays on HACL*: a
+//! second compressor on every block made long hashes slower on an ESP32-S3.
 
 use libcrux_sha2::hacl::sha256_update_nblocks;
 #[cfg(target_pointer_width = "64")]
@@ -97,6 +97,7 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
 // writes 32 bytes at `out`.
 #[cfg(sha512_asm_slot)]
 unsafe extern "C" {
+    #[link_name = concat!("rind_", env!("CARGO_PKG_VERSION_MAJOR"), "_", env!("CARGO_PKG_VERSION_MINOR"), "_", env!("CARGO_PKG_VERSION_PATCH"), "_sha256_finish_one")]
     fn rind_sha256_finish_one(
         state: *const u32,
         message: *const u8,
@@ -163,7 +164,7 @@ mod tests {
     #[test]
     fn sha256_finish_one_block_after_chaining() {
         // The first block is the long compressor. The 32-byte tail is one
-        // padded block, so a 32-bit build finishes it in the rolled slot,
+        // padded block, so a native-slot build finishes it in the rolled slot,
         // with a chaining value that is not the IV.
         let message = pattern(96);
         let mut state = IV;

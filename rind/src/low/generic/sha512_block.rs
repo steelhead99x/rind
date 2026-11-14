@@ -43,7 +43,7 @@ macro_rules! SSIG1 {
 
 #[cfg_attr(sha_slot_driver, unsafe(link_section = ".text.rind_rolled_slot"))]
 #[inline(never)]
-fn sha512_compress_block(state: &mut [u64; 8], block: &[u8]) {
+fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
     let mut a = state[0];
     let mut b = state[1];
     let mut c = state[2];
@@ -103,16 +103,10 @@ fn sha512_compress_block(state: &mut [u64; 8], block: &[u8]) {
 
 /// Eight big-endian bytes of a 128-byte block at word `t`.
 #[inline(always)]
-fn load_be_u64(block: &[u8], t: usize) -> u64 {
+fn load_be_u64(block: &[u8; 128], t: usize) -> u64 {
     // SAFETY: `t < 16` and `block` is one 128-byte SHA-512 block, so these
     // eight bytes are in range. `t` is the public round index.
-    let bytes = unsafe {
-        block
-            .as_ptr()
-            .add(t * 8)
-            .cast::<[u8; 8]>()
-            .read_unaligned()
-    };
+    let bytes = unsafe { block.as_ptr().add(t * 8).cast::<[u8; 8]>().read_unaligned() };
     u64::from_be_bytes(bytes)
 }
 

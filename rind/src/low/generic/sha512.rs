@@ -7,9 +7,9 @@
 //! the ESP32-S3's 16 KiB instruction cache — so every block streams its
 //! code from flash, about 33× rind's compact loop. This implementation
 //! follows [`sha256`](sha256.rs): one 16-word window and an 80-round loop.
-//! On 32-bit portable targets that loop is assembled into
-//! `.text.rind_rolled_slot`, padded to a multiple of 2048 bytes so the
-//! following code keeps its instruction-cache set. The round functions and
+//! On native ELF x86, RISC-V32, and Xtensa that loop is assembled into
+//! `.text.rind_rolled_slot`. Its size plus measured out-of-slot slack is
+//! rounded to 2048 bytes; linked placement still needs board validation. The round functions and
 //! the eighty `K` constants are FIPS 180-4 §4.1.3 and §4.2.3. The unit tests
 //! check FIPS 180-4's SHA-512 vectors and, on every backend except 32-bit
 //! portable, the same compression the backend ships (HACL* or aws-lc).
@@ -38,6 +38,7 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
 // It reads `len` bytes at `blocks` and eight `u64`s at `state`.
 #[cfg(sha512_asm_slot)]
 unsafe extern "C" {
+    #[link_name = concat!("rind_", env!("CARGO_PKG_VERSION_MAJOR"), "_", env!("CARGO_PKG_VERSION_MINOR"), "_", env!("CARGO_PKG_VERSION_PATCH"), "_sha512_compress_blocks")]
     fn rind_sha512_compress_blocks(state: *mut u64, blocks: *const u8, len: usize);
 }
 
@@ -84,8 +85,12 @@ mod tests {
     fn hash(message: &[u8]) -> [u8; 64] {
         let padded = padded(message);
         let mut state = IV;
+        // The block is the secret (a message, or an HMAC key block). Mark it
+        // before this rolled loop, which 64-bit builds compile only in tests,
+        // so ctgrind sees it. The state is public again before a comparison.
+        crate::low::ct::secret_slice(&padded);
         sha512_compress_blocks(&mut state, &padded);
-        encode(state)
+        encode(crate::low::ct::into_public(state))
     }
 
     fn digest_hex(message: &[u8], hex: &str) {

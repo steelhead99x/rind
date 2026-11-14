@@ -194,6 +194,31 @@ mod tests {
     }
 
     #[test]
+    fn hchacha_matches_rounds() {
+        // Both pointer widths share these rounds. Mark the key before the
+        // public entry point and declassify only its output for comparison.
+        let key = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+            0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
+            0x1c, 0x1d, 0x1e, 0x1f,
+        ];
+        let nonce: [u8; 16] = [
+            0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x4a, 0x00, 0x00, 0x00, 0x00, 0x31, 0x41,
+            0x59, 0x27,
+        ];
+        let mut st = state(&key, &nonce);
+        rounds(&mut st);
+        let mut expected = [0u8; 32];
+        for i in 0..8 {
+            let w = if i < 4 { st[i] } else { st[i + 8] };
+            expected[4 * i..4 * (i + 1)].copy_from_slice(&w.to_le_bytes());
+        }
+        crate::low::ct::secret_slice(&key);
+        let got = crate::low::ct::into_public(hchacha20(&key, &nonce));
+        assert_eq!(got, expected);
+    }
+
+    #[test]
     fn hchacha_test_vectors() {
         // From draft-irtf-cfrg-xchacha-03
 

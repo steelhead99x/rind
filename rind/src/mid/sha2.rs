@@ -384,6 +384,29 @@ mod tests {
     }
 
     #[test]
+    fn sha256_short_updates() {
+        for len in [0, 1, 15, 16, 17, 55, 56, 63, 64, 65, 127, 128, 129, 4096] {
+            for prefix in [0, 1, 15, 16, 17, 48, 63, 64] {
+                let message: Vec<u8> = (0..len + prefix).map(|i| (i * 17 + 3) as u8).collect();
+                let expected = Sha256State::new().finish_with(&message);
+                crate::low::ct::secret_slice(&message);
+                for chunk in [1, 16] {
+                    let mut context = Sha256Context::new();
+                    context.update(&message[..prefix]);
+                    for bytes in message[prefix..].chunks(chunk) {
+                        context.update(bytes);
+                    }
+                    let got = crate::low::ct::into_public(context.finish());
+                    assert_eq!(
+                        got, expected,
+                        "{prefix} + {len} bytes in {chunk}-byte updates"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn sha256_all_lengths() {
         // see cifra `vector_length` and associated
         let mut outer = Sha256Context::new();

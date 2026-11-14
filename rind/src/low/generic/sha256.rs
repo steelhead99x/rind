@@ -42,7 +42,7 @@ macro_rules! SSIG1 {
 // `pub(crate)` so the slot driver, a separate crate that includes this file,
 // can call it. Inside rind only `sha256_compress_blocks` does.
 #[allow(unreachable_pub)]
-pub(crate) fn sha256_compress_block(state: &mut [u32; 8], block: &[u8]) {
+pub(crate) fn sha256_compress_block(state: &mut [u32; 8], block: &[u8; 64]) {
     let mut a = state[0];
     let mut b = state[1];
     let mut c = state[2];
@@ -103,7 +103,7 @@ pub(crate) fn sha256_compress_block(state: &mut [u32; 8], block: &[u8]) {
 
 /// Four big-endian bytes of a 64-byte block at word `t`.
 #[inline(always)]
-fn load_be_u32(block: &[u8], t: usize) -> u32 {
+fn load_be_u32(block: &[u8; 64], t: usize) -> u32 {
     // SAFETY: `t < 16` and `block` is one 64-byte SHA-256 block, so these
     // four bytes are in range. `t` is the public round index.
     let bytes = unsafe { block.as_ptr().add(t * 4).cast::<[u8; 4]>().read_unaligned() };
