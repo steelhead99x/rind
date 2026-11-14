@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 use std::num::NonZeroU32;
+use std::sync::Mutex;
 
 use rind::aead::gcm::{self, TagLength};
 use rind::agreement::{ECDH_P256, ECDH_P384, ECDH_P521, PrivateKey};
@@ -938,7 +939,10 @@ fn mldsa_siggen(set: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
 /// `signatureInterface`. `acvptool` does not send it. Without it, a `1` flag
 /// is the supplied `mu`, a non-empty context is the external interface, an
 /// absent flag is external, and a `0` flag with an empty context is the
-/// internal interface, which is what aws-lc's module wrapper does.
+/// internal interface, which is what aws-lc's module wrapper does. An
+/// external-interface test whose context is empty is the same bytes as that
+/// internal case, so those sample signatures are not distinguishable here.
+/// `mid::mldsa`'s ACVP test passes the interface and checks them.
 fn mldsa_mu<'a>(
     external_mu: &'a [u8],
     context: &[u8],
@@ -1064,6 +1068,23 @@ fn mldsa_sigver(set: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     public_reply(vec![vec![u8::from(ok)]])
 }
 
+/// One generated key per `(bits, hash, pad)` for the life of the process.
+///
+/// `acvptool` signs every test in a sigGen group with one key and rejects a
+/// wrapper that returns a different modulus mid-group. The key is wiped on
+/// drop with the rest of `RsaKeyPair`, when this process exits.
+struct CachedSigGen {
+    bits: u32,
+    hash: String,
+    pad: String,
+    key: RsaKeyPair,
+}
+
+fn rsa_siggen_keys() -> &'static Mutex<Vec<CachedSigGen>> {
+    static KEYS: Mutex<Vec<CachedSigGen>> = Mutex::new(Vec::new());
+    &KEYS
+}
+
 fn rsa_siggen(rest: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
     let (hash, pad) = rest
         .split_once('/')
@@ -1079,9 +1100,30 @@ fn rsa_siggen(rest: &str, args: &[Vec<u8>]) -> Result<Reply, String> {
         _ => return Err(format!("unsupported RSA modulus {bits}")),
     };
     let alg = rsa_sign_alg(hash, pad)?;
-    let key = RsaKeyPair::generate(size).map_err(|err| err.to_string())?;
-    let signature = key.sign(alg, message).map_err(|err| err.to_string())?;
-    let (n, e) = pkcs1_public(key.public_key(alg).as_ref())?;
+    let mut keys = rsa_siggen_keys()
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    if !keys
+        .iter()
+        .any(|cached| cached.bits == bits && cached.hash == hash && cached.pad == pad)
+    {
+        let key = RsaKeyPair::generate(size).map_err(|err| err.to_string())?;
+        keys.push(CachedSigGen {
+            bits,
+            hash: hash.to_string(),
+            pad: pad.to_string(),
+            key,
+        });
+    }
+    let cached = keys
+        .iter()
+        .find(|cached| cached.bits == bits && cached.hash == hash && cached.pad == pad)
+        .ok_or("RSA sigGen key")?;
+    let signature = cached
+        .key
+        .sign(alg, message)
+        .map_err(|err| err.to_string())?;
+    let (n, e) = pkcs1_public(cached.key.public_key(alg).as_ref())?;
     public_reply(vec![n, e, signature.as_ref().to_vec()])
 }
 
@@ -1398,6 +1440,22 @@ mod tests {
         );
     }
 
+    /// `acvptool` signs a sigGen group with one key. A second call for the
+    /// same modulus, hash, and padding returns that key, not a new one.
+    #[test]
+    fn rsa_siggen_reuses_the_group_key() {
+        let bits = 2048u32.to_ne_bytes().to_vec();
+        let message = b"acvp".to_vec();
+        let first = handle(
+            "RSA/sigGen/SHA2-256/pkcs1v1.5",
+            &[bits.clone(), message.clone()],
+        )
+        .unwrap();
+        let second = handle("RSA/sigGen/SHA2-256/pkcs1v1.5", &[bits, message]).unwrap();
+        assert_eq!(first[0], second[0], "n");
+        assert_eq!(first[1], second[1], "e");
+    }
+
     /// RFC 5869 A.1. Extract and expand both return `Result` since the FIPS
     /// module landed; this is the chain `KDA/HKDF` runs.
     #[test]
@@ -1418,5 +1476,18 @@ mod tests {
                 "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
             )
         );
+    }
+
+    /// A large-data test hashes `content` repeated `times` times. The sample
+    /// groups are multi-gigabyte, so this is a short stand-in for that call.
+    #[test]
+    fn sha256_ldt_repeats_the_content() {
+        let once = handle("SHA2-256", &[b"abcabcabc".to_vec()]).unwrap();
+        let repeated = handle(
+            "SHA2-256/LDT",
+            &[b"abc".to_vec(), 3u64.to_ne_bytes().to_vec()],
+        )
+        .unwrap();
+        assert_eq!(once[0], repeated[0]);
     }
 }

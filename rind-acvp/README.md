@@ -3,13 +3,15 @@
 Unpublished. A module wrapper for [BoringSSL's and aws-lc's `acvptool`](https://github.com/aws/aws-lc/tree/main/util/fipstools/acvp/acvptool): that tool speaks ACVP's sessions and JSON, and this binary runs the operation.
 
 ```shell
-cargo build -p rind-acvp
-acvptool -wrapper target/debug/rind-acvp -json prompts.json
+# From a checkout of aws-lc. The binary has to be on PATH.
+go build -o acvptool ./util/fipstools/acvp/acvptool
+
+admin/acvp
 ```
 
-`prompts.json` is a JSON array of vector sets, prompts only. The sample files in `thirdparty/acvp` are `internalProjection.json` and also carry the answers, which `acvptool` rejects when the field is one it reads as an input (AES-GCM's `ct` and `tag` on an encrypt test). Strip those before passing the file. `admin/acvp` does this for the sets the wrapper answers offline.
+`admin/acvp` runs `cargo test -p rind-acvp`, then `acvptool -wrapper target/debug/rind-acvp -json` on every sample set in `thirdparty/acvp` that this wrapper answers, and compares the replies to the published answers. The sample files are `internalProjection.json` and also carry the answers. The script strips fields `acvptool` reads as inputs (AES-GCM's `ct` and `tag` on an encrypt test), gives each HMAC test its own length group, and concatenates a KDA hybrid secret's `t` onto `z` because `acvptool` forwards only `z`. `ACVP_SKIP_TOOL=1` runs the crate tests only. Without `acvptool` on `PATH`, `admin/acvp` stops and prints the build line above.
 
-`cargo test -p rind-acvp` checks those answers directly, including SHA-256's standard Monte Carlo test. `acvptool` is what checks the byte framing: a reply is written to the stdout fd, because a block-buffered pipe never flushes a reply that has no newline.
+`prompts.json` for a direct `acvptool` invocation is a JSON array of vector sets, prompts only. `cargo test -p rind-acvp` checks answers by calling the handlers, including the standard Monte Carlo groups the sample files carry. The vendored SHA-256 set has the alternate Monte Carlo, which `acvptool` does not drive. `acvptool` is what checks the byte framing: a reply is written to the stdout fd, because a block-buffered pipe never flushes a reply that has no newline.
 
 A debug build, and a release build with `--cfg rind_cpu_disable`, honours `RIND_CPU_DISABLE_<feature>`, so one process is one CPU path. `rind-fips` applies that mask as the module loads; this binary calls rind, which is where `__acvp` lives. AES-GCM with an internal IV is refused until [that quest](../quest/m4/fips/gcm-iv.md). RSA key generation is not advertised: rind has no FIPS 186-5 generation from the server's seeds or candidates.
 

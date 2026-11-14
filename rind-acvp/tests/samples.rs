@@ -146,22 +146,38 @@ fn mldsa44_keygen_from_seed() {
     assert!(checked > 0);
 }
 
+/// Standard Monte Carlo, the iteration `acvptool` sends. The vendored
+/// SHA-256 set has only the alternate version, which `acvptool` does not
+/// drive; SHA-384 and the other files here carry the standard one.
 #[test]
-fn sha2_256_mct_standard() {
-    let set = set("SHA2-256-1.0");
-    for group in set["testGroups"].as_array().unwrap() {
-        if group["testType"] != "MCT" || group["mctVersion"] != "standard" {
-            continue;
-        }
-        for test in group["tests"].as_array().unwrap() {
-            let mut digest = hex(test, "msg");
-            for result in test["resultsArray"].as_array().unwrap() {
-                let reply = handle("SHA2-256/MCT", &[digest]).unwrap();
-                digest = reply[0].to_vec();
-                assert_eq!(digest, hex(result, "md"));
+fn hash_mct_standard() {
+    let mut checked = 0;
+    for name in [
+        "SHA2-384-1.0",
+        "SHA2-512-1.0",
+        "SHA2-512-256-1.0",
+        "SHA3-256-2.0",
+        "SHA3-384-2.0",
+        "SHA3-512-2.0",
+    ] {
+        let set = set(name);
+        let command = set["algorithm"].as_str().unwrap();
+        for group in set["testGroups"].as_array().unwrap() {
+            if group["testType"] != "MCT" || group["mctVersion"] != "standard" {
+                continue;
+            }
+            for test in group["tests"].as_array().unwrap() {
+                let mut digest = hex(test, "msg");
+                for result in test["resultsArray"].as_array().unwrap() {
+                    let reply = handle(&format!("{command}/MCT"), &[digest]).unwrap();
+                    digest = reply[0].to_vec();
+                    assert_eq!(digest, hex(result, "md"), "{name}");
+                }
+                checked += 1;
             }
         }
     }
+    assert!(checked > 0);
 }
 
 #[test]

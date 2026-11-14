@@ -1,72 +1,313 @@
 #!/usr/bin/env bash
-# Check rind-acvp against NIST's sample answers.
+# Run rind-acvp against the vendored ACVP sample sets.
 #
-# With no arguments, runs the crate's tests, which compare handlers to the
-# sample files. With acvptool on PATH, also runs it on the prompt-only forms
-# of SHA-256 (no 8 GiB LDT group, no alternate Monte Carlo, which acvptool
-# does not send) and AES-GCM, and compares the tool's output to the answers.
+# Needs aws-lc's acvptool on PATH:
+#
+#   go build -o acvptool ./util/fipstools/acvp/acvptool
+#
+# ACVP_SKIP_TOOL=1 runs the crate tests and stops, for a machine that has
+# not built acvptool.
+#
+# The sample files are internalProjection.json and carry answers. This
+# script turns each one into the prompt acvptool expects, then compares
+# the replies to those answers. Groups that stay out:
+#
+#   * hash LDT (8 GiB and larger) and SHA-2's alternate Monte Carlo, which
+#     acvptool does not drive. A short LDT is a crate test.
+#   * AES-CTR tests whose payloadLen is not a whole number of bytes.
+#     acvptool rejects them. mid::aes::acvp_ctr covers the mask.
+#   * ECDSA keyGen whose secretGenerationMode is not "testing candidates".
+#   * RSA sigVer groups whose public exponent is above 33 bits. rind
+#     refuses those, matching aws-lc-rs. The in-process sample test skips
+#     them the same way.
+#   * ML-DSA sigGen tests with signatureInterface "external", externalMu
+#     false, and an empty context. acvptool does not send the interface, so
+#     those bytes match the internal interface. mid::mldsa's ACVP test
+#     passes the interface and checks the signatures.
+#   * XECDH and DetECDSA. This wrapper does not advertise them.
+#
+# KDA groups store a hybrid shared secret as z and t. acvptool forwards
+# only z, so the script concatenates t onto z first. A live NIST session
+# still drops t until acvptool concatenates it. rind's acvp_kda test covers
+# the hybrid path without acvptool.
+#
+# ECDSA, EdDSA, and RSA sigGen answers are fresh keys. The script checks
+# that acvptool accepts the replies. acvptool self-verifies ECDSA and RSA
+# signatures. RSA sigGen keeps one key per modulus, hash, and padding for
+# the life of the process, which is what acvptool requires of a group.
 set -euo pipefail
 
-root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-cd "$root"
+cd "$(dirname "$0")/.."
 
 cargo test -p rind-acvp --locked
 
+if [ "${ACVP_SKIP_TOOL:-}" = 1 ]; then
+  exit 0
+fi
+
 if ! command -v acvptool >/dev/null; then
-    echo "acvptool is not on PATH; the crate tests are the offline check" >&2
-    exit 0
+  echo "acvptool is not on PATH." >&2
+  echo "From a checkout of aws-lc:" >&2
+  echo "  go build -o acvptool ./util/fipstools/acvp/acvptool" >&2
+  exit 1
 fi
 
 cargo build -p rind-acvp --locked
-wrapper=$root/target/debug/rind-acvp
 
-python3 - "$wrapper" "$root/thirdparty/acvp" <<'PY'
-import json, subprocess, sys
-wrapper, base = sys.argv[1], sys.argv[2]
+export RIND_ACVP_WRAPPER="${RIND_ACVP_WRAPPER:-$PWD/target/debug/rind-acvp}"
+export RIND_ACVP_SAMPLES="${RIND_ACVP_SAMPLES:-$PWD/thirdparty/acvp}"
 
-def run(name, edit):
-    src = json.load(open(f"{base}/{name}.json"))
-    prompt = json.loads(json.dumps(src))
-    prompt["testGroups"] = [g for g in prompt["testGroups"] if edit(g)]
-    for g in prompt["testGroups"]:
-        for t in g["tests"]:
-            if name.startswith("ACVP-AES-GCM") and g["direction"] == "encrypt":
-                t.pop("ct", None)
-                t.pop("tag", None)
-            elif name.startswith("ACVP-AES-GCM"):
-                t.pop("pt", None)
-                t.pop("testPassed", None)
-    out = subprocess.check_output(
-        ["acvptool", "-wrapper", wrapper, "-json", "/dev/stdin"],
+python3 - "$RIND_ACVP_WRAPPER" "$(command -v acvptool)" "$RIND_ACVP_SAMPLES" <<'PY'
+import json
+import subprocess
+import sys
+from copy import deepcopy
+
+WRAPPER = sys.argv[1]
+TOOL = sys.argv[2]
+BASE = sys.argv[3]
+
+ANSWER = {
+    "md",
+    "mac",
+    "ct",
+    "tag",
+    "pt",
+    "ek",
+    "dk",
+    "pk",
+    "sk",
+    "signature",
+    "dkm",
+    "dkms",
+    "k",
+    "c",
+    "q",
+    "testPassed",
+    "resultsArray",
+}
+
+
+def fold(value):
+    if isinstance(value, str):
+        return value.lower()
+    if isinstance(value, list):
+        return [fold(item) for item in value]
+    if isinstance(value, dict):
+        return {key: fold(item) for key, item in value.items()}
+    return value
+
+
+def same(expected, got):
+    if isinstance(got, list) and got and isinstance(got[0], dict):
+        if not isinstance(expected, list) or len(expected) != len(got):
+            return False
+        keys = ("md", "pt", "ct", "key", "iv")
+        for left, right in zip(expected, got):
+            for key in keys:
+                if key in right and fold(left.get(key)) != fold(right.get(key)):
+                    return False
+        return True
+    return fold(expected) == fold(got)
+
+
+def keep_hash(group):
+    kind = group.get("testType")
+    if kind == "LDT":
+        return False
+    if kind == "MCT":
+        return group.get("mctVersion") == "standard"
+    return kind == "AFT"
+
+
+def keep_ctr(group):
+    group["tests"] = [
+        test for test in group["tests"] if test.get("payloadLen", 0) % 8 == 0
+    ]
+    return bool(group["tests"])
+
+
+def keep_ecdsa_keygen(group):
+    return group.get("secretGenerationMode") == "testing candidates"
+
+
+def e_bits(hex_e):
+    exponent = bytes.fromhex(hex_e)
+    return (len(exponent) - 1) * 8 + exponent[0].bit_length()
+
+
+def keep_rsa_sigver(group):
+    # rind's PublicKey refuses a public exponent above 33 bits.
+    return e_bits(group["e"]) <= 33
+
+
+def adapt_hmac(group):
+    out = []
+    for test in group["tests"]:
+        one = {
+            "tgId": group["tgId"],
+            "testType": group["testType"],
+            "msgLen": test["msgLen"],
+            "keyLen": test["keyLen"],
+            "macLen": test["macLen"],
+            "tests": [test],
+        }
+        out.append(one)
+    return out
+
+
+def adapt_kda(group):
+    # acvptool sends z and ignores the auxiliary secret t.
+    if group.get("usesHybridSharedSecret"):
+        for test in group["tests"]:
+            params = test["kdfParameter"]
+            params["z"] = params.get("z", "") + params.get("t", "")
+            params.pop("t", None)
+        group["usesHybridSharedSecret"] = False
+    return [group]
+
+
+def adapt_mldsa_siggen(group):
+    # An empty external context is indistinguishable from the internal
+    # interface in the bytes acvptool sends.
+    if group.get("signatureInterface") == "external" and not group.get("externalMu"):
+        group["tests"] = [test for test in group["tests"] if test.get("context")]
+    return [group] if group["tests"] else []
+
+
+def strip_aead(group):
+    for test in group["tests"]:
+        if group.get("direction") == "encrypt":
+            test.pop("ct", None)
+            test.pop("tag", None)
+        else:
+            test.pop("pt", None)
+            test.pop("testPassed", None)
+
+
+# name, keep, adapt, strip, compare
+SETS = [
+    ("SHA2-256-1.0", keep_hash, None, None, True),
+    ("SHA2-384-1.0", keep_hash, None, None, True),
+    ("SHA2-512-1.0", keep_hash, None, None, True),
+    ("SHA2-512-256-1.0", keep_hash, None, None, True),
+    ("SHA3-256-2.0", keep_hash, None, None, True),
+    ("SHA3-384-2.0", keep_hash, None, None, True),
+    ("SHA3-512-2.0", keep_hash, None, None, True),
+    ("HMAC-SHA-1-2.0", None, adapt_hmac, None, True),
+    ("HMAC-SHA2-256-2.0", None, adapt_hmac, None, True),
+    ("HMAC-SHA2-384-2.0", None, adapt_hmac, None, True),
+    ("HMAC-SHA2-512-2.0", None, adapt_hmac, None, True),
+    ("ACVP-AES-ECB-1.0", None, None, None, True),
+    ("ACVP-AES-CBC-1.0", None, None, None, True),
+    ("ACVP-AES-CTR-1.0", keep_ctr, None, None, True),
+    ("ACVP-AES-GCM-1.0", None, None, strip_aead, True),
+    ("ACVP-AES-GMAC-1.0", None, None, strip_aead, True),
+    ("ACVP-AES-KW-1.0", None, None, strip_aead, True),
+    ("ACVP-AES-KWP-1.0", None, None, strip_aead, True),
+    ("KDA-HKDF-Sp800-56Cr2", None, adapt_kda, None, True),
+    ("ECDSA-KeyVer-FIPS186-5", None, None, None, True),
+    ("ECDSA-SigVer-FIPS186-5", None, None, None, True),
+    ("ECDSA-KeyGen-FIPS186-5", keep_ecdsa_keygen, None, None, False),
+    ("ECDSA-SigGen-FIPS186-5", None, None, None, False),
+    ("EDDSA-KeyVer-1.0", None, None, None, True),
+    ("EDDSA-SigVer-1.0", None, None, None, True),
+    ("EDDSA-KeyGen-1.0", None, None, None, False),
+    ("EDDSA-SigGen-1.0", None, None, None, False),
+    ("ML-KEM-keyGen-FIPS203", None, None, None, True),
+    ("ML-KEM-encapDecap-FIPS203-tr1", None, None, None, True),
+    ("ML-DSA-keyGen-FIPS204", None, None, None, True),
+    ("ML-DSA-sigGen-FIPS204", None, adapt_mldsa_siggen, None, True),
+    ("ML-DSA-sigVer-FIPS204", None, None, None, True),
+    ("RSA-DecryptionPrimitive-Sp800-56Br2", None, None, None, True),
+    ("RSA-SignaturePrimitive-2.0", None, None, None, True),
+    ("RSA-SigVer-FIPS186-5", keep_rsa_sigver, None, None, True),
+    ("RSA-SigGen-FIPS186-5", None, None, None, False),
+]
+
+
+def run_set(name, keep, adapt, strip, compare):
+    with open(f"{BASE}/{name}.json") as handle:
+        src = json.load(handle)
+    prompt = deepcopy(src)
+    expected = {}
+    groups = []
+    next_id = 1
+    for group in prompt["testGroups"]:
+        if keep is not None and not keep(group):
+            continue
+        produced = adapt(group) if adapt else [group]
+        for item in produced:
+            item = deepcopy(item)
+            item["tgId"] = next_id
+            for test in item["tests"]:
+                expected[(next_id, test["tcId"])] = deepcopy(test)
+            if strip:
+                strip(item)
+            groups.append(item)
+            next_id += 1
+    if not groups:
+        print(f"{name}: nothing to run")
+        return 0
+    prompt["testGroups"] = groups
+    proc = subprocess.run(
+        [TOOL, "-wrapper", WRAPPER, "-json", "/dev/stdin"],
         input=json.dumps([prompt]).encode(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
-    return src, {g["tgId"]: g for g in json.loads(out)[0]["testGroups"]}
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stderr.decode(errors="replace")[-4000:])
+        sys.stderr.write(proc.stdout.decode(errors="replace")[-2000:])
+        print(f"{name}: acvptool exited {proc.returncode}", file=sys.stderr)
+        return 1
+    got = json.loads(proc.stdout)[0]["testGroups"]
+    checked = 0
+    mismatches = []
+    seen = set()
+    for group in got:
+        for test in group["tests"]:
+            key = (group["tgId"], test["tcId"])
+            seen.add(key)
+            if not compare:
+                checked += 1
+                continue
+            exp = expected[key]
+            for field, value in test.items():
+                if field not in ANSWER or field == "tcId":
+                    continue
+                if field not in exp:
+                    continue
+                if not same(exp[field], value):
+                    mismatches.append((key, field, exp[field], value))
+            checked += 1
+    missing = [key for key in expected if key not in seen]
+    if missing or mismatches:
+        print(
+            f"{name}: {len(mismatches)} mismatches, {len(missing)} missing",
+            file=sys.stderr,
+        )
+        for item in mismatches[:8]:
+            key, field, exp, value = item
+            print(f"  {key} {field}", file=sys.stderr)
+            print(f"    expected {str(exp)[:180]}", file=sys.stderr)
+            print(f"    got      {str(value)[:180]}", file=sys.stderr)
+        if missing[:4]:
+            print(f"  missing {missing[:4]}", file=sys.stderr)
+        return 1
+    print(f"{name}: {checked}")
+    return 0
 
-src, got = run(
-    "SHA2-256-1.0",
-    lambda g: g.get("testType") == "AFT" or g.get("mctVersion") == "standard" and g.get("testType") == "MCT",
-)
-n = 0
-for g in src["testGroups"]:
-    if g["tgId"] not in got:
-        continue
-    for t, u in zip(g["tests"], got[g["tgId"]]["tests"]):
-        if g["testType"] == "AFT":
-            assert t["md"].lower() == u["md"].lower()
-        else:
-            for a, b in zip(t["resultsArray"], u["resultsArray"]):
-                assert a["md"].lower() == b["md"].lower()
-        n += 1
-print(f"sha256 {n}")
 
-src, got = run("ACVP-AES-GCM-1.0", lambda g: True)
-n = 0
-for g in src["testGroups"]:
-    for t, u in zip(g["tests"], got[g["tgId"]]["tests"]):
-        if g["direction"] == "encrypt":
-            assert (u["ct"] + u["tag"]).lower() == (t["ct"] + t["tag"]).lower()
-        else:
-            assert u["testPassed"] == t["testPassed"]
-        n += 1
-print(f"aes-gcm {n}")
+def main():
+    names = sys.argv[4:]
+    selected = [item for item in SETS if not names or item[0] in names]
+    failed = 0
+    for item in selected:
+        failed += run_set(*item)
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
 PY
