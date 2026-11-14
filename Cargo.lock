@@ -4539,6 +4539,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "rind-fips"
+version = "0.1.0"
+dependencies = [
+ "aws-lc-rs",
+ "crabgrind 0.4.0",
+ "hex",
+ "rind",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rind-fips-module"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rind",
+]
+
+[[package]]
 name = "rind-fuzz"
 version = "0.0.0"
 dependencies = [

@@ -197,6 +197,19 @@ impl<C: Curve> SigningKey<C> {
         self.rfc6979_sign_with_random::<H>(message, &random, signature)
     }
 
+    /// [`Self::sign()`] with `random` in place of the system's, so the FIPS
+    /// module's self-test knows its answer.
+    #[cfg(any(test, rind_fips))]
+    pub(crate) fn sign_with_random<'a, H: SignatureHash>(
+        &self,
+        message: &[u8],
+        random: &[u8; 16],
+        signature: &'a mut [u8],
+    ) -> Result<&'a [u8], Error> {
+        let _entry = Entry::new_secret();
+        self.rfc6979_sign_with_random::<H>(message, random, signature)
+    }
+
     /// ECDSA signing, returning a DER-encoded ASN.1 signature.
     ///
     /// This calls [`Self::sign()`] and then does a straightforward conversion

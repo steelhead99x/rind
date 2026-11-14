@@ -50,9 +50,10 @@ impl DecapKey {
 
     /// Encode the key as bytes.
     ///
-    /// Used by tests and by `rind-acvp`, which answers NIST's seeded key
-    /// generation. rind's own callers generate from the system RNG.
-    #[cfg(any(test, feature = "__acvp"))]
+    /// Used by tests, by `rind-acvp` (NIST's seeded key generation), and by
+    /// the FIPS module's self-test. rind's own callers generate from the
+    /// system RNG.
+    #[cfg(any(test, feature = "__acvp", rind_fips))]
     pub(crate) fn as_bytes(&self) -> [u8; K * 768 + 96] {
         let _entry = low::Entry::new_secret();
         let mut out = [0u8; K * 768 + 96];

@@ -105,6 +105,9 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   # Builds the FIPS module's source, which draws every random value from its
   # DRBG (`src/fips_rng.rs`).
   "cfg(rind_fips)",
+  # Builds the FIPS module so `RIND_FIPS_BREAK` corrupts the self-test it
+  # names, as a lab checks each failure path (`src/fips.rs`).
+  "cfg(rind_fips_break)",
   # curve25519-dalek's backend overrides, which armv7 refuses.
   'cfg(curve25519_dalek_bits, values("32", "64"))',
   'cfg(curve25519_dalek_backend, values("fiat", "serial", "simd", "avx512"))',
