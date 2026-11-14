@@ -161,9 +161,10 @@ Miri runs each test hundreds of times slower than a native build, so it runs a
 subset: the unit tests and `tests/cpu.rs` and `tests/debug.rs`, without the
 tests `sh/miri.sh` lists as slow, which are the vector sets and long loops
 over inputs, RSA private-key operations beyond one for each key type, and the
-tests that run many scalar multiplications. A test that repeats one code path
-over parameter sets or cases runs only those that take each branch under
-`cfg(miri)`, as ML-DSA's do. Every primitive keeps a test that builds, uses,
+tests that run many scalar multiplications. `sh/miri.sh` fails on an entry
+that names no test, so a rename cannot slip a slow test back in. A test that
+repeats one code path over parameter sets or cases runs only those that take
+each branch under `cfg(miri)`, as ML-DSA's do. Every primitive keeps a test that builds, uses,
 and drops its keys. Miri cannot run aws-lc's C, so its builds leave out
 aws-lc-rs and the differential tests, `tests/crosschecks.rs` and
 `tests/cctv.rs` among them.
