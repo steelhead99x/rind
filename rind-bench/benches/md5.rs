@@ -5,6 +5,7 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use md5::Digest;
 
 // aws-lc's MD5, which aws-lc-rs does not export, through aws-lc-sys.
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 fn test_aws_md5(data: &[u8]) {
     let mut out = [0u8; 16];
     // SAFETY: `data` is readable for its length, and `out` is writable for
@@ -41,6 +42,7 @@ fn md5(c: &mut Criterion) {
         let input = vec![0u8; size];
         group.throughput(Throughput::Bytes(size as u64));
 
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_with_input(
             BenchmarkId::new("aws-lc-rs", size_name),
             &input,

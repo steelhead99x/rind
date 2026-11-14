@@ -12,7 +12,7 @@ fn bench<R: sha3::Digest>(
     ours: &'static rind::digest::Algorithm,
 ) {
     #[cfg(any(target_arch = "xtensa", target_os = "none"))]
-    let _ = aws;
+    let _ = &aws;
     let mut group = c.benchmark_group(name);
     for (size, size_name) in criterion::HASH_SIZES {
         let input = vec![0u8; size];

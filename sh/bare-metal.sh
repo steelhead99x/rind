@@ -9,6 +9,11 @@
 # Usage: sh/bare-metal.sh [xtensa]
 set -euo pipefail
 
+if (( $# > 1 )) || [[ "${1:-}" != "" && "$1" != xtensa ]]; then
+    echo "Usage: $0 [xtensa]" >&2
+    exit 2
+fi
+
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 # getrandom has no source on these targets until the program names one, which

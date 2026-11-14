@@ -12,30 +12,24 @@ fn rsa_key_generation(c: &mut Criterion) {
     }
 
     let sizes = [
-        (
-            2048,
-            aws_lc_rs::rsa::KeySize::Rsa2048,
-            rind::rsa::KeySize::Rsa2048,
-        ),
-        (
-            3072,
-            aws_lc_rs::rsa::KeySize::Rsa3072,
-            rind::rsa::KeySize::Rsa3072,
-        ),
-        (
-            4096,
-            aws_lc_rs::rsa::KeySize::Rsa4096,
-            rind::rsa::KeySize::Rsa4096,
-        ),
+        (2048, rind::rsa::KeySize::Rsa2048),
+        (3072, rind::rsa::KeySize::Rsa3072),
+        (4096, rind::rsa::KeySize::Rsa4096),
     ];
-    for (bits, theirs, ours) in sizes {
+    for (bits, ours) in sizes {
         let mut group = c.benchmark_group(format!("rsa{bits}-key-generation"));
         group.throughput(Throughput::Elements(1));
         // Each key takes tens to hundreds of milliseconds, so the default
         // hundred samples would take minutes.
         group.sample_size(10);
 
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_function("aws-lc-rs", |b| {
+            let theirs = match bits {
+                2048 => aws_lc_rs::rsa::KeySize::Rsa2048,
+                3072 => aws_lc_rs::rsa::KeySize::Rsa3072,
+                _ => aws_lc_rs::rsa::KeySize::Rsa4096,
+            };
             b.iter(|| {
                 black_box(aws_lc_rs::rsa::KeyPair::generate(theirs).unwrap());
             })
