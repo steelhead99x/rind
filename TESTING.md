@@ -46,8 +46,9 @@ A primitive is checked five ways:
   operation frees: it runs each under two keys with the same public inputs
   and fails on a freed block whose bytes differ between them, since those
   vary with the key, and fails on any nonzero block key generation frees.
-  It runs wherever the zeroing tests do, RSA key generation only in the
-  nightly native and portable runs.
+  It runs wherever the zeroing tests do. RSA key generation runs in the
+  nightly native and portable runs, at every size, and on wasm for RSA-2048
+  only; the portable run also checks RSA-3072 and RSA-4096 on 32-bit limbs.
 
 Separately, `low::guard_pages` checks buffer bounds. It runs each kernel
 that takes a caller's slice (AES-GCM, ChaCha20-Poly1305, AES-CTR, AES-CBC,
@@ -144,8 +145,7 @@ CCTV verdicts still have an oracle: `rind/tests/cctv/ed25519-verdicts.txt`
 records aws-lc's accept or reject, `cctv::ed25519_verdicts_match_aws_lc` checks
 that file against aws-lc where aws-lc builds, and `cctv::ed25519_edge_cases`
 checks rind against the file, including on wasm, and against live aws-lc
-where aws-lc builds. Regenerate the file from
-aws-lc, then commit it, with
+where aws-lc builds. Regenerate the file from aws-lc, then commit it, with
 `RIND_RECORD_VERDICTS=1 cargo test -p rind --test cctv -- --ignored ed25519_record_aws_lc_verdicts`.
 That test is ignored and writes only with that variable set, so a normal run,
 or one with `--include-ignored`, only checks the recorded file.
@@ -179,10 +179,10 @@ each branch under `cfg(miri)`, as ML-DSA's do. Every primitive keeps a test that
 and drops its keys. Miri cannot run aws-lc's C, so its builds leave out
 aws-lc-rs and the differential tests, `tests/crosschecks.rs` and
 `tests/cctv.rs` among them.
-wasm cannot build aws-lc either; it runs `tests/cctv.rs` and compares Ed25519
-verdicts with the recorded aws-lc results, not with aws-lc itself.
 `tests/wycheproof.rs` and `tests/aws_lc.rs` are vector sets too, and
 `tests/zeroing.rs` reads a dropped value on purpose.
+wasm cannot build aws-lc either; it runs `tests/cctv.rs` and compares Ed25519
+verdicts with the recorded aws-lc results, not with aws-lc itself.
 
 ## Primitives
 

@@ -338,6 +338,32 @@ fn ml_dsa_expanded_load<P: rind::signature::sign::MlDsaParameterSet>(set: &str) 
     });
 }
 
+/// The recorded fixtures stay equal to aws-lc's expansion of seeds
+/// `[1u8; 32]` and `[2u8; 32]`. wasm reads the same files and cannot ask
+/// aws-lc itself.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn ml_dsa_expanded_fixtures_match_aws_lc() {
+    use aws_lc_rs::signature::{ML_DSA_44_SIGNING, ML_DSA_65_SIGNING, ML_DSA_87_SIGNING};
+    let dir = format!("{}/tests/heap_scratch", env!("CARGO_MANIFEST_DIR"));
+    for (set, alg) in [
+        ("44", &ML_DSA_44_SIGNING),
+        ("65", &ML_DSA_65_SIGNING),
+        ("87", &ML_DSA_87_SIGNING),
+    ] {
+        for seed_byte in [1u8, 2] {
+            let path = format!("{dir}/ml-dsa-{set}-{seed_byte}.pkcs8");
+            let recorded =
+                std::fs::read(&path).unwrap_or_else(|err| panic!("cannot read {path}: {err}"));
+            assert_eq!(
+                recorded,
+                ml_dsa_expanded_pkcs8(alg, &[seed_byte; 32]),
+                "{path}",
+            );
+        }
+    }
+}
+
 /// Rewrites the expanded-form PKCS#8 fixtures from aws-lc when
 /// `RIND_RECORD_MLDSA_FIXTURES=1`. aws-lc does not build for wasm or Miri.
 #[cfg(not(any(miri, target_family = "wasm")))]
