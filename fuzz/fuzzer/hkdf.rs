@@ -46,8 +46,9 @@ fuzz_target!(|input: Input| {
     let mut ours_out = vec![0; out_len];
     let ours_result = ours::Salt::new(ours_algorithm, &input.salt)
         .extract(&input.secret)
+        .unwrap()
         .expand(&info, len)
-        .fill(&mut ours_out);
+        .and_then(|okm| okm.fill(&mut ours_out));
     let mut theirs_out = vec![0; out_len];
     let theirs_result = theirs::Salt::new(theirs_algorithm, &input.salt)
         .extract(&input.secret)

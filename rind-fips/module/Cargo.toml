@@ -1,0 +1,19 @@
+[package]
+name = "rind-fips-module"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+publish = false
+license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# `rind-fips`'s build script turns on `wipe`, so a workspace build does not.
+rind = { path = "../../rind" }
+libc = { version = "0.2", default-features = false }
+
+[lints.rust]
+# Set by `rind-fips`'s build script: the module's build, and its break build.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(rind_fips)", "cfg(rind_fips_break)"] }

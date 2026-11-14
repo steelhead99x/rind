@@ -145,8 +145,18 @@ impl HaveSha3 {
 }
 
 /// Returns the first CPU feature we require unconditionally that this CPU lacks.
+///
+/// The FIPS module also requires the crypto extension, which every core it
+/// is tested on has, so its vpaes and NEON GHASH paths, which no tested core
+/// runs, need no ACVP run of their own.
 pub(crate) fn missing_cpu_feature() -> Option<&'static str> {
-    (features() & NEON == 0).then_some("neon")
+    if features() & NEON == 0 {
+        return Some("neon");
+    }
+    if cfg!(rind_fips) && features() & CRYPTO_EXT == 0 {
+        return Some("aes, pmull, and sha2");
+    }
+    None
 }
 
 const NEON: u8 = 1 << 0;
@@ -267,6 +277,9 @@ fn test_toggle(_id: &str, detected: bool) -> bool {
 #[cfg(any(debug_assertions, rind_cpu_disable))]
 fn test_toggle(id: &str, detected: bool) -> bool {
     if std::env::var(format!("RIND_CPU_DISABLE_{id}")).is_ok() {
+        // The FIPS module honours the mask in its release build, where its
+        // caller's stdout is not its own.
+        #[cfg(not(rind_fips))]
         println!("DEBUG: denying cpuid {id:?}");
         false
     } else {

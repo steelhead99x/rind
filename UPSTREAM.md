@@ -191,13 +191,6 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 
 ## Dependencies
 
-### libcrux-platform calls `__cpuid` outside `unsafe`
-
-- **Breaks:** libcrux-platform 0.0.4, which libcrux-aes pulled in, calls `__cpuid` outside `unsafe`, which compiles only since `__cpuid` became safe in Rust 1.94. rind dropped libcrux-aes with [kixel-ai/rind#613](https://github.com/kixel-ai/rind/pull/613), but README.md and PLATFORMS.md still state a 1.94 exception on 32-bit x86.
-- **Workaround:** README.md and PLATFORMS.md state the exception, and CI checks i686 only on stable.
-- **Reported:** [celabshq/libcrux#1646](https://github.com/celabshq/libcrux/issues/1646).
-- **Goes when:** [the x86 quest](/quest/m2/adoption/targets/x86.md) checks i686 on the MSRV and drops the exception.
-
 ### aws-lc cannot deny 32-bit ARM features at run time
 
 - **Breaks:** aws-lc reads `OPENSSL_armcap` to deny CPU features on aarch64, but its 32-bit ARM detection has no such variable.

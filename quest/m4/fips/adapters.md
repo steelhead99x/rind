@@ -25,5 +25,4 @@ From [the scope](/quest/m4/fips/README.md), 2026-11-11.
 
 ## Required
 
-- [The module](/quest/m4/fips/module.md) - what the features back
 - [AES-GCM with internal IVs](/quest/m4/fips/gcm-iv.md) - the TLS 1.3 IV unit the rustls provider seals with

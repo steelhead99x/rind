@@ -142,11 +142,14 @@ writes for aarch64:
 
 `rfcx25519` is HOL Light's RFC 7748 X25519, clamping and masking included.
 
-P-256 ECDH, from the same `PrivateKey` to s2n-bignum's routines, in
-`Rind/Aarch64/P256.lean` on aarch64, and, for its agreement alone, in
-`Rind/X86_64/P256Agree.lean`, which `admin/prove` also writes for aarch64, so
-`p256_agree` and `p256_shared_secret` hold on x86_64 too, where key generation
-runs aws-lc's generator multiplication, which no proof covers yet:
+P-256 ECDH on x86_64 and aarch64, from the same `PrivateKey` to s2n-bignum's
+routines, in `Rind/X86_64/P256Agree.lean` and `Rind/X86_64/P256.lean`, which
+`admin/prove` also writes for aarch64. Key generation multiplies the
+generator as each target's `Rind/<Arch>/P256Base.lean` states it: aarch64 by
+s2n-bignum's `p256_scalarmulbase`, and x86_64 by rind's Booth driver, which
+selects each table row's point by rind's Rust select and adds it by aws-lc's
+mixed addition, `ecp_nistz256_point_add_affine`, which a placeholder axiom
+states until rind's HOL Light proof of it lands:
 
 - `p256_generate`: the key's scalar is the first of up to 64 draws whose
   bytes, read big-endian, are in [1, n), it holds its public key, and the key
@@ -172,9 +175,14 @@ every finite point order n too, by `Rind/NistOrder.lean`'s count of the
 curve's points, but `p256_agree` does not yet use it to rule out its fault
 case for the peer's point.
 
-P-256 ECDSA with SHA-256 and fixed-length signatures on aarch64, from the
-signature API's `EcdsaKeyPair` and `PublicKey` to s2n-bignum's routines, in
-`Rind/Aarch64/P256Signature.lean` over `Rind/Aarch64/P256Ecdsa.lean`:
+P-256 ECDSA with SHA-256 and fixed-length signatures on x86_64 and aarch64,
+from the signature API's `EcdsaKeyPair` and `PublicKey` to s2n-bignum's
+routines, in `Rind/X86_64/P256Signature.lean` over
+`Rind/X86_64/P256Ecdsa.lean`, which `admin/prove` also writes for aarch64,
+over each target's generator multiplication, as for ECDH, and its check of a
+key pair's public key, `Rind/<Arch>/P256KeyCheck.lean`: aarch64 compares it
+with the key's own encoding, and x86_64 compares an uncompressed one's point
+with the generator multiplication's Jacobian result, without encoding it:
 
 - `p256_ecdsa_generate`: the key pair's scalar is in [1, n), and generation
   is refused only if the system source's draws fail;
@@ -221,7 +229,8 @@ They also assume `Fills`, that the system source returns, `Held`, that the
 entry guard holds, and `Cached`: a verifying key's lock-free caches of P to
 15P and 17P to 31P, and a signing key's of its encoded public key, whose
 atomics Aeneas cannot translate, are built from the key's own point or
-scalar.
+scalar, and a signing key's returns whenever its build does, as x86_64's
+key check stores the encoding it checked.
 
 P-384 ECDH's agreement on x86_64 and aarch64, from the same `PrivateKey` to
 s2n-bignum's routines, in `Rind/X86_64/P384.lean`, which `admin/prove` also
@@ -260,6 +269,19 @@ which Aeneas cannot translate, and are not modelled yet.
 proves it is multiplication in Mathlib's group of points on such a curve. `Rind/P384Group.lean` proves p and n prime,
 by Pratt certificates that `Rind/Pratt.lean` checks, and G's order n.
 
+The comb's constant-time row select on x86_64, `bignum_aff_point_select_p384`,
+and P-256's and P-521's, in `Rind/X86_64/PointSelect.lean`:
+
+- `bignum_aff_point_select_p256_spec`, `_p384_spec`, `_p521_spec`: the select
+  returns row `index` of a table of 8-, 12-, or 18-word affine points,
+  counting from 1, or zeros for an index of 0 or past the last row, on both
+  its AVX2 and SSE2 paths, for a table of fewer than 2^32 rows;
+- `bignum_aff_point_select_p384_rows16`: the same on P-384's 16-row comb
+  tables, as P-384's key generation takes it.
+
+They assume `RunsSelect`: `HaveAvx2::check` returns, as `Runs` assumes of
+`HaveBmi2Adx::check`. aarch64's NEON select has no model yet.
+
 ChaCha20 QUIC header protection on x86_64 and aarch64, from
 `HeaderProtectionKey` to HACL*'s rounds, in `Rind/X86_64/ChaCha20.lean`:
 
@@ -273,9 +295,24 @@ HACL*'s rounds are Rust, so they are translated and proven with the rest, and
 no axiom stands in for HACL*'s proof of them.
 
 Theorems that run an entry guard assume `Runs`: rind's CPU-feature checks
-pass, which no input affects. `Rind/Aarch64/P256Table.lean` proves that
-rind's generator table holds the multiples of G that s2n-bignum's proof of
-`p256_scalarmulbase` assumes, so `p256_public_key` assumes nothing of it.
+pass, which no input affects. `Rind/<Arch>/P256Table.lean` proves that each
+target's generator table holds the multiples of G its generator
+multiplication reads, on aarch64 those s2n-bignum's proof of
+`p256_scalarmulbase` assumes, and `Rind/<Arch>/P256Base.lean` that its first
+row holds G to 32G, which ECDSA verification's twin multiplication reads, so
+no theorem assumes anything of the tables.
+On x86_64, `Rind/X86_64/P256Base.lean` proves that `base_multiply`, rind's
+port of aws-lc's Booth-recoded generator multiplication, computes k·G for k
+below n (`base_multiply_spec`, and `jac_base_multiply_spec` before its affine
+conversion): `Rind/P256Booth.lean` proves the recoded digits sum to k and that
+no addition doubles, and `Rind/X86_64/P256Table.lean` that its 37-row table
+holds j·2⁷ⁱ·G. Its table select is rind's Rust, which
+`Rind/X86_64/PointSelect.lean` proves on both the AVX2 and SSE2 paths, under
+`RunsSelect`, that `HaveAvx2::check` returns, which `Runs` includes. aws-lc's
+mixed addition is the placeholder axiom `p256_point_add_affine_spec` in
+`Rind/X86_64/S2nBignum.lean`, which no proof covers yet, so x86_64's P-256
+theorems rest on it and earn no ✓ until rind's HOL Light proof of the
+addition lands.
 `Rind/<Arch>/Axioms.lean` checks the axioms each theorem rests on.
 
 SHA-1 and SHA-256's padding and finalization, and HMAC's keyed states over
@@ -367,8 +404,8 @@ RandomSource`, which Aeneas cannot translate either, and
 models it the same way, for `Rind/<Arch>/Dispatch.lean` to call. The signature API's `EcdsaKeyPair` reaches each curve's code, and
 `PublicKey` each ECDSA key's parser and verifier, through function pointers,
 and P-256's ECDSA key generation draws through a `dyn RandomSource`;
-`Rind/Aarch64/EcdsaDispatch.lean` models them for P-256 with SHA-256 and
-fixed-length signatures.
+`Rind/X86_64/EcdsaDispatch.lean`, which `admin/prove` also writes for
+aarch64, models them for P-256 with SHA-256 and fixed-length signatures.
 
 SHA-384, SHA-512, and SHA-512/256, from the digest API to aws-lc's block
 routine, in `Rind/X86_64/Sha512.lean`, which `admin/prove` also writes for
@@ -705,10 +742,13 @@ mentions `Verification::Rsa(` or builds an `Rsa` outside them.
   `Rind/X86_64/ValeAesGcm.lean`: s2n-bignum's, aws-lc-verification's, and
   Vale's theorems, restated as axioms about the routines' Rust wrappers.
 - `Rind/X86_64/Simd.lean`: models of the x86_64 intrinsics rind's AES,
-  AES-GCM setup, partial blocks, and by-8 kernels call;
+  AES-GCM setup, partial blocks, by-8 kernels, and point select call;
   `Rind/X86_64/AesGcmModel.lean`: a hand model, over those intrinsics, of its
   PCLMULQDQ GHASH and by-8 AES-GCM, whose raw pointers, `transmute`
   constants, `as_chunks`, and zipped iterators Aeneas cannot translate;
+  `Rind/X86_64/PointSelectModel.lean`, of its AVX2 and SSE2 point selects,
+  whose raw-pointer loads and `as_chunks` Aeneas cannot translate, and
+  `Rind/X86_64/PointSelect.lean`, their proofs;
   `Rind/Aarch64/Neon.lean`, of the aarch64 intrinsics rind's AES calls, and
   `Rind/Aarch64/NeonVectors.lean`, the vectors `admin/neon-vectors.rs` tests
   them with; `Rind/Lanes.lean`, both targets' vector lanes and bytes.
@@ -776,18 +816,28 @@ mentions `Verification::Rsa(` or builds an `Rsa` outside them.
   `Rind/P256Group.lean`: that `p256` is prime, by a Pratt certificate;
   `Rind/N256Prime.lean`: that `n256` is prime; `Rind/P256Multiples.lean`: the
   group laws and multiples ECDSA's twin multiplication relies on.
-- `Rind/X86_64/P256Dispatch.lean`, `Rind/X86_64/P256Agree.lean`,
-  `Rind/Aarch64/P256Table.lean`, and `Rind/Aarch64/P256.lean`: the hand model
-  of P-256's key generation, the P-256 agreement proof on both targets, and
-  aarch64's generator table and key generation proofs.
-- `Rind/Aarch64/EcdsaDispatch.lean`, `Rind/Aarch64/P256Ecdsa.lean`, and
-  `Rind/Aarch64/P256Signature.lean`: the hand model of ECDSA's dispatch and
-  key generation, the proof of `high::ecdsa` and `mid::p256`'s ECDSA at
-  P-256, and the signature API's theorems.
+- `Rind/X86_64/P256Dispatch.lean`, `Rind/X86_64/P256Agree.lean`, and
+  `Rind/X86_64/P256.lean`: the hand model of P-256's key generation, and the
+  P-256 agreement and key generation proofs, on both targets.
+- `Rind/P256Booth.lean`: the arithmetic of x86_64's Booth-recoded generator
+  multiplication.
+- `Rind/<Arch>/P256Table.lean` and `Rind/<Arch>/P256Base.lean`, one per
+  target: its generator table's proof, and what the shared proofs take of its
+  generator multiplication and table, `base_multiply_spec` and `first_row`,
+  with x86_64's `jac_base_multiply_spec` for its key check.
+- `Rind/X86_64/EcdsaDispatch.lean`, `Rind/X86_64/P256Ecdsa.lean`, and
+  `Rind/X86_64/P256Signature.lean`, on both targets, over
+  `Rind/<Arch>/P256KeyCheck.lean`, one per target: the hand model of ECDSA's
+  dispatch and key generation, the proof of `high::ecdsa` and `mid::p256`'s
+  ECDSA at P-256, the signature API's theorems, and each target's check of a
+  key pair's public key.
 
 ## Trust base
 
 Beyond Lean's kernel:
+
+- x86_64 P-256's mixed addition, `p256_point_add_affine_spec`, which no
+  proof covers yet.
 
 - Charon and Aeneas's translation, and Aeneas's models of `core`, with
   `Rind/Core.lean`'s.
@@ -795,8 +845,8 @@ Beyond Lean's kernel:
   axiom.
 - That `Rind/HashSpec.lean` transliterates FIPS 180-4, RFC 2104, RFC 5869,
   and RFC 8018.
-- The restatement of each s2n-bignum and aws-lc-verification theorem as an
-  axiom, under the composition rule in the
+- The restatement of each s2n-bignum and aws-lc-verification theorem, and of
+  each of rind's own HOL Light theorems, as an axiom, under the composition rule in the
   [verification epic](/quest/m3/verified/README.md), and on aarch64 the
   caveats aws-lc-verification lists for its NSym proof. It lets a
   group-membership fact a proof must decide be its defining equation, so

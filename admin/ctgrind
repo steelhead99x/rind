@@ -1,8 +1,10 @@
 #!/bin/sh
 set -e
 
-# Usage: admin/ctgrind [unit|wycheproof|adapters] [cargo test args...]
-# Runs every suite unless one is named, so CI can run them in parallel.
+# Usage: admin/ctgrind [unit|wycheproof|adapters|fips] [cargo test args...]
+# Runs every suite but fips unless one is named, so CI can run them in
+# parallel. fips checks the FIPS module, which refuses a CPU below its
+# baseline, so the CPU-masked runs leave it out.
 # Run it in `nix develop .#ctgrind`, which has the libclang and valgrind
 # headers crabgrind builds with.
 #
@@ -51,7 +53,7 @@ fi
 
 suite=all
 case "$1" in
-    unit | wycheproof | adapters)
+    unit | wycheproof | adapters | fips)
         suite=$1
         shift
         ;;
@@ -82,5 +84,11 @@ fi
 # hooks mark the keys rind generates or parses. Python's tests run through
 # its extension, not a Rust lib test binary, which would need libpython.
 if [ "$suite" = all ] || [ "$suite" = adapters ]; then
-    cargo test --workspace --exclude rind --exclude rind-python --lib --test ctgrind --features rind/__ctgrind "$@"
+    cargo test --workspace --exclude rind --exclude rind-python --exclude rind-fips --lib --test ctgrind --features rind/__ctgrind "$@"
+fi
+
+# The FIPS module as it ships, built with rind's hooks: its test marks the
+# secrets it hands the module.
+if [ "$suite" = fips ]; then
+    cargo test -p rind-fips --test ctgrind --features __ctgrind,rind/__ctgrind "$@"
 fi

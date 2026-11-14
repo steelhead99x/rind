@@ -9,6 +9,19 @@ categories = ["cryptography"]
 rust-version.workspace = true
 readme = "README.md"
 
+# The provider admin/adapter-api diffs this crate's API against.
+[package.metadata.rind.api]
+crate = "rcgen"
+module = ""
+items = ["KeyPair"]
+# rcgen's default backend, whose behavior the README documents.
+features = ["ring"]
+skip = { fips = "builds AWS-LC's FIPS module, which rind does not offer" }
+# Items rind cannot back, which the README names.
+omitted = [
+  "KeyPair::generate_rsa_for",
+]
+
 [features]
 # rcgen's default features include `pem`.
 default = ["pem"]

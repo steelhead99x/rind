@@ -29,7 +29,3 @@ From [the scope](/quest/m4/fips/README.md), 2026-11-11.
 ## Waiting
 
 - Maintainer: request ACVP demo server credentials from NIST, which issues a TLS client certificate per organization, so fresh sets run before the lab's production run. An agent cannot contact NIST. Optional until the lab is engaged: the offline runs cover the wrapper meanwhile. Done once a credential is stored as a secret and this item is deleted.
-
-## Required
-
-- [The module](/quest/m4/fips/module.md) - the services and CPU mask the wrapper drives

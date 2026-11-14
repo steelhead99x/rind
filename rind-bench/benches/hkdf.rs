@@ -64,7 +64,9 @@ fn bench(
                 let mut out = [0u8; 32];
                 rind::hkdf::Salt::new(ours, b"salt")
                     .extract(&secret)
+                    .unwrap()
                     .expand(&info, out.len())
+                    .unwrap()
                     .fill(&mut out)
                     .unwrap();
                 black_box(out)
@@ -111,12 +113,17 @@ fn bench(
         })
     });
 
-    let prk = rind::hkdf::Salt::new(ours, b"salt").extract(&secret);
+    let prk = rind::hkdf::Salt::new(ours, b"salt")
+        .extract(&secret)
+        .unwrap();
     for (lib, _dit) in criterion::rind_rows() {
         group.bench_function(format!("expand/{lib}"), |b| {
             b.iter(|| {
                 let mut out = [0u8; 32];
-                prk.expand(&info, out.len()).fill(&mut out).unwrap();
+                prk.expand(&info, out.len())
+                    .unwrap()
+                    .fill(&mut out)
+                    .unwrap();
                 black_box(out)
             })
         });
@@ -124,7 +131,7 @@ fn bench(
     group.bench_function("expand-aes-256-gcm-key/rind", |b| {
         b.iter(|| {
             black_box(rind::aead::Key::from(
-                prk.expand(&info, &rind::aead::AES_256_GCM),
+                prk.expand(&info, &rind::aead::AES_256_GCM).unwrap(),
             ))
         })
     });

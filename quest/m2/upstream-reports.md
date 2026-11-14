@@ -8,7 +8,7 @@ Every `UPSTREAM.md` entry not yet reported has an issue (or a PR, where the fix 
 
 Planned with the maintainer on 2026-11-10: ✅ report once rind is more mature, at the maintainer's call (rejected: after rind 1.0; after m2 completes).
 
-- These projects are outside moq-dev and kixelated. Show the maintainer the batch of issue drafts and post only what they approve.
+- These projects are outside [the orgs AGENTS.md lists](/AGENTS.md#development). Show the maintainer the batch of issue drafts and post only what they approve.
 - Recheck each bug against the upstream's current release first, and search for an existing report, before drafting.
 
 ## Waiting

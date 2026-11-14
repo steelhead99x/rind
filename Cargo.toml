@@ -8,6 +8,8 @@ members = [
   "rind-dart",
   "rind-timing",
   "rind-dimpl",
+  "rind-fips",
+  "rind-fips/module",
   "rind-object-store",
   "rind-openmls",
   "rind-rcgen",

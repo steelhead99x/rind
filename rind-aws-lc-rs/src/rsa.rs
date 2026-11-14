@@ -310,11 +310,27 @@ impl<B: AsRef<[u8]>> PublicKeyComponents<B> {
         &self,
         params: &'static RsaParameters,
     ) -> Result<ParsedPublicKey, KeyRejected> {
-        let key = self
-            .parse(params)
-            .map_err(|_| KeyRejected::inconsistent_components())?;
+        let (key, verifies) = match self.parse(params) {
+            Ok(key) => (key, true),
+            // aws-lc-rs keeps a key outside the range and fails at verify.
+            Err(_) => {
+                let key = self
+                    .rind()
+                    .and_then(|components| {
+                        rind::signature::PublicKey::from_components(ANY_RSA, &components)
+                            .map_err(unspecified)
+                    })
+                    .map_err(|_| KeyRejected::inconsistent_components())?;
+                (key, false)
+            }
+        };
         let spki = key.to_spki();
-        Ok(ParsedPublicKey::from_parts(params, key, spki.as_ref()))
+        Ok(ParsedPublicKey::from_parts(
+            params,
+            key,
+            verifies,
+            spki.as_ref(),
+        ))
     }
 }
 
@@ -466,6 +482,19 @@ impl private::Verify for RsaParameters {
     fn parse(&self, public_key: &[u8]) -> Result<rind::signature::PublicKey, KeyRejected> {
         self.with_rind(|algorithm| rind::signature::PublicKey::new(algorithm, public_key))
             .map_err(KeyRejected::rind)
+    }
+
+    /// Keeps a key outside the range that parses for rind's widest one.
+    fn parse_kept(
+        &self,
+        public_key: &[u8],
+    ) -> Result<(rind::signature::PublicKey, bool), KeyRejected> {
+        match self.parse(public_key) {
+            Ok(key) => Ok((key, true)),
+            Err(err) => rind_public_key(public_key)
+                .map(|key| (key, false))
+                .map_err(|_| err),
+        }
     }
 
     fn verify_parsed(

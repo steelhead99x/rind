@@ -10,7 +10,7 @@ SHA-256, SHA-384, and SHA-512, and the MACs and KDFs over them, earn the ✓ on 
 - Already proven: aws-lc's AVX SHA-512, by SAW.
 - Route: HOL Light proofs in s2n-bignum's x86_64 model against [awslabs/s2n-bignum#415](https://github.com/awslabs/s2n-bignum/pull/415)'s and [#420](https://github.com/awslabs/s2n-bignum/pull/420)'s FIPS 180-4 specs. #420 also adds s2n-bignum's own scalar SHA-512 routine; measure it against aws-lc's `nohw`, and take it if it is as fast.
 - Spec pin: build on the specs of [awslabs/s2n-bignum#415](https://github.com/awslabs/s2n-bignum/pull/415) and [#420](https://github.com/awslabs/s2n-bignum/pull/420) at pinned commits while they are unmerged, and move to the merged version when it lands; `benchmarks/verified.toml`'s ✓ notes the pin (decided with the maintainer on 2026-11-07 on [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
-- Upstream: offering this work to awslabs/s2n-bignum is optional, and there is no standing approval: stop and ask the maintainer before posting there or anywhere outside the moq-dev and kixelated orgs (decided with the maintainer on 2026-11-07 on [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
+- Upstream: offering this work to awslabs/s2n-bignum is optional, and there is no standing approval: stop and ask the maintainer before posting there or anywhere outside [the orgs AGENTS.md lists](/AGENTS.md#development) (decided with the maintainer on 2026-11-07 on [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
 
 ## Required
 

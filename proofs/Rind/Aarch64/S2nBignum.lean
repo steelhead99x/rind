@@ -189,27 +189,6 @@ axiom bignum_neg_p256_spec (z x : Std.Array U64 4#usize) :
     low.aarch64.bignum_neg_p256.bignum_neg_p256 z x ⦃ r =>
       wordsNat x.val ≤ p256 → wordsNat r.val = (p256 - wordsNat x.val) % p256 ⦄
 
-/-- The three coordinates at `xyz` as HOL Light's
-`bignum_triple_from_memory (xyz,4)` reads them. -/
-def tripleNat (xyz : List U64) : Nat × Nat × Nat :=
-  (wordsNat (xyz.take 4), wordsNat ((xyz.drop 4).take 4), wordsNat ((xyz.drop 8).take 4))
-
-/-- `weierstrass_of_jacobian (integer_mod_ring p_256) (x, y, z)`: infinity for
-z of zero, and otherwise (x / z², y / z³) in the field of integers mod p, whose
-inverses `ZMod`'s are,
-https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/EC/jacobian.ml#L21 -/
-def p256OfJacobian (x y z : Nat) : P256Point :=
-  if z = 0 then none
-  else some (((x : ZMod p256) * ((z : ZMod p256) ^ 2)⁻¹).val, ((y : ZMod p256) * ((z : ZMod p256) ^ 3)⁻¹).val)
-
-/-- `represents_p256 P (x, y, z)`: each coordinate is below p, and the
-Jacobian point their Montgomery forms decode to (`montgomery_decode`) is `P`,
-https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/p256_montjadd_alt.ml#L2505 -/
-def p256Represents (P : P256Point) (xyz : Nat × Nat × Nat) : Prop :=
-  xyz.1 < p256 ∧ xyz.2.1 < p256 ∧ xyz.2.2 < p256 ∧
-    p256OfJacobian (p256RInv * xyz.1 % p256) (p256RInv * xyz.2.1 % p256)
-      (p256RInv * xyz.2.2 % p256) = P
-
 /-- `P256_MONTJADD_ALT_SUBROUTINE_CORRECT`,
 https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/p256_montjadd_alt.ml#L2677 -/
 @[step]
@@ -372,7 +351,8 @@ least 3k words,
 https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/bignum_modinv.ml#L4890 -/
 @[step]
 axiom bignum_modinv_spec (z a b w : Slice U64) (ha : a.length = z.length)
-    (hb : b.length = z.length) (hw : 3 * z.length ≤ w.length) :
+    (hb : b.length = z.length) (hw : 3 * z.length ≤ w.length)
+    (hk : z.length < 2 ^ 57) :
     low.aarch64.bignum_modinv.bignum_modinv z a b w ⦃ r =>
       r.1.length = z.length ∧
         (Nat.Coprime (wordsNat a.val) (wordsNat b.val) → wordsNat b.val % 2 = 1 → wordsNat b.val ≠ 1 →

@@ -272,8 +272,9 @@ impl<P: Params> KeyPair<P> {
         mu(self.tr(), context, message)
     }
 
-    /// FIPS 204's `ML-DSA.Sign_internal`, for tests to fix `rnd` and `mu`.
-    #[cfg(test)]
+    /// FIPS 204's `ML-DSA.Sign_internal`, for tests and the FIPS module's
+    /// self-test to fix `rnd` and `mu`.
+    #[cfg(any(test, rind_fips))]
     pub(crate) fn sign_internal(
         &self,
         mu: &[u8; MU_LEN],

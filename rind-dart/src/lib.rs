@@ -627,7 +627,7 @@ pub unsafe extern "C" fn rind_dart_aes_cbc_encrypt(
         if pad == 0 {
             key.encrypt_blocks(iv, &mut in_out[..len])?;
         } else {
-            key.encrypt(iv, &mut Room { buf: in_out, len });
+            key.encrypt(iv, &mut Room { buf: in_out, len })?;
         }
         Ok(padded_len)
     })
@@ -935,7 +935,7 @@ pub unsafe extern "C" fn rind_dart_hkdf_extract(
 ) -> isize {
     run(|| {
         // SAFETY: forwarded from the caller.
-        let prk = unsafe { handle(salt) }.extract(unsafe { input(secret, secret_len) });
+        let prk = unsafe { handle(salt) }.extract(unsafe { input(secret, secret_len) })?;
         // SAFETY: forwarded from the caller.
         Ok(unsafe { store(out, prk) })
     })
@@ -955,7 +955,7 @@ pub unsafe extern "C" fn rind_dart_hkdf_expand(
         // SAFETY: forwarded from the caller.
         let (prk, info, out) =
             unsafe { (handle(prk), input(info, info_len), output(out, out_len)) };
-        prk.expand(&[info], out.len()).fill(out)?;
+        prk.expand(&[info], out.len())?.fill(out)?;
         Ok(out_len)
     })
 }

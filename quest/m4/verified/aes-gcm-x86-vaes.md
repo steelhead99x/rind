@@ -18,7 +18,7 @@ AES-GCM earns the ✓ on x86_64 CPUs with VAES and VPCLMULQDQ (Ice Lake and late
   - It goes in a file no target owns, beside `Rind/Vale.lean` and `Rind/Gf128.lean`, so every later quest that meets both specs imports it: [AES-GCM on aarch64](/quest/m4/verified/aes-gcm-aarch64.md) and [its AES-192 kernels](/quest/m4/verified/aes-gcm-aarch64-192.md), [aarch64 without the crypto extension](/quest/m5/verified/aarch64-no-crypto.md), and [x86_64 without AES-NI](/quest/m5/verified/x86-no-aesni.md). If one of those lands first, it writes the theorem there and this quest reuses it.
   - Size stays XL, the largest there is; the theorem adds to it.
 - Do the AVX2 kernel first: it is the whole path on Zen 3 and on cores without AVX-512.
-- Upstream: offering this work to awslabs/s2n-bignum is optional, and there is no standing approval: stop and ask the maintainer before posting there or anywhere outside the moq-dev and kixelated orgs (decided with the maintainer on 2026-11-07 on [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
+- Upstream: offering this work to awslabs/s2n-bignum is optional, and there is no standing approval: stop and ask the maintainer before posting there or anywhere outside [the orgs AGENTS.md lists](/AGENTS.md#development) (decided with the maintainer on 2026-11-07 on [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
 
 ## Required
 

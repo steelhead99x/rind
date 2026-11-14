@@ -41,14 +41,17 @@ impl AesCbcEncryptingKey {
 
     /// Pads `in_out` with PKCS#7, 1 to 16 bytes each holding the count, and
     /// encrypts it in place under `iv`.
-    pub fn encrypt<InOut>(&self, iv: CbcIv, in_out: &mut InOut)
+    ///
+    /// Fails with [`Error::WrongLength`], leaving it padded but unencrypted,
+    /// if `in_out` is a buffer whose `extend` does not grow what `as_mut`
+    /// returns to whole blocks, as aws-lc-rs's `encrypt` refuses it.
+    pub fn encrypt<InOut>(&self, iv: CbcIv, in_out: &mut InOut) -> Result<(), Error>
     where
         InOut: AsMut<[u8]> + for<'a> Extend<&'a u8>,
     {
-        let _entry = Entry::new_secret();
         let pad = 16 - in_out.as_mut().len() % 16;
         in_out.extend(&[pad as u8; 16][..pad]);
-        self.encrypt_in_place(&iv.0, in_out.as_mut().as_chunks_mut().0);
+        self.encrypt_blocks(iv, in_out.as_mut())
     }
 
     /// Encrypts `in_out` in place under `iv`, without padding.
@@ -337,7 +340,8 @@ mod tests {
 
             // padded, the same blocks then one of padding
             let mut buf = pt.clone();
-            enc.encrypt(CbcIv::assume_unpredictable(*iv), &mut buf);
+            enc.encrypt(CbcIv::assume_unpredictable(*iv), &mut buf)
+                .unwrap();
             assert_eq!(hex::encode(&buf[..64]), ct);
             assert_eq!(buf.len(), 80);
             assert_eq!(dec.decrypt(iv, &mut buf).unwrap(), pt);
@@ -375,6 +379,39 @@ mod tests {
         }
     }
 
+    /// A buffer that shows a fixed window, however `extend` grows it.
+    struct Window(Vec<u8>, usize);
+
+    impl AsMut<[u8]> for Window {
+        fn as_mut(&mut self) -> &mut [u8] {
+            &mut self.0[..self.1]
+        }
+    }
+
+    impl<'a> Extend<&'a u8> for Window {
+        fn extend<I: IntoIterator<Item = &'a u8>>(&mut self, iter: I) {
+            self.0.extend(iter);
+        }
+    }
+
+    // A buffer whose window padding cannot grow to whole blocks is refused,
+    // as aws-lc-rs refuses it, rather than encrypted in part, and its
+    // plaintext stays as it was.
+    #[test]
+    fn refuses_a_buffer_padding_cannot_grow() {
+        let (enc, _) = keys(&[0x42; 16]);
+        for window in [1, 17] {
+            let msg: Vec<u8> = (0..window as u8).collect();
+            let mut buf = Window(msg.clone(), window);
+            assert_eq!(
+                enc.encrypt(CbcIv::assume_unpredictable([0x24; 16]), &mut buf),
+                Err(Error::WrongLength),
+                "{window}"
+            );
+            assert_eq!(buf.0[..window], msg, "{window}");
+        }
+    }
+
     // Every length round trips, padded to the next whole block, and only a
     // whole number of blocks is accepted unpadded. The lengths cross the
     // backends' 2- and 8-block loops.
@@ -385,7 +422,8 @@ mod tests {
         for len in 0..=150usize {
             let msg: Vec<u8> = (0..len as u8).collect();
             let mut buf = msg.clone();
-            enc.encrypt(CbcIv::assume_unpredictable(iv), &mut buf);
+            enc.encrypt(CbcIv::assume_unpredictable(iv), &mut buf)
+                .unwrap();
             assert_eq!(buf.len(), (len / 16 + 1) * 16, "{len}");
             assert_eq!(dec.decrypt(&iv, &mut buf).unwrap(), msg, "{len}");
 
@@ -465,7 +503,7 @@ mod tests {
 
             let iv = bytes(16).try_into().unwrap();
             let mut msg = bytes(6 * 16 + 5);
-            ct_qemu::traced(|| enc.encrypt(CbcIv::assume_unpredictable(iv), &mut msg));
+            ct_qemu::traced(|| enc.encrypt(CbcIv::assume_unpredictable(iv), &mut msg)).unwrap();
             ct_qemu::traced(|| dec.decrypt(&iv, &mut msg)).unwrap();
         }
     }

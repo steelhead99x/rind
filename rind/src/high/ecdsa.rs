@@ -121,8 +121,11 @@ impl<C: Curve> SigningKey<C> {
     /// has one.
     fn is_public_key(&self, encoded: &[u8]) -> bool {
         // Kept as the public key once it matches, so it is not derived again.
+        // Indexed rather than matched on a slice pattern, which Aeneas cannot
+        // translate.
         #[cfg(rind_backend = "x86_64")]
-        if let [0x04, ..] = encoded
+        if !encoded.is_empty()
+            && encoded[0] == 0x04
             && let Some(matches) = self.private_key.public_key_is_uncompressed(encoded)
         {
             if matches {
@@ -195,6 +198,19 @@ impl<C: Curve> SigningKey<C> {
         let mut random = [0u8; 16];
         SystemRandom.fill(&mut random)?;
         self.rfc6979_sign_with_random::<H>(message, &random, signature)
+    }
+
+    /// [`Self::sign()`] with `random` in place of the system's, so the FIPS
+    /// module's self-test knows its answer.
+    #[cfg(any(test, rind_fips))]
+    pub(crate) fn sign_with_random<'a, H: SignatureHash>(
+        &self,
+        message: &[u8],
+        random: &[u8; 16],
+        signature: &'a mut [u8],
+    ) -> Result<&'a [u8], Error> {
+        let _entry = Entry::new_secret();
+        self.rfc6979_sign_with_random::<H>(message, random, signature)
     }
 
     /// ECDSA signing, returning a DER-encoded ASN.1 signature.

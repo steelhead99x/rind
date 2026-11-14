@@ -9,9 +9,11 @@
 #               without the library; nightly benchmark IDs on a tier, as the
 #               report's tier table shows them. Either may be a glob, where
 #               `*` also matches the library's own `*`
-#   on          hosts, or CPU tiers as the report's tier columns name them;
-#               the entry must cover some gap where the report's data
-#               measures any of them
+#   on          a host with a result in the report's data, or a CPU tier as
+#               the report's tier columns name it. Any measured machine
+#               counts; it does not have to be one `collect` reaches. The
+#               entry must cover some gap where the report's data measures
+#               any of them
 #
 # The nightly bench's `gate` job fails on a gap over 10% that two scheduled
 # runs in a row show without an entry here.

@@ -13,8 +13,7 @@ of `p256Pow`, HOL Light's `group_pow p256_group`, through the dispatch
 `mont_on_curve` relates to the curve equation, and s2n-bignum's
 `p256_scalarmul` takes and returns plain coordinates. `admin/prove` writes the
 aarch64 proof from this file by renaming the target. Key generation, which
-multiplies the generator, is `Rind.Aarch64.P256`'s, aarch64's alone: x86_64
-runs aws-lc's generator multiplication, which no proof covers yet.
+multiplies the generator, is `Rind.X86_64.P256`'s.
 -/
 
 namespace rind.x86_64

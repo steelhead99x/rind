@@ -18,5 +18,4 @@ Measured on the NixOS host on 2026-11-13 in [kixel-ai/dotfiles#135](https://gith
 
 ## Related
 
-- [The merge queue spends its time building](/quest/m0/ci-speed/queue-overhead.md) - also edits `queue-build.yml` and wants the runner's pre- and post-job cache-gc hooks cheaper, which a larger mbx store must not slow
 - [rind's dev shell builds through the shared compile cache](/quest/m2/mbx-dev-shell.md) - the agents' side of the same `shellHook`, which this quest lands

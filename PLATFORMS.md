@@ -81,10 +81,12 @@ qemu. iOS devices' code is only built.
   Raspberry Pi 1 and Zero), on `arm-linux-androideabi`, which Rust builds for
   ARMv5TE, on `powerpc64le` and big-endian `powerpc64` and `powerpc` Linux,
   and on `x86_64`,
-  where `--cfg rind_portable` forces it. Every PR also compiles the library for
-  `wasm32-wasip2` and `wasm32-unknown-unknown`, with and without `wipe`. The
-  latter enables `getrandom/wasm_js` for JavaScript randomness; the WASI target
-  uses its system random source. The nightly `build.yml` runs the vector tests
+  where `--cfg rind_portable` forces it. `just ci` also compiles the library
+  for `wasm32-wasip2` and `wasm32-unknown-unknown`, with and without `wipe`,
+  when a change touches rind, the workspace manifest or lockfile, or the
+  flake, and `just gate` always does. `wasm32-unknown-unknown` enables
+  `getrandom/wasm_js` for JavaScript randomness; the WASI target uses its
+  system random source. The nightly `build.yml` runs the vector tests
   on `wasm32-wasip2` under wasmtime (`just wasm`), without the differential
   tests, since aws-lc does not build for wasm. `wasm32-unknown-unknown` stays
   compile-only: its tests need a JavaScript host. Constant time is unchecked on
@@ -94,12 +96,17 @@ qemu. iOS devices' code is only built.
   `wasm32` built with `-C target-feature=+wide-arithmetic` (stable from Rust
   1.101), whose 128-bit products take one or two multiply instructions, and
   on 32-bit limbs elsewhere, where a 128-bit product would be a library call.
-  On 32-bit `x86` it needs Rust 1.94 rather than the 1.90 MSRV, since
-  libcrux-platform 0.0.4 calls `__cpuid` outside `unsafe`
-  ([libcrux#1646](https://github.com/celabshq/libcrux/issues/1646)).
 
 Every operation panics on a CPU missing one of these. Call `rind::cpu::check()`
 at startup to get an error naming the missing feature instead.
+
+[rind-fips](rind-fips/README.md)'s FIPS 140-3 module builds only for glibc
+Linux on `x86_64` and `aarch64`, and runs only the fastest paths there: on
+`x86_64` it requires `aes`, `pclmulqdq`, `ssse3`, `sse4.1`, `popcnt`,
+`movbe`, `avx`, `avx2`, `bmi1`, `bmi2`, and `adx`, as on Broadwell, Zen, and
+later cores, and on `aarch64` the crypto extension. It refuses to load on a
+CPU without them, naming the first missing, so each path it can take gets its
+own ACVP run and no other path is in it.
 
 rind's secret-dependent code divides no secret and does no floating-point
 arithmetic on any architecture, as `admin/ct-vartime` checks, but it multiplies
