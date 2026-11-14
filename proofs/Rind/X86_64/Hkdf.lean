@@ -291,56 +291,64 @@ theorem expand_into_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (prk : List
   rintro r ⟨h1, h2⟩
   exact ⟨h1, by rw [h2, hkdfExpand_eq]⟩
 
+/-- `Prk::expand` refuses a length of more than 255 blocks, and otherwise
+holds its arguments for `Okm::fill` or a conversion. `n` is the length the
+key type's `len` gives. -/
+theorem prk_expand_spec {L : Type} (inst : high.hkdf.KeyType L) (a : high.hmac.Algorithm)
+    (prk : List Byte) (k : high.hmac.Key) (hk : KeyOf a prk k) (info : Slice (Slice U8))
+    (len : L) (n : Usize) (hn : inst.sealedSealedInst.len len = ok n) :
+    high.hkdf.Prk.expand inst k info len ⦃ r =>
+      if n.val ≤ 255 * tagLen a then r = .Ok { prk := k, info, len }
+      else r = .Err .WrongLength ⦄ := by
+  obtain ⟨m, hm, hmv⟩ := tagLen_eq a
+  have hm64 : tagLen a ≤ 64 := by cases a <;> decide
+  unfold high.hkdf.Prk.expand
+  simp only [hn, key_algorithm_eq hk, hm, bind_ok]
+  step as ⟨i2, hi2⟩
+  split
+  · rename_i hgt
+    simp only [GT.gt, UScalar.lt_equiv] at hgt
+    simp only [WP.spec_ok]
+    rw [if_neg (by omega)]
+    trivial
+  · rename_i hle
+    simp only [GT.gt, UScalar.lt_equiv, not_lt] at hle
+    simp only [WP.spec_ok]
+    rw [if_pos (by omega)]
+    trivial
+
 /-- `Okm::fill` fills `out` with HKDF-Expand's output when `out` is the
-length asked for and at most 255 blocks, and refuses it otherwise. -/
+length asked for, which `Prk::expand` held to at most 255 blocks, and refuses
+it otherwise. -/
 theorem okm_fill_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (prk : List Byte)
     (k : high.hmac.Key) (hk : KeyOf a prk k) (info : Slice (Slice U8))
     (hinfo : hmacBlock a + tagLen a + (infoBytes info).length + 1 ≤ maxInput) (len : Usize)
-    (out : Slice U8) :
+    (hL : len.val ≤ 255 * tagLen a) (out : Slice U8) :
     high.hkdf.Okm0Usize.fill { prk := k, info, len } out ⦃ r =>
-      if out.length = len.val ∧ out.length ≤ 255 * tagLen a then
+      if out.length = len.val then
         r.1 = .Ok () ∧ r.2.length = out.length ∧
           bv r.2.val = hkdfExpand (hmacOf a) (tagLen a) prk (bv (infoBytes info)) out.length
       else r = (.Err .WrongLength, out) ⦄ := by
-  obtain ⟨n, hn, hnv⟩ := tagLen_eq a
-  have hn64 : tagLen a ≤ 64 := by cases a <;> decide
   unfold high.hkdf.Okm0Usize.fill
-  simp only [key_algorithm_eq hk, hn, bind_ok]
-  split
-  · rename_i hne
-    simp only [WP.spec_ok]
-    split
-    · rename_i hc
-      exfalso
-      obtain ⟨h, -⟩ := hc
-      simp only [bne_iff_ne, ne_eq] at hne
-      apply hne
+  by_cases hlen : out.length = len.val
+  · have heq : (Slice.len out != len) = false := by
+      rw [bne_eq_false_iff_eq]
       apply UScalar.eq_of_val_eq
-      rw [Slice.len_val, h]
-    · trivial
-  · rename_i heq
-    simp only [bne_iff_ne, ne_eq, Decidable.not_not] at heq
-    have hlen : out.length = len.val := by rw [← heq, Slice.len_val]
-    step as ⟨i3, hi3⟩
-    split
-    · rename_i hgt
-      simp only [WP.spec_ok]
-      split
-      · rename_i hc
-        exfalso
-        obtain ⟨-, h⟩ := hc
-        simp only [GT.gt, UScalar.lt_equiv, Slice.len_val] at hgt
-        omega
-      · trivial
-    · rename_i hle
-      simp only [GT.gt, UScalar.lt_equiv, Slice.len_val, not_lt] at hle
-      apply WP.spec_bind (expand_into_spec a hr prk k hk info hinfo out (by omega))
-      rintro r ⟨h1, h2⟩
-      simp only [WP.spec_ok]
-      split
-      · exact ⟨trivial, h1, h2⟩
-      · rename_i hc
-        exact absurd ⟨hlen, by omega⟩ hc
+      rw [Slice.len_val, hlen]
+    simp only [heq, Bool.false_eq_true, ↓reduceIte]
+    apply WP.spec_bind (expand_into_spec a hr prk k hk info hinfo out (by omega))
+    rintro r ⟨h1, h2⟩
+    simp only [WP.spec_ok]
+    rw [if_pos hlen]
+    exact ⟨trivial, h1, h2⟩
+  · have hne : (Slice.len out != len) = true := by
+      rw [bne_iff_ne, ne_eq]
+      intro h
+      apply hlen
+      rw [← Slice.len_val, h]
+    simp only [hne, ↓reduceIte, WP.spec_ok]
+    rw [if_neg hlen]
+    trivial
 
 /-- `Salt::new` keys HMAC with the salt. -/
 theorem salt_new_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (salt : Slice U8)
@@ -355,7 +363,7 @@ theorem salt_new_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (salt : Slice 
 theorem salt_extract_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (salt : List Byte)
     (k : high.hmac.Key) (hk : KeyOf a salt k) (secret : Slice U8)
     (hm : hmacBlock a + secret.length ≤ maxInput) :
-    high.hkdf.Salt.extract k secret ⦃ prk =>
+    high.hkdf.Salt.extract k secret ⦃ r => ∃ prk, r = .Ok prk ∧
       KeyOf a (hkdfExtract (hmacOf a) salt (bv secret.val)) prk ⦄ := by
   have hsign := sign_spec a hr salt k hk secret hm
   have hnew := key_new_spec a hr
@@ -373,34 +381,45 @@ theorem salt_extract_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (salt : Li
   intro prk hprk
   simp only [WP.spec_ok]
   rw [hsb, hdb] at hprk
-  exact hprk
+  exact ⟨prk, rfl, hprk⟩
 
-/-- HKDF in rind's calls: `Salt::new(a, salt).extract(ikm).expand(info, len).fill(out)`
+/-- HKDF in rind's calls: `Salt::new(a, salt).extract(ikm)?.expand(info, len)?.fill(out)`
 fills `out` with RFC 5869's HKDF-Expand of HKDF-Extract's PRK, for any `len`
-that is `out`'s length and at most 255 blocks. -/
+that is `out`'s length and at most 255 blocks, under `usize`'s `KeyType`,
+whose `len` is the value itself. -/
 theorem hkdf_fill (a : high.hmac.Algorithm) (hr : RunsHmac a) (inst : high.hkdf.KeyType Usize)
+    (hinst : ∀ x, inst.sealedSealedInst.len x = ok x)
     (salt ikm : Slice U8) (info : Slice (Slice U8)) (len : Usize) (out : Slice U8)
     (hs : salt.length ≤ maxInput) (hm : hmacBlock a + ikm.length ≤ maxInput)
     (hinfo : hmacBlock a + tagLen a + (infoBytes info).length + 1 ≤ maxInput)
     (hlen : out.length = len.val) (hL : out.length ≤ 255 * tagLen a) :
-    (do
+    ((do
       let s ← high.hkdf.Salt.new a salt
-      let prk ← high.hkdf.Salt.extract s ikm
-      let okm ← high.hkdf.Prk.expand inst prk info len
-      high.hkdf.Okm0Usize.fill okm out) ⦃ r =>
+      let r ← high.hkdf.Salt.extract s ikm
+      match r with
+      | core.result.Result.Err e => ok (core.result.Result.Err e, out)
+      | core.result.Result.Ok prk => do
+        let r ← high.hkdf.Prk.expand inst prk info len
+        match r with
+        | core.result.Result.Err e => ok (core.result.Result.Err e, out)
+        | core.result.Result.Ok okm => high.hkdf.Okm0Usize.fill okm out) :
+      Result ((core.result.Result Unit error.Error) × Slice U8)) ⦃ r =>
       r.1 = .Ok () ∧ bv r.2.val = hkdfExpand (hmacOf a) (tagLen a)
         (hkdfExtract (hmacOf a) (bv salt.val) (bv ikm.val)) (bv (infoBytes info)) out.length ⦄ := by
   apply WP.spec_bind (salt_new_spec a hr salt hs)
   intro s hsk
   apply WP.spec_bind (salt_extract_spec a hr _ s hsk ikm hm)
-  intro prk hprk
-  simp only [high.hkdf.Prk.expand, bind_ok]
-  apply WP.spec_mono (okm_fill_spec a hr _ prk hprk info hinfo len out)
+  rintro _ ⟨prk, rfl, hprk⟩
+  dsimp only
+  apply WP.spec_bind (prk_expand_spec inst a _ prk hprk info len len (hinst len))
   intro r hr'
-  split at hr'
-  · exact ⟨hr'.1, hr'.2.2⟩
-  · rename_i hc
-    exact absurd (And.intro hlen hL) hc
+  rw [if_pos (by omega)] at hr'
+  subst hr'
+  dsimp only
+  apply WP.spec_mono (okm_fill_spec a hr _ prk hprk info hinfo len (by omega) out)
+  intro r hr'
+  rw [if_pos hlen] at hr'
+  exact ⟨hr'.1, hr'.2.2⟩
 
 /-! ## The conversions from `Okm`
 

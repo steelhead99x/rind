@@ -26,6 +26,14 @@ const ARCH: &str = "this target";
 
 impl core::error::Error for MissingFeature {}
 
+impl MissingFeature {
+    /// The feature's name, which the FIPS module's C ABI carries.
+    #[cfg(any(test, rind_fips))]
+    pub(crate) fn name(self) -> &'static str {
+        self.0
+    }
+}
+
 /// Checks that this CPU has every feature rind requires, naming the first one missing.
 pub fn check() -> Result<(), MissingFeature> {
     match super::missing_cpu_feature() {
