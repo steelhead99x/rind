@@ -70,6 +70,40 @@ fn config() -> Vec<Value> {
 }
 
 #[test]
+fn malformed_ecdsa_coordinates_keep_the_wrapper_session_alive() {
+    let mut requests = Vec::new();
+    for (curve, hash, field) in [
+        ("P-256", "SHA2-256", 32),
+        ("P-384", "SHA2-384", 48),
+        ("P-521", "SHA2-512", 66),
+    ] {
+        for coordinate in [3, 4] {
+            for prefix in [vec![0x80], vec![0, 0x80]] {
+                let mut args = vec![
+                    curve.as_bytes().to_vec(),
+                    hash.as_bytes().to_vec(),
+                    b"message".to_vec(),
+                    vec![1; field],
+                    vec![1; field],
+                    vec![1; field],
+                    vec![1; field],
+                ];
+                let mut overlong = prefix;
+                overlong.resize(overlong.len() + field, 0);
+                args[coordinate] = overlong;
+                requests.push(("ECDSA/sigVer", args));
+                requests.push(("SHA2-256", vec![b"abc".to_vec()]));
+            }
+        }
+    }
+    let digest = hex("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    for [failed, followup] in transact(&requests).as_chunks::<2>().0 {
+        assert_eq!(*failed, vec![vec![0]]);
+        assert_eq!(*followup, vec![digest.clone()]);
+    }
+}
+
+#[test]
 fn registration_describes_the_client_supported_capabilities() {
     // NIST's algorithm registration tables require these fields. In particular,
     // an algorithm/mode/revision identifier alone cannot request fresh vectors.

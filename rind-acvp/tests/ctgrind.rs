@@ -55,29 +55,38 @@ fn run(command: &str, args: &[Vec<u8>]) -> Vec<Vec<u8>> {
 /// zero prefix whose public length fixes how many bytes are checked.
 #[test]
 fn ecdh_given_scalar() {
-    for (curve, alg, field) in [("P-256", &ECDH_P256, 32), ("P-384", &ECDH_P384, 48)] {
-        let peer = PrivateKey::from_scalar(alg, &vec![0x03; field]).unwrap();
+    for (curve, alg, field) in [
+        ("P-256", &ECDH_P256, 32),
+        ("P-384", &ECDH_P384, 48),
+        ("P-521", &ECDH_P521, 66),
+    ] {
+        let mut peer_scalar = vec![0; field];
+        peer_scalar[field - 1] = 3;
+        let peer = PrivateKey::from_scalar(alg, &peer_scalar).unwrap();
         let point = peer.public_key().as_ref().to_vec();
         let (x, y) = point[1..].split_at(field);
         let args = |scalar: Vec<u8>| vec![x.to_vec(), y.to_vec(), scalar];
-        let wanted = run(&format!("ECDH/{curve}"), &args(vec![0x02; field]));
-        let scalar = vec![0x02; field];
-        secret(scalar.as_slice());
-        assert_eq!(
-            run(&format!("ECDH/{curve}"), &args(scalar)),
-            wanted,
-            "{curve}"
-        );
-        // One public padding byte, then the same field. The prefix length is
-        // public; the field bytes stay secret.
-        let mut padded = vec![0u8];
-        padded.extend(std::iter::repeat_n(0x02, field));
-        secret(padded.as_slice());
-        assert_eq!(
-            run(&format!("ECDH/{curve}"), &args(padded)),
-            wanted,
-            "{curve} padded"
-        );
+        let mut scalar = vec![0; field];
+        scalar[field - 1] = 2;
+        let wanted = run(&format!("ECDH/{curve}"), &args(scalar.clone()));
+        let mut padded = vec![0u8; 2];
+        padded.extend_from_slice(&scalar);
+        for encoding in [scalar, vec![2], padded] {
+            secret(encoding.as_slice());
+            assert_eq!(
+                run(&format!("ECDH/{curve}"), &args(encoding)),
+                wanted,
+                "{curve}"
+            );
+        }
+        // The whole excess prefix is checked, with only the accept/reject
+        // verdict made public. The nonzero byte can occur anywhere in it.
+        for prefix in [[1, 0], [0, 1]] {
+            let mut rejected = prefix.to_vec();
+            rejected.resize(field + 2, 0);
+            secret(rejected.as_slice());
+            assert!(handle(&format!("ECDH/{curve}"), &args(rejected)).is_err());
+        }
     }
 }
 
