@@ -70,6 +70,13 @@ jobs:
           RUSTFLAGS: --cfg rind_cpu_disable
           RIND_CPU_DISABLE_wide_mul: 1
           RIND_TEST_ARM_WIDE_MUL: 0
+      - name: ctgrind FIPS module tests, narrow multiplier
+        if: runner.arch == 'ARM64'
+        run: nix develop .#ctgrind --command admin/ctgrind fips ${{ matrix.build }}
+        env:
+          RUSTFLAGS: --cfg rind_cpu_disable
+          RIND_CPU_DISABLE_wide_mul: 1
+          RIND_TEST_ARM_WIDE_MUL: 0
 
   # Valgrind hides ADX, which `admin/ctgrind`'s build switch overrides to
   # check s2n-bignum's ADX routines, so this job denies it to check what

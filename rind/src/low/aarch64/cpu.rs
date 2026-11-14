@@ -236,11 +236,14 @@ fn wide_toggle(detected: bool) -> bool {
     #[cfg(any(debug_assertions, rind_cpu_disable))]
     {
         if std::env::var_os("RIND_CPU_DISABLE_wide_mul").is_some() {
-            eprintln!("DEBUG: denying cpuid \"wide_mul\"");
+            // As `test_toggle`: the FIPS module's stdout is its caller's.
+            #[cfg(not(rind_fips))]
+            println!("DEBUG: denying cpuid \"wide_mul\"");
             return false;
         }
         if std::env::var_os("RIND_CPU_FORCE_wide_mul").is_some() {
-            eprintln!("DEBUG: forcing cpuid \"wide_mul\"");
+            #[cfg(not(rind_fips))]
+            println!("DEBUG: forcing cpuid \"wide_mul\"");
             return true;
         }
     }
@@ -414,6 +417,22 @@ pub(in crate::low) fn prefetch_ro<T>(ptr: *const T) {
     }
 }
 
+/// Re-exec this test binary. qemu-user is cargo's runner, not a kernel
+/// binfmt handler, so a child of a cross test needs that runner too. A
+/// native run leaves the variable unset and execs the binary itself.
+#[cfg(all(test, any(debug_assertions, rind_cpu_disable)))]
+pub(super) fn reexec() -> std::process::Command {
+    let exe = std::env::current_exe().unwrap();
+    let Ok(runner) = std::env::var("CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER") else {
+        return std::process::Command::new(exe);
+    };
+    let mut parts = runner.split_whitespace();
+    let mut cmd = std::process::Command::new(parts.next().unwrap());
+    cmd.args(parts);
+    cmd.arg(exe);
+    cmd
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -569,8 +588,12 @@ CPU part	: 0xd0b
             ("wide", false, true),
             ("narrow", true, false),
         ] {
-            let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
-            cmd.args(["--exact", "wide_mul_env_overrides", "--nocapture"])
+            let mut cmd = reexec();
+            // `--exact` matches the harness name, not the function's last
+            // component. `module_path!` includes the crate, which libtest drops.
+            let test = concat!(module_path!(), "::wide_mul_env_overrides");
+            let test = test.split_once("::").unwrap().1;
+            cmd.args([test, "--exact", "--nocapture"])
                 .env(CHILD, mode)
                 .env_remove("RIND_CPU_DISABLE_wide_mul")
                 .env_remove("RIND_CPU_FORCE_wide_mul");
@@ -581,10 +604,16 @@ CPU part	: 0xd0b
                 cmd.env("RIND_CPU_FORCE_wide_mul", "1");
             }
             let output = cmd.output().unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // Disable wins, so a child with both set prints the denial.
+            let line = if disable {
+                "DEBUG: denying cpuid \"wide_mul\""
+            } else {
+                "DEBUG: forcing cpuid \"wide_mul\""
+            };
             assert!(
-                output.status.success(),
-                "{mode}: {}{}",
-                String::from_utf8_lossy(&output.stdout),
+                output.status.success() && stdout.contains(line),
+                "{mode}: {line}\n{stdout}{}",
                 String::from_utf8_lossy(&output.stderr)
             );
         }

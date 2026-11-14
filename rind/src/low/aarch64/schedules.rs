@@ -292,8 +292,12 @@ fn mux_follows_the_override() {
         ("wide", false, true),
         ("narrow", true, false),
     ] {
-        let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
-        cmd.args(["--exact", "mux_follows_the_override", "--nocapture"])
+        let mut cmd = super::cpu::reexec();
+        // `--exact` matches the harness name, not the function's last
+        // component. `module_path!` includes the crate, which libtest drops.
+        let test = concat!(module_path!(), "::mux_follows_the_override");
+        let test = test.split_once("::").unwrap().1;
+        cmd.args([test, "--exact", "--nocapture"])
             .env(CHILD, mode)
             .env_remove("RIND_CPU_DISABLE_wide_mul")
             .env_remove("RIND_CPU_FORCE_wide_mul");
@@ -304,10 +308,16 @@ fn mux_follows_the_override() {
             cmd.env("RIND_CPU_FORCE_wide_mul", "1");
         }
         let output = cmd.output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // Disable wins, so a child with both set prints the denial.
+        let line = if disable {
+            "DEBUG: denying cpuid \"wide_mul\""
+        } else {
+            "DEBUG: forcing cpuid \"wide_mul\""
+        };
         assert!(
-            output.status.success(),
-            "{mode}: {}{}",
-            String::from_utf8_lossy(&output.stdout),
+            output.status.success() && stdout.contains(line),
+            "{mode}: {line}\n{stdout}{}",
             String::from_utf8_lossy(&output.stderr)
         );
     }
