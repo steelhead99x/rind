@@ -34,6 +34,14 @@ opaque low.x86_64.cpu.HaveSse41 : Type
 /-- MD5's chaining state, which no proof covers. -/
 opaque mid.md5.Md5State : Type
 
+/-- A value its owner builds once and keeps, whose atomics Aeneas cannot
+translate. -/
+opaque low.generic.reuse_cache.ReuseCache (T : Type) : Type
+
+/-- The HMAC-DRBG an ECDSA signature draws its nonces from, whose output the
+functional spec leaves out. -/
+opaque high.hmac_drbg.HmacDrbg (H : Type _) (Clause0_Context : Type _) (Clause0_State : Type _) : Type
+
 /-- An MD5 context, which no proof covers. -/
 opaque mid.md5.Md5Context : Type
 
