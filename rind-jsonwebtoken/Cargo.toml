@@ -9,6 +9,12 @@ categories = ["authentication", "cryptography"]
 rust-version.workspace = true
 readme = "README.md"
 
+# The provider admin/adapter-api diffs this crate's API against.
+[package.metadata.rind.api]
+crate = "jsonwebtoken"
+module = "crypto::aws_lc"
+features = ["aws_lc_rs"]
+
 [dependencies]
 rind = { version = "0.3.2", path = "../rind" }
 jsonwebtoken = { version = "11.1", default-features = false }

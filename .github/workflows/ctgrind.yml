@@ -123,7 +123,10 @@ jobs:
   # The portable backend, forced on x86_64 as `just portable` forces it, with
   # dalek's serial backend, which the architectures that need it run. Its
   # public-key arithmetic runs on 64-bit limbs there, so the `32` row forces
-  # the 32-bit limbs 32-bit targets run.
+  # the 32-bit limbs 32-bit targets run, and Poly1305's products from 16-bit
+  # halves, as the Cortex-M3 and the cores without `umull` build it (see
+  # build.rs). Every other row's tests check Poly1305's 26-bit limbs with
+  # whole 32x32->64-bit products.
   portable:
     name: portable (${{ matrix.limb }}-bit limbs)
     if: github.event_name != 'pull_request'
@@ -144,7 +147,7 @@ jobs:
       - name: ctgrind tests
         run: nix develop .#ctgrind --command admin/ctgrind --release
         env:
-          RUSTFLAGS: --cfg rind_portable --cfg curve25519_dalek_backend="serial" --cfg rind_limb="${{ matrix.limb }}"
+          RUSTFLAGS: --cfg rind_portable --cfg curve25519_dalek_backend="serial" --cfg rind_limb="${{ matrix.limb }}" ${{ matrix.limb == '32' && '--cfg rind_mul16' || '' }}
 
   # Valgrind runs no AVX-512, VAES, VPCLMULQDQ, or SHA instruction, so
   # `admin/ct-sde` compares Intel SDE traces of those paths for two secrets

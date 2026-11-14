@@ -21,7 +21,6 @@ fn keygen(c: &mut Criterion) {
         })
     });
 
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{rand, signature};
         let rng = rand::SystemRandom::new();
@@ -97,7 +96,6 @@ fn verify(c: &mut Criterion) {
         })
     });
 
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         let public_key =
             aws_lc_rs::signature::ParsedPublicKey::new(&aws_lc_rs::signature::ED25519, public_key)
@@ -176,7 +174,6 @@ fn sign(c: &mut Criterion) {
         })
     });
 
-    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{rand, signature};
         let rng = rand::SystemRandom::new();
