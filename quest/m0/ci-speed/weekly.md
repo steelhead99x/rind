@@ -17,5 +17,4 @@ Decided with the maintainer on 2026-11-12 ([the epic](/quest/m0/ci-speed/README.
 
 ## Related
 
-- [Releases publish only after the full suite passes locally](/quest/m0/ci-speed/release-check.md) - runs the same suites on the released crates before a release PR merges
 - [Mutation testing runs weekly on native runners](/quest/m0/ci-speed/mutants-slim.md) - moves mutants to the same weekly cadence
