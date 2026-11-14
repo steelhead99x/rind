@@ -206,14 +206,21 @@ mod tests {
         };
         assert_eq!(error.to_string(), "VersionNotSupported");
 
-        // A v2 document that ends before the public key is missing it, which
-        // the `at_end` guard names. Replacing the guard with `false` parses
-        // on and reports a bad encoding.
+        // PKCS#8 v2 is version integer 1. Ending before the public key is
+        // `PublicKeyIsMissing`, which the `at_end` guard names. Replacing that
+        // guard with `false` parses on and reports a bad encoding.
         let missing = ed25519_document(1, false);
         let Err(error) = ed25519_pkcs8(&missing, false) else {
-            panic!("a v1 document without a public key was accepted");
+            panic!("a v2 document without a public key was accepted");
         };
         assert_eq!(error.to_string(), "PublicKeyIsMissing");
+
+        // Replacing the guard with `true` reports every v2 document as missing
+        // its public key, including one that has the key ring reads.
+        let present = ed25519_document(1, true);
+        let key = ed25519_pkcs8(&present, false).expect("a v2 document with its public key");
+        assert_eq!(key.seed, &[0x11; 32]);
+        assert_eq!(key.public_key, Some(&[0x22; 32][..]));
     }
 
     fn ed25519_document(version: u8, with_public_key: bool) -> Vec<u8> {
@@ -222,8 +229,10 @@ mod tests {
         let seed = tlv(0x04, &tlv(0x04, &[0x11; 32]));
         let mut body = [tlv(0x02, &[version]), algorithm, seed].concat();
         if with_public_key {
-            // [1] IMPLICIT OCTET STRING, unused by these refusals.
-            body.extend(tlv(0x81, &[0x22; 32]));
+            // [1] IMPLICIT OCTET STRING: a leading 0x00, then the 32-byte key.
+            let mut public = vec![0x00];
+            public.extend_from_slice(&[0x22; 32]);
+            body.extend(tlv(0x81, &public));
         }
         tlv(0x30, &body)
     }
