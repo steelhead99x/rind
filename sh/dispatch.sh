@@ -98,9 +98,10 @@ declare -A scope=(
     # Quest documents form one graph, so any change validates the whole tree,
     # as does a bump of the flake-pinned validator.
     [quest]='^(quest/|flake\.lock$)'
-    # alert.yml must watch every workflow that runs outside a pull request, and
-    # every third-party action must be pinned.
-    [gh]='^(\.github/|sh/(alert|pins)\.sh$)'
+    # alert.yml must watch every workflow that runs outside a pull request,
+    # every third-party action must be pinned, and every scheduled workflow
+    # must run whole when the release check dispatches it.
+    [gh]='^(\.github/|sh/(alert|pins|release-check)\.sh$)'
     [shell]=''
     [nix]=''
 )
@@ -378,6 +379,7 @@ for module in "${selected[@]}"; do
             fi
             sh/alert.sh check
             sh/pins.sh
+            sh/release-check.sh --check >/dev/null
             ;;
         check:shell) files 'sh/*.sh' | xargs -0 shellcheck ;;
         check:nix) files '*.nix' | xargs -0 nixfmt --check ;;
