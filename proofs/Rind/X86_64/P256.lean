@@ -1,21 +1,20 @@
-import Rind.Aarch64.P256Agree
-import Rind.Aarch64.P256Table
+import Rind.X86_64.P256Base
 import Rind.P256Multiples
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
-# aarch64 P-256 key generation, proven from rind's agreement API to s2n-bignum's contracts
+# P-256 key generation, proven from rind's agreement API to s2n-bignum's contracts
 
 The `p256_*` theorems state the keys the agreement API generates and loads for
 `ECDH_P256`, in terms of `p256Pow`, HOL Light's `group_pow p256_group`,
-through the dispatch `Rind.Aarch64.Dispatch` and `Rind.Aarch64.P256Dispatch`
-model. Agreement itself is `Rind.Aarch64.P256Agree`'s, which `admin/prove`
-writes from x86_64's. Key generation multiplies the generator by s2n-bignum's
-`p256_montjscalarmul` over the table `Rind.Aarch64.P256Table` checks, which
-x86_64 does not run.
+through the dispatch `Rind.X86_64.Dispatch` and `Rind.X86_64.P256Dispatch`
+model. Agreement itself is `Rind.X86_64.P256Agree`'s. Key generation
+multiplies the generator as `Rind.X86_64.P256Base` states, which each target
+proves its own way. `admin/prove` writes the aarch64 proof from this file by
+renaming the target.
 -/
 
-namespace rind.aarch64
+namespace rind.x86_64
 
 /-! ## What the theorems state -/
 
@@ -119,43 +118,12 @@ theorem from_bytes_spec (bytes : Slice U8) (hl : bytes.length = 32) :
   · subst hr
     simp [core.result.Result.map]
 
-@[step]
-theorem base_multiply_spec (_hr : Runs) (k : mid.p256.Scalar) :
-    mid.p256.AffineMontPoint.base_multiply k ⦃ q =>
-      ∃ rx ry, p256AffineZ (rx, ry) (p256Pow p256G (wordsNat k.val)) ∧
-        pairNat q.xy.val = (2 ^ 256 * rx % p256, 2 ^ 256 * ry % p256) ⦄ := by
-  unfold mid.p256.AffineMontPoint.base_multiply
-  step*
-  · simp [mid.p256.AffineMontPoint.X]
-  · simp [mid.p256.AffineMontPoint.X]
-  · rcases r with a | _
-    · exact ⟨a, rfl⟩
-    · exact absurd (by simp [s_post1, mid.p256.AffineMontPoint.X]) r_post
-  · simp [mid.p256.AffineMontPoint.Y]
-  · simp [mid.p256.AffineMontPoint.Y]
-  · rcases r1 with a | _
-    · exact ⟨a, rfl⟩
-    · exact absurd (by simp [s1_post1, mid.p256.AffineMontPoint.Y]) r1_post
-  · subst r_post
-    obtain ⟨ha, -⟩ := r_post
-    subst r1_post
-    obtain ⟨ha1, -⟩ := r1_post
-    have h8 : (xy1.val).length = 8 := xy1.property
-    have hxa : feNat a = (pairNat xy1.val).1 := by
-      simp [feNat, ha, s_post, mid.p256.AffineMontPoint.X, List.slice, pairNat]
-    have hya : feNat a1 = (pairNat xy1.val).2 := by
-      rw [pairNat_drop _ h8]
-      simp [feNat, ha1, s1_post, mid.p256.AffineMontPoint.Y, List.slice, List.take_of_length_le, h8]
-    refine ⟨(pairNat xy1.val).1, (pairNat xy1.val).2, xy1_post _ p256OnCurve_G tabulated, ?_⟩
-    rw [q_post, pairNat_append _ _ fe.property fe1.property, ← hxa, ← hya]
-    exact Prod.ext fe_post fe1_post
-
-theorem public_point_spec (h : Runs) (k : mid.p256.PrivateKey) (x y : Nat)
+theorem public_point_spec (h : Runs) (k : mid.p256.PrivateKey) (hk : wordsNat k.scalar.val < n256) (x y : Nat)
     (hq : p256Pow p256G (wordsNat k.scalar.val) = some (x, y)) (hc : p256OnCurve (some (x, y))) :
     mid.p256.PrivateKey.public_point k ⦃ pt =>
       pairNat pt.xy.val = (2 ^ 256 * x % p256, 2 ^ 256 * y % p256) ⦄ := by
   unfold mid.p256.PrivateKey.public_point low.ct.into_public
-  step with base_multiply_spec h k.scalar as ⟨q, rx, ry, hz, hqq⟩
+  step with base_multiply_spec h k.scalar hk as ⟨q, rx, ry, hz, hqq⟩
   unfold p256AffineZ at hz
   split_ifs at hz with h0
   · rw [hz] at hq; cases hq
@@ -211,13 +179,13 @@ theorem as_bytes_uncompressed_spec (_hr : Runs) (pt : mid.p256.AffineMontPoint) 
     rw [fe1_post, fe3_post, fe_post, fe2_post, pairNat_drop _ hl]
     rfl
 
-theorem public_key_uncompressed_spec (h : Runs) (k : mid.p256.PrivateKey) (x y : Nat)
-    (hq : p256Pow p256G (wordsNat k.scalar.val) = some (x, y)) (hc : p256OnCurve (some (x, y))) :
+theorem public_key_uncompressed_spec (h : Runs) (k : mid.p256.PrivateKey) (hk : wordsNat k.scalar.val < n256)
+    (x y : Nat) (hq : p256Pow p256G (wordsNat k.scalar.val) = some (x, y)) (hc : p256OnCurve (some (x, y))) :
     mid.p256.PrivateKey.public_key_uncompressed k ⦃ b =>
       b.val.head? = some 4#u8 ∧ x962Coords b.val = (x, y) ⦄ := by
   unfold mid.p256.PrivateKey.public_key_uncompressed
   step
-  step with public_point_spec h k x y hq hc as ⟨pt, hpt⟩
+  step with public_point_spec h k hk x y hq hc as ⟨pt, hpt⟩
   have hp : 0 < p256 := by simp [p256]
   step with as_bytes_uncompressed_spec h pt (by rw [hpt]; exact Nat.mod_lt _ hp)
     (by rw [hpt]; exact Nat.mod_lt _ hp) as ⟨b, hb4, hbc⟩
@@ -226,14 +194,14 @@ theorem public_key_uncompressed_spec (h : Runs) (k : mid.p256.PrivateKey) (x y :
   simp only [rinv_tomont _ hc.1, rinv_tomont _ hc.2.1]
 
 theorem encode_public_spec (h : Runs) (k : mid.p256.PrivateKey) (algorithm : high.agreement.Algorithm)
-    (x y : Nat) (hq : p256Pow p256G (wordsNat k.scalar.val) = some (x, y))
+    (hk : wordsNat k.scalar.val < n256) (x y : Nat) (hq : p256Pow p256G (wordsNat k.scalar.val) = some (x, y))
     (hc : p256OnCurve (some (x, y))) :
     high.curve.P256.Insts.RindHighAgreementAgreePrivateKey.encode_public k algorithm ⦃ pk =>
       high.agreement.PublicKey.Insts.CoreConvertAsRefSliceU8.as_ref pk ⦃ b =>
         b.length = 65 ∧ b.val.head? = some 4#u8 ∧ x962Coords b.val = (x, y) ⦄ ⦄ := by
   unfold high.curve.P256.Insts.RindHighAgreementAgreePrivateKey.encode_public high.agreement.PublicKey.from_encoding
     high.agreement.PublicKey.Insts.CoreConvertAsRefSliceU8.as_ref low.generic.zeroise.ZeroableRef.new
-  step with public_key_uncompressed_spec h k x y hq hc as ⟨a, ha4, hac⟩
+  step with public_key_uncompressed_spec h k hk x y hq hc as ⟨a, ha4, hac⟩
   step as ⟨sl, hsl⟩
   subst hsl
   have hlen : a.to_slice.len.val = 65 := by simp
@@ -267,7 +235,7 @@ theorem encode_public_key_spec (h : Runs) (k : mid.p256.PrivateKey) (algorithm :
       high.agreement.PublicKey.Insts.CoreConvertAsRefSliceU8.as_ref pk ⦃ b =>
         p256PublicKey (wordsNat k.scalar.val) b.val ⦄ ⦄ := by
   obtain ⟨x, y, hq, hc⟩ := g_mult _ hk0 hk
-  exact WP.spec_mono (encode_public_spec h k algorithm x y hq hc)
+  exact WP.spec_mono (encode_public_spec h k algorithm hk x y hq hc)
     fun pk hpk => public_key_of_coords _ x y hq pk hpk
 
 /-- `p256Agree`'s fields, which the theorems below rewrite to, so `step` finds
@@ -470,4 +438,4 @@ theorem p256_public_key (key : high.agreement.PrivateKey) (d : Nat) (hkey : p256
   obtain ⟨_, _, _, hpk⟩ := hkey
   simpa [high.agreement.PrivateKey.public_key] using hpk
 
-end rind.aarch64
+end rind.x86_64

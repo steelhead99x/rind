@@ -104,7 +104,11 @@ mod generic {
         all(rind_backend = "aarch64", test)
     ))]
     pub(crate) mod poly1305;
+    #[cfg(target_has_atomic = "8")]
     pub(super) mod reuse_cache;
+    // Where there is no compare-and-swap, and in tests to test it.
+    #[cfg(any(not(target_has_atomic = "8"), test))]
+    pub(super) mod reuse_cache_without_cas;
     // The portable backend's SHA-1, and both hashes in armv7 and x86_64
     // tests to check the assembly against.
     #[cfg(any(
@@ -131,7 +135,10 @@ pub(crate) use generic::ghash::gcm_model;
 pub(crate) use generic::md5::md5_compress_blocks;
 #[cfg(any(rind_backend = "x86_64", all(rind_backend = "aarch64", test)))]
 pub(crate) use generic::poly1305;
+#[cfg(target_has_atomic = "8")]
 pub(crate) use generic::reuse_cache::ReuseCache;
+#[cfg(not(target_has_atomic = "8"))]
+pub(crate) use generic::reuse_cache_without_cas::ReuseCache;
 pub(crate) use generic::zeroise::{Zeroable, ZeroableRef, zeroise, zeroise_value};
 #[cfg(rind_backend = "portable")]
 pub(crate) use portable::poly1305;
@@ -244,7 +251,9 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::bignum_copy_row_from_table::bignum_copy_row_from_table;
         pub(crate) use x86_64::bignum_ctz::bignum_ctz;
         pub(crate) use x86_64::bignum_demont::bignum_demont;
-        pub(crate) use x86_64::bignum_point_select::{bignum_aff_point_select_p384, bignum_aff_point_select_p521};
+        pub(crate) use x86_64::bignum_point_select::{
+            bignum_aff_point_select_p256, bignum_aff_point_select_p384, bignum_aff_point_select_p521,
+        };
         pub(crate) use x86_64::adx_mux::bignum_demont_p256;
         pub(crate) use x86_64::adx_mux::bignum_demont_p384;
         pub(crate) use x86_64::bignum_digitsize::bignum_digitsize;
@@ -323,7 +332,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::adx_mux::p256_montjdouble;
         pub(crate) use x86_64::adx_mux::p256_montjmixadd;
         pub(crate) use x86_64::adx_mux::p256_scalarmul;
-        pub(crate) use x86_64::ecp_nistz256::{P256GeneratorRow, p256_point_add_affine, p256_select_w7};
+        pub(crate) use x86_64::ecp_nistz256::p256_point_add_affine;
         pub(crate) use x86_64::adx_mux::p384_montjadd;
         pub(crate) use x86_64::adx_mux::p384_montjmixadd;
         pub(crate) use x86_64::adx_mux::p384_montjdouble;
