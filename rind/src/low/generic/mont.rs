@@ -472,42 +472,33 @@ fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Wide) -> Wide {
     mul_add_limb(v, prev, c0 as Limb, c1)
 }
 
-/// `x += y * u`, returning the carry out of the top limb.
+/// `x += y * u`, for equally long slices, returning the carry out of the top limb.
 ///
 /// Four limbs at a time. Each product depends only on `u` and `y`, so the
 /// four multiplies issue before the carry chain that adds them. Lengths are
-/// public. It stops at the shorter slice, and a remainder of one to three
-/// limbs takes the one-limb step.
+/// public, and a remainder of one to three limbs takes the one-limb step.
 ///
-/// Each partial sum, the product plus a limb plus the carry, is at most
-/// `2^2b - 1`, and that value is `Wide`'s maximum. The carry in fits a
-/// limb: it starts at zero, and the high half of such a sum is at most
-/// `2^b - 1`.
-#[inline(always)]
+/// The carry fits a limb: it starts at zero, and `add_product`'s bound keeps
+/// the high half of each sum at most `2^b - 1`.
+#[inline]
 fn mul_add(x: &mut [Limb], y: &[Limb], u: Limb) -> Wide {
+    debug_assert_eq!(x.len(), y.len());
     let mut carry: Wide = 0;
     let uu = Wide::from(u);
-    let n = x.len().min(y.len());
-    let (xb, xr) = x[..n].as_chunks_mut::<4>();
-    let (yb, yr) = y[..n].as_chunks::<4>();
+    let (xb, xr) = x.as_chunks_mut::<4>();
+    let (yb, yr) = y.as_chunks::<4>();
     for (xb, yb) in xb.iter_mut().zip(yb) {
         let p0 = uu.wrapping_mul(Wide::from(yb[0]));
         let p1 = uu.wrapping_mul(Wide::from(yb[1]));
         let p2 = uu.wrapping_mul(Wide::from(yb[2]));
         let p3 = uu.wrapping_mul(Wide::from(yb[3]));
-        let s0 = p0.wrapping_add(Wide::from(xb[0])).wrapping_add(carry);
+        let s0 = add_product(p0, xb[0], carry);
         xb[0] = s0 as Limb;
-        let s1 = p1
-            .wrapping_add(Wide::from(xb[1]))
-            .wrapping_add(s0 >> Limb::BITS);
+        let s1 = add_product(p1, xb[1], s0 >> Limb::BITS);
         xb[1] = s1 as Limb;
-        let s2 = p2
-            .wrapping_add(Wide::from(xb[2]))
-            .wrapping_add(s1 >> Limb::BITS);
+        let s2 = add_product(p2, xb[2], s1 >> Limb::BITS);
         xb[2] = s2 as Limb;
-        let s3 = p3
-            .wrapping_add(Wide::from(xb[3]))
-            .wrapping_add(s2 >> Limb::BITS);
+        let s3 = add_product(p3, xb[3], s2 >> Limb::BITS);
         xb[3] = s3 as Limb;
         carry = s3 >> Limb::BITS;
     }
@@ -519,13 +510,15 @@ fn mul_add(x: &mut [Limb], y: &[Limb], u: Limb) -> Wide {
     carry
 }
 
-/// `a * b + c + d`, for a `d` that fits a limb, which fits `Wide`: at most
-/// (2^b - 1)^2 + 2 (2^b - 1) = 2^2b - 1.
+/// Adds a limb and a limb-sized carry to a product of two limbs.
+/// The maximum is `(2^b - 1)^2 + 2 (2^b - 1) = 2^2b - 1`, which fits `Wide`.
+fn add_product(product: Wide, x: Limb, carry: Wide) -> Wide {
+    product.wrapping_add(Wide::from(x)).wrapping_add(carry)
+}
+
+/// `a * b + c + d`, for a `d` that fits a limb.
 fn mul_add_limb(a: Limb, b: Limb, c: Limb, d: Wide) -> Wide {
-    Wide::from(a)
-        .wrapping_mul(Wide::from(b))
-        .wrapping_add(Wide::from(c))
-        .wrapping_add(d)
+    add_product(Wide::from(a).wrapping_mul(Wide::from(b)), c, d)
 }
 
 /// `r := 2r mod m`, for `r` below `m`.
@@ -657,27 +650,25 @@ mod tests {
         }
     }
 
-    /// All-ones rows, which fill each partial sum to `2^2b - 1`, from an
-    /// empty row through two blocks of four, against the one-limb recurrence.
+    /// All-ones rows have the closed-form result `B^(n+1) - B`, for
+    /// `B = 2^Limb::BITS`. Cover the scalar loop, blocks, and every tail.
     #[test]
     fn mul_add_ones() {
-        for n in 0..=8 {
-            let (x, y) = (vec![Limb::MAX; n], vec![Limb::MAX; n]);
-            let (mut got, ys) = (x.clone(), y.clone());
+        for n in 0..=20 {
+            let (mut got, ys) = (vec![Limb::MAX; n], vec![Limb::MAX; n]);
             secret_slice(&got);
             secret_slice(&ys);
             let carry = mul_add(&mut got, &ys, into_secret(Limb::MAX));
 
-            let mut expect = x;
-            let mut c = 0;
-            for (acc, factor) in expect.iter_mut().zip(&y) {
-                let t = mul_add_limb(Limb::MAX, *factor, *acc, c);
-                *acc = t as Limb;
-                c = t >> Limb::BITS;
-            }
             public_slice(&got);
-            assert_eq!(got, expect);
-            assert_eq!(into_public(carry), c);
+            let carry = into_public(carry);
+            if n == 0 {
+                assert_eq!(carry, 0);
+            } else {
+                assert_eq!(got[0], 0);
+                assert!(got[1..].iter().all(|limb| *limb == Limb::MAX));
+                assert_eq!(carry, Wide::from(Limb::MAX));
+            }
         }
     }
 
