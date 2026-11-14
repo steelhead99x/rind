@@ -252,10 +252,18 @@ impl<'a> SlotCompiler<'a> {
             "[package]\nname = {name:?}\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n[lib]\npath = {:?}\n[workspace]\n[profile.release]\nopt-level = \"s\"\ndebug = false\npanic = \"abort\"\n",
             source.to_str().expect("slot source path is UTF-8")
         )).expect("writing slot helper manifest");
+        // A named assembly output needs one codegen unit. The size probe
+        // needs native object code even when the consuming crate uses LTO.
+        // Cargo puts encoded flags after `cargo rustc`'s extra arguments.
+        let mut rustflags = encoded_rustflags();
+        rustflags.extend(
+            ["-Ccodegen-units=1", "-Clto=off", "-Clinker-plugin-lto=no"].map(str::to_owned),
+        );
         let mut cmd = Command::new(env::var_os("CARGO").expect("cargo sets CARGO"));
         cmd.current_dir(&helper)
             .env("RUSTC", &self.rustc)
             .env("RIND_SLOT_PREFIX", &self.prefix)
+            .env("CARGO_ENCODED_RUSTFLAGS", rustflags.join("\x1f"))
             // A recursive cargo must not wait for its parent's jobserver slot.
             .env_remove("CARGO_MAKEFLAGS")
             .env_remove("MAKEFLAGS")
