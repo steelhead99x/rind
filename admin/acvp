@@ -411,6 +411,7 @@ def drbg_answer(digest, entropy, nonce, personal, other, out_len):
 def supplemental_sets():
     # The vendored ACVP sets omit these supported operations. Use Python's
     # standard-library oracle and the already-vendored CAVP ECDH answers.
+    # SHA-1 is registered, and thirdparty/acvp has no SHA-1 file.
     pbkdf, drbg, kda = [], [], []
     for hash_name, digest in HASHES.items():
         tests = []
@@ -471,7 +472,24 @@ def supplemental_sets():
                 tests.append(bad)
                 kas.append(dict(tgId=len(kas) + 1, testType="VAL", domainParameterGenerationMode=curve,
                                 kasRole=role, scheme=scheme, tests=tests))
+    messages = [b"", b"abc", bytes([0xFF]), bytes(range(256)) * 4]
+    sha1 = [
+        dict(
+            tgId=1,
+            testType="AFT",
+            tests=[
+                dict(
+                    tcId=i,
+                    msg=msg.hex(),
+                    len=len(msg) * 8,
+                    md=hashlib.sha1(msg).hexdigest(),
+                )
+                for i, msg in enumerate(messages, 1)
+            ],
+        )
+    ]
     return {
+        "SHA-1-1.0": dict(algorithm="SHA-1", revision="1.0", testGroups=sha1),
         "PBKDF-1.0": dict(algorithm="PBKDF", revision="1.0", testGroups=pbkdf),
         "hmacDRBG-1.0": dict(algorithm="hmacDRBG", revision="1.0", testGroups=drbg),
         "KAS-ECC-SSC-Sp800-56Ar3": dict(algorithm="KAS-ECC-SSC", revision="Sp800-56Ar3", testGroups=kas),
