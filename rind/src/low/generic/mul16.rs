@@ -42,7 +42,7 @@ pub(crate) fn mul16(a: u32, b: u32) -> u64 {
 /// `v`, which the compiler cannot see through, as `generic::md5` hides its
 /// values, without a trip through memory.
 #[inline(always)]
-#[cfg(all(rind_reg_asm, not(miri)))]
+#[cfg(not(any(target_family = "wasm", miri)))]
 // The operand appears only in a comment, so no register width is printed.
 #[allow(asm_sub_register)]
 fn opaque(mut v: u32) -> u32 {
@@ -54,12 +54,11 @@ fn opaque(mut v: u32) -> u32 {
     v
 }
 
-// build.rs sets `rind_reg_asm` only where a `reg` operand is stable.
-// Elsewhere, and under Miri, `black_box` keeps the halves opaque. None of
-// those targets builds with `rind_mul16` except tests, which only check
-// the arithmetic.
+// WebAssembly has no stable inline assembly, and Miri runs none, as MD5's
+// barrier does. `black_box` keeps the halves opaque there. Neither target
+// builds with `rind_mul16` except tests, which only check the arithmetic.
 #[inline(always)]
-#[cfg(not(all(rind_reg_asm, not(miri))))]
+#[cfg(any(target_family = "wasm", miri))]
 fn opaque(v: u32) -> u32 {
     core::hint::black_box(v)
 }

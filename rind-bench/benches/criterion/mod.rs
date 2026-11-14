@@ -3,23 +3,6 @@ pub use codspeed_criterion_compat::*;
 #[cfg(not(feature = "__bench_codspeed"))]
 pub use criterion::*;
 
-/// Names an aws-lc-rs item, or `()` on Xtensa and bare metal
-/// (`target_os = "none"`), which aws-lc builds for no target of: there a
-/// bench leaves aws-lc-rs's rows out and passes its algorithms as `()`.
-/// A bench that uses it declares `#[macro_use] mod criterion;`.
-#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
-#[allow(unused_macros)]
-macro_rules! aws {
-    ($($path:tt)+) => { aws_lc_rs::$($path)+ };
-}
-#[cfg(any(target_arch = "xtensa", target_os = "none"))]
-#[allow(unused_macros)]
-macro_rules! aws {
-    ($($path:tt)+) => {
-        ()
-    };
-}
-
 /// Message sizes for ciphers and AEADs: a short token, QUIC datagrams at and
 /// near the common 1200- and 1350-byte MTUs, and a full TLS record.
 #[allow(dead_code)]

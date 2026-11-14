@@ -11,6 +11,9 @@ codspeed-criterion-compat = { optional = true, version = "6" }
 
 [dev-dependencies]
 aes-gcm = "0.11"
+aws-lc-rs = { version = "1.19", features = ["non-fips"], default-features = false }
+# For XChaCha20-Poly1305, which aws-lc-rs does not expose.
+aws-lc-sys = { version = "0.47", default-features = false }
 chacha20poly1305 = "0.11"
 criterion = "0.8"
 ed25519-dalek = { version = "3", features = ["alloc", "pkcs8", "rand_core"] }
@@ -18,7 +21,7 @@ getrandom = { version = "0.4", features = ["sys_rng"] }
 hkdf = "0.13"
 hex = { version = "0.4", features = ["serde"] }
 hmac = "0.13"
-jsonwebtoken = { version = "11.1", default-features = false }
+jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc_rs"] }
 libcrux-aes = "0.0.10"
 libcrux-chacha20poly1305 = "0.0.10"
 libcrux-ecdh = "0.0.9"
@@ -42,23 +45,13 @@ ring = "0.17"
 rind-jsonwebtoken = { path = "../rind-jsonwebtoken" }
 rind-rustls = { path = "../rind-rustls" }
 rsa = { version = "=0.10.0-rc.19", features = ["sha2"] }
-rustls = { version = "0.23.36", default-features = false, features = ["ring", "std"] }
+rustls = { version = "0.23.36", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.11"
 sha2 = "0.11"
 sha3 = "0.12"
 x25519-dalek = { version = "3", features = ["getrandom"] }
-
-# aws-lc builds for neither Xtensa nor bare metal (`target_os = "none"`), so
-# the benches leave its rows out there, on the same cfg, and these with them:
-# aws-lc-rs, and the aws-lc-rs backends of jsonwebtoken and rustls.
-[target.'cfg(not(any(target_arch = "xtensa", target_os = "none")))'.dev-dependencies]
-aws-lc-rs = { version = "1.19", features = ["non-fips"], default-features = false }
-# For XChaCha20-Poly1305, which aws-lc-rs does not expose.
-aws-lc-sys = { version = "0.47", default-features = false }
-jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc_rs"] }
-rustls = { version = "0.23.36", default-features = false, features = ["aws-lc-rs"] }
 
 # Graviola supports only these.
 [target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dev-dependencies]

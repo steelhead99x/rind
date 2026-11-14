@@ -130,11 +130,7 @@ mod generic {
         test
     ))]
     pub(crate) mod poly1305_32;
-    #[cfg(target_has_atomic = "8")]
     pub(super) mod reuse_cache;
-    // Where there is no compare-and-swap, and in tests to test it.
-    #[cfg(any(not(target_has_atomic = "8"), test))]
-    pub(super) mod reuse_cache_without_cas;
     // The portable backend's SHA-1, and both hashes in armv7 and x86_64
     // tests to check the assembly against.
     #[cfg(any(
@@ -161,10 +157,7 @@ pub(crate) use generic::ghash::gcm_model;
 pub(crate) use generic::md5::md5_compress_blocks;
 #[cfg(any(rind_backend = "x86_64", all(rind_backend = "aarch64", test)))]
 pub(crate) use generic::poly1305;
-#[cfg(target_has_atomic = "8")]
 pub(crate) use generic::reuse_cache::ReuseCache;
-#[cfg(not(target_has_atomic = "8"))]
-pub(crate) use generic::reuse_cache_without_cas::ReuseCache;
 pub(crate) use generic::zeroise::{Zeroable, ZeroableRef, zeroise, zeroise_value};
 #[cfg(rind_backend = "portable")]
 pub(crate) use portable::poly1305;

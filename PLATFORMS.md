@@ -92,16 +92,6 @@ qemu. iOS devices' code is only built.
   compile-only: its tests need a JavaScript host. Constant time is unchecked on
   wasm: ctgrind and the trace checks inspect native code, and a wasm engine
   compiles rind again, so its JIT may turn a select into a branch.
-  Bare-metal targets (`target_os = "none"`) build the library without std, on
-  `alloc`: the program supplies a global allocator and a getrandom backend.
-  Every PR lints it for `thumbv6m-none-eabi` and `riscv32imc-unknown-none-elf`,
-  which lack compare-and-swap and so keep no reuse cache, for
-  `thumbv7em-none-eabihf`, and for `x86_64-unknown-none`, in debug and release,
-  with and without `wipe` (`just bare-metal`), and the nightly `build.yml` does
-  the same for the ESP32's Xtensa targets (`just xtensa`): bare metal
-  (`xtensa-esp32-none-elf` and `xtensa-esp32s3-none-elf`) and ESP-IDF
-  (`xtensa-esp32s3-espidf`, which has std and is only compiled). None of them
-  runs a test or a constant-time check.
   RSA and the NIST curves run on 64-bit limbs on 64-bit targets and on
   `wasm32` built with `-C target-feature=+wide-arithmetic` (stable from Rust
   1.101), whose 128-bit products take one or two multiply instructions, and
@@ -159,13 +149,16 @@ some operands, so it is not constant-time on them:
 - 32-bit `arm` M-profile: Arm's Cortex-M3, whose `umull`, `smull`, `umlal`,
   and `smlal` end early "depending on the size of the source values" (Arm
   DDI 0337, "Cortex-M3 instructions"), as when an operand fits in 16 bits, is
-  zero, or is a power of two ([BearSSL ctmul]). On its target,
-  `thumbv7m-none-eabi`, and on `thumbv6m-none-eabi` and
-  `thumbv8m.base-none-eabi`, whose cores have no `umull`, Poly1305 builds
+  zero, or is a power of two ([BearSSL ctmul]). `build.rs` sets `rind_mul16`
+  for `thumbv6m-none-eabi`, `thumbv7m-none-eabi`, and
+  `thumbv8m.base-none-eabi`. On the portable backend, Poly1305 then builds
   each product from 32x32->32-bit multiplies of 16-bit halves, which those
   cores do in one fixed time, so ChaCha20-Poly1305's MAC is constant time
-  there. The rest of rind's secret arithmetic on 32-bit limbs still takes
-  whole 32x32->64-bit products. The Cortex-M4's `umull` takes one cycle.
+  there. `thumbv6m` already selects that backend. `thumbv7m` and
+  `thumbv8m.base` name ARMv7 or later, so they keep the arm backend, and this
+  Poly1305 runs for them when that target selects the portable backend. The
+  rest of rind's secret arithmetic on 32-bit limbs still takes whole
+  32x32->64-bit products. The Cortex-M4's `umull` takes one cycle.
 - `x86_64` and 32-bit `x86`: VIA's Nano 2000 series ([BearSSL ctmul]). Intel
   lists `mul` and `imul` as data-independent-time ([Intel DOIT]).
 
