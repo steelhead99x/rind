@@ -50,7 +50,12 @@ fn quarter_round(st: &mut [u32], a: u32, b: u32, c: u32, d: u32) {
     st[b as usize] = std22
 }
 
-#[inline]
+// On 32-bit the double-round is one body. Inlining ten copies is about
+// 5 KiB, which misses a 16 KiB instruction cache. ChaCha20 and HChaCha20
+// both call this body. 64-bit keeps it inlined: `proofs/` extracts that
+// form, and the code stays cached.
+#[cfg_attr(target_pointer_width = "32", inline(never))]
+#[cfg_attr(not(target_pointer_width = "32"), inline)]
 fn double_round(st: &mut [u32]) {
     quarter_round(st, 0u32, 4u32, 8u32, 12u32);
     quarter_round(st, 1u32, 5u32, 9u32, 13u32);
@@ -62,7 +67,11 @@ fn double_round(st: &mut [u32]) {
     quarter_round(st, 3u32, 4u32, 9u32, 14u32)
 }
 
-#[inline]
+// Ten calls. On 32-bit `double_round` is not inlined, so this is one
+// short function rather than ten copies of the round. On 64-bit it
+// inlines, as `proofs/` extracts.
+#[cfg_attr(target_pointer_width = "32", inline(never))]
+#[cfg_attr(not(target_pointer_width = "32"), inline)]
 fn rounds(st: &mut [u32]) {
     double_round(st);
     double_round(st);
@@ -107,50 +116,11 @@ fn state(key: &[u8; 32], nonce: &[u8; 16]) -> [u32; 16] {
 /// rounds without the final addition, keeping words 0-3 and 12-15, as
 /// draft-irtf-cfrg-xchacha-03 specifies.
 //
-// Indexes, as `state` does, so `proofs/` can prove it.
-// On 32-bit targets with a small instruction cache, a fully unrolled
-// `rounds` is ~5 KiB and misses on every XChaCha short input. A 10-iteration
-// loop is the same 10 double-rounds; `rounds` itself is left unrolled so
-// `proofs/` and the ChaCha20 cipher path stay as they are.
-#[cfg(target_pointer_width = "32")]
-#[inline(never)]
-fn hchacha20_double_round(st: &mut [u32]) {
-    // A separate function so LLVM cannot unroll ten copies of the
-    // inlined double-round into hchacha20 (~5 KiB, same as `rounds`).
-    double_round(st);
-}
-
-#[cfg(target_pointer_width = "32")]
-fn hchacha20_rounds(st: &mut [u32]) {
-    for _ in 0..10 {
-        hchacha20_double_round(st);
-    }
-}
-
-#[cfg(target_pointer_width = "32")]
-#[inline(never)]
-pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
-    let mut st = state(key, nonce);
-    hchacha20_rounds(&mut st);
-    hchacha20_out(&st)
-}
-
-#[cfg(not(target_pointer_width = "32"))]
+// Indexes, as `state` does, so `proofs/` can prove it. The output loop
+// stays in this function so Aeneas still extracts `hchacha20_loop`.
 pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
     let mut st = state(key, nonce);
     rounds(&mut st);
-    // Keep the output loop in this function so Aeneas still extracts
-    // `hchacha20_loop`, which `proofs/` already proves.
-    let mut out = [0u8; 32];
-    for i in 0..8 {
-        let w = if i < 4 { st[i] } else { st[i + 8] };
-        out[4 * i..4 * (i + 1)].copy_from_slice(&w.to_le_bytes());
-    }
-    out
-}
-
-#[cfg(target_pointer_width = "32")]
-fn hchacha20_out(st: &[u32; 16]) -> [u8; 32] {
     let mut out = [0u8; 32];
     for i in 0..8 {
         let w = if i < 4 { st[i] } else { st[i + 8] };

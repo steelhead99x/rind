@@ -15,6 +15,46 @@ impl<const N: usize> Blockwise<N> {
         }
     }
 
+    /// Stores one byte when the buffer has room. Returns false when the
+    /// buffer already holds a whole block, so the caller runs [`Self::update`].
+    ///
+    /// SHA-256's one-byte update uses this. A store stays in the caller;
+    /// the general path calls memcpy.
+    #[inline(always)]
+    pub(crate) fn absorb_byte(&mut self, byte: u8) -> bool {
+        if self.used < N {
+            self.buffer[self.used] = byte;
+            self.used += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Copies 16 bytes when they fit. Returns false when they don't.
+    ///
+    /// The length is the public input length. SHA-256's 16-byte update uses
+    /// this so the copy is a fixed 16, which stays inline.
+    #[inline(always)]
+    pub(crate) fn absorb_sixteen(&mut self, bytes: &[u8]) -> bool {
+        let used = self.used;
+        if bytes.len() == 16 && used + 16 <= N {
+            // SAFETY: `used + 16 <= N`, so the bytes land in the buffer, and
+            // `bytes` has 16 bytes. The length is public.
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    bytes.as_ptr(),
+                    self.buffer.as_mut_ptr().add(used),
+                    16,
+                );
+            }
+            self.used = used + 16;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Adds `bytes`, passing each run of whole blocks to `state` in order and
     /// holding the rest: what is short of a whole block, or the last whole
     /// block until more follows, so a hash can compress it with its padding

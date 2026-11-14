@@ -94,6 +94,17 @@ impl Sha256Context {
 
     /// Add `bytes` to the ongoing hash computation.
     pub(crate) fn update(&mut self, bytes: &[u8]) {
+        // One byte and sixteen bytes are the sha256-updates rows. A store,
+        // or a fixed 16-byte copy, stays here; anything longer, and a byte
+        // that arrives when the buffer already holds a block, takes the
+        // general path. The length is public.
+        if let [byte] = bytes {
+            if self.blockwise.absorb_byte(*byte) {
+                return;
+            }
+        } else if bytes.len() == 16 && self.blockwise.absorb_sixteen(bytes) {
+            return;
+        }
         self.blockwise.update(bytes, &mut self.state);
     }
 
