@@ -915,7 +915,7 @@ mod tests {
     /// `into_public`, and `public_slice` on the result alone, leave the
     /// release build's addition comparison reading the secret from
     /// `into_secret`. This is not inlined, so the caller compares what it
-    /// returns.
+    /// returns. Marking only one side leaves the other secret in that compare.
     #[inline(never)]
     fn declassified(a: [u64; 9], b: [u64; 9]) -> ([u64; 9], [u64; 9]) {
         public_slice(&a);
