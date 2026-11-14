@@ -62,7 +62,8 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     {
         // On the ESP32-S3 under ESP-IDF, `sha512_compress_block` is placed
         // out of `.flash.text`, so this call does not add flash text ahead
-        // of HACL* SHA-256. Other targets compile the same call.
+        // of HACL* SHA-256. That build also aligns the SHA-256 body to the
+        // instruction-cache set stride. Other targets compile the same call.
         crate::low::generic::sha512::sha512_compress_blocks(state, blocks);
     }
     #[cfg(target_pointer_width = "64")]

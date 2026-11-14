@@ -11,8 +11,12 @@
 //! is placed in IRAM (`.iram1.text`, literal pool included) and its `K`
 //! table in internal DRAM. The layout check verifies that the board's
 //! release build adds no flash text and calls nothing from this body.
-//! A `.text` input linked ahead of libcrux can still move HACL* SHA-256;
-//! this only removes the shift this object was adding. The
+//! Building for `xtensa-esp32s3-espidf` also raises libcrux-sha2's
+//! `.text.*sha256_update*` alignment to 8192 bytes. Every ESP32-S3
+//! instruction-cache set stride divides 8192, so flash text linked ahead
+//! of HACL* SHA-256 moves it only by a multiple of those strides. That is
+//! not a cycle measurement; board timing is unmeasured. `lto` rebuilds
+//! those sections and drops the alignment. The
 //! `esp32s3-sha512-flash` feature leaves the ordinary flash sections, for an
 //! image whose IRAM is already full. The ESP32, the ESP32-S2, `*-none-elf`,
 //! and every other target are unchanged. The round functions and the eighty

@@ -8,12 +8,18 @@
 # ESP32, and xtensa-esp32s3-none-elf keep the ordinary sections. The
 # instructions of the two ESP32-S3 ESP-IDF builds must match.
 #
+# First runs rind/esp32s3-sha256-align.py's self-test, which checks that
+# HACL* SHA-256 text stays on the instruction-cache set stride when earlier
+# flash text is inserted. That test uses the host gcc, ld, and readelf. It
+# does not measure cycles; board timing is unmeasured.
+#
 # Needs the espup rustc that the board uses (1.97.0.0, 8ea53bcd7) and the
 # xtensa-esp-elf binutils. Defaults are under $HOME/.espressif, which is
 # where .github/workflows/esp32s3-sha512-layout.yml installs them.
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
+python3 "$root/rind/esp32s3-sha256-align.py" self-test
 esp=${RIND_ESP_ROOT:-"$HOME/.espressif"}
 rustc=${RIND_ESP_RUSTC:-"$esp/rust-nightly-x86_64-unknown-linux-gnu/rustc/bin/rustc"}
 cargo=${RIND_ESP_CARGO:-"$esp/rust-nightly-x86_64-unknown-linux-gnu/cargo/bin/cargo"}
@@ -217,9 +223,11 @@ flash_text=$(
 cmp "$work/s3.bin" "$work/flash.bin" || fail 'IRAM and flash-feature instruction bytes differ'
 
 # Harness linked first, as the bench image is. The stand-in for HACL* SHA-256
-# checks that this object contributes less flash text. This synthetic link
-# cannot establish the real HACL* address or performance: other text inputs
-# still move it, so board benchmarks remain an acceptance requirement.
+# checks that this object contributes less flash text. It is not the real
+# HACL* body and it is not a cycle count; board timing is unmeasured.
+# Preceding text can still change the real body's address. rind's build for
+# this target aligns that body to the cache-set stride, which the self-test
+# above checks.
 cat > "$work/harness.c" << 'EOF'
 void sha256_update(void);
 void harness_loop(void) { sha256_update(); }
@@ -313,4 +321,5 @@ for elf in "$work/s3.elf" "$work/flash.elf"; do
   fi
 done
 
+printf 'board_timing: unmeasured\n'
 printf 'esp32s3-sha512-layout: ok\n'
