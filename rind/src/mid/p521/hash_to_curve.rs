@@ -172,10 +172,6 @@ mod tests {
         jacobian(p).as_affine().as_bytes_uncompressed().to_vec()
     }
 
-    fn doubled(p: &[FieldElement; 3]) -> [FieldElement; 3] {
-        coordinates(&jacobian(p).double())
-    }
-
     #[test]
     fn rfc9380() {
         tests::check_suite::<FieldElement, Sha512Context>("P521_XMD_SHA-512_SSWU_RO_", 66, affine);
@@ -183,7 +179,7 @@ mod tests {
 
     #[test]
     fn sum() {
-        tests::check_sum::<FieldElement>(affine, doubled);
+        tests::check_sum::<FieldElement>(affine, |x| x.inv());
     }
 
     #[test]
@@ -257,7 +253,6 @@ mod tests {
         tests::check_empty_dst(
             hash_to_curve(b"msg", b"").map(|_| ()),
             hash_to_scalar(&[b"msg"], b"").map(|_| ()),
-            None,
         );
     }
 

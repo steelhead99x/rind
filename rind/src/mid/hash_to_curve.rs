@@ -473,14 +473,15 @@ pub(crate) mod tests {
     }
 
     /// `sum` doubles equal points and gives infinity for opposite ones,
-    /// whatever `Z` each has. `doubled` is the Jacobian doubling
-    /// `double_point` calls, so this does not compare that method with
-    /// itself. Points that share `Y` and `Z` and differ in `X` are added;
+    /// whatever `Z` each has. The expected double is the affine slope
+    /// `(3x^2 + A) / (2y)`, so a bug in `double_point` fails this check.
+    /// `scaled` is `q` under another `Z`: a `same_y` comparison by the
+    /// wrong power of `Z` makes that sum infinity. Points that share
+    /// affine `Y`, differ in affine `X`, and have different `Z` are added;
     /// `same_x | same_y` would double the first instead.
-    pub(crate) fn check_sum<C: Curve>(
-        affine: impl Fn(&[C; 3]) -> Vec<u8>,
-        doubled: impl Fn(&[C; 3]) -> [C; 3],
-    ) {
+    ///
+    /// `inv` is the field inverse in the same form as `C`'s arithmetic.
+    pub(crate) fn check_sum<C: Curve>(affine: impl Fn(&[C; 3]) -> Vec<u8>, inv: impl Fn(&C) -> C) {
         let _entry = low::Entry::new_public();
         let q = map_to_curve(&C::from_wide(&[7; MAX_L][..C::L]));
         let r = map_to_curve(&C::from_wide(&[9; MAX_L][..C::L]));
@@ -490,17 +491,42 @@ pub(crate) mod tests {
         let scaled = [q[0].mul(&k2), q[1].mul(&k3), q[2].mul(&k)];
         let neg = [scaled[0], scaled[1].neg(), scaled[2]];
 
-        assert_eq!(affine(&sum(&q, &scaled)), affine(&doubled(&q)));
+        assert_eq!(affine(&sum(&q, &scaled)), affine(&affine_double(&q, &inv)));
         assert!(sum(&q, &neg)[2].ct_eq(&C::ZERO));
         assert_eq!(affine(&sum(&q, &r)), affine(&C::add_points(&q, &r)));
         assert_eq!(affine(&sum(&q, &r)), affine(&sum(&r, &q)));
 
-        assert!(!q[0].ct_eq(&r[0]));
-        let mut shifted = q;
-        shifted[0] = r[0];
+        // Same affine `Y` as `q`, `r`'s affine `X`, and `Z` scaled by `k`.
+        let shifted = [r[0].mul(&k2), q[1].mul(&k3), q[2].mul(&k)];
+        assert!(!q[2].ct_eq(&shifted[2]));
+        assert!(
+            !q[0]
+                .mul(&shifted[2].sqr())
+                .ct_eq(&shifted[0].mul(&q[2].sqr()))
+        );
+        assert!(
+            q[1].mul(&shifted[2].sqr().mul(&shifted[2]))
+                .ct_eq(&shifted[1].mul(&q[2].sqr().mul(&q[2])))
+        );
         let got = sum(&q, &shifted);
         let expect = C::add_points(&q, &shifted);
         assert!(got.iter().zip(expect).all(|(a, b)| a.ct_eq(&b)));
+    }
+
+    /// `2p` as a Jacobian point with `Z = 1`, by the affine slope
+    /// `(3x^2 + A) * (2y)^-1`. This is not `Curve::double_point`.
+    fn affine_double<C: Curve>(p: &[C; 3], inv: impl Fn(&C) -> C) -> [C; 3] {
+        let [x, y, z] = *p;
+        assert!(!z.ct_eq(&C::ZERO));
+        let x = x.mul(&inv(&z.sqr()));
+        let y = y.mul(&inv(&z.sqr().mul(&z)));
+        assert!(!y.ct_eq(&C::ZERO));
+        let two = C::ONE.add(&C::ONE);
+        let three = two.add(&C::ONE);
+        let slope = three.mul(&x.sqr()).add(&C::A).mul(&inv(&two.mul(&y)));
+        let x2 = slope.sqr().add(&x.neg().add(&x.neg()));
+        let y2 = slope.mul(&x.add(&x2.neg())).add(&y.neg());
+        [x2, y2, C::ONE]
     }
 
     /// `pow_c1` raises to `(p - 3) / 4`: one more factor gives
@@ -546,17 +572,10 @@ pub(crate) mod tests {
         }
     }
 
-    /// The public wrappers and, when given, aws-lc refuse an empty DST.
-    pub(crate) fn check_empty_dst(
-        curve: Result<(), Error>,
-        scalar: Result<(), Error>,
-        aws_lc_ok: Option<bool>,
-    ) {
+    /// The public wrappers refuse an empty DST.
+    pub(crate) fn check_empty_dst(curve: Result<(), Error>, scalar: Result<(), Error>) {
         assert_eq!(curve, Err(Error::WrongLength));
         assert_eq!(scalar, Err(Error::WrongLength));
-        if let Some(ok) = aws_lc_ok {
-            assert!(!ok);
-        }
     }
 
     /// Hashes a secret message, so `admin/ctgrind` checks nothing branches

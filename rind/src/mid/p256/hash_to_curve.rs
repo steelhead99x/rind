@@ -172,10 +172,6 @@ mod tests {
         jacobian(p).as_affine().as_bytes_uncompressed().to_vec()
     }
 
-    fn doubled(p: &[FieldElement; 3]) -> [FieldElement; 3] {
-        coordinates(&jacobian(p).double())
-    }
-
     #[test]
     fn rfc9380() {
         tests::check_suite::<FieldElement, Sha256Context>("P256_XMD_SHA-256_SSWU_RO_", 32, affine);
@@ -183,7 +179,7 @@ mod tests {
 
     #[test]
     fn sum() {
-        tests::check_sum::<FieldElement>(affine, doubled);
+        tests::check_sum::<FieldElement>(affine, |x| x.demont().inv().as_mont());
     }
 
     #[test]
@@ -257,8 +253,8 @@ mod tests {
         tests::check_empty_dst(
             hash_to_curve(b"msg", b"").map(|_| ()),
             hash_to_scalar(&[b"msg"], b"").map(|_| ()),
-            Some(crate::test::aws_lc_hash_to_curve_ok(256, b"msg", b"")),
         );
+        assert!(!crate::test::aws_lc_hash_to_curve_ok(256, b"msg", b""));
     }
 
     #[test]
