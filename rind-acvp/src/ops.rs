@@ -2905,6 +2905,10 @@ mod tests {
         assert_eq!(pad(&[0x00, 0x00, 0x02], 1).unwrap(), [0x02]);
         assert_eq!(pad(&[0x01], 2).unwrap(), [0x00, 0x01]);
         assert!(pad(&[0x01, 0x02], 1).is_err());
+        // A zero length is an empty result. `>=` in place of `>` indexes an
+        // empty slice once every leading zero has been stripped.
+        assert_eq!(pad(&[], 0).unwrap(), Vec::<u8>::new());
+        assert_eq!(pad(&[0], 0).unwrap(), Vec::<u8>::new());
 
         let encoded = pkcs1_encode(&[0xff; 256], &[0x01, 0x00, 0x01]);
         let (n, e) = pkcs1_public(&encoded).unwrap();

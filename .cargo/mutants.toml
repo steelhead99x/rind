@@ -397,4 +397,17 @@ exclude_re = [
   'rind-rustls/src/ticketer\.rs:133:\d+: replace \* with /$',
   'rind-rustls/src/ticketer\.rs:133:\d+: replace \* with \+$',
   'rind-rustls/src/verify\.rs:164:\d+: replace <impl fmt::Debug for Verify>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  # rind-acvp. An 8-byte AES-KW or KWP ciphertext is under the algorithm
+  # minimum, so unwrap fails with the same reply as the early length check.
+  # ECDH's public key is always one uncompressed point of the field width, so
+  # both sides of that check are false. A DER long-form length is 1 to 3
+  # bytes and shares no bit with 0x80, and each length byte is combined into
+  # a value whose low 8 bits are already 0. Once a ciphertext is neither 0
+  # nor 1, a different length makes the predecessor compare false, and an
+  # empty modulus is rejected by either operator.
+  'rind-acvp/src/ops\.rs:\d+:\d+: replace < with <= in kw_open$',
+  'rind-acvp/src/ops\.rs:\d+:\d+: replace \|\| with && in ecdh$',
+  'rind-acvp/src/ops\.rs:\d+:\d+: replace \| with \^ in der_tl$',
+  'rind-acvp/src/ops\.rs:\d+:\d+: replace \| with \^ in der_read$',
+  'rind-acvp/src/ops\.rs:1269:\d+: replace \|\| with && in trivial_rsa_ciphertext$',
 ]
