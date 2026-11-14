@@ -161,9 +161,10 @@ Miri runs each test hundreds of times slower than a native build, so it runs a
 subset: the unit tests and `tests/cpu.rs` and `tests/debug.rs`, without the
 tests `sh/miri.sh` lists as slow, which are the vector sets and long loops
 over inputs, RSA private-key operations beyond one for each key type, and the
-tests that run many scalar multiplications. A test that repeats one code path
-over parameter sets or cases runs only those that take each branch under
-`cfg(miri)`, as ML-DSA's do. Every primitive keeps a test that builds, uses,
+tests that run many scalar multiplications. `sh/miri.sh` fails on an entry
+that names no test, so a rename cannot slip a slow test back in. A test that
+repeats one code path over parameter sets or cases runs only those that take
+each branch under `cfg(miri)`, as ML-DSA's do. Every primitive keeps a test that builds, uses,
 and drops its keys. Miri cannot run aws-lc's C, so its builds leave out
 aws-lc-rs and the differential tests, `tests/crosschecks.rs` and
 `tests/cctv.rs` among them.
@@ -217,7 +218,7 @@ secret names a zeroing test, or says why it has none.
 | Constant-time comparison | `constant_time::verify` | none: no published set | none: it returns whether two slices are equal, which the differential test covers | `crosschecks::slice_comparison_matches_aws_lc_rs` | ctgrind: `high::constant_time::contents_stay_secret`, `low::generic::ct_equal::equiv`; BINSEC: `test::binsec::ct_binsec_constant_time_verify` | none: it keeps nothing |
 | Random bytes | `rand::fill` | none: the operating system's generator, which no vector can check | none, as for vectors | none, as for vectors | none: rind passes the bytes on | none: rind keeps no copy of the bytes |
 
-Exports that are not primitives: `Error`, `KeyRejected`, `doc::inline_assembly_safety`, `cpu::Dit`, `cpu::MissingFeature`, `cpu::check`, `cpu::has_aes_hardware`.
+Exports that are not primitives: `Error`, `KeyRejected`, `doc::inline_assembly_safety`, `cpu::Dit`, `cpu::MissingFeature`, `cpu::check`, `cpu::has_aes_hardware`, and the hooks the FIPS module builds on: `fips::DrbgHold`, `fips::SelfTest`, `fips::broken`, `fips::check_rsa_modulus`, `fips::digest`, `fips::error_code`, `fips::error_from_code`, `fips::fail`, `fips::hold_drbgs`, `fips::missing_cpu_feature`, `fips::zeroise_drbgs`.
 
 ## Adapters
 
