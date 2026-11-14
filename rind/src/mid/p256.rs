@@ -790,7 +790,7 @@ impl JacobianMontPoint {
             None => p.public_naf::<5>(),
             Some(_) => p.public_naf::<6>(),
         };
-        let g_multiples = &precomp::CURVE_GENERATOR_PRECOMP[0][..];
+        let g_multiples = &generator_table()[0][..];
 
         let mut result = Self::infinity();
         for i in (0..g_digits.len()).rev() {
@@ -1409,12 +1409,15 @@ struct AlignedTable(AffineMontPointTable);
 #[cfg(not(rind_backend = "x86_64"))]
 const _: () = assert!(align_of::<AlignedTable>() == 64);
 
-#[cfg(not(rind_backend = "x86_64"))]
-impl core::ops::Deref for AlignedTable {
-    type Target = AffineMontPointTable;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+/// The generator table's rows on either backend layout.
+fn generator_table() -> &'static AffineMontPointTable {
+    #[cfg(rind_backend = "x86_64")]
+    {
+        &precomp::CURVE_GENERATOR_PRECOMP
+    }
+    #[cfg(not(rind_backend = "x86_64"))]
+    {
+        &precomp::CURVE_GENERATOR_PRECOMP.0
     }
 }
 
@@ -1750,7 +1753,7 @@ mod tests {
     #[test]
     fn base_point_precomp() {
         let mut base = JacobianMontPoint::from_affine(&CURVE_GENERATOR);
-        for row in precomp::CURVE_GENERATOR_PRECOMP.iter() {
+        for row in generator_table().iter() {
             let mut multiple = base;
             for (i, entry) in (1..).zip(row.as_chunks::<8>().0) {
                 assert_eq!(&multiple.as_affine().xy, entry);

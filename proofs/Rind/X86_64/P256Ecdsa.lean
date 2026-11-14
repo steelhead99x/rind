@@ -1207,7 +1207,8 @@ theorem twin_multiply_spec (_hr : Runs) (g p : mid.p256.Scalar) (Q : P256Point)
       apply WP.spec_mono (scalar_naf_spec 6#u32 (by simp) p)
       intro pd hpd; simpa using hpd
   intro pd ⟨hpv, hpd⟩
-  simp only [core.array.Array.index, core.ops.index.IndexSlice, core.slice.index.Slice.index,
+  simp only [mid.p256.generator_table, core.array.Array.index, core.ops.index.IndexSlice,
+    core.slice.index.Slice.index,
     core.slice.index.SliceIndexRangeFullSlice, core.slice.index.SliceIndexRangeFullSlice.index]
   step as ⟨a1, ha1⟩
   step*
