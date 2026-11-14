@@ -25,6 +25,13 @@ cargo bench
 With [Nix](https://nixos.org), `nix develop` (or direnv) provides CI's
 toolchain, and `just check` runs CI's gate over what the branch changed; the
 nightly tools are in [TESTING.md](TESTING.md#running-the-tools).
+`just wasm` runs the nightly wasm job: it tests rind on `wasm32-wasip2`
+under wasmtime, with `SLOW_TESTS=1`. aws-lc-rs does not build for wasm, so
+the live differential tests stay on `just portable`. Ed25519's CCTV verdicts
+are compared with a file recorded from aws-lc, and a native test checks that
+file against aws-lc. `ReuseCache`'s threaded test does not run there.
+`wasm32-unknown-unknown` stays a compile check. The pull-request gate
+clippy-checks `rind-ring` there with `wasm32_unknown_unknown_js`.
 
 # Commits
 

@@ -46,8 +46,9 @@ A primitive is checked five ways:
   operation frees: it runs each under two keys with the same public inputs
   and fails on a freed block whose bytes differ between them, since those
   vary with the key, and fails on any nonzero block key generation frees.
-  It runs wherever the zeroing tests do, RSA key generation only in the
-  nightly native and portable runs.
+  It runs wherever the zeroing tests do. RSA key generation runs in the
+  nightly native and portable runs, at every size, and on wasm for RSA-2048
+  only; the portable run also checks RSA-3072 and RSA-4096 on 32-bit limbs.
 
 Separately, `low::guard_pages` checks buffer bounds. It runs each kernel
 that takes a caller's slice (AES-GCM, ChaCha20-Poly1305, AES-CTR, AES-CBC,
@@ -99,7 +100,7 @@ an Intel SDE CPU model, as `x86-cpu.yml` names them.
 | portable | riscv64gc Linux, glibc and musl | `just qemu riscv64` and `just qemu riscv64-musl`: as s390x | as above | as s390x |
 | portable | PowerPC Linux: powerpc64le, big-endian powerpc64 and powerpc | `just qemu powerpc64le`, `just qemu powerpc64`, and `just qemu powerpc`: as s390x | as above | as s390x |
 | portable | ARM before ARMv7 (Raspberry Pi 1 and Zero) | `just qemu armv6` and `just qemu armv6-softfloat`: as s390x, on qemu's ARM1176; `build.yml`'s `android` job: ARMv5TE Android | as above | as s390x |
-| portable | wasm32-wasip2 | `just wasm`: release vectors under wasmtime, in the nightly `build.yml`; no differential tests, since aws-lc does not build for wasm, and `just portable` runs the same Rust against it | as above | unchecked: a wasm engine compiles rind again, and its JIT may turn a select into a branch |
+| portable | wasm32-wasip2 | `just wasm`: release tests under wasmtime, with `SLOW_TESTS=1`, in the nightly `build.yml`. Ed25519 CCTV verdicts are checked against `rind/tests/cctv/ed25519-verdicts.txt`, recorded from aws-lc. Live differential tests stay on `just portable`, since aws-lc does not build for wasm. `heap_scratch::rsa_generate` checks RSA-2048 key generation only; `just portable` checks RSA-3072 and RSA-4096 on the same 32-bit limbs. `low::generic::reuse_cache::shared_across_threads` does not run | as above | unchecked: a wasm engine compiles rind again, and its JIT may turn a select into a branch |
 
 ## Vector suites
 
@@ -138,10 +139,21 @@ expect fails it. The SHA-2 and SHA-3 sets' 1 to 8 GiB messages run only with
 neither as rind uses them.
 
 These suites run wherever the [tier table](#tiers) runs `cargo test`, including
-the forced portable backend. The nightly `build.yml` runs the million-case
-accumulation in native release builds, on every denied x86_64/aarch64 tier,
-and through `just portable`. `just armv7` and `x86-cpu.yml`'s SDE models use
-the default 10,000 cases, even though they build in release mode.
+the forced portable backend and `wasm32-wasip2`. On wasm the live comparisons
+with aws-lc are left out, because aws-lc-rs does not build there. Ed25519's
+CCTV verdicts still have an oracle: `rind/tests/cctv/ed25519-verdicts.txt`
+records aws-lc's accept or reject, `cctv::ed25519_verdicts_match_aws_lc` checks
+that file against aws-lc where aws-lc builds, and `cctv::ed25519_edge_cases`
+checks rind against the file, including on wasm, and against live aws-lc
+where aws-lc builds. Regenerate the file from aws-lc, then commit it, with
+`RIND_RECORD_VERDICTS=1 cargo test -p rind --test cctv -- --ignored ed25519_record_aws_lc_verdicts`.
+That test is ignored and writes only with that variable set, so a normal run,
+or one with `--include-ignored`, only checks the recorded file.
+`just wasm` sets `SLOW_TESTS=1`, so that run includes the slow sets. The
+nightly `build.yml` runs the million-case accumulation in native release
+builds, on every denied x86_64/aarch64 tier, and through `just portable`.
+`just armv7` and `x86-cpu.yml`'s SDE models use the default 10,000 cases,
+even though they build in release mode.
 
 ## Undefined behavior
 
@@ -169,6 +181,8 @@ aws-lc-rs and the differential tests, `tests/crosschecks.rs` and
 `tests/cctv.rs` among them.
 `tests/wycheproof.rs` and `tests/aws_lc.rs` are vector sets too, and
 `tests/zeroing.rs` reads a dropped value on purpose.
+wasm cannot build aws-lc either; it runs `tests/cctv.rs` and compares Ed25519
+verdicts with the recorded aws-lc results, not with aws-lc itself.
 
 ## Primitives
 
@@ -201,7 +215,7 @@ secret names a zeroing test, or says why it has none.
 | ML-KEM-768 | `kem::{Algorithm, Ciphertext, DecapsulationKey, EncapsulationKey, SharedSecret, ML_KEM_768}` | `mlkem_768*_test`, `high::kem::boringssl`, `high::kem::cctv_intermediate`, `high::kem::cctv_unlucky_sample`, `high::kem::cctv_strcmp`, `high::kem::cctv_modulus`, `high::kem::cctv_accumulated`, ACVP: `mid::mlkem768::acvp_key_gen`, `mid::mlkem768::acvp_encap_decap` | `fuzz::kem`, `fuzz::keys` | `crosschecks::mlkem768::encapsulated_by_ours`, `high::kem::encapsulated_by_theirs` | ctgrind: `mid::mlkem768::keygen_internal`, `mid::mlkem768::encaps_internal`; proof: on aarch64, and on x86_64 only for reduction and rejection sampling, s2n-bignum's _SAFE theorems, for the routines [ALGORITHMS.md](ALGORITHMS.md#s2n-bignums-constant-time-theorems) lists with one; qemu: `mid::mlkem768::ct_qemu_mlkem768`; BINSEC: `test::binsec::ct_binsec_mlkem768` | `zeroing::mlkem768` |
 | HPKE | `hpke::{Aead, EncapsulatedKey, Exporter, Kdf, Kem, PrivateKey, PublicKey, Recipient, Sender, Suite, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305, DHKEM_P256_HKDF_SHA256, DHKEM_P384_HKDF_SHA384, DHKEM_P521_HKDF_SHA512, DHKEM_X25519_HKDF_SHA256, HKDF_SHA256, HKDF_SHA384, HKDF_SHA512}` | `hpke_x25519_*_test`, RFC 9180 (X25519, P-256, and P-521 KEMs): `high::hpke::rfc9180` | `fuzz::hpke`, against rustls's aws-lc-rs provider | `crosschecks::hpke::matches_hpke_rs`, against hpke-rs, as aws-lc-rs has no HPKE; rind-rustls's tests/hpke.rs compares its suites with rustls's aws-lc-rs provider's | ctgrind: `high::hpke::secret_decapsulation`, `high::hpke::secret_key_derivation`; the keys, as X25519 and ECDH above | `zeroing::hpke` |
 | Ed25519 signing | `signature::{Ed25519KeyPair, Ed25519Seed}` | RFC 8032: `mid::ed25519::test_rfc8032_test_vectors`, `aws_lc::ed25519`, `aws_lc::evp`, ACVP: `high::ed25519::acvp_key_gen`, `high::ed25519::acvp_sig_gen` | `fuzz::sign`; its seeds load in `fuzz::keys` | `crosschecks::ed25519::sign_verify`, `crosschecks::ed25519::seed_alone`, `crosschecks::ed25519::seed_and_public_key`, `crosschecks::ed25519_key_generation` | ctgrind: the seed `mid::ed25519::from_seed`, armv7 and portable seeds `mid::portable::ed25519::from_seed`; proof: s2n-bignum's _SAFE theorems, for the routines [ALGORITHMS.md](ALGORITHMS.md#s2n-bignums-constant-time-theorems) lists with one; BINSEC: `test::binsec::ct_binsec_ed25519` | `zeroing::ed25519` |
-| Ed25519 verification | `signature::{PublicKey, Signature, VerificationAlgorithm}`, `signature::verify::ED25519` | `ed25519_test`, `aws_lc::ed25519`, `aws_lc::evp`, `cctv::ed25519_edge_cases` (small-order keys refused), ACVP: `high::ed25519::acvp_key_ver`, `high::ed25519::acvp_sig_ver` | `fuzz::verify`, `fuzz::keys` | `crosschecks::ed25519::small_order_public_keys` | | |
+| Ed25519 verification | `signature::{PublicKey, Signature, VerificationAlgorithm}`, `signature::verify::ED25519` | `ed25519_test`, `aws_lc::ed25519`, `aws_lc::evp`, `cctv::ed25519_edge_cases` (small-order keys refused), `cctv::ed25519_verdicts_match_aws_lc` (the recorded file stays equal to aws-lc), `cctv::ed25519_record_aws_lc_verdicts` (ignored; rewrites that file from aws-lc only when asked), ACVP: `high::ed25519::acvp_key_ver`, `high::ed25519::acvp_sig_ver` | `fuzz::verify`, `fuzz::keys` | `crosschecks::ed25519::small_order_public_keys` | | |
 | ECVRF | `vrf::{Algorithm, Output, Proof, PublicKey, SecretKey, SecretKeyBytes, ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI}` | RFC 9381: `high::vrf::rfc9381_vectors`, and refused proofs and keys: `high::vrf::refuses_altered_proofs`, `high::vrf::refuses_unreduced_s`, `high::vrf::refuses_bad_public_keys`; an Ed25519 signature on h_string reuses the nonce: `high::vrf::ed25519_signature_on_h_string_reveals_the_scalar` | `fuzz::vrf`, against itself, as no reference runs on aws-lc | `crosschecks::vrf::matches_akd`, against akd_core for Edwards25519, and `crosschecks::vrf::matches_vrf_rfc9381`, against vrf-rfc9381 for P-256, as aws-lc-rs has no VRF | ctgrind: secret keys are marked when loaded, `high::vrf::stays_secret`. P-256's RFC 6979 nonce retry is declassified in mid::p256::Scalar::into_range_check, so that test does not cover it | `zeroing::vrf` |
 | OPRF, VOPRF | `oprf::{Blind, BlindedElement, EvaluatedElement, Output, ServerKey, ServerKeyBytes, Suite, P256_SHA256, P384_SHA384, P521_SHA512, RISTRETTO255_SHA512}`, `oprf::voprf::{Blind, EvaluatedElements, Proof, PublicKey, ServerKey}` | RFC 9497: `high::oprf::tests::rfc9497_oprf_vectors`, `high::oprf::voprf::tests::rfc9497_voprf_vectors`, and refused proofs, keys, elements, batches, and lengths: `high::oprf::voprf::tests::refuses_altered_proofs`, `high::oprf::voprf::tests::refuses_bad_public_keys`, `high::oprf::voprf::tests::refuses_bad_batches`, `high::oprf::tests::refuses_bad_keys`, `high::oprf::tests::refuses_bad_elements`, `high::oprf::tests::refuses_long_inputs` | `fuzz::oprf`, against itself, as no reference runs on aws-lc | `crosschecks::oprf::ristretto255_matches_voprf`, `crosschecks::oprf::p256_matches_voprf`, `crosschecks::oprf::p384_matches_voprf`, `crosschecks::oprf::p521_matches_voprf`, against the voprf crate in both modes, as aws-lc-rs has no OPRF | ctgrind: server keys are marked when loaded, `high::oprf::tests::stays_secret`, `high::oprf::voprf::tests::stays_secret` | `zeroing::oprf` |
 | ristretto255 and edwards25519 scalar multiplication | none: crate-internal, under the OPRF's ristretto255 suite | `ristretto255_scalar_invert_test`, RFC 9496: `mid::ristretto255_tests::rfc9496_multiples_of_the_generator`, `mid::ristretto255_tests::rfc9496_invalid_encodings`, `mid::ristretto255_tests::rfc9496_from_uniform_bytes`, `mid::edwards25519::sqrt_ratio_m1_vectors`, RFC 9497: `mid::ristretto255_tests::rfc9497_oprf` | through `fuzz::oprf` | `mid::ristretto255_tests::matches_dalek`, against curve25519-dalek, as aws-lc-rs has no ristretto255; armv7 and portable run dalek's, so there it checks only the wrapping | ctgrind: `mid::ristretto255_tests::constant_time`, decoding only on x86_64 and aarch64, as dalek's branches on whether an encoding is valid | `zeroing::oprf`, whose keys and blinds hold its scalars |

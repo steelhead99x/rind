@@ -259,8 +259,9 @@ jobs:
       - name: Build, lint, and test
         run: just armv7
 
-  # wasm32-wasip2 on the portable backend, under wasmtime: the vector tests,
-  # without the differential ones, whose aws-lc does not build for wasm.
+  # wasm32-wasip2 on the portable backend, under wasmtime, with SLOW_TESTS=1.
+  # aws-lc does not build for wasm, so the live differential tests are left
+  # out. Ed25519 CCTV verdicts are compared with a file recorded from aws-lc.
   wasm:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest

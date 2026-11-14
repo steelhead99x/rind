@@ -33,8 +33,10 @@ omitted = [
 ]
 
 # ring's feature names, so a manifest naming them builds unchanged. rind-ring
-# always has `alloc` and `std`, rind's random source already falls back to
-# `/dev/urandom`, and the rest pick platforms, code paths, or tests rind lacks.
+# always has `alloc` and `std`. `wasm32_unknown_unknown_js` selects getrandom's
+# JavaScript backend, as ring's does. The rest change nothing: rind's random
+# source already falls back to `/dev/urandom`, and they pick platforms, code
+# paths, or tests rind lacks.
 [features]
 default = ["alloc", "dev_urandom_fallback"]
 alloc = []
@@ -46,11 +48,18 @@ std = ["alloc"]
 test_logging = []
 unstable-testing-arm-no-hw = []
 unstable-testing-arm-no-neon = []
-wasm32_unknown_unknown_js = []
+# ring's name for getrandom's JavaScript backend on wasm32-unknown-unknown.
+wasm32_unknown_unknown_js = ["dep:getrandom"]
 
 [dependencies]
 rind = { version = "0.3.2", path = "../rind" }
 untrusted = "0.9"
+
+# Activated only on the browser target, and only with the feature above, so a
+# wasip2 build keeps getrandom's WASI backend. Features unify with rind's
+# getrandom 0.4, whose `wasm_js` is what ring 0.17's `js` feature became.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.4", optional = true, features = ["wasm_js"] }
 
 [dev-dependencies]
 aws-lc-rs = { version = "1.16", default-features = false, features = ["alloc", "prebuilt-nasm", "non-fips"] }

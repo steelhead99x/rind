@@ -2,8 +2,10 @@
 # Run rind's tests on wasm32-wasip2 under wasmtime, as `just wasm` runs it in
 # the dev shell's `wasm` shell. wasm compiles the portable backend, so this
 # executes the code only wasm compiles, such as MD5's optimizer barrier.
-# aws-lc does not build for wasm, so the differential tests are left out;
-# `just portable` runs the same Rust against it on x86_64. The vectors run.
+# aws-lc does not build for wasm, so the live differential tests are left out;
+# `just portable` runs the same Rust against it on x86_64. Ed25519's CCTV
+# vectors still run, against `rind/tests/cctv/ed25519-verdicts.txt`. The other
+# vectors run too.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."

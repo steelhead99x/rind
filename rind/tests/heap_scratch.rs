@@ -24,52 +24,118 @@ use freed::freed;
 #[global_allocator]
 static ALLOCATOR: freed::Record = freed::Record;
 
+/// The blocks `op` frees under each of `keys`, after one unrecorded run so
+/// one-time setup, such as CPU detection, stays out of the record.
+fn freed_blocks<K, R>(keys: [K; 2], op: impl Fn(&K) -> R) -> [Vec<Vec<u8>>; 2] {
+    op(&keys[0]);
+    keys.map(|key| freed(|| op(&key)).1)
+}
+
+/// How the blocks freed under two keys differ.
+#[derive(Debug)]
+enum Difference {
+    /// A different number or size of blocks: the key steered the allocations.
+    Layout,
+    /// Block `i` holds different bytes under each key.
+    Bytes(usize),
+}
+
+/// How `left` and `right` differ, if they do.
+fn difference(left: &[Vec<u8>], right: &[Vec<u8>]) -> Option<Difference> {
+    let layout = |blocks: &[Vec<u8>]| blocks.iter().map(Vec::len).collect::<Vec<_>>();
+    if layout(left) != layout(right) {
+        return Some(Difference::Layout);
+    }
+    left.iter()
+        .zip(right)
+        .position(|(a, b)| a != b)
+        .map(Difference::Bytes)
+}
+
+/// How the blocks freed under each of `keys` vary with the key, if they do.
+/// `assert_independent` panics on `Some`. The canary asserts a byte
+/// difference for a planted leak, so dropping the comparison here turns that
+/// canary red.
+fn independent<K, R>(keys: [K; 2], op: impl Fn(&K) -> R) -> Option<Difference> {
+    let [left, right] = freed_blocks(keys, op);
+    difference(&left, &right)
+}
+
 /// Fails if `op` frees a block under one of `keys` whose bytes differ from
 /// those of the block it frees at the same point under the other.
-fn independent<K, R>(what: &str, keys: [K; 2], op: impl Fn(&K) -> R) {
-    // A first, unrecorded run keeps one-time setup out of the record, such
-    // as CPU detection, which frees the names it reads.
-    op(&keys[0]);
-    let [(_a, a), (_b, b)] = keys.map(|key| freed(|| op(&key)));
-    assert_eq!(
-        a.iter().map(Vec::len).collect::<Vec<_>>(),
-        b.iter().map(Vec::len).collect::<Vec<_>>(),
-        "{what}: the blocks freed depend on the key",
-    );
-    for (i, (a, b)) in a.iter().zip(&b).enumerate() {
-        assert!(a == b, "{what}: freed block {i} holds bytes of the key");
+fn assert_independent<K, R>(what: &str, keys: [K; 2], op: impl Fn(&K) -> R) {
+    match independent(keys, op) {
+        None => {}
+        Some(Difference::Layout) => panic!("{what}: the blocks freed depend on the key"),
+        Some(Difference::Bytes(i)) => panic!("{what}: freed block {i} holds bytes of the key"),
     }
 }
 
-/// Fails if `op` frees a block that is not all zero.
-fn zeroed<R>(what: &str, op: impl Fn() -> R) {
-    // Unrecorded first, as `independent` does.
+/// Index of the first freed block that is not all zero, after one unrecorded
+/// run. `assert_zeroed` panics on `Some`. The canary asserts `Some` for a
+/// planted leak, so dropping the comparison here turns that canary red.
+fn first_nonzero<R>(op: impl Fn() -> R) -> Option<usize> {
     op();
-    let (_result, blocks) = freed(op);
-    for (i, block) in blocks.iter().enumerate() {
-        assert!(
-            block.iter().all(|&b| b == 0),
-            "{what}: freed block {i} holds bytes of the key",
-        );
+    freed(&op)
+        .1
+        .iter()
+        .position(|block| block.iter().any(|&byte| byte != 0))
+}
+
+/// Fails if `op` frees a block that is not all zero.
+fn assert_zeroed<R>(what: &str, op: impl Fn() -> R) {
+    if let Some(i) = first_nonzero(op) {
+        panic!("{what}: freed block {i} holds bytes of the key");
     }
 }
 
 /// The check sees key-derived bytes left on the heap, so a clean result
-/// means something.
+/// means something. These canaries call `independent` and `first_nonzero`, the
+/// comparisons the real checks use, and report the result instead of panicking:
+/// wasm32-wasip2 aborts on panic, and a `should_panic` test cannot run there.
+/// Native targets also have `should_panic` canaries that go through the
+/// `assert_*` wrappers, so a no-op arm there cannot pass unnoticed.
 #[test]
-#[should_panic(expected = "holds bytes of the key")]
 fn detects_a_leak() {
-    independent("planted", [[1u8; 32], [2u8; 32]], |key| {
-        drop(key.map(|b| b ^ 0x5a).to_vec())
+    let leaked = independent([[1u8; 32], [2u8; 32]], |key| {
+        drop(black_box(key.map(|b| b ^ 0x5a).to_vec()))
     });
+    // A layout difference would pass a weaker check without finding the
+    // planted bytes, so only a byte difference counts.
+    assert!(
+        matches!(leaked, Some(Difference::Bytes(_))),
+        "planted key bytes were not found in a freed block: {leaked:?}",
+    );
 }
 
 #[test]
-#[should_panic(expected = "holds bytes of the key")]
 fn detects_a_leak_in_key_generation() {
     // Without black_box, the optimizer can drop the unused allocation, and
     // the check then has nothing to find.
-    zeroed("planted", || drop(black_box(vec![1u8; 32])));
+    assert!(
+        first_nonzero(|| drop(black_box(vec![1u8; 32]))).is_some(),
+        "planted key bytes were not visible in a freed block",
+    );
+}
+
+/// Native-only: a planted leak must fail through `assert_independent`, not
+/// only through `independent`. wasm32-wasip2 aborts on panic, so this stays
+/// off that target.
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[should_panic(expected = "holds bytes of the key")]
+fn detects_a_leak_through_assert_independent() {
+    assert_independent("planted leak", [[1u8; 32], [2u8; 32]], |key| {
+        drop(black_box(key.map(|b| b ^ 0x5a).to_vec()))
+    });
+}
+
+/// Native-only: a planted leak must fail through `assert_zeroed`.
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[should_panic(expected = "holds bytes of the key")]
+fn detects_a_leak_in_key_generation_through_assert_zeroed() {
+    assert_zeroed("planted leak", || drop(black_box(vec![1u8; 32])));
 }
 
 /// Two distinct PKCS#8 RSA keys of each size.
@@ -112,13 +178,13 @@ fn rsa_keys() -> impl Iterator<Item = [Vec<u8>; 2]> {
 fn rsa() {
     use rind::signature::{RsaKeyPair, sign};
     for pkcs8 in rsa_keys() {
-        independent("RSA load", pkcs8.clone(), |der| {
+        assert_independent("RSA load", pkcs8.clone(), |der| {
             RsaKeyPair::from_pkcs8(der).unwrap()
         });
         let keys = pkcs8.map(|der| RsaKeyPair::from_pkcs8(&der).unwrap());
-        independent("RSA export", keys.each_ref(), |key| key.to_pkcs8());
+        assert_independent("RSA export", keys.each_ref(), |key| key.to_pkcs8());
         for algorithm in [&sign::RSA_PKCS1_SHA256, &sign::RSA_PSS_SHA256] {
-            independent("RSA signing", keys.each_ref(), |key| {
+            assert_independent("RSA signing", keys.each_ref(), |key| {
                 key.sign(algorithm, b"message").unwrap()
             });
         }
@@ -134,7 +200,7 @@ fn rsa_oaep() {
             let ciphertext = key.public_key().encrypt(b"message", b"").unwrap();
             (key, ciphertext)
         });
-        independent("RSA decryption", keys, |(key, ciphertext)| {
+        assert_independent("RSA decryption", keys, |(key, ciphertext)| {
             key.decrypt(ciphertext.as_ref(), b"").unwrap()
         });
     }
@@ -147,9 +213,17 @@ fn rsa_generate() {
     if std::env::var_os("SLOW_TESTS").is_none() {
         return;
     }
-    // Larger sizes take the same paths, much more slowly.
-    for size in [KeySize::Rsa2048, KeySize::Rsa3072, KeySize::Rsa4096] {
-        zeroed("RSA key generation", || RsaKeyPair::generate(size).unwrap());
+    // Under wasmtime, where `just wasm` sets SLOW_TESTS, the portable
+    // backend runs under a JIT and every freed block is copied, so larger
+    // sizes would take far longer: wasm generates RSA-2048 keys only, and
+    // `just portable` checks every size on the same 32-bit limbs natively.
+    let sizes: &[KeySize] = if cfg!(target_family = "wasm") {
+        &[KeySize::Rsa2048]
+    } else {
+        &[KeySize::Rsa2048, KeySize::Rsa3072, KeySize::Rsa4096]
+    };
+    for &size in sizes {
+        assert_zeroed("RSA key generation", || RsaKeyPair::generate(size).unwrap());
     }
 }
 
@@ -161,19 +235,19 @@ fn ecdsa() {
         &sign::ECDSA_P384_SHA384_ASN1,
         &sign::ECDSA_P521_SHA512_ASN1,
     ] {
-        zeroed("ECDSA key generation", || {
+        assert_zeroed("ECDSA key generation", || {
             EcdsaKeyPair::generate(algorithm).unwrap()
         });
         let pkcs8 = [(); 2].map(|()| {
             let key = EcdsaKeyPair::generate(algorithm).unwrap();
             key.to_pkcs8().as_ref().to_vec()
         });
-        independent("ECDSA load", pkcs8.clone(), |der| {
+        assert_independent("ECDSA load", pkcs8.clone(), |der| {
             EcdsaKeyPair::from_pkcs8(algorithm, der).unwrap()
         });
         let keys = pkcs8.map(|der| EcdsaKeyPair::from_pkcs8(algorithm, &der).unwrap());
-        independent("ECDSA export", keys.each_ref(), |key| key.to_pkcs8());
-        independent("ECDSA signing", keys.each_ref(), |key| {
+        assert_independent("ECDSA export", keys.each_ref(), |key| key.to_pkcs8());
+        assert_independent("ECDSA signing", keys.each_ref(), |key| {
             key.sign(b"message").unwrap()
         });
     }
@@ -182,19 +256,19 @@ fn ecdsa() {
 #[test]
 fn ed25519() {
     use rind::signature::Ed25519KeyPair;
-    zeroed("Ed25519 key generation", || {
+    assert_zeroed("Ed25519 key generation", || {
         Ed25519KeyPair::generate().unwrap()
     });
     let pkcs8 = [(); 2].map(|()| {
         let key = Ed25519KeyPair::generate().unwrap();
         key.to_pkcs8().as_ref().to_vec()
     });
-    independent("Ed25519 load", pkcs8.clone(), |der| {
+    assert_independent("Ed25519 load", pkcs8.clone(), |der| {
         Ed25519KeyPair::from_pkcs8(der).unwrap()
     });
     let keys = pkcs8.map(|der| Ed25519KeyPair::from_pkcs8(&der).unwrap());
-    independent("Ed25519 export", keys.each_ref(), |key| key.to_pkcs8());
-    independent("Ed25519 signing", keys.each_ref(), |key| {
+    assert_independent("Ed25519 export", keys.each_ref(), |key| key.to_pkcs8());
+    assert_independent("Ed25519 signing", keys.each_ref(), |key| {
         key.sign(b"message")
     });
 }
@@ -219,21 +293,109 @@ fn ml_dsa_expanded() {
     ml_dsa_expanded_set::<MlDsa87>(&ML_DSA_87_SIGNING);
 }
 
+/// The expanded-form load from recorded fixtures for the two seeds, so the
+/// portable backend (including wasm) checks this path without aws-lc. Miri
+/// skips the file I/O and the large encodings.
+#[test]
+#[cfg(not(miri))]
+fn ml_dsa_expanded_recorded() {
+    use rind::signature::sign::{MlDsa44, MlDsa65, MlDsa87};
+    ml_dsa_expanded_load::<MlDsa44>("44");
+    ml_dsa_expanded_load::<MlDsa65>("65");
+    ml_dsa_expanded_load::<MlDsa87>("87");
+}
+
 fn ml_dsa_set<P: rind::signature::sign::MlDsaParameterSet>() {
     use rind::signature::sign::MlDsaKeyPair;
-    zeroed("ML-DSA key generation", || {
+    assert_zeroed("ML-DSA key generation", || {
         MlDsaKeyPair::<P>::generate().unwrap()
     });
     let seeds = [[1u8; 32], [2u8; 32]];
-    independent("ML-DSA seed load", seeds, |seed| {
+    assert_independent("ML-DSA seed load", seeds, |seed| {
         MlDsaKeyPair::<P>::from_seed(seed).unwrap()
     });
     let keys = seeds.map(|seed| MlDsaKeyPair::<P>::from_seed(&seed).unwrap());
-    independent("ML-DSA export", keys.each_ref(), |key| key.to_pkcs8());
+    assert_independent("ML-DSA export", keys.each_ref(), |key| key.to_pkcs8());
     // Signing is hedged, so even under one key its randomness varies: every
     // block it frees must be wiped.
     for key in &keys {
-        zeroed("ML-DSA signing", || key.sign(b"message").unwrap());
+        assert_zeroed("ML-DSA signing", || key.sign(b"message").unwrap());
+    }
+}
+
+/// The expanded form, whose load checks the key. `set` is "44", "65", or "87".
+/// The files are the PKCS#8 encodings of seeds `[1u8; 32]` and `[2u8; 32]`.
+#[cfg(not(miri))]
+fn ml_dsa_expanded_load<P: rind::signature::sign::MlDsaParameterSet>(set: &str) {
+    use rind::signature::sign::MlDsaKeyPair;
+    let dir = format!("{}/tests/heap_scratch", env!("CARGO_MANIFEST_DIR"));
+    let expanded = [1, 2].map(|seed| {
+        let path = format!("{dir}/ml-dsa-{set}-{seed}.pkcs8");
+        std::fs::read(&path).unwrap_or_else(|err| panic!("cannot read {path}: {err}"))
+    });
+    assert_independent("ML-DSA expanded load", expanded, |der| {
+        MlDsaKeyPair::<P>::from_pkcs8(der).unwrap()
+    });
+}
+
+/// The recorded fixtures stay equal to aws-lc's expansion of seeds
+/// `[1u8; 32]` and `[2u8; 32]`. wasm reads the same files and cannot ask
+/// aws-lc itself.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn ml_dsa_expanded_fixtures_match_aws_lc() {
+    use aws_lc_rs::signature::{ML_DSA_44_SIGNING, ML_DSA_65_SIGNING, ML_DSA_87_SIGNING};
+    let dir = format!("{}/tests/heap_scratch", env!("CARGO_MANIFEST_DIR"));
+    for (set, alg) in [
+        ("44", &ML_DSA_44_SIGNING),
+        ("65", &ML_DSA_65_SIGNING),
+        ("87", &ML_DSA_87_SIGNING),
+    ] {
+        for seed_byte in [1u8, 2] {
+            let path = format!("{dir}/ml-dsa-{set}-{seed_byte}.pkcs8");
+            let recorded =
+                std::fs::read(&path).unwrap_or_else(|err| panic!("cannot read {path}: {err}"));
+            assert_eq!(
+                recorded,
+                ml_dsa_expanded_pkcs8(alg, &[seed_byte; 32]),
+                "{path}",
+            );
+        }
+    }
+}
+
+/// Rewrites the expanded-form PKCS#8 fixtures from aws-lc when
+/// `RIND_RECORD_MLDSA_FIXTURES=1`. aws-lc does not build for wasm or Miri.
+/// Readers may run beside it, so each file is replaced whole by a rename.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+#[ignore = "rewrites rind/tests/heap_scratch/ml-dsa-*.pkcs8 from aws-lc"]
+fn record_ml_dsa_expanded_fixtures() {
+    if std::env::var_os("RIND_RECORD_MLDSA_FIXTURES").is_none_or(|value| value != "1") {
+        eprintln!("set RIND_RECORD_MLDSA_FIXTURES=1 to rewrite the expanded-form fixtures");
+        return;
+    }
+    use aws_lc_rs::signature::{ML_DSA_44_SIGNING, ML_DSA_65_SIGNING, ML_DSA_87_SIGNING};
+    let dir = format!("{}/tests/heap_scratch", env!("CARGO_MANIFEST_DIR"));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (set, alg) in [
+        ("44", &ML_DSA_44_SIGNING),
+        ("65", &ML_DSA_65_SIGNING),
+        ("87", &ML_DSA_87_SIGNING),
+    ] {
+        for seed_byte in [1u8, 2] {
+            let path = format!("{dir}/ml-dsa-{set}-{seed_byte}.pkcs8");
+            let der = ml_dsa_expanded_pkcs8(alg, &[seed_byte; 32]);
+            // A process-specific temporary file keeps readers on a complete
+            // fixture, including when another recording process runs beside us.
+            let temporary = format!("{path}.{}.tmp", std::process::id());
+            let published =
+                std::fs::write(&temporary, &der).and_then(|()| std::fs::rename(&temporary, &path));
+            if let Err(err) = published {
+                let _ = std::fs::remove_file(&temporary);
+                panic!("cannot replace {path}: {err}");
+            }
+        }
     }
 }
 
@@ -245,7 +407,7 @@ fn ml_dsa_expanded_set<P: rind::signature::sign::MlDsaParameterSet>(
     use rind::signature::sign::MlDsaKeyPair;
     let seeds = [[1u8; 32], [2u8; 32]];
     let expanded = seeds.map(|seed| ml_dsa_expanded_pkcs8(theirs, &seed));
-    independent("ML-DSA expanded load", expanded, |der| {
+    assert_independent("ML-DSA expanded load", expanded, |der| {
         MlDsaKeyPair::<P>::from_pkcs8(der).unwrap()
     });
 }
@@ -284,7 +446,7 @@ fn der(tag: u8, body: &[u8]) -> Vec<u8> {
 fn ecdh() {
     use rind::agreement::{ECDH_P256, ECDH_P384, ECDH_P521, PrivateKey, X25519};
     for algorithm in [&X25519, &ECDH_P256, &ECDH_P384, &ECDH_P521] {
-        zeroed("ECDH key generation", || {
+        assert_zeroed("ECDH key generation", || {
             PrivateKey::generate(algorithm).unwrap()
         });
         let peer = PrivateKey::generate(algorithm).unwrap();
@@ -292,12 +454,12 @@ fn ecdh() {
             let key = PrivateKey::generate(algorithm).unwrap();
             key.to_pkcs8().as_ref().to_vec()
         });
-        independent("ECDH load", pkcs8.clone(), |der| {
+        assert_independent("ECDH load", pkcs8.clone(), |der| {
             PrivateKey::from_pkcs8(algorithm, der).unwrap()
         });
         let keys = pkcs8.map(|der| PrivateKey::from_pkcs8(algorithm, &der).unwrap());
-        independent("ECDH export", keys.each_ref(), |key| key.to_pkcs8());
-        independent("ECDH agreement", keys.each_ref(), |key| {
+        assert_independent("ECDH export", keys.each_ref(), |key| key.to_pkcs8());
+        assert_independent("ECDH agreement", keys.each_ref(), |key| {
             key.agree(peer.public_key().as_ref()).unwrap()
         });
     }
@@ -316,20 +478,20 @@ fn spake2plus() {
     // use different pairs, so scratch from either scalar differs.
     let w0s = [[0x11u8; 40], [0x22u8; 40]];
     let w1s = [[0x33u8; 40], [0x44u8; 40]];
-    independent("SPAKE2+ prover w0", w0s, |w0| {
+    assert_independent("SPAKE2+ prover w0", w0s, |w0| {
         ProverSecrets::new(w0, &[0x33; 40]).unwrap()
     });
-    independent("SPAKE2+ prover w1", w1s, |w1| {
+    assert_independent("SPAKE2+ prover w1", w1s, |w1| {
         ProverSecrets::new(&[0x11; 40], w1).unwrap()
     });
-    independent("SPAKE2+ verifier w0", w0s, |w0| {
+    assert_independent("SPAKE2+ verifier w0", w0s, |w0| {
         VerifierRecord::from_w1(w0, &[0x33; 40]).unwrap()
     });
-    independent("SPAKE2+ verifier w1", w1s, |w1| {
+    assert_independent("SPAKE2+ verifier w1", w1s, |w1| {
         VerifierRecord::from_w1(&[0x11; 40], w1).unwrap()
     });
     let handshakes = [(w0s[0], w1s[0]), (w0s[1], w1s[1])];
-    independent("SPAKE2+ handshake", handshakes, |(w0, w1)| {
+    assert_independent("SPAKE2+ handshake", handshakes, |(w0, w1)| {
         let prover = ProverSecrets::new(w0, w1).unwrap();
         let record = VerifierRecord::from_w1(w0, w1).unwrap();
         let (share_p, prover) = prover.start(&RFC9383, b"ctx", b"a", b"b").unwrap();
@@ -344,7 +506,7 @@ fn spake2plus() {
 #[test]
 fn mlkem768() {
     use rind::kem::{DecapsulationKey, ML_KEM_768};
-    zeroed("ML-KEM key generation", || {
+    assert_zeroed("ML-KEM key generation", || {
         DecapsulationKey::generate(&ML_KEM_768).unwrap()
     });
     let keys = [(); 2].map(|()| {
@@ -352,7 +514,7 @@ fn mlkem768() {
         let (ciphertext, _) = key.public_key().encapsulate().unwrap();
         (key, ciphertext)
     });
-    independent("ML-KEM decapsulation", keys, |(key, ciphertext)| {
+    assert_independent("ML-KEM decapsulation", keys, |(key, ciphertext)| {
         key.decapsulate(ciphertext.as_ref()).unwrap()
     });
 }
