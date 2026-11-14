@@ -60,6 +60,9 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     // keeps HACL*, which is faster when the code stays cached.
     #[cfg(target_pointer_width = "32")]
     {
+        // On Xtensa ESP-IDF, `sha512_compress_block` is in IRAM. The call
+        // site stays an absolute call, and SHA-256's `.flash.text` address
+        // matches a build that has no rolled body in flash.
         crate::low::generic::sha512::sha512_compress_blocks(state, blocks);
     }
     #[cfg(target_pointer_width = "64")]
