@@ -1,4 +1,4 @@
-import Rind.Aarch64.SignatureDispatch
+import Rind.X86_64.SignatureDispatch
 open Aeneas Aeneas.Std Result
 
 /-!
@@ -579,7 +579,7 @@ Drops are not modelled, as everywhere in the translation.
 `SIGNATURE_MAX_LEN` is RSA's largest modulus, 8192 / 8 = 1024.
 -/
 
-namespace rind.aarch64
+namespace rind.x86_64
 
 /-- The loop of `p256::PrivateKey::generate(rng)`, with `n` draws left. -/
 def mid.p256.PrivateKey.generate_from_loop {T : Type} (inst : mid.rng.RandomSource T) :
@@ -622,17 +622,6 @@ abbrev P256SigningKey :=
 /-- An ECDSA verifying key on P-256. -/
 abbrev P256VerifyingKey :=
   high.ecdsa.VerifyingKey high.curve.P256 mid.p256.StaticPrivateKey mid.p256.VerifyingKey mid.p256.Scalar
-
-/-- `Buffer::write`, with `write` a Lean function. -/
-def high.signature.Buffer.write (N : Std.Usize)
-    (write : Slice Std.U8 → Result (core.result.Result (Slice Std.U8) error.Error × Slice Std.U8)) :
-    Result (core.result.Result (high.signature.Buffer N) error.Error) := do
-  let buffer ← high.signature.Buffer.new N
-  let (s, to_slice_mut_back) ← lift (Array.to_slice_mut buffer.bytes)
-  let r ← write s
-  match r.1 with
-  | .Ok span => ok (.Ok { bytes := to_slice_mut_back r.2, len := span.len })
-  | .Err e => ok (.Err e)
 
 /-- `parse_ecdsa::<P256, Sha256, Fixed>`, whose `Verifier`'s `verify` is
 `VerifyingKey::verify::<Sha256>`. -/
@@ -746,4 +735,4 @@ def high.signature.EcdsaKeyPair.sign (self : high.signature.EcdsaKeyPair) (messa
       high.ecdsa.SigningKey.sign P256C Sha256Sig signing message output
   | .Other sign _ => sign message
 
-end rind.aarch64
+end rind.x86_64
