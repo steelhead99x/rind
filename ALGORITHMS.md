@@ -147,7 +147,8 @@ with portable Rust in place of the assembly armv7 runs regardless.
   `.iram1` with `K` in `.dram1`. `esp32s3-sha512-flash` leaves both in
   ordinary flash sections, as do the ESP32, the ESP32-S2, and `*-none-elf`.
   `admin/esp32s3-sha512-layout` checks those sections, the relocation
-  allowlist, and that the block has no call, at opt-level 3. Board time
+  allowlist, and that the block has no call, at opt-level 3, s, and z.
+  Board time
   is unmeasured. SHA-256 on this target is the IRAM body above, and this
   placement leaves libcrux-sha2's object sections unchanged.
 - portable: ChaCha20-Poly1305's Poly1305 is Graviola's on 64-bit targets

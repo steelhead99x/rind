@@ -8,9 +8,14 @@
 # ESP32, and xtensa-esp32s3-none-elf keep the ordinary sections. The
 # instructions of the two ESP32-S3 ESP-IDF builds must match.
 #
+# opt-level 3 is the firmware profile. opt-level s and z are checked on
+# the ESP32-S3 object as well: the same section, relocation, and no-call
+# rules, because a size-optimized outline into flash is the failure this
+# body is written to avoid. opt-level 0 is not a cache-off promise.
+#
 # ESP-IDF Xtensa SHA-256 is rind's IRAM body, checked by
-# admin/esp32s3-sha256-layout. This script does not rewrite libcrux-sha2.
-# Board timing is unmeasured.
+# admin/esp32s3-sha256-layout. This script does not link a stand-in for
+# it and does not rewrite libcrux-sha2. Board timing is unmeasured.
 #
 # Needs the espup rustc that the board uses (1.97.0.0, 8ea53bcd7) and the
 # xtensa-esp-elf binutils. Defaults are under $HOME/.espressif, which is
@@ -109,11 +114,13 @@ export CARGO_HOME="$work/cargo-home"
 build() {
   name=$1
   target=$2
-  extra=$3
+  opt=$3
+  extra=$4
   # shellcheck disable=SC2086
   CARGO_TARGET_DIR="$work/target-$name" \
     "$cargo" build --manifest-path "$work/probe/Cargo.toml" \
-      --release --target "$target" -Z build-std=core --offline $extra \
+      --release --target "$target" -Z build-std=core --offline \
+      --config "profile.release.opt-level=$opt" $extra \
       >"$work/$name.log" 2>&1 \
     || {
       printf 'build %s failed\n' "$name" >&2
@@ -126,10 +133,12 @@ build() {
   find "$work/obj/$name" -name 'sha512_layout-*.o' -exec mv {} "$work/obj/$name.o" \;
 }
 
-build s3 xtensa-esp32s3-espidf ''
-build flash xtensa-esp32s3-espidf '--features esp32s3-sha512-flash'
-build esp32 xtensa-esp32-espidf ''
-build none xtensa-esp32s3-none-elf ''
+build s3 xtensa-esp32s3-espidf 3 ''
+build s xtensa-esp32s3-espidf '"s"' ''
+build z xtensa-esp32s3-espidf '"z"' ''
+build flash xtensa-esp32s3-espidf 3 '--features esp32s3-sha512-flash'
+build esp32 xtensa-esp32-espidf 3 ''
+build none xtensa-esp32s3-none-elf 3 ''
 
 sections() {
   "$objdump" -h "$1" | awk 'NR > 3 && $2 ~ /^\./ { print $2, $3 }'
@@ -189,6 +198,8 @@ expect_ordinary() {
 }
 
 expect_placed "$work/obj/s3.o"
+expect_placed "$work/obj/s.o"
+expect_placed "$work/obj/z.o"
 expect_ordinary "$work/obj/flash.o" 'esp32s3-sha512-flash'
 expect_ordinary "$work/obj/esp32.o" 'xtensa-esp32-espidf'
 expect_ordinary "$work/obj/none.o" 'xtensa-esp32s3-none-elf'
@@ -199,18 +210,26 @@ expect_ordinary "$work/obj/none.o" 'xtensa-esp32s3-none-elf'
 # Quote-terminated so `.rela.iram1.text` does not also match the literal
 # section. Allow only these two section targets, so any function reference
 # (including a panic, not just memset) or other data reference fails.
-"$readelf" -rW "$work/obj/s3.o" | awk '
-  /\.rela\.iram1\.text\.literal'\''/ { inlit = 1; intext = 0; next }
-  /\.rela\.iram1\.text'\''/ { intext = 1; inlit = 0; next }
-  /^Relocation section/ { intext = 0; inlit = 0 }
-  intext && /R_XTENSA_/ && $5 != ".iram1.text.literal" { bad = 1; print > "/dev/stderr" }
-  inlit && /R_XTENSA_/ && $5 != ".dram1.rodata" { bad = 1; print > "/dev/stderr" }
-  inlit && /R_XTENSA_/ && $5 == ".dram1.rodata" { sawk = 1 }
-  END { if (bad || !sawk) exit 1 }
-' || fail 'IRAM relocations are not (literal pool, DRAM K)'
-if "$objdump" -d -j .iram1.text "$work/obj/s3.o" | grep -Eq '[[:space:]]callx?(0|4|8|12)[[:space:]]'; then
-  fail 'IRAM compressor contains a call instruction'
-fi
+check_iram() {
+  obj=$1
+  label=$2
+  "$readelf" -rW "$obj" | awk '
+    /\.rela\.iram1\.text\.literal'\''/ { inlit = 1; intext = 0; next }
+    /\.rela\.iram1\.text'\''/ { intext = 1; inlit = 0; next }
+    /^Relocation section/ { intext = 0; inlit = 0 }
+    intext && /R_XTENSA_/ && $5 != ".iram1.text.literal" { bad = 1; print > "/dev/stderr" }
+    inlit && /R_XTENSA_/ && $5 != ".dram1.rodata" { bad = 1; print > "/dev/stderr" }
+    inlit && /R_XTENSA_/ && $5 == ".dram1.rodata" { sawk = 1 }
+    END { if (bad || !sawk) exit 1 }
+  ' || fail "$label IRAM relocations are not (literal pool, DRAM K)"
+  if "$objdump" -d -j .iram1.text "$obj" | grep -Eq '[[:space:]]callx?(0|4|8|12)[[:space:]]'; then
+    fail "$label IRAM compressor contains a call instruction"
+  fi
+}
+
+check_iram "$work/obj/s3.o" 'opt-level 3'
+check_iram "$work/obj/s.o" 'opt-level s'
+check_iram "$work/obj/z.o" 'opt-level z'
 
 s3_text=.iram1.text
 flash_text=$(
@@ -220,25 +239,10 @@ flash_text=$(
 "$xtensa_bin/xtensa-esp32s3-elf-objcopy" -O binary -j "$flash_text" "$work/obj/flash.o" "$work/flash.bin"
 cmp "$work/s3.bin" "$work/flash.bin" || fail 'IRAM and flash-feature instruction bytes differ'
 
-# Harness linked first, as the bench image is. The stand-in checks that
-# moving the compressor out of flash text moves a later flash function.
-# It is a flash-text contribution check, not rind's SHA-256 body and not
-# a cycle count. Board timing is unmeasured. ESP-IDF Xtensa SHA-256 is
-# sha256_iram, which admin/esp32s3-sha256-layout checks.
-cat > "$work/harness.c" << 'EOF'
-void sha256_update(void);
-void harness_loop(void) { sha256_update(); }
-EOF
-cat > "$work/sha256.c" << 'EOF'
-int sha256_update(void) {
-    volatile int x = 0;
-    for (int i = 0; i < 32; i++) x += i;
-    return x;
-}
-EOF
-"$gcc" -c -O2 -o "$work/harness.o" "$work/harness.c"
-"$gcc" -c -O2 -o "$work/sha256.o" "$work/sha256.c"
-
+# Link the compressor so the literal-pool order and the call from
+# sha512_entry can be checked. ESP-IDF Xtensa SHA-256 is sha256_iram;
+# admin/esp32s3-sha256-layout checks that body. This probe does not
+# stand in for it.
 {
   printf '%s\n' 'void *memset(void *s, int c, unsigned long n) {'
   printf '%s\n' '    unsigned char *p = s;'
@@ -261,7 +265,6 @@ MEMORY {
 SECTIONS {
   .iram0.text : { *(.iram1 .iram1.*) } > iram0_0_seg
   .flash.text : {
-    *harness.o(.literal .literal.* .text .text.*)
     *(.literal .literal.* .text .text.*)
   } > default_code_seg
   .dram0.data : { *(.dram1 .dram1.*) *(.data .data.*) } > dram0_0_seg
@@ -271,31 +274,12 @@ SECTIONS {
 EOF
 
 link_one() {
-  "$ld" --relax -e harness_loop -T "$work/link.ld" -o "$1" \
-    "$work/harness.o" "$2" "$work/sha256.o" "$work/stubs.o"
+  "$ld" --relax -e sha512_entry -T "$work/link.ld" -o "$1" \
+    "$2" "$work/stubs.o"
 }
 
 link_one "$work/s3.elf" "$work/obj/s3.o"
 link_one "$work/flash.elf" "$work/obj/flash.o"
-
-sym_addr() {
-  "$nm" -n "$1" | awk -v name="$2" '$3 == name && $2 ~ /[Tt]/ { print $1; exit }'
-}
-
-h_s3=$(sym_addr "$work/s3.elf" harness_loop)
-h_flash=$(sym_addr "$work/flash.elf" harness_loop)
-s_s3=$(sym_addr "$work/s3.elf" sha256_update)
-s_flash=$(sym_addr "$work/flash.elf" sha256_update)
-[ "$h_s3" = "$h_flash" ] || fail "harness moved ($h_flash -> $h_s3)"
-[ -n "$s_s3" ] && [ -n "$s_flash" ] || fail 'sha256 stand-in missing'
-# sha256 in the flash build is at a higher address by the IRAM contribution.
-python3 - "$s_flash" "$s_s3" << 'PY'
-import sys
-delta = int(sys.argv[1], 16) - int(sys.argv[2], 16)
-if delta <= 0:
-    raise SystemExit(f"sha256 did not move back ({delta:#x})")
-print(f"sha256 flash-iram delta {delta:#x}")
-PY
 
 # Literal pool before the code, which is the direction l32r requires.
 block=$("$nm" -n "$work/s3.elf" | awk '/compress_block/ { print $1; exit }')
