@@ -269,6 +269,7 @@ struct DtlsEvents {
     connected: bool,
     close_notify: bool,
     packets: usize,
+    timeout: Option<Instant>,
 }
 
 fn transfer_dtls(from: &mut dyn DtlsInstance, to: &mut dyn DtlsInstance) -> DtlsEvents {
@@ -283,7 +284,10 @@ fn transfer_dtls(from: &mut dyn DtlsInstance, to: &mut dyn DtlsInstance) -> Dtls
             DtlsOutput::Connected => events.connected = true,
             DtlsOutput::CloseNotify => events.close_notify = true,
             DtlsOutput::PeerCert(_) | DtlsOutput::KeyingMaterial(_, _) => {}
-            DtlsOutput::Timeout(_) => return events,
+            DtlsOutput::Timeout(at) => {
+                events.timeout = Some(at);
+                return events;
+            }
             other => panic!("unexpected DTLS output: {other:?}"),
         }
     }
@@ -307,15 +311,32 @@ fn established_connection_reports_graceful_close() {
             a.set_active(rind_active);
             b.set_active(!rind_active);
             let mut connected = [false; 2];
-            for _ in 0..20 {
+            // dimpl's first flight retransmit is one second. Follow the Timeout
+            // it returns, and fail once simulated time passes a minute.
+            let deadline = now + Duration::from_secs(60);
+            loop {
+                assert!(
+                    now < deadline,
+                    "{version:?} handshake timed out, rind active={rind_active}"
+                );
                 a.handle_timeout(now).unwrap();
                 b.handle_timeout(now).unwrap();
-                connected[0] |= transfer_dtls(&mut *a, &mut *b).connected;
-                connected[1] |= transfer_dtls(&mut *b, &mut *a).connected;
+                let from_a = transfer_dtls(&mut *a, &mut *b);
+                let from_b = transfer_dtls(&mut *b, &mut *a);
+                connected[0] |= from_a.connected;
+                connected[1] |= from_b.connected;
                 if connected == [true; 2] {
                     break;
                 }
-                now += Duration::from_millis(10);
+                let next = from_a
+                    .timeout
+                    .into_iter()
+                    .chain(from_b.timeout)
+                    .min()
+                    .unwrap_or_else(|| panic!("{version:?} handshake stalled without a timeout"));
+                // A timeout that is not strictly later still advances, as `step` does,
+                // so a stuck instant cannot spin.
+                now = (now + Duration::from_millis(1)).max(next);
             }
             assert_eq!(
                 connected, [true; 2],
@@ -339,27 +360,22 @@ fn established_connection_reports_graceful_close() {
 }
 
 /// The generated serial stays a positive INTEGER, and the certificate is valid
-/// for a year. This stays out of the crate's unit tests: `admin/ctgrind
-/// adapters` runs those under valgrind, and the serial comes from
-/// `rind::rand`, so branching on it is a secret-dependent branch.
+/// for exactly 365 days. `clear_serial_high_bit_forces_a_positive_integer`
+/// checks the mask with a forced high bit. Branching on a serial from
+/// `rind::rand` stays here, out of the crate's unit tests, because
+/// `admin/ctgrind adapters` runs those under valgrind.
 #[test]
 fn certificate_serial_stays_positive_and_the_span_is_a_year() {
-    // `serial[0] &= 0x7f` clears the top bit. Replacing `&=` with `|=` forces
-    // the low seven bits on, so every certificate has them set, and leaves a
-    // set top bit set. Subtracting 365 days reverses the validity span.
     let dtls = rind_str0m::default_provider().dtls_provider;
-    let mut saw_unforced_low_bits = false;
-    for _ in 0..8 {
-        let cert = dtls.generate_certificate().unwrap();
-        let serial = serial_integer(&cert.certificate);
-        assert!(serial.len() <= 20 && serial[0] & 0x80 == 0, "{serial:?}");
-        if serial[0] & 0x7f != 0x7f {
-            saw_unforced_low_bits = true;
-        }
-        let (before, after) = validity(&cert.certificate);
-        assert!(after > before, "{before} .. {after}");
-    }
-    assert!(saw_unforced_low_bits);
+    let cert = dtls.generate_certificate().unwrap();
+    let serial = serial_integer(&cert.certificate);
+    assert!(serial.len() <= 20 && serial[0] & 0x80 == 0, "{serial:?}");
+    let (before, after) = validity(&cert.certificate);
+    assert_eq!(
+        certificate_time(&after) - certificate_time(&before),
+        time::Duration::days(365),
+        "{before} .. {after}"
+    );
 }
 
 fn serial_integer(cert: &[u8]) -> Vec<u8> {
@@ -374,6 +390,23 @@ fn serial_integer(cert: &[u8]) -> Vec<u8> {
     let (serial, _) = tlv(after_version);
     assert_eq!(after_version[0], 0x02);
     serial.to_vec()
+}
+
+fn certificate_time(value: &str) -> time::OffsetDateTime {
+    assert!(value.ends_with('Z'), "{value}");
+    let digits = &value[..value.len() - 1];
+    let (year, rest) = match digits.len() {
+        12 => {
+            let yy: i32 = digits[..2].parse().unwrap();
+            (if yy >= 50 { 1900 + yy } else { 2000 + yy }, &digits[2..])
+        }
+        14 => (digits[..4].parse().unwrap(), &digits[4..]),
+        _ => panic!("certificate time {value}"),
+    };
+    let part = |at: usize| -> u8 { rest[at..at + 2].parse().unwrap() };
+    let date = time::Date::from_calendar_date(year, part(0).try_into().unwrap(), part(2)).unwrap();
+    let clock = time::Time::from_hms(part(4), part(6), part(8)).unwrap();
+    date.with_time(clock).assume_utc()
 }
 
 fn validity(cert: &[u8]) -> (String, String) {

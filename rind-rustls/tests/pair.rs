@@ -179,21 +179,30 @@ fn exercise(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>) 
     let mut client = ClientConnection::new(client_config, "localhost".try_into().unwrap()).unwrap();
     let mut server = ServerConnection::new(server_config).unwrap();
 
-    // A confidentiality limit of zero never finishes the handshake: each
-    // record asks for a key update. Bound the rounds so that mutant fails
-    // instead of hanging the suite.
+    // A confidentiality limit of zero never leaves the handshake: each record
+    // asks for a key update. Shuttle until both sides have finished and neither
+    // still wants to write, so a one-sided stall stays inside the cap. One
+    // 1024-byte write cannot carry an RSA-4096 chain plus an ML-KEM share; 64
+    // rounds is past that flight and still rejects a handshake that never goes idle.
     let mut rounds = 0;
-    while client.is_handshaking() && server.is_handshaking() {
+    while client.is_handshaking()
+        || server.is_handshaking()
+        || client.wants_write()
+        || server.wants_write()
+    {
         rounds += 1;
-        assert!(rounds <= 8, "handshake did not finish");
+        assert!(rounds <= 64, "handshake did not finish");
         let mut buf = [0u8; 1024];
         let wr = client.write_tls(&mut &mut buf[..]).unwrap();
-        server.read_tls(&mut &buf[..wr]).unwrap();
-        server.process_new_packets().unwrap();
-
+        if wr > 0 {
+            server.read_tls(&mut &buf[..wr]).unwrap();
+            server.process_new_packets().unwrap();
+        }
         let wr = server.write_tls(&mut &mut buf[..]).unwrap();
-        client.read_tls(&mut &buf[..wr]).unwrap();
-        client.process_new_packets().unwrap();
+        if wr > 0 {
+            client.read_tls(&mut &buf[..wr]).unwrap();
+            client.process_new_packets().unwrap();
+        }
     }
 
     let _ = client.writer().write(b"hello world").unwrap();
