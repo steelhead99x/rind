@@ -8,8 +8,10 @@
 //! code from flash, about 33× ring's compact loop. This implementation
 //! follows [`sha256`](sha256.rs): one 16-word window and an 80-round loop,
 //! which stays in a few kilobytes. The round functions and the eighty
-//! `K` constants are FIPS 180-4 §4.1.3 and §4.2.3. On 64-bit portable
-//! targets, HACL*'s unrolled form is still used.
+//! `K` constants are FIPS 180-4 §4.1.3 and §4.2.3. The unit tests check
+//! FIPS 180-4's SHA-512 vectors and, on every backend except 32-bit
+//! portable, the same compression the backend ships (HACL* or aws-lc).
+//! On 64-bit portable targets, HACL*'s unrolled form is still used.
 
 macro_rules! CH {
     ($x:expr, $y:expr, $z:expr) => {
@@ -216,7 +218,7 @@ mod tests {
         0x5be0cd19137e2179,
     ];
 
-    fn hash(message: &[u8]) -> [u8; 64] {
+    fn padded(message: &[u8]) -> Vec<u8> {
         let bits = (message.len() as u128).checked_mul(8).unwrap();
         let mut padded = message.to_vec();
         padded.push(0x80);
@@ -226,13 +228,22 @@ mod tests {
             padded.push(0);
         }
         padded.extend_from_slice(&bits.to_be_bytes());
-        let mut state = IV;
-        sha512_compress_blocks(&mut state, &padded);
+        padded
+    }
+
+    fn encode(state: [u64; 8]) -> [u8; 64] {
         let mut out = [0u8; 64];
         for (i, word) in state.iter().enumerate() {
             out[i * 8..(i + 1) * 8].copy_from_slice(&word.to_be_bytes());
         }
         out
+    }
+
+    fn hash(message: &[u8]) -> [u8; 64] {
+        let padded = padded(message);
+        let mut state = IV;
+        sha512_compress_blocks(&mut state, &padded);
+        encode(state)
     }
 
     fn digest_hex(message: &[u8], hex: &str) {
@@ -260,6 +271,20 @@ mod tests {
             b"abc",
             "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f",
         );
+    }
+
+    /// The 32-bit portable backend *is* this compression, so that
+    /// comparison would call itself. Everywhere else it is HACL* or aws-lc.
+    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+    #[test]
+    fn matches_backend_compression() {
+        for len in [0usize, 1, 3, 55, 111, 112, 113, 127, 128, 239, 1000] {
+            let message: Vec<u8> = (0..len).map(|i| (i * 17 + 3) as u8).collect();
+            let bytes = padded(&message);
+            let mut state = IV;
+            crate::low::sha512_compress_blocks(&mut state, &bytes);
+            assert_eq!(hash(&message), encode(state), "{len} bytes");
+        }
     }
 
     #[test]

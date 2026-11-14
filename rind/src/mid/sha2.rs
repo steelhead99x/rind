@@ -442,15 +442,29 @@ mod tests {
                 "{len} bytes from the initial state"
             );
         }
+        // `split_tail` holds the last block when the padding fits after it.
+        // A 320-byte message therefore has a 256-byte prefix, which is the
+        // cutover and still rolled; 376 bytes leaves a 56-byte tail that
+        // does not fit the padding, so its 320-byte prefix is long, and so
+        // is a 384-byte message.
+        let prefix = |n: usize| split_tail::<64, 8>(&vec![0u8; n]).0.len();
+        assert_eq!(prefix(256), 192);
+        assert_eq!(prefix(320), 256);
+        assert_eq!(prefix(375), 256);
+        assert_eq!(prefix(376), 320);
+        assert_eq!(prefix(384), 320);
         #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
         {
-            assert!(Sha256State::finish_uses_long(&[0u8; 320]));
+            assert!(!Sha256State::finish_uses_long(&[0u8; 320]));
+            assert!(!Sha256State::finish_uses_long(&[0u8; 375]));
+            assert!(Sha256State::finish_uses_long(&[0u8; 376]));
+            assert!(Sha256State::finish_uses_long(&[0u8; 384]));
             assert!(!Sha256State::finish_uses_long(&[0u8; 256]));
             assert!(!Sha256State::finish_uses_long(&[0u8; 32]));
         }
         #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
         {
-            assert!(!Sha256State::finish_uses_long(&[0u8; 320]));
+            assert!(!Sha256State::finish_uses_long(&[0u8; 384]));
         }
     }
 
