@@ -1,6 +1,6 @@
-import Rind.Aarch64.P256Ecdsa
-import Rind.Aarch64.Ed25519
-import Rind.Aarch64.Hmac
+import Rind.X86_64.P256KeyCheck
+import Rind.X86_64.Ed25519
+import Rind.X86_64.Hmac
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
@@ -8,11 +8,13 @@ open Aeneas Aeneas.Std Result rind.spec
 
 The `p256_ecdsa_*` theorems state what the signature API returns for
 `ECDSA_P256_SHA256_FIXED`, in terms of `Rind.Spec`'s ECDSA, through the
-dispatch `Rind.Aarch64.EcdsaDispatch` models, with SHA-256 as
-`Rind.Aarch64.Hmac` states it.
+dispatch `Rind.X86_64.EcdsaDispatch` models, with SHA-256 as
+`Rind.X86_64.Hmac` states it. A signing key checks its public key as
+`Rind.X86_64.P256KeyCheck` states. `admin/prove` writes the aarch64 proof
+from this file by renaming the target.
 -/
 
-namespace rind.aarch64
+namespace rind.x86_64
 
 open P256
 
@@ -26,7 +28,7 @@ theorem static_public_key_uncompressed_spec (h : Runs) (k : mid.p256.StaticPriva
     (hk0 : 0 < scNat k.scalar) (hk : scNat k.scalar < n256) :
     mid.p256.StaticPrivateKey.public_key_uncompressed k ⦃ b => p256PublicKey (scNat k.scalar) b.val ⦄ := by
   obtain ⟨x, y, hq, hc⟩ := g_mult _ hk0 hk
-  have := public_key_uncompressed_spec h k x y hq hc
+  have := public_key_uncompressed_spec h k hk x y hq hc
   refine WP.spec_mono this fun b ⟨h4, hxy⟩ => ⟨b.property, h4, ?_⟩
   rw [hq, hxy]
 
@@ -217,7 +219,23 @@ theorem is_public_key_spec (h : Runs) (hc : Cached) (key : P256SigningKey) (d : 
     (hs : SigningKeyOf key d) (enc : Slice U8) :
     high.ecdsa.SigningKey.is_public_key P256C key enc ⦃ b =>
       ∃ B, p256PublicKey d B ∧ (b ↔ enc.val = B ∨ enc.val = x962Compress B) ⦄ := by
-  unfold high.ecdsa.SigningKey.is_public_key
+  obtain ⟨hsd, hd0, hd⟩ := hs
+  apply is_public_key_of h hc key enc (hsd ▸ hd0) (hsd ▸ hd)
+  swap
+  · intro m h4 hm
+    obtain ⟨ep, hl, hpk⟩ := WP.spec_exists (public_key_bytes_spec h hc key d ⟨hsd, hd0, hd⟩)
+    cases m
+    · refine ⟨_, hpk, ?_⟩
+      simp only [Bool.false_eq_true, false_iff, not_or]
+      refine ⟨fun he => ?_, fun he => ?_⟩
+      · have := hm.mpr ⟨by rw [Slice.length, he]; exact hpk.1, by rw [hsd, he]; exact hpk.2.2⟩
+        exact Bool.false_ne_true this
+      · rw [he, x962Compress, List.head?_cons, Option.some.injEq] at h4
+        rcases compress_tag ((ep.bytes.val.take 65).getLastD 0#u8) with h | h <;> rw [h] at h4 <;>
+          exact absurd h4 (by decide)
+    · obtain ⟨hl65, hq⟩ := hm.mp rfl
+      exact ⟨enc.val, ⟨hl65, h4, hsd ▸ hq⟩, by simp⟩
+  have hs : SigningKeyOf key d := ⟨hsd, hd0, hd⟩
   step with public_key_bytes_spec h hc key d hs as ⟨ep, hl, hpk⟩
   step with encoded_point_as_ref_spec ep (by rw [hl]; decide) as ⟨sl, hsl⟩
   rw [hl] at hsl
@@ -569,4 +587,4 @@ theorem p256_ecdsa_public_key_new (h : Runs) (hheld : Held) (hc : Cached)
     · subst hr; simp
     · subst hr; simp
 
-end rind.aarch64
+end rind.x86_64
