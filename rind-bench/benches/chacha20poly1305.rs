@@ -13,6 +13,7 @@ fn test_ring_chacha(key: &ring::aead::LessSafeKey, nonce: &[u8; 12], aad: &[u8],
         .unwrap();
 }
 
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 fn test_aws_chacha(
     key: &aws_lc_rs::aead::LessSafeKey,
     nonce: &[u8; 12],
@@ -59,6 +60,7 @@ fn bench_chacha20poly1305(c: &mut Criterion) {
             let key = LessSafeKey::new(key);
             b.iter(|| test_ring_chacha(&key, &nonce, aad, &mut buf));
         });
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_function(BenchmarkId::new("aws-lc-rs", size_name), |b| {
             use aws_lc_rs::aead::{CHACHA20_POLY1305, LessSafeKey, UnboundKey};
             let key = UnboundKey::new(&CHACHA20_POLY1305, &key).unwrap();
@@ -138,6 +140,7 @@ fn bench_chacha20poly1305_open(c: &mut Criterion) {
                 .unwrap();
             });
         });
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_function(BenchmarkId::new("aws-lc-rs", size_name), |b| {
             use aws_lc_rs::aead::{CHACHA20_POLY1305, LessSafeKey, UnboundKey};
             let key = LessSafeKey::new(UnboundKey::new(&CHACHA20_POLY1305, &key).unwrap());

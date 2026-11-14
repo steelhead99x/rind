@@ -10,6 +10,7 @@ fn test_ring_sha1(data: &[u8]) {
     black_box(ctx.finish());
 }
 
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 fn test_aws_sha1(data: &[u8]) {
     let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA1_FOR_LEGACY_USE_ONLY);
     ctx.update(data);
@@ -37,6 +38,7 @@ fn sha1(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("ring", size_name), &input, |b, input| {
             b.iter(|| test_ring_sha1(input))
         });
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_with_input(
             BenchmarkId::new("aws-lc-rs", size_name),
             &input,

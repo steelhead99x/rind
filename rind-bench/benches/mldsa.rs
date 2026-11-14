@@ -45,7 +45,9 @@ mod ossl {
 // the number of rejected attempts, and with it the time, varies alike.
 const MESSAGE: &[u8] = b"rind ML-DSA benchmark message";
 
-// The longest signature, ML-DSA-87's.
+// The longest signature, ML-DSA-87's. Only the aws-lc-rs row writes into a
+// buffer of this size; the other rows return their own.
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 const MAX_SIGNATURE_LEN: usize = 4627;
 
 // One parameter set's key generation, signing, and verification, each library
@@ -74,6 +76,7 @@ macro_rules! ml_dsa {
                 });
             }
 
+            #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
             group.bench_function("aws-lc-rs", |b| {
                 use aws_lc_rs::signature::{KeyPair, PqdsaKeyPair, $aws_signing};
 
@@ -127,6 +130,7 @@ macro_rules! ml_dsa {
                 });
             }
 
+            #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
             group.bench_function("aws-lc-rs", |b| {
                 use aws_lc_rs::signature::{PqdsaKeyPair, $aws_signing};
                 let key = PqdsaKeyPair::generate(&$aws_signing).unwrap();
@@ -212,6 +216,7 @@ macro_rules! ml_dsa {
                 });
             }
 
+            #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
             group.bench_function("aws-lc-rs", |b| {
                 use aws_lc_rs::signature::{ParsedPublicKey, $aws_verify};
                 let key = ParsedPublicKey::new(&$aws_verify, &public_key).unwrap();

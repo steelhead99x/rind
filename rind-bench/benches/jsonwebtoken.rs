@@ -6,25 +6,31 @@
 mod criterion;
 use std::hint::black_box;
 
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 use aws_lc_rs::rand::SystemRandom;
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 use aws_lc_rs::signature::{
     ECDSA_P256_SHA256_FIXED_SIGNING, ECDSA_P384_SHA384_FIXED_SIGNING, EcdsaKeyPair,
     EcdsaSigningAlgorithm, Ed25519KeyPair, KeyPair,
 };
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use jsonwebtoken::crypto::{CryptoProvider, aws_lc};
+use jsonwebtoken::crypto::CryptoProvider;
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+use jsonwebtoken::crypto::aws_lc;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey};
 
-fn providers() -> [(&'static str, &'static CryptoProvider); 2] {
-    [
-        ("aws-lc-rs", &aws_lc::DEFAULT_PROVIDER),
-        ("rind", &rind_jsonwebtoken::DEFAULT_PROVIDER),
-    ]
+fn providers() -> impl Iterator<Item = (&'static str, &'static CryptoProvider)> {
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+    let aws = [("aws-lc-rs", &aws_lc::DEFAULT_PROVIDER)].into_iter();
+    #[cfg(any(target_arch = "xtensa", target_os = "none"))]
+    let aws = std::iter::empty::<(&'static str, &'static CryptoProvider)>();
+    aws.chain([("rind", &rind_jsonwebtoken::DEFAULT_PROVIDER)])
 }
 
 // The header and claims of a typical token, as jsonwebtoken signs them.
 const MESSAGE: &[u8] = b"eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb290IjoiZGVtbyIsInB1dCI6WyIiXSwiZ2V0IjpbIiJdLCJleHAiOjE3OTI4MTYwMDAsImlhdCI6MTc2MTI4MDAwMH0";
 
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 fn ecdsa(signing: &'static EcdsaSigningAlgorithm) -> (EncodingKey, DecodingKey) {
     let pkcs8 = EcdsaKeyPair::generate_pkcs8(signing, &SystemRandom::new()).unwrap();
     let pair = EcdsaKeyPair::from_pkcs8(signing, pkcs8.as_ref()).unwrap();
@@ -34,28 +40,62 @@ fn ecdsa(signing: &'static EcdsaSigningAlgorithm) -> (EncodingKey, DecodingKey) 
     )
 }
 
+/// The same PKCS#8 and SPKI jsonwebtoken loads, built with rind where aws-lc
+/// does not.
+#[cfg(any(target_arch = "xtensa", target_os = "none"))]
+fn ecdsa(signing: &'static rind::signature::EcdsaSigningAlgorithm) -> (EncodingKey, DecodingKey) {
+    let pair = rind::signature::EcdsaKeyPair::generate(signing).unwrap();
+    let pkcs8 = pair.to_pkcs8();
+    let spki = pair.to_spki();
+    (
+        EncodingKey::from_ec_der(pkcs8.as_ref()),
+        DecodingKey::from_ec_der(spki.as_ref()),
+    )
+}
+
 // Keys in the forms a JWK becomes: PKCS#8 that carries the public key, and
 // RSA verified from its modulus and exponent.
 fn keys() -> Vec<(Algorithm, EncodingKey, DecodingKey)> {
     let secret = b"a shared secret of thirty-two by";
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     let (es256_private, es256_public) = ecdsa(&ECDSA_P256_SHA256_FIXED_SIGNING);
+    #[cfg(any(target_arch = "xtensa", target_os = "none"))]
+    let (es256_private, es256_public) = ecdsa(&rind::signature::sign::ECDSA_P256_SHA256_FIXED);
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     let (es384_private, es384_public) = ecdsa(&ECDSA_P384_SHA384_FIXED_SIGNING);
+    #[cfg(any(target_arch = "xtensa", target_os = "none"))]
+    let (es384_private, es384_public) = ecdsa(&rind::signature::sign::ECDSA_P384_SHA384_FIXED);
 
-    let ed25519 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
-    let ed25519_public = Ed25519KeyPair::from_pkcs8(ed25519.as_ref())
-        .unwrap()
-        .public_key()
-        .as_ref()
-        .to_vec();
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+    let (ed25519, ed25519_public) = {
+        let ed25519 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
+        let ed25519_public = Ed25519KeyPair::from_pkcs8(ed25519.as_ref())
+            .unwrap()
+            .public_key()
+            .as_ref()
+            .to_vec();
+        (ed25519, ed25519_public)
+    };
+    #[cfg(any(target_arch = "xtensa", target_os = "none"))]
+    let (ed25519, ed25519_public) = {
+        let pair = rind::signature::Ed25519KeyPair::generate().unwrap();
+        let ed25519_public = pair.to_spki();
+        (pair.to_pkcs8v1(), ed25519_public.as_ref().to_vec())
+    };
 
     let rsa = include_bytes!("../../rind/src/high/rsa/rsa2048.der");
     let rsa_public = rind::signature::RsaKeyPair::from_pkcs1(rsa)
         .unwrap()
         .public_key(&rind::signature::sign::RSA_PKCS1_SHA256);
-    let (n, e) = (aws_lc::DEFAULT_PROVIDER
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+    let components_from_public_key = aws_lc::DEFAULT_PROVIDER
         .key_utils
-        .rsa_pub_components_from_public_key)(rsa_public.as_ref())
-    .unwrap();
+        .rsa_pub_components_from_public_key;
+    #[cfg(any(target_arch = "xtensa", target_os = "none"))]
+    let components_from_public_key = rind_jsonwebtoken::DEFAULT_PROVIDER
+        .key_utils
+        .rsa_pub_components_from_public_key;
+    let (n, e) = (components_from_public_key)(rsa_public.as_ref()).unwrap();
 
     vec![
         (
@@ -68,7 +108,7 @@ fn keys() -> Vec<(Algorithm, EncodingKey, DecodingKey)> {
         (
             Algorithm::EdDSA,
             EncodingKey::from_ed_der(ed25519.as_ref()),
-            DecodingKey::from_ed_der(&ed25519_public),
+            DecodingKey::from_ed_der(ed25519_public.as_ref()),
         ),
         (
             Algorithm::RS256,
@@ -102,7 +142,11 @@ fn verify(c: &mut Criterion) {
         let mut group = c.benchmark_group(format!("jwt-{algorithm:?}-verify").to_lowercase());
         group.throughput(Throughput::Elements(1));
 
-        let signature = (aws_lc::DEFAULT_PROVIDER.signer_factory)(&algorithm, &encoding)
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+        let signer_factory = aws_lc::DEFAULT_PROVIDER.signer_factory;
+        #[cfg(any(target_arch = "xtensa", target_os = "none"))]
+        let signer_factory = rind_jsonwebtoken::DEFAULT_PROVIDER.signer_factory;
+        let signature = (signer_factory)(&algorithm, &encoding)
             .unwrap()
             .try_sign(MESSAGE)
             .unwrap();
