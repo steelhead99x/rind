@@ -220,7 +220,7 @@ class Render(unittest.TestCase):
         md = files[br.REPORT]
         self.assertIn("on three machines", md)
         self.assertIn("Not timed on `kixtop`: full handshake, X25519MLKEM768, ", md)
-        self.assertIn("Not measured yet: `desktop`, `ovh-iad`, `ovh-sea`.", md)
+        self.assertNotIn("Not measured yet", md)
         self.assertNotIn("`desktop` |", md)
         self.assertIn("No nightly results yet.", md)
         self.assertEqual(
@@ -410,16 +410,16 @@ class HostScript(unittest.TestCase):
         self.addCleanup(d.cleanup)
         self.work = os.path.join(d.name, "work")
         self.lock = os.path.join(d.name, "lock")
-        self.addCleanup(setattr, br, "HOSTS", br.HOSTS)
+        self.addCleanup(setattr, br, "COLLECT_HOSTS", br.COLLECT_HOSTS)
 
     def test_removes_its_copy_and_keeps_the_rest(self):
-        br.HOSTS = {"vps": {"jobs": 1}}
+        br.COLLECT_HOSTS = {"vps": {"jobs": 1}}
         os.makedirs(os.path.join(self.work, "target"))
         self.assertEqual(self.run_script("echo $(ls) > result.json"), (0, b"file\n"))
         self.assertEqual(os.listdir(self.work), ["target"])
 
     def test_holds_the_lease_through_the_run_and_its_cleanup(self):
-        br.HOSTS = {"vps": {"jobs": 1, "lease": self.lock}}
+        br.COLLECT_HOSTS = {"vps": {"jobs": 1, "lease": self.lock}}
         # Another run's lease: its work stays.
         os.makedirs(os.path.join(self.work, "target"))
         with open(self.lock, "w") as held:
@@ -433,6 +433,188 @@ class HostScript(unittest.TestCase):
         self.assertFalse(os.path.exists(self.work))
         with open(self.lock) as other:
             fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+ALIEN = "intel-core-ultra-9-275hx"
+RYZEN = "amd-ryzen-9-7950x"
+
+
+def laptop(name):
+    return host(
+        name,
+        "x86_64",
+        "Ubuntu 24.04 (Linux 6.8)",
+        ZEN3,
+        [("x25519-ecdh/{lib}", "rind", 30000.0), ("x25519-ecdh/{lib}", "ring", 20000.0)],
+    )
+
+
+class CpuSlug(unittest.TestCase):
+    def test_slug_normalizes_brand_strings(self):
+        cases = {
+            "Intel(R) Core(TM) Ultra 9 275HX": "intel-core-ultra-9-275hx",
+            "AMD Ryzen 9 7950X 16-Core Processor": "amd-ryzen-9-7950x",
+            "Apple M3 Max": "apple-m3-max",
+            "Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz": "intel-core-i7-8700",
+            "AMD Ryzen 9 5900XT 16-Core Processor": "amd-ryzen-9-5900xt",
+            "Apple M4": "apple-m4",
+            "Intel Core Processor (Haswell, no TSX)": "intel-core-haswell-no-tsx",
+            "Intel(R) Core(TM) Ultra 7 270K Plus": "intel-core-ultra-7-270k-plus",
+            "Intel® Core™ i9-13900K": "intel-core-i9-13900k",
+            "CPU": "unknown",
+        }
+        for raw, slug in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(br.cpu_slug(raw), slug)
+                br.check_host_name(slug)
+
+    def test_slug_stays_a_short_filename(self):
+        slug = br.cpu_slug("word " * 40)
+        self.assertLessEqual(len(slug), 80)
+        self.assertFalse(slug.endswith("-"))
+        br.check_host_name(slug)
+
+    def test_reads_linux_cpuinfo_and_lscpu(self):
+        cpuinfo = "processor\t: 0\nmodel\t\t: 143\nmodel name\t: AMD Ryzen 9 7950X 16-Core Processor\n"
+        self.assertEqual(br.cpu_model_from_cpuinfo(cpuinfo), "AMD Ryzen 9 7950X 16-Core Processor")
+        self.assertEqual(br.cpu_model_from_cpuinfo("Model\t\t: Raspberry Pi 4 Model B\n"), "Raspberry Pi 4 Model B")
+        self.assertEqual(br.cpu_model_from_cpuinfo("processor : 0\n"), "")
+        lscpu = "CPU(s): 16\nModel name:                         Intel(R) Core(TM) Ultra 9 275HX\n"
+        self.assertEqual(br.cpu_model_from_lscpu(lscpu), "Intel(R) Core(TM) Ultra 9 275HX")
+        self.assertEqual(br.cpu_model_from_lscpu("BIOS Model name: ignored\n"), "")
+
+    def test_counts_physical_cores(self):
+        blocks = []
+        for phys in (0, 1):
+            for core in (0, 1):
+                blocks.append(f"physical id\t: {phys}\ncore id\t\t: {core}\nprocessor\t: x\n")
+        self.assertEqual(br.physical_from_cpuinfo("\n".join(blocks)), 4)
+        self.assertIsNone(br.physical_from_cpuinfo("processor : 0\n"))
+        lscpu = "Thread(s) per core: 2\nCore(s) per socket: 8\nSocket(s): 2\n"
+        self.assertEqual(br.physical_from_lscpu(lscpu), 16)
+        self.assertIsNone(br.physical_from_lscpu("CPU(s): 4\n"))
+
+    def test_this_machine_describes_itself(self):
+        meta = br.cpu_metadata()
+        self.assertTrue(meta["model"])
+        self.assertEqual(meta["slug"], br.cpu_slug(meta["model"]))
+        br.check_host_name(meta["slug"])
+        self.assertGreaterEqual(meta["logical_cpus"], 1)
+        self.assertIn("arch", meta)
+        if "physical_cpus" in meta:
+            self.assertGreaterEqual(meta["physical_cpus"], 1)
+
+    def test_host_override_accepts_any_sane_name(self):
+        model = "Intel(R) Core(TM) Ultra 9 275HX"
+        self.assertEqual(br.resolve_host(None, model), ALIEN)
+        self.assertEqual(br.resolve_host("alienware", model), "alienware")
+        self.assertNotIn("alienware", br.COLLECT_HOSTS)
+        for bad in ["../x", "a/b", "tiers", "portable", "x86_64", "has space", ".", ".."]:
+            with self.subTest(bad=bad), self.assertRaises(SystemExit):
+                br.resolve_host(bad, model)
+
+
+class AnyHost(unittest.TestCase):
+    def test_summary_render_and_import_take_a_host_outside_collect_hosts(self):
+        self.assertNotIn(ALIEN, br.COLLECT_HOSTS)
+        self.assertNotIn(RYZEN, br.COLLECT_HOSTS)
+        everyone = hosts()
+        # Caller order of hosts outside COLLECT_HOSTS is kept, which is not
+        # alphabetical: intel-... before amd-...
+        everyone[ALIEN] = laptop(ALIEN)
+        everyone[RYZEN] = laptop(RYZEN)
+        svg = br.overview_svg(everyone, VERIFIED, "light")
+        self.assertIn(f"left to right: nixos, nixos2, kixtop, {ALIEN}, {RYZEN}.", svg)
+        md = br.report(everyone, None, VERIFIED, [])[br.REPORT]
+        self.assertIn("on five machines", md)
+        self.assertIn(f"### `{ALIEN}`: {ALIEN} CPU", md)
+        self.assertIn(f"### `{RYZEN}`:", md)
+        self.assertNotIn("Not measured yet", md)
+
+        with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as dst:
+            for name, body in ((ALIEN, laptop(ALIEN)), (RYZEN, laptop(RYZEN))):
+                with open(os.path.join(src, f"{name}.json"), "w") as f:
+                    json.dump(body, f)
+            with open(os.path.join(src, "nixos.json"), "w") as f:
+                json.dump({"schema": 1, "host": "nixos", "status": "busy", "reason": "busy"}, f)
+            with open(os.path.join(src, "tiers.json"), "w") as f:
+                json.dump({"tiers": []}, f)
+            loaded = br.load_hosts(src)
+            self.assertEqual(list(loaded), ["nixos", RYZEN, ALIEN])
+            with io.StringIO() as out, contextlib.redirect_stdout(out):
+                br.summary(type("Args", (), {"dir": src})())
+                text = out.getvalue()
+            self.assertIn(f"`{ALIEN}`: {ALIEN} CPU", text)
+            self.assertIn(f"`{RYZEN}`", text)
+            self.assertIn("nixos`: not measured, busy: busy", text)
+            self.assertNotIn("tiers", text)
+            self.assertIn(f"{ALIEN} |", text)
+            saved = br.DATA_DIR
+            br.DATA_DIR = dst
+            try:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    br.import_hosts(src)
+            finally:
+                br.DATA_DIR = saved
+            self.assertEqual(sorted(os.listdir(dst)), [f"{RYZEN}.json", f"{ALIEN}.json"])
+
+    def test_published_data_still_loads_in_report_order(self):
+        self.assertEqual(
+            list(br.load_hosts(br.DATA_DIR)),
+            ["nixos", "desktop", "nixos2", "kixtop", "ovh-iad", "ovh-sea"],
+        )
+
+    def test_run_accepts_any_host_and_collect_keeps_its_list(self):
+        script = os.path.join(HERE, "bench-report")
+        for args in (["run"], ["run", "--host", ALIEN]):
+            proc = subprocess.run([sys.executable, script, *args], capture_output=True, text=True)
+            with self.subTest(args=args):
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertNotIn("unknown host", proc.stderr)
+                self.assertNotIn("unknown collect host", proc.stderr)
+                self.assertIn("--commit", proc.stderr)
+        collect = subprocess.run(
+            [sys.executable, script, "collect", "--host", ALIEN], capture_output=True, text=True
+        )
+        self.assertNotEqual(collect.returncode, 0)
+        self.assertIn(f"unknown collect host {ALIEN}", collect.stderr)
+        self.assertIn("nixos", collect.stderr)
+        self.assertIn("`admin/bench-report run`", collect.stderr)
+
+
+class AnyHostGaps(unittest.TestCase):
+    def setUp(self):
+        self.hosts = hosts()
+        self.hosts["nixos"]["results"][1]["ns"] = 20000.0
+        self.hosts[ALIEN] = laptop(ALIEN)
+        self.tiers = {**TIERS, "tiers": [dict(t) for t in TIERS["tiers"]]}
+        self.tiers["tiers"][0]["benchmarks"] = {"sha256/*/64B": {"rind": 100.0, "ring": 80.0}}
+
+    def load(self, *entries):
+        with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
+            f.write("".join("[[gap]]\n" + "".join(f"{k} = {v}\n" for k, v in e.items()) for e in entries))
+        try:
+            return br.load_gaps(self.hosts, self.tiers, f.name)
+        finally:
+            os.unlink(f.name)
+
+    def test_a_measured_host_outside_collect_hosts_can_decide_a_gap(self):
+        gaps = self.load(
+            {"operations": '["x25519-ecdh"]', "on": '["nixos"]', "quest": '"/quest/m3/README.md"'},
+            {"operations": '["sha256/*/64B"]', "on": '["x86_64"]', "reason": '"r"'},
+            {"operations": '["x25519-ecdh"]', "on": f'["{ALIEN}"]', "reason": '"laptop"'},
+        )
+        table = "\n".join(br.gap_table(gaps))
+        self.assertIn(f"| X25519 | `{ALIEN}` | 1.50× (ring) | laptop |", table)
+        self.assertIn("| `sha256/*/64B` | x86_64 tier | 1.25× (ring) | r |", table)
+
+    def test_refuses_a_host_that_has_no_result(self):
+        with self.assertRaises(SystemExit):
+            self.load(
+                {"operations": '["x25519-ecdh"]', "on": '["nixos"]', "quest": '"/quest/m3/README.md"'},
+                {"operations": '["sha256/*/64B"]', "on": '["x86_64"]', "reason": '"r"'},
+                {"operations": '["x25519-ecdh"]', "on": f'["{RYZEN}"]', "reason": '"r"'},
+            )
 
 
 if __name__ == "__main__":
