@@ -26,7 +26,8 @@ Where it behaves differently:
   AES without CPU instructions, for speed.
 - `DEFAULT_CIPHER_SUITES` and `ALL_CIPHER_SUITES` list AES-128-GCM before
   AES-256-GCM, for speed.
-- `hpke`'s suites are `&dyn Hpke`, not upstream's `&HpkeAwsLcRs<..>`.
+- `hpke`'s suites are `&dyn Hpke`, not upstream's `&HpkeAwsLcRs<..>`, a bug
+  to be fixed.
 - `hpke`'s NIST suites refuse a compressed public key, which RFC 9180 does
   not define, where upstream seals to one a message no recipient opens.
 - `hpke`'s NIST suites refuse an X9.62 hybrid point (`0x06`/`0x07`) as a
