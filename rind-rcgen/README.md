@@ -28,7 +28,7 @@ let key = key.serialize_der();
 
 `KeyPair` behaves as rcgen's on its `ring` backend, which is rcgen's default:
 
-- No P-521 or ML-DSA keys, and no `generate_rsa_for` or `RsaKeySize`, which rcgen offers only with `aws_lc_rs`.
+- No P-521 or ML-DSA keys, and no `KeyPair::generate_rsa_for` or `RsaKeySize`, which rcgen offers only with `aws_lc_rs`.
 - RSA keys load but do not generate: `generate_for` returns `KeyGenerationUnavailable`.
 - Only PKCS#8 private keys load, not SEC1 or PKCS#1.
 - An unsupported algorithm returns `UnsupportedSignatureAlgorithm` where rcgen panics.

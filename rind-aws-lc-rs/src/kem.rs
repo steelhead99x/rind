@@ -54,7 +54,8 @@ impl<Id: AlgorithmIdentifier> fmt::Debug for Algorithm<Id> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AlgorithmId {
     /// ML-KEM-768, as standardised by FIPS 203.
-    MlKem768,
+    // aws-lc-rs declares ML-KEM-512 first, so `as` casts see 1.
+    MlKem768 = 1,
 }
 
 /// AWS-LC's `NID_MLKEM768`.
