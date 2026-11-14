@@ -28,8 +28,9 @@ back.
 `hol-light/<arch>/` holds rind's own [HOL Light](https://hol-light.github.io/)
 proofs of the `asm!` blocks it runs, for routines whose published proofs do
 not cover them, on [s2n-bignum](https://github.com/awslabs/s2n-bignum)'s
-instruction models, tactics, and specs at the commit of rind's
-`thirdparty/s2n-bignum` submodule, the revision rind's transliteration pins.
+instruction models, tactics, and specs in rind's fork of it,
+`thirdparty/s2n-bignum`, the revision rind's transliteration pins with rind's
+changes, which [its `RIND.md`](/thirdparty/s2n-bignum/RIND.md) lists.
 Each proof's object code is the block's bytes as rind's release build emits
 them, which `admin/prove` extracts, so no transliteration is trusted: the
 proof lists the bytes and fails unless the build's are the same. An axiom in
@@ -45,12 +46,9 @@ holding the object code the proofs read. Given a file, such as
 `proofs/hol-light/x86_64/ct_compare_16.ml`, it loads it and exits, failing if
 any of it fails; otherwise it reads OCaml from stdin. Loading `base.ml`
 takes minutes, so the first session on a set of inputs (HOL Light, DMTCP,
-the submodule's commit, and what `hol-light/s2n-bignum/` carries)
-checkpoints it with DMTCP into an image of about 400 MB in
-`~/.cache/rind/hol-light/`, which every later session on those inputs, in
-any worktree, restores in under a second. Like `admin/prove`, a session
-first checks the submodule out at the commit rind pins, and it refuses one
-with uncommitted changes, which that commit does not name.
+the kernel, and the fork's files) checkpoints it with DMTCP into an image of
+about 400 MB in `~/.cache/rind/hol-light/`, which every later session on
+those inputs, in any worktree, restores in under a second.
 
 - `aarch64/bignum_eq.ml`: `BIGNUM_EQ_CORRECT`, s2n-bignum's proof of
   `bignum_eq` on the block in `low::aarch64::bignum_eq::bignum_eq`, which is
@@ -69,6 +67,20 @@ with uncommitted changes, which that commit does not name.
   the SHA-512 instructions, computes s2n-bignum's FIPS 180-4 spec,
   `sha512_hash_blocks`, and stores it to the state, as `sha256`'s above; the
   proof checks its round constants against FIPS 180-4's.
+- `aarch64/bn_mul_mont.ml`: `BN_MUL_MONT_GENERIC_SUBROUTINE_CORRECT`, rind's
+  proof that the naked function `low::aarch64::mont::bn_mul_mont`, aws-lc's
+  Montgomery multiplication, writes the Montgomery product
+  `x * y / 2^(64k) mod m` of its `k`-word operands, as s2n-bignum's
+  `bignum_montmul` states it, given `-m^-1 mod 2^64` and
+  `x * y <= 2^(64k) * m`, for every width from two up that is not a multiple
+  of four: those its width-generic path runs, for `k < 2^58`, a 16-aligned
+  stack pointer, and `z` and the stack frame disjoint from the code and the
+  inputs, so `z` may not alias `x`. The theorem covers the dispatch,
+  the stack frame of up to `8k + 72` bytes below the stack pointer, and the
+  callee-saved registers it restores. The widths that run `__bn_mul4x_mont`
+  and `__bn_sqr8x_mont`, which include every standard RSA size and its CRT
+  primes, are not proven yet, and no axiom in `Rind/` restates the theorem
+  yet. The function has no relocations.
 - `x86_64/bn_mul_mont_nohw.ml`: `BN_MUL_MONT_NOHW_SUBROUTINE_CORRECT`, rind's
   proof that the naked function `low::x86_64::mont::bn_mul_mont_nohw`,
   aws-lc's word-serial Montgomery multiplication, writes the Montgomery
@@ -78,6 +90,21 @@ with uncommitted changes, which that commit does not name.
   frame of up to `8k + 1088` bytes below the stack pointer, aligned and probed
   a page at a time, and the callee-saved registers it restores. The function
   has no relocations, so its object is its section alone.
+- `x86_64/sha256_compress_blocks_shaext.ml` and
+  `x86_64/sha256_finish_shaext.ml`: `SHA256_COMPRESS_BLOCKS_SHAEXT_CORRECT`
+  and `SHA256_FINISH_SHAEXT_CORRECT`, rind's proofs that the blocks in
+  `low::x86_64::sha256::sha256_compress_blocks_shaext` and
+  `sha256_finish_shaext`, its routines for the SHA extensions, compute
+  s2n-bignum's FIPS 180-4 spec, `sha256_hash_blocks`. The first stores it to
+  the state over its blocks, any number of them. The second leaves the
+  digest's bytes in xmm2 and xmm1, over its blocks and then the padded block,
+  or two, that it builds from the tail's whole 16-byte lanes in memory, the
+  lane where the message ends as r10 and r11, and the length's word in r8.
+  Both run one round body, which `x86_64/sha256_shaext_rounds.ml` proves
+  once, `SHA256_SHAEXT_ROUNDS_CORRECT`. They read the round constants and
+  the byte-swap mask through rcx from the static `low::x86_64::sha256::K`,
+  whose bytes `admin/prove` extracts and the proof checks against FIPS
+  180-4's.
 - `<arch>/ct_compare_16.ml` and `<arch>/ct_compare_bytes.ml`, on x86_64 and
   aarch64: `CT_COMPARE_16_CORRECT` and `CT_COMPARE_BYTES_CORRECT`, that the
   blocks in `low::<arch>::cpu::ct_compare_16` and `ct_compare_bytes` return
@@ -87,15 +114,14 @@ with uncommitted changes, which that commit does not name.
   bounds. Both functions are `#[inline(never)]` with fixed registers, so the
   proof covers their one copy.
 
-`hol-light/s2n-bignum/` holds what these proofs add to s2n-bignum, ahead of
-the submodule on HOL Light's load path: specs from s2n-bignum pull requests
-not yet merged, rind's own RFC 8439 spec of ChaCha20, Poly1305, and
-ChaCha20-Poly1305, `common/chacha20poly1305.ml`, whose known-answer tests
-`admin/prove hol-light` runs, and `x86.patch`, rind's additions to the x86
-model, which `x86-cosim.ml` checks against the CPU. Its
-[README](hol-light/s2n-bignum/README.md) lists each, so they can be offered
-upstream. `nix develop .#hol-light --command admin/prove cosim` runs the
-cosimulation, on an x86_64 CPU with AVX2.
+The fork adds what these proofs need to s2n-bignum: specs from s2n-bignum
+pull requests not yet merged, rind's own RFC 8439 spec of ChaCha20,
+Poly1305, and ChaCha20-Poly1305, `common/chacha20poly1305.ml`, whose
+known-answer tests `admin/prove hol-light` runs, the SHA extensions and
+other instructions an s2n-bignum pull request adds to the x86 model, and
+rind's own additions to it, which `x86/proofs/rind_cosim.ml` checks against
+the CPU with the pull request's. `nix develop .#hol-light --command
+admin/prove cosim` runs the cosimulation, on an x86_64 CPU with AVX2.
 
 ## What is proven
 
@@ -266,8 +292,8 @@ against FIPS 180-4 and RFC 2104 as `Rind/HashSpec.lean` transliterates them:
 
 Below rind's padding, these theorems take `Sha1Blocks` or `Sha256Blocks` as
 a hypothesis, in each target's own `Rind/<Arch>/ShaBlocks.lean`. No proof
-covers a SHA-1 block function rind runs, or a SHA-256 one on x86_64, so there
-each states that every routine computes FIPS 180-4's block function, x86_64's
+covers a SHA-1 block function rind runs, and no Lean theorem yet restates the
+HOL Light proofs above of SHA-256's on x86_64, so there each states that every routine computes FIPS 180-4's block function, x86_64's
 SHA extensions' routines for SHA-1's padded last blocks and SHA-256's finish
 pad, and SHA-256's encodes, as FIPS 180-4 does, and that rind's checks pass.
 On aarch64, `Sha256Blocks` states only that the CPU has the crypto extension
@@ -304,7 +330,7 @@ x86_64:
   under the algorithm with the `tag_len` bytes of HKDF-Expand;
 - `header_key_from_spec`: ChaCha20 header protection holds the 32 bytes of
   HKDF-Expand, through `header_new_spec` over `chacha20_new`;
-- `aead_key_from_spec`: an AES-128-GCM or AES-256-GCM key holds AES-GCM for
+- `aead_key_from_spec`: an AES-128-GCM, AES-192-GCM, or AES-256-GCM key holds AES-GCM for
   the `4 * nk` bytes of HKDF-Expand, under `RunsAesGcm`, through
   `aead_key_new_spec` over `aes_gcm_new`;
 - `aead_key_from_chacha20_poly1305_spec`: a ChaCha20-Poly1305 key holds the
@@ -314,8 +340,7 @@ x86_64:
   FIPS 197's round keys for the `4 * nk` bytes of HKDF-Expand, under
   `RunsAesHw`, through `aes_header_new_spec` over `aes_header_new`.
 
-The other key `From<Okm>` converts to, AES-192-GCM, has no proof. `Rind/X86_64/Kdf/FunsExternal.lean`'s
-`new` wrappers turn a model's refusal into the panic its `expect` makes, so
+`Rind/X86_64/Kdf/FunsExternal.lean`'s `new` wrappers turn a model's refusal into the panic its `expect` makes, so
 each conversion panics exactly where its `expect` does.
 
 `hmac::Key` and `Context` reach each hash through function pointers, which
@@ -495,10 +520,10 @@ CPU-feature checks find AES-NI, or on aarch64 the crypto extension, which no
 input affects. AES-CBC decrypts through its own routines over the same round keys,
 which [the AES modes quest](/quest/m4/verified/aes-modes.md) owns.
 
-AES-128-GCM and AES-256-GCM on x86_64 CPUs with AES-NI and PCLMULQDQ, from
-the AEAD API's `Key` down to HACL*'s Vale AES-GCM routines on CPUs with AVX and
-MOVBE but no VAES, and to rind's own by-8 AES-CTR and GHASH on CPUs without
-AVX and for what Vale's routines do not take, in
+AES-128-GCM, AES-192-GCM, and AES-256-GCM on x86_64 CPUs with AES-NI and
+PCLMULQDQ, from the AEAD API's `Key` down to HACL*'s Vale AES-GCM routines on
+CPUs with AVX and MOVBE but no VAES, and to rind's own by-8 AES-CTR and GHASH
+on CPUs without AVX and for what Vale's routines do not take, in
 `Rind/X86_64/AesGcmAead.lean`:
 
 - `aes_gcm_new`: a key that is not the algorithm's length is refused, and
@@ -534,9 +559,9 @@ key `Rind/X86_64/GhashClmul.lean` proves equal to it.
 `gcm_decrypt_LE` for a 96-bit nonce: the counter block is
 `compute_iv_BE`'s, the length block `gcm_hash`'s, and the tag GCTR on the
 hash under it, which by-8's `open` compares through `ct_equal`, so the opens
-rest on `Rind/X86_64/CtEqual.lean`'s contracts too. AES-192 keys run by-8 as
-well, which no proof covers yet: [the x86_64 AES-GCM
-quest](/quest/m4/verified/aes-gcm-x86-intrinsics.md) owns them. The key
+rest on `Rind/X86_64/CtEqual.lean`'s contracts too. AES-192 keys run by-8 on
+both tiers, since Vale's routines take only AES-128 and AES-256
+(`vale_192_none`). The key
 setup is rind's: its AES-NI key expansion and block cipher, which
 `Rind/X86_64/AesKey.lean` proves for AES header protection too, and its
 PCLMULQDQ GHASH key powers, whose Karatsuba product and reduction
@@ -552,17 +577,36 @@ CPU-feature checks pick Vale's tier (`RunsValeAesGcm`) or the SSE tier
 (`Algorithm`'s `expand` and `Sealer`'s `Ops`), and `seal_in_place_append_tag`,
 which is generic over its buffer.
 
-`aead::gcm::Key`, which takes an IV of any length, is proven on the same
-tiers for a 12-byte IV and full 16-byte tags, in `Rind/X86_64/GcmKey.lean`, a
-hand model over `AeadDispatch` that quotes `rind/src/aead/gcm.rs`. Its
-`new` for AES-128 or AES-256 holds the `aead::Key` for the algorithm, which
-refuses a key of another length, and its `seal_in_place_separate_tag`,
-`seal_in_place_append_tag`, `open_in_place`, and `open_in_place_separate_tag`
-are `aead::Key`'s: `gcm_key_new`, `gcm_key_seal`, `gcm_key_seal_append_tag`,
-`gcm_key_open`, and `gcm_key_open_separate_tag`, for the same lengths. The
-other IV lengths and truncated tags run `encrypt_any` and `decrypt_any`,
-which no proof covers; the model leaves those arms opaque, and
-[the by-8 intrinsics quest](/quest/m4/verified/aes-gcm-x86-intrinsics.md)
+`aead::gcm::Key`, which takes an IV of any length and tags of any
+`TagLength`, is proven on the same tiers, in `Rind/X86_64/GcmKey.lean`, a
+hand model over `AeadDispatch` that quotes `rind/src/aead/gcm.rs`. Its `new`
+for AES-128, AES-192, or AES-256 holds the `aead::Key` for the algorithm,
+which refuses a key of another length (`gcm_key_new`). For an IV of 1 to
+2^61 - 1 bytes and the same AAD and message lengths, its
+`seal_in_place_separate_tag` leaves AES-GCM's ciphertext and returns the
+first `tag_len` bytes of its tag (`gcm_key_seal`), and
+`seal_in_place_append_tag` returns what its `extend` makes of that, handed
+the tag (`gcm_key_seal_append_tag`), and `open_in_place` and
+`open_in_place_separate_tag` succeed exactly when the tag is those bytes,
+leaving the plaintext, and otherwise fail (`gcm_key_open`,
+`gcm_key_open_separate_tag`). Only an authentication failure clears the
+ciphertext to zeros; a refusal, of an input shorter than the tag or a
+separate tag that is not the key's length, leaves the buffer unchanged. SP 800-38D's MSB_t truncation is the first bytes of Vale's tag, which
+`gcmDecryptTrunc` compares. A seal under a 12-byte IV runs `aead::Key`'s path
+and truncates its tag, and an open runs that path only under a 12-byte IV
+with a 16-byte tag; the model's other arms run `AesGcm::encrypt_any` and `decrypt_any`, which
+`Rind/X86_64/AesGcmAny.lean` proves: `initial_counter` is `compute_iv_BE`: the
+96-bit counter block for a 12-byte IV, and otherwise the GHASH branch,
+through by-8's table and the IV's length block, and the
+tag's prefix is compared through `ct_equal`. They refuse an empty IV, one of
+2^61 bytes or more, and AAD and messages past GCM's bounds with
+`WrongLength`, leaving the buffer as it was (`check_gcm_iv_spec`,
+`check_gcm_lengths_eq`), but those refusals are stated only for
+`encrypt_any` and `decrypt_any`: the 96-bit path's theorems, and the
+`gcm::Key` theorems above both, still take the AAD and message bounds as
+hypotheses.
+The AVX-512 tier's by-16 AES-CTR and GHASH, from 256 bytes to 2 KB, have no
+proof yet: [the AVX-512 by-16 quest](/quest/m4/verified/aes-gcm-x86-intrinsics.md)
 owns them.
 
 ChaCha20-Poly1305 and XChaCha20-Poly1305 on x86_64 CPUs with SSE4.1, from
@@ -589,7 +633,7 @@ HChaCha20, which derives XChaCha20's subkey, runs HACL*'s rounds, which
 CPU-feature checks find SSE4.1, and `OnePass`, that aws-lc's one-pass
 routines compute RFC 8439's AEAD, which no proof covers yet;
 [the ChaCha20-Poly1305 quest](/quest/m4/verified/chacha20-poly1305-x86/aead.md)
-owns their HOL Light proofs, against `hol-light/s2n-bignum/common/chacha20poly1305.ml`,
+owns their HOL Light proofs, against the s2n-bignum fork's `common/chacha20poly1305.ml`,
 which `Rind/S2nChaCha20Poly1305.lean` proves is `Rind/Spec.lean`'s RFC 8439
 for a 32-byte key and a 12-byte nonce. CPUs without SSE4.1 run the separate ChaCha20
 and Poly1305 passes, which the model leaves opaque. `AeadDispatch` models
@@ -650,9 +694,8 @@ mentions `Verification::Rsa(` or builds an `Rsa` outside them.
 
 ## Layout
 
-- `hol-light/<arch>/`: rind's HOL Light proofs, one file per routine, and
-  `hol-light/s2n-bignum/`, what they add to s2n-bignum: unmerged specs and
-  rind's additions to the x86 model, with its cosimulation.
+- `hol-light/<arch>/`: rind's HOL Light proofs, one file per routine, on
+  rind's fork of s2n-bignum in `thirdparty/s2n-bignum`.
 - `Rind/<Arch>/{Types,Funs}.lean`: Aeneas's translation, which `admin/prove`
   writes and git ignores.
 - `Rind/<Arch>/{Types,Funs}External.lean` and `Rind/Core.lean`: what the
@@ -696,7 +739,7 @@ mentions `Verification::Rsa(` or builds an `Rsa` outside them.
   key schedule word by word; `Rind/<Arch>/AesKey.lean`, each target's key
   expansion and block cipher on the AES instructions;
   `Rind/X86_64/AesCipher.lean`, `cipher::Aes` and AES header protection, and
-  `Rind/X86_64/{Ghash,PartialBlock,AesGcmGlue,AesGcm,GhashClmul,AesGcmBy8,AesGcmClmul,AesGcmAead}.lean`:
+  `Rind/X86_64/{Ghash,PartialBlock,AesGcmGlue,AesGcm,GhashClmul,AesGcmBy8,AesGcmClmul,AesGcmAead,AesGcmAny}.lean`:
   the AES-GCM proof, on x86_64 alone; `Rind/X86_64/GcmKey.lean`, the hand model
   of `aead::gcm::Key` and its proofs; `Rind/X86_64/ChaCha20Poly1305.lean`, the
   ChaCha20-Poly1305 and XChaCha20-Poly1305 proof above aws-lc's routines.
@@ -802,9 +845,9 @@ Beyond Lean's kernel:
   code, as for `benchmarks/verified.toml`'s other entries, except where a
   proof in `hol-light/` covers the bytes rind's build emits. For those, HOL
   Light's kernel and s2n-bignum's instruction models, as for s2n-bignum's
-  own theorems, with rind's additions in `hol-light/s2n-bignum/x86.patch`,
-  which `admin/prove cosim` checks against the CPU as s2n-bignum checks its
-  own.
+  own theorems, with the fork's additions to the x86 model, from
+  awslabs/s2n-bignum#450 and rind's own, which
+  `admin/prove cosim` checks against the CPU as s2n-bignum checks its own.
 - The translation ignores drops, which here wipe keys and keyed state under
   the `wipe` feature and restore CPU state, and computes nothing an output
   depends on.

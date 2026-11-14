@@ -339,6 +339,11 @@ pub mod oprf {
 /// Each suite encodes its input to the curve by try-and-increment, whose
 /// running time depends on the input, so an input that must stay secret
 /// from an observer of timing needs another suite (RFC 9381 section 5.4.1.1).
+/// P-256's nonce is RFC 6979's: a candidate not from 1 to n - 1 draws
+/// another block, with probability about 2^-32, and that retry is not
+/// constant time. An Edwards25519 seed is an RFC 8032 seed dedicated to
+/// the VRF. Signing with it reuses the nonce and reveals the scalar; see
+/// [`SecretKey`](vrf::SecretKey).
 /// [`PublicKey::verify`](vrf::PublicKey::verify) always validates the key
 /// (`validate_key = TRUE`).
 ///
@@ -347,7 +352,7 @@ pub mod oprf {
 /// use rind::vrf::*;
 ///
 /// let secret_key = SecretKey::generate(&ECVRF_EDWARDS25519_SHA512_TAI)?;
-/// let (proof, output) = secret_key.prove(b"alice@example.com");
+/// let (proof, output) = secret_key.prove(b"alice@example.com")?;
 ///
 /// // A verifier parses the public key and recovers the same output.
 /// let encoded = secret_key.public_key().as_ref();

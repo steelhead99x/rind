@@ -7,8 +7,8 @@ name: prove
 # intrinsic models with are what an aarch64 CPU computes, and translates
 # rind's Rust under proof to Lean and checks the proofs in `proofs/`. Too slow
 # for `just ci`, so it runs nightly and on pull requests that change rind's
-# source, the proofs, the checks, s2n-bignum's pin, or the flake that pins
-# their tools.
+# source, the proofs, the checks, rind's fork of s2n-bignum, or the flake
+# that pins their tools.
 on:
   schedule:
     - cron: "0 18 * * *"
@@ -26,7 +26,7 @@ on:
       - ALGORITHMS.md
       - flake.nix
       - flake.lock
-      - thirdparty/s2n-bignum
+      - thirdparty/s2n-bignum/**
       - .github/workflows/prove.yml
 
 permissions:
@@ -37,9 +37,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  hol-light:
+  # Each target's HOL Light proofs run in their own job, so the wall time is
+  # the slower target's rather than the sum. Each limit only catches a hang:
+  # it sits well above the target's measured time, with room for the proofs
+  # queued next, and `admin/prove` prints each proof's time to show where it
+  # goes.
+  hol-light-aarch64:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,7 +56,20 @@ jobs:
         run: nix develop .#hol-light --command admin/prove bytes
 
       - name: Prove
-        run: nix develop .#hol-light --command admin/prove hol-light
+        run: nix develop .#hol-light --command admin/prove hol-light aarch64
+
+  hol-light-x86_64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix
+
+      - name: Prove
+        run: nix develop .#hol-light --command admin/prove hol-light x86_64
 
   cosim:
     runs-on: ubuntu-24.04
