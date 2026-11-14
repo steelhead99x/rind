@@ -31,6 +31,7 @@ impl Sha256State {
         }
     }
 
+    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
     fn compress(h: &mut [u32; 8], blocks: &[u8]) {
         Entry::assert_held();
         crate::low::sha256_compress_blocks(h, blocks);
@@ -99,10 +100,38 @@ impl Sha256State {
     }
 }
 
+/// 32-bit portable SHA-256 that has already chosen HACL*.
+///
+/// `Blockwise` monomorphizes on this instead of [`Sha256State`] for a long
+/// one-shot, so that `complete_blocks` names [`crate::low::sha256_hacl_nblocks`]
+/// and not the rolled compressor. The cutover on [`Sha256State::update_blocks`]
+/// is per flush and still names both.
+#[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+struct Sha256Hacl<'a>(&'a mut Sha256State);
+
+#[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+impl UpdateBlocks for Sha256Hacl<'_> {
+    // Inline so the long `complete_blocks` calls `sha256_hacl_nblocks`
+    // itself. That function stays out of line: one copy, shared with finish.
+    #[inline(always)]
+    fn update_blocks(&mut self, blocks: &[u8]) {
+        debug_assert!(blocks.len().is_multiple_of(Sha256Context::BLOCK_SZ));
+        if blocks.is_empty() {
+            return;
+        }
+        let _entry = Entry::new_secret();
+        crate::low::sha256_hacl_nblocks(&mut self.0.h, blocks);
+        self.0.nblocks = self
+            .0
+            .nblocks
+            .saturating_add((blocks.len() / Sha256Context::BLOCK_SZ) as u64);
+    }
+}
+
 impl UpdateBlocks for Sha256State {
-    // Out of line on 32-bit portable so `Blockwise::complete_blocks` stays the
-    // buffering glue. Inlining this there pulled the rolled SHA-256 loop into
-    // the function a long `Context::update` executes.
+    // Out of line on 32-bit portable so `Blockwise::complete_blocks` for a
+    // short or streaming update stays the buffering glue. The long one-shot
+    // does not use this impl.
     #[cfg_attr(
         all(rind_backend = "portable", target_pointer_width = "32"),
         inline(never)
@@ -113,7 +142,25 @@ impl UpdateBlocks for Sha256State {
             // `digest::Context::update` and `hmac::Context::update` leave
             // entering to here.
             let _entry = Entry::new_secret();
-            Self::compress(&mut self.h, blocks);
+            #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+            {
+                // Per-call `len <= 256` sent every 64-byte streaming flush
+                // down the rolled compressor. Count bytes already compressed
+                // too, so a long `sha256-updates` run uses HACL* for every
+                // block after the first 256, the same `sha256_hacl_nblocks`
+                // a long one-shot calls, and the short arm does not go
+                // through the function that also names HACL*.
+                let seen = self.nblocks.saturating_mul(Sha256Context::BLOCK_SZ as u64);
+                if seen.saturating_add(blocks.len() as u64) <= crate::low::SHA256_SHORT as u64 {
+                    crate::low::sha256_compress_rolled(&mut self.h, blocks);
+                } else {
+                    crate::low::sha256_hacl_nblocks(&mut self.h, blocks);
+                }
+            }
+            #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
+            {
+                Self::compress(&mut self.h, blocks);
+            }
             self.nblocks = self
                 .nblocks
                 .saturating_add((blocks.len() / Sha256Context::BLOCK_SZ) as u64);
@@ -143,8 +190,36 @@ impl Sha256Context {
     }
 
     /// Add `bytes` to the ongoing hash computation.
+    ///
+    /// Proofs unfold this body. The 32-bit portable variant is a second
+    /// definition, so this one stays the call those proofs name.
+    #[cfg(not(all(rind_backend = "portable", target_pointer_width = "32")))]
     pub(crate) fn update(&mut self, bytes: &[u8]) {
         self.blockwise.update(bytes, &mut self.state);
+    }
+
+    /// Add `bytes` to the ongoing hash computation.
+    ///
+    /// A fresh message whose whole-block prefix is longer than
+    /// [`crate::low::SHA256_SHORT`] takes [`Sha256Hacl`]. That
+    /// monomorphization of `Blockwise::complete_blocks` calls
+    /// `sha256_hacl_nblocks` only. A shorter write, or one that continues a
+    /// buffered block, uses [`Sha256State`], whose cutover counts bytes
+    /// already compressed so a stream of 16-byte updates does not stay on
+    /// the rolled loop for the whole message.
+    #[cfg(all(rind_backend = "portable", target_pointer_width = "32"))]
+    pub(crate) fn update(&mut self, bytes: &[u8]) {
+        let bulk = if bytes.is_empty() {
+            0
+        } else {
+            (bytes.len() - 1) / Self::BLOCK_SZ * Self::BLOCK_SZ
+        };
+        if self.blockwise.buffered().is_empty() && bulk > crate::low::SHA256_SHORT {
+            self.blockwise
+                .update(bytes, &mut Sha256Hacl(&mut self.state));
+        } else {
+            self.blockwise.update(bytes, &mut self.state);
+        }
     }
 
     /// Complete the SHA256 computation, returning the hash output.
