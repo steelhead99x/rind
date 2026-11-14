@@ -361,6 +361,40 @@ mod tests {
         }
     }
 
+    #[test]
+    fn verify_debug_names_the_type_and_ids_match_aws_lc() {
+        use rustls::pki_types::alg_id;
+
+        let aws = rustls::crypto::aws_lc_rs::default_provider();
+        let ours = crate::SUPPORTED_SIG_ALGS.all;
+        // aws-lc-rs also verifies ML-DSA. rind does not, and those three are
+        // the only identifiers that may differ. Equal lengths then mean a
+        // missing rind algorithm cannot hide behind `any`.
+        let ml_dsa = [alg_id::ML_DSA_44, alg_id::ML_DSA_65, alg_id::ML_DSA_87];
+        let theirs = aws
+            .signature_verification_algorithms
+            .all
+            .iter()
+            .copied()
+            .filter(|alg| !ml_dsa.contains(&alg.public_key_alg_id()))
+            .collect::<Vec<_>>();
+        assert_eq!(ours.len(), theirs.len());
+        for alg in ours {
+            let rendered = format!("{alg:?}");
+            // rustls names its type `AwsLcRsAlgorithm`. rind names `Verify`.
+            // The identifiers are the values that have to match; an empty
+            // `Debug` contains neither.
+            assert!(rendered.contains("Verify"), "{rendered}");
+            assert!(
+                theirs.iter().any(|other| {
+                    other.public_key_alg_id() == alg.public_key_alg_id()
+                        && other.signature_alg_id() == alg.signature_alg_id()
+                }),
+                "{rendered}"
+            );
+        }
+    }
+
     // Like rustls's own providers: `all` holds no algorithm twice.
     #[test]
     fn test_no_duplicate_algorithms() {

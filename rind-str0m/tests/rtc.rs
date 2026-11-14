@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use str0m::crypto::CryptoProvider;
-use str0m::crypto::dtls::DtlsVersion;
+use str0m::crypto::dtls::{DtlsInstance, DtlsOutput, DtlsVersion};
 use str0m::format::Codec;
 use str0m::media::{MediaKind, Mid};
 use str0m::net::{Protocol, Receive};
@@ -233,4 +233,254 @@ fn unusable_certificate_is_an_error() {
         dtls.new_dtls(&cert, Instant::now(), DtlsVersion::Auto, None)
             .is_ok()
     );
+}
+
+/// A fresh connection reports dimpl's state through str0m's trait. This stays
+/// out of the crate's unit tests: `admin/ctgrind` runs those under valgrind,
+/// and building a dimpl config runs dimpl's own key-exchange self-test, which
+/// compares the two throwaway shared secrets with `!=`.
+#[test]
+fn fresh_connection_reports_dimpl_state() {
+    let dtls = rind_str0m::default_provider().dtls_provider;
+    let cert = dtls.generate_certificate().unwrap();
+    let mut dtls12 = dtls
+        .new_dtls(&cert, Instant::now(), DtlsVersion::Dtls12, None)
+        .unwrap();
+    let rendered = format!("{dtls12:?}");
+    assert!(rendered.contains("Dtls"), "{rendered}");
+    assert!(!dtls12.is_active());
+    assert_eq!(format!("{:?}", dtls12.protocol_version()), "Some(DTLS1_2)");
+    let dtls13 = dtls
+        .new_dtls(&cert, Instant::now(), DtlsVersion::Dtls13, None)
+        .unwrap();
+    assert_eq!(format!("{:?}", dtls13.protocol_version()), "Some(DTLS1_3)");
+    assert!(!dtls12.is_closing());
+    assert!(!dtls12.is_closed());
+    dtls12.set_active(true);
+    assert!(dtls12.is_active());
+    assert_eq!(dtls12.send_application_data(&[0x11; 8]).unwrap(), 8);
+    dtls12.close().unwrap();
+    assert!(!dtls12.is_closing());
+    assert!(dtls12.is_closed());
+}
+
+#[derive(Default)]
+struct DtlsEvents {
+    connected: bool,
+    close_notify: bool,
+    packets: usize,
+    timeout: Option<Instant>,
+}
+
+fn transfer_dtls(from: &mut dyn DtlsInstance, to: &mut dyn DtlsInstance) -> DtlsEvents {
+    let mut events = DtlsEvents::default();
+    // dimpl's default MTU is 1150. A short buffer is a retry, not a failure:
+    // `BufferTooSmall` keeps the packet queued until the buffer fits it.
+    let mut buffer = vec![0u8; 2048];
+    // One poll cycle ends with Timeout. A cycle that never does would spin
+    // under the caller's one-minute deadline, which is only checked between
+    // transfers.
+    for _ in 0..64 {
+        match from.poll_output(&mut buffer) {
+            DtlsOutput::Packet(packet) => {
+                to.handle_packet(packet).unwrap();
+                events.packets += 1;
+            }
+            DtlsOutput::BufferTooSmall { needed } => {
+                assert!(
+                    needed > buffer.len() && needed <= 65_536,
+                    "DTLS output asked for {needed} bytes after a {}-byte buffer",
+                    buffer.len()
+                );
+                buffer.resize(needed, 0);
+            }
+            DtlsOutput::Connected => events.connected = true,
+            DtlsOutput::CloseNotify => events.close_notify = true,
+            DtlsOutput::PeerCert(_) | DtlsOutput::KeyingMaterial(_, _) => {}
+            // These handshakes send no application data. Swallowing a record
+            // here would let the close assertions pass without seeing it.
+            DtlsOutput::ApplicationData(data) => {
+                panic!(
+                    "application data during handshake or close: {} bytes",
+                    data.len()
+                );
+            }
+            DtlsOutput::Timeout(at) => {
+                events.timeout = Some(at);
+                return events;
+            }
+            other => panic!("unexpected DTLS output: {other:?}"),
+        }
+    }
+    panic!("DTLS poll did not reach Timeout");
+}
+
+/// Graceful close must be visible while close_notify still needs polling,
+/// through the same provider trait str0m uses for an established connection.
+#[test]
+fn established_connection_reports_graceful_close() {
+    for version in [DtlsVersion::Dtls12, DtlsVersion::Dtls13] {
+        for rind_active in [false, true] {
+            let mut now = Instant::now();
+            let rind = rind_str0m::default_provider().dtls_provider;
+            let aws = str0m_aws_lc_rs::default_provider().dtls_provider;
+            let mut a = rind
+                .new_dtls(&rind.generate_certificate().unwrap(), now, version, None)
+                .unwrap();
+            let mut b = aws
+                .new_dtls(&aws.generate_certificate().unwrap(), now, version, None)
+                .unwrap();
+            a.set_active(rind_active);
+            b.set_active(!rind_active);
+            let mut connected = [false; 2];
+            // dimpl's first flight retransmit is one second. Follow the Timeout
+            // it returns, and fail once simulated time passes a minute.
+            let deadline = now + Duration::from_secs(60);
+            loop {
+                assert!(
+                    now < deadline,
+                    "{version:?} handshake timed out, rind active={rind_active}"
+                );
+                a.handle_timeout(now).unwrap();
+                b.handle_timeout(now).unwrap();
+                let from_a = transfer_dtls(&mut *a, &mut *b);
+                let from_b = transfer_dtls(&mut *b, &mut *a);
+                connected[0] |= from_a.connected;
+                connected[1] |= from_b.connected;
+                if connected == [true; 2] {
+                    break;
+                }
+                let next = from_a
+                    .timeout
+                    .into_iter()
+                    .chain(from_b.timeout)
+                    .min()
+                    .unwrap_or_else(|| panic!("{version:?} handshake stalled without a timeout"));
+                // A timeout that is not strictly later still advances, as `step` does,
+                // so a stuck instant cannot spin.
+                now = (now + Duration::from_millis(1)).max(next);
+            }
+            assert_eq!(
+                connected, [true; 2],
+                "{version:?}, rind active={rind_active}"
+            );
+            assert!(!a.is_closing());
+            assert!(!a.is_closed());
+            a.close().unwrap();
+            assert!(a.is_closing(), "{version:?}, rind active={rind_active}");
+            assert!(!a.is_closed());
+            assert!(transfer_dtls(&mut *a, &mut *b).packets > 0);
+            assert!(transfer_dtls(&mut *b, &mut *a).close_notify);
+            b.close().unwrap();
+            transfer_dtls(&mut *b, &mut *a);
+            transfer_dtls(&mut *a, &mut *b);
+            assert!(a.is_closed());
+            assert!(!a.is_closing());
+            assert!(b.is_closed());
+        }
+    }
+}
+
+/// The generated serial stays a positive INTEGER, and the certificate is valid
+/// for exactly 365 days. `clear_serial_high_bit_forces_a_positive_integer`
+/// checks the mask with a forced high bit. Branching on a serial from
+/// `rind::rand` stays here, out of the crate's unit tests, because
+/// `admin/ctgrind adapters` runs those under valgrind.
+#[test]
+fn certificate_serial_stays_positive_and_the_span_is_a_year() {
+    let dtls = rind_str0m::default_provider().dtls_provider;
+    let cert = dtls.generate_certificate().unwrap();
+    let serial = serial_integer(&cert.certificate);
+    assert!(!serial.is_empty() && serial.len() <= 20, "{serial:?}");
+    assert_eq!(serial[0] & 0x80, 0, "{serial:?}");
+    let (before, after) = validity(&cert.certificate);
+    assert_eq!(
+        certificate_time(&after) - certificate_time(&before),
+        time::Duration::days(365),
+        "{before} .. {after}"
+    );
+}
+
+fn serial_integer(cert: &[u8]) -> Vec<u8> {
+    let body = sequence(cert);
+    let tbs = sequence(body);
+    let after_version = if tbs.first() == Some(&0xa0) {
+        let (_, rest) = tlv(tbs);
+        rest
+    } else {
+        tbs
+    };
+    let (serial, _) = tlv(after_version);
+    assert_eq!(after_version[0], 0x02);
+    serial.to_vec()
+}
+
+fn certificate_time(value: &str) -> time::OffsetDateTime {
+    assert!(value.ends_with('Z'), "{value}");
+    let digits = &value[..value.len() - 1];
+    let (year, rest) = match digits.len() {
+        12 => {
+            let yy: i32 = digits[..2].parse().unwrap();
+            (if yy >= 50 { 1900 + yy } else { 2000 + yy }, &digits[2..])
+        }
+        14 => (digits[..4].parse().unwrap(), &digits[4..]),
+        _ => panic!("certificate time {value}"),
+    };
+    let part = |at: usize| -> u8 { rest[at..at + 2].parse().unwrap() };
+    let date = time::Date::from_calendar_date(year, part(0).try_into().unwrap(), part(2)).unwrap();
+    let clock = time::Time::from_hms(part(4), part(6), part(8)).unwrap();
+    date.with_time(clock).assume_utc()
+}
+
+fn validity(cert: &[u8]) -> (String, String) {
+    let body = sequence(cert);
+    let tbs = sequence(body);
+    let mut rest = tbs;
+    // version, serial, signature, issuer, then validity.
+    for _ in 0..4 {
+        let (_, next) = tlv(rest);
+        rest = next;
+    }
+    let (span, _) = tlv(rest);
+    assert_eq!(rest[0], 0x30, "validity is a SEQUENCE");
+    let (before, after_bytes) = tlv(span);
+    // UTCTime is 0x17, GeneralizedTime is 0x18. A mis-aimed skip that lands
+    // on another field must not be read as a time.
+    assert!(
+        matches!(span[0], 0x17 | 0x18),
+        "notBefore tag {:#x}",
+        span[0]
+    );
+    let (after, rest) = tlv(after_bytes);
+    assert!(
+        matches!(after_bytes[0], 0x17 | 0x18),
+        "notAfter tag {:#x}",
+        after_bytes[0]
+    );
+    assert!(
+        rest.is_empty(),
+        "validity holds two times, leftover {rest:?}"
+    );
+    (
+        String::from_utf8(before.to_vec()).unwrap(),
+        String::from_utf8(after.to_vec()).unwrap(),
+    )
+}
+
+fn sequence(input: &[u8]) -> &[u8] {
+    let (body, _) = tlv(input);
+    assert_eq!(input[0], 0x30);
+    body
+}
+
+fn tlv(input: &[u8]) -> (&[u8], &[u8]) {
+    assert!(input.len() >= 2, "{input:?}");
+    let (len, header) = match input[1] {
+        len @ 0..=0x7f => (len as usize, 2),
+        0x81 => (input[2] as usize, 3),
+        0x82 => (u16::from_be_bytes([input[2], input[3]]) as usize, 4),
+        other => panic!("DER length {other:#x}"),
+    };
+    let rest = &input[header..];
+    (&rest[..len], &rest[len..])
 }

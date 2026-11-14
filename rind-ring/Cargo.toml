@@ -59,6 +59,8 @@ aws-lc-rs = { version = "1.16", default-features = false, features = ["alloc", "
 crabgrind = { version = "0.4", default-features = false }
 hex = { version = "0.4", features = ["serde"] }
 proptest = "1.5.0"
+# ring's own values, for the accessors and `Debug` aws-lc-rs has since changed.
+ring = "0.17.14"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 untrusted = "0.9"

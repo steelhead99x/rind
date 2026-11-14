@@ -239,6 +239,18 @@ mod tests {
     }
 
     #[test]
+    fn aes128_limits_match_aes256() {
+        // Both AES suites use the same bounds. A mutant of one suite's shift
+        // no longer matches the other, and the public test checks AES-256
+        // against rustls's aws-lc-rs provider.
+        assert_eq!(
+            AES_128_GCM.confidentiality_limit,
+            AES_256_GCM.confidentiality_limit
+        );
+        assert_eq!(AES_128_GCM.integrity_limit, AES_256_GCM.integrity_limit);
+    }
+
+    #[test]
     fn rfc9001_client_initial_header() {
         // RFC 9001 appendix A.2, header protection only: the payload is padded to 1162 bytes.
         let keys = initial_keys(cipher_suite::TLS13_AES_128_GCM_SHA256, Side::Client);

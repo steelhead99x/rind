@@ -346,3 +346,27 @@ pub(crate) mod padding {
         "PSS signatures with SHA-512, MGF1, and a 64-byte random salt."
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PublicKey;
+
+    #[test]
+    fn modulus_bits_counts_a_top_byte_below_0x80() {
+        // 0x01ff is 9 bits. `8 * len - leading_zeros` becomes `8 * len +
+        // leading_zeros` only for this shape: a modulus whose top bit is set
+        // has no leading zeros, and the two agree.
+        let modulus = tlv(0x02, &[0x01, 0xff]);
+        let exponent = tlv(0x02, &[0x01, 0x00, 0x01]);
+        let der = tlv(0x30, &[modulus, exponent].concat());
+        let key = PublicKey::new(&der).unwrap();
+        assert_eq!(key.modulus_bits(), 9);
+    }
+
+    fn tlv(tag: u8, body: &[u8]) -> Vec<u8> {
+        assert!(body.len() < 128);
+        let mut out = vec![tag, body.len() as u8];
+        out.extend_from_slice(body);
+        out
+    }
+}

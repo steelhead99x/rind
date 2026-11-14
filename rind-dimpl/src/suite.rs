@@ -244,3 +244,16 @@ pub(crate) static DTLS13_CHACHA20_FIRST: &[&dyn SupportedDtls13CipherSuite] = &[
     DTLS13_AES_128_GCM,
     DTLS13_AES_256_GCM,
 ];
+
+#[cfg(test)]
+mod tests {
+    use rind::aead;
+
+    use super::Aead;
+
+    #[test]
+    fn aead_debug_names_the_type() {
+        let key = aead::Key::new(&aead::AES_128_GCM, &[7; 16]).unwrap();
+        assert_eq!(format!("{:?}", Aead(key)), "Aead");
+    }
+}

@@ -409,3 +409,86 @@ fn ecdsa_key_encodings_load_as_aws_lc() {
         }
     }
 }
+
+#[test]
+fn suite_parameters_match_aws_lc() {
+    let aws_lc = aws_lc_rs::default_provider();
+    let provider = rind();
+    for suite in provider.cipher_suites {
+        let reference = aws_lc
+            .cipher_suites
+            .iter()
+            .find(|other| other.suite() == suite.suite())
+            .unwrap();
+        assert_eq!(suite.hash_algorithm(), reference.hash_algorithm());
+        assert_eq!(suite.tag_len(), reference.tag_len());
+        assert_eq!(suite.key_lengths(), reference.key_lengths());
+        assert_eq!(suite.explicit_nonce_len(), reference.explicit_nonce_len());
+    }
+    for suite in provider.dtls13_cipher_suites {
+        let reference = aws_lc
+            .dtls13_cipher_suites
+            .iter()
+            .find(|other| other.suite() == suite.suite())
+            .unwrap();
+        assert_eq!(suite.hash_algorithm(), reference.hash_algorithm());
+        assert_eq!(suite.tag_len(), reference.tag_len());
+        assert_eq!(suite.key_len(), reference.key_len());
+        assert_eq!(suite.iv_len(), reference.iv_len());
+    }
+}
+
+#[test]
+fn signing_keys_match_aws_lc() {
+    let reference = aws_lc_rs::default_provider();
+    for algorithm in [
+        &rcgen::PKCS_ECDSA_P256_SHA256,
+        &rcgen::PKCS_ECDSA_P384_SHA384,
+    ] {
+        let (_, pkcs8) = certificate(algorithm);
+        let key = rind().key_provider.load_private_key(&pkcs8).unwrap();
+        let aws_lc = reference.key_provider.load_private_key(&pkcs8).unwrap();
+        assert_eq!(key.hash_algorithm(), aws_lc.hash_algorithm());
+        assert_eq!(
+            key.supported_hash_algorithms(),
+            aws_lc.supported_hash_algorithms()
+        );
+        // dimpl's aws-lc-rs provider names its type; rind names the group and hash.
+        // An empty `Debug` has neither.
+        let rendered = format!("{key:?}");
+        assert!(rendered.contains("Key"), "{rendered}");
+        assert!(rendered.contains("SHA"), "{rendered}");
+    }
+}
+
+#[test]
+fn p384_sha256_verification_reaches_the_verifier() {
+    // DTLS 1.2 may verify P-384 with SHA-256. A bad signature still takes that
+    // arm: deleting it reports the pair as unsupported instead of a bad signature.
+    let (cert, _) = certificate(&rcgen::PKCS_ECDSA_P384_SHA384);
+    let error = rind()
+        .signature_verification
+        .verify_signature(
+            &cert,
+            b"data",
+            &[0; 8],
+            HashAlgorithm::SHA256,
+            SignatureAlgorithm::ECDSA,
+        )
+        .expect_err("an eight-byte signature does not verify");
+    assert!(
+        matches!(error, CryptoError::SignatureVerificationFailed { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn random_fill_replaces_the_buffer() {
+    // Replacing `Random::fill` with `Ok(())` leaves the caller's bytes.
+    // This stays out of the crate's unit tests: `admin/ctgrind adapters` runs
+    // those under valgrind, and comparing the filled buffer branches on secret
+    // bytes.
+    let mut buf = [0x5a; 32];
+    rind().secure_random.fill(&mut buf).unwrap();
+    assert_ne!(buf, [0x5a; 32]);
+}

@@ -79,3 +79,26 @@ impl ActiveKeyExchange for Exchange {
         self.group
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use dimpl::crypto::Buf;
+    use rind::agreement::{self, PrivateKey};
+
+    use super::{ALL, Exchange};
+
+    #[test]
+    fn exchange_debug_names_the_group() {
+        let key = PrivateKey::generate(&agreement::X25519).unwrap();
+        let mut pub_key = Buf::new();
+        pub_key.extend_from_slice(key.public_key().as_ref());
+        let exchange = Exchange {
+            group: ALL[0].name(),
+            key,
+            pub_key,
+        };
+        let rendered = format!("{exchange:?}");
+        assert!(rendered.contains("Exchange"), "{rendered}");
+        assert!(rendered.contains("X25519"), "{rendered}");
+    }
+}
