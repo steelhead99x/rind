@@ -100,6 +100,13 @@ impl Sha256State {
 }
 
 impl UpdateBlocks for Sha256State {
+    // Out of line on 32-bit portable so `Blockwise::complete_blocks` stays the
+    // buffering glue. Inlining this there pulled the rolled SHA-256 loop into
+    // the function a long `Context::update` executes.
+    #[cfg_attr(
+        all(rind_backend = "portable", target_pointer_width = "32"),
+        inline(never)
+    )]
     fn update_blocks(&mut self, blocks: &[u8]) {
         debug_assert!(blocks.len().is_multiple_of(Sha256Context::BLOCK_SZ));
         if !blocks.is_empty() {

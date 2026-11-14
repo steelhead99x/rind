@@ -22,20 +22,24 @@ const PIECE: usize = 1 << 31;
 pub(crate) const SHA256_SHORT: usize = 256;
 
 /// Compresses whole 64-byte `blocks` into `state`.
+///
+/// On 32-bit this stays out of line. `Sha256State::update_blocks` is too,
+/// so `Blockwise::complete_blocks` — what `digest::Context::update` runs —
+/// does not itself contain either compressor. A 1200-byte one-shot holds a
+/// 48-byte tail and compresses 1152 bytes here, which is HACL*, the same
+/// `sha256_update_nblocks` loop main uses for every length. The rolled
+/// compressor stays on the `<= 256` arm for HMAC pads, HKDF, and short
+/// hashes: on the ESP32-S3 that arm was 0.77× HACL* at 32 bytes, while
+/// HACL* was 0.78× rolled at 1200 bytes and 0.68× at 16 KB. 64-bit portable
+/// always keeps HACL* and inlines this, as main does.
+#[cfg_attr(target_pointer_width = "32", inline(never))]
+#[cfg_attr(target_pointer_width = "64", inline)]
 pub(crate) fn sha256_compress_blocks(state: &mut [u32; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(64));
-    // HACL*'s `sha256_update` is fully unrolled (~12 KiB on Xtensa), which
-    // fills a 16 KiB instruction cache and makes short inputs and HMAC/HKDF
-    // pay a large miss cost. On 32-bit targets, short calls (HMAC pads,
-    // HKDF, 32-64 byte hashes) use the rolled `generic::sha256`; longer
-    // calls use HACL*, which is faster once that 12 KiB stays hot.
-    // Cutover is 256 bytes (4 blocks): on the ESP32-S3, rolled was 0.77×
-    // at 32 B and 0.99× at 64 B, and HACL* was 0.78× rolled at 1200 B
-    // and 0.68× at 16 KB. 64-bit portable always keeps HACL*.
     #[cfg(target_pointer_width = "32")]
     {
         if blocks.len() <= SHA256_SHORT {
-            crate::low::generic::sha256::sha256_compress_blocks(state, blocks);
+            sha256_compress_rolled(state, blocks);
         } else {
             sha256_hacl_nblocks(state, blocks);
         }
@@ -46,11 +50,30 @@ pub(crate) fn sha256_compress_blocks(state: &mut [u32; 8], blocks: &[u8]) {
     }
 }
 
-#[inline]
+/// HACL*'s `sha256_update_nblocks` loop, the whole of main's
+/// `sha256_compress_blocks`.
+///
+/// Out of line on 32-bit. Inlining it into `Blockwise::complete_blocks` put
+/// the call next to the rolled loop in the function a one-shot
+/// `Context::update` runs, so that hot function carried both compressors.
+/// On Xtensa (rustc 1.97.0.0, the ESP32-S3 release profile) the 1200-byte
+/// update does take this path — 1152 bytes against the 257-byte cutover —
+/// and `sha256_update` is one 12645-byte body. Keeping the loop in its own
+/// function makes the long update the same call main makes.
+#[cfg_attr(target_pointer_width = "32", inline(never))]
+#[cfg_attr(target_pointer_width = "64", inline)]
 fn sha256_hacl_nblocks(state: &mut [u32; 8], blocks: &[u8]) {
     for piece in blocks.chunks(PIECE) {
         sha256_update_nblocks(piece.len() as u32, piece, state);
     }
+}
+
+/// The rolled compressor, out of line so a long update or a long finish does
+/// not fetch it. Short HMAC pads and short hashes are the callers.
+#[cfg(target_pointer_width = "32")]
+#[inline(never)]
+fn sha256_compress_rolled(state: &mut [u32; 8], blocks: &[u8]) {
+    crate::low::generic::sha256::sha256_compress_blocks(state, blocks);
 }
 
 /// Compresses `message`, padded and closed by the big-endian bit `length`.
@@ -131,8 +154,8 @@ fn sha256_finish_body<const FORCE_LONG: bool>(
     let mut last = [[0u8; 64]; 2];
     let padded = crate::low::pad(rest, length, &mut last);
     if !FORCE_LONG && blocks.len() <= SHA256_SHORT {
-        crate::low::generic::sha256::sha256_compress_blocks(&mut h, blocks);
-        crate::low::generic::sha256::sha256_compress_blocks(&mut h, padded);
+        sha256_compress_rolled(&mut h, blocks);
+        sha256_compress_rolled(&mut h, padded);
     } else {
         sha256_hacl_nblocks(&mut h, blocks);
         sha256_hacl_nblocks(&mut h, padded);
