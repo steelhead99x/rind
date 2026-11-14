@@ -149,7 +149,7 @@ exclude_re = [
   'rind/src/mid/aes\.rs:\d+:\d+: replace < with <= in AesCtr::apply_keystream$',
   'rind/src/mid/aes_kw\.rs:187:\d+: replace - with / in AesKek::unwrap_padded$',
   'rind/src/mid/mldsa\.rs:841:\d+: replace < with <= in expand_s$',
-  'rind/src/mid/mlkem768\.rs:487:\d+: replace \+ with \* in Coeffs<\{K \*K \*N\}, Ntt>::transpose$',
+  'rind/src/mid/mlkem768\.rs:496:\d+: replace \+ with \* in Coeffs<\{K \*K \*N\}, Ntt>::transpose$',
   'rind/src/mid/p256\.rs:\d+:\d+: replace < with <= in (JacobianMontPoint::public_twin_multiply|public_below_p)$',
   'rind/src/mid/p384\.rs:\d+:\d+: replace < with <= in JacobianMontPoint::public_twin_multiply$',
   'rind/src/mid/p521\.rs:\d+:\d+: replace < with <= in JacobianPoint::public_twin_multiply$',
