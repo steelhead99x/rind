@@ -34,6 +34,11 @@
 # .cargo/mutants.toml that matches no mutant, such as a `file:line` pin its
 # code moved away from. cargo-mutants lists mutants whatever their `cfg`, so
 # one listing covers every campaign.
+#
+# rind-rcgen's `wipe` and `zeroize` are not in that file's `features` list:
+# cargo-mutants passes the list to every package, and a package that does not
+# depend on rind-rcgen fails to resolve them. `admin/mutants-cargo` adds the
+# two features only when the cargo invocation builds rind-rcgen.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
@@ -252,9 +257,21 @@ done
 export NEXTEST_TEST_THREADS=$((($(nproc) + jobs - 1) / jobs))
 
 export "CARGO_TARGET_${triple}_RUNNER=$here/admin/mutants ${portable_backend:+--portable }${target:+--target $target }--run"
+# Cargo sets CARGO to its own executable when it launches a subcommand, which
+# would replace the wrapper. Call cargo-mutants directly so the wrapper stays
+# the cargo it invokes.
+mutants=$(command -v cargo-mutants) || {
+    echo "admin/mutants: cargo-mutants is not installed; run this inside nix develop" >&2
+    exit 1
+}
+RIND_REAL_CARGO=$(command -v cargo)
+export RIND_REAL_CARGO
+export CARGO=$here/admin/mutants-cargo
 # A mutant that hangs the tests until the timeout is caught by them, so only
 # exit 3, timeouts alone, passes beside 0.
 status=0
-cargo mutants "${args[@]}" "$@" || status=$?
+# This cargo-mutants build's CLI is `cargo mutants`: the binary expects the
+# `mutants` subcommand, which `cargo mutants` inserts and a direct exec does not.
+"$mutants" mutants "${args[@]}" "$@" || status=$?
 [ "$status" -ne 3 ] || status=0
 exit "$status"

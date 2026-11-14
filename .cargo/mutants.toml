@@ -5,7 +5,10 @@
 test_tool = "nextest"
 
 # Turns on the zeroing and heap scratch tests, without which a wiping `Drop`
-# does nothing a test can see.
+# does nothing a test can see. rind-rcgen's `wipe` and `zeroize` stay off this
+# list: cargo-mutants passes it to every package, and one that does not depend
+# on rind-rcgen fails to resolve them. `admin/mutants-cargo` adds those two
+# features only to a cargo invocation that builds rind-rcgen.
 features = ["rind/wipe"]
 
 exclude_globs = [

@@ -103,7 +103,7 @@ jobs:
       - name: Run tests (debug, --no-default-features)
         run: cargo test --no-default-features
       - name: Run zeroing tests (debug, --features wipe)
-        run: cargo test -p rind -p rind-aws-lc-rs -p rind-rcgen --features rind/wipe,rind-aws-lc-rs/wipe,rind-rcgen/wipe --test zeroing
+        run: cargo test -p rind -p rind-aws-lc-rs -p rind-rcgen --features rind/wipe,rind-aws-lc-rs/wipe,rind-rcgen/wipe,rind-rcgen/zeroize --test zeroing
       - name: Run heap scratch tests (release, --features wipe)
         run: env SLOW_TESTS=1 cargo test -p rind --features wipe --test heap_scratch --release
 

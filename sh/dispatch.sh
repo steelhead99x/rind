@@ -222,6 +222,12 @@ for module in "${selected[@]}"; do
             if ((${#packages[@]} == 0)) || printf '%s\n' "${packages[@]}" | grep -qxE 'rind-aws-lc-rs|--workspace'; then
                 cargo nextest run -p rind-aws-lc-rs --features wipe --test zeroing --locked
             fi
+            # Its own invocation, so `wipe` and `zeroize` do not unify into the
+            # packages tested above. A dev-dependency cannot scope them: resolver
+            # 2 would turn `rind/wipe` on for that whole run.
+            if ((${#packages[@]} == 0)) || printf '%s\n' "${packages[@]}" | grep -qxE 'rind-rcgen|--workspace'; then
+                cargo nextest run -p rind-rcgen --features wipe,zeroize --test zeroing --locked
+            fi
             # The FIPS module's own code compiles only under its cfg, which a
             # workspace build leaves off, and only for glibc Linux on x86_64
             # and aarch64, where rind-fips is not empty. Its break build

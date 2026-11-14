@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# cargo-mutants invokes this as $CARGO. `.cargo/mutants.toml` turns on
+# `rind/wipe` for every package. rind-rcgen's own `wipe` and `zeroize` cannot
+# live in that list: a package that does not depend on rind-rcgen fails to
+# resolve them. Add those two only when this invocation builds rind-rcgen.
+set -euo pipefail
+
+real=${RIND_REAL_CARGO:-cargo}
+if [[ $# -eq 0 ]]; then
+    exec "$real"
+fi
+
+case $1 in
+    test | check | nextest) ;;
+    *) exec "$real" "$@" ;;
+esac
+
+packages=()
+prev=
+for arg in "$@"; do
+    case $arg in
+        --package=*) packages+=("${arg#--package=}") ;;
+    esac
+    if [[ $prev == --package || $prev == -p ]]; then
+        packages+=("$arg")
+    fi
+    prev=$arg
+done
+
+only_rcgen=0
+if [[ ${#packages[@]} -gt 0 ]]; then
+    only_rcgen=1
+    for pkg in "${packages[@]}"; do
+        # cargo-mutants passes `name@version`.
+        if [[ ${pkg%%@*} != rind-rcgen ]]; then
+            only_rcgen=0
+            break
+        fi
+    done
+fi
+
+extra=()
+if [[ $only_rcgen -eq 1 ]]; then
+    extra+=(--features=wipe --features=zeroize)
+fi
+if [[ ${#extra[@]} -eq 0 ]]; then
+    exec "$real" "$@"
+fi
+
+# Flags belong before a `--` that forwards arguments to the test binary.
+args=()
+for arg in "$@"; do
+    if [[ $arg == -- ]]; then
+        args+=("${extra[@]}" --)
+        extra=()
+    else
+        args+=("$arg")
+    fi
+done
+exec "$real" "${args[@]}" ${extra[@]+"${extra[@]}"}
