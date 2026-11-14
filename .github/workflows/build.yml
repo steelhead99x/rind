@@ -111,6 +111,11 @@ jobs:
         run: cargo build -p rind --release
       - name: Run tests (release)
         run: env SLOW_TESTS=1 cargo test --release
+      # Each self-test's failure, and on every call, that each service's
+      # stack stays within what it zeroes.
+      - name: Run FIPS break tests
+        if: runner.os == 'Linux'
+        run: cargo test -p rind-fips --features __break_tests
 
       - name: Artificial CPU feature tests (x86_64)
         if: runner.arch == 'X64'
@@ -119,7 +124,9 @@ jobs:
           # Each tier runs the tests and the zeroing tests, then CCTV's million ML-KEM vectors in a
           # release build, which honours the tier's denials only with
           # `--cfg rind_cpu_disable`, alongside the check that they took effect
-          tier() { env "$@" cargo test; env "$@" cargo test -p rind --features wipe --test zeroing --test heap_scratch; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
+          # rind-fips is left out: its module refuses a CPU masked below its
+          # baseline.
+          tier() { env "$@" cargo test --workspace --exclude rind-fips; env "$@" cargo test -p rind --features wipe --test zeroing --test heap_scratch; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
           # test rind's AVX2 SHA-1 and OpenSSL's AVX2 SHA-256 for CPUs without
           # the SHA extensions
           tier RIND_CPU_DISABLE_sha=1 RIND_CPU_DISABLE_intel=1
@@ -157,7 +164,7 @@ jobs:
         if: runner.arch == 'ARM64'
         shell: bash
         run: |
-          tier() { env "$@" cargo test; env "$@" cargo test -p rind --features wipe --test zeroing --test heap_scratch; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
+          tier() { env "$@" cargo test --workspace --exclude rind-fips; env "$@" cargo test -p rind --features wipe --test zeroing --test heap_scratch; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
           # test the by-4 AES-GCM and Keccak-f kernels for cores without SHA3,
           # failing a run whose OS hides the crypto extension
           tier RIND_CPU_DISABLE_sha3=1 RIND_TEST_ARM_CRYPTO_EXT=1
