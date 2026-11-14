@@ -17,7 +17,7 @@ use std::num::NonZeroU32;
 use std::sync::OnceLock;
 
 use rind::{
-    aead, agreement, cipher, constant_time, digest, hkdf, hmac, kem, key_wrap, pbkdf2, rsa,
+    aead, agreement, cipher, constant_time, digest, hkdf, hmac, kem, key_wrap, oprf, pbkdf2, rsa,
     signature,
 };
 
@@ -102,6 +102,7 @@ pub fn all() -> Vec<Case> {
     aead_cases(&mut cases);
     cipher_cases(&mut cases);
     agreement_cases(&mut cases);
+    oprf_cases(&mut cases);
     kem_cases(&mut cases);
     rsa_cases(&mut cases);
     signature_cases(&mut cases);
@@ -477,6 +478,23 @@ fn agreement_cases(cases: &mut Vec<Case>) {
                 measure(config, &peers, |peer| key.agree(peer))
             },
         ));
+    }
+}
+
+/// The OPRF input is the secret hashed to the curve. The server scalar stays
+/// fixed, so the two classes differ only in that message.
+fn oprf_cases(cases: &mut Vec<Case>) {
+    for (name, suite, scalar_len) in [
+        ("p256", &oprf::P256_SHA256, 32),
+        ("p384", &oprf::P384_SHA384, 48),
+        ("p521", &oprf::P521_SHA512, 66),
+    ] {
+        cases.push(case(format!("oprf/{name}/input"), move |config| {
+            let mut scalar = vec![0u8; scalar_len];
+            scalar[scalar_len - 1] = 2;
+            let key = oprf::ServerKey::from_bytes(suite, &scalar).unwrap();
+            measure(config, &secrets(32), |input| key.evaluate(input).unwrap())
+        }));
     }
 }
 

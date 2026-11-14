@@ -90,7 +90,9 @@ impl Xmd for Sha512Context {
 ///
 /// A `dst` over 255 bytes is hashed down, as section 5.3.3 says. An empty
 /// `dst`, which the RFC forbids, and an `out` longer than 255 hashes are
-/// refused, as aws-lc refuses them.
+/// refused, as aws-lc's `crypto/ec_extra/hash_to_curve.c`
+/// (`expand_message_xmd`) refuses a zero `dst_len` and a counter that wraps
+/// after 255 hashes.
 pub(crate) fn expand_message_xmd<H: Xmd>(
     msg: &[&[u8]],
     dst: &[u8],
@@ -462,9 +464,23 @@ pub(crate) mod tests {
         assert_eq!(file.vectors.len(), 5);
     }
 
+    /// An actual sum at infinity, without needing a hash preimage for it.
+    /// Its coordinates stay secret through the wrappers' validation.
+    pub(crate) fn opposite_sum<C: Curve>() -> [C; 3] {
+        let q = low::ct::into_secret(map_to_curve(&C::from_wide(&[7; MAX_L][..C::L])));
+        let neg = [q[0], q[1].neg(), q[2]];
+        sum(&q, &neg)
+    }
+
     /// `sum` doubles equal points and gives infinity for opposite ones,
-    /// whatever `Z` each has.
-    pub(crate) fn check_sum<C: Curve>(affine: impl Fn(&[C; 3]) -> Vec<u8>) {
+    /// whatever `Z` each has. `doubled` is the Jacobian doubling
+    /// `double_point` calls, so this does not compare that method with
+    /// itself. Points that share `Y` and `Z` and differ in `X` are added;
+    /// `same_x | same_y` would double the first instead.
+    pub(crate) fn check_sum<C: Curve>(
+        affine: impl Fn(&[C; 3]) -> Vec<u8>,
+        doubled: impl Fn(&[C; 3]) -> [C; 3],
+    ) {
         let _entry = low::Entry::new_public();
         let q = map_to_curve(&C::from_wide(&[7; MAX_L][..C::L]));
         let r = map_to_curve(&C::from_wide(&[9; MAX_L][..C::L]));
@@ -474,10 +490,17 @@ pub(crate) mod tests {
         let scaled = [q[0].mul(&k2), q[1].mul(&k3), q[2].mul(&k)];
         let neg = [scaled[0], scaled[1].neg(), scaled[2]];
 
-        assert_eq!(affine(&sum(&q, &scaled)), affine(&C::double_point(&q)));
+        assert_eq!(affine(&sum(&q, &scaled)), affine(&doubled(&q)));
         assert!(sum(&q, &neg)[2].ct_eq(&C::ZERO));
         assert_eq!(affine(&sum(&q, &r)), affine(&C::add_points(&q, &r)));
         assert_eq!(affine(&sum(&q, &r)), affine(&sum(&r, &q)));
+
+        assert!(!q[0].ct_eq(&r[0]));
+        let mut shifted = q;
+        shifted[0] = r[0];
+        let got = sum(&q, &shifted);
+        let expect = C::add_points(&q, &shifted);
+        assert!(got.iter().zip(expect).all(|(a, b)| a.ct_eq(&b)));
     }
 
     /// `pow_c1` raises to `(p - 3) / 4`: one more factor gives
@@ -520,6 +543,19 @@ pub(crate) mod tests {
                 .iter()
                 .fold(C::ZERO, |r, &b| r.mul(&b256).add(&byte(b)));
             assert!(C::from_wide(&input).ct_eq(&horner));
+        }
+    }
+
+    /// The public wrappers and, when given, aws-lc refuse an empty DST.
+    pub(crate) fn check_empty_dst(
+        curve: Result<(), Error>,
+        scalar: Result<(), Error>,
+        aws_lc_ok: Option<bool>,
+    ) {
+        assert_eq!(curve, Err(Error::WrongLength));
+        assert_eq!(scalar, Err(Error::WrongLength));
+        if let Some(ok) = aws_lc_ok {
+            assert!(!ok);
         }
     }
 

@@ -14,17 +14,33 @@ use crate::mid::sha2::Sha512Context;
 /// Hashes `msg` to a point, by RFC 9380's `P521_XMD:SHA-512_SSWU_RO_` with
 /// the domain separation tag `dst`.
 ///
-/// The point at infinity, which no message is known to reach, is refused as
-/// a small-order point.
+/// The two map outputs are added in constant time. Opposite outputs would
+/// sum to infinity (`Z = 0`); no message is known to reach that. Conversion
+/// inverts a nonzero element unconditionally, then exposes only the
+/// validation verdict: infinity is refused as a small-order point.
 pub(crate) fn hash_to_curve(msg: &[u8], dst: &[u8]) -> Result<PublicKey, Error> {
     let _entry = low::Entry::new_secret();
-    let point = hash_to_curve::hash_to_curve::<FieldElement, Sha512Context>(msg, dst)?;
-    match low::ct::into_public(point[2].ct_eq(&FieldElement::ZERO)) {
+    public_key(hash_to_curve::hash_to_curve::<FieldElement, Sha512Context>(
+        msg, dst,
+    )?)
+}
+
+fn public_key(mut point: [FieldElement; 3]) -> Result<PublicKey, Error> {
+    let infinity = point[2].ct_eq(&FieldElement::ZERO);
+    point[2] = point[2].select(&FieldElement::ONE, infinity);
+    let point = jacobian(&point).as_affine();
+    // This error verdict is public, as with private-key range validation;
+    // the coordinates remain secret, including the discarded conversion.
+    match low::ct::into_public(infinity) {
         true => Err(KeyFormatError::SmallOrder.into()),
-        false => Ok(PublicKey {
-            point: jacobian(&point).as_affine(),
-        }),
+        false => Ok(PublicKey { point }),
     }
+}
+
+/// Converts an opposite-point sum for the OPRF boundary tests.
+#[cfg(test)]
+pub(crate) fn hash_to_infinity(_msg: &[u8], _dst: &[u8]) -> Result<PublicKey, Error> {
+    public_key(hash_to_curve::tests::opposite_sum::<FieldElement>())
 }
 
 /// Hashes `msg` to a scalar mod n, by RFC 9380's `hash_to_field` over
@@ -156,6 +172,10 @@ mod tests {
         jacobian(p).as_affine().as_bytes_uncompressed().to_vec()
     }
 
+    fn doubled(p: &[FieldElement; 3]) -> [FieldElement; 3] {
+        coordinates(&jacobian(p).double())
+    }
+
     #[test]
     fn rfc9380() {
         tests::check_suite::<FieldElement, Sha512Context>("P521_XMD_SHA-512_SSWU_RO_", 66, affine);
@@ -163,7 +183,18 @@ mod tests {
 
     #[test]
     fn sum() {
-        tests::check_sum::<FieldElement>(affine);
+        tests::check_sum::<FieldElement>(affine, doubled);
+    }
+
+    #[test]
+    fn opposite_points_are_refused() {
+        let _entry = low::Entry::new_secret();
+        let point = tests::opposite_sum::<FieldElement>();
+        assert!(low::ct::into_public(point[2].ct_eq(&FieldElement::ZERO)));
+        assert_eq!(
+            public_key(point).map(|_| ()),
+            Err(KeyFormatError::SmallOrder.into())
+        );
     }
 
     #[test]
@@ -190,6 +221,10 @@ mod tests {
             low::ct::public_slice(&p);
             p
         });
+        // The wrapper, so a branch on Z is under taint.
+        let msg = low::ct::into_secret(*b"password");
+        let point = hash_to_curve(&msg, b"QUUX-V01-CS02").unwrap();
+        low::ct::public_slice(&point.point.as_bytes_uncompressed());
     }
 
     /// The public functions, against RustCrypto's, as aws-lc has no
@@ -213,6 +248,17 @@ mod tests {
             .unwrap();
             assert_eq!(ours.as_bytes()[..], theirs.to_bytes()[..]);
         }
+    }
+
+    /// An empty DST is refused. aws-lc has no P-521 suite, so this is
+    /// only the local path.
+    #[test]
+    fn empty_dst() {
+        tests::check_empty_dst(
+            hash_to_curve(b"msg", b"").map(|_| ()),
+            hash_to_scalar(&[b"msg"], b"").map(|_| ()),
+            None,
+        );
     }
 
     #[test]

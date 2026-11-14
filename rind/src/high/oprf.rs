@@ -275,7 +275,7 @@ fn not_identity(element: ristretto255::Element) -> Option<ristretto255::Element>
 
 /// A NIST curve's group and its suite's hash, over `mid`'s curve.
 macro_rules! nist_group {
-    ($group:ident, $curve:ident, $hash:ty, $name:literal, $suite:ident) => {
+    ($group:ident, $curve:ident, $hash:ty, $name:literal, $suite:ident, $hash_to_curve:path) => {
         #[derive(Clone, Copy)]
         struct $group;
 
@@ -295,7 +295,7 @@ macro_rules! nist_group {
             /// The point at infinity, which no input is known to reach, is
             /// refused as a small-order point.
             fn hash_to_group(input: &[u8], dst: &[u8]) -> Result<Self::Element, Error> {
-                $curve::hash_to_curve::hash_to_curve(input, dst).map(Into::into)
+                $hash_to_curve(input, dst).map(Into::into)
             }
 
             fn hash_to_scalar(msg: &[&[u8]], dst: &[u8]) -> Result<Self::Scalar, Error> {
@@ -364,9 +364,30 @@ macro_rules! nist_group {
     };
 }
 
-nist_group!(P256, p256, Sha256Context, b"P256-SHA256", P256_SHA256);
-nist_group!(P384, p384, Sha384Context, b"P384-SHA384", P384_SHA384);
-nist_group!(P521, p521, Sha512Context, b"P521-SHA512", P521_SHA512);
+nist_group!(
+    P256,
+    p256,
+    Sha256Context,
+    b"P256-SHA256",
+    P256_SHA256,
+    p256::hash_to_curve::hash_to_curve
+);
+nist_group!(
+    P384,
+    p384,
+    Sha384Context,
+    b"P384-SHA384",
+    P384_SHA384,
+    p384::hash_to_curve::hash_to_curve
+);
+nist_group!(
+    P521,
+    p521,
+    Sha512Context,
+    b"P521-SHA512",
+    P521_SHA512,
+    p521::hash_to_curve::hash_to_curve
+);
 
 /// Runs `$body` with `$G` the [`Group`] of the suite `$suite`.
 macro_rules! with_group {
