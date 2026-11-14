@@ -497,6 +497,8 @@ cfg_if::cfg_if! {
             sha1_compress_blocks, sha1_compress_padded, sha256_compress_blocks, sha256_finish,
             sha256_finish_long, sha256_finish_uses_long, sha512_compress_blocks,
         };
+        #[cfg(target_pointer_width = "32")]
+        pub(crate) use portable::sha::SHA256_SHORT;
     } else {
         compile_error!("build.rs sets rind_backend");
     }
