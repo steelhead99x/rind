@@ -476,6 +476,58 @@ mod tests {
         }
     }
 
+    /// Each message word matches `from_be_bytes`, including a block that is
+    /// not word-aligned. On Xtensa `message_word` is the `l32i` plus
+    /// `ssai`/`src` assembly, so this is the run that executes it. Other
+    /// targets take `from_be_bytes` and still instantiate every offset.
+    #[test]
+    fn message_word_matches_from_be_bytes() {
+        let mut storage = [0u8; 160];
+        for (i, byte) in storage.iter_mut().enumerate() {
+            *byte = i.wrapping_mul(17).wrapping_add(3) as u8;
+        }
+        storage[..8].copy_from_slice(&[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]);
+
+        fn check(block: &[u8; 128]) {
+            macro_rules! word {
+                ($byte:literal) => {{
+                    let expect = u64::from_be_bytes(block[$byte..$byte + 8].try_into().unwrap());
+                    assert_eq!(
+                        super::message_word::<$byte>(block),
+                        expect,
+                        "byte {}",
+                        $byte
+                    );
+                }};
+            }
+            word!(0);
+            word!(8);
+            word!(16);
+            word!(24);
+            word!(32);
+            word!(40);
+            word!(48);
+            word!(56);
+            word!(64);
+            word!(72);
+            word!(80);
+            word!(88);
+            word!(96);
+            word!(104);
+            word!(112);
+            word!(120);
+        }
+
+        let aligned: &[u8; 128] = storage[..128].try_into().unwrap();
+        assert_eq!(super::message_word::<0>(aligned), 0x0001_0203_0405_0607);
+        check(aligned);
+        // `[u8; 128]` has alignment 1, so these references are not word-aligned.
+        for start in [1usize, 3] {
+            let block: &[u8; 128] = storage[start..start + 128].try_into().unwrap();
+            check(block);
+        }
+    }
+
     #[test]
     fn fips180_two_blocks() {
         // FIPS 180-4, SHA-512 of the 112-byte letter sequence that pads

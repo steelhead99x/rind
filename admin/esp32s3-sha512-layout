@@ -12,6 +12,9 @@
 # the ESP32-S3 object as well: the same section, relocation, and no-call
 # rules, because a size-optimized outline into flash is the failure this
 # body is written to avoid. opt-level 0 is not a cache-off promise.
+# Every Xtensa object is also checked for the message byte swap: `l32i`
+# into `a14`, `ssai 8`, a 16-bit shift, then `src R, R, a14`; `src R, R, R`;
+# `src R, a14, R`. That is the sequence in `be_u32`. It does not execute it.
 #
 # ESP-IDF Xtensa SHA-256 is rind's IRAM body, checked by
 # admin/esp32s3-sha256-layout. This script does not link a stand-in for
@@ -230,6 +233,77 @@ check_iram() {
 check_iram "$work/obj/s3.o" 'opt-level 3'
 check_iram "$work/obj/s.o" 'opt-level s'
 check_iram "$work/obj/z.o" 'opt-level z'
+
+# The message load is assembly on every Xtensa target, and the host tests
+# never compile it. Require the operand order from `be_u32`, at least once
+# per half of each of the 16 message words. A swapped `src` operand fails.
+check_swap() {
+  label=$1
+  "$objdump" -d "$2" > "$work/dis.s"
+  python3 - "$label" "$work/dis.s" << 'PY' || fail "$label byte swap"
+import re
+import sys
+
+label, path = sys.argv[1], sys.argv[2]
+insn = re.compile(r"^\s*[0-9a-fA-F]+:\s+[0-9a-fA-F ]+\s+([a-z][a-z0-9.]*)\b(.*)$")
+
+def is_16(token):
+    try:
+        return int(token, 0) == 16
+    except ValueError:
+        return False
+
+rows = []
+for line in open(path):
+    match = insn.match(line)
+    if match:
+        operands = [part.strip() for part in match.group(2).split(",") if part.strip()]
+        rows.append((match.group(1), operands, line.strip()))
+found = 0
+i = 0
+while i < len(rows):
+    mnemonic, operands, _line = rows[i]
+    if mnemonic != "ssai" or operands != ["8"]:
+        i += 1
+        continue
+    window = rows[max(0, i - 1) : i + 5]
+    if i == 0 or len(window) < 6:
+        raise SystemExit(f"{label}: ssai 8 is not inside a byte swap")
+    load, _ssai, shift, first, second, third = window
+    dest = shift[1][0] if shift[1] else ""
+    ok = (
+        load[0] == "l32i"
+        and load[1][:1] == ["a14"]
+        and shift[0] in ("srli", "extui")
+        and len(shift[1]) >= 3
+        and shift[1][1] == "a14"
+        and any(is_16(part) for part in shift[1][2:])
+        and first[0] == "src"
+        and second[0] == "src"
+        and third[0] == "src"
+        and first[1] == [dest, dest, "a14"]
+        and second[1] == [dest, dest, dest]
+        and third[1] == [dest, "a14", dest]
+    )
+    if not ok:
+        sys.stderr.write(f"{label}: byte swap operands are not l32i a14; ssai 8; shift 16; src\n")
+        for item in window:
+            sys.stderr.write(item[2] + "\n")
+        raise SystemExit(1)
+    found += 1
+    i += 5
+if found < 32:
+    raise SystemExit(f"{label}: expected at least 32 byte swaps, found {found}")
+print(f"{label}: byte swaps {found}")
+PY
+}
+
+check_swap 'opt-level 3' "$work/obj/s3.o"
+check_swap 'opt-level s' "$work/obj/s.o"
+check_swap 'opt-level z' "$work/obj/z.o"
+check_swap 'esp32s3-sha512-flash' "$work/obj/flash.o"
+check_swap 'xtensa-esp32-espidf' "$work/obj/esp32.o"
+check_swap 'xtensa-esp32s3-none-elf' "$work/obj/none.o"
 
 s3_text=.iram1.text
 flash_text=$(
