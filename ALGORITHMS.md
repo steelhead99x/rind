@@ -136,8 +136,10 @@ with portable Rust in place of the assembly armv7 runs regardless.
   it, and nothing proves the replacement. The 16-word window follows
   Graviola's `generic::sha256`, and the round constants are
   `generic::sha256_k` (Joe Birr-Pixton); the rotates and the block load
-  are Xtensa `asm!`. Host tests check it against
-  FIPS 180-4, `generic::sha256`, HACL*, aws-lc, CAVP, and ACVP. A fully
+  are Xtensa `asm!`. Host tests check the Rust fallback against
+  FIPS 180-4, `generic::sha256`, HACL* compression, and aws-lc. CAVP
+  and ACVP stay on HACL* off Xtensa. The board's sha2 known-answer run
+  executed the Xtensa asm. A fully
   rolled loop here was slower than HACL* in IRAM on an ESP32-S3. At
   `3aaa3c6a`, on a Seeed XIAO ESP32-S3 with 80 MHz flash and three runs,
   long SHA-256 takes about 0.76× that HACL*-in-IRAM image and about
