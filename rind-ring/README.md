@@ -53,6 +53,8 @@ too, fails to build:
 - `io`, `test`, `deprecated_test`, and `test_file!`: ring's DER reader and
   test harness, which are no cryptography. `test::rand`'s fixed random
   sources could not work, since rind draws its own randomness.
+- `signature::RsaEncoding::encode`: ring's hidden, deprecated internal
+  method, which takes a type callers cannot name.
 
 And these behave differently:
 
