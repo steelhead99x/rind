@@ -80,8 +80,8 @@ impl fmt::Debug for Iv<'_> {
 /// which weakens its bounds. The caller owns IV uniqueness, as for a
 /// [`super::Nonce`].
 pub struct Key {
-    // An `aead::Key`, so a 96-bit IV takes its path, the one `proofs/` covers
-    // on x86_64, compiled as when it had no other caller.
+    // An `aead::Key`, so a 96-bit IV takes its path, compiled as when it had
+    // no other caller.
     key: ManuallyDrop<super::Key>,
     tag_len: TagLength,
 }

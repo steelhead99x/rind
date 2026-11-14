@@ -68,6 +68,11 @@ aws-lc-rs = { version = "1.19", default-features = false, features = ["alloc", "
 aws-lc-sys = { version = "0.47", default-features = false }
 # HPKE, which aws-lc-rs does not expose either; `hazmat` reads its private keys.
 hpke-rs = { version = "0.8", default-features = false, features = ["hazmat", "rustcrypto", "std"] }
+# SPAKE2+ differential tests. aws-lc-rs has no SPAKE2+.
+pakery-crypto = { version = "0.6.2", default-features = false, features = ["std", "p256"] }
+pakery-spake2plus = { version = "0.6.2", default-features = false, features = ["std", "test-utils"] }
+# Matter PASE (draft-01). `test-support` injects the ephemeral scalars.
+matter-crypto = { version = "0.5.1", default-features = false, features = ["test-support"] }
 # RSA blind signatures, which aws-lc-rs does not offer.
 blind-rsa-signatures = { version = "0.18", default-features = false }
 # ECVRF, which aws-lc-rs does not offer: key transparency's `akd` for
@@ -95,6 +100,9 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   # Builds the FIPS module's source, which draws every random value from its
   # DRBG (`src/fips_rng.rs`).
   "cfg(rind_fips)",
+  # Builds the FIPS module so `RIND_FIPS_BREAK` corrupts the self-test it
+  # names, as a lab checks each failure path (`src/fips.rs`).
+  "cfg(rind_fips_break)",
   # curve25519-dalek's backend overrides, which armv7 refuses.
   'cfg(curve25519_dalek_bits, values("32", "64"))',
   'cfg(curve25519_dalek_backend, values("fiat", "serial", "simd", "avx512"))',

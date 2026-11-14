@@ -52,6 +52,13 @@ mod error;
 #[cfg(any(test, rind_fips))]
 mod fips_rng;
 
+/// What the FIPS module (`rind-fips`) needs beyond the public API: its
+/// self-tests, its error state, and its errors' codes. Only the module's own
+/// build compiles it.
+#[cfg(any(test, rind_fips))]
+#[doc(hidden)]
+pub mod fips;
+
 /// Test infrastructure.
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -93,12 +100,10 @@ pub mod doc {
 /// let mut alice_key = [0u8; 32];
 /// let mut bob_key = [0u8; 32];
 /// salt.extract(alice_secret.as_ref())
-///     .expand(&[b"key"], alice_key.len())
-///     .fill(&mut alice_key)
+///     .and_then(|prk| prk.expand(&[b"key"], alice_key.len())?.fill(&mut alice_key))
 ///     .unwrap();
 /// salt.extract(bob_secret.as_ref())
-///     .expand(&[b"key"], bob_key.len())
-///     .fill(&mut bob_key)
+///     .and_then(|prk| prk.expand(&[b"key"], bob_key.len())?.fill(&mut bob_key))
 ///     .unwrap();
 /// assert_eq!(alice_key, bob_key);
 /// ```
@@ -129,14 +134,14 @@ pub mod agreement {
 /// let recipient_secret = decapsulation_key.decapsulate(ciphertext.as_ref())?;
 ///
 /// // Each side derives its keys from the secret with a KDF.
-/// let salt = rind::hkdf::Salt::new(&rind::hkdf::HKDF_SHA256, b"");
+/// let salt = rind::hkdf::Salt::new(&rind::hkdf::HKDF_SHA256, b"session salt");
 /// let mut sender_key = [0u8; 32];
 /// let mut recipient_key = [0u8; 32];
-/// salt.extract(sender_secret.as_ref())
-///     .expand(&[b"key"], sender_key.len())
+/// salt.extract(sender_secret.as_ref())?
+///     .expand(&[b"key"], sender_key.len())?
 ///     .fill(&mut sender_key)?;
-/// salt.extract(recipient_secret.as_ref())
-///     .expand(&[b"key"], recipient_key.len())
+/// salt.extract(recipient_secret.as_ref())?
+///     .expand(&[b"key"], recipient_key.len())?
 ///     .fill(&mut recipient_key)?;
 /// assert_eq!(sender_key, recipient_key);
 /// # Ok(())
@@ -339,6 +344,11 @@ pub mod oprf {
 /// Each suite encodes its input to the curve by try-and-increment, whose
 /// running time depends on the input, so an input that must stay secret
 /// from an observer of timing needs another suite (RFC 9381 section 5.4.1.1).
+/// P-256's nonce is RFC 6979's: a candidate not from 1 to n - 1 draws
+/// another block, with probability about 2^-32, and that retry is not
+/// constant time. An Edwards25519 seed is an RFC 8032 seed dedicated to
+/// the VRF. Signing with it reuses the nonce and reveals the scalar; see
+/// [`SecretKey`](vrf::SecretKey).
 /// [`PublicKey::verify`](vrf::PublicKey::verify) always validates the key
 /// (`validate_key = TRUE`).
 ///
@@ -347,7 +357,7 @@ pub mod oprf {
 /// use rind::vrf::*;
 ///
 /// let secret_key = SecretKey::generate(&ECVRF_EDWARDS25519_SHA512_TAI)?;
-/// let (proof, output) = secret_key.prove(b"alice@example.com");
+/// let (proof, output) = secret_key.prove(b"alice@example.com")?;
 ///
 /// // A verifier parses the public key and recovers the same output.
 /// let encoded = secret_key.public_key().as_ref();
@@ -524,16 +534,19 @@ pub mod constant_time {
 /// into any number of keys, each exactly as long as what it becomes.
 ///
 /// ```
+/// # fn main() -> Result<(), rind::Error> {
 /// use rind::{aead, hkdf, hmac};
 ///
-/// let prk = hkdf::Salt::new(&hkdf::HKDF_SHA256, b"salt").extract(b"input key material");
+/// let prk = hkdf::Salt::new(&hkdf::HKDF_SHA256, b"salt").extract(b"input key material")?;
 ///
-/// let aead_key = aead::Key::from(prk.expand(&[b"aead"], &aead::AES_256_GCM));
-/// let hmac_key = hmac::Key::from(prk.expand(&[b"hmac"], &hmac::HMAC_SHA256));
+/// let aead_key = aead::Key::from(prk.expand(&[b"aead"], &aead::AES_256_GCM)?);
+/// let hmac_key = hmac::Key::from(prk.expand(&[b"hmac"], &hmac::HMAC_SHA256)?);
 ///
 /// let info: [&[u8]; 2] = [b"label", b"context"];
 /// let mut bytes = [0u8; 16];
-/// prk.expand(&info, bytes.len()).fill(&mut bytes).unwrap();
+/// prk.expand(&info, bytes.len())?.fill(&mut bytes)?;
+/// # Ok(())
+/// # }
 /// ```
 pub mod hkdf {
     pub use super::high::hkdf::{
@@ -544,6 +557,40 @@ pub mod hkdf {
     pub mod legacy {
         pub use crate::high::hkdf::HKDF_SHA1;
     }
+}
+
+/// SPAKE2+ on P-256 with SHA-256, HKDF, and HMAC.
+///
+/// [`RFC9383`](spake2plus::RFC9383) is RFC 9383. [`MATTER_PASE`](spake2plus::MATTER_PASE)
+/// is draft-bar-cfrg-spake2plus-01, the key schedule Matter's commissioning uses.
+/// The group, the points M and N, and the transcript are the same. The suites
+/// are different types, so a share from one does not type-check as the other's.
+/// The caller stretches the password and passes `w0` and `w1`. A verifier
+/// stores `w0` and `L = w1 * G`, not `w1`.
+///
+/// ```
+/// use rind::spake2plus::{ProverSecrets, RFC9383, VerifierRecord};
+///
+/// let w0 = [0x11; 40];
+/// let w1 = [0x22; 40];
+/// let prover = ProverSecrets::new(&w0, &w1).unwrap();
+/// let verifier = VerifierRecord::from_w1(&w0, &w1).unwrap();
+///
+/// let (share_p, prover) = prover
+///     .start(&RFC9383, b"app", b"client", b"server")
+///     .unwrap();
+/// let (share_v, confirm_v, verifier) = verifier
+///     .start(&RFC9383, b"app", b"client", b"server", &share_p)
+///     .unwrap();
+/// let (confirm_p, prover_key) = prover.finish(&share_v, &confirm_v).unwrap();
+/// let verifier_key = verifier.finish(&confirm_p).unwrap();
+/// assert_eq!(prover_key.as_ref(), verifier_key.as_ref());
+/// ```
+pub mod spake2plus {
+    pub use super::high::spake2plus::{
+        Confirm, MATTER_PASE, MatterPase, ProverAwaiting, ProverSecrets, RFC9383, Rfc9383, Share,
+        SharedKey, Suite, VerifierAwaiting, VerifierRecord,
+    };
 }
 
 /// Password-based key derivation with PBKDF2.
