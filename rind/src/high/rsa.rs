@@ -634,6 +634,68 @@ impl SigningKey {
         Ok(Self(priv_key))
     }
 
+    /// Whether `pkcs1` is a two-prime `RSAPrivateKey` whose components agree,
+    /// including a modulus below the 2048-bit floor [`Self::from_pkcs1_der`]
+    /// enforces. A modulus that does not fit the bignum does not agree.
+    /// The private components are wiped before this returns.
+    pub(crate) fn pkcs1_components_agree(bytes: &[u8]) -> bool {
+        let _entry = Entry::new_secret();
+        let Ok(decoded) = pkix::RSAPrivateKey::from_bytes(bytes) else {
+            return false;
+        };
+        if !matches!(decoded.version, pkix::Version::two_prime) {
+            return false;
+        }
+        if decoded.modulus.is_negative() || decoded.publicExponent.is_negative() {
+            return false;
+        }
+        let Ok(mut n) = PosInt::from_bytes(decoded.modulus.as_ref()) else {
+            return false;
+        };
+        let Ok(e) = public_exponent(decoded.publicExponent.as_ref()) else {
+            return false;
+        };
+        fn secret<const N: usize>(x: &asn1::Integer<'_>) -> Option<PosInt<N>> {
+            if ct::into_public(x.is_negative()) {
+                return None;
+            }
+            PosInt::from_secret_bytes(x.as_ref()).ok()
+        }
+        fn wipe<const N: usize>(mut value: Option<PosInt<N>>) {
+            if let Some(value) = value.as_mut() {
+                crate::low::zeroise_value(value);
+            }
+        }
+        let mut p = secret(&decoded.prime1);
+        let mut q = secret(&decoded.prime2);
+        let mut d = secret(&decoded.privateExponent);
+        let mut dp = secret(&decoded.exponent1);
+        let mut dq = secret(&decoded.exponent2);
+        let mut iqmp = secret(&decoded.coefficient);
+        match (
+            p.take(),
+            q.take(),
+            d.take(),
+            dp.take(),
+            dq.take(),
+            iqmp.take(),
+        ) {
+            (Some(p), Some(q), Some(d), Some(dp), Some(dq), Some(iqmp)) => {
+                rsa_priv::RsaPrivateKey::components_agree(p, q, d, dp, dq, iqmp, n, e)
+            }
+            (p, q, d, dp, dq, iqmp) => {
+                wipe(p);
+                wipe(q);
+                wipe(d);
+                wipe(dp);
+                wipe(dq);
+                wipe(iqmp);
+                crate::low::zeroise_value(&mut n);
+                false
+            }
+        }
+    }
+
     /// Encodes an RSA signing key to PKCS#1 DER format.
     ///
     /// `output` is the output buffer, and the encoding is written to the start

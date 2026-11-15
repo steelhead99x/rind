@@ -89,6 +89,8 @@ pub(crate) fn pkcs8_trailing(der: &[u8]) -> bool {
 pub(crate) struct Pkcs8Parts<'a> {
     pub parameters: &'a [u8],
     pub private_key: &'a [u8],
+    /// RFC 5958 `[1] IMPLICIT BIT STRING`, which some decoders reject.
+    pub has_public_key: bool,
 }
 
 /// Splits a v1 or v2 PKCS#8 document. The version must be 0 or 1. An
@@ -108,7 +110,8 @@ pub(crate) fn pkcs8_parts(der: &[u8]) -> Option<Pkcs8Parts<'_>> {
     if body.peek(0xa0) {
         read(&mut body, 0xa0).ok()?;
     }
-    if body.peek(0x81) {
+    let has_public_key = body.peek(0x81);
+    if has_public_key {
         read(&mut body, 0x81).ok()?;
     }
     if !body.at_end() {
@@ -117,7 +120,32 @@ pub(crate) fn pkcs8_parts(der: &[u8]) -> Option<Pkcs8Parts<'_>> {
     Some(Pkcs8Parts {
         parameters,
         private_key,
+        has_public_key,
     })
+}
+
+/// The outer `SEQUENCE`, including its header, without bytes after it.
+/// [`read`] rejects a non-minimal length, so the header size follows the body.
+pub(crate) fn sequence_prefix(der: &[u8]) -> Option<&[u8]> {
+    element_encoding(der, SEQUENCE)
+}
+
+/// The first DER element's encoding. Bytes after it are not included.
+pub(crate) fn leading_element(der: &[u8]) -> Option<&[u8]> {
+    let tag = *der.first()?;
+    element_encoding(der, tag)
+}
+
+fn element_encoding(der: &[u8], tag: u8) -> Option<&[u8]> {
+    let mut reader = untrusted::Reader::new(untrusted::Input::from(der));
+    let body = read(&mut reader, tag).ok()?;
+    let len = body.as_slice_less_safe().len();
+    let header = match len {
+        0..=0x7f => 2,
+        0x80..=0xff => 3,
+        _ => 4,
+    };
+    der.get(..header + len)
 }
 
 /// The tag and body of the first DER element in `der`. Bytes after it are

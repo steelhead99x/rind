@@ -131,6 +131,74 @@ impl RsaPrivateKey {
         })
     }
 
+    /// Whether these components satisfy the relations [`Self::new`] checks,
+    /// without the signing floor of 2048 bits. A modulus that does not fit
+    /// the bignum is refused by the caller before this runs. Only the final
+    /// verdict is revealed. The inputs are wiped by [`SecretPosInt`]'s drop
+    /// after the caller wraps them; this function wipes the products it makes.
+    pub(crate) fn components_agree(
+        mut p: RsaPosIntModP,
+        mut q: RsaPosIntModP,
+        d: RsaPosIntD,
+        mut dp: RsaPosIntModP,
+        mut dq: RsaPosIntModP,
+        mut iqmp: RsaPosIntModP,
+        n: RsaPosIntModN,
+        e: u64,
+    ) -> bool {
+        let (p_bits, q_bits) = (
+            low::ct::into_public(p.len_bits()),
+            low::ct::into_public(q.len_bits()),
+        );
+        if low::ct::into_public(p.is_even() | q.is_even() | n.is_even())
+            || q_bits < 2
+            || p_bits < 2
+            || e.is_multiple_of(2)
+            || e == 1
+            || e >> 33 != 0
+        {
+            wipe_components(p, q, d, dp, dq, iqmp, n);
+            return false;
+        }
+        let (p_words, q_words) = (p_bits.div_ceil(64), q_bits.div_ceil(64));
+        let fits =
+            p.fit(p_words) & q.fit(q_words) & dp.fit(p_words) & dq.fit(q_words) & iqmp.fit(p_words);
+
+        let mut p: SecretRsaPosIntModP = p.into();
+        let mut q: SecretRsaPosIntModP = q.into();
+        let d: SecretRsaPosIntD = d.into();
+        let dp: SecretRsaPosIntModP = dp.into();
+        let dq: SecretRsaPosIntModP = dq.into();
+        let iqmp: SecretRsaPosIntModP = iqmp.into();
+
+        let e = low::PosInt::word(e);
+        let exponents_agree = exponents_agree(&p, &d, &dp, &e) & exponents_agree(&q, &d, &dq, &e);
+        if p_bits < q_bits {
+            p.expand(&q);
+        } else {
+            q.expand(&p);
+        }
+        let p_montifier: SecretRsaPosIntModP = p.montifier().into();
+        let iqmp_mont: SecretRsaPosIntModP = iqmp.to_montgomery(&p_montifier, &p).into();
+        let mut p0 = p.mont_neg_inverse();
+        let mut pq: RsaPosIntModN = low::PosInt::mul(&p, &q);
+        let mut q_wide: RsaPosIntModN = q.widen();
+        let mut q_p = q_wide.reduce(&p, &p_montifier);
+        let consistent = fits
+            & exponents_agree
+            & pq.equals(&n)
+            & iqmp.less_than(&p)
+            & iqmp_mont.mont_mul(&q_p, &p, p0).equals(&p.fixed_one());
+        let verdict = low::ct::into_public(consistent);
+        low::zeroise_value(&mut pq);
+        low::zeroise_value(&mut q_wide);
+        low::zeroise_value(&mut q_p);
+        low::zeroise_value(&mut p0);
+        let mut n = n;
+        low::zeroise_value(&mut n);
+        verdict
+    }
+
     pub(crate) fn generate(
         size: RsaKeySize,
         candidate_source: &mut dyn RandomSource,
@@ -277,6 +345,24 @@ impl Drop for RsaPrivateKey {
         // Not secret, but wiping it lets `tests/zeroing.rs` check every byte.
         low::zeroise_value(&mut self.public);
     }
+}
+
+fn wipe_components(
+    mut p: RsaPosIntModP,
+    mut q: RsaPosIntModP,
+    mut d: RsaPosIntD,
+    mut dp: RsaPosIntModP,
+    mut dq: RsaPosIntModP,
+    mut iqmp: RsaPosIntModP,
+    mut n: RsaPosIntModN,
+) {
+    low::zeroise_value(&mut p);
+    low::zeroise_value(&mut q);
+    low::zeroise_value(&mut d);
+    low::zeroise_value(&mut dp);
+    low::zeroise_value(&mut dq);
+    low::zeroise_value(&mut iqmp);
+    low::zeroise_value(&mut n);
 }
 
 /// Whether `dp = d mod (p - 1)` and `dp * e = 1 (mod p - 1)`.
