@@ -19,7 +19,10 @@
 # so a run checks the paths the host's CPU takes, short of the features in
 # `UNDECODED`, whose instructions BINSEC cannot read and which this denies
 # through `--cfg rind_cpu_disable`, as `admin/ctgrind`'s jobs deny theirs.
-# `RIND_CPU_DISABLE_*` in the environment denies more.
+# `RIND_CPU_DISABLE_*` in the environment denies more. On aarch64, after the
+# host's own schedule, the X25519 and 16- and 32-word Montgomery tests run
+# again with `RIND_CPU_DISABLE_wide_mul=1`: a wide host would otherwise
+# trace `_alt` and `bn_mul_mont`, and the narrow schedules would go unseen.
 #
 # Run it in `nix develop .#binsec`.
 
@@ -510,7 +513,7 @@ def is_planted(name):
     return name.split("::")[-1].startswith("ct_binsec_planted")
 
 
-def dump(exe, name, target, tmp):
+def dump(exe, name, target, tmp, env):
     """Runs `name` under gdb, dumping it at its region into `tmp`, and
     returns the core's path, the addresses of the markers and of the
     functions in `LIBC` glibc picked, the values the region declassified,
@@ -522,7 +525,9 @@ def dump(exe, name, target, tmp):
         f.write("CORE = {!r}\nSYMBOLS = {!r}\nGOT = {!r}\n".format(core, SYMBOLS, got) + GDB)
     cmd = ["gdb", "-batch", "-nx", "-x", script, "--args", exe]
     cmd += ["--ignored", "--exact", name, "--test-threads=1", "-q"]
-    out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8").stdout
+    out = subprocess.run(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8", env=env
+    ).stdout
     symbols = dict((m[1], int(m[2], 16)) for m in re.finditer(r"^SYMBOL (\S+) (\S+)$", out, re.M))
     libc = dict((m[1], int(m[2], 16)) for m in re.finditer(r"^LIBC (\S+) (\S+)$", out, re.M))
     public = [bytes.fromhex(m) for m in re.findall(r"^PUBLIC ([0-9a-f]*)$", out, re.M)]
@@ -585,9 +590,9 @@ def keep_first_thread(path):
         f.write(data)
 
 
-def check(exe, name, target, timeout, tmp):
+def check(exe, name, target, timeout, tmp, env):
     """Returns BINSEC's verdict on `name`'s region, and its log."""
-    core, symbols, libc, public, stubbed = dump(exe, name, target, tmp)
+    core, symbols, libc, public, stubbed = dump(exe, name, target, tmp, env)
     word = WORD[arch(target)]
     stubs = {}
     for fn, addr in libc.items():
@@ -675,24 +680,40 @@ def main():
         sys.exit("ct-binsec: no ct_binsec test matches {}".format(" ".join(args.filter)))
 
     failed = False
-    for name in names:
-        with tempfile.TemporaryDirectory() as tmp:
-            start = time.monotonic()
-            verdict, log, core = check(exe, name, target, args.timeout, tmp)
-            stats = re.findall(r"\[checkct:info\] (.*)", log)
-            stats.append("{:.0f} s".format(time.monotonic() - start))
-            if is_planted(name):
-                ok = verdict == "insecure"
-            else:
-                ok = verdict == "secure"
-            print("{} {}: {}; {}".format("ok  " if ok else "FAIL", name, verdict, "; ".join(stats)))
-            if not ok:
-                failed = True
-                for finding in findings(exe, core, log):
-                    print("    " + finding)
-                if verdict != "insecure":
-                    for line in log.splitlines()[-40:]:
-                        print("    " + line)
+
+    def run(names, env, label):
+        nonlocal failed
+        if label:
+            print("ct-binsec: {}".format(label))
+        for name in names:
+            with tempfile.TemporaryDirectory() as tmp:
+                start = time.monotonic()
+                verdict, log, core = check(exe, name, target, args.timeout, tmp, env)
+                stats = re.findall(r"\[checkct:info\] (.*)", log)
+                stats.append("{:.0f} s".format(time.monotonic() - start))
+                if is_planted(name):
+                    ok = verdict == "insecure"
+                else:
+                    ok = verdict == "secure"
+                shown = "{} ({})".format(name, label) if label else name
+                print("{} {}: {}; {}".format("ok  " if ok else "FAIL", shown, verdict, "; ".join(stats)))
+                if not ok:
+                    failed = True
+                    for finding in findings(exe, core, log):
+                        print("    " + finding)
+                    if verdict != "insecure":
+                        for line in log.splitlines()[-40:]:
+                            print("    " + line)
+
+    run(names, None, "")
+    # The binary already has `--cfg rind_cpu_disable`, so the variable is
+    # read at run time. One build serves both schedules.
+    narrow = {"ct_binsec_x25519", "ct_binsec_mont16", "ct_binsec_mont_mul"}
+    if arch(target) == "aarch64" and not os.environ.get("RIND_CPU_DISABLE_wide_mul"):
+        again = [name for name in names if name.split("::")[-1] in narrow and not is_planted(name)]
+        if again:
+            env = dict(os.environ, RIND_CPU_DISABLE_wide_mul="1")
+            run(again, env, "narrow multiplier")
     sys.exit(failed)
 
 

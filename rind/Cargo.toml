@@ -42,6 +42,12 @@ libcrux-sha2 = { version = "0.0.9", features = ["expose-hacl"] }
 [target.'cfg(all(target_arch = "arm", target_endian = "little", not(rind_portable), any(target_os = "linux", target_os = "android")))'.dependencies]
 libc = { version = "0.2", default-features = false }
 
+# Installs a SIGSYS handler around the `/proc/cpuinfo` read, so a filter
+# that rejects `openat` with SIGSYS does not kill the first elliptic-curve
+# or RSA call.
+[target.'cfg(all(target_arch = "aarch64", target_os = "linux"))'.dependencies]
+libc = { version = "0.2", default-features = false }
+
 [dev-dependencies]
 # Argon2id's differential tests, since aws-lc-rs has no Argon2.
 argon2 = { version = "0.6", default-features = false, features = ["alloc"] }

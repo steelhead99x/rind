@@ -254,19 +254,173 @@ fn detect_wide_once() -> bool {
 /// that cannot read the file, Android (`target_os` is not `linux`, including
 /// a build that cannot open the file), and Windows on ARM never see a part
 /// list, so they stay on `_alt` rather than guessing a narrow core. FreeBSD
-/// does too. A filter that kills `open` is not that case: it is not invoked
-/// until a wide-or-narrow schedule is first used. Both schedules are correct
-/// on every core.
+/// does too. Both schedules are correct on every core.
+///
+/// [`crate::cpu::wide_multiplier`] is the pre-warm. Call it before a sandbox
+/// that kills `open`: seccomp strict mode delivers `SIGKILL`, which this
+/// cannot catch. A filter that delivers `SIGSYS` is caught around the read,
+/// and the choice stays `_alt`.
 fn detect_wide_multiplier() -> bool {
     if cfg!(target_vendor = "apple") {
         return true;
     }
     if cfg!(target_os = "linux") {
-        return std::fs::read_to_string("/proc/cpuinfo")
+        // A debug build, or a release one with `--cfg rind_cpu_disable`, can
+        // name a fixture instead of the host's file. Release builds compile
+        // this out. `admin/mutants` runs the debug tests, so a mutant that
+        // returns a constant fails the fixture whose answer is the other one.
+        #[cfg(any(debug_assertions, rind_cpu_disable))]
+        if let Some(text) = cpuinfo_fixture() {
+            return wide_from_cpuinfo(text);
+        }
+        return read_cpuinfo()
             .map(|text| wide_from_cpuinfo(&text))
             .unwrap_or(true);
     }
     true
+}
+
+/// `RIND_TEST_CPUINFO=narrow|wide|empty` stands in for `/proc/cpuinfo`.
+#[cfg(any(debug_assertions, rind_cpu_disable))]
+fn cpuinfo_fixture() -> Option<&'static str> {
+    let text = match std::env::var("RIND_TEST_CPUINFO").ok().as_deref() {
+        Some("narrow") => "CPU implementer\t: 0x41\nCPU part\t: 0xd0b\n",
+        Some("wide") => "CPU implementer\t: 0x41\nCPU part\t: 0xd40\n",
+        Some("empty") => "",
+        _ => return None,
+    };
+    Some(text)
+}
+
+/// `/proc/cpuinfo`, or `None` when the read fails.
+///
+/// The buffer is allocated before the `SIGSYS` handler is installed, so the
+/// allocation is outside that window. A full buffer fails closed: a core
+/// past the end would be unseen, and an unseen wide core must not be treated
+/// as narrow.
+#[cfg(target_os = "linux")]
+fn read_cpuinfo() -> Option<String> {
+    let mut buf = vec![0u8; 256 * 1024];
+    // One reader at a time: the handler is process-wide.
+    static GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _gate = GATE.lock().unwrap_or_else(|poison| poison.into_inner());
+    // No handler means a `SIGSYS` filter would kill the process, so skip
+    // the open and fail closed.
+    let restore = install_sigsys_handler()?;
+    // SAFETY: `buf` has `buf.len()` writable bytes.
+    let n = unsafe { read_cpuinfo_raw(buf.as_mut_ptr(), buf.len()) };
+    drop(restore);
+    if n < 0 {
+        return None;
+    }
+    String::from_utf8(buf[..n as usize].to_vec()).ok()
+}
+
+/// Puts `swallow_sigsys` in place for the read and puts the previous
+/// action back when dropped.
+#[cfg(target_os = "linux")]
+fn install_sigsys_handler() -> Option<SigsysRestore> {
+    // SAFETY: `sigaction` is integers and pointers. Zero is an empty mask
+    // and a null handler, and the fields used below are written first.
+    let mut action: libc::sigaction = unsafe { core::mem::zeroed() };
+    action.sa_sigaction = swallow_sigsys as *const () as libc::sighandler_t;
+    // SAFETY: as above. `sigaction` overwrites this with the previous action.
+    let mut previous: libc::sigaction = unsafe { core::mem::zeroed() };
+    // SAFETY: both are zeroed `sigaction`s, and `swallow_sigsys` returns.
+    let installed = unsafe { libc::sigaction(libc::SIGSYS, &action, &mut previous) } == 0;
+    installed.then_some(SigsysRestore(previous))
+}
+
+#[cfg(target_os = "linux")]
+struct SigsysRestore(libc::sigaction);
+
+#[cfg(target_os = "linux")]
+impl Drop for SigsysRestore {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` is the action `sigaction` returned.
+        unsafe {
+            libc::sigaction(libc::SIGSYS, &self.0, core::ptr::null_mut());
+        }
+    }
+}
+
+/// Returns from `SIGSYS` so the trapped `openat` comes back as an error.
+/// A handler that returns does not restart the call: this read does not
+/// retry, so a filter that traps every `openat` cannot loop.
+#[cfg(target_os = "linux")]
+extern "C" fn swallow_sigsys(_signal: libc::c_int) {}
+
+/// Reads `/proc/cpuinfo` with `openat`/`read`/`close`.
+///
+/// A negative result is a failed open or read, including the value left in
+/// `x0` when a `SIGSYS` handler returns from a trapped `openat` (seccomp
+/// rolls the arguments back, and `AT_FDCWD` is negative). The buffer is
+/// filled at most `len` bytes; `len` itself means the file did not fit.
+///
+/// # Safety
+///
+/// `buf` must have `len` writable bytes.
+#[cfg(target_os = "linux")]
+unsafe fn read_cpuinfo_raw(buf: *mut u8, len: usize) -> isize {
+    let path = b"/proc/cpuinfo\0";
+    let fd: isize;
+    // SAFETY: `openat` of a NUL-terminated path. The kernel writes the
+    // result to `x0` and preserves the other inputs' registers.
+    unsafe {
+        core::arch::asm!(
+            "svc #0",
+            in("x8") libc::SYS_openat,
+            inout("x0") libc::AT_FDCWD as isize => fd,
+            in("x1") path.as_ptr(),
+            in("x2") libc::O_RDONLY as isize,
+            in("x3") 0isize,
+            options(nostack)
+        );
+    }
+    if fd < 0 {
+        return fd;
+    }
+    let mut filled = 0usize;
+    while filled < len {
+        let n: isize;
+        // SAFETY: `fd` is an open descriptor, and `buf[filled..]` is writable.
+        unsafe {
+            core::arch::asm!(
+                "svc #0",
+                in("x8") libc::SYS_read,
+                inout("x0") fd => n,
+                in("x1") buf.add(filled),
+                in("x2") len - filled,
+                options(nostack)
+            );
+        }
+        if n < 0 {
+            close_fd(fd);
+            return n;
+        }
+        if n == 0 {
+            break;
+        }
+        filled += n as usize;
+    }
+    close_fd(fd);
+    if filled == len {
+        return -1;
+    }
+    filled as isize
+}
+
+#[cfg(target_os = "linux")]
+fn close_fd(fd: isize) {
+    // SAFETY: `fd` is an open descriptor, and a failed close is ignored.
+    unsafe {
+        core::arch::asm!(
+            "svc #0",
+            in("x8") libc::SYS_close,
+            inout("x0") fd => _,
+            options(nostack)
+        );
+    }
 }
 
 /// Whether `text` should run the `_alt` schedules.
@@ -785,5 +939,185 @@ CPU part	: 0xd0b
             unsafe { core::arch::asm!("mrs {}, S3_3_C4_C2_5", out(reg) pstate) };
             println!("read DIT: {pstate:#x}");
         }
+    }
+
+    /// The host's file and `detect_wide_multiplier` name the same schedule.
+    /// A mutant that returns a constant survives on a host whose file has
+    /// that answer; [`cpuinfo_fixture_selects_the_schedule`] has both answers.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn detected_value_matches_cpuinfo() {
+        let text = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+        assert_eq!(detect_wide_multiplier(), wide_from_cpuinfo(&text));
+        let read = read_cpuinfo().expect("cpuinfo");
+        assert!(read.contains("processor") || read.is_empty());
+        assert_eq!(wide_from_cpuinfo(&read), wide_from_cpuinfo(&text));
+    }
+
+    /// `narrow` is Cortex-A76, `wide` is Neoverse V1, `empty` has no part.
+    #[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
+    #[test]
+    fn cpuinfo_fixture_selects_the_schedule() {
+        const CHILD: &str = "RIND_TEST_CPUINFO_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let mode = std::env::var("RIND_TEST_CPUINFO").unwrap();
+            let wide = detect_wide_multiplier();
+            assert_eq!(wide, mode != "narrow", "{mode}");
+            println!("{CHILD} {mode}");
+            return;
+        }
+        for mode in ["narrow", "wide", "empty"] {
+            let stdout = run_child(
+                concat!(module_path!(), "::cpuinfo_fixture_selects_the_schedule"),
+                &[(CHILD, "1"), ("RIND_TEST_CPUINFO", mode)],
+            );
+            assert!(stdout.contains(&format!("{CHILD} {mode}")), "{stdout}");
+        }
+    }
+
+    /// `SIGSYS` from a trapped `openat` keeps `_alt` and the process.
+    #[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
+    #[test]
+    fn sigsys_on_open_keeps_alt() {
+        const CHILD: &str = "RIND_TEST_SIGSYS_OPEN";
+        if std::env::var_os(CHILD).is_some() {
+            let restore = install_sigsys_handler().expect("sigaction");
+            // SAFETY: `SIGSYS` is caught by `swallow_sigsys` for this call.
+            assert_eq!(unsafe { libc::raise(libc::SIGSYS) }, 0);
+            match install_openat_trap() {
+                Ok(()) => {
+                    let mut probe_buf = [0u8; 64];
+                    // SAFETY: `probe_buf` is writable, and the handler above
+                    // is still installed, so a trapped `openat` returns.
+                    let probe =
+                        unsafe { read_cpuinfo_raw(probe_buf.as_mut_ptr(), probe_buf.len()) };
+                    if probe >= 0 {
+                        // The filter did not catch this process's `openat`.
+                        println!("{CHILD} skipped");
+                    } else {
+                        assert!(detect_wide_multiplier(), "probe {probe}");
+                        println!("{CHILD} done");
+                    }
+                }
+                Err(err) if seccomp_unavailable(&err) => {
+                    // qemu-user rejects `PR_SET_SECCOMP` (`ENOSYS` or
+                    // `EINVAL`) for a filter the kernel would accept. A
+                    // native kernel that rejects only the trap filter
+                    // still fails this test.
+                    println!("{CHILD} skipped");
+                }
+                Err(err) => panic!("seccomp: {err}"),
+            }
+            drop(restore);
+            return;
+        }
+        let stdout = run_child(
+            concat!(module_path!(), "::sigsys_on_open_keeps_alt"),
+            &[(CHILD, "1")],
+        );
+        assert!(
+            stdout.contains(&format!("{CHILD} done"))
+                || stdout.contains(&format!("{CHILD} skipped")),
+            "{stdout}"
+        );
+    }
+
+    #[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
+    fn run_child(test: &str, env: &[(&str, &str)]) -> String {
+        let mut cmd = reexec();
+        let name = test.split_once("::").unwrap().1;
+        cmd.args([name, "--exact", "--nocapture"]);
+        for (key, value) in env {
+            cmd.env(key, value);
+        }
+        let output = cmd.output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        assert!(
+            output.status.success(),
+            "{test}\n{stdout}{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        stdout
+    }
+
+    /// `true` when this kernel will not install any seccomp filter.
+    ///
+    /// An allow-all filter is valid, so `EINVAL` or `ENOSYS` from it means
+    /// the platform (qemu-user, here) has no seccomp, rather than that the
+    /// trap filter above is malformed.
+    #[cfg(target_os = "linux")]
+    fn seccomp_unavailable(err: &std::io::Error) -> bool {
+        if !matches!(err.raw_os_error(), Some(libc::ENOSYS | libc::EINVAL)) {
+            return false;
+        }
+        let mut allow = [libc::sock_filter {
+            code: 0x06, // BPF_RET | BPF_K
+            jt: 0,
+            jf: 0,
+            k: libc::SECCOMP_RET_ALLOW,
+        }];
+        matches!(
+            install_filter(&mut allow).map_err(|err| err.raw_os_error()),
+            Err(Some(libc::ENOSYS | libc::EINVAL))
+        )
+    }
+
+    /// Traps `openat` and `openat2` with `SECCOMP_RET_TRAP`, which delivers
+    /// `SIGSYS`. Other calls are allowed, so the test can still print.
+    #[cfg(target_os = "linux")]
+    fn install_openat_trap() -> std::io::Result<()> {
+        // BPF_LD | BPF_W | BPF_ABS, BPF_JMP | BPF_JEQ | BPF_K, BPF_RET | BPF_K.
+        let mut filter = [
+            libc::sock_filter {
+                code: 0x20,
+                jt: 0,
+                jf: 0,
+                k: 0,
+            },
+            libc::sock_filter {
+                code: 0x15,
+                jt: 2,
+                jf: 0,
+                k: 56,
+            },
+            libc::sock_filter {
+                code: 0x15,
+                jt: 1,
+                jf: 0,
+                k: 437,
+            },
+            libc::sock_filter {
+                code: 0x06,
+                jt: 0,
+                jf: 0,
+                k: libc::SECCOMP_RET_ALLOW,
+            },
+            libc::sock_filter {
+                code: 0x06,
+                jt: 0,
+                jf: 0,
+                k: libc::SECCOMP_RET_TRAP,
+            },
+        ];
+        install_filter(&mut filter)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn install_filter(filter: &mut [libc::sock_filter]) -> std::io::Result<()> {
+        let prog = libc::sock_fprog {
+            len: filter.len() as libc::c_ushort,
+            filter: filter.as_mut_ptr(),
+        };
+        // SAFETY: `prog` points at `filter` for the duration of the call.
+        // `PR_SET_NO_NEW_PRIVS` is required before a seccomp filter.
+        unsafe {
+            if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if libc::prctl(libc::PR_SET_SECCOMP, libc::SECCOMP_MODE_FILTER, &prog, 0, 0) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+        Ok(())
     }
 }

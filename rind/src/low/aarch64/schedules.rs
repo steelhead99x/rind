@@ -5,7 +5,9 @@
 //! Each routine is called on zero, one, an all-ones limb, and a mixed
 //! pattern, and the curve routines also on a generator. The points are the
 //! ones the scalar-multiplication proofs state: Montgomery Jacobian with
-//! z = 1 for P-256 and P-384, and Jacobian with z = 1 for P-521.
+//! z = 1 for P-256 and P-384, and Jacobian with z = 1 for P-521. Field
+//! elements at `p - 1`, `p`, and `p + k`, scalars at and above each group
+//! order, and a point at infinity are included too.
 
 /// Both schedules agree, for every routine `wide_mux` dispatches.
 pub(crate) fn agree() {
@@ -263,6 +265,169 @@ pub(crate) fn agree() {
         super::p521_jscalarmul_narrow::p521_jscalarmul(&mut n, scalar, &g521);
         assert_eq!(w, n, "p521 scalarmul {i}");
     }
+
+    // p = 2^255 - 19, then p - 1 and p + k. These are the reduction edges.
+    let p25519 = [
+        0xffff_ffff_ffff_ffed,
+        u64::MAX,
+        u64::MAX,
+        0x7fff_ffff_ffff_ffff,
+    ];
+    let mut p25519_minus = p25519;
+    p25519_minus[0] -= 1;
+    let mut p25519_plus = p25519;
+    p25519_plus[0] += 2;
+    // 2^255, which is p + 19 and sets only the sign bit of a 32-byte encoding.
+    let two_255 = [0, 0, 0, 0x8000_0000_0000_0000];
+    for (i, x) in [p25519_minus, p25519, p25519_plus, two_255]
+        .iter()
+        .enumerate()
+    {
+        let (mut w, mut n) = ([0; 4], [0; 4]);
+        let rw = super::bignum_invsqrt_p25519::bignum_invsqrt_p25519(&mut w, x);
+        let rn = super::bignum_invsqrt_p25519_narrow::bignum_invsqrt_p25519(&mut n, x);
+        assert_eq!((rw, w), (rn, n), "invsqrt edge {i}");
+        super::bignum_sqr_p25519::bignum_sqr_p25519(&mut w, x);
+        super::bignum_sqr_p25519_narrow::bignum_sqr_p25519(&mut n, x);
+        assert_eq!(w, n, "sqr edge {i}");
+        super::bignum_mul_p25519::bignum_mul_p25519(&mut w, x, &p25519);
+        super::bignum_mul_p25519_narrow::bignum_mul_p25519(&mut n, x, &p25519);
+        assert_eq!(w, n, "mul edge {i}");
+        super::curve25519_x25519::curve25519_x25519(&mut w, x, &p25519_minus);
+        super::curve25519_x25519_narrow::curve25519_x25519(&mut n, x, &p25519_minus);
+        assert_eq!(w, n, "x25519 edge {i}");
+        super::curve25519_x25519base::curve25519_x25519base(&mut w, x);
+        super::curve25519_x25519base_narrow::curve25519_x25519base(&mut n, x);
+        assert_eq!(w, n, "x25519base edge {i}");
+    }
+
+    // Ed25519's group order L, then L - 1 and L + 1.
+    let order25519 = [
+        0x5812_631a_5cf5_d3ed,
+        0x14de_f9de_a2f7_9cd6,
+        0,
+        0x1000_0000_0000_0000,
+    ];
+    let mut below25519 = order25519;
+    below25519[0] -= 1;
+    let mut above25519 = order25519;
+    above25519[0] += 1;
+    for (i, scalar) in [below25519, order25519, above25519].iter().enumerate() {
+        let (mut w, mut n) = ([0; 8], [0; 8]);
+        super::edwards25519_scalarmulbase::edwards25519_scalarmulbase(&mut w, scalar);
+        super::edwards25519_scalarmulbase_narrow::edwards25519_scalarmulbase(&mut n, scalar);
+        assert_eq!(w, n, "ed25519 order {i}");
+    }
+
+    // Decode at p - 1, p, p + 1, and with the sign bit set on each.
+    let mut decode_edges = Vec::new();
+    for mut limbs in [p25519_minus, p25519, p25519_plus] {
+        decode_edges.push(limbs_to_bytes(limbs));
+        limbs[3] |= 0x8000_0000_0000_0000;
+        decode_edges.push(limbs_to_bytes(limbs));
+    }
+    for (i, bytes) in decode_edges.iter().enumerate() {
+        let (mut w, mut n) = ([0; 8], [0; 8]);
+        let rw = super::edwards25519_decode::edwards25519_decode(&mut w, bytes);
+        let rn = super::edwards25519_decode_narrow::edwards25519_decode(&mut n, bytes);
+        assert_eq!((rw, w), (rn, n), "decode edge {i}");
+    }
+
+    // n, n - 1, and n + 1 for each NIST scalar. u64::MAX is above the order
+    // and is already in the loops above; these are the boundary.
+    let n256 = [
+        0xf3b9_cac2_fc63_2551,
+        0xbce6_faad_a717_9e84,
+        u64::MAX,
+        0xffff_ffff_0000_0000,
+    ];
+    let mut below256 = n256;
+    below256[0] -= 1;
+    let mut above256 = n256;
+    above256[0] += 1;
+    for (i, scalar) in [below256, n256, above256].iter().enumerate() {
+        let (mut w, mut n) = ([0; 8], [0; 8]);
+        super::p256_scalarmul::p256_scalarmul(&mut w, scalar, &g_affine);
+        super::p256_scalarmul_narrow::p256_scalarmul(&mut n, scalar, &g_affine);
+        assert_eq!(w, n, "p256 order {i}");
+    }
+
+    let n384 = [
+        0xecec_196a_ccc5_2973,
+        0x581a_0db2_48b0_a77a,
+        0xc763_4d81_f437_2ddf,
+        u64::MAX,
+        u64::MAX,
+        u64::MAX,
+    ];
+    let mut below384 = n384;
+    below384[0] -= 1;
+    let mut above384 = n384;
+    above384[0] += 1;
+    for (i, scalar) in [below384, n384, above384].iter().enumerate() {
+        let (mut w, mut n) = ([0; 18], [0; 18]);
+        super::p384_montjscalarmul::p384_montjscalarmul(&mut w, scalar, &g384);
+        super::p384_montjscalarmul_narrow::p384_montjscalarmul(&mut n, scalar, &g384);
+        assert_eq!(w, n, "p384 order {i}");
+    }
+
+    let n521 = [
+        0xbb6f_b71e_9138_6409,
+        0x3bb5_c9b8_899c_47ae,
+        0x7fcc_0148_f709_a5d0,
+        0x5186_8783_bf2f_966b,
+        0xffff_ffff_ffff_fffa,
+        u64::MAX,
+        u64::MAX,
+        u64::MAX,
+        0x0000_0000_0000_01ff,
+    ];
+    let mut below521 = n521;
+    below521[0] -= 1;
+    let mut above521 = n521;
+    above521[0] += 1;
+    for (i, scalar) in [below521, n521, above521].iter().enumerate() {
+        let (mut w, mut n) = ([0; 27], [0; 27]);
+        super::p521_jscalarmul::p521_jscalarmul(&mut w, scalar, &g521);
+        super::p521_jscalarmul_narrow::p521_jscalarmul(&mut n, scalar, &g521);
+        assert_eq!(w, n, "p521 order {i}");
+    }
+
+    // Point at infinity (Z = 0) and an unreduced affine X, for the mixed adds.
+    let mut inf384 = g384;
+    inf384[12..].fill(0);
+    let mut unreduced384 = affine384;
+    unreduced384[..6].fill(u64::MAX);
+    for (i, (point, affine)) in [(inf384, affine384), (g384, unreduced384)]
+        .iter()
+        .enumerate()
+    {
+        let (mut w, mut n) = ([0; 18], [0; 18]);
+        super::p384_montjmixadd::p384_montjmixadd(&mut w, point, affine);
+        super::p384_montjmixadd_narrow::p384_montjmixadd(&mut n, point, affine);
+        assert_eq!(w, n, "p384 mixadd edge {i}");
+    }
+    let mut inf521 = g521;
+    inf521[18..].fill(0);
+    let mut unreduced521 = affine521;
+    unreduced521[..9].fill(u64::MAX);
+    for (i, (point, affine)) in [(inf521, affine521), (g521, unreduced521)]
+        .iter()
+        .enumerate()
+    {
+        let (mut w, mut n) = ([0; 27], [0; 27]);
+        super::p521_jmixadd::p521_jmixadd(&mut w, point, affine);
+        super::p521_jmixadd_narrow::p521_jmixadd(&mut n, point, affine);
+        assert_eq!(w, n, "p521 mixadd edge {i}");
+    }
+}
+
+fn limbs_to_bytes(limbs: [u64; 4]) -> [u8; 32] {
+    let mut bytes = [0u8; 32];
+    for (i, limb) in limbs.iter().enumerate() {
+        bytes[i * 8..][..8].copy_from_slice(&limb.to_le_bytes());
+    }
+    bytes
 }
 
 // The override is process-wide, so each schedule is a child. Disable wins
@@ -375,8 +540,9 @@ fn trace_ecdh(algorithm: &'static crate::agreement::Algorithm, len: usize) {
 }
 
 // Valgrind on the arm64 runner sees the schedule that runner's core selects,
-// which is wide. `admin/ct-qemu` traces these with the narrow schedules
-// forced, so the NEON field arithmetic is in the trace.
+// which is wide. `admin/ct-qemu` builds with `--cfg rind_cpu_disable` and
+// traces each of these again with `RIND_CPU_DISABLE_wide_mul=1`, so the
+// narrow schedules are in a trace too.
 
 #[test]
 #[ignore = "admin/ct-qemu runs it under qemu"]
@@ -458,11 +624,43 @@ fn ct_qemu_mont32() {
     });
 }
 
+/// A 16-word Montgomery product. On a narrow multiplier that is
+/// `bignum_kmul_16_32`, `bignum_ksqr_16_32`, and `bignum_emontredc_8n` at
+/// k = 16, which is every RSA-2048 CRT exponentiation. The inputs differ
+/// between the two seeds; the low limb of the modulus does not.
+#[test]
+#[ignore = "admin/ct-qemu runs it under qemu"]
+fn ct_qemu_mont16() {
+    let seed = qemu_seed(16 * 8 * 3);
+    let mut modulus = [0u64; 16];
+    let mut x = [0u64; 16];
+    let mut y = [0u64; 16];
+    words_into(&seed[..128], &mut modulus);
+    words_into(&seed[128..256], &mut x);
+    words_into(&seed[256..], &mut y);
+    modulus[0] = 1;
+    modulus[15] |= 1 << 63;
+    x[15] &= !(1 << 63);
+    y[15] &= !(1 << 63);
+    let mut n0 = [0u64];
+    super::bignum_negmodinv::bignum_negmodinv(&mut n0, &modulus[..1]);
+    super::ct_qemu::traced(|| {
+        let mut z = [0u64; 16];
+        super::mont::mont_mul(&mut z, &x, &y, &modulus, n0[0]);
+        super::mont::mont_sqr(&mut z, &x, &modulus, n0[0]);
+        z
+    });
+}
+
 fn words(bytes: &[u8]) -> [u64; 32] {
     let mut out = [0u64; 32];
+    words_into(bytes, &mut out);
+    out
+}
+
+fn words_into(bytes: &[u8], out: &mut [u64]) {
     let (chunks, _) = bytes.as_chunks::<8>();
     for (limb, chunk) in out.iter_mut().zip(chunks) {
         *limb = u64::from_le_bytes(*chunk);
     }
-    out
 }
