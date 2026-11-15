@@ -47,6 +47,12 @@ These items are left out, so code using them fails to build:
 - A [`error::KeyRejected`] from rind's own checks gives rind's reason in its `Display`, and `"InvalidEncoding"` from `description_()`.
 - `VerificationAlgorithm::verify_digest_sig` and `verify_digest` fail for RSA, as they do for Ed25519: rind verifies RSA only over a message it hashes itself.
 - An Ed25519 public key of small order verifies no signature, and a PKCS#8 v2 Ed25519 key whose public key does not match is refused.
+- An ML-DSA PKCS#8 v2 key whose public key does not match is refused. aws-lc-rs loads the private key.
+- An ML-DSA `SubjectPublicKeyInfo` followed by more bytes is refused.
+- An ML-DSA PKCS#8 document followed by more bytes is refused. On a key of another parameter set, aws-lc-rs parses the key and then reports `Unspecified`.
+- An `id-ecPublicKey` PKCS#8 key on secp224r1, secp256k1, or a Brainpool curve is `InvalidEncoding` when loaded as ML-DSA. aws-lc-rs parses that key and reports `WrongAlgorithm`.
+- A DSA PKCS#8 key is `InvalidEncoding` when loaded as ML-DSA. aws-lc-rs parses one whose parameters and private key are in range and reports `WrongAlgorithm`.
+- An RSASSA-PSS PKCS#8 key whose parameters name a hash or a mask generation function is `InvalidEncoding` when loaded as ML-DSA. aws-lc-rs parses it and reports `WrongAlgorithm`.
 - ECDSA and ECDH public keys in the X9.62 hybrid form are refused.
 - An RSA public key, from `rsa::PublicKey::from_der` or elsewhere, must have a modulus of 1024 to 8192 bits, the range rind verifies with.
 - An RSA-OAEP private key is bound to one algorithm in rind, so a `rsa::PrivateDecryptingKey` loads the key again the first time it decrypts with each other algorithm, and keeps it.
