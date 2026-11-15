@@ -1,0 +1,40 @@
+name: regenerate
+
+# Re-runs every importer and generator at the upstream revision it pins and
+# fails on any difference from the committed code, or on an unlisted change in
+# rind's fork of s2n-bignum. Too slow for `just ci`, so it runs nightly and on
+# pull requests that change a generator, a pin, the fork, or the flake that
+# pins its tools.
+on:
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - admin/**
+      - thirdparty/s2n-bignum/**
+      - flake.nix
+      - flake.lock
+      - .github/workflows/regenerate.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regenerate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix
+
+      - name: Regenerate
+        run: nix develop .#regenerate --command admin/regenerate
