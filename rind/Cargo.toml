@@ -37,10 +37,16 @@ crabgrind = { version = "0.4", optional = true }
 [target.'cfg(any(rind_portable, target_endian = "big", target_os = "none", all(target_arch = "aarch64", not(target_feature = "neon")), not(any(target_arch = "x86_64", target_arch = "aarch64"))))'.dependencies]
 curve25519-dalek = { version = "5", default-features = false, features = ["precomputed-tables"] }
 fiat-crypto = { version = "0.3", default-features = false }
+libcrux-sha2 = { version = "0.0.9", features = ["expose-hacl"] }
+
+# armv7's ChaCha20 and its Poly1305 without NEON. A portable build uses
+# HACL*'s Poly1305 only from tests. Bare metal is excluded. Its M-profile
+# triples take the portable backend, and a manifest cannot keep the crates
+# for a bare-metal A-profile triple while leaving the M-profile ones out.
+[target.'cfg(all(target_arch = "arm", target_endian = "little", not(rind_portable), not(target_os = "none")))'.dependencies]
 libcrux-hacl-rs = { version = "0.0.6", features = ["alloc"] }
 libcrux-macros = "0.0.4"
 libcrux-poly1305 = { version = "0.0.7", features = ["expose-hacl"] }
-libcrux-sha2 = { version = "0.0.9", features = ["expose-hacl"] }
 
 # Reads the AArch32 crypto extension's HWCAP2 bits.
 [target.'cfg(all(target_arch = "arm", target_endian = "little", not(rind_portable), any(target_os = "linux", target_os = "android")))'.dependencies]
@@ -51,6 +57,10 @@ libc = { version = "0.2", default-features = false }
 argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
 # BLAKE2b's differential reference, since aws-lc-rs has no BLAKE2b.
 blake2 = { version = "0.11", default-features = false }
+# HACL*'s Poly1305, the differential reference for the 26-bit limbs. The arm
+# backend also links these outside tests; see the target block above.
+libcrux-hacl-rs = { version = "0.0.6", features = ["alloc"] }
+libcrux-poly1305 = { version = "0.0.7", features = ["expose-hacl"] }
 # ristretto255's differential reference; aws-lc-rs has no ristretto255.
 curve25519-dalek = { version = "5", default-features = false, features = ["precomputed-tables"] }
 # Checks armv7's NIST curve arithmetic against s2n-bignum's on the other arches.
