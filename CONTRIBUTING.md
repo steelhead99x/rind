@@ -27,13 +27,15 @@ With [Nix](https://nixos.org), `nix develop` (or direnv) provides CI's
 toolchain, and `just check` runs CI's gate over what the branch changed,
 three modules at a time (`sh/dispatch.sh` lists the `CHECK_*` variables that
 change that); the scheduled workflows' tools are in [TESTING.md](TESTING.md#running-the-tools).
-`just wasm` runs the nightly wasm job: it tests rind on `wasm32-wasip2`
-under wasmtime, with `SLOW_TESTS=1`. aws-lc-rs does not build for wasm, so
-the live differential tests stay on `just portable`. Ed25519's CCTV verdicts
-are compared with a file recorded from aws-lc, and a native test checks that
-file against aws-lc. `ReuseCache`'s threaded test does not run there.
-`wasm32-unknown-unknown` stays a compile check. The pull-request gate
-clippy-checks `rind-ring` there with `wasm32_unknown_unknown_js`.
+`just ci`'s cross lane clippy-checks rind's wasm tests and, on Linux, runs
+`cctv` and `heap_scratch` on `wasm32-wasip2` under wasmtime, and wipe-checks
+RSA-3072 and RSA-4096 key generation on 32-bit limbs. `just wasm` is that
+wasm run with `SLOW_TESTS=1`. aws-lc-rs does not build for wasm, so the live
+differential tests stay on `just portable`. Ed25519's CCTV verdicts are
+compared with a file recorded from aws-lc, and a native test checks that
+file against aws-lc. `ReuseCache`'s threaded test does not run on wasm.
+`wasm32-unknown-unknown` stays a compile check. The cross lane clippy-checks
+`rind-ring` there with `wasm32_unknown_unknown_js`.
 
 # Commits
 

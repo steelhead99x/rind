@@ -55,6 +55,9 @@ unstable-testing-arm-no-neon = []
 wasm32_unknown_unknown_js = ["rind/wasm_js"]
 
 [dependencies]
+# `wasm_js` is not in the published rind 0.3.2. This path dependency is the
+# workspace copy. Publish rind with that feature and bump this requirement
+# in the same release, or a crates.io build of `wasm32_unknown_unknown_js` fails.
 rind = { version = "0.3.2", path = "../rind" }
 untrusted = "0.9"
 
