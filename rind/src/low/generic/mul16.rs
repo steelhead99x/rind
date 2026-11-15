@@ -30,14 +30,17 @@
 //!
 //! RISC-V without the M extension has no multiply instruction. The compiler
 //! lowers `wrapping_mul` to `__mulsi3`, whose iterations follow the bits of
-//! an operand. Each half is then sixteen masked shifts and adds, and the
-//! running sum passes through an empty `asm!` block so the compiler cannot
-//! turn the loop back into that call.
+//! an operand. Each half is then sixteen masked shifts and adds. The mask and
+//! the running sum both pass through an empty `asm!` block: the mask so the
+//! and is not a select on the secret bit, which RV32I can lower to a branch,
+//! and the sum so the compiler cannot turn the shifts back into that call.
 //!
 //! The same empty block hides every half that does use `mul`, so the compiler
 //! cannot see that the four products make one and fuse them back into a
 //! `umull`. `admin/ct-vartime` checks that Poly1305's `blocks` and `finish`,
 //! built on this, hold no 32x32->64-bit multiply and call no multiply routine.
+//! On ARMv5TE every `mul` and `mla` operand must be an `orr` of `#0x80000000`,
+//! and on RV32I a conditional branch there must not test a secret bit.
 //!
 //! [BearSSL ctmul]: https://www.bearssl.org/ctmul.html
 //! [XScale]: https://download.intel.com/design/intelxscale/27347302.pdf
@@ -94,17 +97,20 @@ fn mul_half_top(a: u32, b: u32) -> u32 {
     prod.wrapping_sub(cross)
 }
 
-/// A 16-bit product from shifts and adds. No multiply instruction. The
-/// carried sum is hidden so the compiler does not lower it to `__mulsi3`;
-/// it may unroll the shifts.
+/// A 16-bit product from shifts and adds. No multiply instruction. Inlined,
+/// so a block does not pay a hundred calls. `opaque` on the mask hides that
+/// it is 0 or all-ones: without that, `a & mask` is a select on the secret
+/// bit, and RV32I can lower the select to a branch. `opaque` on the sum
+/// keeps the compiler from turning the recurrence into `__mulsi3`. It may
+/// still unroll the shifts.
 #[cfg(any(test, rind_mul16_soft))]
-#[inline(never)]
+#[inline(always)]
 fn mul_half_soft(a: u32, mut b: u32) -> u32 {
     let mut a = a & 0xffff;
     b &= 0xffff;
     let mut acc = 0u32;
     for _ in 0..16 {
-        let mask = 0u32.wrapping_sub(b & 1);
+        let mask = opaque(0u32.wrapping_sub(b & 1));
         acc = opaque(acc.wrapping_add(a & mask));
         a <<= 1;
         b >>= 1;

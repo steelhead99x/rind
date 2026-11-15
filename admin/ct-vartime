@@ -59,8 +59,18 @@
 # too, without the top or soft cfg, so its halves stay plain `mul`s. From
 # each function in MUL16, the scan follows calls as above and fails on a
 # 32x32->64-bit multiply, a call to a multiply routine, or, on RISC-V, a
-# multiply instruction. It must find the one planted. A `none` target gets
-# getrandom's custom backend, because a library build cannot name one.
+# multiply instruction. It must find the one planted. On ARMv5TE it also
+# requires every `mul` and `mla` in `blocks` and `finish` to take both
+# operands from `orr #0x80000000`: a plain `mul` of a raw half, or a `mul`
+# by five, ends early on ARM7TDMI and XScale, and the planted copies of
+# those must be rejected. On RV32I it rejects a conditional branch in those
+# functions whose condition is a masked bit, the shape a select on the
+# secret half lowers to, and the planted branch must be rejected. A `none`
+# target gets getrandom's custom backend, because a library build cannot
+# name one.
+#
+# `admin/ct-vartime --self-test` checks those two proofs on fixtures and
+# does not build.
 #
 # Run it in `nix develop .#ct-vartime`, which has llvm-objdump and each
 # target's standard library.
@@ -294,6 +304,14 @@ MUL16 = {
     "<rind::low::generic::poly1305_32::Poly1305>::finish": False,
     "rind::low::vartime_planted::planted_long_multiply": True,
 }
+# Planted `mul`s the ARMv5TE row must reject. A raw 16-bit half and a factor
+# of five both leave bit 31 clear, so ARM7TDMI and XScale take the short path.
+EARLY_MUL = (
+    "rind::low::vartime_planted::planted_raw_half_multiply",
+    "rind::low::vartime_planted::planted_multiply_by_five",
+)
+# The branch the RV32I row must reject: `andi` of a secret bit, then `beqz`.
+SECRET_BRANCH = "rind::low::vartime_planted::planted_secret_branch"
 
 # Where a failed check panics or aborts, by name, as the standard library
 # names them. Nothing after one handles a secret.
@@ -457,7 +475,7 @@ class Objects:
             self.entries[(member, name)] = code
             self.names[code] = self.name(name)
 
-        # Each section's labels, and its instructions as (offset, mnemonic).
+        # Each section's labels, and its instructions as (offset, mnemonic, operands).
         self.labels = collections.defaultdict(list)
         self.insns = collections.defaultdict(list)
         syntax = ["-M", "intel"] if arch == "x86" else []
@@ -484,7 +502,7 @@ class Objects:
                 while arch == "x86" and len(words) > 1 and (words[0] in PREFIXES or words[0].startswith("{")):
                     words.pop(0)
                 mnemonic = words[0] if words else ""
-                self.insns[section].append((int(m[1], 16), mnemonic))
+                self.insns[section].append((int(m[1], 16), mnemonic, " ".join(words[1:])))
 
     def name(self, name):
         return self.names.get(name, name)
@@ -536,7 +554,7 @@ def scan(objects, starts, pattern, helpers=None, barrier=None):
         relocs = objects.relocs.get(node, ())
         if barrier and any(objects.name(target) == barrier for _, target in relocs):
             continue
-        for offset, mnemonic in objects.insns.get(node, ()):
+        for offset, mnemonic, _operands in objects.insns.get(node, ()):
             if pattern.fullmatch(mnemonic):
                 function = objects.function(node, offset)
                 findings[function][mnemonic] += 1
@@ -569,6 +587,548 @@ def describe(counts):
         "{} x{}".format(what, n) if n > 1 else what for what, n in sorted(counts.items())
     )
 
+
+
+ARM_CONDS = ("eq", "ne", "hs", "cs", "lo", "cc", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "al")
+ARM_REG = {
+    **{f"r{n}": n for n in range(16)},
+    "sb": 9, "sl": 10, "fp": 11, "ip": 12, "sp": 13, "lr": 14, "pc": 15,
+}
+# A conditional branch on a value produced by one of these is the select on a
+# secret bit that RV32I lowers to a branch. A length or a pointer is not.
+BIT_OP = {
+    "and", "andi", "or", "ori", "xor", "xori", "sll", "slli", "srl", "srli",
+    "sra", "srai", "slt", "slti", "sltu", "sltiu", "sub", "neg", "not", "xnor",
+    "andn", "orn", "c.and", "c.andi", "c.or", "c.xor", "c.sub", "c.slli",
+    "c.srli", "c.srai",
+}
+# A call clobbers the caller-saved registers. A bit left in one of them does
+# not survive into the value the callee returns.
+RV_CLOBBER = {
+    "ra", "t0", "t1", "t2", "t3", "t4", "t5", "t6",
+    "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7",
+}
+RV_BRANCH = re.compile(
+    r"^(beq|bne|blt|bge|bltu|bgeu|beqz|bnez|bgt|ble|bgtu|bleu|bgez|bltz|blez|bgtz|c\.beqz|c\.bnez)$"
+)
+RV_ONE_REG = {"beqz", "bnez", "bgez", "bltz", "blez", "bgtz", "c.beqz", "c.bnez"}
+RV_REG = re.compile(r"^(?:a[0-7]|t[0-6]|s(?:[0-9]|1[01])|ra|gp|tp|fp|x(?:[1-9]|[12][0-9]|3[01]))$")
+
+
+def arm_parts(text):
+    """The base mnemonic, condition, operand list, and raw operands."""
+    piece = text.split(None, 1)
+    mnem = piece[0]
+    ops = piece[1] if len(piece) > 1 else ""
+    cond = ""
+    for code in sorted(ARM_CONDS, key=len, reverse=True):
+        if mnem.endswith(code) and len(mnem) > len(code):
+            cond = code
+            mnem = mnem[: -len(code)]
+            break
+    if mnem.endswith("s") and mnem[:-1] in {
+        "mul", "mla", "mls", "orr", "mov", "add", "sub", "and", "eor", "bic",
+        "lsl", "lsr", "asr", "ror", "rsb",
+    }:
+        mnem = mnem[:-1]
+    operands = [op.strip() for op in ops.split(",")] if ops else []
+    return mnem, cond, operands, ops
+
+
+def arm_imm(token):
+    if not token.startswith("#"):
+        return None
+    try:
+        return int(token[1:], 0) & 0xFFFFFFFF
+    except ValueError:
+        return None
+
+
+def multiply_sources(base, operands):
+    """The multiply inputs of `mul`, `mla`, or `mls`. `mla` adds a fourth
+    register that is not an input of the early-out multiply."""
+    if base == "mul" and len(operands) >= 3:
+        return operands[1:3]
+    if base == "mul" and len(operands) == 2:
+        return operands[:2]
+    if base in {"mla", "mls"} and len(operands) >= 4:
+        return operands[1:3]
+    return None
+
+
+def prove_multiplies(insns):
+    """Each `mul`, `mla`, and `mls`, and whether both sources have bit 31 set.
+
+    A source is proven when every path writes it with `orr Rd, Rn, #0x80000000`
+    or copies or reloads that value. A raw half or a multiply by five is not.
+    `mla` is the same early-out multiply as `mul`; the compiler emits it for a
+    product that is added immediately. Returns None when a branch leaves the
+    function or the facts do not settle, so a path would go unseen.
+    """
+    if not insns:
+        return []
+    index = {off: i for i, (off, _, _) in enumerate(insns)}
+    succs = [[] for _ in insns]
+    for i, (_off, mnemonic, operands) in enumerate(insns):
+        base, cond, _opnds, _raw = arm_parts("{} {}".format(mnemonic, operands).rstrip())
+        if base in {"cbz", "cbnz"}:
+            return None
+        if base == "b":
+            tok = operands.split()[0].rstrip(",") if operands else ""
+            try:
+                target = index.get(int(tok, 16))
+            except ValueError:
+                target = None
+            if target is None:
+                return None
+            if cond in ("", "al"):
+                succs[i].append(target)
+            else:
+                if i + 1 < len(insns):
+                    succs[i].append(i + 1)
+                succs[i].append(target)
+        elif base in {"bx", "blx"} and operands.split()[:1] == ["lr"]:
+            pass
+        elif base == "pop" and "pc" in operands:
+            pass
+        elif i + 1 < len(insns):
+            succs[i].append(i + 1)
+    preds = [[] for _ in insns]
+    for i, ss in enumerate(succs):
+        for dest in ss:
+            preds[dest].append(i)
+
+    def transfer(regs, slots, text):
+        regs, slots = dict(regs), dict(slots)
+        base, cond, opnds, raw = arm_parts(text)
+        conditional = cond not in ("", "al")
+
+        def kill(reg):
+            number = ARM_REG.get(reg)
+            if number is not None and number < 15:
+                regs.pop(number, None)
+
+        if base in {"b", "bx", "bl", "blx", "cmp", "cmn", "tst", "teq"}:
+            if base in {"bl", "blx"}:
+                for number in (0, 1, 2, 3, 12, 14):
+                    regs.pop(number, None)
+            return regs, slots
+        if base == "push" or (base in {"sub", "add"} and opnds[:1] == ["sp"]):
+            slots.clear()
+            return regs, slots
+        if base == "pop":
+            slots.clear()
+            return regs, slots
+        if base == "str" and not conditional:
+            stored = re.fullmatch(
+                r"\s*(\w+)\s*,\s*\[\s*sp\s*(?:,\s*#(-?(?:0x[0-9a-fA-F]+|\d+)))?\s*\]\s*$",
+                raw,
+            )
+            if stored and ARM_REG.get(stored.group(1)) is not None and stored.group(1) != "sp":
+                imm = int(stored.group(2), 0) if stored.group(2) else 0
+                src = ARM_REG[stored.group(1)]
+                if regs.get(src) == "top":
+                    slots[imm] = "top"
+                else:
+                    slots.pop(imm, None)
+                return regs, slots
+            if "[sp" in raw:
+                slots.clear()
+            return regs, slots
+        if base.startswith("stm"):
+            slots.clear()
+            return regs, slots
+        if base == "ldr" and not conditional:
+            loaded = re.fullmatch(
+                r"\s*(\w+)\s*,\s*\[\s*sp\s*(?:,\s*#(-?(?:0x[0-9a-fA-F]+|\d+)))?\s*\]\s*$",
+                raw,
+            )
+            if loaded and ARM_REG.get(loaded.group(1)) is not None:
+                imm = int(loaded.group(2), 0) if loaded.group(2) else 0
+                rd = ARM_REG[loaded.group(1)]
+                if slots.get(imm) == "top":
+                    regs[rd] = "top"
+                else:
+                    regs.pop(rd, None)
+                return regs, slots
+            if opnds and ARM_REG.get(opnds[0]) is not None:
+                kill(opnds[0])
+            if "[sp" in raw:
+                slots.clear()
+            return regs, slots
+        if base.startswith("ldm"):
+            listed = re.fullmatch(r"\s*sp\s*,\s*\{([^}]+)\}\s*$", raw)
+            if listed:
+                for reg in re.findall(r"r\d+|ip|lr|fp|sl|sb|pc", listed.group(1)):
+                    kill(reg)
+                return regs, slots
+        if (
+            base == "orr"
+            and not conditional
+            and len(opnds) == 3
+            and opnds[2].startswith("#")
+            and arm_imm(opnds[2]) == 0x80000000
+            and ARM_REG.get(opnds[0]) is not None
+        ):
+            regs[ARM_REG[opnds[0]]] = "top"
+            return regs, slots
+        if (
+            base == "mov"
+            and not conditional
+            and len(opnds) == 2
+            and ARM_REG.get(opnds[0]) is not None
+            and ARM_REG.get(opnds[1]) is not None
+        ):
+            rd, rn = ARM_REG[opnds[0]], ARM_REG[opnds[1]]
+            if regs.get(rn) == "top":
+                regs[rd] = "top"
+            else:
+                regs.pop(rd, None)
+            return regs, slots
+        if opnds and ARM_REG.get(opnds[0]) is not None and opnds[0] not in {"sp", "pc"}:
+            kill(opnds[0])
+        return regs, slots
+
+    slot_ids = set()
+    for _off, _mnemonic, operands in insns:
+        for match in re.finditer(r"\[sp(?:,\s*#(-?(?:0x[0-9a-fA-F]+|\d+)))?\]", operands):
+            slot_ids.add(int(match.group(1), 0) if match.group(1) else 0)
+    # Greatest fixpoint. A slot set before a loop and never replaced stays set
+    # on the back edge. Starting from "not set" drops it where the loop does
+    # not store it again. The path from the entry removes a slot no store sets.
+    top = ({n: "top" for n in range(15)}, {slot: "top" for slot in slot_ids})
+    out = [(dict(top[0]), dict(top[1])) for _ in insns]
+    for _ in range(32):
+        changed = False
+        for i, (_off, mnemonic, operands) in enumerate(insns):
+            if preds[i]:
+                regs = {
+                    n: "top" for n in range(15)
+                    if all(out[p][0].get(n) == "top" for p in preds[i])
+                }
+                keys = set.intersection(*(set(out[p][1]) for p in preds[i]))
+                slots = {key: "top" for key in keys}
+            else:
+                regs, slots = {}, {}
+            new = transfer(regs, slots, "{} {}".format(mnemonic, operands).rstrip())
+            if new != out[i]:
+                out[i] = new
+                changed = True
+        if not changed:
+            break
+    else:
+        return None
+    proofs = []
+    for i, (_off, mnemonic, operands) in enumerate(insns):
+        base, _cond, opnds, _raw = arm_parts("{} {}".format(mnemonic, operands).rstrip())
+        sources = multiply_sources(base, opnds)
+        if sources is None:
+            continue
+        if preds[i]:
+            regs = {
+                n: "top" for n in range(15)
+                if all(out[p][0].get(n) == "top" for p in preds[i])
+            }
+        else:
+            regs = {}
+        ok = all(ARM_REG.get(src) is not None and regs.get(ARM_REG[src]) == "top" for src in sources)
+        proofs.append(("{} {}".format(mnemonic, operands).rstrip(), ok))
+    return proofs
+
+
+def branch_condition(mnemonic, operands):
+    regs = [tok.strip() for tok in operands.split(",") if RV_REG.fullmatch(tok.strip())]
+    if mnemonic in RV_ONE_REG:
+        return regs[:1]
+    return regs[:2]
+
+
+def secret_branches(insns):
+    """Conditional branches whose condition is a masked or compared bit.
+
+    Returns None when an unconditional jump leaves the instructions, so the
+    scan does not treat that jump as falling through.
+    """
+    if not insns:
+        return []
+    index = {off: i for i, (off, _, _) in enumerate(insns)}
+    succs = [[] for _ in insns]
+    for i, (_off, mnemonic, operands) in enumerate(insns):
+        if RV_BRANCH.fullmatch(mnemonic) or mnemonic in {"j", "jal"}:
+            tok = ""
+            for part in reversed(operands.replace(",", " ").split()):
+                if part.startswith("0x") or re.fullmatch(r"[0-9a-f]+", part):
+                    tok = part
+                    break
+            try:
+                target = index.get(int(tok, 16)) if tok else None
+            except ValueError:
+                target = None
+            if mnemonic == "j":
+                if target is None:
+                    return None
+                succs[i].append(target)
+            else:
+                if i + 1 < len(insns):
+                    succs[i].append(i + 1)
+                if target is not None:
+                    succs[i].append(target)
+        elif mnemonic in {"ret", "jr"}:
+            pass
+        elif i + 1 < len(insns):
+            succs[i].append(i + 1)
+    preds = [[] for _ in insns]
+    for i, ss in enumerate(succs):
+        for dest in ss:
+            preds[dest].append(i)
+
+    def transfer(bits, text):
+        bits = set(bits)
+        piece = text.split(None, 1)
+        mnem = piece[0]
+        ops = [op.strip() for op in (piece[1].split(",") if len(piece) > 1 else [])]
+        if mnem in {"jal", "jalr", "c.jal", "c.jalr"}:
+            bits.difference_update(RV_CLOBBER)
+            return bits
+        if not ops or not RV_REG.fullmatch(ops[0]):
+            return bits
+        rd = ops[0]
+        if mnem in {"sw", "sb", "sh", "sd", "fsw"} or RV_BRANCH.fullmatch(mnem) or mnem in {"j", "jr", "ret"}:
+            return bits
+        bits.discard(rd)
+        if mnem in {"mv", "c.mv"} and len(ops) >= 2 and ops[1] in bits:
+            bits.add(rd)
+        elif mnem == "addi" and len(ops) >= 3 and ops[2] in {"0", "0x0"} and ops[1] in bits:
+            bits.add(rd)
+        elif mnem in BIT_OP:
+            bits.add(rd)
+        return bits
+
+    out = [set() for _ in insns]
+    for _ in range(64):
+        changed = False
+        for i, (_off, mnemonic, operands) in enumerate(insns):
+            incoming = set()
+            for pred in preds[i]:
+                incoming |= out[pred]
+            new = transfer(incoming, "{} {}".format(mnemonic, operands).rstrip())
+            if new != out[i]:
+                out[i] = new
+                changed = True
+        if not changed:
+            break
+    else:
+        return None
+    found = []
+    for i, (_off, mnemonic, operands) in enumerate(insns):
+        if not RV_BRANCH.fullmatch(mnemonic):
+            continue
+        incoming = set()
+        for pred in preds[i]:
+            incoming |= out[pred]
+        if any(reg in incoming for reg in branch_condition(mnemonic, operands)):
+            found.append("{} {}".format(mnemonic, operands).rstrip())
+    return found
+
+
+def fixture_insns(text):
+    insns = []
+    auto = 0
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if re.match(r"^[0-9a-fx]+:", line):
+            off, rest = line.split(":", 1)
+            off = int(off, 16)
+            rest = rest.strip()
+        else:
+            off, rest = auto, line
+            auto += 4
+        piece = rest.split(None, 1)
+        insns.append((off, piece[0], piece[1] if len(piece) > 1 else ""))
+    return insns
+
+
+def self_test_mul16():
+    """The bit-31 proof rejects a raw half and a multiply by five, and the
+    branch proof rejects `beqz` on an `andi` of a secret bit."""
+    def proofs(text):
+        got = prove_multiplies(fixture_insns(text))
+        assert got is not None, text
+        return got
+
+    assert proofs("orr r0, r1, #-2147483648\norr r2, r3, #-2147483648\nmul r4, r0, r2") == [
+        ("mul r4, r0, r2", True)
+    ]
+    assert proofs(
+        "orr r0, r1, #0x80000000\nmov r4, r0\norr r2, r3, #-2147483648\nmul r5, r4, r2"
+    )[0][1]
+    assert proofs(
+        "orr r0, r1, #-2147483648\nstr r0, [sp, #4]\norr r2, r3, #-2147483648\n"
+        "ldr r4, [sp, #4]\nmul r5, r4, r2"
+    )[0][1]
+    assert proofs(
+        "orr r0, r1, #-2147483648\norr r2, r3, #-2147483648\nmla r4, r0, r2, r5"
+    )[0][1]
+    loop = proofs(
+        "0x0: orr r0, r1, #-2147483648\n0x4: str r0, [sp, #4]\n0x8: b 0x10\n"
+        "0x10: ldr r2, [sp, #4]\n0x14: orr r3, r4, #-2147483648\n"
+        "0x18: mul r5, r2, r3\n0x1c: b 0x10"
+    )
+    assert loop == [("mul r5, r2, r3", True)], loop
+    assert proofs(
+        "mov r2, #255\norr r2, r2, #65280\nand r3, r0, r2\nand r1, r1, r2\nmul r0, r1, r3"
+    ) == [("mul r0, r1, r3", False)]
+    assert proofs("mov r2, #5\nmul r1, r0, r2") == [("mul r1, r0, r2", False)]
+    assert proofs("orr r0, r0, #-2147483648\nmul r2, r0, r1") == [("mul r2, r0, r1", False)]
+    assert proofs("mov r3, #5\nmla r0, r1, r3, r2") == [("mla r0, r1, r3, r2", False)]
+
+    def branches(text):
+        got = secret_branches(fixture_insns(text))
+        assert got is not None, text
+        return got
+
+    assert branches("andi a2, a1, 1\nbeqz a2, 0x8") == ["beqz a2, 0x8"]
+    assert branches("andi a2, a1, 1\nmv a3, a2\nbnez a3, 0x10") == ["bnez a3, 0x10"]
+    assert branches("bnez a2, 0x8") == []
+    assert branches("lw s2, 0x38(a1)\nli a0, 0x11\nbgeu s2, a0, 0x20") == []
+    assert branches("slli a2, a1, 31\nbeqz a2, 0x8") == ["beqz a2, 0x8"]
+    assert branches("c.andi a2, 1\nc.beqz a2, 0x8") == ["c.beqz a2, 0x8"]
+    assert branches("andi a0, a1, 1\njalr ra\nbnez a0, 0x10") == []
+    assert branches("slli a2, a1, 1\nadd a2, a2, a0\nbnez a2, 0x8") == []
+
+
+def section_spans(objects, node):
+    """Each function in section `node`, as (demangled name, instructions)."""
+    labels = objects.labels.get(node, [])
+    insns = objects.insns.get(node, [])
+    spans = []
+    for i, (off, label) in enumerate(labels):
+        end = labels[i + 1][0] if i + 1 < len(labels) else None
+        body = [
+            insn for insn in insns
+            if insn[0] >= off and (end is None or insn[0] < end)
+        ]
+        spans.append((objects.name(label), body))
+    return spans
+
+
+def poly_bodies(objects, function):
+    """`function` and the Poly1305 or mul16 callees it reaches, not memcpy."""
+    starts = [
+        node for node, labels in objects.labels.items()
+        if any(objects.name(label) == function for _, label in labels)
+    ]
+    seen = set()
+    queue = collections.deque(starts)
+    bodies = []
+    while queue:
+        node = queue.popleft()
+        if node in seen:
+            continue
+        seen.add(node)
+        bodies.extend(section_spans(objects, node))
+        for _offset, target in objects.relocs.get(node, ()):
+            to = objects.resolve(node[0], target)
+            if to is None or to in seen or PANICS.match(objects.section_name(to)):
+                continue
+            callee = objects.section_name(to)
+            if "poly1305_32" in callee or "mul16" in callee:
+                queue.append(to)
+    return bodies
+
+
+def find_bodies(objects, function):
+    bodies = []
+    for node, labels in objects.labels.items():
+        if any(objects.name(label) == function for _, label in labels):
+            bodies.extend(body for name, body in section_spans(objects, node) if name == function)
+    return bodies
+
+
+def check_early_operands(objects, target):
+    """The ARMv5TE bit-31 proof and the RV32I secret-branch proof."""
+    lines = []
+    failed = False
+    if target.startswith("armv5te"):
+        for function, planted in MUL16.items():
+            if planted:
+                continue
+            bodies = poly_bodies(objects, function)
+            if not bodies:
+                lines.append("FAIL {}: no instructions for the bit-31 check".format(function))
+                failed = True
+                continue
+            bad = []
+            seen = 0
+            broke = False
+            for name, body in bodies:
+                proofs = prove_multiplies(body)
+                if proofs is None:
+                    lines.append("FAIL {}: a branch in {} left the bit-31 proof".format(function, name))
+                    failed = True
+                    broke = True
+                    continue
+                seen += len(proofs)
+                bad.extend("{}: {}".format(name, text) for text, ok in proofs if not ok)
+            own = [body for name, body in bodies if name == function]
+            own_muls = 0
+            for body in own:
+                proofs = prove_multiplies(body)
+                own_muls += 0 if proofs is None else len(proofs)
+            if function.endswith("::blocks") and own_muls == 0:
+                lines.append("FAIL {}: no mul or mla to check for bit 31".format(function))
+                failed = True
+            elif bad:
+                lines.append("FAIL {}: mul without bit 31 set on both operands".format(function))
+                for item in bad[:12]:
+                    lines.append("       " + item)
+                failed = True
+            elif not broke:
+                lines.append("ok   {}: {} mul and mla, each operand has bit 31 set".format(function, seen))
+        for function in EARLY_MUL:
+            bodies = find_bodies(objects, function)
+            proofs = prove_multiplies(bodies[0]) if len(bodies) == 1 else None
+            if not proofs or not any(not ok for _text, ok in proofs):
+                lines.append("FAIL {}: planted early multiply was not rejected".format(function))
+                failed = True
+            else:
+                lines.append("ok   planted {}: mul without bit 31".format(function))
+    if target.split("-")[0].startswith("riscv"):
+        for function, planted in MUL16.items():
+            if planted:
+                continue
+            bodies = poly_bodies(objects, function)
+            if not bodies:
+                lines.append("FAIL {}: no instructions for the branch check".format(function))
+                failed = True
+                continue
+            bad = []
+            broke = False
+            for name, body in bodies:
+                found = secret_branches(body)
+                if found is None:
+                    lines.append("FAIL {}: a jump in {} left the branch proof".format(function, name))
+                    failed = True
+                    broke = True
+                else:
+                    bad.extend("{}: {}".format(name, text) for text in found)
+            if bad:
+                lines.append("FAIL {}: conditional branch on a secret bit".format(function))
+                for item in bad[:12]:
+                    lines.append("       " + item)
+                failed = True
+            elif not broke:
+                lines.append("ok   {}: no conditional branch on a secret bit".format(function))
+        bodies = find_bodies(objects, SECRET_BRANCH)
+        found = secret_branches(bodies[0]) if len(bodies) == 1 else None
+        if not found:
+            lines.append("FAIL {}: planted secret branch was not rejected".format(SECRET_BRANCH))
+            failed = True
+        else:
+            lines.append("ok   planted {}: {}".format(SECRET_BRANCH, found[0]))
+    return lines, failed
 
 def check_mul16(objects, target):
     """Scans the `+mul16` target's MUL16 functions for long multiplies: its
@@ -608,7 +1168,11 @@ def check_mul16(objects, target):
             failed = True
         else:
             lines.append("ok   {}: no {} in {} sections".format(function, kind, reached))
-    return ["{}: checked {} functions for {}".format(target, len(MUL16), kinds)] + lines, failed
+    extra, extra_failed = check_early_operands(objects, target)
+    return (
+        ["{}: checked {} functions for {}".format(target, len(MUL16), kinds)] + lines + extra,
+        failed or extra_failed,
+    )
 
 
 def check(tool, target, rind, others, public):
@@ -667,6 +1231,10 @@ def check(tool, target, rind, others, public):
 
 
 def main():
+    self_test_mul16()
+    if len(sys.argv) > 1 and sys.argv[1] == "--self-test":
+        print("ct-vartime: self-test ok")
+        return
     sys.stdout.reconfigure(line_buffering=True)
     os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     targets = sys.argv[1:] or TARGETS

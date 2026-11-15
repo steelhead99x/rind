@@ -29,6 +29,48 @@ fn planted_long_multiply(secret: u32, by: u32) -> u64 {
     u64::from(secret) * u64::from(by)
 }
 
+/// A `mul` of two raw 16-bit halves, with bit 31 clear. ARM7TDMI and XScale
+/// end that multiply early. The ARMv5TE scan must reject it.
+#[inline(never)]
+fn planted_raw_half_multiply(secret: u32, by: u32) -> u32 {
+    (secret & 0xffff).wrapping_mul(by & 0xffff)
+}
+
+/// A `mul` by five. The factor is hidden so the compiler does not turn it
+/// into a shift and an add, which would not be the multiply the scan looks
+/// for. The ARMv5TE scan must reject it: neither operand is an `orr` of
+/// `#0x80000000`.
+#[inline(never)]
+fn planted_multiply_by_five(secret: u32) -> u32 {
+    let factor = core::hint::black_box(5u32);
+    core::hint::black_box(secret).wrapping_mul(factor)
+}
+
+/// The branch RV32I can emit for a select on a secret bit. The RV32I scan
+/// must reject it. The instructions are written out so the compiler cannot
+/// turn them back into a shift.
+#[cfg(target_arch = "riscv32")]
+#[inline(never)]
+fn planted_secret_branch(mut secret: u32, addend: u32) -> u32 {
+    let mut bit = 0u32;
+    // SAFETY: the instructions read only the named registers and write
+    // `secret` and `bit`. There is no memory operand.
+    unsafe {
+        core::arch::asm!(
+            "andi {bit}, {secret}, 1",
+            "beqz {bit}, 2f",
+            "mv {secret}, {addend}",
+            "2:",
+            bit = out(reg) bit,
+            secret = inout(reg) secret,
+            addend = in(reg) addend,
+            options(nomem, nostack),
+        );
+    }
+    let _ = bit;
+    secret
+}
+
 // Nothing calls them, so these keep them in rind's rlib.
 #[used]
 static DIVISION: fn(u64, u64) -> u64 = planted_division;
@@ -38,6 +80,13 @@ static WIDE_DIVISION: fn(u128, u128) -> u128 = planted_wide_division;
 static FLOAT: fn(f64, f64) -> f64 = planted_float;
 #[used]
 static LONG_MULTIPLY: fn(u32, u32) -> u64 = planted_long_multiply;
+#[used]
+static RAW_HALF_MULTIPLY: fn(u32, u32) -> u32 = planted_raw_half_multiply;
+#[used]
+static MULTIPLY_BY_FIVE: fn(u32) -> u32 = planted_multiply_by_five;
+#[cfg(target_arch = "riscv32")]
+#[used]
+static SECRET_BRANCH: fn(u32, u32) -> u32 = planted_secret_branch;
 
 #[cfg(rind_backend = "x86_64")]
 use core::arch::x86_64::{__m128i, _mm_mul_epu32};
