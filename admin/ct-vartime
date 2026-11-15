@@ -45,15 +45,16 @@
 # multiply outside the mitigation and one inside it. Each outside must be found, so a scan
 # that finds nothing fails, and the one inside must not.
 #
-# The `+mul16` target is armv7's portable build with `--cfg rind_mul16`, which
-# build.rs sets for the Cortex-M3 and the cores without `umull` (see
-# `rind/src/low/generic/mul16.rs`), where Poly1305 builds each secret product
-# from 32x32->32-bit multiplies. That target has no standard library to
-# build against, and its multiplies are the ones armv7's code generator
-# picks, so this checks them there instead: from each function in MUL16, it
-# follows calls as above and fails on a 32x32->64-bit multiply or a call to
-# a multiply routine, which is all it looks for on that target. It must find
-# the one planted.
+# The `+mul16` targets build Poly1305's products from 16-bit halves. build.rs
+# sets that for `thumbv6m-none-eabi`, `thumbv7m-none-eabi`, and
+# `thumbv8m.base-none-eabi` (see `rind/src/low/generic/mul16.rs`). Those
+# three are scanned as themselves, so Thumb-1 and Thumb-2 cannot hide a long
+# multiply that armv7's A-profile code would not emit. armv7's portable
+# build with the cfg forced is scanned too. From each function in MUL16, the
+# scan follows calls as above and fails on a 32x32->64-bit multiply or a
+# call to a multiply routine, which is all it looks for on those targets. It
+# must find the one planted. A `none` target gets getrandom's custom
+# backend, because a library build cannot name one.
 #
 # Run it in `nix develop .#ct-vartime`, which has llvm-objdump and each
 # target's standard library.
@@ -68,8 +69,12 @@ TARGETS = [
     # `sh/dispatch.sh` forces it, at 64 and 32 bits.
     "x86_64-unknown-linux-gnu+portable",
     "armv7-unknown-linux-gnueabihf+portable",
-    # And armv7's portable build with Poly1305's products from 16-bit halves.
+    # Poly1305's products from 16-bit halves: the cores that set `rind_mul16`,
+    # and armv7's portable build with that cfg forced.
     "armv7-unknown-linux-gnueabihf+mul16",
+    "thumbv6m-none-eabi+mul16",
+    "thumbv7m-none-eabi+mul16",
+    "thumbv8m.base-none-eabi+mul16",
     # The architectures whose only backend is the portable one. ARMv6 is
     # 32-bit ARM before ARMv7, and big-endian powerpc64 the ELFv1 ABI, whose
     # calls reach a function through its descriptor in `.opd`.
@@ -323,20 +328,38 @@ def run(cmd, **kw):
     return subprocess.run(cmd, stdout=subprocess.PIPE, check=True, encoding="utf-8", **kw).stdout
 
 
+def scan_flags(target):
+    """The backend flags for `target`, plus getrandom's stand-in on bare metal."""
+    flags = list(BACKENDS[target.partition("+")[2]])
+    # A library build cannot name getrandom's source. The same cfg as
+    # `sh/bare-metal.sh`.
+    if "-none" in target.partition("+")[0]:
+        flags.append('--cfg getrandom_backend="custom"')
+    return flags
+
+
 def build(targets):
     """Each target's rlibs: rind's, then every other crate's it links."""
     libs = {target: ([], []) for target in targets}
-    # Each backend's flags apply to the whole build, so each gets its own.
-    for backend in sorted({t.partition("+")[2] for t in targets}):
+    # Targets that share flags share a build. A `none` triple does not share
+    # with the Linux triple of the same backend: getrandom's cfg differs.
+    groups = collections.defaultdict(list)
+    for target in targets:
+        groups[tuple(scan_flags(target))].append(target)
+    for flags, group in groups.items():
+        backend = group[0].partition("+")[2]
+        dirname = backend or "native"
+        if "-none" in group[0]:
+            dirname += "-none"
         cmd = ["cargo", "build", "-p", "rind", "--lib", "--release"]
-        cmd += ["--target-dir", "target/ct-vartime/" + (backend or "native")]
+        cmd += ["--target-dir", "target/ct-vartime/" + dirname]
         cmd += ["--message-format=json-render-diagnostics"]
-        triples = [t.partition("+")[0] for t in targets if t.partition("+")[2] == backend]
+        triples = [t.partition("+")[0] for t in group]
         for triple in triples:
             cmd += ["--target", triple]
-        flags = [os.environ.get("RUSTFLAGS", ""), "--cfg rind_vartime_planted"]
-        flags += BACKENDS[backend]
-        env = dict(os.environ, RUSTFLAGS=" ".join(flags).strip())
+        rustflags = [os.environ.get("RUSTFLAGS", ""), "--cfg rind_vartime_planted"]
+        rustflags += list(flags)
+        env = dict(os.environ, RUSTFLAGS=" ".join(rustflags).strip())
         for line in run(cmd, env=env).splitlines():
             js = json.loads(line)
             if js.get("reason") != "compiler-artifact":
