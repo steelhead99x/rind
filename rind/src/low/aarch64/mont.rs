@@ -164,4 +164,43 @@ mod tests {
         }
         assert!(ran > 0);
     }
+
+    /// 16- and 32-word Karatsuba against the portable Montgomery product.
+    /// `matches_generic` compares those widths to s2n-bignum and aws-lc;
+    /// this compares them to `generic::limb64::mont`, which is the backend
+    /// every other architecture runs.
+    #[test]
+    fn karatsuba_matches_portable() {
+        use crate::low::generic::limb64::mont as portable;
+
+        for k in [16usize, 32] {
+            let mut sparse = vec![0u64; k];
+            sparse[0] = 0xffff_ffff_ffff_ffc5;
+            sparse[k - 1] = 1u64 << 63;
+            let dense_mod = vec![u64::MAX; k];
+            for m in [sparse, dense_mod] {
+                let mut n0 = [0u64];
+                bignum_negmodinv::bignum_negmodinv(&mut n0, &m[..1]);
+                let mut one = vec![0u64; k];
+                one[0] = 1;
+                let mut below = m.clone();
+                below[0] -= 1;
+                let mut dense = vec![u64::MAX; k];
+                dense[k - 1] = 0;
+                let inputs = [vec![0u64; k], one, below, dense];
+                for x in &inputs {
+                    for y in &inputs {
+                        let mut got = vec![0u64; k];
+                        let mut want = vec![0u64; k];
+                        karatsuba_mul(&mut got, x, y, &m, n0[0]);
+                        portable::mont_mul(&mut want, x, y, &m, n0[0]);
+                        assert_eq!(got, want, "mul {k}");
+                        karatsuba_sqr(&mut got, x, &m, n0[0]);
+                        portable::mont_sqr(&mut want, x, &m, n0[0]);
+                        assert_eq!(got, want, "sqr {k}");
+                    }
+                }
+            }
+        }
+    }
 }
