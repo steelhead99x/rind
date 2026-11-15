@@ -285,6 +285,27 @@ fn mux_follows_the_override() {
             super::curve25519_x25519_narrow::curve25519_x25519(&mut direct, &scalar, &point);
         }
         assert_eq!(via_mux, direct);
+        // The field product is chosen once and then called through that
+        // pointer. A second call must still be the schedule this flag names.
+        let (x, y) = ([1u64, 0, 0, 0], [9u64, 0, 0, 0]);
+        let (mut via_mul, mut direct_mul) = ([0; 4], [0; 4]);
+        super::wide_mux::bignum_mul_p25519(&mut via_mul, &x, &y);
+        super::wide_mux::bignum_mul_p25519(&mut via_mux, &x, &y);
+        if wide {
+            super::bignum_mul_p25519::bignum_mul_p25519(&mut direct_mul, &x, &y);
+        } else {
+            super::bignum_mul_p25519_narrow::bignum_mul_p25519(&mut direct_mul, &x, &y);
+        }
+        assert_eq!(via_mul, direct_mul);
+        assert_eq!(via_mux, direct_mul);
+        let (mut via_sqr, mut direct_sqr) = ([0; 4], [0; 4]);
+        super::wide_mux::bignum_sqr_p25519(&mut via_sqr, &x);
+        if wide {
+            super::bignum_sqr_p25519::bignum_sqr_p25519(&mut direct_sqr, &x);
+        } else {
+            super::bignum_sqr_p25519_narrow::bignum_sqr_p25519(&mut direct_sqr, &x);
+        }
+        assert_eq!(via_sqr, direct_sqr);
         println!("{CHILD} done");
         return;
     }
@@ -339,12 +360,14 @@ fn trace_ecdh(algorithm: &'static crate::agreement::Algorithm, len: usize) {
     peer_scalar[len - 1] = 2;
     let peer = PrivateKey::from_scalar(algorithm, &peer_scalar).unwrap();
     let peer = peer.public_key().as_ref().to_vec();
-    // The low bytes carry the seed. The rest stay zero, so the scalar is
-    // below every curve order `from_scalar` accepts. The scalar is big
-    // endian, so its low bytes are its last.
-    let mut scalar = vec![0u8; len];
-    let seed = qemu_seed(8);
-    scalar[len - seed.len()..].copy_from_slice(&seed);
+    // Every byte comes from the seed except the leading one, which stays
+    // zero. A big-endian NIST scalar is then below 2^(8*(len-1)), which is
+    // below the order, and the high windows differ between the two seeds.
+    let mut scalar = qemu_seed(len);
+    scalar[0] = 0;
+    if scalar.iter().all(|&byte| byte == 0) {
+        scalar[len - 1] = 1;
+    }
     super::ct_qemu::traced(|| {
         let key = PrivateKey::from_scalar(algorithm, &scalar).unwrap();
         key.agree(&peer).is_ok()
@@ -395,10 +418,51 @@ fn ct_qemu_ed25519() {
 #[test]
 #[ignore = "admin/ct-qemu runs it under qemu"]
 fn ct_qemu_rsa() {
+    use crate::high::rsa::{self, SigningKey};
+    use crate::rsa::KeySize;
     use crate::signature::RsaKeyPair;
     use crate::signature::sign::RSA_PKCS1_SHA256;
 
-    let key = RsaKeyPair::from_pkcs8(include_bytes!("../../high/rsa/rsa2048.pkcs8.der")).unwrap();
+    // Built outside the trace, so key generation's public candidate loop
+    // stays out of it. The primes differ between the two seeds.
+    let signing = SigningKey::generate_seeded(KeySize::Rsa2048, &qemu_seed(32)).unwrap();
+    let mut der = [0u8; rsa::MAX_PKCS8_LEN];
+    let key = RsaKeyPair::from_pkcs8(signing.to_pkcs8_der(&mut der).unwrap()).unwrap();
     let message = qemu_seed(32);
     super::ct_qemu::traced(|| key.sign(&RSA_PKCS1_SHA256, &message).unwrap());
+}
+
+/// A 32-word Montgomery product. On a narrow multiplier that is
+/// `bignum_kmul_32_64`, `bignum_ksqr_32_64`, and `bignum_emontredc_8n`,
+/// which a 2048-bit sign never reaches. The inputs differ between the two
+/// seeds; the low limb of the modulus does not, so `-m^-1` is the same.
+#[test]
+#[ignore = "admin/ct-qemu runs it under qemu"]
+fn ct_qemu_mont32() {
+    let seed = qemu_seed(32 * 8 * 3);
+    let mut modulus = words(&seed[..256]);
+    let mut x = words(&seed[256..512]);
+    let mut y = words(&seed[512..]);
+    // The low limb is fixed, so `-m^-1` does not differ between the seeds.
+    modulus[0] = 1;
+    modulus[31] |= 1 << 63;
+    x[31] &= !(1 << 63);
+    y[31] &= !(1 << 63);
+    let mut n0 = [0u64];
+    super::bignum_negmodinv::bignum_negmodinv(&mut n0, &modulus[..1]);
+    super::ct_qemu::traced(|| {
+        let mut z = [0u64; 32];
+        super::mont::mont_mul(&mut z, &x, &y, &modulus, n0[0]);
+        super::mont::mont_sqr(&mut z, &x, &modulus, n0[0]);
+        z
+    });
+}
+
+fn words(bytes: &[u8]) -> [u64; 32] {
+    let mut out = [0u64; 32];
+    let (chunks, _) = bytes.as_chunks::<8>();
+    for (limb, chunk) in out.iter_mut().zip(chunks) {
+        *limb = u64::from_le_bytes(*chunk);
+    }
+    out
 }

@@ -69,7 +69,7 @@ fn main() {
     let pmull = is_aarch64_feature_detected!("pmull");
     let sha2 = is_aarch64_feature_detected!("sha2");
     let sha3 = is_aarch64_feature_detected!("sha3");
-    let wide_mul = rind::cpu::wide_multiplier();
+    let wide_mul = rind::cpu::wide_multiplier().expect("aarch64 reports the multiplier");
 
     let compatible = rind::cpu::check().is_ok();
 

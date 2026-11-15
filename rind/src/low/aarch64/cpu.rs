@@ -164,8 +164,6 @@ const CRYPTO_EXT: u8 = 1 << 1;
 const SHA3: u8 = 1 << 2;
 #[cfg(target_vendor = "apple")]
 const DIT: u8 = 1 << 3;
-/// s2n-bignum's `_alt` schedules, for a core whose 64×64→128 multiply is wide.
-const WIDE_MUL: u8 = 1 << 4;
 const DETECTED: u8 = 1 << 7;
 
 /// Whether this core should run s2n-bignum's `_alt` schedules.
@@ -175,12 +173,26 @@ const DETECTED: u8 = 1 << 7;
 /// Neoverse N1. Every other core keeps `_alt`, including one this crate
 /// does not recognise, which is what aarch64 ran before the dispatch.
 /// Both schedules are correct on every core.
+///
+/// The part list is read here, on the first call, and not from
+/// [`HaveCryptoExt`], [`HaveSha3`], or [`missing_cpu_feature`]. Those stay
+/// on `getauxval`.
 #[inline]
 pub(crate) fn wide_multiplier() -> bool {
-    features() & WIDE_MUL != 0
+    match WIDE.load(Ordering::Relaxed) {
+        WIDE_UNSET => detect_wide_once(),
+        WIDE_ALT => true,
+        _ => false,
+    }
 }
 
 static FEATURES: AtomicU8 = AtomicU8::new(0);
+/// Separate from [`FEATURES`], so an AES or SHA check does not open
+/// `/proc/cpuinfo`. `0` means the choice has not been made.
+static WIDE: AtomicU8 = AtomicU8::new(WIDE_UNSET);
+const WIDE_UNSET: u8 = 0;
+const WIDE_NARROW: u8 = 1;
+const WIDE_ALT: u8 = 2;
 
 /// The detected features, read once. Inlined, so a check is a load and a
 /// test, with the first call's detection out of line.
@@ -203,17 +215,17 @@ fn detect_once() -> u8 {
 fn detect() -> u8 {
     use std::arch::is_aarch64_feature_detected as detected;
 
+    // Hardware features only. The part list is [`wide_multiplier`]'s, so a
+    // seccomp filter that kills `open` still runs AES, SHA, and NEON.
     let neon = test_toggle("neon", detected!("neon"));
     let crypto_ext = test_toggle("aes", detected!("aes"))
         && test_toggle("pmull", detected!("pmull"))
         // Rust's `sha2` covers the SHA-1 instructions too.
         && test_toggle("sha2", detected!("sha2"));
     let sha3 = test_toggle("sha3", detected!("sha3"));
-    let wide = wide_toggle(detect_wide_multiplier());
     let features = (if neon { NEON } else { 0 })
         | (if crypto_ext { CRYPTO_EXT } else { 0 })
-        | (if sha3 { SHA3 } else { 0 })
-        | (if wide { WIDE_MUL } else { 0 });
+        | (if sha3 { SHA3 } else { 0 });
     #[cfg(target_vendor = "apple")]
     let features = features
         | if test_toggle("dit", detected!("dit")) {
@@ -230,36 +242,33 @@ fn detect() -> u8 {
 /// compiles both reads out. Disable wins.
 ///
 /// `_alt` is scalar base Armv8 and runs on every core rind supports, so
-/// forcing it cannot fault. A force toggle must not be added for a feature
-/// whose instructions can.
+/// forcing it cannot fault. [`test_toggle`] does not take a force flag:
+/// forcing NEON or AES on a core that lacks the instructions faults.
 fn wide_toggle(detected: bool) -> bool {
-    #[cfg(any(debug_assertions, rind_cpu_disable))]
-    {
-        if std::env::var_os("RIND_CPU_DISABLE_wide_mul").is_some() {
-            // As `test_toggle`: the FIPS module's stdout is its caller's.
-            #[cfg(not(rind_fips))]
-            println!("DEBUG: denying cpuid \"wide_mul\"");
-            return false;
-        }
-        if std::env::var_os("RIND_CPU_FORCE_wide_mul").is_some() {
-            #[cfg(not(rind_fips))]
-            println!("DEBUG: forcing cpuid \"wide_mul\"");
-            return true;
-        }
-    }
-    detected
+    feature_toggle("wide_mul", detected, true)
+}
+
+#[cold]
+#[inline(never)]
+fn detect_wide_once() -> bool {
+    let wide = wide_toggle(detect_wide_multiplier());
+    WIDE.store(if wide { WIDE_ALT } else { WIDE_NARROW }, Ordering::Relaxed);
+    wide
 }
 
 /// Apple's cores are wide. On Linux, so is every part except the known
 /// narrow ones.
 ///
-/// Detection reads `/proc/cpuinfo` on Linux only, and only the parts online
-/// at that moment: a core hotplugged later is not seen. Apple's platforms
-/// name the vendor in the target, so they need no file. A sandbox that
-/// cannot read the file, Android (`target_os` is not `linux`, including a
-/// build that cannot open the file), and Windows on ARM never see a part
+/// Called only from [`wide_multiplier`], never from an AES, SHA, or NEON
+/// check. Detection reads `/proc/cpuinfo` on Linux only, and only the parts
+/// online at that moment: a core hotplugged later is not seen. Apple's
+/// platforms name the vendor in the target, so they need no file. A sandbox
+/// that cannot read the file, Android (`target_os` is not `linux`, including
+/// a build that cannot open the file), and Windows on ARM never see a part
 /// list, so they stay on `_alt` rather than guessing a narrow core. FreeBSD
-/// does too. Both schedules are correct on every core.
+/// does too. A filter that kills `open` is not that case: it is not invoked
+/// until a wide-or-narrow schedule is first used. Both schedules are correct
+/// on every core.
 fn detect_wide_multiplier() -> bool {
     if cfg!(target_vendor = "apple") {
         return true;
@@ -384,8 +393,15 @@ mod dit {
     }
 }
 
+fn test_toggle(id: &str, detected: bool) -> bool {
+    feature_toggle(id, detected, false)
+}
+
+/// Deny with `RIND_CPU_DISABLE_<id>`. When `force` is set, also force with
+/// `RIND_CPU_FORCE_<id>`. Disable wins. A release build without
+/// `--cfg rind_cpu_disable` compiles both reads out.
 #[cfg(not(any(debug_assertions, rind_cpu_disable)))]
-fn test_toggle(_id: &str, detected: bool) -> bool {
+fn feature_toggle(_id: &str, detected: bool, _force: bool) -> bool {
     detected
 }
 
@@ -393,16 +409,20 @@ fn test_toggle(_id: &str, detected: bool) -> bool {
 /// feature with `RIND_CPU_DISABLE_<id>`, as on x86_64, so a CPU with the
 /// crypto extension also tests the code for one without.
 #[cfg(any(debug_assertions, rind_cpu_disable))]
-fn test_toggle(id: &str, detected: bool) -> bool {
-    if std::env::var(format!("RIND_CPU_DISABLE_{id}")).is_ok() {
+fn feature_toggle(id: &str, detected: bool, force: bool) -> bool {
+    if std::env::var_os(format!("RIND_CPU_DISABLE_{id}")).is_some() {
         // The FIPS module honours the mask in its release build, where its
         // caller's stdout is not its own.
         #[cfg(not(rind_fips))]
         println!("DEBUG: denying cpuid {id:?}");
-        false
-    } else {
-        detected
+        return false;
     }
+    if force && std::env::var_os(format!("RIND_CPU_FORCE_{id}")).is_some() {
+        #[cfg(not(rind_fips))]
+        println!("DEBUG: forcing cpuid {id:?}");
+        return true;
+    }
+    detected
 }
 
 /// Read-only prefetch hint.
@@ -621,6 +641,33 @@ CPU part	: 0xd0b
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+    }
+
+    /// AES, SHA, and NEON checks must not open `/proc/cpuinfo`. A child that
+    /// only runs those checks leaves the multiplier unread.
+    #[cfg(any(debug_assertions, rind_cpu_disable))]
+    #[test]
+    fn hw_checks_leave_the_multiplier_unread() {
+        const CHILD: &str = "RIND_TEST_HW_LEAVES_WIDE";
+        if std::env::var_os(CHILD).is_some() {
+            let _ = HaveCryptoExt::check();
+            let _ = HaveSha3::check();
+            let _ = missing_cpu_feature();
+            assert_eq!(WIDE.load(Ordering::Relaxed), WIDE_UNSET);
+            println!("{CHILD} done");
+            return;
+        }
+        let mut cmd = reexec();
+        let test = concat!(module_path!(), "::hw_checks_leave_the_multiplier_unread");
+        let test = test.split_once("::").unwrap().1;
+        cmd.args([test, "--exact", "--nocapture"]).env(CHILD, "1");
+        let output = cmd.output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains(&format!("{CHILD} done")),
+            "{stdout}{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     // A core that runs `mrs DIT` has DIT, whatever the OS reports, so a child

@@ -568,6 +568,17 @@ impl SigningKey {
             .map(SigningKey)
     }
 
+    /// The key [`Self::generate`] makes from `seed`, for a trace whose two
+    /// runs must differ in the primes and not in the stack.
+    #[cfg(test)]
+    pub(crate) fn generate_seeded(size: RsaKeySize, seed: &[u8]) -> Result<Self, Error> {
+        use crate::high::hmac_drbg::HmacDrbg;
+        let _entry = Entry::new_secret();
+        let mut candidates = HmacDrbg::<hash::Sha256>::new(seed, b"ct-qemu-candidates", b"");
+        let mut witnesses = HmacDrbg::<hash::Sha256>::new(seed, b"ct-qemu-witnesses", b"");
+        rsa_priv::RsaPrivateKey::generate(size, &mut candidates, &mut witnesses).map(SigningKey)
+    }
+
     /// The key [`Self::generate`] makes of the primes `p` and `q`, for
     /// tests whose vectors give them.
     #[cfg(test)]
@@ -975,6 +986,31 @@ mod tests {
     use crate::high::hmac_drbg::HmacDrbg;
     use crate::mid::rng::SliceRandomSource;
     use crate::test::{Acvp, acvp};
+
+    /// The ct-qemu key is this helper. The same seed is the same public key,
+    /// a different seed is not, and the key signs.
+    #[test]
+    fn generate_seeded_follows_the_seed() {
+        fn spki(seed: &[u8]) -> Vec<u8> {
+            let key = SigningKey::generate_seeded(RsaKeySize::Rsa2048, seed).unwrap();
+            let mut buf = [0u8; 600];
+            key.public_key().to_spki_der(&mut buf).unwrap().to_vec()
+        }
+        let seed = b"0123456789abcdef";
+        assert_eq!(spki(seed), spki(seed));
+        assert_ne!(spki(seed), spki(b"fedcba9876543210"));
+        // The ct-qemu trace signs through `RsaKeyPair`, after this encoding.
+        let signing = SigningKey::generate_seeded(RsaKeySize::Rsa2048, seed).unwrap();
+        let mut der = [0u8; MAX_PKCS8_LEN];
+        let key = crate::signature::RsaKeyPair::from_pkcs8(signing.to_pkcs8_der(&mut der).unwrap())
+            .unwrap();
+        let signature = key
+            .sign(&crate::signature::sign::RSA_PKCS1_SHA256, b"ct")
+            .unwrap();
+        key.public_key(&crate::signature::sign::RSA_PKCS1_SHA256)
+            .verify(b"ct", signature.as_ref())
+            .unwrap();
+    }
 
     /// Verifies each test's signature under its group's key, returning
     /// `None` for a group whose public exponent rind refuses: above 33 bits,
