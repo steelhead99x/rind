@@ -452,7 +452,9 @@ pub(crate) fn verify_mu<P: Params>(
     signature: &[u8],
 ) -> Result<(), Error> {
     let _entry = Entry::new_public();
-    verify_internal::<P>(pk, mu, signature)
+    // One verification, so the public-key expansion is not kept on a key.
+    let expanded = low::ReuseCache::new();
+    verify_internal::<P>(pk, &expanded, mu, signature)
 }
 
 /// `mu = H(tr || 0 || len(context) || context || message)`, pure ML-DSA's

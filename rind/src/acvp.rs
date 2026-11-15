@@ -213,16 +213,16 @@ pub fn field_bytes(bytes: &[u8], len: usize) -> Option<Vec<u8>> {
 /// requires an odd modulus, so an even or zero modulus is refused before
 /// that reduction runs.
 ///
-/// The result is secret. ACVP uses this for the RSA signature primitive and
-/// for decryption, and `m^d mod n` is then as good as `d`. It is returned in
-/// a [`SecretBuf`] and is not marked public.
+/// The exponent stays secret. The result does not: it is a signature or a
+/// decrypted message, and neither is wiped. It is marked public before it
+/// is returned.
 ///
 /// The exponentiation's trace follows public lengths. `exp.len()` fixes the
 /// exponent's limb count, and a shorter exponent is widened to the modulus,
 /// whose length is public too. Leading zero bytes stay in the value: they are
 /// not a separate length. An exponent whose public length is already wider
 /// than the modulus keeps that width, so its high words are not dropped.
-pub fn rsa_modexp(base: &[u8], exp: &[u8], modulus: &[u8]) -> Option<SecretBuf> {
+pub fn rsa_modexp(base: &[u8], exp: &[u8], modulus: &[u8]) -> Option<Vec<u8>> {
     let _entry = crate::low::Entry::new_secret();
     if modulus.len() > RSA_WORDS * 8 {
         return None;
@@ -243,7 +243,7 @@ pub fn rsa_modexp(base: &[u8], exp: &[u8], modulus: &[u8]) -> Option<SecretBuf> 
 }
 
 /// RSA's non-CRT private operation with key validation and a public fault check.
-pub fn rsa_private(base: &[u8], d: &[u8], n: &[u8], e: &[u8]) -> Option<SecretBuf> {
+pub fn rsa_private(base: &[u8], d: &[u8], n: &[u8], e: &[u8]) -> Option<Vec<u8>> {
     let _entry = crate::low::Entry::new_secret();
     let public = rsa_public(n, e)?;
     let base = PosInt::from_bytes(base).ok()?;
@@ -297,7 +297,7 @@ pub struct RsaCrtComponents<'a> {
 }
 
 /// rind's validated RSA CRT operation, or `None` for a bad key or input.
-pub fn rsa_crt(base: &[u8], key: &RsaCrtComponents<'_>) -> Option<SecretBuf> {
+pub fn rsa_crt(base: &[u8], key: &RsaCrtComponents<'_>) -> Option<Vec<u8>> {
     use crate::mid::rsa_priv::RsaPrivateKey;
 
     let _entry = crate::low::Entry::new_secret();
@@ -332,14 +332,18 @@ pub fn rsa_crt(base: &[u8], key: &RsaCrtComponents<'_>) -> Option<SecretBuf> {
 }
 
 /// Serializes a private result at the public modulus encoding width.
-fn rsa_bytes(out: &PosInt<RSA_WORDS>, len: usize) -> Option<SecretBuf> {
+fn rsa_bytes(out: &PosInt<RSA_WORDS>, len: usize) -> Option<Vec<u8>> {
     // PosInt encodes whole limbs. Right-align those limbs before taking
     // the modulus's byte width, which need not be a whole number of limbs.
     // The result is below the modulus, so any discarded high bytes are zero.
+    // It is a signature or a decrypted message, so it is marked public and
+    // is not placed in a wiping buffer.
     let mut bytes = [0u8; RSA_WORDS * 8];
     let start = bytes.len() - out.as_words().len() * 8;
     out.to_bytes(&mut bytes[start..]).ok()?;
-    Some(SecretBuf::from_slice(&bytes[bytes.len() - len..]))
+    let result = bytes[bytes.len() - len..].to_vec();
+    crate::low::ct::public_slice(&result);
+    Some(result)
 }
 
 /// Expands a raw HKDF pseudorandom key, checking the length before allocating.
@@ -636,9 +640,9 @@ mod tests {
         let wanted_wide = super::rsa_modexp(&base, &wide_exp, &modulus).unwrap();
         let wanted_short = super::rsa_modexp(&base, &short_exp, &modulus).unwrap();
         let wanted_leading = super::rsa_modexp(&base, &leading, &modulus).unwrap();
-        assert_eq!(wanted_wide.as_slice().len(), 256);
-        assert_eq!(reveal(&wanted_short), reveal(&wanted_leading));
-        assert_ne!(reveal(&wanted_short), reveal(&wanted_wide));
+        assert_eq!(wanted_wide.len(), 256);
+        assert_eq!(wanted_short, wanted_leading);
+        assert_ne!(wanted_short, wanted_wide);
 
         secret_slice(&wide_exp);
         secret_slice(&short_exp);
@@ -646,9 +650,9 @@ mod tests {
         let wide = super::rsa_modexp(&base, &wide_exp, &modulus).unwrap();
         let short = super::rsa_modexp(&base, &short_exp, &modulus).unwrap();
         let padded = super::rsa_modexp(&base, &leading, &modulus).unwrap();
-        assert_eq!(reveal(&wide), reveal(&wanted_wide));
-        assert_eq!(reveal(&short), reveal(&wanted_short));
-        assert_eq!(reveal(&padded), reveal(&wanted_leading));
+        assert_eq!(wide, wanted_wide);
+        assert_eq!(short, wanted_short);
+        assert_eq!(padded, wanted_leading);
     }
 
     #[test]
@@ -662,14 +666,11 @@ mod tests {
             let result = super::rsa_private(&base, &d, &n, &e).unwrap();
             let mut expected = vec![0; len];
             expected[len - 1] = 6;
-            assert_eq!(reveal(&result), expected);
+            assert_eq!(result, expected);
         }
         let n = vec![13];
         let padded = vec![0, 0, 5];
-        assert_eq!(
-            reveal(&super::rsa_private(&base, &padded, &n, &e).unwrap()),
-            [6]
-        );
+        assert_eq!(super::rsa_private(&base, &padded, &n, &e).unwrap(), [6]);
         for e in [0, 1, 2, 13, 15] {
             let invalid = Vec::from([e]);
             assert!(super::rsa_private(&base, &d, &n, &invalid).is_none());
@@ -701,19 +702,14 @@ mod tests {
                     let result = super::rsa_private(&base, &d, &n, &e);
                     if test.flag("testPassed") {
                         assert_eq!(
-                            reveal(&result.unwrap()),
+                            result.unwrap(),
                             test.hex(output),
                             "tcId {}",
                             test.int("tcId")
                         );
                     } else {
                         let expected = super::rsa_modexp(&base, &d, &n);
-                        assert_eq!(
-                            result.as_ref().map(reveal),
-                            expected.as_ref().map(reveal),
-                            "tcId {}",
-                            test.int("tcId")
-                        );
+                        assert_eq!(result, expected, "tcId {}", test.int("tcId"));
                     }
                 }
             }
@@ -742,7 +738,7 @@ mod tests {
         };
         let result = super::rsa_crt(&[2], &key).unwrap();
         let reference = super::rsa_modexp(&[2], key.d, key.n).unwrap();
-        assert_eq!(reveal(&result), reveal(&reference));
+        assert_eq!(result, reference);
 
         for component in 0..8 {
             // Separate allocations keep a marked secret zero from aliasing
@@ -810,23 +806,13 @@ mod tests {
                 let ct = test.hex("ct");
                 let result = super::rsa_crt(&ct, &key);
                 if test.flag("testPassed") {
-                    assert_eq!(
-                        reveal(&result.unwrap()),
-                        test.hex("pt"),
-                        "tcId {}",
-                        test.int("tcId")
-                    );
+                    assert_eq!(result.unwrap(), test.hex("pt"), "tcId {}", test.int("tcId"));
                 } else {
                     // The wrapper rejects SP 800-56B's trivial ciphertexts
                     // before this raw operation. Its core still computes
                     // the same value as the non-CRT exponentiation.
                     let expected = super::rsa_modexp(&ct, &d, &n);
-                    assert_eq!(
-                        result.as_ref().map(reveal),
-                        expected.as_ref().map(reveal),
-                        "tcId {}",
-                        test.int("tcId")
-                    );
+                    assert_eq!(result, expected, "tcId {}", test.int("tcId"));
                 }
             }
         }

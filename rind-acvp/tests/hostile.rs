@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! Reject malformed operation requests before they can produce an answer.
+//! Malformed operation requests are handler errors. The process answers each
+//! one as a failed vector and keeps the session.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 
 use rind_acvp::{Reply, Wrapper};
@@ -46,25 +47,65 @@ fn operation_argument_counts_are_exact() {
 }
 
 #[test]
-fn binary_refuses_an_extra_operation_argument() {
+fn binary_fails_an_extra_operation_argument_and_stays_up() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_rind-acvp"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let args = [b"SHA2-256".as_slice(), b"abc", b"ignored"];
-    let mut request = u32_ne(args.len() as u32);
-    for arg in args {
-        request.extend(u32_ne(arg.len() as u32));
+    let mut input = child.stdin.take().unwrap();
+    let mut output = child.stdout.take().unwrap();
+    let mut err = child.stderr.take().unwrap();
+    write_request(&mut input, &[b"SHA2-256", b"abc", b"ignored"]);
+    assert_eq!(read_reply(&mut output), vec![Vec::<u8>::new()]);
+    write_request(&mut input, &[b"SHA2-256", b"abc"]);
+    assert_eq!(
+        read_reply(&mut output),
+        vec![vec![
+            0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae,
+            0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61,
+            0xf2, 0x00, 0x15, 0xad,
+        ]]
+    );
+    drop(input);
+    let mut stderr = Vec::new();
+    err.read_to_end(&mut stderr).unwrap();
+    assert!(child.wait().unwrap().success());
+    assert!(stderr.is_empty());
+}
+
+fn write_request(input: &mut impl Write, parts: &[&[u8]]) {
+    input
+        .write_all(&(parts.len() as u32).to_ne_bytes())
+        .unwrap();
+    for part in parts {
+        input.write_all(&(part.len() as u32).to_ne_bytes()).unwrap();
     }
-    for arg in args {
-        request.extend_from_slice(arg);
+    for part in parts {
+        input.write_all(part).unwrap();
     }
-    child.stdin.take().unwrap().write_all(&request).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
+    input.flush().unwrap();
+}
+
+fn read_reply(output: &mut impl Read) -> Vec<Vec<u8>> {
+    let mut word = [0u8; 4];
+    output.read_exact(&mut word).unwrap();
+    let count = u32::from_ne_bytes(word) as usize;
+    let lengths: Vec<_> = (0..count)
+        .map(|_| {
+            output.read_exact(&mut word).unwrap();
+            u32::from_ne_bytes(word) as usize
+        })
+        .collect();
+    lengths
+        .into_iter()
+        .map(|len| {
+            let mut bytes = vec![0; len];
+            output.read_exact(&mut bytes).unwrap();
+            bytes
+        })
+        .collect()
 }
 
 #[test]

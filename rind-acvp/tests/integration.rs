@@ -86,6 +86,40 @@ fn empty_rsa_primitive_replies_and_keeps_the_session() {
 }
 
 #[test]
+fn handler_errors_fail_one_vector_and_keep_the_session() {
+    let digest = hex("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    let sha = ("SHA2-256", vec![b"abc".to_vec()]);
+    let mut scalar = vec![1u8];
+    scalar.resize(34, 0);
+    let replies = transact(&[
+        (
+            "PBKDF",
+            vec![
+                vec![0; 7],
+                vec![0; 16],
+                1u32.to_ne_bytes().to_vec(),
+                b"SHA2-256".to_vec(),
+                112u32.to_ne_bytes().to_vec(),
+            ],
+        ),
+        sha.clone(),
+        (
+            "RSA/sigVer/SHA-1/pkcs1v1.5",
+            vec![vec![0xff; 256], vec![1, 0, 1], b"m".to_vec(), vec![0; 256]],
+        ),
+        sha.clone(),
+        ("ECDH/P-256", vec![vec![0; 32], vec![0; 32], scalar]),
+        sha,
+    ]);
+    assert_eq!(replies[0], vec![Vec::<u8>::new()]);
+    assert_eq!(replies[1], vec![digest.clone()]);
+    assert_eq!(replies[2], vec![vec![0]]);
+    assert_eq!(replies[3], vec![digest.clone()]);
+    assert_eq!(replies[4], vec![Vec::<u8>::new(), Vec::new(), Vec::new()]);
+    assert_eq!(replies[5], vec![digest]);
+}
+
+#[test]
 fn malformed_ecdsa_coordinates_keep_the_wrapper_session_alive() {
     let mut requests = Vec::new();
     for (curve, hash, field) in [

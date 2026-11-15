@@ -22,12 +22,17 @@ pub fn serve() -> io::Result<()> {
             let Some((command, args)) = request.split_first() else {
                 return Err(io::Error::other("empty ACVP request"));
             };
-            match std::str::from_utf8(command) {
-                Ok(command) => wrapper.handle(command, args).map_err(io::Error::other),
-                Err(_) => Err(io::Error::other("ACVP command is not UTF-8")),
+            let Ok(command) = std::str::from_utf8(command) else {
+                return Err(io::Error::other("ACVP command is not UTF-8"));
+            };
+            match wrapper.handle(command, args) {
+                Ok(reply) => reply,
+                // A domain error is one failed vector. The process stays up
+                // so the rest of the session is answered. A framing error
+                // still ends it: the stream would be out of step.
+                Err(_) => ops::failure_reply(command),
             }
         };
-        let reply = reply?;
         let spans = reply.slices();
         write_reply(&mut output, &spans)?;
     }

@@ -1252,11 +1252,53 @@ fn rsa_decrypt(args: &[Vec<u8>], crt: bool) -> Result<Reply, String> {
     }
 }
 
-fn rsa_primitive_reply(output: Option<rind::acvp::SecretBuf>) -> Result<Reply, String> {
+fn rsa_primitive_reply(output: Option<Vec<u8>>) -> Result<Reply, String> {
     match output {
-        Some(out) => Ok(with_secret(vec![vec![1]], out)),
+        // A signature or a decrypted message. It is not a key, so the reply
+        // does not wipe it.
+        Some(out) => public_reply(vec![vec![1], out]),
         None => public_reply(vec![vec![0], Vec::new()]),
     }
+}
+
+/// A per-request failure with the arity `acvptool` expects.
+///
+/// A boolean check is one zero byte. An open or an RSA primitive is a failed
+/// status and an empty result. Every other command gets empty spans of the
+/// width its success reply uses, so a later vector is still read.
+pub(crate) fn failure_reply(command: &str) -> Reply {
+    let parts = if matches!(
+        command,
+        "AES-GCM/open" | "AES-KW/open" | "AES-KWP/open" | "RSA/signaturePrimitive"
+    ) || command.starts_with("RSA/decryptionPrimitive")
+    {
+        vec![vec![0], Vec::new()]
+    } else if matches!(
+        command,
+        "AES/encrypt" | "AES/decrypt" | "AES-CBC/encrypt" | "AES-CBC/decrypt"
+    ) {
+        vec![Vec::new(), Vec::new()]
+    } else if command == "ECDSA/keyGen"
+        || command.starts_with("ECDH/")
+        || command.starts_with("RSA/sigGen/")
+    {
+        vec![Vec::new(), Vec::new(), Vec::new()]
+    } else if command == "ECDSA/sigGen"
+        || command == "ECDSA/sigGen/componentTest"
+        || command.ends_with("/keyGen")
+        || command.ends_with("/encap")
+    {
+        vec![Vec::new(), Vec::new()]
+    } else if command.ends_with("/sigVer")
+        || command.ends_with("/keyVer")
+        || command.ends_with("KeyCheck")
+        || command.starts_with("RSA/sigVer/")
+    {
+        vec![vec![0]]
+    } else {
+        vec![Vec::new()]
+    };
+    Reply::public_parts(parts)
 }
 
 /// SP 800-56B's decryption primitive refuses a ciphertext of 0, 1, or n−1.
@@ -2142,6 +2184,32 @@ mod tests {
             ],
         );
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn failure_replies_match_command_arity() {
+        let spans = |command| {
+            failure_reply(command)
+                .slices()
+                .into_iter()
+                .map(<[u8]>::to_vec)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(spans("PBKDF"), vec![Vec::<u8>::new()]);
+        assert_eq!(spans("RSA/sigVer/SHA-1/pkcs1v1.5"), vec![vec![0]]);
+        assert_eq!(
+            spans("ECDH/P-256"),
+            vec![Vec::<u8>::new(), Vec::new(), Vec::new()]
+        );
+        assert_eq!(spans("RSA/signaturePrimitive"), vec![vec![0], vec![]]);
+        assert_eq!(spans("AES-GCM/open"), vec![vec![0], vec![]]);
+        assert_eq!(spans("AES/encrypt").len(), 2);
+        assert_eq!(spans("ECDSA/keyGen").len(), 3);
+        assert_eq!(spans("ECDSA/sigGen").len(), 2);
+        assert_eq!(spans("RSA/sigGen/SHA2-256/pkcs1v1.5").len(), 3);
+        assert_eq!(spans("RSA/decryptionPrimitive/crt"), vec![vec![0], vec![]]);
+        assert_eq!(spans("ML-KEM/ML-KEM-768/keyGen").len(), 2);
+        assert_eq!(spans("SHA2-256").len(), 1);
     }
 
     #[test]
