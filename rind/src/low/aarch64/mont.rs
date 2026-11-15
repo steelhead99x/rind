@@ -181,7 +181,12 @@ mod tests {
             sparse[0] = 0xffff_ffff_ffff_ffc5;
             sparse[k - 1] = 1u64 << 63;
             let dense_mod = vec![u64::MAX; k];
-            for m in [sparse, dense_mod] {
+            // A small top word, as in a DH modulus that is not near a power
+            // of two. `below` is m - 1, so the conditional subtraction in
+            // `redc_8n` runs on a product of values next to m.
+            let mut small_top = vec![u64::MAX; k];
+            small_top[k - 1] = 1;
+            for m in [sparse, dense_mod, small_top] {
                 let mut n0 = [0u64];
                 bignum_negmodinv::bignum_negmodinv(&mut n0, &m[..1]);
                 let mut one = vec![0u64; k];
