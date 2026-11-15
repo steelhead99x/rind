@@ -57,7 +57,7 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 - **Breaks:** stable Rust leaves the unstable `v7` feature out of `CARGO_CFG_TARGET_FEATURE`, so a build script cannot tell an ARMv7 target from an earlier one by feature.
 - **Reproduce:** `rustc --print cfg --target armv7-unknown-linux-gnueabihf` on stable names no `v7`, which is what a build script sees.
-- **Workaround:** `rind/build.rs` reads the version from the target triple.
+- **Workaround:** `rind/build.rs` reads the version from the target triple. The manifest cannot, so it links the arm backend's libcrux crates when the target has 64-bit atomics, which every standard ARMv7-A and ARMv7-R triple has and no ARMv5TE or M-profile triple does. ARMv6 has them too and stays portable, so it builds those crates and does not call them. A custom ARMv7 target without 64-bit atomics stays portable and loses the NEON assembly.
 - **Reported:** no.
 - **Goes when:** the `v7` target feature is stable.
 

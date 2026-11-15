@@ -93,11 +93,12 @@ mod generic {
     // AVX2.
     #[cfg(not(rind_backend = "aarch64"))]
     pub(crate) mod mlkem_poly;
-    // Poly1305's 32x32->64-bit products from 16-bit halves on the 32-bit
-    // cores whose long multiply ends early or is missing (see build.rs).
+    // Poly1305's 32x32->64-bit products from 16-bit halves where that
+    // multiply ends early, is missing, or is a library call (see build.rs).
+    // Only Poly1305 calls it.
     #[cfg(any(
         all(
-            rind_mul16,
+            any(rind_mul16, rind_mul16_top, rind_mul16_soft),
             rind_backend = "portable",
             any(target_pointer_width = "32", rind_limb = "32")
         ),

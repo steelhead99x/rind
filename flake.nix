@@ -642,6 +642,8 @@
                     "thumbv6m-none-eabi"
                     "thumbv7m-none-eabi"
                     "thumbv8m.base-none-eabi"
+                    "armv5te-unknown-linux-gnueabi"
+                    "riscv32i-unknown-none-elf"
                     "i686-unknown-linux-gnu"
                     "loongarch64-unknown-linux-gnu"
                     "powerpc-unknown-linux-gnu"

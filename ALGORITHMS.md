@@ -141,9 +141,11 @@ with portable Rust in place of the assembly armv7 runs regardless.
   which in turn ran SHA-256 28–30% faster than HACL*.
 - portable: ChaCha20-Poly1305's Poly1305 is Graviola's on 64-bit targets
   and rind's on 32-bit ones, in poly1305-donna-32's five 26-bit limbs, so
-  each limb product is one 32x32->64-bit multiply, or four 32x32->32-bit
-  ones of 16-bit halves on the Cortex-M3, whose `umull` ends early on small
-  operands, and on the cores without `umull`. HACL*'s verified one,
+  each limb product is one 32x32->64-bit multiply, or four 16-bit halves
+  where that multiply ends early or is a library call: a fixed-time 32-bit
+  `mul` on the Cortex-M3 and the cores without `umull`, the same `mul` with
+  bit 31 set on ARMv4T and ARMv5TE, and a shift-and-add on RISC-V without
+  the M extension. HACL*'s verified one,
   which armv7 runs without NEON, also has 26-bit limbs but keeps them in
   `u64`s, and on a 32-bit core without NEON spends most of its time in
   64-bit multiplies and adds; nothing proves rind's, whose tests check it

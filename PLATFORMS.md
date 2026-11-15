@@ -163,8 +163,9 @@ own ACVP run and no other path is in it.
 rind's secret-dependent code divides no secret and does no floating-point
 arithmetic on any architecture, as `admin/ct-vartime` checks, but it multiplies
 secrets, so it runs in constant time only where the integer multiplier does.
-rind has no masked multiply for the cores whose multiplier finishes early for
-some operands, so it is not constant-time on them:
+Poly1305 is the exception a bullet names. rind has no masked multiply for the
+other secret products on the cores whose multiplier finishes early for some
+operands, so it is not constant-time on them:
 
 - `aarch64`: Arm's Cortex-A53 (Raspberry Pi 3 and Zero 2 W), whose 64-bit
   multiply takes a cycle longer when both operands exceed 32 bits, as measured
@@ -192,12 +193,23 @@ some operands, so it is not constant-time on them:
   with the Zkt extension, which the RVA22 and RVA23 profiles require, such as
   SpacemiT's X60, guarantees its multiplies' timing ([Zkt]), and SiFive's U54
   and U74 and T-Head's C910 and C920 document a fixed latency.
+- `riscv32` and `riscv64` without the M extension, such as
+  `riscv32i-unknown-none-elf` and `riscv32e-unknown-none-elf`: there is no
+  multiply instruction, so the compiler lowers `wrapping_mul` to `__mulsi3`,
+  whose iterations follow the bits of an operand. Poly1305 builds each
+  16-bit half with sixteen masked shifts and adds. The rest of rind's secret
+  arithmetic on those targets still calls that routine.
 - `s390x`: IBM publishes no instruction timing for IBM Z, so rind cannot say.
 - 32-bit `arm` before ARMv7: Intel's XScale (ARMv5TE), whose `mul`, `umull`,
   and `smull` terminate early by the top bits of their second operand
   ([XScale] Table 10-6), and ARMv4T's ARM7TDMI and ARM9TDMI ([BearSSL ctmul]).
   ARMv6's ARM1176 does not terminate early ([ARM1176 TRM] Table 3-46), nor does
-  the ARM926EJ-S.
+  the ARM926EJ-S. On the ARMv4T and ARMv5TE triples Poly1305 sets bit 31 of
+  each 16-bit half before multiplying, which misses every early-out row in
+  that table, so the long path is taken whatever the secret is and whichever
+  operand the compiler picks. The ARM926EJ-S shares those triples and does
+  not end early, so it pays that long path; its speed was not measured. The
+  rest of rind's secret arithmetic on 32-bit limbs still takes whole products.
 - 32-bit `arm` M-profile: Arm's Cortex-M3, whose `umull`, `smull`, `umlal`,
   and `smlal` end early "depending on the size of the source values" (Arm
   DDI 0337, "Cortex-M3 instructions"), as when an operand fits in 16 bits, is

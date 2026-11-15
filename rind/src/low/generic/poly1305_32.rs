@@ -16,12 +16,13 @@
 //! It adds, multiplies, shifts and masks, and branches on no secret: the final
 //! choice between `h` and `h - p` is a mask. Its time depends on no secret on
 //! a core whose 32x32->64-bit multiply takes the same time for every operand,
-//! as the ESP32-S3's and Cortex-M4's do. A Cortex-M3's `umull` ends early on
-//! small operands, and the Cortex-M0, M0+, M1, and M23 have no `umull`, so on
-//! the targets for them, which `rind_mul16` names (see build.rs), each limb
-//! product is four 32x32->32-bit multiplies of 16-bit halves instead
-//! (`generic::mul16`), which those cores do in the same time for every
-//! operand.
+//! as the ESP32-S3's and Cortex-M4's do. Where that multiply ends early, is
+//! missing, or is a library call, `rind_mul16` (see build.rs) builds each
+//! limb product from 16-bit halves (`generic::mul16`): a 32-bit `mul` on the
+//! Cortex-M0 and M3, the same `mul` with bit 31 set on ARMv4T and ARMv5TE so
+//! the early-out takes its long path, and a shift-and-add where the target
+//! has no multiply instruction. Only these products. The rest of rind's
+//! secret arithmetic on 32-bit limbs is unchanged.
 
 use super::blockwise::Blockwise;
 use crate::low::ct;
@@ -83,6 +84,9 @@ impl Poly1305 {
         self.bw.add_trailing(remainder);
     }
 
+    /// The tag. Never inlined, so `admin/ct-vartime` can see that the only
+    /// product here is five times a carry, not a widening multiply.
+    #[inline(never)]
     pub(crate) fn finish(mut self) -> [u8; 16] {
         if let Some(tail) = self.bw.clone().peek_remaining() {
             // The short last block's 1 goes after its bytes, not at bit 128.
@@ -114,7 +118,7 @@ impl Poly1305 {
         h4 = h4.wrapping_add(c);
         c = h4 >> 26;
         h4 &= MASK;
-        h0 = h0.wrapping_add(c.wrapping_mul(5));
+        h0 = h0.wrapping_add(times5(c));
         c = h0 >> 26;
         h0 &= MASK;
         h1 = h1.wrapping_add(c);
@@ -168,20 +172,15 @@ impl Poly1305 {
     /// limb, the 2^128 RFC 8439 sets above a whole block, or 0 for a padded
     /// last block, which carries its own 1.
     ///
-    /// Never inlined, so `admin/ct-vartime` finds it by name to check that
-    /// with `rind_mul16` it holds no 32x32->64-bit multiply. It runs once per
-    /// update, over every block of it.
+    /// Never inlined, so `admin/ct-vartime` finds it by name, as it finds
+    /// `finish`, and checks that with `rind_mul16` it holds no variable-time
+    /// multiply. It runs once per update, over every block of it.
     #[inline(never)]
     fn blocks(&mut self, blocks: &[[u8; 16]], hibit: u32) {
         let [r0, r1, r2, r3, r4] = self.r;
         // 2^130 = 5 (mod p), so a product's part at or above 2^130 folds
         // back in multiplied by 5: s1..s4 < 5 * 2^26 < 2^29.
-        let (s1, s2, s3, s4) = (
-            r1.wrapping_mul(5),
-            r2.wrapping_mul(5),
-            r3.wrapping_mul(5),
-            r4.wrapping_mul(5),
-        );
+        let (s1, s2, s3, s4) = (times5(r1), times5(r2), times5(r3), times5(r4));
         let [mut h0, mut h1, mut h2, mut h3, mut h4] = self.h;
 
         for block in blocks {
@@ -250,7 +249,7 @@ impl Poly1305 {
             d4 = d4.wrapping_add(u64::from(c));
             c = (d4 >> 26) as u32;
             h4 = d4 as u32 & MASK;
-            h0 = h0.wrapping_add(c.wrapping_mul(5));
+            h0 = h0.wrapping_add(times5(c));
             c = h0 >> 26;
             h0 &= MASK;
             h1 = h1.wrapping_add(c);
@@ -268,10 +267,27 @@ fn mul(a: u32, b: u32) -> u64 {
     u64::from(a).wrapping_mul(u64::from(b))
 }
 
-// Where the 32x32->64-bit multiply ends early or is missing, four
-// 32x32->32-bit multiplies of 16-bit halves.
+// Where the 32x32->64-bit multiply ends early, is missing, or is a library
+// call, four 16-bit halves.
 #[cfg(rind_mul16)]
 use super::mul16::mul16 as mul;
+
+/// `5 * x`. A core whose 32-bit `mul` takes the same time for every operand
+/// keeps that multiply. Where it ends early, or the target has no multiply
+/// instruction, two hidden adds stand in, and the two barriers are separate
+/// so the compiler cannot turn them back into `mul`.
+#[inline(always)]
+fn times5(x: u32) -> u32 {
+    #[cfg(any(rind_mul16_top, rind_mul16_soft))]
+    {
+        let y = super::mul16::hide(x);
+        y.wrapping_add(super::mul16::hide(x << 2))
+    }
+    #[cfg(not(any(rind_mul16_top, rind_mul16_soft)))]
+    {
+        x.wrapping_mul(5)
+    }
+}
 
 fn read32(bytes: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
@@ -440,11 +456,12 @@ mod tests {
     }
 
     // Against Graviola's 64-bit Poly1305 and, where the portable backend
-    // builds, HACL*'s verified one, which 32-bit targets ran before: random keys and messages of random lengths
-    // up to 16 KiB, fed in random pieces, plus every length up to 300 bytes
-    // and keys and messages of all ones, which push the accumulator to its
-    // largest values before the final reduction, and of all zeros. The key
-    // and message are secret, so under `admin/ctgrind` this also checks this
+    // builds, HACL*'s verified one, which 32-bit targets ran before:
+    // random keys and messages of random lengths up to 16 KiB, fed in
+    // random pieces, plus every length up to 300 bytes and keys and
+    // messages of all ones, which push the accumulator to its largest
+    // values before the final reduction, and of all zeros. The key and
+    // message are secret, so under `admin/ctgrind` this also checks this
     // Poly1305 is constant time in both.
     #[test]
     fn matches_hacl_and_generic() {

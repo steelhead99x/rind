@@ -38,14 +38,19 @@
 //! And it sets `rind_reg_asm` on the architectures whose `asm!` with a `reg`
 //! operand is stable Rust, which the portable MD5 uses as an optimisation
 //! barrier. Arm64EC is one of them: its `reg` class has been stable since
-//! Rust 1.84, and it is a subset of AArch64's. It sets `rind_mul16` for the
-//! microcontroller cores whose 32x32->64-bit multiply takes a time that
-//! depends on its operands, or that have none: ARMv7-M's Cortex-M3, whose
-//! `umull` ends early on small operands, and ARMv6-M's and ARMv8-M
-//! Baseline's Cortex-M0, M0+, M1, and M23, which would call a library
-//! routine. There, Poly1305 builds each secret product from 32x32->32-bit
-//! multiplies of 16-bit halves (`low::generic::mul16`). `--cfg rind_mul16`
-//! forces it, so CI checks that code on other targets; it too is for testing.
+//! Rust 1.84, and it is a subset of AArch64's. It sets `rind_mul16` where
+//! Poly1305 must not use a 32x32->64-bit multiply (`low::generic::mul16`).
+//! On `thumbv7m` the Cortex-M3's `umull` ends early, and on `thumbv6m` and
+//! `thumbv8m.base` there is no `umull`; each half is one 32-bit `mul`, which
+//! those cores do in fixed time. On ARMv4T and ARMv5TE that `mul` ends early
+//! too, including on a 16-bit half, so `rind_mul16_top` sets bit 31 of each
+//! half and the early-out takes its long path. On RISC-V without the M
+//! extension there is no multiply instruction, so `rind_mul16_soft` builds
+//! each half with a shift and an add. `--cfg rind_mul16` forces the halves,
+//! so CI checks them on other targets; it is for testing. The top and soft
+//! cfgs follow the target even then. Only Poly1305's limb products use this.
+//! X25519, the NIST curves, and RSA on these cores still use a multiply whose
+//! time depends on its operands.
 //!
 //! On bare-metal x86_64 without SSE2, dalek's default `simd` backend does
 //! not compile, so the build must name `serial` or `fiat`. With SSE2, that
@@ -63,6 +68,8 @@ fn main() {
 
     println!(r#"cargo::rustc-check-cfg=cfg(rind_limb, values("32", "64"))"#);
     println!("cargo::rustc-check-cfg=cfg(rind_mul16)");
+    println!("cargo::rustc-check-cfg=cfg(rind_mul16_top)");
+    println!("cargo::rustc-check-cfg=cfg(rind_mul16_soft)");
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
     println!("cargo::rustc-check-cfg=cfg(rind_x86_64_none_dalek_scalar)");
     println!("cargo::rustc-check-cfg=cfg(rind_x86_64_none_dalek_wide)");
@@ -83,8 +90,10 @@ fn main() {
         "x86_64" if little && !forced && (!bare_metal || sse2) => "x86_64",
         "aarch64" if little && !forced && neon => "aarch64",
         // M-profile is Thumb-only and has no NEON, so the arm assembly
-        // cannot run there.
-        "arm" if little && !forced && armv7_or_later() && !m_profile() => "arm",
+        // cannot run there. A custom ARMv7 target without 64-bit atomics
+        // stays portable: the manifest cannot see the triple's version
+        // (UPSTREAM.md) and links libcrux only when the target has them.
+        "arm" if little && !forced && has_atomic64() && armv7_or_later() && !m_profile() => "arm",
         _ => "portable",
     };
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
@@ -139,24 +148,80 @@ fn main() {
         println!(r#"cargo::rustc-cfg=rind_limb="{limb}""#);
     }
 
-    if env::var_os("CARGO_CFG_RIND_MUL16").is_none() && variable_time_long_multiply() {
+    // A cfg the build already passed, including CI's `--cfg rind_mul16`,
+    // stays. The top and soft cfgs still follow the target, so forcing the
+    // halves on ARMv5TE does not drop the bit that keeps the early-out long.
+    let mode = poly1305_half_mul();
+    if env::var_os("CARGO_CFG_RIND_MUL16").is_none() && mode.is_some() {
         println!("cargo::rustc-cfg=rind_mul16");
+    }
+    if mode == Some(Half::Top) && env::var_os("CARGO_CFG_RIND_MUL16_TOP").is_none() {
+        println!("cargo::rustc-cfg=rind_mul16_top");
+    }
+    if mode == Some(Half::Soft) && env::var_os("CARGO_CFG_RIND_MUL16_SOFT").is_none() {
+        println!("cargo::rustc-cfg=rind_mul16_soft");
     }
 }
 
-/// Whether the target is for a microcontroller core whose 32x32->64-bit
-/// multiply may take a time that depends on its operands, or that has none:
-/// `thumbv7m-none-eabi`'s Cortex-M3, whose `umull` takes 3 to 5 cycles by the
-/// size of its operands (Arm DDI 0337, "Cortex-M3 instructions"), and the
-/// ARMv6-M and ARMv8-M Baseline cores of `thumbv6m-none-eabi` and
-/// `thumbv8m.base-none-eabi`, which have no `umull`. Each one's
-/// 32x32->32-bit `mul` takes the same time for every operand. ARMv7E-M's
-/// Cortex-M4 and M7, as in `thumbv7em-none-eabihf`, take one cycle for
-/// `umull`. As for `armv7_or_later`, the triple is all a build script sees.
-fn variable_time_long_multiply() -> bool {
+/// How Poly1305 multiplies one 16-bit half, where it must not use a
+/// 32x32->64-bit product.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Half {
+    /// One 32-bit `mul`. Constant time on the Cortex-M0 and the Cortex-M3.
+    Halves,
+    /// That `mul` with bit 31 set, so ARMv4T and XScale take the long path.
+    Top,
+    /// Sixteen shifts and adds. The target has no multiply instruction.
+    Soft,
+}
+
+/// Which half Poly1305 uses on this target, or none when a 32x32->64-bit
+/// product is one instruction that takes the same time for every operand.
+///
+/// `thumbv7m` is the Cortex-M3, whose `umull` takes 3 to 5 cycles by the
+/// size of its operands (Arm DDI 0337, "Cortex-M3 instructions"). `thumbv6m`
+/// and `thumbv8m.base` have no `umull`. Each one's 32-bit `mul` takes the
+/// same time for every operand. ARMv7E-M, as in `thumbv7em-none-eabihf`,
+/// takes one cycle for `umull`, so it is not here. ARMv4T and ARMv5TE end a
+/// `mul` early on a 16-bit half too, so the top bit stays set.
+/// `arm-linux-androideabi` is ARMv5TE; `armv7-linux-androideabi` is not, and
+/// its arch component is `armv7`. RISC-V without the M extension has no
+/// multiply instruction. As for `armv7_or_later`, the triple is all a build
+/// script sees.
+fn poly1305_half_mul() -> Option<Half> {
+    if riscv_without_multiply() {
+        return Some(Half::Soft);
+    }
     let target = env::var("TARGET").expect("cargo sets the target");
     let arch = target.split('-').next().unwrap_or_default();
-    matches!(arch, "thumbv6m" | "thumbv7m" | "thumbv8m.base")
+    let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let armv4t = matches!(arch, "armv4t" | "thumbv4t");
+    let armv5te = matches!(arch, "armv5te" | "thumbv5te") || (arch == "arm" && os == "android");
+    if armv4t || armv5te {
+        return Some(Half::Top);
+    }
+    if matches!(arch, "thumbv6m" | "thumbv7m" | "thumbv8m.base") {
+        return Some(Half::Halves);
+    }
+    None
+}
+
+/// Whether this RISC-V target has no M extension, so `wrapping_mul` is a
+/// library call. The feature list is absent when the target enables none.
+fn riscv_without_multiply() -> bool {
+    let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    if arch != "riscv32" && arch != "riscv64" {
+        return false;
+    }
+    let features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
+    !features.split(',').any(|feature| feature == "m")
+}
+
+/// Whether the target has 64-bit atomics. Cargo joins the widths with
+/// commas, as in `16,32,64,8,ptr`.
+fn has_atomic64() -> bool {
+    env::var("CARGO_CFG_TARGET_HAS_ATOMIC")
+        .is_ok_and(|values| values.split(',').any(|value| value == "64"))
 }
 
 /// Whether the 32-bit ARM target's triple names ARMv7 or later, as in

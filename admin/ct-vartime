@@ -46,15 +46,21 @@
 # that finds nothing fails, and the one inside must not.
 #
 # The `+mul16` targets build Poly1305's products from 16-bit halves. build.rs
-# sets that for `thumbv6m-none-eabi`, `thumbv7m-none-eabi`, and
-# `thumbv8m.base-none-eabi` (see `rind/src/low/generic/mul16.rs`). Those
-# three are scanned as themselves, so Thumb-1 and Thumb-2 cannot hide a long
-# multiply that armv7's A-profile code would not emit. armv7's portable
-# build with the cfg forced is scanned too. From each function in MUL16, the
-# scan follows calls as above and fails on a 32x32->64-bit multiply or a
-# call to a multiply routine, which is all it looks for on those targets. It
-# must find the one planted. A `none` target gets getrandom's custom
-# backend, because a library build cannot name one.
+# sets that for the Thumb-M triples, for ARMv4T and ARMv5TE (`rind_mul16_top`,
+# bit 31 set on each half), and for RISC-V without the M extension
+# (`rind_mul16_soft`, a shift-and-add). See `rind/src/low/generic/mul16.rs`.
+# The Thumb triples are scanned as themselves, so Thumb-1 and Thumb-2 cannot
+# hide a long multiply that armv7's A-profile code would not emit.
+# `armv5te-unknown-linux-gnueabi` is the top-bit path; `armv4t`, `thumbv4t`,
+# `thumbv5te`, and `arm-linux-androideabi` set the same cfg and the first
+# three have no prebuilt standard library here. `riscv32i-unknown-none-elf`
+# is the shift-and-add path; `riscv32e` sets the same cfg and has no prebuilt
+# standard library. armv7's portable build with the cfg forced is scanned
+# too, without the top or soft cfg, so its halves stay plain `mul`s. From
+# each function in MUL16, the scan follows calls as above and fails on a
+# 32x32->64-bit multiply, a call to a multiply routine, or, on RISC-V, a
+# multiply instruction. It must find the one planted. A `none` target gets
+# getrandom's custom backend, because a library build cannot name one.
 #
 # Run it in `nix develop .#ct-vartime`, which has llvm-objdump and each
 # target's standard library.
@@ -75,6 +81,8 @@ TARGETS = [
     "thumbv6m-none-eabi+mul16",
     "thumbv7m-none-eabi+mul16",
     "thumbv8m.base-none-eabi+mul16",
+    "armv5te-unknown-linux-gnueabi+mul16",
+    "riscv32i-unknown-none-elf+mul16",
     # The architectures whose only backend is the portable one. ARMv6 is
     # 32-bit ARM before ARMv7, and big-endian powerpc64 the ELFv1 ABI, whose
     # calls reach a function through its descriptor in `.opd`.
@@ -264,17 +272,26 @@ COND = "(eq|ne|hs|cs|lo|cc|mi|pl|vs|vc|hi|ls|ge|lt|gt|le|al)?"
 LONG_MULTIPLY = re.compile(
     r"([us]mull|[us]mlal)s?" + COND + r"|(umaal|smlal(bb|bt|tb|tt)|sml[as]ldx?)" + COND
 )
-MUL_HELPERS = re.compile(r"__aeabi_lmul|__mul[dt]i3")
+MUL_HELPERS = re.compile(r"__aeabi_lmul|__mul[dst]i3")
 LONG_MULTIPLY_SAMPLES = (
     "umull smull umlal smlal umullne umulls smlalseq umaal smlalbb smlald smlsldx",
     "mul muls mla mls mulne smulbb smlabb smmul umul16 adds",
 )
+# RISC-V multiply instructions. A core without the M extension must not emit
+# one, and must not call `__mulsi3`. Longer mnemonics come first so `mul`
+# does not hide `mulhu`.
+RISCV_MUL = re.compile(r"mulhu|mulhsu|mulh|mulw|mul")
+RISCV_MUL_SAMPLES = (
+    "mul mulh mulhu mulhsu mulw",
+    "add addi slli srli and andi sub xor c.mul",
+)
 # The functions the `+mul16` target checks, each with whether it is planted,
-# so must hold a long multiply. Poly1305's block function is never inlined,
-# so it keeps its name, and holds each of Poly1305's products; `finish`
-# multiplies only by 5, in 32 bits.
+# so must hold a long multiply. `blocks` and `finish` are never inlined, so
+# each keeps its name. `blocks` holds the limb products. `finish` multiplies
+# only by five, through `times5`.
 MUL16 = {
     "<rind::low::generic::poly1305_32::Poly1305>::blocks": False,
+    "<rind::low::generic::poly1305_32::Poly1305>::finish": False,
     "rind::low::vartime_planted::planted_long_multiply": True,
 }
 
@@ -444,6 +461,12 @@ class Objects:
         self.labels = collections.defaultdict(list)
         self.insns = collections.defaultdict(list)
         syntax = ["-M", "intel"] if arch == "x86" else []
+        # An ARMv5TE object's Tag_CPU_arch makes this llvm-objdump print
+        # `mul` and `umull` as `<unknown>`. They are the A32 encodings, which
+        # the ARMv7 triple decodes. `armv5te` is A32, so that triple matches
+        # the instruction width.
+        if arch == "armv5te":
+            syntax += ["--triple=armv7-unknown-linux-gnueabihf"]
         section = None
         for line in run([*args, "-d", "--no-show-raw-insn", *syntax], **quiet).splitlines():
             if m := MEMBER.match(line):
@@ -549,7 +572,11 @@ def describe(counts):
 
 def check_mul16(objects, target):
     """Scans the `+mul16` target's MUL16 functions for long multiplies: its
-    report's lines, and whether it failed."""
+    report's lines, and whether it failed. RISC-V also refuses a multiply
+    instruction, which a core without the M extension must not emit."""
+    riscv = target.split("-")[0].startswith("riscv")
+    kind = "variable-time multiply" if riscv else "long multiply"
+    kinds = "variable-time multiplies" if riscv else "long multiplies"
     lines = []
     failed = False
     for function, planted in MUL16.items():
@@ -562,6 +589,11 @@ def check_mul16(objects, target):
             failed = True
             continue
         findings, paths, reached = scan(objects, starts, LONG_MULTIPLY, MUL_HELPERS)
+        if riscv:
+            more, more_paths, reached = scan(objects, starts, RISCV_MUL)
+            for function_name, counts in more.items():
+                findings[function_name].update(counts)
+                paths.setdefault(function_name, more_paths[function_name])
         found = "; ".join("{}: {}".format(f, describe(c)) for f, c in sorted(findings.items()))
         if planted and findings:
             lines.append("ok   planted {}: {}".format(function, found))
@@ -575,8 +607,8 @@ def check_mul16(objects, target):
                     lines.append("       from " + caller)
             failed = True
         else:
-            lines.append("ok   {}: no long multiply in {} sections".format(function, reached))
-    return ["{}: checked {} functions for long multiplies".format(target, len(MUL16))] + lines, failed
+            lines.append("ok   {}: no {} in {} sections".format(function, kind, reached))
+    return ["{}: checked {} functions for {}".format(target, len(MUL16), kinds)] + lines, failed
 
 
 def check(tool, target, rind, others, public):
@@ -663,6 +695,11 @@ def main():
         assert LONG_MULTIPLY.fullmatch(mnemonic), mnemonic
     for mnemonic in allowed.split():
         assert not LONG_MULTIPLY.fullmatch(mnemonic), mnemonic
+    refused, allowed = RISCV_MUL_SAMPLES
+    for mnemonic in refused.split():
+        assert RISCV_MUL.fullmatch(mnemonic), mnemonic
+    for mnemonic in allowed.split():
+        assert not RISCV_MUL.fullmatch(mnemonic), mnemonic
 
     tool = objdump()
     libs = build(targets)

@@ -2,7 +2,7 @@
 
 //! The portable backend's Poly1305: rind's 26-bit limbs in
 //! `generic::poly1305_32` on 32-bit targets, where each limb product is one
-//! 32x32->64-bit multiply, or four 32x32->32-bit ones where build.rs sets
+//! 32x32->64-bit multiply, or four 16-bit halves where build.rs sets
 //! `rind_mul16`, and rind's 64-bit limbs in `generic::poly1305` on
 //! 64-bit ones, as x86_64 runs without SSE4.1. Neither counts its input, so
 //! neither limits the AEADs' message length.
