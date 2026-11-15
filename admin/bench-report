@@ -2198,6 +2198,18 @@ def report(hosts, tiers, verified, gaps):
     return files
 
 
+def usable_machine_id(text):
+    """A machine id, or "" when `text` is empty or the first-boot sentinel.
+
+    machine-id(5) says the file contains `uninitialized` until the first boot
+    finishes, and that string must not be turned into an id.
+    """
+    text = text.strip()
+    if not text or text == "uninitialized":
+        return ""
+    return text
+
+
 def machine_identity():
     """The OS machine id, or "" when this system has none.
 
@@ -2207,7 +2219,7 @@ def machine_identity():
     for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
         try:
             with open(path) as f:
-                ident = f.read().strip()
+                ident = usable_machine_id(f.read())
         except OSError:
             ident = ""
         if ident:
@@ -2217,7 +2229,7 @@ def machine_identity():
             r'"IOPlatformUUID" = "([^"]+)"', try_output(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"])
         )
         if found:
-            return found.group(1)
+            return usable_machine_id(found.group(1))
     return ""
 
 
@@ -2289,12 +2301,23 @@ def generated_alias(host, name):
 
 
 def same_machine_alias(body, name, tag):
-    """True when `body` is this machine's generated alias for `name`."""
+    """True when `body` is a generated alias of `name` for this result.
+
+    An untagged alias may gain a tag, the same way an untagged file may.
+    A tagged alias matches only that tag. An untagged result does not take
+    over a tagged alias.
+    """
     if not generated_alias(body, name):
         return False
-    if tag:
-        return machine_tag_of(body) == tag
-    return not machine_tag_of(body)
+    body_tag = machine_tag_of(body)
+    if not body_tag:
+        return True
+    return bool(tag) and body_tag == tag
+
+
+def this_machine_file(existing, filename, host):
+    """True when `filename` in the data directory is already this result's machine."""
+    return filename in existing and not different_machine(existing[filename], host)
 
 
 def disambiguation_rank(stem, name, tag):
@@ -2338,9 +2361,18 @@ def assign_import_name(name, host, existing, incoming=None):
     """
     incoming = incoming or {}
     tag = machine_tag_of(host)
-    # A marked alias is this machine's one destination, even when the slug
-    # itself is free. A same-tag file that is not an alias of this slug is
-    # left alone, which is how two chosen names on one machine both stay.
+    # A generated alias of a slug this machine already has is not a second
+    # host: the slug file stays the destination.
+    prior = host.get("alias_of") if isinstance(host, dict) else None
+    if isinstance(prior, str) and prior != name and this_machine_file(existing, prior, host):
+        return prior
+    # The slug file already in the report wins over a marked alias, so later
+    # imports refresh the name on disk instead of leaving it at the old time.
+    if this_machine_file(existing, name, host):
+        return name
+    # A marked alias is this machine's one destination when the slug is free
+    # or belongs to someone else. A same-tag file that is not an alias of
+    # this slug is left alone.
     found = {
         stem
         for records in (existing, incoming)
@@ -2400,6 +2432,8 @@ def import_hosts(directory):
             and incoming[target].get("status") == "ok"
             and same_machine_alias(host, target, machine_tag_of(incoming[target]))
         ):
+            if this_machine_file(existing, target, incoming[target]) or not different_machine(host, incoming[target]):
+                print(f"bench-report: {name}: same machine as {target}, not a second host", file=sys.stderr)
             continue
         dest = assign_import_name(name, host, existing, incoming)
         creating = dest not in existing
@@ -2412,7 +2446,14 @@ def import_hosts(directory):
             # alias name keeps the mark.
             body = dict(host)
             body["host"] = dest
-            if dest != name:
+            prior = body.get("alias_of")
+            if isinstance(prior, str) and prior == dest:
+                # Folded into the slug file. That file is not an alias of itself.
+                body.pop("alias_of", None)
+            elif dest != name and isinstance(prior, str) and prior != name:
+                # Already a generated alias of the real slug; do not retarget the marker.
+                body["alias_of"] = prior
+            elif dest != name:
                 body["alias_of"] = name
             elif body.get("alias_of") == name:
                 body.pop("alias_of", None)
@@ -2420,7 +2461,19 @@ def import_hosts(directory):
                 json.dump(body, f, indent=1)
                 f.write("\n")
             existing[dest] = body
-        if creating and dest != name:
+        slug = dest if dest == name or host.get("alias_of") == dest else None
+        if slug:
+            for stem, previous in list(existing.items()):
+                if stem != slug and same_machine_alias(previous, slug, machine_tag_of(host)):
+                    path = os.path.join(DATA_DIR, f"{stem}.json")
+                    if os.path.isfile(path):
+                        os.remove(path)
+                    del existing[stem]
+                    print(f"bench-report: {stem}: same machine as {slug}, dropped", file=sys.stderr)
+        prior = host.get("alias_of") if isinstance(host, dict) else None
+        if isinstance(prior, str) and dest == prior and name != dest:
+            print(f"bench-report: {name}: same machine as {dest}, imported as {dest}", file=sys.stderr)
+        elif creating and dest != name:
             print(f"bench-report: {name}: same slug as another machine, imported as {dest}", file=sys.stderr)
 
 
