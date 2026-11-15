@@ -22,7 +22,10 @@ application key. A free host name is kept when another file carries that
 tag and is not this machine's marked alias. A second machine that wants a
 slug already on disk is `<slug>-<tag>`, or `<slug>-2` when that alias is
 taken, and a later import replaces that file, including after the slug
-itself is free. A host whose chosen name is that spelling is left as it is.
+itself is free. When this machine already has the slug file, that file is
+refreshed and a marked alias of it is removed. An untagged alias gains a
+tag in place. An empty, all-zero, or uninitialized machine id is not a tag.
+A host whose chosen name is that spelling is left as it is.
 
 `collect` is the maintainer path. It copies one commit to each machine in
 COLLECT_HOSTS in turn, waits for room under `quest gate` and for any lease it
@@ -82,7 +85,10 @@ import tomllib
 # stored as `<slug>-host`. A second machine that wants a slug already on disk
 # is stored as `<slug>-<tag>`, or `<slug>-2` when that alias is taken. The
 # tag is eight hex characters of HMAC-SHA256 over the OS machine id under a
-# fixed application key. A chosen host of that spelling is left as it is.
+# fixed application key. An empty, all-zero, or uninitialized id is not a
+# tag. When this machine already has the slug file, that file is refreshed
+# and a marked alias of it is removed. An untagged alias gains a tag in
+# place. A chosen host of that spelling is left as it is.
 # `render` reads a `note` from here
 # only when that host's JSON has none, and shows these names first so the
 # published report keeps its order; every other host keeps the order it was
@@ -2185,7 +2191,9 @@ def report(hosts, tiers, verified, gaps):
         "Linux box is `aarch64-host` rather than the reserved name `aarch64`. A second machine",
         "that wants a slug already on disk is stored as `<slug>-<tag>`, or `<slug>-2` when that",
         "alias is taken, and a later import replaces that file. The tag is eight hex characters",
-        "of HMAC-SHA256 over the OS machine id, under a fixed application key. A host whose",
+        "of HMAC-SHA256 over the OS machine id, under a fixed application key. An empty, all-zero,",
+        "or uninitialized id is not a tag. A slug file this machine already has is refreshed, and",
+        "an untagged alias of that machine gains a tag instead of a second file. A host whose",
         "chosen name is that spelling is left as it is. `summary` and `render --from` read every",
         "measured `<host>.json`.",
         "`collect` reaches only the maintainer's machines. A gap's `on` may name any host with a",
@@ -2198,26 +2206,62 @@ def report(hosts, tiers, verified, gaps):
     return files
 
 
+def machine_id_text(ident):
+    """A machine id worth a tag, or "" when `ident` is not one.
+
+    machine-id(5) and sd_id128_get_machine refuse an empty file, an all-zero
+    id, and the first-boot sentinel `uninitialized`. A string that is not 32
+    hex digits, or a UUID of that form, is not an id either. Those values are
+    the same on every image that was never given an id, so hashing one would
+    publish a single tag for all of them.
+    """
+    if not isinstance(ident, str):
+        return ""
+    text = ident.strip()
+    if not text or text.lower() == "uninitialized":
+        return ""
+    plain = re.fullmatch(r"[0-9a-fA-F]{32}", text)
+    uuid = re.fullmatch(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        text,
+    )
+    if not plain and not uuid:
+        return ""
+    if set(text.replace("-", "").lower()) == {"0"}:
+        return ""
+    return text
+
+
+def read_machine_id(paths):
+    """The first usable machine id in `paths`, or "" when none is."""
+    for path in paths:
+        try:
+            with open(path) as f:
+                ident = machine_id_text(f.read())
+        except OSError:
+            ident = ""
+        if ident:
+            return ident
+    return ""
+
+
 def machine_identity():
     """The OS machine id, or "" when this system has none.
 
     A hostname is not an id: container names change every run, and a short
     one can be guessed. Clones that share one machine id share one tag.
+    An empty, all-zero, or uninitialized id is no id, and so is any other
+    string that is not a machine id.
     """
-    for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
-        try:
-            with open(path) as f:
-                ident = f.read().strip()
-        except OSError:
-            ident = ""
-        if ident:
-            return ident
+    ident = read_machine_id(("/etc/machine-id", "/var/lib/dbus/machine-id"))
+    if ident:
+        return ident
     if sys.platform == "darwin":
         found = re.search(
             r'"IOPlatformUUID" = "([^"]+)"', try_output(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"])
         )
         if found:
-            return found.group(1)
+            return machine_id_text(found.group(1))
     return ""
 
 
@@ -2228,11 +2272,27 @@ def machine_identity():
 _MACHINE_TAG_KEY = b"rind-bench-report-host"
 
 
+def _absent_machine_id(ident):
+    """True for empty, `uninitialized`, and an all-zero id.
+
+    Those are not keyed. Any other string still is, so the HMAC itself can
+    be checked with a short input; `machine_id_text` is what refuses a file
+    that is not an id at all.
+    """
+    if not isinstance(ident, str):
+        return True
+    text = ident.strip()
+    if not text or text.lower() == "uninitialized":
+        return True
+    folded = text.replace("-", "")
+    return bool(folded) and set(folded.lower()) == {"0"} and re.fullmatch(r"[0-9a-fA-F-]+", text)
+
+
 def machine_tag_for(ident):
     """The first eight hex characters of HMAC-SHA256 over `ident`, or "" when there is nothing to key."""
-    if not ident:
+    if not isinstance(ident, str) or _absent_machine_id(ident):
         return ""
-    return hmac.new(_MACHINE_TAG_KEY, ident.encode(), hashlib.sha256).hexdigest()[:8]
+    return hmac.new(_MACHINE_TAG_KEY, ident.strip().encode(), hashlib.sha256).hexdigest()[:8]
 
 
 def machine_tag():
@@ -2288,13 +2348,29 @@ def generated_alias(host, name):
     return isinstance(host, dict) and host.get("alias_of") == name
 
 
+def alias_target(host):
+    """The slug a generated alias records, or "" when this file is not one."""
+    if not isinstance(host, dict):
+        return ""
+    prior = host.get("alias_of")
+    if isinstance(prior, str) and prior:
+        return prior
+    return ""
+
+
 def same_machine_alias(body, name, tag):
-    """True when `body` is this machine's generated alias for `name`."""
+    """True when `body` is this machine's generated alias for `name`.
+
+    An untagged alias may gain `tag`, the same way an untagged file may gain
+    a tag in place. A tagged alias is not a destination for an untagged result,
+    and a different tag is another machine.
+    """
     if not generated_alias(body, name):
         return False
-    if tag:
-        return machine_tag_of(body) == tag
-    return not machine_tag_of(body)
+    body_tag = machine_tag_of(body)
+    if not tag:
+        return not body_tag
+    return body_tag == tag or not body_tag
 
 
 def disambiguation_rank(stem, name, tag):
@@ -2326,31 +2402,38 @@ def collided_host_name(slug, tag, taken):
 def assign_import_name(name, host, existing, incoming=None):
     """Where to put `host`.
 
-    A marked alias of this machine is the one destination, including one
-    still in this collection, and including when the slug itself is free.
-    That filename is reusable when it is missing from the data directory or
-    the file already there is this machine's alias. Any other occupant is
-    left in place. A free name stays that name when no such alias exists,
-    even if another file carries the same tag. The same machine replaces
-    its own file. A different machine that wants a taken name gets
+    When the slug file is already this machine, that file is the one
+    destination. A marked alias is the destination otherwise, including one
+    still in this collection, an untagged alias that may gain a tag, and one
+    whose slug is now free. That filename is reusable when it is missing from
+    the data directory or the file already there is this machine's alias. Any
+    other occupant is left in place. A free name stays that name when no such
+    alias exists, even if another file carries the same tag. The same machine
+    replaces its own file. A different machine that wants a taken name gets
     `collided_host_name`. Only a result that will be imported counts as a
     taken incoming name.
     """
     incoming = incoming or {}
     tag = machine_tag_of(host)
-    # A marked alias is this machine's one destination, even when the slug
-    # itself is free. A same-tag file that is not an alias of this slug is
-    # left alone, which is how two chosen names on one machine both stay.
+    slug = alias_target(host) or name
+    # The name already in the report wins when it is this machine. Updating
+    # a marked alias beside it would leave that name at the old time.
+    if slug in existing and not different_machine(existing[slug], host):
+        return slug
+    # A marked alias is this machine's one destination when the slug is not
+    # already its file, including when the slug is free. A same-tag file that
+    # is not an alias of this slug is left alone, which is how two chosen
+    # names on one machine both stay.
     found = {
         stem
         for records in (existing, incoming)
         for stem, body in records.items()
-        if stem != name
-        and same_machine_alias(body, name, tag)
-        and (stem not in existing or same_machine_alias(existing[stem], name, tag))
+        if stem != slug
+        and same_machine_alias(body, slug, tag)
+        and (stem not in existing or same_machine_alias(existing[stem], slug, tag))
     }
     if found:
-        return min(found, key=lambda stem: disambiguation_rank(stem, name, tag))
+        return min(found, key=lambda stem: disambiguation_rank(stem, slug, tag))
     if name not in existing or not different_machine(existing[name], host):
         return name
     # A file that will not be copied does not hold its name. A missing status
@@ -2364,15 +2447,55 @@ def assign_import_name(name, host, existing, incoming=None):
     return collided_host_name(name, tag, set(existing) | reserved)
 
 
+def _write_imported(directory, name, host, dest):
+    """Stores `host` at `dest`, keeping a generated alias's real slug."""
+    slug = alias_target(host) or name
+    if dest == name and "alias_of" not in host:
+        shutil.copy(os.path.join(directory, f"{name}.json"), os.path.join(DATA_DIR, f"{dest}.json"))
+        return host
+    body = dict(host)
+    body["host"] = dest
+    prior = alias_target(host)
+    if dest == slug:
+        body.pop("alias_of", None)
+    elif dest != name:
+        # Moving a marked alias keeps the slug it was generated for.
+        # Renaming a slug records that slug.
+        body["alias_of"] = prior if prior and prior != name else name
+    elif body.get("alias_of") == name:
+        body.pop("alias_of", None)
+    with open(os.path.join(DATA_DIR, f"{dest}.json"), "w") as f:
+        json.dump(body, f, indent=1)
+        f.write("\n")
+    return body
+
+
+def _drop_extra_aliases(slug, host, existing, keep):
+    """Removes other marked aliases of `slug` so one machine stays one file."""
+    removed = []
+    for stem, body in list(existing.items()):
+        if stem == keep or not same_machine_alias(body, slug, machine_tag_of(host)):
+            continue
+        path = os.path.join(DATA_DIR, f"{stem}.json")
+        if os.path.isfile(path):
+            os.remove(path)
+        del existing[stem]
+        removed.append(stem)
+    return removed
+
+
 def import_hosts(directory):
     """Copies a collection's measured hosts into the report's data.
 
-    A marked alias of this machine is the one destination, even when the
-    slug itself is free. Otherwise a free name stays that name. A different
-    machine with the same slug is stored beside it, as `<slug>-<tag>`, or
-    `<slug>-2` when that alias is taken. Only a file this import will copy
-    counts as a taken incoming name. A file in the collection that is already
-    this machine's generated alias is that destination, not a second host.
+    When this machine already has the slug file, that file is refreshed and
+    a marked alias of it is removed. Otherwise a marked alias is the one
+    destination, even when the slug itself is free, and an untagged alias
+    gains a tag in place. A free name stays that name. A different machine
+    with the same slug is stored beside it, as `<slug>-<tag>`, or `<slug>-2`
+    when that alias is taken. Only a file this import will copy counts as a
+    taken incoming name. A file in the collection that is already this
+    machine's generated alias is that destination, not a second host, and
+    moving it keeps `alias_of`.
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     existing = {}
@@ -2392,9 +2515,10 @@ def import_hosts(directory):
                 file=sys.stderr,
             )
             continue
-        target = host.get("alias_of")
+        slug = alias_target(host) or name
+        target = alias_target(host)
         if (
-            isinstance(target, str)
+            target
             and target in incoming
             and target != name
             and incoming[target].get("status") == "ok"
@@ -2403,25 +2527,17 @@ def import_hosts(directory):
             continue
         dest = assign_import_name(name, host, existing, incoming)
         creating = dest not in existing
-        if dest == name and "alias_of" not in host:
-            shutil.copy(os.path.join(directory, f"{name}.json"), os.path.join(DATA_DIR, f"{name}.json"))
-            existing[dest] = host
-        else:
-            # `alias_of` marks a name this import invented. A chosen host of
-            # the same spelling has no such mark. A file stored under its own
-            # alias name keeps the mark.
-            body = dict(host)
-            body["host"] = dest
-            if dest != name:
-                body["alias_of"] = name
-            elif body.get("alias_of") == name:
-                body.pop("alias_of", None)
-            with open(os.path.join(DATA_DIR, f"{dest}.json"), "w") as f:
-                json.dump(body, f, indent=1)
-                f.write("\n")
-            existing[dest] = body
+        existing[dest] = _write_imported(directory, name, host, dest)
+        removed = _drop_extra_aliases(slug, host, existing, dest)
         if creating and dest != name:
             print(f"bench-report: {name}: same slug as another machine, imported as {dest}", file=sys.stderr)
+        elif dest == slug and dest != name:
+            print(f"bench-report: {name}: this machine already has {dest}, refreshed {dest}", file=sys.stderr)
+        if removed:
+            print(
+                f"bench-report: {slug}: dropped extra alias {', '.join(sorted(removed))}",
+                file=sys.stderr,
+            )
 
 
 def render(args):
