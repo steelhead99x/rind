@@ -95,6 +95,19 @@ fn x25519(c: &mut Criterion) {
         })
     });
 
+    group.bench_function("verified-garbage", |b| {
+        vg_agrees_with_rind();
+        use verified_garbage::x25519::{PrivateKey, PublicKey};
+
+        b.iter(|| {
+            let our_private_key = PrivateKey::generate().unwrap();
+            black_box(our_private_key.public_key());
+
+            let peer = PublicKey::from_bytes(PUBLIC_KEY);
+            black_box(our_private_key.exchange(&peer).unwrap());
+        })
+    });
+
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     group.bench_function("graviola", |b| {
         use graviola::key_agreement::x25519::{PrivateKey, PublicKey};
@@ -175,6 +188,14 @@ fn keygen(c: &mut Criterion) {
         b.iter(|| black_box(libcrux_ecdh::x25519_key_gen(&mut getrandom::SysRng).unwrap()));
     });
 
+    group.bench_function("verified-garbage", |b| {
+        vg_agrees_with_rind();
+        b.iter(|| {
+            let key = verified_garbage::x25519::PrivateKey::generate().unwrap();
+            black_box(key.public_key());
+        })
+    });
+
     #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
     group.bench_function("openssl", |b| {
         b.iter(|| {
@@ -213,6 +234,35 @@ fn stored(c: &mut Criterion) {
 
         b.iter(|| black_box(key.agree(public_key).unwrap()))
     });
+
+    group.bench_function("verified-garbage", |b| {
+        use verified_garbage::x25519::{PrivateKey, PublicKey};
+        vg_agrees_with_rind();
+        let key = PrivateKey::from_bytes(&scalar);
+
+        b.iter(|| {
+            let peer = PublicKey::from_bytes(PUBLIC_KEY);
+            black_box(key.exchange(&peer).unwrap())
+        })
+    });
+}
+
+// Checks verified-garbage's public key and exchange against rind's, from a
+// fixed scalar, before any of its rows times them.
+fn vg_agrees_with_rind() {
+    use verified_garbage::x25519::{PrivateKey, PublicKey};
+    let scalar = [1u8; 32];
+    let key = PrivateKey::from_bytes(&scalar);
+    let rind_key =
+        rind::agreement::PrivateKey::from_scalar(&rind::agreement::X25519, &scalar).unwrap();
+    assert_eq!(
+        key.public_key().as_bytes()[..],
+        *rind_key.public_key().as_ref()
+    );
+    assert_eq!(
+        key.exchange(&PublicKey::from_bytes(PUBLIC_KEY)).unwrap()[..],
+        *rind_key.agree(PUBLIC_KEY).unwrap().as_ref()
+    );
 }
 
 criterion_group!(benches, x25519, keygen, stored);

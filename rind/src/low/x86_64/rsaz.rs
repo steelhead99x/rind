@@ -42,6 +42,7 @@ impl Rsaz {
     ///
     /// The instruction trace and memory addresses depend on none of their
     /// values.
+    #[inline(never)]
     pub(crate) fn mod_exp(
         self,
         z: &mut [u64; 16],
@@ -51,6 +52,8 @@ impl Rsaz {
         rr: &[u64; 16],
         n0: u64,
     ) {
+        // `vpmuludq` multiplies the secrets.
+        let _mcdt = low::Mcdt::enter();
         mod_exp(self.0, z, x, e, m, rr, n0);
     }
 }

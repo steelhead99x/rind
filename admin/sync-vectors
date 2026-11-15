@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# Copy aws-lc's and BoringSSL's vector files that rind's tests run, RFC
-# 9180's HPKE, RFC 9380's hash-to-curve, RFC 9474's blind RSA, and RFC 9497's
-# OPRF vectors, into thirdparty/vectors, from the revisions pinned here. Both repositories are
-# hundreds of megabytes, so rind keeps copies of the files rather than
-# submodules. Bump a revision and rerun to update them.
+# Copy the vector files rind's tests read from aws-lc, BoringSSL,
+# Wycheproof, CAVP, and CCTV, and RFC 9180's HPKE, RFC 9380's hash-to-curve,
+# RFC 9474's blind RSA, and RFC 9497's OPRF vectors, into thirdparty/vectors,
+# from the revisions pinned here. The tests read a small part of each
+# repository, so rind keeps copies of those files rather than submodules.
+# Bump a revision and rerun to update them; each test opens its files by name
+# and fails on a missing one, so a file a test newly reads goes in its list
+# here.
 set -euo pipefail
 
-AWS_LC=2f9a0e95cc2c29235d9b98db8cf86e22b271b35a
-BORINGSSL=0131ae9d78e42fcc2c1811315e62410ad96d8230
+AWS_LC=5ed12cce0fd4453f2f63300d44325ed14f845d6f
+BORINGSSL=8f2554dc344d403fd6d628773d39637c323eb801
 # RFC 9180's repository. hpkewg/hpke's revision of it repeats these vectors
 # unchanged.
 HPKE=b1f7cb0cdeab6906c61b3d6574e8bdfdbe1cd3fb
@@ -16,6 +19,10 @@ HASH_TO_CURVE=664b13592116cecc9e52fb192dcde0ade36f904e
 # blind-rsa-signatures 0.18.0, whose JSON holds all four of RFC 9474's
 # vectors; the CFRG draft's repository holds stale ones.
 BLIND_RSA=45d0abfa829c3623389daae30bc35e9b2f3b550c
+WYCHEPROOF=65ca494727a52944c204441c860b039e6786b99b
+# ctz/cavp mirrors NIST's CAVP sample responses.
+CAVP=0220357e399badc6e9b87e237c428463a00d0992
+CCTV=b88c4b206254ac543df240097e0f1fcc6a664821
 # RFC 9497's repository, whose `poc/vectors/allVectors.json` is its Appendix A.
 VOPRF=5d7d94c8dc7589dc3baa116c1b9c169a7c33ac4e
 
@@ -58,50 +65,228 @@ boringssl_files=(
     crypto/mlkem/mlkem768_nist_decap_tests.txt
     crypto/mlkem/mlkem768_nist_keygen_tests.txt
 )
+# CAVP's README names NIST's sources. CCTV's ML-KEM vectors are CC0, as its
+# README says, and its Ed25519 vectors are under the LICENSE beside them.
+wycheproof_files=(
+    LICENSE
+    testvectors_v1/aes_cbc_pkcs5_test.json
+    testvectors_v1/aes_gcm_test.json
+    testvectors_v1/aes_gmac_test.json
+    testvectors_v1/aes_kwp_test.json
+    testvectors_v1/aes_wrap_test.json
+    testvectors_v1/chacha20_counter_test.json
+    testvectors_v1/chacha20_poly1305_test.json
+    testvectors_v1/ecdh_secp256r1_ecpoint_test.json
+    testvectors_v1/ecdh_secp256r1_test.json
+    testvectors_v1/ecdh_secp384r1_ecpoint_test.json
+    testvectors_v1/ecdh_secp384r1_test.json
+    testvectors_v1/ecdh_secp521r1_ecpoint_test.json
+    testvectors_v1/ecdh_secp521r1_test.json
+    testvectors_v1/ecdsa_secp256r1_sha256_p1363_test.json
+    testvectors_v1/ecdsa_secp256r1_sha256_test.json
+    testvectors_v1/ecdsa_secp256r1_sha512_p1363_test.json
+    testvectors_v1/ecdsa_secp256r1_sha512_test.json
+    testvectors_v1/ecdsa_secp384r1_sha256_test.json
+    testvectors_v1/ecdsa_secp384r1_sha384_p1363_test.json
+    testvectors_v1/ecdsa_secp384r1_sha384_test.json
+    testvectors_v1/ecdsa_secp384r1_sha512_p1363_test.json
+    testvectors_v1/ecdsa_secp384r1_sha512_test.json
+    testvectors_v1/ecdsa_secp521r1_sha512_p1363_test.json
+    testvectors_v1/ecdsa_secp521r1_sha512_test.json
+    testvectors_v1/ed25519_test.json
+    testvectors_v1/hkdf_sha1_test.json
+    testvectors_v1/hkdf_sha256_test.json
+    testvectors_v1/hkdf_sha384_test.json
+    testvectors_v1/hkdf_sha512_test.json
+    testvectors_v1/hmac_sha1_test.json
+    testvectors_v1/hmac_sha256_test.json
+    testvectors_v1/hmac_sha384_test.json
+    testvectors_v1/hmac_sha512_test.json
+    testvectors_v1/hpke_x25519_decrypt_test.json
+    testvectors_v1/hpke_x25519_encap_test.json
+    testvectors_v1/hpke_x25519_sequence_test.json
+    testvectors_v1/mldsa_44_sign_noseed_test.json
+    testvectors_v1/mldsa_44_sign_seed_test.json
+    testvectors_v1/mldsa_44_verify_test.json
+    testvectors_v1/mldsa_65_sign_noseed_test.json
+    testvectors_v1/mldsa_65_sign_seed_test.json
+    testvectors_v1/mldsa_65_verify_test.json
+    testvectors_v1/mldsa_87_sign_noseed_test.json
+    testvectors_v1/mldsa_87_sign_seed_test.json
+    testvectors_v1/mldsa_87_verify_test.json
+    testvectors_v1/mlkem_768_encaps_test.json
+    testvectors_v1/mlkem_768_keygen_seed_test.json
+    testvectors_v1/mlkem_768_test.json
+    testvectors_v1/pbkdf2_hmacsha1_test.json
+    testvectors_v1/pbkdf2_hmacsha256_test.json
+    testvectors_v1/pbkdf2_hmacsha384_test.json
+    testvectors_v1/pbkdf2_hmacsha512_test.json
+    testvectors_v1/ristretto255_scalar_invert_test.json
+    testvectors_v1/rsa_oaep_2048_sha1_mgf1sha1_test.json
+    testvectors_v1/rsa_oaep_2048_sha256_mgf1sha256_test.json
+    testvectors_v1/rsa_oaep_2048_sha384_mgf1sha384_test.json
+    testvectors_v1/rsa_oaep_2048_sha512_mgf1sha512_test.json
+    testvectors_v1/rsa_oaep_3072_sha256_mgf1sha256_test.json
+    testvectors_v1/rsa_oaep_3072_sha512_mgf1sha512_test.json
+    testvectors_v1/rsa_oaep_4096_sha256_mgf1sha256_test.json
+    testvectors_v1/rsa_oaep_4096_sha512_mgf1sha512_test.json
+    testvectors_v1/rsa_oaep_misc_test.json
+    testvectors_v1/rsa_pkcs1_1024_sig_gen_test.json
+    testvectors_v1/rsa_pkcs1_1536_sig_gen_test.json
+    testvectors_v1/rsa_pkcs1_2048_sig_gen_test.json
+    testvectors_v1/rsa_pkcs1_3072_sig_gen_test.json
+    testvectors_v1/rsa_pkcs1_4096_sig_gen_test.json
+    testvectors_v1/rsa_pss_2048_sha256_mgf1_0_test.json
+    testvectors_v1/rsa_pss_2048_sha256_mgf1_32_test.json
+    testvectors_v1/rsa_pss_2048_sha384_mgf1_48_test.json
+    testvectors_v1/rsa_pss_3072_sha256_mgf1_32_test.json
+    testvectors_v1/rsa_pss_4096_sha256_mgf1_32_test.json
+    testvectors_v1/rsa_pss_4096_sha384_mgf1_48_test.json
+    testvectors_v1/rsa_pss_4096_sha512_mgf1_32_test.json
+    testvectors_v1/rsa_pss_4096_sha512_mgf1_64_test.json
+    testvectors_v1/rsa_pss_misc_test.json
+    testvectors_v1/rsa_signature_2048_sha256_test.json
+    testvectors_v1/rsa_signature_2048_sha384_test.json
+    testvectors_v1/rsa_signature_2048_sha512_test.json
+    testvectors_v1/rsa_signature_3072_sha256_test.json
+    testvectors_v1/rsa_signature_3072_sha384_test.json
+    testvectors_v1/rsa_signature_3072_sha512_test.json
+    testvectors_v1/rsa_signature_4096_sha256_test.json
+    testvectors_v1/rsa_signature_4096_sha384_test.json
+    testvectors_v1/rsa_signature_4096_sha512_test.json
+    testvectors_v1/rsa_signature_8192_sha256_test.json
+    testvectors_v1/rsa_signature_8192_sha384_test.json
+    testvectors_v1/rsa_signature_8192_sha512_test.json
+    testvectors_v1/x25519_asn_test.json
+    testvectors_v1/x25519_test.json
+    testvectors_v1/xchacha20_poly1305_test.json
+)
+cavp_files=(
+    README.md
+    aes/ECBGFSbox128.rsp
+    aes/ECBGFSbox192.rsp
+    aes/ECBGFSbox256.rsp
+    aes/ECBKeySbox128.rsp
+    aes/ECBKeySbox192.rsp
+    aes/ECBKeySbox256.rsp
+    aes/ECBMCT128.rsp
+    aes/ECBMCT192.rsp
+    aes/ECBMCT256.rsp
+    aes/ECBVarKey128.rsp
+    aes/ECBVarKey192.rsp
+    aes/ECBVarKey256.rsp
+    aes/ECBVarTxt128.rsp
+    aes/ECBVarTxt192.rsp
+    aes/ECBVarTxt256.rsp
+    drbg/HMAC_DRBG.rsp
+    ecdh/KAS_ECC_CDH_PrimitiveTest.txt
+    ecdsa/KeyPair.rsp
+    ecdsa/PKV.rsp
+    ecdsa/SigVer.rsp
+    gcm/gcmDecrypt128.rsp
+    gcm/gcmDecrypt192.rsp
+    gcm/gcmDecrypt256.rsp
+    gcm/gcmEncryptExtIV128.rsp
+    gcm/gcmEncryptExtIV192.rsp
+    gcm/gcmEncryptExtIV256.rsp
+    hmac/HMAC.rsp
+    sha2/SHA256LongMsg.rsp
+    sha2/SHA256Monte.rsp
+    sha2/SHA256ShortMsg.rsp
+    sha2/SHA384LongMsg.rsp
+    sha2/SHA384Monte.rsp
+    sha2/SHA384ShortMsg.rsp
+    sha2/SHA512LongMsg.rsp
+    sha2/SHA512Monte.rsp
+    sha2/SHA512ShortMsg.rsp
+    sha2/SHA512_256LongMsg.rsp
+    sha2/SHA512_256Monte.rsp
+    sha2/SHA512_256ShortMsg.rsp
+    sha3/SHA3_256LongMsg.rsp
+    sha3/SHA3_256Monte.rsp
+    sha3/SHA3_256ShortMsg.rsp
+    sha3/SHA3_384LongMsg.rsp
+    sha3/SHA3_384Monte.rsp
+    sha3/SHA3_384ShortMsg.rsp
+    sha3/SHA3_512LongMsg.rsp
+    sha3/SHA3_512Monte.rsp
+    sha3/SHA3_512ShortMsg.rsp
+    sha3/SHAKE128LongMsg.rsp
+    sha3/SHAKE128ShortMsg.rsp
+    sha3/SHAKE128VariableOut.rsp
+    sha3/SHAKE256LongMsg.rsp
+    sha3/SHAKE256ShortMsg.rsp
+    sha3/SHAKE256VariableOut.rsp
+)
+cctv_files=(
+    ML-KEM/README.md
+    ed25519/LICENSE
+    ML-KEM/intermediate/ML-KEM-768.txt
+    ML-KEM/modulus/ML-KEM-768.txt.gz
+    ML-KEM/strcmp/ML-KEM-768.txt
+    ML-KEM/unluckysample/ML-KEM-768.txt
+    ed25519/ed25519vectors.json
+)
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../thirdparty/vectors"
+
+# Each refresh writes into `<dir>.new` and swaps it in only once every file
+# arrived, so a failed one leaves the committed copy whole.
+stage() {
+    rm -rf "$1.new"
+    mkdir "$1.new"
+}
+swap() {
+    rm -rf "$1"
+    mv "$1.new" "$1"
+}
 
 fetch() {
     local repo=$1 rev=$2 dir=$3
     shift 3
-    rm -rf "$dir"
+    stage "$dir"
     for file in "$@"; do
-        mkdir -p "$dir/$(dirname "$file")"
-        curl --fail --silent --show-error --location --output "$dir/$file" \
+        mkdir -p "$dir.new/$(dirname "$file")"
+        curl --fail --silent --show-error --location --output "$dir.new/$file" \
             "https://raw.githubusercontent.com/$repo/$rev/$file"
     done
+    echo "https://github.com/$repo/tree/$rev" >"$dir.new/REVISION"
+    swap "$dir"
 }
 
 fetch aws/aws-lc "$AWS_LC" aws-lc "${aws_lc_files[@]}"
 fetch google/boringssl "$BORINGSSL" boringssl "${boringssl_files[@]}"
+fetch C2SP/wycheproof "$WYCHEPROOF" wycheproof "${wycheproof_files[@]}"
+fetch ctz/cavp "$CAVP" cavp "${cavp_files[@]}"
+fetch C2SP/CCTV "$CCTV" cctv "${cctv_files[@]}"
 
 # The 5.9 MB file holds every mode; rind keeps base mode, one vector per
 # line, short of X448 (KEM 0x0021), which it does not offer.
-rm -rf rfc9180
-mkdir rfc9180
+stage rfc9180
 curl --fail --silent --show-error --location \
     "https://raw.githubusercontent.com/cfrg/draft-irtf-cfrg-hpke/$HPKE/test-vectors.json" |
-    jq -c '.[] | select(.mode == 0 and .kem_id != 33)' >rfc9180/test-vectors.json
+    jq -c '.[] | select(.mode == 0 and .kem_id != 33)' >rfc9180.new/test-vectors.json
+swap rfc9180
 
 # The suites rind offers and the expand_message_xmd vectors, renamed without
 # the colons Windows cannot check out.
-rm -rf rfc9380
-mkdir rfc9380
+stage rfc9380
 for file in P256_XMD:SHA-256_SSWU_RO_ P384_XMD:SHA-384_SSWU_RO_ P521_XMD:SHA-512_SSWU_RO_ \
     expand_message_xmd_SHA256_38 expand_message_xmd_SHA256_256 expand_message_xmd_SHA512_38; do
-    curl --fail --silent --show-error --location --output "rfc9380/${file//:/_}.json" \
+    curl --fail --silent --show-error --location --output "rfc9380.new/${file//:/_}.json" \
         "https://raw.githubusercontent.com/cfrg/draft-irtf-cfrg-hash-to-curve/$HASH_TO_CURVE/poc/vectors/$file.json"
 done
+swap rfc9380
 
-rm -rf rfc9474
-mkdir rfc9474
-curl --fail --silent --show-error --location --output rfc9474/test-vectors.json \
+stage rfc9474
+curl --fail --silent --show-error --location --output rfc9474.new/test-vectors.json \
     "https://raw.githubusercontent.com/jedisct1/rust-blind-rsa-signatures/$BLIND_RSA/tests/test_vectors_rfc9474.json"
+swap rfc9474
 
 # The OPRF and VOPRF modes of the suites rind offers, short of decaf448 and
 # the POPRF mode.
-rm -rf rfc9497
-mkdir rfc9497
+stage rfc9497
 curl --fail --silent --show-error --location \
     "https://raw.githubusercontent.com/cfrg/draft-irtf-cfrg-voprf/$VOPRF/poc/vectors/allVectors.json" |
-    jq '[.[] | select(.mode != 2 and .identifier != "decaf448-SHAKE256")]' >rfc9497/allVectors.json
+    jq '[.[] | select(.mode != 2 and .identifier != "decaf448-SHAKE256")]' >rfc9497.new/allVectors.json
+swap rfc9497

@@ -261,6 +261,60 @@ impl<const R: usize> Shake4x<R> {
     }
 }
 
+/// SHAKE256 of each of `inputs`, one to four, four at once, writing the
+/// first `OUT` bytes of each, at most a block, to its item of `outputs`.
+/// Each input is its `P` parts in turn, and the inputs' parts agree in
+/// length, so they absorb in place, without being copied together.
+///
+/// SLH-DSA hashes this way; unlike `Shake4x`, an input may span blocks.
+pub(crate) fn shake256_x4<const OUT: usize, const P: usize>(
+    inputs: &[[&[u8]; P]],
+    outputs: &mut [[u8; OUT]],
+) {
+    const R: usize = SHAKE_256_R_BYTES;
+    const { assert!(OUT <= R) };
+    let lanes = inputs.len();
+    assert!((1..=4).contains(&lanes) && outputs.len() >= lanes);
+    Entry::assert_held();
+
+    // A short batch leaves stale states in the unused lanes, whose outputs
+    // are never read.
+    let permute = |states: &mut [[u64; 25]; 4]| match lanes {
+        4 => sha3_keccak4_f1600(states, &RC),
+        3 => sha3_keccak_nof4_f1600::<3>(states, &RC),
+        2 => sha3_keccak_nof4_f1600::<2>(states, &RC),
+        _ => sha3_keccak_nof4_f1600::<1>(states, &RC),
+    };
+    let mut states = [[0u64; 25]; 4];
+    // The bytes of the current block absorbed so far, under `R`.
+    let mut used = 0;
+    for part in 0..P {
+        let len = inputs[0][part].len();
+        debug_assert!(inputs.iter().all(|input| input[part].len() == len));
+        let mut done = 0;
+        while done < len {
+            let take = Ord::min(R - used, len - done);
+            for (s, input) in states.iter_mut().zip(inputs) {
+                add_bytes(s, used, &input[part][done..done + take]);
+            }
+            (used, done) = (used + take, done + take);
+            if used == R {
+                permute(&mut states);
+                used = 0;
+            }
+        }
+    }
+    // The padding closes the last block, even an empty one.
+    for s in &mut states[..lanes] {
+        pad::<R, SHAKE_PAD_BYTE>(s, used);
+    }
+    permute(&mut states);
+
+    for (s, output) in states.iter().zip(outputs.iter_mut()) {
+        store_bytes(s, output);
+    }
+}
+
 /// A sponge absorbing input, XORed into the state as it arrives, so it needs
 /// no buffer.
 #[derive(Clone)]
@@ -589,6 +643,33 @@ mod tests {
         }
     }
 
+    #[test]
+    fn shake256_x4_matches_single() {
+        let _entry = Entry::new_secret();
+        let inputs: [[u8; 300]; 4] =
+            core::array::from_fn(|n| core::array::from_fn(|i| (i * 7 + n * 31) as u8));
+        for len in [0, 1, 135, 136, 137, 271, 272, 300] {
+            for lanes in 1..=4 {
+                // Split unevenly, so parts straddle lanes and blocks.
+                let inputs: Vec<[&[u8]; 3]> = inputs[..lanes]
+                    .iter()
+                    .map(|i| [&i[..len / 3], &i[len / 3..len / 2], &i[len / 2..len]])
+                    .collect();
+                let mut outputs = [[0u8; 40]; 4];
+                shake256_x4(&inputs, &mut outputs);
+                for (input, output) in inputs.iter().zip(&outputs) {
+                    let mut sponge = Shake256Sponge::new();
+                    for part in input {
+                        sponge.absorb(part);
+                    }
+                    let mut single = [0u8; 40];
+                    Shake::new(&sponge).read(&mut single);
+                    assert_eq!(*output, single, "{len} bytes, {lanes} lanes");
+                }
+            }
+        }
+    }
+
     const SEED: &[u8; 32] = b"Damn right its better than yours";
 
     #[test]
@@ -652,21 +733,21 @@ mod tests {
         }
 
         process_cavp(
-            "../thirdparty/cavp/sha3/SHAKE128ShortMsg.rsp",
+            "../thirdparty/vectors/cavp/sha3/SHAKE128ShortMsg.rsp",
             &mut Cavp {
                 kind: Kind::Shake128,
                 ..Cavp::default()
             },
         );
         process_cavp(
-            "../thirdparty/cavp/sha3/SHAKE128LongMsg.rsp",
+            "../thirdparty/vectors/cavp/sha3/SHAKE128LongMsg.rsp",
             &mut Cavp {
                 kind: Kind::Shake128,
                 ..Cavp::default()
             },
         );
         process_cavp(
-            "../thirdparty/cavp/sha3/SHAKE128VariableOut.rsp",
+            "../thirdparty/vectors/cavp/sha3/SHAKE128VariableOut.rsp",
             &mut Cavp {
                 kind: Kind::Shake128,
                 ..Cavp::default()
@@ -674,21 +755,21 @@ mod tests {
         );
 
         process_cavp(
-            "../thirdparty/cavp/sha3/SHAKE256ShortMsg.rsp",
+            "../thirdparty/vectors/cavp/sha3/SHAKE256ShortMsg.rsp",
             &mut Cavp {
                 kind: Kind::Shake256,
                 ..Cavp::default()
             },
         );
         process_cavp(
-            "../thirdparty/cavp/sha3/SHAKE256LongMsg.rsp",
+            "../thirdparty/vectors/cavp/sha3/SHAKE256LongMsg.rsp",
             &mut Cavp {
                 kind: Kind::Shake256,
                 ..Cavp::default()
             },
         );
         process_cavp(
-            "../thirdparty/cavp/sha3/SHAKE256VariableOut.rsp",
+            "../thirdparty/vectors/cavp/sha3/SHAKE256VariableOut.rsp",
             &mut Cavp {
                 kind: Kind::Shake256,
                 ..Cavp::default()

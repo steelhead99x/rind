@@ -4,11 +4,11 @@ This is one Rust workspace: the `rind` library, its `rind-<consumer>` adapter cr
 
 # Required
 
-- Exactly one backend compiles per target, the portable one where rind has no assembly, and a CPU missing a required feature fails with an error naming it.
+- Exactly one backend compiles per target, the portable one where rind has no assembly, and it requires only the CPU features its target enables at compile time.
 - Keys, signatures, ciphertexts, and encodings are hostile input: a malformed one is an error, never a panic, and its cost is bounded by design.
-- Secret-dependent code runs in constant time: no branch, memory index, or variable-time instruction depends on a secret. New secret-handling paths get a ctgrind test (`admin/ctgrind`).
+- Secret-dependent code runs in constant time: no branch, memory index, or variable-time instruction depends on a secret. New secret-handling paths get a ctgrind test (`admin/ctgrind`). The one exception is Argon2id's data-dependent addressing, everything after its first pass's first half, which picks the memory it reads from password-derived values: the cost of its memory hardness, which RFC 9106 and RFC 9807 accept. It declassifies each such index, so ctgrind still checks the rest.
 - Pick the fastest permissively licensed source for each primitive on each backend. Take a formally verified one (s2n-bignum, libcrux/HACL*, fiat-crypto) only where it measures as fast at every size; otherwise run the fastest and plan its proof. New arithmetic states where its correctness argument comes from.
-- Test every primitive against Wycheproof where vectors exist, and differentially against aws-lc-rs (a dev-dependency only).
+- Test every primitive against Wycheproof where vectors exist, and differentially against aws-lc-rs (a dev-dependency only). Where aws-lc-rs lacks the algorithm, test differentially against libcrux, RustCrypto, or `fips205`, and follow the standard and its LAMPS or IETF profile for behavior.
 - Give the API one way to do each job. Borrow an aws-lc-rs or ring name only when it is as clear; the migration guide maps theirs to rind's.
 - When in doubt about behavior (what to accept, refuse, or wipe), follow aws-lc-rs: it is the library rind would use if it didn't require C.
 - A key type wipes its whole value on drop, public parts included: FIPS 140-3 requires zeroising public security parameters too, and a whole-value wipe lets `rind/tests/zeroing.rs` check every byte. Wipe keyed state and heap scratch derived from a private key before they are freed, since that scratch can be as good as the key, but only under the `wipe` feature: wipe through `low::zeroise` or `low::zeroise_value`, which do nothing without it. Wipe nothing else: digest contexts, decrypted messages, stack temporaries, other scratch, and copies inside a call stay unwiped. Safe Rust cannot read them, so wiping them costs speed for nothing.

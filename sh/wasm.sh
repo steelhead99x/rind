@@ -8,12 +8,6 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-unfetched=$(git submodule status -- thirdparty/cavp thirdparty/cctv thirdparty/wycheproof | sed -n 's/^-[0-9a-f]* //p')
-if [[ -n "$unfetched" ]]; then
-    echo "error: test vectors not checked out; run: git submodule update --init ${unfetched//$'\n'/ }" >&2
-    exit 1
-fi
-
 # The tests open the vector files by their absolute paths under the
 # checkout, so wasmtime preopens it at the same path.
 root=$(pwd)

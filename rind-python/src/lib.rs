@@ -17,7 +17,7 @@ use std::borrow::Cow;
 use std::mem::MaybeUninit;
 
 use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyImportError, PyMemoryError};
+use pyo3::exceptions::{PyException, PyMemoryError};
 use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
@@ -246,10 +246,6 @@ fn has_aes_hardware() -> bool {
 #[pymodule]
 #[pyo3(name = "_rind")]
 fn pyrind(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // rind panics on a CPU missing a feature it requires; refuse the import
-    // instead, naming the feature.
-    rind::cpu::check().map_err(|missing| PyImportError::new_err(missing.to_string()))?;
-
     let py = m.py();
     m.add("Error", py.get_type::<Error>())?;
     m.add("WrongLength", py.get_type::<WrongLength>())?;

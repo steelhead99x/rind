@@ -13,7 +13,8 @@ changes:
 ring = { package = "rind-ring", version = "0.17" }
 ```
 
-Every ring feature is accepted and changes nothing.
+Every ring feature is accepted. As in ring, `alloc` gates RSA and `std` the
+errors' `std::error::Error` impls; the rest change nothing.
 
 The rename reaches only the crate that makes it. A binary moves every crate
 in its tree on ring 0.17 to rind, including dependencies that name ring such

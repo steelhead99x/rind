@@ -17,7 +17,6 @@ on:
       - dart-libraries
       - Dart release
       - coverage
-      - ctgrind debug
       - miri
       - mutants
       - Pullfrog

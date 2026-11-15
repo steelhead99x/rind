@@ -94,6 +94,37 @@ mod ossl {
     }
 }
 
+/// A verified-garbage ML-KEM-768 key, which it generates only from a seed:
+/// drawn here, as the other libraries draw theirs.
+fn vg_generate() -> verified_garbage::mlkem768::DecapsulationKey768 {
+    let mut seed = [0u8; 64];
+    getrandom::fill(&mut seed).unwrap();
+    verified_garbage::mlkem768::DecapsulationKey768::from_seed(&seed).unwrap()
+}
+
+/// Checks that verified-garbage and rind each decapsulate the other's
+/// ciphertexts to the secret it encapsulated.
+fn vg_agrees_with_rind() {
+    use rind::kem::*;
+    use verified_garbage::mlkem768::EncapsulationKey768;
+
+    let ours = DecapsulationKey::generate(&ML_KEM_768).unwrap();
+    let theirs =
+        EncapsulationKey768::from_bytes(ours.public_key().as_ref().try_into().unwrap()).unwrap();
+    let (secret, ciphertext) = theirs.encapsulate().unwrap();
+    assert_eq!(ours.decapsulate(&ciphertext).unwrap().as_ref(), secret);
+
+    let theirs = vg_generate();
+    let ours = EncapsulationKey::new(&ML_KEM_768, theirs.encapsulation_key().as_bytes()).unwrap();
+    let (ciphertext, secret) = ours.encapsulate().unwrap();
+    assert_eq!(
+        theirs
+            .decapsulate(ciphertext.as_ref().try_into().unwrap())
+            .unwrap(),
+        secret.as_ref()
+    );
+}
+
 // client first operation
 fn mlkem768_keygen(c: &mut Criterion) {
     let mut group = c.benchmark_group("mlkem768-keygen");
@@ -143,6 +174,11 @@ fn mlkem768_keygen(c: &mut Criterion) {
         b.iter(|| {
             black_box(DecapsulationKey::generate(&ML_KEM_768).unwrap());
         });
+    });
+
+    group.bench_function("verified-garbage", |b| {
+        vg_agrees_with_rind();
+        b.iter(|| black_box(vg_generate()));
     });
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -240,6 +276,18 @@ fn mlkem768_encaps(c: &mut Criterion) {
         });
     });
 
+    group.bench_function("verified-garbage", |b| {
+        vg_agrees_with_rind();
+        use verified_garbage::mlkem768::EncapsulationKey768;
+
+        let encaps = *vg_generate().encapsulation_key().as_bytes();
+
+        b.iter(|| {
+            let encaps = EncapsulationKey768::from_bytes(&encaps).unwrap();
+            black_box(encaps.encapsulate().unwrap());
+        });
+    });
+
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     group.bench_function("graviola", |b| {
         use graviola::key_agreement::mlkem768::{DecapKey, EncapKey};
@@ -319,6 +367,14 @@ fn mlkem768_decaps(c: &mut Criterion) {
         let (ciphertext, _secret) = decaps.public_key().encapsulate().unwrap();
 
         b.iter(|| black_box(decaps.decapsulate(ciphertext.as_ref()).unwrap()))
+    });
+
+    group.bench_function("verified-garbage", |b| {
+        vg_agrees_with_rind();
+        let decaps = vg_generate();
+        let (_secret, ciphertext) = decaps.encapsulation_key().encapsulate().unwrap();
+
+        b.iter(|| black_box(decaps.decapsulate(&ciphertext).unwrap()))
     });
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -418,6 +474,19 @@ fn mlkem768_combined(c: &mut Criterion) {
             let encaps = EncapsulationKey::new(&ML_KEM_768, encaps_encoded.as_ref()).unwrap();
             let (ciphertext, _secret) = encaps.encapsulate().unwrap();
             black_box(decaps.decapsulate(ciphertext.as_ref()).unwrap());
+        });
+    });
+
+    group.bench_function("verified-garbage", |b| {
+        vg_agrees_with_rind();
+        use verified_garbage::mlkem768::EncapsulationKey768;
+
+        b.iter(|| {
+            let decaps = vg_generate();
+            let encaps_encoded = decaps.encapsulation_key().as_bytes();
+            let encaps = EncapsulationKey768::from_bytes(encaps_encoded).unwrap();
+            let (_secret, ciphertext) = encaps.encapsulate().unwrap();
+            black_box(decaps.decapsulate(&ciphertext).unwrap());
         });
     });
 

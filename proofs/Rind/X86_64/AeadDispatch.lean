@@ -208,6 +208,20 @@ impl Nonce {
     pub fn assume_unique_for_key(nonce: [u8; NONCE_LEN]) -> Self {
         Self(nonce)
     }
+
+    /// The nonce for sequence number `seq`: `iv` with `seq`, big-endian,
+    /// XORed into its last eight bytes, as TLS 1.3 (RFC 8446 section 5.3),
+    /// QUIC (RFC 9001 section 5.3), and HPKE (RFC 9180 section 5.2) build it.
+    ///
+    /// The caller promises that `seq` is used once under `iv` and the key:
+    /// the counter never repeats, wraps, or starts over while the key lives.
+    pub fn from_sequence(iv: &[u8; NONCE_LEN], seq: u64) -> Self {
+        let mut nonce = *iv;
+        for (n, s) in nonce[NONCE_LEN - 8..].iter_mut().zip(seq.to_be_bytes()) {
+            *n ^= s;
+        }
+        Self(nonce)
+    }
 }
 
 pub struct Tag([u8; TAG_LEN]);

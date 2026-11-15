@@ -207,7 +207,7 @@ mod tests {
         }
 
         let mut state = State::default();
-        process_cavp("../thirdparty/cavp/drbg/HMAC_DRBG.rsp", &mut state);
+        process_cavp("../thirdparty/vectors/cavp/drbg/HMAC_DRBG.rsp", &mut state);
         // Sixteen groups of 15 per hash.
         assert_eq!(state.tests, 3 * 16 * 15);
     }

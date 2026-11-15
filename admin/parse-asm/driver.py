@@ -877,7 +877,14 @@ use crate::low::macros::*;
                 else:
                     head_comment.append(line)
             head_comment.append("")
-        head_comment.insert(1, "")
+        if not head_comment:
+            return []
+        # The title may wrap: a line starting in lowercase continues it.
+        title_end = 1
+        while head_comment[title_end][:1].islower():
+            title_end += 1
+        if head_comment[title_end]:
+            head_comment.insert(title_end, "")
         return head_comment[:-1]
 
     def on_source(self, name):

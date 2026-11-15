@@ -4,7 +4,7 @@ use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
-fn bench<R: sha3::Digest>(
+fn bench<R: sha3::Digest, V: verified_garbage::hashes::HashFunction>(
     c: &mut Criterion,
     name: &str,
     aws: &'static aws!(digest::Algorithm),
@@ -53,11 +53,28 @@ fn bench<R: sha3::Digest>(
                 black_box(ctx.finish())
             })
         });
+        let mut ctx = V::new();
+        ctx.update(&input);
+        assert_eq!(
+            ctx.finalize().as_ref(),
+            rind::digest::digest(ours, &input).as_ref()
+        );
+        group.bench_with_input(
+            BenchmarkId::new("verified-garbage", size_name),
+            &input,
+            |b, input| {
+                b.iter(|| {
+                    let mut ctx = V::new();
+                    ctx.update(input);
+                    black_box(ctx.finalize())
+                })
+            },
+        );
     }
 }
 
 fn sha3_256(c: &mut Criterion) {
-    bench::<sha3::Sha3_256>(
+    bench::<sha3::Sha3_256, verified_garbage::hashes::sha3::Sha3_256>(
         c,
         "sha3-256",
         &aws!(digest::SHA3_256),
@@ -69,7 +86,7 @@ fn sha3_256(c: &mut Criterion) {
 }
 
 fn sha3_384(c: &mut Criterion) {
-    bench::<sha3::Sha3_384>(
+    bench::<sha3::Sha3_384, verified_garbage::hashes::sha3::Sha3_384>(
         c,
         "sha3-384",
         &aws!(digest::SHA3_384),
@@ -81,7 +98,7 @@ fn sha3_384(c: &mut Criterion) {
 }
 
 fn sha3_512(c: &mut Criterion) {
-    bench::<sha3::Sha3_512>(
+    bench::<sha3::Sha3_512, verified_garbage::hashes::sha3::Sha3_512>(
         c,
         "sha3-512",
         &aws!(digest::SHA3_512),

@@ -2,44 +2,7 @@
 
 #[cfg(not(target_os = "none"))]
 use core::cell::Cell;
-use core::fmt;
 use core::marker::PhantomData;
-use core::sync::atomic::{AtomicBool, Ordering};
-
-/// A CPU feature rind requires that this CPU lacks.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MissingFeature(&'static str);
-
-impl fmt::Display for MissingFeature {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "rind requires {} CPU support on {}", self.0, ARCH)
-    }
-}
-
-#[cfg(not(target_os = "none"))]
-const ARCH: &str = std::env::consts::ARCH;
-// The arm and portable backends, the only ones a bare-metal target builds,
-// never report a missing feature, so this string is only `Display`'s.
-#[cfg(target_os = "none")]
-const ARCH: &str = "this target";
-
-impl core::error::Error for MissingFeature {}
-
-impl MissingFeature {
-    /// The feature's name, which the FIPS module's C ABI carries.
-    #[cfg(any(test, rind_fips))]
-    pub(crate) fn name(self) -> &'static str {
-        self.0
-    }
-}
-
-/// Checks that this CPU has every feature rind requires, naming the first one missing.
-pub fn check() -> Result<(), MissingFeature> {
-    match super::missing_cpu_feature() {
-        Some(feature) => Err(MissingFeature(feature)),
-        None => Ok(()),
-    }
-}
 
 /// Reports whether rind runs AES on CPU instructions, as aws-lc's `EVP_has_aes_hardware` does.
 ///
@@ -154,25 +117,6 @@ std::thread_local! {
 ))]
 compile_error!("`Dit` keeps no count on bare metal, so its backend must set no CPU state");
 
-/// Panics with [`check`]'s error rather than run instructions this CPU lacks.
-pub(crate) fn verify_cpu_features() {
-    // Every operation calls this, and a single-block one costs little more
-    // than testing each feature, so a pass is remembered.
-    static VERIFIED: AtomicBool = AtomicBool::new(false);
-
-    #[cold]
-    fn verify() {
-        if let Err(missing) = check() {
-            panic!("{missing}");
-        }
-        VERIFIED.store(true, Ordering::Relaxed);
-    }
-
-    if !VERIFIED.load(Ordering::Relaxed) {
-        verify();
-    }
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -187,19 +131,5 @@ mod tests {
         #[cfg(rind_backend = "portable")]
         let hardware = false;
         assert_eq!(super::has_aes_hardware(), hardware);
-    }
-
-    // No CPU a test runs on lacks a required feature, so only this shows
-    // what the panic would say.
-    #[test]
-    fn missing_feature_names_it() {
-        let message = super::MissingFeature("neon").to_string();
-        assert_eq!(
-            message,
-            format!(
-                "rind requires neon CPU support on {}",
-                std::env::consts::ARCH
-            )
-        );
     }
 }

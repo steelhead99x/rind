@@ -9,6 +9,10 @@ description = "Pure-Rust cryptography for MoQ, forked from graviola"
 categories = ["network-programming", "cryptography"]
 rust-version.workspace = true
 
+# One target per backend: x86_64, aarch64, and i686 for the portable one.
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "i686-unknown-linux-gnu"]
+
 [features]
 default = []
 # Wipes keys, keyed state, and private-key heap scratch on drop.
@@ -25,8 +29,8 @@ crabgrind = { version = "0.4", optional = true }
 # curve25519-dalek's for X25519 and Ed25519. The cfg is build.rs's choice of
 # the arm or portable backend, which a manifest cannot read, so armv7 builds
 # libcrux-sha2 too, though it runs aws-lc's assembly for SHA-512. Bare-metal
-# x86_64 and aarch64 (`target_os = "none"`) build the portable backend too.
-[target.'cfg(any(rind_portable, target_endian = "big", target_os = "none", not(any(target_arch = "x86_64", target_arch = "aarch64"))))'.dependencies]
+# targets and an aarch64 target without NEON build the portable backend too.
+[target.'cfg(any(rind_portable, target_endian = "big", target_os = "none", all(target_arch = "aarch64", not(target_feature = "neon")), not(any(target_arch = "x86_64", target_arch = "aarch64"))))'.dependencies]
 curve25519-dalek = { version = "5", default-features = false, features = ["precomputed-tables"] }
 fiat-crypto = { version = "0.3", default-features = false }
 libcrux-hacl-rs = { version = "0.0.6", features = ["alloc"] }
@@ -39,6 +43,10 @@ libcrux-sha2 = { version = "0.0.9", features = ["expose-hacl"] }
 libc = { version = "0.2", default-features = false }
 
 [dev-dependencies]
+# Argon2id's differential tests, since aws-lc-rs has no Argon2.
+argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
+# BLAKE2b's differential reference, since aws-lc-rs has no BLAKE2b.
+blake2 = { version = "0.11", default-features = false }
 # ristretto255's differential reference; aws-lc-rs has no ristretto255.
 curve25519-dalek = { version = "5", default-features = false, features = ["precomputed-tables"] }
 # Checks armv7's NIST curve arithmetic against s2n-bignum's on the other arches.
@@ -80,6 +88,12 @@ blind-rsa-signatures = { version = "0.18", default-features = false }
 # Edwards25519, and `vrf-rfc9381` for P-256.
 akd_core = { version = "0.13", default-features = false, features = ["vrf"] }
 vrf-rfc9381 = { version = "0.0.7", default-features = false, features = ["p256"] }
+# SLH-DSA, which aws-lc-rs lacks: RustCrypto's, whose stable 0.1 predates the
+# digest 0.11 stack the other dependencies share, and integritychain's.
+fips205 = "0.5"
+# Encodes RustCrypto's SLH-DSA keys.
+pkcs8 = { version = "0.11", default-features = false, features = ["alloc"] }
+slh-dsa = "=0.2.0-rc.5"
 # RFC 9497's OPRF and VOPRF, which aws-lc-rs does not offer: `voprf`, with
 # the 0.13 RustCrypto curves its NIST suites run on, and the `rand_core` its
 # blinds and proofs draw from.

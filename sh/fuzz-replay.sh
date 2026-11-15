@@ -41,9 +41,10 @@ case "$arch" in
     # A runner has AVX-512, VAES, and the SHA extensions or lacks them from run
     # to run, and has no SHA512 instructions, so Diamond Rapids, which selects
     # every path, runs them all, then VAES without AVX-512. The x86_64 replay
-    # covers the tiers below.
+    # covers the tiers below. LeakSanitizer is off under SDE: see UPSTREAM.md,
+    # "LeakSanitizer deadlocks under Intel SDE".
     x86_64-sde)
-        runner=(sde -dmr --)
+        runner=(env ASAN_OPTIONS=detect_leaks=0 sde -dmr --)
         tiers=(
             ""
             "avx512f avx512bw"

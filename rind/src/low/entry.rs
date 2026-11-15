@@ -1,7 +1,6 @@
 // Written for Graviola by Joe Birr-Pixton, 2024.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-use super::cpu::verify_cpu_features;
 use super::{enter_cpu_state, leave_cpu_state};
 
 // A bare-metal build (`target_os = "none"`) has no thread-local storage.
@@ -25,6 +24,15 @@ std::thread_local! {
 pub(crate) struct Entry {
     secret: bool,
     cpu_state: u32,
+    // On x86 the portable backend's arithmetic may compile to any of the
+    // multiplies Intel's MXCSR mitigation covers, anywhere, so every call,
+    // public or secret, holds it. The x86_64 backend holds it only around
+    // the algorithms that run them.
+    #[cfg(all(
+        rind_backend = "portable",
+        any(target_arch = "x86", target_arch = "x86_64")
+    ))]
+    _mcdt: super::Mcdt,
 }
 
 impl Entry {
@@ -33,13 +41,17 @@ impl Entry {
     /// Public functions have no secret data in their arguments or return values.
     #[must_use]
     pub(crate) fn new_public() -> Self {
-        verify_cpu_features();
         #[cfg(all(debug_assertions, not(test), not(target_os = "none")))]
         HELD.set(HELD.get() + 1);
 
         Self {
             secret: false,
             cpu_state: 0,
+            #[cfg(all(
+                rind_backend = "portable",
+                any(target_arch = "x86", target_arch = "x86_64")
+            ))]
+            _mcdt: super::Mcdt::enter(),
         }
     }
 
@@ -49,7 +61,6 @@ impl Entry {
     /// (directly, or transitively).
     #[must_use]
     pub(crate) fn new_secret() -> Self {
-        verify_cpu_features();
         let cpu_state = enter_cpu_state();
         #[cfg(all(debug_assertions, not(test), not(target_os = "none")))]
         HELD.set(HELD.get() + 1);
@@ -57,6 +68,11 @@ impl Entry {
         Self {
             secret: true,
             cpu_state,
+            #[cfg(all(
+                rind_backend = "portable",
+                any(target_arch = "x86", target_arch = "x86_64")
+            ))]
+            _mcdt: super::Mcdt::enter(),
         }
     }
 

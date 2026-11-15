@@ -31,6 +31,7 @@ fn all_suites() {
         test_keys_match(&rind_rustls::default_provider(), *key_type);
     }
 
+    #[cfg(feature = "tls12")]
     for key_type in KeyType::RSA {
         test_suite(
             rind_rustls::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
@@ -46,6 +47,7 @@ fn all_suites() {
         );
     }
 
+    #[cfg(feature = "tls12")]
     for key_type in KeyType::ECDSA {
         test_suite(
             rind_rustls::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
@@ -65,7 +67,11 @@ fn all_suites() {
 #[test]
 fn all_key_exchanges() {
     let tls13 = rind_rustls::cipher_suite::TLS13_AES_128_GCM_SHA256;
-    let tls12 = rind_rustls::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256;
+    let suites = [
+        tls13,
+        #[cfg(feature = "tls12")]
+        rind_rustls::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+    ];
 
     // Not supported by *ring*, and TLS 1.3 only.
     for group in [
@@ -79,7 +85,7 @@ fn all_key_exchanges() {
     }
 
     for other in OtherProvider::OTHERS {
-        for suite in [tls13, tls12] {
+        for suite in suites {
             test_key_exchange(rind_rustls::kx_group::X25519, suite, *other);
             test_key_exchange(rind_rustls::kx_group::SECP256R1, suite, *other);
             test_key_exchange(rind_rustls::kx_group::SECP384R1, suite, *other);
@@ -237,8 +243,10 @@ impl KeyType {
         Self::EcdsaP521,
         Self::Ed25519,
     ];
+    #[cfg(feature = "tls12")]
     const RSA: &[Self] = &[Self::Rsa2048, Self::Rsa3072, Self::Rsa4096];
     // TLS 1.2's ECDHE_ECDSA suites also carry Ed25519 (RFC 8422).
+    #[cfg(feature = "tls12")]
     const ECDSA: &[Self] = &[
         Self::EcdsaP256,
         Self::EcdsaP384,

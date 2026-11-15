@@ -1,8 +1,9 @@
 name: bench
 
+# Weekly, at its own hour: see TESTING.md, "Scheduled workflows".
 on:
   schedule:
-    - cron: "0 18 * * *"
+    - cron: "23 12 * * 6"
   workflow_dispatch:
 
 concurrency:
@@ -77,7 +78,7 @@ jobs:
   # of CPUs without it, such as Zen 3 and Intel's client cores, whichever CPU
   # the runner draws; an RSA change's A/B reads it. Another denies all of
   # AVX-512 but keeps VAES and VPCLMULQDQ, so the VAES AVX2 path of Zen 3 and
-  # Intel's client cores is timed every night, not only when the native row
+  # Intel's client cores is timed every run, not only when the native row
   # draws a CPU without AVX-512.
   # Two more x86_64 rows time mostly AES: one also denies AVX, as Westmere
   # and the Goldmont Atoms lack it, and one AES-NI, PCLMULQDQ, and SSE4.1
@@ -205,24 +206,49 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libc6:armhf libssl-dev:armhf
 
-      # Only rind and the libraries it is measured against.
+      # Only rind, the libraries it is measured against, and
+      # pyca/verified-garbage, whose code rind takes where it is faster.
+      # VG_CPU_FEATURES lists the features verified-garbage may use, so
+      # `vg_deny` names those the CPU has, by its names, less those the tier
+      # denies; it panics on a feature the CPU lacks, and on one named without
+      # another every CPU with it has, such as ADX without AVX2. On armv7 it
+      # detects no NEON or crypto extension, so those tiers name nothing.
       - name: Run benchmarks
         run: |
-          libs='rind|aws-lc-rs|ring'
+          vg_deny() {
+            local flags name flag names allowed=()
+            flags=" $(grep -m1 -E '^(Features|flags)' /proc/cpuinfo | cut -d: -f2) "
+            case "${{ matrix.target }}" in
+              x86_64-*) names='ssse3 sha:sha_ni aes pclmulqdq avx avx2 bmi1 bmi2 avx512f sha512 adx avx512ifma avx512vl vaes vpclmulqdq avx512bw avx512fp16:avx512_fp16' ;;
+              aarch64-*) names='neon:asimd aes sha2 sha3 sve2 dit sb' ;;
+            esac
+            for name in $names; do
+              flag=${name#*:} name=${name%%:*}
+              if [[ $flags == *" $flag "* && " $* " != *" $name "* ]]; then
+                allowed+=("$name")
+              fi
+            done
+            VG_CPU_FEATURES=$(IFS=,; echo "${allowed[*]:-none}")
+            export VG_CPU_FEATURES
+            echo "VG_CPU_FEATURES=$VG_CPU_FEATURES"
+          }
+          libs='rind|aws-lc-rs|ring|verified-garbage'
           config=()
           if [ "${{ matrix.portable }}" = true ]; then
-            libs='rind|aws-lc-rs'
+            libs='rind|aws-lc-rs|verified-garbage'
             export RUSTFLAGS='--cfg rind_cpu_disable'
             case "${{ matrix.target }}/${{ matrix.cpu }}" in
               # aws-lc's SHA512 and SHA3 bits.
               aarch64-*/no-sha3)
                 export RIND_CPU_DISABLE_sha3=1
                 export OPENSSL_armcap='~0x840'
+                vg_deny sha3
                 ;;
               aarch64-*)
                 export RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha2=1 RIND_CPU_DISABLE_sha3=1
                 # aws-lc's AES, SHA1, SHA256, PMULL, SHA512, and SHA3 bits.
                 export OPENSSL_armcap='~0x87c'
+                vg_deny aes sha2 sha3
                 ;;
               armv7-*/no-crypto)
                 export RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha1=1 RIND_CPU_DISABLE_sha2=1
@@ -234,12 +260,14 @@ jobs:
               x86_64-*/no-avx512)
                 export RIND_CPU_DISABLE_avx512f=1 RIND_CPU_DISABLE_avx512dq=1 RIND_CPU_DISABLE_avx512ifma=1 RIND_CPU_DISABLE_avx512bw=1 RIND_CPU_DISABLE_avx512vl=1 RIND_CPU_DISABLE_avx512vbmi=1 RIND_CPU_DISABLE_avx512vbmi2=1
                 export OPENSSL_ia32cap='~0x0:~0x5842d0230000'
+                vg_deny avx512f avx512ifma avx512vl avx512bw avx512fp16
                 ;;
               # IFMA in CPUID leaf 7's EBX, which both libraries' dual RSAZ
               # needs.
               x86_64-*/no-ifma)
                 export RIND_CPU_DISABLE_avx512ifma=1
                 export OPENSSL_ia32cap='~0x0:~0x200000'
+                vg_deny avx512ifma
                 ;;
               # Haswell's path: without ADX and AVX-512 IFMA, and for aws-lc
               # without BMI2, ADX, and AVX-512 F, DQ, IFMA, CD, BW, and VL in
@@ -249,10 +277,13 @@ jobs:
                 export RUSTFLAGS='--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
                 export AWS_LC_SYS_NO_ASM=1 AWS_LC_SYS_CMAKE_BUILDER=0
                 config=(--config profile.bench.package.aws-lc-sys.opt-level=2)
+                # verified-garbage has no portable code: its baseline assembly.
+                export VG_CPU_FEATURES=none
                 ;;
               x86_64-*/no-adx)
                 export RIND_CPU_DISABLE_adx=1 RIND_CPU_DISABLE_avx512ifma=1
                 export OPENSSL_ia32cap='~0x0:~0xd02b0100'
+                vg_deny adx avx512ifma
                 ;;
               x86_64-*)
                 # rind's AVX-512 and VAES paths also need AVX2.
@@ -262,6 +293,7 @@ jobs:
                 # ECX (AVX-512 VBMI, VBMI2, VNNI, BITALG, and VPOPCNTDQ, VAES,
                 # and VPCLMULQDQ).
                 export OPENSSL_ia32cap='~0x0:~0x5e42f02b0128'
+                vg=(avx2 bmi1 bmi2 adx sha sha512 avx512f avx512ifma avx512vl avx512bw avx512fp16 vaes vpclmulqdq)
                 # And for these rows, CPUID leaf 1's ECX: AVX, then AES-NI,
                 # PCLMULQDQ, and SSE4.1, which aws-lc's one-pass
                 # ChaCha20-Poly1305 needs, then SSSE3.
@@ -269,16 +301,20 @@ jobs:
                   no-avx)
                     export RIND_CPU_DISABLE_avx=1
                     export OPENSSL_ia32cap='~0x1000000000000000:~0x5e42f02b0128'
+                    vg+=(avx)
                     ;;
                   no-aes)
                     export RIND_CPU_DISABLE_avx=1 RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pclmulqdq=1 RIND_CPU_DISABLE_sse41=1
                     export OPENSSL_ia32cap='~0x1208000200000000:~0x5e42f02b0128'
+                    vg+=(avx aes pclmulqdq)
                     ;;
                   no-ssse3)
                     export RIND_CPU_DISABLE_ssse3=1
                     export OPENSSL_ia32cap='~0x1208020200000000:~0x5e42f02b0128'
+                    vg+=(avx aes pclmulqdq ssse3)
                     ;;
                 esac
+                vg_deny "${vg[@]}"
                 ;;
             esac
           fi
@@ -293,7 +329,7 @@ jobs:
           ARMV7_UNKNOWN_LINUX_GNUEABIHF_OPENSSL_LIB_DIR: /usr/lib/arm-linux-gnueabihf
 
       # Every benchmark's estimate, which the gate job checks and
-      # `admin/bench-report nightly` turns into BENCHMARKS.md's CPU-tier
+      # `admin/bench-report weekly` turns into BENCHMARKS.md's CPU-tier
       # heatmap.
       - name: Save results
         shell: bash
@@ -325,29 +361,29 @@ jobs:
           path: bench-results.json
 
       # One row per benchmark, in run order, with rind's time over the fastest
-      # baseline's.
+      # baseline's, and over verified-garbage's.
       - name: Summarize
         shell: bash
         run: |
           find target/criterion -path '*/new/benchmark.json' -printf '%T@ %p\n' | sort -n | cut -d' ' -f2- |
             while read -r f; do
               jq -c --slurpfile e "${f%benchmark.json}estimates.json" '.full_id | split("/")
-                | {lib: map(select(. == "rind" or . == "aws-lc-rs" or . == "ring"))[0],
-                   key: map(if . == "rind" or . == "aws-lc-rs" or . == "ring" then "*" else . end) | join("/"),
+                | {lib: map(select(. == "rind" or . == "aws-lc-rs" or . == "ring" or . == "verified-garbage"))[0],
+                   key: map(if . == "rind" or . == "aws-lc-rs" or . == "ring" or . == "verified-garbage" then "*" else . end) | join("/"),
                    ns: ($e[0].slope // $e[0].mean).point_estimate}' "$f"
             done |
             jq -rs 'def time: if . == null then "-" elif . < 1e3 then "\(round) ns"
                       elif . < 1e6 then "\(. / 10 | round / 100) µs" else "\(. / 1e4 | round / 100) ms" end;
               reduce (.[] | select(.lib)) as $b ({}; .[$b.key][$b.lib] = $b.ns)
-              | "| benchmark | rind | aws-lc-rs | ring | rind / fastest |", "|---|---|---|---|---|",
+              | "| benchmark | rind | aws-lc-rs | ring | rind / fastest | verified-garbage | rind / verified-garbage |", "|---|---|---|---|---|---|---|",
                 (to_entries[] | .value as $v | ([$v["aws-lc-rs"], $v.ring] | map(select(.)) | min) as $best
-                  | "| \(.key) | \($v.rind | time) | \($v["aws-lc-rs"] | time) | \($v.ring | time) | \(if $v.rind and $best then $v.rind / $best * 100 | round / 100 else "-" end) |")' |
+                  | "| \(.key) | \($v.rind | time) | \($v["aws-lc-rs"] | time) | \($v.ring | time) | \(if $v.rind and $best then $v.rind / $best * 100 | round / 100 else "-" end) | \($v["verified-garbage"] | time) | \(if $v.rind and $v["verified-garbage"] then $v.rind / $v["verified-garbage"] * 100 | round / 100 else "-" end) |")' |
             tee -a "$GITHUB_STEP_SUMMARY"
 
   # Fails the scheduled run, and so alerts, on a gap over 10% that
   # benchmarks/gaps.toml holds no decision for and that the previous
-  # scheduled run showed too: GitHub draws a different CPU each night, so one
-  # night's gap may be the runner's. A dispatched run is an experiment.
+  # scheduled run showed too: GitHub draws a different CPU each run, so one
+  # run's gap may be the runner's. A dispatched run is an experiment.
   gate:
     needs: native
     if: github.event_name == 'schedule'

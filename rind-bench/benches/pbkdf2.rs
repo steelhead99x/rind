@@ -9,7 +9,7 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 // all in the iterations, so throughput is in iterations per second.
 const ITERATIONS: u32 = 1000;
 
-fn bench(
+fn bench<V: verified_garbage::kdf::pbkdf2_hmac::Pbkdf2Hash>(
     c: &mut Criterion,
     name: &str,
     ring: ring::pbkdf2::Algorithm,
@@ -45,10 +45,28 @@ fn bench(
             black_box(&out);
         })
     });
+    let mut expected = vec![0u8; len];
+    rind::pbkdf2::Secret::new(ours, b"password")
+        .derive(iterations, b"salt", &mut expected)
+        .unwrap();
+    let mut got = vec![0u8; len];
+    verified_garbage::kdf::pbkdf2_hmac::derive::<V>(b"password", b"salt", iterations, &mut got);
+    assert_eq!(got, expected);
+    group.bench_function("verified-garbage", |b| {
+        b.iter(|| {
+            verified_garbage::kdf::pbkdf2_hmac::derive::<V>(
+                b"password",
+                b"salt",
+                iterations,
+                &mut out,
+            );
+            black_box(&out);
+        })
+    });
 }
 
 fn pbkdf2(c: &mut Criterion) {
-    bench(
+    bench::<verified_garbage::hashes::sha1::Sha1>(
         c,
         "pbkdf2-sha1",
         ring::pbkdf2::PBKDF2_HMAC_SHA1,
@@ -56,7 +74,7 @@ fn pbkdf2(c: &mut Criterion) {
         &rind::pbkdf2::legacy::PBKDF2_HMAC_SHA1,
         20,
     );
-    bench(
+    bench::<verified_garbage::hashes::sha256::Sha256>(
         c,
         "pbkdf2-sha256",
         ring::pbkdf2::PBKDF2_HMAC_SHA256,
@@ -64,7 +82,7 @@ fn pbkdf2(c: &mut Criterion) {
         &rind::pbkdf2::PBKDF2_HMAC_SHA256,
         32,
     );
-    bench(
+    bench::<verified_garbage::hashes::sha384::Sha384>(
         c,
         "pbkdf2-sha384",
         ring::pbkdf2::PBKDF2_HMAC_SHA384,
@@ -72,7 +90,7 @@ fn pbkdf2(c: &mut Criterion) {
         &rind::pbkdf2::PBKDF2_HMAC_SHA384,
         48,
     );
-    bench(
+    bench::<verified_garbage::hashes::sha512::Sha512>(
         c,
         "pbkdf2-sha512",
         ring::pbkdf2::PBKDF2_HMAC_SHA512,
