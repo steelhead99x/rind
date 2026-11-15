@@ -94,10 +94,17 @@ qemu. iOS devices' code is only built.
   compiles rind again, so its JIT may turn a select into a branch.
   Bare-metal targets (`target_os = "none"`) build the library without std, on
   `alloc`: the program supplies a global allocator and a getrandom backend.
-  Every PR lints it for `thumbv6m-none-eabi` and `riscv32imc-unknown-none-elf`,
-  which lack compare-and-swap and so keep no reuse cache, for
-  `thumbv7em-none-eabihf`, and for `x86_64-unknown-none`, in debug and release,
-  with and without `wipe` (`just bare-metal`). None of them runs a test or a
+  Every PR lints it, in debug and release and with and without `wipe`
+  (`just bare-metal`), for `thumbv6m-none-eabi` and
+  `riscv32imc-unknown-none-elf`, which lack compare-and-swap and so keep no
+  reuse cache, for `thumbv7em-none-eabihf`, for `armv7a-none-eabi` and
+  `armv7r-none-eabihf` (the 32-bit ARM backend, with its NEON paths left
+  off), for `aarch64-unknown-none` and `aarch64-unknown-none-softfloat`
+  (the portable backend), and for `x86_64-unknown-none`. That last target
+  is built with `--cfg curve25519_dalek_backend="serial"`, and the library
+  refuses the build without it: dalek's default on x86_64 is its AVX2
+  backend, chosen at run time, and this target does not promise those
+  registers are saved. None of these targets runs a test or a
   constant-time check.
   RSA and the NIST curves run on 64-bit limbs on 64-bit targets and on
   `wasm32` built with `-C target-feature=+wide-arithmetic` (stable from Rust

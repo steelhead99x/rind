@@ -4,9 +4,13 @@
 use super::cpu::verify_cpu_features;
 use super::{enter_cpu_state, leave_cpu_state};
 
-// A bare-metal build (`target_os = "none"`) has no thread-local storage,
-// and a shared count would race between cores and interrupt handlers, so it
-// leaves the check out; the hosted test suites run it.
+// A bare-metal build (`target_os = "none"`) has no thread-local storage.
+// One count shared by every core and interrupt handler would race, and a
+// debug build would then panic while another core still held an `Entry`.
+// The check stays in every hosted debug build of this library except its
+// unit tests (`cfg(test)` is set only for that harness): a debug binary and
+// the integration tests under `rind/tests` compile it. It counts entries,
+// it does not branch on a secret, and `enter_cpu_state` still runs.
 #[cfg(all(debug_assertions, not(test), not(target_os = "none")))]
 std::thread_local! {
     // This thread's live `Entry`s, for `Entry::assert_held`. Unit tests call

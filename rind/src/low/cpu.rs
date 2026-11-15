@@ -18,9 +18,9 @@ impl fmt::Display for MissingFeature {
 
 #[cfg(not(target_os = "none"))]
 const ARCH: &str = std::env::consts::ARCH;
-#[cfg(all(target_os = "none", target_arch = "arm"))]
-const ARCH: &str = "arm";
-#[cfg(all(target_os = "none", not(target_arch = "arm")))]
+// The arm and portable backends, the only ones a bare-metal target builds,
+// never report a missing feature, so this string is only `Display`'s.
+#[cfg(target_os = "none")]
 const ARCH: &str = "this target";
 
 impl core::error::Error for MissingFeature {}

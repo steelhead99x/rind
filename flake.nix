@@ -67,7 +67,11 @@
             # and alloc.
             targets = [
               "aarch64-unknown-linux-gnu"
+              "aarch64-unknown-none"
+              "aarch64-unknown-none-softfloat"
               "armv7-unknown-linux-gnueabihf"
+              "armv7a-none-eabi"
+              "armv7r-none-eabihf"
               "riscv32imc-unknown-none-elf"
               "thumbv6m-none-eabi"
               "thumbv7em-none-eabihf"

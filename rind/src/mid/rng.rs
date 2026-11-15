@@ -16,14 +16,17 @@ pub(crate) trait RandomSource {
 /// the `getrandom` crate, or in the FIPS module's build, from its DRBG.
 pub(crate) struct SystemRandom;
 
-#[cfg(not(rind_fips))]
+// The FIPS module's generator needs std, so a bare-metal build keeps the
+// system source. That build does not finish: `lib.rs` rejects `rind_fips`
+// on `target_os = "none"`.
+#[cfg(any(not(rind_fips), target_os = "none"))]
 impl RandomSource for SystemRandom {
     fn fill(&mut self, out: &mut [u8]) -> Result<(), Error> {
         getrandom::fill(out).map_err(|_| Error::RngFailed)
     }
 }
 
-#[cfg(rind_fips)]
+#[cfg(all(rind_fips, not(target_os = "none")))]
 impl RandomSource for SystemRandom {
     fn fill(&mut self, out: &mut [u8]) -> Result<(), Error> {
         crate::fips_rng::fill(out)

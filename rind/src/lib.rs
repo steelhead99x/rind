@@ -1,6 +1,10 @@
 // Written for Graviola by Joe Birr-Pixton, 2024.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 #![doc = include_str!("../README.md")]
+// No `std` feature. A feature a dependent must remember to turn off is how
+// `no_std` support rots, and rind has one way to do each job. A target with
+// an operating system keeps `std`. `target_os = "none"` does not. A target
+// whose os is something else, such as UEFI, is outside this.
 #![cfg_attr(target_os = "none", no_std)]
 #![allow(
     clippy::new_without_default,
@@ -35,6 +39,25 @@
 #[macro_use]
 extern crate alloc;
 
+// curve25519-dalek's default on x86_64 is its AVX2 backend, chosen at run
+// time. `x86_64-unknown-none` does not promise those registers are saved, so
+// the build has to name the serial backend, which is the one the portable
+// constant-time jobs build. build.rs sets the cfg when the build did not.
+#[cfg(rind_x86_64_none_dalek_unpinned)]
+compile_error!(
+    "build x86_64-unknown-none with `--cfg curve25519_dalek_backend=\"serial\"`: \
+     curve25519-dalek's default there is its AVX2 backend, and this target does not \
+     promise those registers are saved"
+);
+
+// The FIPS module's error state, its self-tests, and its DRBG use std
+// (`process::abort`, `thread_local`, `RwLock`). A bare-metal build stops
+// here with that reason.
+#[cfg(all(target_os = "none", rind_fips))]
+compile_error!(
+    "the FIPS module needs std; it does not build for a target with no operating system"
+);
+
 /// Low level operations.
 ///
 /// `unsafe` is allowed only here.
@@ -58,13 +81,14 @@ mod error;
 
 /// The FIPS module's random generator, which [`mid::rng`] draws from in the
 /// module's build.
-#[cfg(any(test, rind_fips))]
+#[cfg(all(any(test, rind_fips), not(all(target_os = "none", rind_fips))))]
 mod fips_rng;
 
 /// What the FIPS module (`rind-fips`) needs beyond the public API: its
 /// self-tests, its error state, and its errors' codes. Only the module's own
-/// build compiles it.
-#[cfg(any(test, rind_fips))]
+/// build compiles it. A bare-metal target has no std, which the module needs,
+/// so that build stops at the `compile_error` above.
+#[cfg(all(any(test, rind_fips), not(all(target_os = "none", rind_fips))))]
 #[doc(hidden)]
 pub mod fips;
 

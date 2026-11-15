@@ -27,7 +27,12 @@
 //!
 //! And it sets `rind_reg_asm` on the architectures whose `asm!` with a `reg`
 //! operand is stable Rust, which the portable MD5 uses as an optimisation
-//! barrier.
+//! barrier. Arm64EC is one of them: its `reg` class has been stable since
+//! Rust 1.84, and it is a subset of AArch64's.
+//!
+//! On bare-metal x86_64 it also requires curve25519-dalek's serial backend.
+//! Dalek's default on every x86_64 target is its AVX2 backend, chosen at run
+//! time, and `x86_64-unknown-none` does not promise those registers are saved.
 
 use std::env;
 
@@ -39,6 +44,7 @@ fn main() {
 
     println!(r#"cargo::rustc-check-cfg=cfg(rind_limb, values("32", "64"))"#);
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
+    println!("cargo::rustc-check-cfg=cfg(rind_x86_64_none_dalek_unpinned)");
 
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
@@ -51,6 +57,13 @@ fn main() {
     };
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
 
+    // Dalek selects AVX2 for every 64-bit x86_64 target unless the build
+    // names a backend. Refuse that default here; the serial backend is the
+    // one the portable constant-time jobs build.
+    if arch == "x86_64" && bare_metal && !dalek_backend_is_serial() {
+        println!("cargo::rustc-cfg=rind_x86_64_none_dalek_unpinned");
+    }
+
     // Stable Rust's `asm!` with a `reg` operand, allow-listed so an
     // architecture whose inline assembly is unstable, such as Xtensa or MIPS,
     // falls back to `black_box` instead of failing to build.
@@ -60,6 +73,7 @@ fn main() {
             | "x86_64"
             | "arm"
             | "aarch64"
+            | "arm64ec"
             | "riscv32"
             | "riscv64"
             | "loongarch64"
@@ -116,4 +130,36 @@ fn m_profile() -> bool {
     let rest = skip_digits(version);
     let rest = rest.strip_prefix('.').map_or(rest, skip_digits);
     rest.starts_with('m') || rest.starts_with("em")
+}
+
+/// Whether this build named curve25519-dalek's serial backend.
+///
+/// Cargo passes a `--cfg` from `RUSTFLAGS` to the build script as
+/// `CARGO_CFG_<NAME>`, and the same flags are in `CARGO_ENCODED_RUSTFLAGS`
+/// separated by ASCII unit separators.
+fn dalek_backend_is_serial() -> bool {
+    if env::var("CARGO_CFG_CURVE25519_DALEK_BACKEND").is_ok_and(|value| value == "serial") {
+        return true;
+    }
+    let Ok(flags) = env::var("CARGO_ENCODED_RUSTFLAGS") else {
+        return false;
+    };
+    let args: Vec<&str> = flags.split('\u{1f}').collect();
+    args.iter().enumerate().any(|(index, arg)| {
+        let cfg = if *arg == "--cfg" {
+            args.get(index + 1).copied()
+        } else {
+            arg.strip_prefix("--cfg=")
+        };
+        let Some(cfg) = cfg else {
+            return false;
+        };
+        let Some(value) = cfg
+            .trim_matches('"')
+            .strip_prefix("curve25519_dalek_backend=")
+        else {
+            return false;
+        };
+        value.trim_matches('"') == "serial"
+    })
 }
