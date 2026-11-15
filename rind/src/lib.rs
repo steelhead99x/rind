@@ -39,10 +39,18 @@
 #[macro_use]
 extern crate alloc;
 
-// cpufeatures reports AVX on `target_os = "none"` only when the target
-// feature is on, so dalek's default stays off those registers. An explicit
-// `simd` or `avx512` backend together with those features would use them.
-// build.rs sets the cfg in that case.
+// Without SSE2, dalek's default `simd` backend does not compile on this
+// soft-float target. `serial` and `fiat` do. build.rs sets the cfg when
+// the build did not name one of those.
+#[cfg(rind_x86_64_none_dalek_scalar)]
+compile_error!(
+    "x86_64-unknown-none without SSE2 needs `--cfg curve25519_dalek_backend=\"serial\"` \
+     or `\"fiat\"`: dalek's default simd backend does not compile on this soft-float target"
+);
+
+// With SSE2, cpufeatures reports AVX on `target_os = "none"` only when the
+// target feature is on. An explicit `simd` or `avx512` backend together
+// with those features would use YMM or ZMM. build.rs sets the cfg then.
 #[cfg(rind_x86_64_none_dalek_wide)]
 compile_error!(
     "x86_64-unknown-none cannot use curve25519-dalek's `simd` or `avx512` backend \

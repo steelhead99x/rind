@@ -40,10 +40,11 @@
 //! barrier. Arm64EC is one of them: its `reg` class has been stable since
 //! Rust 1.84, and it is a subset of AArch64's.
 //!
-//! On bare-metal x86_64, curve25519-dalek's default does not use AVX:
-//! cpufeatures reports a SIMD feature there only when it is a compile-time
-//! target feature. An explicit `simd` or `avx512` backend is refused when
-//! those features are enabled, because that build would then use them.
+//! On bare-metal x86_64 without SSE2, dalek's default `simd` backend does
+//! not compile, so the build must name `serial` or `fiat`. With SSE2, that
+//! backend compiles, and cpufeatures reports AVX only when it is a
+//! compile-time target feature. An explicit `simd` or `avx512` backend is
+//! refused when those features are enabled.
 
 use std::env;
 
@@ -55,6 +56,7 @@ fn main() {
 
     println!(r#"cargo::rustc-check-cfg=cfg(rind_limb, values("32", "64"))"#);
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
+    println!("cargo::rustc-check-cfg=cfg(rind_x86_64_none_dalek_scalar)");
     println!("cargo::rustc-check-cfg=cfg(rind_x86_64_none_dalek_wide)");
 
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
@@ -79,11 +81,24 @@ fn main() {
     };
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
 
-    // cpufeatures reports AVX on this os only when the target feature is
-    // on, so dalek's default stays on its serial code. An explicit `simd`
-    // or `avx512` cfg together with those features would use the registers.
-    if arch == "x86_64" && bare_metal && dalek_forces_wide_vectors(&enabled) {
-        println!("cargo::rustc-cfg=rind_x86_64_none_dalek_wide");
+    // Without SSE2, dalek's default `simd` backend does not compile on this
+    // soft-float target. `serial` and `fiat` do. With SSE2, that backend
+    // compiles, and cpufeatures reports AVX only when the target feature is
+    // on. An explicit `simd` or `avx512` cfg together with those features
+    // would use the registers.
+    if arch == "x86_64" && bare_metal {
+        if !sse2 && !dalek_backend_is_scalar() {
+            // Dalek is compiled before this crate, so its simd backend aborts
+            // in LLVM on this soft-float target and the `compile_error` below
+            // never runs. Fail here, where the message is visible.
+            println!("cargo::rustc-cfg=rind_x86_64_none_dalek_scalar");
+            panic!(
+                "x86_64-unknown-none without SSE2 needs --cfg curve25519_dalek_backend=\"serial\" \
+                 or \"fiat\": dalek's default simd backend does not compile on this soft-float target"
+            );
+        } else if dalek_forces_wide_vectors(&enabled) {
+            println!("cargo::rustc-cfg=rind_x86_64_none_dalek_wide");
+        }
     }
 
     // Stable Rust's `asm!` with a `reg` operand, allow-listed so an
@@ -152,6 +167,27 @@ fn m_profile() -> bool {
     let rest = skip_digits(version);
     let rest = rest.strip_prefix('.').map_or(rest, skip_digits);
     rest.starts_with('m') || rest.starts_with("em")
+}
+
+/// Whether this build named dalek's `serial` or `fiat` backend.
+///
+/// Cargo passes a `RUSTFLAGS` `--cfg` as `CARGO_CFG_<NAME>`, one value or
+/// several separated by commas. Every named value has to be one of those two.
+fn dalek_backend_is_scalar() -> bool {
+    let Ok(value) = env::var("CARGO_CFG_CURVE25519_DALEK_BACKEND") else {
+        return false;
+    };
+    let mut any = false;
+    for value in value.split(',') {
+        if value.is_empty() {
+            continue;
+        }
+        any = true;
+        if value != "serial" && value != "fiat" {
+            return false;
+        }
+    }
+    any
 }
 
 /// Whether this build forces curve25519-dalek onto AVX while the target

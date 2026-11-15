@@ -30,7 +30,10 @@ pub(crate) struct Entry {
     // the algorithms that run them.
     #[cfg(all(
         rind_backend = "portable",
-        any(target_arch = "x86", target_arch = "x86_64")
+        any(
+            target_arch = "x86",
+            all(target_arch = "x86_64", target_feature = "sse2")
+        )
     ))]
     _mcdt: super::Mcdt,
 }
@@ -49,7 +52,10 @@ impl Entry {
             cpu_state: 0,
             #[cfg(all(
                 rind_backend = "portable",
-                any(target_arch = "x86", target_arch = "x86_64")
+                any(
+                    target_arch = "x86",
+                    all(target_arch = "x86_64", target_feature = "sse2")
+                )
             ))]
             _mcdt: super::Mcdt::enter(),
         }
@@ -70,7 +76,10 @@ impl Entry {
             cpu_state,
             #[cfg(all(
                 rind_backend = "portable",
-                any(target_arch = "x86", target_arch = "x86_64")
+                any(
+                    target_arch = "x86",
+                    all(target_arch = "x86_64", target_feature = "sse2")
+                )
             ))]
             _mcdt: super::Mcdt::enter(),
         }

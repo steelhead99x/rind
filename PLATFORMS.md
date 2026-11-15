@@ -114,11 +114,16 @@ qemu. iOS devices' code is only built.
   `aarch64-unknown-none-softfloat` (the portable backend, which has no
   NEON), and for `x86_64-unknown-none`. That target is soft-float and does not
   enable SSE2, so the build stays on the portable backend until it passes
-  `-C target-feature=+sse,+sse2,-soft-float`. SSE2 alone leaves soft-float
-  set, and LLVM then aborts while splitting vector results. Rustc warns that
-  disabling soft-float this way will become an error
+  `-C target-feature=+sse,+sse2,-soft-float`, and
+  `--cfg curve25519_dalek_backend="serial"` or `"fiat"`. Dalek's default
+  `simd` backend does not compile on this soft-float target. The portable
+  backend also leaves out `stmxcsr`, which raises `#UD` when `CR4.OSFXSR`
+  is clear. SSE2 alone leaves soft-float set, and LLVM then aborts while
+  splitting vector results. Rustc warns that disabling soft-float this way
+  will become an error
   ([rust-lang/rust#116344](https://github.com/rust-lang/rust/issues/116344)).
-  With both flags it uses the x86_64 backend, which reads CPUID. AVX, AVX2,
+  With SSE2 and soft-float cleared it uses the x86_64 backend, which reads
+  CPUID. AVX, AVX2,
   SHA512, and AVX-512 run only when those target features are enabled: XCR0
   does not mean an interrupt saves YMM or ZMM, and this build does not
   enable them. curve25519-dalek's default stays off AVX here, because

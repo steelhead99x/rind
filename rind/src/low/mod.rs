@@ -127,14 +127,13 @@ mod generic {
 
 pub(crate) mod cpu;
 mod entry;
-// Intel's MXCSR mitigation, where the instructions it covers exist: on x86
-// with SSE2, outside Miri, which runs no assembly.
+// Intel's MXCSR mitigation, where `stmxcsr` exists: x86 and x86_64 with
+// SSE2, outside Miri, which runs no assembly. `x86_64-unknown-none` leaves
+// SSE2 off, and `stmxcsr` raises `#UD` there when `CR4.OSFXSR` is clear.
 #[cfg_attr(
     not(all(
-        any(
-            target_arch = "x86_64",
-            all(target_arch = "x86", target_feature = "sse2")
-        ),
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "sse2",
         not(miri)
     )),
     path = "mcdt_none.rs"

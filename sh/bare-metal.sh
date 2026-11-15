@@ -17,6 +17,9 @@ custom='--cfg getrandom_backend="custom"'
 # `-soft-float` clears that.
 # See UPSTREAM.md, "Clearing soft-float with -C target-feature will become an error".
 sse2='-C target-feature=+sse,+sse2,-soft-float'
+# Without SSE2, dalek's default simd backend does not compile, and the
+# portable backend must not emit `stmxcsr`.
+scalar='--cfg curve25519_dalek_backend="serial"'
 
 # lint TARGET [CLIPPY-ARGS...]: debug, whose `debug_assertions` code release
 # leaves out, and release, each with and without `wipe`.
@@ -98,4 +101,35 @@ for target in \
     x86_64-unknown-none; do
     assemble "$target"
 done
+# `x86_64-unknown-none` with no extra target features: portable backend,
+# dalek `serial`, and no `stmxcsr`. The rows above build the SSE2 assembly
+# backend instead.
+no_sse2() {
+    local target=x86_64-unknown-none
+    local flags rustflags root rlib
+    flags="CARGO_TARGET_$(tr 'a-z.-' 'A-Z__' <<<"$target")_RUSTFLAGS"
+    rustflags="$custom $scalar"
+    for profile in dev release; do
+        for features in "" wipe; do
+            env "$flags=$rustflags" cargo clippy -p rind --lib --locked --target "$target" \
+                --profile "$profile" --features "$features" -- --deny warnings
+        done
+    done
+    env "$flags=$rustflags" cargo build -p rind --lib --locked --target "$target"
+    root=${CARGO_TARGET_DIR:-target}
+    local found=0
+    while IFS= read -r rlib; do
+        found=1
+        if grep -a -q stmxcsr "$rlib"; then
+            echo "error: $target without SSE2 contains stmxcsr ($rlib)" >&2
+            exit 1
+        fi
+    done < <(find "$root/$target/debug" -name 'librind*.rlib')
+    if ((found == 0)); then
+        echo "error: no rlib for $target without SSE2" >&2
+        exit 1
+    fi
+}
+no_sse2
+
 no_aws_lc thumbv7em-none-eabihf
