@@ -18,7 +18,30 @@ impl low::Zeroable for RsaPublicKey {}
 
 impl RsaPublicKey {
     pub(crate) fn new(n: RsaPosInt, e: u64) -> Result<Self, Error> {
-        Self::construct::<MIN_PUBLIC_MODULUS_BITS>(n, e, (1 << MAX_PUBLIC_EXPONENT_BITS) - 1)
+        // This body stays here, rather than calling `construct`. The Lean
+        // proof unfolds `new` and `is_even` together; a wrapper would leave
+        // `is_even` out of that term.
+        low::Entry::assert_held();
+        if n.is_even()
+            || !(MIN_PUBLIC_MODULUS_BITS..=MAX_PUBLIC_MODULUS_BITS).contains(&n.len_bits())
+        {
+            return Err(KeyFormatError::RsaModulus.into());
+        }
+        // As aws-lc requires: an even e has no inverse mod the even
+        // (p - 1)(q - 1), e = 1 makes every message its own signature, and
+        // 33 bits bounds the public operation's cost.
+        if e.is_multiple_of(2) || e == 1 || e >> MAX_PUBLIC_EXPONENT_BITS != 0 {
+            return Err(KeyFormatError::RsaExponent.into());
+        }
+
+        let montifier = n.pub_montifier();
+        let n0 = n.mont_neg_inverse();
+        Ok(Self {
+            n,
+            e,
+            montifier,
+            n0,
+        })
     }
 
     /// ACVP's primitive tests supply public exponents wider than the
@@ -32,6 +55,7 @@ impl RsaPublicKey {
         Self::construct::<2>(n, e, u64::MAX)
     }
 
+    #[cfg(feature = "__acvp")]
     fn construct<const MIN_BITS: usize>(n: RsaPosInt, e: u64, max_e: u64) -> Result<Self, Error> {
         low::Entry::assert_held();
         if n.is_even() || !(MIN_BITS..=MAX_PUBLIC_MODULUS_BITS).contains(&n.len_bits()) {
