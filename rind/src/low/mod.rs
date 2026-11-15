@@ -104,6 +104,9 @@ mod generic {
         test
     ))]
     pub(crate) mod mul16;
+    // One SplitMix64 for the tests that need a reproducible stream.
+    #[cfg(test)]
+    pub(crate) mod splitmix;
     // The portable backend's group orders, picked from by modulus.
     #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
     pub(crate) mod order;

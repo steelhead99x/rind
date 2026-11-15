@@ -96,11 +96,7 @@ mod tests {
         }
         let mut state = 0x6d75_6c31_365f_7465u64;
         for _ in 0..100_000 {
-            state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
-            let mut z = state;
-            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-            z ^= z >> 31;
+            let z = super::super::splitmix::next(&mut state);
             let (a, b) = (z as u32, (z >> 32) as u32);
             assert_eq!(mul16(a, b), u64::from(a) * u64::from(b), "{a:#x} * {b:#x}");
         }
