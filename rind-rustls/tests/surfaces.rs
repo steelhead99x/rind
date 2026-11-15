@@ -1,18 +1,25 @@
 //! Lengths, limits, and `Debug` that cargo-mutants can replace without a
 //! handshake noticing, checked against rustls's aws-lc-rs provider.
 
+#[cfg(feature = "tls12")]
+use rustls::ContentType;
 use rustls::crypto::aws_lc_rs;
-use rustls::crypto::cipher::{AeadKey, InboundOpaqueMessage, OutboundPlainMessage};
+use rustls::crypto::cipher::AeadKey;
+#[cfg(feature = "tls12")]
+use rustls::crypto::cipher::{InboundOpaqueMessage, OutboundPlainMessage};
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, PrivateSec1KeyDer};
-use rustls::{CipherSuite, ContentType, ProtocolVersion, SupportedCipherSuite};
+use rustls::{CipherSuite, ProtocolVersion, SupportedCipherSuite};
 
 fn confidentiality_limit(suite: SupportedCipherSuite) -> u64 {
+    // `Tls12` stays in the enum when the `tls12` feature is off. The suites
+    // that use it do not.
     match suite {
         SupportedCipherSuite::Tls12(suite) => suite.common.confidentiality_limit,
         SupportedCipherSuite::Tls13(suite) => suite.common.confidentiality_limit,
     }
 }
 
+#[cfg(feature = "tls12")]
 fn tls12(suite: SupportedCipherSuite) -> &'static rustls::Tls12CipherSuite {
     match suite {
         SupportedCipherSuite::Tls12(suite) => suite,
@@ -70,6 +77,7 @@ fn aead_key() -> AeadKey {
     AeadKey::from([7u8; 32])
 }
 
+#[cfg(feature = "tls12")]
 fn tls12_suites() -> [(SupportedCipherSuite, SupportedCipherSuite); 6] {
     [
         (
@@ -99,6 +107,7 @@ fn tls12_suites() -> [(SupportedCipherSuite, SupportedCipherSuite); 6] {
     ]
 }
 
+#[cfg(feature = "tls12")]
 #[test]
 fn tls12_encrypted_payload_len_matches_aws_lc() {
     for (ours, theirs) in tls12_suites() {
@@ -132,6 +141,7 @@ fn tls12_encrypted_payload_len_matches_aws_lc() {
     }
 }
 
+#[cfg(feature = "tls12")]
 #[test]
 fn gcm_tls12_accepts_an_empty_plaintext_and_refuses_a_short_record() {
     // `payload.len() < overhead` becomes `<=` if an empty plaintext, whose

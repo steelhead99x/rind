@@ -209,26 +209,27 @@ fn signature_algorithms_match_ring() {
         ours::signature::ECDSA_P256_SHA256_FIXED_SIGNING
     );
 
-    // ring derives a struct dump here. rind-ring prints the algorithm's name,
-    // which is what a test can see; an empty `Debug` prints nothing.
-    assert_eq!(
-        format!("{:?}", ours::signature::RSA_PKCS1_2048_8192_SHA256),
-        "RSA_PKCS1_2048_8192_SHA256"
-    );
-    assert_eq!(
-        format!("{:?}", ours::signature::RSA_PSS_2048_8192_SHA256),
-        "RSA_PSS_2048_8192_SHA256"
-    );
-
-    // Same as `RsaParameters`: rind-ring prints the name, ring a struct dump.
-    assert_eq!(
-        format!("{:?}", ours::signature::RSA_PKCS1_SHA256),
-        "RSA_PKCS1_SHA256"
-    );
-    assert_eq!(
-        format!("{:?}", ours::signature::RSA_PSS_SHA384),
-        "RSA_PSS_SHA384"
-    );
+    // RSA is behind `alloc`, as in ring. These names are what a test can see
+    // of `Debug`; ring derives a struct dump, and an empty `Debug` prints nothing.
+    #[cfg(feature = "alloc")]
+    {
+        assert_eq!(
+            format!("{:?}", ours::signature::RSA_PKCS1_2048_8192_SHA256),
+            "RSA_PKCS1_2048_8192_SHA256"
+        );
+        assert_eq!(
+            format!("{:?}", ours::signature::RSA_PSS_2048_8192_SHA256),
+            "RSA_PSS_2048_8192_SHA256"
+        );
+        assert_eq!(
+            format!("{:?}", ours::signature::RSA_PKCS1_SHA256),
+            "RSA_PKCS1_SHA256"
+        );
+        assert_eq!(
+            format!("{:?}", ours::signature::RSA_PSS_SHA384),
+            "RSA_PSS_SHA384"
+        );
+    }
 }
 
 #[test]

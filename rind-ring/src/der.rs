@@ -195,10 +195,13 @@ pub(crate) fn ed25519_pkcs8(der: &[u8], v1: bool) -> Result<Ed25519Pkcs8<'_>, Ke
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::{ed25519_pkcs8, rsa_public_key};
+    use super::ed25519_pkcs8;
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn positive_integer_refuses_a_negative_encoding() {
+        use super::rsa_public_key;
+
         // An INTEGER whose first byte has the high bit set is negative unless
         // a leading 0x00 precedes it. Deleting that arm accepts 0x80.
         let negative = tlv(0x02, &[0x80]);
@@ -209,6 +212,25 @@ pub(crate) mod tests {
         let non_negative = tlv(0x02, &[0x00, 0x80]);
         let accepted = tlv(0x30, &[non_negative, exponent].concat());
         assert!(rsa_public_key(&accepted).is_ok());
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn positive_integer_refuses_an_empty_encoding() {
+        use super::rsa_public_key;
+
+        // `[]` is an empty INTEGER. Dropping that alternative accepts an
+        // empty modulus, and `PublicKey::modulus_bits` then underflows.
+        // A bare `0x00` is a leading zero with nothing after it, which the
+        // other arm refuses. Either one as the exponent is the same function.
+        let exponent = tlv(0x02, &[0x01, 0x00, 0x01]);
+        let magnitude = tlv(0x02, &[0x01]);
+        for empty in [tlv(0x02, &[]), tlv(0x02, &[0x00])] {
+            let empty_modulus = tlv(0x30, &[empty.clone(), exponent.clone()].concat());
+            let empty_exponent = tlv(0x30, &[magnitude.clone(), empty].concat());
+            assert!(rsa_public_key(&empty_modulus).is_err());
+            assert!(rsa_public_key(&empty_exponent).is_err());
+        }
     }
 
     #[test]

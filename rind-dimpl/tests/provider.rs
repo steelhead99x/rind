@@ -465,7 +465,29 @@ fn signing_keys_match_aws_lc() {
 fn p384_sha256_verification_reaches_the_verifier() {
     // DTLS 1.2 may verify P-384 with SHA-256. A bad signature still takes that
     // arm: deleting it reports the pair as unsupported instead of a bad signature.
-    let (cert, _) = certificate(&rcgen::PKCS_ECDSA_P384_SHA384);
+    // Eight zero bytes are refused by every verifier, so a valid signature is
+    // what shows the arm picked P-384 with SHA-256. aws-lc-rs publishes that
+    // pair only as a verifier. Sign its digest with the P-384 key: `sign_digest`
+    // uses the digest's hash and keeps the key's ASN.1 encoding.
+    let (cert, key) = certificate(&rcgen::PKCS_ECDSA_P384_SHA384);
+    let signing = rind::signature::EcdsaKeyPair::from_pkcs8(
+        &rind::signature::sign::ECDSA_P384_SHA384_ASN1,
+        &key,
+    )
+    .unwrap();
+    let digest = rind::digest::digest(&rind::digest::SHA256, b"data");
+    let signature = signing.sign_digest(&digest).unwrap();
+    rind()
+        .signature_verification
+        .verify_signature(
+            &cert,
+            b"data",
+            signature.as_ref(),
+            HashAlgorithm::SHA256,
+            SignatureAlgorithm::ECDSA,
+        )
+        .expect("a P-384/SHA-256 signature verifies");
+
     let error = rind()
         .signature_verification
         .verify_signature(

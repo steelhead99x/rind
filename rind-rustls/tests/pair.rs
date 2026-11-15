@@ -203,18 +203,6 @@ macro_rules! transfer {
     }};
 }
 
-macro_rules! write_all {
-    ($conn:expr, $bytes:expr) => {{
-        let bytes: &[u8] = $bytes;
-        let mut sent = 0;
-        while sent < bytes.len() {
-            let n = $conn.writer().write(&bytes[sent..]).unwrap();
-            assert!(n > 0, "plaintext write made no progress at {sent}");
-            sent += n;
-        }
-    }};
-}
-
 /// Drains both directions. A confidentiality limit of zero keeps `wants_write`
 /// set, and this fails at the cap instead of spinning.
 fn drain(client: &mut ClientConnection, server: &mut ServerConnection, what: &str) {
@@ -250,7 +238,7 @@ fn exercise(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>) 
         transfer!(server, client, buf);
     }
 
-    write_all!(client, b"hello world");
+    client.writer().write_all(b"hello world").unwrap();
     client.send_close_notify();
     drain(&mut client, &mut server, "application exchange");
 
@@ -258,12 +246,17 @@ fn exercise(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>) 
     server.reader().read_to_end(&mut out).unwrap();
     assert_eq!(out, b"hello world");
 
-    write_all!(server, b"goodbye");
+    server.writer().write_all(b"goodbye").unwrap();
     drain(&mut client, &mut server, "server reply");
     let mut got = Vec::new();
     while got.len() < b"goodbye".len() {
         let mut buf = [0u8; 16];
-        let n = client.reader().read(&mut buf).unwrap();
+        // `WouldBlock` is what a reply that never arrives looks like. `unwrap`
+        // would panic with that error and hide the assertion below.
+        let n = client
+            .reader()
+            .read(&mut buf)
+            .expect("client read none of the server reply");
         assert!(n > 0, "client read none of the server reply");
         got.extend_from_slice(&buf[..n]);
     }

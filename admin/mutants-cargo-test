@@ -21,14 +21,25 @@ expect 'test --package=rind-rcgen@0.13.2 --features=wipe --features=zeroize' \
     test --package=rind-rcgen@0.13.2
 expect 'test -p rind-rcgen --features=wipe --features=zeroize -- --nocapture' \
     test -p rind-rcgen -- --nocapture
+expect 'test -prind-rcgen --features=wipe --features=zeroize' \
+    test -prind-rcgen
 expect 'nextest run --package rind-rcgen --features=wipe --features=zeroize' \
     nextest run --package rind-rcgen
 expect 'check --package=rind-rcgen@0.13.2 --features=wipe --features=zeroize' \
     check --package=rind-rcgen@0.13.2
+expect 'test -p rind-rcgen --features=wipe --features=zeroize -- --package=foo' \
+    test -p rind-rcgen -- --package=foo
 expect 'test --package=rind@0.3.2' test --package=rind@0.3.2
-expect 'test --package=rind-rcgen@0.13.2 --package=rind@0.3.2' \
+expect 'test -p rind -- --package=rind-rcgen' \
+    test -p rind -- --package=rind-rcgen
+expect $'test --package=rind-rcgen@0.13.2 --package=rind@0.3.2\ntest --package=rind-rcgen@0.13.2 --features=wipe --features=zeroize' \
     test --package=rind-rcgen@0.13.2 --package=rind@0.3.2
-expect 'test --workspace' test --workspace
+expect $'test --workspace\ntest --package=rind-rcgen --features=wipe --features=zeroize' \
+    test --workspace
+expect $'nextest run --workspace --no-run\nnextest run --no-run --package=rind-rcgen --features=wipe --features=zeroize' \
+    nextest run --workspace --no-run
+expect $'check --tests --package=rind-rcgen@0.14.4 --package=rind@0.3.2\ncheck --tests --package=rind-rcgen@0.14.4 --features=wipe --features=zeroize' \
+    check --tests --package=rind-rcgen@0.14.4 --package=rind@0.3.2
 expect 'build -p rind-rcgen' build -p rind-rcgen
 expect ''
 

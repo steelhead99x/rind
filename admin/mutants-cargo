@@ -2,7 +2,17 @@
 # cargo-mutants invokes this as $CARGO. `.cargo/mutants.toml` turns on
 # `rind/wipe` for every package. rind-rcgen's own `wipe` and `zeroize` cannot
 # live in that list: a package that does not depend on rind-rcgen fails to
-# resolve them. Add those two only when this invocation builds rind-rcgen.
+# resolve them.
+#
+# Add those two when this invocation builds only rind-rcgen. A workspace or
+# mixed-package command cannot take them, because cargo requires every
+# selected package to define a feature it is given. That command runs as
+# given, and rind-rcgen is then built again with the two features, so its
+# wipe tests are not compiled out and a wipe mutant is not reported missed.
+#
+# `build` is left unchanged. cargo-mutants 27.1.0's build phase is
+# `cargo test --no-run` or `nextest run --no-run`, and its check phase is
+# `cargo check --tests`. Those are the commands this wrapper rewrites.
 set -euo pipefail
 
 real=${RIND_REAL_CARGO:-cargo}
@@ -15,11 +25,31 @@ case $1 in
     *) exec "$real" "$@" ;;
 esac
 
-packages=()
-prev=
+features=(--features=wipe --features=zeroize)
+
+# Words after the first `--` belong to the test binary, not to cargo.
+cargo_args=()
+passthru=()
+seen_dd=0
 for arg in "$@"; do
+    if [[ $seen_dd -eq 1 ]]; then
+        passthru+=("$arg")
+    elif [[ $arg == -- ]]; then
+        seen_dd=1
+    else
+        cargo_args+=("$arg")
+    fi
+done
+
+packages=()
+workspace=0
+prev=
+for arg in "${cargo_args[@]}"; do
     case $arg in
+        --workspace) workspace=1 ;;
         --package=*) packages+=("${arg#--package=}") ;;
+        # `-prind-rcgen`, the attached form of `-p`.
+        -p?*) packages+=("${arg#-p}") ;;
     esac
     if [[ $prev == --package || $prev == -p ]]; then
         packages+=("$arg")
@@ -27,34 +57,67 @@ for arg in "$@"; do
     prev=$arg
 done
 
-only_rcgen=0
-if [[ ${#packages[@]} -gt 0 ]]; then
-    only_rcgen=1
-    for pkg in "${packages[@]}"; do
-        # cargo-mutants passes `name@version`.
-        if [[ ${pkg%%@*} != rind-rcgen ]]; then
-            only_rcgen=0
-            break
+rcgen_spec=
+others=0
+for pkg in "${packages[@]}"; do
+    if [[ ${pkg%%@*} == rind-rcgen ]]; then
+        if [[ -z $rcgen_spec ]]; then
+            rcgen_spec=$pkg
         fi
-    done
+    else
+        others=1
+    fi
+done
+
+# No package filter builds every workspace member, rind-rcgen included.
+if [[ ${#packages[@]} -eq 0 ]]; then
+    workspace=1
 fi
 
-extra=()
-if [[ $only_rcgen -eq 1 ]]; then
-    extra+=(--features=wipe --features=zeroize)
+# Only rind-rcgen: one command, with the features on it.
+if [[ -n $rcgen_spec && $others -eq 0 && $workspace -eq 0 ]]; then
+    args=()
+    inserted=0
+    for arg in "$@"; do
+        if [[ $inserted -eq 0 && $arg == -- ]]; then
+            args+=("${features[@]}" --)
+            inserted=1
+        else
+            args+=("$arg")
+        fi
+    done
+    if [[ $inserted -eq 0 ]]; then
+        args+=("${features[@]}")
+    fi
+    exec "$real" "${args[@]}"
 fi
-if [[ ${#extra[@]} -eq 0 ]]; then
+
+# rind-rcgen is not in this build.
+if [[ $workspace -eq 0 && -z $rcgen_spec ]]; then
     exec "$real" "$@"
 fi
 
-# Flags belong before a `--` that forwards arguments to the test binary.
-args=()
-for arg in "$@"; do
-    if [[ $arg == -- ]]; then
-        args+=("${extra[@]}" --)
-        extra=()
-    else
-        args+=("$arg")
+# Workspace or mixed packages. The first command is the one cargo-mutants
+# asked for. The second builds rind-rcgen alone, with the features, and
+# forwards the same test-binary arguments.
+"$real" "$@"
+
+spec=${rcgen_spec:-rind-rcgen}
+extra=()
+skip_next=0
+for arg in "${cargo_args[@]}"; do
+    if [[ $skip_next -eq 1 ]]; then
+        skip_next=0
+        continue
     fi
+    case $arg in
+        --workspace | --package=* | -p?*) ;;
+        --package | -p) skip_next=1 ;;
+        *) extra+=("$arg") ;;
+    esac
 done
-exec "$real" "${args[@]}" ${extra[@]+"${extra[@]}"}
+extra+=(--package="$spec" "${features[@]}")
+if [[ $seen_dd -eq 1 ]]; then
+    extra+=(-- "${passthru[@]+"${passthru[@]}"}")
+fi
+exec "$real" "${extra[@]}"
