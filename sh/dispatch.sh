@@ -479,13 +479,16 @@ step() {
                 run cargo clippy -p rind --test heap_scratch --test cctv --features wipe --locked \
                     --target wasm32-wasip2 -- --deny warnings
                 if [[ $(uname -s) == Linux ]]; then
-                    # Same runner as sh/wasm.sh. Cargo does not run a wasm
-                    # binary unless this is set, and the tests open the
+                    # `wasm_runner` is the one `just wasm` uses. Cargo does not run
+                    # a wasm binary unless this is set, and the tests open the
                     # verdict file and the PKCS#8 fixtures by absolute path,
-                    # so the checkout has to be preopened.
-                    root=$(pwd)
+                    # so the checkout has to be preopened. SLOW_TESTS stays
+                    # unset: RSA generation stays on `just wasm`.
+                    # shellcheck source=sh/wasm.sh
+                    source sh/wasm.sh
+                    wasm_runner
                     run nix develop .#wasm --command env \
-                        CARGO_TARGET_WASM32_WASIP2_RUNNER="wasmtime run --dir ${root}::${root} --env SLOW_TESTS" \
+                        "CARGO_TARGET_WASM32_WASIP2_RUNNER=${CARGO_TARGET_WASM32_WASIP2_RUNNER}" \
                         cargo test -p rind --features wipe --locked \
                         --target wasm32-wasip2 --test cctv --test heap_scratch
                     if [[ $(uname -m) == x86_64 ]]; then

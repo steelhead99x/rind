@@ -3,6 +3,9 @@
 //! A reader sees the old file or the new one, never a partial write. On
 //! Windows, rename fails while another test still has the destination open,
 //! so this retries briefly.
+//!
+//! The helper lives under `tests/support` so Cargo does not build it as its
+//! own integration test. `cctv` and `heap_scratch` include it with `#[path]`.
 
 use std::thread;
 use std::time::Duration;
