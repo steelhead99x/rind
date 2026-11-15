@@ -355,7 +355,7 @@ impl fmt::Debug for Signature {
 /// parameter set is a type.
 ///
 /// Each signs as the [`verify`] algorithm of the same name verifies:
-/// [`MlDsaKeyPair<MlDsa65>`] as [`verify::ML_DSA_65`].
+/// [`MlDsaKeyPair<MlDsa65>`](sign::MlDsaKeyPair) as [`verify::ML_DSA_65`].
 ///
 /// RSA signs with moduli of an even number of bits from 2048 to 8192,
 /// and RSA-PSS with a salt as long as its hash, the length aws-lc's

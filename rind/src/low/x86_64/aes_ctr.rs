@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 use super::aes::{AesKey, HwKey};
-use crate::low::generic::ctr;
+use super::aes_nohw::NohwKey;
+use super::vpaes_x86_64::VpaesKey;
+use crate::low::generic::ctr::{self, Ctr32};
 
 /// XORs AES-CTR keystream into `inout`.
 ///
@@ -9,15 +11,27 @@ use crate::low::generic::ctr;
 /// `counter + 1`, and so on, wrapping within 32 bits.
 pub(crate) fn apply(key: &AesKey, nonce: &[u8; 12], counter: u32, inout: &mut [u8]) {
     match key {
-        AesKey::Hw(key) => ctr::blocks(nonce, counter, inout, |ivec, blocks| {
-            hw_ctr32(key, ivec, blocks)
-        }),
-        AesKey::Vpaes(key) => ctr::blocks(nonce, counter, inout, |ivec, blocks| {
-            key.ctr32(ivec, blocks)
-        }),
-        AesKey::Nohw(key) => ctr::blocks(nonce, counter, inout, |ivec, blocks| {
-            key.ctr32(ivec, blocks)
-        }),
+        AesKey::Hw(key) => ctr::blocks(key, nonce, counter, inout),
+        AesKey::Vpaes(key) => ctr::blocks(key, nonce, counter, inout),
+        AesKey::Nohw(key) => ctr::blocks(key, nonce, counter, inout),
+    }
+}
+
+impl Ctr32 for HwKey {
+    fn ctr32(&self, ivec: &[u8; 16], blocks: &mut [[u8; 16]]) {
+        hw_ctr32(self, ivec, blocks)
+    }
+}
+
+impl Ctr32 for VpaesKey {
+    fn ctr32(&self, ivec: &[u8; 16], blocks: &mut [[u8; 16]]) {
+        Self::ctr32(self, ivec, blocks)
+    }
+}
+
+impl Ctr32 for NohwKey {
+    fn ctr32(&self, ivec: &[u8; 16], blocks: &mut [[u8; 16]]) {
+        Self::ctr32(self, ivec, blocks)
     }
 }
 
@@ -69,7 +83,6 @@ unsafe extern "sysv64" fn aes_hw_ctr32_encrypt_blocks(
 mod tests {
     use super::*;
     use crate::low::x86_64::cpu::{HaveAesHardware, HaveSsse3};
-    use crate::low::x86_64::vpaes_x86_64::VpaesKey;
 
     // Every other test sees only the path the CPU picks, so the two are
     // compared here: aws-lc's AES-NI routine and vpaes, for each key size,
@@ -97,14 +110,10 @@ mod tests {
                 for len in [1, 15, 16, 17, 32, 48, 64, 80, 96, 112, 127, 128, 129, 300] {
                     let what = format!("{key_len}-byte key, counter {counter}, {len} bytes");
                     let mut want = bytes(len, counter);
-                    ctr::blocks(&nonce, counter, &mut want, |ivec, blocks| {
-                        vpaes.ctr32(ivec, blocks)
-                    });
+                    ctr::blocks(&vpaes, &nonce, counter, &mut want);
 
                     let mut got = bytes(len, counter);
-                    ctr::blocks(&nonce, counter, &mut got, |ivec, blocks| {
-                        hw_ctr32(hw, ivec, blocks)
-                    });
+                    ctr::blocks(hw, &nonce, counter, &mut got);
                     assert_eq!(got, want, "{what}");
                 }
             }

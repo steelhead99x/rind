@@ -228,12 +228,42 @@ fn ml_dsa_set<P: rind::signature::sign::MlDsaParameterSet>() {
     independent("ML-DSA seed load", seeds, |seed| {
         MlDsaKeyPair::<P>::from_seed(seed).unwrap()
     });
+    // A key pair's expansion is as good as its key, so its drop wipes it.
+    independent("ML-DSA key pair drop", seeds, |seed| {
+        drop(MlDsaKeyPair::<P>::from_seed(seed).unwrap())
+    });
     let keys = seeds.map(|seed| MlDsaKeyPair::<P>::from_seed(&seed).unwrap());
     independent("ML-DSA export", keys.each_ref(), |key| key.to_pkcs8());
     // Signing is hedged, so even under one key its randomness varies: every
     // block it frees must be wiped.
     for key in &keys {
         zeroed("ML-DSA signing", || key.sign(b"message").unwrap());
+    }
+}
+
+#[test]
+fn slh_dsa() {
+    use rind::signature::sign::{SlhDsaSha2_128f, SlhDsaShake128f};
+    slh_dsa_set::<SlhDsaSha2_128f>();
+    slh_dsa_set::<SlhDsaShake128f>();
+}
+
+fn slh_dsa_set<P: rind::signature::sign::SlhDsaParameterSet>() {
+    use rind::signature::sign::SlhDsaKeyPair;
+    zeroed("SLH-DSA key generation", || {
+        SlhDsaKeyPair::<P>::generate().unwrap()
+    });
+    let keys = [(); 2].map(|()| SlhDsaKeyPair::<P>::generate().unwrap());
+    independent("SLH-DSA export", keys.each_ref(), |key| key.to_pkcs8());
+    let pkcs8 = keys.each_ref().map(|key| key.to_pkcs8().as_ref().to_vec());
+    // Loading checks the key by making it again.
+    independent("SLH-DSA load", pkcs8, |der| {
+        SlhDsaKeyPair::<P>::from_pkcs8(der).unwrap()
+    });
+    // Signing is randomized, so even under one key it varies: every block
+    // it frees must be wiped.
+    for key in &keys {
+        zeroed("SLH-DSA signing", || key.sign(b"message").unwrap());
     }
 }
 
@@ -246,8 +276,25 @@ fn ml_dsa_expanded_set<P: rind::signature::sign::MlDsaParameterSet>(
     let seeds = [[1u8; 32], [2u8; 32]];
     let expanded = seeds.map(|seed| ml_dsa_expanded_pkcs8(theirs, &seed));
     independent("ML-DSA expanded load", expanded, |der| {
-        MlDsaKeyPair::<P>::from_pkcs8(der).unwrap()
+        drop(MlDsaKeyPair::<P>::from_pkcs8(der).unwrap())
     });
+}
+
+/// Argon2id's memory is as good as the password to an attacker, who could
+/// finish the hash from it without paying for the memory.
+#[test]
+fn argon2() {
+    let params = rind::argon2::Params::new(32, 2, 2).unwrap();
+    independent(
+        "Argon2id",
+        [*b"password one", *b"password two"],
+        |password| {
+            let mut out = [0u8; 32];
+            rind::argon2::derive(params, password, b"saltsalt", &mut out).unwrap();
+            // Verifying derives its key on the heap.
+            black_box(rind::argon2::verify(params, password, b"saltsalt", &out).is_ok())
+        },
+    );
 }
 
 /// The key `seed` expands to, as PKCS#8 in RFC 9881's expanded form, which

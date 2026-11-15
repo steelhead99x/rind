@@ -259,6 +259,7 @@ let instruction_INDUCTION,instruction_RECURSION = define_type
    | AESENCLAST operand operand
    | AESKEYGENASSIST operand operand operand
    | AND operand operand
+   | ANDN operand operand operand
    | BSF operand operand
    | BSR operand operand
    | BSWAP operand
@@ -285,6 +286,7 @@ let instruction_INDUCTION,instruction_RECURSION = define_type
    | MOVD operand operand
    | MOVQ operand operand
    | MOVSB bool operand operand operand
+   | STOSB bool
    | MOVSX operand operand
    | MOVZX operand operand
    | MOVAPS operand operand
@@ -334,6 +336,7 @@ let instruction_INDUCTION,instruction_RECURSION = define_type
    | RET
    | ROL operand operand
    | ROR operand operand
+   | RORX operand operand operand
    | SAR operand operand
    | SBB operand operand
    | SET condition operand

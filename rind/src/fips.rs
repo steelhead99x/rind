@@ -155,6 +155,7 @@ errors! {
         Fault,
         MessageLimitReached,
         Unsupported,
+        OutOfMemory,
     ],
     key: [
         WrongLength,
@@ -222,9 +223,10 @@ impl DrbgHold {
 }
 
 /// The name of the first CPU feature the module requires that this CPU
-/// lacks, as [`crate::cpu::check`] reports it.
+/// lacks. The module builds only on the x86_64 and aarch64 backends.
+#[cfg(all(rind_fips, any(rind_backend = "x86_64", rind_backend = "aarch64")))]
 pub fn missing_cpu_feature() -> Option<&'static str> {
-    crate::cpu::check().err().map(|missing| missing.name())
+    crate::low::missing_cpu_feature()
 }
 
 /// `error`'s code, which is never 0, the code of success.
@@ -591,7 +593,7 @@ mod kat {
     // Key generation from the seed of ACVP's first ML-DSA-44 keyGen vector,
     // then signing with a fixed `rnd`, and verifying.
     pub(super) fn ml_dsa() -> Result<(), &'static str> {
-        use crate::mid::mldsa::{KeyPair, MlDsa44, verify};
+        use crate::mid::mldsa::{KeyPair, MlDsa44, VerifyingKey};
 
         let seed: [u8; 32] = hex_array(ML_DSA_SEED);
         let key = KeyPair::<MlDsa44>::from_seed(&input("ml_dsa_keygen", seed));
@@ -613,9 +615,8 @@ mod kat {
             sha256_of(signature.as_ref())[..] == hex(ML_DSA_SIGNATURE_SHA256),
         )?;
 
-        let verified = verify::<MlDsa44>(
+        let verified = VerifyingKey::new(*key.tr()).verify::<MlDsa44>(
             key.public_key().as_ref(),
-            key.tr(),
             b"",
             &input("ml_dsa_verify", message),
             signature.as_ref(),

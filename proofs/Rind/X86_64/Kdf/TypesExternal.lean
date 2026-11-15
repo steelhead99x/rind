@@ -1,6 +1,6 @@
 module
 public import Rind.X86_64.HmacDispatch
-public import Rind.X86_64.Dispatch
+public import Rind.X86_64.QuicDispatch
 public import Rind.X86_64.AeadDispatch
 @[expose] public section
 open Aeneas Aeneas.Std Result

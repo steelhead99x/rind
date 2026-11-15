@@ -28,7 +28,7 @@ unsafe impl<T: Send + Sync> Sync for ReuseCache<T> {}
 // A panicking `build` leaves `state` at `BUILDING`, so `value` is never read.
 impl<T: RefUnwindSafe + UnwindSafe> RefUnwindSafe for ReuseCache<T> {}
 
-impl<T: Copy + Default> ReuseCache<T> {
+impl<T: Default> ReuseCache<T> {
     pub(crate) fn new() -> Self {
         Self {
             state: AtomicU8::new(UNUSED),
@@ -59,6 +59,16 @@ impl<T: Copy + Default> ReuseCache<T> {
         }
     }
 
+    fn get(&self) -> Option<&T> {
+        match self.state.load(Ordering::Acquire) {
+            // SAFETY: nothing writes `value` once `state` is `READY`.
+            READY => Some(unsafe { &*self.value.get() }),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Copy + Default> ReuseCache<T> {
     /// The value, built with `build` if no use has kept it yet; one racing
     /// another thread's build builds its own copy.
     pub(crate) fn get_or_build_now(&self, build: impl FnOnce() -> T) -> T {
@@ -79,14 +89,6 @@ impl<T: Copy + Default> ReuseCache<T> {
             self.state.store(READY, Ordering::Release);
         }
         value
-    }
-
-    fn get(&self) -> Option<&T> {
-        match self.state.load(Ordering::Acquire) {
-            // SAFETY: nothing writes `value` once `state` is `READY`.
-            READY => Some(unsafe { &*self.value.get() }),
-            _ => None,
-        }
     }
 }
 

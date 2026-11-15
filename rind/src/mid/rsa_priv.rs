@@ -28,50 +28,48 @@ pub(crate) struct RsaPrivateKey {
 }
 
 impl RsaPrivateKey {
+    /// Checks and takes a key's components, which may be wider than they
+    /// need, so no width depends on a secret: each but d is narrowed to the
+    /// width its prime's public length sets.
     pub(crate) fn new(
-        p: RsaPosIntModP,
-        q: RsaPosIntModP,
+        mut p: RsaPosIntModP,
+        mut q: RsaPosIntModP,
         d: RsaPosIntD,
-        dp: RsaPosIntModP,
-        dq: RsaPosIntModP,
-        iqmp: RsaPosIntModP,
+        mut dp: RsaPosIntModP,
+        mut dq: RsaPosIntModP,
+        mut iqmp: RsaPosIntModP,
         n: RsaPosIntModN,
         e: u64,
     ) -> Result<Self, Error> {
-        Self::from_components(p, q, d, dp, dq, iqmp, RsaPublicKey::new(n, e)?)
-    }
-
-    /// Validates private components against an already validated public key.
-    pub(crate) fn from_components(
-        p: RsaPosIntModP,
-        q: RsaPosIntModP,
-        d: RsaPosIntD,
-        dp: RsaPosIntModP,
-        dq: RsaPosIntModP,
-        iqmp: RsaPosIntModP,
-        public: RsaPublicKey,
-    ) -> Result<Self, Error> {
-        if public.modulus_len_bits() < MIN_MODULUS_BITS {
+        if n.len_bits() < MIN_MODULUS_BITS {
             return Err(KeyFormatError::RsaModulus.into());
         }
-        // The arithmetic needs nonzero top words. Only this format verdict
-        // is public; the actual prime lengths and parity stay secret.
-        let p_bytes = p.len_bytes();
-        // `is_even` compares directly, which memcheck reports when the prime
-        // is already secret. `black_box` is the same barrier `bignum_eq` uses
-        // so only `into_public` below reveals the verdict.
-        let valid = (core::hint::black_box(p.low_bit()) == 1)
-            & (core::hint::black_box(q.low_bit()) == 1)
-            & (q.len_bits() >= 2)
-            & (p_bytes >= MIN_PRIVATE_MODULUS_BYTES)
-            & (core::hint::black_box(p.top_word()) != 0)
-            & (core::hint::black_box(q.top_word()) != 0);
-        if !low::ct::into_public(valid) {
+        // The primes are secret, but their bit lengths are revealed, as
+        // aws-lc treats them as public: n's fixes only their sum, yet the
+        // DER framing already reveals each one's byte length, and hiding the
+        // rest would run every CRT at the encoding's wider width. Their
+        // parity is fixed in any valid key.
+        let (p_bits, q_bits) = (
+            low::ct::into_public(p.len_bits()),
+            low::ct::into_public(q.len_bits()),
+        );
+        let p_len = p_bits.div_ceil(8);
+        if low::ct::into_public(p.is_even() | q.is_even())
+            || q_bits < 2
+            || !(MIN_PRIVATE_MODULUS_BYTES..=MAX_PRIVATE_MODULUS_BYTES).contains(&p_len)
+        {
             return Err(KeyFormatError::RsaPrimes.into());
         }
-        // Widths come from the encodings, not a scan of the secret primes.
-        let (p_len, q_len) = (p.as_words().len(), q.as_words().len());
-        let e = public.e;
+
+        // As a generated key's, dp, dq, and iqmp are as wide as their prime.
+        // One that does not fit cannot agree with the others, so this joins
+        // their verdict. d keeps its encoding's width, which may exceed n's,
+        // as d + (p - 1)(q - 1) is as good as d.
+        let (p_words, q_words) = (p_bits.div_ceil(64), q_bits.div_ceil(64));
+        let fits =
+            p.fit(p_words) & q.fit(q_words) & dp.fit(p_words) & dq.fit(q_words) & iqmp.fit(p_words);
+
+        let public = RsaPublicKey::new(n, e)?;
 
         let mut p: SecretRsaPosIntModP = p.into();
         let mut q: SecretRsaPosIntModP = q.into();
@@ -87,7 +85,7 @@ impl RsaPrivateKey {
         // The CRT reduces `c` mod each prime by Montgomery reduction, which
         // needs `c` below 2^(64w) times the prime for a w-word prime. Working
         // at the wider prime's width meets that for unbalanced primes too.
-        if p_len < q_len {
+        if p_bits < q_bits {
             p.expand(&q);
         } else {
             q.expand(&p);
@@ -107,10 +105,92 @@ impl RsaPrivateKey {
         // below the modulus.
         let q_wide: RsaPosIntModN = q.widen();
         let q_p = q_wide.reduce(&p, &p_montifier);
-        let consistent = exponents_agree
+        let consistent = fits
+            & exponents_agree
             & pq.equals(&public.n)
             & iqmp.less_than(&p)
             // Out of Montgomery form: iqmp * R * q * R^-1 = iqmp * q (mod p).
+            & iqmp_mont.mont_mul(&q_p, &p, p0).equals(&p.fixed_one());
+        if !low::ct::into_public(consistent) {
+            return Err(KeyFormatError::MismatchedRsaComponents.into());
+        }
+
+        Ok(Self {
+            public,
+            p,
+            q,
+            d,
+            dp,
+            dq,
+            iqmp,
+            iqmp_mont,
+            p_montifier,
+            q_montifier,
+            p0,
+            q0,
+        })
+    }
+
+    /// Validates private components against an already validated public key.
+    ///
+    /// ACVP's CRT path calls this with components whose bytes are already
+    /// secret. Parity and the top word go through `black_box`, the same
+    /// barrier as `bignum_eq`, and only the combined verdict is public.
+    /// Widths are the encodings' widths: those encodings are a public half
+    /// of the modulus, so this does not narrow them with `fit`.
+    pub(crate) fn from_components(
+        p: RsaPosIntModP,
+        q: RsaPosIntModP,
+        d: RsaPosIntD,
+        dp: RsaPosIntModP,
+        dq: RsaPosIntModP,
+        iqmp: RsaPosIntModP,
+        public: RsaPublicKey,
+    ) -> Result<Self, Error> {
+        if public.modulus_len_bits() < MIN_MODULUS_BITS {
+            return Err(KeyFormatError::RsaModulus.into());
+        }
+        let p_bytes = p.len_bytes();
+        let valid = (core::hint::black_box(p.low_bit()) == 1)
+            & (core::hint::black_box(q.low_bit()) == 1)
+            & (q.len_bits() >= 2)
+            & (p_bytes >= MIN_PRIVATE_MODULUS_BYTES)
+            & (core::hint::black_box(p.top_word()) != 0)
+            & (core::hint::black_box(q.top_word()) != 0);
+        if !low::ct::into_public(valid) {
+            return Err(KeyFormatError::RsaPrimes.into());
+        }
+        let (p_len, q_len) = (p.as_words().len(), q.as_words().len());
+        let e = public.e;
+
+        let mut p: SecretRsaPosIntModP = p.into();
+        let mut q: SecretRsaPosIntModP = q.into();
+        let d: SecretRsaPosIntD = d.into();
+        let dp: SecretRsaPosIntModP = dp.into();
+        let dq: SecretRsaPosIntModP = dq.into();
+        let iqmp: SecretRsaPosIntModP = iqmp.into();
+
+        let e = low::PosInt::word(e);
+        let exponents_agree = exponents_agree(&p, &d, &dp, &e) & exponents_agree(&q, &d, &dq, &e);
+
+        if p_len < q_len {
+            p.expand(&q);
+        } else {
+            q.expand(&p);
+        }
+
+        let p_montifier: SecretRsaPosIntModP = p.montifier().into();
+        let q_montifier = q.montifier().into();
+        let iqmp_mont: SecretRsaPosIntModP = iqmp.to_montgomery(&p_montifier, &p).into();
+        let p0 = p.mont_neg_inverse();
+        let q0 = q.mont_neg_inverse();
+
+        let pq: RsaPosIntModN = low::PosInt::mul(&p, &q);
+        let q_wide: RsaPosIntModN = q.widen();
+        let q_p = q_wide.reduce(&p, &p_montifier);
+        let consistent = exponents_agree
+            & pq.equals(&public.n)
+            & iqmp.less_than(&p)
             & iqmp_mont.mont_mul(&q_p, &p, p0).equals(&p.fixed_one());
         if !low::ct::into_public(consistent) {
             return Err(KeyFormatError::MismatchedRsaComponents.into());

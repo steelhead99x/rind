@@ -338,6 +338,12 @@ unsafe impl Sync for Shared {}
 
 static STATE: Shared = Shared(UnsafeCell::new(State::CANARIES));
 
+/// Holds the lock every checked call runs under, so a test can fork with no
+/// other thread inside one: the child would inherit the lock held forever.
+pub(crate) fn hold() -> std::sync::MutexGuard<'static, ()> {
+    LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 fn run(conv: Convention, f: Word, words: &Words, name: &str) -> Word {
     let (ret, after) = {
         let _held = LOCK.lock().unwrap_or_else(PoisonError::into_inner);
@@ -1111,7 +1117,7 @@ mod tests {
         ),
         (
             "aarch64/aes_cbc.rs",
-            "hw_encrypt",
+            "aese_chained",
             "one `aese` on registers the compiler allocates, which no ABI governs",
         ),
         (

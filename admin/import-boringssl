@@ -24,7 +24,7 @@ import os
 import subprocess
 import sys
 
-REV = "ed9209cff8b5a2fbc6c10050f29b3355048bda85"
+REV = "8f2554dc344d403fd6d628773d39637c323eb801"
 
 ADMIN = os.path.dirname(os.path.abspath(__file__))
 sys.dont_write_bytecode = True

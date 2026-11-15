@@ -1,9 +1,0 @@
-[submodule "thirdparty/wycheproof"]
-	path = thirdparty/wycheproof
-	url = https://github.com/C2SP/wycheproof.git
-[submodule "thirdparty/cavp"]
-	path = thirdparty/cavp
-	url = https://github.com/ctz/cavp.git
-[submodule "thirdparty/cctv"]
-	path = thirdparty/cctv
-	url = https://github.com/C2SP/CCTV.git

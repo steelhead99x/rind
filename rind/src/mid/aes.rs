@@ -361,7 +361,7 @@ mod tests {
                     ..Default::default()
                 };
                 process_cavp(
-                    format!("../thirdparty/cavp/aes/ECB{kind}{bits}.rsp"),
+                    format!("../thirdparty/vectors/cavp/aes/ECB{kind}{bits}.rsp"),
                     &mut state,
                 );
             }
