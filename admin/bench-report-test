@@ -542,14 +542,17 @@ class CpuSlug(unittest.TestCase):
         with self.assertRaises(SystemExit):
             br.resolve_host("aarch64", "aarch64")
 
-    def test_machine_tag_is_stable_hex(self):
-        tag = br.machine_tag()
-        self.assertEqual(tag, br.machine_tag())
-        self.assertRegex(tag, r"^[0-9a-f]{8}$")
+    def test_machine_tag_comes_from_the_os_id(self):
+        self.assertEqual(br.machine_tag_for(""), "")
+        self.assertEqual(br.machine_tag_for("abc"), br.machine_tag_for("abc"))
+        self.assertRegex(br.machine_tag_for("abc"), r"^[0-9a-f]{8}$")
+        self.assertNotEqual(br.machine_tag_for("abc"), br.machine_tag_for("abd"))
+        self.assertEqual(br.machine_tag(), br.machine_tag_for(br.machine_identity()))
         self.assertEqual(br.machine_tag_of({"machine": "abcdef12"}), "abcdef12")
         self.assertEqual(br.machine_tag_of({"machine": "ABCDEF12"}), "")
         self.assertEqual(br.machine_tag_of({"machine": "not-a-tag"}), "")
         self.assertEqual(br.machine_tag_of({}), "")
+        self.assertFalse(br.numeric_disambiguation("box-2", "box-perf"))
 
 
 class AnyHost(unittest.TestCase):
@@ -761,6 +764,106 @@ class AnyHost(unittest.TestCase):
                 self.assertEqual(body["host"], numeric)
                 self.assertEqual(body["started"], "2026-11-05T02:00:00+00:00")
                 self.assertFalse(os.path.exists(os.path.join(data, f"{slug}-3.json")))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_a_free_name_is_not_rerouted_to_the_same_tag(self):
+        tag = "aaaaaaaa"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                slug_body = laptop(RYZEN)
+                slug_body["machine"] = tag
+                slug_body["started"] = "2026-11-03T02:00:00+00:00"
+                with open(os.path.join(src, f"{RYZEN}.json"), "w") as f:
+                    json.dump(slug_body, f)
+                br.import_hosts(src)
+                named = laptop("nixos")
+                named["machine"] = tag
+                named["started"] = "2026-11-04T02:00:00+00:00"
+                os.remove(os.path.join(src, f"{RYZEN}.json"))
+                with open(os.path.join(src, "nixos.json"), "w") as f:
+                    json.dump(named, f)
+                br.import_hosts(src)
+                self.assertEqual(set(os.listdir(data)), {f"{RYZEN}.json", "nixos.json"})
+                with open(os.path.join(data, f"{RYZEN}.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-03T02:00:00+00:00")
+                with open(os.path.join(data, "nixos.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(body["host"], "nixos")
+                self.assertEqual(body["started"], "2026-11-04T02:00:00+00:00")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_two_explicit_names_with_one_tag_both_import(self):
+        tag = "aaaaaaaa"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                for name, started in (("box-perf", "2026-11-03T02:00:00+00:00"), ("box-powersave", "2026-11-04T02:00:00+00:00")):
+                    body = laptop(name)
+                    body["machine"] = tag
+                    body["started"] = started
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                    br.import_hosts(src)
+                    os.remove(os.path.join(src, f"{name}.json"))
+                self.assertEqual(set(os.listdir(data)), {"box-perf.json", "box-powersave.json"})
+                for name, started in (("box-perf", "2026-11-03T02:00:00+00:00"), ("box-powersave", "2026-11-04T02:00:00+00:00")):
+                    with open(os.path.join(data, f"{name}.json")) as f:
+                        body = json.load(f)
+                    self.assertEqual((body["host"], body["started"]), (name, started))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_untagged_import_does_not_replace_a_tagged_host(self):
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                tagged = laptop(RYZEN)
+                tagged["machine"] = "aaaaaaaa"
+                tagged["started"] = "2026-11-03T02:00:00+00:00"
+                with open(os.path.join(src, f"{RYZEN}.json"), "w") as f:
+                    json.dump(tagged, f)
+                br.import_hosts(src)
+                untagged = laptop(RYZEN)
+                untagged["started"] = "2026-11-04T02:00:00+00:00"
+                with open(os.path.join(src, f"{RYZEN}.json"), "w") as f:
+                    json.dump(untagged, f)
+                br.import_hosts(src)
+                numeric = f"{RYZEN}-2"
+                self.assertEqual(set(os.listdir(data)), {f"{RYZEN}.json", f"{numeric}.json"})
+                with open(os.path.join(data, f"{RYZEN}.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "aaaaaaaa")
+                untagged["started"] = "2026-11-05T02:00:00+00:00"
+                with open(os.path.join(src, f"{RYZEN}.json"), "w") as f:
+                    json.dump(untagged, f)
+                br.import_hosts(src)
+                self.assertEqual(set(os.listdir(data)), {f"{RYZEN}.json", f"{numeric}.json"})
+                with open(os.path.join(data, f"{numeric}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(body["started"], "2026-11-05T02:00:00+00:00")
+                self.assertNotIn("machine", body)
+                self.assertFalse(os.path.exists(os.path.join(data, f"{RYZEN}-3.json")))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_import_rejects_a_reserved_name_already_on_disk(self):
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                with open(os.path.join(data, "x86_64.json"), "w") as f:
+                    json.dump({"host": "x86_64"}, f)
+                body = laptop("nixos")
+                with open(os.path.join(src, "nixos.json"), "w") as f:
+                    json.dump(body, f)
+                with self.assertRaises(SystemExit):
+                    br.import_hosts(src)
+                self.assertEqual(os.listdir(data), ["x86_64.json"])
         finally:
             br.DATA_DIR = saved
 
