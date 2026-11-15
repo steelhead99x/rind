@@ -335,10 +335,7 @@ fn ml_dsa_set<P: rind::signature::sign::MlDsaParameterSet>() {
     }
 }
 
-/// The expanded form, whose load checks the key. `set` is "44", "65", or "87".
-/// The files are the PKCS#8 encodings of seeds `[1u8; 32]` and `[2u8; 32]`.
-/// The key is dropped inside the check: its expansion is freed then, and
-/// `freed` stops recording before it drops the closure's result.
+/// The PKCS#8 path of one recorded expanded-form fixture.
 #[cfg(not(miri))]
 fn ml_dsa_fixture_path(set: &str, seed: u8) -> String {
     format!(
@@ -347,6 +344,10 @@ fn ml_dsa_fixture_path(set: &str, seed: u8) -> String {
     )
 }
 
+/// The expanded form, whose load checks the key. `set` is "44", "65", or "87".
+/// The files are the PKCS#8 encodings of seeds `[1u8; 32]` and `[2u8; 32]`.
+/// The key is dropped inside the check: its expansion is freed then, and
+/// `freed` stops recording before it drops the closure's result.
 #[cfg(all(not(miri), target_family = "wasm"))]
 fn ml_dsa_expanded_load<P: rind::signature::sign::MlDsaParameterSet>(set: &str) {
     use rind::signature::sign::MlDsaKeyPair;
@@ -359,9 +360,7 @@ fn ml_dsa_expanded_load<P: rind::signature::sign::MlDsaParameterSet>(set: &str) 
     });
 }
 
-/// The recorded fixtures stay equal to aws-lc's expansion of seeds
-/// `[1u8; 32]` and `[2u8; 32]`. wasm reads the same files and cannot ask
-/// aws-lc itself.
+/// aws-lc's signing algorithm for each ML-DSA parameter set.
 #[cfg(not(any(miri, target_family = "wasm")))]
 fn ml_dsa_signing_sets() -> [(
     &'static str,
@@ -375,6 +374,9 @@ fn ml_dsa_signing_sets() -> [(
     ]
 }
 
+/// The recorded fixtures stay equal to aws-lc's expansion of seeds
+/// `[1u8; 32]` and `[2u8; 32]`. wasm reads the same files and cannot ask
+/// aws-lc itself.
 #[cfg(not(any(miri, target_family = "wasm")))]
 #[test]
 fn ml_dsa_expanded_fixtures_match_aws_lc() {
