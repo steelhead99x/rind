@@ -114,9 +114,9 @@ impl<const N: usize> Blockwise<N> {
         &self.buffer[..self.used]
     }
 
-    // Only Poly1305 uses it.
-    // The 64-bit limbs and the 26-bit limbs. `test` covers the 26-bit
-    // module, which every backend compiles so its tests run.
+    // Only the Poly1305s use it. Callers append only when the buffer is
+    // empty: a non-empty buffer was just completed and taken, or the
+    // leading bytes were consumed whole.
     #[cfg(any(
         rind_backend = "x86_64",
         rind_backend = "portable",
@@ -124,6 +124,8 @@ impl<const N: usize> Blockwise<N> {
         test
     ))]
     pub(crate) fn add_trailing(&mut self, trailing: &[u8]) {
+        debug_assert!(self.used == 0 || trailing.is_empty());
+        debug_assert!(trailing.len() <= N);
         self.buffer[..trailing.len()].copy_from_slice(trailing);
         self.used += trailing.len();
     }

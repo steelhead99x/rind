@@ -49,3 +49,29 @@ impl ChaCha20 {
         self.ctx[12] = self.ctx[12].wrapping_add(buffer.len().div_ceil(64) as u32);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // RFC 8439 §2.3.2's initial state. Replacing HACL*'s loader dropped the
+    // only check of these words; this is that check, with no CPU feature.
+    #[test]
+    fn state_matches_rfc8439() {
+        let key: [u8; 32] = core::array::from_fn(|i| i as u8);
+        // Block counter 1, then the 96-bit nonce 00000009 0000004a 00000000.
+        let nonce = [
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x4a, 0x00, 0x00,
+            0x00, 0x00,
+        ];
+        let state = ChaCha20::new(&key, &nonce);
+        assert_eq!(
+            state.ctx,
+            [
+                0x61707865, 0x3320646e, 0x79622d32, 0x6b206574, 0x03020100, 0x07060504, 0x0b0a0908,
+                0x0f0e0d0c, 0x13121110, 0x17161514, 0x1b1a1918, 0x1f1e1d1c, 0x00000001, 0x09000000,
+                0x4a000000, 0x00000000,
+            ]
+        );
+    }
+}
