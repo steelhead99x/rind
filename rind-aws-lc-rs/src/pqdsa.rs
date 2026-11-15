@@ -248,10 +248,7 @@ impl PqdsaKeyPair {
         // (`aws-lc-rs/src/pqdsa.rs`) as `Unspecified`.
         let named = der::pkcs8_algorithm(pkcs8).map(AlgorithmID::from_oid);
         match named {
-            Some(Some(id)) if algorithm.0.id != &id => match new_key!(&id, from_pkcs8(pkcs8)) {
-                Ok(_) => Err(KeyRejected::unspecified()),
-                Err(err) => Err(KeyRejected::rind(err)),
-            },
+            Some(Some(id)) if algorithm.0.id != &id => Err(other_parameter_set(&id, pkcs8)),
             Some(None) => {
                 if parses_as_other_private_key(pkcs8) {
                     Err(KeyRejected::wrong_algorithm())
@@ -283,7 +280,10 @@ impl PqdsaKeyPair {
             return Err(KeyRejected::unspecified());
         }
         // rind loads an expanded key only as PKCS#8 (RFC 9881's
-        // `expandedKey`), so wrap it in one.
+        // `expandedKey`), so wrap it in one. aws-lc-rs 1.19.0
+        // `parse_raw_private_key` (`aws-lc-rs/src/evp_pkey.rs`) maps every
+        // failure of `EVP_PKEY_pqdsa_new_raw_private_key` at this length to
+        // `InvalidEncoding`.
         let pkcs8 = expanded_pkcs8(&id, raw_private_key);
         let key = new_key!(&id, from_pkcs8(&pkcs8)).map_err(|_| KeyRejected::invalid_encoding())?;
         Ok(Self::new(algorithm, key))
@@ -442,6 +442,38 @@ impl fmt::Debug for PqdsaPublicKey {
         f.write_str("PqdsaPublicKey(")?;
         fmt::Debug::fmt(&Hex(self.as_ref()), f)?;
         f.write_str(")")
+    }
+}
+
+/// Refuses a PKCS#8 key whose algorithm is another ML-DSA parameter set.
+///
+/// A seed-form key is decided from public lengths. aws-lc's
+/// `pqdsa_priv_decode` (`crypto/evp_extra/p_pqdsa_asn1.c`) rejects any seed
+/// other than 32 bytes before keygen, and keygen accepts every 32-byte seed,
+/// so the parameter-set check is then `Unspecified` with no expansion. An
+/// expanded key still runs the consistency check: `pk_from_sk` rejects an
+/// inconsistent key, which is `InvalidEncoding`, and accepts a consistent
+/// one, which is then `Unspecified`. A byte after the document is refused
+/// here; the README lists that.
+fn other_parameter_set(id: &AlgorithmID, pkcs8: &[u8]) -> KeyRejected {
+    if der::pkcs8_trailing(pkcs8) {
+        return KeyRejected::invalid_encoding();
+    }
+    if let Some(parts) = der::pkcs8_parts(pkcs8) {
+        if !parts.parameters.is_empty() {
+            return KeyRejected::invalid_encoding();
+        }
+        if let Some((0x80, seed)) = der::first_element(parts.private_key) {
+            return if seed.len() == 32 {
+                KeyRejected::unspecified()
+            } else {
+                KeyRejected::invalid_encoding()
+            };
+        }
+    }
+    match new_key!(id, from_pkcs8(pkcs8)) {
+        Ok(_) => KeyRejected::unspecified(),
+        Err(err) => KeyRejected::rind(err),
     }
 }
 

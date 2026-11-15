@@ -73,6 +73,14 @@ pub(crate) fn pkcs8_algorithm(der: &[u8]) -> Option<&[u8]> {
     Some(oid.as_slice_less_safe())
 }
 
+/// Whether bytes follow the outer PKCS#8 `SEQUENCE`. rind refuses them.
+/// aws-lc's `EVP_parse_private_key` (`crypto/evp_extra/evp_asn1.c`) reads one
+/// value and does not.
+pub(crate) fn pkcs8_trailing(der: &[u8]) -> bool {
+    let mut outer = untrusted::Reader::new(untrusted::Input::from(der));
+    read(&mut outer, SEQUENCE).is_ok() && !outer.at_end()
+}
+
 /// A PKCS#8 document's algorithm parameters and private key, the parts a
 /// non-ML-DSA decoder inspects. `parameters` is empty when the algorithm
 /// identifier has none. Bytes after the outer sequence are ignored, as
