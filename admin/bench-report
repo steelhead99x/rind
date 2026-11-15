@@ -17,10 +17,12 @@ counts, and the OS. Name the file `<host>.json` to feed it to `summary` or
 `render --from`. A slug that equals a nightly tier name gains a `-host`
 suffix, so a minimal aarch64 Linux box is `aarch64-host` rather than the
 reserved name `aarch64`. A result records a machine tag when the OS has a
-machine id. A free host name is kept even when another file carries that
-tag. A second machine that wants a slug already on disk is `<slug>-<tag>`,
-or `<slug>-2` when that alias is taken, and a later import replaces that
-file. A host whose chosen name is that spelling is left as it is.
+machine id: the first eight hex characters of HMAC-SHA256 under a fixed
+application key. A free host name is kept when another file carries that
+tag and is not this machine's marked alias. A second machine that wants a
+slug already on disk is `<slug>-<tag>`, or `<slug>-2` when that alias is
+taken, and a later import replaces that file, including after the slug
+itself is free. A host whose chosen name is that spelling is left as it is.
 
 `collect` is the maintainer path. It copies one commit to each machine in
 COLLECT_HOSTS in turn, waits for room under `quest gate` and for any lease it
@@ -78,8 +80,10 @@ import tomllib
 # `render`, and `load_gaps` take every host JSON whose name is not reserved,
 # and a nightly tier stays a valid gaps.toml `on`. A reserved CPU slug is
 # stored as `<slug>-host`. A second machine that wants a slug already on disk
-# is stored as `<slug>-<tag>`, or `<slug>-2` when that alias is taken; a chosen
-# host of that spelling is left as it is. `render` reads a `note` from here
+# is stored as `<slug>-<tag>`, or `<slug>-2` when that alias is taken. The
+# tag is eight hex characters of HMAC-SHA256 over the OS machine id under a
+# fixed application key. A chosen host of that spelling is left as it is.
+# `render` reads a `note` from here
 # only when that host's JSON has none, and shows these names first so the
 # published report keeps its order; every other host keeps the order it was
 # given. `load_hosts` sorts those files by name.
@@ -2180,8 +2184,10 @@ def report(hosts, tiers, verified, gaps):
         "A slug that equals a nightly tier name gains a `-host` suffix, so a minimal aarch64",
         "Linux box is `aarch64-host` rather than the reserved name `aarch64`. A second machine",
         "that wants a slug already on disk is stored as `<slug>-<tag>`, or `<slug>-2` when that",
-        "alias is taken, and a later import replaces that file. A host whose chosen name is that",
-        "spelling is left as it is. `summary` and `render --from` read every measured `<host>.json`.",
+        "alias is taken, and a later import replaces that file. The tag is eight hex characters",
+        "of HMAC-SHA256 over the OS machine id, under a fixed application key. A host whose",
+        "chosen name is that spelling is left as it is. `summary` and `render --from` read every",
+        "measured `<host>.json`.",
         "`collect` reaches only the maintainer's machines. A gap's `on` may name any host with a",
         "result, or any nightly tier.",
         "",
@@ -2215,18 +2221,15 @@ def machine_identity():
     return ""
 
 
-# Application label for the published machine tag. Not a secret: anyone who
-# already has the raw machine id can recompute the tag. It keeps a plain hash
-# of that id from another program from matching these files.
+# machine-id(5): a value that leaves the machine is an HMAC under an
+# application key, so another program's hash of the same id does not match.
+# Not a secret: anyone who already has the raw id can recompute the tag.
+# The key is fixed, so one machine keeps one tag across imports.
 _MACHINE_TAG_KEY = b"rind-bench-report-host"
 
 
 def machine_tag_for(ident):
-    """Eight hex characters for `ident`, or "" when there is nothing to tag.
-
-    HMAC-SHA256 with a fixed application key, so the value that leaves the
-    machine is not a raw hash of the OS machine id.
-    """
+    """The first eight hex characters of HMAC-SHA256 over `ident`, or "" when there is nothing to key."""
     if not ident:
         return ""
     return hmac.new(_MACHINE_TAG_KEY, ident.encode(), hashlib.sha256).hexdigest()[:8]
@@ -2323,15 +2326,15 @@ def collided_host_name(slug, tag, taken):
 def assign_import_name(name, host, existing, incoming=None):
     """Where to put `host`.
 
-    A free name is that name when this machine has no marked alias of it.
-    A marked alias is the one destination even when the slug is free. The
-    same machine replaces its own file. A different machine that wants a
-    taken name reuses the file this import already created for that name,
-    including one still waiting in this collection, or gets
-    `collided_host_name`. An incoming alias is reused only when that filename
-    is free or is already this machine's alias. Other filenames in the
-    collection count as taken, so the alias is not a chosen host the
-    collection is about to copy.
+    A marked alias of this machine is the one destination, including one
+    still in this collection, and including when the slug itself is free.
+    That filename is reusable when it is missing from the data directory or
+    the file already there is this machine's alias. Any other occupant is
+    left in place. A free name stays that name when no such alias exists,
+    even if another file carries the same tag. The same machine replaces
+    its own file. A different machine that wants a taken name gets
+    `collided_host_name`. Only a result that will be imported counts as a
+    taken incoming name.
     """
     incoming = incoming or {}
     tag = machine_tag_of(host)
@@ -2350,10 +2353,13 @@ def assign_import_name(name, host, existing, incoming=None):
         return min(found, key=lambda stem: disambiguation_rank(stem, name, tag))
     if name not in existing or not different_machine(existing[name], host):
         return name
+    # A file that will not be copied does not hold its name. A missing status
+    # is not imported, so it does not count as taken. A marked alias of this
+    # result is a destination rather than a chosen host.
     reserved = {
         stem
         for stem, body in incoming.items()
-        if body.get("status", "ok") == "ok" and not same_machine_alias(body, name, tag)
+        if body.get("status") == "ok" and not same_machine_alias(body, name, tag)
     }
     return collided_host_name(name, tag, set(existing) | reserved)
 
@@ -2361,13 +2367,12 @@ def assign_import_name(name, host, existing, incoming=None):
 def import_hosts(directory):
     """Copies a collection's measured hosts into the report's data.
 
-    A free name stays that name unless this machine already has a marked alias,
-    which stays the one destination. A later result from the same machine replaces
-    the file this import already gave it. A different machine with the same
-    slug is stored beside it, as `<slug>-<tag>`, or `<slug>-2` when that alias
-    is taken. Other filenames in the collection count as taken for that choice.
-    A file in the collection that is already this machine's generated alias is
-    the destination, not a second host.
+    A marked alias of this machine is the one destination, even when the
+    slug itself is free. Otherwise a free name stays that name. A different
+    machine with the same slug is stored beside it, as `<slug>-<tag>`, or
+    `<slug>-2` when that alias is taken. Only a file this import will copy
+    counts as a taken incoming name. A file in the collection that is already
+    this machine's generated alias is that destination, not a second host.
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     existing = {}
@@ -2377,7 +2382,7 @@ def import_hosts(directory):
             continue
         existing[stem] = read_host(path, stem)
     incoming = load_hosts(directory)
-    # Chosen filenames in this collection are taken for alias allocation.
+    # Chosen filenames this import will copy are taken for alias allocation.
     # A marked alias of another result in the collection is that result's
     # destination, so it is not copied again and does not lose `alias_of`.
     for name, host in incoming.items():

@@ -545,20 +545,23 @@ class CpuSlug(unittest.TestCase):
             br.resolve_host("aarch64", "aarch64")
 
     def test_machine_tag_comes_from_the_os_id(self):
+        # machine-id(5): a published id is HMAC-SHA256 under this report's key,
+        # not an unkeyed hash of the OS id. Empty input is not a tag.
+        self.assertEqual(br._MACHINE_TAG_KEY, b"rind-bench-report-host")
         self.assertEqual(br.machine_tag_for(""), "")
+        keyed = hmac.new(br._MACHINE_TAG_KEY, b"abc", hashlib.sha256).hexdigest()[:8]
+        self.assertEqual(br.machine_tag_for("abc"), keyed)
+        self.assertNotEqual(keyed, hashlib.sha256(b"abc").hexdigest()[:8])
         self.assertEqual(br.machine_tag_for("abc"), br.machine_tag_for("abc"))
         self.assertRegex(br.machine_tag_for("abc"), r"^[0-9a-f]{8}$")
         self.assertNotEqual(br.machine_tag_for("abc"), br.machine_tag_for("abd"))
-        self.assertNotEqual(br.machine_tag_for("abc"), hashlib.sha256(b"abc").hexdigest()[:8])
-        self.assertEqual(
-            br.machine_tag_for("abc"),
-            hmac.new(br._MACHINE_TAG_KEY, b"abc", hashlib.sha256).hexdigest()[:8],
-        )
         self.assertEqual(br.machine_tag(), br.machine_tag_for(br.machine_identity()))
         self.assertEqual(br.machine_tag_of({"machine": "abcdef12"}), "abcdef12")
         self.assertEqual(br.machine_tag_of({"machine": "ABCDEF12"}), "")
         self.assertEqual(br.machine_tag_of({"machine": "not-a-tag"}), "")
         self.assertEqual(br.machine_tag_of({}), "")
+        text = br.report(hosts(), None, VERIFIED, [])[br.REPORT]
+        self.assertIn("of HMAC-SHA256 over the OS machine id, under a fixed application key", text)
 
 
 class AnyHost(unittest.TestCase):
@@ -1063,6 +1066,292 @@ class AnyHost(unittest.TestCase):
                 self.assertEqual(body["machine"], tag)
                 self.assertEqual(body["alias_of"], "box")
                 self.assertEqual(body["started"], "2026-11-06T02:00:00+00:00")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_marked_alias_does_not_overwrite_another_machine(self):
+        """An incoming `<slug>-N` alias is not a license to replace whoever already uses that name."""
+        tag = "bbbbbbbb"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                other = laptop("box-2")
+                other["machine"] = "cccccccc"
+                other["started"] = "2026-11-04T02:00:00+00:00"
+                for name, body in (("box", resident), ("box-2", other)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                marked = laptop("box-2")
+                marked["machine"] = tag
+                marked["alias_of"] = "box"
+                marked["started"] = "2026-11-06T02:00:00+00:00"
+                for name, body in (("box", newcomer), ("box-2", marked)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                alias = f"box-{tag}"
+                self.assertIn(f"imported as {alias}", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json", f"{alias}.json"})
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "aaaaaaaa")
+                with open(os.path.join(data, "box-2.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual((kept["machine"], kept["started"]), ("cccccccc", "2026-11-04T02:00:00+00:00"))
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(
+                    (body["host"], body["machine"], body["alias_of"], body["started"]),
+                    (alias, tag, "box", "2026-11-06T02:00:00+00:00"),
+                )
+        finally:
+            br.DATA_DIR = saved
+
+    def test_disambiguation_rank_does_not_overwrite_another_machine(self):
+        """The preferred alias spelling is left alone when another machine already owns that file."""
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                real = laptop("box-3")
+                real["machine"] = tag
+                real["alias_of"] = "box"
+                real["started"] = "2026-11-04T02:00:00+00:00"
+                occupied = laptop(alias)
+                occupied["machine"] = "cccccccc"
+                occupied["started"] = "2026-11-04T02:00:00+00:00"
+                for name, body in (("box", resident), ("box-3", real), (alias, occupied)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                marked = laptop(alias)
+                marked["machine"] = tag
+                marked["alias_of"] = "box"
+                for name, body in (("box", newcomer), (alias, marked)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertNotIn(f"imported as {alias}", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-3.json", f"{alias}.json"})
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual((kept["machine"], kept["started"]), ("cccccccc", "2026-11-04T02:00:00+00:00"))
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, "box-3.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(
+                    (body["host"], body["machine"], body["alias_of"], body["started"]),
+                    ("box-3", tag, "box", "2026-11-06T02:00:00+00:00"),
+                )
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "aaaaaaaa")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_disambiguation_rank_does_not_overwrite_another_machines_box_3(self):
+        """A lower numeric suffix loses to the real alias when another machine owns that suffix."""
+        tag = "bbbbbbbb"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                other = laptop("box-3")
+                other["machine"] = "cccccccc"
+                other["started"] = "2026-11-04T02:00:00+00:00"
+                real = laptop("box-4")
+                real["machine"] = tag
+                real["alias_of"] = "box"
+                real["started"] = "2026-11-05T02:00:00+00:00"
+                for name, body in (("box", resident), ("box-3", other), ("box-4", real)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                marked = laptop("box-3")
+                marked["machine"] = tag
+                marked["alias_of"] = "box"
+                for name, body in (("box", newcomer), ("box-3", marked)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertNotIn("imported as box-3", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-3.json", "box-4.json"})
+                with open(os.path.join(data, "box-3.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual((kept["machine"], kept["started"]), ("cccccccc", "2026-11-04T02:00:00+00:00"))
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, "box-4.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(
+                    (body["host"], body["machine"], body["alias_of"], body["started"]),
+                    ("box-4", tag, "box", "2026-11-06T02:00:00+00:00"),
+                )
+        finally:
+            br.DATA_DIR = saved
+
+    def test_free_slug_updates_a_marked_alias(self):
+        """Removing the other machine's file does not turn this machine into two hosts."""
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+
+                def put(files):
+                    for old in os.listdir(src):
+                        os.remove(os.path.join(src, old))
+                    for name, body in files:
+                        with open(os.path.join(src, f"{name}.json"), "w") as f:
+                            json.dump(body, f)
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        br.import_hosts(src)
+
+                other = laptop("box")
+                other["machine"] = "aaaaaaaa"
+                other["started"] = "2026-11-03T02:00:00+00:00"
+                put([("box", other)])
+                first = laptop("box")
+                first["machine"] = tag
+                first["started"] = "2026-11-04T02:00:00+00:00"
+                put([("box", first)])
+                self.assertEqual(set(os.listdir(data)), {"box.json", f"{alias}.json"})
+                os.remove(os.path.join(data, "box.json"))
+                again = laptop("box")
+                again["machine"] = tag
+                again["started"] = "2026-11-06T02:00:00+00:00"
+                put([("box", again)])
+                self.assertEqual(os.listdir(data), [f"{alias}.json"])
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["host"], body["machine"], body["alias_of"], body["started"]), (alias, tag, "box", "2026-11-06T02:00:00+00:00"))
+                stale = laptop(alias)
+                stale["machine"] = tag
+                stale["alias_of"] = "box"
+                stale["started"] = "2026-11-04T02:00:00+00:00"
+                newer = laptop("box")
+                newer["machine"] = tag
+                newer["started"] = "2026-11-07T02:00:00+00:00"
+                put([(alias, stale), ("box", newer)])
+                self.assertEqual(os.listdir(data), [f"{alias}.json"])
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(body["started"], "2026-11-07T02:00:00+00:00")
+                self.assertEqual(body["alias_of"], "box")
+                # A chosen host that only shares the tag keeps its own name.
+                named = laptop("nixos")
+                named["machine"] = tag
+                named["started"] = "2026-11-08T02:00:00+00:00"
+                put([("nixos", named)])
+                self.assertEqual(set(os.listdir(data)), {f"{alias}.json", "nixos.json"})
+                with open(os.path.join(data, "nixos.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual((kept["host"], kept["started"]), ("nixos", "2026-11-08T02:00:00+00:00"))
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-07T02:00:00+00:00")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_a_result_that_will_not_be_imported_does_not_reserve_its_name(self):
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(resident, f)
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                busy = laptop(alias)
+                busy["machine"] = tag
+                busy["status"] = "busy"
+                busy["reason"] = "busy"
+                for name, body in (("box", newcomer), (alias, busy)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                log = err.getvalue()
+                self.assertIn(f"imported as {alias}", log)
+                self.assertNotIn("imported as box-2", log)
+                self.assertIn(f"{alias}: not imported", log)
+                self.assertEqual(set(os.listdir(data)), {"box.json", f"{alias}.json"})
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["host"], body["machine"], body["alias_of"], body["status"]), (alias, tag, "box", "ok"))
+                again = laptop("box")
+                again["machine"] = tag
+                again["started"] = "2026-11-07T02:00:00+00:00"
+                os.remove(os.path.join(src, f"{alias}.json"))
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(again, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertNotIn("box-2", err.getvalue())
+                self.assertFalse(os.path.exists(os.path.join(data, "box-2.json")))
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-07T02:00:00+00:00")
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "aaaaaaaa")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_a_file_without_a_status_does_not_reserve_its_name(self):
+        """A result the import will skip, including one with no status, does not hold a filename."""
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(resident, f)
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                unmeasured = {"schema": 1, "host": alias}
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(newcomer, f)
+                with open(os.path.join(src, f"{alias}.json"), "w") as f:
+                    json.dump(unmeasured, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertIn(f"{alias}: not imported", err.getvalue())
+                self.assertNotIn("imported as box-2", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"box.json", f"{alias}.json"})
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["machine"], body["alias_of"], body["status"]), (tag, "box", "ok"))
+                self.assertFalse(os.path.exists(os.path.join(data, "box-2.json")))
         finally:
             br.DATA_DIR = saved
 
