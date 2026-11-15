@@ -716,6 +716,54 @@ class AnyHost(unittest.TestCase):
         finally:
             br.DATA_DIR = saved
 
+    def test_reimport_reuses_a_numeric_suffix_when_the_tag_alias_is_taken(self):
+        slug = RYZEN
+        tag = "bbbbbbbb"
+        alias = f"{slug}-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop(slug)
+                resident["machine"] = "aaaaaaaa"
+                with open(os.path.join(src, f"{slug}.json"), "w") as f:
+                    json.dump(resident, f)
+                br.import_hosts(src)
+                occupant = laptop(alias)
+                occupant["machine"] = "cccccccc"
+                os.remove(os.path.join(src, f"{slug}.json"))
+                with open(os.path.join(src, f"{alias}.json"), "w") as f:
+                    json.dump(occupant, f)
+                br.import_hosts(src)
+                newcomer = laptop(slug)
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-04T02:00:00+00:00"
+                os.remove(os.path.join(src, f"{alias}.json"))
+                with open(os.path.join(src, f"{slug}.json"), "w") as f:
+                    json.dump(newcomer, f)
+                br.import_hosts(src)
+                numeric = f"{slug}-2"
+                self.assertEqual(
+                    set(os.listdir(data)),
+                    {f"{slug}.json", f"{alias}.json", f"{numeric}.json"},
+                )
+                newcomer["started"] = "2026-11-05T02:00:00+00:00"
+                with open(os.path.join(src, f"{slug}.json"), "w") as f:
+                    json.dump(newcomer, f)
+                br.import_hosts(src)
+                self.assertEqual(
+                    set(os.listdir(data)),
+                    {f"{slug}.json", f"{alias}.json", f"{numeric}.json"},
+                )
+                with open(os.path.join(data, f"{numeric}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(body["machine"], tag)
+                self.assertEqual(body["host"], numeric)
+                self.assertEqual(body["started"], "2026-11-05T02:00:00+00:00")
+                self.assertFalse(os.path.exists(os.path.join(data, f"{slug}-3.json")))
+        finally:
+            br.DATA_DIR = saved
+
     def test_colliding_slug_suffix_stays_a_legal_name(self):
         slug = "n" * 80
         name = br.tagged_host_name(slug, "abcdef12")

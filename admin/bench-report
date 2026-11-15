@@ -18,7 +18,8 @@ counts, and the OS. Name the file `<host>.json` to feed it to `summary` or
 suffix, so a minimal aarch64 Linux box is `aarch64-host` rather than the
 reserved name `aarch64`. Each result records a machine tag. Importing a
 second machine that wants a slug already on disk keeps both: the resident
-keeps the slug, and the newcomer is `<slug>-<tag>`.
+keeps the slug, and the newcomer is `<slug>-<tag>`, or `<slug>-2` when that
+alias is taken. A later import of the same machine replaces that file.
 
 `collect` is the maintainer path. It copies one commit to each machine in
 COLLECT_HOSTS in turn, waits for room under `quest gate` and for any lease it
@@ -2251,13 +2252,13 @@ def collided_host_name(slug, tag, taken):
 
 
 def assign_import_name(name, host, existing):
-    """Where to put `host`. The same machine replaces its file. A different
-    machine that wants a taken name gets `collided_host_name`."""
+    """Where to put `host`. The same machine replaces its file, including a
+    numeric suffix chosen because `<slug>-<tag>` was already taken. A
+    different machine that wants a taken name gets `collided_host_name`."""
     tag = machine_tag_of(host)
     if tag:
-        aliased = tagged_host_name(name, tag)
         for stem in sorted(existing):
-            if machine_tag_of(existing[stem]) == tag and stem in (name, aliased):
+            if machine_tag_of(existing[stem]) == tag:
                 return stem
     if name not in existing or not different_machine(existing[name], host):
         return name
@@ -2267,8 +2268,9 @@ def assign_import_name(name, host, existing):
 def import_hosts(directory):
     """Copies a collection's measured hosts into the report's data.
 
-    A later result from the same machine replaces its file. A different
-    machine with the same slug is stored beside it, as `<slug>-<tag>`.
+    A later result from the same machine replaces its file, whichever suffix
+    it landed on. A different machine with the same slug is stored beside it,
+    as `<slug>-<tag>`, or `<slug>-2`, `<slug>-3`, ... when that alias is taken.
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     existing = {}
