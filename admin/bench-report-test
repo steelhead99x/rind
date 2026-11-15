@@ -1059,6 +1059,50 @@ class AnyHost(unittest.TestCase):
         finally:
             br.DATA_DIR = saved
 
+    def test_incoming_alias_does_not_replace_a_different_host_at_that_name(self):
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                occupied = laptop(alias)
+                occupied["machine"] = "dddddddd"
+                occupied["started"] = "2026-11-04T02:00:00+00:00"
+                for name, body in (("box", resident), (alias, occupied)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                previous = laptop(alias)
+                previous["machine"] = tag
+                previous["alias_of"] = "box"
+                previous["started"] = "2026-11-05T02:00:00+00:00"
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = "2026-11-06T02:00:00+00:00"
+                for name, body in ((alias, previous), ("box", newcomer)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                log = err.getvalue()
+                self.assertIn("imported as box-2", log)
+                self.assertNotIn(f"imported as {alias}", log)
+                self.assertEqual(set(os.listdir(data)), {"box.json", f"{alias}.json", "box-2.json"})
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual((kept["machine"], kept["started"]), ("dddddddd", "2026-11-04T02:00:00+00:00"))
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, "box-2.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["host"], body["machine"], body["alias_of"], body["started"]), ("box-2", tag, "box", "2026-11-06T02:00:00+00:00"))
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "aaaaaaaa")
+        finally:
+            br.DATA_DIR = saved
+
     def test_import_rejects_a_reserved_name_already_on_disk(self):
         saved = br.DATA_DIR
         try:

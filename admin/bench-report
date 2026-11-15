@@ -2316,10 +2316,10 @@ def assign_import_name(name, host, existing, incoming=None):
     The same machine replaces its own file. A different machine that wants a
     taken name reuses the file this import already created for that name,
     including one still waiting in this collection, or gets
-    `collided_host_name`. Other filenames in the collection count as taken
-    for that choice, so the alias is not a chosen host the collection is
-    about to copy. A chosen name that merely looks like `<name>-N` is not
-    that file.
+    `collided_host_name`. An incoming alias is reused only when that filename
+    is free or is already this machine's alias. Other filenames in the
+    collection count as taken, so the alias is not a chosen host the
+    collection is about to copy.
     """
     incoming = incoming or {}
     tag = machine_tag_of(host)
@@ -2329,7 +2329,9 @@ def assign_import_name(name, host, existing, incoming=None):
         stem
         for records in (existing, incoming)
         for stem, body in records.items()
-        if stem != name and same_machine_alias(body, name, tag)
+        if stem != name
+        and same_machine_alias(body, name, tag)
+        and (stem not in existing or same_machine_alias(existing[stem], name, tag))
     }
     if found:
         return min(found, key=lambda stem: disambiguation_rank(stem, name, tag))
