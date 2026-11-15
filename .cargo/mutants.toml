@@ -62,6 +62,7 @@ exclude_re = [
   'rind/src/low/generic/p384_mul32\.rs:\d+:\d+: replace \| with \^ in sqr_wide$',
   'rind/src/low/generic/p521\.rs:\d+:\d+: replace \| with \^ in (booth_w5|join|nonzero_u8|select_words)$',
   'rind/src/low/generic/poly1305\.rs:\d+:\d+: replace \| with \^ in (add|full_reduce|mul)$',
+  'rind/src/low/generic/poly1305_32\.rs:\d+:\d+: replace \| with \^ in Poly1305::(blocks|finish)$',
   'rind/src/low/posint\.rs:\d+:\d+: replace \| with \^ in (PosInt<N>::from_bytes|PosInt<N>::pub_montifier|mul_word_mod)$',
   'rind/src/low/(portable|x86_64)/\.\./generic/aes_nohw\.rs:\d+:\d+: replace \| with \^ in word::(compact_block|rotate_rows_down|rotate_rows_twice|uncompact_block)$',
   'rind/src/low/(portable|x86_64)/\.\./generic/ghash_nohw\.rs:\d+:\d+: replace \| with \^ in (NohwTable::ghash|gcm_mul32_nohw)$',
