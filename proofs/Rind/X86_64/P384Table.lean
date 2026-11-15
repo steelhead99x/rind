@@ -82,8 +82,9 @@ theorem tabulated_of_ok {t : Std.Array (Std.Array U64 192#usize) 20#usize} (h : 
 /-- rind's comb tables hold the multiples of G that `base_multiply` looks up.
 `AlignedTable` is a one-field tuple struct, which Aeneas extracts as a
 reducible synonym of this array and whose `.0` it erases, so the static is
-the array `CombTabulated` takes. The aarch64 copy of this file gets the same
-statement. -/
+the array `CombTabulated` takes. `admin/prove` copies this file to
+`proofs/Rind/Aarch64/P384Table.lean` by renaming the target. That copy
+is not stored in the tree. -/
 theorem tabulated : CombTabulated mid.p384.precomp.CURVE_GENERATOR_PRECOMP_COMB :=
   tabulated_of_ok (by decide +kernel)
 
