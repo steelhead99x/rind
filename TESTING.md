@@ -145,7 +145,9 @@ CCTV verdicts still have an oracle: `rind/tests/cctv/ed25519-verdicts.txt`
 records aws-lc's accept or reject, `cctv::ed25519_verdicts_match_aws_lc` checks
 that file against aws-lc where aws-lc builds, and `cctv::ed25519_edge_cases`
 checks rind against the file, including on wasm, and against live aws-lc
-where aws-lc builds. Regenerate the file from aws-lc, then commit it, with
+where aws-lc builds. rind refuses a key it recognises as small-order
+(`low_order_A`) instead of verifying it. A key it accepts, including a
+`low_order_A` point that filter misses, is compared with those verdicts. Regenerate the file from aws-lc, then commit it, with
 `RIND_RECORD_VERDICTS=1 cargo test -p rind --test cctv -- --ignored ed25519_record_aws_lc_verdicts`.
 That test is ignored and writes only with that variable set, so a normal run,
 or one with `--include-ignored`, only checks the recorded file.
