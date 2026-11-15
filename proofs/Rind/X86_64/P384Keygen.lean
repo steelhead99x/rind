@@ -552,6 +552,7 @@ theorem comb_inner_spec (h : Runs) (X : p384Curve.Point) (hX : nist.fromM X = p3
         have hdig : digit k (4 * j + t) = signed dg.val sg.val := by rw [digit, hdg, hsg]
         have hd16 : dg.val ≤ 16 := by rw [hdg]; exact boothD_le _ (window_lt _ _)
         have htbl' : tbl.val = (mid.p384.precomp.CURVE_GENERATOR_PRECOMP_COMB.val[j]!).val := by
+          simp only [mid.p384.generator_table] at htbl
           rw [htbl, getElem!_pos _ _ (by rw [Std.Array.property]; scalar_tac)]
         by_cases hd0 : dg.val = 0
         · have hz : pairNat6 tmp.xy.val = (0, 0) := by

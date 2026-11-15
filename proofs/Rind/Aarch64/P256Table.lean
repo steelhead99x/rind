@@ -74,7 +74,9 @@ theorem tabulates_of_ok {t : Std.Array (Std.Array U64 256#usize) 43#usize} (h : 
   exact ⟨h1, h2, rfl⟩
 
 /-- rind's generator table holds the multiples of G that s2n-bignum's proof
-of `p256_scalarmulbase` assumes. -/
+of `p256_scalarmulbase` assumes. `AlignedTable` is a one-field tuple struct,
+which Aeneas extracts as a reducible synonym of this array and whose `.0` it
+erases, so the static is the array `p256Tabulates` takes. -/
 theorem tabulated : p256Tabulates p256G mid.p256.precomp.CURVE_GENERATOR_PRECOMP :=
   tabulates_of_ok (by decide +kernel)
 

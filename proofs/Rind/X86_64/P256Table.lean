@@ -82,7 +82,9 @@ theorem tabulated_of_ok {t : Std.Array (Std.Array U64 512#usize) 37#usize} (h : 
   exact ⟨h1, h2, rfl⟩
 
 /-- rind's x86_64 generator table holds the multiples of G that
-`base_multiply`'s Booth driver selects. -/
+`base_multiply`'s Booth driver selects. `AlignedTable` is a one-field tuple
+struct, which Aeneas extracts as a reducible synonym of this array and whose
+`.0` it erases, so the static is the array `Tabulated7` takes. -/
 theorem tabulated : Tabulated7 mid.p256.precomp.CURVE_GENERATOR_PRECOMP :=
   tabulated_of_ok (by decide +kernel)
 

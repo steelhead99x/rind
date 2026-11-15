@@ -565,7 +565,7 @@ impl AffineMontPoint {
     #[cfg(not(rind_backend = "x86_64"))]
     fn base_multiply(scalar: &Scalar) -> Self {
         let mut xy = [0; 8];
-        low::p256_scalarmulbase(&mut xy, &scalar.0, &precomp::CURVE_GENERATOR_PRECOMP.0);
+        low::p256_scalarmulbase(&mut xy, &scalar.0, generator_table());
         let x = FieldElement(xy[Self::X].try_into().unwrap());
         let y = FieldElement(xy[Self::Y].try_into().unwrap());
         Self::from_xy(x.as_mont(), y.as_mont())
@@ -752,7 +752,7 @@ impl JacobianMontPoint {
 
         // The first point is infinity, with a zero `z`, when its digit is zero.
         let (digit, sign) = windows[0];
-        point.select_w7(&precomp::CURVE_GENERATOR_PRECOMP.0[0], digit, sign);
+        point.select_w7(&generator_table()[0], digit, sign);
         let mut result = Self::from_affine(&point);
         low::bignum_mux(
             digit.into(),
@@ -764,7 +764,7 @@ impl JacobianMontPoint {
         #[allow(clippy::needless_range_loop)]
         for w in 1..37 {
             let (digit, sign) = windows[w];
-            point.select_w7(&precomp::CURVE_GENERATOR_PRECOMP.0[w], digit, sign);
+            point.select_w7(&generator_table()[w], digit, sign);
             low::p256_point_add_affine(&mut result.xyz, &point.xy);
         }
         result
@@ -1393,6 +1393,10 @@ type AffineMontPointTable = [[u64; 256]; 43];
 fn generator_table() -> &'static AffineMontPointTable {
     &precomp::CURVE_GENERATOR_PRECOMP.0
 }
+
+// Cross builds that cannot run `base_point_precomp` still reject a static
+// that dropped the wrapper. This is that static's alignment.
+const _: () = assert!(align_of_val(&precomp::CURVE_GENERATOR_PRECOMP) == 64);
 
 const CURVE_A_MONT: FieldElement = FieldElement([
     0xffff_ffff_ffff_fffc,

@@ -79,7 +79,11 @@ theorem tabulated_of_ok {t : Std.Array (Std.Array U64 192#usize) 20#usize} (h : 
   rw [← hg, p384Pow, nist.pow_fromM, mul_nsmul', hrow j hj (hbase j hj) d hd1 hd]
   exact ⟨h1, h2, rfl⟩
 
-/-- rind's comb tables hold the multiples of G that `base_multiply` looks up. -/
+/-- rind's comb tables hold the multiples of G that `base_multiply` looks up.
+`AlignedTable` is a one-field tuple struct, which Aeneas extracts as a
+reducible synonym of this array and whose `.0` it erases, so the static is
+the array `CombTabulated` takes. The aarch64 copy of this file gets the same
+statement. -/
 theorem tabulated : CombTabulated mid.p384.precomp.CURVE_GENERATOR_PRECOMP_COMB :=
   tabulated_of_ok (by decide +kernel)
 

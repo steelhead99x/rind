@@ -615,8 +615,7 @@ impl JacobianPoint {
                 result = Self::select(&doubled, &result, result.is_infinity());
             }
 
-            for (table, &(digit, sign)) in precomp::CURVE_GENERATOR_PRECOMP_COMB
-                .0
+            for (table, &(digit, sign)) in generator_table()
                 .iter()
                 .zip(windows.iter().skip(tooth).step_by(4))
             {
@@ -661,7 +660,7 @@ impl JacobianPoint {
         odd_multiples: &[&[AffinePoint; 8]],
     ) -> Self {
         // G's odd multiples are the comb table's even rows.
-        let (g_rows, _) = precomp::CURVE_GENERATOR_PRECOMP_COMB.0[0].as_chunks::<18>();
+        let (g_rows, _) = generator_table()[0].as_chunks::<18>();
         let g_multiples: [[u64; 18]; 8] = core::array::from_fn(|i| g_rows[2 * i]);
         let mut p_multiples = [[0; 18]; 16];
         for (row, point) in p_multiples
@@ -694,7 +693,7 @@ impl JacobianPoint {
         p_digits: &[i8; 522],
         odd_multiples: &[&[AffinePoint; 8]],
     ) -> Self {
-        let g_multiples = &precomp::CURVE_GENERATOR_PRECOMP_COMB.0[0];
+        let g_multiples = &generator_table()[0];
 
         let mut result = Self::infinity();
         for (g_digit, p_digit) in g_digits.iter().zip(p_digits).rev() {
@@ -1145,6 +1144,15 @@ impl Iterator for BoothRecodeW5 {
 /// 27 tables of 16 affine points
 type AffinePointTableComb = [[u64; 288]; 27];
 
+/// The generator comb tables.
+fn generator_table() -> &'static AffinePointTableComb {
+    &precomp::CURVE_GENERATOR_PRECOMP_COMB.0
+}
+
+// Cross builds that cannot run `base_point_precomp_comb` still reject a static
+// that dropped the wrapper. This is that static's alignment.
+const _: () = assert!(align_of_val(&precomp::CURVE_GENERATOR_PRECOMP_COMB) == 64);
+
 /// a, which is -3
 const CURVE_A: FieldElement = FieldElement([
     0xffff_ffff_ffff_fffc,
@@ -1505,12 +1513,9 @@ mod tests {
     #[test]
     fn base_point_precomp_comb() {
         assert_eq!(align_of_val(&precomp::CURVE_GENERATOR_PRECOMP_COMB), 64);
-        assert_eq!(
-            precomp::CURVE_GENERATOR_PRECOMP_COMB.0.as_ptr() as usize % 64,
-            0
-        );
+        assert_eq!(generator_table().as_ptr() as usize % 64, 0);
         let mut base = JacobianPoint::from_affine(&CURVE_GENERATOR);
-        for table in &precomp::CURVE_GENERATOR_PRECOMP_COMB.0 {
+        for table in generator_table() {
             let mut multiple = base;
             for (i, entry) in (1..).zip(table.as_chunks::<18>().0) {
                 assert_eq!(&multiple.as_affine().xy, entry);

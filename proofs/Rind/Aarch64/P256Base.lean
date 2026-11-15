@@ -44,7 +44,8 @@ theorem base_multiply_spec (_hr : Runs) (k : mid.p256.Scalar) (_hk : wordsNat k.
     have hy : feNat a2 = (pairNat xy1.val).2 := by
       rw [pairNat_drop _ h8]
       simp [feNat, hy_words, s1_post, mid.p256.AffineMontPoint.Y, List.slice, List.take_of_length_le, h8]
-    refine ⟨(pairNat xy1.val).1, (pairNat xy1.val).2, xy1_post _ p256OnCurve_G tabulated, ?_⟩
+    refine ⟨(pairNat xy1.val).1, (pairNat xy1.val).2,
+      xy1_post _ p256OnCurve_G (by simpa [mid.p256.generator_table] using tabulated), ?_⟩
     rw [q_post, pairNat_append _ _ fe.property fe1.property, ← hx, ← hy]
     exact Prod.ext fe_post fe1_post
 

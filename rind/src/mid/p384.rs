@@ -631,7 +631,7 @@ impl JacobianMontPoint {
                 let w = 4 * j + tooth;
                 if w < 77 {
                     let (digit, sign) = windows[w];
-                    let table = &precomp::CURVE_GENERATOR_PRECOMP_COMB.0[j];
+                    let table = &generator_table()[j];
                     let mut tmp = AffineMontPoint::lookup_comb(table, digit);
                     tmp.maybe_negate_y(sign);
                     result.add_inplace_affine(&tmp, digit);
@@ -697,7 +697,7 @@ impl JacobianMontPoint {
             None => p.public_naf::<5>(),
             Some(_) => p.public_naf::<6>(),
         };
-        let g_multiples = &precomp::CURVE_GENERATOR_PRECOMP_COMB.0[0];
+        let g_multiples = &generator_table()[0];
 
         let mut result = Self::infinity();
         for i in (0..g_digits.len()).rev() {
@@ -1238,6 +1238,15 @@ type JacobianMontPointTableW5 = [u64; 288];
 /// 20 tables of 16 affine points
 type AffineMontPointTableComb = [[u64; 192]; 20];
 
+/// The generator comb tables.
+fn generator_table() -> &'static AffineMontPointTableComb {
+    &precomp::CURVE_GENERATOR_PRECOMP_COMB.0
+}
+
+// Cross builds that cannot run `base_point_precomp_comb` still reject a static
+// that dropped the wrapper. This is that static's alignment.
+const _: () = assert!(align_of_val(&precomp::CURVE_GENERATOR_PRECOMP_COMB) == 64);
+
 const CURVE_A_MONT: FieldElement = FieldElement([
     0x0000_0003_ffff_fffc,
     0xffff_fffc_0000_0000,
@@ -1578,12 +1587,9 @@ mod tests {
     #[test]
     fn base_point_precomp_comb() {
         assert_eq!(align_of_val(&precomp::CURVE_GENERATOR_PRECOMP_COMB), 64);
-        assert_eq!(
-            precomp::CURVE_GENERATOR_PRECOMP_COMB.0.as_ptr() as usize % 64,
-            0
-        );
+        assert_eq!(generator_table().as_ptr() as usize % 64, 0);
         let mut base = JacobianMontPoint::from_affine(&CURVE_GENERATOR);
-        for table in &precomp::CURVE_GENERATOR_PRECOMP_COMB.0 {
+        for table in generator_table() {
             let mut multiple = base;
             for (i, entry) in (1..).zip(table.as_chunks::<12>().0) {
                 assert_eq!(&multiple.as_affine().xy, entry);
