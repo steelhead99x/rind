@@ -30,12 +30,10 @@ impl ChaCha20 {
     /// `nonce` is the little-endian block counter followed by the 96-bit nonce.
     pub(crate) fn new(key: &[u8; 32], nonce: &[u8; 16]) -> Self {
         let mut ctx = [0u32; 16];
-        let counter = u32::from_le_bytes([nonce[0], nonce[1], nonce[2], nonce[3]]);
-        let n = [
-            nonce[4], nonce[5], nonce[6], nonce[7], nonce[8], nonce[9], nonce[10], nonce[11],
-            nonce[12], nonce[13], nonce[14], nonce[15],
-        ];
-        chacha20_init(&mut ctx, key, &n, counter);
+        // `nonce` is 16 bytes: a 32-bit counter, then 12 nonce bytes.
+        let counter = u32::from_le_bytes(*nonce.first_chunk::<4>().unwrap());
+        let n: &[u8; 12] = nonce.last_chunk::<12>().unwrap();
+        chacha20_init(&mut ctx, key, n, counter);
         Self {
             ctx,
             neon: HaveNeon::check(),

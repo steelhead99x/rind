@@ -7,9 +7,10 @@
 // domain neon2 version in SUPERCOP by D. J. Bernstein and Peter Schwabe,
 // which computes two interleaved Poly1305 lanes in 26-bit limbs.
 //
-// Neither is formally verified: their correctness rests on their use and
-// testing in BoringSSL and aws-lc, and on rind's tests of them against
-// HACL*'s verified Poly1305, Wycheproof, and aws-lc-rs.
+// Neither is formally verified. Their correctness rests on their use and
+// testing in BoringSSL and aws-lc, on `neon_matches_portable` against the
+// 26-bit limbs, and on those limbs' aws-lc vectors and live
+// `CRYPTO_poly1305_*` comparison, plus Wycheproof and aws-lc-rs on the AEAD.
 
 use super::cpu::HaveNeon;
 
