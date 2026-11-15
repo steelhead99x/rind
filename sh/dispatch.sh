@@ -473,8 +473,28 @@ step() {
                     run cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
                         --features "$features,getrandom/wasm_js" -- --deny warnings
                 done
-                # The nightly wasm job does not build rind-ring. Clippy-check it
-                # here: `wasm32_unknown_unknown_js` selects getrandom's JavaScript
+                # The recorded ML-DSA wipe and the Ed25519 verdict comparison
+                # are cfg'd to wasm, so the library clippy never builds them.
+                # Fork main has no build.yml nightly; this lane runs them.
+                run cargo clippy -p rind --test heap_scratch --test cctv --features wipe --locked \
+                    --target wasm32-wasip2 -- --deny warnings
+                if [[ $(uname -s) == Linux ]]; then
+                    run nix develop .#wasm --command cargo test -p rind --features wipe --locked \
+                        --target wasm32-wasip2 --test cctv --test heap_scratch
+                    if [[ $(uname -m) == x86_64 ]]; then
+                        # RSA-3072 and RSA-4096 on the 32-bit limbs wasm uses.
+                        # Own target dir: these RUSTFLAGS must not rebuild the
+                        # shared tree.
+                        run env \
+                            CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/rind-limb32" \
+                            CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$portable --cfg rind_limb=\"32\"" \
+                            SLOW_TESTS=1 \
+                            cargo test -p rind --features wipe --test heap_scratch --locked --release \
+                            --target x86_64-unknown-linux-gnu -- rsa_generate
+                    fi
+                fi
+                # No nightly wasm job builds rind-ring. Clippy-check it here:
+                # `wasm32_unknown_unknown_js` selects getrandom's JavaScript
                 # backend, and the host build never compiles that target.
                 run cargo clippy -p rind-ring --lib --locked --target wasm32-unknown-unknown \
                     --features wasm32_unknown_unknown_js -- --deny warnings
