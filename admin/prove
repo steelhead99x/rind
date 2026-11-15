@@ -1321,12 +1321,14 @@ extract_kdf aarch64 Aarch64
 extract_armv7
 
 # The portable backend, which builds only under the cfg CI's portable jobs
-# build with, here on x86_64: the hashes, down to HACL*'s SHA-2 block
-# functions, which are opaque (see UPSTREAM.md, "Charon panics on HACL*'s
-# unrolled SHA-2"), and the Keccak-f. `proofs/Rind/Portable/Compare.lean`
-# models its constant-time compares, which read through raw pointers and
-# `black_box`. The error type and `into_public`, which the other targets reach
-# through their curves, are start points of their own here.
+# build with, here on x86_64: the hashes, down to `generic::sha256` and
+# `generic::sha512`'s rolled loop. Both stay opaque with the rest of
+# `crate::low`, since this pass does not `--include` them, until
+# quest/m4/verified/hacl-sha2-lean.md proves them. The Keccak-f is included.
+# `proofs/Rind/Portable/Compare.lean` models its constant-time compares, which
+# read through raw pointers and `black_box`. The error type and `into_public`,
+# which the other targets reach through their curves, are start points of
+# their own here.
 portable_cfg='--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
 portable_target=$prove_target-portable
 CARGO_TARGET_DIR=$portable_target RUSTFLAGS=$portable_cfg extract x86_64 Portable "${hashes[@]}" --include crate::low::portable::sha \
@@ -1352,7 +1354,8 @@ sed -i '/Rind.Aarch64.AeadDispatch/d' proofs/Rind/Aarch64/Kdf/TypesExternal.lean
 sed -i '/-- BEGIN aead/,/-- END aead/d' proofs/Rind/Aarch64/Kdf/FunsExternal.lean
 # The portable backend's hash, HMAC, KDF, and header-protection proofs are the
 # x86_64 ones with the target renamed, over its own block functions' contracts
-# in `Hacl.lean` and `ShaBlocks.lean`, and its compares' proof in `CtEqual.lean`.
+# in `ShaBlocks.lean` and `Sha512Entry.lean`, and its compares' proof in
+# `CtEqual.lean`.
 mkdir -p proofs/Rind/Portable/Kdf
 for file in QuicDispatch DigestAlgorithm DigestDispatch Sha512 ChaCha20 Blockwise Sha Hmac HmacDispatch \
     HkdfExpand Kdf/TypesExternal Kdf/FunsExternal HmacApi DigestApi Hkdf Pbkdf2; do

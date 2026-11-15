@@ -4,13 +4,13 @@ open rind.portable
 
 /-!
 The axioms the SHA-1, SHA-256, HMAC, and digest API theorems rest on, beyond
-Lean's own: HACL*'s SHA-256 contract in `Rind.Portable.Hacl` for SHA-256, and
-nothing else. SHA-1's block function's contract is `Sha1Blocks`, a hypothesis
-of each theorem. `Axioms` pins the theorems over every HMAC algorithm, which
-rest on SHA-512's. A change here is a change to the trust base.
+Lean's own: none. The block functions' contracts are `Sha1Blocks` and
+`Sha256Blocks`, a hypothesis of each theorem. `Axioms` pins the theorems over
+every HMAC algorithm, which rest on SHA-512's. A change here is a change to
+the trust base.
 -/
 
-/-- info: 'rind.portable.sha256_hash' depends on axioms: [propext, Classical.choice, Quot.sound, sha256_update_nblocks_spec] -/
+/-- info: 'rind.portable.sha256_hash' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms sha256_hash
 
@@ -18,7 +18,7 @@ rest on SHA-512's. A change here is a change to the trust base.
 #guard_msgs in
 #print axioms sha1_hash
 
-/-- info: 'rind.portable.hmac_sha256_sign' depends on axioms: [propext, Classical.choice, Quot.sound, sha256_update_nblocks_spec] -/
+/-- info: 'rind.portable.hmac_sha256_sign' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms hmac_sha256_sign
 
@@ -38,7 +38,7 @@ rest on SHA-512's. A change here is a change to the trust base.
 #guard_msgs in
 #print axioms hmac_finish_spec
 
-/-- info: 'rind.portable.digest_spec' depends on axioms: [propext, Classical.choice, Quot.sound, sha256_update_nblocks_spec] -/
+/-- info: 'rind.portable.digest_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms digest_spec
 
@@ -46,16 +46,10 @@ rest on SHA-512's. A change here is a change to the trust base.
 #guard_msgs in
 #print axioms digest_ctx_new_spec
 
-/-- info: 'rind.portable.digest_ctx_update_spec' depends on axioms: [propext,
- Classical.choice,
- Quot.sound,
- sha256_update_nblocks_spec] -/
+/-- info: 'rind.portable.digest_ctx_update_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms digest_ctx_update_spec
 
-/-- info: 'rind.portable.digest_ctx_finish_spec' depends on axioms: [propext,
- Classical.choice,
- Quot.sound,
- sha256_update_nblocks_spec] -/
+/-- info: 'rind.portable.digest_ctx_finish_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms digest_ctx_finish_spec

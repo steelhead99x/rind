@@ -1,43 +1,19 @@
-# [M] HACL*'s SHA-2 block functions are proven in Lean
+# [M] Portable SHA-256 and rolled SHA-512 are proven in Lean
 
 ## Goal
 
-The portable backend's SHA-256 and SHA-512 block functions, libcrux-sha2's `sha256_update_nblocks` and `sha512_update_nblocks`, are translated with the rest of the portable backend and proven against FIPS 180-4 in Lean, so `sha256_update_nblocks_spec` and `sha512_update_nblocks_spec` in `proofs/Rind/Portable/Hacl.lean` stop being axioms and the portable SHA-2 ✓ rests on no HACL* theorem.
+`generic::sha256::sha256_compress_blocks` and `generic::sha512::sha512_compress_blocks` are translated with the portable backend and proven against FIPS 180-4 in Lean. `Sha256Blocks.sha256` in `proofs/Rind/Portable/ShaBlocks.lean` and the compress conjunct of `RunsSha512` in `proofs/Rind/Portable/Sha512Entry.lean` become theorems, and SHA-256, SHA-384, SHA-512, SHA-512/256, and the HMAC and HKDF over them earn a portable ✓ in `benchmarks/verified.toml`.
 
 ## Plan
 
-Follows [the portable backend's proofs](https://github.com/kixel-ai/rind/pull/649), which took the axiom route because Charon cannot translate the two functions.
+The previous goal was libcrux-sha2's unrolled `sha256_update_nblocks` and `sha512_update_nblocks`. The portable backend no longer calls them: `low/portable/sha.rs` calls `generic::sha256` on the whole slice (ESP-IDF Xtensa runs `sha256_iram` instead, which this quest leaves alone), and SHA-384/512 is the rolled loop in `generic::sha512`. The Charon stack-depth workaround for those unrolled bodies is deleted from `UPSTREAM.md`. The 2026-11-12 approval of the HACL* axiom route applied to the code this backend used to run.
 
-Decided 2026-11-12 (maintainer, /quest-unblock): ✅ approve the HACL* axioms route for [kixel-ai/rind#649](https://github.com/kixel-ai/rind/pull/649), so two restated F* theorems join the trust base, and replace them here once Charon is fixed (rejected: hold that PR until Charon is fixed).
-
-- The blocker: libcrux-macros' `unroll_for!` unrolls each function's 64 or 80 rounds into one deeply nested body, and Charon panics translating it when it reaches its fixed `MAX_STACK_DEPTH` of 1024 (`charon/src/utils.rs`). `admin/prove`'s portable pass therefore leaves them opaque, as Charon leaves other crates' bodies.
-- Once Charon translates them, have `admin/prove`'s portable pass translate the two bodies and prove each against `Rind/HashSpec.lean`'s `sha256.compress` and `Rind/Sha2.lean`'s `processBlock`, as `Rind/X86_64/ChaCha20.lean` proves HACL*'s ChaCha20 rounds. The axioms' statements are the theorems to prove, so nothing above `Hacl.lean` changes.
-- Decided 2026-11-13 (maintainer, /quest-merge of #649): ✅ keep this quest (rejected: drop). ✅ approve filing the Charon panic upstream now (rejected: wait for [the upstream reports batch](/quest/m2/upstream-reports.md), the maintainer files it), because the fix blocks rind's own proof work, unlike most `UPSTREAM.md` entries. An agent drafted the issue below; the maintainer approves its text before it is posted.
-- The unrolled bodies are long straight-line code; if `step*` is slow on them, prove one round as a lemma and let the unrolled body reuse it.
-
-### Draft issue for AeneasVerif/charon
-
-Title: Panic "stack depth limit exceeded" on deeply nested control flow from an unrolled loop
-
-> Charon panics translating libcrux-sha2's `sha256_update_nblocks` (and `sha512_update_nblocks`). libcrux-macros' `unroll_for!` unrolls their 64 or 80 rounds into one function body whose blocks nest past the fixed `MAX_STACK_DEPTH` of 1024 in `charon/src/utils.rs`, and the control-flow reconstruction panics:
->
-> ```
-> stack depth limit exceeded (transform/control_flow/ullbc_to_llbc.rs)
-> ```
->
-> **Version:** Aeneas nightly release `nightly-2026.11.03-ab34bd2`, which ships Charon, with Rust nightly 2026-09-17.
->
-> **Reproduce:** in [kixel-ai/rind](https://github.com/kixel-ai/rind), add `--include 'libcrux_sha2::hacl::sha256_update_nblocks' --extract-opaque-bodies` to `admin/prove`'s portable pass and run `nix develop .#prove --command admin/prove lean`. Charon panics translating `sha256_update`.
->
-> **Expected:** the function translates, or Charon reports an error for that item and continues, rather than panicking. The body is straight-line code, so its depth comes from nesting, not from recursion; an iterative traversal, or a limit that scales with the body, would avoid it.
->
-> We want the translation to prove these functions in Lean with Aeneas instead of assuming HACL*'s F* theorems about them.
-
-## Waiting
-
-- AeneasVerif/charon: translate a function whose body nests past Charon's fixed `MAX_STACK_DEPTH` without panicking. Check by bumping Charon in `flake.nix` and running the reproduction in `UPSTREAM.md`'s "Charon panics on HACL*'s unrolled SHA-2", which then translates both functions.
-- Maintainer: approve the draft issue text above, or edit it, so an agent posts it to AeneasVerif/charon; an agent cannot post outside the maintainer's orgs without that approval. Done once the issue exists and `UPSTREAM.md`'s entry links it.
+- Today `admin/prove`'s portable pass includes `low::portable::sha` and leaves `crate::low` opaque, so both generic compressors stay opaque in `proofs/Rind/Portable/FunsExternal.lean`. The padding, digest, HMAC, HKDF, and PBKDF2 proofs assume their contracts. `benchmarks/verified.toml` has no portable SHA-2 row.
+- Include `low::generic::sha256::sha256_compress_blocks` and `low::generic::sha512::sha512_compress_blocks` in that pass and drop the two opaque declarations. The bodies are loops of 64 and 80 rounds, with a 16-word schedule window. They are the code to translate.
+- Prove the SHA-256 body against `Rind/HashSpec.lean`'s `sha256.compress`. State SHA-512's block function as `HashSpec` states SHA-256's, and prove the rolled loop against it: `Rind/Sha2.lean` keeps cryptol-specs' `processBlock` opaque, which suits an axiom about aws-lc's routine. Keep the x86_64 and aarch64 theorems as they are.
+- Discharge `Sha256Blocks.sha256` and `RunsSha512`'s compress conjunct from those proofs. Add the `verified.toml` row for the operations the hypotheses cover, naming these two functions, and regenerate `BENCHMARKS.md` with `admin/bench-report render`.
+- ESP-IDF Xtensa's `sha256_iram` is a separate body. `low/portable/sha.rs` records that nothing proves it. This quest does not.
 
 ## Related
 
-- [Every hand model of untranslated Rust is retired](/quest/m4/verified/aeneas-fn-pointers.md) - retires the other places `proofs/` stands in for Rust the translation leaves out
+- [The portable backend's SHA-2 and its HACL* ChaCha20 rounds are proven](/quest/m4/verified/portable.md) - the padding and API proofs these compressors discharge

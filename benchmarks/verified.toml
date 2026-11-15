@@ -265,13 +265,11 @@ cpu = ["intel", "avx", "ssse3"]
 proof = "aws-lc-verification's SAW proof of SHA-512 through EVP_Digest, padding included, over sha512_block_data_order_avx, which aws-lc runs only on Intel; of aws-lc c21d40da, whose SHA-512 code 5.12.0 keeps"
 link = "https://github.com/awslabs/aws-lc-verification/blob/797302470c1703cbb1a3a6fa98daffef0bfd3d80/SAW/proof/SHA512/verify-SHA512-x86.saw"
 
-[[verified]]
-library = "rind"
-operations = ["sha256/*", "sha512/*", "hmac-sha256/*", "hkdf-sha256/*"]
-arch = "portable"
-proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of HKDF-Expand's loop over its info slices, which Aeneas cannot translate, of its digest, HMAC, and HKDF APIs' SHA-256 and SHA-512, padding included, down to HACL*'s Hacl.SHA2.Scalar32 sha256_update_nblocks and sha512_update_nblocks, which rind runs in pieces under 2^31 bytes, composed with HACL*'s F* proofs of them, compiled to Rust by an unverified step"
-link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/Portable/Hacl.lean"
-
+# rind's portable SHA-256, SHA-384, SHA-512, SHA-512/256, and the HMAC and
+# HKDF over them have no entry. The padding and API proofs take the
+# compressors as hypotheses: `generic::sha256`, which
+# `low::portable::sha::sha256_compress_blocks` calls, and `generic::sha512`'s
+# rolled loop. The quest is quest/m4/verified/hacl-sha2-lean.md.
 [[verified]]
 library = "rind"
 operations = ["quic-header-protection/chacha20"]
