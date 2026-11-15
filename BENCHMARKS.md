@@ -1223,6 +1223,10 @@ over 10%.
 no host list to edit. The result's name is a slug of the CPU model, such as
 `intel-core-ultra-9-275hx`, unless `--host` sets another filesystem-safe name, and
 the JSON records the raw CPU string, that slug, the core counts, and the OS.
-`summary` and `render --from` read every `<host>.json` in the directory. `collect`
-reaches only the maintainer's machines. A gap's `on` may name any host with a
+A slug that equals a nightly tier name gains a `-host` suffix, so a minimal aarch64
+Linux box is `aarch64-host` rather than the reserved name `aarch64`. A second machine
+that wants a slug already on disk is stored as `<slug>-<tag>`, or `<slug>-2` when that
+alias is taken, and a later import replaces that file. A host whose chosen name is that
+spelling is left as it is. `summary` and `render --from` read every measured `<host>.json`.
+`collect` reaches only the maintainer's machines. A gap's `on` may name any host with a
 result, or any nightly tier.

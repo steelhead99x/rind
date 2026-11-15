@@ -552,7 +552,6 @@ class CpuSlug(unittest.TestCase):
         self.assertEqual(br.machine_tag_of({"machine": "ABCDEF12"}), "")
         self.assertEqual(br.machine_tag_of({"machine": "not-a-tag"}), "")
         self.assertEqual(br.machine_tag_of({}), "")
-        self.assertFalse(br.numeric_disambiguation("box-2", "box-perf"))
 
 
 class AnyHost(unittest.TestCase):
@@ -934,6 +933,83 @@ class AnyHost(unittest.TestCase):
                     body = json.load(f)
                 self.assertEqual(body["started"], "2026-11-06T02:00:00+00:00")
                 self.assertEqual(body["alias_of"], "box")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_one_directory_keeps_a_chosen_numeric_name_beside_a_collision(self):
+        """One import of a directory that holds both the colliding slug and a chosen `<slug>-N`."""
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(resident, f)
+                chosen = laptop("box-2")
+                chosen["started"] = "2026-11-04T02:00:00+00:00"
+                newcomer = laptop("box")
+                newcomer["started"] = "2026-11-05T02:00:00+00:00"
+                with open(os.path.join(src, "box-2.json"), "w") as f:
+                    json.dump(chosen, f)
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(newcomer, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                log = err.getvalue()
+                self.assertIn("imported as box-3", log)
+                self.assertNotIn("imported as box-2", log)
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json", "box-3.json"})
+                with open(os.path.join(data, "box.json")) as f:
+                    self.assertEqual(json.load(f)["machine"], "aaaaaaaa")
+                with open(os.path.join(data, "box-2.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual(kept["started"], "2026-11-04T02:00:00+00:00")
+                self.assertEqual(kept["host"], "box-2")
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, "box-3.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(body["started"], "2026-11-05T02:00:00+00:00")
+                self.assertEqual(body["alias_of"], "box")
+                self.assertEqual(body["host"], "box-3")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_one_directory_keeps_a_differently_tagged_chosen_numeric_name(self):
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("box")
+                resident["machine"] = "aaaaaaaa"
+                resident["started"] = "2026-11-03T02:00:00+00:00"
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(resident, f)
+                chosen = laptop("box-2")
+                chosen["machine"] = "dddddddd"
+                chosen["started"] = "2026-11-04T02:00:00+00:00"
+                newcomer = laptop("box")
+                newcomer["machine"] = "bbbbbbbb"
+                newcomer["started"] = "2026-11-05T02:00:00+00:00"
+                with open(os.path.join(src, "box.json"), "w") as f:
+                    json.dump(newcomer, f)
+                with open(os.path.join(src, "box-2.json"), "w") as f:
+                    json.dump(chosen, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                log = err.getvalue()
+                alias = "box-bbbbbbbb"
+                self.assertIn(f"imported as {alias}", log)
+                self.assertNotIn("imported as box-2", log)
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json", f"{alias}.json"})
+                with open(os.path.join(data, "box-2.json")) as f:
+                    kept = json.load(f)
+                self.assertEqual((kept["host"], kept["machine"], kept["started"]), ("box-2", "dddddddd", "2026-11-04T02:00:00+00:00"))
+                self.assertNotIn("alias_of", kept)
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    body = json.load(f)
+                self.assertEqual((body["host"], body["machine"], body["alias_of"]), (alias, "bbbbbbbb", "box"))
         finally:
             br.DATA_DIR = saved
 

@@ -74,8 +74,11 @@ import tomllib
 
 # Machines `collect` can reach, in the order they run. This is the maintainer's
 # ssh list, not a gate. `run` takes any filesystem-safe host name. `summary`,
-# `render`, and `load_gaps` take every host JSON on disk, and a nightly tier
-# stays a valid gaps.toml `on`. `render` reads a `note` from here
+# `render`, and `load_gaps` take every host JSON whose name is not reserved,
+# and a nightly tier stays a valid gaps.toml `on`. A reserved CPU slug is
+# stored as `<slug>-host`. A second machine that wants a slug already on disk
+# is stored as `<slug>-<tag>`, or `<slug>-2` when that alias is taken; a chosen
+# host of that spelling is left as it is. `render` reads a `note` from here
 # only when that host's JSON has none, and shows these names first so the
 # published report keeps its order; every other host keeps the order it was
 # given. `load_hosts` sorts those files by name.
@@ -2173,8 +2176,12 @@ def report(hosts, tiers, verified, gaps):
         "no host list to edit. The result's name is a slug of the CPU model, such as",
         "`intel-core-ultra-9-275hx`, unless `--host` sets another filesystem-safe name, and",
         "the JSON records the raw CPU string, that slug, the core counts, and the OS.",
-        "`summary` and `render --from` read every `<host>.json` in the directory. `collect`",
-        "reaches only the maintainer's machines. A gap's `on` may name any host with a",
+        "A slug that equals a nightly tier name gains a `-host` suffix, so a minimal aarch64",
+        "Linux box is `aarch64-host` rather than the reserved name `aarch64`. A second machine",
+        "that wants a slug already on disk is stored as `<slug>-<tag>`, or `<slug>-2` when that",
+        "alias is taken, and a later import replaces that file. A host whose chosen name is that",
+        "spelling is left as it is. `summary` and `render --from` read every measured `<host>.json`.",
+        "`collect` reaches only the maintainer's machines. A gap's `on` may name any host with a",
         "result, or any nightly tier.",
         "",
     ]
@@ -2262,21 +2269,6 @@ def different_machine(previous, host):
     return bool(left and not right)
 
 
-def numeric_disambiguation(stem, name):
-    """True when `stem` is the `<name>-N` spelling `collided_host_name` would emit.
-
-    Spelling alone is not ownership: a caller may have chosen that name with
-    `--host`.
-    """
-    match = re.fullmatch(r"(.+)-([0-9]+)", stem)
-    if not match or match.group(2).startswith("0"):
-        return False
-    number = int(match.group(2))
-    if number < 2:
-        return False
-    return _suffixed(name, f"-{number}") == stem
-
-
 def generated_alias(host, name):
     """True when this import created the file because `name` was taken."""
     return isinstance(host, dict) and host.get("alias_of") == name
@@ -2308,14 +2300,16 @@ def collided_host_name(slug, tag, taken):
         n += 1
 
 
-def assign_import_name(name, host, existing):
+def assign_import_name(name, host, existing, incoming=()):
     """Where to put `host`.
 
     A free name is that name, even when another file carries the same tag.
     The same machine replaces its own file. A different machine that wants a
     taken name reuses the file this import already created for that name, or
-    gets `collided_host_name`. A chosen name that merely looks like `<name>-N`
-    is not that file.
+    gets `collided_host_name`. Names still waiting in this collection count
+    as taken for that choice, so the alias is not a file the collection is
+    about to copy. A chosen name that merely looks like `<name>-N` is not
+    that file.
     """
     tag = machine_tag_of(host)
     if name not in existing or not different_machine(existing[name], host):
@@ -2327,7 +2321,7 @@ def assign_import_name(name, host, existing):
     ]
     if found:
         return min(found, key=lambda stem: disambiguation_rank(stem, name, tag))
-    return collided_host_name(name, tag, set(existing))
+    return collided_host_name(name, tag, set(existing) | set(incoming))
 
 
 def import_hosts(directory):
@@ -2336,7 +2330,8 @@ def import_hosts(directory):
     A free name stays that name. A later result from the same machine replaces
     the file this import already gave it. A different machine with the same
     slug is stored beside it, as `<slug>-<tag>`, or `<slug>-2` when that alias
-    is taken.
+    is taken. Filenames still in the collection count as taken for that choice,
+    so the alias is not a file this same import is about to copy.
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     existing = {}
@@ -2345,14 +2340,17 @@ def import_hosts(directory):
         if stem == "tiers":
             continue
         existing[stem] = read_host(path, stem)
-    for name, host in load_hosts(directory).items():
+    incoming = load_hosts(directory)
+    # Every filename in this collection is taken for alias allocation, including
+    # ones not copied yet. The free-name check still looks only at `existing`.
+    for name, host in incoming.items():
         if host.get("status") != "ok":
             print(
                 f"bench-report: {name}: not imported, {host.get('status', 'unmeasured')}: {host.get('reason', '')}",
                 file=sys.stderr,
             )
             continue
-        dest = assign_import_name(name, host, existing)
+        dest = assign_import_name(name, host, existing, set(incoming))
         creating = dest not in existing
         if dest == name and "alias_of" not in host:
             shutil.copy(os.path.join(directory, f"{name}.json"), os.path.join(DATA_DIR, f"{name}.json"))
