@@ -5,7 +5,8 @@
 //! aws-lc's AVX and scalar ones, imported by `admin/import-aws-lc`.
 //!
 //! aws-lc-verification's SAW proof covers aws-lc's AVX routine, as aws-lc
-//! builds it; nothing verifies the others.
+//! builds it, and rind's HOL Light proof in `proofs/hol-light/` covers
+//! OpenSSL's AVX2 routine, as rind builds it; nothing verifies the others.
 
 use std::sync::OnceLock;
 

@@ -252,8 +252,8 @@ let SHA256_FINISH_SHAEXT_PAD_TAC r nsteps =
   SHA256_FINISH_SHAEXT_TAIL_TAC (4 * min r 3) THEN
   SHA256_SHAEXT_STEPS_TAC SHA256_FINISH_SHAEXT_EXEC (1--nsteps) THEN
   SHA256_SHAEXT_K_LOADED_TAC ("s" ^ string_of_int nsteps) THEN
-  MP_TAC(SPECL [`pc + 0x6a`; `k:num`; pad; `h:int32 list`]
-               SHA256_SHAEXT_ROUNDS_CORRECT) THEN
+  MP_TAC(UNDISCH(SPECL [`pc + 0x6a`; `k:num`; pad; `h:int32 list`]
+               SHA256_SHAEXT_ROUNDS_CORRECT)) THEN
   X86_BIGSTEP_TAC SHA256_FINISH_SHAEXT_EXEC ("s" ^ string_of_int (nsteps + 1)) THENL
    [CONJ_TAC THENL
      [FIRST_ASSUM(MATCH_ACCEPT_TAC o MATCH_MP SHA256_FINISH_SHAEXT_ROUNDS_LOADED);
@@ -270,7 +270,7 @@ let SHA256_FINISH_SHAEXT_PAD_TAC r nsteps =
 (* With r = 4, the block is r = 3's: its length takes the next. *)
 let SHA256_FINISH_SHAEXT_PAD = prove
  (`!pc data n k r l x y m h.
-     r <= 4
+     r <= 4 /\ aligned 16 (word k:int64)
      ==> ensures x86
       (\s. bytes_loaded s (word pc) sha256_finish_shaext_mc /\
            read RIP s = word (pc + 0x39) /\
@@ -294,9 +294,9 @@ let SHA256_FINISH_SHAEXT_PAD = prove
    [`pc:num`; `data:int64`; `n:num`; `k:num`; `r:num`; `l:int64`; `x:int64`;
     `y:int64`; `m:num->int32 list`; `h:int32 list`] THEN
   REWRITE_TAC[SOME_FLAGS; fst SHA256_FINISH_SHAEXT_EXEC] THEN
-  DISCH_TAC THEN
+  STRIP_TAC THEN
   SUBGOAL_THEN `r = 0 \/ r = 1 \/ r = 2 \/ r = 3 \/ r = 4` MP_TAC THENL
-   [ASM_ARITH_TAC; ALL_TAC] THEN
+   [UNDISCH_TAC `r <= 4` THEN ARITH_TAC; ALL_TAC] THEN
   STRIP_TAC THEN FIRST_X_ASSUM SUBST_ALL_TAC THEN
   CONV_TAC(ONCE_DEPTH_CONV SHA256_MIN_CONV) THEN
   CONV_TAC(ONCE_DEPTH_CONV NUM_MULT_CONV) THEN
@@ -340,7 +340,8 @@ let SHA256_FINISH_SHAEXT_PAD_BIGSTEP_TAC r x y h sname =
   let rtm = mk_small_numeral r in
   let th = MP (SPECL [`pc:num`; `data:int64`; `n:num`; `k:num`; rtm; `l:int64`; x; y;
                       `m:num->int32 list`; h] SHA256_FINISH_SHAEXT_PAD)
-              (EQT_ELIM(NUM_REDUCE_CONV(mk_binop `(<=):num->num->bool` rtm `4`))) in
+              (CONJ (EQT_ELIM(NUM_REDUCE_CONV(mk_binop `(<=):num->num->bool` rtm `4`)))
+                    (ASSUME `aligned 16 (word k:int64)`)) in
   MP_TAC(REWRITE_RULE[SOME_FLAGS]
     (CONV_RULE(ONCE_DEPTH_CONV SHA256_MIN_CONV THENC
                ONCE_DEPTH_CONV NUM_MULT_CONV) th)) THEN
@@ -381,7 +382,7 @@ let SHA256_FINISH_SHAEXT_TAIL_CASE_TAC r =
 
 let SHA256_FINISH_SHAEXT_TAIL = prove
  (`!pc data n k r l x y m h.
-     r <= 4
+     r <= 4 /\ aligned 16 (word k:int64)
      ==> ensures x86
       (\s. bytes_loaded s (word pc) sha256_finish_shaext_mc /\
            read RIP s = word (pc + 0x2f) /\
@@ -410,9 +411,9 @@ let SHA256_FINISH_SHAEXT_TAIL = prove
    [`pc:num`; `data:int64`; `n:num`; `k:num`; `r:num`; `l:int64`; `x:int64`;
     `y:int64`; `m:num->int32 list`; `h:int32 list`] THEN
   REWRITE_TAC[SOME_FLAGS; fst SHA256_FINISH_SHAEXT_EXEC] THEN
-  DISCH_TAC THEN
+  STRIP_TAC THEN
   SUBGOAL_THEN `r = 0 \/ r = 1 \/ r = 2 \/ r = 3 \/ r = 4` MP_TAC THENL
-   [ASM_ARITH_TAC; ALL_TAC] THEN
+   [UNDISCH_TAC `r <= 4` THEN ARITH_TAC; ALL_TAC] THEN
   STRIP_TAC THEN FIRST_X_ASSUM SUBST_ALL_TAC THEN
   CONV_TAC(ONCE_DEPTH_CONV SHA256_MIN_CONV) THEN
   CONV_TAC(ONCE_DEPTH_CONV NUM_MULT_CONV) THEN
@@ -535,9 +536,9 @@ let SHA256_FINISH_SHAEXT_CORRECT = prove
         RULE_ASSUM_TAC(REWRITE_RULE[cth]) THEN
         SHA256_SHAEXT_STEPS_TAC SHA256_FINISH_SHAEXT_EXEC (2--8) THEN
         SHA256_SHAEXT_K_LOADED_TAC "s8" THEN
-        MP_TAC(SPECL [`pc + 0x6a`; `k:num`; `(m:num->int32 list) i`;
+        MP_TAC(UNDISCH(SPECL [`pc + 0x6a`; `k:num`; `(m:num->int32 list) i`;
                       `sha256_hash_blocks m [h0;h1;h2;h3;h4;h5;h6;h7] i`]
-                     SHA256_SHAEXT_ROUNDS_CORRECT) THEN
+                     SHA256_SHAEXT_ROUNDS_CORRECT)) THEN
         X86_BIGSTEP_TAC SHA256_FINISH_SHAEXT_EXEC "s9" THENL
          [CONJ_TAC THENL
            [FIRST_ASSUM(MATCH_ACCEPT_TAC o
@@ -564,11 +565,12 @@ let SHA256_FINISH_SHAEXT_CORRECT = prove
 
     (* The padded blocks and the digest. *)
     ENSURES_INIT_TAC "s0" THEN
-    FIRST_ASSUM(MP_TAC o MATCH_MP
+    MP_TAC(MP
      (SPECL [`pc:num`; `data:int64`; `n:num`; `k:num`; `r:num`; `l:int64`; `x:int64`;
              `y:int64`; `m:num->int32 list`;
              `sha256_hash_blocks m [h0;h1;h2;h3;h4;h5;h6;h7] n`]
-      SHA256_FINISH_SHAEXT_TAIL)) THEN
+      SHA256_FINISH_SHAEXT_TAIL)
+     (CONJ (ASSUME `r <= 4`) (ASSUME `aligned 16 (word k:int64)`))) THEN
     CONV_TAC(LAND_CONV(REWRITE_CONV[SOME_FLAGS] THENC TOP_DEPTH_CONV let_CONV)) THEN
     X86_BIGSTEP_TAC SHA256_FINISH_SHAEXT_EXEC "s1" THEN
     TRY(ASM_REWRITE_TAC[] THEN NO_TAC) THEN

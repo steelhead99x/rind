@@ -273,8 +273,8 @@ impl<H: HmacHash> Keying<H> {
 }
 
 struct Tagging<H: HmacHash> {
-    hmac: Hmac<H>,
     ops: ZeroableRef<TagOps<H>>,
+    hmac: Hmac<H>,
 }
 
 struct TagOps<H: HmacHash> {

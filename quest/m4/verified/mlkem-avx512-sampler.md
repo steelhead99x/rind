@@ -12,4 +12,4 @@ On x86_64 CPUs with AVX-512 F, BW, VBMI, and VBMI2 (Ice Lake and later, Zen 4 an
 ## Required
 
 - [ML-KEM-768's construction is proven](/quest/m4/verified/mlkem-construction.md) - the SampleNTT contract this slots into
-- [VG measured](/quest/m2/verified-garbage/bench.md) - whether pyca/verified-garbage's proven code beats what this would prove; if a switch replaces it, this quest is deleted or rewritten (maintainer, 2026-11-12)
+- [ML-KEM-768 runs pyca/verified-garbage's code where it is faster](/quest/m2/verified-garbage/mlkem.md) - VG measured faster at every ML-KEM-768 operation with AVX-512; delete this quest if that switch retires the sampler for every operation, and drop this link if it doesn't

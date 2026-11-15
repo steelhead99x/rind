@@ -12,8 +12,8 @@ impl<'a> Key<'a> {
     ///
     /// This decodes the given slice as a whole `OneAsymmetricKey`, and then:
     ///
-    /// - ensures the version is 0 if the publicKey field is absent,
-    ///   or the version is 1 if the publicKey field is present.
+    /// - refuses a publicKey field in a v1 document; a v2 document may omit it,
+    ///   as RFC 5958 allows and aws-lc takes,
     /// - ensures the key algorithm is one of `algorithms`,
     /// - ensures the parameters are `parameters`.
     ///
@@ -30,11 +30,9 @@ impl<'a> Key<'a> {
     ) -> Result<Self, Error> {
         let oak = pkix::OneAsymmetricKey::from_bytes(slice).map_err(KeyFormatError::Asn1)?;
 
-        match (oak.version, oak.publicKey.inner()) {
-            (pkix::Pkcs8Version::Pkcs8v1, None) => {}
-            (pkix::Pkcs8Version::Pkcs8v2, Some(_)) => {}
-            _ => return Err(KeyFormatError::UnsupportedPkcs8Version.into()),
-        };
+        if oak.version == pkix::Pkcs8Version::Pkcs8v1 && oak.publicKey.inner().is_some() {
+            return Err(KeyFormatError::UnsupportedPkcs8Version.into());
+        }
 
         if !algorithms.contains(&&oak.privateKeyAlgorithm.algorithm) {
             return Err(KeyFormatError::MismatchedPkcs8Algorithm.into());
@@ -88,10 +86,10 @@ impl<'a> Key<'a> {
         output.get(..len).ok_or(Error::WrongLength)
     }
 
-    /// Returns the `privateKey` body of a v1 document, refusing v2.
+    /// Returns the `privateKey` body of a document without a public key.
     ///
-    /// For key types whose v2 public key the caller does not check: ring reads
-    /// ECDSA and RSA keys as v1 only, and aws-lc-rs refuses their public key.
+    /// For key types whose v2 public key the caller does not check, which
+    /// aws-lc-rs refuses for ECDSA and RSA.
     pub(crate) fn v1_private_key(&self) -> Result<&'a [u8], Error> {
         match self.public_key() {
             Some(_) => Err(KeyFormatError::UnsupportedPkcs8Version.into()),
@@ -212,6 +210,17 @@ mod tests {
                 Key::decode(&ed25519_with(version, &tail), &[&oid::id_ed25519], None).err(),
                 "{tail:02x?}",
             );
+        }
+    }
+
+    #[test]
+    fn v2_without_public_key() {
+        const ATTRIBUTE: &[u8] = &[0xa0, 0x03, 0xff, 0xff, 0xff];
+        for tail in [vec![], vec![ATTRIBUTE]] {
+            let bytes = ed25519_with(1, &tail);
+            let k = Key::decode(&bytes, &[&oid::id_ed25519], None).unwrap();
+            assert_eq!(k.private_key().len(), 34);
+            assert_eq!(k.public_key(), None);
         }
     }
 

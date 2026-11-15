@@ -2,6 +2,7 @@ module
 public import Aeneas
 public import Rind.X86_64.Types
 public import Rind.X86_64.AesGcmModel
+public import Rind.RowSelect
 @[expose] public section
 open Aeneas Aeneas.Std Result
 set_option linter.dupNamespace false
@@ -150,7 +151,7 @@ they call; `Rind.X86_64.PointSelect` proves them.
 
 namespace rind.x86_64
 
-open rind.simd
+open rind.simd rind.select
 
 /-- The four words of `row` from `row[k]`, as `_mm256_loadu_si256` loads them:
 `row[k]` lowest. -/
@@ -158,20 +159,10 @@ def load256 (row : List U64) (k : Nat) : core.core_arch.x86.__m256i :=
   (row.getD (k + 3) 0#u64).bv ++ (row.getD (k + 2) 0#u64).bv ++ (row.getD (k + 1) 0#u64).bv ++
     (row.getD k 0#u64).bv
 
-/-- The two words of `row` from `row[k]`, as `_mm_loadu_si128` loads them:
-`row[k]` lowest. -/
-def load128 (row : List U64) (k : Nat) : core.core_arch.x86.__m128i :=
-  (row.getD (k + 1) 0#u64).bv ++ (row.getD k 0#u64).bv
-
 /-- A 256-bit vector's words, as `_mm256_storeu_si256` writes them: lane 0
 first. -/
 def store256 (v : core.core_arch.x86.__m256i) : List U64 :=
   (List.range 4).map fun j => ⟨v.extractLsb' (64 * j) 64⟩
-
-/-- A 128-bit vector's words, as `_mm_storeu_si128` writes them: lane 0
-first. -/
-def store128 (v : core.core_arch.x86.__m128i) : List U64 :=
-  (List.range 2).map fun j => ⟨v.extractLsb' (64 * j) 64⟩
 
 /-- `_select_avx2`'s state between rows: the counter, the `V` accumulators,
 and the tail. -/

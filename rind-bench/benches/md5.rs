@@ -35,6 +35,12 @@ fn test_rind_md5(data: &[u8]) {
     black_box(ctx.finish());
 }
 
+fn test_vg_md5(data: &[u8]) {
+    let mut ctx = verified_garbage::hashes::md5::Md5::new();
+    ctx.update(data);
+    black_box(ctx.finalize());
+}
+
 fn md5(c: &mut Criterion) {
     let mut group = c.benchmark_group("md5");
     for (size, size_name) in criterion::HASH_SIZES {
@@ -54,6 +60,19 @@ fn md5(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
             b.iter(|| test_rind_md5(input))
         });
+        assert_eq!(
+            {
+                let mut ctx = verified_garbage::hashes::md5::Md5::new();
+                ctx.update(&input);
+                ctx.finalize()
+            },
+            rind::digest::digest(&rind::digest::legacy::MD5, &input).as_ref()
+        );
+        group.bench_with_input(
+            BenchmarkId::new("verified-garbage", size_name),
+            &input,
+            |b, input| b.iter(|| test_vg_md5(input)),
+        );
     }
 }
 

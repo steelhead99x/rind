@@ -22,7 +22,9 @@ omitted = [
 
 [dependencies]
 rind = { version = "0.3.2", path = "../rind" }
-rustls = { version = "0.23.20", default-features = false, features = ["std", "tls12"] }
+# rind-rustls needs the standard library, as does how it reports HPKE errors
+# through rustls's `OtherError`, whose fields depend on rustls's `std`.
+rustls = { version = "0.23.20", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 # Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
@@ -39,5 +41,9 @@ rustls = { version = "0.23.36", default-features = false, features = ["aws-lc-rs
 tokio = { version = "1.0", features = ["io-std", "macros", "net", "rt-multi-thread"] }
 tokio-rustls = { version = "0.26", default-features = false }
 
+# rustls's: as there, `std` gates `Ticketer` and `tls12` the TLS 1.2 suites.
+# rustls's `std` is always on, since rind-rustls needs it.
 [features]
-default = []
+default = ["std", "tls12"]
+std = []
+tls12 = ["rustls/tls12"]

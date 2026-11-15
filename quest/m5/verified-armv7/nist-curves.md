@@ -12,5 +12,4 @@ P-256, P-384, and P-521 key agreement and ECDSA earn the ✓ on armv7.
 
 ## Required
 
-- [armv7 runs the Rust proofs](/quest/m5/verified-armv7/prove.md) - the armv7 translation
 - [P-521 ECDH and ECDSA are proven on x86_64 and aarch64](/quest/m4/verified/p521.md) - the curve lemmas, P-384's included, this reuses

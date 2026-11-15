@@ -55,6 +55,10 @@ pub(crate) fn edwards25519_scalarmuldouble(
 /// returning the result's `(X, Y, Z)`, each reduced.
 #[target_feature(enable = "avx,avx2")]
 fn double_base(a: &[u64; 4], b: &[u64; 4], point: &[[u64; 4]; 4]) -> [[u64; 4]; 3] {
+    // Its operands are public, but `admin/ct-vartime` holds every `vpmuludq`
+    // to Intel's MXCSR mitigation alike. `target_feature` keeps this from
+    // inlining into its caller, so the mitigation covers only the vector work.
+    let _mcdt = crate::low::Mcdt::enter();
     let a_naf = non_adjacent_form(a, 5);
     let b_naf = non_adjacent_form(b, 8);
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! Keccak-f[1600], one round at a time as s2n-bignum's `keccak_round`
-//! (`keccak_spec.ml` at b4f17ee7) states it, so `proofs/Rind/Portable/Keccak.lean`
+//! (`keccak_spec.ml` at 3f01260f) states it, so `proofs/Rind/Portable/Keccak.lean`
 //! proves it against the spec the other backends' routines are proven
 //! against. The lanes are locals and their rotations constants, so no index
 //! or branch depends on the state.

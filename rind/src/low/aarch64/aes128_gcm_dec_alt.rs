@@ -37,13 +37,18 @@ use crate::low::macros::*;
 // the caller's responsibility, as in AWS-LC's GCM layer, whose
 // crypto/fipsmodule/modes/gcm.c passes whole blocks only.
 //
-// The table "htable" is the twelve 16-byte entries (192 bytes) that
-// gcm_init_v8 writes at the start of its Htable, derived from the subkey
-// H = AES_K(0^128). They hold, in order, H, m(H,H^2), H^2, H^3, m(H^3,H^4),
-// H^4, H^5, m(H^5,H^6), H^6, H^7, m(H^7,H^8), H^8, where the powers are in
-// the bit-reflected ("twisted") representation that gcm_init_v8 uses and
-// m(A,B) packs the Karatsuba middle terms A.lo ^ A.hi (low 64 bits) and
-// B.lo ^ B.hi (high 64 bits) of two neighbouring powers into one entry. The
+// The table "htable" is the twelve 16-byte entries (192 bytes) that AWS-LC's
+// gcm_init_v8 (crypto/fipsmodule/modes/asm/ghashv8-armx.pl) writes at the
+// start of its Htable, derived from the subkey H = AES_K(0^128). They hold, in
+// order, H, m(H,H^2), H^2, H^3, m(H^3,H^4), H^4, H^5, m(H^5,H^6), H^6, H^7,
+// m(H^7,H^8), H^8, where the powers are in the bit-reflected ("twisted")
+// representation that gcm_init_v8 uses and m(A,B) packs the Karatsuba middle
+// terms A.lo ^ A.hi (low 64 bits) and B.lo ^ B.hi (high 64 bits) of two
+// neighbouring powers into one entry. Since AWS-LC commit 90315e2a ("AES-GCM
+// AArch64: Store swapped Htable values") gcm_init_v8 stores each power with
+// its two 64-bit halves swapped, so tables built by OpenSSL's or BoringSSL's
+// gcm_init_v8, or by earlier versions of AWS-LC, give wrong tags. The exact
+// contents required are htable_mem_8 in arm/proofs/utils/aes_gcm_spec.ml. The
 // reference implementation in tests/ref_aes_gcm.c (ref_gcm_init_htable)
 // constructs the same table independently.
 // Of "key" only the 11 round keys (176 bytes) are read, not key->rounds, and
@@ -52,8 +57,9 @@ use crate::low::macros::*;
 // The input must satisfy in + len_bits/8 < 2^63, because the loop control
 // compares the input pointer with the main-loop end pointer as signed
 // integers (cmp x0, x5 followed by b.ge or b.lt). The buffers written ("out",
-// "tag" and "ivec") must not overlap each other, "in", "key" or "htable"; in
-// particular, in-place operation (out == in) is not covered by the proof.
+// "tag" and "ivec") must not overlap each other, "key" or "htable", and "tag"
+// and "ivec" must not overlap "in". The output may be the input itself
+// (in-place operation, out == in); otherwise "out" must not overlap "in".
 //
 // This is an alternative to aes128_gcm_dec with the same arguments, for
 // processors with FEAT_SHA3, whose eor3 it uses. Unlike aes128_gcm_dec it
@@ -62,8 +68,9 @@ use crate::low::macros::*;
 // returns 0 without touching memory, where aes128_gcm_dec processes the
 // whole blocks.
 //
-// This routine does not enforce the NIST GCM message limit.
-// Callers must ensure the cumulative message length does not exceed 2^36 - 32 bytes (2^39 - 256 bits).
+// This routine does not enforce the NIST GCM message limit. Callers must
+// ensure the cumulative message length does not exceed 2^36 - 32 bytes
+// (2^39 - 256 bits).
 //
 // Standard ARM ABI: X0 = in, X1 = len_bits, X2 = out, X3 = tag, X4 = ivec,
 //                   X5 = key, X6 = htable, returns X0
@@ -89,19 +96,19 @@ use crate::low::macros::*;
 //    plus the increments 1 to 7, each one add and one rev32 (the increments
 //    2 to 7 are built from the increment 1 first), instead of one serial
 //    add/rev32 chain through v30.
-//  - GHASH tail: the nine Karatsuba middle-term lane moves are
+//  - GHASH tail: the seven Karatsuba middle-term lane moves are
 //    ext vD.16b, vN.16b, vN.16b, #8 instead of ins vD.d[0], vN.d[1]. Only
 //    lane 0 of vD is consumed, and ext writes the whole register, so the
 //    moves no longer wait for the previous writer of vD.
 //  - Exactly 8 blocks left: the tail's first b.gt goes to the straight-line
 //    drain L128_dec_exact8_drain, placed after the return stub, instead of
-//    L128_dec_blocks_more_than_7, which is no longer reached but stays in
-//    place. The drain feeds the partial tag into its first block only,
+//    the generator's L128_dec_blocks_more_than_7, which is removed. The
+//    drain feeds the partial tag into its first block only,
 //    defers the products of three blocks to v13-v15 and folds each into the
 //    next block's accumulations with eor3, and rejoins the shared reduction
 //    at L128_dec_reduce.
 //  - One to four blocks: after the prologue, cmp x9, #64; b.le sends them to
-//    L128_dec_w5r_small, placed after the drain (the small-message path of
+//    L128_dec_small, placed after the drain (the small-message path of
 //    aes256_gcm_dec_alt with the AES-128 round keys). It seeds the GHASH
 //    accumulator with Xi' * H^nblk, decrypts the blocks one at a time,
 //    folding block j in with H^(nblk-j), reduces once, and rejoins the
@@ -114,8 +121,8 @@ use crate::low::macros::*;
 
 // Transliterated from s2n-bignum's arm/aes_gcm/aes128_gcm_dec_alt.S.
 /// AES-128-GCM bulk decryption, 8 blocks at a time: counter-mode decryption of
-///
 /// whole blocks with the GHASH tag update
+///
 /// Inputs in[len_bits/8], len_bits, tag[2], ivec[16], key[176], htable[24];
 /// outputs out[len_bits/8], tag[2], ivec[16], returns bytes processed
 ///
@@ -134,13 +141,18 @@ use crate::low::macros::*;
 /// the caller's responsibility, as in AWS-LC's GCM layer, whose
 /// crypto/fipsmodule/modes/gcm.c passes whole blocks only.
 ///
-/// The table "htable" is the twelve 16-byte entries (192 bytes) that
-/// gcm_init_v8 writes at the start of its Htable, derived from the subkey
-/// H = AES_K(0^128). They hold, in order, H, m(H,H^2), H^2, H^3, m(H^3,H^4),
-/// H^4, H^5, m(H^5,H^6), H^6, H^7, m(H^7,H^8), H^8, where the powers are in
-/// the bit-reflected ("twisted") representation that gcm_init_v8 uses and
-/// m(A,B) packs the Karatsuba middle terms A.lo ^ A.hi (low 64 bits) and
-/// B.lo ^ B.hi (high 64 bits) of two neighbouring powers into one entry. The
+/// The table "htable" is the twelve 16-byte entries (192 bytes) that AWS-LC's
+/// gcm_init_v8 (crypto/fipsmodule/modes/asm/ghashv8-armx.pl) writes at the
+/// start of its Htable, derived from the subkey H = AES_K(0^128). They hold, in
+/// order, H, m(H,H^2), H^2, H^3, m(H^3,H^4), H^4, H^5, m(H^5,H^6), H^6, H^7,
+/// m(H^7,H^8), H^8, where the powers are in the bit-reflected ("twisted")
+/// representation that gcm_init_v8 uses and m(A,B) packs the Karatsuba middle
+/// terms A.lo ^ A.hi (low 64 bits) and B.lo ^ B.hi (high 64 bits) of two
+/// neighbouring powers into one entry. Since AWS-LC commit 90315e2a ("AES-GCM
+/// AArch64: Store swapped Htable values") gcm_init_v8 stores each power with
+/// its two 64-bit halves swapped, so tables built by OpenSSL's or BoringSSL's
+/// gcm_init_v8, or by earlier versions of AWS-LC, give wrong tags. The exact
+/// contents required are htable_mem_8 in arm/proofs/utils/aes_gcm_spec.ml. The
 /// reference implementation in tests/ref_aes_gcm.c (ref_gcm_init_htable)
 /// constructs the same table independently.
 /// Of "key" only the 11 round keys (176 bytes) are read, not key->rounds, and
@@ -149,8 +161,9 @@ use crate::low::macros::*;
 /// The input must satisfy in + len_bits/8 < 2^63, because the loop control
 /// compares the input pointer with the main-loop end pointer as signed
 /// integers (cmp x0, x5 followed by b.ge or b.lt). The buffers written ("out",
-/// "tag" and "ivec") must not overlap each other, "in", "key" or "htable"; in
-/// particular, in-place operation (out == in) is not covered by the proof.
+/// "tag" and "ivec") must not overlap each other, "key" or "htable", and "tag"
+/// and "ivec" must not overlap "in". The output may be the input itself
+/// (in-place operation, out == in); otherwise "out" must not overlap "in".
 ///
 /// This is an alternative to aes128_gcm_dec with the same arguments, for
 /// processors with FEAT_SHA3, whose eor3 it uses. Unlike aes128_gcm_dec it
@@ -159,8 +172,9 @@ use crate::low::macros::*;
 /// returns 0 without touching memory, where aes128_gcm_dec processes the
 /// whole blocks.
 ///
-/// This routine does not enforce the NIST GCM message limit.
-/// Callers must ensure the cumulative message length does not exceed 2^36 - 32 bytes (2^39 - 256 bits).
+/// This routine does not enforce the NIST GCM message limit. Callers must
+/// ensure the cumulative message length does not exceed 2^36 - 32 bytes
+/// (2^39 - 256 bits).
 #[inline(never)]
 #[target_feature(enable = "aes,sha3")]
 pub(crate) unsafe fn aes128_gcm_dec_alt(
@@ -188,7 +202,7 @@ pub(crate) unsafe fn aes128_gcm_dec_alt(
         Q!("    stp             " "x5, xzr, [sp, #64]"),
         Q!("    add             " "x10, sp, #0x40"),
         Q!("    cmp             " "x9, #0x40"),
-        Q!("    b.le            " Label!("L128_dec_w5r_small", 3, After)),
+        Q!("    b.le            " Label!("L128_dec_small", 3, After)),
         Q!("    mov             " "x5, x9"),
         Q!("    ld1             " "{{ v0.16b }}, [x16]"),
         Q!("    ldp             " "q26, q27, [x11]"),
@@ -990,20 +1004,6 @@ pub(crate) unsafe fn aes128_gcm_dec_alt(
         Q!("    ldr             " "q21, [x6, #16]"),
         Q!("    b               " Label!("L128_dec_blocks_less_than_1", 16, After)),
 
-        Q!(Label!("L128_dec_blocks_more_than_7", 17) ":"),
-        Q!("    rev64           " "v8.16b, v9.16b"),
-        Q!("    eor             " "v8.16b, v8.16b, v16.16b"),
-        Q!("    ext             " "v18.16b, v24.16b, v24.16b, #8"),
-        Q!("    pmull           " "v19.1q, v8.1d, v25.1d"),
-        Q!("    ext             " "v27.16b, v8.16b, v8.16b, #8"),
-        Q!("    movi            " "v16.8b, #0x0"),
-        Q!("    ldr             " "q9, [x0], #16"),
-        Q!("    eor             " "v27.8b, v27.8b, v8.8b"),
-        Q!("    pmull2          " "v17.1q, v8.2d, v25.2d"),
-        Q!("    st1             " "{{ v12.16b }}, [x2], #16"),
-        Q!("    eor3            " "v12.16b, v9.16b, v1.16b, v29.16b"),
-        Q!("    pmull           " "v18.1q, v27.1d, v18.1d"),
-
         Q!(Label!("L128_dec_blocks_more_than_6", 8) ":"),
         Q!("    rev64           " "v8.16b, v9.16b"),
         Q!("    eor             " "v8.16b, v8.16b, v16.16b"),
@@ -1121,7 +1121,7 @@ pub(crate) unsafe fn aes128_gcm_dec_alt(
         Q!("    pmull           " "v26.1q, v8.1d, v20.1d"),
         Q!("    eor             " "v18.16b, v18.16b, v16.16b"),
 
-        Q!(Label!("L128_dec_reduce", 18) ":"),
+        Q!(Label!("L128_dec_reduce", 17) ":"),
         Q!("    ldr             " "d16, [x10]"),
         Q!("    eor             " "v19.16b, v19.16b, v26.16b"),
         Q!("    eor             " "v14.16b, v17.16b, v19.16b"),
@@ -1138,17 +1138,17 @@ pub(crate) unsafe fn aes128_gcm_dec_alt(
         Q!("    rev32           " "v30.16b, v30.16b"),
         Q!("    str             " "q30, [x16]"),
 
-        Q!(Label!("L128_dec_frame_restore", 19) ":"),
+        Q!(Label!("L128_dec_frame_restore", 18) ":"),
         Q!("    mov             " "x0, x9"),
         Q!("    ldp             " "d10, d11, [sp, #16]"),
         Q!("    ldp             " "d12, d13, [sp, #32]"),
         Q!("    ldp             " "d14, d15, [sp, #48]"),
         Q!("    ldp             " "d8, d9, [sp], #80"),
-        Q!("    b               " Label!("exit", 20, After)),
+        Q!("    b               " Label!("exit", 19, After)),
 
         Q!(Label!("L128_dec_ret", 2) ":"),
         Q!("    mov             " "w0, #0x0"),
-        Q!("    b               " Label!("exit", 20, After)),
+        Q!("    b               " Label!("exit", 19, After)),
 
         Q!(Label!("L128_dec_exact8_drain", 7) ":"),
         Q!("    rev64           " "v8.16b, v9.16b"),
@@ -1243,9 +1243,9 @@ pub(crate) unsafe fn aes128_gcm_dec_alt(
         Q!("    st1             " "{{ v12.16b }}, [x2]"),
         Q!("    pmull           " "v26.1q, v8.1d, v20.1d"),
         Q!("    eor             " "v18.16b, v18.16b, v16.16b"),
-        Q!("    b               " Label!("L128_dec_reduce", 18, Before)),
+        Q!("    b               " Label!("L128_dec_reduce", 17, Before)),
 
-        Q!(Label!("L128_dec_w5r_small", 3) ":"),
+        Q!(Label!("L128_dec_small", 3) ":"),
         Q!("    ld1             " "{{ v30.16b }}, [x16]"),
         Q!("    ld1             " "{{ v19.16b }}, [x3]"),
         Q!("    mov             " "x15, #0x100000000"),
@@ -1262,17 +1262,17 @@ pub(crate) unsafe fn aes128_gcm_dec_alt(
         Q!("    ldp             " "q9, q10, [x11, #128]"),
         Q!("    ldr             " "q11, [x11, #160]"),
         Q!("    cmp             " "x9, #0x20"),
-        Q!("    b.gt            " Label!("L128_dec_w5r_h1", 21, After)),
+        Q!("    b.gt            " Label!("L128_dec_small_ge3", 20, After)),
         Q!("    cmp             " "x9, #0x10"),
-        Q!("    b.eq            " Label!("L128_dec_w5r_stub_1", 22, After)),
-        Q!("    b               " Label!("L128_dec_w5r_stub_2", 23, After)),
+        Q!("    b.eq            " Label!("L128_dec_small_seed_1", 21, After)),
+        Q!("    b               " Label!("L128_dec_small_seed_2", 22, After)),
 
-        Q!(Label!("L128_dec_w5r_h1", 21) ":"),
+        Q!(Label!("L128_dec_small_ge3", 20) ":"),
         Q!("    cmp             " "x9, #0x30"),
-        Q!("    b.eq            " Label!("L128_dec_w5r_stub_3", 24, After)),
-        Q!("    b               " Label!("L128_dec_w5r_stub_4", 25, After)),
+        Q!("    b.eq            " Label!("L128_dec_small_seed_3", 23, After)),
+        Q!("    b               " Label!("L128_dec_small_seed_4", 24, After)),
 
-        Q!(Label!("L128_dec_w5r_stub_4", 25) ":"),
+        Q!(Label!("L128_dec_small_seed_4", 24) ":"),
         Q!("    ldr             " "q24, [x6, #80]"),
         Q!("    ldr             " "d25, [x6, #72]"),
         Q!("    ext             " "v21.16b, v16.16b, v16.16b, #8"),
@@ -1280,9 +1280,9 @@ pub(crate) unsafe fn aes128_gcm_dec_alt(
         Q!("    pmull2          " "v17.1q, v16.2d, v24.2d"),
         Q!("    pmull           " "v19.1q, v16.1d, v24.1d"),
         Q!("    pmull           " "v18.1q, v21.1d, v25.1d"),
-        Q!("    b               " Label!("L128_dec_w5r_g4", 26, After)),
+        Q!("    b               " Label!("L128_dec_small_blk_4", 25, After)),
 
-        Q!(Label!("L128_dec_w5r_stub_3", 24) ":"),
+        Q!(Label!("L128_dec_small_seed_3", 23) ":"),
         Q!("    ldr             " "q24, [x6, #48]"),
         Q!("    ldr             " "d25, [x6, #64]"),
         Q!("    ext             " "v21.16b, v16.16b, v16.16b, #8"),
@@ -1290,9 +1290,9 @@ pub(crate) unsafe fn aes128_gcm_dec_alt(
         Q!("    pmull2          " "v17.1q, v16.2d, v24.2d"),
         Q!("    pmull           " "v19.1q, v16.1d, v24.1d"),
         Q!("    pmull           " "v18.1q, v21.1d, v25.1d"),
-        Q!("    b               " Label!("L128_dec_w5r_g3", 27, After)),
+        Q!("    b               " Label!("L128_dec_small_blk_3", 26, After)),
 
-        Q!(Label!("L128_dec_w5r_stub_2", 23) ":"),
+        Q!(Label!("L128_dec_small_seed_2", 22) ":"),
         Q!("    ldr             " "q24, [x6, #32]"),
         Q!("    ldr             " "d25, [x6, #24]"),
         Q!("    ext             " "v21.16b, v16.16b, v16.16b, #8"),
@@ -1300,9 +1300,9 @@ pub(crate) unsafe fn aes128_gcm_dec_alt(
         Q!("    pmull2          " "v17.1q, v16.2d, v24.2d"),
         Q!("    pmull           " "v19.1q, v16.1d, v24.1d"),
         Q!("    pmull           " "v18.1q, v21.1d, v25.1d"),
-        Q!("    b               " Label!("L128_dec_w5r_g2", 28, After)),
+        Q!("    b               " Label!("L128_dec_small_blk_2", 27, After)),
 
-        Q!(Label!("L128_dec_w5r_stub_1", 22) ":"),
+        Q!(Label!("L128_dec_small_seed_1", 21) ":"),
         Q!("    ldr             " "q24, [x6]"),
         Q!("    ldr             " "d25, [x6, #16]"),
         Q!("    ext             " "v21.16b, v16.16b, v16.16b, #8"),
@@ -1310,9 +1310,9 @@ pub(crate) unsafe fn aes128_gcm_dec_alt(
         Q!("    pmull2          " "v17.1q, v16.2d, v24.2d"),
         Q!("    pmull           " "v19.1q, v16.1d, v24.1d"),
         Q!("    pmull           " "v18.1q, v21.1d, v25.1d"),
-        Q!("    b               " Label!("L128_dec_w5r_g1", 29, After)),
+        Q!("    b               " Label!("L128_dec_small_blk_1", 28, After)),
 
-        Q!(Label!("L128_dec_w5r_g4", 26) ":"),
+        Q!(Label!("L128_dec_small_blk_4", 25) ":"),
         Q!("    ldr             " "q26, [x0], #16"),
         Q!("    rev32           " "v0.16b, v29.16b"),
         Q!("    add             " "v29.4s, v29.4s, v31.4s"),
@@ -1349,7 +1349,7 @@ pub(crate) unsafe fn aes128_gcm_dec_alt(
         Q!("    eor3            " "v0.16b, v26.16b, v0.16b, v11.16b"),
         Q!("    str             " "q0, [x2], #16"),
 
-        Q!(Label!("L128_dec_w5r_g3", 27) ":"),
+        Q!(Label!("L128_dec_small_blk_3", 26) ":"),
         Q!("    ldr             " "q26, [x0], #16"),
         Q!("    rev32           " "v0.16b, v29.16b"),
         Q!("    add             " "v29.4s, v29.4s, v31.4s"),
@@ -1386,7 +1386,7 @@ pub(crate) unsafe fn aes128_gcm_dec_alt(
         Q!("    eor3            " "v0.16b, v26.16b, v0.16b, v11.16b"),
         Q!("    str             " "q0, [x2], #16"),
 
-        Q!(Label!("L128_dec_w5r_g2", 28) ":"),
+        Q!(Label!("L128_dec_small_blk_2", 27) ":"),
         Q!("    ldr             " "q26, [x0], #16"),
         Q!("    rev32           " "v0.16b, v29.16b"),
         Q!("    add             " "v29.4s, v29.4s, v31.4s"),
@@ -1423,7 +1423,7 @@ pub(crate) unsafe fn aes128_gcm_dec_alt(
         Q!("    eor3            " "v0.16b, v26.16b, v0.16b, v11.16b"),
         Q!("    str             " "q0, [x2], #16"),
 
-        Q!(Label!("L128_dec_w5r_g1", 29) ":"),
+        Q!(Label!("L128_dec_small_blk_1", 28) ":"),
         Q!("    ldr             " "q26, [x0], #16"),
         Q!("    rev32           " "v0.16b, v29.16b"),
         Q!("    add             " "v29.4s, v29.4s, v31.4s"),
@@ -1476,9 +1476,9 @@ pub(crate) unsafe fn aes128_gcm_dec_alt(
         Q!("    eor3            " "v0.16b, v26.16b, v0.16b, v11.16b"),
         Q!("    str             " "q0, [x2], #16"),
 
-        Q!(Label!("L128_dec_w5r_done", 30) ":"),
-        Q!("    b               " Label!("L128_dec_frame_restore", 19, Before)),
-        Q!(Label!("exit", 20) ":"),
+        Q!(Label!("L128_dec_small_done", 29) ":"),
+        Q!("    b               " Label!("L128_dec_frame_restore", 18, Before)),
+        Q!(Label!("exit", 19) ":"),
         inout("x0") inout => _,
         inout("x1") blocks * 128 => _,
         inout("x2") inout => _,
