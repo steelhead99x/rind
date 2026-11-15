@@ -120,10 +120,6 @@ The pins, as `admin/audit` renders them from the files that hold them, so
 | fiat-crypto | 0.3.0 | `Cargo.lock` | the NIST curves' field arithmetic on armv7 and the portable backend |
 | getrandom | 0.4.3 | `Cargo.lock` | the operating system's random source |
 | libc | 0.2.191 | `Cargo.lock` | `getauxval`, for armv7's crypto extension bits |
-| libcrux-hacl-rs | 0.0.6 | `Cargo.lock` | the runtime of the HACL\* ChaCha20 rounds rind copied |
-| libcrux-macros | 0.0.4 | `Cargo.lock` | the same |
-| libcrux-poly1305 | 0.0.7 | `Cargo.lock` | HACL\*'s Poly1305, on 32-bit portable targets |
-| libcrux-sha2 | 0.0.9 | `Cargo.lock` | HACL\*'s SHA-2 block functions, on the portable backend |
 <!-- admin/audit pins: end -->
 
 Code taken once, with no importer to rerun, carries no machine-readable pin:
