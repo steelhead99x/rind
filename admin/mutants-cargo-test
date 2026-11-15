@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Tests admin/mutants-cargo's argument rewriting, with `echo` as the real
+# cargo so each case prints the command the wrapper would run.
+set -euo pipefail
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+export RIND_REAL_CARGO=echo
+
+failed=0
+expect() {
+    local want=$1
+    shift
+    local got
+    got=$("$here/mutants-cargo" "$@")
+    if [[ $got != "$want" ]]; then
+        printf 'admin/mutants-cargo %s\n  want: %s\n  got:  %s\n' "$*" "$want" "$got" >&2
+        failed=1
+    fi
+}
+
+expect 'test --package=rind-rcgen@0.13.2 --features=wipe --features=zeroize' \
+    test --package=rind-rcgen@0.13.2
+expect 'test -p rind-rcgen --features=wipe --features=zeroize -- --nocapture' \
+    test -p rind-rcgen -- --nocapture
+expect 'nextest run --package rind-rcgen --features=wipe --features=zeroize' \
+    nextest run --package rind-rcgen
+expect 'check --package=rind-rcgen@0.13.2 --features=wipe --features=zeroize' \
+    check --package=rind-rcgen@0.13.2
+expect 'test --package=rind@0.3.2' test --package=rind@0.3.2
+expect 'test --package=rind-rcgen@0.13.2 --package=rind@0.3.2' \
+    test --package=rind-rcgen@0.13.2 --package=rind@0.3.2
+expect 'test --workspace' test --workspace
+expect 'build -p rind-rcgen' build -p rind-rcgen
+expect ''
+
+exit "$failed"

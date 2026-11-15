@@ -74,8 +74,9 @@ declare -A scope=(
     # rind runs in place are walked, after planting faults in each.
     [inplace]='^(rind/src/low/|admin/parse-asm/)'
     # .cargo/mutants.toml's exclusions name mutants by file, line, and
-    # function, so moving code can leave one matching nothing.
-    [mutants]='^(rind[^/]*/src/|\.cargo/mutants\.toml$|admin/mutants$)'
+    # function, so moving code can leave one matching nothing. The cargo
+    # wrapper picks rind-rcgen's features, which no other check exercises.
+    [mutants]='^(rind[^/]*/src/|\.cargo/mutants\.toml$|admin/mutants(-cargo(-test)?)?$)'
     # TESTING.md's table names every export, test, and vector file.
     [testing]='^(TESTING\.md$|admin/testing$|rind/(src|tests)/|fuzz/)'
     # COMPATIBILITY.md is generated from the CPU scans.
@@ -331,7 +332,10 @@ for module in "${selected[@]}"; do
             ;;
         check:quest) quest check ;;
         check:license) bash admin/scan-license ;;
-        check:mutants) admin/mutants --pins ;;
+        check:mutants)
+            admin/mutants-cargo-test
+            admin/mutants --pins
+            ;;
         # It finds the generated kernels relative to its own directory.
         check:inplace) (cd admin/parse-asm && python3 inplace.py) ;;
         check:testing) python3 admin/testing ;;
