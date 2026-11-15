@@ -6,7 +6,10 @@
 # `admin/ctgrind`), as `admin/ct-sde` is for x86_64's extensions: armv7's
 # crypto extension, by default, or with `--target aarch64-unknown-linux-gnu`
 # the code aarch64 runs only with SHA3, such as the eight-way AES-GCM
-# kernels. Each rind test named `ct_qemu...` derives its secrets from a seed
+# kernels. On aarch64 it then runs every trace again with
+# `RIND_CPU_DISABLE_wide_mul=1`, which selects the narrow-multiplier
+# schedules a wide host's `/proc/cpuinfo` would not. Each rind test named
+# `ct_qemu...` derives its secrets from a seed
 # and marks the calls it checks. This runs each one whose name contains
 # `filter` twice under qemu-arm's or qemu-aarch64's `max` CPU, which has
 # those features, with different seeds, and fails unless
@@ -39,6 +42,20 @@ def qemu(target):
     return ["setarch", platform.machine(), "-R", QEMU[target], "-cpu", "max"]
 
 
+def build_env(target):
+    """The build environment. aarch64 release builds honour
+    `RIND_CPU_DISABLE_wide_mul` only with `--cfg rind_cpu_disable`, so the
+    narrow pass below can select the non-`_alt` schedules."""
+    env = dict(os.environ)
+    if target == "aarch64-unknown-linux-gnu":
+        flags = env.get("RUSTFLAGS", "")
+        words = flags.split()
+        paired = any(a == "--cfg" and b == "rind_cpu_disable" for a, b in zip(words, words[1:]))
+        if "--cfg=rind_cpu_disable" not in words and not paired:
+            env["RUSTFLAGS"] = (flags + " --cfg rind_cpu_disable").strip()
+    return env
+
+
 def build(target):
     out = subprocess.run(
         ["cargo", "test", "-p", "rind", "--lib", "--release", "--no-run"]
@@ -46,6 +63,7 @@ def build(target):
         stdout=subprocess.PIPE,
         check=True,
         encoding="utf-8",
+        env=build_env(target),
     ).stdout
     for line in out.splitlines():
         js = json.loads(line)
@@ -77,10 +95,10 @@ def describe(record):
     return "{} {} {:#014x}".format(kind.decode(), size, addr)
 
 
-def compare(target, exe, name, tmp, plugin):
+def compare(target, exe, name, tmp, plugin, extra):
     """Traces `name` once for each seed, and returns where the traces differ,
     with the records before it, or None, and how many records they agreed
-    on."""
+    on. `extra` is added to the environment of both traces."""
     procs = []
     files = []
     for i, seed in enumerate(SEEDS):
@@ -93,6 +111,7 @@ def compare(target, exe, name, tmp, plugin):
         # The seeds have the same length, so the environment, and so
         # everything above it on the stack, lies at the same addresses.
         env = dict(os.environ, RIND_CT_QEMU_SEED=seed)
+        env.update(extra)
         log = open(os.path.join(tmp, "log{}".format(i)), "w+")
         proc = subprocess.Popen(cmd, env=env, stdout=log, stderr=log, pass_fds=[w])
         os.close(w)
@@ -150,27 +169,38 @@ def main():
     if all(is_planted(n) for n in names):
         sys.exit("ct-qemu: no ct_qemu test matches {!r}".format(filter))
 
+    # The host qemu sees is wide, or has no Arm part list at all, so one
+    # pass traces `_alt`. The narrow schedules are a second pass. armv7 has
+    # no such choice.
+    passes = [("", {})]
+    if target == "aarch64-unknown-linux-gnu" and not os.environ.get("RIND_CPU_DISABLE_wide_mul"):
+        passes.append(("narrow", {"RIND_CPU_DISABLE_wide_mul": "1"}))
+
     failed = False
-    for name in names:
-        with tempfile.TemporaryDirectory() as tmp:
-            diff, records = compare(target, exe, name, tmp, plugin)
-        planted = is_planted(name)
-        if records == 0:
-            print("FAIL {}: traced nothing".format(name))
-            failed = True
-        elif diff and not planted:
-            context, a, b = diff
-            print("FAIL {}: traces differ after {} records".format(name, records))
-            for record in context:
-                print("    " + describe(record))
-            print("  - " + a)
-            print("  + " + b)
-            failed = True
-        elif not diff and planted:
-            print("FAIL {}: a planted leak traced the same".format(name))
-            failed = True
-        else:
-            print("ok   {}: {} records".format(name, records))
+    for label, extra in passes:
+        if label:
+            print("ct-qemu: {} multiplier".format(label))
+        for name in names:
+            with tempfile.TemporaryDirectory() as tmp:
+                diff, records = compare(target, exe, name, tmp, plugin, extra)
+            planted = is_planted(name)
+            shown = "{} ({})".format(name, label) if label else name
+            if records == 0:
+                print("FAIL {}: traced nothing".format(shown))
+                failed = True
+            elif diff and not planted:
+                context, a, b = diff
+                print("FAIL {}: traces differ after {} records".format(shown, records))
+                for record in context:
+                    print("    " + describe(record))
+                print("  - " + a)
+                print("  + " + b)
+                failed = True
+            elif not diff and planted:
+                print("FAIL {}: a planted leak traced the same".format(shown))
+                failed = True
+            else:
+                print("ok   {}: {} records".format(shown, records))
     sys.exit(failed)
 
 
