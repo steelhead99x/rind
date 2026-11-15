@@ -515,6 +515,42 @@ class CpuSlug(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(SystemExit):
                 br.resolve_host(bad, model)
 
+    def test_architecture_fallback_is_not_a_reserved_host_name(self):
+        # Minimal aarch64 Linux: no model name in cpuinfo or lscpu, so the
+        # brand string is platform.machine(), and that slug is the reserved
+        # tier name. An underscore in x86_64 becomes a hyphen, which is not
+        # reserved; it still has to be a legal host name.
+        for processor, machine, expect in (
+            ("", "aarch64", "aarch64-host"),
+            ("aarch64", "aarch64", "aarch64-host"),
+            ("", "x86_64", "x86-64"),
+        ):
+            model = br.cpu_model_fallback(processor, machine)
+            slug = br.cpu_slug(model)
+            with self.subTest(processor=processor, machine=machine):
+                self.assertEqual(slug, expect)
+                self.assertNotIn(slug, br.reserved_host_names())
+                self.assertEqual(br.resolve_host(None, model), slug)
+                br.check_host_name(slug)
+        self.assertEqual(br.cpu_model_fallback("", ""), "unknown")
+        br.check_host_name(br.cpu_slug(br.cpu_model_fallback("", "")))
+        for _, tier in br.TIERS:
+            slug = br.cpu_slug(tier)
+            with self.subTest(tier=tier):
+                self.assertNotIn(slug, br.reserved_host_names())
+                br.check_host_name(slug)
+        with self.assertRaises(SystemExit):
+            br.resolve_host("aarch64", "aarch64")
+
+    def test_machine_tag_is_stable_hex(self):
+        tag = br.machine_tag()
+        self.assertEqual(tag, br.machine_tag())
+        self.assertRegex(tag, r"^[0-9a-f]{8}$")
+        self.assertEqual(br.machine_tag_of({"machine": "abcdef12"}), "abcdef12")
+        self.assertEqual(br.machine_tag_of({"machine": "ABCDEF12"}), "")
+        self.assertEqual(br.machine_tag_of({"machine": "not-a-tag"}), "")
+        self.assertEqual(br.machine_tag_of({}), "")
+
 
 class AnyHost(unittest.TestCase):
     def test_summary_render_and_import_take_a_host_outside_collect_hosts(self):
@@ -582,6 +618,114 @@ class AnyHost(unittest.TestCase):
         self.assertIn(f"unknown collect host {ALIEN}", collect.stderr)
         self.assertIn("nixos", collect.stderr)
         self.assertIn("`admin/bench-report run`", collect.stderr)
+
+    def test_load_hosts_rejects_illegal_names(self):
+        with tempfile.TemporaryDirectory() as src:
+            cases = {
+                "x86_64.json": "x86_64",
+                "aarch64.json": "aarch64",
+                "armv7.json": "armv7",
+                "portable.json": "portable",
+                "bad name.json": "bad name",
+                f"{'a' * 82}.json": "a" * 82,
+            }
+            for filename, host_name in cases.items():
+                path = os.path.join(src, filename)
+                with open(path, "w") as f:
+                    json.dump({"schema": 1, "host": host_name, "status": "ok"}, f)
+                with self.subTest(filename=filename), self.assertRaises(SystemExit):
+                    br.load_hosts(src)
+                os.remove(path)
+            with open(os.path.join(src, "laptop.json"), "w") as f:
+                json.dump({"schema": 1, "host": "portable", "status": "ok"}, f)
+            with self.assertRaises(SystemExit):
+                br.load_hosts(src)
+            os.remove(os.path.join(src, "laptop.json"))
+            with open(os.path.join(src, "laptop.json"), "w") as f:
+                json.dump({"schema": 1, "host": 1, "status": "ok"}, f)
+            with self.assertRaises(SystemExit):
+                br.load_hosts(src)
+            os.remove(os.path.join(src, "laptop.json"))
+            legal = "b" * 81
+            with open(os.path.join(src, f"{legal}.json"), "w") as f:
+                json.dump({"schema": 1, "host": legal, "status": "ok"}, f)
+            with open(os.path.join(src, "tiers.json"), "w") as f:
+                json.dump({"tiers": []}, f)
+            self.assertEqual(list(br.load_hosts(src)), [legal])
+
+    def test_same_cpu_slug_imports_keep_both_machines(self):
+        slug = RYZEN
+        machines = []
+        for tag, started in (
+            ("aaaaaaaa", "2026-11-03T02:00:00+00:00"),
+            ("bbbbbbbb", "2026-11-04T02:00:00+00:00"),
+        ):
+            body = laptop(slug)
+            body["machine"] = tag
+            body["started"] = started
+            machines.append(body)
+        saved = br.DATA_DIR
+        try:
+            for first, second in (machines, list(reversed(machines))):
+                with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                    br.DATA_DIR = data
+                    for body in (first, second):
+                        with open(os.path.join(src, f"{slug}.json"), "w") as f:
+                            json.dump(body, f)
+                        br.import_hosts(src)
+                    newcomer = f"{slug}-{second['machine']}"
+                    self.assertEqual(set(os.listdir(data)), {f"{slug}.json", f"{newcomer}.json"})
+                    with open(os.path.join(data, f"{slug}.json")) as f:
+                        self.assertEqual(json.load(f)["machine"], first["machine"])
+                    with open(os.path.join(data, f"{newcomer}.json")) as f:
+                        got = json.load(f)
+                    self.assertEqual((got["host"], got["machine"]), (newcomer, second["machine"]))
+                    again = dict(second)
+                    again["started"] = "2026-11-05T02:00:00+00:00"
+                    with open(os.path.join(src, f"{slug}.json"), "w") as f:
+                        json.dump(again, f)
+                    br.import_hosts(src)
+                    self.assertEqual(set(os.listdir(data)), {f"{slug}.json", f"{newcomer}.json"})
+                    with open(os.path.join(data, f"{newcomer}.json")) as f:
+                        self.assertEqual(json.load(f)["started"], "2026-11-05T02:00:00+00:00")
+                    loaded = br.load_hosts(data)
+                    self.assertEqual(set(loaded), {slug, newcomer})
+        finally:
+            br.DATA_DIR = saved
+
+    def test_retagging_one_host_replaces_its_file(self):
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                first = laptop("nixos")
+                with open(os.path.join(src, "nixos.json"), "w") as f:
+                    json.dump(first, f)
+                br.import_hosts(src)
+                second = laptop("nixos")
+                second["machine"] = "cccccccc"
+                second["started"] = "2026-11-05T00:00:00+00:00"
+                with open(os.path.join(src, "nixos.json"), "w") as f:
+                    json.dump(second, f)
+                br.import_hosts(src)
+                self.assertEqual(os.listdir(data), ["nixos.json"])
+                with open(os.path.join(data, "nixos.json")) as f:
+                    body = json.load(f)
+                self.assertEqual(body["machine"], "cccccccc")
+                self.assertEqual(body["started"], "2026-11-05T00:00:00+00:00")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_colliding_slug_suffix_stays_a_legal_name(self):
+        slug = "n" * 80
+        name = br.tagged_host_name(slug, "abcdef12")
+        self.assertLessEqual(len(name), 81)
+        self.assertTrue(name.endswith("-abcdef12"))
+        br.check_host_name(name)
+        other = br.collided_host_name(slug, "abcdef12", {slug, name})
+        br.check_host_name(other)
+        self.assertNotIn(other, {slug, name})
+        self.assertEqual(other, br.collided_host_name(slug, "abcdef12", {slug, name}))
 
 
 class AnyHostGaps(unittest.TestCase):

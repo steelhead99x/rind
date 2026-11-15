@@ -14,7 +14,11 @@ filesystem-safe slug of the CPU model (`intel-core-ultra-9-275hx`,
 `amd-ryzen-9-7950x`, `apple-m3-max`) unless `--host` sets another sane name.
 The JSON records the raw CPU string, that slug, the logical and physical core
 counts, and the OS. Name the file `<host>.json` to feed it to `summary` or
-`render --from`.
+`render --from`. A slug that equals a nightly tier name gains a `-host`
+suffix, so a minimal aarch64 Linux box is `aarch64-host` rather than the
+reserved name `aarch64`. Each result records a machine tag. Importing a
+second machine that wants a slug already on disk keeps both: the resident
+keeps the slug, and the newcomer is `<slug>-<tag>`.
 
 `collect` is the maintainer path. It copies one commit to each machine in
 COLLECT_HOSTS in turn, waits for room under `quest gate` and for any lease it
@@ -52,6 +56,7 @@ import ctypes
 import datetime
 import fnmatch
 import glob
+import hashlib
 import json
 import os
 import platform
@@ -454,7 +459,12 @@ def cpu_model():
         found = cpu_model_from_lscpu(try_output(["lscpu"]))
         if found:
             return found
-    return platform.processor() or platform.machine() or "unknown"
+    return cpu_model_fallback(platform.processor(), platform.machine())
+
+
+def cpu_model_fallback(processor, machine):
+    """The brand string when the OS names no model: processor, then machine."""
+    return processor or machine or "unknown"
 
 
 # Words and suffixes that are not part of the CPU's name: trademarks, a clock,
@@ -467,7 +477,9 @@ def cpu_slug(model):
 
     `Intel(R) Core(TM) Ultra 9 275HX` becomes `intel-core-ultra-9-275hx`,
     `AMD Ryzen 9 7950X 16-Core Processor` becomes `amd-ryzen-9-7950x`, and
-    `Apple M3 Max` becomes `apple-m3-max`.
+    `Apple M3 Max` becomes `apple-m3-max`. A result that is a nightly tier
+    name, which is what `platform.machine()` returns on a minimal aarch64
+    Linux, gains a `-host` suffix so the slug is never reserved.
     """
     text = model.lower()
     text = re.sub(r"\((?:r|tm|c)\)|[®™]", " ", text)
@@ -478,7 +490,10 @@ def cpu_slug(model):
     slug = "-".join(parts)
     if len(slug) > 80:
         slug = slug[:80].rsplit("-", 1)[0] or slug[:80]
-    return slug or "unknown"
+    slug = slug or "unknown"
+    if slug in reserved_host_names():
+        slug = f"{slug}-host"
+    return slug
 
 
 def physical_from_cpuinfo(text):
@@ -553,13 +568,19 @@ def cpu_metadata():
     return info
 
 
+def reserved_host_names():
+    """Nightly tier names and `tiers`. `tiers.json` and gaps.toml's `on` use them."""
+    return set(dict(TIERS).values()) | {"tiers"}
+
+
 def check_host_name(name):
-    """A host name is one path component. Nightly tier names and `tiers` are
-    reserved, because `tiers.json` and gaps.toml's `on` already use them."""
-    reserved = set(dict(TIERS).values()) | {"tiers"}
-    if name in reserved:
+    """A host name is one path component: 1 to 81 letters, digits, `.`, `_`,
+    and `-`, and not a reserved name."""
+    if not isinstance(name, str):
+        fail(f"host name {name!r} is not a filesystem-safe name of letters, digits, '.', '_' and '-'")
+    if name in reserved_host_names():
         fail(f"host name {name!r} is reserved; pass a different --host")
-    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}", name):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}", name):
         fail(f"host name {name!r} is not a filesystem-safe name of letters, digits, '.', '_' and '-'")
 
 
@@ -611,6 +632,7 @@ def run(args):
     result = {
         "schema": 1,
         "host": host,
+        "machine": machine_tag(),
         "commit": args.commit,
         "started": started,
         "cpu": cpu,
@@ -1293,16 +1315,20 @@ def host_note(name, host):
 
 def load_hosts(directory):
     """Every host result in `directory`, keyed by file name. `tiers.json` is
-    the nightly CPU tiers, not a host."""
+    the nightly CPU tiers, not a host. Every other file name has to pass
+    `check_host_name`, and so does a `host` field that names something else."""
     found = {}
     for path in glob.glob(os.path.join(directory, "*.json")):
         name = os.path.splitext(os.path.basename(path))[0]
         if name == "tiers":
             continue
+        check_host_name(name)
         with open(path) as f:
             data = json.load(f)
         if not isinstance(data, dict):
             fail(f"{os.path.basename(path)} is not a host result")
+        if "host" in data and data["host"] != name:
+            check_host_name(data["host"])
         found[name] = data
     # Glob order is not stable. Collect machines stay in COLLECT_HOSTS order
     # and every other file follows by name.
@@ -2152,9 +2178,108 @@ def report(hosts, tiers, verified, gaps):
     return files
 
 
+def machine_tag():
+    """Eight hex characters that identify this machine across runs.
+
+    Two boxes with one CPU model then keep distinct host names on import. The
+    tag is a hash of the OS machine id, not a hostname.
+    """
+    ident = ""
+    for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+        try:
+            with open(path) as f:
+                ident = f.read().strip()
+        except OSError:
+            ident = ""
+        if ident:
+            break
+    if not ident and sys.platform == "darwin":
+        found = re.search(
+            r'"IOPlatformUUID" = "([^"]+)"', try_output(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"])
+        )
+        ident = found.group(1) if found else ""
+    if not ident:
+        ident = socket.gethostname()
+    return hashlib.sha256(ident.encode()).hexdigest()[:8]
+
+
+def machine_tag_of(host):
+    tag = host.get("machine") if isinstance(host, dict) else None
+    if isinstance(tag, str) and re.fullmatch(r"[0-9a-f]{8}", tag):
+        return tag
+    return ""
+
+
+def tagged_host_name(slug, tag):
+    """`slug` plus `tag`, shortened so the result still passes `check_host_name`."""
+    suffix = f"-{tag}"
+    room = 81 - len(suffix)
+    base = slug if len(slug) <= room else (slug[:room].rsplit("-", 1)[0] or slug[:room])
+    name = base + suffix
+    check_host_name(name)
+    return name
+
+
+def different_machine(previous, host):
+    """True when both results carry tags and the tags differ."""
+    left, right = machine_tag_of(previous), machine_tag_of(host)
+    return bool(left and right and left != right)
+
+
+def collided_host_name(slug, tag, taken):
+    """A free name for a machine whose slug is already another machine's.
+
+    With a tag the suffix is that tag, so the same newcomer always lands on
+    the same name. Without one, the suffix is the lowest free `-2`, `-3`, ...
+    """
+    if tag:
+        candidate = tagged_host_name(slug, tag)
+        if candidate not in taken:
+            return candidate
+    n = 2
+    while True:
+        suffix = f"-{n}"
+        room = 81 - len(suffix)
+        if room < 1:
+            fail(f"host name {slug!r} has no free suffix")
+        base = slug if len(slug) <= room else (slug[:room].rsplit("-", 1)[0] or slug[:room])
+        candidate = base + suffix
+        if candidate not in taken:
+            check_host_name(candidate)
+            return candidate
+        n += 1
+
+
+def assign_import_name(name, host, existing):
+    """Where to put `host`. The same machine replaces its file. A different
+    machine that wants a taken name gets `collided_host_name`."""
+    tag = machine_tag_of(host)
+    if tag:
+        aliased = tagged_host_name(name, tag)
+        for stem in sorted(existing):
+            if machine_tag_of(existing[stem]) == tag and stem in (name, aliased):
+                return stem
+    if name not in existing or not different_machine(existing[name], host):
+        return name
+    return collided_host_name(name, tag, set(existing))
+
+
 def import_hosts(directory):
-    """Copies a collection's measured hosts into the report's data."""
+    """Copies a collection's measured hosts into the report's data.
+
+    A later result from the same machine replaces its file. A different
+    machine with the same slug is stored beside it, as `<slug>-<tag>`.
+    """
     os.makedirs(DATA_DIR, exist_ok=True)
+    existing = {}
+    for path in glob.glob(os.path.join(DATA_DIR, "*.json")):
+        stem = os.path.splitext(os.path.basename(path))[0]
+        if stem == "tiers":
+            continue
+        with open(path) as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            existing[stem] = data
     for name, host in load_hosts(directory).items():
         if host.get("status") != "ok":
             print(
@@ -2162,7 +2287,20 @@ def import_hosts(directory):
                 file=sys.stderr,
             )
             continue
-        shutil.copy(os.path.join(directory, f"{name}.json"), os.path.join(DATA_DIR, f"{name}.json"))
+        dest = assign_import_name(name, host, existing)
+        creating = dest not in existing
+        if dest == name:
+            shutil.copy(os.path.join(directory, f"{name}.json"), os.path.join(DATA_DIR, f"{name}.json"))
+            existing[dest] = host
+        else:
+            body = dict(host)
+            body["host"] = dest
+            with open(os.path.join(DATA_DIR, f"{dest}.json"), "w") as f:
+                json.dump(body, f, indent=1)
+                f.write("\n")
+            existing[dest] = body
+        if creating and dest != name:
+            print(f"bench-report: {name}: same slug as another machine, imported as {dest}", file=sys.stderr)
 
 
 def render(args):
