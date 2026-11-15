@@ -16,7 +16,7 @@
 #![cfg(feature = "wipe")]
 
 #[cfg(not(any(miri, target_family = "wasm")))]
-#[path = "replace_file.rs"]
+#[path = "support/replace_file.rs"]
 mod replace_file;
 
 mod freed;

@@ -16,7 +16,7 @@
 #![cfg(not(miri))]
 
 #[cfg(not(target_family = "wasm"))]
-#[path = "replace_file.rs"]
+#[path = "support/replace_file.rs"]
 mod replace_file;
 
 #[cfg(not(target_family = "wasm"))]
