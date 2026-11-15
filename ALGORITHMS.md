@@ -100,7 +100,7 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | AES block, AES-CTR | Graviola + rind | aws-lc |  | aws-lc |
 | AES-KW, AES-KWP, AES-CBC | Graviola + rind | aws-lc + rind |  | aws-lc + rind |
 | ChaCha20 (header protection) | HACL* ✓ + rind |  |  |  |
-| ChaCha20-Poly1305, XChaCha20-Poly1305 | aws-lc ⚡ |  |  | HACL* rounds + Graviola; 26-bit rind on 32-bit |
+| ChaCha20-Poly1305, XChaCha20-Poly1305 | aws-lc ⚡ |  |  | HACL* rounds + Graviola; 26-bit rind when `rind_limb` is 32 |
 | MD5 | rind |  |  |  |
 | SHA-1 | rind | aws-lc |  | rind |
 | SHA-256 | aws-lc ⚡ | aws-lc |  | rind; ESP-IDF Xtensa runs the 16-round body from IRAM |
@@ -156,8 +156,9 @@ with portable Rust in place of the assembly armv7 runs regardless.
   IRAM, `K` in `.dram1`, no call from the block, and no relocation into
   flash text. A debug build is not that promise. Every other portable
   target runs `generic::sha256`.
-- portable: ChaCha20-Poly1305's Poly1305 is Graviola's 64-bit limbs on
-  64-bit targets and rind's 26-bit limbs on 32-bit ones. Neither counts
+- portable: ChaCha20-Poly1305's Poly1305 is Graviola's 64-bit limbs when
+  `rind_limb` is 64, including wasm32 with `wide-arithmetic`, and rind's
+  26-bit limbs when `rind_limb` is 32. Neither counts
   its input, so a message is not limited to 2^32 bytes. SHA-3's, ML-KEM's, and
   ML-DSA's Keccak-f is rind's, s2n-bignum's Keccak spec in Rust, which
   [`proofs/`](proofs/README.md) proves is FIPS 202's KECCAK-f[1600]; it

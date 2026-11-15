@@ -121,7 +121,7 @@ each unproven Montgomery and RSAZ routine of the backend that takes the
 modulus's width, not only the one the CPU picks; beside them, each routine's
 unit tests compare it with proven or portable arithmetic on values built from
 edge-case limbs, in its own radix. Poly1305's 64-bit standalone test runs on x86_64, aarch64, and the 64-bit
-portable backend. The 26-bit one, `low::generic::poly1305_32::aws_lc`, runs in every test build and is what 32-bit portable and armv7 without NEON ship. `low::generic::poly1305_32::matches_aws_lc` calls aws-lc's `CRYPTO_poly1305_*` on the same inputs, because aws-lc-rs does not export Poly1305. The AEAD vectors check both.
+portable backend. The 26-bit one, `low::generic::poly1305_32::aws_lc`, runs in every test build and is what portable targets with `rind_limb` 32, and armv7 without NEON, ship. `low::generic::poly1305_32::matches_aws_lc` calls aws-lc's `CRYPTO_poly1305_*` on the same inputs, because aws-lc-rs does not export Poly1305. The AEAD vectors check both.
 
 CCTV's ML-KEM tests read `ML-KEM/{intermediate,unluckysample,strcmp,modulus}/`.
 The first two use draft keys to check encapsulation and decapsulation, not
