@@ -73,13 +73,13 @@ def nist.ofJacobian (p x y z : Nat) : nist.Point :=
 
 /-- `represents2_p384 P (x, y)`: `P` is the finite point whose coordinates
 in Montgomery form (`montgomery_decode`) are `x` and `y`, each below `p384`,
-https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/p384_montjmixadd_alt.ml#L3736 -/
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/p384_montjmixadd_alt.ml#L3736 -/
 def p384Represents2 (P : nist.Point) (xy : Nat × Nat) : Prop :=
   xy.1 < p384 ∧ xy.2 < p384 ∧ some (p384RInv * xy.1 % p384, p384RInv * xy.2 % p384) = P
 
 /-- `represents_p384 P (x, y, z)`: each coordinate is below p, and the
 Jacobian point their Montgomery forms decode to (`montgomery_decode`) is `P`,
-https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/p384_montjadd_alt.ml#L5051 -/
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/p384_montjadd_alt.ml#L5051 -/
 def p384Represents (P : nist.Point) (xyz : Nat × Nat × Nat) : Prop :=
   xyz.1 < p384 ∧ xyz.2.1 < p384 ∧ xyz.2.2 < p384 ∧
     nist.ofJacobian p384 (p384RInv * xyz.1 % p384) (p384RInv * xyz.2.1 % p384)

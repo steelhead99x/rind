@@ -11,9 +11,9 @@ as Vale's AES spec lays them out, and `encrypt_block` and
 `header_protection_mask` run its block cipher, which the same file proves is
 Vale's `aes_encrypt_LE`. These theorems compose the two through `mid::aes`,
 for AES-128, AES-192, and AES-256, and, for header protection, which RFC 9001
-defines for AES-128 and AES-256 alone, through `Rind.X86_64.Dispatch`'s model
-of `aead::quic`'s dispatch. `admin/prove` writes the aarch64 copy of this
-file, as it does `Dispatch`'s.
+defines for AES-128 and AES-256 alone, through `Rind.X86_64.QuicDispatch`'s
+model of `aead::quic`'s dispatch. `admin/prove` writes the aarch64 copy of
+this file, as it does `QuicDispatch`'s.
 -/
 
 namespace rind.x86_64

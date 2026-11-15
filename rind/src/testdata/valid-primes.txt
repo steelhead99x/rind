@@ -1,4 +1,4 @@
-# extracted from thirdparty/wycheproof/testvectors_v1/primality_test.json
+# extracted from Wycheproof's testvectors_v1/primality_test.json
 # test 251: Mersenne prime (127 bit)
 7fffffffffffffffffffffffffffffff
 # test 252: Mersenne prime (521 bit)

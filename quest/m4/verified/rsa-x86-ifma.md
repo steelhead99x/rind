@@ -14,4 +14,4 @@ On x86_64 CPUs with AVX-512 IFMA (Ice Lake and later, Zen 4 and later), where bo
 ## Required
 
 - [RSA signing, decryption, and key generation are proven](/quest/m4/verified/rsa-sign.md) - the CRT glue this exponentiation slots into
-- [VG measured](/quest/m2/verified-garbage/bench.md) - whether pyca/verified-garbage's proven code beats what this would prove; if a switch replaces it, this quest is deleted or rewritten (maintainer, 2026-11-12)
+- [RSA on AVX-512 runs pyca/verified-garbage's code where it is faster](/quest/m2/verified-garbage/rsa-avx512.md) - VG measured 0.96 to 0.99 of the dual RSAZ's time; delete this quest if that switch covers every size the dual RSAZ runs (2048, 3072, and 4096 bits), shrink it to the sizes left otherwise, and drop this link if none switches

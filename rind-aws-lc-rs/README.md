@@ -31,26 +31,25 @@ It is the one item this crate adds to aws-lc-rs's API.
 These items are left out, so code using them fails to build:
 
 - ML-KEM-512 and ML-KEM-1024 (`kem::ML_KEM_512`, `kem::ML_KEM_1024`, `kem::AlgorithmId::MlKem512`, `kem::AlgorithmId::MlKem1024`): rind has only ML-KEM-768 so far.
-  rustls's `aws_lc_rs` provider does not build on this crate yet: it names `tls_prf`, and rustls 0.23.46 also names `kem::ML_KEM_1024`.
-  rustls-webpki's `aws-lc-rs` feature and rcgen's `aws_lc_rs` feature do build.
-- `signature::PqdsaPrivateKey::as_raw_bytes` and `encoding::PqdsaPrivateKeyRaw`: rind does not export an expanded ML-DSA private key. `PqdsaKeyPair::from_raw_private_key` still loads one.
+  rustls's `aws_lc_rs` provider names ML-KEM-1024, so it does not build on this crate yet.
+- `signature::PqdsaPrivateKey::as_raw_bytes` and `encoding::PqdsaPrivateKeyRaw`: rind does not export an ML-DSA key's expanded form. `to_pkcs8v1` encodes its seed.
 - `kem::DecapsulationKey::new`, `kem::DecapsulationKey::key_bytes`, and `kem::DecapsulationKeyBytes`: rind neither imports nor exports an ML-KEM private key.
 - SHA-224 (`digest::SHA224*`, `hmac::HMAC_SHA224`, `signature::ECDSA_P521_SHA224_*`), ECDSA with SHA-1 or SHA-3 (`signature::ECDSA_*_SHA1_*`, `signature::ECDSA_*_SHA3_*`), and ECDSA on secp256k1 (`signature::ECDSA_P256K1_*`).
 - AES-GCM-SIV (`aead::AES_*_GCM_SIV`); AES in ECB, CFB, or OFB mode (`cipher::*::ecb`, `cipher::*::ecb_pkcs7`, `cipher::*::cfb*`, `cipher::*::ofb`, `cipher::OperatingMode::ECB`, `cipher::OperatingMode::CFB*`, `cipher::OperatingMode::OFB`, `cipher::AES_CFB_IV_LEN`, `cipher::AES_OFB_IV_LEN`); ISO 10126 padding (`cipher::PaddedBlockDecryptingKey::cbc_iso10126`); DES under `legacy-des` (`cipher::DES_*`, `cipher::AlgorithmId::Des*`, `cipher::*Context::Iv64`); CMAC (`cmac`); the KBKDF and SSKDF key derivations (`kdf`); the TLS 1.2 PRF (`tls_prf`); and the streaming cipher contexts (`cipher::Streaming*`, `cipher::BufferUpdate`).
 - `aead::chacha20_poly1305_openssh`: rind has no SSH consumer.
 - `rsa::KeyPair::from_components`, `signature::RsaKeyPair::from_components`, and `rsa::KeyPairComponents`: building a key from its private components means encoding them as DER here, which branches on their secret leading bytes. Load the key as PKCS#1 or PKCS#8.
 - `rsa::KeyPair::sign_digest`, `signature::RsaKeyPair::sign_digest`, `digest::Digest::import_less_safe`, and the PKCS#1 v1.5 encryption keys (`rsa::Pkcs1*`): rind signs only digests it computed, and refuses PKCS#1 v1.5 encryption, which invites padding-oracle attacks.
-- `io::der`, `test`, `test_file`, `awslc_version`, `try_fips_self_test`, the FIPS-only functions, and the items aws-lc-rs's `dev-tests-only` feature exposes (`agreement::*::generate_for_test`, `rand::unsealed`); rind-aws-lc-rs accepts that feature but adds nothing for it.
-- `unstable`: the deprecated aliases (`unstable::signature::ML_DSA_*`, `MLDSA_*`, and the `Pqdsa*` names that module re-exports) are left out. The feature does enable `PqdsaKeyPair::to_pkcs8`, the deprecated alias of `to_pkcs8v1`.
+- `io::der`, `test`, `test_file`, `unstable`, `awslc_version`, `try_fips_self_test`, the FIPS-only functions, and the items aws-lc-rs's `dev-tests-only` feature exposes to supply a key or randomness (`agreement::*::generate_for_test`, `rand::unsealed`), since rind draws its own; under that feature rind-aws-lc-rs adds only `rand::SecureRandom::mut_fill`.
 
 ## Behaves differently
 
 - Where aws-lc-rs takes a [`rand::SecureRandom`] to generate a key or sign, rind draws from the system random source itself, as [`rand::SystemRandom`], the only `SecureRandom`, does.
 - A [`error::KeyRejected`] from rind's own checks gives rind's reason in its `Display`, and `"InvalidEncoding"` from `description_()`.
-- `VerificationAlgorithm::verify_digest_sig` and `verify_digest` fail for RSA, as they do for Ed25519 and ML-DSA: rind verifies RSA only over a message it hashes itself, and pure ML-DSA has no digest verification.
-- An Ed25519 public key of small order verifies no signature, and a PKCS#8 v2 Ed25519 key whose public key does not match, or is missing, is refused. An ML-DSA key whose public key does not match is refused.
+- `VerificationAlgorithm::verify_digest_sig` and `verify_digest` fail for RSA, as they do for Ed25519: rind verifies RSA only over a message it hashes itself.
+- An Ed25519 public key of small order verifies no signature, and a PKCS#8 v2 Ed25519 key whose public key does not match is refused.
+- An ML-DSA PKCS#8 v2 key whose public key does not match is refused. aws-lc-rs loads the private key.
 - An ML-DSA `SubjectPublicKeyInfo` followed by more bytes is refused.
-- An ML-DSA PKCS#8 document followed by more bytes is refused.
+- An ML-DSA PKCS#8 document followed by more bytes is refused. On a key of another parameter set, aws-lc-rs parses the key and then reports `Unspecified`.
 - An `id-ecPublicKey` PKCS#8 key on secp224r1, secp256k1, or a Brainpool curve is `InvalidEncoding` when loaded as ML-DSA. aws-lc-rs parses that key and reports `WrongAlgorithm`.
 - A DSA PKCS#8 key is `InvalidEncoding` when loaded as ML-DSA. aws-lc-rs parses one whose parameters and private key are in range and reports `WrongAlgorithm`.
 - An RSASSA-PSS PKCS#8 key whose parameters name a hash or a mask generation function is `InvalidEncoding` when loaded as ML-DSA. aws-lc-rs parses it and reports `WrongAlgorithm`.

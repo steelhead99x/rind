@@ -21,12 +21,12 @@ fn secret<const N: usize>(fill: u8) -> [u8; N] {
 
 // Messages take a whole block, then a partial one, through each cipher's
 // tail handling. ChaCha20's take every length up to that; BINSEC cannot
-// explore each length of the others in a nightly's time, where it reaches
+// explore each length of the others in a scheduled run's time, where it reaches
 // software AES, `malloc`, or a hash's buffering.
 const MESSAGE: usize = 75;
 
 // Not on aarch64, where BINSEC cannot finish the NEON GHASH that runs
-// without PMULL in a nightly's time.
+// without PMULL in a scheduled run's time.
 #[cfg(not(rind_backend = "aarch64"))]
 #[test]
 #[ignore = "admin/ct-binsec runs it under BINSEC"]
@@ -226,6 +226,27 @@ fn ct_binsec_pbkdf2() {
     });
 }
 
+// Not on aarch64, where BINSEC cannot finish it in a nightly's time. Its
+// portable kernels pass here on the portable backend, and ctgrind's arm64
+// rows run `high::argon2::secret_password`.
+#[cfg(not(rind_backend = "aarch64"))]
+#[test]
+#[ignore = "admin/ct-binsec runs it under BINSEC"]
+fn ct_binsec_argon2() {
+    use crate::argon2::*;
+
+    // The least memory, in one lane: two blocks of each slice, so both
+    // halves of the first pass, and a second pass, run in a short search.
+    // The data-dependent references are declassified, as Argon2id's
+    // exception to the constant-time rule allows.
+    let params = Params::new(8, 2, 1).unwrap();
+    checked(|| {
+        let mut out = [0; 32];
+        derive(params, &secret::<20>(1), &[2; 16], &mut out).unwrap();
+        black_box(verify(params, &secret::<20>(1), &[2; 16], &out).is_ok());
+    });
+}
+
 #[test]
 #[ignore = "admin/ct-binsec runs it under BINSEC"]
 fn ct_binsec_x25519() {
@@ -407,7 +428,7 @@ fn ct_binsec_rsa2048_oaep() {
     });
 }
 
-// Not on aarch64, where BINSEC cannot finish it in a nightly's time.
+// Not on aarch64, where BINSEC cannot finish it in a scheduled run's time.
 #[cfg(not(rind_backend = "aarch64"))]
 #[test]
 #[ignore = "admin/ct-binsec runs it under BINSEC"]

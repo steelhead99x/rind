@@ -64,7 +64,7 @@ pub fn derive(
         .expect("PBKDF2 output over (2^32 - 1) hash outputs");
 }
 
-/// Checks in constant time that `previously_derived` is what [`derive`] makes for the same inputs.
+/// Checks in constant time that `previously_derived` is what [`derive()`] makes for the same inputs.
 ///
 /// Fails if `previously_derived` is empty or differs. As in ring, a value
 /// shorter than the hash output is compared too.

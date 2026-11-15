@@ -14,12 +14,15 @@ aws-lc-rs = { version = "1.19", features = ["non-fips", "ring-io"], default-feat
 # What aws-lc-rs does not expose: XChaCha20-Poly1305, bare ChaCha20, MD5,
 # AES-GCM with any IV, AES-192 key wrap, and RSA-PSS with any salt length.
 aws-lc-sys = { version = "0.47", default-features = false }
+# Argon2id, which aws-lc-rs does not have.
+argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
 # Tells which Ed25519 keys are of small order, which rind refuses.
 curve25519-dalek = { version = "5", default-features = false }
 # The adapters, each compared with its upstream's aws-lc-rs provider.
 arrayvec = "0.7"
 dimpl = { version = "0.9", default-features = false, features = ["aws-lc-rs", "_crypto-common"] }
 rind-dimpl = { path = "../rind-dimpl" }
+rind-openssl = { path = "../rind-openssl" }
 rind-rcgen = { path = "../rind-rcgen" }
 rind-rustls = { path = "../rind-rustls" }
 rind-str0m = { path = "../rind-str0m" }
@@ -27,6 +30,9 @@ rcgen = { version = "0.14", default-features = false }
 rustls = { version = "0.23.20", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
 str0m = { version = "0.25", default-features = false }
 str0m-aws-lc-rs = "0.7"
+# SLH-DSA, which aws-lc-rs lacks, and the traits that encode its keys.
+pkcs8 = { version = "0.11", default-features = false, features = ["alloc"] }
+slh-dsa = "=0.2.0-rc.5"
 
 [dependencies.rind]
 path = "../rind"
@@ -97,6 +103,13 @@ bench = false
 [[bin]]
 name = "hkdf"
 path = "fuzzer/hkdf.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "argon2"
+path = "fuzzer/argon2.rs"
 test = false
 doc = false
 bench = false
@@ -188,6 +201,13 @@ bench = false
 [[bin]]
 name = "str0m"
 path = "fuzzer/str0m.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "openssl"
+path = "fuzzer/openssl.rs"
 test = false
 doc = false
 bench = false

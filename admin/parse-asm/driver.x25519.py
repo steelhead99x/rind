@@ -78,15 +78,18 @@ if __name__ == "__main__":
         )
         parse_file(input, d)
 
+    # The `_byte` routines, unlike the word ones, have `_SAFE` theorems. Their
+    # 32 little-endian bytes are a `[u64; 4]`'s memory on little-endian
+    # aarch64, so the wrappers keep the word types every backend shares.
     with (
         open(
-            "../../thirdparty/s2n-bignum/arm/curve25519/curve25519_x25519_alt.S"
+            "../../thirdparty/s2n-bignum/arm/curve25519/curve25519_x25519_byte_alt.S"
         ) as input,
         generated("../../rind/src/low/aarch64/curve25519_x25519.rs") as output,
     ):
         d = RustDriver(output, Architecture_aarch64)
         d.emit_rust_function(
-            "curve25519_x25519_alt",
+            "curve25519_x25519_byte_alt",
             parameter_map=[
                 ("inout", "res.as_mut_ptr() => _"),
                 ("inout", "scalar.as_ptr() => _"),
@@ -98,14 +101,14 @@ if __name__ == "__main__":
 
     with (
         open(
-            "../../thirdparty/s2n-bignum/arm/curve25519/curve25519_x25519base_alt.S"
+            "../../thirdparty/s2n-bignum/arm/curve25519/curve25519_x25519base_byte_alt.S"
         ) as input,
         generated("../../rind/src/low/aarch64/curve25519_x25519base.rs") as output,
     ):
         d = RustDriver(output, Architecture_aarch64)
-        d.add_const_symbol("curve25519_x25519base_alt_constant")
+        d.add_const_symbol("curve25519_x25519base_byte_alt_constant")
         d.emit_rust_function(
-            "curve25519_x25519base_alt",
+            "curve25519_x25519base_byte_alt",
             parameter_map=[
                 ("inout", "res.as_mut_ptr() => _"),
                 ("inout", "scalar.as_ptr() => _"),

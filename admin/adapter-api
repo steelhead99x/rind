@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Usage: admin/adapter-api [--bless] [--base REF] [ADAPTER...]
+# Usage: admin/adapter-api [ADAPTER...]
 #
 # Diffs each rind-<consumer> adapter's public API against the provider its
 # upstream ships, at the upstream version Cargo.lock resolves, and fails on
@@ -19,21 +19,28 @@
 # - `skip`: upstream features left unbuilt, each with its reason.
 # - `omitted`: the items rind cannot back, as paths under the provider, `*`
 #   matching within a path. Each must still be missing, and must be named in
-#   backticks in the adapter's README.
+#   backticks in the adapter's README. Upstream's signatures name an omitted
+#   item as the adapter names a type callers cannot, and its impls go with it.
 #
-# admin/adapter-api.drift lists the divergences that are bugs, pending the fix
-# quest/m2/confidence/adapter-api-drift.md plans: each exact difference and
-# the feature sets it shows in. Any other difference fails, and so does an
-# entry that no longer differs, so a fix removes it. `--bless` rewrites the
-# file from the differences found. `--base REF` fails on an entry the file
-# lacks at REF, so the list only shrinks.
+# Any other difference is a bug in the adapter, and fails: the adapter
+# offers exactly upstream's API.
+#
+# Impls count where callers can use them. Those of an unexported type that a
+# public item hands out, such as ring's padding behind `RSA_PKCS1_SHA256`, are
+# compared under each path that hands it out, told apart by their place in
+# its signature. Those of a trait callers cannot name are API only for the
+# associated types and consts an exported subtrait reaches; those naming an
+# unexported type no public item hands out are not API.
 #
 # Each comparison builds both sides' rustdoc JSON in their own probe crates,
 # so feature unification within the workspace hides nothing: with upstream's
 # default features, with none, and with each one alone. An adapter that
 # depends on its upstream (it fills in a provider module) gets the same
 # features on that dependency; an adapter that replaces its upstream declares
-# the same feature names, and a feature named both ways is turned on in both.
+# the same feature names. A feature named both ways is turned on in both,
+# including one an upstream feature the adapter lacks turns on, as rustls's
+# `brotli` does `std`; a feature the adapter declares implies only what its
+# own table says.
 #
 # rind-object-store is excluded: object_store defines a provider trait and
 # ships no provider module whose shape the adapter could copy.
@@ -88,8 +95,15 @@ IGNORED_TRAITS = {
     "core::marker::StructuralPartialEq",
     "core::marker::Freeze",
     "core::marker::UnsafeUnpin",
+    "core::clone::TrivialClone",
     "core::ops::drop::Drop",
 }
+
+# A requirement every walk meets: one alternative, needing nothing.
+NONE_NEEDED = frozenset({frozenset()})
+
+# Traits whose arguments are only inputs: a caller converts from them.
+CONVERSIONS = {"core::convert::From", "core::convert::TryFrom"}
 
 
 def cargo_metadata(*args, cwd=ROOT):
@@ -137,8 +151,14 @@ def probe(name, deps):
 
 
 def rustdoc(path, package):
-    # `#[doc(hidden)]` items are still public, and callers use them.
-    env = dict(os.environ, RUSTC_BOOTSTRAP="1", RUSTDOCFLAGS="-Zunstable-options --output-format json --document-hidden-items")
+    # `#[doc(hidden)]` items are still public, and callers use them. Private
+    # items keep the impls of unexported types a public item hands out, which
+    # rustdoc otherwise strips; the walk still starts only from public ones.
+    env = dict(
+        os.environ,
+        RUSTC_BOOTSTRAP="1",
+        RUSTDOCFLAGS="-Zunstable-options --output-format json --document-hidden-items --document-private-items",
+    )
     env.pop("RUSTFLAGS", None)
     subprocess.run(
         [
@@ -162,11 +182,26 @@ def rustdoc(path, package):
 class Api:
     """The public items under one module of a rustdoc JSON crate, by path."""
 
-    def __init__(self, doc, module, items):
+    def __init__(self, doc, module, items, omitted=()):
         self.index = doc["index"]
         self.paths = doc["paths"]
+        # Items the other side declares it cannot back: a signature naming one
+        # names a type its callers cannot, as `$private` does.
+        self.omitted = omitted
         self.entries = {}
         self.public = {}
+        self.exported = None
+        # Unexported types a public signature hands to callers, such as
+        # ring's `Padding` behind `RSA_PKCS1_SHA256`: callers hold their
+        # values, so their impls are API too. Each maps every path that hands
+        # it out to the unexported types along that path.
+        self.exposed = {}
+        # The unexported types along the path being walked, so a type reached
+        # through its own impls is not walked again.
+        self.chain = frozenset()
+        # The sets of unexported types the route being walked needs exposed,
+        # any one of them, as a conversion from one does.
+        self.needs = NONE_NEEDED
         # Types with a public field, which a `Drop` impl stops callers moving out.
         self.open = set()
         # Each variant's observable discriminant, which rustdoc gives only
@@ -180,10 +215,82 @@ class Api:
         # side names by their definition paths.
         self.walk_module(root, (), None, set())
         self.exported = set(self.public)
-        self.entries, self.public = {}, {}
+        # Every trait an exported one extends: generic code bounded by the
+        # subtrait reaches their associated items, nameable or not.
+        self.supertraits = set()
+        todo = [id for id in self.exported if "trait" in self.index[str(id)]["inner"]]
+        while todo:
+            for id in self.supers(todo.pop()):
+                if id not in self.supertraits:
+                    self.supertraits.add(id)
+                    todo.append(id)
+        self.entries, self.public, self.exposed, self.origins, self.route_needs, self.later = {}, {}, {}, {}, {}, []
         for name in module:
             root = self.find(root, name)
-        self.walk_module(root, (), items, set())
+        seen = set()
+        self.walk_module(root, (), items, seen)
+        for item, path in self.later:
+            self.inherit(item, path, seen)
+        # Rustdoc indexes an unexported type's impls but not always the type.
+        impls = collections.defaultdict(list)
+        for id, item in self.index.items():
+            target = item["inner"].get("impl", {}).get("for", {}).get("resolved_path")
+            if target is not None:
+                impls[target["id"]].append(int(id))
+        walked, routes = set(), collections.defaultdict(list)
+        while pending := sorted((path, id) for id, paths in self.exposed.items() for path in paths if (id, path) not in walked):
+            for path, id in pending:
+                walked.add((id, path))
+                if all(o is not None and gone(o) for o in self.origins[(id, path)]):
+                    continue
+                routes[id].append(path)
+                # Listed under every path that hands it out, which both sides
+                # share when they match, whatever order rustdoc finds them in.
+                self.chain = self.exposed[id][path]
+                self.needs = self.route_needs[(id, path)]
+                # Callers read its public fields without naming it.
+                item = self.index.get(str(id))
+                kind, inner = next(iter(item["inner"].items())) if item else (None, None)
+                if kind in ("struct", "union") and self.walk_fields(kind, inner, path, seen):
+                    self.open.add(id)
+                self.walk_impls(impls[id], path, seen, id)
+        self.chain, self.needs = frozenset(), NONE_NEEDED
+        # Which routes hand out one type is API too: a caller can assign
+        # one's value where another's goes only when they are the same.
+        for id, paths in routes.items():
+            # Leaving out routes only a dropped conversion opens, and those
+            # under an item the other side omits.
+            paths = [
+                p
+                for p in paths
+                if self.met(self.route_needs[(id, p)]) and not any(covers(o, "::".join(p)) for o in self.omitted)
+            ]
+            if len(paths) > 1:
+                same = Unordered("::".join(p) for p in paths)
+                for path in paths:
+                    self.entries.setdefault("::".join(path), []).append(("same", same, None, self.route_needs[(id, path)]))
+
+    def bounds(self, id):
+        """Trait `id`'s bounds on `Self`, including through `where Self:`."""
+        trait = self.index[str(id)]["inner"]["trait"]
+        bounds = list(trait["bounds"])
+        for pred in trait["generics"]["where_predicates"]:
+            pred = pred.get("bound_predicate")
+            if pred and pred["type"] == {"generic": "Self"}:
+                bounds += pred["bounds"]
+        return bounds
+
+    def supers(self, id):
+        """The traits in this crate that trait `id` extends directly."""
+        for bound in self.bounds(id):
+            id = (bound.get("trait_bound") or {}).get("trait", {}).get("id")
+            if id is not None and str(id) in self.index:
+                yield id
+
+    def unnameable(self, bound):
+        """Whether `bound` is on a trait in this crate callers cannot name, or the other side omits."""
+        id = (bound.get("trait_bound") or {}).get("trait", {}).get("id")
+        return id is not None and str(id) in self.index and self.name(id, None) in ("$private", "$omitted")
 
     def number(self, item):
         """Records each variant's discriminant, implicit ones only where a caller sees them."""
@@ -245,12 +352,62 @@ class Api:
             self.visit(item, prefix + (item["name"],), seen)
 
     def add(self, path, kind, sig, owner=None):
-        self.entries.setdefault("::".join(path), []).append((kind, sig, owner))
+        # What the route being walked needs, so a type only a dropped
+        # conversion hands out goes with it.
+        needs = self.needs
+        if self.exported is not None:
+            if kind == "impl":
+                # A conversion from an unexported type no public signature
+                # hands out, such as aws-lc-rs's
+                # `From<&[BigEndian<u32>; 3]> for Nonce`, cannot be used: its
+                # caller has no value to convert. Another trait's arguments,
+                # such as `AsRef<Hidden>`'s, may be outputs, so its impls
+                # stay and hand out the types they name.
+                rest = sig
+                if self.external(sig["trait"]["path"].id, None) in CONVERSIONS:
+                    needs = frozenset(n | frozenset(self.hidden(sig["trait"])) for n in needs)
+                    rest = {k: v for k, v in sig.items() if k != "trait"}
+            else:
+                rest = sig
+            hidden = list(dict.fromkeys(self.hidden(rest, bounds=False)))
+            for n, id in enumerate(hidden):
+                if id in self.chain:
+                    continue
+                # Named by its place in the signature, so impls swapped
+                # between two of them still differ.
+                route = tuple(path) + ("{private}" if n == 0 else f"{{private {n}}}",)
+                self.exposed.setdefault(id, {})[route] = self.chain | {id}
+                # Which impls hand it out there, known to be omitted or not
+                # only once the walk has found every public path.
+                self.origins.setdefault((id, route), []).append(sig if kind == "impl" else None)
+                # Any one of its origins is enough to hand it out.
+                key = (id, route)
+                self.route_needs[key] = self.route_needs.get(key, frozenset()) | needs
+        self.entries.setdefault("::".join(path), []).append((kind, sig, owner, needs))
 
-    def visit(self, item, path, seen, owner=None, impl=None):
-        if (item["id"], path) in seen or len(path) > 16:
+    def hidden(self, value, bounds=True):
+        """The unexported types `value` names, leaving out trait bounds unless `bounds`.
+
+        They come in an order both sides share when their APIs match: by key,
+        not declaration order, and an unordered list by its items' shape."""
+        if isinstance(value, Lazy):
+            entry = self.paths.get(str(value.id))
+            if entry and entry["crate_id"] == 0 and value.id not in self.exported and entry["kind"] in ("struct", "enum", "union"):
+                yield value.id
+        elif isinstance(value, dict):
+            for k, v in sorted(value.items()):
+                if bounds or k != "trait_bound":
+                    yield from self.hidden(v, bounds)
+        elif isinstance(value, list):
+            items = sorted(value, key=shape) if isinstance(value, Unordered) else value
+            for v in items:
+                yield from self.hidden(v, bounds)
+
+    def visit(self, item, path, seen, owner=None, impl=None, through=None):
+        key = (item["id"], path) if through is None else (item["id"], path, json.dumps(through, sort_keys=True))
+        if key in seen or len(path) > 16:
             return
-        seen.add((item["id"], path))
+        seen.add(key)
         self.public.setdefault(item["id"], []).append(path)
         kind, inner = next(iter(item["inner"].items()))
         if kind == "module":
@@ -286,6 +443,9 @@ class Api:
         if kind in ("struct", "variant") and isinstance(sig["kind"], dict) and "tuple" in sig["kind"]:
             # Its fields are listed as children.
             sig["kind"] = {"tuple": len(sig["kind"]["tuple"])}
+        if through is not None:
+            # A supertrait's item, read with its trait's arguments.
+            sig = {"through": self.sig(through), "item": sig}
         if impl is not None:
             # A method's callers also meet its impl block's bounds and target.
             sig = {"impl": self.sig(elide({"generics": impl["generics"], "for": impl["for"], "item": inner})), "item": sig}
@@ -305,18 +465,7 @@ class Api:
             sig = {"non_exhaustive": sig}
         self.add(path, kind, sig, owner)
         if kind in ("struct", "union", "enum"):
-            # A union lists its fields directly.
-            fields = inner["fields"] if kind == "union" else inner.get("kind", {})
-            if isinstance(fields, dict):
-                fields = fields.get("plain", fields.get("tuple", fields))
-            if isinstance(fields, dict):
-                fields = fields.get("fields", [])
-            for i, id in enumerate(fields if isinstance(fields, list) else []):
-                if id is None:
-                    continue
-                field = self.index[str(id)]
-                if field["visibility"] == "public":
-                    self.visit(field, path + (field["name"] or str(i),), seen)
+            self.walk_fields(kind, inner, path, seen)
             for id in inner.get("variants", []):
                 variant = self.index[str(id)]
                 self.visit(variant, path + (variant["name"],), seen)
@@ -330,13 +479,81 @@ class Api:
                         field = self.index[str(id)]
                         self.visit(field, path + (field["name"] or str(i),), seen)
         elif kind == "trait":
-            for id in inner["items"]:
+            items = inner["items"]
+            if self.exported is not None:
+                # Once every public path is known, so an omitted supertrait
+                # is told from a public one.
+                self.later.append((item, path))
+            for id in items:
                 child = self.index[str(id)]
                 self.visit(child, path + (child["name"],), seen)
             # Impls for the crate's own types are compared under each type;
             # the rest, such as one for `[u8]`, are listed only here.
             others = [id for id in inner["implementations"] if not self.local(self.index[str(id)]["inner"]["impl"]["for"])]
             self.walk_impls(others, path, seen, None)
+
+    def inherit(self, item, path, seen):
+        """Compares what trait `item` inherits from supertraits callers cannot name."""
+        # Code bounded by this trait also calls the items of the
+        # supertraits callers cannot name, or that the other side
+        # omits, so they are compared here; not a `pub(crate)` or
+        # narrower one's, which are uncallable outside the crate,
+        # though the supertraits it extends in turn may be callable.
+        # The bounds they carry, such as `Send`, hold for this
+        # trait's implementors too, so they are compared under it.
+        # Each comes with its trait's arguments, as `A<u8>`'s items
+        # differ from `A<u16>`'s.
+        todo, done, implied, inherited = [(b, {}) for b in self.bounds(item["id"])], set(), {}, []
+        while todo:
+            bound, outer = todo.pop()
+            if not self.unnameable(bound):
+                continue
+            id = bound["trait_bound"]["trait"]["id"]
+            # Its arguments as callers of this trait see them, however many
+            # hidden steps lie between.
+            args = substitute(bound["trait_bound"]["trait"]["args"], outer)
+            key = (id, json.dumps(args, sort_keys=True))
+            if key in done:
+                continue
+            done.add(key)
+            trait = self.index[str(id)]["inner"]["trait"]
+            if self.index[str(id)]["visibility"] == "public":
+                inherited += [(i, args) for i in trait["items"]]
+            given = [a for a in ((args or {}).get("angle_bracketed") or {}).get("args", []) if "lifetime" not in a]
+            params = [p["name"] for p in trait["generics"]["params"] if "lifetime" not in p["kind"]]
+            inner = dict(zip(params, given))
+            for b in self.bounds(id):
+                if self.unnameable(b):
+                    # Its own supertraits' methods stay callable through this bound.
+                    todo.append((b, inner))
+                else:
+                    b = substitute(b, inner)
+                    implied.setdefault(json.dumps(b, sort_keys=True), b)
+        if implied:
+            self.add(path + ("{supertraits}",), "bounds", Unordered(self.sig(list(implied.values()))))
+        for id, args in inherited:
+            child = self.index[str(id)]
+            # Marked even without arguments: `<T as Public>::read` names
+            # only the trait's own items.
+            self.visit(child, path + (child["name"],), seen, through={"args": args})
+
+    def walk_fields(self, kind, inner, path, seen):
+        """Visits a struct's or union's public fields, returning whether it has any."""
+        # A union lists its fields directly.
+        fields = inner["fields"] if kind == "union" else inner.get("kind", {})
+        if isinstance(fields, dict):
+            fields = fields.get("plain", fields.get("tuple", fields))
+        if isinstance(fields, dict):
+            fields = fields.get("fields", [])
+        found = False
+        for i, id in enumerate(fields if isinstance(fields, list) else []):
+            if id is None:
+                continue
+            field = self.index[str(id)]
+            if field["visibility"] == "public":
+                found = True
+                self.visit(field, path + (field["name"] or str(i),), seen)
+        return found
 
     def walk_impls(self, impls, path, seen, owner):
         for id in impls:
@@ -348,6 +565,19 @@ class Api:
                     child = self.index[str(child_id)]
                     if child["visibility"] == "public":
                         self.visit(child, path + (child["name"],), seen, owner, impl)
+            elif (
+                self.exported is not None
+                and self.name(impl["trait"]["id"], None) == "$private"
+                and (
+                    impl["trait"]["id"] not in self.supertraits
+                    or all("function" in self.index[str(i)]["inner"] for i in impl["items"])
+                )
+            ):
+                # A trait callers cannot name, such as a sealing one, gives
+                # them nothing but the associated types and consts an exported
+                # subtrait reaches, which are compared; so are a public
+                # trait's bounds on it.
+                continue
             elif (trait := self.external(impl["trait"]["id"], impl["trait"]["path"])) not in IGNORED_TRAITS or (
                 trait == "core::ops::drop::Drop" and owner in self.open
             ):
@@ -378,7 +608,10 @@ class Api:
     def name(self, id, fallback):
         """A type's public path in this API, else its definition path."""
         if id in self.public:
-            return "$::" + "::".join(min(self.public[id], key=lambda p: (len(p), p)))
+            paths = [p for p in self.public[id] if not any(covers(o, "::".join(p)) for o in self.omitted)]
+            if not paths:
+                return "$omitted"
+            return "$::" + "::".join(min(paths, key=lambda p: (len(p), p)))
         entry = self.paths.get(str(id))
         if entry and entry["crate_id"] == 0 and id not in self.exported:
             # Unexported, such as a sealing trait, and named alike on both
@@ -406,11 +639,9 @@ class Api:
                 bounds.setdefault(key, []).extend(pred["bound_predicate"]["bounds"])
             else:
                 other.append(pred)
-        preds = [
-            {"bounds": Unordered(self.norm(b)), "type": self.norm(json.loads(k))}
-            for k, b in sorted(bounds.items())
-        ]
-        return {"params": self.norm(params), "where": preds + self.norm(other)}
+        preds = [{"bounds": Unordered(self.norm(b)), "type": self.norm(json.loads(k))} for k, b in bounds.items()]
+        # Their order is not API, and keys hold rustdoc's crate-local IDs.
+        return {"params": self.norm(params), "where": Unordered(preds + self.norm(other))}
 
     def norm(self, value):
         if isinstance(value, list):
@@ -432,12 +663,25 @@ class Api:
     def sig(self, value):
         return self.norm(value)
 
+    def met(self, needs):
+        """Whether the walk exposed every type in one of `needs`'s alternatives."""
+        return any(n <= self.exposed.keys() for n in needs)
+
     def resolved(self):
         """Each path's signatures, rendered once the walk has found every public path."""
-        return {path: {self.render(*entry) for entry in sigs} for path, sigs in self.entries.items()}
+        out = {}
+        for path, sigs in self.entries.items():
+            rendered = {self.render(*entry) for entry in sigs if self.met(entry[3])}
+            rendered.discard(None)
+            if rendered:
+                out[path] = rendered
+        return out
 
-    def render(self, kind, sig, owner):
-        text = json.dumps(plain(sig), sort_keys=True)
+    def render(self, kind, sig, owner, needs):
+        if kind == "impl" and gone(sig):
+            return None
+        sig = plain(sig)
+        text = json.dumps(sig, sort_keys=True).replace('"$omitted"', '"$private"')
         if owner is not None:
             # A method may name its own type or `Self`.
             own = {"resolved_path": {"args": None, "path": self.name(owner, None)}}
@@ -499,18 +743,55 @@ def assoc_item(inner):
     return {"assoc_const": dict(const, value=None)}
 
 
-def plain(value):
-    """`value` with every path rendered and every unordered list sorted."""
-    if isinstance(value, Lazy):
-        return str(value)
+def substitute(value, params):
+    """`value` with each type or const parameter named in `params` replaced by
+    its argument, a rustdoc generic argument such as `{"type": ...}`."""
     if isinstance(value, dict):
-        return {k: plain(v) for k, v in value.items()}
+        name = value.get("generic")
+        if value.keys() == {"generic"} and "type" in params.get(name, {}):
+            return params[name]["type"]
+        expr = (value.get("const") or {}).get("expr") if value.keys() == {"const"} else None
+        if expr in params and "const" in params[expr]:
+            return params[expr]
+        out = {k: substitute(v, params) for k, v in value.items()}
+        if isinstance(out.get("len"), str) and "const" in params.get(out["len"], {}):
+            # An array's length names a const parameter by its bare name.
+            const = params[out["len"]]["const"]
+            out["len"] = const["value"] or const["expr"]
+        return out
     if isinstance(value, list):
-        items = [plain(v) for v in value]
+        return [substitute(v, params) for v in value]
+    return value
+
+
+def gone(impl):
+    """Whether an impl names an item the other side omits, such as aws-lc-rs's
+    `AsRawBytes<PqdsaPrivateKeyRaw>`, so goes with it, along with the types it hands out."""
+    return "$omitted" in json.dumps(plain({"for": impl["for"], "trait": impl["trait"]}))
+
+
+def plain(value, render=str):
+    """`value` with every path rendered by `render` and every unordered list sorted."""
+    if isinstance(value, Lazy):
+        return render(value)
+    if isinstance(value, dict):
+        return {k: plain(v, render) for k, v in value.items()}
+    if isinstance(value, list):
+        items = [plain(v, render) for v in value]
         if isinstance(value, Unordered):
             items.sort(key=lambda v: json.dumps(v, sort_keys=True))
         return items
     return value
+
+
+def shape(value):
+    """`value` as JSON with the crate's own paths left out, an order that holds across crates."""
+
+    def path(lazy):
+        entry = lazy.api.paths.get(str(lazy.id))
+        return "$local" if entry and entry["crate_id"] == 0 else lazy.api.external(lazy.id, lazy.fallback)
+
+    return json.dumps(plain(value, path), sort_keys=True)
 
 
 class Lazy:
@@ -535,7 +816,12 @@ def compare(adapter, cfg, mirror, adapter_features, upstream_features, label, de
         adapter["name"]: {
             "path": str(Path(adapter["manifest_path"]).parent),
             "default-features": default,
-            "features": sorted(f for f in up_features if f in adapter_features),
+            # Each feature the upstream ones turn on through features the
+            # adapter lacks, as rustls's `brotli` turns on `std`. A feature the
+            # adapter declares implies only what its own table says, so a
+            # missing implication there shows up as a difference; so do its
+            # defaults, which only its own `default` turns on.
+            "features": sorted(f for f in implied(upstream_features, up_features, default, set(adapter_features) | {"default"}) if f in adapter_features),
         }
     }
     if mirror:
@@ -543,7 +829,7 @@ def compare(adapter, cfg, mirror, adapter_features, upstream_features, label, de
     adapter_dir = probe(f"{adapter['name']}-{label}-adapter", deps)
     module = [m for m in cfg.get("module", "").split("::") if m]
     only = set(cfg.get("items", [])) or None
-    theirs = Api(rustdoc(upstream_dir, crate), module, only)
+    theirs = Api(rustdoc(upstream_dir, crate), module, only, cfg.get("omitted", []))
     ours = Api(rustdoc(adapter_dir, adapter["name"]), [], only)
     theirs_e, ours_e = theirs.resolved(), ours.resolved()
     diffs = []
@@ -560,57 +846,30 @@ def compare(adapter, cfg, mirror, adapter_features, upstream_features, label, de
     return diffs
 
 
+def implied(table, features, default, own):
+    """`features`, with `default` if set, and every feature they turn on in `table` through features not in `own`."""
+    out, todo = set(), list(features) + (["default"] if default else [])
+    while todo:
+        f = todo.pop()
+        if f in out or f not in table:
+            continue
+        out.add(f)
+        if f in own:
+            continue
+        # `dep:x` and `x/y` reach other packages, not this one's features.
+        todo += [g for g in table[f] if ":" not in g and "/" not in g]
+    return out
+
+
 def covers(pattern, path):
     """Whether `pattern`, a path with optional `*` wildcards, names `path` or an item under it."""
     return fnmatch.fnmatchcase(path, pattern) or fnmatch.fnmatchcase(path, pattern + "::*")
 
 
-DRIFT = ROOT / "admin" / "adapter-api.drift"
-
-
-def read_drift(text):
-    """Each drift entry's key, mapped to the feature sets it shows in."""
-    out = {}
-    for line in text.splitlines():
-        e = json.loads(line)
-        out[(e["adapter"], e["what"], e["path"], tuple(e["upstream"]), tuple(e["ours"]))] = set(e["sets"])
-    return out
-
-
-def write_drift(drift):
-    lines = [
-        json.dumps(
-            {"adapter": k[0], "what": k[1], "path": k[2], "upstream": list(k[3]), "ours": list(k[4]), "sets": sorted(v)},
-            sort_keys=True,
-        )
-        for k, v in sorted(drift.items())
-    ]
-    DRIFT.write_text("".join(line + "\n" for line in lines))
-
-
 def main():
-    args = sys.argv[1:]
-    bless = "--bless" in args
-    args = [a for a in args if a != "--bless"]
-    base = None
-    if "--base" in args:
-        i = args.index("--base")
-        if i + 1 == len(args):
-            sys.exit("error: --base needs a revision")
-        base = args[i + 1]
-        del args[i : i + 2]
-    wanted = set(args)
-    if base is not None:
-        resolved = subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"], cwd=ROOT, capture_output=True
-        )
-        # Only a real revision without the file may skip the growth check.
-        if resolved.returncode != 0:
-            sys.exit(f"error: --base {base} does not resolve to a commit")
+    wanted = set(sys.argv[1:])
     meta = cargo_metadata("--no-deps")
     failed = False
-    known = read_drift(DRIFT.read_text()) if DRIFT.exists() else {}
-    found = {}
     ran = set()
     for package in meta["packages"]:
         cfg = ((package.get("metadata") or {}).get("rind") or {}).get("api")
@@ -647,15 +906,11 @@ def main():
                 if hits:
                     used.update(hits)
                     continue
-                key = (package["name"], what, path, tuple(sorted(a or ())), tuple(sorted(b or ())))
-                found.setdefault(key, set()).add(label)
-                if bless or label in known.get(key, ()):
-                    continue
                 failed = True
                 print(f"{package['name']} [{label}]: {what} {path}")
-                for s in key[3]:
+                for s in sorted(a or ()):
                     print(f"    upstream: {s}")
-                for s in key[4]:
+                for s in sorted(b or ()):
                     print(f"    adapter:  {s}")
         readme = (Path(package["manifest_path"]).parent / "README.md").read_text()
         for o in omitted:
@@ -668,29 +923,6 @@ def main():
     if wanted - ran:
         print(f"no configured adapter is named {sorted(wanted - ran)}")
         failed = True
-    if bless:
-        write_drift({**{k: v for k, v in known.items() if wanted and k[0] not in ran}, **found})
-        known = read_drift(DRIFT.read_text())
-    else:
-        for key, labels in sorted(known.items()):
-            # A full run checks every entry, including one for an adapter
-            # that no longer exists or is no longer compared.
-            stale = labels - found.get(key, set()) if key[0] in ran or not wanted else set()
-            if stale:
-                print(f"{key[0]}: drift {key[1]} {key[2]} no longer shows in {sorted(stale)}; rerun with --bless")
-                failed = True
-    if base is not None:
-        old = subprocess.run(
-            ["git", "show", f"{base}:admin/adapter-api.drift"], cwd=ROOT, capture_output=True, text=True
-        )
-        # Before the file lands, there is nothing to shrink from.
-        if old.returncode == 0:
-            before = read_drift(old.stdout)
-            for key, labels in sorted(known.items()):
-                grown = labels - before.get(key, set())
-                if grown:
-                    print(f"{key[0]}: drift {key[1]} {key[2]} in {sorted(grown)} is new since {base}")
-                    failed = True
     sys.exit(1 if failed else 0)
 
 

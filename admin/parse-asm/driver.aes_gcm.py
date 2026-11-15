@@ -34,8 +34,7 @@ if __name__ == "__main__":
                     ],
                     func_attrs='#[target_feature(enable = "%s")]\n'
                     % ("aes,sha3" if alt else "aes"),
-                    # In place: the proofs exclude it, but each block is loaded
-                    # before its output is stored, as `inplace.py` checks.
+                    # In place, which the proofs allow: `in_p = out_p`.
                     rust_decl="unsafe fn %s(inout: *mut [u8; 16], blocks: usize, tag: &mut [u8; 16], ivec: &mut [u8; 16], key: &[core::arch::aarch64::uint8x16_t; %d], htable: &[core::arch::aarch64::uint64x2_t; %d])"
                     % (name, rounds + 1, 12 if alt else 6),
                     several_exits=alt,
