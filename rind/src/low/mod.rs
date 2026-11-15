@@ -101,22 +101,16 @@ mod generic {
     // compile it so `poly1305_32` can check itself against these limbs.
     #[cfg(any(
         rind_backend = "x86_64",
-        all(
-            rind_backend = "portable",
-            target_pointer_width = "64",
-            not(rind_limb = "32")
-        ),
+        all(rind_backend = "portable", not(rind_limb = "32")),
         test
     ))]
     pub(crate) mod poly1305;
-    // 26-bit limbs wherever a 64x64 product would be a library call: the
-    // portable backend on a 32-bit pointer or forced to 32-bit limbs, and
-    // armv7 without NEON. Tests compile it on the other backends too.
+    // 26-bit limbs wherever a 64x64 product would be a library call:
+    // `rind_limb` 32, and armv7 without NEON. wasm32 with `wide-arithmetic`
+    // has `rind_limb` 64 and uses the module above. Tests compile the 26-bit
+    // limbs on the other backends too.
     #[cfg(any(
-        all(
-            rind_backend = "portable",
-            any(target_pointer_width = "32", rind_limb = "32")
-        ),
+        all(rind_backend = "portable", rind_limb = "32"),
         rind_backend = "arm",
         test
     ))]
