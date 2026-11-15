@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Lint rind's library for bare-metal targets (`target_os = "none"`), where it
 # builds without std, as `just bare-metal` and `just check`'s cross module run
-# it. Compile only: nothing here links a program, runs one, or checks timing
-# on these cores.
+# it. Clippy does not generate code, so the two targets that keep the arm
+# backend are also built: that assembles their `global_asm`. Nothing here
+# links a program, runs one, or checks timing on these cores.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -33,6 +34,17 @@ lint() {
                 --profile "$profile" --features "$features" -- --deny warnings
         done
     done
+}
+
+# clippy is a check build, so it never assembles `global_asm`. The arm
+# backend's blocks switch to `.fpu neon` and back to `.fpu vfpv3`. Build the
+# library once per target that selects that backend, so an assembler rejection
+# fails here. The assembly text does not change with the profile or `wipe`.
+assemble() {
+    local target=$1
+    local flags
+    flags="CARGO_TARGET_$(tr 'a-z.-' 'A-Z__' <<<"$target")_RUSTFLAGS"
+    env "$flags=$custom" cargo build -p rind --lib --locked --target "$target"
 }
 
 # aws-lc builds for none of these, so rind-bench must leave it out of its
@@ -66,5 +78,8 @@ for target in \
     aarch64-unknown-none-softfloat \
     x86_64-unknown-none; do
     lint "$target"
+done
+for target in armv7a-none-eabi armv7r-none-eabihf; do
+    assemble "$target"
 done
 no_aws_lc thumbv7em-none-eabihf

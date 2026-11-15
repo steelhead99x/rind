@@ -97,9 +97,10 @@ qemu. iOS devices' code is only built.
   Every PR lints it, in debug and release and with and without `wipe`
   (`just bare-metal`), for `thumbv6m-none-eabi` and
   `riscv32imc-unknown-none-elf`, which lack compare-and-swap and so keep no
-  reuse cache, for `thumbv7em-none-eabihf`, for `armv7a-none-eabi` and
+  reuse cache,   for `thumbv7em-none-eabihf`, for `armv7a-none-eabi` and
   `armv7r-none-eabihf` (the 32-bit ARM backend, with its NEON paths left
-  off), for `aarch64-unknown-none` and `aarch64-unknown-none-softfloat`
+  off; those two are also built, so their assembly is assembled), for
+  `aarch64-unknown-none` and `aarch64-unknown-none-softfloat`
   (the portable backend), and for `x86_64-unknown-none`. That last target
   is built with `--cfg curve25519_dalek_backend="serial"`, and the library
   refuses the build without it: dalek's default on x86_64 is its AVX2
