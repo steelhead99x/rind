@@ -73,30 +73,33 @@ unescape_basic() {
 }
 
 # A rustflags string is split on spaces. Each element of a rustflags array
-# is one argument, even when it contains a space.
+# is one argument, even when it contains a space. A `#` outside a string is
+# a comment, and an array ends at `]`.
 append_toml_rustflags() {
     local -n dest=$1
     local value=$2
     value=${value#"${value%%[![:space:]]*}"}
-    local i c n
-    if [[ $value == '"'* ]]; then
+    local i=0 c n=${#value} q
+    if [[ $value == '"'* || $value == "'"* ]]; then
+        q=${value:0:1}
         local inner=""
         i=1
-        n=${#value}
         while (( i < n )); do
             c=${value:i:1}
-            if [[ $c == "$bs" ]]; then
+            if [[ $q == '"' && $c == "$bs" ]]; then
                 inner+=${value:i:2}
                 i=$((i + 2))
                 continue
             fi
-            if [[ $c == '"' ]]; then
+            if [[ $c == "$q" ]]; then
                 break
             fi
             inner+=$c
             i=$((i + 1))
         done
-        inner=$(unescape_basic "$inner")
+        if [[ $q == '"' ]]; then
+            inner=$(unescape_basic "$inner")
+        fi
         local part
         local -a bits=()
         IFS=' ' read -r -a bits <<< "$inner"
@@ -106,31 +109,38 @@ append_toml_rustflags() {
         return
     fi
     if [[ $value == '['* ]]; then
-        local in=0 cur=""
-        i=0
-        n=${#value}
+        local in="" cur=""
         while (( i < n )); do
             c=${value:i:1}
-            if (( in == 0 )); then
-                if [[ $c == '"' ]]; then
-                    in=1
-                    cur=""
+            if [[ -n $in ]]; then
+                if [[ $in == '"' && $c == "$bs" ]]; then
+                    cur+=${value:i:2}
+                    i=$((i + 2))
+                    continue
                 fi
+                if [[ $c == "$in" ]]; then
+                    if [[ $in == '"' ]]; then
+                        dest+=("$(unescape_basic "$cur")")
+                    else
+                        dest+=("$cur")
+                    fi
+                    in=""
+                    cur=""
+                    i=$((i + 1))
+                    continue
+                fi
+                cur+=$c
                 i=$((i + 1))
                 continue
             fi
-            if [[ $c == "$bs" ]]; then
-                cur+=${value:i:2}
-                i=$((i + 2))
-                continue
-            fi
-            if [[ $c == '"' ]]; then
-                dest+=("$(unescape_basic "$cur")")
-                in=0
+            if [[ $c == '"' || $c == "'" ]]; then
+                in=$c
                 i=$((i + 1))
                 continue
             fi
-            cur+=$c
+            if [[ $c == ']' ]]; then
+                return
+            fi
             i=$((i + 1))
         done
     fi
@@ -186,37 +196,201 @@ toml_value_closed() {
     return 0
 }
 
+declare -gA target_cfg_cache=()
+
+target_cfg_text() {
+    local target=$1
+    if [[ -z ${target_cfg_cache[$target]+x} ]]; then
+        target_cfg_cache[$target]=$(rustc --print cfg --target "$target" 2>/dev/null || true)
+    fi
+    printf '%s\n' "${target_cfg_cache[$target]}"
+}
+
+cfg_has() {
+    local cfgs=$1 key=$2 value=${3-} line
+    if [[ -z $value ]]; then
+        while IFS= read -r line; do
+            [[ $line == "$key" ]] && return 0
+        done <<<"$cfgs"
+        return 1
+    fi
+    while IFS= read -r line; do
+        [[ $line == "$key=\"$value\"" ]] && return 0
+    done <<<"$cfgs"
+    return 1
+}
+
+trim_ws() {
+    local s=$1
+    s=${s#"${s%%[![:space:]]*}"}
+    s=${s%"${s##*[![:space:]]}"}
+    printf '%s' "$s"
+}
+
+# Split EXPR on commas that are not inside (), quotes. Result in cfg_parts.
+split_top_commas() {
+    local s=$1 i=0 c depth=0 in="" cur=""
+    local n=${#s}
+    cfg_parts=()
+    while (( i < n )); do
+        c=${s:i:1}
+        if [[ -n $in ]]; then
+            cur+=$c
+            if [[ $in == '"' && $c == "$bs" ]]; then
+                i=$((i + 1))
+                if (( i < n )); then
+                    cur+=${s:i:1}
+                fi
+                i=$((i + 1))
+                continue
+            fi
+            if [[ $c == "$in" ]]; then
+                in=""
+            fi
+            i=$((i + 1))
+            continue
+        fi
+        if [[ $c == '"' || $c == "'" ]]; then
+            in=$c
+            cur+=$c
+            i=$((i + 1))
+            continue
+        fi
+        if [[ $c == '(' ]]; then
+            depth=$((depth + 1))
+            cur+=$c
+            i=$((i + 1))
+            continue
+        fi
+        if [[ $c == ')' ]]; then
+            depth=$((depth - 1))
+            cur+=$c
+            i=$((i + 1))
+            continue
+        fi
+        if [[ $c == ',' && depth -eq 0 ]]; then
+            cfg_parts+=("$cur")
+            cur=""
+            i=$((i + 1))
+            continue
+        fi
+        cur+=$c
+        i=$((i + 1))
+    done
+    cfg_parts+=("$cur")
+}
+
+# True when EXPR matches TARGET's `rustc --print cfg` list. Cargo uses that
+# list for `target.'cfg(...)'` tables, without the rustflags added later.
+cfg_eval() {
+    local expr=$1 cfgs=$2
+    expr=$(trim_ws "$expr")
+    [[ -n $expr ]] || return 0
+    local inner p
+    local -a parts=()
+    if [[ $expr == all\(*\) ]]; then
+        inner=${expr#all(}
+        inner=${inner%)}
+        split_top_commas "$inner"
+        parts=("${cfg_parts[@]}")
+        for p in "${parts[@]}"; do
+            cfg_eval "$(trim_ws "$p")" "$cfgs" || return 1
+        done
+        return 0
+    fi
+    if [[ $expr == any\(*\) ]]; then
+        inner=${expr#any(}
+        inner=${inner%)}
+        split_top_commas "$inner"
+        parts=("${cfg_parts[@]}")
+        for p in "${parts[@]}"; do
+            cfg_eval "$(trim_ws "$p")" "$cfgs" && return 0
+        done
+        return 1
+    fi
+    if [[ $expr == not\(*\) ]]; then
+        inner=${expr#not(}
+        inner=${inner%)}
+        cfg_eval "$(trim_ws "$inner")" "$cfgs" && return 1
+        return 0
+    fi
+    if [[ $expr =~ ^([A-Za-z0-9_]+)[[:space:]]*=[[:space:]]*\"([^\"]*)\"$ ]]; then
+        cfg_has "$cfgs" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+        return
+    fi
+    if [[ $expr =~ ^([A-Za-z0-9_]+)[[:space:]]*=[[:space:]]*\'([^\']*)\'$ ]]; then
+        cfg_has "$cfgs" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+        return
+    fi
+    if [[ $expr =~ ^[A-Za-z0-9_]+$ ]]; then
+        cfg_has "$cfgs" "$expr"
+        return
+    fi
+    return 1
+}
+
+# SPEC is a target triple or cfg(...), with one layer of quotes removed.
+# Prints "specific" when Cargo would apply that table to TRIPLE.
+spec_kind() {
+    local spec=$1 triple=$2
+    spec=$(trim_ws "$spec")
+    if [[ $spec == \'*\' ]]; then
+        spec=${spec:1:${#spec}-2}
+    elif [[ $spec == \"*\" ]]; then
+        spec=${spec:1:${#spec}-2}
+    fi
+    if [[ $spec == "$triple" ]]; then
+        printf specific
+        return
+    fi
+    if [[ $spec == cfg\(*\) ]]; then
+        local inner=${spec#cfg(}
+        inner=${inner%)}
+        if cfg_eval "$(trim_ws "$inner")" "$(target_cfg_text "$triple")"; then
+            printf specific
+        fi
+    fi
+}
+
 section_kind() {
     local section=$1 triple=$2
     section=${section%%#*}
-    section=${section%"${section##*[![:space:]]}"}
-    section=${section#"${section%%[![:space:]]*}"}
+    section=$(trim_ws "$section")
     if [[ $section == build ]]; then
         printf build
         return
     fi
     local name=${section#target.}
     [[ $name != "$section" ]] || return 0
-    name=${name#\"}
-    name=${name%\"}
-    name=${name#\'}
-    name=${name%\'}
-    if [[ $name == "$triple" ]]; then
-        printf target
+    spec_kind "$name" "$triple"
+}
+
+# Start a rustflags value. KIND is build, specific, or empty.
+begin_rustflags() {
+    local kind=$1 value=$2
+    [[ -n $kind ]] || return 0
+    pending_kind=$kind
+    if toml_value_closed "$value"; then
+        take_rustflags "$kind" "$value"
+        pending_kind=""
+    else
+        collecting=1
+        buf=$value
     fi
 }
 
 parse_config_file() {
     local file=$1 triple=$2
-    local section="" collecting=0 buf="" line
+    local section="" collecting=0 buf="" line pending_kind=""
     while IFS= read -r line || [[ -n $line ]]; do
         line=${line%%$'\r'}
         if (( collecting )); then
             buf+=$'\n'"$line"
             if toml_value_closed "$buf"; then
-                take_rustflags "$section" "$triple" "$buf"
+                take_rustflags "$pending_kind" "$buf"
                 collecting=0
                 buf=""
+                pending_kind=""
             fi
             continue
         fi
@@ -225,35 +399,38 @@ parse_config_file() {
             section=${BASH_REMATCH[1]}
             continue
         fi
+        if [[ $line =~ ^[[:space:]]*build\.rustflags[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+            begin_rustflags build "${BASH_REMATCH[1]}"
+            continue
+        fi
+        if [[ $line =~ ^[[:space:]]*target\.(.*)\.rustflags[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+            begin_rustflags "$(spec_kind "${BASH_REMATCH[1]}" "$triple")" "${BASH_REMATCH[2]}"
+            continue
+        fi
         if [[ $line =~ ^[[:space:]]*rustflags[[:space:]]*=[[:space:]]*(.*)$ ]]; then
-            buf=${BASH_REMATCH[1]}
-            if toml_value_closed "$buf"; then
-                take_rustflags "$section" "$triple" "$buf"
-            else
-                collecting=1
-            fi
+            begin_rustflags "$(section_kind "$section" "$triple")" "${BASH_REMATCH[1]}"
         fi
     done <"$file"
 }
 
 take_rustflags() {
-    local section=$1 triple=$2 value=$3 kind
-    kind=$(section_kind "$section" "$triple")
+    local kind=$1 value=$2
     [[ -n $kind ]] || return 0
     if [[ $kind == build ]]; then
         append_toml_rustflags build_args "$value"
     else
-        append_toml_rustflags target_args "$value"
+        append_toml_rustflags specific_args "$value"
     fi
 }
 
 # Cargo's config rustflags for TARGET, appended to `args`. $CARGO_HOME comes
 # first, then ancestor `.cargo/config.toml` files from the filesystem root
-# down to here. target.<triple>.rustflags replaces build.rustflags; lists
-# from several files are concatenated. `cfg(...)` target tables are not read.
+# down to here. A matching target.<triple> or target.'cfg(...)' list replaces
+# build.rustflags. Lists from several files are concatenated. Dotted keys
+# (`build.rustflags`) are the same tables.
 config_rustflags() {
     local target=$1
-    local -a files=() build_args=() target_args=()
+    local -a files=() build_args=() specific_args=()
     local home=${CARGO_HOME:-$HOME/.cargo}
     local dir ancestors=() i file
     if [[ -f $home/config.toml ]]; then
@@ -280,8 +457,8 @@ config_rustflags() {
     for file in "${files[@]}"; do
         parse_config_file "$file" "$target"
     done
-    if (( ${#target_args[@]} )); then
-        args+=("${target_args[@]}")
+    if (( ${#specific_args[@]} )); then
+        args+=("${specific_args[@]}")
     elif (( ${#build_args[@]} )); then
         args+=("${build_args[@]}")
     fi
@@ -290,12 +467,11 @@ config_rustflags() {
 run_cargo() {
     local target=$1 extra=$2
     shift 2
-    local var target_flags mode joined
+    local var target_flags joined
     var="CARGO_TARGET_$(printf '%s' "$target" | tr 'a-z.-' 'A-Z__')_RUSTFLAGS"
     target_flags=${!var-}
     local -a args=()
     if [[ -v CARGO_ENCODED_RUSTFLAGS ]]; then
-        mode=encoded
         local rest=${CARGO_ENCODED_RUSTFLAGS} piece
         while [[ $rest == *$'\x1f'* ]]; do
             piece=${rest%%$'\x1f'*}
@@ -304,16 +480,12 @@ run_cargo() {
         done
         [[ -n $rest ]] && args+=("$rest")
     elif [[ -v RUSTFLAGS ]]; then
-        mode=rustflags
         append_words "$RUSTFLAGS"
     elif [[ -n $target_flags ]]; then
-        mode=target
         append_words "$target_flags"
     elif [[ -v CARGO_BUILD_RUSTFLAGS ]]; then
-        mode=build
         append_words "$CARGO_BUILD_RUSTFLAGS"
     else
-        mode=target
         config_rustflags "$target"
     fi
     append_words "$extra"
@@ -321,24 +493,13 @@ run_cargo() {
         "$@"
         return
     fi
-    joined=$(printf '%s ' "${args[@]}")
-    joined=${joined% }
-    case $mode in
-        encoded)
-            local IFS=$'\x1f'
-            joined="${args[*]}"
-            env -u RUSTFLAGS "CARGO_ENCODED_RUSTFLAGS=$joined" "$@"
-            ;;
-        rustflags)
-            env -u CARGO_ENCODED_RUSTFLAGS "RUSTFLAGS=$joined" "$@"
-            ;;
-        build)
-            env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS "CARGO_BUILD_RUSTFLAGS=$joined" "$@"
-            ;;
-        target)
-            env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS "$var=$joined" "$@"
-            ;;
-    esac
+    # Unit separators keep an argument that contains a space intact. Cargo
+    # splits RUSTFLAGS and the target variable on spaces, which would break
+    # a config array element such as `-C link-arg=-Wl,foo bar`.
+    local IFS=$'\x1f'
+    joined="${args[*]}"
+    env -u RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS -u "$var" \
+        "CARGO_ENCODED_RUSTFLAGS=$joined" "$@"
 }
 
 # Flags every lint of TARGET needs. ESP-IDF uses getrandom's own backend.
@@ -439,10 +600,11 @@ if [[ ${1:-} == xtensa ]]; then
         lint "$target" -Zbuild-std=core,alloc
     done
     check_lib xtensa-esp32s3-espidf -Zbuild-std=std,panic_abort
-    # Every bench is empty on Xtensa. criterion's wait-timeout does not build
-    # against ESP-IDF's libc, and ring and OpenSSL have no Xtensa port. The
-    # check still fails if a bench names either. ESP-IDF uses getrandom's
-    # own backend.
+    # Every bench is an empty program on Xtensa. criterion's wait-timeout does
+    # not build against ESP-IDF's libc, and ring and OpenSSL have no Xtensa
+    # port, so those paths are `cfg`'d out. This check compiles the empty
+    # programs. A name inside that `cfg` is not typechecked. ESP-IDF uses
+    # getrandom's own backend.
     run_cargo xtensa-esp32s3-espidf "" "${cargo[@]}" check -Zbuild-std=std,panic_abort \
         -p rind-bench --benches --locked --target xtensa-esp32s3-espidf
     exit 0

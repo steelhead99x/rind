@@ -139,10 +139,11 @@ qemu. iOS devices' code is only built.
   and `xtensa-esp32s3-none-elf` the same four ways, check the ESP-IDF library
   (`xtensa-esp32s3-espidf`, which has std and getrandom's own backend) the
   same four ways, and check `rind-bench`'s bench targets there. Those
-  benches are empty on Xtensa: criterion does not build against ESP-IDF's
-  libc, and ring and OpenSSL have no Xtensa port. The check still fails if
-  a bench names either. None of these targets runs a test or a constant-time
-  check.
+  benches are empty programs on Xtensa: criterion does not build against
+  ESP-IDF's libc, and ring and OpenSSL have no Xtensa port, so those paths
+  are `cfg`'d out. The check compiles the empty programs. A name inside that
+  `cfg` is not typechecked. None of these targets runs a test or a
+  constant-time check.
   RSA and the NIST curves run on 64-bit limbs on 64-bit targets and on
   `wasm32` built with `-C target-feature=+wide-arithmetic` (stable from Rust
   1.101), whose 128-bit products take one or two multiply instructions, and

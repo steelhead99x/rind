@@ -41,6 +41,12 @@ fi
 if [[ ${PRINT_AWS:-} == 1 && $* == *tree* ]]; then
     printf '%s\n' 'aws-lc-rs v1.0.0'
 fi
+# The no-SSE2 build checks the rlib for stmxcsr. Leave an empty one.
+if [[ $* == *build* && $* == *x86_64-unknown-none* ]]; then
+    lib=${CARGO_TARGET_DIR:-target}/x86_64-unknown-none/debug
+    mkdir -p "$lib"
+    : >"$lib/librind.rlib"
+fi
 exit 0
 EOF
 chmod +x "$tmp/cargo"
@@ -53,6 +59,7 @@ run() {
     # A caller can override it with `env CARGO_HOME=...`.
     env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
         CARGO_HOME="$record/cargo-home" \
+        CARGO_TARGET_DIR="$record/target" \
         PATH="$tmp:$PATH" RECORD_DIR="$record" \
         "$@"
 }
@@ -124,7 +131,8 @@ if [[ -e $tmp/bad/0.args ]]; then
 fi
 
 # Default path: eight targets, four clippy rows each, then four assembly
-# builds, then one tree check.
+# builds, then the no-SSE2 x86_64 rows (four clippy and one build), then one
+# tree check.
 # RUSTFLAGS outranks a target-scoped flag, so the target cpu does not merge
 # in. Only x86_64-unknown-none gains SSE2. dalek stays on its default.
 default=$tmp/default
@@ -136,14 +144,13 @@ if ! run "$default" env \
     exit 1
 fi
 count=$(find "$default" -name '*.args' | wc -l)
-if [[ $count -ne 37 ]]; then
-    echo "default path ran $count commands, want 37" >&2
+if [[ $count -ne 42 ]]; then
+    echo "default path ran $count commands, want 42" >&2
     exit 1
 fi
 i=0
 while [[ $i -lt 32 ]]; do
     args=$(args_of "$default/$i.args")
-    envf=$(cat "$default/$i.env")
     flags=$(flags_of "$default/$i.env")
     assert_has "$args" "clippy"
     assert_lacks "$args" "+esp"
@@ -157,7 +164,6 @@ while [[ $i -lt 32 ]]; do
     fi
     assert_has "$flags" "-Cdebuginfo=0"
     assert_has "$flags" 'getrandom_backend="custom"'
-    assert_lacks_line "$envf" "ENCODED="
     assert_lacks "$flags" "target-cpu=generic"
     assert_lacks "$flags" "curve25519_dalek_backend"
     if [[ $args == *x86_64-unknown-none* ]]; then
@@ -179,7 +185,16 @@ assert_has "$arm_r" "armv7r-none-eabihf"
 assert_has "$arm64" "aarch64-unknown-none"
 assert_has "$x86" "x86_64-unknown-none"
 assert_has "$(flags_of "$default/35.env")" "target-feature=+sse,+sse2,-soft-float"
-tree_args=$(args_of "$default/36.args")
+nosse=$(args_of "$default/36.args")
+assert_has "$nosse" "clippy"
+assert_has "$nosse" "x86_64-unknown-none"
+nosse_flags=$(flags_of "$default/36.env")
+assert_has "$nosse_flags" 'curve25519_dalek_backend="serial"'
+assert_lacks "$nosse_flags" "soft-float"
+nosse_build=$(args_of "$default/40.args")
+assert_has "$nosse_build" "build"
+assert_has "$nosse_build" "x86_64-unknown-none"
+tree_args=$(args_of "$default/41.args")
 assert_has "$tree_args" "tree"
 assert_has "$tree_args" "thumbv7em-none-eabihf"
 
@@ -199,10 +214,11 @@ run "$build_case" env \
     CARGO_BUILD_RUSTFLAGS='-Cdebuginfo=2' \
     "$script" >/dev/null
 build_env=$(cat "$build_case/0.env")
-assert_has "$build_env" "CARGO_BUILD_RUSTFLAGS="
+assert_has "$build_env" "ENCODED="
 assert_has "$(flags_of "$build_case/0.env")" "-Cdebuginfo=2"
 assert_has "$(flags_of "$build_case/0.env")" 'getrandom_backend="custom"'
 assert_lacks_line "$build_env" "RUSTFLAGS="
+assert_lacks_line "$build_env" "CARGO_BUILD_RUSTFLAGS="
 
 # With no environment source, Cargo's config file is the source. A
 # target.<triple> list replaces build.rustflags, and the script appends its cfg.
@@ -225,6 +241,75 @@ riscv_flags=$(flags_of "$config_case/4.env")
 assert_has "$riscv_flags" "-C target-cpu=generic"
 assert_has "$riscv_flags" 'getrandom_backend="custom"'
 assert_lacks "$riscv_flags" "from_target"
+
+encoded_fields() {
+    local line val
+    while IFS= read -r line; do
+        if [[ $line == ENCODED=* ]]; then
+            val=${line#ENCODED=}
+            local IFS=$'\x1f'
+            local -a bits=()
+            read -r -a bits <<< "$val"
+            printf '%s\n' "${bits[@]}"
+            return
+        fi
+    done <"$1"
+}
+
+# Dotted build.rustflags, a trailing comment, a literal string, an array
+# element that contains a space, and a matching cfg() table. Cargo 1.98
+# accepts all of these.
+forms=$tmp/forms-home
+mkdir -p "$forms"
+cat >"$forms/config.toml" <<'EOF'
+build.rustflags = ["--cfg", "dotted=\"1\""]
+EOF
+forms_case=$tmp/forms
+run "$forms_case" env CARGO_HOME="$forms" "$script" >/dev/null
+assert_has "$(flags_of "$forms_case/0.env")" 'dotted="1"'
+
+comment=$tmp/comment-home
+mkdir -p "$comment"
+cat >"$comment/config.toml" <<'EOF'
+[build]
+rustflags = ["-C", "target-cpu=generic"] # see "-C" "overflow-checks=off"
+EOF
+comment_case=$tmp/comment
+run "$comment_case" env CARGO_HOME="$comment" "$script" >/dev/null
+comment_flags=$(flags_of "$comment_case/0.env")
+assert_has "$comment_flags" "target-cpu=generic"
+assert_lacks "$comment_flags" "overflow-checks"
+
+literal=$tmp/literal-home
+mkdir -p "$literal"
+cat >"$literal/config.toml" <<'EOF'
+[build]
+rustflags = '-C target-cpu=generic'
+EOF
+literal_case=$tmp/literal
+run "$literal_case" env CARGO_HOME="$literal" "$script" >/dev/null
+assert_has "$(flags_of "$literal_case/0.env")" "-C target-cpu=generic"
+
+space=$tmp/space-home
+mkdir -p "$space"
+cat >"$space/config.toml" <<'EOF'
+[build]
+rustflags = ["-C", "link-arg=-Wl,foo bar"]
+EOF
+space_case=$tmp/space
+run "$space_case" env CARGO_HOME="$space" "$script" >/dev/null
+space_fields=$(encoded_fields "$space_case/0.env")
+assert_has "$space_fields" $'link-arg=-Wl,foo bar'
+
+cfgtbl=$tmp/cfg-home
+mkdir -p "$cfgtbl"
+cat >"$cfgtbl/config.toml" <<'EOF'
+[target.'cfg(target_os = "none")']
+rustflags = ["--cfg", "from_none=\"1\""]
+EOF
+cfg_case=$tmp/cfgtable
+run "$cfg_case" env CARGO_HOME="$cfgtbl" "$script" >/dev/null
+assert_has "$(flags_of "$cfg_case/0.env")" 'from_none="1"'
 
 # Encoded flags outrank RUSTFLAGS. Cargo reads only the encoded source.
 encoded_case=$tmp/encoded
