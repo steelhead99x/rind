@@ -21,8 +21,9 @@
 # through `--cfg rind_cpu_disable`, as `admin/ctgrind`'s jobs deny theirs.
 # `RIND_CPU_DISABLE_*` in the environment denies more. On aarch64, after the
 # host's own schedule, the X25519 and 16- and 32-word Montgomery tests run
-# again with `RIND_CPU_DISABLE_wide_mul=1`: a wide host would otherwise
-# trace `_alt` and `bn_mul_mont`, and the narrow schedules would go unseen.
+# again with `RIND_CPU_DISABLE_wide_mul=1` and with `RIND_CPU_FORCE_wide_mul=1`,
+# each checked to take effect first: either host would otherwise prove only
+# its own schedule.
 #
 # Run it in `nix develop .#binsec`.
 
@@ -708,12 +709,35 @@ def main():
     run(names, None, "")
     # The binary already has `--cfg rind_cpu_disable`, so the variable is
     # read at run time. One build serves both schedules.
+    # The host's own part picks one schedule. On aarch64 the tests that
+    # reach a narrow twin run again with each schedule forced, so a narrow
+    # host still proves `_alt` and a wide one the narrow schedules.
     narrow = {"ct_binsec_x25519", "ct_binsec_mont16", "ct_binsec_mont_mul"}
-    if arch(target) == "aarch64" and not os.environ.get("RIND_CPU_DISABLE_wide_mul"):
+    overridden = any(os.environ.get(v) for v in ("RIND_CPU_DISABLE_wide_mul", "RIND_CPU_FORCE_wide_mul"))
+    if arch(target) == "aarch64" and not overridden:
         again = [name for name in names if name.split("::")[-1] in narrow and not is_planted(name)]
-        if again:
-            env = dict(os.environ, RIND_CPU_DISABLE_wide_mul="1")
-            run(again, env, "narrow multiplier")
+        for label, var, wide in [
+            ("narrow multiplier", "RIND_CPU_DISABLE_wide_mul", "0"),
+            ("wide multiplier", "RIND_CPU_FORCE_wide_mul", "1"),
+        ]:
+            if not again:
+                break
+            env = dict(os.environ, **{var: "1"})
+            # The test asserts the schedule under `RIND_TEST_ARM_WIDE_MUL`, so
+            # a binary that ignored the variable fails here rather than
+            # proving the host's schedule a second time.
+            check = subprocess.run(
+                [exe, "--exact", "low::aarch64::cpu::tests::detects_the_expected_cpu", "--test-threads=1"],
+                env=dict(env, RIND_TEST_ARM_WIDE_MUL=wide),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                encoding="utf-8",
+            )
+            if check.returncode != 0 or "1 passed" not in check.stdout:
+                print("FAIL {} not selected:\n{}".format(label, check.stdout))
+                failed = True
+            else:
+                run(again, env, label)
     sys.exit(failed)
 
 
