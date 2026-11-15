@@ -179,6 +179,18 @@ operands, so it is not constant-time on them:
   [MPC7410UM] Table 6-6, [MPC7450UM] Table 6-5, [e300coreRM] Table 7-4). The
   e300c2 through c4, e500v1 and v2, and e500mc multiply in fixed time
   ([e300coreRM] Table 7-4, [E500CORERM] Table 4-6, [E500MCRM] Table 10-2).
+  Poly1305 on 32-bit `powerpc` uses that widening multiply. On
+  `powerpc-unknown-linux-gnu` it lowers to `mulhwu` and `mullw`, and a
+  16-bit half lowers to `mullw` after the top half is cleared. `rind_mul16`
+  is not set: BearSSL records both that 32-bit product and the 64-bit
+  product as not constant time on the 603e and the 7xx ([BearSSL ctmul]),
+  and this tree has not checked a multiply that holds the early exit off.
+- 32-bit `mips`: the MIPS32 4Km's multiplier is 32-by-16 bits and finishes
+  early, so a 32x32 product varies by one cycle ([eprint 2009/538]).
+  Poly1305 uses the plain widening multiply. `rind_mul16` is not set. Rust
+  1.98.1 ships no prebuilt MIPS standard library, so the code a `mips`
+  target generates was not checked, and a 16-bit half was not assumed to
+  be one fixed-time digit on every core that implements `multu`.
 - 64-bit `powerpc64`: NXP's e6500, whose 64-bit `mulld` and `mulhd` take 4 to
   7 cycles by the width of their operands ([E6500RM] Table 10-2). Its
   predecessor the e5500 likely does too, but its manual is not public.
@@ -193,19 +205,29 @@ operands, so it is not constant-time on them:
   with the Zkt extension, which the RVA22 and RVA23 profiles require, such as
   SpacemiT's X60, guarantees its multiplies' timing ([Zkt]), and SiFive's U54
   and U74 and T-Head's C910 and C920 document a fixed latency.
-- `riscv32` and `riscv64` without the M extension, such as
+- `riscv32` without a multiply instruction, such as
   `riscv32i-unknown-none-elf` and `riscv32e-unknown-none-elf`: there is no
-  multiply instruction, so the compiler lowers `wrapping_mul` to `__mulsi3`,
-  whose iterations follow the bits of an operand. Poly1305 builds each
-  16-bit half with sixteen masked shifts and adds. The rest of rind's secret
-  arithmetic on those targets still calls that routine.
+  `mul`, so the compiler lowers a 32-bit `wrapping_mul` to `__mulsi3` and a
+  32x32->64 product to `__muldi3`, and those routines' iterations follow the
+  bits of an operand. Poly1305 builds each 16-bit half with sixteen masked
+  shifts and adds. Zmmul (`mul` and `mulhu`, no divide) is a multiplier:
+  Poly1305 keeps the widening multiply, and the shift-and-add does not run.
+  The rest of rind's secret arithmetic on a target with no multiply
+  instruction still calls `__mulsi3` or `__muldi3`.
+- `riscv64` without the M extension and without Zmmul: there is no `mul`.
+  Poly1305 stays on 64-bit limbs, so each 64x64->128 product is a call to
+  `__multi3` on the secret limbs. `rind_mul16` does not apply to that width.
+  The build warns. Zmmul is a multiplier, and then those products are `mul`
+  and `mulhu`. The rest of rind's secret arithmetic on a target with no
+  multiply instruction still calls `__multi3`.
 - `s390x`: IBM publishes no instruction timing for IBM Z, so rind cannot say.
 - 32-bit `arm` before ARMv7: Intel's XScale (ARMv5TE), whose `mul`, `umull`,
   and `smull` terminate early by the top bits of their second operand
   ([XScale] Table 10-6), and ARMv4T's ARM7TDMI and ARM9TDMI ([BearSSL ctmul]).
   ARMv6's ARM1176 does not terminate early ([ARM1176 TRM] Table 3-46), nor does
-  the ARM926EJ-S. On the ARMv4T and ARMv5TE triples Poly1305 sets bit 31 of
-  each 16-bit half before multiplying, which misses every early-out row in
+  the ARM926EJ-S. On the ARMv4T and ARMv5TE triples, and on a custom target
+  whose triple, `llvm-target`, or features name `v4t` or `v5te`, Poly1305
+  sets bit 31 of each 16-bit half before multiplying, which misses every early-out row in
   that table, so the long path is taken whatever the secret is and whichever
   operand the compiler picks. The ARM926EJ-S shares those triples and does
   not end early, so it pays that long path; its speed was not measured. The
@@ -279,6 +301,7 @@ family since 2004, and of some AMD cores.
 [XScale]: https://download.intel.com/design/intelxscale/27347302.pdf
 [ARM1176 TRM]: https://developer.arm.com/documentation/ddi0301/h
 [BearSSL ctmul]: https://www.bearssl.org/ctmul.html
+[eprint 2009/538]: https://eprint.iacr.org/2009/538
 [Gu and Shacham]: https://arxiv.org/abs/2311.14246
 [Intel DOIT]: https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/resources/data-operand-independent-timing-instructions.html
 [Intel DOITM]: https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/best-practices/data-operand-independent-timing-isa-guidance.html

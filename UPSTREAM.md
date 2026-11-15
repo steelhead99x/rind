@@ -61,6 +61,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Reported:** no.
 - **Goes when:** the `v7` target feature is stable.
 
+### Build scripts cannot see Zmmul or ARMv4T and ARMv5TE
+
+- **Breaks:** Rust 1.98.1 does not put `zmmul` in `cfg(target_feature)`. It is not a Rust target feature: `-C target-feature=+zmmul` warns and still passes the name to LLVM, and `--print cfg` does not list it. `v5te` is unstable, so stable `--print cfg` omits it for `armv5te-unknown-linux-gnueabi` and for `-C target-feature=+v5te`. `v4t` is not a target feature; an `armv4t` target's cfg lists `soft-float` and not `v4t`. A build script that reads only `CARGO_CFG_TARGET_FEATURE` treats Zmmul as no multiplier and a custom ARMv5TE target as a later core.
+- **Reproduce:** `rustc +1.98.1 --print cfg --target riscv32i-unknown-none-elf -C target-feature=+zmmul` warns and lists no `zmmul`. `rustc +1.98.1 --print cfg --target armv5te-unknown-linux-gnueabi` lists no `v5te`. With `RUSTC_BOOTSTRAP=1`, `rustc +1.98.1 -Z unstable-options --print cfg --target` a JSON whose `features` is `+v5te` and whose `llvm-target` is `arm-none-eabi` lists `target_feature="v5te"`. The same for an `armv4t-none-eabi` `llvm-target` lists no `v4t`.
+- **Workaround:** `rind/build.rs` reads the triple. For the names stable cfg hides, it also reads `-C target-feature` from `CARGO_ENCODED_RUSTFLAGS` and a custom target JSON's `features` and `llvm-target`. Builtin `armv4t`, `armv5te`, and `arm-linux-androideabi` still come from the triple. Rust's unversioned `arm-unknown-linux-*` triples stay ARMv6.
+- **Reported:** no.
+- **Goes when:** `zmmul` and `v5te` are stable `target_feature` cfgs, and a custom target's architecture is visible the same way. `v4t` needs a cfg or the `llvm-target` string keeps naming it.
+
 ### No AddressSanitizer for 32-bit ARM Linux
 
 - **Breaks:** rustc has no AddressSanitizer for `armv7-unknown-linux-gnueabihf`.

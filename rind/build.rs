@@ -44,9 +44,13 @@
 //! `thumbv8m.base` there is no `umull`; each half is one 32-bit `mul`, which
 //! those cores do in fixed time. On ARMv4T and ARMv5TE that `mul` ends early
 //! too, including on a 16-bit half, so `rind_mul16_top` sets bit 31 of each
-//! half and the early-out takes its long path. On RISC-V without the M
-//! extension there is no multiply instruction, so `rind_mul16_soft` builds
-//! each half with a shift and an add. `--cfg rind_mul16` forces the halves,
+//! half and the early-out takes its long path. That includes a custom target
+//! whose triple, `llvm-target`, or features name `v4t` or `v5te`, not only
+//! Android's `armv5te` triple. On 32-bit RISC-V with no multiply instruction,
+//! `rind_mul16_soft` builds each half with a shift and an add. Zmmul has
+//! `mul` and `mulhu`, so it does not. A 64-bit RISC-V target with neither
+//! keeps 64-bit limbs; those products call `__multi3`, and the build warns.
+//! `--cfg rind_mul16` forces the halves,
 //! so CI checks them on other targets; it is for testing. The top and soft
 //! cfgs follow the target even then. Only Poly1305's limb products use this.
 //! X25519, the NIST curves, and RSA on these cores still use a multiply whose
@@ -59,6 +63,8 @@
 //! refused when those features are enabled.
 
 use std::env;
+use std::fs;
+use std::path::Path;
 
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
@@ -161,6 +167,16 @@ fn main() {
     if mode == Some(Half::Soft) && env::var_os("CARGO_CFG_RIND_MUL16_SOFT").is_none() {
         println!("cargo::rustc-cfg=rind_mul16_soft");
     }
+
+    // `rind_mul16` is the 32-bit half product. A 64-bit target keeps
+    // `generic::poly1305`, so the cfg would not cover these calls.
+    if riscv64_without_multiply() {
+        println!(
+            "cargo::warning=riscv64 without the M extension or Zmmul keeps 64-bit \
+             Poly1305 limbs, so each 64x64->128 product calls __multi3 on the secret. \
+             rind_mul16 does not cover that width (PLATFORMS.md)"
+        );
+    }
 }
 
 /// How Poly1305 multiplies one 16-bit half, where it must not use a
@@ -184,37 +200,276 @@ enum Half {
 /// same time for every operand. ARMv7E-M, as in `thumbv7em-none-eabihf`,
 /// takes one cycle for `umull`, so it is not here. ARMv4T and ARMv5TE end a
 /// `mul` early on a 16-bit half too, so the top bit stays set.
-/// `arm-linux-androideabi` is ARMv5TE; `armv7-linux-androideabi` is not, and
-/// its arch component is `armv7`. RISC-V without the M extension has no
-/// multiply instruction. As for `armv7_or_later`, the triple is all a build
-/// script sees.
+/// `arm-linux-androideabi` is ARMv5TE; `armv7-linux-androideabi` is not.
+/// Rust's unversioned `arm-unknown-linux-*` triples are ARMv6, which does
+/// not end early. 32-bit RISC-V without M and without Zmmul has no multiply
+/// instruction. 64-bit RISC-V in that state is not a half product: Poly1305
+/// stays on 64-bit limbs.
 fn poly1305_half_mul() -> Option<Half> {
-    if riscv_without_multiply() {
+    if riscv32_without_multiply() {
         return Some(Half::Soft);
     }
-    let target = env::var("TARGET").expect("cargo sets the target");
-    let arch = target.split('-').next().unwrap_or_default();
-    let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    let armv4t = matches!(arch, "armv4t" | "thumbv4t");
-    let armv5te = matches!(arch, "armv5te" | "thumbv5te") || (arch == "arm" && os == "android");
-    if armv4t || armv5te {
+    if arm_early_mul() {
         return Some(Half::Top);
     }
-    if matches!(arch, "thumbv6m" | "thumbv7m" | "thumbv8m.base") {
+    if thumb_halves() {
         return Some(Half::Halves);
     }
     None
 }
 
-/// Whether this RISC-V target has no M extension, so `wrapping_mul` is a
-/// library call. The feature list is absent when the target enables none.
-fn riscv_without_multiply() -> bool {
-    let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
-    if arch != "riscv32" && arch != "riscv64" {
+/// Whether this 32-bit RISC-V target has no multiply instruction.
+fn riscv32_without_multiply() -> bool {
+    env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default() == "riscv32" && !riscv_has_multiply()
+}
+
+/// Whether this 64-bit RISC-V target has no multiply instruction. Poly1305
+/// then calls `__multi3`. `rind_mul16` does not run on 64-bit limbs.
+fn riscv64_without_multiply() -> bool {
+    env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default() == "riscv64" && !riscv_has_multiply()
+}
+
+/// Whether the RISC-V target has `mul` and `mulhu`: the M extension, or
+/// Zmmul without the divide instructions.
+///
+/// Stable `cfg(target_feature)` lists `m` and omits `zmmul`.
+/// See UPSTREAM.md, "Build scripts cannot see Zmmul or ARMv4T and ARMv5TE".
+fn riscv_has_multiply() -> bool {
+    feature_on("m") || feature_on("zmmul")
+}
+
+/// Whether Poly1305 must set bit 31 before a 32-bit `mul`.
+fn arm_early_mul() -> bool {
+    if env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default() != "arm" {
         return false;
     }
-    let features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
-    !features.split(',').any(|feature| feature == "m")
+    // Those Linux triples are ARMv6. Stable cfg hides `v6`, and `+v5te` on
+    // top of one does not retarget it. A custom JSON is not in this list.
+    if let Ok(target) = env::var("TARGET")
+        && matches!(
+            target.as_str(),
+            "arm-unknown-linux-gnueabi"
+                | "arm-unknown-linux-gnueabihf"
+                | "arm-unknown-linux-musleabi"
+                | "arm-unknown-linux-musleabihf"
+                | "armeb-unknown-linux-gnueabi"
+        )
+    {
+        return false;
+    }
+    let names = arch_names();
+    if names
+        .iter()
+        .any(|name| classify_arm_arch(name) == ArmKind::Later)
+    {
+        return false;
+    }
+    if names
+        .iter()
+        .any(|name| classify_arm_arch(name) == ArmKind::Early)
+    {
+        return true;
+    }
+    let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if os == "android" && names.iter().any(|name| name == "arm") {
+        return true;
+    }
+    // A custom `arm-none-eabi` with `+v5te` or `+v4t`, and no later arch.
+    let early = ["v4t", "armv4t", "v5te", "armv5te"]
+        .iter()
+        .any(|name| feature_on(name));
+    let later = ["v6", "v6k", "v6t2", "v7", "v8", "thumb2"]
+        .iter()
+        .any(|name| feature_on(name));
+    early && !later
+}
+
+/// `thumbv6m`, `thumbv7m`, and `thumbv8m.base`: one fixed-time 32-bit `mul`
+/// per half. The triple or a custom target's `llvm-target` names them.
+fn thumb_halves() -> bool {
+    arch_names()
+        .iter()
+        .any(|name| matches!(name.as_str(), "thumbv6m" | "thumbv7m" | "thumbv8m.base"))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ArmKind {
+    /// ARMv4T or ARMv5TE. The 32-bit `mul` ends early.
+    Early,
+    /// ARMv6 or later. Not this early-out, including M-profile.
+    Later,
+    /// `arm` or `thumb` with no version.
+    Unversioned,
+    /// Not a 32-bit ARM arch name.
+    Other,
+}
+
+fn classify_arm_arch(name: &str) -> ArmKind {
+    let rest = if let Some(rest) = name.strip_prefix("thumb") {
+        rest
+    } else if let Some(rest) = name.strip_prefix("arm") {
+        rest
+    } else {
+        return ArmKind::Other;
+    };
+    let Some(rest) = rest.strip_prefix('v') else {
+        return if rest.is_empty() {
+            ArmKind::Unversioned
+        } else {
+            ArmKind::Other
+        };
+    };
+    let digits = rest.chars().take_while(char::is_ascii_digit).count();
+    let Ok(major) = rest[..digits].parse::<u32>() else {
+        return ArmKind::Other;
+    };
+    if major >= 6 {
+        return ArmKind::Later;
+    }
+    if (major == 4 && rest.starts_with("4t")) || (major == 5 && rest.starts_with("5te")) {
+        return ArmKind::Early;
+    }
+    ArmKind::Other
+}
+
+/// The triple's arch component, and a custom target's `llvm-target` arch.
+fn arch_names() -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(target) = env::var("TARGET") {
+        names.push(arch_component(target_file_stem(&target)).to_string());
+    }
+    if let Some(text) = target_json_text()
+        && let Some(llvm) = json_string_field(&text, "llvm-target")
+    {
+        names.push(arch_component(&llvm).to_string());
+    }
+    names
+}
+
+fn target_file_stem(target: &str) -> &str {
+    let file = target.rsplit(['/', '\\']).next().unwrap_or(target);
+    file.strip_suffix(".json").unwrap_or(file)
+}
+
+fn arch_component(name: &str) -> &str {
+    name.split('-').next().unwrap_or(name)
+}
+
+/// Whether `name` is enabled. An explicit `+` or `-` in a custom target's
+/// `features` or in `-C target-feature` wins. Otherwise the cfg does, which
+/// is where stable Rust reports `m` and where nightly reports `v5te`.
+///
+/// `zmmul` and stable `v5te` are not in that cfg.
+/// See UPSTREAM.md, "Build scripts cannot see Zmmul or ARMv4T and ARMv5TE".
+fn feature_on(name: &str) -> bool {
+    if let Some(enabled) = explicit_feature(name) {
+        return enabled;
+    }
+    env::var("CARGO_CFG_TARGET_FEATURE")
+        .unwrap_or_default()
+        .split(',')
+        .any(|feature| feature == name)
+}
+
+fn explicit_feature(name: &str) -> Option<bool> {
+    let mut found = None;
+    if let Some(text) = target_json_text()
+        && let Some(features) = json_string_field(&text, "features")
+        && let Some(enabled) = last_sign(&features, name)
+    {
+        found = Some(enabled);
+    }
+    if let Ok(encoded) = env::var("CARGO_ENCODED_RUSTFLAGS") {
+        for list in rustflag_feature_lists(&encoded) {
+            if let Some(enabled) = last_sign(list, name) {
+                found = Some(enabled);
+            }
+        }
+    }
+    found
+}
+
+fn last_sign(list: &str, name: &str) -> Option<bool> {
+    let mut found = None;
+    for token in list.split(',') {
+        let token = token.trim();
+        if let Some(feature) = token.strip_prefix('+')
+            && feature == name
+        {
+            found = Some(true);
+        } else if let Some(feature) = token.strip_prefix('-')
+            && feature == name
+        {
+            found = Some(false);
+        }
+    }
+    found
+}
+
+/// `-C target-feature` lists from `CARGO_ENCODED_RUSTFLAGS`. Cargo joins
+/// arguments with U+001F. `RUSTFLAGS='-C target-feature=+zmmul'` arrives as
+/// one argument, `-Ctarget-feature=+zmmul`.
+fn rustflag_feature_lists(encoded: &str) -> Vec<&str> {
+    let args: Vec<&str> = encoded.split('\u{1f}').collect();
+    let mut lists = Vec::new();
+    for (i, arg) in args.iter().enumerate() {
+        if let Some(list) = arg.strip_prefix("-Ctarget-feature=") {
+            lists.push(list);
+        } else if let Some(list) = arg.strip_prefix("target-feature=") {
+            lists.push(list);
+        } else if *arg == "-C"
+            && let Some(list) = args
+                .get(i + 1)
+                .and_then(|next| next.strip_prefix("target-feature="))
+        {
+            lists.push(list);
+        }
+    }
+    lists
+}
+
+fn target_json_text() -> Option<String> {
+    let target = env::var("TARGET").ok()?;
+    let path = Path::new(&target);
+    if path.is_file() {
+        return fs::read_to_string(path).ok();
+    }
+    let json = Path::new(&target).with_extension("json");
+    if json.is_file() {
+        return fs::read_to_string(json).ok();
+    }
+    None
+}
+
+/// The string value of one top-level JSON field, if it is a string.
+fn json_string_field(text: &str, key: &str) -> Option<String> {
+    let needle = format!("\"{key}\"");
+    let mut rest = text;
+    while let Some(at) = rest.find(&needle) {
+        let after = rest[at + needle.len()..].trim_start();
+        rest = &rest[at + needle.len()..];
+        let Some(after) = after.strip_prefix(':') else {
+            continue;
+        };
+        let after = after.trim_start();
+        let Some(after) = after.strip_prefix('"') else {
+            continue;
+        };
+        let mut out = String::new();
+        let mut chars = after.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' => {
+                    if let Some(escaped) = chars.next() {
+                        out.push(escaped);
+                    }
+                }
+                '"' => return Some(out),
+                _ => out.push(c),
+            }
+        }
+    }
+    None
 }
 
 /// Whether the target has 64-bit atomics. Cargo joins the widths with
