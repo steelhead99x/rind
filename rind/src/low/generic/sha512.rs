@@ -7,12 +7,16 @@
 //! fully unrolled. On Xtensa that function is about 47 KiB — several times
 //! the ESP32-S3's 16 KiB instruction cache — so every block streams its
 //! code from flash. On that board the rolled loop takes about 0.033×
-//! main's unrolled HACL* body, about 30×. This implementation
-//! follows [`sha256`](sha256.rs): one 16-word window and an 80-round loop,
-//! which stays in a few kilobytes. On the ESP32-S3 under ESP-IDF that loop
-//! is placed in IRAM (`.iram1.text`, literal pool included) and its `K`
-//! table in internal DRAM. The layout check, at opt-level 3, s, and z,
-//! verifies that this body adds no flash text and calls nothing.
+//! main's unrolled HACL* body, about 30×. That figure is the rolled loop
+//! against that HACL* body, not a cycle count of this IRAM placement
+//! against `esp32s3-sha512-flash`. That comparison is not measured. This
+//! implementation follows [`sha256`](sha256.rs): one 16-word window and an
+//! 80-round loop, which stays in a few kilobytes. On the ESP32-S3 under
+//! ESP-IDF the block is placed in IRAM (`.iram1.text`, literal pool
+//! included) and its `K` table in internal DRAM. The driver
+//! `sha512_compress_blocks` stays in ordinary flash text, so the update
+//! path is not a cache-off API. The layout check, at opt-level 3, s, and z,
+//! verifies that this block adds no flash text and calls nothing.
 //! The `esp32s3-sha512-flash` feature leaves the ordinary flash sections,
 //! for an image whose IRAM is already full. The ESP32, the ESP32-S2,
 //! `*-none-elf`, and every other target are unchanged. ESP-IDF Xtensa

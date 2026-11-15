@@ -166,9 +166,12 @@ with portable Rust in place of the assembly armv7 runs regardless.
   IRAM, `K` in `.dram1`, no call from the block, and no relocation into
   flash text. A debug build is not that promise. Every other portable
   target keeps HACL* through libcrux-sha2.
-- portable, ESP32-S3 ESP-IDF: 32-bit SHA-512 stays the rolled loop, in
-  `.iram1` with `K` in `.dram1`. `esp32s3-sha512-flash` leaves both in
-  ordinary flash sections, as do the ESP32, the ESP32-S2, and `*-none-elf`.
+- portable, ESP32-S3 ESP-IDF: 32-bit SHA-512 stays the rolled loop.
+  The block is in `.iram1` and `K` is in `.dram1`. The driver
+  `sha512_compress_blocks` stays in ordinary flash text, so the update
+  path is not a cache-off API. `esp32s3-sha512-flash` leaves the block and
+  `K` in ordinary flash sections, as do the ESP32, the ESP32-S2, and
+  `*-none-elf`.
   `admin/esp32s3-sha512-layout` checks those sections, the relocation
   allowlist, and that the block has no call, at opt-level 3, s, and z.
   It also runs the Xtensa message load (`l32i`, `ssai`, `src`), including
@@ -177,7 +180,12 @@ with portable Rust in place of the assembly armv7 runs regardless.
   build has no ESP32-S2 CPU. The same check compiles ESP-IDF v5.5.1's
   `core-isa.h` for the ESP32, the ESP32-S2, and the ESP32-S3 and requires
   `XCHAL_UNALIGNED_LOAD_HW` 1 and `XCHAL_UNALIGNED_LOAD_EXCEPTION` 0, the
-  hardware `l32i` of an unaligned address. Board time is not measured.
+  hardware `l32i` of an unaligned address. Board time of this IRAM
+  placement against `esp32s3-sha512-flash` is not measured. QEMU runs the
+  message load, not the full compression. Host FIPS 180-4 vectors cover
+  the Rust compressor. The Xtensa load is not in the host ctgrind binary:
+  its instructions and shift distance are fixed. The synthetic link is not
+  a full ESP-IDF image.
   SHA-256 on this target is the IRAM body above, and this
   placement leaves libcrux-sha2's object sections unchanged.
 - portable: ChaCha20-Poly1305's Poly1305 is Graviola's on 64-bit targets
