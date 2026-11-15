@@ -83,7 +83,7 @@ def edModDecodePair (xy : Nat × Nat) : EdPoint :=
 
 /-- s2n-bignum's `ed25519_encode`, RFC 8032 5.1.2's encoding of a point as a
 number: its y-coordinate, with the low bit of its x-coordinate as bit 255,
-https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/edwards25519_decode.ml#L1350 -/
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/edwards25519_decode.ml#L1350 -/
 def edEncode (P : EdPoint) : Nat := 2 ^ 255 * (edModEncode P.1 % 2) + edModEncode P.2
 
 /-- s2n-bignum's `ed25519_validencode n`: some point of the group encodes as
@@ -92,7 +92,7 @@ def edValidEncode (n : Nat) : Prop := ∃ P, edOnCurve P ∧ edEncode P = n
 
 /-- s2n-bignum's `ed25519_decode n`, a point of the group that encodes as `n`,
 picked by Hilbert's choice as HOL Light's `@` picks it,
-https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/x86/proofs/edwards25519_decode.ml#L1361 -/
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/edwards25519_decode.ml#L1361 -/
 noncomputable def edDecode (n : Nat) : EdPoint :=
   Classical.epsilon fun P => edOnCurve P ∧ edEncode P = n
 

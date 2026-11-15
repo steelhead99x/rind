@@ -1,9 +1,18 @@
 [workspace]
-dependencies_update = true
-git_release_enable = false
+# Crates move only in reviewed updates held to Dependabot's cooldown, never in
+# a release PR's `cargo update`.
+dependencies_update = false
+# A GitHub Release for each crate published, its changelog entry as the body.
+git_release_enable = true
+# Only rind's is marked latest, so a batch of adapter releases never tops it.
+git_release_latest = false
 # Publish only when the commit is a merged release PR, so an ordinary merge to
 # `main` never publishes.
 release_always = false
+
+[[package]]
+name = "rind"
+git_release_latest = true
 
 # pyrind, which .github/workflows/release.yml publishes to PyPI from the tag
 # this creates. It never goes to crates.io, so its versions come from tags.

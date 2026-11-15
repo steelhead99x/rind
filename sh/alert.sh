@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Discord alerting for nightly, landing, and release failures, after moq-dev/moq's.
+# Discord alerting for scheduled, landing, and release failures, after moq-dev/moq's.
 # Usage:
 #   sh/alert.sh discord   Post the current workflow_run failure to Discord.
 #   sh/alert.sh check     Verify alert.yml watches every alertable workflow.
@@ -9,7 +9,7 @@
 #   RUN_REPO          Repository, since the channel is shared.
 #   RUN_NAME          Workflow name (github.event.workflow_run.name).
 #   RUN_URL           Run html_url.
-#   RUN_CONCLUSION    failure / timed_out.
+#   RUN_CONCLUSION    failure, timed_out, or cancelled.
 #   RUN_EVENT         What triggered the failed run (schedule, push, ...).
 #   RUN_REF           head_branch.
 #   RUN_TITLE         display_title, usually the commit subject.

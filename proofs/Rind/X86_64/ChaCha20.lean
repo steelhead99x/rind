@@ -1,5 +1,5 @@
-import Rind.X86_64.S2nBignum
-import Rind.X86_64.Dispatch
+import Rind.X86_64.QuicDispatch
+import Rind.Spec
 import Rind.Bytes
 open Aeneas Aeneas.Std Result rind.spec
 
@@ -8,9 +8,9 @@ open Aeneas Aeneas.Std Result rind.spec
 
 The `chacha20_*` theorems state what the header-protection API returns for
 ChaCha20, in terms of `chacha20.headerProtectionMask`, through the dispatch
-`Rind.X86_64.Dispatch` models. HACL*'s rounds are Rust, so they are proven
-here too, and no axiom stands in for them. `admin/prove` writes the aarch64
-proof from this file by renaming the target.
+`Rind.X86_64.QuicDispatch` models. HACL*'s rounds are Rust, so they are proven
+here too, and no axiom stands in for them. `admin/prove` writes the aarch64,
+armv7, and portable proofs from this file by renaming the target.
 -/
 
 namespace rind.x86_64
@@ -280,8 +280,19 @@ theorem chacha20_block_spec (key : Std.Array U8 32#usize) (counter_nonce : Std.A
 
 /-! ## Header protection, `mid::chacha20` and `aead::quic` -/
 
+/-- The entry guard admits a call that handles secrets: the one fact about the
+machine the mask needs, as it runs the same Rust on every CPU. Each target's
+`Runs` implies it. -/
+def RunsChaCha20 : Prop := ∃ e, low.entry.Entry.new_secret = ok e
+
 @[step]
-theorem header_protection_mask_spec (h : Runs) (k : mid.chacha20.ChaCha20)
+theorem chacha20_new_secret_spec (h : RunsChaCha20) :
+    low.entry.Entry.new_secret ⦃ _ => True ⦄ := by
+  obtain ⟨e, he⟩ := h
+  simp [he]
+
+@[step]
+theorem header_protection_mask_spec (h : RunsChaCha20) (k : mid.chacha20.ChaCha20)
     (sample : Std.Array U8 16#usize) :
     mid.chacha20.ChaCha20.header_protection_mask k sample ⦃ mask =>
       mask.val.map (·.bv) =
@@ -316,7 +327,7 @@ theorem chacha20_new (key : Slice U8) :
 /-- A ChaCha20 header-protection key's mask for a sample: RFC 9001's, the
 first five bytes of RFC 8439's keystream block for the key, with the sample
 as the block counter and nonce. -/
-theorem chacha20_mask (h : Runs) (k : mid.chacha20.ChaCha20) (sample : Std.Array U8 16#usize) :
+theorem chacha20_mask (h : RunsChaCha20) (k : mid.chacha20.ChaCha20) (sample : Std.Array U8 16#usize) :
     aead.quic.HeaderProtectionKey.mask (.ChaCha20 k) sample ⦃ mask =>
       mask.val.map (·.bv) =
         chacha20.headerProtectionMask (k.key.val.map (·.bv)) (sample.val.map (·.bv)) ⦄ := by

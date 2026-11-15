@@ -387,7 +387,7 @@ mod tests {
 
         for file in ["gcmDecrypt128", "gcmDecrypt192", "gcmDecrypt256"] {
             process_cavp(
-                format!("../thirdparty/cavp/gcm/{file}.rsp"),
+                format!("../thirdparty/vectors/cavp/gcm/{file}.rsp"),
                 &mut State::default(),
             );
         }
@@ -400,7 +400,10 @@ mod tests {
                 encrypt: true,
                 ..Default::default()
             };
-            process_cavp(format!("../thirdparty/cavp/gcm/{file}.rsp"), &mut state);
+            process_cavp(
+                format!("../thirdparty/vectors/cavp/gcm/{file}.rsp"),
+                &mut state,
+            );
         }
     }
 

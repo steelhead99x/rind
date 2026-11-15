@@ -858,7 +858,6 @@ macro_rules! muxload6 {
 // Transliterated from s2n-bignum's x86/p384/p384_montjadd_alt.S.
 /// Point addition on NIST curve P-384 in Montgomery-Jacobian coordinates
 ///
-///
 /// Does p3 := p1 + p2 where all points are regarded as Jacobian triples with
 /// each coordinate in the Montgomery domain, i.e. x' = (2^384 * x) mod p_384.
 /// A Jacobian triple (x',y',z') represents affine point (x/z^2,y/z^3).

@@ -745,7 +745,7 @@ mod tests {
 
         let mut state = State::default();
         process_cavp(
-            "../thirdparty/cavp/ecdh/KAS_ECC_CDH_PrimitiveTest.txt",
+            "../thirdparty/vectors/cavp/ecdh/KAS_ECC_CDH_PrimitiveTest.txt",
             &mut state,
         );
         assert_eq!(state.tests, 75);

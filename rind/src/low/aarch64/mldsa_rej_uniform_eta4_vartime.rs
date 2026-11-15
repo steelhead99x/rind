@@ -39,7 +39,6 @@ use crate::low::macros::*;
 // Transliterated from s2n-bignum's arm/mldsa/mldsa_rej_uniform_eta4_VARIABLE_TIME.S.
 /// Rejection sampling with eta=4 for ML-DSA (parameter set 65).
 ///
-///
 /// Extracts up to 256 coefficients in the range [-4, 4] from a buffer of
 /// SHAKE256 output bytes. Each input byte contributes two 4-bit nibbles; a
 /// nibble is accepted iff its value is < 9 (rejection sampling for uniform

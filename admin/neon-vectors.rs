@@ -52,6 +52,19 @@ fn dup_lane<const N: i32>(a: uint8x16_t) -> uint8x16_t {
     vreinterpretq_u8_u32(vdupq_laneq_u32::<N>(vreinterpretq_u32_u8(a)))
 }
 
+#[target_feature(enable = "neon")]
+fn set_lane<const N: i32>(w: u32, a: uint8x16_t) -> uint8x16_t {
+    vreinterpretq_u8_u32(vsetq_lane_u32::<N>(w, vreinterpretq_u32_u8(a)))
+}
+
+/// A binary intrinsic on 32-bit lanes, reinterpreting its operands and
+/// result.
+macro_rules! u32_lanes {
+    ($f:ident) => {
+        |a, b| unsafe { vreinterpretq_u8_u32($f(vreinterpretq_u32_u8(a), vreinterpretq_u32_u8(b))) }
+    };
+}
+
 const ARM: &str = "core.core_arch.arm_shared.neon.generated";
 const AARCH64: &str = "core.core_arch.aarch64.neon.generated";
 const RANDOM: usize = 16;
@@ -76,7 +89,7 @@ fn main() {
     // `TBL`'s indices past 15 select zero: each pair's random second vector
     // has some, and these some at and around the edge.
     let tbl_edges = [0x0f10_1f20_7f80_ff00_0102_0304_0506_0708, 0x1011_1213_0f0e_0d0c_8000_7fff_4020_1008];
-    let binary: [(String, Binary); 5] = [
+    let binary: [(String, Binary); 9] = [
         (format!("{ARM}.veorq_u8"), |a, b| unsafe { veorq_u8(a, b) }),
         (format!("{AARCH64}.vqtbl1q_u8"), |a, b| unsafe {
             vqtbl1q_u8(a, b)
@@ -89,9 +102,15 @@ fn main() {
         }),
         (format!("{ARM}.vaeseq_u8"), |a, b| unsafe { vaeseq_u8(a, b) }),
         (format!("{ARM}.vaesdq_u8"), |a, b| unsafe { vaesdq_u8(a, b) }),
+        (format!("{ARM}.vceqq_u32"), u32_lanes!(vceqq_u32)),
+        (format!("{ARM}.vaddq_u32"), u32_lanes!(vaddq_u32)),
+        (format!("{ARM}.vandq_u32"), u32_lanes!(vandq_u32)),
+        (format!("{ARM}.veorq_u32"), u32_lanes!(veorq_u32)),
     ];
+    // `CMEQ` on vectors equal in some 32-bit lanes and not the others.
+    let lane_edges = [(inputs[3], inputs[3] ^ 1), (inputs[3], inputs[3] ^ (1 << 64))];
     for (name, f) in binary {
-        let edges = tbl_edges.iter().map(|&b| (inputs[3], b));
+        let edges = tbl_edges.iter().map(|&b| (inputs[3], b)).chain(lane_edges);
         for (a, b) in pairs.iter().copied().chain(edges) {
             let r = unsafe { f(v(a), v(b)) };
             guard(format!("{name} {} {}", q(v(a)), q(v(b))), q(r));
@@ -153,6 +172,15 @@ fn main() {
             format!("((·.bv) <$> {ARM}.vreinterpretq_p128_u8 {})", q(v(a))),
             format!("{r:#x}#128"),
         );
+    }
+
+    type SetLane = unsafe fn(u32, uint8x16_t) -> uint8x16_t;
+    let sets: [SetLane; 4] = [set_lane::<0>, set_lane::<1>, set_lane::<2>, set_lane::<3>];
+    for (imm, f) in sets.iter().enumerate() {
+        for (w, a) in [(0, u128::MAX), (u32::MAX, 0), (rng.u64() as u32, rng.u128())] {
+            let r = unsafe { f(w, v(a)) };
+            guard(format!("{ARM}.vsetq_lane_u32 ⟨{imm}#32⟩ ⟨{w}#32⟩ {}", q(v(a))), q(r));
+        }
     }
     print!("{out}");
 }
