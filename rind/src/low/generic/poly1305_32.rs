@@ -20,9 +20,11 @@
 //! missing, or is a library call, `rind_mul16` (see build.rs) builds each
 //! limb product from 16-bit halves (`generic::mul16`): a 32-bit `mul` on the
 //! Cortex-M0 and M3, the same `mul` with bit 31 set on ARMv4T and ARMv5TE so
-//! the early-out takes its long path, and a shift-and-add where the target
-//! has no multiply instruction. Only these products. The rest of rind's
-//! secret arithmetic on 32-bit limbs is unchanged.
+//! the early-out takes its long path, and a shift-and-add on 32-bit RISC-V
+//! with no multiply instruction. MIPS and 32-bit PowerPC are not in that
+//! list: this widening multiply is what they run, and it can finish early
+//! (PLATFORMS.md). Only these products. The rest of rind's secret arithmetic
+//! on 32-bit limbs is unchanged.
 
 use super::blockwise::Blockwise;
 use crate::low::ct;
@@ -261,6 +263,13 @@ impl Poly1305 {
 
 /// The 64-bit product of two 32-bit limbs: one `mull`/`muluh` pair on
 /// Xtensa, one `umull` on a Cortex-M4 or 32-bit ARM application core.
+///
+/// On `powerpc-unknown-linux-gnu` this lowers to `mulhwu` and `mullw`, and a
+/// 16-bit half lowers to `mullw` after the top half is cleared. `rind_mul16`
+/// is not set there: that `mullw` is the instruction that finishes early, and
+/// a sequence that holds the early exit off was not checked. 32-bit `mips`
+/// is the same choice. Rust 1.98.1 ships no prebuilt MIPS standard library,
+/// so that codegen was not checked. See PLATFORMS.md.
 #[cfg(not(rind_mul16))]
 #[inline(always)]
 fn mul(a: u32, b: u32) -> u64 {
