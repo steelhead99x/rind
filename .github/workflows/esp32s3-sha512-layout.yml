@@ -9,6 +9,9 @@ on:
       - rind/src/low/generic/sha512.rs
       - rind/src/low/portable/sha.rs
       - rind/Cargo.toml
+      # `rind_esp32s3` is set here. The probe copies this file, so a
+      # triple-test change has to rerun the placement check.
+      - rind/build.rs
       - admin/esp32s3-sha512-layout
       - .github/workflows/esp32s3-sha512-layout.yml
   workflow_dispatch:
