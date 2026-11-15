@@ -297,8 +297,8 @@ fn aws_lc_hashed_point(bits: u16, msg: &[u8], dst: &[u8]) -> Option<AwsLcPoint> 
     ) -> core::ffi::c_int;
 
     // SAFETY: each pointer is to a live buffer of the length passed with it.
-    // A refused hash frees its point here; an accepted one is freed by
-    // `AwsLcPoint`.
+    // `EC_POINT_new`'s result is checked for null before the hash. A refused
+    // hash frees its point here; an accepted one is freed by `AwsLcPoint`.
     unsafe {
         let (group, hash): (*const EC_GROUP, HashToCurve) = match bits {
             256 => (EC_group_p256(), EC_hash_to_curve_p256_xmd_sha256_sswu),
@@ -306,6 +306,7 @@ fn aws_lc_hashed_point(bits: u16, msg: &[u8], dst: &[u8]) -> Option<AwsLcPoint> 
             _ => unreachable!(),
         };
         let point = EC_POINT_new(group);
+        assert!(!point.is_null(), "EC_POINT_new failed");
         let ok = hash(
             group,
             point,

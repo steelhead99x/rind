@@ -274,7 +274,20 @@ fn not_identity(element: ristretto255::Element) -> Option<ristretto255::Element>
 }
 
 /// A NIST curve's group and its suite's hash, over `mid`'s curve.
+///
+/// The five-argument form hashes with `$curve::hash_to_curve::hash_to_curve`.
+/// Tests pass a sixth argument to inject an opposite-point sum instead.
 macro_rules! nist_group {
+    ($group:ident, $curve:ident, $hash:ty, $name:literal, $suite:ident) => {
+        nist_group!(
+            $group,
+            $curve,
+            $hash,
+            $name,
+            $suite,
+            $curve::hash_to_curve::hash_to_curve
+        );
+    };
     ($group:ident, $curve:ident, $hash:ty, $name:literal, $suite:ident, $hash_to_curve:path) => {
         #[derive(Clone, Copy)]
         struct $group;
@@ -364,30 +377,9 @@ macro_rules! nist_group {
     };
 }
 
-nist_group!(
-    P256,
-    p256,
-    Sha256Context,
-    b"P256-SHA256",
-    P256_SHA256,
-    p256::hash_to_curve::hash_to_curve
-);
-nist_group!(
-    P384,
-    p384,
-    Sha384Context,
-    b"P384-SHA384",
-    P384_SHA384,
-    p384::hash_to_curve::hash_to_curve
-);
-nist_group!(
-    P521,
-    p521,
-    Sha512Context,
-    b"P521-SHA512",
-    P521_SHA512,
-    p521::hash_to_curve::hash_to_curve
-);
+nist_group!(P256, p256, Sha256Context, b"P256-SHA256", P256_SHA256);
+nist_group!(P384, p384, Sha384Context, b"P384-SHA384", P384_SHA384);
+nist_group!(P521, p521, Sha512Context, b"P521-SHA512", P521_SHA512);
 
 /// Runs `$body` with `$G` the [`Group`] of the suite `$suite`.
 macro_rules! with_group {

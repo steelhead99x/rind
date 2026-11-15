@@ -34,17 +34,19 @@ nist_group!(
 
 fn refuses_identity_hash<G: Group>() {
     let _entry = Entry::new_secret();
-    let input = ct::into_secret(*b"identity");
+    // `hash_to_infinity` ignores this message. The secret under test is the
+    // opposite sum's coordinates, which `opposite_sum` marks.
+    let input = b"identity".as_slice();
     let mut key = vec![0; G::SCALAR_LEN];
     key[G::SCALAR_LEN - 1] = 2;
     ct::secret_slice(&key);
     for mode in [Mode::Oprf, Mode::Voprf] {
         assert_eq!(
-            ClientState::<G>::blind(mode, &input, scalar::<G>(&key)).err(),
+            ClientState::<G>::blind(mode, input, scalar::<G>(&key)).err(),
             Some(identity())
         );
         assert_eq!(
-            evaluate::<G>(mode, &scalar::<G>(&key), &input).err(),
+            evaluate::<G>(mode, &scalar::<G>(&key), input).err(),
             Some(identity())
         );
     }

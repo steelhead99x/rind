@@ -13,7 +13,8 @@
 //!
 //! [RFC 9380]: https://www.rfc-editor.org/rfc/rfc9380.html
 
-use crate::error::Error;
+use crate::error::{Error, KeyFormatError};
+use crate::low;
 use crate::mid::sha2::{Sha256Context, Sha384Context, Sha512Context};
 
 /// A SHA-2 hash, as `expand_message_xmd` takes it.
@@ -273,6 +274,24 @@ pub(crate) fn sum<C: Curve>(q0: &[C; 3], q1: &[C; 3]) -> [C; 3] {
     [x, y, z.select(&C::ZERO, opposite)]
 }
 
+/// The public key for `point`, or a small-order rejection when it is infinity.
+///
+/// A zero `Z` is replaced with one, so `to_public`'s inversion is defined on
+/// every input, and only that bit is then declassified. The coordinates,
+/// including the discarded image of infinity, stay secret.
+pub(crate) fn finite_public_key<C: Curve, P>(
+    mut point: [C; 3],
+    to_public: impl FnOnce(&[C; 3]) -> P,
+) -> Result<P, Error> {
+    let infinity = point[2].ct_eq(&C::ZERO);
+    point[2] = point[2].select(&C::ONE, infinity);
+    let key = to_public(&point);
+    match low::ct::into_public(infinity) {
+        true => Err(KeyFormatError::SmallOrder.into()),
+        false => Ok(key),
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod tests {
@@ -472,13 +491,33 @@ pub(crate) mod tests {
         sum(&q, &neg)
     }
 
+    /// `public_key` refuses an opposite-point sum, whose `Z` is zero.
+    pub(crate) fn refuses_opposite_sum<C: Curve>(
+        public_key: impl FnOnce([C; 3]) -> Result<(), Error>,
+    ) {
+        let _entry = low::Entry::new_secret();
+        let point = opposite_sum::<C>();
+        assert!(low::ct::into_public(point[2].ct_eq(&C::ZERO)));
+        assert_eq!(public_key(point), Err(KeyFormatError::SmallOrder.into()));
+    }
+
+    /// The curve wrapper, with the message secret, so a branch on `Z` is
+    /// under taint. `hash` returns the encoded point.
+    pub(crate) fn check_wrapper_constant_time(hash: impl FnOnce(&[u8]) -> Vec<u8>) {
+        let msg = low::ct::into_secret(*b"password");
+        let encoded = hash(&msg);
+        low::ct::public_slice(&encoded);
+    }
+
     /// `sum` doubles equal points and gives infinity for opposite ones,
     /// whatever `Z` each has. The expected double is the affine slope
     /// `(3x^2 + A) / (2y)`, so a bug in `double_point` fails this check.
     /// `scaled` is `q` under another `Z`: a `same_y` comparison by the
-    /// wrong power of `Z` makes that sum infinity. Points that share
-    /// affine `Y`, differ in affine `X`, and have different `Z` are added;
-    /// `same_x | same_y` would double the first instead.
+    /// wrong power of `Z` makes that sum infinity. A second point on the
+    /// curve shares affine `Y`, differs in affine `X`, and uses another
+    /// `Z`; `same_x | same_y` would double the first instead. That sum is
+    /// `(-(x1 + x2), -y)`, the third point of the horizontal line, so the
+    /// check does not ask `add_points` for the expected value.
     ///
     /// `inv` is the field inverse in the same form as `C`'s arithmetic.
     pub(crate) fn check_sum<C: Curve>(affine: impl Fn(&[C; 3]) -> Vec<u8>, inv: impl Fn(&C) -> C) {
@@ -496,34 +535,70 @@ pub(crate) mod tests {
         assert_eq!(affine(&sum(&q, &r)), affine(&C::add_points(&q, &r)));
         assert_eq!(affine(&sum(&q, &r)), affine(&sum(&r, &q)));
 
-        // Same affine `Y` as `q`, `r`'s affine `X`, and `Z` scaled by `k`.
-        // Jacobian `X` is `r_x * (q_z / r_z)^2 * k^2`, so the affine `X`
-        // is `r`'s (`r_x / r_z^2`) even when `q_z` and `r_z` differ.
-        let qz_over_rz = q[2].mul(&inv(&r[2]));
-        let shifted = [
-            r[0].mul(&qz_over_rz.sqr()).mul(&k2),
-            q[1].mul(&k3),
-            q[2].mul(&k),
-        ];
-        assert!(!q[2].ct_eq(&r[2]));
-        assert!(
-            shifted[0]
-                .mul(&r[2].sqr())
-                .ct_eq(&r[0].mul(&shifted[2].sqr()))
-        );
-        assert!(!q[2].ct_eq(&shifted[2]));
-        assert!(
-            !q[0]
-                .mul(&shifted[2].sqr())
-                .ct_eq(&shifted[0].mul(&q[2].sqr()))
-        );
-        assert!(
-            q[1].mul(&shifted[2].sqr().mul(&shifted[2]))
-                .ct_eq(&shifted[1].mul(&q[2].sqr().mul(&q[2])))
-        );
-        let got = sum(&q, &shifted);
-        let expect = C::add_points(&q, &shifted);
-        assert!(got.iter().zip(expect).all(|(a, b)| a.ct_eq(&b)));
+        // On the curve: `same`'s affine Y is `base`'s, its affine X is the
+        // cubic's other root, and its Z is `k`, different from `base`'s.
+        let (base, same) = curve_point_sharing_y::<C>(&k, &inv);
+        let (x1, y1) = affine_xy(&base, &inv);
+        let (x2, y2) = affine_xy(&same, &inv);
+        assert!(y1.ct_eq(&y2));
+        assert!(!x1.ct_eq(&x2));
+        assert!(!base[2].ct_eq(&same[2]));
+        let got = sum(&base, &same);
+        let added = C::add_points(&base, &same);
+        assert!(got.iter().zip(added).all(|(a, b)| a.ct_eq(&b)));
+        let (x3, y3) = affine_xy(&got, &inv);
+        assert!(x3.ct_eq(&x1.add(&x2).neg()));
+        assert!(y3.ct_eq(&y1.neg()));
+    }
+
+    /// Affine `(X / Z^2, Y / Z^3)`. `Z` is not zero.
+    fn affine_xy<C: Curve>(p: &[C; 3], inv: &impl Fn(&C) -> C) -> (C, C) {
+        let [x, y, z] = p;
+        assert!(!z.ct_eq(&C::ZERO));
+        let z2 = z.sqr();
+        (x.mul(&inv(&z2)), y.mul(&inv(&z2.mul(z))))
+    }
+
+    /// `(q, s)` on the curve. `s` has `q`'s affine Y, another affine X, and
+    /// `Z = k`.
+    ///
+    /// `y^2 = x^3 + A x + B` and `A = -3`, so the other X are the roots of
+    /// `t^2 + x t + (x^2 + A) = 0`. The discriminant is `-3 x^2 - 4 A`,
+    /// which is `A x^2 + 12`.
+    fn curve_point_sharing_y<C: Curve>(k: &C, inv: &impl Fn(&C) -> C) -> ([C; 3], [C; 3]) {
+        for seed in 1..=40u8 {
+            let q = map_to_curve(&C::from_wide(&[seed; MAX_L][..C::L]));
+            let Some(s) = other_x_same_y(&q, k, inv) else {
+                continue;
+            };
+            if !q[2].ct_eq(&s[2]) {
+                return (q, s);
+            }
+        }
+        panic!("no seed in 1..=40 has another curve X for its Y");
+    }
+
+    fn other_x_same_y<C: Curve>(q: &[C; 3], k: &C, inv: &impl Fn(&C) -> C) -> Option<[C; 3]> {
+        let (x, y) = affine_xy(q, inv);
+        let three = C::ONE.add(&C::ONE).add(&C::ONE);
+        let twelve = three.mul(&C::ONE.add(&C::ONE).sqr());
+        let d = C::A.mul(&x.sqr()).add(&twelve);
+        // `p = 3 mod 4`, so a square root is `d^((p + 1) / 4)`.
+        let root = d.mul(&d.pow_c1());
+        if !root.sqr().ct_eq(&d) {
+            return None;
+        }
+        let half = inv(&C::ONE.add(&C::ONE));
+        let x2 = x.neg().add(&root).mul(&half);
+        let x3 = x.neg().add(&root.neg()).mul(&half);
+        let other = if x2.ct_eq(&x) { x3 } else { x2 };
+        if other.ct_eq(&x) {
+            return None;
+        }
+        let rhs = other.sqr().mul(&other).add(&C::A.mul(&other)).add(&C::B);
+        assert!(y.sqr().ct_eq(&rhs), "the other root is not on the curve");
+        let k2 = k.sqr();
+        Some([other.mul(&k2), y.mul(&k2.mul(k)), *k])
     }
 
     /// `2p` as a Jacobian point with `Z = 1`, by the affine slope

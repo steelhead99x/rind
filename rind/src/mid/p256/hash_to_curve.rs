@@ -6,7 +6,7 @@ use super::{
     CURVE_A_MONT, CURVE_B_MONT, CURVE_ONE_MONT, CURVE_ORDER_MM, FieldElement, JacobianMontPoint,
     PublicKey, Scalar, util,
 };
-use crate::error::{Error, KeyFormatError};
+use crate::error::Error;
 use crate::low;
 use crate::mid::hash_to_curve::{self, Curve};
 use crate::mid::sha2::Sha256Context;
@@ -25,16 +25,10 @@ pub(crate) fn hash_to_curve(msg: &[u8], dst: &[u8]) -> Result<PublicKey, Error> 
     )?)
 }
 
-fn public_key(mut point: [FieldElement; 3]) -> Result<PublicKey, Error> {
-    let infinity = point[2].ct_eq(&FieldElement::ZERO);
-    point[2] = point[2].select(&FieldElement::ONE, infinity);
-    let point = jacobian(&point).as_affine();
-    // This error verdict is public, as with private-key range validation;
-    // the coordinates remain secret, including the discarded conversion.
-    match low::ct::into_public(infinity) {
-        true => Err(KeyFormatError::SmallOrder.into()),
-        false => Ok(PublicKey { point }),
-    }
+fn public_key(point: [FieldElement; 3]) -> Result<PublicKey, Error> {
+    hash_to_curve::finite_public_key(point, |point| PublicKey {
+        point: jacobian(point).as_affine(),
+    })
 }
 
 /// Converts an opposite-point sum for the OPRF boundary tests.
@@ -184,13 +178,7 @@ mod tests {
 
     #[test]
     fn opposite_points_are_refused() {
-        let _entry = low::Entry::new_secret();
-        let point = tests::opposite_sum::<FieldElement>();
-        assert!(low::ct::into_public(point[2].ct_eq(&FieldElement::ZERO)));
-        assert_eq!(
-            public_key(point).map(|_| ()),
-            Err(KeyFormatError::SmallOrder.into())
-        );
+        tests::refuses_opposite_sum::<FieldElement>(|point| public_key(point).map(|_| ()));
     }
 
     #[test]
@@ -218,10 +206,13 @@ mod tests {
             low::ct::public_slice(&p);
             p
         });
-        // The wrapper, so a branch on Z is under taint.
-        let msg = low::ct::into_secret(*b"password");
-        let point = hash_to_curve(&msg, b"QUUX-V01-CS02").unwrap();
-        low::ct::public_slice(&point.point.as_bytes_uncompressed());
+        tests::check_wrapper_constant_time(|msg| {
+            hash_to_curve(msg, b"QUUX-V01-CS02")
+                .unwrap()
+                .point
+                .as_bytes_uncompressed()
+                .to_vec()
+        });
     }
 
     /// The public functions, against aws-lc's hash to the curve and

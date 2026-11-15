@@ -481,18 +481,22 @@ fn agreement_cases(cases: &mut Vec<Case>) {
     }
 }
 
-/// The OPRF input is the secret hashed to the curve. The server scalar stays
-/// fixed, so the two classes differ only in that message.
+/// Each suite's OPRF and VOPRF `Evaluate` hashes the secret input to the
+/// group. The server scalar is one generated key, shared by both classes,
+/// so they differ only in that message.
 fn oprf_cases(cases: &mut Vec<Case>) {
-    for (name, suite, scalar_len) in [
-        ("p256", &oprf::P256_SHA256, 32),
-        ("p384", &oprf::P384_SHA384, 48),
-        ("p521", &oprf::P521_SHA512, 66),
+    for (name, suite) in [
+        ("ristretto255", &oprf::RISTRETTO255_SHA512),
+        ("p256", &oprf::P256_SHA256),
+        ("p384", &oprf::P384_SHA384),
+        ("p521", &oprf::P521_SHA512),
     ] {
         cases.push(case(format!("oprf/{name}/input"), move |config| {
-            let mut scalar = vec![0u8; scalar_len];
-            scalar[scalar_len - 1] = 2;
-            let key = oprf::ServerKey::from_bytes(suite, &scalar).unwrap();
+            let key = oprf::ServerKey::generate(suite).unwrap();
+            measure(config, &secrets(32), |input| key.evaluate(input).unwrap())
+        }));
+        cases.push(case(format!("voprf/{name}/input"), move |config| {
+            let key = oprf::voprf::ServerKey::generate(suite).unwrap();
             measure(config, &secrets(32), |input| key.evaluate(input).unwrap())
         }));
     }
