@@ -302,16 +302,29 @@ pub fn rsa_crt(base: &[u8], key: &RsaCrtComponents<'_>) -> Option<SecretBuf> {
 
     let _entry = crate::low::Entry::new_secret();
     let public = rsa_public(key.n, key.e)?;
-    for secret in [key.d, key.p, key.q, key.dp, key.dq, key.iqmp] {
-        crate::low::ct::secret_slice(secret);
-    }
+    // Copy before marking. The caller may borrow a static DER that other
+    // tests parse; marking that memory undefined makes those parses branch
+    // on a secret.
+    let secret = |bytes: &[u8]| {
+        let owned = bytes.to_vec();
+        crate::low::ct::secret_slice(&owned);
+        owned
+    };
+    let (d, p, q, dp, dq, iqmp) = (
+        secret(key.d),
+        secret(key.p),
+        secret(key.q),
+        secret(key.dp),
+        secret(key.dq),
+        secret(key.iqmp),
+    );
     let prime_width = PosInt::<{ RSA_WORDS / 2 }>::zero();
-    let p = PosInt::from_public_width(key.p, &prime_width).ok()?;
-    let q = PosInt::from_public_width(key.q, &prime_width).ok()?;
-    let d = PosInt::from_public_width(key.d, &public.n).ok()?;
-    let dp = PosInt::from_public_width(key.dp, &p).ok()?;
-    let dq = PosInt::from_public_width(key.dq, &q).ok()?;
-    let iqmp = PosInt::from_public_width(key.iqmp, &p).ok()?;
+    let p = PosInt::from_public_width(&p, &prime_width).ok()?;
+    let q = PosInt::from_public_width(&q, &prime_width).ok()?;
+    let d = PosInt::from_public_width(&d, &public.n).ok()?;
+    let dp = PosInt::from_public_width(&dp, &p).ok()?;
+    let dq = PosInt::from_public_width(&dq, &q).ok()?;
+    let iqmp = PosInt::from_public_width(&iqmp, &p).ok()?;
     let private = RsaPrivateKey::from_components(p, q, d, dp, dq, iqmp, public).ok()?;
     let base = PosInt::from_bytes(base).ok()?;
     let out = private.private_op(&base).ok()?;

@@ -57,12 +57,15 @@ impl RsaPrivateKey {
         // The arithmetic needs nonzero top words. Only this format verdict
         // is public; the actual prime lengths and parity stay secret.
         let p_bytes = p.len_bytes();
-        let valid = !p.is_even()
-            & !q.is_even()
+        // `is_even` compares directly, which memcheck reports when the prime
+        // is already secret. `black_box` is the same barrier `bignum_eq` uses
+        // so only `into_public` below reveals the verdict.
+        let valid = (core::hint::black_box(p.low_bit()) == 1)
+            & (core::hint::black_box(q.low_bit()) == 1)
             & (q.len_bits() >= 2)
             & (p_bytes >= MIN_PRIVATE_MODULUS_BYTES)
-            & (p.as_words().last().copied().unwrap_or(0) != 0)
-            & (q.as_words().last().copied().unwrap_or(0) != 0);
+            & (core::hint::black_box(p.top_word()) != 0)
+            & (core::hint::black_box(q.top_word()) != 0);
         if !low::ct::into_public(valid) {
             return Err(KeyFormatError::RsaPrimes.into());
         }

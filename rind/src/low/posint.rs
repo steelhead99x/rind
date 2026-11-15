@@ -199,6 +199,18 @@ impl<const N: usize> PosInt<N> {
         self.words[0] & 1 == 0
     }
 
+    /// The least significant bit. Callers that already hold a secret pass it
+    /// through `black_box` before comparing; this read does not compare.
+    pub(crate) fn low_bit(&self) -> u64 {
+        self.words[0] & 1
+    }
+
+    /// The most significant word, or zero when `used` is zero.
+    /// The index is `used`, which encodings fix. The word itself may be secret.
+    pub(crate) fn top_word(&self) -> u64 {
+        self.as_words().last().copied().unwrap_or(0)
+    }
+
     /// Return true if `gcd(self, other)` is one
     pub(crate) fn is_coprime(&self, other: &Self) -> bool {
         const { assert!(N <= MAX_SCRATCH_WORDS) };
