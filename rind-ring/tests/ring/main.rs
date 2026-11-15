@@ -25,6 +25,7 @@ mod hmac_tests;
 mod pbkdf2_tests;
 mod quic_tests;
 mod rand_tests;
+#[cfg(feature = "alloc")]
 mod rsa_tests;
 mod signature_tests;
 

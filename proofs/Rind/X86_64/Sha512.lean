@@ -6,7 +6,7 @@ import Rind.Bytes
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
-# The SHA-512 family, proven from rind's digest API to aws-lc's contract
+# The SHA-512 family, proven from rind's digest API to the block routine's contract
 
 `sha512_family_digest` and `sha512_family_context` state what the digest API
 returns for SHA-384, SHA-512, and SHA-512/256, in terms of `Rind.Sha2`'s spec,
@@ -511,35 +511,6 @@ def sha512Bytes (m : List Byte) : List Byte := bv (sha512 (ofBv m))
 /-- SHA-384 over spec bytes, as `HashSpec` takes a hash. -/
 def sha384Bytes (m : List Byte) : List Byte := bv (sha384 (ofBv m))
 
-/-- The compression function keeps eight words: aws-lc's routine returns them. -/
-theorem processBlock_length (h : RunsSha512) (hv : List U64) (hl : hv.length = 8)
-    (block : List U8) (hb : block.length = 128) :
-    (processBlock hv (blockWords block)).length = 8 := by
-  obtain ⟨r, hr⟩ := WP.spec_exists (sha512_compress_blocks_spec h
-    (Std.Array.from hv (by simp [hl])) (Slice.from block (by rw [hb]; scalar_tac)) (by
-      simp [Slice.length, hb]))
-  have hr' : r.val = compress hv block := by simpa using hr
-  rw [compress_block _ _ (by omega), List.take_of_length_le (by omega),
-    show block.drop 128 = [] by simp [hb], compress_nil] at hr'
-  rw [← hr']
-  simp
-
-theorem compress_length (h : RunsSha512) (hv : List U64) (hl : hv.length = 8) (bytes : List U8) :
-    (compress hv bytes).length = 8 := by
-  by_cases hb : 128 ≤ bytes.length
-  · rw [compress_block _ _ hb]
-    exact compress_length h _ (processBlock_length h hv hl _ (by simp; omega)) _
-  · rwa [compress_short _ _ (by omega)]
-termination_by bytes.length
-decreasing_by simp; omega
-
-theorem sha512Words_length (h : RunsSha512) (iv : List U64) (hiv : iv.length = 8) (m : List U8) :
-    (sha512Words iv m).length = 64 := by
-  have h8 : ∀ a : U64, a.bv.toBEBytes.length = 8 := fun a => by simp [BitVec.toBEBytes_length]
-  simp only [sha512Words, List.length_flatMap, beBytes, List.length_map, h8, List.map_const',
-    List.sum_replicate, compress_length h iv hiv]
-  rfl
-
 theorem absorbed_initial (iv : List U64) (s : mid.sha2.Sha512State) (hh : s.h.val = iv)
     (hn : s.nblocks.val = 0) : Sha512Absorbed iv [] s := by
   simp [Sha512Absorbed, hh, hn]
@@ -597,12 +568,12 @@ theorem sha512_ctx_clone_spec (c : mid.sha2.Sha512Context) :
 theorem maxInput_lt (n : Nat) (h : n ≤ maxInput) : n < 2 ^ 64 := by
   unfold maxInput at h; simp only [U64.max_eq] at h; omega
 
-/-- SHA-512's `Hash` impl computes FIPS 180-4's SHA-512, given aws-lc's routine. -/
+/-- SHA-512's `Hash` impl computes FIPS 180-4's SHA-512, given the block routine (`RunsSha512`). -/
 theorem sha512_hashSpec (h : RunsSha512) :
     HashSpec high.hash.Sha512.Insts.RindHighHashHashSha512ContextSha512State sha512Bytes 128 64
       maxInput (Sha512Absorbed sha512Iv) (fun p c => Hashed sha512Iv c p) where
   out := ⟨by decide, by decide, by decide, by unfold maxInput; scalar_tac, fun m => by
-    simp [sha512Bytes, bv, sha512, sha512Words_length h sha512Iv rfl]⟩
+    simp [sha512Bytes, bv, sha512, sha512Words_length sha512Iv rfl]⟩
   initial := by
     simp only [high.hash.Sha512.Insts.RindHighHashHashSha512ContextSha512State.initial]
     step with sha512_initial_spec as ⟨s, hh, hn⟩
@@ -652,12 +623,12 @@ theorem sha512_hashSpec (h : RunsSha512) :
     step with sha512_ctx_clone_spec as ⟨c', h'⟩
     exact h' ▸ hc
 
-/-- SHA-384's `Hash` impl computes FIPS 180-4's SHA-384, given aws-lc's routine. -/
+/-- SHA-384's `Hash` impl computes FIPS 180-4's SHA-384, given the block routine (`RunsSha512`). -/
 theorem sha384_hashSpec (h : RunsSha512) :
     HashSpec high.hash.Sha384.Insts.RindHighHashHashSha384ContextSha384State sha384Bytes 128 48
       maxInput (Sha512Absorbed sha384Iv) (fun p c => Hashed sha384Iv c.inner p) where
   out := ⟨by decide, by decide, by decide, by unfold maxInput; scalar_tac, fun m => by
-    simp [sha384Bytes, bv, sha384, sha512Words_length h sha384Iv rfl]⟩
+    simp [sha384Bytes, bv, sha384, sha512Words_length sha384Iv rfl]⟩
   initial := by
     simp only [high.hash.Sha384.Insts.RindHighHashHashSha384ContextSha384State.initial]
     step with sha384_initial_spec as ⟨s, hh, hn⟩

@@ -29,6 +29,8 @@ jobs:
     timeout-minutes: 60
     env:
       BASE: ${{ github.event.merge_group.base_sha }}
+      # A failure ejects the group whatever else fails, so stop at the first.
+      CHECK_FAIL_FAST: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -222,7 +222,7 @@ class Render(unittest.TestCase):
         self.assertIn("Not timed on `kixtop`: full handshake, X25519MLKEM768, ", md)
         self.assertNotIn("Not measured yet", md)
         self.assertNotIn("`desktop` |", md)
-        self.assertIn("No nightly results yet.", md)
+        self.assertIn("No weekly results yet.", md)
         self.assertEqual(
             sorted(os.path.basename(p) for p in files if p.endswith(".svg")),
             sorted(f"{n}{s}.svg" for n in ["overview", "nixos", "nixos2", "kixtop"] for s in ["", "-dark"]),
@@ -277,13 +277,15 @@ class Verified(unittest.TestCase):
     def test_accepts_a_valid_entry(self):
         self.assertEqual(len(self.load(self.entry(cpu='["adx", "!vaes"]'))), 1)
         self.assertEqual(len(self.load(self.entry(arch=None))), 1)
+        self.assertEqual(len(self.load(self.entry(arch='"armv7"', cpu=None))), 1)
 
     def test_refuses_what_names_nothing(self):
         for fields in [
             {"library": '"rustls"'},
             {"operations": '["x25519"]'},
             {"operations": '["aes256-gcm/8B"]'},
-            {"arch": '"armv7"'},
+            {"arch": '"riscv64"'},
+            {"arch": '"armv7"', "cpu": '["neon"]'},
             {"arch": None, "cpu": '["adx"]'},
             {"cpu": '["sha2"]'},
             {"os": '"windows"'},
@@ -615,6 +617,92 @@ class AnyHostGaps(unittest.TestCase):
                 {"operations": '["sha256/*/64B"]', "on": '["x86_64"]', "reason": '"r"'},
                 {"operations": '["x25519-ecdh"]', "on": f'["{RYZEN}"]', "reason": '"r"'},
             )
+
+
+class Comparison(unittest.TestCase):
+    def cells(self, hosts):
+        table = br.comparison_table(hosts, VERIFIED)
+        rows = {}
+        for line in table[2:]:
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            rows[re.sub(r"^\[([^]]*)\].*", r"\1", cells[0])] = cells[1:]
+        return table[0], rows
+
+    def test_lacks_only_what_another_library_has_and_flags_outside_api(self):
+        h = hosts()
+        h["nixos"]["results"] += [
+            {"operation": "xchacha20poly1305/{lib}/32B", "library": lib, "ns": 1.0} for lib in ["rind", "aws-lc-rs"]
+        ]
+        header, rows = self.cells(h)
+        # AES-GCM, XChaCha20-Poly1305, and X25519 are timed; nothing else is.
+        self.assertIn("Lacks, of the 3 algorithms benchmarked", header)
+        self.assertEqual(rows["rind"][1], "none")
+        self.assertEqual(rows["aws-lc-rs"][1], "XChaCha20-Poly1305 (aws-lc has it, through aws-lc-sys), X25519")
+        self.assertEqual(rows["ring"][1], "AES-GCM, XChaCha20-Poly1305")
+
+    def test_verified_by_arch_marks_cpu_os_or_operation_limits(self):
+        _, rows = self.cells(hosts())
+        # The AES proof covers AES-256-GCM's seal alone, of AES-GCM's rows.
+        self.assertIn(
+            "[aarch64: X25519 (some CPUs); x86_64: AES-GCM (some CPUs, some operations), X25519 (some CPUs)]",
+            rows["rind"][2],
+        )
+        # An entry with no arch runs the same code on every one.
+        self.assertIn("[all: X25519]", rows["ring"][2])
+        self.assertIn("[none]", rows["RustCrypto + dalek"][2])
+
+    def test_counts_times_within_ten_percent_of_the_fastest(self):
+        _, rows = self.cells(hosts())
+        # rind leads all four of its contested times. aws-lc-rs is within 10%
+        # on nixos2 only, and ring at exactly 1.1x on nixos, but twice
+        # rind's time on kixtop.
+        self.assertIn("[4 of its 4 times]", rows["rind"][3])
+        self.assertIn("[1 of its 2 times]", rows["aws-lc-rs"][3])
+        self.assertIn("[1 of its 2 times]", rows["ring"][3])
+
+    def test_a_cpu_limit_on_one_operation_marks_its_algorithm(self):
+        # Ed25519's sign proof runs everywhere, its verify proof only with ADX.
+        verified = [
+            {"library": "rind", "operations": ["ed25519-sign"], "arch": "x86_64", "proof": "p", "link": "l"},
+            {"library": "rind", "operations": ["ed25519-verify"], "arch": "x86_64", "cpu": ["adx"], "proof": "p", "link": "l"},
+        ]
+        table = br.comparison_table(hosts(), verified)
+        self.assertIn("[x86_64: Ed25519 (some CPUs)]", table[2])
+
+    def test_an_unmeasured_library_reads_not_measured(self):
+        _, rows = self.cells(hosts())
+        # No host has a build cost, and RustCrypto has no times.
+        self.assertIn("[not measured]", rows["rind"][0])
+        self.assertEqual(rows["RustCrypto + dalek"][1], "not measured")
+        self.assertIn("[not measured]", rows["RustCrypto + dalek"][3])
+        h = hosts()
+        h["nixos"]["build_cost"] = {"status": "ok", "builds": [{"name": "rind", "tools": []}]}
+        _, rows = self.cells(h)
+        self.assertIn("[none]", rows["rind"][0])
+        self.assertIn("[not measured]", rows["ring"][0])
+
+    def test_refuses_a_row_no_algorithm_matches(self):
+        algorithms = br.ALGORITHMS
+        br.ALGORITHMS = [a for a in algorithms if a[0] != "P-521"]
+        try:
+            with self.assertRaises(SystemExit):
+                br.comparison_table(hosts(), VERIFIED)
+        finally:
+            br.ALGORITHMS = algorithms
+
+    def test_replaces_only_between_the_markers(self):
+        start, end = br.COMPARISON_MARKERS
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+            f.write(f"before\n{start}\nold\n{end}\nafter\n")
+        self.addCleanup(os.remove, f.name)
+        self.assertEqual(br.readme_with_comparison(["new"], f.name), f"before\n{start}\nnew\n{end}\nafter\n")
+        with open(f.name, "w") as g:
+            g.write(f"{end}\n{start}\n")
+        with self.assertRaises(SystemExit):
+            br.readme_with_comparison(["new"], f.name)
+
+    def test_checked_in_readme_has_the_markers(self):
+        br.readme_with_comparison([])
 
 
 if __name__ == "__main__":

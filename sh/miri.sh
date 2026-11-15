@@ -14,12 +14,6 @@ fi
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-unfetched=$(git submodule status -- thirdparty/cavp thirdparty/cctv thirdparty/wycheproof | sed -n 's/^-[0-9a-f]* //p')
-if [[ -n "$unfetched" ]]; then
-    echo "error: test vectors not checked out; run: git submodule update --init ${unfetched//$'\n'/ }" >&2
-    exit 1
-fi
-
 # Tests too slow for Miri that repeat what a kept test runs: vector sets and
 # long loops over inputs, RSA private-key operations beyond one for each key
 # type, and many scalar multiplications. Each primitive keeps a quicker test
@@ -27,6 +21,7 @@ fi
 # and the native runs keep these.
 slow=(
     aead::gcm::tests::cavp
+    aead::tests::from_sequence_rfc9180
     high::agreement::tests::agrees
     high::agreement::tests::cavp_ecdh
     high::agreement::tests::decompresses_points
@@ -70,6 +65,12 @@ slow=(
     high::oaep::tests::every_failure_is_the_same
     high::oaep::tests::round_trip
     high::oaep::tests::stays_secret
+    high::oprf::tests::rfc9497_oprf_vectors
+    high::oprf::tests::stays_secret
+    high::oprf::voprf::tests::refuses_altered_proofs
+    high::oprf::voprf::tests::refuses_bad_batches
+    high::oprf::voprf::tests::rfc9497_voprf_vectors
+    high::oprf::voprf::tests::stays_secret
     high::rsa::tests::key_generation_known_answer
     high::rsa::tests::loads_d_above_lcm
     high::rsa::tests::loads_q_above_p
@@ -95,6 +96,12 @@ slow=(
     high::signature::tests::ecdsa_verifies_only_under_its_algorithm
     high::signature::tests::encodings_fit_the_largest_keys
     high::signature::tests::rsa_public_key_components
+    high::signature::tests::slh_dsa_rfc9909
+    high::spake2plus::tests::connectedhomeip
+    high::spake2plus::tests::draft01
+    high::spake2plus::tests::exceptional_peer_share_follows_rfc9383
+    high::spake2plus::tests::zero_residue_fails_closed
+    high::vrf::tests::refuses_altered_proofs
     low::generic::ct_equal::tests::matches_eq
     low::generic::mldsa_poly::tests::backend_matches_port
     low::posint::tests::aws_lc_mod_exp
@@ -102,6 +109,9 @@ slow=(
     low::posint::tests::mont_exp_matches_square_and_multiply
     low::posint::tests::pub_montifier
     mid::aes::tests::cavp
+    mid::argon2::tests::matches_rustcrypto
+    mid::argon2::tests::reference_kat
+    mid::blake2b::tests::matches_rustcrypto
     mid::aes::tests::srtp_aes_cm
     mid::mldsa::tests::wycheproof
     mid::p256::tests::base_point_precomp
@@ -130,6 +140,7 @@ slow=(
     mid::sha3::tests::cavp_shake
     mid::sha3::tests::sha3_256_all_lengths
     mid::sha3::tests::sha3_512_all_lengths
+    mid::slhdsa::tests::sign_verify_round_trip
     mid::x25519::tests::rfc7748_3
 )
 filter=$(printf 'test(=%s) | ' "${slow[@]}")
@@ -148,8 +159,9 @@ args=(-p rind --features wipe --locked --target "$target" --lib --test cpu --tes
 
 # A slow entry that names no test, such as one a rename left behind, would let
 # the renamed test back into the run unnoticed. The listing builds what the
-# run then reuses, under the same flags and `cfg(miri)`.
-tests=$(cargo miri nextest list "${args[@]}" --message-format oneline | cut -d' ' -f2)
+# run then reuses, under the same flags and `cfg(miri)`. Uncoloured, since
+# CI sets CARGO_TERM_COLOR=always, which would colour the names.
+tests=$(cargo miri nextest list "${args[@]}" --message-format oneline --color never | cut -d' ' -f2)
 stale=0
 for name in "${slow[@]}"; do
     if ! grep -qxF -- "$name" <<<"$tests"; then

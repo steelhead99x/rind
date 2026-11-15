@@ -86,7 +86,7 @@ unhex() {
 # Wycheproof FILE, in hex: the selector byte, then the key.
 wycheproof() {
     local selector=$1 file=$2 filter=$3 key
-    jq -r "[$filter] | unique[]" "thirdparty/wycheproof/testvectors_v1/$file" | while read -r key; do
+    jq -r "[$filter] | unique[]" "thirdparty/vectors/wycheproof/testvectors_v1/$file" | while read -r key; do
         printf %02x%s "$selector" "$key" | unhex >"$corpus/$selector-${file%_test.json}-${key: -16}"
     done
 }
@@ -114,6 +114,13 @@ for set in 0:44 1:65 2:87; do
     wycheproof $((52 + ${set%:*})) "mldsa_${set#*:}_verify_test.json" '.testGroups[].publicKeyDer // empty'
 done
 
+# SLH-DSA-SHA2-128s's key pair from RFC 9909: its private key as PKCS#8, and
+# its public key, raw and in a `SubjectPublicKeyInfo`.
+rfc9909=thirdparty/vectors/rfc9909
+seed 55 "$rfc9909/private-key.der"
+seed 59 "$rfc9909/public-key.der"
+{ printf '\x39'; tail -c 32 "$rfc9909/public-key.der"; } >"$corpus/57-rfc9909-public-key"
+
 # Version 2 documents, which the ECDSA and RSA loaders refuse: one with its
 # public key, one with an empty one, and two without, which aws-lc-rs takes.
 field=$(mktemp)
@@ -128,7 +135,7 @@ pkcs8_v2 12 "$rsa/rsa3072.pkcs8.der" "$field"
 
 corpus=fuzz/corpus/verify
 mkdir -p "$corpus"
-wycheproof=thirdparty/wycheproof/testvectors_v1
+wycheproof=thirdparty/vectors/wycheproof/testvectors_v1
 
 # verify SELECTOR FILE [SHA]: a seed for each test in the Wycheproof FILE, or
 # in its groups hashing with SHA: the selector byte, then the key and the
@@ -186,3 +193,28 @@ verify 28 rsa_pss_misc_test.json SHA-512
 verify 29 mldsa_44_verify_test.json
 verify 30 mldsa_65_verify_test.json
 verify 31 mldsa_87_verify_test.json
+# SLH-DSA from ACVP's verification vectors, a few of each group: the fuzzer
+# verifies pure SLH-DSA with the empty context, under which most of them fail,
+# but their keys and signatures are well formed.
+jq -r '
+    def hex16: (length / 2) as $n
+        | [4096, 256, 16, 1] | map(($n / . | floor) % 16 | "0123456789abcdef"[.:. + 1]) | join("");
+    .testGroups[] | (.parameterSet) as $set | .tests[:2][]
+    | "\(.tcId) \($set) \((.pk | hex16) + .pk + (.signature | hex16) + .signature + .message | ascii_upcase)"
+' thirdparty/acvp/SLH-DSA-sigVer-FIPS205.json | while read -r id set seed; do
+    case $set in
+        SLH-DSA-SHA2-128s) selector=32 ;;
+        SLH-DSA-SHA2-128f) selector=33 ;;
+        SLH-DSA-SHA2-192s) selector=34 ;;
+        SLH-DSA-SHA2-192f) selector=35 ;;
+        SLH-DSA-SHA2-256s) selector=36 ;;
+        SLH-DSA-SHA2-256f) selector=37 ;;
+        SLH-DSA-SHAKE-128s) selector=38 ;;
+        SLH-DSA-SHAKE-128f) selector=39 ;;
+        SLH-DSA-SHAKE-192s) selector=40 ;;
+        SLH-DSA-SHAKE-192f) selector=41 ;;
+        SLH-DSA-SHAKE-256s) selector=42 ;;
+        SLH-DSA-SHAKE-256f) selector=43 ;;
+    esac
+    { printf %b "\\x$(printf %02x "$selector")"; basenc --base16 -d <<<"$seed"; } >"$corpus/$selector-slhdsa-$id"
+done

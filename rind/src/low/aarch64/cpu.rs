@@ -144,26 +144,12 @@ impl HaveSha3 {
     }
 }
 
-/// Returns the first CPU feature we require unconditionally that this CPU lacks.
-///
-/// The FIPS module also requires the crypto extension, which every core it
-/// is tested on has, so its vpaes and NEON GHASH paths, which no tested core
-/// runs, need no ACVP run of their own.
-pub(crate) fn missing_cpu_feature() -> Option<&'static str> {
-    if features() & NEON == 0 {
-        return Some("neon");
-    }
-    if cfg!(rind_fips) && features() & CRYPTO_EXT == 0 {
-        return Some("aes, pmull, and sha2");
-    }
-    None
-}
-
-const NEON: u8 = 1 << 0;
 const CRYPTO_EXT: u8 = 1 << 1;
 const SHA3: u8 = 1 << 2;
 #[cfg(target_vendor = "apple")]
 const DIT: u8 = 1 << 3;
+#[cfg(target_vendor = "apple")]
+const SB: u8 = 1 << 4;
 const DETECTED: u8 = 1 << 7;
 
 static FEATURES: AtomicU8 = AtomicU8::new(0);
@@ -189,19 +175,21 @@ fn detect_once() -> u8 {
 fn detect() -> u8 {
     use std::arch::is_aarch64_feature_detected as detected;
 
-    let neon = test_toggle("neon", detected!("neon"));
     let crypto_ext = test_toggle("aes", detected!("aes"))
         && test_toggle("pmull", detected!("pmull"))
         // Rust's `sha2` covers the SHA-1 instructions too.
         && test_toggle("sha2", detected!("sha2"));
     let sha3 = test_toggle("sha3", detected!("sha3"));
-    let features = (if neon { NEON } else { 0 })
-        | (if crypto_ext { CRYPTO_EXT } else { 0 })
-        | (if sha3 { SHA3 } else { 0 });
+    let features = (if crypto_ext { CRYPTO_EXT } else { 0 }) | (if sha3 { SHA3 } else { 0 });
     #[cfg(target_vendor = "apple")]
     let features = features
         | if test_toggle("dit", detected!("dit")) {
             DIT
+        } else {
+            0
+        }
+        | if test_toggle("sb", detected!("sb")) {
+            SB
         } else {
             0
         };
@@ -259,10 +247,27 @@ mod dit {
         if on > 0 {
             // SAFETY: `msr DIT, _` is defined only if `dit` cpu feature is supported
             unsafe { core::arch::asm!("msr DIT, #1") }
+            // Arm requires no barrier after a PSTATE write, but Apple asks
+            // for a speculation barrier after setting DIT, so that nothing
+            // after it runs speculatively without DIT.
+            if super::features() & super::SB != 0 {
+                // SAFETY: in this branch, we verified `sb` cpu feature is supported
+                unsafe { speculation_barrier() }
+            } else {
+                // SAFETY: Armv8.0 barriers, Apple's choice for cores without `sb`.
+                unsafe { core::arch::asm!("dsb nsh", "isb sy", options(nostack, preserves_flags)) }
+            }
         } else {
             // SAFETY: `msr DIT, _` is defined only if `dit` cpu feature is supported
             unsafe { core::arch::asm!("msr DIT, #0") }
         }
+    }
+
+    /// Runs nothing after it speculatively until everything before it completes.
+    #[target_feature(enable = "sb")]
+    pub(super) fn speculation_barrier() {
+        // SAFETY: `sb` is defined only if `sb` cpu feature is supported
+        unsafe { core::arch::asm!("sb", options(nostack, preserves_flags)) }
     }
 }
 
@@ -299,6 +304,16 @@ pub(in crate::low) fn prefetch_ro<T>(ptr: *const T) {
     }
 }
 
+/// The first CPU feature the FIPS module requires that this CPU lacks.
+///
+/// The module requires the crypto extension, which every core it is tested
+/// on has, so its vpaes and NEON GHASH paths, which no tested core runs,
+/// need no ACVP run of their own.
+#[cfg(rind_fips)]
+pub(crate) fn missing_cpu_feature() -> Option<&'static str> {
+    (features() & CRYPTO_EXT == 0).then_some("aes, pmull, and sha2")
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -319,6 +334,11 @@ mod tests {
                 let on = call!(unsafe dit::read);
                 call!(unsafe dit::write, on);
             }
+        }
+        #[cfg(target_vendor = "apple")]
+        if std::arch::is_aarch64_feature_detected!("sb") {
+            // SAFETY: the CPU has SB.
+            unsafe { call!(unsafe dit::speculation_barrier) };
         }
         let (a, b) = ([1u8; 37], [2u8; 37]);
         assert_ne!(call!(ct_compare_bytes, &a, &b), 0);
@@ -342,12 +362,13 @@ mod tests {
     // independently of the bits `detect` packs them into.
     #[test]
     fn checks_need_their_features() {
-        assert_eq!(missing_cpu_feature().is_none(), available!("neon"));
         assert_eq!(
             HaveCryptoExt::check().is_some(),
             available!("aes", "pmull", "sha2")
         );
         assert_eq!(HaveSha3::check().is_some(), available!("sha3"));
+        #[cfg(target_vendor = "apple")]
+        assert_eq!(features() & SB != 0, available!("sb"));
     }
 
     // CI runs the aarch64 suite on a CPU with the crypto extension, then

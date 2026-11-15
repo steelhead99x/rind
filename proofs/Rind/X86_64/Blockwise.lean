@@ -360,6 +360,126 @@ theorem complete_blocks_spec {S : Type} {N : Usize}
         rw [List.take_left' rfl, List.append_assoc, whole_post2, whole_post3,
           List.take_append_drop, hqb]
 
+/-- One piece of `copy_lanes`: `src`'s bytes `i` to `j` written over `d`,
+whose first `i` bytes are already `src`'s, leaves its first `j` `src`'s. -/
+theorem copy_piece {d src : List U8} {i j : Nat} (hl : d.length = src.length) (hij : i ≤ j)
+    (hj : j ≤ src.length) (hp : d.take i = src.take i) :
+    (d.setSlice! i (src.slice i j)).length = src.length ∧
+      (d.setSlice! i (src.slice i j)).take j = src.take j := by
+  have hsl : (src.slice i j).length = j - i := by simp [List.slice]; omega
+  refine ⟨by simp [hl], ?_⟩
+  rw [setSlice!_eq _ _ _ (by rw [hsl]; omega), List.take_left' (by simp; omega), hp,
+    show j = i + (j - i) by omega, List.take_add]
+  simp [List.slice]
+
+/-- What `copy_lanes`' loop over whole lanes leaves: under a lane of `src`
+still to copy, and every byte before it copied. -/
+theorem copy_lanes_loop_spec (src : Slice U8) (iter : core.ops.range.Range Usize)
+    (dst : Slice U8) (i : Usize) (hl : dst.length = src.length)
+    (hi : i.val = 16 * iter.start.val) (hs : iter.start.val ≤ iter.end.val)
+    (he : src.length < 16 * iter.end.val + 16) (his : i.val ≤ src.length)
+    (hp : dst.val.take i.val = src.val.take i.val) :
+    low.generic.blockwise.copy_lanes_loop iter dst src i ⦃ r =>
+      r.1.length = src.length ∧ r.2.val ≤ src.length ∧ src.length < r.2.val + 16 ∧
+        r.1.val.take r.2.val = src.val.take r.2.val ⦄ := by
+  unfold low.generic.blockwise.copy_lanes_loop
+  apply loop.spec_decr_nat (fun x => x.1.end.val - x.1.start.val)
+    (fun x => x.2.1.length = src.length ∧ x.2.2.val = 16 * x.1.start.val ∧
+      x.1.start.val ≤ x.1.end.val ∧ src.length < 16 * x.1.end.val + 16 ∧
+      x.2.2.val ≤ src.length ∧ x.2.1.val.take x.2.2.val = src.val.take x.2.2.val)
+  · rintro ⟨it, d, j⟩ ⟨hl, hi, hs, he, his, hp⟩
+    simp only at hl hi hs he his hp ⊢
+    unfold low.generic.blockwise.copy_lanes_loop.body
+    step as ⟨o, iter1, ho, he1⟩
+    split_ifs at ho with hlt
+    · obtain ⟨rfl, hst⟩ := ho
+      simp only
+      step*
+      have hge : 16 ≤ i2.val := by scalar_tac
+      have hsrc : src.len.val = src.val.length := by simp [Slice.len]
+      have he2 : iter1.end.val = it.end.val := by rw [he1]
+      simp only [Slice.length] at hl he his ⊢
+      have hv : (index_mut_back s2).val = d.val.setSlice! j.val (src.val.slice j.val i3.val) := by
+        rw [s_post2, s2_post, s1_post]
+        simp
+      obtain ⟨hlen, htake⟩ := copy_piece (d := d.val) (src := src.val) (i := j.val)
+        (j := i3.val) (by simpa [Slice.length] using hl) (by omega)
+        (by simp only [Slice.length] at *; omega) hp
+      refine ⟨?_, by omega, by omega, by omega, by simp only [Slice.length] at *; omega,
+        by rw [hv]; exact htake, by omega⟩
+      simp only [Slice.length] at *
+      rw [hv]
+      exact hlen
+    · obtain ⟨rfl, hst⟩ := ho
+      simp only [WP.spec_ok]
+      refine ⟨hl, his, by omega, hp⟩
+  · exact ⟨hl, hi, hs, he, his, hp⟩
+
+/-- One of `copy_lanes`' pieces after its lanes: `k` more bytes of `src`
+copied if that many remain, leaving under `k` to copy. -/
+theorem copy_lanes_piece_spec (src d : Slice U8) (i k r : Usize)
+    (hl : d.length = src.length) (his : i.val ≤ src.length) (hr : r.val = src.length - i.val)
+    (hb : src.length - i.val < 2 * k.val) (hp : d.val.take i.val = src.val.take i.val) :
+    (if r >= k then do
+      let j ← i + k
+      let (s, index_mut_back) ←
+        core.slice.index.SliceIndexRangeUsizeSlice.index_mut { start := i, «end» := j } d
+      let s1 ← core.slice.index.SliceIndexRangeUsizeSlice.index { start := i, «end» := j } src
+      let s2 ← core.slice.Slice.copy_from_slice core.marker.CopyU8 s s1
+      ok (index_mut_back s2, j)
+    else ok (d, i)) ⦃ d1 j => d1.length = src.length ∧ j.val ≤ src.length ∧
+      src.length - j.val < k.val ∧ d1.val.take j.val = src.val.take j.val ⦄ := by
+  simp only [Slice.length] at *
+  split_ifs with h
+  · step*
+    have hv : (index_mut_back s2).val = d.val.setSlice! i.val (src.val.slice i.val j.val) := by
+      rw [s_post2, s2_post, s1_post]
+      simp
+    obtain ⟨hlen, htake⟩ := copy_piece (d := d.val) (src := src.val) (i := i.val)
+      (j := j.val) hl (by omega) (by scalar_tac) hp
+    refine ⟨by rw [hv]; exact hlen, by scalar_tac, by scalar_tac, by rw [hv]; exact htake⟩
+  · simp only [WP.spec_ok]
+    refine ⟨hl, his, by scalar_tac, hp⟩
+
+/-- `copy_lanes` leaves `dst` holding `src`. -/
+theorem copy_lanes_spec (N : Usize) (dst src : Slice U8) (hl : dst.length = src.length)
+    (hN : src.length ≤ N.val) :
+    low.generic.blockwise.copy_lanes N dst src ⦃ d => d.val = src.val ⦄ := by
+  unfold low.generic.blockwise.copy_lanes
+  have hsrc : (Slice.len src).val = src.val.length := by simp [Slice.len]
+  simp only [Slice.length] at hl hN
+  step as ⟨q, hq⟩
+  step with copy_lanes_loop_spec src { start := 0#usize, «end» := q } dst 0#usize
+    (by simpa [Slice.length] using hl) (by simp) (by simp) (by simp [Slice.length]; omega)
+    (by simp) (by simp) as ⟨d1, i1, hl1, hi1, hlt1, hp1⟩
+  step as ⟨r1, hr1⟩
+  step with copy_lanes_piece_spec src d1 i1 8#usize r1 hl1 hi1 (by simp [Slice.length] at *; omega)
+    (by simp [Slice.length] at *; omega) hp1 as ⟨d2, i2, hl2, hi2, hlt2, hp2⟩
+  step as ⟨r2, hr2⟩
+  step with copy_lanes_piece_spec src d2 i2 4#usize r2 hl2 hi2 (by simp [Slice.length] at *; omega)
+    (by simp [Slice.length] at *; omega) hp2 as ⟨d3, i3, hl3, hi3, hlt3, hp3⟩
+  step as ⟨r3, hr3⟩
+  step with copy_lanes_piece_spec src d3 i3 2#usize r3 hl3 hi3 (by simp [Slice.length] at *; omega)
+    (by simp [Slice.length] at *; omega) hp3 as ⟨d4, i4, hl4, hi4, hlt4, hp4⟩
+  simp only [Slice.length] at hl4 hi4 hlt4
+  split_ifs with hlast
+  · step*
+    have hi : i4.val + 1 = src.val.length := by scalar_tac
+    rw [d_post, Slice.set_val_eq, i12_post]
+    apply List.ext_getElem (by simp; omega)
+    intro n h1 h2
+    rw [List.getElem_set]
+    split_ifs with hn
+    · subst hn
+      rfl
+    · have e := List.getElem_of_eq hp4 (by simp; omega : n < (List.take i4.val d4.val).length)
+      rw [List.getElem_take, List.getElem_take] at e
+      exact e
+  · simp only [WP.spec_ok]
+    have hi : i4.val = src.val.length := by scalar_tac
+    rw [hi, List.take_of_length_le (by omega), List.take_of_length_le (by omega)] at hp4
+    exact hp4
+
 theorem update_spec {S : Type} {N : Usize}
     (inst : low.generic.blockwise.UpdateBlocks S) (R : List U8 → S → Prop) (bound : Nat)
     (hC : ∀ p s (b : Slice U8), R p s → b.length % N.val = 0 → p.length + b.length ≤ bound →
@@ -377,10 +497,11 @@ theorem update_spec {S : Type} {N : Usize}
   case h2 =>
     exact complete_blocks_spec inst R bound hC p bw bytes state hB hN
       (by simp only [UScalar.le_equiv] at *; omega) hb
-  · scalar_tac
-  · refine ⟨by scalar_tac, q, hq, ?_⟩
+  · step with copy_lanes_spec N s bytes (by simp only [Slice.length] at *; scalar_tac)
+      (by simp only [Slice.length] at *; scalar_tac) as ⟨s1, hs1⟩
+    refine ⟨by scalar_tac, q, hq, ?_⟩
     simp only
-    rw [s_post2, s1_post, setSlice!_eq _ _ _ (by scalar_tac),
+    rw [s_post2, hs1, setSlice!_eq _ _ _ (by scalar_tac),
       List.take_left' (by simp; scalar_tac), ← hqp, List.append_assoc]
 
 theorem buffered_spec {N : Usize} (bw : low.generic.blockwise.Blockwise N) (h : bw.used.val ≤ N.val) :

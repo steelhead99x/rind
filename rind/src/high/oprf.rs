@@ -840,7 +840,7 @@ impl Blind {
     ///
     /// An element that does not decode, or is the identity, is refused with
     /// [`Error::KeyRejected`]. A server that evaluated with another key, or
-    /// not at all, goes unnoticed: [`voprf`] detects it.
+    /// not at all, goes unnoticed: [`voprf`](crate::oprf::voprf) detects it.
     pub fn finalize(self, evaluated_element: &[u8]) -> Result<Output, Error> {
         let _entry = Entry::new_secret();
         dispatch!(BlindInner, &self.0, state => state.finalize_encoded(evaluated_element))

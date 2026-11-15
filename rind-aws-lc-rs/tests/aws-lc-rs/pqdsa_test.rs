@@ -1,0 +1,281 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0 OR ISC
+
+use aws_lc_rs::encoding::AsDer;
+use aws_lc_rs::signature::{
+    KeyPair, ML_DSA_44, ML_DSA_44_SIGNING, ML_DSA_65, ML_DSA_65_SIGNING, ML_DSA_87,
+    ML_DSA_87_SIGNING, ParsedPublicKey, PqdsaKeyPair, UnparsedPublicKey, VerificationAlgorithm,
+};
+
+use crate::{test, test_file};
+
+macro_rules! mldsa_keygen_test {
+    ($file:literal, $signing:expr) => {
+        test::run(test_file!($file), |section, test_case| {
+            assert_eq!(section, "");
+            let seed = test_case.consume_bytes("SEED");
+            let public = test_case.consume_bytes("PUBLIC");
+            let secret = test_case.consume_bytes("SECRET");
+
+            // Verify key construction from raw private key produces expected public key
+            let key_pair_secret = PqdsaKeyPair::from_raw_private_key($signing, secret.as_slice())?;
+            let public_secret = key_pair_secret.public_key();
+            assert_eq!(public.as_slice(), public_secret.as_ref());
+
+            // Verify seed-based key generation produces the same public key
+            let key_pair_seed = PqdsaKeyPair::from_seed($signing, seed.as_slice())?;
+            assert_eq!(public.as_slice(), key_pair_seed.public_key().as_ref());
+
+            // rind-aws-lc-rs: no `as_raw_bytes`, so the expanded key is not
+            // read back.
+
+            Ok(())
+        });
+    };
+}
+
+macro_rules! mldsa_sigver_test {
+    ($file:literal, $verification:expr) => {
+        test::run(test_file!($file), |section, test_case| {
+            assert_eq!(section, "");
+            let public_key = test_case.consume_bytes("PUBLIC");
+            let message = test_case.consume_bytes("MESSAGE");
+            let signature = test_case.consume_bytes("SIGNATURE");
+            let _context = test_case.consume_bytes("CONTEXT");
+            let expected_result = test_case.consume_bool("RESULT");
+
+            let result =
+                $verification.verify_sig(public_key.as_ref(), message.as_ref(), signature.as_ref());
+            if expected_result {
+                assert!(result.is_ok());
+            } else {
+                assert!(result.is_err());
+            }
+
+            let ppk = ParsedPublicKey::new($verification, public_key.as_slice()).unwrap();
+            let result = ppk.verify_sig(message.as_ref(), signature.as_ref());
+            if expected_result {
+                assert!(result.is_ok());
+            } else {
+                assert!(result.is_err());
+            }
+            let x509_bytes = ppk.as_der().unwrap();
+            let result =
+                $verification.verify_sig(x509_bytes.as_ref(), message.as_ref(), signature.as_ref());
+            if expected_result {
+                assert!(result.is_ok());
+            } else {
+                assert!(result.is_err());
+            }
+            Ok(())
+        });
+    };
+}
+
+macro_rules! mldsa_sigver_digest_test {
+    ($file:literal, $verification:expr) => {
+        test::run(test_file!($file), |section, test_case| {
+            assert_eq!(section, "");
+            let public_key = test_case.consume_bytes("PUBLIC");
+            let message = test_case.consume_bytes("MESSAGE");
+            let signature = test_case.consume_bytes("SIGNATURE");
+            let _context = test_case.consume_bytes("CONTEXT");
+            let _expected_result = test_case.consume_bool("RESULT");
+
+            // For code coverage
+            let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, message.as_ref());
+            let result =
+                $verification.verify_digest_sig(public_key.as_ref(), &digest, signature.as_ref());
+            assert!(result.is_err());
+
+            let ppk = ParsedPublicKey::new($verification, public_key.as_slice()).unwrap();
+            let result = ppk.verify_digest_sig(&digest, signature.as_ref());
+            assert!(result.is_err());
+
+            Ok(())
+        });
+    };
+}
+
+#[test]
+fn mldsa_traits() {
+    test::compile_time_assert_send::<PqdsaKeyPair>();
+    test::compile_time_assert_sync::<PqdsaKeyPair>();
+    test::compile_time_assert_clone::<PqdsaKeyPair>();
+}
+
+#[test]
+fn mldsa_key_pair_clone() {
+    const MESSAGE: &[u8] = b"hello, world";
+
+    let key_pair = PqdsaKeyPair::generate(&ML_DSA_44_SIGNING).unwrap();
+    let cloned = key_pair.clone();
+    assert_eq!(key_pair.public_key().as_ref(), cloned.public_key().as_ref());
+    let public_key = cloned.public_key().as_ref().to_vec();
+
+    // The clone must remain usable after the original is dropped.
+    drop(key_pair);
+
+    let mut sig = vec![0; ML_DSA_44_SIGNING.signature_len()];
+    let sig_len = cloned.sign(MESSAGE, &mut sig).unwrap();
+    UnparsedPublicKey::new(&ML_DSA_44, &public_key)
+        .verify(MESSAGE, &sig[..sig_len])
+        .unwrap();
+}
+
+#[test]
+fn mldsa_44_keygen_test() {
+    mldsa_keygen_test!("data/MLDSA_44_ACVP_keyGen.txt", &ML_DSA_44_SIGNING);
+}
+
+#[test]
+fn mldsa_65_keygen_test() {
+    mldsa_keygen_test!("data/MLDSA_65_ACVP_keyGen.txt", &ML_DSA_65_SIGNING);
+}
+
+#[test]
+fn mldsa_87_keygen_test() {
+    mldsa_keygen_test!("data/MLDSA_87_ACVP_keyGen.txt", &ML_DSA_87_SIGNING);
+}
+
+#[test]
+fn mldsa_44_sigver_test() {
+    mldsa_sigver_test!("data/MLDSA_44_sigVer.txt", &ML_DSA_44);
+}
+
+#[test]
+fn mldsa_65_sigver_test() {
+    mldsa_sigver_test!("data/MLDSA_65_sigVer.txt", &ML_DSA_65);
+}
+
+#[test]
+fn mldsa_87_sigver_test() {
+    mldsa_sigver_test!("data/MLDSA_87_sigVer.txt", &ML_DSA_87);
+}
+
+#[test]
+// For code coverage
+fn mldsa_44_sigver_digest_test() {
+    mldsa_sigver_digest_test!("data/MLDSA_44_sigVer.txt", &ML_DSA_44);
+}
+
+#[test]
+fn test_mldsa_seed_sign_verify() {
+    for (signing_alg, verify_alg) in [
+        (&ML_DSA_44_SIGNING, &ML_DSA_44),
+        (&ML_DSA_65_SIGNING, &ML_DSA_65),
+        (&ML_DSA_87_SIGNING, &ML_DSA_87),
+    ] {
+        let seed = [7u8; 32];
+        let kp = PqdsaKeyPair::from_seed(signing_alg, &seed)
+            .expect("from_seed should succeed with valid 32-byte seed");
+        let msg = b"test message";
+        let mut sig = vec![0u8; signing_alg.signature_len()];
+        let sig_len = kp
+            .sign(msg, &mut sig)
+            .expect("signing with seed-derived key should succeed");
+        assert_eq!(sig_len, signing_alg.signature_len());
+        let pk = aws_lc_rs::signature::UnparsedPublicKey::new(verify_alg, kp.public_key().as_ref());
+        pk.verify(msg, &sig)
+            .expect("verification of seed-derived signature should succeed");
+    }
+}
+
+#[test]
+fn test_mldsa_seed_wrong_size() {
+    for signing_alg in [&ML_DSA_44_SIGNING, &ML_DSA_65_SIGNING, &ML_DSA_87_SIGNING] {
+        let too_short = PqdsaKeyPair::from_seed(signing_alg, &[0u8; 31]);
+        assert!(
+            too_short.is_err(),
+            "31 bytes should be rejected as too short"
+        );
+
+        let too_long = PqdsaKeyPair::from_seed(signing_alg, &[0u8; 33]);
+        assert!(too_long.is_err(), "33 bytes should be rejected as too long");
+
+        let empty = PqdsaKeyPair::from_seed(signing_alg, &[]);
+        assert!(empty.is_err(), "empty seed should be rejected");
+
+        // Exact size (32 bytes) should succeed
+        let exact = PqdsaKeyPair::from_seed(signing_alg, &[0u8; 32]);
+        assert!(exact.is_ok(), "32 bytes should be accepted");
+    }
+}
+
+#[test]
+fn test_mldsa_seed_serialization_roundtrip() {
+    for signing_alg in [&ML_DSA_44_SIGNING, &ML_DSA_65_SIGNING, &ML_DSA_87_SIGNING] {
+        let seed = [99u8; 32];
+        let kp = PqdsaKeyPair::from_seed(signing_alg, &seed).unwrap();
+
+        // PKCS#8 round-trip
+        let pkcs8 = kp.to_pkcs8v1().expect("to_pkcs8v1 should succeed");
+        let kp_pkcs8 = PqdsaKeyPair::from_pkcs8(signing_alg, pkcs8.as_ref())
+            .expect("from_pkcs8 should reconstruct the key");
+        assert_eq!(
+            kp.public_key().as_ref(),
+            kp_pkcs8.public_key().as_ref(),
+            "PKCS#8 round-trip should preserve public key"
+        );
+
+        // rind-aws-lc-rs: no `as_raw_bytes`, so no raw private key
+        // round-trip.
+    }
+}
+
+#[test]
+fn test_mldsa_seed_different_seeds_different_keys() {
+    for signing_alg in [&ML_DSA_44_SIGNING, &ML_DSA_65_SIGNING, &ML_DSA_87_SIGNING] {
+        let kp1 = PqdsaKeyPair::from_seed(signing_alg, &[1u8; 32]).unwrap();
+        let kp2 = PqdsaKeyPair::from_seed(signing_alg, &[2u8; 32]).unwrap();
+        assert_ne!(
+            kp1.public_key().as_ref(),
+            kp2.public_key().as_ref(),
+            "different seeds should produce different public keys"
+        );
+    }
+}
+
+#[test]
+fn test_mldsa_seed_zeroed_bytes() {
+    // Test behavior when constructing from an all-zeros seed.
+    // ML-DSA should accept any 32-byte seed and produce a valid, functional key pair.
+    for (signing_alg, verify_alg) in [
+        (&ML_DSA_44_SIGNING, &ML_DSA_44),
+        (&ML_DSA_65_SIGNING, &ML_DSA_65),
+        (&ML_DSA_87_SIGNING, &ML_DSA_87),
+    ] {
+        let zeroed_seed = [0u8; 32];
+
+        // Constructing a key from zeroed seed should succeed
+        let kp = PqdsaKeyPair::from_seed(signing_alg, &zeroed_seed);
+        assert!(
+            kp.is_ok(),
+            "from_seed should accept zeroed bytes of correct size"
+        );
+        let kp = kp.unwrap();
+
+        // Key should be functional: sign and verify
+        let msg = b"zeroed seed test";
+        let mut sig = vec![0u8; signing_alg.signature_len()];
+        let sig_len = kp
+            .sign(msg, &mut sig)
+            .expect("signing with zeroed-seed key should succeed");
+        assert_eq!(sig_len, signing_alg.signature_len());
+
+        let pk = aws_lc_rs::signature::UnparsedPublicKey::new(verify_alg, kp.public_key().as_ref());
+        pk.verify(msg, &sig)
+            .expect("verification with zeroed-seed key should succeed");
+
+        // Determinism: same zeroed seed should produce the same key
+        let kp2 = PqdsaKeyPair::from_seed(signing_alg, &zeroed_seed).unwrap();
+        assert_eq!(
+            kp.public_key().as_ref(),
+            kp2.public_key().as_ref(),
+            "same seed should always produce the same key"
+        );
+    }
+}
+
+// rind-aws-lc-rs: `test_mldsa_seed_functional_equivalence` is removed, since it
+// exports the expanded key with `as_raw_bytes`.

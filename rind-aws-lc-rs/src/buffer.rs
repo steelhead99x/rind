@@ -10,7 +10,9 @@ use zeroize::Zeroize;
 /// Bytes exposed by an encoding. `T` tells the encodings apart, and says
 /// whether they hold a private key, wiped on drop when owned under the `wipe`
 /// feature.
-pub struct Buffer<'a, T: Kind>(Cow<'a, [u8]>, PhantomData<T>);
+// `T` is unbounded, as in aws-lc-rs, so its impls carry no bounds either;
+// whether to wipe is fixed at construction instead.
+pub struct Buffer<'a, T>(Cow<'a, [u8]>, bool, PhantomData<T>);
 
 /// Whether an encoding holds a private key.
 pub trait Kind {
@@ -21,26 +23,26 @@ pub trait Kind {
 
 impl<T: Kind> Buffer<'_, T> {
     pub(crate) fn new(owned: Vec<u8>) -> Self {
-        Buffer(Cow::Owned(owned), PhantomData)
+        Buffer(Cow::Owned(owned), T::SECRET, PhantomData)
     }
 }
 
-impl<T: Kind> Drop for Buffer<'_, T> {
+impl<T> Drop for Buffer<'_, T> {
     fn drop(&mut self) {
         // `cfg!` keeps the wipe type-checked in every build.
-        if let (true, Cow::Owned(bytes)) = (cfg!(feature = "wipe") && T::SECRET, &mut self.0) {
+        if let (true, Cow::Owned(bytes)) = (cfg!(feature = "wipe") && self.1, &mut self.0) {
             bytes.zeroize();
         }
     }
 }
 
-impl<T: Kind> fmt::Debug for Buffer<'_, T> {
+impl<T> fmt::Debug for Buffer<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("Buffer(...)")
     }
 }
 
-impl<T: Kind> AsRef<[u8]> for Buffer<'_, T> {
+impl<T> AsRef<[u8]> for Buffer<'_, T> {
     fn as_ref(&self) -> &[u8] {
         &self.0
     }

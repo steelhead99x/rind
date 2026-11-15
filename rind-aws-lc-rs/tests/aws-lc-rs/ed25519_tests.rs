@@ -170,16 +170,6 @@ fn test_ed25519_from_pkcs8() {
         result: Result<Ed25519KeyPair, error::KeyRejected>,
         error: Option<String>,
     ) {
-        // rind-aws-lc-rs: rind refuses a PKCS#8 v2 key without its public key,
-        // here missing or tagged as attributes.
-        const V2_WITHOUT_PUBLIC_KEY: [&str; 2] = [
-            "302e020101300506032b657004220420a22efdb713f0e1600d2a5ce948e321ca3a18137c47f15091a12c7126c1749a00",
-            "3051020101300506032b657004220420a22efdb713f0e1600d2a5ce948e321ca3a18137c47f15091a12c7126c1749a00a021001aeb8e3ee5ba5afd91113466d19f4ea77fa0feffbd8c5adcb499927f12535f77",
-        ];
-        if V2_WITHOUT_PUBLIC_KEY.contains(&test::to_hex(input).as_str()) {
-            assert!(result.is_err());
-            return;
-        }
         match (result, error) {
             (Ok(_), None) => (),
             (Err(e), None) => panic!(

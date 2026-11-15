@@ -5,6 +5,24 @@ use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
+// verified-garbage has no key generation: a random scalar, drawn again until
+// it is in range, and its public key.
+fn vg_generate() -> (
+    verified_garbage::ec::PrivateKey<verified_garbage::ec::P521>,
+    verified_garbage::ec::PublicKey<verified_garbage::ec::P521>,
+) {
+    loop {
+        let mut d = [0u8; 66];
+        getrandom::fill(&mut d).unwrap();
+        // The order is just under 2^521: keep only the top byte's low bit.
+        d[0] &= 1;
+        let key = verified_garbage::ec::PrivateKey::from_bytes(&d);
+        if let Ok(public_key) = key.public_key() {
+            return (key, public_key);
+        }
+    }
+}
+
 // RFC6979 A.2.7's public key, and its SHA-512 signature over "sample".
 const PUBLIC_KEY: &str = "0401894550d0785932e00eaa23b694f213f8c3121f86dc97a04e5a7167db4e5bcd371123d46e45db6b5d5370a7f20fb633155d38ffa16d2bd761dcac474b9a2f5023a400493101c962cd4d2fddf782285e64584139c2f91b47f87ff82354d6630f746a28a0db25741b5b34a828008b22acc23f924faafbd4d33f81ea66956dfeaa2bfdfcf5";
 const MESSAGE: &[u8] = b"sample";
@@ -49,6 +67,20 @@ fn ecdh(c: &mut Criterion) {
 
             let secret = our_private_key.agree(&public_key).unwrap();
             black_box(secret);
+        })
+    });
+
+    group.bench_function("verified-garbage", |b| {
+        vg_agrees_with_rind();
+        use verified_garbage::ec::PublicKey;
+        let peer_bytes: [u8; 133] = public_key[..].try_into().unwrap();
+
+        b.iter(|| {
+            let (our_private_key, our_public_key) = vg_generate();
+            black_box(our_public_key);
+
+            let peer = PublicKey::from_bytes(&peer_bytes);
+            black_box(our_private_key.exchange(&peer).unwrap());
         })
     });
 
@@ -98,6 +130,11 @@ fn keygen(c: &mut Criterion) {
             black_box(our_private_key.public_key());
         })
     });
+
+    group.bench_function("verified-garbage", |b| {
+        vg_agrees_with_rind();
+        b.iter(|| black_box(vg_generate()));
+    });
 }
 
 fn ecdsa_verify(c: &mut Criterion) {
@@ -125,6 +162,19 @@ fn ecdsa_verify(c: &mut Criterion) {
                 .unwrap()
                 .verify(MESSAGE, &signature)
                 .unwrap();
+        })
+    });
+
+    // verified-garbage takes the key's bytes and validates it on every verify.
+    group.bench_function("verified-garbage", |b| {
+        use verified_garbage::hashes::sha512::Sha512;
+        let public_key = verified_garbage::ec::PublicKey::<verified_garbage::ec::P521>::from_bytes(
+            &public_key[..].try_into().unwrap(),
+        );
+        let signature: [u8; 132] = signature[..].try_into().unwrap();
+
+        b.iter(|| {
+            public_key.verify::<Sha512>(MESSAGE, &signature).unwrap();
         })
     });
 
@@ -201,6 +251,26 @@ fn ecdsa_verify(c: &mut Criterion) {
             public_key.verify_digest(&digest, &signature).unwrap();
         })
     });
+
+    // verified-garbage validates the key on every verify, which rind's row parses once.
+    group.bench_function("verified-garbage", |b| {
+        use rind::digest;
+        use verified_garbage::hashes::sha512::Sha512;
+        let public_key = verified_garbage::ec::PublicKey::<verified_garbage::ec::P521>::from_bytes(
+            &public_key[..].try_into().unwrap(),
+        );
+        let signature: [u8; 132] = signature[..].try_into().unwrap();
+        let digest: [u8; 64] = digest::digest(&digest::SHA512, MESSAGE)
+            .as_ref()
+            .try_into()
+            .unwrap();
+
+        b.iter(|| {
+            public_key
+                .verify_prehashed::<Sha512>(&digest, &signature)
+                .unwrap();
+        })
+    });
 }
 
 fn ecdsa_sign(c: &mut Criterion) {
@@ -233,6 +303,22 @@ fn ecdsa_sign(c: &mut Criterion) {
 
         b.iter(|| {
             black_box(signing_key.sign(MESSAGE).unwrap());
+        });
+    });
+
+    // verified-garbage signs deterministically (RFC 6979), where rind hedges its nonce.
+    group.bench_function("verified-garbage", |b| {
+        use rind::signature::{PublicKey, verify};
+        use verified_garbage::hashes::sha512::Sha512;
+        let (signing_key, public_key) = vg_generate();
+        // rind verifies verified-garbage's signature.
+        let rind_key =
+            PublicKey::new(&verify::ECDSA_P521_SHA512_FIXED, public_key.as_bytes()).unwrap();
+        let signature = signing_key.sign::<Sha512>(MESSAGE).unwrap();
+        rind_key.verify(MESSAGE, &signature).unwrap();
+
+        b.iter(|| {
+            black_box(signing_key.sign::<Sha512>(MESSAGE).unwrap());
         });
     });
 
@@ -291,6 +377,27 @@ fn ecdsa_sign(c: &mut Criterion) {
             black_box(signing_key.sign_digest(&digest).unwrap());
         });
     });
+
+    // verified-garbage signs deterministically (RFC 6979), where rind hedges its nonce.
+    group.bench_function("verified-garbage", |b| {
+        use rind::digest;
+        use rind::signature::{PublicKey, verify};
+        use verified_garbage::hashes::sha512::Sha512;
+        let (signing_key, public_key) = vg_generate();
+        // rind verifies verified-garbage's signature.
+        let rind_key =
+            PublicKey::new(&verify::ECDSA_P521_SHA512_FIXED, public_key.as_bytes()).unwrap();
+        let signature = signing_key.sign::<Sha512>(MESSAGE).unwrap();
+        rind_key.verify(MESSAGE, &signature).unwrap();
+        let digest: [u8; 64] = digest::digest(&digest::SHA512, MESSAGE)
+            .as_ref()
+            .try_into()
+            .unwrap();
+
+        b.iter(|| {
+            black_box(signing_key.sign_prehashed::<Sha512>(&digest).unwrap());
+        });
+    });
 }
 
 // Agree with a stored key, loaded once, as WebCrypto's `deriveBits` and
@@ -321,6 +428,38 @@ fn stored(c: &mut Criterion) {
 
         b.iter(|| black_box(key.agree(public_key).unwrap()))
     });
+
+    group.bench_function("verified-garbage", |b| {
+        use verified_garbage::ec::{PrivateKey, PublicKey};
+        vg_agrees_with_rind();
+        let key = PrivateKey::<verified_garbage::ec::P521>::from_bytes(&scalar);
+        let peer_bytes: [u8; 133] = public_key[..].try_into().unwrap();
+
+        b.iter(|| {
+            let peer = PublicKey::from_bytes(&peer_bytes);
+            black_box(key.exchange(&peer).unwrap())
+        })
+    });
+}
+
+// Checks verified-garbage's public key and exchange against rind's, from a
+// fixed scalar, before any of its rows times them.
+fn vg_agrees_with_rind() {
+    use rind::agreement::{self, ECDH_P521};
+    use verified_garbage::ec::{PrivateKey, PublicKey};
+    let scalar = [1u8; 66];
+    let public_key: &[u8] = &hex::decode(PUBLIC_KEY).unwrap();
+    let key = PrivateKey::<verified_garbage::ec::P521>::from_bytes(&scalar);
+    let peer_bytes: [u8; 133] = public_key.try_into().unwrap();
+    let rind_key = agreement::PrivateKey::from_scalar(&ECDH_P521, &scalar).unwrap();
+    assert_eq!(
+        key.public_key().unwrap().as_bytes()[..],
+        *rind_key.public_key().as_ref()
+    );
+    assert_eq!(
+        key.exchange(&PublicKey::from_bytes(&peer_bytes)).unwrap()[..],
+        *rind_key.agree(public_key).unwrap().as_ref()
+    );
 }
 
 criterion_group!(benches, ecdh, keygen, ecdsa_verify, ecdsa_sign, stored);

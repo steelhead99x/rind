@@ -28,6 +28,12 @@ fn test_rind_sha1(data: &[u8]) {
     black_box(ctx.finish());
 }
 
+fn test_vg_sha1(data: &[u8]) {
+    let mut ctx = verified_garbage::hashes::sha1::Sha1::new();
+    ctx.update(data);
+    black_box(ctx.finalize());
+}
+
 fn sha1(c: &mut Criterion) {
     let mut group = c.benchmark_group("sha1");
     for (size, size_name) in criterion::HASH_SIZES {
@@ -50,6 +56,17 @@ fn sha1(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
             b.iter(|| test_rind_sha1(input))
         });
+        let mut ctx = verified_garbage::hashes::sha1::Sha1::new();
+        ctx.update(&input);
+        assert_eq!(
+            ctx.finalize(),
+            rind::digest::digest(&rind::digest::legacy::SHA1, &input).as_ref()
+        );
+        group.bench_with_input(
+            BenchmarkId::new("verified-garbage", size_name),
+            &input,
+            |b, input| b.iter(|| test_vg_sha1(input)),
+        );
     }
 }
 

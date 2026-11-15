@@ -20,9 +20,30 @@
 # only rind's callers compile, such as a generic function at a type rind
 # never instantiates itself, nor the C library's memcpy and memset.
 #
+# On the x86_64 backend, it also fails if a function reached from one rind
+# exports, which is all its callers can call, holds an instruction in MCDT
+# without passing through a function that enters Intel's MXCSR mitigation,
+# `rind::low::Mcdt`. Everything such a function calls counts as mitigated,
+# and so does all of the function itself, so it enters the mitigation first,
+# holds it to its end, and is `#[inline(never)]` or `target_feature`, so it
+# never inlines into a caller whose own work the scan would then skip. The
+# scan does not check that order: LLVM lays out the path for a CPU that
+# needs no mitigation, which never calls `enter`, beside the one that does,
+# so an instruction's address says nothing about whether the mitigation is
+# held there. Nothing in `admin/ct-vartime.toml`
+# excuses these, public operands included: the mitigation costs little
+# beside the arithmetic that runs them. A generic function compiles in its
+# caller, which exports what it calls, so the mitigation goes in code that
+# compiles in rind, such as a trait's method for one type. The portable
+# backend's arithmetic may compile to these anywhere, so on x86 every
+# `rind::low::Entry` enters the mitigation, and the scan skips it: what it
+# exports for generic callers, such as trait impls, has no `Entry` of its
+# own.
+#
 # The build sets `--cfg rind_vartime_planted`, which adds the divisions of a
-# secret in `rind/src/low/vartime_planted.rs`. Each must be found, so a scan
-# that finds nothing fails.
+# secret in `rind/src/low/vartime_planted.rs`, and for the x86_64 backend a
+# multiply outside the mitigation and one inside it. Each outside must be found, so a scan
+# that finds nothing fails, and the one inside must not.
 #
 # Run it in `nix develop .#ct-vartime`, which has llvm-objdump and each
 # target's standard library.
@@ -151,6 +172,25 @@ VARTIME = {
     ),
 }
 
+# Intel's list of the data-independent-time instructions whose timing may
+# still depend on their data unless MXCSR holds 0x1FBF, on its Core
+# processors from Skylake through Alder Lake and others that do not report
+# MCDT_NO: "MXCSR Configuration Dependent Timing", Table 1,
+# https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/best-practices/mxcsr-configuration-dependent-timing.html
+# Each but `vplzcnt` and the `vpmadd52` pair has a legacy SSE form.
+MCDT = re.compile(
+    r"v?p(maddubsw|maddwd|muldq|mulhrsw|mulhuw|mulhw|mulld|mullw|muludq)"
+    r"|vpmullq|vplzcnt[dq]|vpmadd52[hl]uq"
+)
+MCDT_SAMPLES = (
+    "pmaddubsw vpmaddwd pmuldq vpmulhrsw pmulhuw vpmulhw pmulld vpmullq vpmullw pmuludq vplzcntd"
+    " vplzcntq vpmadd52luq vpmadd52huq",
+    "mul mulx imul pmullq vpmultishiftqb vpclmulqdq vpaddq lzcnt vpdpwssd vpmovzxwd",
+)
+
+# The function `rind::low::Mcdt` calls to enter the mitigation.
+MITIGATION = "rind::low::mcdt::enter"
+
 # Mnemonics each VARTIME pattern must refuse, then must allow, checked
 # before every scan.
 SAMPLES = {
@@ -210,6 +250,7 @@ PLANTED = {
         t for t in TARGETS if not t.startswith(("arm", "i686"))
     ],
     "rind::low::vartime_planted::planted_float": TARGETS,
+    "rind::low::vartime_planted::planted_mcdt": ["x86_64-unknown-linux-gnu"],
 }
 
 # x86 prefixes, which llvm-objdump prints as their own word before the
@@ -226,7 +267,7 @@ INSN = re.compile(r"^\s+([0-9a-f]+):\s+(.*)$")
 RELOCS = re.compile(r"^RELOCATION RECORDS FOR \[(.+)\]:$")
 RELOC = re.compile(r"^([0-9a-f]+) \S+\s+(\S+?)(?:[+-]0x[0-9a-f]+)?$")
 # ELFv2's local entry offset, as in `0x60`, may follow a symbol's size.
-SYMBOL = re.compile(r"^([0-9a-f]+) (.{7}) (\S+)\t[0-9a-f]+ (?:0x[0-9a-f]+ )?(?:\.hidden |\.protected |\.internal )?(.+)$")
+SYMBOL = re.compile(r"^([0-9a-f]+) (.{7}) (\S+)\t[0-9a-f]+ (?:0x[0-9a-f]+ )?(\.hidden |\.protected |\.internal )?(.+)$")
 # Unwind tables and debug info, which point at every function, call nothing.
 METADATA = re.compile(r"\.(eh_frame|debug|ARM\.ex|gcc_except_table|note|comment|llvm)")
 LLVM_SUFFIX = re.compile(r" ?\(?\.llvm\.\d+\)?$")
@@ -295,6 +336,9 @@ class Objects:
         self.local = {}
         self.defined = {}
         self.opd = {}
+        # The sections holding symbols other crates can link to: rustc
+        # hides every other one.
+        self.exported = set()
         member = None
         for line, dline in zip(symbols, demangled):
             if m := MEMBER.match(line):
@@ -303,11 +347,13 @@ class Objects:
             m, dm = SYMBOL.match(line), SYMBOL.match(dline)
             if not m or not dm:
                 continue
-            value, flags, section, name = m.groups()
-            self.names[name] = LLVM_SUFFIX.sub("", dm[4])
+            value, flags, section, visibility, name = m.groups()
+            self.names[name] = LLVM_SUFFIX.sub("", dm[5])
             if section == "*UND*":
                 continue
             self.local[(member, name)] = section
+            if ("g" in flags or "w" in flags) and visibility in (None, ".protected "):
+                self.exported.add((member, section))
             if section == ".opd":
                 self.opd[(member, name)] = int(value, 16)
             if "g" in flags or "w" in flags:
@@ -389,29 +435,32 @@ class Objects:
         return defined
 
 
-def scan(objects, roots, arch):
-    """Every finding as {function: Counter(what)}, with a path from a root to
-    each, and how many sections were reached."""
-    vartime = VARTIME[arch]
+def scan(objects, starts, pattern, helpers=None, barrier=None):
+    """Every instruction matching `pattern` reached from `starts`, and every
+    call to a routine in `helpers`, as {function: Counter(what)}, with a path
+    from a start to each, and how many sections were reached. A section that
+    calls `barrier` is reached, but neither searched nor left."""
     parent = {}
     queue = collections.deque()
-    for node in objects.insns:
-        if node[0] in roots and any("rind::" in objects.name(l) for _, l in objects.labels[node]):
-            parent[node] = None
-            queue.append(node)
+    for node in starts:
+        parent[node] = None
+        queue.append(node)
 
     findings = collections.defaultdict(collections.Counter)
     paths = {}
     while queue:
         node = queue.popleft()
+        relocs = objects.relocs.get(node, ())
+        if barrier and any(objects.name(target) == barrier for _, target in relocs):
+            continue
         for offset, mnemonic in objects.insns.get(node, ()):
-            if vartime.fullmatch(mnemonic):
+            if pattern.fullmatch(mnemonic):
                 function = objects.function(node, offset)
                 findings[function][mnemonic] += 1
                 paths.setdefault(function, node)
-        for offset, target in objects.relocs.get(node, ()):
+        for offset, target in relocs:
             name = objects.name(target)
-            if HELPERS.fullmatch(name):
+            if helpers and helpers.fullmatch(name):
                 function = objects.function(node, offset)
                 findings[function]["calls " + name] += 1
                 paths.setdefault(function, node)
@@ -444,9 +493,27 @@ def check(tool, target, rind, others, public):
     arch = ARCH.get(arch, arch)
     objects = Objects(tool, arch, rind + others)
     roots = {m for m, _ in objects.insns if m.startswith(os.path.basename(rind[0]) + "(")}
-    findings, paths, reached = scan(objects, roots, arch)
+    starts = [
+        node for node in objects.insns
+        if node[0] in roots and any("rind::" in objects.name(l) for _, l in objects.labels[node])
+    ]
+    findings, paths, reached = scan(objects, starts, VARTIME[arch], helpers=HELPERS)
     lines = ["{}: reached {} sections".format(target, reached)]
     failed = False
+
+    if target == "x86_64-unknown-linux-gnu":
+        exported = sorted(node for node in objects.exported if node[0] in roots)
+        mcdt, mcdt_paths, mcdt_reached = scan(objects, exported, MCDT, barrier=MITIGATION)
+        lines.append("{}: reached {} sections from {} exported outside the MXCSR mitigation".format(
+            target, mcdt_reached, len(exported)))
+        for function, counts in sorted(mcdt.items()):
+            if function in PLANTED:
+                findings[function].update(counts)
+                continue
+            lines.append("FAIL {}: {} outside the MXCSR mitigation".format(function, describe(counts)))
+            for caller in mcdt_paths[function][:12]:
+                lines.append("       from " + caller)
+            failed = True
 
     listed = {e["function"]: e["holds"][target] for e in public if target in e["holds"]}
     for function, where in PLANTED.items():
@@ -493,6 +560,10 @@ def main():
             assert VARTIME[arch].fullmatch(mnemonic), (arch, mnemonic)
         for mnemonic in allowed.split():
             assert not VARTIME[arch].fullmatch(mnemonic), (arch, mnemonic)
+    for mnemonic in MCDT_SAMPLES[0].split():
+        assert MCDT.fullmatch(mnemonic), mnemonic
+    for mnemonic in MCDT_SAMPLES[1].split():
+        assert not MCDT.fullmatch(mnemonic), mnemonic
 
     tool = objdump()
     libs = build(targets)

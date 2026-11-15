@@ -1,12 +1,12 @@
 # The decision on every gap: each operation where another library beats rind
-# by more than 10%, on a host in benchmarks/data or a CPU tier of the nightly
+# by more than 10%, on a host in benchmarks/data or a CPU tier of the weekly
 # bench. BENCHMARKS.md lists them under Known gaps. `admin/bench-report
 # render` refuses a gap without an entry, and an entry that covers no gap, so
 # a refresh that opens or closes one must update this file.
 #
 # Each entry:
 #   operations  report rows on a host, as admin/bench-report's OPERATIONS
-#               without the library; nightly benchmark IDs on a tier, as the
+#               without the library; weekly benchmark IDs on a tier, as the
 #               report's tier table shows them. Either may be a glob, where
 #               `*` also matches the library's own `*`
 #   on          a host with a result in the report's data, or a CPU tier as
@@ -15,7 +15,7 @@
 #               entry must cover some gap where the report's data measures
 #               any of them
 #
-# The nightly bench's `gate` job fails on a gap over 10% that two scheduled
+# The weekly bench's `gate` job fails on a gap over 10% that two scheduled
 # runs in a row show without an entry here.
 #   quest       the quest that closes it, or
 #   reason      why it stays
@@ -43,7 +43,7 @@ reason = "Noise from the VPS's other tenants: `ovh-sea`, the same virtual CPU, m
 [[gap]]
 operations = ["p256-ecdsa-verify/*"]
 on = ["no ADX"]
-reason = "CPUs older than Broadwell and Zen lack ADX, and so do virtual CPUs that hide it, as `ovh-iad`'s and `ovh-sea`'s do. There rind runs s2n-bignum's verified `_alt` routines, which trail by more than 10% only on the nightly runners: on the VPSes P-256 verification measured 1.05× aws-lc-rs's time."
+reason = "CPUs older than Broadwell and Zen lack ADX, and so do virtual CPUs that hide it, as `ovh-iad`'s and `ovh-sea`'s do. There rind runs s2n-bignum's verified `_alt` routines, which trail by more than 10% only on GitHub's runners: on the VPSes P-256 verification measured 1.05× aws-lc-rs's time."
 
 [[gap]]
 operations = ["chacha20poly1305/*/16KB", "xchacha20poly1305/*/16KB"]
@@ -97,17 +97,17 @@ reason = "rind's portable SHA-1 and HACL*'s verified SHA-384/512, through libcru
 [[gap]]
 operations = ["aes*-cbc-encrypt/*"]
 on = ["aarch64"]
-reason = "Closed by [kixel-ai/rind#612](https://github.com/kixel-ai/rind/pull/612), whose [bench run 43016732906](https://github.com/kixel-ai/rind/actions/runs/43016732906) times every AES-KW and AES-CBC case within 1.03× of aws-lc-rs on every tier; this nightly data predates it, and the import of a later nightly drops this entry."
+reason = "Closed by [kixel-ai/rind#612](https://github.com/kixel-ai/rind/pull/612), whose [bench run 43016732906](https://github.com/kixel-ai/rind/actions/runs/43016732906) times every AES-KW and AES-CBC case within 1.03× of aws-lc-rs on every tier; this tier data predates it, and the import of a later weekly run drops this entry."
 
 [[gap]]
 operations = ["aes*-kw-wrap/*", "aes*-kwp-wrap/*"]
 on = ["x86_64", "no AVX2", "no AES-NI"]
-reason = "Closed by [kixel-ai/rind#612](https://github.com/kixel-ai/rind/pull/612), whose [bench run 43016732906](https://github.com/kixel-ai/rind/actions/runs/43016732906) times every AES-KW and AES-CBC case within 1.03× of aws-lc-rs on every tier; this nightly data predates it, and the import of a later nightly drops this entry."
+reason = "Closed by [kixel-ai/rind#612](https://github.com/kixel-ai/rind/pull/612), whose [bench run 43016732906](https://github.com/kixel-ai/rind/actions/runs/43016732906) times every AES-KW and AES-CBC case within 1.03× of aws-lc-rs on every tier; this tier data predates it, and the import of a later weekly run drops this entry."
 
 [[gap]]
 operations = ["aes*-cbc-decrypt/*/32B", "aes192-cbc-decrypt/*/1200B"]
 on = ["x86_64", "no AVX"]
-reason = "Closed by [kixel-ai/rind#612](https://github.com/kixel-ai/rind/pull/612), whose [bench run 43016732906](https://github.com/kixel-ai/rind/actions/runs/43016732906) times every AES-KW and AES-CBC case within 1.03× of aws-lc-rs on every tier; this nightly data predates it, and the import of a later nightly drops this entry."
+reason = "Closed by [kixel-ai/rind#612](https://github.com/kixel-ai/rind/pull/612), whose [bench run 43016732906](https://github.com/kixel-ai/rind/actions/runs/43016732906) times every AES-KW and AES-CBC case within 1.03× of aws-lc-rs on every tier; this tier data predates it, and the import of a later weekly run drops this entry."
 
 [[gap]]
 operations = ["rustls-full-handshake-key/ecdsa-p521/*"]

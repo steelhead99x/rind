@@ -63,8 +63,8 @@ macro_rules! j {
 
 // Transliterated from s2n-bignum's arm/generic/bignum_copy_row_from_table.S.
 /// Given table: uint64_t[height*width], copy table[idx*width...(idx+1)*width-1]
-///
 /// into z[0..width-1].
+///
 /// This function is constant-time with respect to the value of `idx`. This is
 /// achieved by reading the whole table and using the bit-masking to get the
 /// `idx`-th row.
