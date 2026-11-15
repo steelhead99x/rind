@@ -56,8 +56,12 @@ pub(super) mod util;
 pub(super) mod x25519;
 pub(super) mod xchacha20poly1305;
 
-/// Static point tables aligned so linker placement cannot make vector loads
-/// cross cache lines. This adds less than 64 bytes before each table.
+/// Static point tables aligned to 64 bytes. That keeps every 16-byte load,
+/// and the 32-byte loads of the 64-byte P-256 points and the 96-byte P-384
+/// points, inside one 64-byte cache line. P-521 points are 144 bytes, and
+/// the x86_64 AVX2 select loads 32 bytes at offsets 0, 32, 64, and 96, so a
+/// point that starts at 16 or 48 mod 64 still crosses a line. This adds less
+/// than 64 bytes before each table.
 #[repr(C, align(64))]
 struct AlignedTable<T>(T);
 
