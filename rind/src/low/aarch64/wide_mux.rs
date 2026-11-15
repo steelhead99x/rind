@@ -10,6 +10,11 @@
 //! Cortex-A72, Cortex-A76, and Neoverse N1; every other core, including
 //! one this crate does not recognise, keeps `_alt`. `cpu::wide_multiplier`
 //! is the choice.
+//!
+//! Each routine, the field product and square included, loads that cached
+//! flag and calls its schedule directly. The scalar multiplications inline
+//! their own field arithmetic after one such choice. A function pointer
+//! would add an indirect call on every product the Rust field type makes.
 
 #[inline]
 pub(crate) fn bignum_invsqrt_p25519(z: &mut [u64; 4], x: &[u64; 4]) -> u64 {
@@ -29,43 +34,22 @@ pub(crate) fn bignum_madd_n25519(z: &mut [u64; 4], x: &[u64; 4], y: &[u64; 4], c
     }
 }
 
-type P25519Mul = fn(&mut [u64; 4], &[u64; 4], &[u64; 4]);
-type P25519Sqr = fn(&mut [u64; 4], &[u64; 4]);
-
+#[inline]
 pub(crate) fn bignum_mul_p25519(z: &mut [u64; 4], x: &[u64; 4], y: &[u64; 4]) {
-    p25519_mul()(z, x, y);
+    if super::cpu::wide_multiplier() {
+        super::bignum_mul_p25519::bignum_mul_p25519(z, x, y)
+    } else {
+        super::bignum_mul_p25519_narrow::bignum_mul_p25519(z, x, y)
+    }
 }
 
+#[inline]
 pub(crate) fn bignum_sqr_p25519(z: &mut [u64; 4], x: &[u64; 4]) {
-    p25519_sqr()(z, x);
-}
-
-/// The field multiply and square sit in the inner loop of a scalar
-/// multiplication. The schedule is chosen on the first call and then
-/// called through the stored pointer, so a later product does not test
-/// the feature flag again.
-fn p25519_mul() -> P25519Mul {
-    use std::sync::OnceLock;
-    static CHOSEN: OnceLock<P25519Mul> = OnceLock::new();
-    *CHOSEN.get_or_init(|| {
-        if super::cpu::wide_multiplier() {
-            super::bignum_mul_p25519::bignum_mul_p25519
-        } else {
-            super::bignum_mul_p25519_narrow::bignum_mul_p25519
-        }
-    })
-}
-
-fn p25519_sqr() -> P25519Sqr {
-    use std::sync::OnceLock;
-    static CHOSEN: OnceLock<P25519Sqr> = OnceLock::new();
-    *CHOSEN.get_or_init(|| {
-        if super::cpu::wide_multiplier() {
-            super::bignum_sqr_p25519::bignum_sqr_p25519
-        } else {
-            super::bignum_sqr_p25519_narrow::bignum_sqr_p25519
-        }
-    })
+    if super::cpu::wide_multiplier() {
+        super::bignum_sqr_p25519::bignum_sqr_p25519(z, x)
+    } else {
+        super::bignum_sqr_p25519_narrow::bignum_sqr_p25519(z, x)
+    }
 }
 
 #[inline]

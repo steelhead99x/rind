@@ -269,6 +269,11 @@ def write_mux(specs):
         "//! Cortex-A72, Cortex-A76, and Neoverse N1; every other core, including",
         "//! one this crate does not recognise, keeps `_alt`. `cpu::wide_multiplier`",
         "//! is the choice.",
+        "//!",
+        "//! Each routine, the field product and square included, loads that cached",
+        "//! flag and calls its schedule directly. The scalar multiplications inline",
+        "//! their own field arithmetic after one such choice. A function pointer",
+        "//! would add an indirect call on every product the Rust field type makes.",
         "",
     ]
     for spec in specs:

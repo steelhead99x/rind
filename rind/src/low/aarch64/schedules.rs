@@ -285,8 +285,8 @@ fn mux_follows_the_override() {
             super::curve25519_x25519_narrow::curve25519_x25519(&mut direct, &scalar, &point);
         }
         assert_eq!(via_mux, direct);
-        // The field product is chosen once and then called through that
-        // pointer. A second call must still be the schedule this flag names.
+        // A second product must still be the schedule this flag names. The
+        // mux calls that schedule directly.
         let (x, y) = ([1u64, 0, 0, 0], [9u64, 0, 0, 0]);
         let (mut via_mul, mut direct_mul) = ([0; 4], [0; 4]);
         super::wide_mux::bignum_mul_p25519(&mut via_mul, &x, &y);
