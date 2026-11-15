@@ -2,16 +2,18 @@
 
 //! Poly1305 in five 26-bit limbs, for a 32-bit multiplier.
 //!
-//! The portable backend uses this when the pointer is 32 bits or `rind_limb`
-//! is 32, and armv7 uses it without NEON. Each limb product is one
-//! 32x32->64-bit multiply. `generic::poly1305`'s 64-bit limbs take a 64x64
-//! product, which a 32-bit compiler lowers to a library call.
+//! The portable backend uses this when `rind_limb` is 32, including a
+//! 32-bit pointer whose 64-bit product is a library call, and armv7 uses it
+//! without NEON. A 32-bit target with a cheap 64-bit product, such as wasm32
+//! built with `wide-arithmetic`, has `rind_limb` 64 and uses
+//! `generic::poly1305` instead. Each limb product here is one 32x32->64-bit
+//! multiply.
 //!
 //! The radix and the carry chain are Andrew Moon's poly1305-donna-32 (public
 //! domain or MIT); the code is rind's. Its correctness argument is the bounds
 //! below, which keep every sum inside its type, and its tests: RFC 8439's and
-//! aws-lc's vectors, and agreement with the 64-bit limbs over random keys,
-//! messages, and splits.
+//! aws-lc's vectors, a live `CRYPTO_poly1305_*` comparison, and agreement
+//! with the 64-bit limbs over random keys, messages, and splits.
 //!
 //! It adds, multiplies, shifts, and masks, and branches on no secret: the
 //! final choice between `h` and `h - p` is a mask. Its time depends on no
@@ -80,11 +82,15 @@ impl Poly1305 {
     }
 
     pub(crate) fn finish(mut self) -> [u8; 16] {
-        if let Some(tail) = self.bw.clone().peek_remaining() {
-            // The short last block's 1 goes after its bytes, not at bit 128.
+        // Copy the tail out before `blocks` borrows `self`. A full block was
+        // already taken, so `tail` is shorter than 16 and the pad byte fits.
+        let partial = self.bw.peek_remaining().map(|tail| {
             let mut block = [0u8; 16];
             block[..tail.len()].copy_from_slice(tail);
             block[tail.len()] = 0x01;
+            block
+        });
+        if let Some(block) = partial {
             self.blocks(&[block], 0);
         }
 
@@ -481,6 +487,61 @@ mod tests {
                 msg.len()
             );
         }
+    }
+
+    /// Tags against aws-lc's `CRYPTO_poly1305_*` (`include/openssl/poly1305.h`).
+    /// The 64-bit limbs are not this reference: a mistake shared with them
+    /// still fails. aws-lc-rs does not export Poly1305, so this calls aws-lc.
+    #[cfg(not(any(miri, target_family = "wasm")))]
+    #[test]
+    fn matches_aws_lc() {
+        let cases: &[([u8; 32], &[u8])] = &[
+            ([0; 32], b""),
+            ([0xff; 32], b"\x00"),
+            (
+                *b"\x85\xd6\xbe\x78\x57\x55\x6d\x33\x7f\x44\x52\xfe\x42\xd5\x06\xa8\
+                   \x01\x03\x80\x8a\xfb\x0d\xb2\xfd\x4a\xbf\xf6\xaf\x41\x49\xf5\x1b",
+                b"Cryptographic Forum Research Group",
+            ),
+        ];
+        let mut long = [0u8; 200];
+        for (i, byte) in long.iter_mut().enumerate() {
+            *byte = i.wrapping_mul(17).wrapping_add(3) as u8;
+        }
+        for len in [0usize, 1, 15, 16, 17, 31, 32, 33, 64, 200] {
+            let key = core::array::from_fn(|i| (i as u8).wrapping_mul(9).wrapping_add(1));
+            check_aws_lc(&key, &long[..len]);
+            // The same bytes, fed in two updates, against one aws-lc call.
+            let mut got = Poly1305::new(&key);
+            got.add_bytes(&long[..len / 3]);
+            got.add_bytes(&long[len / 3..len]);
+            assert_eq!(got.finish(), aws_lc_tag(&key, &long[..len]), "split {len}");
+        }
+        for (key, msg) in cases {
+            check_aws_lc(key, msg);
+        }
+    }
+
+    #[cfg(not(any(miri, target_family = "wasm")))]
+    fn check_aws_lc(key: &[u8; 32], msg: &[u8]) {
+        let mut got = Poly1305::new(key);
+        got.add_bytes(msg);
+        assert_eq!(got.finish(), aws_lc_tag(key, msg), "{} bytes", msg.len());
+    }
+
+    #[cfg(not(any(miri, target_family = "wasm")))]
+    fn aws_lc_tag(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
+        let mut state = [0u8; 512];
+        let mut mac = [0u8; 16];
+        let state_ptr = (&mut state as *mut [u8; 512]).cast::<aws_lc_sys::poly1305_state>();
+        // SAFETY: `state` is the 512-byte `poly1305_state`, `key` is 32 bytes,
+        // and `msg` is the length passed with it. aws-lc writes 16 tag bytes.
+        unsafe {
+            aws_lc_sys::CRYPTO_poly1305_init(state_ptr, key.as_ptr());
+            aws_lc_sys::CRYPTO_poly1305_update(state_ptr, msg.as_ptr(), msg.len());
+            aws_lc_sys::CRYPTO_poly1305_finish(state_ptr, mac.as_mut_ptr());
+        }
+        mac
     }
 
     /// SplitMix64, for reproducible random cases.
