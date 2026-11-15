@@ -296,6 +296,10 @@ fn ml_dsa_expanded() {
 /// The expanded-form load from recorded fixtures for the two seeds, so the
 /// portable backend (including wasm) checks this path without aws-lc. Miri
 /// skips the file I/O and the large encodings.
+///
+/// Native targets run it too. The fixture comparison only checks bytes, and
+/// the live aws-lc load wipe-checks a fresh expansion. This is the wipe check
+/// of the committed bytes.
 #[test]
 #[cfg(not(miri))]
 fn ml_dsa_expanded_recorded() {
