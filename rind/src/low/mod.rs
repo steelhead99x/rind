@@ -112,20 +112,34 @@ mod generic {
         all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha1;
-    #[cfg(all(
-        test,
-        any(
-            rind_backend = "arm",
+    // The portable backend's SHA-256, except ESP-IDF Xtensa, which ships the
+    // IRAM body and does not also link this one. armv7 and x86_64 compile it
+    // in tests and check their assembly against it.
+    #[cfg(any(
+        all(
             rind_backend = "portable",
-            rind_backend = "x86_64"
+            not(all(target_arch = "xtensa", target_os = "espidf"))
+        ),
+        all(
+            test,
+            any(
+                rind_backend = "arm",
+                rind_backend = "portable",
+                rind_backend = "x86_64"
+            )
         )
     ))]
     pub(super) mod sha256;
-    // FIPS 180-4 §4.2.2, one copy. The ESP-IDF Xtensa compressor and the
-    // test compressor above both read it. aarch64 tests compile neither
-    // reader, so the table stays out: clippy denies an unused static.
+    // FIPS 180-4 §4.2.2, one copy. The portable compressor, the ESP-IDF
+    // Xtensa IRAM body, and the assembly tests above all read it. aarch64
+    // tests compile none of those readers, so the table stays out: clippy
+    // denies an unused static.
     #[cfg(any(
         all(target_arch = "xtensa", target_os = "espidf"),
+        all(
+            rind_backend = "portable",
+            not(all(target_arch = "xtensa", target_os = "espidf"))
+        ),
         all(
             test,
             any(
