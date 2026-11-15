@@ -1325,7 +1325,6 @@ macro_rules! cmsub41_p521 {
 // Transliterated from s2n-bignum's x86/p521/p521_jdouble.S.
 /// Point doubling on NIST curve P-521 in Jacobian coordinates
 ///
-///
 /// Does p3 := 2 * p1 where all points are regarded as Jacobian triples.
 /// A Jacobian triple (x,y,z) represents affine point (x/z^2,y/z^3).
 /// It is assumed that all coordinates of the input point are fully

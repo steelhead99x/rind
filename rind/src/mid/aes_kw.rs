@@ -67,7 +67,7 @@ impl AesKek {
 
         // Expanded for this call, so it skips its wipe.
         let aes = ManuallyDrop::new(AesKey::new(self.key()));
-        a.copy_from_slice(&wrap_blocks(&aes, IV, r));
+        a.copy_from_slice(&wrap_blocks(&aes, IV, r.as_chunks_mut().0));
 
         low::ct::public_slice(wrapped);
         Ok(())
@@ -92,7 +92,7 @@ impl AesKek {
 
         // Expanded for this call, so it skips its wipe.
         let aes = ManuallyDrop::new(AesDecKey::new(self.key()));
-        let a = unwrap_blocks(&aes, a.try_into().unwrap(), key);
+        let a = unwrap_blocks(&aes, a.try_into().unwrap(), key.as_chunks_mut().0);
 
         if low::ct::into_public(ct_equal(&a, &IV)) {
             low::ct::public_slice(key);
@@ -138,7 +138,7 @@ impl AesKek {
             block[8..].copy_from_slice(r);
             wrapped.copy_from_slice(&aes.encrypt_block(&block));
         } else {
-            a.copy_from_slice(&wrap_blocks(&aes, aiv, r));
+            a.copy_from_slice(&wrap_blocks(&aes, aiv, r.as_chunks_mut().0));
         }
 
         low::ct::public_slice(wrapped);
@@ -175,7 +175,7 @@ impl AesKek {
         } else {
             let (a, c) = wrapped.split_at(8);
             key.copy_from_slice(c);
-            unwrap_blocks(&aes, a.try_into().unwrap(), key)
+            unwrap_blocks(&aes, a.try_into().unwrap(), key.as_chunks_mut().0)
         };
 
         // Valid if the AIV's constant matches, the claimed length ends in the
@@ -184,10 +184,13 @@ impl AesKek {
         // compiler splits `a & b` of two bools into a branch on each.
         let claimed = u64::from(u32::from_be_bytes(*aiv.last_chunk().unwrap()));
         let mut bad = black_box((key.len() as u64).wrapping_sub(claimed) >> 3);
-        for (i, byte) in key.iter().enumerate().skip(key.len() - 8) {
+        // Indexed rather than iterating `enumerate().skip()`, which Aeneas
+        // cannot translate, so `proofs/` can prove it.
+        #[allow(clippy::needless_range_loop)]
+        for i in key.len() - 8..key.len() {
             // all ones if `i` is at or past the claimed length
             let past = ((i as u64).wrapping_sub(claimed) >> 63).wrapping_sub(1);
-            bad |= black_box(past & u64::from(*byte));
+            bad |= black_box(past & u64::from(key[i]));
         }
         bad |= black_box(u64::from(!ct_equal(&aiv[..4], &AIV)));
 
@@ -224,36 +227,56 @@ impl Zeroable for AesKek {}
 /// A stays in a register and each block is built afresh: copying it through
 /// one buffer the cipher returns into put store-to-load round trips on the
 /// serial chain, a few nanoseconds a block.
-fn wrap_blocks(aes: &AesKey, a: [u8; 8], r: &mut [u8]) -> [u8; 8] {
+fn wrap_blocks(aes: &AesKey, a: [u8; 8], r: &mut [[u8; 8]]) -> [u8; 8] {
+    let n = r.len() as u64;
     let mut a = u64::from_ne_bytes(a);
-    let mut t = 0u64;
-    for _ in 0..6 {
-        for r_i in r.as_chunks_mut::<8>().0 {
-            t += 1;
-            let out = aes.encrypt_block(&block(a, r_i));
-            a = u64::from_ne_bytes(*out.first_chunk().unwrap()) ^ t.to_be();
-            *r_i = *out.last_chunk().unwrap();
-        }
+    for j in 0..6 {
+        a = wrap_pass(aes, a, j * n, r);
     }
     a.to_ne_bytes()
 }
 
+/// One of wrapping's six passes over `r`, its steps counting from `t + 1`.
+///
+/// A function of its own, indexing `r`, since Aeneas translates neither a
+/// loop nested in another that writes through a reference nor one over
+/// `iter_mut`, so `proofs/` can prove it.
+#[inline(always)]
+#[allow(clippy::needless_range_loop)]
+fn wrap_pass(aes: &AesKey, mut a: u64, mut t: u64, r: &mut [[u8; 8]]) -> u64 {
+    for i in 0..r.len() {
+        t += 1;
+        let out = aes.encrypt_block(&block(a, &r[i]));
+        a = u64::from_ne_bytes(*out.first_chunk().unwrap()) ^ t.to_be();
+        r[i] = *out.last_chunk().unwrap();
+    }
+    a
+}
+
 /// RFC 3394's unwrapping of `r` in place from the integrity value `a`,
 /// returning the initial value for the caller to check.
-fn unwrap_blocks(aes: &AesDecKey, a: [u8; 8], r: &mut [u8]) -> [u8; 8] {
+fn unwrap_blocks(aes: &AesDecKey, a: [u8; 8], r: &mut [[u8; 8]]) -> [u8; 8] {
+    let n = r.len() as u64;
     let mut a = u64::from_ne_bytes(a);
-    let r = r.as_chunks_mut::<8>().0;
-    let mut t = 6 * r.len() as u64;
-    for _ in 0..6 {
-        for r_i in r.iter_mut().rev() {
-            let mut b = block(a ^ t.to_be(), r_i);
-            t -= 1;
-            aes.decrypt_block(&mut b);
-            a = u64::from_ne_bytes(*b.first_chunk().unwrap());
-            *r_i = *b.last_chunk().unwrap();
-        }
+    for j in 0..6 {
+        a = unwrap_pass(aes, a, (6 - j) * n, r);
     }
     a.to_ne_bytes()
+}
+
+/// One of unwrapping's six passes over `r`, from its last block, its steps
+/// counting down from `t`, as [`wrap_pass`] is shaped for Aeneas.
+#[inline(always)]
+fn unwrap_pass(aes: &AesDecKey, mut a: u64, mut t: u64, r: &mut [[u8; 8]]) -> u64 {
+    for j in 0..r.len() {
+        let i = r.len() - 1 - j;
+        let mut b = block(a ^ t.to_be(), &r[i]);
+        t -= 1;
+        aes.decrypt_block(&mut b);
+        a = u64::from_ne_bytes(*b.first_chunk().unwrap());
+        r[i] = *b.last_chunk().unwrap();
+    }
+    a
 }
 
 /// A, in native byte order, followed by R[i].
@@ -452,7 +475,7 @@ mod tests {
                         forged.copy_from_slice(&enc.encrypt_block(&block));
                     } else {
                         forged[8..].copy_from_slice(&plain);
-                        let a = wrap_blocks(&enc, aiv, &mut forged[8..]);
+                        let a = wrap_blocks(&enc, aiv, forged[8..].as_chunks_mut().0);
                         forged[..8].copy_from_slice(&a);
                     }
                     // the forgery is well formed, and only the claimed

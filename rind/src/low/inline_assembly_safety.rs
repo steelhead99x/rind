@@ -78,10 +78,9 @@
 //! many CPUs have defined exception behaviour (that kills the
 //! process with the `SIGILL` signal, on some OSes).
 //!
-//! `crate::low::Entry` is responsible for panicking if run on an
-//! unsuitable processor.  This is run before any inline assembly
-//! code, because: `mod low` is non-public, and `mod low` is the only
-//! venue where `unsafe` code may exist in this crate.
+//! A backend requires only the CPU features its target enables at compile
+//! time (`rind/build.rs` picks it), so no processor that runs the binary
+//! lacks one; code using any other feature detects it at runtime first.
 //!
 //! The determination of which CPU features are requirements for this
 //! crate is currently done manually, based on `s2n-bignum`'s documentation.

@@ -1,8 +1,0 @@
-name: Fetch test vectors
-description: Check out the Wycheproof, CAVP, and CCTV submodules the tests read, and no other.
-
-runs:
-  using: composite
-  steps:
-    - shell: bash
-      run: git submodule update --init --depth 1 thirdparty/cavp thirdparty/cctv thirdparty/wycheproof

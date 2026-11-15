@@ -12,7 +12,9 @@ use std::fs::File;
 use std::io::BufReader;
 use std::num::NonZeroU32;
 
-use rind_fips::aead::{AES_128_GCM, AES_192_GCM, AES_256_GCM, Key, Nonce, Tag, gcm};
+use rind_fips::aead::{
+    AES_128_GCM, AES_192_GCM, AES_256_GCM, Key, Nonce, Tag, TlsProtocolId, TlsRecordSealingKey, gcm,
+};
 use rind_fips::cipher::{
     AES_128, AES_192, AES_256, AesCbcDecryptingKey, AesCbcEncryptingKey, CbcIv,
 };
@@ -25,7 +27,7 @@ use serde::Deserialize;
 /// The path of the Wycheproof vector file `name`.
 fn vectors(name: &str) -> String {
     let dir = env!("CARGO_MANIFEST_DIR");
-    format!("{dir}/../thirdparty/wycheproof/testvectors_v1/{name}")
+    format!("{dir}/../thirdparty/vectors/wycheproof/testvectors_v1/{name}")
 }
 
 fn read<T: for<'de> Deserialize<'de>>(name: &str) -> T {
@@ -575,7 +577,7 @@ fn aes_gmac() {
 
 /// Opens a file of AES-GCM tests, or of GMAC's if `gmac`, whose message is
 /// the AAD of an empty one, through `gcm::Key`, and those with 96-bit IVs
-/// through `aead::Key` too. The module does not seal.
+/// through `aead::Key` too, and seals the valid ones a TLS record key takes.
 fn aes_gcm_file(file: &'static str, gmac: bool) {
     let mut summary = Summary::new(file);
     for group in read::<TestFile>(file).groups {
@@ -627,6 +629,24 @@ fn aes_gcm_file(file: &'static str, gmac: bool) {
                     (valid, _, result) => {
                         panic!("{file} {}: expected valid {valid}, got {result:?}", test.id)
                     }
+                }
+
+                // A TLS 1.3 key's first record takes any nonce, so it seals
+                // each valid test of TLS's key sizes.
+                if valid && !malformed && test.key.len() != 24 {
+                    let mut key =
+                        TlsRecordSealingKey::new(algorithm, TlsProtocolId::TLS13, &test.key)
+                            .unwrap();
+                    let mut sealed = msg.to_vec();
+                    let tag = key
+                        .seal_in_place_separate_tag(
+                            Nonce::assume_unique_for_key(iv),
+                            aad,
+                            &mut sealed,
+                        )
+                        .unwrap();
+                    assert_eq!(sealed, ct, "{file} {}", test.id);
+                    assert_eq!(tag.as_ref(), &test.tag[..], "{file} {}", test.id);
                 }
             }
 

@@ -235,8 +235,8 @@ macro_rules! vmask {
 
 // Transliterated from s2n-bignum's arm/generic/bignum_copy_row_from_table_32.S.
 /// Given table: uint64_t[height*32], copy table[idx*32...(idx+1)*32-1]
-///
 /// into z[0..row-1].
+///
 /// This function is constant-time with respect to the value of `idx`. This is
 /// achieved by reading the whole table and using the bit-masking to get the
 /// `idx`-th row.

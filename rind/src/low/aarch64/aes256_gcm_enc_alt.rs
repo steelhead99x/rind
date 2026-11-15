@@ -2,8 +2,13 @@
 #![allow(non_upper_case_globals, unused_macros, unused_imports)]
 use crate::low::macros::*;
 
+// Copyright (c) 2020-2022 The OpenSSL Project Authors
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
+// SPDX-License-Identifier: Apache-2.0
+
+// Written by Xiaokang Qian <xiaokang.qian@arm.com> for the OpenSSL project,
+// derived from https://github.com/ARM-software/AArch64cryptolib, original
+// author Samuel Lee <Samuel.Lee@arm.com>.
 
 // ----------------------------------------------------------------------------
 // AES-256-GCM bulk encryption, 8 blocks at a time: counter-mode encryption of
@@ -12,10 +17,10 @@ use crate::low::macros::*;
 // outputs out[len_bits/8], tag[2], ivec[16], returns bytes processed
 //
 //    extern uint64_t aes256_gcm_enc_alt(const uint8_t *in, uint64_t len_bits,
-//                                            uint8_t *out, uint64_t *tag,
-//                                            uint8_t *ivec,
-//                                            const s2n_bignum_AES_KEY *key,
-//                                            const uint64_t *htable);
+//                                       uint8_t *out, uint64_t *tag,
+//                                       uint8_t *ivec,
+//                                       const s2n_bignum_AES_KEY *key,
+//                                       const uint64_t *htable);
 //
 // Processes the input "in" of "len_bits" bits under AES-256 in GCM mode: each
 // 16-byte block is encrypted in counter mode using the counter block "ivec"
@@ -32,13 +37,18 @@ use crate::low::macros::*;
 // the caller's responsibility, as in AWS-LC's GCM layer, whose
 // crypto/fipsmodule/modes/gcm.c passes whole blocks only.
 //
-// The table "htable" is the twelve 16-byte entries (192 bytes) that
-// gcm_init_v8 writes at the start of its Htable, derived from the subkey
-// H = AES_K(0^128). They hold, in order, H, m(H,H^2), H^2, H^3, m(H^3,H^4),
-// H^4, H^5, m(H^5,H^6), H^6, H^7, m(H^7,H^8), H^8, where the powers are in
-// the bit-reflected ("twisted") representation that gcm_init_v8 uses and
-// m(A,B) packs the Karatsuba middle terms A.lo ^ A.hi (low 64 bits) and
-// B.lo ^ B.hi (high 64 bits) of two neighbouring powers into one entry. The
+// The table "htable" is the twelve 16-byte entries (192 bytes) that AWS-LC's
+// gcm_init_v8 (crypto/fipsmodule/modes/asm/ghashv8-armx.pl) writes at the
+// start of its Htable, derived from the subkey H = AES_K(0^128). They hold, in
+// order, H, m(H,H^2), H^2, H^3, m(H^3,H^4), H^4, H^5, m(H^5,H^6), H^6, H^7,
+// m(H^7,H^8), H^8, where the powers are in the bit-reflected ("twisted")
+// representation that gcm_init_v8 uses and m(A,B) packs the Karatsuba middle
+// terms A.lo ^ A.hi (low 64 bits) and B.lo ^ B.hi (high 64 bits) of two
+// neighbouring powers into one entry. Since AWS-LC commit 90315e2a ("AES-GCM
+// AArch64: Store swapped Htable values") gcm_init_v8 stores each power with
+// its two 64-bit halves swapped, so tables built by OpenSSL's or BoringSSL's
+// gcm_init_v8, or by earlier versions of AWS-LC, give wrong tags. The exact
+// contents required are htable_mem_8 in arm/proofs/utils/aes_gcm_spec.ml. The
 // reference implementation in tests/ref_aes_gcm.c (ref_gcm_init_htable)
 // constructs the same table independently.
 // Of "key" only the 15 round keys (240 bytes) are read, not key->rounds, and
@@ -47,11 +57,20 @@ use crate::low::macros::*;
 // The input must satisfy in + len_bits/8 < 2^63, because the loop control
 // compares the input pointer with the main-loop end pointer as signed
 // integers (cmp x0, x5 followed by b.ge or b.lt). The buffers written ("out",
-// "tag" and "ivec") must not overlap each other, "in", "key" or "htable"; in
-// particular, in-place operation (out == in) is not covered by the proof.
+// "tag" and "ivec") must not overlap each other, "key" or "htable", and "tag"
+// and "ivec" must not overlap "in". The output may be the input itself
+// (in-place operation, out == in); otherwise "out" must not overlap "in".
 //
-// This routine does not enforce the NIST GCM message limit.
-// Callers must ensure the cumulative message length does not exceed 2^36 - 32 bytes (2^39 - 256 bits).
+// This is an alternative to aes256_gcm_enc with the same arguments, for
+// processors with FEAT_SHA3, whose eor3 it uses. Unlike aes256_gcm_enc it
+// reads the whole 192-byte table, not just its first 96 bytes, it requires
+// in + len_bits/8 < 2^63, and when len_bits is not a multiple of 128 it
+// returns 0 without touching memory, where aes256_gcm_enc processes the
+// whole blocks.
+//
+// This routine does not enforce the NIST GCM message limit. Callers must
+// ensure the cumulative message length does not exceed 2^36 - 32 bytes
+// (2^39 - 256 bits).
 //
 // Standard ARM ABI: X0 = in, X1 = len_bits, X2 = out, X3 = tag, X4 = ivec,
 //                   X5 = key, X6 = htable, returns X0
@@ -62,8 +81,8 @@ use crate::low::macros::*;
 // with these changes:
 //  - Entry: a whole-blocks guard (tst x1, #127; b.ne L256_enc_ret) follows
 //    the zero-length check (cbz x1, L256_enc_ret) and precedes the d8-d15
-//    saves, so the reject path returns 0 having touched no memory unless
-//    len_bits is a nonzero multiple of 128.
+//    saves, so unless len_bits is a nonzero multiple of 128 the function
+//    returns 0 having touched no memory.
 //  - Final block: the partial-block masking machinery at
 //    L256_enc_blocks_less_than_1 is removed as dead under the whole-blocks
 //    contract, including the ld1 that reads existing output bytes (a 16-byte
@@ -71,13 +90,18 @@ use crate::low::macros::*;
 //    final block is a plain full block, and the output buffer is never read.
 //    The AWS-LC caller already satisfies the contract: its
 //    crypto/fipsmodule/modes/gcm.c masks the length to whole blocks.
+//  - Inputs of 1 to 4 blocks take a separate path (L256_enc_small), and the
+//    tail has dedicated GHASH drains for exactly 8 and exactly 2 remaining
+//    blocks (L256_enc_exact8_drain, L256_enc_rem2_drain) and for the last
+//    four of 4 to 7 remaining blocks (L256_enc_rem4_drain).
 //  - The body has since been rescheduled for speed, so it is not a verbatim
 //    copy of the generator's output.
+// Proofs: arm/proofs/aes256_gcm_enc_alt.ml.
 
 // Transliterated from s2n-bignum's arm/aes_gcm/aes256_gcm_enc_alt.S.
 /// AES-256-GCM bulk encryption, 8 blocks at a time: counter-mode encryption of
-///
 /// whole blocks with the GHASH tag update
+///
 /// Inputs in[len_bits/8], len_bits, tag[2], ivec[16], key[240], htable[24];
 /// outputs out[len_bits/8], tag[2], ivec[16], returns bytes processed
 ///
@@ -96,13 +120,18 @@ use crate::low::macros::*;
 /// the caller's responsibility, as in AWS-LC's GCM layer, whose
 /// crypto/fipsmodule/modes/gcm.c passes whole blocks only.
 ///
-/// The table "htable" is the twelve 16-byte entries (192 bytes) that
-/// gcm_init_v8 writes at the start of its Htable, derived from the subkey
-/// H = AES_K(0^128). They hold, in order, H, m(H,H^2), H^2, H^3, m(H^3,H^4),
-/// H^4, H^5, m(H^5,H^6), H^6, H^7, m(H^7,H^8), H^8, where the powers are in
-/// the bit-reflected ("twisted") representation that gcm_init_v8 uses and
-/// m(A,B) packs the Karatsuba middle terms A.lo ^ A.hi (low 64 bits) and
-/// B.lo ^ B.hi (high 64 bits) of two neighbouring powers into one entry. The
+/// The table "htable" is the twelve 16-byte entries (192 bytes) that AWS-LC's
+/// gcm_init_v8 (crypto/fipsmodule/modes/asm/ghashv8-armx.pl) writes at the
+/// start of its Htable, derived from the subkey H = AES_K(0^128). They hold, in
+/// order, H, m(H,H^2), H^2, H^3, m(H^3,H^4), H^4, H^5, m(H^5,H^6), H^6, H^7,
+/// m(H^7,H^8), H^8, where the powers are in the bit-reflected ("twisted")
+/// representation that gcm_init_v8 uses and m(A,B) packs the Karatsuba middle
+/// terms A.lo ^ A.hi (low 64 bits) and B.lo ^ B.hi (high 64 bits) of two
+/// neighbouring powers into one entry. Since AWS-LC commit 90315e2a ("AES-GCM
+/// AArch64: Store swapped Htable values") gcm_init_v8 stores each power with
+/// its two 64-bit halves swapped, so tables built by OpenSSL's or BoringSSL's
+/// gcm_init_v8, or by earlier versions of AWS-LC, give wrong tags. The exact
+/// contents required are htable_mem_8 in arm/proofs/utils/aes_gcm_spec.ml. The
 /// reference implementation in tests/ref_aes_gcm.c (ref_gcm_init_htable)
 /// constructs the same table independently.
 /// Of "key" only the 15 round keys (240 bytes) are read, not key->rounds, and
@@ -111,11 +140,20 @@ use crate::low::macros::*;
 /// The input must satisfy in + len_bits/8 < 2^63, because the loop control
 /// compares the input pointer with the main-loop end pointer as signed
 /// integers (cmp x0, x5 followed by b.ge or b.lt). The buffers written ("out",
-/// "tag" and "ivec") must not overlap each other, "in", "key" or "htable"; in
-/// particular, in-place operation (out == in) is not covered by the proof.
+/// "tag" and "ivec") must not overlap each other, "key" or "htable", and "tag"
+/// and "ivec" must not overlap "in". The output may be the input itself
+/// (in-place operation, out == in); otherwise "out" must not overlap "in".
 ///
-/// This routine does not enforce the NIST GCM message limit.
-/// Callers must ensure the cumulative message length does not exceed 2^36 - 32 bytes (2^39 - 256 bits).
+/// This is an alternative to aes256_gcm_enc with the same arguments, for
+/// processors with FEAT_SHA3, whose eor3 it uses. Unlike aes256_gcm_enc it
+/// reads the whole 192-byte table, not just its first 96 bytes, it requires
+/// in + len_bits/8 < 2^63, and when len_bits is not a multiple of 128 it
+/// returns 0 without touching memory, where aes256_gcm_enc processes the
+/// whole blocks.
+///
+/// This routine does not enforce the NIST GCM message limit. Callers must
+/// ensure the cumulative message length does not exceed 2^36 - 32 bytes
+/// (2^39 - 256 bits).
 #[inline(never)]
 #[target_feature(enable = "aes,sha3")]
 pub(crate) unsafe fn aes256_gcm_enc_alt(

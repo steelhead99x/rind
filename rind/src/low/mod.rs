@@ -46,6 +46,7 @@ mod vartime_planted;
 pub mod inline_assembly_safety;
 
 mod generic {
+    pub(crate) mod argon2;
     // The portable backend's RSA arithmetic, which armv7 shares, also built
     // in tests elsewhere to check it against s2n-bignum.
     #[cfg(any(rind_backend = "arm", rind_backend = "portable", test))]
@@ -136,6 +137,9 @@ mod generic {
         )
     ))]
     pub(super) mod sha256_k;
+    // SLH-DSA's SHA-256 lanes one at a time, which x86_64 runs with the SHA
+    // extensions or without AVX2.
+    pub(super) mod sha256x8;
     // Rolled SHA-512 wherever the pointer is not 64 bits. HACL*'s unrolled
     // form is about 47 KiB in that codegen and misses a small instruction
     // cache. 64-bit tests still compile it and check it against FIPS 180-4.
@@ -148,9 +152,25 @@ mod generic {
 
 pub(crate) mod cpu;
 mod entry;
+// Intel's MXCSR mitigation, where the instructions it covers exist: on x86
+// with SSE2, outside Miri, which runs no assembly.
+#[cfg_attr(
+    not(all(
+        any(
+            target_arch = "x86_64",
+            all(target_arch = "x86", target_feature = "sse2")
+        ),
+        not(miri)
+    )),
+    path = "mcdt_none.rs"
+)]
+mod mcdt;
 mod posint;
 
 pub(crate) use entry::Entry;
+pub(crate) use generic::argon2::Argon2Block;
+#[cfg(not(rind_backend = "x86_64"))]
+pub(crate) use generic::argon2::argon2_compress;
 pub(crate) use generic::blockwise::{Blockwise, UpdateBlocks, pad, sha256_digest, split_tail};
 pub(crate) use generic::chacha20::{chacha20_block, hchacha20};
 pub(crate) use generic::ct_copy::{ct_copy, ct_select_i16};
@@ -162,6 +182,7 @@ pub(crate) use generic::md5::md5_compress_blocks;
 pub(crate) use generic::poly1305;
 pub(crate) use generic::reuse_cache::ReuseCache;
 pub(crate) use generic::zeroise::{Zeroable, ZeroableRef, zeroise, zeroise_value};
+pub(crate) use mcdt::Mcdt;
 #[cfg(rind_backend = "portable")]
 pub(crate) use portable::poly1305;
 pub(crate) use posint::{ModExp, PosInt, SecretPosInt};
@@ -252,7 +273,10 @@ mod x86_64;
 
 cfg_if::cfg_if! {
     if #[cfg(rind_backend = "x86_64")] {
-        pub(in crate::low) use x86_64::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state, missing_cpu_feature};
+        pub(in crate::low) use x86_64::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
+        pub(crate) use x86_64::argon2::argon2_compress;
+        #[cfg(rind_fips)]
+        pub(crate) use x86_64::cpu::missing_cpu_feature;
         pub(crate) use x86_64::chacha20;
         pub(crate) use x86_64::chacha20poly1305;
         pub(crate) use x86_64::aes::{AesDecKey, AesKey};
@@ -365,13 +389,16 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::adx_mux::p521_jscalarmul;
         pub(crate) use x86_64::sha1_mux::{sha1_compress_blocks, sha1_compress_padded};
         pub(crate) use x86_64::sha256_mux::{sha256_compress_blocks, sha256_finish};
+        pub(crate) use x86_64::sha256x8::sha256_finish_x8;
         pub(crate) use x86_64::sha512::sha512_compress_blocks;
         pub(crate) use x86_64::sha3_keccak_f1600::sha3_keccak_f1600;
         pub(crate) use x86_64::sha3_keccak4_f1600_shim::sha3_keccak4_f1600;
         pub(crate) use x86_64::sha3_keccak_nof4_f1600::sha3_keccak_nof4_f1600;
 
     } else if #[cfg(rind_backend = "aarch64")] {
-        pub(in crate::low) use aarch64::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state, missing_cpu_feature};
+        pub(in crate::low) use aarch64::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
+        #[cfg(rind_fips)]
+        pub(crate) use aarch64::cpu::missing_cpu_feature;
         pub(crate) use aarch64::aes::{AesDecKey, AesKey};
         pub(crate) use aarch64::aes_cbc;
         pub(crate) use aarch64::aes_ctr;
@@ -471,6 +498,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::p521_jscalarmul::p521_jscalarmul;
         pub(crate) use aarch64::sha1::{sha1_compress_blocks, sha1_compress_padded};
         pub(crate) use aarch64::sha256::{sha256_compress_blocks, sha256_finish};
+        pub(crate) use generic::sha256x8::sha256_finish_x8;
         pub(crate) use aarch64::sha3_keccak_f1600_mux::sha3_keccak_f1600;
         pub(crate) use aarch64::sha3_keccak4_f1600_mux::sha3_keccak4_f1600;
         pub(crate) use aarch64::sha3_keccak_nof4_f1600::sha3_keccak_nof4_f1600;
@@ -481,7 +509,7 @@ cfg_if::cfg_if! {
         pub(crate) use generic::mlkem::{mlkem_compress_d4, mlkem_compress_d10, mlkem_frombytes, mlkem_unpack};
         pub(crate) use generic::mlkem768::mlkem768_sample_poly_ntt_8x;
     } else if #[cfg(rind_backend = "arm")] {
-        pub(in crate::low) use arm::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state, missing_cpu_feature};
+        pub(in crate::low) use arm::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
         pub(crate) use arm::aes::{AesDecKey, AesKey};
         pub(crate) use arm::aes_cbc;
         pub(crate) use arm::aes_ctr;
@@ -504,8 +532,9 @@ cfg_if::cfg_if! {
             sha1_compress_blocks, sha1_compress_padded, sha256_compress_blocks, sha256_finish,
             sha512_compress_blocks,
         };
+        pub(crate) use generic::sha256x8::sha256_finish_x8;
     } else if #[cfg(rind_backend = "portable")] {
-        pub(in crate::low) use portable::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state, missing_cpu_feature};
+        pub(in crate::low) use portable::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
         pub(crate) use portable::aes::{AesDecKey, AesKey};
         pub(crate) use portable::aes_cbc;
         pub(crate) use portable::aes_ctr;
@@ -519,6 +548,7 @@ cfg_if::cfg_if! {
             sha1_compress_blocks, sha1_compress_padded, sha256_compress_blocks, sha256_finish,
             sha512_compress_blocks,
         };
+        pub(crate) use generic::sha256x8::sha256_finish_x8;
     } else {
         compile_error!("build.rs sets rind_backend");
     }

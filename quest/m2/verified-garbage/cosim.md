@@ -10,8 +10,4 @@ Every instruction in the VG routines rind switches to is checked against the CPU
 - Run each instruction on random inputs on the CPU and in the model, as `admin/prove cosim` runs the s2n-bignum fork's `x86/proofs/rind_cosim.ml` for rind's additions. x86_64 runs in CI; aarch64 needs an aarch64 runner.
 - VG emits straight-line code as base64 machine code and the rest as assembly text. Decode the vendored blobs and check them against VG's `assembly/*.s` for the pinned commit, since VG's CI only checks its encoder against golden tests.
 - A model fault the cosimulation finds is reported to VG with a reproducer once the maintainer approves posting there, and blocks the ✓ for every routine that uses the instruction.
-- Scope: the instructions [the measurement](/quest/m2/verified-garbage/bench.md)'s switch quests use. A switch landed later extends the cosimulation in its own ✓ quest.
-
-## Required
-
-- [VG measured](/quest/m2/verified-garbage/bench.md) - which routines rind switches to, and so which instructions to cosimulate
+- Scope: the x86_64 and aarch64 instructions of the VG routines the epic's switch quests name (P-256, P-384, X25519 and Ed25519 on AVX-512, ML-KEM-768, SHA-3, aarch64 ChaCha20-Poly1305, RSA on AVX-512, aarch64 PBKDF2, ML-DSA signing without AVX2, and AES-128 header protection), at the pinned VG commit; `cipher::ChaCha20`'s switch, measured later, extends it in its own ✓ quest. A switch that adds routines later extends the cosimulation in its own ✓ quest.
