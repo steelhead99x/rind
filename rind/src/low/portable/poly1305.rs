@@ -69,12 +69,13 @@ mod tests {
     use super::*;
     use crate::low::ct;
 
-    // 32-bit targets run HACL*'s Poly1305 and 64-bit ones rind's, so each is
-    // checked against the other here: every length up to 200 bytes, plus
-    // some longer, each fed whole and in ragged pieces, and all-ones blocks
-    // and key, which push the accumulator to its largest values before the
-    // final reduction. The key and message are secret, so under
-    // `admin/ctgrind` this also checks both are constant time in them.
+    // On a 64-bit host, compare HACL* with the Poly1305 this module
+    // selected: 64-bit limbs, or the 26-bit limbs when `rind_limb = "32"`.
+    // Every length up to 200 bytes, plus some longer, each fed whole and in
+    // ragged pieces, and all-ones blocks and key, which push the accumulator
+    // to its largest values before the final reduction. The key and message
+    // are secret, so under `admin/ctgrind` this also checks both are
+    // constant time in them.
     #[test]
     fn hacl_matches_generic() {
         let key: [u8; 32] = core::array::from_fn(|i| 0xa5 ^ (i as u8).wrapping_mul(29));
