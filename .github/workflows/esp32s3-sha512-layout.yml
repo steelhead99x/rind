@@ -71,5 +71,21 @@ jobs:
           "$root/rust-nightly-x86_64-unknown-linux-gnu/rustc/bin/rustc" --version
           "$root/xtensa-esp-elf/bin/xtensa-esp32s3-elf-gcc" --version
 
+      - name: Install QEMU for the message load
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install --yes libslirp0
+          root="$HOME/.espressif"
+          mkdir -p "$root"
+          curl -fsSL -o /tmp/qemu-xtensa.tar.xz \
+            https://github.com/espressif/qemu/releases/download/esp-develop-9.2.2-20261109/qemu-xtensa-softmmu-esp_develop_9.2.2_20261109-x86_64-linux-gnu.tar.xz
+          # SHA-256 of that release asset, from its published checksum file.
+          sha256sum -c << 'EOF'
+          fbc3bffa9fa71192847969a627a584aabe2e86d85bed4902a096ff06c2b8a815  /tmp/qemu-xtensa.tar.xz
+          EOF
+          tar -xJf /tmp/qemu-xtensa.tar.xz -C "$root"
+          test -x "$root/qemu/bin/qemu-system-xtensa"
+
       - name: Check placement
         run: admin/esp32s3-sha512-layout

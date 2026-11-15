@@ -30,6 +30,8 @@ fn main() {
 
     println!(r#"cargo::rustc-check-cfg=cfg(rind_limb, values("32", "64"))"#);
     println!("cargo::rustc-check-cfg=cfg(rind_esp32s3)");
+    // The SHA-512 layout probe sets this so it can link `sha512_load_probe`.
+    println!("cargo::rustc-check-cfg=cfg(rind_sha512_load_probe)");
 
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");

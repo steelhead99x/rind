@@ -14,7 +14,11 @@
 # body is written to avoid. opt-level 0 is not a cache-off promise.
 # Every Xtensa object is also checked for the message byte swap: `l32i`
 # into `a14`, `ssai 8`, a 16-bit shift, then `src R, R, a14`; `src R, R, R`;
-# `src R, a14, R`. That is the sequence in `be_u32`. It does not execute it.
+# `src R, a14, R`. That is the sequence in `be_u32`. The none-elf object is
+# then linked call0 and run under QEMU's esp32 and esp32s3 CPUs, including
+# blocks that are not word-aligned. That is the emulator's model of those
+# cores, not a cycle count. This QEMU build has no ESP32-S2 CPU. Board
+# timing is unmeasured.
 #
 # ESP-IDF Xtensa SHA-256 is rind's IRAM body, checked by
 # admin/esp32s3-sha256-layout. This script does not link a stand-in for
@@ -146,7 +150,25 @@ build s xtensa-esp32s3-espidf '"s"' ''
 build z xtensa-esp32s3-espidf '"z"' ''
 build flash xtensa-esp32s3-espidf 3 '--features esp32s3-sha512-flash'
 build esp32 xtensa-esp32-espidf 3 ''
-build none xtensa-esp32s3-none-elf 3 ''
+# call0, so the QEMU stub can enter the probe without a window exception.
+# Flags after `--` apply to this crate only. `-windowed` on core does not
+# compile. The firmware objects above keep the target's default ABI. The
+# inline asm sequence does not change with the ABI.
+CARGO_TARGET_DIR="$work/target-none" \
+  "$cargo" rustc --manifest-path "$work/probe/Cargo.toml" \
+    --release --target xtensa-esp32s3-none-elf -Z build-std=core --offline \
+    --config 'profile.release.opt-level=3' \
+    -- --cfg rind_sha512_load_probe -C target-feature=-windowed \
+    >"$work/none.log" 2>&1 \
+  || {
+    printf 'build none failed\n' >&2
+    cat "$work/none.log" >&2
+    exit 1
+  }
+rlib=$(find "$work/target-none/xtensa-esp32s3-none-elf/release/deps" -name 'libsha512_layout-*.rlib' | head -1)
+mkdir -p "$work/obj/none"
+(cd "$work/obj/none" && "$ar" x "$rlib")
+find "$work/obj/none" -name 'sha512_layout-*.o' -exec mv {} "$work/obj/none.o" \;
 
 sections() {
   "$objdump" -h "$1" | awk 'NR > 3 && $2 ~ /^\./ { print $2, $3 }'
@@ -380,6 +402,123 @@ for elf in "$work/s3.elf" "$work/flash.elf"; do
     fail "sha512_entry in $elf relaxed to call8"
   fi
 done
+
+# Execute the message load. The firmware link above is not runnable: its
+# text sits in the flash window, which this sim machine does not map.
+# Code, constants, and the stack stay in the instruction RAM both the
+# esp32 and esp32s3 CPU models map at 0x40000000. The stub is call0.
+qemu=${RIND_QEMU:-"$esp/qemu/bin/qemu-system-xtensa"}
+if [ ! -x "$qemu" ]; then
+  printf 'missing %s\ninstall it as .github/workflows/esp32s3-sha512-layout.yml does\n' "$qemu" >&2
+  exit 1
+fi
+if ! "$nm" "$work/obj/none.o" | awk '$3 == "sha512_load_probe" { found = 1 } END { exit !found }'; then
+  fail 'none object has no sha512_load_probe'
+fi
+if "$objdump" -d "$work/obj/none.o" | awk '/<sha512_load_probe>:/{f=1} f && /^$/{exit} f' | grep -q 'entry'; then
+  fail 'sha512_load_probe is windowed; the QEMU stub is call0'
+fi
+
+{
+  printf '%s\n' 'void *memset(void *s, int c, unsigned long n) {'
+  printf '%s\n' '    unsigned char *p = s;'
+  printf '%s\n' '    for (unsigned long i = 0; i < n; i++) p[i] = (unsigned char)c;'
+  printf '%s\n' '    return s;'
+  printf '%s\n' '}'
+  printf '%s\n' 'void *memcpy(void *d, const void *s, unsigned long n) {'
+  printf '%s\n' '    unsigned char *out = d;'
+  printf '%s\n' '    const unsigned char *in = s;'
+  printf '%s\n' '    for (unsigned long i = 0; i < n; i++) out[i] = in[i];'
+  printf '%s\n' '    return d;'
+  printf '%s\n' '}'
+  "$nm" -u "$work/obj/none.o" | awk '$1 == "U" && $2 != "memset" && $2 != "memcpy" { print $2 }' | sort -u |
+    while read -r sym; do
+      # A panic must not return into the probe.
+      printf 'void %s(void) { for (;;) {} }\n' "$sym"
+    done
+} > "$work/load-stubs.c"
+"$gcc" -c -mabi=call0 -O2 -o "$work/load-stubs.o" "$work/load-stubs.c"
+
+cat > "$work/load.ld" << 'EOF'
+MEMORY {
+  iram (rwx) : ORIGIN = 0x40000000, LENGTH = 128K
+}
+ENTRY(_start)
+SECTIONS {
+  .literal : { *(.literal .literal.* .xt.lit) } > iram
+  .text : { *(.text .text.*) } > iram
+  .rodata : { *(.rodata .rodata.*) } > iram
+  .data : { *(.data .data.*) } > iram
+  .bss : { *(.bss .bss.*) } > iram
+}
+EOF
+
+cat > "$work/start.S" << 'EOF'
+.section .text
+.global _start
+_start:
+    movi a1, 0x4001F000
+    call0 sha512_load_probe
+    mov a6, a2
+    movi a2, 4
+    movi a3, 1
+    movi a4, ok_msg
+    movi a5, 3
+    beqz a6, 1f
+    movi a4, fail_msg
+    movi a5, 5
+1:
+    simcall
+    movi a2, 1
+    mov a3, a6
+    simcall
+2:
+    j 2b
+.section .rodata
+ok_msg:
+    .ascii "OK\n"
+fail_msg:
+    .ascii "FAIL\n"
+EOF
+"$gcc" -c -mabi=call0 -o "$work/start.o" "$work/start.S"
+"$ld" --relax -e _start -T "$work/load.ld" -o "$work/load.elf" \
+  "$work/start.o" "$work/obj/none.o" "$work/load-stubs.o"
+
+# The stack is at 0x4001F000 and grows down. The image has to end before it.
+"$readelf" -lW "$work/load.elf" | python3 -c '
+import sys
+max_end = 0
+for line in sys.stdin:
+    parts = line.split()
+    if not parts or parts[0] != "LOAD" or len(parts) < 6:
+        continue
+    max_end = max(max_end, int(parts[2], 16) + int(parts[5], 16))
+limit = 0x4001F000
+if max_end == 0 or max_end >= limit:
+    raise SystemExit(f"load image ends at {max_end:#x}, stack is {limit:#x}")
+print(f"load image ends at {max_end:#x}")
+'
+
+run_load() {
+  cpu=$1
+  out=$work/load-$cpu.out
+  err=$work/load-$cpu.err
+  if ! timeout 20 "$qemu" -M sim -cpu "$cpu" -nographic -monitor none -semihosting \
+      -device "loader,file=$work/load.elf,cpu-num=0" >"$out" 2>"$err"; then
+    printf 'qemu %s failed\n' "$cpu" >&2
+    cat "$out" "$err" >&2
+    exit 1
+  fi
+  if grep -q 'FAIL' "$out" || ! grep -qx 'OK' "$out"; then
+    printf 'qemu %s did not report OK\n' "$cpu" >&2
+    cat "$out" "$err" >&2
+    exit 1
+  fi
+  printf 'qemu %s: message load OK\n' "$cpu"
+}
+
+run_load esp32
+run_load esp32s3
 
 printf 'board_timing: unmeasured\n'
 printf 'esp32s3-sha512-layout: ok\n'

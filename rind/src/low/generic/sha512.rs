@@ -110,8 +110,12 @@ fn be_u32<const BYTE: usize, const OFF: usize>(block: &[u8; 128]) -> u32 {
     // load. `BYTE + OFF` is a multiple of 4 in `0..128`. ESP-IDF v5.5.1 sets
     // `XCHAL_UNALIGNED_LOAD_HW` to 1 and `XCHAL_UNALIGNED_LOAD_EXCEPTION`
     // to 0 on ESP32, ESP32-S2, and ESP32-S3, so `l32i` does not trap and
-    // does not call a helper when `block` is not word-aligned. The sequence
-    // writes SAR, `a14`, and `y`, and does not use the stack. esp rustc
+    // does not call a helper when `block` is not word-aligned.
+    // `admin/esp32s3-sha512-layout` runs this sequence, including a block
+    // whose address is not a multiple of 4, on QEMU's `esp32` and `esp32s3`
+    // CPUs. That is the emulator's model of those cores, not a board
+    // measurement. This QEMU build has no ESP32-S2 CPU. The
+    // sequence writes SAR, `a14`, and `y`, and does not use the stack. esp rustc
     // 1.97 lists `sar` as a clobber-only register, the same class
     // `sha256_iram` names with `out("sar") _`. The `ssai 8` is consumed by
     // the three `src` before the block ends. The address is the public
@@ -396,6 +400,104 @@ static K: [u64; 80] = [
     0x6c44198c4a475817,
 ];
 
+/// Compares every message word with `from_be_bytes`.
+///
+/// Returns 0 when every word matches, including blocks at byte offsets 1
+/// and 3. Any other value is `0x0100_0000 | (start << 8) | byte` for the
+/// first mismatch. On Xtensa `message_word` is the `l32i` / `ssai` / `src`
+/// load, so `admin/esp32s3-sha512-layout` runs this under QEMU. Host tests
+/// take `from_be_bytes`.
+#[cfg(any(test, rind_sha512_load_probe))]
+fn message_load_failures() -> u32 {
+    // Uninitialized so the probe does not call `memset`. Every byte is
+    // written before it is read.
+    let mut raw = [const { core::mem::MaybeUninit::<u8>::uninit() }; 160];
+    // SAFETY: `MaybeUninit<u8>` has the same layout as `u8`, and `raw`
+    // has 160 elements. The loop writes each one.
+    let base = raw.as_mut_ptr().cast::<u8>();
+    let mut i = 0usize;
+    while i < 160 {
+        // SAFETY: `i` stays below 160.
+        unsafe {
+            *base.add(i) = i.wrapping_mul(17).wrapping_add(3) as u8;
+        }
+        i += 1;
+    }
+    // SAFETY: the first eight bytes were written by the loop above.
+    unsafe {
+        *base = 0x00;
+        *base.add(1) = 0x01;
+        *base.add(2) = 0x02;
+        *base.add(3) = 0x03;
+        *base.add(4) = 0x04;
+        *base.add(5) = 0x05;
+        *base.add(6) = 0x06;
+        *base.add(7) = 0x07;
+    }
+
+    fn check_at(base: *const u8, start: usize) -> u32 {
+        // SAFETY: `start` is 0, 1, or 3, and `base` points at 160 written
+        // bytes, so the 128 bytes at `start` are in range.
+        let block = unsafe { &*base.add(start).cast::<[u8; 128]>() };
+        macro_rules! word {
+            ($byte:literal) => {{
+                let p = block.as_ptr();
+                // SAFETY: `$byte` is 0, 8, ..., 120, so these eight bytes lie in `block`.
+                let expect = u64::from_be_bytes(unsafe {
+                    [
+                        *p.add($byte),
+                        *p.add($byte + 1),
+                        *p.add($byte + 2),
+                        *p.add($byte + 3),
+                        *p.add($byte + 4),
+                        *p.add($byte + 5),
+                        *p.add($byte + 6),
+                        *p.add($byte + 7),
+                    ]
+                });
+                if message_word::<$byte>(block) != expect {
+                    return 0x0100_0000 | ((start as u32) << 8) | $byte;
+                }
+            }};
+        }
+        word!(0);
+        word!(8);
+        word!(16);
+        word!(24);
+        word!(32);
+        word!(40);
+        word!(48);
+        word!(56);
+        word!(64);
+        word!(72);
+        word!(80);
+        word!(88);
+        word!(96);
+        word!(104);
+        word!(112);
+        word!(120);
+        0
+    }
+
+    let fail = check_at(base, 0);
+    if fail != 0 {
+        return fail;
+    }
+    let fail = check_at(base, 1);
+    if fail != 0 {
+        return fail;
+    }
+    check_at(base, 3)
+}
+
+/// Entry the layout probe links and runs. Not a rind API.
+#[cfg(rind_sha512_load_probe)]
+#[unsafe(no_mangle)]
+#[inline(never)]
+pub extern "C" fn sha512_load_probe() -> u32 {
+    message_load_failures()
+}
+
 #[cfg(test)]
 mod tests {
     use super::sha512_compress_blocks;
@@ -479,55 +581,13 @@ mod tests {
     }
 
     /// Each message word matches `from_be_bytes`, including a block that is
-    /// not word-aligned. On Xtensa `message_word` is the `l32i` plus
-    /// `ssai`/`src` assembly, so this is the run that executes it. Other
-    /// targets take `from_be_bytes` and still instantiate every offset.
+    /// not word-aligned. On Xtensa that comparison is the `l32i` load;
+    /// `admin/esp32s3-sha512-layout` is what runs it. This host build takes
+    /// `from_be_bytes`.
     #[test]
     fn message_word_matches_from_be_bytes() {
-        let mut storage = [0u8; 160];
-        for (i, byte) in storage.iter_mut().enumerate() {
-            *byte = i.wrapping_mul(17).wrapping_add(3) as u8;
-        }
-        storage[..8].copy_from_slice(&[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]);
-
-        fn check(block: &[u8; 128]) {
-            macro_rules! word {
-                ($byte:literal) => {{
-                    let expect = u64::from_be_bytes(block[$byte..$byte + 8].try_into().unwrap());
-                    assert_eq!(
-                        super::message_word::<$byte>(block),
-                        expect,
-                        "byte {}",
-                        $byte
-                    );
-                }};
-            }
-            word!(0);
-            word!(8);
-            word!(16);
-            word!(24);
-            word!(32);
-            word!(40);
-            word!(48);
-            word!(56);
-            word!(64);
-            word!(72);
-            word!(80);
-            word!(88);
-            word!(96);
-            word!(104);
-            word!(112);
-            word!(120);
-        }
-
-        let aligned: &[u8; 128] = storage[..128].try_into().unwrap();
-        assert_eq!(super::message_word::<0>(aligned), 0x0001_0203_0405_0607);
-        check(aligned);
-        // `[u8; 128]` has alignment 1, so these references are not word-aligned.
-        for start in [1usize, 3] {
-            let block: &[u8; 128] = storage[start..start + 128].try_into().unwrap();
-            check(block);
-        }
+        let fail = super::message_load_failures();
+        assert_eq!(fail, 0, "message load mismatch {fail:#x}");
     }
 
     #[test]

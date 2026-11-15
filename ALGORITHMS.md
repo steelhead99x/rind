@@ -161,7 +161,10 @@ with portable Rust in place of the assembly armv7 runs regardless.
   ordinary flash sections, as do the ESP32, the ESP32-S2, and `*-none-elf`.
   `admin/esp32s3-sha512-layout` checks those sections, the relocation
   allowlist, and that the block has no call, at opt-level 3, s, and z.
-  Board time
+  It also runs the Xtensa message load (`l32i`, `ssai`, `src`), including
+  blocks at byte offsets 1 and 3, on QEMU's ESP32 and ESP32-S3 CPUs. That
+  run is the emulator's model of those cores, not a cycle count. This QEMU
+  build has no ESP32-S2 CPU. Board time
   is unmeasured. SHA-256 on this target is the IRAM body above, and this
   placement leaves libcrux-sha2's object sections unchanged.
 - portable: ChaCha20-Poly1305's Poly1305 is Graviola's on 64-bit targets
