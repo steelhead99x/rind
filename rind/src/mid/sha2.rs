@@ -12,7 +12,9 @@ use crate::low::{Blockwise, Entry, UpdateBlocks, pad, split_tail};
 ///
 /// Finishing needs no buffer, so a one-shot hash, or HMAC from its keyed
 /// states, works on this alone.
+// `h` first: see `Sha256Context`.
 #[derive(Clone)]
+#[repr(C)]
 pub(crate) struct Sha256State {
     h: [u32; 8],
     // u64 so 32-bit targets can hash past 4 GiB.
@@ -41,6 +43,15 @@ impl Sha256State {
         let length = self.length(message.len());
         Entry::assert_held();
         crate::low::sha256_finish(&self.h, message, length)
+    }
+
+    /// The hashes of the input so far followed by each of `messages`, one to
+    /// eight of equal length, as [`Self::finish_with`] gives them; those past
+    /// `messages` are unspecified. AVX2 runs eight at once.
+    pub(crate) fn finish_x8(&self, messages: &[&[u8]]) -> [[u8; Sha256Context::OUTPUT_SZ]; 8] {
+        let length = self.length(messages[0].len());
+        Entry::assert_held();
+        crate::low::sha256_finish_x8(&self.h, messages, length)
     }
 
     /// The padding's length field for the input so far followed by `more` bytes.
@@ -72,7 +83,13 @@ impl UpdateBlocks for Sha256State {
 }
 
 /// A context for incremental computation of SHA256.
+// In this order, `h`, the counters, then the buffer: placed on a 16-byte
+// boundary, as `digest::Context` places it on 64-bit targets, the context
+// holds `h` and the buffer on 16-byte boundaries too, so no 16-byte load or
+// store of them crosses a cache line, which on Zen 5 stops later loads
+// taking their bytes from the stores still in flight.
 #[derive(Clone)]
+#[repr(C)]
 pub(crate) struct Sha256Context {
     state: Sha256State,
     blockwise: Blockwise<{ Self::BLOCK_SZ }>,
@@ -207,7 +224,9 @@ impl Sha512_256Context {
 /// SHA512's chaining value after a whole number of blocks, as [`Sha256State`].
 ///
 /// SHA384 and SHA512/256 share it, from their own initial values.
+// `h` first: see `Sha512Context`.
 #[derive(Clone)]
+#[repr(C)]
 pub(crate) struct Sha512State {
     h: [u64; 8],
     // u64 so 32-bit targets can hash past 4 GiB.
@@ -281,7 +300,9 @@ impl UpdateBlocks for Sha512State {
 }
 
 /// A context for incremental computation of SHA512.
+// In this order for the reason `Sha256Context` is.
 #[derive(Clone)]
+#[repr(C)]
 pub(crate) struct Sha512Context {
     state: Sha512State,
     blockwise: Blockwise<{ Self::BLOCK_SZ }>,
@@ -322,6 +343,22 @@ impl Sha512Context {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    // From where each context starts, `h` and the buffer lie on 16-byte
+    // boundaries on 64-bit targets: `digest::Context` relies on it.
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn layout() {
+        fn offset<T>(base: &T, field: *const u8) -> usize {
+            field as usize - core::ptr::from_ref(base) as usize
+        }
+        let c = Sha256Context::new();
+        assert_eq!(offset(&c, c.state.h.as_ptr().cast()) % 16, 0);
+        assert_eq!(offset(&c, c.blockwise.buffered().as_ptr()) % 16, 0);
+        let c = Sha512Context::new();
+        assert_eq!(offset(&c, c.state.h.as_ptr().cast()) % 16, 0);
+        assert_eq!(offset(&c, c.blockwise.buffered().as_ptr()) % 16, 0);
+    }
 
     #[test]
     fn hello() {

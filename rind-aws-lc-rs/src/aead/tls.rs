@@ -70,13 +70,15 @@ impl TlsRecordSealingKey {
         A: AsRef<[u8]>,
         InOut: AsMut<[u8]> + for<'in_out> Extend<&'in_out u8>,
     {
+        // Bad buffers leave the nonce unused, as in aws-lc-rs.
+        let (plaintext, tag_out) = super::append_tag_room(in_out)?;
         if let Err(refused) = self.check(&nonce) {
-            // aws-lc-rs appends room for the tag before AWS-LC refuses.
-            in_out.extend(&[0; super::TAG_LEN]);
-            in_out.as_mut().fill(0);
+            plaintext.fill(0);
             return Err(refused);
         }
-        self.key.seal_in_place_append_tag(nonce, aad, in_out)
+        let tag = self.key.seal_in_place_separate_tag(nonce, aad, plaintext)?;
+        tag_out.copy_from_slice(tag.as_ref());
+        Ok(())
     }
 
     /// Seals `in_out` in place and returns the tag.

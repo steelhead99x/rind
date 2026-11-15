@@ -18,7 +18,8 @@
 //! `rand_thread_state_clear_all` does.
 
 use core::cell::RefCell;
-use std::sync::{Once, PoisonError, RwLock, RwLockWriteGuard};
+use core::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{PoisonError, RwLock, RwLockWriteGuard};
 
 use crate::Error;
 use crate::high::hash::Sha512;
@@ -167,13 +168,21 @@ pub(crate) fn fill(out: &mut [u8]) -> Result<(), Error> {
     .map_err(|_| Error::RngFailed)?
 }
 
+/// Whether the self-test has passed in this process.
+static CAST_PASSED: AtomicBool = AtomicBool::new(false);
+
 fn instantiate() -> Result<HmacDrbg<Sha512>, Error> {
-    static CAST: Once = Once::new();
-    CAST.call_once(|| {
+    // The self-test passes once per process, before the first instantiation.
+    // A plain flag, not a `Once`: `fork` copies a `Once` that another thread
+    // is inside, and the child, which lacks that thread, then waits forever
+    // on its first draw. Threads that race here each run the test, which is
+    // pure, so the race only repeats it.
+    if !CAST_PASSED.load(Ordering::Acquire) {
         if !cast() {
             crate::fips::fail("drbg");
         }
-    });
+        CAST_PASSED.store(true, Ordering::Release);
+    }
 
     let mut entropy = [0u8; ENTROPY_LEN];
     let mut nonce = [0u8; NONCE_LEN];
@@ -205,6 +214,9 @@ pub(crate) fn cast() -> bool {
     const ADDITIONAL_RESEED: [u8; 32] = *b"\xb9\xed\x8e\x35\xad\x01\x8a\x37\x5b\x61\x18\x9c\x8d\x36\x5b\x00\x50\x7c\xb1\xb4\x51\x0d\x21\xca\xc2\x12\x35\x6b\x5b\xba\xa8\xb2";
     const ADDITIONAL_1: [u8; 32] = *b"\xb7\x99\x89\x98\xea\xf9\xe5\xd3\x4e\x64\xff\x7f\x03\xde\x76\x5b\x31\xf4\x07\x89\x9d\x20\x53\x55\x73\xe6\x70\xc1\xb4\x02\xc2\x6a";
     const ADDITIONAL_2: [u8; 32] = *b"\x20\x89\xd4\x9d\x63\xe0\xc4\xdf\x58\x87\x9d\x0c\xb1\xba\x99\x8e\x5b\x3d\x1a\x77\x86\xb7\x85\xe7\xcf\x13\xca\x5e\xa5\xe3\x3c\xfd";
+    #[cfg(all(test, unix, not(miri)))]
+    tests::stall();
+
     const EXPECTED: [u8; 64] = *b"\x5b\x70\xf3\xe4\xda\x95\x26\x42\x33\xef\xba\xb1\x55\xb8\x28\xd4\xe2\x31\xb6\x7c\xc9\x27\x57\xfe\xca\x40\x7c\xc9\x61\x5a\x66\x08\x71\xcb\x07\xad\x1a\x2e\x9a\x99\x41\x2f\xed\xa8\xee\x34\xdc\x9c\x57\xfa\x08\xd3\xf8\x22\x5b\x30\xd2\x98\x87\xd2\x09\x07\xd1\x23";
 
     let mut entropy = ENTROPY;
@@ -252,5 +264,97 @@ mod tests {
         .join()
         .unwrap();
         assert_ne!(ours, theirs);
+    }
+
+    /// Set by the fork test, so a thread inside the self-test waits there
+    /// until `RELEASE` is set.
+    #[cfg(all(unix, not(miri)))]
+    static STALL: AtomicBool = AtomicBool::new(false);
+    #[cfg(all(unix, not(miri)))]
+    static STALLED: AtomicBool = AtomicBool::new(false);
+    #[cfg(all(unix, not(miri)))]
+    static RELEASE: AtomicBool = AtomicBool::new(false);
+
+    #[cfg(all(unix, not(miri)))]
+    pub(super) fn stall() {
+        if STALL.load(Ordering::Acquire) {
+            STALLED.store(true, Ordering::Release);
+            while !RELEASE.load(Ordering::Acquire) {
+                std::thread::yield_now();
+            }
+        }
+    }
+
+    /// A process forked while another thread is inside the self-test still
+    /// instantiates. Clearing the passed flag first makes the next
+    /// instantiation run the self-test again, whatever other tests did, so
+    /// this needs no fresh process.
+    #[cfg(all(unix, not(miri)))]
+    #[test]
+    fn fork_during_self_test() {
+        // Finishes every lazy initialization the child reaches, such as
+        // SHA-512's routine choice, so no other thread is inside one at fork.
+        assert!(cast());
+        STALL.store(true, Ordering::Release);
+        // A test thread already past `stall` can set the flag again after
+        // the reset, letting the drawer skip the self-test; draw again then.
+        let drawer = loop {
+            CAST_PASSED.store(false, Ordering::Release);
+            // A fresh thread has no DRBG yet, so its draw instantiates.
+            let drawer = std::thread::spawn(|| fill(&mut [0u8; 32]).unwrap());
+            while !STALLED.load(Ordering::Acquire) && !drawer.is_finished() {
+                std::thread::yield_now();
+            }
+            if STALLED.load(Ordering::Acquire) {
+                break drawer;
+            }
+            drawer.join().unwrap();
+        };
+
+        // The test build checks each assembly call under one lock, which a
+        // child forked while another test thread held it could never take.
+        #[cfg(any(
+            rind_backend = "x86_64",
+            rind_backend = "aarch64",
+            rind_backend = "arm"
+        ))]
+        let abi = crate::low::abi::hold();
+        // SAFETY: the child calls only `instantiate`, which allocates
+        // nothing, and leaves through `_exit`.
+        let pid = unsafe { libc::fork() };
+        #[cfg(any(
+            rind_backend = "x86_64",
+            rind_backend = "aarch64",
+            rind_backend = "arm"
+        ))]
+        drop(abi);
+        if pid < 0 {
+            RELEASE.store(true, Ordering::Release);
+            panic!("fork failed");
+        }
+        if pid == 0 {
+            RELEASE.store(true, Ordering::Release);
+            // Whatever another thread published, the child runs the self-test.
+            CAST_PASSED.store(false, Ordering::Release);
+            let ok = instantiate().is_ok();
+            // SAFETY: ends the child without running the parent's destructors.
+            unsafe { libc::_exit(if ok { 0 } else { 1 }) };
+        }
+
+        RELEASE.store(true, Ordering::Release);
+        drawer.join().unwrap();
+        let mut status = 0;
+        for _ in 0..1000 {
+            // SAFETY: `pid` is our child and `status` a valid out pointer.
+            let done = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+            if done == pid {
+                assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0);
+                return;
+            }
+            std::thread::sleep(core::time::Duration::from_millis(10));
+        }
+        // SAFETY: `pid` is our child, still running.
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+        panic!("the forked child hung instantiating");
     }
 }

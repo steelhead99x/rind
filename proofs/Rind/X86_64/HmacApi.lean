@@ -143,8 +143,8 @@ theorem RunsHmac.held {a : high.hmac.Algorithm} (hr : RunsHmac a) :
   cases a
   · exact h.held
   · exact h.held
-  · exact h.2.1
-  · exact h.2.1
+  · exact h.held
+  · exact h.held
 
 /-- `verify` accepts exactly HMAC's tag of the message. -/
 theorem verify_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (key : List Byte)
