@@ -137,18 +137,33 @@ fn cipher() {
     assert_eq!(leaked, 0);
 }
 
-/// An ML-DSA seed, and the PKCS#8 documents that hold it.
+/// An ML-DSA-44 and an ML-DSA-65 seed and public key, each key's clone, and
+/// the PKCS#8 documents holding the seed.
 #[test]
 fn ml_dsa() {
-    let seed: [u8; 32] = distinct(11);
-    let leaked = leaks(&seed, || {
-        let key = Box::new(
-            signature::PqdsaKeyPair::from_seed(&signature::ML_DSA_44_SIGNING, &seed).unwrap(),
-        );
-        let _pkcs8 = key.to_pkcs8v1().unwrap();
-        let _der: Pkcs8V1Der<'static> = key.private_key().as_der().unwrap();
-    });
-    assert_eq!(leaked, 0);
+    for (algorithm, start) in [
+        (&signature::ML_DSA_44_SIGNING, 11),
+        (&signature::ML_DSA_65_SIGNING, 5),
+    ] {
+        let seed: [u8; 32] = distinct(start);
+        let public_key = signature::PqdsaKeyPair::from_seed(algorithm, &seed)
+            .unwrap()
+            .public_key()
+            .as_ref()
+            .to_vec();
+        // The public key's bytes past its public seed `rho`.
+        let public_needle = &public_key[32..];
+        for needle in [&seed[..], public_needle] {
+            let leaked = leaks(needle, || {
+                let key = Box::new(signature::PqdsaKeyPair::from_seed(algorithm, &seed).unwrap());
+                let _clone = key.clone();
+                let _public = key.public_key().clone();
+                let _pkcs8 = key.to_pkcs8v1().unwrap();
+                let _der: Pkcs8V1Der<'static> = key.private_key().as_der().unwrap();
+            });
+            assert_eq!(leaked, 0);
+        }
+    }
 }
 
 /// A generated ML-DSA key, whose seed is read from its own PKCS#8 export
@@ -206,11 +221,12 @@ fn ml_dsa_expanded() {
     .as_ref()
     .to_vec();
     let secret = &raw[32..];
-    let leaked = leaks(secret, || {
-        let key = Box::new(
-            signature::PqdsaKeyPair::from_raw_private_key(&signature::ML_DSA_44_SIGNING, &raw)
-                .unwrap(),
-        );
+    // `from_raw_private_key` copies the key into a PKCS#8 document for that
+    // call and leaves the copy unwiped, so the key is built before the check.
+    let key = Box::new(
+        signature::PqdsaKeyPair::from_raw_private_key(&signature::ML_DSA_44_SIGNING, &raw).unwrap(),
+    );
+    let leaked = leaks(secret, move || {
         assert!(key.to_pkcs8v1().is_err());
         let mut sig = vec![0; signature::ML_DSA_44_SIGNING.signature_len()];
         key.sign(b"expanded", &mut sig).unwrap();
@@ -262,28 +278,4 @@ fn kem() {
     secret.copy_from_slice(sent.as_ref());
     assert_eq!(received.as_ref(), secret);
     assert_eq!(leaks(&secret, || drop((sent, received))), 0);
-}
-
-/// An ML-DSA seed and public key, and the PKCS#8 documents holding the seed.
-#[test]
-fn ml_dsa() {
-    let seed: [u8; 32] = distinct(5);
-    let public_key = signature::PqdsaKeyPair::from_seed(&signature::ML_DSA_65_SIGNING, &seed)
-        .unwrap()
-        .public_key()
-        .as_ref()
-        .to_vec();
-    // The public key's bytes past its public seed `rho`.
-    let public_needle = &public_key[32..];
-    for needle in [&seed[..], public_needle] {
-        let leaked = leaks(needle, || {
-            let key =
-                signature::PqdsaKeyPair::from_seed(&signature::ML_DSA_65_SIGNING, &seed).unwrap();
-            let _clone = key.clone();
-            let _public = key.public_key().clone();
-            let _v1 = key.to_pkcs8v1().unwrap();
-            let _der: Pkcs8V1Der<'static> = key.private_key().as_der().unwrap();
-        });
-        assert_eq!(leaked, 0);
-    }
 }
