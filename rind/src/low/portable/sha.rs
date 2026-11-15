@@ -18,7 +18,8 @@
 //! and `from_be_bytes` fallbacks rather than the Xtensa asm. SHA-384/512 is
 //! the rolled loop in `generic::sha512` on every pointer width. The unrolled
 //! form is about 47 KiB when the pointer is 32 bits and misses a 16 KiB
-//! instruction cache.
+//! instruction cache. The measured ratio against aws-lc's C is the portable
+//! SHA-2 decision in `benchmarks/gaps.toml`.
 
 pub(crate) use crate::low::generic::sha1::sha1_compress_blocks;
 pub(crate) use crate::low::generic::sha512::sha512_compress_blocks;
