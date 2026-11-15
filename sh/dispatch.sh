@@ -533,6 +533,9 @@ step() {
                 return 1
             fi
             run sh/alert.sh check
+            # Fixtures for the checker. A failure here is the checker, not alert.yml,
+            # so it is not part of `sh/alert.sh check`.
+            run sh/alert.sh prove
             run sh/pins.sh
             run sh/release-check.sh --check >/dev/null
             ;;

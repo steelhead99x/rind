@@ -1,16 +1,23 @@
 name: Alert
 
-# Posts nightly, landing, and release failures to the Discord #alerts channel,
-# since those runs have no pull request to turn red. Reads the kixel-ai
-# organization's DISCORD_WEBHOOK secret.
+# Posts to Discord #alerts when a nightly or a release stops and nobody is
+# watching the run. Reads the kixel-ai organization's DISCORD_WEBHOOK secret.
+# A job that runs past its time limit ends cancelled, not timed_out. Release
+# and Dart release set no timeout-minutes, so a hung publish dies at GitHub's
+# 360-minute default.
 
 permissions:
   contents: read
+  # Classifying a cancellation reads the run's jobs and their check annotations.
+  actions: read
+  checks: read
 
 on:
   workflow_run:
-    # Matched by workflow `name:`, not filename. Only workflows that run outside
-    # a pull request. `sh/alert.sh check` enforces the list.
+    # Matched by workflow `name:`, not filename. `sh/alert.sh check` requires
+    # every workflow whose failure can go unseen. A workflow that runs only
+    # from a pull request, as a caller, or from a manual dispatch is left out,
+    # because someone is already watching that run.
     workflows:
       - asan
       - bench
@@ -30,18 +37,18 @@ on:
 jobs:
   discord:
     name: Discord
-    # Scheduled runs alert only when scheduled, since whoever dispatched one
-    # is already watching it, and alert when cancelled too: a job that runs
-    # past its timeout ends `cancelled`, not `timed_out`, and any other
-    # cancellation still leaves the scheduled check undone. Release alerts
-    # however it ran: a push to main starts it with nobody watching. So does
-    # Dart release, which a tag push starts with nobody watching. Their
-    # cancellations stay quiet, since a newer push supersedes a run as a
-    # matter of course.
+    # Scheduled runs post on failure or timed_out, and on cancelled only when
+    # a job annotation says it exceeded its maximum execution time. A hand
+    # cancel, or a dispatch that replaces the nightly (these workflows share
+    # one concurrency group per ref, with cancel-in-progress), is also
+    # cancelled, and sh/alert.sh does not post it. Release and Dart release
+    # post on failure, timed_out, and cancelled however they ran.
+    # release.yml sets cancel-in-progress: false, and Dart release has no
+    # concurrency group, so a newer push does not cancel them.
     if: >-
       (github.event.workflow_run.event == 'schedule' &&
       contains(fromJSON('["failure", "timed_out", "cancelled"]'), github.event.workflow_run.conclusion)) ||
-      (contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion) &&
+      (contains(fromJSON('["failure", "timed_out", "cancelled"]'), github.event.workflow_run.conclusion) &&
       contains(fromJSON('["Release", "Dart release"]'), github.event.workflow_run.name))
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -54,6 +61,9 @@ jobs:
       - name: Post to Discord
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           RUN_REPO: ${{ github.repository }}
           RUN_NAME: ${{ github.event.workflow_run.name }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
