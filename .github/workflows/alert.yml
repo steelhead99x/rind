@@ -38,13 +38,17 @@ jobs:
   discord:
     name: Discord
     # Scheduled runs post on failure or timed_out, and on cancelled only when
-    # a job annotation says it exceeded its maximum execution time. A hand
-    # cancel, or a dispatch that replaces the nightly (these workflows share
-    # one concurrency group per ref, with cancel-in-progress), is also
-    # cancelled, and sh/alert.sh does not post it. Release and Dart release
-    # post on failure, timed_out, and cancelled however they ran.
-    # release.yml sets cancel-in-progress: false, and Dart release has no
-    # concurrency group, so a newer push does not cancel them.
+    # a job annotation says it exceeded its maximum execution time. That
+    # includes the hosted runner's "The job running on runner ... has exceeded
+    # the maximum execution time of ..." form, not only the timeout-minutes
+    # sentence. A hand cancel, or a dispatch that replaces the nightly (these
+    # workflows share one concurrency group per ref, with cancel-in-progress),
+    # does not post. Release and Dart release post on failure, timed_out, and
+    # a cancelled run that started a job. release.yml sets cancel-in-progress
+    # to false, so a newer push leaves an in-progress publish running, but it
+    # cancels a pending one waiting in the group. That pending run never
+    # starts a job, so it does not post. A cancellation the jobs API cannot
+    # classify still posts, and the embed says so.
     if: >-
       (github.event.workflow_run.event == 'schedule' &&
       contains(fromJSON('["failure", "timed_out", "cancelled"]'), github.event.workflow_run.conclusion)) ||
