@@ -1,11 +1,12 @@
 name: ctgrind
 
+# Weekly, at its own hour: see TESTING.md, "Scheduled workflows".
 on:
   schedule:
-    - cron: "0 18 * * *"
+    - cron: "23 7 * * 6"
   workflow_dispatch:
   # A pull request runs only the x86_64 release row of `build`, the one that
-  # fails fastest, and `binsec`; the nightly runs the rest.
+  # fails fastest, and `binsec`; the weekly run runs the rest.
   pull_request:
     branches: [main]
     paths:
@@ -46,12 +47,13 @@ jobs:
     env:
       RIND_TEST_ARM_CRYPTO_EXT: 1
       RIND_TEST_ARM_SHA3: 0
+      # A pull request whose change reaches no backend this job builds skips it.
+      RIND_SCOPE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - uses: ./.github/actions/vectors
+          fetch-depth: 0
 
       - uses: ./.github/actions/nix
 
@@ -104,8 +106,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/vectors
-
       - uses: ./.github/actions/nix
 
       # A denial set to any value takes effect, so a row's extra variables
@@ -136,8 +136,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - uses: ./.github/actions/vectors
 
       - uses: ./.github/actions/nix
 
@@ -183,8 +181,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/vectors
-
       - uses: ./.github/actions/nix
 
       - name: ctgrind tests
@@ -203,9 +199,9 @@ jobs:
   # code is checked here and the extension's by `armv7-qemu` (see
   # `admin/ctgrind`).
   #
-  # Release here: constant time matters most in the code that ships, so the
-  # debug build runs weekly in `ctgrind-debug.yml` instead. Valgrind runs every
-  # thread on one core, so the suites run as parallel jobs instead.
+  # Release and debug builds, as `build` checks. Valgrind runs every thread on
+  # one core, so the suites run as parallel jobs instead, and
+  # `--no-fail-fast` reports every failing test binary in one run.
   #
   # The `no-neon` row denies NEON to check the code cores without it run, such
   # as OpenSSL's integer Keccak-f. The denial takes `--cfg rind_cpu_disable`,
@@ -214,7 +210,7 @@ jobs:
   # Ubuntu's armhf valgrind rather than `devShells.ctgrind`: nixpkgs caches no
   # armhf valgrind for an arm64 host, and building it builds its gdb too.
   armv7:
-    name: armv7 (${{ matrix.suite }}${{ matrix.neon == '0' && ', no-neon' || '' }})
+    name: armv7 (${{ matrix.suite }}${{ matrix.neon == '0' && ', no-neon' || '' }}${{ matrix.build == '' && ', debug' || '' }})
     if: github.event_name != 'pull_request'
     strategy:
       # One suite's failure says nothing about the others.
@@ -222,17 +218,20 @@ jobs:
       matrix:
         suite: [unit, wycheproof, adapters]
         neon: ["1"]
+        build: ["", "--release"]
         include:
           - suite: unit
             neon: "0"
+            build: ""
+          - suite: unit
+            neon: "0"
+            build: --release
 
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - uses: ./.github/actions/vectors
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
@@ -253,7 +252,7 @@ jobs:
           if [ "$RIND_TEST_ARM_NEON" = 0 ]; then
             export RIND_CPU_DISABLE_neon=1 RUSTFLAGS='--cfg rind_cpu_disable'
           fi
-          admin/ctgrind ${{ matrix.suite }} --target armv7-unknown-linux-gnueabihf --release
+          admin/ctgrind ${{ matrix.suite }} --target armv7-unknown-linux-gnueabihf ${{ matrix.build }} --no-fail-fast
         env:
           CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
           CC_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-gcc

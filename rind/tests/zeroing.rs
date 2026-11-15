@@ -135,6 +135,30 @@ fn ml_dsa() {
 }
 
 #[test]
+fn slh_dsa() {
+    use rind::signature::sign::{
+        SlhDsaKeyPair, SlhDsaParameterSet, SlhDsaSha2_128f, SlhDsaSha2_192f, SlhDsaSha2_256f,
+        SlhDsaShake128f, SlhDsaShake192f, SlhDsaShake256f,
+    };
+    // The f sets, whose keys are quick to make, cover each key size.
+    fn check<P: SlhDsaParameterSet>() {
+        let key = SlhDsaKeyPair::<P>::generate().unwrap();
+        check_zeroed_on_drop(Box::pin(key.to_pkcs8()));
+        let pkcs8 = key.to_pkcs8();
+        check_zeroed_on_drop(Box::pin(
+            SlhDsaKeyPair::<P>::from_pkcs8(pkcs8.as_ref()).unwrap(),
+        ));
+        check_zeroed_on_drop(Box::pin(key));
+    }
+    check::<SlhDsaSha2_128f>();
+    check::<SlhDsaSha2_192f>();
+    check::<SlhDsaSha2_256f>();
+    check::<SlhDsaShake128f>();
+    check::<SlhDsaShake192f>();
+    check::<SlhDsaShake256f>();
+}
+
+#[test]
 fn ecdh() {
     use rind::agreement::*;
     for algorithm in [&X25519, &ECDH_P256, &ECDH_P384, &ECDH_P521] {

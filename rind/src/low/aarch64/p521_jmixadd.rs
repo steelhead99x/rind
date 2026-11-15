@@ -749,7 +749,6 @@ macro_rules! sub_p521 {
 // Transliterated from s2n-bignum's arm/p521/p521_jmixadd_alt.S.
 /// Point mixed addition on NIST curve P-521 in Jacobian coordinates
 ///
-///
 /// Does p3 := p1 + p2 where all points are regarded as Jacobian triples.
 /// A Jacobian triple (x,y,z) represents affine point (x/z^2,y/z^3).
 /// The "mixed" part means that p2 only has x and y coordinates, with the

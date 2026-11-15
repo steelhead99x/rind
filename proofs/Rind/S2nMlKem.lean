@@ -5,7 +5,7 @@ import Rind.MlKem
 
 The functions s2n-bignum's ML-KEM postconditions name, from
 `common/mlkem_mldsa.ml`, `arm/proofs/mlkem_basemul_k3.ml`,
-`x86/proofs/mlkem_mulcache_compute.ml`, and `x86/proofs/mlkem_basemul_k3.ml` at b4f17ee7, which
+`x86/proofs/mlkem_mulcache_compute.ml`, and `x86/proofs/mlkem_basemul_k3.ml` at 3f01260f, which
 `thirdparty/s2n-bignum` holds, transliterated: HOL Light's `num->int` is
 `ℕ → ℤ`, `isum (0..127)` is `∑ j ∈ range 128`, `&a pow n` is `(a : ℤ) ^ n`, and
 `x rem &3329` is `x % 3329`, both the remainder in `[0, 3329)`. `bitreverse7`

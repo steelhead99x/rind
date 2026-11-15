@@ -6,78 +6,118 @@ use crate::low::macros::*;
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 // ----------------------------------------------------------------------------
-// AES-256-GCM bulk decryption: counter-mode decryption of whole blocks with the GHASH tag update
-// Decrypts the input in CTR mode while accumulating the GHASH of the input.
+// AES-256-GCM bulk decryption: counter-mode decryption of whole blocks with
+// the GHASH tag update
+// Inputs in[len_bits/8], len_bits, tag[2], ivec[16], key[240], htable[12];
+// outputs out[len_bits/8], tag[2], ivec[16], returns len_bits/8
 //
-//    extern uint64_t aes256_gcm_dec(const uint8_t *in, uint64_t len_bits, uint8_t *out,
-//                              uint64_t *tag, uint8_t *ivec,
-//                              const s2n_bignum_AES_KEY *key, const uint64_t *htable);
+//    extern uint64_t aes256_gcm_dec(const uint8_t *in, uint64_t len_bits,
+//                                   uint8_t *out, uint64_t *tag,
+//                                   uint8_t *ivec,
+//                                   const s2n_bignum_AES_KEY *key,
+//                                   const uint64_t *htable);
 //
-// Processes the input "in" of "len_bits" bits (a whole number of 16-byte
-// blocks) under AES-256 in GCM mode: each block is decrypted in counter mode
-// using the counter block "ivec" and the AES round keys "key", the result is
-// written to "out", and the running GHASH authenticator "tag" is updated using
-// the precomputed table of H-powers "htable" over the INPUT (ciphertext). On
-// return the updated counter is written back to "ivec", the updated
-// authenticator to "tag", and the number of bytes processed is returned.
+// Processes the input "in" of "len_bits" bits under AES-256 in GCM mode: each
+// 16-byte block is decrypted in counter mode using the counter block "ivec"
+// and the AES round keys "key", the result is written to "out", and the
+// running GHASH authenticator "tag" is updated over the INPUT (ciphertext)
+// using the precomputed table of H-powers "htable". On return the updated
+// counter is written back to "ivec", the updated authenticator to "tag", and
+// len_bits/8 is returned. "tag" and "ivec" are the Xi and Yi blocks of
+// AWS-LC's GCM context.
 //
 // The kernel is intended for a whole number of 16-byte blocks, i.e. len_bits a
 // multiple of 128; a partial final block is the caller's responsibility, as in
 // AWS-LC's GCM layer. For any other length only the floor(len_bits/128)
 // complete blocks are processed, while the return value is still len_bits/8.
 //
-// The table "htable" is the GHASH key schedule used by the PMULL-based GCM
-// code in OpenSSL, BoringSSL and AWS-LC: the first 96 bytes of the Htable that
-// gcm_init_v8 derives from the subkey H = AES_K(0^128). Its six 16-byte entries
-// hold, in order, H, m(H,H^2), H^2, H^3, m(H^3,H^4), H^4, where the powers are
-// in the bit-reflected ("twisted") representation that gcm_init_v8 uses and
-// m(A,B) packs the Karatsuba middle terms A.lo ^ A.hi (low 64 bits) and
-// B.lo ^ B.hi (high 64 bits) of the two neighbouring powers into one entry;
-// four powers suffice because GHASH is folded four blocks at a time, and
-// nothing beyond the first 96 bytes is read. The reference implementation in
+// The table "htable" is the first 96 bytes of the Htable that AWS-LC's
+// gcm_init_v8 (crypto/fipsmodule/modes/asm/ghashv8-armx.pl) derives from the
+// subkey H = AES_K(0^128). Its six 16-byte entries hold, in order, H,
+// m(H,H^2), H^2, H^3, m(H^3,H^4), H^4, where the powers are in the
+// bit-reflected ("twisted") representation that gcm_init_v8 uses and m(A,B)
+// packs the Karatsuba middle terms A.lo ^ A.hi (low 64 bits) and B.lo ^ B.hi
+// (high 64 bits) of the two neighbouring powers into one entry; four powers
+// suffice because GHASH is folded four blocks at a time. Since AWS-LC commit
+// 90315e2a ("AES-GCM AArch64: Store swapped Htable values") gcm_init_v8 stores
+// each power with its two 64-bit halves swapped, so tables built by OpenSSL's
+// or BoringSSL's gcm_init_v8, or by earlier versions of AWS-LC, give wrong
+// tags. The exact contents required are htable_mem_4 in
+// arm/proofs/utils/aes_gcm_spec.ml. The reference implementation in
 // tests/ref_aes_gcm.c (ref_gcm_init_htable) constructs the full table
 // independently.
+// Of "key" only the 15 round keys (240 bytes) are read, not key->rounds, and
+// of "htable" only these 96 bytes.
+//
+// The buffers written ("out", "tag" and "ivec") must not overlap each other,
+// "key" or "htable", and "tag" and "ivec" must not overlap "in". The output
+// may be the input itself (in-place operation, out == in); otherwise "out"
+// must not overlap "in".
+//
+// This routine does not enforce the NIST GCM message limit. Callers must
+// ensure the cumulative message length does not exceed 2^36 - 32 bytes
+// (2^39 - 256 bits).
 //
 // Standard ARM ABI: X0 = in, X1 = len_bits, X2 = out, X3 = tag, X4 = ivec,
 //                   X5 = key, X6 = htable, returns X0
 // ----------------------------------------------------------------------------
 
 // Origin: derived from the 'clean' (readability-oriented) AArch64 AES-GCM
-// implementation by Hanno Becker, itself derived from the assembly generated by
-// aesv8-gcm-armv8.pl (Fangming Fang, OpenSSL) and ultimately from ARM's
-// AArch64cryptolib (Samuel Lee).  The main four-block loop is software-pipelined
-// and the whole kernel rescheduled with the SLOTHY superoptimizer; the
-// surrounding assembler boilerplate follows the s2n-bignum house style.
+// implementation by Hanno Becker, itself derived from the assembly
+// generated by aesv8-gcm-armv8.pl (Fangming Fang, OpenSSL) and ultimately
+// from ARM's AArch64cryptolib (Samuel Lee). The main four-block loop is
+// software-pipelined and the whole kernel rescheduled with the SLOTHY
+// superoptimizer; the surrounding assembler boilerplate follows the
+// s2n-bignum house style.
+// Proofs: arm/proofs/aes256_gcm_dec.ml.
 
 // Transliterated from s2n-bignum's arm/aes_gcm/aes256_gcm_dec.S.
-/// AES-256-GCM bulk decryption: counter-mode decryption of whole blocks with the GHASH tag update
+/// AES-256-GCM bulk decryption: counter-mode decryption of whole blocks with
+/// the GHASH tag update
 ///
-/// Decrypts the input in CTR mode while accumulating the GHASH of the input.
+/// Inputs in[len_bits/8], len_bits, tag[2], ivec[16], key[240], htable[12];
+/// outputs out[len_bits/8], tag[2], ivec[16], returns len_bits/8
 ///
-/// Processes the input "in" of "len_bits" bits (a whole number of 16-byte
-/// blocks) under AES-256 in GCM mode: each block is decrypted in counter mode
-/// using the counter block "ivec" and the AES round keys "key", the result is
-/// written to "out", and the running GHASH authenticator "tag" is updated using
-/// the precomputed table of H-powers "htable" over the INPUT (ciphertext). On
-/// return the updated counter is written back to "ivec", the updated
-/// authenticator to "tag", and the number of bytes processed is returned.
+/// Processes the input "in" of "len_bits" bits under AES-256 in GCM mode: each
+/// 16-byte block is decrypted in counter mode using the counter block "ivec"
+/// and the AES round keys "key", the result is written to "out", and the
+/// running GHASH authenticator "tag" is updated over the INPUT (ciphertext)
+/// using the precomputed table of H-powers "htable". On return the updated
+/// counter is written back to "ivec", the updated authenticator to "tag", and
+/// len_bits/8 is returned. "tag" and "ivec" are the Xi and Yi blocks of
+/// AWS-LC's GCM context.
 ///
 /// The kernel is intended for a whole number of 16-byte blocks, i.e. len_bits a
 /// multiple of 128; a partial final block is the caller's responsibility, as in
 /// AWS-LC's GCM layer. For any other length only the floor(len_bits/128)
 /// complete blocks are processed, while the return value is still len_bits/8.
 ///
-/// The table "htable" is the GHASH key schedule used by the PMULL-based GCM
-/// code in OpenSSL, BoringSSL and AWS-LC: the first 96 bytes of the Htable that
-/// gcm_init_v8 derives from the subkey H = AES_K(0^128). Its six 16-byte entries
-/// hold, in order, H, m(H,H^2), H^2, H^3, m(H^3,H^4), H^4, where the powers are
-/// in the bit-reflected ("twisted") representation that gcm_init_v8 uses and
-/// m(A,B) packs the Karatsuba middle terms A.lo ^ A.hi (low 64 bits) and
-/// B.lo ^ B.hi (high 64 bits) of the two neighbouring powers into one entry;
-/// four powers suffice because GHASH is folded four blocks at a time, and
-/// nothing beyond the first 96 bytes is read. The reference implementation in
+/// The table "htable" is the first 96 bytes of the Htable that AWS-LC's
+/// gcm_init_v8 (crypto/fipsmodule/modes/asm/ghashv8-armx.pl) derives from the
+/// subkey H = AES_K(0^128). Its six 16-byte entries hold, in order, H,
+/// m(H,H^2), H^2, H^3, m(H^3,H^4), H^4, where the powers are in the
+/// bit-reflected ("twisted") representation that gcm_init_v8 uses and m(A,B)
+/// packs the Karatsuba middle terms A.lo ^ A.hi (low 64 bits) and B.lo ^ B.hi
+/// (high 64 bits) of the two neighbouring powers into one entry; four powers
+/// suffice because GHASH is folded four blocks at a time. Since AWS-LC commit
+/// 90315e2a ("AES-GCM AArch64: Store swapped Htable values") gcm_init_v8 stores
+/// each power with its two 64-bit halves swapped, so tables built by OpenSSL's
+/// or BoringSSL's gcm_init_v8, or by earlier versions of AWS-LC, give wrong
+/// tags. The exact contents required are htable_mem_4 in
+/// arm/proofs/utils/aes_gcm_spec.ml. The reference implementation in
 /// tests/ref_aes_gcm.c (ref_gcm_init_htable) constructs the full table
 /// independently.
+/// Of "key" only the 15 round keys (240 bytes) are read, not key->rounds, and
+/// of "htable" only these 96 bytes.
+///
+/// The buffers written ("out", "tag" and "ivec") must not overlap each other,
+/// "key" or "htable", and "tag" and "ivec" must not overlap "in". The output
+/// may be the input itself (in-place operation, out == in); otherwise "out"
+/// must not overlap "in".
+///
+/// This routine does not enforce the NIST GCM message limit. Callers must
+/// ensure the cumulative message length does not exceed 2^36 - 32 bytes
+/// (2^39 - 256 bits).
 #[inline(never)]
 #[target_feature(enable = "aes")]
 pub(crate) unsafe fn aes256_gcm_dec(

@@ -68,6 +68,26 @@ fn keygen(c: &mut Criterion) {
         })
     });
 
+    // verified-garbage has no key generation or PKCS#8 encoding: a random
+    // seed and its public key.
+    group.bench_function("verified-garbage", |b| {
+        use verified_garbage::ed25519::SigningKey;
+        let seed = [7u8; 32];
+        assert_eq!(
+            SigningKey::from_seed(&seed).verifying_key().as_bytes()[..],
+            *rind::signature::Ed25519KeyPair::from_seed(&seed)
+                .unwrap()
+                .public_key()
+                .as_ref()
+        );
+
+        b.iter(|| {
+            let mut seed = [0u8; 32];
+            getrandom::fill(&mut seed).unwrap();
+            black_box(SigningKey::from_seed(&seed).verifying_key().as_bytes());
+        })
+    });
+
     #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
     group.bench_function("openssl", |b| {
         b.iter(|| {
@@ -134,6 +154,15 @@ fn verify(c: &mut Criterion) {
 
         b.iter(|| {
             public_key.verify(signature, message).unwrap();
+        })
+    });
+
+    group.bench_function("verified-garbage", |b| {
+        use verified_garbage::ed25519::VerifyingKey;
+        let public_key = VerifyingKey::from_bytes(public_key);
+
+        b.iter(|| {
+            public_key.verify(message, signature).unwrap();
         })
     });
 
@@ -208,6 +237,25 @@ fn sign(c: &mut Criterion) {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     group.bench_function("graviola", |b| {
         let signing_key = graviola::signing::eddsa::Ed25519SigningKey::generate().unwrap();
+
+        b.iter(|| {
+            black_box(signing_key.sign(message));
+        });
+    });
+
+    group.bench_function("verified-garbage", |b| {
+        use rind::signature::{PublicKey, verify};
+        let mut seed = [0u8; 32];
+        getrandom::fill(&mut seed).unwrap();
+        let signing_key = verified_garbage::ed25519::SigningKey::from_seed(&seed);
+        // Ed25519 is deterministic, so both sign alike and rind verifies it.
+        let rind_key = rind::signature::Ed25519KeyPair::from_seed(&seed).unwrap();
+        let signature = signing_key.sign(message);
+        assert_eq!(signature[..], *rind_key.sign(message).as_ref());
+        PublicKey::new(&verify::ED25519, signing_key.verifying_key().as_bytes())
+            .unwrap()
+            .verify(message, &signature)
+            .unwrap();
 
         b.iter(|| {
             black_box(signing_key.sign(message));

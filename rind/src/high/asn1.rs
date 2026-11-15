@@ -6,6 +6,8 @@ use core::marker::PhantomData;
 use core::mem;
 use core::mem::size_of;
 
+use crate::low::ct;
+
 macro_rules! _asn1_struct_ty(
     ([$context:literal] EXPLICIT $($itty:ident)+) => { $crate::high::asn1::Context<'a, $context, true, $crate::high::asn1::_asn1_struct_ty!($($itty)+)> };
     ([$context:literal] $($itty:ident)+) => { $crate::high::asn1::Context<'a, $context, false, $crate::high::asn1::_asn1_struct_ty!($($itty)+)> };
@@ -527,12 +529,12 @@ impl<'a> Integer<'a> {
         // the first octet and bit 8 of the second octet
         // a) shall not be ones; and
         // b) shall not be zero"
+        // That is, the first octet is not bit 8 of the second, extended. A
+        // private key's integers are secret, so only the verdict is
+        // revealed.
         if let Some(first_two) = twos_complement.get(..2) {
-            if first_two[0] == 0xff && first_two[1] & 0x80 == 0x80 {
-                return Err(Error::IntegerOutOfRange);
-            }
-
-            if first_two[0] == 0x00 && first_two[1] & 0x80 == 0x00 {
+            let extended = 0u8.wrapping_sub(first_two[1] >> 7);
+            if ct::into_public(first_two[0] == extended) {
                 return Err(Error::IntegerOutOfRange);
             }
         }

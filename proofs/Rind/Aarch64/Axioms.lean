@@ -8,6 +8,9 @@ import Rind.Aarch64.ChaCha20
 import Rind.Aarch64.Ed25519
 import Rind.Aarch64.Sha3
 import Rind.Aarch64.P256Signature
+import Rind.Aarch64.AesModesLow
+import Rind.Aarch64.AesKw
+import Rind.Aarch64.AesModesApi
 open rind.aarch64
 
 /-!
@@ -20,8 +23,9 @@ there of aws-lc's routine for the SHA-512 instructions; rind's HOL Light proof
 of SHA-256's routine for the crypto extension in `Rind.Aarch64.Sha256Hw`, for
 the theorems over every HMAC algorithm; rind's HOL Light proofs of its
 constant-time compares in `Rind.Aarch64.CtEqual` for HMAC's and PBKDF2's
-`verify`; and nothing else. P-384's key generation also takes its table
-select as the hypothesis `AffSelect`, which no axiom states.
+`verify` and key wrap's `unwrap` and `unwrap_padded`; and nothing else.
+P-384's comb table select rests on no axiom, only on the hand model in
+`Rind.Aarch64.PointSelectModel`.
 A change here is a change to the trust base.
 -/
 
@@ -155,6 +159,10 @@ A change here is a change to the trust base.
 /-- info: 'rind.aarch64.p384_shared_secret' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms p384_shared_secret
+
+/-- info: 'rind.aarch64.bignum_aff_point_select_p384_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms bignum_aff_point_select_p384_spec
 
 /-- info: 'rind.aarch64.sha512_family_digest' depends on axioms: [propext,
  Classical.choice,
@@ -511,3 +519,83 @@ A change here is a change to the trust base.
  sha3_keccak_f1600_spec] -/
 #guard_msgs in
 #print axioms shake256_batch_spec
+
+/-- info: 'rind.aarch64.expand_key_mode_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms expand_key_mode_spec
+
+/-- info: 'rind.aarch64.dec_key_new_mode_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms dec_key_new_mode_spec
+
+/-- info: 'rind.aarch64.aes_ctr_apply_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_ctr_apply_spec
+
+/-- info: 'rind.aarch64.aes_cbc_encrypt_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_cbc_encrypt_spec
+
+/-- info: 'rind.aarch64.aes_cbc_decrypt_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_cbc_decrypt_spec
+
+/-- info: 'rind.aarch64.kek_new_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kek_new_spec
+
+/-- info: 'rind.aarch64.kek_wrap_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kek_wrap_spec
+
+/-- info: 'rind.aarch64.kek_unwrap_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec] -/
+#guard_msgs in
+#print axioms kek_unwrap_spec
+
+/-- info: 'rind.aarch64.kek_wrap_padded_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kek_wrap_padded_spec
+
+/-- info: 'rind.aarch64.kek_unwrap_padded_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec] -/
+#guard_msgs in
+#print axioms kek_unwrap_padded_spec
+
+/-- info: 'rind.aarch64.aes_ctr_new_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_ctr_new_spec
+
+/-- info: 'rind.aarch64.aes_ctr_apply_keystream_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_ctr_apply_keystream_spec
+
+/-- info: 'rind.aarch64.aes_cbc_encrypting_key_new_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_cbc_encrypting_key_new_spec
+
+/-- info: 'rind.aarch64.aes_cbc_decrypting_key_new_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_cbc_decrypting_key_new_spec
+
+/-- info: 'rind.aarch64.aes_cbc_encrypt_blocks_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_cbc_encrypt_blocks_spec
+
+/-- info: 'rind.aarch64.aes_cbc_decrypt_blocks_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_cbc_decrypt_blocks_spec
+
+/-- info: 'rind.aarch64.aes_cbc_encrypt_vec_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_cbc_encrypt_vec_spec
+
+/-- info: 'rind.aarch64.aes_cbc_decrypting_key_decrypt_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms aes_cbc_decrypting_key_decrypt_spec

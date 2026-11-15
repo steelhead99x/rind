@@ -51,7 +51,7 @@ pub enum AlgorithmId {
 }
 
 /// A block cipher, chosen by one of this module's constants.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub struct Algorithm {
     id: AlgorithmId,
     key_len: usize,
@@ -69,6 +69,16 @@ impl Algorithm {
             AlgorithmId::Aes192 => &rind::cipher::AES_192,
             AlgorithmId::Aes256 => &rind::cipher::AES_256,
         }
+    }
+}
+
+impl fmt::Debug for Algorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Algorithm")
+            .field("id", &self.id)
+            .field("key_len", &self.key_len)
+            .field("block_len", &self.block_len())
+            .finish()
     }
 }
 
@@ -213,6 +223,21 @@ impl From<hkdf::Okm<'_, &'static Algorithm>> for UnboundCipherKey {
         let mut key = Key::new([0; AES_256_KEY_LEN]);
         okm.fill_exact(&mut key[..algorithm.key_len]);
         Self { algorithm, key }
+    }
+}
+
+mod private {
+    /// What aws-lc-rs's `TryInto` turns an [`super::UnboundCipherKey`] into:
+    /// callers can hold one but name no use for it.
+    pub struct SymmetricCipherKey(#[allow(dead_code)] pub(super) super::UnboundCipherKey);
+}
+
+impl TryInto<private::SymmetricCipherKey> for UnboundCipherKey {
+    type Error = crate::error::KeyRejected;
+
+    // `new` and `From<Okm>` already fix the key's length, so this cannot fail.
+    fn try_into(self) -> Result<private::SymmetricCipherKey, Self::Error> {
+        Ok(private::SymmetricCipherKey(self))
     }
 }
 
@@ -465,6 +490,7 @@ impl fmt::Debug for PaddedBlockEncryptingKey {
         f.debug_struct("PaddedBlockEncryptingKey")
             .field("algorithm", self.algorithm)
             .field("mode", &self.mode())
+            .field("padding", &format_args!("PKCS7"))
             .finish_non_exhaustive()
     }
 }
@@ -513,6 +539,7 @@ impl fmt::Debug for PaddedBlockDecryptingKey {
         f.debug_struct("PaddedBlockDecryptingKey")
             .field("algorithm", self.algorithm)
             .field("mode", &self.mode())
+            .field("padding", &format_args!("PKCS7"))
             .finish_non_exhaustive()
     }
 }

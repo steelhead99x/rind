@@ -19,10 +19,9 @@ From [the scope](/quest/m4/fips/README.md), 2026-11-11.
   X25519MLKEM768 with ML-KEM inside the module and X25519 outside it, and
   ECDSA, RSA, Ed25519, and ML-DSA signatures. Each component's `fips()` is
   true exactly where aws-lc-rs's is.
+- rind-fips has no `TlsRecordOpeningKey` (decided in
+  [kixel-ai/rind#771](https://github.com/kixel-ai/rind/pull/771#issuecomment-6892740753)):
+  rind-aws-lc-rs's FIPS build backs aws-lc-rs's by wrapping `aead::Key`.
 - Deno's FIPS build ([denoland/deno#36906](https://github.com/denoland/deno/pull/36906))
   swaps aws-lc-rs for its FIPS module through these same features, so it is
   the first test of the swap.
-
-## Required
-
-- [AES-GCM with internal IVs](/quest/m4/fips/gcm-iv.md) - the TLS 1.3 IV unit the rustls provider seals with

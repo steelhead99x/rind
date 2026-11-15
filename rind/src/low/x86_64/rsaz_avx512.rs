@@ -56,10 +56,13 @@ impl RsazAvx512 {
     ///
     /// The instruction trace and memory addresses depend on none of their
     /// values.
+    #[inline(never)]
     pub(crate) fn mod_exp(self, z: [&mut [u64]; 2], operands: [Operands<'_>; 2]) {
         for (z, o) in z.iter().zip(&operands) {
             assert!([z.len(), o.x.len(), o.e.len(), o.m.len(), o.rr.len()] == [self.words; 5]);
         }
+        // `vpmadd52luq` and `vpmadd52huq` multiply the secrets.
+        let _mcdt = low::Mcdt::enter();
         match self.words {
             16 => mod_exp(self.token, &X20, z, &operands),
             24 => mod_exp(self.token, &X30, z, &operands),

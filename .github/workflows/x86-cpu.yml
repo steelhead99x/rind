@@ -1,8 +1,9 @@
 name: x86-cpu
 
+# Weekly, at its own hour: see TESTING.md, "Scheduled workflows".
 on:
   schedule:
-    - cron: "0 18 * * *"
+    - cron: "23 8 * * 0"
   workflow_dispatch:
   pull_request:
     branches: [main]
@@ -32,8 +33,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/vectors
-
       - uses: ./.github/actions/nix
 
       # The dev shell's `sde` runs Intel's binaries in a bubblewrap sandbox,
@@ -54,7 +53,8 @@ jobs:
       # that `rind/src/low/x86_64/cpu.rs` picks from cpuid, and asserts that
       # set with `RIND_TEST_X86_*`. Its comment names the other models that
       # select the same set, per the scans `admin/x86-cpu sde-scan` saves in
-      # `admin/x86-cpus`.
+      # `admin/x86-cpus`. SDE reports no `MCDT_NO` for any model, Arrow
+      # Lake's included, so every row needs `rind/src/low/mcdt.rs`'s guard.
 
       # Prescott, a Pentium 4, lacks SSSE3, so it runs every slowest path:
       # aws-lc's SSE2 AES and integer GHASH, SHA-1, and SHA-256, HACL*'s
@@ -77,6 +77,7 @@ jobs:
           RIND_TEST_X86_AVX512_AES_GCM: 0
           RIND_TEST_X86_AVX512_ML_KEM: 0
           RIND_TEST_X86_AVX512_RSA: 0
+          RIND_TEST_X86_MCDT: 1
 
       # Merom, the first Core 2, adds SSSE3 but not SSE4.1 or AES-NI, so it
       # runs aws-lc's vpaes and SSSE3 GHASH, ChaCha20, SHA-1, and SHA-256,
@@ -98,6 +99,7 @@ jobs:
           RIND_TEST_X86_AVX512_AES_GCM: 0
           RIND_TEST_X86_AVX512_ML_KEM: 0
           RIND_TEST_X86_AVX512_RSA: 0
+          RIND_TEST_X86_MCDT: 1
 
       # Nehalem adds SSE4.1, so ChaCha20-Poly1305 runs in one pass, but still
       # lacks AES-NI, so it otherwise runs Merom's paths. Penryn selects the
@@ -119,6 +121,7 @@ jobs:
           RIND_TEST_X86_AVX512_AES_GCM: 0
           RIND_TEST_X86_AVX512_ML_KEM: 0
           RIND_TEST_X86_AVX512_RSA: 0
+          RIND_TEST_X86_MCDT: 1
 
       # Westmere adds AES-NI and PCLMULQDQ without AVX, so rind's AES-GCM and
       # GHASH intrinsics run without VEX encoding. Silvermont selects the same
@@ -140,6 +143,7 @@ jobs:
           RIND_TEST_X86_AVX512_AES_GCM: 0
           RIND_TEST_X86_AVX512_ML_KEM: 0
           RIND_TEST_X86_AVX512_RSA: 0
+          RIND_TEST_X86_MCDT: 1
 
       # Goldmont, an Atom, runs Westmere's paths, but SHA-1 and SHA-256 on
       # its SHA extensions. Goldmont Plus, Tremont, and Snow Ridge select the
@@ -161,6 +165,7 @@ jobs:
           RIND_TEST_X86_AVX512_AES_GCM: 0
           RIND_TEST_X86_AVX512_ML_KEM: 0
           RIND_TEST_X86_AVX512_RSA: 0
+          RIND_TEST_X86_MCDT: 1
 
       # Sandy Bridge lacks AVX2, MOVBE, BMI2, and ADX, so rind's AES-GCM
       # intrinsics, aws-lc's AVX SHA and SSSE3 ChaCha20 routines, the portable
@@ -183,6 +188,7 @@ jobs:
           RIND_TEST_X86_AVX512_AES_GCM: 0
           RIND_TEST_X86_AVX512_ML_KEM: 0
           RIND_TEST_X86_AVX512_RSA: 0
+          RIND_TEST_X86_MCDT: 1
 
       # Haswell lacks ADX and VAES, so s2n-bignum's `_alt` routines, aws-lc's
       # Montgomery multiplication, its RSAZ exponentiation for RSA-2048, and
@@ -204,6 +210,7 @@ jobs:
           RIND_TEST_X86_AVX512_AES_GCM: 0
           RIND_TEST_X86_AVX512_ML_KEM: 0
           RIND_TEST_X86_AVX512_RSA: 0
+          RIND_TEST_X86_MCDT: 1
 
       # Skylake server has AVX-512 but neither SHA nor VAES, so it runs the
       # AVX2 kernels with s2n-bignum's BMI2 and ADX routines, aws-lc's AVX
@@ -226,6 +233,7 @@ jobs:
           RIND_TEST_X86_AVX512_AES_GCM: 0
           RIND_TEST_X86_AVX512_ML_KEM: 0
           RIND_TEST_X86_AVX512_RSA: 0
+          RIND_TEST_X86_MCDT: 1
 
       # Cannon Lake adds SHA and AVX-512 IFMA, but lacks VAES and AVX-512
       # VBMI2, so it runs Skylake server's paths with SHA-1 and SHA-256 on the
@@ -247,6 +255,7 @@ jobs:
           RIND_TEST_X86_AVX512_AES_GCM: 0
           RIND_TEST_X86_AVX512_ML_KEM: 0
           RIND_TEST_X86_AVX512_RSA: 1
+          RIND_TEST_X86_MCDT: 1
 
       # Alder Lake adds VAES without AVX-512, so AES-GCM runs on 256-bit
       # vectors. Meteor and Raptor Lake, and Sierra Forest, select the same
@@ -268,6 +277,7 @@ jobs:
           RIND_TEST_X86_AVX512_AES_GCM: 0
           RIND_TEST_X86_AVX512_ML_KEM: 0
           RIND_TEST_X86_AVX512_RSA: 0
+          RIND_TEST_X86_MCDT: 1
 
       # Arrow Lake adds the SHA512 instructions to Alder Lake's paths, so
       # SHA-384 and SHA-512 run OpenSSL's routine for them. Lunar and Panther
@@ -289,6 +299,7 @@ jobs:
           RIND_TEST_X86_AVX512_AES_GCM: 0
           RIND_TEST_X86_AVX512_ML_KEM: 0
           RIND_TEST_X86_AVX512_RSA: 0
+          RIND_TEST_X86_MCDT: 1
 
       # Granite Rapids limited to 256-bit AVX10 hides AVX-512F, so it selects
       # Alder Lake's paths, checking that rind takes no AVX-512 path there.
@@ -309,6 +320,7 @@ jobs:
           RIND_TEST_X86_AVX512_AES_GCM: 0
           RIND_TEST_X86_AVX512_ML_KEM: 0
           RIND_TEST_X86_AVX512_RSA: 0
+          RIND_TEST_X86_MCDT: 1
 
       # Granite Rapids selects every path but the SHA512 instructions',
       # including AVX-512 AES-GCM, ML-KEM, and RSA. Ice Lake, Ice Lake server,
@@ -330,6 +342,7 @@ jobs:
           RIND_TEST_X86_AVX512_AES_GCM: 1
           RIND_TEST_X86_AVX512_ML_KEM: 1
           RIND_TEST_X86_AVX512_RSA: 1
+          RIND_TEST_X86_MCDT: 1
 
       # Diamond Rapids selects every path, Granite Rapids' and the SHA512
       # instructions'.
@@ -350,3 +363,4 @@ jobs:
           RIND_TEST_X86_AVX512_AES_GCM: 1
           RIND_TEST_X86_AVX512_ML_KEM: 1
           RIND_TEST_X86_AVX512_RSA: 1
+          RIND_TEST_X86_MCDT: 1

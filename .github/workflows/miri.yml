@@ -1,11 +1,12 @@
 name: miri
 
-# Nightly only. A Miri run takes hours, longer than a pull request should
-# wait, and a cancelled check blocks the merge queue. Run `just miri TARGET`
-# locally, or dispatch this workflow, to check a change before it lands.
+# Weekly only, at its own hour (see TESTING.md, "Scheduled workflows"). A
+# Miri run takes hours, longer than a pull request should wait, and a
+# cancelled check blocks the merge queue. Run `just miri TARGET` locally, or
+# dispatch this workflow, to check a change before it lands.
 on:
   schedule:
-    - cron: "0 18 * * *"
+    - cron: "23 0 * * 0"
   workflow_dispatch:
 
 permissions:
@@ -32,8 +33,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - uses: ./.github/actions/vectors
 
       - uses: ./.github/actions/nix
 

@@ -24,6 +24,7 @@
 //! # Ok(())
 //! # }
 //! ```
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use core::fmt;
 
@@ -96,7 +97,9 @@ impl KeyPair {
         alg: &'static SignatureAlgorithm,
     ) -> Result<Self, Error> {
         let der = pkcs8.secret_pkcs8_der();
-        let key = match signer(alg)? {
+        let signer = signer(alg)?;
+        ring_pkcs8_version(der, matches!(signer, Signer::Ed25519))?;
+        let key = match signer {
             Signer::Ecdsa(signing) => {
                 Key::Ecdsa(EcdsaKeyPair::from_pkcs8(signing, der).map_err(rejected)?)
             }
@@ -249,6 +252,44 @@ fn signer(algorithm: &SignatureAlgorithm) -> Result<Signer, Error> {
     })
 }
 
+/// Refuses the PKCS#8 v2 documents ring does, which rind takes as aws-lc-rs
+/// does: any for ECDSA and RSA, and for Ed25519 one without its public key.
+fn ring_pkcs8_version(der: &[u8], ed25519: bool) -> Result<(), Error> {
+    /// The tag, body, and remainder of the DER element starting `der`, for
+    /// lengths up to 0xffff; anything else is left for rind to refuse.
+    fn element(der: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+        let (&tag, rest) = der.split_first()?;
+        let (&len, rest) = rest.split_first()?;
+        let (len, rest) = match len {
+            0..=0x7f => (usize::from(len), rest),
+            0x81 => (usize::from(*rest.first()?), rest.get(1..)?),
+            0x82 => (
+                usize::from(u16::from_be_bytes([*rest.first()?, *rest.get(1)?])),
+                rest.get(2..)?,
+            ),
+            _ => return None,
+        };
+        rest.split_at_checked(len)
+            .map(|(body, rest)| (tag, body, rest))
+    }
+
+    let Some((_, body, _)) = element(der) else {
+        return Ok(());
+    };
+    let v2 = element(body).is_some_and(|(tag, version, _)| (tag, version) == (0x02, &[1][..]));
+    let mut public_key = false;
+    let mut fields = body;
+    while let Some((tag, _, rest)) = element(fields) {
+        public_key |= tag == 0x81;
+        fields = rest;
+    }
+    match (v2, ed25519, public_key) {
+        (true, false, _) => Err(Error::RingKeyRejected("VersionNotSupported".into())),
+        (true, true, false) => Err(Error::RingKeyRejected("PublicKeyIsMissing".into())),
+        _ => Ok(()),
+    }
+}
+
 /// Keeps rind's reason for refusing a key, as rcgen does for its backends.
 fn rejected(err: rind::Error) -> Error {
     match err {
@@ -347,5 +388,60 @@ impl fmt::Debug for KeyPair {
         f.debug_struct("KeyPair")
             .field("algorithm", self.algorithm)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `pkcs8` with its version set to `version`.
+    fn with_version(pkcs8: &[u8], version: u8) -> Vec<u8> {
+        let mut der = pkcs8.to_vec();
+        let at = match der[1] {
+            0x81 => 3,
+            0x82 => 4,
+            _ => 2,
+        };
+        assert_eq!(der[at..at + 2], [0x02, 0x01]);
+        der[at + 2] = version;
+        der
+    }
+
+    fn load(der: &[u8], alg: &'static SignatureAlgorithm) -> Result<KeyPair, Error> {
+        KeyPair::from_pkcs8_der_and_sign_algo(&PrivatePkcs8KeyDer::from(der), alg)
+    }
+
+    /// ring refuses a v2 document that rind takes: any for ECDSA and RSA,
+    /// and for Ed25519 one without its public key.
+    #[test]
+    fn pkcs8_v2_as_ring() {
+        let rejected = |reason: &str| Some(Error::RingKeyRejected(reason.into()));
+
+        let ecdsa = EcdsaKeyPair::generate(&sign::ECDSA_P256_SHA256_ASN1)
+            .unwrap()
+            .to_pkcs8();
+        let rsa = RsaKeyPair::from_pkcs1(include_bytes!("../../rind/src/high/rsa/rsa2048.der"))
+            .unwrap()
+            .to_pkcs8();
+        for (pkcs8, alg) in [
+            (ecdsa.as_ref(), &PKCS_ECDSA_P256_SHA256),
+            (rsa.as_ref(), &PKCS_RSA_SHA256),
+        ] {
+            assert!(load(pkcs8, alg).is_ok());
+            let v2 = with_version(pkcs8, 1);
+            assert_eq!(load(&v2, alg).err(), rejected("VersionNotSupported"));
+        }
+
+        let ed25519 = Ed25519KeyPair::generate().unwrap();
+        assert!(load(ed25519.to_pkcs8().as_ref(), &PKCS_ED25519).is_ok());
+        let v1 = ed25519.to_pkcs8v1();
+        assert!(load(v1.as_ref(), &PKCS_ED25519).is_ok());
+        let v2 = with_version(v1.as_ref(), 1);
+        assert!(Ed25519KeyPair::from_pkcs8(&v2).is_ok());
+        assert_eq!(
+            load(&v2, &PKCS_ED25519).err(),
+            rejected("PublicKeyIsMissing")
+        );
     }
 }

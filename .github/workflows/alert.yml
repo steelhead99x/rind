@@ -1,6 +1,6 @@
 name: Alert
 
-# Posts nightly, landing, and release failures to the Discord #alerts channel,
+# Posts scheduled, landing, and release failures to the Discord #alerts channel,
 # since those runs have no pull request to turn red. Reads the kixel-ai
 # organization's DISCORD_WEBHOOK secret.
 
@@ -20,7 +20,6 @@ on:
       - Check
       - coverage
       - ctgrind
-      - ctgrind debug
       - fuzz
       - miri
       - mutants
@@ -36,22 +35,25 @@ on:
     types:
       - completed
 
-# No concurrency group: each run reports a different failed run, and the
-# nightlies share a schedule, so cancelling would drop alerts.
+# No concurrency group: each run reports a different failed run, and
+# scheduled runs can finish together, so cancelling would drop alerts.
 
 jobs:
   discord:
     name: Discord
-    # `cancelled` is excluded: a superseded run is cancelled as a matter of
-    # course. The nightlies alert only when scheduled, since whoever dispatched
-    # one is already watching it. Release and Check alert however they ran:
+    # Scheduled runs alert only when scheduled, since whoever dispatched one
+    # is already watching it, and alert when cancelled too: a job that runs
+    # past its timeout ends `cancelled`, not `timed_out`, and any other
+    # cancellation still leaves the scheduled check undone. Release and Check alert however they ran:
     # they follow the queue's pushes to main, which nobody watches. So does
-    # Dart release, which a tag push starts with nobody watching.
-    # Queue failures stay on the PR and go to the queue watcher and fixer.
+    # Dart release, which a tag push starts with nobody watching. Their
+    # cancellations are excluded, since a newer push supersedes a run as a
+    # matter of course. Queue failures stay on the PR and go to the queue
+    # watcher and fixer.
     if: >-
-      (github.event.workflow_run.conclusion == 'failure' ||
-      github.event.workflow_run.conclusion == 'timed_out') &&
-      (github.event.workflow_run.event == 'schedule' ||
+      (github.event.workflow_run.event == 'schedule' &&
+      contains(fromJSON('["failure", "timed_out", "cancelled"]'), github.event.workflow_run.conclusion)) ||
+      (contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion) &&
       contains(fromJSON('["Release", "Check", "Dart release"]'), github.event.workflow_run.name))
     runs-on: ubuntu-latest
     timeout-minutes: 5
