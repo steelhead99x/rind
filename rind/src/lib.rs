@@ -48,16 +48,6 @@ compile_error!(
      or `\"fiat\"`: dalek's default simd backend does not compile on this soft-float target"
 );
 
-// With SSE2, cpufeatures reports AVX on `target_os = "none"` only when the
-// target feature is on. An explicit `simd` or `avx512` backend together
-// with those features would use YMM or ZMM. build.rs sets the cfg then.
-#[cfg(rind_x86_64_none_dalek_wide)]
-compile_error!(
-    "x86_64-unknown-none cannot use curve25519-dalek's `simd` or `avx512` backend \
-     when those target features are enabled: the build would use YMM or ZMM, and \
-     an interrupt here is not known to save them"
-);
-
 // The FIPS module's error state, its self-tests, and its DRBG use std
 // (`process::abort`, `thread_local`, `RwLock`). A bare-metal build stops
 // here with that reason.
