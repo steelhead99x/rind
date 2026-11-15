@@ -19,7 +19,6 @@ on:
       - coverage
       - miri
       - mutants
-      - Pullfrog
       - python
       - Release
     types:
