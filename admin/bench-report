@@ -24,7 +24,8 @@ slug already on disk is `<slug>-<tag>`, or `<slug>-2` when that alias is
 taken, and a later import replaces that file, including after the slug
 itself is free. When this machine already has the slug file, that file is
 refreshed and a marked alias of it is removed. An untagged alias gains a
-tag in place. An empty, all-zero, or uninitialized machine id is not a tag.
+tag in place. Refreshing a tagged alias leaves another machine's untagged
+alias of that slug. An empty, all-zero, or uninitialized machine id is not a tag.
 A host whose chosen name is that spelling is left as it is.
 
 `collect` is the maintainer path. It copies one commit to each machine in
@@ -88,7 +89,8 @@ import tomllib
 # fixed application key. An empty, all-zero, or uninitialized id is not a
 # tag. When this machine already has the slug file, that file is refreshed
 # and a marked alias of it is removed. An untagged alias gains a tag in
-# place. A chosen host of that spelling is left as it is.
+# place. Refreshing a tagged alias leaves another machine's untagged alias.
+# A chosen host of that spelling is left as it is.
 # `render` reads a `note` from here
 # only when that host's JSON has none, and shows these names first so the
 # published report keeps its order; every other host keeps the order it was
@@ -2193,7 +2195,8 @@ def report(hosts, tiers, verified, gaps):
         "alias is taken, and a later import replaces that file. The tag is eight hex characters",
         "of HMAC-SHA256 over the OS machine id, under a fixed application key. An empty, all-zero,",
         "or uninitialized id is not a tag. A slug file this machine already has is refreshed, and",
-        "an untagged alias of that machine gains a tag instead of a second file. A host whose",
+        "an untagged alias of that machine gains a tag instead of a second file. Refreshing a",
+        "tagged alias leaves another machine's untagged alias of that slug. A host whose",
         "chosen name is that spelling is left as it is. `summary` and `render --from` read every",
         "measured `<host>.json`.",
         "`collect` reaches only the maintainer's machines. A gap's `on` may name any host with a",
@@ -2491,10 +2494,19 @@ def _write_imported(directory, name, host, dest):
 
 
 def _drop_extra_aliases(slug, host, existing, keep):
-    """Removes other marked aliases of `slug` so one machine stays one file."""
+    """Removes other marked aliases of `slug` so one machine stays one file.
+
+    A same-tag alias is this machine, so a second copy is removed wherever
+    the result lands. An untagged alias matches any tagged result, and it
+    may be another machine. It is removed only when this import writes the
+    slug file itself.
+    """
+    tag = machine_tag_of(host)
     removed = []
     for stem, body in list(existing.items()):
-        if stem == keep or not same_machine_alias(body, slug, machine_tag_of(host)):
+        if stem == keep or not same_machine_alias(body, slug, tag):
+            continue
+        if not machine_tag_of(body) and keep != slug:
             continue
         path = os.path.join(DATA_DIR, f"{stem}.json")
         if os.path.isfile(path):
@@ -2508,14 +2520,16 @@ def import_hosts(directory):
     """Copies a collection's measured hosts into the report's data.
 
     When this machine already has the slug file, that file is refreshed and
-    a marked alias of it is removed. Otherwise a marked alias is the one
-    destination, even when the slug itself is free, and an untagged alias
-    gains a tag in place. A free name stays that name. A different machine
-    with the same slug is stored beside it, as `<slug>-<tag>`, or `<slug>-2`
-    when that alias is taken. Only a file this import will copy counts as a
-    taken incoming name. A file in the collection that is already this
-    machine's generated alias is that destination, not a second host, and
-    moving it keeps `alias_of`.
+    a marked alias of it is removed, including an untagged one. Otherwise a
+    marked alias is the one destination, even when the slug itself is free,
+    and an untagged alias gains a tag in place. Refreshing that alias does
+    not delete a different machine's untagged alias of the same slug. A
+    second alias that already carries this result's tag is removed. A free
+    name stays that name. A different machine with the same slug is stored
+    beside it, as `<slug>-<tag>`, or `<slug>-2` when that alias is taken.
+    Only a file this import will copy counts as a taken incoming name. A
+    file in the collection that is already this machine's generated alias
+    is that destination, not a second host, and moving it keeps `alias_of`.
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     existing = {}
