@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! The portable backend: pure Rust, for every architecture without one of
-//! rind's assembly backends, and the base armv7 builds on. Most is libcrux's
-//! and HACL*'s, where whole operations are swapped in `mid`, and rind's own
-//! portable arithmetic in `generic`: the NIST curves, RSA, and ML-KEM. Each
-//! file names its source.
+//! rind's assembly backends, and the base armv7 builds on. Whole operations
+//! are chosen in `mid`. The arithmetic in `generic` is rind's: the NIST
+//! curves, RSA, ML-KEM, SHA-2, and Poly1305. Each file names its source.
 //!
 //! It needs no CPU features, and each operation's time depends on no secret,
 //! given a CPU whose multiply takes the same time for every operand.
@@ -24,6 +23,7 @@ pub(crate) mod curve25519;
 pub(crate) mod ghash_nohw;
 #[cfg(rind_backend = "portable")]
 pub(crate) mod keccak;
+#[cfg(rind_backend = "portable")]
 pub(crate) mod poly1305;
 #[cfg(rind_backend = "portable")]
 pub(crate) mod sha;

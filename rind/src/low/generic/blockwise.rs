@@ -53,10 +53,13 @@ impl<const N: usize> Blockwise<N> {
     }
 
     // Only Poly1305 uses it.
+    // The 64-bit limbs and the 26-bit limbs. `test` covers the 26-bit
+    // module, which every backend compiles so its tests run.
     #[cfg(any(
         rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
-        all(rind_backend = "aarch64", test)
+        rind_backend = "portable",
+        rind_backend = "arm",
+        test
     ))]
     pub(crate) fn add_leading<'a>(&mut self, bytes: &'a [u8]) -> &'a [u8] {
         if self.used == 0 {
@@ -72,10 +75,13 @@ impl<const N: usize> Blockwise<N> {
     }
 
     // Only Poly1305 uses it.
+    // The 64-bit limbs and the 26-bit limbs. `test` covers the 26-bit
+    // module, which every backend compiles so its tests run.
     #[cfg(any(
         rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
-        all(rind_backend = "aarch64", test)
+        rind_backend = "portable",
+        rind_backend = "arm",
+        test
     ))]
     pub(crate) fn take(&mut self) -> Option<[u8; N]> {
         if self.used == N {
@@ -87,10 +93,13 @@ impl<const N: usize> Blockwise<N> {
     }
 
     // Only Poly1305's tail reads it.
+    // The 64-bit limbs and the 26-bit limbs. `test` covers the 26-bit
+    // module, which every backend compiles so its tests run.
     #[cfg(any(
         rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
-        all(rind_backend = "aarch64", test)
+        rind_backend = "portable",
+        rind_backend = "arm",
+        test
     ))]
     pub(crate) fn peek_remaining(&self) -> Option<&[u8]> {
         if self.used > 0 {
@@ -106,10 +115,13 @@ impl<const N: usize> Blockwise<N> {
     }
 
     // Only Poly1305 uses it.
+    // The 64-bit limbs and the 26-bit limbs. `test` covers the 26-bit
+    // module, which every backend compiles so its tests run.
     #[cfg(any(
         rind_backend = "x86_64",
-        all(rind_backend = "portable", target_pointer_width = "64"),
-        all(rind_backend = "aarch64", test)
+        rind_backend = "portable",
+        rind_backend = "arm",
+        test
     ))]
     pub(crate) fn add_trailing(&mut self, trailing: &[u8]) {
         self.buffer[..trailing.len()].copy_from_slice(trailing);

@@ -1,23 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! Poly1305 with aws-lc's NEON code where the CPU has NEON, and HACL*'s
-//! verified streaming `Hacl_MAC_Poly1305`, as libcrux-poly1305 ships it,
-//! otherwise.
+//! Poly1305 with aws-lc's NEON code where the CPU has NEON, and rind's
+//! 26-bit limbs in `generic::poly1305_32` otherwise.
 
 use super::cpu::HaveNeon;
 use super::poly1305_arm::Poly1305Neon;
-use crate::low::portable::poly1305::Hacl;
+use crate::low::generic::poly1305_32::Poly1305 as Poly32;
 
+// NEON's state stays inline: opening an AEAD does not allocate. The 26-bit
+// state is smaller, which is the difference this lint measures.
+#[expect(clippy::large_enum_variant)]
 pub(crate) enum Poly1305 {
     Neon(Poly1305Neon),
-    Portable(Hacl),
+    Portable(Poly32),
 }
 
 impl Poly1305 {
     pub(crate) fn new(key: &[u8; 32]) -> Self {
         match HaveNeon::check() {
             Some(token) => Self::Neon(Poly1305Neon::new(key, token)),
-            None => Self::Portable(Hacl::new(key)),
+            None => Self::Portable(Poly32::new(key)),
         }
     }
 
@@ -43,7 +45,7 @@ mod tests {
     use crate::low::ct;
 
     // Every other test sees only the path the CPU picks, so the NEON code is
-    // checked against HACL*'s here: every length up to 200 bytes, plus some
+    // checked against the 26-bit limbs here: every length up to 200 bytes, plus some
     // past the assembly's 64-byte and 32-byte loops, each fed whole and in
     // ragged pieces that cross its 32-byte buffer. The key and message are
     // secret, so under `admin/ctgrind` this also checks both are constant
@@ -61,7 +63,7 @@ mod tests {
         ct::secret_slice(&msg);
         for len in (0..=200).chain([255, 256, 257, 1023, 1024, 1025, 1100]) {
             let msg = &msg[..len];
-            let mut want = Hacl::new(&key);
+            let mut want = Poly32::new(&key);
             want.add_bytes(msg);
             let want = ct::into_public(want.finish());
 
@@ -83,7 +85,7 @@ mod tests {
         let ones = [0xff; 32];
         let msg = [0xff; 1100];
         for len in [16, 17, 32, 64, 1100] {
-            let mut want = Hacl::new(&ones);
+            let mut want = Poly32::new(&ones);
             want.add_bytes(&msg[..len]);
             let mut got = Poly1305Neon::new(&ones, token);
             got.add_bytes(&msg[..len]);

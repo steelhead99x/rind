@@ -45,8 +45,8 @@ qemu. iOS devices' code is only built.
   Sapphire Rapids, and AMD's Zen 4 and 5, RSA-2048, 3072, and 4096 signing
   runs aws-lc's dual AVX-512 RSAZ.
 - 32-bit `arm` from ARMv7 on (tested on `armv7-unknown-linux-gnueabihf` and
-  `armv7-linux-androideabi`) runs portable Rust instead, mostly from
-  [libcrux] (see [ALGORITHMS.md](ALGORITHMS.md)), and needs no CPU features. RSA's
+  `armv7-linux-androideabi`) runs portable Rust for the operations without
+  assembly (see [ALGORITHMS.md](ALGORITHMS.md)), and needs no CPU features. RSA's
   Montgomery multiplication runs [aws-lc]'s assembly, with NEON where the CPU
   has it. Where
   the CPU has the ARMv8 crypto extension, as most 32-bit Android devices do,
@@ -157,7 +157,6 @@ family since 2004, and of some AMD cores.
 [HACL\*]: https://github.com/hacl-star/hacl-star
 [mlkem-native]: https://github.com/pq-code-package/mlkem-native
 [mldsa-native]: https://github.com/pq-code-package/mldsa-native
-[libcrux]: https://github.com/cryspen/libcrux
 [aws-lc]: https://github.com/aws/aws-lc
 [BoringSSL]: https://boringssl.googlesource.com/boringssl
 [OpenSSL]: https://github.com/openssl/openssl
