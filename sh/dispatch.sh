@@ -354,7 +354,55 @@ step() {
             # nextest runs the test binaries in parallel but not doc tests. Like
             # `cargo test`, it passes a selection with no tests, such as the
             # benches alone.
-            run cargo nextest run "${packages[@]}" --locked --no-tests=warn
+            #
+            # rind's default build leaves `low::zeroise` a no-op, so that
+            # resolve is `cargo nextest run -p rind` and nothing else.
+            # rind-openssl depends on rind with `features = ["wipe"]`, which
+            # resolver 2 turns on for every package sharing its invocation.
+            # rind-fuzz depends on rind-openssl, so it does the same. Each
+            # runs alone, as rind-rcgen's wipe features do below. A new member
+            # that depends on rind-openssl has to be split out the same way.
+            local rest=() arg name i workspace=0 saw_rind='' saw_openssl='' saw_fuzz=''
+            if ((${#packages[@]} == 0)); then
+                run cargo nextest run --locked --no-tests=warn
+            else
+                for ((i = 0; i < ${#packages[@]}; i++)); do
+                    arg=${packages[i]}
+                    if [[ $arg == --workspace ]]; then
+                        workspace=1
+                    elif [[ $arg == -p ]]; then
+                        i=$((i + 1))
+                        name=${packages[i]:-}
+                        case $name in
+                            rind) saw_rind=1 ;;
+                            rind-openssl) saw_openssl=1 ;;
+                            rind-fuzz) saw_fuzz=1 ;;
+                            '') ;;
+                            *) rest+=(-p "$name") ;;
+                        esac
+                    else
+                        rest+=("$arg")
+                    fi
+                done
+                if ((workspace)); then
+                    saw_rind=1
+                    saw_openssl=1
+                    saw_fuzz=1
+                    rest=(--workspace --exclude rind --exclude rind-openssl --exclude rind-fuzz)
+                fi
+                if [[ -n $saw_rind ]]; then
+                    run cargo nextest run -p rind --locked --no-tests=warn
+                fi
+                if ((${#rest[@]} > 0)); then
+                    run cargo nextest run "${rest[@]}" --locked --no-tests=warn
+                fi
+                if [[ -n $saw_openssl ]]; then
+                    run cargo nextest run -p rind-openssl --locked --no-tests=warn
+                fi
+                if [[ -n $saw_fuzz ]]; then
+                    run cargo nextest run -p rind-fuzz --locked --no-tests=warn
+                fi
+            fi
             # Only the zeroing and heap scratch tests see the opt-in wipe,
             # which the default build turns into no-ops.
             if names rind "${packages[@]}"; then

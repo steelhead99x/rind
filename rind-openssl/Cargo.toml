@@ -18,6 +18,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # OpenSSL's own providers cleanse keys, so this one always wipes them.
+# `sh/dispatch.sh` tests this crate in its own cargo invocation. Shared with
+# other packages, this feature turns `rind/wipe` on for every one of them.
 rind = { version = "0.3.2", path = "../rind", features = ["wipe"] }
 zeroize = "1.9"
 
