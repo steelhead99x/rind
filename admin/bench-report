@@ -59,6 +59,7 @@ import datetime
 import fnmatch
 import glob
 import hashlib
+import hmac
 import json
 import os
 import platform
@@ -2214,11 +2215,21 @@ def machine_identity():
     return ""
 
 
+# Application label for the published machine tag. Not a secret: anyone who
+# already has the raw machine id can recompute the tag. It keeps a plain hash
+# of that id from another program from matching these files.
+_MACHINE_TAG_KEY = b"rind-bench-report-host"
+
+
 def machine_tag_for(ident):
-    """Eight hex characters for `ident`, or "" when there is nothing to hash."""
+    """Eight hex characters for `ident`, or "" when there is nothing to tag.
+
+    HMAC-SHA256 with a fixed application key, so the value that leaves the
+    machine is not a raw hash of the OS machine id.
+    """
     if not ident:
         return ""
-    return hashlib.sha256(ident.encode()).hexdigest()[:8]
+    return hmac.new(_MACHINE_TAG_KEY, ident.encode(), hashlib.sha256).hexdigest()[:8]
 
 
 def machine_tag():
@@ -2312,8 +2323,9 @@ def collided_host_name(slug, tag, taken):
 def assign_import_name(name, host, existing, incoming=None):
     """Where to put `host`.
 
-    A free name is that name, even when another file carries the same tag.
-    The same machine replaces its own file. A different machine that wants a
+    A free name is that name when this machine has no marked alias of it.
+    A marked alias is the one destination even when the slug is free. The
+    same machine replaces its own file. A different machine that wants a
     taken name reuses the file this import already created for that name,
     including one still waiting in this collection, or gets
     `collided_host_name`. An incoming alias is reused only when that filename
@@ -2323,8 +2335,9 @@ def assign_import_name(name, host, existing, incoming=None):
     """
     incoming = incoming or {}
     tag = machine_tag_of(host)
-    if name not in existing or not different_machine(existing[name], host):
-        return name
+    # A marked alias is this machine's one destination, even when the slug
+    # itself is free. A same-tag file that is not an alias of this slug is
+    # left alone, which is how two chosen names on one machine both stay.
     found = {
         stem
         for records in (existing, incoming)
@@ -2335,14 +2348,21 @@ def assign_import_name(name, host, existing, incoming=None):
     }
     if found:
         return min(found, key=lambda stem: disambiguation_rank(stem, name, tag))
-    reserved = {stem for stem, body in incoming.items() if not same_machine_alias(body, name, tag)}
+    if name not in existing or not different_machine(existing[name], host):
+        return name
+    reserved = {
+        stem
+        for stem, body in incoming.items()
+        if body.get("status", "ok") == "ok" and not same_machine_alias(body, name, tag)
+    }
     return collided_host_name(name, tag, set(existing) | reserved)
 
 
 def import_hosts(directory):
     """Copies a collection's measured hosts into the report's data.
 
-    A free name stays that name. A later result from the same machine replaces
+    A free name stays that name unless this machine already has a marked alias,
+    which stays the one destination. A later result from the same machine replaces
     the file this import already gave it. A different machine with the same
     slug is stored beside it, as `<slug>-<tag>`, or `<slug>-2` when that alias
     is taken. Other filenames in the collection count as taken for that choice.
