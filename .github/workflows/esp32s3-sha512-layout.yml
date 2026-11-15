@@ -75,7 +75,8 @@ jobs:
         run: |
           set -eu
           sudo apt-get update
-          sudo apt-get install --yes libslirp0
+          # gcc is the host compiler that checks the pinned core-isa.h headers.
+          sudo apt-get install --yes libslirp0 gcc
           root="$HOME/.espressif"
           mkdir -p "$root"
           curl -fsSL -o /tmp/qemu-xtensa.tar.xz \

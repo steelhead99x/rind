@@ -107,14 +107,17 @@ fn round_constant<const I: usize>(kp: *const u64) -> u64 {
 fn be_u32<const BYTE: usize, const OFF: usize>(block: &[u8; 128]) -> u32 {
     let y;
     // SAFETY: the same `l32i` plus byte swap as `sha256_iram`'s message
-    // load. `BYTE + OFF` is a multiple of 4 in `0..128`. ESP-IDF v5.5.1 sets
-    // `XCHAL_UNALIGNED_LOAD_HW` to 1 and `XCHAL_UNALIGNED_LOAD_EXCEPTION`
-    // to 0 on ESP32, ESP32-S2, and ESP32-S3, so `l32i` does not trap and
-    // does not call a helper when `block` is not word-aligned.
-    // `admin/esp32s3-sha512-layout` runs this sequence, including a block
-    // whose address is not a multiple of 4, on QEMU's `esp32` and `esp32s3`
-    // CPUs. That is the emulator's model of those cores, not a board
-    // measurement. This QEMU build has no ESP32-S2 CPU. The
+    // load. `BYTE + OFF` is a multiple of 4 in `0..128`. ESP-IDF v5.5.1's
+    // `core-isa.h` sets `XCHAL_UNALIGNED_LOAD_HW` to 1 and
+    // `XCHAL_UNALIGNED_LOAD_EXCEPTION` to 0 on ESP32, ESP32-S2, and ESP32-S3.
+    // That is Hardware Alignment with no unaligned-load exception, so `l32i`
+    // returns the word at an address that is not a multiple of 4. It does
+    // not trap, it does not ignore the low bits, and it does not call a
+    // helper. `admin/esp32s3-sha512-layout` checks those three headers, and
+    // runs this sequence, including a block whose address is not a multiple
+    // of 4, on QEMU's `esp32` and `esp32s3` CPUs. That is the emulator's
+    // model of those cores, not a board measurement. This QEMU build has no
+    // ESP32-S2 CPU, which is why that chip is the header check. The
     // sequence writes SAR, `a14`, and `y`, and does not use the stack. esp rustc
     // 1.97 lists `sar` as a clobber-only register, the same class
     // `sha256_iram` names with `out("sar") _`. The `ssai 8` is consumed by

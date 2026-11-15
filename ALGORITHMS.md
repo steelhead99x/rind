@@ -164,8 +164,11 @@ with portable Rust in place of the assembly armv7 runs regardless.
   It also runs the Xtensa message load (`l32i`, `ssai`, `src`), including
   blocks at byte offsets 1 and 3, on QEMU's ESP32 and ESP32-S3 CPUs. That
   run is the emulator's model of those cores, not a cycle count. This QEMU
-  build has no ESP32-S2 CPU. Board time
-  is unmeasured. SHA-256 on this target is the IRAM body above, and this
+  build has no ESP32-S2 CPU. The same check compiles ESP-IDF v5.5.1's
+  `core-isa.h` for the ESP32, the ESP32-S2, and the ESP32-S3 and requires
+  `XCHAL_UNALIGNED_LOAD_HW` 1 and `XCHAL_UNALIGNED_LOAD_EXCEPTION` 0, the
+  hardware `l32i` of an unaligned address. Board time is not measured.
+  SHA-256 on this target is the IRAM body above, and this
   placement leaves libcrux-sha2's object sections unchanged.
 - portable: ChaCha20-Poly1305's Poly1305 is Graviola's on 64-bit targets
   and HACL*'s ✓ on 32-bit ones, whose streaming state counts its input in a

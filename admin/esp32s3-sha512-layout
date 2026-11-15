@@ -17,16 +17,22 @@
 # `src R, a14, R`. That is the sequence in `be_u32`. The none-elf object is
 # then linked call0 and run under QEMU's esp32 and esp32s3 CPUs, including
 # blocks that are not word-aligned. That is the emulator's model of those
-# cores, not a cycle count. This QEMU build has no ESP32-S2 CPU. Board
-# timing is unmeasured.
+# cores, not a cycle count. This QEMU build has no ESP32-S2 CPU. ESP-IDF
+# v5.5.1's core-isa.h for the ESP32, the ESP32-S2, and the ESP32-S3 is
+# checked instead: Hardware Alignment is on and an unaligned load does not
+# trap, which is that core's l32i of an address that is not a multiple of
+# 4. Board timing is not measured.
 #
 # ESP-IDF Xtensa SHA-256 is rind's IRAM body, checked by
 # admin/esp32s3-sha256-layout. This script does not link a stand-in for
-# it and does not rewrite libcrux-sha2. Board timing is unmeasured.
+# it and does not rewrite libcrux-sha2. Board timing is not measured.
 #
 # Needs the espup rustc that the board uses (1.97.0.0, 8ea53bcd7) and the
 # xtensa-esp-elf binutils. Defaults are under $HOME/.espressif, which is
-# where .github/workflows/esp32s3-sha512-layout.yml installs them.
+# where .github/workflows/esp32s3-sha512-layout.yml installs them. It also
+# needs curl, sha256sum, a host C compiler, and network, to fetch and
+# check those three pinned headers. The host compiler reads them so the
+# Xtensa gcc's own core header cannot satisfy the include guard first.
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
@@ -40,6 +46,64 @@ nm=$xtensa_bin/xtensa-esp32s3-elf-nm
 ar=$xtensa_bin/xtensa-esp32s3-elf-ar
 gcc=$xtensa_bin/xtensa-esp32s3-elf-gcc
 ld=$xtensa_bin/xtensa-esp32s3-elf-ld
+host_cc=${CC:-cc}
+
+mkdir -p "$root/.tmp"
+work=$(mktemp -d "$root/.tmp/sha512-layout.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+
+# ESP-IDF v5.5.1 core-isa.h. QEMU executes an unaligned l32i on esp32 and
+# esp32s3 only. This build has no ESP32-S2 CPU, so that chip's header is
+# what says the instruction is a hardware load. The same macros are checked
+# on the two cores QEMU does run. XCHAL_UNALIGNED_LOAD_HW is the Hardware
+# Alignment option, which covers l32i. With XCHAL_UNALIGNED_LOAD_EXCEPTION
+# at 0, an unaligned l32i is the word at that address: it does not trap and
+# it does not ignore the low bits. The bytes are checked before the compiler
+# reads a macro. The tag is v5.5.1, path
+# components/xtensa/<chip>/include/xtensa/config/core-isa.h.
+if ! command -v curl >/dev/null 2>&1 || ! command -v sha256sum >/dev/null 2>&1; then
+  printf 'missing curl or sha256sum\n' >&2
+  exit 1
+fi
+if ! command -v "$host_cc" >/dev/null 2>&1; then
+  if command -v gcc >/dev/null 2>&1; then
+    host_cc=gcc
+  else
+    printf 'missing host C compiler %s\n' "$host_cc" >&2
+    exit 1
+  fi
+fi
+check_unaligned_l32i() {
+  chip=$1
+  sum=$2
+  id0=$3
+  id1=$4
+  version=$5
+  hdr=$work/$chip-core-isa.h
+  url=https://raw.githubusercontent.com/espressif/esp-idf/v5.5.1/components/xtensa/$chip/include/xtensa/config/core-isa.h
+  curl -fsSL -o "$hdr" "$url"
+  printf '%s  %s\n' "$sum" "$hdr" | sha256sum -c -
+  cat > "$work/$chip-unaligned.c" << EOF
+_Static_assert(XCHAL_HW_CONFIGID0 == $id0, "not the $chip core-isa.h");
+_Static_assert(XCHAL_HW_CONFIGID1 == $id1, "not the $chip core-isa.h");
+_Static_assert(XCHAL_HW_VERSION == $version, "not the $chip core-isa.h");
+_Static_assert(XCHAL_UNALIGNED_LOAD_HW == 1, "$chip unaligned l32i is not hardware");
+_Static_assert(XCHAL_UNALIGNED_LOAD_EXCEPTION == 0, "$chip unaligned l32i traps");
+EOF
+  # -nostdinc so no other core-isa.h can satisfy the include guard first.
+  "$host_cc" -fsyntax-only -std=c11 -ffreestanding -nostdinc \
+    -include "$hdr" "$work/$chip-unaligned.c"
+  printf '%s core-isa.h: unaligned l32i is hardware\n' "$chip"
+}
+check_unaligned_l32i esp32 \
+  8171435d7244c032535b495bd4e8dfb592f492275519d5657e5fa5a05fd613db \
+  0xC2BCFFFEu 0x1CC5FE96u 260003
+check_unaligned_l32i esp32s2 \
+  4668ebfb2f51b21b3fc3dae0d93fbe3392028b52fe4c630eced8a47bdafff201 \
+  0xC2ECFAFEu 0x22075F76u 270008
+check_unaligned_l32i esp32s3 \
+  7019cdf8369feda20f243f11ae5418bde0ecf99cb1c639d1ef4777957a4d800f \
+  0xC2F0FFFEu 0x23090F1Fu 270012
 
 for tool in "$rustc" "$cargo" "$objdump" "$readelf" "$nm" "$ar" "$gcc" "$ld"; do
   if [ ! -x "$tool" ]; then
@@ -47,10 +111,6 @@ for tool in "$rustc" "$cargo" "$objdump" "$readelf" "$nm" "$ar" "$gcc" "$ld"; do
     exit 1
   fi
 done
-
-mkdir -p "$root/.tmp"
-work=$(mktemp -d "$root/.tmp/sha512-layout.XXXXXX")
-trap 'rm -rf "$work"' EXIT
 
 # The real compressor, tests stripped, plus an entry so the block is live.
 # The feature name matches rind's, so the cfg in the source applies.
@@ -499,6 +559,13 @@ if max_end == 0 or max_end >= limit:
 print(f"load image ends at {max_end:#x}")
 '
 
+# This build's CPU list has esp32 and esp32s3 and no esp32s2. If a later
+# QEMU grows an esp32s2 CPU, the header check is no longer the only
+# evidence and the load has to run there too.
+if "$qemu" -cpu help | awk 'NR > 1 { print $1 }' | grep -qx esp32s2; then
+  fail 'this QEMU has an esp32s2 CPU; run the message load on it'
+fi
+
 run_load() {
   cpu=$1
   out=$work/load-$cpu.out
@@ -520,5 +587,5 @@ run_load() {
 run_load esp32
 run_load esp32s3
 
-printf 'board_timing: unmeasured\n'
+printf 'board_timing: not measured\n'
 printf 'esp32s3-sha512-layout: ok\n'
