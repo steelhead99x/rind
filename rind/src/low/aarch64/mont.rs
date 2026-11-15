@@ -9,13 +9,16 @@
 //! and twice as fast at 24, 48, 64, 96, and 128. It was also faster there
 //! than s2n-bignum's Karatsuba routines at 16 and 32 words.
 //!
-//! On a narrow multiplier the comparison reverses. At 16 and 32 words,
-//! RSA-2048's prime and modulus, this runs s2n-bignum's Karatsuba product
-//! and its 8n reduction, which is what aws-lc runs on a core outside its
-//! wide allowlist (Neoverse V1, V2, V3, and Apple). This crate also keeps
-//! `bn_mul_mont` on Neoverse N2, Cobalt 100, and any core Linux does not
-//! identify as Cortex-A72, Cortex-A76, or Neoverse N1. The generic
-//! routines run only below two words.
+//! On a narrow multiplier the 16-word comparison reverses: RSA-2048's CRT
+//! primes take s2n-bignum's Karatsuba product and its 8n reduction, which
+//! is what aws-lc runs on a core outside its wide allowlist (Neoverse V1,
+//! V2, V3, and Apple). The 32-word products, RSA-2048's public modulus and
+//! RSA-4096's CRT primes, take that path too. Their speed on Cortex-A76
+//! and Neoverse N1 was not measured. On Neoverse N2, a wide multiplier,
+//! `bn_mul_mont` was the faster of the two at 32 words, and this crate
+//! keeps it there, on Cobalt 100, and on any core Linux does not identify
+//! as Cortex-A72, Cortex-A76, or Neoverse N1. The generic routines run
+//! only below two words.
 
 /// `z = x * y / 2^(64k) mod m`, for `x` and `y` below `m`, where `k` is the
 /// length of each and `n0` is `-m^-1 mod 2^64`.
