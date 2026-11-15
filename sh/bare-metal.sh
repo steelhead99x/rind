@@ -34,11 +34,13 @@ scalar='--cfg curve25519_dalek_backend="serial"'
 cargo=(cargo)
 
 # Cargo uses one rustflags source and ignores the rest, in this order
-# (rustflags_from_env, then the target variable, then build.rustflags):
-# CARGO_ENCODED_RUSTFLAGS, RUSTFLAGS, CARGO_TARGET_<triple>_RUSTFLAGS,
-# CARGO_BUILD_RUSTFLAGS. Append this script's flags to that one source.
-# Splitting is on spaces, and quote characters stay in the token, which is
-# how `getrandom_backend="custom"` reaches rustc.
+# (rustflags_from_env, then the target variable, then build.rustflags, then
+# the config file): CARGO_ENCODED_RUSTFLAGS, RUSTFLAGS,
+# CARGO_TARGET_<triple>_RUSTFLAGS, CARGO_BUILD_RUSTFLAGS, then
+# target.<triple>.rustflags or build.rustflags from Cargo's config. Append
+# this script's flags to that one source. Splitting is on spaces, and quote
+# characters stay in the token, which is how `getrandom_backend="custom"`
+# reaches rustc.
 append_words() {
     local part
     local -a bits=()
@@ -46,6 +48,243 @@ append_words() {
     for part in "${bits[@]}"; do
         [[ -n $part ]] && args+=("$part")
     done
+}
+
+# A backslash written as '\'' trips shellcheck, so the comparisons use this.
+bs=$'\\'
+
+unescape_basic() {
+    local s=$1 out="" i=0 c
+    local n=${#s}
+    while (( i < n )); do
+        c=${s:i:1}
+        if [[ $c == "$bs" ]]; then
+            local nch=${s:i+1:1}
+            if [[ $nch == '"' || $nch == "$bs" ]]; then
+                out+=$nch
+                i=$((i + 2))
+                continue
+            fi
+        fi
+        out+=$c
+        i=$((i + 1))
+    done
+    printf '%s' "$out"
+}
+
+# A rustflags string is split on spaces. Each element of a rustflags array
+# is one argument, even when it contains a space.
+append_toml_rustflags() {
+    local -n dest=$1
+    local value=$2
+    value=${value#"${value%%[![:space:]]*}"}
+    local i c n
+    if [[ $value == '"'* ]]; then
+        local inner=""
+        i=1
+        n=${#value}
+        while (( i < n )); do
+            c=${value:i:1}
+            if [[ $c == "$bs" ]]; then
+                inner+=${value:i:2}
+                i=$((i + 2))
+                continue
+            fi
+            if [[ $c == '"' ]]; then
+                break
+            fi
+            inner+=$c
+            i=$((i + 1))
+        done
+        inner=$(unescape_basic "$inner")
+        local part
+        local -a bits=()
+        IFS=' ' read -r -a bits <<< "$inner"
+        for part in "${bits[@]}"; do
+            [[ -n $part ]] && dest+=("$part")
+        done
+        return
+    fi
+    if [[ $value == '['* ]]; then
+        local in=0 cur=""
+        i=0
+        n=${#value}
+        while (( i < n )); do
+            c=${value:i:1}
+            if (( in == 0 )); then
+                if [[ $c == '"' ]]; then
+                    in=1
+                    cur=""
+                fi
+                i=$((i + 1))
+                continue
+            fi
+            if [[ $c == "$bs" ]]; then
+                cur+=${value:i:2}
+                i=$((i + 2))
+                continue
+            fi
+            if [[ $c == '"' ]]; then
+                dest+=("$(unescape_basic "$cur")")
+                in=0
+                i=$((i + 1))
+                continue
+            fi
+            cur+=$c
+            i=$((i + 1))
+        done
+    fi
+}
+
+toml_value_closed() {
+    local s=$1
+    s=${s#"${s%%[![:space:]]*}"}
+    local i=0 c n=${#s} depth=0 in=0
+    if [[ $s == '"'* ]]; then
+        i=1
+        while (( i < n )); do
+            c=${s:i:1}
+            if [[ $c == "$bs" ]]; then
+                i=$((i + 2))
+                continue
+            fi
+            if [[ $c == '"' ]]; then
+                return 0
+            fi
+            i=$((i + 1))
+        done
+        return 1
+    fi
+    if [[ $s == '['* ]]; then
+        while (( i < n )); do
+            c=${s:i:1}
+            if (( in )); then
+                if [[ $c == "$bs" ]]; then
+                    i=$((i + 2))
+                    continue
+                fi
+                if [[ $c == '"' ]]; then
+                    in=0
+                fi
+                i=$((i + 1))
+                continue
+            fi
+            if [[ $c == '"' ]]; then
+                in=1
+            elif [[ $c == '[' ]]; then
+                depth=$((depth + 1))
+            elif [[ $c == ']' ]]; then
+                depth=$((depth - 1))
+                if (( depth == 0 )); then
+                    return 0
+                fi
+            fi
+            i=$((i + 1))
+        done
+        return 1
+    fi
+    return 0
+}
+
+section_kind() {
+    local section=$1 triple=$2
+    section=${section%%#*}
+    section=${section%"${section##*[![:space:]]}"}
+    section=${section#"${section%%[![:space:]]*}"}
+    if [[ $section == build ]]; then
+        printf build
+        return
+    fi
+    local name=${section#target.}
+    [[ $name != "$section" ]] || return 0
+    name=${name#\"}
+    name=${name%\"}
+    name=${name#\'}
+    name=${name%\'}
+    if [[ $name == "$triple" ]]; then
+        printf target
+    fi
+}
+
+parse_config_file() {
+    local file=$1 triple=$2
+    local section="" collecting=0 buf="" line
+    while IFS= read -r line || [[ -n $line ]]; do
+        line=${line%%$'\r'}
+        if (( collecting )); then
+            buf+=$'\n'"$line"
+            if toml_value_closed "$buf"; then
+                take_rustflags "$section" "$triple" "$buf"
+                collecting=0
+                buf=""
+            fi
+            continue
+        fi
+        [[ $line =~ ^[[:space:]]*# ]] && continue
+        if [[ $line =~ ^[[:space:]]*\[([^]]+)\] ]]; then
+            section=${BASH_REMATCH[1]}
+            continue
+        fi
+        if [[ $line =~ ^[[:space:]]*rustflags[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+            buf=${BASH_REMATCH[1]}
+            if toml_value_closed "$buf"; then
+                take_rustflags "$section" "$triple" "$buf"
+            else
+                collecting=1
+            fi
+        fi
+    done <"$file"
+}
+
+take_rustflags() {
+    local section=$1 triple=$2 value=$3 kind
+    kind=$(section_kind "$section" "$triple")
+    [[ -n $kind ]] || return 0
+    if [[ $kind == build ]]; then
+        append_toml_rustflags build_args "$value"
+    else
+        append_toml_rustflags target_args "$value"
+    fi
+}
+
+# Cargo's config rustflags for TARGET, appended to `args`. $CARGO_HOME comes
+# first, then ancestor `.cargo/config.toml` files from the filesystem root
+# down to here. target.<triple>.rustflags replaces build.rustflags; lists
+# from several files are concatenated. `cfg(...)` target tables are not read.
+config_rustflags() {
+    local target=$1
+    local -a files=() build_args=() target_args=()
+    local home=${CARGO_HOME:-$HOME/.cargo}
+    local dir ancestors=() i file
+    if [[ -f $home/config.toml ]]; then
+        files+=("$home/config.toml")
+    elif [[ -f $home/config ]]; then
+        files+=("$home/config")
+    fi
+    dir=$PWD
+    while true; do
+        ancestors+=("$dir")
+        [[ $dir == / ]] && break
+        dir=$(dirname "$dir")
+    done
+    i=${#ancestors[@]}
+    while (( i > 0 )); do
+        i=$((i - 1))
+        dir=${ancestors[$i]}
+        if [[ -f $dir/.cargo/config.toml ]]; then
+            files+=("$dir/.cargo/config.toml")
+        elif [[ -f $dir/.cargo/config ]]; then
+            files+=("$dir/.cargo/config")
+        fi
+    done
+    for file in "${files[@]}"; do
+        parse_config_file "$file" "$target"
+    done
+    if (( ${#target_args[@]} )); then
+        args+=("${target_args[@]}")
+    elif (( ${#build_args[@]} )); then
+        args+=("${build_args[@]}")
+    fi
 }
 
 run_cargo() {
@@ -75,6 +314,7 @@ run_cargo() {
         append_words "$CARGO_BUILD_RUSTFLAGS"
     else
         mode=target
+        config_rustflags "$target"
     fi
     append_words "$extra"
     if [[ ${#args[@]} -eq 0 ]]; then

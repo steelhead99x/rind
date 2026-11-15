@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Drive sh/bare-metal.sh with a fake cargo and check the command list, the
-# rustflags merge, and failure propagation. No toolchain and no network.
+# rustflags source, and failure propagation. No toolchain and no network.
+# Bash only: the cross module's tools are cargo and nix.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -47,37 +48,42 @@ chmod +x "$tmp/cargo"
 run() {
     local record=$1
     shift
-    mkdir -p "$record"
+    mkdir -p "$record/cargo-home"
+    # An empty CARGO_HOME keeps a developer config out of the command list.
+    # A caller can override it with `env CARGO_HOME=...`.
     env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+        CARGO_HOME="$record/cargo-home" \
         PATH="$tmp:$PATH" RECORD_DIR="$record" \
         "$@"
 }
 
 args_of() {
-    python3 - "$1" <<'PY'
-import pathlib, sys
-data = pathlib.Path(sys.argv[1]).read_bytes().split(b"\0")
-if data and data[-1] == b"":
-    data = data[:-1]
-sys.stdout.write("\n".join(part.decode() for part in data))
-PY
+    local part
+    while IFS= read -r -d '' part || [[ -n $part ]]; do
+        printf '%s\n' "$part"
+    done <"$1"
 }
 
 # The rustflags Cargo will actually read, with unit separators as spaces.
 flags_of() {
-    python3 - "$1" <<'PY'
-import pathlib, sys
-text = pathlib.Path(sys.argv[1]).read_text().splitlines()
-for prefix in ("ENCODED=", "RUSTFLAGS=", "CARGO_BUILD_RUSTFLAGS="):
-    for line in text:
-        if line.startswith(prefix):
-            sys.stdout.write(line[len(prefix):].replace("\x1f", " "))
-            raise SystemExit
-for line in text:
-    if line.startswith("CARGO_TARGET_") and "_RUSTFLAGS=" in line:
-        sys.stdout.write(line.split("=", 1)[1])
-        break
-PY
+    local line val
+    while IFS= read -r line; do
+        case $line in
+            ENCODED=* | RUSTFLAGS=* | CARGO_BUILD_RUSTFLAGS=*)
+                val=${line#*=}
+                printf '%s' "${val//$'\x1f'/ }"
+                return
+                ;;
+        esac
+    done <"$1"
+    while IFS= read -r line; do
+        case $line in
+            CARGO_TARGET_*_RUSTFLAGS=*)
+                printf '%s' "${line#*=}"
+                return
+                ;;
+        esac
+    done <"$1"
 }
 
 assert_has() {
@@ -197,6 +203,28 @@ assert_has "$build_env" "CARGO_BUILD_RUSTFLAGS="
 assert_has "$(flags_of "$build_case/0.env")" "-Cdebuginfo=2"
 assert_has "$(flags_of "$build_case/0.env")" 'getrandom_backend="custom"'
 assert_lacks_line "$build_env" "RUSTFLAGS="
+
+# With no environment source, Cargo's config file is the source. A
+# target.<triple> list replaces build.rustflags, and the script appends its cfg.
+cfghome=$tmp/cfghome
+mkdir -p "$cfghome"
+cat >"$cfghome/config.toml" <<'EOF'
+[build]
+rustflags = "-C target-cpu=generic"
+
+[target.thumbv6m-none-eabi]
+rustflags = ["--cfg", "from_target=\"1\""]
+EOF
+config_case=$tmp/config
+run "$config_case" env CARGO_HOME="$cfghome" "$script" >/dev/null
+thumb_flags=$(flags_of "$config_case/0.env")
+assert_has "$thumb_flags" 'from_target="1"'
+assert_has "$thumb_flags" 'getrandom_backend="custom"'
+assert_lacks "$thumb_flags" "target-cpu=generic"
+riscv_flags=$(flags_of "$config_case/4.env")
+assert_has "$riscv_flags" "-C target-cpu=generic"
+assert_has "$riscv_flags" 'getrandom_backend="custom"'
+assert_lacks "$riscv_flags" "from_target"
 
 # Encoded flags outrank RUSTFLAGS. Cargo reads only the encoded source.
 encoded_case=$tmp/encoded
