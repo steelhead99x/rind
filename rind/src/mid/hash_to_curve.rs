@@ -497,7 +497,20 @@ pub(crate) mod tests {
         assert_eq!(affine(&sum(&q, &r)), affine(&sum(&r, &q)));
 
         // Same affine `Y` as `q`, `r`'s affine `X`, and `Z` scaled by `k`.
-        let shifted = [r[0].mul(&k2), q[1].mul(&k3), q[2].mul(&k)];
+        // Jacobian `X` is `r_x * (q_z / r_z)^2 * k^2`, so the affine `X`
+        // is `r`'s (`r_x / r_z^2`) even when `q_z` and `r_z` differ.
+        let qz_over_rz = q[2].mul(&inv(&r[2]));
+        let shifted = [
+            r[0].mul(&qz_over_rz.sqr()).mul(&k2),
+            q[1].mul(&k3),
+            q[2].mul(&k),
+        ];
+        assert!(!q[2].ct_eq(&r[2]));
+        assert!(
+            shifted[0]
+                .mul(&r[2].sqr())
+                .ct_eq(&r[0].mul(&shifted[2].sqr()))
+        );
         assert!(!q[2].ct_eq(&shifted[2]));
         assert!(
             !q[0]
