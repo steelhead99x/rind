@@ -304,8 +304,11 @@ impl EcdsaKeyPair {
         Ok(pkcs8::Document::new(key.to_pkcs8()))
     }
 
-    /// Loads a PKCS#8 `ECPrivateKey` on `alg`'s curve, refused unless it
+    /// Loads a PKCS#8 v1 `ECPrivateKey` on `alg`'s curve, refused unless it
     /// carries its public key as an uncompressed point.
+    ///
+    /// Version 1 is refused, as ring's `Version::V1Only` refuses it. rind
+    /// takes that document when its PKCS#8 public key is absent.
     pub fn from_pkcs8(
         alg: &'static EcdsaSigningAlgorithm,
         pkcs8: &[u8],
@@ -314,6 +317,11 @@ impl EcdsaKeyPair {
         let _ = rng;
         let key = rind::signature::EcdsaKeyPair::from_pkcs8(alg.rind, pkcs8)
             .map_err(error::KeyRejected::rind)?;
+        // A version-1 document reaches here only when it omits its PKCS#8
+        // public key. ring refuses every version but 0.
+        if der::pkcs8_version(pkcs8) != Some(0) {
+            return Err(error::KeyRejected::version_not_supported());
+        }
         // ring requires the public key, uncompressed, where rind also takes
         // it compressed.
         match der::ecdsa_pkcs8_public_key(pkcs8) == Some(key.public_key().as_ref()) {

@@ -2483,6 +2483,102 @@ mod pkcs8_attributes {
             }
         }
     }
+
+    /// `pkcs8` as version 1, with a PKCS#8 `publicKey` field removed.
+    ///
+    /// The public key inside an `ECPrivateKey` stays: that field is not the
+    /// PKCS#8 one.
+    fn v2_without_public_key(pkcs8: &[u8]) -> Vec<u8> {
+        let (header, len) = element(pkcs8);
+        assert_eq!(header + len, pkcs8.len());
+        let body = &pkcs8[header..];
+        let mut at = 0;
+        let mut fields = Vec::new();
+        let mut version = true;
+        while at < body.len() {
+            let (field_header, field_len) = element(&body[at..]);
+            let end = at + field_header + field_len;
+            if body[at] != 0x81 {
+                if version {
+                    assert_eq!((body[at], field_len), (0x02, 1));
+                    let mut field = body[at..end].to_vec();
+                    field[field_header] = 0x01;
+                    fields.extend_from_slice(&field);
+                    version = false;
+                } else {
+                    fields.extend_from_slice(&body[at..end]);
+                }
+            }
+            at = end;
+        }
+        let header = match fields.len() {
+            len @ 0..=0x7f => vec![0x30, len as u8],
+            len @ 0x80..=0xff => vec![0x30, 0x81, len as u8],
+            len => [
+                &[0x30, 0x82][..],
+                &u16::try_from(len).unwrap().to_be_bytes(),
+            ]
+            .concat(),
+        };
+        [header, fields].concat()
+    }
+
+    /// aws-lc takes a v2 document whose public key is absent, for every key
+    /// type this loads. Version 0 with a public key present stays refused.
+    #[test]
+    fn v2_without_public_key_matches_aws_lc() {
+        for key in keys() {
+            let public = (key.ours)(&key.pkcs8).unwrap();
+            let v2 = v2_without_public_key(&key.pkcs8);
+            assert_eq!(
+                (key.ours)(&v2).as_deref(),
+                Some(public.as_slice()),
+                "{v2:02x?}"
+            );
+            assert_eq!(
+                (key.theirs)(&v2).as_deref(),
+                Some(public.as_slice()),
+                "{v2:02x?}"
+            );
+        }
+
+        let ed25519 = keys().into_iter().find(|key| key.v2).unwrap();
+        let mut with_public_key = ed25519.pkcs8.clone();
+        let (header, _) = element(&with_public_key);
+        let (field_header, field_len) = element(&with_public_key[header..]);
+        assert_eq!(field_len, 1);
+        with_public_key[header + field_header] = 0;
+        assert_eq!((ed25519.ours)(&with_public_key), None);
+        assert_eq!((ed25519.theirs)(&with_public_key), None);
+
+        // The public key tagged as attributes, which both skip.
+        for der in [
+            "302e020101300506032b657004220420a22efdb713f0e1600d2a5ce948e321ca3a18137c47f15091a12c7126c1749a00",
+            "3051020101300506032b657004220420a22efdb713f0e1600d2a5ce948e321ca3a18137c47f15091a12c7126c1749a00a021001aeb8e3ee5ba5afd91113466d19f4ea77fa0feffbd8c5adcb499927f12535f77",
+        ] {
+            let der = hex::decode(der).unwrap();
+            let ours = (ed25519.ours)(&der).unwrap();
+            let theirs = (ed25519.theirs)(&der).unwrap();
+            assert_eq!(ours, theirs);
+        }
+    }
+
+    #[test]
+    fn ml_dsa_v2_without_public_key_matches_aws_lc() {
+        fn check<P: sign::MlDsaParameterSet>(signing: &'static theirs::PqdsaSigningAlgorithm) {
+            let key = sign::MlDsaKeyPair::<P>::from_seed(&[7; 32]).unwrap();
+            let public = key.public_key().as_ref().to_vec();
+            let v2 = v2_without_public_key(key.to_pkcs8().as_ref());
+            let ours = sign::MlDsaKeyPair::<P>::from_pkcs8(&v2).unwrap();
+            let theirs = theirs::PqdsaKeyPair::from_pkcs8(signing, &v2).unwrap();
+            assert_eq!(ours.public_key().as_ref(), public.as_slice());
+            assert_eq!(theirs.public_key().as_ref(), public.as_slice());
+        }
+
+        check::<sign::MlDsa44>(&theirs::ML_DSA_44_SIGNING);
+        check::<sign::MlDsa65>(&theirs::ML_DSA_65_SIGNING);
+        check::<sign::MlDsa87>(&theirs::ML_DSA_87_SIGNING);
+    }
 }
 
 mod ecdh_scalars {
@@ -2624,6 +2720,20 @@ mod ecdh_scalars {
             prop_assert_eq!(loaded.as_ref(), ours.as_ref());
             prop_assert_eq!(aws_lc_x25519_from_pkcs8(ours_pkcs8.as_ref()), private);
         }
+    }
+
+    /// aws-lc's PKCS#8 parser takes version 1 with no public key. X25519 has
+    /// no loader in aws-lc-rs, so this checks `EVP_parse_private_key`.
+    #[test]
+    fn x25519_v2_without_public_key() {
+        let private = [0x11; 32];
+        let ours = ours::PrivateKey::from_scalar(&ours::X25519, &private).unwrap();
+        let mut der = ours.to_pkcs8().as_ref().to_vec();
+        assert_eq!(&der[..5], &[0x30, 0x2e, 0x02, 0x01, 0x00], "{der:02x?}");
+        der[4] = 0x01;
+        let loaded = ours::PrivateKey::from_pkcs8(&ours::X25519, &der).unwrap();
+        assert_eq!(loaded.public_key().as_ref(), ours.public_key().as_ref());
+        assert_eq!(aws_lc_x25519_from_pkcs8(&der), private);
     }
 
     /// aws-lc's PKCS#8 encoding of the X25519 key `private`.

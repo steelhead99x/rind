@@ -12,8 +12,9 @@ impl<'a> Key<'a> {
     ///
     /// This decodes the given slice as a whole `OneAsymmetricKey`, and then:
     ///
-    /// - ensures the version is 0 if the publicKey field is absent,
-    ///   or the version is 1 if the publicKey field is present.
+    /// - ensures the version is 0 or 1. Version 0 (RFC 5208) requires the
+    ///   publicKey field to be absent. Version 1 (RFC 5958) may omit it, as
+    ///   aws-lc does, though the RFC pairs that version with a present key.
     /// - ensures the key algorithm is one of `algorithms`,
     /// - ensures the parameters are `parameters`.
     ///
@@ -31,9 +32,13 @@ impl<'a> Key<'a> {
         let oak = pkix::OneAsymmetricKey::from_bytes(slice).map_err(KeyFormatError::Asn1)?;
 
         match (oak.version, oak.publicKey.inner()) {
-            (pkix::Pkcs8Version::Pkcs8v1, None) => {}
-            (pkix::Pkcs8Version::Pkcs8v2, Some(_)) => {}
-            _ => return Err(KeyFormatError::UnsupportedPkcs8Version.into()),
+            (pkix::Pkcs8Version::Pkcs8v1, None)
+            | (pkix::Pkcs8Version::Pkcs8v2, None)
+            | (pkix::Pkcs8Version::Pkcs8v2, Some(_)) => {}
+            // A public key with version 0. aws-lc refuses this too.
+            (pkix::Pkcs8Version::Pkcs8v1, Some(_)) => {
+                return Err(KeyFormatError::UnsupportedPkcs8Version.into());
+            }
         };
 
         if !algorithms.contains(&&oak.privateKeyAlgorithm.algorithm) {
@@ -88,10 +93,11 @@ impl<'a> Key<'a> {
         output.get(..len).ok_or(Error::WrongLength)
     }
 
-    /// Returns the `privateKey` body of a v1 document, refusing v2.
+    /// Returns the `privateKey` body when the document carries no public key.
     ///
-    /// For key types whose v2 public key the caller does not check: ring reads
-    /// ECDSA and RSA keys as v1 only, and aws-lc-rs refuses their public key.
+    /// A v2 document that omits the field is included: aws-lc takes it. One
+    /// that carries a public key is refused, because the caller does not
+    /// check it. ring reads ECDSA and RSA keys as v1 only, in its own parser.
     pub(crate) fn v1_private_key(&self) -> Result<&'a [u8], Error> {
         match self.public_key() {
             Some(_) => Err(KeyFormatError::UnsupportedPkcs8Version.into()),
@@ -223,6 +229,28 @@ mod tests {
             Some(KeyFormatError::Asn1(asn1::Error::UnhandledEnumValue).into()),
             Key::decode(&bytes, &[&oid::id_ed25519], None).err(),
         );
+    }
+
+    #[test]
+    fn accepts_v2_without_public_key() {
+        // aws-lc-rs's ed25519_from_pkcs8_tests.txt: version 1, no publicKey,
+        // and the same document with the public key tagged as attributes,
+        // which are skipped.
+        for (bytes, public_key) in [
+            (
+                "302e020101300506032b657004220420a22efdb713f0e1600d2a5ce948e321ca3a18137c47f15091a12c7126c1749a00",
+                None,
+            ),
+            (
+                "3051020101300506032b657004220420a22efdb713f0e1600d2a5ce948e321ca3a18137c47f15091a12c7126c1749a00a021001aeb8e3ee5ba5afd91113466d19f4ea77fa0feffbd8c5adcb499927f12535f77",
+                None,
+            ),
+        ] {
+            let bytes = hex::decode(bytes).unwrap();
+            let key = Key::decode(&bytes, &[&oid::id_ed25519], None).unwrap();
+            assert_eq!(key.private_key().len(), 34);
+            assert_eq!(key.public_key(), public_key);
+        }
     }
 
     #[test]

@@ -44,7 +44,6 @@ Each follows from a difference the README lists under
 - RSA `verify_digest` is expected to fail.
 - An RSA key outside an algorithm's modulus range is expected to be refused
   when it is parsed for that algorithm, not when verifying.
-- A PKCS#8 v2 Ed25519 key without its public key is expected to be refused.
 
 Otherwise, imports name this harness, the modules are gathered under
 `main.rs`, `std::sync::LazyLock` stands in for the `lazy_static` crate, one

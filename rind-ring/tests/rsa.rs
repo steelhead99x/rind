@@ -39,3 +39,20 @@ fn key_pair_modulus_sizes() {
         .unwrap();
     }
 }
+
+/// ring's `Version::V1Only`. rind takes version 1 when the public key is absent.
+#[test]
+fn pkcs8_v1_only() {
+    let der = include_bytes!("../../rind/src/high/rsa/rsa2048.pkcs8.der");
+    let mut v2 = der.to_vec();
+    let start = match v2[1] {
+        0x81 => 3,
+        0x82 => 4,
+        _ => 2,
+    };
+    assert_eq!(&v2[start..start + 3], &[0x02, 0x01, 0x00]);
+    v2[start + 2] = 0x01;
+    assert!(rind::signature::RsaKeyPair::from_pkcs8(&v2).is_ok());
+    assert!(signature::RsaKeyPair::from_pkcs8(&v2).is_err());
+    assert!(signature::RsaKeyPair::from_pkcs8(der).is_ok());
+}

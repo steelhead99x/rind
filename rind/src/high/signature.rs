@@ -930,7 +930,11 @@ impl EcdsaKeyPair {
         (algorithm.load)(algorithm.ecdsa, EcdsaSource::Generate)
     }
 
-    /// Loads a PKCS#8 v1 `ECPrivateKey` on `algorithm`'s curve.
+    /// Loads a PKCS#8 `ECPrivateKey` on `algorithm`'s curve.
+    ///
+    /// A v2 document (RFC 5958) is taken when it omits its public key, as
+    /// aws-lc does, and refused when it carries one, which this does not
+    /// check. A public key inside the `ECPrivateKey` is still checked.
     pub fn from_pkcs8(
         algorithm: &'static EcdsaSigningAlgorithm,
         der: &[u8],
@@ -1414,8 +1418,11 @@ impl RsaKeyPair {
         Self::new(rsa::SigningKey::generate(size)?)
     }
 
-    /// Loads a PKCS#8 v1 RSA private key, named `rsaEncryption`,
+    /// Loads a PKCS#8 RSA private key, named `rsaEncryption`,
     /// `id-RSAES-OAEP`, or `id-ea-rsa`.
+    ///
+    /// A v2 document (RFC 5958) is taken when it omits its public key, as
+    /// aws-lc does, and refused when it carries one.
     pub fn from_pkcs8(der: &[u8]) -> Result<Self, Error> {
         Self::new(rsa::SigningKey::from_pkcs8_der(der)?)
     }
@@ -1516,8 +1523,9 @@ impl Ed25519KeyPair {
     /// Loads a PKCS#8 Ed25519 key, refused if it carries a public key
     /// (v2, RFC 5958) that does not match.
     ///
-    /// This also takes PKCS#8 v1, which carries no public key: common tools
-    /// write v1, and such a key is no less valid.
+    /// The public key may be absent. Common tools write v1, which has none,
+    /// and aws-lc also takes a v2 document that omits it. The public key is
+    /// then derived from the seed.
     pub fn from_pkcs8(der: &[u8]) -> Result<Self, Error> {
         Ok(Self::new(Ed25519SigningKey::from_pkcs8_der(der)?))
     }

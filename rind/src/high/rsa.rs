@@ -681,7 +681,9 @@ impl SigningKey {
     ///
     /// This format is defined in
     /// [RFC5208](https://datatracker.ietf.org/doc/html/rfc5208#section-5)
-    /// (and earlier standards, including the original PKCS#8 standard).
+    /// and [RFC5958](https://datatracker.ietf.org/doc/html/rfc5958). A v2
+    /// document is taken when it omits its public key, as aws-lc does, and
+    /// refused when it carries one.
     ///
     /// `privateKeyAlgorithm` inside this encoding must be one of
     /// [`KEY_ALGORITHMS`] with `NULL` parameters, as aws-lc requires.

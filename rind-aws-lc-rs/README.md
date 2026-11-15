@@ -48,7 +48,7 @@ These items are left out, so code using them fails to build:
 - Where aws-lc-rs takes a [`rand::SecureRandom`] to generate a key or sign, rind draws from the system random source itself, as [`rand::SystemRandom`], the only `SecureRandom`, does.
 - A [`error::KeyRejected`] from rind's own checks gives rind's reason in its `Display`, and `"InvalidEncoding"` from `description_()`.
 - `VerificationAlgorithm::verify_digest_sig` and `verify_digest` fail for RSA, as they do for Ed25519 and ML-DSA: rind verifies RSA only over a message it hashes itself, and pure ML-DSA has no digest verification.
-- An Ed25519 public key of small order verifies no signature, and a PKCS#8 v2 Ed25519 key whose public key does not match, or is missing, is refused. An ML-DSA key whose public key does not match is refused.
+- An Ed25519 public key of small order verifies no signature, and a PKCS#8 v2 Ed25519 key whose public key does not match is refused. An ML-DSA key whose public key does not match is refused.
 - An ML-DSA `SubjectPublicKeyInfo` followed by more bytes is refused.
 - An ML-DSA PKCS#8 document followed by more bytes is refused.
 - An `id-ecPublicKey` PKCS#8 key on secp224r1, secp256k1, or a Brainpool curve is `InvalidEncoding` when loaded as ML-DSA. aws-lc-rs parses that key and reports `WrongAlgorithm`.

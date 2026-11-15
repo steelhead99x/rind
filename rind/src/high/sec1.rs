@@ -59,7 +59,10 @@ pub(crate) fn decode<'a>(der: &'a [u8], curve: &asn1::ObjectId) -> Result<Decode
     })
 }
 
-/// Decodes a PKCS#8 v1 `ECPrivateKey` on `curve`.
+/// Decodes a PKCS#8 `ECPrivateKey` on `curve`.
+///
+/// A v2 document is taken only when it omits the PKCS#8 public key, which
+/// this does not check. The public key inside the `ECPrivateKey` still is.
 pub(crate) fn decode_pkcs8<'a>(
     der: &'a [u8],
     curve: &asn1::ObjectId,

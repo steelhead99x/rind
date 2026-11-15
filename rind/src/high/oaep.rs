@@ -92,8 +92,11 @@ impl DecryptingKey {
         Ok(Self::new(algorithm, rsa::SigningKey::generate(size)?))
     }
 
-    /// Loads a PKCS#8 v1 RSA private key for `algorithm`, named
+    /// Loads a PKCS#8 RSA private key for `algorithm`, named
     /// `rsaEncryption`, `id-RSAES-OAEP`, or `id-ea-rsa`.
+    ///
+    /// A v2 document is taken when it omits its public key, as aws-lc does,
+    /// and refused when it carries one.
     pub fn from_pkcs8(algorithm: &'static OaepAlgorithm, der: &[u8]) -> Result<Self, Error> {
         Ok(Self::new(algorithm, rsa::SigningKey::from_pkcs8_der(der)?))
     }

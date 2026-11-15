@@ -138,7 +138,8 @@ impl PrivateKey {
     /// Loads a PKCS#8 private key for `algorithm`.
     ///
     /// X25519 takes RFC 8410's, v1 or v2, refused if a v2 public key does
-    /// not match; a NIST curve takes v1 `ECPrivateKey` on its curve, as
+    /// not match. A NIST curve takes an `ECPrivateKey` on its curve, v1 or
+    /// a v2 document that omits its public key, as
     /// [`EcdsaKeyPair::from_pkcs8`](crate::signature::EcdsaKeyPair::from_pkcs8)
     /// does.
     pub fn from_pkcs8(algorithm: &'static Algorithm, der: &[u8]) -> Result<Self, Error> {

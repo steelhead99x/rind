@@ -16,12 +16,20 @@ pub struct KeyPair {
 }
 
 impl KeyPair {
-    /// Loads a PKCS#8 RSA private key, named `rsaEncryption`, `id-RSAES-OAEP`,
-    /// or `id-ea-rsa`.
+    /// Loads a PKCS#8 v1 RSA private key, named `rsaEncryption`,
+    /// `id-RSAES-OAEP`, or `id-ea-rsa`.
+    ///
+    /// Version 1 is refused, as ring's `Version::V1Only` refuses it. rind
+    /// takes that document when its public key is absent.
     pub fn from_pkcs8(pkcs8: &[u8]) -> Result<Self, error::KeyRejected> {
-        rind::signature::RsaKeyPair::from_pkcs8(pkcs8)
-            .map_err(error::KeyRejected::rind)
-            .and_then(Self::new)
+        let key =
+            rind::signature::RsaKeyPair::from_pkcs8(pkcs8).map_err(error::KeyRejected::rind)?;
+        // A version-1 document reaches here only when it omits its public
+        // key. ring refuses every version but 0.
+        match der::pkcs8_version(pkcs8) {
+            Some(0) => Self::new(key),
+            _ => Err(error::KeyRejected::version_not_supported()),
+        }
     }
 
     /// Loads a PKCS#1 `RSAPrivateKey`.

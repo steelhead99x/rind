@@ -40,7 +40,7 @@ fuzz_target!(|data: &[u8]| {
             input,
             ours::RsaKeyPair::from_pkcs8,
             their_rsa::KeyPair::from_pkcs8,
-            (trailing(input) || v2_without_public_key(input)).into(),
+            trailing(input).into(),
         ),
         13 => rsa_private(
             input,
@@ -262,17 +262,6 @@ fn agree<A, B, E: std::fmt::Debug>(
     }
 }
 
-/// Whether `input` is a PKCS#8 version 2 document without a public key, which
-/// aws-lc-rs takes for every key type. RFC 5958 sets version 2 only when the
-/// public key is present.
-fn v2_without_public_key(input: &[u8]) -> bool {
-    let Some(contents) = sequence(input) else {
-        return false;
-    };
-    let mut fields = elements(contents);
-    fields.next() == Some((0x02, &[1][..])) && fields.all(|(tag, _)| tag != 0x81)
-}
-
 /// The `privateKey` of the PKCS#8 document `input`.
 fn pkcs8_private_key(input: &[u8]) -> Option<&[u8]> {
     let (tag, private_key) = elements(sequence(input)?).nth(2)?;
@@ -303,7 +292,7 @@ fn ecdsa_pkcs8(curve: &Curve, input: &[u8]) {
     let ours = ours::EcdsaKeyPair::from_pkcs8(curve.ours, input);
     let theirs = theirs::EcdsaKeyPair::from_pkcs8(curve.theirs, input);
     let point = pkcs8_private_key(input).and_then(sec1_public_key);
-    let refused = trailing(input) || v2_without_public_key(input) || point.is_some_and(hybrid);
+    let refused = trailing(input) || point.is_some_and(hybrid);
     let ecdh = ours_ecdh::PrivateKey::from_pkcs8(curve.ecdh.ours, input);
     same_key(&ours, &ecdh);
     agree_ecdsa(curve, ours, theirs, refused.into());
@@ -588,7 +577,7 @@ fn rsa_public_key_der(n: &[u8], e: &[u8]) -> Vec<u8> {
 fn ed25519_pkcs8(input: &[u8]) {
     let ours = ours::Ed25519KeyPair::from_pkcs8(input);
     let theirs = theirs::Ed25519KeyPair::from_pkcs8(input);
-    let refused = trailing(input) || v2_without_public_key(input);
+    let refused = trailing(input);
     agree_ed25519(ours, theirs, refused.into());
 }
 

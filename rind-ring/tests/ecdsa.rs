@@ -86,3 +86,25 @@ fn key_pair_public_key_forms() {
         }
     }
 }
+
+/// ring's `Version::V1Only`. rind takes version 1 when the PKCS#8 public key
+/// is absent; the point inside the `ECPrivateKey` is still required here.
+#[test]
+fn pkcs8_v1_only() {
+    let rind_alg = &rind::signature::sign::ECDSA_P256_SHA256_ASN1;
+    let key = rind::signature::EcdsaKeyPair::generate(rind_alg).unwrap();
+    let mut v2 = key.to_pkcs8().as_ref().to_vec();
+    let start = match v2[1] {
+        0x81 => 3,
+        0x82 => 4,
+        _ => 2,
+    };
+    assert_eq!(&v2[start..start + 3], &[0x02, 0x01, 0x00]);
+    v2[start + 2] = 0x01;
+    assert!(rind::signature::EcdsaKeyPair::from_pkcs8(rind_alg, &v2).is_ok());
+    let rng = rand::SystemRandom::new();
+    assert!(
+        signature::EcdsaKeyPair::from_pkcs8(&signature::ECDSA_P256_SHA256_ASN1_SIGNING, &v2, &rng,)
+            .is_err()
+    );
+}

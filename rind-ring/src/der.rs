@@ -99,6 +99,21 @@ pub(crate) fn ecdsa_pkcs8_public_key(der: &[u8]) -> Option<&[u8]> {
         .ok()
 }
 
+/// The PKCS#8 version byte, when the document is one sequence whose first
+/// field is a single-byte integer.
+pub(crate) fn pkcs8_version(der: &[u8]) -> Option<u8> {
+    let mut outer = untrusted::Reader::new(untrusted::Input::from(der));
+    let sequence = read(&mut outer, SEQUENCE).ok()?;
+    if !outer.at_end() {
+        return None;
+    }
+    let mut input = untrusted::Reader::new(sequence);
+    match read(&mut input, INTEGER).ok()?.as_slice_less_safe() {
+        [version] => Some(*version),
+        _ => None,
+    }
+}
+
 /// An Ed25519 PKCS#8 document's parts, as ring reads them.
 pub(crate) struct Ed25519Pkcs8<'a> {
     /// The 32-byte seed, or another length the caller refuses.

@@ -145,8 +145,9 @@ impl Ed25519SigningKey {
 
     /// Load an Ed25519 private key in PKCS#8 format.
     ///
-    /// This supports PKCS#8 v1 (RFC 5208) and v2 (RFC 5958, which may include the public key).
-    /// If the encoding includes the alleged public key, this is checked against the actual one.
+    /// This supports PKCS#8 v1 (RFC 5208) and v2 (RFC 5958). A v2 document
+    /// may omit its public key, as aws-lc does. When the encoding includes
+    /// one, it is checked against the public key of the seed.
     pub(crate) fn from_pkcs8_der(bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_secret();
 
@@ -313,6 +314,23 @@ mod tests {
             pk.to_spki_der(&mut [0u8; 32]).unwrap_err(),
             Error::WrongLength
         );
+    }
+
+    /// aws-lc's vectors: a v2 document whose public key is absent, and the
+    /// same key with that public key tagged as skipped attributes.
+    #[test]
+    fn pkcs8_v2_without_public_key() {
+        const WITH_PUBLIC_KEY: &str = "3051020101300506032b657004220420a22efdb713f0e1600d2a5ce948e321ca3a18137c47f15091a12c7126c1749a008121001aeb8e3ee5ba5afd91113466d19f4ea77fa0feffbd8c5adcb499927f12535f77";
+        let expected = Ed25519SigningKey::from_pkcs8_der(&hex::decode(WITH_PUBLIC_KEY).unwrap())
+            .unwrap()
+            .public_key();
+        for der in [
+            "302e020101300506032b657004220420a22efdb713f0e1600d2a5ce948e321ca3a18137c47f15091a12c7126c1749a00",
+            "3051020101300506032b657004220420a22efdb713f0e1600d2a5ce948e321ca3a18137c47f15091a12c7126c1749a00a021001aeb8e3ee5ba5afd91113466d19f4ea77fa0feffbd8c5adcb499927f12535f77",
+        ] {
+            let key = Ed25519SigningKey::from_pkcs8_der(&hex::decode(der).unwrap()).unwrap();
+            assert_eq!(key.public_key().as_bytes(), expected.as_bytes());
+        }
     }
 
     #[test]
