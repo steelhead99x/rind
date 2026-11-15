@@ -3,7 +3,11 @@ use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
-#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(all(
+    feature = "__bench_openssl",
+    target_family = "unix",
+    not(target_arch = "xtensa")
+))]
 mod ossl {
     //! The openssl crate does not yet wrap ML-DSA key generation.
 
@@ -67,7 +71,11 @@ macro_rules! ml_dsa {
             let mut group = c.benchmark_group(concat!($id, "-keygen"));
             group.throughput(Throughput::Elements(1));
 
-            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[cfg(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))]
             if ossl::available() {
                 group.bench_function("openssl", |b| {
                     b.iter(|| {
@@ -143,7 +151,11 @@ macro_rules! ml_dsa {
             let mut group = c.benchmark_group(concat!($id, "-sign"));
             group.throughput(Throughput::Elements(1));
 
-            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[cfg(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))]
             if ossl::available() {
                 group.bench_function("openssl", |b| {
                     use openssl::sign::Signer;
@@ -240,7 +252,11 @@ macro_rules! ml_dsa {
                 )
             };
 
-            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[cfg(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))]
             if ossl::available() {
                 group.bench_function("openssl", |b| {
                     use openssl::pkey::{KeyType, PKey};
@@ -319,7 +335,11 @@ macro_rules! ml_dsa {
             let mut group = c.benchmark_group(concat!($id, "-load-verify"));
             group.throughput(Throughput::Elements(1));
 
-            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[cfg(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))]
             if ossl::available() {
                 group.bench_function("openssl", |b| {
                     use openssl::pkey::{KeyType, PKey};

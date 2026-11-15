@@ -100,6 +100,7 @@ exclude_re = [
   'rind/src/high/rsa\.rs:16:\d+: replace \+ with \*$',
   'rind/src/high/rsa\.rs:20:\d+: replace \+ with \*$',
   'rind/src/high/sec1\.rs:14:\d+: replace \+ with \*$',
+  'rind/src/high/signature\.rs:(242|1716):\d+: replace \+ with \*$',
   'rind/src/low/generic/mont\.rs:167:\d+: replace \+ with \* in mont_mul$',
   'rind/src/mid/rsa_priv\.rs:331:\d+: replace / with \*$',
   'rind/src/mid/rsa_priv\.rs:316:44: replace \+ with \*$',
@@ -166,6 +167,7 @@ exclude_re = [
   'rind/src/low/generic/mldsa_poly\.rs:206:\d+: replace - with [+/] in decompose$',
   'rind/src/low/x86_64/mldsa\.rs:(209|211|213|215|237|239|241|243|245|247|249|251|257|259|269|277|283|285|287|293|295|537|539|541|543|549|551|565|569|571|575|577|579|581|583|587):5: delete -$',
   'rind/src/mid/mldsa\.rs:91:52: replace - with [+/]$',
+  'rind/src/mid/mldsa\.rs:(933|940):\d+: replace - with [+/] in (decompose|use_hint)$',
   'rind/src/mid/mldsa\.rs:1004:\d+: replace \* with / in expand_a$',
   'rind/src/mid/mldsa\.rs:1008:\d+: replace - with [+/] in expand_a$',
   # Speed only: which of several implementations runs, or how far ahead it

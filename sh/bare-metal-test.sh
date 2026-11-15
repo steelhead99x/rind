@@ -26,6 +26,9 @@ printf '%s\0' "$@" >"$out.args"
     if [[ -v CARGO_ENCODED_RUSTFLAGS ]]; then
         printf 'ENCODED=%s\n' "$CARGO_ENCODED_RUSTFLAGS"
     fi
+    if [[ -v CARGO_BUILD_RUSTFLAGS ]]; then
+        printf 'CARGO_BUILD_RUSTFLAGS=%s\n' "$CARGO_BUILD_RUSTFLAGS"
+    fi
     env | grep '^CARGO_TARGET_.*_RUSTFLAGS=' || true
 } >"$out.env"
 if [[ ${FAIL_CARGO:-} == 1 ]]; then
@@ -60,13 +63,19 @@ sys.stdout.write("\n".join(part.decode() for part in data))
 PY
 }
 
-encoded_of() {
+# The rustflags Cargo will actually read, with unit separators as spaces.
+flags_of() {
     python3 - "$1" <<'PY'
 import pathlib, sys
-text = pathlib.Path(sys.argv[1]).read_text()
-for line in text.splitlines():
-    if line.startswith("ENCODED="):
-        sys.stdout.write(line[len("ENCODED="):])
+text = pathlib.Path(sys.argv[1]).read_text().splitlines()
+for prefix in ("ENCODED=", "RUSTFLAGS=", "CARGO_BUILD_RUSTFLAGS="):
+    for line in text:
+        if line.startswith(prefix):
+            sys.stdout.write(line[len(prefix):].replace("\x1f", " "))
+            raise SystemExit
+for line in text:
+    if line.startswith("CARGO_TARGET_") and "_RUSTFLAGS=" in line:
+        sys.stdout.write(line.split("=", 1)[1])
         break
 PY
 }
@@ -108,10 +117,10 @@ if [[ -e $tmp/bad/0.args ]]; then
     exit 1
 fi
 
-# Default path: eight targets, four clippy rows each, then the two arm
-# assembly builds, then one tree check.
-# An inherited RUSTFLAGS and a target-scoped flag both survive, and only
-# x86_64-unknown-none gains dalek's serial backend.
+# Default path: eight targets, four clippy rows each, then four assembly
+# builds, then one tree check.
+# RUSTFLAGS outranks a target-scoped flag, so the target cpu does not merge
+# in. Only x86_64-unknown-none gains dalek's serial backend and SSE2.
 default=$tmp/default
 if ! run "$default" env \
     RUSTFLAGS='-Cdebuginfo=0' \
@@ -121,56 +130,81 @@ if ! run "$default" env \
     exit 1
 fi
 count=$(find "$default" -name '*.args' | wc -l)
-if [[ $count -ne 35 ]]; then
-    echo "default path ran $count commands, want 35" >&2
+if [[ $count -ne 37 ]]; then
+    echo "default path ran $count commands, want 37" >&2
     exit 1
 fi
 i=0
 while [[ $i -lt 32 ]]; do
     args=$(args_of "$default/$i.args")
     envf=$(cat "$default/$i.env")
-    encoded=$(encoded_of "$default/$i.env")
+    flags=$(flags_of "$default/$i.env")
     assert_has "$args" "clippy"
     assert_lacks "$args" "+esp"
-    assert_has "$encoded" $'-Cdebuginfo=0'
-    assert_has "$encoded" $'--cfg\x1fgetrandom_backend="custom"'
-    assert_lacks_line "$envf" "RUSTFLAGS="
-    if [[ $args == *thumbv6m-none-eabi* ]]; then
-        assert_lacks_line "$envf" "CARGO_TARGET_THUMBV6M_NONE_EABI_RUSTFLAGS="
-    fi
+    assert_has "$flags" "-Cdebuginfo=0"
+    assert_has "$flags" 'getrandom_backend="custom"'
+    assert_lacks_line "$envf" "ENCODED="
+    assert_lacks "$flags" "target-cpu=generic"
     if [[ $args == *x86_64-unknown-none* ]]; then
-        assert_has "$encoded" $'--cfg\x1fcurve25519_dalek_backend="serial"'
+        assert_has "$flags" 'curve25519_dalek_backend="serial"'
+        assert_has "$flags" "target-feature=+sse,+sse2,-soft-float"
     else
-        assert_lacks "$encoded" "curve25519_dalek_backend"
-    fi
-    if [[ $args == *thumbv6m-none-eabi* ]]; then
-        assert_has "$encoded" $'-Ctarget-cpu=generic'
-    else
-        assert_lacks "$encoded" "target-cpu=generic"
+        assert_lacks "$flags" "curve25519_dalek_backend"
+        assert_lacks "$flags" "soft-float"
     fi
     i=$((i + 1))
 done
 arm_a=$(args_of "$default/32.args")
 arm_r=$(args_of "$default/33.args")
+arm64=$(args_of "$default/34.args")
+x86=$(args_of "$default/35.args")
 assert_has "$arm_a" "build"
 assert_has "$arm_a" "armv7a-none-eabi"
-assert_has "$(encoded_of "$default/32.env")" $'getrandom_backend="custom"'
+assert_has "$(flags_of "$default/32.env")" 'getrandom_backend="custom"'
 assert_has "$arm_r" "build"
 assert_has "$arm_r" "armv7r-none-eabihf"
-tree_args=$(args_of "$default/34.args")
+assert_has "$arm64" "aarch64-unknown-none"
+assert_has "$x86" "x86_64-unknown-none"
+assert_has "$(flags_of "$default/35.env")" "target-feature=+sse,+sse2,-soft-float"
+tree_args=$(args_of "$default/36.args")
 assert_has "$tree_args" "tree"
 assert_has "$tree_args" "thumbv7em-none-eabihf"
 
-# Encoded flags outrank RUSTFLAGS in Cargo, and this script keeps both.
+# With no higher source, the target variable is the one Cargo reads, and
+# this script appends its cfg there.
+target_case=$tmp/target
+run "$target_case" env \
+    CARGO_TARGET_THUMBV6M_NONE_EABI_RUSTFLAGS='-Ctarget-cpu=generic' \
+    "$script" >/dev/null
+target_flags=$(flags_of "$target_case/0.env")
+assert_has "$target_flags" "-Ctarget-cpu=generic"
+assert_has "$target_flags" 'getrandom_backend="custom"'
+
+# CARGO_BUILD_RUSTFLAGS is the source when nothing above it is set.
+build_case=$tmp/build
+run "$build_case" env \
+    CARGO_BUILD_RUSTFLAGS='-Cdebuginfo=2' \
+    "$script" >/dev/null
+build_env=$(cat "$build_case/0.env")
+assert_has "$build_env" "CARGO_BUILD_RUSTFLAGS="
+assert_has "$(flags_of "$build_case/0.env")" "-Cdebuginfo=2"
+assert_has "$(flags_of "$build_case/0.env")" 'getrandom_backend="custom"'
+assert_lacks_line "$build_env" "RUSTFLAGS="
+
+# Encoded flags outrank RUSTFLAGS. Cargo reads only the encoded source.
 encoded_case=$tmp/encoded
 run "$encoded_case" env \
     CARGO_ENCODED_RUSTFLAGS=$'-Cdebuginfo=1' \
     RUSTFLAGS='-Cdebuginfo=0' \
+    CARGO_TARGET_THUMBV6M_NONE_EABI_RUSTFLAGS='-Ctarget-cpu=generic' \
     "$script" >/dev/null
-first=$(encoded_of "$encoded_case/0.env")
-assert_has "$first" $'-Cdebuginfo=1'
-assert_has "$first" $'-Cdebuginfo=0'
-assert_has "$first" $'getrandom_backend="custom"'
+first=$(flags_of "$encoded_case/0.env")
+encoded_env=$(cat "$encoded_case/0.env")
+assert_has "$first" "-Cdebuginfo=1"
+assert_lacks "$first" "-Cdebuginfo=0"
+assert_lacks "$first" "target-cpu=generic"
+assert_has "$first" 'getrandom_backend="custom"'
+assert_lacks_line "$encoded_env" "RUSTFLAGS="
 
 # A failing cargo stops the script on that call.
 fail=$tmp/fail
@@ -198,41 +232,52 @@ if run "$aws" env PRINT_AWS=1 "$script"; then
     exit 1
 fi
 
-# Xtensa: eight bare-metal clippy rows, four ESP-IDF checks, one bench build.
+# Xtensa: three bare-metal targets, four clippy rows each, four ESP-IDF
+# checks, one bench build. ESP-IDF keeps getrandom's own backend.
 xtensa=$tmp/xtensa
 if ! run "$xtensa" env RUSTFLAGS='-Cdebuginfo=0' "$script" xtensa; then
     echo "xtensa path failed" >&2
     exit 1
 fi
 xcount=$(find "$xtensa" -name '*.args' | wc -l)
-if [[ $xcount -ne 13 ]]; then
-    echo "xtensa path ran $xcount commands, want 13" >&2
+if [[ $xcount -ne 17 ]]; then
+    echo "xtensa path ran $xcount commands, want 17" >&2
     exit 1
 fi
 i=0
-while [[ $i -lt 13 ]]; do
+while [[ $i -lt 12 ]]; do
     args=$(args_of "$xtensa/$i.args")
-    encoded=$(encoded_of "$xtensa/$i.env")
+    flags=$(flags_of "$xtensa/$i.env")
     assert_has "$args" "+esp"
-    assert_has "$encoded" $'-Cdebuginfo=0'
-    assert_has "$encoded" $'getrandom_backend="custom"'
-    assert_lacks "$encoded" "curve25519_dalek_backend"
+    assert_has "$args" "clippy"
+    assert_has "$flags" "-Cdebuginfo=0"
+    assert_has "$flags" 'getrandom_backend="custom"'
+    assert_lacks "$flags" "curve25519_dalek_backend"
+    i=$((i + 1))
+done
+while [[ $i -lt 17 ]]; do
+    args=$(args_of "$xtensa/$i.args")
+    flags=$(flags_of "$xtensa/$i.env")
+    assert_has "$args" "+esp"
+    assert_has "$flags" "-Cdebuginfo=0"
+    assert_lacks "$flags" "getrandom_backend"
     i=$((i + 1))
 done
 assert_has "$(args_of "$xtensa/0.args")" "-Zbuild-std=core,alloc"
 assert_has "$(args_of "$xtensa/0.args")" "xtensa-esp32-none-elf"
-assert_has "$(args_of "$xtensa/8.args")" "-Zbuild-std=std,panic_abort"
-assert_has "$(args_of "$xtensa/8.args")" "xtensa-esp32s3-espidf"
-assert_has "$(args_of "$xtensa/8.args")" "check"
-bench=$(args_of "$xtensa/12.args")
+assert_has "$(args_of "$xtensa/4.args")" "xtensa-esp32s2-none-elf"
+assert_has "$(args_of "$xtensa/12.args")" "-Zbuild-std=std,panic_abort"
+assert_has "$(args_of "$xtensa/12.args")" "xtensa-esp32s3-espidf"
+assert_has "$(args_of "$xtensa/12.args")" "check"
+bench=$(args_of "$xtensa/16.args")
 assert_has "$bench" "--benches"
-assert_has "$bench" "--no-default-features"
+assert_lacks "$bench" "--no-default-features"
 assert_has "$bench" "rind-bench"
 
 # Cargo keeps the quote characters when it splits on spaces. rustc requires them.
 quote=$tmp/quote
 run "$quote" env RUSTFLAGS='--cfg getrandom_backend="custom"' "$script" >/dev/null
-qenc=$(encoded_of "$quote/0.env")
-assert_has "$qenc" $'--cfg\x1fgetrandom_backend="custom"'
+qflags=$(flags_of "$quote/0.env")
+assert_has "$qflags" '--cfg getrandom_backend="custom"'
 
 echo "bare-metal-test: ok"

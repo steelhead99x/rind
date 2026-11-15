@@ -1,0 +1,48 @@
+name: xtensa
+
+# The ESP32's Xtensa targets need Espressif's toolchain, which is not in the
+# Nix dev shell, so `just check` does not run them. This job does.
+on:
+  pull_request:
+    paths:
+      - rind/**
+      - rind-bench/**
+      - sh/bare-metal.sh
+      - sh/bare-metal-test.sh
+      - justfile
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/xtensa.yml
+  workflow_dispatch:
+  schedule:
+    - cron: "0 18 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xtensa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  xtensa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the lint script
+        run: sh/bare-metal-test.sh
+
+      - uses: ./.github/actions/just
+      # The release of the dev shell's pinned rustc, 1.98.1.
+      - uses: esp-rs/xtensa-toolchain@ec6d36527049a7f4fb2cb0c1a644668c1bb8a2a4 # v1.7.0
+        with:
+          version: 1.98.1.0
+          buildtargets: esp32,esp32s2,esp32s3
+          ldproxy: true
+          override: false
+
+      - name: Lint
+        run: just xtensa

@@ -28,7 +28,11 @@ fn argon2(c: &mut Criterion) {
                 black_box(&out);
             })
         });
-        #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+        #[cfg(all(
+            feature = "__bench_openssl",
+            target_family = "unix",
+            not(target_arch = "xtensa")
+        ))]
         group.bench_function("openssl", |b| {
             b.iter(|| {
                 openssl::kdf::argon2id(

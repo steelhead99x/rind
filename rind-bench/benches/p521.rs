@@ -1,5 +1,9 @@
 mod criterion;
-#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(all(
+    feature = "__bench_openssl",
+    target_family = "unix",
+    not(target_arch = "xtensa")
+))]
 mod ossl_ec;
 use std::hint::black_box;
 
@@ -99,7 +103,11 @@ fn ecdh(c: &mut Criterion) {
         });
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         let mut curve = ossl_ec::Curve::new(
             openssl::nid::Nid::SECP521R1,
@@ -192,7 +200,11 @@ fn ecdsa_verify(c: &mut Criterion) {
         });
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         let mut curve = ossl_ec::Curve::new(
             openssl::nid::Nid::SECP521R1,
@@ -339,7 +351,11 @@ fn ecdsa_sign(c: &mut Criterion) {
         });
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         let curve = ossl_ec::Curve::new(
             openssl::nid::Nid::SECP521R1,

@@ -1,10 +1,17 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 /// The modulus and public exponent of a PKCS#1 public key, as
 /// verified-garbage takes them in place of DER.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_components(public_key: &[u8]) -> (Vec<u8>, Vec<u8>) {
     use rsa::pkcs1::DecodeRsaPublicKey;
     use rsa::traits::PublicKeyParts;
@@ -13,11 +20,13 @@ fn vg_components(public_key: &[u8]) -> (Vec<u8>, Vec<u8>) {
 }
 
 /// verified-garbage's public key of the modulus and exponent `n_e`.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_public((n, e): &(Vec<u8>, Vec<u8>)) -> verified_garbage::rsa::PublicKey {
     use verified_garbage::rsa::{BigUint, PublicKey};
     PublicKey::new(BigUint::from_be_bytes(n), BigUint::from_be_bytes(e)).unwrap()
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rsa2048_pkcs1_sha256_verify(c: &mut Criterion) {
     let public_key = b"\x30\x82\x01\x0a\x02\x82\x01\x01\x00\xa2\xb4\x51\xa0\x7d\x0a\xa5\xf9\x6e\x45\x56\x71\x51\x35\x50\x51\x4a\x8a\x5b\x46\x2e\xbe\xf7\x17\x09\x4f\xa1\xfe\xe8\x22\x24\xe6\x37\xf9\x74\x6d\x3f\x7c\xaf\xd3\x18\x78\xd8\x03\x25\xb6\xef\x5a\x17\x00\xf6\x59\x03\xb4\x69\x42\x9e\x89\xd6\xea\xc8\x84\x50\x97\xb5\xab\x39\x31\x89\xdb\x92\x51\x2e\xd8\xa7\x71\x1a\x12\x53\xfa\xcd\x20\xf7\x9c\x15\xe8\x24\x7f\x3d\x3e\x42\xe4\x6e\x48\xc9\x8e\x25\x4a\x2f\xe9\x76\x53\x13\xa0\x3e\xff\x8f\x17\xe1\xa0\x29\x39\x7a\x1f\xa2\x6a\x8d\xce\x26\xf4\x90\xed\x81\x29\x96\x15\xd9\x81\x4c\x22\xda\x61\x04\x28\xe0\x9c\x7d\x96\x58\x59\x42\x66\xf5\xc0\x21\xd0\xfc\xec\xa0\x8d\x94\x5a\x12\xbe\x82\xde\x4d\x1e\xce\x6b\x4c\x03\x14\x5b\x5d\x34\x95\xd4\xed\x54\x11\xeb\x87\x8d\xaf\x05\xfd\x7a\xfc\x3e\x09\xad\xa0\xf1\x12\x64\x22\xf5\x90\x97\x5a\x19\x69\x81\x6f\x48\x69\x8b\xcb\xba\x1b\x4d\x9c\xae\x79\xd4\x60\xd8\xf9\xf8\x5e\x79\x75\x00\x5d\x9b\xc2\x2c\x4e\x5a\xc0\xf7\xc1\xa4\x5d\x12\x56\x9a\x62\x80\x7d\x3b\x9a\x02\xe5\xa5\x30\xe7\x73\x06\x6f\x45\x3d\x1f\x5b\x4c\x2e\x9c\xf7\x82\x02\x83\xf7\x42\xb9\xd5\x02\x03\x01\x00\x01";
     let signature = b"\x8a\x1b\x22\x0c\xb2\xab\x41\x5d\xc7\x60\xeb\x7f\x5b\xb1\x03\x35\xa3\xcc\xa2\x69\xd7\xdb\xbf\x7d\x09\x62\xba\x79\xf9\xcf\x7b\x43\xa5\xfc\x09\xc9\x9a\x15\x84\xf0\x74\x03\x47\x3d\x6c\x18\x9a\x83\x68\x97\xa5\xb6\xf8\xea\x9f\xa2\x2d\x60\x1e\x6b\xa5\xf7\x41\x1f\xe2\x7c\x63\x8b\x81\xb1\xa2\x23\x63\x58\x3a\x80\xfc\xe8\xc7\xdf\x3e\x40\xfb\x51\xbd\x0e\x60\xd0\xa6\x65\x3f\x79\xf3\xbc\xb7\xec\x3e\x9d\xc1\x4c\xfb\x5b\x31\xab\x17\x35\xbc\xa6\x92\xd5\x0a\xc0\x3f\x97\x9d\xda\x92\x74\x7c\x64\x30\xf8\x04\x5e\xfa\x35\x13\xba\x6e\x0c\xe3\xe9\xe3\x55\x70\xe1\xc3\x0c\x8e\xbe\x58\x9b\x44\x19\x2e\x13\x44\xca\x83\xdf\xa5\x76\xfc\x6f\xdc\x7b\xf1\xcd\x7c\xee\x87\x5b\x00\x1c\x8c\x02\xce\x8d\x60\x27\x69\xe4\xbd\x9d\x24\x1c\x48\x57\x18\x2a\x00\x89\xa8\xb6\x76\x44\xe7\x3e\xef\x10\x5c\x55\x0e\xfa\x47\xa4\x08\x74\x28\x93\x95\xac\x0c\x4e\x02\xfd\x4b\xa9\x8e\x13\x0a\x4c\x2d\x1b\x95\x52\x1c\x6a\xf4\xa0\x02\xac\x3b\xdc\x6e\x52\x12\x2a\xe4\xc0\x8c\xc3\xda\x1c\x89\x6e\x05\x9a\xcb\xdd\xec\x57\x4a\xc0\x43\x2f\x61\x03\xdd\x97\x27\x3d\x88\x03\xc1\x02";
@@ -98,7 +107,11 @@ fn rsa2048_pkcs1_sha256_verify(c: &mut Criterion) {
         })
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         b.iter(|| openssl_verify(public_key, false, message, signature));
     });
@@ -141,6 +154,7 @@ fn rsa2048_pkcs1_sha256_verify(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rsa1024_pkcs1_sha1_verify(c: &mut Criterion) {
     // Wycheproof's `rsa_pkcs1_1024_sig_gen_test.json`, the first SHA-1 case.
     let public_key = b"\x30\x81\x89\x02\x81\x81\x00\xd0\x94\x1e\x63\xa9\x80\xfa\x92\xfb\x25\xed\x4c\x7b\x33\x07\xf8\x27\x02\x30\x34\xae\x7f\x1a\x74\x91\xf0\x69\x9c\xa7\x60\x72\x85\xe6\x2a\xd8\xe9\x94\xba\xc2\x1b\x8b\x6e\x30\x5e\x33\x4f\x48\x74\x06\x7d\x28\xe3\x04\x23\x0d\xca\x7f\x0e\x85\xf7\xce\x59\x57\x70\xb6\xe0\x54\xc9\xf8\x44\xba\x86\xc0\x69\x6e\xeb\xa0\x76\x9d\x8d\x4a\x34\x7e\x8f\xe8\x5c\x72\x4a\xc1\xc4\x49\x94\xaf\x18\xa3\x9e\x71\x9f\x72\x1f\x1b\xc5\x0c\x46\xa3\x9e\x6c\x07\x5f\xcd\x16\x49\xf0\x1f\x22\x60\x8c\xe7\xdc\x69\x55\x50\x22\x58\x33\x69\x87\xd9\x02\x03\x01\x00\x01";
@@ -199,6 +213,7 @@ fn rsa1024_pkcs1_sha1_verify(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rsa2048_pss_sha256_verify(c: &mut Criterion) {
     // Signed here, since PSS signatures are randomized.
     use rind::signature::{RsaKeyPair, sign};
@@ -310,12 +325,17 @@ fn rsa2048_pss_sha256_verify(c: &mut Criterion) {
         })
     });
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     group.bench_function("openssl", |b| {
         b.iter(|| openssl_verify(public_key, true, message, signature));
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rsa2048_oaep_sha256_encrypt(c: &mut Criterion) {
     use rind::rsa::{DecryptingKey, OAEP_SHA256};
     let private_key = DecryptingKey::from_pkcs1(
@@ -374,7 +394,12 @@ fn rsa2048_oaep_sha256_encrypt(c: &mut Criterion) {
 
 /// Parses a PKCS#1 public key and verifies a PKCS#1 v1.5 or PSS signature
 /// over SHA-256 with it, through OpenSSL.
-#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(all(
+    feature = "__bench_openssl",
+    target_family = "unix",
+    not(target_arch = "xtensa")
+))]
+#[cfg(not(target_arch = "xtensa"))]
 fn openssl_verify(public_key: &[u8], pss: bool, message: &[u8], signature: &[u8]) {
     use openssl::hash::MessageDigest;
     use openssl::pkey::PKey;
@@ -394,6 +419,7 @@ fn openssl_verify(public_key: &[u8], pss: bool, message: &[u8], signature: &[u8]
 /// Verification at the other sizes, whose moduli take a different Montgomery
 /// multiplication from RSA-2048's on some CPUs: 2056 bits for an odd number
 /// of words.
+#[cfg(not(target_arch = "xtensa"))]
 fn rsa_pkcs1_sha256_verify_sizes(c: &mut Criterion) {
     use rind::signature::{RsaKeyPair, sign};
 
@@ -485,6 +511,7 @@ fn rsa_pkcs1_sha256_verify_sizes(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(
     benches,
     rsa2048_pkcs1_sha256_verify,
@@ -493,4 +520,5 @@ criterion_group!(
     rsa_pkcs1_sha256_verify_sizes,
     rsa2048_oaep_sha256_encrypt
 );
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

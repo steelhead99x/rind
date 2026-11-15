@@ -3,7 +3,11 @@ use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
-#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(all(
+    feature = "__bench_openssl",
+    target_family = "unix",
+    not(target_arch = "xtensa")
+))]
 mod ossl {
     //! The openssl crate does not yet wrap SLH-DSA key generation.
 
@@ -78,7 +82,11 @@ macro_rules! slh_dsa {
             group.throughput(Throughput::Elements(1));
             sample_size(&mut group);
 
-            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[cfg(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))]
             if ossl::available() {
                 group.bench_function("openssl", |b| {
                     b.iter(|| {
@@ -115,7 +123,11 @@ macro_rules! slh_dsa {
             group.throughput(Throughput::Elements(1));
             sample_size(&mut group);
 
-            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[cfg(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))]
             if ossl::available() {
                 group.bench_function("openssl", |b| {
                     use openssl::sign::Signer;
@@ -177,7 +189,11 @@ macro_rules! slh_dsa {
                 )
             };
 
-            #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+            #[cfg(all(
+                feature = "__bench_openssl",
+                target_family = "unix",
+                not(target_arch = "xtensa")
+            ))]
             if ossl::available() {
                 group.bench_function("openssl", |b| {
                     use openssl::pkey::PKey;

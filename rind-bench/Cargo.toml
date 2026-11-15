@@ -80,7 +80,8 @@ rustls-graviola = "0.4"
 
 # ring's C build and rustls's ring backend have no Xtensa port. ESP-IDF counts
 # as unix, but openssl-sys needs a target OpenSSL this lint does not install.
-# Host `cargo bench` keeps both: `__bench_ring` is a default feature.
+# Benches that call ring are cfg'd out on Xtensa, so a host `cargo bench`
+# still builds them and an Xtensa one does not ask for ring.
 [target.'cfg(not(target_arch = "xtensa"))'.dev-dependencies]
 ring = "0.17"
 rustls = { version = "0.23.36", default-features = false, features = ["ring", "std"] }
@@ -92,10 +93,8 @@ openssl-sys = "0.9"
 rustls-openssl = { version = "0.4", default-features = false }
 
 [features]
-default = ["__bench_ring"]
 __bench_openssl = []
 __bench_codspeed = ["dep:codspeed-criterion-compat"]
-__bench_ring = []
 
 [[bench]]
 name = "argon2"
@@ -104,17 +103,14 @@ harness = false
 [[bench]]
 name = "x25519"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "p256"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "p384"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "p521"
@@ -127,12 +123,10 @@ harness = false
 [[bench]]
 name = "sha1"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "sha2"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "sha3"
@@ -141,17 +135,14 @@ harness = false
 [[bench]]
 name = "aes_gcm"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "rsa_pub"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "rsa_priv"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "rsa_gen"
@@ -160,7 +151,6 @@ harness = false
 [[bench]]
 name = "chacha20poly1305"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "xchacha20poly1305"
@@ -169,7 +159,6 @@ harness = false
 [[bench]]
 name = "hmac"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "mldsa"
@@ -186,17 +175,14 @@ harness = false
 [[bench]]
 name = "ed25519"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "hkdf"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "cipher"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "key_wrap"
@@ -205,7 +191,6 @@ harness = false
 [[bench]]
 name = "pbkdf2"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "jsonwebtoken"
@@ -214,7 +199,6 @@ harness = false
 [[bench]]
 name = "rustls"
 harness = false
-required-features = ["__bench_ring"]
 
 [[bench]]
 name = "hpke"
