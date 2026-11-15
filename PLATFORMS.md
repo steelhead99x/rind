@@ -93,7 +93,8 @@ qemu. iOS devices' code is only built.
   `ReuseCache`'s threaded test does not run there: this target has no threads.
   `wasm32-unknown-unknown` stays compile-only: its tests need a JavaScript
   host. The pull-request gate clippy-checks `rind-ring` on that target with
-  `wasm32_unknown_unknown_js`, which selects getrandom's JavaScript backend.
+  `wasm32_unknown_unknown_js`, which enables rind's `wasm_js` and so selects
+  getrandom's JavaScript backend.
   Constant time is unchecked on wasm: ctgrind and the trace checks inspect
   native code, and a wasm engine
   compiles rind again, so its JIT may turn a select into a branch.
