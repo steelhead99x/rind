@@ -1511,6 +1511,139 @@ fn ml_dsa_malformed() {
     assert_eq!(theirs.description_(), "Unspecified");
 }
 
+/// Other algorithms, and a seed with bytes after it, named as aws-lc-rs names them.
+///
+/// rind's own parsers refuse an RSA modulus outside 2048 to 8192 bits and a
+/// PKCS#8 document with a byte after it. aws-lc-rs has parsed a key, so the
+/// refusal is `WrongAlgorithm`. A seed with a byte after it, still inside the
+/// private key, is rind's `InvalidEncoding`; the README lists that.
+#[test]
+fn ml_dsa_algorithm_name() {
+    let as_ml_dsa = |pkcs8: &[u8]| {
+        same_rejection(
+            ours::signature::PqdsaKeyPair::from_pkcs8(&ours::signature::ML_DSA_44_SIGNING, pkcs8),
+            theirs::signature::PqdsaKeyPair::from_pkcs8(
+                &theirs::signature::ML_DSA_44_SIGNING,
+                pkcs8,
+            ),
+        );
+    };
+    let trailed = |pkcs8: &[u8]| {
+        let mut doc = pkcs8.to_vec();
+        doc.push(0);
+        doc
+    };
+
+    let rsa1024 = wycheproof_rsa1024();
+    as_ml_dsa(&rsa1024);
+    as_ml_dsa(&trailed(&rsa1024));
+    // A modulus rind loads is checked, so a broken 2048-bit key agrees.
+    let mut bad2048 = rsa_pkcs8().to_vec();
+    let last = bad2048.len() - 1;
+    bad2048[last] ^= 0x01;
+    as_ml_dsa(&bad2048);
+    // Outside that range the shape is enough. aws-lc-rs still runs
+    // `RSA_check_key`; the README lists the difference.
+    let mut inconsistent = rsa1024.clone();
+    let last = inconsistent.len() - 1;
+    inconsistent[last] ^= 0x01;
+    let ours = ours::signature::PqdsaKeyPair::from_pkcs8(
+        &ours::signature::ML_DSA_44_SIGNING,
+        &inconsistent,
+    )
+    .unwrap_err();
+    let theirs = theirs::signature::PqdsaKeyPair::from_pkcs8(
+        &theirs::signature::ML_DSA_44_SIGNING,
+        &inconsistent,
+    )
+    .unwrap_err();
+    assert_eq!(ours.description_(), "WrongAlgorithm");
+    assert_eq!(theirs.description_(), "InvalidEncoding");
+    as_ml_dsa(&trailed(rsa_pkcs8()));
+
+    let ed25519 = theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32]).unwrap();
+    as_ml_dsa(&trailed(ed25519.to_pkcs8v1().unwrap().as_ref()));
+    as_ml_dsa(&trailed(ed25519.to_pkcs8().unwrap().as_ref()));
+
+    as_ml_dsa(&trailed(&pkcs8_private_key(
+        &[0x2b, 0x65, 0x6e],
+        None,
+        &der(0x04, &[0x11; 32]),
+    )));
+
+    let rng = theirs::rand::SystemRandom::new();
+    for algorithm in [
+        &theirs::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+        &theirs::signature::ECDSA_P384_SHA384_ASN1_SIGNING,
+        &theirs::signature::ECDSA_P521_SHA512_ASN1_SIGNING,
+    ] {
+        let doc = theirs::signature::EcdsaKeyPair::generate_pkcs8(algorithm, &rng).unwrap();
+        as_ml_dsa(&trailed(doc.as_ref()));
+    }
+
+    // Version 1 with a public key. aws-lc's RSA decoder rejects that shape.
+    let (_, body, _) = der_split(rsa_pkcs8()).unwrap();
+    let (_, _, body) = der_split(body).unwrap();
+    let (_, _, body) = der_split(body).unwrap();
+    let (_, pkcs1, _) = der_split(body).unwrap();
+    let rsa_oid = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
+    let v2 = der(
+        0x30,
+        &[
+            der(0x02, &[1]),
+            der(0x30, &[der(0x06, &rsa_oid), vec![0x05, 0x00]].concat()),
+            der(0x04, pkcs1),
+            der(0x81, &[0x00, 0x01]),
+        ]
+        .concat(),
+    );
+    as_ml_dsa(&v2);
+
+    // ML-DSA-65 seed, then one byte still inside the private key.
+    let seed = der(0x80, &[0x5a; 32]);
+    let mut with_tail = seed.clone();
+    with_tail.push(0);
+    let oid65 = [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12];
+    let pkcs8 = pkcs8_private_key(&oid65, None, &with_tail);
+    let ours =
+        ours::signature::PqdsaKeyPair::from_pkcs8(&ours::signature::ML_DSA_65_SIGNING, &pkcs8)
+            .unwrap_err();
+    let theirs =
+        theirs::signature::PqdsaKeyPair::from_pkcs8(&theirs::signature::ML_DSA_65_SIGNING, &pkcs8);
+    assert_eq!(ours.description_(), "InvalidEncoding");
+    assert!(
+        theirs.is_ok(),
+        "aws-lc-rs {}",
+        theirs.unwrap_err().description_()
+    );
+    let ours =
+        ours::signature::PqdsaKeyPair::from_pkcs8(&ours::signature::ML_DSA_44_SIGNING, &pkcs8)
+            .unwrap_err();
+    let theirs =
+        theirs::signature::PqdsaKeyPair::from_pkcs8(&theirs::signature::ML_DSA_44_SIGNING, &pkcs8)
+            .unwrap_err();
+    assert_eq!(ours.description_(), "InvalidEncoding");
+    assert_eq!(theirs.description_(), "Unspecified");
+    // The seed alone, loaded as the other set, stays `Unspecified` on both.
+    let pkcs8 = pkcs8_private_key(&oid65, None, &seed);
+    same_rejection(
+        ours::signature::PqdsaKeyPair::from_pkcs8(&ours::signature::ML_DSA_44_SIGNING, &pkcs8),
+        theirs::signature::PqdsaKeyPair::from_pkcs8(&theirs::signature::ML_DSA_44_SIGNING, &pkcs8),
+    );
+}
+
+/// The first Wycheproof RSA-1024 signing key, PKCS#8.
+fn wycheproof_rsa1024() -> Vec<u8> {
+    let path = format!(
+        "{}/../thirdparty/vectors/wycheproof/testvectors_v1/rsa_pkcs1_1024_sig_gen_test.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let file = std::fs::read_to_string(path).unwrap();
+    let doc: serde_json::Value = serde_json::from_str(&file).unwrap();
+    let hex = doc["testGroups"][0]["privateKeyPkcs8"].as_str().unwrap();
+    hex::decode(hex).unwrap()
+}
+
 /// A seed-form PKCS#8 v1 document with its 32-byte seed cut to 31.
 fn ml_dsa_short_seed(seed_form: &[u8]) -> Vec<u8> {
     let header = ml_dsa_pkcs8_header(seed_form);

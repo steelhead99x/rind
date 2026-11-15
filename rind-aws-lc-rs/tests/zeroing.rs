@@ -266,7 +266,7 @@ fn kem() {
 
 /// An ML-DSA seed and public key, and the PKCS#8 documents holding the seed.
 #[test]
-fn ml_dsa() {
+fn ml_dsa_public() {
     let seed: [u8; 32] = distinct(5);
     let public_key = signature::PqdsaKeyPair::from_seed(&signature::ML_DSA_65_SIGNING, &seed)
         .unwrap()

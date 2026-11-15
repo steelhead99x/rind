@@ -50,9 +50,11 @@ These items are left out, so code using them fails to build:
 - An ML-DSA PKCS#8 v2 key whose public key does not match is refused. aws-lc-rs loads the private key.
 - An ML-DSA `SubjectPublicKeyInfo` followed by more bytes is refused.
 - An ML-DSA PKCS#8 document followed by more bytes is refused. On a key of another parameter set, aws-lc-rs parses the key and then reports `Unspecified`.
+- An ML-DSA seed with bytes after the seed element, still inside the private key, is `InvalidEncoding`. aws-lc-rs ignores those bytes (`pqdsa_priv_decode` does not require the private-key value to end): the named parameter set loads, and another parameter set is `Unspecified`.
 - An `id-ecPublicKey` PKCS#8 key on secp224r1, secp256k1, or a Brainpool curve is `InvalidEncoding` when loaded as ML-DSA. aws-lc-rs parses that key and reports `WrongAlgorithm`.
 - A DSA PKCS#8 key is `InvalidEncoding` when loaded as ML-DSA. aws-lc-rs parses one whose parameters and private key are in range and reports `WrongAlgorithm`.
 - An RSASSA-PSS PKCS#8 key whose parameters name a hash or a mask generation function is `InvalidEncoding` when loaded as ML-DSA. aws-lc-rs parses it and reports `WrongAlgorithm`.
+- An RSA private key whose modulus is outside 2048 to 8192 bits is `WrongAlgorithm` when loaded as ML-DSA if the PKCS#1 encoding has the two-prime shape, including when the components do not agree. aws-lc-rs runs its key check and reports `InvalidEncoding` when they do not. A modulus in that range is checked.
 - ECDSA and ECDH public keys in the X9.62 hybrid form are refused.
 - An RSA public key, from `rsa::PublicKey::from_der` or elsewhere, must have a modulus of 1024 to 8192 bits, the range rind verifies with.
 - An RSA-OAEP private key is bound to one algorithm in rind, so a `rsa::PrivateDecryptingKey` loads the key again the first time it decrypts with each other algorithm, and keeps it.

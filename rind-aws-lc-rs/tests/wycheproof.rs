@@ -4,7 +4,9 @@
 use std::fs::File;
 use std::io::BufReader;
 
+use aws_lc_rs::signature::KeyPair as _;
 use rind_aws_lc_rs::signature;
+use rind_aws_lc_rs::signature::KeyPair as _;
 use rind_aws_lc_rs::{error, hkdf};
 use serde::Deserialize;
 
@@ -172,6 +174,125 @@ struct MlDsaCase {
     result: String,
     #[serde(default)]
     flags: Vec<String>,
+}
+
+/// ML-DSA key loading from the vendored Wycheproof signing vectors.
+///
+/// `sign_seed` loads [`signature::PqdsaKeyPair::from_seed`] and, when the
+/// vector has one, `from_pkcs8`. `sign_noseed` loads
+/// [`signature::PqdsaKeyPair::from_raw_private_key`]. The adapter signs with
+/// fresh randomness, so these vectors check the loaded key and its public
+/// key, not the signature bytes. A group whose key does not load must be
+/// refused with aws-lc-rs's reason.
+#[test]
+fn ml_dsa_sign() {
+    for (seed_file, noseed_file, ours, theirs) in [
+        (
+            "mldsa_44_sign_seed_test.json",
+            "mldsa_44_sign_noseed_test.json",
+            &signature::ML_DSA_44_SIGNING,
+            &aws_lc_rs::signature::ML_DSA_44_SIGNING,
+        ),
+        (
+            "mldsa_65_sign_seed_test.json",
+            "mldsa_65_sign_noseed_test.json",
+            &signature::ML_DSA_65_SIGNING,
+            &aws_lc_rs::signature::ML_DSA_65_SIGNING,
+        ),
+        (
+            "mldsa_87_sign_seed_test.json",
+            "mldsa_87_sign_noseed_test.json",
+            &signature::ML_DSA_87_SIGNING,
+            &aws_lc_rs::signature::ML_DSA_87_SIGNING,
+        ),
+    ] {
+        let mut count = 0;
+        for group in sign_groups(seed_file) {
+            let seed = hex::decode(&group.private_seed).unwrap();
+            agree_key(
+                seed_file,
+                signature::PqdsaKeyPair::from_seed(ours, &seed),
+                aws_lc_rs::signature::PqdsaKeyPair::from_seed(theirs, &seed),
+                group.public_key.as_deref(),
+            );
+            if !group.private_key_pkcs8.is_empty() {
+                let pkcs8 = hex::decode(&group.private_key_pkcs8).unwrap();
+                agree_key(
+                    seed_file,
+                    signature::PqdsaKeyPair::from_pkcs8(ours, &pkcs8),
+                    aws_lc_rs::signature::PqdsaKeyPair::from_pkcs8(theirs, &pkcs8),
+                    group.public_key.as_deref(),
+                );
+            }
+            count += 1;
+        }
+        assert!(count > 0, "{seed_file} has no groups");
+
+        count = 0;
+        for group in sign_groups(noseed_file) {
+            let raw = hex::decode(&group.private_key).unwrap();
+            agree_key(
+                noseed_file,
+                signature::PqdsaKeyPair::from_raw_private_key(ours, &raw),
+                aws_lc_rs::signature::PqdsaKeyPair::from_raw_private_key(theirs, &raw),
+                group.public_key.as_deref(),
+            );
+            count += 1;
+        }
+        assert!(count > 0, "{noseed_file} has no groups");
+    }
+}
+
+fn sign_groups(file: &str) -> Vec<SignGroup> {
+    let data = File::open(format!(
+        "{}/../thirdparty/vectors/wycheproof/testvectors_v1/{file}",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap_or_else(|_| panic!("failed to open {file}"));
+    serde_json::from_reader::<_, SignFile>(BufReader::new(data))
+        .unwrap()
+        .groups
+}
+
+fn agree_key(
+    file: &str,
+    ours: Result<signature::PqdsaKeyPair, error::KeyRejected>,
+    theirs: Result<aws_lc_rs::signature::PqdsaKeyPair, aws_lc_rs::error::KeyRejected>,
+    public_key: Option<&str>,
+) {
+    match (ours, theirs) {
+        (Ok(ours), Ok(theirs)) => {
+            let public = hex::decode(public_key.expect("a loaded key has a public key")).unwrap();
+            assert_eq!(ours.public_key().as_ref(), public, "{file}");
+            assert_eq!(theirs.public_key().as_ref(), public, "{file}");
+        }
+        (Err(ours), Err(theirs)) => {
+            assert_eq!(ours.description_(), theirs.description_(), "{file}: {ours}");
+        }
+        (ours, theirs) => panic!(
+            "{file}: ours {} theirs {}",
+            ours.as_ref().map(|_| "ok").unwrap_or("err"),
+            theirs.as_ref().map(|_| "ok").unwrap_or("err"),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct SignFile {
+    #[serde(rename = "testGroups")]
+    groups: Vec<SignGroup>,
+}
+
+#[derive(Deserialize)]
+struct SignGroup {
+    #[serde(default, rename = "privateSeed")]
+    private_seed: String,
+    #[serde(default, rename = "privateKey")]
+    private_key: String,
+    #[serde(default, rename = "privateKeyPkcs8")]
+    private_key_pkcs8: String,
+    #[serde(default, rename = "publicKey")]
+    public_key: Option<String>,
 }
 
 /// A caller's own key type, which aws-lc-rs lets any crate define.
