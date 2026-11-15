@@ -16,6 +16,10 @@
 #![cfg(not(miri))]
 
 #[cfg(not(target_family = "wasm"))]
+#[path = "replace_file.rs"]
+mod replace_file;
+
+#[cfg(not(target_family = "wasm"))]
 use aws_lc_rs::signature::{ED25519, UnparsedPublicKey};
 use rind::Error;
 use rind::signature::{self, verify};
@@ -131,31 +135,7 @@ fn ed25519_record_aws_lc_verdicts() {
         };
         text.push_str(&format!("{i} {verdict}\n"));
     }
-    // Include the process id so two recording runs, such as two worktrees
-    // sharing a target directory, do not share a temporary path.
-    let temporary = format!("{path}.{}.tmp", std::process::id());
-    std::fs::write(&temporary, &text)
-        .unwrap_or_else(|err| panic!("cannot write {temporary}: {err}"));
-    // On Windows, rename fails if another test still has the file open.
-    // Retry briefly; a reader then sees the old file or the new one.
-    let mut last_err = None;
-    for _ in 0..16 {
-        match std::fs::rename(&temporary, &path) {
-            Ok(()) => {
-                last_err = None;
-                break;
-            }
-            Err(err) => {
-                last_err = Some(err);
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-        }
-    }
-    if let Some(err) = last_err {
-        // Leave no stray temporary file in the source tree.
-        let _ = std::fs::remove_file(&temporary);
-        panic!("cannot replace {path}: {err}");
-    }
+    replace_file::replace_file(&path, text.as_bytes());
     // The file reads back as written and parses as the readers parse it.
     let written = std::fs::read_to_string(&path).unwrap();
     assert_eq!(written, text, "{path}");
@@ -191,10 +171,14 @@ fn ed25519_edge_cases() {
                     fail(format!("ours {result:?}, file {}", verdicts[v.number]));
                 }
                 // Native targets have aws-lc, so a stale file cannot hide a
-                // difference when this test runs alone.
+                // difference when this test runs alone. One call: the
+                // comparison and the message must name the same verdict.
                 #[cfg(not(target_family = "wasm"))]
-                if result.is_ok() != aws_lc_accepts(&v) {
-                    fail(format!("ours {result:?}, aws-lc {}", aws_lc_accepts(&v)));
+                {
+                    let aws_lc = aws_lc_accepts(&v);
+                    if result.is_ok() != aws_lc {
+                        fail(format!("ours {result:?}, aws-lc {aws_lc}"));
+                    }
                 }
             }
             Err(Error::KeyRejected(e)) => {

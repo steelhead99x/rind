@@ -15,6 +15,10 @@
 
 #![cfg(feature = "wipe")]
 
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[path = "replace_file.rs"]
+mod replace_file;
+
 mod freed;
 
 use std::hint::black_box;
@@ -335,12 +339,19 @@ fn ml_dsa_set<P: rind::signature::sign::MlDsaParameterSet>() {
 /// The files are the PKCS#8 encodings of seeds `[1u8; 32]` and `[2u8; 32]`.
 /// The key is dropped inside the check: its expansion is freed then, and
 /// `freed` stops recording before it drops the closure's result.
+#[cfg(not(miri))]
+fn ml_dsa_fixture_path(set: &str, seed: u8) -> String {
+    format!(
+        "{}/tests/heap_scratch/ml-dsa-{set}-{seed}.pkcs8",
+        env!("CARGO_MANIFEST_DIR")
+    )
+}
+
 #[cfg(all(not(miri), target_family = "wasm"))]
 fn ml_dsa_expanded_load<P: rind::signature::sign::MlDsaParameterSet>(set: &str) {
     use rind::signature::sign::MlDsaKeyPair;
-    let dir = format!("{}/tests/heap_scratch", env!("CARGO_MANIFEST_DIR"));
     let expanded = [1, 2].map(|seed| {
-        let path = format!("{dir}/ml-dsa-{set}-{seed}.pkcs8");
+        let path = ml_dsa_fixture_path(set, seed);
         std::fs::read(&path).unwrap_or_else(|err| panic!("cannot read {path}: {err}"))
     });
     assert_independent("ML-DSA expanded load", expanded, |der| {
@@ -352,17 +363,24 @@ fn ml_dsa_expanded_load<P: rind::signature::sign::MlDsaParameterSet>(set: &str) 
 /// `[1u8; 32]` and `[2u8; 32]`. wasm reads the same files and cannot ask
 /// aws-lc itself.
 #[cfg(not(any(miri, target_family = "wasm")))]
-#[test]
-fn ml_dsa_expanded_fixtures_match_aws_lc() {
+fn ml_dsa_signing_sets() -> [(
+    &'static str,
+    &'static aws_lc_rs::signature::PqdsaSigningAlgorithm,
+); 3] {
     use aws_lc_rs::signature::{ML_DSA_44_SIGNING, ML_DSA_65_SIGNING, ML_DSA_87_SIGNING};
-    let dir = format!("{}/tests/heap_scratch", env!("CARGO_MANIFEST_DIR"));
-    for (set, alg) in [
+    [
         ("44", &ML_DSA_44_SIGNING),
         ("65", &ML_DSA_65_SIGNING),
         ("87", &ML_DSA_87_SIGNING),
-    ] {
+    ]
+}
+
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn ml_dsa_expanded_fixtures_match_aws_lc() {
+    for (set, alg) in ml_dsa_signing_sets() {
         for seed_byte in [1u8, 2] {
-            let path = format!("{dir}/ml-dsa-{set}-{seed_byte}.pkcs8");
+            let path = ml_dsa_fixture_path(set, seed_byte);
             let recorded =
                 std::fs::read(&path).unwrap_or_else(|err| panic!("cannot read {path}: {err}"));
             assert_eq!(
@@ -385,26 +403,16 @@ fn record_ml_dsa_expanded_fixtures() {
         eprintln!("set RIND_RECORD_MLDSA_FIXTURES=1 to rewrite the expanded-form fixtures");
         return;
     }
-    use aws_lc_rs::signature::{ML_DSA_44_SIGNING, ML_DSA_65_SIGNING, ML_DSA_87_SIGNING};
-    let dir = format!("{}/tests/heap_scratch", env!("CARGO_MANIFEST_DIR"));
-    std::fs::create_dir_all(&dir).unwrap();
-    for (set, alg) in [
-        ("44", &ML_DSA_44_SIGNING),
-        ("65", &ML_DSA_65_SIGNING),
-        ("87", &ML_DSA_87_SIGNING),
-    ] {
+    let sample = ml_dsa_fixture_path("44", 1);
+    let dir = std::path::Path::new(&sample)
+        .parent()
+        .expect("fixture path has a directory");
+    std::fs::create_dir_all(dir).unwrap();
+    for (set, alg) in ml_dsa_signing_sets() {
         for seed_byte in [1u8, 2] {
-            let path = format!("{dir}/ml-dsa-{set}-{seed_byte}.pkcs8");
+            let path = ml_dsa_fixture_path(set, seed_byte);
             let der = ml_dsa_expanded_pkcs8(alg, &[seed_byte; 32]);
-            // A process-specific temporary file keeps readers on a complete
-            // fixture, including when another recording process runs beside us.
-            let temporary = format!("{path}.{}.tmp", std::process::id());
-            let published =
-                std::fs::write(&temporary, &der).and_then(|()| std::fs::rename(&temporary, &path));
-            if let Err(err) = published {
-                let _ = std::fs::remove_file(&temporary);
-                panic!("cannot replace {path}: {err}");
-            }
+            replace_file::replace_file(&path, &der);
         }
     }
 }
