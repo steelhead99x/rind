@@ -313,18 +313,41 @@ for module in "${selected[@]}"; do
             # JavaScript backend, and the host build never compiles that target.
             cargo clippy -p rind-ring --lib --locked --target wasm32-unknown-unknown \
                 --features wasm32_unknown_unknown_js -- --deny warnings
-            # clippy type-checks only. Fail if getrandom does not unify, or if
-            # wasm_js never reaches it, so a version split cannot hide here.
-            tree=$(cargo tree -p rind-ring --locked --target wasm32-unknown-unknown \
-                --features wasm32_unknown_unknown_js -e features -i getrandom)
-            # `-d` takes no package, so list every duplicated package's root
-            # and look for getrandom among them. Assign first, so a failing
-            # `cargo tree` stops the gate instead of reading as no duplicates.
-            dups=$(cargo tree -p rind-ring --locked --target wasm32-unknown-unknown \
-                --features wasm32_unknown_unknown_js -d --depth 0 --prefix none)
+            # Self-test for the assignment below. A failure inside `$(...)`
+            # has to be visible, and the duplicate grep has to match a
+            # getrandom root only.
+            gate_status=0
+            gate_out=$(false) || gate_status=$?
+            if [[ "$gate_status" -eq 0 || -n "$gate_out" ]]; then
+                echo "error: a failing cargo tree would be ignored" >&2
+                exit 1
+            fi
+            if ! grep -q '^getrandom v' <<<"getrandom v0.4.3" ||
+                grep -q '^getrandom v' <<<"proptest v1.5.0"; then
+                echo "error: getrandom duplicate detection matched the wrong crate" >&2
+                exit 1
+            fi
+            # clippy type-checks only. Fail if the library's getrandom does not
+            # unify, or if wasm_js never reaches it. `-e normal` leaves out
+            # dev-dependencies (proptest, aws-lc-rs): they are not in the
+            # library, and a getrandom they pull must not fail this gate.
+            # Duplicates first. `-i getrandom` errors once that name is
+            # ambiguous, and `set -e` would stop before the message below.
+            # The status is checked explicitly: a failure inside `$(...)`
+            # must not look like an empty listing.
+            if ! dups=$(cargo tree -p rind-ring --locked --target wasm32-unknown-unknown \
+                --features wasm32_unknown_unknown_js -e normal -d --depth 0 --prefix none); then
+                echo "error: cargo tree failed while checking duplicated getrandom" >&2
+                exit 1
+            fi
             if grep -q '^getrandom v' <<<"$dups"; then
                 echo "error: rind-ring's wasm32_unknown_unknown_js resolved more than one getrandom" >&2
-                echo "$tree" >&2
+                echo "$dups" >&2
+                exit 1
+            fi
+            if ! tree=$(cargo tree -p rind-ring --locked --target wasm32-unknown-unknown \
+                --features wasm32_unknown_unknown_js -e normal,features -i getrandom@0.4); then
+                echo "error: rind-ring's wasm32_unknown_unknown_js did not resolve getrandom 0.4" >&2
                 exit 1
             fi
             if ! grep -q 'wasm_js' <<<"$tree"; then
