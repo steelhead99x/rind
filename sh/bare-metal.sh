@@ -616,6 +616,7 @@ fi
 # A-profile `armv7a-none-eabi` and R-profile `armv7r-none-eabihf` keep the
 # 32-bit ARM backend: bare metal never asks a kernel, so that backend's
 # NEON and crypto paths stay off and the base assembly is what runs.
+# Poly1305 without NEON links libcrux there.
 # `aarch64-unknown-none` keeps the aarch64 backend. Its tier is the
 # compile-time target features: NEON by default, and the crypto extension
 # only when the target enables it. Soft-float aarch64 has no NEON, so it
@@ -674,3 +675,4 @@ no_sse2() {
 no_sse2
 
 no_aws_lc thumbv7em-none-eabihf
+no_aws_lc armv7a-none-eabi

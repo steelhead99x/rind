@@ -40,10 +40,15 @@ fiat-crypto = { version = "0.3", default-features = false }
 libcrux-sha2 = { version = "0.0.9", features = ["expose-hacl"] }
 
 # armv7's ChaCha20 and its Poly1305 without NEON. A portable build uses
-# HACL*'s Poly1305 only from tests. Bare metal is excluded. Its M-profile
-# triples take the portable backend, and a manifest cannot keep the crates
-# for a bare-metal A-profile triple while leaving the M-profile ones out.
-[target.'cfg(all(target_arch = "arm", target_endian = "little", not(rind_portable), not(target_os = "none")))'.dependencies]
+# HACL*'s Poly1305 only from tests. build.rs sends M-profile bare metal to
+# the portable backend, and A-profile and R-profile bare metal
+# (`armv7a-none-eabi`, `armv7r-none-eabihf`, `armv8r-none-eabihf`) to the
+# arm backend. A manifest cannot read that choice. It can read
+# `target_has_atomic`: Rust gives those triples 64-bit atomics and every
+# M-profile triple none. ARMv6 bare metal (`armv6-none-eabi`) also has
+# 64-bit atomics; build.rs sends it to the portable backend, so it builds
+# these crates and does not call them.
+[target.'cfg(all(target_arch = "arm", target_endian = "little", not(rind_portable), any(not(target_os = "none"), target_has_atomic = "64")))'.dependencies]
 libcrux-hacl-rs = { version = "0.0.6", features = ["alloc"] }
 libcrux-macros = "0.0.4"
 libcrux-poly1305 = { version = "0.0.7", features = ["expose-hacl"] }
