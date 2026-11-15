@@ -10,10 +10,10 @@ Decided 2026-11-12 (maintainer, /quest-audit): ✅ a `no_std` build is one of th
 
 Where `rind` uses `std` on `main` that day, by `grep`, outside tests:
 
-- Run-time CPU feature detection, in one `detect` function per backend: `is_x86_feature_detected!` in `rind/src/low/x86_64/cpu.rs:437`, `is_aarch64_feature_detected!` in `rind/src/low/aarch64/cpu.rs:179`, and `libc::getauxval` in `rind/src/low/arm/cpu.rs:67`, which needs no `std`. The macros' other uses, over a hundred lines of them, are in tests, mostly the generated assembly wrappers' `abi` checks, and can keep `std`.
+- Run-time CPU feature detection, in one `detect` function per backend: `is_x86_feature_detected!` in `rind/src/low/x86_64/cpu.rs:437`, `is_aarch64_feature_detected!` in `rind/src/low/aarch64/cpu.rs:173`, and `libc::getauxval` in `rind/src/low/arm/cpu.rs:60`, which needs no `std`. The macros' other uses, over a hundred lines of them, are in tests, mostly the generated assembly wrappers' `abi` checks, and can keep `std`.
 - `std::env::var` in each backend's `test_toggle`, which reads `RIND_CPU_DISABLE_<id>` in debug builds and under `--cfg rind_cpu_disable` (`x86_64/cpu.rs:503`).
 - `OnceLock`, three times, caching which SHA routine a CPU runs (`rind/src/low/x86_64/sha256_mux.rs:57` and its siblings).
-- `thread_local!`, three times: the constant-time guard count (`rind/src/low/cpu.rs:121`), a debug-only check (`rind/src/low/entry.rs:8`), and the FIPS generator's per-thread state (`rind/src/fips_rng.rs:33`).
+- `thread_local!`, three times: the constant-time guard count (`rind/src/low/cpu.rs:94`), a debug-only check (`rind/src/low/entry.rs:7`), and the FIPS generator's per-thread state (`rind/src/fips_rng.rs:33`).
 - `low/abi.rs`, and `Vec` and `Box`, which only need `alloc`.
 
 The audit's recommendations, for whoever does this to confirm against the code:
@@ -26,7 +26,3 @@ The audit's recommendations, for whoever does this to confirm against the code:
 - CI builds `rind` for one bare-metal target per architecture it has assembly for (such as `x86_64-unknown-none`, `aarch64-unknown-none`, and `armv7a-none-eabi`) on every PR, beside the wasm builds.
 - The adapters stay on `std`: their upstreams' providers are.
 - Removing a path that used `std` must not slow a hosted target: benchmark dispatch-heavy small inputs (SHA-256 at 64 B, AES-GCM at 128 B) before and after, against aws-lc-rs.
-
-## Required
-
-- [rind needs no runtime CPU check](/quest/m2/api/cpu-check.md) - CPU detection as this leaves it, which this then moves off `std`

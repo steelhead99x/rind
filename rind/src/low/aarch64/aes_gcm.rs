@@ -275,12 +275,10 @@ fn cipher<const ENC: bool>(
         let (inout, len) = (blocks.as_mut_ptr(), blocks.len());
         // SAFETY: only a `HaveCryptoExt` token builds a `HwKey`, proving the
         // `aes` cpu feature, `eight_way` proves `sha3`, and `inout` is valid
-        // for reads and writes of `len` blocks. s2n-bignum's kernels' proofs
-        // assume the input and output do not overlap, but every path through
-        // them loads each input block before storing its output block and
-        // never reads an output back, so in place they compute the same, as
-        // `admin/parse-asm/inplace.py` checks. aws-lc runs its AES-192
-        // routines in place too.
+        // for reads and writes of `len` blocks. s2n-bignum's kernels' theorems
+        // (`AES*_GCM_*_NOIBT_SUBROUTINE_{CORRECT,SAFE}`) take the input and
+        // output either equal, as here, or disjoint, and every other buffer
+        // is a separate borrow. aws-lc runs its AES-192 routines in place too.
         unsafe {
             match (hw_key, ENC, table.eight_way) {
                 (HwKey::Aes128(k), true, None) => {

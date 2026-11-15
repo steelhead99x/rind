@@ -1,4 +1,5 @@
-# Keeps the commit SHAs that sh/pins.sh requires current, one weekly PR for all.
+# One weekly PR each: the commit SHAs that sh/pins.sh requires, and the
+# workspace's crates.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -16,3 +17,26 @@ updates:
       actions:
         patterns:
           - "*"
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    # Its lockfile update can still take a younger release, which review
+    # catches; see UPSTREAM.md, "Dependabot's Cargo lockfile updates skip its
+    # cooldown".
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      crates:
+        patterns:
+          - "*"
+    # Dependabot calls every release cargo treats as breaking major: a new
+    # major from 1.0 on, a new minor below it, a new patch below 0.1. Each is
+    # planned work, an adapter release when it moves the version an adapter
+    # tracks (sh/adapter-versions.sh), so quest/m2/upstream-updates.md takes it.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]

@@ -40,6 +40,11 @@ pub enum Error {
     /// A call was given an algorithm it does not take, such as a digest for
     /// a key that verifies only messages.
     Unsupported,
+
+    /// A sealing key refused another message: a randomized-nonce key has
+    /// sealed its 2^32, or a TLS record key was given a sequence number
+    /// not above the last it sealed, or one that would wrap.
+    MessageLimitReached,
 }
 
 impl Error {
@@ -52,6 +57,7 @@ impl Error {
             ids::error::RNG_FAILED => Self::RngFailed,
             ids::error::NOT_EQUAL => Self::NotEqual,
             ids::error::UNSUPPORTED => Self::Unsupported,
+            ids::error::MESSAGE_LIMIT_REACHED => Self::MessageLimitReached,
             _ => Self::Fault,
         }
     }
@@ -86,6 +92,7 @@ impl fmt::Display for Error {
             Self::NotEqual => f.write_str("values compared in constant time were not equal"),
             Self::Fault => f.write_str("an internal consistency check failed"),
             Self::Unsupported => f.write_str("an algorithm the call does not take"),
+            Self::MessageLimitReached => f.write_str("a key reached its message limit"),
         }
     }
 }

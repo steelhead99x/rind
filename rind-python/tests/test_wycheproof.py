@@ -13,13 +13,13 @@ import pyrind
 from pyrind import aead, agreement, cipher, hkdf, hmac, kem, key_wrap, rsa, signature
 from pyrind.signature import verify
 
-VECTORS = pathlib.Path(__file__).resolve().parents[2] / "thirdparty" / "wycheproof" / "testvectors_v1"
+VECTORS = pathlib.Path(__file__).resolve().parents[2] / "thirdparty" / "vectors" / "wycheproof" / "testvectors_v1"
 
 
 def groups(name):
     path = VECTORS / f"{name}_test.json"
     if not path.exists():
-        raise FileNotFoundError(f"{path} is missing; run: git submodule update --init thirdparty/wycheproof")
+        raise FileNotFoundError(f"{path} is missing; run: admin/sync-vectors")
     return json.loads(path.read_text())["testGroups"]
 
 

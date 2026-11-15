@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-use super::aes::{AesDecKey, AesKey};
+use super::aes::{AesDecKey, AesKey, HwDecKey, HwKey};
 
 /// Encrypts whole blocks in place in CBC mode, the first chained from `iv`.
 pub(crate) fn encrypt(key: &AesKey, iv: &[u8; 16], blocks: &mut [[u8; 16]]) {
     match key {
-        AesKey::Hw(key) => hw_cbc(key.as_aes_key(), iv, blocks, true),
+        AesKey::Hw(key) => hw_encrypt(key, iv, blocks),
         AesKey::Vpaes(key) => key.cbc_encrypt(iv, blocks),
         AesKey::Nohw(key) => key.cbc_encrypt(iv, blocks),
     }
@@ -14,10 +14,20 @@ pub(crate) fn encrypt(key: &AesKey, iv: &[u8; 16], blocks: &mut [[u8; 16]]) {
 /// Decrypts whole blocks in place in CBC mode, the first chained from `iv`.
 pub(crate) fn decrypt(key: &AesDecKey, iv: &[u8; 16], blocks: &mut [[u8; 16]]) {
     match key {
-        AesDecKey::Hw(key) => hw_cbc(key.as_aes_key(), iv, blocks, false),
+        AesDecKey::Hw(key) => hw_decrypt(key, iv, blocks),
         AesDecKey::Vpaes(key) => key.cbc_decrypt(iv, blocks),
         AesDecKey::Nohw(key) => key.cbc_decrypt(iv, blocks),
     }
+}
+
+/// Encrypts whole blocks in place in CBC mode with aws-lc's AES-NI routine.
+fn hw_encrypt(key: &HwKey, iv: &[u8; 16], blocks: &mut [[u8; 16]]) {
+    hw_cbc(key.as_aes_key(), iv, blocks, true)
+}
+
+/// Decrypts whole blocks in place in CBC mode with aws-lc's AES-NI routine.
+fn hw_decrypt(key: &HwDecKey, iv: &[u8; 16], blocks: &mut [[u8; 16]]) {
+    hw_cbc(key.as_aes_key(), iv, blocks, false)
 }
 
 /// CBC with aws-lc's AES-NI routine: serial encryption, and decryption eight

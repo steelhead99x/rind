@@ -9,13 +9,13 @@
 //! with pinned flags; a plain workspace build compiles it empty.
 //!
 //! - At load, a constructor runs the HMAC-SHA-256 and SHA-256 self-tests,
-//!   then the integrity test ([`integrity`]).
-//! - Each algorithm's self-test runs before its first use ([`selftest`]),
+//!   then the integrity test (`integrity`).
+//! - Each algorithm's self-test runs before its first use (`selftest`),
 //!   and a pairwise consistency test follows each key pair generation.
 //! - A failure prints which test failed and aborts: the error state.
 //! - Every service that handles an SSP zeroes the stack it used
-//!   ([`scrub`]), and the allocator zeroes every block it frees
-//!   ([`alloc`]), so no SSP outlives the call or handle holding it.
+//!   (`scrub`), and the allocator zeroes every block it frees
+//!   (`alloc`), so no SSP outlives the call or handle holding it.
 //! - Every service is approved, with approved parameters, so a successful
 //!   call is the service indicator.
 #![cfg(rind_fips)]
@@ -46,11 +46,15 @@ pub(crate) const VERSION: &str = concat!("rind-fips ", env!("CARGO_PKG_VERSION")
 static INIT: extern "C" fn() = init;
 
 extern "C" fn init() {
-    // The integrity test runs on HMAC-SHA-256, so those go first. Their
-    // first call detects the CPU's features, so the `RIND_CPU_DISABLE_*`
+    // The CPU check detects the CPU's features, so the `RIND_CPU_DISABLE_*`
     // mask, by which each CPU path is reached for its ACVP run, is read at
-    // load, and a CPU missing a feature the module requires aborts here,
-    // naming it.
+    // load. rind checks no features at runtime, so the module refuses a CPU
+    // missing one it requires here, before any instruction needs it.
+    if let Some(feature) = rind::fips::missing_cpu_feature() {
+        std::eprintln!("rind-fips: requires {feature} CPU support");
+        std::process::abort();
+    }
+    // The integrity test runs on HMAC-SHA-256, so those go first.
     selftest::ensure(&[selftest::SelfTest::Sha256, selftest::SelfTest::Hmac]);
     if !integrity::check() {
         rind::fips::fail("integrity");

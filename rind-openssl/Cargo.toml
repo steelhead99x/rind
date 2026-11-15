@@ -1,0 +1,32 @@
+[package]
+name = "rind-openssl"
+version = "3.0.0"
+edition = "2024"
+repository = "https://github.com/kixel-ai/rind"
+license = "Apache-2.0 OR ISC OR MIT-0"
+description = "An OpenSSL 3 provider backed by rind"
+categories = ["cryptography"]
+rust-version.workspace = true
+readme = "README.md"
+# OpenSSL loads the shared library this builds; no crate links it.
+publish = false
+
+[lib]
+name = "rind_openssl"
+# The rlib lets the fuzzer drive the provider as OpenSSL does.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# OpenSSL's own providers cleanse keys, so this one always wipes them.
+rind = { version = "0.3.2", path = "../rind", features = ["wipe"] }
+zeroize = "1.9"
+
+[dev-dependencies]
+# Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
+# features, as `admin/ctgrind` does; otherwise they build as no-ops.
+crabgrind = { version = "0.4", default-features = false }
+
+# The tests load the provider into the system's OpenSSL 3, which Windows
+# hosts lack.
+[target.'cfg(unix)'.dev-dependencies]
+openssl-sys = "0.9"

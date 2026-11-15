@@ -250,6 +250,34 @@ fn signature() {
     assert_eq!(format!("{signature:?}"), format!("MlDsaSignature({bytes})"));
     assert_eq!(format!("{:?}", pair.to_seed().unwrap()), "MlDsaSeed(..)");
     assert_eq!(format!("{:?}", pair.to_pkcs8()), "Pkcs8(..)");
+
+    use rind::signature::sign::{SlhDsaKeyPair, SlhDsaShake128f};
+    assert_eq!(
+        format!("{:?}", verify::SLH_DSA_SHAKE_128F),
+        "SLH-DSA-SHAKE-128f"
+    );
+    let pair = SlhDsaKeyPair::<SlhDsaShake128f>::generate().unwrap();
+    assert_eq!(
+        format!("{pair:?}"),
+        "SlhDsaKeyPair { algorithm: SLH-DSA-SHAKE-128f, .. }"
+    );
+    let public = pair.public_key();
+    let bytes = format!("{:?}", public.as_ref());
+    assert_eq!(
+        format!("{public:?}"),
+        format!("PublicKey {{ algorithm: SLH-DSA-SHAKE-128f, bytes: {bytes} }}")
+    );
+    assert_eq!(format!("{:?}", pair.to_pkcs8()), "Pkcs8(..)");
+    // A signature takes Miri half an hour; the native runs sign.
+    if cfg!(miri) {
+        return;
+    }
+    let signature = pair.sign(b"").unwrap();
+    let bytes = format!("{:?}", signature.as_ref());
+    assert_eq!(
+        format!("{signature:?}"),
+        format!("SlhDsaSignature({bytes})")
+    );
 }
 
 #[test]
@@ -264,4 +292,45 @@ fn agreement() {
     assert_eq!(format!("{public:?}"), format!("PublicKey({bytes})"));
     let secret = key.agree(public.as_ref()).unwrap();
     assert_eq!(format!("{secret:?}"), "SharedSecret(..)");
+}
+
+#[test]
+fn vrf() {
+    use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI, SecretKey};
+    for (algorithm, name) in [
+        (&ECVRF_EDWARDS25519_SHA512_TAI, "Edwards25519Sha512Tai"),
+        (&ECVRF_P256_SHA256_TAI, "P256Sha256Tai"),
+    ] {
+        assert_eq!(format!("{algorithm:?}"), name);
+        let key = SecretKey::from_bytes(algorithm, &[0x11; 32]).unwrap();
+        // `show` flags "255", which `Edwards25519`'s name contains, so check
+        // the seed's decimal bytes (0x11) here.
+        let secret = |value: &dyn core::fmt::Debug| {
+            let shown = format!("{value:?}");
+            assert!(!shown.contains("17"), "{shown}");
+            shown
+        };
+        assert_eq!(
+            secret(&key),
+            format!("SecretKey {{ algorithm: {name}, .. }}")
+        );
+        assert_eq!(secret(&key.to_bytes()), "SecretKeyBytes(..)");
+
+        let public = key.public_key();
+        let bytes = format!("{:?}", public.as_ref());
+        assert_eq!(format!("{public:?}"), format!("PublicKey({bytes})"));
+        let (proof, output) = key.prove(b"alpha").unwrap();
+        let bytes = format!("{:?}", proof.as_ref());
+        assert_eq!(format!("{proof:?}"), format!("Proof({bytes})"));
+        let bytes = format!("{:?}", output.as_ref());
+        assert_eq!(format!("{output:?}"), format!("Output({bytes})"));
+    }
+}
+
+#[test]
+fn vrf_algorithms_differ() {
+    use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI};
+    assert_eq!(ECVRF_P256_SHA256_TAI, ECVRF_P256_SHA256_TAI);
+    assert_eq!(ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_EDWARDS25519_SHA512_TAI);
+    assert_ne!(ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI);
 }

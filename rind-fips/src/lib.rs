@@ -154,15 +154,26 @@ pub mod hkdf;
 /// ```
 pub mod pbkdf2;
 
-/// Authenticated decryption with AES-GCM.
+/// Authenticated encryption with AES-GCM.
 ///
-/// An [`aead::Key`] is built from an algorithm constant and key bytes, and
-/// opens what a peer sealed under its nonces. It does not seal: FIPS 140-3
-/// approves AES-GCM encryption only under an IV the module generates, which
-/// this crate does not offer yet.
+/// FIPS 140-3 approves AES-GCM encryption only under an IV the module
+/// generates, so the caller never picks a nonce to seal under. A
+/// [`aead::RandomizedNonceKey`] draws each from the module's DRBG, and a
+/// [`aead::TlsRecordSealingKey`] seals TLS 1.3 records, whose sequence
+/// numbers it checks. An [`aead::Key`] opens what a peer sealed under its
+/// nonces, TLS 1.3 records included: opening one checks nothing more, so
+/// there is no `TlsRecordOpeningKey`.
 ///
 /// ```
 /// use rind_fips::aead::*;
+///
+/// let key = RandomizedNonceKey::new(&AES_256_GCM, &[0x42; 32]).unwrap();
+/// let mut in_out = b"hello".to_vec();
+/// let nonce = key
+///     .seal_in_place_append_tag(b"header", &mut in_out)
+///     .unwrap();
+/// let plaintext = key.open_in_place(nonce, b"header", &mut in_out).unwrap();
+/// assert_eq!(plaintext, b"hello");
 ///
 /// let key = Key::new(&AES_128_GCM, &[0; 16]).unwrap();
 ///

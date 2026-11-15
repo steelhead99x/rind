@@ -7,7 +7,8 @@
 //! signature, each after a big-endian 16-bit length, then the message.
 //! rind must never accept a signature aws-lc-rs refuses, and refuses one it
 //! accepts only for a key it refuses by design. RSA-PSS with any salt length,
-//! which aws-lc-rs does not expose, is checked against aws-lc's.
+//! which aws-lc-rs does not expose, is checked against aws-lc's, and SLH-DSA,
+//! which aws-lc lacks, against RustCrypto's.
 
 use aws_lc_rs::digest;
 use aws_lc_rs::signature::{self as theirs, UnparsedPublicKey};
@@ -39,6 +40,7 @@ fuzz_target!(|data: &[u8]| {
             .verify(message, signature)
             .is_ok(),
         Theirs::PssAnySalt(hash, md) => pss_any_salt(hash, md, key, message, signature),
+        Theirs::SlhDsa(verify) => verify(key, message, signature),
     };
     match PublicKey::new(ours, key) {
         Ok(key) => assert_eq!(key.verify(message, signature).is_ok(), accepted),
@@ -64,6 +66,20 @@ enum Theirs {
         &'static digest::Algorithm,
         unsafe extern "C" fn() -> *const aws_lc_sys::EVP_MD,
     ),
+    /// RustCrypto's SLH-DSA, pure with the empty context: `(key, message,
+    /// signature)`.
+    SlhDsa(fn(&[u8], &[u8], &[u8]) -> bool),
+}
+
+/// Whether RustCrypto verifies `signature` with SLH-DSA parameter set `P`.
+fn slh_dsa<P: slh_dsa::ParameterSet>(key: &[u8], message: &[u8], signature: &[u8]) -> bool {
+    use slh_dsa::signature::Verifier;
+    let key = slh_dsa::VerifyingKey::<P>::try_from(key);
+    let signature = slh_dsa::Signature::<P>::try_from(signature);
+    let (Ok(key), Ok(signature)) = (key, signature) else {
+        return false;
+    };
+    key.verify(message, &signature).is_ok()
 }
 
 /// Whether aws-lc verifies `signature` with RSA-PSS and any salt length,
@@ -135,6 +151,7 @@ enum Kind {
     Ed25519,
     /// ML-DSA, with its parameter set's public key length.
     MlDsa(usize),
+    SlhDsa,
 }
 
 /// The algorithm `selector` picks on each side, and its key type.
@@ -301,6 +318,66 @@ fn algorithm(selector: u8) -> Option<(&'static VerificationAlgorithm, Theirs, Ki
             Theirs::Rs(&theirs::ML_DSA_87),
             Kind::MlDsa(2592),
         ),
+        32 => (
+            &verify::SLH_DSA_SHA2_128S,
+            Theirs::SlhDsa(slh_dsa::<slh_dsa::Sha2_128s>),
+            Kind::SlhDsa,
+        ),
+        33 => (
+            &verify::SLH_DSA_SHA2_128F,
+            Theirs::SlhDsa(slh_dsa::<slh_dsa::Sha2_128f>),
+            Kind::SlhDsa,
+        ),
+        34 => (
+            &verify::SLH_DSA_SHA2_192S,
+            Theirs::SlhDsa(slh_dsa::<slh_dsa::Sha2_192s>),
+            Kind::SlhDsa,
+        ),
+        35 => (
+            &verify::SLH_DSA_SHA2_192F,
+            Theirs::SlhDsa(slh_dsa::<slh_dsa::Sha2_192f>),
+            Kind::SlhDsa,
+        ),
+        36 => (
+            &verify::SLH_DSA_SHA2_256S,
+            Theirs::SlhDsa(slh_dsa::<slh_dsa::Sha2_256s>),
+            Kind::SlhDsa,
+        ),
+        37 => (
+            &verify::SLH_DSA_SHA2_256F,
+            Theirs::SlhDsa(slh_dsa::<slh_dsa::Sha2_256f>),
+            Kind::SlhDsa,
+        ),
+        38 => (
+            &verify::SLH_DSA_SHAKE_128S,
+            Theirs::SlhDsa(slh_dsa::<slh_dsa::Shake128s>),
+            Kind::SlhDsa,
+        ),
+        39 => (
+            &verify::SLH_DSA_SHAKE_128F,
+            Theirs::SlhDsa(slh_dsa::<slh_dsa::Shake128f>),
+            Kind::SlhDsa,
+        ),
+        40 => (
+            &verify::SLH_DSA_SHAKE_192S,
+            Theirs::SlhDsa(slh_dsa::<slh_dsa::Shake192s>),
+            Kind::SlhDsa,
+        ),
+        41 => (
+            &verify::SLH_DSA_SHAKE_192F,
+            Theirs::SlhDsa(slh_dsa::<slh_dsa::Shake192f>),
+            Kind::SlhDsa,
+        ),
+        42 => (
+            &verify::SLH_DSA_SHAKE_256S,
+            Theirs::SlhDsa(slh_dsa::<slh_dsa::Shake256s>),
+            Kind::SlhDsa,
+        ),
+        43 => (
+            &verify::SLH_DSA_SHAKE_256F,
+            Theirs::SlhDsa(slh_dsa::<slh_dsa::Shake256f>),
+            Kind::SlhDsa,
+        ),
         _ => return None,
     })
 }
@@ -336,5 +413,7 @@ fn refused(kind: Kind, key: &[u8]) -> bool {
         // aws-lc-rs also takes a `SubjectPublicKeyInfo`; rind takes only the
         // raw key, of which any bytes of its length are one.
         Kind::MlDsa(len) => key.len() != len,
+        // Any bytes of the key's length are one, on both sides.
+        Kind::SlhDsa => false,
     }
 }

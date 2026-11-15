@@ -595,7 +595,8 @@ let SHA256_SHAEXT_K_TAC =
 
 let SHA256_SHAEXT_ROUNDS_CORRECT = prove
  (`!pc k m h.
-     ensures x86
+     aligned 16 (word k:int64)
+     ==> ensures x86
       (\s. bytes_loaded s (word pc) sha256_shaext_rounds_mc /\
            read RIP s = word pc /\
            read RCX s = word k /\
@@ -618,7 +619,7 @@ let SHA256_SHAEXT_ROUNDS_CORRECT = prove
        MAYCHANGE [ZMM0; ZMM1; ZMM2; ZMM3; ZMM10; ZMM11; ZMM12; ZMM13; ZMM14; ZMM15] ,,
        MAYCHANGE [events])`,
   MAP_EVERY X_GEN_TAC [`pc:num`; `k:num`; `m:int32 list`; `h:int32 list`] THEN
-  REWRITE_TAC[fst SHA256_SHAEXT_ROUNDS_EXEC] THEN
+  DISCH_TAC THEN REWRITE_TAC[fst SHA256_SHAEXT_ROUNDS_EXEC] THEN
   SHA256_SHAEXT_YMM_INIT_TAC THEN
   RULE_ASSUM_TAC(REWRITE_RULE(map GSYM SHA256_MSG_SCHEDULE_FIRST)) THEN
   SHA256_SHAEXT_K_TAC THEN
