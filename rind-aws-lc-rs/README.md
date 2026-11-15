@@ -50,7 +50,7 @@ These items are left out, so code using them fails to build:
 - An ML-DSA PKCS#8 v2 key whose public key does not match is refused. aws-lc-rs loads the private key.
 - An ML-DSA `SubjectPublicKeyInfo` followed by more bytes is refused.
 - An ML-DSA PKCS#8 document followed by more bytes is refused. On a key of another parameter set, aws-lc-rs parses the key and then reports `Unspecified`.
-- An ML-DSA seed with bytes after the seed element, still inside the private key, is `InvalidEncoding`. aws-lc-rs ignores those bytes (`pqdsa_priv_decode` does not require the private-key value to end): the named parameter set loads, and another parameter set is `Unspecified`.
+- An ML-DSA seed with bytes after the seed element, still inside the private key, is `InvalidEncoding` when loaded as that parameter set. aws-lc-rs ignores those bytes and loads the key. Loaded as another parameter set, both report `Unspecified`.
 - An `id-ecPublicKey` PKCS#8 key on secp224r1, secp256k1, or a Brainpool curve is `InvalidEncoding` when loaded as ML-DSA. aws-lc-rs parses that key and reports `WrongAlgorithm`.
 - A DSA PKCS#8 key is `InvalidEncoding` when loaded as ML-DSA. aws-lc-rs parses one whose parameters and private key are in range and reports `WrongAlgorithm`.
 - An RSASSA-PSS PKCS#8 key whose parameters name a hash or a mask generation function is `InvalidEncoding` when loaded as ML-DSA. aws-lc-rs parses it and reports `WrongAlgorithm`.

@@ -449,10 +449,10 @@ impl fmt::Debug for PqdsaPublicKey {
 /// consistent one is then `Unspecified`. A byte after the document is
 /// refused here; the README lists that.
 ///
-/// Bytes after the seed element, still inside the private key, are
-/// `InvalidEncoding`. That decoder does not require its private-key CBS to
-/// end after the seed, so aws-lc-rs reports `Unspecified` for another
-/// parameter set. rind's parser refuses the extra byte for the named set
+/// That decoder does not require its private-key CBS to end after the seed
+/// (lines 198-211). A 32-byte seed is therefore `Unspecified` for another
+/// parameter set even when bytes follow the seed element. The named set
+/// still refuses those bytes: rind's parser requires the value to end
 /// (`Type::from_bytes` calls `check_end` in `rind/src/high/asn1.rs`).
 fn other_parameter_set(id: &AlgorithmID, pkcs8: &[u8]) -> KeyRejected {
     if der::pkcs8_trailing(pkcs8) {
@@ -462,7 +462,9 @@ fn other_parameter_set(id: &AlgorithmID, pkcs8: &[u8]) -> KeyRejected {
         if !parts.parameters.is_empty() {
             return KeyRejected::invalid_encoding();
         }
-        if let Some((0x80, seed)) = der::sole_element(parts.private_key) {
+        // The first element only. Bytes after a 32-byte seed are unread,
+        // as `pqdsa_priv_decode` leaves them unread.
+        if let Some((0x80, seed)) = der::first_element(parts.private_key) {
             return if seed.len() == 32 {
                 KeyRejected::unspecified()
             } else {

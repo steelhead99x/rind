@@ -1511,12 +1511,11 @@ fn ml_dsa_malformed() {
     assert_eq!(theirs.description_(), "Unspecified");
 }
 
-/// Other algorithms, and a seed with bytes after it, named as aws-lc-rs names them.
+/// Other algorithms, named as aws-lc-rs names them.
 ///
 /// rind's own parsers refuse an RSA modulus outside 2048 to 8192 bits and a
 /// PKCS#8 document with a byte after it. aws-lc-rs has parsed a key, so the
-/// refusal is `WrongAlgorithm`. A seed with a byte after it, still inside the
-/// private key, is rind's `InvalidEncoding`; the README lists that.
+/// refusal is `WrongAlgorithm`.
 #[test]
 fn ml_dsa_algorithm_name() {
     let as_ml_dsa = |pkcs8: &[u8]| {
@@ -1542,8 +1541,8 @@ fn ml_dsa_algorithm_name() {
     let last = bad2048.len() - 1;
     bad2048[last] ^= 0x01;
     as_ml_dsa(&bad2048);
-    // Outside that range the shape is enough. aws-lc-rs still runs
-    // `RSA_check_key`; the README lists the difference.
+    // Outside that range the PKCS#1 shape is enough. aws-lc-rs still runs
+    // `RSA_check_key` and reports `InvalidEncoding`; the README lists that.
     let mut inconsistent = rsa1024.clone();
     let last = inconsistent.len() - 1;
     inconsistent[last] ^= 0x01;
@@ -1616,20 +1615,33 @@ fn ml_dsa_algorithm_name() {
         "aws-lc-rs {}",
         theirs.unwrap_err().description_()
     );
-    let ours =
-        ours::signature::PqdsaKeyPair::from_pkcs8(&ours::signature::ML_DSA_44_SIGNING, &pkcs8)
-            .unwrap_err();
-    let theirs =
-        theirs::signature::PqdsaKeyPair::from_pkcs8(&theirs::signature::ML_DSA_44_SIGNING, &pkcs8)
-            .unwrap_err();
-    assert_eq!(ours.description_(), "InvalidEncoding");
-    assert_eq!(theirs.description_(), "Unspecified");
     // The seed alone, loaded as the other set, stays `Unspecified` on both.
     let pkcs8 = pkcs8_private_key(&oid65, None, &seed);
     same_rejection(
         ours::signature::PqdsaKeyPair::from_pkcs8(&ours::signature::ML_DSA_44_SIGNING, &pkcs8),
         theirs::signature::PqdsaKeyPair::from_pkcs8(&theirs::signature::ML_DSA_44_SIGNING, &pkcs8),
     );
+}
+
+/// An ML-DSA-65 PKCS#8 whose private key is a 32-byte seed plus one trailing
+/// byte, loaded as ML-DSA-44. aws-lc-rs 1.19.0 reports `Unspecified`:
+/// `pqdsa_priv_decode` reads the seed and does not require the private-key
+/// value to end (aws-lc-sys 0.47.0 `crypto/evp_extra/p_pqdsa_asn1.c`,
+/// lines 198-211).
+#[test]
+fn ml_dsa_other_set_seed_tail() {
+    let mut private_key = der(0x80, &[0x5a; 32]);
+    private_key.push(0);
+    let oid65 = [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12];
+    let pkcs8 = pkcs8_private_key(&oid65, None, &private_key);
+    let ours =
+        ours::signature::PqdsaKeyPair::from_pkcs8(&ours::signature::ML_DSA_44_SIGNING, &pkcs8)
+            .unwrap_err();
+    let theirs =
+        theirs::signature::PqdsaKeyPair::from_pkcs8(&theirs::signature::ML_DSA_44_SIGNING, &pkcs8)
+            .unwrap_err();
+    assert_eq!(ours.description_(), theirs.description_());
+    assert_eq!(theirs.description_(), "Unspecified");
 }
 
 /// The first Wycheproof RSA-1024 signing key, PKCS#8.
