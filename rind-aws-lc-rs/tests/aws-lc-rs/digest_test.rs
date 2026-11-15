@@ -82,7 +82,7 @@ mod digest_shavs {
     }
 
     // rind-aws-lc-rs: read when the test runs rather than built in, since
-    // `thirdparty/cavp` is a submodule that a build need not check out.
+    // the vectors are not part of the published crate.
     fn vectors(name: &'static str) -> test::File<'static> {
         let path = format!("{}/../thirdparty/{name}", env!("CARGO_MANIFEST_DIR"));
         let contents = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
@@ -238,12 +238,12 @@ mod digest_shavs {
         SHA1_FOR_LEGACY_USE_ONLY,
         TestType::Fips180_4
     );
-    shavs_tests!("cavp/sha2/", SHA256, SHA256, TestType::Fips180_4);
-    shavs_tests!("cavp/sha2/", SHA384, SHA384, TestType::Fips180_4);
-    shavs_tests!("cavp/sha2/", SHA512, SHA512, TestType::Fips180_4);
-    shavs_tests!("cavp/sha3/", SHA3_256, SHA3_256, TestType::Fips202);
-    shavs_tests!("cavp/sha3/", SHA3_384, SHA3_384, TestType::Fips202);
-    shavs_tests!("cavp/sha3/", SHA3_512, SHA3_512, TestType::Fips202);
+    shavs_tests!("vectors/cavp/sha2/", SHA256, SHA256, TestType::Fips180_4);
+    shavs_tests!("vectors/cavp/sha2/", SHA384, SHA384, TestType::Fips180_4);
+    shavs_tests!("vectors/cavp/sha2/", SHA512, SHA512, TestType::Fips180_4);
+    shavs_tests!("vectors/cavp/sha3/", SHA3_256, SHA3_256, TestType::Fips202);
+    shavs_tests!("vectors/cavp/sha3/", SHA3_384, SHA3_384, TestType::Fips202);
+    shavs_tests!("vectors/cavp/sha3/", SHA3_512, SHA3_512, TestType::Fips202);
 }
 
 /// Test some ways in which `Context::update` and/or `Context::finish`

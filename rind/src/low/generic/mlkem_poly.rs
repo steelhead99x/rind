@@ -4,7 +4,7 @@
 //! ML-KEM's polynomial arithmetic in natural coefficient order, for armv7 and
 //! x86_64 CPUs without AVX2: a Rust port of mlkem-native's portable C
 //! (`poly.c`, `poly_k.c`, `compress.c`, and `sampling.c`, as aws-lc
-//! 91c93a8eb860e51482a871a8772cb9b1b310baea vendors it), whose contracts
+//! 5ed12cce0fd4453f2f63300d44325ed14f845d6f vendors it), whose contracts
 //! s2n-bignum's routines share. mlkem-native's CBMC proofs of its C do not
 //! cover this port; rind's tests check it against s2n-bignum's AVX2 routines.
 //!

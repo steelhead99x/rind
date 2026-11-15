@@ -3,7 +3,7 @@
 
 //! Bitsliced AES for CPUs without AES instructions: aws-lc's
 //! `crypto/fipsmodule/aes/aes_nohw.c` at commit
-//! 91c93a8eb860e51482a871a8772cb9b1b310baea, in Rust. It bitslices eight
+//! 5ed12cce0fd4453f2f63300d44325ed14f845d6f, in Rust. It bitslices eight
 //! blocks into 128-bit SSE2 words on x86_64 CPUs without SSSE3, and in the
 //! portable backend, which armv7 without the crypto extension runs, four
 //! blocks into 64-bit words on 64-bit targets and two into 32-bit words

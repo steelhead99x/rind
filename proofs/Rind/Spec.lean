@@ -206,19 +206,19 @@ theorem p256RInv_spec : p256RInv < p256 ∧ 2 ^ 256 * p256RInv % p256 = 1 := by
 
 /-- `affinepoint_p256 xy P`: `P` is the point whose coordinates are `xy`'s,
 reduced mod `p256` (`modular_decode`),
-https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/p256_scalarmul_alt.ml#L6433 -/
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/p256_scalarmul_alt.ml#L6433 -/
 def p256Affine (xy : Nat × Nat) (P : P256Point) : Prop :=
   P = some (xy.1 % p256, xy.2 % p256)
 
 /-- `affinepointz_p256 xy P`: as `p256Affine`, except that (0, 0) is the point
 at infinity,
-https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/p256_scalarmul_alt.ml#L6437 -/
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/p256_scalarmul_alt.ml#L6437 -/
 def p256AffineZ (xy : Nat × Nat) (P : P256Point) : Prop :=
   if xy.1 = 0 ∧ xy.2 = 0 then P = none else P = some (xy.1 % p256, xy.2 % p256)
 
 /-- `represents2_p256 P xy`: `xy` are `P`'s coordinates in Montgomery form
 (`montgomery_decode`), each below `p256`,
-https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/p256_montjmixadd_alt.ml#L1951 -/
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/p256_montjmixadd_alt.ml#L1951 -/
 def p256Represents2 (P : P256Point) (xy : Nat × Nat) : Prop :=
   xy.1 < p256 ∧ xy.2 < p256 ∧ some (p256RInv * xy.1 % p256, p256RInv * xy.2 % p256) = P
 
@@ -237,7 +237,7 @@ def p256OfJacobian (x y z : Nat) : P256Point :=
 
 /-- `represents_p256 P (x, y, z)`: each coordinate is below p, and the
 Jacobian point their Montgomery forms decode to (`montgomery_decode`) is `P`,
-https://github.com/awslabs/s2n-bignum/blob/b4f17ee743ebc9b53a26c3cd1908f50f0658314f/arm/proofs/p256_montjadd_alt.ml#L2505 -/
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/p256_montjadd_alt.ml#L2505 -/
 def p256Represents (P : P256Point) (xyz : Nat × Nat × Nat) : Prop :=
   xyz.1 < p256 ∧ xyz.2.1 < p256 ∧ xyz.2.2 < p256 ∧
     p256OfJacobian (p256RInv * xyz.1 % p256) (p256RInv * xyz.2.1 % p256)

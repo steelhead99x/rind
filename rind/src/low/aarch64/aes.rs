@@ -349,14 +349,14 @@ fn xor_prefix(t: uint8x16_t) -> uint8x16_t {
 /// A value rather than a pointer, which Aeneas cannot translate.
 #[inline]
 #[target_feature(enable = "aes")]
-fn load(block: &[u8; 16]) -> uint8x16_t {
+pub(super) fn load(block: &[u8; 16]) -> uint8x16_t {
     vreinterpretq_u8_p128(u128::from_le_bytes(*block))
 }
 
 /// `v`'s bytes, lane 0 first, as `vst1q_u8` stores them.
 #[inline]
 #[target_feature(enable = "aes")]
-fn store(v: uint8x16_t) -> [u8; 16] {
+pub(super) fn store(v: uint8x16_t) -> [u8; 16] {
     vreinterpretq_p128_u8(v).to_le_bytes()
 }
 
@@ -592,21 +592,61 @@ pub(crate) fn _aes256_8_blocks(
     )
 }
 
+/// Eight blocks under an AES-192 key, as [`_aes128_8_blocks`] takes them.
+#[target_feature(enable = "aes")]
+#[inline]
+pub(crate) fn _aes192_8_blocks(
+    round_keys: &[uint8x16_t; 13],
+    b0: uint8x16_t,
+    b1: uint8x16_t,
+    b2: uint8x16_t,
+    b3: uint8x16_t,
+    b4: uint8x16_t,
+    b5: uint8x16_t,
+    b6: uint8x16_t,
+    b7: uint8x16_t,
+) -> (
+    uint8x16_t,
+    uint8x16_t,
+    uint8x16_t,
+    uint8x16_t,
+    uint8x16_t,
+    uint8x16_t,
+    uint8x16_t,
+    uint8x16_t,
+) {
+    let [b0, b1, b2, b3, b4, b5, b6, b7] =
+        _aes_8_blocks(round_keys, [b0, b1, b2, b3, b4, b5, b6, b7]);
+    (b0, b1, b2, b3, b4, b5, b6, b7)
+}
+
 /// Eight blocks under any key size, by its number of round keys,
 /// interleaved as [`_aes128_8_blocks`] does.
+#[allow(clippy::needless_range_loop)]
 #[target_feature(enable = "aes")]
 #[inline]
 pub(crate) fn _aes_8_blocks<const N: usize>(
     round_keys: &[uint8x16_t; N],
     mut b: [uint8x16_t; 8],
 ) -> [uint8x16_t; 8] {
-    for rk in &round_keys[..N - 2] {
-        for b in &mut b {
-            *b = vaesmcq_u8(vaeseq_u8(*b, *rk));
-        }
+    // Loops by index, none nested: Aeneas translates no loop that writes
+    // through an iterator's references, nor one nested in another.
+    for r in 0..N - 2 {
+        b = _aes_round_8(b, round_keys[r]);
     }
-    for b in &mut b {
-        *b = veorq_u8(vaeseq_u8(*b, round_keys[N - 2]), round_keys[N - 1]);
+    for j in 0..8 {
+        b[j] = veorq_u8(vaeseq_u8(b[j], round_keys[N - 2]), round_keys[N - 1]);
+    }
+    b
+}
+
+/// An `aese` and `aesmc` round of each of eight blocks.
+#[allow(clippy::needless_range_loop)]
+#[target_feature(enable = "aes")]
+#[inline]
+fn _aes_round_8(mut b: [uint8x16_t; 8], round_key: uint8x16_t) -> [uint8x16_t; 8] {
+    for j in 0..8 {
+        b[j] = vaesmcq_u8(vaeseq_u8(b[j], round_key));
     }
     b
 }

@@ -69,7 +69,7 @@ theorem select_row_spec (hc : RunsSelect) (z : Std.Array U64 8#usize) (table : S
   apply WP.spec_mono (bignum_aff_point_select_p256_spec hc z table index (by rw [ht]; norm_num))
   intro r hr
   have hl : table.val.length = 512 := ht
-  rw [hr, tableRow, hl]
+  rw [hr, rind.select.tableRow, hl]
 
 /-- What `bignum_aff_point_select_p256` selects from a 64-entry row: entry
 `d`, counting from 1, or zeros for any other `d`. -/

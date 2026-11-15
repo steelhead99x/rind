@@ -145,9 +145,16 @@ pub fn digest(algorithm: &'static Algorithm, data: &[u8]) -> Digest {
 pub struct Context(State);
 
 // `repr(u8)` lays every variant out as the tag then its `Hashing`, so `ops`
-// sits at one offset in each.
+// sits at one offset in each, and, on 64-bit targets, each context 16
+// bytes in.
+//
+// Aligned to a cache line, so the layouts of the contexts it holds decide
+// which loads and stores cross one. A load cannot take its bytes from a
+// store still in flight that crosses a line, or from two stores, and waits
+// for them to reach the cache. That cost a SHA-256 context, against a
+// one-shot hash, 16 ns at 16 bytes on Zen 5.
 #[derive(Clone)]
-#[repr(u8)]
+#[repr(u8, align(64))]
 enum State {
     Md5(Hashing<Md5Context>),
     Sha1(Hashing<Sha1Context>),
@@ -561,7 +568,9 @@ mod tests {
     #[test]
     fn secret_message() {
         // Under `admin/ctgrind`, nothing may branch on or index by the
-        // message, which ends in a partial block of each hash.
+        // message, which ends in a partial block of each hash. 31-byte
+        // updates copy into the buffer in every lane size, from offsets 0
+        // and 31, as well as filling blocks.
         for algorithm in [
             &MD5,
             &SHA1,
@@ -580,6 +589,12 @@ mod tests {
             let mut ctx = Context::new(algorithm);
             ctx.update(&message[..100]);
             ctx.update(&message[100..]);
+            let got = ct::into_public(ctx.finish());
+            assert_eq!(got.as_ref(), wanted.as_ref());
+            let mut ctx = Context::new(algorithm);
+            for chunk in message.chunks(31) {
+                ctx.update(chunk);
+            }
             let got = ct::into_public(ctx.finish());
             assert_eq!(got.as_ref(), wanted.as_ref());
             let got = ct::into_public(digest(algorithm, &message));
@@ -635,23 +650,53 @@ mod tests {
         for (file, algorithm) in [
             ("../thirdparty/cavp-sha1/SHA1ShortMsg.rsp", &SHA1),
             ("../thirdparty/cavp-sha1/SHA1LongMsg.rsp", &SHA1),
-            ("../thirdparty/cavp/sha2/SHA256ShortMsg.rsp", &SHA256),
-            ("../thirdparty/cavp/sha2/SHA256LongMsg.rsp", &SHA256),
-            ("../thirdparty/cavp/sha2/SHA384ShortMsg.rsp", &SHA384),
-            ("../thirdparty/cavp/sha2/SHA384LongMsg.rsp", &SHA384),
-            ("../thirdparty/cavp/sha2/SHA512ShortMsg.rsp", &SHA512),
-            ("../thirdparty/cavp/sha2/SHA512LongMsg.rsp", &SHA512),
             (
-                "../thirdparty/cavp/sha2/SHA512_256ShortMsg.rsp",
+                "../thirdparty/vectors/cavp/sha2/SHA256ShortMsg.rsp",
+                &SHA256,
+            ),
+            ("../thirdparty/vectors/cavp/sha2/SHA256LongMsg.rsp", &SHA256),
+            (
+                "../thirdparty/vectors/cavp/sha2/SHA384ShortMsg.rsp",
+                &SHA384,
+            ),
+            ("../thirdparty/vectors/cavp/sha2/SHA384LongMsg.rsp", &SHA384),
+            (
+                "../thirdparty/vectors/cavp/sha2/SHA512ShortMsg.rsp",
+                &SHA512,
+            ),
+            ("../thirdparty/vectors/cavp/sha2/SHA512LongMsg.rsp", &SHA512),
+            (
+                "../thirdparty/vectors/cavp/sha2/SHA512_256ShortMsg.rsp",
                 &SHA512_256,
             ),
-            ("../thirdparty/cavp/sha2/SHA512_256LongMsg.rsp", &SHA512_256),
-            ("../thirdparty/cavp/sha3/SHA3_256ShortMsg.rsp", &SHA3_256),
-            ("../thirdparty/cavp/sha3/SHA3_256LongMsg.rsp", &SHA3_256),
-            ("../thirdparty/cavp/sha3/SHA3_384ShortMsg.rsp", &SHA3_384),
-            ("../thirdparty/cavp/sha3/SHA3_384LongMsg.rsp", &SHA3_384),
-            ("../thirdparty/cavp/sha3/SHA3_512ShortMsg.rsp", &SHA3_512),
-            ("../thirdparty/cavp/sha3/SHA3_512LongMsg.rsp", &SHA3_512),
+            (
+                "../thirdparty/vectors/cavp/sha2/SHA512_256LongMsg.rsp",
+                &SHA512_256,
+            ),
+            (
+                "../thirdparty/vectors/cavp/sha3/SHA3_256ShortMsg.rsp",
+                &SHA3_256,
+            ),
+            (
+                "../thirdparty/vectors/cavp/sha3/SHA3_256LongMsg.rsp",
+                &SHA3_256,
+            ),
+            (
+                "../thirdparty/vectors/cavp/sha3/SHA3_384ShortMsg.rsp",
+                &SHA3_384,
+            ),
+            (
+                "../thirdparty/vectors/cavp/sha3/SHA3_384LongMsg.rsp",
+                &SHA3_384,
+            ),
+            (
+                "../thirdparty/vectors/cavp/sha3/SHA3_512ShortMsg.rsp",
+                &SHA3_512,
+            ),
+            (
+                "../thirdparty/vectors/cavp/sha3/SHA3_512LongMsg.rsp",
+                &SHA3_512,
+            ),
         ] {
             process_cavp(
                 file,
@@ -687,6 +732,28 @@ mod tests {
         ] {
             let got = digest(&MD5, message.as_bytes());
             assert_eq!(got.as_ref(), hex::decode(wanted).unwrap(), "{message:?}");
+        }
+    }
+
+    // Each context starts on a 16-byte boundary of a cache-line-aligned
+    // `Context`, which `mid::sha2`'s layout test builds on.
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn layout() {
+        assert_eq!(align_of::<Context>(), 64);
+        for algorithm in [&SHA256, &SHA384, &SHA512, &SHA512_256] {
+            let ctx = Context::new(algorithm);
+            let context: *const u8 = match &ctx.0 {
+                State::Sha256(hashing) => core::ptr::from_ref(&hashing.context).cast(),
+                State::Sha384(hashing) => core::ptr::from_ref(&hashing.context).cast(),
+                State::Sha512(hashing) => core::ptr::from_ref(&hashing.context).cast(),
+                State::Sha512_256(hashing) => core::ptr::from_ref(&hashing.context).cast(),
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                (context as usize - core::ptr::from_ref(&ctx) as usize) % 16,
+                0
+            );
         }
     }
 
@@ -773,13 +840,25 @@ mod tests {
         if std::env::var_os("SLOW_TESTS").is_some() {
             for (file, algorithm) in [
                 ("../thirdparty/cavp-sha1/SHA1Monte.rsp", &SHA1),
-                ("../thirdparty/cavp/sha2/SHA256Monte.rsp", &SHA256),
-                ("../thirdparty/cavp/sha2/SHA384Monte.rsp", &SHA384),
-                ("../thirdparty/cavp/sha2/SHA512Monte.rsp", &SHA512),
-                ("../thirdparty/cavp/sha2/SHA512_256Monte.rsp", &SHA512_256),
-                ("../thirdparty/cavp/sha3/SHA3_256Monte.rsp", &SHA3_256),
-                ("../thirdparty/cavp/sha3/SHA3_384Monte.rsp", &SHA3_384),
-                ("../thirdparty/cavp/sha3/SHA3_512Monte.rsp", &SHA3_512),
+                ("../thirdparty/vectors/cavp/sha2/SHA256Monte.rsp", &SHA256),
+                ("../thirdparty/vectors/cavp/sha2/SHA384Monte.rsp", &SHA384),
+                ("../thirdparty/vectors/cavp/sha2/SHA512Monte.rsp", &SHA512),
+                (
+                    "../thirdparty/vectors/cavp/sha2/SHA512_256Monte.rsp",
+                    &SHA512_256,
+                ),
+                (
+                    "../thirdparty/vectors/cavp/sha3/SHA3_256Monte.rsp",
+                    &SHA3_256,
+                ),
+                (
+                    "../thirdparty/vectors/cavp/sha3/SHA3_384Monte.rsp",
+                    &SHA3_384,
+                ),
+                (
+                    "../thirdparty/vectors/cavp/sha3/SHA3_512Monte.rsp",
+                    &SHA3_512,
+                ),
             ] {
                 process_cavp(
                     file,

@@ -22,14 +22,297 @@
 #
 # No campaign runs armv7's own code or the AVX-512 paths: no runner takes
 # them natively, and under qemu or Intel SDE a campaign took too long for
-# what it found. The x86_64 campaign skips the files only AVX-512 runs, and
-# .cargo/mutants.toml excludes the rest of both.
+# what it found. Nor does one run the DIT code only Apple's cores run, which
+# .cargo/mutants.toml excludes. The x86_64 campaign skips the files only
+# AVX-512 runs, and .cargo/mutants.toml excludes the rest of both.
 #
 # cargo-mutants mutates code whatever its `cfg`, so a function only another
 # architecture compiles is missed here. `admin/mutants --survivors DIR...`
 # combines runs' `mutants.out` directories: it prints each mutant some run
 # missed and none caught, and fails if there is one.
 #
+# `--in-diff` is rewritten before cargo-mutants sees it. Version 27.1.0, the
+# one nixpkgs pins, records a `#[path = "../generic/aes_nohw.rs"]` module as
+# `low/portable/../generic/aes_nohw.rs` and compares that string to the diff.
+# Nothing matches, and "no mutants" exits 0.
+# See UPSTREAM.md, "cargo-mutants matches `#[path]` with `..` literally".
+set -euo pipefail
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+# Copies a Git diff so each changed file also appears under the un-normalized
+# `#[path]` names cargo-mutants records. `expand` writes one diff; `self-test`
+# checks those names against this tree.
+# The program is an argument, not stdin, so `--in-diff /dev/stdin` still reads
+# the caller's diff.
+read -r -d '' expand_py <<'PY' || true
+import posixpath
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+def ascent(path):
+    """How far `path` climbs above its start, as cargo-mutants 27.1.0 counts it."""
+    height = 0
+    worst = 0
+    for part in path.split("/"):
+        if part == "..":
+            height += 1
+            worst = max(worst, height)
+        elif part not in ("", "."):
+            height -= 1
+    return worst
+
+def path_aliases(root):
+    """Git path -> the `..` names cargo-mutants keeps for a top-level `#[path]`."""
+    listed = subprocess.check_output(["git", "ls-files", "-z"], cwd=root)
+    aliases = {}
+    attr = re.compile(r'^#\[path\s*=\s*"([^"]+)"\]\s*$')
+    for rel in listed.split(b"\0"):
+        if not rel.endswith(b".rs"):
+            continue
+        rel_s = rel.decode()
+        parent = posixpath.dirname(rel_s)
+        # A tracked file deleted from the work tree declares nothing.
+        if not (root / rel_s).is_file():
+            continue
+        # A top-level attribute is what cargo-mutants resolves against the
+        # parent file's directory. One inside `cfg_attr` is not this form.
+        for line in (root / rel_s).read_text(encoding="utf-8").splitlines():
+            match = attr.match(line)
+            if not match:
+                continue
+            discovered = f"{parent}/{match.group(1)}" if parent else match.group(1)
+            canonical = posixpath.normpath(discovered)
+            if discovered != canonical and ascent(discovered) == 0:
+                aliases.setdefault(canonical, set()).add(discovered)
+    return aliases
+
+def sections(text):
+    if text == "":
+        return []
+    parts = []
+    current = []
+    for line in text.splitlines(keepends=True):
+        if line.startswith("diff --git ") and current:
+            parts.append("".join(current))
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        parts.append("".join(current))
+    return parts
+
+def new_path(section):
+    for line in section.splitlines():
+        if not line.startswith("+++ "):
+            continue
+        path = line[4:].strip().split("\t", 1)[0].strip()
+        if len(path) >= 2 and path[0] == '"' and path[-1] == '"':
+            path = path[1:-1]
+        if path.startswith("b/"):
+            path = path[2:]
+        if path == "/dev/null":
+            return None
+        return path
+    return None
+
+def rewrite_header(line, old, new):
+    newline = ""
+    if line.endswith("\n"):
+        newline = "\n"
+        line = line[:-1]
+    if line.endswith("\r"):
+        newline = "\r" + newline
+        line = line[:-1]
+    out = []
+    for part in line.split(" "):
+        tab = ""
+        if "\t" in part:
+            part, rest = part.split("\t", 1)
+            tab = "\t" + rest
+        # `git diff --no-prefix` names the file bare.
+        for prefix in ("a/", "b/", ""):
+            if part == prefix + old:
+                part = prefix + new
+                break
+        out.append(part + tab)
+    return " ".join(out) + newline
+
+def expand_text(root, text):
+    aliases = path_aliases(root)
+    parts = sections(text)
+    present = {path for part in parts if (path := new_path(part))}
+    out = []
+    for part in parts:
+        out.append(part)
+        path = new_path(part)
+        if path is None:
+            continue
+        for alias in sorted(aliases.get(path, ())):
+            if alias in present:
+                continue
+            present.add(alias)
+            rewritten = []
+            for line in part.splitlines(keepends=True):
+                if line.startswith(("diff --git ", "--- ", "+++ ")):
+                    line = rewrite_header(line, path, alias)
+                rewritten.append(line)
+            out.append("".join(rewritten))
+    return "".join(out)
+
+def expand_file(root, src, dest):
+    try:
+        # cargo-mutants decodes a diff lossily, so a non-UTF-8 byte elsewhere
+        # in it passes through unchanged.
+        text = Path(src).read_text(encoding="utf-8", errors="surrogateescape")
+    except OSError as err:
+        print(f"admin/mutants: {err}", file=sys.stderr)
+        sys.exit(1)
+    Path(dest).write_text(expand_text(root, text), encoding="utf-8", errors="surrogateescape")
+
+def self_test(root):
+    aliases = path_aliases(root)
+    expect = {
+        "rind/src/low/generic/aes_nohw.rs": {
+            "rind/src/low/portable/../generic/aes_nohw.rs",
+            "rind/src/low/x86_64/../generic/aes_nohw.rs",
+        },
+        "rind/src/low/generic/ghash_nohw.rs": {
+            "rind/src/low/portable/../generic/ghash_nohw.rs",
+            "rind/src/low/x86_64/../generic/ghash_nohw.rs",
+        },
+    }
+    for path, want in expect.items():
+        got = aliases.get(path)
+        if got != want:
+            sys.exit(f"admin/mutants: aliases for {path}: {got!r}, want {want!r}")
+    if "rind/src/mid/portable/aes_gcm.rs" in aliases:
+        sys.exit("admin/mutants: a #[path] that is already the git path was aliased")
+    for names in aliases.values():
+        for name in names:
+            if "ristretto255" in name:
+                sys.exit(f"admin/mutants: a cfg_attr path was aliased: {name}")
+
+    def sample(path):
+        return (
+            f"diff --git a/{path} b/{path}\n"
+            f"index 1111111..2222222 100644\n"
+            f"--- a/{path}\n"
+            f"+++ b/{path}\n"
+            f"@@ -1 +1,2 @@\n"
+            f" context\n"
+            f"+added\n"
+        )
+
+    aes = "rind/src/low/generic/aes_nohw.rs"
+    text = sample(aes) + sample("rind/src/lib.rs")
+    once = expand_text(root, text)
+    if expand_text(root, once) != once:
+        sys.exit("admin/mutants: diff expansion is not idempotent")
+    if sample("rind/src/lib.rs") not in once:
+        sys.exit("admin/mutants: an unrelated diff was rewritten")
+    if once.count(f"+++ b/{aes}\n") != 1:
+        sys.exit("admin/mutants: the git path was dropped or duplicated")
+    for alias in sorted(expect[aes]):
+        block = f"+++ b/{alias}\n@@ -1 +1,2 @@\n context\n+added\n"
+        if once.count(f"+++ b/{alias}\n") != 1 or block not in once:
+            sys.exit(f"admin/mutants: alias hunk for {alias} is missing or changed:\n{once}")
+    deleted = (
+        f"diff --git a/{aes} b/{aes}\n"
+        "deleted file mode 100644\n"
+        f"--- a/{aes}\n"
+        "+++ /dev/null\n"
+        "@@ -1 +0,0 @@\n"
+        "-gone\n"
+    )
+    if expand_text(root, deleted) != deleted:
+        sys.exit("admin/mutants: a deletion was rewritten")
+    bare = sample(aes).replace(" a/", " ").replace(" b/", " ")
+    for alias in sorted(expect[aes]):
+        if f"+++ {alias}\n" not in expand_text(root, bare):
+            sys.exit(f"admin/mutants: a --no-prefix diff was not copied onto {alias}")
+    if expand_text(root, "") != "":
+        sys.exit("admin/mutants: an empty diff was not left empty")
+    print("admin/mutants: expand-diff self-test passed")
+
+def main():
+    root = Path(sys.argv[1])
+    mode = sys.argv[2]
+    if mode == "self-test":
+        self_test(root)
+    elif mode == "expand":
+        expand_file(root, sys.argv[3], sys.argv[4])
+    else:
+        sys.exit(f"admin/mutants: unknown expand mode {mode}")
+
+main()
+PY
+expand_in_diff() {
+    python3 -I -c "$expand_py" "$here" "$@"
+}
+
+if [ "${1:-}" = --expand-diff-self-test ]; then
+    expand_in_diff self-test
+    if ! missing=$(mktemp); then
+        echo "admin/mutants: mktemp failed" >&2
+        exit 1
+    fi
+    if expand_in_diff expand "$here/no-such-diff" "$missing" 2>/dev/null; then
+        echo "admin/mutants: a missing diff did not fail" >&2
+        exit 1
+    fi
+    rm -f "$missing"
+    # The shell must pass cargo-mutants the rewritten diff, and leave the
+    # caller's file alone. A fake cargo records the arguments.
+    bindir=$(mktemp -d)
+    argsfile=$(mktemp)
+    sample=$(mktemp)
+    cat >"$bindir/cargo" <<EOF
+#!/bin/sh
+: > "$argsfile"
+for arg in "\$@"; do
+    printf '%s\n' "\$arg" >> "$argsfile"
+    file=\${arg#-D}
+    file=\${file#--in-diff=}
+    if [ -f "\$file" ]; then
+        cat "\$file" >> "$argsfile"
+    fi
+done
+exit 0
+EOF
+    chmod +x "$bindir/cargo"
+    cat >"$sample" <<'EOF'
+diff --git a/rind/src/low/generic/aes_nohw.rs b/rind/src/low/generic/aes_nohw.rs
+--- a/rind/src/low/generic/aes_nohw.rs
++++ b/rind/src/low/generic/aes_nohw.rs
+@@ -1 +1,2 @@
+ context
++added
+EOF
+    PATH="$bindir:$PATH" "$0" --in-diff "$sample" --list
+    if grep -q 'portable/\.\./generic/aes_nohw.rs' "$sample"; then
+        echo "admin/mutants: --in-diff rewrote the caller's diff" >&2
+        exit 1
+    fi
+    if ! grep -q 'portable/\.\./generic/aes_nohw.rs' "$argsfile"; then
+        echo "admin/mutants: cargo did not receive a diff naming the portable path" >&2
+        exit 1
+    fi
+    # The other ways to name the diff, and a non-UTF-8 byte in another file.
+    printf 'diff --git a/x.txt b/x.txt\n--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-\xff\n+\xfe\n' >>"$sample"
+    PATH="$bindir:$PATH" "$0" --list --in-diff /dev/stdin <"$sample"
+    grep -q 'portable/\.\./generic/aes_nohw.rs' "$argsfile" ||
+        { echo "admin/mutants: --in-diff /dev/stdin lost the diff" >&2; exit 1; }
+    grep -qa $'^+\xfe$' "$argsfile" ||
+        { echo "admin/mutants: a non-UTF-8 byte did not pass through" >&2; exit 1; }
+    PATH="$bindir:$PATH" "$0" --list "-D=$sample"
+    grep -q 'portable/\.\./generic/aes_nohw.rs' "$argsfile" ||
+        { echo "admin/mutants: -D=FILE lost the diff" >&2; exit 1; }
+    rm -rf "$bindir" "$argsfile" "$sample"
+    exit 0
+fi
+
 # `admin/mutants --pins` fails naming each `exclude_re` entry in
 # .cargo/mutants.toml that matches no mutant, such as a `file:line` pin its
 # code moved away from. cargo-mutants lists mutants whatever their `cfg`, so
@@ -39,9 +322,6 @@
 # cargo-mutants passes the list to every package, and a package that does not
 # depend on rind-rcgen fails to resolve them. `admin/mutants-cargo` adds the
 # two features only when the cargo invocation builds rind-rcgen.
-set -euo pipefail
-here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-
 if [ "${1:-}" = --pins ]; then
     cd "$here"
     # Without the config, so its exclusions don't hide what they match.
@@ -68,8 +348,11 @@ if [ "${1:-}" = --survivors ]; then
     shift
     # A run with no mutants to test, such as one over an empty diff, writes
     # none of these. A file two backends include by `#[path]`, such as
-    # `low/x86_64/../generic/aes_nohw.rs`, is named by its own path, so a
-    # mutant one backend misses matches the other's catch.
+    # `low/x86_64/../generic/aes_nohw.rs`, is named with that `..`, so a
+    # mutant one backend misses matches the other's catch. `--in-diff`
+    # copies the diff onto those names before selection; this only joins
+    # the outcomes.
+    # See UPSTREAM.md, "cargo-mutants matches `#[path]` with `..` literally".
     list() {
         for dir in "$@"; do
             for outcome in "${outcomes[@]}"; do
@@ -114,7 +397,6 @@ done
 case $(uname -sm) in
     "Linux x86_64") host=x86_64-unknown-linux-gnu ;;
     "Linux aarch64") host=aarch64-unknown-linux-gnu ;;
-    "Darwin arm64") host=aarch64-apple-darwin ;;
     *) host="$(uname -sm)" ;;
 esac
 
@@ -123,9 +405,6 @@ portable=(
     'rind/src/low/portable/**' 'rind/src/mid/portable/**'
     rind/src/low/generic/order.rs
 )
-# Darwin runs only the DIT code, which compiles for Apple's platforms alone;
-# the Linux runs cover the rest.
-only=()
 campaign=${target:-$host}
 if [ -n "$portable_backend" ]; then
     [ -z "$target" ] && [ "$campaign" = x86_64-unknown-linux-gnu ] || {
@@ -135,16 +414,6 @@ if [ -n "$portable_backend" ]; then
     campaign=portable
 fi
 case $campaign in
-    aarch64-apple-darwin)
-        triple=AARCH64_APPLE_DARWIN
-        skip=()
-        only=(
-            --file rind/src/low/cpu.rs --file rind/src/low/aarch64/cpu.rs
-            --file rind/src/low/entry.rs
-            --re '(\bDit\b|enter_cpu_state|leave_cpu_state|\bdit::|<impl Drop for Entry>::drop with \(\))'
-        )
-        rows=("dit")
-        ;;
     x86_64-unknown-linux-gnu)
         triple=X86_64_UNKNOWN_LINUX_GNU
         skip=(
@@ -222,9 +491,8 @@ if [ "${1:-}" = --run ]; then
     exit 0
 fi
 
-# A diff, named files, or a listing runs anywhere, as does the Darwin
-# campaign, which names its files itself.
-if [ -z "$listing$scoped" ] && [ ${#only[@]} -eq 0 ] && [ "${RUNNER_ENVIRONMENT:-}" != github-hosted ]; then
+# A diff, named files, or a listing runs anywhere.
+if [ -z "$listing$scoped" ] && [ "${RUNNER_ENVIRONMENT:-}" != github-hosted ]; then
     name=${campaign%%-*}
     [ -z "$portable_backend" ] || name=portable
     branch=$(git -C "$here" branch --show-current)
@@ -235,7 +503,7 @@ if [ -z "$listing$scoped" ] && [ ${#only[@]} -eq 0 ] && [ "${RUNNER_ENVIRONMENT:
 fi
 
 cd "$here"
-args=(${only[@]+"${only[@]}"})
+args=()
 for glob in ${skip[@]+"${skip[@]}"}; do
     args+=(--exclude "$glob")
 done
@@ -269,9 +537,58 @@ export RIND_REAL_CARGO
 export CARGO=$here/admin/mutants-cargo
 # A mutant that hangs the tests until the timeout is caught by them, so only
 # exit 3, timeouts alone, passes beside 0.
+# Copy `--in-diff` onto the `..` names cargo-mutants records. The copy is
+# what it reads; the caller's diff is left as Git wrote it.
+diff_copies=()
+cleanup_diffs() {
+    [ ${#diff_copies[@]} -eq 0 ] || rm -f "${diff_copies[@]}"
+}
+trap cleanup_diffs EXIT
+stage_diff() {
+    local src="$1" how="$2" expanded
+    if ! expanded=$(mktemp); then
+        echo "admin/mutants: mktemp failed" >&2
+        return 1
+    fi
+    # Register the copy before expanding it, so a failed expand is removed.
+    diff_copies+=("$expanded")
+    expand_in_diff expand "$src" "$expanded"
+    case $how in
+        value) cargo_args+=("$expanded") ;;
+        long) cargo_args+=("--in-diff=$expanded") ;;
+        short) cargo_args+=("-D$expanded") ;;
+    esac
+}
+cargo_args=()
+ended=
+prev=
+for arg in "$@"; do
+    if [ -n "$ended" ]; then
+        cargo_args+=("$arg")
+        continue
+    fi
+    if [ "$arg" = -- ]; then
+        ended=1
+        cargo_args+=("$arg")
+        prev=
+        continue
+    fi
+    if [ "$prev" = --in-diff ] || [ "$prev" = -D ]; then
+        stage_diff "$arg" value
+        prev=
+        continue
+    fi
+    case $arg in
+        --in-diff=*) stage_diff "${arg#--in-diff=}" long ;;
+        -D=*) stage_diff "${arg#-D=}" short ;;
+        -D?*) stage_diff "${arg#-D}" short ;;
+        *) cargo_args+=("$arg") ;;
+    esac
+    prev=$arg
+done
 status=0
 # This cargo-mutants build's CLI is `cargo mutants`: the binary expects the
 # `mutants` subcommand, which `cargo mutants` inserts and a direct exec does not.
-"$mutants" mutants "${args[@]}" "$@" || status=$?
+"$mutants" mutants "${args[@]}" ${cargo_args[@]+"${cargo_args[@]}"} || status=$?
 [ "$status" -ne 3 ] || status=0
 exit "$status"

@@ -1,9 +1,12 @@
+use rustls::crypto::CipherSuiteCommon;
+#[cfg(feature = "tls12")]
+use rustls::crypto::KeyExchangeAlgorithm;
+#[cfg(feature = "tls12")]
 use rustls::crypto::tls12::PrfUsingHmac;
 use rustls::crypto::tls13::HkdfUsingHmac;
-use rustls::crypto::{CipherSuiteCommon, KeyExchangeAlgorithm};
-use rustls::{
-    CipherSuite, SignatureScheme, SupportedCipherSuite, Tls12CipherSuite, Tls13CipherSuite,
-};
+use rustls::{CipherSuite, SupportedCipherSuite, Tls13CipherSuite};
+#[cfg(feature = "tls12")]
+use rustls::{SignatureScheme, Tls12CipherSuite};
 
 use super::{aead, hash, hmac, quic};
 
@@ -46,6 +49,7 @@ pub static TLS13_CHACHA20_POLY1305_SHA256: SupportedCipherSuite =
         quic: Some(&quic::CHACHA20_POLY1305),
     });
 
+#[cfg(feature = "tls12")]
 /// The TLS1.2 `TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256` cipher suite.
 pub static TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256: SupportedCipherSuite =
     SupportedCipherSuite::Tls12(&Tls12CipherSuite {
@@ -54,12 +58,13 @@ pub static TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256: SupportedCipherSuite =
             hash_provider: &hash::SHA256,
             confidentiality_limit: u64::MAX,
         },
-        kx: rustls::crypto::KeyExchangeAlgorithm::ECDHE,
+        kx: KeyExchangeAlgorithm::ECDHE,
         sign: TLS12_RSA_SCHEMES,
         aead_alg: &aead::Chacha20Poly1305,
         prf_provider: &PrfUsingHmac(&hmac::SHA256),
     });
 
+#[cfg(feature = "tls12")]
 /// The TLS1.2 `TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256` cipher suite.
 pub static TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256: SupportedCipherSuite =
     SupportedCipherSuite::Tls12(&Tls12CipherSuite {
@@ -74,6 +79,7 @@ pub static TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256: SupportedCipherSuite =
         prf_provider: &PrfUsingHmac(&hmac::SHA256),
     });
 
+#[cfg(feature = "tls12")]
 /// The TLS1.2 `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256` cipher suite.
 pub static TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256: SupportedCipherSuite =
     SupportedCipherSuite::Tls12(&Tls12CipherSuite {
@@ -88,6 +94,7 @@ pub static TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256: SupportedCipherSuite =
         prf_provider: &PrfUsingHmac(&hmac::SHA256),
     });
 
+#[cfg(feature = "tls12")]
 /// The TLS1.2 `TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384` cipher suite.
 pub static TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384: SupportedCipherSuite =
     SupportedCipherSuite::Tls12(&Tls12CipherSuite {
@@ -102,6 +109,7 @@ pub static TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384: SupportedCipherSuite =
         prf_provider: &PrfUsingHmac(&hmac::SHA384),
     });
 
+#[cfg(feature = "tls12")]
 /// The TLS1.2 `TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256` cipher suite.
 pub static TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256: SupportedCipherSuite =
     SupportedCipherSuite::Tls12(&Tls12CipherSuite {
@@ -116,6 +124,7 @@ pub static TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256: SupportedCipherSuite =
         prf_provider: &PrfUsingHmac(&hmac::SHA256),
     });
 
+#[cfg(feature = "tls12")]
 /// The TLS1.2 `TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384` cipher suite.
 pub static TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384: SupportedCipherSuite =
     SupportedCipherSuite::Tls12(&Tls12CipherSuite {
@@ -130,6 +139,7 @@ pub static TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384: SupportedCipherSuite =
         prf_provider: &PrfUsingHmac(&hmac::SHA384),
     });
 
+#[cfg(feature = "tls12")]
 static TLS12_ECDSA_SCHEMES: &[SignatureScheme] = &[
     SignatureScheme::ED25519,
     SignatureScheme::ECDSA_NISTP521_SHA512,
@@ -137,6 +147,7 @@ static TLS12_ECDSA_SCHEMES: &[SignatureScheme] = &[
     SignatureScheme::ECDSA_NISTP256_SHA256,
 ];
 
+#[cfg(feature = "tls12")]
 static TLS12_RSA_SCHEMES: &[SignatureScheme] = &[
     SignatureScheme::RSA_PSS_SHA512,
     SignatureScheme::RSA_PSS_SHA384,

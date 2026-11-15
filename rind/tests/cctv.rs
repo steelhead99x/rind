@@ -27,7 +27,7 @@ struct Ed25519Vector {
 #[test]
 fn ed25519_edge_cases() {
     let path = format!(
-        "{}/../thirdparty/cctv/ed25519/ed25519vectors.json",
+        "{}/../thirdparty/vectors/cctv/ed25519/ed25519vectors.json",
         env!("CARGO_MANIFEST_DIR")
     );
     let file = std::fs::File::open(&path).unwrap_or_else(|_| panic!("cannot open {path}"));

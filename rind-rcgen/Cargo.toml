@@ -9,6 +9,10 @@ categories = ["cryptography"]
 rust-version.workspace = true
 readme = "README.md"
 
+# Every feature, so docs.rs shows the items each gates, labeled with it.
+[package.metadata.docs.rs]
+all-features = true
+
 # The provider admin/adapter-api diffs this crate's API against.
 [package.metadata.rind.api]
 crate = "rcgen"

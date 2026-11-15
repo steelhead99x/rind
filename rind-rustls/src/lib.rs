@@ -40,7 +40,9 @@ pub mod kx_group;
 /// Loading software keys to sign with.
 pub mod sign;
 
+#[cfg(feature = "std")]
 mod ticketer;
+#[cfg(feature = "std")]
 pub use ticketer::Ticketer;
 
 /// Returns a rustls [`CryptoProvider`] using cryptography from rind.
@@ -73,11 +75,17 @@ pub static ALL_CIPHER_SUITES: &[SupportedCipherSuite] = &[
     cipher_suite::TLS13_AES_128_GCM_SHA256,
     cipher_suite::TLS13_AES_256_GCM_SHA384,
     cipher_suite::TLS13_CHACHA20_POLY1305_SHA256,
+    #[cfg(feature = "tls12")]
     cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+    #[cfg(feature = "tls12")]
     cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+    #[cfg(feature = "tls12")]
     cipher_suite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+    #[cfg(feature = "tls12")]
     cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+    #[cfg(feature = "tls12")]
     cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+    #[cfg(feature = "tls12")]
     cipher_suite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
 ];
 
@@ -87,11 +95,17 @@ static CHACHA20_FIRST: &[SupportedCipherSuite] = &[
     cipher_suite::TLS13_CHACHA20_POLY1305_SHA256,
     cipher_suite::TLS13_AES_128_GCM_SHA256,
     cipher_suite::TLS13_AES_256_GCM_SHA384,
+    #[cfg(feature = "tls12")]
     cipher_suite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+    #[cfg(feature = "tls12")]
     cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+    #[cfg(feature = "tls12")]
     cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+    #[cfg(feature = "tls12")]
     cipher_suite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+    #[cfg(feature = "tls12")]
     cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+    #[cfg(feature = "tls12")]
     cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
 ];
 
@@ -227,7 +241,9 @@ mod tests {
     }
 
     // rustls's aws-lc-rs provider offers ML-KEM-1024 and ML-DSA, which rind
-    // lacks; everything else it offers, this crate offers too.
+    // lacks; everything else it offers, this crate offers too. Tests build
+    // rustls with `tls12`, so its TLS 1.2 suites are there to compare.
+    #[cfg(feature = "tls12")]
     #[test]
     fn aws_lc_rs_parity() {
         use rustls::crypto::aws_lc_rs;
@@ -318,8 +334,8 @@ mod tests {
 
     // Every public item of rustls's aws-lc-rs provider, doc-hidden ones
     // included, short of `kx_group::MLKEM1024`, has the same name and type
-    // here, but for `hpke`'s suites, which are `&dyn Hpke` rather than
-    // `&HpkeAwsLcRs<..>`. This fails to compile on a divergence.
+    // here. This fails to compile on a divergence.
+    #[cfg(all(feature = "std", feature = "tls12"))]
     #[test]
     fn aws_lc_rs_items() {
         use rustls::crypto::aws_lc_rs as theirs;

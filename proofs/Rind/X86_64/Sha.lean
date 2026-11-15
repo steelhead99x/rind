@@ -157,8 +157,10 @@ theorem sha256_update_blocks_spec (hb : Sha256Blocks) (P : List U8) (s : mid.sha
   obtain ⟨e, he⟩ := hb.entry
   unfold mid.sha2.Sha256State.Insts.RindLowGenericBlockwiseUpdateBlocks.update_blocks
   step*
-  case h2 =>
-    rw [he, bind_ok]
+  -- `step*` names its goals differently per target, so each is told by its shape:
+  -- the nonempty case runs the block function, the empty one does not.
+  all_goals first
+  | rw [he, bind_ok]
     step with sha256_block_spec hb s.h blk hl as ⟨a, ha⟩
     step*
     have hi3 : i3.val = blk.length / 64 := by
@@ -170,8 +172,7 @@ theorem sha256_update_blocks_spec (hb : Sha256Blocks) (P : List U8) (s : mid.sha
     rw [saturating_add_val _ _ (by rw [hi3]; omega), hi3, List.length_append]
     simp only [Slice.length] at *
     omega
-  all_goals
-    rename_i h0
+  | rename_i h0
     have : blk.val = [] := List.eq_nil_of_length_eq_zero (by simpa [b1_post] using h0)
     simp only [this, List.append_nil]
     exact ⟨hh, hn⟩
@@ -470,8 +471,10 @@ theorem sha1_update_blocks_spec (hb : Sha1Blocks) (P : List U8) (s : mid.sha1.Sh
   obtain ⟨e, he⟩ := hb.entry
   unfold mid.sha1.Sha1State.Insts.RindLowGenericBlockwiseUpdateBlocks.update_blocks
   step*
-  case h2 =>
-    rw [he, bind_ok]
+  -- `step*` names its goals differently per target, so each is told by its shape:
+  -- the nonempty case runs the block function, the empty one does not.
+  all_goals first
+  | rw [he, bind_ok]
     step with sha1_block_spec hb s.h blk hl as ⟨a, ha⟩
     step*
     have hi3 : i3.val = blk.length / 64 := by
@@ -483,8 +486,7 @@ theorem sha1_update_blocks_spec (hb : Sha1Blocks) (P : List U8) (s : mid.sha1.Sh
     rw [saturating_add_val _ _ (by rw [hi3]; omega), hi3, List.length_append]
     simp only [Slice.length] at *
     omega
-  all_goals
-    rename_i h0
+  | rename_i h0
     have : blk.val = [] := List.eq_nil_of_length_eq_zero (by simpa [b1_post] using h0)
     simp only [this, List.append_nil]
     exact ⟨hh, hn⟩

@@ -76,6 +76,32 @@ fn test_rind_sha512_256(data: &[u8]) {
     black_box(ctx.finish());
 }
 
+fn test_vg<H: verified_garbage::hashes::HashFunction>(data: &[u8]) {
+    let mut ctx = H::new();
+    ctx.update(data);
+    black_box(ctx.finalize());
+}
+
+// verified-garbage's row, after checking its digest matches rind's.
+fn vg_row<H: verified_garbage::hashes::HashFunction>(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    ours: &'static rind::digest::Algorithm,
+    size_name: &str,
+    input: &[u8],
+) {
+    let mut ctx = H::new();
+    ctx.update(input);
+    assert_eq!(
+        ctx.finalize().as_ref(),
+        rind::digest::digest(ours, input).as_ref()
+    );
+    group.bench_with_input(
+        BenchmarkId::new("verified-garbage", size_name),
+        input,
+        |b, input| b.iter(|| test_vg::<H>(input)),
+    );
+}
+
 fn sha256(c: &mut Criterion) {
     let mut group = c.benchmark_group("sha256");
     for (size, size_name) in criterion::HASH_SIZES {
@@ -100,6 +126,12 @@ fn sha256(c: &mut Criterion) {
                 b.iter(|| test_rind_sha256(input))
             });
         }
+        vg_row::<verified_garbage::hashes::sha256::Sha256>(
+            &mut group,
+            &rind::digest::SHA256,
+            size_name,
+            &input,
+        );
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         group.bench_with_input(
             BenchmarkId::new("graviola", size_name),
@@ -150,6 +182,12 @@ fn sha512(c: &mut Criterion) {
                 b.iter(|| test_rind_sha512(input))
             });
         }
+        vg_row::<verified_garbage::hashes::sha512::Sha512>(
+            &mut group,
+            &rind::digest::SHA512,
+            size_name,
+            &input,
+        );
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         group.bench_with_input(
             BenchmarkId::new("graviola", size_name),
@@ -198,6 +236,12 @@ fn sha512_256(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
             b.iter(|| test_rind_sha512_256(input))
         });
+        vg_row::<verified_garbage::hashes::sha512_256::Sha512_256>(
+            &mut group,
+            &rind::digest::SHA512_256,
+            size_name,
+            &input,
+        );
     }
 }
 

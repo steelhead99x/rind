@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Checks out, into .tmp/upstream/<name>, the revision of the upstream that
-# `admin/import-<name>` pins as its REV, or for s2n-bignum the base its fork's
+# `admin/import-<name>` pins as its REV, or for a fork rind vendors the base its
 # `RIND.md` names, or into .tmp/upstream/<name>@<rev> the revision `rev`,
 # fetching it shallowly unless it is already there.
 #
-# Usage: admin/upstream <aws-lc | boringssl | openssl | hacl-star | s2n-bignum> [rev]
+# Usage: admin/upstream <aws-lc | boringssl | openssl | hacl-star | s2n-bignum | blind-rsa-signatures> [rev]
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -14,8 +14,9 @@ boringssl) url=https://github.com/google/boringssl script=admin/import-boringssl
 openssl) url=https://github.com/openssl/openssl script=admin/import-openssl ;;
 hacl-star) url=https://github.com/hacl-star/hacl-star script=admin/import-hacl ;;
 s2n-bignum) url=https://github.com/awslabs/s2n-bignum script=thirdparty/s2n-bignum/RIND.md ;;
+blind-rsa-signatures) url=https://github.com/jedisct1/rust-blind-rsa-signatures script=thirdparty/blind-rsa-signatures/RIND.md ;;
 *)
-    echo "usage: admin/upstream <aws-lc | boringssl | openssl | hacl-star | s2n-bignum> [rev]" >&2
+    echo "usage: admin/upstream <aws-lc | boringssl | openssl | hacl-star | s2n-bignum | blind-rsa-signatures> [rev]" >&2
     exit 2
     ;;
 esac

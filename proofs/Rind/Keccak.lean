@@ -5,7 +5,7 @@ import Mathlib.Tactic.IntervalCases
 # Keccak-f[1600] on lanes
 
 s2n-bignum's Keccak spec, `keccak_spec.ml` at the revision rind transliterates
-(b4f17ee7), in which its Keccak routines' theorems are stated: the state as 25
+(3f01260f), in which its Keccak routines' theorems are stated: the state as 25
 64-bit lanes in row-major order, lane `5 * y + x` holding FIPS 202's `A[x, y]`.
 `keccak_eq_KECCAK_f` proves its 24 rounds FIPS 202's `KECCAK-f[1600]`, as
 SymCrypt's transliteration defines it, on the string whose bits are the lanes'

@@ -6,6 +6,7 @@
 //! Load the key as PKCS#1 or PKCS#8 instead.
 
 use core::fmt;
+use core::marker::PhantomData;
 
 use crate::{der, error, rand, signature};
 
@@ -19,6 +20,7 @@ impl KeyPair {
     /// Loads a PKCS#8 RSA private key, named `rsaEncryption`, `id-RSAES-OAEP`,
     /// or `id-ea-rsa`.
     pub fn from_pkcs8(pkcs8: &[u8]) -> Result<Self, error::KeyRejected> {
+        der::pkcs8_v1_only(pkcs8)?;
         rind::signature::RsaKeyPair::from_pkcs8(pkcs8)
             .map_err(error::KeyRejected::rind)
             .and_then(Self::new)
@@ -77,7 +79,7 @@ impl KeyPair {
         }
         let signed = self
             .key
-            .sign(padding_alg.padding().rind, msg)
+            .sign(padding_alg.rind(), msg)
             .map_err(|_| error::Unspecified)?;
         if signed.as_ref().len() != signature.len() {
             return Err(error::Unspecified);
@@ -192,6 +194,9 @@ impl<B: FromIterator<u8>> From<&PublicKey> for PublicKeyComponents<B> {
 pub struct RsaParameters {
     rind: &'static rind::signature::RsaVerificationAlgorithm,
     id: &'static str,
+    // ring's holds a `&'static dyn` padding, which is neither `UnwindSafe`
+    // nor `RefUnwindSafe`, so neither is this.
+    unwind: PhantomData<&'static dyn Sync>,
 }
 
 impl fmt::Debug for RsaParameters {
@@ -222,6 +227,7 @@ pub(crate) mod verification {
             pub static $name: RsaParameters = RsaParameters {
                 rind: &$rind,
                 id: stringify!($name),
+                unwind: core::marker::PhantomData,
             };
         };
     }
@@ -286,63 +292,106 @@ pub(crate) mod verification {
 pub(crate) mod padding {
     use core::fmt;
 
-    use crate::sealed;
+    use crate::{digest, sealed};
 
     /// An RSA signature encoding, a padding and a hash, for [`super::KeyPair::sign`].
     pub trait RsaEncoding: Encoding {}
 
-    // Returns rind-ring's own `Padding`, never a rind type: a caller bounded
-    // by `E: RsaEncoding` can call this, and rind-ring's public API must not
-    // name rind.
-    pub trait Encoding: fmt::Debug + Sync + sealed::Sealed + 'static {
-        fn padding(&self) -> &Padding;
+    // A caller bounded by `E: RsaEncoding` can call this trait's methods, so
+    // it has exactly those of ring's `Padding`.
+    #[allow(private_bounds)]
+    pub trait Encoding: fmt::Debug + Sync + sealed::Sealed + Signs + 'static {
+        fn digest_alg(&self) -> &'static digest::Algorithm;
     }
 
-    /// One of the `RSA_PKCS1_*` and `RSA_PSS_*` signing encodings.
-    pub struct Padding {
-        pub(super) rind: &'static rind::signature::RsaSigningAlgorithm,
-        id: &'static str,
+    // `pub(crate)`, so callers cannot reach the rind algorithm through it.
+    pub(crate) trait Signs {
+        fn rind(&self) -> &'static rind::signature::RsaSigningAlgorithm;
     }
 
-    impl fmt::Debug for Padding {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str(self.id)
-        }
+    // ring's PKCS#1 and PSS encodings are two types, so a caller cannot
+    // assign one's value where the other's goes; neither can rind-ring's.
+    macro_rules! padding_type {
+        ($ty:ident, $doc:expr) => {
+            #[doc = $doc]
+            pub struct $ty {
+                rind: &'static rind::signature::RsaSigningAlgorithm,
+                digest: &'static digest::Algorithm,
+                id: &'static str,
+            }
+
+            impl fmt::Debug for $ty {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str(self.id)
+                }
+            }
+
+            impl sealed::Sealed for $ty {}
+
+            impl Encoding for $ty {
+                fn digest_alg(&self) -> &'static digest::Algorithm {
+                    self.digest
+                }
+            }
+
+            impl Signs for $ty {
+                fn rind(&self) -> &'static rind::signature::RsaSigningAlgorithm {
+                    self.rind
+                }
+            }
+
+            impl RsaEncoding for $ty {}
+        };
     }
 
-    impl sealed::Sealed for Padding {}
-
-    impl Encoding for Padding {
-        fn padding(&self) -> &Padding {
-            self
-        }
-    }
-
-    impl RsaEncoding for Padding {}
+    padding_type!(Pkcs1, "One of the `RSA_PKCS1_*` signing encodings.");
+    padding_type!(Pss, "One of the `RSA_PSS_*` signing encodings.");
 
     macro_rules! padding {
-        ($name:ident, $doc:expr) => {
+        ($name:ident, $ty:ident, $digest:ident, $doc:expr) => {
             #[doc = $doc]
-            pub static $name: Padding = Padding {
+            pub static $name: $ty = $ty {
                 rind: &rind::signature::sign::$name,
+                digest: &digest::$digest,
                 id: stringify!($name),
             };
         };
     }
 
-    padding!(RSA_PKCS1_SHA256, "PKCS#1 v1.5 signatures with SHA-256.");
-    padding!(RSA_PKCS1_SHA384, "PKCS#1 v1.5 signatures with SHA-384.");
-    padding!(RSA_PKCS1_SHA512, "PKCS#1 v1.5 signatures with SHA-512.");
+    padding!(
+        RSA_PKCS1_SHA256,
+        Pkcs1,
+        SHA256,
+        "PKCS#1 v1.5 signatures with SHA-256."
+    );
+    padding!(
+        RSA_PKCS1_SHA384,
+        Pkcs1,
+        SHA384,
+        "PKCS#1 v1.5 signatures with SHA-384."
+    );
+    padding!(
+        RSA_PKCS1_SHA512,
+        Pkcs1,
+        SHA512,
+        "PKCS#1 v1.5 signatures with SHA-512."
+    );
     padding!(
         RSA_PSS_SHA256,
+        Pss,
+        SHA256,
         "PSS signatures with SHA-256, MGF1, and a 32-byte random salt."
     );
     padding!(
         RSA_PSS_SHA384,
+        Pss,
+        SHA384,
         "PSS signatures with SHA-384, MGF1, and a 48-byte random salt."
     );
     padding!(
         RSA_PSS_SHA512,
+        Pss,
+        SHA512,
         "PSS signatures with SHA-512, MGF1, and a 64-byte random salt."
     );
 }

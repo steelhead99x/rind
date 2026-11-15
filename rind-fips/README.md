@@ -33,6 +33,14 @@ lab to test.
   itself as its thread exits, and as the process exits, the module wipes
   those of threads still running. A forked child wipes its copies of the
   DRBGs of its parent's other threads, which it does not run.
+- **AES-GCM IVs.** The module seals only under IVs it generates (IG C.H).
+  A `RandomizedNonceKey` draws each 96-bit IV whole from the DRBG
+  (scenario 2) and seals at most 2^32 messages. A `TlsRecordSealingKey`
+  is TLS 1.3's (scenario 5, RFC 8446): it seals a record only if its
+  sequence number, the nonce XORed with the first nonce, is above the last
+  and below 2^64 - 1, so the caller must rekey before it wraps. Keys live
+  only in memory, so after a restart a new key is established, as IG C.H
+  requires. A seal that fails zeroes its buffer, as aws-lc's does.
 
 ## Running
 
@@ -57,5 +65,13 @@ These are in `rind` but not here, since FIPS 140-3 does not approve them:
   verifying legacy signatures
 - HPKE, RSA-OAEP, RSA blind signatures, and ECVRF
 - RSA-PSS verification of any salt length (`RSA_PSS_*_ANY_SALT`)
-- AES-GCM sealing with a caller's nonce: FIPS 140-3 approves sealing only
-  with an IV the module generates, which is not offered yet
+- AES-GCM sealing with a caller's nonce (`aead::Key` and `aead::gcm::Key`
+  only open): FIPS 140-3 approves sealing only under an IV the module
+  generates, so `aead::RandomizedNonceKey` seals under random 96-bit nonces
+  from the DRBG, rather than XChaCha20-Poly1305 as rind's does, and
+  `aead::TlsRecordSealingKey` seals TLS 1.3 records
+
+Nor is there a `TlsRecordOpeningKey`, as aws-lc-rs has: opening a TLS 1.3
+record checks nothing that opening any AES-GCM message doesn't, so
+`aead::Key` opens them, and a FIPS build of rind-aws-lc-rs wraps it to back
+aws-lc-rs's type.

@@ -8,7 +8,7 @@ set_option linter.style.nameCheck false
 open Aeneas Aeneas.Std Result
 
 /-!
-# aarch64's 128-bit vectors and the NEON intrinsics rind's AES calls
+# aarch64's 128-bit vectors and the NEON intrinsics rind's AES and point select call
 
 `core::arch` implements each intrinsic with an LLVM builtin, which Aeneas
 cannot translate, so these model them by hand, each as the Arm Architecture
@@ -62,6 +62,12 @@ def core.core_arch.arm_shared.neon.generated.vdupq_laneq_u32 (LANE : Std.I32)
 def core.core_arch.arm_shared.neon.generated.veorq_u8 (a b : core.core_arch.arm_shared.neon.uint8x16_t) :
     Result core.core_arch.arm_shared.neon.uint8x16_t :=
   ok (a ^^^ b)
+
+/-- `vsetq_lane_u32::<LANE>`, `INS` (general): `v` with word lane `LANE` set
+to `a`, of the two bits of `LANE` the instruction reads. -/
+def core.core_arch.arm_shared.neon.generated.vsetq_lane_u32 (LANE : Std.I32) (a : Std.U32)
+    (v : core.core_arch.arm_shared.neon.uint32x4_t) : Result core.core_arch.arm_shared.neon.uint32x4_t :=
+  ok (ofLanes32 fun i => if i = LANE.bv.toNat % 4 then a.bv else lane32 v i)
 
 /-- `vextq_u8::<N>`, `EXT`: the 16 bytes from byte `N` of `b`:`a`, `a` lowest,
 of the four bits of `N` the instruction reads. -/
@@ -129,3 +135,24 @@ def core.core_arch.arm_shared.neon.generated.vreinterpretq_u64_u8
 def core.core_arch.arm_shared.neon.generated.vreinterpretq_u8_u64
     (a : core.core_arch.arm_shared.neon.uint64x2_t) : Result core.core_arch.arm_shared.neon.uint8x16_t :=
   ok a
+
+/-- `vceqq_u32`, `CMEQ`: each word lane all ones where the lanes are equal, and
+zero where not. -/
+def core.core_arch.arm_shared.neon.generated.vceqq_u32 (a b : core.core_arch.arm_shared.neon.uint32x4_t) :
+    Result core.core_arch.arm_shared.neon.uint32x4_t :=
+  ok (ofLanes32 fun i => if lane32 a i = lane32 b i then BitVec.allOnes 32 else 0)
+
+/-- `vaddq_u32`, `ADD`: each word lane's sum, wrapping. -/
+def core.core_arch.arm_shared.neon.generated.vaddq_u32 (a b : core.core_arch.arm_shared.neon.uint32x4_t) :
+    Result core.core_arch.arm_shared.neon.uint32x4_t :=
+  ok (ofLanes32 fun i => lane32 a i + lane32 b i)
+
+/-- `vandq_u32`, `AND`. -/
+def core.core_arch.arm_shared.neon.generated.vandq_u32 (a b : core.core_arch.arm_shared.neon.uint32x4_t) :
+    Result core.core_arch.arm_shared.neon.uint32x4_t :=
+  ok (a &&& b)
+
+/-- `veorq_u32`, `EOR`. -/
+def core.core_arch.arm_shared.neon.generated.veorq_u32 (a b : core.core_arch.arm_shared.neon.uint32x4_t) :
+    Result core.core_arch.arm_shared.neon.uint32x4_t :=
+  ok (a ^^^ b)

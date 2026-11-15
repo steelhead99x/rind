@@ -28,27 +28,46 @@ pub(crate) struct RsaPrivateKey {
 }
 
 impl RsaPrivateKey {
+    /// Checks and takes a key's components, which may be wider than they
+    /// need, so no width depends on a secret: each but d is narrowed to the
+    /// width its prime's public length sets.
     pub(crate) fn new(
-        p: RsaPosIntModP,
-        q: RsaPosIntModP,
+        mut p: RsaPosIntModP,
+        mut q: RsaPosIntModP,
         d: RsaPosIntD,
-        dp: RsaPosIntModP,
-        dq: RsaPosIntModP,
-        iqmp: RsaPosIntModP,
+        mut dp: RsaPosIntModP,
+        mut dq: RsaPosIntModP,
+        mut iqmp: RsaPosIntModP,
         n: RsaPosIntModN,
         e: u64,
     ) -> Result<Self, Error> {
-        let (p_len, q_len) = (p.len_bytes(), q.len_bytes());
         if n.len_bits() < MIN_MODULUS_BITS {
             return Err(KeyFormatError::RsaModulus.into());
         }
-        if p.is_even()
-            || q.is_even()
-            || q.len_bits() < 2
+        // The primes are secret, but their bit lengths are revealed, as
+        // aws-lc treats them as public: n's fixes only their sum, yet the
+        // DER framing already reveals each one's byte length, and hiding the
+        // rest would run every CRT at the encoding's wider width. Their
+        // parity is fixed in any valid key.
+        let (p_bits, q_bits) = (
+            low::ct::into_public(p.len_bits()),
+            low::ct::into_public(q.len_bits()),
+        );
+        let p_len = p_bits.div_ceil(8);
+        if low::ct::into_public(p.is_even() | q.is_even())
+            || q_bits < 2
             || !(MIN_PRIVATE_MODULUS_BYTES..=MAX_PRIVATE_MODULUS_BYTES).contains(&p_len)
         {
             return Err(KeyFormatError::RsaPrimes.into());
         }
+
+        // As a generated key's, dp, dq, and iqmp are as wide as their prime.
+        // One that does not fit cannot agree with the others, so this joins
+        // their verdict. d keeps its encoding's width, which may exceed n's,
+        // as d + (p - 1)(q - 1) is as good as d.
+        let (p_words, q_words) = (p_bits.div_ceil(64), q_bits.div_ceil(64));
+        let fits =
+            p.fit(p_words) & q.fit(q_words) & dp.fit(p_words) & dq.fit(q_words) & iqmp.fit(p_words);
 
         let public = RsaPublicKey::new(n, e)?;
 
@@ -66,7 +85,7 @@ impl RsaPrivateKey {
         // The CRT reduces `c` mod each prime by Montgomery reduction, which
         // needs `c` below 2^(64w) times the prime for a w-word prime. Working
         // at the wider prime's width meets that for unbalanced primes too.
-        if p_len < q_len {
+        if p_bits < q_bits {
             p.expand(&q);
         } else {
             q.expand(&p);
@@ -86,7 +105,8 @@ impl RsaPrivateKey {
         // below the modulus.
         let q_wide: RsaPosIntModN = q.widen();
         let q_p = q_wide.reduce(&p, &p_montifier);
-        let consistent = exponents_agree
+        let consistent = fits
+            & exponents_agree
             & pq.equals(&public.n)
             & iqmp.less_than(&p)
             // Out of Montgomery form: iqmp * R * q * R^-1 = iqmp * q (mod p).
