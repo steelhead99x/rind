@@ -1,16 +1,24 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 // RFC 9106's second recommendation, the one cheap enough to sample, and one
 // lane of 16 MiB in one pass. Filling memory is nearly all the cost, so
 // throughput is in bytes filled.
+#[cfg(not(target_arch = "xtensa"))]
 const COSTS: [(&str, u32, u32, u32); 2] = [
     ("16MiB-t1-p1", 1 << 14, 1, 1),
     ("64MiB-t3-p4", 1 << 16, 3, 4),
 ];
 
+#[cfg(not(target_arch = "xtensa"))]
 fn argon2(c: &mut Criterion) {
     let (password, salt) = (b"password", b"per-user salt");
     for (name, memory_kib, passes, lanes) in COSTS {
@@ -52,5 +60,7 @@ fn argon2(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, argon2);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

@@ -21,6 +21,7 @@ on:
       - mutants
       - python
       - Release
+      - xtensa
     types:
       - completed
 

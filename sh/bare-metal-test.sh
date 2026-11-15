@@ -120,7 +120,7 @@ fi
 # Default path: eight targets, four clippy rows each, then four assembly
 # builds, then one tree check.
 # RUSTFLAGS outranks a target-scoped flag, so the target cpu does not merge
-# in. Only x86_64-unknown-none gains dalek's serial backend and SSE2.
+# in. Only x86_64-unknown-none gains SSE2. dalek stays on its default.
 default=$tmp/default
 if ! run "$default" env \
     RUSTFLAGS='-Cdebuginfo=0' \
@@ -141,15 +141,22 @@ while [[ $i -lt 32 ]]; do
     flags=$(flags_of "$default/$i.env")
     assert_has "$args" "clippy"
     assert_lacks "$args" "+esp"
+    # `--target` and `--profile` are cargo's, so they precede rustc's `--`.
+    assert_has "$args" "--profile"
+    profile_at=$(grep -n '^--profile$' <<<"$args" | head -1 | cut -d: -f1)
+    dash_at=$(grep -n '^--$' <<<"$args" | head -1 | cut -d: -f1)
+    if [[ -z $dash_at || $profile_at -gt $dash_at ]]; then
+        echo "--profile follows -- in [$args]" >&2
+        exit 1
+    fi
     assert_has "$flags" "-Cdebuginfo=0"
     assert_has "$flags" 'getrandom_backend="custom"'
     assert_lacks_line "$envf" "ENCODED="
     assert_lacks "$flags" "target-cpu=generic"
+    assert_lacks "$flags" "curve25519_dalek_backend"
     if [[ $args == *x86_64-unknown-none* ]]; then
-        assert_has "$flags" 'curve25519_dalek_backend="serial"'
         assert_has "$flags" "target-feature=+sse,+sse2,-soft-float"
     else
-        assert_lacks "$flags" "curve25519_dalek_backend"
         assert_lacks "$flags" "soft-float"
     fi
     i=$((i + 1))
@@ -250,6 +257,12 @@ while [[ $i -lt 12 ]]; do
     flags=$(flags_of "$xtensa/$i.env")
     assert_has "$args" "+esp"
     assert_has "$args" "clippy"
+    profile_at=$(grep -n '^--profile$' <<<"$args" | head -1 | cut -d: -f1)
+    dash_at=$(grep -n '^--$' <<<"$args" | head -1 | cut -d: -f1)
+    if [[ -z $dash_at || $profile_at -gt $dash_at ]]; then
+        echo "--profile follows -- in [$args]" >&2
+        exit 1
+    fi
     assert_has "$flags" "-Cdebuginfo=0"
     assert_has "$flags" 'getrandom_backend="custom"'
     assert_lacks "$flags" "curve25519_dalek_backend"

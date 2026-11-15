@@ -1,6 +1,12 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 
 #[cfg(all(
@@ -8,6 +14,7 @@ use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_mai
     target_family = "unix",
     not(target_arch = "xtensa")
 ))]
+#[cfg(not(target_arch = "xtensa"))]
 mod ossl {
     //! The openssl crate does not yet wrap ML-KEM keygen/encaps/decaps.
 
@@ -100,6 +107,7 @@ mod ossl {
 
 /// A verified-garbage ML-KEM-768 key, which it generates only from a seed:
 /// drawn here, as the other libraries draw theirs.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_generate() -> verified_garbage::mlkem768::DecapsulationKey768 {
     let mut seed = [0u8; 64];
     getrandom::fill(&mut seed).unwrap();
@@ -108,6 +116,7 @@ fn vg_generate() -> verified_garbage::mlkem768::DecapsulationKey768 {
 
 /// Checks that verified-garbage and rind each decapsulate the other's
 /// ciphertexts to the secret it encapsulated.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_agrees_with_rind() {
     use rind::kem::*;
     use verified_garbage::mlkem768::EncapsulationKey768;
@@ -130,6 +139,7 @@ fn vg_agrees_with_rind() {
 }
 
 // client first operation
+#[cfg(not(target_arch = "xtensa"))]
 fn mlkem768_keygen(c: &mut Criterion) {
     let mut group = c.benchmark_group("mlkem768-keygen");
     group.throughput(Throughput::Elements(1));
@@ -200,6 +210,7 @@ fn mlkem768_keygen(c: &mut Criterion) {
 }
 
 // server operation
+#[cfg(not(target_arch = "xtensa"))]
 fn mlkem768_encaps(c: &mut Criterion) {
     let mut group = c.benchmark_group("mlkem768-encaps");
     group.throughput(Throughput::Elements(1));
@@ -314,6 +325,7 @@ fn mlkem768_encaps(c: &mut Criterion) {
 }
 
 // client second operation
+#[cfg(not(target_arch = "xtensa"))]
 fn mlkem768_decaps(c: &mut Criterion) {
     let mut group = c.benchmark_group("mlkem768-decaps");
     group.throughput(Throughput::Elements(1));
@@ -411,6 +423,7 @@ fn mlkem768_decaps(c: &mut Criterion) {
 }
 
 // combined operation: keygen, encaps-encode, encaps-decode, encaps, decaps
+#[cfg(not(target_arch = "xtensa"))]
 fn mlkem768_combined(c: &mut Criterion) {
     let mut group = c.benchmark_group("mlkem768-combined");
     group.throughput(Throughput::Elements(1));
@@ -523,6 +536,7 @@ fn mlkem768_combined(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(
     benches,
     mlkem768_keygen,
@@ -530,4 +544,5 @@ criterion_group!(
     mlkem768_decaps,
     mlkem768_combined,
 );
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

@@ -1,6 +1,12 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 #[cfg(all(
@@ -8,6 +14,7 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
     target_family = "unix",
     not(target_arch = "xtensa")
 ))]
+#[cfg(not(target_arch = "xtensa"))]
 mod ossl {
     //! The openssl crate does not yet wrap ML-DSA key generation.
 
@@ -47,15 +54,18 @@ mod ossl {
 
 // The message every library signs. Each signature draws fresh randomness, so
 // the number of rejected attempts, and with it the time, varies alike.
+#[cfg(not(target_arch = "xtensa"))]
 const MESSAGE: &[u8] = b"rind ML-DSA benchmark message";
 
 // The longest signature, ML-DSA-87's. Only the aws-lc-rs row writes into a
 // buffer of this size; the other rows return their own.
 #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 const MAX_SIGNATURE_LEN: usize = 4627;
 
 // One parameter set's key generation, signing, and verification, each library
 // by its own name for the set.
+#[cfg(not(target_arch = "xtensa"))]
 macro_rules! ml_dsa {
     (
         $bench:ident, $id:literal,
@@ -405,6 +415,7 @@ macro_rules! ml_dsa {
     };
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 ml_dsa!(
     mldsa44, "mldsa44",
     rind: MlDsa44, ML_DSA_44,
@@ -415,6 +426,7 @@ ml_dsa!(
     openssl: c"ML-DSA-44", ML_DSA_44,
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 ml_dsa!(
     mldsa65, "mldsa65",
     rind: MlDsa65, ML_DSA_65,
@@ -425,6 +437,7 @@ ml_dsa!(
     openssl: c"ML-DSA-65", ML_DSA_65,
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 ml_dsa!(
     mldsa87, "mldsa87",
     rind: MlDsa87, ML_DSA_87,
@@ -435,5 +448,7 @@ ml_dsa!(
     openssl: c"ML-DSA-87", ML_DSA_87,
 );
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, mldsa44, mldsa65, mldsa87);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

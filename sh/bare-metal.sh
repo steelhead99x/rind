@@ -119,12 +119,31 @@ required_flags() {
 rows() {
     local target=$1
     shift
-    local flags profile features
+    local flags profile features arg
     flags=$(required_flags "$target")
+    # Cargo arguments precede `--`. Anything after it is for rustc, so the
+    # profile and the target have to be inserted before that separator.
+    local -a before=() after=()
+    local seen=0
+    for arg in "$@"; do
+        if [[ $seen -eq 1 ]]; then
+            after+=("$arg")
+        elif [[ $arg == -- ]]; then
+            seen=1
+        else
+            before+=("$arg")
+        fi
+    done
     for profile in dev release; do
         for features in "" wipe; do
-            run_cargo "$target" "$flags" "${cargo[@]}" "$@" \
-                --target "$target" --profile "$profile" --features "$features"
+            if [[ $seen -eq 1 ]]; then
+                run_cargo "$target" "$flags" "${cargo[@]}" "${before[@]}" \
+                    --target "$target" --profile "$profile" --features "$features" \
+                    -- "${after[@]}"
+            else
+                run_cargo "$target" "$flags" "${cargo[@]}" "${before[@]}" \
+                    --target "$target" --profile "$profile" --features "$features"
+            fi
         done
     done
 }
@@ -180,8 +199,10 @@ if [[ ${1:-} == xtensa ]]; then
         lint "$target" -Zbuild-std=core,alloc
     done
     check_lib xtensa-esp32s3-espidf -Zbuild-std=std,panic_abort
-    # ring and openssl-sys are not dependencies on Xtensa. The benches that
-    # call them are cfg'd out. ESP-IDF uses getrandom's own backend.
+    # Every bench is empty on Xtensa. criterion's wait-timeout does not build
+    # against ESP-IDF's libc, and ring and OpenSSL have no Xtensa port. The
+    # check still fails if a bench names either. ESP-IDF uses getrandom's
+    # own backend.
     run_cargo xtensa-esp32s3-espidf "" "${cargo[@]}" check -Zbuild-std=std,panic_abort \
         -p rind-bench --benches --locked --target xtensa-esp32s3-espidf
     exit 0

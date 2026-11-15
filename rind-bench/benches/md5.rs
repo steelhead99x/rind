@@ -1,11 +1,19 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+#[cfg(not(target_arch = "xtensa"))]
 use md5::Digest;
 
 // aws-lc's MD5, which aws-lc-rs does not export, through aws-lc-sys.
 #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 fn test_aws_md5(data: &[u8]) {
     let mut out = [0u8; 16];
     // SAFETY: `data` is readable for its length, and `out` is writable for
@@ -24,24 +32,28 @@ fn test_aws_md5(data: &[u8]) {
     black_box(out);
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rc_md5(data: &[u8]) {
     let mut ctx = md5::Md5::new();
     ctx.update(data);
     black_box(ctx.finalize());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rind_md5(data: &[u8]) {
     let mut ctx = rind::digest::Context::new(&rind::digest::legacy::MD5);
     ctx.update(data);
     black_box(ctx.finish());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_vg_md5(data: &[u8]) {
     let mut ctx = verified_garbage::hashes::md5::Md5::new();
     ctx.update(data);
     black_box(ctx.finalize());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn md5(c: &mut Criterion) {
     let mut group = c.benchmark_group("md5");
     for (size, size_name) in criterion::HASH_SIZES {
@@ -78,5 +90,7 @@ fn md5(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, md5);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

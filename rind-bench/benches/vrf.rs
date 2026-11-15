@@ -1,14 +1,23 @@
 //! RFC 9381's ECVRF try-and-increment suites: a proof of one key
 //! transparency label, and its verification from the encoded proof against a
 //! parsed public key.
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
+#[cfg(not(target_arch = "xtensa"))]
 const ALPHA: &[u8] = b"alice@example.com";
+#[cfg(not(target_arch = "xtensa"))]
 const SEED: [u8; 32] = [0x42; 32];
 
+#[cfg(not(target_arch = "xtensa"))]
 fn prove(c: &mut Criterion) {
     {
         let mut group = c.benchmark_group("vrf-edwards25519-prove");
@@ -56,16 +65,19 @@ fn prove(c: &mut Criterion) {
 
 // rind's `prove` returns the proof and its output together, so the other
 // library's rows encode both too.
+#[cfg(not(target_arch = "xtensa"))]
 fn edwards() -> vrf_rfc9381::Ciphersuite {
     vrf_rfc9381::Ciphersuite::ECVRF_EDWARDS25519_SHA512_TAI
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn p256() -> vrf_rfc9381::Ciphersuite {
     vrf_rfc9381::Ciphersuite::ECVRF_P256_SHA256_TAI
 }
 
 // Both libraries prove the same output from the same seed, and each verifies
 // the other's proof, so the rows time the same suites.
+#[cfg(not(target_arch = "xtensa"))]
 fn check_interop() {
     use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI, PublicKey, SecretKey};
     use vrf_rfc9381::ec::edwards25519::tai::{EdVrfEdwards25519Tai, EdVrfEdwards25519TaiSecretKey};
@@ -96,6 +108,7 @@ fn check_interop() {
     public_key.verify(ALPHA, &pi).unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn verify(c: &mut Criterion) {
     check_interop();
     {
@@ -150,5 +163,7 @@ fn verify(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, prove, verify);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);
