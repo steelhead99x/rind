@@ -77,6 +77,12 @@ A PR that adds such a workaround adds its entry there and names the entry in the
 release-plz opens a release PR from `main`, and publishing happens only when that PR merges.
 release-plz owns crate versions.
 
+A release PR merges only after `just release-check` passes at its head, so nothing publishes that the full suite has not passed.
+It dispatches every scheduled workflow but `bench` and `dart-libraries` on the PR's branch, so each runs its whole scheduled matrix on the head, and waits for them all, which takes as long as the slowest. Mutation testing covers every change since the previous release.
+An agent merging a release PR, as `/quest-merge` does, runs it first.
+It records the result as the `release-check` status on the head the runs tested, so a release-plz update to the PR needs a new run.
+`just ci` fails a scheduled workflow that a dispatch would not run whole.
+
 Each published `rind-<consumer>` adapter's version begins with the breaking part of the upstream version it adapts (major.minor below 1.0, major from 1.0 on), so rind-rustls 0.23.x adapts rustls 0.23; the rest of the version is the adapter's own.
 `sh/adapter-versions.sh`, in `just ci`, fails when the two drift.
 An adapter's API is its upstream's, so it changes only with upstream's; the PR that moves an adapter to upstream's next breaking release sets the adapter's version to match.
