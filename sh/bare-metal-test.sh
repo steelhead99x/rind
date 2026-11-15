@@ -41,11 +41,16 @@ fi
 if [[ ${PRINT_AWS:-} == 1 && $* == *tree* ]]; then
     printf '%s\n' 'aws-lc-rs v1.0.0'
 fi
-# The no-SSE2 build checks the rlib for stmxcsr. Leave an empty one.
-if [[ $* == *build* && $* == *x86_64-unknown-none* ]]; then
+# The no-SSE2 build disassembles the rlib named in this invocation's JSON.
+# An empty file is not an object archive, so leave a real one with no
+# stmxcsr instruction.
+if [[ $* == *--message-format=json* && $* == *build* && $* == *x86_64-unknown-none* ]]; then
     lib=${CARGO_TARGET_DIR:-target}/x86_64-unknown-none/debug
     mkdir -p "$lib"
-    : >"$lib/librind.rlib"
+    printf '.text\n' | as -o "$lib/empty.o"
+    ar cr "$lib/librind.rlib" "$lib/empty.o"
+    rm -f "$lib/empty.o"
+    printf '%s\n' "{\"reason\":\"compiler-artifact\",\"target\":{\"name\":\"rind\",\"kind\":[\"lib\"]},\"filenames\":[\"$lib/librind.rlib\"]}"
 fi
 exit 0
 EOF

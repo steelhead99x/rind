@@ -643,33 +643,76 @@ for target in \
     x86_64-unknown-none; do
     assemble "$target"
 done
+# The rlib this cargo invocation wrote. A `find` of the shared debug
+# directory also sees an older rlib from the SSE2 assemble row above.
+rlib_from_messages() {
+    local json=$1
+    grep '"reason":"compiler-artifact"' "$json" \
+        | grep '"name":"rind"' \
+        | grep -o '"[^"]*librind[^"]*\.rlib"' \
+        | tr -d '"' \
+        | tail -n 1 || true
+}
+
+# `stmxcsr` is the bytes 0F AE /3. The mnemonic is not in the object code, so
+# grepping the rlib for that text misses an emitted instruction and can pass
+# on a build that still raises `#UD`. Disassemble this build's objects.
+reject_stmxcsr() {
+    local rlib=$1
+    local dir dump
+    if ! command -v ar >/dev/null || ! command -v objdump >/dev/null; then
+        echo "error: ar and objdump are required to check for stmxcsr" >&2
+        exit 1
+    fi
+    dir=$(mktemp -d)
+    dump=$(mktemp)
+    # The EXIT trap stays in this subshell.
+    (
+        trap 'rm -rf "$dir" "$dump"' EXIT
+        cd "$dir"
+        if ! ar x "$rlib"; then
+            echo "error: ar could not read $rlib" >&2
+            exit 1
+        fi
+        shopt -s nullglob
+        objs=(./*.o)
+        if ((${#objs[@]} == 0)); then
+            echo "error: $rlib contains no object file" >&2
+            exit 1
+        fi
+        if ! objdump -d "${objs[@]}" >"$dump"; then
+            echo "error: objdump failed on $rlib" >&2
+            exit 1
+        fi
+        if grep -E -q '(^|[[:space:]])stmxcsr([[:space:]]|$)' "$dump"; then
+            echo "error: $rlib emits stmxcsr" >&2
+            exit 1
+        fi
+    )
+}
+
 # `x86_64-unknown-none` with no extra target features: portable backend,
 # dalek `serial`, and no `stmxcsr`. The rows above build the SSE2 assembly
 # backend instead.
 no_sse2() {
     local target=x86_64-unknown-none
-    local profile features root rlib
+    local profile features json rlib
     for profile in dev release; do
         for features in "" wipe; do
             run_cargo "$target" "$custom $scalar" "${cargo[@]}" clippy -p rind --lib --locked \
                 --target "$target" --profile "$profile" --features "$features" -- --deny warnings
         done
     done
+    json=$(mktemp)
     run_cargo "$target" "$custom $scalar" "${cargo[@]}" build -p rind --lib --locked \
-        --target "$target"
-    root=${CARGO_TARGET_DIR:-target}
-    local found=0
-    while IFS= read -r rlib; do
-        found=1
-        if grep -a -q stmxcsr "$rlib"; then
-            echo "error: $target without SSE2 contains stmxcsr ($rlib)" >&2
-            exit 1
-        fi
-    done < <(find "$root/$target/debug" -name 'librind*.rlib')
-    if ((found == 0)); then
+        --target "$target" --message-format=json >"$json"
+    rlib=$(rlib_from_messages "$json")
+    rm -f "$json"
+    if [[ -z ${rlib:-} || ! -f "$rlib" ]]; then
         echo "error: no rlib for $target without SSE2" >&2
         exit 1
     fi
+    reject_stmxcsr "$rlib"
 }
 no_sse2
 
