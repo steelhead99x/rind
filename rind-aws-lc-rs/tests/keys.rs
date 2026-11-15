@@ -488,6 +488,81 @@ fn refused() {
     }
 }
 
+/// ML-DSA refusal names aws-lc-rs 1.19.0 uses, beyond the `is_err` checks in
+/// `ml_dsa` and `refused`.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn ml_dsa_refusal_kind() {
+    use theirs::encoding::AsRawBytes;
+
+    fn same<T: core::fmt::Debug, U: core::fmt::Debug>(
+        ours: Result<T, ours::error::KeyRejected>,
+        theirs: Result<U, theirs::error::KeyRejected>,
+    ) {
+        assert_eq!(
+            ours.unwrap_err().description_(),
+            theirs.unwrap_err().description_()
+        );
+    }
+    let ours_sign = &ours::signature::ML_DSA_44_SIGNING;
+    let theirs_sign = &theirs::signature::ML_DSA_44_SIGNING;
+    let other =
+        theirs::signature::PqdsaKeyPair::from_seed(&theirs::signature::ML_DSA_65_SIGNING, &[4; 32])
+            .unwrap();
+    let pkcs8 = other.to_pkcs8v1().unwrap();
+    same(
+        ours::signature::PqdsaKeyPair::from_pkcs8(ours_sign, pkcs8.as_ref()),
+        theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_sign, pkcs8.as_ref()),
+    );
+    let raw = AsRawBytes::as_raw_bytes(&other.private_key()).unwrap();
+    same(
+        ours::signature::PqdsaKeyPair::from_raw_private_key(ours_sign, raw.as_ref()),
+        theirs::signature::PqdsaKeyPair::from_raw_private_key(theirs_sign, raw.as_ref()),
+    );
+    let public = other.public_key().as_ref();
+    let short = &public[..public.len() - 1];
+    same(
+        ours::signature::ParsedPublicKey::new(&ours::signature::ML_DSA_65, short),
+        theirs::signature::ParsedPublicKey::new(&theirs::signature::ML_DSA_65, short),
+    );
+    let ed = theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32])
+        .unwrap()
+        .to_pkcs8v1()
+        .unwrap();
+    same(
+        ours::signature::PqdsaKeyPair::from_pkcs8(ours_sign, ed.as_ref()),
+        theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_sign, ed.as_ref()),
+    );
+    let oid65 = [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12];
+    let short_seed = der(
+        0x30,
+        &[
+            der(0x02, &[0]),
+            der(0x30, &der(0x06, &oid65)),
+            der(0x04, &der(0x80, &[0; 31])),
+        ]
+        .concat(),
+    );
+    same(
+        ours::signature::PqdsaKeyPair::from_pkcs8(ours_sign, &short_seed),
+        theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_sign, &short_seed),
+    );
+    let good = theirs::signature::PqdsaKeyPair::from_seed(theirs_sign, &[6; 32]).unwrap();
+    let good_raw = AsRawBytes::as_raw_bytes(&good.private_key()).unwrap();
+    let mut bad = good_raw.as_ref().to_vec();
+    bad[..32].fill(0);
+    same(
+        ours::signature::PqdsaKeyPair::from_raw_private_key(ours_sign, &bad),
+        theirs::signature::PqdsaKeyPair::from_raw_private_key(theirs_sign, &bad),
+    );
+    let mut trailed = pkcs8.as_ref().to_vec();
+    trailed.push(0);
+    let ours = ours::signature::PqdsaKeyPair::from_pkcs8(ours_sign, &trailed).unwrap_err();
+    let theirs = theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_sign, &trailed).unwrap_err();
+    assert_eq!(ours.description_(), "InvalidEncoding");
+    assert_eq!(theirs.description_(), "Unspecified");
+}
+
 /// A DER element tagged `tag` holding `contents`.
 fn der(tag: u8, contents: &[u8]) -> Vec<u8> {
     let len = contents.len();
