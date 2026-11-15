@@ -9,6 +9,9 @@
 # selected package to define a feature it is given. That command runs as
 # given, and rind-rcgen is then built again with the two features, so its
 # wipe tests are not compiled out and a wipe mutant is not reported missed.
+# `--exclude` is not copied onto that second build: cargo accepts it only
+# with `--workspace`. Excluding rind-rcgen skips the follow-up, so the
+# wrapper does not build the package the caller left out.
 #
 # `build` is left unchanged. cargo-mutants 27.1.0's build phase is
 # `cargo test --no-run` or `nextest run --no-run`, and its check phase is
@@ -99,23 +102,47 @@ fi
 
 # Workspace or mixed packages. The first command is the one cargo-mutants
 # asked for. The second builds rind-rcgen alone, with the features, and
-# forwards the same test-binary arguments.
+# forwards the same test-binary arguments. `--exclude` and its spec are
+# dropped: the follow-up has no `--workspace`, and cargo rejects `--exclude`
+# on its own. An exclusion of rind-rcgen means there is no second command.
 "$real" "$@"
 
 spec=${rcgen_spec:-rind-rcgen}
 extra=()
 skip_next=0
+skip_kind=
+excluded_rcgen=0
 for arg in "${cargo_args[@]}"; do
     if [[ $skip_next -eq 1 ]]; then
+        if [[ $skip_kind == exclude && ${arg%%@*} == rind-rcgen ]]; then
+            excluded_rcgen=1
+        fi
         skip_next=0
+        skip_kind=
         continue
     fi
     case $arg in
         --workspace | --package=* | -p?*) ;;
-        --package | -p) skip_next=1 ;;
+        --exclude=*)
+            excluded_name=${arg#--exclude=}
+            if [[ ${excluded_name%%@*} == rind-rcgen ]]; then
+                excluded_rcgen=1
+            fi
+            ;;
+        --package | -p)
+            skip_next=1
+            skip_kind=package
+            ;;
+        --exclude)
+            skip_next=1
+            skip_kind=exclude
+            ;;
         *) extra+=("$arg") ;;
     esac
 done
+if [[ $excluded_rcgen -eq 1 ]]; then
+    exit 0
+fi
 extra+=(--package="$spec" "${features[@]}")
 if [[ $seen_dd -eq 1 ]]; then
     extra+=(-- "${passthru[@]+"${passthru[@]}"}")
