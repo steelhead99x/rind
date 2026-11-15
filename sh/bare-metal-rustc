@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Append the lint's rustc flags to a cross compile.
+#
+# Cargo has already chosen its rustflags. This wrapper does not replace
+# them. It adds RIND_BARE_METAL_RUSTFLAGS, split on spaces, to an invocation
+# that names `--target`. That includes `rustc --print cfg --target TRIPLE`,
+# which is how Cargo fills CARGO_CFG_*, so the probe and the compile see the
+# same flags, from the rustc Cargo selected (the `+esp` toolchain on Xtensa).
+# A host build script has no `--target` and is unchanged.
+set -euo pipefail
+
+target=""
+i=1
+while ((i <= $#)); do
+    arg=${!i}
+    if [[ $arg == --target ]]; then
+        next=$((i + 1))
+        target=${!next-}
+        break
+    fi
+    if [[ $arg == --target=* ]]; then
+        target=${arg#--target=}
+        break
+    fi
+    i=$((i + 1))
+done
+
+extra=()
+if [[ -n $target && -n ${RIND_BARE_METAL_RUSTFLAGS:-} ]]; then
+    # Quote characters stay in the token. rustc accepts
+    # `getrandom_backend="custom"` in that form.
+    IFS=' ' read -r -a extra <<< "$RIND_BARE_METAL_RUSTFLAGS"
+fi
+
+final=("$@")
+if ((${#extra[@]})); then
+    final+=("${extra[@]}")
+fi
+
+if [[ -n ${RIND_BARE_METAL_WRAPPER_LOG:-} ]]; then
+    printf '%s\0' "${final[@]}" >> "$RIND_BARE_METAL_WRAPPER_LOG"
+fi
+
+if [[ ${RIND_BARE_METAL_WRAPPER_DRY:-} == 1 ]]; then
+    printf '%s\0' "${final[@]}"
+    exit 0
+fi
+
+exec "${final[@]}"

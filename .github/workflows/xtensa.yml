@@ -8,6 +8,7 @@ on:
       - rind/**
       - rind-bench/**
       - sh/bare-metal.sh
+      - sh/bare-metal-rustc
       - sh/bare-metal-test.sh
       - justfile
       - Cargo.toml
