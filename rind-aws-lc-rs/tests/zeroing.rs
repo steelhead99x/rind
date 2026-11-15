@@ -26,15 +26,41 @@ static ALLOCATOR: freed::Record = freed::Record;
 /// How many bytes of a secret are looked for.
 const NEEDLE_LEN: usize = 16;
 
+/// Whether `block` contains `needle`.
+fn holds(block: &[u8], needle: &[u8]) -> bool {
+    block.windows(needle.len()).any(|window| window == needle)
+}
+
 /// Counts the blocks freed while `drop` runs that still hold the first
 /// bytes of `secret`.
 fn leaks(secret: &[u8], drop: impl FnOnce()) -> usize {
     let needle = &secret[..NEEDLE_LEN];
     let ((), blocks) = freed::freed(drop);
-    blocks
-        .iter()
-        .filter(|block| block.windows(NEEDLE_LEN).any(|w| w == needle))
-        .count()
+    blocks.iter().filter(|block| holds(block, needle)).count()
+}
+
+/// Like [`leaks`], ignoring one freed block that is the document `allow`
+/// with no further copy of the needle after it.
+///
+/// The returned flag is whether that block was seen. A second block with the
+/// same prefix counts.
+fn leaks_ignoring_document(secret: &[u8], allow: &[u8], drop: impl FnOnce()) -> (usize, bool) {
+    let needle = &secret[..NEEDLE_LEN];
+    let ((), blocks) = freed::freed(drop);
+    let mut ignored = false;
+    let mut leaked = 0;
+    for block in &blocks {
+        if !holds(block, needle) {
+            continue;
+        }
+        let rest = block.get(allow.len()..).unwrap_or_default();
+        if !ignored && block.starts_with(allow) && !holds(rest, needle) {
+            ignored = true;
+            continue;
+        }
+        leaked += 1;
+    }
+    (leaked, ignored)
 }
 
 /// Bytes unlikely to appear anywhere else.
@@ -137,13 +163,15 @@ fn cipher() {
     assert_eq!(leaked, 0);
 }
 
-/// An ML-DSA-44 and an ML-DSA-65 seed and public key, each key's clone, and
-/// the PKCS#8 documents holding the seed.
+/// An ML-DSA seed and public key, and the PKCS#8 documents holding the seed,
+/// for each parameter set. A clone of the key and of the public key are
+/// dropped with the key.
 #[test]
 fn ml_dsa() {
     for (algorithm, start) in [
         (&signature::ML_DSA_44_SIGNING, 11),
-        (&signature::ML_DSA_65_SIGNING, 5),
+        (&signature::ML_DSA_65_SIGNING, 15),
+        (&signature::ML_DSA_87_SIGNING, 19),
     ] {
         let seed: [u8; 32] = distinct(start);
         let public_key = signature::PqdsaKeyPair::from_seed(algorithm, &seed)
@@ -221,19 +249,22 @@ fn ml_dsa_expanded() {
     .as_ref()
     .to_vec();
     let secret = &raw[32..];
-    // `from_raw_private_key` copies the key into a PKCS#8 document for that
-    // call and leaves the copy unwiped, so the key is built before the check.
-    let key = Box::new(
-        signature::PqdsaKeyPair::from_raw_private_key(&signature::ML_DSA_44_SIGNING, &raw).unwrap(),
-    );
-    let leaked = leaks(secret, move || {
+    // One freed block is the PKCS#8 document this call builds. The adapter's
+    // `expanded_pkcs8` in `rind-aws-lc-rs/src/pqdsa.rs` leaves that copy
+    // unwiped. Every other freed block that holds `K` counts.
+    let pkcs8 = expanded_pkcs8(&raw);
+    let (leaked, ignored_document) = leaks_ignoring_document(secret, &pkcs8, || {
+        let key = Box::new(
+            signature::PqdsaKeyPair::from_raw_private_key(&signature::ML_DSA_44_SIGNING, &raw)
+                .unwrap(),
+        );
         assert!(key.to_pkcs8v1().is_err());
         let mut sig = vec![0; signature::ML_DSA_44_SIGNING.signature_len()];
         key.sign(b"expanded", &mut sig).unwrap();
     });
+    assert!(ignored_document);
     assert_eq!(leaked, 0);
 
-    let pkcs8 = expanded_pkcs8(&raw);
     let leaked = leaks(secret, || {
         let key = Box::new(
             signature::PqdsaKeyPair::from_pkcs8(&signature::ML_DSA_44_SIGNING, &pkcs8).unwrap(),
