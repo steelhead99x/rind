@@ -44,4 +44,27 @@ theorem pad_append (p m : List U8) (hp : p.length % 128 = 0) :
   simp only [sha512Pad, padAfter, List.length_append, List.append_assoc,
     show (p.length + m.length) % 128 = m.length % 128 by omega]
 
+/-- The compression function keeps eight words. -/
+theorem processBlock_length (hv : List U64) (hl : hv.length = 8) (m : List U64) :
+    (processBlock hv m).length = 8 := by
+  simp only [processBlock, fips512.compressBlock, List.length_map, List.length_zipWith, hl]
+  rw [show 80 = 79 + 1 from rfl, List.range_succ, List.foldl_append]
+  simp
+
+theorem compress_length (hv : List U64) (hl : hv.length = 8) (bytes : List U8) :
+    (compress hv bytes).length = 8 := by
+  by_cases hb : 128 ≤ bytes.length
+  · rw [compress_block _ _ hb]
+    exact compress_length _ (processBlock_length hv hl _) _
+  · rwa [compress_short _ _ (by omega)]
+termination_by bytes.length
+decreasing_by simp; omega
+
+theorem sha512Words_length (iv : List U64) (hiv : iv.length = 8) (m : List U8) :
+    (sha512Words iv m).length = 64 := by
+  have h8 : ∀ a : U64, a.bv.toBEBytes.length = 8 := fun a => by simp [BitVec.toBEBytes_length]
+  simp only [sha512Words, List.length_flatMap, beBytes, List.length_map, h8, List.map_const',
+    List.sum_replicate, compress_length iv hiv]
+  rfl
+
 end rind.spec

@@ -8,7 +8,8 @@ open Aeneas Aeneas.Std Result
 set_option linter.dupNamespace false
 
 /-! The rind types the x86_64 translation leaves opaque. `Rind.X86_64.Dispatch`,
-`Rind.X86_64.DigestDispatch`, and `Rind.X86_64.AeadDispatch` model the last six,
+`Rind.X86_64.QuicDispatch`, `Rind.X86_64.DigestDispatch`, and
+`Rind.X86_64.AeadDispatch` model the last six,
 `Rind.X86_64.DigestAlgorithm` `Algorithm` and `Digest`, and `Rind.X86_64.Simd`
 `__m128i`. -/
 
@@ -84,7 +85,7 @@ nothing, since `Keyed::private_key` builds each `Ops<K::Key>` from the curve
 marker `K`'s own `Agree` functions, which the model calls directly. -/
 @[reducible] def high.agreement.Ops (_Key : Type) : Type := Unit
 
-/-- A header-protection key with its cipher's mask, as `Rind.X86_64.Dispatch` models it:
+/-- A header-protection key with its cipher's mask, as `Rind.X86_64.QuicDispatch` models it:
 the key, since `Masker::new` builds every one with `C`'s own `mask`, which the
 model calls directly. -/
 @[reducible] def aead.quic.Masker (C : Type) : Type := C

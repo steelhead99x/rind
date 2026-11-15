@@ -37,7 +37,6 @@ use crate::low::macros::*;
 // Transliterated from s2n-bignum's x86/mldsa/mldsa_rej_uniform_eta2_VARIABLE_TIME.S.
 /// Rejection sampling of eta=2 secret coefficients for ML-DSA (x86_64 AVX2)
 ///
-///
 /// Extracts 4-bit nibbles from the input byte buffer, accepts those < 15, and
 /// maps an accepted nibble n to the coefficient 2 - (n mod 5) via a centered
 /// modulo-5 reduction, producing values in [-2, 2]. Fills the output array

@@ -410,6 +410,20 @@ impl Nonce {
     pub fn assume_unique_for_key(nonce: [u8; NONCE_LEN]) -> Self {
         Self(nonce)
     }
+
+    /// The nonce for sequence number `seq`: `iv` with `seq`, big-endian,
+    /// XORed into its last eight bytes, as TLS 1.3 (RFC 8446 section 5.3),
+    /// QUIC (RFC 9001 section 5.3), and HPKE (RFC 9180 section 5.2) build it.
+    ///
+    /// The caller promises that `seq` is used once under `iv` and the key:
+    /// the counter never repeats, wraps, or starts over while the key lives.
+    pub fn from_sequence(iv: &[u8; NONCE_LEN], seq: u64) -> Self {
+        let mut nonce = *iv;
+        for (n, s) in nonce[NONCE_LEN - 8..].iter_mut().zip(seq.to_be_bytes()) {
+            *n ^= s;
+        }
+        Self(nonce)
+    }
 }
 
 impl fmt::Debug for Nonce {
@@ -582,6 +596,55 @@ mod tests {
             );
             assert_eq!(short, [0xaa; TAG_LEN - 1]);
         }
+    }
+
+    #[test]
+    fn from_sequence() {
+        // RFC 9180's vectors reach only the counter's two low bytes; this
+        // places all eight, and an all-ones IV tells XOR from OR or AND.
+        assert_eq!(
+            Nonce::from_sequence(&[0xff; NONCE_LEN], 0x0102_0304_0506_0708).0,
+            [
+                0xff, 0xff, 0xff, 0xff, 0xfe, 0xfd, 0xfc, 0xfb, 0xfa, 0xf9, 0xf8, 0xf7
+            ]
+        );
+    }
+
+    #[test]
+    fn from_sequence_rfc9180() {
+        #[derive(serde::Deserialize)]
+        struct Suite {
+            #[serde(with = "hex::serde")]
+            base_nonce: Vec<u8>,
+            encryptions: Vec<Encryption>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Encryption {
+            #[serde(with = "hex::serde")]
+            nonce: Vec<u8>,
+        }
+
+        let path = format!(
+            "{}/../thirdparty/vectors/rfc9180/test-vectors.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let file = std::io::BufReader::new(std::fs::File::open(&path).unwrap());
+        let mut count = 0;
+        for suite in serde_json::Deserializer::from_reader(file).into_iter::<Suite>() {
+            let suite = suite.unwrap();
+            // An export-only suite has no nonce.
+            let Ok(iv) = <[u8; NONCE_LEN]>::try_from(suite.base_nonce) else {
+                assert!(suite.encryptions.is_empty());
+                continue;
+            };
+            // The vectors seal sequence numbers 0 through 256 in order.
+            for (seq, e) in (0..).zip(&suite.encryptions) {
+                assert_eq!(Nonce::from_sequence(&iv, seq).0[..], e.nonce, "{seq}");
+                count += 1;
+            }
+        }
+        // Three KEMs and two KDFs with each of three AEADs, 257 messages each.
+        assert_eq!(count, 18 * 257);
     }
 
     #[test]

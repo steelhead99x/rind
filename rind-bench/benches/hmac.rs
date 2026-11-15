@@ -30,7 +30,7 @@ fn openssl(md: openssl::hash::MessageDigest, key: &[u8], data: &[u8]) {
 
 // Each row keys HMAC per message, as a one-off MAC does; the `reused-key`
 // rows sign with a long-lived key, such as a STUN or SRTP session's.
-fn bench(
+fn bench<V: verified_garbage::hmac::HmacHash>(
     c: &mut Criterion,
     name: &str,
     ring: ring::hmac::Algorithm,
@@ -74,6 +74,21 @@ fn bench(
                 b.iter(|| black_box(rind::hmac::sign(&rind::hmac::Key::new(ours, key), input)))
             });
         }
+        assert_eq!(
+            verified_garbage::hmac::Hmac::<V>::mac(key, &input).as_ref(),
+            rind::hmac::sign(&rind::hmac::Key::new(ours, key), &input).as_ref()
+        );
+        group.bench_with_input(
+            BenchmarkId::new("verified-garbage", size_name),
+            &input,
+            |b, input| {
+                b.iter(|| {
+                    let mut ctx = verified_garbage::hmac::Hmac::<V>::new(key);
+                    ctx.update(input);
+                    black_box(ctx.finalize())
+                })
+            },
+        );
 
         let ring_key = ring::hmac::Key::new(ring, key);
         group.bench_with_input(
@@ -92,6 +107,19 @@ fn bench(
             BenchmarkId::new("rind/reused-key", size_name),
             &input,
             |b, input| b.iter(|| black_box(rind::hmac::sign(&rind_key, input))),
+        );
+        // Its keyed state, cloned per message, is the key schedule reused.
+        let vg_key = verified_garbage::hmac::Hmac::<V>::new(key);
+        group.bench_with_input(
+            BenchmarkId::new("verified-garbage/reused-key", size_name),
+            &input,
+            |b, input| {
+                b.iter(|| {
+                    let mut ctx = vg_key.clone();
+                    ctx.update(input);
+                    black_box(ctx.finalize())
+                })
+            },
         );
     }
 }
@@ -144,7 +172,7 @@ fn hmac(c: &mut Criterion) {
         )
     };
 
-    bench(
+    bench::<verified_garbage::hashes::sha1::Sha1>(
         c,
         "hmac-sha1",
         ring::hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
@@ -153,7 +181,7 @@ fn hmac(c: &mut Criterion) {
         &[0xff; 20],
         &sha1,
     );
-    bench(
+    bench::<verified_garbage::hashes::sha256::Sha256>(
         c,
         "hmac-sha256",
         ring::hmac::HMAC_SHA256,
@@ -162,7 +190,7 @@ fn hmac(c: &mut Criterion) {
         &[0xff; 32],
         &sha256,
     );
-    bench(
+    bench::<verified_garbage::hashes::sha384::Sha384>(
         c,
         "hmac-sha384",
         ring::hmac::HMAC_SHA384,

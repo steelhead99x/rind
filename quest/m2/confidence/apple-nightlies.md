@@ -8,7 +8,7 @@ The scheduled jobs that need Apple silicon run on the maintainer's Mac mini inst
 
 Planned with the maintainer on 2026-11-10 ([the runner quest](/quest/m0/mac-mini-runner.md) holds the shared decisions).
 
-- Survey the workflows' macOS jobs (`build.yml`'s macOS and iOS rows, `dart` rows; [the mutants slim-down](/quest/m0/ci-speed/mutants-slim.md) drops `mutants.yml`'s macOS campaign) and move each one that gains from the machine; leave hosted runners where a clean VM matters, such as release builds.
+- Survey the workflows' macOS jobs (`build.yml`'s macOS and iOS rows, `dart` rows; `mutants.yml` has no macOS campaign) and move each one that gains from the machine; leave hosted runners where a clean VM matters, such as release builds.
 - Keep each moved job under `quest gate` so it shares the machine with the queue and agents.
 
 ## Required

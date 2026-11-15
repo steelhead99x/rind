@@ -3,7 +3,7 @@
 #
 # Usage: sh/python.sh test|bench [ARGS...]
 # The tests need pyca/cryptography, the differential oracle, mypy, pytest,
-# and the Wycheproof submodule. They cover pyrind, then pyrind-cryptography,
+# and the Wycheproof vectors. They cover pyrind, then pyrind-cryptography,
 # then pyjwt's and joserfc's own suites run on pyrind-cryptography, from the
 # releases the dev shell pins (PYJWT_SRC and JOSERFC_SRC). The benchmarks
 # compare against cryptography, hashlib, and hmac. ARGS go to unittest or

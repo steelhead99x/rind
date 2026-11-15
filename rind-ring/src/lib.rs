@@ -10,7 +10,8 @@
 //! ring = { package = "rind-ring", version = "0.17" }
 //! ```
 //!
-//! Every ring feature is accepted. `wasm32_unknown_unknown_js` enables rind's
+//! Every ring feature is accepted. As in ring, `alloc` gates RSA and `std` the
+//! errors' `std::error::Error` impls. `wasm32_unknown_unknown_js` enables rind's
 //! `wasm_js` feature, which selects getrandom's JavaScript backend on
 //! `wasm32-unknown-unknown`, as ring's does. The other features change nothing.
 //!
@@ -80,6 +81,7 @@ pub mod hmac;
 pub mod pbkdf2;
 pub mod pkcs8;
 pub mod rand;
+#[cfg(feature = "alloc")]
 pub mod rsa;
 pub mod signature;
 

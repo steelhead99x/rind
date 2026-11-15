@@ -125,9 +125,6 @@ free-threaded CPython, and other platforms build the sdist, which needs a
 Rust toolchain. rind runs only on x86_64, aarch64, and 32-bit arm, so other
 architectures fail to build; there is no pure-Python fallback.
 
-Importing pyrind raises `ImportError` on a CPU missing a feature rind
-requires, naming it, rather than failing later.
-
 ## License
 
 pyrind carries rind's licenses: rind's own code is Apache-2.0, ISC, or

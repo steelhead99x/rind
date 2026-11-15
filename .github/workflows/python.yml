@@ -104,9 +104,6 @@ jobs:
           manylinux: ${{ matrix.manylinux || 'auto' }}
           args: --release --locked --out dist --manifest-path rind-python/Cargo.toml
 
-      - if: matrix.test
-        uses: ./.github/actions/vectors
-
       - name: Test
         if: matrix.test && !matrix.container
         shell: bash

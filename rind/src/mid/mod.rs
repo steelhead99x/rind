@@ -26,6 +26,8 @@ pub(super) mod ristretto255;
 pub(super) mod aes;
 pub(super) mod aes_cbc;
 pub(super) mod aes_kw;
+pub(super) mod argon2;
+pub(super) mod blake2b;
 pub(super) mod chacha20;
 pub(super) mod chacha20poly1305;
 #[cfg_attr(
@@ -49,6 +51,7 @@ pub(super) mod rsa_pub;
 pub(super) mod sha1;
 pub(super) mod sha2;
 pub(super) mod sha3;
+pub(super) mod slhdsa;
 pub(super) mod util;
 pub(super) mod x25519;
 pub(super) mod xchacha20poly1305;

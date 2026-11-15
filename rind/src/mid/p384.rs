@@ -208,7 +208,8 @@ impl StaticPrivateKey {
     /// `n` (ie, the input is never reduced mod n),  or the value is zero.
     pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         let _entry = low::Entry::new_secret();
-        PrivateKey::from_bytes(bytes).map(Self)
+        // Not `.map(Self)`, whose constructor Aeneas names as P-256's does.
+        Ok(Self(PrivateKey::from_bytes(bytes)?))
     }
 
     /// Return a fixed-length encoding of this private key's value, still secret.

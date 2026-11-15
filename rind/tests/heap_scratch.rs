@@ -293,15 +293,15 @@ fn ml_dsa_expanded() {
     ml_dsa_expanded_set::<MlDsa87>(&ML_DSA_87_SIGNING);
 }
 
-/// The expanded-form load from recorded fixtures for the two seeds, so the
-/// portable backend (including wasm) checks this path without aws-lc. Miri
-/// skips the file I/O and the large encodings.
-///
-/// Native targets run it too. The fixture comparison only checks bytes, and
-/// the live aws-lc load wipe-checks a fresh expansion. This is the wipe check
-/// of the committed bytes.
+/// The expanded-form load from the recorded fixtures, on wasm. aws-lc does
+/// not build there, so this is the wipe check of those committed bytes,
+/// including the expansion freed when the key is dropped. On native,
+/// `ml_dsa_expanded_set` wipe-checks aws-lc's expansion of the same seeds,
+/// and `ml_dsa_expanded_fixtures_match_aws_lc` checks the files equal that
+/// expansion, so loading the files again would repeat it. Miri skips the
+/// file I/O and the large encodings.
 #[test]
-#[cfg(not(miri))]
+#[cfg(all(not(miri), target_family = "wasm"))]
 fn ml_dsa_expanded_recorded() {
     use rind::signature::sign::{MlDsa44, MlDsa65, MlDsa87};
     ml_dsa_expanded_load::<MlDsa44>("44");
@@ -318,6 +318,10 @@ fn ml_dsa_set<P: rind::signature::sign::MlDsaParameterSet>() {
     assert_independent("ML-DSA seed load", seeds, |seed| {
         MlDsaKeyPair::<P>::from_seed(seed).unwrap()
     });
+    // A key pair's expansion is as good as its key, so its drop wipes it.
+    assert_independent("ML-DSA key pair drop", seeds, |seed| {
+        drop(MlDsaKeyPair::<P>::from_seed(seed).unwrap())
+    });
     let keys = seeds.map(|seed| MlDsaKeyPair::<P>::from_seed(&seed).unwrap());
     assert_independent("ML-DSA export", keys.each_ref(), |key| key.to_pkcs8());
     // Signing is hedged, so even under one key its randomness varies: every
@@ -329,7 +333,9 @@ fn ml_dsa_set<P: rind::signature::sign::MlDsaParameterSet>() {
 
 /// The expanded form, whose load checks the key. `set` is "44", "65", or "87".
 /// The files are the PKCS#8 encodings of seeds `[1u8; 32]` and `[2u8; 32]`.
-#[cfg(not(miri))]
+/// The key is dropped inside the check: its expansion is freed then, and
+/// `freed` stops recording before it drops the closure's result.
+#[cfg(all(not(miri), target_family = "wasm"))]
 fn ml_dsa_expanded_load<P: rind::signature::sign::MlDsaParameterSet>(set: &str) {
     use rind::signature::sign::MlDsaKeyPair;
     let dir = format!("{}/tests/heap_scratch", env!("CARGO_MANIFEST_DIR"));
@@ -338,7 +344,7 @@ fn ml_dsa_expanded_load<P: rind::signature::sign::MlDsaParameterSet>(set: &str) 
         std::fs::read(&path).unwrap_or_else(|err| panic!("cannot read {path}: {err}"))
     });
     assert_independent("ML-DSA expanded load", expanded, |der| {
-        MlDsaKeyPair::<P>::from_pkcs8(der).unwrap()
+        drop(MlDsaKeyPair::<P>::from_pkcs8(der).unwrap())
     });
 }
 
@@ -403,6 +409,32 @@ fn record_ml_dsa_expanded_fixtures() {
     }
 }
 
+#[test]
+fn slh_dsa() {
+    use rind::signature::sign::{SlhDsaSha2_128f, SlhDsaShake128f};
+    slh_dsa_set::<SlhDsaSha2_128f>();
+    slh_dsa_set::<SlhDsaShake128f>();
+}
+
+fn slh_dsa_set<P: rind::signature::sign::SlhDsaParameterSet>() {
+    use rind::signature::sign::SlhDsaKeyPair;
+    assert_zeroed("SLH-DSA key generation", || {
+        SlhDsaKeyPair::<P>::generate().unwrap()
+    });
+    let keys = [(); 2].map(|()| SlhDsaKeyPair::<P>::generate().unwrap());
+    assert_independent("SLH-DSA export", keys.each_ref(), |key| key.to_pkcs8());
+    let pkcs8 = keys.each_ref().map(|key| key.to_pkcs8().as_ref().to_vec());
+    // Loading checks the key by making it again.
+    assert_independent("SLH-DSA load", pkcs8, |der| {
+        SlhDsaKeyPair::<P>::from_pkcs8(der).unwrap()
+    });
+    // Signing is randomized, so even under one key it varies: every block
+    // it frees must be wiped.
+    for key in &keys {
+        assert_zeroed("SLH-DSA signing", || key.sign(b"message").unwrap());
+    }
+}
+
 /// The expanded form, whose load checks the key.
 #[cfg(not(any(miri, target_family = "wasm")))]
 fn ml_dsa_expanded_set<P: rind::signature::sign::MlDsaParameterSet>(
@@ -411,9 +443,28 @@ fn ml_dsa_expanded_set<P: rind::signature::sign::MlDsaParameterSet>(
     use rind::signature::sign::MlDsaKeyPair;
     let seeds = [[1u8; 32], [2u8; 32]];
     let expanded = seeds.map(|seed| ml_dsa_expanded_pkcs8(theirs, &seed));
+    // Dropped inside the check: the expansion is freed then, and `freed`
+    // stops recording before it drops the closure's result.
     assert_independent("ML-DSA expanded load", expanded, |der| {
-        MlDsaKeyPair::<P>::from_pkcs8(der).unwrap()
+        drop(MlDsaKeyPair::<P>::from_pkcs8(der).unwrap())
     });
+}
+
+/// Argon2id's memory is as good as the password to an attacker, who could
+/// finish the hash from it without paying for the memory.
+#[test]
+fn argon2() {
+    let params = rind::argon2::Params::new(32, 2, 2).unwrap();
+    assert_independent(
+        "Argon2id",
+        [*b"password one", *b"password two"],
+        |password| {
+            let mut out = [0u8; 32];
+            rind::argon2::derive(params, password, b"saltsalt", &mut out).unwrap();
+            // Verifying derives its key on the heap.
+            black_box(rind::argon2::verify(params, password, b"saltsalt", &out).is_ok())
+        },
+    );
 }
 
 /// The key `seed` expands to, as PKCS#8 in RFC 9881's expanded form, which

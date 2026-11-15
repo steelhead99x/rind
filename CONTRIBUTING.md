@@ -10,8 +10,9 @@ under the files they change.
 
 # Building and testing
 
-`thirdparty/vectors` holds aws-lc's and BoringSSL's vector files, which
-`admin/sync-vectors` copies from the revisions it pins. `SLOW_TESTS=1` adds
+`thirdparty/vectors` holds the aws-lc, BoringSSL, Wycheproof, CAVP, and CCTV
+vector files the tests read, which `admin/sync-vectors` copies from the
+revisions it pins, so a plain clone runs every test. `SLOW_TESTS=1` adds
 the large sets, such as CCTV's million ML-KEM vectors, which the nightly
 `build` workflow runs on every CPU tier.
 
@@ -23,8 +24,9 @@ cargo bench
 [BENCHMARKS.md](BENCHMARKS.md#updating-this-report) says how to refresh the benchmark report.
 
 With [Nix](https://nixos.org), `nix develop` (or direnv) provides CI's
-toolchain, and `just check` runs CI's gate over what the branch changed; the
-nightly tools are in [TESTING.md](TESTING.md#running-the-tools).
+toolchain, and `just check` runs CI's gate over what the branch changed,
+three modules at a time (`sh/dispatch.sh` lists the `CHECK_*` variables that
+change that); the scheduled workflows' tools are in [TESTING.md](TESTING.md#running-the-tools).
 `just wasm` runs the nightly wasm job: it tests rind on `wasm32-wasip2`
 under wasmtime, with `SLOW_TESTS=1`. aws-lc-rs does not build for wasm, so
 the live differential tests stay on `just portable`. Ed25519's CCTV verdicts
@@ -53,7 +55,7 @@ Have at least these sections:
 
 Run `just ci` before every push.
 
-The scheduled workflows run nightly (`timing` and `ctgrind-debug` weekly) or on demand with `gh workflow run <name> --ref <branch>`, and some on a pull request that touches their inputs: ctgrind's x86_64 release row and its BINSEC rows, the armv7, portable, Dart, and openmls jobs of `build`, a timing build, the fuzz targets' builds, aarch64 clippy, and all of `x86-cpu`, `prove`, and `regenerate`. `mutants` never runs on a pull request; mutate its diff with `admin/mutants --in-diff`, and dispatch a whole campaign, which `admin/mutants` runs only on GitHub-hosted runners. These runs are advisory, since a path-filtered workflow cannot be a required check, but fix a red one before merging.
+The scheduled workflows run as [TESTING.md](TESTING.md#scheduled-workflows) lists, or on demand with `gh workflow run <name> --ref <branch>`, and some on a pull request that touches their inputs: ctgrind's x86_64 release row and its BINSEC rows, the armv7, portable, Dart, and openmls jobs of `build`, a timing build, the fuzz targets' builds, aarch64 clippy, and all of `x86-cpu`, `prove`, and `regenerate`. `mutants` never runs on a pull request; mutate its diff with `admin/mutants --in-diff`, and dispatch a whole campaign, which `admin/mutants` runs only on GitHub-hosted runners. These runs are advisory, since a path-filtered workflow cannot be a required check, but fix a red one before merging.
 PRs land on `main` through GitHub's merge queue, one PR at a time, as squash commits.
 Queue the reviewed head with `quest merge <pr> --land <sha>` (`/quest-merge` does this).
 The required `Queue build / Build` check skips on pull requests; the merge group runs `just ci` against the merge group's base on the self-hosted runner, and that job's own result decides the group.
@@ -66,6 +68,11 @@ The admin bypass of `main`'s ruleset is for emergencies.
 AI-assisted issues, pull requests, reviews, and comments are welcome.
 Prefer a quest for work needing durable scope or coordination.
 
+# Vulnerabilities
+
+Report a vulnerability privately, as [SECURITY.md](SECURITY.md) says, never in
+an issue, pull request, or quest.
+
 # Reviews
 
 A release-plz PR, which only bumps versions and changelogs, needs no review beyond the maintainer's approval to merge it.
@@ -76,6 +83,10 @@ rind began as a fork of [ctz/graviola](https://github.com/ctz/graviola) and no l
 Report bugs that also affect graviola, or any other source rind imports, upstream; never block on the fix.
 Each `Written for Graviola by ...` header is attribution; keep it on files that carry one.
 
+When rind needs an upstream changed, by its own fix or an unmerged upstream pull request, it forks that upstream and vendors the fork's whole tree in this repository, in place of a submodule, and takes upstream's later commits by merging them into it.
+Never vendor an upstream file unchanged from an older base, or only the changed files over a pinned upstream: the first reverts every later upstream commit to that file, and the second silently shadows them.
+[UPSTREAM.md](UPSTREAM.md#forks) names each fork and where its list of rind's changes lives, so they can be offered upstream.
+
 [UPSTREAM.md](UPSTREAM.md) lists every workaround for a bug or gap in a tool or dependency rind doesn't own.
 A PR that adds such a workaround adds its entry there and names the entry in the workaround's comment; a PR that drops one removes it from its entry, and deletes the entry once it lists no workaround.
 
@@ -83,6 +94,8 @@ A PR that adds such a workaround adds its entry there and names the entry in the
 
 release-plz opens a release PR from `main`, and publishing happens only when that PR merges.
 release-plz owns crate versions.
+It creates a GitHub Release for each tag it pushes, with its changelog entry as the body, and only rind's marked latest.
+If creating one fails, the release job stops there and alerts, leaving later crates and pyrind's PyPI upload undone. Rerun the failed `Release` run, which finishes them but skips the tag already pushed, then create that tag's Release by hand with `gh release create <tag> --verify-tag --latest=false --title <tag> --notes-file <its CHANGELOG.md entry>`, passing `--latest` for rind's.
 
 A release PR merges only after `just release-check` passes at its head, so nothing publishes that the full suite has not passed.
 It dispatches every scheduled workflow but `bench` and `dart-libraries` on the PR's branch, so each runs its whole scheduled matrix on the head, and waits for them all, which takes as long as the slowest. Mutation testing covers every change since the previous release.

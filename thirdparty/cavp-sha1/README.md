@@ -1,7 +1,8 @@
 # CAVP SHA-1 sample files
 
-NIST [CAVP][cavp] sample responses for SHA-1, which the `thirdparty/cavp`
-mirror omits. The files are unmodified.
+NIST [CAVP][cavp] sample responses for SHA-1, which the
+[ctz/cavp](https://github.com/ctz/cavp) mirror `thirdparty/vectors/cavp/`
+copies from omits. The files are unmodified.
 
 Source (retrieved 2026-10-27):
 <https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/shs/shabytetestvectors.zip>
