@@ -16,20 +16,12 @@
 //! slower on that chip. Host tests
 //! compile the IRAM body and call it directly, on the Rust `rotate_right`
 //! and `from_be_bytes` fallbacks rather than the Xtensa asm. SHA-384/512 is
-//! still HACL* on 64-bit targets and the rolled loop in `generic::sha512`
-//! on every other pointer width, where the unrolled body is about 47 KiB
-//! and misses a 16 KiB instruction cache.
-
-#[cfg(target_pointer_width = "64")]
-use libcrux_sha2::hacl::sha512_update_nblocks;
+//! the rolled loop in `generic::sha512` on every pointer width. The unrolled
+//! form is about 47 KiB when the pointer is 32 bits and misses a 16 KiB
+//! instruction cache.
 
 pub(crate) use crate::low::generic::sha1::sha1_compress_blocks;
-
-/// HACL* SHA-512 takes a 32-bit length, so longer input goes in pieces of
-/// whole blocks below it. 32-bit portable and ESP-IDF Xtensa run the rolled
-/// loop instead and do not call HACL*.
-#[cfg(target_pointer_width = "64")]
-const PIECE: usize = 1 << 31;
+pub(crate) use crate::low::generic::sha512::sha512_compress_blocks;
 
 // The IRAM body is what ESP-IDF Xtensa ships. Other builds compile it only
 // for the tests below, which call it by name. `sha256_compress_blocks` does
@@ -76,29 +68,6 @@ pub(crate) fn sha256_finish(state: &[u32; 8], message: &[u8], length: [u8; 8]) -
     let mut last = [[0u8; 64]; 2];
     sha256_compress_blocks(&mut h, crate::low::pad(rest, length, &mut last));
     crate::low::sha256_digest(&h)
-}
-
-/// Compresses whole 128-byte `blocks` into `state`.
-pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
-    assert!(blocks.len().is_multiple_of(128));
-    // HACL*'s `sha512_update` is fully unrolled (~47 KiB when the pointer
-    // is 32 bits), which is several times a 16 KiB instruction cache. That
-    // size is a property of the 32-bit codegen, so the switch is the
-    // pointer width and not `rind_limb`: `--cfg rind_limb="32"` on a
-    // 64-bit host still ships this HACL* body, and the rolled loop is in
-    // the 64-bit test binary. A 16-bit target is not a rind platform. The
-    // non-64-bit arm is still the rolled loop, so there is no pointer
-    // width on which this function returns `state` unchanged.
-    #[cfg(not(target_pointer_width = "64"))]
-    {
-        crate::low::generic::sha512::sha512_compress_blocks(state, blocks);
-    }
-    #[cfg(target_pointer_width = "64")]
-    {
-        for piece in blocks.chunks(PIECE) {
-            sha512_update_nblocks(piece.len() as u32, piece, state);
-        }
-    }
 }
 
 #[cfg(test)]

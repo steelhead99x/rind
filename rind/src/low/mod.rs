@@ -150,12 +150,12 @@ mod generic {
         )
     ))]
     pub(super) mod sha256_k;
-    // Rolled SHA-512 wherever the pointer is not 64 bits. HACL*'s unrolled
-    // form is about 47 KiB in that codegen and misses a small instruction
-    // cache. 64-bit tests still compile it and check it against FIPS 180-4.
-    // `rind_limb` does not select it: a 64-bit host forced to 32-bit limbs
-    // still ships the 64-bit HACL* body.
-    #[cfg(any(all(rind_backend = "portable", not(target_pointer_width = "64")), test))]
+    // The portable backend's SHA-512 on every pointer width. The unrolled
+    // body is about 47 KiB when the pointer is 32 bits and misses a 16 KiB
+    // instruction cache, so the rolled loop is the one every portable target
+    // ships. Other backends compile it in tests and check their assembly
+    // against it.
+    #[cfg(any(rind_backend = "portable", test))]
     pub(super) mod sha512;
     pub(super) mod zeroise;
 }
@@ -508,9 +508,9 @@ cfg_if::cfg_if! {
         pub(crate) use arm::poly1305;
         pub(crate) use arm::curve25519::curve25519_x25519;
         pub(crate) use arm::mont::{mont_mul, mont_sqr};
-        // SHA-1 and SHA-256 use the crypto extension where present, else rind's
-        // portable SHA, since libcrux has no SHA-1 and rind's SHA-256 is faster
-        // than libcrux's. SHA-512 is aws-lc's, NEON or scalar.
+        // SHA-1, SHA-256, and SHA-512 are aws-lc's assembly: the crypto
+        // extension or NEON where the CPU has them, and the integer routines
+        // otherwise. SHA-512 has no crypto-extension path.
         pub(crate) use arm::keccak1600_armv4::{
             sha3_keccak4_f1600, sha3_keccak_f1600, sha3_keccak_nof4_f1600,
         };

@@ -92,7 +92,7 @@ reason = "Narrowed by [#621](https://github.com/kixel-ai/rind/pull/621), after t
 [[gap]]
 operations = ["sha1/*", "hmac-sha1/*", "sha512*", "hmac-sha384/*", "hmac-sha512/*"]
 on = ["portable"]
-reason = "rind's portable SHA-1 and HACL*'s verified SHA-384/512, through libcrux-sha2, trail aws-lc's C by 1.1 to 1.3× from 1200 B up. Kept: verified HACL* within 1.3× is worth more than an unverified source on targets without assembly, which are the cold tiers."
+reason = "On the data this entry was written from, portable SHA-1 and HACL*'s SHA-384/512 trailed aws-lc's C by 1.1 to 1.3× from 1200 B up. The portable backend now runs rind's generic SHA-256 and rolled SHA-512 instead of libcrux-sha2. The next refresh rechecks the ratio."
 
 [[gap]]
 operations = ["aes*-cbc-encrypt/*"]

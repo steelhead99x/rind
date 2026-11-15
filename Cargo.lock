@@ -4412,7 +4412,6 @@ dependencies = [
  "libcrux-hacl-rs 0.0.6",
  "libcrux-macros 0.0.4",
  "libcrux-poly1305 0.0.7",
- "libcrux-sha2 0.0.9",
  "matter-crypto",
  "p256 0.13.2",
  "p256 0.14.0",

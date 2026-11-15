@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! A rolled SHA-512 compression, for portable targets whose pointer is not
-//! 64 bits.
+//! A rolled SHA-512 compression. The portable backend ships this on every
+//! pointer width.
 //!
-//! The portable backend otherwise calls HACL*'s `sha512_update`, which is
-//! fully unrolled. On Xtensa that function is about 47 KiB — several times
-//! the ESP32-S3's 16 KiB instruction cache — so every block streams its
-//! code from flash. On that board the rolled loop takes about 0.033×
-//! main's unrolled HACL* body, about 30×. This implementation
-//! follows [`sha256`](sha256.rs): one 16-word window and an 80-round loop,
-//! which stays in a few kilobytes. The round functions and the eighty
-//! `K` constants are FIPS 180-4 §4.1.3 and §4.2.3. The unit tests check
-//! FIPS 180-4's SHA-512 vectors, mark the block secret so ctgrind checks
-//! this loop, and, on every backend except portable with a pointer that is
-//! not 64 bits, compare with the compression the backend ships (HACL* or
-//! aws-lc). On 64-bit portable targets, HACL*'s unrolled form is still used.
+//! An unrolled body is about 47 KiB when the pointer is 32 bits, several
+//! times the ESP32-S3's 16 KiB instruction cache, so every block would
+//! stream its code from flash. On that board this loop takes about 0.033×
+//! that unrolled body's time, about 30×. It follows [`sha256`](sha256.rs):
+//! one 16-word window and an 80-round loop, which stays in a few kilobytes.
+//! The round functions and the eighty `K` constants are FIPS 180-4 §4.1.3
+//! and §4.2.3. The unit tests check FIPS 180-4's SHA-512 vectors, mark the
+//! block secret so ctgrind checks this loop, and, on every backend except
+//! portable, compare with the compression that backend ships.
 
 macro_rules! CH {
     ($x:expr, $y:expr, $z:expr) => {
@@ -277,10 +274,9 @@ mod tests {
         );
     }
 
-    /// A portable backend whose pointer is not 64 bits *is* this compression,
-    /// so that comparison would call itself. Everywhere else it is HACL* or
-    /// aws-lc.
-    #[cfg(not(all(rind_backend = "portable", not(target_pointer_width = "64"))))]
+    /// The portable backend *is* this compression, so that comparison would
+    /// call itself. Everywhere else it is aws-lc's assembly.
+    #[cfg(not(rind_backend = "portable"))]
     #[test]
     fn matches_backend_compression() {
         for len in [0usize, 1, 3, 55, 111, 112, 113, 127, 128, 239, 1000] {
