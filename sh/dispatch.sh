@@ -479,7 +479,14 @@ step() {
                 run cargo clippy -p rind --test heap_scratch --test cctv --features wipe --locked \
                     --target wasm32-wasip2 -- --deny warnings
                 if [[ $(uname -s) == Linux ]]; then
-                    run nix develop .#wasm --command cargo test -p rind --features wipe --locked \
+                    # Same runner as sh/wasm.sh. Cargo does not run a wasm
+                    # binary unless this is set, and the tests open the
+                    # verdict file and the PKCS#8 fixtures by absolute path,
+                    # so the checkout has to be preopened.
+                    root=$(pwd)
+                    run nix develop .#wasm --command env \
+                        CARGO_TARGET_WASM32_WASIP2_RUNNER="wasmtime run --dir ${root}::${root} --env SLOW_TESTS" \
+                        cargo test -p rind --features wipe --locked \
                         --target wasm32-wasip2 --test cctv --test heap_scratch
                     if [[ $(uname -m) == x86_64 ]]; then
                         # RSA-3072 and RSA-4096 on the 32-bit limbs wasm uses.
