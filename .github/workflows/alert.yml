@@ -20,7 +20,6 @@ on:
       - ESP32-S3 SHA-256 layout
       - miri
       - mutants
-      - Pullfrog
       - python
       - Release
     types:
