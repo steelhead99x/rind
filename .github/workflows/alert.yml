@@ -38,17 +38,20 @@ jobs:
   discord:
     name: Discord
     # Scheduled runs post on failure or timed_out, and on cancelled only when
-    # a job annotation says it exceeded its maximum execution time. That
-    # includes the hosted runner's "The job running on runner ... has exceeded
-    # the maximum execution time of ..." form, not only the timeout-minutes
-    # sentence. A hand cancel, or a dispatch that replaces the nightly (these
-    # workflows share one concurrency group per ref, with cancel-in-progress),
-    # does not post. Release and Dart release post on failure, timed_out, and
-    # a cancelled run that started a job. release.yml sets cancel-in-progress
-    # to false, so a newer push leaves an in-progress publish running, but it
-    # cancels a pending one waiting in the group. That pending run never
-    # starts a job, so it does not post. A cancellation the jobs API cannot
-    # classify still posts, and the embed says so.
+    # a job annotation is one of the two time-limit sentences: timeout-minutes
+    # ("The job has exceeded the maximum execution time of ...") or the hosted
+    # runner's 360-minute cap ("The job running on runner ... has exceeded the
+    # maximum execution time of ..."). A hand cancel, or a dispatch that
+    # replaces the nightly (these workflows share one concurrency group per
+    # ref, with cancel-in-progress), does not post. Release and Dart release
+    # post on failure, timed_out, and a cancelled run that started a job,
+    # unless that run's only cancel annotation is "Canceling since a higher
+    # priority waiting request". release.yml sets cancel-in-progress to false
+    # and does not set queue: max, so a newer push leaves an in-progress
+    # publish running and cancels the pending one waiting in the group. That
+    # pending cancellation does not post. A hand cancel of a job that started,
+    # and a time limit, still post. The jobs GET is retried; a cancellation it
+    # still cannot classify posts, and the embed says so.
     if: >-
       (github.event.workflow_run.event == 'schedule' &&
       contains(fromJSON('["failure", "timed_out", "cancelled"]'), github.event.workflow_run.conclusion)) ||

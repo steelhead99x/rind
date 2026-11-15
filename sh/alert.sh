@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Discord alerts for scheduled and release runs that stop with nobody watching,
 # after moq-dev/moq's. A scheduled cancellation posts only when a job exceeded
-# its time limit (GitHub reports that as cancelled, not timed_out). A Release
-# or Dart release cancellation posts when a job started. release.yml's
-# concurrency group leaves an in-progress publish running, but a newer push
-# cancels the pending one behind it, and that run never starts a job. When the
-# jobs API cannot classify a cancellation, the embed still posts and says so:
-# no workflow watches Alert, so a failed classification would otherwise vanish.
+# its time limit (GitHub reports that as cancelled, not timed_out). The
+# annotation is one of two sentences: timeout-minutes, or the hosted runner's
+# 360-minute cap ("The job running on runner ..."). A Release or Dart release
+# cancellation posts when a job started, unless the only cancel annotation is
+# "Canceling since a higher priority waiting request": release.yml does not set
+# queue: max, so a newer push cancels the pending publish behind the one that
+# is running. A hand cancel of a job that started, and a time limit, still
+# post. The jobs GET is retried. When it still cannot classify a
+# cancellation, the embed posts and
+# says so: no workflow watches Alert, so a failed classification would
+# otherwise vanish.
 # Usage:
 #   sh/alert.sh discord   Post this workflow_run when it should alert.
 #   sh/alert.sh check     Verify alert.yml's watch list and its if.
@@ -33,23 +38,30 @@ workflows=.github/workflows
 # Names of the release workflows. alert.yml's release arm must list these and
 # no others; judge reads this array, and is_release reads it too, so the
 # poster and the checker cannot drift. A cancellation of one of these posts
-# once a job has started.
+# once a job has started, unless a newer push replaced a pending run.
 release_names=(
     Release
     "Dart release"
 )
 
-# Either sentence GitHub writes when a job hits a time limit. timeout-minutes
-# produces "The job has exceeded the maximum execution time of 360m0s". The
-# hosted runner's own 360-minute limit produces "The job running on runner
-# GitHub Actions N has exceeded the maximum execution time of 360 minutes."
-# The match is the shared words, not the first ones. A hand cancel and a
-# concurrency cancel say "The operation was canceled." and do not match.
-timeout_re='has exceeded the maximum execution time of .+'
+# The two sentences GitHub writes when a job hits a time limit, whole
+# annotation or not at all. timeout-minutes produces "The job has exceeded the
+# maximum execution time of 59m0s". The hosted runner's own 360-minute cap,
+# which asan, bench, coverage, miri, python, and dart-libraries hit because
+# they set no timeout-minutes, produces "The job running on runner GitHub
+# Actions N has exceeded the maximum execution time of 360 minutes." A hand
+# cancel and a concurrency cancel do not match either sentence.
+timeout_re='^(The job has exceeded the maximum execution time of .+|The job running on runner .+ has exceeded the maximum execution time of .+)$'
+# A pending run replaced by a newer one in the same concurrency group. GitHub
+# also writes "The operation was canceled." on that job; that line alone is
+# not this reason.
+replaced_re='^Canceling since a higher priority waiting request'
+generic_re='^The operation was canceled\.$'
 
 # Posts one embed. A scheduled cancellation posts only for a job time limit.
-# A release cancellation posts once a job has started. A cancellation that
-# cannot be classified still posts, with that fact in the title.
+# A release cancellation posts once a job has started, unless the pending run
+# was replaced. A cancellation that cannot be classified still posts, with
+# that fact in the title.
 discord() {
     : "${DISCORD_WEBHOOK:?DISCORD_WEBHOOK is required}"
 
@@ -66,7 +78,11 @@ discord() {
     fi
     if ! should_post "${RUN_CONCLUSION:-}" "${RUN_NAME:-}" "$class"; then
         if is_release "${RUN_NAME:-}"; then
-            echo "sh/alert.sh: not posting ${RUN_NAME:-workflow}; a release cancellation posts only after a job has started"
+            if [[ $class == replaced ]]; then
+                echo "sh/alert.sh: not posting ${RUN_NAME:-workflow}; a pending release a newer push replaced does not post"
+            else
+                echo "sh/alert.sh: not posting ${RUN_NAME:-workflow}; a release cancellation posts only after a job has started"
+            fi
         else
             echo "sh/alert.sh: not posting ${RUN_NAME:-workflow} conclusion ${RUN_CONCLUSION:-}; a scheduled cancellation posts only when a job exceeded its time limit"
         fi
@@ -109,7 +125,7 @@ post_discord() {
 
     # A rejected webhook fails the run instead of dropping every future alert,
     # and a stalled endpoint fails in seconds instead of at the job timeout.
-    curl -sS --fail-with-body -X POST \
+    http_curl -sS --fail-with-body -X POST \
         --connect-timeout 5 --max-time 15 \
         -H "Content-Type: application/json" \
         -d "$payload" \
@@ -125,18 +141,22 @@ is_release() {
 }
 
 # should_post <conclusion> <workflow name> <class>
-# class is timeout, started, or never, from classify_run. A failure or
-# timed_out always posts. A release cancellation posts unless no job started,
-# which is a pending run a newer push replaced. Any other cancellation posts
-# only when a job annotation is a time limit.
+# class is timeout, started, never, or replaced, from classify_run. A failure
+# or timed_out always posts. A release cancellation posts for a time limit or
+# a job that started. It stays quiet when no job started, and when the only
+# cancel annotation is a higher-priority waiting request: a pending run a
+# newer push replaced, which can still carry started_at. Any other
+# cancellation posts only when a job annotation is a time limit.
 should_post() {
     local conclusion="$1" name="$2" class="$3"
     case $conclusion in
         failure | timed_out) return 0 ;;
         cancelled)
             if is_release "$name"; then
-                [[ $class != never ]]
-                return
+                case $class in
+                    never | replaced) return 1 ;;
+                    *) return 0 ;;
+                esac
             fi
             [[ $class == timeout ]]
             ;;
@@ -144,38 +164,116 @@ should_post() {
     esac
 }
 
+# One curl. prove replaces this function; production always runs curl.
+http_curl() {
+    command curl "$@"
+}
+
+# gh_get <url>
+# A 502, a rate limit, or a dropped connection is retried. prove sets
+# GH_GET_ATTEMPTS and GH_GET_BACKOFF; a run uses 3 attempts and waits one
+# second between them. The last failure is returned so the caller can post
+# that the cancellation could not be classified.
 gh_get() {
-    curl -sS --fail-with-body \
-        --connect-timeout 5 --max-time 20 \
-        -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-        -H "Accept: application/vnd.github+json" \
-        -H "X-GitHub-Api-Version: 2022-11-28" \
-        -- "$1"
+    local url=$1 attempt=1 max=${GH_GET_ATTEMPTS:-3} wait=${GH_GET_BACKOFF:-1}
+    local body status
+    if [[ ! $max =~ ^[1-9][0-9]*$ || ! $wait =~ ^[0-9]+$ ]]; then
+        echo "sh/alert.sh: GH_GET_ATTEMPTS and GH_GET_BACKOFF must be numbers" >&2
+        return 2
+    fi
+    while (( attempt <= max )); do
+        status=0
+        body=$(http_curl -sS --fail-with-body \
+            --connect-timeout 5 --max-time 20 \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -- "$url") || status=$?
+        if (( status == 0 )); then
+            printf '%s\n' "$body"
+            return 0
+        fi
+        echo "sh/alert.sh: GET failed (${status}), attempt ${attempt} of ${max}" >&2
+        if (( attempt == max )); then
+            return "$status"
+        fi
+        if (( wait > 0 )); then
+            sleep "$wait"
+        fi
+        attempt=$((attempt + 1))
+    done
+}
+
+# stdin: a JSON array of annotation messages. Prints timeout, replaced,
+# generic, or other. timeout is either time-limit sentence. replaced is the
+# higher-priority waiting request, with or without the generic cancel line
+# GitHub writes beside it. generic is only that line, or nothing. other is a
+# hand cancel or any other note.
+annotation_class() {
+    jq -r --arg timeout "$timeout_re" --arg replaced "$replaced_re" --arg generic "$generic_re" '
+        if type != "array" or any(.[]; type != "string") then "bad"
+        elif any(.[]; test($timeout)) then "timeout"
+        elif any(.[]; test($replaced)) and all(.[]; test($replaced) or test($generic)) then "replaced"
+        elif all(.[]; test($generic)) then "generic"
+        else "other"
+        end'
 }
 
 # stdin: a JSON array of annotation messages. Exit 0 when one is a job time limit.
 annotation_is_timeout() {
-    jq -e --arg re "$timeout_re" \
-        'type == "array" and any(.[]; type == "string" and test($re))' >/dev/null
+    local kind
+    kind=$(annotation_class) || return 1
+    [[ $kind == timeout ]]
 }
 
-# Exit 0 when this job's annotations say it exceeded its time limit, 1 when
-# they do not, and 2 when the response is incomplete or not a list.
-job_timed_out() {
-    local id="$1" page=1 notes count messages
+# Print timeout, replaced, or other for this job. Exit 2 when a page is missing
+# or not a list. A time-limit sentence wins. A higher-priority waiting request
+# is replaced only when no page has any other reason. The generic cancel line
+# does not decide the job.
+job_cancel_class() {
+    local id=$1 page=1 notes count messages kind
+    local saw_replaced=no saw_other=no
     while (( page <= 5 )); do
-        notes=$(gh_get "https://api.github.com/repos/${RUN_REPO}/check-runs/${id}/annotations?per_page=100&page=${page}")
+        notes=$(gh_get "https://api.github.com/repos/${RUN_REPO}/check-runs/${id}/annotations?per_page=100&page=${page}") || {
+            echo "sh/alert.sh: annotations request failed for job ${id}" >&2
+            return 2
+        }
         if ! jq -e 'type == "array"' <<<"$notes" >/dev/null; then
             echo "sh/alert.sh: annotations for job ${id} were not a list" >&2
             return 2
         fi
         messages=$(jq -c '[.[] | .message | select(type == "string")]' <<<"$notes")
-        if annotation_is_timeout <<<"$messages"; then
-            return 0
-        fi
+        kind=$(annotation_class <<<"$messages") || {
+            echo "sh/alert.sh: annotations for job ${id} could not be classified" >&2
+            return 2
+        }
+        case $kind in
+            timeout)
+                echo timeout
+                return 0
+                ;;
+            replaced) saw_replaced=yes ;;
+            generic) ;;
+            other) saw_other=yes ;;
+            *)
+                echo "sh/alert.sh: annotations for job ${id} could not be classified" >&2
+                return 2
+                ;;
+        esac
         count=$(jq -r 'length' <<<"$notes")
+        if [[ ! $count =~ ^[0-9]+$ ]]; then
+            echo "sh/alert.sh: annotations for job ${id} could not be classified" >&2
+            return 2
+        fi
         if (( count < 100 )); then
-            return 1
+            if [[ $saw_other == yes ]]; then
+                echo other
+            elif [[ $saw_replaced == yes ]]; then
+                echo replaced
+            else
+                echo other
+            fi
+            return 0
         fi
         page=$((page + 1))
     done
@@ -199,17 +297,23 @@ require_run_ids() {
     fi
 }
 
-# Print timeout, started, or never. Exit 2 when the run id is unusable or a
-# page is missing. timeout: a cancelled job's annotation is a time limit.
-# started: some job has started_at, and none of those annotations matched.
-# never: no job started, including a run cancelled before it had jobs. That
-# is how a newer push replaces a pending Release.
+# Print timeout, started, never, or replaced. Exit 2 when the run id is
+# unusable or a page is missing. timeout: a cancelled job's annotation is a
+# time limit. started: some job has started_at, and the cancellation is not
+# only a higher-priority waiting request. never: no job has started_at,
+# including a run cancelled before it had jobs. replaced: a job may have
+# started_at, but the only cancel annotation is a higher-priority waiting
+# request, which is how a newer push replaces a pending Release.
 classify_run() {
     require_run_ids || return $?
 
     local page=1 jobs total count scanned=0 started=no cancelled_ids id status
+    local saw_replaced=no saw_other=no kind
     while (( page <= 10 )); do
-        jobs=$(gh_get "https://api.github.com/repos/${RUN_REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs?per_page=100&page=${page}")
+        jobs=$(gh_get "https://api.github.com/repos/${RUN_REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs?per_page=100&page=${page}") || {
+            echo "sh/alert.sh: jobs request failed" >&2
+            return 2
+        }
         if ! jq -e '.jobs | type == "array"' <<<"$jobs" >/dev/null; then
             echo "sh/alert.sh: jobs response has no list" >&2
             return 2
@@ -240,21 +344,30 @@ classify_run() {
                 return 2
             fi
             status=0
-            job_timed_out "$id" || status=$?
-            case $status in
-                0)
+            kind=$(job_cancel_class "$id") || status=$?
+            if (( status != 0 )); then
+                return "$status"
+            fi
+            case $kind in
+                timeout)
                     echo timeout
                     return 0
                     ;;
-                1) ;;
-                *) return "$status" ;;
+                replaced) saw_replaced=yes ;;
+                other) saw_other=yes ;;
+                *)
+                    echo "sh/alert.sh: bad cancel class for job ${id}" >&2
+                    return 2
+                    ;;
             esac
         done <<<"$cancelled_ids"
         if (( scanned >= total )); then
-            if [[ $started == yes ]]; then
-                echo started
-            else
+            if [[ $started == no ]]; then
                 echo never
+            elif [[ $saw_other == no && $saw_replaced == yes ]]; then
+                echo replaced
+            else
+                echo started
             fi
             return 0
         fi
@@ -585,9 +698,12 @@ prove_post() {
     # annotation. One that never started is the pending run a newer push replaced.
     expect_post cancelled Release started yes
     expect_post cancelled Release never no
+    expect_post cancelled Release replaced no
     expect_post cancelled Release timeout yes
     expect_post cancelled "Dart release" started yes
     expect_post cancelled "Dart release" never no
+    expect_post cancelled "Dart release" replaced no
+    expect_post cancelled asan replaced no
     expect_post failure Release started yes
     expect_post timed_out "Dart release" started yes
     expect_post cancelled asan timeout yes
@@ -602,6 +718,10 @@ prove_timeout() {
     local hand='["The operation was canceled."]'
     local both='["The operation was canceled.","The job has exceeded the maximum execution time of 1m0s"]'
     local loose='["exceeded the maximum execution time"]'
+    local wrapped='["Note: The job has exceeded the maximum execution time of 1m0s"]'
+    local runner_cut='["The job running on runner GitHub Actions 2 has exceeded"]'
+    local waiting='["Canceling since a higher priority waiting request for release exists"]'
+    local minutes_short='["The job has exceeded the maximum execution time of 59m0s"]'
     local empty='[]'
     if ! annotation_is_timeout <<<"$hit"; then
         echo "sh/alert.sh prove: a time-limit annotation was not recognized" >&2
@@ -627,8 +747,202 @@ prove_timeout() {
         echo "sh/alert.sh prove: a partial time-limit phrase was accepted" >&2
         return 1
     fi
+    if annotation_is_timeout <<<"$wrapped"; then
+        echo "sh/alert.sh prove: a time-limit sentence with a prefix was accepted" >&2
+        return 1
+    fi
+    if annotation_is_timeout <<<"$runner_cut"; then
+        echo "sh/alert.sh prove: a partial runner sentence was accepted" >&2
+        return 1
+    fi
+    if annotation_is_timeout <<<"$waiting"; then
+        echo "sh/alert.sh prove: a higher-priority waiting request was treated as a time limit" >&2
+        return 1
+    fi
+    if ! annotation_is_timeout <<<"$minutes_short"; then
+        echo "sh/alert.sh prove: a timeout-minutes annotation was not recognized" >&2
+        return 1
+    fi
     if annotation_is_timeout <<<"$empty"; then
         echo "sh/alert.sh prove: no annotations was treated as a time limit" >&2
+        return 1
+    fi
+}
+
+expect_class() {
+    local label=$1 messages=$2 want=$3 got
+    got=$(annotation_class <<<"$messages") || {
+        echo "sh/alert.sh prove: ${label} could not be classified" >&2
+        return 1
+    }
+    if [[ $got != "$want" ]]; then
+        echo "sh/alert.sh prove: ${label} got ${got}, want ${want}" >&2
+        return 1
+    fi
+}
+
+# The phrases GitHub writes, including the generic cancel line it pairs with
+# a real reason. These do not go through the network.
+prove_class() {
+    expect_class "runner time limit" \
+        '["The job running on runner GitHub Actions 2 has exceeded the maximum execution time of 360 minutes."]' \
+        timeout
+    expect_class "timeout-minutes" \
+        '["The job has exceeded the maximum execution time of 59m0s"]' \
+        timeout
+    expect_class "waiting request" \
+        '["Canceling since a higher priority waiting request for release exists"]' \
+        replaced
+    expect_class "waiting request beside the generic cancel" \
+        '["The operation was canceled.","Canceling since a higher priority waiting request for release exists"]' \
+        replaced
+    expect_class "hand cancel" \
+        '["The operation was canceled.","The run was canceled by @octocat."]' \
+        other
+    expect_class "generic cancel alone" '["The operation was canceled."]' generic
+    expect_class "empty" '[]' generic
+    expect_class "timeout beside a waiting request" \
+        '["Canceling since a higher priority waiting request for release exists","The job running on runner GitHub Actions 4 has exceeded the maximum execution time of 360 minutes."]' \
+        timeout
+}
+
+# discord under a stand-in for curl. A failing GET is tried three times. A
+# cancellation that is still unclassified posts and exits 0. A confident
+# non-timeout stays quiet. A Release posts for a hand cancel and a time limit,
+# and stays quiet when the job never started or the only cancel annotation is
+# a higher-priority waiting request.
+prove_http() {
+    local dir status=0
+    dir=$(mktemp -d)
+    prove_http_cases "$dir" || status=$?
+    rm -rf "$dir"
+    return "$status"
+}
+
+prove_http_cases() {
+    local dir=$1
+    # `|| return` so a failed fixture stops the rest even when this function
+    # is reached from `||`, which turns set -e off.
+    expect_discord "$dir" exhaust asan yes classify || return
+    expect_discord "$dir" retry-empty Release no quiet || return
+    expect_discord "$dir" retry-timeout asan yes posted || return
+    expect_discord "$dir" hand asan no quiet || return
+    expect_discord "$dir" hand Release yes posted || return
+    expect_discord "$dir" waiting Release no quiet || return
+    expect_discord "$dir" timeout Release yes posted || return
+    expect_discord "$dir" unstarted Release no quiet || return
+}
+
+expect_discord() {
+    local dir=$1 mode=$2 name=$3 want_post=$4 want_title=$5
+    local status=0 out n posted
+    rm -f "$dir/urls" "$dir/posted" "$dir/err"
+    out=$(
+        export GH_GET_ATTEMPTS=3 GH_GET_BACKOFF=0
+        export RUN_REPO=kixel-ai/rind RUN_ID=9 RUN_ATTEMPT=1 GITHUB_TOKEN=t
+        export DISCORD_WEBHOOK=https://discord.example/hook
+        export RUN_CONCLUSION=cancelled RUN_NAME="$name" RUN_URL=https://example/run
+        export RUN_TITLE=nightly RUN_REF=main RUN_EVENT=schedule RUN_ACTOR=octocat
+        export STUB_MODE=$mode STUB_DIR=$dir
+        exec 2>"$STUB_DIR/err"
+        http_curl() {
+            local arg url="" piece=""
+            for arg in "$@"; do
+                url=$arg
+            done
+            printf '%s\n' "$url" >>"$STUB_DIR/urls"
+            case $url in
+                *api.github.com*) stub_api "$url" ;;
+                *)
+                    for piece in "$@"; do
+                        if [[ $piece == '{'* ]]; then
+                            printf '%s\n' "$piece" >"$STUB_DIR/posted"
+                        fi
+                    done
+                    ;;
+            esac
+        }
+        stub_api() {
+            local url=$1 n
+            n=$(wc -l <"$STUB_DIR/urls")
+            case $STUB_MODE in
+                exhaust) return 22 ;;
+                retry-empty)
+                    if (( n < 3 )); then
+                        return 22
+                    fi
+                    printf '%s\n' '{"total_count":0,"jobs":[]}'
+                    ;;
+                retry-timeout)
+                    if [[ $url == *'/jobs?'* ]] && (( n == 1 )); then
+                        return 22
+                    fi
+                    if [[ $url == *'/jobs?'* ]]; then
+                        printf '%s\n' '{"total_count":1,"jobs":[{"id":42,"conclusion":"cancelled","started_at":"2026-11-15T00:00:00Z"}]}'
+                        return 0
+                    fi
+                    printf '%s\n' '[{"message":"The job running on runner GitHub Actions 2 has exceeded the maximum execution time of 360 minutes."}]'
+                    ;;
+                unstarted)
+                    if [[ $url == *'/jobs?'* ]]; then
+                        printf '%s\n' '{"total_count":1,"jobs":[{"id":42,"conclusion":"cancelled","started_at":null}]}'
+                        return 0
+                    fi
+                    printf '%s\n' '[{"message":"The run was canceled by @octocat."}]'
+                    ;;
+                *)
+                    if [[ $url == *'/jobs?'* ]]; then
+                        printf '%s\n' '{"total_count":1,"jobs":[{"id":42,"conclusion":"cancelled","started_at":"2026-11-15T00:00:00Z"}]}'
+                        return 0
+                    fi
+                    case $STUB_MODE in
+                        hand)
+                            printf '%s\n' '[{"message":"The operation was canceled."},{"message":"The run was canceled by @octocat."}]'
+                            ;;
+                        waiting)
+                            printf '%s\n' '[{"message":"The operation was canceled."},{"message":"Canceling since a higher priority waiting request for release exists"}]'
+                            ;;
+                        timeout)
+                            printf '%s\n' '[{"message":"The job running on runner GitHub Actions 12 has exceeded the maximum execution time of 360 minutes."}]'
+                            ;;
+                        *)
+                            echo "sh/alert.sh prove: unknown stub ${STUB_MODE}" >&2
+                            return 2
+                            ;;
+                    esac
+                    ;;
+            esac
+        }
+        discord
+    ) 2>"$dir/err" || status=$?
+    if [[ $status -ne 0 ]]; then
+        echo "sh/alert.sh prove: ${mode} ${name} exited ${status}: ${out} $(cat "$dir/err")" >&2
+        return 1
+    fi
+    posted=no
+    if [[ -f $dir/posted ]]; then
+        posted=yes
+    fi
+    if [[ $posted != "$want_post" ]]; then
+        echo "sh/alert.sh prove: ${mode} ${name} posted ${posted}, want ${want_post}: $(cat "$dir/err")" >&2
+        return 1
+    fi
+    n=$(grep -c 'api.github.com' "$dir/urls")
+    case $mode in
+        exhaust | retry-empty | retry-timeout)
+            if (( n != 3 )); then
+                echo "sh/alert.sh prove: ${mode} tried the GET ${n} times, want 3" >&2
+                return 1
+            fi
+            ;;
+    esac
+    if [[ $want_title == classify ]]; then
+        if [[ $(cat "$dir/posted") != *'could not classify'* ]]; then
+            echo "sh/alert.sh prove: ${mode} ${name} did not say the cancellation could not be classified" >&2
+            return 1
+        fi
+    elif [[ $want_title == posted && $(cat "$dir/posted") == *'could not classify'* ]]; then
+        echo "sh/alert.sh prove: ${mode} ${name} was titled as unclassified" >&2
         return 1
     fi
 }
@@ -678,9 +992,11 @@ prove() {
     prove_form
     prove_post
     prove_timeout
+    prove_class
+    prove_http
     prove_wires
     prove_ids
-    echo "sh/alert.sh prove: parser, post policy, and time-limit annotation"
+    echo "sh/alert.sh prove: parser, post policy, time-limit annotation, and classification"
 }
 
 case ${1:-} in
