@@ -37,5 +37,11 @@ SLOW_TESTS=1 cargo test -p rind --features wipe --test zeroing --test heap_scrat
 # wasm32's portable build runs on 32-bit limbs, and `just wasm` generates
 # only RSA-2048 keys, so RSA-3072 and RSA-4096 key generation on those limbs
 # is wipe-checked here, natively.
-CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS --cfg rind_limb=\"32\"" \
+#
+# RUSTFLAGS are part of cargo's fingerprint. A separate target directory keeps
+# this one cfg from rebuilding the shared tree, including aws-lc-sys, and from
+# making the next run rebuild it again.
+limb32_target="${CARGO_TARGET_DIR:-target}/rind-limb32"
+CARGO_TARGET_DIR="$limb32_target" \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS --cfg rind_limb=\"32\"" \
     SLOW_TESTS=1 cargo test -p rind --features wipe --test heap_scratch --locked --release --target "$target" -- rsa_generate
