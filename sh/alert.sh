@@ -144,6 +144,8 @@ judge() {
 # The checker has to reject both regressions it exists for: a schedule arm that
 # dropped cancelled, and a predicate outside the supported form. A checker that
 # always passes, or that reads the lists and ignores the rest, would hide either.
+# The supported form's pass is checked here. It does not depend on `set -e`:
+# a judge that exits 0 without the pass line fails too.
 prove_conclusions() {
     local good bad disabled err
     good=$(
@@ -161,7 +163,14 @@ EOF
 (github.event.workflow_run.event == 'schedule' && contains(fromJSON('["failure", "timed_out", "cancelled"]'), github.event.workflow_run.conclusion) && false) || (contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion) && contains(fromJSON('["Release", "Dart release"]'), github.event.workflow_run.name))
 EOF
     )
-    judge "$good" >/dev/null
+    if ! err=$(judge "$good" 2>&1); then
+        echo "sh/alert.sh: the supported form was rejected: $err" >&2
+        return 1
+    fi
+    if [[ "$err" != *"scheduled failure, timeout, or cancellation"* ]]; then
+        echo "sh/alert.sh: the supported form did not report a pass: $err" >&2
+        return 1
+    fi
     if err=$(judge "$bad" 2>&1); then
         echo "sh/alert.sh: conclusion check accepted a schedule arm without cancelled" >&2
         return 1
