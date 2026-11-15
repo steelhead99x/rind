@@ -12,8 +12,14 @@ use core::marker::PhantomData;
 /// and a core this crate does not recognise keep `_alt`. So does a sandbox
 /// whose `/proc/cpuinfo` cannot be read, Android (the target is not Linux,
 /// and a failed read on a Linux Android build), and Windows on ARM, which
-/// never reads a part list. That file is opened on the first call here, not
-/// when AES, SHA, or NEON is checked.
+/// never reads a part list.
+///
+/// The file is opened on the first call here, and on the first
+/// elliptic-curve or RSA operation. AES, SHA, and NEON checks do not open
+/// it. Call this before entering a sandbox that kills `open` (seccomp
+/// strict mode sends `SIGKILL`): the choice is cached, and a later
+/// operation reuses it. A filter that delivers `SIGSYS` for that `open`
+/// keeps `_alt` and returns.
 ///
 /// `None` is every other architecture: those builds have no such choice,
 /// and this reads no feature flag there.

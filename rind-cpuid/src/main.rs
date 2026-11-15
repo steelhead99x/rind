@@ -68,7 +68,10 @@ fn main() {
     let pmull = is_aarch64_feature_detected!("pmull");
     let sha2 = is_aarch64_feature_detected!("sha2");
     let sha3 = is_aarch64_feature_detected!("sha3");
-    let wide_mul = rind::cpu::wide_multiplier().expect("aarch64 reports the multiplier");
+    // `None` is the portable aarch64 backend (`--cfg rind_portable`, a
+    // no-NEON target, or big-endian). It has no `_alt` schedule. Print 0
+    // so the feature JSON still comes out.
+    let wide_mul = rind::cpu::wide_multiplier().unwrap_or(false);
 
     println!(
         "{{ \"cpuid\": {{ \"aes\": {}, \"dit\": {}, \"neon\": {}, \"pmull\": {}, \
