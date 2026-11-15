@@ -18,7 +18,6 @@
       "vaes": 1,
       "vpclmulqdq": 1
     },
-    "compatible": 1,
     "supports_avx512_aes_gcm": 1
   }
 }

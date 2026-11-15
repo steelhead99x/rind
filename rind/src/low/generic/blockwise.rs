@@ -1,10 +1,14 @@
 // Written for Graviola by Joe Birr-Pixton, 2024.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
+// `used` first, so a context that holds its chaining value then this can
+// start the buffer on a 16-byte boundary on 64-bit targets: see
+// `copy_lanes`.
 #[derive(Clone)]
+#[repr(C)]
 pub(crate) struct Blockwise<const N: usize> {
-    buffer: [u8; N],
     used: usize,
+    buffer: [u8; N],
 }
 
 impl<const N: usize> Blockwise<N> {
@@ -26,7 +30,7 @@ impl<const N: usize> Blockwise<N> {
         // save no registers and tail-call the copy.
         if bytes.len() <= N - used {
             self.used = used + bytes.len();
-            self.buffer[used..used + bytes.len()].copy_from_slice(bytes);
+            copy_lanes::<N>(&mut self.buffer[used..used + bytes.len()], bytes);
         } else {
             self.complete_blocks(bytes, state);
         }
@@ -107,6 +111,43 @@ impl<const N: usize> Blockwise<N> {
     }
 }
 
+/// Copies `src` into `dst`, which must be as long and at most `N` bytes, in the stores a hash's
+/// finish loads it back with: 16-byte lanes, then 8, 4, 2, and 1 bytes.
+///
+/// A load that spans two stores still in flight cannot take its bytes from
+/// them, and waits for both to reach the cache, stalling the finish that
+/// follows an update. A `memcpy` of 17 to 63 bytes writes two overlapping
+/// stores that SHA-256's 16-byte loads span: on Zen 5 that made a 64-byte
+/// `digest::Context` hash 40% slower.
+// A loop over whole lanes would become a `memcpy` call; this one, with its
+// count bounded and its exit inside, unrolls into the lanes instead.
+#[inline(always)]
+fn copy_lanes<const N: usize>(dst: &mut [u8], src: &[u8]) {
+    let mut i = 0;
+    for _ in 0..N / 16 {
+        if src.len() - i < 16 {
+            break;
+        }
+        dst[i..i + 16].copy_from_slice(&src[i..i + 16]);
+        i += 16;
+    }
+    if src.len() - i >= 8 {
+        dst[i..i + 8].copy_from_slice(&src[i..i + 8]);
+        i += 8;
+    }
+    if src.len() - i >= 4 {
+        dst[i..i + 4].copy_from_slice(&src[i..i + 4]);
+        i += 4;
+    }
+    if src.len() - i >= 2 {
+        dst[i..i + 2].copy_from_slice(&src[i..i + 2]);
+        i += 2;
+    }
+    if src.len() > i {
+        dst[i] = src[i];
+    }
+}
+
 /// A hash's chaining value, which [`Blockwise::update`] passes whole blocks.
 ///
 /// A trait rather than a closure, which Aeneas cannot translate when it
@@ -161,4 +202,27 @@ pub(crate) fn sha256_digest(h: &[u32; 8]) -> [u8; 32] {
         r[i * 4..(i + 1) * 4].copy_from_slice(&word.to_be_bytes());
     }
     r
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    // Every length a block of either size buffers, so each piece of the
+    // copy, alone and after whole lanes, is checked.
+    #[test]
+    fn copy_lanes_copies() {
+        fn check<const N: usize>() {
+            let src: Vec<u8> = (1..=N as u8).collect();
+            for len in 0..=N {
+                let mut dst = [0u8; N];
+                copy_lanes::<N>(&mut dst[..len], &src[..len]);
+                assert_eq!(dst[..len], src[..len], "{N}-byte block, {len} bytes");
+                assert!(dst[len..].iter().all(|&b| b == 0));
+            }
+        }
+        check::<64>();
+        check::<128>();
+    }
 }

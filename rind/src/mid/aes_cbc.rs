@@ -60,9 +60,10 @@ impl AesCbcEncryptingKey {
     /// `in_out` is not a whole number of 16-byte blocks.
     pub fn encrypt_blocks(&self, iv: CbcIv, in_out: &mut [u8]) -> Result<(), Error> {
         let _entry = Entry::new_secret();
-        let (blocks, []) = in_out.as_chunks_mut() else {
+        let (blocks, rest) = in_out.as_chunks_mut();
+        if !rest.is_empty() {
             return Err(Error::WrongLength);
-        };
+        }
         self.encrypt_in_place(&iv.0, blocks);
         Ok(())
     }
@@ -146,9 +147,10 @@ impl AesCbcDecryptingKey {
     /// its padding is malformed. The padding check runs in constant time.
     pub fn decrypt<'a>(&self, iv: &[u8; 16], in_out: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
         let _entry = Entry::new_secret();
-        let (blocks, []) = in_out.as_chunks_mut() else {
+        let (blocks, rest) = in_out.as_chunks_mut();
+        if !rest.is_empty() {
             return Err(Error::DecryptFailed);
-        };
+        }
         if blocks.is_empty() {
             return Err(Error::DecryptFailed);
         }
@@ -160,8 +162,8 @@ impl AesCbcDecryptingKey {
         // Bad if `pad` is 0 or over 16, or any of the last `pad` bytes is not
         // `pad`, computed without a branch on them.
         let mut bad = ct_mask_lt(16, pad) | ct_mask_lt(pad, 1);
-        for (i, byte) in (0u8..).zip(last.iter().rev()) {
-            bad |= ct_mask_lt(i, pad) & (byte ^ pad);
+        for i in 0..16 {
+            bad |= ct_mask_lt(i as u8, pad) & (last[15 - i] ^ pad);
         }
 
         if low::ct::into_public(black_box(bad)) != 0 {
@@ -180,9 +182,10 @@ impl AesCbcDecryptingKey {
     /// `in_out` is not a whole number of 16-byte blocks.
     pub fn decrypt_blocks(&self, iv: &[u8; 16], in_out: &mut [u8]) -> Result<(), Error> {
         let _entry = Entry::new_secret();
-        let (blocks, []) = in_out.as_chunks_mut() else {
+        let (blocks, rest) = in_out.as_chunks_mut();
+        if !rest.is_empty() {
             return Err(Error::DecryptFailed);
-        };
+        }
         aes_cbc::decrypt(&self.key, iv, blocks);
         low::ct::public_slice(blocks);
         Ok(())

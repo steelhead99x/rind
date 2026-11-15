@@ -546,7 +546,6 @@ macro_rules! cmsub38_p256 {
 // Transliterated from s2n-bignum's arm/p256/p256_montjdouble_alt.S.
 /// Point doubling on NIST curve P-256 in Montgomery-Jacobian coordinates
 ///
-///
 /// Does p3 := 2 * p1 where all points are regarded as Jacobian triples with
 /// each coordinate in the Montgomery domain, i.e. x' = (2^256 * x) mod p_256.
 /// A Jacobian triple (x',y',z') represents affine point (x/z^2,y/z^3).

@@ -1,0 +1,32 @@
+# OpenSSL 3 configuration that prefers rind's algorithms and keeps OpenSSL's
+# default provider for the rest. Set `module` to where the library is.
+
+# Fail OpenSSL's initialization on an error in this file, such as a section
+# it names but lacks, rather than carry on without the file. It must be in
+# the default section. Since OpenSSL 3.0.13, 3.1.5, and 3.2.1, a provider
+# that fails to load is no such error: OpenSSL carries on without it, so
+# check that `openssl list -providers` names rind.
+config_diagnostics = 1
+openssl_conf = openssl_init
+# Node.js reads its own section, unless run with --openssl-shared-config.
+nodejs_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+alg_section = algorithm_sect
+
+[provider_sect]
+# Activating any provider stops OpenSSL loading the default one implicitly.
+default = default_sect
+rind = rind_sect
+
+[default_sect]
+activate = 1
+
+[rind_sect]
+module = /usr/local/lib/ossl-modules/librind_openssl.so
+activate = 1
+
+[algorithm_sect]
+# Prefer rind wherever it implements an algorithm; `?` makes it a preference.
+default_properties = ?provider=rind

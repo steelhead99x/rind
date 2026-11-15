@@ -17,6 +17,10 @@ use crate::encoding::{
     EcPublicKeyCompressedBin, EcPublicKeyUncompressedBin, Pkcs8V1Der, Pkcs8V2Der, PublicKeyX509Der,
 };
 use crate::error::{KeyRejected, Unspecified, unspecified};
+pub use crate::pqdsa::{
+    PqdsaKeyPair, PqdsaPrivateKey, PqdsaPublicKey, PqdsaSigningAlgorithm,
+    PqdsaVerificationAlgorithm,
+};
 pub use crate::rsa::signing::{
     RSA_PKCS1_SHA256, RSA_PKCS1_SHA384, RSA_PKCS1_SHA512, RSA_PSS_SHA256, RSA_PSS_SHA384,
     RSA_PSS_SHA512, RsaEncoding, RsaSignatureEncoding,
@@ -58,9 +62,12 @@ pub(crate) mod private {
     use crate::digest::Digest;
     use crate::error::{KeyRejected, Unspecified};
 
-    /// How a verification algorithm parses keys and verifies with rind,
-    /// which only rind-aws-lc-rs can name.
-    pub trait Verify {
+    /// How a verification algorithm parses keys and verifies with rind. It
+    /// also seals [`super::VerificationAlgorithm`], whose one private
+    /// supertrait it is, as aws-lc-rs's has one. It is `pub(crate)`, since
+    /// code bounded by the subtrait could otherwise call these methods,
+    /// which aws-lc-rs's sealing trait does not have.
+    pub(crate) trait Verify: crate::sealed::Sealed {
         /// Parses an encoded public key.
         fn parse(&self, public_key: &[u8]) -> Result<rind::signature::PublicKey, KeyRejected>;
 
@@ -93,9 +100,8 @@ pub(crate) mod private {
 }
 
 /// A signature verification algorithm.
-pub trait VerificationAlgorithm:
-    fmt::Debug + Sync + Any + sealed::Sealed + private::Verify
-{
+#[allow(private_bounds)]
+pub trait VerificationAlgorithm: fmt::Debug + Sync + Any + private::Verify {
     /// Verifies `signature` over `msg` with the encoded `public_key`.
     #[cfg(feature = "ring-sig-verify")]
     #[deprecated(
@@ -981,9 +987,26 @@ impl AsDer<PublicKeyX509Der<'static>> for Ed25519PublicKey {
     }
 }
 
-mod mldsa;
-pub use mldsa::{
-    ML_DSA_44, ML_DSA_44_SIGNING, ML_DSA_65, ML_DSA_65_SIGNING, ML_DSA_87, ML_DSA_87_SIGNING,
-    PqdsaKeyPair, PqdsaPrivateKey, PqdsaPublicKey, PqdsaSigningAlgorithm,
-    PqdsaVerificationAlgorithm,
+/// ML-DSA-44 verification.
+pub const ML_DSA_44: PqdsaVerificationAlgorithm = PqdsaVerificationAlgorithm {
+    id: &crate::pqdsa::AlgorithmID::ML_DSA_44,
 };
+
+/// ML-DSA-65 verification.
+pub const ML_DSA_65: PqdsaVerificationAlgorithm = PqdsaVerificationAlgorithm {
+    id: &crate::pqdsa::AlgorithmID::ML_DSA_65,
+};
+
+/// ML-DSA-87 verification.
+pub const ML_DSA_87: PqdsaVerificationAlgorithm = PqdsaVerificationAlgorithm {
+    id: &crate::pqdsa::AlgorithmID::ML_DSA_87,
+};
+
+/// ML-DSA-44 signing.
+pub const ML_DSA_44_SIGNING: PqdsaSigningAlgorithm = PqdsaSigningAlgorithm(&ML_DSA_44);
+
+/// ML-DSA-65 signing.
+pub const ML_DSA_65_SIGNING: PqdsaSigningAlgorithm = PqdsaSigningAlgorithm(&ML_DSA_65);
+
+/// ML-DSA-87 signing.
+pub const ML_DSA_87_SIGNING: PqdsaSigningAlgorithm = PqdsaSigningAlgorithm(&ML_DSA_87);
