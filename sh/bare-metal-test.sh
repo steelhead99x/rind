@@ -108,7 +108,8 @@ if [[ -e $tmp/bad/0.args ]]; then
     exit 1
 fi
 
-# Default path: eight targets, four clippy rows each, then one tree check.
+# Default path: eight targets, four clippy rows each, then the two arm
+# assembly builds, then one tree check.
 # An inherited RUSTFLAGS and a target-scoped flag both survive, and only
 # x86_64-unknown-none gains dalek's serial backend.
 default=$tmp/default
@@ -120,8 +121,8 @@ if ! run "$default" env \
     exit 1
 fi
 count=$(find "$default" -name '*.args' | wc -l)
-if [[ $count -ne 33 ]]; then
-    echo "default path ran $count commands, want 33" >&2
+if [[ $count -ne 35 ]]; then
+    echo "default path ran $count commands, want 35" >&2
     exit 1
 fi
 i=0
@@ -149,7 +150,14 @@ while [[ $i -lt 32 ]]; do
     fi
     i=$((i + 1))
 done
-tree_args=$(args_of "$default/32.args")
+arm_a=$(args_of "$default/32.args")
+arm_r=$(args_of "$default/33.args")
+assert_has "$arm_a" "build"
+assert_has "$arm_a" "armv7a-none-eabi"
+assert_has "$(encoded_of "$default/32.env")" $'getrandom_backend="custom"'
+assert_has "$arm_r" "build"
+assert_has "$arm_r" "armv7r-none-eabihf"
+tree_args=$(args_of "$default/34.args")
 assert_has "$tree_args" "tree"
 assert_has "$tree_args" "thumbv7em-none-eabihf"
 
