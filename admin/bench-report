@@ -19,7 +19,8 @@ suffix, so a minimal aarch64 Linux box is `aarch64-host` rather than the
 reserved name `aarch64`. A result records a machine tag when the OS has a
 machine id. A free host name is kept even when another file carries that
 tag. A second machine that wants a slug already on disk is `<slug>-<tag>`,
-or `<slug>-2` when that alias is taken, and a later import replaces that file.
+or `<slug>-2` when that alias is taken, and a later import replaces that
+file. A host whose chosen name is that spelling is left as it is.
 
 `collect` is the maintainer path. It copies one commit to each machine in
 COLLECT_HOSTS in turn, waits for room under `quest gate` and for any lease it
@@ -2262,7 +2263,11 @@ def different_machine(previous, host):
 
 
 def numeric_disambiguation(stem, name):
-    """True when `stem` is the `<name>-N` form `collided_host_name` would emit."""
+    """True when `stem` is the `<name>-N` spelling `collided_host_name` would emit.
+
+    Spelling alone is not ownership: a caller may have chosen that name with
+    `--host`.
+    """
     match = re.fullmatch(r"(.+)-([0-9]+)", stem)
     if not match or match.group(2).startswith("0"):
         return False
@@ -2272,11 +2277,9 @@ def numeric_disambiguation(stem, name):
     return _suffixed(name, f"-{number}") == stem
 
 
-def owned_disambiguation(stem, name, tag):
-    """A file this import created because `name` belonged to another machine."""
-    if tag and stem == _suffixed(name, f"-{tag}"):
-        return True
-    return numeric_disambiguation(stem, name)
+def generated_alias(host, name):
+    """True when this import created the file because `name` was taken."""
+    return isinstance(host, dict) and host.get("alias_of") == name
 
 
 def disambiguation_rank(stem, name, tag):
@@ -2310,28 +2313,20 @@ def assign_import_name(name, host, existing):
 
     A free name is that name, even when another file carries the same tag.
     The same machine replaces its own file. A different machine that wants a
-    taken name reuses the disambiguation already created for this tag, or
-    gets `collided_host_name`.
+    taken name reuses the file this import already created for that name, or
+    gets `collided_host_name`. A chosen name that merely looks like `<name>-N`
+    is not that file.
     """
     tag = machine_tag_of(host)
     if name not in existing or not different_machine(existing[name], host):
         return name
-    if tag:
-        found = [
-            stem
-            for stem in existing
-            if machine_tag_of(existing[stem]) == tag and owned_disambiguation(stem, name, tag)
-        ]
-        if found:
-            return min(found, key=lambda stem: disambiguation_rank(stem, name, tag))
-    else:
-        found = [
-            stem
-            for stem in existing
-            if not machine_tag_of(existing[stem]) and numeric_disambiguation(stem, name)
-        ]
-        if found:
-            return min(found, key=lambda stem: disambiguation_rank(stem, name, ""))
+    found = [
+        stem
+        for stem, body in existing.items()
+        if generated_alias(body, name) and (machine_tag_of(body) == tag if tag else not machine_tag_of(body))
+    ]
+    if found:
+        return min(found, key=lambda stem: disambiguation_rank(stem, name, tag))
     return collided_host_name(name, tag, set(existing))
 
 
@@ -2359,12 +2354,18 @@ def import_hosts(directory):
             continue
         dest = assign_import_name(name, host, existing)
         creating = dest not in existing
-        if dest == name:
+        if dest == name and "alias_of" not in host:
             shutil.copy(os.path.join(directory, f"{name}.json"), os.path.join(DATA_DIR, f"{name}.json"))
             existing[dest] = host
         else:
+            # `alias_of` marks a name this import invented. A chosen host of
+            # the same spelling has no such mark, so a later import leaves it.
             body = dict(host)
             body["host"] = dest
+            if dest == name:
+                body.pop("alias_of", None)
+            else:
+                body["alias_of"] = name
             with open(os.path.join(DATA_DIR, f"{dest}.json"), "w") as f:
                 json.dump(body, f, indent=1)
                 f.write("\n")
