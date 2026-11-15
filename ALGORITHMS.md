@@ -128,9 +128,11 @@ with portable Rust in place of the assembly armv7 runs regardless.
   16-word and 32-word products. Linux selects the narrow schedules only when
   every online core is Cortex-A72, Cortex-A76, or Neoverse N1. Apple, Neoverse
   V1, V2, V3, and N2, Cobalt 100, a mixed list, and a core rind does not
-  recognise keep the `_alt` schedules. A sandbox that cannot read
-  `/proc/cpuinfo`, Android, and Windows on ARM do too: they never see a part
-  list, so they do not switch to the narrow schedules. Each imported narrow
+  recognise keep the `_alt` schedules. The part list is opened only when a
+  schedule that has a narrow twin is first used, not when AES, SHA, or NEON
+  is checked. A sandbox that cannot read `/proc/cpuinfo`, Android, and
+  Windows on ARM never see a part list, so they do not switch to the narrow
+  schedules. Each imported narrow
   routine has a HOL Light correctness proof that embeds that object's bytes.
   `admin/prove-bytes` checks those bytes against the routine's `asm!` block
   in rind's release build, the comparison
