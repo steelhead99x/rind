@@ -2274,6 +2274,15 @@ def generated_alias(host, name):
     return isinstance(host, dict) and host.get("alias_of") == name
 
 
+def same_machine_alias(body, name, tag):
+    """True when `body` is this machine's generated alias for `name`."""
+    if not generated_alias(body, name):
+        return False
+    if tag:
+        return machine_tag_of(body) == tag
+    return not machine_tag_of(body)
+
+
 def disambiguation_rank(stem, name, tag):
     """Prefer the tag alias, then the lowest numeric suffix."""
     if tag and stem == _suffixed(name, f"-{tag}"):
@@ -2300,28 +2309,32 @@ def collided_host_name(slug, tag, taken):
         n += 1
 
 
-def assign_import_name(name, host, existing, incoming=()):
+def assign_import_name(name, host, existing, incoming=None):
     """Where to put `host`.
 
     A free name is that name, even when another file carries the same tag.
     The same machine replaces its own file. A different machine that wants a
-    taken name reuses the file this import already created for that name, or
-    gets `collided_host_name`. Names still waiting in this collection count
-    as taken for that choice, so the alias is not a file the collection is
+    taken name reuses the file this import already created for that name,
+    including one still waiting in this collection, or gets
+    `collided_host_name`. Other filenames in the collection count as taken
+    for that choice, so the alias is not a chosen host the collection is
     about to copy. A chosen name that merely looks like `<name>-N` is not
     that file.
     """
+    incoming = incoming or {}
     tag = machine_tag_of(host)
     if name not in existing or not different_machine(existing[name], host):
         return name
-    found = [
+    found = {
         stem
-        for stem, body in existing.items()
-        if generated_alias(body, name) and (machine_tag_of(body) == tag if tag else not machine_tag_of(body))
-    ]
+        for records in (existing, incoming)
+        for stem, body in records.items()
+        if stem != name and same_machine_alias(body, name, tag)
+    }
     if found:
         return min(found, key=lambda stem: disambiguation_rank(stem, name, tag))
-    return collided_host_name(name, tag, set(existing) | set(incoming))
+    reserved = {stem for stem, body in incoming.items() if not same_machine_alias(body, name, tag)}
+    return collided_host_name(name, tag, set(existing) | reserved)
 
 
 def import_hosts(directory):
@@ -2330,8 +2343,9 @@ def import_hosts(directory):
     A free name stays that name. A later result from the same machine replaces
     the file this import already gave it. A different machine with the same
     slug is stored beside it, as `<slug>-<tag>`, or `<slug>-2` when that alias
-    is taken. Filenames still in the collection count as taken for that choice,
-    so the alias is not a file this same import is about to copy.
+    is taken. Other filenames in the collection count as taken for that choice.
+    A file in the collection that is already this machine's generated alias is
+    the destination, not a second host.
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     existing = {}
@@ -2341,8 +2355,9 @@ def import_hosts(directory):
             continue
         existing[stem] = read_host(path, stem)
     incoming = load_hosts(directory)
-    # Every filename in this collection is taken for alias allocation, including
-    # ones not copied yet. The free-name check still looks only at `existing`.
+    # Chosen filenames in this collection are taken for alias allocation.
+    # A marked alias of another result in the collection is that result's
+    # destination, so it is not copied again and does not lose `alias_of`.
     for name, host in incoming.items():
         if host.get("status") != "ok":
             print(
@@ -2350,20 +2365,30 @@ def import_hosts(directory):
                 file=sys.stderr,
             )
             continue
-        dest = assign_import_name(name, host, existing, set(incoming))
+        target = host.get("alias_of")
+        if (
+            isinstance(target, str)
+            and target in incoming
+            and target != name
+            and incoming[target].get("status") == "ok"
+            and same_machine_alias(host, target, machine_tag_of(incoming[target]))
+        ):
+            continue
+        dest = assign_import_name(name, host, existing, incoming)
         creating = dest not in existing
         if dest == name and "alias_of" not in host:
             shutil.copy(os.path.join(directory, f"{name}.json"), os.path.join(DATA_DIR, f"{name}.json"))
             existing[dest] = host
         else:
             # `alias_of` marks a name this import invented. A chosen host of
-            # the same spelling has no such mark, so a later import leaves it.
+            # the same spelling has no such mark. A file stored under its own
+            # alias name keeps the mark.
             body = dict(host)
             body["host"] = dest
-            if dest == name:
-                body.pop("alias_of", None)
-            else:
+            if dest != name:
                 body["alias_of"] = name
+            elif body.get("alias_of") == name:
+                body.pop("alias_of", None)
             with open(os.path.join(DATA_DIR, f"{dest}.json"), "w") as f:
                 json.dump(body, f, indent=1)
                 f.write("\n")
