@@ -274,6 +274,13 @@ fn read32(bytes: &[u8], at: usize) -> u32 {
     u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
 }
 
+// The aws-lc call is `unsafe`, and this file's carry checks are
+// `debug_assert`s. `low::tests::no_debug_assert_beside_unsafe` rejects a
+// file that has both, so the call lives next to this one.
+#[cfg(all(test, not(any(miri, target_family = "wasm"))))]
+#[path = "poly1305_32_aws.rs"]
+mod aws;
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -531,17 +538,10 @@ mod tests {
 
     #[cfg(not(any(miri, target_family = "wasm")))]
     fn aws_lc_tag(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
-        let mut state = [0u8; 512];
-        let mut mac = [0u8; 16];
-        let state_ptr = (&mut state as *mut [u8; 512]).cast::<aws_lc_sys::poly1305_state>();
-        // SAFETY: `state` is the 512-byte `poly1305_state`, `key` is 32 bytes,
-        // and `msg` is the length passed with it. aws-lc writes 16 tag bytes.
-        unsafe {
-            aws_lc_sys::CRYPTO_poly1305_init(state_ptr, key.as_ptr());
-            aws_lc_sys::CRYPTO_poly1305_update(state_ptr, msg.as_ptr(), msg.len());
-            aws_lc_sys::CRYPTO_poly1305_finish(state_ptr, mac.as_mut_ptr());
-        }
-        mac
+        // The `unsafe` call is a sibling module, so this file can keep its
+        // `debug_assert`s. `no_debug_assert_beside_unsafe` rejects both in
+        // one file.
+        aws::tag(key, msg)
     }
 
     /// SplitMix64, for reproducible random cases.
