@@ -30,7 +30,6 @@ use crate::low::macros::*;
 // Transliterated from s2n-bignum's x86/mldsa/mldsa_decompose_88.S.
 /// Coefficient decomposition for ML-DSA-44 (GAMMA2 = (Q-1)/88 = 95232)
 ///
-///
 /// For each coefficient c of the input polynomial (assumed to be a standard
 /// unsigned canonical representative, i.e. 0 <= c < Q), compute high and low
 /// bits c1, c0 such that c = c1*ALPHA + c0 with -ALPHA/2 < c0 <= ALPHA/2,

@@ -2,7 +2,8 @@
 
 //! AES through the module agrees with rind's, which its own tests check
 //! against Wycheproof and aws-lc-rs: the block cipher, CTR, CBC, key
-//! wrapping, QUIC header protection, and AES-GCM opening what rind seals.
+//! wrapping, QUIC header protection, and AES-GCM: opening what rind seals,
+//! and sealing what rind opens.
 #![cfg(rind_fips_module)]
 
 use rind_fips::{Error, aead, cipher, hkdf, key_wrap};
@@ -599,4 +600,213 @@ fn hkdf_derives_the_keys_rind_does() {
             }
         }
     }
+}
+
+#[test]
+fn randomized_nonce_key_seals_what_rind_opens() {
+    for (ours, theirs) in AEADS {
+        for len in 0..=33 {
+            let key = bytes("key", len);
+            same(
+                &aead::RandomizedNonceKey::new(ours, &key),
+                &rind::aead::Key::new(theirs, &key),
+            );
+        }
+
+        let key_value = bytes("key", ours.key_len());
+        let key = aead::RandomizedNonceKey::new(ours, &key_value).unwrap();
+        let reference = rind::aead::Key::new(theirs, &key_value).unwrap();
+        assert!(format!("{key:?}").starts_with("RandomizedNonceKey { algorithm: Aes"));
+        let mut nonces = std::collections::HashSet::new();
+        for len in LENGTHS {
+            for aad_len in [0, 1, 16, 17] {
+                let plaintext = bytes("plaintext", len);
+                let aad = bytes("aad", aad_len);
+                let mut sealed = plaintext.clone();
+                let nonce = key.seal_in_place_append_tag(&aad, &mut sealed).unwrap();
+                let n: [u8; 12] = nonce.as_ref().try_into().unwrap();
+                assert!(nonces.insert(n), "a nonce repeated");
+
+                // rind opens it under the nonce returned.
+                let mut opened = sealed.clone();
+                let theirs_nonce = rind::aead::Nonce::assume_unique_for_key(n);
+                assert_eq!(
+                    reference
+                        .open_in_place(theirs_nonce, &aad, &mut opened)
+                        .unwrap(),
+                    plaintext
+                );
+
+                // The key opens it too, under the nonce as received, and
+                // refuses a flipped byte or another nonce.
+                let mut opened = sealed.clone();
+                assert_eq!(
+                    key.open_in_place(aead::RandomNonce::from(n), &aad, &mut opened)
+                        .unwrap(),
+                    plaintext
+                );
+                let mut flipped = sealed.clone();
+                *flipped.last_mut().unwrap() ^= 1;
+                assert_eq!(
+                    key.open_in_place(nonce, &aad, &mut flipped),
+                    Err(Error::DecryptFailed)
+                );
+                let mut other = n;
+                other[0] ^= 1;
+                let mut opened = sealed.clone();
+                assert_eq!(
+                    key.open_in_place(aead::RandomNonce::from(other), &aad, &mut opened),
+                    Err(Error::DecryptFailed)
+                );
+
+                // A separate tag is the one rind seals under the same nonce.
+                let mut separate = plaintext.clone();
+                let (nonce, tag) = key.seal_in_place_separate_tag(&aad, &mut separate).unwrap();
+                let n: [u8; 12] = nonce.as_ref().try_into().unwrap();
+                assert!(nonces.insert(n), "a nonce repeated");
+                let mut expected = plaintext.clone();
+                let expected_tag = reference
+                    .seal_in_place_separate_tag(
+                        rind::aead::Nonce::assume_unique_for_key(n),
+                        &aad,
+                        &mut expected,
+                    )
+                    .unwrap();
+                assert_eq!(separate, expected);
+                assert_eq!(tag.as_ref(), expected_tag.as_ref());
+            }
+        }
+
+        let mut short = [0xaa; 15];
+        assert_eq!(
+            key.open_in_place(aead::RandomNonce::from([0; 12]), &[], &mut short),
+            Err(Error::DecryptFailed)
+        );
+        assert_eq!(short, [0xaa; 15]);
+    }
+}
+
+/// TLS 1.3's nonce for `seq` (RFC 8446 section 5.3).
+fn tls13_nonce(iv: [u8; 12], seq: u64) -> aead::Nonce {
+    aead::Nonce::from_sequence(&iv, seq)
+}
+
+#[test]
+fn tls_record_sealing_key_seals_as_rind_does() {
+    use aead::{TlsProtocolId, TlsRecordSealingKey};
+
+    for (ours, theirs) in AEADS {
+        for len in 0..=33 {
+            let key = bytes("key", len);
+            let result = TlsRecordSealingKey::new(ours, TlsProtocolId::TLS13, &key);
+            if ours.key_len() == 24 {
+                // No TLS 1.3 cipher suite is AES-192-GCM.
+                assert_eq!(result.err(), Some(Error::Unsupported));
+            } else {
+                same(&result, &rind::aead::Key::new(theirs, &key));
+            }
+        }
+        if ours.key_len() == 24 {
+            continue;
+        }
+
+        let key_value = bytes("key", ours.key_len());
+        let reference = rind::aead::Key::new(theirs, &key_value).unwrap();
+        let iv: [u8; 12] = bytes("iv", 12).try_into().unwrap();
+        let mut key = TlsRecordSealingKey::new(ours, TlsProtocolId::TLS13, &key_value).unwrap();
+        assert!(format!("{key:?}").starts_with("TlsRecordSealingKey { algorithm: Aes"));
+
+        // Sequence numbers that increase, skipping some, seal as rind does;
+        // each one not above the last, or the one that would wrap, is
+        // refused, zeroing the record.
+        let steps = [
+            (0, true),
+            (0, false),
+            (1, true),
+            (5, true),
+            (5, false),
+            (3, false),
+            (6, true),
+            (u64::MAX, false),
+            (u64::MAX - 1, true),
+            (u64::MAX - 1, false),
+            (u64::MAX, false),
+            (7, false),
+        ];
+        for (i, (seq, sealed)) in steps.into_iter().enumerate() {
+            let plaintext = bytes(&format!("record {i}"), i * 7);
+            let aad = bytes(&format!("header {i}"), 5);
+            let mut ours_out = plaintext.clone();
+            let result = match i % 2 {
+                0 => key.seal_in_place_append_tag(tls13_nonce(iv, seq), &aad, &mut ours_out),
+                _ => key
+                    .seal_in_place_separate_tag(tls13_nonce(iv, seq), &aad, &mut ours_out)
+                    .map(|tag| ours_out.extend_from_slice(tag.as_ref())),
+            };
+            if !sealed {
+                assert_eq!(result, Err(Error::MessageLimitReached), "seq {seq}");
+                assert_eq!(ours_out, vec![0; plaintext.len()]);
+                continue;
+            }
+            result.unwrap();
+            let mut theirs_nonce = [0; 12];
+            theirs_nonce[4..].copy_from_slice(&seq.to_be_bytes());
+            for (n, v) in theirs_nonce.iter_mut().zip(iv) {
+                *n ^= v;
+            }
+            let mut theirs_out = plaintext.clone();
+            reference
+                .seal_in_place_append_tag(
+                    rind::aead::Nonce::assume_unique_for_key(theirs_nonce),
+                    &aad,
+                    &mut theirs_out,
+                )
+                .unwrap();
+            assert_eq!(ours_out, theirs_out, "seq {seq}");
+        }
+    }
+
+    // The first nonce is taken for the IV, so it is sequence number 0
+    // whatever it is.
+    let mut key =
+        TlsRecordSealingKey::new(&aead::AES_128_GCM, TlsProtocolId::TLS13, &[1; 16]).unwrap();
+    let mut record = Vec::new();
+    for seq in [0, 1] {
+        key.seal_in_place_append_tag(tls13_nonce([9; 12], seq), b"", &mut record)
+            .unwrap();
+    }
+    assert_eq!(
+        key.seal_in_place_append_tag(tls13_nonce([9; 12], 0), b"", &mut record),
+        Err(Error::MessageLimitReached)
+    );
+}
+
+/// The break build lowers a randomized-nonce key's limit from 2^32 seals
+/// to 2^10, so this reaches it.
+#[cfg(feature = "__break_tests")]
+#[test]
+fn randomized_nonce_key_stops_at_its_limit() {
+    let key = aead::RandomizedNonceKey::new(&aead::AES_128_GCM, &[3; 16]).unwrap();
+    let mut last = None;
+    for i in 0..1 << 10 {
+        let mut in_out = vec![i as u8];
+        let nonce = key.seal_in_place_append_tag(b"", &mut in_out).unwrap();
+        last = Some((nonce, in_out));
+    }
+    let mut in_out = b"one too many".to_vec();
+    assert_eq!(
+        key.seal_in_place_append_tag(b"", &mut in_out).err(),
+        Some(Error::MessageLimitReached)
+    );
+    assert_eq!(in_out, [0; 12]);
+    assert_eq!(
+        key.seal_in_place_separate_tag(b"", &mut in_out).err(),
+        Some(Error::MessageLimitReached)
+    );
+
+    // It still opens, and a new key seals again.
+    let (nonce, mut sealed) = last.unwrap();
+    assert_eq!(key.open_in_place(nonce, b"", &mut sealed).unwrap(), [0xff]);
+    let key = aead::RandomizedNonceKey::new(&aead::AES_128_GCM, &[3; 16]).unwrap();
+    key.seal_in_place_append_tag(b"", &mut in_out).unwrap();
 }

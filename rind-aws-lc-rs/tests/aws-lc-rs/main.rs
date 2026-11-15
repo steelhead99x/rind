@@ -24,6 +24,34 @@ mod ed25519_tests;
 mod hkdf_test;
 mod hmac_test;
 mod pbkdf2_test;
+mod pqdsa_test;
 mod quic_test;
 mod rand_test;
 mod rsa_test;
+
+// aws-lc-rs's tests kept beside its code in `src/`, each at its path there.
+mod unit {
+    mod aead;
+    mod agreement;
+    mod cipher;
+    mod digest;
+    mod ec;
+    mod ed25519;
+    mod error;
+    mod hkdf;
+    mod hmac;
+    mod iv;
+    mod kem;
+    mod key_wrap;
+    mod lib;
+    mod pbkdf2;
+    mod pqdsa;
+    mod rand;
+    mod rsa;
+    mod signature;
+
+    // Stands in for the `regex` crate in the `Debug` checks that used it.
+    fn is_lower_hex(s: &str) -> bool {
+        !s.is_empty() && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    }
+}

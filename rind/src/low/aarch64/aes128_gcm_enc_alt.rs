@@ -17,10 +17,10 @@ use crate::low::macros::*;
 // outputs out[len_bits/8], tag[2], ivec[16], returns bytes processed
 //
 //    extern uint64_t aes128_gcm_enc_alt(const uint8_t *in, uint64_t len_bits,
-//                                            uint8_t *out, uint64_t *tag,
-//                                            uint8_t *ivec,
-//                                            const s2n_bignum_AES_KEY *key,
-//                                            const uint64_t *htable);
+//                                       uint8_t *out, uint64_t *tag,
+//                                       uint8_t *ivec,
+//                                       const s2n_bignum_AES_KEY *key,
+//                                       const uint64_t *htable);
 //
 // Processes the input "in" of "len_bits" bits under AES-128 in GCM mode: each
 // 16-byte block is encrypted in counter mode using the counter block "ivec"
@@ -37,13 +37,18 @@ use crate::low::macros::*;
 // the caller's responsibility, as in AWS-LC's GCM layer, whose
 // crypto/fipsmodule/modes/gcm.c passes whole blocks only.
 //
-// The table "htable" is the twelve 16-byte entries (192 bytes) that
-// gcm_init_v8 writes at the start of its Htable, derived from the subkey
-// H = AES_K(0^128). They hold, in order, H, m(H,H^2), H^2, H^3, m(H^3,H^4),
-// H^4, H^5, m(H^5,H^6), H^6, H^7, m(H^7,H^8), H^8, where the powers are in
-// the bit-reflected ("twisted") representation that gcm_init_v8 uses and
-// m(A,B) packs the Karatsuba middle terms A.lo ^ A.hi (low 64 bits) and
-// B.lo ^ B.hi (high 64 bits) of two neighbouring powers into one entry. The
+// The table "htable" is the twelve 16-byte entries (192 bytes) that AWS-LC's
+// gcm_init_v8 (crypto/fipsmodule/modes/asm/ghashv8-armx.pl) writes at the
+// start of its Htable, derived from the subkey H = AES_K(0^128). They hold, in
+// order, H, m(H,H^2), H^2, H^3, m(H^3,H^4), H^4, H^5, m(H^5,H^6), H^6, H^7,
+// m(H^7,H^8), H^8, where the powers are in the bit-reflected ("twisted")
+// representation that gcm_init_v8 uses and m(A,B) packs the Karatsuba middle
+// terms A.lo ^ A.hi (low 64 bits) and B.lo ^ B.hi (high 64 bits) of two
+// neighbouring powers into one entry. Since AWS-LC commit 90315e2a ("AES-GCM
+// AArch64: Store swapped Htable values") gcm_init_v8 stores each power with
+// its two 64-bit halves swapped, so tables built by OpenSSL's or BoringSSL's
+// gcm_init_v8, or by earlier versions of AWS-LC, give wrong tags. The exact
+// contents required are htable_mem_8 in arm/proofs/utils/aes_gcm_spec.ml. The
 // reference implementation in tests/ref_aes_gcm.c (ref_gcm_init_htable)
 // constructs the same table independently.
 // Of "key" only the 11 round keys (176 bytes) are read, not key->rounds, and
@@ -52,29 +57,39 @@ use crate::low::macros::*;
 // The input must satisfy in + len_bits/8 < 2^63, because the loop control
 // compares the input pointer with the main-loop end pointer as signed
 // integers (cmp x0, x5 followed by b.ge or b.lt). The buffers written ("out",
-// "tag" and "ivec") must not overlap each other, "in", "key" or "htable"; in
-// particular, in-place operation (out == in) is not covered by the proof.
+// "tag" and "ivec") must not overlap each other, "key" or "htable", and "tag"
+// and "ivec" must not overlap "in". The output may be the input itself
+// (in-place operation, out == in); otherwise "out" must not overlap "in".
 //
-// This routine does not enforce the NIST GCM message limit.
-// Callers must ensure the cumulative message length does not exceed 2^36 - 32 bytes (2^39 - 256 bits).
+// This is an alternative to aes128_gcm_enc with the same arguments, for
+// processors with FEAT_SHA3, whose eor3 it uses. Unlike aes128_gcm_enc it
+// reads the whole 192-byte table, not just its first 96 bytes, it requires
+// in + len_bits/8 < 2^63, and when len_bits is not a multiple of 128 it
+// returns 0 without touching memory, where aes128_gcm_enc processes the
+// whole blocks.
+//
+// This routine does not enforce the NIST GCM message limit. Callers must
+// ensure the cumulative message length does not exceed 2^36 - 32 bytes
+// (2^39 - 256 bits).
 //
 // Standard ARM ABI: X0 = in, X1 = len_bits, X2 = out, X3 = tag, X4 = ivec,
 //                   X5 = key, X6 = htable, returns X0
 // ----------------------------------------------------------------------------
 
 // Origin: aes256_gcm_enc_alt reduced to AES-128, from s2n-bignum commit
-// 330672965f9ee29eaa27df14c484806d7b8ef0bc. It retains that kernel's schedule
-// and optimizations, with ten AES rounds and eleven round keys instead of
-// fourteen rounds and fifteen keys. Its schedule is not the output of
-// AWS-LC's aesv8_gcm_8x_enc_128.
+// 330672965f9ee29eaa27df14c484806d7b8ef0bc. It retains that kernel's counter
+// setup, initial AES setup, tails and small-input optimizations, with ten
+// AES rounds and eleven round keys instead of fourteen rounds and fifteen
+// keys. The pipelined bulk GHASH/AES loop uses the native instruction order
+// of AWS-LC's aesv8_gcm_8x_enc_128 from aesv8-gcm-armv8-unroll8.pl.
 //
 // The AES-256 kernel derives from the OpenSSL generator carried by AWS-LC
 // as crypto/fipsmodule/modes/asm/aesv8-gcm-armv8-unroll8.pl (the linux64
 // aesv8_gcm_8x_enc_256 output). That kernel already includes these changes:
 //  - Entry: a whole-blocks guard (tst x1, #127; b.ne L128_enc_ret) follows
 //    the zero-length check (cbz x1, L128_enc_ret) and precedes the d8-d15
-//    saves, so the reject path returns 0 having touched no memory unless
-//    len_bits is a nonzero multiple of 128.
+//    saves, so unless len_bits is a nonzero multiple of 128 the function
+//    returns 0 having touched no memory.
 //  - Final block: the partial-block masking machinery at
 //    L128_enc_blocks_less_than_1 is removed as dead under the whole-blocks
 //    contract, including the ld1 that reads existing output bytes (a 16-byte
@@ -82,14 +97,19 @@ use crate::low::macros::*;
 //    final block is a plain full block, and the output buffer is never read.
 //    The AWS-LC caller already satisfies the contract: its
 //    crypto/fipsmodule/modes/gcm.c masks the length to whole blocks.
-//  - The counter setup, pipelined GHASH/AES body, exact-eight drain and
-//    fused one-to-four-block path are rescheduled for speed. This kernel
-//    keeps those optimizations while reducing the AES round schedule.
+//  - Inputs of 1 to 4 blocks take a separate path (L128_enc_small), and the
+//    tail has dedicated GHASH drains for exactly 8 and exactly 2 remaining
+//    blocks (L128_enc_exact8_drain, L128_enc_rem2_drain) and for the last
+//    four of 4 to 7 remaining blocks (L128_enc_rem4_drain).
+//  - The counter setup, exact-eight drain and fused one-to-four-block path
+//    retain the reduced AES-256 kernel's optimizations. The pipelined bulk
+//    GHASH/AES loop follows AWS-LC's native AES-128 instruction order.
+// Proofs: arm/proofs/aes128_gcm_enc_alt.ml.
 
 // Transliterated from s2n-bignum's arm/aes_gcm/aes128_gcm_enc_alt.S.
 /// AES-128-GCM bulk encryption, 8 blocks at a time: counter-mode encryption of
-///
 /// whole blocks with the GHASH tag update
+///
 /// Inputs in[len_bits/8], len_bits, tag[2], ivec[16], key[176], htable[24];
 /// outputs out[len_bits/8], tag[2], ivec[16], returns bytes processed
 ///
@@ -108,13 +128,18 @@ use crate::low::macros::*;
 /// the caller's responsibility, as in AWS-LC's GCM layer, whose
 /// crypto/fipsmodule/modes/gcm.c passes whole blocks only.
 ///
-/// The table "htable" is the twelve 16-byte entries (192 bytes) that
-/// gcm_init_v8 writes at the start of its Htable, derived from the subkey
-/// H = AES_K(0^128). They hold, in order, H, m(H,H^2), H^2, H^3, m(H^3,H^4),
-/// H^4, H^5, m(H^5,H^6), H^6, H^7, m(H^7,H^8), H^8, where the powers are in
-/// the bit-reflected ("twisted") representation that gcm_init_v8 uses and
-/// m(A,B) packs the Karatsuba middle terms A.lo ^ A.hi (low 64 bits) and
-/// B.lo ^ B.hi (high 64 bits) of two neighbouring powers into one entry. The
+/// The table "htable" is the twelve 16-byte entries (192 bytes) that AWS-LC's
+/// gcm_init_v8 (crypto/fipsmodule/modes/asm/ghashv8-armx.pl) writes at the
+/// start of its Htable, derived from the subkey H = AES_K(0^128). They hold, in
+/// order, H, m(H,H^2), H^2, H^3, m(H^3,H^4), H^4, H^5, m(H^5,H^6), H^6, H^7,
+/// m(H^7,H^8), H^8, where the powers are in the bit-reflected ("twisted")
+/// representation that gcm_init_v8 uses and m(A,B) packs the Karatsuba middle
+/// terms A.lo ^ A.hi (low 64 bits) and B.lo ^ B.hi (high 64 bits) of two
+/// neighbouring powers into one entry. Since AWS-LC commit 90315e2a ("AES-GCM
+/// AArch64: Store swapped Htable values") gcm_init_v8 stores each power with
+/// its two 64-bit halves swapped, so tables built by OpenSSL's or BoringSSL's
+/// gcm_init_v8, or by earlier versions of AWS-LC, give wrong tags. The exact
+/// contents required are htable_mem_8 in arm/proofs/utils/aes_gcm_spec.ml. The
 /// reference implementation in tests/ref_aes_gcm.c (ref_gcm_init_htable)
 /// constructs the same table independently.
 /// Of "key" only the 11 round keys (176 bytes) are read, not key->rounds, and
@@ -123,11 +148,20 @@ use crate::low::macros::*;
 /// The input must satisfy in + len_bits/8 < 2^63, because the loop control
 /// compares the input pointer with the main-loop end pointer as signed
 /// integers (cmp x0, x5 followed by b.ge or b.lt). The buffers written ("out",
-/// "tag" and "ivec") must not overlap each other, "in", "key" or "htable"; in
-/// particular, in-place operation (out == in) is not covered by the proof.
+/// "tag" and "ivec") must not overlap each other, "key" or "htable", and "tag"
+/// and "ivec" must not overlap "in". The output may be the input itself
+/// (in-place operation, out == in); otherwise "out" must not overlap "in".
 ///
-/// This routine does not enforce the NIST GCM message limit.
-/// Callers must ensure the cumulative message length does not exceed 2^36 - 32 bytes (2^39 - 256 bits).
+/// This is an alternative to aes128_gcm_enc with the same arguments, for
+/// processors with FEAT_SHA3, whose eor3 it uses. Unlike aes128_gcm_enc it
+/// reads the whole 192-byte table, not just its first 96 bytes, it requires
+/// in + len_bits/8 < 2^63, and when len_bits is not a multiple of 128 it
+/// returns 0 without touching memory, where aes128_gcm_enc processes the
+/// whole blocks.
+///
+/// This routine does not enforce the NIST GCM message limit. Callers must
+/// ensure the cumulative message length does not exceed 2^36 - 32 bytes
+/// (2^39 - 256 bits).
 #[inline(never)]
 #[target_feature(enable = "aes,sha3")]
 pub(crate) unsafe fn aes128_gcm_enc_alt(
@@ -381,279 +415,279 @@ pub(crate) unsafe fn aes128_gcm_enc_alt(
         Q!("    b.ge            " Label!("L128_enc_prepretail", 5, After)),
 
         Q!(Label!("L128_enc_main_loop", 6) ":"),
-        Q!("    ldp             " "q26, q27, [x11]"),
         Q!("    rev32           " "v5.16b, v30.16b"),
-        Q!("    add             " "v30.4s, v30.4s, v31.4s"),
-        Q!("    ldr             " "q21, [x6, #112]"),
-        Q!("    ldr             " "q24, [x6, #160]"),
-        Q!("    rev64           " "v11.16b, v11.16b"),
         Q!("    ldr             " "q20, [x6, #96]"),
         Q!("    ldr             " "q22, [x6, #128]"),
-        Q!("    rev64           " "v9.16b, v9.16b"),
-        Q!("    rev32           " "v6.16b, v30.16b"),
         Q!("    add             " "v30.4s, v30.4s, v31.4s"),
+        Q!("    rev64           " "v9.16b, v9.16b"),
         Q!("    rev64           " "v8.16b, v8.16b"),
-        Q!("    rev64           " "v12.16b, v12.16b"),
-        Q!("    ext             " "v19.16b, v19.16b, v19.16b, #8"),
         Q!("    ldr             " "q23, [x6, #144]"),
         Q!("    ldr             " "q25, [x6, #176]"),
-        Q!("    aese            " "v3.16b, v26.16b"),
-        Q!("    aesmc           " "v3.16b, v3.16b"),
-        Q!("    aese            " "v5.16b, v26.16b"),
-        Q!("    aesmc           " "v5.16b, v5.16b"),
-        Q!("    rev32           " "v7.16b, v30.16b"),
-        Q!("    aese            " "v0.16b, v26.16b"),
-        Q!("    aesmc           " "v0.16b, v0.16b"),
-        Q!("    aese            " "v1.16b, v26.16b"),
-        Q!("    aesmc           " "v1.16b, v1.16b"),
-        Q!("    aese            " "v6.16b, v26.16b"),
-        Q!("    aesmc           " "v6.16b, v6.16b"),
-        Q!("    aese            " "v7.16b, v26.16b"),
-        Q!("    aesmc           " "v7.16b, v7.16b"),
-        Q!("    aese            " "v2.16b, v26.16b"),
-        Q!("    aesmc           " "v2.16b, v2.16b"),
-        Q!("    aese            " "v4.16b, v26.16b"),
-        Q!("    aesmc           " "v4.16b, v4.16b"),
-        Q!("    ldp             " "q28, q26, [x11, #32]"),
-        Q!("    eor             " "v8.16b, v8.16b, v19.16b"),
-        Q!("    aese            " "v6.16b, v27.16b"),
-        Q!("    aesmc           " "v6.16b, v6.16b"),
-        Q!("    aese            " "v2.16b, v27.16b"),
-        Q!("    aesmc           " "v2.16b, v2.16b"),
-        Q!("    aese            " "v1.16b, v27.16b"),
-        Q!("    aesmc           " "v1.16b, v1.16b"),
-        Q!("    aese            " "v0.16b, v27.16b"),
-        Q!("    aesmc           " "v0.16b, v0.16b"),
-        Q!("    aese            " "v4.16b, v27.16b"),
-        Q!("    aesmc           " "v4.16b, v4.16b"),
-        Q!("    aese            " "v3.16b, v27.16b"),
-        Q!("    aesmc           " "v3.16b, v3.16b"),
-        Q!("    aese            " "v5.16b, v27.16b"),
-        Q!("    aesmc           " "v5.16b, v5.16b"),
-        Q!("    pmull2          " "v17.1q, v8.2d, v25.2d"),
-        Q!("    pmull           " "v19.1q, v8.1d, v25.1d"),
-        Q!("    pmull2          " "v16.1q, v9.2d, v23.2d"),
-        Q!("    trn1            " "v18.2d, v9.2d, v8.2d"),
-        Q!("    trn2            " "v8.2d, v9.2d, v8.2d"),
-        Q!("    aese            " "v7.16b, v27.16b"),
-        Q!("    aesmc           " "v7.16b, v7.16b"),
-        Q!("    aese            " "v1.16b, v28.16b"),
-        Q!("    aesmc           " "v1.16b, v1.16b"),
-        Q!("    aese            " "v5.16b, v28.16b"),
-        Q!("    aesmc           " "v5.16b, v5.16b"),
-        Q!("    aese            " "v6.16b, v28.16b"),
-        Q!("    aesmc           " "v6.16b, v6.16b"),
-        Q!("    aese            " "v2.16b, v28.16b"),
-        Q!("    aesmc           " "v2.16b, v2.16b"),
-        Q!("    pmull           " "v23.1q, v9.1d, v23.1d"),
-        Q!("    aese            " "v4.16b, v28.16b"),
-        Q!("    aesmc           " "v4.16b, v4.16b"),
-        Q!("    aese            " "v5.16b, v26.16b"),
-        Q!("    aesmc           " "v5.16b, v5.16b"),
-        Q!("    aese            " "v6.16b, v26.16b"),
-        Q!("    aesmc           " "v6.16b, v6.16b"),
-        Q!("    aese            " "v0.16b, v28.16b"),
-        Q!("    aesmc           " "v0.16b, v0.16b"),
-        Q!("    aese            " "v1.16b, v26.16b"),
-        Q!("    aesmc           " "v1.16b, v1.16b"),
-        Q!("    aese            " "v7.16b, v28.16b"),
-        Q!("    aesmc           " "v7.16b, v7.16b"),
-        Q!("    aese            " "v3.16b, v28.16b"),
-        Q!("    aesmc           " "v3.16b, v3.16b"),
-        Q!("    aese            " "v4.16b, v26.16b"),
-        Q!("    aesmc           " "v4.16b, v4.16b"),
-        Q!("    rev64           " "v14.16b, v14.16b"),
-        Q!("    pmull2          " "v9.1q, v11.2d, v20.2d"),
-        Q!("    aese            " "v3.16b, v26.16b"),
-        Q!("    aesmc           " "v3.16b, v3.16b"),
-        Q!("    ldp             " "q27, q28, [x11, #64]"),
-        Q!("    rev64           " "v10.16b, v10.16b"),
-        Q!("    aese            " "v2.16b, v26.16b"),
-        Q!("    aesmc           " "v2.16b, v2.16b"),
-        Q!("    aese            " "v7.16b, v26.16b"),
-        Q!("    aesmc           " "v7.16b, v7.16b"),
-        Q!("    aese            " "v0.16b, v26.16b"),
-        Q!("    aesmc           " "v0.16b, v0.16b"),
-        Q!("    eor             " "v17.16b, v17.16b, v16.16b"),
-        Q!("    pmull2          " "v29.1q, v10.2d, v22.2d"),
+        Q!("    rev32           " "v6.16b, v30.16b"),
+        Q!("    add             " "v30.4s, v30.4s, v31.4s"),
+        Q!("    ext             " "v19.16b, v19.16b, v19.16b, #8"),
+        Q!("    ldr             " "q21, [x6, #112]"),
+        Q!("    ldr             " "q24, [x6, #160]"),
         Q!("    rev64           " "v13.16b, v13.16b"),
-        Q!("    pmull           " "v20.1q, v11.1d, v20.1d"),
+        Q!("    rev64           " "v11.16b, v11.16b"),
+        Q!("    ldp             " "q26, q27, [x11]"),
+        Q!("    eor             " "v8.16b, v8.16b, v19.16b"),
+        Q!("    rev32           " "v7.16b, v30.16b"),
+        Q!("    rev64           " "v15.16b, v15.16b"),
+        Q!("    pmull2          " "v16.1q, v9.2d, v23.2d"),
+        Q!("    rev64           " "v10.16b, v10.16b"),
+        Q!("    pmull2          " "v17.1q, v8.2d, v25.2d"),
+        Q!("    pmull           " "v23.1q, v9.1d, v23.1d"),
+        Q!("    trn1            " "v18.2d, v9.2d, v8.2d"),
+        Q!("    pmull           " "v19.1q, v8.1d, v25.1d"),
+        Q!("    trn2            " "v8.2d, v9.2d, v8.2d"),
+        Q!("    pmull2          " "v29.1q, v10.2d, v22.2d"),
+        Q!("    pmull2          " "v9.1q, v11.2d, v20.2d"),
         Q!("    eor             " "v19.16b, v19.16b, v23.16b"),
         Q!("    ldr             " "q23, [x6, #48]"),
         Q!("    ldr             " "q25, [x6, #80]"),
-        Q!("    trn1            " "v16.2d, v13.2d, v12.2d"),
-        Q!("    eor3            " "v17.16b, v17.16b, v29.16b, v9.16b"),
-        Q!("    pmull           " "v22.1q, v10.1d, v22.1d"),
-        Q!("    aese            " "v4.16b, v27.16b"),
-        Q!("    aesmc           " "v4.16b, v4.16b"),
-        Q!("    aese            " "v1.16b, v27.16b"),
-        Q!("    aesmc           " "v1.16b, v1.16b"),
-        Q!("    aese            " "v5.16b, v27.16b"),
-        Q!("    aesmc           " "v5.16b, v5.16b"),
-        Q!("    aese            " "v7.16b, v27.16b"),
-        Q!("    aesmc           " "v7.16b, v7.16b"),
-        Q!("    aese            " "v3.16b, v27.16b"),
-        Q!("    aesmc           " "v3.16b, v3.16b"),
-        Q!("    aese            " "v2.16b, v27.16b"),
-        Q!("    aesmc           " "v2.16b, v2.16b"),
-        Q!("    trn1            " "v29.2d, v11.2d, v10.2d"),
-        Q!("    aese            " "v6.16b, v27.16b"),
-        Q!("    aesmc           " "v6.16b, v6.16b"),
-        Q!("    aese            " "v0.16b, v27.16b"),
-        Q!("    aesmc           " "v0.16b, v0.16b"),
-        Q!("    trn2            " "v10.2d, v11.2d, v10.2d"),
-        Q!("    eor             " "v8.16b, v8.16b, v18.16b"),
-        Q!("    ldp             " "q26, q27, [x11, #96]"),
-        Q!("    aese            " "v5.16b, v28.16b"),
-        Q!("    aesmc           " "v5.16b, v5.16b"),
-        Q!("    aese            " "v7.16b, v28.16b"),
-        Q!("    aesmc           " "v7.16b, v7.16b"),
-        Q!("    aese            " "v4.16b, v28.16b"),
-        Q!("    aesmc           " "v4.16b, v4.16b"),
-        Q!("    eor             " "v10.16b, v10.16b, v29.16b"),
-        Q!("    aese            " "v2.16b, v28.16b"),
-        Q!("    aesmc           " "v2.16b, v2.16b"),
-        Q!("    rev64           " "v15.16b, v15.16b"),
-        Q!("    aese            " "v3.16b, v28.16b"),
-        Q!("    aesmc           " "v3.16b, v3.16b"),
-        Q!("    aese            " "v6.16b, v28.16b"),
-        Q!("    aesmc           " "v6.16b, v6.16b"),
-        Q!("    aese            " "v1.16b, v28.16b"),
-        Q!("    aesmc           " "v1.16b, v1.16b"),
-        Q!("    pmull2          " "v29.1q, v10.2d, v21.2d"),
-        Q!("    pmull2          " "v18.1q, v8.2d, v24.2d"),
-        Q!("    aese            " "v0.16b, v28.16b"),
-        Q!("    aesmc           " "v0.16b, v0.16b"),
-        Q!("    pmull           " "v24.1q, v8.1d, v24.1d"),
-        Q!("    aese            " "v4.16b, v26.16b"),
-        Q!("    aesmc           " "v4.16b, v4.16b"),
-        Q!("    aese            " "v2.16b, v26.16b"),
-        Q!("    aesmc           " "v2.16b, v2.16b"),
-        Q!("    aese            " "v6.16b, v26.16b"),
-        Q!("    aesmc           " "v6.16b, v6.16b"),
-        Q!("    aese            " "v1.16b, v26.16b"),
-        Q!("    aesmc           " "v1.16b, v1.16b"),
-        Q!("    aese            " "v7.16b, v26.16b"),
-        Q!("    aesmc           " "v7.16b, v7.16b"),
-        Q!("    eor             " "v18.16b, v18.16b, v24.16b"),
-        Q!("    pmull           " "v21.1q, v10.1d, v21.1d"),
         Q!("    aese            " "v5.16b, v26.16b"),
         Q!("    aesmc           " "v5.16b, v5.16b"),
-        Q!("    eor3            " "v19.16b, v19.16b, v22.16b, v20.16b"),
-        Q!("    aese            " "v3.16b, v26.16b"),
-        Q!("    aesmc           " "v3.16b, v3.16b"),
+        Q!("    aese            " "v1.16b, v26.16b"),
+        Q!("    aesmc           " "v1.16b, v1.16b"),
+        Q!("    aese            " "v4.16b, v26.16b"),
+        Q!("    aesmc           " "v4.16b, v4.16b"),
+        Q!("    eor             " "v17.16b, v17.16b, v16.16b"),
+        Q!("    add             " "v30.4s, v30.4s, v31.4s"),
+        Q!("    aese            " "v2.16b, v26.16b"),
+        Q!("    aesmc           " "v2.16b, v2.16b"),
+        Q!("    eor             " "v8.16b, v8.16b, v18.16b"),
+        Q!("    aese            " "v6.16b, v26.16b"),
+        Q!("    aesmc           " "v6.16b, v6.16b"),
+        Q!("    aese            " "v1.16b, v27.16b"),
+        Q!("    aesmc           " "v1.16b, v1.16b"),
         Q!("    aese            " "v0.16b, v26.16b"),
         Q!("    aesmc           " "v0.16b, v0.16b"),
-        Q!("    ldp             " "q28, q26, [x11, #128]"),
-        Q!("    pmull2          " "v8.1q, v12.2d, v25.2d"),
-        Q!("    aese            " "v5.16b, v27.16b"),
-        Q!("    aesmc           " "v5.16b, v5.16b"),
-        Q!("    ldr             " "q20, [x6]"),
-        Q!("    ldr             " "q22, [x6, #32]"),
         Q!("    aese            " "v2.16b, v27.16b"),
         Q!("    aesmc           " "v2.16b, v2.16b"),
-        Q!("    eor3            " "v18.16b, v18.16b, v21.16b, v29.16b"),
-        Q!("    ldr             " "q21, [x6, #16]"),
-        Q!("    ldr             " "q24, [x6, #64]"),
-        Q!("    aese            " "v6.16b, v27.16b"),
-        Q!("    aesmc           " "v6.16b, v6.16b"),
+        Q!("    aese            " "v3.16b, v26.16b"),
+        Q!("    aesmc           " "v3.16b, v3.16b"),
+        Q!("    pmull           " "v22.1q, v10.1d, v22.1d"),
+        Q!("    aese            " "v5.16b, v27.16b"),
+        Q!("    aesmc           " "v5.16b, v5.16b"),
+        Q!("    aese            " "v7.16b, v26.16b"),
+        Q!("    aesmc           " "v7.16b, v7.16b"),
+        Q!("    aese            " "v0.16b, v27.16b"),
+        Q!("    aesmc           " "v0.16b, v0.16b"),
+        Q!("    eor3            " "v17.16b, v17.16b, v29.16b, v9.16b"),
+        Q!("    trn1            " "v29.2d, v11.2d, v10.2d"),
+        Q!("    trn2            " "v10.2d, v11.2d, v10.2d"),
+        Q!("    ldp             " "q28, q26, [x11, #32]"),
+        Q!("    aese            " "v4.16b, v27.16b"),
+        Q!("    aesmc           " "v4.16b, v4.16b"),
         Q!("    aese            " "v3.16b, v27.16b"),
         Q!("    aesmc           " "v3.16b, v3.16b"),
+        Q!("    pmull           " "v20.1q, v11.1d, v20.1d"),
+        Q!("    aese            " "v7.16b, v27.16b"),
+        Q!("    aesmc           " "v7.16b, v7.16b"),
+        Q!("    aese            " "v6.16b, v27.16b"),
+        Q!("    aesmc           " "v6.16b, v6.16b"),
+        Q!("    pmull2          " "v18.1q, v8.2d, v24.2d"),
+        Q!("    eor             " "v10.16b, v10.16b, v29.16b"),
+        Q!("    pmull           " "v24.1q, v8.1d, v24.1d"),
+        Q!("    rev64           " "v14.16b, v14.16b"),
+        Q!("    eor3            " "v19.16b, v19.16b, v22.16b, v20.16b"),
+        Q!("    pmull2          " "v29.1q, v10.2d, v21.2d"),
+        Q!("    eor             " "v18.16b, v18.16b, v24.16b"),
+        Q!("    pmull           " "v21.1q, v10.1d, v21.1d"),
+        Q!("    aese            " "v5.16b, v28.16b"),
+        Q!("    aesmc           " "v5.16b, v5.16b"),
+        Q!("    aese            " "v4.16b, v28.16b"),
+        Q!("    aesmc           " "v4.16b, v4.16b"),
+        Q!("    aese            " "v2.16b, v28.16b"),
+        Q!("    aesmc           " "v2.16b, v2.16b"),
+        Q!("    aese            " "v1.16b, v28.16b"),
+        Q!("    aesmc           " "v1.16b, v1.16b"),
+        Q!("    eor3            " "v18.16b, v18.16b, v21.16b, v29.16b"),
+        Q!("    aese            " "v6.16b, v28.16b"),
+        Q!("    aesmc           " "v6.16b, v6.16b"),
+        Q!("    aese            " "v0.16b, v28.16b"),
+        Q!("    aesmc           " "v0.16b, v0.16b"),
+        Q!("    aese            " "v3.16b, v28.16b"),
+        Q!("    aesmc           " "v3.16b, v3.16b"),
+        Q!("    aese            " "v7.16b, v28.16b"),
+        Q!("    aesmc           " "v7.16b, v7.16b"),
+        Q!("    aese            " "v6.16b, v26.16b"),
+        Q!("    aesmc           " "v6.16b, v6.16b"),
+        Q!("    ldr             " "q21, [x6, #16]"),
+        Q!("    ldr             " "q24, [x6, #64]"),
+        Q!("    rev64           " "v12.16b, v12.16b"),
+        Q!("    ldp             " "q27, q28, [x11, #64]"),
+        Q!("    aese            " "v2.16b, v26.16b"),
+        Q!("    aesmc           " "v2.16b, v2.16b"),
+        Q!("    aese            " "v1.16b, v26.16b"),
+        Q!("    aesmc           " "v1.16b, v1.16b"),
+        Q!("    ldr             " "q20, [x6]"),
+        Q!("    ldr             " "q22, [x6, #32]"),
+        Q!("    pmull2          " "v8.1q, v12.2d, v25.2d"),
+        Q!("    pmull           " "v25.1q, v12.1d, v25.1d"),
+        Q!("    trn1            " "v16.2d, v13.2d, v12.2d"),
+        Q!("    trn2            " "v12.2d, v13.2d, v12.2d"),
+        Q!("    aese            " "v0.16b, v26.16b"),
+        Q!("    aesmc           " "v0.16b, v0.16b"),
+        Q!("    aese            " "v3.16b, v26.16b"),
+        Q!("    aesmc           " "v3.16b, v3.16b"),
+        Q!("    aese            " "v7.16b, v26.16b"),
+        Q!("    aesmc           " "v7.16b, v7.16b"),
+        Q!("    aese            " "v4.16b, v26.16b"),
+        Q!("    aesmc           " "v4.16b, v4.16b"),
+        Q!("    aese            " "v5.16b, v26.16b"),
+        Q!("    aesmc           " "v5.16b, v5.16b"),
         Q!("    aese            " "v0.16b, v27.16b"),
         Q!("    aesmc           " "v0.16b, v0.16b"),
         Q!("    aese            " "v7.16b, v27.16b"),
         Q!("    aesmc           " "v7.16b, v7.16b"),
-        Q!("    pmull           " "v25.1q, v12.1d, v25.1d"),
-        Q!("    trn2            " "v12.2d, v13.2d, v12.2d"),
+        Q!("    aese            " "v3.16b, v27.16b"),
+        Q!("    aesmc           " "v3.16b, v3.16b"),
         Q!("    aese            " "v4.16b, v27.16b"),
         Q!("    aesmc           " "v4.16b, v4.16b"),
+        Q!("    aese            " "v5.16b, v27.16b"),
+        Q!("    aesmc           " "v5.16b, v5.16b"),
+        Q!("    aese            " "v6.16b, v27.16b"),
+        Q!("    aesmc           " "v6.16b, v6.16b"),
         Q!("    aese            " "v1.16b, v27.16b"),
         Q!("    aesmc           " "v1.16b, v1.16b"),
         Q!("    pmull2          " "v10.1q, v13.2d, v23.2d"),
-        Q!("    aese            " "v7.16b, v28.16b"),
-        Q!("    aesmc           " "v7.16b, v7.16b"),
-        Q!("    aese            " "v0.16b, v28.16b"),
-        Q!("    aesmc           " "v0.16b, v0.16b"),
-        Q!("    pmull           " "v23.1q, v13.1d, v23.1d"),
-        Q!("    trn1            " "v13.2d, v15.2d, v14.2d"),
         Q!("    eor             " "v12.16b, v12.16b, v16.16b"),
-        Q!("    aese            " "v3.16b, v28.16b"),
-        Q!("    aesmc           " "v3.16b, v3.16b"),
-        Q!("    aese            " "v1.16b, v28.16b"),
-        Q!("    aesmc           " "v1.16b, v1.16b"),
+        Q!("    pmull           " "v23.1q, v13.1d, v23.1d"),
+        Q!("    aese            " "v2.16b, v27.16b"),
+        Q!("    aesmc           " "v2.16b, v2.16b"),
+        Q!("    ldp             " "q26, q27, [x11, #96]"),
+        Q!("    trn1            " "v13.2d, v15.2d, v14.2d"),
         Q!("    pmull2          " "v16.1q, v12.2d, v24.2d"),
         Q!("    pmull           " "v24.1q, v12.1d, v24.1d"),
+        Q!("    pmull2          " "v11.1q, v14.2d, v22.2d"),
+        Q!("    pmull2          " "v12.1q, v15.2d, v20.2d"),
         Q!("    aese            " "v2.16b, v28.16b"),
         Q!("    aesmc           " "v2.16b, v2.16b"),
         Q!("    aese            " "v5.16b, v28.16b"),
         Q!("    aesmc           " "v5.16b, v5.16b"),
-        Q!("    pmull2          " "v11.1q, v14.2d, v22.2d"),
         Q!("    pmull           " "v22.1q, v14.1d, v22.1d"),
+        Q!("    eor3            " "v17.16b, v17.16b, v8.16b, v10.16b"),
+        Q!("    trn2            " "v14.2d, v15.2d, v14.2d"),
+        Q!("    eor3            " "v19.16b, v19.16b, v25.16b, v23.16b"),
         Q!("    aese            " "v6.16b, v28.16b"),
         Q!("    aesmc           " "v6.16b, v6.16b"),
-        Q!("    trn2            " "v14.2d, v15.2d, v14.2d"),
+        Q!("    eor             " "v14.16b, v14.16b, v13.16b"),
+        Q!("    aese            " "v7.16b, v28.16b"),
+        Q!("    aesmc           " "v7.16b, v7.16b"),
+        Q!("    aese            " "v1.16b, v28.16b"),
+        Q!("    aesmc           " "v1.16b, v1.16b"),
+        Q!("    aese            " "v3.16b, v28.16b"),
+        Q!("    aesmc           " "v3.16b, v3.16b"),
         Q!("    aese            " "v4.16b, v28.16b"),
         Q!("    aesmc           " "v4.16b, v4.16b"),
+        Q!("    aese            " "v0.16b, v28.16b"),
+        Q!("    aesmc           " "v0.16b, v0.16b"),
         Q!("    eor3            " "v18.16b, v18.16b, v24.16b, v16.16b"),
-        Q!("    eor             " "v14.16b, v14.16b, v13.16b"),
-        Q!("    pmull2          " "v12.1q, v15.2d, v20.2d"),
-        Q!("    eor3            " "v19.16b, v19.16b, v25.16b, v23.16b"),
-        Q!("    pmull           " "v20.1q, v15.1d, v20.1d"),
         Q!("    ldr             " "d16, [x10]"),
-        Q!("    pmull2          " "v13.1q, v14.2d, v21.2d"),
-        Q!("    pmull           " "v21.1q, v14.1d, v21.1d"),
-        Q!("    eor3            " "v18.16b, v18.16b, v21.16b, v13.16b"),
-        Q!("    eor3            " "v19.16b, v19.16b, v22.16b, v20.16b"),
-        Q!("    eor3            " "v17.16b, v17.16b, v8.16b, v10.16b"),
-        Q!("    add             " "v30.4s, v30.4s, v31.4s"),
-        Q!("    eor3            " "v17.16b, v17.16b, v11.16b, v12.16b"),
-        Q!("    rev32           " "v20.16b, v30.16b"),
-        Q!("    ext             " "v21.16b, v17.16b, v17.16b, #8"),
-        Q!("    ldp             " "q8, q9, [x0], #32"),
-        Q!("    add             " "v30.4s, v30.4s, v31.4s"),
-        Q!("    pmull           " "v29.1q, v17.1d, v16.1d"),
-        Q!("    rev32           " "v22.16b, v30.16b"),
-        Q!("    add             " "v30.4s, v30.4s, v31.4s"),
-        Q!("    eor3            " "v18.16b, v18.16b, v17.16b, v19.16b"),
-        Q!("    ldr             " "q28, [x11, #160]"),
+        Q!("    pmull           " "v20.1q, v15.1d, v20.1d"),
         Q!("    aese            " "v7.16b, v26.16b"),
-        Q!("    ldp             " "q10, q11, [x0], #32"),
-        Q!("    eor3            " "v18.16b, v18.16b, v29.16b, v21.16b"),
-        Q!("    ldp             " "q12, q13, [x0], #32"),
-        Q!("    ldp             " "q14, q15, [x0], #32"),
+        Q!("    aesmc           " "v7.16b, v7.16b"),
+        Q!("    aese            " "v5.16b, v26.16b"),
+        Q!("    aesmc           " "v5.16b, v5.16b"),
+        Q!("    pmull2          " "v13.1q, v14.2d, v21.2d"),
+        Q!("    aese            " "v1.16b, v26.16b"),
+        Q!("    aesmc           " "v1.16b, v1.16b"),
         Q!("    aese            " "v2.16b, v26.16b"),
+        Q!("    aesmc           " "v2.16b, v2.16b"),
+        Q!("    pmull           " "v21.1q, v14.1d, v21.1d"),
+        Q!("    eor3            " "v19.16b, v19.16b, v22.16b, v20.16b"),
+        Q!("    ldp             " "q8, q9, [x0], #32"),
+        Q!("    aese            " "v3.16b, v26.16b"),
+        Q!("    aesmc           " "v3.16b, v3.16b"),
+        Q!("    rev32           " "v20.16b, v30.16b"),
+        Q!("    add             " "v30.4s, v30.4s, v31.4s"),
         Q!("    aese            " "v4.16b, v26.16b"),
+        Q!("    aesmc           " "v4.16b, v4.16b"),
+        Q!("    aese            " "v0.16b, v26.16b"),
+        Q!("    aesmc           " "v0.16b, v0.16b"),
+        Q!("    aese            " "v6.16b, v26.16b"),
+        Q!("    aesmc           " "v6.16b, v6.16b"),
+        Q!("    eor3            " "v18.16b, v18.16b, v21.16b, v13.16b"),
+        Q!("    ldp             " "q28, q26, [x11, #128]"),
+        Q!("    eor3            " "v17.16b, v17.16b, v11.16b, v12.16b"),
+        Q!("    aese            " "v2.16b, v27.16b"),
+        Q!("    aesmc           " "v2.16b, v2.16b"),
+        Q!("    aese            " "v7.16b, v27.16b"),
+        Q!("    aesmc           " "v7.16b, v7.16b"),
+        Q!("    ldp             " "q10, q11, [x0], #32"),
+        Q!("    aese            " "v5.16b, v27.16b"),
+        Q!("    aesmc           " "v5.16b, v5.16b"),
+        Q!("    aese            " "v6.16b, v27.16b"),
+        Q!("    aesmc           " "v6.16b, v6.16b"),
+        Q!("    aese            " "v1.16b, v27.16b"),
+        Q!("    aesmc           " "v1.16b, v1.16b"),
+        Q!("    pmull           " "v21.1q, v17.1d, v16.1d"),
+        Q!("    aese            " "v0.16b, v27.16b"),
+        Q!("    aesmc           " "v0.16b, v0.16b"),
+        Q!("    aese            " "v4.16b, v27.16b"),
+        Q!("    aesmc           " "v4.16b, v4.16b"),
+        Q!("    rev32           " "v22.16b, v30.16b"),
+        Q!("    aese            " "v3.16b, v27.16b"),
+        Q!("    aesmc           " "v3.16b, v3.16b"),
+        Q!("    aese            " "v5.16b, v28.16b"),
+        Q!("    aesmc           " "v5.16b, v5.16b"),
+        Q!("    ldp             " "q12, q13, [x0], #32"),
+        Q!("    add             " "v30.4s, v30.4s, v31.4s"),
+        Q!("    aese            " "v2.16b, v28.16b"),
+        Q!("    aesmc           " "v2.16b, v2.16b"),
+        Q!("    aese            " "v1.16b, v28.16b"),
+        Q!("    aesmc           " "v1.16b, v1.16b"),
+        Q!("    aese            " "v7.16b, v28.16b"),
+        Q!("    aesmc           " "v7.16b, v7.16b"),
+        Q!("    aese            " "v4.16b, v28.16b"),
+        Q!("    aesmc           " "v4.16b, v4.16b"),
+        Q!("    eor3            " "v18.16b, v18.16b, v17.16b, v19.16b"),
+        Q!("    ldr             " "q27, [x11, #160]"),
+        Q!("    ext             " "v29.16b, v17.16b, v17.16b, #8"),
         Q!("    rev32           " "v23.16b, v30.16b"),
         Q!("    add             " "v30.4s, v30.4s, v31.4s"),
-        Q!("    aese            " "v5.16b, v26.16b"),
-        Q!("    aese            " "v3.16b, v26.16b"),
-        Q!("    cmp             " "x0, x5"),
-        Q!("    eor3            " "v10.16b, v10.16b, v2.16b, v28.16b"),
+        Q!("    aese            " "v3.16b, v28.16b"),
+        Q!("    aesmc           " "v3.16b, v3.16b"),
+        Q!("    aese            " "v0.16b, v28.16b"),
+        Q!("    aesmc           " "v0.16b, v0.16b"),
+        Q!("    eor3            " "v18.16b, v18.16b, v29.16b, v21.16b"),
+        Q!("    aese            " "v6.16b, v28.16b"),
+        Q!("    aesmc           " "v6.16b, v6.16b"),
+        Q!("    aese            " "v2.16b, v26.16b"),
+        Q!("    aese            " "v4.16b, v26.16b"),
+        Q!("    aese            " "v1.16b, v26.16b"),
+        Q!("    ldp             " "q14, q15, [x0], #32"),
         Q!("    rev32           " "v25.16b, v30.16b"),
         Q!("    add             " "v30.4s, v30.4s, v31.4s"),
-        Q!("    aese            " "v0.16b, v26.16b"),
+        Q!("    cmp             " "x0, x5"),
+        Q!("    eor3            " "v12.16b, v12.16b, v4.16b, v27.16b"),
+        Q!("    aese            " "v7.16b, v26.16b"),
         Q!("    aese            " "v6.16b, v26.16b"),
-        Q!("    eor3            " "v13.16b, v13.16b, v5.16b, v28.16b"),
-        Q!("    ext             " "v21.16b, v18.16b, v18.16b, #8"),
-        Q!("    pmull           " "v17.1q, v18.1d, v16.1d"),
-        Q!("    aese            " "v1.16b, v26.16b"),
-        Q!("    eor3            " "v12.16b, v12.16b, v4.16b, v28.16b"),
-        Q!("    rev32           " "v4.16b, v30.16b"),
-        Q!("    eor3            " "v11.16b, v11.16b, v3.16b, v28.16b"),
-        Q!("    mov             " "v3.16b, v25.16b"),
-        Q!("    eor3            " "v9.16b, v9.16b, v1.16b, v28.16b"),
-        Q!("    eor3            " "v8.16b, v8.16b, v0.16b, v28.16b"),
-        Q!("    add             " "v30.4s, v30.4s, v31.4s"),
-        Q!("    stp             " "q8, q9, [x2], #32"),
+        Q!("    aese            " "v3.16b, v26.16b"),
+        Q!("    eor3            " "v10.16b, v10.16b, v2.16b, v27.16b"),
         Q!("    mov             " "v2.16b, v23.16b"),
-        Q!("    eor3            " "v15.16b, v15.16b, v7.16b, v28.16b"),
-        Q!("    eor3            " "v19.16b, v19.16b, v21.16b, v17.16b"),
-        Q!("    stp             " "q10, q11, [x2], #32"),
-        Q!("    eor3            " "v14.16b, v14.16b, v6.16b, v28.16b"),
+        Q!("    aese            " "v0.16b, v26.16b"),
+        Q!("    rev32           " "v4.16b, v30.16b"),
+        Q!("    add             " "v30.4s, v30.4s, v31.4s"),
+        Q!("    eor3            " "v15.16b, v15.16b, v7.16b, v27.16b"),
+        Q!("    aese            " "v5.16b, v26.16b"),
+        Q!("    pmull           " "v17.1q, v18.1d, v16.1d"),
+        Q!("    eor3            " "v9.16b, v9.16b, v1.16b, v27.16b"),
+        Q!("    eor3            " "v11.16b, v11.16b, v3.16b, v27.16b"),
+        Q!("    mov             " "v3.16b, v25.16b"),
+        Q!("    ext             " "v21.16b, v18.16b, v18.16b, #8"),
+        Q!("    eor3            " "v13.16b, v13.16b, v5.16b, v27.16b"),
         Q!("    mov             " "v1.16b, v22.16b"),
-        Q!("    stp             " "q12, q13, [x2], #32"),
-        Q!("    stp             " "q14, q15, [x2], #32"),
+        Q!("    eor3            " "v8.16b, v8.16b, v0.16b, v27.16b"),
         Q!("    mov             " "v0.16b, v20.16b"),
+        Q!("    stp             " "q8, q9, [x2], #32"),
+        Q!("    stp             " "q10, q11, [x2], #32"),
+        Q!("    eor3            " "v14.16b, v14.16b, v6.16b, v27.16b"),
+        Q!("    stp             " "q12, q13, [x2], #32"),
+        Q!("    eor3            " "v19.16b, v19.16b, v17.16b, v21.16b"),
+        Q!("    stp             " "q14, q15, [x2], #32"),
         Q!("    b.lt            " Label!("L128_enc_main_loop", 6, Before)),
 
         Q!(Label!("L128_enc_prepretail", 5) ":"),

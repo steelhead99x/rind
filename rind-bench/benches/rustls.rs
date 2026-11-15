@@ -3,7 +3,10 @@
 
 mod criterion;
 use std::io::{Read, Write};
-use std::sync::Arc;
+use std::panic::{self, AssertUnwindSafe};
+use std::sync::{Arc, mpsc};
+use std::thread;
+use std::time::Instant;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use rustls::client::Resumption;
@@ -241,6 +244,102 @@ fn resumed_handshake(c: &mut Criterion) {
     }
 }
 
+/// Full and resumed TLS 1.3 handshakes over X25519 with an ECDSA P-256
+/// certificate, on every logical CPU at once. A row's time is the machine's:
+/// wall time over the handshakes all threads completed, so its ratio to the
+/// single-thread row is how throughput scales.
+///
+/// Each thread keeps its own client and server, as the single-thread rows do:
+/// a shared server's session cache gains a ticket per resumption and evicts
+/// the oldest, so a thread that falls behind finds its ticket gone and runs a
+/// full handshake. The threads live for the whole row, so per-thread state a
+/// provider sets up on first use, such as aws-lc's, is not timed.
+fn threaded_handshake(c: &mut Criterion) {
+    let threads = thread::available_parallelism().unwrap().get();
+    // bench-report reports these rows as running on every logical CPU, so a
+    // run held to fewer, by affinity or a cgroup quota, must not pass for one.
+    if let Ok(cpus) = std::env::var("RIND_BENCH_CPUS") {
+        let cpus: usize = cpus.parse().expect("RIND_BENCH_CPUS is a count");
+        assert_eq!(
+            threads, cpus,
+            "this process may use {threads} of the host's {cpus} logical CPUs"
+        );
+    }
+    for (bench, resumption, kind) in [
+        ("rustls-full-handshake-threads", false, HandshakeKind::Full),
+        (
+            "rustls-resumed-handshake-threads",
+            true,
+            HandshakeKind::Resumed,
+        ),
+    ] {
+        let mut group = c.benchmark_group(bench);
+        group.throughput(Throughput::Elements(1));
+        for name in providers() {
+            thread::scope(|s| {
+                let (done_tx, done) = mpsc::channel();
+                let workers: Vec<_> = (0..threads)
+                    .map(|_| {
+                        let (work, jobs) = mpsc::channel::<u64>();
+                        let done_tx = done_tx.clone();
+                        s.spawn(move || {
+                            // Each step reports whether it ran and every handshake
+                            // was of `kind`, rather than panic and leave the main
+                            // thread waiting on this one.
+                            let report = |f: &mut dyn FnMut() -> bool| {
+                                let ok = panic::catch_unwind(AssertUnwindSafe(f));
+                                done_tx.send(matches!(ok, Ok(true))).unwrap();
+                            };
+                            let mut pair = None;
+                            report(&mut || {
+                                let provider = with_group(name, NamedGroup::X25519).unwrap();
+                                let (client, server) =
+                                    configs(provider, "ecdsa-p256", resumption).unwrap();
+                                // Seeds a resuming client's tickets.
+                                handshake(&client, &server);
+                                let ok = handshake_kind(&handshake(&client, &server).1) == kind;
+                                pair = Some((client, server));
+                                ok
+                            });
+                            let Some((client, server)) = pair else {
+                                return;
+                            };
+                            for n in jobs {
+                                report(&mut || {
+                                    (0..n).all(|_| {
+                                        handshake_kind(&handshake(&client, &server).1) == kind
+                                    })
+                                });
+                            }
+                        });
+                        work
+                    })
+                    .collect();
+                drop(done_tx);
+                let wait = || {
+                    let ok = (0..threads).all(|_| done.recv().unwrap());
+                    assert!(
+                        ok,
+                        "a {bench} handshake over {name} failed or was not {kind:?}"
+                    );
+                };
+                wait();
+                group.bench_function(format!("x25519/{name}"), |b| {
+                    b.iter_custom(|iters| {
+                        let start = Instant::now();
+                        for (work, i) in workers.iter().zip(0..) {
+                            let n = threads as u64;
+                            work.send(iters / n + u64::from(i < iters % n)).unwrap();
+                        }
+                        wait();
+                        start.elapsed()
+                    })
+                });
+            });
+        }
+    }
+}
+
 /// 1 MB from server to client in full records, per TLS 1.3 cipher suite:
 /// each byte is sealed once and opened once.
 fn bulk(c: &mut Criterion) {
@@ -280,6 +379,7 @@ criterion_group!(
     full_handshake_by_group,
     full_handshake_by_key,
     resumed_handshake,
+    threaded_handshake,
     bulk
 );
 criterion_main!(benches);

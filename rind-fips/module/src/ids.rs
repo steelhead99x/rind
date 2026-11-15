@@ -103,4 +103,5 @@ pub(crate) mod error {
     pub(crate) const NOT_EQUAL: u32 = 6;
     pub(crate) const FAULT: u32 = 7;
     pub(crate) const UNSUPPORTED: u32 = 8;
+    pub(crate) const MESSAGE_LIMIT_REACHED: u32 = 9;
 }

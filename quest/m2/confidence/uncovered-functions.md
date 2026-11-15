@@ -17,14 +17,10 @@ On the 2026-11-12 macOS run, before the port of aws-lc-rs's tests and the report
 
 Guidance:
 
-- Start from the report as the port of aws-lc-rs's tests leaves it, and recount: `admin/coverage` now measures rind-dart under `dart test` and pyrind under `sh/python.sh test`, and leaves the tools out, and the port reaches much of the adapters.
+- Start from the report as the port of aws-lc-rs's tests leaves it, and recount: `admin/coverage` now measures rind-dart under `dart test` and pyrind under `sh/python.sh test`, and leaves the tools out, and the port reaches much of the adapters. With aws-lc-rs's in-crate tests ported too, 42 of rind-aws-lc-rs's 512 functions were left unrun under `cargo llvm-cov -p rind-aws-lc-rs` on Linux/x86_64 (2026-11-13).
 - Test behavior a caller can see, such as an error path on malformed input or an accessor compared with the upstream crate's value. A `Debug` or `Display` impl needs a test only where callers rely on its output.
 - Where a function is unreachable from any public path, delete it rather than test it.
 - Where only a CPU feature neither runner has reaches a function, say so in [TESTING.md](/TESTING.md) instead of leaving it silent.
-
-## Required
-
-- [rind-aws-lc-rs runs aws-lc-rs's in-crate tests of its public API](/quest/m2/confidence/aws-lc-rs-unit-tests.md) - closes most of rind-aws-lc-rs's remaining gap first, so no test is written twice
 
 ## Related
 

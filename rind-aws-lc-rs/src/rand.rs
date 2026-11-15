@@ -9,10 +9,19 @@ use crate::error;
 pub trait SecureRandom: sealed::SecureRandom {
     /// Fills `dest` with random bytes.
     fn fill(&self, dest: &mut [u8]) -> Result<(), error::Unspecified>;
+
+    /// Fills `dest` with random bytes, as [`Self::fill`] does.
+    #[cfg(feature = "dev-tests-only")]
+    fn mut_fill(&mut self, dest: &mut [u8]) -> Result<(), error::Unspecified>;
 }
 
 impl<T: sealed::SecureRandom> SecureRandom for T {
     fn fill(&self, dest: &mut [u8]) -> Result<(), error::Unspecified> {
+        self.fill_impl(dest)
+    }
+
+    #[cfg(feature = "dev-tests-only")]
+    fn mut_fill(&mut self, dest: &mut [u8]) -> Result<(), error::Unspecified> {
         self.fill_impl(dest)
     }
 }

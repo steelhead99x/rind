@@ -1,6 +1,7 @@
 import Rind.X86_64.P384
 import Rind.P384Comb
 import Rind.X86_64.P384Table
+import Rind.X86_64.P384Select
 open Aeneas Aeneas.Std Result rind.spec rind.spec.comb384
 
 /-!
@@ -17,8 +18,8 @@ checks, adding with s2n-bignum's `p384_montjmixadd` and doubling with its
 `p384_montjdouble`. Their contracts need the points they add to differ,
 which `comb_ne` proves for a scalar below n.
 
-The theorems take `AffSelect`, what the table lookup computes, as a
-hypothesis: rind's AVX2, SSE2, and NEON selects are not modelled yet.
+The table lookup is rind's AVX2, SSE2, or NEON select, which
+`Rind.X86_64.P384Select` states from its proof.
 `admin/prove` writes the aarch64 proof from this file by renaming the target.
 -/
 
@@ -56,17 +57,6 @@ def p384Keygen (draws : Nat → core.result.Result Unit getrandom.error.Error ×
       else p384Keygen draws (i + 1) n key
 
 namespace P384
-
-/-- What `bignum_aff_point_select_p384` computes, viewing `table` as 16 rows
-of 12 words: row `index`, counting from 1, or zeros for any other index.
-rind selects with SIMD vectors (AVX2 or SSE2 on x86-64, NEON on Arm), through
-raw-pointer loads Aeneas cannot translate, and no hand model of them is proven
-yet, so the theorems below take this as a hypothesis. -/
-def AffSelect : Prop :=
-  ∀ (z : Std.Array U64 12#usize) (table : Slice U64) (index : U8), table.length = 192 →
-    low.x86_64.bignum_point_select.bignum_aff_point_select_p384 z table index ⦃ r =>
-      r.val = if 1 ≤ index.val ∧ index.val ≤ 16 then (table.val.drop (12 * (index.val - 1))).take 12
-        else List.replicate 12 0#u64 ⦄
 
 /-! ## Limbs -/
 
@@ -175,14 +165,14 @@ theorem maybe_negate_y_spec (pt : mid.p384.AffineMontPoint) (sign : U8) (hy : (p
     · exact hny.trans (by rw [hfy]; rfl)
 
 @[step]
-theorem lookup_comb_spec (hsel : AffSelect) (table : Std.Array U64 192#usize) (index : U8) :
+theorem lookup_comb_spec (h : Runs) (table : Std.Array U64 192#usize) (index : U8) :
     mid.p384.AffineMontPoint.lookup_comb table index ⦃ r =>
       r.xy.val = if 1 ≤ index.val ∧ index.val ≤ 16 then (table.val.drop (12 * (index.val - 1))).take 12
         else List.replicate 12 0#u64 ⦄ := by
   unfold mid.p384.AffineMontPoint.lookup_comb mid.p384.AffineMontPoint.Insts.CoreDefaultDefault.default
     core.default.DefaultArray.default
   simp only [lift, bind_ok]
-  step with hsel _ table.to_slice index (by simp) as ⟨r, hr⟩
+  step with p384_aff_select h _ table.to_slice index (by simp) as ⟨r, hr⟩
   simpa using hr
 
 /-! ## Points -/
@@ -515,7 +505,7 @@ theorem gpt_ne (X : p384Curve.Point) (hord : addOrderOf X = n384) (a b : Int) (h
   rw [zsmul_eq_zsmul_iff_modEq, hord] at this
   exact this
 
-theorem comb_inner_spec (h : Runs) (hsel : AffSelect) (X : p384Curve.Point) (hX : nist.fromM X = p384G) (hord : addOrderOf X = n384)
+theorem comb_inner_spec (h : Runs) (X : p384Curve.Point) (hX : nist.fromM X = p384G) (hord : addOrderOf X = n384)
     (htab : CombTabulated mid.p384.precomp.CURVE_GENERATOR_PRECOMP_COMB)
     (k : Nat) (hk : k < n384) (windows : Std.Array (U8 × U8) 77#usize) (hw : WindowsOk k windows 77)
     (tooth : Usize) (ht : tooth.val < 4) (iter : core.ops.range.Range Usize) (hs : iter.start.val ≤ 20)
@@ -633,7 +623,7 @@ theorem iterate_double (X : p384Curve.Point) (n : Nat) (a : Int) :
 tooth `m - 1`: none yet for `m` = 4. -/
 def toothAcc (k m : Nat) : Int := if m = 4 then 0 else combAcc (digit k) m 20
 
-theorem comb_outer_spec (h : Runs) (hsel : AffSelect) (X : p384Curve.Point) (hX : nist.fromM X = p384G) (hord : addOrderOf X = n384)
+theorem comb_outer_spec (h : Runs) (X : p384Curve.Point) (hX : nist.fromM X = p384G) (hord : addOrderOf X = n384)
     (htab : CombTabulated mid.p384.precomp.CURVE_GENERATOR_PRECOMP_COMB)
     (k : Nat) (hk : k < n384) (windows : Std.Array (U8 × U8) 77#usize) (hw : WindowsOk k windows 77)
     (iter : core.iter.adapters.rev.Rev (core.ops.range.Range Usize)) (hs : iter.iter.start.val = 0)
@@ -675,7 +665,7 @@ theorem comb_outer_spec (h : Runs) (hsel : AffSelect) (X : p384Curve.Point) (hX 
           rw [h3', combAcc_start]
           exact hres
       · intro r1 hr1
-        step with comb_inner_spec h hsel X hX hord htab k hk windows hw it1.iter.end (by omega)
+        step with comb_inner_spec h X hX hord htab k hk windows hw it1.iter.end (by omega)
           { start := 0#usize, «end» := 20#usize } (by simp) (by simp) r1 (by simpa using hr1) as ⟨r2, hr2⟩
         refine ⟨by omega, by omega, ?_, by omega⟩
         rw [toothAcc, ite_eq_right (by omega)]
@@ -688,7 +678,7 @@ theorem comb_outer_spec (h : Runs) (hsel : AffSelect) (X : p384Curve.Point) (hX 
   · exact ⟨hs, he, hres⟩
 
 @[step]
-theorem base_multiply_spec (h : Runs) (hsel : AffSelect) (htab : CombTabulated mid.p384.precomp.CURVE_GENERATOR_PRECOMP_COMB)
+theorem base_multiply_spec (h : Runs) (htab : CombTabulated mid.p384.precomp.CURVE_GENERATOR_PRECOMP_COMB)
     (k : mid.p384.Scalar) (hk : wordsNat k.val < n384) :
     mid.p384.JacobianMontPoint.base_multiply k ⦃ r => jrep (p384Pow p384G (wordsNat k.val)) r ⦄ := by
   obtain ⟨X, hX, hX0, hn⟩ := p384_fromM_G
@@ -698,7 +688,7 @@ theorem base_multiply_spec (h : Runs) (hsel : AffSelect) (htab : CombTabulated m
   step with booth_w5_spec k as ⟨windows, hw⟩
   step with infinity_spec as ⟨inf, hinf⟩
   step as ⟨iter, hiter⟩
-  apply WP.spec_mono (comb_outer_spec h hsel X hX hord htab _ hk windows hw iter (by rw [hiter]; rfl) (by rw [hiter]; decide) inf
+  apply WP.spec_mono (comb_outer_spec h X hX hord htab _ hk windows hw iter (by rw [hiter]; rfl) (by rw [hiter]; decide) inf
     (by rw [hiter]; show jrep (nist.fromM ((if 4 = 4 then 0 else _ : Int) • X)) inf; rw [ite_eq_left rfl, zero_zsmul]; exact hinf))
   intro r hr
   rw [combAcc_end, booth_sum _ hk384] at hr
@@ -787,13 +777,13 @@ theorem from_bytes_spec (bytes : Slice U8) (hl : bytes.length = 48) :
   · subst hr
     simp [core.result.Result.map]
 
-theorem public_point_spec (h : Runs) (hsel : AffSelect) (k : mid.p384.PrivateKey) (x y : Nat) (hk : wordsNat k.scalar.val < n384)
+theorem public_point_spec (h : Runs) (k : mid.p384.PrivateKey) (x y : Nat) (hk : wordsNat k.scalar.val < n384)
     (hq : p384Pow p384G (wordsNat k.scalar.val) = some (x, y)) (hc : p384OnCurve (some (x, y))) :
     mid.p384.PrivateKey.public_point k ⦃ pt =>
       (pairNat6 pt.xy.val).1 < p384 ∧ (pairNat6 pt.xy.val).2 < p384 ∧
         (p384RInv * (pairNat6 pt.xy.val).1 % p384, p384RInv * (pairNat6 pt.xy.val).2 % p384) = (x, y) ⦄ := by
   unfold mid.p384.PrivateKey.public_point low.ct.into_public
-  step with base_multiply_spec h hsel tabulated k.scalar hk as ⟨j, hj⟩
+  step with base_multiply_spec h tabulated k.scalar hk as ⟨j, hj⟩
   step with as_affine_spec h j _ hj as ⟨q, hqx, hqy, hq'⟩
   rw [hq] at hq'
   simp only [Option.getD_some] at hq'
@@ -843,18 +833,18 @@ theorem as_bytes_uncompressed_spec (h : Runs) (pt : mid.p384.AffineMontPoint) (h
     simp only [feNat] at fe_post fe1_post fe2_post fe3_post
     rw [fe1_post, fe3_post, fe_post, fe2_post]
 
-theorem public_key_uncompressed_spec (h : Runs) (hsel : AffSelect) (k : mid.p384.PrivateKey) (x y : Nat)
+theorem public_key_uncompressed_spec (h : Runs) (k : mid.p384.PrivateKey) (x y : Nat)
     (hk : wordsNat k.scalar.val < n384)
     (hq : p384Pow p384G (wordsNat k.scalar.val) = some (x, y)) (hc : p384OnCurve (some (x, y))) :
     mid.p384.PrivateKey.public_key_uncompressed k ⦃ b =>
       b.val.head? = some 4#u8 ∧ p384Coords b.val = (x, y) ⦄ := by
   unfold mid.p384.PrivateKey.public_key_uncompressed
   step
-  step with public_point_spec h hsel k x y hk hq hc as ⟨pt, hx, hy, hpx, hpy⟩
+  step with public_point_spec h k x y hk hq hc as ⟨pt, hx, hy, hpx, hpy⟩
   step with as_bytes_uncompressed_spec h pt hx hy as ⟨b, hb4, hbc⟩
   exact ⟨hb4, hbc.trans (Prod.ext hpx hpy)⟩
 
-theorem encode_public_spec (h : Runs) (hsel : AffSelect) (k : mid.p384.PrivateKey) (algorithm : high.agreement.Algorithm)
+theorem encode_public_spec (h : Runs) (k : mid.p384.PrivateKey) (algorithm : high.agreement.Algorithm)
     (x y : Nat) (hk : wordsNat k.scalar.val < n384) (hq : p384Pow p384G (wordsNat k.scalar.val) = some (x, y))
     (hc : p384OnCurve (some (x, y))) :
     high.curve.P384.Insts.RindHighAgreementAgreePrivateKey.encode_public k algorithm ⦃ pk =>
@@ -862,7 +852,7 @@ theorem encode_public_spec (h : Runs) (hsel : AffSelect) (k : mid.p384.PrivateKe
         b.length = 97 ∧ b.val.head? = some 4#u8 ∧ p384Coords b.val = (x, y) ⦄ ⦄ := by
   unfold high.curve.P384.Insts.RindHighAgreementAgreePrivateKey.encode_public high.agreement.PublicKey.from_encoding
     high.agreement.PublicKey.Insts.CoreConvertAsRefSliceU8.as_ref low.generic.zeroise.ZeroableRef.new
-  step with public_key_uncompressed_spec h hsel k x y hk hq hc as ⟨a, ha4, hac⟩
+  step with public_key_uncompressed_spec h k x y hk hq hc as ⟨a, ha4, hac⟩
   step as ⟨sl, hsl⟩
   subst hsl
   have hlen : a.to_slice.len.val = 97 := by simp
@@ -890,13 +880,13 @@ theorem public_key_of_coords (d x y : Nat) (hq : p384Pow p384G d = some (x, y))
   WP.spec_mono hpk fun b ⟨hl, h4, hxy⟩ => ⟨hl, h4, by rw [hq, hxy]⟩
 
 /-- The public key `encode_public` computes for a scalar in [1, n). -/
-theorem encode_public_key_spec (h : Runs) (hsel : AffSelect) (k : mid.p384.PrivateKey) (algorithm : high.agreement.Algorithm)
+theorem encode_public_key_spec (h : Runs) (k : mid.p384.PrivateKey) (algorithm : high.agreement.Algorithm)
     (hk0 : 0 < wordsNat k.scalar.val) (hk : wordsNat k.scalar.val < n384) :
     high.curve.P384.Insts.RindHighAgreementAgreePrivateKey.encode_public k algorithm ⦃ pk =>
       high.agreement.PublicKey.Insts.CoreConvertAsRefSliceU8.as_ref pk ⦃ b =>
         p384PublicKey (wordsNat k.scalar.val) b.val ⦄ ⦄ := by
   obtain ⟨x, y, hq, hc⟩ := p384_g_mult _ hk0 hk
-  exact WP.spec_mono (encode_public_spec h hsel k algorithm x y hk hq hc)
+  exact WP.spec_mono (encode_public_spec h k algorithm x y hk hq hc)
     fun pk hpk => public_key_of_coords _ x y hq pk hpk
 
 /-- `p384Agree`'s fields, which the theorems below rewrite to, so `step` finds
@@ -1003,7 +993,7 @@ theorem drawKeygen_err (draws : Nat → core.result.Result Unit getrandom.error.
       · exact ih (i + 1) hr
     · simpa using hr
 
-theorem load_scalar_spec (h : Runs) (hsel : AffSelect) (algorithm : high.agreement.Algorithm) (b : Slice U8) :
+theorem load_scalar_spec (h : Runs) (algorithm : high.agreement.Algorithm) (b : Slice U8) :
     high.curve.P384.Insts.RindHighAgreementAgreePrivateKey.load algorithm (.Scalar b) ⦃ r =>
       if b.length = 48 then
         if 0 < beNat b.val ∧ beNat b.val < n384 then
@@ -1025,7 +1015,7 @@ theorem load_scalar_spec (h : Runs) (hsel : AffSelect) (algorithm : high.agreeme
       step with core.result.Result.Insts.CoreOpsTry.branch_Ok.spec as ⟨cf, hcf⟩
       subst hcf
       simp only
-      step with encode_public_key_spec h hsel k algorithm (hk ▸ hrange.1) (hk ▸ hrange.2) as ⟨pk, hpk⟩
+      step with encode_public_key_spec h k algorithm (hk ▸ hrange.1) (hk ▸ hrange.2) as ⟨pk, hpk⟩
       exact ⟨k, pk, rfl, hk, hk ▸ hpk⟩
     · subst hr
       simp [core.result.Result.Insts.CoreOpsTry.branch,
@@ -1045,7 +1035,7 @@ open P384
 system source whose bytes, read big-endian, are in [1, n), and key generation
 is refused if a draw fails before one is, or none is. The draws themselves are
 outside the functional spec. -/
-theorem p384_generate (h : Runs) (hsel : AffSelect) (draws : Nat → core.result.Result Unit getrandom.error.Error × Slice U8)
+theorem p384_generate (h : Runs) (draws : Nat → core.result.Result Unit getrandom.error.Error × Slice U8)
     (hdraw : ∀ i, mid.p384.PrivateKey.draw i (Array.repeat 48#usize 0#u8).to_slice = ok (draws i))
     (hlen : ∀ i, (draws i).2.length = 48) :
     high.agreement.PrivateKey.generate high.agreement.ECDH_P384 ⦃ key => p384Keygen draws 0 64 key ⦄ := by
@@ -1058,7 +1048,7 @@ theorem p384_generate (h : Runs) (hsel : AffSelect) (draws : Nat → core.result
   rcases r with k | e
   · obtain ⟨hk0, hk, hkey⟩ := drawKeygen_ok draws 64 0 k hr
     simp only [p384Agree_encode_public]
-    step with encode_public_key_spec h hsel k _ hk0 hk as ⟨pk, hpk⟩
+    step with encode_public_key_spec h k _ hk0 hk as ⟨pk, hpk⟩
     step with private_key_spec k pk hpk as ⟨key, hkey'⟩
     exact hkey key hkey'
   · simp only [WP.spec_ok]
@@ -1067,7 +1057,7 @@ theorem p384_generate (h : Runs) (hsel : AffSelect) (draws : Nat → core.result
 /-- A P-384 key loaded from its scalar is refused unless it is 48 bytes and,
 read big-endian, in [1, n), and otherwise is that scalar, as
 `p384_generate`'s is a draw's. -/
-theorem p384_from_scalar (h : Runs) (hsel : AffSelect) (b : Slice U8) :
+theorem p384_from_scalar (h : Runs) (b : Slice U8) :
     high.agreement.PrivateKey.from_scalar high.agreement.ECDH_P384 b ⦃ key =>
       if b.length = 48 then
         if 0 < beNat b.val ∧ beNat b.val < n384 then
@@ -1077,7 +1067,7 @@ theorem p384_from_scalar (h : Runs) (hsel : AffSelect) (b : Slice U8) :
   unfold high.agreement.PrivateKey.from_scalar high.agreement.ECDH_P384 high.agreement.Algorithm.load
     high.agreement.Keyed.load
   simp only [p384Agree_load]
-  step with load_scalar_spec h hsel _ b as ⟨r, hr⟩
+  step with load_scalar_spec h _ b as ⟨r, hr⟩
   split_ifs at hr ⊢
   · obtain ⟨k, pk, rfl, hk, hpk⟩ := hr
     simp only

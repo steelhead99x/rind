@@ -29,7 +29,6 @@ use crate::low::macros::*;
 // Transliterated from s2n-bignum's x86/mldsa/mldsa_polyz_unpack_19.S.
 /// Unpack polynomial z with 20-bit packed coefficients (GAMMA1 = 2^19)
 ///
-///
 /// Reads 640 bytes of packed input (256 coefficients, 20 bits each) and writes
 /// 256 signed 32-bit output coefficients.  Each packed field x in [0, 2^20-1]
 /// is mapped to the signed value GAMMA1 - x in [-(2^19-1), 2^19].

@@ -14,26 +14,15 @@ on:
     workflows:
       - asan
       - bench
-      - build
       - dart-libraries
       - Dart release
-      - Check
       - coverage
-      - ctgrind
-      - ctgrind debug
       - ESP32-S3 SHA-256 layout
-      - fuzz
       - miri
       - mutants
-      - prove
       - Pullfrog
       - python
-      - quality lints
-      - Queue
-      - regenerate
       - Release
-      - timing
-      - x86-cpu
     types:
       - completed
 
@@ -45,15 +34,14 @@ jobs:
     name: Discord
     # `cancelled` is excluded: a superseded run is cancelled as a matter of
     # course. The nightlies alert only when scheduled, since whoever dispatched
-    # one is already watching it. Release and Check alert however they ran:
-    # they follow the queue's pushes to main, which nobody watches. So does
-    # Dart release, which a tag push starts with nobody watching.
-    # Queue failures stay on the PR and go to the queue watcher and fixer.
+    # one is already watching it. Release alerts however it ran: a push to
+    # main starts it with nobody watching. So does Dart release, which a tag
+    # push starts with nobody watching.
     if: >-
       (github.event.workflow_run.conclusion == 'failure' ||
       github.event.workflow_run.conclusion == 'timed_out') &&
       (github.event.workflow_run.event == 'schedule' ||
-      contains(fromJSON('["Release", "Check", "Dart release"]'), github.event.workflow_run.name))
+      contains(fromJSON('["Release", "Dart release"]'), github.event.workflow_run.name))
     runs-on: ubuntu-latest
     timeout-minutes: 5
 

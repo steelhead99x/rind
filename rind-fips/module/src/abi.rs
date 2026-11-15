@@ -37,7 +37,7 @@ pub(crate) fn status(result: Result<(), Error>) -> Status {
         Error::RngFailed => RNG_FAILED,
         Error::NotEqual => NOT_EQUAL,
         Error::Unsupported => UNSUPPORTED,
-        // HPKE's message limit, which no service here reaches.
+        Error::MessageLimitReached => MESSAGE_LIMIT_REACHED,
         _ => FAULT,
     };
     kind | rind::fips::error_code(error) << 8

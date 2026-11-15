@@ -22,6 +22,7 @@ enum Verification {
     Rsa(Rsa),
     Ed25519(fn(&[u8]) -> Result<Parsed, Error>),
     MlDsa(MlDsaAlgorithm),
+    SlhDsa(SlhDsaAlgorithm),
 }
 
 type Verify<K> = fn(&K, &[u8], &[u8]) -> Result<(), Error>;
@@ -49,6 +50,7 @@ enum Parsed {
     Rsa(RsaVerifier, RsaVerification),
     Ed25519(Verifier<Ed25519VerifyingKey>),
     MlDsa(MlDsaVerifier),
+    SlhDsa(SlhDsaAlgorithm),
 }
 
 impl PublicKey {
@@ -68,6 +70,7 @@ impl PublicKey {
             Verification::Rsa(rsa) => return (rsa.parse)(rsa, bytes),
             Verification::Ed25519(parse) => parse(bytes)?,
             Verification::MlDsa(algorithm) => algorithm.parse(bytes)?,
+            Verification::SlhDsa(algorithm) => algorithm.parse(bytes)?,
         };
         Ok(Self {
             key,
@@ -119,6 +122,9 @@ impl PublicKey {
             Verification::MlDsa(ml_dsa) => {
                 Self::new(algorithm, spki::decode(der, &[ml_dsa.oid], None)?)
             }
+            Verification::SlhDsa(slh_dsa) => {
+                Self::new(algorithm, spki::decode(der, &[slh_dsa.oid], None)?)
+            }
         }
     }
 
@@ -134,6 +140,7 @@ impl PublicKey {
             Parsed::Rsa(..) => (&asn1::oid::rsaEncryption, Some(asn1::Any::Null(asn1::Null))),
             Parsed::Ed25519(_) => (&asn1::oid::id_ed25519, None),
             Parsed::MlDsa(key) => (key.algorithm.oid, None),
+            Parsed::SlhDsa(algorithm) => (algorithm.oid, None),
         };
         Spki(Buffer::encode(|output| {
             spki::encode(self.as_ref(), algorithm, parameters, output)
@@ -178,6 +185,7 @@ impl PublicKey {
             }
             Parsed::Ed25519(key) => key.verify(message, signature),
             Parsed::MlDsa(key) => key.verify(self.as_ref(), message, signature),
+            Parsed::SlhDsa(algorithm) => (algorithm.verify)(self.as_ref(), message, signature),
         }
     }
 
@@ -198,7 +206,9 @@ impl PublicKey {
             Parsed::EcdsaP256(key, _) => key.verify_digest(digest, signature),
             Parsed::EcdsaP384(key, _) => key.verify_digest(digest, signature),
             Parsed::EcdsaP521(key, _) => key.verify_digest(digest, signature),
-            Parsed::Rsa(..) | Parsed::Ed25519(_) | Parsed::MlDsa(_) => Err(Error::Unsupported),
+            Parsed::Rsa(..) | Parsed::Ed25519(_) | Parsed::MlDsa(_) | Parsed::SlhDsa(_) => {
+                Err(Error::Unsupported)
+            }
         }
     }
 }
@@ -219,6 +229,7 @@ impl fmt::Debug for PublicKey {
             Parsed::Rsa(_, verification) => f.field("algorithm", verification),
             Parsed::Ed25519(_) => f.field("algorithm", &format_args!("Ed25519")),
             Parsed::MlDsa(key) => f.field("algorithm", &format_args!("{}", key.algorithm.name)),
+            Parsed::SlhDsa(algorithm) => f.field("algorithm", &format_args!("{}", algorithm.name)),
         };
         f.field("bytes", &self.as_ref()).finish()
     }
@@ -335,9 +346,9 @@ The model departs from the Rust in five ways, and adds no axiom:
   `signature.rs`, where only `parse_ed25519` and `Ed25519KeyPair::public_key`
   build a `Parsed::Ed25519`, each with that function. `admin/prove` checks
   that the quotes hold every mention of `Parsed::Ed25519(` there.
-- ECDSA's, RSA's, and ML-DSA's variants, which no theorem here is about,
-  are one `Other` variant of each type, holding what `PublicKey::new` and
-  `PublicKey::verify` do for them. `Verification::Ecdsa`'s decompressor,
+- ECDSA's, RSA's, ML-DSA's, and SLH-DSA's variants, which no theorem here is
+  about, are one `Other` variant of each type, holding what `PublicKey::new`
+  and `PublicKey::verify` do for them. `Verification::Ecdsa`'s decompressor,
   which only `PublicKey::from_spki` reads, is left out.
 - `?` is a `match`, since each error it passes on is already an `Error`.
 
