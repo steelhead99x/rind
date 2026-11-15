@@ -99,13 +99,15 @@ fn round_constant<const I: usize>(kp: *const u64) -> u64 {
     unsafe { kp.add(I).read() }
 }
 
-// Big-endian word at byte `BYTE`. `BYTE` is a literal offset.
+// Big-endian word at byte `BYTE + OFF`, both literal offsets. Two
+// parameters because a const argument cannot be `{ BYTE + 4 }` on stable,
+// but an `asm!` const operand can add them.
 #[cfg(target_arch = "xtensa")]
 #[inline(always)]
-fn be_u32<const BYTE: usize>(block: &[u8; 128]) -> u32 {
+fn be_u32<const BYTE: usize, const OFF: usize>(block: &[u8; 128]) -> u32 {
     let y;
     // SAFETY: the same `l32i` plus byte swap as `sha256_iram`'s message
-    // load. `BYTE` is a multiple of 4 in `0..128`. ESP-IDF v5.5.1 sets
+    // load. `BYTE + OFF` is a multiple of 4 in `0..128`. ESP-IDF v5.5.1 sets
     // `XCHAL_UNALIGNED_LOAD_HW` to 1 and `XCHAL_UNALIGNED_LOAD_EXCEPTION`
     // to 0 on ESP32, ESP32-S2, and ESP32-S3, so `l32i` does not trap and
     // does not call a helper when `block` is not word-aligned. The sequence
@@ -124,7 +126,7 @@ fn be_u32<const BYTE: usize>(block: &[u8; 128]) -> u32 {
             "src {y}, {y}, {y}",
             "src {y}, a14, {y}",
             p = in(reg) block.as_ptr(),
-            byte = const BYTE,
+            byte = const BYTE + OFF,
             y = lateout(reg) y,
             out("a14") _,
             out("sar") _,
@@ -137,8 +139,8 @@ fn be_u32<const BYTE: usize>(block: &[u8; 128]) -> u32 {
 #[cfg(target_arch = "xtensa")]
 #[inline(always)]
 fn message_word<const BYTE: usize>(block: &[u8; 128]) -> u64 {
-    let hi = be_u32::<BYTE>(block) as u64;
-    let lo = be_u32::<{ BYTE + 4 }>(block) as u64;
+    let hi = be_u32::<BYTE, 0>(block) as u64;
+    let lo = be_u32::<BYTE, 4>(block) as u64;
     (hi << 32) | lo
 }
 
@@ -217,7 +219,7 @@ macro_rules! schedule_rounds {
     all(
         target_arch = "xtensa",
         target_os = "espidf",
-        target_feature = "esp32s3ops",
+        rind_esp32s3,
         not(feature = "esp32s3-sha512-flash"),
     ),
     unsafe(link_section = ".iram1.text")
@@ -306,7 +308,7 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     all(
         target_arch = "xtensa",
         target_os = "espidf",
-        target_feature = "esp32s3ops",
+        rind_esp32s3,
         not(feature = "esp32s3-sha512-flash"),
     ),
     unsafe(link_section = ".dram1.rodata")

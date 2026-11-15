@@ -57,7 +57,9 @@ awk '
 
 mkdir -p "$work/probe/src"
 {
-  printf '%s\n' '#![no_std]' '#![allow(dead_code, rustdoc::broken_intra_doc_links)]'
+  # rind/src/lib.rs enables asm_experimental_arch on Xtensa; the probe
+  # needs the same gate for the message-load asm.
+  printf '%s\n' '#![no_std]' '#![feature(asm_experimental_arch)]' '#![allow(dead_code, rustdoc::broken_intra_doc_links)]'
   cat "$work/body.rs"
   cat << 'EOF'
 
@@ -67,6 +69,9 @@ pub fn sha512_entry(state: &mut [u64; 8], blocks: &[u8]) {
 }
 EOF
 } > "$work/probe/src/lib.rs"
+
+# rind's build script, so the probe gets the same `rind_esp32s3` cfg.
+cp "$root/rind/build.rs" "$work/probe/build.rs"
 
 cat > "$work/probe/Cargo.toml" << 'EOF'
 [package]

@@ -108,9 +108,6 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   # Builds the FIPS module so `RIND_FIPS_BREAK` corrupts the self-test it
   # names, as a lab checks each failure path (`src/fips.rs`).
   "cfg(rind_fips_break)",
-  # Set by the ESP32-S3 Xtensa target. The host's built-in list does not
-  # name it, and this build is what places rolled SHA-512 in IRAM.
-  'cfg(target_feature, values("esp32s3ops"))',
   # curve25519-dalek's backend overrides, which armv7 refuses.
   'cfg(curve25519_dalek_bits, values("32", "64"))',
   'cfg(curve25519_dalek_backend, values("fiat", "serial", "simd", "avx512"))',
