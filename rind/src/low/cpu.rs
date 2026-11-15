@@ -108,12 +108,18 @@ std::thread_local! {
 // A bare-metal target (`target_os = "none"`) has no thread-local storage for
 // the count, and one count shared by every core and interrupt handler would
 // race: a guard dropped in one could turn DIT off under another's operation.
-// So there the guard keeps no count and does nothing, which is sound only
-// because build.rs gives those targets the arm or portable backend, neither
-// of which sets any CPU state for a guard to hold.
+// So there the guard keeps no count and does nothing. That is sound because
+// none of these backends change CPU state on bare metal: x86_64's
+// `enter_cpu_state` is a no-op, aarch64 sets DIT only for a hosted Apple
+// target, and arm and portable never set it.
 #[cfg(all(
     target_os = "none",
-    not(any(rind_backend = "arm", rind_backend = "portable"))
+    not(any(
+        rind_backend = "arm",
+        rind_backend = "portable",
+        rind_backend = "x86_64",
+        rind_backend = "aarch64",
+    ))
 ))]
 compile_error!("`Dit` keeps no count on bare metal, so its backend must set no CPU state");
 

@@ -106,7 +106,9 @@ module rs '^(rind[^/]*/|fuzz/|thirdparty/|Cargo\.(toml|lock)$|\.rustfmt(\.unstab
 # armv7 builds run in nix's cross shells.
 cross_tools=cargo
 [[ $(uname -s) != Linux ]] || cross_tools='cargo nix'
-module cross '^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|flake\.(nix|lock)$)' \
+# `sh/bare-metal.sh` is this module's script. It is not under `rind/src/`, so
+# `reach` treats a change to it as every backend.
+module cross '^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|sh/bare-metal\.sh$|Cargo\.(toml|lock)$|flake\.(nix|lock)$)' \
     tools="$cross_tools" compiles
 # Dependents may build with the workspace's declared rust-version. Plain
 # `cargo check` covers the lib and bin targets, all a dependent builds, so a
@@ -250,11 +252,13 @@ for module in "${modules[@]}"; do
     if [[ -z "$all" && -n "$pattern" ]] && ! grep -qE "$pattern" "$changed"; then
         continue
     fi
-    # The host's build already covers its own backend. A plain assignment, so
-    # a failing `reach` stops the run instead of reading as no backend.
+    # The host's Linux build covers its own backend, but not the bare-metal
+    # targets, and those exist for every backend, including the host's. A
+    # plain assignment, so a failing `reach` stops the run instead of
+    # reading as no backend.
     if [[ "$verb:$module" == check:cross ]]; then
         cross_reach=$(reach cross)
-        reaches "$cross_reach" aarch64 arm portable || continue
+        reaches "$cross_reach" x86_64 aarch64 arm portable || continue
     fi
     # Selection must not depend on the tools setup has yet to install.
     if [[ -n "$query" ]]; then
@@ -473,9 +477,14 @@ step() {
                         --features "$features,getrandom/wasm_js" -- --deny warnings
                 done
             fi
-            # And without std, on bare metal. Clippy does not assemble the
-            # arm backend, so the script also builds that library.
-            sh/bare-metal.sh
+            # And without std, on bare metal. Every backend has a target here:
+            # portable on M-profile, RISC-V, and soft-float aarch64; arm on
+            # A- and R-profile; aarch64 and x86_64 on their `none` targets.
+            # A change that reaches none of them skips the script. `run`
+            # keeps the lane's INT/QUIT trap, which a bare script would not.
+            if reaches "$backends" x86_64 aarch64 arm portable; then
+                run sh/bare-metal.sh
+            fi
             ;;
         check:vartime)
             # Each backend's targets, as admin/ct-vartime names them; no

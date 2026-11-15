@@ -6,10 +6,16 @@
 //! aarch64 or 32-bit ARM target gets the portable backend, as does every
 //! other architecture. The aarch64 backend needs NEON, so a target without
 //! it, such as `aarch64-unknown-none-softfloat`, gets the portable backend.
-//! The x86_64 and aarch64 backends still detect optional features through
-//! std, so every bare-metal target (`target_os = "none"`, such as
-//! `x86_64-unknown-none` or `aarch64-unknown-none`) gets the portable
-//! backend instead, NEON or not. The 32-bit ARM assembly is cut for ARMv7,
+//! Bare-metal x86_64 keeps the x86_64 backend when the target enables SSE2.
+//! `x86_64-unknown-none` does not: it is soft-float, so that assembly's
+//! `xmm` operands are refused until the build passes
+//! `-C target-feature=+sse,+sse2,-soft-float`. Leaving soft-float set beside
+//! SSE makes LLVM abort while splitting vector results. The backend then
+//! reads CPUID and XCR0 through `core::arch`, and picks an AVX tier only
+//! where the kernel saves those registers. Bare-metal aarch64
+//! with NEON keeps the aarch64 backend,
+//! and its crypto tier is the compile-time target features, because there
+//! is no OS to ask. The 32-bit ARM assembly is cut for ARMv7,
 //! so a target for an earlier core, such as ARMv6's
 //! `arm-unknown-linux-gnueabihf` or ARMv5TE's `arm-linux-androideabi`, gets
 //! the portable backend too, and so does a microcontroller (M-profile)
@@ -33,9 +39,10 @@
 //! barrier. Arm64EC is one of them: its `reg` class has been stable since
 //! Rust 1.84, and it is a subset of AArch64's.
 //!
-//! On bare-metal x86_64 it also requires curve25519-dalek's serial backend.
-//! Dalek's default on every x86_64 target is its AVX2 backend, chosen at run
-//! time, and `x86_64-unknown-none` does not promise those registers are saved.
+//! On bare-metal x86_64 it also requires curve25519-dalek's `serial` or
+//! `fiat` backend. Dalek's default on every x86_64 target is its AVX2
+//! backend, chosen at run time, and `x86_64-unknown-none` does not promise
+//! those registers are saved.
 
 use std::env;
 
@@ -53,14 +60,17 @@ fn main() {
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
     let forced = env::var_os("CARGO_CFG_RIND_PORTABLE").is_some();
     let bare_metal = env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "none");
-    let neon =
-        env::var("CARGO_CFG_TARGET_FEATURE").is_ok_and(|f| f.split(',').any(|f| f == "neon"));
+    let target_feature = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
+    let enabled = |name: &str| target_feature.split(',').any(|feature| feature == name);
+    let neon = enabled("neon");
+    // The x86_64 assembly names `xmm` registers, which need SSE2. A hosted
+    // x86_64 target enables it. `x86_64-unknown-none` does not, until the
+    // build asks for it. That target is also soft-float, which has to be
+    // cleared in the same flag or LLVM cannot legalize the vectors.
+    let sse2 = enabled("sse2");
     let backend = match arch.as_str() {
-        // The x86_64 and aarch64 backends still detect optional features
-        // through std, so a bare-metal target cannot use them. A hosted
-        // aarch64 target uses that backend only when it enables NEON.
-        "x86_64" if little && !forced && !bare_metal => "x86_64",
-        "aarch64" if little && !forced && neon && !bare_metal => "aarch64",
+        "x86_64" if little && !forced && (!bare_metal || sse2) => "x86_64",
+        "aarch64" if little && !forced && neon => "aarch64",
         // M-profile is Thumb-only and has no NEON, so the arm assembly
         // cannot run there.
         "arm" if little && !forced && armv7_or_later() && !m_profile() => "arm",
@@ -69,9 +79,9 @@ fn main() {
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
 
     // Dalek selects AVX2 for every 64-bit x86_64 target unless the build
-    // names a backend. Refuse that default here; the serial backend is the
-    // one the portable constant-time jobs build.
-    if arch == "x86_64" && bare_metal && !dalek_backend_is_serial() {
+    // names a backend. Refuse that default, and `simd` or `avx512`.
+    // `serial` and `fiat` do not use those registers.
+    if arch == "x86_64" && bare_metal && !dalek_backend_avoids_avx() {
         println!("cargo::rustc-cfg=rind_x86_64_none_dalek_unpinned");
     }
 
@@ -143,34 +153,25 @@ fn m_profile() -> bool {
     rest.starts_with('m') || rest.starts_with("em")
 }
 
-/// Whether this build named curve25519-dalek's serial backend.
+/// Whether this build named a curve25519-dalek backend that does not use AVX.
 ///
-/// Cargo passes a `--cfg` from `RUSTFLAGS` to the build script as
-/// `CARGO_CFG_<NAME>`, and the same flags are in `CARGO_ENCODED_RUSTFLAGS`
-/// separated by ASCII unit separators.
-fn dalek_backend_is_serial() -> bool {
-    if env::var("CARGO_CFG_CURVE25519_DALEK_BACKEND").is_ok_and(|value| value == "serial") {
-        return true;
-    }
-    let Ok(flags) = env::var("CARGO_ENCODED_RUSTFLAGS") else {
+/// `serial` and `fiat` are constant-time Rust. `simd` and `avx512`, and the
+/// unset default on x86_64, use AVX registers this target does not promise
+/// are saved. Cargo passes a `RUSTFLAGS` `--cfg` to the build script as
+/// `CARGO_CFG_<NAME>`, one value or several separated by commas.
+fn dalek_backend_avoids_avx() -> bool {
+    let Ok(value) = env::var("CARGO_CFG_CURVE25519_DALEK_BACKEND") else {
         return false;
     };
-    let args: Vec<&str> = flags.split('\u{1f}').collect();
-    args.iter().enumerate().any(|(index, arg)| {
-        let cfg = if *arg == "--cfg" {
-            args.get(index + 1).copied()
-        } else {
-            arg.strip_prefix("--cfg=")
-        };
-        let Some(cfg) = cfg else {
+    let mut any = false;
+    for value in value.split(',') {
+        if value.is_empty() {
+            continue;
+        }
+        any = true;
+        if value != "serial" && value != "fiat" {
             return false;
-        };
-        let Some(value) = cfg
-            .trim_matches('"')
-            .strip_prefix("curve25519_dalek_backend=")
-        else {
-            return false;
-        };
-        value.trim_matches('"') == "serial"
-    })
+        }
+    }
+    any
 }

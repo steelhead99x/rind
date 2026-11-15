@@ -4,16 +4,18 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
 pub(crate) fn enter_cpu_state() -> u32 {
-    #[cfg(target_vendor = "apple")]
+    #[cfg(all(target_vendor = "apple", not(target_os = "none")))]
     return dit::maybe_enable();
-    #[cfg(not(target_vendor = "apple"))]
+    // Bare metal, including a custom Apple target, sets no DIT: there is no
+    // per-context guard, and a shared one would race with interrupt handlers.
+    #[cfg(not(all(target_vendor = "apple", not(target_os = "none"))))]
     0
 }
 
 pub(crate) fn leave_cpu_state(old: u32) {
-    #[cfg(target_vendor = "apple")]
+    #[cfg(all(target_vendor = "apple", not(target_os = "none")))]
     dit::maybe_disable(old);
-    #[cfg(not(target_vendor = "apple"))]
+    #[cfg(not(all(target_vendor = "apple", not(target_os = "none"))))]
     let _ = old;
 }
 
@@ -146,9 +148,9 @@ impl HaveSha3 {
 
 const CRYPTO_EXT: u8 = 1 << 1;
 const SHA3: u8 = 1 << 2;
-#[cfg(target_vendor = "apple")]
+#[cfg(all(target_vendor = "apple", not(target_os = "none")))]
 const DIT: u8 = 1 << 3;
-#[cfg(target_vendor = "apple")]
+#[cfg(all(target_vendor = "apple", not(target_os = "none")))]
 const SB: u8 = 1 << 4;
 const DETECTED: u8 = 1 << 7;
 
@@ -173,22 +175,20 @@ fn detect_once() -> u8 {
 }
 
 fn detect() -> u8 {
-    use std::arch::is_aarch64_feature_detected as detected;
-
-    let crypto_ext = test_toggle("aes", detected!("aes"))
-        && test_toggle("pmull", detected!("pmull"))
+    let crypto_ext = test_toggle("aes", feature_aes())
+        && test_toggle("pmull", feature_pmull())
         // Rust's `sha2` covers the SHA-1 instructions too.
-        && test_toggle("sha2", detected!("sha2"));
-    let sha3 = test_toggle("sha3", detected!("sha3"));
+        && test_toggle("sha2", feature_sha2());
+    let sha3 = test_toggle("sha3", feature_sha3());
     let features = (if crypto_ext { CRYPTO_EXT } else { 0 }) | (if sha3 { SHA3 } else { 0 });
-    #[cfg(target_vendor = "apple")]
+    #[cfg(all(target_vendor = "apple", not(target_os = "none")))]
     let features = features
-        | if test_toggle("dit", detected!("dit")) {
+        | if test_toggle("dit", feature_dit()) {
             DIT
         } else {
             0
         }
-        | if test_toggle("sb", detected!("sb")) {
+        | if test_toggle("sb", feature_sb()) {
             SB
         } else {
             0
@@ -196,11 +196,59 @@ fn detect() -> u8 {
     features
 }
 
+/// A hosted target asks the OS. Bare metal has nothing to ask, so the tier is
+/// the compile-time target features. Rust's `aes` feature is FEAT_AES and
+/// FEAT_PMULL; `pmull` is not a stable target feature of its own.
+#[cfg(not(target_os = "none"))]
+fn feature_aes() -> bool {
+    std::arch::is_aarch64_feature_detected!("aes")
+}
+#[cfg(target_os = "none")]
+fn feature_aes() -> bool {
+    cfg!(target_feature = "aes")
+}
+
+#[cfg(not(target_os = "none"))]
+fn feature_pmull() -> bool {
+    std::arch::is_aarch64_feature_detected!("pmull")
+}
+#[cfg(target_os = "none")]
+fn feature_pmull() -> bool {
+    cfg!(target_feature = "aes")
+}
+
+#[cfg(not(target_os = "none"))]
+fn feature_sha2() -> bool {
+    std::arch::is_aarch64_feature_detected!("sha2")
+}
+#[cfg(target_os = "none")]
+fn feature_sha2() -> bool {
+    cfg!(target_feature = "sha2")
+}
+
+#[cfg(not(target_os = "none"))]
+fn feature_sha3() -> bool {
+    std::arch::is_aarch64_feature_detected!("sha3")
+}
+#[cfg(target_os = "none")]
+fn feature_sha3() -> bool {
+    cfg!(target_feature = "sha3")
+}
+
+#[cfg(all(target_vendor = "apple", not(target_os = "none")))]
+fn feature_dit() -> bool {
+    std::arch::is_aarch64_feature_detected!("dit")
+}
+#[cfg(all(target_vendor = "apple", not(target_os = "none")))]
+fn feature_sb() -> bool {
+    std::arch::is_aarch64_feature_detected!("sb")
+}
+
 // DIT changes what runs only on Apple's cores, where from the M3 it turns off
 // the data memory-dependent prefetcher that GoFetch reads secrets through. Arm
 // says it has no effect on any current Arm core, so elsewhere rind skips the
 // cost of setting it.
-#[cfg(target_vendor = "apple")]
+#[cfg(all(target_vendor = "apple", not(target_os = "none")))]
 mod dit {
     pub(super) fn maybe_enable() -> u32 {
         if super::features() & super::DIT != 0 {
@@ -271,15 +319,16 @@ mod dit {
     }
 }
 
-#[cfg(not(any(debug_assertions, rind_cpu_disable)))]
+#[cfg(any(target_os = "none", not(any(debug_assertions, rind_cpu_disable))))]
 fn test_toggle(_id: &str, detected: bool) -> bool {
     detected
 }
 
 /// Lets a debug build, or a release one with `--cfg rind_cpu_disable`, deny a
 /// feature with `RIND_CPU_DISABLE_<id>`, as on x86_64, so a CPU with the
-/// crypto extension also tests the code for one without.
-#[cfg(any(debug_assertions, rind_cpu_disable))]
+/// crypto extension also tests the code for one without. Bare metal has no
+/// environment to read.
+#[cfg(all(not(target_os = "none"), any(debug_assertions, rind_cpu_disable)))]
 fn test_toggle(id: &str, detected: bool) -> bool {
     if std::env::var(format!("RIND_CPU_DISABLE_{id}")).is_ok() {
         // The FIPS module honours the mask in its release build, where its
@@ -327,7 +376,7 @@ mod tests {
         unsafe { call!(unsafe zero_bytes, bytes.as_mut_ptr(), 100) };
         assert_eq!(bytes, [0; 100]);
         call!(prefetch_ro::<u8>, bytes.as_ptr());
-        #[cfg(target_vendor = "apple")]
+        #[cfg(all(target_vendor = "apple", not(target_os = "none")))]
         if std::arch::is_aarch64_feature_detected!("dit") {
             // SAFETY: the CPU has DIT, which this leaves as it found it.
             unsafe {
@@ -335,7 +384,7 @@ mod tests {
                 call!(unsafe dit::write, on);
             }
         }
-        #[cfg(target_vendor = "apple")]
+        #[cfg(all(target_vendor = "apple", not(target_os = "none")))]
         if std::arch::is_aarch64_feature_detected!("sb") {
             // SAFETY: the CPU has SB.
             unsafe { call!(unsafe dit::speculation_barrier) };
@@ -367,7 +416,7 @@ mod tests {
             available!("aes", "pmull", "sha2")
         );
         assert_eq!(HaveSha3::check().is_some(), available!("sha3"));
-        #[cfg(target_vendor = "apple")]
+        #[cfg(all(target_vendor = "apple", not(target_os = "none")))]
         assert_eq!(features() & SB != 0, available!("sb"));
     }
 
@@ -386,7 +435,7 @@ mod tests {
 
     // A core that runs `mrs DIT` has DIT, whatever the OS reports, so a child
     // process runs it.
-    #[cfg(target_vendor = "apple")]
+    #[cfg(all(target_vendor = "apple", not(target_os = "none")))]
     #[test]
     fn enables_dit_whenever_the_cpu_has_it() {
         let has_dit = child_reads_dit();
@@ -420,7 +469,7 @@ mod tests {
         }
     }
 
-    #[cfg(target_vendor = "apple")]
+    #[cfg(all(target_vendor = "apple", not(target_os = "none")))]
     #[test]
     fn dit_hold_keeps_dit_on_across_calls() {
         if features() & DIT == 0 {
@@ -446,7 +495,7 @@ mod tests {
         assert_eq!(unsafe { dit::read() }, 0);
     }
 
-    #[cfg(target_vendor = "apple")]
+    #[cfg(all(target_vendor = "apple", not(target_os = "none")))]
     fn child_reads_dit() -> bool {
         let test = concat!(module_path!(), "::reads_dit");
         let test = test.split_once("::").unwrap().1;
@@ -467,7 +516,7 @@ mod tests {
 
     /// Runs `mrs DIT` for `child_reads_dit`, which an illegal instruction
     /// kills on a core without DIT.
-    #[cfg(target_vendor = "apple")]
+    #[cfg(all(target_vendor = "apple", not(target_os = "none")))]
     #[test]
     fn reads_dit() {
         if std::env::var_os("RIND_TEST_READ_DIT").is_some() {

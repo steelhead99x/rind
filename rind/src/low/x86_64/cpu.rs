@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 use core::arch::x86_64::*;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 pub(crate) fn enter_cpu_state() -> u32 {
     // DOIT: "Data Operand Independent Timing" -- turning this on
@@ -370,6 +370,38 @@ impl HaveBmi2Adx {
     }
 }
 
+macro_rules! cached_tokens {
+    ($($name:ident),+ $(,)?) => {$(
+        impl $name {
+            /// Rebuilds a token the SHA path cache already proved.
+            pub(super) const fn cached() -> Self {
+                Self(())
+            }
+        }
+    )+};
+}
+
+cached_tokens!(
+    HaveSha1, HaveSha256, HaveAvx, HaveAvx2, HaveSsse3, HaveSha512
+);
+
+/// Remembers a non-zero `pick` in `slot`. `0` means empty, so `pick` must
+/// not return it. Concurrent callers may all run `pick`; it has to agree.
+pub(super) fn cached_tag(slot: &AtomicU8, pick: impl FnOnce() -> u8) -> u8 {
+    match slot.load(Ordering::Acquire) {
+        0 => {
+            let tag = pick();
+            // Zero means empty. A zero tag would be read as a miss forever.
+            assert_ne!(tag, 0, "a cached feature tag is never zero");
+            match slot.compare_exchange(0, tag, Ordering::Release, Ordering::Acquire) {
+                Ok(_) => tag,
+                Err(stored) => stored,
+            }
+        }
+        tag => tag,
+    }
+}
+
 /// Whether the CPU is Intel's, for code that is fastest on one vendor's cores.
 pub(crate) fn is_intel() -> bool {
     has(INTEL)
@@ -434,6 +466,186 @@ fn detect_once() -> u32 {
     features
 }
 
+/// CPUID leaves the bare-metal detector reads. `xcr0` is `None` when
+/// `XGETBV` would raise `#UD`, because XSAVE or OSXSAVE is clear.
+#[cfg(any(test, target_os = "none"))]
+struct CpuidLeaves {
+    intel: bool,
+    leaf1_ecx: u32,
+    /// Leaf 7, subleaf 0.
+    leaf7_ebx: u32,
+    leaf7_ecx: u32,
+    /// Leaf 7, subleaf 1, EAX. SHA512 is reported here, not in subleaf 0.
+    leaf7_sub1_eax: u32,
+    xcr0: Option<u32>,
+}
+
+#[cfg(any(test, target_os = "none"))]
+fn read_cpuid_leaves() -> CpuidLeaves {
+    // `__cpuid` is safe from Rust 1.94 but `unsafe` on the 1.90 MSRV.
+    #[allow(unused_unsafe)]
+    // SAFETY: every x86_64 CPU implements CPUID.
+    let id = unsafe { __cpuid(0) };
+    let intel = (id.ebx, id.edx, id.ecx) == (0x756e_6547, 0x4965_6e69, 0x6c65_746e);
+    if id.eax < 1 {
+        return CpuidLeaves {
+            intel,
+            leaf1_ecx: 0,
+            leaf7_ebx: 0,
+            leaf7_ecx: 0,
+            leaf7_sub1_eax: 0,
+            xcr0: None,
+        };
+    }
+    // `__cpuid` is safe from Rust 1.94 but `unsafe` on the 1.90 MSRV.
+    #[allow(unused_unsafe)]
+    // SAFETY: every x86_64 CPU implements CPUID. Leaf 1 exists here.
+    let leaf1 = unsafe { __cpuid(1) };
+    let (leaf7_ebx, leaf7_ecx, leaf7_sub1_eax) = if id.eax >= 7 {
+        #[allow(unused_unsafe)]
+        // SAFETY: CPUID reported a maximum leaf of at least 7.
+        let leaf7 = unsafe { __cpuid(7) };
+        #[allow(unused_unsafe)]
+        // SAFETY: as above. Subleaf 1 is zero when the CPU does not have it.
+        let sub1 = unsafe { __cpuid_count(7, 1) };
+        (leaf7.ebx, leaf7.ecx, sub1.eax)
+    } else {
+        (0, 0, 0)
+    };
+    CpuidLeaves {
+        intel,
+        leaf1_ecx: leaf1.ecx,
+        leaf7_ebx,
+        leaf7_ecx,
+        leaf7_sub1_eax,
+        xcr0: os_xcr0(leaf1.ecx),
+    }
+}
+
+#[cfg(any(test, target_os = "none"))]
+fn os_xcr0(leaf1_ecx: u32) -> Option<u32> {
+    const XSAVE: u32 = 1 << 26;
+    const OSXSAVE: u32 = 1 << 27;
+    if leaf1_ecx & (XSAVE | OSXSAVE) != XSAVE | OSXSAVE {
+        return None;
+    }
+    // SAFETY: CPUID reports XSAVE and OSXSAVE, so XGETBV of XCR0 does not
+    // raise #UD. The features below use only the low 32 bits of XCR0.
+    let xcr0 = unsafe { _xgetbv(0) };
+    Some((xcr0 & 0xffff_ffff) as u32)
+}
+
+/// The same bits `is_x86_feature_detected!` would set for the features rind
+/// asks about, from CPUID and XCR0, with no OS and no `std`.
+///
+/// AVX, AVX2, AVX-512, and SHA512 need the XSAVE and OSXSAVE CPUID bits and
+/// the matching XCR0 bits: without XSAVE the OS cannot have enabled that
+/// state, so a present `xcr0` is ignored. AVX-512 also needs FMA and F16C,
+/// which Rust's detector requires because its assembler treats `avx512f` as
+/// implying them. Intel's Skylake erratum SKL052 reports BMI1 and BMI2 on
+/// parts that do not implement them and do not have AVX; those bits are
+/// cleared, as in std.
+#[cfg(any(test, target_os = "none"))]
+fn feature_bits(leaves: CpuidLeaves) -> u32 {
+    let bit = |reg: u32, index: u32| reg & (1 << index) != 0;
+    let xcr0 = leaves.xcr0.unwrap_or(0);
+    // std reads XCR0 only when both XSAVE and OSXSAVE are set. An `xcr0`
+    // without those bits did not come from a kernel that enabled the state.
+    let xsave = (1 << 26) | (1 << 27);
+    let os_state = leaves.xcr0.is_some() && (leaves.leaf1_ecx & xsave) == xsave;
+    let os_avx = os_state && xcr0 & 6 == 6;
+    let os_avx512 = os_avx && xcr0 & 0xe0 == 0xe0;
+    let f16c = bit(leaves.leaf1_ecx, 29);
+    let fma = os_avx && bit(leaves.leaf1_ecx, 12);
+    let avx512 = os_avx512 && f16c && fma;
+
+    let mut bits = 0u32;
+    if bit(leaves.leaf1_ecx, 25) {
+        bits |= AES;
+    }
+    if bit(leaves.leaf1_ecx, 1) {
+        bits |= PCLMULQDQ;
+    }
+    if bit(leaves.leaf1_ecx, 9) {
+        bits |= SSSE3;
+    }
+    if bit(leaves.leaf1_ecx, 19) {
+        bits |= SSE41;
+    }
+    if bit(leaves.leaf1_ecx, 22) {
+        bits |= MOVBE;
+    }
+    if bit(leaves.leaf1_ecx, 23) {
+        bits |= POPCNT;
+    }
+    if bit(leaves.leaf7_ebx, 19) {
+        bits |= ADX;
+    }
+    if bit(leaves.leaf7_ebx, 29) {
+        bits |= SHA;
+    }
+    if bit(leaves.leaf7_ebx, 3) {
+        bits |= BMI1;
+    }
+    if bit(leaves.leaf7_ebx, 8) {
+        bits |= BMI2;
+    }
+    if bit(leaves.leaf7_ecx, 9) {
+        bits |= VAES;
+    }
+    if bit(leaves.leaf7_ecx, 10) {
+        bits |= VPCLMULQDQ;
+    }
+    if os_avx {
+        if bit(leaves.leaf1_ecx, 28) {
+            bits |= AVX;
+        }
+        if bit(leaves.leaf7_ebx, 5) {
+            bits |= AVX2;
+        }
+        if bit(leaves.leaf7_sub1_eax, 0) {
+            bits |= SHA512;
+        }
+    }
+    if avx512 {
+        if bit(leaves.leaf7_ebx, 16) {
+            bits |= AVX512F;
+        }
+        if bit(leaves.leaf7_ebx, 17) {
+            bits |= AVX512DQ;
+        }
+        if bit(leaves.leaf7_ebx, 21) {
+            bits |= AVX512IFMA;
+        }
+        if bit(leaves.leaf7_ebx, 30) {
+            bits |= AVX512BW;
+        }
+        if bit(leaves.leaf7_ebx, 31) {
+            bits |= AVX512VL;
+        }
+        if bit(leaves.leaf7_ecx, 1) {
+            bits |= AVX512VBMI;
+        }
+        if bit(leaves.leaf7_ecx, 6) {
+            bits |= AVX512VBMI2;
+        }
+    }
+    if leaves.intel && bits & AVX == 0 {
+        bits &= !(BMI1 | BMI2);
+    }
+    if leaves.intel {
+        bits |= INTEL;
+    }
+    bits
+}
+
+#[cfg(target_os = "none")]
+fn detect() -> u32 {
+    // No `RIND_CPU_DISABLE_*` here: bare metal has no environment to read.
+    feature_bits(read_cpuid_leaves())
+}
+
+#[cfg(not(target_os = "none"))]
 fn detect() -> u32 {
     macro_rules! detect {
         ($name:tt, $bit:expr) => {
@@ -487,7 +699,7 @@ fn detect() -> u32 {
         | detect!("movbe", MOVBE)
 }
 
-#[cfg(not(any(debug_assertions, rind_cpu_disable)))]
+#[cfg(all(not(target_os = "none"), not(any(debug_assertions, rind_cpu_disable))))]
 fn test_toggle(_id: &str, detected: bool) -> bool {
     detected
 }
@@ -497,8 +709,8 @@ fn test_toggle(_id: &str, detected: bool) -> bool {
 /// does the same for a release build, so benches and ctgrind time and check
 /// the code that ships; only `RUSTFLAGS` sets it, never a dependent crate.
 /// The variable drops the dot from `sse4.1`, since shells drop variables
-/// whose names have one.
-#[cfg(any(debug_assertions, rind_cpu_disable))]
+/// whose names have one. Bare metal has no environment to read.
+#[cfg(all(not(target_os = "none"), any(debug_assertions, rind_cpu_disable)))]
 fn test_toggle(id: &str, detected: bool) -> bool {
     if std::env::var(format!("RIND_CPU_DISABLE_{}", id.replace('.', ""))).is_ok() {
         // The FIPS module honours the mask in its release build, where its
@@ -755,5 +967,145 @@ mod tests {
         if let Some(expected) = std::env::var_os("RIND_TEST_X86_AVX512_RSA") {
             assert_eq!(HaveAvx512ForRsa::check().is_some(), expected == "1");
         }
+    }
+
+    fn leaves(
+        intel: bool,
+        leaf1_ecx: u32,
+        leaf7_ebx: u32,
+        leaf7_ecx: u32,
+        leaf7_sub1_eax: u32,
+        xcr0: Option<u32>,
+    ) -> CpuidLeaves {
+        CpuidLeaves {
+            intel,
+            leaf1_ecx,
+            leaf7_ebx,
+            leaf7_ecx,
+            leaf7_sub1_eax,
+            xcr0,
+        }
+    }
+
+    /// This host's CPUID agrees with std, which is what a hosted build runs.
+    #[test]
+    fn bare_metal_detection_matches_std() {
+        let bits = feature_bits(read_cpuid_leaves());
+        assert_eq!(bits & AES != 0, is_x86_feature_detected!("aes"));
+        assert_eq!(bits & VAES != 0, is_x86_feature_detected!("vaes"));
+        assert_eq!(bits & PCLMULQDQ != 0, is_x86_feature_detected!("pclmulqdq"));
+        assert_eq!(
+            bits & VPCLMULQDQ != 0,
+            is_x86_feature_detected!("vpclmulqdq")
+        );
+        assert_eq!(bits & BMI1 != 0, is_x86_feature_detected!("bmi1"));
+        assert_eq!(bits & BMI2 != 0, is_x86_feature_detected!("bmi2"));
+        assert_eq!(bits & ADX != 0, is_x86_feature_detected!("adx"));
+        assert_eq!(bits & POPCNT != 0, is_x86_feature_detected!("popcnt"));
+        assert_eq!(bits & SSSE3 != 0, is_x86_feature_detected!("ssse3"));
+        assert_eq!(bits & AVX != 0, is_x86_feature_detected!("avx"));
+        assert_eq!(bits & AVX2 != 0, is_x86_feature_detected!("avx2"));
+        assert_eq!(bits & AVX512F != 0, is_x86_feature_detected!("avx512f"));
+        assert_eq!(bits & AVX512DQ != 0, is_x86_feature_detected!("avx512dq"));
+        assert_eq!(
+            bits & AVX512IFMA != 0,
+            is_x86_feature_detected!("avx512ifma")
+        );
+        assert_eq!(bits & AVX512BW != 0, is_x86_feature_detected!("avx512bw"));
+        assert_eq!(bits & AVX512VL != 0, is_x86_feature_detected!("avx512vl"));
+        assert_eq!(
+            bits & AVX512VBMI != 0,
+            is_x86_feature_detected!("avx512vbmi")
+        );
+        assert_eq!(
+            bits & AVX512VBMI2 != 0,
+            is_x86_feature_detected!("avx512vbmi2")
+        );
+        assert_eq!(bits & SHA != 0, is_x86_feature_detected!("sha"));
+        assert_eq!(bits & SSE41 != 0, is_x86_feature_detected!("sse4.1"));
+        assert_eq!(bits & MOVBE != 0, is_x86_feature_detected!("movbe"));
+        assert_eq!(bits & SHA512 != 0, is_x86_feature_detected!("sha512"));
+    }
+
+    #[test]
+    fn avx_requires_osxsave_and_xcr0() {
+        const XSAVE: u32 = 1 << 26;
+        const OSXSAVE: u32 = 1 << 27;
+        const AVX_BIT: u32 = 1 << 28;
+        let ecx = XSAVE | OSXSAVE | AVX_BIT;
+        assert_eq!(feature_bits(leaves(false, ecx, 0, 0, 0, None)) & AVX, 0);
+        assert_eq!(
+            feature_bits(leaves(false, ecx, 0, 0, 0, Some(0x2))) & AVX,
+            0
+        );
+        assert_ne!(
+            feature_bits(leaves(false, ecx, 0, 0, 0, Some(0x6))) & AVX,
+            0
+        );
+        // The AVX feature bit without XSAVE still cannot touch YMM.
+        assert_eq!(
+            feature_bits(leaves(false, AVX_BIT, 0, 0, 0, Some(0x6))) & AVX,
+            0
+        );
+    }
+
+    #[test]
+    fn intel_without_avx_drops_bmi() {
+        const BMI1_BIT: u32 = 1 << 3;
+        const BMI2_BIT: u32 = 1 << 8;
+        let bits = feature_bits(leaves(true, 0, BMI1_BIT | BMI2_BIT, 0, 0, None));
+        assert_eq!(bits & (BMI1 | BMI2), 0);
+        assert_ne!(bits & INTEL, 0);
+        let bits = feature_bits(leaves(false, 0, BMI1_BIT | BMI2_BIT, 0, 0, None));
+        assert_eq!(bits & (BMI1 | BMI2), BMI1 | BMI2);
+        assert_eq!(bits & INTEL, 0);
+    }
+
+    #[test]
+    fn avx512_needs_os_state_fma_and_f16c() {
+        const XSAVE: u32 = 1 << 26;
+        const OSXSAVE: u32 = 1 << 27;
+        const AVX_BIT: u32 = 1 << 28;
+        const FMA: u32 = 1 << 12;
+        const F16C: u32 = 1 << 29;
+        const AVX2_BIT: u32 = 1 << 5;
+        const AVX512F_BIT: u32 = 1 << 16;
+        let ready = XSAVE | OSXSAVE | AVX_BIT | FMA | F16C;
+        let xcr = Some(0x6 | 0xe0);
+        assert_ne!(
+            feature_bits(leaves(false, ready, AVX512F_BIT | AVX2_BIT, 0, 0, xcr)) & AVX512F,
+            0
+        );
+        let no_fma = XSAVE | OSXSAVE | AVX_BIT | F16C;
+        assert_eq!(
+            feature_bits(leaves(false, no_fma, AVX512F_BIT, 0, 0, xcr)) & AVX512F,
+            0
+        );
+        assert_eq!(
+            feature_bits(leaves(false, ready, AVX512F_BIT, 0, 0, Some(0x6))) & AVX512F,
+            0
+        );
+    }
+
+    #[test]
+    fn sha512_needs_avx_os_support() {
+        const XSAVE: u32 = 1 << 26;
+        const OSXSAVE: u32 = 1 << 27;
+        const AVX_BIT: u32 = 1 << 28;
+        let ecx = XSAVE | OSXSAVE | AVX_BIT;
+        assert_eq!(
+            feature_bits(leaves(false, ecx, 0, 0, 1, Some(0x2))) & SHA512,
+            0
+        );
+        assert_ne!(
+            feature_bits(leaves(false, ecx, 0, 0, 1, Some(0x6))) & SHA512,
+            0
+        );
+    }
+
+    #[test]
+    fn aes_ignores_xcr0() {
+        const AES_BIT: u32 = 1 << 25;
+        assert_ne!(feature_bits(leaves(false, AES_BIT, 0, 0, 0, None)) & AES, 0);
     }
 }

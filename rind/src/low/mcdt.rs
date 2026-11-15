@@ -157,8 +157,12 @@ fn reports_mcdt_no() -> bool {
 /// ignore `MCDT_NO` with `RIND_CPU_DISABLE_mcdt_no`, so a CPU that reports
 /// it also runs and times the mitigation.
 fn denied() -> bool {
-    cfg!(any(debug_assertions, rind_cpu_disable))
-        && std::env::var_os("RIND_CPU_DISABLE_mcdt_no").is_some()
+    // Bare metal has no environment to read. The `std::env` call has to stay
+    // out of that build: `cfg!` would still type-check it.
+    #[cfg(all(not(target_os = "none"), any(debug_assertions, rind_cpu_disable)))]
+    return std::env::var_os("RIND_CPU_DISABLE_mcdt_no").is_some();
+    #[cfg(not(all(not(target_os = "none"), any(debug_assertions, rind_cpu_disable))))]
+    false
 }
 
 #[cfg(test)]

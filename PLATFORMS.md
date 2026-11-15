@@ -107,16 +107,27 @@ qemu. iOS devices' code is only built.
   Every PR lints it, in debug and release and with and without `wipe`
   (`just bare-metal`), for `thumbv6m-none-eabi` and
   `riscv32imc-unknown-none-elf`, which lack compare-and-swap and so keep no
-  reuse cache,   for `thumbv7em-none-eabihf`, for `armv7a-none-eabi` and
+  reuse cache, for `thumbv7em-none-eabihf`, for `armv7a-none-eabi` and
   `armv7r-none-eabihf` (the 32-bit ARM backend, with its NEON paths left
-  off; those two are also built, so their assembly is assembled), for
-  `aarch64-unknown-none` and `aarch64-unknown-none-softfloat`
-  (the portable backend), and for `x86_64-unknown-none`. That last target
-  is built with `--cfg curve25519_dalek_backend="serial"`, and the library
-  refuses the build without it: dalek's default on x86_64 is its AVX2
-  backend, chosen at run time, and this target does not promise those
-  registers are saved. None of these targets runs a test or a
-  constant-time check.
+  off), for `aarch64-unknown-none` (the aarch64 backend; its crypto tier is
+  the compile-time target features, and NEON is the default) and
+  `aarch64-unknown-none-softfloat` (the portable backend, which has no
+  NEON),   and for `x86_64-unknown-none`. That target is soft-float and does not
+  enable SSE2, so the build stays on the portable backend until it passes
+  `-C target-feature=+sse,+sse2,-soft-float`. SSE2 alone leaves soft-float
+  set, and LLVM then aborts while splitting vector results. With both, it
+  uses the x86_64 backend, which reads CPUID and XCR0 and picks AVX only
+  where the kernel saves those registers. Rustc warns that disabling
+  soft-float this way will become an error
+  ([rust-lang/rust#116344](https://github.com/rust-lang/rust/issues/116344)).
+  The four targets that keep an assembly backend are also built, so their
+  `global_asm` is assembled. `x86_64-unknown-none` is built with
+  `--cfg curve25519_dalek_backend="serial"` or `"fiat"`, and the library
+  refuses the build without one of those: dalek's default on x86_64 is its
+  AVX2 backend, chosen at run time, and this target does not promise those
+  registers are saved. `Dit::hold` does nothing on these targets: there is
+  no thread-local count, and these backends set no CPU state there.
+  None of these targets runs a test or a constant-time check.
   RSA and the NIST curves run on 64-bit limbs on 64-bit targets and on
   `wasm32` built with `-C target-feature=+wide-arithmetic` (stable from Rust
   1.101), whose 128-bit products take one or two multiply instructions, and

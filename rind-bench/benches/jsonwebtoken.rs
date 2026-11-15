@@ -40,16 +40,15 @@ fn ecdsa(signing: &'static EcdsaSigningAlgorithm) -> (EncodingKey, DecodingKey) 
     )
 }
 
-/// The same PKCS#8 and SPKI jsonwebtoken loads, built with rind where aws-lc
-/// does not.
+/// PKCS#8 for the private key, and the raw public key rind-jsonwebtoken
+/// parses: an X9.62 uncompressed point, not a SubjectPublicKeyInfo.
 #[cfg(any(target_arch = "xtensa", target_os = "none"))]
 fn ecdsa(signing: &'static rind::signature::EcdsaSigningAlgorithm) -> (EncodingKey, DecodingKey) {
     let pair = rind::signature::EcdsaKeyPair::generate(signing).unwrap();
     let pkcs8 = pair.to_pkcs8();
-    let spki = pair.to_spki();
     (
         EncodingKey::from_ec_der(pkcs8.as_ref()),
-        DecodingKey::from_ec_der(spki.as_ref()),
+        DecodingKey::from_ec_der(pair.public_key().as_ref()),
     )
 }
 
@@ -79,8 +78,10 @@ fn keys() -> Vec<(Algorithm, EncodingKey, DecodingKey)> {
     #[cfg(any(target_arch = "xtensa", target_os = "none"))]
     let (ed25519, ed25519_public) = {
         let pair = rind::signature::Ed25519KeyPair::generate().unwrap();
-        let ed25519_public = pair.to_spki();
-        (pair.to_pkcs8v1(), ed25519_public.as_ref().to_vec())
+        // The 32-byte public key. `to_spki` is a SubjectPublicKeyInfo, which
+        // `PublicKey::new` refuses.
+        let ed25519_public = pair.public_key().as_ref().to_vec();
+        (pair.to_pkcs8v1(), ed25519_public)
     };
 
     let rsa = include_bytes!("../../rind/src/high/rsa/rsa2048.der");

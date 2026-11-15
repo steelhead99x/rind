@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-use std::sync::OnceLock;
+use core::sync::atomic::AtomicU8;
 
 use crate::low::x86_64;
-use crate::low::x86_64::cpu::{HaveAvx, HaveAvx2, HaveSha1, HaveSsse3, is_intel};
+use crate::low::x86_64::cpu::{HaveAvx, HaveAvx2, HaveSha1, HaveSsse3, cached_tag, is_intel};
 use crate::low::{pad, split_tail};
 
 /// The SHA-1 routine this CPU runs, with the proof it may.
@@ -50,8 +50,21 @@ pub(crate) fn sha1_compress_padded(state: &mut [u32; 5], message: &[u8], length:
 
 fn path() -> Path {
     // Picked once, rather than testing up to four features on every compression.
-    static PATH: OnceLock<Path> = OnceLock::new();
-    *PATH.get_or_init(pick)
+    // An atomic, not `OnceLock`: this file also builds for `x86_64-unknown-none`.
+    static PATH: AtomicU8 = AtomicU8::new(0);
+    match cached_tag(&PATH, || match pick() {
+        Path::Shaext(_) => 1,
+        Path::Avx2(_) => 2,
+        Path::Avx(_) => 3,
+        Path::Ssse3(_) => 4,
+        Path::Nohw => 5,
+    }) {
+        1 => Path::Shaext(HaveSha1::cached()),
+        2 => Path::Avx2(HaveAvx2::cached()),
+        3 => Path::Avx(HaveAvx::cached()),
+        4 => Path::Ssse3(HaveSsse3::cached()),
+        _ => Path::Nohw,
+    }
 }
 
 fn pick() -> Path {

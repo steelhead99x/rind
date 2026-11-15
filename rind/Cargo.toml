@@ -28,8 +28,12 @@ crabgrind = { version = "0.4", optional = true }
 # no C or intrinsics features enabled, fiat-crypto's for the NIST curves, and
 # curve25519-dalek's for X25519 and Ed25519. The cfg is build.rs's choice of
 # the arm or portable backend, which a manifest cannot read, so armv7 builds
-# libcrux-sha2 too, though it runs aws-lc's assembly for SHA-512. Bare-metal
-# targets and an aarch64 target without NEON build the portable backend too.
+# libcrux-sha2 too, though it runs aws-lc's assembly for SHA-512. Every
+# bare-metal target still builds these crates, because the manifest cannot
+# see which backend build.rs picked. A bare-metal x86_64 target with SSE2
+# and soft-float cleared, or a NEON aarch64 target, runs the assembly
+# backend anyway. An aarch64 target without NEON, and `x86_64-unknown-none`
+# without SSE2, stay portable.
 [target.'cfg(any(rind_portable, target_endian = "big", target_os = "none", all(target_arch = "aarch64", not(target_feature = "neon")), not(any(target_arch = "x86_64", target_arch = "aarch64"))))'.dependencies]
 curve25519-dalek = { version = "5", default-features = false, features = ["precomputed-tables"] }
 fiat-crypto = { version = "0.3", default-features = false }
