@@ -73,34 +73,29 @@ alertable='
 # Scheduled runs alert on failure, timed_out, and cancelled. A job past its
 # timeout-minutes ends cancelled, not timed_out, so timed_out alone misses a
 # scheduled run that stops. Release and Dart release stay on failure and timed_out:
-# a newer push cancels the run it supersedes.
+# a newer push cancels the run it supersedes. The whole `if` must be that form.
+# A predicate outside it, such as `&& false`, changes whether the job runs, so
+# the check rejects it instead of reading the conclusion lists and ignoring it.
 # shellcheck disable=SC2016 # A jq program, not a shell expansion.
 conclusions='
-    def norm: gsub("[[:space:]]+"; " ") | gsub(" ?\\|\\| ?"; " || ") | sub("^ "; "") | sub(" $"; "");
-    def lists($text):
-        [$text | match("\\[[^\\[\\]]*\\]"; "g") | .string | fromjson];
+    def norm: gsub("[[:space:]]+"; " ") | sub("^ "; "") | sub(" $"; "");
+    # `.` stands for the quote around each literal. The match is anchored, so
+    # the three lists are the whole condition.
+    def shape:
+        "\\(github\\.event\\.workflow_run\\.event == .schedule. && contains\\(fromJSON\\(.(?<sched>\\[[^\\]]*\\]).\\), github\\.event\\.workflow_run\\.conclusion\\)\\) \\|\\| \\(contains\\(fromJSON\\(.(?<push>\\[[^\\]]*\\]).\\), github\\.event\\.workflow_run\\.conclusion\\) && contains\\(fromJSON\\(.(?<names>\\[[^\\]]*\\]).\\), github\\.event\\.workflow_run\\.name\\)\\)";
     def alerts($sched; $push; $names; $event; $conclusion; $name):
         ($event == "schedule" and ($sched | index($conclusion) != null))
         or (($push | index($conclusion) != null) and ($names | index($name) != null));
     ($expr | norm) as $text
-    | ($text | split(" || ")) as $arms
-    | if ($arms | length) != 2 then
-        error("alert if: expected a schedule arm or a release arm, got \($arms | length): \($text)")
-      elif ($arms[0] | test("event == .schedule.")) | not then
-        error("alert if: the first arm must match a scheduled run: \($arms[0])")
-      elif ($arms[1] | test("\\.name")) | not then
-        error("alert if: the second arm must match workflow names: \($arms[1])")
-      else .
+    | [$text | match("^" + shape + "$")] as $hits
+    | if ($hits | length) != 1 then
+        error("alert if is not the supported form: " + $text)
+      else $hits[0]
       end
-    | (lists($arms[0])) as $sched_lists
-    | (lists($arms[1])) as $push_lists
-    | if ($sched_lists | length) != 1 or ($push_lists | length) != 2 then
-        error("alert if: the schedule arm needs one list and the release arm two; got \($sched_lists | length) and \($push_lists | length)")
-      else .
-      end
-    | ($sched_lists[0] | sort) as $sched
-    | ($push_lists[0] | sort) as $push
-    | ($push_lists[1] | sort) as $names
+    | ([$hits[0].captures[] | {(.name): .string}] | add) as $captured
+    | ($captured.sched | fromjson | sort) as $sched
+    | ($captured.push | fromjson | sort) as $push
+    | ($captured.names | fromjson | sort) as $names
     | (["cancelled", "failure", "timed_out"] | sort) as $want_sched
     | (["failure", "timed_out"] | sort) as $want_push
     | (["Dart release", "Release"] | sort) as $want_names
@@ -146,10 +141,11 @@ judge() {
     jq -nr --arg expr "$1" "$conclusions"
 }
 
-# The checker has to reject the condition this fixes, or a checker that always
-# passes would hide a schedule arm that dropped cancelled again.
+# The checker has to reject both regressions it exists for: a schedule arm that
+# dropped cancelled, and a predicate outside the supported form. A checker that
+# always passes, or that reads the lists and ignores the rest, would hide either.
 prove_conclusions() {
-    local good bad err
+    local good bad disabled err
     good=$(
         cat <<'EOF'
 (github.event.workflow_run.event == 'schedule' && contains(fromJSON('["failure", "timed_out", "cancelled"]'), github.event.workflow_run.conclusion)) || (contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion) && contains(fromJSON('["Release", "Dart release"]'), github.event.workflow_run.name))
@@ -160,6 +156,11 @@ EOF
 (github.event.workflow_run.event == 'schedule' && contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion)) || (contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion) && contains(fromJSON('["Release", "Dart release"]'), github.event.workflow_run.name))
 EOF
     )
+    disabled=$(
+        cat <<'EOF'
+(github.event.workflow_run.event == 'schedule' && contains(fromJSON('["failure", "timed_out", "cancelled"]'), github.event.workflow_run.conclusion) && false) || (contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion) && contains(fromJSON('["Release", "Dart release"]'), github.event.workflow_run.name))
+EOF
+    )
     judge "$good" >/dev/null
     if err=$(judge "$bad" 2>&1); then
         echo "sh/alert.sh: conclusion check accepted a schedule arm without cancelled" >&2
@@ -167,6 +168,14 @@ EOF
     fi
     if [[ "$err" != *cancelled* ]]; then
         echo "sh/alert.sh: a schedule arm without cancelled failed for another reason: $err" >&2
+        return 1
+    fi
+    if err=$(judge "$disabled" 2>&1); then
+        echo "sh/alert.sh: conclusion check accepted an added && false" >&2
+        return 1
+    fi
+    if [[ "$err" != *supported\ form* ]]; then
+        echo "sh/alert.sh: an added && false failed for another reason: $err" >&2
         return 1
     fi
 }
