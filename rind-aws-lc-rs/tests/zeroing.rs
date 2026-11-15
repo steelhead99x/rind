@@ -192,14 +192,17 @@ fn ml_dsa_expanded() {
     .as_ref()
     .to_vec();
     let secret = &raw[32..];
+    // `from_raw_private_key` wraps the key in PKCS#8 for that call. That copy
+    // is freed before the key is returned, and a copy inside a call stays
+    // unwiped, so the check starts once the key exists.
+    let key = Box::new(
+        signature::PqdsaKeyPair::from_raw_private_key(&signature::ML_DSA_44_SIGNING, &raw).unwrap(),
+    );
     let leaked = leaks(secret, || {
-        let key = Box::new(
-            signature::PqdsaKeyPair::from_raw_private_key(&signature::ML_DSA_44_SIGNING, &raw)
-                .unwrap(),
-        );
         assert!(key.to_pkcs8v1().is_err());
         let mut sig = vec![0; signature::ML_DSA_44_SIGNING.signature_len()];
         key.sign(b"expanded", &mut sig).unwrap();
+        drop(key);
     });
     assert_eq!(leaked, 0);
 
