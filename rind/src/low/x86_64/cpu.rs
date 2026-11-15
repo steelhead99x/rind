@@ -469,6 +469,7 @@ fn detect_once() -> u32 {
 /// CPUID leaves the bare-metal detector reads. `xcr0` is `None` when
 /// `XGETBV` would raise `#UD`, because XSAVE or OSXSAVE is clear.
 #[cfg(any(test, target_os = "none"))]
+#[derive(Clone, Copy)]
 struct CpuidLeaves {
     intel: bool,
     leaf1_ecx: u32,
@@ -477,6 +478,9 @@ struct CpuidLeaves {
     leaf7_ecx: u32,
     /// Leaf 7, subleaf 1, EAX. SHA512 is reported here, not in subleaf 0.
     leaf7_sub1_eax: u32,
+    /// The std-matching check in tests reads this. The bare-metal detector
+    /// does not: XCR0 does not mean this context saves YMM or ZMM.
+    #[cfg_attr(not(test), allow(dead_code))]
     xcr0: Option<u32>,
 }
 
@@ -536,7 +540,7 @@ fn os_xcr0(leaf1_ecx: u32) -> Option<u32> {
 }
 
 /// The same bits `is_x86_feature_detected!` would set for the features rind
-/// asks about, from CPUID and XCR0, with no OS and no `std`.
+/// asks about, from CPUID and XCR0.
 ///
 /// AVX, AVX2, AVX-512, and SHA512 need the XSAVE and OSXSAVE CPUID bits and
 /// the matching XCR0 bits: without XSAVE the OS cannot have enabled that
@@ -544,8 +548,11 @@ fn os_xcr0(leaf1_ecx: u32) -> Option<u32> {
 /// which Rust's detector requires because its assembler treats `avx512f` as
 /// implying them. Intel's Skylake erratum SKL052 reports BMI1 and BMI2 on
 /// parts that do not implement them and do not have AVX; those bits are
-/// cleared, as in std.
-#[cfg(any(test, target_os = "none"))]
+/// cleared, as in std. A hosted build uses `is_x86_feature_detected!`
+/// directly. This is the check the tests compare with that macro. Bare metal
+/// does not use it: XCR0 does not mean an interrupt in the calling context
+/// saves YMM or ZMM.
+#[cfg(test)]
 fn feature_bits(leaves: CpuidLeaves) -> u32 {
     let bit = |reg: u32, index: u32| reg & (1 << index) != 0;
     let xcr0 = leaves.xcr0.unwrap_or(0);
@@ -639,10 +646,137 @@ fn feature_bits(leaves: CpuidLeaves) -> u32 {
     bits
 }
 
+/// Compile-time target features for the registers an interrupt on
+/// `target_os = "none"` is not known to save. A feature is usable only when
+/// the build named it, the same rule cpufeatures uses on that os.
+#[cfg(any(test, target_os = "none"))]
+#[derive(Clone, Copy)]
+struct WideTarget {
+    avx: bool,
+    avx2: bool,
+    sha512: bool,
+    avx512f: bool,
+    fma: bool,
+    f16c: bool,
+    vaes: bool,
+    vpclmulqdq: bool,
+}
+
+#[cfg(target_os = "none")]
+fn wide_from_target() -> WideTarget {
+    WideTarget {
+        avx: cfg!(target_feature = "avx"),
+        avx2: cfg!(target_feature = "avx2"),
+        sha512: cfg!(target_feature = "sha512"),
+        avx512f: cfg!(target_feature = "avx512f"),
+        fma: cfg!(target_feature = "fma"),
+        f16c: cfg!(target_feature = "f16c"),
+        vaes: cfg!(target_feature = "vaes"),
+        vpclmulqdq: cfg!(target_feature = "vpclmulqdq"),
+    }
+}
+
+/// CPUID features for bare metal.
+///
+/// AES, PCLMULQDQ, SSSE3, SSE4.1, SHA, BMI, ADX, POPCNT, and MOVBE come from
+/// CPUID. They do not use YMM or ZMM, and SSE2 is already required before
+/// this backend is selected. AVX, AVX2, SHA512, VAES, VPCLMULQDQ, and AVX-512
+/// also need the matching compile-time target feature: XCR0 is not enough,
+/// because an interrupt in this context may not save those registers.
+/// AVX-512 still needs FMA and F16C, which Rust's detector requires.
+/// Intel's SKL052 clearing of BMI1 and BMI2 follows the CPUID AVX bit, not
+/// whether this build chose to run AVX.
+#[cfg(any(test, target_os = "none"))]
+fn bare_feature_bits(leaves: CpuidLeaves, wide: WideTarget) -> u32 {
+    let bit = |reg: u32, index: u32| reg & (1 << index) != 0;
+    let cpuid_avx = bit(leaves.leaf1_ecx, 28);
+    let fma = bit(leaves.leaf1_ecx, 12);
+    let f16c = bit(leaves.leaf1_ecx, 29);
+    let avx = wide.avx && cpuid_avx;
+    let avx512 = wide.avx512f && wide.fma && wide.f16c && avx && fma && f16c;
+
+    let mut bits = 0u32;
+    if bit(leaves.leaf1_ecx, 25) {
+        bits |= AES;
+    }
+    if bit(leaves.leaf1_ecx, 1) {
+        bits |= PCLMULQDQ;
+    }
+    if bit(leaves.leaf1_ecx, 9) {
+        bits |= SSSE3;
+    }
+    if bit(leaves.leaf1_ecx, 19) {
+        bits |= SSE41;
+    }
+    if bit(leaves.leaf1_ecx, 22) {
+        bits |= MOVBE;
+    }
+    if bit(leaves.leaf1_ecx, 23) {
+        bits |= POPCNT;
+    }
+    if bit(leaves.leaf7_ebx, 19) {
+        bits |= ADX;
+    }
+    if bit(leaves.leaf7_ebx, 29) {
+        bits |= SHA;
+    }
+    if bit(leaves.leaf7_ebx, 3) {
+        bits |= BMI1;
+    }
+    if bit(leaves.leaf7_ebx, 8) {
+        bits |= BMI2;
+    }
+    if avx {
+        bits |= AVX;
+        if wide.avx2 && bit(leaves.leaf7_ebx, 5) {
+            bits |= AVX2;
+        }
+        if wide.sha512 && bit(leaves.leaf7_sub1_eax, 0) {
+            bits |= SHA512;
+        }
+        if wide.vaes && bit(leaves.leaf7_ecx, 9) {
+            bits |= VAES;
+        }
+        if wide.vpclmulqdq && bit(leaves.leaf7_ecx, 10) {
+            bits |= VPCLMULQDQ;
+        }
+    }
+    if avx512 {
+        if bit(leaves.leaf7_ebx, 16) {
+            bits |= AVX512F;
+        }
+        if bit(leaves.leaf7_ebx, 17) {
+            bits |= AVX512DQ;
+        }
+        if bit(leaves.leaf7_ebx, 21) {
+            bits |= AVX512IFMA;
+        }
+        if bit(leaves.leaf7_ebx, 30) {
+            bits |= AVX512BW;
+        }
+        if bit(leaves.leaf7_ebx, 31) {
+            bits |= AVX512VL;
+        }
+        if bit(leaves.leaf7_ecx, 1) {
+            bits |= AVX512VBMI;
+        }
+        if bit(leaves.leaf7_ecx, 6) {
+            bits |= AVX512VBMI2;
+        }
+    }
+    if leaves.intel && !cpuid_avx {
+        bits &= !(BMI1 | BMI2);
+    }
+    if leaves.intel {
+        bits |= INTEL;
+    }
+    bits
+}
+
 #[cfg(target_os = "none")]
 fn detect() -> u32 {
     // No `RIND_CPU_DISABLE_*` here: bare metal has no environment to read.
-    feature_bits(read_cpuid_leaves())
+    bare_feature_bits(read_cpuid_leaves(), wide_from_target())
 }
 
 #[cfg(not(target_os = "none"))]
@@ -1107,5 +1241,73 @@ mod tests {
     fn aes_ignores_xcr0() {
         const AES_BIT: u32 = 1 << 25;
         assert_ne!(feature_bits(leaves(false, AES_BIT, 0, 0, 0, None)) & AES, 0);
+    }
+
+    fn none_wide() -> WideTarget {
+        WideTarget {
+            avx: false,
+            avx2: false,
+            sha512: false,
+            avx512f: false,
+            fma: false,
+            f16c: false,
+            vaes: false,
+            vpclmulqdq: false,
+        }
+    }
+
+    /// On `target_os = "none"`, XCR0 does not enable YMM or ZMM. Those paths
+    /// run only when the build named the target feature. AES does not use
+    /// them, so CPUID still enables it.
+    #[test]
+    fn bare_metal_ymm_needs_the_target_feature() {
+        const XSAVE: u32 = 1 << 26;
+        const OSXSAVE: u32 = 1 << 27;
+        const AVX_BIT: u32 = 1 << 28;
+        const FMA: u32 = 1 << 12;
+        const F16C: u32 = 1 << 29;
+        const AES_BIT: u32 = 1 << 25;
+        const AVX2_BIT: u32 = 1 << 5;
+        const AVX512F_BIT: u32 = 1 << 16;
+        const VAES_BIT: u32 = 1 << 9;
+        let ecx = XSAVE | OSXSAVE | AVX_BIT | FMA | F16C | AES_BIT;
+        let xcr = Some(0x6 | 0xe0);
+        let saved = leaves(false, ecx, AVX2_BIT | AVX512F_BIT, VAES_BIT, 1, xcr);
+        let off = bare_feature_bits(saved, none_wide());
+        assert_eq!(off & (AVX | AVX2 | SHA512 | AVX512F | VAES), 0);
+        assert_ne!(off & AES, 0);
+
+        let mut wide = none_wide();
+        wide.avx = true;
+        let avx_only = bare_feature_bits(saved, wide);
+        assert_ne!(avx_only & AVX, 0);
+        assert_eq!(avx_only & (AVX2 | SHA512 | AVX512F), 0);
+
+        wide.avx2 = true;
+        wide.sha512 = true;
+        let avx2 = bare_feature_bits(saved, wide);
+        assert_ne!(avx2 & (AVX | AVX2 | SHA512), 0);
+        assert_eq!(avx2 & AVX512F, 0);
+
+        wide.avx512f = true;
+        assert_eq!(bare_feature_bits(saved, wide) & AVX512F, 0);
+        wide.fma = true;
+        wide.f16c = true;
+        assert_ne!(bare_feature_bits(saved, wide) & AVX512F, 0);
+
+        wide.vaes = true;
+        assert_ne!(bare_feature_bits(saved, wide) & VAES, 0);
+
+        // The CPU has AVX, so SKL052 does not clear BMI, even when this
+        // build leaves the AVX path off.
+        const BMI1_BIT: u32 = 1 << 3;
+        const BMI2_BIT: u32 = 1 << 8;
+        let intel = leaves(true, ecx, BMI1_BIT | BMI2_BIT, 0, 0, xcr);
+        assert_eq!(
+            bare_feature_bits(intel, none_wide()) & (BMI1 | BMI2),
+            BMI1 | BMI2
+        );
+        let no_avx = leaves(true, AES_BIT, BMI1_BIT | BMI2_BIT, 0, 0, None);
+        assert_eq!(bare_feature_bits(no_avx, none_wide()) & (BMI1 | BMI2), 0);
     }
 }

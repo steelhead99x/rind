@@ -39,15 +39,15 @@
 #[macro_use]
 extern crate alloc;
 
-// curve25519-dalek's default on x86_64 is its AVX2 backend, chosen at run
-// time. `x86_64-unknown-none` does not promise those registers are saved, so
-// the build has to name `serial` or `fiat`, which do not use them. build.rs
-// sets the cfg when the build did not.
-#[cfg(rind_x86_64_none_dalek_unpinned)]
+// cpufeatures reports AVX on `target_os = "none"` only when the target
+// feature is on, so dalek's default stays off those registers. An explicit
+// `simd` or `avx512` backend together with those features would use them.
+// build.rs sets the cfg in that case.
+#[cfg(rind_x86_64_none_dalek_wide)]
 compile_error!(
-    "build x86_64-unknown-none with `--cfg curve25519_dalek_backend=\"serial\"` \
-     or `\"fiat\"`: curve25519-dalek's default there is its AVX2 backend, and this \
-     target does not promise those registers are saved"
+    "x86_64-unknown-none cannot use curve25519-dalek's `simd` or `avx512` backend \
+     when those target features are enabled: the build would use YMM or ZMM, and \
+     an interrupt here is not known to save them"
 );
 
 // The FIPS module's error state, its self-tests, and its DRBG use std

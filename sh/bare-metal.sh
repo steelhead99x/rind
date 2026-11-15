@@ -11,16 +11,11 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # getrandom has no source on these targets until the program names one, which
 # a library build cannot, so its custom backend stands in.
 custom='--cfg getrandom_backend="custom"'
-# curve25519-dalek's default on x86_64 is its AVX2 backend, chosen at run
-# time. This target does not promise those registers are saved, so the lint
-# builds the serial backend, as the portable constant-time jobs do. The
-# library refuses the build without this cfg. The x86_64 assembly also needs
-# SSE2. This target is soft-float and leaves SSE off, so `xmm` operands are
-# refused until SSE2 is on, and LLVM aborts while splitting vector results
-# if soft-float stays enabled beside it. `-soft-float` clears that. Rustc
-# warns the disable will become an error (rust-lang/rust#116344); it does
-# not fail `--deny warnings`.
-serial='--cfg curve25519_dalek_backend="serial"'
+# The x86_64 assembly needs SSE2. This target is soft-float and leaves SSE
+# off, so `xmm` operands are refused until SSE2 is on, and LLVM aborts while
+# splitting vector results if soft-float stays enabled beside it.
+# `-soft-float` clears that.
+# See UPSTREAM.md, "Clearing soft-float with -C target-feature will become an error".
 sse2='-C target-feature=+sse,+sse2,-soft-float'
 
 # lint TARGET [CLIPPY-ARGS...]: debug, whose `debug_assertions` code release
@@ -32,7 +27,7 @@ lint() {
     flags="CARGO_TARGET_$(tr 'a-z.-' 'A-Z__' <<<"$target")_RUSTFLAGS"
     rustflags=$custom
     if [[ $target == x86_64-unknown-none ]]; then
-        rustflags+=" $serial $sse2"
+        rustflags+=" $sse2"
     fi
     for profile in dev release; do
         for features in "" wipe; do
@@ -45,14 +40,14 @@ lint() {
 # clippy is a check build, so it never assembles `global_asm`. Build the
 # library once per target that selects an assembly backend, so an assembler
 # rejection fails here. The assembly text does not change with the profile
-# or `wipe`. `x86_64-unknown-none` also needs dalek's serial backend.
+# or `wipe`.
 assemble() {
     local target=$1
     local flags rustflags
     flags="CARGO_TARGET_$(tr 'a-z.-' 'A-Z__' <<<"$target")_RUSTFLAGS"
     rustflags=$custom
     if [[ $target == x86_64-unknown-none ]]; then
-        rustflags+=" $serial $sse2"
+        rustflags+=" $sse2"
     fi
     env "$flags=$rustflags" cargo build -p rind --lib --locked --target "$target"
 }
@@ -82,8 +77,9 @@ no_aws_lc() {
 # stays on the portable backend. `x86_64-unknown-none` keeps the x86_64
 # backend only with SSE2 and soft-float cleared, which this script enables:
 # without SSE2 the target has no `xmm` registers and the build stays
-# portable. With them the backend reads CPUID and XCR0 and picks AVX only
-# where those registers are saved.
+# portable. With them the backend reads CPUID. AVX, AVX2, SHA512, and
+# AVX-512 run only when those target features are enabled. XCR0 does not
+# mean an interrupt saves YMM or ZMM. The script does not enable them.
 for target in \
     thumbv6m-none-eabi \
     riscv32imc-unknown-none-elf \

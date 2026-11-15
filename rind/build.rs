@@ -11,8 +11,9 @@
 //! `xmm` operands are refused until the build passes
 //! `-C target-feature=+sse,+sse2,-soft-float`. Leaving soft-float set beside
 //! SSE makes LLVM abort while splitting vector results. The backend then
-//! reads CPUID and XCR0 through `core::arch`, and picks an AVX tier only
-//! where the kernel saves those registers. Bare-metal aarch64
+//! reads CPUID through `core::arch`. AVX, AVX2, SHA512, and AVX-512 run
+//! only when those target features are enabled: XCR0 does not mean an
+//! interrupt saves YMM or ZMM. Bare-metal aarch64
 //! with NEON keeps the aarch64 backend,
 //! and its crypto tier is the compile-time target features, because there
 //! is no OS to ask. The 32-bit ARM assembly is cut for ARMv7,
@@ -39,10 +40,10 @@
 //! barrier. Arm64EC is one of them: its `reg` class has been stable since
 //! Rust 1.84, and it is a subset of AArch64's.
 //!
-//! On bare-metal x86_64 it also requires curve25519-dalek's `serial` or
-//! `fiat` backend. Dalek's default on every x86_64 target is its AVX2
-//! backend, chosen at run time, and `x86_64-unknown-none` does not promise
-//! those registers are saved.
+//! On bare-metal x86_64, curve25519-dalek's default does not use AVX:
+//! cpufeatures reports a SIMD feature there only when it is a compile-time
+//! target feature. An explicit `simd` or `avx512` backend is refused when
+//! those features are enabled, because that build would then use them.
 
 use std::env;
 
@@ -54,7 +55,7 @@ fn main() {
 
     println!(r#"cargo::rustc-check-cfg=cfg(rind_limb, values("32", "64"))"#);
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
-    println!("cargo::rustc-check-cfg=cfg(rind_x86_64_none_dalek_unpinned)");
+    println!("cargo::rustc-check-cfg=cfg(rind_x86_64_none_dalek_wide)");
 
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
@@ -78,11 +79,11 @@ fn main() {
     };
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
 
-    // Dalek selects AVX2 for every 64-bit x86_64 target unless the build
-    // names a backend. Refuse that default, and `simd` or `avx512`.
-    // `serial` and `fiat` do not use those registers.
-    if arch == "x86_64" && bare_metal && !dalek_backend_avoids_avx() {
-        println!("cargo::rustc-cfg=rind_x86_64_none_dalek_unpinned");
+    // cpufeatures reports AVX on this os only when the target feature is
+    // on, so dalek's default stays on its serial code. An explicit `simd`
+    // or `avx512` cfg together with those features would use the registers.
+    if arch == "x86_64" && bare_metal && dalek_forces_wide_vectors(&enabled) {
+        println!("cargo::rustc-cfg=rind_x86_64_none_dalek_wide");
     }
 
     // Stable Rust's `asm!` with a `reg` operand, allow-listed so an
@@ -153,25 +154,19 @@ fn m_profile() -> bool {
     rest.starts_with('m') || rest.starts_with("em")
 }
 
-/// Whether this build named a curve25519-dalek backend that does not use AVX.
+/// Whether this build forces curve25519-dalek onto AVX while the target
+/// features would let cpufeatures report that those registers exist.
 ///
-/// `serial` and `fiat` are constant-time Rust. `simd` and `avx512`, and the
-/// unset default on x86_64, use AVX registers this target does not promise
-/// are saved. Cargo passes a `RUSTFLAGS` `--cfg` to the build script as
-/// `CARGO_CFG_<NAME>`, one value or several separated by commas.
-fn dalek_backend_avoids_avx() -> bool {
+/// Cargo passes a `RUSTFLAGS` `--cfg` to the build script as
+/// `CARGO_CFG_<NAME>`, one value or several separated by commas. The unset
+/// default, `serial`, and `fiat` do not take this path.
+fn dalek_forces_wide_vectors(enabled: &dyn Fn(&str) -> bool) -> bool {
     let Ok(value) = env::var("CARGO_CFG_CURVE25519_DALEK_BACKEND") else {
         return false;
     };
-    let mut any = false;
-    for value in value.split(',') {
-        if value.is_empty() {
-            continue;
-        }
-        any = true;
-        if value != "serial" && value != "fiat" {
-            return false;
-        }
-    }
-    any
+    value.split(',').any(|value| match value {
+        "simd" => enabled("avx") || enabled("avx2"),
+        "avx512" => enabled("avx512f") || enabled("avx512ifma") || enabled("avx512vl"),
+        _ => false,
+    })
 }

@@ -112,21 +112,22 @@ qemu. iOS devices' code is only built.
   off), for `aarch64-unknown-none` (the aarch64 backend; its crypto tier is
   the compile-time target features, and NEON is the default) and
   `aarch64-unknown-none-softfloat` (the portable backend, which has no
-  NEON),   and for `x86_64-unknown-none`. That target is soft-float and does not
+  NEON), and for `x86_64-unknown-none`. That target is soft-float and does not
   enable SSE2, so the build stays on the portable backend until it passes
   `-C target-feature=+sse,+sse2,-soft-float`. SSE2 alone leaves soft-float
-  set, and LLVM then aborts while splitting vector results. With both, it
-  uses the x86_64 backend, which reads CPUID and XCR0 and picks AVX only
-  where the kernel saves those registers. Rustc warns that disabling
-  soft-float this way will become an error
+  set, and LLVM then aborts while splitting vector results. Rustc warns that
+  disabling soft-float this way will become an error
   ([rust-lang/rust#116344](https://github.com/rust-lang/rust/issues/116344)).
-  The four targets that keep an assembly backend are also built, so their
-  `global_asm` is assembled. `x86_64-unknown-none` is built with
-  `--cfg curve25519_dalek_backend="serial"` or `"fiat"`, and the library
-  refuses the build without one of those: dalek's default on x86_64 is its
-  AVX2 backend, chosen at run time, and this target does not promise those
-  registers are saved. `Dit::hold` does nothing on these targets: there is
-  no thread-local count, and these backends set no CPU state there.
+  With both flags it uses the x86_64 backend, which reads CPUID. AVX, AVX2,
+  SHA512, and AVX-512 run only when those target features are enabled: XCR0
+  does not mean an interrupt saves YMM or ZMM, and this build does not
+  enable them. curve25519-dalek's default stays off AVX here, because
+  cpufeatures reports a SIMD feature on this os only when it is a target
+  feature. An explicit `simd` or `avx512` backend is refused when those
+  features are enabled. The four targets that keep an assembly backend are
+  also built, so their `global_asm` is assembled. `Dit::hold` does nothing
+  on these targets: there is no thread-local count, and these backends set
+  no CPU state there.
   None of these targets runs a test or a constant-time check.
   RSA and the NIST curves run on 64-bit limbs on 64-bit targets and on
   `wasm32` built with `-C target-feature=+wide-arithmetic` (stable from Rust

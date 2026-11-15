@@ -37,6 +37,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Reported:** no (llvm/llvm-project, for lld to refuse BSS-PLT objects; NixOS/nixpkgs, for a Secure PLT gcc).
 - **Goes when:** lld refuses or handles BSS-PLT objects and nixpkgs' ppc32 gcc emits the Secure PLT, or Rust links powerpc with the system linker.
 
+### Clearing soft-float with -C target-feature will become an error
+
+- **Breaks:** `x86_64-unknown-none` is soft-float and does not enable SSE2. The x86_64 backend's `xmm` operands need SSE2, and leaving `soft-float` set beside `+sse2` makes LLVM abort with `Do not know how to split the result of this operator!`. Passing `-C target-feature=-soft-float` is how the lint clears it, and rustc warns that clearing a feature this way will become a hard error.
+- **Reproduce:** `cargo build -p rind --lib --target x86_64-unknown-none` with `RUSTFLAGS='--cfg getrandom_backend="custom" -C target-feature=+sse,+sse2'` on rustc 1.98.1 aborts in LLVM. Adding `-soft-float` builds, and prints the future-compat warning.
+- **Workaround:** `sh/bare-metal.sh` passes `-C target-feature=+sse,+sse2,-soft-float` for that target. `--deny warnings` does not fail the warning.
+- **Reported:** [rust-lang/rust#116344](https://github.com/rust-lang/rust/issues/116344).
+- **Goes when:** `x86_64-unknown-none` enables SSE2 without soft-float, or rustc provides another way to clear soft-float that is not this warning.
+
 ### Build scripts cannot see ARM's `v7` target feature
 
 - **Breaks:** stable Rust leaves the unstable `v7` feature out of `CARGO_CFG_TARGET_FEATURE`, so a build script cannot tell an ARMv7 target from an earlier one by feature.
