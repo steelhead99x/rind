@@ -6,6 +6,7 @@
 
 use core::fmt;
 
+use crate::wipe::Wiped;
 use crate::{error, hmac};
 
 /// An HKDF algorithm, chosen by one of this module's constants.
@@ -55,7 +56,10 @@ impl Salt {
     /// Extracts a pseudorandom key from `secret` (HKDF-Extract).
     pub fn extract(&self, secret: &[u8]) -> Prk {
         let prk = hmac::sign(&self.0, secret);
-        Prk(hmac::Key::new(self.0.algorithm(), prk.as_ref()))
+        Prk(
+            hmac::Key::new(self.0.algorithm(), prk.as_ref()),
+            Wiped::new(true),
+        )
     }
 
     /// The algorithm this salt was made for.
@@ -67,7 +71,7 @@ impl Salt {
 impl fmt::Debug for Salt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("hkdf::Salt")
-            .field("algorithm", &self.algorithm())
+            .field("algorithm", &self.0.algorithm())
             .finish()
     }
 }
@@ -86,13 +90,15 @@ pub trait KeyType {
 
 /// A pseudorandom key, from which [`Prk::expand`] derives any number of keys;
 /// wiped on drop under the `wipe` feature.
+// The flag records whether HKDF-Extract made it, which only `Debug` shows, as
+// aws-lc-rs's does; it is wiped with the key.
 #[derive(Clone)]
-pub struct Prk(hmac::Key);
+pub struct Prk(hmac::Key, Wiped<bool>);
 
 impl Prk {
     /// Takes `value` as the pseudorandom key itself, skipping HKDF-Extract.
     pub fn new_less_safe(algorithm: Algorithm, value: &[u8]) -> Self {
-        Self(hmac::Key::new(algorithm.0, value))
+        Self(hmac::Key::new(algorithm.0, value), Wiped::new(false))
     }
 
     /// Derives key material for the concatenation of `info` (HKDF-Expand),
@@ -141,14 +147,21 @@ impl Prk {
 impl fmt::Debug for Prk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("hkdf::Prk")
-            .field("algorithm", &Algorithm(self.0.algorithm()))
+            .field("algorithm", &self.0.algorithm())
+            .field(
+                "mode",
+                &format_args!(
+                    "{} {{ .. }}",
+                    if *self.1 { "ExtractExpand" } else { "Expand" }
+                ),
+            )
             .finish()
     }
 }
 
 impl From<Okm<'_, Algorithm>> for Prk {
     fn from(okm: Okm<'_, Algorithm>) -> Self {
-        Self(hmac::Key::from(okm.into_hmac()))
+        Self(hmac::Key::from(okm.into_hmac()), Wiped::new(false))
     }
 }
 

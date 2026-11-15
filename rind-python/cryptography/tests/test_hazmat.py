@@ -33,7 +33,7 @@ from pyrind_cryptography.hazmat.primitives.asymmetric import padding as asym_pad
 from pyrind_cryptography.hazmat.primitives.ciphers import Cipher, aead, algorithms, modes
 from pyrind_cryptography.hazmat.primitives.kdf import concatkdf, hkdf, pbkdf2, x963kdf
 
-VECTORS = pathlib.Path(__file__).resolve().parents[3] / "thirdparty" / "wycheproof" / "testvectors_v1"
+VECTORS = pathlib.Path(__file__).resolve().parents[3] / "thirdparty" / "vectors" / "wycheproof" / "testvectors_v1"
 
 HASHES = ["SHA1", "SHA256", "SHA384", "SHA512", "SHA512_256", "SHA3_256", "SHA3_384", "SHA3_512", "MD5"]
 HMAC_HASHES = ["SHA1", "SHA256", "SHA384", "SHA512"]
@@ -61,7 +61,7 @@ def pyca_format(value):
 def vectors(name):
     path = VECTORS / f"{name}_test.json"
     if not path.exists():
-        raise FileNotFoundError(f"{path} is missing; run: git submodule update --init thirdparty/wycheproof")
+        raise FileNotFoundError(f"{path} is missing; run: admin/sync-vectors")
     for group in json.loads(path.read_text())["testGroups"]:
         for test in group["tests"]:
             yield group, test

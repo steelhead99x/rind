@@ -511,36 +511,6 @@ fn test_toggle(id: &str, detected: bool) -> bool {
     }
 }
 
-/// Returns the first CPU feature we require unconditionally that this CPU lacks.
-///
-/// Every feature beyond SSE2, which every x86_64 CPU has, only picks a faster
-/// path, so this refuses no x86_64 CPU, except in the FIPS module.
-///
-/// The FIPS module requires what every x86_64 server since Broadwell and
-/// Zen has, so the paths for older CPUs, which no tested CPU runs, need no
-/// ACVP run of their own: the SSE2 and vpaes AES, the integer and SSSE3
-/// GHASH, and s2n-bignum's `_alt` routines for CPUs without ADX.
-pub(crate) fn missing_cpu_feature() -> Option<&'static str> {
-    if !cfg!(rind_fips) {
-        return None;
-    }
-    [
-        (AES, "aes"),
-        (PCLMULQDQ, "pclmulqdq"),
-        (SSSE3, "ssse3"),
-        (SSE41, "sse4.1"),
-        (POPCNT, "popcnt"),
-        (MOVBE, "movbe"),
-        (AVX, "avx"),
-        (AVX2, "avx2"),
-        (BMI1, "bmi1"),
-        (BMI2, "bmi2"),
-        (ADX, "adx"),
-    ]
-    .into_iter()
-    .find_map(|(bit, name)| (!has(bit)).then_some(name))
-}
-
 // --- Safe abstractions over common intrinsics operations ---
 
 /// Prefetch both `table` and `table[stride]`
@@ -557,6 +527,31 @@ pub(crate) fn prefetch<T>(table: &[T], stride: usize) {
         _mm_prefetch(table.as_ptr().cast(), _MM_HINT_T0);
         _mm_prefetch(table.as_ptr().wrapping_add(stride).cast(), _MM_HINT_T0);
     }
+}
+
+/// The first CPU feature the FIPS module requires that this CPU lacks.
+///
+/// The module requires what every x86_64 server since Broadwell and Zen has,
+/// so the paths for older CPUs, which no tested CPU runs, need no ACVP run of
+/// their own: the SSE2 and vpaes AES, the integer and SSSE3 GHASH, and
+/// s2n-bignum's `_alt` routines for CPUs without ADX.
+#[cfg(rind_fips)]
+pub(crate) fn missing_cpu_feature() -> Option<&'static str> {
+    [
+        (AES, "aes"),
+        (PCLMULQDQ, "pclmulqdq"),
+        (SSSE3, "ssse3"),
+        (SSE41, "sse4.1"),
+        (POPCNT, "popcnt"),
+        (MOVBE, "movbe"),
+        (AVX, "avx"),
+        (AVX2, "avx2"),
+        (BMI1, "bmi1"),
+        (BMI2, "bmi2"),
+        (ADX, "adx"),
+    ]
+    .into_iter()
+    .find_map(|(bit, name)| (!has(bit)).then_some(name))
 }
 
 #[cfg(test)]

@@ -20,7 +20,7 @@ use serde::Deserialize;
 /// iOS simulator runs the tests.
 fn vectors(name: &str) -> String {
     let dir = env!("CARGO_MANIFEST_DIR");
-    format!("{dir}/../thirdparty/wycheproof/testvectors_v1/{name}")
+    format!("{dir}/../thirdparty/vectors/wycheproof/testvectors_v1/{name}")
 }
 
 #[derive(Deserialize, Debug)]

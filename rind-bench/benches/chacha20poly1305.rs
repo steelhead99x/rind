@@ -44,6 +44,7 @@ fn test_rind_chacha(key: &rind::aead::Key, nonce: &[u8; 12], aad: &[u8], buf: &m
 
 fn bench_chacha20poly1305(c: &mut Criterion) {
     let key = [0u8; 32];
+    let key_bytes = &key;
     let nonce = [0u8; 12];
 
     let mut group = c.benchmark_group("chacha20poly1305");
@@ -77,6 +78,25 @@ fn bench_chacha20poly1305(c: &mut Criterion) {
                 b.iter(|| test_rind_chacha(&key, &nonce, aad, &mut buf));
             });
         }
+        group.bench_function(BenchmarkId::new("verified-garbage", size_name), |b| {
+            let key = verified_garbage::aead::chacha20poly1305::ChaCha20Poly1305::new(&key);
+            let mut expect = vec![0u8; size];
+            let tag = rind::aead::Key::new(&rind::aead::CHACHA20_POLY1305, key_bytes)
+                .unwrap()
+                .seal_in_place_separate_tag(
+                    rind::aead::Nonce::assume_unique_for_key(nonce),
+                    aad,
+                    &mut expect,
+                )
+                .unwrap();
+            let mut ct = vec![0u8; size];
+            assert_eq!(
+                key.encrypt_in_place(&nonce, aad, &mut ct).unwrap(),
+                tag.as_ref()
+            );
+            assert_eq!(ct, expect);
+            b.iter(|| key.encrypt_in_place(&nonce, aad, &mut buf).unwrap());
+        });
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         group.bench_function(BenchmarkId::new("graviola", size_name), |b| {
             let key = graviola::aead::ChaCha20Poly1305::new(key);
@@ -177,6 +197,17 @@ fn bench_chacha20poly1305_open(c: &mut Criterion) {
                 });
             });
         }
+        group.bench_function(BenchmarkId::new("verified-garbage", size_name), |b| {
+            let key = verified_garbage::aead::chacha20poly1305::ChaCha20Poly1305::new(&key);
+            let tag = tag.as_ref().try_into().unwrap();
+            pt.copy_from_slice(ct);
+            key.decrypt_in_place(&nonce, aad, pt, tag).unwrap();
+            assert!(pt.iter().all(|&x| x == 0));
+            b.iter(|| {
+                pt.copy_from_slice(ct);
+                key.decrypt_in_place(&nonce, aad, pt, tag).unwrap();
+            });
+        });
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         group.bench_function(BenchmarkId::new("graviola", size_name), |b| {
             let key = graviola::aead::ChaCha20Poly1305::new(key);

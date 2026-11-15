@@ -63,6 +63,11 @@ sets=(
     ML-DSA-keyGen-FIPS204 'true'
     ML-DSA-sigGen-FIPS204 '.preHash != "preHash"'
     ML-DSA-sigVer-FIPS204 '.preHash != "preHash"'
+    # Pure SLH-DSA, signing randomized as rind does; HashSLH-DSA waits for a
+    # consumer.
+    SLH-DSA-keyGen-FIPS205 'true'
+    SLH-DSA-sigGen-FIPS205 '.preHash != "preHash" and .deterministic == false'
+    SLH-DSA-sigVer-FIPS205 '.preHash != "preHash"'
 )
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../thirdparty/acvp"
@@ -77,9 +82,9 @@ for ((i = 0; i < ${#sets[@]}; i += 2)); do
         # conformance, and tests whose bit `len` is not whole bytes, as rind's
         # hashes take bytes (AES-CTR's tests carry `payloadLen` instead, so
         # they stay, and `acvp_ctr` masks them); Ed25519 signing groups drop
-        # their Ed25519ctx tests, which have a context. ML-DSA's tests keep
-        # their contexts, which its internal API takes.
-        jq --indent 1 --arg name "$name" ".testGroups |= map(select(.conformance == null and $filter) | .tests |= map(select((.len // 0) % 8 == 0 and ((.context // \"\") == \"\" or (\$name | startswith(\"ML-DSA\"))))))" \
+        # their Ed25519ctx tests, which have a context. ML-DSA's and
+        # SLH-DSA's tests keep their contexts, which their internal APIs take.
+        jq --indent 1 --arg name "$name" ".testGroups |= map(select(.conformance == null and $filter) | .tests |= map(select((.len // 0) % 8 == 0 and ((.context // \"\") == \"\" or (\$name | test(\"^(ML|SLH)-DSA\"))))))" \
             > "$name.json"
     if [[ $(jq '[.testGroups[].tests[]] | length' "$name.json") == 0 ]]; then
         echo "$name: no test rind runs" >&2

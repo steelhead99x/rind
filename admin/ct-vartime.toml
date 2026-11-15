@@ -34,6 +34,24 @@ why = "Divides 256 by the window width, which is 4 for the basepoint table rind 
 "s390x-unknown-linux-gnu" = "dlgr"
 
 [[public]]
+function = "rind::mid::argon2::argon2id"
+why = "Sets up from public costs only: divides the memory by the lane count into segments, 2^64 by the lane count for the reciprocal that reduces each reference's lane without a division, and the memory into lanes. No division runs per block, so none takes a password-derived operand."
+[public.holds]
+"x86_64-unknown-linux-gnu" = "div x2"
+"aarch64-unknown-linux-gnu" = "udiv x2"
+"armv7-unknown-linux-gnueabihf" = "calls __aeabi_uidiv, calls __aeabi_uidivmod, calls __aeabi_uldivmod"
+"x86_64-unknown-linux-gnu+portable" = "div x2"
+"armv7-unknown-linux-gnueabihf+portable" = "calls __aeabi_uidiv, calls __aeabi_uidivmod, calls __aeabi_uldivmod"
+"i686-unknown-linux-gnu" = "calls __udivdi3, div x2"
+"arm-unknown-linux-gnueabihf" = "calls __aeabi_uidiv, calls __aeabi_uidivmod, calls __aeabi_uldivmod"
+"loongarch64-unknown-linux-gnu" = "div.du x2"
+"powerpc-unknown-linux-gnu" = "calls __udivdi3, divwu x2"
+"powerpc64-unknown-linux-gnu" = "divdu x2"
+"powerpc64le-unknown-linux-gnu" = "divdu x2"
+"riscv64gc-unknown-linux-gnu" = "divu x2"
+"s390x-unknown-linux-gnu" = "dlgr x2"
+
+[[public]]
 function = "<rind::high::pbkdf2::Secret>::derive"
 why = "The length check and step_by iterator divide only the public output length by the selected hash's public tag length; neither operand comes from the password or derived key. Retains the formally verified implementation."
 [public.holds]

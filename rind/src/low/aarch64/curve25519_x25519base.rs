@@ -6,11 +6,11 @@ use crate::low::macros::*;
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 // ----------------------------------------------------------------------------
-// The x25519 function for curve25519 on base element 9
-// Input scalar[4]; output res[4]
+// The x25519 function for curve25519 on base element 9 (byte array arguments)
+// Input scalar[32] (bytes); output res[32] (bytes)
 //
-// extern void curve25519_x25519base_alt
-//   (uint64_t res[static 4],const uint64_t scalar[static 4]);
+// extern void curve25519_x25519base_byte_alt
+//   (uint8_t res[static 32],const uint8_t scalar[static 32]);
 //
 // Given a scalar n, returns the X coordinate of n * G where G = (9,...) is
 // the standard generator. The scalar is first slightly modified/mangled
@@ -378,10 +378,10 @@ macro_rules! double_twice4 {
     )}
 }
 
-// Transliterated from s2n-bignum's arm/curve25519/curve25519_x25519base_alt.S.
-/// The x25519 function for curve25519 on base element 9
+// Transliterated from s2n-bignum's arm/curve25519/curve25519_x25519base_byte_alt.S.
+/// The x25519 function for curve25519 on base element 9 (byte array arguments)
 ///
-/// Input scalar[4]; output res[4]
+/// Input scalar[32] (bytes); output res[32] (bytes)
 ///
 /// Given a scalar n, returns the X coordinate of n * G where G = (9,...) is
 /// the standard generator. The scalar is first slightly modified/mangled
@@ -409,9 +409,68 @@ pub(crate) fn curve25519_x25519base(res: &mut [u64; 4], scalar: &[u64; 4]) {
         // 2^254 * G is taken care of by the starting value for the addition
         // chain below, while we never look at the three low bits at all.
 
-        Q!("    ldp             " "x10, x11, [x1]"),
+        Q!("    ldrb            " "w10, [x1]"),
+        Q!("    ldrb            " "w0, [x1, #1]"),
+        Q!("    orr             " "x10, x10, x0, lsl #8"),
+        Q!("    ldrb            " "w0, [x1, #2]"),
+        Q!("    orr             " "x10, x10, x0, lsl #16"),
+        Q!("    ldrb            " "w0, [x1, #3]"),
+        Q!("    orr             " "x10, x10, x0, lsl #24"),
+        Q!("    ldrb            " "w0, [x1, #4]"),
+        Q!("    orr             " "x10, x10, x0, lsl #32"),
+        Q!("    ldrb            " "w0, [x1, #5]"),
+        Q!("    orr             " "x10, x10, x0, lsl #40"),
+        Q!("    ldrb            " "w0, [x1, #6]"),
+        Q!("    orr             " "x10, x10, x0, lsl #48"),
+        Q!("    ldrb            " "w0, [x1, #7]"),
+        Q!("    orr             " "x10, x10, x0, lsl #56"),
+        Q!("    ldrb            " "w11, [x1, #8]"),
+        Q!("    ldrb            " "w0, [x1, #9]"),
+        Q!("    orr             " "x11, x11, x0, lsl #8"),
+        Q!("    ldrb            " "w0, [x1, #10]"),
+        Q!("    orr             " "x11, x11, x0, lsl #16"),
+        Q!("    ldrb            " "w0, [x1, #11]"),
+        Q!("    orr             " "x11, x11, x0, lsl #24"),
+        Q!("    ldrb            " "w0, [x1, #12]"),
+        Q!("    orr             " "x11, x11, x0, lsl #32"),
+        Q!("    ldrb            " "w0, [x1, #13]"),
+        Q!("    orr             " "x11, x11, x0, lsl #40"),
+        Q!("    ldrb            " "w0, [x1, #14]"),
+        Q!("    orr             " "x11, x11, x0, lsl #48"),
+        Q!("    ldrb            " "w0, [x1, #15]"),
+        Q!("    orr             " "x11, x11, x0, lsl #56"),
         Q!("    stp             " "x10, x11, [" scalar!() "]"),
-        Q!("    ldp             " "x12, x13, [x1, #16]"),
+
+        Q!("    ldrb            " "w12, [x1, #16]"),
+        Q!("    ldrb            " "w0, [x1, #17]"),
+        Q!("    orr             " "x12, x12, x0, lsl #8"),
+        Q!("    ldrb            " "w0, [x1, #18]"),
+        Q!("    orr             " "x12, x12, x0, lsl #16"),
+        Q!("    ldrb            " "w0, [x1, #19]"),
+        Q!("    orr             " "x12, x12, x0, lsl #24"),
+        Q!("    ldrb            " "w0, [x1, #20]"),
+        Q!("    orr             " "x12, x12, x0, lsl #32"),
+        Q!("    ldrb            " "w0, [x1, #21]"),
+        Q!("    orr             " "x12, x12, x0, lsl #40"),
+        Q!("    ldrb            " "w0, [x1, #22]"),
+        Q!("    orr             " "x12, x12, x0, lsl #48"),
+        Q!("    ldrb            " "w0, [x1, #23]"),
+        Q!("    orr             " "x12, x12, x0, lsl #56"),
+        Q!("    ldrb            " "w13, [x1, #24]"),
+        Q!("    ldrb            " "w0, [x1, #25]"),
+        Q!("    orr             " "x13, x13, x0, lsl #8"),
+        Q!("    ldrb            " "w0, [x1, #26]"),
+        Q!("    orr             " "x13, x13, x0, lsl #16"),
+        Q!("    ldrb            " "w0, [x1, #27]"),
+        Q!("    orr             " "x13, x13, x0, lsl #24"),
+        Q!("    ldrb            " "w0, [x1, #28]"),
+        Q!("    orr             " "x13, x13, x0, lsl #32"),
+        Q!("    ldrb            " "w0, [x1, #29]"),
+        Q!("    orr             " "x13, x13, x0, lsl #40"),
+        Q!("    ldrb            " "w0, [x1, #30]"),
+        Q!("    orr             " "x13, x13, x0, lsl #48"),
+        Q!("    ldrb            " "w0, [x1, #31]"),
+        Q!("    orr             " "x13, x13, x0, lsl #56"),
         Q!("    bic             " "x13, x13, #0xc000000000000000"),
         Q!("    stp             " "x12, x13, [" scalar!() "+ 16]"),
 
@@ -429,8 +488,8 @@ pub(crate) fn curve25519_x25519base(res: &mut [u64; 4], scalar: &[u64; 4]) {
         Q!("    ldr             " "x0, [" scalar!() "]"),
         Q!("    ands            " "xzr, x0, #8"),
 
-        Q!("    adrp            " tab!() ", " PageRef!("curve25519_x25519base_alt_constant")),
-        Q!("    add             " tab!() ", " tab!() ", " PageOffRef!("curve25519_x25519base_alt_constant")),
+        Q!("    adrp            " tab!() ", " PageRef!("curve25519_x25519base_byte_alt_constant")),
+        Q!("    add             " tab!() ", " tab!() ", " PageOffRef!("curve25519_x25519base_byte_alt_constant")),
 
         Q!("    ldp             " "x0, x1, [" tab!() "]"),
         Q!("    ldp             " "x2, x3, [" tab!() ", #96]"),
@@ -439,19 +498,19 @@ pub(crate) fn curve25519_x25519base(res: &mut [u64; 4], scalar: &[u64; 4]) {
         Q!("    stp             " "x0, x1, [" acc!() "]"),
 
         Q!("    ldp             " "x0, x1, [" tab!() ", #1 * 16]"),
-        Q!("    ldp             " "x2, x3, [" tab!() ", #96 + 1 * 16]"),
+        Q!("    ldp             " "x2, x3, [" tab!() ", # (96 + 1 * 16)]"),
         Q!("    csel            " "x0, x0, x2, eq"),
         Q!("    csel            " "x1, x1, x3, eq"),
         Q!("    stp             " "x0, x1, [" acc!() "+ 1 * 16]"),
 
         Q!("    ldp             " "x0, x1, [" tab!() ", #2 * 16]"),
-        Q!("    ldp             " "x2, x3, [" tab!() ", #96 + 2 * 16]"),
+        Q!("    ldp             " "x2, x3, [" tab!() ", # (96 + 2 * 16)]"),
         Q!("    csel            " "x0, x0, x2, eq"),
         Q!("    csel            " "x1, x1, x3, eq"),
         Q!("    stp             " "x0, x1, [" acc!() "+ 2 * 16]"),
 
         Q!("    ldp             " "x0, x1, [" tab!() ", #3 * 16]"),
-        Q!("    ldp             " "x2, x3, [" tab!() ", #96 + 3 * 16]"),
+        Q!("    ldp             " "x2, x3, [" tab!() ", # (96 + 3 * 16)]"),
         Q!("    csel            " "x0, x0, x2, eq"),
         Q!("    csel            " "x1, x1, x3, eq"),
         Q!("    stp             " "x0, x1, [" acc!() "+ 3 * 16]"),
@@ -461,13 +520,13 @@ pub(crate) fn curve25519_x25519base(res: &mut [u64; 4], scalar: &[u64; 4]) {
         Q!("    stp             " "xzr, xzr, [" acc!() "+ 5 * 16]"),
 
         Q!("    ldp             " "x0, x1, [" tab!() ", #4 * 16]"),
-        Q!("    ldp             " "x2, x3, [" tab!() ", #96 + 4 * 16]"),
+        Q!("    ldp             " "x2, x3, [" tab!() ", # (96 + 4 * 16)]"),
         Q!("    csel            " "x0, x0, x2, eq"),
         Q!("    csel            " "x1, x1, x3, eq"),
         Q!("    stp             " "x0, x1, [" acc!() "+ 6 * 16]"),
 
         Q!("    ldp             " "x0, x1, [" tab!() ", #5 * 16]"),
-        Q!("    ldp             " "x2, x3, [" tab!() ", #96 + 5 * 16]"),
+        Q!("    ldp             " "x2, x3, [" tab!() ", # (96 + 5 * 16)]"),
         Q!("    csel            " "x0, x0, x2, eq"),
         Q!("    csel            " "x1, x1, x3, eq"),
         Q!("    stp             " "x0, x1, [" acc!() "+ 7 * 16]"),
@@ -492,7 +551,7 @@ pub(crate) fn curve25519_x25519base(res: &mut [u64; 4], scalar: &[u64; 4]) {
 
         // Start of the main loop, repeated 63 times for i = 4, 8, ..., 252
 
-        Q!(Label!("Lcurve25519_x25519base_alt_scalarloop", 2) ":"),
+        Q!(Label!("Lcurve25519_x25519base_byte_alt_scalarloop", 2) ":"),
 
         // Look at the next 4-bit field "bf", adding the previous bias as well.
         // Choose the table index "ix" as bf when bf <= 8 and 16 - bf for bf >= 9,
@@ -775,7 +834,7 @@ pub(crate) fn curve25519_x25519base(res: &mut [u64; 4], scalar: &[u64; 4]) {
 
         Q!("    add             " i!() ", " i!() ", 4"),
         Q!("    cmp             " i!() ", 256"),
-        Q!("    bcc             " Label!("Lcurve25519_x25519base_alt_scalarloop", 2, Before)),
+        Q!("    bcc             " Label!("Lcurve25519_x25519base_byte_alt_scalarloop", 2, Before)),
 
         // Now we need to translate from Edwards curve edwards25519 back
         // to the Montgomery form curve25519. The mapping in the affine
@@ -865,8 +924,8 @@ pub(crate) fn curve25519_x25519base(res: &mut [u64; 4], scalar: &[u64; 4]) {
         Q!("    stp             " "x12, x13, [sp, #112]"),
         Q!("    mov             " "x21, #0xa"),
         Q!("    mov             " "x22, #0x1"),
-        Q!("    b               " Label!("Lcurve25519_x25519base_alt_invmidloop", 3, After)),
-        Q!(Label!("Lcurve25519_x25519base_alt_invloop", 4) ":"),
+        Q!("    b               " Label!("Lcurve25519_x25519base_byte_alt_invmidloop", 3, After)),
+        Q!(Label!("Lcurve25519_x25519base_byte_alt_invloop", 4) ":"),
         Q!("    cmp             " "x10, xzr"),
         Q!("    csetm           " "x14, mi"),
         Q!("    cneg            " "x10, x10, mi"),
@@ -1133,7 +1192,7 @@ pub(crate) fn curve25519_x25519base(res: &mut [u64; 4], scalar: &[u64; 4]) {
         Q!("    adc             " "x2, x2, x5"),
         Q!("    stp             " "x0, x1, [sp, #96]"),
         Q!("    stp             " "x3, x2, [sp, #112]"),
-        Q!(Label!("Lcurve25519_x25519base_alt_invmidloop", 3) ":"),
+        Q!(Label!("Lcurve25519_x25519base_byte_alt_invmidloop", 3) ":"),
         Q!("    mov             " "x1, x22"),
         Q!("    ldr             " "x2, [sp]"),
         Q!("    ldr             " "x3, [sp, #32]"),
@@ -1744,7 +1803,7 @@ pub(crate) fn curve25519_x25519base(res: &mut [u64; 4], scalar: &[u64; 4]) {
         Q!("    msub            " "x13, x15, x17, x5"),
         Q!("    mov             " "x22, x1"),
         Q!("    subs            " "x21, x21, #0x1"),
-        Q!("    b.ne            " Label!("Lcurve25519_x25519base_alt_invloop", 4, Before)),
+        Q!("    b.ne            " Label!("Lcurve25519_x25519base_byte_alt_invloop", 4, Before)),
         Q!("    ldr             " "x0, [sp]"),
         Q!("    ldr             " "x1, [sp, #32]"),
         Q!("    mul             " "x0, x0, x10"),
@@ -1853,7 +1912,73 @@ pub(crate) fn curve25519_x25519base(res: &mut [u64; 4], scalar: &[u64; 4]) {
         // fully reduces modulo p_25519 since now we want the canonical
         // answer as output.
 
-        mul_p25519!(resx!(), t1!(), t0!()),
+        mul_p25519!(x_1!(), t1!(), t0!()),
+
+        Q!("    ldp             " "x10, x11, [" x_1!() "]"),
+        Q!("    strb            " "w10, [" resx!() "]"),
+        Q!("    lsr             " "x10, x10, #8"),
+        Q!("    strb            " "w10, [" resx!() "+ 1]"),
+        Q!("    lsr             " "x10, x10, #8"),
+        Q!("    strb            " "w10, [" resx!() "+ 2]"),
+        Q!("    lsr             " "x10, x10, #8"),
+        Q!("    strb            " "w10, [" resx!() "+ 3]"),
+        Q!("    lsr             " "x10, x10, #8"),
+        Q!("    strb            " "w10, [" resx!() "+ 4]"),
+        Q!("    lsr             " "x10, x10, #8"),
+        Q!("    strb            " "w10, [" resx!() "+ 5]"),
+        Q!("    lsr             " "x10, x10, #8"),
+        Q!("    strb            " "w10, [" resx!() "+ 6]"),
+        Q!("    lsr             " "x10, x10, #8"),
+        Q!("    strb            " "w10, [" resx!() "+ 7]"),
+
+        Q!("    strb            " "w11, [" resx!() "+ 8]"),
+        Q!("    lsr             " "x11, x11, #8"),
+        Q!("    strb            " "w11, [" resx!() "+ 9]"),
+        Q!("    lsr             " "x11, x11, #8"),
+        Q!("    strb            " "w11, [" resx!() "+ 10]"),
+        Q!("    lsr             " "x11, x11, #8"),
+        Q!("    strb            " "w11, [" resx!() "+ 11]"),
+        Q!("    lsr             " "x11, x11, #8"),
+        Q!("    strb            " "w11, [" resx!() "+ 12]"),
+        Q!("    lsr             " "x11, x11, #8"),
+        Q!("    strb            " "w11, [" resx!() "+ 13]"),
+        Q!("    lsr             " "x11, x11, #8"),
+        Q!("    strb            " "w11, [" resx!() "+ 14]"),
+        Q!("    lsr             " "x11, x11, #8"),
+        Q!("    strb            " "w11, [" resx!() "+ 15]"),
+
+        Q!("    ldp             " "x12, x13, [" x_1!() "+ 16]"),
+        Q!("    strb            " "w12, [" resx!() "+ 16]"),
+        Q!("    lsr             " "x12, x12, #8"),
+        Q!("    strb            " "w12, [" resx!() "+ 17]"),
+        Q!("    lsr             " "x12, x12, #8"),
+        Q!("    strb            " "w12, [" resx!() "+ 18]"),
+        Q!("    lsr             " "x12, x12, #8"),
+        Q!("    strb            " "w12, [" resx!() "+ 19]"),
+        Q!("    lsr             " "x12, x12, #8"),
+        Q!("    strb            " "w12, [" resx!() "+ 20]"),
+        Q!("    lsr             " "x12, x12, #8"),
+        Q!("    strb            " "w12, [" resx!() "+ 21]"),
+        Q!("    lsr             " "x12, x12, #8"),
+        Q!("    strb            " "w12, [" resx!() "+ 22]"),
+        Q!("    lsr             " "x12, x12, #8"),
+        Q!("    strb            " "w12, [" resx!() "+ 23]"),
+
+        Q!("    strb            " "w13, [" resx!() "+ 24]"),
+        Q!("    lsr             " "x13, x13, #8"),
+        Q!("    strb            " "w13, [" resx!() "+ 25]"),
+        Q!("    lsr             " "x13, x13, #8"),
+        Q!("    strb            " "w13, [" resx!() "+ 26]"),
+        Q!("    lsr             " "x13, x13, #8"),
+        Q!("    strb            " "w13, [" resx!() "+ 27]"),
+        Q!("    lsr             " "x13, x13, #8"),
+        Q!("    strb            " "w13, [" resx!() "+ 28]"),
+        Q!("    lsr             " "x13, x13, #8"),
+        Q!("    strb            " "w13, [" resx!() "+ 29]"),
+        Q!("    lsr             " "x13, x13, #8"),
+        Q!("    strb            " "w13, [" resx!() "+ 30]"),
+        Q!("    lsr             " "x13, x13, #8"),
+        Q!("    strb            " "w13, [" resx!() "+ 31]"),
 
         // Restore stack and registers
 
@@ -1864,7 +1989,7 @@ pub(crate) fn curve25519_x25519base(res: &mut [u64; 4], scalar: &[u64; 4]) {
 
         inout("x0") res.as_mut_ptr() => _,
         inout("x1") scalar.as_ptr() => _,
-        curve25519_x25519base_alt_constant = sym curve25519_x25519base_alt_constant,
+        curve25519_x25519base_byte_alt_constant = sym curve25519_x25519base_byte_alt_constant,
         // clobbers
         out("x10") _,
         out("x11") _,
@@ -1895,7 +2020,7 @@ pub(crate) fn curve25519_x25519base(res: &mut [u64; 4], scalar: &[u64; 4]) {
 // The precomputed data (all read-only).
 // ****************************************************************************
 
-static curve25519_x25519base_alt_constant: [u64; 6072] = [
+static curve25519_x25519base_byte_alt_constant: [u64; 6072] = [
     // 2^254 * G and (2^254 + 8) * G in extended-projective coordinates
     // but with Z = 1 assumed and hence left out, so they are (X,Y,T) only.
     0x251037f7cf4e861d,
