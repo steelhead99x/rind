@@ -53,6 +53,10 @@ wasm:
 bare-metal:
     nix develop --command sh/bare-metal.sh
 
+# Lint rind's library for the ESP32's Xtensa targets, with espup's `esp` toolchain.
+xtensa:
+    sh/bare-metal.sh xtensa
+
 # Test the portable backend under Miri for TARGET, such as s390x-unknown-linux-gnu (Linux only).
 miri TARGET="x86_64-unknown-linux-gnu":
     nix develop .#miri --command sh/miri.sh {{TARGET}}

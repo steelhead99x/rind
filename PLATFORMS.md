@@ -133,7 +133,13 @@ qemu. iOS devices' code is only built.
   also built, so their `global_asm` is assembled. `Dit::hold` does nothing
   on these targets: there is no thread-local count, and these backends set
   no CPU state there.
-  None of these targets runs a test or a constant-time check.
+  The ESP32's Xtensa targets are tier 3, on Espressif's toolchain, so they
+  are not part of that Nix lint. `just xtensa` and `.github/workflows/xtensa.yml`
+  clippy `xtensa-esp32-none-elf`, `xtensa-esp32s2-none-elf` (no compare-and-swap),
+  and `xtensa-esp32s3-none-elf` the same four ways, check the ESP-IDF library
+  (`xtensa-esp32s3-espidf`, which has std and getrandom's own backend) the
+  same four ways, and compile `rind-bench`'s benches there without ring or
+  OpenSSL. None of these targets runs a test or a constant-time check.
   RSA and the NIST curves run on 64-bit limbs on 64-bit targets and on
   `wasm32` built with `-C target-feature=+wide-arithmetic` (stable from Rust
   1.101), whose 128-bit products take one or two multiply instructions, and

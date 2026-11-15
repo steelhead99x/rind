@@ -108,7 +108,7 @@ cross_tools=cargo
 [[ $(uname -s) != Linux ]] || cross_tools='cargo nix'
 # `sh/bare-metal.sh` is this module's script. It is not under `rind/src/`, so
 # `reach` treats a change to it as every backend.
-module cross '^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|sh/bare-metal\.sh$|Cargo\.(toml|lock)$|flake\.(nix|lock)$)' \
+module cross '^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|rind-bench/Cargo\.toml$|sh/bare-metal(-test)?\.sh$|Cargo\.(toml|lock)$|flake\.(nix|lock)$)' \
     tools="$cross_tools" compiles
 # Dependents may build with the workspace's declared rust-version. Plain
 # `cargo check` covers the lib and bin targets, all a dependent builds, so a
@@ -482,7 +482,10 @@ step() {
             # A- and R-profile; aarch64 and x86_64 on their `none` targets.
             # A change that reaches none of them skips the script. `run`
             # keeps the lane's INT/QUIT trap, which a bare script would not.
+            # The harness needs no toolchain. Xtensa is `just xtensa`: its
+            # compiler is not in this shell.
             if reaches "$backends" x86_64 aarch64 arm portable; then
+                run sh/bare-metal-test.sh
                 run sh/bare-metal.sh
             fi
             ;;

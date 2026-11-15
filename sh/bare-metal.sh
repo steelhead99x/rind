@@ -2,14 +2,25 @@
 # Lint rind's library for bare-metal targets (`target_os = "none"`), where it
 # builds without std, as `just bare-metal` and `just check`'s cross module run
 # it. Clippy does not generate code, so each target that keeps an assembly
-# backend is also built: that assembles its `global_asm`. Nothing here
-# links a program, runs one, or checks timing on these cores.
+# backend is also built: that assembles its `global_asm`. `xtensa` lints the
+# ESP32's Xtensa targets instead. Those are tier 3 and need espup's toolchain
+# (`ESP_TOOLCHAIN`, by default `esp`), as `just xtensa` and
+# `.github/workflows/xtensa.yml` run it. Compile only: nothing here links a
+# program, runs one, or checks timing on these cores.
+#
+# Usage: sh/bare-metal.sh [xtensa]
 set -euo pipefail
+
+if (( $# > 1 )) || [[ ${1:-} != "" && $1 != xtensa ]]; then
+    echo "Usage: $0 [xtensa]" >&2
+    exit 2
+fi
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# getrandom has no source on these targets until the program names one, which
-# a library build cannot, so its custom backend stands in.
+# getrandom has no source on `target_os = "none"` until the program names one,
+# which a library build cannot, so its custom backend stands in. ESP-IDF has
+# getrandom's own backend, so those rows do not set this.
 custom='--cfg getrandom_backend="custom"'
 # The x86_64 assembly needs SSE2. This target is soft-float and leaves SSE
 # off, so `xmm` operands are refused until SSE2 is on, and LLVM aborts while
@@ -20,24 +31,114 @@ sse2='-C target-feature=+sse,+sse2,-soft-float'
 # Without SSE2, dalek's default simd backend does not compile, and the
 # portable backend must not emit `stmxcsr`.
 scalar='--cfg curve25519_dalek_backend="serial"'
+cargo=(cargo)
 
-# lint TARGET [CLIPPY-ARGS...]: debug, whose `debug_assertions` code release
+# Cargo uses one rustflags source and ignores the rest, in this order
+# (rustflags_from_env, then the target variable, then build.rustflags):
+# CARGO_ENCODED_RUSTFLAGS, RUSTFLAGS, CARGO_TARGET_<triple>_RUSTFLAGS,
+# CARGO_BUILD_RUSTFLAGS. Append this script's flags to that one source.
+# Splitting is on spaces, and quote characters stay in the token, which is
+# how `getrandom_backend="custom"` reaches rustc.
+append_words() {
+    local part
+    local -a bits=()
+    IFS=' ' read -r -a bits <<< "$1"
+    for part in "${bits[@]}"; do
+        [[ -n $part ]] && args+=("$part")
+    done
+}
+
+run_cargo() {
+    local target=$1 extra=$2
+    shift 2
+    local var target_flags mode joined
+    var="CARGO_TARGET_$(printf '%s' "$target" | tr 'a-z.-' 'A-Z__')_RUSTFLAGS"
+    target_flags=${!var-}
+    local -a args=()
+    if [[ -v CARGO_ENCODED_RUSTFLAGS ]]; then
+        mode=encoded
+        local rest=${CARGO_ENCODED_RUSTFLAGS} piece
+        while [[ $rest == *$'\x1f'* ]]; do
+            piece=${rest%%$'\x1f'*}
+            [[ -n $piece ]] && args+=("$piece")
+            rest=${rest#*$'\x1f'}
+        done
+        [[ -n $rest ]] && args+=("$rest")
+    elif [[ -v RUSTFLAGS ]]; then
+        mode=rustflags
+        append_words "$RUSTFLAGS"
+    elif [[ -n $target_flags ]]; then
+        mode=target
+        append_words "$target_flags"
+    elif [[ -v CARGO_BUILD_RUSTFLAGS ]]; then
+        mode=build
+        append_words "$CARGO_BUILD_RUSTFLAGS"
+    else
+        mode=target
+    fi
+    append_words "$extra"
+    if [[ ${#args[@]} -eq 0 ]]; then
+        "$@"
+        return
+    fi
+    joined=$(printf '%s ' "${args[@]}")
+    joined=${joined% }
+    case $mode in
+        encoded)
+            local IFS=$'\x1f'
+            joined="${args[*]}"
+            env -u RUSTFLAGS "CARGO_ENCODED_RUSTFLAGS=$joined" "$@"
+            ;;
+        rustflags)
+            env -u CARGO_ENCODED_RUSTFLAGS "RUSTFLAGS=$joined" "$@"
+            ;;
+        build)
+            env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS "CARGO_BUILD_RUSTFLAGS=$joined" "$@"
+            ;;
+        target)
+            env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS "$var=$joined" "$@"
+            ;;
+    esac
+}
+
+# Flags every lint of TARGET needs. ESP-IDF uses getrandom's own backend.
+# Bare-metal x86_64 also needs SSE2. dalek's default stays off AVX there:
+# cpufeatures reports a SIMD feature on this os only when it is a target
+# feature, and this script does not enable AVX.
+required_flags() {
+    local target=$1
+    case $target in
+        xtensa-*-espidf) ;;
+        x86_64-unknown-none) printf '%s' "$custom $sse2" ;;
+        *) printf '%s' "$custom" ;;
+    esac
+}
+
+# rows TARGET COMMAND [ARGS...]: debug, whose `debug_assertions` code release
 # leaves out, and release, each with and without `wipe`.
+rows() {
+    local target=$1
+    shift
+    local flags profile features
+    flags=$(required_flags "$target")
+    for profile in dev release; do
+        for features in "" wipe; do
+            run_cargo "$target" "$flags" "${cargo[@]}" "$@" \
+                --target "$target" --profile "$profile" --features "$features"
+        done
+    done
+}
+
 lint() {
     local target=$1
     shift
-    local flags rustflags
-    flags="CARGO_TARGET_$(tr 'a-z.-' 'A-Z__' <<<"$target")_RUSTFLAGS"
-    rustflags=$custom
-    if [[ $target == x86_64-unknown-none ]]; then
-        rustflags+=" $sse2"
-    fi
-    for profile in dev release; do
-        for features in "" wipe; do
-            env "$flags=$rustflags" cargo clippy "$@" -p rind --lib --locked --target "$target" \
-                --profile "$profile" --features "$features" -- --deny warnings
-        done
-    done
+    rows "$target" clippy "$@" -p rind --lib --locked -- --deny warnings
+}
+
+check_lib() {
+    local target=$1
+    shift
+    rows "$target" check "$@" -p rind --lib --locked
 }
 
 # clippy is a check build, so it never assembles `global_asm`. Build the
@@ -46,27 +147,45 @@ lint() {
 # or `wipe`.
 assemble() {
     local target=$1
-    local flags rustflags
-    flags="CARGO_TARGET_$(tr 'a-z.-' 'A-Z__' <<<"$target")_RUSTFLAGS"
-    rustflags=$custom
-    if [[ $target == x86_64-unknown-none ]]; then
-        rustflags+=" $sse2"
-    fi
-    env "$flags=$rustflags" cargo build -p rind --lib --locked --target "$target"
+    run_cargo "$target" "$(required_flags "$target")" "${cargo[@]}" build -p rind --lib --locked \
+        --target "$target"
 }
 
 # aws-lc builds for none of these, so rind-bench must leave it out of its
 # dependencies there, as its benches leave out aws-lc-rs's rows.
 no_aws_lc() {
     local target=$1
-    local crates
-    crates=$(cargo tree -p rind-bench -e normal,build,dev --locked --target "$target" \
-        --prefix none --format '{p}')
+    local crates status
+    status=0
+    crates=$(run_cargo "$target" "" "${cargo[@]}" tree -p rind-bench -e normal,build,dev --locked \
+        --target "$target" --prefix none --format '{p}') || status=$?
+    if (( status != 0 )); then
+        echo "error: cargo tree failed for $target" >&2
+        exit "$status"
+    fi
     if grep -E '^aws-lc' <<<"$crates"; then
         echo "error: rind-bench depends on aws-lc for $target" >&2
         exit 1
     fi
 }
+
+if [[ ${1:-} == xtensa ]]; then
+    cargo=(cargo "+${ESP_TOOLCHAIN:-esp}")
+    # Tier 3 ships no prebuilt standard library, so it is built from source.
+    # ESP32-S2 has no compare-and-swap, so it builds `reuse_cache_without_cas`.
+    # ESP-IDF is checked, not linted: there clippy's `missing_const_for_thread_local`
+    # flags thread-locals whose initializers are already `const`.
+    # See UPSTREAM.md, "Clippy flags const thread-local initializers".
+    for target in xtensa-esp32-none-elf xtensa-esp32s2-none-elf xtensa-esp32s3-none-elf; do
+        lint "$target" -Zbuild-std=core,alloc
+    done
+    check_lib xtensa-esp32s3-espidf -Zbuild-std=std,panic_abort
+    # ring and openssl-sys are not dependencies on Xtensa. The benches that
+    # call them are cfg'd out. ESP-IDF uses getrandom's own backend.
+    run_cargo xtensa-esp32s3-espidf "" "${cargo[@]}" check -Zbuild-std=std,panic_abort \
+        -p rind-bench --benches --locked --target xtensa-esp32s3-espidf
+    exit 0
+fi
 
 # ARMv6-M (Cortex-M0+, the RP2040) and RV32IMC (the ESP32-C3) have no
 # compare-and-swap, so they build `reuse_cache_without_cas`. ARMv7E-M
@@ -106,16 +225,15 @@ done
 # backend instead.
 no_sse2() {
     local target=x86_64-unknown-none
-    local flags rustflags root rlib
-    flags="CARGO_TARGET_$(tr 'a-z.-' 'A-Z__' <<<"$target")_RUSTFLAGS"
-    rustflags="$custom $scalar"
+    local profile features root rlib
     for profile in dev release; do
         for features in "" wipe; do
-            env "$flags=$rustflags" cargo clippy -p rind --lib --locked --target "$target" \
-                --profile "$profile" --features "$features" -- --deny warnings
+            run_cargo "$target" "$custom $scalar" "${cargo[@]}" clippy -p rind --lib --locked \
+                --target "$target" --profile "$profile" --features "$features" -- --deny warnings
         done
     done
-    env "$flags=$rustflags" cargo build -p rind --lib --locked --target "$target"
+    run_cargo "$target" "$custom $scalar" "${cargo[@]}" build -p rind --lib --locked \
+        --target "$target"
     root=${CARGO_TARGET_DIR:-target}
     local found=0
     while IFS= read -r rlib; do
