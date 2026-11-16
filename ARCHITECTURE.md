@@ -51,6 +51,10 @@ The modules:
   finalizes the reply into the output. Its `voprf` mode adds the server's
   public key and a DLEQ proof over a batch, as Privacy Pass's privately
   verifiable tokens (RFC 9578) need; OPAQUE uses the base mode.
+- `frost`: RFC 9591's FROST threshold signatures over Ed25519, ristretto255,
+  and P-256: a trusted dealer's shares and commitment, each signer's
+  single-use nonces and signature share, and a coordinator's signing package
+  that aggregates the shares and verifies each, under a group public key.
 - `signature`: ECDSA on P-256, P-384, and P-521, RSA PKCS#1 v1.5 and PSS, and
   Ed25519 key pairs and verification, plus ECDSA over a `digest` the caller
   computed, with any SHA-2 hash, RSA keys given as their components, and

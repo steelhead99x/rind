@@ -181,6 +181,9 @@ errors! {
         MismatchedSec1Curve,
         MismatchedSec1PublicKey,
         MismatchedSpkiAlgorithm,
+        DuplicateIdentifier,
+        UnknownIdentifier,
+        MismatchedCommitments,
     ],
     asn1: [
         UnexpectedTag,
@@ -362,7 +365,7 @@ mod kat {
         let info = hex("f0f1f2f3f4f5f6f7f8f9");
         let filled = salt
             .extract(&input("hkdf", [0x0b; 22]))
-            .and_then(|prk| prk.expand(&[&info], okm.len())?.fill(&mut okm));
+            .and_then(|prk| prk.fill(&[&info], &mut okm));
         check(
             "hkdf",
             filled.is_ok()

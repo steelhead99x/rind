@@ -7,7 +7,7 @@ use openmls_traits::types::{
 use rind::signature::{
     EcdsaKeyPair, EcdsaSigningAlgorithm, Ed25519KeyPair, PublicKey, sign, verify,
 };
-use rind::{aead, digest, hmac, hpke};
+use rind::{aead, digest, hkdf, hmac, hpke};
 use tls_codec::SecretVLBytes;
 
 /// The ciphersuites openmls_rust_crypto offers.
@@ -57,8 +57,8 @@ impl OpenMlsCrypto for RustCrypto {
         Ok(hmac::sign(&key, message).as_ref().into())
     }
 
-    // rind's `hkdf::Prk` cannot be loaded from bytes, so this is RFC 5869's
-    // expand over HMAC.
+    // Upstream refuses a PRK shorter than the hash. The output's limit is
+    // checked here too, before allocating it.
     fn hkdf_expand(
         &self,
         hash_type: HashType,
@@ -70,20 +70,10 @@ impl OpenMlsCrypto for RustCrypto {
         if prk.len() < hash_len || okm_len > 255 * hash_len {
             return Err(CryptoError::HkdfOutputLengthInvalid);
         }
-        let key = hmac::Key::new(hmac_algorithm(hash_type), prk);
-        let mut okm = Vec::with_capacity(okm_len.next_multiple_of(hash_len));
-        let mut previous = 0..0;
-        for counter in 1..=okm_len.div_ceil(hash_len) {
-            let mut ctx = hmac::Context::with_key(&key);
-            ctx.update(&okm[previous.clone()]);
-            ctx.update(info);
-            // At most 255 blocks, checked above.
-            ctx.update(&[counter as u8]);
-            let start = okm.len();
-            okm.extend_from_slice(ctx.sign().as_ref());
-            previous = start..okm.len();
-        }
-        okm.truncate(okm_len);
+        let mut okm = vec![0; okm_len];
+        hkdf::Prk::new(hkdf_algorithm(hash_type), prk)
+            .fill(&[info], &mut okm)
+            .map_err(|_| CryptoError::HkdfOutputLengthInvalid)?;
         Ok(okm.into())
     }
 
@@ -413,6 +403,14 @@ fn hmac_algorithm(hash_type: HashType) -> &'static hmac::Algorithm {
         HashType::Sha2_256 => &hmac::HMAC_SHA256,
         HashType::Sha2_384 => &hmac::HMAC_SHA384,
         HashType::Sha2_512 => &hmac::HMAC_SHA512,
+    }
+}
+
+fn hkdf_algorithm(hash_type: HashType) -> &'static hkdf::Algorithm {
+    match hash_type {
+        HashType::Sha2_256 => &hkdf::HKDF_SHA256,
+        HashType::Sha2_384 => &hkdf::HKDF_SHA384,
+        HashType::Sha2_512 => &hkdf::HKDF_SHA512,
     }
 }
 
