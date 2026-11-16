@@ -1,17 +1,17 @@
 //! ML-DSA (FIPS 204), which aws-lc-rs names PQDSA, backed by rind's
-//! `MlDsaKeyPair`, whose parameter set is a type where aws-lc-rs's is a
+//! `ml_dsa::KeyPair`, whose parameter set is a type where aws-lc-rs's is a
 //! value.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 
-use rind::signature::sign::{MlDsa44, MlDsa65, MlDsa87, MlDsaKeyPair};
+use rind::ml_dsa::{self, MlDsa44, MlDsa65, MlDsa87};
 
 use crate::digest::Digest;
 use crate::encoding::{AsDer, Pkcs8V1Der, PublicKeyX509Der};
 use crate::error::{KeyRejected, Unspecified, unspecified};
-use crate::signature::{KeyPair, private, verification_algorithm};
+use crate::signature::{KeyPair, ParsedKey, private, verification_algorithm};
 use crate::wipe::Wiped;
 use crate::{Hex, der, pkcs8};
 
@@ -91,12 +91,22 @@ impl AlgorithmID {
             .find(|id| id.oid().as_slice() == oid)
     }
 
-    fn rind(&self) -> &'static rind::signature::VerificationAlgorithm {
-        match self {
-            Self::ML_DSA_44 => &rind::signature::verify::ML_DSA_44,
-            Self::ML_DSA_65 => &rind::signature::verify::ML_DSA_65,
-            Self::ML_DSA_87 => &rind::signature::verify::ML_DSA_87,
-        }
+    /// Parses FIPS 204's encoding of a public key of this parameter set.
+    fn parse_raw(&self, bytes: &[u8]) -> Result<ParsedKey, rind::Error> {
+        Ok(match self {
+            Self::ML_DSA_44 => ParsedKey::MlDsa44(ml_dsa::PublicKey::new(bytes)?),
+            Self::ML_DSA_65 => ParsedKey::MlDsa65(ml_dsa::PublicKey::new(bytes)?),
+            Self::ML_DSA_87 => ParsedKey::MlDsa87(ml_dsa::PublicKey::new(bytes)?),
+        })
+    }
+
+    /// Parses a `SubjectPublicKeyInfo` naming this parameter set.
+    fn parse_spki(&self, der: &[u8]) -> Result<ParsedKey, rind::Error> {
+        Ok(match self {
+            Self::ML_DSA_44 => ParsedKey::MlDsa44(ml_dsa::PublicKey::from_spki(der)?),
+            Self::ML_DSA_65 => ParsedKey::MlDsa65(ml_dsa::PublicKey::from_spki(der)?),
+            Self::ML_DSA_87 => ParsedKey::MlDsa87(ml_dsa::PublicKey::from_spki(der)?),
+        })
     }
 }
 
@@ -110,46 +120,47 @@ pub struct PqdsaVerificationAlgorithm {
 }
 
 impl private::Verify for PqdsaVerificationAlgorithm {
-    fn parse(&self, public_key: &[u8]) -> Result<rind::signature::PublicKey, KeyRejected> {
-        let algorithm = self.id.rind();
+    fn parse(&self, public_key: &[u8]) -> Result<ParsedKey, KeyRejected> {
         // aws-lc-rs tries a SubjectPublicKeyInfo, then the raw key
         // (`parse_pqdsa_public_key` in aws-lc-rs 1.19.0 `aws-lc-rs/src/pqdsa.rs`).
         // A raw key of another length is `Unspecified`
         // (`parse_raw_public_key` in `aws-lc-rs/src/evp_pkey.rs`), and
         // `Result::or` keeps that error in place of the SPKI failure.
-        if let Ok(key) = rind::signature::PublicKey::from_spki(algorithm, public_key) {
+        if let Ok(key) = self.id.parse_spki(public_key) {
             return Ok(key);
         }
         // aws-lc's `EVP_parse_public_key` reads one value and leaves the rest
         // (`crypto/evp_extra/evp_asn1.c`).
         if let Some(prefix) = der::sequence_prefix(public_key)
             && prefix.len() != public_key.len()
-            && let Ok(key) = rind::signature::PublicKey::from_spki(algorithm, prefix)
+            && let Ok(key) = self.id.parse_spki(prefix)
         {
             return Ok(key);
         }
         if public_key.len() == self.id.public_key_len() {
-            return rind::signature::PublicKey::new(algorithm, public_key)
-                .map_err(KeyRejected::rind);
+            return self.id.parse_raw(public_key).map_err(KeyRejected::rind);
         }
         Err(KeyRejected::unspecified())
     }
 
     fn verify_parsed(
         &self,
-        key: &rind::signature::PublicKey,
+        key: &ParsedKey,
         msg: &[u8],
         signature: &[u8],
     ) -> Result<(), Unspecified> {
-        key.verify(msg, signature).map_err(unspecified)
+        // A key of another parameter set, or another algorithm, verifies
+        // nothing here.
+        match (self.id, key) {
+            (AlgorithmID::ML_DSA_44, ParsedKey::MlDsa44(key)) => key.verify(msg, signature),
+            (AlgorithmID::ML_DSA_65, ParsedKey::MlDsa65(key)) => key.verify(msg, signature),
+            (AlgorithmID::ML_DSA_87, ParsedKey::MlDsa87(key)) => key.verify(msg, signature),
+            _ => return Err(Unspecified),
+        }
+        .map_err(unspecified)
     }
 
-    fn verify_parsed_digest(
-        &self,
-        _: &rind::signature::PublicKey,
-        _: &Digest,
-        _: &[u8],
-    ) -> Result<(), Unspecified> {
+    fn verify_parsed_digest(&self, _: &ParsedKey, _: &Digest, _: &[u8]) -> Result<(), Unspecified> {
         Err(Unspecified)
     }
 }
@@ -186,9 +197,9 @@ impl PqdsaSigningAlgorithm {
 // stale stack bytes, a seed among them, that the key's wipe never reaches.
 #[derive(Clone)]
 enum Key {
-    MlDsa44(Arc<MlDsaKeyPair<MlDsa44>>),
-    MlDsa65(Arc<MlDsaKeyPair<MlDsa65>>),
-    MlDsa87(Arc<MlDsaKeyPair<MlDsa87>>),
+    MlDsa44(Arc<ml_dsa::KeyPair<MlDsa44>>),
+    MlDsa65(Arc<ml_dsa::KeyPair<MlDsa65>>),
+    MlDsa87(Arc<ml_dsa::KeyPair<MlDsa87>>),
 }
 
 /// Runs `$body` with `$k` bound to the [`Key`]'s rind key pair.
@@ -202,14 +213,14 @@ macro_rules! with_key {
     };
 }
 
-/// Calls rind's `MlDsaKeyPair::$method($args)` for `$id`'s parameter set,
+/// Calls rind's `ml_dsa::KeyPair::$method($args)` for `$id`'s parameter set,
 /// returning a [`Key`].
 macro_rules! new_key {
     ($id:expr, $method:ident($($arg:expr),*)) => {
         match $id {
-            AlgorithmID::ML_DSA_44 => MlDsaKeyPair::$method($($arg),*).map(|k| Key::MlDsa44(Arc::new(k))),
-            AlgorithmID::ML_DSA_65 => MlDsaKeyPair::$method($($arg),*).map(|k| Key::MlDsa65(Arc::new(k))),
-            AlgorithmID::ML_DSA_87 => MlDsaKeyPair::$method($($arg),*).map(|k| Key::MlDsa87(Arc::new(k))),
+            AlgorithmID::ML_DSA_44 => ml_dsa::KeyPair::$method($($arg),*).map(|k| Key::MlDsa44(Arc::new(k))),
+            AlgorithmID::ML_DSA_65 => ml_dsa::KeyPair::$method($($arg),*).map(|k| Key::MlDsa65(Arc::new(k))),
+            AlgorithmID::ML_DSA_87 => ml_dsa::KeyPair::$method($($arg),*).map(|k| Key::MlDsa87(Arc::new(k))),
         }
     };
 }
@@ -450,8 +461,7 @@ impl AsRef<[u8]> for PqdsaPublicKey {
 
 impl AsDer<PublicKeyX509Der<'static>> for PqdsaPublicKey {
     fn as_der(&self) -> Result<PublicKeyX509Der<'static>, Unspecified> {
-        let key =
-            rind::signature::PublicKey::new(self.id.rind(), &self.bytes).map_err(unspecified)?;
+        let key = self.id.parse_raw(&self.bytes).map_err(unspecified)?;
         Ok(PublicKeyX509Der::new(key.to_spki().as_ref().to_vec()))
     }
 }
@@ -508,7 +518,7 @@ fn parses_as_other_private_key(pkcs8: &[u8]) -> bool {
     let document = der::sequence_prefix(pkcs8).unwrap_or(pkcs8);
     match oid {
         // RFC 8410 Ed25519.
-        [0x2b, 0x65, 0x70] => rind::signature::Ed25519KeyPair::from_pkcs8(document).is_ok(),
+        [0x2b, 0x65, 0x70] => rind::ed25519::KeyPair::from_pkcs8(document).is_ok(),
         // RFC 8410 X25519.
         [0x2b, 0x65, 0x6e] => {
             rind::agreement::PrivateKey::from_pkcs8(&rind::agreement::X25519, document).is_ok()
@@ -553,8 +563,8 @@ fn rsa_pss_private_key(pkcs8: &[u8]) -> bool {
     if !pss_parameters_ok(parts.parameters) {
         return false;
     }
-    rind::signature::RsaKeyPair::from_pkcs1(parts.private_key).is_ok()
-        || rind::signature::RsaKeyPair::pkcs1_components_agree(parts.private_key)
+    rind::rsa::KeyPair::from_pkcs1(parts.private_key).is_ok()
+        || rind::rsa::KeyPair::pkcs1_components_agree(parts.private_key)
 }
 
 /// `rsa_priv_decode`: NULL parameters, no v2 public key, and components that
@@ -567,8 +577,8 @@ fn rsa_private_key(pkcs8: &[u8]) -> bool {
     if parts.has_public_key || parts.parameters != [0x05, 0x00] {
         return false;
     }
-    rind::signature::RsaKeyPair::from_pkcs8(pkcs8).is_ok()
-        || rind::signature::RsaKeyPair::pkcs1_components_agree(parts.private_key)
+    rind::rsa::KeyPair::from_pkcs8(pkcs8).is_ok()
+        || rind::rsa::KeyPair::pkcs1_components_agree(parts.private_key)
 }
 
 /// An ML-KEM private key in RFC 9935's seed form or expanded form.
@@ -637,8 +647,9 @@ fn der_tlv(tag: u8, body: &[u8]) -> Option<Vec<u8>> {
 /// field. Other named curves aws-lc parses are checked against the order
 /// and, when a public point is present, the curve equation.
 fn ec_private_key(pkcs8: &[u8]) -> bool {
-    use rind::signature::sign::{
-        ECDSA_P256_SHA256_ASN1, ECDSA_P384_SHA384_ASN1, ECDSA_P521_SHA512_ASN1,
+    use rind::ecdsa::sign::{
+        P256_SHA256_ASN1 as ECDSA_P256_SHA256_ASN1, P384_SHA384_ASN1 as ECDSA_P384_SHA384_ASN1,
+        P521_SHA512_ASN1 as ECDSA_P521_SHA512_ASN1,
     };
     if [
         &ECDSA_P256_SHA256_ASN1,
@@ -646,7 +657,7 @@ fn ec_private_key(pkcs8: &[u8]) -> bool {
         &ECDSA_P521_SHA512_ASN1,
     ]
     .into_iter()
-    .any(|algorithm| rind::signature::EcdsaKeyPair::from_pkcs8(algorithm, pkcs8).is_ok())
+    .any(|algorithm| rind::ecdsa::KeyPair::from_pkcs8(algorithm, pkcs8).is_ok())
     {
         return true;
     }
@@ -659,7 +670,7 @@ fn ec_private_key(pkcs8: &[u8]) -> bool {
         &ECDSA_P521_SHA512_ASN1,
     ]
     .into_iter()
-    .any(|algorithm| rind::signature::EcdsaKeyPair::from_pkcs8(algorithm, &padded).is_ok())
+    .any(|algorithm| rind::ecdsa::KeyPair::from_pkcs8(algorithm, &padded).is_ok())
         || named_curve_private_key(pkcs8)
 }
 

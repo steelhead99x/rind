@@ -19,7 +19,7 @@ fn entry_points_load_password_scalars_and_shares() {
     ProverSecrets::new(&w0, &w1).unwrap();
     VerifierRecord::from_w1(&w0, &w1).unwrap();
     VerifierRecord::from_record(&w0, GENERATOR).unwrap();
-    let share = Share::<Rfc9383>::from_bytes(GENERATOR).unwrap();
+    let share = Share::<Rfc9383>::new(GENERATOR).unwrap();
     assert_eq!(share.as_ref(), GENERATOR);
-    assert!(Share::<Rfc9383>::from_bytes(&[0x04; 65]).is_err());
+    assert!(Share::<Rfc9383>::new(&[0x04; 65]).is_err());
 }

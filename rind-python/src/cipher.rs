@@ -5,7 +5,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rind::cipher::{self, CbcIv};
-use rind::key_wrap::AesKek;
+use rind::key_wrap::{AesKek, Mode};
 
 use crate::{Bytes, WrongLength, algorithm, bytes, bytes_with, constants, error};
 
@@ -101,7 +101,7 @@ impl Kek {
     /// `WrongLength` for any other length.
     fn wrap<'py>(&self, py: Python<'py>, key: Bytes<'_>) -> PyResult<Bound<'py, PyBytes>> {
         bytes_with(py, &[], key.len() + 8, |out| {
-            self.0.wrap(&key, out).map_err(error)
+            self.0.wrap_key(Mode::Kw, &key, out).map_err(error)
         })
     }
 
@@ -112,14 +112,17 @@ impl Kek {
             return Err(error(rind::Error::DecryptFailed));
         }
         bytes_with(py, &[], wrapped.len() - 8, |out| {
-            self.0.unwrap(&wrapped, out).map_err(error)
+            self.0
+                .unwrap_key(Mode::Kw, &wrapped, out)
+                .map(|_| ())
+                .map_err(error)
         })
     }
 
     /// Wraps `key`, of any length from 1 byte, with AES-KWP.
     fn wrap_padded<'py>(&self, py: Python<'py>, key: Bytes<'_>) -> PyResult<Bound<'py, PyBytes>> {
         bytes_with(py, &[], key.len().next_multiple_of(8) + 8, |out| {
-            self.0.wrap_padded(&key, out).map_err(error)
+            self.0.wrap_key(Mode::Kwp, &key, out).map_err(error)
         })
     }
 
@@ -136,7 +139,7 @@ impl Kek {
         let mut key = vec![0; wrapped.len() - 8];
         let len = self
             .0
-            .unwrap_padded(&wrapped, &mut key)
+            .unwrap_key(Mode::Kwp, &wrapped, &mut key)
             .map_err(error)?
             .len();
         Ok(bytes(py, &key[..len]))

@@ -255,17 +255,12 @@ pub fn digest(
 
 /// Refuses an RSA key whose modulus FIPS 186-5 does not approve, as
 /// aws-lc's service indicator does: an even length of 2048 bits or more,
-/// or exactly 1024 bits if `legacy_1024`, for verifying old signatures. A
-/// key that is not RSA passes.
-pub fn check_rsa_modulus(
-    key: &crate::signature::PublicKey,
-    legacy_1024: bool,
-) -> Result<(), Error> {
-    match key.rsa_modulus_bits() {
-        Some(bits) if !((bits >= 2048 && bits % 2 == 0) || (legacy_1024 && bits == 1024)) => {
-            Err(KeyFormatError::RsaModulus.into())
-        }
-        _ => Ok(()),
+/// or exactly 1024 bits if `legacy_1024`, for verifying old signatures.
+pub fn check_rsa_modulus(key: &crate::rsa::PublicKey, legacy_1024: bool) -> Result<(), Error> {
+    let bits = key.modulus_bits();
+    match (bits >= 2048 && bits.is_multiple_of(2)) || (legacy_1024 && bits == 1024) {
+        true => Ok(()),
+        false => Err(KeyFormatError::RsaModulus.into()),
     }
 }
 
@@ -514,10 +509,10 @@ mod kat {
 
     // RFC 8032's test 1.
     pub(super) fn ed25519() -> Result<(), &'static str> {
-        use crate::high::signature::{Ed25519KeyPair, PublicKey, verify::ED25519};
+        use crate::ed25519::{KeyPair, PublicKey};
         let seed: [u8; 32] =
             hex_array("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
-        let Ok(key) = Ed25519KeyPair::from_seed(&input("ed25519_sign", seed)) else {
+        let Ok(key) = KeyPair::from_seed(&input("ed25519_sign", seed)) else {
             return Err("ed25519_sign");
         };
         let signature: [u8; 64] = hex_array(concat!(
@@ -528,19 +523,18 @@ mod kat {
 
         let public_key = hex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
         let signature = input("ed25519_verify", signature);
-        let verified =
-            PublicKey::new(&ED25519, &public_key).and_then(|k| k.verify(b"", &signature));
+        let verified = PublicKey::new(&public_key).and_then(|k| k.verify(b"", &signature));
         check("ed25519_verify", verified.is_ok())
     }
 
     // PKCS#1 v1.5 with SHA-256 under a 2048-bit key.
     pub(super) fn rsa() -> Result<(), &'static str> {
-        use crate::high::signature::{PublicKey, RsaKeyPair, sign, verify};
-        let Ok(key) = RsaKeyPair::from_pkcs8(include_bytes!("high/rsa/rsa2048.pkcs8.der")) else {
+        use crate::rsa::{KeyPair, PublicKey, sign, verify};
+        let Ok(key) = KeyPair::from_pkcs8(include_bytes!("high/rsa/rsa2048.pkcs8.der")) else {
             return Err("rsa_sign");
         };
         let message = input("rsa_sign", *b"rind-fips RSA self-test");
-        let signature = key.sign(&sign::RSA_PKCS1_SHA256, &message);
+        let signature = key.sign(&sign::PKCS1_SHA256, &message);
         let Ok(signature) = signature else {
             return Err("rsa_sign");
         };
@@ -550,9 +544,8 @@ mod kat {
         )?;
 
         let message = input("rsa_verify", *b"rind-fips RSA self-test");
-        let public_key = key.public_key(&sign::RSA_PKCS1_SHA256);
-        let verified = PublicKey::new(&verify::RSA_PKCS1_SHA256, public_key.as_ref())
-            .and_then(|k| k.verify(&message, signature.as_ref()));
+        let verified = PublicKey::new(key.public_key().as_ref())
+            .and_then(|k| k.verify(&verify::PKCS1_SHA256, &message, signature.as_ref()));
         check("rsa_verify", verified.is_ok())
     }
 
@@ -597,13 +590,13 @@ mod kat {
     // Key generation from the seed of ACVP's first ML-DSA-44 keyGen vector,
     // then signing with a fixed `rnd`, and verifying.
     pub(super) fn ml_dsa() -> Result<(), &'static str> {
-        use crate::mid::mldsa::{KeyPair, MlDsa44, VerifyingKey};
+        use crate::mid::mldsa::{KeyPair, MlDsa44};
 
         let seed: [u8; 32] = hex_array(ML_DSA_SEED);
-        let key = KeyPair::<MlDsa44>::from_seed(&input("ml_dsa_keygen", seed));
+        let (key, public_key) = KeyPair::<MlDsa44>::from_seed(&input("ml_dsa_keygen", seed));
         check(
             "ml_dsa_keygen",
-            sha256_of(key.public_key().as_ref())[..] == hex(ML_DSA_PK_SHA256)
+            sha256_of(public_key.as_ref())[..] == hex(ML_DSA_PK_SHA256)
                 && sha256_of(key.secret_key().as_ref())[..] == hex(ML_DSA_SK_SHA256),
         )?;
 
@@ -619,12 +612,7 @@ mod kat {
             sha256_of(signature.as_ref())[..] == hex(ML_DSA_SIGNATURE_SHA256),
         )?;
 
-        let verified = VerifyingKey::new(*key.tr()).verify::<MlDsa44>(
-            key.public_key().as_ref(),
-            b"",
-            &input("ml_dsa_verify", message),
-            signature.as_ref(),
-        );
+        let verified = public_key.verify(b"", &input("ml_dsa_verify", message), signature.as_ref());
         check("ml_dsa_verify", verified.is_ok())
     }
 
