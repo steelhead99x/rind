@@ -119,7 +119,7 @@ fn hmac() {
     let prk = salt.extract(&[0xff; 32]).unwrap();
     assert_eq!(show(&prk), "Prk { algorithm: Sha256, .. }");
     assert_eq!(
-        show(&prk.expand(&[], 16).unwrap()),
+        show(&prk.expand(&[], &hkdf::HKDF_SHA256).unwrap()),
         "Okm { algorithm: Sha256, .. }"
     );
 

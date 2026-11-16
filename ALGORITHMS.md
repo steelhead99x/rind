@@ -45,6 +45,7 @@ SHA-512.
 | HPKE, over the rows it builds on | rind |  |  |  |  |
 | ECVRF, over the rows it builds on | rind |  |  |  |  |
 | OPRF, VOPRF, over the rows it builds on | rind |  |  |  |  |
+| FROST, over the rows it builds on | rind |  |  |  |  |
 | PBKDF2 | rind |  |  |  |  |
 | Argon2id | Argon2's reference + rind | rind |  |  |  |
 | SPAKE2+ | rind, over P-256 |  |  |  |  |
@@ -128,6 +129,7 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | HPKE, over the rows it builds on | rind |  |  |  |
 | ECVRF, over the rows it builds on | rind |  |  |  |
 | OPRF, VOPRF, over the rows it builds on | rind |  |  |  |
+| FROST, over the rows it builds on | rind |  |  |  |
 | PBKDF2 | rind |  |  |  |
 | Argon2id | rind |  |  |  |
 | SPAKE2+ | rind, over P-256 |  |  |  |
@@ -629,6 +631,17 @@ multiplies in constant time, as with ECVRF on edwards25519, and the NIST
 curves' compute `s G + c Y` as ECDSA verification does, and their other
 sums from constant-time products. The suites' vectors and the `voprf` crate
 cover the composition; nothing in it is proven.
+
+FROST (RFC 9591) is rind's as well, over the same code: edwards25519's and
+ristretto255's constant-time multiplications, or curve25519-dalek's on armv7
+and portable, and P-256's ECDH base point multiplication and RFC 9380
+`hash_to_field`. Dealing, nonce generation, and signing run in constant time
+in the dealer's polynomial, the shares, and the nonces. Binding factors, the
+group commitment, and verifying a share or a signature handle public data:
+edwards25519's and ristretto255's still multiply in constant time, and P-256
+computes its sums as ECDSA verification does. A FROST(Ed25519, SHA-512)
+signature verifies through rind's Ed25519. The suites' vectors and the Zcash
+Foundation's `frost-*` crates cover the composition; nothing in it is proven.
 
 ### ML-KEM
 On aarch64, and on x86_64 CPUs with AVX2, the core polynomial arithmetic -- the NTT, inverse NTT, base multiplication
