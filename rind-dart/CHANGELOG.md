@@ -14,6 +14,8 @@
   agreement private key, and an ML-KEM decapsulation key each return the
   same `publicKey` every time it is read, as does an RSA-OAEP decrypting
   key.
+- `AgreementPublicKey.bytes` and `EncapsulationKey.bytes` return a new copy
+  on each read, so changing a list one returned leaves the key as it was.
 - Breaking: RSA-OAEP moves to `package:rind/rsa.dart` too, and
   `rsa.EncryptingKey(algorithm, der)` takes PKCS#1 only, and
   `rsa.EncryptingKey.fromSpki` a `SubjectPublicKeyInfo`.
@@ -65,6 +67,7 @@
 | `RsaDecryptingKey.publicKey`, a new `RsaEncryptingKey` each time | `rsa.DecryptingKey.publicKey`, the same `rsa.EncryptingKey` each time |
 | `AgreementPrivateKey.publicKey`, a new key each time | the same `AgreementPublicKey` each time |
 | `DecapsulationKey.publicKey`, a new key each time | the same `EncapsulationKey` each time |
+| `AgreementPublicKey.bytes` and `EncapsulationKey.bytes`, the list the key holds | a new copy each read |
 | `EcdsaKeyPair.toSpki()`, `Ed25519KeyPair.toSpki()`, `RsaKeyPair.toSpki()`, `RsaDecryptingKey.toSpki()` | `publicKey.toSpki()` |
 | `RsaEncryptingKey(algorithm, der)`, PKCS#1 or SPKI | `rsa.EncryptingKey(algorithm, der)`, PKCS#1, or `rsa.EncryptingKey.fromSpki(algorithm, der)` |
 
