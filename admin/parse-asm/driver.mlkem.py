@@ -137,6 +137,29 @@ if __name__ == "__main__":
         parse_file(input, d)
 
     with (
+        open("../../thirdparty/s2n-bignum/x86/mlkem/mlkem_basemul_k2.S") as input,
+        generated("../../rind/src/low/x86_64/mlkem_basemul_k2.rs") as output,
+    ):
+        d = RustDriver(output, Architecture_amd64)
+        d.emit_rust_function(
+            "mlkem_basemul_k2",
+            parameter_map=[
+                ("inout", "r.as_mut_ptr() => _"),
+                ("inout", "a.as_ptr() => _"),
+                ("inout", "b.as_ptr() => _"),
+                ("inout", "bt.as_ptr() => _"),
+            ],
+            assertions=[
+                "(r.as_mut_ptr() as usize).is_multiple_of(32)",
+                "(a.as_ptr() as usize).is_multiple_of(32)",
+                "(b.as_ptr() as usize).is_multiple_of(32)",
+                "(bt.as_ptr() as usize).is_multiple_of(32)",
+            ],
+            rust_decl="fn mlkem_basemul_k2(r: &mut [i16; 256], a: &[i16; 512], b: &[i16; 512], bt: &[i16; 256])",
+        )
+        parse_file(input, d)
+
+    with (
         open("../../thirdparty/s2n-bignum/x86/mlkem/mlkem_basemul_k3.S") as input,
         generated("../../rind/src/low/x86_64/mlkem_basemul_k3.rs") as output,
     ):
@@ -156,6 +179,29 @@ if __name__ == "__main__":
                 "(bt.as_ptr() as usize).is_multiple_of(32)",
             ],
             rust_decl="fn mlkem_basemul_k3(r: &mut [i16; 256], a: &[i16; 768], b: &[i16; 768], bt: &[i16; 384])",
+        )
+        parse_file(input, d)
+
+    with (
+        open("../../thirdparty/s2n-bignum/x86/mlkem/mlkem_basemul_k4.S") as input,
+        generated("../../rind/src/low/x86_64/mlkem_basemul_k4.rs") as output,
+    ):
+        d = RustDriver(output, Architecture_amd64)
+        d.emit_rust_function(
+            "mlkem_basemul_k4",
+            parameter_map=[
+                ("inout", "r.as_mut_ptr() => _"),
+                ("inout", "a.as_ptr() => _"),
+                ("inout", "b.as_ptr() => _"),
+                ("inout", "bt.as_ptr() => _"),
+            ],
+            assertions=[
+                "(r.as_mut_ptr() as usize).is_multiple_of(32)",
+                "(a.as_ptr() as usize).is_multiple_of(32)",
+                "(b.as_ptr() as usize).is_multiple_of(32)",
+                "(bt.as_ptr() as usize).is_multiple_of(32)",
+            ],
+            rust_decl="fn mlkem_basemul_k4(r: &mut [i16; 256], a: &[i16; 1024], b: &[i16; 1024], bt: &[i16; 512])",
         )
         parse_file(input, d)
 
@@ -290,6 +336,23 @@ if __name__ == "__main__":
         parse_file(input, d)
 
     with (
+        open("../../thirdparty/s2n-bignum/arm/mlkem/mlkem_basemul_k2.S") as input,
+        generated("../../rind/src/low/aarch64/mlkem_basemul_k2.rs") as output,
+    ):
+        d = RustDriver(output, Architecture_aarch64)
+        d.emit_rust_function(
+            "mlkem_basemul_k2",
+            parameter_map=[
+                ("inout", "r.as_mut_ptr() => _"),
+                ("inout", "a.as_ptr() => _"),
+                ("inout", "b.as_ptr() => _"),
+                ("inout", "bt.as_ptr() => _"),
+            ],
+            rust_decl="fn mlkem_basemul_k2(r: &mut [i16; 256], a: &[i16; 512], b: &[i16; 512], bt: &[i16; 256])",
+        )
+        parse_file(input, d)
+
+    with (
         open("../../thirdparty/s2n-bignum/arm/mlkem/mlkem_basemul_k3.S") as input,
         generated("../../rind/src/low/aarch64/mlkem_basemul_k3.rs") as output,
     ):
@@ -303,6 +366,23 @@ if __name__ == "__main__":
                 ("inout", "bt.as_ptr() => _"),
             ],
             rust_decl="fn mlkem_basemul_k3(r: &mut [i16; 256], a: &[i16; 768], b: &[i16; 768], bt: &[i16; 384])",
+        )
+        parse_file(input, d)
+
+    with (
+        open("../../thirdparty/s2n-bignum/arm/mlkem/mlkem_basemul_k4.S") as input,
+        generated("../../rind/src/low/aarch64/mlkem_basemul_k4.rs") as output,
+    ):
+        d = RustDriver(output, Architecture_aarch64)
+        d.emit_rust_function(
+            "mlkem_basemul_k4",
+            parameter_map=[
+                ("inout", "r.as_mut_ptr() => _"),
+                ("inout", "a.as_ptr() => _"),
+                ("inout", "b.as_ptr() => _"),
+                ("inout", "bt.as_ptr() => _"),
+            ],
+            rust_decl="fn mlkem_basemul_k4(r: &mut [i16; 256], a: &[i16; 1024], b: &[i16; 1024], bt: &[i16; 512])",
         )
         parse_file(input, d)
 

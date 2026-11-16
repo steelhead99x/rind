@@ -518,7 +518,10 @@ which has [its quest](/quest/m4/verified/mlkem-construction.md):
 
 Ed25519 on x86_64 and aarch64, from the signature API's `Ed25519KeyPair` and
 `PublicKey` to s2n-bignum's routines and the SHA-512 proof above, in
-`Rind/X86_64/Ed25519.lean`, which `admin/prove` also writes for aarch64:
+`Rind/X86_64/Ed25519.lean`, which `admin/prove` also writes for aarch64, and
+for aarch64's verification in `Rind/Aarch64/Ed25519Verify.lean`. x86_64's
+verification checks a multiple of RFC 8032's equation with half-size
+scalars, which nothing proves yet, so the last two are aarch64's only:
 
 - `ed25519_generate`: the key pair's seed is the 32 drawn bytes, and a failed
   draw is refused;
@@ -542,12 +545,10 @@ The spec, in `Rind/Ed25519.lean`, is RFC 8032 over HOL Light's
 `edwards25519_group`, whose multiplication and power stay opaque, with
 s2n-bignum's `ed25519_encode` and `ed25519_decode` of its points. Each theorem
 assumes `Runs` and `RunsSha512`, and each with a message bounds it at
-2^64 - 64 bytes. The two that verify also assume `RunsDouble`: on x86_64
-that a CPU without ADX lacks AVX2 too, since with it rind runs a port of
-curve25519-dalek's AVX2 backend, which nothing proves, and on aarch64
-nothing. That a multiple of the base point is a point of the group,
-which `ed25519_key_pair_verify` assumes, is the group's theory, which these
-theorems do not import. `PublicKey` reaches each algorithm's key parser, and
+2^64 - 64 bytes. The two that verify also assume `RunsDouble`, which
+holds on every aarch64 CPU. That a multiple of the base point is a point of
+the group, which `ed25519_key_pair_verify` assumes, is the group's theory,
+which these theorems do not import. `PublicKey` reaches each algorithm's key parser, and
 each parsed key its verification, through function pointers, which
 `Rind/X86_64/SignatureDispatch.lean` models.
 
@@ -722,9 +723,32 @@ tag's prefix is compared through `ct_equal`. They refuse an empty IV, one of
 `encrypt_any` and `decrypt_any`: the 96-bit path's theorems, and the
 `gcm::Key` theorems above both, still take the AAD and message bounds as
 hypotheses.
-The AVX-512 tier's by-16 AES-CTR and GHASH, from 256 bytes to 2 KB, have no
-proof yet: [the AVX-512 by-16 quest](/quest/m4/verified/aes-gcm-x86-intrinsics.md)
-owns them.
+The AVX-512 tier's messages below 2 KB, which run rind's by-16 AES-CTR and
+GHASH from 256 bytes and by-8 below that, are proven in
+`Rind/X86_64/AesGcmAvx512.lean`, over `Rind/X86_64/AesGcmModel.lean`'s hand
+model of `_cipher_avx512`, `Counter512`, `GhashTableAvx512::add`, `_mul16`,
+and `_mul_tail`:
+
+- `cipher_avx512_spec`: `_cipher_avx512` is Vale's `gctr_encrypt_LE` of the
+  message from the counter after J0, and folds the padded AAD and ciphertext
+  into the hash by the Horner rule, as by-8 does. Each lane of its 512-bit
+  counters, round keys, and blocks runs by-8's 128-bit steps, and its last
+  chunk of up to 255 bytes runs masked 64-byte loads and stores and
+  `_mul_tail`'s sum of descending key powers;
+- `avx512_add_spec` (`Rind/X86_64/GhashAvx512.lean`):
+  `GhashTableAvx512::add` is the same Horner rule, 16 blocks a step;
+- `cipher_avx512_tier`: `cipher` on the tier, below 2 KB, is the same, by-16
+  from 256 bytes and by-8 below (`by8_spec_of`, by-8 over any table whose
+  `Ghash::add` is the Horner rule, `GhashOf`);
+- `tagged_from_avx512_spec`: `tagged_from` on the tier, below 2 KB, is
+  `tagged_from_spec`'s ciphertext and tag.
+
+They take the tier's key powers as hypotheses: `Avx512Powers`, that
+`VaesKernel::powers` gives the key's first 16 powers, and `TableFor` of the
+PCLMULQDQ table `from_powers` builds from them. BoringSSL's
+`gcm_init_vpclmulqdq_avx512` sets both up, and
+[the VAES quest](/quest/m4/verified/aes-gcm-x86-vaes.md) proves it, the
+kernels the tier runs from 2 KB, and the tier's seals and opens.
 
 ChaCha20-Poly1305 and XChaCha20-Poly1305 on x86_64 CPUs with SSE4.1, from
 the AEAD API's `Key` and `RandomizedNonceKey` down to the call of aws-lc's
@@ -884,10 +908,14 @@ proof after those.
   `Rind/X86_64/ValeAesGcm.lean`: s2n-bignum's, aws-lc-verification's, and
   Vale's theorems, restated as axioms about the routines' Rust wrappers.
 - `Rind/X86_64/Simd.lean`: models of the x86_64 intrinsics rind's AES,
-  AES-GCM setup, partial blocks, by-8 kernels, and point select call;
+  AES-GCM setup, partial blocks, by-8 and by-16 kernels, and point select
+  call;
   `Rind/X86_64/AesGcmModel.lean`: a hand model, over those intrinsics, of its
-  PCLMULQDQ GHASH and by-8 AES-GCM, whose raw pointers, `transmute`
-  constants, `as_chunks`, and zipped iterators Aeneas cannot translate;
+  PCLMULQDQ GHASH, by-8 AES-GCM, and AVX-512 by-16 AES-GCM, whose raw
+  pointers, `transmute` constants, `as_chunks`, and zipped iterators Aeneas
+  cannot translate; `Rind/X86_64/Avx512Vectors.lean`, the vectors
+  `admin/avx512-vectors.rs` tests the AVX-512, VAES, and VPCLMULQDQ models
+  with; `Rind/X86_64/Lanes512.lean`, those intrinsics lane by lane;
   `Rind/X86_64/PointSelectModel.lean`, of its AVX2 and SSE2 point selects,
   whose raw-pointer loads and `as_chunks` Aeneas cannot translate, and
   `Rind/X86_64/PointSelect.lean`, their proofs;
@@ -929,7 +957,7 @@ proof after those.
   `Rind/<Arch>/{AesModesLow,AesModesApi,AesKw}.lean`, their proofs;
   `hol-light/x86_64/aes_hw_spec.ml`, AES on the AES-NI instructions and CTR32's
   counter blocks, for the x86_64 routines' HOL Light proofs; and
-  `Rind/X86_64/{Ghash,PartialBlock,AesGcmGlue,AesGcm,GhashClmul,AesGcmBy8,AesGcmClmul,AesGcmAead,AesGcmAny}.lean`:
+  `Rind/X86_64/{Ghash,PartialBlock,AesGcmGlue,AesGcm,GhashClmul,AesGcmBy8,AesGcmClmul,AesGcmAead,AesGcmAny,GhashAvx512,AesGcmAvx512}.lean`:
   the AES-GCM proof, on x86_64 alone; `Rind/X86_64/GcmKey.lean`, the hand model
   of `aead::gcm::Key` and its proofs; `Rind/X86_64/ChaCha20Poly1305.lean`, the
   ChaCha20-Poly1305 and XChaCha20-Poly1305 proof above aws-lc's routines.
@@ -1050,7 +1078,10 @@ Beyond Lean's kernel:
   same. `admin/neon-vectors.rs` does the same for the aarch64 ones; its
   output is committed as `Rind/Aarch64/NeonVectors.lean`, which Lean checks
   on any host, and the `prove` workflow reruns it on an aarch64 CPU and fails
-  if the output changed. The AES models run the S-box and
+  if the output changed. `admin/avx512-vectors.rs` does the same for the
+  AVX-512, VAES, and VPCLMULQDQ ones, committed as
+  `Rind/X86_64/Avx512Vectors.lean`; `admin/prove` reruns it only on a CPU
+  with those features, and fails if the output changed. The AES models run the S-box and
   `MixColumns` as FIPS 197 computes them, bodies Lean evaluates while proofs
   keep the two opaque. All are tested on hardware, none under an emulator;
   `admin/prove` fails on a `core.core_arch` model it does not test.

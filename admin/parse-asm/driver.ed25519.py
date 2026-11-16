@@ -92,57 +92,6 @@ if __name__ == "__main__":
         )
         parse_file(input, d)
 
-    # edwards25519_scalarmuldouble (x86_64)
-    with (
-        open(
-            "../../thirdparty/s2n-bignum/x86/curve25519/edwards25519_scalarmuldouble.S"
-        ) as input,
-        generated(
-            "../../rind/src/low/x86_64/edwards25519_scalarmuldouble.rs"
-        ) as output,
-    ):
-        d = RustDriver(output, Architecture_amd64)
-        d.add_const_symbol("edwards25519_scalarmuldouble_constant", shared=True)
-        d.emit_rust_function(
-            "edwards25519_scalarmuldouble",
-            parameter_map=[
-                ("inout", "res.as_mut_ptr() => _"),
-                ("inout", "scalar.as_ptr() => _"),
-                ("inout", "point.as_ptr() => _"),
-                ("inout", "bscalar.as_ptr() => _"),
-            ],
-            hoist=["proc", "Ledwards25519_scalarmuldouble_pepadd", "ret"],
-            rust_decl="fn edwards25519_scalarmuldouble(res: &mut [u64; 8], scalar: &[u64; 4], point: &[u64; 8], bscalar: &[u64; 4])",
-        )
-        parse_file(input, d)
-
-    # edwards25519_scalarmuldouble (x86_64, without BMI2 and ADX)
-    with (
-        open(
-            "../../thirdparty/s2n-bignum/x86/curve25519/edwards25519_scalarmuldouble_alt.S"
-        ) as input,
-        generated(
-            "../../rind/src/low/x86_64/edwards25519_scalarmuldouble_alt.rs"
-        ) as output,
-    ):
-        d = RustDriver(output, Architecture_amd64)
-        d.add_const_symbol(
-            "edwards25519_scalarmuldouble_alt_constant",
-            same_as="super::edwards25519_scalarmuldouble::edwards25519_scalarmuldouble_constant",
-        )
-        d.emit_rust_function(
-            "edwards25519_scalarmuldouble_alt",
-            parameter_map=[
-                ("inout", "res.as_mut_ptr() => _"),
-                ("inout", "scalar.as_ptr() => _"),
-                ("inout", "point.as_ptr() => _"),
-                ("inout", "bscalar.as_ptr() => _"),
-            ],
-            hoist=["proc", "Ledwards25519_scalarmuldouble_alt_pepadd", "ret"],
-            rust_decl="fn edwards25519_scalarmuldouble_alt(res: &mut [u64; 8], scalar: &[u64; 4], point: &[u64; 8], bscalar: &[u64; 4])",
-        )
-        parse_file(input, d)
-
     # bignum_madd_n25519 (x86_64)
     with (
         open(
@@ -198,22 +147,6 @@ if __name__ == "__main__":
             ],
             # hoist=["linear", "Lbignum_mod_n25519_shortinput", "jmp"],
             rust_decl="fn bignum_mod_n25519(z: &mut [u64; 4], x: &[u64])",
-        )
-        parse_file(input, d)
-
-    # bignum_inv_p25519 (x86_64)
-    with (
-        open("../../thirdparty/s2n-bignum/x86/curve25519/bignum_inv_p25519.S") as input,
-        generated("../../rind/src/low/x86_64/bignum_inv_p25519.rs") as output,
-    ):
-        d = RustDriver(output, Architecture_amd64)
-        d.emit_rust_function(
-            "bignum_inv_p25519",
-            parameter_map=[
-                ("inout", "z.as_mut_ptr() => _"),
-                ("inout", "x.as_ptr() => _"),
-            ],
-            rust_decl="fn bignum_inv_p25519(z: &mut [u64; 4], x: &[u64; 4])",
         )
         parse_file(input, d)
 

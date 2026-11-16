@@ -163,9 +163,6 @@ opaque low.x86_64.ghash_nohw.NohwTable.new
 opaque low.x86_64.ghash.ClmulTable.from_powers
   : Slice core.core_arch.x86.__m128i → low.x86_64.cpu.HaveAesHardware → Result low.x86_64.ghash.ClmulTable
 
-opaque low.x86_64.aes_gcm_vaes.VaesKernel.powers
-  : low.x86_64.aes_gcm_vaes.VaesKernel → Result (Slice core.core_arch.x86.__m128i)
-
 opaque low.x86_64.aes_gcm_vaes.VaesKernel.avx512
   : Std.U128 → low.x86_64.cpu.HaveAvx512ForAesGcm → Result low.x86_64.aes_gcm_vaes.VaesKernel
 
@@ -206,11 +203,6 @@ opaque low.x86_64.edwards25519_scalarmulbase.edwards25519_scalarmulbase
   Array Std.U64 8#usize → Array Std.U64 4#usize → Result (Array Std.U64
     8#usize)
 
-opaque low.x86_64.edwards25519_scalarmuldouble.edwards25519_scalarmuldouble
-  :
-  Array Std.U64 8#usize → Array Std.U64 4#usize → Array Std.U64 8#usize →
-    Array Std.U64 4#usize → Result (Array Std.U64 8#usize)
-
 opaque low.x86_64.bignum_madd_n25519.bignum_madd_n25519
   :
   Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
@@ -225,16 +217,6 @@ opaque low.x86_64.edwards25519_scalarmulbase_alt.edwards25519_scalarmulbase_alt
   :
   Array Std.U64 8#usize → Array Std.U64 4#usize → Result (Array Std.U64
     8#usize)
-
-opaque low.x86_64.edwards25519_scalarmuldouble_alt.edwards25519_scalarmuldouble_alt
-  :
-  Array Std.U64 8#usize → Array Std.U64 4#usize → Array Std.U64 8#usize →
-    Array Std.U64 4#usize → Result (Array Std.U64 8#usize)
-
-opaque low.x86_64.edwards25519_scalarmuldouble_avx2.edwards25519_scalarmuldouble
-  :
-  Array Std.U64 8#usize → Array Std.U64 4#usize → Array Std.U64 8#usize →
-    Array Std.U64 4#usize → low.x86_64.cpu.HaveAvx2 → Result (Array Std.U64 8#usize)
 
 opaque low.x86_64.bignum_madd_n25519_alt.bignum_madd_n25519_alt
   :
@@ -251,6 +233,20 @@ opaque low.x86_64.bignum_neg_p25519.bignum_neg_p25519
 
 opaque low.x86_64.bignum_cmp_lt.bignum_cmp_lt
   : Slice Std.U64 → Slice Std.U64 → Result Std.U64
+
+/-! Ed25519 verification's half-size check, which no theorem covers yet:
+the multi-scalar multiplication's dispatch and the field product it needs. -/
+
+opaque low.x86_64.adx_mux.edwards25519_msm
+  :
+  Array Std.U64 12#usize → Array Std.U64 4#usize → Array (Array Std.U64
+    4#usize) 2#usize → Array (Array Std.U64 16#usize) 2#usize → Result
+    (Array Std.U64 12#usize)
+
+opaque low.x86_64.adx_mux.bignum_mul_p25519
+  :
+  Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
+    Result (Array Std.U64 4#usize)
 
 /-! The wipe a drop runs, which no theorem calls. -/
 
