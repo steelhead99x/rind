@@ -234,6 +234,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Reported:** no (Intel SDE has no public tracker; LLVM documents that LeakSanitizer does not work under ptrace).
 - **Goes when:** an SDE release runs LeakSanitizer's stop-the-world without hanging.
 
+### Intel SDE aborts Go's `acvptool`
+
+- **Breaks:** with `x86-cpu.yml`'s Diamond Rapids job running the offline ACVP test under `sde -dmr --` as its cargo runner, SDE followed the test into `acvptool`, a Go binary, and Pin's instrumentation of it aborted it with SIGABRT and no message, twice on GitHub's AMD runners, so the job failed before any set was answered.
+- **Reproduce:** on an AMD x86_64 host in `nix develop .#sde`, run `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="sde -dmr --" cargo test -p rind-acvp --features module --release --test offline`. It has not reproduced on an Intel host (Core Ultra 7 270K), where all three CPU masks pass.
+- **Workaround:** the job sets `RIND_ACVP_WRAPPER_RUNNER` instead, and `rind-acvp/tests/offline.rs`'s `wrapper` runs only `rind-acvp`, the module, under SDE; the test and `acvptool` run natively. Found in [kixel-ai/rind#789](https://github.com/kixel-ai/rind/pull/789).
+- **Reported:** no (Intel SDE has no public tracker).
+- **Goes when:** an SDE release after 9.53.0 runs Go binaries on AMD hosts. Keeping it costs no coverage, since only the module needs the emulated CPU.
+
 ## Dependencies
 
 ### aws-lc cannot deny 32-bit ARM features at run time
@@ -274,6 +282,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Workaround:** `.github/actionlint.yaml` ignores that error in `mutants.yml`.
 - **Reported:** [rhysd/actionlint#657](https://github.com/rhysd/actionlint/issues/657), with a fix in [rhysd/actionlint#654](https://github.com/rhysd/actionlint/pull/654).
 - **Goes when:** an actionlint release in nixpkgs accepts `queue`.
+
+### acvptool sends ML-DSA's externalMu for the external interface
+
+- **Breaks:** NIST's ML-DSA sigGen and sigVer sets give external-interface groups `externalMu: false`, and aws-lc's `acvptool` (through v5.11 and its `main`) forwards it to the module wrapper whatever the group's `signatureInterface`. A wrapper, aws-lc's own included, reads a present flag as the internal interface, so it signs and verifies the external interface's tests without their context and domain separation, and answers them wrongly.
+- **Reproduce:** run an unpatched `acvptool -json` on `thirdparty/acvp/ML-DSA-sigGen-FIPS204.json` through `rind-acvp`: the external groups' signatures differ from the expected ones.
+- **Workaround:** `flake.nix`'s `acvptool` forwards `externalMu` only for `signatureInterface: internal`, the convention aws-lc's module wrapper states. Found in [kixel-ai/rind#789](https://github.com/kixel-ai/rind/pull/789).
+- **Reported:** no (aws/aws-lc).
+- **Goes when:** an aws-lc release in nixpkgs forwards `externalMu` only for the internal interface.
 
 ### Dependabot's Cargo lockfile updates skip its cooldown
 
