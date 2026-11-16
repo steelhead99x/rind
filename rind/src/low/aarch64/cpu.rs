@@ -781,8 +781,14 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn detected_value_matches_midr() {
+        // On a big.LITTLE host the thread can move between cores, and each
+        // core reads its own MIDR_EL1. Compare only when both reads around
+        // the detection agree.
         let midr = read_midr();
-        assert_eq!(detect_wide_multiplier(), midr.is_none_or(wide_from_midr));
+        let detected = detect_wide_multiplier();
+        if read_midr() == midr {
+            assert_eq!(detected, midr.is_none_or(wide_from_midr));
+        }
         // qemu-user shows the host's sysfs, which has no aarch64 registers,
         // so this part runs only on an aarch64 kernel that lists them.
         let listed: Vec<u64> = (0..4096)
