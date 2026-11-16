@@ -352,14 +352,18 @@ names() {
 
 # The workspace packages whose test run turns on rind's `wipe`: those that
 # depend on rind with that feature, and everything that depends on them.
+# With `--lib`, only those with a library, which doc tests need.
 wiping_packages() {
+    local lib=${1:-}
     cargo metadata --no-deps --format-version 1 --locked | jq -r '
         .packages as $all
         | def grow: . as $in
             | ([$all[] | select(any(.dependencies[]; .name as $d | $in | index($d) != null)) | .name] + $in) | unique;
         [$all[] | select(any(.dependencies[]; .name == "rind" and (.features | index("wipe")))) | .name]
-        | until(grow == .; grow)
-        | .[]'
+        | until(grow == .; grow) as $names
+        | $all[] | select(.name as $n | $names | index($n) != null)
+        | select($lib == "" or any(.targets[]; any(.kind[]; . == "lib" or . == "rlib")))
+        | .name' --arg lib "$lib"
 }
 
 # Runs a cargo command once per group of the packages named by the array SEL,
@@ -367,7 +371,14 @@ wiping_packages() {
 # `wiping_packages` alone, since they turn on rind's `wipe` for any package
 # sharing their resolve. Usage: run_grouped SEL cargo CMD ... :: TRAILING ...
 # The selection's `-p NAME` and `--workspace` words go between the two halves.
+# A leading `--lib` runs only the wiping packages that have a library, for doc
+# tests; the rest still stay out of the others' resolve.
 run_grouped() {
+    local only_lib=''
+    if [[ $1 == --lib ]]; then
+        only_lib=--lib
+        shift
+    fi
     local -n sel=$1
     shift
     local head=() tail=() seen=0 arg
@@ -403,7 +414,7 @@ run_grouped() {
     done
     if ((workspace)); then
         saw_rind=1
-        saw=("${wipers[@]}")
+        mapfile -t saw < <(wiping_packages $only_lib)
         rest=(--workspace --exclude rind)
         for name in "${wipers[@]}"; do
             rest+=(--exclude "$name")
@@ -478,7 +489,7 @@ step() {
             # Doc tests need a library. No packages at all means the workspace.
             mapfile -t libs < <(sh/select.sh "$changed" "$all" --lib)
             if ((${#libs[@]} > 0 || ${#packages[@]} == 0)); then
-                run_grouped libs cargo test :: --locked --doc
+                run_grouped --lib libs cargo test :: --locked --doc
                 # A broken or private intra-doc link renders as plain text on
                 # docs.rs.
                 RUSTDOCFLAGS='--deny warnings' run_grouped libs cargo doc :: --no-deps --locked

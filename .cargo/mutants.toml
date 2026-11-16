@@ -343,13 +343,10 @@ exclude_re = [
   'rind/src/mid/rsa_priv/generate\.rs:\d+:\d+: replace \* with \+ in MillerRabinParams<\x27a>::random_base$',
   'rind/src/mid/rsa_priv/generate\.rs:208:\d+: replace \+ with - in MillerRabinParams<\x27a>::random_base$',
   'rind/src/mid/rsa_priv/generate\.rs:208:\d+: replace \+ with \* in MillerRabinParams<\x27a>::random_base$',
-  # `Debug` and `Display` stay excluded. The quest calls them low-value,
-  # so the campaign does not spend a run on them. Tests still check the
-  # strings those impls write.
-  'rind-dimpl/src/digest\.rs:28:\d+: replace <impl fmt::Debug for Running>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-dimpl/src/kx\.rs:55:\d+: replace <impl fmt::Debug for Exchange>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  # `Debug` and `Display` impls no test reads. One a test checks, such as
+  # rind-dimpl's `Running` or rind-rustls's signers, is not listed here, so
+  # the campaign confirms the test catches it.
   'rind-dimpl/src/sign\.rs:79:\d+: replace <impl fmt::Debug for Key>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-dimpl/src/suite\.rs:70:\d+: replace <impl fmt::Debug for Aead>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   'rind-ring/src/aead/quic\.rs:40:\d+: replace <impl fmt::Debug for Algorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   'rind-ring/src/agreement\.rs:120:\d+: replace <impl fmt::Debug for PublicKey>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   'rind-ring/src/error\.rs:99:\d+: replace <impl fmt::Display for KeyRejected>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
@@ -358,9 +355,6 @@ exclude_re = [
   'rind-ring/src/rsa\.rs:204:\d+: replace <impl fmt::Debug for RsaParameters>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   'rind-ring/src/signature\.rs:281:\d+: replace <impl fmt::Debug for EcdsaSigningAlgorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   'rind-ring/src/signature\.rs:210:\d+: replace <impl fmt::Debug for EcdsaVerificationAlgorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-rustls/src/sign\.rs:304:\d+: replace <impl fmt::Debug for Ecdsa>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
-  'rind-rustls/src/sign\.rs:217:\d+: replace <impl fmt::Debug for RsaSigningKey>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
-  'rind-rustls/src/sign\.rs:244:\d+: replace <impl fmt::Debug for RsaSigner>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
   'rind-rustls/src/ticketer\.rs:127:\d+: replace <impl fmt::Debug for XChaCha20Ticketer>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   # One AAD, concatenated, is that AAD. Deleting the one-element arm still
   # feeds `open` the same bytes.

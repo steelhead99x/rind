@@ -54,6 +54,11 @@ expect $'test --workspace -- --exclude rind-rcgen\ntest --package=rind-rcgen --f
     test --workspace -- --exclude rind-rcgen
 expect $'check --tests --package=rind-rcgen@0.14.4 --package=rind@0.3.2\ncheck --tests --package=rind-rcgen@0.14.4 --features=wipe --features=zeroize' \
     check --tests --package=rind-rcgen@0.14.4 --package=rind@0.3.2
+# A selection flag the parser does not know reads as no filter, the
+# workspace, so rind-rcgen still gets its features: an unknown command shape
+# can cost an extra build, never a silently compiled-out wipe test.
+expect $'test --frobnicate=rind-rcgen\ntest --frobnicate=rind-rcgen --package=rind-rcgen --features=wipe --features=zeroize --lib --test zeroing' \
+    test --frobnicate=rind-rcgen
 expect 'build -p rind-rcgen' build -p rind-rcgen
 expect ''
 
