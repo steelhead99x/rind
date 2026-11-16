@@ -11,6 +11,8 @@ use crate::Error;
 use crate::error::{KeyFormatError, KeyRejected};
 use crate::high::asn1;
 
+pub mod acvp;
+
 /// A known-answer self-test of one algorithm, covering each of its
 /// functions (encrypt and decrypt, sign and verify, encapsulate and
 /// decapsulate) at its smallest approved size.

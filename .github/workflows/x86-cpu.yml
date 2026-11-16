@@ -364,3 +364,24 @@ jobs:
           RIND_TEST_X86_AVX512_ML_KEM: 1
           RIND_TEST_X86_AVX512_RSA: 1
           RIND_TEST_X86_MCDT: 1
+
+  # rind-fips's module answers ACVP's sets through rind-acvp on each of its
+  # x86_64 paths: Diamond Rapids has every feature the module takes, and the
+  # test's CPU masks reach its paths without AVX-512, then the baseline the
+  # module requires. The large-data hash tests run natively, in build.yml.
+  acvp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix
+
+      - name: Allow user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Check Diamond Rapids
+        run: nix develop .#sde --command cargo test --release -p rind-acvp --features module --locked
+        env:
+          RIND_ACVP_WRAPPER_RUNNER: "sde -dmr --"

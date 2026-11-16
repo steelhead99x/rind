@@ -49,4 +49,9 @@ These items are left out, so code using them fails to build:
 - An RSA public key, from `rsa::PublicKey::from_der` or elsewhere, must have a modulus of 1024 to 8192 bits, the range rind verifies with.
 - An RSA-OAEP private key is bound to one algorithm in rind, so a `rsa::PrivateDecryptingKey` loads the key again the first time it decrypts with each other algorithm, and keeps it.
 
+It builds for `wasm32-wasip2` and `wasm32-unknown-unknown`, the browser, for
+neither of which aws-lc-rs builds. In the browser, rind needs its JavaScript random source, `getrandom = { version = "0.4",
+features = ["wasm_js"] }`. [PLATFORMS.md](https://github.com/kixel-ai/rind/blob/main/PLATFORMS.md) lists what each adapter's
+upstream needs there too, and why rind's constant-time checks do not cover wasm.
+
 License: Apache-2.0 OR ISC OR MIT-0
