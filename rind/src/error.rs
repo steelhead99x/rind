@@ -75,6 +75,9 @@ pub(crate) enum KeyFormatError {
     MismatchedSec1Curve,
     MismatchedSec1PublicKey,
     MismatchedSpkiAlgorithm,
+    DuplicateIdentifier,
+    UnknownIdentifier,
+    MismatchedCommitments,
 }
 
 impl From<KeyFormatError> for Error {
@@ -133,6 +136,18 @@ impl core::fmt::Display for KeyRejected {
             KeyFormatError::MismatchedSec1PublicKey => write!(f, "mismatched SEC1 public key"),
             KeyFormatError::MismatchedSpkiAlgorithm => {
                 write!(f, "a SubjectPublicKeyInfo of another algorithm")
+            }
+            KeyFormatError::DuplicateIdentifier => {
+                write!(f, "a threshold participant's identifier given twice")
+            }
+            KeyFormatError::UnknownIdentifier => {
+                write!(
+                    f,
+                    "a threshold participant missing from the signing package"
+                )
+            }
+            KeyFormatError::MismatchedCommitments => {
+                write!(f, "nonce commitments that are not the signer's")
             }
         }
     }
