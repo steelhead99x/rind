@@ -5,7 +5,8 @@ use core::fmt;
 use super::hash::{Hash, LegacySha1, Sha256, Sha384, Sha512};
 use super::pkcs1;
 use super::rsa;
-use super::signature::{Buffer, Pkcs8, PublicKeyComponents, RSA_MIN_BITS, Spki};
+use super::signature::rsa::{MIN_BITS as RSA_MIN_BITS, PublicKeyComponents};
+use super::signature::{Buffer, Pkcs8, Spki};
 use crate::error::{Error, KeyFormatError};
 use crate::low;
 use crate::mid::rsa_key_size::RsaKeySize;
@@ -21,7 +22,7 @@ type Decrypt = for<'a> fn(&rsa::SigningKey, &'a mut [u8], &[u8], &[u8]) -> Resul
 /// An RSA-OAEP algorithm: a hash, which MGF1 also uses.
 pub struct OaepAlgorithm {
     hash: OaepHash,
-    // The only paths to the hash's code, as `signature`'s algorithms hold.
+    // The only paths to the hash's code, as the signature algorithms hold.
     encrypt: Encrypt,
     decrypt: Decrypt,
     max_message_len: fn(usize) -> usize,
@@ -66,20 +67,11 @@ pub static OAEP_SHA512: OaepAlgorithm = oaep::<Sha512>(OaepHash::Sha512);
 pub static OAEP_SHA1: OaepAlgorithm = oaep::<LegacySha1>(OaepHash::Sha1);
 
 /// A two-prime RSA private key, with a modulus of 2048 to 8192 bits, bound
-/// to the one RSA-OAEP algorithm it decrypts.
+/// to the one RSA-OAEP algorithm it decrypts, and its public key.
 pub struct DecryptingKey {
     key: rsa::SigningKey,
-    algorithm: AlgorithmRef,
+    public: EncryptingKey,
 }
-
-/// The key's algorithm.
-// Aligned like the private key's `u64` fields, which is 4 bytes on i686 and 8
-// on armv7, so any padding `DecryptingKey` needs falls inside this value,
-// which its drop wipes whole.
-#[derive(Clone, Copy)]
-struct AlgorithmRef(low::ZeroableRef<OaepAlgorithm>, [u64; 0]);
-
-impl low::Zeroable for AlgorithmRef {}
 
 impl DecryptingKey {
     /// Generates a key of `size` for `algorithm` from the system random
@@ -104,21 +96,19 @@ impl DecryptingKey {
     }
 
     fn new(algorithm: &'static OaepAlgorithm, key: rsa::SigningKey) -> Self {
-        Self {
-            key,
-            algorithm: AlgorithmRef(low::ZeroableRef::new(algorithm), []),
-        }
+        // A private key's modulus is at least 2048 bits.
+        let public = EncryptingKey::new_unchecked(algorithm, key.public_key());
+        Self { key, public }
     }
 
     fn algorithm(&self) -> &'static OaepAlgorithm {
-        self.algorithm.0.get()
+        self.public.algorithm()
     }
 
     /// Returns the public key, which encrypts to this key with its
     /// algorithm.
-    pub fn public_key(&self) -> EncryptingKey {
-        // A private key's modulus is at least 2048 bits.
-        EncryptingKey::new_unchecked(self.algorithm(), self.key.public_key())
+    pub fn public_key(&self) -> &EncryptingKey {
+        &self.public
     }
 
     /// Decrypts `ciphertext`, which must have been encrypted with `label`.
@@ -136,13 +126,6 @@ impl DecryptingKey {
     pub fn to_pkcs8(&self) -> Pkcs8 {
         Pkcs8(Buffer::encode(|output| self.key.to_pkcs8_der(output)))
     }
-
-    /// Encodes the public key as a `SubjectPublicKeyInfo`.
-    pub fn to_spki(&self) -> Spki {
-        Spki(Buffer::encode(|output| {
-            self.key.public_key().to_spki_der(output)
-        }))
-    }
 }
 
 impl fmt::Debug for DecryptingKey {
@@ -157,7 +140,7 @@ impl Drop for DecryptingKey {
     fn drop(&mut self) {
         // The private key wipes itself. Wiping this, which is not secret,
         // lets `tests/zeroing.rs` check every byte.
-        low::zeroise_value(&mut self.algorithm);
+        low::zeroise_value(&mut self.public);
     }
 }
 
@@ -165,17 +148,31 @@ impl Drop for DecryptingKey {
 /// RSA-OAEP algorithm it encrypts with.
 ///
 /// Its bytes are its PKCS#1 `RSAPublicKey` DER, however it was given.
+#[derive(Clone)]
 pub struct EncryptingKey {
     key: rsa::VerifyingKey,
-    algorithm: &'static OaepAlgorithm,
+    algorithm: low::ZeroableRef<OaepAlgorithm>,
+    // Aligned like the key's `u64` words, which is 4 bytes on i686 and 8 on
+    // armv7, so any padding a `DecryptingKey` needs falls inside this value,
+    // which its drop wipes whole.
     encoding: Buffer<{ rsa::MAX_PUBLIC_KEY_LEN }>,
+    _align: [u64; 0],
 }
 
+// Words, bytes, lengths, and a `ZeroableRef`, all valid at zero.
+impl low::Zeroable for EncryptingKey {}
+
 impl EncryptingKey {
-    /// Parses a PKCS#1 `RSAPublicKey` or a `SubjectPublicKeyInfo` for
-    /// `algorithm`.
+    /// Parses a PKCS#1 `RSAPublicKey` for `algorithm`.
     pub fn new(algorithm: &'static OaepAlgorithm, der: &[u8]) -> Result<Self, Error> {
-        Self::checked(algorithm, rsa::VerifyingKey::from_der(der)?)
+        Self::checked(algorithm, rsa::VerifyingKey::from_pkcs1_der(der)?)
+    }
+
+    /// Parses a public key for `algorithm` from its `SubjectPublicKeyInfo`
+    /// DER, naming `rsaEncryption`, `id-RSAES-OAEP`, or `id-ea-rsa` with
+    /// `NULL` parameters or none.
+    pub fn from_spki(algorithm: &'static OaepAlgorithm, der: &[u8]) -> Result<Self, Error> {
+        Self::checked(algorithm, rsa::VerifyingKey::from_spki_der(der)?)
     }
 
     /// Loads a key for `algorithm` from its big-endian modulus and exponent,
@@ -202,9 +199,14 @@ impl EncryptingKey {
     fn new_unchecked(algorithm: &'static OaepAlgorithm, key: rsa::VerifyingKey) -> Self {
         Self {
             encoding: Buffer::encode(|output| key.to_pkcs1_der(output)),
-            algorithm,
+            algorithm: low::ZeroableRef::new(algorithm),
             key,
+            _align: [],
         }
+    }
+
+    fn algorithm(&self) -> &'static OaepAlgorithm {
+        self.algorithm.get()
     }
 
     /// Encrypts `message` with `label`, which may be empty, returning a
@@ -213,14 +215,14 @@ impl EncryptingKey {
     /// A message longer than [`Self::max_message_len`] fails with
     /// [`Error::WrongLength`].
     pub fn encrypt(&self, message: &[u8], label: &[u8]) -> Result<Ciphertext, Error> {
-        Buffer::write(|output| (self.algorithm.encrypt)(&self.key, output, message, label))
+        Buffer::write(|output| (self.algorithm().encrypt)(&self.key, output, message, label))
             .map(Ciphertext)
     }
 
     /// Returns the longest message this key encrypts: the modulus length,
     /// less twice the hash length and two.
     pub fn max_message_len(&self) -> usize {
-        (self.algorithm.max_message_len)(self.key.modulus_len_bits().div_ceil(8))
+        (self.algorithm().max_message_len)(self.key.modulus_len_bits().div_ceil(8))
     }
 
     /// Encodes the key as a `SubjectPublicKeyInfo` naming `rsaEncryption`
@@ -239,7 +241,7 @@ impl AsRef<[u8]> for EncryptingKey {
 impl fmt::Debug for EncryptingKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("EncryptingKey")
-            .field("algorithm", self.algorithm)
+            .field("algorithm", self.algorithm())
             .field("bytes", &self.as_ref())
             .finish()
     }
@@ -308,11 +310,14 @@ mod tests {
             for algorithm in ALGORITHMS {
                 let key = DecryptingKey::from_pkcs8(algorithm, der).unwrap();
                 // Through its PKCS#1 bytes and its SPKI, as a peer gets it.
-                let spki = key.to_spki();
+                let spki = key.public_key().to_spki();
                 for public in [
                     EncryptingKey::new(algorithm, key.public_key().as_ref()).unwrap(),
-                    EncryptingKey::new(algorithm, spki.as_ref()).unwrap(),
+                    EncryptingKey::from_spki(algorithm, spki.as_ref()).unwrap(),
                 ] {
+                    // Each refuses the other's encoding.
+                    assert!(EncryptingKey::new(algorithm, spki.as_ref()).is_err());
+                    assert!(EncryptingKey::from_spki(algorithm, public.as_ref()).is_err());
                     assert_eq!(public.as_ref(), key.public_key().as_ref());
                     assert_eq!(public.to_spki().as_ref(), spki.as_ref());
                     let max = public.max_message_len();
