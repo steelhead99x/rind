@@ -206,6 +206,10 @@ impl VerifyingKey {
     pub(crate) fn as_bytes(&self) -> [u8; 32] {
         self.bytes
     }
+
+    pub(crate) fn bytes(&self) -> &[u8; 32] {
+        &self.bytes
+    }
 }
 
 /// In ed25519 format, the curve point (x, y) is determined by the

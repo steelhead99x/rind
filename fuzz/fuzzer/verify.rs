@@ -15,9 +15,9 @@ use aws_lc_rs::signature::{self as theirs, UnparsedPublicKey};
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use der::{spki_parameters, trailing};
 use libfuzzer_sys::fuzz_target;
-use rind::signature::{
-    PublicKey, RsaPssSaltLength, RsaVerificationAlgorithm, VerificationAlgorithm, verify,
-};
+use rind::ml_dsa::{MlDsa44, MlDsa65, MlDsa87};
+use rind::rsa::{PssSaltLength, VerificationAlgorithm as RsaVerificationAlgorithm};
+use rind::{Error, ecdsa, ed25519, ml_dsa, rsa};
 
 mod der;
 
@@ -31,7 +31,7 @@ fuzz_target!(|data: &[u8]| {
     let Some((signature, message)) = split(rest) else {
         return;
     };
-    let Some((ours, theirs, kind)) = algorithm(selector) else {
+    let Some((ours, theirs)) = algorithm(selector) else {
         return;
     };
 
@@ -42,14 +42,57 @@ fuzz_target!(|data: &[u8]| {
         Theirs::PssAnySalt(hash, md) => pss_any_salt(hash, md, key, message, signature),
         Theirs::SlhDsa(verify) => verify(key, message, signature),
     };
-    match PublicKey::new(ours, key) {
-        Ok(key) => assert_eq!(key.verify(message, signature).is_ok(), accepted),
+    match ours.verify(key, message, signature) {
+        Ok(verified) => assert_eq!(verified, accepted),
         Err(e) => assert!(
-            !accepted || refused(kind, key),
+            !accepted || refused(ours, key),
             "refused a key aws-lc-rs verifies with: {e:?}"
         ),
     }
 });
+
+/// rind's algorithm, in its module.
+#[derive(Clone, Copy)]
+enum Ours {
+    Ecdsa(&'static ecdsa::VerificationAlgorithm),
+    Rsa(&'static RsaVerificationAlgorithm),
+    Ed25519,
+    MlDsa44,
+    MlDsa65,
+    MlDsa87,
+    SlhDsa(OurSlhDsa),
+}
+
+/// Whether a key of an SLH-DSA parameter set verifies a signature over a
+/// message, `(key, message, signature)`, or an error if rind refuses the key.
+type OurSlhDsa = fn(&[u8], &[u8], &[u8]) -> Result<bool, Error>;
+
+impl Ours {
+    /// Whether `signature` verifies over `message`, or an error if rind
+    /// refuses `key`: as it loads it, or for RSA as it verifies, with a
+    /// modulus below the algorithm's floor.
+    fn verify(self, key: &[u8], message: &[u8], signature: &[u8]) -> Result<bool, Error> {
+        let verified = match self {
+            Self::Ecdsa(algorithm) => {
+                ecdsa::PublicKey::new(algorithm, key)?.verify(message, signature)
+            }
+            Self::Rsa(algorithm) => {
+                // aws-lc-rs takes PKCS#1 or a `SubjectPublicKeyInfo`.
+                let key = rsa::PublicKey::new(key).or_else(|_| rsa::PublicKey::from_spki(key))?;
+                match key.verify(algorithm, message, signature) {
+                    Err(Error::KeyRejected(e)) => return Err(Error::KeyRejected(e)),
+                    verified => verified,
+                }
+            }
+            Self::Ed25519 => ed25519::PublicKey::new(key)?.verify(message, signature),
+            Self::MlDsa44 => ml_dsa::PublicKey::<MlDsa44>::new(key)?.verify(message, signature),
+            Self::MlDsa65 => ml_dsa::PublicKey::<MlDsa65>::new(key)?.verify(message, signature),
+            Self::MlDsa87 => ml_dsa::PublicKey::<MlDsa87>::new(key)?.verify(message, signature),
+            Self::SlhDsa(verify) => return verify(key, message, signature),
+        };
+        Ok(verified.is_ok())
+    }
+}
 
 /// Splits `input` after a leading big-endian 16-bit length.
 fn split(input: &[u8]) -> Option<(&[u8], &[u8])> {
@@ -69,6 +112,17 @@ enum Theirs {
     /// RustCrypto's SLH-DSA, pure with the empty context: `(key, message,
     /// signature)`.
     SlhDsa(fn(&[u8], &[u8], &[u8]) -> bool),
+}
+
+/// Whether rind verifies `signature` with SLH-DSA parameter set `P`, or an
+/// error if it refuses `key`.
+fn our_slh_dsa<P: rind::slh_dsa::ParameterSet>(
+    key: &[u8],
+    message: &[u8],
+    signature: &[u8],
+) -> Result<bool, Error> {
+    let key = rind::slh_dsa::PublicKey::<P>::new(key)?;
+    Ok(key.verify(message, signature).is_ok())
 }
 
 /// Whether RustCrypto verifies `signature` with SLH-DSA parameter set `P`.
@@ -144,239 +198,173 @@ unsafe fn parse_rsa(key: &[u8]) -> *mut aws_lc_sys::RSA {
     rsa
 }
 
-#[derive(Clone, Copy)]
-enum Kind {
-    Ecdsa,
-    Rsa,
-    Ed25519,
-    /// ML-DSA, with its parameter set's public key length.
-    MlDsa(usize),
-    SlhDsa,
-}
-
-/// The algorithm `selector` picks on each side, and its key type.
-fn algorithm(selector: u8) -> Option<(&'static VerificationAlgorithm, Theirs, Kind)> {
-    use verify::legacy;
+/// The algorithm `selector` picks on each side.
+fn algorithm(selector: u8) -> Option<(Ours, Theirs)> {
+    use rsa::verify::{self, legacy};
     Some(match selector {
-        0 => (
-            &verify::ED25519,
-            Theirs::Rs(&theirs::ED25519),
-            Kind::Ed25519,
-        ),
+        0 => (Ours::Ed25519, Theirs::Rs(&theirs::ED25519)),
         1 => (
-            &verify::ECDSA_P256_SHA256_ASN1,
+            Ours::Ecdsa(&ecdsa::verify::P256_SHA256_ASN1),
             Theirs::Rs(&theirs::ECDSA_P256_SHA256_ASN1),
-            Kind::Ecdsa,
         ),
         2 => (
-            &verify::ECDSA_P256_SHA384_ASN1,
+            Ours::Ecdsa(&ecdsa::verify::P256_SHA384_ASN1),
             Theirs::Rs(&theirs::ECDSA_P256_SHA384_ASN1),
-            Kind::Ecdsa,
         ),
         3 => (
-            &verify::ECDSA_P256_SHA512_ASN1,
+            Ours::Ecdsa(&ecdsa::verify::P256_SHA512_ASN1),
             Theirs::Rs(&theirs::ECDSA_P256_SHA512_ASN1),
-            Kind::Ecdsa,
         ),
         4 => (
-            &verify::ECDSA_P384_SHA256_ASN1,
+            Ours::Ecdsa(&ecdsa::verify::P384_SHA256_ASN1),
             Theirs::Rs(&theirs::ECDSA_P384_SHA256_ASN1),
-            Kind::Ecdsa,
         ),
         5 => (
-            &verify::ECDSA_P384_SHA384_ASN1,
+            Ours::Ecdsa(&ecdsa::verify::P384_SHA384_ASN1),
             Theirs::Rs(&theirs::ECDSA_P384_SHA384_ASN1),
-            Kind::Ecdsa,
         ),
         6 => (
-            &verify::ECDSA_P384_SHA512_ASN1,
+            Ours::Ecdsa(&ecdsa::verify::P384_SHA512_ASN1),
             Theirs::Rs(&theirs::ECDSA_P384_SHA512_ASN1),
-            Kind::Ecdsa,
         ),
         7 => (
-            &verify::ECDSA_P521_SHA256_ASN1,
+            Ours::Ecdsa(&ecdsa::verify::P521_SHA256_ASN1),
             Theirs::Rs(&theirs::ECDSA_P521_SHA256_ASN1),
-            Kind::Ecdsa,
         ),
         8 => (
-            &verify::ECDSA_P521_SHA384_ASN1,
+            Ours::Ecdsa(&ecdsa::verify::P521_SHA384_ASN1),
             Theirs::Rs(&theirs::ECDSA_P521_SHA384_ASN1),
-            Kind::Ecdsa,
         ),
         9 => (
-            &verify::ECDSA_P521_SHA512_ASN1,
+            Ours::Ecdsa(&ecdsa::verify::P521_SHA512_ASN1),
             Theirs::Rs(&theirs::ECDSA_P521_SHA512_ASN1),
-            Kind::Ecdsa,
         ),
         10 => (
-            &verify::ECDSA_P256_SHA256_FIXED,
+            Ours::Ecdsa(&ecdsa::verify::P256_SHA256_FIXED),
             Theirs::Rs(&theirs::ECDSA_P256_SHA256_FIXED),
-            Kind::Ecdsa,
         ),
         11 => (
-            &verify::ECDSA_P384_SHA384_FIXED,
+            Ours::Ecdsa(&ecdsa::verify::P384_SHA384_FIXED),
             Theirs::Rs(&theirs::ECDSA_P384_SHA384_FIXED),
-            Kind::Ecdsa,
         ),
         12 => (
-            &verify::ECDSA_P521_SHA512_FIXED,
+            Ours::Ecdsa(&ecdsa::verify::P521_SHA512_FIXED),
             Theirs::Rs(&theirs::ECDSA_P521_SHA512_FIXED),
-            Kind::Ecdsa,
         ),
         13 => (
-            verify::RSA_PKCS1_SHA256.as_ref(),
+            Ours::Rsa(&verify::PKCS1_SHA256),
             Theirs::Rs(&theirs::RSA_PKCS1_2048_8192_SHA256),
-            Kind::Rsa,
         ),
         14 => (
-            verify::RSA_PKCS1_SHA384.as_ref(),
+            Ours::Rsa(&verify::PKCS1_SHA384),
             Theirs::Rs(&theirs::RSA_PKCS1_2048_8192_SHA384),
-            Kind::Rsa,
         ),
         15 => (
-            verify::RSA_PKCS1_SHA512.as_ref(),
+            Ours::Rsa(&verify::PKCS1_SHA512),
             Theirs::Rs(&theirs::RSA_PKCS1_2048_8192_SHA512),
-            Kind::Rsa,
         ),
         16 => (
-            verify::RSA_PSS_SHA256.as_ref(),
+            Ours::Rsa(&verify::PSS_SHA256),
             Theirs::Rs(&theirs::RSA_PSS_2048_8192_SHA256),
-            Kind::Rsa,
         ),
         17 => (
-            verify::RSA_PSS_SHA384.as_ref(),
+            Ours::Rsa(&verify::PSS_SHA384),
             Theirs::Rs(&theirs::RSA_PSS_2048_8192_SHA384),
-            Kind::Rsa,
         ),
         18 => (
-            verify::RSA_PSS_SHA512.as_ref(),
+            Ours::Rsa(&verify::PSS_SHA512),
             Theirs::Rs(&theirs::RSA_PSS_2048_8192_SHA512),
-            Kind::Rsa,
         ),
         19 => (
-            legacy::RSA_PKCS1_SHA1.as_ref(),
+            Ours::Rsa(&legacy::PKCS1_SHA1),
             Theirs::Rs(&theirs::RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY),
-            Kind::Rsa,
         ),
         20 => (
-            legacy::RSA_PKCS1_1024_SHA1.as_ref(),
+            Ours::Rsa(&legacy::PKCS1_1024_SHA1),
             Theirs::Rs(&theirs::RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY),
-            Kind::Rsa,
         ),
         21 => (
-            legacy::RSA_PKCS1_1024_SHA256.as_ref(),
+            Ours::Rsa(&legacy::PKCS1_1024_SHA256),
             Theirs::Rs(&theirs::RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY),
-            Kind::Rsa,
         ),
         22 => (
-            legacy::RSA_PKCS1_1024_SHA512.as_ref(),
+            Ours::Rsa(&legacy::PKCS1_1024_SHA512),
             Theirs::Rs(&theirs::RSA_PKCS1_1024_8192_SHA512_FOR_LEGACY_USE_ONLY),
-            Kind::Rsa,
         ),
         23 => (
-            legacy::RSA_PKCS1_3072_SHA384.as_ref(),
+            Ours::Rsa(&legacy::PKCS1_3072_SHA384),
             Theirs::Rs(&theirs::RSA_PKCS1_3072_8192_SHA384),
-            Kind::Rsa,
         ),
         24 => (
-            OURS_PSS_SHA256_NO_SALT.as_ref(),
+            Ours::Rsa(&OURS_PSS_SHA256_NO_SALT),
             Theirs::Rs(&THEIRS_PSS_SHA256_NO_SALT),
-            Kind::Rsa,
         ),
         25 => (
-            OURS_PSS_SHA512_MAX_SALT.as_ref(),
+            Ours::Rsa(&OURS_PSS_SHA512_MAX_SALT),
             Theirs::Rs(&THEIRS_PSS_SHA512_MAX_SALT),
-            Kind::Rsa,
         ),
         26 => (
-            verify::RSA_PSS_SHA256_ANY_SALT.as_ref(),
+            Ours::Rsa(&verify::PSS_SHA256_ANY_SALT),
             Theirs::PssAnySalt(&digest::SHA256, aws_lc_sys::EVP_sha256),
-            Kind::Rsa,
         ),
         27 => (
-            verify::RSA_PSS_SHA384_ANY_SALT.as_ref(),
+            Ours::Rsa(&verify::PSS_SHA384_ANY_SALT),
             Theirs::PssAnySalt(&digest::SHA384, aws_lc_sys::EVP_sha384),
-            Kind::Rsa,
         ),
         28 => (
-            verify::RSA_PSS_SHA512_ANY_SALT.as_ref(),
+            Ours::Rsa(&verify::PSS_SHA512_ANY_SALT),
             Theirs::PssAnySalt(&digest::SHA512, aws_lc_sys::EVP_sha512),
-            Kind::Rsa,
         ),
-        29 => (
-            &verify::ML_DSA_44,
-            Theirs::Rs(&theirs::ML_DSA_44),
-            Kind::MlDsa(1312),
-        ),
-        30 => (
-            &verify::ML_DSA_65,
-            Theirs::Rs(&theirs::ML_DSA_65),
-            Kind::MlDsa(1952),
-        ),
-        31 => (
-            &verify::ML_DSA_87,
-            Theirs::Rs(&theirs::ML_DSA_87),
-            Kind::MlDsa(2592),
-        ),
+        29 => (Ours::MlDsa44, Theirs::Rs(&theirs::ML_DSA_44)),
+        30 => (Ours::MlDsa65, Theirs::Rs(&theirs::ML_DSA_65)),
+        31 => (Ours::MlDsa87, Theirs::Rs(&theirs::ML_DSA_87)),
         32 => (
-            &verify::SLH_DSA_SHA2_128S,
+            Ours::SlhDsa(our_slh_dsa::<rind::slh_dsa::SlhDsaSha2_128s>),
             Theirs::SlhDsa(slh_dsa::<slh_dsa::Sha2_128s>),
-            Kind::SlhDsa,
         ),
         33 => (
-            &verify::SLH_DSA_SHA2_128F,
+            Ours::SlhDsa(our_slh_dsa::<rind::slh_dsa::SlhDsaSha2_128f>),
             Theirs::SlhDsa(slh_dsa::<slh_dsa::Sha2_128f>),
-            Kind::SlhDsa,
         ),
         34 => (
-            &verify::SLH_DSA_SHA2_192S,
+            Ours::SlhDsa(our_slh_dsa::<rind::slh_dsa::SlhDsaSha2_192s>),
             Theirs::SlhDsa(slh_dsa::<slh_dsa::Sha2_192s>),
-            Kind::SlhDsa,
         ),
         35 => (
-            &verify::SLH_DSA_SHA2_192F,
+            Ours::SlhDsa(our_slh_dsa::<rind::slh_dsa::SlhDsaSha2_192f>),
             Theirs::SlhDsa(slh_dsa::<slh_dsa::Sha2_192f>),
-            Kind::SlhDsa,
         ),
         36 => (
-            &verify::SLH_DSA_SHA2_256S,
+            Ours::SlhDsa(our_slh_dsa::<rind::slh_dsa::SlhDsaSha2_256s>),
             Theirs::SlhDsa(slh_dsa::<slh_dsa::Sha2_256s>),
-            Kind::SlhDsa,
         ),
         37 => (
-            &verify::SLH_DSA_SHA2_256F,
+            Ours::SlhDsa(our_slh_dsa::<rind::slh_dsa::SlhDsaSha2_256f>),
             Theirs::SlhDsa(slh_dsa::<slh_dsa::Sha2_256f>),
-            Kind::SlhDsa,
         ),
         38 => (
-            &verify::SLH_DSA_SHAKE_128S,
+            Ours::SlhDsa(our_slh_dsa::<rind::slh_dsa::SlhDsaShake128s>),
             Theirs::SlhDsa(slh_dsa::<slh_dsa::Shake128s>),
-            Kind::SlhDsa,
         ),
         39 => (
-            &verify::SLH_DSA_SHAKE_128F,
+            Ours::SlhDsa(our_slh_dsa::<rind::slh_dsa::SlhDsaShake128f>),
             Theirs::SlhDsa(slh_dsa::<slh_dsa::Shake128f>),
-            Kind::SlhDsa,
         ),
         40 => (
-            &verify::SLH_DSA_SHAKE_192S,
+            Ours::SlhDsa(our_slh_dsa::<rind::slh_dsa::SlhDsaShake192s>),
             Theirs::SlhDsa(slh_dsa::<slh_dsa::Shake192s>),
-            Kind::SlhDsa,
         ),
         41 => (
-            &verify::SLH_DSA_SHAKE_192F,
+            Ours::SlhDsa(our_slh_dsa::<rind::slh_dsa::SlhDsaShake192f>),
             Theirs::SlhDsa(slh_dsa::<slh_dsa::Shake192f>),
-            Kind::SlhDsa,
         ),
         42 => (
-            &verify::SLH_DSA_SHAKE_256S,
+            Ours::SlhDsa(our_slh_dsa::<rind::slh_dsa::SlhDsaShake256s>),
             Theirs::SlhDsa(slh_dsa::<slh_dsa::Shake256s>),
-            Kind::SlhDsa,
         ),
         43 => (
-            &verify::SLH_DSA_SHAKE_256F,
+            Ours::SlhDsa(our_slh_dsa::<rind::slh_dsa::SlhDsaShake256f>),
             Theirs::SlhDsa(slh_dsa::<slh_dsa::Shake256f>),
-            Kind::SlhDsa,
         ),
         _ => return None,
     })
@@ -384,27 +372,27 @@ fn algorithm(selector: u8) -> Option<(&'static VerificationAlgorithm, Theirs, Ki
 
 // PSS with salt lengths other than the hash's, at both ends of the range.
 static OURS_PSS_SHA256_NO_SALT: RsaVerificationAlgorithm =
-    RsaVerificationAlgorithm::pss_sha256(RsaPssSaltLength::Custom(0));
+    RsaVerificationAlgorithm::pss_sha256(PssSaltLength::Custom(0));
 static THEIRS_PSS_SHA256_NO_SALT: theirs::RsaParameters =
     theirs::RSA_PSS_2048_8192_SHA256.with_pss_salt_length(theirs::RsaPssSaltLength::Custom(0));
 static OURS_PSS_SHA512_MAX_SALT: RsaVerificationAlgorithm =
-    RsaVerificationAlgorithm::pss_sha512(RsaPssSaltLength::Max);
+    RsaVerificationAlgorithm::pss_sha512(PssSaltLength::Max);
 static THEIRS_PSS_SHA512_MAX_SALT: theirs::RsaParameters =
     theirs::RSA_PSS_2048_8192_SHA512.with_pss_salt_length(theirs::RsaPssSaltLength::Max);
 
 /// Whether rind refuses `key` by design where aws-lc-rs takes it.
-fn refused(kind: Kind, key: &[u8]) -> bool {
-    match kind {
+fn refused(ours: Ours, key: &[u8]) -> bool {
+    match ours {
         // aws-lc-rs also takes a `SubjectPublicKeyInfo`, and a compressed or
         // hybrid point; rind takes only the uncompressed point.
-        Kind::Ecdsa => key.first() != Some(&4),
+        Ours::Ecdsa(_) => key.first() != Some(&4),
         // aws-lc-rs ignores a `SubjectPublicKeyInfo`'s parameters, and
         // bytes after the key.
-        Kind::Rsa => spki_parameters(key) || trailing(key),
+        Ours::Rsa(_) => spki_parameters(key) || trailing(key),
         // aws-lc-rs also takes a `SubjectPublicKeyInfo`, any length but 32,
         // and rind refuses a key of small order, under which signatures
         // nobody made verify.
-        Kind::Ed25519 => match <[u8; 32]>::try_from(key) {
+        Ours::Ed25519 => match <[u8; 32]>::try_from(key) {
             Ok(key) => CompressedEdwardsY(key)
                 .decompress()
                 .is_some_and(|point| point.is_small_order()),
@@ -412,8 +400,10 @@ fn refused(kind: Kind, key: &[u8]) -> bool {
         },
         // aws-lc-rs also takes a `SubjectPublicKeyInfo`; rind takes only the
         // raw key, of which any bytes of its length are one.
-        Kind::MlDsa(len) => key.len() != len,
+        Ours::MlDsa44 => key.len() != 1312,
+        Ours::MlDsa65 => key.len() != 1952,
+        Ours::MlDsa87 => key.len() != 2592,
         // Any bytes of the key's length are one, on both sides.
-        Kind::SlhDsa => false,
+        Ours::SlhDsa(_) => false,
     }
 }

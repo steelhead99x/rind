@@ -18,6 +18,7 @@ use crate::mid::aes_gcm::AesGcm;
 /// unless a protocol fixes a shorter tag; SP 800-38D's Appendix C bounds how
 /// much one key may open under 32- and 64-bit tags.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 #[repr(u8)]
 pub enum TagLength {
     /// The whole 128-bit tag.

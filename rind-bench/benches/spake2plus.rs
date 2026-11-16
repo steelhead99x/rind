@@ -7,12 +7,17 @@ use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use getrandom::{SysRng, rand_core::UnwrapErr};
-use rind::spake2plus::{ProverSecrets, RFC9383, VerifierRecord};
+use rind::spake2plus::{ProverSecrets, RFC9383, Session, VerifierRecord};
 use spake2plus::{Context, P256Sha256, Prover, ProverSecret, Verifier};
 
 const CONTEXT: &[u8] = b"rind-bench";
 const PROVER: &[u8] = b"client";
 const VERIFIER: &[u8] = b"server";
+const SESSION: Session<'static> = Session {
+    context: CONTEXT,
+    id_prover: PROVER,
+    id_verifier: VERIFIER,
+};
 
 // w0s and w1s, the password hash's output, which each library reduces into
 // the same w0 and w1.
@@ -36,13 +41,13 @@ fn rustcrypto_secret() -> ProverSecret<P256Sha256> {
 fn check_interop() {
     let prover = ProverSecrets::new(&W0S, &W1S).unwrap();
     let record = rustcrypto_secret().verifier_record();
-    let (share_p, prover) = prover.start(&RFC9383, CONTEXT, PROVER, VERIFIER).unwrap();
+    let (share_p, prover) = prover.start(&RFC9383, &SESSION).unwrap();
     let (verifier, share_v) = Verifier::start(&record, &context(), &mut UnwrapErr(SysRng));
     let (verifier, confirm_v) = verifier
         .receive(&spake2plus::ShareP::from_bytes(share_p.as_ref()).unwrap())
         .unwrap();
-    let share_v = rind::spake2plus::Share::from_bytes(share_v.as_bytes().as_ref()).unwrap();
-    let confirm_v = rind::spake2plus::Confirm::from_bytes(confirm_v.as_bytes().as_ref()).unwrap();
+    let share_v = rind::spake2plus::Share::new(share_v.as_bytes().as_ref()).unwrap();
+    let confirm_v = rind::spake2plus::Confirm::new(confirm_v.as_bytes().as_ref()).unwrap();
     let (confirm_p, prover_key) = prover.finish(&share_v, &confirm_v).unwrap();
     let verifier_key = verifier
         .finish(&spake2plus::ConfirmP::from_bytes(confirm_p.as_ref()).unwrap())
@@ -62,7 +67,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("spake2plus-p256-prover-start");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
-        b.iter(|| black_box(secrets.start(&RFC9383, CONTEXT, PROVER, VERIFIER).unwrap()));
+        b.iter(|| black_box(secrets.start(&RFC9383, &SESSION).unwrap()));
     });
     group.bench_function("rustcrypto", |b| {
         let mut rng = rng();
@@ -74,14 +79,8 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("spake2plus-p256-verifier-start");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
-        let (share_p, _) = secrets.start(&RFC9383, CONTEXT, PROVER, VERIFIER).unwrap();
-        b.iter(|| {
-            black_box(
-                record
-                    .start(&RFC9383, CONTEXT, PROVER, VERIFIER, &share_p)
-                    .unwrap(),
-            )
-        });
+        let (share_p, _) = secrets.start(&RFC9383, &SESSION).unwrap();
+        b.iter(|| black_box(record.start(&RFC9383, &SESSION, &share_p).unwrap()));
     });
     group.bench_function("rustcrypto", |b| {
         let mut rng = rng();
@@ -100,10 +99,8 @@ fn bench(c: &mut Criterion) {
     group.bench_function("rind", |b| {
         b.iter_batched(
             || {
-                let (share_p, prover) = secrets.start(&RFC9383, CONTEXT, PROVER, VERIFIER).unwrap();
-                let (share_v, confirm_v, _) = record
-                    .start(&RFC9383, CONTEXT, PROVER, VERIFIER, &share_p)
-                    .unwrap();
+                let (share_p, prover) = secrets.start(&RFC9383, &SESSION).unwrap();
+                let (share_v, confirm_v, _) = record.start(&RFC9383, &SESSION, &share_p).unwrap();
                 (prover, share_v, confirm_v)
             },
             |(prover, share_v, confirm_v)| black_box(prover.finish(&share_v, &confirm_v).unwrap()),
@@ -138,10 +135,9 @@ fn bench(c: &mut Criterion) {
     group.bench_function("rind", |b| {
         b.iter_batched(
             || {
-                let (share_p, prover) = secrets.start(&RFC9383, CONTEXT, PROVER, VERIFIER).unwrap();
-                let (share_v, confirm_v, verifier) = record
-                    .start(&RFC9383, CONTEXT, PROVER, VERIFIER, &share_p)
-                    .unwrap();
+                let (share_p, prover) = secrets.start(&RFC9383, &SESSION).unwrap();
+                let (share_v, confirm_v, verifier) =
+                    record.start(&RFC9383, &SESSION, &share_p).unwrap();
                 let (confirm_p, _) = prover.finish(&share_v, &confirm_v).unwrap();
                 (verifier, confirm_p)
             },
