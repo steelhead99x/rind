@@ -91,7 +91,12 @@ bool _rsaVerify(
       e: _bytes(publicKey.e),
     ),
   );
-  return _verifies(key, message, signature.bytes);
+  // rind refuses a modulus below the algorithm's floor as it verifies.
+  return _keyArgument(
+    'signature.publicKey',
+    publicKey,
+    () => _verifies(key, message, signature.bytes),
+  );
 }
 
 final class _RsaPkcs1 extends RsaSsaPkcs1v15 {

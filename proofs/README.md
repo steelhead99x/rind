@@ -194,7 +194,7 @@ curve's points, but `p256_agree` does not yet use it to rule out its fault
 case for the peer's point.
 
 P-256 ECDSA with SHA-256 and fixed-length signatures on x86_64 and aarch64,
-from the signature API's `EcdsaKeyPair` and `PublicKey` to s2n-bignum's
+from the signature API's `ecdsa::KeyPair` and `ecdsa::PublicKey` to s2n-bignum's
 routines, in `Rind/X86_64/P256Signature.lean` over
 `Rind/X86_64/P256Ecdsa.lean`, which `admin/prove` also writes for aarch64,
 over each target's generator multiplication, as for ECDH, and its check of a
@@ -202,12 +202,14 @@ key pair's public key, `Rind/<Arch>/P256KeyCheck.lean`: aarch64 compares it
 with the key's own encoding, and x86_64 compares an uncompressed one's point
 with the generator multiplication's Jacobian result, without encoding it:
 
-- `p256_ecdsa_generate`: the key pair's scalar is in [1, n), and generation
-  is refused only if the system source's draws fail;
+- `p256_ecdsa_generate`: the key pair's scalar is in [1, n), it holds the
+  public key below, and generation is refused only if the system source's
+  draws fail;
 - `p256_ecdsa_from_scalar_and_public_key`: a scalar that is not 32 bytes
   is refused, so is one outside [1, n), and so is a public key that is neither
   X9.62 encoding, uncompressed or compressed, of the scalar times G, and
-  otherwise the key pair's scalar is the scalar;
+  otherwise the key pair's scalar is the scalar, and it holds the public key
+  below;
 - `p256_ecdsa_sign`: a signature signing returns is 64 bytes, the big-endian
   r and s of the ECDSA signature of the message's SHA-256 under the scalar,
   for some nonce in [1, n), neither zero, and signing is refused only if the
@@ -432,11 +434,13 @@ the Rust they model, with an agreement `Algorithm` as which static it is.
 P-256's key generation draws through a `dyn
 RandomSource`, which Aeneas cannot translate either, and
 `Rind/X86_64/P256Dispatch.lean`, which `admin/prove` also writes for aarch64,
-models it the same way, for `Rind/<Arch>/Dispatch.lean` to call. The signature API's `EcdsaKeyPair` reaches each curve's code, and
-`PublicKey` each ECDSA key's parser and verifier, through function pointers,
-and P-256's ECDSA key generation draws through a `dyn RandomSource`;
-`Rind/X86_64/EcdsaDispatch.lean`, which `admin/prove` also writes for
-aarch64, models them for P-256 with SHA-256 and fixed-length signatures.
+models it the same way, for `Rind/<Arch>/Dispatch.lean` to call. The signature API's `ecdsa::KeyPair` reaches each curve's code, and
+`ecdsa::PublicKey` each ECDSA key's parser and verifier, through function
+pointers, and P-256's ECDSA key generation draws through a `dyn
+RandomSource`; `Rind/X86_64/EcdsaDispatch.lean`, which `admin/prove` also
+writes for aarch64, models them for P-256 with SHA-256 and fixed-length
+signatures, over `Rind/X86_64/SignatureBuffer.lean`'s model of
+`Buffer::write`, whose closure returns a borrow of its argument.
 
 SHA-384, SHA-512, and SHA-512/256, from the digest API to aws-lc's block
 routine, in `Rind/X86_64/Sha512.lean`, which `admin/prove` also writes for
@@ -523,8 +527,8 @@ which has [its quest](/quest/m4/verified/mlkem-construction.md):
   `pmulaccred0K3_eq` and its siblings: the same for the x86_64 routines, which
   keep FIPS 203's coefficients in the AVX2 order.
 
-Ed25519 on x86_64 and aarch64, from the signature API's `Ed25519KeyPair` and
-`PublicKey` to s2n-bignum's routines and the SHA-512 proof above, in
+Ed25519 on x86_64 and aarch64, from the signature API's `ed25519::KeyPair`
+and `ed25519::PublicKey` to s2n-bignum's routines and the SHA-512 proof above, in
 `Rind/X86_64/Ed25519.lean`, which `admin/prove` also writes for aarch64, and
 for aarch64's verification in `Rind/Aarch64/Ed25519Verify.lean`. x86_64's
 verification checks a multiple of RFC 8032's equation with half-size
@@ -555,9 +559,8 @@ assumes `Runs` and `RunsSha512`, and each with a message bounds it at
 2^64 - 64 bytes. The two that verify also assume `RunsDouble`, which
 holds on every aarch64 CPU. That a multiple of the base point is a point of
 the group, which `ed25519_key_pair_verify` assumes, is the group's theory,
-which these theorems do not import. `PublicKey` reaches each algorithm's key parser, and
-each parsed key its verification, through function pointers, which
-`Rind/X86_64/SignatureDispatch.lean` models.
+which these theorems do not import. The `ed25519` module calls no function
+pointer, so these theorems are about its translation, with no hand model.
 
 AES-128, AES-192, and AES-256 on x86_64 CPUs with AES-NI and aarch64 CPUs
 with the crypto extension, from `cipher::Aes` and the header-protection API's
@@ -640,7 +643,10 @@ transliteration, whose `#guard`s check RFC 3394's and RFC 5649's vectors:
   wrap takes any key of 1 to 2^32 - 1 bytes, aligned or not, into an output of
   the key padded to whole semiblocks plus one, and refuses anything else; an
   unwrap refuses as KW's does from two semiblocks of input, and zeroes the
-  buffer when KWP-AD's integrity check fails.
+  buffer when KWP-AD's integrity check fails;
+- `kek_wrap_key_spec` and `kek_unwrap_key_spec`: the public `wrap_key` and
+  `unwrap_key` run KW's for `Mode::Kw` and KWP's for `Mode::Kwp`, as the
+  four above state, and `unwrap_key` returns the unwrapped key.
 
 The unwraps' integrity check rests on the constant-time compares'
 `Rind/<Arch>/CtEqual.lean` contracts; the rest rests on nothing.
@@ -790,20 +796,21 @@ and Poly1305 passes, which the model leaves opaque. `AeadDispatch` models
 against RFC 8439's and draft-irtf-cfrg-xchacha-03's test vectors.
 
 RSASSA-PKCS1-v1_5 and RSASSA-PSS verification with SHA-256 on x86_64, from
-the signature API's `PublicKey` to the Montgomery products, in
+the signature API's `rsa::PublicKey` to the Montgomery products, in
 `Rind/X86_64/RsaDispatch.lean`, against RFC 8017 as `Rind/Rsa.lean`
 transliterates it:
 
-- `rsa_pkcs1_sha256_new_spec`, `rsa_pss_sha256_new_spec`: a key
-  `PublicKey::new` returns for `verify::RSA_PKCS1_SHA256` or
-  `RSA_PSS_SHA256` has a modulus N of 2048 to 8192 bits and an exponent E,
-  and its `verify` accepts exactly the signatures RSASSA-PKCS1-V1_5-VERIFY
-  accepts under (N, E) with SHA-256's `DigestInfo`, or RSASSA-PSS-VERIFY
-  with MGF1-SHA-256 and a 32-byte salt;
-- `rsa_pkcs1_sha256_from_components_spec`,
-  `rsa_pss_sha256_from_components_spec`: the same for a key
+- `rsa_signature_new_spec`, `rsa_signature_from_spki_spec`: a key
+  `PublicKey::new` or `PublicKey::from_spki` returns has a modulus N of 1024
+  to 8192 bits and an exponent E;
+- `rsa_signature_from_components_spec`: the same for a key
   `PublicKey::from_components` returns, with N and E its components read
   big-endian;
+- `rsa_pkcs1_sha256_verify_spec`, `rsa_pss_sha256_verify_spec`: such a key's
+  `verify` with `verify::PKCS1_SHA256` or `verify::PSS_SHA256` refuses the
+  key if N is under 2048 bits, and otherwise accepts exactly the signatures
+  RSASSA-PKCS1-V1_5-VERIFY accepts under (N, E) with SHA-256's
+  `DigestInfo`, or RSASSA-PSS-VERIFY with MGF1-SHA-256 and a 32-byte salt;
 - `rsa2048_mont_products`: on a CPU with BMI2 and ADX, a 2048-bit modulus's
   Montgomery products, s2n-bignum's Karatsuba routines and Montgomery
   reduction, return their results.
@@ -818,27 +825,27 @@ odd exponent of at least 3, `pub_montifier`'s R^2 mod N, and
 (`public_op_spec`), `Rind/X86_64/RsaBytes.lean` the conversions between
 bytes and words, and `Rind/X86_64/{RsaVerify,RsaPss}.lean`
 EMSA-PKCS1-v1_5's encoding check and EMSA-PSS-VERIFY. DER is opaque, as the ✓
-leaves it out, so the `new` theorems hold for every key `PublicKey::new`
-returns without saying which encodings it accepts. Each theorem assumes
-`Runs`, `Sha256Blocks`, and messages of at most `maxInput` bytes, and each
-that verifies takes `MontProducts k`, that `low::x86_64::mont`'s products
+leaves it out, so the `new` and `from_spki` theorems hold for every key
+those return without saying which encodings they accept. The loaders assume
+that the entry guard holds, `from_components` also `Runs`, and each `verify`
+theorem `Runs`, `Sha256Blocks`, messages of at most `maxInput` bytes, and
+`MontProducts k`, that `low::x86_64::mont`'s products
 return their results at the modulus's width of k words.
 `Rind/X86_64/RsaMont.lean`'s `mont_products` proves it at 16 and 32 words
 with BMI2 and ADX, from s2n-bignum's theorems, and from `AwsLcMont`, that
 aws-lc's unproven routines return theirs, at every other width and CPU.
-`PublicKey` reaches each RSA algorithm's key parser and verification through
-function pointers, which `Rind/X86_64/RsaDispatch.lean` models for these two
-algorithms. On aarch64 the products are aws-lc's, so these proofs are not
+`PublicKey::verify` reaches each algorithm's verification through a function
+pointer, and every loader encodes the key through `Buffer::write`, which
+`Rind/X86_64/RsaDispatch.lean` models for these two algorithms. On aarch64 the products are aws-lc's, so these proofs are not
 copied there yet.
 
 `admin/prove` fails if a hand model's quote no longer matches the source, if
 the source names `Ops`, builds a `Masker`, or writes its `mask` outside the
 dispatch models' quotes, if it builds a digest `Algorithm` outside
-`DigestAlgorithm.lean`'s, if it mentions `Verification::Ed25519(` or
-`Parsed::Ed25519(` outside `SignatureDispatch.lean`'s, or if it mentions
-`Verification::Ecdsa(`, `EcdsaP256`, or `EcdsaKey::`, builds an `EcdsaOps` or
-`EcdsaPair`, or reads an `ops` outside the signature models' quotes, or if it
-mentions `Verification::Rsa(` or builds an `Rsa` outside them.
+`DigestAlgorithm.lean`'s, or if `signature/ecdsa.rs` mentions `Key::` or
+`EcdsaKey::`, clones a `Key`, builds a `VerifyOps`, `EcdsaOps`, or
+`EcdsaPair`, or reads an `ops` outside `EcdsaDispatch.lean`'s. RSA's two
+statics are built wholly by quoted code.
 
 ## The portable backend
 
@@ -944,9 +951,10 @@ proof after those.
   `Rind/ValeBytes.lean`, and `Rind/Gf128.lean`: Vale's AES and GF(2^128) specs
   and their lemmas, and `Rind/AesInverse.lean`, FIPS 197's equivalent inverse
   cipher.
-- `Rind/X86_64/{Dispatch,QuicDispatch,DigestDispatch,DigestAlgorithm,SignatureDispatch,AeadDispatch,HmacDispatch,GcmKey}.lean`:
-  the hand models of the agreement, header-protection, digest, signature,
-  AEAD, and HMAC APIs' dispatch, and of `aead::gcm::Key` over the AEAD model; `Rind/X86_64/HkdfExpand.lean` and
+- `Rind/X86_64/{Dispatch,QuicDispatch,DigestDispatch,DigestAlgorithm,AeadDispatch,HmacDispatch,GcmKey}.lean`:
+  the hand models of the agreement, header-protection, digest, AEAD, and HMAC
+  APIs' dispatch, `Rind/X86_64/SignatureBuffer.lean`, of the signature
+  modules' `Buffer::write`, and of `aead::gcm::Key` over the AEAD model; `Rind/X86_64/HkdfExpand.lean` and
   `Rind/X86_64/Kdf/{TypesExternal,FunsExternal}.lean`, of what the HKDF and
   PBKDF2 pass leaves opaque.
 - `Rind/X86_64/{X25519,Sha512,ChaCha20,Ed25519}.lean`: the X25519, SHA-512,
@@ -972,7 +980,7 @@ proof after those.
   transliterated, and its lemmas; `Rind/X86_64/{RsaBytes,RsaMont,RsaPublic,RsaKey,RsaVerify,RsaPss}.lean`:
   the RSA verification proof, on x86_64 alone, and
   `Rind/X86_64/RsaDispatch.lean`, the hand model of the signature API's RSA
-  dispatch and its theorems.
+  public keys and its theorems.
 - `Rind/SymCrypt/{Defs,Sha3}.lean`: SymCrypt's Lean FIPS 202 spec, vendored;
   `Rind/Keccak.lean`: s2n-bignum's Keccak spec, transliterated, and its proof
   that it is SymCrypt's; `Rind/Sha3.lean`: the sponge over bytes, and its
