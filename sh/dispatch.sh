@@ -175,6 +175,10 @@ module compat '^(COMPATIBILITY\.md$|admin/x86-cpus?(/|$))' \
 # close them.
 module bench '^(BENCHMARKS\.md$|README\.md$|benchmarks/|admin/bench-report|quest/)' \
     tools='python3'
+# The landing page reads and links files across the repository, and its build
+# takes seconds, so it runs on every diff rather than keep a list.
+module site '' \
+    tools='nix'
 # Quest documents form one graph, so any change validates the whole tree, as
 # does a bump of the flake-pinned validator.
 module quest '^(quest/|flake\.lock$)' \
@@ -589,6 +593,7 @@ step() {
         check:py) run sh/python.sh test ;;
         check:dart) run nix develop .#dart --command sh/dart.sh check ;;
         check:openssl) run nix develop .#openssl --command sh/openssl.sh ;;
+        check:site) run nix develop .#site --command sh/site.sh ;;
         fix:dart) run nix develop .#dart --command sh/dart.sh fix ;;
         check:gh)
             run actionlint

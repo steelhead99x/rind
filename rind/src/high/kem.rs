@@ -1,45 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 use core::fmt;
+use core::marker::PhantomData;
 
 use crate::Error;
 use crate::error::KeyFormatError;
-use crate::mid::mlkem768;
+use crate::mid::mlkem::{self, Array, Params};
+pub use crate::mid::mlkem::{MlKem512, MlKem768, MlKem1024};
 
-/// A key encapsulation mechanism.
-pub struct Algorithm {
-    id: AlgorithmId,
-}
+/// An ML-KEM parameter set: [`MlKem512`], [`MlKem768`], or [`MlKem1024`].
+///
+/// Each key, ciphertext, and secret names its set, so a ciphertext of one
+/// set fails to compile against a key of another.
+pub trait Algorithm: Params {}
 
-#[derive(Clone, Copy, Debug)]
-enum AlgorithmId {
-    MlKem768,
-}
-
-impl fmt::Debug for Algorithm {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.id.fmt(f)
-    }
-}
-
-/// ML-KEM-768, as standardised by FIPS-203.
-pub static ML_KEM_768: Algorithm = Algorithm {
-    id: AlgorithmId::MlKem768,
-};
+impl Algorithm for MlKem512 {}
+impl Algorithm for MlKem768 {}
+impl Algorithm for MlKem1024 {}
 
 /// A decapsulation key, which decapsulates any number of ciphertexts, wiped on drop under the `wipe` feature.
-pub struct DecapsulationKey(mlkem768::DecapKey);
+pub struct DecapsulationKey<A: Algorithm>(mlkem::DecapKey<A>);
 
-impl DecapsulationKey {
-    /// Generates a decapsulation key for `algorithm` from the system random source.
-    pub fn generate(algorithm: &'static Algorithm) -> Result<Self, Error> {
-        match algorithm.id {
-            AlgorithmId::MlKem768 => mlkem768::DecapKey::generate().map(Self),
-        }
+impl<A: Algorithm> DecapsulationKey<A> {
+    /// Generates a decapsulation key from the system random source.
+    pub fn generate() -> Result<Self, Error> {
+        mlkem::DecapKey::generate().map(Self)
     }
 
     /// Returns the encapsulation key to send to the peer.
-    pub fn public_key(&self) -> EncapsulationKey {
+    pub fn public_key(&self) -> EncapsulationKey<A> {
         let key = self.0.encapsulation_key();
         EncapsulationKey {
             bytes: key.as_bytes(),
@@ -49,60 +38,60 @@ impl DecapsulationKey {
 
     /// Recovers the secret the peer encapsulated in `ciphertext`.
     ///
-    /// A ciphertext of the wrong length is refused. Any other tampering
-    /// yields an unrelated secret (FIPS-203's implicit rejection), so the
-    /// peer learns nothing until the secret is used.
-    pub fn decapsulate(&self, ciphertext: &[u8]) -> Result<SharedSecret, Error> {
-        let ciphertext: [u8; 1088] = ciphertext.try_into().map_err(|_| Error::WrongLength)?;
-        Ok(SharedSecret(
-            self.0.decaps(&mlkem768::Ciphertext::from(ciphertext)),
-        ))
+    /// A tampered ciphertext yields an unrelated secret (FIPS-203's implicit
+    /// rejection), so the peer learns nothing until the secret is used.
+    pub fn decapsulate(&self, ciphertext: &Ciphertext<A>) -> SharedSecret<A> {
+        SharedSecret::new(self.0.decaps(&ciphertext.0))
     }
 }
 
-impl fmt::Debug for DecapsulationKey {
+impl<A: Algorithm> fmt::Debug for DecapsulationKey<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DecapsulationKey").finish_non_exhaustive()
     }
 }
 
 /// An encapsulation key, which anyone may encapsulate a secret to.
-#[derive(Clone)]
-pub struct EncapsulationKey {
-    key: mlkem768::EncapKey,
-    bytes: [u8; 1184],
+pub struct EncapsulationKey<A: Algorithm> {
+    key: mlkem::EncapKey<A>,
+    bytes: A::EncapKeyBytes,
 }
 
-impl EncapsulationKey {
-    /// Parses a peer's encapsulation key for `algorithm`.
+impl<A: Algorithm> EncapsulationKey<A> {
+    /// Parses a peer's encapsulation key.
     ///
     /// Fails with [`Error::KeyRejected`] for the wrong length, or if it fails
     /// FIPS-203's modulus check.
-    pub fn new(algorithm: &'static Algorithm, bytes: &[u8]) -> Result<Self, Error> {
-        match algorithm.id {
-            AlgorithmId::MlKem768 => {
-                let bytes = bytes.try_into().map_err(|_| KeyFormatError::WrongLength)?;
-                let key = mlkem768::EncapKey::from_bytes(bytes)?;
-                Ok(Self { key, bytes: *bytes })
-            }
-        }
+    pub fn new(bytes: &[u8]) -> Result<Self, Error> {
+        let bytes = A::EncapKeyBytes::from_slice(bytes).ok_or(KeyFormatError::WrongLength)?;
+        let key = mlkem::EncapKey::from_bytes(&bytes)?;
+        Ok(Self { key, bytes })
     }
 
     /// Encapsulates a fresh random secret, returning the ciphertext to send
     /// to the key's holder and the secret.
-    pub fn encapsulate(&self) -> Result<(Ciphertext, SharedSecret), Error> {
+    pub fn encapsulate(&self) -> Result<(Ciphertext<A>, SharedSecret<A>), Error> {
         let (secret, ciphertext) = self.key.encaps()?;
-        Ok((Ciphertext(ciphertext), SharedSecret(secret)))
+        Ok((Ciphertext(ciphertext), SharedSecret::new(secret)))
     }
 }
 
-impl AsRef<[u8]> for EncapsulationKey {
+impl<A: Algorithm> Clone for EncapsulationKey<A> {
+    fn clone(&self) -> Self {
+        Self {
+            key: self.key.clone(),
+            bytes: self.bytes.clone(),
+        }
+    }
+}
+
+impl<A: Algorithm> AsRef<[u8]> for EncapsulationKey<A> {
     fn as_ref(&self) -> &[u8] {
-        &self.bytes
+        self.bytes.as_ref()
     }
 }
 
-impl fmt::Debug for EncapsulationKey {
+impl<A: Algorithm> fmt::Debug for EncapsulationKey<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("EncapsulationKey")
             .field(&self.as_ref())
@@ -114,32 +103,66 @@ impl fmt::Debug for EncapsulationKey {
 // AVX2 CPUs without FSRM. CodSpeed's simulator charges that per byte, which
 // would swamp real changes in the ML-KEM benchmarks.
 const _: () = {
-    assert!(size_of::<EncapsulationKey>() < 8192);
-    assert!(size_of::<Result<EncapsulationKey, Error>>() < 8192);
-    assert!(size_of::<DecapsulationKey>() < 8192);
-    assert!(size_of::<Result<DecapsulationKey, Error>>() < 8192);
+    macro_rules! small {
+        ($($a:ty),*) => {$(
+            assert!(size_of::<EncapsulationKey<$a>>() < 8192);
+            assert!(size_of::<Result<EncapsulationKey<$a>, Error>>() < 8192);
+            assert!(size_of::<DecapsulationKey<$a>>() < 8192);
+            assert!(size_of::<Result<DecapsulationKey<$a>, Error>>() < 8192);
+        )*};
+    }
+    small!(MlKem512, MlKem768, MlKem1024);
 };
 
 /// A ciphertext carrying an encapsulated secret, to send to the key's holder.
-#[derive(Clone, Debug)]
-pub struct Ciphertext(mlkem768::Ciphertext);
+pub struct Ciphertext<A: Algorithm>(mlkem::Ciphertext<A>);
 
-impl AsRef<[u8]> for Ciphertext {
+impl<A: Algorithm> Ciphertext<A> {
+    /// Takes a ciphertext the peer sent.
+    ///
+    /// Fails with [`Error::WrongLength`] unless it is the parameter set's
+    /// length.
+    pub fn new(bytes: &[u8]) -> Result<Self, Error> {
+        mlkem::Ciphertext::from_slice(bytes)
+            .map(Self)
+            .ok_or(Error::WrongLength)
+    }
+}
+
+impl<A: Algorithm> Clone for Ciphertext<A> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<A: Algorithm> fmt::Debug for Ciphertext<A> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl<A: Algorithm> AsRef<[u8]> for Ciphertext<A> {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
 
 /// The secret both parties share, wiped on drop under the `wipe` feature.
-pub struct SharedSecret(mlkem768::SharedSecret);
+pub struct SharedSecret<A: Algorithm>(mlkem::SharedSecret, PhantomData<A>);
 
-impl AsRef<[u8]> for SharedSecret {
+impl<A: Algorithm> SharedSecret<A> {
+    fn new(secret: mlkem::SharedSecret) -> Self {
+        Self(secret, PhantomData)
+    }
+}
+
+impl<A: Algorithm> AsRef<[u8]> for SharedSecret<A> {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
 
-impl fmt::Debug for SharedSecret {
+impl<A: Algorithm> fmt::Debug for SharedSecret<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("SharedSecret").finish_non_exhaustive()
     }
@@ -153,6 +176,15 @@ mod tests {
     use super::*;
     use crate::low;
     use crate::test::{Expected, cctv, cctv_records, cctv_value, wycheproof};
+
+    /// Runs the generic test `f` for every parameter set.
+    macro_rules! each_set {
+        ($f:ident) => {
+            $f::<MlKem512>();
+            $f::<MlKem768>();
+            $f::<MlKem1024>();
+        };
+    }
 
     // The seed and message vectors need crate access, so these live here
     // rather than in `tests/wycheproof.rs`.
@@ -175,125 +207,202 @@ mod tests {
         result: Expected,
     }
 
-    fn secret_bytes(secret: &SharedSecret) -> Vec<u8> {
+    /// The parameter set's size, as file names spell it: `512`, `768`, or
+    /// `1024`.
+    fn size<A: Algorithm>() -> &'static str {
+        A::NAME.trim_start_matches("ML-KEM-")
+    }
+
+    fn secret_bytes<A: Algorithm>(secret: &SharedSecret<A>) -> Vec<u8> {
         let bytes = secret.as_ref().to_vec();
         low::ct::public_slice(&bytes);
         bytes
     }
 
+    fn keygen<A: Algorithm>(seed: &[u8]) -> mlkem::DecapKey<A> {
+        mlkem::DecapKey::keygen_internal(&seed.try_into().unwrap())
+    }
+
+    /// The encapsulation of `m` to `key`: its secret and ciphertext.
+    fn encaps<A: Algorithm>(key: &EncapsulationKey<A>, m: &[u8]) -> (Vec<u8>, Ciphertext<A>) {
+        let (secret, ciphertext) = key
+            .key
+            .encaps_internal(mlkem::Message(m.try_into().unwrap()));
+        (
+            secret_bytes(&SharedSecret::<A>::new(secret)),
+            Ciphertext(ciphertext),
+        )
+    }
+
+    /// The expanded decapsulation key `dk`, or `None` where rind would never
+    /// hold it: the wrong length, a coefficient of `s` not below q, or the
+    /// wrong `H(ek)`.
+    fn expanded<A: Algorithm>(dk: &[u8]) -> Option<DecapsulationKey<A>> {
+        A::DecapKeyBytes::from_slice(dk)
+            .filter(|dk| reduced(&dk.as_ref()[..384 * A::K]))
+            .and_then(|dk| mlkem::DecapKey::from_bytes(&dk))
+            .map(DecapsulationKey)
+    }
+
+    fn decapsulate<A: Algorithm>(key: &DecapsulationKey<A>, c: &[u8]) -> Result<Vec<u8>, Error> {
+        Ciphertext::new(c).map(|c| secret_bytes(&key.decapsulate(&c)))
+    }
+
     #[test]
     fn wycheproof_keygen() {
-        for test in wycheproof::<KemTest>("mlkem_768_keygen_seed_test.json") {
-            assert_eq!(test.result, Expected::Valid, "{}", test.id);
-            let key = mlkem768::DecapKey::keygen_internal(&test.seed.try_into().unwrap());
-            assert_eq!(&low::ct::into_public(key.as_bytes())[..], &test.dk);
-            let key = DecapsulationKey(key);
-            assert_eq!(key.public_key().as_ref(), &test.ek);
+        fn check<A: Algorithm>() {
+            let file = format!("mlkem_{}_keygen_seed_test.json", size::<A>());
+            for test in wycheproof::<KemTest>(&file) {
+                assert_eq!(test.result, Expected::Valid, "{}", test.id);
+                let key = keygen::<A>(&test.seed);
+                assert_eq!(low::ct::into_public(key.as_bytes()).as_ref(), &test.dk);
+                let key = DecapsulationKey(key);
+                assert_eq!(key.public_key().as_ref(), &test.ek);
+            }
         }
+        each_set!(check);
     }
 
     #[test]
     fn wycheproof_encaps() {
-        for test in wycheproof::<KemTest>("mlkem_768_encaps_test.json") {
-            let m = mlkem768::Message(test.m.try_into().unwrap());
-            let result = EncapsulationKey::new(&ML_KEM_768, &test.ek).map(|key| {
-                let (secret, ciphertext) = key.key.encaps_internal(m);
-                (secret_bytes(&SharedSecret(secret)), ciphertext)
-            });
-            match (test.result, &result) {
-                (Expected::Valid, Ok((secret, ciphertext))) => {
-                    assert_eq!(secret, &test.k, "{}", test.id);
-                    assert_eq!(&ciphertext.as_ref()[..], &test.c, "{}", test.id);
+        fn check<A: Algorithm>() {
+            let file = format!("mlkem_{}_encaps_test.json", size::<A>());
+            for test in wycheproof::<KemTest>(&file) {
+                let result = EncapsulationKey::<A>::new(&test.ek).map(|key| encaps(&key, &test.m));
+                match (test.result, &result) {
+                    (Expected::Valid, Ok((secret, ciphertext))) => {
+                        assert_eq!(secret, &test.k, "{}", test.id);
+                        assert_eq!(ciphertext.as_ref(), &test.c, "{}", test.id);
+                    }
+                    (Expected::Invalid, Err(Error::KeyRejected(_))) => {}
+                    _ => panic!("{}: expected {:?} got {:?}", test.id, test.result, result),
                 }
-                (Expected::Invalid, Err(Error::KeyRejected(_))) => {}
-                _ => panic!("{}: expected {:?} got {:?}", test.id, test.result, result),
             }
         }
+        each_set!(check);
     }
 
     #[test]
     fn wycheproof_decaps() {
-        for test in wycheproof::<KemTest>("mlkem_768_test.json") {
-            // Generation never makes a seed of another length.
-            let Ok(seed) = test.seed.as_slice().try_into() else {
-                assert_eq!(test.result, Expected::Invalid, "{}", test.id);
-                continue;
-            };
+        fn check<A: Algorithm>() {
+            let file = format!("mlkem_{}_test.json", size::<A>());
+            for test in wycheproof::<KemTest>(&file) {
+                // Generation never makes a seed of another length.
+                if test.seed.len() != 64 {
+                    assert_eq!(test.result, Expected::Invalid, "{}", test.id);
+                    continue;
+                }
 
-            let key = DecapsulationKey(mlkem768::DecapKey::keygen_internal(&seed));
-            assert_eq!(key.public_key().as_ref(), &test.ek, "{}", test.id);
-            let result = key.decapsulate(&test.c).map(|secret| secret_bytes(&secret));
-            match (test.result, &result) {
-                (Expected::Valid, Ok(secret)) => assert_eq!(secret, &test.k, "{}", test.id),
-                (Expected::Invalid, Err(Error::WrongLength)) => {}
-                _ => panic!("{}: expected {:?} got {:?}", test.id, test.result, result),
+                let key = DecapsulationKey(keygen::<A>(&test.seed));
+                assert_eq!(key.public_key().as_ref(), &test.ek, "{}", test.id);
+                let result = decapsulate(&key, &test.c);
+                match (test.result, &result) {
+                    (Expected::Valid, Ok(secret)) => assert_eq!(secret, &test.k, "{}", test.id),
+                    (Expected::Invalid, Err(Error::WrongLength)) => {}
+                    _ => panic!("{}: expected {:?} got {:?}", test.id, test.result, result),
+                }
             }
         }
+        each_set!(check);
+    }
+
+    // Decapsulation from the expanded key, which rind holds but imports only
+    // here.
+    #[test]
+    fn wycheproof_semi_expanded_decaps() {
+        fn check<A: Algorithm>() {
+            let file = format!("mlkem_{}_semi_expanded_decaps_test.json", size::<A>());
+            for test in wycheproof::<KemTest>(&file) {
+                let Some(key) = expanded::<A>(&test.dk) else {
+                    assert_eq!(test.result, Expected::Invalid, "{}", test.id);
+                    continue;
+                };
+                assert_eq!(key.public_key().as_ref(), &test.ek, "{}", test.id);
+                let result = decapsulate(&key, &test.c);
+                match (test.result, &result) {
+                    (Expected::Valid, Ok(secret)) => assert_eq!(secret, &test.k, "{}", test.id),
+                    (Expected::Invalid, Err(Error::WrongLength)) => {}
+                    _ => panic!("{}: expected {:?} got {:?}", test.id, test.result, result),
+                }
+            }
+        }
+        each_set!(check);
     }
 
     // CCTV's keys come from FIPS 203's draft, whose key generation lacked
     // `k` in `G(d || k)`, so these check encapsulation and decapsulation,
     // which the final standard kept, from the encoded keys.
-    fn cctv_encaps_decaps(record: &[(String, Vec<u8>)]) {
-        let ek = EncapsulationKey::new(&ML_KEM_768, cctv_value(record, "ek")).unwrap();
-        let m = mlkem768::Message(cctv_value(record, "m").try_into().unwrap());
-        let (secret, ciphertext) = ek.key.encaps_internal(m);
-        assert_eq!(&ciphertext.as_ref()[..], cctv_value(record, "c"));
-        assert_eq!(secret_bytes(&SharedSecret(secret)), cctv_value(record, "K"));
+    fn cctv_encaps_decaps<A: Algorithm>(record: &[(String, Vec<u8>)]) {
+        let ek = EncapsulationKey::<A>::new(cctv_value(record, "ek")).unwrap();
+        let (secret, ciphertext) = encaps(&ek, cctv_value(record, "m"));
+        assert_eq!(ciphertext.as_ref(), cctv_value(record, "c"));
+        assert_eq!(secret, cctv_value(record, "K"));
 
-        let dk = cctv_value(record, "dk").try_into().unwrap();
-        let dk = DecapsulationKey(mlkem768::DecapKey::from_bytes(dk).unwrap());
+        let dk = expanded::<A>(cctv_value(record, "dk")).unwrap();
         assert_eq!(dk.public_key().as_ref(), cctv_value(record, "ek"));
-        let secret = dk.decapsulate(cctv_value(record, "c")).unwrap();
-        assert_eq!(secret_bytes(&secret), cctv_value(record, "K"));
+        let secret = decapsulate(&dk, cctv_value(record, "c")).unwrap();
+        assert_eq!(secret, cctv_value(record, "K"));
     }
 
     // One key's every intermediate value, of which we check the results.
     #[test]
     fn cctv_intermediate() {
-        for record in cctv_records("ML-KEM/intermediate/ML-KEM-768.txt") {
-            cctv_encaps_decaps(&record);
+        fn check<A: Algorithm>() {
+            for record in cctv_records(&format!("ML-KEM/intermediate/{}.txt", A::NAME)) {
+                cctv_encaps_decaps::<A>(&record);
+            }
         }
+        each_set!(check);
     }
 
     // Keys whose matrix needs over 575 bytes of SHAKE-128 to sample.
     #[test]
     fn cctv_unlucky_sample() {
-        for record in cctv_records("ML-KEM/unluckysample/ML-KEM-768.txt") {
-            cctv_encaps_decaps(&record);
+        fn check<A: Algorithm>() {
+            for record in cctv_records(&format!("ML-KEM/unluckysample/{}.txt", A::NAME)) {
+                cctv_encaps_decaps::<A>(&record);
+            }
         }
+        each_set!(check);
     }
 
     // A ciphertext that matches the re-encryption up to a zero byte, which a
     // `strcmp` comparison would accept.
     #[test]
     fn cctv_strcmp() {
-        for record in cctv_records("ML-KEM/strcmp/ML-KEM-768.txt") {
-            let dk = cctv_value(&record, "dk").try_into().unwrap();
-            let key = DecapsulationKey(mlkem768::DecapKey::from_bytes(dk).unwrap());
-            let secret = key.decapsulate(cctv_value(&record, "c")).unwrap();
-            assert_eq!(secret_bytes(&secret), cctv_value(&record, "K"));
+        fn check<A: Algorithm>() {
+            for record in cctv_records(&format!("ML-KEM/strcmp/{}.txt", A::NAME)) {
+                let key = expanded::<A>(cctv_value(&record, "dk")).unwrap();
+                let secret = decapsulate(&key, cctv_value(&record, "c")).unwrap();
+                assert_eq!(secret, cctv_value(&record, "K"));
+            }
         }
+        each_set!(check);
     }
 
     // Encapsulation keys with one coefficient from q to 4095, for every value
     // and position.
     #[test]
     fn cctv_modulus() {
-        use std::io::{BufRead, BufReader};
+        fn check<A: Algorithm>(want: usize) {
+            use std::io::{BufRead, BufReader};
 
-        let path = cctv("ML-KEM/modulus/ML-KEM-768.txt.gz");
-        let file = std::fs::File::open(&path).unwrap_or_else(|_| panic!("cannot open {path}"));
-        let mut count = 0;
-        for line in BufReader::new(flate2::read::GzDecoder::new(file)).lines() {
-            let ek = hex::decode(line.unwrap()).unwrap();
-            assert_eq!(
-                EncapsulationKey::new(&ML_KEM_768, &ek).err(),
-                Some(KeyFormatError::MlKemModulus.into())
-            );
-            count += 1;
+            let path = cctv(&format!("ML-KEM/modulus/{}.txt.gz", A::NAME));
+            let file = std::fs::File::open(&path).unwrap_or_else(|_| panic!("cannot open {path}"));
+            let mut count = 0;
+            for line in BufReader::new(flate2::read::GzDecoder::new(file)).lines() {
+                let ek = hex::decode(line.unwrap()).unwrap();
+                assert_eq!(
+                    EncapsulationKey::<A>::new(&ek).err(),
+                    Some(KeyFormatError::MlKemModulus.into())
+                );
+                count += 1;
+            }
+            assert_eq!(count, want, "{}", A::NAME);
         }
-        assert_eq!(count, 780);
+        check::<MlKem512>(775);
+        check::<MlKem768>(780);
+        check::<MlKem1024>(1040);
     }
 
     // CCTV's pq-crystals vectors, as Go's `crypto/mlkem` updated them for
@@ -325,15 +434,12 @@ mod tests {
             rng.read(&mut m);
             rng.read(&mut ct);
 
-            let key = mlkem768::DecapKey::keygen_internal(&seed);
-            let (secret, ciphertext) = key
-                .encapsulation_key()
-                .encaps_internal(mlkem768::Message(m));
-            let secret = secret_bytes(&SharedSecret(secret));
-            assert_eq!(secret_bytes(&SharedSecret(key.decaps(&ciphertext))), secret);
-            let rejected = secret_bytes(&SharedSecret(key.decaps(&ct.into())));
+            let key = DecapsulationKey(keygen::<MlKem768>(&seed));
+            let (secret, ciphertext) = encaps(&key.public_key(), &m);
+            assert_eq!(decapsulate(&key, ciphertext.as_ref()).unwrap(), secret);
+            let rejected = decapsulate(&key, &ct).unwrap();
 
-            acc.absorb(&key.encapsulation_key().as_bytes());
+            acc.absorb(key.public_key().as_ref());
             acc.absorb(ciphertext.as_ref());
             acc.absorb(&secret);
             acc.absorb(&rejected);
@@ -364,178 +470,202 @@ mod tests {
     }
 
     // BoringSSL's key generation, encapsulation, and decapsulation vectors,
-    // NIST's among them, and its EVP keys' raw encodings.
+    // NIST's among them, for ML-KEM-768 and ML-KEM-1024.
     #[test]
     fn boringssl() {
         use crate::test::file_test::tests;
 
-        for test in tests("boringssl/crypto/mlkem/mlkem768_keygen_tests.txt") {
-            let key = mlkem768::DecapKey::keygen_internal(&test.bytes("seed").try_into().unwrap());
-            assert_eq!(
-                &key.encapsulation_key().as_bytes()[..],
-                test.bytes("public_key"),
-                "{test}"
-            );
-            assert_eq!(
-                &low::ct::into_public(key.as_bytes())[..],
-                test.bytes("private_key"),
-                "{test}"
-            );
-        }
+        fn check<A: Algorithm>() {
+            let file =
+                |name: &str| format!("boringssl/crypto/mlkem/mlkem{}_{name}.txt", size::<A>());
 
-        for test in tests("boringssl/crypto/mlkem/mlkem768_nist_keygen_tests.txt") {
-            let seed = [test.bytes("d"), test.bytes("z")].concat();
-            let key = mlkem768::DecapKey::keygen_internal(&seed.try_into().unwrap());
-            assert_eq!(
-                &key.encapsulation_key().as_bytes()[..],
-                test.bytes("ek"),
-                "{test}"
-            );
-            assert_eq!(
-                &low::ct::into_public(key.as_bytes())[..],
-                test.bytes("dk"),
-                "{test}"
-            );
-        }
+            for test in tests(&file("keygen_tests")) {
+                let key = keygen::<A>(&test.bytes("seed"));
+                let public = key.encapsulation_key().as_bytes();
+                assert_eq!(public.as_ref(), test.bytes("public_key"), "{test}");
+                let private = low::ct::into_public(key.as_bytes());
+                assert_eq!(private.as_ref(), test.bytes("private_key"), "{test}");
+            }
 
-        for test in tests("boringssl/crypto/mlkem/mlkem768_encap_tests.txt") {
-            let m = mlkem768::Message(test.bytes("entropy").try_into().unwrap());
-            let key = EncapsulationKey::new(&ML_KEM_768, &test.bytes("public_key"));
-            match test.str("result") {
-                "pass" => {
-                    let (secret, ciphertext) = key.unwrap().key.encaps_internal(m);
-                    assert_eq!(&ciphertext.as_ref()[..], test.bytes("ciphertext"), "{test}");
-                    let secret = secret_bytes(&SharedSecret(secret));
-                    assert_eq!(secret, test.bytes("shared_secret"), "{test}");
+            for test in tests(&file("nist_keygen_tests")) {
+                let key = keygen::<A>(&[test.bytes("d"), test.bytes("z")].concat());
+                let public = key.encapsulation_key().as_bytes();
+                assert_eq!(public.as_ref(), test.bytes("ek"), "{test}");
+                let private = low::ct::into_public(key.as_bytes());
+                assert_eq!(private.as_ref(), test.bytes("dk"), "{test}");
+            }
+
+            for test in tests(&file("encap_tests")) {
+                let key = EncapsulationKey::<A>::new(&test.bytes("public_key"));
+                match test.str("result") {
+                    "pass" => {
+                        let (secret, ciphertext) = encaps(&key.unwrap(), &test.bytes("entropy"));
+                        assert_eq!(ciphertext.as_ref(), test.bytes("ciphertext"), "{test}");
+                        assert_eq!(secret, test.bytes("shared_secret"), "{test}");
+                    }
+                    _ => assert!(matches!(key, Err(Error::KeyRejected(_))), "{test}"),
                 }
-                _ => assert!(matches!(key, Err(Error::KeyRejected(_))), "{test}"),
             }
-        }
 
-        // rind imports no decapsulation key, so the vectors of a malformed
-        // one have no counterpart.
-        for test in tests("boringssl/crypto/mlkem/mlkem768_decap_tests.txt") {
-            let dk = test.bytes("private_key");
-            let Some(dk) = <&[u8; 2400]>::try_from(&dk[..])
-                .ok()
-                .filter(|dk| reduced(&dk[..1152]))
-                .and_then(mlkem768::DecapKey::from_bytes)
-            else {
-                assert_eq!(test.str("result"), "fail", "{test}");
-                continue;
-            };
-            let result = DecapsulationKey(dk)
-                .decapsulate(&test.bytes("ciphertext"))
-                .map(|secret| secret_bytes(&secret));
-            match test.str("result") {
-                "pass" => assert_eq!(result, Ok(test.bytes("shared_secret")), "{test}"),
-                _ => assert_eq!(result, Err(Error::WrongLength), "{test}"),
-            }
-        }
-
-        for test in tests("boringssl/crypto/mlkem/mlkem768_nist_decap_tests.txt") {
-            let dk = mlkem768::DecapKey::from_bytes(&test.bytes("dk").try_into().unwrap());
-            let secret = DecapsulationKey(dk.unwrap())
-                .decapsulate(&test.bytes("c"))
-                .unwrap();
-            assert_eq!(secret_bytes(&secret), test.bytes("k"), "{test}");
-        }
-
-        // BoringSSL's EVP tests: rind has the raw encodings, not the SPKI or
-        // PKCS#8 ones, and imports no key, so of the keys it takes the seeds.
-        let mut keys = std::collections::HashMap::new();
-        for test in tests("boringssl/crypto/evp/test/mlkem_tests.txt") {
-            if test.get("Algorithm") != Some("ML-KEM-768") {
-                continue;
-            }
-            if let Some(name) = test.get("Key") {
-                if test.get("Error").is_some() {
+            // rind imports no decapsulation key, so the vectors of a malformed
+            // one have no counterpart.
+            for test in tests(&file("decap_tests")) {
+                let Some(key) = expanded::<A>(&test.bytes("private_key")) else {
+                    assert_eq!(test.str("result"), "fail", "{test}");
                     continue;
-                }
-                let seed = match test.get("PrivateSeed") {
-                    Some(_) => test.bytes("PrivateSeed"),
-                    // A seed-only PKCS#8 key ends in its 64-byte seed.
-                    None => test.bytes("PKCS8")[22..].to_vec(),
                 };
-                let key = mlkem768::DecapKey::keygen_internal(&seed.try_into().unwrap());
-                let key = DecapsulationKey(key);
-                if test.get("RawPublic").is_some() {
-                    assert_eq!(key.public_key().as_ref(), test.bytes("RawPublic"), "{test}");
+                let result = decapsulate(&key, &test.bytes("ciphertext"));
+                match test.str("result") {
+                    "pass" => assert_eq!(result, Ok(test.bytes("shared_secret")), "{test}"),
+                    _ => assert_eq!(result, Err(Error::WrongLength), "{test}"),
                 }
-                keys.insert(name.to_string(), key);
-            } else if let Some(name) = test.get("Decapsulate") {
-                let key = &keys[name.trim_end_matches("/Private")];
-                let result = key
-                    .decapsulate(&test.bytes("Input"))
-                    .map(|secret| secret_bytes(&secret));
-                match test.get("DecapsulateFail") {
-                    Some(_) => assert_eq!(result, Err(Error::WrongLength), "{test}"),
-                    None => assert_eq!(result, Ok(test.bytes("Output")), "{test}"),
-                }
-            } else if let Some(name) = test.get("Encapsulate") {
-                let ek = keys[name].public_key();
-                if test.get("Entropy").is_none() {
-                    let (ciphertext, secret) = ek.encapsulate().unwrap();
-                    let decapsulated = keys[name].decapsulate(ciphertext.as_ref()).unwrap();
-                    assert_eq!(secret_bytes(&decapsulated), secret_bytes(&secret), "{test}");
-                    continue;
-                }
-                let m = mlkem768::Message(test.bytes("Entropy").try_into().unwrap());
-                let (secret, ciphertext) = ek.key.encaps_internal(m);
-                assert_eq!(&ciphertext.as_ref()[..], test.bytes("Ciphertext"), "{test}");
-                let secret = secret_bytes(&SharedSecret(secret));
-                assert_eq!(secret, test.bytes("Secret"), "{test}");
-            } else if let Some(name) = test.get("EncapsulateDecapsulate") {
-                let key = &keys[name.trim_end_matches("/Private")];
-                let (ciphertext, secret) = key.public_key().encapsulate().unwrap();
-                let decapsulated = key.decapsulate(ciphertext.as_ref()).unwrap();
-                assert_eq!(secret_bytes(&decapsulated), secret_bytes(&secret), "{test}");
-            } else {
-                panic!("{test}: unexpected test");
+            }
+
+            for test in tests(&file("nist_decap_tests")) {
+                let key = expanded::<A>(&test.bytes("dk")).unwrap();
+                let secret = decapsulate(&key, &test.bytes("c")).unwrap();
+                assert_eq!(secret, test.bytes("k"), "{test}");
             }
         }
+        check::<MlKem768>();
+        check::<MlKem1024>();
+    }
+
+    // BoringSSL's EVP tests: rind has the raw encodings, not the SPKI or
+    // PKCS#8 ones, and imports no key, so of the keys it takes the seeds.
+    #[test]
+    fn boringssl_evp() {
+        use crate::test::file_test::tests;
+
+        fn check<A: Algorithm>() {
+            let mut keys = std::collections::HashMap::new();
+            for test in tests("boringssl/crypto/evp/test/mlkem_tests.txt") {
+                if test.get("Algorithm").is_some_and(|alg| alg != A::NAME) {
+                    continue;
+                }
+                if let Some(name) = test.get("Key") {
+                    if test.get("Error").is_some() {
+                        continue;
+                    }
+                    let seed = match test.get("PrivateSeed") {
+                        Some(_) => test.bytes("PrivateSeed"),
+                        // A seed-only PKCS#8 key ends in its 64-byte seed.
+                        None => test.bytes("PKCS8")[22..].to_vec(),
+                    };
+                    let key = DecapsulationKey(keygen::<A>(&seed));
+                    if test.get("RawPublic").is_some() {
+                        assert_eq!(key.public_key().as_ref(), test.bytes("RawPublic"), "{test}");
+                    }
+                    keys.insert(name.to_string(), key);
+                } else if let Some(name) = test.get("Decapsulate") {
+                    // Each key's tests follow its own `Key` line.
+                    let Some(key) = keys.get(name.trim_end_matches("/Private")) else {
+                        continue;
+                    };
+                    let result = decapsulate(key, &test.bytes("Input"));
+                    match test.get("DecapsulateFail") {
+                        Some(_) => assert_eq!(result, Err(Error::WrongLength), "{test}"),
+                        None => assert_eq!(result, Ok(test.bytes("Output")), "{test}"),
+                    }
+                } else if let Some(name) = test.get("Encapsulate") {
+                    let Some(key) = keys.get(name) else {
+                        continue;
+                    };
+                    let ek = key.public_key();
+                    if test.get("Entropy").is_none() {
+                        let (ciphertext, secret) = ek.encapsulate().unwrap();
+                        let decapsulated = key.decapsulate(&ciphertext);
+                        assert_eq!(secret_bytes(&decapsulated), secret_bytes(&secret), "{test}");
+                        continue;
+                    }
+                    let (secret, ciphertext) = encaps(&ek, &test.bytes("Entropy"));
+                    assert_eq!(ciphertext.as_ref(), test.bytes("Ciphertext"), "{test}");
+                    assert_eq!(secret, test.bytes("Secret"), "{test}");
+                } else if let Some(name) = test.get("EncapsulateDecapsulate") {
+                    let Some(key) = keys.get(name.trim_end_matches("/Private")) else {
+                        continue;
+                    };
+                    let (ciphertext, secret) = key.public_key().encapsulate().unwrap();
+                    let decapsulated = key.decapsulate(&ciphertext);
+                    assert_eq!(secret_bytes(&decapsulated), secret_bytes(&secret), "{test}");
+                } else {
+                    panic!("{test}: unexpected test");
+                }
+            }
+            assert!(!keys.is_empty(), "{}", A::NAME);
+        }
+        check::<MlKem768>();
+        check::<MlKem1024>();
     }
 
     // Exporting our decapsulation key needs crate access, so this
     // differential test lives here rather than in `tests/crosschecks.rs`.
     #[cfg(not(any(miri, target_family = "wasm")))]
     mod crosscheck {
-        use aws_lc_rs::kem::{self, ML_KEM_768};
+        use aws_lc_rs::kem::{self, AlgorithmId, ML_KEM_512, ML_KEM_768, ML_KEM_1024};
         use proptest::prelude::*;
         use proptest::sample::Index;
 
         use super::*;
 
+        fn algorithm<A: Algorithm>() -> &'static kem::Algorithm<AlgorithmId> {
+            match A::K {
+                2 => &ML_KEM_512,
+                3 => &ML_KEM_768,
+                4 => &ML_KEM_1024,
+                _ => unreachable!(),
+            }
+        }
+
+        // We decapsulate what aws-lc-rs encapsulates to our key, and so
+        // does aws-lc-rs holding our serialized key. With one byte of the
+        // ciphertext altered, both give the same implicit-rejection secret.
+        fn encapsulated_by_theirs<A: Algorithm>(
+            alter: Option<(Index, u8)>,
+        ) -> Result<(), TestCaseError> {
+            let ours = DecapsulationKey::<A>::generate().unwrap();
+            let theirs = kem::DecapsulationKey::new(
+                algorithm::<A>(),
+                low::ct::into_public(ours.0.as_bytes()).as_ref(),
+            )
+            .unwrap();
+            let (ciphertext, secret) =
+                kem::EncapsulationKey::new(algorithm::<A>(), ours.public_key().as_ref())
+                    .unwrap()
+                    .encapsulate()
+                    .unwrap();
+
+            let mut ciphertext = ciphertext.as_ref().to_vec();
+            if let Some((index, xor)) = alter {
+                let index = index.index(ciphertext.len());
+                ciphertext[index] ^= xor;
+            }
+            let theirs_secret = theirs
+                .decapsulate(kem::Ciphertext::from(&ciphertext[..]))
+                .unwrap();
+            let ours_secret = decapsulate(&ours, &ciphertext).unwrap();
+            prop_assert_eq!(&ours_secret[..], theirs_secret.as_ref());
+            prop_assert_eq!(&ours_secret[..] == secret.as_ref(), alter.is_none());
+            Ok(())
+        }
+
         // Each case generates a key, which is slow under emulation.
         proptest! {
             #![proptest_config(ProptestConfig::with_cases(32))]
 
-            // We decapsulate what aws-lc-rs encapsulates to our key, and so
-            // does aws-lc-rs holding our serialized key. With one byte of the
-            // ciphertext altered, both give the same implicit-rejection secret.
             #[test]
-            fn encapsulated_by_theirs(alter in prop::option::of((any::<Index>(), 1..=255u8))) {
-                let ours = DecapsulationKey::generate(&super::ML_KEM_768).unwrap();
-                let theirs = kem::DecapsulationKey::new(
-                    &ML_KEM_768,
-                    &low::ct::into_public(ours.0.as_bytes()),
-                )
-                .unwrap();
-                let (ciphertext, secret) =
-                    kem::EncapsulationKey::new(&ML_KEM_768, ours.public_key().as_ref())
-                        .unwrap()
-                        .encapsulate()
-                        .unwrap();
+            fn encapsulated_by_theirs_512(alter in prop::option::of((any::<Index>(), 1..=255u8))) {
+                encapsulated_by_theirs::<MlKem512>(alter)?;
+            }
 
-                let mut ciphertext = ciphertext.as_ref().to_vec();
-                if let Some((index, xor)) = alter {
-                    let index = index.index(ciphertext.len());
-                    ciphertext[index] ^= xor;
-                }
-                let theirs_secret = theirs.decapsulate(kem::Ciphertext::from(&ciphertext[..])).unwrap();
-                let ours_secret = secret_bytes(&ours.decapsulate(&ciphertext).unwrap());
-                prop_assert_eq!(&ours_secret[..], theirs_secret.as_ref());
-                prop_assert_eq!(&ours_secret[..] == secret.as_ref(), alter.is_none());
+            #[test]
+            fn encapsulated_by_theirs_768(alter in prop::option::of((any::<Index>(), 1..=255u8))) {
+                encapsulated_by_theirs::<MlKem768>(alter)?;
+            }
+
+            #[test]
+            fn encapsulated_by_theirs_1024(alter in prop::option::of((any::<Index>(), 1..=255u8))) {
+                encapsulated_by_theirs::<MlKem1024>(alter)?;
             }
         }
     }

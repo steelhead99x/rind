@@ -476,7 +476,7 @@ IMPORTS_64 = [
             "routines": [f"mlkem_poly_compress_{d}_avx2_asm"],
             "vzeroupper": True,
         }
-        for d in ["d4", "d10"]
+        for d in ["d4", "d5", "d10", "d11"]
     ],
     {
         "arch": "aarch64",

@@ -569,17 +569,22 @@ fn spake2plus() {
 }
 
 #[test]
-fn mlkem768() {
-    use rind::kem::{DecapsulationKey, ML_KEM_768};
-    assert_zeroed("ML-KEM key generation", || {
-        DecapsulationKey::generate(&ML_KEM_768).unwrap()
-    });
-    let keys = [(); 2].map(|()| {
-        let key = DecapsulationKey::generate(&ML_KEM_768).unwrap();
-        let (ciphertext, _) = key.public_key().encapsulate().unwrap();
-        (key, ciphertext)
-    });
-    assert_independent("ML-KEM decapsulation", keys, |(key, ciphertext)| {
-        key.decapsulate(ciphertext.as_ref()).unwrap()
-    });
+fn mlkem() {
+    use rind::kem::{Algorithm, DecapsulationKey, MlKem512, MlKem768, MlKem1024};
+    fn check<A: Algorithm>() {
+        assert_zeroed("ML-KEM key generation", || {
+            DecapsulationKey::<A>::generate().unwrap()
+        });
+        let keys = [(); 2].map(|()| {
+            let key = DecapsulationKey::<A>::generate().unwrap();
+            let (ciphertext, _) = key.public_key().encapsulate().unwrap();
+            (key, ciphertext)
+        });
+        assert_independent("ML-KEM decapsulation", keys, |(key, ciphertext)| {
+            key.decapsulate(ciphertext)
+        });
+    }
+    check::<MlKem512>();
+    check::<MlKem768>();
+    check::<MlKem1024>();
 }
