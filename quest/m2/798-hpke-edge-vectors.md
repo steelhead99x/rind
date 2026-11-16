@@ -1,13 +1,12 @@
-# HPKE edge vectors
-
-Difficulty: 6/10 (estimate)
-
+# [M] HPKE edge vectors
 
 ## Goal
 
 HPKE DeriveKeyPair rejection and range handling are tested against the real code, with vectors tied to a known source revision.
 
 ## Plan
+
+Difficulty: 6/10 (estimate).
 
 Upstream draft #798, fork branch `fork/798-gaps` at `df02622c`. Score 8/10. No fork PR yet; push the branch and open one first.
 

@@ -1,13 +1,12 @@
-# Hash-to-curve validation
-
-Difficulty: 7/10 (estimate)
-
+# [L] Hash-to-curve validation
 
 ## Goal
 
 Secret OPRF inputs are timed, the identity hash boundary is tested through the public API, and shared helpers are not copied across curves.
 
 ## Plan
+
+Difficulty: 7/10 (estimate).
 
 Fork PR #39, head `035092e6`. Score 7/10. Upstream twin #791; fork #112 mirrors it. A partial diff is saved as `forkpr-39-partial-grok.diff`. Discard the local merge `70c65b04`.
 

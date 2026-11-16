@@ -1,13 +1,12 @@
-# Drop libcrux
-
-Difficulty: 8/10 (estimate)
-
+# [L] Drop libcrux
 
 ## Goal
 
 libcrux is removed where it is not needed, and the SHA-2 and Poly1305 proofs state their assumptions consistently.
 
 ## Plan
+
+Difficulty: 8/10 (estimate).
 
 Fork PR #102 (upstream twin #794; fork #115 mirrors it), head `e5f128c6`. Score 5/10, on #94. A local commit `a6bb4040` is untested.
 

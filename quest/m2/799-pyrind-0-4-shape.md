@@ -1,13 +1,12 @@
-# pyrind 0.4 shape fixes
-
-Difficulty: 6/10 (estimate)
-
+# [M] pyrind 0.4 shape fixes
 
 ## Goal
 
 pyrind's enum hashing is consistent, RSA public-key paths are tested, and the shim's error handling and duplication are cleaned up.
 
 ## Plan
+
+Difficulty: 6/10 (estimate).
 
 Upstream draft #799, fork branch `fork/799-gaps` at `b27ca30e`. Score 8/10. Push the branch and open a fork PR first.
 

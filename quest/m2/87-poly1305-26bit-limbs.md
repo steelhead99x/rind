@@ -1,13 +1,12 @@
-# Poly1305 in 26-bit limbs
-
-Difficulty: 7/10 (estimate)
-
+# [L] Poly1305 in 26-bit limbs
 
 ## Goal
 
 Poly1305 selects the right code for every target, including custom target JSON files and riscv64 without M or Zmmul.
 
 ## Plan
+
+Difficulty: 7/10 (estimate).
 
 Fork PR #87, head `67f48a31`, on #85. CI passes. This feeds #794.
 

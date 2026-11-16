@@ -1,13 +1,12 @@
-# Adapter mutants
-
-Difficulty: 4/10 (estimate)
-
+# [S] Adapter mutants
 
 ## Goal
 
 Mutation testing covers the adapters correctly, and the package lists and test runs are not duplicated or stale.
 
 ## Plan
+
+Difficulty: 4/10 (estimate).
 
 Fork PR #23 (mirrored by fork #113), head `f2e26577`. Score 6/10. Upstream twin #792. A partial diff is saved. Also needs fork fix `bf25c044`; expect a conflict with upstream #804.
 

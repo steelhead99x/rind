@@ -1,13 +1,12 @@
-# Narrow multiplier schedules on aarch64
-
-Difficulty: 7/10 (estimate)
-
+# [L] Narrow multiplier schedules on aarch64
 
 ## Goal
 
 The narrow multiplier path is limited and benchmarked before it ships, and test hooks stay out of release FIPS builds. This is the bottom of the aarch64 stack.
 
 ## Plan
+
+Difficulty: 7/10 (estimate).
 
 Fork PR #82, head `81a1bc14`. Score 6/10. A partial diff is saved.
 
@@ -18,4 +17,4 @@ Fork PR #82, head `81a1bc14`. Score 6/10. A partial diff is saved.
 - Decide whether `wide_multiplier()` is public, `#[doc(hidden)]`, or crate-private.
 - Expect a file conflict with upstream #813.
 
-Next: [#118](118-narrow-vs-generic-tests.md).
+Next: [#118](/quest/m2/118-narrow-vs-generic-tests.md).

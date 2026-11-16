@@ -1,13 +1,12 @@
-# Alert on cancel stops reporting old alerts as new
-
-Difficulty: 3/10 (estimate)
-
+# [S] Alert on cancel stops reporting old alerts as new
 
 ## Goal
 
 The cancel alert is correct and does not duplicate alerts that upstream already ships.
 
 ## Plan
+
+Difficulty: 3/10 (estimate).
 
 Fork PR #106, base `fork/bench-report`, head `36441665`. Score 6/10. Upstream twin #796.
 
@@ -17,4 +16,4 @@ Fork PR #106, base `fork/bench-report`, head `36441665`. Score 6/10. Upstream tw
 
 ## Related
 
-- [Bench report host slugs](107-bench-report-host-slugs.md) - same base branch
+- [Bench report host slugs](/quest/m0/107-bench-report-host-slugs.md) - same base branch

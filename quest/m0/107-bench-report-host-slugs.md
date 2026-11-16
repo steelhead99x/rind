@@ -1,13 +1,12 @@
-# Bench report host slugs stop overwriting machines
-
-Difficulty: 6/10 (estimate)
-
+# [M] Bench report host slugs stop overwriting machines
 
 ## Goal
 
 Results from different machines never overwrite each other, and bad input cannot stop the host list from loading.
 
 ## Plan
+
+Difficulty: 6/10 (estimate).
 
 Fork PR #107, base `fork/bench-report`, head `449e868c`. Score 4/10, fork only.
 
@@ -21,4 +20,4 @@ Fork PR #107, base `fork/bench-report`, head `449e868c`. Score 4/10, fork only.
 
 ## Related
 
-- [CI alert on cancel](106-alert-on-cancel.md) - touches the same bench-report branch
+- [CI alert on cancel](/quest/m0/106-alert-on-cancel.md) - touches the same bench-report branch
