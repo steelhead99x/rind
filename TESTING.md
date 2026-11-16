@@ -90,7 +90,7 @@ an Intel SDE CPU model, as `x86-cpu.yml` names them.
 | aarch64 | crypto extension, SHA-512 and SHA-3 instructions (Graviton 3, Apple M, Cobalt 100) | `build.yml` on the arm64 runners | the arm64 runner | `admin/ct-qemu`: AES-GCM, HMAC-SHA384 and HMAC-SHA512, and ML-KEM, for SHA3's Keccak kernels; ctgrind for the rest, as the next row |
 | aarch64 | crypto extension without SHA-3 (Graviton 2, Raspberry Pi 5) | denied | denied | ctgrind on the arm64 runner, which valgrind hides SHA3 from |
 | aarch64 | no crypto extension (Raspberry Pi 4) | denied | denied | ctgrind: denied (`aarch64-portable`); `admin/ct-binsec`: denied |
-| aarch64 | narrow multiplier (Cortex-A72, Cortex-A76, Neoverse N1) | `admin/ctgrind`'s wycheproof suite with `RIND_CPU_DISABLE_wide_mul=1`; `low::aarch64::wide_mux::schedules_agree` compares both schedules in ordinary `cargo test` | denied | `admin/ctgrind`, including its fips suite, runs a second aarch64 pass with `RIND_CPU_DISABLE_wide_mul=1` and `--cfg rind_cpu_disable`; `admin/ct-qemu` traces each `ct_qemu` test again with that variable; BINSEC repeats `test::binsec::ct_binsec_x25519`, `test::binsec::ct_binsec_mont16`, and `test::binsec::ct_binsec_mont_mul` with it |
+| aarch64 | narrow multiplier (Cortex-A72, Cortex-A76, Neoverse N1) | `admin/ctgrind`'s wycheproof suite with `RIND_CPU_DISABLE_wide_mul=1`; `low::aarch64::wide_mux::schedules_agree` compares both schedules in ordinary `cargo test` | denied | `admin/ctgrind`, including its fips suite, runs a second aarch64 pass with `RIND_CPU_DISABLE_wide_mul=1` and `--cfg rind_cpu_disable`; `admin/ct-qemu` traces each `ct_qemu` test with `RIND_CPU_FORCE_wide_mul=1` and again with `RIND_CPU_DISABLE_wide_mul=1`; BINSEC repeats `test::binsec::ct_binsec_x25519`, `test::binsec::ct_binsec_ed25519`, `test::binsec::ct_binsec_ecdh_p256`, `test::binsec::ct_binsec_ecdh_p384`, `test::binsec::ct_binsec_ecdh_p521`, `test::binsec::ct_binsec_ecdsa_p256`, `test::binsec::ct_binsec_ecdsa_p384`, `test::binsec::ct_binsec_ecdsa_p521`, `test::binsec::ct_binsec_mont16`, and `test::binsec::ct_binsec_mont_mul` with each variable. Both scripts first run `low::aarch64::cpu::tests::detects_the_expected_cpu` with `RIND_TEST_ARM_WIDE_MUL` and stop if the binary did not pick the forced schedule |
 | armv7 | crypto extension (most 32-bit Android) | `just armv7`: qemu `max` | the arm64 runner, which runs armv7 natively | `admin/ct-qemu`: AES, AES-CBC, AES-KW, AES-GCM, HMAC |
 | armv7 | NEON without the crypto extension | `just armv7`: qemu Cortex-A15 | denied | ctgrind on the arm64 runner, which valgrind hides the crypto extension from |
 | armv7 | no NEON | `just armv7`: qemu Cortex-A15, denied | denied | ctgrind: denied (`no-neon`) |
@@ -278,11 +278,11 @@ valgrind cannot run, under Intel SDE, and `nix develop .#ct-qemu --command
 admin/ct-qemu` those of the armv7 crypto extension code valgrind hides, under
 qemu; on an aarch64 host, `nix develop .#ct-qemu-aarch64 --command
 admin/ct-qemu --target aarch64-unknown-linux-gnu` those of the aarch64 code
-that runs only with SHA3, and then the same traces with the narrow-multiplier
-schedules forced. `nix develop .#binsec --command admin/ct-binsec
+that runs only with SHA3, once with the `_alt` schedules forced and once with
+the narrow-multiplier schedules forced. `nix develop .#binsec --command admin/ct-binsec
 [--exact] [test]` has BINSEC prove the region of each `ct_binsec_...` test
 constant time for every secret, symbolically, and on aarch64 repeats the
-X25519 and 16- and 32-word Montgomery regions with the narrow schedules forced.
+X25519 and 16- and 32-word Montgomery regions with each schedule forced.
 `admin/ctgrind` on aarch64 does the same for its whole suite, including fips. None of them but BINSEC, which
 sees divisions, can see an instruction whose timing depends on its
 operands, so `admin/ct-vartime`, which `just check` runs when rind changes,
