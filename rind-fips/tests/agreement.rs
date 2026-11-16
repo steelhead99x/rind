@@ -22,11 +22,11 @@ const CURVES: [Curve; 3] = [
 ];
 
 /// Each curve's ECDSA signing algorithm, which writes SEC1 keys.
-fn ecdsa(scalar_len: usize) -> &'static rind::signature::EcdsaSigningAlgorithm {
+fn ecdsa(scalar_len: usize) -> &'static rind::ecdsa::SigningAlgorithm {
     match scalar_len {
-        32 => &rind::signature::sign::ECDSA_P256_SHA256_ASN1,
-        48 => &rind::signature::sign::ECDSA_P384_SHA384_ASN1,
-        _ => &rind::signature::sign::ECDSA_P521_SHA512_ASN1,
+        32 => &rind::ecdsa::sign::P256_SHA256_ASN1,
+        48 => &rind::ecdsa::sign::P384_SHA384_ASN1,
+        _ => &rind::ecdsa::sign::P521_SHA512_ASN1,
     }
 }
 
@@ -90,7 +90,7 @@ fn encodings_round_trip_with_rind() {
         let reference = rind::agreement::PrivateKey::generate(theirs).unwrap();
         let pkcs8 = reference.to_pkcs8();
         let scalar = reference.to_scalar();
-        let sec1 = rind::signature::EcdsaKeyPair::from_pkcs8(ecdsa(scalar_len), pkcs8.as_ref())
+        let sec1 = rind::ecdsa::KeyPair::from_pkcs8(ecdsa(scalar_len), pkcs8.as_ref())
             .unwrap()
             .to_sec1();
 

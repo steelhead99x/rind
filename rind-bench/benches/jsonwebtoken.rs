@@ -49,9 +49,8 @@ fn keys() -> Vec<(Algorithm, EncodingKey, DecodingKey)> {
         .to_vec();
 
     let rsa = include_bytes!("../../rind/src/high/rsa/rsa2048.der");
-    let rsa_public = rind::signature::RsaKeyPair::from_pkcs1(rsa)
-        .unwrap()
-        .public_key(&rind::signature::sign::RSA_PKCS1_SHA256);
+    let rsa_pair = rind::rsa::KeyPair::from_pkcs1(rsa).unwrap();
+    let rsa_public = rsa_pair.public_key();
     let (n, e) = (aws_lc::DEFAULT_PROVIDER
         .key_utils
         .rsa_pub_components_from_public_key)(rsa_public.as_ref())
