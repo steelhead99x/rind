@@ -1,0 +1,31 @@
+[package]
+name = "rind-acvp"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+publish = false
+license = "Apache-2.0 OR ISC OR MIT-0"
+
+# The module's ACVP build, which only the `module` feature builds, so a
+# workspace build or test without it compiles nothing here, and the module's
+# deterministic forms never reach a build that links `rind-fips` otherwise.
+[features]
+module = ["dep:rind-fips"]
+
+[[bin]]
+name = "rind-acvp"
+required-features = ["module"]
+
+[[test]]
+name = "offline"
+required-features = ["module"]
+
+[dependencies]
+rind-fips = { path = "../rind-fips", features = ["__acvp"], optional = true }
+
+[dev-dependencies]
+# Checks the answers that have none to compare, such as generated keys.
+aws-lc-rs = { version = "1.19", default-features = false, features = ["alloc", "prebuilt-nasm", "non-fips"] }
+hex = "0.4"
+num-bigint = "0.4"
+serde_json = "1"

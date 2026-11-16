@@ -22,4 +22,9 @@ On a CPU where rind runs AES without CPU instructions, it puts ChaCha20-Poly1305
 dimpl's PSK suite, AES-128-CCM-8, is not offered.
 A PEM key whose preamble starts with `0` is refused: that byte is the tag every DER key starts with, and a DER key's later bytes are secret, so rind never searches them for PEM.
 
+It builds for `wasm32-wasip2` and `wasm32-unknown-unknown`, the browser, where
+rind needs its JavaScript random source, `getrandom = { version = "0.4",
+features = ["wasm_js"] }`. [PLATFORMS.md](https://github.com/kixel-ai/rind/blob/main/PLATFORMS.md) lists what each adapter's
+upstream needs there too, and why rind's constant-time checks do not cover wasm.
+
 License: Apache-2.0 OR ISC OR MIT-0
