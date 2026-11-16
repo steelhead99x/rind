@@ -474,3 +474,72 @@ fn random() {
     rand::fill(&mut out).unwrap();
     public(&out);
 }
+
+/// The ACVP build's deterministic services, with the randomness ACVP passes
+/// in and every private part of an expanded key marked secret.
+#[cfg(feature = "__acvp")]
+#[test]
+fn acvp() {
+    use rind_fips::acvp::{self, Generate, MlDsaMessage};
+
+    let entropy = [0x55u8; 32];
+    let reseed = [0x66u8; 32];
+    secret(&entropy);
+    secret(&reseed);
+    let generate = Generate {
+        additional_input: b"",
+        entropy: &reseed,
+    };
+    let mut out = [0u8; 256];
+    acvp::drbg(&entropy, &[0x77; 16], b"", [generate; 2], &mut out).unwrap();
+    public(&out);
+
+    // An ML-KEM-768 expanded decapsulation key is `dk_pke`, then the
+    // encapsulation key, its hash, and `z`; `dk_pke` and `z` are secret.
+    let (d, z, m) = ([0x88u8; 32], [0x99u8; 32], [0xaau8; 32]);
+    secret(&d);
+    secret(&z);
+    secret(&m);
+    let (ek, mut dk) = acvp::ml_kem_key_gen::<kem::MlKem768>(&d, &z).unwrap();
+    public(&ek[..]);
+    public(&dk[..]);
+    secret(&dk[..1152]);
+    secret(&dk[2368..]);
+    acvp::ml_kem_check_decapsulation_key::<kem::MlKem768>(&dk).unwrap();
+    let (mut ciphertext, sent) = acvp::ml_kem_encap::<kem::MlKem768>(&ek, &m).unwrap();
+    public(&ciphertext[..]);
+    let received = acvp::ml_kem_decap::<kem::MlKem768>(&dk, &ciphertext).unwrap();
+    public(&sent[..]);
+    public(&received[..]);
+    assert_eq!(sent, received);
+    // Implicit rejection: a corrupted ciphertext decapsulates to a secret
+    // derived from `z`.
+    ciphertext[0] ^= 1;
+    let rejected = acvp::ml_kem_decap::<kem::MlKem768>(&dk, &ciphertext).unwrap();
+    public(&rejected[..]);
+    assert_ne!(rejected, sent);
+    dk.fill(0);
+
+    // An ML-DSA expanded private key is `rho`, `K`, `tr`, then `s1`, `s2`,
+    // and `t0`; all but `rho` and `tr` are secret.
+    let (seed, rnd) = ([0xbbu8; 32], [0xccu8; 32]);
+    secret(&seed);
+    secret(&rnd);
+    let (pk, sk) = acvp::ml_dsa_key_gen::<MlDsa65>(&seed).unwrap();
+    public(&pk[..]);
+    public(&sk[..]);
+    secret(&sk[32..64]);
+    secret(&sk[128..]);
+    for message in [
+        MlDsaMessage::External {
+            context: b"context",
+            message: MESSAGE,
+        },
+        MlDsaMessage::Internal(MESSAGE),
+        MlDsaMessage::Mu(&[0xdd; 64]),
+    ] {
+        let signature = acvp::ml_dsa_sign::<MlDsa65>(&sk, message, &rnd).unwrap();
+        public(&signature[..]);
+        acvp::ml_dsa_verify::<MlDsa65>(&pk, message, &signature).unwrap();
+    }
+}
