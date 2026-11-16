@@ -2,8 +2,10 @@
 
 //! Argon2id, standardized in [RFC 9106](https://datatracker.ietf.org/doc/html/rfc9106).
 
+use core::fmt;
+
 use crate::Error;
-use crate::low::{Entry, ct, ct_equal, zeroise};
+use crate::low::{Entry, Zeroable, ct, ct_equal, zeroise, zeroise_value};
 use crate::mid::argon2::{Cost, argon2id};
 
 /// How much memory and time Argon2id spends: RFC 9106's `m`, `t`, and `p`.
@@ -59,67 +61,104 @@ impl Params {
     }
 }
 
-/// Fills `out` with the key Argon2id derives from `password` and `salt`.
-///
-/// Give each password its own `salt`, such as 16 random bytes stored with
-/// the key, so an attacker's guesses at one cannot be reused on another.
-///
-/// `out` must be at least the 4 bytes RFC 9106 allows, or this fails to
-/// compile. The lanes are filled one after another, on the calling thread.
-///
-/// Fails with [`Error::WrongLength`] if `salt` is shorter than 8 bytes, or
-/// `password` or `salt` is 2^32 bytes or longer, and with
-/// [`Error::OutOfMemory`] if the memory `params` asks for cannot be
-/// allocated. `out` is unchanged on failure.
-pub fn derive<const N: usize>(
-    params: Params,
-    password: &[u8],
-    salt: &[u8],
-    out: &mut [u8; N],
-) -> Result<(), Error> {
-    const { assert!(N >= 4 && N as u64 <= u32::MAX as u64) };
-    let _entry = Entry::new_secret();
-    check_lengths(password, salt)?;
-    // Argon2id fails only allocating its memory, before it writes `out`.
-    argon2id(params.cost(), password, salt, &[], &[], out)
-}
+/// A password, kept for every salt and cost it derives with; wiped on drop
+/// under the `wipe` feature.
+pub struct Secret(
+    /// A copy of the password, `None` only once wiped.
+    Option<Box<[u8]>>,
+);
 
-/// Checks in constant time that `previously_derived` is what [`derive`](fn@derive) makes from `password` and `salt`.
-///
-/// Fails with [`Error::BadSignature`] if the keys differ, and otherwise as
-/// [`derive`](fn@derive) does.
-pub fn verify<const N: usize>(
-    params: Params,
-    password: &[u8],
-    salt: &[u8],
-    previously_derived: &[u8; N],
-) -> Result<(), Error> {
-    const { assert!(N >= 4 && N as u64 <= u32::MAX as u64) };
-    let _entry = Entry::new_secret();
-    check_lengths(password, salt)?;
-    // On the heap, since `N` may be far larger than a thread's stack.
-    let mut key = Vec::new();
-    key.try_reserve_exact(N).map_err(|_| Error::OutOfMemory)?;
-    key.resize(N, 0);
-    let result = argon2id(params.cost(), password, salt, &[], &[], &mut key)
-        .map(|()| ct::into_public(ct_equal(&key, previously_derived)));
-    // Heap scratch as good as a key derived from the password.
-    zeroise(&mut key);
-    match result? {
-        true => Ok(()),
-        false => Err(Error::BadSignature),
+impl fmt::Debug for Secret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Secret").finish_non_exhaustive()
     }
 }
 
-// RFC 9106 encodes each length in 32 bits, and its reference refuses salts
-// shorter than 8 bytes.
-fn check_lengths(password: &[u8], salt: &[u8]) -> Result<(), Error> {
-    let fits = |input: &[u8]| u32::try_from(input.len()).is_ok();
-    match fits(password) && fits(salt) && salt.len() >= 8 {
-        true => Ok(()),
-        false => Err(Error::WrongLength),
+impl Secret {
+    /// Keeps a copy of `password`, which may be any length below 2^32 bytes.
+    pub fn new(password: &[u8]) -> Self {
+        Self(Some(password.into()))
+    }
+
+    fn password(&self) -> &[u8] {
+        self.0.as_deref().unwrap_or_default()
+    }
+
+    /// Fills `out` with the key Argon2id derives from the password and
+    /// `salt` at the cost `params` sets.
+    ///
+    /// Give each password its own `salt`, such as 16 random bytes stored with
+    /// the key, so an attacker's guesses at one cannot be reused on another.
+    /// The lanes are filled one after another, on the calling thread.
+    ///
+    /// Fails with [`Error::WrongLength`] if `out` is shorter than the 4 bytes
+    /// RFC 9106 allows, `salt` is shorter than 8 bytes, or `out`, the
+    /// password, or `salt` is 2^32 bytes or longer, and with
+    /// [`Error::OutOfMemory`] if the memory `params` asks for cannot be
+    /// allocated. `out` is unchanged on failure.
+    pub fn derive(&self, params: Params, salt: &[u8], out: &mut [u8]) -> Result<(), Error> {
+        let _entry = Entry::new_secret();
+        self.check_lengths(salt, out.len())?;
+        // Argon2id fails only allocating its memory, before it writes `out`.
+        argon2id(params.cost(), self.password(), salt, &[], &[], out)
+    }
+
+    /// Checks in constant time that `previously_derived` is what
+    /// [`Secret::derive`] makes for `params` and `salt`.
+    ///
+    /// The key derived is as long as `previously_derived`. Fails with
+    /// [`Error::BadSignature`] if the keys differ, and otherwise as
+    /// [`Secret::derive`] does.
+    pub fn verify(
+        &self,
+        params: Params,
+        salt: &[u8],
+        previously_derived: &[u8],
+    ) -> Result<(), Error> {
+        let _entry = Entry::new_secret();
+        self.check_lengths(salt, previously_derived.len())?;
+        // On the heap, since the key may be far larger than a thread's stack.
+        let mut key = Vec::new();
+        key.try_reserve_exact(previously_derived.len())
+            .map_err(|_| Error::OutOfMemory)?;
+        key.resize(previously_derived.len(), 0);
+        let result = argon2id(params.cost(), self.password(), salt, &[], &[], &mut key)
+            .map(|()| ct::into_public(ct_equal(&key, previously_derived)));
+        // Heap scratch as good as a key derived from the password.
+        zeroise(&mut key);
+        match result? {
+            true => Ok(()),
+            false => Err(Error::BadSignature),
+        }
+    }
+
+    // RFC 9106 encodes each length in 32 bits, and allows tags of 4 bytes or
+    // more; its reference refuses salts shorter than 8 bytes.
+    fn check_lengths(&self, salt: &[u8], out_len: usize) -> Result<(), Error> {
+        let fits = |len: usize| u32::try_from(len).is_ok();
+        match fits(self.password().len())
+            && fits(salt.len())
+            && fits(out_len)
+            && salt.len() >= 8
+            && out_len >= 4
+        {
+            true => Ok(()),
+            false => Err(Error::WrongLength),
+        }
     }
 }
+
+impl Drop for Secret {
+    fn drop(&mut self) {
+        if let Some(mut password) = self.0.take() {
+            zeroise(&mut password);
+        }
+        zeroise_value(self);
+    }
+}
+
+// `None` once wiped.
+impl Zeroable for Secret {}
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -164,18 +203,27 @@ mod tests {
 
     #[test]
     fn lengths() {
+        let secret = Secret::new(b"password");
         let mut out = [0u8; 4];
         assert_eq!(
-            derive(SMALL, b"password", &[0; 7], &mut out),
+            secret.derive(SMALL, &[0; 7], &mut out),
+            Err(Error::WrongLength)
+        );
+        assert_eq!(secret.verify(SMALL, &[0; 7], &out), Err(Error::WrongLength));
+        assert_eq!(out, [0; 4]);
+        // RFC 9106's shortest tag is 4 bytes.
+        let mut short = [0u8; 3];
+        assert_eq!(
+            secret.derive(SMALL, &[0; 8], &mut short),
             Err(Error::WrongLength)
         );
         assert_eq!(
-            verify(SMALL, b"password", &[0; 7], &out),
+            secret.verify(SMALL, &[0; 8], &short),
             Err(Error::WrongLength)
         );
-        assert_eq!(out, [0; 4]);
-        derive(SMALL, b"", &[0; 8], &mut out).unwrap();
-        assert_eq!(verify(SMALL, b"", &[0; 8], &out), Ok(()));
+        let empty = Secret::new(b"");
+        empty.derive(SMALL, &[0; 8], &mut out).unwrap();
+        assert_eq!(empty.verify(SMALL, &[0; 8], &out), Ok(()));
     }
 
     // Only a 32-bit address space is too small for Argon2's largest memory,
@@ -187,7 +235,7 @@ mod tests {
         let mut out = [0u8; 4];
         let huge = Params::new(u32::MAX, 1, 1).unwrap();
         assert_eq!(
-            derive(huge, b"password", &[0; 8], &mut out),
+            Secret::new(b"password").derive(huge, &[0; 8], &mut out),
             Err(Error::OutOfMemory)
         );
         assert_eq!(out, [0; 4]);
@@ -196,33 +244,28 @@ mod tests {
     #[test]
     fn verify_checks_every_byte() {
         let salt = b"saltsalt";
+        let secret = Secret::new(b"password");
         let mut key = [0u8; 20];
-        derive(SMALL, b"password", salt, &mut key).unwrap();
-        assert_eq!(verify(SMALL, b"password", salt, &key), Ok(()));
+        secret.derive(SMALL, salt, &mut key).unwrap();
+        assert_eq!(secret.verify(SMALL, salt, &key), Ok(()));
         for i in 0..key.len() {
             let mut wrong = key;
             wrong[i] ^= 1;
-            assert_eq!(
-                verify(SMALL, b"password", salt, &wrong),
-                Err(Error::BadSignature)
-            );
+            assert_eq!(secret.verify(SMALL, salt, &wrong), Err(Error::BadSignature));
         }
         assert_eq!(
-            verify(SMALL, b"passwore", salt, &key),
+            Secret::new(b"passwore").verify(SMALL, salt, &key),
             Err(Error::BadSignature)
         );
         assert_eq!(
-            verify(SMALL, b"password", b"saltsalu", &key),
+            secret.verify(SMALL, b"saltsalu", &key),
             Err(Error::BadSignature)
         );
         let more = Params::new(16, 3, 2).unwrap();
-        assert_eq!(
-            verify(more, b"password", salt, &key),
-            Err(Error::BadSignature)
-        );
+        assert_eq!(secret.verify(more, salt, &key), Err(Error::BadSignature));
         // The tag length is hashed in, so a prefix of a longer key differs.
         let mut longer = [0u8; 21];
-        derive(SMALL, b"password", salt, &mut longer).unwrap();
+        secret.derive(SMALL, salt, &mut longer).unwrap();
         assert_ne!(longer[..20], key);
     }
 
@@ -238,13 +281,16 @@ mod tests {
         let password = [0x5a; 40];
         let salt = b"saltsalt";
         let mut wanted = [0u8; 32];
-        derive(SMALL, &password, salt, &mut wanted).unwrap();
+        Secret::new(&password)
+            .derive(SMALL, salt, &mut wanted)
+            .unwrap();
 
         ct::secret_slice(&password);
+        let secret = Secret::new(&password);
         let mut got = [0u8; 32];
-        derive(SMALL, &password, salt, &mut got).unwrap();
+        secret.derive(SMALL, salt, &mut got).unwrap();
         ct::public_slice(&got);
         assert_eq!(got, wanted);
-        assert_eq!(verify(SMALL, &password, salt, &wanted), Ok(()));
+        assert_eq!(secret.verify(SMALL, salt, &wanted), Ok(()));
     }
 }

@@ -155,10 +155,10 @@ fn ecdsa_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        use rind::signature::{PublicKey, verify};
+        use rind::ecdsa::{PublicKey, verify};
 
         b.iter(|| {
-            PublicKey::new(&verify::ECDSA_P521_SHA512_FIXED, &public_key)
+            PublicKey::new(&verify::P521_SHA512_FIXED, &public_key)
                 .unwrap()
                 .verify(MESSAGE, &signature)
                 .unwrap();
@@ -216,8 +216,8 @@ fn ecdsa_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        use rind::signature::{PublicKey, verify};
-        let public_key = PublicKey::new(&verify::ECDSA_P521_SHA512_FIXED, &public_key).unwrap();
+        use rind::ecdsa::{PublicKey, verify};
+        let public_key = PublicKey::new(&verify::P521_SHA512_FIXED, &public_key).unwrap();
 
         b.iter(|| {
             public_key.verify(MESSAGE, &signature).unwrap();
@@ -243,8 +243,8 @@ fn ecdsa_verify(c: &mut Criterion) {
 
     group.bench_function("rind", |b| {
         use rind::digest;
-        use rind::signature::{PublicKey, verify};
-        let public_key = PublicKey::new(&verify::ECDSA_P521_SHA512_FIXED, &public_key).unwrap();
+        use rind::ecdsa::{PublicKey, verify};
+        let public_key = PublicKey::new(&verify::P521_SHA512_FIXED, &public_key).unwrap();
         let digest = digest::digest(&digest::SHA512, MESSAGE);
 
         b.iter(|| {
@@ -298,8 +298,8 @@ fn ecdsa_sign(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        use rind::signature::{EcdsaKeyPair, sign};
-        let signing_key = EcdsaKeyPair::generate(&sign::ECDSA_P521_SHA512_FIXED).unwrap();
+        use rind::ecdsa::{KeyPair, sign};
+        let signing_key = KeyPair::generate(&sign::P521_SHA512_FIXED).unwrap();
 
         b.iter(|| {
             black_box(signing_key.sign(MESSAGE).unwrap());
@@ -308,12 +308,11 @@ fn ecdsa_sign(c: &mut Criterion) {
 
     // verified-garbage signs deterministically (RFC 6979), where rind hedges its nonce.
     group.bench_function("verified-garbage", |b| {
-        use rind::signature::{PublicKey, verify};
+        use rind::ecdsa::{PublicKey, verify};
         use verified_garbage::hashes::sha512::Sha512;
         let (signing_key, public_key) = vg_generate();
         // rind verifies verified-garbage's signature.
-        let rind_key =
-            PublicKey::new(&verify::ECDSA_P521_SHA512_FIXED, public_key.as_bytes()).unwrap();
+        let rind_key = PublicKey::new(&verify::P521_SHA512_FIXED, public_key.as_bytes()).unwrap();
         let signature = signing_key.sign::<Sha512>(MESSAGE).unwrap();
         rind_key.verify(MESSAGE, &signature).unwrap();
 
@@ -369,8 +368,8 @@ fn ecdsa_sign(c: &mut Criterion) {
 
     group.bench_function("rind", |b| {
         use rind::digest;
-        use rind::signature::{EcdsaKeyPair, sign};
-        let signing_key = EcdsaKeyPair::generate(&sign::ECDSA_P521_SHA512_FIXED).unwrap();
+        use rind::ecdsa::{KeyPair, sign};
+        let signing_key = KeyPair::generate(&sign::P521_SHA512_FIXED).unwrap();
         let digest = digest::digest(&digest::SHA512, MESSAGE);
 
         b.iter(|| {
@@ -381,12 +380,11 @@ fn ecdsa_sign(c: &mut Criterion) {
     // verified-garbage signs deterministically (RFC 6979), where rind hedges its nonce.
     group.bench_function("verified-garbage", |b| {
         use rind::digest;
-        use rind::signature::{PublicKey, verify};
+        use rind::ecdsa::{PublicKey, verify};
         use verified_garbage::hashes::sha512::Sha512;
         let (signing_key, public_key) = vg_generate();
         // rind verifies verified-garbage's signature.
-        let rind_key =
-            PublicKey::new(&verify::ECDSA_P521_SHA512_FIXED, public_key.as_bytes()).unwrap();
+        let rind_key = PublicKey::new(&verify::P521_SHA512_FIXED, public_key.as_bytes()).unwrap();
         let signature = signing_key.sign::<Sha512>(MESSAGE).unwrap();
         rind_key.verify(MESSAGE, &signature).unwrap();
         let digest: [u8; 64] = digest::digest(&digest::SHA512, MESSAGE)

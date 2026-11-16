@@ -453,7 +453,7 @@ On every architecture, the private operation is always followed by the public op
 RSA signs and verifies with PKCS#1 v1.5 and PSS, and encrypts with OAEP on
 SHA-1, SHA-256, SHA-384, or SHA-512.  Private keys have 2048- to 8192-bit
 moduli; verification also takes 1024-bit moduli and SHA-1, but only under
-`signature::verify::legacy`.  Every key refuses a public exponent that is
+`rsa::verify::legacy`.  Every key refuses a public exponent that is
 even, 1, or over 33 bits, and a private key whose components disagree is
 refused when it loads, as aws-lc's `RSA_check_key` does.  Public keys load
 from PKCS#1 `RSAPublicKey` or `SubjectPublicKeyInfo` DER, or from their

@@ -22,7 +22,7 @@ use crate::encoding::{AsDer, Pkcs8V1Der, PublicKeyX509Der};
 use crate::error::{KeyRejected, Unspecified, unspecified};
 #[cfg(feature = "ring-io")]
 use crate::io;
-use crate::signature::{self, ParsedPublicKey, private};
+use crate::signature::{self, ParsedKey, ParsedPublicKey, private};
 use crate::wipe::Wiped;
 use crate::{der, rand, sealed};
 
@@ -74,17 +74,16 @@ fn check_bits(bits: usize) -> Result<(), KeyRejected> {
 /// An RSA private key and its public key, for signing.
 #[derive(Clone)]
 pub struct KeyPair {
-    key: Arc<rind::signature::RsaKeyPair>,
+    key: Arc<rind::rsa::KeyPair>,
     public: PublicKey,
 }
 
 impl sealed::Sealed for KeyPair {}
 
 impl KeyPair {
-    fn new(key: rind::signature::RsaKeyPair) -> Result<Self, KeyRejected> {
-        let public = key.public_key(&rind::signature::sign::RSA_PKCS1_SHA256);
-        let public =
-            PublicKey::from_pkcs1(public.as_ref()).map_err(|_| KeyRejected::unexpected_error())?;
+    fn new(key: rind::rsa::KeyPair) -> Result<Self, KeyRejected> {
+        let public = PublicKey::from_pkcs1(key.public_key().as_ref())
+            .map_err(|_| KeyRejected::unexpected_error())?;
         check_bits(der::bits(&public.n))?;
         Ok(Self {
             key: Arc::new(key),
@@ -94,20 +93,20 @@ impl KeyPair {
 
     /// Generates a key pair of `size` from the system random source.
     pub fn generate(size: KeySize) -> Result<Self, Unspecified> {
-        let key = rind::signature::RsaKeyPair::generate(size.rind()).map_err(unspecified)?;
+        let key = rind::rsa::KeyPair::generate(size.rind()).map_err(unspecified)?;
         Ok(Self::new(key)?)
     }
 
     /// Loads a PKCS#8 v1 RSA private key.
     pub fn from_pkcs8(pkcs8: &[u8]) -> Result<Self, KeyRejected> {
-        rind::signature::RsaKeyPair::from_pkcs8(pkcs8)
+        rind::rsa::KeyPair::from_pkcs8(pkcs8)
             .map_err(KeyRejected::rind)
             .and_then(Self::new)
     }
 
     /// Loads a PKCS#1 `RSAPrivateKey`.
     pub fn from_der(input: &[u8]) -> Result<Self, KeyRejected> {
-        rind::signature::RsaKeyPair::from_pkcs1(input)
+        rind::rsa::KeyPair::from_pkcs1(input)
             .map_err(KeyRejected::rind)
             .and_then(Self::new)
     }
@@ -166,21 +165,20 @@ impl AsDer<Pkcs8V1Der<'static>> for KeyPair {
     }
 }
 
-/// The verification algorithm with rind's widest modulus range, 1024 to 8192
-/// bits, which loads RSA public keys outside any one algorithm.
-const ANY_RSA: &rind::signature::RsaVerificationAlgorithm =
-    &rind::signature::verify::legacy::RSA_PKCS1_1024_SHA1;
-
-/// Loads a PKCS#1 `RSAPublicKey` or `SubjectPublicKeyInfo` as rind does,
-/// refusing what AWS-LC's `RSA_check_key` does, such as an even modulus or an
-/// exponent of 1. Its bytes are then always PKCS#1.
-fn rind_public_key(der: &[u8]) -> Result<rind::signature::PublicKey, Unspecified> {
-    rind::signature::PublicKey::new(ANY_RSA, der).map_err(|_| Unspecified)
+/// Loads a PKCS#1 `RSAPublicKey` or `SubjectPublicKeyInfo` with a modulus of
+/// 1024 to 8192 bits, refusing what AWS-LC's `RSA_check_key` does, such as an
+/// even modulus or an exponent of 1. Its bytes are then always PKCS#1.
+fn rind_public_key(der: &[u8]) -> Result<rind::rsa::PublicKey, rind::Error> {
+    if der::is_spki(der) {
+        rind::rsa::PublicKey::from_spki(der)
+    } else {
+        rind::rsa::PublicKey::new(der)
+    }
 }
 
 /// The `rsaEncryption` `SubjectPublicKeyInfo` holding a PKCS#1 `RSAPublicKey`.
 fn spki(pkcs1: &[u8]) -> Result<PublicKeyX509Der<'static>, Unspecified> {
-    let spki = rind_public_key(pkcs1)?.to_spki();
+    let spki = rind_public_key(pkcs1).map_err(unspecified)?.to_spki();
     Ok(PublicKeyX509Der::new(spki.as_ref().to_vec()))
 }
 
@@ -208,6 +206,7 @@ impl PublicKey {
     /// `SubjectPublicKeyInfo`.
     pub fn from_der(input: &[u8]) -> Result<Self, KeyRejected> {
         rind_public_key(input)
+            .map_err(unspecified)
             .and_then(|key| Self::from_pkcs1(key.as_ref()))
             .map_err(|_| KeyRejected::invalid_encoding())
     }
@@ -285,13 +284,8 @@ impl<B: AsRef<[u8]>> PublicKeyComponents<B> {
         Ok(rind::rsa::PublicKeyComponents { n, e })
     }
 
-    fn parse(&self, params: &RsaParameters) -> Result<rind::signature::PublicKey, Unspecified> {
-        let components = self.rind()?;
-        params
-            .with_rind(|algorithm| {
-                rind::signature::PublicKey::from_components(algorithm, &components)
-            })
-            .map_err(unspecified)
+    fn parse(&self) -> Result<rind::rsa::PublicKey, Unspecified> {
+        rind::rsa::PublicKey::from_components(&self.rind()?).map_err(unspecified)
     }
 
     /// Verifies `signature` over `message` with this key and `params`.
@@ -301,8 +295,9 @@ impl<B: AsRef<[u8]>> PublicKeyComponents<B> {
         message: &[u8],
         signature: &[u8],
     ) -> Result<(), Unspecified> {
-        self.parse(params)?
-            .verify(message, signature)
+        let key = self.parse()?;
+        params
+            .with_rind(|algorithm| key.verify(algorithm, message, signature))
             .map_err(unspecified)
     }
 
@@ -311,25 +306,15 @@ impl<B: AsRef<[u8]>> PublicKeyComponents<B> {
         &self,
         params: &'static RsaParameters,
     ) -> Result<ParsedPublicKey, KeyRejected> {
-        let (key, verifies) = match self.parse(params) {
-            Ok(key) => (key, true),
-            // aws-lc-rs keeps a key outside the range and fails at verify.
-            Err(_) => {
-                let key = self
-                    .rind()
-                    .and_then(|components| {
-                        rind::signature::PublicKey::from_components(ANY_RSA, &components)
-                            .map_err(unspecified)
-                    })
-                    .map_err(|_| KeyRejected::inconsistent_components())?;
-                (key, false)
-            }
-        };
+        // aws-lc-rs keeps a key outside the range and fails at verify, as
+        // rind does.
+        let key = self
+            .parse()
+            .map_err(|_| KeyRejected::inconsistent_components())?;
         let spki = key.to_spki();
         Ok(ParsedPublicKey::from_parts(
             params,
-            key,
-            verifies,
+            ParsedKey::Rsa(key),
             spki.as_ref(),
         ))
     }
@@ -361,8 +346,7 @@ impl<B: AsRef<[u8]>> TryInto<PublicEncryptingKey> for PublicKeyComponents<B> {
 
 impl<B: AsRef<[u8]>> AsDer<PublicKeyX509Der<'static>> for PublicKeyComponents<B> {
     fn as_der(&self) -> Result<PublicKeyX509Der<'static>, Unspecified> {
-        let key = rind::signature::PublicKey::from_components(ANY_RSA, &self.rind()?)
-            .map_err(unspecified)?;
+        let key = self.parse()?;
         Ok(PublicKeyX509Der::new(key.to_spki().as_ref().to_vec()))
     }
 }
@@ -383,11 +367,11 @@ pub enum RsaPssSaltLength {
 impl RsaPssSaltLength {
     /// rind's salt length, or `None` for the hash's length, which rind's
     /// `RSA_PSS_*` algorithms use.
-    const fn rind(self) -> Option<rind::signature::RsaPssSaltLength> {
+    const fn rind(self) -> Option<rind::rsa::PssSaltLength> {
         match self {
             Self::Digest => None,
-            Self::Max => Some(rind::signature::RsaPssSaltLength::Max),
-            Self::Custom(len) => Some(rind::signature::RsaPssSaltLength::Custom(len)),
+            Self::Max => Some(rind::rsa::PssSaltLength::Max),
+            Self::Custom(len) => Some(rind::rsa::PssSaltLength::Custom(len)),
         }
     }
 }
@@ -404,7 +388,7 @@ enum PssHash {
 #[derive(Clone, Copy)]
 enum Verification {
     /// PKCS#1 v1.5, whose algorithm rind has as a static.
-    Pkcs1(&'static rind::signature::RsaVerificationAlgorithm),
+    Pkcs1(&'static rind::rsa::VerificationAlgorithm),
     /// PSS, with the salt length the parameters name.
     Pss(PssHash),
 }
@@ -430,7 +414,7 @@ impl RsaParameters {
     pub fn public_modulus_len(public_key: &[u8]) -> Result<u32, Unspecified> {
         // aws-lc-rs takes PKCS#1 alone here, which `der` checks.
         let (n, _) = der::rsa_public_key(public_key)?;
-        rind_public_key(public_key)?;
+        rind_public_key(public_key).map_err(unspecified)?;
         Ok(u32::try_from(der::bits(n))?)
     }
 
@@ -447,13 +431,13 @@ impl RsaParameters {
     }
 
     /// Calls `f` with rind's algorithm for these parameters.
-    fn with_rind<R>(&self, f: impl FnOnce(&rind::signature::RsaVerificationAlgorithm) -> R) -> R {
-        use rind::signature::{RsaVerificationAlgorithm as Alg, verify};
+    fn with_rind<R>(&self, f: impl FnOnce(&rind::rsa::VerificationAlgorithm) -> R) -> R {
+        use rind::rsa::{VerificationAlgorithm as Alg, verify};
         match (self.verification, self.pss_salt_length.rind()) {
             (Verification::Pkcs1(algorithm), _) => f(algorithm),
-            (Verification::Pss(PssHash::Sha256), None) => f(&verify::RSA_PSS_SHA256),
-            (Verification::Pss(PssHash::Sha384), None) => f(&verify::RSA_PSS_SHA384),
-            (Verification::Pss(PssHash::Sha512), None) => f(&verify::RSA_PSS_SHA512),
+            (Verification::Pss(PssHash::Sha256), None) => f(&verify::PSS_SHA256),
+            (Verification::Pss(PssHash::Sha384), None) => f(&verify::PSS_SHA384),
+            (Verification::Pss(PssHash::Sha512), None) => f(&verify::PSS_SHA512),
             (Verification::Pss(PssHash::Sha256), Some(salt)) => f(&Alg::pss_sha256(salt)),
             (Verification::Pss(PssHash::Sha384), Some(salt)) => f(&Alg::pss_sha384(salt)),
             (Verification::Pss(PssHash::Sha512), Some(salt)) => f(&Alg::pss_sha512(salt)),
@@ -480,40 +464,27 @@ impl fmt::Debug for RsaParameters {
 }
 
 impl private::Verify for RsaParameters {
-    fn parse(&self, public_key: &[u8]) -> Result<rind::signature::PublicKey, KeyRejected> {
-        self.with_rind(|algorithm| rind::signature::PublicKey::new(algorithm, public_key))
+    fn parse(&self, public_key: &[u8]) -> Result<ParsedKey, KeyRejected> {
+        rind_public_key(public_key)
+            .map(ParsedKey::Rsa)
             .map_err(KeyRejected::rind)
-    }
-
-    /// Keeps a key outside the range that parses for rind's widest one.
-    fn parse_kept(
-        &self,
-        public_key: &[u8],
-    ) -> Result<(rind::signature::PublicKey, bool), KeyRejected> {
-        match self.parse(public_key) {
-            Ok(key) => Ok((key, true)),
-            Err(err) => rind_public_key(public_key)
-                .map(|key| (key, false))
-                .map_err(|_| err),
-        }
     }
 
     fn verify_parsed(
         &self,
-        key: &rind::signature::PublicKey,
+        key: &ParsedKey,
         msg: &[u8],
         signature: &[u8],
     ) -> Result<(), Unspecified> {
-        key.verify(msg, signature).map_err(unspecified)
+        let ParsedKey::Rsa(key) = key else {
+            return Err(Unspecified);
+        };
+        self.with_rind(|algorithm| key.verify(algorithm, msg, signature))
+            .map_err(unspecified)
     }
 
     /// rind verifies RSA only over a message it hashes itself.
-    fn verify_parsed_digest(
-        &self,
-        _: &rind::signature::PublicKey,
-        _: &Digest,
-        _: &[u8],
-    ) -> Result<(), Unspecified> {
+    fn verify_parsed_digest(&self, _: &ParsedKey, _: &Digest, _: &[u8]) -> Result<(), Unspecified> {
         Err(Unspecified)
     }
 }
@@ -535,53 +506,53 @@ pub(crate) mod verification {
         };
     }
 
-    use rind::signature::verify::{self, legacy};
+    use rind::rsa::verify::{self, legacy};
 
     rsa_params!(
         RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY,
-        Verification::Pkcs1(&legacy::RSA_PKCS1_1024_SHA1),
+        Verification::Pkcs1(&legacy::PKCS1_1024_SHA1),
         1024..=8192,
         "PKCS#1 v1.5 with SHA-1 and a modulus of 1024 to 8192 bits, for legacy protocols only."
     );
     rsa_params!(
         RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY,
-        Verification::Pkcs1(&legacy::RSA_PKCS1_1024_SHA256),
+        Verification::Pkcs1(&legacy::PKCS1_1024_SHA256),
         1024..=8192,
         "PKCS#1 v1.5 with SHA-256 and a modulus of 1024 to 8192 bits, for legacy protocols only."
     );
     rsa_params!(
         RSA_PKCS1_1024_8192_SHA512_FOR_LEGACY_USE_ONLY,
-        Verification::Pkcs1(&legacy::RSA_PKCS1_1024_SHA512),
+        Verification::Pkcs1(&legacy::PKCS1_1024_SHA512),
         1024..=8192,
         "PKCS#1 v1.5 with SHA-512 and a modulus of 1024 to 8192 bits, for legacy protocols only."
     );
     rsa_params!(
         RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY,
-        Verification::Pkcs1(&legacy::RSA_PKCS1_SHA1),
+        Verification::Pkcs1(&legacy::PKCS1_SHA1),
         2048..=8192,
         "PKCS#1 v1.5 with SHA-1 and a modulus of 2048 to 8192 bits, for legacy protocols only."
     );
     rsa_params!(
         RSA_PKCS1_2048_8192_SHA256,
-        Verification::Pkcs1(&verify::RSA_PKCS1_SHA256),
+        Verification::Pkcs1(&verify::PKCS1_SHA256),
         2048..=8192,
         "PKCS#1 v1.5 with SHA-256 and a modulus of 2048 to 8192 bits."
     );
     rsa_params!(
         RSA_PKCS1_2048_8192_SHA384,
-        Verification::Pkcs1(&verify::RSA_PKCS1_SHA384),
+        Verification::Pkcs1(&verify::PKCS1_SHA384),
         2048..=8192,
         "PKCS#1 v1.5 with SHA-384 and a modulus of 2048 to 8192 bits."
     );
     rsa_params!(
         RSA_PKCS1_2048_8192_SHA512,
-        Verification::Pkcs1(&verify::RSA_PKCS1_SHA512),
+        Verification::Pkcs1(&verify::PKCS1_SHA512),
         2048..=8192,
         "PKCS#1 v1.5 with SHA-512 and a modulus of 2048 to 8192 bits."
     );
     rsa_params!(
         RSA_PKCS1_3072_8192_SHA384,
-        Verification::Pkcs1(&legacy::RSA_PKCS1_3072_SHA384),
+        Verification::Pkcs1(&legacy::PKCS1_3072_SHA384),
         3072..=8192,
         "PKCS#1 v1.5 with SHA-384 and a modulus of 3072 to 8192 bits."
     );
@@ -614,7 +585,7 @@ pub(crate) mod signing {
     /// What an [`RsaSignatureEncoding`] signs with.
     #[derive(Clone, Copy)]
     enum Scheme {
-        Pkcs1(&'static rind::signature::RsaSigningAlgorithm),
+        Pkcs1(&'static rind::rsa::SigningAlgorithm),
         Pss(PssHash),
     }
 
@@ -634,16 +605,13 @@ pub(crate) mod signing {
         }
 
         /// Calls `f` with rind's algorithm for this encoding.
-        pub(crate) fn with_rind<R>(
-            &self,
-            f: impl FnOnce(&rind::signature::RsaSigningAlgorithm) -> R,
-        ) -> R {
-            use rind::signature::{RsaSigningAlgorithm as Alg, sign};
+        pub(crate) fn with_rind<R>(&self, f: impl FnOnce(&rind::rsa::SigningAlgorithm) -> R) -> R {
+            use rind::rsa::{SigningAlgorithm as Alg, sign};
             match (self.scheme, self.pss_salt_length.rind()) {
                 (Scheme::Pkcs1(algorithm), _) => f(algorithm),
-                (Scheme::Pss(PssHash::Sha256), None) => f(&sign::RSA_PSS_SHA256),
-                (Scheme::Pss(PssHash::Sha384), None) => f(&sign::RSA_PSS_SHA384),
-                (Scheme::Pss(PssHash::Sha512), None) => f(&sign::RSA_PSS_SHA512),
+                (Scheme::Pss(PssHash::Sha256), None) => f(&sign::PSS_SHA256),
+                (Scheme::Pss(PssHash::Sha384), None) => f(&sign::PSS_SHA384),
+                (Scheme::Pss(PssHash::Sha512), None) => f(&sign::PSS_SHA512),
                 (Scheme::Pss(PssHash::Sha256), Some(salt)) => f(&Alg::pss_sha256(salt)),
                 (Scheme::Pss(PssHash::Sha384), Some(salt)) => f(&Alg::pss_sha384(salt)),
                 (Scheme::Pss(PssHash::Sha512), Some(salt)) => f(&Alg::pss_sha512(salt)),
@@ -686,21 +654,21 @@ pub(crate) mod signing {
         };
     }
 
-    use rind::signature::sign;
+    use rind::rsa::sign;
 
     encoding!(
         RSA_PKCS1_SHA256,
-        Scheme::Pkcs1(&sign::RSA_PKCS1_SHA256),
+        Scheme::Pkcs1(&sign::PKCS1_SHA256),
         "PKCS#1 v1.5 signatures with SHA-256."
     );
     encoding!(
         RSA_PKCS1_SHA384,
-        Scheme::Pkcs1(&sign::RSA_PKCS1_SHA384),
+        Scheme::Pkcs1(&sign::PKCS1_SHA384),
         "PKCS#1 v1.5 signatures with SHA-384."
     );
     encoding!(
         RSA_PKCS1_SHA512,
-        Scheme::Pkcs1(&sign::RSA_PKCS1_SHA512),
+        Scheme::Pkcs1(&sign::PKCS1_SHA512),
         "PKCS#1 v1.5 signatures with SHA-512."
     );
     encoding!(
@@ -918,7 +886,7 @@ impl PublicEncryptingKey {
         if !der::is_spki(value) {
             return Err(KeyRejected::invalid_encoding());
         }
-        let key = rind::rsa::EncryptingKey::new(&rind::rsa::OAEP_SHA256, value)
+        let key = rind::rsa::EncryptingKey::from_spki(&rind::rsa::OAEP_SHA256, value)
             .map_err(KeyRejected::rind)?;
         Self::new(key.as_ref())
     }

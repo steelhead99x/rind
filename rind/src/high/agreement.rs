@@ -139,14 +139,14 @@ impl PrivateKey {
     ///
     /// X25519 takes RFC 8410's, v1 or v2, refused if a v2 public key does
     /// not match; a NIST curve takes v1 `ECPrivateKey` on its curve, as
-    /// [`EcdsaKeyPair::from_pkcs8`](crate::signature::EcdsaKeyPair::from_pkcs8)
+    /// [`ecdsa::KeyPair::from_pkcs8`](crate::ecdsa::KeyPair::from_pkcs8)
     /// does.
     pub fn from_pkcs8(algorithm: &'static Algorithm, der: &[u8]) -> Result<Self, Error> {
         (algorithm.load)(algorithm, Source::Pkcs8(der))
     }
 
     /// Loads a SEC1 (RFC 5915) `ECPrivateKey` on `algorithm`'s curve, as
-    /// [`EcdsaKeyPair::from_sec1`](crate::signature::EcdsaKeyPair::from_sec1)
+    /// [`ecdsa::KeyPair::from_sec1`](crate::ecdsa::KeyPair::from_sec1)
     /// does.
     ///
     /// X25519 has no SEC1 encoding, so it refuses every key.
@@ -182,7 +182,7 @@ impl PrivateKey {
     }
 
     /// Encodes the private key as PKCS#8: v1 for X25519, and for a NIST
-    /// curve as [`EcdsaKeyPair::to_pkcs8`](crate::signature::EcdsaKeyPair::to_pkcs8)
+    /// curve as [`ecdsa::KeyPair::to_pkcs8`](crate::ecdsa::KeyPair::to_pkcs8)
     /// does, with its public key.
     pub fn to_pkcs8(&self) -> Pkcs8 {
         let public = self.public.as_ref();
@@ -644,7 +644,7 @@ mod tests {
     use serde::Deserialize;
 
     use super::*;
-    use crate::high::signature::{EcdsaKeyPair, sign};
+    use crate::ecdsa::{KeyPair as EcdsaKeyPair, sign};
     use crate::test::{Acvp, Expected, wycheproof};
 
     #[test]
@@ -853,19 +853,19 @@ mod tests {
         for (algorithm, signing, pkcs8, sec1) in [
             (
                 &ECDH_P256,
-                &sign::ECDSA_P256_SHA256_ASN1,
+                &sign::P256_SHA256_ASN1,
                 &include_bytes!("ecdsa/secp256r1.pkcs8.der")[..],
                 &include_bytes!("ecdsa/secp256r1.der")[..],
             ),
             (
                 &ECDH_P384,
-                &sign::ECDSA_P384_SHA384_ASN1,
+                &sign::P384_SHA384_ASN1,
                 &include_bytes!("ecdsa/secp384r1.pkcs8.der")[..],
                 &include_bytes!("ecdsa/secp384r1.der")[..],
             ),
             (
                 &ECDH_P521,
-                &sign::ECDSA_P521_SHA512_ASN1,
+                &sign::P521_SHA512_ASN1,
                 &include_bytes!("ecdsa/secp521r1.pkcs8.der")[..],
                 &include_bytes!("ecdsa/secp521r1.der")[..],
             ),

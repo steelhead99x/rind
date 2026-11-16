@@ -74,16 +74,16 @@ pub struct MatterPase;
 /// [`Share`] or a [`Confirm`].
 ///
 /// ```compile_fail
-/// use rind::spake2plus::{MATTER_PASE, ProverSecrets, RFC9383, VerifierRecord};
+/// use rind::spake2plus::{MATTER_PASE, ProverSecrets, RFC9383, Session, VerifierRecord};
 /// let w0 = [0x11; 40];
 /// let w1 = [0x22; 40];
 /// let (share_p, _) = ProverSecrets::new(&w0, &w1)
 ///     .unwrap()
-///     .start(&RFC9383, b"app", b"a", b"b")
+///     .start(&RFC9383, &Session { context: b"app", id_prover: b"a", id_verifier: b"b" })
 ///     .unwrap();
 /// let _ = VerifierRecord::from_w1(&w0, &w1)
 ///     .unwrap()
-///     .start(&MATTER_PASE, b"app", b"a", b"b", &share_p);
+///     .start(&MATTER_PASE, &Session { context: b"app", id_prover: b"a", id_verifier: b"b" }, &share_p);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Suite<S> {
@@ -110,6 +110,22 @@ pub static MATTER_PASE: Suite<MatterPase> = Suite {
     _kind: PhantomData,
 };
 
+/// What both parties bind into the handshake's transcript: the application's
+/// context and each party's identity.
+///
+/// Each goes in under an 8-byte little-endian length, including when empty,
+/// and each is at most 1024 bytes. The prover and the verifier must pass the
+/// same values.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Session<'a> {
+    /// The application's context string.
+    pub context: &'a [u8],
+    /// The prover's identity.
+    pub id_prover: &'a [u8],
+    /// The verifier's identity.
+    pub id_verifier: &'a [u8],
+}
+
 /// A party's share, an uncompressed P-256 point of suite `S`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Share<S> {
@@ -125,7 +141,7 @@ impl<S> Share<S> {
     ///
     /// Fails with [`Error::KeyRejected`] when `bytes` is not that encoding of
     /// a point on P-256.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+    pub fn new(bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_public();
         let point = Affine::from_uncompressed(bytes)?;
         let encoded = point.to_uncompressed();
@@ -168,7 +184,7 @@ impl<S> Confirm<S> {
     /// Copies `bytes` when they are [`Self::BYTES`] long.
     ///
     /// Fails with [`Error::WrongLength`] otherwise.
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+    pub fn new(bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_public();
         let bytes: [u8; 32] = bytes.try_into().map_err(|_| Error::WrongLength)?;
         Ok(Self {
@@ -269,29 +285,23 @@ impl ProverSecrets {
 
     /// Picks an ephemeral scalar and returns this prover's share.
     ///
-    /// `context`, `id_prover`, and `id_verifier` go into the transcript under
-    /// an 8-byte little-endian length, including when empty. Each is at most
-    /// 1024 bytes. The secrets stay usable for another handshake.
+    /// The secrets stay usable for another handshake.
     pub fn start<S: 'static>(
         &self,
         suite: &'static Suite<S>,
-        context: &[u8],
-        id_prover: &[u8],
-        id_verifier: &[u8],
+        session: &Session<'_>,
     ) -> Result<(Share<S>, ProverAwaiting<S>), Error> {
-        self.start_at(suite, context, id_prover, id_verifier, None)
+        self.start_at(suite, session, None)
     }
 
     fn start_at<S: 'static>(
         &self,
         suite: &'static Suite<S>,
-        context: &[u8],
-        id_prover: &[u8],
-        id_verifier: &[u8],
+        session: &Session<'_>,
         scalar: Option<Scalar>,
     ) -> Result<(Share<S>, ProverAwaiting<S>), Error> {
         let _entry = Entry::new_secret();
-        let labels = Labels::new(context, id_prover, id_verifier)?;
+        let labels = Labels::new(session)?;
         let x = match scalar {
             Some(scalar) => scalar,
             None => random_scalar()?,
@@ -394,30 +404,26 @@ impl VerifierRecord {
 
     /// Answers `prover`'s share with this verifier's share and confirmation.
     ///
-    /// The labels are the same strings the prover passed to [`ProverSecrets::start`].
+    /// `session` is the one the prover passed to [`ProverSecrets::start`].
     /// The record stays usable for another handshake.
     pub fn start<S: 'static>(
         &self,
         suite: &'static Suite<S>,
-        context: &[u8],
-        id_prover: &[u8],
-        id_verifier: &[u8],
+        session: &Session<'_>,
         prover: &Share<S>,
     ) -> VerifierStart<S> {
-        self.start_at(suite, context, id_prover, id_verifier, prover, None)
+        self.start_at(suite, session, prover, None)
     }
 
     fn start_at<S: 'static>(
         &self,
         suite: &'static Suite<S>,
-        context: &[u8],
-        id_prover: &[u8],
-        id_verifier: &[u8],
+        session: &Session<'_>,
         prover: &Share<S>,
         scalar: Option<Scalar>,
     ) -> VerifierStart<S> {
         let _entry = Entry::new_secret();
-        let labels = Labels::new(context, id_prover, id_verifier)?;
+        let labels = Labels::new(session)?;
         let y = match scalar {
             Some(scalar) => scalar,
             None => random_scalar()?,
@@ -638,11 +644,11 @@ struct Labels {
 }
 
 impl Labels {
-    fn new(context: &[u8], id_prover: &[u8], id_verifier: &[u8]) -> Result<Self, Error> {
+    fn new(session: &Session<'_>) -> Result<Self, Error> {
         Ok(Self {
-            context: Label::new(context)?,
-            id_prover: Label::new(id_prover)?,
-            id_verifier: Label::new(id_verifier)?,
+            context: Label::new(session.context)?,
+            id_prover: Label::new(session.id_prover)?,
+            id_verifier: Label::new(session.id_verifier)?,
         })
     }
 }
@@ -929,9 +935,11 @@ mod tests {
         let (share_p, prover) = prover
             .start_at(
                 vector.suite,
-                vector.context,
-                vector.id_prover,
-                vector.id_verifier,
+                &Session {
+                    context: vector.context,
+                    id_prover: vector.id_prover,
+                    id_verifier: vector.id_verifier,
+                },
                 Some(scalar(vector.x)),
             )
             .unwrap();
@@ -940,9 +948,11 @@ mod tests {
         let (share_v, confirm_v, _) = loaded
             .start_at(
                 vector.suite,
-                vector.context,
-                vector.id_prover,
-                vector.id_verifier,
+                &Session {
+                    context: vector.context,
+                    id_prover: vector.id_prover,
+                    id_verifier: vector.id_verifier,
+                },
                 &share_p,
                 Some(scalar(vector.y)),
             )
@@ -960,9 +970,11 @@ mod tests {
         let (share_v, confirm_v, verifier) = from_w1
             .start_at(
                 vector.suite,
-                vector.context,
-                vector.id_prover,
-                vector.id_verifier,
+                &Session {
+                    context: vector.context,
+                    id_prover: vector.id_prover,
+                    id_verifier: vector.id_verifier,
+                },
                 &share_p,
                 Some(scalar(vector.y)),
             )
@@ -1147,9 +1159,11 @@ mod tests {
             .unwrap()
             .start_at(
                 &RFC9383,
-                context,
-                id_prover,
-                id_verifier,
+                &Session {
+                    context,
+                    id_prover,
+                    id_verifier,
+                },
                 Some(Scalar::from_be_reduced(&x).unwrap()),
             )
             .unwrap();
@@ -1158,9 +1172,11 @@ mod tests {
             .unwrap()
             .start_at(
                 &RFC9383,
-                context,
-                id_prover,
-                id_verifier,
+                &Session {
+                    context,
+                    id_prover,
+                    id_verifier,
+                },
                 &share_p,
                 Some(Scalar::from_be_reduced(&y).unwrap()),
             )
@@ -1211,10 +1227,27 @@ mod tests {
         let mut keys = Vec::new();
         let mut shares = Vec::new();
         for _ in 0..2 {
-            let (share_p, prover) = prover.start(&RFC9383, b"ctx", b"a", b"b").unwrap();
+            let (share_p, prover) = prover
+                .start(
+                    &RFC9383,
+                    &Session {
+                        context: b"ctx",
+                        id_prover: b"a",
+                        id_verifier: b"b",
+                    },
+                )
+                .unwrap();
             shares.push(share_p);
             let (share_v, confirm_v, verifier) = record
-                .start(&RFC9383, b"ctx", b"a", b"b", &share_p)
+                .start(
+                    &RFC9383,
+                    &Session {
+                        context: b"ctx",
+                        id_prover: b"a",
+                        id_verifier: b"b",
+                    },
+                    &share_p,
+                )
                 .unwrap();
             let (confirm_p, key) = prover.finish(&share_v, &confirm_v).unwrap();
             let other = verifier.finish(&confirm_p).unwrap();
@@ -1233,9 +1266,26 @@ mod tests {
         let w1 = [0x22; 40];
         let prover = ProverSecrets::new(&w0, &w1).unwrap();
         let verifier = VerifierRecord::from_w1(&w0, &w1).unwrap();
-        let (share_p, prover_state) = prover.start(&RFC9383, b"ctx", b"a", b"b").unwrap();
+        let (share_p, prover_state) = prover
+            .start(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+            )
+            .unwrap();
         let (share_v, confirm_v, _) = verifier
-            .start(&RFC9383, b"ctx", b"a", b"b", &share_p)
+            .start(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+                &share_p,
+            )
             .unwrap();
         let mut bad = confirm_v.bytes;
         bad[0] ^= 1;
@@ -1248,9 +1298,26 @@ mod tests {
 
         let prover = ProverSecrets::new(&w0, &w1).unwrap();
         let verifier = VerifierRecord::from_w1(&w0, &w1).unwrap();
-        let (share_p, prover_state) = prover.start(&RFC9383, b"ctx", b"a", b"b").unwrap();
+        let (share_p, prover_state) = prover
+            .start(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+            )
+            .unwrap();
         let (share_v, confirm_v, verifier_state) = verifier
-            .start(&RFC9383, b"ctx", b"a", b"b", &share_p)
+            .start(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+                &share_p,
+            )
             .unwrap();
         let (confirm_p, _) = prover_state.finish(&share_v, &confirm_v).unwrap();
         let mut bad = confirm_p.bytes;
@@ -1262,14 +1329,23 @@ mod tests {
 
         let mut off = share_p.bytes;
         off[10] ^= 1;
-        assert!(Share::<Rfc9383>::from_bytes(&off).is_err());
-        assert!(Share::<Rfc9383>::from_bytes(&off[..64]).is_err());
-        assert!(Confirm::<Rfc9383>::from_bytes(&[0; 16]).is_err());
+        assert!(Share::<Rfc9383>::new(&off).is_err());
+        assert!(Share::<Rfc9383>::new(&off[..64]).is_err());
+        assert!(Confirm::<Rfc9383>::new(&[0; 16]).is_err());
         assert!(ProverSecrets::new(&[], &w1).is_err());
         assert!(VerifierRecord::from_w1(&w0, &[0; 129]).is_err());
         let prover = ProverSecrets::new(&w0, &w1).unwrap();
         assert_eq!(
-            prover.start(&RFC9383, &[0; MAX_LABEL + 1], b"", b"").err(),
+            prover
+                .start(
+                    &RFC9383,
+                    &Session {
+                        context: &[0; MAX_LABEL + 1],
+                        id_prover: b"",
+                        id_verifier: b""
+                    }
+                )
+                .err(),
             Some(Error::WrongLength)
         );
     }
@@ -1324,9 +1400,26 @@ mod tests {
         ] {
             let prover = ProverSecrets::new(w0, w1).unwrap();
             let verifier = VerifierRecord::from_w1(w0, w1).unwrap();
-            let (share_p, prover) = prover.start(&RFC9383, b"ctx", b"a", b"b").unwrap();
+            let (share_p, prover) = prover
+                .start(
+                    &RFC9383,
+                    &Session {
+                        context: b"ctx",
+                        id_prover: b"a",
+                        id_verifier: b"b",
+                    },
+                )
+                .unwrap();
             let (share_v, confirm_v, verifier) = verifier
-                .start(&RFC9383, b"ctx", b"a", b"b", &share_p)
+                .start(
+                    &RFC9383,
+                    &Session {
+                        context: b"ctx",
+                        id_prover: b"a",
+                        id_verifier: b"b",
+                    },
+                    &share_p,
+                )
                 .unwrap();
             assert_eq!(
                 prover.finish(&share_v, &confirm_v).err(),
@@ -1344,9 +1437,26 @@ mod tests {
         ct::secret_slice(&n);
         let prover = ProverSecrets::new(&n, &normal).unwrap();
         let verifier = VerifierRecord::from_w1(&n, &normal).unwrap();
-        let (share_p, prover) = prover.start(&RFC9383, b"ctx", b"a", b"b").unwrap();
+        let (share_p, prover) = prover
+            .start(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+            )
+            .unwrap();
         let (share_v, confirm_v, _) = verifier
-            .start(&RFC9383, b"ctx", b"a", b"b", &share_p)
+            .start(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+                &share_p,
+            )
             .unwrap();
         assert_eq!(
             prover.finish(&share_v, &confirm_v).err(),
@@ -1357,7 +1467,15 @@ mod tests {
         let y = scalar("000000000000000000000000000000000000000000000000000000000000000b");
         let (share_p, _) = ProverSecrets::new(&zero, &normal)
             .unwrap()
-            .start_at(&RFC9383, b"ctx", b"a", b"b", Some(x.copy()))
+            .start_at(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+                Some(x.copy()),
+            )
             .unwrap();
         let expect = Affine::mul_base(&x).to_uncompressed();
         ct::public_slice(&expect);
@@ -1365,7 +1483,16 @@ mod tests {
         assert_eq!(share_p.as_ref(), &expect);
         let (share_v, _, _) = VerifierRecord::from_w1(&zero, &normal)
             .unwrap()
-            .start_at(&RFC9383, b"ctx", b"a", b"b", &share_p, Some(y.copy()))
+            .start_at(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+                &share_p,
+                Some(y.copy()),
+            )
             .unwrap();
         let expect_v = Affine::mul_base(&y).to_uncompressed();
         ct::public_slice(&expect_v);
@@ -1392,10 +1519,25 @@ mod tests {
         let loaded = VerifierRecord::from_record(&zero, &l).unwrap();
         let (share_p, prover) = ProverSecrets::new(&zero, &normal)
             .unwrap()
-            .start(&RFC9383, b"ctx", b"a", b"b")
+            .start(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+            )
             .unwrap();
         let (share_v, confirm_v, verifier) = loaded
-            .start(&RFC9383, b"ctx", b"a", b"b", &share_p)
+            .start(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+                &share_p,
+            )
             .unwrap();
         assert_eq!(
             prover.finish(&share_v, &confirm_v).err(),
@@ -1426,14 +1568,36 @@ mod tests {
     fn tags_match_transcript(w0: &[u8], w1: &[u8], x: &Scalar, y: &Scalar, z: &[u8], v: &[u8]) {
         let (share_p, prover) = ProverSecrets::new(w0, w1)
             .unwrap()
-            .start_at(&RFC9383, b"ctx", b"a", b"b", Some(x.copy()))
+            .start_at(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+                Some(x.copy()),
+            )
             .unwrap();
         let (share_v, confirm_v, verifier) = VerifierRecord::from_w1(w0, w1)
             .unwrap()
-            .start_at(&RFC9383, b"ctx", b"a", b"b", &share_p, Some(y.copy()))
+            .start_at(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+                &share_p,
+                Some(y.copy()),
+            )
             .unwrap();
         let reduced = Scalar::from_be_reduced(w0).unwrap();
-        let labels = Labels::new(b"ctx", b"a", b"b").unwrap();
+        let labels = Labels::new(&Session {
+            context: b"ctx",
+            id_prover: b"a",
+            id_verifier: b"b",
+        })
+        .unwrap();
         let tt = transcript(&labels, share_p.as_ref(), share_v.as_ref(), z, v, &reduced).unwrap();
         let keys = schedule_keys(Schedule::Rfc9383, &tt).unwrap();
         let expect_v = mac::<Rfc9383>(keys.verifier_key(), share_p.as_ref());
@@ -1454,11 +1618,28 @@ mod tests {
     fn refuses_alias(pw0: &[u8], pw1: &[u8], vw0: &[u8], vw1: &[u8], x: &Scalar, y: &Scalar) {
         let (share_p, prover) = ProverSecrets::new(pw0, pw1)
             .unwrap()
-            .start_at(&RFC9383, b"ctx", b"a", b"b", Some(x.copy()))
+            .start_at(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+                Some(x.copy()),
+            )
             .unwrap();
         let (share_v, confirm_v, verifier) = VerifierRecord::from_w1(vw0, vw1)
             .unwrap()
-            .start_at(&RFC9383, b"ctx", b"a", b"b", &share_p, Some(y.copy()))
+            .start_at(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+                &share_p,
+                Some(y.copy()),
+            )
             .unwrap();
         let (confirm_p, _key, ok) = prover.compute(&share_v, &confirm_v).unwrap();
         assert_eq!(ct::into_public(ok), 0);
@@ -1478,7 +1659,12 @@ mod tests {
         let x = scalar("0000000000000000000000000000000000000000000000000000000000000007");
         let two = Scalar::from_be_reduced(&[2]).unwrap();
         let (m, n) = points().unwrap();
-        let labels = Labels::new(b"ctx", b"client", b"").unwrap();
+        let labels = Labels::new(&Session {
+            context: b"ctx",
+            id_prover: b"client",
+            id_verifier: b"",
+        })
+        .unwrap();
 
         let negated = m.mul(&w0s).negate();
         let share_x = point_share::<Rfc9383>(negated.to_uncompressed());
@@ -1498,7 +1684,16 @@ mod tests {
         let keys = schedule_keys(Schedule::Rfc9383, &tt).unwrap();
         let verifier = VerifierRecord::from_w1(&w0, &w1).unwrap();
         let (got_share, got_confirm, state) = verifier
-            .start_at(&RFC9383, b"ctx", b"client", b"", &share_x, Some(y.copy()))
+            .start_at(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"client",
+                    id_verifier: b"",
+                },
+                &share_x,
+                Some(y.copy()),
+            )
             .unwrap();
         assert_eq!(got_share.as_ref(), share_v.as_ref());
         assert_eq!(
@@ -1517,7 +1712,16 @@ mod tests {
         let verifier = VerifierRecord::from_w1(&w0, &w1).unwrap();
         assert_eq!(
             verifier
-                .start_at(&RFC9383, b"ctx", b"client", b"", &share_x, Some(y.copy()))
+                .start_at(
+                    &RFC9383,
+                    &Session {
+                        context: b"ctx",
+                        id_prover: b"client",
+                        id_verifier: b""
+                    },
+                    &share_x,
+                    Some(y.copy())
+                )
                 .err(),
             Some(Error::BadSignature)
         );
@@ -1525,7 +1729,15 @@ mod tests {
         // The prover's subtraction, Y = -w0*N.
         let prover = ProverSecrets::new(&w0, &w1).unwrap();
         let (share_p, prover) = prover
-            .start_at(&RFC9383, b"ctx", b"client", b"", Some(x.copy()))
+            .start_at(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"client",
+                    id_verifier: b"",
+                },
+                Some(x.copy()),
+            )
             .unwrap();
         let negated = n.mul(&w0s).negate();
         let share_y = point_share::<Rfc9383>(negated.to_uncompressed());
@@ -1559,7 +1771,15 @@ mod tests {
         // Y = w0*N makes the prover's difference the identity.
         let prover = ProverSecrets::new(&w0, &w1).unwrap();
         let (_, prover) = prover
-            .start_at(&RFC9383, b"ctx", b"client", b"", Some(x))
+            .start_at(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"client",
+                    id_verifier: b"",
+                },
+                Some(x),
+            )
             .unwrap();
         let share_y = point_share::<Rfc9383>(n.mul(&w0s).to_uncompressed());
         assert_eq!(
@@ -1620,10 +1840,27 @@ mod tests {
             let prover = ProverSecrets::new(w0, w1).unwrap();
             let verifier = VerifierRecord::from_w1(w0, w1).unwrap();
             let (share_p, prover) = prover
-                .start_at(suite, b"ctx", b"client", b"", Some(x.copy()))
+                .start_at(
+                    suite,
+                    &Session {
+                        context: b"ctx",
+                        id_prover: b"client",
+                        id_verifier: b"",
+                    },
+                    Some(x.copy()),
+                )
                 .unwrap();
             let (share_v, confirm_v, verifier) = verifier
-                .start_at(suite, b"ctx", b"client", b"", &share_p, Some(y.copy()))
+                .start_at(
+                    suite,
+                    &Session {
+                        context: b"ctx",
+                        id_prover: b"client",
+                        id_verifier: b"",
+                    },
+                    &share_p,
+                    Some(y.copy()),
+                )
                 .unwrap();
             let (confirm_p, key) = prover.finish(&share_v, &confirm_v).unwrap();
             let other = verifier.finish(&confirm_p).unwrap();
@@ -1693,18 +1930,22 @@ mod tests {
         let (share_p, prover) = prover
             .start_at(
                 &MATTER_PASE,
-                context.as_ref(),
-                b"",
-                b"",
+                &Session {
+                    context: context.as_ref(),
+                    id_prover: b"",
+                    id_verifier: b"",
+                },
                 Some(Scalar::from_be_reduced(&x_bytes).unwrap()),
             )
             .unwrap();
         let (share_v, confirm_v, verifier) = verifier
             .start_at(
                 &MATTER_PASE,
-                context.as_ref(),
-                b"",
-                b"",
+                &Session {
+                    context: context.as_ref(),
+                    id_prover: b"",
+                    id_verifier: b"",
+                },
                 &share_p,
                 Some(Scalar::from_be_reduced(&y_bytes).unwrap()),
             )
@@ -1745,10 +1986,25 @@ mod tests {
             verifier: VerifierRecord,
         ) {
             let (share_p, prover) = prover
-                .start(suite, b"CHIP", b"commissionee", b"commissioner")
+                .start(
+                    suite,
+                    &Session {
+                        context: b"CHIP",
+                        id_prover: b"commissionee",
+                        id_verifier: b"commissioner",
+                    },
+                )
                 .unwrap();
             let (share_v, confirm_v, verifier) = verifier
-                .start(suite, b"CHIP", b"commissionee", b"commissioner", &share_p)
+                .start(
+                    suite,
+                    &Session {
+                        context: b"CHIP",
+                        id_prover: b"commissionee",
+                        id_verifier: b"commissioner",
+                    },
+                    &share_p,
+                )
                 .unwrap();
             let (confirm_p, key_p) = prover.finish(&share_v, &confirm_v).unwrap();
             let key_v = verifier.finish(&confirm_p).unwrap();
