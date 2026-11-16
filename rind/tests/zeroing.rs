@@ -211,17 +211,21 @@ fn vrf() {
 }
 
 #[test]
-fn mlkem768() {
+fn mlkem() {
     use rind::kem::*;
-    let key = DecapsulationKey::generate(&ML_KEM_768).unwrap();
-    let (ciphertext, secret) = key.public_key().encapsulate().unwrap();
-    check_zeroed_on_drop(Box::pin(secret));
-    let decapsulated = DecapsulationKey::generate(&ML_KEM_768)
-        .unwrap()
-        .decapsulate(ciphertext.as_ref())
-        .unwrap();
-    check_zeroed_on_drop(Box::pin(decapsulated));
-    check_zeroed_on_drop(Box::pin(key));
+    fn check<A: Algorithm>() {
+        let key = DecapsulationKey::<A>::generate().unwrap();
+        let (ciphertext, secret) = key.public_key().encapsulate().unwrap();
+        check_zeroed_on_drop(Box::pin(secret));
+        let decapsulated = DecapsulationKey::<A>::generate()
+            .unwrap()
+            .decapsulate(&ciphertext);
+        check_zeroed_on_drop(Box::pin(decapsulated));
+        check_zeroed_on_drop(Box::pin(key));
+    }
+    check::<MlKem512>();
+    check::<MlKem768>();
+    check::<MlKem1024>();
 }
 
 #[test]
