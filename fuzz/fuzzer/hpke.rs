@@ -82,7 +82,7 @@ fuzz_target!(|input: Input| {
     assert_eq!(ours.ok(), theirs_opened.ok());
 
     // Theirs opens what ours seals.
-    let (enc, mut sender) = Sender::new(suite, &public_key, &input.info).unwrap();
+    let (enc, mut sender) = Sender::new(suite, public_key, &input.info).unwrap();
     let mut sealed = input.plaintext.clone();
     sender
         .seal_in_place_append_tag(&input.aad, &mut sealed)

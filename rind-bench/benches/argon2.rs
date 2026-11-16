@@ -40,8 +40,9 @@ fn argon2(c: &mut Criterion) {
         });
         group.bench_function("rind", |b| {
             let params = rind::argon2::Params::new(memory_kib, passes, lanes).unwrap();
+            let secret = rind::argon2::Secret::new(password);
             b.iter(|| {
-                rind::argon2::derive(params, password, salt, &mut out).unwrap();
+                secret.derive(params, salt, &mut out).unwrap();
                 black_box(&out);
             })
         });

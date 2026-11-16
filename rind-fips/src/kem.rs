@@ -99,9 +99,12 @@ impl Algorithm for MlKem1024 {
     type CiphertextBytes = [u8; 1568];
 }
 
-/// A decapsulation key, which decapsulates any number of ciphertexts; held
-/// in the module, which wipes it on drop.
-pub struct DecapsulationKey<A: Algorithm>(Handle<KemDecapsulationKey>, PhantomData<A>);
+/// A decapsulation key, which decapsulates any number of ciphertexts, and
+/// its encapsulation key; held in the module, which wipes it on drop.
+pub struct DecapsulationKey<A: Algorithm> {
+    handle: Handle<KemDecapsulationKey>,
+    public: EncapsulationKey<A>,
+}
 
 impl<A: Algorithm> DecapsulationKey<A> {
     /// Generates a decapsulation key from the module's DRBG, after checking
@@ -110,20 +113,24 @@ impl<A: Algorithm> DecapsulationKey<A> {
         let mut out = core::ptr::null_mut();
         // SAFETY: `out` is writable.
         let status = unsafe { rind_fips_kem_generate(A::ID, &mut out) };
-        Handle::from_status(status, out).map(|handle| Self(handle, PhantomData))
-    }
-
-    /// Returns the encapsulation key to send to the peer.
-    pub fn public_key(&self) -> EncapsulationKey<A> {
+        let handle = Handle::from_status(status, out)?;
         let mut bytes = A::EncapKeyBytes::zeroed();
         let out = bytes.as_mut();
         // SAFETY: the handle is live, of set `A`, and `out` holds its
         // encapsulation key's length in writable bytes.
-        let handle = unsafe { rind_fips_kem_public_key(self.0.ptr(), out.as_mut_ptr(), out.len()) };
-        EncapsulationKey {
-            handle: Handle::new(handle),
-            bytes,
-        }
+        let public = unsafe { rind_fips_kem_public_key(handle.ptr(), out.as_mut_ptr(), out.len()) };
+        Ok(Self {
+            handle,
+            public: EncapsulationKey {
+                handle: Handle::new(public),
+                bytes,
+            },
+        })
+    }
+
+    /// Returns the encapsulation key to send to the peer.
+    pub fn public_key(&self) -> &EncapsulationKey<A> {
+        &self.public
     }
 
     /// Recovers the secret the peer encapsulated in `ciphertext`.
@@ -137,7 +144,7 @@ impl<A: Algorithm> DecapsulationKey<A> {
         // writable.
         let status = unsafe {
             rind_fips_kem_decapsulate(
-                self.0.ptr(),
+                self.handle.ptr(),
                 ciphertext.as_ptr(),
                 ciphertext.len(),
                 &mut out,

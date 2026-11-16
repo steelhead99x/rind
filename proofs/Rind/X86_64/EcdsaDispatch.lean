@@ -1,10 +1,10 @@
-import Rind.X86_64.SignatureDispatch
+import Rind.X86_64.SignatureBuffer
 open Aeneas Aeneas.Std Result
 
 /-!
 # The signature API's P-256 ECDSA dispatch, modelled by hand
 
-`EcdsaKeyPair` reaches each algorithm's code, and `PublicKey` each ECDSA
+`ecdsa::KeyPair` reaches each algorithm's code, and `ecdsa::PublicKey` each
 key's parser and verifier, through function pointers, and P-256's key
 generation draws through a `dyn RandomSource`, none of which Aeneas can
 translate, so the translation stops below them and this file models the Rust
@@ -46,73 +46,30 @@ impl Curve for P256 {
         PrivateKey::generate(rng).map(Self)
     }
 
-impl<const N: usize> Buffer<N> {
-    fn new() -> Self {
-        Self {
-            bytes: [0; N],
-            len: 0,
-        }
-    }
-
-    // `let else` rather than `ok_or(..)?` on the `&mut` span, whose
-    // translation `proofs/` cannot check. The compiled code is the same.
-    fn copy_from(bytes: &[u8]) -> Result<Self, Error> {
-        let mut buffer = Self::new();
-        let Some(span) = buffer.bytes.get_mut(..bytes.len()) else {
-            return Err(Error::WrongLength);
-        };
-        span.copy_from_slice(bytes);
-        buffer.len = bytes.len();
-        Ok(buffer)
-    }
-
-    /// Runs `write`, which writes to the start of its argument and returns
-    /// the written span.
-    pub(super) fn write(
-        write: impl FnOnce(&mut [u8]) -> Result<&[u8], Error>,
-    ) -> Result<Self, Error> {
-        let mut buffer = Self::new();
-        buffer.len = write(&mut buffer.bytes)?.len();
-        Ok(buffer)
-    }
-
-    /// Copies into a buffer at least as large.
-    fn widen<const M: usize>(&self) -> Buffer<M> {
-        const { assert!(M >= N) };
-        let mut wide = Buffer::new();
-        wide.bytes[..N].copy_from_slice(&self.bytes);
-        wide.len = self.len;
-        wide
-    }
-
-    /// Runs `encode` as [`Self::write`] does, for an encoder `N` is sized
-    /// for.
-    ///
-    /// Every `N` holds the encoding of the largest key a loader accepts, so
-    /// an encoder that runs out of room is a bug in rind, not bad input.
-    pub(super) fn encode(encode: impl FnOnce(&mut [u8]) -> Result<&[u8], Error>) -> Self {
-        Self::write(encode).expect("sized for the largest key")
-    }
-}
-
 macro_rules! with_hash {
     ($hash:expr, |$H:ident| $body:expr) => {
         match $hash {
             HashId::Sha256 => {
-                type $H = Sha256;
+                type $H = crate::high::hash::Sha256;
                 $body
             }
             HashId::Sha384 => {
-                type $H = Sha384;
+                type $H = crate::high::hash::Sha384;
                 $body
             }
             HashId::Sha512 => {
-                type $H = Sha512;
+                type $H = crate::high::hash::Sha512;
                 $body
             }
         }
     };
 }
+
+type Verify<K> = fn(&K, &[u8], &[u8]) -> Result<(), Error>;
+
+type Sign<K> = for<'a> fn(&K, &'a mut [u8], &[u8]) -> Result<&'a [u8], Error>;
+
+type Write<K> = for<'a> fn(&K, &'a mut [u8]) -> Result<&'a [u8], Error>;
 
 struct Ecdsa {
     curve: CurveId,
@@ -217,53 +174,107 @@ impl Encoding for Fixed {
 }
 
 trait EcdsaCurve: Curve<PublicKey: Clone> + Sized + 'static {
-    fn parsed(key: EcdsaVerifier<Self>, ecdsa: Ecdsa) -> Parsed;
+    fn key(key: EcdsaVerifier<Self>) -> Key;
 
-    fn key(pair: EcdsaPair<Self>) -> EcdsaKey;
+    fn pair(pair: EcdsaPair<Self>) -> EcdsaKey;
 }
 
 macro_rules! ecdsa_curve {
-    ($curve:ident, $parsed:ident) => {
+    ($curve:ident) => {
         impl EcdsaCurve for $curve {
-            fn parsed(key: EcdsaVerifier<Self>, ecdsa: Ecdsa) -> Parsed {
-                Parsed::$parsed(key, ecdsa)
+            fn key(key: EcdsaVerifier<Self>) -> Key {
+                Key::$curve(key)
             }
 
-            fn key(pair: EcdsaPair<Self>) -> EcdsaKey {
+            fn pair(pair: EcdsaPair<Self>) -> EcdsaKey {
                 EcdsaKey::$curve(pair)
             }
         }
     };
 }
 
-ecdsa_curve!(P256, EcdsaP256);
+ecdsa_curve!(P256);
 
-struct EcdsaVerifier<C: Curve> {
+enum Key {
+    P256(EcdsaVerifier<P256>),
+    P384(EcdsaVerifier<P384>),
+    P521(EcdsaVerifier<P521>),
+}
+
+impl Clone for Key {
+    fn clone(&self) -> Self {
+        match self {
+            Self::P256(key) => Self::P256(key.clone()),
+            Self::P384(key) => Self::P384(key.clone()),
+            Self::P521(key) => Self::P521(key.clone()),
+        }
+    }
+}
+
+struct EcdsaVerifier<C: EcdsaCurve> {
     key: ecdsa::VerifyingKey<C>,
+    ops: low::ZeroableRef<VerifyOps<C>>,
+}
+
+impl<C: EcdsaCurve> Clone for EcdsaVerifier<C> {
+    fn clone(&self) -> Self {
+        Self {
+            key: self.key.clone(),
+            ops: self.ops,
+        }
+    }
+}
+
+struct VerifyOps<C: EcdsaCurve> {
     verify: Verify<ecdsa::VerifyingKey<C>>,
     verify_digest: Verify<ecdsa::VerifyingKey<C>>,
 }
 
-impl<C: Curve> EcdsaVerifier<C> {
+impl<C: EcdsaCurve> EcdsaVerifier<C> {
+    /// Parses `point` for the encoding and hash `E` and `H`.
+    fn parse<H: SignatureHash, E: Encoding>(point: &[u8]) -> Result<Self, Error> {
+        Ok(Self {
+            key: ecdsa::VerifyingKey::from_x962_uncompressed(point)?,
+            ops: low::ZeroableRef::new(
+                const {
+                    &VerifyOps {
+                        verify: E::verify::<C, H>,
+                        verify_digest: E::verify_digest::<C>,
+                    }
+                },
+            ),
+        })
+    }
+
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
-        (self.verify)(&self.key, signature, message)
+        (self.ops.get().verify)(&self.key, signature, message)
     }
 
     fn verify_digest(&self, digest: &[u8], signature: &[u8]) -> Result<(), Error> {
-        (self.verify_digest)(&self.key, signature, digest)
+        (self.ops.get().verify_digest)(&self.key, signature, digest)
     }
 }
 
-fn parse_ecdsa<C: EcdsaCurve, H: SignatureHash, E: Encoding>(
-    ecdsa: Ecdsa,
-    bytes: &[u8],
-) -> Result<Parsed, Error> {
-    let key = EcdsaVerifier {
-        key: ecdsa::VerifyingKey::from_x962_uncompressed(bytes)?,
-        verify: E::verify::<C, H>,
-        verify_digest: E::verify_digest::<C>,
+macro_rules! on_key {
+    ($key_enum:expr, |$key:ident| $body:expr) => {
+        match $key_enum {
+            Key::P256($key) => $body,
+            Key::P384($key) => $body,
+            Key::P521($key) => $body,
+        }
     };
-    Ok(C::parsed(key, ecdsa))
+}
+
+fn parse_ecdsa<C: EcdsaCurve, H: SignatureHash, E: Encoding>(point: &[u8]) -> Result<Key, Error> {
+    EcdsaVerifier::<C>::parse::<H, E>(point).map(C::key)
+}
+
+pub struct VerificationAlgorithm {
+    ecdsa: Ecdsa,
+    // The only path to the algorithm's code: a binary links only the
+    // algorithms it names.
+    parse: fn(&[u8]) -> Result<Key, Error>,
+    decompress: sec1::Decompress,
 }
 
 const fn ecdsa_verification(
@@ -282,23 +293,105 @@ const fn ecdsa_verification(
         CurveId::P384 => p384::PublicKey::decompress,
         CurveId::P521 => p521::PublicKey::decompress,
     };
-    VerificationAlgorithm(Verification::Ecdsa(ecdsa, parse, decompress))
-}
-
-const fn ecdsa_signing(verification: &VerificationAlgorithm) -> EcdsaSigningAlgorithm {
-    match verification.0 {
-        Verification::Ecdsa(ecdsa, ..) => EcdsaSigningAlgorithm {
-            ecdsa,
-            load: with_ecdsa!(ecdsa, |C, H, E| EcdsaKeyPair::load::<C, H, E> as _),
-        },
-        _ => panic!("not an ECDSA algorithm"),
+    VerificationAlgorithm {
+        ecdsa,
+        parse,
+        decompress,
     }
 }
 
-pub struct EcdsaSigningAlgorithm {
+pub struct PublicKey {
+    key: Key,
+    algorithm: Ecdsa,
+    point: EncodedPoint,
+}
+
+impl PublicKey {
+    /// Parses an X9.62 uncompressed point for `algorithm`, refusing a
+    /// malformed key before any signature arrives.
+    ///
+    /// A compressed point is refused, which
+    /// [`agreement::PublicKey::new`](crate::agreement::PublicKey::new)
+    /// decompresses, and [`Self::from_spki`] takes inside a
+    /// `SubjectPublicKeyInfo`.
+    pub fn new(algorithm: &VerificationAlgorithm, point: &[u8]) -> Result<Self, Error> {
+        Ok(Self {
+            key: (algorithm.parse)(point)?,
+            algorithm: algorithm.ecdsa,
+            point: EncodedPoint::copy_from(point)?,
+        })
+    }
+
+    /// Parses a public key for `algorithm` from its `SubjectPublicKeyInfo`
+    /// DER, refusing one that names another algorithm or curve.
+    ///
+    /// It names `id-ecPublicKey` and the algorithm's curve, and its point
+    /// may be compressed (RFC 5480), which this decompresses.
+    pub fn from_spki(algorithm: &VerificationAlgorithm, der: &[u8]) -> Result<Self, Error> {
+        let curve = Some(asn1::Any::ObjectId(curve_oid(algorithm.ecdsa.curve)));
+        let point = spki::decode(der, &[&asn1::oid::id_ecPublicKey], curve)?;
+        let mut decompressed = [0; MAX_UNCOMPRESSED_PUBLIC_KEY_LEN];
+        Self::new(
+            algorithm,
+            sec1::uncompressed(point, algorithm.decompress, &mut decompressed)?,
+        )
+    }
+
+    /// Encodes the public key as a `SubjectPublicKeyInfo`: `id-ecPublicKey`
+    /// on its curve, with its uncompressed point.
+    pub fn to_spki(&self) -> Spki {
+        let curve = Some(asn1::Any::ObjectId(curve_oid(self.algorithm.curve)));
+        Spki(Buffer::encode(|output| {
+            spki::encode(self.as_ref(), &asn1::oid::id_ecPublicKey, curve, output)
+        }))
+    }
+
+    /// Verifies `signature` over `message`, refusing a malformed signature.
+    ///
+    /// ECDSA signatures are malleable: `(r, s)` and `(r, n - s)` both verify,
+    /// so don't identify a message by its signature's bytes.
+    pub fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
+        on_key!(&self.key, |key| key.verify(message, signature))
+    }
+
+    /// Verifies `signature` over the message `digest` hashes.
+    ///
+    /// The digest's hash, SHA-256, SHA-384, or SHA-512, replaces the
+    /// algorithm's, which still fixes the curve and the signature's encoding.
+    /// Another hash is refused as [`Error::Unsupported`].
+    ///
+    /// So unlike [`Self::verify`], this does not pin the hash: hash with the
+    /// one your protocol names, never one the signed data or its sender
+    /// picks. A signature over one SHA-2 hash verifies over another only
+    /// for a message whose digest collides with it, which no one can find.
+    pub fn verify_digest(&self, digest: &Digest, signature: &[u8]) -> Result<(), Error> {
+        let digest = signed_digest(digest)?;
+        on_key!(&self.key, |key| key.verify_digest(digest, signature))
+    }
+}
+
+impl AsRef<[u8]> for PublicKey {
+    fn as_ref(&self) -> &[u8] {
+        self.point.as_ref()
+    }
+}
+
+pub struct Signature(Buffer<SIGNATURE_MAX_LEN>);
+
+const SIGNATURE_MAX_LEN: usize = 3 + 2 * (2 + MAX_SCALAR_LEN + 1);
+
+const fn ecdsa_signing(verification: &VerificationAlgorithm) -> SigningAlgorithm {
+    let ecdsa = verification.ecdsa;
+    SigningAlgorithm {
+        ecdsa,
+        load: with_ecdsa!(ecdsa, |C, H, E| KeyPair::load::<C, H, E> as _),
+    }
+}
+
+pub struct SigningAlgorithm {
     ecdsa: Ecdsa,
-    // The only path to the algorithm's code, as `Verification`'s.
-    load: fn(Ecdsa, EcdsaSource<'_>) -> Result<EcdsaKeyPair, Error>,
+    // The only path to the algorithm's code, as `VerificationAlgorithm`'s.
+    load: fn(Ecdsa, EcdsaSource<'_>) -> Result<KeyPair, Error>,
 }
 
 enum EcdsaSource<'a> {
@@ -311,9 +404,9 @@ enum EcdsaSource<'a> {
     },
 }
 
-pub struct EcdsaKeyPair {
+pub struct KeyPair {
     key: EcdsaKey,
-    algorithm: Ecdsa,
+    public: PublicKey,
 }
 
 enum EcdsaKey {
@@ -327,37 +420,11 @@ struct EcdsaPair<C: EcdsaCurve> {
     ops: low::ZeroableRef<EcdsaOps<C>>,
 }
 
-type Write<K> = for<'a> fn(&K, &'a mut [u8]) -> Result<&'a [u8], Error>;
-
 struct EcdsaOps<C: EcdsaCurve> {
-    public_key: fn(&ecdsa::SigningKey<C>) -> ecdsa::EncodedPoint,
-    parse: fn(&[u8]) -> Result<ecdsa::VerifyingKey<C>, Error>,
     sign: Sign<ecdsa::SigningKey<C>>,
     sign_digest: Sign<ecdsa::SigningKey<C>>,
-    verify: Verify<ecdsa::VerifyingKey<C>>,
-    verify_digest: Verify<ecdsa::VerifyingKey<C>>,
     to_pkcs8: Write<ecdsa::SigningKey<C>>,
     to_scalar: Write<ecdsa::SigningKey<C>>,
-    to_spki: Write<ecdsa::SigningKey<C>>,
-}
-
-impl<C: EcdsaCurve> EcdsaPair<C> {
-    fn point(&self) -> ecdsa::EncodedPoint {
-        (self.ops.get().public_key)(&self.signing)
-    }
-
-    fn public_key(&self, ecdsa: Ecdsa) -> PublicKey {
-        let point = self.point();
-        let key = EcdsaVerifier {
-            key: (self.ops.get().parse)(point.as_ref()).expect("a key pair's own point"),
-            verify: self.ops.get().verify,
-            verify_digest: self.ops.get().verify_digest,
-        };
-        PublicKey {
-            key: C::parsed(key, ecdsa),
-            encoding: Buffer::copy_from(point.as_ref()).expect("sized for the largest key"),
-        }
-    }
 }
 
 macro_rules! on_ecdsa {
@@ -370,17 +437,14 @@ macro_rules! on_ecdsa {
     };
 }
 
-impl EcdsaKeyPair {
+impl KeyPair {
     /// Generates a key pair for `algorithm` from the system random source.
-    pub fn generate(algorithm: &'static EcdsaSigningAlgorithm) -> Result<Self, Error> {
+    pub fn generate(algorithm: &'static SigningAlgorithm) -> Result<Self, Error> {
         (algorithm.load)(algorithm.ecdsa, EcdsaSource::Generate)
     }
 
     /// Loads a PKCS#8 v1 `ECPrivateKey` on `algorithm`'s curve.
-    pub fn from_pkcs8(
-        algorithm: &'static EcdsaSigningAlgorithm,
-        der: &[u8],
-    ) -> Result<Self, Error> {
+    pub fn from_pkcs8(algorithm: &'static SigningAlgorithm, der: &[u8]) -> Result<Self, Error> {
         (algorithm.load)(algorithm.ecdsa, EcdsaSource::Pkcs8(der))
     }
 
@@ -388,7 +452,7 @@ impl EcdsaKeyPair {
     ///
     /// This refuses PKCS#8, which [`Self::from_pkcs8`] takes: a caller always
     /// knows which of the two it holds.
-    pub fn from_sec1(algorithm: &'static EcdsaSigningAlgorithm, der: &[u8]) -> Result<Self, Error> {
+    pub fn from_sec1(algorithm: &'static SigningAlgorithm, der: &[u8]) -> Result<Self, Error> {
         (algorithm.load)(algorithm.ecdsa, EcdsaSource::Sec1(der))
     }
 
@@ -399,7 +463,7 @@ impl EcdsaKeyPair {
     /// This suits a JWK's `d` and `x`/`y`; prefer [`Self::from_pkcs8`] for
     /// stored keys.
     pub fn from_scalar_and_public_key(
-        algorithm: &'static EcdsaSigningAlgorithm,
+        algorithm: &'static SigningAlgorithm,
         scalar: &[u8],
         public_key: &[u8],
     ) -> Result<Self, Error> {
@@ -408,7 +472,7 @@ impl EcdsaKeyPair {
     }
 
     /// Loads a key pair for `ecdsa`, whose curve, hash, and encoding are `C`,
-    /// `H`, and `E`.
+    /// `H`, and `E`, and derives its public key.
     fn load<C: EcdsaCurve, H: SignatureHash, E: Encoding>(
         ecdsa: Ecdsa,
         source: EcdsaSource<'_>,
@@ -421,31 +485,34 @@ impl EcdsaKeyPair {
                 ecdsa::SigningKey::from_private_key_and_public_key(scalar, public_key)
             }
         }?;
+        // A loader that checked a given public key kept it, so only a key
+        // without one costs a scalar multiplication here.
+        let point = signing.public_key_uncompressed();
+        let public = PublicKey {
+            key: C::key(EcdsaVerifier::parse::<H, E>(point.as_ref()).expect("its own point")),
+            algorithm: ecdsa,
+            point,
+        };
         let ops = const {
             &EcdsaOps {
-                public_key: ecdsa::SigningKey::public_key_uncompressed,
-                parse: ecdsa::VerifyingKey::from_x962_uncompressed,
                 sign: E::sign::<C, H>,
                 sign_digest: E::sign_digest::<C, H>,
-                verify: E::verify::<C, H>,
-                verify_digest: E::verify_digest::<C>,
                 to_pkcs8: ecdsa::SigningKey::to_pkcs8_der,
                 to_scalar: ecdsa::SigningKey::to_scalar,
-                to_spki: ecdsa::SigningKey::to_spki_der,
             }
         };
         Ok(Self {
-            key: C::key(EcdsaPair {
+            key: C::pair(EcdsaPair {
                 signing,
                 ops: low::ZeroableRef::new(ops),
             }),
-            algorithm: ecdsa,
+            public,
         })
     }
 
     /// Returns the public key, which verifies what this key pair signs.
-    pub fn public_key(&self) -> PublicKey {
-        on_ecdsa!(self, |pair| pair.public_key(self.algorithm))
+    pub fn public_key(&self) -> &PublicKey {
+        &self.public
     }
 
     /// Signs `message` with a fresh nonce.
@@ -464,7 +531,7 @@ impl EcdsaKeyPair {
     ///
     /// The digest's hash, SHA-256, SHA-384, or SHA-512, replaces the
     /// algorithm's, which still fixes the signature's encoding, so
-    /// [`Self::public_key`] verifies the signature over the message only if
+    /// [`PublicKey::verify`] verifies the signature over the message only if
     /// the hashes match; [`PublicKey::verify_digest`] verifies it in any
     /// case. Another hash is refused as [`Error::Unsupported`].
     pub fn sign_digest(&self, digest: &Digest) -> Result<Signature, Error> {
@@ -494,8 +561,8 @@ impl EcdsaKeyPair {
     ///
     /// This is what [`Self::from_scalar_and_public_key`] loads; prefer
     /// [`Self::to_pkcs8`] for stored keys.
-    pub fn to_scalar(&self) -> EcdsaScalar {
-        EcdsaScalar(Buffer::encode(|output| {
+    pub fn to_scalar(&self) -> Scalar {
+        Scalar(Buffer::encode(|output| {
             on_ecdsa!(self, |pair| (pair.ops.get().to_scalar)(
                 &pair.signing,
                 output
@@ -510,26 +577,23 @@ impl EcdsaKeyPair {
     /// same `ECPrivateKey` without its curve, which PKCS#8 names instead.
     pub fn to_sec1(&self) -> Sec1 {
         let _entry = low::Entry::new_secret();
-        let scalar = self.to_scalar();
-        let point = on_ecdsa!(self, |pair| pair.point());
-        let curve = curve_oid(self.algorithm.curve);
+        // A copy inside the call, so unwiped, unlike `to_scalar`'s.
+        let scalar = Buffer::<MAX_SCALAR_LEN>::encode(|output| {
+            on_ecdsa!(self, |pair| (pair.ops.get().to_scalar)(
+                &pair.signing,
+                output
+            ))
+        });
+        let curve = curve_oid(self.public.algorithm.curve);
         Sec1(Buffer::encode(|output| {
-            sec1::encode(scalar.as_ref(), point.as_ref(), Some(curve), output)
-        }))
-    }
-
-    /// Encodes the public key as a `SubjectPublicKeyInfo`.
-    pub fn to_spki(&self) -> Spki {
-        Spki(Buffer::encode(|output| {
-            on_ecdsa!(self, |pair| (pair.ops.get().to_spki)(&pair.signing, output))
+            sec1::encode(scalar.as_ref(), self.public.as_ref(), Some(curve), output)
         }))
     }
 }
 
-    pub static ECDSA_P256_SHA256_FIXED: EcdsaSigningAlgorithm =
-        ecdsa_signing(&verify::ECDSA_P256_SHA256_FIXED);
+    pub static P256_SHA256_FIXED: SigningAlgorithm = ecdsa_signing(&verify::P256_SHA256_FIXED);
 
-    pub static ECDSA_P256_SHA256_FIXED: VerificationAlgorithm =
+    pub static P256_SHA256_FIXED: VerificationAlgorithm =
         ecdsa_verification(CurveId::P256, HashId::Sha256, EcdsaEncoding::Fixed);
 
 ```
@@ -542,41 +606,42 @@ The model departs from the Rust in these ways, and adds no axiom:
   that computes nothing, is left out. `P256C` is the translated `Curve` impl
   for `P256` with `generate_random_key` replaced by this model, so the
   translated ECDSA code over it runs the model.
-- `verify::ECDSA_P256_SHA256_FIXED` is `Verification::Other`, holding what
-  `PublicKey::new` does for it: `with_ecdsa!` gives it
-  `parse_ecdsa::<P256, Sha256, Fixed>`, then the key's bytes are copied.
-- That parser's `Parsed::EcdsaP256` is `Parsed::Other`, holding what
-  `PublicKey::verify` does for it: its `EcdsaVerifier`'s `verify`,
-  `Fixed::verify::<P256, Sha256>`, which is `VerifyingKey::verify::<Sha256>`.
-  Its `verify_digest`, read only by `PublicKey::verify_digest`, which no
-  theorem here is about, and its `Ecdsa`, read only by `Debug`, are left
-  out.
-- An `EcdsaSigningAlgorithm` is the `load` it holds, applied to its `Ecdsa`;
-  `with_ecdsa!` gives `sign::ECDSA_P256_SHA256_FIXED`
-  `EcdsaKeyPair::load::<P256, Sha256, Fixed>`.
-- An `EcdsaKey::P256` whose ops that `load` built is `P256Sha256Fixed`,
-  holding its signing key, and `EcdsaKeyPair::sign` and `public_key` call
-  those ops' `Fixed::sign::<P256, Sha256>`, which is
-  `SigningKey::sign::<Sha256>`, `public_key`, which is
-  `SigningKey::public_key_uncompressed`, `parse`, which is
-  `VerifyingKey::from_x962_uncompressed`, and
-  `Fixed::verify::<P256, Sha256>` directly: `load` builds every `EcdsaOps` and `EcdsaPair`, and its `ops` are
-  reached only through `pair.ops.get()`. `admin/prove` checks that the quotes
-  hold every mention of these. Every other key is `Other`, holding what
-  `sign` and `public_key` do for it, and `ZeroableRef`, which holds the ops,
-  is left out.
-- `EcdsaKeyPair`'s `algorithm`, read only by `Debug` and the `Parsed` it
-  passes to, is left out, as are `sign_digest`, `Debug`, and the `to_*`
-  encoders, which no theorem here is about, and the ops' `sign_digest` and
-  `verify_digest`, which only `sign_digest` and `verify_digest` read.
-- `Buffer::write` takes `write` as a Lean function, as Aeneas cannot
-  translate a closure that returns a borrow of its argument.
+- A `VerificationAlgorithm` is its `parse`; `with_ecdsa!` gives
+  `verify::P256_SHA256_FIXED` `parse_ecdsa::<P256, Sha256, Fixed>`. Its
+  `ecdsa`, which `PublicKey::new` copies into the key's `algorithm`, and its
+  `decompress`, read only by `PublicKey::from_spki`, are left out.
+- A `Key::P256` whose `EcdsaVerifier`'s ops `parse::<Sha256, Fixed>` built is
+  `Key.P256Sha256Fixed`, holding its `VerifyingKey`, and `PublicKey::verify`
+  calls those ops' `verify`, `Fixed::verify::<P256, Sha256>`, which is
+  `VerifyingKey::verify::<Sha256>`, directly: `parse` builds every
+  `VerifyOps`, a clone keeps its ops, and they are read only through
+  `ops.get()`. Every other key is `Other`, holding what `verify` does for it,
+  and `ZeroableRef`, which holds the ops, is left out.
+- A `PublicKey`'s `algorithm`, read only by `Debug`, `to_spki`, and
+  `KeyPair::to_sec1`, is left out.
+- A `SigningAlgorithm` is the `load` it holds, applied to its `Ecdsa`;
+  `with_ecdsa!` gives `sign::P256_SHA256_FIXED`
+  `KeyPair::load::<P256, Sha256, Fixed>`.
+- An `EcdsaKey::P256` whose ops that `load` built is
+  `EcdsaKey.P256Sha256Fixed`, holding its signing key, and `KeyPair::sign`
+  calls those ops' `sign`, `Fixed::sign::<P256, Sha256>`, which is
+  `SigningKey::sign::<Sha256>`, directly: `load` builds every `EcdsaOps` and
+  `EcdsaPair`. Every other key is `Other`, holding what `sign` does for it.
+- `admin/prove` checks that the quotes hold every mention of `Key::` and
+  `EcdsaKey::`, every `VerifyOps`, `EcdsaOps`, and `EcdsaPair` built, every
+  `Key` a clone builds, and every read of an `ops`.
+- `verify_digest`, `sign_digest`, `from_spki`, `to_spki`, and the `to_*`
+  encoders, which no theorem here is about, are quoted only because they
+  share their `impl`, and are not modelled, nor are the ops they read.
+  Neither are the clones, which compute no result here.
+- `.map(Signature)` is the identity: the translation's `Signature` is its
+  `Buffer`. `Buffer::write` is `Rind.X86_64.SignatureBuffer`'s.
 - PKCS#8 and SEC1 loading, DER the ✓ leaves out, is opaque.
 - `?` is a `match`, since each error it passes on is already an `Error`.
 
 Drops are not modelled, as everywhere in the translation.
-`MAX_UNCOMPRESSED_PUBLIC_KEY_LEN` is P-521's 1 + 2 · 66 = 133, and
-`SIGNATURE_MAX_LEN` is RSA's largest modulus, 8192 / 8 = 1024.
+`SIGNATURE_MAX_LEN` is 3 + 2 · (2 + 66 + 1) = 141, from P-521's 66-byte
+`MAX_SCALAR_LEN`.
 -/
 
 namespace rind.x86_64
@@ -623,51 +688,92 @@ abbrev P256SigningKey :=
 abbrev P256VerifyingKey :=
   high.ecdsa.VerifyingKey high.curve.P256 mid.p256.StaticPrivateKey mid.p256.VerifyingKey mid.p256.Scalar
 
-/-- `parse_ecdsa::<P256, Sha256, Fixed>`, whose `Verifier`'s `verify` is
-`VerifyingKey::verify::<Sha256>`. -/
-def high.signature.parse_ecdsa_p256_sha256_fixed (bytes : Slice Std.U8) :
-    Result (core.result.Result high.signature.Parsed error.Error) := do
-  let r ← high.ecdsa.VerifyingKey.from_x962_uncompressed P256C bytes
+/-- `Key`, whose P-256 verifier `parse::<Sha256, Fixed>` built is
+`P256Sha256Fixed`. -/
+inductive high.signature.ecdsa.Key where
+  | P256Sha256Fixed (key : P256VerifyingKey)
+  | Other (verify : Slice Std.U8 → Slice Std.U8 → Result (core.result.Result Unit error.Error))
+
+/-- `PublicKey`. -/
+structure high.signature.ecdsa.PublicKey where
+  key : high.signature.ecdsa.Key
+  point : high.ecdsa.EncodedPoint
+
+/-- `VerificationAlgorithm`: its `parse`. -/
+structure high.signature.ecdsa.VerificationAlgorithm where
+  parse : Slice Std.U8 → Result (core.result.Result high.signature.ecdsa.Key error.Error)
+
+/-- `EcdsaVerifier::<P256>::parse::<Sha256, Fixed>`, whose ops' `verify` is
+`VerifyingKey::verify::<Sha256>`, as the `VerifyingKey` it holds. -/
+def high.signature.ecdsa.EcdsaVerifier.parse_p256_sha256_fixed (point : Slice Std.U8) :
+    Result (core.result.Result P256VerifyingKey error.Error) := do
+  let r ← high.ecdsa.VerifyingKey.from_x962_uncompressed P256C point
   match r with
-  | .Ok key => ok (.Ok (.Other fun message signature =>
-      high.ecdsa.VerifyingKey.verify P256C Sha256Sig key message signature))
+  | .Ok key => ok (.Ok key)
   | .Err e => ok (.Err e)
 
-/-- The `verify::ECDSA_P256_SHA256_FIXED` static, whose parser is
-`parse_ecdsa::<P256, Sha256, Fixed>`, with what `PublicKey::new` does for it. -/
-def high.signature.verify.ECDSA_P256_SHA256_FIXED : high.signature.Verification :=
-  .Other fun bytes => do
-    let r ← high.signature.parse_ecdsa_p256_sha256_fixed bytes
-    match r with
-    | .Ok key =>
-      let b ← high.signature.Buffer.copy_from 2592#usize bytes
-      match b with
-      | .Ok encoding => ok (.Ok { key, encoding })
-      | .Err e => ok (.Err e)
+/-- `parse_ecdsa::<P256, Sha256, Fixed>`. -/
+def high.signature.ecdsa.parse_ecdsa_p256_sha256_fixed (point : Slice Std.U8) :
+    Result (core.result.Result high.signature.ecdsa.Key error.Error) := do
+  let r ← high.signature.ecdsa.EcdsaVerifier.parse_p256_sha256_fixed point
+  match r with
+  | .Ok key => ok (.Ok (.P256Sha256Fixed key))
+  | .Err e => ok (.Err e)
+
+/-- The `verify::P256_SHA256_FIXED` static, whose parser is
+`parse_ecdsa::<P256, Sha256, Fixed>`. -/
+def high.signature.ecdsa.verify.P256_SHA256_FIXED : high.signature.ecdsa.VerificationAlgorithm :=
+  ⟨high.signature.ecdsa.parse_ecdsa_p256_sha256_fixed⟩
+
+/-- `PublicKey::new`. -/
+def high.signature.ecdsa.PublicKey.new (algorithm : high.signature.ecdsa.VerificationAlgorithm)
+    (point : Slice Std.U8) :
+    Result (core.result.Result high.signature.ecdsa.PublicKey error.Error) := do
+  let r ← algorithm.parse point
+  match r with
+  | .Err e => ok (.Err e)
+  | .Ok key =>
+    let p ← high.ecdsa.EncodedPoint.copy_from point
+    match p with
+    | .Ok point => ok (.Ok { key, point })
     | .Err e => ok (.Err e)
+
+/-- `PublicKey::verify`, whose P-256 verifier's `verify` is
+`VerifyingKey::verify::<Sha256>`. -/
+def high.signature.ecdsa.PublicKey.verify (self : high.signature.ecdsa.PublicKey)
+    (message signature : Slice Std.U8) : Result (core.result.Result Unit error.Error) :=
+  match self.key with
+  | .P256Sha256Fixed key => high.ecdsa.VerifyingKey.verify P256C Sha256Sig key message signature
+  | .Other verify => verify message signature
+
+/-- `PublicKey`'s `AsRef<[u8]>`. -/
+def high.signature.ecdsa.PublicKey.Insts.CoreConvertAsRefSliceU8.as_ref
+    (self : high.signature.ecdsa.PublicKey) : Result (Slice Std.U8) :=
+  high.ecdsa.EncodedPoint.Insts.CoreConvertAsRefSliceU8.as_ref self.point
 
 /-- `EcdsaKey`, whose P-256 pair `load::<P256, Sha256, Fixed>` built is
 `P256Sha256Fixed`. -/
-inductive high.signature.EcdsaKey where
+inductive high.signature.ecdsa.EcdsaKey where
   | P256Sha256Fixed (signing : P256SigningKey)
-  | Other (sign : Slice Std.U8 → Result (core.result.Result high.signature.Signature error.Error))
-      (public_key : Result high.signature.PublicKey)
+  | Other (sign : Slice Std.U8 →
+      Result (core.result.Result high.signature.ecdsa.Signature error.Error))
 
-/-- `EcdsaKeyPair`. -/
-structure high.signature.EcdsaKeyPair where
-  key : high.signature.EcdsaKey
+/-- `KeyPair`. -/
+structure high.signature.ecdsa.KeyPair where
+  key : high.signature.ecdsa.EcdsaKey
+  «public» : high.signature.ecdsa.PublicKey
 
 /-- `EcdsaSource`. -/
-inductive high.signature.EcdsaSource where
+inductive high.signature.ecdsa.EcdsaSource where
   | Generate
   | Pkcs8 (der : Slice Std.U8)
   | Sec1 (der : Slice Std.U8)
   | Scalar (scalar public_key : Slice Std.U8)
 
-/-- `EcdsaSigningAlgorithm`: its `load`, applied to its `Ecdsa`. -/
-structure high.signature.EcdsaSigningAlgorithm where
-  load : high.signature.EcdsaSource →
-    Result (core.result.Result high.signature.EcdsaKeyPair error.Error)
+/-- `SigningAlgorithm`: its `load`, applied to its `Ecdsa`. -/
+structure high.signature.ecdsa.SigningAlgorithm where
+  load : high.signature.ecdsa.EcdsaSource →
+    Result (core.result.Result high.signature.ecdsa.KeyPair error.Error)
 
 /-- `ecdsa::SigningKey::<P256>::from_pkcs8_der`, DER the ✓ leaves out. -/
 opaque high.ecdsa.SigningKey.from_pkcs8_der_p256 :
@@ -677,9 +783,9 @@ opaque high.ecdsa.SigningKey.from_pkcs8_der_p256 :
 opaque high.ecdsa.SigningKey.from_sec1_der_p256 :
     Slice Std.U8 → Result (core.result.Result P256SigningKey error.Error)
 
-/-- `EcdsaKeyPair::load::<P256, Sha256, Fixed>`. -/
-def high.signature.EcdsaKeyPair.load_p256_sha256_fixed (source : high.signature.EcdsaSource) :
-    Result (core.result.Result high.signature.EcdsaKeyPair error.Error) := do
+/-- `KeyPair::load::<P256, Sha256, Fixed>`. -/
+def high.signature.ecdsa.KeyPair.load_p256_sha256_fixed (source : high.signature.ecdsa.EcdsaSource) :
+    Result (core.result.Result high.signature.ecdsa.KeyPair error.Error) := do
   let signing ← match source with
     | .Generate => high.ecdsa.SigningKey.generate P256C
     | .Pkcs8 der => high.ecdsa.SigningKey.from_pkcs8_der_p256 der
@@ -688,51 +794,41 @@ def high.signature.EcdsaKeyPair.load_p256_sha256_fixed (source : high.signature.
       high.ecdsa.SigningKey.from_private_key_and_public_key P256C scalar public_key
   match signing with
   | .Err e => ok (.Err e)
-  | .Ok signing => ok (.Ok { key := .P256Sha256Fixed signing })
-
-/-- The `sign::ECDSA_P256_SHA256_FIXED` static, whose `load` is
-`EcdsaKeyPair::load::<P256, Sha256, Fixed>`. -/
-def high.signature.sign.ECDSA_P256_SHA256_FIXED : high.signature.EcdsaSigningAlgorithm :=
-  ⟨high.signature.EcdsaKeyPair.load_p256_sha256_fixed⟩
-
-/-- `EcdsaKeyPair::generate`. -/
-def high.signature.EcdsaKeyPair.generate (algorithm : high.signature.EcdsaSigningAlgorithm) :
-    Result (core.result.Result high.signature.EcdsaKeyPair error.Error) :=
-  algorithm.load .Generate
-
-/-- `EcdsaKeyPair::from_scalar_and_public_key`. -/
-def high.signature.EcdsaKeyPair.from_scalar_and_public_key
-    (algorithm : high.signature.EcdsaSigningAlgorithm) (scalar public_key : Slice Std.U8) :
-    Result (core.result.Result high.signature.EcdsaKeyPair error.Error) :=
-  algorithm.load (.Scalar scalar public_key)
-
-/-- `EcdsaKeyPair::public_key`, as the translation names a method, whose
-P-256 `Verifier`'s `verify` is `VerifyingKey::verify::<Sha256>`. -/
-def high.signature.EcdsaKeyPair.impl.public_key (self : high.signature.EcdsaKeyPair) :
-    Result high.signature.PublicKey :=
-  match self.key with
-  | .P256Sha256Fixed signing => do
+  | .Ok signing =>
     let point ← high.ecdsa.SigningKey.public_key_uncompressed P256C signing
     let s ← high.ecdsa.EncodedPoint.Insts.CoreConvertAsRefSliceU8.as_ref point
-    let r ← high.ecdsa.VerifyingKey.from_x962_uncompressed P256C s
-    let key ← core.result.Result.expect error.Error.Insts.CoreFmtDebug r
-      (toStr "a key pair's own point")
-    let s1 ← high.ecdsa.EncodedPoint.Insts.CoreConvertAsRefSliceU8.as_ref point
-    let b ← high.signature.Buffer.copy_from 2592#usize s1
-    let encoding ← core.result.Result.expect error.Error.Insts.CoreFmtDebug b
-      (toStr "sized for the largest key")
-    ok { key := .Other fun message signature =>
-        high.ecdsa.VerifyingKey.verify P256C Sha256Sig key message signature, encoding }
-  | .Other _ public_key => public_key
+    let r ← high.signature.ecdsa.EcdsaVerifier.parse_p256_sha256_fixed s
+    let key ← core.result.Result.expect error.Error.Insts.CoreFmtDebug r (toStr "its own point")
+    ok (.Ok { key := .P256Sha256Fixed signing, «public» := { key := .P256Sha256Fixed key, point } })
 
-/-- `EcdsaKeyPair::sign`, whose P-256 ops' `sign` is
-`SigningKey::sign::<Sha256>`. -/
-def high.signature.EcdsaKeyPair.sign (self : high.signature.EcdsaKeyPair) (message : Slice Std.U8) :
-    Result (core.result.Result high.signature.Signature error.Error) :=
+/-- The `sign::P256_SHA256_FIXED` static, whose `load` is
+`KeyPair::load::<P256, Sha256, Fixed>`. -/
+def high.signature.ecdsa.sign.P256_SHA256_FIXED : high.signature.ecdsa.SigningAlgorithm :=
+  ⟨high.signature.ecdsa.KeyPair.load_p256_sha256_fixed⟩
+
+/-- `KeyPair::generate`. -/
+def high.signature.ecdsa.KeyPair.generate (algorithm : high.signature.ecdsa.SigningAlgorithm) :
+    Result (core.result.Result high.signature.ecdsa.KeyPair error.Error) :=
+  algorithm.load .Generate
+
+/-- `KeyPair::from_scalar_and_public_key`. -/
+def high.signature.ecdsa.KeyPair.from_scalar_and_public_key
+    (algorithm : high.signature.ecdsa.SigningAlgorithm) (scalar public_key : Slice Std.U8) :
+    Result (core.result.Result high.signature.ecdsa.KeyPair error.Error) :=
+  algorithm.load (.Scalar scalar public_key)
+
+/-- `KeyPair::public_key`. -/
+def high.signature.ecdsa.KeyPair.public_key (self : high.signature.ecdsa.KeyPair) :
+    Result high.signature.ecdsa.PublicKey :=
+  ok self.«public»
+
+/-- `KeyPair::sign`, whose P-256 ops' `sign` is `SigningKey::sign::<Sha256>`. -/
+def high.signature.ecdsa.KeyPair.sign (self : high.signature.ecdsa.KeyPair) (message : Slice Std.U8) :
+    Result (core.result.Result high.signature.ecdsa.Signature error.Error) :=
   match self.key with
   | .P256Sha256Fixed signing =>
-    high.signature.Buffer.write 1024#usize fun output =>
+    high.signature.Buffer.write 141#usize fun output =>
       high.ecdsa.SigningKey.sign P256C Sha256Sig signing message output
-  | .Other sign _ => sign message
+  | .Other sign => sign message
 
 end rind.x86_64
