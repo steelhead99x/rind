@@ -181,11 +181,6 @@ params! {
     SlhDsaShake256f: Shake, n = 32, h = 68, d = 17, a = 9, k = 35, m = 49, sig = 49856;
 }
 
-/// The length of a parameter set's public key encoding.
-pub(crate) const fn public_key_len<P: Params>() -> usize {
-    2 * P::N
-}
-
 /// `m`, the message digest's length: the FORS indices, then the tree and
 /// leaf indices.
 const fn digest_len<P: Params>() -> usize {

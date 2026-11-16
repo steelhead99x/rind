@@ -268,10 +268,10 @@ fn ecdsa_keygen(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        use rind::signature::{EcdsaKeyPair, sign};
+        use rind::ecdsa::{KeyPair, sign};
 
         b.iter(|| {
-            let key = EcdsaKeyPair::generate(&sign::ECDSA_P256_SHA256_FIXED).unwrap();
+            let key = KeyPair::generate(&sign::P256_SHA256_FIXED).unwrap();
             black_box(key.public_key().as_ref());
         })
     });
@@ -328,10 +328,10 @@ fn ecdsa_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        use rind::signature::{PublicKey, verify};
+        use rind::ecdsa::{PublicKey, verify};
 
         b.iter(|| {
-            PublicKey::new(&verify::ECDSA_P256_SHA256_FIXED, public_key)
+            PublicKey::new(&verify::P256_SHA256_FIXED, public_key)
                 .unwrap()
                 .verify(message, signature)
                 .unwrap();
@@ -409,8 +409,8 @@ fn ecdsa_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        use rind::signature::{PublicKey, verify};
-        let public_key = PublicKey::new(&verify::ECDSA_P256_SHA256_FIXED, public_key).unwrap();
+        use rind::ecdsa::{PublicKey, verify};
+        let public_key = PublicKey::new(&verify::P256_SHA256_FIXED, public_key).unwrap();
 
         b.iter(|| {
             public_key.verify(message, signature).unwrap();
@@ -437,8 +437,8 @@ fn ecdsa_verify(c: &mut Criterion) {
 
     group.bench_function("rind", |b| {
         use rind::digest;
-        use rind::signature::{PublicKey, verify};
-        let public_key = PublicKey::new(&verify::ECDSA_P256_SHA256_FIXED, public_key).unwrap();
+        use rind::ecdsa::{PublicKey, verify};
+        let public_key = PublicKey::new(&verify::P256_SHA256_FIXED, public_key).unwrap();
         let digest = digest::digest(&digest::SHA256, message);
 
         b.iter(|| {
@@ -527,8 +527,8 @@ fn ecdsa_sign(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        use rind::signature::{EcdsaKeyPair, sign};
-        let signing_key = EcdsaKeyPair::generate(&sign::ECDSA_P256_SHA256_FIXED).unwrap();
+        use rind::ecdsa::{KeyPair, sign};
+        let signing_key = KeyPair::generate(&sign::P256_SHA256_FIXED).unwrap();
 
         b.iter(|| {
             black_box(signing_key.sign(message).unwrap());
@@ -537,12 +537,11 @@ fn ecdsa_sign(c: &mut Criterion) {
 
     // verified-garbage signs deterministically (RFC 6979), where rind hedges its nonce.
     group.bench_function("verified-garbage", |b| {
-        use rind::signature::{PublicKey, verify};
+        use rind::ecdsa::{PublicKey, verify};
         use verified_garbage::hashes::sha256::Sha256;
         let (signing_key, public_key) = vg_generate();
         // rind verifies verified-garbage's signature.
-        let rind_key =
-            PublicKey::new(&verify::ECDSA_P256_SHA256_FIXED, public_key.as_bytes()).unwrap();
+        let rind_key = PublicKey::new(&verify::P256_SHA256_FIXED, public_key.as_bytes()).unwrap();
         let signature = signing_key.sign::<Sha256>(message).unwrap();
         rind_key.verify(message, &signature).unwrap();
 
@@ -622,8 +621,8 @@ fn ecdsa_sign(c: &mut Criterion) {
 
     group.bench_function("rind", |b| {
         use rind::digest;
-        use rind::signature::{EcdsaKeyPair, sign};
-        let signing_key = EcdsaKeyPair::generate(&sign::ECDSA_P256_SHA256_FIXED).unwrap();
+        use rind::ecdsa::{KeyPair, sign};
+        let signing_key = KeyPair::generate(&sign::P256_SHA256_FIXED).unwrap();
         let digest = digest::digest(&digest::SHA256, message);
 
         b.iter(|| {
@@ -634,12 +633,11 @@ fn ecdsa_sign(c: &mut Criterion) {
     // verified-garbage signs deterministically (RFC 6979), where rind hedges its nonce.
     group.bench_function("verified-garbage", |b| {
         use rind::digest;
-        use rind::signature::{PublicKey, verify};
+        use rind::ecdsa::{PublicKey, verify};
         use verified_garbage::hashes::sha256::Sha256;
         let (signing_key, public_key) = vg_generate();
         // rind verifies verified-garbage's signature.
-        let rind_key =
-            PublicKey::new(&verify::ECDSA_P256_SHA256_FIXED, public_key.as_bytes()).unwrap();
+        let rind_key = PublicKey::new(&verify::P256_SHA256_FIXED, public_key.as_bytes()).unwrap();
         let signature = signing_key.sign::<Sha256>(message).unwrap();
         rind_key.verify(message, &signature).unwrap();
         let digest: [u8; 32] = digest::digest(&digest::SHA256, message)

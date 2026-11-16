@@ -19,11 +19,10 @@ use core::cell::RefCell;
 use core::slice;
 use std::num::NonZeroU32;
 
-use rind::signature::{
-    EcdsaKeyPair, EcdsaSigningAlgorithm, Ed25519KeyPair, PublicKey, RsaKeyPair,
-    RsaSigningAlgorithm, RsaVerificationAlgorithm, VerificationAlgorithm, sign, verify,
-};
-use rind::{Error, aead, agreement, cipher, digest, hkdf, hmac, kem, pbkdf2, rsa};
+use rind::ecdsa::KeyPair as EcdsaKeyPair;
+use rind::ed25519::KeyPair as Ed25519KeyPair;
+use rind::rsa::KeyPair as RsaKeyPair;
+use rind::{Error, aead, agreement, cipher, digest, ecdsa, ed25519, hkdf, hmac, kem, pbkdf2, rsa};
 
 #[cfg(test)]
 mod ctgrind;
@@ -258,68 +257,110 @@ fn agreement_algorithm(id: u32) -> Result<&'static agreement::Algorithm, Misuse>
     })
 }
 
-fn ecdsa_algorithm(id: u32) -> Result<&'static EcdsaSigningAlgorithm, Misuse> {
+fn ecdsa_algorithm(id: u32) -> Result<&'static ecdsa::SigningAlgorithm, Misuse> {
     Ok(match id {
-        0 => &sign::ECDSA_P256_SHA256_ASN1,
-        1 => &sign::ECDSA_P256_SHA256_FIXED,
-        2 => &sign::ECDSA_P384_SHA384_ASN1,
-        3 => &sign::ECDSA_P384_SHA384_FIXED,
-        4 => &sign::ECDSA_P521_SHA512_ASN1,
-        5 => &sign::ECDSA_P521_SHA512_FIXED,
+        0 => &ecdsa::sign::P256_SHA256_ASN1,
+        1 => &ecdsa::sign::P256_SHA256_FIXED,
+        2 => &ecdsa::sign::P384_SHA384_ASN1,
+        3 => &ecdsa::sign::P384_SHA384_FIXED,
+        4 => &ecdsa::sign::P521_SHA512_ASN1,
+        5 => &ecdsa::sign::P521_SHA512_FIXED,
         _ => return Err(Misuse("unknown ECDSA algorithm")),
     })
 }
 
-fn rsa_signing_algorithm(id: u32) -> Result<&'static RsaSigningAlgorithm, Misuse> {
+fn rsa_signing_algorithm(id: u32) -> Result<&'static rsa::SigningAlgorithm, Misuse> {
     Ok(match id {
-        0 => &sign::RSA_PKCS1_SHA256,
-        1 => &sign::RSA_PKCS1_SHA384,
-        2 => &sign::RSA_PKCS1_SHA512,
-        3 => &sign::RSA_PSS_SHA256,
-        4 => &sign::RSA_PSS_SHA384,
-        5 => &sign::RSA_PSS_SHA512,
+        0 => &rsa::sign::PKCS1_SHA256,
+        1 => &rsa::sign::PKCS1_SHA384,
+        2 => &rsa::sign::PKCS1_SHA512,
+        3 => &rsa::sign::PSS_SHA256,
+        4 => &rsa::sign::PSS_SHA384,
+        5 => &rsa::sign::PSS_SHA512,
         _ => return Err(Misuse("unknown RSA signing algorithm")),
     })
 }
 
 // RSA verification ids are 0..=8 and 100..=104, the others' 20..=34, so the
 // Dart side's one id space covers both.
-fn rsa_verification_algorithm(id: u32) -> Result<&'static RsaVerificationAlgorithm, Misuse> {
+fn rsa_verification_algorithm(id: u32) -> Result<&'static rsa::VerificationAlgorithm, Misuse> {
     Ok(match id {
-        0 => &verify::RSA_PKCS1_SHA256,
-        1 => &verify::RSA_PKCS1_SHA384,
-        2 => &verify::RSA_PKCS1_SHA512,
-        3 => &verify::RSA_PSS_SHA256,
-        4 => &verify::RSA_PSS_SHA384,
-        5 => &verify::RSA_PSS_SHA512,
-        6 => &verify::RSA_PSS_SHA256_ANY_SALT,
-        7 => &verify::RSA_PSS_SHA384_ANY_SALT,
-        8 => &verify::RSA_PSS_SHA512_ANY_SALT,
-        100 => &verify::legacy::RSA_PKCS1_SHA1,
-        101 => &verify::legacy::RSA_PKCS1_1024_SHA1,
-        102 => &verify::legacy::RSA_PKCS1_1024_SHA256,
-        103 => &verify::legacy::RSA_PKCS1_1024_SHA512,
-        104 => &verify::legacy::RSA_PKCS1_3072_SHA384,
+        0 => &rsa::verify::PKCS1_SHA256,
+        1 => &rsa::verify::PKCS1_SHA384,
+        2 => &rsa::verify::PKCS1_SHA512,
+        3 => &rsa::verify::PSS_SHA256,
+        4 => &rsa::verify::PSS_SHA384,
+        5 => &rsa::verify::PSS_SHA512,
+        6 => &rsa::verify::PSS_SHA256_ANY_SALT,
+        7 => &rsa::verify::PSS_SHA384_ANY_SALT,
+        8 => &rsa::verify::PSS_SHA512_ANY_SALT,
+        100 => &rsa::verify::legacy::PKCS1_SHA1,
+        101 => &rsa::verify::legacy::PKCS1_1024_SHA1,
+        102 => &rsa::verify::legacy::PKCS1_1024_SHA256,
+        103 => &rsa::verify::legacy::PKCS1_1024_SHA512,
+        104 => &rsa::verify::legacy::PKCS1_3072_SHA384,
         _ => return Err(Misuse("unknown RSA verification algorithm")),
     })
 }
 
-fn verification_algorithm(id: u32) -> Result<&'static VerificationAlgorithm, Misuse> {
+/// A verification algorithm, in its module.
+#[derive(Clone, Copy)]
+enum Verification {
+    Ecdsa(&'static ecdsa::VerificationAlgorithm),
+    Ed25519,
+    Rsa(&'static rsa::VerificationAlgorithm),
+}
+
+/// A public key and, for RSA, the algorithm it verifies with.
+#[allow(clippy::large_enum_variant)]
+pub enum PublicKey {
+    Ecdsa(ecdsa::PublicKey),
+    Ed25519(ed25519::PublicKey),
+    Rsa(rsa::PublicKey, &'static rsa::VerificationAlgorithm),
+}
+
+impl PublicKey {
+    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
+        match self {
+            Self::Ecdsa(key) => key.verify(message, signature),
+            Self::Ed25519(key) => key.verify(message, signature),
+            Self::Rsa(key, algorithm) => key.verify(algorithm, message, signature),
+        }
+    }
+
+    fn encoding(&self) -> &[u8] {
+        match self {
+            Self::Ecdsa(key) => key.as_ref(),
+            Self::Ed25519(key) => key.as_ref(),
+            Self::Rsa(key, _) => key.as_ref(),
+        }
+    }
+
+    fn to_spki(&self) -> rind::encoding::Spki {
+        match self {
+            Self::Ecdsa(key) => key.to_spki(),
+            Self::Ed25519(key) => key.to_spki(),
+            Self::Rsa(key, _) => key.to_spki(),
+        }
+    }
+}
+
+fn verification_algorithm(id: u32) -> Result<Verification, Misuse> {
     Ok(match id {
-        20 => &verify::ECDSA_P256_SHA256_ASN1,
-        21 => &verify::ECDSA_P256_SHA384_ASN1,
-        22 => &verify::ECDSA_P256_SHA512_ASN1,
-        23 => &verify::ECDSA_P384_SHA256_ASN1,
-        24 => &verify::ECDSA_P384_SHA384_ASN1,
-        25 => &verify::ECDSA_P384_SHA512_ASN1,
-        26 => &verify::ECDSA_P521_SHA256_ASN1,
-        27 => &verify::ECDSA_P521_SHA384_ASN1,
-        28 => &verify::ECDSA_P521_SHA512_ASN1,
-        29 => &verify::ECDSA_P256_SHA256_FIXED,
-        30 => &verify::ECDSA_P384_SHA384_FIXED,
-        31 => &verify::ECDSA_P521_SHA512_FIXED,
-        32 => &verify::ED25519,
-        _ => rsa_verification_algorithm(id)?.as_ref(),
+        20 => Verification::Ecdsa(&ecdsa::verify::P256_SHA256_ASN1),
+        21 => Verification::Ecdsa(&ecdsa::verify::P256_SHA384_ASN1),
+        22 => Verification::Ecdsa(&ecdsa::verify::P256_SHA512_ASN1),
+        23 => Verification::Ecdsa(&ecdsa::verify::P384_SHA256_ASN1),
+        24 => Verification::Ecdsa(&ecdsa::verify::P384_SHA384_ASN1),
+        25 => Verification::Ecdsa(&ecdsa::verify::P384_SHA512_ASN1),
+        26 => Verification::Ecdsa(&ecdsa::verify::P521_SHA256_ASN1),
+        27 => Verification::Ecdsa(&ecdsa::verify::P521_SHA384_ASN1),
+        28 => Verification::Ecdsa(&ecdsa::verify::P521_SHA512_ASN1),
+        29 => Verification::Ecdsa(&ecdsa::verify::P256_SHA256_FIXED),
+        30 => Verification::Ecdsa(&ecdsa::verify::P384_SHA384_FIXED),
+        31 => Verification::Ecdsa(&ecdsa::verify::P521_SHA512_FIXED),
+        32 => Verification::Ed25519,
+        _ => Verification::Rsa(rsa_verification_algorithm(id)?),
     })
 }
 
@@ -1181,7 +1222,7 @@ pub unsafe extern "C" fn rind_dart_ecdsa_key_pair_export(
             1 => write(out, pair.to_pkcs8().as_ref()),
             2 => write(out, pair.to_sec1().as_ref()),
             3 => write(out, pair.to_scalar().as_ref()),
-            4 => write(out, pair.to_spki().as_ref()),
+            4 => write(out, pair.public_key().to_spki().as_ref()),
             _ => Err(Misuse("unknown export").into()),
         }
     })
@@ -1251,7 +1292,7 @@ pub unsafe extern "C" fn rind_dart_ed25519_key_pair_export(
             1 => write(out, pair.to_pkcs8().as_ref()),
             2 => write(out, pair.to_pkcs8v1().as_ref()),
             3 => write(out, pair.to_seed().as_ref()),
-            4 => write(out, pair.to_spki().as_ref()),
+            4 => write(out, pair.public_key().to_spki().as_ref()),
             _ => Err(Misuse("unknown export").into()),
         }
     })
@@ -1318,7 +1359,7 @@ pub unsafe extern "C" fn rind_dart_rsa_key_pair_export(
         let (pair, out) = unsafe { (handle(pair), output(out, out_len)) };
         match what {
             1 => write(out, pair.to_pkcs8().as_ref()),
-            4 => write(out, pair.to_spki().as_ref()),
+            4 => write(out, pair.public_key().to_spki().as_ref()),
             _ => Err(Misuse("unknown export").into()),
         }
     })
@@ -1338,10 +1379,14 @@ pub unsafe extern "C" fn rind_dart_key_pair_public_key(
         // SAFETY: the caller passes a live handle of the type `kind` names.
         let key = unsafe {
             match kind {
-                0 => handle(pair.cast::<EcdsaKeyPair>()).public_key(),
-                1 => handle(pair.cast::<Ed25519KeyPair>()).public_key(),
+                0 => PublicKey::Ecdsa(handle(pair.cast::<EcdsaKeyPair>()).public_key().clone()),
+                1 => PublicKey::Ed25519(handle(pair.cast::<Ed25519KeyPair>()).public_key().clone()),
                 2 => {
-                    handle(pair.cast::<RsaKeyPair>()).public_key(rsa_signing_algorithm(algorithm)?)
+                    // Each signing algorithm's id is the verification
+                    // algorithm's of the same name.
+                    rsa_signing_algorithm(algorithm)?;
+                    let key = handle(pair.cast::<RsaKeyPair>()).public_key().clone();
+                    PublicKey::Rsa(key, rsa_verification_algorithm(algorithm)?)
                 }
                 _ => return Err(Misuse("unknown key pair").into()),
             }
@@ -1367,16 +1412,33 @@ pub unsafe extern "C" fn rind_dart_public_key_new(
     run(|| {
         // SAFETY: forwarded from the caller.
         let (bytes, exponent) = unsafe { (input(bytes, bytes_len), input(exponent, exponent_len)) };
-        let key = match source {
-            0 => PublicKey::new(verification_algorithm(algorithm)?, bytes),
-            1 => PublicKey::from_spki(verification_algorithm(algorithm)?, bytes),
-            2 => PublicKey::from_components(
-                rsa_verification_algorithm(algorithm)?,
-                &rind::rsa::PublicKeyComponents {
+        let key = match (source, verification_algorithm(algorithm)?) {
+            (0, Verification::Ecdsa(algorithm)) => {
+                ecdsa::PublicKey::new(algorithm, bytes).map(PublicKey::Ecdsa)
+            }
+            (1, Verification::Ecdsa(algorithm)) => {
+                ecdsa::PublicKey::from_spki(algorithm, bytes).map(PublicKey::Ecdsa)
+            }
+            (0, Verification::Ed25519) => ed25519::PublicKey::new(bytes).map(PublicKey::Ed25519),
+            (1, Verification::Ed25519) => {
+                ed25519::PublicKey::from_spki(bytes).map(PublicKey::Ed25519)
+            }
+            // PKCS#1 or SPKI, as the Dart API documents.
+            (0, Verification::Rsa(algorithm)) => rsa::PublicKey::new(bytes)
+                .or_else(|_| rsa::PublicKey::from_spki(bytes))
+                .map(|key| PublicKey::Rsa(key, algorithm)),
+            (1, Verification::Rsa(algorithm)) => {
+                rsa::PublicKey::from_spki(bytes).map(|key| PublicKey::Rsa(key, algorithm))
+            }
+            (2, Verification::Rsa(algorithm)) => {
+                let components = rsa::PublicKeyComponents {
                     n: bytes,
                     e: exponent,
-                },
-            ),
+                };
+                rsa::PublicKey::from_components(&components)
+                    .map(|key| PublicKey::Rsa(key, algorithm))
+            }
+            (2, _) => return Err(Misuse("unknown RSA verification algorithm").into()),
             _ => return Err(Misuse("unknown key source").into()),
         }?;
         // SAFETY: forwarded from the caller.
@@ -1419,7 +1481,7 @@ pub unsafe extern "C" fn rind_dart_public_key_export(
         // SAFETY: forwarded from the caller.
         let (key, out) = unsafe { (handle(key), output(out, out_len)) };
         match spki {
-            0 => write(out, key.as_ref()),
+            0 => write(out, key.encoding()),
             _ => write(out, key.to_spki().as_ref()),
         }
     })
@@ -1552,7 +1614,7 @@ pub unsafe extern "C" fn rind_dart_decrypting_key_public_key(
 ) -> isize {
     run(|| {
         // SAFETY: forwarded from the caller.
-        let public_key = unsafe { handle(key) }.public_key();
+        let public_key = unsafe { handle(key) }.public_key().clone();
         // SAFETY: forwarded from the caller.
         Ok(unsafe { store(out, public_key) })
     })
@@ -1596,7 +1658,7 @@ pub unsafe extern "C" fn rind_dart_decrypting_key_export(
         let (key, out) = unsafe { (handle(key), output(out, out_len)) };
         match what {
             1 => write(out, key.to_pkcs8().as_ref()),
-            4 => write(out, key.to_spki().as_ref()),
+            4 => write(out, key.public_key().to_spki().as_ref()),
             _ => Err(Misuse("unknown export").into()),
         }
     })
@@ -1621,7 +1683,8 @@ pub unsafe extern "C" fn rind_dart_encrypting_key_new(
         // SAFETY: forwarded from the caller.
         let (bytes, exponent) = unsafe { (input(bytes, bytes_len), input(exponent, exponent_len)) };
         let key = match source {
-            0 => EncryptingKey::new(algorithm, bytes),
+            0 => EncryptingKey::new(algorithm, bytes)
+                .or_else(|_| EncryptingKey::from_spki(algorithm, bytes)),
             2 => EncryptingKey::from_components(
                 algorithm,
                 &rsa::PublicKeyComponents {

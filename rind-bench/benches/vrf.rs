@@ -24,8 +24,8 @@ fn prove(c: &mut Criterion) {
         group.throughput(Throughput::Elements(1));
 
         group.bench_function("rind", |b| {
-            use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, SecretKey};
-            let key = SecretKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, &SEED).unwrap();
+            use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, KeyPair};
+            let key = KeyPair::from_seed(&ECVRF_EDWARDS25519_SHA512_TAI, &SEED).unwrap();
             b.iter(|| black_box(key.prove(ALPHA).unwrap()));
         });
 
@@ -47,8 +47,8 @@ fn prove(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     group.bench_function("rind", |b| {
-        use rind::vrf::{ECVRF_P256_SHA256_TAI, SecretKey};
-        let key = SecretKey::from_bytes(&ECVRF_P256_SHA256_TAI, &SEED).unwrap();
+        use rind::vrf::{ECVRF_P256_SHA256_TAI, KeyPair};
+        let key = KeyPair::from_seed(&ECVRF_P256_SHA256_TAI, &SEED).unwrap();
         b.iter(|| black_box(key.prove(ALPHA).unwrap()));
     });
 
@@ -79,12 +79,12 @@ fn p256() -> vrf_rfc9381::Ciphersuite {
 // the other's proof, so the rows time the same suites.
 #[cfg(not(target_arch = "xtensa"))]
 fn check_interop() {
-    use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI, PublicKey, SecretKey};
+    use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI, KeyPair, PublicKey};
     use vrf_rfc9381::ec::edwards25519::tai::{EdVrfEdwards25519Tai, EdVrfEdwards25519TaiSecretKey};
     use vrf_rfc9381::ec::p256::tai::{EcVrfP256Tai, EcVrfP256TaiSecretKey};
     use vrf_rfc9381::{Prover, VRF};
 
-    let ours = SecretKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, &SEED).unwrap();
+    let ours = KeyPair::from_seed(&ECVRF_EDWARDS25519_SHA512_TAI, &SEED).unwrap();
     let theirs = EdVrfEdwards25519TaiSecretKey::from_slice(&SEED).unwrap();
     let (proof, output) = ours.prove(ALPHA).unwrap();
     let pi = EdVrfEdwards25519Tai.prove(&theirs, ALPHA).unwrap();
@@ -96,7 +96,7 @@ fn check_interop() {
         PublicKey::new(&ECVRF_EDWARDS25519_SHA512_TAI, ours.public_key().as_ref()).unwrap();
     public_key.verify(ALPHA, &pi).unwrap();
 
-    let ours = SecretKey::from_bytes(&ECVRF_P256_SHA256_TAI, &SEED).unwrap();
+    let ours = KeyPair::from_seed(&ECVRF_P256_SHA256_TAI, &SEED).unwrap();
     let theirs = EcVrfP256TaiSecretKey::from_slice(&SEED).unwrap();
     let (proof, output) = ours.prove(ALPHA).unwrap();
     let pi = EcVrfP256Tai.prove(&theirs, ALPHA).unwrap();
@@ -116,8 +116,8 @@ fn verify(c: &mut Criterion) {
         group.throughput(Throughput::Elements(1));
 
         group.bench_function("rind", |b| {
-            use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, PublicKey, SecretKey};
-            let key = SecretKey::from_bytes(&ECVRF_EDWARDS25519_SHA512_TAI, &SEED).unwrap();
+            use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, KeyPair, PublicKey};
+            let key = KeyPair::from_seed(&ECVRF_EDWARDS25519_SHA512_TAI, &SEED).unwrap();
             let (proof, _) = key.prove(ALPHA).unwrap();
             let public_key =
                 PublicKey::new(&ECVRF_EDWARDS25519_SHA512_TAI, key.public_key().as_ref()).unwrap();
@@ -146,8 +146,8 @@ fn verify(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     group.bench_function("rind", |b| {
-        use rind::vrf::{ECVRF_P256_SHA256_TAI, PublicKey, SecretKey};
-        let key = SecretKey::from_bytes(&ECVRF_P256_SHA256_TAI, &SEED).unwrap();
+        use rind::vrf::{ECVRF_P256_SHA256_TAI, KeyPair, PublicKey};
+        let key = KeyPair::from_seed(&ECVRF_P256_SHA256_TAI, &SEED).unwrap();
         let (proof, _) = key.prove(ALPHA).unwrap();
         let public_key = PublicKey::new(&ECVRF_P256_SHA256_TAI, key.public_key().as_ref()).unwrap();
         b.iter(|| black_box(public_key.verify(ALPHA, proof.as_ref()).unwrap()));

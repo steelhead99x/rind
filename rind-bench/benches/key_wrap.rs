@@ -10,21 +10,18 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 // as pyca and JWE use a KEK: aws-lc-rs's `KeyWrap` consumes its key anyway.
 #[cfg(not(target_arch = "xtensa"))]
 fn bench_key_wrap(c: &mut Criterion) {
-    for (mode, padded) in [("kw", false), ("kwp", true)] {
+    use rind::key_wrap::Mode;
+    for (name, mode, padded) in [("kw", Mode::Kw, false), ("kwp", Mode::Kwp, true)] {
         for (aes, kek_len) in [("aes128", 16), ("aes256", 32)] {
             let kek = &[0x42u8; 32][..kek_len];
             let rind_kek = || rind::key_wrap::AesKek::new(rind_algorithm(kek_len), kek).unwrap();
             for (op, unwrap) in [("wrap", false), ("unwrap", true)] {
-                let mut group = c.benchmark_group(format!("{aes}-{mode}-{op}"));
+                let mut group = c.benchmark_group(format!("{aes}-{name}-{op}"));
                 for key_len in [16, 32] {
                     let size_name = format!("{key_len}B");
                     let key = &[0x24u8; 32][..key_len];
                     let mut wrapped = vec![0u8; key_len + 8];
-                    if padded {
-                        rind_kek().wrap_padded(key, &mut wrapped).unwrap();
-                    } else {
-                        rind_kek().wrap(key, &mut wrapped).unwrap();
-                    }
+                    rind_kek().wrap_key(mode, key, &mut wrapped).unwrap();
                     // aws-lc-rs's padded wrap wants 15 bytes of room
                     let mut out = vec![0u8; key_len + 15];
 
@@ -49,15 +46,10 @@ fn bench_key_wrap(c: &mut Criterion) {
                     group.bench_function(BenchmarkId::new("rind", &size_name), |b| {
                         b.iter(|| {
                             let kek = rind_kek();
-                            match (padded, unwrap) {
-                                (false, false) => kek.wrap(key, &mut out[..key_len + 8]).unwrap(),
-                                (false, true) => kek.unwrap(&wrapped, &mut out[..key_len]).unwrap(),
-                                (true, false) => {
-                                    kek.wrap_padded(key, &mut out[..key_len + 8]).unwrap()
-                                }
-                                (true, true) => {
-                                    kek.unwrap_padded(&wrapped, &mut out[..key_len]).unwrap();
-                                }
+                            if unwrap {
+                                kek.unwrap_key(mode, &wrapped, &mut out[..key_len]).unwrap();
+                            } else {
+                                kek.wrap_key(mode, key, &mut out[..key_len + 8]).unwrap();
                             }
                         });
                     });

@@ -292,7 +292,8 @@ fn mlkem768_encaps(c: &mut Criterion) {
 
         let encaps = DecapsulationKey::<MlKem768>::generate()
             .unwrap()
-            .public_key();
+            .public_key()
+            .clone();
 
         b.iter(|| {
             let encaps = EncapsulationKey::<MlKem768>::new(encaps.as_ref()).unwrap();
@@ -626,7 +627,10 @@ macro_rules! mlkem_set {
             group.bench_function("rind", |b| {
                 use rind::kem::*;
 
-                let encaps = DecapsulationKey::<$set>::generate().unwrap().public_key();
+                let encaps = DecapsulationKey::<$set>::generate()
+                    .unwrap()
+                    .public_key()
+                    .clone();
 
                 b.iter(|| {
                     let encaps = EncapsulationKey::<$set>::new(encaps.as_ref()).unwrap();

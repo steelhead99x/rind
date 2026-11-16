@@ -130,10 +130,9 @@ fn setup_sender(c: &mut Criterion) {
 
     group.bench_function("rind", |b| {
         use rind::hpke::{DHKEM_X25519_HKDF_SHA256, PrivateKey, Sender};
-        let public_key = PrivateKey::generate(&DHKEM_X25519_HKDF_SHA256)
-            .unwrap()
-            .public_key();
-        b.iter(|| black_box(Sender::new(rind_suite(), &public_key, INFO).unwrap()));
+        let private_key = PrivateKey::generate(&DHKEM_X25519_HKDF_SHA256).unwrap();
+        let public_key = private_key.public_key();
+        b.iter(|| black_box(Sender::new(rind_suite(), public_key, INFO).unwrap()));
     });
 
     group.bench_function("aws-lc-rs", |b| {
@@ -173,7 +172,7 @@ fn setup_recipient(c: &mut Criterion) {
     group.bench_function("rind", |b| {
         use rind::hpke::{DHKEM_X25519_HKDF_SHA256, PrivateKey, Recipient, Sender};
         let private_key = PrivateKey::generate(&DHKEM_X25519_HKDF_SHA256).unwrap();
-        let (enc, _) = Sender::new(rind_suite(), &private_key.public_key(), INFO).unwrap();
+        let (enc, _) = Sender::new(rind_suite(), private_key.public_key(), INFO).unwrap();
         b.iter(|| {
             black_box(Recipient::new(rind_suite(), &private_key, enc.as_ref(), INFO).unwrap())
         });
@@ -228,10 +227,9 @@ fn seal(c: &mut Criterion) {
 
     group.bench_function("rind/1350B", |b| {
         use rind::hpke::{DHKEM_X25519_HKDF_SHA256, PrivateKey, Sender};
-        let public_key = PrivateKey::generate(&DHKEM_X25519_HKDF_SHA256)
-            .unwrap()
-            .public_key();
-        let (_, mut sender) = Sender::new(rind_suite(), &public_key, INFO).unwrap();
+        let private_key = PrivateKey::generate(&DHKEM_X25519_HKDF_SHA256).unwrap();
+        let public_key = private_key.public_key();
+        let (_, mut sender) = Sender::new(rind_suite(), public_key, INFO).unwrap();
         let mut buffer = Vec::with_capacity(MESSAGE.len() + 16);
         b.iter(|| {
             buffer.clear();
@@ -287,7 +285,7 @@ fn open(c: &mut Criterion) {
         let public_key = private_key.public_key();
         b.iter_batched_ref(
             || {
-                let (enc, mut sender) = Sender::new(rind_suite(), &public_key, INFO).unwrap();
+                let (enc, mut sender) = Sender::new(rind_suite(), public_key, INFO).unwrap();
                 let mut ciphertext = MESSAGE.to_vec();
                 sender
                     .seal_in_place_append_tag(AAD, &mut ciphertext)

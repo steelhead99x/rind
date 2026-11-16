@@ -201,84 +201,191 @@ mod aes_kw;
 /// `A128KW`, `A192KW`, and `A256KW` use it, and with AES-KWP, RFC 5649,
 /// which pads keys of any length.
 ///
+/// A key-encryption key wraps in either [`Mode`](key_wrap::Mode), chosen
+/// per call.
+///
 /// ```
-/// use rind_fips::key_wrap::{AES_256, AesKek};
+/// use rind_fips::key_wrap::{AES_256, AesKek, Mode};
 ///
 /// let kek = AesKek::new(&AES_256, &[0x42; 32]).unwrap();
-///
 /// let key = [0x24; 16];
 /// let mut wrapped = [0u8; 24];
-/// kek.wrap(&key, &mut wrapped).unwrap();
-///
+/// kek.wrap_key(Mode::Kw, &key, &mut wrapped).unwrap();
 /// let mut unwrapped = [0u8; 16];
-/// kek.unwrap(&wrapped, &mut unwrapped).unwrap();
-/// assert_eq!(unwrapped, key);
+/// assert_eq!(
+///     kek.unwrap_key(Mode::Kw, &wrapped, &mut unwrapped).unwrap(),
+///     key
+/// );
 ///
 /// let key = [0x24; 20];
 /// let mut wrapped = [0u8; 32];
-/// kek.wrap_padded(&key, &mut wrapped).unwrap();
-///
+/// kek.wrap_key(Mode::Kwp, &key, &mut wrapped).unwrap();
 /// let mut unwrapped = [0u8; 24];
-/// assert_eq!(kek.unwrap_padded(&wrapped, &mut unwrapped).unwrap(), key);
+/// assert_eq!(
+///     kek.unwrap_key(Mode::Kwp, &wrapped, &mut unwrapped).unwrap(),
+///     key
+/// );
 /// ```
 pub mod key_wrap {
-    pub use crate::aes_kw::AesKek;
+    pub use crate::aes_kw::{AesKek, Mode};
     pub use crate::cipher::{AES_128, AES_192, AES_256};
 }
 
-/// Public key signatures: ECDSA on P-256, P-384, and P-521, RSA, Ed25519,
-/// and ML-DSA.
+mod signature;
+
+/// ECDSA signatures on P-256, P-384, and P-521.
 ///
-/// A key pair signs with a [`signature::sign`] algorithm, and a peer's
-/// public key is parsed for a [`signature::verify`] algorithm:
+/// A key pair signs with an [`ecdsa::sign`] algorithm, and its public key,
+/// or a peer's parsed for an [`ecdsa::verify`] algorithm, verifies:
 ///
 /// ```
 /// # fn main() -> Result<(), rind_fips::Error> {
-/// use rind_fips::signature::{EcdsaKeyPair, PublicKey, sign, verify};
+/// use rind_fips::ecdsa::{KeyPair, PublicKey, sign, verify};
 ///
-/// let key_pair = EcdsaKeyPair::generate(&sign::ECDSA_P256_SHA256_ASN1)?;
+/// let key_pair = KeyPair::generate(&sign::P256_SHA256_ASN1)?;
 /// let signature = key_pair.sign(b"hello")?;
 ///
-/// let encoded = key_pair.public_key();
-/// let public_key = PublicKey::new(&verify::ECDSA_P256_SHA256_ASN1, encoded.as_ref())?;
+/// let encoded = key_pair.public_key().as_ref();
+/// let public_key = PublicKey::new(&verify::P256_SHA256_ASN1, encoded)?;
 /// public_key.verify(b"hello", signature.as_ref())?;
 /// # Ok(())
 /// # }
 /// ```
-///
-/// RSA-PSS takes only a salt as long as its hash, which is all FIPS
-/// 140-3's tested configurations approve, so neither a custom salt length
-/// nor any-salt verification is here:
-///
-/// ```compile_fail
-/// use rind_fips::signature::verify::RSA_PSS_SHA256_ANY_SALT;
-/// ```
-///
-/// ```compile_fail
-/// use rind_fips::signature::RsaPssSaltLength;
-/// ```
-pub mod signature;
+pub mod ecdsa {
+    pub use crate::signature::ecdsa::{
+        KeyPair, PublicKey, Scalar, Signature, SigningAlgorithm, VerificationAlgorithm,
+    };
 
-/// RSA keys' sizes and components, which RSA signatures under [`signature`]
-/// take.
-///
-/// RSA-OAEP is in `rind` alone, outside the module.
+    /// Algorithms a key pair signs with.
+    ///
+    /// Each signs as the [`verify`] algorithm of the same name verifies.
+    pub mod sign {
+        pub use crate::signature::ecdsa::sign::{
+            P256_SHA256_ASN1, P256_SHA256_FIXED, P384_SHA384_ASN1, P384_SHA384_FIXED,
+            P521_SHA512_ASN1, P521_SHA512_FIXED,
+        };
+    }
+
+    /// Algorithms a public key verifies with.
+    pub mod verify {
+        pub use crate::signature::ecdsa::verify::{
+            P256_SHA256_ASN1, P256_SHA256_FIXED, P256_SHA384_ASN1, P256_SHA512_ASN1,
+            P384_SHA256_ASN1, P384_SHA384_ASN1, P384_SHA384_FIXED, P384_SHA512_ASN1,
+            P521_SHA256_ASN1, P521_SHA384_ASN1, P521_SHA512_ASN1, P521_SHA512_FIXED,
+        };
+    }
+}
+
+/// Ed25519 signatures ([RFC 8032]).
 ///
 /// ```
 /// # fn main() -> Result<(), rind_fips::Error> {
-/// use rind_fips::rsa::KeySize;
-/// use rind_fips::signature::{PublicKey, RsaKeyPair, sign, verify};
+/// use rind_fips::ed25519::{KeyPair, PublicKey};
 ///
-/// let key_pair = RsaKeyPair::generate(KeySize::Rsa2048)?;
-/// let signature = key_pair.sign(&sign::RSA_PSS_SHA256, b"hello")?;
+/// let key_pair = KeyPair::generate()?;
+/// let signature = key_pair.sign(b"hello");
 ///
-/// let public_key = PublicKey::from_spki(&verify::RSA_PSS_SHA256, key_pair.to_spki().as_ref())?;
+/// let public_key = PublicKey::new(key_pair.public_key().as_ref())?;
 /// public_key.verify(b"hello", signature.as_ref())?;
 /// # Ok(())
 /// # }
 /// ```
+///
+/// [RFC 8032]: https://www.rfc-editor.org/rfc/rfc8032.html
+pub mod ed25519 {
+    pub use crate::signature::ed25519::{KeyPair, PublicKey, Seed, Signature};
+}
+
+/// ML-DSA signatures (FIPS 204): ML-DSA-44, ML-DSA-65, and ML-DSA-87, pure
+/// with the empty context.
+///
+/// The parameter set is a type, so a key of one set fails to compile where
+/// another's is expected, and a signature is a fixed-size array.
+///
+/// ```
+/// # fn main() -> Result<(), rind_fips::Error> {
+/// use rind_fips::ml_dsa::{KeyPair, MlDsa65, PublicKey};
+///
+/// let key_pair = KeyPair::<MlDsa65>::generate()?;
+/// let signature = key_pair.sign(b"hello")?;
+///
+/// let public_key = PublicKey::<MlDsa65>::new(key_pair.public_key().as_ref())?;
+/// public_key.verify(b"hello", signature.as_ref())?;
+/// # Ok(())
+/// # }
+/// ```
+pub mod ml_dsa {
+    pub use crate::signature::ml_dsa::{
+        KeyPair, MlDsa44, MlDsa65, MlDsa87, ParameterSet, PublicKey, Seed, Signature,
+    };
+}
+
+/// RSA signatures: PKCS#1 v1.5 and PSS.
+///
+/// A [`KeyPair`](rsa::KeyPair) signs with any [`rsa::sign`] algorithm, and
+/// a [`PublicKey`](rsa::PublicKey) verifies with any [`rsa::verify`]
+/// algorithm whose floor its modulus meets: neither is bound to a padding,
+/// as TLS picks one per handshake.
+///
+/// ```
+/// # fn main() -> Result<(), rind_fips::Error> {
+/// use rind_fips::rsa::{KeyPair, KeySize, PublicKey, sign, verify};
+///
+/// let key_pair = KeyPair::generate(KeySize::Rsa2048)?;
+/// let signature = key_pair.sign(&sign::PSS_SHA256, b"hello")?;
+///
+/// let public_key = PublicKey::new(key_pair.public_key().as_ref())?;
+/// public_key.verify(&verify::PSS_SHA256, b"hello", signature.as_ref())?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// RSA-OAEP is in `rind` alone, outside the module. RSA-PSS takes only a
+/// salt as long as its hash, which is all FIPS 140-3's tested
+/// configurations approve, so neither a custom salt length nor any-salt
+/// verification is here:
+///
+/// ```compile_fail
+/// use rind_fips::rsa::verify::PSS_SHA256_ANY_SALT;
+/// ```
+///
+/// ```compile_fail
+/// use rind_fips::rsa::PssSaltLength;
+/// ```
 pub mod rsa {
-    pub use crate::signature::rsa::{KeySize, PublicKeyComponents};
+    pub use crate::signature::rsa::{
+        KeyPair, KeySize, PublicKey, PublicKeyComponents, Signature, SigningAlgorithm,
+        VerificationAlgorithm,
+    };
+
+    /// Algorithms a key pair signs with.
+    ///
+    /// They sign with moduli of an even number of bits from 2048 to 8192,
+    /// and RSA-PSS with a salt as long as its hash, the length aws-lc's
+    /// module approves.
+    pub mod sign {
+        pub use crate::signature::rsa::sign::{
+            PKCS1_SHA256, PKCS1_SHA384, PKCS1_SHA512, PSS_SHA256, PSS_SHA384, PSS_SHA512,
+        };
+    }
+
+    /// Algorithms a public key verifies with, for moduli of an even number
+    /// of bits from 2048 to 8192.
+    pub mod verify {
+        pub use crate::signature::rsa::verify::{
+            PKCS1_SHA256, PKCS1_SHA384, PKCS1_SHA512, PSS_SHA256, PSS_SHA384, PSS_SHA512,
+        };
+
+        /// Algorithms with another modulus floor, or SHA-1, for old keys
+        /// and signatures, as SP 800-131A approves them for verifying only:
+        /// a 1024-bit modulus, but none between it and 2048 bits.
+        pub mod legacy {
+            pub use crate::signature::rsa::verify::legacy::{
+                PKCS1_1024_SHA1, PKCS1_1024_SHA256, PKCS1_1024_SHA512, PKCS1_3072_SHA384,
+                PKCS1_SHA1,
+            };
+        }
+    }
 }
 
 /// Encoded keys: PKCS#8 and SEC1 private keys, and `SubjectPublicKeyInfo`

@@ -9,11 +9,10 @@ use rind::aead::{
 use rind::cipher::{
     AES_128, AES_192, AES_256, AesCbcDecryptingKey, AesCbcEncryptingKey, CbcIv, ChaCha20,
 };
-use rind::key_wrap::{self, AesKek};
+use rind::key_wrap::{self, AesKek, Mode};
+use rind::rsa::verify::legacy;
 use rind::rsa::{self, DecryptingKey, OaepAlgorithm};
-use rind::signature::verify::legacy;
-use rind::signature::{self, RsaPssSaltLength, RsaVerificationAlgorithm, sign, verify};
-use rind::{hkdf, hmac, pbkdf2};
+use rind::{ecdsa, ed25519, hkdf, hmac, ml_dsa, pbkdf2};
 use serde::Deserialize;
 
 /// The path of the Wycheproof vector file `name`, from any directory, as the
@@ -336,39 +335,39 @@ fn test_verify_ecdsa() {
     for (file, algorithm) in [
         (
             "ecdsa_secp256r1_sha256_p1363_test.json",
-            &verify::ECDSA_P256_SHA256_FIXED,
+            &ecdsa::verify::P256_SHA256_FIXED,
         ),
         (
             "ecdsa_secp256r1_sha256_test.json",
-            &verify::ECDSA_P256_SHA256_ASN1,
+            &ecdsa::verify::P256_SHA256_ASN1,
         ),
         (
             "ecdsa_secp256r1_sha512_test.json",
-            &verify::ECDSA_P256_SHA512_ASN1,
+            &ecdsa::verify::P256_SHA512_ASN1,
         ),
         (
             "ecdsa_secp384r1_sha256_test.json",
-            &verify::ECDSA_P384_SHA256_ASN1,
+            &ecdsa::verify::P384_SHA256_ASN1,
         ),
         (
             "ecdsa_secp384r1_sha384_p1363_test.json",
-            &verify::ECDSA_P384_SHA384_FIXED,
+            &ecdsa::verify::P384_SHA384_FIXED,
         ),
         (
             "ecdsa_secp384r1_sha384_test.json",
-            &verify::ECDSA_P384_SHA384_ASN1,
+            &ecdsa::verify::P384_SHA384_ASN1,
         ),
         (
             "ecdsa_secp384r1_sha512_test.json",
-            &verify::ECDSA_P384_SHA512_ASN1,
+            &ecdsa::verify::P384_SHA512_ASN1,
         ),
         (
             "ecdsa_secp521r1_sha512_p1363_test.json",
-            &verify::ECDSA_P521_SHA512_FIXED,
+            &ecdsa::verify::P521_SHA512_FIXED,
         ),
         (
             "ecdsa_secp521r1_sha512_test.json",
-            &verify::ECDSA_P521_SHA512_ASN1,
+            &ecdsa::verify::P521_SHA512_ASN1,
         ),
     ] {
         let data_file = File::open(vectors(file))
@@ -382,7 +381,7 @@ fn test_verify_ecdsa() {
             summary.group(&group);
 
             let public_key =
-                signature::PublicKey::new(algorithm, &group.public_key.uncompressed).unwrap();
+                ecdsa::PublicKey::new(algorithm, &group.public_key.uncompressed).unwrap();
             check_ecdsa_spki(algorithm, &group, &public_key);
 
             for test in group.tests {
@@ -402,12 +401,12 @@ fn test_verify_ecdsa() {
 /// The group's SPKI parses as its point, and encodes back to itself; and
 /// with its point compressed, parses as the same point.
 fn check_ecdsa_spki(
-    algorithm: &'static signature::VerificationAlgorithm,
+    algorithm: &'static ecdsa::VerificationAlgorithm,
     group: &TestGroup,
-    key: &signature::PublicKey,
+    key: &ecdsa::PublicKey,
 ) {
     let der = &group.public_key_der;
-    let from_spki = signature::PublicKey::from_spki(algorithm, der).unwrap();
+    let from_spki = ecdsa::PublicKey::from_spki(algorithm, der).unwrap();
     assert_eq!(from_spki.as_ref(), key.as_ref());
     assert_eq!(from_spki.to_spki().as_ref(), &der[..]);
 
@@ -415,7 +414,7 @@ fn check_ecdsa_spki(
     let (x, y) = point[1..].split_at(point.len() / 2);
     let compressed = [&[2 | (y[y.len() - 1] & 1)][..], x].concat();
     let compressed_der = spki(algorithm_identifier(der), &compressed);
-    let from_compressed = signature::PublicKey::from_spki(algorithm, &compressed_der);
+    let from_compressed = ecdsa::PublicKey::from_spki(algorithm, &compressed_der);
     assert_eq!(from_compressed.unwrap().as_ref(), key.as_ref());
 }
 
@@ -455,57 +454,57 @@ fn test_verify_ecdsa_digest() {
     for (file, algorithm, hash) in [
         (
             "ecdsa_secp256r1_sha256_p1363_test.json",
-            &verify::ECDSA_P256_SHA256_FIXED,
+            &ecdsa::verify::P256_SHA256_FIXED,
             &SHA256,
         ),
         (
             "ecdsa_secp256r1_sha256_test.json",
-            &verify::ECDSA_P256_SHA256_ASN1,
+            &ecdsa::verify::P256_SHA256_ASN1,
             &SHA256,
         ),
         (
             "ecdsa_secp256r1_sha512_p1363_test.json",
-            &verify::ECDSA_P256_SHA256_FIXED,
+            &ecdsa::verify::P256_SHA256_FIXED,
             &SHA512,
         ),
         (
             "ecdsa_secp256r1_sha512_test.json",
-            &verify::ECDSA_P256_SHA256_ASN1,
+            &ecdsa::verify::P256_SHA256_ASN1,
             &SHA512,
         ),
         (
             "ecdsa_secp384r1_sha256_test.json",
-            &verify::ECDSA_P384_SHA384_ASN1,
+            &ecdsa::verify::P384_SHA384_ASN1,
             &SHA256,
         ),
         (
             "ecdsa_secp384r1_sha384_p1363_test.json",
-            &verify::ECDSA_P384_SHA384_FIXED,
+            &ecdsa::verify::P384_SHA384_FIXED,
             &SHA384,
         ),
         (
             "ecdsa_secp384r1_sha384_test.json",
-            &verify::ECDSA_P384_SHA384_ASN1,
+            &ecdsa::verify::P384_SHA384_ASN1,
             &SHA384,
         ),
         (
             "ecdsa_secp384r1_sha512_p1363_test.json",
-            &verify::ECDSA_P384_SHA384_FIXED,
+            &ecdsa::verify::P384_SHA384_FIXED,
             &SHA512,
         ),
         (
             "ecdsa_secp384r1_sha512_test.json",
-            &verify::ECDSA_P384_SHA384_ASN1,
+            &ecdsa::verify::P384_SHA384_ASN1,
             &SHA512,
         ),
         (
             "ecdsa_secp521r1_sha512_p1363_test.json",
-            &verify::ECDSA_P521_SHA512_FIXED,
+            &ecdsa::verify::P521_SHA512_FIXED,
             &SHA512,
         ),
         (
             "ecdsa_secp521r1_sha512_test.json",
-            &verify::ECDSA_P521_SHA512_ASN1,
+            &ecdsa::verify::P521_SHA512_ASN1,
             &SHA512,
         ),
     ] {
@@ -520,7 +519,7 @@ fn test_verify_ecdsa_digest() {
             summary.group(&group);
 
             let public_key =
-                signature::PublicKey::new(algorithm, &group.public_key.uncompressed).unwrap();
+                ecdsa::PublicKey::new(algorithm, &group.public_key.uncompressed).unwrap();
 
             for test in group.tests {
                 summary.start(&test);
@@ -710,9 +709,11 @@ fn test_aes_wrap() {
             let kek = AesKek::new(algorithm, &test.key).unwrap();
 
             let mut key = vec![0xaa; test.ct.len().saturating_sub(8)];
-            let result = kek.unwrap(&test.ct, &mut key);
+            let result = kek
+                .unwrap_key(Mode::Kw, &test.ct, &mut key)
+                .map(|key| key.to_vec());
             match (test.result, result) {
-                (ExpectedResult::Valid, Ok(())) => assert_eq!(key, test.msg),
+                (ExpectedResult::Valid, Ok(key)) => assert_eq!(key, test.msg),
                 // RFC 3394 wraps no key shorter than 16 bytes, which the
                 // acceptable tests are.
                 (
@@ -725,7 +726,7 @@ fn test_aes_wrap() {
             }
 
             let mut wrapped = vec![0u8; test.msg.len() + 8];
-            let result = kek.wrap(&test.msg, &mut wrapped);
+            let result = kek.wrap_key(Mode::Kw, &test.msg, &mut wrapped);
             let wrappable = test.msg.len() >= 16 && test.msg.len().is_multiple_of(8);
             match (test.result, result) {
                 (ExpectedResult::Valid, Ok(())) => assert_eq!(wrapped, test.ct),
@@ -763,7 +764,7 @@ fn test_aes_kwp() {
 
             let mut key = vec![0xaa; test.ct.len().saturating_sub(8)];
             let result = kek
-                .unwrap_padded(&test.ct, &mut key)
+                .unwrap_key(Mode::Kwp, &test.ct, &mut key)
                 .map(|key| key.to_vec());
             match (test.result, result) {
                 (ExpectedResult::Valid, Ok(key)) => assert_eq!(key, test.msg),
@@ -774,7 +775,7 @@ fn test_aes_kwp() {
             }
 
             let mut wrapped = vec![0u8; test.msg.len().next_multiple_of(8) + 8];
-            let result = kek.wrap_padded(&test.msg, &mut wrapped);
+            let result = kek.wrap_key(Mode::Kwp, &test.msg, &mut wrapped);
             match (test.result, result) {
                 (ExpectedResult::Valid, Ok(())) => assert_eq!(wrapped, test.ct),
                 // a key wrapped and then altered
@@ -814,65 +815,57 @@ fn test_rsa_pkcs1_verify() {
             summary.group(&group);
 
             // Each algorithm for this hash, with the smallest modulus it takes.
-            let algorithms: &[(&'static RsaVerificationAlgorithm, usize)] = match group.sha.as_ref()
-            {
-                "SHA-256" => &[
-                    (&verify::RSA_PKCS1_SHA256, 2048),
-                    (&legacy::RSA_PKCS1_1024_SHA256, 1024),
-                ],
-                "SHA-384" => &[
-                    (&verify::RSA_PKCS1_SHA384, 2048),
-                    (&legacy::RSA_PKCS1_3072_SHA384, 3072),
-                ],
-                "SHA-512" => &[
-                    (&verify::RSA_PKCS1_SHA512, 2048),
-                    (&legacy::RSA_PKCS1_1024_SHA512, 1024),
-                ],
-                other => panic!("unhandled sha {other:?}"),
-            };
+            let algorithms: &[(&'static rsa::VerificationAlgorithm, usize)] =
+                match group.sha.as_ref() {
+                    "SHA-256" => &[
+                        (&rsa::verify::PKCS1_SHA256, 2048),
+                        (&legacy::PKCS1_1024_SHA256, 1024),
+                    ],
+                    "SHA-384" => &[
+                        (&rsa::verify::PKCS1_SHA384, 2048),
+                        (&legacy::PKCS1_3072_SHA384, 3072),
+                    ],
+                    "SHA-512" => &[
+                        (&rsa::verify::PKCS1_SHA512, 2048),
+                        (&legacy::PKCS1_1024_SHA512, 1024),
+                    ],
+                    other => panic!("unhandled sha {other:?}"),
+                };
             let n = group.public_key.modulus.strip_prefix(&[0]).unwrap();
-            let components = rind::rsa::PublicKeyComponents {
+            let components = rsa::PublicKeyComponents {
                 n,
                 e: &group.public_key.public_exponent[..],
             };
 
+            let key = rsa::PublicKey::new(&group.public_key_asn).unwrap();
+            let from_components = rsa::PublicKey::from_components(&components).unwrap();
+            assert_eq!(from_components.as_ref(), key.as_ref());
+            let from_spki = rsa::PublicKey::from_spki(&group.public_key_der).unwrap();
+            assert_eq!(from_spki.as_ref(), key.as_ref());
+            assert_eq!(from_spki.to_spki().as_ref(), &group.public_key_der[..]);
+            // Neither parser takes the other's encoding.
+            assert!(rsa::PublicKey::from_spki(&group.public_key_asn).is_err());
+            assert!(rsa::PublicKey::new(&group.public_key_der).is_err());
+
+            // The modulus with its sign byte is not minimal.
+            let signed = rsa::PublicKeyComponents {
+                n: &group.public_key.modulus[..],
+                e: components.e,
+            };
+            assert!(matches!(
+                rsa::PublicKey::from_components(&signed),
+                Err(Error::KeyRejected(_))
+            ));
+
             for &(algorithm, min_bits) in algorithms {
-                let key = signature::PublicKey::new(algorithm, &group.public_key_asn);
-                if group.key_size < min_bits {
-                    assert!(matches!(key, Err(Error::KeyRejected(_))));
-                    assert!(matches!(
-                        signature::PublicKey::from_components(algorithm, &components),
-                        Err(Error::KeyRejected(_))
-                    ));
-                    continue;
-                }
-                let key = key.unwrap();
-                let from_components =
-                    signature::PublicKey::from_components(algorithm, &components).unwrap();
-                assert_eq!(from_components.as_ref(), key.as_ref());
-                let from_spki =
-                    signature::PublicKey::new(algorithm, &group.public_key_der).unwrap();
-                assert_eq!(from_spki.as_ref(), key.as_ref());
-                let from_spki =
-                    signature::PublicKey::from_spki(algorithm, &group.public_key_der).unwrap();
-                assert_eq!(from_spki.as_ref(), key.as_ref());
-                assert_eq!(from_spki.to_spki().as_ref(), &group.public_key_der[..]);
-                assert!(signature::PublicKey::from_spki(algorithm, &group.public_key_asn).is_err());
-
-                // The modulus with its sign byte is not minimal.
-                let signed = rind::rsa::PublicKeyComponents {
-                    n: &group.public_key.modulus[..],
-                    e: components.e,
-                };
-                assert!(matches!(
-                    signature::PublicKey::from_components(algorithm, &signed),
-                    Err(Error::KeyRejected(_))
-                ));
-
                 for test in &group.tests {
                     summary.start(test);
 
-                    let result = key.verify(&test.msg, &test.sig);
+                    let result = key.verify(algorithm, &test.msg, &test.sig);
+                    if group.key_size < min_bits {
+                        assert!(matches!(result, Err(Error::KeyRejected(_))));
+                        continue;
+                    }
                     match (test.result, &result) {
                         (ExpectedResult::Valid, Ok(())) => {}
                         (
@@ -881,7 +874,10 @@ fn test_rsa_pkcs1_verify() {
                         ) => {}
                         _ => panic!("expected {:?} got {:?}", test.result, result.err()),
                     }
-                    assert_eq!(from_components.verify(&test.msg, &test.sig), result);
+                    assert_eq!(
+                        from_components.verify(algorithm, &test.msg, &test.sig),
+                        result
+                    );
                 }
             }
         }
@@ -908,46 +904,45 @@ fn test_rsa_pkcs1_legacy_verify() {
             summary.group(&group);
 
             // Each algorithm for this hash, with the smallest modulus it takes.
-            let algorithms: &[(&'static RsaVerificationAlgorithm, usize)] = match group.sha.as_ref()
-            {
-                "SHA-1" => &[
-                    (&legacy::RSA_PKCS1_1024_SHA1, 1024),
-                    (&legacy::RSA_PKCS1_SHA1, 2048),
-                ],
-                "SHA-256" => &[
-                    (&legacy::RSA_PKCS1_1024_SHA256, 1024),
-                    (&verify::RSA_PKCS1_SHA256, 2048),
-                ],
-                "SHA-384" => &[
-                    (&verify::RSA_PKCS1_SHA384, 2048),
-                    (&legacy::RSA_PKCS1_3072_SHA384, 3072),
-                ],
-                "SHA-512" => &[
-                    (&legacy::RSA_PKCS1_1024_SHA512, 1024),
-                    (&verify::RSA_PKCS1_SHA512, 2048),
-                ],
-                other => {
-                    summary.skipped(&format!("pkcs1 verification with {other} not supported"));
-                    continue;
-                }
-            };
+            let algorithms: &[(&'static rsa::VerificationAlgorithm, usize)] =
+                match group.sha.as_ref() {
+                    "SHA-1" => &[
+                        (&legacy::PKCS1_1024_SHA1, 1024),
+                        (&legacy::PKCS1_SHA1, 2048),
+                    ],
+                    "SHA-256" => &[
+                        (&legacy::PKCS1_1024_SHA256, 1024),
+                        (&rsa::verify::PKCS1_SHA256, 2048),
+                    ],
+                    "SHA-384" => &[
+                        (&rsa::verify::PKCS1_SHA384, 2048),
+                        (&legacy::PKCS1_3072_SHA384, 3072),
+                    ],
+                    "SHA-512" => &[
+                        (&legacy::PKCS1_1024_SHA512, 1024),
+                        (&rsa::verify::PKCS1_SHA512, 2048),
+                    ],
+                    other => {
+                        summary.skipped(&format!("pkcs1 verification with {other} not supported"));
+                        continue;
+                    }
+                };
 
+            let key = rsa::PublicKey::new(&group.key_asn).unwrap();
             for &(algorithm, min_bits) in algorithms {
-                let key = signature::PublicKey::new(algorithm, &group.key_asn);
-                if group.key_size < min_bits {
-                    assert!(matches!(key, Err(Error::KeyRejected(_))));
-                    continue;
-                }
-                let key = key.unwrap();
-
                 for test in &group.tests {
                     summary.start(test);
 
+                    let result = key.verify(algorithm, &test.msg, &test.sig);
+                    if group.key_size < min_bits {
+                        assert!(matches!(result, Err(Error::KeyRejected(_))));
+                        continue;
+                    }
                     // Every case is valid or acceptable (a small modulus or
                     // a weak hash), and binds its message.
-                    key.verify(&test.msg, &test.sig).unwrap();
+                    result.unwrap();
                     assert_eq!(
-                        key.verify(&[&test.msg[..], b"!"].concat(), &test.sig),
+                        key.verify(algorithm, &[&test.msg[..], b"!"].concat(), &test.sig),
                         Err(Error::BadSignature)
                     );
                 }
@@ -975,16 +970,16 @@ fn test_rsa_pkcs1_sign() {
             summary.group(&group);
 
             let algorithm = match group.sha.as_ref() {
-                "SHA-256" => &sign::RSA_PKCS1_SHA256,
-                "SHA-384" => &sign::RSA_PKCS1_SHA384,
-                "SHA-512" => &sign::RSA_PKCS1_SHA512,
+                "SHA-256" => &rsa::sign::PKCS1_SHA256,
+                "SHA-384" => &rsa::sign::PKCS1_SHA384,
+                "SHA-512" => &rsa::sign::PKCS1_SHA512,
                 other => {
                     summary.skipped(&format!("pkcs1 signing with {other} not supported"));
                     continue;
                 }
             };
 
-            let key = signature::RsaKeyPair::from_pkcs8(&group.private_key_pkcs8).unwrap();
+            let key = rsa::KeyPair::from_pkcs8(&group.private_key_pkcs8).unwrap();
 
             for test in group.tests {
                 summary.start(&test);
@@ -1087,19 +1082,19 @@ fn test_rsa_pss_verify() {
         for group in tests.groups {
             summary.group(&group);
 
-            type Pss = fn(RsaPssSaltLength) -> RsaVerificationAlgorithm;
+            type Pss = fn(rsa::PssSaltLength) -> rsa::VerificationAlgorithm;
             let (pss, any_salt): (Pss, _) = match (group.sha.as_ref(), group.mgf_sha.as_ref()) {
                 ("SHA-256", "SHA-256") => (
-                    RsaVerificationAlgorithm::pss_sha256,
-                    &verify::RSA_PSS_SHA256_ANY_SALT,
+                    rsa::VerificationAlgorithm::pss_sha256,
+                    &rsa::verify::PSS_SHA256_ANY_SALT,
                 ),
                 ("SHA-384", "SHA-384") => (
-                    RsaVerificationAlgorithm::pss_sha384,
-                    &verify::RSA_PSS_SHA384_ANY_SALT,
+                    rsa::VerificationAlgorithm::pss_sha384,
+                    &rsa::verify::PSS_SHA384_ANY_SALT,
                 ),
                 ("SHA-512", "SHA-512") => (
-                    RsaVerificationAlgorithm::pss_sha512,
-                    &verify::RSA_PSS_SHA512_ANY_SALT,
+                    rsa::VerificationAlgorithm::pss_sha512,
+                    &rsa::verify::PSS_SHA512_ANY_SALT,
                 ),
                 other => {
                     summary.skipped(&format!(
@@ -1111,22 +1106,21 @@ fn test_rsa_pss_verify() {
             };
             // Loaded from its SPKI; the PKCS#1 tests load the raw key.
             let spki = &group.public_key_der;
-            let salt = |len: usize| pss(RsaPssSaltLength::Custom(len.try_into().unwrap()));
-            let key = signature::PublicKey::new(&salt(group.salt_len), spki).unwrap();
-            let any_salt_key = signature::PublicKey::new(any_salt, spki).unwrap();
+            let salt = |len: usize| pss(rsa::PssSaltLength::Custom(len.try_into().unwrap()));
+            let key = rsa::PublicKey::from_spki(spki).unwrap();
+            let algorithm = salt(group.salt_len);
             // The hash-length salt has its own constant, which must agree.
-            let hash_salt_key = match (group.sha.as_ref(), group.salt_len) {
-                ("SHA-256", 32) => Some(&verify::RSA_PSS_SHA256),
-                ("SHA-384", 48) => Some(&verify::RSA_PSS_SHA384),
-                ("SHA-512", 64) => Some(&verify::RSA_PSS_SHA512),
+            let hash_salt = match (group.sha.as_ref(), group.salt_len) {
+                ("SHA-256", 32) => Some(&rsa::verify::PSS_SHA256),
+                ("SHA-384", 48) => Some(&rsa::verify::PSS_SHA384),
+                ("SHA-512", 64) => Some(&rsa::verify::PSS_SHA512),
                 _ => None,
-            }
-            .map(|algorithm| signature::PublicKey::new(algorithm, spki).unwrap());
+            };
 
             for test in group.tests {
                 summary.start(&test);
 
-                let result = key.verify(&test.msg, &test.sig);
+                let result = key.verify(&algorithm, &test.msg, &test.sig);
                 match (test.result, &result) {
                     (ExpectedResult::Valid, Ok(())) => {}
                     (
@@ -1135,8 +1129,8 @@ fn test_rsa_pss_verify() {
                     ) => {}
                     _ => panic!("expected {:?} got {:?}", test.result, result.err()),
                 }
-                if let Some(hash_salt_key) = &hash_salt_key {
-                    assert_eq!(hash_salt_key.verify(&test.msg, &test.sig), result);
+                if let Some(hash_salt) = hash_salt {
+                    assert_eq!(key.verify(hash_salt, &test.msg, &test.sig), result);
                 }
 
                 // These are well formed with another salt length, which
@@ -1148,13 +1142,10 @@ fn test_rsa_pss_verify() {
                 {
                     Some(len) => {
                         let len = len.parse().unwrap();
-                        signature::PublicKey::new(&salt(len), spki)
-                            .unwrap()
-                            .verify(&test.msg, &test.sig)
-                            .unwrap();
-                        any_salt_key.verify(&test.msg, &test.sig).unwrap();
+                        key.verify(&salt(len), &test.msg, &test.sig).unwrap();
+                        key.verify(any_salt, &test.msg, &test.sig).unwrap();
                     }
-                    None => assert_eq!(any_salt_key.verify(&test.msg, &test.sig), result),
+                    None => assert_eq!(key.verify(any_salt, &test.msg, &test.sig), result),
                 }
             }
         }
@@ -1181,7 +1172,7 @@ fn test_blind_rsa_verify() {
                 (group.sha.as_ref(), group.mgf_sha.as_ref(), group.salt_len),
                 ("SHA-384", "SHA-384", 48)
             );
-            let components = rind::rsa::PublicKeyComponents {
+            let components = rsa::PublicKeyComponents {
                 n: group.public_key.modulus.strip_prefix(&[0]).unwrap(),
                 e: &group.public_key.public_exponent[..],
             };
@@ -1216,8 +1207,8 @@ fn test_ed25519_verify() {
     for group in tests.groups {
         summary.group(&group);
 
-        let key = signature::PublicKey::new(&verify::ED25519, &group.public_key.pk);
-        let from_spki = signature::PublicKey::from_spki(&verify::ED25519, &group.public_key_der);
+        let key = ed25519::PublicKey::new(&group.public_key.pk);
+        let from_spki = ed25519::PublicKey::from_spki(&group.public_key_der);
         match (&key, from_spki) {
             (Ok(key), Ok(from_spki)) => {
                 assert_eq!(from_spki.as_ref(), key.as_ref());
@@ -1453,16 +1444,12 @@ fn ml_dsa_pkcs8(arc: u8, private_key: &[u8]) -> Vec<u8> {
 
 /// One parameter set's files: its seed and expanded signing keys, and its
 /// verification tests.
-fn ml_dsa_wycheproof<P: sign::MlDsaParameterSet>(
-    [seed, noseed, verify]: [&str; 3],
-    algorithm: &'static signature::VerificationAlgorithm,
-    arc: u8,
-) {
+fn ml_dsa_wycheproof<P: ml_dsa::ParameterSet>([seed, noseed, verify]: [&str; 3], arc: u8) {
     let mut verified = 0;
     for group in ml_dsa_file(verify).groups {
         let public_key = hex::decode(group.public_key.unwrap()).unwrap();
-        let key = signature::PublicKey::new(algorithm, &public_key);
-        let from_spki = signature::PublicKey::from_spki(algorithm, &group.public_key_der);
+        let key = ml_dsa::PublicKey::<P>::new(&public_key);
+        let from_spki = ml_dsa::PublicKey::<P>::from_spki(&group.public_key_der);
         match (&key, from_spki) {
             (Ok(key), Ok(from_spki)) => {
                 assert_eq!(from_spki.as_ref(), key.as_ref());
@@ -1491,12 +1478,10 @@ fn ml_dsa_wycheproof<P: sign::MlDsaParameterSet>(
 
     let mut signed = 0;
     for group in ml_dsa_file(seed).groups {
-        let key = sign::MlDsaKeyPair::<P>::from_seed(&group.private_seed);
+        let key = ml_dsa::KeyPair::<P>::from_seed(&group.private_seed);
         let from_pkcs8 = match group.private_key_pkcs8.is_empty() {
             true => None,
-            false => Some(sign::MlDsaKeyPair::<P>::from_pkcs8(
-                &group.private_key_pkcs8,
-            )),
+            false => Some(ml_dsa::KeyPair::<P>::from_pkcs8(&group.private_key_pkcs8)),
         };
         let Some(public_key) = group.public_key else {
             assert!(key.is_err());
@@ -1513,7 +1498,7 @@ fn ml_dsa_wycheproof<P: sign::MlDsaParameterSet>(
             assert_eq!(key.to_pkcs8().as_ref(), group.private_key_pkcs8);
         }
 
-        let verifier = signature::PublicKey::new(algorithm, &public_key).unwrap();
+        let verifier = ml_dsa::PublicKey::<P>::new(&public_key).unwrap();
         for test in group.tests.iter().filter(|test| test.pure()) {
             // Signing is hedged, so check that the signature verifies rather
             // than its bytes.
@@ -1532,7 +1517,7 @@ fn ml_dsa_wycheproof<P: sign::MlDsaParameterSet>(
 
     for group in ml_dsa_file(noseed).groups {
         let der = ml_dsa_pkcs8(arc, &der(0x04, &group.private_key));
-        let Ok(key) = sign::MlDsaKeyPair::<P>::from_pkcs8(&der) else {
+        let Ok(key) = ml_dsa::KeyPair::<P>::from_pkcs8(&der) else {
             // An inconsistent or misshapen key.
             for test in &group.tests {
                 assert_eq!(test.result, ExpectedResult::Invalid, "tcId {}", test.id);
@@ -1549,31 +1534,28 @@ fn ml_dsa_wycheproof<P: sign::MlDsaParameterSet>(
 
 #[test]
 fn test_ml_dsa() {
-    ml_dsa_wycheproof::<sign::MlDsa44>(
+    ml_dsa_wycheproof::<ml_dsa::MlDsa44>(
         [
             "mldsa_44_sign_seed_test.json",
             "mldsa_44_sign_noseed_test.json",
             "mldsa_44_verify_test.json",
         ],
-        &verify::ML_DSA_44,
         17,
     );
-    ml_dsa_wycheproof::<sign::MlDsa65>(
+    ml_dsa_wycheproof::<ml_dsa::MlDsa65>(
         [
             "mldsa_65_sign_seed_test.json",
             "mldsa_65_sign_noseed_test.json",
             "mldsa_65_verify_test.json",
         ],
-        &verify::ML_DSA_65,
         18,
     );
-    ml_dsa_wycheproof::<sign::MlDsa87>(
+    ml_dsa_wycheproof::<ml_dsa::MlDsa87>(
         [
             "mldsa_87_sign_seed_test.json",
             "mldsa_87_sign_noseed_test.json",
             "mldsa_87_verify_test.json",
         ],
-        &verify::ML_DSA_87,
         19,
     );
 }

@@ -51,7 +51,7 @@ fn key_pair_pkcs8_v1_only() {
         env!("CARGO_MANIFEST_DIR")
     ))
     .unwrap();
-    let mut pkcs8 = rind::signature::RsaKeyPair::from_pkcs1(&der)
+    let mut pkcs8 = rind::rsa::KeyPair::from_pkcs1(&der)
         .unwrap()
         .to_pkcs8()
         .as_ref()
@@ -59,7 +59,7 @@ fn key_pair_pkcs8_v1_only() {
     assert!(signature::RsaKeyPair::from_pkcs8(&pkcs8).is_ok());
     assert_eq!(pkcs8[4..7], [0x02, 0x01, 0x00]);
     pkcs8[6] = 1;
-    assert!(rind::signature::RsaKeyPair::from_pkcs8(&pkcs8).is_ok());
+    assert!(rind::rsa::KeyPair::from_pkcs8(&pkcs8).is_ok());
     assert_eq!(
         signature::RsaKeyPair::from_pkcs8(&pkcs8)
             .err()
