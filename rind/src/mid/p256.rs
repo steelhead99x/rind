@@ -754,7 +754,8 @@ impl JacobianMontPoint {
 
         // The first point is infinity, with a zero `z`, when its digit is zero.
         let (digit, sign) = windows[0];
-        point.select_w7(&generator_table()[0], digit, sign);
+        let table = generator_table();
+        point.select_w7(&table[0], digit, sign);
         let mut result = Self::from_affine(&point);
         low::bignum_mux(
             digit.into(),
@@ -766,7 +767,7 @@ impl JacobianMontPoint {
         #[allow(clippy::needless_range_loop)]
         for w in 1..37 {
             let (digit, sign) = windows[w];
-            point.select_w7(&generator_table()[w], digit, sign);
+            point.select_w7(&table[w], digit, sign);
             low::p256_point_add_affine(&mut result.xyz, &point.xy);
         }
         result

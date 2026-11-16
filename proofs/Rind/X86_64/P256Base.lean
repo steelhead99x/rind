@@ -31,8 +31,8 @@ namespace P256Base
 
 open P256
 
-/-- `generator_table` returns the static. Aeneas binds that call, and the
-Booth loop receives the array as its first argument. -/
+/-- `generator_table` returns the static. `base_multiply` binds it once and
+passes it to the Booth loop. -/
 @[step]
 theorem generator_table_spec :
     mid.p256.generator_table ⦃ t => t = mid.p256.precomp.CURVE_GENERATOR_PRECOMP ⦄ := by
@@ -600,7 +600,7 @@ theorem loop_spec (hc : RunsSelect) (X : p256Curve.Point) (hX : nist.fromM X = p
     (iter : core.ops.range.Range Usize) (hs1 : 1 ≤ iter.start.val) (hs : iter.start.val ≤ 37)
     (he : iter.end.val = 37) (point : mid.p256.AffineMontPoint) (a : Std.Array U64 12#usize)
     (ha : p256Represents (gpt X (acc (digit k) iter.start.val)) (tripleNat a.val)) :
-    mid.p256.JacobianMontPoint.base_multiply_loop table iter windows point a ⦃ r =>
+    mid.p256.JacobianMontPoint.base_multiply_loop iter windows point table a ⦃ r =>
       p256Represents (gpt X (acc (digit k) 37)) (tripleNat r.val) ⦄ := by
   have hk256 : k < 2 ^ 256 := lt_trans hk (by simp [n256])
   unfold mid.p256.JacobianMontPoint.base_multiply_loop
