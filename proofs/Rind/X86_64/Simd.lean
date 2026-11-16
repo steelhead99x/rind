@@ -249,3 +249,121 @@ def core.core_arch.x86.avx2._mm256_and_si256 (a b : core.core_arch.x86.__m256i) 
 def core.core_arch.x86.avx2._mm256_xor_si256 (a b : core.core_arch.x86.__m256i) :
     Result core.core_arch.x86.__m256i :=
   ok (a ^^^ b)
+
+/-! ## 512-bit vectors
+
+`__m512i` is its 512 bits, 128-bit lane 0 lowest. VAES, VPCLMULQDQ, and the
+byte shuffle and 32-bit operations below act on each 128-bit lane as their
+128-bit forms above do, which is how Intel's manual defines them. -/
+
+/-- `__m512i`: 512 bits, 128-bit lane 0 lowest. -/
+@[reducible] def core.core_arch.x86.__m512i : Type := BitVec 512
+
+namespace rind.simd
+
+/-- A 512-bit vector's 128-bit lane `j`. -/
+def lane128 (x : BitVec 512) (j : Nat) : BitVec 128 := x.extractLsb' (128 * j) 128
+
+/-- The 512-bit vector of four 128-bit lanes, lane 0 lowest. -/
+def ofLanes128 (f : Nat → BitVec 128) : BitVec 512 := f 3 ++ f 2 ++ f 1 ++ f 0
+
+/-- `VPTERNLOG`'s bitwise function: bit `i` is the bit of `imm` that bits `i`
+of `a`, `b`, and `c` index, `a`'s the highest, as the union of the minterms
+`imm` selects. -/
+def ternary {w : Nat} (imm : BitVec 8) (a b c : BitVec w) : BitVec w :=
+  let t (k : Nat) (m : BitVec w) := if imm.getLsbD k then m else 0
+  t 0 (~~~a &&& ~~~b &&& ~~~c) ||| t 1 (~~~a &&& ~~~b &&& c) ||| t 2 (~~~a &&& b &&& ~~~c) |||
+    t 3 (~~~a &&& b &&& c) ||| t 4 (a &&& ~~~b &&& ~~~c) ||| t 5 (a &&& ~~~b &&& c) |||
+    t 6 (a &&& b &&& ~~~c) ||| t 7 (a &&& b &&& c)
+
+end rind.simd
+
+open rind.simd
+
+/-- `_mm512_setzero_si512`. -/
+def core.core_arch.x86.avx512f._mm512_setzero_si512 : Result core.core_arch.x86.__m512i :=
+  ok 0
+
+/-- `_mm512_xor_epi32`, `VPXORD`. -/
+def core.core_arch.x86.avx512f._mm512_xor_epi32 (a b : core.core_arch.x86.__m512i) :
+    Result core.core_arch.x86.__m512i :=
+  ok (a ^^^ b)
+
+/-- `_mm512_xor_epi64`, `VPXORQ`. -/
+def core.core_arch.x86.avx512f._mm512_xor_epi64 (a b : core.core_arch.x86.__m512i) :
+    Result core.core_arch.x86.__m512i :=
+  ok (a ^^^ b)
+
+/-- `_mm512_add_epi32`, `VPADDD`: each 32-bit lane's sum, wrapping. -/
+def core.core_arch.x86.avx512f._mm512_add_epi32 (a b : core.core_arch.x86.__m512i) :
+    Result core.core_arch.x86.__m512i :=
+  ok (ofLanes128 fun j => ofLanes32 fun i => lane32 (lane128 a j) i + lane32 (lane128 b j) i)
+
+/-- `_mm512_inserti32x4::<IMM8>`, `VINSERTI32X4`: `a` with its 128-bit lane
+that bits 0 and 1 of `IMM8` select replaced by `b`. -/
+def core.core_arch.x86.avx512f._mm512_inserti32x4 (IMM8 : Std.I32) (a : core.core_arch.x86.__m512i)
+    (b : core.core_arch.x86.__m128i) : Result core.core_arch.x86.__m512i :=
+  ok (ofLanes128 fun j => if j = IMM8.bv.toNat % 4 then b else lane128 a j)
+
+/-- `_mm512_extracti32x4_epi32::<IMM8>`, `VEXTRACTI32X4`: the 128-bit lane that
+bits 0 and 1 of `IMM8` select. -/
+def core.core_arch.x86.avx512f._mm512_extracti32x4_epi32 (IMM8 : Std.I32)
+    (a : core.core_arch.x86.__m512i) : Result core.core_arch.x86.__m128i :=
+  ok (lane128 a (IMM8.bv.toNat % 4))
+
+/-- `_mm512_broadcast_i32x4`, `VBROADCASTI32X4`: `a` in each 128-bit lane. -/
+def core.core_arch.x86.avx512f._mm512_broadcast_i32x4 (a : core.core_arch.x86.__m128i) :
+    Result core.core_arch.x86.__m512i :=
+  ok (ofLanes128 fun _ => a)
+
+/-- `_mm512_shuffle_epi32::<IMM8>`, `VPSHUFD`: `PSHUFD` in each 128-bit lane. -/
+def core.core_arch.x86.avx512f._mm512_shuffle_epi32 (IMM8 : Std.I32) (a : core.core_arch.x86.__m512i) :
+    Result core.core_arch.x86.__m512i :=
+  ok (ofLanes128 fun j => ofLanes32 fun i => lane32 (lane128 a j) (IMM8.bv.toNat / 4 ^ i % 4))
+
+/-- `_mm512_ternarylogic_epi32::<IMM8>`, `VPTERNLOGD`: `ternary` of the low
+byte of `IMM8`. -/
+def core.core_arch.x86.avx512f._mm512_ternarylogic_epi32 (IMM8 : Std.I32)
+    (a b c : core.core_arch.x86.__m512i) : Result core.core_arch.x86.__m512i :=
+  ok (ternary (IMM8.bv.setWidth 8) a b c)
+
+/-- `_mm512_ternarylogic_epi64::<IMM8>`, `VPTERNLOGQ`: `ternary` of the low
+byte of `IMM8`. -/
+def core.core_arch.x86.avx512f._mm512_ternarylogic_epi64 (IMM8 : Std.I32)
+    (a b c : core.core_arch.x86.__m512i) : Result core.core_arch.x86.__m512i :=
+  ok (ternary (IMM8.bv.setWidth 8) a b c)
+
+/-- `_mm_ternarylogic_epi32::<IMM8>`, `VPTERNLOGD` on 128 bits: `ternary` of
+the low byte of `IMM8`. -/
+def core.core_arch.x86.avx512f._mm_ternarylogic_epi32 (IMM8 : Std.I32)
+    (a b c : core.core_arch.x86.__m128i) : Result core.core_arch.x86.__m128i :=
+  ok (ternary (IMM8.bv.setWidth 8) a b c)
+
+/-- `_mm512_shuffle_epi8`, `VPSHUFB`: `PSHUFB` in each 128-bit lane. -/
+def core.core_arch.x86.avx512bw._mm512_shuffle_epi8 (a b : core.core_arch.x86.__m512i) :
+    Result core.core_arch.x86.__m512i :=
+  ok (ofLanes128 fun j => ofBytes fun i =>
+    if (byte (lane128 b j) i).msb then 0 else byte (lane128 a j) ((byte (lane128 b j) i).toNat % 16))
+
+/-- `_mm512_maskz_mov_epi8`, `VMOVDQU8` zero-masked: byte `i` is `a`'s where
+bit `i` of `k` is set, and zero where not. -/
+def core.core_arch.x86.avx512bw._mm512_maskz_mov_epi8 (k : Std.U64) (a : core.core_arch.x86.__m512i) :
+    Result core.core_arch.x86.__m512i :=
+  ok (ofLanes128 fun j => ofBytes fun i => if k.bv.getLsbD (16 * j + i) then byte (lane128 a j) i else 0)
+
+/-- `_mm512_aesenc_epi128`, `VAESENC`: `AESENC` in each 128-bit lane. -/
+def core.core_arch.x86.vaes._mm512_aesenc_epi128 (a roundKey : core.core_arch.x86.__m512i) :
+    Result core.core_arch.x86.__m512i :=
+  ok (ofLanes128 fun j => mixColumns (subBytes (shiftRows (lane128 a j))) ^^^ lane128 roundKey j)
+
+/-- `_mm512_aesenclast_epi128`, `VAESENCLAST`: `AESENCLAST` in each 128-bit lane. -/
+def core.core_arch.x86.vaes._mm512_aesenclast_epi128 (a roundKey : core.core_arch.x86.__m512i) :
+    Result core.core_arch.x86.__m512i :=
+  ok (ofLanes128 fun j => subBytes (shiftRows (lane128 a j)) ^^^ lane128 roundKey j)
+
+/-- `_mm512_clmulepi64_epi128::<IMM8>`, `VPCLMULQDQ`: `PCLMULQDQ` in each
+128-bit lane. -/
+def core.core_arch.x86.vpclmulqdq._mm512_clmulepi64_epi128 (IMM8 : Std.I32)
+    (a b : core.core_arch.x86.__m512i) : Result core.core_arch.x86.__m512i :=
+  ok (ofLanes128 fun j => clmul (lane64 (lane128 a j) (if IMM8.bv.getLsbD 0 then 1 else 0))
+    (lane64 (lane128 b j) (if IMM8.bv.getLsbD 4 then 1 else 0)))

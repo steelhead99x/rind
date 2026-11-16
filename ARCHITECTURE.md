@@ -5,7 +5,9 @@ run time. [MIGRATING.md][migrating] maps each ring and aws-lc-rs item to it.
 
 - Each module takes an algorithm as a `&'static` constant, such as
   `aead::AES_128_GCM` or `signature::verify::ECDSA_P256_SHA256_ASN1`, and has
-  one key type per role.
+  one key type per role. KEMs and signing key pairs instead take a type per
+  parameter set, such as `kem::DecapsulationKey<MlKem768>`, so a ciphertext or
+  key of one set fails to compile against another's.
 - Algorithms only old protocols should use sit in `legacy` submodules, such
   as `digest::legacy::SHA1`.
 - Key pairs name the DER format they load or encode (`from_pkcs8`,
@@ -34,7 +36,7 @@ The modules:
   load from a scalar, PKCS#8, or SEC1, and export as a scalar or PKCS#8, and
   peer keys parsed from a point, compressed or not, or a
   `SubjectPublicKeyInfo`.
-- `kem`: ML-KEM-768.
+- `kem`: ML-KEM-512, ML-KEM-768, and ML-KEM-1024.
 - `hpke`: RFC 9180's base mode and secret export, over DHKEM with X25519,
   P-256, P-384, and P-521, HKDF, and the AEADs: a recipient's keys, and
   sender, recipient, and export-only contexts.

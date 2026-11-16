@@ -65,3 +65,6 @@ proofs/Rind/Armv7/QuicDispatch.lean
 proofs/Rind/Armv7/ChaCha20.lean
 patch/*/Cargo.lock
 __pycache__/
+site/node_modules/
+site/dist/
+site/.astro/
