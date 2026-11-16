@@ -305,6 +305,8 @@ let instruction_INDUCTION,instruction_RECURSION = define_type
    | PALIGNR operand operand operand
    | PAND operand operand
    | PBLENDW operand operand operand
+   | PANDN operand operand
+   | PCMPEQD operand operand
    | PCMPGTD operand operand
    | PCMPGTW operand operand
    | PEXT operand operand operand
@@ -345,7 +347,9 @@ let instruction_INDUCTION,instruction_RECURSION = define_type
    | SHA256RNDS2 operand operand
    | SHL operand operand
    | SHR operand operand
+   | SHLX operand operand operand
    | SHLD operand operand operand
+   | SHRX operand operand operand
    | SHRD operand operand operand
    | STCF
    | STD

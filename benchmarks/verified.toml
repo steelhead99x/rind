@@ -38,7 +38,8 @@
 # graviola has none. Its X25519 and Ed25519 run only s2n-bignum's verified
 # routines, but convert between bytes and limbs in unverified Rust.
 #
-# rind: X25519, P-256 ECDH and ECDSA on aarch64, P-384 ECDH, SHA-256,
+# rind: X25519, P-256 ECDH and ECDSA (on x86_64 only on Linux, as the
+# proofs check the ELF object, not the Mach-O one), P-384 ECDH, SHA-256,
 # HMAC-SHA256, and HKDF-SHA256 on aarch64 with the crypto extension, SHA3-256
 # and SHA3-512, whose Rust sponge `proofs/` proves against SymCrypt's Lean
 # FIPS 202 spec and s2n-bignum's Keccak-f theorems, SHA-512 and Ed25519 on
@@ -60,9 +61,8 @@
 # 8032's equation with half-size scalars that nothing proves yet. Every other
 # rind operation runs unverified code, such as SHA-256's block function on
 # x86_64 or without the crypto extension, under padding and HMAC glue that
-# `proofs/` proves, ChaCha20-Poly1305's aws-lc one-pass routines on x86_64,
-# under glue `proofs/` proves, or x86_64 P-256's generator multiplication,
-# whose mixed addition is aws-lc's.
+# `proofs/` proves, or ChaCha20-Poly1305's aws-lc one-pass routines on x86_64,
+# under glue `proofs/` proves.
 #
 # rind's RSA-2048 PKCS#1 v1.5 verification earns the ✓ on x86_64 with BMI2
 # and ADX, whose Montgomery products are s2n-bignum's Karatsuba routines; its
@@ -153,6 +153,22 @@ operations = ["p256-ecdsa-sign", "p256-ecdsa-verify"]
 arch = "aarch64"
 cpu = ["wide_mul"]
 proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of the nonces' draws through a dyn RandomSource, which Aeneas cannot translate, of its signature API's P-256 ECDSA with SHA-256 and fixed-length signatures, key generation and loading, signing, and verification, down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of p256_scalarmulbase_alt, p256_montjadd_alt, p256_montjdouble_alt, p256_montjmixadd_alt, bignum_inv_p256, bignum_neg_p256, bignum_tomont_p256, bignum_demont_p256, bignum_add_p256, bignum_montmul_p256, bignum_montsqr_p256, bignum_mod_n256_4, bignum_modadd, bignum_montmul, bignum_demont, and bignum_modinv, which rind runs on a wide multiplier, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of bignum_eq, of the object code rind's build emits, with the group laws its twin multiplication relies on proven from Mathlib's, the generator's order n proven, and HOL Light's P256_GROUP_ELEMENT_ORDER, that every finite point has order n, proven by counting the curve's points, and proving a signature right when signing returns, as its nonce loop has no bound"
+link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/P256Signature.lean"
+
+[[verified]]
+library = "rind"
+operations = ["p256-ecdh"]
+arch = "x86_64"
+os = "linux"
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of key generation's draws through a dyn RandomSource, and of the AVX2 and SSE2 table select, whose intrinsics' models rind tests against the CPU, which Aeneas cannot translate, of its agreement API's P-256 key generation, public key, and agreement down to s2n-bignum's routines and rind's port of aws-lc's Booth-recoded generator multiplication, its 37-row table proven to hold the multiples of G, composed with s2n-bignum's HOL Light proofs of p256_scalarmul, bignum_tomont_p256, bignum_demont_p256, bignum_montmul_p256, bignum_montsqr_p256, and their _alt forms without BMI2 and ADX, bignum_add_p256, bignum_inv_p256, bignum_neg_p256, bignum_mod_n256_4, bignum_mux, and bignum_eq, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proofs of aws-lc's mixed additions ecp_nistz256_point_add_affine and its BMI2 and ADX form, of the object code rind's Linux build emits, which assume the ABI's 16-byte stack alignment at the call and the 16-byte alignment rind gives their constant table"
+link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/P256.lean"
+
+[[verified]]
+library = "rind"
+operations = ["p256-ecdsa-sign", "p256-ecdsa-verify"]
+arch = "x86_64"
+os = "linux"
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the nonces' draws through a dyn RandomSource, and of the AVX2 and SSE2 table select, whose intrinsics' models rind tests against the CPU, which Aeneas cannot translate, of its signature API's P-256 ECDSA with SHA-256 and fixed-length signatures, key generation and loading, signing, and verification, down to s2n-bignum's routines and rind's port of aws-lc's Booth-recoded generator multiplication, its 37-row table proven to hold the multiples of G, composed with s2n-bignum's HOL Light proofs of p256_montjadd, p256_montjdouble, p256_montjmixadd, bignum_tomont_p256, bignum_demont_p256, bignum_montmul_p256, bignum_montsqr_p256, and their _alt forms without BMI2 and ADX, bignum_add_p256, bignum_inv_p256, bignum_neg_p256, bignum_mod_n256_4, bignum_mux, bignum_modadd, bignum_montmul, bignum_demont, bignum_modinv, and bignum_eq, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proofs of aws-lc's mixed additions ecp_nistz256_point_add_affine and its BMI2 and ADX form, of the object code rind's Linux build emits, which assume the ABI's 16-byte stack alignment at the call and the 16-byte alignment rind gives their constant table, with the group laws its twin multiplication relies on proven from Mathlib's, the generator's order n proven, and HOL Light's P256_GROUP_ELEMENT_ORDER, that every finite point has order n, proven by counting the curve's points, and proving a signature right when signing returns, as its nonce loop has no bound"
 link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/P256Signature.lean"
 
 [[verified]]

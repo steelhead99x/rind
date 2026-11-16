@@ -1,5 +1,5 @@
 rind is a pure-Rust cryptography library for [MoQ](https://github.com/moq-dev/moq), derived from [graviola](https://github.com/ctz/graviola), which it no longer tracks.
-This is one Rust workspace: the `rind` library, its `rind-<consumer>` adapter crates such as `rind-rustls`, and the unpublished `rind-fips` module, bench, cpuid, timing, and fuzz crates.
+This is one Rust workspace: the `rind` library, its `rind-<consumer>` adapter crates such as `rind-rustls`, and the unpublished `rind-fips` module, ACVP wrapper (`rind-acvp`), bench, cpuid, timing, and fuzz crates.
 [ARCHITECTURE.md](ARCHITECTURE.md) covers the `low`/`mid`/`high` layering, [PLATFORMS.md](PLATFORMS.md) the CPU requirements, and [CONTRIBUTING.md](CONTRIBUTING.md) how to run the tests.
 
 # Required
