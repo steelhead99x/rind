@@ -712,7 +712,18 @@ def main():
     # The host's own part picks one schedule. On aarch64 the tests that
     # reach a narrow twin run again with each schedule forced, so a narrow
     # host still proves `_alt` and a wide one the narrow schedules.
-    narrow = {"ct_binsec_x25519", "ct_binsec_mont16", "ct_binsec_mont_mul"}
+    narrow = {
+        "ct_binsec_x25519",
+        "ct_binsec_ed25519",
+        "ct_binsec_ecdh_p256",
+        "ct_binsec_ecdh_p384",
+        "ct_binsec_ecdh_p521",
+        "ct_binsec_ecdsa_p256",
+        "ct_binsec_ecdsa_p384",
+        "ct_binsec_ecdsa_p521",
+        "ct_binsec_mont16",
+        "ct_binsec_mont_mul",
+    }
     overridden = any(os.environ.get(v) for v in ("RIND_CPU_DISABLE_wide_mul", "RIND_CPU_FORCE_wide_mul"))
     if arch(target) == "aarch64" and not overridden:
         again = [name for name in names if name.split("::")[-1] in narrow and not is_planted(name)]
@@ -726,15 +737,15 @@ def main():
             # The test asserts the schedule under `RIND_TEST_ARM_WIDE_MUL`, so
             # a binary that ignored the variable fails here rather than
             # proving the host's schedule a second time.
-            check = subprocess.run(
+            probe = subprocess.run(
                 [exe, "--exact", "low::aarch64::cpu::tests::detects_the_expected_cpu", "--test-threads=1"],
                 env=dict(env, RIND_TEST_ARM_WIDE_MUL=wide),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 encoding="utf-8",
             )
-            if check.returncode != 0 or "1 passed" not in check.stdout:
-                print("FAIL {} not selected:\n{}".format(label, check.stdout))
+            if probe.returncode != 0 or "1 passed" not in probe.stdout:
+                print("FAIL {} not selected:\n{}".format(label, probe.stdout))
                 failed = True
             else:
                 run(again, env, label)
