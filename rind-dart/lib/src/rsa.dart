@@ -11,6 +11,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 import 'error.dart';
+import 'handle.dart';
 import 'status.dart';
 
 /// The modulus size of a generated RSA key.
@@ -69,8 +70,9 @@ enum SigningAlgorithm {
 /// and [pssSha512] verify what the [SigningAlgorithm] of the same name
 /// signs. [pssSha256AnySalt], [pssSha384AnySalt], and [pssSha512AnySalt]
 /// verify a PSS signature of that hash with a salt of any length, which
-/// includes the salt the signer of that hash produces. Each accepts a
-/// modulus of 2048 to 8192 bits.
+/// includes the salt the signer of that hash produces. These accept a
+/// modulus of 2048 to 8192 bits; the algorithms in
+/// `package:rind/rsa_legacy.dart` state their own floors.
 final class VerificationAlgorithm {
   const VerificationAlgorithm._(this._id, this._name);
 
@@ -135,25 +137,26 @@ final class VerificationAlgorithm {
   String toString() => _name;
 }
 
-/// RSASSA-PKCS1-v1_5 with SHA-1, for old signatures.
+/// RSASSA-PKCS1-v1_5 with SHA-1, for old signatures by keys of 2048 to 8192
+/// bits.
 const pkcs1Sha1 = VerificationAlgorithm._(100, 'rsa.pkcs1Sha1');
 
-/// RSASSA-PKCS1-v1_5 with SHA-1, for old keys of 1024 bits or more.
+/// RSASSA-PKCS1-v1_5 with SHA-1, for old keys of 1024 to 8192 bits.
 const pkcs1Min1024Sha1 = VerificationAlgorithm._(101, 'rsa.pkcs1Min1024Sha1');
 
-/// RSASSA-PKCS1-v1_5 with SHA-256, for old keys of 1024 bits or more.
+/// RSASSA-PKCS1-v1_5 with SHA-256, for old keys of 1024 to 8192 bits.
 const pkcs1Min1024Sha256 = VerificationAlgorithm._(
   102,
   'rsa.pkcs1Min1024Sha256',
 );
 
-/// RSASSA-PKCS1-v1_5 with SHA-512, for old keys of 1024 bits or more.
+/// RSASSA-PKCS1-v1_5 with SHA-512, for old keys of 1024 to 8192 bits.
 const pkcs1Min1024Sha512 = VerificationAlgorithm._(
   103,
   'rsa.pkcs1Min1024Sha512',
 );
 
-/// RSASSA-PKCS1-v1_5 with SHA-384, for keys of 3072 bits or more only.
+/// RSASSA-PKCS1-v1_5 with SHA-384, for keys of 3072 to 8192 bits only.
 const pkcs1Min3072Sha384 = VerificationAlgorithm._(
   104,
   'rsa.pkcs1Min3072Sha384',
@@ -161,7 +164,7 @@ const pkcs1Min3072Sha384 = VerificationAlgorithm._(
 
 /// An RSA public key, which verifies with any [VerificationAlgorithm]
 /// whose modulus floor it meets.
-final class PublicKey extends _Handle {
+final class PublicKey extends Handle {
   PublicKey._(Pointer<Void> pointer) : super(pointer, _rsaPublicKeyFinalizer);
 
   PublicKey._parse(int source, Uint8List bytes, [Uint8List? exponent])
@@ -203,7 +206,7 @@ final class PublicKey extends _Handle {
   ) {
     check(
       _rsaPublicKeyVerify(
-        _pointer,
+        pointer,
         algorithm._id,
         message.address,
         message.length,
@@ -214,7 +217,7 @@ final class PublicKey extends _Handle {
   }
 
   /// The modulus's length in bytes, which is also its signatures' length.
-  int get modulusLength => check(_rsaPublicKeyModulusLen(_pointer));
+  int get modulusLength => check(_rsaPublicKeyModulusLen(pointer));
 
   /// The key's PKCS#1 `RSAPublicKey` encoding, as [PublicKey.new] takes
   /// it.
@@ -224,8 +227,8 @@ final class PublicKey extends _Handle {
   Uint8List toSpki() => _export(1);
 
   Uint8List _export(int spki) => output(
-    exportLength,
-    (out) => _rsaPublicKeyExport(_pointer, spki, out.address, out.length),
+    _maxPublicKeyLength,
+    (out) => _rsaPublicKeyExport(pointer, spki, out.address, out.length),
   );
 }
 
@@ -233,7 +236,7 @@ final class PublicKey extends _Handle {
 ///
 /// Generating a key and signing take milliseconds to seconds, so run them
 /// off the UI isolate, as with `Isolate.run`.
-final class KeyPair extends _Handle {
+final class KeyPair extends Handle {
   KeyPair._(Pointer<Void> pointer) : super(pointer, _rsaKeyPairFinalizer);
 
   static Pointer<Void> _parse(int source, Uint8List der) => nativeCopy(
@@ -258,7 +261,7 @@ final class KeyPair extends _Handle {
 
   /// The public key, which verifies the key pair's signatures.
   late final PublicKey publicKey = PublicKey._(
-    newHandle((out) => _rsaKeyPairPublicKey(_pointer, out)),
+    newHandle((out) => _rsaKeyPairPublicKey(pointer, out)),
   );
 
   /// Signs [message] with [algorithm].
@@ -266,7 +269,7 @@ final class KeyPair extends _Handle {
       nativeCopy(message, (input) {
         return _modulusOut(
           (out) => _rsaSign(
-            _pointer,
+            pointer,
             algorithm._id,
             input,
             message.length,
@@ -279,7 +282,7 @@ final class KeyPair extends _Handle {
   /// Encodes the private key as PKCS#8.
   Uint8List toPkcs8() => output(
     exportLength,
-    (out) => _rsaKeyPairExport(_pointer, 1, out.address, out.length),
+    (out) => _rsaKeyPairExport(pointer, 1, out.address, out.length),
   );
 }
 
@@ -310,7 +313,7 @@ const oaepSha1 = OaepAlgorithm._(100, 'rsa.oaepSha1');
 ///
 /// Generating a key and decrypting take milliseconds to seconds, so run
 /// them off the UI isolate, as with `Isolate.run`.
-final class DecryptingKey extends _Handle {
+final class DecryptingKey extends Handle {
   DecryptingKey._(this.algorithm, int source, int size, Uint8List der)
     : super(
         nativeCopy(
@@ -349,7 +352,7 @@ final class DecryptingKey extends _Handle {
   /// The public key, which encrypts to this key.
   late final EncryptingKey publicKey = EncryptingKey._(
     algorithm,
-    newHandle((out) => _decryptingKeyPublicKey(_pointer, out)),
+    newHandle((out) => _decryptingKeyPublicKey(pointer, out)),
   );
 
   /// Decrypts [ciphertext] sealed with [label], throwing
@@ -360,7 +363,7 @@ final class DecryptingKey extends _Handle {
       return nativeCopy(label!, (labelPointer) {
         return _modulusOut(
           (out) => _decrypt(
-            _pointer,
+            pointer,
             input,
             ciphertext.length,
             labelPointer,
@@ -376,14 +379,14 @@ final class DecryptingKey extends _Handle {
   /// Encodes the private key as PKCS#8.
   Uint8List toPkcs8() => output(
     exportLength,
-    (out) => _decryptingKeyExport(_pointer, 1, out.address, out.length),
+    (out) => _decryptingKeyExport(pointer, 1, out.address, out.length),
   );
 }
 
 /// An RSA public key that encrypts with RSA-OAEP.
-final class EncryptingKey extends _Handle {
-  EncryptingKey._(this.algorithm, Pointer<Void> _pointer)
-    : super(_pointer, _encryptingKeyFinalizer);
+final class EncryptingKey extends Handle {
+  EncryptingKey._(this.algorithm, Pointer<Void> pointer)
+    : super(pointer, _encryptingKeyFinalizer);
 
   EncryptingKey._parse(
     this.algorithm,
@@ -444,7 +447,7 @@ final class EncryptingKey extends _Handle {
     return output(
       _maxModulusLength,
       (out) => _encrypt(
-        _pointer,
+        pointer,
         message.address,
         message.length,
         label!.address,
@@ -456,7 +459,7 @@ final class EncryptingKey extends _Handle {
   }
 
   /// The longest message the key encrypts, in bytes.
-  int get maxMessageLength => check(_encryptingKeyMaxMessageLen(_pointer));
+  int get maxMessageLength => check(_encryptingKeyMaxMessageLen(pointer));
 
   /// The key's PKCS#1 `RSAPublicKey` encoding, as [EncryptingKey.new]
   /// takes it.
@@ -466,8 +469,8 @@ final class EncryptingKey extends _Handle {
   Uint8List toSpki() => _export(1);
 
   Uint8List _export(int spki) => output(
-    exportLength,
-    (out) => _encryptingKeyExport(_pointer, spki, out.address, out.length),
+    _maxPublicKeyLength,
+    (out) => _encryptingKeyExport(pointer, spki, out.address, out.length),
   );
 }
 
@@ -715,10 +718,6 @@ external int _encryptingKeyExport(
 )
 external int _encryptingKeyMaxMessageLen(Pointer<Void> key);
 
-// `_Handle` stores the native key pointer, so it stays in this library.
-// `newHandle` only returns the pointer this library's own call stored, and
-// `nativeCopy` only copies the caller's own bytes.
-
 // The modulus-sized output of a signature or a decryption. Zeroed: Rust
 // borrows it as `&mut [u8]`, which has to already be initialized.
 Uint8List _modulusOut(int Function(Pointer<Uint8> out) write) {
@@ -731,14 +730,15 @@ Uint8List _modulusOut(int Function(Pointer<Uint8> out) write) {
   }
 }
 
-abstract base class _Handle implements Finalizable {
-  _Handle(this._pointer, NativeFinalizer finalizer) {
-    finalizer.attach(this, _pointer, detach: this);
-  }
-
-  final Pointer<Void> _pointer;
-}
-
 // RSA-8192's modulus, which bounds RSA's signatures, ciphertexts, and
 // plaintexts. Not a key's own modulus length.
 const _maxModulusLength = 1024;
+
+// The longest public key encoding, an RSA-8192 SubjectPublicKeyInfo. Its
+// PKCS#1 `RSAPublicKey` is a 4-byte SEQUENCE header, the modulus as an
+// INTEGER (a 4-byte header and a sign byte), and an exponent of at most 33
+// bits, rind's limit, as a 7-byte INTEGER: the modulus and 16 bytes. The
+// SubjectPublicKeyInfo adds a 4-byte SEQUENCE header, the 15-byte
+// rsaEncryption AlgorithmIdentifier, and a BIT STRING's 4-byte header and
+// unused-bits byte.
+const _maxPublicKeyLength = _maxModulusLength + 16 + 24;

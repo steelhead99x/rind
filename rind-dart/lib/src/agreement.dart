@@ -23,7 +23,7 @@ enum AgreementAlgorithm {
 }
 
 /// A private key for key agreement.
-final class AgreementPrivateKey extends _Handle {
+final class AgreementPrivateKey extends Handle {
   AgreementPrivateKey._(this.algorithm, int source, Uint8List bytes)
     : super(
         newHandle(
@@ -59,9 +59,8 @@ final class AgreementPrivateKey extends _Handle {
   final AgreementAlgorithm algorithm;
 
   Uint8List _export(int what) => output(
-    what == 0 ? _maxPointLength : exportLength,
-    (out) =>
-        _agreementPrivateKeyExport(_pointer, what, out.address, out.length),
+    what == 0 ? maxEcPointLength : exportLength,
+    (out) => _agreementPrivateKeyExport(pointer, what, out.address, out.length),
   );
 
   /// The public key to send to the peer.
@@ -76,7 +75,7 @@ final class AgreementPrivateKey extends _Handle {
   Uint8List agree(Uint8List peer) => output(
     algorithm._secretLength,
     (out) => _agreementAgree(
-      _pointer,
+      pointer,
       peer.address,
       peer.length,
       out.address,
@@ -128,7 +127,8 @@ final class AgreementPublicKey {
     Uint8List bytes,
     int export,
   ) => output(
-    export == 0 ? _maxPointLength : _maxSpkiLength,
+    // X25519's 32 bytes and 44-byte SPKI fit the NIST curves' bounds.
+    export == 0 ? maxEcPointLength : maxEcSpkiLength,
     (out) => _agreementPublicKey(
       algorithm._id,
       spki,
@@ -140,9 +140,3 @@ final class AgreementPublicKey {
     ),
   );
 }
-
-// X25519's public key is 32 bytes and its SubjectPublicKeyInfo is 44.
-// A NIST curve's uncompressed point is at most 133 bytes, on P-521, and
-// its SubjectPublicKeyInfo (id-ecPublicKey and the curve) is at most 158.
-const _maxPointLength = 133;
-const _maxSpkiLength = 158;

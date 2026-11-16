@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-// Status mapping for a native call. This library holds no key pointer:
-// `newHandle` returns the pointer its caller's own native call stored, and
-// `nativeCopy` copies the caller's own bytes. The library that owns a handle
-// keeps that pointer private.
+// Status mapping, buffers, and bounds every native call shares.
 //
 // `hook/build.dart` registers one code asset, [nativeAssetId]. The annotation
 // names it, because this library's own URI is not that asset.
@@ -51,6 +48,14 @@ Uint8List output(int length, int Function(Uint8List out) call) {
 
 /// The longest key export, an RSA-8192 PKCS#8 key, fits in this many bytes.
 const exportLength = 8192;
+
+/// The longest X9.62 uncompressed point, P-521's: a 0x04 tag and two
+/// 66-byte coordinates. P-256's and P-384's are 65 and 97 bytes.
+const maxEcPointLength = 1 + 2 * 66;
+
+/// The longest NIST curve `SubjectPublicKeyInfo`, P-521's: id-ecPublicKey
+/// and the curve OID around [maxEcPointLength] bytes.
+const maxEcSpkiLength = 158;
 
 /// Runs [call] with a slot for the handle it stores, and returns that pointer.
 ///

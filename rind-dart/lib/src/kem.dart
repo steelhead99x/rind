@@ -15,7 +15,7 @@ enum KemAlgorithm {
 }
 
 /// A private key that decapsulates the secrets its [publicKey] encapsulates.
-final class DecapsulationKey extends _Handle {
+final class DecapsulationKey extends Handle {
   /// Generates a random key for [algorithm].
   DecapsulationKey.generate(this.algorithm)
     : super(
@@ -31,7 +31,7 @@ final class DecapsulationKey extends _Handle {
     algorithm,
     output(
       algorithm._publicKeyLength,
-      (out) => _decapsulationKeyPublicKey(_pointer, out.address, out.length),
+      (out) => _decapsulationKeyPublicKey(pointer, out.address, out.length),
     ),
   );
 
@@ -43,7 +43,7 @@ final class DecapsulationKey extends _Handle {
   Uint8List decapsulate(Uint8List ciphertext) => output(
     32,
     (out) => _decapsulate(
-      _pointer,
+      pointer,
       ciphertext.address,
       ciphertext.length,
       out.address,
@@ -53,7 +53,7 @@ final class DecapsulationKey extends _Handle {
 }
 
 /// A peer's public key, which encapsulates secrets to it.
-final class EncapsulationKey extends _Handle {
+final class EncapsulationKey extends Handle {
   /// Parses an encapsulation key for [algorithm].
   EncapsulationKey(this.algorithm, Uint8List bytes)
     : _bytes = Uint8List.fromList(bytes),
@@ -87,7 +87,7 @@ final class EncapsulationKey extends _Handle {
     final secret = Uint8List(32);
     check(
       _encapsulate(
-        _pointer,
+        pointer,
         ciphertext.address,
         ciphertext.length,
         secret.address,

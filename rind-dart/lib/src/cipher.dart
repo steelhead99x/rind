@@ -51,7 +51,7 @@ final class CbcIv {
 /// whether it decrypted can decrypt it: Vaudenay's padding oracle needs only
 /// that error, however it surfaces. Send a MAC over the IV and ciphertext
 /// with each message, or use [AeadKey] instead.
-final class AesCbcEncryptingKey extends _Handle {
+final class AesCbcEncryptingKey extends Handle {
   /// Expands [key] for [algorithm], throwing [RindError.wrongLength] unless
   /// it is [CipherAlgorithm.keyLength] bytes.
   AesCbcEncryptingKey(CipherAlgorithm algorithm, Uint8List key)
@@ -81,7 +81,7 @@ final class AesCbcEncryptingKey extends _Handle {
     final inOut = Uint8List(length)..setAll(0, plaintext);
     check(
       _aesCbcEncrypt(
-        _pointer,
+        pointer,
         iv.bytes.address,
         iv.bytes.length,
         pad,
@@ -99,7 +99,7 @@ final class AesCbcEncryptingKey extends _Handle {
 /// Decryption is unauthenticated: check the MAC over the IV and ciphertext
 /// before decrypting, and never let a sender learn that decryption failed,
 /// or the error is a padding oracle. See [AesCbcEncryptingKey].
-final class AesCbcDecryptingKey extends _Handle {
+final class AesCbcDecryptingKey extends Handle {
   /// Expands [key] for [algorithm], throwing [RindError.wrongLength] unless
   /// it is [CipherAlgorithm.keyLength] bytes.
   AesCbcDecryptingKey(CipherAlgorithm algorithm, Uint8List key)
@@ -133,7 +133,7 @@ final class AesCbcDecryptingKey extends _Handle {
     final inOut = Uint8List.fromList(ciphertext);
     final len = check(
       _aesCbcDecrypt(
-        _pointer,
+        pointer,
         iv.address,
         iv.length,
         pad,
@@ -146,7 +146,7 @@ final class AesCbcDecryptingKey extends _Handle {
 }
 
 /// An AES key in counter mode.
-final class AesCtr extends _Handle {
+final class AesCtr extends Handle {
   /// Expands [key] for [algorithm], counting over the rightmost
   /// [counterBits] bits of each counter block.
   ///
@@ -177,7 +177,7 @@ final class AesCtr extends _Handle {
     final inOut = Uint8List.fromList(data);
     check(
       _aesCtrApplyKeystream(
-        _pointer,
+        pointer,
         counterBlock.address,
         counterBlock.length,
         inOut.address,
@@ -190,7 +190,7 @@ final class AesCtr extends _Handle {
 
 /// A ChaCha20 key, for the bare stream cipher with a 96-bit nonce and a
 /// 32-bit block counter (RFC 8439).
-final class ChaCha20 extends _Handle {
+final class ChaCha20 extends Handle {
   /// Makes a key from 32 bytes of key material.
   ChaCha20(Uint8List key)
     : super(
@@ -209,7 +209,7 @@ final class ChaCha20 extends _Handle {
     final inOut = Uint8List.fromList(data);
     check(
       _chacha20ApplyKeystream(
-        _pointer,
+        pointer,
         nonce.address,
         nonce.length,
         _uint32(counter, 'counter'),

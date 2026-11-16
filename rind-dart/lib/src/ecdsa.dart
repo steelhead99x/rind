@@ -9,6 +9,7 @@ import 'dart:ffi';
 import 'dart:typed_data';
 
 import 'error.dart';
+import 'handle.dart';
 import 'status.dart';
 
 /// An algorithm a [KeyPair] signs with: a curve, a hash, and a signature
@@ -95,7 +96,7 @@ enum VerificationAlgorithm {
 }
 
 /// An ECDSA public key, bound to the one algorithm it verifies with.
-final class PublicKey extends _Handle {
+final class PublicKey extends Handle {
   PublicKey._(this.algorithm, Pointer<Void> pointer)
     : super(pointer, _ecdsaPublicKeyFinalizer);
 
@@ -133,7 +134,7 @@ final class PublicKey extends _Handle {
   void verify(Uint8List message, Uint8List signature) {
     check(
       _ecdsaPublicKeyVerify(
-        _pointer,
+        pointer,
         message.address,
         message.length,
         signature.address,
@@ -149,13 +150,13 @@ final class PublicKey extends _Handle {
   Uint8List toSpki() => _export(1);
 
   Uint8List _export(int spki) => output(
-    spki == 0 ? _maxPointLength : _maxSpkiLength,
-    (out) => _ecdsaPublicKeyExport(_pointer, spki, out.address, out.length),
+    spki == 0 ? maxEcPointLength : maxEcSpkiLength,
+    (out) => _ecdsaPublicKeyExport(pointer, spki, out.address, out.length),
   );
 }
 
 /// An ECDSA key pair, bound to the one algorithm it signs with.
-final class KeyPair extends _Handle {
+final class KeyPair extends Handle {
   KeyPair._(this.algorithm, int source, Uint8List bytes, [Uint8List? publicKey])
     : super(
         _new(algorithm, source, bytes, publicKey ?? Uint8List(0)),
@@ -208,14 +209,14 @@ final class KeyPair extends _Handle {
   /// The public key, which verifies the key pair's signatures.
   late final PublicKey publicKey = PublicKey._(
     algorithm._verification,
-    newHandle((out) => _ecdsaKeyPairPublicKey(_pointer, out)),
+    newHandle((out) => _ecdsaKeyPairPublicKey(pointer, out)),
   );
 
   /// Signs [message].
   Uint8List sign(Uint8List message) => output(
     _maxSignatureLength,
     (out) => _ecdsaSign(
-      _pointer,
+      pointer,
       message.address,
       message.length,
       out.address,
@@ -225,7 +226,7 @@ final class KeyPair extends _Handle {
 
   Uint8List _export(int what) => output(
     exportLength,
-    (out) => _ecdsaKeyPairExport(_pointer, what, out.address, out.length),
+    (out) => _ecdsaKeyPairExport(pointer, what, out.address, out.length),
   );
 
   /// Encodes the private key as PKCS#8.
@@ -335,25 +336,7 @@ external int _ecdsaPublicKeyExport(
   int outLen,
 );
 
-// An X9.62 uncompressed point is 65, 97, or 133 bytes on P-256, P-384, and
-// P-521: a 0x04 tag and two coordinates, 66 bytes each on P-521. The
-// SubjectPublicKeyInfo, id-ecPublicKey and the curve OID around that point,
-// is 158 bytes on P-521 and shorter on the others.
-const _maxPointLength = 133;
-const _maxSpkiLength = 158;
-
 // The longest ECDSA signature, a P-521 DER value: rind's `SIGNATURE_MAX_LEN`.
 // A sequence length of two bytes plus two INTEGERs, each a sign byte and a
 // 66-byte scalar. Fixed-length signatures are shorter.
 const _maxSignatureLength = 3 + 2 * (2 + 66 + 1);
-
-// `_Handle` stores the native key pointer, so it stays in this library.
-// `newHandle` only returns the pointer this library's own call stored.
-
-abstract base class _Handle implements Finalizable {
-  _Handle(this._pointer, NativeFinalizer finalizer) {
-    finalizer.attach(this, _pointer, detach: this);
-  }
-
-  final Pointer<Void> _pointer;
-}

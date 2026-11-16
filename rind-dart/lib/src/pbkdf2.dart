@@ -28,7 +28,7 @@ const pbkdf2HmacSha1 = Pbkdf2Algorithm._(hmacSha1);
 ///
 /// Deriving takes as long as its iteration count asks, so run it off the
 /// UI isolate, as with `Isolate.run`.
-final class Pbkdf2Secret extends _Handle {
+final class Pbkdf2Secret extends Handle {
   /// Keys [algorithm] with [secret], which may be any length.
   Pbkdf2Secret(Pbkdf2Algorithm algorithm, Uint8List secret)
     : super(
@@ -52,7 +52,7 @@ final class Pbkdf2Secret extends _Handle {
       return nativeCopy(Uint8List(length), (out) {
         check(
           _pbkdf2Derive(
-            _pointer,
+            pointer,
             iterations,
             saltPointer,
             salt.length,
@@ -76,7 +76,7 @@ final class Pbkdf2Secret extends _Handle {
       nativeCopy(previouslyDerived, (previous) {
         check(
           _pbkdf2Verify(
-            _pointer,
+            pointer,
             iterations,
             saltPointer,
             salt.length,

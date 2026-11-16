@@ -9,10 +9,11 @@ import 'dart:ffi';
 import 'dart:typed_data';
 
 import 'error.dart';
+import 'handle.dart';
 import 'status.dart';
 
 /// An Ed25519 public key.
-final class PublicKey extends _Handle {
+final class PublicKey extends Handle {
   PublicKey._(Pointer<Void> pointer)
     : super(pointer, _ed25519PublicKeyFinalizer);
 
@@ -36,7 +37,7 @@ final class PublicKey extends _Handle {
   void verify(Uint8List message, Uint8List signature) {
     check(
       _ed25519PublicKeyVerify(
-        _pointer,
+        pointer,
         message.address,
         message.length,
         signature.address,
@@ -53,12 +54,12 @@ final class PublicKey extends _Handle {
 
   Uint8List _export(int spki) => output(
     spki == 0 ? _rawPublicKeyLength : _spkiLength,
-    (out) => _ed25519PublicKeyExport(_pointer, spki, out.address, out.length),
+    (out) => _ed25519PublicKeyExport(pointer, spki, out.address, out.length),
   );
 }
 
 /// An Ed25519 key pair.
-final class KeyPair extends _Handle {
+final class KeyPair extends Handle {
   KeyPair._(int source, Uint8List bytes, [Uint8List? publicKey])
     : super(
         _new(source, bytes, publicKey ?? Uint8List(0)),
@@ -94,14 +95,14 @@ final class KeyPair extends _Handle {
 
   /// The public key, which verifies the key pair's signatures.
   late final PublicKey publicKey = PublicKey._(
-    newHandle((out) => _ed25519KeyPairPublicKey(_pointer, out)),
+    newHandle((out) => _ed25519KeyPairPublicKey(pointer, out)),
   );
 
   /// Signs [message].
   Uint8List sign(Uint8List message) => output(
     64,
     (out) => _ed25519Sign(
-      _pointer,
+      pointer,
       message.address,
       message.length,
       out.address,
@@ -111,7 +112,7 @@ final class KeyPair extends _Handle {
 
   Uint8List _export(int what) => output(
     exportLength,
-    (out) => _ed25519KeyPairExport(_pointer, what, out.address, out.length),
+    (out) => _ed25519KeyPairExport(pointer, what, out.address, out.length),
   );
 
   /// Encodes the private key as PKCS#8 v2, with its public key.
@@ -226,14 +227,3 @@ external int _ed25519PublicKeyExport(
 // 32 bytes.
 const _rawPublicKeyLength = 32;
 const _spkiLength = 44;
-
-// `_Handle` stores the native key pointer, so it stays in this library.
-// `newHandle` only returns the pointer this library's own call stored.
-
-abstract base class _Handle implements Finalizable {
-  _Handle(this._pointer, NativeFinalizer finalizer) {
-    finalizer.attach(this, _pointer, detach: this);
-  }
-
-  final Pointer<Void> _pointer;
-}

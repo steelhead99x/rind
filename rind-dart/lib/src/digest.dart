@@ -56,7 +56,7 @@ Uint8List digest(DigestAlgorithm algorithm, Uint8List data) => output(
 );
 
 /// A hash of a message given in parts.
-final class DigestContext extends _Handle {
+final class DigestContext extends Handle {
   /// Starts hashing a message with [algorithm].
   DigestContext(this.algorithm)
     : super(
@@ -69,12 +69,12 @@ final class DigestContext extends _Handle {
 
   /// Adds [data] to the message.
   void update(Uint8List data) {
-    check(_digestContextUpdate(_pointer, data.address, data.length));
+    check(_digestContextUpdate(pointer, data.address, data.length));
   }
 
   /// Returns the message's digest, and starts a new message.
   Uint8List finish() => output(
     algorithm.outputLength,
-    (out) => _digestContextFinish(_pointer, out.address, out.length),
+    (out) => _digestContextFinish(pointer, out.address, out.length),
   );
 }
