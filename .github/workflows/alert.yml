@@ -41,9 +41,12 @@ jobs:
     # a job annotation is one of the two time-limit sentences: timeout-minutes
     # ("The job has exceeded the maximum execution time of ...") or the hosted
     # runner's 360-minute cap ("The job running on runner ... has exceeded the
-    # maximum execution time of ..."). A hand cancel, or a dispatch that
-    # replaces the nightly (these workflows share one concurrency group per
-    # ref, with cancel-in-progress), does not post. Release and Dart release
+    # maximum execution time of ..."). A hand cancel does not post. A dispatch
+    # that replaces the nightly does not post where that workflow cancels the
+    # running job: asan, bench, coverage, miri, python, and dart-libraries use
+    # one group per ref with cancel-in-progress. mutants does not. Its group
+    # is mutants-${{ github.event_name }} with queue: max, so a dispatch waits
+    # and does not cancel the weekly run. Release and Dart release
     # post on failure, timed_out, and a cancelled run that started a job,
     # unless that run's only cancel annotation is "Canceling since a higher
     # priority waiting request". release.yml sets cancel-in-progress to false

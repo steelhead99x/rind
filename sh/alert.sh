@@ -32,7 +32,11 @@
 #   RUN_ATTEMPT       workflow_run attempt, required for that classification.
 set -euo pipefail
 
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
+# Absolute path, taken before the cd below. prove_wires reads this file after
+# that cd, and a relative BASH_SOURCE would point at the wrong place when the
+# script is started as ./alert.sh from sh/.
+alert_source=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")
+cd "$(dirname "$alert_source")/.."
 workflows=.github/workflows
 
 # Names of the release workflows. alert.yml's release arm must list these and
@@ -394,8 +398,9 @@ alertable='
 # The if is two arms joined by ||. Each arm is && of predicates. Operand order
 # and list order do not matter. A predicate outside this shape, such as
 # `&& false`, is rejected. Both arms alert on failure, timed_out, and
-# cancelled: the schedule arm so a time-limit kill starts this job, and the
-# release arm because a newer push does not cancel Release or Dart release.
+# cancelled, so a time-limit kill and a cancelled Release or Dart release
+# start this job. The script then decides which cancellations post. A newer
+# push still cancels a pending Release.
 # shellcheck disable=SC2016 # A jq program, not a shell expansion.
 form='
 def squeeze:
@@ -951,7 +956,16 @@ expect_discord() {
 # them; check does not run this.
 prove_wires() {
     local body
-    body=$(awk '/^discord\(\)/{p=1} p{print} p && /^}$/{exit}' "${BASH_SOURCE[0]}")
+    # The path is absolute so this still finds the script after the cd to the
+    # repository root, including when prove is started as ./alert.sh from sh/.
+    if [[ $alert_source != /* || ! -f $alert_source ]]; then
+        echo "sh/alert.sh prove: source path is not the script file: ${alert_source}" >&2
+        return 1
+    fi
+    body=$(awk '/^discord\(\)/{p=1} p{print} p && /^}$/{exit}' "$alert_source") || {
+        echo "sh/alert.sh prove: could not read discord()" >&2
+        return 1
+    }
     if [[ $body != *should_post* || $body != *classify_run* || $body != *"could not classify"* ]]; then
         echo "sh/alert.sh prove: discord() does not classify a cancellation before posting" >&2
         return 1
