@@ -326,18 +326,18 @@
 <text x="985.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.08</text>
 <rect x="1024.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>P-521 ECDH, ECDSA on portable: p521-ecdsa-verify/* takes 1.26 ms with rind, 450.00 µs with aws-lc-rs</title></rect>
 <text x="1059.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.79</text>
-<text x="12.0" y="456.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM-768</text>
-<rect x="284.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ML-KEM-768 on x86_64: mlkem768-keygen/* takes 6.96 µs with rind, 12.17 µs with aws-lc-rs</title></rect>
+<text x="12.0" y="456.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM</text>
+<rect x="284.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ML-KEM on x86_64: mlkem768-keygen/* takes 6.96 µs with rind, 12.17 µs with aws-lc-rs</title></rect>
 <text x="319.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.57</text>
-<rect x="506.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ML-KEM-768 on no AVX2: mlkem768-keygen/* takes 29.32 µs with rind, 33.17 µs with aws-lc-rs</title></rect>
+<rect x="506.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ML-KEM on no AVX2: mlkem768-keygen/* takes 29.32 µs with rind, 33.17 µs with aws-lc-rs</title></rect>
 <text x="541.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.88</text>
-<rect x="802.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>ML-KEM-768 on aarch64: mlkem768-encaps/* takes 19.60 µs with rind, 19.83 µs with aws-lc-rs</title></rect>
+<rect x="802.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>ML-KEM on aarch64: mlkem768-encaps/* takes 19.60 µs with rind, 19.83 µs with aws-lc-rs</title></rect>
 <text x="837.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="876.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ML-KEM-768 on no crypto: mlkem768-encaps/* takes 15.70 µs with rind, 17.95 µs with aws-lc-rs</title></rect>
+<rect x="876.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ML-KEM on no crypto: mlkem768-encaps/* takes 15.70 µs with rind, 17.95 µs with aws-lc-rs</title></rect>
 <text x="911.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.87</text>
-<rect x="950.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ML-KEM-768 on armv7: mlkem768-encaps/* takes 57.50 µs with rind, 84.49 µs with aws-lc-rs</title></rect>
+<rect x="950.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ML-KEM on armv7: mlkem768-encaps/* takes 57.50 µs with rind, 84.49 µs with aws-lc-rs</title></rect>
 <text x="985.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.68</text>
-<rect x="1024.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ML-KEM-768 on portable: mlkem768-keygen/* takes 28.11 µs with rind, 45.45 µs with aws-lc-rs</title></rect>
+<rect x="1024.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ML-KEM on portable: mlkem768-keygen/* takes 28.11 µs with rind, 45.45 µs with aws-lc-rs</title></rect>
 <text x="1059.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.62</text>
 <text x="12.0" y="476.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-DSA</text>
 <text x="12.0" y="496.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">RSA signatures</text>

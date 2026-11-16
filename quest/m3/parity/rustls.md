@@ -11,7 +11,3 @@ rind-rustls offers the rest of aws-lc-rs's rustls provider: the MLKEM1024 key-ex
 - `aws_lc_rs_parity` and `aws_lc_rs_items` in `rind-rustls/src/lib.rs` list
   these as the only gaps; drop each exclusion as it lands, and
   each from rind-rustls's README and MIGRATING.md.
-
-## Required
-
-- [ML-KEM-512 and ML-KEM-1024](/quest/m3/parity/ml-kem.md) - rind's ML-KEM-1024

@@ -843,10 +843,21 @@ fn id_ecdh(input: &[u8]) -> bool {
     spki_algorithm(input).is_some_and(|(oid, _)| oid == [0x2b, 0x81, 0x04, 0x01, 0x0c])
 }
 
+/// The input as an encapsulation key of each parameter set, of which its
+/// length picks at most one.
 fn mlkem_public(input: &[u8]) {
-    let ours = our_kem::EncapsulationKey::new(&our_kem::ML_KEM_768, input);
+    mlkem_public_of::<our_kem::MlKem512>(&their_kem::ML_KEM_512, input);
+    mlkem_public_of::<our_kem::MlKem768>(&their_kem::ML_KEM_768, input);
+    mlkem_public_of::<our_kem::MlKem1024>(&their_kem::ML_KEM_1024, input);
+}
+
+fn mlkem_public_of<A: our_kem::Algorithm>(
+    algorithm: &'static their_kem::Algorithm<their_kem::AlgorithmId>,
+    input: &[u8],
+) {
+    let ours = our_kem::EncapsulationKey::<A>::new(input);
     // aws-lc-rs checks the modulus only when it encapsulates.
-    let theirs = their_kem::EncapsulationKey::new(&their_kem::ML_KEM_768, input)
+    let theirs = their_kem::EncapsulationKey::new(algorithm, input)
         .map_err(|_| "refused")
         .and_then(|key| key.encapsulate().map(|_| key).map_err(|_| "modulus"));
     agree(&ours, &theirs, Expect::Agree);
