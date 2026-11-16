@@ -239,9 +239,9 @@ fn signature_algorithms_match_ring() {
 #[test]
 fn key_rejected_names_its_reason() {
     // An empty `Display` prints nothing, and a rejected key always has a reason.
-    let rejected = ours::signature::Ed25519KeyPair::from_pkcs8(&[])
-        .err()
-        .expect("an empty document is not a key");
+    let Err(rejected) = ours::signature::Ed25519KeyPair::from_pkcs8(&[]) else {
+        panic!("an empty document is not a key");
+    };
     assert!(!rejected.to_string().is_empty());
 }
 

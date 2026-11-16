@@ -8,7 +8,7 @@ Mutation testing covers the adapters correctly, and the package lists and test r
 
 Difficulty: 4/10 (estimate).
 
-Fork PR #23 (mirrored by fork #113), head `f2e26577`. Score 6/10. Upstream twin #792. A partial diff is saved. Also needs fork fix `bf25c044`; expect a conflict with upstream #804.
+Fork PR #23 (mirrored by fork #113), head `f2e26577`. Score 6/10. Upstream twin #792. A partial diff is saved. Expect a conflict with upstream #804.
 
 Done on the PR branch (checked with `admin/mutants --expand-diff-self-test` and `rustfmt`; the campaign and nextest did not run, since `cargo-mutants` and the git dependencies are unavailable offline):
 - The `Padding` pin sits inside `macro_rules`, which cargo-mutants never mutates, so it is gone.
