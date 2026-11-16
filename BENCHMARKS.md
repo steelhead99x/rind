@@ -1261,16 +1261,18 @@ no host list to edit. The result's name is a slug of the CPU model, such as
 `intel-core-ultra-9-275hx`, unless `--host` sets another filesystem-safe name, and
 the JSON records the raw CPU string, that slug, the core counts, and the OS.
 A slug that equals a nightly tier name gains a `-host` suffix, so a minimal aarch64
-Linux box is `aarch64-host` rather than the reserved name `aarch64`. A second machine
+Linux box is `aarch64-host` rather than the reserved name `aarch64`, and a host whose
+chosen name is that spelling is left as it is. A second machine
 that wants a slug already on disk is stored as `<slug>-<tag>`, or `<slug>-2` when that
 alias is taken, and a later import replaces that file. The tag is eight hex characters
 of HMAC-SHA256 over the OS machine id, under a fixed application key. An empty, all-zero,
 or uninitialized id is not a tag. A machine without one passes `--host`. A slug file
 this machine already has is refreshed, along with any second alias that carries its tag.
-An alias without a tag may be another machine, so an import never reuses, takes over,
-or deletes it, and a result without a tag whose name another machine holds is not
-imported until it is rerun with a different `--host`. A host whose
-chosen name is that spelling is left as it is. `summary` and `render --from` read every
-readable measured `<host>.json` and name any file they skip.
+A file without a tag may be any machine, so an import never replaces, reuses, or deletes
+one: a tagged result is stored beside it, and a result without a tag whose name is
+already on disk is not imported until it is rerun with a different `--host`. Of one
+machine's results under one slug in a collection, only the newest is imported.
+`summary` and `render --from` read every readable measured `<host>.json` and name any
+file they skip.
 `collect` reaches only the maintainer's machines. A gap's `on` may name any host with a
 result, or any nightly tier.

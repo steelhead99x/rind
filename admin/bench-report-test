@@ -758,26 +758,57 @@ class AnyHost(unittest.TestCase):
         finally:
             br.DATA_DIR = saved
 
-    def test_retagging_one_host_replaces_its_file(self):
+    def test_tagged_result_does_not_replace_an_untagged_host(self):
+        """An untagged file may be any machine, so a tagged result goes beside it as `<slug>-<tag>`."""
         saved = br.DATA_DIR
         try:
             with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
                 br.DATA_DIR = data
-                first = laptop("nixos")
-                with open(os.path.join(src, "nixos.json"), "w") as f:
+                first = laptop("mybox")
+                with open(os.path.join(data, "mybox.json"), "w") as f:
                     json.dump(first, f)
-                br.import_hosts(src)
-                second = laptop("nixos")
+                second = laptop("mybox")
                 second["machine"] = "cccccccc"
                 second["started"] = "2026-11-05T00:00:00+00:00"
-                with open(os.path.join(src, "nixos.json"), "w") as f:
+                with open(os.path.join(src, "mybox.json"), "w") as f:
                     json.dump(second, f)
-                br.import_hosts(src)
-                self.assertEqual(os.listdir(data), ["nixos.json"])
-                with open(os.path.join(data, "nixos.json")) as f:
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertIn("mybox: same slug as another machine, imported as mybox-cccccccc", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"mybox.json", "mybox-cccccccc.json"})
+                with open(os.path.join(data, "mybox.json")) as f:
+                    self.assertEqual(json.load(f), first)
+                with open(os.path.join(data, "mybox-cccccccc.json")) as f:
                     body = json.load(f)
-                self.assertEqual(body["machine"], "cccccccc")
-                self.assertEqual(body["started"], "2026-11-05T00:00:00+00:00")
+                self.assertEqual(
+                    (body["host"], body["machine"], body["alias_of"], body["started"]),
+                    ("mybox-cccccccc", "cccccccc", "mybox", "2026-11-05T00:00:00+00:00"),
+                )
+        finally:
+            br.DATA_DIR = saved
+
+    def test_untagged_result_does_not_replace_an_untagged_host(self):
+        """Two untagged results cannot be told apart, so the newcomer is refused and named on stderr."""
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                first = laptop("mybox")
+                with open(os.path.join(data, "mybox.json"), "w") as f:
+                    json.dump(first, f)
+                second = laptop("mybox")
+                second["cpu"]["model"] = "another CPU"
+                second["started"] = "2026-11-05T00:00:00+00:00"
+                with open(os.path.join(src, "mybox.json"), "w") as f:
+                    json.dump(second, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertIn(
+                    "mybox: not imported, a result that may be another machine's holds mybox", err.getvalue()
+                )
+                self.assertEqual(os.listdir(data), ["mybox.json"])
+                with open(os.path.join(data, "mybox.json")) as f:
+                    self.assertEqual(json.load(f), first)
         finally:
             br.DATA_DIR = saved
 
@@ -899,7 +930,7 @@ class AnyHost(unittest.TestCase):
                 for _ in range(2):
                     with contextlib.redirect_stderr(io.StringIO()) as err:
                         br.import_hosts(src)
-                    self.assertIn(f"{RYZEN}: not imported, another machine's result holds {RYZEN}", err.getvalue())
+                    self.assertIn(f"{RYZEN}: not imported, a result that may be another machine's holds {RYZEN}", err.getvalue())
                     self.assertEqual(os.listdir(data), [f"{RYZEN}.json"])
                     with open(os.path.join(data, f"{RYZEN}.json")) as f:
                         body = json.load(f)
@@ -978,7 +1009,7 @@ class AnyHost(unittest.TestCase):
                 untagged = laptop("box")
                 untagged["started"] = "2026-11-05T02:00:00+00:00"
                 for _ in range(2):
-                    self.assertIn("box: not imported, another machine's result holds box", put("box", untagged))
+                    self.assertIn("box: not imported, a result that may be another machine's holds box", put("box", untagged))
                     self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json"})
                 with open(os.path.join(data, "box-2.json")) as f:
                     kept = json.load(f)
@@ -1015,7 +1046,7 @@ class AnyHost(unittest.TestCase):
                 with contextlib.redirect_stderr(io.StringIO()) as err:
                     br.import_hosts(src)
                 log = err.getvalue()
-                self.assertIn("box: not imported, another machine's result holds box", log)
+                self.assertIn("box: not imported, a result that may be another machine's holds box", log)
                 self.assertNotIn("imported as", log)
                 self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json"})
                 with open(os.path.join(data, "box.json")) as f:
@@ -1690,7 +1721,7 @@ class AnyHost(unittest.TestCase):
                     json.dump(other, f)
                 with contextlib.redirect_stderr(io.StringIO()) as err:
                     br.import_hosts(src)
-                self.assertIn("box-2: not imported, another machine's result holds box-2", err.getvalue())
+                self.assertIn("box-2: not imported, a result that may be another machine's holds box-2", err.getvalue())
                 self.assertEqual(set(os.listdir(data)), {"box.json", "box-2.json"})
                 with open(os.path.join(data, "box-2.json")) as f:
                     body = json.load(f)
@@ -1776,7 +1807,7 @@ class AnyHost(unittest.TestCase):
                     json.dump(laptop("box"), f)
                 with contextlib.redirect_stderr(io.StringIO()) as err:
                     br.import_hosts(src)
-                self.assertIn("box: not imported, another machine's result holds box", err.getvalue())
+                self.assertIn("box: not imported, a result that may be another machine's holds box", err.getvalue())
                 self.assertEqual(set(os.listdir(data)), {"box.json", f"box-{tag}.json"})
                 with open(os.path.join(data, "box.json")) as f:
                     self.assertEqual(f.read(), "{not json")
@@ -2026,6 +2057,152 @@ class AnyHost(unittest.TestCase):
                 with open(os.path.join(data, f"{moved}.json")) as f:
                     self.assertEqual(json.load(f)["started"], "2026-11-06T02:00:00+00:00")
                 self.assertFalse(os.path.exists(os.path.join(data, "box.json")))
+        finally:
+            br.DATA_DIR = saved
+
+    def test_an_unreadable_file_is_never_an_alias_destination(self):
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        resident = laptop("box")
+        resident["machine"] = "aaaaaaaa"
+        newcomer = laptop("box")
+        newcomer["machine"] = tag
+        marked = laptop(alias)
+        marked["machine"] = tag
+        marked["alias_of"] = "box"
+        got = br.assign_import_name(
+            "box", newcomer, {"box": resident}, {"box": newcomer, alias: marked}, blocked={alias}
+        )
+        self.assertEqual(got, "box-2")
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                with open(os.path.join(data, "box.json"), "w") as f:
+                    json.dump(resident, f)
+                with open(os.path.join(data, f"{alias}.json"), "w") as f:
+                    f.write("{not json")
+                marked["started"] = "2026-11-02T02:00:00+00:00"
+                for name, body in (("box", newcomer), (alias, marked)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()):
+                    br.import_hosts(src)
+                self.assertEqual(set(os.listdir(data)), {"box.json", f"{alias}.json", "box-2.json"})
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    self.assertEqual(f.read(), "{not json")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_a_result_that_will_not_be_imported_is_never_an_alias_destination(self):
+        tag = "bbbbbbbb"
+        resident = laptop("box")
+        resident["machine"] = "aaaaaaaa"
+        kept = laptop("box-4")
+        kept["machine"] = tag
+        kept["alias_of"] = "box"
+        kept["started"] = "2026-11-02T02:00:00+00:00"
+        newcomer = laptop("box")
+        newcomer["machine"] = tag
+        newcomer["started"] = "2026-11-06T02:00:00+00:00"
+        busy = {"schema": 1, "host": "box-3", "machine": tag, "alias_of": "box", "status": "busy", "reason": "busy"}
+        got = br.assign_import_name(
+            "box", newcomer, {"box": resident, "box-4": kept}, {"box": newcomer, "box-3": busy}
+        )
+        self.assertEqual(got, "box-4")
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                for name, body in (("box", resident), ("box-4", kept)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                for name, body in (("box", newcomer), ("box-3", busy)):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()):
+                    br.import_hosts(src)
+                self.assertEqual(set(os.listdir(data)), {"box.json", "box-4.json"})
+                with open(os.path.join(data, "box-4.json")) as f:
+                    self.assertEqual(json.load(f)["started"], "2026-11-06T02:00:00+00:00")
+        finally:
+            br.DATA_DIR = saved
+
+    def test_the_newest_result_of_one_machine_in_a_collection_wins(self):
+        tag = "bbbbbbbb"
+        alias = f"box-{tag}"
+        resident = laptop("box")
+        resident["machine"] = "aaaaaaaa"
+        for slug_started, alias_started, winner, loser in (
+            ("2026-11-03T02:00:00+00:00", "2026-11-05T02:00:00+00:00", alias, "box"),
+            ("2026-11-05T02:00:00+00:00", "2026-11-03T02:00:00+00:00", "box", alias),
+            # Same instant, different offsets: the alias is an hour later.
+            ("2026-11-05T02:00:00+00:00", "2026-11-05T04:00:00+01:00", alias, "box"),
+        ):
+            with self.subTest(winner=winner, slug_started=slug_started):
+                newcomer = laptop("box")
+                newcomer["machine"] = tag
+                newcomer["started"] = slug_started
+                marked = laptop(alias)
+                marked["machine"] = tag
+                marked["alias_of"] = "box"
+                marked["started"] = alias_started
+                newest = slug_started if winner == "box" else alias_started
+                saved = br.DATA_DIR
+                try:
+                    with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                        br.DATA_DIR = data
+                        with open(os.path.join(data, "box.json"), "w") as f:
+                            json.dump(resident, f)
+                        for name, body in (("box", newcomer), (alias, marked)):
+                            with open(os.path.join(src, f"{name}.json"), "w") as f:
+                                json.dump(body, f)
+                        with contextlib.redirect_stderr(io.StringIO()) as err:
+                            br.import_hosts(src)
+                        self.assertIn(f"{loser}: same machine as {winner}, not a second host", err.getvalue())
+                        self.assertEqual(set(os.listdir(data)), {"box.json", f"{alias}.json"})
+                        with open(os.path.join(data, "box.json")) as f:
+                            self.assertEqual(json.load(f), resident)
+                        with open(os.path.join(data, f"{alias}.json")) as f:
+                            body = json.load(f)
+                        self.assertEqual((body["machine"], body["alias_of"], body["started"]), (tag, "box", newest))
+                finally:
+                    br.DATA_DIR = saved
+
+    def test_summary_render_and_import_skip_a_result_without_times(self):
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                broken = laptop("nolist")
+                broken["results"] = {"x": 1}
+                bad_entry = laptop("badentry")
+                bad_entry["results"].append({"operation": "x25519-ecdh/{lib}", "library": "rind"})
+                missing = laptop("missing")
+                del missing["results"]
+                busy = {"schema": 1, "host": "busybox", "status": "busy", "reason": "busy"}
+                for d in (src, data):
+                    for body in (laptop("box"), broken, bad_entry, missing, busy):
+                        with open(os.path.join(d, f"{body['host']}.json"), "w") as f:
+                            json.dump(body, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    self.assertEqual(list(br.load_measured(data)), ["box"])
+                for name in ("nolist", "badentry", "missing"):
+                    self.assertIn(f"{name}: no well-formed results list, skipped", err.getvalue())
+                self.assertIn("busybox: not measured, busy: busy, skipped", err.getvalue())
+                with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.summary(type("Args", (), {"dir": src})())
+                text = out.getvalue()
+                self.assertIn("`box`: box CPU", text)
+                self.assertIn("busybox`: not measured, busy: busy", text)
+                self.assertIn("missing: no well-formed results list, skipped", err.getvalue())
+                self.assertNotIn("missing", text)
+                with tempfile.TemporaryDirectory() as empty:
+                    br.DATA_DIR = empty
+                    with contextlib.redirect_stderr(io.StringIO()) as err:
+                        br.import_hosts(src)
+                    self.assertEqual(os.listdir(empty), ["box.json"])
+                    self.assertIn("missing: not imported, no well-formed results list", err.getvalue())
         finally:
             br.DATA_DIR = saved
 
