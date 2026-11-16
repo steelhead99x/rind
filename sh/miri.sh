@@ -157,7 +157,7 @@ filter="not (${filter}test(/::acvp/))"
 # Debug tests run.
 export RUSTFLAGS='--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
 export MIRIFLAGS=-Zmiri-disable-isolation
-args=(-p rind --features wipe --locked --target "$target" --lib --test cpu --test debug)
+args=(-p rind --locked --target "$target" --lib --test cpu --test debug)
 
 # A slow entry that names no test, such as one a rename left behind, would let
 # the renamed test back into the run unnoticed. The listing builds what the

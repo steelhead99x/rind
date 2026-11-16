@@ -1,6 +1,6 @@
 [package]
 name = "rind-aws-lc-rs"
-version = "1.0.3"
+version = "1.0.4"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
 license = "Apache-2.0 OR ISC OR MIT-0"
@@ -95,10 +95,6 @@ ring-io = []
 ring-sig-verify = []
 test_logging = []
 unstable = []
-
-# rind-aws-lc-rs's own: wipes rind's keys and the adapter's heap copies of
-# secrets on drop, as aws-lc-rs always does.
-wipe = ["rind/wipe"]
 
 [dependencies]
 rind = { version = "0.3.2", path = "../rind" }
