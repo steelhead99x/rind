@@ -27,6 +27,14 @@ set_option exponentiation.threshold 400
 
 namespace rind.x86_64
 
+/-- `generator_table` returns the comb static. The inner comb loop calls it
+before indexing the tooth's row. -/
+@[step]
+theorem generator_table_spec :
+    mid.p384.generator_table ⦃ t => t = mid.p384.precomp.CURVE_GENERATOR_PRECOMP_COMB ⦄ := by
+  unfold mid.p384.generator_table
+  simp
+
 /-! ## What the theorems state -/
 
 /-- `b` is X9.62's uncompressed encoding of `d` times the generator. -/
@@ -538,6 +546,7 @@ theorem comb_inner_spec (h : Runs) (X : p384Curve.Point) (hX : nist.fromM X = p3
         have hwn : w.val = 4 * it.start.val + tooth.val := by scalar_tac
         step as ⟨pr, hpr⟩
         obtain ⟨dg, sg⟩ := pr
+        step as ⟨tab, htab0⟩
         step as ⟨tbl, htbl⟩
         step as ⟨tmp, htmp⟩
         set j := it.start.val with hjdef
@@ -552,8 +561,7 @@ theorem comb_inner_spec (h : Runs) (X : p384Curve.Point) (hX : nist.fromM X = p3
         have hdig : digit k (4 * j + t) = signed dg.val sg.val := by rw [digit, hdg, hsg]
         have hd16 : dg.val ≤ 16 := by rw [hdg]; exact boothD_le _ (window_lt _ _)
         have htbl' : tbl.val = (mid.p384.precomp.CURVE_GENERATOR_PRECOMP_COMB.val[j]!).val := by
-          simp only [mid.p384.generator_table] at htbl
-          rw [htbl, getElem!_pos _ _ (by rw [Std.Array.property]; scalar_tac)]
+          rw [htbl, htab0, getElem!_pos _ _ (by rw [Std.Array.property]; scalar_tac)]
         by_cases hd0 : dg.val = 0
         · have hz : pairNat6 tmp.xy.val = (0, 0) := by
             rw [htmp]; simp [hd0, pairNat6, wordsNat, Nat.ofDigits]

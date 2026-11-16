@@ -566,9 +566,11 @@ impl AffineMontPoint {
     fn base_multiply(scalar: &Scalar) -> Self {
         let mut xy = [0; 8];
         low::p256_scalarmulbase(&mut xy, &scalar.0, generator_table());
-        let x = FieldElement(xy[Self::X].try_into().unwrap());
-        let y = FieldElement(xy[Self::Y].try_into().unwrap());
-        Self::from_xy(x.as_mont(), y.as_mont())
+        // Aeneas keeps these names. Wrapped in `FieldElement`, the `unwrap`s
+        // were `a1` and `a2`, which move when `generator_table()` is inlined.
+        let x = xy[Self::X].try_into().unwrap();
+        let y = xy[Self::Y].try_into().unwrap();
+        Self::from_xy(FieldElement(x).as_mont(), FieldElement(y).as_mont())
     }
 
     /// Returns `row[index - 1]`, for a public `index` above zero.

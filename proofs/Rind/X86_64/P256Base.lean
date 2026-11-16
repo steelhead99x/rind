@@ -31,6 +31,14 @@ namespace P256Base
 
 open P256
 
+/-- `generator_table` returns the static. Aeneas binds that call, and the
+Booth loop receives the array as its first argument. -/
+@[step]
+theorem generator_table_spec :
+    mid.p256.generator_table ⦃ t => t = mid.p256.precomp.CURVE_GENERATOR_PRECOMP ⦄ := by
+  unfold mid.p256.generator_table
+  simp
+
 /-! ## Limbs -/
 
 theorem wordsNat_inj : ∀ (a b : List U64), a.length = b.length → wordsNat a = wordsNat b → a = b
@@ -587,10 +595,12 @@ theorem from_affine_val (p : mid.p256.AffineMontPoint) :
 accumulator, which holds the sum of the windows below it. -/
 theorem loop_spec (hc : RunsSelect) (X : p256Curve.Point) (hX : nist.fromM X = p256G) (hord : addOrderOf X = n256)
     (k : Nat) (hk : k < n256) (windows : Std.Array (U8 × U8) 37#usize) (hw : WindowsOk k windows 37)
+    (table : Std.Array (Std.Array U64 512#usize) 37#usize)
+    (htable : table = mid.p256.precomp.CURVE_GENERATOR_PRECOMP)
     (iter : core.ops.range.Range Usize) (hs1 : 1 ≤ iter.start.val) (hs : iter.start.val ≤ 37)
     (he : iter.end.val = 37) (point : mid.p256.AffineMontPoint) (a : Std.Array U64 12#usize)
     (ha : p256Represents (gpt X (acc (digit k) iter.start.val)) (tripleNat a.val)) :
-    mid.p256.JacobianMontPoint.base_multiply_loop iter windows point a ⦃ r =>
+    mid.p256.JacobianMontPoint.base_multiply_loop table iter windows point a ⦃ r =>
       p256Represents (gpt X (acc (digit k) 37)) (tripleNat r.val) ⦄ := by
   have hk256 : k < 2 ^ 256 := lt_trans hk (by simp [n256])
   unfold mid.p256.JacobianMontPoint.base_multiply_loop
@@ -618,8 +628,7 @@ theorem loop_spec (hc : RunsSelect) (X : p256Curve.Point) (hX : nist.fromM X = p
       have hdig : digit k w = signed dg.val sg.val := by rw [digit, hdg, hsg]
       have hd64 : dg.val ≤ 64 := by rw [hdg]; exact boothD_le _ (window_lt _ _)
       have hrow' : row = mid.p256.precomp.CURVE_GENERATOR_PRECOMP.val[w]! := by
-        simp only [mid.p256.generator_table] at hrow
-        rw [hrow, getElem!_pos _ _ (by rw [Std.Array.property]; scalar_tac)]
+        rw [hrow, htable, getElem!_pos _ _ (by rw [Std.Array.property]; scalar_tac)]
       step with select_entry hc X hX w (by omega) pt row hrow' dg sg hd64 as ⟨pt1, hz, hP2⟩
       step as ⟨r1, hr1⟩
       obtain ⟨hX1, hY1, hZ1, -⟩ := id hres
@@ -668,6 +677,7 @@ theorem jac_base_multiply_spec (hc : RunsSelect) (k : mid.p256.Scalar) (hk : wor
   step with booth_w7_spec k as ⟨windows, hw⟩
   step as ⟨pr, hpr⟩
   obtain ⟨dg, sg⟩ := pr
+  step as ⟨table, htable⟩
   step as ⟨row, hrow⟩
   have hwk := hw 0 (by norm_num)
   have hpr' : windows.val[0]! = (dg, sg) := by
@@ -678,8 +688,7 @@ theorem jac_base_multiply_spec (hc : RunsSelect) (k : mid.p256.Scalar) (hk : wor
   have hdig : digit (wordsNat k.val) 0 = signed dg.val sg.val := by rw [digit, hdg, hsg]
   have hd64 : dg.val ≤ 64 := by rw [hdg]; exact boothD_le _ (window_lt _ _)
   have hrow' : row = mid.p256.precomp.CURVE_GENERATOR_PRECOMP.val[0]! := by
-    simp only [mid.p256.generator_table] at hrow
-    rw [hrow, getElem!_pos _ _ (by rw [Std.Array.property]; scalar_tac)]
+    rw [hrow, htable, getElem!_pos _ _ (by rw [Std.Array.property]; scalar_tac)]
   step with select_entry hc X hX 0 (by norm_num) _ row hrow' dg sg hd64 as ⟨pt1, hz, hP2⟩
   step with from_affine_val pt1 as ⟨res, hres⟩
   step*
@@ -726,7 +735,7 @@ theorem jac_base_multiply_spec (hc : RunsSelect) (k : mid.p256.Scalar) (hk : wor
         have := hP2 hd0
         simp only [pow_zero, mul_one] at this
         exact rep_one _ _ this
-    step with loop_spec hc X hX hord (wordsNat k.val) hk windows hw { start := 1#usize, «end» := 37#usize }
+    step with loop_spec hc X hX hord (wordsNat k.val) hk windows hw table htable { start := 1#usize, «end» := 37#usize }
       (by simp) (by simp) (by simp) pt1 (index_mut_back s3) (by simpa using hinit)
       as ⟨a4, ha4⟩
     rw [show acc (digit (wordsNat k.val)) 37 = wordsNat k.val from booth_sum _ hk256] at ha4

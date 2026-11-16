@@ -17,6 +17,15 @@ namespace rind.aarch64
 
 namespace P256
 
+/-- `generator_table` is the static. Aeneas names that binding `a`, which shifts
+every later anonymous let; `base_multiply` names the coordinates `x` and `y`
+so this proof does not follow that counter. -/
+@[step]
+theorem generator_table_spec :
+    mid.p256.generator_table ⦃ t => t = mid.p256.precomp.CURVE_GENERATOR_PRECOMP ⦄ := by
+  unfold mid.p256.generator_table
+  simp
+
 @[step]
 theorem base_multiply_spec (_hr : Runs) (k : mid.p256.Scalar) (_hk : wordsNat k.val < n256) :
     mid.p256.AffineMontPoint.base_multiply k ⦃ q =>
@@ -39,13 +48,15 @@ theorem base_multiply_spec (_hr : Runs) (k : mid.p256.Scalar) (_hk : wordsNat k.
     subst r1_post
     obtain ⟨hy_words, -⟩ := r1_post
     have h8 : (xy1.val).length = 8 := xy1.property
-    have hx : feNat a1 = (pairNat xy1.val).1 := by
+    -- `x` and `y` are the `try_into` lets in `base_multiply`, not the
+    -- anonymous counter. Inlining `generator_table` does not renumber them.
+    have hx : feNat x = (pairNat xy1.val).1 := by
       simp [feNat, hx_words, s_post, mid.p256.AffineMontPoint.X, List.slice, pairNat]
-    have hy : feNat a2 = (pairNat xy1.val).2 := by
+    have hy : feNat y = (pairNat xy1.val).2 := by
       rw [pairNat_drop _ h8]
       simp [feNat, hy_words, s1_post, mid.p256.AffineMontPoint.Y, List.slice, List.take_of_length_le, h8]
     refine ⟨(pairNat xy1.val).1, (pairNat xy1.val).2,
-      xy1_post _ p256OnCurve_G (by simpa [mid.p256.generator_table] using tabulated), ?_⟩
+      xy1_post _ p256OnCurve_G (by simpa [a_post] using tabulated), ?_⟩
     rw [q_post, pairNat_append _ _ fe.property fe1.property, ← hx, ← hy]
     exact Prod.ext fe_post fe1_post
 
