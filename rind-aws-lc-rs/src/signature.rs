@@ -957,7 +957,7 @@ impl AsDer<Pkcs8V2Der<'static>> for Ed25519KeyPair {
     }
 }
 
-/// An Ed25519 private key's seed; wiped on drop under the `wipe` feature.
+/// An Ed25519 private key's seed; wiped on drop.
 #[derive(Clone)]
 pub struct Ed25519Seed<'a> {
     bytes: Wiped<[u8; 32]>,

@@ -31,7 +31,7 @@ pub static PBKDF2_HMAC_SHA384: Algorithm = Algorithm(&hmac::HMAC_SHA384);
 /// PBKDF2-HMAC-SHA512.
 pub static PBKDF2_HMAC_SHA512: Algorithm = Algorithm(&hmac::HMAC_SHA512);
 
-/// A secret, such as a password, keyed once for every salt it derives with; wiped on drop under the `wipe` feature.
+/// A secret, such as a password, keyed once for every salt it derives with; wiped on drop.
 pub struct Secret(hmac::Key);
 
 impl fmt::Debug for Secret {

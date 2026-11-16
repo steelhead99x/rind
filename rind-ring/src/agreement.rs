@@ -51,7 +51,7 @@ pub static ECDH_P384: Algorithm = Algorithm {
     curve: CurveId::P384,
 };
 
-/// A private key used for one key agreement; wiped on drop under rind's `wipe` feature.
+/// A private key used for one key agreement; wiped on drop.
 pub struct EphemeralPrivateKey {
     key: rind::agreement::PrivateKey,
     algorithm: &'static Algorithm,
