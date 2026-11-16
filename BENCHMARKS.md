@@ -1265,10 +1265,12 @@ Linux box is `aarch64-host` rather than the reserved name `aarch64`. A second ma
 that wants a slug already on disk is stored as `<slug>-<tag>`, or `<slug>-2` when that
 alias is taken, and a later import replaces that file. The tag is eight hex characters
 of HMAC-SHA256 over the OS machine id, under a fixed application key. An empty, all-zero,
-or uninitialized id is not a tag. A slug file this machine already has is refreshed, and
-an untagged alias of that machine gains a tag instead of a second file. Refreshing a
-tagged alias leaves another machine's untagged alias of that slug. A host whose
+or uninitialized id is not a tag. A machine without one passes `--host`. A slug file
+this machine already has is refreshed, along with any second alias that carries its tag.
+An alias without a tag may be another machine, so an import never reuses, takes over,
+or deletes it, and a result without a tag whose name another machine holds is not
+imported until it is rerun with a different `--host`. A host whose
 chosen name is that spelling is left as it is. `summary` and `render --from` read every
-measured `<host>.json`.
+readable measured `<host>.json` and name any file they skip.
 `collect` reaches only the maintainer's machines. A gap's `on` may name any host with a
 result, or any nightly tier.

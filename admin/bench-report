@@ -12,6 +12,9 @@ Usage:
 `run` measures the machine it is on. The result's host name is a
 filesystem-safe slug of the CPU model (`intel-core-ultra-9-275hx`,
 `amd-ryzen-9-7950x`, `apple-m3-max`) unless `--host` sets another sane name.
+A machine whose OS has no machine id must pass `--host`: without an id its
+result carries no tag, and a name made from the CPU alone is the same on every
+machine with that CPU.
 The JSON records the raw CPU string, that slug, the logical and physical core
 counts, and the OS. Name the file `<host>.json` to feed it to `summary` or
 `render --from`. A slug that equals a nightly tier name gains a `-host`
@@ -23,9 +26,13 @@ tag and is not this machine's marked alias. A second machine that wants a
 slug already on disk is `<slug>-<tag>`, or `<slug>-2` when that alias is
 taken, and a later import replaces that file, including after the slug
 itself is free. When this machine already has the slug file, that file is
-refreshed and a marked alias of it is removed. An untagged alias gains a
-tag in place. Refreshing a tagged alias leaves another machine's untagged
-alias of that slug. An empty, all-zero, or uninitialized machine id is not a tag.
+refreshed and a marked alias of it that carries its tag is removed. An alias
+without a tag may be another machine, so an import never reuses, takes over,
+or deletes it. A result with no tag has nothing to make a second name from:
+when another machine holds its name it is not imported, and the message says
+to rerun it with a different `--host`. A file in the data directory that is
+not readable JSON is named on stderr and left as it is, and it holds its name.
+An empty, all-zero, or uninitialized machine id is not a tag.
 A host whose chosen name is that spelling is left as it is.
 
 `collect` is the maintainer path. It copies one commit to each machine in
@@ -88,9 +95,10 @@ import tomllib
 # tag is eight hex characters of HMAC-SHA256 over the OS machine id under a
 # fixed application key. An empty, all-zero, or uninitialized id is not a
 # tag. When this machine already has the slug file, that file is refreshed
-# and a marked alias of it is removed. An untagged alias gains a tag in
-# place. Refreshing a tagged alias leaves another machine's untagged alias.
-# A chosen host of that spelling is left as it is.
+# and a marked alias of it that carries its tag is removed. An alias without
+# a tag may be another machine, so an import never reuses, takes over, or
+# deletes it, and a result with no tag whose name another machine holds is
+# not imported. A chosen host of that spelling is left as it is.
 # `render` reads a `note` from here
 # only when that host's JSON has none, and shows these names first so the
 # published report keeps its order; every other host keeps the order it was
@@ -658,12 +666,16 @@ def toolchain(env):
 
 def run(args):
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-    cpu = cpu_metadata()
-    host = resolve_host(args.host, cpu["model"])
-    result = {"schema": 1, "host": host}
     # No tag when the OS has no machine id. A hostname is not a substitute:
     # it changes between container runs, and it is not an id.
     tag = machine_tag()
+    if not tag and not args.host:
+        # A slug of the CPU model is the same on every machine with that CPU,
+        # and a tag is what keeps their results apart.
+        fail("this machine has no machine id, so a name made from its CPU could be another machine's: pass --host NAME")
+    cpu = cpu_metadata()
+    host = resolve_host(args.host, cpu["model"])
+    result = {"schema": 1, "host": host}
     if tag:
         result["machine"] = tag
     result.update(commit=args.commit, started=started, cpu=cpu, os=os_name())
@@ -1348,14 +1360,22 @@ def host_note(name, host):
     return host.get("note") or COLLECT_HOSTS.get(name, {}).get("note")
 
 
+class BadHostFile(Exception):
+    """A file in a host directory that is not readable as a host result."""
+
+
 def read_host(path, name):
     """One host result. `name` is its file stem and has to be a host name,
-    and so does a `host` field that names something else."""
+    and so does a `host` field that names something else. A file that is not
+    JSON, or not an object, raises `BadHostFile`, so a caller can skip it."""
     check_host_name(name)
-    with open(path) as f:
-        data = json.load(f)
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        raise BadHostFile(f"{os.path.basename(path)}: not readable as JSON ({e})") from e
     if not isinstance(data, dict):
-        fail(f"{os.path.basename(path)} is not a host result")
+        raise BadHostFile(f"{os.path.basename(path)}: not a host result")
     if "host" in data and data["host"] != name:
         check_host_name(data["host"])
     return data
@@ -1364,13 +1384,18 @@ def read_host(path, name):
 def load_hosts(directory):
     """Every host result in `directory`, keyed by file name. `tiers.json` is
     the nightly CPU tiers, not a host. Every other file name has to pass
-    `check_host_name`, and so does a `host` field that names something else."""
+    `check_host_name`, and so does a `host` field that names something else.
+    A file that is not a readable host result is named on stderr and skipped,
+    so one bad file does not hide the others."""
     found = {}
     for path in glob.glob(os.path.join(directory, "*.json")):
         name = os.path.splitext(os.path.basename(path))[0]
         if name == "tiers":
             continue
-        found[name] = read_host(path, name)
+        try:
+            found[name] = read_host(path, name)
+        except BadHostFile as e:
+            print(f"bench-report: {e}, skipped", file=sys.stderr)
     # Glob order is not stable. Collect machines stay in COLLECT_HOSTS order
     # and every other file follows by name.
     names = [name for name in COLLECT_HOSTS if name in found]
@@ -2213,11 +2238,13 @@ def report(hosts, tiers, verified, gaps):
         "that wants a slug already on disk is stored as `<slug>-<tag>`, or `<slug>-2` when that",
         "alias is taken, and a later import replaces that file. The tag is eight hex characters",
         "of HMAC-SHA256 over the OS machine id, under a fixed application key. An empty, all-zero,",
-        "or uninitialized id is not a tag. A slug file this machine already has is refreshed, and",
-        "an untagged alias of that machine gains a tag instead of a second file. Refreshing a",
-        "tagged alias leaves another machine's untagged alias of that slug. A host whose",
+        "or uninitialized id is not a tag. A machine without one passes `--host`. A slug file",
+        "this machine already has is refreshed, along with any second alias that carries its tag.",
+        "An alias without a tag may be another machine, so an import never reuses, takes over,",
+        "or deletes it, and a result without a tag whose name another machine holds is not",
+        "imported until it is rerun with a different `--host`. A host whose",
         "chosen name is that spelling is left as it is. `summary` and `render --from` read every",
-        "measured `<host>.json`.",
+        "readable measured `<host>.json` and name any file they skip.",
         "`collect` reaches only the maintainer's machines. A gap's `on` may name any host with a",
         "result, or any nightly tier.",
         "",
@@ -2369,13 +2396,17 @@ def different_machine(previous, host):
     """True when these results must not share a file.
 
     Two tagged results differ when the tags differ. An untagged result must
-    not replace a tagged file. An untagged file may gain a tag, and two
-    untagged results keep the single historical slot.
+    not replace a tagged file. A generated alias without a tag is never
+    replaced or taken over: nothing says which machine it came from. An
+    untagged named file may gain a tag, and two untagged named results keep
+    the single historical slot, since `run` makes their names a choice.
     """
     left, right = machine_tag_of(previous), machine_tag_of(host)
     if left and right:
         return left != right
-    return bool(left and not right)
+    if left:
+        return True
+    return bool(alias_target(previous) or alias_target(host))
 
 
 def generated_alias(host, name):
@@ -2396,15 +2427,13 @@ def alias_target(host):
 def same_machine_alias(body, name, tag):
     """True when `body` is a generated alias of `name` for this result.
 
-    An untagged alias may gain a tag, the same way an untagged file may.
-    A tagged alias matches only that tag. An untagged result does not take
-    over a tagged alias.
+    A tagged alias matches only that tag. An alias without a tag matches
+    nothing, and neither does an untagged result: either could be another
+    machine, so an import neither reuses, takes over, nor deletes it.
     """
     if not generated_alias(body, name):
         return False
     body_tag = machine_tag_of(body)
-    if not body_tag:
-        return True
     return bool(tag) and body_tag == tag
 
 
@@ -2439,8 +2468,12 @@ def collided_host_name(slug, tag, taken):
         n += 1
 
 
-def assign_import_name(name, host, existing, incoming=None):
-    """Where to put `host`.
+def assign_import_name(name, host, existing, incoming=None, blocked=frozenset()):
+    """Where to put `host`, or None when it cannot be stored without risking
+    another machine's file: a result with no tag whose name another machine
+    holds has no tag to make a second name from, so it is not imported.
+    `blocked` names files in the data directory that could not be read. Each
+    holds its name like another machine's result, and nothing replaces it.
 
     When the slug file is already this machine, that file is the one
     destination. A marked alias is the destination otherwise, including one
@@ -2455,7 +2488,9 @@ def assign_import_name(name, host, existing, incoming=None):
     """
     incoming = incoming or {}
     tag = machine_tag_of(host)
-    slug = alias_target(host) or name
+    # Without a tag nothing says whose alias this is, so its marker is ignored
+    # and the file is a chosen name like any other.
+    slug = (alias_target(host) if tag else "") or name
     # The name already in the report wins when it is this machine. Updating
     # a marked alias beside it would leave that name at the old time.
     if isinstance(slug, str) and slug != name and this_machine_file(existing, slug, host):
@@ -2476,8 +2511,6 @@ def assign_import_name(name, host, existing, incoming=None):
     }
     if found:
         return min(found, key=lambda stem: disambiguation_rank(stem, slug, tag))
-    if name not in existing or not different_machine(existing[name], host):
-        return name
     # A file that will not be copied does not hold its name. A missing status
     # is not imported, so it does not count as taken. A marked alias of this
     # result is a destination rather than a chosen host.
@@ -2486,7 +2519,12 @@ def assign_import_name(name, host, existing, incoming=None):
         for stem, body in incoming.items()
         if body.get("status") == "ok" and not same_machine_alias(body, name, tag)
     }
-    return collided_host_name(name, tag, set(existing) | reserved)
+    taken = set(existing) | set(blocked) | reserved
+    if name in blocked:
+        return collided_host_name(name, tag, taken) if tag else None
+    if name not in existing or not different_machine(existing[name], host):
+        return name
+    return collided_host_name(name, tag, taken) if tag else None
 
 
 def _write_imported(directory, name, host, dest):
@@ -2516,16 +2554,13 @@ def _drop_extra_aliases(slug, host, existing, keep):
     """Removes other marked aliases of `slug` so one machine stays one file.
 
     A same-tag alias is this machine, so a second copy is removed wherever
-    the result lands. An untagged alias matches any tagged result, and it
-    may be another machine. It is removed only when this import writes the
-    slug file itself.
+    the result lands. An alias without a tag may be another machine, so it is
+    never removed.
     """
     tag = machine_tag_of(host)
     removed = []
     for stem, body in list(existing.items()):
         if stem == keep or not same_machine_alias(body, slug, tag):
-            continue
-        if not machine_tag_of(body) and keep != slug:
             continue
         path = os.path.join(DATA_DIR, f"{stem}.json")
         if os.path.isfile(path):
@@ -2539,24 +2574,31 @@ def import_hosts(directory):
     """Copies a collection's measured hosts into the report's data.
 
     When this machine already has the slug file, that file is refreshed and
-    a marked alias of it is removed, including an untagged one. Otherwise a
-    marked alias is the one destination, even when the slug itself is free,
-    and an untagged alias gains a tag in place. Refreshing that alias does
-    not delete a different machine's untagged alias of the same slug. A
-    second alias that already carries this result's tag is removed. A free
-    name stays that name. A different machine with the same slug is stored
-    beside it, as `<slug>-<tag>`, or `<slug>-2` when that alias is taken.
-    Only a file this import will copy counts as a taken incoming name. A
-    file in the collection that is already this machine's generated alias
-    is that destination, not a second host, and moving it keeps `alias_of`.
+    a marked alias of it that carries its tag is removed. Otherwise a marked
+    alias that carries its tag is the one destination, even when the slug
+    itself is free. An alias without a tag is never reused, taken over, or
+    deleted, since it may be another machine. A free name stays that name. A
+    different machine with the same slug is stored beside it, as
+    `<slug>-<tag>`, or `<slug>-2` when that alias is taken. A result with no
+    tag has nothing to make a second name from, so when another machine
+    holds its name it is not imported. Only a file this import will copy
+    counts as a taken incoming name. A file in the collection that is
+    already this machine's generated alias is that destination, not a
+    second host, and moving it keeps `alias_of`. A file in the data
+    directory that is not readable holds its name and is left as it is.
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     existing = {}
+    blocked = set()
     for path in glob.glob(os.path.join(DATA_DIR, "*.json")):
         stem = os.path.splitext(os.path.basename(path))[0]
         if stem == "tiers":
             continue
-        existing[stem] = read_host(path, stem)
+        try:
+            existing[stem] = read_host(path, stem)
+        except BadHostFile as e:
+            print(f"bench-report: {e}, left as it is", file=sys.stderr)
+            blocked.add(stem)
     incoming = load_hosts(directory)
     # Chosen filenames this import will copy are taken for alias allocation.
     # A marked alias of another result in the collection is that result's
@@ -2580,7 +2622,14 @@ def import_hosts(directory):
             if this_machine_file(existing, target, incoming[target]) or not different_machine(host, incoming[target]):
                 print(f"bench-report: {name}: same machine as {target}, not a second host", file=sys.stderr)
             continue
-        dest = assign_import_name(name, host, existing, incoming)
+        dest = assign_import_name(name, host, existing, incoming, blocked)
+        if dest is None:
+            print(
+                f"bench-report: {name}: not imported, another machine's result holds {name} "
+                "and this one has no machine id to name a second file; rerun it with a different --host",
+                file=sys.stderr,
+            )
+            continue
         creating = dest not in existing
         existing[dest] = _write_imported(directory, name, host, dest)
         removed = _drop_extra_aliases(slug, host, existing, dest)
