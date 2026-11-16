@@ -1,0 +1,16 @@
+[package]
+name = "wasm-fixture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# What a browser caller of the adapters adds, as their upstreams require of
+# any provider: the random sources of rind, jsonwebtoken, and str0m's rand,
+# and rustls's clock.
+# `just ci` builds this beside every adapter for wasm32-unknown-unknown, so
+# cargo unifies these features into theirs.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+getrandom-02 = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom-03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+rustls-pki-types = { version = "1", features = ["web"] }
