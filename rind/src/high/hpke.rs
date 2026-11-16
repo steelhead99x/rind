@@ -158,8 +158,8 @@ pub struct Suite {
 
 /// A recipient's private key, wiped on drop under the `wipe` feature.
 pub struct PrivateKey {
-    kem: low::ZeroableRef<Kem>,
     key: agreement::PrivateKey,
+    public: PublicKey,
 }
 
 impl PrivateKey {
@@ -223,23 +223,21 @@ impl PrivateKey {
     }
 
     /// Returns the public key to send to senders.
-    pub fn public_key(&self) -> PublicKey {
-        PublicKey {
-            kem: self.kem(),
-            key: self.key.public_key().clone(),
-        }
+    pub fn public_key(&self) -> &PublicKey {
+        &self.public
     }
 
     /// Returns the key's KEM.
     pub fn kem(&self) -> &'static Kem {
-        self.kem.get()
+        self.public.kem()
     }
 
     fn new(kem: &'static Kem, key: agreement::PrivateKey) -> Self {
-        Self {
+        let public = PublicKey {
             kem: low::ZeroableRef::new(kem),
-            key,
-        }
+            key: key.public_key().clone(),
+        };
+        Self { key, public }
     }
 
     /// `Decap` (RFC 9180 section 4.1): the shared secret `enc` encapsulates.
@@ -259,8 +257,7 @@ impl PrivateKey {
     }
 }
 
-// A NIST curve's key is a valid agreement key; the KEM reference is a
-// `ZeroableRef`.
+// A NIST curve's key is a valid agreement key, and so is its public key's.
 impl low::Zeroable for PrivateKey {}
 
 impl Drop for PrivateKey {
@@ -281,7 +278,7 @@ impl fmt::Debug for PrivateKey {
 /// A recipient's public key.
 #[derive(Clone)]
 pub struct PublicKey {
-    kem: &'static Kem,
+    kem: low::ZeroableRef<Kem>,
     key: agreement::PublicKey,
 }
 
@@ -294,14 +291,14 @@ impl PublicKey {
             return Err(KeyFormatError::WrongLength.into());
         }
         Ok(Self {
-            kem,
+            kem: low::ZeroableRef::new(kem),
             key: agreement::PublicKey::new(kem.agreement, bytes)?,
         })
     }
 
     /// Returns the key's KEM.
     pub fn kem(&self) -> &'static Kem {
-        self.kem
+        self.kem.get()
     }
 
     /// `Encap` (RFC 9180 section 4.1): a fresh shared secret and its
@@ -312,12 +309,12 @@ impl PublicKey {
     ) -> Result<(EncapsulatedKey, SharedSecret), Error> {
         let dh = ephemeral.agree(self.key.as_ref())?;
         let enc = ephemeral.public_key();
-        let secret = SharedSecret::new(self.kem, dh.as_ref(), enc.as_ref(), self.key.as_ref());
+        let secret = SharedSecret::new(self.kem(), dh.as_ref(), enc.as_ref(), self.key.as_ref());
         Ok((EncapsulatedKey(enc.clone()), secret))
     }
 
     fn encapsulate_random(&self) -> Result<(EncapsulatedKey, SharedSecret), Error> {
-        self.encapsulate(&agreement::PrivateKey::generate(self.kem.agreement)?)
+        self.encapsulate(&agreement::PrivateKey::generate(self.kem().agreement)?)
     }
 }
 
@@ -330,7 +327,7 @@ impl AsRef<[u8]> for PublicKey {
 impl fmt::Debug for PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PublicKey")
-            .field("kem", self.kem)
+            .field("kem", self.kem())
             .field("key", &self.as_ref())
             .finish()
     }
@@ -857,7 +854,7 @@ mod tests {
         ikm_e: &[u8],
         info: &[u8],
     ) -> Result<(EncapsulatedKey, Sender), Error> {
-        let ephemeral = PrivateKey::derive(public_key.kem, ikm_e)?;
+        let ephemeral = PrivateKey::derive(public_key.kem(), ikm_e)?;
         let (enc, secret) = public_key.encapsulate(&ephemeral.key)?;
         Ok((enc, Sender::schedule(suite, &secret, info)))
     }
@@ -1145,7 +1142,7 @@ mod tests {
                 kem.scalar_len
             );
             for suite in suites() {
-                let (enc, mut sender) = Sender::new(suite, &public_key, b"info").unwrap();
+                let (enc, mut sender) = Sender::new(suite, public_key, b"info").unwrap();
                 let mut recipient =
                     Recipient::new(suite, &private_key, enc.as_ref(), b"info").unwrap();
                 for message in [&b""[..], b"one", &[7; 1000]] {
@@ -1166,7 +1163,7 @@ mod tests {
                     Err(Error::WrongLength)
                 );
 
-                let (enc, exporter) = Exporter::sender(suite.kdf, &public_key, b"info").unwrap();
+                let (enc, exporter) = Exporter::sender(suite.kdf, public_key, b"info").unwrap();
                 let other =
                     Exporter::recipient(suite.kdf, &private_key, enc.as_ref(), b"info").unwrap();
                 assert_eq!(
@@ -1188,7 +1185,7 @@ mod tests {
             kdf: &HKDF_SHA256,
             aead: &AES_128_GCM,
         };
-        let (enc, mut sender) = Sender::new(suite, &private_key.public_key(), b"info").unwrap();
+        let (enc, mut sender) = Sender::new(suite, private_key.public_key(), b"info").unwrap();
         let mut sealed = b"hello".to_vec();
         sender.seal_in_place_append_tag(b"", &mut sealed).unwrap();
 
@@ -1296,7 +1293,7 @@ mod tests {
             kdf: &HKDF_SHA256,
             aead: &CHACHA20_POLY1305,
         };
-        let (enc, mut sender) = Sender::new(suite, &private_key.public_key(), b"").unwrap();
+        let (enc, mut sender) = Sender::new(suite, private_key.public_key(), b"").unwrap();
         let mut recipient = Recipient::new(suite, &private_key, enc.as_ref(), b"").unwrap();
         let mut first = b"first".to_vec();
         sender.seal_in_place_append_tag(b"", &mut first).unwrap();
@@ -1343,7 +1340,7 @@ mod tests {
             kdf: &HKDF_SHA256,
             aead: &AES_128_GCM,
         };
-        let (_, mut sender) = Sender::new(suite, &private_key.public_key(), b"").unwrap();
+        let (_, mut sender) = Sender::new(suite, private_key.public_key(), b"").unwrap();
         let mut lost = NoRoom(vec![0; 16]);
         let sealed = std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
             sender.seal_in_place_append_tag(b"", &mut lost)
@@ -1364,7 +1361,7 @@ mod tests {
             kdf: &HKDF_SHA256,
             aead: &AES_256_GCM,
         };
-        let (enc, mut sender) = Sender::new(suite, &private_key.public_key(), b"").unwrap();
+        let (enc, mut sender) = Sender::new(suite, private_key.public_key(), b"").unwrap();
         let mut recipient = Recipient::new(suite, &private_key, enc.as_ref(), b"").unwrap();
         sender.sealing.seq = u64::MAX - 1;
         recipient.sealing.seq = u64::MAX - 1;
@@ -1417,8 +1414,7 @@ mod tests {
                     aead: &CHACHA20_POLY1305,
                 },
             ] {
-                let (enc, mut sender) =
-                    Sender::new(suite, &private_key.public_key(), info).unwrap();
+                let (enc, mut sender) = Sender::new(suite, private_key.public_key(), info).unwrap();
                 let mut sealed = b"message".to_vec();
                 sender
                     .seal_in_place_append_tag(b"aad", &mut sealed)
@@ -1443,7 +1439,7 @@ mod tests {
         // whether a NIST curve's candidate is in range, which is public.
         for kem in KEMS {
             let ikm = [0x5a; 66];
-            let wanted = PrivateKey::derive(kem, &ikm).unwrap().public_key();
+            let wanted = PrivateKey::derive(kem, &ikm).unwrap().public_key().clone();
 
             low::ct::secret_slice(&ikm);
             let key = PrivateKey::derive(kem, &ikm).unwrap();
@@ -1470,7 +1466,7 @@ mod tests {
             kdf: &HKDF_SHA384,
             aead: &AES_256_GCM,
         };
-        let (_, sender) = Sender::new(suite, &key.public_key(), b"").unwrap();
+        let (_, sender) = Sender::new(suite, key.public_key(), b"").unwrap();
         assert_eq!(format!("{sender:?}"), "Sender { .. }");
     }
 }

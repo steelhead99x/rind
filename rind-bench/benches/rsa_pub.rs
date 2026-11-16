@@ -61,11 +61,11 @@ fn rsa2048_pkcs1_sha256_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        use rind::signature::{PublicKey, verify};
+        use rind::rsa::{PublicKey, verify};
 
         b.iter(|| {
-            let peer_public_key = PublicKey::new(&verify::RSA_PKCS1_SHA256, public_key).unwrap();
-            black_box(peer_public_key.verify(message, signature)).unwrap();
+            let peer_public_key = PublicKey::new(public_key).unwrap();
+            black_box(peer_public_key.verify(&verify::PKCS1_SHA256, message, signature)).unwrap();
         })
     });
 
@@ -119,11 +119,11 @@ fn rsa2048_pkcs1_sha256_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        use rind::signature::{PublicKey, verify};
-        let peer_public_key = PublicKey::new(&verify::RSA_PKCS1_SHA256, public_key).unwrap();
+        use rind::rsa::{PublicKey, verify};
+        let peer_public_key = PublicKey::new(public_key).unwrap();
 
         b.iter(|| {
-            black_box(peer_public_key.verify(message, signature)).unwrap();
+            black_box(peer_public_key.verify(&verify::PKCS1_SHA256, message, signature)).unwrap();
         })
     });
 
@@ -173,12 +173,12 @@ fn rsa1024_pkcs1_sha1_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        use rind::signature::{PublicKey, verify};
+        use rind::rsa::{PublicKey, verify};
 
         b.iter(|| {
-            let peer_public_key =
-                PublicKey::new(&verify::legacy::RSA_PKCS1_1024_SHA1, public_key).unwrap();
-            black_box(peer_public_key.verify(message, signature)).unwrap();
+            let peer_public_key = PublicKey::new(public_key).unwrap();
+            black_box(peer_public_key.verify(&verify::legacy::PKCS1_1024_SHA1, message, signature))
+                .unwrap();
         })
     });
 
@@ -198,14 +198,14 @@ fn rsa1024_pkcs1_sha1_verify(c: &mut Criterion) {
 
 fn rsa2048_pss_sha256_verify(c: &mut Criterion) {
     // Signed here, since PSS signatures are randomized.
-    use rind::signature::{RsaKeyPair, sign};
+    use rind::rsa::{KeyPair, sign};
     let private_key =
-        RsaKeyPair::from_pkcs1(include_bytes!("../../rind/src/high/rsa/rsa2048.der")).unwrap();
-    let public_key = private_key.public_key(&sign::RSA_PSS_SHA256);
+        KeyPair::from_pkcs1(include_bytes!("../../rind/src/high/rsa/rsa2048.der")).unwrap();
+    let public_key = private_key.public_key();
     let public_key = public_key.as_ref();
     let message =
         b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
-    let signature = private_key.sign(&sign::RSA_PSS_SHA256, message).unwrap();
+    let signature = private_key.sign(&sign::PSS_SHA256, message).unwrap();
     let signature = signature.as_ref();
 
     let mut group = c.benchmark_group("rsa2048-pss-sha256-verify");
@@ -232,11 +232,11 @@ fn rsa2048_pss_sha256_verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        use rind::signature::{PublicKey, verify};
+        use rind::rsa::{PublicKey, verify};
 
         b.iter(|| {
-            let peer_public_key = PublicKey::new(&verify::RSA_PSS_SHA256, public_key).unwrap();
-            black_box(peer_public_key.verify(message, signature)).unwrap();
+            let peer_public_key = PublicKey::new(public_key).unwrap();
+            black_box(peer_public_key.verify(&verify::PSS_SHA256, message, signature)).unwrap();
         })
     });
 
@@ -330,7 +330,7 @@ fn rsa2048_oaep_sha256_encrypt(c: &mut Criterion) {
             OAEP_SHA256_MGF1SHA256, OaepPublicEncryptingKey, PublicEncryptingKey,
         };
         let key = OaepPublicEncryptingKey::new(
-            PublicEncryptingKey::from_der(private_key.to_spki().as_ref()).unwrap(),
+            PublicEncryptingKey::from_der(public_key.to_spki().as_ref()).unwrap(),
         )
         .unwrap();
 
@@ -390,7 +390,7 @@ fn openssl_verify(public_key: &[u8], pss: bool, message: &[u8], signature: &[u8]
 /// multiplication from RSA-2048's on some CPUs: 2056 bits for an odd number
 /// of words.
 fn rsa_pkcs1_sha256_verify_sizes(c: &mut Criterion) {
-    use rind::signature::{RsaKeyPair, sign};
+    use rind::rsa::{KeyPair, sign};
 
     let keys: [(u32, &[u8]); 5] = [
         (
@@ -416,10 +416,10 @@ fn rsa_pkcs1_sha256_verify_sizes(c: &mut Criterion) {
     ];
     let message = b"hello";
     for (bits, private_key) in keys {
-        let private_key = RsaKeyPair::from_pkcs8(private_key).unwrap();
-        let public_key = private_key.public_key(&sign::RSA_PKCS1_SHA256);
+        let private_key = KeyPair::from_pkcs8(private_key).unwrap();
+        let public_key = private_key.public_key();
         let public_key = public_key.as_ref();
-        let signature = private_key.sign(&sign::RSA_PKCS1_SHA256, message).unwrap();
+        let signature = private_key.sign(&sign::PKCS1_SHA256, message).unwrap();
         let signature = signature.as_ref();
 
         let mut group = c.benchmark_group(format!("rsa{bits}-pkcs1-sha256-verify"));
@@ -450,12 +450,12 @@ fn rsa_pkcs1_sha256_verify_sizes(c: &mut Criterion) {
         });
 
         group.bench_function("rind", |b| {
-            use rind::signature::{PublicKey, verify};
+            use rind::rsa::{PublicKey, verify};
 
             b.iter(|| {
-                let peer_public_key =
-                    PublicKey::new(&verify::RSA_PKCS1_SHA256, public_key).unwrap();
-                black_box(peer_public_key.verify(message, signature)).unwrap();
+                let peer_public_key = PublicKey::new(public_key).unwrap();
+                black_box(peer_public_key.verify(&verify::PKCS1_SHA256, message, signature))
+                    .unwrap();
             })
         });
 

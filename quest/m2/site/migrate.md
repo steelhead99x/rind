@@ -18,4 +18,4 @@ Decided 2026-11-12 (maintainer, /quest-plan): ✅ one of the three showpieces, a
 - The agent prompt for `MIGRATE.md` is on every page, since it covers each route these pages describe (`MIGRATE.md:39-45`): rustls and the crates above it, the crates an adapter serves, ring's and aws-lc-rs's APIs, and a crate that hard-wires ring 0.17.
 - The patch route is ring's alone: [rind-patch](https://github.com/kixel-ai/rind-patch)'s workspace holds one crate, named `ring`, so the aws-lc-rs page offers the dependency rename and no `[patch]` line. An aws-lc-rs shim would be new work with its own test, and is not planned here.
 - `sh/patch.sh` and `patch/fixture` already test ring's patch route. If a page shows a snippet no test builds, say which in the PR.
-- [The API's shape](/quest/m2/api/shape.md) may rename and move types before rind 0.4. These pages are rendered from MIGRATING.md, so they follow it without a second edit.
+- rind 0.4 moved the signature types into per-algorithm modules ([kixel-ai/rind#781](https://github.com/kixel-ai/rind/pull/781)). These pages are rendered from MIGRATING.md, so they follow it without a second edit.
