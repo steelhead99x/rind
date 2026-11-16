@@ -37,4 +37,9 @@ The `pem` feature, on by default as rcgen's is, adds the PEM methods.
 The `wipe` feature wipes keys and the key pair's PKCS#8 copy on drop.
 The `zeroize` feature, as rcgen's, implements `Zeroize` for `KeyPair`, clearing its PKCS#8 copy.
 
+It builds for `wasm32-wasip2` and `wasm32-unknown-unknown`, the browser, where
+rind needs its JavaScript random source, `getrandom = { version = "0.4",
+features = ["wasm_js"] }`. [PLATFORMS.md](https://github.com/kixel-ai/rind/blob/main/PLATFORMS.md) lists what each adapter's
+upstream needs there too, and why rind's constant-time checks do not cover wasm.
+
 License: Apache-2.0 OR ISC OR MIT-0

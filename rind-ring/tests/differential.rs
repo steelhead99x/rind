@@ -1,6 +1,9 @@
 //! The compositions rind-ring builds itself, HKDF on rind's HMAC and the
 //! short PBKDF2 compare, checked against aws-lc-rs, whose names match ring's.
 
+// aws-lc-rs does not build for wasm.
+#![cfg(not(target_family = "wasm"))]
+
 use core::num::NonZeroU32;
 
 use aws_lc_rs as theirs;
