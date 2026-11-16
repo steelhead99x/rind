@@ -44,7 +44,7 @@ pub enum SelfTest {
     Ed25519,
     /// RSA PKCS#1 v1.5 with SHA-256 at 2048 bits, signing and verifying.
     Rsa,
-    /// ML-KEM-768: key generation, encapsulation, and decapsulation.
+    /// ML-KEM-512: key generation, encapsulation, and decapsulation.
     MlKem,
     /// ML-DSA-44: key generation, signing, and verifying.
     MlDsa,
@@ -553,17 +553,17 @@ mod kat {
         check("rsa_verify", verified.is_ok())
     }
 
-    // Key generation from the seed of ACVP's first ML-KEM-768 keyGen vector,
+    // Key generation from the seed of ACVP's first ML-KEM-512 keyGen vector,
     // then encapsulation of a fixed message, and decapsulation of its
     // ciphertext and of that ciphertext corrupted, which implicit rejection
     // answers.
     pub(super) fn ml_kem() -> Result<(), &'static str> {
-        use crate::mid::mlkem768::{Ciphertext, DecapKey, Message};
+        use crate::mid::mlkem::{Ciphertext, DecapKey, Message, MlKem512};
 
         let mut seed = [0u8; 64];
         seed[..32].copy_from_slice(&hex(ML_KEM_D));
         seed[32..].copy_from_slice(&hex(ML_KEM_Z));
-        let key = DecapKey::keygen_internal(&input("ml_kem_keygen", seed));
+        let key = DecapKey::<MlKem512>::keygen_internal(&input("ml_kem_keygen", seed));
         let ek = key.encapsulation_key();
         check(
             "ml_kem_keygen",
@@ -578,11 +578,12 @@ mod kat {
                 && sha256_of(secret.as_ref())[..] == hex(ML_KEM_SECRET_SHA256),
         )?;
 
-        let ciphertext = input("ml_kem_decaps", *ciphertext.as_ref());
-        let decapsulated = key.decaps(&Ciphertext::from(ciphertext));
+        let ciphertext: [u8; 768] = ciphertext.as_ref().try_into().expect("768 bytes");
+        let ciphertext = input("ml_kem_decaps", ciphertext);
+        let decapsulated = key.decaps(&Ciphertext::from_slice(&ciphertext).expect("768 bytes"));
         let mut corrupted = ciphertext;
         corrupted[1] ^= 1;
-        let rejected = key.decaps(&Ciphertext::from(corrupted));
+        let rejected = key.decaps(&Ciphertext::from_slice(&corrupted).expect("768 bytes"));
         check(
             "ml_kem_decaps",
             sha256_of(decapsulated.as_ref())[..] == hex(ML_KEM_SECRET_SHA256)
@@ -629,19 +630,19 @@ mod kat {
     pub(super) const RSA_SIGNATURE_SHA256: &str =
         "2d4231a659a72edf02a0545bb7e6f9b43cc1fca1d4bc46e3881e56e72230fb7a";
     pub(super) const ML_KEM_D: &str =
-        "e582b7d75e6c80b05ae392a1fc9f7153b12390fd99930368cc67a768baebc8a0";
+        "47b893474672ba92e4b12ee44fb32953af8e8503b5fb471d1614fb8a021a660a";
     pub(super) const ML_KEM_Z: &str =
-        "1cdacb8740c0b87c4a379575f187b367cbfa3b300bf591b109f79816e9cbe8f0";
+        "1f8cb39e9e30bc458a0dc5408884b1187fb217018df760fa57317703b844a0a9";
     pub(super) const ML_KEM_EK_SHA256: &str =
-        "4158f6afb5e516c99f1da07da8c651348422b17c1f4e9a08ad73fb1f91249b3e";
+        "7e4a2b716a684c1ad33c43c808782da9e1a72f14ccda82723f712d49f53a9f28";
     pub(super) const ML_KEM_DK_SHA256: &str =
-        "7aab35839207f72b310abe36e2daa1cc7ff6f7fa8941e439967cd47d9b437079";
+        "c725c25ca8636d75653a07e7a9ccf0b3c2b927617e8f99f0f05ab1f9cb7e046d";
     pub(super) const ML_KEM_CIPHERTEXT_SHA256: &str =
-        "f0241042115f1f11a1ac98805db1d0ecd0ebe7826de65e5979516f9f46b70108";
+        "7538ff136f0b37509313aa30c914af58288826a9a86c7e6a2969d57dbd091dcc";
     pub(super) const ML_KEM_SECRET_SHA256: &str =
-        "4e689716554875744605303f68c4aa404953a510020ea00b16e2380995d4c99e";
+        "d5939b0f208fdb16b77aadea0cab02c65a32ea8792bfb01a5d0c60de468cfd68";
     pub(super) const ML_KEM_REJECTED_SHA256: &str =
-        "1f3f16b46cfa1d09d9c2ed5566e7dca46ad152a9f30fe23bcd14216711d2bed9";
+        "47b2ea819ca42a5be816bf5f4a8bd170befe76c6143570743fe56753af52c3a6";
     pub(super) const ML_DSA_SEED: &str =
         "7194b13c95231010afd2c909992bd2003ba6f437c3886bdbe3f6b867a14ba161";
     pub(super) const ML_DSA_PK_SHA256: &str =
@@ -689,7 +690,7 @@ mod tests {
 
         let group = acvp("ML-KEM-keyGen-FIPS203")
             .into_iter()
-            .find(|g| g.str("parameterSet") == "ML-KEM-768")
+            .find(|g| g.str("parameterSet") == "ML-KEM-512")
             .unwrap();
         let test = &group.tests()[0];
         assert_eq!(test.hex("d"), hex::decode(kat::ML_KEM_D).unwrap());
