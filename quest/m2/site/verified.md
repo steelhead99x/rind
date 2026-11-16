@@ -16,11 +16,7 @@ Decided 2026-11-12 (maintainer, /quest-plan): ✅ one of the three showpieces. T
 - BENCHMARKS.md's Verified code section lists the entries from the same file, and its host tables carry the marks. The page must agree with both.
 - The gaps are then visible as gaps, and the grid fills in by itself as [the proofs](/quest/m4/verified/README.md) land, with no edit to the site.
 - Say what the proofs trust and what they leave out (DER parsing, randomness), from the file's own header and `proofs/README.md`.
-- The landing page's "verified where it counts" claim then links here.
-
-## Required
-
-- [The landing page builds from the repository](/quest/m2/site/landing.md) - the `site/` project this adds a page to
+- The landing page's "verified where it counts" claim then links here. It takes each claim's proof from the README claim's one link into BENCHMARKS.md (`site/src/lib/landing.ts`), which a link here does not meet, so pointing the README's link here also takes changing that rule.
 
 ## Related
 
