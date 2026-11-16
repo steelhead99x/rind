@@ -56,10 +56,11 @@ impl Prk {
     ) -> PyResult<Bound<'py, PyAny>> {
         let info: [&[u8]; 1] = [&info];
         Ok(match key_type {
-            // Expanding first refuses a length too long before allocating it.
+            // Past SHA-512's 255 blocks, the most any hash fills, the length
+            // is refused before allocating it; `fill` checks the PRK's own.
+            KeyType::Len(len) if len > 255 * 64 => return Err(error(rind::Error::WrongLength)),
             KeyType::Len(len) => {
-                let okm = self.0.expand(&info, len).map_err(error)?;
-                PyBytes::new_with(py, len, |out| okm.fill(out).map_err(error))?.into_any()
+                PyBytes::new_with(py, len, |out| self.0.fill(&info, out).map_err(error))?.into_any()
             }
             KeyType::Aead(algorithm) => {
                 let okm = self.0.expand(&info, algorithm.get().inner);

@@ -324,13 +324,17 @@ impl Point {
     ///
     /// A zero scalar's product, at infinity, is skipped, as the
     /// multiplications take only points that are not; every other product
-    /// is not, as the group's order is prime.
+    /// is not, as the group's order is prime. A point whose scalar is one,
+    /// such as a FROST hiding commitment, is added without a multiplication.
     pub(crate) fn public_mul_sum<'a>(
         terms: impl IntoIterator<Item = (&'a Self, &'a Scalar)>,
     ) -> Option<Self> {
+        let one = Scalar::one();
         let mut sum = JacobianMontPoint::infinity();
         for (point, scalar) in terms {
-            if !scalar.is_zero() {
+            if scalar.0 == one.0 {
+                sum = sum.public_add_affine(&point.0);
+            } else if !scalar.is_zero() {
                 sum = sum.public_add_affine(&point.0.multiply(scalar));
             }
         }

@@ -72,9 +72,11 @@ fn hmac_hkdf_and_pbkdf2() {
         .extract(&ikm)
         .unwrap();
     let mut okm = [0u8; 42];
-    prk.expand(&[b"info"], okm.len())
-        .unwrap()
-        .fill(&mut okm)
+    prk.fill(&[b"info"], &mut okm).unwrap();
+    public(&okm);
+    hkdf::Prk::new(&hkdf::HKDF_SHA256, &ikm)
+        .clone()
+        .fill(&[b"info"], &mut okm)
         .unwrap();
     public(&okm);
     let key = hmac::Key::from(prk.expand(&[b"info"], &hmac::HMAC_SHA256).unwrap());
