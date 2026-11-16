@@ -261,8 +261,7 @@ const fn signature_len<P: Params>() -> usize {
 /// from, if known, and the expansion every signature reads, which loading
 /// computes once.
 ///
-/// It wipes its whole value on drop under the `wipe` feature, its expansion
-/// included.
+/// It wipes its whole value on drop, its expansion included.
 pub(crate) struct KeyPair<P: Params> {
     seed: Option<[u8; SEED_LEN]>,
     secret_key: P::SecretKey,
@@ -564,9 +563,9 @@ impl VerifyingKey {
     }
 }
 
-/// Polynomials on the heap, wiped before they are freed under the `wipe`
-/// feature, as heap scratch derived from a private key must be. All-zero
-/// bytes are none, so a key holding them can wipe its whole value.
+/// Polynomials on the heap, wiped before they are freed, as heap scratch
+/// derived from a private key must be. All-zero bytes are none, so a key
+/// holding them can wipe its whole value.
 #[doc(hidden)]
 pub struct Polys(Option<Box<[Poly]>>);
 

@@ -195,21 +195,17 @@ impl KeyPair {
     }
 }
 
-/// The key pair's PKCS#8 encoding, wiped on drop under the `wipe` feature, as
-/// rind wipes the key itself.
+/// The key pair's PKCS#8 encoding, wiped on drop, as rind wipes the key itself.
 struct Wiped(Vec<u8>);
 
 impl Drop for Wiped {
     fn drop(&mut self) {
-        // `cfg!` keeps the wipe type-checked in every build.
-        if cfg!(feature = "wipe") {
-            zeroize::Zeroize::zeroize(&mut self.0);
-        }
+        zeroize::Zeroize::zeroize(&mut self.0);
     }
 }
 
 /// Clears the key pair's PKCS#8 copy, as rcgen's `zeroize` feature does; the
-/// rind key it wraps is wiped on drop under the `wipe` feature.
+/// rind key it wraps is wiped on drop.
 #[cfg(feature = "zeroize")]
 impl zeroize::Zeroize for KeyPair {
     fn zeroize(&mut self) {

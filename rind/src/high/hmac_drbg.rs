@@ -119,7 +119,7 @@ impl<H: Hash> HmacDrbg<H> {
         self.reseed_counter += 1;
     }
 
-    /// Wipes K and V, the secret state, under `wipe`.
+    /// Wipes K and V, the secret state.
     #[cfg(any(test, rind_fips))]
     pub(crate) fn zeroise(&mut self) {
         zeroise(self.k.as_mut());
@@ -236,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn zeroise_wipes_the_state_under_wipe() {
+    fn zeroise_wipes_the_state() {
         let mut drbg = HmacDrbg::<Sha256>::new(&[1; 32], &[2; 16], b"");
         drbg.zeroise();
         let wiped = drbg
@@ -245,7 +245,7 @@ mod tests {
             .iter()
             .chain(drbg.v.as_ref())
             .all(|&b| b == 0);
-        assert_eq!(wiped, cfg!(feature = "wipe"));
+        assert!(wiped);
     }
 
     #[test]

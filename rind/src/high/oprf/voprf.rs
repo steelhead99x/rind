@@ -78,8 +78,7 @@ suited!(
 );
 
 /// The server's key in the VOPRF mode, which evaluates blinded elements
-/// for clients and proves it used the key it published, wiped on drop
-/// under the `wipe` feature.
+/// for clients and proves it used the key it published, wiped on drop.
 ///
 /// It keeps its public key, computed once when it is generated or loaded.
 /// Its outputs differ from an [`oprf::ServerKey`](super::ServerKey)'s with
@@ -271,7 +270,7 @@ impl fmt::Debug for PublicKey {
 
 /// A client's secret for one input in the VOPRF mode, which verifies the
 /// server's proof and turns its evaluated element into the output, wiped
-/// on drop under the `wipe` feature.
+/// on drop.
 pub struct Blind(BlindInner);
 
 impl Blind {
