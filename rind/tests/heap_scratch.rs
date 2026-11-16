@@ -144,7 +144,7 @@ fn detects_a_leak_in_key_generation_through_assert_zeroed() {
 
 /// Two distinct PKCS#8 RSA keys of each size.
 fn rsa_keys() -> impl Iterator<Item = [Vec<u8>; 2]> {
-    use rind::signature::RsaKeyPair;
+    use rind::rsa::KeyPair as RsaKeyPair;
     [
         (
             &include_bytes!("../src/high/rsa/rsa2048.pkcs8.der")[..],
@@ -171,8 +171,12 @@ fn rsa_keys() -> impl Iterator<Item = [Vec<u8>; 2]> {
     .map(|(pkcs8, pkcs1)| {
         let pkcs1 = RsaKeyPair::from_pkcs1(pkcs1).unwrap();
         assert_ne!(
-            RsaKeyPair::from_pkcs8(pkcs8).unwrap().to_spki().as_ref(),
-            pkcs1.to_spki().as_ref(),
+            RsaKeyPair::from_pkcs8(pkcs8)
+                .unwrap()
+                .public_key()
+                .to_spki()
+                .as_ref(),
+            pkcs1.public_key().to_spki().as_ref(),
         );
         [pkcs8.to_vec(), pkcs1.to_pkcs8().as_ref().to_vec()]
     })
@@ -180,14 +184,14 @@ fn rsa_keys() -> impl Iterator<Item = [Vec<u8>; 2]> {
 
 #[test]
 fn rsa() {
-    use rind::signature::{RsaKeyPair, sign};
+    use rind::rsa::{KeyPair as RsaKeyPair, sign};
     for pkcs8 in rsa_keys() {
         assert_independent("RSA load", pkcs8.clone(), |der| {
             RsaKeyPair::from_pkcs8(der).unwrap()
         });
         let keys = pkcs8.map(|der| RsaKeyPair::from_pkcs8(&der).unwrap());
         assert_independent("RSA export", keys.each_ref(), |key| key.to_pkcs8());
-        for algorithm in [&sign::RSA_PKCS1_SHA256, &sign::RSA_PSS_SHA256] {
+        for algorithm in [&sign::PKCS1_SHA256, &sign::PSS_SHA256] {
             assert_independent("RSA signing", keys.each_ref(), |key| {
                 key.sign(algorithm, b"message").unwrap()
             });
@@ -212,8 +216,8 @@ fn rsa_oaep() {
 
 #[test]
 fn rsa_generate() {
+    use rind::rsa::KeyPair as RsaKeyPair;
     use rind::rsa::KeySize;
-    use rind::signature::RsaKeyPair;
     if std::env::var_os("SLOW_TESTS").is_none() {
         return;
     }
@@ -233,11 +237,11 @@ fn rsa_generate() {
 
 #[test]
 fn ecdsa() {
-    use rind::signature::{EcdsaKeyPair, sign};
+    use rind::ecdsa::{KeyPair as EcdsaKeyPair, sign};
     for algorithm in [
-        &sign::ECDSA_P256_SHA256_ASN1,
-        &sign::ECDSA_P384_SHA384_ASN1,
-        &sign::ECDSA_P521_SHA512_ASN1,
+        &sign::P256_SHA256_ASN1,
+        &sign::P384_SHA384_ASN1,
+        &sign::P521_SHA512_ASN1,
     ] {
         assert_zeroed("ECDSA key generation", || {
             EcdsaKeyPair::generate(algorithm).unwrap()
@@ -259,7 +263,7 @@ fn ecdsa() {
 
 #[test]
 fn ed25519() {
-    use rind::signature::Ed25519KeyPair;
+    use rind::ed25519::KeyPair as Ed25519KeyPair;
     assert_zeroed("Ed25519 key generation", || {
         Ed25519KeyPair::generate().unwrap()
     });
@@ -279,7 +283,7 @@ fn ed25519() {
 
 #[test]
 fn ml_dsa() {
-    use rind::signature::sign::{MlDsa44, MlDsa65, MlDsa87};
+    use rind::ml_dsa::{MlDsa44, MlDsa65, MlDsa87};
     ml_dsa_set::<MlDsa44>();
     ml_dsa_set::<MlDsa65>();
     ml_dsa_set::<MlDsa87>();
@@ -291,7 +295,7 @@ fn ml_dsa() {
 #[cfg(not(any(miri, target_family = "wasm")))]
 fn ml_dsa_expanded() {
     use aws_lc_rs::signature::{ML_DSA_44_SIGNING, ML_DSA_65_SIGNING, ML_DSA_87_SIGNING};
-    use rind::signature::sign::{MlDsa44, MlDsa65, MlDsa87};
+    use rind::ml_dsa::{MlDsa44, MlDsa65, MlDsa87};
     ml_dsa_expanded_set::<MlDsa44>(&ML_DSA_44_SIGNING);
     ml_dsa_expanded_set::<MlDsa65>(&ML_DSA_65_SIGNING);
     ml_dsa_expanded_set::<MlDsa87>(&ML_DSA_87_SIGNING);
@@ -307,14 +311,14 @@ fn ml_dsa_expanded() {
 #[test]
 #[cfg(all(not(miri), target_family = "wasm"))]
 fn ml_dsa_expanded_recorded() {
-    use rind::signature::sign::{MlDsa44, MlDsa65, MlDsa87};
+    use rind::ml_dsa::{MlDsa44, MlDsa65, MlDsa87};
     ml_dsa_expanded_load::<MlDsa44>("44");
     ml_dsa_expanded_load::<MlDsa65>("65");
     ml_dsa_expanded_load::<MlDsa87>("87");
 }
 
-fn ml_dsa_set<P: rind::signature::sign::MlDsaParameterSet>() {
-    use rind::signature::sign::MlDsaKeyPair;
+fn ml_dsa_set<P: rind::ml_dsa::ParameterSet>() {
+    use rind::ml_dsa::KeyPair as MlDsaKeyPair;
     assert_zeroed("ML-DSA key generation", || {
         MlDsaKeyPair::<P>::generate().unwrap()
     });
@@ -349,8 +353,8 @@ fn ml_dsa_fixture_path(set: &str, seed: u8) -> String {
 /// The key is dropped inside the check: its expansion is freed then, and
 /// `freed` stops recording before it drops the closure's result.
 #[cfg(all(not(miri), target_family = "wasm"))]
-fn ml_dsa_expanded_load<P: rind::signature::sign::MlDsaParameterSet>(set: &str) {
-    use rind::signature::sign::MlDsaKeyPair;
+fn ml_dsa_expanded_load<P: rind::ml_dsa::ParameterSet>(set: &str) {
+    use rind::ml_dsa::KeyPair as MlDsaKeyPair;
     let expanded = [1, 2].map(|seed| {
         let path = ml_dsa_fixture_path(set, seed);
         std::fs::read(&path).unwrap_or_else(|err| panic!("cannot read {path}: {err}"))
@@ -421,13 +425,13 @@ fn record_ml_dsa_expanded_fixtures() {
 
 #[test]
 fn slh_dsa() {
-    use rind::signature::sign::{SlhDsaSha2_128f, SlhDsaShake128f};
+    use rind::slh_dsa::{SlhDsaSha2_128f, SlhDsaShake128f};
     slh_dsa_set::<SlhDsaSha2_128f>();
     slh_dsa_set::<SlhDsaShake128f>();
 }
 
-fn slh_dsa_set<P: rind::signature::sign::SlhDsaParameterSet>() {
-    use rind::signature::sign::SlhDsaKeyPair;
+fn slh_dsa_set<P: rind::slh_dsa::ParameterSet>() {
+    use rind::slh_dsa::KeyPair as SlhDsaKeyPair;
     assert_zeroed("SLH-DSA key generation", || {
         SlhDsaKeyPair::<P>::generate().unwrap()
     });
@@ -447,10 +451,10 @@ fn slh_dsa_set<P: rind::signature::sign::SlhDsaParameterSet>() {
 
 /// The expanded form, whose load checks the key.
 #[cfg(not(any(miri, target_family = "wasm")))]
-fn ml_dsa_expanded_set<P: rind::signature::sign::MlDsaParameterSet>(
+fn ml_dsa_expanded_set<P: rind::ml_dsa::ParameterSet>(
     theirs: &'static aws_lc_rs::signature::PqdsaSigningAlgorithm,
 ) {
-    use rind::signature::sign::MlDsaKeyPair;
+    use rind::ml_dsa::KeyPair as MlDsaKeyPair;
     let seeds = [[1u8; 32], [2u8; 32]];
     let expanded = seeds.map(|seed| ml_dsa_expanded_pkcs8(theirs, &seed));
     // Dropped inside the check: the expansion is freed then, and `freed`
@@ -469,10 +473,12 @@ fn argon2() {
         "Argon2id",
         [*b"password one", *b"password two"],
         |password| {
+            // The secret keeps its password on the heap.
+            let secret = rind::argon2::Secret::new(password);
             let mut out = [0u8; 32];
-            rind::argon2::derive(params, password, b"saltsalt", &mut out).unwrap();
+            secret.derive(params, b"saltsalt", &mut out).unwrap();
             // Verifying derives its key on the heap.
-            black_box(rind::argon2::verify(params, password, b"saltsalt", &out).is_ok())
+            black_box(secret.verify(params, b"saltsalt", &out).is_ok())
         },
     );
 }
@@ -532,7 +538,7 @@ fn ecdh() {
 
 #[test]
 fn spake2plus() {
-    use rind::spake2plus::{ProverSecrets, RFC9383, VerifierRecord};
+    use rind::spake2plus::{ProverSecrets, RFC9383, Session, VerifierRecord};
     // SPAKE2+ allocates nothing today; this holds it to wiping if it starts
     // to. A handshake's heap scratch would derive from the password or the
     // ephemeral scalars, so a block freed unwiped differs between the runs
@@ -559,9 +565,26 @@ fn spake2plus() {
     assert_independent("SPAKE2+ handshake", handshakes, |(w0, w1)| {
         let prover = ProverSecrets::new(w0, w1).unwrap();
         let record = VerifierRecord::from_w1(w0, w1).unwrap();
-        let (share_p, prover) = prover.start(&RFC9383, b"ctx", b"a", b"b").unwrap();
+        let (share_p, prover) = prover
+            .start(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+            )
+            .unwrap();
         let (share_v, confirm_v, verifier) = record
-            .start(&RFC9383, b"ctx", b"a", b"b", &share_p)
+            .start(
+                &RFC9383,
+                &Session {
+                    context: b"ctx",
+                    id_prover: b"a",
+                    id_verifier: b"b",
+                },
+                &share_p,
+            )
             .unwrap();
         let (confirm_p, key) = prover.finish(&share_v, &confirm_v).unwrap();
         (key, verifier.finish(&confirm_p).unwrap())

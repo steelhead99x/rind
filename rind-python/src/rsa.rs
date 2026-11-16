@@ -79,7 +79,7 @@ impl DecryptingKey {
 
     /// The public key, which encrypts to this key with its algorithm.
     fn public_key(&self) -> EncryptingKey {
-        EncryptingKey(Box::new(self.0.public_key()))
+        EncryptingKey(Box::new(self.0.public_key().clone()))
     }
 
     /// Decrypts `ciphertext`, encrypted with `label`, releasing the GIL.
@@ -107,7 +107,7 @@ impl DecryptingKey {
 
     /// Encodes the public key as `SubjectPublicKeyInfo` DER.
     fn to_spki<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        bytes(py, self.0.to_spki())
+        bytes(py, self.0.public_key().to_spki())
     }
 }
 
@@ -121,7 +121,9 @@ impl EncryptingKey {
     /// `algorithm`.
     #[new]
     fn new(algorithm: &Bound<'_, OaepAlgorithm>, der: Bytes<'_>) -> PyResult<Self> {
-        rsa::EncryptingKey::new(algorithm.get().inner, &der)
+        let algorithm = algorithm.get().inner;
+        rsa::EncryptingKey::new(algorithm, &der)
+            .or_else(|_| rsa::EncryptingKey::from_spki(algorithm, &der))
             .map(Box::new)
             .map(Self)
             .map_err(error)

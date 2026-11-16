@@ -4,10 +4,7 @@ use openmls_traits::types::{
     AeadType, Ciphersuite, CryptoError, ExporterSecret, HashType, HpkeAeadType, HpkeCiphertext,
     HpkeConfig, HpkeKdfType, HpkeKemType, HpkeKeyPair, SignatureScheme,
 };
-use rind::signature::{
-    EcdsaKeyPair, EcdsaSigningAlgorithm, Ed25519KeyPair, PublicKey, sign, verify,
-};
-use rind::{aead, digest, hkdf, hmac, hpke};
+use rind::{aead, digest, ecdsa, ed25519, hkdf, hmac, hpke};
 use tls_codec::SecretVLBytes;
 
 /// The ciphersuites openmls_rust_crypto offers.
@@ -125,14 +122,14 @@ impl OpenMlsCrypto for RustCrypto {
     fn signature_key_gen(&self, alg: SignatureScheme) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
         if alg == SignatureScheme::ED25519 {
             let key =
-                Ed25519KeyPair::generate().map_err(|_| CryptoError::InsufficientRandomness)?;
+                ed25519::KeyPair::generate().map_err(|_| CryptoError::InsufficientRandomness)?;
             return Ok((
                 key.to_seed().as_ref().to_vec(),
                 key.public_key().as_ref().to_vec(),
             ));
         }
         let (algorithm, _) = ecdsa(alg)?;
-        let key = EcdsaKeyPair::generate(algorithm.signing)
+        let key = ecdsa::KeyPair::generate(algorithm.signing)
             .map_err(|_| CryptoError::InsufficientRandomness)?;
         Ok((
             key.to_scalar().as_ref().to_vec(),
@@ -147,8 +144,10 @@ impl OpenMlsCrypto for RustCrypto {
         pk: &[u8],
         signature: &[u8],
     ) -> Result<(), CryptoError> {
-        let key = match alg {
-            SignatureScheme::ED25519 => PublicKey::new(&verify::ED25519, pk),
+        let verified = match alg {
+            SignatureScheme::ED25519 => {
+                ed25519::PublicKey::new(pk).map(|key| key.verify(data, signature))
+            }
             _ => {
                 let (algorithm, _) = ecdsa(alg)?;
                 // openmls_rust_crypto takes a compressed point too, which rind
@@ -166,18 +165,19 @@ impl OpenMlsCrypto for RustCrypto {
                     pk,
                 ]
                 .concat();
-                PublicKey::from_spki(algorithm.verification, &spki)
+                ecdsa::PublicKey::from_spki(algorithm.verification, &spki)
+                    .map(|key| key.verify(data, signature))
             }
         };
-        key.map_err(|_| CryptoError::CryptoLibraryError)?
-            .verify(data, signature)
+        verified
+            .map_err(|_| CryptoError::CryptoLibraryError)?
             .map_err(|_| CryptoError::InvalidSignature)
     }
 
     fn sign(&self, alg: SignatureScheme, data: &[u8], key: &[u8]) -> Result<Vec<u8>, CryptoError> {
         if alg == SignatureScheme::ED25519 {
             let key =
-                Ed25519KeyPair::from_seed(key).map_err(|_| CryptoError::CryptoLibraryError)?;
+                ed25519::KeyPair::from_seed(key).map_err(|_| CryptoError::CryptoLibraryError)?;
             return Ok(key.sign(data).as_ref().to_vec());
         }
         let (algorithm, scalar_len) = ecdsa(alg)?;
@@ -200,7 +200,7 @@ impl OpenMlsCrypto for RustCrypto {
             scalar_len as u8,
         ]);
         sec1[7..].copy_from_slice(key);
-        let key = EcdsaKeyPair::from_sec1(algorithm.signing, sec1)
+        let key = ecdsa::KeyPair::from_sec1(algorithm.signing, sec1)
             .map_err(|_| CryptoError::CryptoLibraryError)?;
         let signature = key.sign(data).map_err(|_| CryptoError::SigningError)?;
         Ok(signature.as_ref().to_vec())
@@ -363,8 +363,8 @@ const MAX_POINT_LEN: usize = 1 + 2 * MAX_SCALAR_LEN;
 const EC_PUBLIC_KEY: [u8; 9] = [0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
 
 struct Ecdsa {
-    signing: &'static EcdsaSigningAlgorithm,
-    verification: &'static rind::signature::VerificationAlgorithm,
+    signing: &'static ecdsa::SigningAlgorithm,
+    verification: &'static ecdsa::VerificationAlgorithm,
     /// The DER of the curve's OID.
     curve: &'static [u8],
 }
@@ -375,14 +375,14 @@ struct Ecdsa {
 fn ecdsa(alg: SignatureScheme) -> Result<(Ecdsa, usize), CryptoError> {
     let (signing, verification, curve, scalar_len): (_, _, &[u8], _) = match alg {
         SignatureScheme::ECDSA_SECP256R1_SHA256 => (
-            &sign::ECDSA_P256_SHA256_ASN1,
-            &verify::ECDSA_P256_SHA256_ASN1,
+            &ecdsa::sign::P256_SHA256_ASN1,
+            &ecdsa::verify::P256_SHA256_ASN1,
             &[0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07],
             32,
         ),
         SignatureScheme::ECDSA_SECP384R1_SHA384 => (
-            &sign::ECDSA_P384_SHA384_ASN1,
-            &verify::ECDSA_P384_SHA384_ASN1,
+            &ecdsa::sign::P384_SHA384_ASN1,
+            &ecdsa::verify::P384_SHA384_ASN1,
             &[0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22],
             48,
         ),

@@ -129,14 +129,14 @@ HMAC, HKDF, PBKDF2, Argon2id, SPAKE2+, and AES key wrap. Each algorithm is a con
 type has one role, so misuse fails to compile:
 
 ```rust
-use rind::signature::{EcdsaKeyPair, PublicKey, sign, verify};
+use rind::ecdsa::{KeyPair, PublicKey, sign, verify};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let key_pair = EcdsaKeyPair::generate(&sign::ECDSA_P256_SHA256_ASN1)?;
+    let key_pair = KeyPair::generate(&sign::P256_SHA256_ASN1)?;
     let signature = key_pair.sign(b"hello")?;
 
-    let encoded = key_pair.public_key();
-    let public_key = PublicKey::new(&verify::ECDSA_P256_SHA256_ASN1, encoded.as_ref())?;
+    let encoded = key_pair.public_key().as_ref();
+    let public_key = PublicKey::new(&verify::P256_SHA256_ASN1, encoded)?;
     public_key.verify(b"hello", signature.as_ref())?;
     Ok(())
 }

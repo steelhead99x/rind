@@ -5,6 +5,7 @@ use core::marker::PhantomData;
 
 use crate::Error;
 use crate::error::KeyFormatError;
+use crate::low;
 use crate::mid::mlkem::{self, Array, Params};
 pub use crate::mid::mlkem::{MlKem512, MlKem768, MlKem1024};
 
@@ -18,22 +19,33 @@ impl Algorithm for MlKem512 {}
 impl Algorithm for MlKem768 {}
 impl Algorithm for MlKem1024 {}
 
-/// A decapsulation key, which decapsulates any number of ciphertexts, wiped on drop under the `wipe` feature.
-pub struct DecapsulationKey<A: Algorithm>(mlkem::DecapKey<A>);
+/// A decapsulation key, which decapsulates any number of ciphertexts, and
+/// its encapsulation key; wiped on drop under the `wipe` feature.
+pub struct DecapsulationKey<A: Algorithm> {
+    key: mlkem::DecapKey<A>,
+    public: EncapsulationKey<A>,
+}
 
 impl<A: Algorithm> DecapsulationKey<A> {
+    fn new(key: mlkem::DecapKey<A>) -> Self {
+        let public = key.encapsulation_key();
+        Self {
+            public: EncapsulationKey {
+                bytes: public.as_bytes(),
+                key: public,
+            },
+            key,
+        }
+    }
+
     /// Generates a decapsulation key from the system random source.
     pub fn generate() -> Result<Self, Error> {
-        mlkem::DecapKey::generate().map(Self)
+        mlkem::DecapKey::generate().map(Self::new)
     }
 
     /// Returns the encapsulation key to send to the peer.
-    pub fn public_key(&self) -> EncapsulationKey<A> {
-        let key = self.0.encapsulation_key();
-        EncapsulationKey {
-            bytes: key.as_bytes(),
-            key,
-        }
+    pub fn public_key(&self) -> &EncapsulationKey<A> {
+        &self.public
     }
 
     /// Recovers the secret the peer encapsulated in `ciphertext`.
@@ -41,9 +53,21 @@ impl<A: Algorithm> DecapsulationKey<A> {
     /// A tampered ciphertext yields an unrelated secret (FIPS-203's implicit
     /// rejection), so the peer learns nothing until the secret is used.
     pub fn decapsulate(&self, ciphertext: &Ciphertext<A>) -> SharedSecret<A> {
-        SharedSecret::new(self.0.decaps(&ciphertext.0))
+        SharedSecret::new(self.key.decaps(&ciphertext.0))
     }
 }
+
+impl<A: Algorithm> Drop for DecapsulationKey<A> {
+    // The private key's own drop wipes it, so this wipes the encapsulation
+    // key, once it frees its matrix.
+    fn drop(&mut self) {
+        self.public.key.free_matrix();
+        low::zeroise_value(&mut self.public);
+    }
+}
+
+// Bytes, and a matrix that is `None` once freed.
+impl<A: Algorithm> low::Zeroable for EncapsulationKey<A> {}
 
 impl<A: Algorithm> fmt::Debug for DecapsulationKey<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -241,7 +265,7 @@ mod tests {
         A::DecapKeyBytes::from_slice(dk)
             .filter(|dk| reduced(&dk.as_ref()[..384 * A::K]))
             .and_then(|dk| mlkem::DecapKey::from_bytes(&dk))
-            .map(DecapsulationKey)
+            .map(DecapsulationKey::new)
     }
 
     fn decapsulate<A: Algorithm>(key: &DecapsulationKey<A>, c: &[u8]) -> Result<Vec<u8>, Error> {
@@ -256,7 +280,7 @@ mod tests {
                 assert_eq!(test.result, Expected::Valid, "{}", test.id);
                 let key = keygen::<A>(&test.seed);
                 assert_eq!(low::ct::into_public(key.as_bytes()).as_ref(), &test.dk);
-                let key = DecapsulationKey(key);
+                let key = DecapsulationKey::new(key);
                 assert_eq!(key.public_key().as_ref(), &test.ek);
             }
         }
@@ -293,7 +317,7 @@ mod tests {
                     continue;
                 }
 
-                let key = DecapsulationKey(keygen::<A>(&test.seed));
+                let key = DecapsulationKey::new(keygen::<A>(&test.seed));
                 assert_eq!(key.public_key().as_ref(), &test.ek, "{}", test.id);
                 let result = decapsulate(&key, &test.c);
                 match (test.result, &result) {
@@ -434,8 +458,8 @@ mod tests {
             rng.read(&mut m);
             rng.read(&mut ct);
 
-            let key = DecapsulationKey(keygen::<MlKem768>(&seed));
-            let (secret, ciphertext) = encaps(&key.public_key(), &m);
+            let key = DecapsulationKey::new(keygen::<MlKem768>(&seed));
+            let (secret, ciphertext) = encaps(key.public_key(), &m);
             assert_eq!(decapsulate(&key, ciphertext.as_ref()).unwrap(), secret);
             let rejected = decapsulate(&key, &ct).unwrap();
 
@@ -552,7 +576,7 @@ mod tests {
                         // A seed-only PKCS#8 key ends in its 64-byte seed.
                         None => test.bytes("PKCS8")[22..].to_vec(),
                     };
-                    let key = DecapsulationKey(keygen::<A>(&seed));
+                    let key = DecapsulationKey::new(keygen::<A>(&seed));
                     if test.get("RawPublic").is_some() {
                         assert_eq!(key.public_key().as_ref(), test.bytes("RawPublic"), "{test}");
                     }
@@ -578,7 +602,7 @@ mod tests {
                         assert_eq!(secret_bytes(&decapsulated), secret_bytes(&secret), "{test}");
                         continue;
                     }
-                    let (secret, ciphertext) = encaps(&ek, &test.bytes("Entropy"));
+                    let (secret, ciphertext) = encaps(ek, &test.bytes("Entropy"));
                     assert_eq!(ciphertext.as_ref(), test.bytes("Ciphertext"), "{test}");
                     assert_eq!(secret, test.bytes("Secret"), "{test}");
                 } else if let Some(name) = test.get("EncapsulateDecapsulate") {
@@ -626,7 +650,7 @@ mod tests {
             let ours = DecapsulationKey::<A>::generate().unwrap();
             let theirs = kem::DecapsulationKey::new(
                 algorithm::<A>(),
-                low::ct::into_public(ours.0.as_bytes()).as_ref(),
+                low::ct::into_public(ours.key.as_bytes()).as_ref(),
             )
             .unwrap();
             let (ciphertext, secret) =

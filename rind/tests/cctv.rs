@@ -22,7 +22,6 @@ mod replace_file;
 #[cfg(not(target_family = "wasm"))]
 use aws_lc_rs::signature::{ED25519, UnparsedPublicKey};
 use rind::Error;
-use rind::signature::{self, verify};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -151,8 +150,8 @@ fn ed25519_edge_cases() {
     let verdicts = ed25519_verdicts();
     let mut failures = Vec::new();
     for v in ed25519_vectors() {
-        let ours = signature::PublicKey::new(&verify::ED25519, &v.key)
-            .map(|key| key.verify(v.msg.as_bytes(), &v.sig));
+        let ours =
+            rind::ed25519::PublicKey::new(&v.key).map(|key| key.verify(v.msg.as_bytes(), &v.sig));
         let flags = v.flags.as_deref().unwrap_or(&[]);
         let mut fail = |msg: String| failures.push(format!("{}: {flags:?}: {msg}", v.number));
         match ours {
