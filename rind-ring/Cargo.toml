@@ -1,6 +1,6 @@
 [package]
 name = "rind-ring"
-version = "0.17.4"
+version = "0.17.5"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
 license = "Apache-2.0 OR ISC OR MIT-0"
@@ -33,9 +33,10 @@ omitted = [
 ]
 
 # ring's feature names, so a manifest naming them builds unchanged. As in ring,
-# `alloc` gates RSA and `std` the errors' `std::error::Error` impls; rind's
-# random source already falls back to `/dev/urandom`, and the rest pick
-# platforms, code paths, or tests rind lacks.
+# `alloc` gates RSA, `std` the errors' `std::error::Error` impls, and
+# `wasm32_unknown_unknown_js` the browser's random source; rind's random source
+# already falls back to `/dev/urandom`, and the rest pick platforms, code
+# paths, or tests rind lacks.
 [features]
 default = ["alloc", "dev_urandom_fallback"]
 alloc = []
@@ -47,19 +48,24 @@ std = ["alloc"]
 test_logging = []
 unstable-testing-arm-no-hw = []
 unstable-testing-arm-no-neon = []
-wasm32_unknown_unknown_js = []
+wasm32_unknown_unknown_js = ["dep:getrandom", "getrandom/wasm_js"]
 
 [dependencies]
+# rind's own, named here only to turn on its JavaScript source.
+getrandom = { version = "0.4", optional = true }
 rind = { version = "0.3.2", path = "../rind" }
 untrusted = "0.9"
 
 [dev-dependencies]
-aws-lc-rs = { version = "1.16", default-features = false, features = ["alloc", "prebuilt-nasm", "non-fips"] }
 # Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
 # features, as `admin/ctgrind` does; otherwise they build as no-ops.
 crabgrind = { version = "0.4", default-features = false }
 hex = { version = "0.4", features = ["serde"] }
-proptest = "1.5.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 untrusted = "0.9"
+
+# aws-lc-rs does not build for wasm, so wasm leaves out the differential tests.
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+aws-lc-rs = { version = "1.16", default-features = false, features = ["alloc", "prebuilt-nasm", "non-fips"] }
+proptest = "1.5.0"

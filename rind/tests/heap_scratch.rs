@@ -1,5 +1,5 @@
-//! Verification that, under the `wipe` feature, heap scratch derived from a
-//! private key is wiped before it is freed.
+//! Verification that heap scratch derived from a private key is wiped before
+//! it is freed.
 //!
 //! `tests/zeroing.rs` checks the bytes of each key value; this checks the
 //! blocks an operation frees while it holds one. Messages, public values,
@@ -12,8 +12,6 @@
 //!
 //! The allocator covers the whole binary, so this is a test binary of its
 //! own. RSA key generation is slow, so it runs only under `SLOW_TESTS`.
-
-#![cfg(feature = "wipe")]
 
 mod freed;
 

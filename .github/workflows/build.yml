@@ -62,6 +62,27 @@ jobs:
             fi
           done >>"$GITHUB_OUTPUT"
 
+  # rind-fips's module answers ACVP's sets through rind-acvp on each of the
+  # runner's paths, with the large-data hash tests, 15 GiB a hash, which
+  # pull requests skip. x86-cpu.yml covers the AVX-512 paths under SDE.
+  acvp:
+    if: github.event_name != 'pull_request'
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix
+
+      - name: Answer ACVP's sets
+        run: nix develop .#acvp --command cargo test --release -p rind-acvp --features module --locked
+        env:
+          SLOW_TESTS: 1
+
   build:
     if: github.event_name != 'pull_request'
     strategy:
@@ -100,10 +121,6 @@ jobs:
         run: cargo test
       - name: Run tests (debug, --no-default-features)
         run: cargo test --no-default-features
-      - name: Run zeroing tests (debug, --features wipe)
-        run: cargo test -p rind -p rind-aws-lc-rs -p rind-rcgen --features rind/wipe,rind-aws-lc-rs/wipe,rind-rcgen/wipe --test zeroing
-      - name: Run heap scratch tests (release, --features wipe)
-        run: env SLOW_TESTS=1 cargo test -p rind --features wipe --test heap_scratch --release
 
       - name: Build (release)
         run: cargo build -p rind --release
@@ -119,12 +136,12 @@ jobs:
         if: runner.arch == 'X64'
         shell: bash
         run: |
-          # Each tier runs the tests and the zeroing tests, then CCTV's million ML-KEM vectors in a
+          # Each tier runs the tests, then CCTV's million ML-KEM vectors in a
           # release build, which honours the tier's denials only with
           # `--cfg rind_cpu_disable`, alongside the check that they took effect
           # rind-fips is left out: its module refuses a CPU masked below its
           # baseline.
-          tier() { env "$@" cargo test --workspace --exclude rind-fips; env "$@" cargo test -p rind --features wipe --test zeroing --test heap_scratch; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
+          tier() { env "$@" cargo test --workspace --exclude rind-fips; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
           # test rind's AVX2 SHA-1 and OpenSSL's AVX2 SHA-256 for CPUs without
           # the SHA extensions
           tier RIND_CPU_DISABLE_sha=1 RIND_CPU_DISABLE_intel=1
@@ -162,7 +179,7 @@ jobs:
         if: runner.arch == 'ARM64'
         shell: bash
         run: |
-          tier() { env "$@" cargo test --workspace --exclude rind-fips; env "$@" cargo test -p rind --features wipe --test zeroing --test heap_scratch; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
+          tier() { env "$@" cargo test --workspace --exclude rind-fips; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
           # test the by-4 AES-GCM and Keccak-f kernels for cores without SHA3,
           # failing a run whose OS hides the crypto extension, and on Apple
           # silicon the `dsb nsh; isb sy` barrier after DIT for cores without `sb`
@@ -253,8 +270,9 @@ jobs:
       - name: Build, lint, and test
         run: just armv7
 
-  # wasm32-wasip2 on the portable backend, under wasmtime: the vector tests,
-  # without the differential ones, whose aws-lc does not build for wasm.
+  # wasm32-wasip2 on the portable backend, under wasmtime: rind's vector tests
+  # and rind-rustls's and rind-ring's tests, without the differential ones,
+  # whose aws-lc does not build for wasm.
   wasm:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest

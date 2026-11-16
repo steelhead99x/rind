@@ -95,7 +95,7 @@ pub const X25519: Algorithm = Algorithm {
     id: AlgorithmId::X25519,
 };
 
-/// A private key for any number of key agreements; wiped on drop under the `wipe` feature.
+/// A private key for any number of key agreements; wiped on drop.
 pub struct PrivateKey {
     key: rind::agreement::PrivateKey,
 }
@@ -422,7 +422,7 @@ where
     }
 }
 
-/// A private key for one key agreement; wiped on drop under the `wipe` feature.
+/// A private key for one key agreement; wiped on drop.
 pub struct EphemeralPrivateKey(PrivateKey);
 
 impl EphemeralPrivateKey {

@@ -85,6 +85,9 @@ fn main() {
 
     println!("cargo::rustc-link-search=native={}", lib.display());
     println!("cargo::rustc-link-lib=dylib=rind_fips_module");
+    // A dependent's build script reads it as `DEP_RIND_FIPS_MODULE_LIB`, as
+    // `rind-acvp`'s does to find the module outside cargo.
+    println!("cargo::metadata=lib={}", lib.display());
     // Tests find the module to tamper with a copy of it.
     println!("cargo::rustc-env=RIND_FIPS_MODULE={}", module.display());
 }
@@ -97,16 +100,19 @@ fn build(manifest: &Path, out: &Path, target: &str) -> PathBuf {
         flags.extend(["--cfg", "rind_fips_break"]);
     }
     flags.push(concat!("-Clink-arg=-Wl,-soname,", "librind_fips_module.so"));
-    // Until `wipe` is rind's default, the module turns it on here: as a
-    // dependency in its manifest, it would turn it on for every crate a
-    // workspace build compiles with the module. Under valgrind the module
-    // keeps line tables, so ctgrind's suppressions match inlined frames.
+    // Under valgrind the module keeps line tables, so ctgrind's suppressions
+    // match inlined frames.
     let ctgrind = env::var_os("CARGO_FEATURE___CTGRIND").is_some();
-    let (features, debug) = if ctgrind {
-        ("rind/wipe,rind/__ctgrind", "line-tables-only")
-    } else {
-        ("rind/wipe", "false")
-    };
+    let debug = if ctgrind { "line-tables-only" } else { "false" };
+    let mut features = Vec::new();
+    if ctgrind {
+        features.push("rind/__ctgrind");
+    }
+    // `rind-acvp`'s build: the deterministic forms of the randomized
+    // services, for testing only.
+    if env::var_os("CARGO_FEATURE___ACVP").is_some() {
+        features.push("acvp");
+    }
 
     let mut command = Command::new(env::var_os("CARGO").unwrap());
     command
@@ -122,7 +128,6 @@ fn build(manifest: &Path, out: &Path, target: &str) -> PathBuf {
         .arg(manifest.join("module/Cargo.toml"))
         .arg("--target-dir")
         .arg(&target_dir)
-        .args(["--features", features])
         // These flags replace any the caller set, which would otherwise
         // reach the module through the environment.
         .env("CARGO_ENCODED_RUSTFLAGS", flags.join("\x1f"))
@@ -138,6 +143,9 @@ fn build(manifest: &Path, out: &Path, target: &str) -> PathBuf {
         .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .env_remove("CARGO_TARGET_DIR")
         .env_remove("CARGO_BUILD_TARGET");
+    if !features.is_empty() {
+        command.args(["--features", &features.join(",")]);
+    }
     // Cargo sets these for this script from the caller's cfgs and features,
     // and sets them again for each nested build script only where they hold
     // there, so one the caller's flags set, such as `rind_portable`, would

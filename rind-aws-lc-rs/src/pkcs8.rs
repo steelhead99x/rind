@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use crate::wipe::Wiped;
 
-/// A PKCS#8 private key document, wiped on drop under the `wipe` feature.
+/// A PKCS#8 private key document, wiped on drop.
 pub struct Document(Wiped<Vec<u8>>);
 
 impl Document {

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Run rind's tests on wasm32-wasip2 under wasmtime, as `just wasm` runs it in
-# the dev shell's `wasm` shell. wasm compiles the portable backend, so this
-# executes the code only wasm compiles, such as MD5's optimizer barrier.
-# aws-lc does not build for wasm, so the differential tests are left out;
-# `just portable` runs the same Rust against it on x86_64. The vectors run.
+# Run rind's tests, and rind-rustls's and rind-ring's, on wasm32-wasip2 under
+# wasmtime, as `just wasm` runs it in the dev shell's `wasm` shell. wasm
+# compiles the portable backend, so this executes the code only wasm compiles,
+# such as MD5's optimizer barrier. aws-lc does not build for wasm, so the
+# differential tests are left out; `just portable` runs the same Rust against
+# it on x86_64. The vectors run, and the adapters' handshakes run rind against
+# itself.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -18,4 +20,6 @@ export CARGO_TARGET_WASM32_WASIP2_RUNNER="wasmtime run --dir $root::$root --env 
 # Optimised, as the armv7 run is, but keeping the checks a debug build has.
 export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
 export CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true
-SLOW_TESTS=1 cargo test -p rind --features wipe --locked --release --target wasm32-wasip2
+SLOW_TESTS=1 cargo test -p rind --locked --release --target wasm32-wasip2
+# Without the examples, whose tokio needs the threads and sockets wasm lacks.
+cargo test -p rind-rustls -p rind-ring --lib --tests --locked --release --target wasm32-wasip2

@@ -9,8 +9,13 @@ license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apach
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+# The deterministic forms of the randomized services, which FIPS 203 and 204
+# allow only for testing, for `rind-acvp`; `rind-fips`'s `__acvp` asks for
+# them.
+acvp = []
+
 [dependencies]
-# `rind-fips`'s build script turns on `wipe`, so a workspace build does not.
 rind = { path = "../../rind" }
 libc = { version = "0.2", default-features = false }
 
