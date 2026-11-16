@@ -410,11 +410,7 @@ impl From<[u8; NONCE_LEN]> for RandomNonce {
 }
 
 /// A key of the algorithm's [`Algorithm::key_len`].
-impl hkdf::sealed::Sealed for &'static Algorithm {
-    fn len(&self) -> usize {
-        self.key_len()
-    }
-}
+impl hkdf::sealed::Sealed for &'static Algorithm {}
 impl hkdf::KeyType for &'static Algorithm {}
 
 impl From<hkdf::Okm<'_, &'static Algorithm>> for Key {
