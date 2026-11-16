@@ -838,9 +838,7 @@ fn transcript(
 }
 
 fn expand(prk: &hkdf::Prk, info: &[u8], out: &mut [u8]) -> Result<(), Error> {
-    prk.expand(&[info], out.len())
-        .and_then(|okm| okm.fill(out))
-        .map_err(|_| Error::Fault)
+    prk.fill(&[info], out).map_err(|_| Error::Fault)
 }
 
 fn schedule_keys(schedule: Schedule, transcript_hash: &[u8; 32]) -> Result<Keys, Error> {
