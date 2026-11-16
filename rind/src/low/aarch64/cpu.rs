@@ -501,6 +501,8 @@ mod tests {
         unsafe { call!(unsafe zero_bytes, bytes.as_mut_ptr(), 100) };
         assert_eq!(bytes, [0; 100]);
         call!(prefetch_ro::<u8>, bytes.as_ptr());
+        #[cfg(target_os = "linux")]
+        let _ = call!(read_midr);
         #[cfg(target_vendor = "apple")]
         if std::arch::is_aarch64_feature_detected!("dit") {
             // SAFETY: the CPU has DIT, which this leaves as it found it.
@@ -901,7 +903,7 @@ mod tests {
     /// An allow-all filter is valid, so `EINVAL` or `ENOSYS` from it means
     /// the platform (qemu-user, here) has no seccomp, rather than that the
     /// trap filter above is malformed.
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
     fn seccomp_unavailable(err: &std::io::Error) -> bool {
         if !matches!(err.raw_os_error(), Some(libc::ENOSYS | libc::EINVAL)) {
             return false;
@@ -920,7 +922,7 @@ mod tests {
 
     /// Answers `openat` and `openat2` with `action`. Other calls are
     /// allowed, so the test can still print.
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
     fn install_openat_filter(action: u32) -> std::io::Result<()> {
         // BPF_LD | BPF_W | BPF_ABS, BPF_JMP | BPF_JEQ | BPF_K, BPF_RET | BPF_K.
         let mut filter = [
@@ -958,7 +960,7 @@ mod tests {
         install_filter(&mut filter)
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
     fn install_filter(filter: &mut [libc::sock_filter]) -> std::io::Result<()> {
         let prog = libc::sock_fprog {
             len: filter.len() as libc::c_ushort,
