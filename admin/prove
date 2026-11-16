@@ -710,15 +710,15 @@ fi
 # Each hand model quotes the Rust it models. Fail if that Rust has changed, so
 # the model is reviewed with every change to it: print the first item each line
 # starts, from that line to the closing one at its indentation, or to the `;`
-# that ends an item whose first line ends with `=`, then a blank line.
+# that ends an item whose first line ends with `=` or `;`, then a blank line.
 items() {
     local file=$1
     shift
     for start in "$@"; do
         awk -v s="$start" '
-            !p && index($0, s) == 1 { p = 1; ind = substr($0, 1, match($0, /[^ ]/) - 1); eq = /=$/ }
+            !p && index($0, s) == 1 { p = 1; ind = substr($0, 1, match($0, /[^ ]/) - 1); eq = /=$/; one = /;$/ }
             p { print }
-            p && (index($0, ind "}") == 1 || (ind == "" && /^[^ }].*;$/) || (eq && /;$/)) { print ""; exit }' "$file"
+            p && (one || index($0, ind "}") == 1 || (ind == "" && /^[^ }].*;$/) || (eq && /;$/)) { print ""; exit }' "$file"
     done
 }
 check_quote() {
@@ -751,16 +751,19 @@ ecdsa_items() {
     items rind/src/high/curve.rs 'impl Curve for P256 {'
     items rind/src/mid/p256.rs '    pub(crate) fn generate(rng: &mut dyn'
     items <(sed -n '/^impl StaticPrivateKey {/,/^}/p' rind/src/mid/p256.rs) '    pub(crate) fn generate('
-    items rind/src/high/signature.rs 'impl<const N: usize> Buffer<N> {' 'macro_rules! with_hash {' \
-        'struct Ecdsa {' 'macro_rules! with_ecdsa {' 'macro_rules! with_curve {' 'trait Encoding {' \
-        'impl Encoding for Fixed {' 'trait EcdsaCurve:' 'macro_rules! ecdsa_curve {' \
-        'ecdsa_curve!(P256, EcdsaP256);' 'struct EcdsaVerifier<' 'impl<C: Curve> EcdsaVerifier<C> {' \
-        'fn parse_ecdsa<' 'const fn ecdsa_verification(' \
-        'const fn ecdsa_signing(' 'pub struct EcdsaSigningAlgorithm {' 'enum EcdsaSource<' \
-        'pub struct EcdsaKeyPair {' 'enum EcdsaKey {' 'struct EcdsaPair<' 'type Write<K> =' \
-        'struct EcdsaOps<' 'impl<C: EcdsaCurve> EcdsaPair<C> {' 'macro_rules! on_ecdsa {' \
-        'impl EcdsaKeyPair {' '    pub static ECDSA_P256_SHA256_FIXED: EcdsaSigningAlgorithm' \
-        '    pub static ECDSA_P256_SHA256_FIXED: VerificationAlgorithm'
+    items rind/src/high/signature.rs 'macro_rules! with_hash {' 'type Verify<K> =' 'type Sign<K> =' \
+        'type Write<K> ='
+    items rind/src/high/signature/ecdsa.rs 'struct Ecdsa {' 'macro_rules! with_ecdsa {' \
+        'macro_rules! with_curve {' 'trait Encoding {' 'impl Encoding for Fixed {' 'trait EcdsaCurve:' \
+        'macro_rules! ecdsa_curve {' 'ecdsa_curve!(P256);' 'enum Key {' 'impl Clone for Key {' \
+        'struct EcdsaVerifier<' 'impl<C: EcdsaCurve> Clone for EcdsaVerifier<C> {' 'struct VerifyOps<' \
+        'impl<C: EcdsaCurve> EcdsaVerifier<C> {' 'macro_rules! on_key {' 'fn parse_ecdsa<' \
+        'pub struct VerificationAlgorithm {' 'const fn ecdsa_verification(' 'pub struct PublicKey {' \
+        'impl PublicKey {' 'impl AsRef<[u8]> for PublicKey {' 'pub struct Signature(' \
+        'const SIGNATURE_MAX_LEN:' 'const fn ecdsa_signing(' 'pub struct SigningAlgorithm {' \
+        'enum EcdsaSource<' 'pub struct KeyPair {' 'enum EcdsaKey {' 'struct EcdsaPair<' 'struct EcdsaOps<' \
+        'macro_rules! on_ecdsa {' 'impl KeyPair {' '    pub static P256_SHA256_FIXED: SigningAlgorithm' \
+        '    pub static P256_SHA256_FIXED: VerificationAlgorithm'
 }
 check_quote X86_64/EcdsaDispatch ecdsa_items
 check_quote X86_64/DigestAlgorithm items rind/src/high/digest.rs 'pub struct Algorithm ' 'impl Algorithm {' \
@@ -817,37 +820,31 @@ check_quote X86_64/HmacDispatch items rind/src/high/hmac.rs 'pub struct Algorith
 check_quote X86_64/HkdfExpand items rind/src/high/hkdf.rs '    fn expand_into('
 check_quote Portable/Compare items rind/src/low/portable/cpu.rs 'pub(in crate::low) fn ct_compare_bytes(' \
     'pub(in crate::low) fn ct_compare_16('
-check_quote X86_64/SignatureDispatch items rind/src/high/signature.rs \
-    'pub struct VerificationAlgorithm(' 'enum Verification {' 'type Verify<K> =' \
-    'struct Verifier<K> {' 'impl<K> Verifier<K> {' 'pub struct PublicKey {' 'enum Parsed {' \
-    'impl PublicKey {' 'impl AsRef<[u8]> for PublicKey {' 'impl fmt::Debug for PublicKey {' \
-    'impl Ed25519KeyPair {' 'fn parse_ed25519(' '    pub static ED25519:'
-check_quote X86_64/RsaDispatch items rind/src/high/signature.rs 'enum HashId {' 'impl HashId {' \
-    'impl<const N: usize> Buffer<N> {' 'pub struct RsaVerificationAlgorithm {' \
-    'impl AsRef<VerificationAlgorithm> for RsaVerificationAlgorithm {' 'enum RsaPadding {' \
-    'struct RsaScheme {' 'type RsaVerify =' 'struct RsaVerifier {' 'impl RsaScheme {' \
-    'enum RsaVerification {' 'impl RsaVerification {' 'struct Rsa {' 'impl fmt::Debug for Rsa {' \
-    'impl Rsa {' 'const fn rsa_verification(' 'const fn rsa_algorithm(' 'const PKCS1_SHA256:' \
-    'const PSS_SHA256:' 'pub(super) const RSA_MIN_BITS:' \
-    '    pub static RSA_PKCS1_SHA256: RsaVerificationAlgorithm' \
-    '    pub static RSA_PSS_SHA256: RsaVerificationAlgorithm'
+check_quote X86_64/SignatureBuffer items rind/src/high/signature.rs 'impl<const N: usize> Buffer<N> {'
+rsa_items() {
+    items rind/src/high/signature.rs 'enum HashId {' 'impl HashId {'
+    items rind/src/mid/rsa_pub.rs 'const MAX_PUBLIC_MODULUS_BITS:' 'pub(crate) const MAX_PUBLIC_MODULUS_BYTES:'
+    items rind/src/high/rsa.rs 'pub(crate) const MAX_PUBLIC_KEY_LEN:'
+    items rind/src/high/signature/rsa.rs 'enum RsaPadding {' 'struct RsaScheme {' 'type RsaSign =' \
+        'type RsaVerify =' 'impl RsaScheme {' 'enum RsaVerification {' 'impl RsaVerification {' \
+        'pub struct VerificationAlgorithm {' 'const fn verification(' 'const fn algorithm(' \
+        'const PKCS1_SHA256_SCHEME:' 'const PSS_SHA256_SCHEME:' 'pub(crate) const MIN_BITS:' \
+        'pub struct PublicKey {' 'struct RsaPublicKeyDer(' 'impl PublicKey {' \
+        '    pub static PKCS1_SHA256: VerificationAlgorithm' '    pub static PSS_SHA256: VerificationAlgorithm'
+}
+check_quote X86_64/RsaDispatch rsa_items
 # The models' `Ops` hold nothing, since the quoted constructor builds the only
 # one; `Masker<C>` holds only the key, since the quoted `Masker::new` builds
 # each with `C::mask`; and a digest `Algorithm` is which static it is. That
 # holds while the quotes have every match of these: each mention of `Ops`,
 # each `Masker` literal, `impl` on `Masker`, and write to a `mask` field, which
-# only `quic.rs` can make, and each `Algorithm` the source builds. Likewise
-# `Verification::Ed25519` holds nothing and `Parsed::Ed25519` only its key,
-# while the quotes have every mention of each: `ED25519` builds the only one
-# of the first, with `parse_ed25519`, and each of the second has
-# `Ed25519VerifyingKey::verify`. ECDSA's keys are modelled for P-256 with
-# SHA-256 and fixed-length signatures, which holds while the quotes have each
-# `Verification::Ecdsa`, `EcdsaP256`, and `EcdsaKey::`, each `EcdsaOps` and
-# `EcdsaPair` built, which `load` alone builds, and each read of their `ops`.
-# An RSA verification algorithm is its `Rsa`'s floor and `verify`, its
-# `parse` being `PublicKey::parse_rsa`, which holds while the quotes have each
-# `Rsa` literal, which `rsa_algorithm` alone builds, and each
-# `Verification::Rsa`.
+# only `quic.rs` can make, and each `Algorithm` the source builds. ECDSA's
+# keys are modelled for P-256 with SHA-256 and fixed-length signatures, which
+# holds while the quotes have each mention of `Key::` and `EcdsaKey::`, each
+# `Key` a clone builds, each `VerifyOps`, `EcdsaOps`, and `EcdsaPair` built,
+# which `parse` and `load` alone build, and each read of their `ops`. RSA's
+# two statics are built wholly by quoted code, so its model needs no such
+# check.
 # An AEAD `Sealer<C>` is its key, since the quoted `Sealer::expand` builds
 # every `Ops`, of `C`'s own functions, while the quote has each mention of
 # `Ops` in `aead.rs` and each `Algorithm` it builds.
@@ -865,17 +862,11 @@ only_quoted rind/src/aead/quic.rs "$out/quic-all.rs" 'Masker(<[^>]*>)? *\{'
 only_quoted rind/src/aead/quic.rs "$out/quic-all.rs" '\.mask *=[^=]'
 only_quoted rind/src/high/digest.rs "$out/DigestDispatch.rs" '\bOps\b'
 only_quoted rind/src/high/digest.rs "$out/DigestAlgorithm.rs" '= Algorithm \{'
-only_quoted rind/src/high/signature.rs "$out/SignatureDispatch.rs" 'Verification::Ed25519\('
-only_quoted rind/src/high/signature.rs "$out/SignatureDispatch.rs" 'Parsed::Ed25519\('
-cat "$out/SignatureDispatch.rs" "$out/EcdsaDispatch.rs" >"$out/signature.rs"
-only_quoted rind/src/high/signature.rs "$out/signature.rs" 'Verification::Ecdsa\('
-only_quoted rind/src/high/signature.rs "$out/signature.rs" 'EcdsaP256\b'
-only_quoted rind/src/high/signature.rs "$out/EcdsaDispatch.rs" 'EcdsaKey::'
-only_quoted rind/src/high/signature.rs "$out/EcdsaDispatch.rs" 'Ecdsa(Ops|Pair) \{'
-only_quoted rind/src/high/signature.rs "$out/EcdsaDispatch.rs" '\.ops\b'
-cat "$out/SignatureDispatch.rs" "$out/RsaDispatch.rs" >"$out/rsa-signature.rs"
-only_quoted rind/src/high/signature.rs "$out/rsa-signature.rs" 'Verification::Rsa\('
-only_quoted rind/src/high/signature.rs "$out/RsaDispatch.rs" '\bRsa \{'
+only_quoted rind/src/high/signature/ecdsa.rs "$out/EcdsaDispatch.rs" '\bKey::'
+only_quoted rind/src/high/signature/ecdsa.rs "$out/EcdsaDispatch.rs" 'EcdsaKey::'
+only_quoted rind/src/high/signature/ecdsa.rs "$out/EcdsaDispatch.rs" 'Self::P(256|384|521)\('
+only_quoted rind/src/high/signature/ecdsa.rs "$out/EcdsaDispatch.rs" '(VerifyOps|EcdsaOps|EcdsaPair) \{'
+only_quoted rind/src/high/signature/ecdsa.rs "$out/EcdsaDispatch.rs" '\.ops\b'
 only_quoted rind/src/high/hmac.rs "$out/HmacDispatch.rs" '\.ops\b'
 only_quoted rind/src/high/hmac.rs "$out/HmacDispatch.rs" '(Key|Tag)Ops \{'
 only_quoted rind/src/high/hmac.rs "$out/HmacDispatch.rs" '= Algorithm \{'
@@ -896,23 +887,24 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # block cipher on the AES instructions, over the intrinsics
 # `proofs/Rind/X86_64/Simd.lean` and `proofs/Rind/Aarch64/Neon.lean` model.
 # Then Ed25519 from
-# `high::signature`'s key pair and `high::ed25519` down to s2n-bignum's
-# routines and the SHA-512 context. On x86_64, ChaCha20-Poly1305 and
+# `high::signature::ed25519`'s key pair and public key, which call no function
+# pointer, down to s2n-bignum's routines and the SHA-512 context. On x86_64, ChaCha20-Poly1305 and
 # XChaCha20-Poly1305 from their keys down to the call of aws-lc's one-pass
 # routine, which is opaque, as are the separate passes CPUs without SSE4.1
 # run, with HChaCha20 over HACL*'s rounds.
 #
 # Aeneas cannot translate function pointers, through which `PrivateKey`
 # reaches each curve's `Agree` impl, `HeaderProtectionKey` each cipher's
-# `Mask` impl, `digest::Context` each hash's, and `signature::PublicKey` each
-# algorithm's parser and verifier, so the translation starts below that
+# `Mask` impl, `digest::Context` each hash's, and the ECDSA and RSA signature
+# modules' keys each algorithm's, so the translation starts below that
 # dispatch, and `proofs/Rind/X86_64/Dispatch.lean`, `QuicDispatch.lean`,
-# `DigestDispatch.lean`, and `SignatureDispatch.lean` model it by hand. `agreement::Algorithm` holds the
+# `DigestDispatch.lean`, `EcdsaDispatch.lean`, and `RsaDispatch.lean` model it
+# by hand, over `SignatureBuffer.lean`'s `Buffer::write`, whose closure returns
+# a borrow of its argument. `agreement::Algorithm` holds the
 # agreement API's, and its `PublicKey` holds an `Algorithm`, so it is opaque,
 # and `Dispatch.lean` models it. `digest::Algorithm` holds the
-# digest API's, so it is opaque too, and `DigestAlgorithm.lean` models it;
-# `signature::PublicKey` holds the signature API's, so no translated function
-# reaches it, and `SignatureDispatch.lean` defines it. SHA-1's and SHA-256's
+# digest API's, so it is opaque too, and `DigestAlgorithm.lean` models it.
+# SHA-1's and SHA-256's
 # padding is translated down to their block functions, which are opaque.
 # SHA-3's sponge is translated down to its Keccak-f routines, which are
 # opaque, from what the digest API, ML-KEM, and ML-DSA call.
@@ -934,7 +926,8 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # On x86_64, RSA verification is translated from `high::rsa::VerifyingKey`
 # down to `low::posint` and the Montgomery products' dispatch in
 # `low::x86_64::mont`, whose s2n-bignum and aws-lc routines are opaque. Its
-# DER parsing and encoding, which the ✓ leaves out, are opaque too.
+# DER parsing and encoding, which the ✓ leaves out, are opaque too, and
+# `RsaDispatch.lean` models `signature::rsa::PublicKey` above it.
 # x86_64's RSA reaches `Digest::ct_equal`, so every target starts from it,
 # for the HMAC model all share.
 # See UPSTREAM.md, "Aeneas cannot translate several kinds of Rust".
@@ -1000,11 +993,17 @@ assembly=(
     --start-from crate::high::ed25519::Ed25519SigningKey::from_bytes
     --start-from crate::high::ed25519::Ed25519SigningKey::sign
     --start-from crate::high::ed25519::Ed25519SigningKey::public_key
-    --start-from crate::high::signature::Ed25519KeyPair::generate
-    --start-from crate::high::signature::Ed25519KeyPair::from_seed_and_public_key
-    --start-from crate::high::signature::Ed25519KeyPair::sign
-    --start-from '{impl core::convert::AsRef for crate::high::signature::Signature}'
-    --start-from crate::high::signature::Buffer::copy_from
+    --start-from crate::high::signature::ed25519::KeyPair::generate
+    --start-from crate::high::signature::ed25519::KeyPair::from_seed_and_public_key
+    --start-from crate::high::signature::ed25519::KeyPair::sign
+    --start-from crate::high::signature::ed25519::KeyPair::public_key
+    --start-from crate::high::signature::ed25519::PublicKey::new
+    --start-from crate::high::signature::ed25519::PublicKey::verify
+    --start-from '{impl core::convert::AsRef for crate::high::signature::ed25519::PublicKey}'
+    --start-from '{impl core::convert::AsRef for crate::high::signature::ed25519::Signature}'
+    --start-from crate::high::signature::Buffer::new
+    --start-from crate::high::ecdsa::EncodedPoint::copy_from
+    --start-from '{impl core::convert::AsRef for crate::high::signature::ecdsa::Signature}'
     --start-from crate::mid::sha3::shake256_batch
     --start-from 'crate::mid::sha3::SqueezingSponge4xShake128::_'
     --start-from crate::mid::sha3::SqueezingSponge::new
@@ -1255,7 +1254,8 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --opaque crate::low::x86_64::aes_gcm_avx::counter_block \
     --opaque crate::low::x86_64::aes_gcm_avx::aead \
     --start-from crate::high::rsa::VerifyingKey::from_components \
-    --start-from crate::high::rsa::VerifyingKey::from_der \
+    --start-from crate::high::rsa::VerifyingKey::from_pkcs1_der \
+    --start-from crate::high::rsa::VerifyingKey::from_spki_der \
     --start-from crate::high::rsa::VerifyingKey::to_pkcs1_der \
     --start-from crate::high::rsa::VerifyingKey::modulus_len_bits \
     --start-from crate::high::rsa::VerifyingKey::verify_pkcs1_sha1 \
@@ -1265,7 +1265,8 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --start-from crate::high::rsa::VerifyingKey::verify_pss_sha256 \
     --start-from crate::high::rsa::VerifyingKey::verify_pss_sha384 \
     --start-from crate::high::rsa::VerifyingKey::verify_pss_sha512 \
-    --opaque crate::high::rsa::der_components \
+    --opaque crate::high::rsa::pkcs1_components \
+    --opaque crate::high::rsa::spki_components \
     --opaque 'crate::high::rsa::_::to_pkcs1_der' \
     --include crate::low::posint \
     --include crate::low::x86_64::mont::mont_mul \
@@ -1351,7 +1352,7 @@ mkdir -p proofs/Rind/Aarch64/Kdf
 # target has its own `P256Base` stating it, and `P256KeyCheck` for the key
 # check x86_64 shortcuts; key generation and ECDSA above them are shared.
 for file in Dispatch QuicDispatch P256Dispatch P256Agree P384Dispatch X25519 P384 P384Table P384Keygen DigestAlgorithm \
-    DigestDispatch Sha512 ChaCha20 SignatureDispatch Ed25519 \
+    DigestDispatch Sha512 ChaCha20 SignatureBuffer Ed25519 \
     Blockwise Sha Hmac HmacDispatch HkdfExpand Kdf/TypesExternal Kdf/FunsExternal \
     CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3 AesCipher HkdfAes AesModesApi AesKw P256 EcdsaDispatch Naf P256Ecdsa P256Signature; do
     sed 's/X86_64/Aarch64/g; s/x86_64/aarch64/g' "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Aarch64/$file.lean"

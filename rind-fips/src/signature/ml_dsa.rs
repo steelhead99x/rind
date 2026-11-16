@@ -4,9 +4,9 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::panic::{RefUnwindSafe, UnwindSafe};
 
-use super::{PublicKey, PublicKeyHandle, Verification, load, pkcs8};
+use super::{Key, PublicKeyHandle, load, pkcs8};
 use crate::Error;
-use crate::encoding::{Encoded, Pkcs8};
+use crate::encoding::{Encoded, Pkcs8, Spki};
 use crate::ffi::{self, Handle, Status, ids, opaque};
 
 opaque! {
@@ -28,6 +28,7 @@ unsafe extern "C" {
         out: *mut *mut MlDsaHandle,
     ) -> Status;
     fn rind_fips_ml_dsa_to_seed(key: *const MlDsaHandle) -> *mut ffi::Encoded;
+    fn rind_fips_ml_dsa_has_seed(key: *const MlDsaHandle) -> bool;
     fn rind_fips_ml_dsa_to_pkcs8(key: *const MlDsaHandle) -> *mut ffi::Encoded;
     fn rind_fips_ml_dsa_public_key(key: *const MlDsaHandle) -> *mut PublicKeyHandle;
     fn rind_fips_ml_dsa_sign(
@@ -52,15 +53,25 @@ pub enum MlDsa65 {}
 #[derive(Debug)]
 pub enum MlDsa87 {}
 
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for super::MlDsa44 {}
+    impl Sealed for super::MlDsa65 {}
+    impl Sealed for super::MlDsa87 {}
+}
+
 /// An ML-DSA parameter set, as FIPS 204 standardises them: [`MlDsa44`],
 /// [`MlDsa65`], or [`MlDsa87`], which fixes the sizes of its keys and
 /// signatures.
-pub trait MlDsaParameterSet:
-    fmt::Debug + Send + Sync + Unpin + UnwindSafe + RefUnwindSafe + 'static
+pub trait ParameterSet:
+    sealed::Sealed + fmt::Debug + Send + Sync + Unpin + UnwindSafe + RefUnwindSafe + 'static
 {
     /// The parameter set's number in the module's C ABI.
     #[doc(hidden)]
     const ID: u32;
+    /// Its verification algorithm's number in the module's C ABI.
+    #[doc(hidden)]
+    const VERIFICATION: u32;
     /// FIPS 204's name for it.
     #[doc(hidden)]
     const NAME: &'static str;
@@ -93,44 +104,105 @@ impl<const LEN: usize> Array for [u8; LEN] {
     }
 }
 
-impl MlDsaParameterSet for MlDsa44 {
+impl ParameterSet for MlDsa44 {
     const ID: u32 = ids::ml_dsa::ML_DSA_44;
+    const VERIFICATION: u32 = ids::signature::ML_DSA_44;
     const NAME: &'static str = "ML-DSA-44";
     type Signature = [u8; 2420];
 }
 
-impl MlDsaParameterSet for MlDsa65 {
+impl ParameterSet for MlDsa65 {
     const ID: u32 = ids::ml_dsa::ML_DSA_65;
+    const VERIFICATION: u32 = ids::signature::ML_DSA_65;
     const NAME: &'static str = "ML-DSA-65";
     type Signature = [u8; 3309];
 }
 
-impl MlDsaParameterSet for MlDsa87 {
+impl ParameterSet for MlDsa87 {
     const ID: u32 = ids::ml_dsa::ML_DSA_87;
+    const VERIFICATION: u32 = ids::signature::ML_DSA_87;
     const NAME: &'static str = "ML-DSA-87";
     type Signature = [u8; 4627];
+}
+
+/// An ML-DSA public key of parameter set `P`: FIPS 204's encoding.
+pub struct PublicKey<P: ParameterSet> {
+    key: Key,
+    set: PhantomData<P>,
+}
+
+impl<P: ParameterSet> PublicKey<P> {
+    fn from_key(key: Key) -> Self {
+        Self {
+            key,
+            set: PhantomData,
+        }
+    }
+
+    /// Parses FIPS 204's encoding of a public key: any bytes of the
+    /// parameter set's length are one.
+    pub fn new(bytes: &[u8]) -> Result<Self, Error> {
+        Key::new(P::VERIFICATION, bytes).map(Self::from_key)
+    }
+
+    /// Parses a public key from its `SubjectPublicKeyInfo` DER, which names
+    /// the parameter set's OID (RFC 9881).
+    pub fn from_spki(der: &[u8]) -> Result<Self, Error> {
+        Key::from_spki(P::VERIFICATION, der).map(Self::from_key)
+    }
+
+    /// Encodes the public key as a `SubjectPublicKeyInfo` naming its
+    /// parameter set.
+    pub fn to_spki(&self) -> Spki {
+        self.key.to_spki()
+    }
+
+    /// Verifies `signature` over `message`: pure ML-DSA with the empty
+    /// context, as TLS and X.509 sign.
+    pub fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
+        self.key.verify(message, signature)
+    }
+}
+
+impl<P: ParameterSet> Clone for PublicKey<P> {
+    fn clone(&self) -> Self {
+        Self::from_key(self.key.clone())
+    }
+}
+
+impl<P: ParameterSet> AsRef<[u8]> for PublicKey<P> {
+    fn as_ref(&self) -> &[u8] {
+        self.key.bytes()
+    }
+}
+
+impl<P: ParameterSet> fmt::Debug for PublicKey<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PublicKey")
+            .field("algorithm", &format_args!("{}", P::NAME))
+            .field("bytes", &self.as_ref())
+            .finish()
+    }
 }
 
 /// An ML-DSA private key and its public key, of parameter set `P`; held in
 /// the module, which wipes it on drop.
 ///
 /// It signs pure ML-DSA (FIPS 204) with the empty context, as TLS and X.509
-/// use it, hedged with fresh randomness, as [`verify::ML_DSA_44`],
-/// [`verify::ML_DSA_65`], and [`verify::ML_DSA_87`] verify.
-///
-/// [`verify::ML_DSA_44`]: super::verify::ML_DSA_44
-/// [`verify::ML_DSA_65`]: super::verify::ML_DSA_65
-/// [`verify::ML_DSA_87`]: super::verify::ML_DSA_87
-pub struct MlDsaKeyPair<P: MlDsaParameterSet> {
+/// use it, hedged with fresh randomness, as [`PublicKey::verify`] verifies.
+pub struct KeyPair<P: ParameterSet> {
     handle: Handle<MlDsaHandle>,
-    set: PhantomData<P>,
+    public: PublicKey<P>,
 }
 
-impl<P: MlDsaParameterSet> MlDsaKeyPair<P> {
+impl<P: ParameterSet> KeyPair<P> {
     fn load(load_with: impl FnOnce(*mut *mut MlDsaHandle) -> Status) -> Result<Self, Error> {
-        load(load_with).map(|handle| Self {
+        let handle = load(load_with)?;
+        // SAFETY: the handle is live.
+        let public = unsafe { rind_fips_ml_dsa_public_key(handle.ptr()) };
+        Ok(Self {
             handle,
-            set: PhantomData,
+            public: PublicKey::from_key(Key::from_handle(public)),
         })
     }
 
@@ -152,10 +224,17 @@ impl<P: MlDsaParameterSet> MlDsaKeyPair<P> {
     /// Returns the private key's 32-byte seed, which [`Self::from_seed`]
     /// loads, unless the key was loaded from its expanded form, which has
     /// none.
-    pub fn to_seed(&self) -> Option<MlDsaSeed> {
+    pub fn to_seed(&self) -> Option<Seed> {
         // SAFETY: the handle is live.
         let seed = unsafe { rind_fips_ml_dsa_to_seed(self.handle.ptr()) };
-        (!seed.is_null()).then(|| MlDsaSeed(Encoded::new(seed)))
+        (!seed.is_null()).then(|| Seed(Encoded::new(seed)))
+    }
+
+    /// Whether the key pair has its seed, which it lacks when loaded from its
+    /// expanded form.
+    pub fn has_seed(&self) -> bool {
+        // SAFETY: the handle is live.
+        unsafe { rind_fips_ml_dsa_has_seed(self.handle.ptr()) }
     }
 
     /// Loads a PKCS#8 ML-DSA key (RFC 9881), refused if it carries a public
@@ -180,15 +259,13 @@ impl<P: MlDsaParameterSet> MlDsaKeyPair<P> {
     }
 
     /// Returns the public key, which verifies what this key pair signs.
-    pub fn public_key(&self) -> PublicKey {
-        // SAFETY: the handle is live.
-        let handle = unsafe { rind_fips_ml_dsa_public_key(self.handle.ptr()) };
-        PublicKey::from_handle(handle, Verification::MlDsa(P::NAME))
+    pub fn public_key(&self) -> &PublicKey<P> {
+        &self.public
     }
 
     /// Signs `message`, with fresh randomness from the module's random
     /// generator.
-    pub fn sign(&self, message: &[u8]) -> Result<MlDsaSignature<P>, Error> {
+    pub fn sign(&self, message: &[u8]) -> Result<Signature<P>, Error> {
         let mut signature = P::Signature::zeroed();
         let out = signature.as_mut();
         let mut len = 0;
@@ -204,53 +281,51 @@ impl<P: MlDsaParameterSet> MlDsaKeyPair<P> {
                 &mut len,
             )
         })?;
-        Ok(MlDsaSignature(signature))
+        Ok(Signature(signature))
     }
 }
 
-impl<P: MlDsaParameterSet> fmt::Debug for MlDsaKeyPair<P> {
+impl<P: ParameterSet> fmt::Debug for KeyPair<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MlDsaKeyPair")
+        f.debug_struct("KeyPair")
             .field("algorithm", &format_args!("{}", P::NAME))
             .finish_non_exhaustive()
     }
 }
 
 /// An ML-DSA signature of parameter set `P`, FIPS 204's encoding.
-pub struct MlDsaSignature<P: MlDsaParameterSet>(P::Signature);
+pub struct Signature<P: ParameterSet>(P::Signature);
 
-impl<P: MlDsaParameterSet> Clone for MlDsaSignature<P> {
+impl<P: ParameterSet> Clone for Signature<P> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<P: MlDsaParameterSet> AsRef<[u8]> for MlDsaSignature<P> {
+impl<P: ParameterSet> AsRef<[u8]> for Signature<P> {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
 
-impl<P: MlDsaParameterSet> fmt::Debug for MlDsaSignature<P> {
+impl<P: ParameterSet> fmt::Debug for Signature<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("MlDsaSignature")
-            .field(&self.as_ref())
-            .finish()
+        f.debug_tuple("Signature").field(&self.as_ref()).finish()
     }
 }
 
 /// An ML-DSA private key's 32-byte seed, held in the module, which wipes it
 /// on drop.
-pub struct MlDsaSeed(Encoded);
+pub struct Seed(Encoded);
 
-impl AsRef<[u8]> for MlDsaSeed {
+impl AsRef<[u8]> for Seed {
     fn as_ref(&self) -> &[u8] {
         self.0.bytes()
     }
 }
 
-impl fmt::Debug for MlDsaSeed {
+impl fmt::Debug for Seed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("MlDsaSeed").finish_non_exhaustive()
+        f.debug_tuple("Seed").finish_non_exhaustive()
     }
 }

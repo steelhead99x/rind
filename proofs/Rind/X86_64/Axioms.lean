@@ -330,6 +330,8 @@ change to the trust base.
  Classical.choice,
  Quot.sound,
  compress_avx_spec,
+ finish_padded_spec,
+ sha256_compress_blocks_shaext_spec,
  sha512_block_data_order_avx2_spec] -/
 #guard_msgs in
 #print axioms kdf.prk_new_fill
@@ -565,8 +567,21 @@ change to the trust base.
 /-- info: 'rind.x86_64.p256_ecdsa_generate' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
+ bignum_add_p256_spec,
+ bignum_demont_p256_alt_spec,
+ bignum_demont_p256_spec,
  bignum_eq_spec,
- bignum_mod_n256_spec] -/
+ bignum_inv_p256_spec,
+ bignum_mod_n256_spec,
+ bignum_montmul_p256_alt_spec,
+ bignum_montmul_p256_spec,
+ bignum_montsqr_p256_alt_spec,
+ bignum_montsqr_p256_spec,
+ bignum_mux_spec,
+ bignum_neg_p256_spec,
+ bignum_tomont_p256_alt_spec,
+ bignum_tomont_p256_spec,
+ p256_point_add_affine_spec] -/
 #guard_msgs in
 #print axioms p256_ecdsa_generate
 
@@ -618,30 +633,13 @@ change to the trust base.
 #guard_msgs in
 #print axioms p256_ecdsa_sign
 
-/-- info: 'rind.x86_64.p256_ecdsa_key_pair_public_key' depends on axioms: [propext,
- Classical.choice,
- Quot.sound,
- bignum_add_p256_spec,
- bignum_demont_p256_alt_spec,
- bignum_demont_p256_spec,
- bignum_eq_spec,
- bignum_inv_p256_spec,
- bignum_montmul_p256_alt_spec,
- bignum_montmul_p256_spec,
- bignum_montsqr_p256_alt_spec,
- bignum_montsqr_p256_spec,
- bignum_mux_spec,
- bignum_neg_p256_spec,
- bignum_tomont_p256_alt_spec,
- bignum_tomont_p256_spec,
- p256_point_add_affine_spec] -/
+/-- info: 'rind.x86_64.p256_ecdsa_key_pair_public_key' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms p256_ecdsa_key_pair_public_key
 
 /-- info: 'rind.x86_64.p256_ecdsa_key_pair_verify' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
- bignum_add_p256_spec,
  bignum_demont_p256_alt_spec,
  bignum_demont_p256_spec,
  bignum_demont_spec,
@@ -654,7 +652,6 @@ change to the trust base.
  bignum_montmul_spec,
  bignum_montsqr_p256_alt_spec,
  bignum_montsqr_p256_spec,
- bignum_mux_spec,
  bignum_neg_p256_spec,
  bignum_tomont_p256_alt_spec,
  bignum_tomont_p256_spec,
@@ -665,7 +662,6 @@ change to the trust base.
  p256_montjdouble_spec,
  p256_montjmixadd_alt_spec,
  p256_montjmixadd_spec,
- p256_point_add_affine_spec,
  sha256_compress_blocks_shaext_spec] -/
 #guard_msgs in
 #print axioms p256_ecdsa_key_pair_verify
@@ -700,7 +696,31 @@ change to the trust base.
 #guard_msgs in
 #print axioms p256_ecdsa_public_key_new
 
-/-- info: 'rind.x86_64.rsa_pkcs1_sha256_new_spec' depends on axioms: [propext,
+/-- info: 'rind.x86_64.rsa_signature_new_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_bitsize_spec,
+ bignum_negmodinv_spec] -/
+#guard_msgs in
+#print axioms rsa_signature_new_spec
+
+/-- info: 'rind.x86_64.rsa_signature_from_spki_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_bitsize_spec,
+ bignum_negmodinv_spec] -/
+#guard_msgs in
+#print axioms rsa_signature_from_spki_spec
+
+/-- info: 'rind.x86_64.rsa_signature_from_components_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_bitsize_spec,
+ bignum_negmodinv_spec] -/
+#guard_msgs in
+#print axioms rsa_signature_from_components_spec
+
+/-- info: 'rind.x86_64.rsa_pkcs1_sha256_verify_spec' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
  bignum_bitsize_spec,
@@ -709,9 +729,9 @@ change to the trust base.
  finish_padded_spec,
  sha256_compress_blocks_shaext_spec] -/
 #guard_msgs in
-#print axioms rsa_pkcs1_sha256_new_spec
+#print axioms rsa_pkcs1_sha256_verify_spec
 
-/-- info: 'rind.x86_64.rsa_pss_sha256_new_spec' depends on axioms: [propext,
+/-- info: 'rind.x86_64.rsa_pss_sha256_verify_spec' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
  bignum_bitsize_spec,
@@ -722,31 +742,7 @@ change to the trust base.
  finish_padded_spec,
  sha256_compress_blocks_shaext_spec] -/
 #guard_msgs in
-#print axioms rsa_pss_sha256_new_spec
-
-/-- info: 'rind.x86_64.rsa_pkcs1_sha256_from_components_spec' depends on axioms: [propext,
- Classical.choice,
- Quot.sound,
- bignum_bitsize_spec,
- bignum_cmp_lt_spec,
- bignum_negmodinv_spec,
- finish_padded_spec,
- sha256_compress_blocks_shaext_spec] -/
-#guard_msgs in
-#print axioms rsa_pkcs1_sha256_from_components_spec
-
-/-- info: 'rind.x86_64.rsa_pss_sha256_from_components_spec' depends on axioms: [propext,
- Classical.choice,
- Quot.sound,
- bignum_bitsize_spec,
- bignum_cmp_lt_spec,
- bignum_negmodinv_spec,
- ct_compare_16_spec,
- ct_compare_bytes_spec,
- finish_padded_spec,
- sha256_compress_blocks_shaext_spec] -/
-#guard_msgs in
-#print axioms rsa_pss_sha256_from_components_spec
+#print axioms rsa_pss_sha256_verify_spec
 
 /-- info: 'rind.x86_64.rsa2048_mont_products' depends on axioms: [propext,
  Classical.choice,
@@ -840,6 +836,18 @@ change to the trust base.
  ct_compare_bytes_spec] -/
 #guard_msgs in
 #print axioms kek_unwrap_padded_spec
+
+/-- info: 'rind.x86_64.kek_wrap_key_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kek_wrap_key_spec
+
+/-- info: 'rind.x86_64.kek_unwrap_key_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ ct_compare_16_spec,
+ ct_compare_bytes_spec] -/
+#guard_msgs in
+#print axioms kek_unwrap_key_spec
 
 /-- info: 'rind.x86_64.bignum_aff_point_select_p256_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in

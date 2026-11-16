@@ -15,7 +15,7 @@ fn upper_vector_state_left_clean() {
     use rind::agreement::{self, X25519};
     use rind::digest::{SHA256, SHA512, digest, legacy::SHA1};
     use rind::kem::{self, Ciphertext, DecapsulationKey, EncapsulationKey};
-    use rind::signature::{EcdsaKeyPair, RsaKeyPair, sign};
+    use rind::{ecdsa, rsa};
 
     fn dirty() -> bool {
         let xinuse: u32;
@@ -98,9 +98,12 @@ fn upper_vector_state_left_clean() {
     for algorithm in [&SHA1, &SHA256, &SHA512] {
         check(&format!("{algorithm:?}"), || digest(algorithm, &[3; 4096]));
     }
-    for algorithm in [&sign::ECDSA_P256_SHA256_ASN1, &sign::ECDSA_P384_SHA384_ASN1] {
+    for algorithm in [
+        &ecdsa::sign::P256_SHA256_ASN1,
+        &ecdsa::sign::P384_SHA384_ASN1,
+    ] {
         let key = check(&format!("{algorithm:?} generate"), || {
-            EcdsaKeyPair::generate(algorithm).unwrap()
+            ecdsa::KeyPair::generate(algorithm).unwrap()
         });
         check(&format!("{algorithm:?} sign"), || {
             key.sign(b"message").unwrap()
@@ -114,8 +117,9 @@ fn upper_vector_state_left_clean() {
         .public_key()
         .clone();
     check("X25519 agree", || ours.agree(theirs.as_ref()).unwrap());
-    let rsa = RsaKeyPair::from_pkcs8(include_bytes!("../src/high/rsa/rsa2048.pkcs8.der")).unwrap();
+    let rsa =
+        rsa::KeyPair::from_pkcs8(include_bytes!("../src/high/rsa/rsa2048.pkcs8.der")).unwrap();
     check("RSA-2048 sign", || {
-        rsa.sign(&sign::RSA_PKCS1_SHA256, b"message").unwrap()
+        rsa.sign(&rsa::sign::PKCS1_SHA256, b"message").unwrap()
     });
 }
