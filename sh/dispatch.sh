@@ -108,6 +108,10 @@ cross_tools=cargo
 [[ $(uname -s) != Linux ]] || cross_tools='cargo nix'
 module cross '^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|flake\.(nix|lock)$)' \
     tools="$cross_tools" compiles
+# The published adapters' wasm32 builds, and the tests the nightly runs there.
+# rind's manifest picks the random source rind-ring's browser feature reaches.
+module wasm '^(rind/Cargo\.toml$|rind-(aws-lc-rs|ring|rustls|rcgen|jsonwebtoken|dimpl|str0m|openmls|object-store)/(src/|tests/|Cargo\.toml$)|admin/wasm-fixture/|Cargo\.(toml|lock)$|flake\.(nix|lock)$)' \
+    tools='cargo jq' compiles
 # Dependents may build with the workspace's declared rust-version. Plain
 # `cargo check` covers the lib and bin targets, all a dependent builds, so a
 # crate's tests, benches, and docs cannot break it. A Rust crate nested in
@@ -359,14 +363,6 @@ step() {
             # `cargo test`, it passes a selection with no tests, such as the
             # benches alone.
             run cargo nextest run "${packages[@]}" --locked --no-tests=warn
-            # Only the zeroing and heap scratch tests see the opt-in wipe,
-            # which the default build turns into no-ops.
-            if names rind "${packages[@]}"; then
-                run cargo nextest run -p rind --features wipe --test zeroing --test heap_scratch --locked
-            fi
-            if names rind-aws-lc-rs "${packages[@]}"; then
-                run cargo nextest run -p rind-aws-lc-rs --features wipe --test zeroing --locked
-            fi
             # The FIPS module's own code compiles only under its cfg, which a
             # workspace build leaves off, and only for glibc Linux on x86_64
             # and aarch64, where rind-fips is not empty. Its break build
@@ -482,13 +478,24 @@ step() {
                     run cargo clippy -p rind --lib --locked --target armv7-unknown-linux-gnueabihf -- --deny warnings
                 # wasm32 compiles on the portable backend; the browser target
                 # needs getrandom's JavaScript source, WASI has its own.
-                local features
-                for features in "" wipe; do
-                    run cargo clippy -p rind --lib --locked --target wasm32-wasip2 --features "$features" -- --deny warnings
-                    run cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
-                        --features "$features,getrandom/wasm_js" -- --deny warnings
-                done
+                run cargo clippy -p rind --lib --locked --target wasm32-wasip2 -- --deny warnings
+                run cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
+                    --features getrandom/wasm_js -- --deny warnings
             fi
+            ;;
+        check:wasm)
+            # Each published adapter, as sh/adapter-versions.sh finds them.
+            local adapters
+            mapfile -t adapters < <(cargo metadata --format-version 1 --no-deps --locked |
+                jq -r '.packages[] | select((.name | startswith("rind-")) and .publish == null) | "-p", .name')
+            run cargo clippy "${adapters[@]}" --lib --locked --target wasm32-wasip2 -- --deny warnings
+            # The tests `just wasm` runs, without the differential ones.
+            run cargo clippy -p rind-rustls -p rind-ring --lib --tests --locked --target wasm32-wasip2 -- --deny warnings
+            # The browser: admin/wasm-fixture adds what a caller adds, and
+            # rind-ring also takes ring's own feature for it.
+            run cargo clippy -p wasm-fixture "${adapters[@]}" --lib --locked --target wasm32-unknown-unknown -- --deny warnings
+            run cargo clippy -p rind-ring --lib --locked --target wasm32-unknown-unknown \
+                --features wasm32_unknown_unknown_js -- --deny warnings
             ;;
         check:vartime)
             # Each backend's targets, as admin/ct-vartime names them; no

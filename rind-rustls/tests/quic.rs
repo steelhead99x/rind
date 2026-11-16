@@ -3,18 +3,33 @@
 
 use std::sync::Arc;
 
-use rustls::crypto::{CryptoProvider, aws_lc_rs, ring};
+use rustls::crypto::CryptoProvider;
+#[cfg(not(target_family = "wasm"))]
+use rustls::crypto::{aws_lc_rs, ring};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::quic::{self, Connection, DirectionalKeys, KeyChange, PacketKey, Version};
 use rustls::{CipherSuite, ClientConfig, RootCertStore, ServerConfig, Side, SupportedCipherSuite};
+
+/// The providers rind runs against.
+#[cfg(not(target_family = "wasm"))]
+fn others() -> [CryptoProvider; 2] {
+    [aws_lc_rs::default_provider(), ring::default_provider()]
+}
+
+/// rustls's own providers build for neither wasm target, so there rind runs
+/// against itself.
+#[cfg(target_family = "wasm")]
+fn others() -> [CryptoProvider; 1] {
+    [rind_rustls::default_provider()]
+}
 
 #[test]
 fn initial_keys() {
     // Initial keys always use AES-128-GCM, derived from the client's first destination CID.
     let dcid = b"initial dcid";
     let rind = rind_rustls::default_provider();
-    for other in [aws_lc_rs::default_provider(), ring::default_provider()] {
+    for other in others() {
         check_keys(
             &initial(&rind, dcid, Side::Client),
             &initial(&other, dcid, Side::Server),
@@ -38,7 +53,7 @@ fn all_suites() {
             ..rind_rustls::default_provider()
         }
         .into();
-        for other in [aws_lc_rs::default_provider(), ring::default_provider()] {
+        for other in others() {
             let other = Arc::new(other);
             handshake(suite, rind.clone(), other.clone());
             handshake(suite, other, rind.clone());

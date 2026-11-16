@@ -120,7 +120,7 @@ pub(super) const MAX_PRIVATE_KEY_LEN: usize = mldsa::secret_key_len::<MlDsa87>()
 /// work, and keeps the expansion on the heap: 28 KiB for ML-DSA-44, 47 KiB
 /// for ML-DSA-65, and 79 KiB for ML-DSA-87.
 ///
-/// It wipes its whole value on drop under the `wipe` feature.
+/// It wipes its whole value on drop.
 pub struct KeyPair<P: ParameterSet> {
     pair: mldsa::KeyPair<P>,
     public: PublicKey<P>,
@@ -285,8 +285,7 @@ impl<P: ParameterSet> fmt::Debug for Signature<P> {
     }
 }
 
-/// An ML-DSA private key's 32-byte seed, wiped on drop under the `wipe`
-/// feature.
+/// An ML-DSA private key's 32-byte seed, wiped on drop.
 pub struct Seed([u8; mldsa::SEED_LEN]);
 
 impl AsRef<[u8]> for Seed {

@@ -92,13 +92,21 @@ qemu. iOS devices' code is only built.
   ARMv5TE, on `powerpc64le` and big-endian `powerpc64` and `powerpc` Linux,
   and on `x86_64`,
   where `--cfg rind_portable` forces it. `just ci` also compiles the library
-  for `wasm32-wasip2` and `wasm32-unknown-unknown`, with and without `wipe`,
+  for `wasm32-wasip2` and `wasm32-unknown-unknown`
   when a change touches rind, the workspace manifest or lockfile, or the
-  flake, and `just gate` always does. `wasm32-unknown-unknown` enables
-  `getrandom/wasm_js` for JavaScript randomness; the WASI target uses its
-  system random source. The nightly `build.yml` runs the vector tests
-  on `wasm32-wasip2` under wasmtime (`just wasm`), without the differential
-  tests, since aws-lc does not build for wasm. `wasm32-unknown-unknown` stays
+  flake, and `just gate` always does. It compiles every published adapter
+  for both, and rind-rustls's and rind-ring's tests for `wasm32-wasip2`, when
+  a change touches an adapter, rind's manifest, the workspace manifest or
+  lockfile, or the flake. `wasm32-unknown-unknown` enables `getrandom/wasm_js`
+  for JavaScript randomness, as rind-ring's `wasm32_unknown_unknown_js` does
+  for a ring caller; the WASI target uses its system random source. There the
+  adapters' upstreams need what they need with any backend, which
+  [admin/wasm-fixture](admin/wasm-fixture/Cargo.toml) adds: rustls's clock
+  (`rustls-pki-types/web`) and the random sources of jsonwebtoken and str0m.
+  The nightly `build.yml` runs rind's vector tests and rind-rustls's and
+  rind-ring's tests on `wasm32-wasip2` under wasmtime (`just wasm`), without
+  the differential tests, since aws-lc does not build for wasm; the adapters'
+  handshakes run rind against itself. `wasm32-unknown-unknown` stays
   compile-only: its tests need a JavaScript host. Constant time is unchecked on
   wasm: ctgrind and the trace checks inspect native code, and a wasm engine
   compiles rind again, so its JIT may turn a select into a branch.

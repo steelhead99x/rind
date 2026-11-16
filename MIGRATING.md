@@ -18,7 +18,7 @@ renames [rind-aws-lc-rs](#rind-aws-lc-rs) to `aws-lc-rs` the same way.
 | An allocated `Document`, `Vec`, or `Box` output | an owned value of fixed capacity, such as `encoding::Pkcs8` |
 | `error::Unspecified`, `error::KeyRejected` | `rind::Error`, by kind of call (see [error](#error)) |
 | One `signature` module for every algorithm | a module for each: [ecdsa](#ecdsa), [ed25519](#ed25519), [ml_dsa](#ml_dsa), [rsa](#rsa), and [slh_dsa](#slh_dsa) (see [signature](#signature)) |
-| aws-lc-rs wipes keys and keyed state on drop; ring doesn't | rind wipes them only under its `wipe` feature: enable `rind/wipe`, or rind-aws-lc-rs's `wipe`, to keep aws-lc-rs's behavior |
+| aws-lc-rs wipes keys and keyed state on drop; ring doesn't | rind wipes them too, always |
 
 ## digest
 
@@ -140,7 +140,7 @@ protocols with their own integrity protection need. ring has none.
 |---|---|
 | `EphemeralPrivateKey::generate(alg, rng)`, `PrivateKey::generate(alg)` | `PrivateKey::generate(&alg)?` |
 | `compute_public_key()?` | `public_key()`, which cannot fail |
-| `agree_ephemeral(key, &UnparsedPublicKey::new(alg, peer), err, kdf)` | `key.agree(peer)?`, returning a `SharedSecret` wiped on drop under `wipe`; run a KDF such as `hkdf` on it, as `kdf` did |
+| `agree_ephemeral(key, &UnparsedPublicKey::new(alg, peer), err, kdf)` | `key.agree(peer)?`, returning a `SharedSecret` wiped on drop; run a KDF such as `hkdf` on it, as `kdf` did |
 | `agree(&key, peer, err, kdf)` | `key.agree(peer)?`, which borrows the key, so it agrees again |
 | `UnparsedPublicKey::new(alg, point)`, `ParsedPublicKey` of a point | `PublicKey::new(&alg, point)?`, which decompresses a compressed point, then `key.agree(peer.as_ref())`; `agree` alone takes an uncompressed point |
 | `ParsedPublicKey` of a `SubjectPublicKeyInfo` | `PublicKey::from_spki(&alg, der)?`, which also takes WebCrypto's `id-ecDH` |
@@ -149,7 +149,7 @@ protocols with their own integrity protection need. ring has none.
 | `X25519`, `ECDH_P256`, `ECDH_P384`, `ECDH_P521` | the same |
 | `PrivateKey::from_private_key(alg, bytes)` | `PrivateKey::from_scalar(&alg, bytes)` |
 | `PrivateKey::from_private_key_der(alg, der)` | `from_pkcs8(&alg, der)` or `from_sec1(&alg, der)`, whichever the caller holds |
-| `as_be_bytes()` to `EcPrivateKeyBin` or `Curve25519SeedBin` | `to_scalar()`, a `Scalar` wiped on drop under `wipe` |
+| `as_be_bytes()` to `EcPrivateKeyBin` or `Curve25519SeedBin` | `to_scalar()`, a `Scalar` wiped on drop |
 | `AsDer<Pkcs8V1Der>::as_der()` | `to_pkcs8()`, which X25519 keys also have |
 | `PublicKey::as_der()` | `PublicKey::to_spki()`, with an uncompressed point |
 | `AsDer<EcPrivateKeyRfc5915Der>::as_der()`, `PublicKey::as_be_bytes()` | none; an ECDSA key pair's `to_sec1()` |
@@ -199,7 +199,7 @@ modules' public keys, as [rind-rustls](rind-rustls/src/verify.rs) does.
 | `KeyPair` trait, `KeyPair::public_key()`, ring's `RsaKeyPair::public()` | inherent `public_key()`, a borrowed `PublicKey` of the same module |
 | `Ed25519PublicKey`, `EcdsaPublicKey`, `RsaSubjectPublicKey` | `ed25519::PublicKey`, `ecdsa::PublicKey`, `rsa::PublicKey` |
 | `generate_pkcs8(rng)`, `generate_pkcs8(alg, rng)`, `generate_pkcs8v1` | `generate(..)?.to_pkcs8()` |
-| `to_pkcs8()`, `to_pkcs8v1()`, `public_key().as_der()`, each an allocated `Document` | `to_pkcs8()`, `to_pkcs8v1()` (Ed25519), `public_key().to_spki()`, each of fixed capacity; `Pkcs8` is wiped on drop under `wipe` |
+| `to_pkcs8()`, `to_pkcs8v1()`, `public_key().as_der()`, each an allocated `Document` | `to_pkcs8()`, `to_pkcs8v1()` (Ed25519), `public_key().to_spki()`, each of fixed capacity; `Pkcs8` is wiped on drop |
 | `Signature`, one type for every algorithm | each module's `Signature`, which holds only its algorithm's length |
 
 Every private key loader refuses bytes after the encoded key, which
@@ -221,8 +221,8 @@ for ECDSA and RSA, and version 2 only with its public key for Ed25519.
 | `EcdsaKeyPair::from_pkcs8(alg, der)`, ring's `(alg, der, rng)` | `ecdsa::KeyPair::from_pkcs8(&alg, der)` |
 | `EcdsaKeyPair::from_private_key_and_public_key`, ring's with an `rng` | `from_scalar_and_public_key(&alg, scalar, public_key)`, with no random source |
 | `EcdsaKeyPair::from_private_key_der` | `from_sec1`, which refuses PKCS#8 |
-| `EcdsaKeyPair::private_key().as_der()` | `to_sec1()`, an `encoding::Sec1` wiped on drop under `wipe` |
-| `EcdsaKeyPair::private_key().as_be_bytes()` (not in ring) | `to_scalar()`, an `ecdsa::Scalar` wiped on drop under `wipe` |
+| `EcdsaKeyPair::private_key().as_der()` | `to_sec1()`, an `encoding::Sec1` wiped on drop |
+| `EcdsaKeyPair::private_key().as_be_bytes()` (not in ring) | `to_scalar()`, an `ecdsa::Scalar` wiped on drop |
 | `EcdsaKeyPair::sign(rng, m)` | `sign(m)`, which takes no random source and returns an `ecdsa::Signature` |
 
 `ecdsa::PublicKey::new` refuses a compressed point and a
@@ -243,7 +243,7 @@ aws-lc-rs takes leading zeros added or stripped.
 | `Ed25519KeyPair`, `ED25519`, `EdDSAParameters` | `ed25519::KeyPair`; `ed25519::PublicKey::new` takes no algorithm |
 | `Ed25519KeyPair::from_pkcs8_maybe_unchecked` | `from_pkcs8`, which takes v1 and v2 |
 | `Ed25519KeyPair::from_seed_unchecked` | `from_seed`, or `from_seed_and_public_key`, which checks the public key |
-| `Ed25519KeyPair::seed()?.as_be_bytes()` (not in ring) | `to_seed()`, an `ed25519::Seed` wiped on drop under `wipe` |
+| `Ed25519KeyPair::seed()?.as_be_bytes()` (not in ring) | `to_seed()`, an `ed25519::Seed` wiped on drop |
 | `Ed25519KeyPair::sign(m)`, `try_sign(m)` | `sign(m)`, an `ed25519::Signature` |
 | `verify_digest` for Ed25519 | none |
 | `ED25519_PUBLIC_KEY_LEN` | none: always 32 |
@@ -414,6 +414,13 @@ AES-KWP, which each call names.
 Each `rind-*` crate stands in for a crate's crypto backend, such as its
 aws-lc-rs, ring, or RustCrypto one, and offers that backend's signatures.
 
+Each builds for `wasm32-wasip2` and `wasm32-unknown-unknown`, the browser,
+where aws-lc-rs does not build and ring needs a C compiler targeting wasm.
+In the browser, rind needs its JavaScript random source,
+`getrandom = { version = "0.4", features = ["wasm_js"] }`, or rind-ring's
+`wasm32_unknown_unknown_js`, as ring does; [PLATFORMS.md](PLATFORMS.md)
+lists what each adapter's upstream needs there with any backend.
+
 ### rind-ring
 
 rind-ring offers ring 0.17's API name for name, so a crate on ring swaps it
@@ -434,8 +441,8 @@ items it leaves out and the inputs it refuses where ring takes them.
 rind-aws-lc-rs offers aws-lc-rs 1.x's API name for name for every item rind
 backs, so a crate on aws-lc-rs swaps it in with `aws-lc-rs = { package =
 "rind-aws-lc-rs", version = "1" }` and no code changes. The rename reaches
-only that crate. It accepts every aws-lc-rs feature but `fips`, and adds only
-a `wipe` feature, since aws-lc-rs always wipes. Its [README](rind-aws-lc-rs/README.md) lists
+only that crate. It accepts every aws-lc-rs feature but `fips`, and wipes keys
+as aws-lc-rs does. Its [README](rind-aws-lc-rs/README.md) lists
 the items it leaves out, such as SHA-224 and the PKCS#1 v1.5 encryption keys,
 and where it behaves differently.
 

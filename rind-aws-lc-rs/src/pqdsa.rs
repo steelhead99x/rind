@@ -357,8 +357,8 @@ impl fmt::Debug for PqdsaPrivateKey<'_> {
     }
 }
 
-/// An ML-DSA key pair's public key, FIPS 204's encoding; wiped on drop under
-/// the `wipe` feature, as the key pair is.
+/// An ML-DSA key pair's public key, FIPS 204's encoding; wiped on drop, as
+/// the key pair is.
 #[derive(Clone)]
 pub struct PqdsaPublicKey {
     id: &'static AlgorithmID,

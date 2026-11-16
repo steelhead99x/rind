@@ -150,9 +150,8 @@ SHA-1 and MD5 are in `package:rind/legacy.dart`, and RSA's SHA-1 algorithms
 and other modulus floors in `package:rind/rsa_legacy.dart`, imported `as rsa`
 beside `package:rind/rsa.dart`.
 
-Keys live in native memory, which Dart frees without wiping: this package
-builds rind without its `wipe` feature. To wipe keys, use rind from Rust with
-`wipe`.
+Keys live in native memory, and rind wipes that native copy when Dart frees
+the key. It does not wipe a `Uint8List` you passed in; clear that yourself.
 
 Generating RSA keys, RSA's private-key operations, and PBKDF2 take
 milliseconds to seconds, so call them off the UI isolate, as with
