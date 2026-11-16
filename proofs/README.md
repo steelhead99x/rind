@@ -129,6 +129,22 @@ those inputs, in any worktree, restores in under a second.
   targets build these functions as Thumb-2, which no proof covers; rustc
   refuses `#[instruction_set(arm::a32)]` on armv7's Linux and Android
   targets, which would otherwise force A32.
+- `x86_64/ecp_nistz256_point_add_affine.ml` and
+  `x86_64/ecp_nistz256_point_add_affinex.ml`:
+  `ECP_NISTZ256_POINT_ADD_AFFINE_SUBROUTINE_CORRECT` and
+  `ECP_NISTZ256_POINT_ADD_AFFINEX_SUBROUTINE_CORRECT`, rind's proofs that
+  aws-lc's mixed additions in `low::x86_64::ecp_nistz256`, its mulq routine
+  and its BMI2 and ADX one, called in place, add an affine point to a
+  Jacobian one in Montgomery form, as s2n-bignum's `p256_montjmixadd`
+  states it, and return either input for the other's infinity. Each proves
+  its four field helpers from entry to return, then the body over 17 calls
+  to them, with s2n-bignum's field algebra. They assume a 16-byte aligned
+  stack at the call, as the System V ABI gives, since the body's MOVDQA
+  stores require it, and read the field constants from the static
+  `POLY`, whose `align(16)` the body's two PANDs from it require. They
+  are of the Linux build's object: Apple's text aligns the helpers to 32
+  bytes but not the entry, so its calls can reach them at other offsets,
+  and no proof covers it.
 
 The fork adds what these proofs need to s2n-bignum: specs from s2n-bignum
 pull requests not yet merged, rind's own RFC 8439 spec of ChaCha20,
@@ -166,8 +182,8 @@ routines, in `Rind/X86_64/P256Agree.lean` and `Rind/X86_64/P256.lean`, which
 generator as each target's `Rind/<Arch>/P256Base.lean` states it: aarch64 by
 s2n-bignum's `p256_scalarmulbase`, and x86_64 by rind's Booth driver, which
 selects each table row's point by rind's Rust select and adds it by aws-lc's
-mixed addition, `ecp_nistz256_point_add_affine`, which a placeholder axiom
-states until rind's HOL Light proof of it lands:
+mixed addition, `ecp_nistz256_point_add_affine` or its BMI2 and ADX form,
+which rind proves in HOL Light:
 
 - `p256_generate`: the key's scalar is the first of up to 64 draws whose
   bytes, read big-endian, are in [1, n), it holds its public key, and the key
@@ -335,10 +351,13 @@ no addition doubles, and `Rind/X86_64/P256Table.lean` that its 37-row table
 holds j·2⁷ⁱ·G. Its table select is rind's Rust, which
 `Rind/X86_64/PointSelect.lean` proves on both the AVX2 and SSE2 paths, under
 `RunsSelect`, that `HaveAvx2::check` returns, which `Runs` includes. aws-lc's
-mixed addition is the placeholder axiom `p256_point_add_affine_spec` in
-`Rind/X86_64/S2nBignum.lean`, which no proof covers yet, so x86_64's P-256
-theorems rest on it and earn no ✓ until rind's HOL Light proof of the
-addition lands.
+mixed addition, both its mulq and its BMI2 and ADX routines, is proven in
+HOL Light of the object code rind's Linux build emits, in
+`proofs/hol-light/x86_64/ecp_nistz256_point_add_affine.ml` and
+`ecp_nistz256_point_add_affinex.ml`, which `p256_point_add_affine_spec` in
+`Rind/X86_64/S2nBignum.lean` restates. The proofs reuse s2n-bignum's
+`p256_montjmixadd` field algebra and also cover the two infinities the
+driver starts from.
 `Rind/<Arch>/Axioms.lean` checks the axioms each theorem rests on.
 
 SHA-1 and SHA-256's padding and finalization, and HMAC's keyed states over
@@ -1039,9 +1058,6 @@ proof after those.
 ## Trust base
 
 Beyond Lean's kernel:
-
-- x86_64 P-256's mixed addition, `p256_point_add_affine_spec`, which no
-  proof covers yet.
 
 - Charon and Aeneas's translation, and Aeneas's models of `core`, with
   `Rind/Core.lean`'s.
