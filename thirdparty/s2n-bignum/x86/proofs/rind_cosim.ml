@@ -58,6 +58,11 @@ let vexp pp map w v l opcode md reg rm tail =
 (* The same with the 66 prefix. *)
 let vex = vexp 1;;
 
+(* A BMI2 shift by a register: the 0F38 map with prefix bits pp, 1 for
+   SHLX's 66 and 3 for SHRX's F2, W for its width, and opcode F7, with ModRM
+   fields reg and rm and count register v. *)
+let shiftx pp w md reg rm v tail = vexp pp 2 w v 0 0xf7 md reg rm tail;;
+
 (* A random register other than RSP. *)
 let gpr () = let r = rnd 15 in if r >= 4 then r + 1 else r;;
 
@@ -87,6 +92,12 @@ let register_forms = [
   (fun () -> vexp 0 2 (rnd 2) (gpr ()) 0 0xf2 3 (gpr ()) (gpr ())
                []);                                            (* ANDN *)
   (fun () -> ps [0x0f; 0x57] 3 (rnd 16) (rnd 16) []);          (* XORPS *)
+  (fun () -> sse [0x0f; 0xdf] 3 (rnd 16) (rnd 16) []);         (* PANDN *)
+  (fun () -> sse [0x0f; 0x76] 3 (rnd 16) (rnd 16) []);         (* PCMPEQD *)
+  (* Equal lanes, which random ones almost never are. *)
+  (fun () -> let r = rnd 16 in sse [0x0f; 0x76] 3 r r []);     (* PCMPEQD *)
+  (fun () -> shiftx 1 (rnd 2) 3 (gpr ()) (gpr ()) (gpr ()) []); (* SHLX *)
+  (fun () -> shiftx 3 (rnd 2) 3 (gpr ()) (gpr ()) (gpr ()) []); (* SHRX *)
 ];;
 
 (* Memory forms on [rsp + d], run as cosimulate_instructions (Some 0) 32:
@@ -120,6 +131,12 @@ let memory_forms = [
                (mem (rnd 128)));                               (* ANDN m *)
   (fun () -> ps [0x0f; 0x57] 1 (rnd 16) 4 (mem (aligned ())));    (* XORPS *)
   (fun () -> ps [0x0f; 0x18] 1 1 4 (mem (rnd 128)));              (* PREFETCHT0 *)
+  (fun () -> sse [0x0f; 0xdf] 1 (rnd 16) 4 (mem (aligned ())));   (* PANDN *)
+  (fun () -> sse [0x0f; 0x76] 1 (rnd 16) 4 (mem (aligned ())));   (* PCMPEQD *)
+  (fun () -> shiftx 1 (rnd 2) 1 (gpr ()) 4 (gpr ())
+               (mem (8 * rnd 16)));                            (* SHLX m *)
+  (fun () -> shiftx 3 (rnd 2) 1 (gpr ()) 4 (gpr ())
+               (mem (8 * rnd 16)));                            (* SHRX m *)
 ];;
 
 (* PUSH m64, FF /6, of [rsp + d] between LEA rsp, [rsp + 16] and LEA rsp,
