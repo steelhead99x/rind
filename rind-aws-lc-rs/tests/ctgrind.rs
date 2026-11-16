@@ -305,3 +305,38 @@ fn ml_dsa_other_private_key() {
     public(&pkcs8[..at]);
     public(&pkcs8[at + seed.len()..]);
 }
+
+/// `PqdsaKeyPair::from_raw_private_key` loads an ML-DSA-65 expanded key,
+/// and one with a flipped byte, as ML-DSA-44 before refusing it. The secret
+/// bytes are marked. The first 32 bytes are the public seed `rho`.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn ml_dsa_other_set() {
+    use aws_lc_rs::encoding::{AsRawBytes, PqdsaPrivateKeyRaw};
+    use rind_aws_lc_rs::signature::{ML_DSA_44_SIGNING, PqdsaKeyPair};
+
+    let seed = [0x33u8; 32];
+    let raw: PqdsaPrivateKeyRaw<'static> = aws_lc_rs::signature::PqdsaKeyPair::from_seed(
+        &aws_lc_rs::signature::ML_DSA_65_SIGNING,
+        &seed,
+    )
+    .unwrap()
+    .private_key()
+    .as_raw_bytes()
+    .unwrap();
+    let raw = raw.as_ref().to_vec();
+    let mut corrupt = raw.clone();
+    corrupt[100] ^= 0x01;
+
+    // The expanded key's first 32 bytes are the public seed `rho`.
+    secret(&raw[32..]);
+    secret(&corrupt[32..]);
+
+    let err = PqdsaKeyPair::from_raw_private_key(&ML_DSA_44_SIGNING, &raw).unwrap_err();
+    public(err.description_().as_bytes());
+    assert_eq!(err.description_(), "Unspecified");
+
+    let err = PqdsaKeyPair::from_raw_private_key(&ML_DSA_44_SIGNING, &corrupt).unwrap_err();
+    public(err.description_().as_bytes());
+    assert_eq!(err.description_(), "InvalidEncoding");
+}

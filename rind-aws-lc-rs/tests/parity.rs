@@ -220,10 +220,6 @@ fn mldsa_oid(last: u8) -> Vec<u8> {
     oid_with_last(&ML_DSA_OID_PREFIX, last)
 }
 
-fn mldsa_pkcs8(last: u8, private_key: &[u8], suffix: &[u8]) -> Vec<u8> {
-    pkcs8(0, &algorithm(&mldsa_oid(last), None), private_key, suffix)
-}
-
 fn seed_key(seed: &[u8], tail: &[u8]) -> Vec<u8> {
     let mut body = der(0x80, seed);
     body.extend_from_slice(tail);
@@ -408,12 +404,6 @@ fn rsa_public_pkcs1(doc: &[u8]) -> Vec<u8> {
     )
 }
 
-fn rsa_public_suffix(public_key: &[u8]) -> Vec<u8> {
-    let mut bits = vec![0x00];
-    bits.extend_from_slice(public_key);
-    der(0x81, &bits)
-}
-
 fn pss_explicit_params() -> Vec<u8> {
     let sha = der(0x30, &[der(0x06, SHA256), der(0x05, &[])].concat());
     let mgf = der(0x30, &[der(0x06, MGF1), sha.clone()].concat());
@@ -479,7 +469,7 @@ fn pkcs1_version(doc: &[u8], version: u8) -> Vec<u8> {
     })
 }
 
-fn generated_pair(set: u8, seed: &[u8; 32]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+fn generated_pair(set: u8, seed: &[u8; 32]) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
     let (_, alg) = signing(set);
     let key = theirs::signature::PqdsaKeyPair::from_seed(alg, seed).unwrap();
     let pkcs8 = key.to_pkcs8v1().unwrap().as_ref().to_vec();
@@ -488,7 +478,12 @@ fn generated_pair(set: u8, seed: &[u8; 32]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
         .unwrap()
         .as_ref()
         .to_vec();
-    (pkcs8, public, raw)
+    let spki =
+        theirs::encoding::AsDer::<theirs::encoding::PublicKeyX509Der>::as_der(key.public_key())
+            .unwrap()
+            .as_ref()
+            .to_vec();
+    (pkcs8, public, raw, spki)
 }
 
 fn append_outer(doc: &[u8], extra: &[u8]) -> Vec<u8> {
@@ -532,10 +527,6 @@ fn attributes() -> Vec<u8> {
     der(0xa0, &friendly)
 }
 
-fn curve25519_pkcs8(oid: &[u8], seed: &[u8], suffix: &[u8]) -> Vec<u8> {
-    pkcs8(0, &algorithm(oid, None), &der(0x04, seed), suffix)
-}
-
 fn public_suffix(public_key: &[u8]) -> Vec<u8> {
     let mut bits = vec![0x00];
     bits.extend_from_slice(public_key);
@@ -560,7 +551,7 @@ fn embedded(name: &str) -> Vec<u8> {
 }
 
 #[test]
-fn rsa_consistency() {
+fn pqdsa_from_pkcs8_rsa_consistency() {
     let mut report = Report::new();
     let keys = [
         ("rsa2048", RSA2048.to_vec(), Some("err:WrongAlgorithm")),
@@ -617,7 +608,7 @@ fn rsa_consistency() {
         1,
         &algorithm(RSA_ENCRYPTION, Some(&der(0x05, &[]))),
         &private_key_octet(RSA2048),
-        &rsa_public_suffix(&rsa_public_pkcs1(RSA2048)),
+        &public_suffix(&rsa_public_pkcs1(RSA2048)),
     );
     check_pkcs8(&mut report, "rsa2048 v2 public key", 65, &v2, None);
     check_pkcs8(
@@ -636,7 +627,7 @@ fn rsa_consistency() {
 }
 
 #[test]
-fn ec_short_scalar() {
+fn pqdsa_from_pkcs8_ec_short_scalar() {
     let mut report = Report::new();
     for (name, curve) in [
         ("p256", &P256_NIST),
@@ -812,13 +803,13 @@ fn ec_mismatched_point() {
 }
 
 #[test]
-fn pss_inconsistent_and_v2() {
+fn pqdsa_from_pkcs8_pss_inconsistent_and_v2() {
     let mut report = Report::new();
     let base = RSA2048;
-    let public = rsa_public_suffix(&rsa_public_pkcs1(base));
+    let public = public_suffix(&rsa_public_pkcs1(base));
     let mut flipped_public = rsa_public_pkcs1(base);
     *flipped_public.last_mut().unwrap() ^= 0x01;
-    let flipped_public = rsa_public_suffix(&flipped_public);
+    let flipped_public = public_suffix(&flipped_public);
     let shapes: [(&str, Option<Vec<u8>>); 4] = [
         ("absent params", None),
         ("empty params", Some(der(0x30, &[]))),
@@ -865,7 +856,7 @@ fn pss_inconsistent_and_v2() {
         );
     }
     let small = embedded("rsa1024");
-    let small_public = rsa_public_suffix(&rsa_public_pkcs1(&small));
+    let small_public = public_suffix(&rsa_public_pkcs1(&small));
     check_pkcs8(
         &mut report,
         "pss 1024 absent params",
@@ -908,7 +899,7 @@ fn pss_inconsistent_and_v2() {
 fn mldsa_seed_tail() {
     let mut report = Report::new();
     let seed = [0x2a; 32];
-    let (own, public, raw) = generated_pair(65, &seed);
+    let (own, public, raw, spki) = generated_pair(65, &seed);
     check_pkcs8(&mut report, "mldsa65 own seed", 65, &own, Some("ok:"));
     check_pkcs8(
         &mut report,
@@ -933,7 +924,7 @@ fn mldsa_seed_tail() {
         ),
         ("second seed element", der(0x80, &[0x11; 32])),
     ] {
-        let doc = mldsa_pkcs8(18, &seed_key(&seed, &tail), &[]);
+        let doc = mldsa_pkcs8_version(18, &seed_key(&seed, &tail), 0, &[]);
         check_pkcs8(
             &mut report,
             &format!("mldsa65 own seed tail {name}"),
@@ -950,7 +941,7 @@ fn mldsa_seed_tail() {
         );
     }
     for len in [0, 31, 33, 64] {
-        let doc = mldsa_pkcs8(18, &seed_key(&vec![0x2a; len], &[]), &[]);
+        let doc = mldsa_pkcs8_version(18, &seed_key(&vec![0x2a; len], &[]), 0, &[]);
         check_pkcs8(
             &mut report,
             &format!("mldsa65 seed length {len} as own set"),
@@ -1022,9 +1013,72 @@ fn mldsa_seed_tail() {
         Some("err:InvalidEncoding"),
     );
     let (ours, theirs) = load_raw(44, &raw);
-    report.check("mldsa65 raw as mldsa44", &ours, &theirs, None);
+    report.check(
+        "mldsa65 raw as mldsa44",
+        &ours,
+        &theirs,
+        Some("err:Unspecified"),
+    );
     let (ours, theirs) = load_raw(44, &corrupt);
-    report.check("mldsa65 raw flipped as mldsa44", &ours, &theirs, None);
+    report.check(
+        "mldsa65 raw flipped as mldsa44",
+        &ours,
+        &theirs,
+        Some("err:InvalidEncoding"),
+    );
+    let (ours, theirs) = load_raw(65, &[]);
+    report.check(
+        "mldsa65 empty raw",
+        &ours,
+        &theirs,
+        Some("err:InvalidEncoding"),
+    );
+    let (ours, theirs) = load_raw(65, &seed);
+    report.check(
+        "mldsa65 seed as raw",
+        &ours,
+        &theirs,
+        Some("err:InvalidEncoding"),
+    );
+    let (_, _, raw44, _) = generated_pair(44, &seed);
+    let (_, _, raw87, _) = generated_pair(87, &seed);
+    let (ours, theirs) = load_raw(44, &raw87);
+    report.check(
+        "mldsa87 raw as mldsa44",
+        &ours,
+        &theirs,
+        Some("err:Unspecified"),
+    );
+    let (ours, theirs) = load_raw(65, &raw87);
+    report.check(
+        "mldsa87 raw as mldsa65",
+        &ours,
+        &theirs,
+        Some("err:Unspecified"),
+    );
+    let (ours, theirs) = load_raw(65, &raw44);
+    report.check(
+        "mldsa44 raw as mldsa65",
+        &ours,
+        &theirs,
+        Some("err:Unspecified"),
+    );
+    let (ours, theirs) = load_raw(65, &raw44[..raw44.len() - 1]);
+    report.check(
+        "mldsa44 raw one short as mldsa65",
+        &ours,
+        &theirs,
+        Some("err:InvalidEncoding"),
+    );
+    let mut one_long = raw87.clone();
+    one_long.push(0);
+    let (ours, theirs) = load_raw(44, &one_long);
+    report.check(
+        "mldsa87 raw one long as mldsa44",
+        &ours,
+        &theirs,
+        Some("err:InvalidEncoding"),
+    );
     let (ours, theirs) = load_raw(65, &raw[..raw.len() - 1]);
     report.check(
         "mldsa65 raw short",
@@ -1049,7 +1103,6 @@ fn mldsa_seed_tail() {
     report.check("mldsa65 raw public flipped", &ours, &theirs, None);
     let (ours, theirs) = load_public(65, &[]);
     report.check("mldsa65 empty public", &ours, &theirs, None);
-    let spki = generated_spki(65, &seed);
     let (ours, theirs_out) = load_public(65, &spki);
     report.check("mldsa65 spki", &ours, &theirs_out, Some("ok"));
     let (ours, theirs_out) = load_public(65, &append_outer(&spki, &[0x00]));
@@ -1066,7 +1119,7 @@ fn mldsa_seed_tail() {
         ),
         None,
     );
-    let wycheproof = hex::decode(WYCHEPROOF_MLDSA65_SEED).unwrap();
+    let wycheproof = wycheproof_mldsa65_seed();
     check_pkcs8(
         &mut report,
         "wycheproof mldsa65 seed",
@@ -1093,13 +1146,27 @@ fn mldsa_pkcs8_version(last: u8, private_key: &[u8], version: u8, suffix: &[u8])
     )
 }
 
-fn generated_spki(set: u8, seed: &[u8]) -> Vec<u8> {
-    let (_, alg) = signing(set);
-    let key = theirs::signature::PqdsaKeyPair::from_seed(alg, seed).unwrap();
-    theirs::encoding::AsDer::<theirs::encoding::PublicKeyX509Der>::as_der(key.public_key())
+/// The first ML-DSA-65 seed PKCS#8 in Wycheproof's signing file whose seed
+/// is not 32 bytes of 0x2a, the key this test builds itself.
+fn wycheproof_mldsa65_seed() -> Vec<u8> {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../thirdparty/vectors/wycheproof/testvectors_v1/mldsa_65_sign_seed_test.json"
+    );
+    let value: serde_json::Value =
+        serde_json::from_reader(std::fs::File::open(path).unwrap()).unwrap();
+    let own = "2a".repeat(32);
+    let pkcs8 = value["testGroups"]
+        .as_array()
         .unwrap()
-        .as_ref()
-        .to_vec()
+        .iter()
+        .find_map(|group| {
+            let seed = group["privateSeed"].as_str()?;
+            let pkcs8 = group["privateKeyPkcs8"].as_str()?;
+            (seed != own).then_some(pkcs8)
+        })
+        .unwrap();
+    hex::decode(pkcs8).unwrap()
 }
 
 #[test]
@@ -1112,11 +1179,9 @@ fn nearby_edges() {
         &embedded("dsa2048"),
         Some("err:WrongAlgorithm"),
     );
-    let ed = theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32])
-        .unwrap()
-        .to_pkcs8v1()
-        .unwrap();
-    let ed = ed.as_ref();
+    let ed_key = theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32]).unwrap();
+    let ed_doc = ed_key.to_pkcs8v1().unwrap();
+    let ed = ed_doc.as_ref();
     check_pkcs8(&mut report, "ed25519", 65, ed, Some("err:WrongAlgorithm"));
     check_pkcs8(
         &mut report,
@@ -1132,11 +1197,7 @@ fn nearby_edges() {
         &append_outer(ed, &[0x00]),
         None,
     );
-    let ed_public = theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32])
-        .unwrap()
-        .public_key()
-        .as_ref()
-        .to_vec();
+    let ed_public = ed_key.public_key().as_ref().to_vec();
     check_pkcs8(
         &mut report,
         "ed25519 v2 public",
@@ -1154,7 +1215,7 @@ fn nearby_edges() {
         Some("err:InvalidEncoding"),
     );
     let x_seed = [9; 32];
-    let x_doc = curve25519_pkcs8(&[0x2b, 0x65, 0x6e], &x_seed, &[]);
+    let x_doc = curve25519_versioned(&[0x2b, 0x65, 0x6e], &x_seed, 0, &[]);
     check_pkcs8(
         &mut report,
         "x25519",
@@ -1166,7 +1227,7 @@ fn nearby_edges() {
         &mut report,
         "x25519 attributes",
         65,
-        &curve25519_pkcs8(&[0x2b, 0x65, 0x6e], &x_seed, &attributes()),
+        &curve25519_versioned(&[0x2b, 0x65, 0x6e], &x_seed, 0, &attributes()),
         None,
     );
     let x_public =
@@ -1238,8 +1299,6 @@ fn extend_suffix(doc: &[u8], suffix: &[u8]) -> Vec<u8> {
 fn curve25519_versioned(oid: &[u8], seed: &[u8], version: u8, suffix: &[u8]) -> Vec<u8> {
     pkcs8(version, &algorithm(oid, None), &der(0x04, seed), suffix)
 }
-
-const WYCHEPROOF_MLDSA65_SEED: &str = "3034020100300b0609608648016503040312042280202a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a";
 
 const RSA1024: &str = "30820277020100300d06092a864886f70d0101010500048202613082025d02010002818100d8917628e8923e137bea7c3e38e8b3c9f450c7a367d600e1a8c11342f058ffe805489d4d92f8588d014f18e5c27cea30fa644e71d46696447c44503bb9dc52e51422a571a85bf4a905da23f9ea59ce30b5f2eec76dab1c16944ea8b48483028202d18480d7e0e3ce78d078a6b783c33431dac86e34faf55cb3b6e0211ff2424b02030100010281807957874d04826c259e989364899e589e1f35e3a5bad83d4632b77b83560787db089ad7085000b61ccb4ef63445f4978339c859eb8d86ad4b5215349f4254205d117f98e11bb3557e3c6c2f5b2858992e43c5e07c9434f40c3852bbbd3587eb6bb3cea25cbc90a71de1ce189b83ff90daa4e3155fcc623cc5eec74a942f1c8901024100fde3a3ce09c42388577b89b51f698f0bacb8901009b5e2dabc0ffd87603827b341fc7c9a6de912f4590eebb35efc4b8639fb8b1a7a68bdb8a6e10987783a8f79024100da5e63e8305a91c2137849ae4328e6dcff7e9b617777c991340e1e11ea5d244aafeaa0c0624a1c9a41ce4e4e47b84a8b202802135aa06e7704276ce2a698dae3024100b53d8bf1c986fad6999cd6f1353b65a22fea90ece201b5aff0107a2be9c42c930ac7f32b4acad77d17164fabfc629e87735cde3048b1fcbd94639129e3e9ea0102402246b4a9ea851ce1f8ca65ce5bae5ce68d9822ed9ea207daa9f0195a388e5c36f8fbfc359678099b50ff001d9b765b05118c161f5197631f7d606edff8c47f7f024100d84310b6d51b56e7e5f32aa5f09ef77ef2aa0d13a592228c418a9794276beea194345cdf5c1003ab48a83a1dd3c99ef87e6bd8b47dd3d5e423b348ac0da5ac7b";
 
