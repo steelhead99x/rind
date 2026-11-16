@@ -10,7 +10,7 @@ use crate::mid::rng::{RandomSource, SystemRandom};
 use crate::mid::{ed25519, util};
 
 /// An Ed25519 verification public key.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Ed25519VerifyingKey(ed25519::VerifyingKey);
 
 impl Ed25519VerifyingKey {
@@ -53,6 +53,11 @@ impl Ed25519VerifyingKey {
     /// Encode using compressed point encoding.
     pub(crate) fn as_bytes(&self) -> [u8; 32] {
         self.0.as_bytes()
+    }
+
+    /// The compressed point encoding this key was decoded from.
+    pub(crate) fn bytes(&self) -> &[u8; 32] {
+        self.0.bytes()
     }
 
     /// Verify a `signature` against the given `message`.

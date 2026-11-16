@@ -718,16 +718,16 @@ impl ServerKey {
         .into())))
     }
 
-    /// Loads a key for `suite` from its `SerializeScalar` encoding, refused
+    /// Loads a key for `suite` from its scalar, `SerializeScalar`'s encoding, refused
     /// unless it is from 1 to the group order less one.
-    pub fn from_bytes(suite: &'static Suite, bytes: &[u8]) -> Result<Self, Error> {
+    pub fn from_scalar(suite: &'static Suite, scalar: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_secret();
-        with_group!(suite, G => Ok(Self(Key::<G> { k: scalar_from_key::<G>(bytes)? }.into())))
+        with_group!(suite, G => Ok(Self(Key::<G> { k: scalar_from_key::<G>(scalar)? }.into())))
     }
 
-    /// Encodes the key as [`Self::from_bytes`] loads it.
-    pub fn to_bytes(&self) -> ServerKeyBytes {
-        dispatch!(KeyInner, &self.0, key => key.to_bytes())
+    /// Encodes the key as the scalar [`Self::from_scalar`] loads.
+    pub fn to_scalar(&self) -> Scalar {
+        dispatch!(KeyInner, &self.0, key => key.to_scalar())
     }
 
     /// Returns the key's suite.
@@ -762,8 +762,8 @@ impl<G: Group> Key<G> {
         G::mul(element, &self.k)
     }
 
-    fn to_bytes(&self) -> ServerKeyBytes {
-        ServerKeyBytes(scalar_bytes::<G>(&self.k))
+    fn to_scalar(&self) -> Scalar {
+        Scalar(scalar_bytes::<G>(&self.k))
     }
 
     /// `BlindEvaluate` of an encoded blinded element, in the OPRF mode.
@@ -906,24 +906,25 @@ impl fmt::Debug for Output {
     }
 }
 
-/// An encoded server key, wiped on drop under the `wipe` feature.
-pub struct ServerKeyBytes(Bytes<MAX_SCALAR>);
+/// A server key as its scalar, which `from_scalar` loads, wiped on drop
+/// under the `wipe` feature.
+pub struct Scalar(Bytes<MAX_SCALAR>);
 
-impl AsRef<[u8]> for ServerKeyBytes {
+impl AsRef<[u8]> for Scalar {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
 
-impl Drop for ServerKeyBytes {
+impl Drop for Scalar {
     fn drop(&mut self) {
         low::zeroise_value(&mut self.0);
     }
 }
 
-impl fmt::Debug for ServerKeyBytes {
+impl fmt::Debug for Scalar {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ServerKeyBytes").finish_non_exhaustive()
+        f.debug_tuple("Scalar").finish_non_exhaustive()
     }
 }
 

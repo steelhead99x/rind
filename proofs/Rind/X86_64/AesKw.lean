@@ -1053,4 +1053,61 @@ theorem kek_unwrap_padded_spec (h : RunsAesHw) (hheld : low.entry.Entry.assert_h
       step as ⟨key2, hkey2, hkey2v⟩
       rw [hkey2v, hL]
 
+/-- `wrap_key` wraps as `mode` names: as `kek_wrap_spec` states for
+`Mode::Kw`, and as `kek_wrap_padded_spec` states for `Mode::Kwp`. -/
+theorem kek_wrap_key_spec (h : RunsAesHw) {alg : Algorithm} {kek : List (BitVec 8)}
+    {self : mid.aes_kw.AesKek} (hk : KekIs alg kek self) (mode : mid.aes_kw.Mode) (key wrapped : Slice U8)
+    (hroom : key.length + 15 ≤ Usize.max) :
+    mid.aes_kw.AesKek.wrap_key self mode key wrapped ⦃ res =>
+      match mode with
+      | .Kw =>
+        if 16 ≤ key.length ∧ key.length % 8 = 0 ∧ wrapped.length = key.length + 8 then
+          res.1 = .Ok () ∧ bvs res.2.val = kwAE alg kek (bvs key.val)
+        else res = (.Err .WrongLength, wrapped)
+      | .Kwp =>
+        if 0 < key.length ∧ key.length < 2 ^ 32 ∧ wrapped.length = (key.length + 7) / 8 * 8 + 8 then
+          res.1 = .Ok () ∧ bvs res.2.val = kwpAE alg kek (bvs key.val)
+        else res = (.Err .WrongLength, wrapped) ⦄ := by
+  unfold mid.aes_kw.AesKek.wrap_key
+  cases mode
+  · exact kek_wrap_spec h hk key wrapped (by omega)
+  · exact kek_wrap_padded_spec h hk key wrapped hroom
+
+/-- `unwrap_key` unwraps as `mode` names, returning the unwrapped key: as
+`kek_unwrap_spec` states for `Mode::Kw`, returning all of `key`, and as
+`kek_unwrap_padded_spec` states for `Mode::Kwp`. -/
+theorem kek_unwrap_key_spec (h : RunsAesHw) (hheld : low.entry.Entry.assert_held = ok ()) {alg : Algorithm}
+    {kek : List (BitVec 8)} {self : mid.aes_kw.AesKek} (hk : KekIs alg kek self) (mode : mid.aes_kw.Mode)
+    (wrapped key : Slice U8) :
+    mid.aes_kw.AesKek.unwrap_key self mode wrapped key ⦃ res =>
+      match mode with
+      | .Kw =>
+        if wrapped.length < 24 ∨ wrapped.length % 8 ≠ 0 then res.1 = .Err .DecryptFailed ∧ res.2 res.1 = key
+        else if key.length ≠ wrapped.length - 8 then res.1 = .Err .WrongLength ∧ res.2 res.1 = key
+        else match kwAD alg kek (bvs wrapped.val) with
+          | some p => ∃ s, res.1 = .Ok s ∧ bvs s.val = p
+          | none => res.1 = .Err .DecryptFailed ∧ (res.2 res.1).val = List.replicate key.length 0#u8
+      | .Kwp =>
+        if wrapped.length < 16 ∨ wrapped.length % 8 ≠ 0 then res.1 = .Err .DecryptFailed ∧ res.2 res.1 = key
+        else if key.length ≠ wrapped.length - 8 then res.1 = .Err .WrongLength ∧ res.2 res.1 = key
+        else match kwpAD alg kek (bvs wrapped.val) with
+          | some p => ∃ s, res.1 = .Ok s ∧ bvs s.val = p
+          | none => res.1 = .Err .DecryptFailed ∧ (res.2 res.1).val = List.replicate key.length 0#u8 ⦄ := by
+  unfold mid.aes_kw.AesKek.unwrap_key
+  cases mode
+  · simp only
+    apply WP.spec_bind (kek_unwrap_spec h hheld hk wrapped key)
+    rintro ⟨r, key1⟩ hpost
+    split_ifs at hpost ⊢ with h24 hl
+    · obtain ⟨rfl, rfl⟩ := Prod.mk.inj hpost
+      simp
+    · obtain ⟨rfl, rfl⟩ := Prod.mk.inj hpost
+      simp
+    · rcases hkw : kwAD alg kek (bvs wrapped.val) with _ | p <;> simp only [hkw] at hpost ⊢
+      · obtain ⟨rfl, hz⟩ := hpost
+        simpa using hz
+      · obtain ⟨rfl, hp⟩ := hpost
+        simpa using hp
+  · exact kek_unwrap_padded_spec h hheld hk wrapped key
+
 end rind.x86_64
