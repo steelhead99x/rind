@@ -29,4 +29,12 @@ Where str0m-aws-lc-rs lets dimpl panic on an empty DTLS certificate or a private
 
 A generated certificate's private key is returned in dimpl's `DtlsCertificate`, whose plain `Vec<u8>` str0m owns and nothing wipes when it is dropped.
 
+It builds for `wasm32-wasip2` and `wasm32-unknown-unknown`, the browser, where
+rind needs its JavaScript random source, `getrandom = { version = "0.4",
+features = ["wasm_js"] }`. [PLATFORMS.md](https://github.com/kixel-ai/rind/blob/main/PLATFORMS.md) lists what each adapter's
+upstream needs there too, and why rind's constant-time checks do not cover wasm.
+In the browser it only builds: str0m takes its time as a `std::time::Instant`,
+which `wasm32-unknown-unknown`'s std cannot produce (`Instant::now()` panics),
+so the example above and str0m itself cannot run there with any provider.
+
 License: Apache-2.0 OR ISC OR MIT-0
