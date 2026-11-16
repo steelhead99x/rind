@@ -70,7 +70,7 @@
 
 	leaq	64-0(%rsi),%rsi
 	leaq	32(%rsp),%rdi
-	call	{ecp_nistz256_sqr_montq}
+	call	.Lp256___ecp_nistz256_sqr_montq
 
 	pcmpeqd	%xmm4,%xmm5
 	pshufd	$0xb1,%xmm3,%xmm4
@@ -90,11 +90,11 @@
 	leaq	32-0(%rsp),%rsi
 	movq	%r15,%r12
 	leaq	0(%rsp),%rdi
-	call	{ecp_nistz256_mul_montq}
+	call	.Lp256___ecp_nistz256_mul_montq
 
 	leaq	320(%rsp),%rbx
 	leaq	64(%rsp),%rdi
-	call	{ecp_nistz256_sub_fromq}
+	call	.Lp256___ecp_nistz256_sub_fromq
 
 	movq	384(%rsp),%rax
 	leaq	384(%rsp),%rbx
@@ -104,7 +104,7 @@
 	movq	16+32(%rsp),%r11
 	movq	24+32(%rsp),%r12
 	leaq	32(%rsp),%rdi
-	call	{ecp_nistz256_mul_montq}
+	call	.Lp256___ecp_nistz256_mul_montq
 
 	movq	384(%rsp),%rax
 	leaq	384(%rsp),%rbx
@@ -114,7 +114,7 @@
 	movq	16+64(%rsp),%r11
 	movq	24+64(%rsp),%r12
 	leaq	288(%rsp),%rdi
-	call	{ecp_nistz256_mul_montq}
+	call	.Lp256___ecp_nistz256_mul_montq
 
 	movq	448(%rsp),%rax
 	leaq	448(%rsp),%rbx
@@ -124,11 +124,11 @@
 	movq	16+32(%rsp),%r11
 	movq	24+32(%rsp),%r12
 	leaq	32(%rsp),%rdi
-	call	{ecp_nistz256_mul_montq}
+	call	.Lp256___ecp_nistz256_mul_montq
 
 	leaq	352(%rsp),%rbx
 	leaq	96(%rsp),%rdi
-	call	{ecp_nistz256_sub_fromq}
+	call	.Lp256___ecp_nistz256_sub_fromq
 
 	movq	0+64(%rsp),%rax
 	movq	8+64(%rsp),%r14
@@ -136,7 +136,7 @@
 	movq	16+64(%rsp),%r15
 	movq	24+64(%rsp),%r8
 	leaq	128(%rsp),%rdi
-	call	{ecp_nistz256_sqr_montq}
+	call	.Lp256___ecp_nistz256_sqr_montq
 
 	movq	0+96(%rsp),%rax
 	movq	8+96(%rsp),%r14
@@ -144,7 +144,7 @@
 	movq	16+96(%rsp),%r15
 	movq	24+96(%rsp),%r8
 	leaq	192(%rsp),%rdi
-	call	{ecp_nistz256_sqr_montq}
+	call	.Lp256___ecp_nistz256_sqr_montq
 
 	movq	128(%rsp),%rax
 	leaq	128(%rsp),%rbx
@@ -154,7 +154,7 @@
 	movq	16+64(%rsp),%r11
 	movq	24+64(%rsp),%r12
 	leaq	160(%rsp),%rdi
-	call	{ecp_nistz256_mul_montq}
+	call	.Lp256___ecp_nistz256_mul_montq
 
 	movq	320(%rsp),%rax
 	leaq	320(%rsp),%rbx
@@ -164,7 +164,7 @@
 	movq	16+128(%rsp),%r11
 	movq	24+128(%rsp),%r12
 	leaq	0(%rsp),%rdi
-	call	{ecp_nistz256_mul_montq}
+	call	.Lp256___ecp_nistz256_mul_montq
 
 
 
@@ -196,11 +196,11 @@
 	cmovcq	%r10,%r9
 	movq	24(%rsi),%r10
 
-	call	{ecp_nistz256_subq}
+	call	.Lp256___ecp_nistz256_subq
 
 	leaq	160(%rsp),%rbx
 	leaq	224(%rsp),%rdi
-	call	{ecp_nistz256_sub_fromq}
+	call	.Lp256___ecp_nistz256_sub_fromq
 
 	movq	0+0(%rsp),%rax
 	movq	0+8(%rsp),%rbp
@@ -208,7 +208,7 @@
 	movq	0+24(%rsp),%r10
 	leaq	64(%rsp),%rdi
 
-	call	{ecp_nistz256_subq}
+	call	.Lp256___ecp_nistz256_subq
 
 	movq	%r12,0(%rdi)
 	movq	%r13,8(%rdi)
@@ -222,7 +222,7 @@
 	movq	16+160(%rsp),%r11
 	movq	24+160(%rsp),%r12
 	leaq	32(%rsp),%rdi
-	call	{ecp_nistz256_mul_montq}
+	call	.Lp256___ecp_nistz256_mul_montq
 
 	movq	96(%rsp),%rax
 	leaq	96(%rsp),%rbx
@@ -232,11 +232,11 @@
 	movq	16+64(%rsp),%r11
 	movq	24+64(%rsp),%r12
 	leaq	64(%rsp),%rdi
-	call	{ecp_nistz256_mul_montq}
+	call	.Lp256___ecp_nistz256_mul_montq
 
 	leaq	32(%rsp),%rbx
 	leaq	256(%rsp),%rdi
-	call	{ecp_nistz256_sub_fromq}
+	call	.Lp256___ecp_nistz256_sub_fromq
 
 .byte	102,72,15,126,199
 
@@ -246,8 +246,8 @@
 	movdqa	%xmm5,%xmm2
 	pandn	288+16(%rsp),%xmm1
 	movdqa	%xmm5,%xmm3
-	pand	{ONE_mont}(%rip),%xmm2
-	pand	{ONE_mont}+16(%rip),%xmm3
+	pand	{poly}+128(%rip),%xmm2
+	pand	{poly}+128+16(%rip),%xmm3
 	por	%xmm0,%xmm2
 	por	%xmm1,%xmm3
 
@@ -329,5 +329,437 @@
 	leaq	(%rsi),%rsp
 .cfi_def_cfa_register	%rsp
 .Lp256_add_affineq_epilogue:
+	.byte	0xf3,0xc3
+.cfi_endproc	
+.align	32
+.Lp256___ecp_nistz256_mul_montq:
+.cfi_startproc	
+
+
+	movq	%rax,%rbp
+	mulq	%r9
+	movq	{poly}+8(%rip),%r14
+	movq	%rax,%r8
+	movq	%rbp,%rax
+	movq	%rdx,%r9
+
+	mulq	%r10
+	movq	{poly}+24(%rip),%r15
+	addq	%rax,%r9
+	movq	%rbp,%rax
+	adcq	$0,%rdx
+	movq	%rdx,%r10
+
+	mulq	%r11
+	addq	%rax,%r10
+	movq	%rbp,%rax
+	adcq	$0,%rdx
+	movq	%rdx,%r11
+
+	mulq	%r12
+	addq	%rax,%r11
+	movq	%r8,%rax
+	adcq	$0,%rdx
+	xorq	%r13,%r13
+	movq	%rdx,%r12
+
+
+
+
+
+
+
+
+
+
+	movq	%r8,%rbp
+	shlq	$32,%r8
+	mulq	%r15
+	shrq	$32,%rbp
+	addq	%r8,%r9
+	adcq	%rbp,%r10
+	adcq	%rax,%r11
+	movq	8(%rbx),%rax
+	adcq	%rdx,%r12
+	adcq	$0,%r13
+	xorq	%r8,%r8
+
+
+
+	movq	%rax,%rbp
+	mulq	0(%rsi)
+	addq	%rax,%r9
+	movq	%rbp,%rax
+	adcq	$0,%rdx
+	movq	%rdx,%rcx
+
+	mulq	8(%rsi)
+	addq	%rcx,%r10
+	adcq	$0,%rdx
+	addq	%rax,%r10
+	movq	%rbp,%rax
+	adcq	$0,%rdx
+	movq	%rdx,%rcx
+
+	mulq	16(%rsi)
+	addq	%rcx,%r11
+	adcq	$0,%rdx
+	addq	%rax,%r11
+	movq	%rbp,%rax
+	adcq	$0,%rdx
+	movq	%rdx,%rcx
+
+	mulq	24(%rsi)
+	addq	%rcx,%r12
+	adcq	$0,%rdx
+	addq	%rax,%r12
+	movq	%r9,%rax
+	adcq	%rdx,%r13
+	adcq	$0,%r8
+
+
+
+	movq	%r9,%rbp
+	shlq	$32,%r9
+	mulq	%r15
+	shrq	$32,%rbp
+	addq	%r9,%r10
+	adcq	%rbp,%r11
+	adcq	%rax,%r12
+	movq	16(%rbx),%rax
+	adcq	%rdx,%r13
+	adcq	$0,%r8
+	xorq	%r9,%r9
+
+
+
+	movq	%rax,%rbp
+	mulq	0(%rsi)
+	addq	%rax,%r10
+	movq	%rbp,%rax
+	adcq	$0,%rdx
+	movq	%rdx,%rcx
+
+	mulq	8(%rsi)
+	addq	%rcx,%r11
+	adcq	$0,%rdx
+	addq	%rax,%r11
+	movq	%rbp,%rax
+	adcq	$0,%rdx
+	movq	%rdx,%rcx
+
+	mulq	16(%rsi)
+	addq	%rcx,%r12
+	adcq	$0,%rdx
+	addq	%rax,%r12
+	movq	%rbp,%rax
+	adcq	$0,%rdx
+	movq	%rdx,%rcx
+
+	mulq	24(%rsi)
+	addq	%rcx,%r13
+	adcq	$0,%rdx
+	addq	%rax,%r13
+	movq	%r10,%rax
+	adcq	%rdx,%r8
+	adcq	$0,%r9
+
+
+
+	movq	%r10,%rbp
+	shlq	$32,%r10
+	mulq	%r15
+	shrq	$32,%rbp
+	addq	%r10,%r11
+	adcq	%rbp,%r12
+	adcq	%rax,%r13
+	movq	24(%rbx),%rax
+	adcq	%rdx,%r8
+	adcq	$0,%r9
+	xorq	%r10,%r10
+
+
+
+	movq	%rax,%rbp
+	mulq	0(%rsi)
+	addq	%rax,%r11
+	movq	%rbp,%rax
+	adcq	$0,%rdx
+	movq	%rdx,%rcx
+
+	mulq	8(%rsi)
+	addq	%rcx,%r12
+	adcq	$0,%rdx
+	addq	%rax,%r12
+	movq	%rbp,%rax
+	adcq	$0,%rdx
+	movq	%rdx,%rcx
+
+	mulq	16(%rsi)
+	addq	%rcx,%r13
+	adcq	$0,%rdx
+	addq	%rax,%r13
+	movq	%rbp,%rax
+	adcq	$0,%rdx
+	movq	%rdx,%rcx
+
+	mulq	24(%rsi)
+	addq	%rcx,%r8
+	adcq	$0,%rdx
+	addq	%rax,%r8
+	movq	%r11,%rax
+	adcq	%rdx,%r9
+	adcq	$0,%r10
+
+
+
+	movq	%r11,%rbp
+	shlq	$32,%r11
+	mulq	%r15
+	shrq	$32,%rbp
+	addq	%r11,%r12
+	adcq	%rbp,%r13
+	movq	%r12,%rcx
+	adcq	%rax,%r8
+	adcq	%rdx,%r9
+	movq	%r13,%rbp
+	adcq	$0,%r10
+
+
+
+	subq	$-1,%r12
+	movq	%r8,%rbx
+	sbbq	%r14,%r13
+	sbbq	$0,%r8
+	movq	%r9,%rdx
+	sbbq	%r15,%r9
+	sbbq	$0,%r10
+
+	cmovcq	%rcx,%r12
+	cmovcq	%rbp,%r13
+	movq	%r12,0(%rdi)
+	cmovcq	%rbx,%r8
+	movq	%r13,8(%rdi)
+	cmovcq	%rdx,%r9
+	movq	%r8,16(%rdi)
+	movq	%r9,24(%rdi)
+
+	.byte	0xf3,0xc3
+.cfi_endproc	
+.align	32
+.Lp256___ecp_nistz256_sqr_montq:
+.cfi_startproc	
+	movq	%rax,%r13
+	mulq	%r14
+	movq	%rax,%r9
+	movq	%r15,%rax
+	movq	%rdx,%r10
+
+	mulq	%r13
+	addq	%rax,%r10
+	movq	%r8,%rax
+	adcq	$0,%rdx
+	movq	%rdx,%r11
+
+	mulq	%r13
+	addq	%rax,%r11
+	movq	%r15,%rax
+	adcq	$0,%rdx
+	movq	%rdx,%r12
+
+
+	mulq	%r14
+	addq	%rax,%r11
+	movq	%r8,%rax
+	adcq	$0,%rdx
+	movq	%rdx,%rbp
+
+	mulq	%r14
+	addq	%rax,%r12
+	movq	%r8,%rax
+	adcq	$0,%rdx
+	addq	%rbp,%r12
+	movq	%rdx,%r13
+	adcq	$0,%r13
+
+
+	mulq	%r15
+	xorq	%r15,%r15
+	addq	%rax,%r13
+	movq	0(%rsi),%rax
+	movq	%rdx,%r14
+	adcq	$0,%r14
+
+	addq	%r9,%r9
+	adcq	%r10,%r10
+	adcq	%r11,%r11
+	adcq	%r12,%r12
+	adcq	%r13,%r13
+	adcq	%r14,%r14
+	adcq	$0,%r15
+
+	mulq	%rax
+	movq	%rax,%r8
+	movq	8(%rsi),%rax
+	movq	%rdx,%rcx
+
+	mulq	%rax
+	addq	%rcx,%r9
+	adcq	%rax,%r10
+	movq	16(%rsi),%rax
+	adcq	$0,%rdx
+	movq	%rdx,%rcx
+
+	mulq	%rax
+	addq	%rcx,%r11
+	adcq	%rax,%r12
+	movq	24(%rsi),%rax
+	adcq	$0,%rdx
+	movq	%rdx,%rcx
+
+	mulq	%rax
+	addq	%rcx,%r13
+	adcq	%rax,%r14
+	movq	%r8,%rax
+	adcq	%rdx,%r15
+
+	movq	{poly}+8(%rip),%rsi
+	movq	{poly}+24(%rip),%rbp
+
+
+
+
+	movq	%r8,%rcx
+	shlq	$32,%r8
+	mulq	%rbp
+	shrq	$32,%rcx
+	addq	%r8,%r9
+	adcq	%rcx,%r10
+	adcq	%rax,%r11
+	movq	%r9,%rax
+	adcq	$0,%rdx
+
+
+
+	movq	%r9,%rcx
+	shlq	$32,%r9
+	movq	%rdx,%r8
+	mulq	%rbp
+	shrq	$32,%rcx
+	addq	%r9,%r10
+	adcq	%rcx,%r11
+	adcq	%rax,%r8
+	movq	%r10,%rax
+	adcq	$0,%rdx
+
+
+
+	movq	%r10,%rcx
+	shlq	$32,%r10
+	movq	%rdx,%r9
+	mulq	%rbp
+	shrq	$32,%rcx
+	addq	%r10,%r11
+	adcq	%rcx,%r8
+	adcq	%rax,%r9
+	movq	%r11,%rax
+	adcq	$0,%rdx
+
+
+
+	movq	%r11,%rcx
+	shlq	$32,%r11
+	movq	%rdx,%r10
+	mulq	%rbp
+	shrq	$32,%rcx
+	addq	%r11,%r8
+	adcq	%rcx,%r9
+	adcq	%rax,%r10
+	adcq	$0,%rdx
+	xorq	%r11,%r11
+
+
+
+	addq	%r8,%r12
+	adcq	%r9,%r13
+	movq	%r12,%r8
+	adcq	%r10,%r14
+	adcq	%rdx,%r15
+	movq	%r13,%r9
+	adcq	$0,%r11
+
+	subq	$-1,%r12
+	movq	%r14,%r10
+	sbbq	%rsi,%r13
+	sbbq	$0,%r14
+	movq	%r15,%rcx
+	sbbq	%rbp,%r15
+	sbbq	$0,%r11
+
+	cmovcq	%r8,%r12
+	cmovcq	%r9,%r13
+	movq	%r12,0(%rdi)
+	cmovcq	%r10,%r14
+	movq	%r13,8(%rdi)
+	cmovcq	%rcx,%r15
+	movq	%r14,16(%rdi)
+	movq	%r15,24(%rdi)
+
+	.byte	0xf3,0xc3
+.cfi_endproc	
+.align	32
+.Lp256___ecp_nistz256_sub_fromq:
+.cfi_startproc	
+	subq	0(%rbx),%r12
+	sbbq	8(%rbx),%r13
+	movq	%r12,%rax
+	sbbq	16(%rbx),%r8
+	sbbq	24(%rbx),%r9
+	movq	%r13,%rbp
+	sbbq	%r11,%r11
+
+	addq	$-1,%r12
+	movq	%r8,%rcx
+	adcq	%r14,%r13
+	adcq	$0,%r8
+	movq	%r9,%r10
+	adcq	%r15,%r9
+	testq	%r11,%r11
+
+	cmovzq	%rax,%r12
+	cmovzq	%rbp,%r13
+	movq	%r12,0(%rdi)
+	cmovzq	%rcx,%r8
+	movq	%r13,8(%rdi)
+	cmovzq	%r10,%r9
+	movq	%r8,16(%rdi)
+	movq	%r9,24(%rdi)
+
+	.byte	0xf3,0xc3
+.cfi_endproc	
+.align	32
+.Lp256___ecp_nistz256_subq:
+.cfi_startproc	
+	subq	%r12,%rax
+	sbbq	%r13,%rbp
+	movq	%rax,%r12
+	sbbq	%r8,%rcx
+	sbbq	%r9,%r10
+	movq	%rbp,%r13
+	sbbq	%r11,%r11
+
+	addq	$-1,%rax
+	movq	%rcx,%r8
+	adcq	%r14,%rbp
+	adcq	$0,%rcx
+	movq	%r10,%r9
+	adcq	%r15,%r10
+	testq	%r11,%r11
+
+	cmovnzq	%rax,%r12
+	cmovnzq	%rbp,%r13
+	cmovnzq	%rcx,%r8
+	cmovnzq	%r10,%r9
+
 	.byte	0xf3,0xc3
 .cfi_endproc	
