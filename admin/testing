@@ -126,7 +126,7 @@ rows, not_primitives = table()
 
 exported = set(exports(SRC / "lib.rs", []))
 named = {name for row in rows for token in re.findall(r"`([^`]+)`", row["Exports"]) for name in expand(token)}
-named |= set(not_primitives)
+named |= {name for token in not_primitives for name in expand(token)}
 for name in sorted(exported - named):
     errors.append(f"export `{name}` has no row")
 for name in sorted(named - exported):

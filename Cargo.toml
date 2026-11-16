@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "rind",
+  "rind-acvp",
   "rind-aws-lc-rs",
   "rind-bench",
   "rind-cpuid",
@@ -19,7 +20,8 @@ members = [
   "rind-jsonwebtoken",
   "rind-openssl",
   "rind-python",
-  "fuzz"
+  "fuzz",
+  "admin/wasm-fixture"
 ]
 # Vendored upstream forks, built only through `[patch.crates-io]`.
 exclude = ["thirdparty/blind-rsa-signatures"]

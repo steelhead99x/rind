@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
 use rustls::client::{EchConfig, EchMode};
+#[cfg(not(target_family = "wasm"))]
 use rustls::crypto::aws_lc_rs;
 use rustls::crypto::hpke::{EncapsulatedSecret, Hpke, HpkePrivateKey, HpkePublicKey};
 use rustls::pki_types::{EchConfigListBytes, ServerName};
 use rustls::{ClientConfig, ClientConnection, RootCertStore};
 
 /// Each of our suites beside rustls's aws-lc-rs provider's same suite.
+#[cfg(not(target_family = "wasm"))]
 fn pairs() -> impl Iterator<Item = (&'static dyn Hpke, &'static dyn Hpke)> {
     rind_rustls::hpke::ALL_SUPPORTED_SUITES
         .iter()
@@ -15,6 +17,14 @@ fn pairs() -> impl Iterator<Item = (&'static dyn Hpke, &'static dyn Hpke)> {
             assert_eq!(ours.suite(), theirs.suite());
             (*ours, *theirs)
         })
+}
+
+/// aws-lc-rs does not build for wasm, so there each suite meets itself.
+#[cfg(target_family = "wasm")]
+fn pairs() -> impl Iterator<Item = (&'static dyn Hpke, &'static dyn Hpke)> {
+    rind_rustls::hpke::ALL_SUPPORTED_SUITES
+        .iter()
+        .map(|ours| (*ours, *ours))
 }
 
 fn copy(key: &HpkePrivateKey) -> HpkePrivateKey {
@@ -75,6 +85,7 @@ fn matches_aws_lc_rs() {
 }
 
 /// `point`, an uncompressed NIST point, compressed.
+#[cfg(not(target_family = "wasm"))]
 fn compressed(point: &[u8]) -> Vec<u8> {
     let mut compressed = vec![2 | (point[point.len() - 1] & 1)];
     compressed.extend(&point[1..1 + point.len() / 2]);
@@ -86,6 +97,8 @@ fn compressed(point: &[u8]) -> Vec<u8> {
 // but its recipient hashes its own key uncompressed, so not even aws-lc-rs
 // opens the message; rind refuses the key instead. Both take a compressed
 // `enc`, which a sender that sends one hashes as sent.
+// It needs aws-lc-rs, which seals to a compressed key.
+#[cfg(not(target_family = "wasm"))]
 #[test]
 fn compressed_points() {
     for (ours, theirs) in pairs() {

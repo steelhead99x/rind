@@ -85,6 +85,9 @@ fn main() {
 
     println!("cargo::rustc-link-search=native={}", lib.display());
     println!("cargo::rustc-link-lib=dylib=rind_fips_module");
+    // A dependent's build script reads it as `DEP_RIND_FIPS_MODULE_LIB`, as
+    // `rind-acvp`'s does to find the module outside cargo.
+    println!("cargo::metadata=lib={}", lib.display());
     // Tests find the module to tamper with a copy of it.
     println!("cargo::rustc-env=RIND_FIPS_MODULE={}", module.display());
 }
@@ -102,11 +105,16 @@ fn build(manifest: &Path, out: &Path, target: &str) -> PathBuf {
     // workspace build compiles with the module. Under valgrind the module
     // keeps line tables, so ctgrind's suppressions match inlined frames.
     let ctgrind = env::var_os("CARGO_FEATURE___CTGRIND").is_some();
-    let (features, debug) = if ctgrind {
-        ("rind/wipe,rind/__ctgrind", "line-tables-only")
+    let (mut features, debug) = if ctgrind {
+        ("rind/wipe,rind/__ctgrind".to_owned(), "line-tables-only")
     } else {
-        ("rind/wipe", "false")
+        ("rind/wipe".to_owned(), "false")
     };
+    // `rind-acvp`'s build: the deterministic forms of the randomized
+    // services, for testing only.
+    if env::var_os("CARGO_FEATURE___ACVP").is_some() {
+        features.push_str(",acvp");
+    }
 
     let mut command = Command::new(env::var_os("CARGO").unwrap());
     command
@@ -122,7 +130,7 @@ fn build(manifest: &Path, out: &Path, target: &str) -> PathBuf {
         .arg(manifest.join("module/Cargo.toml"))
         .arg("--target-dir")
         .arg(&target_dir)
-        .args(["--features", features])
+        .args(["--features", &features])
         // These flags replace any the caller set, which would otherwise
         // reach the module through the environment.
         .env("CARGO_ENCODED_RUSTFLAGS", flags.join("\x1f"))
