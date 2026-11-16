@@ -34,7 +34,7 @@ impl DecapsulationKey {
 
     /// The public key to send the sender.
     fn public_key(&self) -> EncapsulationKey {
-        EncapsulationKey(Box::new(self.0.public_key()))
+        EncapsulationKey(Box::new(self.0.public_key().clone()))
     }
 
     /// Recovers the shared secret from the sender's `ciphertext`.

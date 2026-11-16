@@ -96,27 +96,27 @@ fn rsa2048_pkcs1_sha256_sign(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        use rind::signature::{RsaKeyPair, sign};
-        let key = RsaKeyPair::from_pkcs1(private_key).unwrap();
+        use rind::rsa::{KeyPair, sign};
+        let key = KeyPair::from_pkcs1(private_key).unwrap();
 
         b.iter(|| {
-            black_box(key.sign(&sign::RSA_PKCS1_SHA256, message)).unwrap();
+            black_box(key.sign(&sign::PKCS1_SHA256, message)).unwrap();
         })
     });
 
     // verified-garbage signs a digest, so its row hashes the message first,
     // as rind's sign does inside.
     group.bench_function("verified-garbage", |b| {
-        use rind::signature::{RsaKeyPair, sign};
+        use rind::rsa::{KeyPair, sign};
         use verified_garbage::hashes::sha256::Sha256;
         use verified_garbage::rsa::pkcs1_sig::Hash;
         let key = vg_key(private_key);
         let theirs = key
             .sign_pkcs1v15(&Sha256::digest(message), Hash::Sha256)
             .unwrap();
-        let ours = RsaKeyPair::from_pkcs1(private_key)
+        let ours = KeyPair::from_pkcs1(private_key)
             .unwrap()
-            .sign(&sign::RSA_PKCS1_SHA256, message)
+            .sign(&sign::PKCS1_SHA256, message)
             .unwrap();
         assert_eq!(theirs, ours.as_ref());
 
@@ -185,27 +185,25 @@ fn rsa2048_pss_sha256_sign(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        use rind::signature::{RsaKeyPair, sign};
-        let key = RsaKeyPair::from_pkcs1(private_key).unwrap();
+        use rind::rsa::{KeyPair, sign};
+        let key = KeyPair::from_pkcs1(private_key).unwrap();
 
         b.iter(|| {
-            black_box(key.sign(&sign::RSA_PSS_SHA256, message)).unwrap();
+            black_box(key.sign(&sign::PSS_SHA256, message)).unwrap();
         })
     });
 
     // Hashing the message first, as above.
     group.bench_function("verified-garbage", |b| {
-        use rind::signature::{PublicKey, RsaKeyPair, sign, verify};
+        use rind::rsa::{KeyPair, verify};
         use verified_garbage::hashes::sha256::Sha256;
         use verified_garbage::rsa::pss::Hash;
         let key = vg_key(private_key);
         let sign = || key.sign_pss(&Sha256::digest(message), Hash::Sha256, Hash::Sha256, 32);
-        let public_key = RsaKeyPair::from_pkcs1(private_key)
+        KeyPair::from_pkcs1(private_key)
             .unwrap()
-            .public_key(&sign::RSA_PSS_SHA256);
-        PublicKey::new(&verify::RSA_PSS_SHA256, public_key.as_ref())
-            .unwrap()
-            .verify(message, &sign().unwrap())
+            .public_key()
+            .verify(&verify::PSS_SHA256, message, &sign().unwrap())
             .unwrap();
 
         b.iter(|| black_box(sign()).unwrap())
@@ -341,23 +339,23 @@ fn rsa_pkcs1_sha256_sign_sizes(c: &mut Criterion) {
         });
 
         group.bench_function("rind", |b| {
-            use rind::signature::{RsaKeyPair, sign};
-            let key = RsaKeyPair::from_pkcs8(private_key).unwrap();
+            use rind::rsa::{KeyPair, sign};
+            let key = KeyPair::from_pkcs8(private_key).unwrap();
 
             b.iter(|| {
-                black_box(key.sign(&sign::RSA_PKCS1_SHA256, message)).unwrap();
+                black_box(key.sign(&sign::PKCS1_SHA256, message)).unwrap();
             })
         });
 
         // Hashing the message first, as above.
         group.bench_function("verified-garbage", |b| {
-            use rind::signature::{RsaKeyPair, sign};
+            use rind::rsa::{KeyPair, sign};
             use verified_garbage::hashes::sha256::Sha256;
             use verified_garbage::rsa::pkcs1_sig::Hash;
             let key = vg_key(private_key);
-            let ours = RsaKeyPair::from_pkcs8(private_key)
+            let ours = KeyPair::from_pkcs8(private_key)
                 .unwrap()
-                .sign(&sign::RSA_PKCS1_SHA256, message)
+                .sign(&sign::PKCS1_SHA256, message)
                 .unwrap();
             let theirs = key
                 .sign_pkcs1v15(&Sha256::digest(message), Hash::Sha256)
@@ -453,9 +451,9 @@ fn rsa_load(c: &mut Criterion) {
         });
 
         group.bench_function("rind", |b| {
-            use rind::signature::RsaKeyPair;
+            use rind::rsa::KeyPair;
 
-            b.iter(|| black_box(RsaKeyPair::from_pkcs1(black_box(private_key)).unwrap()))
+            b.iter(|| black_box(KeyPair::from_pkcs1(black_box(private_key)).unwrap()))
         });
 
         // verified-garbage loads the CRT components, parsed from the DER
@@ -485,9 +483,9 @@ fn rsa_load(c: &mut Criterion) {
         });
 
         group.bench_function("rind-sign", |b| {
-            use rind::signature::{RsaKeyPair, sign};
-            let key = RsaKeyPair::from_pkcs1(private_key).unwrap();
-            b.iter(|| black_box(key.sign(&sign::RSA_PKCS1_SHA256, b"hello")).unwrap())
+            use rind::rsa::{KeyPair, sign};
+            let key = KeyPair::from_pkcs1(private_key).unwrap();
+            b.iter(|| black_box(key.sign(&sign::PKCS1_SHA256, b"hello")).unwrap())
         });
     }
 }

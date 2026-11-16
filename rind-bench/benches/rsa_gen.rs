@@ -37,7 +37,7 @@ fn rsa_key_generation(c: &mut Criterion) {
 
         group.bench_function("rind", |b| {
             b.iter(|| {
-                black_box(rind::signature::RsaKeyPair::generate(ours).unwrap());
+                black_box(rind::rsa::KeyPair::generate(ours).unwrap());
             })
         });
 

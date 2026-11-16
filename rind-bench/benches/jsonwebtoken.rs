@@ -85,9 +85,8 @@ fn keys() -> Vec<(Algorithm, EncodingKey, DecodingKey)> {
     };
 
     let rsa = include_bytes!("../../rind/src/high/rsa/rsa2048.der");
-    let rsa_public = rind::signature::RsaKeyPair::from_pkcs1(rsa)
-        .unwrap()
-        .public_key(&rind::signature::sign::RSA_PKCS1_SHA256);
+    let rsa_pair = rind::rsa::KeyPair::from_pkcs1(rsa).unwrap();
+    let rsa_public = rsa_pair.public_key();
     #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     let components_from_public_key = aws_lc::DEFAULT_PROVIDER
         .key_utils

@@ -449,9 +449,7 @@ impl<P: Params> DecapKey<P> {
 // matrix goes first, since the whole-value wipe nulls its pointer.
 impl<P: Params> Drop for DecapKey<P> {
     fn drop(&mut self) {
-        if let Some(mut transpose_a_hat) = self.ek_pke.transpose_a_hat.take() {
-            low::zeroise(transpose_a_hat.0.as_mut().as_flattened_mut());
-        }
+        self.ek_pke.free_matrix();
         low::zeroise_value(self);
     }
 }
@@ -469,8 +467,18 @@ pub struct EncapKey<P: Params> {
     t_hat_coeffs: Coeffs<P::Vector, Ntt>,
     /// The transposed matrix, which encryption multiplies by. Boxed, as
     /// ML-KEM-1024's is 8 KiB, so moving a key copies little; `None` only
-    /// once a [`DecapKey`] holding it is wiped.
+    /// once a key pair holding it is wiped.
     transpose_a_hat: Option<Box<Coeffs<P::Matrix, Ntt>>>,
+}
+
+impl<P: Params> EncapKey<P> {
+    /// Wipes and frees the transposed matrix, so that a key pair's drop can
+    /// wipe the rest of the key's value.
+    pub(crate) fn free_matrix(&mut self) {
+        if let Some(mut transpose_a_hat) = self.transpose_a_hat.take() {
+            low::zeroise(transpose_a_hat.0.as_mut().as_flattened_mut());
+        }
+    }
 }
 
 impl<P: Params> Clone for EncapKey<P> {

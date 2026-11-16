@@ -133,7 +133,7 @@ pub unsafe extern "C" fn rind_fips_kem_public_key(
 ) -> *mut Encapsulation {
     // SAFETY: the caller's contract.
     let key = unsafe { &*key };
-    let public = on_kem!(key, Decapsulation => Encapsulation, |key| key.public_key());
+    let public = on_kem!(key, Decapsulation => Encapsulation, |key| key.public_key().clone());
     // SAFETY: the caller's contract.
     let out = unsafe { bytes_mut(out, len) };
     out.copy_from_slice(on_kem!(&public, Encapsulation, |key| key.as_ref()));
