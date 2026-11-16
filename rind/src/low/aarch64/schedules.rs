@@ -1497,7 +1497,7 @@ fn ct_qemu_ecdh_p521() {
 #[test]
 #[ignore = "admin/ct-qemu runs it under qemu"]
 fn ct_qemu_ed25519() {
-    use crate::signature::Ed25519KeyPair;
+    use crate::ed25519::KeyPair as Ed25519KeyPair;
 
     let seed = qemu_seed(32);
     let message = qemu_seed(40);

@@ -45,15 +45,6 @@ fn public_exponent(e: &[u8]) -> Result<u64, Error> {
     Ok(value)
 }
 
-/// The big-endian modulus and exponent of PKCS#1 `RSAPublicKey` or
-/// `SubjectPublicKeyInfo` DER.
-fn der_components(bytes: &[u8]) -> Result<(&[u8], &[u8]), Error> {
-    match asn1::opens_nested_sequence(bytes) {
-        true => spki_components(bytes),
-        false => pkcs1_components(bytes),
-    }
-}
-
 /// [`pkcs1_components`] of the key in `SubjectPublicKeyInfo` DER, whose
 /// algorithm must be one of [`KEY_ALGORITHMS`] with `NULL` parameters, as RFC
 /// 3279 section 2.3.1 requires for `rsaEncryption`, or none, which aws-lc
@@ -133,13 +124,12 @@ impl VerifyingKey {
         Self::from_unsigned(n, e)
     }
 
-    /// Decodes an RSA public key from PKCS#1 `RSAPublicKey` or
-    /// `SubjectPublicKeyInfo` DER, as aws-lc-rs takes either.
-    pub(crate) fn from_der(bytes: &[u8]) -> Result<Self, Error> {
+    /// Decodes an RSA public key from `SubjectPublicKeyInfo` DER.
+    pub(crate) fn from_spki_der(bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_public();
         // A `match` rather than `?` on the borrowed pair, whose translation
         // `proofs/` cannot check. The compiled code is the same.
-        match der_components(bytes) {
+        match spki_components(bytes) {
             Ok((n, e)) => Self::from_unsigned(n, e),
             Err(err) => Err(err),
         }
@@ -1008,16 +998,13 @@ mod tests {
         let seed = b"0123456789abcdef";
         assert_eq!(spki(seed), spki(seed));
         assert_ne!(spki(seed), spki(b"fedcba9876543210"));
-        // The ct-qemu trace signs through `RsaKeyPair`, after this encoding.
+        // The ct-qemu trace signs through `rsa::KeyPair`, after this encoding.
         let signing = SigningKey::generate_seeded(RsaKeySize::Rsa2048, seed).unwrap();
         let mut der = [0u8; MAX_PKCS8_LEN];
-        let key = crate::signature::RsaKeyPair::from_pkcs8(signing.to_pkcs8_der(&mut der).unwrap())
-            .unwrap();
-        let signature = key
-            .sign(&crate::signature::sign::RSA_PKCS1_SHA256, b"ct")
-            .unwrap();
-        key.public_key(&crate::signature::sign::RSA_PKCS1_SHA256)
-            .verify(b"ct", signature.as_ref())
+        let key = crate::rsa::KeyPair::from_pkcs8(signing.to_pkcs8_der(&mut der).unwrap()).unwrap();
+        let signature = key.sign(&crate::rsa::sign::PKCS1_SHA256, b"ct").unwrap();
+        key.public_key()
+            .verify(&crate::rsa::verify::PKCS1_SHA256, b"ct", signature.as_ref())
             .unwrap();
     }
 
@@ -1028,8 +1015,8 @@ mod tests {
     #[ignore = "admin/ct-qemu runs it under qemu"]
     fn ct_qemu_rsa() {
         use crate::low::ct_qemu;
-        use crate::signature::RsaKeyPair;
-        use crate::signature::sign::RSA_PKCS1_SHA256;
+        use crate::rsa::KeyPair as RsaKeyPair;
+        use crate::rsa::sign::PKCS1_SHA256 as RSA_PKCS1_SHA256;
 
         let seed = ct_qemu::seed().to_le_bytes();
         let bytes = |n: usize| seed.iter().cycle().take(n).copied().collect::<Vec<_>>();

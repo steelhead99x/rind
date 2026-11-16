@@ -183,9 +183,9 @@ impl<Id: AlgorithmIdentifier> DecapsulationKey<Id> {
     /// The key's encapsulation key.
     pub fn encapsulation_key(&self) -> Result<EncapsulationKey<Id>, Unspecified> {
         let key = match &self.key {
-            BySet::MlKem512(key) => BySet::MlKem512(Box::new(key.public_key())),
-            BySet::MlKem768(key) => BySet::MlKem768(Box::new(key.public_key())),
-            BySet::MlKem1024(key) => BySet::MlKem1024(Box::new(key.public_key())),
+            BySet::MlKem512(key) => BySet::MlKem512(Box::new(key.public_key().clone())),
+            BySet::MlKem768(key) => BySet::MlKem768(Box::new(key.public_key().clone())),
+            BySet::MlKem1024(key) => BySet::MlKem1024(Box::new(key.public_key().clone())),
         };
         Ok(EncapsulationKey {
             algorithm: self.algorithm,

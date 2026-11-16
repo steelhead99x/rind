@@ -7,7 +7,6 @@
 
 use aws_lc_rs::signature::{ED25519, UnparsedPublicKey};
 use rind::Error;
-use rind::signature::{self, verify};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -38,8 +37,8 @@ fn ed25519_edge_cases() {
         let theirs = UnparsedPublicKey::new(&ED25519, &v.key)
             .verify(v.msg.as_bytes(), &v.sig)
             .is_ok();
-        let ours = signature::PublicKey::new(&verify::ED25519, &v.key)
-            .map(|key| key.verify(v.msg.as_bytes(), &v.sig));
+        let ours =
+            rind::ed25519::PublicKey::new(&v.key).map(|key| key.verify(v.msg.as_bytes(), &v.sig));
         let flags = v.flags.unwrap_or_default();
         match ours {
             Ok(result) => assert_eq!(
