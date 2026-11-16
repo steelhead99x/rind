@@ -112,12 +112,11 @@ for tool in "$rustc" "$cargo" "$objdump" "$readelf" "$nm" "$ar" "$gcc" "$ld"; do
   fi
 done
 
-# The real compressor, tests stripped, plus an entry so the block is live.
+# The real compressor, plus an entry so the block is live. The whole file
+# is copied: its `#[cfg(test)] mod tests` stays, and compiles to nothing
+# because the probe is not built with cfg(test).
 # The feature name matches rind's, so the cfg in the source applies.
-awk '
-  /^#!\[cfg\(test\)\]/ { exit }
-  { print }
-' "$root/rind/src/low/generic/sha512.rs" > "$work/body.rs"
+cp "$root/rind/src/low/generic/sha512.rs" "$work/body.rs"
 
 mkdir -p "$work/probe/src"
 {

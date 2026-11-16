@@ -19,7 +19,12 @@
 //! verifies that this block adds no flash text and calls nothing.
 //! The `esp32s3-sha512-flash` feature leaves the ordinary flash sections,
 //! for an image whose IRAM is already full. The ESP32, the ESP32-S2,
-//! `*-none-elf`, and every other target are unchanged. ESP-IDF Xtensa
+//! `*-none-elf`, and every other target keep the ordinary sections. The
+//! body is not unchanged there: every 32-bit portable target runs the same
+//! sixteen-round groups, whose code size is not checked on those targets,
+//! and every Xtensa core loads the message with the `l32i` sequence in
+//! `be_u32`, which `admin/esp32s3-sha512-layout` checks on the ESP32
+//! build too. ESP-IDF Xtensa
 //! SHA-256 is rind's own IRAM body in `sha256_iram`, so this placement
 //! leaves libcrux-sha2's sections as that crate built them. The round
 //! functions and the eighty `K` constants are FIPS 180-4 §4.1.3 and

@@ -123,8 +123,6 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   # Builds the FIPS module so `RIND_FIPS_BREAK` corrupts the self-test it
   # names, as a lab checks each failure path (`src/fips.rs`).
   "cfg(rind_fips_break)",
-  # Set by admin/esp32s3-sha512-layout to link and run the Xtensa message load.
-  "cfg(rind_sha512_load_probe)",
   # curve25519-dalek's backend overrides, which armv7 refuses.
   'cfg(curve25519_dalek_bits, values("32", "64"))',
   'cfg(curve25519_dalek_backend, values("fiat", "serial", "simd", "avx512"))',
