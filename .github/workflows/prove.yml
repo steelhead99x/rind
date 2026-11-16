@@ -22,6 +22,7 @@ on:
       - admin/prove-bytes
       - admin/simd-vectors.rs
       - admin/neon-vectors.rs
+      - admin/avx512-vectors.rs
       - admin/upstream
       - ALGORITHMS.md
       - flake.nix

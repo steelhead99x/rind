@@ -50,6 +50,20 @@ pub(crate) fn mlkem_rej_uniform_vartime(r: &mut [i16; 256], input: &[u8]) -> u64
     }
 }
 
+/// Scalar product of 2-element polynomial vectors in the NTT domain, with
+/// the mulcache `bt` of `b`
+pub(crate) fn mlkem_basemul_k2(
+    r: &mut [i16; 256],
+    a: &[i16; 512],
+    b: &[i16; 512],
+    bt: &[i16; 256],
+) {
+    match HaveAvx2::check() {
+        Some(_) => super::mlkem_basemul_k2::mlkem_basemul_k2(r, a, b, bt),
+        None => portable::mlkem_basemul_k2(r, a, b, bt),
+    }
+}
+
 /// Scalar product of 3-element polynomial vectors in the NTT domain, with
 /// the mulcache `bt` of `b`
 pub(crate) fn mlkem_basemul_k3(
@@ -61,6 +75,20 @@ pub(crate) fn mlkem_basemul_k3(
     match HaveAvx2::check() {
         Some(_) => super::mlkem_basemul_k3::mlkem_basemul_k3(r, a, b, bt),
         None => portable::mlkem_basemul_k3(r, a, b, bt),
+    }
+}
+
+/// Scalar product of 4-element polynomial vectors in the NTT domain, with
+/// the mulcache `bt` of `b`
+pub(crate) fn mlkem_basemul_k4(
+    r: &mut [i16; 256],
+    a: &[i16; 1024],
+    b: &[i16; 1024],
+    bt: &[i16; 512],
+) {
+    match HaveAvx2::check() {
+        Some(_) => super::mlkem_basemul_k4::mlkem_basemul_k4(r, a, b, bt),
+        None => portable::mlkem_basemul_k4(r, a, b, bt),
     }
 }
 
@@ -96,6 +124,22 @@ pub(crate) fn mlkem_tobytes(r: &mut [u8; 384], a: &[i16; 256]) {
     }
 }
 
+/// Compress ML-KEM polynomial coefficients in `[0, Q)` to 4 bits each, and pack them
+pub(crate) fn mlkem_compress_d4(r: &mut [u8; 128], a: &[i16; 256]) {
+    match HaveAvx2::check() {
+        Some(_) => super::mlkem_compress::mlkem_compress_d4(r, a),
+        None => generic::mlkem_compress_d4(r, a),
+    }
+}
+
+/// Compress ML-KEM polynomial coefficients in `[0, Q)` to 5 bits each, and pack them
+pub(crate) fn mlkem_compress_d5(r: &mut [u8; 160], a: &[i16; 256]) {
+    match HaveAvx2::check() {
+        Some(_) => super::mlkem_compress::mlkem_compress_d5(r, a),
+        None => generic::mlkem_compress_d5(r, a),
+    }
+}
+
 /// Compress ML-KEM polynomial coefficients in `[0, Q)` to 10 bits each, and pack them
 pub(crate) fn mlkem_compress_d10(r: &mut [u8; 320], a: &[i16; 256]) {
     match HaveAvx2::check() {
@@ -104,11 +148,11 @@ pub(crate) fn mlkem_compress_d10(r: &mut [u8; 320], a: &[i16; 256]) {
     }
 }
 
-/// Compress ML-KEM polynomial coefficients in `[0, Q)` to 4 bits each, and pack them
-pub(crate) fn mlkem_compress_d4(r: &mut [u8; 128], a: &[i16; 256]) {
+/// Compress ML-KEM polynomial coefficients in `[0, Q)` to 11 bits each, and pack them
+pub(crate) fn mlkem_compress_d11(r: &mut [u8; 352], a: &[i16; 256]) {
     match HaveAvx2::check() {
-        Some(_) => super::mlkem_compress::mlkem_compress_d4(r, a),
-        None => generic::mlkem_compress_d4(r, a),
+        Some(_) => super::mlkem_compress::mlkem_compress_d11(r, a),
+        None => generic::mlkem_compress_d11(r, a),
     }
 }
 
@@ -445,15 +489,25 @@ mod tests {
         for start in (0..3329 + 7).step_by(256 - 7) {
             let a = Coeffs::<256>(core::array::from_fn(|i| ((start + i) % 3329) as i16));
 
+            let (mut want, mut got) = ([0; 128], [0; 128]);
+            generic::mlkem_compress_d4(&mut want, &a.0);
+            super::super::mlkem_compress::mlkem_compress_d4(&mut got, &a.0);
+            assert_eq!(want, got, "d4, from {start}");
+
+            let (mut want, mut got) = ([0; 160], [0; 160]);
+            generic::mlkem_compress_d5(&mut want, &a.0);
+            super::super::mlkem_compress::mlkem_compress_d5(&mut got, &a.0);
+            assert_eq!(want, got, "d5, from {start}");
+
             let (mut want, mut got) = ([0; 320], [0; 320]);
             generic::mlkem_compress_d10(&mut want, &a.0);
             super::super::mlkem_compress::mlkem_compress_d10(&mut got, &a.0);
             assert_eq!(want, got, "d10, from {start}");
 
-            let (mut want, mut got) = ([0; 128], [0; 128]);
-            generic::mlkem_compress_d4(&mut want, &a.0);
-            super::super::mlkem_compress::mlkem_compress_d4(&mut got, &a.0);
-            assert_eq!(want, got, "d4, from {start}");
+            let (mut want, mut got) = ([0; 352], [0; 352]);
+            generic::mlkem_compress_d11(&mut want, &a.0);
+            super::super::mlkem_compress::mlkem_compress_d11(&mut got, &a.0);
+            assert_eq!(want, got, "d11, from {start}");
         }
     }
 
@@ -537,41 +591,45 @@ mod tests {
                 );
             }
 
-            // Base multiplication, whose inputs are at most 2^12.
-            let a: [i16; 768] = core::array::from_fn(|_| next(4096));
-            let b: [i16; 768] = core::array::from_fn(|_| next(4096));
-            let (mut a_avx2, mut b_avx2) = (Coeffs([0; 768]), Coeffs([0; 768]));
-            let (mut bt, mut bt_avx2) = ([0; 384], Coeffs([0; 384]));
-            for k in 0..3 {
-                let poly = |v: &[i16; 768]| -> [i16; 256] {
-                    v[256 * k..256 * (k + 1)].try_into().unwrap()
-                };
-                a_avx2.0[256 * k..256 * (k + 1)].copy_from_slice(&to_avx2(&poly(&a)).0);
-                b_avx2.0[256 * k..256 * (k + 1)].copy_from_slice(&to_avx2(&poly(&b)).0);
-                portable::mlkem_mulcache_compute(
-                    (&mut bt[128 * k..128 * (k + 1)]).try_into().unwrap(),
-                    &poly(&b),
-                );
-                super::super::mlkem_mulcache_compute::mlkem_mulcache_compute(
-                    (&mut bt_avx2.0[128 * k..128 * (k + 1)]).try_into().unwrap(),
-                    b_avx2.0[256 * k..256 * (k + 1)].try_into().unwrap(),
-                    &Q_DATA.0,
-                );
+            // Base multiplication, whose inputs are at most 2^12, at each rank.
+            let a: [i16; 1024] = core::array::from_fn(|_| next(4096));
+            let b: [i16; 1024] = core::array::from_fn(|_| next(4096));
+            macro_rules! basemul {
+                ($k:literal, $f:ident) => {{
+                    let (a, b) = (&a[..256 * $k], &b[..256 * $k]);
+                    let (mut a_avx2, mut b_avx2) = (Coeffs([0; 256 * $k]), Coeffs([0; 256 * $k]));
+                    let (mut bt, mut bt_avx2) = ([0; 128 * $k], Coeffs([0; 128 * $k]));
+                    for k in 0..$k {
+                        let poly = |v: &[i16]| -> [i16; 256] {
+                            v[256 * k..256 * (k + 1)].try_into().unwrap()
+                        };
+                        a_avx2.0[256 * k..256 * (k + 1)].copy_from_slice(&to_avx2(&poly(a)).0);
+                        b_avx2.0[256 * k..256 * (k + 1)].copy_from_slice(&to_avx2(&poly(b)).0);
+                        portable::mlkem_mulcache_compute(
+                            (&mut bt[128 * k..128 * (k + 1)]).try_into().unwrap(),
+                            &poly(b),
+                        );
+                        super::super::mlkem_mulcache_compute::mlkem_mulcache_compute(
+                            (&mut bt_avx2.0[128 * k..128 * (k + 1)]).try_into().unwrap(),
+                            b_avx2.0[256 * k..256 * (k + 1)].try_into().unwrap(),
+                            &Q_DATA.0,
+                        );
+                    }
+                    let mut want = Coeffs([0; 256]);
+                    super::super::$f::$f(&mut want.0, &a_avx2.0, &b_avx2.0, &bt_avx2.0);
+                    let mut got = [0; 256];
+                    portable::$f(&mut got, a.try_into().unwrap(), b.try_into().unwrap(), &bt);
+                    assert_eq!(
+                        bytes_portable(got),
+                        bytes_avx2(want),
+                        "basemul k{}, round {round}",
+                        $k
+                    );
+                }};
             }
-            let mut want = Coeffs([0; 256]);
-            super::super::mlkem_basemul_k3::mlkem_basemul_k3(
-                &mut want.0,
-                &a_avx2.0,
-                &b_avx2.0,
-                &bt_avx2.0,
-            );
-            let mut got = [0; 256];
-            portable::mlkem_basemul_k3(&mut got, &a, &b, &bt);
-            assert_eq!(
-                bytes_portable(got),
-                bytes_avx2(want),
-                "basemul, round {round}"
-            );
+            basemul!(2, mlkem_basemul_k2);
+            basemul!(3, mlkem_basemul_k3);
+            basemul!(4, mlkem_basemul_k4);
 
             // Packing, from canonical coefficients.
             let mut canonical = x;

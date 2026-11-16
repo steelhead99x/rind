@@ -530,35 +530,6 @@ change to the trust base.
 #guard_msgs in
 #print axioms ed25519_key_pair_public_key
 
-/-- info: 'rind.x86_64.ed25519_key_pair_verify' depends on axioms: [propext,
- Classical.choice,
- Quot.sound,
- bignum_cmp_lt_spec,
- bignum_mod_n25519_spec,
- bignum_neg_p25519_spec,
- compress_avx_spec,
- edwards25519_scalarmuldouble_alt_spec,
- edwards25519_scalarmuldouble_spec,
- sha512_block_data_order_avx2_spec] -/
-#guard_msgs in
-#print axioms ed25519_key_pair_verify
-
-/-- info: 'rind.x86_64.ed25519_public_key_new' depends on axioms: [propext,
- Classical.choice,
- Quot.sound,
- bignum_cmp_lt_spec,
- bignum_eq_spec,
- bignum_mod_n25519_spec,
- bignum_neg_p25519_spec,
- compress_avx_spec,
- edwards25519_decode_alt_spec,
- edwards25519_decode_spec,
- edwards25519_scalarmuldouble_alt_spec,
- edwards25519_scalarmuldouble_spec,
- sha512_block_data_order_avx2_spec] -/
-#guard_msgs in
-#print axioms ed25519_public_key_new
-
 /-- info: 'rind.x86_64.p256_ecdsa_generate' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,

@@ -1539,8 +1539,18 @@ struct KemTest {
 /// these check what reaches it through its ABI: each encapsulation key it
 /// must parse or refuse, and the ciphertext lengths it must refuse.
 #[test]
-fn ml_kem_768() {
-    let file = "mlkem_768_encaps_test.json";
+fn ml_kem() {
+    ml_kem_set::<kem::MlKem512>(["mlkem_512_encaps_test.json", "mlkem_512_test.json"], 768);
+    ml_kem_set::<kem::MlKem768>(["mlkem_768_encaps_test.json", "mlkem_768_test.json"], 1088);
+    ml_kem_set::<kem::MlKem1024>(
+        ["mlkem_1024_encaps_test.json", "mlkem_1024_test.json"],
+        1568,
+    );
+}
+
+/// Checks set `A` against its `[encapsulation, decapsulation]` files.
+fn ml_kem_set<A: kem::Algorithm>(files: [&'static str; 2], ciphertext_len: usize) {
+    let [file, decaps] = files;
     let mut summary = Summary::new(file);
     for test in read::<KemFile>(file)
         .groups
@@ -1548,7 +1558,7 @@ fn ml_kem_768() {
         .flat_map(|g| g.tests)
     {
         summary.start();
-        let key = kem::EncapsulationKey::new(&kem::ML_KEM_768, &test.ek);
+        let key = kem::EncapsulationKey::<A>::new(&test.ek);
         match (test.result, key) {
             (ExpectedResult::Valid, Ok(key)) => {
                 assert_eq!(key.as_ref(), &test.ek[..]);
@@ -1559,23 +1569,22 @@ fn ml_kem_768() {
         }
     }
 
-    let file = "mlkem_768_test.json";
+    let file = decaps;
     let mut summary = Summary::new(file);
-    let ours = kem::DecapsulationKey::generate(&kem::ML_KEM_768).unwrap();
     for test in read::<KemFile>(file)
         .groups
         .into_iter()
         .flat_map(|g| g.tests)
     {
         // A key of the vector's own, which only its seed makes.
-        if test.c.len() == 1088 {
+        if test.c.len() == ciphertext_len {
             summary.skip(1);
             continue;
         }
         summary.start();
         assert_eq!(test.result, ExpectedResult::Invalid, "{file} {}", test.id);
         assert_eq!(
-            ours.decapsulate(&test.c).map(|_| ()),
+            kem::Ciphertext::<A>::new(&test.c).map(|_| ()),
             Err(Error::WrongLength),
             "{file} {}",
             test.id
