@@ -263,7 +263,7 @@ fn hkdf() {
                 let info = [test.info.as_slice()];
                 let result = hkdf::Salt::new(algorithm, &test.salt)
                     .extract(&test.ikm)
-                    .and_then(|prk| prk.expand(&info, okm.len())?.fill(&mut okm));
+                    .and_then(|prk| prk.fill(&info, &mut okm));
                 // FIPS 140-3 approves no empty salt or info.
                 if test.salt.is_empty() || test.info.is_empty() {
                     assert_eq!(result, Err(Error::WrongLength), "{file} {}", test.id);

@@ -201,6 +201,19 @@ fn oprf() {
 }
 
 #[test]
+fn frost() {
+    use rind::frost::*;
+    for suite in [&ED25519_SHA512, &RISTRETTO255_SHA512, &P256_SHA256] {
+        let (mut shares, _) = deal(suite, 2, 3).unwrap();
+        let share = shares.pop().unwrap();
+        let (nonces, _) = SigningNonces::commit(&share).unwrap();
+        check_zeroed_on_drop(Box::pin(share.to_scalar()));
+        check_zeroed_on_drop(Box::pin(nonces));
+        check_zeroed_on_drop(Box::pin(share));
+    }
+}
+
+#[test]
 fn vrf() {
     use rind::vrf::*;
     for algorithm in [&ECVRF_EDWARDS25519_SHA512_TAI, &ECVRF_P256_SHA256_TAI] {
