@@ -37,8 +37,8 @@ ChaCha20-Poly1305's theorems also take aws-lc's one-pass routines as the
 hypothesis `RunsChaCha20Poly1305`, which no axiom states. The generator
 tables' point selects rest on no axiom, only on the hand model in
 `Rind.X86_64.PointSelectModel`. P-256's generator multiplication also rests
-on a placeholder in `Rind.X86_64.S2nBignum`, `p256_point_add_affine_spec`,
-until the mixed addition's HOL Light proof replaces it. A change here is a
+on `p256_point_add_affine_spec` in `Rind.X86_64.S2nBignum`, which restates
+rind's HOL Light proofs of aws-lc's mixed addition. A change here is a
 change to the trust base.
 -/
 
