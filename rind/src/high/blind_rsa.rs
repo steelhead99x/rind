@@ -5,7 +5,8 @@ use core::fmt;
 use super::asn1::{self, Type, pkix};
 use super::hash::{Hash, HashContext, Sha384};
 use super::rsa::{self, PssSalt};
-use super::signature::{Buffer, Pkcs8, PublicKeyComponents, RSA_MIN_BITS, Spki};
+use super::signature::rsa::{MIN_BITS as RSA_MIN_BITS, PublicKeyComponents};
+use super::signature::{Buffer, Pkcs8, Spki};
 use crate::error::{Error, KeyFormatError};
 use crate::low;
 use crate::mid::rng::{RandomSource, SystemRandom};
@@ -119,15 +120,8 @@ impl Algorithm {
 /// no other variant, as RFC 9474 requires.
 pub struct KeyPair {
     key: rsa::SigningKey,
-    algorithm: AlgorithmRef,
+    public: PublicKey,
 }
-
-/// The key's algorithm, aligned as `DecryptingKey`'s is, so its drop wipes
-/// any padding `KeyPair` needs.
-#[derive(Clone, Copy)]
-struct AlgorithmRef(low::ZeroableRef<Algorithm>, [u64; 0]);
-
-impl low::Zeroable for AlgorithmRef {}
 
 impl KeyPair {
     /// Generates a key of `size` for `algorithm` from the system random
@@ -147,23 +141,14 @@ impl KeyPair {
     }
 
     fn new(algorithm: &'static Algorithm, key: rsa::SigningKey) -> Self {
-        Self {
-            key,
-            algorithm: AlgorithmRef(low::ZeroableRef::new(algorithm), []),
-        }
-    }
-
-    fn algorithm(&self) -> &'static Algorithm {
-        self.algorithm.0.get()
+        // A private key's modulus is at least 2048 bits.
+        let public = PublicKey::new_unchecked(algorithm, key.public_key());
+        Self { key, public }
     }
 
     /// Returns the public key, which clients blind messages to.
-    pub fn public_key(&self) -> PublicKey {
-        // A private key's modulus is at least 2048 bits.
-        PublicKey {
-            key: self.key.public_key(),
-            algorithm: self.algorithm(),
-        }
+    pub fn public_key(&self) -> &PublicKey {
+        &self.public
     }
 
     /// Signs a client's blinded message, which must be as long as the
@@ -184,7 +169,7 @@ impl KeyPair {
 impl fmt::Debug for KeyPair {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("KeyPair")
-            .field("algorithm", self.algorithm())
+            .field("algorithm", self.public.algorithm())
             .finish_non_exhaustive()
     }
 }
@@ -193,7 +178,7 @@ impl Drop for KeyPair {
     fn drop(&mut self) {
         // The private key wipes itself. Wiping this, which is not secret,
         // lets `tests/zeroing.rs` check every byte.
-        low::zeroise_value(&mut self.algorithm);
+        low::zeroise_value(&mut self.public);
     }
 }
 
@@ -203,8 +188,15 @@ impl Drop for KeyPair {
 #[derive(Clone)]
 pub struct PublicKey {
     key: rsa::VerifyingKey,
-    algorithm: &'static Algorithm,
+    // Aligned like the key's `u64` words, as `rsa::EncryptingKey`'s
+    // encoding is, so any padding a `KeyPair` needs falls inside this value,
+    // which its drop wipes whole.
+    algorithm: low::ZeroableRef<Algorithm>,
+    _align: [u64; 0],
 }
+
+// Words, lengths, and a `ZeroableRef`, all valid at zero.
+impl low::Zeroable for PublicKey {}
 
 impl PublicKey {
     /// Parses a `SubjectPublicKeyInfo` naming `id-RSASSA-PSS`, whose
@@ -212,7 +204,7 @@ impl PublicKey {
     /// RFC 9578 requires of Privacy Pass issuers' keys.
     ///
     /// RFC 9474 forbids `rsaEncryption` for these keys, so it is refused.
-    pub fn new(algorithm: &'static Algorithm, spki: &[u8]) -> Result<Self, Error> {
+    pub fn from_spki(algorithm: &'static Algorithm, spki: &[u8]) -> Result<Self, Error> {
         let _entry = low::Entry::new_public();
         let spki =
             pkix::FixedAlgorithmPublicKeyInfo::from_bytes(spki).map_err(KeyFormatError::Asn1)?;
@@ -238,9 +230,21 @@ impl PublicKey {
     /// legacy verification.
     fn checked(algorithm: &'static Algorithm, key: rsa::VerifyingKey) -> Result<Self, Error> {
         match key.modulus_len_bits() >= RSA_MIN_BITS {
-            true => Ok(Self { key, algorithm }),
+            true => Ok(Self::new_unchecked(algorithm, key)),
             false => Err(KeyFormatError::RsaModulus.into()),
         }
+    }
+
+    fn new_unchecked(algorithm: &'static Algorithm, key: rsa::VerifyingKey) -> Self {
+        Self {
+            key,
+            algorithm: low::ZeroableRef::new(algorithm),
+            _align: [],
+        }
+    }
+
+    fn algorithm(&self) -> &'static Algorithm {
+        self.algorithm.get()
     }
 
     /// Blinds `message` for the server to sign, returning the blinded
@@ -260,14 +264,14 @@ impl PublicKey {
     ) -> Result<(BlindedMessage, Blinding), Error> {
         let _entry = low::Entry::new_secret();
         let mut prefix = [0; PREFIX_LEN];
-        rng.fill(&mut prefix[..self.algorithm.prefix_len()])?;
-        let digest = self.algorithm.digest(&prefix, message);
+        rng.fill(&mut prefix[..self.algorithm().prefix_len()])?;
+        let digest = self.algorithm().digest(&prefix, message);
 
         let mut unblinder = None;
         let blinded = Buffer::write(|output| {
             let (blinded, inverse) =
                 self.key
-                    .blind_pss::<Sha384>(self.algorithm.salt, &digest, rng, output)?;
+                    .blind_pss::<Sha384>(self.algorithm().salt, &digest, rng, output)?;
             unblinder = Some(inverse);
             Ok(blinded)
         })?;
@@ -284,15 +288,15 @@ impl PublicKey {
     /// signature.
     pub fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
         let _entry = low::Entry::new_public();
-        let Some((prefix, signature)) = signature.split_at_checked(self.algorithm.prefix_len())
+        let Some((prefix, signature)) = signature.split_at_checked(self.algorithm().prefix_len())
         else {
             return Err(Error::BadSignature);
         };
         let mut padded = [0; PREFIX_LEN];
         padded[..prefix.len()].copy_from_slice(prefix);
-        let digest = self.algorithm.digest(&padded, message);
+        let digest = self.algorithm().digest(&padded, message);
         self.key
-            .verify_pss_digest::<Sha384>(Some(self.algorithm.salt), signature, &digest)
+            .verify_pss_digest::<Sha384>(Some(self.algorithm().salt), signature, &digest)
     }
 
     /// Encodes the key as a `SubjectPublicKeyInfo` naming `id-RSASSA-PSS`
@@ -303,7 +307,7 @@ impl PublicKey {
             let mut pkcs1 = [0; rsa::MAX_PUBLIC_KEY_LEN];
             let pkcs1 = self.key.to_pkcs1_der(&mut pkcs1)?;
             let len = pkix::FixedAlgorithmPublicKeyInfo {
-                algorithm: asn1::Sequence::new(self.algorithm.algorithm_id),
+                algorithm: asn1::Sequence::new(self.algorithm().algorithm_id),
                 subjectPublicKey: asn1::BitString::new(pkcs1),
             }
             .encode(&mut asn1::Encoder::new(output))
@@ -316,7 +320,7 @@ impl PublicKey {
 impl fmt::Debug for PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PublicKey")
-            .field("algorithm", self.algorithm)
+            .field("algorithm", self.algorithm())
             .field("bits", &self.key.modulus_len_bits())
             .finish()
     }
@@ -341,8 +345,7 @@ impl Blinding {
     /// A reply that does not unblind to a valid signature fails with
     /// [`Error::BadSignature`].
     pub fn finalize(self, blind_signature: &[u8]) -> Result<Signature, Error> {
-        let algorithm = self.key.algorithm;
-        let prefix_len = algorithm.prefix_len();
+        let prefix_len = self.key.algorithm().prefix_len();
         Buffer::write(|output| {
             let (prefix, rest) = output.split_at_mut(prefix_len);
             let len = prefix_len
@@ -361,7 +364,7 @@ impl Blinding {
 impl fmt::Debug for Blinding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Blinding")
-            .field("algorithm", self.key.algorithm)
+            .field("algorithm", self.key.algorithm())
             .finish_non_exhaustive()
     }
 }
@@ -521,7 +524,7 @@ mod tests {
             KeyPair::from_pkcs8(algorithm, include_bytes!("rsa/rfc9578.pkcs8.der")).unwrap();
         let spki = hex(&vector["pkI"]);
         assert_eq!(key_pair.public_key().to_spki().as_ref(), spki);
-        let public_key = PublicKey::new(algorithm, &spki).unwrap();
+        let public_key = PublicKey::from_spki(algorithm, &spki).unwrap();
 
         let token = hex(&vector["token"]);
         let (token_input, authenticator) = token.split_at(2 + 32 + 32 + 32);
@@ -549,7 +552,7 @@ mod tests {
             for algorithm in ALGORITHMS {
                 let key_pair = KeyPair::from_pkcs8(algorithm, der).unwrap();
                 let spki = key_pair.public_key().to_spki();
-                let public_key = PublicKey::new(algorithm, spki.as_ref()).unwrap();
+                let public_key = PublicKey::from_spki(algorithm, spki.as_ref()).unwrap();
                 assert_eq!(public_key.to_spki().as_ref(), spki.as_ref());
 
                 for message in [&b""[..], b"hello", &[0xa5; 300]] {
@@ -739,27 +742,23 @@ mod tests {
             .to_spki_der(&mut rsa_encryption_spki)
             .unwrap();
 
-        PublicKey::new(&RSABSSA_SHA384_PSS_DETERMINISTIC, pss.as_ref()).unwrap();
+        PublicKey::from_spki(&RSABSSA_SHA384_PSS_DETERMINISTIC, pss.as_ref()).unwrap();
         for (algorithm, spki) in [
             (&RSABSSA_SHA384_PSS_RANDOMIZED, pss_zero.as_ref()),
             (&RSABSSA_SHA384_PSSZERO_RANDOMIZED, pss.as_ref()),
             (&RSABSSA_SHA384_PSS_RANDOMIZED, rsa_encryption),
         ] {
             assert_eq!(
-                PublicKey::new(algorithm, spki).err(),
+                PublicKey::from_spki(algorithm, spki).err(),
                 Some(KeyFormatError::MismatchedSpkiAlgorithm.into())
             );
         }
 
         let small = include_bytes!("rsa/rsa2047.pub.der");
-        let small = rsa::VerifyingKey::from_der(small).unwrap();
-        let small = PublicKey {
-            key: small,
-            algorithm: &RSABSSA_SHA384_PSS_RANDOMIZED,
-        }
-        .to_spki();
+        let small = rsa::VerifyingKey::from_pkcs1_der(small).unwrap();
+        let small = PublicKey::new_unchecked(&RSABSSA_SHA384_PSS_RANDOMIZED, small).to_spki();
         assert_eq!(
-            PublicKey::new(&RSABSSA_SHA384_PSS_RANDOMIZED, small.as_ref()).err(),
+            PublicKey::from_spki(&RSABSSA_SHA384_PSS_RANDOMIZED, small.as_ref()).err(),
             Some(KeyFormatError::RsaModulus.into())
         );
     }

@@ -546,9 +546,28 @@ class Signature(unittest.TestCase):
         key = signature.RsaKeyPair.generate(rsa.KeySize.RSA_2048)
         public = signature.PublicKey.from_spki(verify.RSA_PSS_SHA256, key.to_spki())
         public.verify(b"m", key.sign(sign.RSA_PSS_SHA256, b"m"))
+        # The constructor takes SPKI as well as PKCS#1.
+        spki = signature.PublicKey(verify.RSA_PSS_SHA256, key.to_spki())
+        self.assertEqual(bytes(spki), bytes(public))
+        # Each constructor refuses a modulus below the algorithm's floor as
+        # it loads, before any signature arrives.
+        floor = verify.legacy.RSA_PKCS1_3072_SHA384
+        for call in (
+            lambda: signature.PublicKey(floor, bytes(public)),
+            lambda: signature.PublicKey(floor, key.to_spki()),
+            lambda: signature.PublicKey.from_spki(floor, key.to_spki()),
+        ):
+            with self.assertRaises(pyrind.KeyRejected):
+                call()
         if PYCA:
             loaded = serialization.load_der_private_key(key.to_pkcs8(), None)
             self.assertEqual(loaded.key_size, 2048)
+            numbers = loaded.public_key().public_numbers()
+            n = numbers.n.to_bytes(256, "big")
+            e = numbers.e.to_bytes(3, "big")
+            signature.PublicKey.from_components(verify.RSA_PSS_SHA256, n, e)
+            with self.assertRaises(pyrind.KeyRejected):
+                signature.PublicKey.from_components(floor, n, e)
 
     def test_garbage_keys_are_rejected(self):
         for call in (
