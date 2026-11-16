@@ -8,6 +8,9 @@
 //! z = 1 for P-256 and P-384, and Jacobian with z = 1 for P-521. Field
 //! elements at `p - 1`, `p`, and `p + k`, scalars at and above each group
 //! order, and a point at infinity are included too.
+//! `matches_portable` checks the narrow schedules against oracles other than
+//! the wide schedule: a schoolbook reduction, curve25519-dalek, and the
+//! generic backend.
 
 /// Both schedules agree, for every routine `wide_mux` dispatches.
 pub(crate) fn agree() {
@@ -420,6 +423,9 @@ pub(crate) fn agree() {
         super::p521_jmixadd_narrow::p521_jmixadd(&mut n, point, affine);
         assert_eq!(w, n, "p521 mixadd edge {i}");
     }
+
+    #[cfg(test)]
+    matches_portable(&g_affine, &g256, &g384, &g521);
 }
 
 fn limbs_to_bytes(limbs: [u64; 4]) -> [u8; 32] {
@@ -428,6 +434,467 @@ fn limbs_to_bytes(limbs: [u64; 4]) -> [u8; 32] {
         bytes[i * 8..][..8].copy_from_slice(&limb.to_le_bytes());
     }
     bytes
+}
+
+/// Narrow schedules against oracles other than the wide schedule.
+///
+/// Field products and `n_25519` multiply-add are reduced by a binary
+/// schoolbook, whose `(p - 1)^2 = 1` and `n * 1 = 0` checks run first.
+/// X25519 and Ed25519 base multiplication are curve25519-dalek, and the
+/// RFC 7748 base-point vector. P-256, P-384, and P-521 use the generic
+/// backend where its words match s2n-bignum; P-256 scalar multiplication
+/// is also checked at `0`, `1`, `n - 1`, `n`, and `n + 1`.
+#[cfg(test)]
+fn matches_portable(g_affine: &[u64; 8], g256: &[u64; 12], g384: &[u64; 18], g521: &[u64; 27]) {
+    use curve25519_dalek::edwards::EdwardsPoint;
+    use curve25519_dalek::montgomery::MontgomeryPoint;
+    use curve25519_dalek::scalar::Scalar;
+
+    let p = [
+        0xffff_ffff_ffff_ffed,
+        u64::MAX,
+        u64::MAX,
+        0x7fff_ffff_ffff_ffff,
+    ];
+    let extra: u128 = 27_742_317_777_372_353_535_851_937_790_883_648_493;
+    let n25519 = [extra as u64, (extra >> 64) as u64, 0, 1u64 << 60];
+    assert_eq!(
+        n25519,
+        [
+            0x5812_631a_5cf5_d3ed,
+            0x14de_f9de_a2f7_9cd6,
+            0,
+            0x1000_0000_0000_0000,
+        ]
+    );
+    let one = [1, 0, 0, 0];
+    let pm1 = sub4(p, one);
+    let nm1 = sub4(n25519, one);
+    assert_eq!(reduce(&mul256(pm1, pm1), &p), one, "oracle (p-1)^2");
+    assert_eq!(reduce(&mul256(p, one), &p), [0; 4], "oracle p");
+    assert_eq!(
+        reduce(&mul256([2, 0, 0, 0], [2, 0, 0, 0]), &p),
+        [4, 0, 0, 0],
+        "oracle 4"
+    );
+    assert_eq!(madd_n(n25519, one, [0; 4], n25519), [0; 4], "oracle n");
+    assert_eq!(madd_n(nm1, nm1, [0; 4], n25519), one, "oracle (n-1)^2");
+
+    let two255 = [u64::MAX, u64::MAX, u64::MAX, 0x7fff_ffff_ffff_ffff];
+    let field = [
+        [0; 4],
+        one,
+        pm1,
+        p,
+        succ4(p),
+        two255,
+        [u64::MAX; 4],
+        [
+            0x0123_4567_89ab_cdef,
+            0xfedc_ba98_7654_3210,
+            0x0f0e_0d0c_0b0a_0908,
+            0x0706_0504_0302_0100,
+        ],
+    ];
+    for (i, x) in field.iter().enumerate() {
+        let mut got = [0; 4];
+        super::bignum_sqr_p25519_narrow::bignum_sqr_p25519(&mut got, x);
+        assert_eq!(got, reduce(&mul256(*x, *x), &p), "portable sqr {i}");
+        for (j, y) in field.iter().enumerate() {
+            super::bignum_mul_p25519_narrow::bignum_mul_p25519(&mut got, x, y);
+            assert_eq!(got, reduce(&mul256(*x, *y), &p), "portable mul {i},{j}");
+            let carry = field[(i + j) % field.len()];
+            super::bignum_madd_n25519_narrow::bignum_madd_n25519(&mut got, x, y, &carry);
+            assert_eq!(got, madd_n(*x, *y, carry, n25519), "portable madd {i},{j}");
+        }
+    }
+
+    let alice = hex32("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+    let alice_public = hex32("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a");
+    let mut base = [0; 4];
+    super::curve25519_x25519base_narrow::curve25519_x25519base(&mut base, &bytes_to_words(&alice));
+    assert_eq!(words_to_bytes(&base), alice_public, "rfc7748 base");
+    assert_eq!(
+        MontgomeryPoint::mul_base_clamped(alice).0,
+        alice_public,
+        "dalek rfc7748"
+    );
+
+    let alice_words = bytes_to_words(&alice);
+    let points = [one, [9, 0, 0, 0], [u64::MAX; 4], alice_words];
+    for (i, scalar) in [one, [u64::MAX; 4], alice_words].iter().enumerate() {
+        let mut got = [0; 4];
+        super::curve25519_x25519base_narrow::curve25519_x25519base(&mut got, scalar);
+        let want = MontgomeryPoint::mul_base_clamped(words_to_bytes(scalar)).0;
+        assert_eq!(words_to_bytes(&got), want, "portable x25519 base {i}");
+        for (j, point) in points.iter().enumerate() {
+            super::curve25519_x25519_narrow::curve25519_x25519(&mut got, scalar, point);
+            let want = MontgomeryPoint(words_to_bytes(point))
+                .mul_clamped(words_to_bytes(scalar))
+                .0;
+            assert_eq!(words_to_bytes(&got), want, "portable x25519 {i},{j}");
+        }
+    }
+
+    let identity = {
+        let mut bytes = [0u8; 32];
+        bytes[0] = 1;
+        bytes
+    };
+    let base_ed = hex32("5866666666666666666666666666666666666666666666666666666666666666");
+    for (label, scalar, expect) in [("0", [0; 4], identity), ("1", one, base_ed)] {
+        let mut point = [0; 8];
+        super::edwards25519_scalarmulbase_narrow::edwards25519_scalarmulbase(&mut point, &scalar);
+        assert_eq!(compress_edwards(&point), expect, "ed25519 {label}");
+        let want = EdwardsPoint::mul_base(&Scalar::from_bytes_mod_order(words_to_bytes(&scalar)))
+            .compress()
+            .0;
+        assert_eq!(compress_edwards(&point), want, "portable ed25519 {label}");
+    }
+    for (i, scalar) in [[u64::MAX; 4], alice_words, nm1, n25519, succ4(n25519)]
+        .iter()
+        .enumerate()
+    {
+        let mut point = [0; 8];
+        super::edwards25519_scalarmulbase_narrow::edwards25519_scalarmulbase(&mut point, scalar);
+        let want = EdwardsPoint::mul_base(&Scalar::from_bytes_mod_order(words_to_bytes(scalar)))
+            .compress()
+            .0;
+        assert_eq!(compress_edwards(&point), want, "portable ed25519 {i}");
+    }
+
+    p256_edges(g_affine);
+    mixadd_p256(g256);
+    mixadd_p384(g384);
+    p384_order(g384);
+    p521_points(g521);
+    p521_order(g521);
+}
+
+#[cfg(test)]
+fn p256_edges(g_affine: &[u64; 8]) {
+    use crate::low::generic::limb64::p256;
+
+    let n = p256::N;
+    let expect_neg = neg_p256(g_affine);
+    for (label, scalar, expect) in [
+        ("0", [0; 4], [0; 8]),
+        ("1", [1, 0, 0, 0], *g_affine),
+        ("n-1", pred(n), expect_neg),
+        ("n", n, [0; 8]),
+        ("n+1", succ(n), *g_affine),
+    ] {
+        let mut narrow = [0; 8];
+        let mut wide = [0; 8];
+        super::p256_scalarmul_narrow::p256_scalarmul(&mut narrow, &scalar, g_affine);
+        super::p256_scalarmul::p256_scalarmul(&mut wide, &scalar, g_affine);
+        assert_eq!(narrow, wide, "p256 order {label}");
+        assert_eq!(narrow, expect, "p256 affine {label}");
+    }
+}
+
+#[cfg(test)]
+fn mixadd_p256(g256: &[u64; 12]) {
+    use crate::low::generic::limb64::p256;
+
+    let mont = |w: u64| {
+        let mut raw = [0; 4];
+        raw[0] = w;
+        let mut out = [0; 4];
+        p256::bignum_tomont_p256(&mut out, &raw);
+        out
+    };
+    let one = mont(1);
+    let mut z_one = [0u64; 4];
+    z_one.copy_from_slice(&g256[8..]);
+    assert_eq!(one, z_one, "p256 mont one");
+    let mut affine = [0; 8];
+    affine[..4].copy_from_slice(&mont(2));
+    affine[4..].copy_from_slice(&mont(3));
+    let mut got = [0; 12];
+    let mut want = [0; 12];
+    super::p256_montjmixadd_narrow::p256_montjmixadd(&mut got, g256, &affine);
+    p256::p256_montjmixadd(&mut want, g256, &affine);
+    assert_eq!(got, want, "portable p256 mixadd");
+    let infinity = [0; 12];
+    super::p256_montjmixadd_narrow::p256_montjmixadd(&mut got, &infinity, &affine);
+    p256::p256_montjmixadd(&mut want, &infinity, &affine);
+    assert_eq!(got, want, "portable p256 mixadd infinity");
+}
+
+#[cfg(test)]
+fn mixadd_p384(g384: &[u64; 18]) {
+    use crate::low::generic::limb64::p384;
+
+    let mont = |w: u64| {
+        let mut raw = [0; 6];
+        raw[0] = w;
+        let mut out = [0; 6];
+        p384::bignum_tomont_p384(&mut out, &raw);
+        out
+    };
+    assert_eq!(mont(1).as_slice(), &g384[12..], "p384 mont one");
+    let mut affine = [0; 12];
+    affine[..6].copy_from_slice(&mont(2));
+    affine[6..].copy_from_slice(&mont(3));
+    let mut got = [0; 18];
+    let mut want = [0; 18];
+    super::p384_montjmixadd_narrow::p384_montjmixadd(&mut got, g384, &affine);
+    p384::p384_montjmixadd(&mut want, g384, &affine);
+    assert_eq!(got, want, "portable p384 mixadd");
+    let infinity = [0; 18];
+    super::p384_montjmixadd_narrow::p384_montjmixadd(&mut got, &infinity, &affine);
+    p384::p384_montjmixadd(&mut want, &infinity, &affine);
+    assert_eq!(got, want, "portable p384 mixadd infinity");
+}
+
+#[cfg(test)]
+fn p384_order(g384: &[u64; 18]) {
+    use crate::low::generic::limb64::p384;
+
+    let n = p384::N;
+    for (label, scalar) in [
+        ("0", [0; 6]),
+        ("1", [1, 0, 0, 0, 0, 0]),
+        ("n-1", pred(n)),
+        ("n", n),
+        ("n+1", succ(n)),
+        ("ones", [u64::MAX; 6]),
+    ] {
+        let mut narrow = [0; 18];
+        let mut wide = [0; 18];
+        super::p384_montjscalarmul_narrow::p384_montjscalarmul(&mut narrow, &scalar, g384);
+        super::p384_montjscalarmul::p384_montjscalarmul(&mut wide, &scalar, g384);
+        assert_eq!(narrow, wide, "p384 order {label}");
+    }
+}
+
+#[cfg(test)]
+fn p521_points(g521: &[u64; 27]) {
+    use crate::low::generic::limb64::p521;
+
+    let mut other = [0; 27];
+    other[0] = 1;
+    other[9] = 2;
+    other[18] = 1;
+    let mut affine = [0; 18];
+    affine[0] = 3;
+    affine[9] = 4;
+    let mut got = [0; 27];
+    let mut want = [0; 27];
+    super::p521_jdouble_narrow::p521_jdouble(&mut got, g521);
+    p521::p521_jdouble(&mut want, g521);
+    assert_eq!(got, want, "portable p521 double");
+    super::p521_jdouble_narrow::p521_jdouble(&mut got, &other);
+    p521::p521_jdouble(&mut want, &other);
+    assert_eq!(got, want, "portable p521 double other");
+    super::p521_jadd_narrow::p521_jadd(&mut got, g521, &other);
+    p521::p521_jadd(&mut want, g521, &other);
+    assert_eq!(got, want, "portable p521 add");
+    super::p521_jmixadd_narrow::p521_jmixadd(&mut got, g521, &affine);
+    p521::p521_jmixadd(&mut want, g521, &affine);
+    assert_eq!(got, want, "portable p521 mixadd");
+    super::p521_jmixadd_narrow::p521_jmixadd(&mut got, &other, &affine);
+    p521::p521_jmixadd(&mut want, &other, &affine);
+    assert_eq!(got, want, "portable p521 mixadd other");
+}
+
+#[cfg(test)]
+fn p521_order(g521: &[u64; 27]) {
+    use crate::low::generic::limb64::p521;
+
+    let n = p521::N;
+    for (label, scalar) in [
+        ("0", [0; 9]),
+        ("1", [1, 0, 0, 0, 0, 0, 0, 0, 0]),
+        ("n-1", pred(n)),
+        ("n", n),
+        ("n+1", succ(n)),
+        ("ones", [u64::MAX; 9]),
+    ] {
+        let mut narrow = [0; 27];
+        let mut wide = [0; 27];
+        super::p521_jscalarmul_narrow::p521_jscalarmul(&mut narrow, &scalar, g521);
+        super::p521_jscalarmul::p521_jscalarmul(&mut wide, &scalar, g521);
+        assert_eq!(narrow, wide, "p521 order {label}");
+    }
+}
+
+#[cfg(test)]
+fn neg_p256(g: &[u64; 8]) -> [u64; 8] {
+    // p_256 = 2^256 - 2^224 + 2^192 + 2^96 - 1.
+    let p = [
+        0xffff_ffff_ffff_ffff,
+        0x0000_0000_ffff_ffff,
+        0,
+        0xffff_ffff_0000_0001,
+    ];
+    let mut y = [0; 4];
+    y.copy_from_slice(&g[4..]);
+    let mut out = *g;
+    out[4..].copy_from_slice(&sub4(p, y));
+    out
+}
+
+#[cfg(test)]
+fn madd_n(x: [u64; 4], y: [u64; 4], c: [u64; 4], n: [u64; 4]) -> [u64; 4] {
+    let mut wide = [0; 9];
+    wide[..8].copy_from_slice(&mul256(x, y));
+    let mut carry = 0u64;
+    for i in 0..4 {
+        let (sum, c1) = wide[i].overflowing_add(c[i]);
+        let (sum, c2) = sum.overflowing_add(carry);
+        wide[i] = sum;
+        carry = u64::from(c1 || c2);
+    }
+    for limb in wide.iter_mut().take(8).skip(4) {
+        let (sum, c1) = limb.overflowing_add(carry);
+        *limb = sum;
+        carry = u64::from(c1);
+    }
+    wide[8] = carry;
+    reduce(&wide, &n)
+}
+
+#[cfg(test)]
+fn mul256(x: [u64; 4], y: [u64; 4]) -> [u64; 8] {
+    let mut acc = [0u128; 8];
+    for i in 0..4 {
+        let mut carry = 0u128;
+        for j in 0..4 {
+            let t = acc[i + j] + u128::from(x[i]) * u128::from(y[j]) + carry;
+            acc[i + j] = t & u128::from(u64::MAX);
+            carry = t >> 64;
+        }
+        acc[i + 4] += carry;
+    }
+    let mut out = [0; 8];
+    for (out, acc) in out.iter_mut().zip(acc) {
+        assert!(acc <= u128::from(u64::MAX), "product limb overflowed");
+        *out = acc as u64;
+    }
+    out
+}
+
+/// `prod` mod `modulus`, `prod` little-endian and shorter than twice the
+/// modulus width in bits. `modulus` is nonzero and below `2^(64N - 1)`.
+#[cfg(test)]
+fn reduce<const N: usize, const W: usize>(prod: &[u64; W], modulus: &[u64; N]) -> [u64; N] {
+    let mut r = [0u64; N];
+    for bit in (0..W * 64).rev() {
+        let mut carry = 0u64;
+        for limb in &mut r {
+            let next = *limb >> 63;
+            *limb = (*limb << 1) | carry;
+            carry = next;
+        }
+        assert_eq!(carry, 0, "residue doubled past its width");
+        let bit_set = (prod[bit / 64] >> (bit % 64)) & 1;
+        let mut add = bit_set;
+        for limb in &mut r {
+            let (sum, c) = limb.overflowing_add(add);
+            *limb = sum;
+            add = u64::from(c);
+        }
+        assert_eq!(add, 0, "residue addition carried out");
+        if ge(&r, modulus) {
+            sub_into(&mut r, modulus);
+        }
+        assert!(!ge(&r, modulus), "residue not reduced");
+    }
+    r
+}
+
+#[cfg(test)]
+fn ge<const N: usize>(a: &[u64; N], b: &[u64; N]) -> bool {
+    for i in (0..N).rev() {
+        if a[i] != b[i] {
+            return a[i] > b[i];
+        }
+    }
+    true
+}
+
+#[cfg(test)]
+fn sub_into<const N: usize>(a: &mut [u64; N], b: &[u64; N]) {
+    let mut borrow = 0u64;
+    for i in 0..N {
+        let (diff, b1) = a[i].overflowing_sub(b[i]);
+        let (diff, b2) = diff.overflowing_sub(borrow);
+        a[i] = diff;
+        borrow = u64::from(b1 || b2);
+    }
+    assert_eq!(borrow, 0, "subtraction borrowed");
+}
+
+#[cfg(test)]
+fn sub4(mut a: [u64; 4], b: [u64; 4]) -> [u64; 4] {
+    sub_into(&mut a, &b);
+    a
+}
+
+#[cfg(test)]
+fn succ4(a: [u64; 4]) -> [u64; 4] {
+    succ(a)
+}
+
+#[cfg(test)]
+fn succ<const N: usize>(mut a: [u64; N]) -> [u64; N] {
+    let mut carry = 1u64;
+    for limb in &mut a {
+        let (sum, c) = limb.overflowing_add(carry);
+        *limb = sum;
+        carry = u64::from(c);
+    }
+    a
+}
+
+#[cfg(test)]
+fn pred<const N: usize>(mut a: [u64; N]) -> [u64; N] {
+    let mut borrow = 1u64;
+    for limb in &mut a {
+        let (diff, b) = limb.overflowing_sub(borrow);
+        *limb = diff;
+        borrow = u64::from(b);
+    }
+    a
+}
+
+#[cfg(test)]
+fn hex32(s: &str) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    for (i, byte) in out.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap();
+    }
+    out
+}
+
+#[cfg(test)]
+fn words_to_bytes(words: &[u64; 4]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    for (chunk, word) in out.as_chunks_mut::<8>().0.iter_mut().zip(words) {
+        *chunk = word.to_le_bytes();
+    }
+    out
+}
+
+#[cfg(test)]
+fn bytes_to_words(bytes: &[u8; 32]) -> [u64; 4] {
+    let mut out = [0u64; 4];
+    for (word, chunk) in out.iter_mut().zip(bytes.as_chunks::<8>().0) {
+        *word = u64::from_le_bytes(*chunk);
+    }
+    out
+}
+
+#[cfg(test)]
+fn compress_edwards(p: &[u64; 8]) -> [u8; 32] {
+    let y3 = (p[7] & 0x7fff_ffff_ffff_ffff) | (p[0] << 63);
+    let mut out = [0u8; 32];
+    for (i, word) in [p[4], p[5], p[6], y3].into_iter().enumerate() {
+        out[8 * i..8 * i + 8].copy_from_slice(&word.to_le_bytes());
+    }
+    out
 }
 
 // The override is process-wide, so each schedule is a child. Disable wins

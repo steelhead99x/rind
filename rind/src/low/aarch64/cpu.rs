@@ -155,14 +155,13 @@ const DETECTED: u8 = 1 << 7;
 /// Whether this core should run s2n-bignum's `_alt` schedules.
 ///
 /// Those are written for cores that issue `umulh` widely. The narrow
-/// schedules run only for a core Linux names as Cortex-A72, Cortex-A76, or
-/// Neoverse N1. Every other core keeps `_alt`, including one this crate
-/// does not recognise, which is what aarch64 ran before the dispatch.
-/// Both schedules are correct on every core.
+/// schedules run only for a core whose `MIDR_EL1` names Cortex-A72,
+/// Cortex-A76, or Neoverse N1. Every other core keeps `_alt`, including one
+/// this crate does not recognise, which is what aarch64 ran before the
+/// dispatch. Both schedules are correct on every core.
 ///
-/// The part list is read here, on the first call, and not from
-/// [`HaveCryptoExt`] or [`HaveSha3`]. Those stay on `getauxval`. A FIPS
-/// build's required-feature check does too.
+/// The part is read here, on the first call, and not from
+/// [`HaveCryptoExt`] or [`HaveSha3`]. Neither read opens a file.
 #[inline]
 pub(crate) fn wide_multiplier() -> bool {
     match WIDE.load(Ordering::Relaxed) {
@@ -173,8 +172,8 @@ pub(crate) fn wide_multiplier() -> bool {
 }
 
 static FEATURES: AtomicU8 = AtomicU8::new(0);
-/// Separate from [`FEATURES`], so an AES or SHA check does not open
-/// `/proc/cpuinfo`. `0` means the choice has not been made.
+/// Separate from [`FEATURES`], so an AES or SHA check does not read the
+/// part. `0` means the choice has not been made.
 static WIDE: AtomicU8 = AtomicU8::new(WIDE_UNSET);
 const WIDE_UNSET: u8 = 0;
 const WIDE_NARROW: u8 = 1;
@@ -248,216 +247,85 @@ fn detect_wide_once() -> bool {
 /// narrow ones.
 ///
 /// Called only from [`wide_multiplier`], never from an AES, SHA, or NEON
-/// check. Detection reads `/proc/cpuinfo` on Linux only, and only the parts
-/// online at that moment: a core hotplugged later is not seen. Apple's
-/// platforms name the vendor in the target, so they need no file. A sandbox
-/// that cannot read the file, Android (`target_os` is not `linux`, including
-/// a build that cannot open the file), and Windows on ARM never see a part
-/// list, so they stay on `_alt` rather than guessing a narrow core. FreeBSD
-/// does too. Both schedules are correct on every core.
+/// check. Linux reads `MIDR_EL1` with `mrs` when `AT_HWCAP` has
+/// `HWCAP_CPUID`; the kernel emulates that read, so detection makes no
+/// system call and opens no file, and a seccomp filter that kills `open`
+/// cannot fire here. A kernel without `HWCAP_CPUID` (before Linux 4.11),
+/// Android (`target_os` is not `linux`), Windows on ARM, and FreeBSD never
+/// see a part, so they stay on `_alt` rather than guessing a narrow core.
 ///
-/// [`crate::cpu::wide_multiplier`] is the pre-warm. Call it before a sandbox
-/// that kills `open`: seccomp strict mode delivers `SIGKILL`, which this
-/// cannot catch. A filter that delivers `SIGSYS` is caught around the read,
-/// and the choice stays `_alt`.
+/// This is the read aws-lc makes (`crypto/fipsmodule/cpucap/cpu_aarch64_linux.c`
+/// lines 19-23 and 74-75 at `5ed12cce`), gated on the same bit because
+/// valgrind cannot decode the register without it. Like aws-lc, it sees the
+/// core the first call ran on. On a chip that mixes core types, the choice
+/// follows that core and is then cached; both schedules are correct and
+/// constant time on every core, so only speed depends on it.
 fn detect_wide_multiplier() -> bool {
-    if cfg!(target_vendor = "apple") {
-        return true;
-    }
-    if cfg!(target_os = "linux") {
+    #[cfg(target_os = "linux")]
+    {
         // A debug build, or a release one with `--cfg rind_cpu_disable`, can
-        // name a fixture instead of the host's file. Release builds compile
-        // this out. `admin/mutants` runs the debug tests, so a mutant that
-        // returns a constant fails the fixture whose answer is the other one.
+        // name a fixture instead of the host's register. Release builds
+        // compile this out. `admin/mutants` runs the debug tests, so a mutant
+        // that returns a constant fails the fixture whose answer is the other
+        // one.
         #[cfg(any(debug_assertions, rind_cpu_disable))]
-        if let Some(text) = cpuinfo_fixture() {
-            return wide_from_cpuinfo(text);
+        if let Some(midr) = midr_fixture() {
+            return midr.is_none_or(wide_from_midr);
         }
-        return read_cpuinfo()
-            .map(|text| wide_from_cpuinfo(&text))
-            .unwrap_or(true);
+        read_midr().is_none_or(wide_from_midr)
     }
+    #[cfg(not(target_os = "linux"))]
     true
 }
 
-/// `RIND_TEST_CPUINFO=narrow|wide|empty` stands in for `/proc/cpuinfo`.
-#[cfg(any(debug_assertions, rind_cpu_disable))]
-fn cpuinfo_fixture() -> Option<&'static str> {
-    let text = match std::env::var("RIND_TEST_CPUINFO").ok().as_deref() {
-        Some("narrow") => "CPU implementer\t: 0x41\nCPU part\t: 0xd0b\n",
-        Some("wide") => "CPU implementer\t: 0x41\nCPU part\t: 0xd40\n",
-        Some("empty") => "",
+/// `RIND_TEST_MIDR=narrow|wide|none` stands in for `MIDR_EL1`: a
+/// Cortex-A76 r4p1, a Neoverse V1 r1p1, or a kernel without `HWCAP_CPUID`.
+#[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
+fn midr_fixture() -> Option<Option<u64>> {
+    let midr = match std::env::var("RIND_TEST_MIDR").ok().as_deref() {
+        Some("narrow") => Some(0x414f_d0b1),
+        Some("wide") => Some(0x411f_d401),
+        Some("none") => None,
         _ => return None,
     };
-    Some(text)
+    Some(midr)
 }
 
-/// `/proc/cpuinfo`, or `None` when the read fails.
-///
-/// The buffer is allocated before the `SIGSYS` handler is installed, so the
-/// allocation is outside that window. A full buffer fails closed: a core
-/// past the end would be unseen, and an unseen wide core must not be treated
-/// as narrow.
+/// `MIDR_EL1`, or `None` when the kernel does not emulate EL0 reads of the
+/// ID registers.
 #[cfg(target_os = "linux")]
-fn read_cpuinfo() -> Option<String> {
-    let mut buf = vec![0u8; 256 * 1024];
-    // One reader at a time: the handler is process-wide.
-    static GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _gate = GATE.lock().unwrap_or_else(|poison| poison.into_inner());
-    // No handler means a `SIGSYS` filter would kill the process, so skip
-    // the open and fail closed.
-    let restore = install_sigsys_handler()?;
-    // SAFETY: `buf` has `buf.len()` writable bytes.
-    let n = unsafe { read_cpuinfo_raw(buf.as_mut_ptr(), buf.len()) };
-    drop(restore);
-    if n < 0 {
+fn read_midr() -> Option<u64> {
+    // SAFETY: `getauxval` reads the auxiliary vector the kernel passed at
+    // exec. It makes no system call.
+    let hwcap = unsafe { libc::getauxval(libc::AT_HWCAP) };
+    if hwcap & libc::HWCAP_CPUID == 0 {
         return None;
     }
-    String::from_utf8(buf[..n as usize].to_vec()).ok()
-}
-
-/// Puts `swallow_sigsys` in place for the read and puts the previous
-/// action back when dropped.
-#[cfg(target_os = "linux")]
-fn install_sigsys_handler() -> Option<SigsysRestore> {
-    // SAFETY: `sigaction` is integers and pointers. Zero is an empty mask
-    // and a null handler, and the fields used below are written first.
-    let mut action: libc::sigaction = unsafe { core::mem::zeroed() };
-    action.sa_sigaction = swallow_sigsys as *const () as libc::sighandler_t;
-    // SAFETY: as above. `sigaction` overwrites this with the previous action.
-    let mut previous: libc::sigaction = unsafe { core::mem::zeroed() };
-    // SAFETY: both are zeroed `sigaction`s, and `swallow_sigsys` returns.
-    let installed = unsafe { libc::sigaction(libc::SIGSYS, &action, &mut previous) } == 0;
-    installed.then_some(SigsysRestore(previous))
-}
-
-#[cfg(target_os = "linux")]
-struct SigsysRestore(libc::sigaction);
-
-#[cfg(target_os = "linux")]
-impl Drop for SigsysRestore {
-    fn drop(&mut self) {
-        // SAFETY: `self.0` is the action `sigaction` returned.
-        unsafe {
-            libc::sigaction(libc::SIGSYS, &self.0, core::ptr::null_mut());
-        }
-    }
-}
-
-/// Returns from `SIGSYS` so the trapped `openat` comes back as an error.
-/// A handler that returns does not restart the call: this read does not
-/// retry, so a filter that traps every `openat` cannot loop.
-#[cfg(target_os = "linux")]
-extern "C" fn swallow_sigsys(_signal: libc::c_int) {}
-
-/// Reads `/proc/cpuinfo` with `openat`/`read`/`close`.
-///
-/// A negative result is a failed open or read, including the value left in
-/// `x0` when a `SIGSYS` handler returns from a trapped `openat` (seccomp
-/// rolls the arguments back, and `AT_FDCWD` is negative). The buffer is
-/// filled at most `len` bytes; `len` itself means the file did not fit.
-///
-/// # Safety
-///
-/// `buf` must have `len` writable bytes.
-#[cfg(target_os = "linux")]
-unsafe fn read_cpuinfo_raw(buf: *mut u8, len: usize) -> isize {
-    let path = b"/proc/cpuinfo\0";
-    let fd: isize;
-    // SAFETY: `openat` of a NUL-terminated path. The kernel writes the
-    // result to `x0` and preserves the other inputs' registers.
+    let midr: u64;
+    // SAFETY: with `HWCAP_CPUID` set, Linux traps and emulates an EL0 read
+    // of `MIDR_EL1` (Documentation/arch/arm64/cpu-feature-registers.rst),
+    // so this does not fault.
     unsafe {
         core::arch::asm!(
-            "svc #0",
-            in("x8") libc::SYS_openat,
-            inout("x0") libc::AT_FDCWD as isize => fd,
-            in("x1") path.as_ptr(),
-            in("x2") libc::O_RDONLY as isize,
-            in("x3") 0isize,
-            options(nostack)
+            "mrs {}, midr_el1",
+            out(reg) midr,
+            options(nomem, nostack, preserves_flags)
         );
     }
-    if fd < 0 {
-        return fd;
-    }
-    let mut filled = 0usize;
-    while filled < len {
-        let n: isize;
-        // SAFETY: `fd` is an open descriptor, and `buf[filled..]` is writable.
-        unsafe {
-            core::arch::asm!(
-                "svc #0",
-                in("x8") libc::SYS_read,
-                inout("x0") fd => n,
-                in("x1") buf.add(filled),
-                in("x2") len - filled,
-                options(nostack)
-            );
-        }
-        if n < 0 {
-            close_fd(fd);
-            return n;
-        }
-        if n == 0 {
-            break;
-        }
-        filled += n as usize;
-    }
-    close_fd(fd);
-    if filled == len {
-        return -1;
-    }
-    filled as isize
+    Some(midr)
 }
 
-#[cfg(target_os = "linux")]
-fn close_fd(fd: isize) {
-    // SAFETY: `fd` is an open descriptor, and a failed close is ignored.
-    unsafe {
-        core::arch::asm!(
-            "svc #0",
-            in("x8") libc::SYS_close,
-            inout("x0") fd => _,
-            options(nostack)
-        );
-    }
-}
-
-/// Whether `text` should run the `_alt` schedules.
+/// Whether the core `midr` names should run the `_alt` schedules.
 ///
-/// That is every listing except one whose parts are all known narrow cores.
-/// No part, an unknown part, or a mix with anything else stays on `_alt`:
-/// a chip this crate has not measured keeps the code it ran before.
-fn wide_from_cpuinfo(text: &str) -> bool {
-    let mut saw = false;
-    let mut all_narrow = true;
-    let mut implementer = None;
-    for line in text.lines() {
-        let Some((key, value)) = line.split_once(':') else {
-            continue;
-        };
-        let (key, value) = (key.trim(), value.trim());
-        if key == "processor" {
-            implementer = None;
-        } else if key.eq_ignore_ascii_case("CPU implementer") {
-            implementer = parse_cpu_id(value);
-        } else if key.eq_ignore_ascii_case("CPU part") {
-            saw = true;
-            all_narrow &= narrow_part(implementer, parse_cpu_id(value));
-        }
-    }
-    !(saw && all_narrow)
+/// The implementer is bits 31:24 and the part number bits 15:4. Variant,
+/// architecture, and revision do not change the multiplier, so they are
+/// ignored.
+#[cfg(any(target_os = "linux", test))]
+fn wide_from_midr(midr: u64) -> bool {
+    !narrow_part((midr >> 24) & 0xff, (midr >> 4) & 0xfff)
 }
 
-fn parse_cpu_id(value: &str) -> Option<u64> {
-    let value = value
-        .strip_prefix("0x")
-        .or_else(|| value.strip_prefix("0X"))
-        .unwrap_or(value);
-    u64::from_str_radix(value, 16).ok()
-}
-
-/// MIDR implementer and part, as Linux prints them in `/proc/cpuinfo`.
+/// `MIDR_EL1` implementer and part.
 ///
 /// Cortex-A72 (`0xd08`), Cortex-A76 (`0xd0b`), and Neoverse N1 (`0xd0c`)
 /// are the narrow parts. A76 is the Pi 5's core. N1 is the same multiplier
@@ -470,11 +338,9 @@ fn parse_cpu_id(value: &str) -> Option<u64> {
 /// V2, V3, and Apple, and defaults to the narrow schedules. This crate
 /// defaults to `_alt`, and keeps N2 and Cobalt there because `_alt` was
 /// measured faster on N2.
-fn narrow_part(implementer: Option<u64>, part: Option<u64>) -> bool {
-    matches!(
-        (implementer, part),
-        (Some(0x41), Some(0xd08 | 0xd0b | 0xd0c))
-    )
+#[cfg(any(target_os = "linux", test))]
+fn narrow_part(implementer: u64, part: u64) -> bool {
+    implementer == 0x41 && matches!(part, 0xd08 | 0xd0b | 0xd0c)
 }
 
 // DIT changes what runs only on Apple's cores, where from the M3 it turns off
@@ -696,75 +562,42 @@ mod tests {
     }
 
     #[test]
-    fn cpuinfo_selects_known_narrow_cores() {
-        let pi5 = "\
-processor	: 0
-CPU implementer	: 0x41
-CPU part	: 0xd0b
-processor	: 1
-cpu implementer	: 0x41
-cpu part	: 0xd0b
-";
-        assert!(!wide_from_cpuinfo(pi5));
-        assert!(!wide_from_cpuinfo(
-            "CPU implementer	: 0x41\nCPU part	: 0xd08\n"
-        ));
-        assert!(!wide_from_cpuinfo(
-            "CPU implementer	: 0x41\nCPU part	: 0xd0c\n"
-        ));
-        // Measured wide cores, and parts this crate has not measured.
-        for part in ["0xd40", "0xd49", "0xd4f", "0xd84", "0xd05", "0xd41"] {
-            let text = format!("CPU implementer	: 0x41\nCPU part	: {part}\n");
-            assert!(wide_from_cpuinfo(&text), "{part}");
+    fn midr_selects_known_narrow_cores() {
+        // Cortex-A72 r0p3, Cortex-A76 r4p1 (the Pi 5), and Neoverse N1 r3p1.
+        for midr in [0x410f_d083, 0x414f_d0b1, 0x413f_d0c1] {
+            assert!(!wide_from_midr(midr), "{midr:#x}");
         }
-        assert!(wide_from_cpuinfo(
-            "CPU implementer	: 0x61\nCPU part	: 0x023\n"
-        ));
-        assert!(wide_from_cpuinfo(
-            "CPU implementer	: 0x6d\nCPU part	: 0xd49\n"
-        ));
-        // A wide core beside a narrow one keeps `_alt`.
-        assert!(wide_from_cpuinfo(
-            "\
-processor	: 0
-CPU implementer	: 0x41
-CPU part	: 0xd40
-processor	: 1
-CPU implementer	: 0x41
-CPU part	: 0xd0b
-"
-        ));
-        // An unmeasured little core beside an A76 keeps `_alt` too.
-        assert!(wide_from_cpuinfo(
-            "\
-processor	: 0
-CPU implementer	: 0x41
-CPU part	: 0xd0b
-processor	: 1
-CPU implementer	: 0x41
-CPU part	: 0xd05
-"
-        ));
-        assert!(wide_from_cpuinfo(""));
-        assert!(wide_from_cpuinfo("processor	: 0\n"));
-        // A part that arrives before its implementer, or an unknown
-        // implementer, has not been identified, so it stays on `_alt`.
-        assert!(wide_from_cpuinfo(
-            "CPU part	: 0xd0b\nCPU implementer	: 0x41\n"
-        ));
-        assert!(wide_from_cpuinfo(
-            "CPU implementer	: 0x51\nCPU part	: 0x001\n"
-        ));
-        // A later processor that omits the implementer is unknown.
-        assert!(wide_from_cpuinfo(
-            "\
-processor	: 0
-CPU implementer	: 0x41
-CPU part	: 0xd0b
-processor	: 1
-CPU part	: 0xd0b
-"
-        ));
+        // Variant and revision do not matter, and the upper 32 bits are
+        // reserved.
+        for variant in 0..16u64 {
+            for revision in 0..16u64 {
+                let midr = 0x410f_d0b0 | (variant << 20) | revision;
+                assert!(!wide_from_midr(midr), "{midr:#x}");
+                assert!(!wide_from_midr(midr | (u64::MAX << 32)), "{midr:#x}");
+            }
+        }
+        // Measured wide cores, and parts this crate has not measured
+        // (Cortex-A55 `0xd05`, Cortex-A78 `0xd41`).
+        for part in [0xd40, 0xd49, 0xd4f, 0xd84, 0xd05, 0xd41] {
+            let midr = 0x410f_0000 | (part << 4);
+            assert!(wide_from_midr(midr), "{part:#x}");
+        }
+        // Apple M1, Cobalt 100, a Qualcomm part, and the narrow part numbers
+        // from implementers other than Arm, which are other cores.
+        assert!(wide_from_midr(0x610f_0230));
+        assert!(wide_from_midr(0x6d0f_d490));
+        assert!(wide_from_midr(0x510f_0010));
+        for implementer in [0x00, 0x42, 0x51, 0x61, 0xc0] {
+            for part in [0xd08u64, 0xd0b, 0xd0c] {
+                let midr = (implementer << 24) | 0x000f_0000 | (part << 4);
+                assert!(wide_from_midr(midr), "{midr:#x}");
+            }
+        }
+        // An empty register, and a narrow part number shifted into the
+        // revision or variant field, name no narrow core.
+        assert!(wide_from_midr(0));
+        assert!(wide_from_midr(0x4100_000b));
+        assert!(wide_from_midr(0x41d0_b000));
     }
 
     // The override is process-wide, so each case is a child. Disable wins
@@ -818,8 +651,8 @@ CPU part	: 0xd0b
         }
     }
 
-    /// AES, SHA, and NEON checks must not open `/proc/cpuinfo`. A child that
-    /// only runs those checks leaves the multiplier unread.
+    /// AES, SHA, and NEON checks do not read the part. A child that only
+    /// runs those checks leaves the multiplier unread.
     #[cfg(any(debug_assertions, rind_cpu_disable))]
     #[test]
     fn hw_checks_leave_the_multiplier_unread() {
@@ -941,85 +774,108 @@ CPU part	: 0xd0b
         }
     }
 
-    /// The host's file and `detect_wide_multiplier` name the same schedule.
-    /// A mutant that returns a constant survives on a host whose file has
-    /// that answer; [`cpuinfo_fixture_selects_the_schedule`] has both answers.
+    /// The register and `detect_wide_multiplier` name the same schedule, and
+    /// the register is one of the cores Linux lists. A mutant that returns a
+    /// constant survives on a host with that answer;
+    /// [`midr_fixture_selects_the_schedule`] has both answers.
     #[cfg(target_os = "linux")]
     #[test]
-    fn detected_value_matches_cpuinfo() {
-        let text = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
-        assert_eq!(detect_wide_multiplier(), wide_from_cpuinfo(&text));
-        let read = read_cpuinfo().expect("cpuinfo");
-        assert!(read.contains("processor") || read.is_empty());
-        assert_eq!(wide_from_cpuinfo(&read), wide_from_cpuinfo(&text));
+    fn detected_value_matches_midr() {
+        let midr = read_midr();
+        assert_eq!(detect_wide_multiplier(), midr.is_none_or(wide_from_midr));
+        // qemu-user shows the host's sysfs, which has no aarch64 registers,
+        // so this part runs only on an aarch64 kernel that lists them.
+        let listed: Vec<u64> = (0..4096)
+            .map_while(|cpu| {
+                let dir = format!("/sys/devices/system/cpu/cpu{cpu}");
+                std::path::Path::new(&dir).exists().then_some(dir)
+            })
+            .filter_map(|dir| {
+                let path = format!("{dir}/regs/identification/midr_el1");
+                let text = std::fs::read_to_string(path).ok()?;
+                u64::from_str_radix(text.trim().trim_start_matches("0x"), 16).ok()
+            })
+            .collect();
+        if let (Some(midr), false) = (midr, listed.is_empty()) {
+            assert!(listed.contains(&midr), "{midr:#x} not in {listed:x?}");
+        }
     }
 
-    /// `narrow` is Cortex-A76, `wide` is Neoverse V1, `empty` has no part.
+    /// `narrow` is Cortex-A76, `wide` is Neoverse V1, `none` has no
+    /// `HWCAP_CPUID`.
     #[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
     #[test]
-    fn cpuinfo_fixture_selects_the_schedule() {
-        const CHILD: &str = "RIND_TEST_CPUINFO_CHILD";
+    fn midr_fixture_selects_the_schedule() {
+        const CHILD: &str = "RIND_TEST_MIDR_CHILD";
         if std::env::var_os(CHILD).is_some() {
-            let mode = std::env::var("RIND_TEST_CPUINFO").unwrap();
+            let mode = std::env::var("RIND_TEST_MIDR").unwrap();
             let wide = detect_wide_multiplier();
             assert_eq!(wide, mode != "narrow", "{mode}");
             println!("{CHILD} {mode}");
             return;
         }
-        for mode in ["narrow", "wide", "empty"] {
+        for mode in ["narrow", "wide", "none"] {
             let stdout = run_child(
-                concat!(module_path!(), "::cpuinfo_fixture_selects_the_schedule"),
-                &[(CHILD, "1"), ("RIND_TEST_CPUINFO", mode)],
+                concat!(module_path!(), "::midr_fixture_selects_the_schedule"),
+                &[(CHILD, "1"), ("RIND_TEST_MIDR", mode)],
             );
             assert!(stdout.contains(&format!("{CHILD} {mode}")), "{stdout}");
         }
     }
 
-    /// `SIGSYS` from a trapped `openat` keeps `_alt` and the process.
+    /// The first schedule choice, and the first X25519 after it, survive a
+    /// filter that kills the process on `openat` or `openat2`, and one that
+    /// sends `SIGSYS` with no handler installed. Either would end the child
+    /// if detection opened a file.
     #[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
     #[test]
-    fn sigsys_on_open_keeps_alt() {
-        const CHILD: &str = "RIND_TEST_SIGSYS_OPEN";
-        if std::env::var_os(CHILD).is_some() {
-            let restore = install_sigsys_handler().expect("sigaction");
-            // SAFETY: `SIGSYS` is caught by `swallow_sigsys` for this call.
-            assert_eq!(unsafe { libc::raise(libc::SIGSYS) }, 0);
-            match install_openat_trap() {
+    fn detection_opens_no_file() {
+        const CHILD: &str = "RIND_TEST_NO_OPEN";
+        if let Some(action) = std::env::var_os(CHILD) {
+            let action = if action == "kill" {
+                libc::SECCOMP_RET_KILL_PROCESS
+            } else {
+                libc::SECCOMP_RET_TRAP
+            };
+            assert_eq!(WIDE.load(Ordering::Relaxed), WIDE_UNSET);
+            let expected = read_midr().is_none_or(wide_from_midr);
+            match install_openat_filter(action) {
                 Ok(()) => {
-                    let mut probe_buf = [0u8; 64];
-                    // SAFETY: `probe_buf` is writable, and the handler above
-                    // is still installed, so a trapped `openat` returns.
-                    let probe =
-                        unsafe { read_cpuinfo_raw(probe_buf.as_mut_ptr(), probe_buf.len()) };
-                    if probe >= 0 {
-                        // The filter did not catch this process's `openat`.
-                        println!("{CHILD} skipped");
-                    } else {
-                        assert!(detect_wide_multiplier(), "probe {probe}");
-                        println!("{CHILD} done");
-                    }
+                    let wide = wide_multiplier();
+                    let _ = HaveCryptoExt::check();
+                    let mut out = [0; 4];
+                    super::super::wide_mux::curve25519_x25519(
+                        &mut out,
+                        &[1, 0, 0, 0],
+                        &[9, 0, 0, 0],
+                    );
+                    assert_ne!(out, [0; 4]);
+                    // Disable and force still apply on top of detection.
+                    assert_eq!(wide, wide_toggle(expected));
+                    println!("{CHILD} done");
                 }
                 Err(err) if seccomp_unavailable(&err) => {
                     // qemu-user rejects `PR_SET_SECCOMP` (`ENOSYS` or
                     // `EINVAL`) for a filter the kernel would accept. A
-                    // native kernel that rejects only the trap filter
-                    // still fails this test.
+                    // native kernel that rejects only this filter still
+                    // fails the test.
                     println!("{CHILD} skipped");
                 }
                 Err(err) => panic!("seccomp: {err}"),
             }
-            drop(restore);
             return;
         }
-        let stdout = run_child(
-            concat!(module_path!(), "::sigsys_on_open_keeps_alt"),
-            &[(CHILD, "1")],
-        );
-        assert!(
-            stdout.contains(&format!("{CHILD} done"))
-                || stdout.contains(&format!("{CHILD} skipped")),
-            "{stdout}"
-        );
+        for action in ["kill", "trap"] {
+            let stdout = run_child(
+                concat!(module_path!(), "::detection_opens_no_file"),
+                &[(CHILD, action)],
+            );
+            assert!(
+                stdout.contains(&format!("{CHILD} done"))
+                    || stdout.contains(&format!("{CHILD} skipped")),
+                "{action}: {stdout}"
+            );
+        }
     }
 
     #[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
@@ -1062,10 +918,10 @@ CPU part	: 0xd0b
         )
     }
 
-    /// Traps `openat` and `openat2` with `SECCOMP_RET_TRAP`, which delivers
-    /// `SIGSYS`. Other calls are allowed, so the test can still print.
+    /// Answers `openat` and `openat2` with `action`. Other calls are
+    /// allowed, so the test can still print.
     #[cfg(target_os = "linux")]
-    fn install_openat_trap() -> std::io::Result<()> {
+    fn install_openat_filter(action: u32) -> std::io::Result<()> {
         // BPF_LD | BPF_W | BPF_ABS, BPF_JMP | BPF_JEQ | BPF_K, BPF_RET | BPF_K.
         let mut filter = [
             libc::sock_filter {
@@ -1096,7 +952,7 @@ CPU part	: 0xd0b
                 code: 0x06,
                 jt: 0,
                 jf: 0,
-                k: libc::SECCOMP_RET_TRAP,
+                k: action,
             },
         ];
         install_filter(&mut filter)
