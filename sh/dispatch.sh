@@ -362,6 +362,64 @@ wiping_packages() {
         | .[]'
 }
 
+# Runs a cargo command once per group of the packages named by the array SEL,
+# or the whole workspace when it is empty: `rind` alone, the rest, then each of
+# `wiping_packages` alone, since they turn on rind's `wipe` for any package
+# sharing their resolve. Usage: run_grouped SEL cargo CMD ... :: TRAILING ...
+# The selection's `-p NAME` and `--workspace` words go between the two halves.
+run_grouped() {
+    local -n sel=$1
+    shift
+    local head=() tail=() seen=0 arg
+    for arg; do
+        if ((seen)); then
+            tail+=("$arg")
+        elif [[ $arg == '::' ]]; then
+            seen=1
+        else
+            head+=("$arg")
+        fi
+    done
+    local rest=() name i workspace=0 saw_rind='' wipers saw=()
+    mapfile -t wipers < <(wiping_packages)
+    ((${#sel[@]})) || workspace=1
+    for ((i = 0; i < ${#sel[@]}; i++)); do
+        arg=${sel[i]}
+        if [[ $arg == --workspace ]]; then
+            workspace=1
+        elif [[ $arg == -p ]]; then
+            i=$((i + 1))
+            name=${sel[i]:-}
+            if [[ $name == rind ]]; then
+                saw_rind=1
+            elif [[ " ${wipers[*]} " == *" $name "* ]]; then
+                saw+=("$name")
+            elif [[ -n $name ]]; then
+                rest+=(-p "$name")
+            fi
+        else
+            rest+=("$arg")
+        fi
+    done
+    if ((workspace)); then
+        saw_rind=1
+        saw=("${wipers[@]}")
+        rest=(--workspace --exclude rind)
+        for name in "${wipers[@]}"; do
+            rest+=(--exclude "$name")
+        done
+    fi
+    if [[ -n $saw_rind ]]; then
+        run "${head[@]}" -p rind "${tail[@]}"
+    fi
+    if ((${#rest[@]} > 0)); then
+        run "${head[@]}" "${rest[@]}" "${tail[@]}"
+    fi
+    for name in ${saw[@]+"${saw[@]}"}; do
+        run "${head[@]}" -p "$name" "${tail[@]}"
+    done
+}
+
 # One module's check or fix, run through `run`.
 step() {
     local listed=$logs/$2.files packages libs backends target targets
@@ -370,56 +428,14 @@ step() {
             mapfile -t packages < <(sh/select.sh "$changed" "$all")
             run cargo fmt --all --check
             RUSTFMT=rustfmt-unstable run cargo fmt --all --check -- --config-path=.rustfmt.unstable.toml
-            run cargo clippy "${packages[@]}" --all-targets --locked -- --deny warnings
+            run_grouped packages cargo clippy :: --all-targets --locked -- --deny warnings
             # nextest runs the test binaries in parallel but not doc tests. Like
             # `cargo test`, it passes a selection with no tests, such as the
             # benches alone.
             #
-            # rind's default build leaves `low::zeroise` a no-op, so that
-            # resolve is `cargo nextest run -p rind` and nothing else. A
-            # package that depends on rind with `features = ["wipe"]`, such as
-            # rind-openssl, turns it on under resolver 2 for every package
-            # sharing its invocation, and so does anything that depends on
-            # that package. `wipers` lists them, from the manifests, and each
-            # runs alone, as rind-rcgen's wipe features do below.
-            local rest=() arg name i workspace=0 saw_rind='' wipers saw=()
-            mapfile -t wipers < <(wiping_packages)
-            ((${#packages[@]})) || workspace=1
-            for ((i = 0; i < ${#packages[@]}; i++)); do
-                arg=${packages[i]}
-                if [[ $arg == --workspace ]]; then
-                    workspace=1
-                elif [[ $arg == -p ]]; then
-                    i=$((i + 1))
-                    name=${packages[i]:-}
-                    if [[ $name == rind ]]; then
-                        saw_rind=1
-                    elif [[ " ${wipers[*]} " == *" $name "* ]]; then
-                        saw+=("$name")
-                    elif [[ -n $name ]]; then
-                        rest+=(-p "$name")
-                    fi
-                else
-                    rest+=("$arg")
-                fi
-            done
-            if ((workspace)); then
-                saw_rind=1
-                saw=("${wipers[@]}")
-                rest=(--workspace --exclude rind)
-                for name in "${wipers[@]}"; do
-                    rest+=(--exclude "$name")
-                done
-            fi
-            if [[ -n $saw_rind ]]; then
-                run cargo nextest run -p rind --locked --no-tests=warn
-            fi
-            if ((${#rest[@]} > 0)); then
-                run cargo nextest run "${rest[@]}" --locked --no-tests=warn
-            fi
-            for name in ${saw[@]+"${saw[@]}"}; do
-                run cargo nextest run -p "$name" --locked --no-tests=warn
-            done
+            # rind's default build leaves `low::zeroise` a no-op, so `run_grouped`
+            # keeps each package that turns it on out of the others' resolve.
+            run_grouped packages cargo nextest run :: --locked --no-tests=warn
             # Only the zeroing and heap scratch tests see the opt-in wipe,
             # which the default build turns into no-ops.
             if names rind "${packages[@]}"; then
@@ -462,10 +478,10 @@ step() {
             # Doc tests need a library. No packages at all means the workspace.
             mapfile -t libs < <(sh/select.sh "$changed" "$all" --lib)
             if ((${#libs[@]} > 0 || ${#packages[@]} == 0)); then
-                run cargo test "${libs[@]}" --locked --doc
+                run_grouped libs cargo test :: --locked --doc
                 # A broken or private intra-doc link renders as plain text on
                 # docs.rs.
-                RUSTDOCFLAGS='--deny warnings' run cargo doc "${libs[@]}" --no-deps --locked
+                RUSTDOCFLAGS='--deny warnings' run_grouped libs cargo doc :: --no-deps --locked
             fi
             ;;
         fix:rs)

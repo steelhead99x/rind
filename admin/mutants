@@ -549,7 +549,10 @@ mutants=$(command -v cargo-mutants) || {
     echo "admin/mutants: cargo-mutants is not installed; run this inside nix develop" >&2
     exit 1
 }
-RIND_REAL_CARGO=$(command -v cargo)
+RIND_REAL_CARGO=$(command -v cargo) || {
+    echo "admin/mutants: cargo is not installed; run this inside nix develop" >&2
+    exit 1
+}
 export RIND_REAL_CARGO
 export CARGO=$here/admin/mutants-cargo
 # A mutant that hangs the tests until the timeout is caught by them, so only

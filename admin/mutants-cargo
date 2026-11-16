@@ -63,7 +63,7 @@ done
 
 rcgen_spec=
 others=0
-for pkg in "${packages[@]}"; do
+for pkg in ${packages[@]+"${packages[@]}"}; do
     if [[ ${pkg%%@*} == rind-rcgen ]]; then
         if [[ -z $rcgen_spec ]]; then
             rcgen_spec=$pkg

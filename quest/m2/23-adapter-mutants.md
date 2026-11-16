@@ -15,7 +15,8 @@ Done on the PR branch (checked with `admin/mutants-cargo-test`, `admin/mutants -
 - The `Padding` pin sits inside `macro_rules`, which cargo-mutants never mutates, so it is gone.
 - An empty package selection is the workspace, like `--workspace`.
 - AES-128 QUIC and TLS 1.2 limits match rustls 0.23.46's aws-lc-rs provider; the QUIC test now pins the RFC 9001 values.
-- The split-out package list comes from the manifests (`wiping_packages`), not by hand.
+- The split-out package list comes from the manifests (`wiping_packages`), not by hand, and `run_grouped` applies it to clippy, nextest, doc tests, and `cargo doc`.
+- `admin/mutants-cargo` guards its possibly empty package array, and `admin/mutants` checks its cargo lookup.
 - `rind-rcgen`'s second build runs only `--lib --test zeroing`.
 - `RIND_MUTANTS_STUB` is gone.
 
