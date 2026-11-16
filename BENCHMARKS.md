@@ -79,11 +79,11 @@ Not timed on `nixos`: full handshake, X25519, every logical CPU, resumed handsha
 | AES-256 header protection | 6 ns ✓ | 8 ns | 10 ns | - | - | - | - |
 | ChaCha20 header protection | 61 ns ✓ | 82 ns | 74 ns | - | - | - | - |
 | X25519 | 23.97 µs ✓ | 24.61 µs | 46.72 µs | 52.09 µs | 23.94 µs | 64.60 µs ✓ | 49.70 µs |
-| P-256 ECDH | 42.82 µs | 42.60 µs | 46.05 µs | 268.62 µs | 47.87 µs | 268.70 µs ✓ | 71.25 µs |
+| P-256 ECDH | 42.82 µs ✓ | 42.60 µs | 46.05 µs | 268.62 µs | 47.87 µs | 268.70 µs ✓ | 71.25 µs |
 | Ed25519 sign | 5.72 µs ✓ | 6.13 µs | 17.23 µs | 13.30 µs | 5.83 µs | 41.37 µs ✓ | 23.38 µs |
 | Ed25519 verify | 27.15 µs | 27.03 µs | 34.76 µs | 24.83 µs | 27.08 µs | 54.52 µs ✓ | 79.25 µs |
-| P-256 ECDSA sign | 9.62 µs | 12.66 µs | 13.68 µs | 70.62 µs | 11.49 µs | 95.47 µs ✓ | 18.04 µs |
-| P-256 ECDSA verify | 39.25 µs | 40.24 µs | 41.25 µs | 226.27 µs | 41.92 µs | 215.83 µs ✓ | 60.27 µs |
+| P-256 ECDSA sign | 9.62 µs ✓ | 12.66 µs | 13.68 µs | 70.62 µs | 11.49 µs | 95.47 µs ✓ | 18.04 µs |
+| P-256 ECDSA verify | 39.25 µs ✓ | 40.24 µs | 41.25 µs | 226.27 µs | 41.92 µs | 215.83 µs ✓ | 60.27 µs |
 | SHA-256, 64 B | 69 ns | 96 ns | 78 ns | 59 ns | 67 ns | 385 ns ✓ | 244 ns |
 | SHA-256, 1350 B | 620 ns | 740 ns | 637 ns | 618 ns | 637 ns | 3.71 µs ✓ | 815 ns |
 | SHA-256, 16 KB | 6.86 µs | 6.88 µs | 6.97 µs | 7.22 µs | 7.08 µs | 43.12 µs ✓ | 7.37 µs |
@@ -199,11 +199,11 @@ Not timed on `desktop`: full handshake, X25519, every logical CPU, resumed hands
 | AES-256 header protection | 2 ns ✓ | 5 ns | 5 ns | - | - | - | - |
 | ChaCha20 header protection | 53 ns ✓ | 68 ns | 60 ns | - | - | - | - |
 | X25519 | 18.20 µs ✓ | 19.24 µs | 35.63 µs | 36.06 µs | 18.09 µs | 42.68 µs ✓ | 33.95 µs |
-| P-256 ECDH | 29.52 µs | 31.77 µs | 33.64 µs | 121.30 µs | 33.67 µs | 171.68 µs ✓ | 52.92 µs |
+| P-256 ECDH | 29.52 µs ✓ | 31.77 µs | 33.64 µs | 121.30 µs | 33.67 µs | 171.68 µs ✓ | 52.92 µs |
 | Ed25519 sign | 4.11 µs | 4.49 µs | 13.11 µs | 9.60 µs | 4.40 µs | 28.54 µs ✓ | 13.67 µs |
 | Ed25519 verify | 21.43 µs | 21.41 µs | 25.93 µs | 21.87 µs | 21.45 µs | 41.83 µs ✓ | 44.79 µs |
-| P-256 ECDSA sign | 6.74 µs | 12.25 µs | 12.20 µs | 31.32 µs | 8.97 µs | 61.81 µs ✓ | 14.45 µs |
-| P-256 ECDSA verify | 30.59 µs | 29.75 µs | 33.23 µs | 103.24 µs | 32.36 µs | 147.27 µs ✓ | 46.46 µs |
+| P-256 ECDSA sign | 6.74 µs ✓ | 12.25 µs | 12.20 µs | 31.32 µs | 8.97 µs | 61.81 µs ✓ | 14.45 µs |
+| P-256 ECDSA verify | 30.59 µs ✓ | 29.75 µs | 33.23 µs | 103.24 µs | 32.36 µs | 147.27 µs ✓ | 46.46 µs |
 | SHA-256, 64 B | 28 ns | 57 ns | 56 ns | 39 ns | 40 ns | 218 ns ✓ | 158 ns |
 | SHA-256, 1350 B | 269 ns | 306 ns | 304 ns | 296 ns | 292 ns | 2.29 µs ✓ | 406 ns |
 | SHA-256, 16 KB | 3.19 µs | 3.23 µs | 3.22 µs | 3.22 µs | 3.22 µs | 26.90 µs ✓ | 3.36 µs |
@@ -319,11 +319,11 @@ Not timed on `nixos2`: full handshake, X25519, every logical CPU, resumed handsh
 | AES-256 header protection | 8 ns ✓ | 10 ns | 10 ns | - | - | - | - |
 | ChaCha20 header protection | 84 ns ✓ | 104 ns | 98 ns | - | - | - | - |
 | X25519 | 25.00 µs ✓ | 30.89 µs | 53.60 µs | 56.59 µs | 24.95 µs | 72.34 µs ✓ | 55.20 µs |
-| P-256 ECDH | 42.80 µs | 51.71 µs | 47.10 µs | 233.70 µs | 46.44 µs | 280.52 µs ✓ | 81.68 µs |
+| P-256 ECDH | 42.80 µs ✓ | 51.71 µs | 47.10 µs | 233.70 µs | 46.44 µs | 280.52 µs ✓ | 81.68 µs |
 | Ed25519 sign | 7.13 µs ✓ | 7.81 µs | 22.26 µs | 17.40 µs | 7.22 µs | 53.66 µs ✓ | 31.01 µs |
 | Ed25519 verify | 31.81 µs | 31.62 µs | 42.48 µs | 29.88 µs | 32.22 µs | 69.12 µs ✓ | 93.09 µs |
-| P-256 ECDSA sign | 13.11 µs | 19.80 µs | 14.86 µs | 69.11 µs | 19.89 µs | 102.03 µs ✓ | 20.35 µs |
-| P-256 ECDSA verify | 41.56 µs | 43.27 µs | 43.93 µs | 197.15 µs | 44.30 µs | 236.87 µs ✓ | 68.34 µs |
+| P-256 ECDSA sign | 13.11 µs ✓ | 19.80 µs | 14.86 µs | 69.11 µs | 19.89 µs | 102.03 µs ✓ | 20.35 µs |
+| P-256 ECDSA verify | 41.56 µs ✓ | 43.27 µs | 43.93 µs | 197.15 µs | 44.30 µs | 236.87 µs ✓ | 68.34 µs |
 | SHA-256, 64 B | 244 ns | 307 ns | 277 ns | 473 ns | 576 ns | 485 ns ✓ | 505 ns |
 | SHA-256, 1350 B | 2.46 µs | 2.79 µs | 2.82 µs | 5.11 µs | 6.07 µs | 5.23 µs ✓ | 2.68 µs |
 | SHA-256, 16 KB | 28.06 µs | 31.46 µs | 32.37 µs | 58.17 µs | 69.84 µs | 61.68 µs ✓ | 28.83 µs |
@@ -565,11 +565,11 @@ graviola isn't timed on `ovh-iad`: it requires ADX, which this CPU lacks.
 | AES-256 header protection | 10 ns ✓ | 16 ns | 15 ns | - | - | - |
 | ChaCha20 header protection | 126 ns ✓ | 160 ns | 145 ns | - | - | - |
 | X25519 | 51.79 µs ✓ | 55.09 µs | 79.18 µs | 92.76 µs | 118.60 µs ✓ | 108.87 µs |
-| P-256 ECDH | 80.93 µs | 90.86 µs | 86.47 µs | 379.56 µs | 448.99 µs ✓ | 144.90 µs |
+| P-256 ECDH | 80.93 µs ✓ | 90.86 µs | 86.47 µs | 379.56 µs | 448.99 µs ✓ | 144.90 µs |
 | Ed25519 sign | 14.51 µs ✓ | 12.85 µs | 29.90 µs | 25.23 µs | 92.43 µs ✓ | 49.77 µs |
 | Ed25519 verify | 60.71 µs | 60.32 µs | 61.26 µs | 46.55 µs | 98.92 µs ✓ | 140.95 µs |
-| P-256 ECDSA sign | 22.42 µs | 24.53 µs | 26.21 µs | 107.76 µs | 163.02 µs ✓ | 32.70 µs |
-| P-256 ECDSA verify | 81.50 µs | 77.59 µs | 79.97 µs | 324.89 µs | 389.47 µs ✓ | 115.24 µs |
+| P-256 ECDSA sign | 22.42 µs ✓ | 24.53 µs | 26.21 µs | 107.76 µs | 163.02 µs ✓ | 32.70 µs |
+| P-256 ECDSA verify | 81.50 µs ✓ | 77.59 µs | 79.97 µs | 324.89 µs | 389.47 µs ✓ | 115.24 µs |
 | SHA-256, 64 B | 399 ns | 491 ns | 449 ns | 762 ns | 764 ns ✓ | 813 ns |
 | SHA-256, 1350 B | 3.87 µs | 4.74 µs | 4.47 µs | 8.13 µs | 8.43 µs ✓ | 4.34 µs |
 | SHA-256, 16 KB | 45.11 µs | 50.68 µs | 50.70 µs | 93.30 µs | 96.58 µs ✓ | 45.56 µs |
@@ -689,11 +689,11 @@ graviola isn't timed on `ovh-sea`: it requires ADX, which this CPU lacks.
 | AES-256 header protection | 9 ns ✓ | 15 ns | 15 ns | - | - | - |
 | ChaCha20 header protection | 122 ns ✓ | 152 ns | 139 ns | - | - | - |
 | X25519 | 51.10 µs ✓ | 51.15 µs | 76.22 µs | 87.59 µs | 113.85 µs ✓ | 94.95 µs |
-| P-256 ECDH | 78.75 µs | 83.71 µs | 83.41 µs | 363.81 µs | 431.73 µs ✓ | 135.76 µs |
+| P-256 ECDH | 78.75 µs ✓ | 83.71 µs | 83.41 µs | 363.81 µs | 431.73 µs ✓ | 135.76 µs |
 | Ed25519 sign | 11.68 µs ✓ | 12.65 µs | 28.95 µs | 23.74 µs | 73.35 µs ✓ | 41.96 µs |
 | Ed25519 verify | 58.97 µs | 57.63 µs | 59.24 µs | 45.80 µs | 93.99 µs ✓ | 136.50 µs |
-| P-256 ECDSA sign | 21.44 µs | 23.93 µs | 24.84 µs | 107.39 µs | 156.95 µs ✓ | 31.82 µs |
-| P-256 ECDSA verify | 77.75 µs | 74.54 µs | 78.73 µs | 305.79 µs | 363.17 µs ✓ | 111.98 µs |
+| P-256 ECDSA sign | 21.44 µs ✓ | 23.93 µs | 24.84 µs | 107.39 µs | 156.95 µs ✓ | 31.82 µs |
+| P-256 ECDSA verify | 77.75 µs ✓ | 74.54 µs | 78.73 µs | 305.79 µs | 363.17 µs ✓ | 111.98 µs |
 | SHA-256, 64 B | 386 ns | 481 ns | 432 ns | 734 ns | 760 ns ✓ | 801 ns |
 | SHA-256, 1350 B | 3.85 µs | 4.75 µs | 4.31 µs | 8.29 µs | 8.24 µs ✓ | 4.22 µs |
 | SHA-256, 16 KB | 43.51 µs | 49.41 µs | 51.35 µs | 92.84 µs | 97.66 µs ✓ | 43.72 µs |
@@ -1215,6 +1215,8 @@ A ✓ means a published, machine-checked proof shows that all the code computing
 | rind | `ed25519-sign`, `ed25519-verify` | aarch64 | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's Ed25519 key loading, signing, and verification, small-order key refusal included, down to s2n-bignum's routines and its SHA-512 down to aws-lc's sha512_block_data_order_hw, which rind runs with the SHA-512 instructions, and sha512_block_data_order_nohw, which it runs without them, composed with s2n-bignum's HOL Light proofs of edwards25519_decode_alt, edwards25519_scalarmulbase_alt, edwards25519_scalarmuldouble_alt, bignum_madd_n25519_alt, bignum_mod_n25519, bignum_neg_p25519, and bignum_lt, of s2n-bignum's own object code, which rind transliterates, rind's HOL Light proofs of bignum_eq and of the first SHA-512 routine, of the object code rind's build emits, the latter against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's, and aws-lc-verification's NSym proof of the second, with its ArmSpecGap caveat](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Ed25519.lean) |
 | rind | `p256-ecdh` | aarch64 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of key generation's draws through a dyn RandomSource, which Aeneas cannot translate, of its agreement API's P-256 key generation, public key, and agreement down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of p256_scalarmulbase_alt, p256_scalarmul_alt, bignum_tomont_p256, bignum_demont_p256, bignum_add_p256, bignum_montmul_p256, bignum_montsqr_p256, and bignum_mod_n256_4, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of bignum_eq, of the object code rind's build emits, with rind's generator table proven to hold the multiples of G that s2n-bignum's proof assumes](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/P256.lean) |
 | rind | `p256-ecdsa-sign`, `p256-ecdsa-verify` | aarch64 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of the nonces' draws through a dyn RandomSource, which Aeneas cannot translate, of its signature API's P-256 ECDSA with SHA-256 and fixed-length signatures, key generation and loading, signing, and verification, down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of p256_scalarmulbase_alt, p256_montjadd_alt, p256_montjdouble_alt, p256_montjmixadd_alt, bignum_inv_p256, bignum_neg_p256, bignum_tomont_p256, bignum_demont_p256, bignum_add_p256, bignum_montmul_p256, bignum_montsqr_p256, bignum_mod_n256_4, bignum_modadd, bignum_montmul, bignum_demont, and bignum_modinv, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of bignum_eq, of the object code rind's build emits, with the group laws its twin multiplication relies on proven from Mathlib's, the generator's order n proven, and HOL Light's P256_GROUP_ELEMENT_ORDER, that every finite point has order n, proven by counting the curve's points, and proving a signature right when signing returns, as its nonce loop has no bound](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/P256Signature.lean) |
+| rind | `p256-ecdh` | x86_64 on Linux | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of key generation's draws through a dyn RandomSource, and of the AVX2 and SSE2 table select, whose intrinsics' models rind tests against the CPU, which Aeneas cannot translate, of its agreement API's P-256 key generation, public key, and agreement down to s2n-bignum's routines and rind's port of aws-lc's Booth-recoded generator multiplication, its 37-row table proven to hold the multiples of G, composed with s2n-bignum's HOL Light proofs of p256_scalarmul, bignum_tomont_p256, bignum_demont_p256, bignum_montmul_p256, bignum_montsqr_p256, and their _alt forms without BMI2 and ADX, bignum_add_p256, bignum_inv_p256, bignum_neg_p256, bignum_mod_n256_4, bignum_mux, and bignum_eq, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proofs of aws-lc's mixed additions ecp_nistz256_point_add_affine and its BMI2 and ADX form, of the object code rind's Linux build emits, which assume the ABI's 16-byte stack alignment at the call and the 16-byte alignment rind gives their constant table](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/P256.lean) |
+| rind | `p256-ecdsa-sign`, `p256-ecdsa-verify` | x86_64 on Linux | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the nonces' draws through a dyn RandomSource, and of the AVX2 and SSE2 table select, whose intrinsics' models rind tests against the CPU, which Aeneas cannot translate, of its signature API's P-256 ECDSA with SHA-256 and fixed-length signatures, key generation and loading, signing, and verification, down to s2n-bignum's routines and rind's port of aws-lc's Booth-recoded generator multiplication, its 37-row table proven to hold the multiples of G, composed with s2n-bignum's HOL Light proofs of p256_montjadd, p256_montjdouble, p256_montjmixadd, bignum_tomont_p256, bignum_demont_p256, bignum_montmul_p256, bignum_montsqr_p256, and their _alt forms without BMI2 and ADX, bignum_add_p256, bignum_inv_p256, bignum_neg_p256, bignum_mod_n256_4, bignum_mux, bignum_modadd, bignum_montmul, bignum_demont, bignum_modinv, and bignum_eq, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proofs of aws-lc's mixed additions ecp_nistz256_point_add_affine and its BMI2 and ADX form, of the object code rind's Linux build emits, which assume the ABI's 16-byte stack alignment at the call and the 16-byte alignment rind gives their constant table, with the group laws its twin multiplication relies on proven from Mathlib's, the generator's order n proven, and HOL Light's P256_GROUP_ELEMENT_ORDER, that every finite point has order n, proven by counting the curve's points, and proving a signature right when signing returns, as its nonce loop has no bound](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/P256Signature.lean) |
 | rind | `p384-ecdh` | x86_64 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of key generation's draws through a dyn RandomSource, and of the AVX2 and SSE2 comb table select, whose intrinsics' models rind tests against the CPU, which Aeneas cannot translate, of its agreement API's P-384 key generation, public key, and agreement down to s2n-bignum's routines, its own comb for k·G and its tables included, composed with s2n-bignum's HOL Light proofs of p384_montjscalarmul, p384_montjdouble, p384_montjmixadd, bignum_tomont_p384, bignum_demont_p384, bignum_montmul_p384, bignum_montsqr_p384, and their _alt forms without BMI2 and ADX, bignum_add_p384, bignum_inv_p384, bignum_neg_p384, bignum_mod_n384_6, bignum_mux, and bignum_eq, of s2n-bignum's own object code, which rind transliterates, with the generator's order n proven by Pratt certificates](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/P384Keygen.lean) |
 | rind | `p384-ecdh` | aarch64 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of key generation's draws through a dyn RandomSource, and of the NEON comb table select, whose intrinsics' models rind tests against the CPU, which Aeneas cannot translate, of its agreement API's P-384 key generation, public key, and agreement down to s2n-bignum's routines, its own comb for k·G and its tables included, composed with s2n-bignum's HOL Light proofs of p384_montjscalarmul_alt, p384_montjdouble_alt, p384_montjmixadd_alt, bignum_tomont_p384, bignum_demont_p384, bignum_add_p384, bignum_montmul_p384_alt, bignum_montsqr_p384_alt, bignum_inv_p384, bignum_neg_p384, bignum_mod_n384_6, and bignum_mux, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of bignum_eq, of the object code rind's build emits, with the generator's order n proven by Pratt certificates](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/P384Keygen.lean) |
 | rind | `sha256/*`, `hmac-sha256/*`, `hkdf-sha256/*` | aarch64 with aes, pmull, sha2 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of HKDF-Expand's loop over its info slices, which Aeneas cannot translate, of its digest, HMAC, and HKDF APIs' SHA-256, padding included, down to aws-lc's sha256_block_data_order_hw, which rind runs with the crypto extension, composed with rind's HOL Light proof of that routine, of the object code rind's build emits, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#415, unmerged, which rind pins at 79120e64 and proves FIPS 180-4's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/Aarch64/Sha256Hw.lean) |
