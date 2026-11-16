@@ -40,7 +40,7 @@ A primitive is checked five ways:
   constant time for every input, including variable-time instructions, and
   `admin/prove bytes` checks that rind runs the code they are about.
 - **Zeroing**: a `rind/tests/zeroing.rs` test that drops each value owning
-  the primitive's secrets under the `wipe` feature and fails on any of its
+  the primitive's secrets and fails on any of its
   bytes left nonzero. It runs on every tier, native runner, and Windows.
   `rind/tests/heap_scratch.rs` checks the heap blocks each private-key
   operation frees: it runs each under two keys with the same public inputs
@@ -148,7 +148,7 @@ the default 10,000 cases, even though they build in release mode.
 ## Undefined behavior
 
 The weekly `miri` workflow, or `just miri TARGET`, runs the portable
-backend's tests under [Miri] with `wipe` on, forced on x86_64 and again as
+backend's tests under [Miri], forced on x86_64 and again as
 big-endian `s390x-unknown-linux-gnu`. Miri fails a test on undefined behavior,
 such as a key type's wipe leaving an invalid value for the drop that follows,
 a misaligned or out-of-bounds pointer, or a data race in `ReuseCache`, in rind
