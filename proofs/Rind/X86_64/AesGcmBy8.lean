@@ -479,20 +479,29 @@ theorem by8_out (icb : Quad32) (alg : Algorithm) (kw : List (BitVec 32)) (b : Li
 
 /-! ## `by8` -/
 
-/-- `by8`: Vale's GCTR from the counter after `j0`, and GHASH over the AAD's
-and the ciphertext's padded blocks. -/
-theorem by8_spec (ENC : Bool) (hk : low.x86_64.aes.HwKey) (alg : Algorithm) (kw : List (BitVec 32))
+/-- A GHASH table whose `Ghash::add` hashes as GHASH with the key `H`. -/
+def GhashOf (H : P) (tb : low.x86_64.ghash.GhashTable) : Prop :=
+  ∀ (c : BitVec 128) (b : List U8), ∃ y, low.x86_64.ghash.Ghash.addBytes ⟨tb, c⟩ b = ok ⟨tb, y⟩ ∧
+    toPoly y = ghashPoly H (toPoly c) ((padBlocks b).map toPoly)
+
+theorem ClmulOf.ghashOf {H : P} (hH : Small H) {tb : low.x86_64.ghash.GhashTable}
+    {t : low.x86_64.ghash.ClmulTable} (ht : TableFor H t) (hg : ClmulOf tb t) : GhashOf H tb := fun c b => by
+  obtain ⟨y, hy, hyp⟩ := clmul_add_spec H hH t ht b c
+  exact ⟨y, by rw [addBytes_clmul ⟨tb, c⟩ t hg, hy, bind_ok], hyp⟩
+
+/-- `by8`, for any table whose hashing is GHASH with `H`: Vale's GCTR from the
+counter after `j0`, and GHASH over the AAD's and the ciphertext's padded blocks. -/
+theorem by8_spec_of (ENC : Bool) (hk : low.x86_64.aes.HwKey) (alg : Algorithm) (kw : List (BitVec 32))
     (hkey : HwKeyIs alg kw hk) (H : P) (hH : Small H) (t : low.x86_64.ghash.ClmulTable) (ht : TableFor H t)
-    (ghash : low.x86_64.ghash.Ghash) (hg : ClmulOf ghash.table t) (j0 : Quad32) (y0 : Std.Array U8 16#usize)
+    (ghash : low.x86_64.ghash.Ghash) (hgh : GhashOf H ghash.table) (j0 : Quad32) (y0 : Std.Array U8 16#usize)
     (hy : loadBytes y0.val = reverseBytesQuad32 j0) (aad inout : Slice U8) :
     ∃ g out, low.x86_64.aes_gcm.by8 ENC hk t ghash y0 aad inout = ok (g, out) ∧ g.table = ghash.table ∧
       out.val.map (·.bv) = gctrEncrypt (inc32 j0 1) (inout.val.map (·.bv)) alg kw ∧
       toPoly g.current = ghashPoly H (toPoly ghash.current)
         ((padBlocks aad.val ++ padBlocks (if ENC then out.val else inout.val)).map toPoly) := by
-  choose F hF hFp using fun b x => clmul_add_spec H hH t ht b x
+  choose F hF hFp using fun b c => hgh c b
   have hadd : ∀ c b, low.x86_64.ghash.Ghash.addBytes { ghash with current := c } b =
-      ok { ghash with current := F b c } := fun c b => by
-    rw [addBytes_clmul { ghash with current := c } t hg, hF, bind_ok]
+      ok { ghash with current := F b c } := fun c b => hF b c
   have hadd0 : ∀ b, low.x86_64.ghash.Ghash.addBytes ghash b = ok { ghash with current := F b ghash.current } :=
     fun b => hadd ghash.current b
   obtain ⟨⟨f, rks, l⟩, hrk⟩ : ∃ r, hk.round_keys = r := ⟨_, rfl⟩
@@ -544,5 +553,17 @@ theorem by8_spec (ENC : Bool) (hk : low.x86_64.aes.HwKey) (alg : Algorithm) (kw 
         (0 + 8 * (chunksOf 128 inout.val).length)).flatMap low.x86_64.aes_gcm.bytes) _
         (by rw [length_flatMap_bytes]; omega)]
     simp only [padBlocks_flatMap_bytes, List.map_append, ghashPoly_append, List.map_map]
+
+/-- `by8`: Vale's GCTR from the counter after `j0`, and GHASH over the AAD's
+and the ciphertext's padded blocks. -/
+theorem by8_spec (ENC : Bool) (hk : low.x86_64.aes.HwKey) (alg : Algorithm) (kw : List (BitVec 32))
+    (hkey : HwKeyIs alg kw hk) (H : P) (hH : Small H) (t : low.x86_64.ghash.ClmulTable) (ht : TableFor H t)
+    (ghash : low.x86_64.ghash.Ghash) (hg : ClmulOf ghash.table t) (j0 : Quad32) (y0 : Std.Array U8 16#usize)
+    (hy : loadBytes y0.val = reverseBytesQuad32 j0) (aad inout : Slice U8) :
+    ∃ g out, low.x86_64.aes_gcm.by8 ENC hk t ghash y0 aad inout = ok (g, out) ∧ g.table = ghash.table ∧
+      out.val.map (·.bv) = gctrEncrypt (inc32 j0 1) (inout.val.map (·.bv)) alg kw ∧
+      toPoly g.current = ghashPoly H (toPoly ghash.current)
+        ((padBlocks aad.val ++ padBlocks (if ENC then out.val else inout.val)).map toPoly) :=
+  by8_spec_of ENC hk alg kw hkey H hH t ht ghash (hg.ghashOf hH ht) j0 y0 hy aad inout
 
 end rind.x86_64

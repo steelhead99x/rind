@@ -2,7 +2,7 @@
 
 ## Goal
 
-SHA-384, SHA-512, SHA-512/256, Ed25519, and HMAC and HKDF over SHA-384 earn the ✓ on x86_64 CPUs with the SHA512 instructions (Arrow Lake, Lunar Lake, and later Intel cores).
+SHA-384, SHA-512, SHA-512/256, Ed25519 signing, and HMAC and HKDF over SHA-384 earn the ✓ on x86_64 CPUs with the SHA512 instructions (Arrow Lake, Lunar Lake, and later Intel cores). Ed25519 verification there also needs [its half-size check proven](/quest/m4/verified/ed25519-half-scalar.md).
 
 ## Plan
 
