@@ -205,9 +205,9 @@ fn ct_binsec_hkdf() {
             .extract(&secret::<32>(2))
             .unwrap();
         let mut okm = [0; 80];
-        prk.expand(&[b"info"], okm.len())
-            .unwrap()
-            .fill(&mut okm)
+        prk.fill(&[b"info"], &mut okm).unwrap();
+        Prk::new(&HKDF_SHA256, &secret::<32>(3))
+            .fill(&[b"info"], &mut okm)
             .unwrap();
     });
 }

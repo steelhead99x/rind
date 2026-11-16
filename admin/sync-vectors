@@ -25,6 +25,8 @@ CAVP=0220357e399badc6e9b87e237c428463a00d0992
 CCTV=b88c4b206254ac543df240097e0f1fcc6a664821
 # RFC 9497's repository, whose `poc/vectors/allVectors.json` is its Appendix A.
 VOPRF=5d7d94c8dc7589dc3baa116c1b9c169a7c33ac4e
+# RFC 9591's repository, whose `poc/frost-*.json` are its Appendix E.
+FROST=127452b93acb3094a6f659d059550df5618c2714
 
 # aws-lc's copy of each file BoringSSL also has holds every BoringSSL vector
 # for rind's algorithms, so BoringSSL contributes only its own files.
@@ -312,3 +314,11 @@ curl --fail --silent --show-error --location \
     "https://raw.githubusercontent.com/cfrg/draft-irtf-cfrg-voprf/$VOPRF/poc/vectors/allVectors.json" |
     jq '[.[] | select(.mode != 2 and .identifier != "decaf448-SHAKE256")]' >rfc9497.new/allVectors.json
 swap rfc9497
+
+# The suites rind offers, short of Ed448 and secp256k1.
+stage rfc9591
+for suite in ed25519-sha512 ristretto255-sha512 p256-sha256; do
+    curl --fail --silent --show-error --location --output "rfc9591.new/frost-$suite.json" \
+        "https://raw.githubusercontent.com/cfrg/draft-irtf-cfrg-frost/$FROST/poc/frost-$suite.json"
+done
+swap rfc9591
