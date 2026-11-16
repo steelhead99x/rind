@@ -173,8 +173,9 @@ if [[ -e $tmp/bad/0.args ]]; then
 fi
 
 # Default path: eight targets, four clippy rows each, then four assembly
-# builds, then the no-SSE2 x86_64 rows (four clippy and one build), then one
-# tree check. The caller's RUSTFLAGS and target variable stay as they were.
+# builds, then the no-SSE2 x86_64 rows (four clippy and one build), then two
+# tree checks: thumbv7em-none-eabihf, then armv7a-none-eabi. The caller's
+# RUSTFLAGS and target variable stay as they were.
 # This script's flags go to the wrapper. Only x86_64-unknown-none gains SSE2.
 default=$tmp/default
 if ! run "$default" env \
@@ -185,8 +186,8 @@ if ! run "$default" env \
     exit 1
 fi
 count=$(find "$default" -name '*.args' | wc -l)
-if [[ $count -ne 42 ]]; then
-    echo "default path ran $count commands, want 42" >&2
+if [[ $count -ne 43 ]]; then
+    echo "default path ran $count commands, want 43" >&2
     exit 1
 fi
 i=0
@@ -244,6 +245,9 @@ assert_has "$nosse_build" "x86_64-unknown-none"
 tree_args=$(args_of "$default/41.args")
 assert_has "$tree_args" "tree"
 assert_has "$tree_args" "thumbv7em-none-eabihf"
+arm_tree=$(args_of "$default/42.args")
+assert_has "$arm_tree" "tree"
+assert_has "$arm_tree" "armv7a-none-eabi"
 # Cargo does not fingerprint wrapper flags. Each flag set gets its own
 # target dir, so a later row cannot reuse an earlier build script.
 thumb_dir=$(target_dir_of "$default/0.env")
