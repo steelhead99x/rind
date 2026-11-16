@@ -950,7 +950,7 @@ pub unsafe extern "C" fn rind_dart_hkdf_expand(
         // SAFETY: forwarded from the caller.
         let (prk, info, out) =
             unsafe { (handle(prk), input(info, info_len), output(out, out_len)) };
-        prk.expand(&[info], out.len())?.fill(out)?;
+        prk.fill(&[info], out)?;
         Ok(out_len)
     })
 }

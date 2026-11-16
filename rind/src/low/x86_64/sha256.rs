@@ -73,16 +73,40 @@ pub(in crate::low) fn sha256_finish_shaext(
     state: &[u32; 8],
     message: &[u8],
     length: [u8; 8],
+    token: super::cpu::HaveSha256,
+) -> [u8; 32] {
+    let (_, tail) = message.as_chunks::<64>();
+    // SAFETY: `padded` counts the whole lanes of `tail`, which follows
+    // `message`'s whole blocks within it, and gives 4 only for three.
+    unsafe { finish_padded(state, message, padded(tail, length), token) }
+}
+
+/// The digest of `state` followed by `message`'s whole blocks, then the
+/// block `padded` describes, and when its `lanes` is 4, a block of zeros
+/// closed by its `length`.
+///
+/// Apart from `sha256_finish_shaext`, so that the padding above it is plain
+/// Rust a proof can translate, and inline into it, so that the words reach
+/// the block in registers.
+///
+/// # Safety
+///
+/// `padded.lanes` must be at most 4, and `message` must hold that many whole
+/// 16-byte lanes after its whole blocks, or three when it is 4.
+#[inline(always)]
+unsafe fn finish_padded(
+    state: &[u32; 8],
+    message: &[u8],
+    padded: Padded,
     _token: super::cpu::HaveSha256,
 ) -> [u8; 32] {
-    let (blocks, tail) = message.as_chunks::<64>();
-    let padded = padded(tail, length);
     let (abcd, efgh): (__m128i, __m128i);
     // SAFETY: `_token` proves the caller checked the `sha`, `ssse3`, and
-    // `sse4.1` features. The block reads `state`, `blocks.len()` blocks of
-    // `message` and then `padded.lanes` lanes, or three when that is 4, all
-    // within `tail`, and `K`. It takes the System V ABI's argument registers where it
-    // can, and leaves rdi, so that few values move.
+    // `sse4.1` features. The block reads `state`, `message.len() / 64`
+    // blocks of `message` and then `padded.lanes` lanes, or three when that
+    // is 4, within `message` as the caller promises, and `K`. It takes the
+    // System V ABI's argument registers where it can, and leaves rdi, so
+    // that few values move.
     unsafe {
         asm!(
             "movdqu (%rsi), %xmm0",
@@ -160,8 +184,8 @@ pub(in crate::low) fn sha256_finish_shaext(
             "pshufb %xmm4, %xmm2",
             "pshufb %xmm4, %xmm1",
             in("rsi") state.as_ptr(),
-            inout("rdx") blocks.as_ptr() => _,
-            inout("rax") blocks.len() => _,
+            inout("rdx") message.as_ptr() => _,
+            inout("rax") message.len() / 64 => _,
             in("rcx") K.0.as_ptr(),
             in("r8") padded.length,
             inout("r9") padded.lanes => _,
@@ -213,9 +237,15 @@ struct Padded {
 fn padded(tail: &[u8], length: [u8; 8]) -> Padded {
     let lanes = tail.len() / 16;
     let part = &tail[16 * lanes..];
-    let mut end = match part.split_first_chunk::<8>() {
-        Some((first, rest)) => [u64::from_le_bytes(*first), ended(rest)],
-        None => [ended(part), 0],
+    // A length check, not `split_first_chunk`, whose match Aeneas cannot
+    // translate.
+    let mut end = if part.len() >= 8 {
+        [
+            u64::from_le_bytes(part[..8].try_into().unwrap()),
+            ended(&part[8..]),
+        ]
+    } else {
+        [ended(part), 0]
     };
     let length = u64::from_le_bytes(length);
     if tail.len() + 1 + 8 > 64 {
