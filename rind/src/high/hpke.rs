@@ -1022,6 +1022,9 @@ mod tests {
                 }
             } else if !in_block {
                 if let Some(name) = line.strip_prefix("## ") {
+                    // A block before this vector's first `###` heading is
+                    // unknown, not the previous vector's last block.
+                    heading = "";
                     cases.push(EdgeCase {
                         name: name.to_owned(),
                         ..EdgeCase::default()
@@ -1041,6 +1044,7 @@ mod tests {
             };
             if line == "~~~" || line.is_empty() {
                 records.push(HashMap::new());
+                last_field.clear();
                 continue;
             }
             let record = records.last_mut().unwrap();
@@ -1050,7 +1054,10 @@ mod tests {
                     let old = record.insert(last_field.clone(), value.trim().to_owned());
                     assert!(old.is_none(), "{field:?} twice in {:?}", case.name);
                 }
-                None => record.get_mut(&last_field).unwrap().push_str(line),
+                None => record
+                    .get_mut(&last_field)
+                    .unwrap_or_else(|| panic!("{line:?} continues no field in {:?}", case.name))
+                    .push_str(line),
             }
         }
         assert!(!in_block, "an unclosed block");
