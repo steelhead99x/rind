@@ -704,16 +704,6 @@ impl<'a> Type<'a> for Sequence<'a> {
     const TAG: Tag = Tag(Tag::SEQUENCE);
 }
 
-/// Whether `bytes` opens with a `SEQUENCE` whose first element is also a
-/// `SEQUENCE`, as a `SubjectPublicKeyInfo` does and an `RSAPublicKey`, which
-/// opens with an `INTEGER`, does not.
-pub(crate) fn opens_nested_sequence(bytes: &[u8]) -> bool {
-    Parser::new(bytes)
-        .descend(Tag(Tag::SEQUENCE))
-        .and_then(|(_, mut body)| body.peek_tag())
-        .is_ok_and(|tag| tag.0 == Tag::SEQUENCE)
-}
-
 pub(crate) struct Parser<'a> {
     input: &'a [u8],
 }

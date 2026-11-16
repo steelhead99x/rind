@@ -12,7 +12,7 @@ use rcgen::{
     PKCS_RSA_SHA256, PKCS_RSA_SHA384, PKCS_RSA_SHA512, PublicKeyData, SerialNumber,
     SignatureAlgorithm,
 };
-use rind::signature::{PublicKey, RsaVerificationAlgorithm, VerificationAlgorithm, verify};
+use rind::{ecdsa, ed25519, rsa};
 use rind_rcgen::KeyPair;
 use rustls_pki_types::PrivatePkcs8KeyDer;
 
@@ -27,17 +27,25 @@ fn mark<T: ?Sized>(value: &T, state: MemState) {
     }
 }
 
-/// Each algorithm rind-rcgen generates keys for, and the rind algorithm that
-/// verifies it.
-const ALGORITHMS: [(&SignatureAlgorithm, &VerificationAlgorithm); 3] = [
-    (&PKCS_ECDSA_P256_SHA256, &verify::ECDSA_P256_SHA256_ASN1),
-    (&PKCS_ECDSA_P384_SHA384, &verify::ECDSA_P384_SHA384_ASN1),
-    (&PKCS_ED25519, &verify::ED25519),
+/// Verifies a signature over a message with an encoded public key.
+type Verify = fn(&[u8], &[u8], &[u8]) -> Result<(), rind::Error>;
+
+/// Each algorithm rind-rcgen generates keys for, and how rind verifies it.
+const ALGORITHMS: [(&SignatureAlgorithm, Verify); 3] = [
+    (&PKCS_ECDSA_P256_SHA256, |key, message, signature| {
+        ecdsa::PublicKey::new(&ecdsa::verify::P256_SHA256_ASN1, key)?.verify(message, signature)
+    }),
+    (&PKCS_ECDSA_P384_SHA384, |key, message, signature| {
+        ecdsa::PublicKey::new(&ecdsa::verify::P384_SHA384_ASN1, key)?.verify(message, signature)
+    }),
+    (&PKCS_ED25519, |key, message, signature| {
+        ed25519::PublicKey::new(key)?.verify(message, signature)
+    }),
 ];
 
 #[test]
 fn self_signed() {
-    for (algorithm, verification) in ALGORITHMS {
+    for (algorithm, verify) in ALGORITHMS {
         let key = KeyPair::generate_for(algorithm).unwrap();
 
         let mut params = CertificateParams::new(["localhost".to_string()]).unwrap();
@@ -48,10 +56,7 @@ fn self_signed() {
 
         let signature = rcgen::SigningKey::sign(&key, b"message").unwrap();
         public(&signature[..]);
-        PublicKey::new(verification, key.der_bytes())
-            .unwrap()
-            .verify(b"message", &signature)
-            .unwrap();
+        verify(key.der_bytes(), b"message", &signature).unwrap();
     }
 }
 
@@ -73,19 +78,19 @@ fn export() {
 fn rsa() {
     let der =
         PrivatePkcs8KeyDer::from(&include_bytes!("../../rind/src/high/rsa/rsa2048.pkcs8.der")[..]);
-    let algorithms: [(&SignatureAlgorithm, &RsaVerificationAlgorithm); 3] = [
-        (&PKCS_RSA_SHA256, &verify::RSA_PKCS1_SHA256),
-        (&PKCS_RSA_SHA384, &verify::RSA_PKCS1_SHA384),
-        (&PKCS_RSA_SHA512, &verify::RSA_PKCS1_SHA512),
+    let algorithms: [(&SignatureAlgorithm, &rsa::VerificationAlgorithm); 3] = [
+        (&PKCS_RSA_SHA256, &rsa::verify::PKCS1_SHA256),
+        (&PKCS_RSA_SHA384, &rsa::verify::PKCS1_SHA384),
+        (&PKCS_RSA_SHA512, &rsa::verify::PKCS1_SHA512),
     ];
     for (algorithm, verification) in algorithms {
         let key = KeyPair::from_pkcs8_der_and_sign_algo(&der, algorithm).unwrap();
 
         let signature = rcgen::SigningKey::sign(&key, b"message").unwrap();
         public(&signature[..]);
-        PublicKey::new(verification, key.der_bytes())
+        rsa::PublicKey::new(key.der_bytes())
             .unwrap()
-            .verify(b"message", &signature)
+            .verify(verification, b"message", &signature)
             .unwrap();
 
         // rind treats an exported key as leaving its care, so the encoding is public.

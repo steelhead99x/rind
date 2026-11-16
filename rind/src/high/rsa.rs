@@ -45,15 +45,6 @@ fn public_exponent(e: &[u8]) -> Result<u64, Error> {
     Ok(value)
 }
 
-/// The big-endian modulus and exponent of PKCS#1 `RSAPublicKey` or
-/// `SubjectPublicKeyInfo` DER.
-fn der_components(bytes: &[u8]) -> Result<(&[u8], &[u8]), Error> {
-    match asn1::opens_nested_sequence(bytes) {
-        true => spki_components(bytes),
-        false => pkcs1_components(bytes),
-    }
-}
-
 /// [`pkcs1_components`] of the key in `SubjectPublicKeyInfo` DER, whose
 /// algorithm must be one of [`KEY_ALGORITHMS`] with `NULL` parameters, as RFC
 /// 3279 section 2.3.1 requires for `rsaEncryption`, or none, which aws-lc
@@ -133,13 +124,12 @@ impl VerifyingKey {
         Self::from_unsigned(n, e)
     }
 
-    /// Decodes an RSA public key from PKCS#1 `RSAPublicKey` or
-    /// `SubjectPublicKeyInfo` DER, as aws-lc-rs takes either.
-    pub(crate) fn from_der(bytes: &[u8]) -> Result<Self, Error> {
+    /// Decodes an RSA public key from `SubjectPublicKeyInfo` DER.
+    pub(crate) fn from_spki_der(bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_public();
         // A `match` rather than `?` on the borrowed pair, whose translation
         // `proofs/` cannot check. The compiled code is the same.
-        match der_components(bytes) {
+        match spki_components(bytes) {
             Ok((n, e)) => Self::from_unsigned(n, e),
             Err(err) => Err(err),
         }

@@ -298,7 +298,7 @@ fn boxed_decapsulation_key(alg: &'static kem::Algorithm) -> Box<kem::Decapsulati
 
 /// An ML-DSA seed and public key, and the PKCS#8 documents holding the seed.
 #[test]
-fn ml_dsa_public_key() {
+fn ml_dsa() {
     let seed: [u8; 32] = distinct(5);
     let public_key = signature::PqdsaKeyPair::from_seed(&signature::ML_DSA_65_SIGNING, &seed)
         .unwrap()

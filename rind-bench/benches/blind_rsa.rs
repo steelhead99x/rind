@@ -38,7 +38,7 @@ fn keys() -> Keys {
     let rind = KeyPair::generate(&ALGORITHM, rind::rsa::KeySize::Rsa2048).unwrap();
     let rustcrypto = RcSecretKey::from_der(rind.to_pkcs8().as_ref()).unwrap();
     let keys = Keys {
-        rind_public: rind.public_key(),
+        rind_public: rind.public_key().clone(),
         rustcrypto_public: rustcrypto.public_key().unwrap(),
         rind,
         rustcrypto,

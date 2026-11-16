@@ -18,6 +18,8 @@
 // suggestion for `chunks_exact(G::ELEMENT_LEN)` would need.
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
+#[cfg(target_os = "none")]
+use alloc::vec::Vec;
 use core::cmp::Ordering;
 use core::fmt;
 
