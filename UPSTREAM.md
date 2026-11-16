@@ -25,7 +25,7 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 - **Breaks:** Espressif Rust 1.98.1.0's `missing_const_for_thread_local` flags `DIT_GUARDS` in `rind/src/low/cpu.rs` and `HELD` in `rind/src/low/entry.rs` on `xtensa-esp32s3-espidf`, although both initializers are already `const` blocks.
 - **Reproduce:** with that version installed as `esp`, run `cargo +esp clippy -Zbuild-std=std,panic_abort -p rind --lib --locked --target xtensa-esp32s3-espidf -- --deny warnings`.
-- **Workaround:** `sh/bare-metal.sh` compiles the ESP-IDF library with `cargo check` in debug and release, with and without `wipe`. Its bare-metal targets still run Clippy.
+- **Workaround:** `sh/bare-metal.sh` compiles the ESP-IDF library with `cargo check` in debug and release. Its bare-metal targets still run Clippy.
 - **Reported:** [rust-lang/rust-clippy#17566](https://github.com/rust-lang/rust-clippy/issues/17566), the same false positive on targets without native thread-local support.
 - **Goes when:** the pinned Espressif toolchain's Clippy accepts those const initializers, so the ESP-IDF row can run Clippy too.
 

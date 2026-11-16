@@ -49,8 +49,8 @@ rind assumes an attacker who:
 rind's defenses are the rules [AGENTS.md](AGENTS.md#required) sets: hostile
 input returns an error, never a panic, and its cost is bounded by design;
 secret-dependent code runs in constant time; and a key type wipes its whole
-value on drop, with keyed state and heap scratch derived from a private key,
-under the `wipe` feature ([Wiping keys](README.md#wiping-keys)). Wiping is a
+value on drop, with keyed state and heap scratch derived from a private key
+([Wiping keys](README.md#wiping-keys)). Wiping is a
 second layer against an attacker who later reads freed memory, as in a heap
 dump; it does not wipe digest contexts, decrypted messages, or stack
 temporaries.
@@ -220,8 +220,8 @@ establishes, and what it does not:
   compiled from HACL\*'s verified C by an unverified step.
 - **Zeroing**: `rind/tests/zeroing.rs` drops each value holding a secret and
   fails on any byte left nonzero, and `rind/tests/heap_scratch.rs` fails on a
-  freed heap block that differs between two keys. Both run only under the
-  `wipe` feature, and see only the value itself and the heap blocks it frees.
+  freed heap block that differs between two keys. Both see only the value
+  itself and the heap blocks it frees.
 - **Bounds**: `low::guard_pages` runs each kernel that takes a caller's
   slice against `PROT_NONE` pages, at lengths up to 1100 bytes and, for the
   AEADs, 2000 to 2600, on Unix. It is the only bounds check on the assembly

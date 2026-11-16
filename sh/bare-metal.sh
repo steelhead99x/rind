@@ -79,11 +79,11 @@ required_flags() {
 }
 
 # rows TARGET COMMAND [ARGS...]: debug, whose `debug_assertions` code release
-# leaves out, and release, each with and without `wipe`.
+# leaves out, and release.
 rows() {
     local target=$1
     shift
-    local flags profile features arg
+    local flags profile arg
     flags=$(required_flags "$target")
     # Cargo arguments precede `--`. Anything after it is for rustc, so the
     # profile and the target have to be inserted before that separator.
@@ -99,16 +99,13 @@ rows() {
         fi
     done
     for profile in dev release; do
-        for features in "" wipe; do
-            if [[ $seen -eq 1 ]]; then
-                run_cargo "$target" "$flags" "${cargo[@]}" "${before[@]}" \
-                    --target "$target" --profile "$profile" --features "$features" \
-                    -- "${after[@]}"
-            else
-                run_cargo "$target" "$flags" "${cargo[@]}" "${before[@]}" \
-                    --target "$target" --profile "$profile" --features "$features"
-            fi
-        done
+        if [[ $seen -eq 1 ]]; then
+            run_cargo "$target" "$flags" "${cargo[@]}" "${before[@]}" \
+                --target "$target" --profile "$profile" -- "${after[@]}"
+        else
+            run_cargo "$target" "$flags" "${cargo[@]}" "${before[@]}" \
+                --target "$target" --profile "$profile"
+        fi
     done
 }
 
@@ -126,8 +123,7 @@ check_lib() {
 
 # clippy is a check build, so it never assembles `global_asm`. Build the
 # library once per target that selects an assembly backend, so an assembler
-# rejection fails here. The assembly text does not change with the profile
-# or `wipe`.
+# rejection fails here. The assembly text does not change with the profile.
 assemble() {
     local target=$1
     run_cargo "$target" "$(required_flags "$target")" "${cargo[@]}" build -p rind --lib --locked \
@@ -259,12 +255,10 @@ reject_stmxcsr() {
 # backend instead.
 no_sse2() {
     local target=x86_64-unknown-none
-    local profile features json rlib
+    local profile json rlib
     for profile in dev release; do
-        for features in "" wipe; do
-            run_cargo "$target" "$custom $scalar" "${cargo[@]}" clippy -p rind --lib --locked \
-                --target "$target" --profile "$profile" --features "$features" -- --deny warnings
-        done
+        run_cargo "$target" "$custom $scalar" "${cargo[@]}" clippy -p rind --lib --locked \
+            --target "$target" --profile "$profile" -- --deny warnings
     done
     json=$(mktemp)
     run_cargo "$target" "$custom $scalar" "${cargo[@]}" build -p rind --lib --locked \

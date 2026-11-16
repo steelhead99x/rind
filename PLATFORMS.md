@@ -92,7 +92,7 @@ qemu. iOS devices' code is only built.
   ARMv5TE, on `powerpc64le` and big-endian `powerpc64` and `powerpc` Linux,
   and on `x86_64`,
   where `--cfg rind_portable` forces it. `just ci` also compiles the library
-  for `wasm32-wasip2` and `wasm32-unknown-unknown`, with and without `wipe`,
+  for `wasm32-wasip2` and `wasm32-unknown-unknown`
   when a change touches rind, the workspace manifest or lockfile, or the
   flake, and `just gate` always does. It compiles every published adapter
   for both, and rind-rustls's and rind-ring's tests for `wasm32-wasip2`, when
@@ -112,7 +112,7 @@ qemu. iOS devices' code is only built.
   compiles rind again, so its JIT may turn a select into a branch.
   Bare-metal targets (`target_os = "none"`) build the library without std, on
   `alloc`: the program supplies a global allocator and a getrandom backend.
-  Every PR lints it, in debug and release and with and without `wipe`
+  Every PR lints it, in debug and release
   (`just bare-metal`), for `thumbv6m-none-eabi` and
   `riscv32imc-unknown-none-elf`, which lack compare-and-swap and so keep no
   reuse cache, for `thumbv7em-none-eabihf`, for `armv7a-none-eabi` and

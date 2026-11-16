@@ -172,8 +172,8 @@ if [[ -e $tmp/bad/0.args ]]; then
     exit 1
 fi
 
-# Default path: eight targets, four clippy rows each, then four assembly
-# builds, then the no-SSE2 x86_64 rows (four clippy and one build), then one
+# Default path: eight targets, two clippy rows each, then four assembly
+# builds, then the no-SSE2 x86_64 rows (two clippy and one build), then one
 # tree check. The caller's RUSTFLAGS and target variable stay as they were.
 # This script's flags go to the wrapper. Only x86_64-unknown-none gains SSE2.
 default=$tmp/default
@@ -185,12 +185,12 @@ if ! run "$default" env \
     exit 1
 fi
 count=$(find "$default" -name '*.args' | wc -l)
-if [[ $count -ne 42 ]]; then
-    echo "default path ran $count commands, want 42" >&2
+if [[ $count -ne 24 ]]; then
+    echo "default path ran $count commands, want 24" >&2
     exit 1
 fi
 i=0
-while [[ $i -lt 32 ]]; do
+while [[ $i -lt 16 ]]; do
     args=$(args_of "$default/$i.args")
     caller=$(flags_of "$default/$i.env")
     added=$(script_flags "$default/$i.env")
@@ -220,36 +220,36 @@ while [[ $i -lt 32 ]]; do
     fi
     i=$((i + 1))
 done
-arm_a=$(args_of "$default/32.args")
-arm_r=$(args_of "$default/33.args")
-arm64=$(args_of "$default/34.args")
-x86=$(args_of "$default/35.args")
+arm_a=$(args_of "$default/16.args")
+arm_r=$(args_of "$default/17.args")
+arm64=$(args_of "$default/18.args")
+x86=$(args_of "$default/19.args")
 assert_has "$arm_a" "build"
 assert_has "$arm_a" "armv7a-none-eabi"
-assert_has "$(script_flags "$default/32.env")" 'getrandom_backend="custom"'
+assert_has "$(script_flags "$default/16.env")" 'getrandom_backend="custom"'
 assert_has "$arm_r" "build"
 assert_has "$arm_r" "armv7r-none-eabihf"
 assert_has "$arm64" "aarch64-unknown-none"
 assert_has "$x86" "x86_64-unknown-none"
-assert_has "$(script_flags "$default/35.env")" "target-feature=+sse,+sse2,-soft-float"
-nosse=$(args_of "$default/36.args")
+assert_has "$(script_flags "$default/19.env")" "target-feature=+sse,+sse2,-soft-float"
+nosse=$(args_of "$default/20.args")
 assert_has "$nosse" "clippy"
 assert_has "$nosse" "x86_64-unknown-none"
-nosse_flags=$(script_flags "$default/36.env")
+nosse_flags=$(script_flags "$default/20.env")
 assert_has "$nosse_flags" 'curve25519_dalek_backend="serial"'
 assert_lacks "$nosse_flags" "soft-float"
-nosse_build=$(args_of "$default/40.args")
+nosse_build=$(args_of "$default/22.args")
 assert_has "$nosse_build" "build"
 assert_has "$nosse_build" "x86_64-unknown-none"
-tree_args=$(args_of "$default/41.args")
+tree_args=$(args_of "$default/23.args")
 assert_has "$tree_args" "tree"
 assert_has "$tree_args" "thumbv7em-none-eabihf"
 # Cargo does not fingerprint wrapper flags. Each flag set gets its own
 # target dir, so a later row cannot reuse an earlier build script.
 thumb_dir=$(target_dir_of "$default/0.env")
-if [[ $thumb_dir != "$(target_dir_of "$default/4.env")" \
-    || $thumb_dir == "$(target_dir_of "$default/28.env")" \
-    || $(target_dir_of "$default/28.env") == "$(target_dir_of "$default/36.env")" ]]; then
+if [[ $thumb_dir != "$(target_dir_of "$default/2.env")" \
+    || $thumb_dir == "$(target_dir_of "$default/14.env")" \
+    || $(target_dir_of "$default/14.env") == "$(target_dir_of "$default/20.env")" ]]; then
     echo "flag sets shared a target dir" >&2
     exit 1
 fi
@@ -318,7 +318,7 @@ if run "$aws" env PRINT_AWS=1 "$script"; then
     exit 1
 fi
 
-# Xtensa: three bare-metal targets, four clippy rows each, four ESP-IDF
+# Xtensa: three bare-metal targets, two clippy rows each, two ESP-IDF
 # checks, one bench build. ESP-IDF keeps getrandom's own backend.
 xtensa=$tmp/xtensa
 if ! run "$xtensa" env RUSTFLAGS='-Cdebuginfo=0' "$script" xtensa; then
@@ -326,12 +326,12 @@ if ! run "$xtensa" env RUSTFLAGS='-Cdebuginfo=0' "$script" xtensa; then
     exit 1
 fi
 xcount=$(find "$xtensa" -name '*.args' | wc -l)
-if [[ $xcount -ne 17 ]]; then
-    echo "xtensa path ran $xcount commands, want 17" >&2
+if [[ $xcount -ne 9 ]]; then
+    echo "xtensa path ran $xcount commands, want 9" >&2
     exit 1
 fi
 i=0
-while [[ $i -lt 12 ]]; do
+while [[ $i -lt 6 ]]; do
     args=$(args_of "$xtensa/$i.args")
     caller=$(flags_of "$xtensa/$i.env")
     added=$(script_flags "$xtensa/$i.env")
@@ -350,7 +350,7 @@ while [[ $i -lt 12 ]]; do
     assert_has "$(cat "$xtensa/$i.env")" "bare-metal-rustc"
     i=$((i + 1))
 done
-while [[ $i -lt 17 ]]; do
+while [[ $i -lt 9 ]]; do
     args=$(args_of "$xtensa/$i.args")
     caller=$(flags_of "$xtensa/$i.env")
     added=$(script_flags "$xtensa/$i.env")
@@ -359,17 +359,17 @@ while [[ $i -lt 17 ]]; do
     assert_lacks "$added" "getrandom_backend"
     i=$((i + 1))
 done
-if [[ $(target_dir_of "$xtensa/0.env") == "$(target_dir_of "$xtensa/12.env")" ]]; then
+if [[ $(target_dir_of "$xtensa/0.env") == "$(target_dir_of "$xtensa/6.env")" ]]; then
     echo "xtensa flag sets shared a target dir" >&2
     exit 1
 fi
 assert_has "$(args_of "$xtensa/0.args")" "-Zbuild-std=core,alloc"
 assert_has "$(args_of "$xtensa/0.args")" "xtensa-esp32-none-elf"
-assert_has "$(args_of "$xtensa/4.args")" "xtensa-esp32s2-none-elf"
-assert_has "$(args_of "$xtensa/12.args")" "-Zbuild-std=std,panic_abort"
-assert_has "$(args_of "$xtensa/12.args")" "xtensa-esp32s3-espidf"
-assert_has "$(args_of "$xtensa/12.args")" "check"
-bench=$(args_of "$xtensa/16.args")
+assert_has "$(args_of "$xtensa/2.args")" "xtensa-esp32s2-none-elf"
+assert_has "$(args_of "$xtensa/6.args")" "-Zbuild-std=std,panic_abort"
+assert_has "$(args_of "$xtensa/6.args")" "xtensa-esp32s3-espidf"
+assert_has "$(args_of "$xtensa/6.args")" "check"
+bench=$(args_of "$xtensa/8.args")
 assert_has "$bench" "--benches"
 assert_lacks "$bench" "--no-default-features"
 assert_has "$bench" "rind-bench"

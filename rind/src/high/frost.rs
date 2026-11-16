@@ -970,7 +970,7 @@ fn deal_with<G: Group>(
 }
 
 /// A participant's share of a group's signing key, with its identifier and
-/// the group's public key, wiped on drop under the `wipe` feature.
+/// the group's public key, wiped on drop.
 pub struct SigningShare {
     suite: ZeroableRef<Suite>,
     identifier: Identifier,
@@ -1065,7 +1065,7 @@ impl fmt::Debug for SigningShare {
     }
 }
 
-/// An encoded signing share, wiped on drop under the `wipe` feature.
+/// An encoded signing share, wiped on drop.
 pub struct Scalar([u8; SCALAR_LEN]);
 
 impl AsRef<[u8]> for Scalar {
@@ -1086,8 +1086,7 @@ impl fmt::Debug for Scalar {
     }
 }
 
-/// A participant's nonces for one signature, wiped on drop under the `wipe`
-/// feature.
+/// A participant's nonces for one signature, wiped on drop.
 ///
 /// [`Self::sign`] consumes them, and they cannot be copied or encoded, so a
 /// pair of nonces signs at most once.
