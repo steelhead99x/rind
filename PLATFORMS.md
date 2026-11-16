@@ -135,7 +135,9 @@ qemu. iOS devices' code is only built.
   `Dit::hold` does nothing on these targets: there is no thread-local count, and these backends set
   no CPU state there.
   The ESP32's Xtensa targets are tier 3, on Espressif's toolchain, so they
-  are not part of that Nix lint. `just xtensa` and `.github/workflows/xtensa.yml`
+  are not part of that Nix lint. They use Espressif's 1.98.1.0, the release of
+  the dev shell's rustc, since 1.97's Clippy does not know every lint rind
+  names. `just xtensa` and `.github/workflows/xtensa.yml`
   clippy `xtensa-esp32-none-elf`, `xtensa-esp32s2-none-elf` (no compare-and-swap),
   and `xtensa-esp32s3-none-elf` the same four ways, check the ESP-IDF library
   (`xtensa-esp32s3-espidf`, which has std and getrandom's own backend) the

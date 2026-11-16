@@ -37,7 +37,8 @@ jobs:
         run: sh/bare-metal-test.sh
 
       - uses: ./.github/actions/just
-      # The release of the dev shell's pinned rustc, 1.98.1.
+      # The release of the dev shell's pinned rustc, 1.98.1. 1.97's Clippy
+      # rejects `clippy::chunks_exact_to_as_chunks` as an unknown lint.
       - uses: esp-rs/xtensa-toolchain@ec6d36527049a7f4fb2cb0c1a644668c1bb8a2a4 # v1.7.0
         with:
           version: 1.98.1.0
