@@ -638,21 +638,33 @@ mod hkdf {
             };
             let info: Vec<&[u8]> = info.iter().map(Vec::as_slice).collect();
 
-            let mut ours_out = vec![0u8; len];
-            let prk = hkdf::Salt::new(ours, &salt).extract(&ikm).unwrap();
-            let result = prk.expand(&info, len).and_then(|okm| okm.fill(&mut ours_out));
-
-            let prk = theirs::Salt::new(their_alg, &salt).extract(&ikm);
-            match prk.expand(&info, Len(len)) {
-                Ok(okm) => {
-                    result.unwrap();
-                    let mut theirs_out = vec![0u8; len];
-                    okm.fill(&mut theirs_out).unwrap();
-                    prop_assert_eq!(ours_out, theirs_out);
-                }
-                Err(_) => {
-                    prop_assert_eq!(result, Err(Error::WrongLength));
-                    prop_assert!(ours_out.iter().all(|b| *b == 0));
+            // An extracted PRK, then the salt taken as a PRK as it is, up to
+            // the 64 bytes aws-lc-rs's `new_less_safe` holds before it panics.
+            let prk = &salt[..salt.len().min(64)];
+            let pairs = [
+                (
+                    hkdf::Salt::new(ours, &salt).extract(&ikm).unwrap(),
+                    theirs::Salt::new(their_alg, &salt).extract(&ikm),
+                ),
+                (
+                    hkdf::Prk::new(ours, prk),
+                    theirs::Prk::new_less_safe(their_alg, prk),
+                ),
+            ];
+            for (ours, theirs) in pairs {
+                let mut ours_out = vec![0u8; len];
+                let result = ours.fill(&info, &mut ours_out);
+                match theirs.expand(&info, Len(len)) {
+                    Ok(okm) => {
+                        result.unwrap();
+                        let mut theirs_out = vec![0u8; len];
+                        okm.fill(&mut theirs_out).unwrap();
+                        prop_assert_eq!(ours_out, theirs_out);
+                    }
+                    Err(_) => {
+                        prop_assert_eq!(result, Err(Error::WrongLength));
+                        prop_assert!(ours_out.iter().all(|b| *b == 0));
+                    }
                 }
             }
         }
@@ -716,7 +728,7 @@ mod hkdf {
             let ours = hkdf::Prk::from(ours.expand(&info, ours_prk_alg).unwrap());
             let theirs = theirs::Prk::from(theirs.expand(&info, theirs_prk_alg).unwrap());
             let mut ours_out = [0u8; 100];
-            ours.expand(&info, ours_out.len()).unwrap().fill(&mut ours_out).unwrap();
+            ours.fill(&info, &mut ours_out).unwrap();
             let mut theirs_out = [0u8; 100];
             theirs.expand(&info, Len(theirs_out.len())).unwrap().fill(&mut theirs_out).unwrap();
             prop_assert_eq!(ours_out, theirs_out);
@@ -3538,5 +3550,223 @@ mod oprf {
         ) {
             matches_voprf!(p521_voprf::NistP521, &P521_SHA512, seed, info, inputs);
         }
+    }
+}
+
+/// FROST against the Zcash Foundation's `frost-*` crates, as aws-lc-rs has
+/// no FROST.
+mod frost {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use rand_core_voprf::OsRng;
+    use rind::frost::*;
+
+    /// Every suite's identifiers and scalars are 32 bytes.
+    const SCALAR_LEN: usize = 32;
+
+    macro_rules! differential {
+        ($frost:ident, $suite:expr) => {
+            use $frost::keys::{
+                IdentifierList, KeyPackage, PublicKeyPackage, SecretShare,
+                SigningShare as FrostShare, VerifiableSecretSharingCommitment,
+                generate_with_dealer,
+            };
+            use $frost::round1::{NonceCommitment, SigningCommitments};
+            use $frost::{Identifier as FrostId, SigningPackage as FrostPackage, round1, round2};
+
+            const SUITE: &Suite = $suite;
+
+            fn commitments_of(c: &SigningCommitments, id: &FrostId) -> Commitments {
+                let bytes = [
+                    id.serialize(),
+                    c.hiding().serialize().unwrap(),
+                    c.binding().serialize().unwrap(),
+                ]
+                .concat();
+                Commitments::new(SUITE, &bytes).unwrap()
+            }
+
+            fn frost_commitments(c: &Commitments) -> (FrostId, SigningCommitments) {
+                let len = (c.as_ref().len() - SCALAR_LEN) / 2;
+                let (id, rest) = c.as_ref().split_at(SCALAR_LEN);
+                (
+                    FrostId::deserialize(id).unwrap(),
+                    SigningCommitments::new(
+                        NonceCommitment::deserialize(&rest[..len]).unwrap(),
+                        NonceCommitment::deserialize(&rest[len..]).unwrap(),
+                    ),
+                )
+            }
+
+            /// The reference's dealer, and signers split between rind and
+            /// the reference: each side's coordinator reaches the same
+            /// signature, and each verifies it.
+            #[test]
+            fn reference_dealer_mixed_signers() {
+                for message in [&b""[..], b"message", &[0xa5; 1000]] {
+                    let (secret_shares, pubkeys) =
+                        generate_with_dealer(5, 3, IdentifierList::Default, &mut OsRng).unwrap();
+                    let vss = secret_shares
+                        .values()
+                        .next()
+                        .unwrap()
+                        .commitment()
+                        .serialize_whole()
+                        .unwrap();
+                    let commitment = VssCommitment::new(SUITE, &vss).unwrap();
+                    assert_eq!(
+                        commitment.public_key().as_ref(),
+                        pubkeys.verifying_key().serialize().unwrap()
+                    );
+
+                    // Participants 1 and 4 run rind; 3 runs the reference.
+                    let mut ours = BTreeMap::new();
+                    for n in [1u16, 4] {
+                        let id = FrostId::try_from(n).unwrap();
+                        let share = &secret_shares[&id];
+                        let identifier = Identifier::new(SUITE, &id.serialize()).unwrap();
+                        let share = rind::frost::SigningShare::from_scalar(
+                            &identifier,
+                            &share.signing_share().serialize(),
+                            &commitment,
+                        )
+                        .unwrap();
+                        ours.insert(id, share);
+                    }
+                    let theirs_id = FrostId::try_from(3u16).unwrap();
+                    let theirs = KeyPackage::try_from(secret_shares[&theirs_id].clone()).unwrap();
+
+                    let mut our_nonces = BTreeMap::new();
+                    let mut commitments = Vec::new();
+                    for (id, share) in &ours {
+                        let (n, c) = SigningNonces::commit(share).unwrap();
+                        our_nonces.insert(*id, n);
+                        commitments.push(c);
+                    }
+                    let (their_nonces, their_commitments) =
+                        round1::commit(theirs.signing_share(), &mut OsRng);
+                    commitments.push(commitments_of(&their_commitments, &theirs_id));
+
+                    let package =
+                        SigningPackage::new(commitment.public_key(), &commitments, message)
+                            .unwrap();
+                    let frost_package = FrostPackage::new(
+                        commitments.iter().map(frost_commitments).collect(),
+                        message,
+                    );
+
+                    let mut shares = Vec::new();
+                    let mut frost_shares = BTreeMap::new();
+                    for (id, n) in our_nonces {
+                        let share = n.sign(&ours[&id], &package).unwrap();
+                        frost_shares.insert(
+                            id,
+                            round2::SignatureShare::deserialize(&share.as_ref()[SCALAR_LEN..])
+                                .unwrap(),
+                        );
+                        shares.push(share);
+                    }
+                    let their_share = round2::sign(&frost_package, &their_nonces, &theirs).unwrap();
+                    let bytes = [theirs_id.serialize(), their_share.serialize()].concat();
+                    shares.push(SignatureShare::new(SUITE, &bytes).unwrap());
+                    frost_shares.insert(theirs_id, their_share);
+
+                    for share in &shares {
+                        package.verify_share(share, &commitment).unwrap();
+                    }
+                    let signature = package.aggregate(&shares).unwrap();
+                    let frost_signature =
+                        $frost::aggregate(&frost_package, &frost_shares, &pubkeys).unwrap();
+                    assert_eq!(signature.as_ref(), frost_signature.serialize().unwrap());
+                    commitment
+                        .public_key()
+                        .verify(message, signature.as_ref())
+                        .unwrap();
+                    pubkeys
+                        .verifying_key()
+                        .verify(message, &frost_signature)
+                        .unwrap();
+                }
+            }
+
+            /// rind's dealer, whose shares and commitment the reference
+            /// loads and signs with, and whose signature rind verifies.
+            #[test]
+            fn rind_dealer_reference_signers() {
+                let (shares, commitment) = deal(SUITE, 3, 4).unwrap();
+                let frost_commitment =
+                    VerifiableSecretSharingCommitment::deserialize_whole(commitment.as_ref())
+                        .unwrap();
+                let ids: BTreeSet<FrostId> = shares
+                    .iter()
+                    .map(|s| FrostId::deserialize(s.identifier().as_ref()).unwrap())
+                    .collect();
+                let pubkeys = PublicKeyPackage::from_commitment(&ids, &frost_commitment).unwrap();
+                assert_eq!(
+                    pubkeys.verifying_key().serialize().unwrap(),
+                    commitment.public_key().as_ref()
+                );
+
+                let key_packages: BTreeMap<FrostId, KeyPackage> = shares[1..]
+                    .iter()
+                    .map(|s| {
+                        let id = FrostId::deserialize(s.identifier().as_ref()).unwrap();
+                        let share = FrostShare::deserialize(s.to_scalar().as_ref()).unwrap();
+                        let secret = SecretShare::new(id, share, frost_commitment.clone());
+                        (id, KeyPackage::try_from(secret).unwrap())
+                    })
+                    .collect();
+                let mut nonces = BTreeMap::new();
+                let mut frost_commitments = BTreeMap::new();
+                for (id, key_package) in &key_packages {
+                    let (n, c) = round1::commit(key_package.signing_share(), &mut OsRng);
+                    nonces.insert(*id, n);
+                    frost_commitments.insert(*id, c);
+                }
+                let frost_package = FrostPackage::new(frost_commitments.clone(), b"message");
+                let commitments: Vec<_> = frost_commitments
+                    .iter()
+                    .map(|(id, c)| commitments_of(c, id))
+                    .collect();
+                let package =
+                    SigningPackage::new(commitment.public_key(), &commitments, b"message").unwrap();
+                let signature_shares: Vec<_> = key_packages
+                    .iter()
+                    .map(|(id, key_package)| {
+                        let share = round2::sign(&frost_package, &nonces[id], key_package).unwrap();
+                        let bytes = [id.serialize(), share.serialize()].concat();
+                        SignatureShare::new(SUITE, &bytes).unwrap()
+                    })
+                    .collect();
+                for share in &signature_shares {
+                    package.verify_share(share, &commitment).unwrap();
+                }
+                let signature = package.aggregate(&signature_shares).unwrap();
+                commitment
+                    .public_key()
+                    .verify(b"message", signature.as_ref())
+                    .unwrap();
+                let frost_signature = $frost::Signature::deserialize(signature.as_ref()).unwrap();
+                pubkeys
+                    .verifying_key()
+                    .verify(b"message", &frost_signature)
+                    .unwrap();
+            }
+        };
+    }
+
+    mod ed25519 {
+        use super::*;
+        differential!(frost_ed25519, &ED25519_SHA512);
+    }
+
+    mod ristretto255 {
+        use super::*;
+        differential!(frost_ristretto255, &RISTRETTO255_SHA512);
+    }
+
+    mod p256 {
+        use super::*;
+        differential!(frost_p256, &P256_SHA256);
     }
 }
