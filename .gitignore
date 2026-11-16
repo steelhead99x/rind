@@ -24,7 +24,7 @@ proofs/Rind/Aarch64/ChaCha20.lean
 proofs/Rind/Aarch64/Blockwise.lean
 proofs/Rind/Aarch64/Sha.lean
 proofs/Rind/Aarch64/Hmac.lean
-proofs/Rind/Aarch64/SignatureDispatch.lean
+proofs/Rind/Aarch64/SignatureBuffer.lean
 proofs/Rind/Aarch64/Ed25519.lean
 proofs/Rind/Aarch64/HmacDispatch.lean
 proofs/Rind/Aarch64/HkdfExpand.lean

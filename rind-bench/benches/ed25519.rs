@@ -47,7 +47,7 @@ fn keygen(c: &mut Criterion) {
 
     group.bench_function("rind", |b| {
         b.iter(|| {
-            let our_private_key = rind::signature::Ed25519KeyPair::generate().unwrap();
+            let our_private_key = rind::ed25519::KeyPair::generate().unwrap();
             black_box(our_private_key.to_pkcs8());
         })
     });
@@ -75,7 +75,7 @@ fn keygen(c: &mut Criterion) {
         let seed = [7u8; 32];
         assert_eq!(
             SigningKey::from_seed(&seed).verifying_key().as_bytes()[..],
-            *rind::signature::Ed25519KeyPair::from_seed(&seed)
+            *rind::ed25519::KeyPair::from_seed(&seed)
                 .unwrap()
                 .public_key()
                 .as_ref()
@@ -139,8 +139,7 @@ fn verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        use rind::signature::{PublicKey, verify};
-        let public_key = PublicKey::new(&verify::ED25519, public_key).unwrap();
+        let public_key = rind::ed25519::PublicKey::new(public_key).unwrap();
 
         b.iter(|| {
             public_key.verify(message, signature).unwrap();
@@ -227,7 +226,7 @@ fn sign(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
-        let signing_key = rind::signature::Ed25519KeyPair::generate().unwrap();
+        let signing_key = rind::ed25519::KeyPair::generate().unwrap();
 
         b.iter(|| {
             black_box(signing_key.sign(message));
@@ -244,15 +243,15 @@ fn sign(c: &mut Criterion) {
     });
 
     group.bench_function("verified-garbage", |b| {
-        use rind::signature::{PublicKey, verify};
+        use rind::ed25519::{KeyPair, PublicKey};
         let mut seed = [0u8; 32];
         getrandom::fill(&mut seed).unwrap();
         let signing_key = verified_garbage::ed25519::SigningKey::from_seed(&seed);
         // Ed25519 is deterministic, so both sign alike and rind verifies it.
-        let rind_key = rind::signature::Ed25519KeyPair::from_seed(&seed).unwrap();
+        let rind_key = KeyPair::from_seed(&seed).unwrap();
         let signature = signing_key.sign(message);
         assert_eq!(signature[..], *rind_key.sign(message).as_ref());
-        PublicKey::new(&verify::ED25519, signing_key.verifying_key().as_bytes())
+        PublicKey::new(signing_key.verifying_key().as_bytes())
             .unwrap()
             .verify(message, &signature)
             .unwrap();

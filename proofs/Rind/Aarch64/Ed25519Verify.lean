@@ -75,7 +75,7 @@ theorem high_verify_spec (h : Runs) (hd : RunsDouble) (hs : RunsSha512) (vk : hi
     (hA : edOnCurve A) (hp : pairNat vk.point.val = edModEncodePair A) (sig msg : Slice U8)
     (hm : msg.length + 64 < 2 ^ 64) :
     high.ed25519.Ed25519VerifyingKey.verify vk sig msg ⦃ r =>
-      r = if ed25519Verifies A vk.bytes.val msg.val sig.val then
+      r = if ed25519Verifies A (mid.ed25519.VerifyingKey.bytes vk).val msg.val sig.val then
         (.Ok () : core.result.Result Unit error.Error) else .Err .BadSignature ⦄ := by
   unfold high.ed25519.Ed25519VerifyingKey.verify
   step
@@ -89,7 +89,7 @@ theorem high_verify_spec (h : Runs) (hd : RunsDouble) (hs : RunsSha512) (vk : hi
     rw [hr, ha]
   · simp only [hl, ↓reduceIte] at hr
     obtain ⟨e, rfl⟩ := hr
-    have hn : ¬ ed25519Verifies A vk.bytes.val msg.val sig.val := fun ⟨h64, _⟩ => hl h64
+    have hn : ¬ ed25519Verifies A (mid.ed25519.VerifyingKey.bytes vk).val msg.val sig.val := fun ⟨h64, _⟩ => hl h64
     simp [core.result.Result.map_err, core.result.Result.Insts.CoreOpsTry.branch,
       high.ed25519.Ed25519VerifyingKey.verify.closure.Insts.CoreOpsFunctionFnOnceTupleTryFromSliceErrorError.call_once,
       core.result.Result.Insts.CoreOpsTry_traitFromResidualResult.from_residual, hn]
@@ -98,22 +98,20 @@ open Classical in
 /-- Verification with a key pair's public key: RFC 8032's verification with
 its seed's public key, whose point is the base point times its secret scalar,
 for a scalar whose multiple is a point of the group. -/
-theorem ed25519_key_pair_verify (h : Runs) (hd : RunsDouble) (hs : RunsSha512) (kp : high.signature.Ed25519KeyPair)
+theorem ed25519_key_pair_verify (h : Runs) (hd : RunsDouble) (hs : RunsSha512) (kp : high.signature.ed25519.KeyPair)
     (seed : List U8) (hkp : KeyPairOf kp seed) (hA : edOnCurve (edPow edB (ed25519Scalar seed)))
     (msg sig : Slice U8) (hm : msg.length + 64 < 2 ^ 64) :
     (do
-      let pk ← high.signature.Ed25519KeyPair.impl.public_key kp
-      high.signature.PublicKey.verify pk msg sig) ⦃ r =>
+      let pk ← high.signature.ed25519.KeyPair.public_key kp
+      high.signature.ed25519.PublicKey.verify pk msg sig) ⦃ r =>
       r = if ed25519Verifies (edPow edB (ed25519Scalar seed)) (ed25519PublicKey seed) msg.val sig.val then
         (.Ok () : core.result.Result Unit error.Error) else .Err .BadSignature ⦄ := by
-  unfold high.signature.Ed25519KeyPair.impl.public_key high.signature.PublicKey.verify
-    high.signature.Buffer.Insts.CoreConvertFromArrayU8N.from
-  obtain ⟨⟨-, -, -, hkb, hkpt⟩, -⟩ := hkp
-  step with high_public_key_spec h kp.key as ⟨vk, hvk⟩
-  step*
-  have hb : vk.bytes.val = ed25519PublicKey seed := by rw [hvk]; exact hkb
+  unfold high.signature.ed25519.KeyPair.public_key high.signature.ed25519.PublicKey.verify
+  obtain ⟨⟨-, -, -, hkb, hkpt⟩, hpub⟩ := hkp
+  simp only [bind_ok]
+  have hb : (mid.ed25519.VerifyingKey.bytes kp.«public»).val = ed25519PublicKey seed := by rw [hpub]; exact hkb
   rw [← hb]
-  exact high_verify_spec h hd hs vk _ hA (by rw [hvk]; exact hkpt) sig msg hm
+  exact high_verify_spec h hd hs kp.«public» _ hA (by rw [hpub]; exact hkpt) sig msg hm
 
 open Classical in
 /-- An Ed25519 public key parsed from its encoding: refused unless it is 32
@@ -122,31 +120,27 @@ refused unless it encodes a point of the group, and otherwise its
 verification is RFC 8032's with that point, for messages under 2⁶⁴ - 64
 bytes. -/
 theorem ed25519_public_key_new (h : Runs) (hd : RunsDouble) (hs : RunsSha512) (key : Slice U8) :
-    high.signature.PublicKey.new high.signature.verify.ED25519 key ⦃ r =>
+    high.signature.ed25519.PublicKey.new key ⦃ r =>
       if key.length ≠ 32 then r = .Err (.KeyRejected .WrongLength)
       else if leNat key.val % 2 ^ 255 ∈ edSmallOrderY then r = .Err (.KeyRejected .SmallOrder)
       else if edValidEncode (leNat key.val) then
         ∃ pk, r = .Ok pk ∧ ∀ msg sig : Slice U8, msg.length + 64 < 2 ^ 64 →
-          high.signature.PublicKey.verify pk msg sig ⦃ v =>
+          high.signature.ed25519.PublicKey.verify pk msg sig ⦃ v =>
             v = if ed25519Verifies (edDecode (leNat key.val)) key.val msg.val sig.val then
               (.Ok () : core.result.Result Unit error.Error) else .Err .BadSignature ⦄
       else r = .Err (.KeyRejected .NotOnCurve) ⦄ := by
-  unfold high.signature.PublicKey.new high.signature.verify.ED25519 high.signature.parse_ed25519
-  simp only
+  unfold high.signature.ed25519.PublicKey.new
   step with high_from_bytes_spec h hs key as ⟨r, hr⟩
   split_ifs at hr ⊢ with hl hso hv
-  · subst hr; simp
-  · subst hr; simp
+  · subst hr; simp [core.result.Result.map]
+  · subst hr; simp [core.result.Result.map]
   · obtain ⟨vk, rfl, hvb, hvp⟩ := hr
-    simp only
-    have hl' : key.length = 32 := by simpa using hl
-    step with copy_from_ok 2592#usize key (by simp [hl']) as ⟨b, enc, hb⟩
-    subst hb
-    simp only [WP.spec_ok]
+    simp only [core.result.Result.map, P.Insts.CoreOpsFunctionFnOnceTupleEd25519VerifyingKeyPublicKey.call_once,
+      high.signature.ed25519.PublicKey.constructor, bind_ok, WP.spec_ok]
     refine ⟨_, rfl, fun msg sig hm => ?_⟩
-    simp only [high.signature.PublicKey.verify]
+    simp only [high.signature.ed25519.PublicKey.verify]
     have := high_verify_spec h hd hs vk _ (edDecode_spec _ hv).1 hvp sig msg hm
     rwa [hvb] at this
-  · subst hr; simp
+  · subst hr; simp [core.result.Result.map]
 
 end rind.aarch64

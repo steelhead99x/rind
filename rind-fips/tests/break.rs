@@ -119,28 +119,28 @@ fn trigger_ml_kem_generate() {
 
 #[test]
 fn trigger_ecdsa_generate() {
-    use rind_fips::signature::{EcdsaKeyPair, sign};
-    EcdsaKeyPair::generate(&sign::ECDSA_P256_SHA256_ASN1).unwrap();
+    use rind_fips::ecdsa::{KeyPair, sign};
+    KeyPair::generate(&sign::P256_SHA256_ASN1).unwrap();
     eprintln!("trigger done");
 }
 
 #[test]
 fn trigger_ed25519_generate() {
-    rind_fips::signature::Ed25519KeyPair::generate().unwrap();
+    rind_fips::ed25519::KeyPair::generate().unwrap();
     eprintln!("trigger done");
 }
 
 #[test]
 fn trigger_rsa_generate() {
-    use rind_fips::{rsa::KeySize, signature::RsaKeyPair};
-    RsaKeyPair::generate(KeySize::Rsa2048).unwrap();
+    use rind_fips::rsa::{KeyPair, KeySize};
+    KeyPair::generate(KeySize::Rsa2048).unwrap();
     eprintln!("trigger done");
 }
 
 #[test]
 fn trigger_ml_dsa_generate() {
-    use rind_fips::signature::sign::{MlDsa44, MlDsaKeyPair};
-    MlDsaKeyPair::<MlDsa44>::generate().unwrap();
+    use rind_fips::ml_dsa::{KeyPair, MlDsa44};
+    KeyPair::<MlDsa44>::generate().unwrap();
     eprintln!("trigger done");
 }
 

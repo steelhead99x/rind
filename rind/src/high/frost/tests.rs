@@ -216,14 +216,14 @@ fn any_threshold_signs() {
 }
 
 /// A FROST(Ed25519, SHA-512) signature verifies as an Ed25519 signature,
-/// through `rind::signature`.
+/// through `rind::ed25519`.
 #[test]
 fn ed25519_signatures_are_ed25519() {
-    use crate::high::signature::{PublicKey as SignaturePublicKey, verify};
+    use crate::high::signature::ed25519::PublicKey as Ed25519PublicKey;
     let (shares, commitment) = deal(&ED25519_SHA512, 2, 3).unwrap();
     let (package, signature_shares) = sign(&shares, &[0, 2], b"hello");
     let signature = package.aggregate(&signature_shares).unwrap();
-    let key = SignaturePublicKey::new(&verify::ED25519, commitment.public_key().as_ref()).unwrap();
+    let key = Ed25519PublicKey::new(commitment.public_key().as_ref()).unwrap();
     key.verify(b"hello", signature.as_ref()).unwrap();
     assert!(key.verify(b"hellp", signature.as_ref()).is_err());
 }

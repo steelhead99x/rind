@@ -1,6 +1,6 @@
 use std::hint::black_box;
 
-use rind::signature::{EcdsaKeyPair, PublicKey, sign, verify};
+use rind::ecdsa::{KeyPair, PublicKey, sign, verify};
 use rind::{aead, agreement, digest};
 
 fn main() {
@@ -15,15 +15,12 @@ fn main() {
         .unwrap();
     key.open_in_place(nonce(), b"", &mut in_out).unwrap();
 
-    let key_pair = EcdsaKeyPair::generate(&sign::ECDSA_P256_SHA256_ASN1).unwrap();
+    let key_pair = KeyPair::generate(&sign::P256_SHA256_ASN1).unwrap();
     let signature = key_pair.sign(message).unwrap();
-    PublicKey::new(
-        &verify::ECDSA_P256_SHA256_ASN1,
-        key_pair.public_key().as_ref(),
-    )
-    .unwrap()
-    .verify(message, signature.as_ref())
-    .unwrap();
+    PublicKey::new(&verify::P256_SHA256_ASN1, key_pair.public_key().as_ref())
+        .unwrap()
+        .verify(message, signature.as_ref())
+        .unwrap();
 
     let alice = agreement::PrivateKey::generate(&agreement::X25519).unwrap();
     let bob = agreement::PrivateKey::generate(&agreement::X25519).unwrap();

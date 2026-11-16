@@ -190,7 +190,7 @@ fn rfc9497_oprf_vectors() {
             .unwrap();
             assert_eq!(server.suite(), suite_ref);
             assert_eq!(
-                ct::into_public(server.to_bytes().0.clone()).as_ref(),
+                ct::into_public(server.to_scalar().0.clone()).as_ref(),
                 str_field(suite, "skSm")
             );
             for v in suite["vectors"].as_array().unwrap() {
@@ -222,9 +222,9 @@ fn round_trips() {
         &P521_SHA512,
     ] {
         let server = ServerKey::generate(suite).unwrap();
-        let encoded = server.to_bytes();
-        assert_eq!(format!("{encoded:?}"), "ServerKeyBytes(..)");
-        let loaded = ServerKey::from_bytes(suite, encoded.as_ref()).unwrap();
+        let encoded = server.to_scalar();
+        assert_eq!(format!("{encoded:?}"), "Scalar(..)");
+        let loaded = ServerKey::from_scalar(suite, encoded.as_ref()).unwrap();
         for input in [&b""[..], b"input", &[0x5a; MAX_INPUT]] {
             let (blind, blinded) = Blind::new(suite, input).unwrap();
             assert_eq!(blind.suite(), suite);
@@ -298,11 +298,11 @@ fn refuses_bad_keys() {
         let zero = vec![0; order.len()];
         for bad in [&order[..], &zero, &order[1..], &[&order[..], &[0]].concat()] {
             assert!(matches!(
-                ServerKey::from_bytes(suite, bad).unwrap_err(),
+                ServerKey::from_scalar(suite, bad).unwrap_err(),
                 Error::KeyRejected(_)
             ));
             assert!(matches!(
-                voprf::ServerKey::from_bytes(suite, bad).unwrap_err(),
+                voprf::ServerKey::from_scalar(suite, bad).unwrap_err(),
                 Error::KeyRejected(_)
             ));
         }
@@ -312,7 +312,7 @@ fn refuses_bad_keys() {
             SuiteId::Ristretto255Sha512 => largest[0] -= 1,
             _ => *largest.last_mut().unwrap() -= 1,
         }
-        ServerKey::from_bytes(suite, &largest).unwrap();
+        ServerKey::from_scalar(suite, &largest).unwrap();
     }
 }
 

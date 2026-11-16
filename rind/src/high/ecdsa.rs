@@ -37,6 +37,19 @@ impl Default for EncodedPoint {
     }
 }
 
+impl EncodedPoint {
+    /// Copies an encoded point, refused if it is longer than any curve's.
+    pub(crate) fn copy_from(encoded: &[u8]) -> Result<Self, Error> {
+        let mut point = Self::default();
+        let Some(span) = point.bytes.get_mut(..encoded.len()) else {
+            return Err(KeyFormatError::WrongLength.into());
+        };
+        span.copy_from_slice(encoded);
+        point.len = encoded.len();
+        Ok(point)
+    }
+}
+
 impl AsRef<[u8]> for EncodedPoint {
     fn as_ref(&self) -> &[u8] {
         &self.bytes[..self.len]
@@ -159,27 +172,6 @@ impl<C: Curve> SigningKey<C> {
                 .len();
             point
         })
-    }
-
-    /// Encode this private key's corresponding public key in SubjectPublicKeyInfo DER format.
-    ///
-    /// The encoding is written to the start of `output`, and the used span is
-    /// returned.  [`Error::WrongLength`] is returned if `output` is not sufficient
-    /// to contain the full encoding.
-    pub(crate) fn to_spki_der<'a>(&self, output: &'a mut [u8]) -> Result<&'a [u8], Error> {
-        let point = self.public_key_uncompressed();
-        let spki = asn1::pkix::SubjectPublicKeyInfo {
-            algorithm: asn1::pkix::AlgorithmIdentifier {
-                algorithm: asn1::oid::id_ecPublicKey.clone(),
-                parameters: Some(asn1::Any::ObjectId(C::oid())),
-            },
-            subjectPublicKey: asn1::BitString::new(point.as_ref()),
-        };
-
-        let len = spki
-            .encode(&mut asn1::Encoder::new(output))
-            .map_err(|_| Error::WrongLength)?;
-        Ok(&output[..len])
     }
 
     /// ECDSA signing, returning a fixed-length signature.
@@ -850,7 +842,6 @@ mod tests {
             sk.sign_asn1::<hash::Sha256>(message, &mut [0u8; 8]),
             Err(Error::WrongLength)
         );
-        assert_eq!(sk.to_spki_der(&mut [0u8; 8]), Err(Error::WrongLength));
     }
 
     fn check_pairwise_sec1<C: Curve>(sec1_der: &[u8]) {
