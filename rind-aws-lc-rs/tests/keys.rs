@@ -291,18 +291,23 @@ proptest! {
     }
 
     #[test]
-    fn kem(_case in any::<u8>()) {
-        let ours_key = ours::kem::DecapsulationKey::generate(&ours::kem::ML_KEM_768).unwrap();
-        let theirs_key = theirs::kem::DecapsulationKey::generate(&theirs::kem::ML_KEM_768).unwrap();
+    fn kem(set in 0..3usize) {
+        let (ours_alg, theirs_alg) = [
+            (&ours::kem::ML_KEM_512, &theirs::kem::ML_KEM_512),
+            (&ours::kem::ML_KEM_768, &theirs::kem::ML_KEM_768),
+            (&ours::kem::ML_KEM_1024, &theirs::kem::ML_KEM_1024),
+        ][set];
+        let ours_key = ours::kem::DecapsulationKey::generate(ours_alg).unwrap();
+        let theirs_key = theirs::kem::DecapsulationKey::generate(theirs_alg).unwrap();
 
         let ours_public = ours_key.encapsulation_key().unwrap().key_bytes().unwrap();
-        let peer = theirs::kem::EncapsulationKey::new(&theirs::kem::ML_KEM_768, ours_public.as_ref()).unwrap();
+        let peer = theirs::kem::EncapsulationKey::new(theirs_alg, ours_public.as_ref()).unwrap();
         let (ciphertext, secret) = peer.encapsulate().unwrap();
         let ours_secret = ours_key.decapsulate(ours::kem::Ciphertext::from(ciphertext.as_ref())).unwrap();
         prop_assert_eq!(ours_secret.as_ref(), secret.as_ref());
 
         let theirs_public = theirs_key.encapsulation_key().unwrap().key_bytes().unwrap();
-        let peer = ours::kem::EncapsulationKey::new(&ours::kem::ML_KEM_768, theirs_public.as_ref()).unwrap();
+        let peer = ours::kem::EncapsulationKey::new(ours_alg, theirs_public.as_ref()).unwrap();
         let (ciphertext, secret) = peer.encapsulate().unwrap();
         let theirs_secret = theirs_key
             .decapsulate(theirs::kem::Ciphertext::from(ciphertext.as_ref()))
@@ -311,7 +316,7 @@ proptest! {
 
         use ours::kem::AlgorithmIdentifier as _;
         use theirs::kem::AlgorithmIdentifier as _;
-        prop_assert_eq!(ours::kem::ML_KEM_768.id().nid(), theirs::kem::ML_KEM_768.id().nid());
+        prop_assert_eq!(ours_alg.id().nid(), theirs_alg.id().nid());
     }
 }
 

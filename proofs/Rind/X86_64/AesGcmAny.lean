@@ -156,7 +156,7 @@ theorem initial_counter_spec (hLE : Quad32) (table : low.x86_64.ghash.GhashTable
     obtain ⟨y, hy, hyp⟩ := clmul_add_spec (polyLE hLE) (small_toPoly _) t ht iv.val 0
     simp only [low.x86_64.ghash.Ghash.new, low.x86_64.ghash.zero, core.core_arch.x86.sse2._mm_setzero_si128,
       bind_ok, low.x86_64.ghash.Ghash.add, addBytes_clmul ⟨table, 0⟩ t hg, hy]
-    apply WP.spec_bind (add_lengths_spec ⟨table, y⟩ t (polyLE hLE) (small_toPoly _) ht hg 0#usize iv.len
+    apply WP.spec_bind (add_lengths_spec ⟨table, y⟩ t (polyLE hLE) (small_toPoly _) ht (.inl hg) 0#usize iv.len
       (by rw [Slice.len_val]; exact hiv))
     rintro g' ⟨-, hg'⟩
     simp only [low.x86_64.ghash.Ghash.tag, byte_reverse_eq, core.core_arch.x86.sse2._mm_xor_si128, load_zero,

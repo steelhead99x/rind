@@ -17,6 +17,3 @@ From [the scope](/quest/m4/pq/README.md), 2026-11-06.
 
 - rustls/rustls: a release whose aws-lc-rs provider offers the group. Check that `SECP384R1MLKEM1024` appears in [`rustls::crypto::aws_lc_rs::kx_group`](https://docs.rs/rustls/latest/rustls/crypto/aws_lc_rs/kx_group/index.html), in the rustls version rind-rustls adapts.
 
-## Required
-
-- [ML-KEM-512 and ML-KEM-1024](/quest/m3/parity/ml-kem.md) - rind's ML-KEM-1024

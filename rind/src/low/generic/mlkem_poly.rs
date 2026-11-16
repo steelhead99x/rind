@@ -99,6 +99,17 @@ pub(crate) fn mlkem_mulcache_compute(x: &mut [i16; 128], a: &[i16; 256]) {
     }
 }
 
+/// Scalar product of 2-element polynomial vectors in the NTT domain, with
+/// the mulcache `bt` of `b`.
+pub(crate) fn mlkem_basemul_k2(
+    r: &mut [i16; 256],
+    a: &[i16; 512],
+    b: &[i16; 512],
+    bt: &[i16; 256],
+) {
+    basemul::<2>(r, a, b, bt);
+}
+
 /// Scalar product of 3-element polynomial vectors in the NTT domain, with
 /// the mulcache `bt` of `b`.
 pub(crate) fn mlkem_basemul_k3(
@@ -107,10 +118,27 @@ pub(crate) fn mlkem_basemul_k3(
     b: &[i16; 768],
     bt: &[i16; 384],
 ) {
+    basemul::<3>(r, a, b, bt);
+}
+
+/// Scalar product of 4-element polynomial vectors in the NTT domain, with
+/// the mulcache `bt` of `b`.
+pub(crate) fn mlkem_basemul_k4(
+    r: &mut [i16; 256],
+    a: &[i16; 1024],
+    b: &[i16; 1024],
+    bt: &[i16; 512],
+) {
+    basemul::<4>(r, a, b, bt);
+}
+
+/// Scalar product of `K`-element polynomial vectors: mlkem-native's
+/// `polyvec_basemul_acc_montgomery_cached`.
+fn basemul<const K: usize>(r: &mut [i16; 256], a: &[i16], b: &[i16], bt: &[i16]) {
     for i in 0..128 {
         let mut t0 = 0i32;
         let mut t1 = 0i32;
-        for k in 0..3 {
+        for k in 0..K {
             let (a0, a1) = (a[256 * k + 2 * i] as i32, a[256 * k + 2 * i + 1] as i32);
             let (b0, b1) = (b[256 * k + 2 * i] as i32, b[256 * k + 2 * i + 1] as i32);
             t0 = t0
