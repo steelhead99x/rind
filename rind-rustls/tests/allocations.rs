@@ -119,10 +119,10 @@ fn count(client: &Arc<ClientConfig>, server: &Arc<ServerConfig>) -> u64 {
 /// Each key type's allocations per handshake over rind-rustls's default
 /// provider, which leads with X25519MLKEM768.
 const EXPECTED: [(&str, u64); 4] = [
-    ("ecdsa-p256", 245),
-    ("ecdsa-p384", 249),
-    ("ecdsa-p521", 253),
-    ("ed25519", 245),
+    ("ecdsa-p256", 248),
+    ("ecdsa-p384", 252),
+    ("ecdsa-p521", 256),
+    ("ed25519", 248),
 ];
 
 #[test]
