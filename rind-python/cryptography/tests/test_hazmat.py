@@ -593,6 +593,28 @@ class Keys(unittest.TestCase):
             with self.assertRaises(ValueError):
                 rsa.RSAPublicNumbers(e, (1 << 2047) | 1).public_key()
 
+    def test_rsa_public_key_malformed_before_size(self):
+        """A malformed RSA public key is a ValueError, as on pyca, even when its modulus is a size rind lacks."""
+        with self.assertRaisesRegex(ValueError, "e must be odd"):
+            rsa.RSAPublicNumbers(4, (1 << 511) | 1).public_key()
+        with self.assertRaisesRegex(ValueError, "n must be odd"):
+            rsa.RSAPublicNumbers(3, 1 << 9000).public_key()
+        rsa_oid = _der.encode(_der.OID, bytes.fromhex("2a864886f70d010101"))
+
+        def spki(pkcs1, parameters=_der.encode(_der.NULL, b"")):
+            return _der.sequence(_der.sequence(rsa_oid, parameters), _der.encode(0x03, b"\x00" + pkcs1))
+
+        missing_e = _der.sequence(_der.encode_integer(5))
+        even_n = _der.sequence(_der.encode_integer(1 << 512), _der.encode_integer(65537))
+        odd_small = _der.sequence(_der.encode_integer((1 << 511) | 1), _der.encode_integer(65537))
+        for der in (spki(missing_e), missing_e, spki(even_n), even_n, spki(odd_small, _der.encode(0x02, b"\x00"))):
+            with self.subTest(der=der.hex()), self.assertRaises(ValueError):
+                serialization.load_der_public_key(der)
+        # A well-formed key of a size rind lacks stays unsupported.
+        for der in (spki(odd_small), odd_small):
+            with self.subTest(der=der.hex()), self.assertRaises(exceptions.UnsupportedAlgorithm):
+                serialization.load_der_public_key(der)
+
     def test_rsa_unsupported(self):
         key = rsa.generate_private_key(65537, 2048)
         sha256 = hashes.SHA256()

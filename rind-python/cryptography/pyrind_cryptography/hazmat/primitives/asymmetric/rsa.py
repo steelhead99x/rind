@@ -51,6 +51,37 @@ def _check_size(bits, low):
         raise unsupported(f"{bits}-bit RSA keys", _Reasons.UNSUPPORTED_PUBLIC_KEY_ALGORITHM)
 
 
+def _check_components(n, e):
+    """Refuses a malformed modulus and exponent with pyca's own messages, before any size check."""
+    if n < 3:
+        raise ValueError("n must be >= 3.")
+    if e < 3 or e >= n:
+        raise ValueError("e must be >= 3 and < n.")
+    if not e & 1:
+        raise ValueError("e must be odd.")
+    if not n & 1:
+        raise ValueError("n must be odd.")
+
+
+def _well_formed(ints):
+    """Whether `ints` are a PKCS#1 `RSAPublicKey`'s two INTEGERs, an odd modulus and an odd exponent below it."""
+    if len(ints) != 2:
+        return False
+    try:
+        _check_components(*ints)
+    except ValueError:
+        return False
+    return True
+
+
+def _spki_rsa_key(der):
+    """An RSA `SubjectPublicKeyInfo`'s PKCS#1 key, or ValueError when its algorithm carries parameters other than NULL."""
+    items = _der.elements(_der.one(der, _der.SEQUENCE))
+    if _der.algorithm(items[0][1])[1] is not None:
+        raise ValueError("RSA parameters must be NULL")
+    return _der.spki_key(der)
+
+
 def _check_private_size(pkcs1):
     """Refuses a PKCS#1 `RSAPrivateKey` whose modulus rind lacks; rind parses the rest."""
     try:
@@ -133,8 +164,7 @@ class RSAPublicNumbers:
 
     def public_key(self, backend=None):
         """Loads the key."""
-        if self._e < 3 or self._n < 3:
-            raise ValueError("Invalid RSA key")
+        _check_components(self._n, self._e)
         _check_size(self._n.bit_length(), 1024)
         with _keys.loading():
             return RSAPublicKey(_rsa.PublicKey.from_components(_unsigned(self._n), _unsigned(self._e)))
@@ -203,7 +233,7 @@ class RSAPublicKey(metaclass=abc.ABCMeta):
     @classmethod
     def _from_spki(cls, der):
         """Loads `SubjectPublicKeyInfo` DER, refusing a modulus under 1024 bits or over 8192 as unsupported."""
-        return cls._load(_rsa.PublicKey.from_spki, der, lambda: _der.spki_key(der))
+        return cls._load(_rsa.PublicKey.from_spki, der, lambda: _spki_rsa_key(der))
 
     @classmethod
     def _from_pkcs1(cls, der):
@@ -214,11 +244,11 @@ class RSAPublicKey(metaclass=abc.ABCMeta):
     def _load(cls, parse, der, pkcs1):
         """Loads `der` with `parse`, first refusing as unsupported a well-formed key whose `pkcs1` modulus rind lacks."""
         try:
-            n = _der.integers(pkcs1())[0]
+            ints = _der.integers(pkcs1())
         except (ValueError, IndexError):
-            pass
-        else:
-            _check_size(n.bit_length(), 1024)
+            ints = None
+        if ints is not None and _well_formed(ints):
+            _check_size(ints[0].bit_length(), 1024)
         with _keys.loading():
             return cls(parse(der))
 
