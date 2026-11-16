@@ -1118,7 +1118,7 @@ mod tests {
         (
             "aarch64/cpu.rs",
             "read_midr",
-            "returns Option, which the trampoline cannot return",
+            "one `mrs` into a register the compiler allocates, which no ABI governs",
         ),
         (
             "aarch64/aes_cbc.rs",
