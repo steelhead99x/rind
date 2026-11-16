@@ -13,7 +13,7 @@
 //! was accepted. Edwards25519 reduces a 64-byte hash and does not retry.
 //!
 //! An Edwards25519 seed must be dedicated. It is an RFC 8032 seed, and
-//! signing with it reuses this suite's nonce; see [`SecretKey`].
+//! signing with it reuses this suite's nonce; see [`KeyPair`].
 //!
 //! The SSWU and ELL2 suites are left out: no RFC 9381 consumer uses them, and
 //! Cardano's and Algorand's VRFs follow an incompatible pre-RFC draft.
@@ -55,25 +55,26 @@ impl fmt::Debug for Algorithm {
     }
 }
 
-/// ECVRF-EDWARDS25519-SHA512-TAI: a 32-byte secret key (an RFC 8032 seed),
+/// ECVRF-EDWARDS25519-SHA512-TAI: a 32-byte seed (RFC 8032's),
 /// 32-byte public keys, 80-byte proofs, and 64-byte outputs.
 pub static ECVRF_EDWARDS25519_SHA512_TAI: Algorithm = Algorithm {
     id: AlgorithmId::Edwards25519Sha512Tai,
 };
 
-/// ECVRF-P256-SHA256-TAI: a 32-byte big-endian secret scalar, 33-byte X9.62
+/// ECVRF-P256-SHA256-TAI: a 32-byte seed that is the big-endian scalar, 33-byte X9.62
 /// compressed public keys, 81-byte proofs, and 32-byte outputs.
 pub static ECVRF_P256_SHA256_TAI: Algorithm = Algorithm {
     id: AlgorithmId::P256Sha256Tai,
 };
 
-/// The secret key that proves outputs, wiped on drop under the `wipe` feature.
+/// A private key that proves outputs, and its public key, wiped on drop
+/// under the `wipe` feature.
 ///
 /// It keeps its public key, computed once when it is generated or loaded.
 ///
 /// An Edwards25519 seed is an RFC 8032 seed, the same 32 bytes
-/// [`Ed25519KeyPair::from_seed`](crate::signature::Ed25519KeyPair::from_seed)
-/// and [`Ed25519Seed`](crate::signature::Ed25519Seed) hold, and it has to be
+/// [`ed25519::KeyPair::from_seed`](crate::ed25519::KeyPair::from_seed)
+/// and [`ed25519::Seed`](crate::ed25519::Seed) hold, and it has to be
 /// this key's alone. This suite's nonce is Ed25519's,
 /// `SHA-512(prefix || h_string) mod L`: `prefix` is the upper half of
 /// `SHA-512(seed)`, and `h_string` is the try-and-increment point, which
@@ -82,9 +83,9 @@ pub static ECVRF_P256_SHA256_TAI: Algorithm = Algorithm {
 /// response `S` and the proof's response `s` then give the scalar,
 /// `x = (S - s) * inv(c_sig - c_vrf) mod L`, where `c_sig` and `c_vrf` are
 /// the two challenges. Generate the seed for this key, or load bytes that
-/// have never been an Ed25519 signing key. A P-256 key is a group scalar,
-/// not an Ed25519 seed, and this does not apply to it.
-pub struct SecretKey {
+/// have never been an Ed25519 signing key. A P-256 seed is the group scalar
+/// itself, not an Ed25519 seed, and this does not apply to it.
+pub struct KeyPair {
     secret: Secret,
     public: PublicKey,
 }
@@ -109,13 +110,13 @@ enum Secret {
 
 impl low::Zeroable for Secret {}
 
-impl low::Zeroable for SecretKey {}
+impl low::Zeroable for KeyPair {}
 
-impl SecretKey {
-    /// Generates a secret key for `algorithm` from the system random source.
+impl KeyPair {
+    /// Generates a key pair for `algorithm` from the system random source.
     ///
     /// The bytes belong to this key. Reusing an Edwards25519 seed as an
-    /// Ed25519 signing key reveals the scalar; see [`SecretKey`].
+    /// Ed25519 signing key reveals the scalar; see [`KeyPair`].
     pub fn generate(algorithm: &'static Algorithm) -> Result<Self, Error> {
         let _entry = Entry::new_secret();
         let mut bytes = [0u8; 32];
@@ -130,17 +131,16 @@ impl SecretKey {
         }
     }
 
-    /// Loads a secret key for `algorithm`: Edwards25519's 32-byte RFC 8032
-    /// seed, any value, or P-256's 32-byte big-endian scalar, refused unless
-    /// it is from 1 to n - 1.
+    /// Loads a key pair for `algorithm` from its seed: Edwards25519's 32-byte
+    /// RFC 8032 seed, any value, or P-256's 32-byte big-endian scalar,
+    /// refused unless it is from 1 to n - 1.
     ///
     /// The Edwards25519 seed must be dedicated, not an Ed25519 signing seed
-    /// such as [`Ed25519Seed`](crate::signature::Ed25519Seed). See
-    /// [`SecretKey`].
-    pub fn from_bytes(algorithm: &'static Algorithm, bytes: &[u8]) -> Result<Self, Error> {
+    /// such as [`ed25519::Seed`](crate::ed25519::Seed). See [`KeyPair`].
+    pub fn from_seed(algorithm: &'static Algorithm, seed: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_secret();
-        let bytes: &[u8; 32] = bytes.try_into().map_err(|_| KeyFormatError::WrongLength)?;
-        Self::load(algorithm, &ct::into_secret(*bytes))
+        let seed: &[u8; 32] = seed.try_into().map_err(|_| KeyFormatError::WrongLength)?;
+        Self::load(algorithm, &ct::into_secret(*seed))
     }
 
     fn load(algorithm: &'static Algorithm, bytes: &[u8; 32]) -> Result<Self, Error> {
@@ -181,9 +181,9 @@ impl SecretKey {
         }
     }
 
-    /// Encodes the secret key as [`Self::from_bytes`] loads it.
-    pub fn to_bytes(&self) -> SecretKeyBytes {
-        SecretKeyBytes(match &self.secret {
+    /// Returns the seed [`Self::from_seed`] loads.
+    pub fn to_seed(&self) -> Seed {
+        Seed(match &self.secret {
             Secret::Edwards25519 { seed, .. } => *seed,
             Secret::P256 { x } => x.as_bytes(),
         })
@@ -276,39 +276,39 @@ impl SecretKey {
     }
 }
 
-impl Drop for SecretKey {
+impl Drop for KeyPair {
     fn drop(&mut self) {
         // The public key is not secret, but a key type wipes its whole value.
         low::zeroise_value(self);
     }
 }
 
-impl fmt::Debug for SecretKey {
+impl fmt::Debug for KeyPair {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SecretKey")
+        f.debug_struct("KeyPair")
             .field("algorithm", self.algorithm())
             .finish_non_exhaustive()
     }
 }
 
-/// An encoded secret key, wiped on drop under the `wipe` feature.
-pub struct SecretKeyBytes([u8; 32]);
+/// A key pair's 32-byte seed, wiped on drop under the `wipe` feature.
+pub struct Seed([u8; 32]);
 
-impl AsRef<[u8]> for SecretKeyBytes {
+impl AsRef<[u8]> for Seed {
     fn as_ref(&self) -> &[u8] {
         &self.0
     }
 }
 
-impl Drop for SecretKeyBytes {
+impl Drop for Seed {
     fn drop(&mut self) {
         low::zeroise(&mut self.0);
     }
 }
 
-impl fmt::Debug for SecretKeyBytes {
+impl fmt::Debug for Seed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("SecretKeyBytes").finish_non_exhaustive()
+        f.debug_tuple("Seed").finish_non_exhaustive()
     }
 }
 
@@ -527,7 +527,7 @@ const P256_PROOF_LEN: usize = p256::Point::COMPRESSED_BYTES + CHALLENGE_LEN + 32
 ///
 /// Each candidate decodes with a chance of about 1/2, so `None` has a chance
 /// of about 2^-256: no input can be found that gives it.
-/// [`SecretKey::prove`] reports that as [`Error::Fault`]; [`PublicKey::verify`]
+/// [`KeyPair::prove`] reports that as [`Error::Fault`]; [`PublicKey::verify`]
 /// reports it as [`Error::BadSignature`].
 fn edwards25519_encode_to_curve(
     public_key: &[u8; 32],
@@ -722,9 +722,9 @@ mod tests {
     #[test]
     fn rfc9381_vectors() {
         for v in &VECTORS {
-            let key = SecretKey::from_bytes(v.algorithm, &h(v.secret_key)).unwrap();
-            // `to_bytes` is the secret key, still secret under ctgrind.
-            assert_eq!(ct::into_public(key.to_bytes().0), &h(v.secret_key)[..]);
+            let key = KeyPair::from_seed(v.algorithm, &h(v.secret_key)).unwrap();
+            // `to_seed` is the secret key, still secret under ctgrind.
+            assert_eq!(ct::into_public(key.to_seed().0), &h(v.secret_key)[..]);
             assert_eq!(key.public_key().as_ref(), h(v.public_key));
             let (proof, output) = key.prove(&h(v.alpha)).unwrap();
             assert_eq!(proof.as_ref(), h(v.proof), "{}", v.proof);
@@ -760,7 +760,7 @@ mod tests {
                     .is_err()
             );
 
-            let other = SecretKey::generate(v.algorithm).unwrap();
+            let other = KeyPair::generate(v.algorithm).unwrap();
             assert!(other.public_key().verify(&alpha, &proof).is_err());
         }
     }
@@ -844,21 +844,21 @@ mod tests {
     #[test]
     fn refuses_bad_secret_keys() {
         for algorithm in [&ECVRF_EDWARDS25519_SHA512_TAI, &ECVRF_P256_SHA256_TAI] {
-            assert!(SecretKey::from_bytes(algorithm, &[1; 31]).is_err());
-            assert!(SecretKey::from_bytes(algorithm, &[1; 33]).is_err());
+            assert!(KeyPair::from_seed(algorithm, &[1; 31]).is_err());
+            assert!(KeyPair::from_seed(algorithm, &[1; 33]).is_err());
         }
         // P-256 refuses 0 and n.
-        assert!(SecretKey::from_bytes(&ECVRF_P256_SHA256_TAI, &[0; 32]).is_err());
+        assert!(KeyPair::from_seed(&ECVRF_P256_SHA256_TAI, &[0; 32]).is_err());
         let n = h("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
-        assert!(SecretKey::from_bytes(&ECVRF_P256_SHA256_TAI, &n).is_err());
+        assert!(KeyPair::from_seed(&ECVRF_P256_SHA256_TAI, &n).is_err());
     }
 
     #[test]
     fn generated_keys_round_trip() {
         for algorithm in [&ECVRF_EDWARDS25519_SHA512_TAI, &ECVRF_P256_SHA256_TAI] {
-            let key = SecretKey::generate(algorithm).unwrap();
+            let key = KeyPair::generate(algorithm).unwrap();
             assert_eq!(key.algorithm(), algorithm);
-            let loaded = SecretKey::from_bytes(algorithm, key.to_bytes().as_ref()).unwrap();
+            let loaded = KeyPair::from_seed(algorithm, key.to_seed().as_ref()).unwrap();
             assert_eq!(loaded.public_key().as_ref(), key.public_key().as_ref());
             let public_key = PublicKey::new(algorithm, key.public_key().as_ref()).unwrap();
             assert_eq!(public_key.algorithm(), algorithm);
@@ -875,7 +875,7 @@ mod tests {
     fn ed25519_signature_on_h_string_reveals_the_scalar() {
         let v = &VECTORS[3];
         let seed: [u8; 32] = h(v.secret_key).try_into().unwrap();
-        let key = SecretKey::from_bytes(v.algorithm, &seed).unwrap();
+        let key = KeyPair::from_seed(v.algorithm, &seed).unwrap();
         let public: [u8; 32] = key.public_key().as_ref().try_into().unwrap();
         let alpha = h(v.alpha);
         let (proof, _) = key.prove(&alpha).unwrap();
@@ -924,7 +924,7 @@ mod tests {
         for v in &VECTORS {
             let secret = h(v.secret_key);
             ct::secret_slice(&secret);
-            let key = SecretKey::from_bytes(v.algorithm, &secret).unwrap();
+            let key = KeyPair::from_seed(v.algorithm, &secret).unwrap();
             let (proof, output) = key.prove(&h(v.alpha)).unwrap();
             assert_eq!(proof.as_ref(), h(v.proof));
             assert_eq!(output.as_ref(), h(v.output));

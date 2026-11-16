@@ -775,7 +775,12 @@ opaque low.x86_64.mont.sqr8x
 
 /-! RSA's DER parsing and encoding, which the ✓ leaves out. -/
 
-opaque high.rsa.der_components
+opaque high.rsa.pkcs1_components
+  :
+  Slice Std.U8 → Result (core.result.Result ((Slice Std.U8) × (Slice
+    Std.U8)) error.Error)
+
+opaque high.rsa.spki_components
   :
   Slice Std.U8 → Result (core.result.Result ((Slice Std.U8) × (Slice
     Std.U8)) error.Error)
