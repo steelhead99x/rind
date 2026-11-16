@@ -322,13 +322,25 @@ axiom bignum_mux_spec (p : U64) (z x y : Slice U64) (hx : x.length = z.length)
 
 /-! ### P-256's generator multiplication
 
-PLACEHOLDER until the HOL Light proof of aws-lc's mixed addition lands. -/
+aws-lc's mixed addition, which rind imports rather than takes from s2n-bignum,
+is proven in HOL Light, of the bytes rind's Linux build emits, in
+`proofs/hol-light/x86_64/`. Apple's text aligns its helpers but not its entry,
+so its calls can reach them at other offsets, which no proof covers. -/
 
-/-- What aws-lc's `ecp_nistz256_point_add_affine` and `_affinex` compute,
-in place, for coordinates below p: `p1` itself when `p2` is all zeros, the
-affine infinity; `p2` with a Montgomery-form z of one when `p1`'s z is zero,
-the Jacobian infinity; and otherwise the sum of the points they represent,
-unless those are equal, which it cannot double. -/
+/-- `ECP_NISTZ256_POINT_ADD_AFFINE_SUBROUTINE_CORRECT`, in
+`proofs/hol-light/x86_64/ecp_nistz256_point_add_affine.ml`, and
+`ECP_NISTZ256_POINT_ADD_AFFINEX_SUBROUTINE_CORRECT`, in
+`proofs/hol-light/x86_64/ecp_nistz256_point_add_affinex.ml`, for the routine
+the wrapper picks: what aws-lc's `ecp_nistz256_point_add_affine` and
+`_affinex` compute, in place, for coordinates below p: `p1` itself when `p2`
+is all zeros, the affine infinity; `p2` with a Montgomery-form z of one when
+`p1`'s z is zero, the Jacobian infinity; and otherwise the sum of the points
+they represent, unless those are equal, which it cannot double. The
+theorems also assume what the wrapper and the System V ABI give and Lean
+cannot state, which is trusted: the stack is 16-byte aligned at the call,
+and the `POLY` table is too, as its `align(16)` makes it;
+the routine's code, its 200-byte `POLY` table, `p1`, `p2`, and its 544-byte
+frame do not overlap; and the table's rip-relative displacements reach it. -/
 @[step]
 axiom p256_point_add_affine_spec (p1 : Std.Array U64 12#usize) (p2 : Std.Array U64 8#usize) :
     low.x86_64.ecp_nistz256.p256_point_add_affine p1 p2 ⦃ r =>
