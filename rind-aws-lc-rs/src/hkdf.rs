@@ -1,13 +1,13 @@
 //! Key derivation with HKDF (RFC 5869), over any [`hmac`] algorithm.
 //!
-//! Built here on rind's HMAC, as aws-lc-rs's API needs a pseudorandom key
-//! taken as is ([`Prk::new_less_safe`]) and keys made from key material,
-//! which rind's HKDF does not offer.
+//! HKDF-Expand is rind's. HKDF-Extract is its HMAC keyed by the salt, as
+//! aws-lc-rs's `extract` cannot fail and a [`Salt`] can be made from key
+//! material.
 
 use core::fmt;
 
 use crate::wipe::Wiped;
-use crate::{error, hmac};
+use crate::{digest, error, hmac};
 
 /// An HKDF algorithm, chosen by one of this module's constants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,6 +17,19 @@ impl Algorithm {
     /// The HMAC algorithm this HKDF is built on.
     pub fn hmac_algorithm(&self) -> hmac::Algorithm {
         self.0
+    }
+
+    fn rind(&self) -> &'static rind::hkdf::Algorithm {
+        use digest::AlgorithmId::*;
+        match self.0.digest_algorithm().id {
+            SHA1 => &rind::hkdf::legacy::HKDF_SHA1,
+            SHA256 => &rind::hkdf::HKDF_SHA256,
+            SHA384 => &rind::hkdf::HKDF_SHA384,
+            SHA512 => &rind::hkdf::HKDF_SHA512,
+            SHA512_256 | SHA3_256 | SHA3_384 | SHA3_512 => {
+                unreachable!("only this module's constants make an Algorithm")
+            }
+        }
     }
 }
 
@@ -56,10 +69,7 @@ impl Salt {
     /// Extracts a pseudorandom key from `secret` (HKDF-Extract).
     pub fn extract(&self, secret: &[u8]) -> Prk {
         let prk = hmac::sign(&self.0, secret);
-        Prk(
-            hmac::Key::new(self.0.algorithm(), prk.as_ref()),
-            Wiped::new(true),
-        )
+        Prk::with_mode(self.algorithm(), prk.as_ref(), true)
     }
 
     /// The algorithm this salt was made for.
@@ -90,15 +100,27 @@ pub trait KeyType {
 
 /// A pseudorandom key, from which [`Prk::expand`] derives any number of keys;
 /// wiped on drop under the `wipe` feature.
-// The flag records whether HKDF-Extract made it, which only `Debug` shows, as
-// aws-lc-rs's does; it is wiped with the key.
+// `extracted` records whether HKDF-Extract made it, which only `Debug` shows,
+// as aws-lc-rs's does; it is wiped with the key.
 #[derive(Clone)]
-pub struct Prk(hmac::Key, Wiped<bool>);
+pub struct Prk {
+    inner: rind::hkdf::Prk,
+    algorithm: Algorithm,
+    extracted: Wiped<bool>,
+}
 
 impl Prk {
     /// Takes `value` as the pseudorandom key itself, skipping HKDF-Extract.
     pub fn new_less_safe(algorithm: Algorithm, value: &[u8]) -> Self {
-        Self(hmac::Key::new(algorithm.0, value), Wiped::new(false))
+        Self::with_mode(algorithm, value, false)
+    }
+
+    fn with_mode(algorithm: Algorithm, value: &[u8], extracted: bool) -> Self {
+        Self {
+            inner: rind::hkdf::Prk::new(algorithm.rind(), value),
+            algorithm,
+            extracted: Wiped::new(extracted),
+        }
     }
 
     /// Derives key material for the concatenation of `info` (HKDF-Expand),
@@ -109,7 +131,7 @@ impl Prk {
         len: L,
     ) -> Result<Okm<'a, L>, error::Unspecified> {
         let len_cached = len.len();
-        if len_cached > 255 * self.hash_len() {
+        if len_cached > 255 * self.algorithm.len() {
             return Err(error::Unspecified);
         }
         Ok(Okm {
@@ -119,40 +141,21 @@ impl Prk {
             len_cached,
         })
     }
-
-    fn hash_len(&self) -> usize {
-        self.0.algorithm().tag_len()
-    }
-
-    // Fills `out`, which `expand` has checked is at most 255 hash outputs,
-    // the most HKDF-Expand's one-byte block counter numbers.
-    fn expand_into(&self, info: &[&[u8]], out: &mut [u8]) {
-        let mut previous: Option<hmac::Tag> = None;
-        for (counter, chunk) in (1..=255u8).zip(out.chunks_mut(self.hash_len())) {
-            let mut ctx = hmac::Context::with_key(&self.0);
-            if let Some(previous) = &previous {
-                ctx.update(previous.as_ref());
-            }
-            for info in info {
-                ctx.update(info);
-            }
-            ctx.update(&[counter]);
-            let block = ctx.sign();
-            chunk.copy_from_slice(&block.as_ref()[..chunk.len()]);
-            previous = Some(block);
-        }
-    }
 }
 
 impl fmt::Debug for Prk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("hkdf::Prk")
-            .field("algorithm", &self.0.algorithm())
+            .field("algorithm", &self.algorithm.0)
             .field(
                 "mode",
                 &format_args!(
                     "{} {{ .. }}",
-                    if *self.1 { "ExtractExpand" } else { "Expand" }
+                    if *self.extracted {
+                        "ExtractExpand"
+                    } else {
+                        "Expand"
+                    }
                 ),
             )
             .finish()
@@ -161,7 +164,11 @@ impl fmt::Debug for Prk {
 
 impl From<Okm<'_, Algorithm>> for Prk {
     fn from(okm: Okm<'_, Algorithm>) -> Self {
-        Self(hmac::Key::from(okm.into_hmac()), Wiped::new(false))
+        let algorithm = *okm.len();
+        let mut key = [0u8; digest::MAX_OUTPUT_LEN];
+        let key = &mut key[..algorithm.len()];
+        okm.fill_exact(key);
+        Self::new_less_safe(algorithm, key)
     }
 }
 
@@ -190,14 +197,16 @@ impl<L: KeyType> Okm<'_, L> {
         if out.len() != self.len_cached {
             return Err(error::Unspecified);
         }
-        self.prk.expand_into(self.info, out);
-        Ok(())
+        self.prk
+            .inner
+            .fill(self.info, out)
+            .map_err(|_| error::Unspecified)
     }
 
     /// Fills `out`, which the caller made exactly the length `L` says.
     pub(crate) fn fill_exact(self, out: &mut [u8]) {
-        debug_assert_eq!(out.len(), self.len_cached);
-        self.prk.expand_into(self.info, out);
+        self.fill(out)
+            .expect("`expand` held the length to 255 hash outputs");
     }
 }
 

@@ -247,9 +247,7 @@ fn hkdf_tests() {
                     .extract(&test.ikm)
                     .unwrap();
                 let info = [test.info.as_slice()];
-                let result = prk
-                    .expand(&info, okm.len())
-                    .and_then(|okm_| okm_.fill(&mut okm));
+                let result = prk.fill(&info, &mut okm);
 
                 match (test.result, result) {
                     (ExpectedResult::Valid, Ok(())) => assert_eq!(okm, test.okm),

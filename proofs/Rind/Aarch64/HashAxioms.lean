@@ -10,7 +10,7 @@ crypto extension, and whose theorem rests on `sha256_block_data_order_hw_spec`,
 rind's HOL Light proof of the routine. `Axioms` pins the theorems over every
 HMAC algorithm, which rest on SHA-512's too. A change here is a change to the
 trust base. `admin/prove` copies the files beside it from x86_64's, but not
-this one, since aarch64's SHA-256 theorems rest on an axiom x86_64's do not.
+this one, since each target's SHA-256 theorems rest on axioms of its own.
 -/
 
 /-- info: 'rind.aarch64.sha256_hash' depends on axioms: [propext, Classical.choice, Quot.sound, sha256_block_data_order_hw_spec] -/
