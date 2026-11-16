@@ -288,31 +288,39 @@ fn ecdh() {
 }
 
 #[test]
-fn ml_kem_768() {
-    use aws_lc_rs::kem::{Ciphertext, DecapsulationKey, EncapsulationKey, ML_KEM_768};
+fn ml_kem() {
+    use aws_lc_rs::kem::{ML_KEM_512, ML_KEM_768, ML_KEM_1024};
+
+    ml_kem_set::<kem::MlKem512>(&ML_KEM_512);
+    ml_kem_set::<kem::MlKem768>(&ML_KEM_768);
+    ml_kem_set::<kem::MlKem1024>(&ML_KEM_1024);
+}
+
+fn ml_kem_set<A: kem::Algorithm>(algorithm: &'static aws_lc_rs::kem::Algorithm) {
+    use aws_lc_rs::kem::{Ciphertext, DecapsulationKey, EncapsulationKey};
 
     for _ in 0..ROUNDS {
         // Theirs decapsulates what ours encapsulates to it.
-        let theirs_key = DecapsulationKey::generate(&ML_KEM_768).unwrap();
+        let theirs_key = DecapsulationKey::generate(algorithm).unwrap();
         let theirs_public = theirs_key.encapsulation_key().unwrap().key_bytes().unwrap();
-        let (ciphertext, secret) =
-            kem::EncapsulationKey::new(&kem::ML_KEM_768, theirs_public.as_ref())
-                .unwrap()
-                .encapsulate()
-                .unwrap();
+        let (ciphertext, secret) = kem::EncapsulationKey::<A>::new(theirs_public.as_ref())
+            .unwrap()
+            .encapsulate()
+            .unwrap();
         let theirs_secret = theirs_key
             .decapsulate(Ciphertext::from(ciphertext.as_ref()))
             .unwrap();
         assert_eq!(secret.as_ref(), theirs_secret.as_ref());
 
         // Ours decapsulates what theirs encapsulates to it.
-        let ours = kem::DecapsulationKey::generate(&kem::ML_KEM_768).unwrap();
+        let ours = kem::DecapsulationKey::<A>::generate().unwrap();
         let (ciphertext, theirs_secret) =
-            EncapsulationKey::new(&ML_KEM_768, ours.public_key().as_ref())
+            EncapsulationKey::new(algorithm, ours.public_key().as_ref())
                 .unwrap()
                 .encapsulate()
                 .unwrap();
-        let secret = ours.decapsulate(ciphertext.as_ref()).unwrap();
+        let ciphertext = kem::Ciphertext::new(ciphertext.as_ref()).unwrap();
+        let secret = ours.decapsulate(&ciphertext);
         assert_eq!(secret.as_ref(), theirs_secret.as_ref());
     }
 }

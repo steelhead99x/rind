@@ -14,11 +14,7 @@ Decided 2026-11-12 (maintainer, /quest-plan): ✅ one of the site's three showpi
 - Show where rind loses as plainly as where it wins, with what `gaps.toml` decided about it. Each entry holds either a reason or the quest that closes the gap, never both (`admin/bench-report:1070`), so the page shows the reason or links the quest by its title, as the report's gap table does. No gap over 10% is without an entry, since `load_gaps` refuses one. The colour rule is the report's: within 10% of the fastest counts as fastest.
 - Let a visitor link to a view, such as one host and two libraries, so a number quoted elsewhere can point at its source.
 - Say when and at which commit each host was measured, as the report does.
-- The landing page's speed claim then links here.
-
-## Required
-
-- [The landing page builds from the repository](/quest/m2/site/landing.md) - the `site/` project this adds a page to
+- The landing page's speed claim then links here. It takes each claim's proof from the README claim's one link into BENCHMARKS.md (`site/src/lib/landing.ts`), which a link here does not meet, so pointing the README's speed claim here also takes changing that rule.
 
 ## Related
 
