@@ -297,16 +297,15 @@ impl PqdsaKeyPair {
         algorithm: &'static PqdsaSigningAlgorithm,
         raw_private_key: &[u8],
     ) -> Result<Self, KeyRejected> {
-        // aws-lc-rs picks the parameter set from the length, then refuses a
-        // key of another set as `Unspecified` (`validate_pqdsa_evp_key`).
-        // The length is public, so that refusal comes before the key is
-        // expanded. Any other length is `InvalidEncoding`.
+        // aws-lc-rs picks the parameter set from the length and loads the
+        // key as that set, then refuses a key of another set as
+        // `Unspecified` (`validate_pqdsa_evp_key`). Loading runs the
+        // consistency check first, so an inconsistent key of another set is
+        // `InvalidEncoding`, as `other_parameter_set` does for PKCS#8. Any
+        // other length is `InvalidEncoding`.
         let Some(id) = AlgorithmID::from_raw_len(raw_private_key.len()) else {
             return Err(KeyRejected::invalid_encoding());
         };
-        if algorithm.0.id != &id {
-            return Err(KeyRejected::unspecified());
-        }
         // rind loads an expanded key only as PKCS#8 (RFC 9881's
         // `expandedKey`), so wrap it in one. aws-lc-rs 1.19.0
         // `parse_raw_private_key` (`aws-lc-rs/src/evp_pkey.rs`) maps every
@@ -314,6 +313,9 @@ impl PqdsaKeyPair {
         // `InvalidEncoding`.
         let pkcs8 = expanded_pkcs8(&id, raw_private_key);
         let key = new_key!(&id, from_pkcs8(&pkcs8)).map_err(|_| KeyRejected::invalid_encoding())?;
+        if algorithm.0.id != &id {
+            return Err(KeyRejected::unspecified());
+        }
         Ok(Self::new(algorithm, key))
     }
 
