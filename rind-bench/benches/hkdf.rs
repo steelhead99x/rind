@@ -65,9 +65,7 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
                 rind::hkdf::Salt::new(ours, b"salt")
                     .extract(&secret)
                     .unwrap()
-                    .expand(&info, out.len())
-                    .unwrap()
-                    .fill(&mut out)
+                    .fill(&info, &mut out)
                     .unwrap();
                 black_box(out)
             })
@@ -120,10 +118,7 @@ fn bench<V: verified_garbage::hmac::HmacHash>(
         group.bench_function(format!("expand/{lib}"), |b| {
             b.iter(|| {
                 let mut out = [0u8; 32];
-                prk.expand(&info, out.len())
-                    .unwrap()
-                    .fill(&mut out)
-                    .unwrap();
+                prk.fill(&info, &mut out).unwrap();
                 black_box(out)
             })
         });
@@ -211,9 +206,7 @@ fn vg<V: verified_garbage::hmac::HmacHash>(
     rind::hkdf::Salt::new(ours, b"salt")
         .extract(secret)
         .unwrap()
-        .expand(&[info], expected.len())
-        .unwrap()
-        .fill(&mut expected)
+        .fill(&[info], &mut expected)
         .unwrap();
     let mut out = [0u8; 32];
     extract_expand(&mut out);

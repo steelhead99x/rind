@@ -341,6 +341,9 @@ impl Point {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Scalar(pub(crate) [u64; 4]);
 
+// Plain words, so all zeroes is a value it can hold.
+impl low::Zeroable for Scalar {}
+
 impl Scalar {
     /// `L`, little-endian.
     const ORDER: [u64; 4] = [

@@ -262,15 +262,50 @@ pub unsafe extern "C" fn rind_fips_hkdf_extract(
     })
 }
 
+/// The pseudorandom key for the hash `id` names, taken as the `len` bytes
+/// at `value`, or null for an unknown `id`.
+///
+/// # Safety
+/// `value` must be valid for `len` reads.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_fips_hkdf_prk_new(
+    id: u32,
+    value: *const u8,
+    len: usize,
+) -> *mut hkdf::Prk {
+    let Some(algorithm) = hkdf_algorithm(id) else {
+        return core::ptr::null_mut();
+    };
+    // SAFETY: the caller's contract.
+    let value = unsafe { bytes(value, len) };
+    new_handle(|| hkdf::Prk::new(algorithm, value))
+}
+
+/// A copy of `prk`.
+///
+/// # Safety
+/// `prk` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_fips_hkdf_prk_clone(prk: *const hkdf::Prk) -> *mut hkdf::Prk {
+    // SAFETY: the caller's contract.
+    new_handle(|| unsafe { (*prk).clone() })
+}
+
+/// Refuses an empty `info`.
+fn approved(info: &[&[u8]]) -> Result<(), Error> {
+    match info.iter().all(|part| part.is_empty()) {
+        true => Err(Error::WrongLength),
+        false => Ok(()),
+    }
+}
+
 /// `prk.expand`, refusing an empty `info`.
 pub(crate) fn expand<'a, L: hkdf::KeyType>(
     prk: &'a hkdf::Prk,
     info: &'a [&'a [u8]],
     len: L,
 ) -> Result<hkdf::Okm<'a, L>, Error> {
-    if info.iter().all(|part| part.is_empty()) {
-        return Err(Error::WrongLength);
-    }
+    approved(info)?;
     prk.expand(info, len)
 }
 
@@ -292,7 +327,7 @@ pub unsafe extern "C" fn rind_fips_hkdf_fill(
     // SAFETY: the caller's contract.
     let (prk, info, out) = unsafe { (&*prk, byte_list(info, info_len), bytes_mut(out, len)) };
     scrubbed(Depth::Small, || {
-        status(expand(prk, &info, out.len()).and_then(|okm| okm.fill(out)))
+        status(approved(&info).and_then(|()| prk.fill(&info, out)))
     })
 }
 
