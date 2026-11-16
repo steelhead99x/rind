@@ -1580,7 +1580,7 @@ let x86_required_features instr =
   | "LZCNT" -> ["abm"]
   | "TZCNT" | "ANDN" -> ["bmi1"]
   | "ADCX" | "ADOX" -> ["adx"]
-  | "MULX4" | "PEXT" | "RORX" -> ["bmi2"]
+  | "MULX4" | "PEXT" | "RORX" | "SHLX" | "SHRX" -> ["bmi2"]
   | "AESENC" | "AESENCLAST" | "AESDEC" | "AESDECLAST"
   | "AESKEYGENASSIST" -> ["aes"]
   | "PSHUFB" -> ["ssse3"]
