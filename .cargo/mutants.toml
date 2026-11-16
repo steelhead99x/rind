@@ -159,7 +159,7 @@ exclude_re = [
   'rind/src/low/x86_64/sha1\.rs:\d+:\d+: replace match guard i == pairs\.len\(\) with true in sha1_avx2$',
   'rind/src/mid/aes\.rs:\d+:\d+: replace < with <= in AesCtr::apply_keystream$',
   'rind/src/mid/aes_kw\.rs:233:\d+: replace - with / in AesKek::unwrap_padded$',
-  'rind/src/mid/mldsa\.rs:1134:\d+: replace < with <= in expand_s$',
+  'rind/src/mid/mldsa\.rs:1159:\d+: replace < with <= in expand_s$',
   'rind/src/mid/p256\.rs:\d+:\d+: replace < with <= in (JacobianMontPoint::public_twin_multiply|public_below_p)$',
   'rind/src/mid/p384\.rs:\d+:\d+: replace < with <= in JacobianMontPoint::public_twin_multiply$',
   'rind/src/low/generic/p521\.rs:\d+:\d+: replace < with <= in p521_public_twin_multiply$',
@@ -178,9 +178,9 @@ exclude_re = [
   'rind/src/low/generic/mldsa_poly\.rs:206:\d+: replace - with [+/] in decompose$',
   'rind/src/low/x86_64/mldsa\.rs:(209|211|213|215|237|239|241|243|245|247|249|251|257|259|269|277|283|285|287|293|295|537|539|541|543|549|551|565|569|571|575|577|579|581|583|587):5: delete -$',
   'rind/src/mid/mldsa\.rs:89:52: replace - with [+/]$',
-  'rind/src/mid/mldsa\.rs:(995|1002):\d+: replace - with [+/] in (decompose|use_hint)$',
-  'rind/src/mid/mldsa\.rs:1066:\d+: replace \* with / in expand_a$',
-  'rind/src/mid/mldsa\.rs:1070:\d+: replace - with [+/] in expand_a$',
+  'rind/src/mid/mldsa\.rs:(1020|1027):\d+: replace - with [+/] in (decompose|use_hint)$',
+  'rind/src/mid/mldsa\.rs:1091:\d+: replace \* with / in expand_a$',
+  'rind/src/mid/mldsa\.rs:1095:\d+: replace - with [+/] in expand_a$',
   # Speed only: where Ed25519 verification's multiplication starts, as
   # doubling the identity leaves it; and which of two valid half-size rows
   # `split` returns, both odd and below 2^128.
@@ -326,8 +326,8 @@ exclude_re = [
   'rind/src/fips_rng\.rs:\d+:\d+: replace cast -> bool with true$',
   'rind/src/high/hmac_drbg\.rs:\d+:\d+: replace \+= with \*= in HmacDrbg<H>::generate$',
   'rind/src/high/rsa\.rs:\d+:\d+: delete match arm Error::Fault in SigningKey::decrypt_oaep$',
-  'rind/src/mid/mldsa\.rs:775:\d+: replace - with [+/] in sign_internal$',
-  'rind/src/mid/mldsa\.rs:1082:\d+: replace < with > in expand_a$',
+  'rind/src/mid/mldsa\.rs:800:\d+: replace - with [+/] in sign_internal$',
+  'rind/src/mid/mldsa\.rs:1107:\d+: replace < with > in expand_a$',
   'rind/src/low/aarch64/sha1\.rs:\d+:\d+: replace match guard blocks\.is_empty\(\) with false in sha1_compress_blocks$',
   'rind/src/low/entry\.rs:\d+:\d+: replace - with / in <impl Drop for Entry>::drop$',
   'rind/src/low/entry\.rs:\d+:\d+: replace - with \+ in <impl Drop for Entry>::drop$',

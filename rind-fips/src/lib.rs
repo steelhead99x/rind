@@ -14,6 +14,10 @@
 mod error;
 mod ffi;
 
+#[cfg(feature = "__acvp")]
+#[doc(hidden)]
+pub mod acvp;
+
 pub use error::{Error, KeyRejected};
 
 /// The module's name and version, as its security policy names it.
