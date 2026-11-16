@@ -6,7 +6,7 @@
 //! An unrolled body is about 47 KiB when the pointer is 32 bits, several
 //! times the ESP32-S3's 16 KiB instruction cache, so every block would
 //! stream its code from flash. On that board this loop takes about 0.033×
-//! that unrolled body's time, about 30×. It follows [`sha256`](sha256.rs):
+//! that unrolled body's time. It follows [`sha256`](sha256.rs):
 //! one 16-word window and an 80-round loop, which stays in a few kilobytes.
 //! The round functions and the eighty `K` constants are FIPS 180-4 §4.1.3
 //! and §4.2.3. The unit tests check FIPS 180-4's SHA-512 vectors, mark the
