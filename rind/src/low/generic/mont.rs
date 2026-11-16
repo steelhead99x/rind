@@ -472,55 +472,52 @@ fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Wide) -> Wide {
     mul_add_limb(v, prev, c0 as Limb, c1)
 }
 
-/// `x += y * u`, returning the carry out of the top limb.
+/// `x += y * u`, returning the carry out of the top limb, for `x` and `y`
+/// of the same public length, as every caller passes them.
 ///
-/// Four limbs at a time: the products do not depend on the carry, so they
-/// issue before the chain that adds them. The length is public. The shorter
-/// of the two slices is what a `zip` takes, so a length that is not a
-/// multiple of four stays correct. The tail loop adds the leftover limbs.
-#[inline(always)]
+/// Each block of four limbs forms its four products, which don't depend on
+/// the carry, before one carry chain adds them; a short last block takes
+/// the one-limb step. Each sum is one `add_limbs`, so its bound holds.
+/// Slicing both to the shorter length only guards a release build against
+/// a caller that breaks that.
+#[inline]
 fn mul_add(x: &mut [Limb], y: &[Limb], u: Limb) -> Wide {
-    let mut carry: Wide = 0;
-    let uu = Wide::from(u);
+    debug_assert_eq!(x.len(), y.len(), "mul_add takes equal lengths");
+    let mut carry = 0;
     let n = x.len().min(y.len());
     let (xb, xr) = x[..n].as_chunks_mut::<4>();
     let (yb, yr) = y[..n].as_chunks::<4>();
     for (xb, yb) in xb.iter_mut().zip(yb) {
-        let p0 = uu.wrapping_mul(Wide::from(yb[0]));
-        let p1 = uu.wrapping_mul(Wide::from(yb[1]));
-        let p2 = uu.wrapping_mul(Wide::from(yb[2]));
-        let p3 = uu.wrapping_mul(Wide::from(yb[3]));
-        let s0 = p0.wrapping_add(Wide::from(xb[0])).wrapping_add(carry);
-        xb[0] = s0 as Limb;
-        let s1 = p1
-            .wrapping_add(Wide::from(xb[1]))
-            .wrapping_add(s0 >> Limb::BITS);
-        xb[1] = s1 as Limb;
-        let s2 = p2
-            .wrapping_add(Wide::from(xb[2]))
-            .wrapping_add(s1 >> Limb::BITS);
-        xb[2] = s2 as Limb;
-        let s3 = p3
-            .wrapping_add(Wide::from(xb[3]))
-            .wrapping_add(s2 >> Limb::BITS);
-        xb[3] = s3 as Limb;
-        carry = s3 >> Limb::BITS;
+        let products = yb.map(|y| wide_product(u, y));
+        for (x, p) in xb.iter_mut().zip(products) {
+            let s = add_limbs(p, *x, carry);
+            *x = s as Limb;
+            carry = s >> Limb::BITS;
+        }
     }
     for (x, y) in xr.iter_mut().zip(yr) {
-        let t = mul_add_limb(u, *y, *x, carry);
-        *x = t as Limb;
-        carry = t >> Limb::BITS;
+        let s = mul_add_limb(u, *y, *x, carry);
+        *x = s as Limb;
+        carry = s >> Limb::BITS;
     }
     carry
 }
 
-/// `a * b + c + d`, for a `d` that fits a limb, which fits `Wide`: at most
-/// (2^b - 1)^2 + 2 (2^b - 1) = 2^2b - 1.
+/// `a * b + c + d`, for a `d` that fits a limb, which fits `Wide`, as
+/// `add_limbs` bounds it.
 fn mul_add_limb(a: Limb, b: Limb, c: Limb, d: Wide) -> Wide {
-    Wide::from(a)
-        .wrapping_mul(Wide::from(b))
-        .wrapping_add(Wide::from(c))
-        .wrapping_add(d)
+    add_limbs(wide_product(a, b), c, d)
+}
+
+/// `a * b`, one multiply instruction, or two for a 64-bit limb's halves.
+fn wide_product(a: Limb, b: Limb) -> Wide {
+    Wide::from(a).wrapping_mul(Wide::from(b))
+}
+
+/// `p + c + d`, for a product `p` of two limbs and a `d` that fits a limb,
+/// which fits `Wide`: at most (2^b - 1)^2 + 2 (2^b - 1) = 2^2b - 1.
+fn add_limbs(p: Wide, c: Limb, d: Wide) -> Wide {
+    p.wrapping_add(Wide::from(c)).wrapping_add(d)
 }
 
 /// `r := 2r mod m`, for `r` below `m`.
@@ -649,6 +646,58 @@ mod tests {
             mont_sqr(&mut ours, &sx, &sm, into_secret(n0[0]));
             low::mont_mul(&mut theirs, &x, &x, &m, n0[0]);
             prop_assert_eq!(public(&ours), theirs);
+        }
+    }
+
+    /// `mul_add` at every length to three blocks and a short one, all ones
+    /// with the top multiplier for the largest carries, and spread values,
+    /// against the one-limb step alone, so each block's carry into the
+    /// next and into the short last one is checked at both limb widths.
+    #[test]
+    fn mul_add_blocks() {
+        let patterns: [fn(usize) -> Limb; 3] = [
+            |_| Limb::MAX,
+            |i| Limb::MAX - i as Limb,
+            |i| (i as Limb + 1).wrapping_mul(0x9e37_79b9),
+        ];
+        for n in 0..=4 * 3 + 3 {
+            for (px, py, u) in [(0, 0, Limb::MAX), (1, 2, Limb::MAX - 1), (2, 1, 3)] {
+                let y: Vec<Limb> = (0..n).map(patterns[py]).collect();
+                let mut ours: Vec<Limb> = (0..n).map(patterns[px]).collect();
+                let mut theirs = ours.clone();
+                let ours_carry = mul_add(&mut ours, &y, u);
+                let theirs_carry = mul_add_by_limb(&mut theirs, &y, u);
+                assert_eq!((ours, ours_carry), (theirs, theirs_carry), "{n} limbs");
+            }
+        }
+    }
+
+    /// One-limb step reference for `mul_add`.
+    fn mul_add_by_limb(x: &mut [Limb], y: &[Limb], u: Limb) -> Wide {
+        let mut carry = 0;
+        for (x, y) in x.iter_mut().zip(y) {
+            let s = mul_add_limb(u, *y, *x, carry);
+            *x = s as Limb;
+            carry = s >> Limb::BITS;
+        }
+        carry
+    }
+
+    proptest! {
+        /// `mul_add` on random values at every length to two blocks and a
+        /// short one, against the one-limb step.
+        #[test]
+        fn mul_add_random(
+            (x, y) in (0..=11usize).prop_flat_map(|n| (
+                proptest::collection::vec(any::<Limb>(), n),
+                proptest::collection::vec(any::<Limb>(), n),
+            )),
+            u in any::<Limb>(),
+        ) {
+            let (mut ours, mut theirs) = (x.clone(), x);
+            let ours_carry = mul_add(&mut ours, &y, u);
+            let theirs_carry = mul_add_by_limb(&mut theirs, &y, u);
+            prop_assert_eq!((ours, ours_carry), (theirs, theirs_carry));
         }
     }
 
