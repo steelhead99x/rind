@@ -6,10 +6,11 @@
 # `admin/ctgrind`), as `admin/ct-sde` is for x86_64's extensions: armv7's
 # crypto extension, by default, or with `--target aarch64-unknown-linux-gnu`
 # the code aarch64 runs only with SHA3, such as the eight-way AES-GCM
-# kernels. On aarch64 it then runs every trace again with
-# `RIND_CPU_DISABLE_wide_mul=1`, which selects the narrow-multiplier
-# schedules a wide host's `/proc/cpuinfo` would not. Each rind test named
-# `ct_qemu...` derives its secrets from a seed
+# kernels. On aarch64 it traces each test twice over: once with
+# `RIND_CPU_FORCE_wide_mul=1`, the `_alt` schedules, and once with
+# `RIND_CPU_DISABLE_wide_mul=1`, the narrow-multiplier schedules qemu's
+# `max` part would not pick, after checking the binary obeys each. Each rind
+# test named `ct_qemu...` derives its secrets from a seed
 # and marks the calls it checks. This runs each one whose name contains
 # `filter` twice under qemu-arm's or qemu-aarch64's `max` CPU, which has
 # those features, with different seeds, and fails unless
@@ -151,6 +152,27 @@ def compare(target, exe, name, tmp, plugin, extra):
     return diff, records
 
 
+# `RIND_TEST_ARM_WIDE_MUL` makes this test assert the schedule chosen.
+EXPECT_SCHEDULE = "low::aarch64::cpu::tests::detects_the_expected_cpu"
+
+
+def expect_schedule(target, exe, extra, wide):
+    """Fails unless `exe`, run with `extra`, picks the `_alt` schedules
+    when `wide` and the narrow ones otherwise."""
+    env = dict(os.environ, RIND_TEST_ARM_WIDE_MUL="1" if wide else "0")
+    env.update(extra)
+    cmd = qemu(target) + [exe, "--exact", EXPECT_SCHEDULE, "--test-threads=1"]
+    run = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8")
+    if run.returncode != 0 or "1 passed" not in run.stdout:
+        sys.exit(
+            "ct-qemu: {} did not select the {} schedules:\n{}".format(
+                " ".join("{}={}".format(k, v) for k, v in extra.items()),
+                "_alt" if wide else "narrow",
+                run.stdout,
+            )
+        )
+
+
 def main():
     sys.stdout.reconfigure(line_buffering=True)
     plugin = os.environ.get("RIND_CT_QEMU_PLUGIN")
@@ -169,12 +191,20 @@ def main():
     if all(is_planted(n) for n in names):
         sys.exit("ct-qemu: no ct_qemu test matches {!r}".format(filter))
 
-    # The host qemu sees is wide, or has no Arm part list at all, so one
-    # pass traces `_alt`. The narrow schedules are a second pass. armv7 has
-    # no such choice.
+    # qemu's `max` part is not a narrow core, so without a variable every
+    # trace would be `_alt`. Each schedule is a pass of its own, forced, and
+    # checked to take effect, so a build that compiled the override out
+    # fails here rather than tracing `_alt` twice. armv7 has no such choice.
     passes = [("", {})]
-    if target == "aarch64-unknown-linux-gnu" and not os.environ.get("RIND_CPU_DISABLE_wide_mul"):
-        passes.append(("narrow", {"RIND_CPU_DISABLE_wide_mul": "1"}))
+    if target == "aarch64-unknown-linux-gnu" and not any(
+        os.environ.get(v) for v in ("RIND_CPU_DISABLE_wide_mul", "RIND_CPU_FORCE_wide_mul")
+    ):
+        passes = [
+            ("wide", {"RIND_CPU_FORCE_wide_mul": "1"}),
+            ("narrow", {"RIND_CPU_DISABLE_wide_mul": "1"}),
+        ]
+        for label, extra in passes:
+            expect_schedule(target, exe, extra, label == "wide")
 
     failed = False
     for label, extra in passes:

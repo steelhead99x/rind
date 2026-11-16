@@ -6,20 +6,18 @@ use core::marker::PhantomData;
 /// Whether this CPU runs s2n-bignum's wide-multiplier schedules.
 ///
 /// `Some(true)` keeps the `_alt` schedules. `Some(false)` is the narrow
-/// ones. On aarch64 those run only when Linux's `/proc/cpuinfo` names
-/// every online core as Cortex-A72, Cortex-A76, or Neoverse N1. Apple's
-/// cores, Neoverse V1, V2, V3, and N2, Cobalt 100, a mixed big.LITTLE list,
-/// and a core this crate does not recognise keep `_alt`. So does a sandbox
-/// whose `/proc/cpuinfo` cannot be read, Android (the target is not Linux,
-/// and a failed read on a Linux Android build), and Windows on ARM, which
-/// never reads a part list.
+/// ones. On aarch64 those run only when Linux reports `HWCAP_CPUID` and
+/// `MIDR_EL1` names Cortex-A72, Cortex-A76, or Neoverse N1. Apple's cores,
+/// Neoverse V1, V2, V3, and N2, Cobalt 100, and a core this crate does not
+/// recognise keep `_alt`. So do a kernel without `HWCAP_CPUID`, Android
+/// (the target is not Linux), and Windows on ARM, which never read a part.
+/// On a chip that mixes core types, the register is the one of the core
+/// the first read ran on, as in aws-lc.
 ///
-/// The file is opened on the first call here, and on the first
-/// elliptic-curve or RSA operation. AES, SHA, and NEON checks do not open
-/// it. Call this before entering a sandbox that kills `open` (seccomp
-/// strict mode sends `SIGKILL`): the choice is cached, and a later
-/// operation reuses it. A filter that delivers `SIGSYS` for that `open`
-/// keeps `_alt` and returns.
+/// The part is read on the first call here, or on the first elliptic-curve
+/// or RSA operation, and cached. The read is an `mrs` the kernel emulates:
+/// it makes no system call and opens no file, so a seccomp filter cannot
+/// stop it.
 ///
 /// `None` is every other architecture: those builds have no such choice,
 /// and this reads no feature flag there.
