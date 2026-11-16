@@ -1021,6 +1021,24 @@ mod tests {
             .unwrap();
     }
 
+    /// Signs under the narrow-multiplier schedules. Key generation stays
+    /// outside the trace; its public candidate loop is not the multiplication.
+    #[cfg(rind_backend = "aarch64")]
+    #[test]
+    #[ignore = "admin/ct-qemu runs it under qemu"]
+    fn ct_qemu_rsa() {
+        use crate::low::ct_qemu;
+        use crate::signature::RsaKeyPair;
+        use crate::signature::sign::RSA_PKCS1_SHA256;
+
+        let seed = ct_qemu::seed().to_le_bytes();
+        let bytes = |n: usize| seed.iter().cycle().take(n).copied().collect::<Vec<_>>();
+        let signing = SigningKey::generate_seeded(RsaKeySize::Rsa2048, &bytes(32)).unwrap();
+        let mut der = [0u8; MAX_PKCS8_LEN];
+        let key = RsaKeyPair::from_pkcs8(signing.to_pkcs8_der(&mut der).unwrap()).unwrap();
+        ct_qemu::traced(|| key.sign(&RSA_PKCS1_SHA256, &bytes(32)).unwrap());
+    }
+
     /// Verifies each test's signature under its group's key, returning
     /// `None` for a group whose public exponent rind refuses: above 33 bits,
     /// as aws-lc refuses.

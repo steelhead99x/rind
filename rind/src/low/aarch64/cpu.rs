@@ -1044,8 +1044,10 @@ CPU part	: 0xd0b
     ///
     /// An allow-all filter is valid, so `EINVAL` or `ENOSYS` from it means
     /// the platform (qemu-user, here) has no seccomp, rather than that the
-    /// trap filter above is malformed.
-    #[cfg(target_os = "linux")]
+    /// trap filter above is malformed. Only [`sigsys_on_open_keeps_alt`]
+    /// calls this, so a release build without `--cfg rind_cpu_disable`
+    /// compiles it out.
+    #[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
     fn seccomp_unavailable(err: &std::io::Error) -> bool {
         if !matches!(err.raw_os_error(), Some(libc::ENOSYS | libc::EINVAL)) {
             return false;
@@ -1064,7 +1066,7 @@ CPU part	: 0xd0b
 
     /// Traps `openat` and `openat2` with `SECCOMP_RET_TRAP`, which delivers
     /// `SIGSYS`. Other calls are allowed, so the test can still print.
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
     fn install_openat_trap() -> std::io::Result<()> {
         // BPF_LD | BPF_W | BPF_ABS, BPF_JMP | BPF_JEQ | BPF_K, BPF_RET | BPF_K.
         let mut filter = [
@@ -1102,7 +1104,7 @@ CPU part	: 0xd0b
         install_filter(&mut filter)
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
     fn install_filter(filter: &mut [libc::sock_filter]) -> std::io::Result<()> {
         let prog = libc::sock_fprog {
             len: filter.len() as libc::c_ushort,

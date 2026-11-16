@@ -436,7 +436,8 @@ pub(crate) fn agree() {
 /// multiplication are curve25519-dalek, as is the RFC 7748 base-point
 /// vector. `bignum_invsqrt_p25519` is checked against Euler's criterion.
 /// P-256 scalar multiplication is checked at `0`, `1`, `n - 1`, `n`, and
-/// `n + 1`, and base multiplication against the generic backend. P-256 and
+/// `n + 1`. Base multiplication uses the signing table and the generic
+/// backend, at `0`, `1`, `n - 1`, `n`, and a full-width scalar. P-256 and
 /// P-384 mixed addition, including `P = Q` and `P = -Q`, use the generic
 /// backend. P-384 has no variable-base scalar multiplication there, so its
 /// order edges are checked against the affine generator. P-521 doubling,
@@ -1007,18 +1008,107 @@ fn euler(x: &[u64; 4], p: &[u64; 4], exp: &[u64; 4], pm1: &[u64; 4]) -> i64 {
 fn p256_base(g256: &[u64; 12], g_affine: &[u64; 8]) {
     use crate::low::generic::limb64::p256;
 
-    // Digit 1 of row 0 is `2^0 * G` in Montgomery form, which scalar 1 selects.
-    let mut rows = vec![[0u64; 256]; 43];
-    rows[0][..8].copy_from_slice(&g256[..8]);
-    let table: Box<[[u64; 256]; 43]> = rows.try_into().unwrap();
-    for (label, scalar, expect) in [("0", [0; 4], [0; 8]), ("1", [1, 0, 0, 0], *g_affine)] {
+    // The generator table `p256_scalarmulbase` reads: row i is
+    // `2^(6i) * j * G` for j from 1 to 32, Montgomery affine. Scalars 0 and
+    // 1 only select the first entry.
+    let table = p256_generator_table(g256);
+    assert_eq!(&table[0][..8], &g256[..8], "row 0 digit 1 is G");
+    assert!(
+        table[42].iter().any(|limb| *limb != 0),
+        "a late row is nonzero"
+    );
+
+    let n = p256::N;
+    let below = pred(n);
+    let full = [u64::MAX; 4];
+    assert!(
+        exercises_base_table(&below),
+        "n - 1 must hit a later window and a digit above 32"
+    );
+    assert!(
+        exercises_base_table(&full),
+        "a full-width scalar must hit a later window and a digit above 32"
+    );
+    let neg_g = neg_p256(g_affine);
+    for (label, scalar, expect) in [
+        ("0", [0; 4], Some([0; 8])),
+        ("1", [1, 0, 0, 0], Some(*g_affine)),
+        ("n-1", below, Some(neg_g)),
+        ("n", n, Some([0; 8])),
+        ("full", full, None),
+    ] {
         let mut narrow = [0; 8];
         let mut generic = [0; 8];
         super::p256_scalarmulbase_narrow::p256_scalarmulbase(&mut narrow, &scalar, &table);
         p256::p256_scalarmulbase(&mut generic, &scalar, &table);
         assert_eq!(narrow, generic, "p256 base generic {label}");
-        assert_eq!(narrow, expect, "p256 base affine {label}");
+        if let Some(expect) = expect {
+            assert_eq!(narrow, expect, "p256 base affine {label}");
+        }
     }
+}
+
+/// Row i holds `2^(6i) * j * G` for j from 1 to 32, in Montgomery affine form.
+fn p256_generator_table(g: &[u64; 12]) -> Box<[[u64; 256]; 43]> {
+    let mut rows = vec![[0u64; 256]; 43];
+    let mut base = *g;
+    for row in &mut rows {
+        let mut multiple = base;
+        for (j, entry) in (1..).zip(row.as_chunks_mut::<8>().0) {
+            *entry = mont_affine_p256(&multiple);
+            let kept = multiple;
+            if j == 1 {
+                super::p256_montjdouble::p256_montjdouble(&mut multiple, &kept);
+            } else {
+                super::p256_montjadd::p256_montjadd(&mut multiple, &kept, &base);
+            }
+        }
+        for _ in 0..6 {
+            let kept = base;
+            super::p256_montjdouble::p256_montjdouble(&mut base, &kept);
+        }
+    }
+    rows.try_into().unwrap()
+}
+
+/// `(x / z^2, y / z^3)` in Montgomery form.
+fn mont_affine_p256(point: &[u64; 12]) -> [u64; 8] {
+    let z: [u64; 4] = limbs_at(&point[8..]);
+    assert_ne!(z, [0; 4], "affine of a zero z");
+    let mut plain = [0; 4];
+    super::bignum_demont_p256::bignum_demont_p256(&mut plain, &z);
+    let mut inv = [0; 4];
+    super::bignum_inv_p256::bignum_inv_p256(&mut inv, &plain);
+    let mut inv_m = [0; 4];
+    super::bignum_tomont_p256::bignum_tomont_p256(&mut inv_m, &inv);
+    let mut z2 = [0; 4];
+    super::bignum_montsqr_p256::bignum_montsqr_p256(&mut z2, &inv_m);
+    let mut z3 = [0; 4];
+    super::bignum_montmul_p256::bignum_montmul_p256(&mut z3, &z2, &inv_m);
+    let mut xy = [0; 8];
+    let (out, _) = xy.as_chunks_mut::<4>();
+    super::bignum_montmul_p256::bignum_montmul_p256(&mut out[0], &limbs_at(&point[..4]), &z2);
+    super::bignum_montmul_p256::bignum_montmul_p256(&mut out[1], &limbs_at(&point[4..8]), &z3);
+    xy
+}
+
+/// The scalar's raw 6-bit windows include one after the first and one above
+/// 32, which scalars 0 and 1 never select.
+fn exercises_base_table(scalar: &[u64; 4]) -> bool {
+    let mut late = false;
+    let mut wide_digit = false;
+    for i in 0..43 {
+        let bit = 6 * i;
+        let (word, shift) = (bit / 64, bit % 64);
+        let mut window = scalar[word] >> shift;
+        if shift > 58 && word < 3 {
+            window |= scalar[word + 1] << (64 - shift);
+        }
+        let digit = (window & 0x3f) as u8;
+        late |= i > 0 && digit != 0;
+        wide_digit |= digit > 32;
+    }
+    late && wide_digit
 }
 
 /// Negate the Montgomery y coordinate of an affine point, x then y.
@@ -1415,23 +1505,6 @@ fn ct_qemu_ed25519() {
         let key = Ed25519KeyPair::from_seed(&seed).unwrap();
         key.sign(&message)
     });
-}
-
-#[test]
-#[ignore = "admin/ct-qemu runs it under qemu"]
-fn ct_qemu_rsa() {
-    use crate::high::rsa::{self, SigningKey};
-    use crate::rsa::KeySize;
-    use crate::signature::RsaKeyPair;
-    use crate::signature::sign::RSA_PKCS1_SHA256;
-
-    // Built outside the trace, so key generation's public candidate loop
-    // stays out of it. The primes differ between the two seeds.
-    let signing = SigningKey::generate_seeded(KeySize::Rsa2048, &qemu_seed(32)).unwrap();
-    let mut der = [0u8; rsa::MAX_PKCS8_LEN];
-    let key = RsaKeyPair::from_pkcs8(signing.to_pkcs8_der(&mut der).unwrap()).unwrap();
-    let message = qemu_seed(32);
-    super::ct_qemu::traced(|| key.sign(&RSA_PKCS1_SHA256, &message).unwrap());
 }
 
 /// A 32-word Montgomery product. On a narrow multiplier that is
