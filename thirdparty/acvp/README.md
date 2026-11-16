@@ -15,6 +15,9 @@ bit-length payloads stay, and its test masks them. To update, bump the revision 
 they do not expect, so the script's filters are the only place a test is
 skipped.
 
+rind-acvp's offline test reads them too, and alone reads the HMAC_DRBG and
+RSA key generation sets, which test rind-fips's module.
+
 These are samples whose answers NIST publishes. Passing them is not a
 validation: that answers fresh sets from NIST's ACVP server.
 
@@ -52,7 +55,8 @@ ACVP-Server's README carries this notice, which applies to these files:
 > employees is not subject to copyright protection within the United States.
 
 The changes: on 2026-11-09, rind trimmed each set to the groups and tests
-it runs, as above. Source: National Institute of Standards and Technology,
+it runs, as above, and on 2026-11-14 added the HMAC_DRBG and RSA key
+generation sets, trimmed alike. Source: National Institute of Standards and Technology,
 [ACVP-Server].
 
 [ACVP-Server]: https://github.com/usnistgov/ACVP-Server

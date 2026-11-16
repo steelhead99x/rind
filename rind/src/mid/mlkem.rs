@@ -291,15 +291,19 @@ impl<P: Params> DecapKey<P> {
     }
 
     /// Decode a key encoded as [`Self::as_bytes()`] encodes it, or `None` if
-    /// its `H(ek)` is not that of its encapsulation key.
+    /// its `H(ek)` is not that of its encapsulation key. Like FIPS 203's
+    /// decapsulation input check (section 7.3), it checks nothing else: an
+    /// embedded encapsulation key that fails its modulus check decodes
+    /// reduced mod q.
     ///
-    /// This is used for testing: rind generates keys only from seeds.
-    #[cfg(test)]
+    /// This is used for testing, and by the FIPS module's ACVP build: rind
+    /// generates keys only from seeds.
+    #[cfg(any(test, rind_fips))]
     pub(crate) fn from_bytes(dk: &P::DecapKeyBytes) -> Option<Self> {
         let (dk_pke, rest) = dk.as_ref().split_at(P::K * 384);
         let (ek, rest) = rest.split_at(P::K * 384 + 32);
         let (h_ek, z) = rest.split_at(32);
-        let ek_pke = EncapKey::from_bytes(&P::EncapKeyBytes::from_slice(ek).unwrap()).ok()?;
+        let ek_pke = EncapKey::from_bytes_unchecked(&P::EncapKeyBytes::from_slice(ek).unwrap());
         let mut encoded = Encoded::<P>::filled([0; 384]);
         encoded.as_mut().as_flattened_mut().copy_from_slice(dk_pke);
         (ek_pke.h_ek == h_ek).then(|| Self {
@@ -521,6 +525,25 @@ impl<P: Params> EncapKey<P> {
     pub(crate) fn from_bytes(input: &P::EncapKeyBytes) -> Result<Self, Error> {
         let _entry = low::Entry::new_public();
         P::parse(Internal(()), input)
+    }
+
+    /// [`Self::from_bytes`] without its modulus check, as decapsulation's
+    /// input check (FIPS 203, section 7.3) has it: `ByteDecode_12` reduces
+    /// each coefficient mod q, and `H(ek)` stays the hash of `input` as
+    /// given.
+    #[cfg(any(test, rind_fips))]
+    #[inline(never)]
+    fn from_bytes_unchecked(input: &P::EncapKeyBytes) -> Self {
+        let _entry = low::Entry::new_public();
+        // Its arithmetic runs multiplies Intel's MXCSR mitigation covers.
+        let _mcdt = low::Mcdt::enter();
+        let (t_hat, rho) = input.as_ref().split_at(P::K * 384);
+        let mut encoded = Encoded::<P>::filled([0; 384]);
+        encoded.as_mut().as_flattened_mut().copy_from_slice(t_hat);
+        let t_hat_coeffs = Coeffs::<P::Vector, Ntt>::from_bytes(&encoded);
+        let rho = rho.try_into().unwrap();
+        let transpose_a_hat = Coeffs::sample(&rho, true);
+        Self::new(t_hat_coeffs, rho, transpose_a_hat, Some(input))
     }
 
     /// [`Self::from_bytes`], under the caller's MXCSR mitigation.
@@ -1324,6 +1347,32 @@ mod tests {
                 EncapKey::<P>::from_bytes(&P::EncapKeyBytes::filled(0xff)).err(),
                 Some(KeyFormatError::MlKemModulus.into())
             );
+        }
+        check::<MlKem512>();
+        check::<MlKem768>();
+        check::<MlKem1024>();
+    }
+
+    #[test]
+    fn decaps_input_check_skips_the_modulus_check() {
+        // A decapsulation key whose embedded encapsulation key holds the
+        // coefficient q, with that key's hash: FIPS 203's section 7.3 checks
+        // only the hash, and ByteDecode_12 reduces q to 0.
+        fn check<P: Params>() {
+            let mut dk = DecapKey::<P>::keygen_internal(&[0x5a; 64]).as_bytes();
+            let dk = dk.as_mut();
+            dk[P::K * 384] = 0x01;
+            dk[P::K * 384 + 1] = (dk[P::K * 384 + 1] & 0xf0) | 0x0d;
+            let ek = P::EncapKeyBytes::from_slice(&dk[P::K * 384..P::K * 768 + 32]).unwrap();
+            assert!(EncapKey::<P>::from_bytes(&ek).is_err());
+            let mut h = sha3::Sha3_256Context::new();
+            h.update(ek.as_ref());
+            let h = h.finish();
+            dk[P::K * 768 + 32..P::K * 768 + 64].copy_from_slice(&h);
+            let key =
+                DecapKey::<P>::from_bytes(&P::DecapKeyBytes::from_slice(dk).unwrap()).unwrap();
+            assert_eq!(key.ek_pke.h_ek, h);
+            assert_eq!(key.ek_pke.t_hat_coeffs.0.as_ref()[0][0], 0);
         }
         check::<MlKem512>();
         check::<MlKem768>();
