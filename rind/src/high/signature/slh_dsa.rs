@@ -131,7 +131,7 @@ impl<P: ParameterSet> low::Zeroable for PublicKey<P> {}
 /// it (RFC 9909), randomized with fresh randomness as FIPS 205 recommends,
 /// as [`PublicKey::verify`] verifies.
 ///
-/// It wipes its whole value on drop under the `wipe` feature.
+/// It wipes its whole value on drop.
 pub struct KeyPair<P: ParameterSet> {
     pair: slhdsa::KeyPair<P>,
     public: PublicKey<P>,

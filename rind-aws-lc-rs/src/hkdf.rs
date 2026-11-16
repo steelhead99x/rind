@@ -99,7 +99,7 @@ pub trait KeyType {
 }
 
 /// A pseudorandom key, from which [`Prk::expand`] derives any number of keys;
-/// wiped on drop under the `wipe` feature.
+/// wiped on drop.
 // `extracted` records whether HKDF-Extract made it, which only `Debug` shows,
 // as aws-lc-rs's does; it is wiped with the key.
 #[derive(Clone)]
