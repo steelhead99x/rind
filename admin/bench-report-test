@@ -14,6 +14,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -422,6 +423,8 @@ class HostScript(unittest.TestCase):
         self.assertEqual(self.run_script("echo $(ls) > result.json"), (0, b"file\n"))
         self.assertEqual(os.listdir(self.work), ["target"])
 
+    # The lease is flock(1), which macOS does not ship.
+    @unittest.skipUnless(shutil.which("flock"), "needs flock(1)")
     def test_holds_the_lease_through_the_run_and_its_cleanup(self):
         br.COLLECT_HOSTS = {"vps": {"jobs": 1, "lease": self.lock}}
         # Another run's lease: its work stays.
