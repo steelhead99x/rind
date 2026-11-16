@@ -29,9 +29,9 @@ Each bullet names one file.
 - `x86/proofs/instruction.ml`: the two sets of instructions below.
 - `x86/proofs/decode.ml`: their decoders.
 - `x86/proofs/x86.ml`: their semantics.
-- `x86/proofs/simulator.ml`: the CPU features `ANDN` and `RORX` need, BMI1
-  and BMI2, so cosimulation skips them on a CPU without those, as it does
-  upstream's other instructions.
+- `x86/proofs/simulator.ml`: the CPU features `ANDN`, `RORX`, `SHLX`, and
+  `SHRX` need, BMI1 and BMI2, so cosimulation skips them on a CPU without
+  those, as it does upstream's other instructions.
 - `x86/proofs/utils/sha256_spec.ml`: SHA-256's FIPS 180-4 spec, from
   [awslabs/s2n-bignum#415](https://github.com/awslabs/s2n-bignum/pull/415) at
   `79120e64ed55e37c9652565ff272b7ef17f76738`, unchanged.
@@ -93,9 +93,11 @@ What aws-lc's x86_64 ChaCha20-Poly1305 and ChaCha20 routines need,
 `ChaCha20_ctr32_ssse3_4x` (maintainer, 2026-11-11, on
 [kixel-ai/rind#627](https://github.com/kixel-ai/rind/pull/627)), its
 AES-CTR and AES-CBC routines, `aes_hw_ctr32_encrypt_blocks` and
-`aes_hw_cbc_encrypt`, and what OpenSSL's `sha512_block_data_order_avx2` adds
-to them: BMI1's `ANDN`, BMI2's `RORX`, and `PUSH m64`. With them every
-instruction of those routines, as rind's release build emits them,
+`aes_hw_cbc_encrypt`, its P-256 mixed additions,
+`ecp_nistz256_point_add_affine` and `ecp_nistz256_point_add_affinex`, and
+what OpenSSL's `sha512_block_data_order_avx2` adds to them: BMI1's `ANDN`,
+BMI2's `RORX`, and `PUSH m64`. With them every instruction of those
+routines, as rind's release build emits them,
 decodes. Posting them to awslabs/s2n-bignum needs the maintainer's approval
 ([kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
 
@@ -110,8 +112,12 @@ decodes. Posting them to awslabs/s2n-bignum needs the maintainer's approval
 | `PEXTRB r32/m8, xmm, imm8` | 66 0F 3A 14 /r ib | REX.W refused |
 | `PEXTRQ r/m64, xmm, imm8` | 66 REX.W 0F 3A 16 /r ib | |
 | `POR xmm, xmm/m128` | 66 0F EB /r | |
+| `PANDN xmm, xmm/m128` | 66 0F DF /r | |
+| `PCMPEQD xmm, xmm/m128` | 66 0F 76 /r | |
 | `PUNPCKLDQ xmm, xmm/m128` | 66 0F 62 /r | |
 | `PUNPCKHDQ xmm, xmm/m128` | 66 0F 6A /r | |
+| `SHLX r32/r64, r/m32/m64, r32/r64` | VEX.LZ.66.0F38.W0/W1 F7 /r | BMI2; the count masked to the width, flags unchanged |
+| `SHRX r32/r64, r/m32/m64, r32/r64` | VEX.LZ.F2.0F38.W0/W1 F7 /r | BMI2; the count masked to the width, flags unchanged |
 | `VBROADCASTI128 ymm, m128` | VEX.256.66.0F38.W0 5A /r | |
 | `ANDN r32/64, r32/64, r/m32/64` | VEX.LZ.0F38.W0/W1 F2 /r | sets SF and ZF, clears OF and CF, AF and PF undefined |
 | `RORX r32/64, r/m32/64, imm8` | VEX.LZ.F2.0F3A.W0/W1 F0 /r ib | leaves the flags |
