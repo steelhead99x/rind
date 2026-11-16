@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Run rind's tests on wasm32-wasip2 under wasmtime, as `just wasm` runs it in
-# the dev shell's `wasm` shell. wasm compiles the portable backend, so this
-# executes the code only wasm compiles, such as MD5's optimizer barrier.
-# aws-lc does not build for wasm, so the live differential tests are left out;
-# `just portable` runs the same Rust against it on x86_64. Ed25519's CCTV
-# vectors still run, against `rind/tests/cctv/ed25519-verdicts.txt`. The other
-# vectors run too.
+# Run rind's tests, and rind-rustls's and rind-ring's, on wasm32-wasip2 under
+# wasmtime, as `just wasm` runs it in the dev shell's `wasm` shell. wasm
+# compiles the portable backend, so this executes the code only wasm compiles,
+# such as MD5's optimizer barrier. aws-lc does not build for wasm, so the live
+# differential tests are left out; `just portable` runs the same Rust against
+# it on x86_64. Ed25519's CCTV vectors still run, against
+# `rind/tests/cctv/ed25519-verdicts.txt`. The other vectors run too, and the
+# adapters' handshakes run rind against itself.
 #
 # `sh/dispatch.sh` sources this file for `wasm_runner` and does not run the
 # suite below. Sourcing stops after the function.
@@ -31,4 +32,7 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
     export SLOW_TESTS=1
     wasm_runner
     cargo test -p rind --features wipe --locked --release --target wasm32-wasip2
+    # Without the examples, whose tokio needs the threads and sockets wasm lacks.
+    # SLOW_TESTS is rind's alone.
+    env -u SLOW_TESTS cargo test -p rind-rustls -p rind-ring --lib --tests --locked --release --target wasm32-wasip2
 fi

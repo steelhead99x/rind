@@ -94,20 +94,28 @@ qemu. iOS devices' code is only built.
   where `--cfg rind_portable` forces it. `just ci` also compiles the library
   for `wasm32-wasip2` and `wasm32-unknown-unknown`, with and without `wipe`,
   when a change touches rind, the workspace manifest or lockfile, or the
-  flake, and `just gate` always does. `wasm32-unknown-unknown` enables
-  `getrandom/wasm_js` for JavaScript randomness; the WASI target uses its
-  system random source. `just ci`'s cross lane clippy-checks the wasm
-  tests and, on Linux, runs `cctv` and `heap_scratch` on `wasm32-wasip2`
-  under wasmtime, and wipe-checks RSA-3072 and RSA-4096 key generation on
-  32-bit limbs. `just wasm` is that wasm run with `SLOW_TESTS=1`. aws-lc
-  does not build for wasm, so the live differential tests stay on
-  `just portable`. Ed25519 CCTV verdicts are compared with a file recorded
-  from aws-lc.
+  flake, and `just gate` always does. It compiles every published adapter
+  for both, and rind-rustls's and rind-ring's tests for `wasm32-wasip2`, when
+  a change touches an adapter, rind's manifest, the workspace manifest or
+  lockfile, or the flake. `wasm32-unknown-unknown` enables `getrandom/wasm_js`
+  for JavaScript randomness, as rind-ring's `wasm32_unknown_unknown_js` does
+  for a ring caller; the WASI target uses its system random source. There the
+  adapters' upstreams need what they need with any backend, which
+  [admin/wasm-fixture](admin/wasm-fixture/Cargo.toml) adds: rustls's clock
+  (`rustls-pki-types/web`) and the random sources of jsonwebtoken and str0m.
+  `just ci`'s cross lane clippy-checks the wasm tests and, on Linux, runs
+  `cctv` and `heap_scratch` on `wasm32-wasip2` under wasmtime, and
+  wipe-checks RSA-3072 and RSA-4096 key generation on 32-bit limbs.
+  `just wasm` is that wasm run with `SLOW_TESTS=1`, plus rind-rustls's and
+  rind-ring's tests; the nightly `build.yml` runs it. aws-lc does not build
+  for wasm, so the live differential tests stay on `just portable`, and the
+  adapters' handshakes run rind against itself. Ed25519 CCTV verdicts are
+  compared with a file recorded from aws-lc.
   `ReuseCache`'s threaded test does not run there: this target has no threads.
   `wasm32-unknown-unknown` stays compile-only: its tests need a JavaScript
-  host. The pull-request gate clippy-checks `rind-ring` on that target with
-  `wasm32_unknown_unknown_js`, which enables rind's `wasm_js` and so selects
-  getrandom's JavaScript backend.
+  host. The pull-request gate checks that rind-ring's
+  `wasm32_unknown_unknown_js` resolves one getrandom, rind's, with `wasm_js`
+  on, so it selects getrandom's JavaScript backend.
   Constant time is unchecked on wasm: ctgrind and the trace checks inspect
   native code, and a wasm engine
   compiles rind again, so its JIT may turn a select into a branch.
@@ -125,7 +133,7 @@ Linux on `x86_64` and `aarch64`, and runs only the fastest paths there: on
 `movbe`, `avx`, `avx2`, `bmi1`, `bmi2`, and `adx`, as on Broadwell, Zen, and
 later cores, and on `aarch64` the crypto extension. It refuses to load on a
 CPU without them, naming the first missing, so each path it can take gets its
-own ACVP run and no other path is in it.
+own ACVP run ([rind-acvp](rind-acvp/README.md)) and no other path is in it.
 
 rind's secret-dependent code divides no secret and does no floating-point
 arithmetic on any architecture, as `admin/ct-vartime` checks, but it multiplies

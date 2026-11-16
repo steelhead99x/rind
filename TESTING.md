@@ -100,7 +100,7 @@ an Intel SDE CPU model, as `x86-cpu.yml` names them.
 | portable | riscv64gc Linux, glibc and musl | `just qemu riscv64` and `just qemu riscv64-musl`: as s390x | as above | as s390x |
 | portable | PowerPC Linux: powerpc64le, big-endian powerpc64 and powerpc | `just qemu powerpc64le`, `just qemu powerpc64`, and `just qemu powerpc`: as s390x | as above | as s390x |
 | portable | ARM before ARMv7 (Raspberry Pi 1 and Zero) | `just qemu armv6` and `just qemu armv6-softfloat`: as s390x, on qemu's ARM1176; `build.yml`'s `android` job: ARMv5TE Android | as above | as s390x |
-| portable | wasm32-wasip2 | `just wasm`: release tests under wasmtime, with `SLOW_TESTS=1`. `just ci`'s cross lane runs `cctv` and `heap_scratch` there on Linux, and wipe-checks RSA-3072 and RSA-4096 key generation on 32-bit limbs. Ed25519 CCTV verdicts are checked against `rind/tests/cctv/ed25519-verdicts.txt`, recorded from aws-lc. Live differential tests stay on `just portable`, since aws-lc does not build for wasm. `heap_scratch::rsa_generate` on wasm checks RSA-2048 only. `low::generic::reuse_cache::shared_across_threads` does not run | as above | unchecked: a wasm engine compiles rind again, and its JIT may turn a select into a branch |
+| portable | wasm32-wasip2 | `just wasm`: release tests, and rind-rustls's and rind-ring's tests, under wasmtime, with `SLOW_TESTS=1` for rind's. `just ci`'s cross lane runs `cctv` and `heap_scratch` there on Linux, and wipe-checks RSA-3072 and RSA-4096 key generation on 32-bit limbs. Ed25519 CCTV verdicts are checked against `rind/tests/cctv/ed25519-verdicts.txt`, recorded from aws-lc. Live differential tests stay on `just portable`, since aws-lc does not build for wasm; the adapters' handshakes run rind against itself. `heap_scratch::rsa_generate` on wasm checks RSA-2048 only. `low::generic::reuse_cache::shared_across_threads` does not run | as above | unchecked: a wasm engine compiles rind again, and its JIT may turn a select into a branch |
 
 ## Vector suites
 
@@ -136,7 +136,9 @@ The `acvp_...` unit tests read NIST's ACVP sample sets in `thirdparty/acvp/`,
 which `admin/sync-acvp` trims to the groups rind runs; a group a test does not
 expect fails it. The SHA-2 and SHA-3 sets' 1 to 8 GiB messages run only with
 `SLOW_TESTS=1`. HMAC_DRBG and ECDH read CAVP's files, as ACVP's samples test
-neither as rind uses them.
+neither as rind uses them. [rind-acvp](rind-acvp/README.md)'s offline test
+answers the sets for rind-fips's module through aws-lc's `acvptool`, on each
+CPU path, with the sets it builds for what the samples lack.
 
 These suites run wherever the [tier table](#tiers) runs `cargo test`, including
 the forced portable backend and `wasm32-wasip2`. On wasm the live comparisons
@@ -237,7 +239,7 @@ secret names a zeroing test, or says why it has none.
 | Constant-time comparison | `constant_time::verify` | none: no published set | none: it returns whether two slices are equal, which the differential test covers | `crosschecks::slice_comparison_matches_aws_lc_rs` | ctgrind: `high::constant_time::contents_stay_secret`, `low::generic::ct_equal::equiv`; BINSEC: `test::binsec::ct_binsec_constant_time_verify` | none: it keeps nothing |
 | Random bytes | `rand::fill` | none: the operating system's generator, which no vector can check | none, as for vectors | none, as for vectors | none: rind passes the bytes on | none: rind keeps no copy of the bytes |
 
-Exports that are not primitives: `Error`, `KeyRejected`, `doc::inline_assembly_safety`, `cpu::Dit`, `cpu::has_aes_hardware`, and the hooks the FIPS module builds on: `fips::DrbgHold`, `fips::SelfTest`, `fips::broken`, `fips::check_rsa_modulus`, `fips::digest`, `fips::error_code`, `fips::error_from_code`, `fips::fail`, `fips::hold_drbgs`, `fips::missing_cpu_feature`, `fips::zeroise_drbgs`.
+Exports that are not primitives: `Error`, `KeyRejected`, `doc::inline_assembly_safety`, `cpu::Dit`, `cpu::has_aes_hardware`, and the hooks the FIPS module builds on: `fips::DrbgHold`, `fips::SelfTest`, `fips::broken`, `fips::check_rsa_modulus`, `fips::digest`, `fips::error_code`, `fips::error_from_code`, `fips::fail`, `fips::hold_drbgs`, `fips::missing_cpu_feature`, `fips::zeroise_drbgs`, and the deterministic forms of its randomized services that only its ACVP build exports, which the rind-acvp crate's offline test checks against ACVP's answers: `fips::acvp::{Drbg, Generate, MlDsaMessage, ml_dsa_key_gen, ml_dsa_sign, ml_dsa_verify, ml_kem_check_decapsulation_key, ml_kem_check_encapsulation_key, ml_kem_decap, ml_kem_encap, ml_kem_key_gen}`.
 
 ## Adapters
 

@@ -18,10 +18,6 @@ default = []
 # Wipes keys, keyed state, and private-key heap scratch on drop.
 wipe = []
 __ctgrind = ["dep:crabgrind"]
-# getrandom's JavaScript backend. Only `wasm32-unknown-unknown` compiles it;
-# every other target ignores the flag. rind-ring's `wasm32_unknown_unknown_js`
-# enables this so the flag is set on the getrandom rind calls.
-wasm_js = ["getrandom/wasm_js"]
 
 [dependencies]
 cfg-if = "1"
