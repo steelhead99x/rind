@@ -27,4 +27,4 @@ The audit checked every module of `rind` against AGENTS.md's rules and found not
   - The per-packet copy in rind-str0m's SRTP. aws-lc-rs's ciphers are in place too, and MoQ doesn't use SRTP.
   - Taking `agree(&PublicKey)` instead of bytes. TLS parses each peer key once per handshake anyway.
   - A streaming `hmac::Context::verify`. It has no consumer; the hygiene quest documents signing and then calling `constant_time::verify`.
-- Owned elsewhere: storing and loading ML-KEM decapsulation keys is in [ML-KEM-512 and ML-KEM-1024](/quest/m3/parity/ml-kem.md).
+- Owned elsewhere: storing and loading ML-KEM decapsulation keys is in [HPKE's post-quantum KEMs](/quest/m4/protocols/hpke-pq.md).
