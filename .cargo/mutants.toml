@@ -343,19 +343,6 @@ exclude_re = [
   'rind/src/mid/rsa_priv/generate\.rs:\d+:\d+: replace \* with \+ in MillerRabinParams<\x27a>::random_base$',
   'rind/src/mid/rsa_priv/generate\.rs:208:\d+: replace \+ with - in MillerRabinParams<\x27a>::random_base$',
   'rind/src/mid/rsa_priv/generate\.rs:208:\d+: replace \+ with \* in MillerRabinParams<\x27a>::random_base$',
-  # `Debug` and `Display` impls no test reads. One a test checks, such as
-  # rind-dimpl's `Running` or rind-rustls's signers, is not listed here, so
-  # the campaign confirms the test catches it.
-  'rind-dimpl/src/sign\.rs:79:\d+: replace <impl fmt::Debug for Key>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/aead/quic\.rs:40:\d+: replace <impl fmt::Debug for Algorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/agreement\.rs:120:\d+: replace <impl fmt::Debug for PublicKey>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/error\.rs:99:\d+: replace <impl fmt::Display for KeyRejected>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/error\.rs:11:\d+: replace <impl fmt::Display for Unspecified>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/hmac\.rs:23:\d+: replace <impl fmt::Debug for Algorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/rsa\.rs:204:\d+: replace <impl fmt::Debug for RsaParameters>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/signature\.rs:281:\d+: replace <impl fmt::Debug for EcdsaSigningAlgorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/signature\.rs:210:\d+: replace <impl fmt::Debug for EcdsaVerificationAlgorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-rustls/src/ticketer\.rs:127:\d+: replace <impl fmt::Debug for XChaCha20Ticketer>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   # One AAD, concatenated, is that AAD. Deleting the one-element arm still
   # feeds `open` the same bytes.
   'rind-str0m/src/srtp\.rs:\d+:\d+: delete match arm \[aad\] in Gcm::open$',
