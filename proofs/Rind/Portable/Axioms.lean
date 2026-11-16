@@ -81,13 +81,13 @@ proven here. A change here is a change to the trust base.
 #guard_msgs in
 #print axioms kdf.salt_extract_spec
 
-/-- info: 'rind.portable.kdf.okm_fill_spec' depends on axioms: [propext,
+/-- info: 'rind.portable.kdf.prk_fill_spec' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
  sha256_update_nblocks_spec,
  sha512_update_nblocks_spec] -/
 #guard_msgs in
-#print axioms kdf.okm_fill_spec
+#print axioms kdf.prk_fill_spec
 
 /-- info: 'rind.portable.kdf.hkdf_fill' depends on axioms: [propext,
  Classical.choice,
@@ -96,6 +96,14 @@ proven here. A change here is a change to the trust base.
  sha512_update_nblocks_spec] -/
 #guard_msgs in
 #print axioms kdf.hkdf_fill
+
+/-- info: 'rind.portable.kdf.prk_new_fill' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ sha256_update_nblocks_spec,
+ sha512_update_nblocks_spec] -/
+#guard_msgs in
+#print axioms kdf.prk_new_fill
 
 /-- info: 'rind.portable.kdf.derive_spec' depends on axioms: [propext,
  Classical.choice,

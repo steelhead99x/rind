@@ -378,7 +378,10 @@ class Objects:
             if code is None:
                 sys.exit("ct-vartime: no code for descriptor {}".format(name))
             self.entries[(member, name)] = code
-            self.names[code] = self.name(name)
+            # The section's own symbol, at offset 0, names no function, so it
+            # leaves the name of the code there to that function's symbol.
+            if name != ".opd":
+                self.names[code] = self.name(name)
 
         # Each section's labels, and its instructions as (offset, mnemonic).
         self.labels = collections.defaultdict(list)
