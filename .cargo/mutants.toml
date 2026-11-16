@@ -111,7 +111,7 @@ exclude_re = [
   'rind/src/mid/rsa_priv\.rs:316:44: replace \+ with \*$',
   'rind/src/mid/rsa_priv\.rs:318:\d+: replace \+ with \*$',
   'rind/src/mid/rsa_priv/exponents\.rs:57:\d+: replace \* with \+ in Exponents::derive$',
-  'rind-openmls/src/provider\.rs:201:\d+: replace \+ with \* in <impl OpenMlsCrypto for RustCrypto>::sign$',
+  'rind-openmls/src/provider\.rs:195:\d+: replace \+ with \* in <impl OpenMlsCrypto for RustCrypto>::sign$',
   # Equivalent: a comparison whose two forms differ only where both branches
   # give the same result, or a step that computes the same value another way,
   # such as squaring rather than multiplying to the same power.
@@ -322,7 +322,6 @@ exclude_re = [
   # debugging helper, an impl nothing calls, a limit past 2^48 calls, a fault
   # only hardware injects, a check of what another check also refuses, or a
   # case random keys reach with probability below 2^-64.
-  'rind/src/high/hkdf\.rs:\d+:\d+: replace <impl sealed::Sealed for &[^>]+>::len -> usize with [01]$',
   'rind/src/fips_rng\.rs:\d+:\d+: replace cast -> bool with true$',
   'rind/src/high/hmac_drbg\.rs:\d+:\d+: replace \+= with \*= in HmacDrbg<H>::generate$',
   'rind/src/high/rsa\.rs:\d+:\d+: delete match arm Error::Fault in SigningKey::decrypt_oaep$',

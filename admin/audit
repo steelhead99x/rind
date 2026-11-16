@@ -51,6 +51,7 @@ PINS = [
     ("RFC 9380", "hash-to-curve test vectors", "admin/sync-vectors", rf"^HASH_TO_CURVE={SHA}$"),
     ("blind-rsa-signatures", "RFC 9474 test vectors", "admin/sync-vectors", rf"^BLIND_RSA={SHA}$"),
     ("RFC 9497", "OPRF test vectors", "admin/sync-vectors", rf"^VOPRF={SHA}$"),
+    ("RFC 9591", "FROST test vectors", "admin/sync-vectors", rf"^FROST={SHA}$"),
 ]
 
 

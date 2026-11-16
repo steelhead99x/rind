@@ -1,10 +1,10 @@
-# x86_64 SHA-NI SHA-256 is proven
+# [S] x86_64 SHA-NI SHA-256 is proven
 
 ## Goal
 
 x86_64 with SHA-NI runs a proven SHA-256 at today's speed, the in-register finish included, so SHA-256, HMAC-SHA256, and HKDF-SHA256 earn ✓ there. RSA-2048 PSS verification earns it there too where the CPU also has BMI2 and ADX: its MGF1 and H' hash with SHA-256 inside the scheme, and the rest is proven by [kixel-ai/rind#624](https://github.com/kixel-ai/rind/pull/624).
 
-This epic's own work is the ✓: `Rind/X86_64/ShaBlocks.lean`'s `Sha256Blocks` no longer assumes `shaext` or `shaext_finish`, `HashAxioms.lean` pins the frozen routine's axiom in their place, `benchmarks/verified.toml` gives the x86_64 SHA-NI cells their proof line, noting the unmerged s2n-bignum PR its spec comes from, and `rsa2048-pss-sha256-verify` an entry beside rind's `rsa2048-pkcs1-sha256-verify` with `cpu = ["bmi2", "adx", "sha"]`, and `BENCHMARKS.md` is rendered from it.
+The work left is the ✓, since [kixel-ai/rind#776](https://github.com/kixel-ai/rind/pull/776) proved the routines' composition: `benchmarks/verified.toml` gives the x86_64 SHA-NI cells their proof line, noting the unmerged s2n-bignum PR its spec comes from, and `rsa2048-pss-sha256-verify` an entry beside rind's `rsa2048-pkcs1-sha256-verify` with `cpu = ["bmi2", "adx", "sha"]`, and `BENCHMARKS.md` is rendered from it.
 
 ## Plan
 

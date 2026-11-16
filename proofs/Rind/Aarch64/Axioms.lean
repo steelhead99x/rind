@@ -246,14 +246,14 @@ A change here is a change to the trust base.
 #guard_msgs in
 #print axioms kdf.salt_extract_spec
 
-/-- info: 'rind.aarch64.kdf.okm_fill_spec' depends on axioms: [propext,
+/-- info: 'rind.aarch64.kdf.prk_fill_spec' depends on axioms: [propext,
  Classical.choice,
  Quot.sound,
  compress_nohw_spec,
  sha256_block_data_order_hw_spec,
  sha512_block_data_order_hw_spec] -/
 #guard_msgs in
-#print axioms kdf.okm_fill_spec
+#print axioms kdf.prk_fill_spec
 
 /-- info: 'rind.aarch64.kdf.hkdf_fill' depends on axioms: [propext,
  Classical.choice,
@@ -263,6 +263,15 @@ A change here is a change to the trust base.
  sha512_block_data_order_hw_spec] -/
 #guard_msgs in
 #print axioms kdf.hkdf_fill
+
+/-- info: 'rind.aarch64.kdf.prk_new_fill' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ compress_nohw_spec,
+ sha256_block_data_order_hw_spec,
+ sha512_block_data_order_hw_spec] -/
+#guard_msgs in
+#print axioms kdf.prk_new_fill
 
 /-- info: 'rind.aarch64.kdf.derive_spec' depends on axioms: [propext,
  Classical.choice,
