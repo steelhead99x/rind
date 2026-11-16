@@ -437,8 +437,8 @@ case $campaign in
         triple=X86_64_UNKNOWN_LINUX_GNU
         skip=(
             'rind/src/low/aarch64/**' 'rind/src/low/arm/**' "${portable[@]}"
-            rind/src/low/generic/mlkem768.rs
-            rind/src/low/x86_64/mlkem768_sample_poly_ntt_8x.rs
+            rind/src/low/generic/mlkem_sample.rs
+            rind/src/low/x86_64/mlkem_sample_poly_ntt_8x.rs
             rind/src/low/x86_64/rsaz_avx512.rs
         )
         rows=(

@@ -36,7 +36,7 @@ libcrux-ed25519 = { version = "0.0.10", features = ["rand"] }
 libcrux-hkdf = "0.0.9"
 libcrux-hmac = "0.0.9"
 libcrux-ml-dsa = "0.0.11"
-libcrux-ml-kem = { version = "0.0.11", default-features = false, features = ["mlkem768", "alloc"] }
+libcrux-ml-kem = { version = "0.0.11", default-features = false, features = ["mlkem512", "mlkem768", "mlkem1024", "alloc"] }
 libcrux-rsa = "0.0.9"
 libcrux-sha2 = "0.0.9"
 libcrux-sha3 = "0.0.11"
@@ -156,7 +156,7 @@ name = "slhdsa"
 harness = false
 
 [[bench]]
-name = "mlkem768"
+name = "mlkem"
 harness = false
 
 [[bench]]

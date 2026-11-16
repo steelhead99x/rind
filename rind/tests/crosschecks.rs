@@ -2289,29 +2289,47 @@ mod rsa {
     }
 }
 
-mod mlkem768 {
-    use aws_lc_rs::kem::{Ciphertext, DecapsulationKey, ML_KEM_768};
+mod mlkem {
+    use aws_lc_rs::kem::{
+        Algorithm, AlgorithmId, Ciphertext, DecapsulationKey, ML_KEM_512, ML_KEM_768, ML_KEM_1024,
+    };
     use proptest::prelude::*;
     use rind::kem;
+
+    // aws-lc-rs decapsulates what we encapsulate to its key.
+    fn encapsulated_by_ours<A: kem::Algorithm>(
+        algorithm: &'static Algorithm<AlgorithmId>,
+    ) -> Result<(), TestCaseError> {
+        let theirs = DecapsulationKey::generate(algorithm).unwrap();
+        let theirs_public = theirs.encapsulation_key().unwrap().key_bytes().unwrap();
+        let (ciphertext, secret) = kem::EncapsulationKey::<A>::new(theirs_public.as_ref())
+            .unwrap()
+            .encapsulate()
+            .unwrap();
+        let theirs_secret = theirs
+            .decapsulate(Ciphertext::from(ciphertext.as_ref()))
+            .unwrap();
+        prop_assert_eq!(secret.as_ref(), theirs_secret.as_ref());
+        Ok(())
+    }
 
     // Each case generates a key, which is slow under emulation.
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(32))]
 
-        // aws-lc-rs decapsulates what we encapsulate to its key.
         #[test]
-        fn encapsulated_by_ours(_case in any::<u8>()) {
-            let theirs = DecapsulationKey::generate(&ML_KEM_768).unwrap();
-            let theirs_public = theirs.encapsulation_key().unwrap().key_bytes().unwrap();
-            let (ciphertext, secret) =
-                kem::EncapsulationKey::new(&kem::ML_KEM_768, theirs_public.as_ref())
-                    .unwrap()
-                    .encapsulate()
-                    .unwrap();
-            let theirs_secret = theirs
-                .decapsulate(Ciphertext::from(ciphertext.as_ref()))
-                .unwrap();
-            prop_assert_eq!(secret.as_ref(), theirs_secret.as_ref());
+        fn encapsulated_by_ours_512(_case in any::<u8>()) {
+            encapsulated_by_ours::<kem::MlKem512>(&ML_KEM_512)?;
+        }
+
+        #[test]
+        fn encapsulated_by_ours_768(_case in any::<u8>()) {
+            encapsulated_by_ours::<kem::MlKem768>(&ML_KEM_768)?;
+        }
+
+        #[test]
+        fn encapsulated_by_ours_1024(_case in any::<u8>()) {
+            encapsulated_by_ours::<kem::MlKem1024>(&ML_KEM_1024)?;
         }
     }
 }
