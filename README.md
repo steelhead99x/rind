@@ -174,18 +174,15 @@ library is faster, [Known gaps][gaps] says why and what closes it.
 
 ## Wiping keys
 
-rind wipes keys, keyed state, and heap scratch derived from a private key
-on drop only under its `wipe` feature, as RustCrypto does with `zeroize`;
-aws-lc-rs always wipes, and ring never does. The benefit of wiping is to avoid *unused keys* being leaked
-in a heap dump, like with Heartbleed. But IMO, you have bigger issues at that point, and it's not worth the perf hit by default.
-Enable it on `rind` itself, and Cargo turns it on beneath every
-adapter too. rind-aws-lc-rs also has its own `wipe`, which turns on rind's
-and wipes the adapter's own copies of secrets.
-
-```toml
-[dependencies]
-rind = { version = "0.3", features = ["wipe"] }
-```
+rind always wipes keys, keyed state, and heap scratch derived from a
+private key on drop, as aws-lc-rs does; ring never does. Wiping does not
+stop an attacker who can read memory while a key is in use, as Heartbleed
+could: the key is still there to read. What it does is shorten how long a
+key that is no longer in use stays in memory, in freed blocks a later
+allocation reuses, in swap, in core dumps and crash reports taken later, and
+in memory read after the fact; copies already written out stay. It does not wipe stack copies, digest contexts, or
+messages. The adapters wipe their own copies of secrets too, such as
+rind-aws-lc-rs's PKCS#8 documents.
 
 ## Data-independent timing
 
