@@ -1,0 +1,131 @@
+---
+import CopyButton from "../components/CopyButton.svelte";
+import Base from "../layouts/Base.astro";
+import * as landing from "../lib/landing";
+import { html, inlineHtml } from "../lib/markdown";
+import { home } from "../lib/pages";
+---
+
+<Base page={home} title={`rind: ${landing.headline}`}>
+	<header>
+		<picture>
+			<source srcset="/wordmark.svg" media="(prefers-color-scheme: dark)" />
+			<img src="/wordmark-light.svg" width="280" height="225" alt="rind" />
+		</picture>
+		<h1>{landing.headline}</h1>
+		<p class="subline">{landing.subline}</p>
+	</header>
+
+	<main>
+		<section class="claims" aria-label="Claims">
+			{
+				landing.claims.map((claim) => (
+					<article>
+						<h2>
+							<span aria-hidden="true">{claim.icon}</span> <a href={claim.proof}>{claim.title}</a>
+						</h2>
+						<p set:html={inlineHtml(claim.body)} />
+					</article>
+				))
+			}
+		</section>
+
+		<section>
+			<h2>Switch with an agent</h2>
+			<Fragment set:html={html(landing.agentLead)} />
+			<div class="prompt">
+				<pre><code>{landing.prompt}</code></pre>
+				<CopyButton client:only="svelte" text={landing.prompt} />
+			</div>
+			<Fragment set:html={html(landing.agentAfter)} />
+		</section>
+
+		<section>
+			<h2>{landing.candorTitle}</h2>
+			<Fragment set:html={html(landing.candor)} />
+		</section>
+	</main>
+
+	<footer>
+		<nav>
+			{landing.footer.map((link) => <a href={link.href}>{link.label}</a>)}
+		</nav>
+		<p>Built by <a href={landing.builtBy.href}>{landing.builtBy.label}</a></p>
+	</footer>
+</Base>
+
+<style>
+	header,
+	main,
+	footer {
+		max-width: 60rem;
+		margin: 0 auto;
+		padding: 0 1.25rem;
+	}
+	header {
+		text-align: center;
+		padding-top: 3rem;
+	}
+	header img {
+		width: 14rem;
+		height: auto;
+	}
+	h1 {
+		font-size: clamp(1.5rem, 4vw, 2.25rem);
+		line-height: 1.25;
+		margin: 1rem 0 0.5rem;
+	}
+	.subline {
+		color: var(--muted);
+		font-size: 1.15rem;
+		margin: 0;
+	}
+	main > section {
+		margin-top: 3.5rem;
+	}
+	h2 {
+		font-size: 1.35rem;
+	}
+	.claims {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+		gap: 1rem;
+	}
+	.claims article {
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: 0.75rem;
+		padding: 0.25rem 1.25rem 1rem;
+	}
+	.claims h2 {
+		font-size: 1.1rem;
+	}
+	.claims h2 a {
+		color: inherit;
+	}
+	.prompt {
+		position: relative;
+	}
+	.prompt pre {
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: 0.75rem;
+		padding: 1rem 6rem 1rem 1.25rem;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+	footer {
+		margin-top: 4rem;
+		padding-top: 1.5rem;
+		padding-bottom: 3rem;
+		border-top: 1px solid var(--border);
+		color: var(--muted);
+		text-align: center;
+	}
+	footer nav {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 0.5rem 1.5rem;
+	}
+</style>
