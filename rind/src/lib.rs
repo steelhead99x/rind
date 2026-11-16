@@ -141,10 +141,10 @@ pub mod doc {
 /// let mut alice_key = [0u8; 32];
 /// let mut bob_key = [0u8; 32];
 /// salt.extract(alice_secret.as_ref())
-///     .and_then(|prk| prk.expand(&[b"key"], alice_key.len())?.fill(&mut alice_key))
+///     .and_then(|prk| prk.fill(&[b"key"], &mut alice_key))
 ///     .unwrap();
 /// salt.extract(bob_secret.as_ref())
-///     .and_then(|prk| prk.expand(&[b"key"], bob_key.len())?.fill(&mut bob_key))
+///     .and_then(|prk| prk.fill(&[b"key"], &mut bob_key))
 ///     .unwrap();
 /// assert_eq!(alice_key, bob_key);
 /// ```
@@ -184,11 +184,9 @@ pub mod agreement {
 /// let mut sender_key = [0u8; 32];
 /// let mut recipient_key = [0u8; 32];
 /// salt.extract(sender_secret.as_ref())?
-///     .expand(&[b"key"], sender_key.len())?
-///     .fill(&mut sender_key)?;
+///     .fill(&[b"key"], &mut sender_key)?;
 /// salt.extract(recipient_secret.as_ref())?
-///     .expand(&[b"key"], recipient_key.len())?
-///     .fill(&mut recipient_key)?;
+///     .fill(&[b"key"], &mut recipient_key)?;
 /// assert_eq!(sender_key, recipient_key);
 /// # Ok(())
 /// # }
@@ -331,6 +329,60 @@ pub mod blind_rsa {
         Algorithm, BlindSignature, BlindedMessage, Blinding, KeyPair, PublicKey,
         RSABSSA_SHA384_PSS_DETERMINISTIC, RSABSSA_SHA384_PSS_RANDOMIZED,
         RSABSSA_SHA384_PSSZERO_DETERMINISTIC, RSABSSA_SHA384_PSSZERO_RANDOMIZED, Signature,
+    };
+}
+
+/// FROST threshold Schnorr signatures ([RFC 9591]) over Ed25519,
+/// ristretto255, and P-256.
+///
+/// A trusted dealer splits a signing key into shares, any threshold of
+/// which sign together. Each signer commits to fresh nonces, the
+/// coordinator gathers the commitments and the message into a
+/// [`SigningPackage`](frost::SigningPackage) every signer builds the same
+/// way, each signer returns its signature share, and the coordinator sums
+/// them into one signature under the group's key, verifying each share to
+/// name a participant whose share is bad. A
+/// [`FROST(Ed25519, SHA-512)`](frost::ED25519_SHA512) signature is an
+/// Ed25519 signature.
+///
+/// Dealing and signing run in constant time. Distributed key generation is
+/// not offered.
+///
+/// ```
+/// # fn main() -> Result<(), rind::Error> {
+/// use rind::frost::*;
+///
+/// // The dealer gives each of three participants a share, any two of which
+/// // sign, and publishes its commitment.
+/// let (shares, commitment) = deal(&ED25519_SHA512, 2, 3)?;
+///
+/// // Two participants commit to nonces and send the coordinator their
+/// // commitments.
+/// let (nonces_1, commitments_1) = SigningNonces::commit(&shares[0])?;
+/// let (nonces_3, commitments_3) = SigningNonces::commit(&shares[2])?;
+///
+/// // The coordinator sends the commitments and the message to both, and
+/// // each builds the same package and signs it.
+/// let public_key = commitment.public_key();
+/// let package = SigningPackage::new(public_key, &[commitments_1, commitments_3], b"hello")?;
+/// let share_1 = nonces_1.sign(&shares[0], &package)?;
+/// let share_3 = nonces_3.sign(&shares[2], &package)?;
+///
+/// // The coordinator checks each share and sums them into the signature.
+/// package.verify_share(&share_1, &commitment)?;
+/// package.verify_share(&share_3, &commitment)?;
+/// let signature = package.aggregate(&[share_1, share_3])?;
+/// public_key.verify(b"hello", signature.as_ref())?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// [RFC 9591]: https://www.rfc-editor.org/rfc/rfc9591.html
+pub mod frost {
+    pub use crate::high::frost::{
+        Commitments, ED25519_SHA512, Identifier, P256_SHA256, PublicKey, RISTRETTO255_SHA512,
+        Scalar, Signature, SignatureShare, SigningNonces, SigningPackage, SigningShare, Suite,
+        VssCommitment, deal,
     };
 }
 
@@ -586,8 +638,10 @@ pub mod constant_time {
 
 /// Key derivation with HKDF.
 ///
-/// A [`hkdf::Salt`] extracts a [`hkdf::Prk`] from a secret, which then expands
-/// into any number of keys, each exactly as long as what it becomes.
+/// A [`hkdf::Salt`] extracts a [`hkdf::Prk`] from a secret, or
+/// [`hkdf::Prk::new`] takes one a protocol already holds. It then expands
+/// into any number of keys, each exactly as long as what it becomes, or fills
+/// a buffer.
 ///
 /// ```
 /// # fn main() -> Result<(), rind::Error> {
@@ -600,7 +654,10 @@ pub mod constant_time {
 ///
 /// let info: [&[u8]; 2] = [b"label", b"context"];
 /// let mut bytes = [0u8; 16];
-/// prk.expand(&info, bytes.len())?.fill(&mut bytes)?;
+/// prk.fill(&info, &mut bytes)?;
+///
+/// let loaded = hkdf::Prk::new(&hkdf::HKDF_SHA256, &[0x0b; 32]);
+/// loaded.fill(&info, &mut bytes)?;
 /// # Ok(())
 /// # }
 /// ```
