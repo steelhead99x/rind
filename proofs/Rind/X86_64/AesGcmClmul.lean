@@ -53,14 +53,15 @@ theorem lengths_eq (A M : Nat) (hM : M < 2 ^ 64) :
     simp [h, this, show k - 64 < 64 by omega, show k - 64 < 128 by omega, show 64 + (k - 64) = k by omega]
 
 theorem add_lengths_spec (g : low.x86_64.ghash.Ghash) (t : low.x86_64.ghash.ClmulTable) (H : P) (hH : Small H)
-    (ht : TableFor H t) (hg : ClmulOf g.table t) (a m : Usize) (hm : m.val < 2 ^ 61) :
+    (ht : TableFor H t) (hg : ClmulOf g.table t ∨ ∃ a, g.table = .Avx512 a ∧ a.clmul = t) (a m : Usize)
+    (hm : m.val < 2 ^ 61) :
     g.add_lengths a m ⦃ g' => g'.table = g.table ∧
       toPoly g'.current = gf128MulRev (toPoly g.current +
         toPoly (insertNat64 (insertNat64 (mkfour 0 0 0 0) (8 * a.val) 1) (8 * m.val) 0)) H ⦄ := by
   obtain ⟨tb, cur⟩ := g
   simp only at hg
   unfold low.x86_64.ghash.Ghash.add_lengths
-  rcases hg with rfl | ⟨k, rfl⟩ | ⟨k1, k2, rfl⟩ <;>
+  rcases hg with (rfl | ⟨k, rfl⟩ | ⟨k1, k2, rfl⟩) | ⟨k, rfl, rfl⟩ <;>
   all_goals
     step*
     case hmax =>
@@ -75,7 +76,7 @@ theorem add_lengths_spec (g : low.x86_64.ghash.Ghash) (t : low.x86_64.ghash.Clmu
       have em : U128.max = 2 ^ 128 - 1 := by rw [U128.max_eq]; norm_num
       rw [e8, em]; omega
     simp only [u128_to_m128i_eq, core.core_arch.x86.sse2._mm_xor_si128, bind_ok]
-    apply WP.spec_bind (mul_h_spec H hH t ht _)
+    apply WP.spec_bind (mul_h_spec H hH _ ht _)
     intro y hy
     rw [WP.spec_ok]
     refine ⟨rfl, ?_⟩
@@ -244,7 +245,8 @@ theorem tagged_from_spec (ENC : Bool) (hk : low.x86_64.aes.HwKey) (alg : Algorit
   unfold low.x86_64.aes_gcm.tagged_from
   simp only [low.x86_64.ghash.Ghash.new, low.x86_64.ghash.zero, core.core_arch.x86.sse2._mm_setzero_si128,
     bind_ok, cipher_by8 ENC hk ⟨table, 0⟩ t hg, h8, uncurry_apply_pair]
-  apply WP.spec_bind (add_lengths_spec g t (polyLE hLE) (small_toPoly _) ht (by rw [hgt]; exact hg.clmulOf) _ _
+  apply WP.spec_bind (add_lengths_spec g t (polyLE hLE) (small_toPoly _) ht
+    (.inl (by rw [hgt]; exact hg.clmulOf)) _ _
     (by rw [Slice.len_val, hlen]; exact hin))
   rintro g' ⟨-, hg'⟩
   simp only [hw_encrypt_block hk alg kw hkey, bind_ok, low.x86_64.ghash.Ghash.tag, byte_reverse_eq,

@@ -23,6 +23,7 @@ exclude_globs = [
   # Tools, not libraries.
   "rind-bench/**",
   "rind-cpuid/**",
+  "rind-timing/src/cases.rs",
   "fuzz/**",
   # The FIPS module, which refuses the CPUs admin/mutants masks features on;
   # its differential and break tests cover what it adds to rind.
@@ -41,6 +42,7 @@ exclude_re = [
   # bit fields, or a carry and a borrow that cannot both occur, is their
   # exclusive or. So is an AND of flags that always agree their OR, and
   # `1 << 0` is `1 >> 0`, as `1 << 8` is `1 >> 8` in the byte kept.
+  'rind/src/mid/half_size\.rs:\d+:\d+: replace \| with \^ in U256::(from|shl)$',
   'rind/src/high/asn1\.rs:\d+:\d+: replace \| with \^ in (Parser<\x27a>::take_len|Tag::context)$',
   'rind/src/high/pkcs1\.rs:380:\d+: replace \^ with \| in decode_oaep$',
   'rind/src/high/pkcs1\.rs:\d+:\d+: replace \^= with \|= in decode_oaep$',
@@ -54,7 +56,7 @@ exclude_re = [
   'rind/src/low/generic/limb(32|64)\.rs:\d+:\d+: replace \| with \^ in join$',
   'rind/src/low/generic/chacha20\.rs:\d+:\d+: replace \| with \^ in quarter_round$',
   'rind/src/low/generic/mldsa_poly\.rs:\d+:\d+: replace \| with \^ in (mldsa_polyz_unpack_17|mldsa_polyz_unpack_19|mldsa_rej_uniform_vartime)$',
-  'rind/src/low/generic/mlkem\.rs:\d+:\d+: replace \| with \^ in (mlkem_compress_d10|mlkem_compress_d4|mlkem_frombytes)$',
+  'rind/src/low/generic/mlkem\.rs:\d+:\d+: replace \| with \^ in (compress|compress_one|mlkem_frombytes)$',
   'rind/src/low/generic/mlkem_poly\.rs:\d+:\d+: replace \| with \^ in (mlkem_rej_uniform_vartime|mlkem_tobytes)$',
   'rind/src/low/generic/p256\.rs:\d+:\d+: replace \| with \^ in (booth_w5|join|select_u8)$',
   'rind/src/low/generic/p256_mul32\.rs:\d+:\d+: replace \| with \^ in sqr_wide$',
@@ -73,8 +75,8 @@ exclude_re = [
   'rind/src/low/x86_64/cpu\.rs:434:\d+: replace \| with \^$',
   'rind/src/low/x86_64/cpu\.rs:439:\d+: replace \| with \^$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAesHardware::check|HaveAvx::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveSha1::check|HaveSha256::check|HaveSha512::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
-  'rind/src/low/x86_64/edwards25519_scalarmuldouble_avx2\.rs:(220|221|222):\d+: replace \| with \^$',
-  'rind/src/low/x86_64/edwards25519_scalarmuldouble_avx2\.rs:\d+:\d+: replace \| with \^ in (Fe4::diff_sum|Fe4::split|non_adjacent_form)$',
+  'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:17[789]:\d+: replace \| with \^$',
+  'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^ in (Fe4::diff_sum|Fe4::split)$',
   'rind/src/low/x86_64/ghash\.rs:340:\d+: replace \| with \^ in Ghash<\x27a>::add_lengths$',
   'rind/src/low/x86_64/ghash\.rs:606:22: replace \| with \^ in load_partial$',
   'rind/src/low/x86_64/ghash\.rs:632:\d+: replace \| with \^ in store_partial$',
@@ -85,7 +87,6 @@ exclude_re = [
   'rind/src/mid/aes_cbc\.rs:\d+:\d+: replace \| with \^ in AesCbcDecryptingKey::decrypt$',
   'rind/src/mid/ed25519\.rs:\d+:\d+: replace \| with \^ in EdwardsPoint::compress$',
   'rind/src/mid/mldsa\.rs:\d+:\d+: replace \| with \^ in (pack_eta|pack_t0|pack_t1|pack_w1|pack_z|unpack_eta|unpack_t0|unpack_t1)$',
-  'rind/src/mid/mlkem768\.rs:\d+:\d+: replace \| with \^ in Coeffs<\{K \*N\}, Normal>::decompress_from_bytes_du_10$',
   'rind/src/mid/p256\.rs:\d+:\d+: replace \| with \^ in (Point::to_compressed|booth_recode_w7|JacobianMontPoint::public_x_is)$',
   'rind/src/mid/p256\.rs:\d+:\d+: replace << with >> in booth_recode_w7$',
   'rind/src/mid/p256\.rs:\d+:\d+: replace > with >= in Scalar::booth_w7$',
@@ -103,6 +104,7 @@ exclude_re = [
   'rind/src/high/sec1\.rs:14:\d+: replace \+ with \*$',
   'rind/src/high/signature\.rs:(242|1716):\d+: replace \+ with \*$',
   'rind/src/low/generic/mont\.rs:167:\d+: replace \+ with \* in mont_mul$',
+  'rind/src/low/x86_64/mlkem_sample_poly_ntt_8x\.rs:229:\d+: replace \+ with \* in _squeeze_rate_and_reject$',
   'rind/src/mid/rsa_priv\.rs:331:\d+: replace / with \*$',
   'rind/src/mid/rsa_priv\.rs:316:44: replace \+ with \*$',
   'rind/src/mid/rsa_priv\.rs:318:\d+: replace \+ with \*$',
@@ -111,6 +113,14 @@ exclude_re = [
   # Equivalent: a comparison whose two forms differ only where both branches
   # give the same result, or a step that computes the same value another way,
   # such as squaring rather than multiplying to the same power.
+  # Ed25519's non-adjacent forms: no digit is zero where its sign is tested,
+  # past 64 bits a window's extra bits are masked off, and a borrow never
+  # carries past bit 255 of a scalar below 2^255. With equal remainders,
+  # either of `split`'s rows may lead.
+  'rind/src/low/generic/edwards25519_msm\.rs:59:\d+: replace > with >= in edwards25519_msm$',
+  'rind/src/low/generic/edwards25519_msm\.rs:13[79]:\d+: replace < with <= in non_adjacent_form$',
+  'rind/src/low/generic/edwards25519_msm\.rs:125:\d+: replace (> with >=|\+ with \*) in non_adjacent_form$',
+  'rind/src/mid/half_size\.rs:71:\d+: replace < with <= in split$',
   'rind/src/high/asn1\.rs:\d+:\d+: replace < with <= in ObjectId::from_path$',
   'rind/src/high/ecdsa\.rs:\d+:\d+: replace > with >= in hash_to_scalar$',
   'rind/src/high/rsa\.rs:\d+:\d+: replace > with >= in public_exponent$',
@@ -136,9 +146,7 @@ exclude_re = [
   'rind/src/low/posint\.rs:\d+:\d+: replace \* with / in PosInt<N>::reduce_even$',
   'rind/src/low/x86_64/aes\.rs:568:\d+: replace - with / in invert_round_keys$',
   'rind/src/low/x86_64/chacha20\.rs:\d+:\d+: replace > with >= in core_2x$',
-  'rind/src/low/x86_64/edwards25519_scalarmuldouble_avx2\.rs:\d+:\d+: replace > with >= in double_base$',
-  'rind/src/low/x86_64/edwards25519_scalarmuldouble_avx2\.rs:\d+:\d+: replace < with <= in non_adjacent_form$',
-  'rind/src/low/x86_64/edwards25519_scalarmuldouble_avx2\.rs:113:\d+: replace - with / in non_adjacent_form$',
+  'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace > with >= in msm$',
   'rind/src/low/x86_64/ghash\.rs:641:41: replace / with % in store_partial$',
   'rind/src/low/x86_64/mldsa\.rs:\d+:\d+: replace < with <= in rej_uniform_table$',
   'rind/src/low/x86_64/rsaz\.rs:\d+:\d+: replace < with <= in mod_exp$',
@@ -149,7 +157,6 @@ exclude_re = [
   'rind/src/mid/aes\.rs:\d+:\d+: replace < with <= in AesCtr::apply_keystream$',
   'rind/src/mid/aes_kw\.rs:190:\d+: replace - with / in AesKek::unwrap_padded$',
   'rind/src/mid/mldsa\.rs:1072:\d+: replace < with <= in expand_s$',
-  'rind/src/mid/mlkem768\.rs:499:\d+: replace \+ with \* in Coeffs<\{K \*K \*N\}, Ntt>::transpose$',
   'rind/src/mid/p256\.rs:\d+:\d+: replace < with <= in (JacobianMontPoint::public_twin_multiply|public_below_p)$',
   'rind/src/mid/p384\.rs:\d+:\d+: replace < with <= in JacobianMontPoint::public_twin_multiply$',
   'rind/src/low/generic/p521\.rs:\d+:\d+: replace < with <= in p521_public_twin_multiply$',
@@ -171,6 +178,11 @@ exclude_re = [
   'rind/src/mid/mldsa\.rs:(933|940):\d+: replace - with [+/] in (decompose|use_hint)$',
   'rind/src/mid/mldsa\.rs:1004:\d+: replace \* with / in expand_a$',
   'rind/src/mid/mldsa\.rs:1008:\d+: replace - with [+/] in expand_a$',
+  # Speed only: where Ed25519 verification's multiplication starts, as
+  # doubling the identity leaves it; and which of two valid half-size rows
+  # `split` returns, both odd and below 2^128.
+  'rind/src/low/generic/edwards25519_msm\.rs:36:\d+: replace != with == in edwards25519_msm$',
+  'rind/src/mid/half_size\.rs:85:\d+: replace (match guard .* with (true|false)|< with (==|>|<=)) in split$',
   # Speed only: which of several implementations runs, or how far ahead it
   # prefetches. Each implementation is tested on its own against the others.
   'rind/src/low/x86_64/mldsa\.rs:\d+:\d+: delete match arm \(Some\(_\), [457]\) in mldsa_pointwise_acc$',

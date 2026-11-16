@@ -60,6 +60,10 @@ mod generic {
     pub(super) mod ct_copy;
     pub(super) mod ct_equal;
     pub(super) mod ctr;
+    // Ed25519 verification's multi-scalar multiplication over s2n-bignum's
+    // point routines.
+    #[cfg(rind_backend = "x86_64")]
+    pub(crate) mod edwards25519_msm;
     #[cfg(test)]
     pub(crate) mod ghash;
     // The portable backend's public-key arithmetic on limbs of `rind_limb`
@@ -88,7 +92,7 @@ mod generic {
     pub(crate) mod mldsa_poly;
     pub(crate) mod mlkem;
     #[cfg(not(rind_backend = "x86_64"))]
-    pub(crate) mod mlkem768;
+    pub(crate) mod mlkem_sample;
     // ML-KEM arithmetic for the portable backend and x86_64 CPUs without
     // AVX2.
     #[cfg(not(rind_backend = "aarch64"))]
@@ -254,12 +258,15 @@ pub(crate) use generic::{
         mldsa_poly_use_hint_88, mldsa_polyz_unpack_17, mldsa_polyz_unpack_19, mldsa_reduce,
         mldsa_rej_uniform_eta2_vartime, mldsa_rej_uniform_eta4_vartime, mldsa_rej_uniform_vartime,
     },
-    mlkem::{mlkem_compress_d4, mlkem_compress_d10, mlkem_frombytes, mlkem_unpack},
-    mlkem_poly::{
-        mlkem_basemul_k3, mlkem_intt, mlkem_mulcache_compute, mlkem_ntt, mlkem_reduce,
-        mlkem_rej_uniform_vartime, mlkem_tobytes, mlkem_tomont,
+    mlkem::{
+        mlkem_compress_d4, mlkem_compress_d5, mlkem_compress_d10, mlkem_compress_d11,
+        mlkem_frombytes, mlkem_unpack,
     },
-    mlkem768::mlkem768_sample_poly_ntt_8x,
+    mlkem_poly::{
+        mlkem_basemul_k2, mlkem_basemul_k3, mlkem_basemul_k4, mlkem_intt, mlkem_mulcache_compute,
+        mlkem_ntt, mlkem_reduce, mlkem_rej_uniform_vartime, mlkem_tobytes, mlkem_tomont,
+    },
+    mlkem_sample::mlkem_sample_poly_ntt_8x,
     // libcrux's P-256 runs 64-bit limbs and recomputes the nonce's point to
     // sign, it exports P-384 only as ECDH, and it has no P-521, so rind
     // composes their arithmetic itself.
@@ -354,7 +361,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::adx_mux::edwards25519_epdouble;
         pub(crate) use x86_64::adx_mux::edwards25519_pdouble;
         pub(crate) use x86_64::adx_mux::edwards25519_scalarmulbase;
-        pub(crate) use x86_64::adx_mux::edwards25519_scalarmuldouble;
+        pub(crate) use x86_64::adx_mux::edwards25519_msm;
         pub(crate) use x86_64::ghash;
         pub(crate) use x86_64::mldsa::{
             mldsa_ntt, mldsa_intt, mldsa_nttunpack, mldsa_pointwise, mldsa_pointwise_acc,
@@ -368,10 +375,14 @@ cfg_if::cfg_if! {
             mlkem_intt,
             mlkem_mulcache_compute,
             mlkem_rej_uniform_vartime,
+            mlkem_basemul_k2,
             mlkem_basemul_k3,
+            mlkem_basemul_k4,
             mlkem_reduce,
             mlkem_compress_d4,
+            mlkem_compress_d5,
             mlkem_compress_d10,
+            mlkem_compress_d11,
             mlkem_frombytes,
             mlkem_tobytes,
             mlkem_tomont,
@@ -381,7 +392,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::mont_exp::mont_exp;
         pub(crate) use x86_64::rsaz::Rsaz;
         pub(crate) use x86_64::rsaz_avx512::{Operands, RsazAvx512};
-        pub(crate) use x86_64::mlkem768_sample_poly_ntt_8x::mlkem768_sample_poly_ntt_8x;
+        pub(crate) use x86_64::mlkem_sample_poly_ntt_8x::mlkem_sample_poly_ntt_8x;
 
         pub(crate) use x86_64::adx_mux::p256_montjadd;
         pub(crate) use x86_64::adx_mux::p256_montjdouble;
@@ -486,7 +497,9 @@ cfg_if::cfg_if! {
             mlkem_mulcache_compute,
             mlkem_rej_uniform_vartime,
         };
+        pub(crate) use aarch64::mlkem_basemul_k2::mlkem_basemul_k2;
         pub(crate) use aarch64::mlkem_basemul_k3::mlkem_basemul_k3;
+        pub(crate) use aarch64::mlkem_basemul_k4::mlkem_basemul_k4;
         pub(crate) use aarch64::mlkem_reduce::mlkem_reduce;
         pub(crate) use aarch64::mlkem_tobytes::mlkem_tobytes;
         pub(crate) use aarch64::mlkem_tomont::mlkem_tomont;
@@ -515,8 +528,8 @@ cfg_if::cfg_if! {
 
         pub(crate) use aarch64::chacha20;
         pub(crate) use aarch64::chacha20poly1305;
-        pub(crate) use generic::mlkem::{mlkem_compress_d4, mlkem_compress_d10, mlkem_frombytes, mlkem_unpack};
-        pub(crate) use generic::mlkem768::mlkem768_sample_poly_ntt_8x;
+        pub(crate) use generic::mlkem::{mlkem_compress_d4, mlkem_compress_d5, mlkem_compress_d10, mlkem_compress_d11, mlkem_frombytes, mlkem_unpack};
+        pub(crate) use generic::mlkem_sample::mlkem_sample_poly_ntt_8x;
     } else if #[cfg(rind_backend = "arm")] {
         pub(in crate::low) use arm::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
         pub(crate) use arm::aes::{AesDecKey, AesKey};

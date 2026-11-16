@@ -273,9 +273,15 @@ fn agreement_and_kem() {
     public(theirs.as_ref());
     assert_eq!(shared.as_ref(), theirs.as_ref());
 
-    let key = kem::DecapsulationKey::generate(&kem::ML_KEM_768).unwrap();
+    kem_set::<kem::MlKem512>();
+    kem_set::<kem::MlKem768>();
+    kem_set::<kem::MlKem1024>();
+}
+
+fn kem_set<A: kem::Algorithm>() {
+    let key = kem::DecapsulationKey::<A>::generate().unwrap();
     let (ciphertext, sent) = key.public_key().encapsulate().unwrap();
-    let received = key.decapsulate(ciphertext.as_ref()).unwrap();
+    let received = key.decapsulate(&ciphertext);
     public(sent.as_ref());
     public(received.as_ref());
     assert_eq!(sent.as_ref(), received.as_ref());
