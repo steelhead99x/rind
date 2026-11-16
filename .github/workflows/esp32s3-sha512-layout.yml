@@ -76,7 +76,8 @@ jobs:
           set -eu
           sudo apt-get update
           # gcc is the host compiler that checks the pinned core-isa.h headers.
-          sudo apt-get install --yes libslirp0 gcc
+          # Espressif's QEMU links SDL2 and slirp even with -nographic.
+          sudo apt-get install --yes libsdl2-2.0-0 libslirp0 gcc
           root="$HOME/.espressif"
           mkdir -p "$root"
           curl -fsSL -o /tmp/qemu-xtensa.tar.xz \
@@ -87,6 +88,9 @@ jobs:
           EOF
           tar -xJf /tmp/qemu-xtensa.tar.xz -C "$root"
           test -x "$root/qemu/bin/qemu-system-xtensa"
+          if ldd "$root/qemu/bin/qemu-system-xtensa" | grep 'not found'; then
+            exit 1
+          fi
 
       - name: Check placement
         run: admin/esp32s3-sha512-layout
