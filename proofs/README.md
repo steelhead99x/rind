@@ -1128,6 +1128,6 @@ Beyond Lean's kernel:
   own theorems, with the fork's additions to the x86 model, from
   awslabs/s2n-bignum#450 and rind's own, which
   `admin/prove cosim` checks against the CPU as s2n-bignum checks its own.
-- The translation ignores drops, which here wipe keys and keyed state under
-  the `wipe` feature and restore CPU state, and computes nothing an output
+- The translation ignores drops, which here wipe keys and keyed state and
+  restore CPU state, and computes nothing an output
   depends on.

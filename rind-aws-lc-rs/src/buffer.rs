@@ -8,16 +8,14 @@ use core::marker::PhantomData;
 use zeroize::Zeroize;
 
 /// Bytes exposed by an encoding. `T` tells the encodings apart, and says
-/// whether they hold a private key, wiped on drop when owned under the `wipe`
-/// feature.
+/// whether they hold a private key, wiped on drop when owned.
 // `T` is unbounded, as in aws-lc-rs, so its impls carry no bounds either;
 // whether to wipe is fixed at construction instead.
 pub struct Buffer<'a, T>(Cow<'a, [u8]>, bool, PhantomData<T>);
 
 /// Whether an encoding holds a private key.
 pub trait Kind {
-    /// Whether the encoding holds a private key, which is wiped on drop under
-    /// the `wipe` feature.
+    /// Whether the encoding holds a private key, which is wiped on drop.
     const SECRET: bool;
 }
 
@@ -29,8 +27,7 @@ impl<T: Kind> Buffer<'_, T> {
 
 impl<T> Drop for Buffer<'_, T> {
     fn drop(&mut self) {
-        // `cfg!` keeps the wipe type-checked in every build.
-        if let (true, Cow::Owned(bytes)) = (cfg!(feature = "wipe") && self.1, &mut self.0) {
+        if let (true, Cow::Owned(bytes)) = (self.1, &mut self.0) {
             bytes.zeroize();
         }
     }

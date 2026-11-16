@@ -78,7 +78,7 @@ pub const CHACHA20: Algorithm = Algorithm {
     id: AlgorithmId::CHACHA20,
 };
 
-/// A header-protection key; wiped on drop under the `wipe` feature.
+/// A header-protection key; wiped on drop.
 pub struct HeaderProtectionKey {
     key: rind::aead::quic::HeaderProtectionKey,
     algorithm: &'static Algorithm,
