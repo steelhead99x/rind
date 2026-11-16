@@ -17,4 +17,4 @@ Success check: `gh pr view 789 --repo kixel-ai/rind --json state --jq .state` is
 
 ## Related
 
-- [Fix the ML-DSA seed-tail parity test](/quest/local/12a-fix-mldsa-seed-tail.md) - other open ML-DSA work on the fork
+- [Run the full aws-lc-rs parity suite after the seed-tail fix](/quest/local/12b-run-parity-suite.md) - other open ML-DSA work on the fork
