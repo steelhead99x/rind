@@ -90,7 +90,7 @@ pub static ECDH_P521: Algorithm = Algorithm {
     parse_public: p521_public_key,
 };
 
-/// A private key, which agrees with any number of peers, wiped on drop under the `wipe` feature.
+/// A private key, which agrees with any number of peers, wiped on drop.
 ///
 /// It keeps its public key, computed once when it is generated or loaded.
 pub struct PrivateKey {
@@ -221,7 +221,7 @@ impl fmt::Debug for PrivateKey {
 }
 
 /// A private key as its scalar, which [`PrivateKey::from_scalar`]
-/// loads, wiped on drop under the `wipe` feature.
+/// loads, wiped on drop.
 pub struct Scalar(Buffer<MAX_SCALAR_LEN>);
 
 impl AsRef<[u8]> for Scalar {
@@ -601,7 +601,7 @@ impl fmt::Debug for PublicKey {
     }
 }
 
-/// The secret both parties agree on, wiped on drop under the `wipe` feature.
+/// The secret both parties agree on, wiped on drop.
 pub struct SharedSecret(Secret);
 
 // As `Private`: all-bits-zero is a valid `X25519` secret.

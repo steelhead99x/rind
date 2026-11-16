@@ -252,7 +252,7 @@ impl Drop for SharedKey {
 
 impl Zeroable for SharedKey {}
 
-/// The prover's password scalars `w0` and `w1`, wiped on drop under `wipe`.
+/// The prover's password scalars `w0` and `w1`, wiped on drop.
 pub struct ProverSecrets {
     w0: Scalar,
     w1: Scalar,
@@ -339,7 +339,7 @@ impl Drop for ProverSecrets {
 
 impl Zeroable for ProverSecrets {}
 
-/// The verifier's record, `w0` and `L = w1 * G`, wiped on drop under `wipe`.
+/// The verifier's record, `w0` and `L = w1 * G`, wiped on drop.
 pub struct VerifierRecord {
     w0: Scalar,
     /// 1 when `w0` reduced to 0. Secret, as on [`ProverSecrets`].
