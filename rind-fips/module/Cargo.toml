@@ -16,7 +16,6 @@ crate-type = ["cdylib"]
 acvp = []
 
 [dependencies]
-# `rind-fips`'s build script turns on `wipe`, so a workspace build does not.
 rind = { path = "../../rind" }
 libc = { version = "0.2", default-features = false }
 

@@ -17,7 +17,7 @@ Decided with the maintainer on 2026-11-12, in `/quest-plan`:
 
 Settled by the agent, from `AGENTS.md`:
 
-- Behavior: a switch takes VG's lowest routine that leaves rind's API and behavior intact, and keeps rind's glue. Rind follows aws-lc-rs where VG differs: rind signs ECDSA with hedged nonces where VG is deterministic (RFC 6979), refuses small-order Ed25519 keys where VG doesn't, and wipes as rind's `wipe` feature says, not VG's secret-residue rule.
+- Behavior: a switch takes VG's lowest routine that leaves rind's API and behavior intact, and keeps rind's glue. Rind follows aws-lc-rs where VG differs: rind signs ECDSA with hedged nonces where VG is deterministic (RFC 6979), refuses small-order Ed25519 keys where VG doesn't, and wipes as AGENTS.md's wipe rule says, not VG's secret-residue rule.
 - Code: the first switch adds `admin/import-vg`, which vendors VG's generated code byte for byte from a pinned VG commit, as `admin/import-aws-lc` does for aws-lc. It also updates `AGENTS.md`'s list of verified sources and [the m4 verified epic](/quest/m4/verified/README.md)'s routes.
 - Proofs: each ✓ imports a VG routine's theorem as one axiom about rind's opaque wrapper, under [the m3 epic's composition rule](/quest/m3/verified/README.md). VG's proofs as a Lake dependency were ruled out: one routine's import closure is 155 to 650 modules (50k to 176k lines, against `proofs/Rind`'s 38k), and needs VG's 18 GB build cache.
 
