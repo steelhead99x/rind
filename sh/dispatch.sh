@@ -350,6 +350,18 @@ names() {
     return 1
 }
 
+# The workspace packages whose test run turns on rind's `wipe`: those that
+# depend on rind with that feature, and everything that depends on them.
+wiping_packages() {
+    cargo metadata --no-deps --format-version 1 --locked | jq -r '
+        .packages as $all
+        | def grow: . as $in
+            | ([$all[] | select(any(.dependencies[]; .name as $d | $in | index($d) != null)) | .name] + $in) | unique;
+        [$all[] | select(any(.dependencies[]; .name == "rind" and (.features | index("wipe")))) | .name]
+        | until(grow == .; grow)
+        | .[]'
+}
+
 # One module's check or fix, run through `run`.
 step() {
     local listed=$logs/$2.files packages libs backends target targets
@@ -364,57 +376,54 @@ step() {
             # benches alone.
             #
             # rind's default build leaves `low::zeroise` a no-op, so that
-            # resolve is `cargo nextest run -p rind` and nothing else.
-            # rind-openssl depends on rind with `features = ["wipe"]`, which
-            # resolver 2 turns on for every package sharing its invocation.
-            # rind-fuzz depends on rind-openssl, so it does the same. Each
-            # runs alone, as rind-rcgen's wipe features do below. A new member
-            # that depends on rind-openssl has to be split out the same way.
-            local rest=() arg name i workspace=0 saw_rind='' saw_openssl='' saw_fuzz=''
-            if ((${#packages[@]} == 0)); then
-                run cargo nextest run --locked --no-tests=warn
-            else
-                for ((i = 0; i < ${#packages[@]}; i++)); do
-                    arg=${packages[i]}
-                    if [[ $arg == --workspace ]]; then
-                        workspace=1
-                    elif [[ $arg == -p ]]; then
-                        i=$((i + 1))
-                        name=${packages[i]:-}
-                        case $name in
-                            rind) saw_rind=1 ;;
-                            rind-openssl) saw_openssl=1 ;;
-                            rind-fuzz) saw_fuzz=1 ;;
-                            '') ;;
-                            *) rest+=(-p "$name") ;;
-                        esac
-                    else
-                        rest+=("$arg")
+            # resolve is `cargo nextest run -p rind` and nothing else. A
+            # package that depends on rind with `features = ["wipe"]`, such as
+            # rind-openssl, turns it on under resolver 2 for every package
+            # sharing its invocation, and so does anything that depends on
+            # that package. `wipers` lists them, from the manifests, and each
+            # runs alone, as rind-rcgen's wipe features do below.
+            local rest=() arg name i workspace=0 saw_rind='' wipers saw=()
+            mapfile -t wipers < <(wiping_packages)
+            ((${#packages[@]})) || workspace=1
+            for ((i = 0; i < ${#packages[@]}; i++)); do
+                arg=${packages[i]}
+                if [[ $arg == --workspace ]]; then
+                    workspace=1
+                elif [[ $arg == -p ]]; then
+                    i=$((i + 1))
+                    name=${packages[i]:-}
+                    if [[ $name == rind ]]; then
+                        saw_rind=1
+                    elif [[ " ${wipers[*]} " == *" $name "* ]]; then
+                        saw+=("$name")
+                    elif [[ -n $name ]]; then
+                        rest+=(-p "$name")
                     fi
+                else
+                    rest+=("$arg")
+                fi
+            done
+            if ((workspace)); then
+                saw_rind=1
+                saw=("${wipers[@]}")
+                rest=(--workspace --exclude rind)
+                for name in "${wipers[@]}"; do
+                    rest+=(--exclude "$name")
                 done
-                if ((workspace)); then
-                    saw_rind=1
-                    saw_openssl=1
-                    saw_fuzz=1
-                    rest=(--workspace --exclude rind --exclude rind-openssl --exclude rind-fuzz)
-                fi
-                if [[ -n $saw_rind ]]; then
-                    run cargo nextest run -p rind --locked --no-tests=warn
-                fi
-                if ((${#rest[@]} > 0)); then
-                    run cargo nextest run "${rest[@]}" --locked --no-tests=warn
-                fi
-                if [[ -n $saw_openssl ]]; then
-                    run cargo nextest run -p rind-openssl --locked --no-tests=warn
-                fi
-                if [[ -n $saw_fuzz ]]; then
-                    run cargo nextest run -p rind-fuzz --locked --no-tests=warn
-                fi
             fi
+            if [[ -n $saw_rind ]]; then
+                run cargo nextest run -p rind --locked --no-tests=warn
+            fi
+            if ((${#rest[@]} > 0)); then
+                run cargo nextest run "${rest[@]}" --locked --no-tests=warn
+            fi
+            for name in ${saw[@]+"${saw[@]}"}; do
+                run cargo nextest run -p "$name" --locked --no-tests=warn
+            done
             # Only the zeroing and heap scratch tests see the opt-in wipe,
             # which the default build turns into no-ops.
             if names rind "${packages[@]}"; then
-                run cargo nextest run -p rind --features wipe --test zeroing --test heap_scratch --locked
+                run cargo nextest run -p rind --features wipe --lib --test zeroing --test heap_scratch --locked
             fi
             if names rind-aws-lc-rs "${packages[@]}"; then
                 run cargo nextest run -p rind-aws-lc-rs --features wipe --test zeroing --locked

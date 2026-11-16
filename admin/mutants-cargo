@@ -9,8 +9,9 @@
 # selected package to define a feature it is given. That command runs as
 # given, and rind-rcgen is then built again with the two features, so its
 # wipe tests are not compiled out and a wipe mutant is not reported missed.
-# `--exclude` is not copied onto that second build: cargo accepts it only
-# with `--workspace`. Excluding rind-rcgen skips the follow-up, so the
+# A test run's second build selects only rind-rcgen's `--lib` and `--test
+# zeroing`, so its other tests do not run twice. `--exclude` is not copied
+# onto that second build: cargo accepts it only with `--workspace`. Excluding rind-rcgen skips the follow-up, so the
 # wrapper does not build the package the caller left out.
 #
 # `build` is left unchanged. cargo-mutants 27.1.0's build phase is
@@ -144,6 +145,9 @@ if [[ $excluded_rcgen -eq 1 ]]; then
     exit 0
 fi
 extra+=(--package="$spec" "${features[@]}")
+# The first command already ran rind-rcgen's tests without the features. Only
+# its library and zeroing test, the code the features add, need this build.
+case $1 in test | nextest) extra+=(--lib --test zeroing) ;; esac
 if [[ $seen_dd -eq 1 ]]; then
     extra+=(-- "${passthru[@]+"${passthru[@]}"}")
 fi

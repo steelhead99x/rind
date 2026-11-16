@@ -266,12 +266,10 @@ if [ "${1:-}" = --expand-diff-self-test ]; then
     # The shell must pass cargo-mutants the rewritten diff, and leave the
     # caller's file alone. A fake cargo-mutants stands in for the real
     # binary, so this exercises the launch path: find it, point CARGO at
-    # the wrapper, and exec it with the `mutants` subcommand. An exported
-    # RIND_MUTANTS_STUB must not select a different path.
+    # the wrapper, and exec it with the `mutants` subcommand.
     bindir=$(mktemp -d)
     argsfile=$(mktemp)
     sample=$(mktemp)
-    unset RIND_MUTANTS_STUB
     cat >"$bindir/cargo-mutants" <<EOF
 #!/bin/sh
 : > "$argsfile"

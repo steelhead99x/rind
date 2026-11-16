@@ -32,11 +32,11 @@ expect 'test -p rind-rcgen --features=wipe --features=zeroize -- --package=foo' 
 expect 'test --package=rind@0.3.2' test --package=rind@0.3.2
 expect 'test -p rind -- --package=rind-rcgen' \
     test -p rind -- --package=rind-rcgen
-expect $'test --package=rind-rcgen@0.13.2 --package=rind@0.3.2\ntest --package=rind-rcgen@0.13.2 --features=wipe --features=zeroize' \
+expect $'test --package=rind-rcgen@0.13.2 --package=rind@0.3.2\ntest --package=rind-rcgen@0.13.2 --features=wipe --features=zeroize --lib --test zeroing' \
     test --package=rind-rcgen@0.13.2 --package=rind@0.3.2
-expect $'test --workspace\ntest --package=rind-rcgen --features=wipe --features=zeroize' \
+expect $'test --workspace\ntest --package=rind-rcgen --features=wipe --features=zeroize --lib --test zeroing' \
     test --workspace
-expect $'nextest run --workspace --no-run\nnextest run --no-run --package=rind-rcgen --features=wipe --features=zeroize' \
+expect $'nextest run --workspace --no-run\nnextest run --no-run --package=rind-rcgen --features=wipe --features=zeroize --lib --test zeroing' \
     nextest run --workspace --no-run
 expect 'test --workspace --exclude rind-rcgen' \
     test --workspace --exclude rind-rcgen
@@ -46,11 +46,11 @@ expect 'test --workspace --exclude rind --exclude rind-rcgen' \
     test --workspace --exclude rind --exclude rind-rcgen
 expect 'test --package=rind-rcgen@0.13.2 --package=rind@0.3.2 --exclude rind-rcgen' \
     test --package=rind-rcgen@0.13.2 --package=rind@0.3.2 --exclude rind-rcgen
-expect $'test --workspace --exclude rind --offline\ntest --offline --package=rind-rcgen --features=wipe --features=zeroize' \
+expect $'test --workspace --exclude rind --offline\ntest --offline --package=rind-rcgen --features=wipe --features=zeroize --lib --test zeroing' \
     test --workspace --exclude rind --offline
-expect $'nextest run --workspace --exclude=rind-ring --no-run\nnextest run --no-run --package=rind-rcgen --features=wipe --features=zeroize' \
+expect $'nextest run --workspace --exclude=rind-ring --no-run\nnextest run --no-run --package=rind-rcgen --features=wipe --features=zeroize --lib --test zeroing' \
     nextest run --workspace --exclude=rind-ring --no-run
-expect $'test --workspace -- --exclude rind-rcgen\ntest --package=rind-rcgen --features=wipe --features=zeroize -- --exclude rind-rcgen' \
+expect $'test --workspace -- --exclude rind-rcgen\ntest --package=rind-rcgen --features=wipe --features=zeroize --lib --test zeroing -- --exclude rind-rcgen' \
     test --workspace -- --exclude rind-rcgen
 expect $'check --tests --package=rind-rcgen@0.14.4 --package=rind@0.3.2\ncheck --tests --package=rind-rcgen@0.14.4 --features=wipe --features=zeroize' \
     check --tests --package=rind-rcgen@0.14.4 --package=rind@0.3.2
