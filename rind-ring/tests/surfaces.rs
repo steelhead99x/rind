@@ -1,6 +1,10 @@
 //! Values cargo-mutants can replace without a round-trip noticing: lengths,
 //! equality, `Debug`, and `Display`. Checked against ring, which rind-ring
 //! offers. aws-lc-rs has changed some of those `Debug` strings.
+//!
+//! ring is a native-only dev-dependency, so wasm leaves these out.
+
+#![cfg(not(target_family = "wasm"))]
 
 use core::num::NonZeroU32;
 

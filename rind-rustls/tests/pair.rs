@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 use std::sync::Arc;
 
 use rustls::crypto::{CryptoProvider, SupportedKxGroup};
+#[cfg(not(target_family = "wasm"))]
 use rustls::crypto::{aws_lc_rs as aws_lc_rs_provider, ring};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
@@ -79,8 +80,8 @@ fn all_key_exchanges() {
         rind_rustls::kx_group::SECP256R1MLKEM768,
         rind_rustls::kx_group::MLKEM768,
     ] {
-        for other in [OtherProvider::BaselineAwsLcRs, OtherProvider::SelfTest] {
-            test_key_exchange(group, tls13, other);
+        for other in OtherProvider::NOT_RING {
+            test_key_exchange(group, tls13, *other);
         }
     }
 
@@ -307,7 +308,7 @@ impl KeyType {
     /// The providers that can sign and verify with this key: *ring* has no P-521.
     fn others(self) -> &'static [OtherProvider] {
         match self {
-            Self::EcdsaP521 => &[OtherProvider::BaselineAwsLcRs],
+            Self::EcdsaP521 => OtherProvider::NOT_RING,
             _ => OtherProvider::OTHERS,
         }
     }
@@ -353,7 +354,9 @@ impl KeyType {
 
 #[derive(Copy, Clone, Debug)]
 enum OtherProvider {
+    #[cfg(not(target_family = "wasm"))]
     BaselineRing,
+    #[cfg(not(target_family = "wasm"))]
     BaselineAwsLcRs,
     SelfTest,
 }
@@ -361,18 +364,33 @@ enum OtherProvider {
 impl OtherProvider {
     fn into_provider(self) -> Arc<CryptoProvider> {
         match self {
+            #[cfg(not(target_family = "wasm"))]
             Self::BaselineRing => ring::default_provider().into(),
+            #[cfg(not(target_family = "wasm"))]
             Self::BaselineAwsLcRs => aws_lc_rs_provider::default_provider().into(),
             Self::SelfTest => rind_rustls::default_provider().into(),
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     const OTHERS: &[Self] = &[Self::BaselineRing, Self::BaselineAwsLcRs];
+    /// Those with P-521 and ML-KEM, which *ring* lacks.
+    #[cfg(not(target_family = "wasm"))]
+    const NOT_RING: &[Self] = &[Self::BaselineAwsLcRs, Self::SelfTest];
+
+    // rustls's own providers build for neither wasm target, so there rind
+    // runs against itself.
+    #[cfg(target_family = "wasm")]
+    const OTHERS: &[Self] = &[Self::SelfTest];
+    #[cfg(target_family = "wasm")]
+    const NOT_RING: &[Self] = Self::OTHERS;
 
     /// This provider's own key exchange group named `name`.
     fn kx_group(self, name: NamedGroup) -> &'static dyn SupportedKxGroup {
         let all = match self {
+            #[cfg(not(target_family = "wasm"))]
             Self::BaselineRing => ring::ALL_KX_GROUPS,
+            #[cfg(not(target_family = "wasm"))]
             Self::BaselineAwsLcRs => aws_lc_rs_provider::ALL_KX_GROUPS,
             Self::SelfTest => rind_rustls::ALL_KX_GROUPS,
         };

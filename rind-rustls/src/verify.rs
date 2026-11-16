@@ -365,6 +365,8 @@ mod tests {
         }
     }
 
+    // aws-lc-rs does not build for wasm.
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn verify_debug_names_the_type_and_ids_match_aws_lc() {
         use rustls::pki_types::alg_id;

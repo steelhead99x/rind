@@ -146,10 +146,16 @@ mod tests {
 
         assert!(t.enabled());
         assert_eq!(t.lifetime(), ONE_TICKET_LIFETIME_SECS * 2);
-        let theirs = rustls::crypto::aws_lc_rs::Ticketer::new().unwrap();
-        assert_eq!(t.lifetime(), theirs.lifetime());
+        // aws-lc-rs does not build for wasm.
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let theirs = rustls::crypto::aws_lc_rs::Ticketer::new().unwrap();
+            assert_eq!(t.lifetime(), theirs.lifetime());
+        }
     }
 
+    // aws-lc-rs does not build for wasm.
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn make_generator() {
         let g = make_ticket_generator().unwrap();

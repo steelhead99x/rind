@@ -1,5 +1,9 @@
 //! Lengths, limits, and `Debug` that cargo-mutants can replace without a
 //! handshake noticing, checked against rustls's aws-lc-rs provider.
+//!
+//! aws-lc-rs does not build for wasm, so wasm leaves these out.
+
+#![cfg(not(target_family = "wasm"))]
 
 #[cfg(feature = "tls12")]
 use rustls::ContentType;
