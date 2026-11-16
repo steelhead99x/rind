@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SubjectPublicKeyInfo` with `rsa.EncryptingKey.from_spki`.
 - **Breaking:** `key_wrap.AesKek`'s four methods are two, each naming a
   `key_wrap.Mode`, `KW` or `KWP`.
+- **Breaking:** `rsa.KeySize` equals only itself, never the int it once
+  did, so its hash agrees with its equality.
+- `agreement.PrivateKey.public_key()` and `kem.DecapsulationKey.public_key()`
+  return the same object each call, made on the first.
 
 ### Added
 
@@ -64,6 +68,7 @@ Each name in 0.1 and its replacement:
 | `rsa.EncryptingKey(algorithm, der)`, PKCS#1 or SPKI | `rsa.EncryptingKey(algorithm, der)`, PKCS#1 only, or `rsa.EncryptingKey.from_spki(algorithm, der)` |
 | `key_wrap.AesKek.wrap(key)`, `unwrap(wrapped)` | `wrap_key(key_wrap.Mode.KW, key)`, `unwrap_key(key_wrap.Mode.KW, wrapped)` |
 | `key_wrap.AesKek.wrap_padded(key)`, `unwrap_padded(wrapped)` | `wrap_key(key_wrap.Mode.KWP, key)`, `unwrap_key(key_wrap.Mode.KWP, wrapped)` |
+| `rsa.KeySize.RSA_2048 == 0` and the like | `int(rsa.KeySize.RSA_2048) == 0` |
 
 ## [0.1.2](https://github.com/kixel-ai/rind/compare/rind-python-v0.1.1...rind-python-v0.1.2) - 2026-11-08
 

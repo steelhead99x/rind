@@ -1,6 +1,7 @@
 """RSA: PKCS#1 v1.5 and PSS signatures and OAEP encryption, on rind's RSA."""
 
 import abc
+import functools
 
 import pyrind
 from pyrind import rsa as _rsa
@@ -8,13 +9,11 @@ from pyrind.rsa import sign as _sign
 from pyrind.rsa import verify as _verify
 
 from pyrind_cryptography import _der
-from pyrind_cryptography.exceptions import InvalidSignature, _Reasons, unsupported
+from pyrind_cryptography.exceptions import _Reasons, unsupported
 from pyrind_cryptography.hazmat.primitives import _keys, hashes
 from pyrind_cryptography.hazmat.primitives.asymmetric import padding as _padding
 from pyrind_cryptography.hazmat.primitives.asymmetric import utils as _utils
 from pyrind_cryptography.hazmat.primitives.serialization import _ssh
-
-_ALGORITHM = _der.sequence(_der.encode(_der.OID, _der.encode_oid("1.2.840.113549.1.1.1")), _der.encode(_der.NULL, b""))
 
 _SIZES = {
     2048: _rsa.KeySize.RSA_2048,
@@ -59,6 +58,11 @@ def _check_private_size(pkcs1):
     except (ValueError, IndexError):
         return
     _check_size(n.bit_length(), 2048)
+
+
+def _unsigned(value):
+    """A positive int's minimal big-endian bytes, as `PublicKey.from_components` takes them."""
+    return value.to_bytes((value.bit_length() + 7) // 8, "big")
 
 
 def _hash_name(algorithm):
@@ -131,7 +135,9 @@ class RSAPublicNumbers:
         """Loads the key."""
         if self._e < 3 or self._n < 3:
             raise ValueError("Invalid RSA key")
-        return RSAPublicKey._from_spki(_der.spki(_ALGORITHM, _der.sequence(_der.encode_integer(self._n), _der.encode_integer(self._e))))
+        _check_size(self._n.bit_length(), 1024)
+        with _keys.loading():
+            return RSAPublicKey(_rsa.PublicKey.from_components(_unsigned(self._n), _unsigned(self._e)))
 
     def __eq__(self, other):
         if not isinstance(other, RSAPublicNumbers):
@@ -191,21 +197,30 @@ class RSAPublicKey(metaclass=abc.ABCMeta):
 
     def __init__(self, key):
         self._key = key
-        self._spki = key.to_spki()
         self._n, self._e = _der.integers(bytes(key))
         self._encrypting = {}
 
     @classmethod
     def _from_spki(cls, der):
-        """Loads `SubjectPublicKeyInfo` DER, refusing a modulus under 1024 bits or over 8192."""
+        """Loads `SubjectPublicKeyInfo` DER, refusing a modulus under 1024 bits or over 8192 as unsupported."""
+        return cls._load(_rsa.PublicKey.from_spki, der, lambda: _der.spki_key(der))
+
+    @classmethod
+    def _from_pkcs1(cls, der):
+        """Loads a PKCS#1 `RSAPublicKey`, refusing a modulus under 1024 bits or over 8192 as unsupported."""
+        return cls._load(_rsa.PublicKey, der, lambda: der)
+
+    @classmethod
+    def _load(cls, parse, der, pkcs1):
+        """Loads `der` with `parse`, first refusing as unsupported a well-formed key whose `pkcs1` modulus rind lacks."""
         try:
-            n = _der.integers(_der.spki_key(der))[0]
+            n = _der.integers(pkcs1())[0]
         except (ValueError, IndexError):
             pass
         else:
             _check_size(n.bit_length(), 1024)
         with _keys.loading():
-            return RSAPublicKey(_rsa.PublicKey.from_spki(der))
+            return cls(parse(der))
 
     @property
     def key_size(self):
@@ -214,15 +229,12 @@ class RSAPublicKey(metaclass=abc.ABCMeta):
     def public_numbers(self):
         return RSAPublicNumbers(self._e, self._n)
 
-    def _pkcs1(self):
-        return _der.spki_key(self._spki)
-
     def _openssh(self):
         return _ssh.encode_public(b"ssh-rsa", _ssh.mpint(self._e) + _ssh.mpint(self._n))
 
     def public_bytes(self, encoding, format):
         """Writes the key as `encoding` and `format`."""
-        return _keys.public_bytes(encoding, format, spki=lambda: self._spki, pkcs1=self._pkcs1, openssh=self._openssh)
+        return _keys.public_bytes(encoding, format, spki=self._key.to_spki, pkcs1=lambda: bytes(self._key), openssh=self._openssh)
 
     def _verification_algorithm(self, padding, algorithm):
         hash_name = _hash_name(algorithm)
@@ -232,7 +244,6 @@ class RSAPublicKey(metaclass=abc.ABCMeta):
         elif isinstance(padding, _padding.PSS):
             if _mgf1_hash(padding) != hash_name:
                 raise unsupported("PSS with a different MGF1 hash", _Reasons.UNSUPPORTED_PADDING)
-            _check_size(self.key_size, 2048)
             exact = _pss_salt_is_digest(padding, hash_name, algorithm.digest_size, self.key_size, verifying=True)
             chosen = _choose(_PSS_VERIFY if exact else _PSS_VERIFY_ANY_SALT, hash_name, "PSS")
         elif isinstance(padding, _padding.AsymmetricPadding):
@@ -248,10 +259,13 @@ class RSAPublicKey(metaclass=abc.ABCMeta):
             try:
                 self._key.verify(chosen, data, signature)
             except pyrind.KeyRejected:
-                # The size checks above keep every key within the chosen
-                # algorithm's floor, so this is a mismatch with rind's, which
-                # verifies nothing.
-                raise InvalidSignature from None
+                # The modulus is below the algorithm's floor, which rind
+                # checks before it reads the signature: a key rind does not
+                # verify with, not a bad signature.
+                raise unsupported(
+                    f"{type(padding).__name__} with {algorithm.name} for a {self.key_size}-bit key",
+                    _Reasons.UNSUPPORTED_PUBLIC_KEY_ALGORITHM,
+                ) from None
 
     def recover_data_from_signature(self, signature, padding, algorithm):
         """Recovers the signed digest; rind only verifies."""
@@ -273,7 +287,7 @@ class RSAPublicKey(metaclass=abc.ABCMeta):
     def __eq__(self, other):
         if not isinstance(other, RSAPublicKey):
             return NotImplemented
-        return self._spki == other._spki
+        return bytes(self._key) == bytes(other._key)
 
     def __copy__(self):
         return self
@@ -287,12 +301,16 @@ class RSAPrivateKey(metaclass=abc.ABCMeta):
 
     def __init__(self, key_pair):
         self._key_pair = key_pair
-        self._public_key = RSAPublicKey(key_pair.public_key())
         self._decrypting = {}
 
     @property
     def key_size(self):
         return self._public_key.key_size
+
+    @functools.cached_property
+    def _public_key(self):
+        """The public key, made on first use, so a key that only signs or decrypts never parses it."""
+        return RSAPublicKey(self._key_pair.public_key())
 
     def public_key(self):
         return self._public_key

@@ -215,8 +215,8 @@ pub(crate) fn bytes_with<'py>(
 }
 
 /// A key's public key as a Python object, made on the first `get` and the
-/// same object every call after, so a key loaded only to sign or decrypt
-/// never copies its public key.
+/// same object every call after, so a key that only signs, decrypts,
+/// agrees, or decapsulates never copies its public key.
 pub(crate) struct PublicKeyCell<T>(PyOnceLock<Py<T>>);
 
 impl<T: pyo3::PyClass> PublicKeyCell<T> {
@@ -240,9 +240,9 @@ pub(crate) fn bytes<'py>(py: Python<'py>, value: impl AsRef<[u8]>) -> Bound<'py,
     PyBytes::new(py, value.as_ref())
 }
 
-/// Adds the submodule `path`, such as `pyrind.signature.verify`, to
-/// `parent` under its last component, and to `sys.modules`, so that
-/// `import pyrind.signature.verify` finds it.
+/// Adds the submodule `path`, such as `pyrind.rsa.verify`, to `parent`
+/// under its last component, and to `sys.modules`, so that
+/// `import pyrind.rsa.verify` finds it.
 pub(crate) fn submodule<'py>(
     parent: &Bound<'py, PyModule>,
     path: &str,

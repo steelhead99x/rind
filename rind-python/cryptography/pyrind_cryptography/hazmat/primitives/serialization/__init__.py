@@ -128,7 +128,7 @@ def _spki(der):
 
 def _pkcs1_public(der):
     rsa = _modules()[2]
-    return rsa.RSAPublicKey._from_spki(_der.spki(rsa._ALGORITHM, der))
+    return rsa.RSAPublicKey._from_pkcs1(der)
 
 
 def _public_der(der):

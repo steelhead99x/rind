@@ -61,21 +61,21 @@ _CURVE_TYPES["prime192v1"] = SECP192R1
 _CURVE_TYPES["prime256v1"] = SECP256R1
 
 # Each curve rind has: its algorithms, the field prime and `b` for
-# decompressing points (`a` is -3 on all three), its OID, and its SSH name.
+# decompressing points (`a` is -3 on all three), and its SSH name.
 _RIND = {
     "secp256r1": (
         _sign.P256_SHA256_ASN1, _agreement.ECDH_P256, 2**256 - 2**224 + 2**192 + 2**96 - 1,
-        0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B, "1.2.840.10045.3.1.7", b"nistp256",
+        0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B, b"nistp256",
     ),
     "secp384r1": (
         _sign.P384_SHA384_ASN1, _agreement.ECDH_P384, 2**384 - 2**128 - 2**96 + 2**32 - 1,
         0xB3312FA7E23EE7E4988E056BE3F82D19181D9C6EFE8141120314088F5013875AC656398D8A2ED19D2A85C8EDD3EC2AEF,
-        "1.3.132.0.34", b"nistp384",
+        b"nistp384",
     ),
     "secp521r1": (
         _sign.P521_SHA512_ASN1, _agreement.ECDH_P521, 2**521 - 1,
         0x0051953EB9618E1C9A1F929A21A0B68540EEA2DA725B99B315F3B8B489918EF109E156193951EC7E937B1652C0BD3BB1BF073573DF883D2C34F1EF451FD46B503F00,
-        "1.3.132.0.35", b"nistp521",
+        b"nistp521",
     ),
 }
 _OIDS = {
@@ -239,7 +239,7 @@ class EllipticCurvePrivateNumbers:
 
 def _decompress(curve, point):
     """The uncompressed form of the compressed point `point`, which is public, so plain integer arithmetic serves."""
-    _, _, p, b, _, _ = _rind(curve)
+    _, _, p, b, _ = _rind(curve)
     width = _width(curve)
     if len(point) != 1 + width:
         raise ValueError("Invalid EC key.")
@@ -305,9 +305,8 @@ class EllipticCurvePublicKey(metaclass=abc.ABCMeta):
         return EllipticCurvePublicNumbers(x, y, self._curve)
 
     def _spki(self):
-        oid = _rind(self._curve)[4]
-        algorithm = _der.sequence(_der.encode(_der.OID, _der.encode_oid("1.2.840.10045.2.1")), _der.encode(_der.OID, _der.encode_oid(oid)))
-        return _der.spki(algorithm, self._point)
+        # Each way to make a key loads its curve's own verifier first.
+        return self._verifiers[_SIGN_HASH[self._curve.name]].to_spki()
 
     def _encode_point(self, compressed):
         if not compressed:
@@ -316,7 +315,7 @@ class EllipticCurvePublicKey(metaclass=abc.ABCMeta):
         return bytes([2 | self._point[-1] & 1]) + self._point[1 : 1 + width]
 
     def _openssh(self):
-        name = _rind(self._curve)[5]
+        name = _rind(self._curve)[4]
         kind = b"ecdsa-sha2-" + name
         return _ssh.encode_public(kind, _ssh.string(name) + _ssh.string(self._point))
 

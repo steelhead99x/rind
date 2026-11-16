@@ -90,20 +90,6 @@ def encode(tag, contents):
     return bytes([tag, 0x80 | len(length)]) + length + contents
 
 
-def encode_oid(dotted):
-    """Encodes the contents of an OBJECT IDENTIFIER in dotted form."""
-    arcs = [int(arc) for arc in dotted.split(".")]
-    out = bytearray()
-    for arc in [40 * arcs[0] + arcs[1], *arcs[2:]]:
-        chunk = [arc & 0x7F]
-        arc >>= 7
-        while arc:
-            chunk.append(0x80 | arc & 0x7F)
-            arc >>= 7
-        out += bytes(reversed(chunk))
-    return bytes(out)
-
-
 def encode_integer(value):
     """Encodes a non-negative INTEGER."""
     if value < 0:
@@ -156,11 +142,6 @@ def spki_key(der):
     if not bits or bits[0] != 0:
         raise ValueError("bad SubjectPublicKeyInfo")
     return bits[1:]
-
-
-def spki(algorithm_der, key):
-    """Encodes a `SubjectPublicKeyInfo` from its encoded `AlgorithmIdentifier` and key octets."""
-    return sequence(algorithm_der, encode(BIT_STRING, b"\x00" + key))
 
 
 def integers(der):

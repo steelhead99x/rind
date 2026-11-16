@@ -82,11 +82,11 @@ impl AesCbcDecryptingKey {
 }
 
 /// A key-wrap mode: AES-KW (RFC 3394), for keys a multiple of 8 bytes from
-/// 16, or AES-KWP (RFC 5649), for keys of any length from 1 byte.
+/// 16, or AES-KWP (RFC 5649), for keys of any length from 1 byte; equal
+/// only to itself, never to an int, so its hash agrees with its equality.
 #[pyclass(
     frozen,
     eq,
-    eq_int,
     hash,
     from_py_object,
     module = "pyrind.key_wrap",
@@ -133,10 +133,8 @@ impl Kek {
         mode: KeyWrapMode,
         key: Bytes<'_>,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        let len = match mode {
-            KeyWrapMode::Kw => key.len() + 8,
-            KeyWrapMode::Kwp => key.len().next_multiple_of(8) + 8,
-        };
+        // Both modes' wrapped length, as KW takes only a multiple of 8.
+        let len = key.len().next_multiple_of(8) + 8;
         bytes_with(py, &[], len, |out| {
             self.0.wrap_key(mode.into(), &key, out).map_err(error)
         })
@@ -150,31 +148,15 @@ impl Kek {
         mode: KeyWrapMode,
         wrapped: Bytes<'_>,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        let min = match mode {
-            KeyWrapMode::Kw => 24,
-            KeyWrapMode::Kwp => 16,
-        };
-        if wrapped.len() < min || !wrapped.len().is_multiple_of(8) {
-            return Err(error(rind::Error::DecryptFailed));
-        }
-        match mode {
-            KeyWrapMode::Kw => bytes_with(py, &[], wrapped.len() - 8, |out| {
-                self.0
-                    .unwrap_key(Mode::Kw, &wrapped, out)
-                    .map(|_| ())
-                    .map_err(error)
-            }),
-            // The unpadded key is shorter than the buffer, so it is copied out.
-            KeyWrapMode::Kwp => {
-                let mut key = vec![0; wrapped.len() - 8];
-                let len = self
-                    .0
-                    .unwrap_key(Mode::Kwp, &wrapped, &mut key)
-                    .map_err(error)?
-                    .len();
-                Ok(bytes(py, &key[..len]))
-            }
-        }
+        // rind refuses a `wrapped` too short for `mode` before it reads the
+        // buffer, and KWP's key may be shorter than it, so it is copied out.
+        let mut key = vec![0; wrapped.len().saturating_sub(8)];
+        let len = self
+            .0
+            .unwrap_key(mode.into(), &wrapped, &mut key)
+            .map_err(error)?
+            .len();
+        Ok(bytes(py, &key[..len]))
     }
 }
 

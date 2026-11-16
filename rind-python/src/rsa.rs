@@ -7,8 +7,9 @@ use rind::rsa;
 
 use crate::{Bytes, PublicKeyCell, algorithm, bytes, constants, error, submodule};
 
-/// An RSA modulus size for key generation.
-#[pyclass(frozen, eq, eq_int, hash, from_py_object, module = "pyrind.rsa")]
+/// An RSA modulus size for key generation, equal only to itself, never to
+/// an int, so its hash agrees with its equality.
+#[pyclass(frozen, eq, hash, from_py_object, module = "pyrind.rsa")]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum KeySize {
     #[pyo3(name = "RSA_2048")]
