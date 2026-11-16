@@ -27,11 +27,16 @@ rind = { version = "0.3.2", path = "../rind" }
 rustls = { version = "0.23.20", default-features = false, features = ["std"] }
 
 [dev-dependencies]
+env_logger = "0.11"
+hex = "0.4"
+
+# aws-lc-rs does not build for wasm and ring needs a C compiler targeting it,
+# so wasm leaves out the differential tests, and the examples, whose tokio
+# needs the threads and sockets wasm lacks.
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 # Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
 # features, as `admin/ctgrind` does; otherwise they build as no-ops.
 crabgrind = { version = "0.4", default-features = false }
-env_logger = "0.11"
-hex = "0.4"
 http = "1"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false }
