@@ -38,6 +38,9 @@ printf '%s\0' "$@" >"$out.args"
     if [[ -v RUSTC_WRAPPER ]]; then
         printf 'WRAPPER=%s\n' "$RUSTC_WRAPPER"
     fi
+    if [[ -v RIND_BARE_METAL_INNER_WRAPPER ]]; then
+        printf 'INNER=%s\n' "$RIND_BARE_METAL_INNER_WRAPPER"
+    fi
     if [[ -v CARGO_TARGET_DIR ]]; then
         printf 'TARGET_DIR=%s\n' "$CARGO_TARGET_DIR"
     fi
@@ -73,7 +76,9 @@ run() {
     mkdir -p "$record/cargo-home"
     # An empty CARGO_HOME keeps a developer config out of the command list.
     # A caller can override it with `env CARGO_HOME=...`.
-    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+    # Drop a developer rustc wrapper too, so the recorded chain is this
+    # test's. A case that wants one sets it in the command.
+    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER \
         CARGO_HOME="$record/cargo-home" \
         CARGO_TARGET_DIR="$record/target" \
         PATH="$tmp:$PATH" RECORD_DIR="$record" \
@@ -402,6 +407,58 @@ eq_fields=$(
 )
 assert_has "$eq_fields" "--target=thumbv6m-none-eabi"
 assert_has "$eq_fields" 'getrandom_backend="custom"'
+
+# A caller-supplied RUSTC_WRAPPER stays in the chain. This script appends
+# its flags, then that wrapper runs. Dry mode still only prints the argv.
+caller=$tmp/caller-wrapper
+cat >"$caller" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$RUSTC_WRAPPER" >"${CALLER_SEEN:?}"
+printf '%s\0' "$@" >"${CALLER_ARGV:?}"
+printf 'caller-ran\n' >>"${CALLER_LOG:?}"
+exit 0
+EOF
+chmod +x "$caller"
+direct=$tmp/direct-chain
+mkdir -p "$direct"
+CALLER_ARGV=$direct/argv CALLER_LOG=$direct/log CALLER_SEEN=$direct/seen \
+    RIND_BARE_METAL_INNER_WRAPPER=$caller \
+    RIND_BARE_METAL_RUSTFLAGS='--cfg getrandom_backend="custom"' \
+    "$wrapper" rustc --crate-name rind --target thumbv6m-none-eabi
+assert_has "$(cat "$direct/log")" "caller-ran"
+assert_has "$(cat "$direct/seen")" "$caller"
+direct_fields=$(nul_fields <"$direct/argv")
+assert_has "$direct_fields" "rustc"
+assert_has "$direct_fields" "--target"
+assert_has "$direct_fields" "thumbv6m-none-eabi"
+assert_has "$direct_fields" 'getrandom_backend="custom"'
+dry_log=$tmp/dry-skips-inner.log
+dry_seen=$tmp/dry-skips-inner.seen
+dry_fields=$(
+    RIND_BARE_METAL_INNER_WRAPPER=$caller \
+        RIND_BARE_METAL_WRAPPER_DRY=1 \
+        RIND_BARE_METAL_RUSTFLAGS='--cfg getrandom_backend="custom"' \
+        CALLER_ARGV=$tmp/unused-argv CALLER_LOG=$dry_log CALLER_SEEN=$dry_seen \
+        "$wrapper" rustc --target thumbv6m-none-eabi | nul_fields
+)
+assert_has "$dry_fields" 'getrandom_backend="custom"'
+if [[ -e $dry_log || -e $dry_seen ]]; then
+    echo "dry run called the inner wrapper" >&2
+    exit 1
+fi
+chain=$tmp/chain
+if ! run "$chain" env RUSTC_WRAPPER="$caller" "$script" >/dev/null; then
+    echo "wrapper chain path failed" >&2
+    exit 1
+fi
+chain_env=$(cat "$chain/0.env")
+assert_has "$chain_env" "bare-metal-rustc"
+assert_has "$chain_env" "INNER=$caller"
+if ! grep -qx 'INNER=' "$default/0.env"; then
+    echo "empty caller wrapper was recorded as [$(grep '^INNER=' "$default/0.env")]" >&2
+    exit 1
+fi
 
 # Cargo's own config, including forms a hand parser drops, reaches the
 # build. The wrapper's cfg is on top of whichever source Cargo chose.

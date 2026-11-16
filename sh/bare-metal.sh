@@ -49,16 +49,20 @@ run_cargo() {
     shift 2
     # The target selects the flags in `extra`. Cargo sees it as `--target`.
     : "$target"
-    local wrapper base sum dir
+    local wrapper base sum dir inner
     wrapper=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bare-metal-rustc
+    # Cargo runs one RUSTC_WRAPPER. Keep a wrapper the caller already
+    # exported: this script appends its flags, then that wrapper runs rustc.
+    inner=${RUSTC_WRAPPER:-}
     # Cargo fingerprints its own rustflags, not flags a wrapper appends.
     # Two flag sets for one triple (SSE2, and no SSE2 with dalek `serial`)
     # would otherwise reuse one build script and compile the wrong backend.
     base=${CARGO_TARGET_DIR:-target}
     sum=$(printf '%s' "$extra" | cksum | awk '{ print $1 }')
     dir=$base/rind-bare-metal-$sum
-    env "RIND_BARE_METAL_RUSTFLAGS=$extra" "RUSTC_WRAPPER=$wrapper" \
-        "CARGO_TARGET_DIR=$dir" "$@"
+    env "RIND_BARE_METAL_RUSTFLAGS=$extra" \
+        "RIND_BARE_METAL_INNER_WRAPPER=$inner" \
+        "RUSTC_WRAPPER=$wrapper" "CARGO_TARGET_DIR=$dir" "$@"
 }
 
 # Flags every lint of TARGET needs. ESP-IDF uses getrandom's own backend.

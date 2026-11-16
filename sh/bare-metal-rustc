@@ -7,6 +7,8 @@
 # which is how Cargo fills CARGO_CFG_*, so the probe and the compile see the
 # same flags, from the rustc Cargo selected (the `+esp` toolchain on Xtensa).
 # A host build script has no `--target` and is unchanged.
+# A caller who already set RUSTC_WRAPPER keeps that program: it runs this
+# argv, flags included, with RUSTC_WRAPPER pointed back at it.
 set -euo pipefail
 
 target=""
@@ -46,4 +48,10 @@ if [[ ${RIND_BARE_METAL_WRAPPER_DRY:-} == 1 ]]; then
     exit 0
 fi
 
+# Empty means the caller had no wrapper, so rustc runs directly.
+if [[ -n ${RIND_BARE_METAL_INNER_WRAPPER:-} ]]; then
+    inner=$RIND_BARE_METAL_INNER_WRAPPER
+    unset RIND_BARE_METAL_INNER_WRAPPER
+    RUSTC_WRAPPER=$inner exec "$inner" "${final[@]}"
+fi
 exec "${final[@]}"
