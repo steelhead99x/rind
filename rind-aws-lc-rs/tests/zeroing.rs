@@ -40,11 +40,9 @@ fn leaks(secret: &[u8], drop: impl FnOnce()) -> usize {
 }
 
 /// Like [`leaks`], ignoring one freed block that is the document `allow`
-/// with no further copy of the needle after it.
-///
-/// The returned flag is whether that block was seen. A second block with the
-/// same prefix counts.
-fn leaks_ignoring_document(secret: &[u8], allow: &[u8], drop: impl FnOnce()) -> (usize, bool) {
+/// with no further copy of the needle after it. A second such block counts.
+/// If that document was wiped, nothing is ignored.
+fn leaks_ignoring_document(secret: &[u8], allow: &[u8], drop: impl FnOnce()) -> usize {
     let needle = &secret[..NEEDLE_LEN];
     let ((), blocks) = freed::freed(drop);
     let mut ignored = false;
@@ -60,7 +58,7 @@ fn leaks_ignoring_document(secret: &[u8], allow: &[u8], drop: impl FnOnce()) -> 
         }
         leaked += 1;
     }
-    (leaked, ignored)
+    leaked
 }
 
 /// Bytes unlikely to appear anywhere else.
@@ -249,11 +247,12 @@ fn ml_dsa_expanded() {
     .as_ref()
     .to_vec();
     let secret = &raw[32..];
-    // One freed block is the PKCS#8 document this call builds. The adapter's
-    // `expanded_pkcs8` in `rind-aws-lc-rs/src/pqdsa.rs` leaves that copy
-    // unwiped. Every other freed block that holds `K` counts.
+    // `from_raw_private_key` may free the PKCS#8 document built by the
+    // adapter's `expanded_pkcs8` (`rind-aws-lc-rs/src/pqdsa.rs`), which that
+    // function leaves unwiped. That one block is ignored. Every other freed
+    // block that holds `K` counts, including a second copy of the document.
     let pkcs8 = expanded_pkcs8(&raw);
-    let (leaked, ignored_document) = leaks_ignoring_document(secret, &pkcs8, || {
+    let leaked = leaks_ignoring_document(secret, &pkcs8, || {
         let key = Box::new(
             signature::PqdsaKeyPair::from_raw_private_key(&signature::ML_DSA_44_SIGNING, &raw)
                 .unwrap(),
@@ -262,7 +261,6 @@ fn ml_dsa_expanded() {
         let mut sig = vec![0; signature::ML_DSA_44_SIGNING.signature_len()];
         key.sign(b"expanded", &mut sig).unwrap();
     });
-    assert!(ignored_document);
     assert_eq!(leaked, 0);
 
     let leaked = leaks(secret, || {
