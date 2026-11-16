@@ -1,13 +1,12 @@
-# SHA-512 in IRAM
-
-Difficulty: 6/10 (estimate)
-
+# [M] SHA-512 in IRAM
 
 ## Goal
 
 The IRAM SHA-512 path is tested end to end on QEMU, sized deliberately, and free of duplicated code.
 
 ## Plan
+
+Difficulty: 6/10 (estimate).
 
 Fork PR #94, head `48132d02`, on #69. Score 6/10.
 

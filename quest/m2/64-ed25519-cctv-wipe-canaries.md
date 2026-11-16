@@ -1,13 +1,12 @@
-# Ed25519 CCTV and wipe canaries
-
-Difficulty: 5/10 (estimate)
-
+# [M] Ed25519 CCTV and wipe canaries
 
 ## Goal
 
 The Ed25519 checks run in the right CI lanes with the right coverage, and the ML-DSA wasm part is trimmed to avoid overlap.
 
 ## Plan
+
+Difficulty: 5/10 (estimate).
 
 Fork PR #64, head `4f74eebb`. Score 7/10. Upstream twin #797. Base `fork/mldsa-aws-lc-rs`. Grok's full fix for all nine findings is saved as `forkpr-64-partial-grok.diff`, but no one has reviewed it.
 

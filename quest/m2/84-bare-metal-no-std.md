@@ -1,13 +1,12 @@
-# Bare-metal no-std backends
-
-Difficulty: 8/10 (estimate)
-
+# [L] Bare-metal no-std backends
 
 ## Goal
 
 The bare-metal backends are safe on unaligned targets and their CPU and cache handling is correct. This is the bottom of the bare-metal stack.
 
 ## Plan
+
+Difficulty: 8/10 (estimate).
 
 Fork PR #84 (fork only), head `95f3c6dc`. Score 6/10. A partial diff is saved.
 
@@ -20,4 +19,4 @@ Mediums:
 - The `cached()` constructors skip the CPU check.
 - Targets without compare-and-swap rebuild the cache on every call.
 
-Finish this before [#85](85-xtensa-lint.md).
+Finish this before [#85](/quest/m2/85-xtensa-lint.md).

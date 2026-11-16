@@ -1,8 +1,10 @@
 # Review follow-ups for steelhead99x/rind fork PRs
 
-Draft quests written by hand from the review notes (not yet validated with the `quest` CLI). Each file maps to one fork PR or a small group of PRs. Milestones follow rind's quest plan: m0 holds urgent fixes (broken CI, data-loss risks), m2 holds the rest of the follow-up work.
+## Goal
 
-## Order
+Land each fork PR the review notes cover, one quest per PR or small group, in the order below. Nothing goes to upstream until the maintainer says so.
+
+## Plan
 
 Finish bottom to top within each stack:
 
@@ -10,9 +12,11 @@ Finish bottom to top within each stack:
 - aarch64: #82, then #118
 - arithmetic and protocols: #76, #39, #64, #23 can go in any order
 
-Independent PRs: #117, #119, #79, #798, #799, #800, #106, #107.
+Independent PRs: #117, #79, #798, #799, #800, #106, #107. #119 is closed: fork `main` already has its fix.
 
-## Rules (from the review notes)
+Many PRs sit on a stacked base such as `fork/bench-report`; check a PR's base before retargeting it, because that pulls in the whole stack.
+
+Rules from the review notes:
 
 - Work only on the fork PR branch. Do not push to `up/*` branches.
 - Merge upstream changes; never rebase or force-push.
@@ -20,12 +24,6 @@ Independent PRs: #117, #119, #79, #798, #799, #800, #106, #107.
 - Commit author and committer: steelhead99x.
 - Leave the core zeroing ml_dsa Mac failure to upstream #803.
 
-## Status of this workspace
+## Waiting
 
-- GitHub access for this session is read-only (public clone only). Nothing here can be pushed until push access is granted.
-- Closing #109: close it, and give error-kinds its own fork PR onto `fork/mldsa-aws-lc-rs`.
-
-## Files
-
-m0: 107-bench-report-host-slugs.md, 106-alert-on-cancel.md
-m2: all others
+- Maintainer: close #109 and give its error-kinds work its own fork PR onto `fork/mldsa-aws-lc-rs`

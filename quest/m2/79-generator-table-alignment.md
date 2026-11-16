@@ -1,13 +1,12 @@
-# Generator table alignment
-
-Difficulty: 5/10 (estimate)
-
+# [M] Generator table alignment
 
 ## Goal
 
 Generator tables have real alignment guarantees, not just type checks, and the aarch64 proof does not depend on a generated name.
 
 ## Plan
+
+Difficulty: 5/10 (estimate).
 
 Fork PR #79, head `cfb3e411`. Score 8/10. Upstream twin #790; fork #111 mirrors it. Lean proofs pass for both.
 

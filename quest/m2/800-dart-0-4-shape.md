@@ -1,13 +1,12 @@
-# Dart 0.4 shape fixes
-
-Difficulty: 6/10 (estimate)
-
+# [M] Dart 0.4 shape fixes
 
 ## Goal
 
 Dart's ECDSA and RSA ids are tested, fresh-process checks do not race the build hook, and naming and docs are corrected.
 
 ## Plan
+
+Difficulty: 6/10 (estimate).
 
 Upstream draft #800, fork branch `fork/800-gaps` at `bc56b761`. Score 8/10. Push the branch and open a fork PR first.
 

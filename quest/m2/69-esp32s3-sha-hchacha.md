@@ -1,13 +1,12 @@
-# ESP32-S3 SHA and HChaCha
-
-Difficulty: 6/10 (estimate)
-
+# [M] ESP32-S3 SHA and HChaCha
 
 ## Goal
 
 The Xtensa assembly that ships is tested under QEMU, rolled SHA-512 and HChaCha20 are limited to ESP-IDF Xtensa, and the layout job builds rind itself.
 
 ## Plan
+
+Difficulty: 6/10 (estimate).
 
 Fork PR #69 (upstream twin #793; fork #114 mirrors it), head `9ee58187`. Score 5/10.
 
