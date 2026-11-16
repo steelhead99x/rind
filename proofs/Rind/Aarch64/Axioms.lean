@@ -6,6 +6,7 @@ import Rind.Aarch64.Pbkdf2
 import Rind.Aarch64.P256
 import Rind.Aarch64.ChaCha20
 import Rind.Aarch64.Ed25519
+import Rind.Aarch64.Ed25519Verify
 import Rind.Aarch64.Sha3
 import Rind.Aarch64.P256Signature
 import Rind.Aarch64.AesModesLow
