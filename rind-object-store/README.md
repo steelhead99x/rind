@@ -17,4 +17,9 @@ let store = object_store::gcp::GoogleCloudStorageBuilder::new()
     .build()?;
 ```
 
+It builds for `wasm32-wasip2` and `wasm32-unknown-unknown`, the browser, where
+rind needs its JavaScript random source, `getrandom = { version = "0.4",
+features = ["wasm_js"] }`. [PLATFORMS.md](https://github.com/kixel-ai/rind/blob/main/PLATFORMS.md) lists what each adapter's
+upstream needs there too, and why rind's constant-time checks do not cover wasm.
+
 License: Apache-2.0 OR ISC OR MIT-0

@@ -51,6 +51,51 @@ pub(crate) mod ml_dsa {
     pub(crate) const ML_DSA_87: u32 = 3;
 }
 
+/// The operations of the ACVP build's `rind_fips_acvp`, by their arguments
+/// and their output, which only that build serves.
+#[allow(dead_code)]
+pub(crate) mod acvp {
+    /// HMAC_DRBG over SHA-512 with prediction resistance, of no parameter:
+    /// the entropy, nonce, and personalization string it instantiates with,
+    /// then each of two generates' additional input and entropy, to the
+    /// second generate's output.
+    pub(crate) const DRBG: u32 = 1;
+    /// ML-KEM key generation (`kem`) from seeds `d` and `z`, to the
+    /// encapsulation key, then the expanded decapsulation key.
+    pub(crate) const ML_KEM_KEY_GEN: u32 = 2;
+    /// ML-KEM encapsulation (`kem`) to an encapsulation key of message `m`,
+    /// to the ciphertext, then the shared secret.
+    pub(crate) const ML_KEM_ENCAP: u32 = 3;
+    /// ML-KEM decapsulation (`kem`) with an expanded decapsulation key of a
+    /// ciphertext, to the shared secret.
+    pub(crate) const ML_KEM_DECAP: u32 = 4;
+    /// ML-KEM's encapsulation key check (`kem`), to nothing.
+    pub(crate) const ML_KEM_CHECK_ENCAPSULATION_KEY: u32 = 5;
+    /// ML-KEM's decapsulation key check (`kem`), to nothing.
+    pub(crate) const ML_KEM_CHECK_DECAPSULATION_KEY: u32 = 6;
+    /// ML-DSA key generation (`ml_dsa`) from a seed, to the public key, then
+    /// the expanded private key.
+    pub(crate) const ML_DSA_KEY_GEN: u32 = 7;
+    /// ML-DSA signing (`ml_dsa`) with an expanded private key and `rnd`, by
+    /// an interface (`ml_dsa_interface`) of a message and a context, to the
+    /// signature.
+    pub(crate) const ML_DSA_SIGN: u32 = 8;
+    /// ML-DSA verification (`ml_dsa`) with a public key of a signature, by
+    /// an interface (`ml_dsa_interface`) of a message and a context, to
+    /// nothing.
+    pub(crate) const ML_DSA_VERIFY: u32 = 9;
+}
+
+/// What an ML-DSA signature of the ACVP build is over, as one byte: a
+/// message under a context, FIPS 204's internal `M'` with no context, or a
+/// message representative `mu` with no context.
+#[allow(dead_code)]
+pub(crate) mod ml_dsa_interface {
+    pub(crate) const EXTERNAL: u8 = 1;
+    pub(crate) const INTERNAL: u8 = 2;
+    pub(crate) const MU: u8 = 3;
+}
+
 /// Signature algorithms, by the name of rind's constant: every verify
 /// algorithm, of which the ECDSA and RSA ones that also sign name their
 /// sign algorithm too.
