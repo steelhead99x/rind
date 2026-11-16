@@ -9,7 +9,7 @@ use crate::{Error, encoding};
 
 mod ecdsa;
 mod ed25519;
-mod ml_dsa;
+pub(crate) mod ml_dsa;
 pub(crate) mod rsa;
 
 pub use ecdsa::{EcdsaKeyPair, EcdsaScalar, EcdsaSigningAlgorithm};
