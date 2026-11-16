@@ -58,9 +58,11 @@
 //!
 //! On bare-metal x86_64 without SSE2, dalek's default `simd` backend does
 //! not compile, so the build must name `serial` or `fiat`. With SSE2, that
-//! backend compiles, and cpufeatures reports AVX only when it is a
-//! compile-time target feature. An explicit `simd` or `avx512` backend is
-//! refused when those features are enabled.
+//! default compiles. cpufeatures reports AVX2, and AVX-512, on this os only
+//! when those target features are enabled, the same opt-in as this crate's
+//! own wide paths. Dalek's default is that simd backend, and the avx512
+//! backend when `avx512ifma` and `avx512vl` are both enabled, so an explicit
+//! `simd` or `avx512` cfg selects the same code.
 
 use std::env;
 use std::fs;
@@ -78,7 +80,6 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(rind_mul16_soft)");
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
     println!("cargo::rustc-check-cfg=cfg(rind_x86_64_none_dalek_scalar)");
-    println!("cargo::rustc-check-cfg=cfg(rind_x86_64_none_dalek_wide)");
 
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
@@ -105,23 +106,19 @@ fn main() {
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
 
     // Without SSE2, dalek's default `simd` backend does not compile on this
-    // soft-float target. `serial` and `fiat` do. With SSE2, that backend
-    // compiles, and cpufeatures reports AVX only when the target feature is
-    // on. An explicit `simd` or `avx512` cfg together with those features
-    // would use the registers.
-    if arch == "x86_64" && bare_metal {
-        if !sse2 && !dalek_backend_is_scalar() {
-            // Dalek is compiled before this crate, so its simd backend aborts
-            // in LLVM on this soft-float target and the `compile_error` below
-            // never runs. Fail here, where the message is visible.
-            println!("cargo::rustc-cfg=rind_x86_64_none_dalek_scalar");
-            panic!(
-                "x86_64-unknown-none without SSE2 needs --cfg curve25519_dalek_backend=\"serial\" \
-                 or \"fiat\": dalek's default simd backend does not compile on this soft-float target"
-            );
-        } else if dalek_forces_wide_vectors(&enabled) {
-            println!("cargo::rustc-cfg=rind_x86_64_none_dalek_wide");
-        }
+    // soft-float target. `serial` and `fiat` do. With SSE2 it compiles.
+    // cpufeatures on this os reports AVX2, and AVX-512, only when those
+    // target features are enabled, for the default backend as well as for
+    // an explicit `simd` or `avx512` cfg, so the target feature is the opt-in.
+    if arch == "x86_64" && bare_metal && !sse2 && !dalek_backend_is_scalar() {
+        // Dalek is compiled before this crate, so its simd backend aborts
+        // in LLVM on this soft-float target and the `compile_error` below
+        // never runs. Fail here, where the message is visible.
+        println!("cargo::rustc-cfg=rind_x86_64_none_dalek_scalar");
+        panic!(
+            "x86_64-unknown-none without SSE2 needs --cfg curve25519_dalek_backend=\"serial\" \
+             or \"fiat\": dalek's default simd backend does not compile on this soft-float target"
+        );
     }
 
     // Stable Rust's `asm!` with a `reg` operand, allow-listed so an
@@ -535,21 +532,4 @@ fn dalek_backend_is_scalar() -> bool {
         }
     }
     any
-}
-
-/// Whether this build forces curve25519-dalek onto AVX while the target
-/// features would let cpufeatures report that those registers exist.
-///
-/// Cargo passes a `RUSTFLAGS` `--cfg` to the build script as
-/// `CARGO_CFG_<NAME>`, one value or several separated by commas. The unset
-/// default, `serial`, and `fiat` do not take this path.
-fn dalek_forces_wide_vectors(enabled: &dyn Fn(&str) -> bool) -> bool {
-    let Ok(value) = env::var("CARGO_CFG_CURVE25519_DALEK_BACKEND") else {
-        return false;
-    };
-    value.split(',').any(|value| match value {
-        "simd" => enabled("avx") || enabled("avx2"),
-        "avx512" => enabled("avx512f") || enabled("avx512ifma") || enabled("avx512vl"),
-        _ => false,
-    })
 }

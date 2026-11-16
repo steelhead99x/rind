@@ -126,12 +126,13 @@ qemu. iOS devices' code is only built.
   CPUID. AVX, AVX2,
   SHA512, and AVX-512 run only when those target features are enabled: XCR0
   does not mean an interrupt saves YMM or ZMM, and this build does not
-  enable them. curve25519-dalek's default stays off AVX here, because
-  cpufeatures reports a SIMD feature on this os only when it is a target
-  feature. An explicit `simd` or `avx512` backend is refused when those
-  features are enabled. The four targets that keep an assembly backend are
-  also built, so their `global_asm` is assembled. `Dit::hold` does nothing
-  on these targets: there is no thread-local count, and these backends set
+  enable them. curve25519-dalek's default on x86_64 is its simd backend,
+  and the avx512 backend when `avx512ifma` and `avx512vl` are both enabled.
+  cpufeatures reports those features on this os only when they are target
+  features, so dalek uses YMM or ZMM only under that same opt-in. An explicit
+  `simd` or `avx512` cfg selects that same code. The four targets that keep
+  an assembly backend are also built, so their `global_asm` is assembled.
+  `Dit::hold` does nothing on these targets: there is no thread-local count, and these backends set
   no CPU state there.
   The ESP32's Xtensa targets are tier 3, on Espressif's toolchain, so they
   are not part of that Nix lint. `just xtensa` and `.github/workflows/xtensa.yml`

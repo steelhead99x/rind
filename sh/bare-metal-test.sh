@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Drive sh/bare-metal.sh with a fake cargo and check the command list, the
-# rustflags source, and failure propagation. No toolchain and no network.
-# Bash only: the cross module's tools are cargo and nix.
+# Drive sh/bare-metal.sh with a fake cargo and check the command list, that
+# the caller's rustflags are left alone, and that failure still propagates.
+# That part needs no toolchain and no network. When cargo and rustc are
+# installed, a later probe checks that Cargo's own config reaches the build
+# and that the wrapper's cfg is added on top. Bash only.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -30,6 +32,18 @@ printf '%s\0' "$@" >"$out.args"
     if [[ -v CARGO_BUILD_RUSTFLAGS ]]; then
         printf 'CARGO_BUILD_RUSTFLAGS=%s\n' "$CARGO_BUILD_RUSTFLAGS"
     fi
+    if [[ -v RIND_BARE_METAL_RUSTFLAGS ]]; then
+        printf 'SCRIPT=%s\n' "$RIND_BARE_METAL_RUSTFLAGS"
+    fi
+    if [[ -v RUSTC_WRAPPER ]]; then
+        printf 'WRAPPER=%s\n' "$RUSTC_WRAPPER"
+    fi
+    if [[ -v RIND_BARE_METAL_INNER_WRAPPER ]]; then
+        printf 'INNER=%s\n' "$RIND_BARE_METAL_INNER_WRAPPER"
+    fi
+    if [[ -v CARGO_TARGET_DIR ]]; then
+        printf 'TARGET_DIR=%s\n' "$CARGO_TARGET_DIR"
+    fi
     env | grep '^CARGO_TARGET_.*_RUSTFLAGS=' || true
 } >"$out.env"
 if [[ ${FAIL_CARGO:-} == 1 ]]; then
@@ -41,11 +55,16 @@ fi
 if [[ ${PRINT_AWS:-} == 1 && $* == *tree* ]]; then
     printf '%s\n' 'aws-lc-rs v1.0.0'
 fi
-# The no-SSE2 build checks the rlib for stmxcsr. Leave an empty one.
-if [[ $* == *build* && $* == *x86_64-unknown-none* ]]; then
+# The no-SSE2 build disassembles the rlib named in this invocation's JSON.
+# An empty file is not an object archive, so leave a real one with no
+# stmxcsr instruction.
+if [[ $* == *--message-format=json* && $* == *build* && $* == *x86_64-unknown-none* ]]; then
     lib=${CARGO_TARGET_DIR:-target}/x86_64-unknown-none/debug
     mkdir -p "$lib"
-    : >"$lib/librind.rlib"
+    printf '.text\n' | as -o "$lib/empty.o"
+    ar cr "$lib/librind.rlib" "$lib/empty.o"
+    rm -f "$lib/empty.o"
+    printf '%s\n' "{\"reason\":\"compiler-artifact\",\"target\":{\"name\":\"rind\",\"kind\":[\"lib\"]},\"filenames\":[\"$lib/librind.rlib\"]}"
 fi
 exit 0
 EOF
@@ -57,7 +76,9 @@ run() {
     mkdir -p "$record/cargo-home"
     # An empty CARGO_HOME keeps a developer config out of the command list.
     # A caller can override it with `env CARGO_HOME=...`.
-    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+    # Drop a developer rustc wrapper too, so the recorded chain is this
+    # test's. A case that wants one sets it in the command.
+    env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u RUSTC_WRAPPER \
         CARGO_HOME="$record/cargo-home" \
         CARGO_TARGET_DIR="$record/target" \
         PATH="$tmp:$PATH" RECORD_DIR="$record" \
@@ -71,7 +92,7 @@ args_of() {
     done <"$1"
 }
 
-# The rustflags Cargo will actually read, with unit separators as spaces.
+# The caller's rustflags, left untouched. Unit separators print as spaces.
 flags_of() {
     local line val
     while IFS= read -r line; do
@@ -90,6 +111,27 @@ flags_of() {
                 return
                 ;;
         esac
+    done <"$1"
+}
+
+target_dir_of() {
+    local line
+    while IFS= read -r line; do
+        if [[ $line == TARGET_DIR=* ]]; then
+            printf '%s' "${line#TARGET_DIR=}"
+            return
+        fi
+    done <"$1"
+}
+
+# Flags this script adds, through the wrapper, on top of Cargo's source.
+script_flags() {
+    local line
+    while IFS= read -r line; do
+        if [[ $line == SCRIPT=* ]]; then
+            printf '%s' "${line#SCRIPT=}"
+            return
+        fi
     done <"$1"
 }
 
@@ -132,9 +174,8 @@ fi
 
 # Default path: eight targets, four clippy rows each, then four assembly
 # builds, then the no-SSE2 x86_64 rows (four clippy and one build), then one
-# tree check.
-# RUSTFLAGS outranks a target-scoped flag, so the target cpu does not merge
-# in. Only x86_64-unknown-none gains SSE2. dalek stays on its default.
+# tree check. The caller's RUSTFLAGS and target variable stay as they were.
+# This script's flags go to the wrapper. Only x86_64-unknown-none gains SSE2.
 default=$tmp/default
 if ! run "$default" env \
     RUSTFLAGS='-Cdebuginfo=0' \
@@ -151,7 +192,9 @@ fi
 i=0
 while [[ $i -lt 32 ]]; do
     args=$(args_of "$default/$i.args")
-    flags=$(flags_of "$default/$i.env")
+    caller=$(flags_of "$default/$i.env")
+    added=$(script_flags "$default/$i.env")
+    envfile=$(cat "$default/$i.env")
     assert_has "$args" "clippy"
     assert_lacks "$args" "+esp"
     # `--target` and `--profile` are cargo's, so they precede rustc's `--`.
@@ -162,14 +205,18 @@ while [[ $i -lt 32 ]]; do
         echo "--profile follows -- in [$args]" >&2
         exit 1
     fi
-    assert_has "$flags" "-Cdebuginfo=0"
-    assert_has "$flags" 'getrandom_backend="custom"'
-    assert_lacks "$flags" "target-cpu=generic"
-    assert_lacks "$flags" "curve25519_dalek_backend"
+    assert_has "$caller" "-Cdebuginfo=0"
+    assert_lacks "$caller" "getrandom_backend"
+    assert_has "$added" 'getrandom_backend="custom"'
+    assert_lacks "$added" "target-cpu=generic"
+    assert_lacks "$added" "curve25519_dalek_backend"
+    assert_has "$envfile" "CARGO_TARGET_THUMBV6M_NONE_EABI_RUSTFLAGS=-Ctarget-cpu=generic"
+    assert_has "$envfile" "bare-metal-rustc"
+    assert_lacks_line "$envfile" "ENCODED="
     if [[ $args == *x86_64-unknown-none* ]]; then
-        assert_has "$flags" "target-feature=+sse,+sse2,-soft-float"
+        assert_has "$added" "target-feature=+sse,+sse2,-soft-float"
     else
-        assert_lacks "$flags" "soft-float"
+        assert_lacks "$added" "soft-float"
     fi
     i=$((i + 1))
 done
@@ -179,16 +226,16 @@ arm64=$(args_of "$default/34.args")
 x86=$(args_of "$default/35.args")
 assert_has "$arm_a" "build"
 assert_has "$arm_a" "armv7a-none-eabi"
-assert_has "$(flags_of "$default/32.env")" 'getrandom_backend="custom"'
+assert_has "$(script_flags "$default/32.env")" 'getrandom_backend="custom"'
 assert_has "$arm_r" "build"
 assert_has "$arm_r" "armv7r-none-eabihf"
 assert_has "$arm64" "aarch64-unknown-none"
 assert_has "$x86" "x86_64-unknown-none"
-assert_has "$(flags_of "$default/35.env")" "target-feature=+sse,+sse2,-soft-float"
+assert_has "$(script_flags "$default/35.env")" "target-feature=+sse,+sse2,-soft-float"
 nosse=$(args_of "$default/36.args")
 assert_has "$nosse" "clippy"
 assert_has "$nosse" "x86_64-unknown-none"
-nosse_flags=$(flags_of "$default/36.env")
+nosse_flags=$(script_flags "$default/36.env")
 assert_has "$nosse_flags" 'curve25519_dalek_backend="serial"'
 assert_lacks "$nosse_flags" "soft-float"
 nosse_build=$(args_of "$default/40.args")
@@ -197,134 +244,53 @@ assert_has "$nosse_build" "x86_64-unknown-none"
 tree_args=$(args_of "$default/41.args")
 assert_has "$tree_args" "tree"
 assert_has "$tree_args" "thumbv7em-none-eabihf"
+# Cargo does not fingerprint wrapper flags. Each flag set gets its own
+# target dir, so a later row cannot reuse an earlier build script.
+thumb_dir=$(target_dir_of "$default/0.env")
+if [[ $thumb_dir != "$(target_dir_of "$default/4.env")" \
+    || $thumb_dir == "$(target_dir_of "$default/28.env")" \
+    || $(target_dir_of "$default/28.env") == "$(target_dir_of "$default/36.env")" ]]; then
+    echo "flag sets shared a target dir" >&2
+    exit 1
+fi
 
-# With no higher source, the target variable is the one Cargo reads, and
-# this script appends its cfg there.
+# A target-scoped variable stays set. Cargo reads it when nothing outranks
+# it. This script does not copy it into the wrapper flags.
 target_case=$tmp/target
 run "$target_case" env \
     CARGO_TARGET_THUMBV6M_NONE_EABI_RUSTFLAGS='-Ctarget-cpu=generic' \
     "$script" >/dev/null
-target_flags=$(flags_of "$target_case/0.env")
-assert_has "$target_flags" "-Ctarget-cpu=generic"
-assert_has "$target_flags" 'getrandom_backend="custom"'
+target_env=$(cat "$target_case/0.env")
+assert_has "$target_env" "CARGO_TARGET_THUMBV6M_NONE_EABI_RUSTFLAGS=-Ctarget-cpu=generic"
+assert_has "$(script_flags "$target_case/0.env")" 'getrandom_backend="custom"'
+assert_lacks "$(script_flags "$target_case/0.env")" "target-cpu=generic"
+assert_lacks_line "$target_env" "ENCODED="
 
-# CARGO_BUILD_RUSTFLAGS is the source when nothing above it is set.
+# CARGO_BUILD_RUSTFLAGS stays set. The wrapper still carries the cfg.
 build_case=$tmp/build
 run "$build_case" env \
     CARGO_BUILD_RUSTFLAGS='-Cdebuginfo=2' \
     "$script" >/dev/null
 build_env=$(cat "$build_case/0.env")
-assert_has "$build_env" "ENCODED="
-assert_has "$(flags_of "$build_case/0.env")" "-Cdebuginfo=2"
-assert_has "$(flags_of "$build_case/0.env")" 'getrandom_backend="custom"'
+assert_has "$build_env" "CARGO_BUILD_RUSTFLAGS=-Cdebuginfo=2"
+assert_has "$(script_flags "$build_case/0.env")" 'getrandom_backend="custom"'
+assert_lacks_line "$build_env" "ENCODED="
 assert_lacks_line "$build_env" "RUSTFLAGS="
-assert_lacks_line "$build_env" "CARGO_BUILD_RUSTFLAGS="
 
-# With no environment source, Cargo's config file is the source. A
-# target.<triple> list replaces build.rustflags, and the script appends its cfg.
-cfghome=$tmp/cfghome
-mkdir -p "$cfghome"
-cat >"$cfghome/config.toml" <<'EOF'
-[build]
-rustflags = "-C target-cpu=generic"
-
-[target.thumbv6m-none-eabi]
-rustflags = ["--cfg", "from_target=\"1\""]
-EOF
-config_case=$tmp/config
-run "$config_case" env CARGO_HOME="$cfghome" "$script" >/dev/null
-thumb_flags=$(flags_of "$config_case/0.env")
-assert_has "$thumb_flags" 'from_target="1"'
-assert_has "$thumb_flags" 'getrandom_backend="custom"'
-assert_lacks "$thumb_flags" "target-cpu=generic"
-riscv_flags=$(flags_of "$config_case/4.env")
-assert_has "$riscv_flags" "-C target-cpu=generic"
-assert_has "$riscv_flags" 'getrandom_backend="custom"'
-assert_lacks "$riscv_flags" "from_target"
-
-encoded_fields() {
-    local line val
-    while IFS= read -r line; do
-        if [[ $line == ENCODED=* ]]; then
-            val=${line#ENCODED=}
-            local IFS=$'\x1f'
-            local -a bits=()
-            read -r -a bits <<< "$val"
-            printf '%s\n' "${bits[@]}"
-            return
-        fi
-    done <"$1"
-}
-
-# Dotted build.rustflags, a trailing comment, a literal string, an array
-# element that contains a space, and a matching cfg() table. Cargo 1.98
-# accepts all of these.
-forms=$tmp/forms-home
-mkdir -p "$forms"
-cat >"$forms/config.toml" <<'EOF'
-build.rustflags = ["--cfg", "dotted=\"1\""]
-EOF
-forms_case=$tmp/forms
-run "$forms_case" env CARGO_HOME="$forms" "$script" >/dev/null
-assert_has "$(flags_of "$forms_case/0.env")" 'dotted="1"'
-
-comment=$tmp/comment-home
-mkdir -p "$comment"
-cat >"$comment/config.toml" <<'EOF'
-[build]
-rustflags = ["-C", "target-cpu=generic"] # see "-C" "overflow-checks=off"
-EOF
-comment_case=$tmp/comment
-run "$comment_case" env CARGO_HOME="$comment" "$script" >/dev/null
-comment_flags=$(flags_of "$comment_case/0.env")
-assert_has "$comment_flags" "target-cpu=generic"
-assert_lacks "$comment_flags" "overflow-checks"
-
-literal=$tmp/literal-home
-mkdir -p "$literal"
-cat >"$literal/config.toml" <<'EOF'
-[build]
-rustflags = '-C target-cpu=generic'
-EOF
-literal_case=$tmp/literal
-run "$literal_case" env CARGO_HOME="$literal" "$script" >/dev/null
-assert_has "$(flags_of "$literal_case/0.env")" "-C target-cpu=generic"
-
-space=$tmp/space-home
-mkdir -p "$space"
-cat >"$space/config.toml" <<'EOF'
-[build]
-rustflags = ["-C", "link-arg=-Wl,foo bar"]
-EOF
-space_case=$tmp/space
-run "$space_case" env CARGO_HOME="$space" "$script" >/dev/null
-space_fields=$(encoded_fields "$space_case/0.env")
-assert_has "$space_fields" $'link-arg=-Wl,foo bar'
-
-cfgtbl=$tmp/cfg-home
-mkdir -p "$cfgtbl"
-cat >"$cfgtbl/config.toml" <<'EOF'
-[target.'cfg(target_os = "none")']
-rustflags = ["--cfg", "from_none=\"1\""]
-EOF
-cfg_case=$tmp/cfgtable
-run "$cfg_case" env CARGO_HOME="$cfgtbl" "$script" >/dev/null
-assert_has "$(flags_of "$cfg_case/0.env")" 'from_none="1"'
-
-# Encoded flags outrank RUSTFLAGS. Cargo reads only the encoded source.
+# Encoded flags stay encoded. RUSTFLAGS and the target variable stay too.
+# Cargo prefers the encoded source; the wrapper still adds the cfg.
 encoded_case=$tmp/encoded
 run "$encoded_case" env \
     CARGO_ENCODED_RUSTFLAGS=$'-Cdebuginfo=1' \
     RUSTFLAGS='-Cdebuginfo=0' \
     CARGO_TARGET_THUMBV6M_NONE_EABI_RUSTFLAGS='-Ctarget-cpu=generic' \
     "$script" >/dev/null
-first=$(flags_of "$encoded_case/0.env")
 encoded_env=$(cat "$encoded_case/0.env")
-assert_has "$first" "-Cdebuginfo=1"
-assert_lacks "$first" "-Cdebuginfo=0"
-assert_lacks "$first" "target-cpu=generic"
-assert_has "$first" 'getrandom_backend="custom"'
-assert_lacks_line "$encoded_env" "RUSTFLAGS="
+assert_has "$encoded_env" "ENCODED=-Cdebuginfo=1"
+assert_has "$encoded_env" "RUSTFLAGS=-Cdebuginfo=0"
+assert_has "$encoded_env" "CARGO_TARGET_THUMBV6M_NONE_EABI_RUSTFLAGS=-Ctarget-cpu=generic"
+assert_has "$(script_flags "$encoded_case/0.env")" 'getrandom_backend="custom"'
+assert_lacks "$(script_flags "$encoded_case/0.env")" "debuginfo"
 
 # A failing cargo stops the script on that call.
 fail=$tmp/fail
@@ -367,7 +333,8 @@ fi
 i=0
 while [[ $i -lt 12 ]]; do
     args=$(args_of "$xtensa/$i.args")
-    flags=$(flags_of "$xtensa/$i.env")
+    caller=$(flags_of "$xtensa/$i.env")
+    added=$(script_flags "$xtensa/$i.env")
     assert_has "$args" "+esp"
     assert_has "$args" "clippy"
     profile_at=$(grep -n '^--profile$' <<<"$args" | head -1 | cut -d: -f1)
@@ -376,19 +343,26 @@ while [[ $i -lt 12 ]]; do
         echo "--profile follows -- in [$args]" >&2
         exit 1
     fi
-    assert_has "$flags" "-Cdebuginfo=0"
-    assert_has "$flags" 'getrandom_backend="custom"'
-    assert_lacks "$flags" "curve25519_dalek_backend"
+    assert_has "$caller" "-Cdebuginfo=0"
+    assert_lacks "$caller" "getrandom_backend"
+    assert_has "$added" 'getrandom_backend="custom"'
+    assert_lacks "$added" "curve25519_dalek_backend"
+    assert_has "$(cat "$xtensa/$i.env")" "bare-metal-rustc"
     i=$((i + 1))
 done
 while [[ $i -lt 17 ]]; do
     args=$(args_of "$xtensa/$i.args")
-    flags=$(flags_of "$xtensa/$i.env")
+    caller=$(flags_of "$xtensa/$i.env")
+    added=$(script_flags "$xtensa/$i.env")
     assert_has "$args" "+esp"
-    assert_has "$flags" "-Cdebuginfo=0"
-    assert_lacks "$flags" "getrandom_backend"
+    assert_has "$caller" "-Cdebuginfo=0"
+    assert_lacks "$added" "getrandom_backend"
     i=$((i + 1))
 done
+if [[ $(target_dir_of "$xtensa/0.env") == "$(target_dir_of "$xtensa/12.env")" ]]; then
+    echo "xtensa flag sets shared a target dir" >&2
+    exit 1
+fi
 assert_has "$(args_of "$xtensa/0.args")" "-Zbuild-std=core,alloc"
 assert_has "$(args_of "$xtensa/0.args")" "xtensa-esp32-none-elf"
 assert_has "$(args_of "$xtensa/4.args")" "xtensa-esp32s2-none-elf"
@@ -400,10 +374,300 @@ assert_has "$bench" "--benches"
 assert_lacks "$bench" "--no-default-features"
 assert_has "$bench" "rind-bench"
 
-# Cargo keeps the quote characters when it splits on spaces. rustc requires them.
+# Quote characters stay in the token. rustc requires them, and the wrapper
+# splits on spaces the same way.
 quote=$tmp/quote
 run "$quote" env RUSTFLAGS='--cfg getrandom_backend="custom"' "$script" >/dev/null
-qflags=$(flags_of "$quote/0.env")
-assert_has "$qflags" '--cfg getrandom_backend="custom"'
+assert_has "$(flags_of "$quote/0.env")" '--cfg getrandom_backend="custom"'
+assert_has "$(script_flags "$quote/0.env")" 'getrandom_backend="custom"'
+
+wrapper=$root/sh/bare-metal-rustc
+nul_fields() {
+    local part
+    while IFS= read -r -d '' part || [[ -n $part ]]; do
+        printf '%s\n' "$part"
+    done
+}
+host_fields=$(
+    RIND_BARE_METAL_WRAPPER_DRY=1 \
+        RIND_BARE_METAL_RUSTFLAGS='--cfg getrandom_backend="custom"' \
+        "$wrapper" rustc --crate-name probe | nul_fields
+)
+assert_lacks "$host_fields" "getrandom_backend"
+target_fields=$(
+    RIND_BARE_METAL_WRAPPER_DRY=1 \
+        RIND_BARE_METAL_RUSTFLAGS='--cfg getrandom_backend="custom" -C link-arg=-Wl,foo' \
+        "$wrapper" rustc --target thumbv6m-none-eabi --crate-name probe | nul_fields
+)
+assert_has "$target_fields" 'getrandom_backend="custom"'
+eq_fields=$(
+    RIND_BARE_METAL_WRAPPER_DRY=1 \
+        RIND_BARE_METAL_RUSTFLAGS='--cfg getrandom_backend="custom"' \
+        "$wrapper" rustc --target=thumbv6m-none-eabi | nul_fields
+)
+assert_has "$eq_fields" "--target=thumbv6m-none-eabi"
+assert_has "$eq_fields" 'getrandom_backend="custom"'
+
+# A caller-supplied RUSTC_WRAPPER stays in the chain. This script appends
+# its flags, then that wrapper runs. Dry mode still only prints the argv.
+caller=$tmp/caller-wrapper
+cat >"$caller" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$RUSTC_WRAPPER" >"${CALLER_SEEN:?}"
+printf '%s\0' "$@" >"${CALLER_ARGV:?}"
+printf 'caller-ran\n' >>"${CALLER_LOG:?}"
+exit 0
+EOF
+chmod +x "$caller"
+direct=$tmp/direct-chain
+mkdir -p "$direct"
+CALLER_ARGV=$direct/argv CALLER_LOG=$direct/log CALLER_SEEN=$direct/seen \
+    RIND_BARE_METAL_INNER_WRAPPER=$caller \
+    RIND_BARE_METAL_RUSTFLAGS='--cfg getrandom_backend="custom"' \
+    "$wrapper" rustc --crate-name rind --target thumbv6m-none-eabi
+assert_has "$(cat "$direct/log")" "caller-ran"
+assert_has "$(cat "$direct/seen")" "$caller"
+direct_fields=$(nul_fields <"$direct/argv")
+assert_has "$direct_fields" "rustc"
+assert_has "$direct_fields" "--target"
+assert_has "$direct_fields" "thumbv6m-none-eabi"
+assert_has "$direct_fields" 'getrandom_backend="custom"'
+dry_log=$tmp/dry-skips-inner.log
+dry_seen=$tmp/dry-skips-inner.seen
+dry_fields=$(
+    RIND_BARE_METAL_INNER_WRAPPER=$caller \
+        RIND_BARE_METAL_WRAPPER_DRY=1 \
+        RIND_BARE_METAL_RUSTFLAGS='--cfg getrandom_backend="custom"' \
+        CALLER_ARGV=$tmp/unused-argv CALLER_LOG=$dry_log CALLER_SEEN=$dry_seen \
+        "$wrapper" rustc --target thumbv6m-none-eabi | nul_fields
+)
+assert_has "$dry_fields" 'getrandom_backend="custom"'
+if [[ -e $dry_log || -e $dry_seen ]]; then
+    echo "dry run called the inner wrapper" >&2
+    exit 1
+fi
+chain=$tmp/chain
+if ! run "$chain" env RUSTC_WRAPPER="$caller" "$script" >/dev/null; then
+    echo "wrapper chain path failed" >&2
+    exit 1
+fi
+chain_env=$(cat "$chain/0.env")
+assert_has "$chain_env" "bare-metal-rustc"
+assert_has "$chain_env" "INNER=$caller"
+if ! grep -qx 'INNER=' "$default/0.env"; then
+    echo "empty caller wrapper was recorded as [$(grep '^INNER=' "$default/0.env")]" >&2
+    exit 1
+fi
+
+# Cargo's own config, including forms a hand parser drops, reaches the
+# build. The wrapper's cfg is on top of whichever source Cargo chose.
+# Skipped when this job has no cargo yet (the Xtensa workflow runs this
+# before the toolchain action).
+if command -v cargo >/dev/null && command -v rustc >/dev/null; then
+    host=$(rustc -vV | awk '/^host: / { print $2 }')
+    os=$(rustc --print cfg --target "$host" | sed -n 's/^target_os="\(.*\)"$/\1/p')
+    arch=$(rustc --print cfg --target "$host" | sed -n 's/^target_arch="\(.*\)"$/\1/p')
+    upper=$(printf '%s' "$host" | tr 'a-z.-' 'A-Z__')
+    probe=$tmp/probe
+    mkdir -p "$probe/src"
+    cat >"$probe/Cargo.toml" <<'EOF'
+[package]
+name = "flagprobe"
+version = "0.0.0"
+edition = "2021"
+EOF
+    cat >"$probe/src/lib.rs" <<'EOF'
+pub fn x() {}
+EOF
+    cat >"$probe/build.rs" <<'EOF'
+fn show(name: &str) {
+    match std::env::var(name) {
+        Ok(value) => println!("cargo:warning=PROBE {name}={value}"),
+        Err(_) => println!("cargo:warning=PROBE {name}=unset"),
+    }
+}
+fn main() {
+    show("CARGO_CFG_FROM_TRIPLE");
+    show("CARGO_CFG_FROM_INLINE");
+    show("CARGO_CFG_FROM_INCLUDE");
+    show("CARGO_CFG_FROM_CFG");
+    show("CARGO_CFG_BRACKET");
+    show("CARGO_CFG_HASH");
+    show("CARGO_CFG_SPACED");
+    show("CARGO_CFG_GETRANDOM_BACKEND");
+}
+EOF
+    mkdir -p "$probe/.cargo"
+    cat >"$probe/.cargo/more.toml" <<'EOF'
+[build]
+rustflags = ["--cfg", 'from_include="1"']
+EOF
+    cat >"$probe/.cargo/config.toml" <<EOF
+include = ["more.toml"]
+
+[target.$host]
+rustflags = [
+    "--cfg", 'from_triple="1"',
+    "--cfg", 'bracket="]"',
+    "--cfg", 'hash="#"',
+    "--cfg", 'spaced="a b"',
+]
+EOF
+    log=$probe/triple.log
+    (
+        cd "$probe"
+        env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS \
+            -u "CARGO_TARGET_${upper}_RUSTFLAGS" \
+            CARGO_HOME="$probe/empty-home" \
+            CARGO_TARGET_DIR="$probe/target-triple" \
+            RIND_BARE_METAL_RUSTFLAGS='--cfg getrandom_backend="custom"' \
+            RUSTC_WRAPPER="$wrapper" \
+            RIND_BARE_METAL_WRAPPER_LOG="$probe/wrap.log" \
+            cargo build --offline --lib --target "$host" >"$log" 2>&1
+    ) || {
+        echo "probe failed" >&2
+        cat "$log" >&2
+        exit 1
+    }
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_FROM_TRIPLE=1"
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_BRACKET=]"
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_HASH=#"
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_GETRANDOM_BACKEND=custom"
+    # A triple table replaces build.rustflags and cfg() tables.
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_FROM_INCLUDE=unset"
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_FROM_CFG=unset"
+    wraplog=$(nul_fields <"$probe/wrap.log")
+    assert_has "$wraplog" 'getrandom_backend="custom"'
+    # A space inside one rustflags element stays one rustc argument.
+    assert_has "$wraplog" 'spaced="a b"'
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_SPACED=a b"
+
+    # An inline target table is config Cargo parses. The wrapper does not.
+    cat >"$probe/.cargo/config.toml" <<EOF
+target = { "$host" = { rustflags = ["--cfg", 'from_inline="1"'] } }
+EOF
+    log=$probe/inline.log
+    (
+        cd "$probe"
+        env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS \
+            -u "CARGO_TARGET_${upper}_RUSTFLAGS" \
+            CARGO_HOME="$probe/empty-home" \
+            CARGO_TARGET_DIR="$probe/target-inline" \
+            RIND_BARE_METAL_RUSTFLAGS='--cfg getrandom_backend="custom"' \
+            RUSTC_WRAPPER="$wrapper" \
+            cargo build --offline --lib --target "$host" >"$log" 2>&1
+    ) || {
+        echo "probe failed" >&2
+        cat "$log" >&2
+        exit 1
+    }
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_FROM_INLINE=1"
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_GETRANDOM_BACKEND=custom"
+
+    # A matching cfg() table is evaluated by rustc. It replaces
+    # build.rustflags, the same way a triple table does.
+    cat >"$probe/.cargo/config.toml" <<EOF
+[target.'cfg(all(target_os = "$os", target_arch = "$arch"))']
+rustflags = ["--cfg", 'from_cfg="1"']
+EOF
+    log=$probe/cfg.log
+    (
+        cd "$probe"
+        env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS \
+            -u "CARGO_TARGET_${upper}_RUSTFLAGS" \
+            CARGO_HOME="$probe/empty-home" \
+            CARGO_TARGET_DIR="$probe/target-cfg" \
+            RIND_BARE_METAL_RUSTFLAGS='--cfg getrandom_backend="custom"' \
+            RUSTC_WRAPPER="$wrapper" \
+            cargo build --offline --lib --target "$host" >"$log" 2>&1
+    ) || {
+        echo "probe failed" >&2
+        cat "$log" >&2
+        exit 1
+    }
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_FROM_CFG=1"
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_FROM_INCLUDE=unset"
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_GETRANDOM_BACKEND=custom"
+
+    # An include supplies build.rustflags when no target table replaces it.
+    cat >"$probe/.cargo/config.toml" <<'EOF'
+include = ["more.toml"]
+EOF
+    log=$probe/include.log
+    (
+        cd "$probe"
+        env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS \
+            -u "CARGO_TARGET_${upper}_RUSTFLAGS" \
+            CARGO_HOME="$probe/empty-home" \
+            CARGO_TARGET_DIR="$probe/target-include" \
+            RIND_BARE_METAL_RUSTFLAGS='--cfg getrandom_backend="custom"' \
+            RUSTC_WRAPPER="$wrapper" \
+            cargo build --offline --lib --target "$host" >"$log" 2>&1
+    ) || {
+        echo "probe failed" >&2
+        cat "$log" >&2
+        exit 1
+    }
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_FROM_INCLUDE=1"
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_GETRANDOM_BACKEND=custom"
+
+    # RUSTFLAGS outranks config. The wrapper flag is still present.
+    log=$probe/rustflags.log
+    (
+        cd "$probe"
+        env -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS \
+            -u "CARGO_TARGET_${upper}_RUSTFLAGS" \
+            RUSTFLAGS='-Cdebuginfo=0' \
+            CARGO_HOME="$probe/empty-home" \
+            CARGO_TARGET_DIR="$probe/target-rustflags" \
+            RIND_BARE_METAL_RUSTFLAGS='--cfg getrandom_backend="custom"' \
+            RUSTC_WRAPPER="$wrapper" \
+            cargo build --offline --lib --target "$host" >"$log" 2>&1
+    ) || {
+        echo "probe failed" >&2
+        cat "$log" >&2
+        exit 1
+    }
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_FROM_INCLUDE=unset"
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_GETRANDOM_BACKEND=custom"
+
+    # Cargo treats an empty target variable as unset, so config still applies.
+    # A non-empty one replaces config. The wrapper adds its cfg either way.
+    log=$probe/empty.log
+    (
+        cd "$probe"
+        env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS \
+            "CARGO_TARGET_${upper}_RUSTFLAGS=" \
+            CARGO_HOME="$probe/empty-home" \
+            CARGO_TARGET_DIR="$probe/target-empty" \
+            RIND_BARE_METAL_RUSTFLAGS='--cfg getrandom_backend="custom"' \
+            RUSTC_WRAPPER="$wrapper" \
+            cargo build --offline --lib --target "$host" >"$log" 2>&1
+    ) || {
+        echo "probe failed" >&2
+        cat "$log" >&2
+        exit 1
+    }
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_FROM_INCLUDE=1"
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_GETRANDOM_BACKEND=custom"
+    log=$probe/targetvar.log
+    (
+        cd "$probe"
+        env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS \
+            "CARGO_TARGET_${upper}_RUSTFLAGS=-Cdebuginfo=1" \
+            CARGO_HOME="$probe/empty-home" \
+            CARGO_TARGET_DIR="$probe/target-var" \
+            RIND_BARE_METAL_RUSTFLAGS='--cfg getrandom_backend="custom"' \
+            RUSTC_WRAPPER="$wrapper" \
+            cargo build --offline --lib --target "$host" >"$log" 2>&1
+    ) || {
+        echo "probe failed" >&2
+        cat "$log" >&2
+        exit 1
+    }
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_FROM_INCLUDE=unset"
+    assert_has "$(cat "$log")" "PROBE CARGO_CFG_GETRANDOM_BACKEND=custom"
+fi
 
 echo "bare-metal-test: ok"
