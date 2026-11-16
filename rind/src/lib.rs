@@ -114,7 +114,10 @@ pub mod agreement {
     };
 }
 
-/// Key encapsulation: ML-KEM-768.
+/// Key encapsulation: ML-KEM-512, ML-KEM-768, and ML-KEM-1024.
+///
+/// Each type names its parameter set, so a ciphertext of one set fails to
+/// compile against a key of another.
 ///
 /// ```
 /// # fn main() -> Result<(), rind::Error> {
@@ -122,16 +125,18 @@ pub mod agreement {
 ///
 /// // The recipient generates a key pair, and sends the encapsulation key to
 /// // the sender.
-/// let decapsulation_key = DecapsulationKey::generate(&ML_KEM_768)?;
+/// let decapsulation_key = DecapsulationKey::<MlKem768>::generate()?;
 /// let encapsulation_key = decapsulation_key.public_key();
 ///
 /// // The sender parses the encapsulation key, encapsulates a fresh secret,
 /// // and sends the ciphertext back to the recipient.
-/// let peer_key = EncapsulationKey::new(&ML_KEM_768, encapsulation_key.as_ref())?;
+/// let peer_key = EncapsulationKey::<MlKem768>::new(encapsulation_key.as_ref())?;
 /// let (ciphertext, sender_secret) = peer_key.encapsulate()?;
 ///
-/// // The recipient decapsulates the ciphertext, recovering the same secret.
-/// let recipient_secret = decapsulation_key.decapsulate(ciphertext.as_ref())?;
+/// // The recipient parses the ciphertext and decapsulates it, recovering the
+/// // same secret.
+/// let ciphertext = Ciphertext::<MlKem768>::new(ciphertext.as_ref())?;
+/// let recipient_secret = decapsulation_key.decapsulate(&ciphertext);
 ///
 /// // Each side derives its keys from the secret with a KDF.
 /// let salt = rind::hkdf::Salt::new(&rind::hkdf::HKDF_SHA256, b"session salt");
@@ -149,7 +154,8 @@ pub mod agreement {
 /// ```
 pub mod kem {
     pub use crate::high::kem::{
-        Algorithm, Ciphertext, DecapsulationKey, EncapsulationKey, ML_KEM_768, SharedSecret,
+        Algorithm, Ciphertext, DecapsulationKey, EncapsulationKey, MlKem512, MlKem768, MlKem1024,
+        SharedSecret,
     };
 }
 

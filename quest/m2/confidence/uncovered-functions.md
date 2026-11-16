@@ -10,7 +10,7 @@ Planned with the maintainer on 2026-11-12, with the coverage report's goal: no p
 
 On the 2026-11-12 macOS run, before the port of aws-lc-rs's tests and the report changes, the unrun functions outside rind-aws-lc-rs and the tools were:
 
-- `rind`: 53 of 2,129 (20 in `high/`, 15 in `mid/`, 18 in `low/`), for example in `high/signature.rs`, `high/hpke.rs`, `mid/mldsa.rs`, `mid/mlkem768.rs`, and `low/aarch64/mldsa.rs`.
+- `rind`: 53 of 2,129 (20 in `high/`, 15 in `mid/`, 18 in `low/`), for example in `high/signature.rs`, `high/hpke.rs`, `mid/mldsa.rs`, `mid/mlkem.rs`, and `low/aarch64/mldsa.rs`.
 - rind-ring: 33 of 213, mostly in `aead.rs` and `agreement.rs`.
 - rind-dart: 34 of 199. Measured under `dart test`, 1 is left on the 2026-11-12 Linux run.
 - Smaller gaps: rind-str0m 14, rind-dimpl 13, rind-rcgen 10, rind-rustls 10, rind-object-store 3, rind-jsonwebtoken 1.
