@@ -56,6 +56,14 @@ the crypto extension; it refuses to load without them, naming the first
 missing. `RIND_CPU_DISABLE_<feature>` masks a feature at load, which is how
 each CPU path is reached for its ACVP run.
 
+## ACVP
+
+[rind-acvp](../rind-acvp/README.md) answers ACVP's test sets for the module,
+as aws-lc's `acvptool` asks. The hidden `__acvp` feature builds it a module
+with one more symbol, `rind_fips_acvp`: the deterministic forms of the
+randomized services, which FIPS 203 and 204 allow only for testing. Nothing
+else may turn it on.
+
 ## What it does not offer
 
 These are in `rind` but not here, since FIPS 140-3 does not approve them:
