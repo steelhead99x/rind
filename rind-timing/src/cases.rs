@@ -143,9 +143,7 @@ fn kdf_cases(cases: &mut Vec<Case>) {
         let extract = |secret: &Vec<u8>| salt.extract(secret).unwrap();
         measure_built(config, &secrets(32), extract, |prk| {
             let mut out = [0; 32];
-            prk.expand(&[b"public info"], out.len())
-                .and_then(|okm| okm.fill(&mut out))
-                .map(|()| out)
+            prk.fill(&[b"public info"], &mut out).map(|()| out)
         })
     }));
 
