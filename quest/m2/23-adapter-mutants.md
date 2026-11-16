@@ -20,7 +20,10 @@ Done on the PR branch (checked with `admin/mutants-cargo-test`, `admin/mutants -
 - `rind-rcgen`'s second build runs only `--lib --test zeroing`.
 - `RIND_MUTANTS_STUB` is gone.
 
+Hosted x86_64 campaigns on the PR branch, none missed: `rind-rustls` 280 mutants (186 caught, 94 unviable), `rind-dimpl` 90 (82, 8), `rind-ring` 331 (239, 92). No Debug or Display pin is left in `.cargo/mutants.toml`.
+
 Left:
-- Run the campaign on GitHub-hosted runners (`gh workflow run mutants.yml --ref <branch> -f package=rind-rustls`) and the nextest runs in `just check`.
-- The "extra test run" low is not pinned down; recheck once the above runs.
+- The `rind-aws-lc-rs`, `rind-rcgen`, `rind-str0m`, and `rind-openmls` campaigns, and the other architectures.
+- `just check`, clippy, and nextest in CI or the dev shell.
+- The maintainer's call on replacing the `admin/mutants-cargo` re-parser.
 - Expect a conflict with upstream #804.
