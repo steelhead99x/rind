@@ -41,11 +41,21 @@ use crate::{pkcs8, rand, sealed};
 
 /// A signature.
 #[derive(Clone, Copy)]
-pub struct Signature(rind::signature::Signature);
+pub struct Signature(SignatureBytes);
+
+/// rind's signature, of whichever algorithm signed it.
+#[derive(Clone, Copy)]
+enum SignatureBytes {
+    Ecdsa(rind::ecdsa::Signature),
+    Ed25519(rind::ed25519::Signature),
+}
 
 impl AsRef<[u8]> for Signature {
     fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
+        match &self.0 {
+            SignatureBytes::Ecdsa(signature) => signature.as_ref(),
+            SignatureBytes::Ed25519(signature) => signature.as_ref(),
+        }
     }
 }
 
@@ -58,9 +68,38 @@ pub trait KeyPair: fmt::Debug + Send + Sized + Sync {
     fn public_key(&self) -> &Self::PublicKey;
 }
 
+pub(crate) use private::ParsedKey;
+
 pub(crate) mod private {
+    use rind::ml_dsa::{MlDsa44, MlDsa65, MlDsa87};
+
     use crate::digest::Digest;
     use crate::error::{KeyRejected, Unspecified};
+
+    /// A public key rind parsed, of the algorithm that parsed it.
+    #[allow(clippy::large_enum_variant)]
+    pub(crate) enum ParsedKey {
+        Ecdsa(rind::ecdsa::PublicKey),
+        Ed25519(rind::ed25519::PublicKey),
+        MlDsa44(rind::ml_dsa::PublicKey<MlDsa44>),
+        MlDsa65(rind::ml_dsa::PublicKey<MlDsa65>),
+        MlDsa87(rind::ml_dsa::PublicKey<MlDsa87>),
+        Rsa(rind::rsa::PublicKey),
+    }
+
+    impl ParsedKey {
+        /// The key as a `SubjectPublicKeyInfo`.
+        pub(crate) fn to_spki(&self) -> rind::encoding::Spki {
+            match self {
+                Self::Ecdsa(key) => key.to_spki(),
+                Self::Ed25519(key) => key.to_spki(),
+                Self::MlDsa44(key) => key.to_spki(),
+                Self::MlDsa65(key) => key.to_spki(),
+                Self::MlDsa87(key) => key.to_spki(),
+                Self::Rsa(key) => key.to_spki(),
+            }
+        }
+    }
 
     /// How a verification algorithm parses keys and verifies with rind. It
     /// also seals [`super::VerificationAlgorithm`], whose one private
@@ -69,22 +108,15 @@ pub(crate) mod private {
     /// which aws-lc-rs's sealing trait does not have.
     pub(crate) trait Verify: crate::sealed::Sealed {
         /// Parses an encoded public key.
-        fn parse(&self, public_key: &[u8]) -> Result<rind::signature::PublicKey, KeyRejected>;
-
-        /// Parses an encoded public key to keep, also returning whether it
-        /// can verify for this algorithm. aws-lc-rs keeps an RSA key outside
-        /// the algorithm's range and fails its verifications.
-        fn parse_kept(
-            &self,
-            public_key: &[u8],
-        ) -> Result<(rind::signature::PublicKey, bool), KeyRejected> {
-            self.parse(public_key).map(|key| (key, true))
-        }
+        ///
+        /// An RSA key outside the algorithm's range parses, as aws-lc-rs
+        /// keeps it, and fails each verification.
+        fn parse(&self, public_key: &[u8]) -> Result<ParsedKey, KeyRejected>;
 
         /// Verifies `signature` over `msg`.
         fn verify_parsed(
             &self,
-            key: &rind::signature::PublicKey,
+            key: &ParsedKey,
             msg: &[u8],
             signature: &[u8],
         ) -> Result<(), Unspecified>;
@@ -92,7 +124,7 @@ pub(crate) mod private {
         /// Verifies `signature` over the message `digest` hashes.
         fn verify_parsed_digest(
             &self,
-            key: &rind::signature::PublicKey,
+            key: &ParsedKey,
             digest: &Digest,
             signature: &[u8],
         ) -> Result<(), Unspecified>;
@@ -238,10 +270,7 @@ impl<B: AsRef<[u8]>> fmt::Debug for UnparsedPublicKey<B> {
 #[derive(Clone)]
 pub struct ParsedPublicKey {
     algorithm: &'static dyn VerificationAlgorithm,
-    key: Arc<rind::signature::PublicKey>,
-    /// Whether `key` can verify for `algorithm`, false for an RSA key
-    /// outside its range.
-    verifies: bool,
+    key: Arc<ParsedKey>,
     bytes: Box<[u8]>,
 }
 
@@ -251,20 +280,18 @@ impl ParsedPublicKey {
         algorithm: &'static dyn VerificationAlgorithm,
         bytes: B,
     ) -> Result<Self, KeyRejected> {
-        let (key, verifies) = algorithm.parse_kept(bytes.as_ref())?;
-        Ok(Self::from_parts(algorithm, key, verifies, bytes.as_ref()))
+        let key = algorithm.parse(bytes.as_ref())?;
+        Ok(Self::from_parts(algorithm, key, bytes.as_ref()))
     }
 
     pub(crate) fn from_parts(
         algorithm: &'static dyn VerificationAlgorithm,
-        key: rind::signature::PublicKey,
-        verifies: bool,
+        key: ParsedKey,
         bytes: &[u8],
     ) -> Self {
         Self {
             algorithm,
             key: Arc::new(key),
-            verifies,
             bytes: bytes.into(),
         }
     }
@@ -277,17 +304,11 @@ impl ParsedPublicKey {
 
     /// Verifies `signature` over `message`.
     pub fn verify_sig(&self, message: &[u8], signature: &[u8]) -> Result<(), Unspecified> {
-        if !self.verifies {
-            return Err(Unspecified);
-        }
         self.algorithm.verify_parsed(&self.key, message, signature)
     }
 
     /// Verifies `signature` over the message `digest` hashes.
     pub fn verify_digest_sig(&self, digest: &Digest, signature: &[u8]) -> Result<(), Unspecified> {
-        if !self.verifies {
-            return Err(Unspecified);
-        }
         self.algorithm
             .verify_parsed_digest(&self.key, digest, signature)
     }
@@ -346,36 +367,30 @@ pub struct EcdsaVerificationAlgorithm {
 
 impl EcdsaVerificationAlgorithm {
     /// rind's algorithm with this curve and signature encoding, whose hash
-    /// [`rind::signature::PublicKey::verify_digest`] replaces.
-    fn rind(&self) -> &'static rind::signature::VerificationAlgorithm {
-        use rind::signature::verify;
+    /// [`rind::ecdsa::PublicKey::verify_digest`] replaces.
+    fn rind(&self) -> &'static rind::ecdsa::VerificationAlgorithm {
+        use rind::ecdsa::verify;
         match (&self.id, &self.sig_format) {
-            (EcdsaCurve::ECDSA_P256, EcdsaSignatureFormat::ASN1) => &verify::ECDSA_P256_SHA256_ASN1,
-            (EcdsaCurve::ECDSA_P256, EcdsaSignatureFormat::Fixed) => {
-                &verify::ECDSA_P256_SHA256_FIXED
-            }
-            (EcdsaCurve::ECDSA_P384, EcdsaSignatureFormat::ASN1) => &verify::ECDSA_P384_SHA384_ASN1,
-            (EcdsaCurve::ECDSA_P384, EcdsaSignatureFormat::Fixed) => {
-                &verify::ECDSA_P384_SHA384_FIXED
-            }
-            (EcdsaCurve::ECDSA_P521, EcdsaSignatureFormat::ASN1) => &verify::ECDSA_P521_SHA512_ASN1,
-            (EcdsaCurve::ECDSA_P521, EcdsaSignatureFormat::Fixed) => {
-                &verify::ECDSA_P521_SHA512_FIXED
-            }
+            (EcdsaCurve::ECDSA_P256, EcdsaSignatureFormat::ASN1) => &verify::P256_SHA256_ASN1,
+            (EcdsaCurve::ECDSA_P256, EcdsaSignatureFormat::Fixed) => &verify::P256_SHA256_FIXED,
+            (EcdsaCurve::ECDSA_P384, EcdsaSignatureFormat::ASN1) => &verify::P384_SHA384_ASN1,
+            (EcdsaCurve::ECDSA_P384, EcdsaSignatureFormat::Fixed) => &verify::P384_SHA384_FIXED,
+            (EcdsaCurve::ECDSA_P521, EcdsaSignatureFormat::ASN1) => &verify::P521_SHA512_ASN1,
+            (EcdsaCurve::ECDSA_P521, EcdsaSignatureFormat::Fixed) => &verify::P521_SHA512_FIXED,
         }
     }
 
     /// rind's signing algorithm with this curve and signature encoding,
-    /// whose hash [`rind::signature::EcdsaKeyPair::sign_digest`] replaces.
-    fn rind_signing(&self) -> &'static rind::signature::EcdsaSigningAlgorithm {
-        use rind::signature::sign;
+    /// whose hash [`rind::ecdsa::KeyPair::sign_digest`] replaces.
+    fn rind_signing(&self) -> &'static rind::ecdsa::SigningAlgorithm {
+        use rind::ecdsa::sign;
         match (&self.id, &self.sig_format) {
-            (EcdsaCurve::ECDSA_P256, EcdsaSignatureFormat::ASN1) => &sign::ECDSA_P256_SHA256_ASN1,
-            (EcdsaCurve::ECDSA_P256, EcdsaSignatureFormat::Fixed) => &sign::ECDSA_P256_SHA256_FIXED,
-            (EcdsaCurve::ECDSA_P384, EcdsaSignatureFormat::ASN1) => &sign::ECDSA_P384_SHA384_ASN1,
-            (EcdsaCurve::ECDSA_P384, EcdsaSignatureFormat::Fixed) => &sign::ECDSA_P384_SHA384_FIXED,
-            (EcdsaCurve::ECDSA_P521, EcdsaSignatureFormat::ASN1) => &sign::ECDSA_P521_SHA512_ASN1,
-            (EcdsaCurve::ECDSA_P521, EcdsaSignatureFormat::Fixed) => &sign::ECDSA_P521_SHA512_FIXED,
+            (EcdsaCurve::ECDSA_P256, EcdsaSignatureFormat::ASN1) => &sign::P256_SHA256_ASN1,
+            (EcdsaCurve::ECDSA_P256, EcdsaSignatureFormat::Fixed) => &sign::P256_SHA256_FIXED,
+            (EcdsaCurve::ECDSA_P384, EcdsaSignatureFormat::ASN1) => &sign::P384_SHA384_ASN1,
+            (EcdsaCurve::ECDSA_P384, EcdsaSignatureFormat::Fixed) => &sign::P384_SHA384_FIXED,
+            (EcdsaCurve::ECDSA_P521, EcdsaSignatureFormat::ASN1) => &sign::P521_SHA512_ASN1,
+            (EcdsaCurve::ECDSA_P521, EcdsaSignatureFormat::Fixed) => &sign::P521_SHA512_FIXED,
         }
     }
 
@@ -390,38 +405,45 @@ impl EcdsaVerificationAlgorithm {
 }
 
 impl private::Verify for EcdsaVerificationAlgorithm {
-    fn parse(&self, public_key: &[u8]) -> Result<rind::signature::PublicKey, KeyRejected> {
+    fn parse(&self, public_key: &[u8]) -> Result<ParsedKey, KeyRejected> {
         let algorithm = self.rind();
-        if let Ok(key) = rind::signature::PublicKey::from_spki(algorithm, public_key) {
-            return Ok(key);
+        if let Ok(key) = rind::ecdsa::PublicKey::from_spki(algorithm, public_key) {
+            return Ok(ParsedKey::Ecdsa(key));
         }
         match public_key.first() {
             Some(0x02 | 0x03) => {
                 let point = rind::agreement::PublicKey::new(self.ecdh(), public_key)
                     .map_err(KeyRejected::rind)?;
-                rind::signature::PublicKey::new(algorithm, point.as_ref())
+                rind::ecdsa::PublicKey::new(algorithm, point.as_ref())
             }
-            _ => rind::signature::PublicKey::new(algorithm, public_key),
+            _ => rind::ecdsa::PublicKey::new(algorithm, public_key),
         }
+        .map(ParsedKey::Ecdsa)
         .map_err(KeyRejected::rind)
     }
 
     fn verify_parsed(
         &self,
-        key: &rind::signature::PublicKey,
+        key: &ParsedKey,
         msg: &[u8],
         signature: &[u8],
     ) -> Result<(), Unspecified> {
+        let ParsedKey::Ecdsa(key) = key else {
+            return Err(Unspecified);
+        };
         let digest = rind::digest::digest(self.digest.rind(), msg);
         key.verify_digest(&digest, signature).map_err(unspecified)
     }
 
     fn verify_parsed_digest(
         &self,
-        key: &rind::signature::PublicKey,
+        key: &ParsedKey,
         digest: &Digest,
         signature: &[u8],
     ) -> Result<(), Unspecified> {
+        let ParsedKey::Ecdsa(key) = key else {
+            return Err(Unspecified);
+        };
         if digest.algorithm() != self.digest {
             return Err(Unspecified);
         }
@@ -576,15 +598,15 @@ ecdsa!(
 #[derive(Clone)]
 pub struct EcdsaKeyPair {
     algorithm: &'static EcdsaSigningAlgorithm,
-    key: Arc<rind::signature::EcdsaKeyPair>,
+    key: Arc<rind::ecdsa::KeyPair>,
     public_key: EcdsaPublicKey,
 }
 
 impl EcdsaKeyPair {
-    fn new(algorithm: &'static EcdsaSigningAlgorithm, key: rind::signature::EcdsaKeyPair) -> Self {
+    fn new(algorithm: &'static EcdsaSigningAlgorithm, key: rind::ecdsa::KeyPair) -> Self {
         let public_key = EcdsaPublicKey {
             point: key.public_key().as_ref().into(),
-            spki: key.to_spki().as_ref().into(),
+            spki: key.public_key().to_spki().as_ref().into(),
         };
         Self {
             algorithm,
@@ -595,8 +617,7 @@ impl EcdsaKeyPair {
 
     /// Generates a key pair for `alg` from the system random source.
     pub fn generate(alg: &'static EcdsaSigningAlgorithm) -> Result<Self, Unspecified> {
-        let key =
-            rind::signature::EcdsaKeyPair::generate(alg.rind_signing()).map_err(unspecified)?;
+        let key = rind::ecdsa::KeyPair::generate(alg.rind_signing()).map_err(unspecified)?;
         Ok(Self::new(alg, key))
     }
 
@@ -605,7 +626,7 @@ impl EcdsaKeyPair {
         alg: &'static EcdsaSigningAlgorithm,
         pkcs8: &[u8],
     ) -> Result<Self, KeyRejected> {
-        let key = rind::signature::EcdsaKeyPair::from_pkcs8(alg.rind_signing(), pkcs8)
+        let key = rind::ecdsa::KeyPair::from_pkcs8(alg.rind_signing(), pkcs8)
             .map_err(KeyRejected::rind)?;
         Ok(Self::new(alg, key))
     }
@@ -631,7 +652,7 @@ impl EcdsaKeyPair {
         private_key: &[u8],
         public_key: &[u8],
     ) -> Result<Self, KeyRejected> {
-        let key = rind::signature::EcdsaKeyPair::from_scalar_and_public_key(
+        let key = rind::ecdsa::KeyPair::from_scalar_and_public_key(
             alg.rind_signing(),
             private_key,
             public_key,
@@ -645,8 +666,8 @@ impl EcdsaKeyPair {
         alg: &'static EcdsaSigningAlgorithm,
         private_key: &[u8],
     ) -> Result<Self, KeyRejected> {
-        let key = rind::signature::EcdsaKeyPair::from_pkcs8(alg.rind_signing(), private_key)
-            .or_else(|_| rind::signature::EcdsaKeyPair::from_sec1(alg.rind_signing(), private_key))
+        let key = rind::ecdsa::KeyPair::from_pkcs8(alg.rind_signing(), private_key)
+            .or_else(|_| rind::ecdsa::KeyPair::from_sec1(alg.rind_signing(), private_key))
             .map_err(KeyRejected::rind)?;
         Ok(Self::new(alg, key))
     }
@@ -673,7 +694,7 @@ impl EcdsaKeyPair {
         let digest = rind::digest::digest(self.algorithm.digest.rind(), message);
         self.key
             .sign_digest(&digest)
-            .map(Signature)
+            .map(|signature| Signature(SignatureBytes::Ecdsa(signature)))
             .map_err(unspecified)
     }
 
@@ -684,7 +705,7 @@ impl EcdsaKeyPair {
         }
         self.key
             .sign_digest(digest.rind())
-            .map(Signature)
+            .map(|signature| Signature(SignatureBytes::Ecdsa(signature)))
             .map_err(unspecified)
     }
 }
@@ -780,30 +801,28 @@ impl AsBigEndian<EcPublicKeyUncompressedBin<'static>> for EcdsaPublicKey {
 pub struct EdDSAParameters;
 
 impl private::Verify for EdDSAParameters {
-    fn parse(&self, public_key: &[u8]) -> Result<rind::signature::PublicKey, KeyRejected> {
-        let algorithm = &rind::signature::verify::ED25519;
+    fn parse(&self, public_key: &[u8]) -> Result<ParsedKey, KeyRejected> {
         match public_key.len() {
-            ED25519_PUBLIC_KEY_LEN => rind::signature::PublicKey::new(algorithm, public_key),
-            _ => rind::signature::PublicKey::from_spki(algorithm, public_key),
+            ED25519_PUBLIC_KEY_LEN => rind::ed25519::PublicKey::new(public_key),
+            _ => rind::ed25519::PublicKey::from_spki(public_key),
         }
+        .map(ParsedKey::Ed25519)
         .map_err(KeyRejected::rind)
     }
 
     fn verify_parsed(
         &self,
-        key: &rind::signature::PublicKey,
+        key: &ParsedKey,
         msg: &[u8],
         signature: &[u8],
     ) -> Result<(), Unspecified> {
+        let ParsedKey::Ed25519(key) = key else {
+            return Err(Unspecified);
+        };
         key.verify(msg, signature).map_err(unspecified)
     }
 
-    fn verify_parsed_digest(
-        &self,
-        _: &rind::signature::PublicKey,
-        _: &Digest,
-        _: &[u8],
-    ) -> Result<(), Unspecified> {
+    fn verify_parsed_digest(&self, _: &ParsedKey, _: &Digest, _: &[u8]) -> Result<(), Unspecified> {
         Err(Unspecified)
     }
 }
@@ -819,12 +838,12 @@ pub const ED25519_PUBLIC_KEY_LEN: usize = 32;
 /// An Ed25519 private key and its public key.
 #[derive(Clone)]
 pub struct Ed25519KeyPair {
-    key: Arc<rind::signature::Ed25519KeyPair>,
+    key: Arc<rind::ed25519::KeyPair>,
     public_key: Ed25519PublicKey,
 }
 
 impl Ed25519KeyPair {
-    fn new(key: rind::signature::Ed25519KeyPair) -> Self {
+    fn new(key: rind::ed25519::KeyPair) -> Self {
         let mut public_key = [0; ED25519_PUBLIC_KEY_LEN];
         public_key.copy_from_slice(key.public_key().as_ref());
         Self {
@@ -836,7 +855,7 @@ impl Ed25519KeyPair {
     /// Generates a key pair from the system random source.
     pub fn generate() -> Result<Self, Unspecified> {
         Ok(Self::new(
-            rind::signature::Ed25519KeyPair::generate().map_err(unspecified)?,
+            rind::ed25519::KeyPair::generate().map_err(unspecified)?,
         ))
     }
 
@@ -865,14 +884,14 @@ impl Ed25519KeyPair {
 
     /// Loads a 32-byte seed, refused unless `public_key` is its public key.
     pub fn from_seed_and_public_key(seed: &[u8], public_key: &[u8]) -> Result<Self, KeyRejected> {
-        rind::signature::Ed25519KeyPair::from_seed_and_public_key(seed, public_key)
+        rind::ed25519::KeyPair::from_seed_and_public_key(seed, public_key)
             .map(Self::new)
             .map_err(KeyRejected::rind)
     }
 
     /// Loads a 32-byte seed, deriving its public key.
     pub fn from_seed_unchecked(seed: &[u8]) -> Result<Self, KeyRejected> {
-        rind::signature::Ed25519KeyPair::from_seed(seed)
+        rind::ed25519::KeyPair::from_seed(seed)
             .map(Self::new)
             .map_err(KeyRejected::rind)
     }
@@ -880,7 +899,7 @@ impl Ed25519KeyPair {
     /// Loads a PKCS#8 v1 or v2 key, refused if a v2 public key does not
     /// match.
     pub fn from_pkcs8(pkcs8: &[u8]) -> Result<Self, KeyRejected> {
-        rind::signature::Ed25519KeyPair::from_pkcs8(pkcs8)
+        rind::ed25519::KeyPair::from_pkcs8(pkcs8)
             .map(Self::new)
             .map_err(KeyRejected::rind)
     }
@@ -893,7 +912,7 @@ impl Ed25519KeyPair {
     /// Signs `msg`.
     #[must_use]
     pub fn sign(&self, msg: &[u8]) -> Signature {
-        Signature(self.key.sign(msg))
+        Signature(SignatureBytes::Ed25519(self.key.sign(msg)))
     }
 
     /// Signs `msg`, which never fails.

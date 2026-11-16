@@ -245,9 +245,7 @@ fn hybrid_groups_match_aws_lc_versions() {
 
 #[test]
 fn signing_key_debug_matches_aws_lc() {
-    let ecdsa =
-        rind::signature::EcdsaKeyPair::generate(&rind::signature::sign::ECDSA_P256_SHA256_ASN1)
-            .unwrap();
+    let ecdsa = rind::ecdsa::KeyPair::generate(&rind::ecdsa::sign::P256_SHA256_ASN1).unwrap();
     let pkcs8 = ecdsa.to_pkcs8();
     let der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(pkcs8.as_ref().to_vec()));
     let ours = rind_rustls::sign::any_ecdsa_type(&der).unwrap();
@@ -264,7 +262,7 @@ fn signing_key_debug_matches_aws_lc() {
         theirs.choose_scheme(&[scheme]).unwrap().scheme()
     );
 
-    let rsa = rind::signature::RsaKeyPair::generate(rind::rsa::KeySize::Rsa2048).unwrap();
+    let rsa = rind::rsa::KeyPair::generate(rind::rsa::KeySize::Rsa2048).unwrap();
     let pkcs8 = rsa.to_pkcs8();
     let der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(pkcs8.as_ref().to_vec()));
     let ours = rind_rustls::sign::any_supported_type(&der).unwrap();

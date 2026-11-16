@@ -10,7 +10,7 @@ use core::mem::ManuallyDrop;
 use core::slice;
 use std::sync::Arc;
 
-use rind::signature::{Ed25519KeyPair, Ed25519Seed, PublicKey, verify};
+use rind::ed25519::{KeyPair, PublicKey, Seed};
 use zeroize::Zeroizing;
 
 use crate::ffi::{
@@ -42,12 +42,12 @@ pub(crate) struct Ed25519;
 /// A key pair, with its public key's bytes, which `priv` and `pub` read.
 /// Both halves wipe themselves, so the whole value is wiped on drop.
 pub(crate) struct Pair {
-    pair: Ed25519KeyPair,
+    pair: KeyPair,
     public: Zeroizing<[u8; LEN]>,
 }
 
 impl Pair {
-    fn new(pair: Ed25519KeyPair) -> Self {
+    fn new(pair: KeyPair) -> Self {
         let mut public = Zeroizing::new([0; LEN]);
         public.copy_from_slice(pair.public_key().as_ref());
         Self { pair, public }
@@ -79,7 +79,7 @@ impl Drop for Public {
 impl Kind for Ed25519 {
     type Private = Pair;
     type Public = Public;
-    type Secret = Ed25519Seed;
+    type Secret = Seed;
 
     const BITS: c_int = 256;
     const SECURITY_BITS: c_int = 128;
@@ -91,16 +91,16 @@ impl Kind for Ed25519 {
         if ikm.is_some() {
             return Err(Failure::invalid("dhkem-ikm derives only X25519 keys"));
         }
-        Ok(Pair::new(Ed25519KeyPair::generate()?))
+        Ok(Pair::new(KeyPair::generate()?))
     }
 
     fn load(private: &[u8]) -> Result<Pair, rind::Error> {
-        Ok(Pair::new(Ed25519KeyPair::from_seed(private)?))
+        Ok(Pair::new(KeyPair::from_seed(private)?))
     }
 
     fn public(bytes: [u8; LEN]) -> Public {
         Public {
-            verifier: ManuallyDrop::new(PublicKey::new(&verify::ED25519, &bytes).ok()),
+            verifier: ManuallyDrop::new(PublicKey::new(&bytes).ok()),
             bytes,
         }
     }
@@ -113,7 +113,7 @@ impl Kind for Ed25519 {
         &private.public[..]
     }
 
-    fn private_bytes(private: &Pair) -> Ed25519Seed {
+    fn private_bytes(private: &Pair) -> Seed {
         private.pair.to_seed()
     }
 
@@ -321,15 +321,9 @@ impl Signing {
     }
 
     fn verify(&self, signature: &[u8], message: &[u8]) -> Result<(), Failure> {
-        // A private key's verifier is a copy, not kept, so the key held
-        // stays one that wipes whole.
-        let owned;
         let verifier = match self.check()? {
             Key::Public(public) => public.verifier.as_ref(),
-            Key::Private(pair) => {
-                owned = pair.pair.public_key();
-                Some(&owned)
-            }
+            Key::Private(pair) => Some(pair.pair.public_key()),
         };
         // OpenSSL's default provider raises no error for a signature that
         // fails, whether its length, its point, or its equation is wrong.

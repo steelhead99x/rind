@@ -470,11 +470,8 @@ fn p384_sha256_verification_reaches_the_verifier() {
     // pair only as a verifier. Sign its digest with the P-384 key: `sign_digest`
     // uses the digest's hash and keeps the key's ASN.1 encoding.
     let (cert, key) = certificate(&rcgen::PKCS_ECDSA_P384_SHA384);
-    let signing = rind::signature::EcdsaKeyPair::from_pkcs8(
-        &rind::signature::sign::ECDSA_P384_SHA384_ASN1,
-        &key,
-    )
-    .unwrap();
+    let signing =
+        rind::ecdsa::KeyPair::from_pkcs8(&rind::ecdsa::sign::P384_SHA384_ASN1, &key).unwrap();
     let digest = rind::digest::digest(&rind::digest::SHA256, b"data");
     let signature = signing.sign_digest(&digest).unwrap();
     rind()

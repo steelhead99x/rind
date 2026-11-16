@@ -15,7 +15,8 @@ use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{self as theirs, KeyPair as _, UnparsedPublicKey};
 use aws_lc_rs::{agreement, digest};
 use libfuzzer_sys::{arbitrary, arbitrary::Arbitrary, fuzz_target};
-use rind::signature::{self as ours, RsaPssSaltLength, RsaSigningAlgorithm, sign};
+use rind::rsa::{PssSaltLength, SigningAlgorithm as RsaSigningAlgorithm};
+use rind::{ecdsa, ed25519, rsa as our_rsa};
 
 #[derive(Arbitrary, Debug)]
 enum Input {
@@ -54,7 +55,7 @@ enum Hash {
 /// A PSS salt length.
 #[derive(Arbitrary, Debug)]
 enum Salt {
-    /// The hash's length, as the `sign::RSA_PSS_*` constants use.
+    /// The hash's length, as the `rsa::sign::PSS_*` constants use.
     Hash,
     Max,
     Custom(u16),
@@ -63,7 +64,7 @@ enum Salt {
 fuzz_target!(|input: Input| match input {
     Input::Ed25519 { seed, message } => {
         let theirs = theirs::Ed25519KeyPair::from_seed_unchecked(&seed).unwrap();
-        let ours = ours::Ed25519KeyPair::from_seed(&seed).unwrap();
+        let ours = ed25519::KeyPair::from_seed(&seed).unwrap();
         assert_eq!(ours.public_key().as_ref(), theirs.public_key().as_ref());
         assert_eq!(ours.sign(&message).as_ref(), theirs.sign(&message).as_ref());
     }
@@ -92,7 +93,7 @@ fuzz_target!(|input: Input| match input {
 /// algorithm for the two.
 struct EcdsaCase {
     curve: Curve,
-    ours: &'static ours::EcdsaSigningAlgorithm,
+    ours: &'static ecdsa::SigningAlgorithm,
     digest: Option<&'static rind::digest::Algorithm>,
     theirs: &'static theirs::EcdsaVerificationAlgorithm,
 }
@@ -109,7 +110,7 @@ macro_rules! ecdsa {
     ($curve:ident, $ours:ident, $digest:expr, $theirs:ident) => {
         EcdsaCase {
             curve: $curve,
-            ours: &sign::$ours,
+            ours: &ecdsa::sign::$ours,
             digest: $digest,
             theirs: &theirs::$theirs,
         }
@@ -119,95 +120,95 @@ macro_rules! ecdsa {
 const ECDSA: [EcdsaCase; 20] = {
     use rind::digest::{SHA256, SHA384, SHA512};
     [
-        ecdsa!(P256, ECDSA_P256_SHA256_ASN1, None, ECDSA_P256_SHA256_ASN1),
-        ecdsa!(P256, ECDSA_P256_SHA256_FIXED, None, ECDSA_P256_SHA256_FIXED),
-        ecdsa!(P384, ECDSA_P384_SHA384_ASN1, None, ECDSA_P384_SHA384_ASN1),
-        ecdsa!(P384, ECDSA_P384_SHA384_FIXED, None, ECDSA_P384_SHA384_FIXED),
-        ecdsa!(P521, ECDSA_P521_SHA512_ASN1, None, ECDSA_P521_SHA512_ASN1),
-        ecdsa!(P521, ECDSA_P521_SHA512_FIXED, None, ECDSA_P521_SHA512_FIXED),
+        ecdsa!(P256, P256_SHA256_ASN1, None, ECDSA_P256_SHA256_ASN1),
+        ecdsa!(P256, P256_SHA256_FIXED, None, ECDSA_P256_SHA256_FIXED),
+        ecdsa!(P384, P384_SHA384_ASN1, None, ECDSA_P384_SHA384_ASN1),
+        ecdsa!(P384, P384_SHA384_FIXED, None, ECDSA_P384_SHA384_FIXED),
+        ecdsa!(P521, P521_SHA512_ASN1, None, ECDSA_P521_SHA512_ASN1),
+        ecdsa!(P521, P521_SHA512_FIXED, None, ECDSA_P521_SHA512_FIXED),
         // aws-lc-rs verifies a fixed-width P-256 or P-384 signature only
         // under the curve's own hash.
         ecdsa!(
             P256,
-            ECDSA_P256_SHA256_ASN1,
+            P256_SHA256_ASN1,
             Some(&SHA256),
             ECDSA_P256_SHA256_ASN1
         ),
         ecdsa!(
             P256,
-            ECDSA_P256_SHA256_ASN1,
+            P256_SHA256_ASN1,
             Some(&SHA384),
             ECDSA_P256_SHA384_ASN1
         ),
         ecdsa!(
             P256,
-            ECDSA_P256_SHA256_ASN1,
+            P256_SHA256_ASN1,
             Some(&SHA512),
             ECDSA_P256_SHA512_ASN1
         ),
         ecdsa!(
             P256,
-            ECDSA_P256_SHA256_FIXED,
+            P256_SHA256_FIXED,
             Some(&SHA256),
             ECDSA_P256_SHA256_FIXED
         ),
         ecdsa!(
             P384,
-            ECDSA_P384_SHA384_ASN1,
+            P384_SHA384_ASN1,
             Some(&SHA256),
             ECDSA_P384_SHA256_ASN1
         ),
         ecdsa!(
             P384,
-            ECDSA_P384_SHA384_ASN1,
+            P384_SHA384_ASN1,
             Some(&SHA384),
             ECDSA_P384_SHA384_ASN1
         ),
         ecdsa!(
             P384,
-            ECDSA_P384_SHA384_ASN1,
+            P384_SHA384_ASN1,
             Some(&SHA512),
             ECDSA_P384_SHA512_ASN1
         ),
         ecdsa!(
             P384,
-            ECDSA_P384_SHA384_FIXED,
+            P384_SHA384_FIXED,
             Some(&SHA384),
             ECDSA_P384_SHA384_FIXED
         ),
         ecdsa!(
             P521,
-            ECDSA_P521_SHA512_ASN1,
+            P521_SHA512_ASN1,
             Some(&SHA256),
             ECDSA_P521_SHA256_ASN1
         ),
         ecdsa!(
             P521,
-            ECDSA_P521_SHA512_ASN1,
+            P521_SHA512_ASN1,
             Some(&SHA384),
             ECDSA_P521_SHA384_ASN1
         ),
         ecdsa!(
             P521,
-            ECDSA_P521_SHA512_ASN1,
+            P521_SHA512_ASN1,
             Some(&SHA512),
             ECDSA_P521_SHA512_ASN1
         ),
         ecdsa!(
             P521,
-            ECDSA_P521_SHA512_FIXED,
+            P521_SHA512_FIXED,
             Some(&SHA256),
             ECDSA_P521_SHA256_FIXED
         ),
         ecdsa!(
             P521,
-            ECDSA_P521_SHA512_FIXED,
+            P521_SHA512_FIXED,
             Some(&SHA384),
             ECDSA_P521_SHA384_FIXED
         ),
         ecdsa!(
             P521,
-            ECDSA_P521_SHA512_FIXED,
+            P521_SHA512_FIXED,
             Some(&SHA512),
             ECDSA_P521_SHA512_FIXED
         ),
@@ -229,7 +230,7 @@ fn ecdsa(case: &EcdsaCase, scalar: &mut [u8; 66], message: &[u8]) {
         return;
     };
     let point = theirs.compute_public_key().unwrap();
-    let ours = ours::EcdsaKeyPair::from_scalar_and_public_key(case.ours, scalar, point.as_ref())
+    let ours = ecdsa::KeyPair::from_scalar_and_public_key(case.ours, scalar, point.as_ref())
         .expect("refused a key with aws-lc's public key");
     let signature = match case.digest {
         None => ours.sign(message),
@@ -244,19 +245,19 @@ fn ecdsa(case: &EcdsaCase, scalar: &mut [u8; 66], message: &[u8]) {
 /// A test key, loaded by both.
 struct RsaKey {
     name: String,
-    ours: ours::RsaKeyPair,
+    ours: our_rsa::KeyPair,
     theirs: aws_lc_rs::rsa::KeyPair,
 }
 
 static RSA_KEYS: LazyLock<Vec<RsaKey>> = LazyLock::new(|| {
     let pkcs8 = |name: &str, der: &[u8]| RsaKey {
         name: name.into(),
-        ours: ours::RsaKeyPair::from_pkcs8(der).unwrap(),
+        ours: our_rsa::KeyPair::from_pkcs8(der).unwrap(),
         theirs: aws_lc_rs::rsa::KeyPair::from_pkcs8(der).unwrap(),
     };
     let pkcs1 = |name: &str, der: &[u8]| RsaKey {
         name: name.into(),
-        ours: ours::RsaKeyPair::from_pkcs1(der).unwrap(),
+        ours: our_rsa::KeyPair::from_pkcs1(der).unwrap(),
         theirs: aws_lc_rs::rsa::KeyPair::from_der(der).unwrap(),
     };
     macro_rules! key {
@@ -268,7 +269,7 @@ static RSA_KEYS: LazyLock<Vec<RsaKey>> = LazyLock::new(|| {
         };
     }
 
-    let generated = ours::RsaKeyPair::generate(rind::rsa::KeySize::Rsa2048).unwrap();
+    let generated = our_rsa::KeyPair::generate(rind::rsa::KeySize::Rsa2048).unwrap();
     let der = generated.to_pkcs8();
     let name = format!("generated: {}", hex(der.as_ref()));
     let theirs = aws_lc_rs::rsa::KeyPair::from_pkcs8(der.as_ref())
@@ -294,7 +295,7 @@ static RSA_KEYS: LazyLock<Vec<RsaKey>> = LazyLock::new(|| {
         key!(pkcs1, "rsa2086-unbalanced.der"),
     ];
     for key in &keys {
-        let public = key.ours.public_key(&sign::RSA_PKCS1_SHA256);
+        let public = key.ours.public_key();
         assert_eq!(
             public.as_ref(),
             key.theirs.public_key().as_ref(),
@@ -317,9 +318,9 @@ fn rsa(key: &RsaKey, scheme: &RsaScheme, message: &[u8]) {
     let (hash, salt) = match *scheme {
         RsaScheme::Pkcs1(hash) => {
             let (ours, theirs) = match hash {
-                Hash::Sha256 => (&sign::RSA_PKCS1_SHA256, &theirs::RSA_PKCS1_SHA256),
-                Hash::Sha384 => (&sign::RSA_PKCS1_SHA384, &theirs::RSA_PKCS1_SHA384),
-                Hash::Sha512 => (&sign::RSA_PKCS1_SHA512, &theirs::RSA_PKCS1_SHA512),
+                Hash::Sha256 => (&our_rsa::sign::PKCS1_SHA256, &theirs::RSA_PKCS1_SHA256),
+                Hash::Sha384 => (&our_rsa::sign::PKCS1_SHA384, &theirs::RSA_PKCS1_SHA384),
+                Hash::Sha512 => (&our_rsa::sign::PKCS1_SHA512, &theirs::RSA_PKCS1_SHA512),
             };
             let signature = key.ours.sign(ours, message).unwrap();
             let mut wanted = vec![0; key.theirs.public_modulus_len()];
@@ -335,19 +336,19 @@ fn rsa(key: &RsaKey, scheme: &RsaScheme, message: &[u8]) {
     type Md = unsafe extern "C" fn() -> *const aws_lc_sys::EVP_MD;
     let (constant, with_salt, theirs_hash, md): (_, fn(_) -> _, _, Md) = match hash {
         Hash::Sha256 => (
-            &sign::RSA_PSS_SHA256,
+            &our_rsa::sign::PSS_SHA256,
             RsaSigningAlgorithm::pss_sha256,
             &digest::SHA256,
             aws_lc_sys::EVP_sha256,
         ),
         Hash::Sha384 => (
-            &sign::RSA_PSS_SHA384,
+            &our_rsa::sign::PSS_SHA384,
             RsaSigningAlgorithm::pss_sha384,
             &digest::SHA384,
             aws_lc_sys::EVP_sha384,
         ),
         Hash::Sha512 => (
-            &sign::RSA_PSS_SHA512,
+            &our_rsa::sign::PSS_SHA512,
             RsaSigningAlgorithm::pss_sha512,
             &digest::SHA512,
             aws_lc_sys::EVP_sha512,
@@ -365,13 +366,10 @@ fn rsa(key: &RsaKey, scheme: &RsaScheme, message: &[u8]) {
     let max = (bits - 1).div_ceil(8) - hash_len - 2;
     let (signature, salt_len) = match *salt {
         Salt::Hash => (key.ours.sign(constant, message), hash_len),
-        Salt::Max => (
-            key.ours.sign(&with_salt(RsaPssSaltLength::Max), message),
-            max,
-        ),
+        Salt::Max => (key.ours.sign(&with_salt(PssSaltLength::Max), message), max),
         Salt::Custom(len) => (
             key.ours
-                .sign(&with_salt(RsaPssSaltLength::Custom(len)), message),
+                .sign(&with_salt(PssSaltLength::Custom(len)), message),
             usize::from(len),
         ),
     };

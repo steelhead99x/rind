@@ -7,7 +7,7 @@ use aws_lc_rs::signature::{
 };
 use jsonwebtoken::crypto::aws_lc;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey};
-use rind::signature;
+use rind::{ecdsa, ed25519, rsa};
 
 pub const HMAC: [Algorithm; 3] = [Algorithm::HS256, Algorithm::HS384, Algorithm::HS512];
 pub const RSA: [Algorithm; 6] = [
@@ -62,15 +62,22 @@ pub fn all() -> Vec<Key> {
     }
 
     for (algorithm, signing) in [
-        (Algorithm::ES256, &signature::sign::ECDSA_P256_SHA256_FIXED),
-        (Algorithm::ES384, &signature::sign::ECDSA_P384_SHA384_FIXED),
+        (Algorithm::ES256, &ecdsa::sign::P256_SHA256_FIXED),
+        (Algorithm::ES384, &ecdsa::sign::P384_SHA384_FIXED),
     ] {
-        let pair = signature::EcdsaKeyPair::generate(signing).unwrap();
+        let pair = ecdsa::KeyPair::generate(signing).unwrap();
         keys.push(Key::new(
             algorithm,
             "rind",
             EncodingKey::from_ec_der(pair.to_pkcs8().as_ref()),
             DecodingKey::from_ec_der(pair.public_key().as_ref()),
+        ));
+        // aws-lc-rs's verifier also takes the key as SPKI.
+        keys.push(Key::new(
+            algorithm,
+            "rind, SPKI",
+            EncodingKey::from_ec_der(pair.to_pkcs8().as_ref()),
+            DecodingKey::from_ec_der(pair.public_key().to_spki().as_ref()),
         ));
     }
     keys.push(aws_lc_ecdsa(
@@ -82,12 +89,18 @@ pub fn all() -> Vec<Key> {
         &ECDSA_P384_SHA384_FIXED_SIGNING,
     ));
 
-    let ed25519 = signature::Ed25519KeyPair::generate().unwrap();
+    let ed_pair = ed25519::KeyPair::generate().unwrap();
     keys.push(Key::new(
         Algorithm::EdDSA,
         "rind",
-        EncodingKey::from_ed_der(ed25519.to_pkcs8().as_ref()),
-        DecodingKey::from_ed_der(ed25519.public_key().as_ref()),
+        EncodingKey::from_ed_der(ed_pair.to_pkcs8().as_ref()),
+        DecodingKey::from_ed_der(ed_pair.public_key().as_ref()),
+    ));
+    keys.push(Key::new(
+        Algorithm::EdDSA,
+        "rind, SPKI",
+        EncodingKey::from_ed_der(ed_pair.to_pkcs8().as_ref()),
+        DecodingKey::from_ed_der(ed_pair.public_key().to_spki().as_ref()),
     ));
     // aws-lc-rs writes PKCS#8 v2, which carries the public key too.
     let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
@@ -141,9 +154,9 @@ pub fn rsa_key() -> (&'static [u8], &'static [u8]) {
     const PRIVATE: &[u8] = include_bytes!("../../../rind/src/high/rsa/rsa2048.der");
     static PUBLIC: OnceLock<Vec<u8>> = OnceLock::new();
     let public = PUBLIC.get_or_init(|| {
-        signature::RsaKeyPair::from_pkcs1(PRIVATE)
+        rsa::KeyPair::from_pkcs1(PRIVATE)
             .unwrap()
-            .public_key(&signature::sign::RSA_PKCS1_SHA256)
+            .public_key()
             .as_ref()
             .to_vec()
     });

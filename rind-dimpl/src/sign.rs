@@ -5,8 +5,9 @@ use dimpl::crypto::{
     check_verify_scheme,
 };
 use dimpl::{CryptoError, CryptoOperation};
-use rind::signature::{
-    EcdsaKeyPair, EcdsaSigningAlgorithm, PublicKey, VerificationAlgorithm, sign, verify,
+use rind::ecdsa::{
+    KeyPair as EcdsaKeyPair, PublicKey, SigningAlgorithm as EcdsaSigningAlgorithm,
+    VerificationAlgorithm, sign, verify,
 };
 use rustls_pki_types::pem;
 use x509_cert::Certificate;
@@ -25,12 +26,12 @@ const CURVES: [(NamedGroup, HashAlgorithm, &EcdsaSigningAlgorithm); 2] = [
     (
         NamedGroup::Secp256r1,
         HashAlgorithm::SHA256,
-        &sign::ECDSA_P256_SHA256_ASN1,
+        &sign::P256_SHA256_ASN1,
     ),
     (
         NamedGroup::Secp384r1,
         HashAlgorithm::SHA384,
-        &sign::ECDSA_P384_SHA384_ASN1,
+        &sign::P384_SHA384_ASN1,
     ),
 ];
 
@@ -152,10 +153,10 @@ impl SignatureVerifier for Verifier {
 
         // DTLS 1.2 may pair either curve with either hash.
         let verification: &'static VerificationAlgorithm = match (group, hash) {
-            (NamedGroup::Secp256r1, HashAlgorithm::SHA256) => &verify::ECDSA_P256_SHA256_ASN1,
-            (NamedGroup::Secp256r1, HashAlgorithm::SHA384) => &verify::ECDSA_P256_SHA384_ASN1,
-            (NamedGroup::Secp384r1, HashAlgorithm::SHA256) => &verify::ECDSA_P384_SHA256_ASN1,
-            (NamedGroup::Secp384r1, HashAlgorithm::SHA384) => &verify::ECDSA_P384_SHA384_ASN1,
+            (NamedGroup::Secp256r1, HashAlgorithm::SHA256) => &verify::P256_SHA256_ASN1,
+            (NamedGroup::Secp256r1, HashAlgorithm::SHA384) => &verify::P256_SHA384_ASN1,
+            (NamedGroup::Secp384r1, HashAlgorithm::SHA256) => &verify::P384_SHA256_ASN1,
+            (NamedGroup::Secp384r1, HashAlgorithm::SHA384) => &verify::P384_SHA384_ASN1,
             _ => {
                 return Err(CryptoError::UnsupportedSignatureVerification {
                     signature: algorithm,

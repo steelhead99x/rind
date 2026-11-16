@@ -1,6 +1,4 @@
-use core::fmt;
-
-use rind::signature::{self, VerificationAlgorithm, verify};
+use rind::{ecdsa, ed25519, rsa};
 use rustls::pki_types::{
     AlgorithmIdentifier, InvalidSignature, SignatureVerificationAlgorithm, alg_id,
 };
@@ -9,112 +7,112 @@ use rustls::pki_types::{
 pub static ECDSA_P256_SHA256: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::ECDSA_P256,
     signature_alg_id: alg_id::ECDSA_SHA256,
-    algorithm: &verify::ECDSA_P256_SHA256_ASN1,
+    algorithm: Algorithm::Ecdsa(&ecdsa::verify::P256_SHA256_ASN1),
 };
 
 /// Verifies ECDSA signatures by P-256 keys over SHA-384.
 pub static ECDSA_P256_SHA384: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::ECDSA_P256,
     signature_alg_id: alg_id::ECDSA_SHA384,
-    algorithm: &verify::ECDSA_P256_SHA384_ASN1,
+    algorithm: Algorithm::Ecdsa(&ecdsa::verify::P256_SHA384_ASN1),
 };
 
 /// Verifies ECDSA signatures by P-256 keys over SHA-512.
 pub static ECDSA_P256_SHA512: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::ECDSA_P256,
     signature_alg_id: alg_id::ECDSA_SHA512,
-    algorithm: &verify::ECDSA_P256_SHA512_ASN1,
+    algorithm: Algorithm::Ecdsa(&ecdsa::verify::P256_SHA512_ASN1),
 };
 
 /// Verifies ECDSA signatures by P-384 keys over SHA-256.
 pub static ECDSA_P384_SHA256: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::ECDSA_P384,
     signature_alg_id: alg_id::ECDSA_SHA256,
-    algorithm: &verify::ECDSA_P384_SHA256_ASN1,
+    algorithm: Algorithm::Ecdsa(&ecdsa::verify::P384_SHA256_ASN1),
 };
 
 /// Verifies ECDSA signatures by P-384 keys over SHA-384.
 pub static ECDSA_P384_SHA384: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::ECDSA_P384,
     signature_alg_id: alg_id::ECDSA_SHA384,
-    algorithm: &verify::ECDSA_P384_SHA384_ASN1,
+    algorithm: Algorithm::Ecdsa(&ecdsa::verify::P384_SHA384_ASN1),
 };
 
 /// Verifies ECDSA signatures by P-384 keys over SHA-512.
 pub static ECDSA_P384_SHA512: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::ECDSA_P384,
     signature_alg_id: alg_id::ECDSA_SHA512,
-    algorithm: &verify::ECDSA_P384_SHA512_ASN1,
+    algorithm: Algorithm::Ecdsa(&ecdsa::verify::P384_SHA512_ASN1),
 };
 
 /// Verifies ECDSA signatures by P-521 keys over SHA-256.
 pub static ECDSA_P521_SHA256: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::ECDSA_P521,
     signature_alg_id: alg_id::ECDSA_SHA256,
-    algorithm: &verify::ECDSA_P521_SHA256_ASN1,
+    algorithm: Algorithm::Ecdsa(&ecdsa::verify::P521_SHA256_ASN1),
 };
 
 /// Verifies ECDSA signatures by P-521 keys over SHA-384.
 pub static ECDSA_P521_SHA384: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::ECDSA_P521,
     signature_alg_id: alg_id::ECDSA_SHA384,
-    algorithm: &verify::ECDSA_P521_SHA384_ASN1,
+    algorithm: Algorithm::Ecdsa(&ecdsa::verify::P521_SHA384_ASN1),
 };
 
 /// Verifies ECDSA signatures by P-521 keys over SHA-512.
 pub static ECDSA_P521_SHA512: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::ECDSA_P521,
     signature_alg_id: alg_id::ECDSA_SHA512,
-    algorithm: &verify::ECDSA_P521_SHA512_ASN1,
+    algorithm: Algorithm::Ecdsa(&ecdsa::verify::P521_SHA512_ASN1),
 };
 
 /// Verifies Ed25519 signatures.
 pub static ED25519: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::ED25519,
     signature_alg_id: alg_id::ED25519,
-    algorithm: &verify::ED25519,
+    algorithm: Algorithm::Ed25519,
 };
 
 /// Verifies RSASSA-PSS signatures over SHA-256 by 2048- to 8192-bit RSA keys.
 pub static RSA_PSS_SHA256: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::RSA_ENCRYPTION,
     signature_alg_id: alg_id::RSA_PSS_SHA256,
-    algorithm: &verify::RSA_PSS_SHA256,
+    algorithm: Algorithm::Rsa(&rsa::verify::PSS_SHA256),
 };
 
 /// Verifies RSASSA-PSS signatures over SHA-384 by 2048- to 8192-bit RSA keys.
 pub static RSA_PSS_SHA384: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::RSA_ENCRYPTION,
     signature_alg_id: alg_id::RSA_PSS_SHA384,
-    algorithm: &verify::RSA_PSS_SHA384,
+    algorithm: Algorithm::Rsa(&rsa::verify::PSS_SHA384),
 };
 
 /// Verifies RSASSA-PSS signatures over SHA-512 by 2048- to 8192-bit RSA keys.
 pub static RSA_PSS_SHA512: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::RSA_ENCRYPTION,
     signature_alg_id: alg_id::RSA_PSS_SHA512,
-    algorithm: &verify::RSA_PSS_SHA512,
+    algorithm: Algorithm::Rsa(&rsa::verify::PSS_SHA512),
 };
 
 /// Verifies RSASSA-PKCS1-v1_5 signatures over SHA-256 by 2048- to 8192-bit RSA keys.
 pub static RSA_PKCS1_SHA256: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::RSA_ENCRYPTION,
     signature_alg_id: alg_id::RSA_PKCS1_SHA256,
-    algorithm: &verify::RSA_PKCS1_SHA256,
+    algorithm: Algorithm::Rsa(&rsa::verify::PKCS1_SHA256),
 };
 
 /// Verifies RSASSA-PKCS1-v1_5 signatures over SHA-384 by 2048- to 8192-bit RSA keys.
 pub static RSA_PKCS1_SHA384: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::RSA_ENCRYPTION,
     signature_alg_id: alg_id::RSA_PKCS1_SHA384,
-    algorithm: &verify::RSA_PKCS1_SHA384,
+    algorithm: Algorithm::Rsa(&rsa::verify::PKCS1_SHA384),
 };
 
 /// Verifies RSASSA-PKCS1-v1_5 signatures over SHA-512 by 2048- to 8192-bit RSA keys.
 pub static RSA_PKCS1_SHA512: &dyn SignatureVerificationAlgorithm = &Verify {
     public_key_alg_id: alg_id::RSA_ENCRYPTION,
     signature_alg_id: alg_id::RSA_PKCS1_SHA512,
-    algorithm: &verify::RSA_PKCS1_SHA512,
+    algorithm: Algorithm::Rsa(&rsa::verify::PKCS1_SHA512),
 };
 
 /// [`RSA_PKCS1_SHA256`] for certificates that omit RFC 4055's NULL parameters, as webpki allows.
@@ -124,7 +122,7 @@ pub static RSA_PKCS1_SHA256_ABSENT_PARAMS: &dyn SignatureVerificationAlgorithm =
     signature_alg_id: AlgorithmIdentifier::from_slice(&[
         0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b,
     ]),
-    algorithm: &verify::RSA_PKCS1_SHA256,
+    algorithm: Algorithm::Rsa(&rsa::verify::PKCS1_SHA256),
 };
 
 /// [`RSA_PKCS1_SHA384`] for certificates that omit RFC 4055's NULL parameters, as webpki allows.
@@ -134,7 +132,7 @@ pub static RSA_PKCS1_SHA384_ABSENT_PARAMS: &dyn SignatureVerificationAlgorithm =
     signature_alg_id: AlgorithmIdentifier::from_slice(&[
         0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0c,
     ]),
-    algorithm: &verify::RSA_PKCS1_SHA384,
+    algorithm: Algorithm::Rsa(&rsa::verify::PKCS1_SHA384),
 };
 
 /// [`RSA_PKCS1_SHA512`] for certificates that omit RFC 4055's NULL parameters, as webpki allows.
@@ -144,29 +142,27 @@ pub static RSA_PKCS1_SHA512_ABSENT_PARAMS: &dyn SignatureVerificationAlgorithm =
     signature_alg_id: AlgorithmIdentifier::from_slice(&[
         0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0d,
     ]),
-    algorithm: &verify::RSA_PKCS1_SHA512,
+    algorithm: Algorithm::Rsa(&rsa::verify::PKCS1_SHA512),
 };
 
 /// A webpki algorithm: its identifiers, and the rind constant that verifies it.
 ///
 /// webpki hands over the `subjectPublicKey` bit string, which is the encoding
-/// each constant takes: an X9.62 point, a PKCS#1 `RSAPublicKey`, or Ed25519's
-/// 32 bytes.
+/// each public key's `new` takes: an X9.62 point, a PKCS#1 `RSAPublicKey`, or
+/// Ed25519's 32 bytes.
+#[derive(Debug)]
 struct Verify {
     public_key_alg_id: AlgorithmIdentifier,
     signature_alg_id: AlgorithmIdentifier,
-    // RSA's constants are their own type, which converts to this.
-    algorithm: &'static (dyn AsRef<VerificationAlgorithm> + Sync),
+    algorithm: Algorithm,
 }
 
-impl fmt::Debug for Verify {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Verify")
-            .field("public_key_alg_id", &self.public_key_alg_id)
-            .field("signature_alg_id", &self.signature_alg_id)
-            .field("algorithm", self.algorithm.as_ref())
-            .finish()
-    }
+/// The rind algorithm that verifies a webpki one, by key type.
+#[derive(Debug)]
+enum Algorithm {
+    Ecdsa(&'static ecdsa::VerificationAlgorithm),
+    Ed25519,
+    Rsa(&'static rsa::VerificationAlgorithm),
 }
 
 impl SignatureVerificationAlgorithm for Verify {
@@ -184,16 +180,25 @@ impl SignatureVerificationAlgorithm for Verify {
         message: &[u8],
         signature: &[u8],
     ) -> Result<(), InvalidSignature> {
-        signature::PublicKey::new(self.algorithm.as_ref(), public_key)
-            .and_then(|key| key.verify(message, signature))
-            .map_err(|_| InvalidSignature)
+        match self.algorithm {
+            Algorithm::Ecdsa(algorithm) => ecdsa::PublicKey::new(algorithm, public_key)
+                .and_then(|key| key.verify(message, signature)),
+            Algorithm::Ed25519 => {
+                ed25519::PublicKey::new(public_key).and_then(|key| key.verify(message, signature))
+            }
+            Algorithm::Rsa(algorithm) => rsa::PublicKey::new(public_key)
+                .and_then(|key| key.verify(algorithm, message, signature)),
+        }
+        .map_err(|_| InvalidSignature)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use rind::ecdsa::KeyPair as EcdsaKeyPair;
+    use rind::ed25519::KeyPair as Ed25519KeyPair;
     use rind::rand;
-    use rind::signature::{EcdsaKeyPair, Ed25519KeyPair, RsaKeyPair, sign};
+    use rind::rsa::KeyPair as RsaKeyPair;
     use rustls::SignatureScheme;
 
     use super::*;
@@ -227,19 +232,19 @@ mod tests {
         for (pkcs8, signing, algorithm, others) in [
             (
                 &include_bytes!("../../rind/src/high/ecdsa/secp256r1.pkcs8.der")[..],
-                &sign::ECDSA_P256_SHA256_ASN1,
+                &ecdsa::sign::P256_SHA256_ASN1,
                 ECDSA_P256_SHA256,
                 [ECDSA_P256_SHA384, ECDSA_P256_SHA512, ECDSA_P384_SHA256],
             ),
             (
                 &include_bytes!("../../rind/src/high/ecdsa/secp384r1.pkcs8.der")[..],
-                &sign::ECDSA_P384_SHA384_ASN1,
+                &ecdsa::sign::P384_SHA384_ASN1,
                 ECDSA_P384_SHA384,
                 [ECDSA_P384_SHA256, ECDSA_P384_SHA512, ECDSA_P256_SHA384],
             ),
             (
                 &include_bytes!("../../rind/src/high/ecdsa/secp521r1.pkcs8.der")[..],
-                &sign::ECDSA_P521_SHA512_ASN1,
+                &ecdsa::sign::P521_SHA512_ASN1,
                 ECDSA_P521_SHA512,
                 [ECDSA_P521_SHA256, ECDSA_P521_SHA384, ECDSA_P384_SHA512],
             ),
@@ -247,8 +252,7 @@ mod tests {
             let key = EcdsaKeyPair::from_pkcs8(signing, pkcs8).unwrap();
             let message = message();
             let signature = key.sign(&message).unwrap();
-            let public_key = key.public_key();
-            let public_key = public_key.as_ref();
+            let public_key = key.public_key().as_ref();
             algorithm
                 .verify_signature(public_key, &message, signature.as_ref())
                 .unwrap();
@@ -282,38 +286,38 @@ mod tests {
             (
                 RSA_PSS_SHA256,
                 alg_id::RSA_PSS_SHA256,
-                &sign::RSA_PSS_SHA256,
+                &rsa::sign::PSS_SHA256,
             ),
             (
                 RSA_PSS_SHA384,
                 alg_id::RSA_PSS_SHA384,
-                &sign::RSA_PSS_SHA384,
+                &rsa::sign::PSS_SHA384,
             ),
             (
                 RSA_PSS_SHA512,
                 alg_id::RSA_PSS_SHA512,
-                &sign::RSA_PSS_SHA512,
+                &rsa::sign::PSS_SHA512,
             ),
             (
                 RSA_PKCS1_SHA256,
                 alg_id::RSA_PKCS1_SHA256,
-                &sign::RSA_PKCS1_SHA256,
+                &rsa::sign::PKCS1_SHA256,
             ),
             (
                 RSA_PKCS1_SHA384,
                 alg_id::RSA_PKCS1_SHA384,
-                &sign::RSA_PKCS1_SHA384,
+                &rsa::sign::PKCS1_SHA384,
             ),
             (
                 RSA_PKCS1_SHA512,
                 alg_id::RSA_PKCS1_SHA512,
-                &sign::RSA_PKCS1_SHA512,
+                &rsa::sign::PKCS1_SHA512,
             ),
         ];
         for (i, (algorithm, alg_id, padding)) in schemes.iter().enumerate() {
             assert_eq!(algorithm.signature_alg_id(), *alg_id);
             let signature = key.sign(padding, &message).unwrap();
-            let public_key = key.public_key(padding);
+            let public_key = key.public_key();
             for (j, (other, ..)) in schemes.iter().enumerate() {
                 let result =
                     other.verify_signature(public_key.as_ref(), &message, signature.as_ref());
@@ -334,17 +338,17 @@ mod tests {
             (
                 RSA_PKCS1_SHA256_ABSENT_PARAMS,
                 RSA_PKCS1_SHA256,
-                &sign::RSA_PKCS1_SHA256,
+                &rsa::sign::PKCS1_SHA256,
             ),
             (
                 RSA_PKCS1_SHA384_ABSENT_PARAMS,
                 RSA_PKCS1_SHA384,
-                &sign::RSA_PKCS1_SHA384,
+                &rsa::sign::PKCS1_SHA384,
             ),
             (
                 RSA_PKCS1_SHA512_ABSENT_PARAMS,
                 RSA_PKCS1_SHA512,
-                &sign::RSA_PKCS1_SHA512,
+                &rsa::sign::PKCS1_SHA512,
             ),
         ] {
             let present_id = present.signature_alg_id();
@@ -354,7 +358,7 @@ mod tests {
             assert_eq!(absent.public_key_alg_id(), present.public_key_alg_id());
 
             let signature = key.sign(padding, &message).unwrap();
-            let public_key = key.public_key(padding);
+            let public_key = key.public_key();
             absent
                 .verify_signature(public_key.as_ref(), &message, signature.as_ref())
                 .unwrap();

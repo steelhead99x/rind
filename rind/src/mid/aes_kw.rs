@@ -14,9 +14,18 @@ const IV: [u8; 8] = [0xa6; 8];
 /// RFC 5649's alternative initial value, which the key's length follows.
 const AIV: [u8; 4] = [0xa6, 0x59, 0x59, 0xa6];
 
-/// An AES key-encryption key, which wraps and unwraps other keys with RFC
-/// 3394 AES-KW, or with RFC 5649 AES-KWP for keys of any length; wiped on
-/// drop.
+/// How a key is wrapped.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Mode {
+    /// RFC 3394's AES-KW, which wraps keys at least 16 bytes long and a
+    /// multiple of 8, as JWE's `A128KW` does.
+    Kw,
+    /// RFC 5649's AES-KWP, which pads keys of any length from 1 byte.
+    Kwp,
+}
+
+/// An AES key-encryption key, which wraps and unwraps other keys in either
+/// [`Mode`]; wiped on drop.
 ///
 /// Wrapping is deterministic and authenticated: a wrapped key that was
 /// altered fails to unwrap.
@@ -51,12 +60,50 @@ impl AesKek {
         &self.key[..self.key_len]
     }
 
+    /// Wraps `key` into `wrapped`, which must be
+    /// `key.len().next_multiple_of(8) + 8` bytes long.
+    ///
+    /// [`Mode::Kw`] takes a `key` at least 16 bytes long and a multiple of 8,
+    /// and [`Mode::Kwp`] any `key` from 1 byte to `u32::MAX` bytes. Fails
+    /// with [`Error::WrongLength`], leaving `wrapped` unchanged, otherwise.
+    pub fn wrap_key(&self, mode: Mode, key: &[u8], wrapped: &mut [u8]) -> Result<(), Error> {
+        match mode {
+            Mode::Kw => self.wrap(key, wrapped),
+            Mode::Kwp => self.wrap_padded(key, wrapped),
+        }
+    }
+
+    /// Unwraps `wrapped` into `key`, which must be 8 bytes shorter,
+    /// returning the unwrapped key at its start: all of `key` under
+    /// [`Mode::Kw`], and the length its header records under [`Mode::Kwp`].
+    ///
+    /// Fails with [`Error::DecryptFailed`] if `wrapped` was not wrapped by
+    /// this key in `mode`, clearing `key`, or is not a length `mode` wraps
+    /// to, and with [`Error::WrongLength`] if `key` is not 8 bytes shorter;
+    /// a length failure leaves `key` unchanged.
+    pub fn unwrap_key<'a>(
+        &self,
+        mode: Mode,
+        wrapped: &[u8],
+        key: &'a mut [u8],
+    ) -> Result<&'a mut [u8], Error> {
+        match mode {
+            // A `match` rather than `map` with a closure that returns the
+            // `&mut` key, whose translation `proofs/` cannot check.
+            Mode::Kw => match self.unwrap(wrapped, key) {
+                Ok(()) => Ok(key),
+                Err(err) => Err(err),
+            },
+            Mode::Kwp => self.unwrap_padded(wrapped, key),
+        }
+    }
+
     /// Wraps `key` into `wrapped`, which must be 8 bytes longer.
     ///
     /// Fails with [`Error::WrongLength`], leaving `wrapped` unchanged, if
     /// `key` is shorter than 16 bytes or not a multiple of 8, or `wrapped` is
     /// not 8 bytes longer.
-    pub fn wrap(&self, key: &[u8], wrapped: &mut [u8]) -> Result<(), Error> {
+    fn wrap(&self, key: &[u8], wrapped: &mut [u8]) -> Result<(), Error> {
         let _entry = Entry::new_secret();
         if key.len() < 16 || !key.len().is_multiple_of(8) || wrapped.len() != key.len() + 8 {
             return Err(Error::WrongLength);
@@ -79,7 +126,7 @@ impl AesKek {
     /// this key, clearing `key`, or is shorter than 24 bytes or not a
     /// multiple of 8, and with [`Error::WrongLength`] if `key` is not 8 bytes
     /// shorter; a length failure leaves `key` unchanged.
-    pub fn unwrap(&self, wrapped: &[u8], key: &mut [u8]) -> Result<(), Error> {
+    fn unwrap(&self, wrapped: &[u8], key: &mut [u8]) -> Result<(), Error> {
         let _entry = Entry::new_secret();
         if wrapped.len() < 24 || !wrapped.len().is_multiple_of(8) {
             return Err(Error::DecryptFailed);
@@ -111,7 +158,7 @@ impl AesKek {
     /// Fails with [`Error::WrongLength`], leaving `wrapped` unchanged, if
     /// `key` is empty or longer than `u32::MAX` bytes, or `wrapped` is not
     /// that length.
-    pub fn wrap_padded(&self, key: &[u8], wrapped: &mut [u8]) -> Result<(), Error> {
+    fn wrap_padded(&self, key: &[u8], wrapped: &mut [u8]) -> Result<(), Error> {
         let _entry = Entry::new_secret();
         let Ok(len) = u32::try_from(key.len()) else {
             return Err(Error::WrongLength);
@@ -152,11 +199,7 @@ impl AesKek {
     /// this key, clearing `key`, or is shorter than 16 bytes or not a
     /// multiple of 8, and with [`Error::WrongLength`] if `key` is not 8 bytes
     /// shorter; a length failure leaves `key` unchanged.
-    pub fn unwrap_padded<'a>(
-        &self,
-        wrapped: &[u8],
-        key: &'a mut [u8],
-    ) -> Result<&'a mut [u8], Error> {
+    fn unwrap_padded<'a>(&self, wrapped: &[u8], key: &'a mut [u8]) -> Result<&'a mut [u8], Error> {
         let _entry = Entry::new_secret();
         if wrapped.len() < 16 || !wrapped.len().is_multiple_of(8) {
             return Err(Error::DecryptFailed);
@@ -297,15 +340,15 @@ mod tests {
 
     #[test]
     fn acvp_kw() {
-        acvp_set("ACVP-AES-KW-1.0", false);
+        acvp_set("ACVP-AES-KW-1.0", Mode::Kw);
     }
 
     #[test]
     fn acvp_kwp() {
-        acvp_set("ACVP-AES-KWP-1.0", true);
+        acvp_set("ACVP-AES-KWP-1.0", Mode::Kwp);
     }
 
-    fn acvp_set(name: &str, padded: bool) {
+    fn acvp_set(name: &str, mode: Mode) {
         for group in acvp(name) {
             assert_eq!(group.str("kwCipher"), "cipher");
             let encrypt = match group.str("direction") {
@@ -319,22 +362,14 @@ mod tests {
                 let ct = test.hex("ct");
                 if encrypt {
                     let mut wrapped = vec![0; ct.len()];
-                    if padded {
-                        kek.wrap_padded(&test.hex("pt"), &mut wrapped)
-                    } else {
-                        kek.wrap(&test.hex("pt"), &mut wrapped)
-                    }
-                    .unwrap();
+                    kek.wrap_key(mode, &test.hex("pt"), &mut wrapped).unwrap();
                     assert_eq!(wrapped, ct);
                     continue;
                 }
                 let mut unwrapped = vec![0; ct.len() - 8];
-                let result = if padded {
-                    kek.unwrap_padded(&ct, &mut unwrapped)
-                        .map(|key| key.to_vec())
-                } else {
-                    kek.unwrap(&ct, &mut unwrapped).map(|()| unwrapped)
-                };
+                let result = kek
+                    .unwrap_key(mode, &ct, &mut unwrapped)
+                    .map(|key| key.to_vec());
                 match test.flag("testPassed") {
                     true => assert_eq!(result.unwrap(), test.hex("pt")),
                     false => assert_eq!(result, Err(Error::DecryptFailed)),

@@ -266,7 +266,8 @@ final class PublicKey extends _Handle {
   );
 
   /// Parses a public key for [algorithm], refusing a malformed key before
-  /// any signature arrives.
+  /// any signature arrives. An RSA key whose modulus is below the
+  /// algorithm's floor parses, and [verify] throws [RindError.keyRejected].
   ///
   /// ECDSA keys are X9.62 uncompressed points, RSA keys PKCS#1
   /// `RSAPublicKey` or `SubjectPublicKeyInfo` DER, and Ed25519 keys their 32
@@ -288,7 +289,8 @@ final class PublicKey extends _Handle {
   }) : this._parse(algorithm._id, 2, n, e);
 
   /// Checks that [signature] is the key's signature of [message], throwing
-  /// [RindError.badSignature] if not.
+  /// [RindError.badSignature] if not, or [RindError.keyRejected] for an RSA
+  /// key whose modulus is below the algorithm's floor.
   void verify(Uint8List message, Uint8List signature) {
     _check(
       _publicKeyVerify(
