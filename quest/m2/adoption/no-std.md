@@ -25,4 +25,5 @@ The audit's recommendations, for whoever does this to confirm against the code:
 - `getrandom` already supports targets without an OS through a caller-supplied source. rind passes that through and documents it; it does not grow a generator of its own.
 - CI builds `rind` for one bare-metal target per architecture it has assembly for (such as `x86_64-unknown-none`, `aarch64-unknown-none`, and `armv7a-none-eabi`) on every PR, beside the wasm builds.
 - The adapters stay on `std`: their upstreams' providers are.
+- Once CI builds a `no_std` target, drop the `std` sentence from the "Maturity and reach" bullet under the README's "Compared with the alternatives", since rind no longer lacks it.
 - Removing a path that used `std` must not slow a hosted target: benchmark dispatch-heavy small inputs (SHA-256 at 64 B, AES-GCM at 128 B) before and after, against aws-lc-rs.
