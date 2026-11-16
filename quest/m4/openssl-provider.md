@@ -39,9 +39,10 @@ Planned by the maintainer on 2026-11-04 in m4. The provider, its documented
   material (rejected: a build flag off by default; wiping nothing).
   `AGENTS.md` leaves other scratch unwiped because safe Rust cannot read
   freed memory; that reason does not cover these buffers. They are heap
-  scratch derived from a private key, and the provider's heap is the host
-  process's, which C code reads. OpenSSL's own providers cleanse keys, so
-  anything less is a regression for whoever switches.
+  scratch derived from a private key, which `AGENTS.md` wipes, and the
+  provider's heap is the host process's, which C code reads. OpenSSL's own
+  providers cleanse keys, so anything less is a regression for whoever
+  switches. rind itself always wipes its keys.
 - Decided 2026-11-12 (maintainer, /quest-unblock): the provider takes
   OpenSSL's `EC` key type for P-256, P-384, and P-521 only when its
   configuration section opts in with `ec = 1`. Keys on other curves then fail
