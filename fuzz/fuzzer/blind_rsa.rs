@@ -45,7 +45,7 @@ fuzz_target!(|input: Input| {
 
     let mut spki = public_key.to_spki().as_ref().to_vec();
     let spki_changed = input.spki.apply(&mut spki);
-    if let Ok(parsed) = PublicKey::new(ALGORITHMS[index], &spki) {
+    if let Ok(parsed) = PublicKey::from_spki(ALGORITHMS[index], &spki) {
         // Only a change to the modulus or exponent survives, which makes
         // another key.
         if !spki_changed {

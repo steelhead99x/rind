@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use rind::key_wrap::Mode;
+
 use crate::error::{Unspecified, unspecified};
 use crate::sealed::Sealed;
 
@@ -142,7 +144,9 @@ impl KeyWrap for KeyEncryptionKey<AesBlockCipher> {
     ) -> Result<&'output mut [u8], Unspecified> {
         let len = plaintext.len().checked_add(8).ok_or(Unspecified)?;
         let output = output.get_mut(..len).ok_or(Unspecified)?;
-        self.kek.wrap(plaintext, output).map_err(unspecified)?;
+        self.kek
+            .wrap_key(Mode::Kw, plaintext, output)
+            .map_err(unspecified)?;
         Ok(output)
     }
 
@@ -153,8 +157,9 @@ impl KeyWrap for KeyEncryptionKey<AesBlockCipher> {
     ) -> Result<&'output mut [u8], Unspecified> {
         let len = ciphertext.len().checked_sub(8).ok_or(Unspecified)?;
         let output = output.get_mut(..len).ok_or(Unspecified)?;
-        self.kek.unwrap(ciphertext, output).map_err(unspecified)?;
-        Ok(output)
+        self.kek
+            .unwrap_key(Mode::Kw, ciphertext, output)
+            .map_err(unspecified)
     }
 }
 
@@ -171,7 +176,7 @@ impl KeyWrapPadded for KeyEncryptionKey<AesBlockCipher> {
             .ok_or(Unspecified)?;
         let output = output.get_mut(..len).ok_or(Unspecified)?;
         self.kek
-            .wrap_padded(plaintext, output)
+            .wrap_key(Mode::Kwp, plaintext, output)
             .map_err(unspecified)?;
         Ok(output)
     }
@@ -184,7 +189,7 @@ impl KeyWrapPadded for KeyEncryptionKey<AesBlockCipher> {
         let len = ciphertext.len().checked_sub(8).ok_or(Unspecified)?;
         let output = output.get_mut(..len).ok_or(Unspecified)?;
         self.kek
-            .unwrap_padded(ciphertext, output)
+            .unwrap_key(Mode::Kwp, ciphertext, output)
             .map_err(unspecified)
     }
 }

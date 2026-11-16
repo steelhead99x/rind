@@ -143,7 +143,7 @@ impl PrivateKey {
     }
 
     /// Loads a PKCS#8 v1 `ECPrivateKey` on `algorithm`'s curve, as
-    /// [`EcdsaKeyPair::from_pkcs8`](crate::signature::EcdsaKeyPair::from_pkcs8)
+    /// [`ecdsa::KeyPair::from_pkcs8`](crate::ecdsa::KeyPair::from_pkcs8)
     /// does.
     pub fn from_pkcs8(algorithm: &'static Algorithm, der: &[u8]) -> Result<Self, Error> {
         let mut out = core::ptr::null_mut();
@@ -155,7 +155,7 @@ impl PrivateKey {
     }
 
     /// Loads a SEC1 (RFC 5915) `ECPrivateKey` on `algorithm`'s curve, as
-    /// [`EcdsaKeyPair::from_sec1`](crate::signature::EcdsaKeyPair::from_sec1)
+    /// [`ecdsa::KeyPair::from_sec1`](crate::ecdsa::KeyPair::from_sec1)
     /// does.
     pub fn from_sec1(algorithm: &'static Algorithm, der: &[u8]) -> Result<Self, Error> {
         let mut out = core::ptr::null_mut();
@@ -206,7 +206,7 @@ impl PrivateKey {
     }
 
     /// Encodes the private key as PKCS#8, as
-    /// [`EcdsaKeyPair::to_pkcs8`](crate::signature::EcdsaKeyPair::to_pkcs8)
+    /// [`ecdsa::KeyPair::to_pkcs8`](crate::ecdsa::KeyPair::to_pkcs8)
     /// does, with its public key.
     pub fn to_pkcs8(&self) -> Pkcs8 {
         // SAFETY: the handle is live.
