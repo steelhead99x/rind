@@ -229,11 +229,10 @@ OpenSSL <https://github.com/openssl/openssl>
 
 curve25519-dalek <https://github.com/dalek-cryptography/curve25519-dalek>
 
-  What: rind/src/low/x86_64/edwards25519_scalarmuldouble_avx2.rs, a port
-  of curve25519-dalek 5.0.0's AVX2 backend (its field arithmetic, point
-  formulas, and table of the base point's odd multiples) and its scalars'
-  non-adjacent forms, for Ed25519 verification on x86_64 CPUs with AVX2 but
-  without ADX.
+  What: rind/src/low/x86_64/edwards25519_msm_avx2.rs, a port of
+  curve25519-dalek 5.0.0's AVX2 backend (its field arithmetic, point
+  formulas, and table of the base point's odd multiples), for Ed25519
+  verification on x86_64 CPUs with AVX2 but without ADX.
   Copyright (c) 2016-2021 isis agora lovecruft. All rights reserved.
   Copyright (c) 2016-2021 Henry de Valence. All rights reserved.
   License: BSD-3-Clause.
