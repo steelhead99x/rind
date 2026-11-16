@@ -1811,8 +1811,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1822,9 +1824,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 5.3.0",
  "wasip2",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -4651,6 +4655,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rind-acvp"
+version = "0.1.0"
+dependencies = [
+ "aws-lc-rs",
+ "hex",
+ "num-bigint 0.4.8",
+ "rind-fips",
+ "serde_json",
+]
+
+[[package]]
 name = "rind-aws-lc-rs"
 version = "1.0.3"
 dependencies = [
@@ -4882,6 +4897,7 @@ version = "0.17.4"
 dependencies = [
  "aws-lc-rs",
  "crabgrind 0.4.0",
+ "getrandom 0.4.3",
  "hex",
  "proptest",
  "rind",
@@ -5083,6 +5099,7 @@ version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f4925028c7eb5d1fcdaf196971378ed9d2c1c4efc7dc5d011256f76c99c0a96"
 dependencies = [
+ "web-time",
  "zeroize",
 ]
 
@@ -6263,6 +6280,16 @@ name = "wasm-bindgen-test-shared"
 version = "0.2.130"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ab365ce29ba0232367502b2894556ae77a9c214d33dbf453fdba7f586905918"
+
+[[package]]
+name = "wasm-fixture"
+version = "0.0.0"
+dependencies = [
+ "getrandom 0.2.17",
+ "getrandom 0.3.4",
+ "getrandom 0.4.3",
+ "rustls-pki-types",
+]
 
 [[package]]
 name = "web-sys"

@@ -33,4 +33,15 @@ Where it behaves differently:
 - `Ticketer` seals tickets with XChaCha20-Poly1305, where upstream's uses
   RFC 5077's AES-256-CBC and HMAC-SHA256.
 
+## WebAssembly
+
+rind-rustls builds for `wasm32-wasip2`, where CI runs its tests under
+wasmtime, and for `wasm32-unknown-unknown`, the browser. rustls's aws-lc-rs
+provider builds for neither, and its ring one needs a C compiler targeting
+wasm. In the browser, turn on rind's JavaScript random source, `getrandom = {
+version = "0.4", features = ["wasm_js"] }`, and give rustls a clock, as any
+provider needs, such as `rustls-pki-types = { version = "1", features =
+["web"] }`. rind's constant-time checks do not cover wasm; [PLATFORMS.md](https://github.com/kixel-ai/rind/blob/main/PLATFORMS.md)
+says why.
+
 License: Apache-2.0 OR ISC OR MIT-0

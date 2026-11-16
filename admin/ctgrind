@@ -176,9 +176,11 @@ if [ "$suite" = all ] || [ "$suite" = adapters ]; then
 fi
 
 # The FIPS module as it ships, built with rind's hooks: its test marks the
-# secrets it hands the module.
+# secrets it hands the module. Then the ACVP build's deterministic services,
+# which only that build exports.
 if [ "$suite" = fips ]; then
     cargo test -p rind-fips --test ctgrind --features __ctgrind,rind/__ctgrind "$@"
+    cargo test -p rind-fips --test ctgrind --features __ctgrind,__acvp,rind/__ctgrind "$@" -- --exact acvp
 fi
 }
 
