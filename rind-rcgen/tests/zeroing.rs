@@ -5,10 +5,6 @@
 //! secret, counts each freed block still holding it. Like that test, it
 //! reads blocks as they are freed, which is not sound in theory;
 //! `detects_a_leak` checks that it catches a leak in practice.
-//!
-//! The wipe is opt-in, so these tests build only with the `wipe` feature.
-
-#![cfg(feature = "wipe")]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::Mutex;

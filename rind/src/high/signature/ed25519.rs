@@ -71,7 +71,7 @@ impl fmt::Debug for Signature {
     }
 }
 
-/// An Ed25519 private key as its 32-byte seed, wiped on drop under the `wipe` feature.
+/// An Ed25519 private key as its 32-byte seed, wiped on drop.
 pub struct Seed([u8; 32]);
 
 impl AsRef<[u8]> for Seed {

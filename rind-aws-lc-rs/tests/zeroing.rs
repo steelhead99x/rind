@@ -5,10 +5,6 @@
 //! one records the blocks freed while the values that held a secret are
 //! dropped, and checks none still holds it. Inline values are boxed so they
 //! live on the heap too.
-//!
-//! The wipe is opt-in, so these tests build only with the `wipe` feature.
-
-#![cfg(feature = "wipe")]
 
 #[path = "../../rind/tests/freed/mod.rs"]
 mod freed;
@@ -139,7 +135,7 @@ fn cipher() {
 
 /// An ML-DSA seed, and the PKCS#8 documents that hold it.
 #[test]
-fn ml_dsa() {
+fn ml_dsa_seed() {
     let seed: [u8; 32] = distinct(11);
     let leaked = leaks(&seed, || {
         let key = Box::new(
@@ -284,7 +280,7 @@ fn kem_slack() {
 #[inline(never)]
 fn paint_stack(stale: &[u8; NEEDLE_LEN]) {
     let mut stack = [0u8; 64 * 1024];
-    for chunk in stack.chunks_exact_mut(NEEDLE_LEN) {
+    for chunk in stack.as_chunks_mut::<NEEDLE_LEN>().0 {
         chunk.copy_from_slice(stale);
     }
     core::hint::black_box(&mut stack);

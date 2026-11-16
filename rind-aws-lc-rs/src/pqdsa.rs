@@ -295,7 +295,7 @@ impl PqdsaKeyPair {
         // `parse_raw_private_key` (`aws-lc-rs/src/evp_pkey.rs`) maps every
         // failure of `EVP_PKEY_pqdsa_new_raw_private_key` at this length to
         // `InvalidEncoding`.
-        let pkcs8 = expanded_pkcs8(&id, raw_private_key);
+        let pkcs8 = Wiped::new(expanded_pkcs8(&id, raw_private_key));
         let key = new_key!(&id, from_pkcs8(&pkcs8)).map_err(|_| KeyRejected::invalid_encoding())?;
         Ok(Self::new(algorithm, key))
     }
@@ -400,7 +400,7 @@ fn expanded_pkcs8(id: &AlgorithmID, key: &[u8]) -> Vec<u8> {
         0x03,
         id.oid_last(),
     ];
-    // A copy of the key inside one call, which the repository leaves unwiped.
+    // The caller wraps this heap copy of the key in `Wiped`.
     let mut der = Vec::with_capacity(prefix.len() + key.len() + 12);
     header(&mut der, 0x30, prefix.len() + key.len() + 8);
     der.extend_from_slice(&prefix);
@@ -426,8 +426,8 @@ impl fmt::Debug for PqdsaPrivateKey<'_> {
     }
 }
 
-/// An ML-DSA key pair's public key, FIPS 204's encoding; wiped on drop under
-/// the `wipe` feature, as the key pair is.
+/// An ML-DSA key pair's public key, FIPS 204's encoding; wiped on drop, as
+/// the key pair is.
 #[derive(Clone)]
 pub struct PqdsaPublicKey {
     id: &'static AlgorithmID,

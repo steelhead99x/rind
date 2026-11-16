@@ -22,7 +22,7 @@ sse2='-C target-feature=+sse,+sse2,-soft-float'
 scalar='--cfg curve25519_dalek_backend="serial"'
 
 # lint TARGET [CLIPPY-ARGS...]: debug, whose `debug_assertions` code release
-# leaves out, and release, each with and without `wipe`.
+# leaves out, and release.
 lint() {
     local target=$1
     shift
@@ -33,17 +33,14 @@ lint() {
         rustflags+=" $sse2"
     fi
     for profile in dev release; do
-        for features in "" wipe; do
-            env "$flags=$rustflags" cargo clippy "$@" -p rind --lib --locked --target "$target" \
-                --profile "$profile" --features "$features" -- --deny warnings
-        done
+        env "$flags=$rustflags" cargo clippy "$@" -p rind --lib --locked --target "$target" \
+            --profile "$profile" -- --deny warnings
     done
 }
 
 # clippy is a check build, so it never assembles `global_asm`. Build the
 # library once per target that selects an assembly backend, so an assembler
-# rejection fails here. The assembly text does not change with the profile
-# or `wipe`.
+# rejection fails here. The assembly text does not change with the profile.
 assemble() {
     local target=$1
     local flags rustflags
@@ -158,10 +155,8 @@ no_sse2() {
     flags="CARGO_TARGET_$(tr 'a-z.-' 'A-Z__' <<<"$target")_RUSTFLAGS"
     rustflags="$custom $scalar"
     for profile in dev release; do
-        for features in "" wipe; do
-            env "$flags=$rustflags" cargo clippy -p rind --lib --locked --target "$target" \
-                --profile "$profile" --features "$features" -- --deny warnings
-        done
+        env "$flags=$rustflags" cargo clippy -p rind --lib --locked --target "$target" \
+            --profile "$profile" -- --deny warnings
     done
     json=$(mktemp)
     env "$flags=$rustflags" cargo build -p rind --lib --locked --target "$target" \
