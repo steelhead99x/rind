@@ -23,7 +23,7 @@ use object_store::client::{
     CryptoProvider, DigestAlgorithm, DigestContext, HmacContext, Signer, SigningAlgorithm,
 };
 use object_store::{Error, Result};
-use rind::signature::{RsaKeyPair, sign};
+use rind::rsa::{KeyPair as RsaKeyPair, sign};
 use rind::{digest, hmac};
 use rustls_pki_types::PrivateKeyDer;
 use rustls_pki_types::pem::PemObject;
@@ -112,7 +112,7 @@ impl Signer for Rs256 {
     fn sign(&self, message: &[u8]) -> Result<Vec<u8>> {
         let signature = self
             .0
-            .sign(&sign::RSA_PKCS1_SHA256, message)
+            .sign(&sign::PKCS1_SHA256, message)
             .map_err(|err| generic(format!("RSA signing failed: {err}")))?;
         Ok(signature.as_ref().to_vec())
     }

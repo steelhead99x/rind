@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 
 use libfuzzer_sys::{arbitrary, arbitrary::Arbitrary, fuzz_target};
 use rind::agreement::{PrivateKey, X25519};
-use rind::signature::{Ed25519KeyPair, PublicKey, verify};
+use rind::ed25519::{KeyPair, PublicKey};
 
 fuzz_target!(|input: Input| {
     let provider = provider();
@@ -86,7 +86,7 @@ fuzz_target!(|input: Input| {
             message,
         } => {
             if let Some(seed) = signed {
-                let pair = Ed25519KeyPair::from_seed(&seed).unwrap();
+                let pair = KeyPair::from_seed(&seed).unwrap();
                 public.copy_from_slice(pair.public_key().as_ref());
                 signature = pair.sign(&message).as_ref().to_vec();
             }
@@ -113,7 +113,7 @@ fuzz_target!(|input: Input| {
                         message.len(),
                     )
                 };
-                let expected = PublicKey::new(&verify::ED25519, &public)
+                let expected = PublicKey::new(&public)
                     .and_then(|key| key.verify(&message, &signature))
                     .is_ok();
                 // Parameters may still refuse a valid signature, as a context
@@ -603,7 +603,7 @@ impl Provider {
 /// The public key of a 32-byte private key, by rind's own API.
 fn public_of(ed25519: bool, private: &[u8]) -> Vec<u8> {
     if ed25519 {
-        Ed25519KeyPair::from_seed(private)
+        KeyPair::from_seed(private)
             .unwrap()
             .public_key()
             .as_ref()
@@ -819,7 +819,7 @@ fn sign(
             assert_eq!(ok, 1);
         }
         if ok == 1 {
-            let expected = Ed25519KeyPair::from_seed(seed).unwrap().sign(message);
+            let expected = KeyPair::from_seed(seed).unwrap().sign(message);
             assert_eq!(&signature[..len], expected.as_ref());
             // A null buffer asks only the length.
             // SAFETY: the context is live, and the message valid.
