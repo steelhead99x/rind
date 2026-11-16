@@ -34,15 +34,17 @@ fn holds(block: &[u8], needle: &[u8]) -> bool {
 /// Counts the blocks freed while `drop` runs that still hold the first
 /// bytes of `secret`.
 fn leaks(secret: &[u8], drop: impl FnOnce()) -> usize {
-    let needle = &secret[..NEEDLE_LEN];
-    let ((), blocks) = freed::freed(drop);
-    blocks.iter().filter(|block| holds(block, needle)).count()
+    leaks_ignoring(secret, None, drop)
 }
 
 /// Like [`leaks`], ignoring one freed block that is the document `allow`
 /// with no further copy of the needle after it. A second such block counts.
 /// If that document was wiped, nothing is ignored.
 fn leaks_ignoring_document(secret: &[u8], allow: &[u8], drop: impl FnOnce()) -> usize {
+    leaks_ignoring(secret, Some(allow), drop)
+}
+
+fn leaks_ignoring(secret: &[u8], allow: Option<&[u8]>, drop: impl FnOnce()) -> usize {
     let needle = &secret[..NEEDLE_LEN];
     let ((), blocks) = freed::freed(drop);
     let mut ignored = false;
@@ -51,10 +53,12 @@ fn leaks_ignoring_document(secret: &[u8], allow: &[u8], drop: impl FnOnce()) -> 
         if !holds(block, needle) {
             continue;
         }
-        let rest = block.get(allow.len()..).unwrap_or_default();
-        if !ignored && block.starts_with(allow) && !holds(rest, needle) {
-            ignored = true;
-            continue;
+        if let Some(allow) = allow {
+            let rest = block.get(allow.len()..).unwrap_or_default();
+            if !ignored && block.starts_with(allow) && !holds(rest, needle) {
+                ignored = true;
+                continue;
+            }
         }
         leaked += 1;
     }
@@ -72,6 +76,26 @@ fn detects_a_leak() {
     let secret: [u8; 32] = distinct(1);
     let copy = secret.to_vec();
     assert_eq!(leaks(&secret, || drop(copy)), 1);
+}
+
+/// The allowance ignores one copy of the document and nothing else: a second
+/// copy counts, and so does a copy with the secret again after it.
+#[test]
+fn ignores_one_document() {
+    let secret: [u8; 32] = distinct(3);
+    let document = [&[0x30, 0x22, 0x04, 0x20][..], &secret].concat();
+    let copies = [document.clone(), document.clone()];
+    assert_eq!(
+        leaks_ignoring_document(&secret, &document, || drop(copies)),
+        1
+    );
+    let one = document.clone();
+    assert_eq!(leaks_ignoring_document(&secret, &document, || drop(one)), 0);
+    let longer = [&document[..], &secret].concat();
+    assert_eq!(
+        leaks_ignoring_document(&secret, &document, || drop(longer)),
+        1
+    );
 }
 
 /// A decrypting key's PKCS#8 copy, with every algorithm's key cached and the
@@ -229,60 +253,72 @@ fn ml_dsa_from_pkcs8() {
     assert_eq!(leaked, 0);
 }
 
-/// An expanded ML-DSA private key, loaded raw, which the adapter wraps in
-/// PKCS#8 itself, and loaded from a PKCS#8 document in expanded form. The
-/// needle is FIPS 204's `K`, after `rho`, which the public key repeats.
+/// An expanded ML-DSA private key of each parameter set, loaded raw, which
+/// the adapter wraps in PKCS#8 itself, and loaded from a PKCS#8 document in
+/// expanded form. The needle is FIPS 204's `K`, after `rho`, which the public
+/// key repeats.
 #[test]
 fn ml_dsa_expanded() {
     use aws_lc_rs::encoding::AsRawBytes;
 
-    let raw = aws_lc_rs::signature::PqdsaKeyPair::from_seed(
-        &aws_lc_rs::signature::ML_DSA_44_SIGNING,
-        &distinct::<32>(17),
-    )
-    .unwrap()
-    .private_key()
-    .as_raw_bytes()
-    .unwrap()
-    .as_ref()
-    .to_vec();
-    let secret = &raw[32..];
-    // `from_raw_private_key` may free the PKCS#8 document built by the
-    // adapter's `expanded_pkcs8` (`rind-aws-lc-rs/src/pqdsa.rs`), which that
-    // function leaves unwiped. That one block is ignored. Every other freed
-    // block that holds `K` counts, including a second copy of the document.
-    let pkcs8 = expanded_pkcs8(&raw);
-    let leaked = leaks_ignoring_document(secret, &pkcs8, || {
-        let key = Box::new(
-            signature::PqdsaKeyPair::from_raw_private_key(&signature::ML_DSA_44_SIGNING, &raw)
-                .unwrap(),
-        );
-        assert!(key.to_pkcs8v1().is_err());
-        let mut sig = vec![0; signature::ML_DSA_44_SIGNING.signature_len()];
-        key.sign(b"expanded", &mut sig).unwrap();
-    });
-    assert_eq!(leaked, 0);
+    for (theirs, ours, oid) in [
+        (
+            &aws_lc_rs::signature::ML_DSA_44_SIGNING,
+            &signature::ML_DSA_44_SIGNING,
+            0x11,
+        ),
+        (
+            &aws_lc_rs::signature::ML_DSA_65_SIGNING,
+            &signature::ML_DSA_65_SIGNING,
+            0x12,
+        ),
+        (
+            &aws_lc_rs::signature::ML_DSA_87_SIGNING,
+            &signature::ML_DSA_87_SIGNING,
+            0x13,
+        ),
+    ] {
+        let raw = aws_lc_rs::signature::PqdsaKeyPair::from_seed(theirs, &distinct::<32>(17))
+            .unwrap()
+            .private_key()
+            .as_raw_bytes()
+            .unwrap()
+            .as_ref()
+            .to_vec();
+        let secret = &raw[32..];
+        // `from_raw_private_key` always frees the PKCS#8 document built by the
+        // adapter's `expanded_pkcs8` (`rind-aws-lc-rs/src/pqdsa.rs`), which
+        // that function leaves unwiped. That one block is ignored. Every other
+        // freed block that holds `K` counts, including a second copy of the
+        // document.
+        let pkcs8 = expanded_pkcs8(oid, &raw);
+        let leaked = leaks_ignoring_document(secret, &pkcs8, || {
+            let key = Box::new(signature::PqdsaKeyPair::from_raw_private_key(ours, &raw).unwrap());
+            assert!(key.to_pkcs8v1().is_err());
+            let mut sig = vec![0; ours.signature_len()];
+            key.sign(b"expanded", &mut sig).unwrap();
+        });
+        assert_eq!(leaked, 0, "{oid:#x}");
 
-    let leaked = leaks(secret, || {
-        let key = Box::new(
-            signature::PqdsaKeyPair::from_pkcs8(&signature::ML_DSA_44_SIGNING, &pkcs8).unwrap(),
-        );
-        let mut sig = vec![0; signature::ML_DSA_44_SIGNING.signature_len()];
-        key.sign(b"message", &mut sig).unwrap();
-    });
-    assert_eq!(leaked, 0);
+        let leaked = leaks(secret, || {
+            let key = Box::new(signature::PqdsaKeyPair::from_pkcs8(ours, &pkcs8).unwrap());
+            let mut sig = vec![0; ours.signature_len()];
+            key.sign(b"message", &mut sig).unwrap();
+        });
+        assert_eq!(leaked, 0, "{oid:#x}");
+    }
 }
 
-/// ML-DSA-44's PKCS#8 v1 in expanded form (RFC 9881).
-fn expanded_pkcs8(raw: &[u8]) -> Vec<u8> {
+/// An ML-DSA PKCS#8 v1 in expanded form (RFC 9881), for the parameter set
+/// whose OID, 2.16.840.1.101.3.4.3.`oid`, ends in `oid`.
+fn expanded_pkcs8(oid: u8, raw: &[u8]) -> Vec<u8> {
     let len = |n: usize| [0x82, (n >> 8) as u8, n as u8];
     let mut inner = vec![0x04];
     inner.extend(len(raw.len()));
     inner.extend_from_slice(raw);
     let mut body = vec![0x02, 0x01, 0x00];
-    // id-ml-dsa-44, 2.16.840.1.101.3.4.3.17
     body.extend([
-        0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x11,
+        0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, oid,
     ]);
     body.push(0x04);
     body.extend(len(inner.len()));
