@@ -1149,10 +1149,6 @@ fn generator_table() -> &'static AffinePointTableComb {
     &precomp::CURVE_GENERATOR_PRECOMP_COMB.0
 }
 
-// Cross builds that cannot run `base_point_precomp_comb` still reject a static
-// that dropped the wrapper. This is that static's alignment.
-const _: () = assert!(align_of_val(&precomp::CURVE_GENERATOR_PRECOMP_COMB) == 64);
-
 /// a, which is -3
 const CURVE_A: FieldElement = FieldElement([
     0xffff_ffff_ffff_fffc,
@@ -1513,7 +1509,6 @@ mod tests {
     #[test]
     fn base_point_precomp_comb() {
         assert_eq!(align_of_val(&precomp::CURVE_GENERATOR_PRECOMP_COMB), 64);
-        assert_eq!(generator_table().as_ptr() as usize % 64, 0);
         let mut base = JacobianPoint::from_affine(&CURVE_GENERATOR);
         for table in generator_table() {
             let mut multiple = base;

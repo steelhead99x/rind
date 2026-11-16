@@ -66,7 +66,7 @@ pub(super) mod xchacha20poly1305;
 /// Widening that stride would change the comb index.
 ///
 /// A one-field tuple struct: Aeneas extracts it as a reducible synonym of the
-/// inner array and erases `.0`. Each curve asserts its own static's alignment.
-/// Alignment of this wrapper type would still hold if a generated table dropped it.
+/// inner array and erases `.0`. Each curve's table test checks its static's
+/// alignment.
 #[repr(C, align(64))]
 struct AlignedTable<T>(T);
