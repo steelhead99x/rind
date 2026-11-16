@@ -8,6 +8,7 @@ import 'package:rind/ed25519.dart' as ed25519;
 import 'package:rind/legacy.dart';
 import 'package:rind/rind.dart';
 import 'package:rind/rsa.dart' as rsa;
+import 'package:pointycastle/export.dart' as pc;
 import 'package:rind/rsa_legacy.dart' as rsa;
 import 'package:test/test.dart';
 
@@ -605,6 +606,76 @@ void main() {
       );
     });
 
+    test('ECDSA verifies the hash each id names, on each curve', () {
+      // pointycastle signs with every hash, which no rind signer does.
+      final curves = {
+        ecdsa.SigningAlgorithm.p256Sha256Asn1: (
+          pc.ECCurve_secp256r1(),
+          [
+            ecdsa.VerificationAlgorithm.p256Sha256Asn1,
+            ecdsa.VerificationAlgorithm.p256Sha384Asn1,
+            ecdsa.VerificationAlgorithm.p256Sha512Asn1,
+          ],
+        ),
+        ecdsa.SigningAlgorithm.p384Sha384Asn1: (
+          pc.ECCurve_secp384r1(),
+          [
+            ecdsa.VerificationAlgorithm.p384Sha256Asn1,
+            ecdsa.VerificationAlgorithm.p384Sha384Asn1,
+            ecdsa.VerificationAlgorithm.p384Sha512Asn1,
+          ],
+        ),
+        ecdsa.SigningAlgorithm.p521Sha512Asn1: (
+          pc.ECCurve_secp521r1(),
+          [
+            ecdsa.VerificationAlgorithm.p521Sha256Asn1,
+            ecdsa.VerificationAlgorithm.p521Sha384Asn1,
+            ecdsa.VerificationAlgorithm.p521Sha512Asn1,
+          ],
+        ),
+      };
+      final digests = [
+        pc.SHA256Digest.new,
+        pc.SHA384Digest.new,
+        pc.SHA512Digest.new,
+      ];
+      final random = pc.FortunaRandom()..seed(pc.KeyParameter(Uint8List(32)));
+      final message = ascii('hello');
+      for (final MapEntry(key: signing, value: (curve, verifications))
+          in curves.entries) {
+        final pair = ecdsa.KeyPair.generate(signing);
+        final private = pc.ECPrivateKey(bigInt(pair.toScalar()), curve);
+        for (var hash = 0; hash < digests.length; hash++) {
+          final signer = pc.ECDSASigner(digests[hash]())
+            ..init(
+              true,
+              pc.ParametersWithRandom(pc.PrivateKeyParameter(private), random),
+            );
+          final ecSignature =
+              signer.generateSignature(message) as pc.ECSignature;
+          final signature = der(0x30, [
+            ...derInteger(ecSignature.r),
+            ...derInteger(ecSignature.s),
+          ]);
+          for (var id = 0; id < verifications.length; id++) {
+            final key = ecdsa.PublicKey(
+              verifications[id],
+              pair.publicKey.bytes,
+            );
+            if (id == hash) {
+              key.verify(message, signature);
+            } else {
+              expect(
+                () => key.verify(message, signature),
+                throwsRind(RindError.badSignature),
+                reason: '${verifications[id]} took ${verifications[hash]}',
+              );
+            }
+          }
+        }
+      }
+    });
+
     test('ECDSA public keys refuse another encoding or curve', () {
       const p256 = ecdsa.VerificationAlgorithm.p256Sha256Asn1;
       final pair = ecdsa.KeyPair.generate(
@@ -752,6 +823,32 @@ void main() {
       );
     });
 
+    test('RSA exports the longest public key it parses', () {
+      // An 8192-bit modulus and a 33-bit exponent, the largest rind takes.
+      final n = Uint8List(1024)
+        ..[0] = 0x80
+        ..[1023] = 1;
+      final e = hex('01ffffffff');
+      final key = rsa.PublicKey.fromComponents(n: n, e: e);
+      final encrypting = rsa.EncryptingKey.fromComponents(
+        rsa.OaepAlgorithm.sha256,
+        n: n,
+        e: e,
+      );
+      expect(key.modulusLength, 1024);
+      for (final (bytes, spki) in [
+        (key.bytes, key.toSpki()),
+        (encrypting.bytes, encrypting.toSpki()),
+      ]) {
+        expect(bytes.length, 1040);
+        expect(spki.length, 1064);
+        final components = rsaComponents(bytes);
+        expect(components.n, n);
+        expect(components.e, e);
+        expect(rsa.PublicKey.fromSpki(spki).bytes, bytes);
+      }
+    });
+
     test('RSA public keys refuse another encoding', () {
       final publicKey = rsa.KeyPair.generate(rsa.KeySize.rsa2048).publicKey;
       final pkcs1 = publicKey.bytes;
@@ -783,6 +880,46 @@ void main() {
       );
     });
 
+    test('RSA legacy algorithms verify the hash each names', () {
+      final pair = rsa.KeyPair.generate(rsa.KeySize.rsa2048);
+      final message = ascii('hello');
+      // rind signs no SHA-1, so pointycastle signs with the same key.
+      final pkcs8 = derSequence(pair.toPkcs8());
+      final [_, n, _, d, p, q, ...] = derSequence(
+        pkcs8[2],
+      ).map(bigInt).toList();
+      final sha1 =
+          (pc.RSASigner(pc.SHA1Digest(), '06052b0e03021a')..init(
+                true,
+                pc.PrivateKeyParameter<pc.RSAPrivateKey>(
+                  pc.RSAPrivateKey(n, d, p, q),
+                ),
+              ))
+              .generateSignature(message)
+              .bytes;
+      final sha256 = pair.sign(rsa.SigningAlgorithm.pkcs1Sha256, message);
+      final sha512 = pair.sign(rsa.SigningAlgorithm.pkcs1Sha512, message);
+      final signatures = {
+        rsa.pkcs1Sha1: sha1,
+        rsa.pkcs1Min1024Sha1: sha1,
+        rsa.pkcs1Min1024Sha256: sha256,
+        rsa.pkcs1Min1024Sha512: sha512,
+      };
+      signatures.forEach((algorithm, signature) {
+        for (final other in {sha1, sha256, sha512}) {
+          if (identical(other, signature)) {
+            pair.publicKey.verify(algorithm, message, signature);
+          } else {
+            expect(
+              () => pair.publicKey.verify(algorithm, message, other),
+              throwsRind(RindError.badSignature),
+              reason: '$algorithm',
+            );
+          }
+        }
+      });
+    });
+
     test('RSA refuses a modulus below the algorithm floor at verify', () {
       final pair = rsa.KeyPair.generate(rsa.KeySize.rsa2048);
       final message = ascii('hello');
@@ -811,6 +948,8 @@ void main() {
         rsa.VerificationAlgorithm.pkcs1Sha256,
         rsa.VerificationAlgorithm.pssSha256,
         rsa.VerificationAlgorithm.pssSha256AnySalt,
+        rsa.pkcs1Sha1,
+        rsa.pkcs1Min3072Sha384,
       ]) {
         expect(
           () => small.verify(algorithm, message, forged),
@@ -818,10 +957,17 @@ void main() {
           reason: '$algorithm',
         );
       }
-      expect(
-        () => small.verify(rsa.pkcs1Min1024Sha256, message, forged),
-        throwsRind(RindError.badSignature),
-      );
+      for (final algorithm in [
+        rsa.pkcs1Min1024Sha1,
+        rsa.pkcs1Min1024Sha256,
+        rsa.pkcs1Min1024Sha512,
+      ]) {
+        expect(
+          () => small.verify(algorithm, message, forged),
+          throwsRind(RindError.badSignature),
+          reason: '$algorithm',
+        );
+      }
     });
 
     test('a key pair returns the same public key each time', () {
@@ -987,29 +1133,52 @@ void main() {
 
 /// The modulus and exponent of a PKCS#1 `RSAPublicKey`.
 ({Uint8List n, Uint8List e}) rsaComponents(Uint8List der) {
-  var offset = 0;
-  int length() {
-    final first = der[offset++];
-    if (first < 0x80) return first;
-    var len = 0;
-    for (var i = 0; i < (first & 0x7f); i++) {
-      len = len << 8 | der[offset++];
-    }
-    return len;
-  }
-
-  Uint8List integer() {
-    expect(der[offset++], 0x02);
-    final len = length();
-    var value = der.sublist(offset, offset + len);
-    offset += len;
-    while (value.length > 1 && value[0] == 0) {
-      value = value.sublist(1);
-    }
-    return value;
-  }
-
-  expect(der[offset++], 0x30);
-  length();
-  return (n: integer(), e: integer());
+  Uint8List unsigned(Uint8List integer) =>
+      integer.length > 1 && integer[0] == 0 ? integer.sublist(1) : integer;
+  final [n, e] = derSequence(der);
+  return (n: unsigned(n), e: unsigned(e));
 }
+
+/// The contents of each element of the DER SEQUENCE [der].
+List<Uint8List> derSequence(Uint8List der) {
+  var at = 0;
+  (int, Uint8List) element(Uint8List bytes) {
+    final tag = bytes[at++];
+    var length = bytes[at++];
+    if (length >= 0x80) {
+      final count = length & 0x7f;
+      length = 0;
+      for (var i = 0; i < count; i++) {
+        length = length << 8 | bytes[at++];
+      }
+    }
+    at += length;
+    return (tag, bytes.sublist(at - length, at));
+  }
+
+  final (tag, contents) = element(der);
+  expect((tag, at), (0x30, der.length));
+  at = 0;
+  return [for (; at < contents.length;) element(contents).$2];
+}
+
+/// A DER element of [tag] around [contents], shorter than 256 bytes.
+Uint8List der(int tag, List<int> contents) => Uint8List.fromList([
+  tag,
+  if (contents.length >= 0x80) 0x81,
+  contents.length,
+  ...contents,
+]);
+
+/// A non-negative [value] as a DER INTEGER.
+Uint8List derInteger(BigInt value) {
+  final bytes = [
+    for (var v = value; v > BigInt.zero; v >>= 8)
+      (v & BigInt.from(0xff)).toInt(),
+  ].reversed.toList();
+  return der(0x02, [if (bytes.isEmpty || bytes[0] >= 0x80) 0, ...bytes]);
+}
+
+/// The unsigned big-endian [bytes] as a number.
+BigInt bigInt(Uint8List bytes) =>
+    bytes.fold(BigInt.zero, (n, b) => n << 8 | BigInt.from(b));

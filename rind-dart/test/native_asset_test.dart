@@ -1,23 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:rind/src/status.dart';
 import 'package:test/test.dart';
+
+// The package root, wherever `dart test` runs from.
+final _root = Isolate.resolvePackageUriSync(
+  Uri.parse('package:rind/'),
+)!.resolve('..');
 
 void main() {
   test('every @Native resolves against the registered code asset', () {
     final registered = _hookAssetId();
     expect(nativeAssetId, registered, reason: 'hook/build.dart');
     final nativeLibraries = <String>[];
-    for (final file in Directory(
-      'lib',
+    for (final file in Directory.fromUri(
+      _root.resolve('lib/'),
     ).listSync(recursive: true).whereType<File>()) {
       if (!file.path.endsWith('.dart')) continue;
       final text = file.readAsStringSync();
       if (!text.contains('@Native')) continue;
       final library = _libraryFile(file, text);
-      nativeLibraries.add(library.path);
+      nativeLibraries.add(library.uri.pathSegments.last);
       expect(
         _defaultAssetArgument(library),
         'nativeAssetId',
@@ -30,7 +36,7 @@ void main() {
       }
     }
     expect(
-      nativeLibraries.map((path) => path.split('/').last).toSet(),
+      nativeLibraries.toSet(),
       containsAll([
         'bindings.dart',
         'ecdsa.dart',
@@ -48,8 +54,8 @@ void main() {
       final results = await Future.wait([
         for (final name in names)
           Process.run(Platform.resolvedExecutable, [
-            'test/first_call/$name.dart',
-          ]),
+            _root.resolve('test/first_call/$name.dart').toFilePath(),
+          ], workingDirectory: _root.toFilePath()),
       ]);
       for (var i = 0; i < names.length; i++) {
         final result = results[i];
@@ -78,10 +84,10 @@ String _hookAssetId() {
   final package = RegExp(
     r'^name:\s*(\S+)',
     multiLine: true,
-  ).firstMatch(File('pubspec.yaml').readAsStringSync())!.group(1)!;
+  ).firstMatch(_read('pubspec.yaml'))!.group(1)!;
   final name = RegExp(
     r'''CodeAsset\(\s*package:\s*input\.packageName\s*,\s*name:\s*['"]([^'"]+)['"]''',
-  ).firstMatch(File('hook/build.dart').readAsStringSync())!.group(1)!;
+  ).firstMatch(_read('hook/build.dart'))!.group(1)!;
   return 'package:$package/$name';
 }
 
@@ -98,3 +104,6 @@ String _defaultAssetArgument(File library) {
 Iterable<String> _explicitAssetIds(String text) => RegExp(
   r'''assetId:\s*['"]([^'"]+)['"]''',
 ).allMatches(text).map((match) => match.group(1)!);
+
+String _read(String path) =>
+    File.fromUri(_root.resolve(path)).readAsStringSync();
