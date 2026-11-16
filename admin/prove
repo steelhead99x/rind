@@ -1102,7 +1102,8 @@ extract_kdf() {
         --start-from crate::high::hkdf::Salt::new \
         --start-from crate::high::hkdf::Salt::extract \
         --start-from crate::high::hkdf::Prk::expand \
-        --start-from crate::high::hkdf::Okm::fill \
+        --start-from crate::high::hkdf::Prk::new \
+        --start-from crate::high::hkdf::Prk::fill \
         --start-from crate::high::pbkdf2::Secret::new \
         --start-from crate::high::pbkdf2::Secret::derive \
         --start-from crate::high::pbkdf2::Secret::verify \
@@ -1143,6 +1144,10 @@ export CARGO_TARGET_DIR=$prove_target
 
 extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::x86_64::sha512::sha512_compress_blocks \
+    --include crate::low::x86_64::sha256::sha256_finish_shaext \
+    --include crate::low::x86_64::sha256::Padded \
+    --include crate::low::x86_64::sha256::padded \
+    --include crate::low::x86_64::sha256::ended \
     --start-from crate::mid::p256::PrivateKey::from_bytes \
     --start-from crate::high::ecdsa::VerifyingKey::from_x962_uncompressed \
     --start-from crate::high::ecdsa::VerifyingKey::verify \

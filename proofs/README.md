@@ -112,7 +112,9 @@ those inputs, in any worktree, restores in under a second.
   once, `SHA256_SHAEXT_ROUNDS_CORRECT`. They read the round constants and
   the byte-swap mask through rcx from the static `low::x86_64::sha256::K`,
   whose bytes `admin/prove` extracts and the proof checks against FIPS
-  180-4's.
+  180-4's. `Rind/X86_64/Sha256Shaext.lean` restates the two as axioms and
+  proves that the finish's padding, plain Rust above its block, builds the
+  block, or two, that FIPS 180-4 pads.
 - `<arch>/ct_compare_16.ml` and `<arch>/ct_compare_bytes.ml`, on x86_64,
   aarch64, and armv7: `CT_COMPARE_16_CORRECT` and `CT_COMPARE_BYTES_CORRECT`,
   that the blocks in `low::<arch>::cpu::ct_compare_16` and `ct_compare_bytes`,
@@ -351,16 +353,20 @@ against FIPS 180-4 and RFC 2104 as `Rind/HashSpec.lean` transliterates them:
 
 Below rind's padding, these theorems take `Sha1Blocks` or `Sha256Blocks` as
 a hypothesis, in each target's own `Rind/<Arch>/ShaBlocks.lean`. No proof
-covers a SHA-1 block function rind runs, and no Lean theorem yet restates the
-HOL Light proofs above of SHA-256's on x86_64, so there each states that every routine computes FIPS 180-4's block function, x86_64's
-SHA extensions' routines for SHA-1's padded last blocks and SHA-256's finish
-pad, and SHA-256's encodes, as FIPS 180-4 does, and that rind's checks pass.
+covers a SHA-1 block function rind runs, or SHA-256's on x86_64 without the
+SHA extensions, so there each states that every such routine computes FIPS
+180-4's block function, x86_64's SHA extensions' routine for SHA-1's padded
+last blocks pads as FIPS 180-4 does, and that rind's checks pass.
+`Rind/X86_64/Sha256Shaext.lean` restates the HOL Light proofs above of
+SHA-256's routines for the SHA extensions as the axioms
+`sha256_compress_blocks_shaext_spec` and `finish_padded_spec`, and proves that
+the finish's padding, `padded` and `ended`, gives FIPS 180-4's last blocks.
 On aarch64, `Sha256Blocks` states only that the CPU has the crypto extension
 and rind's checks pass: `Rind/Aarch64/Sha256Hw.lean` restates the HOL Light
 proof above as the axiom `sha256_block_data_order_hw_spec`, and
 `Rind/S2nSha256.lean` proves s2n-bignum's spec FIPS 180-4's block function.
-`Rind/<Arch>/HashAxioms.lean` checks the axioms each theorem rests on: none
-on x86_64, and that one for SHA-256 on aarch64. An input is at most `maxInput`
+`Rind/<Arch>/HashAxioms.lean` checks the axioms each theorem rests on: those
+for SHA-256 on x86_64 and aarch64. An input is at most `maxInput`
 (2^61 - 1) bytes, under FIPS 180-4's 2^64-bit limit. `Rind/HashSpecTest.lean`
 checks the transliterations against FIPS 180-4's, RFC 4231's, RFC 5869's, and
 RFC 6070's vectors.
@@ -375,8 +381,9 @@ and RFC 8018 as `Rind/HashSpec.lean` transliterates them:
 - `key_new_spec`, `sign_spec`, `verify_spec`, `context_with_key_spec`,
   `context_update_spec'`, `context_sign_spec` (`Rind/X86_64/HmacApi.lean`):
   `hmac::Key`, `sign`, `verify`, and `Context`;
-- `kdf.salt_extract_spec`, `kdf.okm_fill_spec`, `kdf.hkdf_fill`
-  (`Rind/X86_64/Hkdf.lean`): HKDF's extract and expand;
+- `kdf.salt_extract_spec`, `kdf.prk_fill_spec`, `kdf.hkdf_fill`,
+  `kdf.prk_new_fill` (`Rind/X86_64/Hkdf.lean`): HKDF's extract and expand,
+  and expand from a PRK loaded from bytes;
 - `kdf.derive_spec`, `kdf.verify_spec` (`Rind/X86_64/Pbkdf2.lean`): PBKDF2's
   `Secret::derive` and `Secret::verify`.
 
@@ -985,7 +992,9 @@ proof after those.
 - `Rind/<Arch>/ShaBlocks.lean`: SHA-1 and SHA-256's block functions on each
   target, SHA-1's padded last blocks, and SHA-256's padded last blocks and
   finish; `Rind/Aarch64/Sha256Hw.lean`, the axiom for aarch64's routine with
-  the SHA-256 instructions, and `Rind/S2nSha256.lean`, s2n-bignum's SHA-256
+  the SHA-256 instructions; `Rind/X86_64/Sha256Shaext.lean`, the axioms for
+  x86_64's routines for the SHA extensions and the proof of the finish's
+  padding; and `Rind/S2nSha256.lean`, s2n-bignum's SHA-256
   spec, transliterated, and its proof that it is `Rind/HashSpec.lean`'s;
   `Rind/S2nChaCha20Poly1305.lean`, rind's HOL Light ChaCha20-Poly1305 spec,
   transliterated, and its proof that it is `Rind/Spec.lean`'s.
