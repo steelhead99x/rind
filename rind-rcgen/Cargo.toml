@@ -1,6 +1,6 @@
 [package]
 name = "rind-rcgen"
-version = "0.14.4"
+version = "0.14.5"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
 license = "Apache-2.0 OR ISC OR MIT-0"
@@ -31,8 +31,6 @@ omitted = [
 default = ["pem"]
 # rcgen's PEM methods on `KeyPair`.
 pem = ["dep:base64ct", "rcgen/pem"]
-# rind-rcgen's own: wipes rind's keys and the key pair's PKCS#8 copy on drop.
-wipe = ["rind/wipe"]
 # rcgen's `impl Zeroize for KeyPair`, which clears its PKCS#8 copy.
 zeroize = []
 
@@ -44,10 +42,6 @@ rustls-pki-types = "1.12"
 zeroize = "1.9"
 
 [dev-dependencies]
-# `sh/dispatch.sh` and `admin/mutants` enable `wipe` and `zeroize` for
-# rind-rcgen alone. A dev-dependency that enabled them would, under resolver
-# 2, turn on `rind/wipe` for every package in one workspace test run.
-
 # Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
 # features, as `admin/ctgrind` does; otherwise they build as no-ops.
 crabgrind = { version = "0.4", default-features = false }

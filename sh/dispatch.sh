@@ -151,7 +151,7 @@ module deny '(^|/)Cargo\.(toml|lock)$|^deny\.toml$' \
     tools='cargo-deny'
 # .cargo/mutants.toml's exclusions name mutants by file, line, and function,
 # so moving code can leave one matching nothing.
-module mutants '^(rind[^/]*/src/|\.cargo/mutants\.toml$|admin/mutants(-cargo(-test)?)?$)' \
+module mutants '^(rind[^/]*/src/|\.cargo/mutants\.toml$|admin/mutants$)' \
     tools='cargo-mutants python3'
 # An adapter's manifest holds both its version and its upstream requirement.
 module versions '^(rind-[^/]+/Cargo\.toml$|sh/adapter-versions\.sh$)' \
@@ -350,87 +350,6 @@ names() {
     return 1
 }
 
-# The workspace packages whose test run turns on rind's `wipe`: those that
-# depend on rind with that feature, and everything that depends on them.
-# With `--lib`, only those with a library, which doc tests need.
-wiping_packages() {
-    local lib=${1:-}
-    cargo metadata --no-deps --format-version 1 --locked | jq -r '
-        .packages as $all
-        | def grow: . as $in
-            | ([$all[] | select(any(.dependencies[]; .name as $d | $in | index($d) != null)) | .name] + $in) | unique;
-        [$all[] | select(any(.dependencies[]; .name == "rind" and (.features | index("wipe")))) | .name]
-        | until(grow == .; grow) as $names
-        | $all[] | select(.name as $n | $names | index($n) != null)
-        | select($lib == "" or any(.targets[]; any(.kind[]; . == "lib" or . == "rlib")))
-        | .name' --arg lib "$lib"
-}
-
-# Runs a cargo command once per group of the packages named by the array SEL,
-# or the whole workspace when it is empty: `rind` alone, the rest, then each of
-# `wiping_packages` alone, since they turn on rind's `wipe` for any package
-# sharing their resolve. Usage: run_grouped SEL cargo CMD ... :: TRAILING ...
-# The selection's `-p NAME` and `--workspace` words go between the two halves.
-# A leading `--lib` runs only the wiping packages that have a library, for doc
-# tests; the rest still stay out of the others' resolve.
-run_grouped() {
-    local only_lib=''
-    if [[ $1 == --lib ]]; then
-        only_lib=--lib
-        shift
-    fi
-    local -n sel=$1
-    shift
-    local head=() tail=() seen=0 arg
-    for arg; do
-        if ((seen)); then
-            tail+=("$arg")
-        elif [[ $arg == '::' ]]; then
-            seen=1
-        else
-            head+=("$arg")
-        fi
-    done
-    local rest=() name i workspace=0 saw_rind='' wipers saw=()
-    mapfile -t wipers < <(wiping_packages)
-    ((${#sel[@]})) || workspace=1
-    for ((i = 0; i < ${#sel[@]}; i++)); do
-        arg=${sel[i]}
-        if [[ $arg == --workspace ]]; then
-            workspace=1
-        elif [[ $arg == -p ]]; then
-            i=$((i + 1))
-            name=${sel[i]:-}
-            if [[ $name == rind ]]; then
-                saw_rind=1
-            elif [[ " ${wipers[*]} " == *" $name "* ]]; then
-                saw+=("$name")
-            elif [[ -n $name ]]; then
-                rest+=(-p "$name")
-            fi
-        else
-            rest+=("$arg")
-        fi
-    done
-    if ((workspace)); then
-        saw_rind=1
-        mapfile -t saw < <(wiping_packages $only_lib)
-        rest=(--workspace --exclude rind)
-        for name in "${wipers[@]}"; do
-            rest+=(--exclude "$name")
-        done
-    fi
-    if [[ -n $saw_rind ]]; then
-        run "${head[@]}" -p rind "${tail[@]}"
-    fi
-    if ((${#rest[@]} > 0)); then
-        run "${head[@]}" "${rest[@]}" "${tail[@]}"
-    fi
-    for name in ${saw[@]+"${saw[@]}"}; do
-        run "${head[@]}" -p "$name" "${tail[@]}"
-    done
-}
-
 # One module's check or fix, run through `run`.
 step() {
     local listed=$logs/$2.files packages libs backends target targets
@@ -439,28 +358,11 @@ step() {
             mapfile -t packages < <(sh/select.sh "$changed" "$all")
             run cargo fmt --all --check
             RUSTFMT=rustfmt-unstable run cargo fmt --all --check -- --config-path=.rustfmt.unstable.toml
-            run_grouped packages cargo clippy :: --all-targets --locked -- --deny warnings
+            run cargo clippy "${packages[@]}" --all-targets --locked -- --deny warnings
             # nextest runs the test binaries in parallel but not doc tests. Like
             # `cargo test`, it passes a selection with no tests, such as the
             # benches alone.
-            #
-            # rind's default build leaves `low::zeroise` a no-op, so `run_grouped`
-            # keeps each package that turns it on out of the others' resolve.
-            run_grouped packages cargo nextest run :: --locked --no-tests=warn
-            # Only the zeroing and heap scratch tests see the opt-in wipe,
-            # which the default build turns into no-ops.
-            if names rind "${packages[@]}"; then
-                run cargo nextest run -p rind --features wipe --lib --test zeroing --test heap_scratch --locked
-            fi
-            if names rind-aws-lc-rs "${packages[@]}"; then
-                run cargo nextest run -p rind-aws-lc-rs --features wipe --test zeroing --locked
-            fi
-            # Its own invocation, so `wipe` and `zeroize` do not unify into the
-            # packages tested above. A dev-dependency cannot scope them: resolver
-            # 2 would turn `rind/wipe` on for that whole run.
-            if names rind-rcgen "${packages[@]}"; then
-                run cargo nextest run -p rind-rcgen --features wipe,zeroize --test zeroing --locked
-            fi
+            run cargo nextest run "${packages[@]}" --locked --no-tests=warn
             # The FIPS module's own code compiles only under its cfg, which a
             # workspace build leaves off, and only for glibc Linux on x86_64
             # and aarch64, where rind-fips is not empty. Its break build
@@ -489,10 +391,10 @@ step() {
             # Doc tests need a library. No packages at all means the workspace.
             mapfile -t libs < <(sh/select.sh "$changed" "$all" --lib)
             if ((${#libs[@]} > 0 || ${#packages[@]} == 0)); then
-                run_grouped --lib libs cargo test :: --locked --doc
+                run cargo test "${libs[@]}" --locked --doc
                 # A broken or private intra-doc link renders as plain text on
                 # docs.rs.
-                RUSTDOCFLAGS='--deny warnings' run_grouped libs cargo doc :: --no-deps --locked
+                RUSTDOCFLAGS='--deny warnings' run cargo doc "${libs[@]}" --no-deps --locked
             fi
             ;;
         fix:rs)
@@ -576,12 +478,9 @@ step() {
                     run cargo clippy -p rind --lib --locked --target armv7-unknown-linux-gnueabihf -- --deny warnings
                 # wasm32 compiles on the portable backend; the browser target
                 # needs getrandom's JavaScript source, WASI has its own.
-                local features
-                for features in "" wipe; do
-                    run cargo clippy -p rind --lib --locked --target wasm32-wasip2 --features "$features" -- --deny warnings
-                    run cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
-                        --features "$features,getrandom/wasm_js" -- --deny warnings
-                done
+                run cargo clippy -p rind --lib --locked --target wasm32-wasip2 -- --deny warnings
+                run cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
+                    --features getrandom/wasm_js -- --deny warnings
             fi
             ;;
         check:wasm)
@@ -623,7 +522,6 @@ step() {
         check:quest) run quest check ;;
         check:license) run bash admin/scan-license ;;
         check:mutants)
-            run admin/mutants-cargo-test
             run admin/mutants --pins
             run admin/mutants --expand-diff-self-test
             ;;

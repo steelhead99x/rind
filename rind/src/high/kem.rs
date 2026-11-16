@@ -20,7 +20,7 @@ impl Algorithm for MlKem768 {}
 impl Algorithm for MlKem1024 {}
 
 /// A decapsulation key, which decapsulates any number of ciphertexts, and
-/// its encapsulation key; wiped on drop under the `wipe` feature.
+/// its encapsulation key; wiped on drop.
 pub struct DecapsulationKey<A: Algorithm> {
     key: mlkem::DecapKey<A>,
     public: EncapsulationKey<A>,
@@ -171,7 +171,7 @@ impl<A: Algorithm> AsRef<[u8]> for Ciphertext<A> {
     }
 }
 
-/// The secret both parties share, wiped on drop under the `wipe` feature.
+/// The secret both parties share, wiped on drop.
 pub struct SharedSecret<A: Algorithm>(mlkem::SharedSecret, PhantomData<A>);
 
 impl<A: Algorithm> SharedSecret<A> {

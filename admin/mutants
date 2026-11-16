@@ -264,18 +264,13 @@ if [ "${1:-}" = --expand-diff-self-test ]; then
     fi
     rm -f "$missing"
     # The shell must pass cargo-mutants the rewritten diff, and leave the
-    # caller's file alone. A fake cargo-mutants stands in for the real
-    # binary, so this exercises the launch path: find it, point CARGO at
-    # the wrapper, and exec it with the `mutants` subcommand.
+    # caller's file alone. A fake cargo records the arguments.
     bindir=$(mktemp -d)
     argsfile=$(mktemp)
     sample=$(mktemp)
-    cat >"$bindir/cargo-mutants" <<EOF
+    cat >"$bindir/cargo" <<EOF
 #!/bin/sh
 : > "$argsfile"
-printf 'BIN=%s\n' "\$0" >> "$argsfile"
-printf 'CARGO=%s\n' "\$CARGO" >> "$argsfile"
-printf 'RIND_REAL_CARGO=%s\n' "\$RIND_REAL_CARGO" >> "$argsfile"
 for arg in "\$@"; do
     printf '%s\n' "\$arg" >> "$argsfile"
     file=\${arg#-D}
@@ -286,7 +281,7 @@ for arg in "\$@"; do
 done
 exit 0
 EOF
-    chmod +x "$bindir/cargo-mutants"
+    chmod +x "$bindir/cargo"
     cat >"$sample" <<'EOF'
 diff --git a/rind/src/low/generic/aes_nohw.rs b/rind/src/low/generic/aes_nohw.rs
 --- a/rind/src/low/generic/aes_nohw.rs
@@ -301,19 +296,7 @@ EOF
         exit 1
     fi
     if ! grep -q 'portable/\.\./generic/aes_nohw.rs' "$argsfile"; then
-        echo "admin/mutants: cargo-mutants did not receive a diff naming the portable path" >&2
-        exit 1
-    fi
-    if ! grep -q 'BIN=.*/cargo-mutants$' "$argsfile" || ! grep -qx mutants "$argsfile"; then
-        echo "admin/mutants: cargo-mutants was not executed with the mutants subcommand" >&2
-        exit 1
-    fi
-    if ! grep -qx "CARGO=$here/admin/mutants-cargo" "$argsfile"; then
-        echo "admin/mutants: CARGO is not admin/mutants-cargo" >&2
-        exit 1
-    fi
-    if ! grep -q '^RIND_REAL_CARGO=/' "$argsfile"; then
-        echo "admin/mutants: RIND_REAL_CARGO is not set to cargo" >&2
+        echo "admin/mutants: cargo did not receive a diff naming the portable path" >&2
         exit 1
     fi
     # The other ways to name the diff, and a non-UTF-8 byte in another file.
@@ -334,11 +317,6 @@ fi
 # .cargo/mutants.toml that matches no mutant, such as a `file:line` pin its
 # code moved away from. cargo-mutants lists mutants whatever their `cfg`, so
 # one listing covers every campaign.
-#
-# rind-rcgen's `wipe` and `zeroize` are not in that file's `features` list:
-# cargo-mutants passes the list to every package, and a package that does not
-# depend on rind-rcgen fails to resolve them. `admin/mutants-cargo` adds the
-# two features only when the cargo invocation builds rind-rcgen.
 if [ "${1:-}" = --pins ]; then
     cd "$here"
     # Without the config, so its exclusions don't hide what they match.
@@ -542,19 +520,6 @@ done
 export NEXTEST_TEST_THREADS=$((($(nproc) + jobs - 1) / jobs))
 
 export "CARGO_TARGET_${triple}_RUNNER=$here/admin/mutants ${portable_backend:+--portable }${target:+--target $target }--run"
-# Cargo sets CARGO to its own executable when it launches a subcommand, which
-# would replace the wrapper. Call cargo-mutants directly so the wrapper stays
-# the cargo it invokes.
-mutants=$(command -v cargo-mutants) || {
-    echo "admin/mutants: cargo-mutants is not installed; run this inside nix develop" >&2
-    exit 1
-}
-RIND_REAL_CARGO=$(command -v cargo) || {
-    echo "admin/mutants: cargo is not installed; run this inside nix develop" >&2
-    exit 1
-}
-export RIND_REAL_CARGO
-export CARGO=$here/admin/mutants-cargo
 # A mutant that hangs the tests until the timeout is caught by them, so only
 # exit 3, timeouts alone, passes beside 0.
 # Copy `--in-diff` onto the `..` names cargo-mutants records. The copy is
@@ -607,8 +572,6 @@ for arg in "$@"; do
     prev=$arg
 done
 status=0
-# This cargo-mutants build's CLI is `cargo mutants`: the binary expects the
-# `mutants` subcommand, which `cargo mutants` inserts and a direct exec does not.
-"$mutants" mutants "${args[@]}" ${cargo_args[@]+"${cargo_args[@]}"} || status=$?
+cargo mutants "${args[@]}" ${cargo_args[@]+"${cargo_args[@]}"} || status=$?
 [ "$status" -ne 3 ] || status=0
 exit "$status"

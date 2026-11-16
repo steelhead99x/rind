@@ -22,8 +22,6 @@ curve25519-dalek = { version = "5", default-features = false }
 arrayvec = "0.7"
 dimpl = { version = "0.9", default-features = false, features = ["aws-lc-rs", "_crypto-common"] }
 rind-dimpl = { path = "../rind-dimpl" }
-# Depends on rind-openssl, which enables `rind/wipe`. `sh/dispatch.sh` tests
-# this crate on its own so that feature stays out of the other resolves.
 rind-openssl = { path = "../rind-openssl" }
 rind-rcgen = { path = "../rind-rcgen" }
 rind-rustls = { path = "../rind-rustls" }
