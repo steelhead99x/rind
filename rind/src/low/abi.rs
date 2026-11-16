@@ -1116,6 +1116,11 @@ mod tests {
             "a test, whose assembly only reads DIT",
         ),
         (
+            "aarch64/cpu.rs",
+            "read_midr",
+            "returns Option, which the trampoline cannot return",
+        ),
+        (
             "aarch64/aes_cbc.rs",
             "aese_chained",
             "one `aese` on registers the compiler allocates, which no ABI governs",
