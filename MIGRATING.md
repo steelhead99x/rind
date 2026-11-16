@@ -163,12 +163,12 @@ agreement keys refuse.
 
 | aws-lc-rs | rind |
 |---|---|
-| `DecapsulationKey::generate(&ML_KEM_768)` | the same |
+| `ML_KEM_512`, `ML_KEM_768`, `ML_KEM_1024` | the types `MlKem512`, `MlKem768`, `MlKem1024`, which parameterize every key, ciphertext, and secret |
+| `DecapsulationKey::generate(&ML_KEM_768)` | `DecapsulationKey::<MlKem768>::generate()` |
 | `encapsulation_key()?`, then `EncapsulationKey::key_bytes()?` | `public_key()`, and its bytes through `AsRef<[u8]>` |
-| `EncapsulationKey::new(alg, bytes)`, `encapsulate()` | the same |
-| `decapsulate(Ciphertext::from(bytes))` | `decapsulate(bytes)`, which borrows the key |
+| `EncapsulationKey::new(&ML_KEM_768, bytes)`, `encapsulate()` | `EncapsulationKey::<MlKem768>::new(bytes)`, `encapsulate()` |
+| `decapsulate(Ciphertext::from(bytes))` | `decapsulate(&Ciphertext::<MlKem768>::new(bytes)?)`, where `new` checks the length and `decapsulate` cannot fail |
 | `DecapsulationKey::new(alg, bytes)`, `DecapsulationKey::key_bytes()` | none: decapsulation keys are ephemeral |
-| `ML_KEM_512`, `ML_KEM_1024` | none; [ML-KEM-512 and ML-KEM-1024](quest/m3/parity/ml-kem.md) |
 | `algorithm()`, `Algorithm::id()`, `AlgorithmId`, `AlgorithmIdentifier` | none |
 
 ring has no `kem`.
@@ -378,10 +378,8 @@ backs, so a crate on aws-lc-rs swaps it in with `aws-lc-rs = { package =
 "rind-aws-lc-rs", version = "1" }` and no code changes. The rename reaches
 only that crate. It accepts every aws-lc-rs feature but `fips`, and adds only
 a `wipe` feature, since aws-lc-rs always wipes. Its [README](rind-aws-lc-rs/README.md) lists
-the items it leaves out, such as ML-KEM-512 and ML-KEM-1024, SHA-224, and the
-PKCS#1 v1.5 encryption keys, and where it behaves differently. rustls's
-`aws_lc_rs` provider names ML-KEM-1024, so it does not build on it until it
-offers [ML-KEM-1024](quest/m3/parity/ml-kem.md).
+the items it leaves out, such as SHA-224 and the PKCS#1 v1.5 encryption keys,
+and where it behaves differently.
 
 ### rind-rustls
 

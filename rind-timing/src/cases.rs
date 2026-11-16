@@ -481,10 +481,12 @@ fn agreement_cases(cases: &mut Vec<Case>) {
 }
 
 fn kem_cases(cases: &mut Vec<Case>) {
+    use kem::{Ciphertext, MlKem768};
+
     let setup = || {
-        let key = kem::DecapsulationKey::generate(&kem::ML_KEM_768).unwrap();
+        let key = kem::DecapsulationKey::<MlKem768>::generate().unwrap();
         let public = key.public_key();
-        let encapsulate = move || public.encapsulate().unwrap().0.as_ref().to_vec();
+        let encapsulate = move || public.encapsulate().unwrap().0;
         (key, encapsulate)
     };
     cases.push(case("kem/ml-kem-768/decapsulate", move |config| {
@@ -498,11 +500,11 @@ fn kem_cases(cases: &mut Vec<Case>) {
         let (key, encapsulate) = setup();
         let valid = encapsulate();
         let tampered = || {
-            let mut c = valid.clone();
+            let mut c = valid.as_ref().to_vec();
             let [at, flip] = random::<2>();
             let at = usize::from(at) * c.len() / 256;
             c[at] ^= flip | 1;
-            c
+            Ciphertext::new(&c).unwrap()
         };
         let ciphertexts = classes(VALUES, fixed(valid.clone()), tampered);
         measure(config, &ciphertexts, |c| key.decapsulate(c))

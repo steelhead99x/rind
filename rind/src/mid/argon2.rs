@@ -109,10 +109,16 @@ pub(crate) fn argon2id(
         }
     }
 
-    // The xor of each lane's last block.
+    // The xor of each lane's last block, indexed rather than through
+    // `chunks_exact`, whose `len % chunk` the compiler folds away only in
+    // some builds, so `admin/ct-vartime` would find it in others.
     let mut last = Block::ZERO;
-    for lane in memory.chunks_exact(geometry.lane_len) {
-        for (last, word) in last.0.iter_mut().zip(&lane[geometry.lane_len - 1].0) {
+    for lane in 1..=lanes {
+        for (last, word) in last
+            .0
+            .iter_mut()
+            .zip(&memory[lane * geometry.lane_len - 1].0)
+        {
             *last ^= word;
         }
     }
