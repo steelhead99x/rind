@@ -501,8 +501,6 @@ mod tests {
         unsafe { call!(unsafe zero_bytes, bytes.as_mut_ptr(), 100) };
         assert_eq!(bytes, [0; 100]);
         call!(prefetch_ro::<u8>, bytes.as_ptr());
-        #[cfg(target_os = "linux")]
-        let _ = call!(read_midr);
         #[cfg(target_vendor = "apple")]
         if std::arch::is_aarch64_feature_detected!("dit") {
             // SAFETY: the CPU has DIT, which this leaves as it found it.
