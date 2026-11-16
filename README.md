@@ -52,7 +52,7 @@ cost in AI tokens.
 <!-- comparison: `admin/bench-report render` writes this table -->
 | Library | Build tools beyond rustc | Lacks, of the 14 algorithms benchmarked | Formally verified | Fastest, or within 10% |
 |---|---|---|---|---|
-| rind | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | none | [aarch64: SHA-256 (some CPUs), SHA-512, SHA-3, HMAC (some CPUs), HKDF (some CPUs), X25519, Ed25519, P-256, P-384 (some operations); portable: SHA-256, SHA-512, HMAC, HKDF; x86_64: AES-GCM (some CPUs), SHA-512 (some CPUs), SHA-3, X25519, Ed25519 (some CPUs, some operations), P-384 (some operations), RSA (some CPUs, some operations)](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [331 of its 354 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
+| rind | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | none | [aarch64: SHA-256 (some CPUs), SHA-512, SHA-3, HMAC (some CPUs), HKDF (some CPUs), X25519, Ed25519, P-256, P-384 (some operations); portable: SHA-256, SHA-512, HMAC, HKDF; x86_64: AES-GCM (some CPUs), SHA-512 (some CPUs), SHA-3, X25519, Ed25519 (some CPUs, some operations), P-256 (some CPUs), P-384 (some operations), RSA (some CPUs, some operations)](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [331 of its 354 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
 | [aws-lc-rs](https://github.com/aws/aws-lc-rs) | [cc](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | XChaCha20-Poly1305 (aws-lc has it, through aws-lc-sys) | [x86_64: SHA-512 (some CPUs)](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [127 of its 354 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
 | [ring](https://github.com/briansmith/ring) | [cc](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | XChaCha20-Poly1305, P-521, ML-KEM | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [94 of its 294 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
 | [RustCrypto + dalek](https://github.com/RustCrypto) | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | none | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [27 of its 282 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
@@ -174,18 +174,15 @@ library is faster, [Known gaps][gaps] says why and what closes it.
 
 ## Wiping keys
 
-rind wipes keys, keyed state, and heap scratch derived from a private key
-on drop only under its `wipe` feature, as RustCrypto does with `zeroize`;
-aws-lc-rs always wipes, and ring never does. The benefit of wiping is to avoid *unused keys* being leaked
-in a heap dump, like with Heartbleed. But IMO, you have bigger issues at that point, and it's not worth the perf hit by default.
-Enable it on `rind` itself, and Cargo turns it on beneath every
-adapter too. rind-aws-lc-rs also has its own `wipe`, which turns on rind's
-and wipes the adapter's own copies of secrets.
-
-```toml
-[dependencies]
-rind = { version = "0.3", features = ["wipe"] }
-```
+rind always wipes keys, keyed state, and heap scratch derived from a
+private key on drop, as aws-lc-rs does; ring never does. Wiping does not
+stop an attacker who can read memory while a key is in use, as Heartbleed
+could: the key is still there to read. What it does is shorten how long a
+key that is no longer in use stays in memory, in freed blocks a later
+allocation reuses, in swap, in core dumps and crash reports taken later, and
+in memory read after the fact; copies already written out stay. It does not wipe stack copies, digest contexts, or
+messages. The adapters wipe their own copies of secrets too, such as
+rind-aws-lc-rs's PKCS#8 documents.
 
 ## Data-independent timing
 

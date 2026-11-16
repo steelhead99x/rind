@@ -33,7 +33,7 @@ const D: u32 = 13;
 /// The length of a key's seed, `xi`.
 pub(crate) const SEED_LEN: usize = 32;
 pub(crate) const TR_LEN: usize = 64;
-const MU_LEN: usize = 64;
+pub(crate) const MU_LEN: usize = 64;
 const RND_LEN: usize = 32;
 const T1_PACKED: usize = 320;
 const T0_PACKED: usize = 416;
@@ -261,8 +261,7 @@ const fn signature_len<P: Params>() -> usize {
 /// from, if known, and the expansion every signature reads, which loading
 /// computes once.
 ///
-/// It wipes its whole value on drop under the `wipe` feature, its expansion
-/// included.
+/// It wipes its whole value on drop, its expansion included.
 pub(crate) struct KeyPair<P: Params> {
     seed: Option<[u8; SEED_LEN]>,
     secret_key: P::SecretKey,
@@ -502,6 +501,18 @@ pub(crate) fn mu(tr: &[u8; TR_LEN], context: &[u8], message: &[u8]) -> Result<[u
     Ok(mu)
 }
 
+/// `mu = H(tr || M')` for the internal interface's message `M'`, which ACVP
+/// tests as it is.
+#[cfg(any(test, rind_fips))]
+pub(crate) fn mu_internal(tr: &[u8; TR_LEN], message: &[u8]) -> [u8; MU_LEN] {
+    let mut mu = [0u8; MU_LEN];
+    let mut h = Shake256Sponge::new();
+    h.absorb(tr);
+    h.absorb(message);
+    Shake256::new(&h).read(&mut mu);
+    mu
+}
+
 /// A public key's hash `tr`, and its expansion, `A`, then `t1 * 2^d`, in
 /// the NTT domain, which its second verification keeps for later ones, so a
 /// key used once never holds it. The key's encoding is its owner's, passed
@@ -537,11 +548,24 @@ impl VerifyingKey {
         let mu = mu(&self.tr, context, message).map_err(|_| Error::BadSignature)?;
         P::verify(Internal(()), self, pk, &mu, signature)
     }
+
+    /// FIPS 204's `ML-DSA.Verify_internal`, which ACVP tests: verifies
+    /// `signature` over `mu` under this key, whose encoding is `pk`.
+    #[cfg(any(test, rind_fips))]
+    pub(crate) fn verify_mu<P: Params>(
+        &self,
+        pk: &[u8],
+        mu: &[u8; MU_LEN],
+        signature: &[u8],
+    ) -> Result<(), Error> {
+        let _entry = Entry::new_public();
+        P::verify(Internal(()), self, pk, mu, signature)
+    }
 }
 
-/// Polynomials on the heap, wiped before they are freed under the `wipe`
-/// feature, as heap scratch derived from a private key must be. All-zero
-/// bytes are none, so a key holding them can wipe its whole value.
+/// Polynomials on the heap, wiped before they are freed, as heap scratch
+/// derived from a private key must be. All-zero bytes are none, so a key
+/// holding them can wipe its whole value.
 #[doc(hidden)]
 pub struct Polys(Option<Box<[Poly]>>);
 
@@ -1389,14 +1413,7 @@ mod tests {
             return test.hex("mu").try_into().unwrap();
         }
         match group.str("signatureInterface") {
-            "internal" => {
-                let mut mu = [0u8; MU_LEN];
-                let mut h = Shake256Sponge::new();
-                h.absorb(tr);
-                h.absorb(&test.hex("message"));
-                Shake256::new(&h).read(&mut mu);
-                mu
-            }
+            "internal" => mu_internal(tr, &test.hex("message")),
             "external" => mu(tr, &test.hex("context"), &test.hex("message")).unwrap(),
             other => panic!("unexpected interface {other}"),
         }

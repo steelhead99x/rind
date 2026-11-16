@@ -21,6 +21,8 @@
 #![cfg(rind_fips)]
 
 mod abi;
+#[cfg(feature = "acvp")]
+mod acvp;
 mod aes;
 mod agreement;
 mod alloc;
