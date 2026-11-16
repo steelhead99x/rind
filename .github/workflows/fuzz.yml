@@ -1,0 +1,406 @@
+name: fuzz
+
+# Fuzzes each target weekly on x86_64, keeping its corpus between runs as an
+# artifact (see sh/fuzz-corpus.sh), then replays the corpus on every CPU tier
+# of x86_64, aarch64, and armv7 (see sh/fuzz-replay.sh), and fuzzes it again
+# against the portable backend, from the x86_64 corpus and a corpus of its
+# own. A crash, timeout, or out-of-memory fails the run, which alert.yml
+# reports, and the input that caused it is uploaded as an artifact.
+
+# Weekly, at its own hour: see TESTING.md, "Scheduled workflows".
+on:
+  schedule:
+    - cron: "23 2 * * 6"
+  workflow_dispatch:
+  # A pull request only builds the targets; fuzzing needs the saved corpus
+  # and hours.
+  pull_request:
+    branches: [main]
+    paths:
+      - fuzz/**
+      - sh/fuzz-*.sh
+      - .github/workflows/fuzz.yml
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build fuzz targets (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - arch: aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          # Rust has no AddressSanitizer for 32-bit ARM Linux.
+          # See UPSTREAM.md, "No AddressSanitizer for 32-bit ARM Linux".
+          - arch: armv7
+            os: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+            sanitizer: none
+          # Forced on x86_64, as `just portable` does, so libFuzzer's coverage
+          # sees inside the backend every architecture without assembly runs.
+          - arch: portable
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            rustflags: --cfg rind_portable --cfg curve25519_dalek_backend="serial"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: nightly
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo fuzz
+        run: cargo install cargo-fuzz
+
+      # For aws-lc's C and libFuzzer's C++.
+      - name: Install the armhf toolchain
+        if: matrix.arch == 'armv7'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+
+      # The cfg lets sh/fuzz-replay.sh deny CPU features.
+      - name: Build fuzz targets
+        run: |
+          cargo fuzz build --target "$TARGET" --sanitizer "$SANITIZER"
+          mkdir bin
+          for target in $(cargo fuzz list); do
+            cp "target/$TARGET/release/$target" bin/
+          done
+        env:
+          TARGET: ${{ matrix.target }}
+          SANITIZER: ${{ matrix.sanitizer || 'address' }}
+          RUSTFLAGS: ${{ matrix.rustflags || '--cfg rind_cpu_disable' }}
+          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
+          CC_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-gcc
+          CXX_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-g++
+
+      - name: List fuzz targets
+        id: list
+        run: echo "targets=$(cargo fuzz list | jq -Rnc '[inputs]')" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-targets-${{ matrix.arch }}
+          path: bin/
+          retention-days: 1
+
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      # sh/fuzz-corpus.sh finds the last run's corpus.
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.build.outputs.targets) }}
+    env:
+      TARGET: ${{ matrix.target }}
+      CORPUS: fuzz/corpus/${{ matrix.target }}
+      ARTIFACTS: fuzz/artifacts/${{ matrix.target }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Wycheproof's signatures seed `verify`.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fuzz-targets-x86_64
+          path: bin/
+
+      - name: Restore the corpus
+        run: sh/fuzz-corpus.sh "fuzz-corpus-$TARGET" "$CORPUS"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Seed the corpus
+        run: sh/fuzz-seed.sh
+
+      # Twenty minutes per target, with every input bounded to 30 seconds.
+      - name: Fuzz
+        run: |
+          chmod +x "bin/$TARGET"
+          mkdir -p "$CORPUS" "$ARTIFACTS"
+          "bin/$TARGET" "$CORPUS" -max_total_time=1200 -timeout=30 -rss_limit_mb=2048 \
+            -artifact_prefix="$ARTIFACTS/" -print_final_stats=1
+
+      # Drops inputs that add no coverage, so the corpus stays small.
+      - name: Minimize the corpus
+        run: |
+          mkdir minimized
+          "bin/$TARGET" -merge=1 minimized "$CORPUS"
+          rm -r "$CORPUS"
+          mv minimized "$CORPUS"
+
+      - name: Replay the corpus on slower CPU tiers
+        run: sh/fuzz-replay.sh x86_64 "bin/$TARGET" "$CORPUS" -timeout=30 -rss_limit_mb=2048 -artifact_prefix="$ARTIFACTS/"
+
+      # For the replays below, and for the next run, as long as GitHub keeps
+      # an artifact.
+      - name: Save the corpus
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-corpus-${{ matrix.target }}
+          path: ${{ env.CORPUS }}/
+          retention-days: 90
+
+      - name: Upload the crashing input
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: ${{ env.ARTIFACTS }}/
+
+  # The x86_64 corpus, saved above, on each aarch64 tier.
+  replay-aarch64:
+    name: Replay ${{ matrix.target }} on aarch64
+    needs: [build, fuzz]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.build.result == 'success' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.build.outputs.targets) }}
+    env:
+      TARGET: ${{ matrix.target }}
+      CORPUS: fuzz/corpus/${{ matrix.target }}
+      ARTIFACTS: fuzz/artifacts/${{ matrix.target }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fuzz-targets-aarch64
+          path: bin/
+
+      - name: Restore the corpus
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fuzz-corpus-${{ matrix.target }}
+          path: ${{ env.CORPUS }}
+
+      - name: Replay the corpus
+        run: |
+          chmod +x "bin/$TARGET"
+          mkdir -p "$ARTIFACTS"
+          sh/fuzz-replay.sh aarch64 "bin/$TARGET" "$CORPUS" -timeout=30 -rss_limit_mb=2048 -artifact_prefix="$ARTIFACTS/"
+
+      - name: Upload the crashing input
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-crash-${{ matrix.target }}-aarch64
+          path: ${{ env.ARTIFACTS }}/
+
+  # The x86_64 corpus under Intel SDE, on the paths a runner has or lacks from
+  # run to run (AVX-512, VAES, and the SHA extensions) and the SHA512
+  # instructions, which none has.
+  replay-x86_64-sde:
+    name: Replay ${{ matrix.target }} under SDE
+    needs: [build, fuzz]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.build.outputs.targets) }}
+    env:
+      TARGET: ${{ matrix.target }}
+      CORPUS: fuzz/corpus/${{ matrix.target }}
+      ARTIFACTS: fuzz/artifacts/${{ matrix.target }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix
+
+      # As in x86-cpu.yml, for the dev shell's SDE sandbox.
+      - name: Allow user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fuzz-targets-x86_64
+          path: bin/
+
+      - name: Restore the corpus
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fuzz-corpus-${{ matrix.target }}
+          path: ${{ env.CORPUS }}
+
+      - name: Replay the corpus
+        run: |
+          chmod +x "bin/$TARGET"
+          mkdir -p "$ARTIFACTS"
+          nix develop .#sde --command sh/fuzz-replay.sh x86_64-sde "bin/$TARGET" "$CORPUS" -timeout=30 -rss_limit_mb=2048 -artifact_prefix="$ARTIFACTS/"
+
+      - name: Upload the crashing input
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-crash-${{ matrix.target }}-x86_64-sde
+          path: ${{ env.ARTIFACTS }}/
+
+  # The x86_64 corpus on each armv7 tier. The arm64 runner runs 32-bit ARM
+  # natively, and its core has the crypto extension.
+  replay-armv7:
+    name: Replay ${{ matrix.target }} on armv7
+    needs: [build, fuzz]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.build.result == 'success' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.build.outputs.targets) }}
+    env:
+      TARGET: ${{ matrix.target }}
+      CORPUS: fuzz/corpus/${{ matrix.target }}
+      ARTIFACTS: fuzz/artifacts/${{ matrix.target }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the armhf C and C++ runtimes
+        run: |
+          sudo dpkg --add-architecture armhf
+          sudo apt-get update
+          sudo apt-get install -y libc6:armhf libstdc++6:armhf
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fuzz-targets-armv7
+          path: bin/
+
+      - name: Restore the corpus
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fuzz-corpus-${{ matrix.target }}
+          path: ${{ env.CORPUS }}
+
+      - name: Replay the corpus
+        run: |
+          chmod +x "bin/$TARGET"
+          mkdir -p "$ARTIFACTS"
+          sh/fuzz-replay.sh armv7 "bin/$TARGET" "$CORPUS" -timeout=30 -rss_limit_mb=2048 -artifact_prefix="$ARTIFACTS/"
+
+      - name: Upload the crashing input
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-crash-${{ matrix.target }}-armv7
+          path: ${{ env.ARTIFACTS }}/
+
+  # The portable backend, fuzzed from the x86_64 corpus saved above, which it
+  # replays first, into a corpus of its own, which finds the inputs its own
+  # branches need.
+  fuzz-portable:
+    name: Fuzz ${{ matrix.target }} on the portable backend
+    needs: [build, fuzz]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.build.outputs.targets) }}
+    env:
+      TARGET: ${{ matrix.target }}
+      NATIVE_CORPUS: fuzz/corpus/${{ matrix.target }}
+      CORPUS: fuzz/corpus-portable/${{ matrix.target }}
+      ARTIFACTS: fuzz/artifacts/${{ matrix.target }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fuzz-targets-portable
+          path: bin/
+
+      - name: Restore the x86_64 corpus
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fuzz-corpus-${{ matrix.target }}
+          path: ${{ env.NATIVE_CORPUS }}
+
+      - name: Restore the corpus
+        run: sh/fuzz-corpus.sh "fuzz-portable-corpus-$TARGET" "$CORPUS"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # libFuzzer runs every input of both corpora before it mutates them,
+      # and writes what it finds only to the first.
+      - name: Fuzz
+        run: |
+          chmod +x "bin/$TARGET"
+          mkdir -p "$CORPUS" "$ARTIFACTS"
+          "bin/$TARGET" "$CORPUS" "$NATIVE_CORPUS" -max_total_time=1200 -timeout=30 -rss_limit_mb=2048 \
+            -artifact_prefix="$ARTIFACTS/" -print_final_stats=1
+
+      - name: Minimize the corpus
+        run: |
+          mkdir minimized
+          "bin/$TARGET" -merge=1 minimized "$CORPUS"
+          rm -r "$CORPUS"
+          mv minimized "$CORPUS"
+
+      - name: Save the corpus
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-portable-corpus-${{ matrix.target }}
+          path: ${{ env.CORPUS }}/
+          retention-days: 90
+
+      - name: Upload the crashing input
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-crash-${{ matrix.target }}-portable
+          path: ${{ env.ARTIFACTS }}/
