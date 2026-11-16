@@ -244,7 +244,8 @@ mod tests {
     // does not back yet; everything else it offers, this crate offers too.
     // Tests build rustls with `tls12`, so its TLS 1.2 suites are there to
     // compare.
-    #[cfg(feature = "tls12")]
+    // aws-lc-rs does not build for wasm.
+    #[cfg(all(feature = "tls12", not(target_family = "wasm")))]
     #[test]
     fn aws_lc_rs_parity() {
         use rustls::crypto::aws_lc_rs;
@@ -336,7 +337,8 @@ mod tests {
     // Every public item of rustls's aws-lc-rs provider, doc-hidden ones
     // included, short of `kx_group::MLKEM1024`, has the same name and type
     // here. This fails to compile on a divergence.
-    #[cfg(all(feature = "std", feature = "tls12"))]
+    // aws-lc-rs does not build for wasm.
+    #[cfg(all(feature = "std", feature = "tls12", not(target_family = "wasm")))]
     #[test]
     fn aws_lc_rs_items() {
         use rustls::crypto::aws_lc_rs as theirs;
