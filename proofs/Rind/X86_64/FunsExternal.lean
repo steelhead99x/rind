@@ -326,9 +326,10 @@ opaque low.x86_64.sha1_mux.path : Result low.x86_64.sha1_mux.Path
 
 opaque low.x86_64.sha256_mux.path : Result low.x86_64.sha256_mux.Path
 
-/-! SHA-1 and SHA-256's block and finishing functions, whose contracts `Rind.X86_64.ShaBlocks`
-states as hypotheses. SHA-1's block function is its whole dispatch, which `Sha1Blocks` states
-as one. -/
+/-! SHA-1 and SHA-256's block and finishing functions. `Rind.X86_64.ShaBlocks` states SHA-1's
+contracts as hypotheses, and `Rind.X86_64.Sha256Shaext` SHA-256's as axioms restating their
+HOL Light proofs. SHA-1's block function is its whole dispatch, which `Sha1Blocks` states as
+one. `finish_padded` is `sha256_finish_shaext`'s `asm!` block, below its padding. -/
 
 opaque low.x86_64.sha1_mux.sha1_compress_blocks
   : Array Std.U32 5#usize → Slice Std.U8 → Result (Array Std.U32 5#usize)
@@ -341,8 +342,8 @@ opaque low.x86_64.sha256.sha256_compress_blocks_shaext
   : Array Std.U32 8#usize → Slice Std.U8 → low.x86_64.cpu.HaveSha256 →
     Result (Array Std.U32 8#usize)
 
-opaque low.x86_64.sha256.sha256_finish_shaext
-  : Array Std.U32 8#usize → Slice Std.U8 → Array Std.U8 8#usize → low.x86_64.cpu.HaveSha256 →
+opaque low.x86_64.sha256.finish_padded
+  : Array Std.U32 8#usize → Slice Std.U8 → low.x86_64.sha256.Padded → low.x86_64.cpu.HaveSha256 →
     Result (Array Std.U8 32#usize)
 
 opaque low.x86_64.sha256.sha256_compress_blocks_avx

@@ -98,6 +98,17 @@ fn hkdf_matches_rind() {
             for secret_len in [0, 22, 100] {
                 let secret = bytes("secret", secret_len);
                 let reference = reference_salt.extract(&secret).unwrap();
+
+                // The secret loaded as a PRK, and its clone, expand as rind's.
+                let loaded = hkdf::Prk::new(ours, &secret);
+                let reference_loaded = rind::hkdf::Prk::new(theirs, &secret);
+                for prk in [loaded.clone(), loaded] {
+                    let (mut out, mut expected) = ([0; 42], [0; 42]);
+                    prk.fill(&[b"loaded"], &mut out).unwrap();
+                    reference_loaded.fill(&[b"loaded"], &mut expected).unwrap();
+                    assert_eq!(out, expected);
+                }
+
                 // FIPS 140-3 approves no empty salt, which rind takes.
                 if salt_len == 0 {
                     assert_eq!(salt.extract(&secret).unwrap_err(), Error::WrongLength);
@@ -107,7 +118,9 @@ fn hkdf_matches_rind() {
 
                 // Nor an empty info, however it is split.
                 for info in [&[][..], &[&[][..]], &[&[][..], &[][..]]] {
-                    assert_eq!(prk.expand(info, 16).unwrap_err(), Error::WrongLength);
+                    let mut out = [0; 16];
+                    assert_eq!(prk.fill(info, &mut out), Err(Error::WrongLength));
+                    assert_eq!(out, [0; 16]);
                     assert_eq!(
                         prk.expand(info, &hmac::HMAC_SHA256).unwrap_err(),
                         Error::WrongLength
@@ -116,7 +129,7 @@ fn hkdf_matches_rind() {
                         prk.expand(info, &hkdf::HKDF_SHA256).unwrap_err(),
                         Error::WrongLength
                     );
-                    assert!(reference.expand(info, 16).is_ok());
+                    assert!(reference.fill(info, &mut out).is_ok());
                 }
 
                 let (a, b) = (bytes("a", 10), bytes("b", 300));
@@ -125,12 +138,8 @@ fn hkdf_matches_rind() {
                     for len in [1, hash_len, hash_len + 1, 255 * hash_len] {
                         let mut out = vec![0; len];
                         let mut expected = vec![0; len];
-                        prk.expand(info, len).unwrap().fill(&mut out).unwrap();
-                        reference
-                            .expand(info, len)
-                            .unwrap()
-                            .fill(&mut expected)
-                            .unwrap();
+                        prk.fill(info, &mut out).unwrap();
+                        reference.fill(info, &mut expected).unwrap();
                         assert_eq!(
                             out, expected,
                             "{ours:?}, salt {salt_len}, secret {secret_len}"
@@ -152,26 +161,16 @@ fn hkdf_matches_rind() {
                         let reference_next =
                             rind::hkdf::Prk::from(reference.expand(info, next_theirs).unwrap());
                         let (mut out, mut expected) = ([0; 42], [0; 42]);
-                        next.expand(&[b"next"], 42).unwrap().fill(&mut out).unwrap();
-                        reference_next
-                            .expand(&[b"next"], 42)
-                            .unwrap()
-                            .fill(&mut expected)
-                            .unwrap();
+                        next.fill(&[b"next"], &mut out).unwrap();
+                        reference_next.fill(&[b"next"], &mut expected).unwrap();
                         assert_eq!(out, expected);
                     }
                 }
 
-                // Beyond 255 blocks, or not the length expanded for.
-                let info: [&[u8]; 1] = [b"info"];
-                assert_eq!(
-                    prk.expand(&info, 255 * hash_len + 1).unwrap_err(),
-                    Error::WrongLength
-                );
-                assert_eq!(
-                    prk.expand(&info, 31).unwrap().fill(&mut [0; 32]),
-                    Err(Error::WrongLength)
-                );
+                // Beyond 255 blocks.
+                let mut out = vec![0; 255 * hash_len + 1];
+                assert_eq!(prk.fill(&[b"info"], &mut out), Err(Error::WrongLength));
+                assert!(out.iter().all(|&b| b == 0));
             }
         }
     }
