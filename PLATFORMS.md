@@ -42,7 +42,7 @@ qemu. iOS devices' code is only built.
   that hide it, [s2n-bignum]'s `_alt` routines replace those that use it,
   and [aws-lc]'s Montgomery multiplication replaces its Karatsuba routines
   for RSA; with `avx2` there, as on Haswell, RSA-2048 signing runs aws-lc's
-  RSAZ exponentiation, and Ed25519 verification a port of
+  RSAZ exponentiation, and Ed25519 verification's multiplication a port of
   [curve25519-dalek]'s AVX2 backend. With `avx2` but without `sha`, as on
   Intel's cores before Ice Lake and AMD's before Zen, SLH-DSA's SHA-2
   parameter sets hash eight SHA-256 inputs at once with a port of the
@@ -176,8 +176,9 @@ Intel guarantees the timing of the instructions it lists as data-independent
   vector integer multiplies, such as `vpmuludq` and `vpmullw`, may take a cycle
   longer for some values ([Intel MCDT]), and SGX enclaves are no exception.
   rind loads `0x1FBF` around its x86_64 ML-KEM, ML-DSA, RSA exponentiation
-  with AVX2 or AVX-512, and Ed25519 verification with AVX2, and around every
-  call on 32-bit `x86`, whose compiled arithmetic may use them anywhere, then
+  with AVX2 or AVX-512, and Ed25519 verification with AVX2 but without ADX,
+  and around every call on 32-bit `x86`, whose compiled arithmetic may use
+  them anywhere, then
   restores the caller's MXCSR. On the x86_64 backend, `admin/ct-vartime`
   checks that nothing rind exports reaches one except through a function that
   enters the mitigation. It counts all of such a function as covered, so each
