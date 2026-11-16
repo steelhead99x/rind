@@ -1116,6 +1116,16 @@ mod tests {
             "a test, whose assembly only reads DIT",
         ),
         (
+            "aarch64/cpu.rs",
+            "read_cpuinfo_raw",
+            "a Linux `openat`/`read` sequence; its signed length is not a harness word",
+        ),
+        (
+            "aarch64/cpu.rs",
+            "close_fd",
+            "one `close` syscall, whose failed result is ignored and is not a harness word",
+        ),
+        (
             "aarch64/aes_cbc.rs",
             "aese_chained",
             "one `aese` on registers the compiler allocates, which no ABI governs",
