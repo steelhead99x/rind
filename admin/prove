@@ -777,6 +777,11 @@ aes_gcm_items() {
     items rind/src/low/x86_64/aes.rs '    pub(crate) fn round_keys(&self)'
     items rind/src/low/x86_64/aes_gcm.rs 'fn counter_block(' 'fn by8<' 'impl Counter {' 'const COUNTER_1:' \
         'const BYTESWAP:' 'const BYTESWAP_EPI64:'
+    items rind/src/low/x86_64/ghash.rs 'impl GhashTableAvx512 {' 'pub(crate) fn _mul16(' 'pub(crate) fn _mul_tail(' \
+        'const TERNARY_XOR:' 'const GF128_POLY_LO:'
+    items rind/src/low/x86_64/aes.rs '    pub(crate) fn round_keys_512(&self)' 'impl RoundKeys512 {'
+    items rind/src/low/x86_64/aes_gcm.rs 'fn _cipher_avx512<' 'impl Counter512 {' 'const COUNTER_512_4:' \
+        'const BYTESWAP_512:' 'const BYTESWAP_512_EPI64:'
 }
 check_quote X86_64/AesGcmModel aes_gcm_items
 select_items() {
@@ -1187,7 +1192,6 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::x86_64::adx_mux::curve25519_x25519base \
     --include crate::low::x86_64::adx_mux::edwards25519_decode \
     --include crate::low::x86_64::adx_mux::edwards25519_scalarmulbase \
-    --include crate::low::x86_64::adx_mux::edwards25519_scalarmuldouble \
     --include crate::low::x86_64::adx_mux::bignum_madd_n25519 \
     --include crate::low::x86_64::sha1_mux \
     --opaque crate::low::x86_64::sha1_mux::path \
@@ -1379,13 +1383,29 @@ done
 # the same, which Lean checks once the proofs build, and
 # `proofs/Rind/Aarch64/NeonVectors.lean` holds what `admin/neon-vectors.rs`
 # printed on an aarch64 CPU, which the `prove` workflow's `neon` job checks is
-# still what it prints. Fail on a model neither tests, so a new one cannot go
-# untested.
+# still what it prints. `proofs/Rind/X86_64/Avx512Vectors.lean` holds what
+# `admin/avx512-vectors.rs` printed on a CPU with AVX-512, VAES, and
+# VPCLMULQDQ, which this checks is still what it prints where this CPU has
+# them; no CI runner is sure to. Fail on a model none tests, so a new one
+# cannot go untested.
 rustc --edition 2024 -O -o "$out/simd-vectors" admin/simd-vectors.rs
 "$out/simd-vectors" >"$out/SimdVectors.lean"
+has_avx512() {
+    local feature
+    for feature in avx512f avx512bw avx512vl vaes vpclmulqdq; do
+        grep -qw "$feature" /proc/cpuinfo || return 1
+    done
+}
+if has_avx512; then
+    rustc --edition 2024 -O -o "$out/avx512-vectors" admin/avx512-vectors.rs
+    "$out/avx512-vectors" | diff -u --label avx512-vectors - proofs/Rind/X86_64/Avx512Vectors.lean
+else
+    echo "admin/prove: this CPU lacks AVX-512, so proofs/Rind/X86_64/Avx512Vectors.lean is checked against the models but not rerun" >&2
+fi
 untested=$(grep -rhoE '^def core\.core_arch\.[^ ]+' proofs/Rind | sed 's/^def //' | grep -vE '\.__m|_t\.Insts\.' | sort -u |
     while read -r model; do
-        grep -qF " $model " "$out/SimdVectors.lean" proofs/Rind/Aarch64/NeonVectors.lean || echo "$model"
+        grep -qF " $model " "$out/SimdVectors.lean" proofs/Rind/Aarch64/NeonVectors.lean \
+            proofs/Rind/X86_64/Avx512Vectors.lean || echo "$model"
     done)
 if [[ -n $untested ]]; then
     echo "admin/prove: no vectors test these intrinsic models:" $untested >&2

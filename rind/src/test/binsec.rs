@@ -292,16 +292,34 @@ fn ct_binsec_ecdh_p521() {
     ecdh(&crate::agreement::ECDH_P521, 66);
 }
 
-#[test]
-#[ignore = "admin/ct-binsec runs it under BINSEC"]
-fn ct_binsec_mlkem768() {
-    use crate::mid::mlkem768::DecapKey;
+fn mlkem<P: crate::mid::mlkem::Params>() {
+    use crate::mid::mlkem::DecapKey;
 
-    let (_, ciphertext) = DecapKey::keygen_internal(&[1; 64])
+    let (_, ciphertext) = DecapKey::<P>::keygen_internal(&[1; 64])
         .encapsulation_key()
         .encaps()
         .unwrap();
-    checked(|| DecapKey::keygen_internal(&[1; 64]).decaps(&ciphertext));
+    checked(|| DecapKey::<P>::keygen_internal(&[1; 64]).decaps(&ciphertext));
+}
+
+// ML-KEM-512 samples its key's noise with `eta1 = 3`, and ML-KEM-1024
+// compresses its re-encryption to 11 and 5 bits.
+#[test]
+#[ignore = "admin/ct-binsec runs it under BINSEC"]
+fn ct_binsec_mlkem512() {
+    mlkem::<crate::mid::mlkem::MlKem512>();
+}
+
+#[test]
+#[ignore = "admin/ct-binsec runs it under BINSEC"]
+fn ct_binsec_mlkem768() {
+    mlkem::<crate::mid::mlkem::MlKem768>();
+}
+
+#[test]
+#[ignore = "admin/ct-binsec runs it under BINSEC"]
+fn ct_binsec_mlkem1024() {
+    mlkem::<crate::mid::mlkem::MlKem1024>();
 }
 
 #[test]

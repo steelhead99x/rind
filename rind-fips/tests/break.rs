@@ -112,8 +112,8 @@ fn trigger_ecdh_generate() {
 
 #[test]
 fn trigger_ml_kem_generate() {
-    use rind_fips::kem::{DecapsulationKey, ML_KEM_768};
-    DecapsulationKey::generate(&ML_KEM_768).unwrap();
+    use rind_fips::kem::{DecapsulationKey, MlKem768};
+    DecapsulationKey::<MlKem768>::generate().unwrap();
     eprintln!("trigger done");
 }
 
