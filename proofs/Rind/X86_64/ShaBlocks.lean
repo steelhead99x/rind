@@ -1,16 +1,19 @@
 import Rind.X86_64.Blockwise
+import Rind.X86_64.Sha256Shaext
 open Aeneas Aeneas.Std Result rind.spec
 
 /-!
 # SHA-1 and SHA-256's block functions on x86_64
 
-No proof covers any block function x86_64 runs for SHA-1 or SHA-256, so the
-theorems over them take `Sha1Blocks` or `Sha256Blocks` as a hypothesis instead
-of an axiom: each routine's contract, FIPS 180-4's block function over every
-whole block it is given, and that rind's checks pass. On the SHA extensions,
-SHA-1 and SHA-256 pad their last block in registers, so those routines'
-contracts cover the padding too. Once a routine's published proof lands, an
-axiom restating it under the composition rule discharges its field.
+SHA-256's routines on the SHA extensions are proven: `Rind.X86_64.Sha256Shaext`
+restates their HOL Light proofs as axioms and proves the finish's padding. No
+proof covers x86_64's other SHA-1 and SHA-256 block functions, so the theorems
+over them take `Sha1Blocks` or `Sha256Blocks` as a hypothesis instead of an
+axiom: each routine's contract, FIPS 180-4's block function over every whole
+block it is given, and that rind's checks pass. On the SHA extensions, SHA-1
+pads its last block in registers, so that routine's contract covers the padding
+too. Once a routine's published proof lands, an axiom restating it under the
+composition rule discharges its field.
 -/
 
 namespace rind.x86_64
@@ -34,20 +37,12 @@ structure Sha1Blocks : Prop where
   sha1 : Compresses sha1.compress low.x86_64.sha1_mux.sha1_compress_blocks
 
 /-- What the SHA-256 theorems assume of the code below rind's padding on
-x86_64, as `Sha1Blocks` does for SHA-1's. -/
+x86_64, as `Sha1Blocks` does for SHA-1's, but for the SHA extensions' routines,
+which `Rind.X86_64.Sha256Shaext` proves. -/
 structure Sha256Blocks : Prop where
   entry : ∃ e, low.entry.Entry.new_secret = ok e
   held : low.entry.Entry.assert_held = ok ()
   path : ∃ p, low.x86_64.sha256_mux.path = ok p
-  shaext : ∀ t, Compresses sha256.compress fun h b =>
-    low.x86_64.sha256.sha256_compress_blocks_shaext h b t
-  /-- The SHA extensions' finish: `m` padded and closed by `length`, and the
-  result's words big-endian. -/
-  shaext_finish : ∀ t h (m : Slice U8) (length : Std.Array U8 8#usize),
-    low.x86_64.sha256.sha256_finish_shaext h m length t ⦃ r =>
-      bv r.val = ((blocks 64 (bv (m.val ++ [128#u8] ++
-        List.replicate (padZeros 64 8 m.length) 0#u8 ++ length.val))).foldl sha256.compress
-          (words h.val)).flatMap BitVec.toBEBytes ⦄
   avx : ∀ t, Compresses sha256.compress fun h b => low.x86_64.sha256.sha256_compress_blocks_avx h b t
   avx2 : ∀ t, Compresses sha256.compress fun h b =>
     low.x86_64.sha256.sha256_compress_blocks_avx2 h b t
@@ -62,7 +57,7 @@ theorem sha256_compress_blocks_spec (hb : Sha256Blocks) :
   unfold low.x86_64.sha256_mux.sha256_compress_blocks
   rw [hp]
   cases p with
-  | Shaext t => exact (by simpa using hb.shaext t h b hl)
+  | Shaext t => exact (by simpa using sha256_compress_blocks_shaext_compresses t h b hl)
   | Avx t => exact (by simpa using hb.avx t h b hl)
   | Avx2 t => exact (by simpa using hb.avx2 t h b hl)
   | Ssse3 t => exact (by simpa using hb.ssse3 t h b hl)
@@ -200,7 +195,7 @@ theorem sha256_finish_spec (hb : Sha256Blocks) (P : List U8) (state : Std.Array 
   cases p with
   | Shaext t =>
     simp only [bind_ok]
-    apply WP.spec_mono (hb.shaext_finish t state message length)
+    apply WP.spec_mono (sha256_finish_shaext_spec t state message length)
     intro r hr
     have := sha256Finished_split (b := []) (rest := message.val) (length := length.val) hR
       (by simp)
