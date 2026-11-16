@@ -1038,7 +1038,7 @@ fn ct_qemu_ecdh_p521() {
 #[test]
 #[ignore = "admin/ct-qemu runs it under qemu"]
 fn ct_qemu_ed25519() {
-    use crate::signature::Ed25519KeyPair;
+    use crate::ed25519::KeyPair as Ed25519KeyPair;
 
     let seed = qemu_seed(32);
     let message = qemu_seed(40);
@@ -1051,8 +1051,8 @@ fn ct_qemu_ed25519() {
 #[cfg(test)]
 mod qemu_rsa {
     use crate::high::rsa::{self, SigningKey};
+    use crate::rsa::KeyPair as RsaKeyPair;
     use crate::rsa::KeySize;
-    use crate::signature::RsaKeyPair;
 
     pub(super) fn key_from_seed(seed: &[u8]) -> RsaKeyPair {
         let signing = SigningKey::generate_seeded(KeySize::Rsa2048, seed).unwrap();
@@ -1064,7 +1064,7 @@ mod qemu_rsa {
 #[test]
 #[ignore = "admin/ct-qemu runs it under qemu"]
 fn ct_qemu_rsa() {
-    use crate::signature::sign::RSA_PKCS1_SHA256;
+    use crate::rsa::sign::PKCS1_SHA256 as RSA_PKCS1_SHA256;
 
     // Built outside the trace, so key generation's public candidate loop
     // stays out of it. The primes differ between the two seeds.

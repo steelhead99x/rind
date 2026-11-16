@@ -32,10 +32,10 @@ use rcgen::{
     Error, PKCS_ECDSA_P256_SHA256, PKCS_ECDSA_P384_SHA384, PKCS_ED25519, PKCS_RSA_SHA256,
     PKCS_RSA_SHA384, PKCS_RSA_SHA512, PublicKeyData, SignatureAlgorithm,
 };
-use rind::signature::{
-    EcdsaKeyPair, EcdsaSigningAlgorithm, Ed25519KeyPair, PublicKey, RsaKeyPair,
-    RsaSigningAlgorithm, sign,
-};
+use rind::ecdsa::{KeyPair as EcdsaKeyPair, SigningAlgorithm as EcdsaSigningAlgorithm};
+use rind::ed25519::KeyPair as Ed25519KeyPair;
+use rind::rsa::{KeyPair as RsaKeyPair, SigningAlgorithm as RsaSigningAlgorithm};
+use rind::{ecdsa, rsa};
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 
 #[cfg(feature = "pem")]
@@ -45,8 +45,6 @@ mod pem;
 pub struct KeyPair {
     key: Key,
     algorithm: &'static SignatureAlgorithm,
-    // Kept for `der_bytes`, which lends its encoding.
-    public_key: PublicKey,
     serialized_der: Wiped,
 }
 
@@ -189,15 +187,9 @@ impl KeyPair {
     }
 
     fn new(key: Key, algorithm: &'static SignatureAlgorithm, serialized_der: Vec<u8>) -> Self {
-        let public_key = match &key {
-            Key::Ecdsa(key) => key.public_key(),
-            Key::Ed25519(key) => key.public_key(),
-            Key::Rsa(key, padding) => key.public_key(padding),
-        };
         Self {
             key,
             algorithm,
-            public_key,
             serialized_der: Wiped(serialized_der),
         }
     }
@@ -236,17 +228,17 @@ enum Signer {
 fn signer(algorithm: &SignatureAlgorithm) -> Result<Signer, Error> {
     // rcgen's algorithms are statics compared by value, so this can't match on them.
     Ok(if *algorithm == PKCS_ECDSA_P256_SHA256 {
-        Signer::Ecdsa(&sign::ECDSA_P256_SHA256_ASN1)
+        Signer::Ecdsa(&ecdsa::sign::P256_SHA256_ASN1)
     } else if *algorithm == PKCS_ECDSA_P384_SHA384 {
-        Signer::Ecdsa(&sign::ECDSA_P384_SHA384_ASN1)
+        Signer::Ecdsa(&ecdsa::sign::P384_SHA384_ASN1)
     } else if *algorithm == PKCS_ED25519 {
         Signer::Ed25519
     } else if *algorithm == PKCS_RSA_SHA256 {
-        Signer::Rsa(&sign::RSA_PKCS1_SHA256)
+        Signer::Rsa(&rsa::sign::PKCS1_SHA256)
     } else if *algorithm == PKCS_RSA_SHA384 {
-        Signer::Rsa(&sign::RSA_PKCS1_SHA384)
+        Signer::Rsa(&rsa::sign::PKCS1_SHA384)
     } else if *algorithm == PKCS_RSA_SHA512 {
-        Signer::Rsa(&sign::RSA_PKCS1_SHA512)
+        Signer::Rsa(&rsa::sign::PKCS1_SHA512)
     } else {
         return Err(Error::UnsupportedSignatureAlgorithm);
     })
@@ -302,7 +294,11 @@ impl PublicKeyData for KeyPair {
     // rcgen takes the uncompressed point for ECDSA, the 32 bytes for Ed25519,
     // and PKCS#1 `RSAPublicKey` DER for RSA, which is rind's encoding of each.
     fn der_bytes(&self) -> &[u8] {
-        self.public_key.as_ref()
+        match &self.key {
+            Key::Ecdsa(key) => key.public_key().as_ref(),
+            Key::Ed25519(key) => key.public_key().as_ref(),
+            Key::Rsa(key, _) => key.public_key().as_ref(),
+        }
     }
 
     fn algorithm(&self) -> &'static SignatureAlgorithm {
@@ -313,12 +309,11 @@ impl PublicKeyData for KeyPair {
 impl rcgen::SigningKey for KeyPair {
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>, Error> {
         let signature = match &self.key {
-            Key::Ecdsa(key) => key.sign(msg),
-            Key::Ed25519(key) => Ok(key.sign(msg)),
-            Key::Rsa(key, padding) => key.sign(padding, msg),
-        }
-        .map_err(|_| Error::RingUnspecified)?;
-        Ok(signature.as_ref().to_vec())
+            Key::Ecdsa(key) => key.sign(msg).map(|s| s.as_ref().to_vec()),
+            Key::Ed25519(key) => Ok(key.sign(msg).as_ref().to_vec()),
+            Key::Rsa(key, padding) => key.sign(padding, msg).map(|s| s.as_ref().to_vec()),
+        };
+        signature.map_err(|_| Error::RingUnspecified)
     }
 }
 
@@ -418,7 +413,7 @@ mod tests {
     fn pkcs8_v2_as_ring() {
         let rejected = |reason: &str| Some(Error::RingKeyRejected(reason.into()));
 
-        let ecdsa = EcdsaKeyPair::generate(&sign::ECDSA_P256_SHA256_ASN1)
+        let ecdsa = EcdsaKeyPair::generate(&ecdsa::sign::P256_SHA256_ASN1)
             .unwrap()
             .to_pkcs8();
         let rsa = RsaKeyPair::from_pkcs1(include_bytes!("../../rind/src/high/rsa/rsa2048.der"))

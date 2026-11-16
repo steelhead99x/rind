@@ -1,13 +1,10 @@
 use core::fmt;
 use std::sync::Arc;
 
-use rind::signature::sign::{
-    ECDSA_P256_SHA256_ASN1, ECDSA_P384_SHA384_ASN1, ECDSA_P521_SHA512_ASN1, RSA_PKCS1_SHA256,
-    RSA_PKCS1_SHA384, RSA_PKCS1_SHA512, RSA_PSS_SHA256, RSA_PSS_SHA384, RSA_PSS_SHA512,
-};
-use rind::signature::{
-    EcdsaKeyPair, EcdsaSigningAlgorithm, Ed25519KeyPair, RsaKeyPair, RsaSigningAlgorithm,
-};
+use rind::ecdsa::{KeyPair as EcdsaKeyPair, SigningAlgorithm as EcdsaSigningAlgorithm};
+use rind::ed25519::KeyPair as Ed25519KeyPair;
+use rind::rsa::{KeyPair as RsaKeyPair, SigningAlgorithm as RsaSigningAlgorithm};
+use rind::{ecdsa, rsa};
 use rustls::SignatureScheme;
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer, SubjectPublicKeyInfoDer};
 use rustls::sign::{self, SigningKey};
@@ -92,17 +89,17 @@ impl Load for RsaKeys {
 
 /// Each curve's one scheme, since TLS 1.3 binds the hash to the curve.
 static ECDSA_P256_KEYS: EcdsaKeys = EcdsaKeys {
-    algorithm: &ECDSA_P256_SHA256_ASN1,
+    algorithm: &ecdsa::sign::P256_SHA256_ASN1,
     scheme: SignatureScheme::ECDSA_NISTP256_SHA256,
 };
 
 static ECDSA_P384_KEYS: EcdsaKeys = EcdsaKeys {
-    algorithm: &ECDSA_P384_SHA384_ASN1,
+    algorithm: &ecdsa::sign::P384_SHA384_ASN1,
     scheme: SignatureScheme::ECDSA_NISTP384_SHA384,
 };
 
 static ECDSA_P521_KEYS: EcdsaKeys = EcdsaKeys {
-    algorithm: &ECDSA_P521_SHA512_ASN1,
+    algorithm: &ecdsa::sign::P521_SHA512_ASN1,
     scheme: SignatureScheme::ECDSA_NISTP521_SHA512,
 };
 
@@ -148,12 +145,12 @@ impl Load for Ed25519Keys {
 /// The RSA schemes in preference order: PSS over PKCS#1, then the longest hash.
 /// SHA-1 is absent, so it is never chosen.
 const RSA_SCHEMES: [(SignatureScheme, &RsaSigningAlgorithm); 6] = [
-    (SignatureScheme::RSA_PSS_SHA512, &RSA_PSS_SHA512),
-    (SignatureScheme::RSA_PSS_SHA384, &RSA_PSS_SHA384),
-    (SignatureScheme::RSA_PSS_SHA256, &RSA_PSS_SHA256),
-    (SignatureScheme::RSA_PKCS1_SHA512, &RSA_PKCS1_SHA512),
-    (SignatureScheme::RSA_PKCS1_SHA384, &RSA_PKCS1_SHA384),
-    (SignatureScheme::RSA_PKCS1_SHA256, &RSA_PKCS1_SHA256),
+    (SignatureScheme::RSA_PSS_SHA512, &rsa::sign::PSS_SHA512),
+    (SignatureScheme::RSA_PSS_SHA384, &rsa::sign::PSS_SHA384),
+    (SignatureScheme::RSA_PSS_SHA256, &rsa::sign::PSS_SHA256),
+    (SignatureScheme::RSA_PKCS1_SHA512, &rsa::sign::PKCS1_SHA512),
+    (SignatureScheme::RSA_PKCS1_SHA384, &rsa::sign::PKCS1_SHA384),
+    (SignatureScheme::RSA_PKCS1_SHA256, &rsa::sign::PKCS1_SHA256),
 ];
 
 /// A `SigningKey` for RSA-PKCS1 or RSA-PSS.
@@ -210,7 +207,7 @@ impl sign::SigningKey for RsaSigningKey {
 
     fn public_key(&self) -> Option<SubjectPublicKeyInfoDer<'static>> {
         Some(SubjectPublicKeyInfoDer::from(
-            self.0.to_spki().as_ref().to_vec(),
+            self.0.public_key().to_spki().as_ref().to_vec(),
         ))
     }
 }
@@ -282,7 +279,7 @@ impl sign::SigningKey for Ecdsa {
 
     fn public_key(&self) -> Option<SubjectPublicKeyInfoDer<'static>> {
         Some(SubjectPublicKeyInfoDer::from(
-            self.key.to_spki().as_ref().to_vec(),
+            self.key.public_key().to_spki().as_ref().to_vec(),
         ))
     }
 }
@@ -330,7 +327,7 @@ impl sign::SigningKey for Ed25519 {
 
     fn public_key(&self) -> Option<SubjectPublicKeyInfoDer<'static>> {
         Some(SubjectPublicKeyInfoDer::from(
-            self.0.to_spki().as_ref().to_vec(),
+            self.0.public_key().to_spki().as_ref().to_vec(),
         ))
     }
 }

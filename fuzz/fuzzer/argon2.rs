@@ -1,7 +1,7 @@
 #![no_main]
 
 //! Argon2id against RustCrypto's `argon2`, as aws-lc-rs has none, for any
-//! password and salt, small costs, and several output lengths, and checking
+//! password and salt, small costs, and any output length, and checking
 //! that output tampered with fails to verify.
 
 use libfuzzer_sys::{arbitrary, arbitrary::Arbitrary, fuzz_target};
@@ -45,24 +45,16 @@ fuzz_target!(|input: Input| {
         theirs_params,
     );
 
-    // Lengths around BLAKE2b's 64-byte output, where H' changes form.
-    match input.len % 6 {
-        0 => check::<4>(&input, &theirs, ours_params),
-        1 => check::<32>(&input, &theirs, ours_params),
-        2 => check::<64>(&input, &theirs, ours_params),
-        3 => check::<65>(&input, &theirs, ours_params),
-        4 => check::<97>(&input, &theirs, ours_params),
-        _ => check::<200>(&input, &theirs, ours_params),
-    }
-});
-
-fn check<const N: usize>(input: &Input, theirs: &argon2::Argon2, params: ours::Params) {
+    // Any length up to 255 bytes, so below RFC 9106's 4-byte minimum and on
+    // both sides of BLAKE2b's 64-byte output, where H' changes form.
+    let len = usize::from(input.len);
     let (password, salt) = (&input.password, &input.salt);
-    let mut ours_out = [0; N];
-    let ours_result = ours::derive(params, password, salt, &mut ours_out);
-    let mut theirs_out = [0; N];
+    let secret = ours::Secret::new(password);
+    let mut ours_out = vec![0; len];
+    let ours_result = secret.derive(ours_params, salt, &mut ours_out);
+    let mut theirs_out = vec![0; len];
     let theirs_result = theirs.hash_password_into(password, salt, &mut theirs_out);
-    // Both refuse a salt shorter than 8 bytes.
+    // Both refuse a salt shorter than 8 bytes and an output shorter than 4.
     assert_eq!(
         ours_result.is_ok(),
         theirs_result.is_ok(),
@@ -74,13 +66,19 @@ fn check<const N: usize>(input: &Input, theirs: &argon2::Argon2, params: ours::P
     }
     assert_eq!(ours_out, theirs_out);
 
-    let mut stored = ours_out.to_vec();
+    // An edited tag verifies exactly when it is RustCrypto's derivation of
+    // its own length, which an edit that also cuts bytes can still be.
+    let mut stored = ours_out.clone();
     input.edit.apply(&mut stored);
-    let Ok(stored) = <[u8; N]>::try_from(stored) else {
-        return;
+    let expected = match stored.len() == len {
+        true => stored == theirs_out,
+        false => {
+            let mut again = vec![0; stored.len()];
+            theirs
+                .hash_password_into(password, salt, &mut again)
+                .is_ok()
+                && stored == again
+        }
     };
-    assert_eq!(
-        ours::verify(params, password, salt, &stored).is_ok(),
-        stored == ours_out
-    );
-}
+    assert_eq!(secret.verify(ours_params, salt, &stored).is_ok(), expected);
+});

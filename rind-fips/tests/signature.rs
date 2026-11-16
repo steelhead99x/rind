@@ -7,14 +7,8 @@
 //! moduli FIPS 186-5 does not approve, which rind takes.
 #![cfg(rind_fips_module)]
 
-use rind::signature as theirs;
 use rind_fips::rsa::{KeySize, PublicKeyComponents};
-use rind_fips::signature::sign::{MlDsa44, MlDsa65, MlDsa87, MlDsaKeyPair, MlDsaParameterSet};
-use rind_fips::signature::{
-    EcdsaKeyPair, EcdsaSigningAlgorithm, Ed25519KeyPair, PublicKey, RsaKeyPair,
-    RsaSigningAlgorithm, VerificationAlgorithm, sign, verify,
-};
-use rind_fips::{Error, digest};
+use rind_fips::{Error, digest, ecdsa, ed25519, ml_dsa, rsa};
 
 const MESSAGE: &[u8] = b"rind-fips differential test";
 
@@ -37,11 +31,55 @@ fn same_error<A, B>(ours: &Result<A, Error>, theirs: &Result<B, rind::Error>) {
     );
 }
 
+/// Both refuse, with the same error.
+#[track_caller]
+fn same_refusal<A, B>(ours: &Result<A, Error>, theirs: &Result<B, rind::Error>) {
+    assert!(ours.is_err() && theirs.is_err(), "accepted");
+    same_error(ours, theirs);
+}
+
 /// The `Debug` of `ours` is `theirs`', plain and pretty.
 #[track_caller]
 fn same_debug(ours: &impl core::fmt::Debug, theirs: &impl core::fmt::Debug) {
     assert_eq!(format!("{ours:?}"), format!("{theirs:?}"));
     assert_eq!(format!("{ours:#?}"), format!("{theirs:#?}"));
+}
+
+/// The module's verdicts match rind's: both verify `signature` over
+/// [`MESSAGE`], and refuse alike a flipped, truncated, or empty one, or
+/// another message.
+#[track_caller]
+fn same_verdicts(
+    ours: impl Fn(&[u8], &[u8]) -> Result<(), Error>,
+    theirs: impl Fn(&[u8], &[u8]) -> Result<(), rind::Error>,
+    signature: &[u8],
+) {
+    ours(MESSAGE, signature).unwrap();
+    theirs(MESSAGE, signature).unwrap();
+    let mut flipped = signature.to_vec();
+    flipped[signature.len() / 2] ^= 1;
+    let truncated = &signature[..signature.len() - 1];
+    for signature in [&flipped[..], truncated, &[]] {
+        same_refusal(&ours(MESSAGE, signature), &theirs(MESSAGE, signature));
+    }
+    same_refusal(&ours(b"another", signature), &theirs(b"another", signature));
+}
+
+/// The module parses `encoded` as rind does, to the same bytes, and refuses
+/// alike what rind refuses: it cut at either end, or empty.
+#[track_caller]
+fn same_parse<A: AsRef<[u8]>, B: AsRef<[u8]>>(
+    ours: impl Fn(&[u8]) -> Result<A, Error>,
+    theirs: impl Fn(&[u8]) -> Result<B, rind::Error>,
+    encoded: &[u8],
+) {
+    assert_eq!(
+        ours(encoded).unwrap().as_ref(),
+        theirs(encoded).unwrap().as_ref()
+    );
+    for bad in [&encoded[1..], &encoded[..encoded.len() - 1], &[]] {
+        same_refusal(&ours(bad), &theirs(bad));
+    }
 }
 
 /// Our digest of `message` with `ours`, and rind's with `theirs`.
@@ -56,320 +94,151 @@ fn digests(
     )
 }
 
-/// A verify algorithm, rind's, and a public key and a signature over
-/// [`MESSAGE`] that rind made for it.
-struct VerifyCase {
-    ours: &'static VerificationAlgorithm,
-    theirs: &'static theirs::VerificationAlgorithm,
-    public_key: Vec<u8>,
-    signature: Vec<u8>,
-}
+/// Our verify algorithm, rind's, and rind's signing algorithm, key, and
+/// hash for a signature it verifies.
+type EcdsaVerify = (
+    &'static ecdsa::VerificationAlgorithm,
+    &'static rind::ecdsa::VerificationAlgorithm,
+    &'static rind::ecdsa::SigningAlgorithm,
+    &'static [u8],
+    &'static rind::digest::Algorithm,
+);
 
-fn ecdsa_case(
-    ours: &'static VerificationAlgorithm,
-    theirs: &'static theirs::VerificationAlgorithm,
-    signer: &'static theirs::EcdsaSigningAlgorithm,
-    pkcs8: &[u8],
-    hash: &'static rind::digest::Algorithm,
-) -> VerifyCase {
-    let key = theirs::EcdsaKeyPair::from_pkcs8(signer, pkcs8).unwrap();
-    let digest = rind::digest::digest(hash, MESSAGE);
-    VerifyCase {
-        ours,
-        theirs,
-        public_key: key.public_key().as_ref().to_vec(),
-        signature: key.sign_digest(&digest).unwrap().as_ref().to_vec(),
-    }
-}
-
-fn rsa_case(
-    ours: &'static impl AsRef<VerificationAlgorithm>,
-    theirs: &'static theirs::RsaVerificationAlgorithm,
-    signer: &'static theirs::RsaSigningAlgorithm,
-    pkcs8: &[u8],
-) -> VerifyCase {
-    let key = theirs::RsaKeyPair::from_pkcs8(pkcs8).unwrap();
-    VerifyCase {
-        ours: ours.as_ref(),
-        theirs: theirs.as_ref(),
-        public_key: key.public_key(signer).as_ref().to_vec(),
-        signature: key.sign(signer, MESSAGE).unwrap().as_ref().to_vec(),
-    }
-}
-
-/// An RSASSA-PKCS1-v1_5 signature with SHA-1 over [`MESSAGE`], which rind
-/// signs only as a raw RSA operation: a blind signature over the encoded
-/// message.
-fn rsa_sha1_case(
-    ours: &'static impl AsRef<VerificationAlgorithm>,
-    theirs: &'static theirs::RsaVerificationAlgorithm,
-) -> VerifyCase {
-    let key = rind::blind_rsa::KeyPair::from_pkcs8(
-        &rind::blind_rsa::RSABSSA_SHA384_PSS_RANDOMIZED,
-        RSA2048,
-    )
-    .unwrap();
-    let digest = rind::digest::digest(&rind::digest::legacy::SHA1, MESSAGE);
-    let info: &[u8] = &[
-        0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14,
-    ];
-    let mut encoded = vec![0xff; 256];
-    encoded[..2].copy_from_slice(&[0x00, 0x01]);
-    let at = 256 - info.len() - digest.as_ref().len();
-    encoded[at - 1] = 0;
-    encoded[at..at + info.len()].copy_from_slice(info);
-    encoded[at + info.len()..].copy_from_slice(digest.as_ref());
-    let rsa = theirs::RsaKeyPair::from_pkcs8(RSA2048).unwrap();
-    VerifyCase {
-        ours: ours.as_ref(),
-        theirs: theirs.as_ref(),
-        public_key: rsa
-            .public_key(&theirs::sign::RSA_PKCS1_SHA256)
-            .as_ref()
-            .to_vec(),
-        signature: key.blind_sign(&encoded).unwrap().as_ref().to_vec(),
-    }
-}
-
-fn ed25519_case() -> VerifyCase {
-    let key = theirs::Ed25519KeyPair::from_seed(&[9; 32]).unwrap();
-    VerifyCase {
-        ours: &verify::ED25519,
-        theirs: &theirs::verify::ED25519,
-        public_key: key.public_key().as_ref().to_vec(),
-        signature: key.sign(MESSAGE).as_ref().to_vec(),
-    }
-}
-
-fn ml_dsa_case<P: theirs::sign::MlDsaParameterSet>(
-    ours: &'static VerificationAlgorithm,
-    theirs: &'static theirs::VerificationAlgorithm,
-) -> VerifyCase {
-    let key = theirs::sign::MlDsaKeyPair::<P>::from_seed(&[5; 32]).unwrap();
-    VerifyCase {
-        ours,
-        theirs,
-        public_key: key.public_key().as_ref().to_vec(),
-        signature: key.sign(MESSAGE).unwrap().as_ref().to_vec(),
-    }
-}
-
-/// A case for every verify algorithm.
-fn verify_cases() -> Vec<VerifyCase> {
+const ECDSA_VERIFY: [EcdsaVerify; 12] = {
     use rind::digest::{SHA256, SHA384, SHA512};
-    let p256 = &theirs::sign::ECDSA_P256_SHA256_ASN1;
-    let p384 = &theirs::sign::ECDSA_P384_SHA384_ASN1;
-    let p521 = &theirs::sign::ECDSA_P521_SHA512_ASN1;
-    vec![
-        ecdsa_case(
-            &verify::ECDSA_P256_SHA256_ASN1,
-            &theirs::verify::ECDSA_P256_SHA256_ASN1,
+    use rind::ecdsa::{sign, verify as theirs};
+    use rind_fips::ecdsa::verify as ours;
+    let p256 = &sign::P256_SHA256_ASN1;
+    let p384 = &sign::P384_SHA384_ASN1;
+    let p521 = &sign::P521_SHA512_ASN1;
+    [
+        (
+            &ours::P256_SHA256_ASN1,
+            &theirs::P256_SHA256_ASN1,
             p256,
             P256,
             &SHA256,
         ),
-        ecdsa_case(
-            &verify::ECDSA_P256_SHA384_ASN1,
-            &theirs::verify::ECDSA_P256_SHA384_ASN1,
+        (
+            &ours::P256_SHA384_ASN1,
+            &theirs::P256_SHA384_ASN1,
             p256,
             P256,
             &SHA384,
         ),
-        ecdsa_case(
-            &verify::ECDSA_P256_SHA512_ASN1,
-            &theirs::verify::ECDSA_P256_SHA512_ASN1,
+        (
+            &ours::P256_SHA512_ASN1,
+            &theirs::P256_SHA512_ASN1,
             p256,
             P256,
             &SHA512,
         ),
-        ecdsa_case(
-            &verify::ECDSA_P384_SHA256_ASN1,
-            &theirs::verify::ECDSA_P384_SHA256_ASN1,
+        (
+            &ours::P384_SHA256_ASN1,
+            &theirs::P384_SHA256_ASN1,
             p384,
             P384,
             &SHA256,
         ),
-        ecdsa_case(
-            &verify::ECDSA_P384_SHA384_ASN1,
-            &theirs::verify::ECDSA_P384_SHA384_ASN1,
+        (
+            &ours::P384_SHA384_ASN1,
+            &theirs::P384_SHA384_ASN1,
             p384,
             P384,
             &SHA384,
         ),
-        ecdsa_case(
-            &verify::ECDSA_P384_SHA512_ASN1,
-            &theirs::verify::ECDSA_P384_SHA512_ASN1,
+        (
+            &ours::P384_SHA512_ASN1,
+            &theirs::P384_SHA512_ASN1,
             p384,
             P384,
             &SHA512,
         ),
-        ecdsa_case(
-            &verify::ECDSA_P521_SHA256_ASN1,
-            &theirs::verify::ECDSA_P521_SHA256_ASN1,
+        (
+            &ours::P521_SHA256_ASN1,
+            &theirs::P521_SHA256_ASN1,
             p521,
             P521,
             &SHA256,
         ),
-        ecdsa_case(
-            &verify::ECDSA_P521_SHA384_ASN1,
-            &theirs::verify::ECDSA_P521_SHA384_ASN1,
+        (
+            &ours::P521_SHA384_ASN1,
+            &theirs::P521_SHA384_ASN1,
             p521,
             P521,
             &SHA384,
         ),
-        ecdsa_case(
-            &verify::ECDSA_P521_SHA512_ASN1,
-            &theirs::verify::ECDSA_P521_SHA512_ASN1,
+        (
+            &ours::P521_SHA512_ASN1,
+            &theirs::P521_SHA512_ASN1,
             p521,
             P521,
             &SHA512,
         ),
-        ecdsa_case(
-            &verify::ECDSA_P256_SHA256_FIXED,
-            &theirs::verify::ECDSA_P256_SHA256_FIXED,
-            &theirs::sign::ECDSA_P256_SHA256_FIXED,
+        (
+            &ours::P256_SHA256_FIXED,
+            &theirs::P256_SHA256_FIXED,
+            &sign::P256_SHA256_FIXED,
             P256,
             &SHA256,
         ),
-        ecdsa_case(
-            &verify::ECDSA_P384_SHA384_FIXED,
-            &theirs::verify::ECDSA_P384_SHA384_FIXED,
-            &theirs::sign::ECDSA_P384_SHA384_FIXED,
+        (
+            &ours::P384_SHA384_FIXED,
+            &theirs::P384_SHA384_FIXED,
+            &sign::P384_SHA384_FIXED,
             P384,
             &SHA384,
         ),
-        ecdsa_case(
-            &verify::ECDSA_P521_SHA512_FIXED,
-            &theirs::verify::ECDSA_P521_SHA512_FIXED,
-            &theirs::sign::ECDSA_P521_SHA512_FIXED,
+        (
+            &ours::P521_SHA512_FIXED,
+            &theirs::P521_SHA512_FIXED,
+            &sign::P521_SHA512_FIXED,
             P521,
             &SHA512,
-        ),
-        rsa_case(
-            &verify::RSA_PKCS1_SHA256,
-            &theirs::verify::RSA_PKCS1_SHA256,
-            &theirs::sign::RSA_PKCS1_SHA256,
-            RSA2048,
-        ),
-        rsa_case(
-            &verify::RSA_PKCS1_SHA384,
-            &theirs::verify::RSA_PKCS1_SHA384,
-            &theirs::sign::RSA_PKCS1_SHA384,
-            RSA2048,
-        ),
-        rsa_case(
-            &verify::RSA_PKCS1_SHA512,
-            &theirs::verify::RSA_PKCS1_SHA512,
-            &theirs::sign::RSA_PKCS1_SHA512,
-            RSA2048,
-        ),
-        rsa_case(
-            &verify::RSA_PSS_SHA256,
-            &theirs::verify::RSA_PSS_SHA256,
-            &theirs::sign::RSA_PSS_SHA256,
-            RSA2048,
-        ),
-        rsa_case(
-            &verify::RSA_PSS_SHA384,
-            &theirs::verify::RSA_PSS_SHA384,
-            &theirs::sign::RSA_PSS_SHA384,
-            RSA2048,
-        ),
-        rsa_case(
-            &verify::RSA_PSS_SHA512,
-            &theirs::verify::RSA_PSS_SHA512,
-            &theirs::sign::RSA_PSS_SHA512,
-            RSA2048,
-        ),
-        ed25519_case(),
-        ml_dsa_case::<theirs::sign::MlDsa44>(&verify::ML_DSA_44, &theirs::verify::ML_DSA_44),
-        ml_dsa_case::<theirs::sign::MlDsa65>(&verify::ML_DSA_65, &theirs::verify::ML_DSA_65),
-        ml_dsa_case::<theirs::sign::MlDsa87>(&verify::ML_DSA_87, &theirs::verify::ML_DSA_87),
-        rsa_sha1_case(
-            &verify::legacy::RSA_PKCS1_SHA1,
-            &theirs::verify::legacy::RSA_PKCS1_SHA1,
-        ),
-        rsa_sha1_case(
-            &verify::legacy::RSA_PKCS1_1024_SHA1,
-            &theirs::verify::legacy::RSA_PKCS1_1024_SHA1,
-        ),
-        rsa_case(
-            &verify::legacy::RSA_PKCS1_1024_SHA256,
-            &theirs::verify::legacy::RSA_PKCS1_1024_SHA256,
-            &theirs::sign::RSA_PKCS1_SHA256,
-            RSA2048,
-        ),
-        rsa_case(
-            &verify::legacy::RSA_PKCS1_1024_SHA512,
-            &theirs::verify::legacy::RSA_PKCS1_1024_SHA512,
-            &theirs::sign::RSA_PKCS1_SHA512,
-            RSA2048,
-        ),
-        rsa_case(
-            &verify::legacy::RSA_PKCS1_3072_SHA384,
-            &theirs::verify::legacy::RSA_PKCS1_3072_SHA384,
-            &theirs::sign::RSA_PKCS1_SHA384,
-            RSA3072,
         ),
     ]
-}
+};
 
 #[test]
-fn every_verify_algorithm_verifies_as_rind_does() {
-    for case in verify_cases() {
-        same_debug(case.ours, case.theirs);
-        let reference = theirs::PublicKey::new(case.theirs, &case.public_key).unwrap();
-        reference.verify(MESSAGE, &case.signature).unwrap();
+fn ecdsa_public_keys_verify_as_rind_does() {
+    for (ours, theirs, signer, pkcs8, hash) in ECDSA_VERIFY {
+        same_debug(ours, theirs);
+        let signer = rind::ecdsa::KeyPair::from_pkcs8(signer, pkcs8).unwrap();
+        let signature = signer
+            .sign_digest(&rind::digest::digest(hash, MESSAGE))
+            .unwrap();
+        let point = signer.public_key().as_ref();
 
-        let key = PublicKey::new(case.ours, &case.public_key).unwrap();
-        assert_eq!(key.as_ref(), reference.as_ref(), "{:?}", case.ours);
+        let reference = rind::ecdsa::PublicKey::new(theirs, point).unwrap();
+        let key = ecdsa::PublicKey::new(ours, point).unwrap();
         same_debug(&key, &reference);
-        key.verify(MESSAGE, &case.signature).unwrap();
+        same_verdicts(
+            |m, s| key.verify(m, s),
+            |m, s| reference.verify(m, s),
+            signature.as_ref(),
+        );
+        same_parse(
+            |b| ecdsa::PublicKey::new(ours, b),
+            |b| rind::ecdsa::PublicKey::new(theirs, b),
+            point,
+        );
 
         let spki = reference.to_spki();
         assert_eq!(key.to_spki().as_ref(), spki.as_ref());
-        let from_spki = PublicKey::from_spki(case.ours, spki.as_ref()).unwrap();
-        from_spki.verify(MESSAGE, &case.signature).unwrap();
-        same_error(
-            &PublicKey::from_spki(case.ours, &spki.as_ref()[1..]),
-            &theirs::PublicKey::from_spki(case.theirs, &spki.as_ref()[1..]),
+        same_parse(
+            |b| ecdsa::PublicKey::from_spki(ours, b),
+            |b| rind::ecdsa::PublicKey::from_spki(theirs, b),
+            spki.as_ref(),
         );
-
-        // A changed message or signature, a truncated one, and an empty one.
-        let mut flipped = case.signature.clone();
-        flipped[case.signature.len() / 2] ^= 1;
-        let truncated = &case.signature[..case.signature.len() - 1];
-        for signature in [&flipped[..], truncated, &[]] {
-            same_error(
-                &key.verify(MESSAGE, signature),
-                &reference.verify(MESSAGE, signature),
-            );
-        }
-        same_error(
-            &key.verify(b"another", &case.signature),
-            &reference.verify(b"another", &case.signature),
-        );
-
-        // Malformed keys.
-        for bad in [
-            &case.public_key[1..],
-            &case.public_key[..case.public_key.len() - 1],
-            &[],
-        ] {
-            same_error(
-                &PublicKey::new(case.ours, bad),
-                &theirs::PublicKey::new(case.theirs, bad),
-            );
-        }
     }
 }
 
 #[test]
 fn ecdsa_verify_digest_matches_rind() {
     let reference =
-        theirs::EcdsaKeyPair::from_pkcs8(&theirs::sign::ECDSA_P384_SHA384_ASN1, P384).unwrap();
-    let key = PublicKey::new(
-        &verify::ECDSA_P384_SHA384_ASN1,
+        rind::ecdsa::KeyPair::from_pkcs8(&rind::ecdsa::sign::P384_SHA384_ASN1, P384).unwrap();
+    let key = ecdsa::PublicKey::new(
+        &ecdsa::verify::P384_SHA384_ASN1,
         reference.public_key().as_ref(),
     )
     .unwrap();
@@ -400,82 +269,81 @@ fn ecdsa_verify_digest_matches_rind() {
             }
         }
     }
-
-    // Keys other than ECDSA take no digest.
-    let ed25519 = Ed25519KeyPair::from_seed(&[1; 32]).unwrap().public_key();
-    let (digest, _) = digests(&digest::SHA256, &rind::digest::SHA256, MESSAGE);
-    assert_eq!(
-        ed25519.verify_digest(&digest, &[0; 64]),
-        Err(Error::Unsupported)
-    );
 }
 
 /// Our signing algorithm, rind's, and the verify algorithms of each.
 type EcdsaPair = (
-    &'static EcdsaSigningAlgorithm,
-    &'static theirs::EcdsaSigningAlgorithm,
-    &'static VerificationAlgorithm,
-    &'static theirs::VerificationAlgorithm,
+    &'static ecdsa::SigningAlgorithm,
+    &'static rind::ecdsa::SigningAlgorithm,
+    &'static ecdsa::VerificationAlgorithm,
+    &'static rind::ecdsa::VerificationAlgorithm,
     &'static [u8],
 );
 
-const ECDSA: [EcdsaPair; 6] = [
-    (
-        &sign::ECDSA_P256_SHA256_ASN1,
-        &theirs::sign::ECDSA_P256_SHA256_ASN1,
-        &verify::ECDSA_P256_SHA256_ASN1,
-        &theirs::verify::ECDSA_P256_SHA256_ASN1,
-        P256,
-    ),
-    (
-        &sign::ECDSA_P384_SHA384_ASN1,
-        &theirs::sign::ECDSA_P384_SHA384_ASN1,
-        &verify::ECDSA_P384_SHA384_ASN1,
-        &theirs::verify::ECDSA_P384_SHA384_ASN1,
-        P384,
-    ),
-    (
-        &sign::ECDSA_P521_SHA512_ASN1,
-        &theirs::sign::ECDSA_P521_SHA512_ASN1,
-        &verify::ECDSA_P521_SHA512_ASN1,
-        &theirs::verify::ECDSA_P521_SHA512_ASN1,
-        P521,
-    ),
-    (
-        &sign::ECDSA_P256_SHA256_FIXED,
-        &theirs::sign::ECDSA_P256_SHA256_FIXED,
-        &verify::ECDSA_P256_SHA256_FIXED,
-        &theirs::verify::ECDSA_P256_SHA256_FIXED,
-        P256,
-    ),
-    (
-        &sign::ECDSA_P384_SHA384_FIXED,
-        &theirs::sign::ECDSA_P384_SHA384_FIXED,
-        &verify::ECDSA_P384_SHA384_FIXED,
-        &theirs::verify::ECDSA_P384_SHA384_FIXED,
-        P384,
-    ),
-    (
-        &sign::ECDSA_P521_SHA512_FIXED,
-        &theirs::sign::ECDSA_P521_SHA512_FIXED,
-        &verify::ECDSA_P521_SHA512_FIXED,
-        &theirs::verify::ECDSA_P521_SHA512_FIXED,
-        P521,
-    ),
-];
+const ECDSA: [EcdsaPair; 6] = {
+    use rind::ecdsa::{sign as their_sign, verify as their_verify};
+    use rind_fips::ecdsa::{sign, verify};
+    [
+        (
+            &sign::P256_SHA256_ASN1,
+            &their_sign::P256_SHA256_ASN1,
+            &verify::P256_SHA256_ASN1,
+            &their_verify::P256_SHA256_ASN1,
+            P256,
+        ),
+        (
+            &sign::P384_SHA384_ASN1,
+            &their_sign::P384_SHA384_ASN1,
+            &verify::P384_SHA384_ASN1,
+            &their_verify::P384_SHA384_ASN1,
+            P384,
+        ),
+        (
+            &sign::P521_SHA512_ASN1,
+            &their_sign::P521_SHA512_ASN1,
+            &verify::P521_SHA512_ASN1,
+            &their_verify::P521_SHA512_ASN1,
+            P521,
+        ),
+        (
+            &sign::P256_SHA256_FIXED,
+            &their_sign::P256_SHA256_FIXED,
+            &verify::P256_SHA256_FIXED,
+            &their_verify::P256_SHA256_FIXED,
+            P256,
+        ),
+        (
+            &sign::P384_SHA384_FIXED,
+            &their_sign::P384_SHA384_FIXED,
+            &verify::P384_SHA384_FIXED,
+            &their_verify::P384_SHA384_FIXED,
+            P384,
+        ),
+        (
+            &sign::P521_SHA512_FIXED,
+            &their_sign::P521_SHA512_FIXED,
+            &verify::P521_SHA512_FIXED,
+            &their_verify::P521_SHA512_FIXED,
+            P521,
+        ),
+    ]
+};
 
 #[test]
 fn ecdsa_key_pairs_match_rind() {
     for (ours, theirs_alg, our_verify, their_verify, pkcs8) in ECDSA {
         same_debug(ours, theirs_alg);
-        let reference = theirs::EcdsaKeyPair::from_pkcs8(theirs_alg, pkcs8).unwrap();
-        let key = EcdsaKeyPair::from_pkcs8(ours, pkcs8).unwrap();
+        let reference = rind::ecdsa::KeyPair::from_pkcs8(theirs_alg, pkcs8).unwrap();
+        let key = ecdsa::KeyPair::from_pkcs8(ours, pkcs8).unwrap();
         same_debug(&key, &reference);
-        same_debug(&key.public_key(), &reference.public_key());
+        same_debug(key.public_key(), reference.public_key());
         assert_eq!(key.to_pkcs8().as_ref(), reference.to_pkcs8().as_ref());
         assert_eq!(key.to_sec1().as_ref(), reference.to_sec1().as_ref());
         assert_eq!(key.to_scalar().as_ref(), reference.to_scalar().as_ref());
-        assert_eq!(key.to_spki().as_ref(), reference.to_spki().as_ref());
+        assert_eq!(
+            key.public_key().to_spki().as_ref(),
+            reference.public_key().to_spki().as_ref()
+        );
         same_debug(&key.to_pkcs8(), &reference.to_pkcs8());
         same_debug(&key.to_sec1(), &reference.to_sec1());
         same_debug(&key.to_scalar(), &reference.to_scalar());
@@ -485,8 +353,8 @@ fn ecdsa_key_pairs_match_rind() {
         let scalar = reference.to_scalar();
         let public = reference.public_key();
         let loaded = [
-            EcdsaKeyPair::from_sec1(ours, sec1.as_ref()).unwrap(),
-            EcdsaKeyPair::from_scalar_and_public_key(ours, scalar.as_ref(), public.as_ref())
+            ecdsa::KeyPair::from_sec1(ours, sec1.as_ref()).unwrap(),
+            ecdsa::KeyPair::from_scalar_and_public_key(ours, scalar.as_ref(), public.as_ref())
                 .unwrap(),
         ];
         for loaded in loaded {
@@ -494,8 +362,9 @@ fn ecdsa_key_pairs_match_rind() {
         }
 
         // Signatures cross both ways.
-        let their_public = theirs::PublicKey::new(their_verify, key.public_key().as_ref()).unwrap();
-        let our_public = PublicKey::new(our_verify, reference.public_key().as_ref()).unwrap();
+        let their_public =
+            rind::ecdsa::PublicKey::new(their_verify, key.public_key().as_ref()).unwrap();
+        let our_public = ecdsa::PublicKey::new(our_verify, public.as_ref()).unwrap();
         let signature = key.sign(MESSAGE).unwrap();
         their_public.verify(MESSAGE, signature.as_ref()).unwrap();
         key.public_key()
@@ -521,24 +390,24 @@ fn ecdsa_key_pairs_match_rind() {
         let cases: [&[u8]; 4] = [&pkcs8[1..], &pkcs8[..pkcs8.len() - 1], &[], P384];
         for bad in cases {
             same_error(
-                &EcdsaKeyPair::from_pkcs8(ours, bad),
-                &theirs::EcdsaKeyPair::from_pkcs8(theirs_alg, bad),
+                &ecdsa::KeyPair::from_pkcs8(ours, bad),
+                &rind::ecdsa::KeyPair::from_pkcs8(theirs_alg, bad),
             );
             same_error(
-                &EcdsaKeyPair::from_sec1(ours, bad),
-                &theirs::EcdsaKeyPair::from_sec1(theirs_alg, bad),
+                &ecdsa::KeyPair::from_sec1(ours, bad),
+                &rind::ecdsa::KeyPair::from_sec1(theirs_alg, bad),
             );
         }
         let mut wrong = public.as_ref().to_vec();
         wrong[10] ^= 1;
         same_error(
-            &EcdsaKeyPair::from_scalar_and_public_key(ours, scalar.as_ref(), &wrong),
-            &theirs::EcdsaKeyPair::from_scalar_and_public_key(theirs_alg, scalar.as_ref(), &wrong),
+            &ecdsa::KeyPair::from_scalar_and_public_key(ours, scalar.as_ref(), &wrong),
+            &rind::ecdsa::KeyPair::from_scalar_and_public_key(theirs_alg, scalar.as_ref(), &wrong),
         );
         let zero = vec![0; scalar.as_ref().len()];
         same_error(
-            &EcdsaKeyPair::from_scalar_and_public_key(ours, &zero, public.as_ref()),
-            &theirs::EcdsaKeyPair::from_scalar_and_public_key(theirs_alg, &zero, public.as_ref()),
+            &ecdsa::KeyPair::from_scalar_and_public_key(ours, &zero, public.as_ref()),
+            &rind::ecdsa::KeyPair::from_scalar_and_public_key(theirs_alg, &zero, public.as_ref()),
         );
     }
 }
@@ -546,111 +415,263 @@ fn ecdsa_key_pairs_match_rind() {
 #[test]
 fn generated_ecdsa_keys_work_in_rind() {
     for (ours, theirs_alg, _, their_verify, _) in &ECDSA[..3] {
-        let key = EcdsaKeyPair::generate(ours).unwrap();
+        let key = ecdsa::KeyPair::generate(ours).unwrap();
         let reference =
-            theirs::EcdsaKeyPair::from_pkcs8(theirs_alg, key.to_pkcs8().as_ref()).unwrap();
+            rind::ecdsa::KeyPair::from_pkcs8(theirs_alg, key.to_pkcs8().as_ref()).unwrap();
         assert_eq!(key.public_key().as_ref(), reference.public_key().as_ref());
         let signature = key.sign(MESSAGE).unwrap();
-        theirs::PublicKey::new(*their_verify, key.public_key().as_ref())
+        rind::ecdsa::PublicKey::new(their_verify, key.public_key().as_ref())
             .unwrap()
             .verify(MESSAGE, signature.as_ref())
             .unwrap();
     }
 }
 
-const RSA_SIGNING: [(
-    &RsaSigningAlgorithm,
-    &theirs::RsaSigningAlgorithm,
-    &rind_fips::signature::RsaVerificationAlgorithm,
-    &theirs::RsaVerificationAlgorithm,
-); 6] = [
-    (
-        &sign::RSA_PKCS1_SHA256,
-        &theirs::sign::RSA_PKCS1_SHA256,
-        &verify::RSA_PKCS1_SHA256,
-        &theirs::verify::RSA_PKCS1_SHA256,
-    ),
-    (
-        &sign::RSA_PKCS1_SHA384,
-        &theirs::sign::RSA_PKCS1_SHA384,
-        &verify::RSA_PKCS1_SHA384,
-        &theirs::verify::RSA_PKCS1_SHA384,
-    ),
-    (
-        &sign::RSA_PKCS1_SHA512,
-        &theirs::sign::RSA_PKCS1_SHA512,
-        &verify::RSA_PKCS1_SHA512,
-        &theirs::verify::RSA_PKCS1_SHA512,
-    ),
-    (
-        &sign::RSA_PSS_SHA256,
-        &theirs::sign::RSA_PSS_SHA256,
-        &verify::RSA_PSS_SHA256,
-        &theirs::verify::RSA_PSS_SHA256,
-    ),
-    (
-        &sign::RSA_PSS_SHA384,
-        &theirs::sign::RSA_PSS_SHA384,
-        &verify::RSA_PSS_SHA384,
-        &theirs::verify::RSA_PSS_SHA384,
-    ),
-    (
-        &sign::RSA_PSS_SHA512,
-        &theirs::sign::RSA_PSS_SHA512,
-        &verify::RSA_PSS_SHA512,
-        &theirs::verify::RSA_PSS_SHA512,
-    ),
-];
+/// Our verify algorithm, rind's, and rind's signature over [`MESSAGE`] for
+/// it with the key in `pkcs8`.
+type RsaVerify = (
+    &'static rsa::VerificationAlgorithm,
+    &'static rind::rsa::VerificationAlgorithm,
+    Vec<u8>,
+    &'static [u8],
+);
+
+fn rsa_signature(algorithm: &rind::rsa::SigningAlgorithm, pkcs8: &[u8]) -> Vec<u8> {
+    let key = rind::rsa::KeyPair::from_pkcs8(pkcs8).unwrap();
+    key.sign(algorithm, MESSAGE).unwrap().as_ref().to_vec()
+}
+
+/// An RSASSA-PKCS1-v1_5 signature with SHA-1 over [`MESSAGE`] by the key
+/// in [`RSA2048`], which rind signs only as a raw RSA operation: a blind
+/// signature over the encoded message.
+fn rsa_sha1_signature() -> Vec<u8> {
+    let key = rind::blind_rsa::KeyPair::from_pkcs8(
+        &rind::blind_rsa::RSABSSA_SHA384_PSS_RANDOMIZED,
+        RSA2048,
+    )
+    .unwrap();
+    let digest = rind::digest::digest(&rind::digest::legacy::SHA1, MESSAGE);
+    let info: &[u8] = &[
+        0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14,
+    ];
+    let mut encoded = vec![0xff; 256];
+    encoded[..2].copy_from_slice(&[0x00, 0x01]);
+    let at = 256 - info.len() - digest.as_ref().len();
+    encoded[at - 1] = 0;
+    encoded[at..at + info.len()].copy_from_slice(info);
+    encoded[at + info.len()..].copy_from_slice(digest.as_ref());
+    key.blind_sign(&encoded).unwrap().as_ref().to_vec()
+}
+
+/// A case for every RSA verify algorithm.
+fn rsa_verify_cases() -> Vec<RsaVerify> {
+    use rind::rsa::{sign, verify as theirs};
+    use rind_fips::rsa::verify as ours;
+    vec![
+        (
+            &ours::PKCS1_SHA256,
+            &theirs::PKCS1_SHA256,
+            rsa_signature(&sign::PKCS1_SHA256, RSA2048),
+            RSA2048,
+        ),
+        (
+            &ours::PKCS1_SHA384,
+            &theirs::PKCS1_SHA384,
+            rsa_signature(&sign::PKCS1_SHA384, RSA2048),
+            RSA2048,
+        ),
+        (
+            &ours::PKCS1_SHA512,
+            &theirs::PKCS1_SHA512,
+            rsa_signature(&sign::PKCS1_SHA512, RSA2048),
+            RSA2048,
+        ),
+        (
+            &ours::PSS_SHA256,
+            &theirs::PSS_SHA256,
+            rsa_signature(&sign::PSS_SHA256, RSA2048),
+            RSA2048,
+        ),
+        (
+            &ours::PSS_SHA384,
+            &theirs::PSS_SHA384,
+            rsa_signature(&sign::PSS_SHA384, RSA2048),
+            RSA2048,
+        ),
+        (
+            &ours::PSS_SHA512,
+            &theirs::PSS_SHA512,
+            rsa_signature(&sign::PSS_SHA512, RSA2048),
+            RSA2048,
+        ),
+        (
+            &ours::legacy::PKCS1_SHA1,
+            &theirs::legacy::PKCS1_SHA1,
+            rsa_sha1_signature(),
+            RSA2048,
+        ),
+        (
+            &ours::legacy::PKCS1_1024_SHA1,
+            &theirs::legacy::PKCS1_1024_SHA1,
+            rsa_sha1_signature(),
+            RSA2048,
+        ),
+        (
+            &ours::legacy::PKCS1_1024_SHA256,
+            &theirs::legacy::PKCS1_1024_SHA256,
+            rsa_signature(&sign::PKCS1_SHA256, RSA2048),
+            RSA2048,
+        ),
+        (
+            &ours::legacy::PKCS1_1024_SHA512,
+            &theirs::legacy::PKCS1_1024_SHA512,
+            rsa_signature(&sign::PKCS1_SHA512, RSA2048),
+            RSA2048,
+        ),
+        (
+            &ours::legacy::PKCS1_3072_SHA384,
+            &theirs::legacy::PKCS1_3072_SHA384,
+            rsa_signature(&sign::PKCS1_SHA384, RSA3072),
+            RSA3072,
+        ),
+    ]
+}
+
+#[test]
+fn rsa_public_keys_verify_as_rind_does() {
+    for (ours, theirs, signature, pkcs8) in rsa_verify_cases() {
+        same_debug(ours, theirs);
+        let signer = rind::rsa::KeyPair::from_pkcs8(pkcs8).unwrap();
+        let pkcs1 = signer.public_key().as_ref();
+
+        let reference = rind::rsa::PublicKey::new(pkcs1).unwrap();
+        let key = rsa::PublicKey::new(pkcs1).unwrap();
+        same_debug(&key, &reference);
+        assert_eq!(key.modulus_len(), reference.modulus_len());
+        same_verdicts(
+            |m, s| key.verify(ours, m, s),
+            |m, s| reference.verify(theirs, m, s),
+            &signature,
+        );
+        same_parse(rsa::PublicKey::new, rind::rsa::PublicKey::new, pkcs1);
+
+        let spki = reference.to_spki();
+        assert_eq!(key.to_spki().as_ref(), spki.as_ref());
+        same_parse(
+            rsa::PublicKey::from_spki,
+            rind::rsa::PublicKey::from_spki,
+            spki.as_ref(),
+        );
+        // Each loader takes its own encoding alone, as rind's does.
+        same_error(
+            &rsa::PublicKey::new(spki.as_ref()),
+            &rind::rsa::PublicKey::new(spki.as_ref()),
+        );
+        same_error(
+            &rsa::PublicKey::from_spki(pkcs1),
+            &rind::rsa::PublicKey::from_spki(pkcs1),
+        );
+    }
+}
+
+/// Our signing algorithm, rind's, and the verify algorithms of each.
+type RsaPair = (
+    &'static rsa::SigningAlgorithm,
+    &'static rind::rsa::SigningAlgorithm,
+    &'static rsa::VerificationAlgorithm,
+    &'static rind::rsa::VerificationAlgorithm,
+);
+
+const RSA_SIGNING: [RsaPair; 6] = {
+    use rind::rsa::{sign as their_sign, verify as their_verify};
+    use rind_fips::rsa::{sign, verify};
+    [
+        (
+            &sign::PKCS1_SHA256,
+            &their_sign::PKCS1_SHA256,
+            &verify::PKCS1_SHA256,
+            &their_verify::PKCS1_SHA256,
+        ),
+        (
+            &sign::PKCS1_SHA384,
+            &their_sign::PKCS1_SHA384,
+            &verify::PKCS1_SHA384,
+            &their_verify::PKCS1_SHA384,
+        ),
+        (
+            &sign::PKCS1_SHA512,
+            &their_sign::PKCS1_SHA512,
+            &verify::PKCS1_SHA512,
+            &their_verify::PKCS1_SHA512,
+        ),
+        (
+            &sign::PSS_SHA256,
+            &their_sign::PSS_SHA256,
+            &verify::PSS_SHA256,
+            &their_verify::PSS_SHA256,
+        ),
+        (
+            &sign::PSS_SHA384,
+            &their_sign::PSS_SHA384,
+            &verify::PSS_SHA384,
+            &their_verify::PSS_SHA384,
+        ),
+        (
+            &sign::PSS_SHA512,
+            &their_sign::PSS_SHA512,
+            &verify::PSS_SHA512,
+            &their_verify::PSS_SHA512,
+        ),
+    ]
+};
 
 #[test]
 fn rsa_key_pairs_match_rind() {
     for pkcs8 in [RSA2048, RSA2050, RSA3072] {
-        let reference = theirs::RsaKeyPair::from_pkcs8(pkcs8).unwrap();
-        let key = RsaKeyPair::from_pkcs8(pkcs8).unwrap();
+        let reference = rind::rsa::KeyPair::from_pkcs8(pkcs8).unwrap();
+        let key = rsa::KeyPair::from_pkcs8(pkcs8).unwrap();
         same_debug(&key, &reference);
+        same_debug(key.public_key(), reference.public_key());
         assert_eq!(key.to_pkcs8().as_ref(), reference.to_pkcs8().as_ref());
-        assert_eq!(key.to_spki().as_ref(), reference.to_spki().as_ref());
+        assert_eq!(
+            key.public_key().to_spki().as_ref(),
+            reference.public_key().to_spki().as_ref()
+        );
+        assert_eq!(
+            key.public_key().modulus_len(),
+            reference.public_key().modulus_len()
+        );
 
         for (ours, theirs_alg, our_verify, their_verify) in RSA_SIGNING {
             same_debug(ours, theirs_alg);
-            same_debug(our_verify, their_verify);
-            same_debug(&key.public_key(ours), &reference.public_key(theirs_alg));
-            assert_eq!(
-                key.public_key(ours).as_ref(),
-                reference.public_key(theirs_alg).as_ref()
-            );
-
             let signature = key.sign(ours, MESSAGE).unwrap();
             let their_signature = reference.sign(theirs_alg, MESSAGE).unwrap();
             if format!("{ours:?}").contains("Pkcs1") {
                 assert_eq!(signature.as_ref(), their_signature.as_ref());
+                same_debug(&signature, &their_signature);
             }
-            theirs::PublicKey::new(their_verify, key.public_key(ours).as_ref())
-                .unwrap()
-                .verify(MESSAGE, signature.as_ref())
+            reference
+                .public_key()
+                .verify(their_verify, MESSAGE, signature.as_ref())
                 .unwrap();
-            key.public_key(ours)
-                .verify(MESSAGE, their_signature.as_ref())
-                .unwrap();
-            PublicKey::new(our_verify, reference.public_key(theirs_alg).as_ref())
-                .unwrap()
-                .verify(MESSAGE, their_signature.as_ref())
+            key.public_key()
+                .verify(our_verify, MESSAGE, their_signature.as_ref())
                 .unwrap();
         }
     }
 
-    let reference = theirs::RsaKeyPair::from_pkcs1(RSA2048_PKCS1).unwrap();
-    let key = RsaKeyPair::from_pkcs1(RSA2048_PKCS1).unwrap();
+    let reference = rind::rsa::KeyPair::from_pkcs1(RSA2048_PKCS1).unwrap();
+    let key = rsa::KeyPair::from_pkcs1(RSA2048_PKCS1).unwrap();
     assert_eq!(key.to_pkcs8().as_ref(), reference.to_pkcs8().as_ref());
 
     for bad in [&RSA2048[1..], &RSA2048[..RSA2048.len() - 1], &[], P256] {
         same_error(
-            &RsaKeyPair::from_pkcs8(bad),
-            &theirs::RsaKeyPair::from_pkcs8(bad),
+            &rsa::KeyPair::from_pkcs8(bad),
+            &rind::rsa::KeyPair::from_pkcs8(bad),
         );
         same_error(
-            &RsaKeyPair::from_pkcs1(bad),
-            &theirs::RsaKeyPair::from_pkcs1(bad),
+            &rsa::KeyPair::from_pkcs1(bad),
+            &rind::rsa::KeyPair::from_pkcs1(bad),
         );
     }
 }
@@ -663,19 +684,17 @@ fn large_rsa_keys_match_rind() {
         include_bytes!("../../rind/src/high/rsa/rsa8192.pkcs8.der"),
     ];
     for pkcs8 in keys {
-        let reference = theirs::RsaKeyPair::from_pkcs8(pkcs8).unwrap();
-        let key = RsaKeyPair::from_pkcs8(pkcs8).unwrap();
+        let reference = rind::rsa::KeyPair::from_pkcs8(pkcs8).unwrap();
+        let key = rsa::KeyPair::from_pkcs8(pkcs8).unwrap();
         assert_eq!(key.to_pkcs8().as_ref(), reference.to_pkcs8().as_ref());
-        let signature = key.sign(&sign::RSA_PKCS1_SHA512, MESSAGE).unwrap();
+        let signature = key.sign(&rsa::sign::PKCS1_SHA512, MESSAGE).unwrap();
         let their_signature = reference
-            .sign(&theirs::sign::RSA_PKCS1_SHA512, MESSAGE)
+            .sign(&rind::rsa::sign::PKCS1_SHA512, MESSAGE)
             .unwrap();
         assert_eq!(signature.as_ref(), their_signature.as_ref());
-        key.public_key(&sign::RSA_PSS_SHA512)
-            .verify(
-                MESSAGE,
-                key.sign(&sign::RSA_PSS_SHA512, MESSAGE).unwrap().as_ref(),
-            )
+        let signature = key.sign(&rsa::sign::PSS_SHA512, MESSAGE).unwrap();
+        key.public_key()
+            .verify(&rsa::verify::PSS_SHA512, MESSAGE, signature.as_ref())
             .unwrap();
     }
 }
@@ -683,13 +702,14 @@ fn large_rsa_keys_match_rind() {
 #[test]
 fn generated_rsa_keys_work_in_rind() {
     same_debug(&KeySize::Rsa2048, &rind::rsa::KeySize::Rsa2048);
-    let key = RsaKeyPair::generate(KeySize::Rsa2048).unwrap();
-    let reference = theirs::RsaKeyPair::from_pkcs8(key.to_pkcs8().as_ref()).unwrap();
-    assert_eq!(key.to_spki().as_ref(), reference.to_spki().as_ref());
-    let signature = key.sign(&sign::RSA_PSS_SHA256, MESSAGE).unwrap();
-    theirs::PublicKey::from_spki(&theirs::verify::RSA_PSS_SHA256, key.to_spki().as_ref())
+    let key = rsa::KeyPair::generate(KeySize::Rsa2048).unwrap();
+    let reference = rind::rsa::KeyPair::from_pkcs8(key.to_pkcs8().as_ref()).unwrap();
+    let spki = key.public_key().to_spki();
+    assert_eq!(spki.as_ref(), reference.public_key().to_spki().as_ref());
+    let signature = key.sign(&rsa::sign::PSS_SHA256, MESSAGE).unwrap();
+    rind::rsa::PublicKey::from_spki(spki.as_ref())
         .unwrap()
-        .verify(MESSAGE, signature.as_ref())
+        .verify(&rind::rsa::verify::PSS_SHA256, MESSAGE, signature.as_ref())
         .unwrap();
 }
 
@@ -713,11 +733,11 @@ fn components(der: &[u8]) -> (Vec<u8>, Vec<u8>) {
 
 #[test]
 fn rsa_components_match_rind() {
-    let reference = theirs::RsaKeyPair::from_pkcs8(RSA2048).unwrap();
-    let pkcs1 = reference.public_key(&theirs::sign::RSA_PKCS1_SHA256);
+    let reference = rind::rsa::KeyPair::from_pkcs8(RSA2048).unwrap();
+    let pkcs1 = reference.public_key();
     let (n, e) = components(pkcs1.as_ref());
     let signature = reference
-        .sign(&theirs::sign::RSA_PKCS1_SHA256, MESSAGE)
+        .sign(&rind::rsa::sign::PKCS1_SHA256, MESSAGE)
         .unwrap();
 
     let ours = PublicKeyComponents {
@@ -729,23 +749,21 @@ fn rsa_components_match_rind() {
         e: &e[..],
     };
     same_debug(&ours, &theirs_components);
-    let key = PublicKey::from_components(&verify::RSA_PKCS1_SHA256, &ours).unwrap();
+    let key = rsa::PublicKey::from_components(&ours).unwrap();
     assert_eq!(key.as_ref(), pkcs1.as_ref());
-    key.verify(MESSAGE, signature.as_ref()).unwrap();
+    key.verify(&rsa::verify::PKCS1_SHA256, MESSAGE, signature.as_ref())
+        .unwrap();
 
     let even = PublicKeyComponents {
         n: &n[..],
         e: &[2u8][..],
     };
     same_error(
-        &PublicKey::from_components(&verify::RSA_PKCS1_SHA256, &even),
-        &theirs::PublicKey::from_components(
-            &theirs::verify::RSA_PKCS1_SHA256,
-            &rind::rsa::PublicKeyComponents {
-                n: &n[..],
-                e: &[2u8][..],
-            },
-        ),
+        &rsa::PublicKey::from_components(&even),
+        &rind::rsa::PublicKey::from_components(&rind::rsa::PublicKeyComponents {
+            n: &n[..],
+            e: &[2u8][..],
+        }),
     );
 }
 
@@ -764,76 +782,99 @@ fn modulus(bits: usize) -> Vec<u8> {
 
 #[test]
 fn rsa_moduli_fips_does_not_approve_are_refused() {
-    let refused = Error::KeyRejected(match RsaKeyPair::from_pkcs8(RSA2049) {
+    let refused = Error::KeyRejected(match rsa::KeyPair::from_pkcs8(RSA2049) {
         Err(Error::KeyRejected(reason)) => reason,
         other => panic!("{other:?}"),
     });
     // rind's reason for a modulus too small.
     let reason =
-        theirs::RsaKeyPair::from_pkcs8(include_bytes!("../../rind/src/high/rsa/rsa2047.pkcs8.der"));
+        rind::rsa::KeyPair::from_pkcs8(include_bytes!("../../rind/src/high/rsa/rsa2047.pkcs8.der"));
     assert_eq!(
         Some(refused.to_string()),
         reason.err().map(|e| e.to_string())
     );
 
     // An odd length rind signs with.
-    assert!(theirs::RsaKeyPair::from_pkcs8(RSA2049).is_ok());
+    assert!(rind::rsa::KeyPair::from_pkcs8(RSA2049).is_ok());
 
-    // rind verifies with an odd length, or one between 1024 and 2048 bits,
-    // under the legacy algorithms.
+    // rind parses a public key of an odd length, or between 1024 and 2048
+    // bits, and verifies with it under an algorithm whose floor it meets.
+    // The module parses only an even length from 2048 bits, or 1024 bits,
+    // which verifies only under the legacy algorithms that name it.
     let e = [1, 0, 1];
+    let algorithms: [(
+        &rsa::VerificationAlgorithm,
+        &rind::rsa::VerificationAlgorithm,
+    ); 4] = [
+        (
+            &rsa::verify::legacy::PKCS1_1024_SHA256,
+            &rind::rsa::verify::legacy::PKCS1_1024_SHA256,
+        ),
+        (
+            &rsa::verify::legacy::PKCS1_SHA1,
+            &rind::rsa::verify::legacy::PKCS1_SHA1,
+        ),
+        (&rsa::verify::PKCS1_SHA256, &rind::rsa::verify::PKCS1_SHA256),
+        (
+            &rsa::verify::legacy::PKCS1_3072_SHA384,
+            &rind::rsa::verify::legacy::PKCS1_3072_SHA384,
+        ),
+    ];
     for bits in [1024, 1536, 2047, 2048, 2049, 3071, 3072] {
         let n = modulus(bits);
-        let algorithms: [(
-            &rind_fips::signature::RsaVerificationAlgorithm,
-            &theirs::RsaVerificationAlgorithm,
-        ); 3] = [
-            (
-                &verify::legacy::RSA_PKCS1_1024_SHA256,
-                &theirs::verify::legacy::RSA_PKCS1_1024_SHA256,
-            ),
-            (&verify::RSA_PKCS1_SHA256, &theirs::verify::RSA_PKCS1_SHA256),
-            (
-                &verify::legacy::RSA_PKCS1_3072_SHA384,
-                &theirs::verify::legacy::RSA_PKCS1_3072_SHA384,
-            ),
-        ];
-        for (ours, theirs_alg) in algorithms {
-            let our_key = PublicKey::from_components(
-                ours,
-                &PublicKeyComponents {
-                    n: &n[..],
-                    e: &e[..],
-                },
+        let our_key = rsa::PublicKey::from_components(&PublicKeyComponents {
+            n: &n[..],
+            e: &e[..],
+        });
+        let their_key = rind::rsa::PublicKey::from_components(&rind::rsa::PublicKeyComponents {
+            n: &n[..],
+            e: &e[..],
+        })
+        .unwrap();
+        if !(bits == 1024 || (bits >= 2048 && bits % 2 == 0)) {
+            assert_eq!(our_key.err(), Some(refused), "{bits} bits");
+            continue;
+        }
+        let our_key = our_key.unwrap();
+        assert_eq!(our_key.modulus_len(), their_key.modulus_len());
+        let signature = vec![0x5a; n.len()];
+        for (ours, theirs) in algorithms {
+            same_error(
+                &our_key.verify(ours, MESSAGE, &signature),
+                &their_key.verify(theirs, MESSAGE, &signature),
             );
-            let their_key = theirs::PublicKey::from_components(
-                theirs_alg,
-                &rind::rsa::PublicKeyComponents {
-                    n: &n[..],
-                    e: &e[..],
-                },
-            );
-            let approved = bits == 1024 || (bits >= 2048 && bits % 2 == 0);
-            match (approved, &their_key) {
-                (true, _) | (false, Err(_)) => same_error(&our_key, &their_key),
-                (false, Ok(_)) => assert_eq!(our_key.err(), Some(refused), "{bits} bits, {ours:?}"),
-            }
         }
     }
-    same_error(
-        &PublicKey::new(&verify::RSA_PKCS1_SHA256, RSA2047_PUBLIC),
-        &theirs::PublicKey::new(&theirs::verify::RSA_PKCS1_SHA256, RSA2047_PUBLIC),
+    assert_eq!(rsa::PublicKey::new(RSA2047_PUBLIC).err(), Some(refused));
+    assert!(rind::rsa::PublicKey::new(RSA2047_PUBLIC).is_ok());
+}
+
+#[test]
+fn ed25519_public_keys_verify_as_rind_does() {
+    let signer = rind::ed25519::KeyPair::from_seed(&[9; 32]).unwrap();
+    let signature = signer.sign(MESSAGE);
+    let encoded = signer.public_key().as_ref();
+
+    let reference = rind::ed25519::PublicKey::new(encoded).unwrap();
+    let key = ed25519::PublicKey::new(encoded).unwrap();
+    same_debug(&key, &reference);
+    same_verdicts(
+        |m, s| key.verify(m, s),
+        |m, s| reference.verify(m, s),
+        signature.as_ref(),
     );
-    assert_eq!(
-        PublicKey::new(&verify::legacy::RSA_PKCS1_1024_SHA256, RSA2047_PUBLIC).err(),
-        Some(refused)
+    same_parse(
+        ed25519::PublicKey::new,
+        rind::ed25519::PublicKey::new,
+        encoded,
     );
-    assert!(
-        theirs::PublicKey::new(
-            &theirs::verify::legacy::RSA_PKCS1_1024_SHA256,
-            RSA2047_PUBLIC
-        )
-        .is_ok()
+
+    let spki = reference.to_spki();
+    assert_eq!(key.to_spki().as_ref(), spki.as_ref());
+    same_parse(
+        ed25519::PublicKey::from_spki,
+        rind::ed25519::PublicKey::from_spki,
+        spki.as_ref(),
     );
 }
 
@@ -845,98 +886,110 @@ fn ed25519_key_pairs_match_rind() {
         0xc4, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x7f, 0xda, 0x41, 0x63, 0x3a, 0xb6, 0xe2, 0x2e, 0x1e,
         0x2f, 0x2f,
     ];
-    let reference = theirs::Ed25519KeyPair::from_seed(&seed).unwrap();
-    let key = Ed25519KeyPair::from_seed(&seed).unwrap();
+    let reference = rind::ed25519::KeyPair::from_seed(&seed).unwrap();
+    let key = ed25519::KeyPair::from_seed(&seed).unwrap();
     same_debug(&key, &reference);
-    same_debug(&key.public_key(), &reference.public_key());
-    assert_eq!(key.public_key().as_ref(), reference.public_key().as_ref());
+    same_debug(key.public_key(), reference.public_key());
     assert_eq!(key.sign(MESSAGE).as_ref(), reference.sign(MESSAGE).as_ref());
     same_debug(&key.sign(MESSAGE), &reference.sign(MESSAGE));
     assert_eq!(key.to_pkcs8().as_ref(), reference.to_pkcs8().as_ref());
     assert_eq!(key.to_pkcs8v1().as_ref(), reference.to_pkcs8v1().as_ref());
     assert_eq!(key.to_seed().as_ref(), reference.to_seed().as_ref());
     same_debug(&key.to_seed(), &reference.to_seed());
-    assert_eq!(key.to_spki().as_ref(), reference.to_spki().as_ref());
+    assert_eq!(
+        key.public_key().to_spki().as_ref(),
+        reference.public_key().to_spki().as_ref()
+    );
 
     for pkcs8 in [reference.to_pkcs8(), reference.to_pkcs8v1()] {
-        let loaded = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
+        let loaded = ed25519::KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
         assert_eq!(
             loaded.sign(MESSAGE).as_ref(),
             reference.sign(MESSAGE).as_ref()
         );
     }
     let public = reference.public_key();
-    Ed25519KeyPair::from_seed_and_public_key(&seed, public.as_ref()).unwrap();
+    ed25519::KeyPair::from_seed_and_public_key(&seed, public.as_ref()).unwrap();
 
     let mut wrong = public.as_ref().to_vec();
     wrong[0] ^= 1;
     same_error(
-        &Ed25519KeyPair::from_seed_and_public_key(&seed, &wrong),
-        &theirs::Ed25519KeyPair::from_seed_and_public_key(&seed, &wrong),
+        &ed25519::KeyPair::from_seed_and_public_key(&seed, &wrong),
+        &rind::ed25519::KeyPair::from_seed_and_public_key(&seed, &wrong),
     );
     let pkcs8 = reference.to_pkcs8();
     let bad_cases: [&[u8]; 4] = [&seed[1..], &[], &pkcs8.as_ref()[1..], P256];
     for bad in bad_cases {
         same_error(
-            &Ed25519KeyPair::from_seed(bad),
-            &theirs::Ed25519KeyPair::from_seed(bad),
+            &ed25519::KeyPair::from_seed(bad),
+            &rind::ed25519::KeyPair::from_seed(bad),
         );
         same_error(
-            &Ed25519KeyPair::from_pkcs8(bad),
-            &theirs::Ed25519KeyPair::from_pkcs8(bad),
+            &ed25519::KeyPair::from_pkcs8(bad),
+            &rind::ed25519::KeyPair::from_pkcs8(bad),
         );
     }
 
-    let generated = Ed25519KeyPair::generate().unwrap();
-    let reference = theirs::Ed25519KeyPair::from_pkcs8(generated.to_pkcs8().as_ref()).unwrap();
+    let generated = ed25519::KeyPair::generate().unwrap();
+    let reference = rind::ed25519::KeyPair::from_pkcs8(generated.to_pkcs8().as_ref()).unwrap();
     assert_eq!(
         generated.sign(MESSAGE).as_ref(),
         reference.sign(MESSAGE).as_ref()
     );
 }
 
-fn ml_dsa_matches_rind<P: MlDsaParameterSet, Q: theirs::sign::MlDsaParameterSet>(
-    ours: &'static VerificationAlgorithm,
-    theirs_alg: &'static theirs::VerificationAlgorithm,
-) {
+fn ml_dsa_matches_rind<P: ml_dsa::ParameterSet, Q: rind::ml_dsa::ParameterSet>() {
     let seed = [3; 32];
-    let reference = theirs::sign::MlDsaKeyPair::<Q>::from_seed(&seed).unwrap();
-    let key = MlDsaKeyPair::<P>::from_seed(&seed).unwrap();
+    let reference = rind::ml_dsa::KeyPair::<Q>::from_seed(&seed).unwrap();
+    let key = ml_dsa::KeyPair::<P>::from_seed(&seed).unwrap();
     same_debug(&key, &reference);
-    same_debug(&key.public_key(), &reference.public_key());
+    same_debug(key.public_key(), reference.public_key());
     assert_eq!(key.to_pkcs8().as_ref(), reference.to_pkcs8().as_ref());
     assert_eq!(
         key.to_seed().unwrap().as_ref(),
         reference.to_seed().unwrap().as_ref()
     );
-    same_debug(&key.to_seed(), &reference.to_seed());
+    assert!(key.has_seed());
+    same_debug(&key.to_seed().unwrap(), &reference.to_seed().unwrap());
 
     // Signatures are hedged, so cross rather than match.
     let signature = key.sign(MESSAGE).unwrap();
-    assert_eq!(
-        signature.as_ref().len(),
-        reference.sign(MESSAGE).unwrap().as_ref().len()
-    );
-    theirs::PublicKey::new(theirs_alg, key.public_key().as_ref())
-        .unwrap()
-        .verify(MESSAGE, signature.as_ref())
-        .unwrap();
-    PublicKey::new(ours, reference.public_key().as_ref())
-        .unwrap()
-        .verify(MESSAGE, reference.sign(MESSAGE).unwrap().as_ref())
-        .unwrap();
+    let their_signature = reference.sign(MESSAGE).unwrap();
+    assert_eq!(signature.as_ref().len(), their_signature.as_ref().len());
     let cloned = signature.clone();
     assert_eq!(format!("{cloned:?}"), format!("{signature:?}"));
 
-    let loaded = MlDsaKeyPair::<P>::from_pkcs8(reference.to_pkcs8().as_ref()).unwrap();
+    // Public keys verify alike, and parse alike.
+    let encoded = reference.public_key().as_ref();
+    let our_public = ml_dsa::PublicKey::<P>::new(encoded).unwrap();
+    let their_public = rind::ml_dsa::PublicKey::<Q>::new(encoded).unwrap();
+    their_public.verify(MESSAGE, signature.as_ref()).unwrap();
+    same_verdicts(
+        |m, s| our_public.verify(m, s),
+        |m, s| their_public.verify(m, s),
+        their_signature.as_ref(),
+    );
+    same_parse(
+        ml_dsa::PublicKey::<P>::new,
+        rind::ml_dsa::PublicKey::<Q>::new,
+        encoded,
+    );
+    let spki = their_public.to_spki();
+    assert_eq!(our_public.to_spki().as_ref(), spki.as_ref());
+    same_parse(
+        ml_dsa::PublicKey::<P>::from_spki,
+        rind::ml_dsa::PublicKey::<Q>::from_spki,
+        spki.as_ref(),
+    );
+
+    let loaded = ml_dsa::KeyPair::<P>::from_pkcs8(reference.to_pkcs8().as_ref()).unwrap();
     assert_eq!(
         loaded.public_key().as_ref(),
         reference.public_key().as_ref()
     );
 
-    let generated = MlDsaKeyPair::<P>::generate().unwrap();
-    let reloaded =
-        theirs::sign::MlDsaKeyPair::<Q>::from_pkcs8(generated.to_pkcs8().as_ref()).unwrap();
+    let generated = ml_dsa::KeyPair::<P>::generate().unwrap();
+    let reloaded = rind::ml_dsa::KeyPair::<Q>::from_pkcs8(generated.to_pkcs8().as_ref()).unwrap();
     assert_eq!(
         generated.public_key().as_ref(),
         reloaded.public_key().as_ref()
@@ -946,28 +999,54 @@ fn ml_dsa_matches_rind<P: MlDsaParameterSet, Q: theirs::sign::MlDsaParameterSet>
     let bad_cases: [&[u8]; 4] = [&seed[1..], &[], &pkcs8.as_ref()[1..], P256];
     for bad in bad_cases {
         same_error(
-            &MlDsaKeyPair::<P>::from_seed(bad),
-            &theirs::sign::MlDsaKeyPair::<Q>::from_seed(bad),
+            &ml_dsa::KeyPair::<P>::from_seed(bad),
+            &rind::ml_dsa::KeyPair::<Q>::from_seed(bad),
         );
         same_error(
-            &MlDsaKeyPair::<P>::from_pkcs8(bad),
-            &theirs::sign::MlDsaKeyPair::<Q>::from_pkcs8(bad),
+            &ml_dsa::KeyPair::<P>::from_pkcs8(bad),
+            &rind::ml_dsa::KeyPair::<Q>::from_pkcs8(bad),
         );
     }
 }
 
 #[test]
 fn ml_dsa_key_pairs_match_rind() {
-    ml_dsa_matches_rind::<MlDsa44, theirs::sign::MlDsa44>(
-        &verify::ML_DSA_44,
-        &theirs::verify::ML_DSA_44,
-    );
-    ml_dsa_matches_rind::<MlDsa65, theirs::sign::MlDsa65>(
-        &verify::ML_DSA_65,
-        &theirs::verify::ML_DSA_65,
-    );
-    ml_dsa_matches_rind::<MlDsa87, theirs::sign::MlDsa87>(
-        &verify::ML_DSA_87,
-        &theirs::verify::ML_DSA_87,
-    );
+    use rind_fips::ml_dsa::{MlDsa44, MlDsa65, MlDsa87};
+    ml_dsa_matches_rind::<MlDsa44, rind::ml_dsa::MlDsa44>();
+    ml_dsa_matches_rind::<MlDsa65, rind::ml_dsa::MlDsa65>();
+    ml_dsa_matches_rind::<MlDsa87, rind::ml_dsa::MlDsa87>();
+}
+
+#[test]
+fn cloned_public_keys_outlive_their_key_pairs() {
+    // A clone holds a handle of its own, as rind's owned copy is a value of
+    // its own, so it verifies once its key pair is gone.
+    let (key, signature) = {
+        let pair = ecdsa::KeyPair::from_pkcs8(&ecdsa::sign::P256_SHA256_ASN1, P256).unwrap();
+        (pair.public_key().clone(), pair.sign(MESSAGE).unwrap())
+    };
+    same_debug(&key, &key.clone());
+    key.verify(MESSAGE, signature.as_ref()).unwrap();
+
+    let (key, signature) = {
+        let pair = rsa::KeyPair::from_pkcs8(RSA2048).unwrap();
+        let signature = pair.sign(&rsa::sign::PSS_SHA256, MESSAGE).unwrap();
+        (pair.public_key().clone(), signature)
+    };
+    assert_eq!(key.modulus_len(), 256);
+    key.verify(&rsa::verify::PSS_SHA256, MESSAGE, signature.as_ref())
+        .unwrap();
+
+    let (key, signature) = {
+        let pair = ed25519::KeyPair::from_seed(&[1; 32]).unwrap();
+        (pair.public_key().clone(), pair.sign(MESSAGE))
+    };
+    key.verify(MESSAGE, signature.as_ref()).unwrap();
+
+    let (key, signature) = {
+        let pair = ml_dsa::KeyPair::<ml_dsa::MlDsa44>::from_seed(&[1; 32]).unwrap();
+        (pair.public_key().clone(), pair.sign(MESSAGE).unwrap())
+    };
+    assert_eq!(key.clone().as_ref(), key.as_ref());
+    key.verify(MESSAGE, signature.as_ref()).unwrap();
 }

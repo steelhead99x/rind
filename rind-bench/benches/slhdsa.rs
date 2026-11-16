@@ -50,7 +50,7 @@ const MESSAGE: &[u8] = b"rind SLH-DSA benchmark message";
 macro_rules! slh_dsa {
     (
         $bench:ident, $id:literal, n: $n:literal,
-        rind: $rind:ident, $rind_verify:ident,
+        rind: $rind:ident,
         rustcrypto: $rustcrypto:ident,
         fips205: $fips205:ident,
         openssl: $openssl:literal $(,)?
@@ -101,10 +101,10 @@ macro_rules! slh_dsa {
             });
 
             group.bench_function("rind", |b| {
-                use rind::signature::sign::{SlhDsaKeyPair, $rind};
+                use rind::slh_dsa::{KeyPair, $rind};
 
                 b.iter(|| {
-                    let key = SlhDsaKeyPair::<$rind>::generate().unwrap();
+                    let key = KeyPair::<$rind>::generate().unwrap();
                     black_box(key.public_key());
                 })
             });
@@ -151,8 +151,8 @@ macro_rules! slh_dsa {
             });
 
             group.bench_function("rind", |b| {
-                use rind::signature::sign::{SlhDsaKeyPair, $rind};
-                let key = SlhDsaKeyPair::<$rind>::generate().unwrap();
+                use rind::slh_dsa::{KeyPair, $rind};
+                let key = KeyPair::<$rind>::generate().unwrap();
 
                 b.iter(|| {
                     black_box(key.sign(MESSAGE).unwrap());
@@ -166,8 +166,8 @@ macro_rules! slh_dsa {
             group.throughput(Throughput::Elements(1));
 
             let (public_key, spki, signature) = {
-                use rind::signature::sign::{SlhDsaKeyPair, $rind};
-                let key = SlhDsaKeyPair::<$rind>::generate().unwrap();
+                use rind::slh_dsa::{KeyPair, $rind};
+                let key = KeyPair::<$rind>::generate().unwrap();
                 let signature = key.sign(MESSAGE).unwrap();
                 let public_key = key.public_key();
                 (
@@ -216,8 +216,8 @@ macro_rules! slh_dsa {
             });
 
             group.bench_function("rind", |b| {
-                use rind::signature::{PublicKey, verify};
-                let key = PublicKey::from_spki(&verify::$rind_verify, &spki).unwrap();
+                use rind::slh_dsa::{PublicKey, $rind};
+                let key = PublicKey::<$rind>::from_spki(&spki).unwrap();
 
                 b.iter(|| {
                     key.verify(MESSAGE, &signature).unwrap();
@@ -230,7 +230,7 @@ macro_rules! slh_dsa {
 
 slh_dsa!(
     sha2_128s, "slhdsa-sha2-128s", n: 16,
-    rind: SlhDsaSha2_128s, SLH_DSA_SHA2_128S,
+    rind: SlhDsaSha2_128s,
     rustcrypto: Sha2_128s,
     fips205: slh_dsa_sha2_128s,
     openssl: c"SLH-DSA-SHA2-128s",
@@ -238,7 +238,7 @@ slh_dsa!(
 
 slh_dsa!(
     sha2_128f, "slhdsa-sha2-128f", n: 16,
-    rind: SlhDsaSha2_128f, SLH_DSA_SHA2_128F,
+    rind: SlhDsaSha2_128f,
     rustcrypto: Sha2_128f,
     fips205: slh_dsa_sha2_128f,
     openssl: c"SLH-DSA-SHA2-128f",
@@ -246,7 +246,7 @@ slh_dsa!(
 
 slh_dsa!(
     shake_128s, "slhdsa-shake-128s", n: 16,
-    rind: SlhDsaShake128s, SLH_DSA_SHAKE_128S,
+    rind: SlhDsaShake128s,
     rustcrypto: Shake128s,
     fips205: slh_dsa_shake_128s,
     openssl: c"SLH-DSA-SHAKE-128s",
@@ -254,7 +254,7 @@ slh_dsa!(
 
 slh_dsa!(
     shake_128f, "slhdsa-shake-128f", n: 16,
-    rind: SlhDsaShake128f, SLH_DSA_SHAKE_128F,
+    rind: SlhDsaShake128f,
     rustcrypto: Shake128f,
     fips205: slh_dsa_shake_128f,
     openssl: c"SLH-DSA-SHAKE-128f",
@@ -262,7 +262,7 @@ slh_dsa!(
 
 slh_dsa!(
     sha2_256f, "slhdsa-sha2-256f", n: 32,
-    rind: SlhDsaSha2_256f, SLH_DSA_SHA2_256F,
+    rind: SlhDsaSha2_256f,
     rustcrypto: Sha2_256f,
     fips205: slh_dsa_sha2_256f,
     openssl: c"SLH-DSA-SHA2-256f",
@@ -270,7 +270,7 @@ slh_dsa!(
 
 slh_dsa!(
     shake_256f, "slhdsa-shake-256f", n: 32,
-    rind: SlhDsaShake256f, SLH_DSA_SHAKE_256F,
+    rind: SlhDsaShake256f,
     rustcrypto: Shake256f,
     fips205: slh_dsa_shake_256f,
     openssl: c"SLH-DSA-SHAKE-256f",
