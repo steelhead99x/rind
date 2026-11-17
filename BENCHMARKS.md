@@ -1236,14 +1236,42 @@ A ✓ means a published, machine-checked proof shows that all the code computing
 ## Updating this report
 
 `admin/bench-report collect` runs the report's benchmarks, then
-`admin/build-cost`, on each benchmark host in turn over ssh, in the Nix dev
+`admin/build-cost`, on each machine in `COLLECT_HOSTS` in turn over ssh, in the Nix dev
 shell and under `quest gate`, which waits for the host to have room but
 shares it with other gated work, so its numbers are noisier than the weekly
 `bench` workflow's runners, which give the clean ones; it skips any host that is still busy, and writes their results and the hosts' details as JSON under
 `.tmp/bench-report/`. `admin/bench-report weekly` saves the latest weekly
-`bench` run's results, and `admin/bench-report render --from DIR` copies a
-collection's measured hosts into `benchmarks/data/` and writes
+`bench` run's results, and `admin/bench-report render --from DIR` copies every
+measured host JSON from that directory into `benchmarks/data/` and writes
 `BENCHMARKS.md`, its SVGs, which the README shows too, and the README's comparison table from them,
 `benchmarks/verified.toml`, and
 `benchmarks/gaps.toml`, which must hold a quest or a reason for every gap
-over 10%.
+over 10%. `render --check` fails if those files are out of date and writes nothing,
+so it refuses `--from`: import first, then check.
+
+`admin/bench-report run` measures the machine it is on. Anyone can run it: there is
+no host list to edit. The result's name is a slug of the CPU model, such as
+`intel-core-ultra-9-275hx`, unless `--host` sets another filesystem-safe name, and
+the JSON records the raw CPU string, that slug, the core counts, and the OS.
+A slug that equals a nightly tier name gains a `-host` suffix, so a minimal aarch64
+Linux box is `aarch64-host` rather than the reserved name `aarch64`, and a host whose
+chosen name is that spelling is left as it is. A second machine
+that wants a slug already on disk is stored as `<slug>-<tag>`, or `<slug>-2` when that
+alias is taken, and a later import replaces that file. The tag is eight hex characters
+of HMAC-SHA256 over the OS machine id, under a fixed application key. An empty, all-zero,
+or uninitialized id is not a tag. A machine without one passes `--host`. A slug file
+this machine already has is refreshed, along with any second alias that carries its tag.
+A file without a tag may be any machine, so an import never replaces, reuses, or deletes
+one: a tagged result is stored beside it, and a result without a tag whose name is
+already on disk is not imported until it is rerun with a different `--host`.
+`render --from DIR --adopt NAME` is the one exception: it writes the tag of DIR's tagged
+`NAME.json` into the untagged `NAME.json` on disk, so that machine's file is refreshed in
+place from then on, and it refuses a missing or tagged file, an untagged or alias result,
+or one older than that file. No import replaces or deletes a file from the same machine
+that started later. Of one
+machine's results under one slug in a collection, only the newest is imported.
+`summary` and `render --from` read every readable measured `<host>.json` and name any
+file they skip, including one missing a field the report shows or with a time that is
+not a finite number above zero.
+`collect` reaches only the maintainer's machines. A gap's `on` may name any host with a
+result, or any nightly tier.

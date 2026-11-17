@@ -25,7 +25,6 @@ on:
       - miri
       - mutants
       - prove
-      - Pullfrog
       - python
       - quality lints
       - Queue
@@ -47,15 +46,19 @@ jobs:
     # past its timeout ends `cancelled`, not `timed_out`, and any other
     # cancellation still leaves the scheduled check undone. Release and Check alert however they ran:
     # they follow the queue's pushes to main, which nobody watches. So does
-    # Dart release, which a tag push starts with nobody watching. Their
+    # Dart release, which a tag push starts with nobody watching. Check's
     # cancellations are excluded, since a newer push supersedes a run as a
-    # matter of course. Queue failures stay on the PR and go to the queue
-    # watcher and fixer.
+    # matter of course. The releases' are not: no push cancels one (Release
+    # queues, Dart release has no group), so a cancelled release is a hung
+    # publish killed at its time limit, or a hand cancel. Queue failures stay
+    # on the PR and go to the queue watcher and fixer.
     if: >-
       (github.event.workflow_run.event == 'schedule' &&
       contains(fromJSON('["failure", "timed_out", "cancelled"]'), github.event.workflow_run.conclusion)) ||
       (contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion) &&
-      contains(fromJSON('["Release", "Check", "Dart release"]'), github.event.workflow_run.name))
+      contains(fromJSON('["Release", "Check", "Dart release"]'), github.event.workflow_run.name)) ||
+      (github.event.workflow_run.conclusion == 'cancelled' &&
+      contains(fromJSON('["Release", "Dart release"]'), github.event.workflow_run.name))
     runs-on: ubuntu-latest
     timeout-minutes: 5
 

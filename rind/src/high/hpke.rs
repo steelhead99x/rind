@@ -179,12 +179,11 @@ impl PrivateKey {
     /// derives keys from 64 bytes, needs.
     pub fn derive(kem: &'static Kem, ikm: &[u8]) -> Result<Self, Error> {
         let _entry = low::Entry::new_secret();
-        let labels = Labels::kem(kem);
-        let dkp_prk = labels.extract_prk(b"", b"dkp_prk", ikm);
+        let dkp_prk = DkpPrk::new(kem, ikm);
         let mut bytes = [0u8; MAX_SCALAR_LEN];
         let bytes = &mut bytes[..kem.scalar_len];
         let Some(mask) = kem.candidate_mask else {
-            labels.expand(&dkp_prk, b"sk", &[], bytes)?;
+            dkp_prk.labels.expand(&dkp_prk.prk, b"sk", &[], bytes)?;
             return Self::from_scalar(kem, bytes);
         };
 
@@ -192,8 +191,7 @@ impl PrivateKey {
         // ECDSA nonce: a rejected one says nothing of the one kept.
         let mut result: Result<Self, Error> = Err(KeyFormatError::ScalarOutOfRange.into());
         for counter in 0..=255u8 {
-            labels.expand(&dkp_prk, b"candidate", &[&[counter]], bytes)?;
-            bytes[0] &= mask;
+            dkp_prk.candidate(counter, mask, bytes)?;
             result = Self::from_scalar(kem, bytes);
             if result.is_ok() {
                 break;
@@ -254,6 +252,30 @@ impl PrivateKey {
             enc,
             self.key.public_key().as_ref(),
         ))
+    }
+}
+
+/// `DeriveKeyPair`'s `dkp_prk` (RFC 9180 section 7.1.3), which a key
+/// expands from.
+struct DkpPrk {
+    labels: Labels,
+    prk: Prk,
+}
+
+impl DkpPrk {
+    fn new(kem: &Kem, ikm: &[u8]) -> Self {
+        let labels = Labels::kem(kem);
+        let prk = labels.extract_prk(b"", b"dkp_prk", ikm);
+        Self { labels, prk }
+    }
+
+    /// A NIST curve's candidate `counter` into `out`, its first byte masked
+    /// by `mask`.
+    fn candidate(&self, counter: u8, mask: u8, out: &mut [u8]) -> Result<(), Error> {
+        self.labels
+            .expand(&self.prk, b"candidate", &[&[counter]], out)?;
+        out[0] &= mask;
+        Ok(())
     }
 }
 
@@ -793,6 +815,7 @@ const VERSION: &[u8] = b"HPKE-v1";
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::collections::HashMap;
     use std::fs::File;
     use std::io::BufReader;
 
@@ -962,6 +985,271 @@ mod tests {
         // X25519, P-256, and P-521, each with SHA-256 and SHA-512 and four
         // AEADs.
         assert_eq!(count, 24);
+    }
+
+    /// One vector of the IETF revision of RFC 9180's edge-case appendix
+    /// (`thirdparty/vectors/rfc9180/edge-cases.md`, at the hpkewg/hpke
+    /// revision `admin/sync-vectors` pins): each `~~~` block's records, a
+    /// record's fields by name, hex unless named otherwise.
+    #[derive(Default)]
+    struct EdgeCase {
+        name: String,
+        setup: Vec<HashMap<String, String>>,
+        encryptions: Vec<HashMap<String, String>>,
+        exports: Vec<HashMap<String, String>>,
+    }
+
+    /// Reads the appendix as published: `## <name>` begins a vector, its
+    /// `###` and `####` headings name its blocks, a blank line separates
+    /// two records of one block, and a value too long for its field's line
+    /// continues on the lines after it. A block under any other heading,
+    /// or a field given twice, fails the test.
+    fn edge_cases() -> Vec<EdgeCase> {
+        let text = std::fs::read_to_string(format!(
+            "{}/../thirdparty/vectors/rfc9180/edge-cases.md",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap();
+        let mut cases: Vec<EdgeCase> = Vec::new();
+        let mut heading = "";
+        let mut in_block = false;
+        let mut last_field = String::new();
+        for line in text.lines() {
+            if line == "~~~" {
+                in_block = !in_block;
+                if !in_block {
+                    continue;
+                }
+            } else if !in_block {
+                if let Some(name) = line.strip_prefix("## ") {
+                    // A block before this vector's first `###` heading is
+                    // unknown, not the previous vector's last block.
+                    heading = "";
+                    cases.push(EdgeCase {
+                        name: name.to_owned(),
+                        ..EdgeCase::default()
+                    });
+                } else if let Some(name) = line.strip_prefix("### ").or(line.strip_prefix("#### "))
+                {
+                    heading = name;
+                }
+                continue;
+            }
+            let case = cases.last_mut().expect("a block inside a vector");
+            let records = match heading {
+                "Base Setup Information" | "PSK Setup Information" => &mut case.setup,
+                "Encryptions" => &mut case.encryptions,
+                "Exported Values" => &mut case.exports,
+                _ => panic!("unknown block {heading:?} in {:?}", case.name),
+            };
+            if line == "~~~" || line.is_empty() {
+                records.push(HashMap::new());
+                last_field.clear();
+                continue;
+            }
+            let record = records.last_mut().unwrap();
+            match line.split_once(':') {
+                Some((field, value)) => {
+                    last_field = field.to_owned();
+                    let old = record.insert(last_field.clone(), value.trim().to_owned());
+                    assert!(old.is_none(), "{field:?} twice in {:?}", case.name);
+                }
+                None => record
+                    .get_mut(&last_field)
+                    .unwrap_or_else(|| panic!("{line:?} continues no field in {:?}", case.name))
+                    .push_str(line),
+            }
+        }
+        assert!(!in_block, "an unclosed block");
+        cases
+    }
+
+    /// `record`'s hex field `name`, which must be there.
+    fn field(record: &HashMap<String, String>, name: &str) -> Vec<u8> {
+        hex::decode(&record[name]).unwrap()
+    }
+
+    /// `record`'s decimal field `name`, which must be there.
+    fn number<T>(record: &HashMap<String, String>, name: &str) -> T
+    where
+        T: core::str::FromStr,
+        T::Err: fmt::Debug,
+    {
+        record[name].parse().unwrap()
+    }
+
+    #[test]
+    fn rfc9180_edge_cases() {
+        let cases = edge_cases();
+        // The appendix's five, all of whose suites rind offers.
+        assert_eq!(cases.len(), 5);
+        for case in &cases {
+            let name = &case.name;
+            let [setup] = &case.setup[..] else {
+                panic!("{name}: one setup block");
+            };
+            let kem = kem(number(setup, "kem_id")).unwrap();
+            // The vector's own identifiers pick the suite, so a wrong one
+            // changes `suite_id` and every value derived under it.
+            let suite = Suite {
+                kdf: kdf(number(setup, "kdf_id")),
+                aead: aead(number(setup, "aead_id")).unwrap(),
+            };
+            let (info, enc) = (field(setup, "info"), field(setup, "enc"));
+
+            let private_key = PrivateKey::derive(kem, &field(setup, "ikmR")).unwrap();
+            let sk_rm = field(setup, "skRm");
+            assert_eq!(public(private_key.to_scalar().as_ref()), sk_rm, "{name}");
+            assert_eq!(
+                private_key.public_key().as_ref(),
+                field(setup, "pkRm"),
+                "{name}"
+            );
+            let loaded = PrivateKey::from_scalar(kem, &sk_rm).unwrap();
+            assert_eq!(loaded.public_key().as_ref(), field(setup, "pkRm"), "{name}");
+
+            let shared_secret = field(setup, "shared_secret");
+            let public_key = PublicKey::new(kem, &field(setup, "pkRm")).unwrap();
+            let ephemeral = PrivateKey::derive(kem, &field(setup, "ikmE")).unwrap();
+            let (sent, secret) = public_key.encapsulate(&ephemeral.key).unwrap();
+            assert_eq!(sent.as_ref(), enc, "{name}");
+            assert_eq!(public(secret.as_ref()), shared_secret, "{name}");
+            let received = loaded.decapsulate(&enc).unwrap();
+            assert_eq!(public(received.as_ref()), shared_secret, "{name}");
+            // rind offers base mode alone, so a PSK vector checks its KEM.
+            match number::<u8>(setup, "mode") {
+                0 => {}
+                1 => continue,
+                mode => panic!("{name}: mode {mode}"),
+            }
+
+            // The draft's `key` and `exporter_secret` are opaque here, so the
+            // ciphertexts and exported values check them.
+            let mut sender = Sender::schedule(suite, &secret, &info);
+            assert_eq!(
+                public(&sender.sealing.base_nonce),
+                field(setup, "base_nonce"),
+                "{name}"
+            );
+            let mut recipient = Recipient::new(suite, &loaded, &enc, &info).unwrap();
+            assert!(!case.encryptions.is_empty(), "{name}");
+            for (seq, encryption) in case.encryptions.iter().enumerate() {
+                assert_eq!(
+                    number::<usize>(encryption, "sequence number"),
+                    seq,
+                    "{name}"
+                );
+                let (pt, aad, ct) = (
+                    field(encryption, "pt"),
+                    field(encryption, "aad"),
+                    field(encryption, "ct"),
+                );
+                let mut sealed = pt.clone();
+                sender.seal_in_place_append_tag(&aad, &mut sealed).unwrap();
+                assert_eq!(sealed, ct, "{name}");
+                assert_eq!(opened(&mut recipient, &aad, &ct).unwrap(), pt, "{name}");
+            }
+            assert!(!case.exports.is_empty(), "{name}");
+            for export in &case.exports {
+                let context = field(export, "exporter_context");
+                let (value, len) = (field(export, "exported_value"), number(export, "L"));
+                assert_eq!(
+                    exported(|out| sender.export(&context, out), len),
+                    value,
+                    "{name}"
+                );
+                assert_eq!(
+                    exported(|out| recipient.export(&context, out), len),
+                    value,
+                    "{name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn derive_rejects_a_candidate_at_or_above_the_order() {
+        // The rejection-sampling vector: its counter 0 candidate, published
+        // as `rejected_candidate`, is at or above P-256's order, so
+        // `DeriveKeyPair` keeps counter 1's, its `skRm`.
+        let cases = edge_cases();
+        let [setup] = &cases
+            .iter()
+            .find(|case| case.name == "KEM Key Derivation with Rejection Sampling")
+            .unwrap()
+            .setup[..]
+        else {
+            panic!("one setup block");
+        };
+        let kem = kem(number(setup, "kem_id")).unwrap();
+        assert_eq!(kem.id, DHKEM_P256_HKDF_SHA256.id);
+        let ikm = field(setup, "ikmR");
+        let dkp_prk = DkpPrk::new(kem, &ikm);
+        let mut candidate = [0u8; 32];
+        for (counter, wanted, in_range) in [
+            (0, field(setup, "rejected_candidate (counter=0)"), false),
+            (1, field(setup, "skRm"), true),
+        ] {
+            dkp_prk
+                .candidate(counter, kem.candidate_mask.unwrap(), &mut candidate)
+                .unwrap();
+            assert_eq!(public(&candidate), wanted);
+            assert_eq!(PrivateKey::from_scalar(kem, &candidate).is_ok(), in_range);
+        }
+        let key = PrivateKey::derive(kem, &ikm).unwrap();
+        assert_eq!(public(key.to_scalar().as_ref()), candidate);
+    }
+
+    #[test]
+    fn scalar_range() {
+        // A NIST curve's key is from 1 to n - 1, which `DeriveKeyPair`'s
+        // rejection sampling keeps to; aws-lc-rs refuses and takes the same.
+        for (kem, n) in [
+            (
+                &DHKEM_P256_HKDF_SHA256,
+                "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
+            ),
+            (
+                &DHKEM_P384_HKDF_SHA384,
+                "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf\
+                 581a0db248b0a77aecec196accc52973",
+            ),
+            (
+                &DHKEM_P521_HKDF_SHA512,
+                "01fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa\
+                 51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e91386409",
+            ),
+        ] {
+            let n = hex::decode(n).unwrap();
+            assert_eq!(n.len(), kem.scalar_len);
+            let mut n_minus_1 = n.clone();
+            *n_minus_1.last_mut().unwrap() -= 1;
+            for (scalar, in_range) in [
+                (vec![0; kem.scalar_len], false),
+                (n_minus_1, true),
+                (n, false),
+            ] {
+                assert_eq!(
+                    PrivateKey::from_scalar(kem, &scalar).is_ok(),
+                    in_range,
+                    "{kem:?} {scalar:02x?}"
+                );
+                #[cfg(not(any(miri, target_family = "wasm")))]
+                {
+                    use aws_lc_rs::agreement as theirs;
+                    let theirs_algorithm = match kem.id {
+                        0x0010 => &theirs::ECDH_P256,
+                        0x0011 => &theirs::ECDH_P384,
+                        _ => &theirs::ECDH_P521,
+                    };
+                    assert_eq!(
+                        theirs::PrivateKey::from_private_key(theirs_algorithm, &scalar).is_ok(),
+                        in_range,
+                        "aws-lc-rs {kem:?} {scalar:02x?}"
+                    );
+                }
+            }
+        }
     }
 
     #[derive(Deserialize, Debug)]
@@ -1436,9 +1724,16 @@ mod tests {
     #[test]
     fn secret_key_derivation() {
         // Under `admin/ctgrind`, nothing may branch on or index by `ikm` but
-        // whether a NIST curve's candidate is in range, which is public.
-        for kem in KEMS {
-            let ikm = [0x5a; 66];
+        // whether a NIST curve's candidate is in range, which is public. The
+        // edge-case appendix's P-256 `ikmR` takes the rejection path: its
+        // first candidate is out of range.
+        let rejecting = edge_cases()
+            .into_iter()
+            .find(|case| case.name == "KEM Key Derivation with Rejection Sampling")
+            .unwrap();
+        let rejecting = (&DHKEM_P256_HKDF_SHA256, field(&rejecting.setup[0], "ikmR"));
+        let ikms = KEMS.into_iter().map(|kem| (kem, vec![0x5a; 66]));
+        for (kem, ikm) in ikms.chain([rejecting]) {
             let wanted = PrivateKey::derive(kem, &ikm).unwrap().public_key().clone();
 
             low::ct::secret_slice(&ikm);
