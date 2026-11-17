@@ -1430,6 +1430,10 @@ def unmeasured(host):
     for key in OPTIONAL_HOST_OBJECTS:
         if key in host and not isinstance(host[key], dict):
             return f"no well-formed {key}"
+    if "refused" in host and not well_formed_refused(host["refused"]):
+        return "no well-formed refused"
+    if "build_cost" in host and not well_formed_build_cost(host["build_cost"]):
+        return "no well-formed build_cost"
     results = host.get("results")
     if not isinstance(results, list) or not all(
         isinstance(r, dict)
@@ -1447,6 +1451,44 @@ def unmeasured(host):
 REQUIRED_HOST_FIELDS = ("commit", "started", "os", "cpu.model", "cpu.arch", "cpu.logical_cpus", "toolchain.rustc")
 # Optional fields the report reads as objects when a host has them.
 OPTIONAL_HOST_OBJECTS = ("load", "refused", "build_cost", "rind_cpu")
+
+
+def _strings(value):
+    return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+
+def _seconds(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= sys.float_info.max
+
+
+def well_formed_refused(refused):
+    """Whether `refused` maps known libraries to the CPU features each lacks, as the report reads it."""
+    return all(lib in COLUMNS and _strings(missing) for lib, missing in refused.items())
+
+
+def well_formed_build_cost(cost):
+    """Whether `cost` has every field `build_table` and the build-cost section read."""
+    if cost.get("status") != "ok":
+        return isinstance(cost.get("status"), str) and isinstance(cost.get("reason"), str)
+    host = cost.get("host")
+    builds = cost.get("builds")
+    return (
+        isinstance(cost.get("started"), str)
+        and isinstance(host, dict)
+        and all(isinstance(host.get(k), (str, int)) and not isinstance(host.get(k), bool) for k in ("rustc", "cc", "jobs"))
+        and isinstance(builds, list)
+        and all(
+            isinstance(b, dict)
+            and isinstance(b.get("name"), str)
+            and isinstance(b.get("seconds"), list)
+            and b["seconds"]
+            and all(_seconds(x) for x in b["seconds"])
+            and all(_seconds(b.get(k)) for k in ("median_seconds", "median_cpu_seconds", "stripped_bytes"))
+            and _strings(b.get("tools"))
+            and isinstance(b.get("packages"), list)
+            for b in builds
+        )
+    )
 
 
 def positive_time(ns):
@@ -2806,10 +2848,8 @@ def import_hosts(directory, adopt=()):
         removed = _drop_extra_aliases(slug, host, existing, dest)
         for stem in sorted(removed):
             print(f"bench-report: {stem}: same machine as {slug}, dropped", file=sys.stderr)
-            print(f"bench-report: {slug}: dropped extra alias {stem}", file=sys.stderr)
         if moved:
-            print(f"bench-report: {name}: same machine as {dest}, imported as {dest}", file=sys.stderr)
-            print(f"bench-report: {name}: this machine already has {dest}, refreshed {dest}", file=sys.stderr)
+            print(f"bench-report: {name}: same machine as {dest}, refreshed {dest}", file=sys.stderr)
         elif creating and dest != name:
             print(f"bench-report: {name}: same slug as another machine, imported as {dest}", file=sys.stderr)
 
