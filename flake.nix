@@ -474,19 +474,23 @@
             export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
           '';
 
-          # `msrv-<version>`, with `.` as `_`, for each rust-version a workspace
-          # member declares itself rather than inheriting rind's, such as
-          # rind-openmls's 1.91: `just check`'s msrv module checks a published
-          # one there. Read from the manifests, so a new adapter with its own
-          # rust-version needs no edit here. Nix evaluates a shell only when
-          # it is entered, so an unpublished member's version costs nothing.
+          # `msrv-<version>`, with `.` as `_`, for each rust-version a
+          # published workspace member declares itself rather than inheriting
+          # the workspace's, such as rind-openmls's 1.91, where `just check`'s
+          # msrv module checks it. Read from the manifests, so a new adapter
+          # with its own rust-version needs no edit here. An unpublished
+          # member's version gets none: no user builds it on that version.
           msrv-shells =
             let
               workspace = builtins.fromTOML (builtins.readFile ./Cargo.toml);
-              declared = map (
+              packages = map (
                 member:
-                (builtins.fromTOML (builtins.readFile (./. + "/${member}/Cargo.toml"))).package.rust-version or null
+                (builtins.fromTOML (builtins.readFile (./. + "/${member}/Cargo.toml"))).package
               ) workspace.workspace.members;
+              published = builtins.filter (
+                package: package.publish or true != false && package.publish or true != [ ]
+              ) packages;
+              declared = map (package: package.rust-version or null) published;
               versions = pkgs.lib.unique (
                 builtins.filter (
                   version: builtins.isString version && version != workspace.workspace.package.rust-version
@@ -624,9 +628,9 @@
               };
             };
 
-            # The nightly MSRV job builds in it. The workspace's rust-version
-            # names a minor release, which resolves to its latest patch, as
-            # rustup does. The extra targets let it check rind's other
+            # `just check`'s msrv module builds in it. The workspace's
+            # rust-version names a minor release, which resolves to its latest
+            # patch, as rustup does. The extra targets let it check rind's other
             # backends and 32-bit x86, which `check` does without a C toolchain.
             msrv = pkgs.mkShell {
               packages = [

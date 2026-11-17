@@ -416,30 +416,39 @@ step() {
                 # An adapter whose upstream needs a newer Rust declares that
                 # rust-version instead, which its users need anyway, so it is
                 # checked on its own version, in the flake's msrv-<version>
-                # shell, rather than on rind's. An unpublished crate with a
-                # rust-version of its own, or none, is left out: no user
-                # builds it on that version.
-                local newer args=() i name version
+                # shell, with every crate sharing that version, rather than
+                # on rind's. An unpublished crate with a rust-version of its
+                # own, or none, is left out: no user builds it on that
+                # version. A published crate with none promises no Rust
+                # version, which is an error rather than a skip.
+                local metadata own_list args=() i name version names
                 local -A own=() versions=()
-                mapfile -t newer < <(cargo metadata --format-version 1 --no-deps --locked |
-                    jq -r '(.packages[] | select(.name == "rind") | .rust_version) as $v | .packages[] | select(.rust_version != $v) | "\(.name) \(if .publish == [] or .rust_version == null then "" else .rust_version end)"')
-                for name in "${newer[@]}"; do
-                    own[${name% *}]=${name#* }
-                done
+                # Plain assignments, so a failing cargo or jq stops the
+                # module instead of reading as no crate of its own.
+                metadata=$(cargo metadata --format-version 1 --no-deps --locked)
+                own_list=$(jq -r '(.packages[] | select(.name == "rind") | .rust_version) as $rind
+                    | .packages[] | select(.rust_version != $rind)
+                    | if .publish == [] then [.name, ""]
+                      elif .rust_version == null then error("\(.name) is published but declares no rust-version")
+                      else [.name, .rust_version] end
+                    | @tsv' <<<"$metadata")
+                while IFS=$'\t' read -r name version; do
+                    [[ -z "$name" ]] || own[$name]=$version
+                done <<<"$own_list"
                 for ((i = 0; i < ${#packages[@]}; i++)); do
                     if [[ "${packages[i]}" == -p ]]; then
                         i=$((i + 1))
                         name=${packages[i]}
-                        if [[ ! -v own[$name] ]]; then
+                        if [[ ! -v "own[$name]" ]]; then
                             args+=(-p "$name")
                         elif [[ -n "${own[$name]}" ]]; then
-                            versions[${own[$name]}]+=" -p $name"
+                            versions[${own[$name]}]+=" $name"
                         fi
                     elif [[ "${packages[i]}" == --workspace ]]; then
                         args+=(--workspace)
                         for name in "${!own[@]}"; do
                             args+=(--exclude "$name")
-                            [[ -z "${own[$name]}" ]] || versions[${own[$name]}]+=" -p $name"
+                            [[ -z "${own[$name]}" ]] || versions[${own[$name]}]+=" $name"
                         done
                     fi
                 done
@@ -447,12 +456,16 @@ step() {
                     run nix develop .#msrv --command cargo check "${args[@]}" --locked
                 fi
                 for version in "${!versions[@]}"; do
+                    read -ra names <<<"${versions[$version]}"
+                    args=()
+                    for name in "${names[@]}"; do
+                        args+=(-p "$name")
+                    done
                     # This rustc is not the one building target/, so its
                     # check keeps to its own directory instead of making
                     # that build start over.
-                    # shellcheck disable=SC2086 # each entry is "-p NAME" pairs
                     run nix develop ".#msrv-${version//./_}" --command \
-                        cargo check ${versions[$version]} --locked --target-dir "target/msrv-${version//./_}"
+                        cargo check "${args[@]}" --locked --target-dir "target/msrv-${version//./_}"
                 done
             fi
             # rind and rind-rustls on each other backend this change reaches.
