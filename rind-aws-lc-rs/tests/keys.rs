@@ -641,8 +641,10 @@ fn ml_dsa_every_refusal() {
     ours::signature::ParsedPublicKey::new(&ours::signature::ML_DSA_65, &spki).unwrap();
     theirs::signature::ParsedPublicKey::new(&theirs::signature::ML_DSA_65, &spki).unwrap();
 
-    // RSA-1024 from Wycheproof. Consistent components are `WrongAlgorithm`
-    // even below 2048 bits. A corrupted coefficient is `InvalidEncoding`.
+    // RSA-1024 from Wycheproof, below the 2048 bits rind can back. Consistent
+    // components are `WrongAlgorithm` in both. A corrupted coefficient is
+    // `InvalidEncoding` in aws-lc-rs, and `WrongAlgorithm` here, decided from
+    // the modulus length.
     let rsa = rsa1024_pkcs8();
     kind(&rsa, ours44, theirs44, "WrongAlgorithm");
     let mut bad_rsa = pkcs1_of(&rsa);
@@ -655,7 +657,7 @@ fn ml_dsa_every_refusal() {
         &bad_rsa,
         None,
     );
-    kind(&bad_rsa, ours44, theirs44, "InvalidEncoding");
+    unbacked(&bad_rsa, "InvalidEncoding");
     let v2_rsa = pkcs8_doc(
         1,
         &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01],
@@ -666,7 +668,8 @@ fn ml_dsa_every_refusal() {
     kind(&v2_rsa, ours44, theirs44, "InvalidEncoding");
 
     // RSASSA-PSS. NULL parameters do not parse. An explicit SHA-256 does.
-    // A v2 public key is ignored. An inconsistent key does not parse.
+    // A v2 public key is ignored. An inconsistent key does not parse in
+    // aws-lc-rs; this 1024-bit one is refused from its modulus length here.
     let pss_oid = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a];
     let pkcs1 = pkcs1_of(&rsa);
     kind(
@@ -702,10 +705,8 @@ fn ml_dsa_every_refusal() {
     let mut bad_pss = pkcs1.clone();
     let last = bad_pss.len() - 1;
     bad_pss[last] ^= 0xff;
-    kind(
+    unbacked(
         &pkcs8_doc(0, &pss_oid, &pss_params, &bad_pss, None),
-        ours44,
-        theirs44,
         "InvalidEncoding",
     );
 

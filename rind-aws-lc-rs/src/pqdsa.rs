@@ -549,12 +549,11 @@ fn rsa_pss_private_key(pkcs8: &[u8]) -> bool {
         return false;
     }
     rind::rsa::KeyPair::from_pkcs1(parts.private_key).is_ok()
-        || rind::rsa::KeyPair::pkcs1_components_agree(parts.private_key)
+        || unbacked_rsa_size(parts.private_key)
 }
 
 /// `rsa_priv_decode`: NULL parameters, no v2 public key, and components that
-/// agree. A modulus outside 2048 to 8192 bits still agrees when the same
-/// relations hold; rind's loader refuses that size.
+/// agree, which rind checks for a modulus of 2048 to 8192 bits.
 fn rsa_private_key(pkcs8: &[u8]) -> bool {
     let Some(parts) = der::pkcs8_parts(pkcs8) else {
         return false;
@@ -562,8 +561,24 @@ fn rsa_private_key(pkcs8: &[u8]) -> bool {
     if parts.has_public_key || parts.parameters != [0x05, 0x00] {
         return false;
     }
-    rind::rsa::KeyPair::from_pkcs8(pkcs8).is_ok()
-        || rind::rsa::KeyPair::pkcs1_components_agree(parts.private_key)
+    rind::rsa::KeyPair::from_pkcs8(pkcs8).is_ok() || unbacked_rsa_size(parts.private_key)
+}
+
+/// Whether a PKCS#1 `RSAPrivateKey`'s modulus is outside the 2048 to 8192
+/// bits rind signs with. rind cannot back such a key, so it is refused as
+/// another algorithm from that public length alone, without reading the
+/// private components.
+fn unbacked_rsa_size(pkcs1: &[u8]) -> bool {
+    let Some((0x30, body)) = der::first_element(pkcs1) else {
+        return false;
+    };
+    let Some(version) = der::leading_element(body) else {
+        return false;
+    };
+    let Some((0x02, modulus)) = body.get(version.len()..).and_then(der::first_element) else {
+        return false;
+    };
+    !(2048..=8192).contains(&der::bits(modulus))
 }
 
 /// An ML-KEM private key in RFC 9935's seed form or expanded form.

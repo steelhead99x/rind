@@ -3,7 +3,8 @@
 //! Each case is loaded through rind-aws-lc-rs and through the locked
 //! aws-lc-rs 1.19.0. Both must accept or both must reject. A rejection must
 //! use the same [`KeyRejected::description_()`]. An acceptance must produce
-//! the same public key. Nothing here records a known difference.
+//! the same public key. The one recorded difference, `check_unbacked`, is the
+//! one rind-aws-lc-rs's README lists: a key of a type rind cannot back.
 
 #![cfg(not(any(miri, target_family = "wasm")))]
 
@@ -49,6 +50,19 @@ impl Report {
                 format!("rind={} aws-lc-rs={}", brief(ours), brief(theirs))
             };
             self.failures.push(format!("MISMATCH {label}: {detail}"));
+        }
+    }
+
+    /// A key of a type rind cannot back, refused from public facts: rind says
+    /// `WrongAlgorithm` and aws-lc-rs `expected`, the one difference
+    /// rind-aws-lc-rs's README lists for it.
+    fn check_unbacked(&mut self, label: &str, ours: &str, theirs: &str, expected: &str) {
+        if theirs != expected || ours != "err:WrongAlgorithm" {
+            self.failures.push(format!(
+                "UNBACKED {label}: rind={} aws-lc-rs={} expected rind=err:WrongAlgorithm aws-lc-rs={expected}",
+                brief(ours),
+                brief(theirs)
+            ));
         }
     }
 
@@ -568,13 +582,13 @@ fn pqdsa_from_pkcs8_rsa_consistency() {
             &doc,
             fixture,
         );
-        check_pkcs8(
-            &mut report,
-            &format!("{name} inconsistent qInv"),
-            65,
-            &corrupt_coefficient(&doc),
-            Some("err:InvalidEncoding"),
-        );
+        let label = format!("{name} inconsistent qInv");
+        let (ours, theirs) = load_pkcs8(65, &corrupt_coefficient(&doc));
+        if matches!(name, "rsa2047" | "rsa1024") {
+            report.check_unbacked(&label, &ours, &theirs, "err:InvalidEncoding");
+        } else {
+            report.check(&label, &ours, &theirs, Some("err:InvalidEncoding"));
+        }
     }
     check_pkcs8(
         &mut report,
@@ -864,12 +878,12 @@ fn pqdsa_from_pkcs8_pss_inconsistent_and_v2() {
         &rewrap_pss(&small, None, 0, &[]),
         Some("err:WrongAlgorithm"),
     );
-    check_pkcs8(
-        &mut report,
+    let (ours, theirs) = load_pkcs8(65, &rewrap_pss(&corrupt_coefficient(&small), None, 0, &[]));
+    report.check_unbacked(
         "pss 1024 inconsistent qInv",
-        65,
-        &rewrap_pss(&corrupt_coefficient(&small), None, 0, &[]),
-        Some("err:InvalidEncoding"),
+        &ours,
+        &theirs,
+        "err:InvalidEncoding",
     );
     check_pkcs8(
         &mut report,
@@ -885,12 +899,12 @@ fn pqdsa_from_pkcs8_pss_inconsistent_and_v2() {
         &rewrap_pss(RSA2047, None, 0, &[]),
         Some("err:WrongAlgorithm"),
     );
-    check_pkcs8(
-        &mut report,
+    let (ours, theirs) = load_pkcs8(65, &rewrap_pss(&corrupt_coefficient(RSA2047), None, 0, &[]));
+    report.check_unbacked(
         "pss 2047 inconsistent qInv",
-        65,
-        &rewrap_pss(&corrupt_coefficient(RSA2047), None, 0, &[]),
-        Some("err:InvalidEncoding"),
+        &ours,
+        &theirs,
+        "err:InvalidEncoding",
     );
     report.finish();
 }

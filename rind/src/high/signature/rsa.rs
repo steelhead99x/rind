@@ -414,14 +414,6 @@ impl KeyPair {
         Self::new(rsa::SigningKey::from_pkcs1_der(der)?)
     }
 
-    /// Whether `pkcs1` is a two-prime RSA private key whose components agree,
-    /// including a modulus this type refuses to load. The adapter uses the
-    /// verdict to name `WrongAlgorithm`. The private components are wiped
-    /// before this returns.
-    pub fn pkcs1_components_agree(pkcs1: &[u8]) -> bool {
-        rsa::SigningKey::pkcs1_components_agree(pkcs1)
-    }
-
     fn new(key: rsa::SigningKey) -> Result<Self, Error> {
         let public = PublicKey::from_key(key.public_key())?;
         Ok(Self { key, public })
