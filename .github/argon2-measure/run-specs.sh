@@ -9,6 +9,11 @@ out=$(mkdir -p "$1" && cd "$1" && pwd); spec=$2
 rounds=${ROUNDS:-3}
 tbase=${TARGET_BASE:-target}; [[ $tbase = /* ]] || tbase=$PWD/$tbase
 declare -A exe envs
+# With a bench lock, wait for it before building, so the build never overlaps
+# another lane's timed round.
+if [ -n "${BENCH_LOCK:-}" ] && [ -z "${EXES:-}" ]; then
+  while [ -e "$BENCH_LOCK" ]; do sleep 10; done
+fi
 names=()
 while IFS='|' read -r name tree flags env; do
   [ -z "$name" ] || [[ $name = \#* ]] && continue
