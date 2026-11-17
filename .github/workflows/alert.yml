@@ -1,64 +1,63 @@
 name: Alert
 
-# Posts to Discord #alerts when a nightly or a release stops and nobody is
-# watching the run. Reads the kixel-ai organization's DISCORD_WEBHOOK secret.
-# A job that runs past its time limit ends cancelled, not timed_out. Release
-# and Dart release set no timeout-minutes, so a hung publish dies at GitHub's
-# 360-minute default.
+# Posts scheduled, landing, and release failures to the Discord #alerts channel,
+# since those runs have no pull request to turn red. Reads the kixel-ai
+# organization's DISCORD_WEBHOOK secret.
 
 permissions:
   contents: read
-  # Classifying a cancellation reads the run's jobs and their check annotations.
-  actions: read
-  checks: read
 
 on:
   workflow_run:
-    # Matched by workflow `name:`, not filename. `sh/alert.sh check` requires
-    # every workflow whose failure can go unseen. A workflow that runs only
-    # from a pull request, as a caller, or from a manual dispatch is left out,
-    # because someone is already watching that run.
+    # Matched by workflow `name:`, not filename. Only workflows that run outside
+    # a pull request. `sh/alert.sh check` enforces the list.
     workflows:
       - asan
       - bench
+      - build
       - dart-libraries
       - Dart release
+      - Check
       - coverage
+      - ctgrind
+      - fuzz
       - miri
       - mutants
+      - prove
+      - Pullfrog
       - python
+      - quality lints
+      - Queue
+      - regenerate
       - Release
+      - timing
+      - x86-cpu
     types:
       - completed
 
-# No concurrency group: each run reports a different failed run, and the
-# nightlies share a schedule, so cancelling would drop alerts.
+# No concurrency group: each run reports a different failed run, and
+# scheduled runs can finish together, so cancelling would drop alerts.
 
 jobs:
   discord:
     name: Discord
-    # Scheduled runs post on failure or timed_out, and on cancelled only when
-    # a job annotation is one of the two time-limit sentences: timeout-minutes
-    # ("The job has exceeded the maximum execution time of ...") or the hosted
-    # runner's 360-minute cap ("The job running on runner ... has exceeded the
-    # maximum execution time of ..."). A hand cancel does not post. A dispatch
-    # that replaces the nightly does not post where that workflow cancels the
-    # running job: asan, bench, coverage, miri, python, and dart-libraries use
-    # one group per ref with cancel-in-progress. mutants does not. Its group
-    # is mutants-${{ github.event_name }} with queue: max, so a dispatch waits
-    # and does not cancel the weekly run. Release and Dart release
-    # post on failure, timed_out, and a cancelled run that started a job,
-    # unless that run's only cancel annotation is "Canceling since a higher
-    # priority waiting request". release.yml sets cancel-in-progress to false
-    # and does not set queue: max, so a newer push leaves an in-progress
-    # publish running and cancels the pending one waiting in the group. That
-    # pending cancellation does not post. A hand cancel of a job that started,
-    # and a time limit, still post. The jobs GET is retried; a cancellation it
-    # still cannot classify posts, and the embed says so.
+    # Scheduled runs alert only when scheduled, since whoever dispatched one
+    # is already watching it, and alert when cancelled too: a job that runs
+    # past its timeout ends `cancelled`, not `timed_out`, and any other
+    # cancellation still leaves the scheduled check undone. Release and Check alert however they ran:
+    # they follow the queue's pushes to main, which nobody watches. So does
+    # Dart release, which a tag push starts with nobody watching. Check's
+    # cancellations are excluded, since a newer push supersedes a run as a
+    # matter of course. The releases' are not: no push cancels one (Release
+    # queues, Dart release has no group), so a cancelled release is a hung
+    # publish killed at its time limit, or a hand cancel. Queue failures stay
+    # on the PR and go to the queue watcher and fixer.
     if: >-
       (github.event.workflow_run.event == 'schedule' &&
       contains(fromJSON('["failure", "timed_out", "cancelled"]'), github.event.workflow_run.conclusion)) ||
-      (contains(fromJSON('["failure", "timed_out", "cancelled"]'), github.event.workflow_run.conclusion) &&
+      (contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion) &&
+      contains(fromJSON('["Release", "Check", "Dart release"]'), github.event.workflow_run.name)) ||
+      (github.event.workflow_run.conclusion == 'cancelled' &&
       contains(fromJSON('["Release", "Dart release"]'), github.event.workflow_run.name))
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -71,9 +70,6 @@ jobs:
       - name: Post to Discord
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          GITHUB_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
-          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           RUN_REPO: ${{ github.repository }}
           RUN_NAME: ${{ github.event.workflow_run.name }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
