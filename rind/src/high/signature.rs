@@ -151,7 +151,7 @@ fn signed_digest(digest: &Digest) -> Result<&[u8], Error> {
     }
 }
 
-/// A private key encoded as PKCS#8 DER, wiped on drop under the `wipe` feature.
+/// A private key encoded as PKCS#8 DER, wiped on drop.
 pub struct Pkcs8(pub(super) Buffer<MAX_PKCS8_LEN>);
 
 impl AsRef<[u8]> for Pkcs8 {
@@ -189,7 +189,7 @@ impl fmt::Debug for Spki {
 }
 
 /// An ECDSA private key encoded as a SEC1 (RFC 5915) `ECPrivateKey` in
-/// DER, wiped on drop under the `wipe` feature.
+/// DER, wiped on drop.
 pub struct Sec1(Buffer<{ sec1::MAX_LEN }>);
 
 impl AsRef<[u8]> for Sec1 {

@@ -24,4 +24,3 @@ export CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true
 # big-endian build.
 cargo clippy "${packages[@]}" --locked --release --target "$target" --all-targets -- --deny warnings
 cargo test "${packages[@]}" --locked --release --target "$target"
-cargo test -p rind --features wipe --test zeroing --test heap_scratch --locked --release --target "$target"

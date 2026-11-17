@@ -13,11 +13,11 @@ use crate::encoding::{AsDer, Pkcs8V1Der, PublicKeyX509Der};
 use crate::error::{KeyRejected, Unspecified, unspecified};
 use crate::signature::{KeyPair, ParsedKey, private, verification_algorithm};
 use crate::wipe::Wiped;
-use crate::{Hex, der, pkcs8};
+use crate::{Hex, pkcs8};
 
 /// An ML-DSA parameter set.
 #[allow(non_camel_case_types)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub(crate) enum AlgorithmID {
     ML_DSA_44,
     ML_DSA_65,
@@ -59,38 +59,6 @@ impl AlgorithmID {
         }
     }
 
-    /// The object identifier's contents, without its tag and length.
-    fn oid(self) -> [u8; 9] {
-        [
-            0x60,
-            0x86,
-            0x48,
-            0x01,
-            0x65,
-            0x03,
-            0x04,
-            0x03,
-            self.oid_last(),
-        ]
-    }
-
-    /// The parameter set whose expanded private key is `len` bytes.
-    /// aws-lc-rs selects it from the length before checking the caller's
-    /// algorithm (`parse_raw_private_key` in aws-lc-rs 1.19.0
-    /// `aws-lc-rs/src/evp_pkey.rs`).
-    fn from_raw_len(len: usize) -> Option<Self> {
-        [Self::ML_DSA_44, Self::ML_DSA_65, Self::ML_DSA_87]
-            .into_iter()
-            .find(|id| id.private_key_len() == len)
-    }
-
-    /// The parameter set whose object identifier's contents are `oid`.
-    fn from_oid(oid: &[u8]) -> Option<Self> {
-        [Self::ML_DSA_44, Self::ML_DSA_65, Self::ML_DSA_87]
-            .into_iter()
-            .find(|id| id.oid().as_slice() == oid)
-    }
-
     /// Parses FIPS 204's encoding of a public key of this parameter set.
     fn parse_raw(&self, bytes: &[u8]) -> Result<ParsedKey, rind::Error> {
         Ok(match self {
@@ -121,18 +89,11 @@ pub struct PqdsaVerificationAlgorithm {
 
 impl private::Verify for PqdsaVerificationAlgorithm {
     fn parse(&self, public_key: &[u8]) -> Result<ParsedKey, KeyRejected> {
-        // aws-lc-rs tries a SubjectPublicKeyInfo, then the raw key
-        // (`parse_pqdsa_public_key` in aws-lc-rs 1.19.0 `aws-lc-rs/src/pqdsa.rs`).
-        // A raw key of another length is `Unspecified`
-        // (`parse_raw_public_key` in `aws-lc-rs/src/evp_pkey.rs`), and
-        // `Result::or` keeps that error in place of the SPKI failure.
-        if let Ok(key) = self.id.parse_spki(public_key) {
-            return Ok(key);
+        match public_key.len() == self.id.public_key_len() {
+            true => self.id.parse_raw(public_key),
+            false => self.id.parse_spki(public_key),
         }
-        if public_key.len() == self.id.public_key_len() {
-            return self.id.parse_raw(public_key).map_err(KeyRejected::rind);
-        }
-        Err(KeyRejected::unspecified())
+        .map_err(KeyRejected::rind)
     }
 
     fn verify_parsed(
@@ -250,28 +211,8 @@ impl PqdsaKeyPair {
         algorithm: &'static PqdsaSigningAlgorithm,
         pkcs8: &[u8],
     ) -> Result<Self, KeyRejected> {
-        // The algorithm identifier is public, so it picks the refusal before
-        // any key is expanded. Only the parameter set it names is parsed.
-        // aws-lc-rs 1.19.0 `parse_rfc5208_private_key` (`aws-lc-rs/src/evp_pkey.rs`)
-        // returns `InvalidEncoding` when `EVP_parse_private_key` fails and
-        // `WrongAlgorithm` when the parsed key is not PQDSA. A parsed ML-DSA
-        // key of another parameter set then fails `validate_pqdsa_evp_key`
-        // (`aws-lc-rs/src/pqdsa.rs`) as `Unspecified`.
-        let named = der::pkcs8_algorithm(pkcs8).map(AlgorithmID::from_oid);
-        match named {
-            Some(Some(id)) if algorithm.0.id != &id => Err(other_parameter_set(&id, pkcs8)),
-            Some(None) => {
-                if parses_as_other_private_key(pkcs8) {
-                    Err(KeyRejected::wrong_algorithm())
-                } else {
-                    Err(KeyRejected::invalid_encoding())
-                }
-            }
-            Some(Some(_)) | None => {
-                let key = new_key!(algorithm.0.id, from_pkcs8(pkcs8)).map_err(KeyRejected::rind)?;
-                Ok(Self::new(algorithm, key))
-            }
-        }
+        let key = new_key!(algorithm.0.id, from_pkcs8(pkcs8)).map_err(KeyRejected::rind)?;
+        Ok(Self::new(algorithm, key))
     }
 
     /// Loads FIPS 204's expanded private key. The key pair then has no seed,
@@ -280,24 +221,14 @@ impl PqdsaKeyPair {
         algorithm: &'static PqdsaSigningAlgorithm,
         raw_private_key: &[u8],
     ) -> Result<Self, KeyRejected> {
-        // aws-lc-rs picks the parameter set from the length, then refuses a
-        // key of another set as `Unspecified` (`validate_pqdsa_evp_key`).
-        // The length is public, so that refusal comes before the key is
-        // expanded. Any other length is `InvalidEncoding`.
-        let Some(id) = AlgorithmID::from_raw_len(raw_private_key.len()) else {
+        let id = algorithm.0.id;
+        if raw_private_key.len() != id.private_key_len() {
             return Err(KeyRejected::invalid_encoding());
-        };
-        if algorithm.0.id != &id {
-            return Err(KeyRejected::unspecified());
         }
         // rind loads an expanded key only as PKCS#8 (RFC 9881's
-        // `expandedKey`), so wrap it in one. aws-lc-rs 1.19.0
-        // `parse_raw_private_key` (`aws-lc-rs/src/evp_pkey.rs`) maps every
-        // failure of `EVP_PKEY_pqdsa_new_raw_private_key` at this length to
-        // `InvalidEncoding`.
-        let pkcs8 = expanded_pkcs8(&id, raw_private_key);
-        let key = new_key!(&id, from_pkcs8(&pkcs8)).map_err(|_| KeyRejected::invalid_encoding())?;
-        Ok(Self::new(algorithm, key))
+        // `expandedKey`), so wrap it in one.
+        let pkcs8 = expanded_pkcs8(id, raw_private_key);
+        Self::from_pkcs8(algorithm, &pkcs8)
     }
 
     /// Expands a 32-byte seed into its key pair, as FIPS 204's key
@@ -426,8 +357,8 @@ impl fmt::Debug for PqdsaPrivateKey<'_> {
     }
 }
 
-/// An ML-DSA key pair's public key, FIPS 204's encoding; wiped on drop under
-/// the `wipe` feature, as the key pair is.
+/// An ML-DSA key pair's public key, FIPS 204's encoding; wiped on drop, as
+/// the key pair is.
 #[derive(Clone)]
 pub struct PqdsaPublicKey {
     id: &'static AlgorithmID,
@@ -452,110 +383,5 @@ impl fmt::Debug for PqdsaPublicKey {
         f.write_str("PqdsaPublicKey(")?;
         fmt::Debug::fmt(&Hex(self.as_ref()), f)?;
         f.write_str(")")
-    }
-}
-
-/// Refuses a PKCS#8 key whose algorithm is another ML-DSA parameter set.
-///
-/// A seed-form key is decided from public lengths. aws-lc's
-/// `pqdsa_priv_decode` (`crypto/evp_extra/p_pqdsa_asn1.c`) rejects any seed
-/// other than 32 bytes before keygen, and keygen accepts every 32-byte seed,
-/// so the parameter-set check is then `Unspecified` with no expansion. An
-/// expanded key still runs the consistency check: `pk_from_sk` rejects an
-/// inconsistent key, which is `InvalidEncoding`, and accepts a consistent
-/// one, which is then `Unspecified`. A byte after the document is refused
-/// here; the README lists that.
-fn other_parameter_set(id: &AlgorithmID, pkcs8: &[u8]) -> KeyRejected {
-    if der::pkcs8_trailing(pkcs8) {
-        return KeyRejected::invalid_encoding();
-    }
-    if let Some(parts) = der::pkcs8_parts(pkcs8) {
-        if !parts.parameters.is_empty() {
-            return KeyRejected::invalid_encoding();
-        }
-        if let Some((0x80, seed)) = der::first_element(parts.private_key) {
-            return if seed.len() == 32 {
-                KeyRejected::unspecified()
-            } else {
-                KeyRejected::invalid_encoding()
-            };
-        }
-    }
-    match new_key!(id, from_pkcs8(pkcs8)) {
-        Ok(_) => KeyRejected::unspecified(),
-        Err(err) => KeyRejected::rind(err),
-    }
-}
-
-/// Whether `pkcs8` is a private key of a type aws-lc-rs parses that is not
-/// ML-DSA. The OID is public; only the parser for that OID runs, and only a
-/// successful parse is `WrongAlgorithm`, as `parse_rfc5208_private_key` does
-/// (aws-lc-rs 1.19.0 `aws-lc-rs/src/evp_pkey.rs`). A curve or parameter set
-/// rind does not implement still parses in aws-lc; the README lists those.
-fn parses_as_other_private_key(pkcs8: &[u8]) -> bool {
-    let Some(oid) = der::pkcs8_algorithm(pkcs8) else {
-        return false;
-    };
-    match oid {
-        // RFC 8410 Ed25519.
-        [0x2b, 0x65, 0x70] => rind::ed25519::KeyPair::from_pkcs8(pkcs8).is_ok(),
-        // RFC 8410 X25519.
-        [0x2b, 0x65, 0x6e] => {
-            rind::agreement::PrivateKey::from_pkcs8(&rind::agreement::X25519, pkcs8).is_ok()
-        }
-        // RFC 5480 `id-ecPublicKey`. The curve is in the parameters. A curve
-        // rind does not implement, such as secp256k1, fails these parsers.
-        [0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01] => {
-            use rind::ecdsa::sign::{P256_SHA256_ASN1, P384_SHA384_ASN1, P521_SHA512_ASN1};
-            [&P256_SHA256_ASN1, &P384_SHA384_ASN1, &P521_SHA512_ASN1]
-                .into_iter()
-                .any(|algorithm| rind::ecdsa::KeyPair::from_pkcs8(algorithm, pkcs8).is_ok())
-        }
-        // RFC 8017 `rsaEncryption`, RFC 4055 `id-RSAES-OAEP`, and X.509's
-        // `id-ea-rsa`. aws-lc decodes each with the RSA private-key parser,
-        // which requires NULL parameters.
-        [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01]
-        | [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x07]
-        | [0x55, 0x08, 0x01, 0x01] => rind::rsa::KeyPair::from_pkcs8(pkcs8).is_ok(),
-        // RFC 4055 `id-RSASSA-PSS`. Absent parameters, or an empty parameter
-        // sequence, take the defaults. Explicit hash or mask parameters are
-        // `InvalidEncoding` here; the README lists that.
-        [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a] => rsa_pss_private_key(pkcs8),
-        // RFC 9935 ML-KEM. The seed is 64 bytes and the expanded key has the
-        // parameter set's length. aws-lc accepts either encoding at that
-        // length and does not check the bytes further.
-        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x01] => ml_kem_private_key(pkcs8, 1632),
-        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x02] => ml_kem_private_key(pkcs8, 2400),
-        [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x03] => ml_kem_private_key(pkcs8, 3168),
-        // DSA, and an `id-ecPublicKey` curve rind does not implement, are not
-        // recognized. aws-lc parses those keys; the README lists the difference.
-        _ => false,
-    }
-}
-
-/// An RSASSA-PSS private key whose parameters are absent or an empty
-/// `RSASSA-PSS-params`, and whose private key is a PKCS#1 RSA key.
-fn rsa_pss_private_key(pkcs8: &[u8]) -> bool {
-    let Some(parts) = der::pkcs8_parts(pkcs8) else {
-        return false;
-    };
-    let defaults = parts.parameters.is_empty() || parts.parameters == [0x30, 0x00];
-    defaults && rind::rsa::KeyPair::from_pkcs1(parts.private_key).is_ok()
-}
-
-/// An ML-KEM private key in RFC 9935's seed form or expanded form.
-fn ml_kem_private_key(pkcs8: &[u8], expanded_len: usize) -> bool {
-    let Some(parts) = der::pkcs8_parts(pkcs8) else {
-        return false;
-    };
-    if !parts.parameters.is_empty() {
-        return false;
-    }
-    // aws-lc reads one inner value and does not require it to end the
-    // private key.
-    match der::first_element(parts.private_key) {
-        Some((0x80, seed)) => seed.len() == 64,
-        Some((0x04, expanded)) => expanded.len() == expanded_len,
-        _ => false,
     }
 }
