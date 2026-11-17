@@ -20,21 +20,10 @@ use crate::mid::sha2::Sha512Context;
 /// validation verdict: infinity is refused as a small-order point.
 pub(crate) fn hash_to_curve(msg: &[u8], dst: &[u8]) -> Result<PublicKey, Error> {
     let _entry = low::Entry::new_secret();
-    public_key(hash_to_curve::hash_to_curve::<FieldElement, Sha512Context>(
-        msg, dst,
-    )?)
-}
-
-fn public_key(point: [FieldElement; 3]) -> Result<PublicKey, Error> {
+    let point = hash_to_curve::hash_to_curve::<FieldElement, Sha512Context>(msg, dst)?;
     hash_to_curve::finite_public_key(point, |point| PublicKey {
         point: jacobian(point).as_affine(),
     })
-}
-
-/// Converts an opposite-point sum for the OPRF boundary tests.
-#[cfg(test)]
-pub(crate) fn hash_to_infinity(_msg: &[u8], _dst: &[u8]) -> Result<PublicKey, Error> {
-    public_key(hash_to_curve::tests::opposite_sum::<FieldElement>())
 }
 
 /// Hashes `msg` to a scalar mod n, by RFC 9380's `hash_to_field` over
@@ -178,7 +167,9 @@ mod tests {
 
     #[test]
     fn opposite_points_are_refused() {
-        tests::refuses_opposite_sum::<FieldElement>(|point| public_key(point).map(|_| ()));
+        tests::refuses_opposite_sum::<FieldElement, Sha512Context>(|msg, dst| {
+            hash_to_curve(msg, dst).map(|_| ())
+        });
     }
 
     #[test]

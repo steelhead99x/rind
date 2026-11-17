@@ -215,6 +215,11 @@ pub(crate) fn hash_to_curve<C: Curve, H: Xmd>(msg: &[u8], dst: &[u8]) -> Result<
     let (u0, u1) = uniform.split_at(C::L);
     let q0 = map_to_curve(&C::from_wide(u0));
     let q1 = map_to_curve(&C::from_wide(u1));
+    #[cfg(test)]
+    let q1 = match crate::test::OppositeHashes::held() {
+        true => [q0[0], q0[1].neg(), q0[2]],
+        false => q1,
+    };
     Ok(sum(&q0, &q1))
 }
 
@@ -483,22 +488,20 @@ pub(crate) mod tests {
         assert_eq!(file.vectors.len(), 5);
     }
 
-    /// An actual sum at infinity, without needing a hash preimage for it.
-    /// Its coordinates stay secret through the wrappers' validation.
-    pub(crate) fn opposite_sum<C: Curve>() -> [C; 3] {
-        let q = low::ct::into_secret(map_to_curve(&C::from_wide(&[7; MAX_L][..C::L])));
-        let neg = [q[0], q[1].neg(), q[2]];
-        sum(&q, &neg)
-    }
-
-    /// `public_key` refuses an opposite-point sum, whose `Z` is zero.
-    pub(crate) fn refuses_opposite_sum<C: Curve>(
-        public_key: impl FnOnce([C; 3]) -> Result<(), Error>,
+    /// The curve wrapper `hash` refuses a secret message whose map outputs
+    /// are forced opposite, as their sum is infinity.
+    pub(crate) fn refuses_opposite_sum<C: Curve, H: Xmd>(
+        hash: impl FnOnce(&[u8], &[u8]) -> Result<(), Error>,
     ) {
         let _entry = low::Entry::new_secret();
-        let point = opposite_sum::<C>();
+        let _opposite = crate::test::OppositeHashes::new();
+        let msg = low::ct::into_secret(*b"password");
+        let point = hash_to_curve::<C, H>(&msg, b"QUUX-V01-CS02").unwrap();
         assert!(low::ct::into_public(point[2].ct_eq(&C::ZERO)));
-        assert_eq!(public_key(point), Err(KeyFormatError::SmallOrder.into()));
+        assert_eq!(
+            hash(&msg, b"QUUX-V01-CS02"),
+            Err(KeyFormatError::SmallOrder.into())
+        );
     }
 
     /// The curve wrapper, with the message secret, so a branch on `Z` is

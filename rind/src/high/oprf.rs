@@ -274,21 +274,8 @@ fn not_identity(element: ristretto255::Element) -> Option<ristretto255::Element>
 }
 
 /// A NIST curve's group and its suite's hash, over `mid`'s curve.
-///
-/// The five-argument form hashes with `$curve::hash_to_curve::hash_to_curve`.
-/// Tests pass a sixth argument to inject an opposite-point sum instead.
 macro_rules! nist_group {
     ($group:ident, $curve:ident, $hash:ty, $name:literal, $suite:ident) => {
-        nist_group!(
-            $group,
-            $curve,
-            $hash,
-            $name,
-            $suite,
-            $curve::hash_to_curve::hash_to_curve
-        );
-    };
-    ($group:ident, $curve:ident, $hash:ty, $name:literal, $suite:ident, $hash_to_curve:path) => {
         #[derive(Clone, Copy)]
         struct $group;
 
@@ -308,7 +295,7 @@ macro_rules! nist_group {
             /// The point at infinity, which no input is known to reach, is
             /// refused as a small-order point.
             fn hash_to_group(input: &[u8], dst: &[u8]) -> Result<Self::Element, Error> {
-                $hash_to_curve(input, dst).map(Into::into)
+                $curve::hash_to_curve::hash_to_curve(input, dst).map(Into::into)
             }
 
             fn hash_to_scalar(msg: &[&[u8]], dst: &[u8]) -> Result<Self::Scalar, Error> {

@@ -236,6 +236,33 @@ pub(crate) mod bignum;
 mod binsec;
 pub(crate) mod file_test;
 
+std::thread_local! {
+    static OPPOSITE_HASHES: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// While held, this thread's hashes to a group add their first map output
+/// to its own negation, so the real sum and the identity refusal after it
+/// run on an opposite pair, which no known message reaches.
+pub(crate) struct OppositeHashes(());
+
+impl OppositeHashes {
+    pub(crate) fn new() -> Self {
+        OPPOSITE_HASHES.set(true);
+        Self(())
+    }
+
+    /// Whether one is held on this thread.
+    pub(crate) fn held() -> bool {
+        OPPOSITE_HASHES.get()
+    }
+}
+
+impl Drop for OppositeHashes {
+    fn drop(&mut self) {
+        OPPOSITE_HASHES.set(false);
+    }
+}
+
 /// Messages and domain separation tags for crosschecking hashes to a curve:
 /// empty, short, and random messages, with tags of one byte, 255 bytes, and
 /// 256 bytes, the shortest RFC 9380 hashes down.
