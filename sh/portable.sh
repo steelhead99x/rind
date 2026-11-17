@@ -28,7 +28,9 @@ export CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true
 SLOW_TESTS=1 cargo test "${packages[@]}" --locked --release --target "$target"
 # wasm runs on 32-bit limbs and generates only RSA-2048 keys, so every size's
 # key generation is wipe-checked here on those limbs, with the checks above.
-# Its own target directory keeps this cfg from rebuilding the tree above.
+# Its own target directory keeps this cfg from rebuilding the tree above, at
+# the price of one cold build of the test's dependencies, about three minutes:
+# CI keeps no cargo cache for this job, so every run pays it.
 CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/rind-limb32" \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS --cfg rind_limb=\"32\"" \
     SLOW_TESTS=1 cargo test -p rind --test heap_scratch --locked --release --target "$target" -- rsa_generate

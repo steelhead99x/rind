@@ -1,1 +1,3 @@
 quest/** merge=quest
+# The CCTV verdicts parser expects LF; a CRLF checkout would leave `accept\r`.
+rind/tests/cctv/*.txt text eol=lf
