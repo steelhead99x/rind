@@ -1,0 +1,28 @@
+---
+// A code block with a button that copies it.
+import CopyButton from "./CopyButton.svelte";
+
+interface Props {
+	code: string;
+	lang: string;
+}
+const { code, lang } = Astro.props;
+---
+
+<div class="code">
+	<pre><code data-lang={lang || undefined}>{code}</code></pre>
+	<CopyButton client:only="svelte" text={code} />
+</div>
+
+<style>
+	.code {
+		position: relative;
+	}
+	pre {
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: 0.75rem;
+		padding: 1rem 6rem 1rem 1.25rem;
+		overflow-x: auto;
+	}
+</style>

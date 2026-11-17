@@ -22,7 +22,7 @@ set -e
 # Valgrind (through 3.27) decodes no AVX-512, VAES, VPCLMULQDQ, or SHA
 # instruction and hides them from `cpuid`, so rind's AES-GCM on VAES, SHA-1
 # and SHA-256 on the SHA extensions, SHA-384 and SHA-512 on the SHA512
-# instructions, and AVX-512 ML-KEM and RSA go unchecked here. `admin/ct-sde` checks them under Intel SDE, all but ML-KEM, whose
+# instructions, and AVX-512 ML-KEM, RSA, and ChaCha20 go unchecked here. `admin/ct-sde` checks them under Intel SDE, all but ML-KEM, whose
 # AVX-512 code samples only the public matrix.
 # See UPSTREAM.md, "Valgrind cannot run x86_64's newest extensions".
 #
@@ -34,8 +34,14 @@ set -e
 #
 # Release builds keep line tables so memcheck names inlined frames, which
 # the suppressions match.
+#
+# On ARM, an unwind that stops within three frames scans the stack for
+# return addresses, so a suppression still sees the caller of a std function
+# whose unwind entry valgrind cannot read. Other architectures ignore it.
+# See UPSTREAM.md, "Valgrind cannot unwind std's frame-pointer entries on
+# armv7".
 self="$(cd "$(dirname "$0")" && pwd)/ctgrind"
-valgrind="valgrind --error-exitcode=99 --suppressions=$(dirname "$self")/ctgrind.supp"
+valgrind="valgrind --error-exitcode=99 --unw-stack-scan-thresh=3 --suppressions=$(dirname "$self")/ctgrind.supp"
 
 # Cargo runs each test binary through this script. `--track-origins=yes`
 # roughly doubles memcheck's cost, so only a binary memcheck failed reruns
