@@ -762,7 +762,7 @@ graviola isn't timed on `ovh-sea`: it requires ADX, which this CPU lacks.
 
 ## Build cost
 
-A cold `cargo build --release` of a minimal binary per library (AES-128-GCM, SHA-256, ECDSA P-256, and X25519) and of a rustls client per provider, by `admin/build-cost`: the median of three builds with an empty target directory and a warm download cache, their CPU time, the stripped binary's size, the build tools it needs beyond rustc and a linker, and the crates it compiles. The system OpenSSL build leaves the library itself out of its size; the vendored build is the static figure.
+A cold `cargo build --release` of a minimal binary per library (AES-128-GCM, SHA-256, ECDSA P-256, and X25519) and of a rustls client per provider, by `admin/build-cost`: the median of three builds with an empty target directory and a warm download cache, their CPU time, the stripped binary's size, the build tools it needs beyond rustc and a linker, and the crates it compiles. The system OpenSSL build leaves the library itself out of its size; the vendored build is the static figure. verified-garbage has no P-256 key generation, so its binary imports a random scalar instead, and no rustls provider, so it has no rustls build.
 
 ### `nixos`
 
@@ -858,13 +858,13 @@ Measured 2026-11-06 at [`6b185382`](https://github.com/kixel-ai/rind/commit/6b18
 
 ## CPU tiers
 
-GitHub's runners, timed by the weekly `bench` workflow with CPU features denied as `bench.yml` describes: x86_64 runs every feature, its name suffixed with the AES-GCM tier the runner drew (AVX-512 or VAES AVX2); no IFMA denies AVX-512 IFMA, and no AVX-512 all of AVX-512 but VAES and VPCLMULQDQ; from no ADX, each column denies more (no ADX: ADX and AVX-512 IFMA; no AVX2: also AVX2, BMI2, SHA-NI, AVX-512, VAES, and VPCLMULQDQ; no AVX: also AVX; no AES-NI: also AES-NI, PCLMULQDQ, and SSE4.1; SSE2: also SSSE3). aarch64 runs with the crypto extension, no SHA-3 without the SHA-512 and SHA-3 instructions, no crypto without any of them, armv7 in 32-bit mode on the same core, and armv7 NEON there without the crypto extension. portable times rind's portable backend, forced with `--cfg rind_portable`, against aws-lc's C built without assembly; ring has no such build, so it sits that column out. Each cell is rind's time over the fastest of aws-lc-rs and ring (aws-lc-rs alone where a feature is denied, since ring can't be denied one), in the row's benchmark where rind trails most. An empty cell runs the same code as the one to its left, so it isn't timed.
+GitHub's runners, timed by the weekly `bench` workflow with CPU features denied as `bench.yml` describes: x86_64 runs every feature, its name suffixed with the AES-GCM tier the runner drew (AVX-512 or VAES AVX2); no IFMA denies AVX-512 IFMA, and no AVX-512 all of AVX-512 but VAES and VPCLMULQDQ; from no ADX, each column denies more (no ADX: ADX and AVX-512 IFMA; no AVX2: also AVX2, BMI2, SHA-NI, AVX-512, VAES, and VPCLMULQDQ; no AVX: also AVX; no AES-NI: also AES-NI, PCLMULQDQ, and SSE4.1; SSE2: also SSSE3). aarch64 runs with the crypto extension, no SHA-3 without the SHA-512 and SHA-3 instructions, no crypto without any of them, armv7 in 32-bit mode on the same core, and armv7 NEON there without the crypto extension. portable times rind's portable backend, forced with `--cfg rind_portable`, against aws-lc's C built without assembly; ring has no such build, and verified-garbage runs its assembly there, so both sit that column out. Each cell is rind's time over the fastest of aws-lc-rs, ring, and verified-garbage (without ring where a feature is denied, since ring can't be denied one), in the row's benchmark where rind trails most. A cell verified-garbage wins gets a quest that switches rind to its proven code, not an entry under Known gaps. An empty cell runs the same code as the one to its left, so it isn't timed.
 
 From [run 42734638175](https://github.com/kixel-ai/rind/actions/runs/42734638175), 2026-11-10 at [`3585c47b`](https://github.com/kixel-ai/rind/commit/3585c47bd13bb28d90701a033657a3d38d6a0d55), on AMD EPYC 7763 64-Core Processor, AMD EPYC 9V45 96-Core Processor, AMD EPYC 9V74 80-Core Processor, Neoverse-N2.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/tiers-dark.svg">
-  <img alt="rind's time over the fastest of aws-lc-rs and ring, by CPU tier" src="benchmarks/tiers.svg">
+  <img alt="rind's time over the fastest of aws-lc-rs, ring, and verified-garbage, by CPU tier" src="benchmarks/tiers.svg">
 </picture>
 
 <details>
