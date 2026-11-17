@@ -189,7 +189,7 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 ### cargo-mutants misses compound `cfg(test)`s
 
-- **Breaks:** cargo-mutants skips code under a bare `#[cfg(test)]`, but not under one that also names an architecture, such as `cfg(all(test, rind_backend = "x86_64"))`, so it mutates test helpers.
+- **Breaks:** cargo-mutants skips code under a bare `#[cfg(test)]`, but not under one that also names an architecture or another cfg, such as `cfg(all(test, rind_backend = "x86_64"))` or the SHA-512 layout probe's `cfg(any(test, rind_sha512_load_probe))`, so it mutates test helpers.
 - **Workaround:** `.cargo/mutants.toml` excludes `rind/src/low/tests.rs` by glob and `\btests::` by regex.
 - **Reported:** no.
 - **Goes when:** cargo-mutants treats any `cfg` that requires `test` as test-only.

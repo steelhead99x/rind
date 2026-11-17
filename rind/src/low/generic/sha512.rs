@@ -412,42 +412,75 @@ static K: [u64; 80] = [
     0x6c44198c4a475817,
 ];
 
-/// Compares every message word with `from_be_bytes`.
-///
-/// Returns 0 when every word matches, including blocks at byte offsets 1
-/// and 3. Any other value is `0x0100_0000 | (start << 8) | byte` for the
-/// first mismatch. On Xtensa `message_word` is the `l32i` / `ssai` / `src`
-/// load, so `admin/esp32s3-sha512-layout` runs this under QEMU. Host tests
-/// take `from_be_bytes`.
+// Also compiled for the layout probe, which links its exports. A `tests`
+// module, so cargo-mutants skips it under this compound `cfg`: see
+// UPSTREAM.md, "cargo-mutants misses compound `cfg(test)`s".
 #[cfg(any(test, rind_sha512_load_probe))]
-fn message_load_failures() -> u32 {
-    // Uninitialized so the probe does not call `memset`. Every byte is
-    // written before it is read.
-    let mut raw = [const { core::mem::MaybeUninit::<u8>::uninit() }; 160];
-    // SAFETY: `MaybeUninit<u8>` has the same layout as `u8`, and `raw`
-    // has 160 elements. The loop writes each one.
-    let base = raw.as_mut_ptr().cast::<u8>();
-    let mut i = 0usize;
-    while i < 160 {
-        // SAFETY: `i` stays below 160.
-        unsafe {
-            *base.add(i) = i.wrapping_mul(17).wrapping_add(3) as u8;
+mod tests {
+    use super::message_word;
+    #[cfg(test)]
+    use super::sha512_compress_blocks;
+
+    /// SHA-512's IV, FIPS 180-4 §5.3.5.
+    #[cfg(test)]
+    const IV: [u64; 8] = [
+        0x6a09e667f3bcc908,
+        0xbb67ae8584caa73b,
+        0x3c6ef372fe94f82b,
+        0xa54ff53a5f1d36f1,
+        0x510e527fade682d1,
+        0x9b05688c2b3e6c1f,
+        0x1f83d9abfb41bd6b,
+        0x5be0cd19137e2179,
+    ];
+
+    /// Compares every message word with `from_be_bytes`.
+    ///
+    /// Returns 0 when every word matches, including blocks at byte offsets 1
+    /// and 3. Any other value is `0x0100_0000 | (start << 8) | byte` for the
+    /// first mismatch. On Xtensa `message_word` is the `l32i` / `ssai` / `src`
+    /// load, so `admin/esp32s3-sha512-layout` runs this under QEMU. Host tests
+    /// take `from_be_bytes`.
+    fn message_load_failures() -> u32 {
+        // Uninitialized so the probe does not call `memset`. Every byte is
+        // written before it is read.
+        let mut raw = [const { core::mem::MaybeUninit::<u8>::uninit() }; 160];
+        // SAFETY: `MaybeUninit<u8>` has the same layout as `u8`, and `raw`
+        // has 160 elements. The loop writes each one.
+        let base = raw.as_mut_ptr().cast::<u8>();
+        let mut i = 0usize;
+        while i < 160 {
+            // SAFETY: `i` stays below 160.
+            unsafe {
+                *base.add(i) = i.wrapping_mul(17).wrapping_add(3) as u8;
+            }
+            i += 1;
         }
-        i += 1;
-    }
-    // SAFETY: the first eight bytes were written by the loop above.
-    unsafe {
-        *base = 0x00;
-        *base.add(1) = 0x01;
-        *base.add(2) = 0x02;
-        *base.add(3) = 0x03;
-        *base.add(4) = 0x04;
-        *base.add(5) = 0x05;
-        *base.add(6) = 0x06;
-        *base.add(7) = 0x07;
+        // SAFETY: the first eight bytes were written by the loop above.
+        unsafe {
+            *base = 0x00;
+            *base.add(1) = 0x01;
+            *base.add(2) = 0x02;
+            *base.add(3) = 0x03;
+            *base.add(4) = 0x04;
+            *base.add(5) = 0x05;
+            *base.add(6) = 0x06;
+            *base.add(7) = 0x07;
+        }
+
+        let fail = message_load_failures_at(base, 0);
+        if fail != 0 {
+            return fail;
+        }
+        let fail = message_load_failures_at(base, 1);
+        if fail != 0 {
+            return fail;
+        }
+        message_load_failures_at(base, 3)
     }
 
-    fn check_at(base: *const u8, start: usize) -> u32 {
+    // The block at byte `start` of the probe's buffer.
+    fn message_load_failures_at(base: *const u8, start: usize) -> u32 {
         // SAFETY: `start` is 0, 1, or 3, and `base` points at 160 written
         // bytes, so the 128 bytes at `start` are in range.
         let block = unsafe { &*base.add(start).cast::<[u8; 128]>() };
@@ -491,41 +524,15 @@ fn message_load_failures() -> u32 {
         0
     }
 
-    let fail = check_at(base, 0);
-    if fail != 0 {
-        return fail;
+    /// Entry the layout probe links and runs. Not a rind API.
+    #[cfg(rind_sha512_load_probe)]
+    #[unsafe(no_mangle)]
+    #[inline(never)]
+    pub extern "C" fn sha512_load_probe() -> u32 {
+        message_load_failures()
     }
-    let fail = check_at(base, 1);
-    if fail != 0 {
-        return fail;
-    }
-    check_at(base, 3)
-}
 
-/// Entry the layout probe links and runs. Not a rind API.
-#[cfg(rind_sha512_load_probe)]
-#[unsafe(no_mangle)]
-#[inline(never)]
-pub extern "C" fn sha512_load_probe() -> u32 {
-    message_load_failures()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::sha512_compress_blocks;
-
-    /// SHA-512's IV, FIPS 180-4 §5.3.5.
-    const IV: [u64; 8] = [
-        0x6a09e667f3bcc908,
-        0xbb67ae8584caa73b,
-        0x3c6ef372fe94f82b,
-        0xa54ff53a5f1d36f1,
-        0x510e527fade682d1,
-        0x9b05688c2b3e6c1f,
-        0x1f83d9abfb41bd6b,
-        0x5be0cd19137e2179,
-    ];
-
+    #[cfg(test)]
     fn padded(message: &[u8]) -> Vec<u8> {
         let bits = (message.len() as u128).checked_mul(8).unwrap();
         let (blocks, rest) = crate::low::split_tail::<128, 16>(message);
@@ -535,6 +542,7 @@ mod tests {
         padded
     }
 
+    #[cfg(test)]
     fn encode(state: [u64; 8]) -> [u8; 64] {
         let mut out = [0u8; 64];
         for (i, word) in state.iter().enumerate() {
@@ -543,6 +551,7 @@ mod tests {
         out
     }
 
+    #[cfg(test)]
     fn hash(message: &[u8]) -> [u8; 64] {
         let padded = padded(message);
         let mut state = IV;
@@ -554,6 +563,7 @@ mod tests {
         encode(crate::low::ct::into_public(state))
     }
 
+    #[cfg(test)]
     fn digest_hex(message: &[u8], hex_digest: &str) {
         let expected = hex::decode(hex_digest).unwrap();
         assert_eq!(hash(message).as_slice(), expected.as_slice());
@@ -598,7 +608,7 @@ mod tests {
     /// `from_be_bytes`.
     #[test]
     fn message_word_matches_from_be_bytes() {
-        let fail = super::message_load_failures();
+        let fail = message_load_failures();
         assert_eq!(fail, 0, "message load mismatch {fail:#x}");
     }
 
