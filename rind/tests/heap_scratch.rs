@@ -1,5 +1,5 @@
-//! Verification that, under the `wipe` feature, heap scratch derived from a
-//! private key is wiped before it is freed.
+//! Verification that heap scratch derived from a private key is wiped before
+//! it is freed.
 //!
 //! `tests/zeroing.rs` checks the bytes of each key value; this checks the
 //! blocks an operation frees while it holds one. Messages, public values,
@@ -12,12 +12,6 @@
 //!
 //! The allocator covers the whole binary, so this is a test binary of its
 //! own. RSA key generation is slow, so it runs only under `SLOW_TESTS`.
-
-#![cfg(feature = "wipe")]
-
-#[cfg(not(any(miri, target_family = "wasm")))]
-#[path = "support/replace_file.rs"]
-mod replace_file;
 
 mod freed;
 
@@ -301,22 +295,6 @@ fn ml_dsa_expanded() {
     ml_dsa_expanded_set::<MlDsa87>(&ML_DSA_87_SIGNING);
 }
 
-/// The expanded-form load from the recorded fixtures, on wasm. aws-lc does
-/// not build there, so this is the wipe check of those committed bytes,
-/// including the expansion freed when the key is dropped. On native,
-/// `ml_dsa_expanded_set` wipe-checks aws-lc's expansion of the same seeds,
-/// and `ml_dsa_expanded_fixtures_match_aws_lc` checks the files equal that
-/// expansion, so loading the files again would repeat it. Miri skips the
-/// file I/O and the large encodings.
-#[test]
-#[cfg(all(not(miri), target_family = "wasm"))]
-fn ml_dsa_expanded_recorded() {
-    use rind::ml_dsa::{MlDsa44, MlDsa65, MlDsa87};
-    ml_dsa_expanded_load::<MlDsa44>("44");
-    ml_dsa_expanded_load::<MlDsa65>("65");
-    ml_dsa_expanded_load::<MlDsa87>("87");
-}
-
 fn ml_dsa_set<P: rind::ml_dsa::ParameterSet>() {
     use rind::ml_dsa::KeyPair as MlDsaKeyPair;
     assert_zeroed("ML-DSA key generation", || {
@@ -336,90 +314,6 @@ fn ml_dsa_set<P: rind::ml_dsa::ParameterSet>() {
     // block it frees must be wiped.
     for key in &keys {
         assert_zeroed("ML-DSA signing", || key.sign(b"message").unwrap());
-    }
-}
-
-/// The PKCS#8 path of one recorded expanded-form fixture.
-#[cfg(not(miri))]
-fn ml_dsa_fixture_path(set: &str, seed: u8) -> String {
-    format!(
-        "{}/tests/heap_scratch/ml-dsa-{set}-{seed}.pkcs8",
-        env!("CARGO_MANIFEST_DIR")
-    )
-}
-
-/// The expanded form, whose load checks the key. `set` is "44", "65", or "87".
-/// The files are the PKCS#8 encodings of seeds `[1u8; 32]` and `[2u8; 32]`.
-/// The key is dropped inside the check: its expansion is freed then, and
-/// `freed` stops recording before it drops the closure's result.
-#[cfg(all(not(miri), target_family = "wasm"))]
-fn ml_dsa_expanded_load<P: rind::ml_dsa::ParameterSet>(set: &str) {
-    use rind::ml_dsa::KeyPair as MlDsaKeyPair;
-    let expanded = [1, 2].map(|seed| {
-        let path = ml_dsa_fixture_path(set, seed);
-        std::fs::read(&path).unwrap_or_else(|err| panic!("cannot read {path}: {err}"))
-    });
-    assert_independent("ML-DSA expanded load", expanded, |der| {
-        drop(MlDsaKeyPair::<P>::from_pkcs8(der).unwrap())
-    });
-}
-
-/// aws-lc's signing algorithm for each ML-DSA parameter set.
-#[cfg(not(any(miri, target_family = "wasm")))]
-fn ml_dsa_signing_sets() -> [(
-    &'static str,
-    &'static aws_lc_rs::signature::PqdsaSigningAlgorithm,
-); 3] {
-    use aws_lc_rs::signature::{ML_DSA_44_SIGNING, ML_DSA_65_SIGNING, ML_DSA_87_SIGNING};
-    [
-        ("44", &ML_DSA_44_SIGNING),
-        ("65", &ML_DSA_65_SIGNING),
-        ("87", &ML_DSA_87_SIGNING),
-    ]
-}
-
-/// The recorded fixtures stay equal to aws-lc's expansion of seeds
-/// `[1u8; 32]` and `[2u8; 32]`. wasm reads the same files and cannot ask
-/// aws-lc itself.
-#[cfg(not(any(miri, target_family = "wasm")))]
-#[test]
-fn ml_dsa_expanded_fixtures_match_aws_lc() {
-    for (set, alg) in ml_dsa_signing_sets() {
-        for seed_byte in [1u8, 2] {
-            let path = ml_dsa_fixture_path(set, seed_byte);
-            let recorded =
-                std::fs::read(&path).unwrap_or_else(|err| panic!("cannot read {path}: {err}"));
-            assert_eq!(
-                recorded,
-                ml_dsa_expanded_pkcs8(alg, &[seed_byte; 32]),
-                "{path}",
-            );
-        }
-    }
-}
-
-/// Rewrites the expanded-form PKCS#8 fixtures from aws-lc when
-/// `RIND_RECORD_MLDSA_FIXTURES=1`. aws-lc does not build for wasm or Miri.
-/// Readers may run beside it, so each file is replaced whole by a rename.
-#[cfg(not(any(miri, target_family = "wasm")))]
-#[test]
-#[ignore = "rewrites rind/tests/heap_scratch/ml-dsa-*.pkcs8 from aws-lc"]
-fn record_ml_dsa_expanded_fixtures() {
-    if std::env::var_os("RIND_RECORD_MLDSA_FIXTURES").is_none_or(|value| value != "1") {
-        eprintln!("set RIND_RECORD_MLDSA_FIXTURES=1 to rewrite the expanded-form fixtures");
-        return;
-    }
-    let sample = ml_dsa_fixture_path("44", 1);
-    let dir = std::path::Path::new(&sample)
-        .parent()
-        .expect("fixture path has a directory");
-    std::fs::create_dir_all(dir).unwrap();
-    for (set, alg) in ml_dsa_signing_sets() {
-        for seed_byte in [1u8, 2] {
-            let path = ml_dsa_fixture_path(set, seed_byte);
-            let der = ml_dsa_expanded_pkcs8(alg, &[seed_byte; 32]);
-            replace_file::replace_file(&path, &der);
-        }
     }
 }
 

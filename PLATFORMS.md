@@ -92,7 +92,7 @@ qemu. iOS devices' code is only built.
   ARMv5TE, on `powerpc64le` and big-endian `powerpc64` and `powerpc` Linux,
   and on `x86_64`,
   where `--cfg rind_portable` forces it. `just ci` also compiles the library
-  for `wasm32-wasip2` and `wasm32-unknown-unknown`, with and without `wipe`,
+  for `wasm32-wasip2` and `wasm32-unknown-unknown`
   when a change touches rind, the workspace manifest or lockfile, or the
   flake, and `just gate` always does. It compiles every published adapter
   for both, and rind-rustls's and rind-ring's tests for `wasm32-wasip2`, when
@@ -103,21 +103,13 @@ qemu. iOS devices' code is only built.
   adapters' upstreams need what they need with any backend, which
   [admin/wasm-fixture](admin/wasm-fixture/Cargo.toml) adds: rustls's clock
   (`rustls-pki-types/web`) and the random sources of jsonwebtoken and str0m.
-  `just ci`'s cross lane clippy-checks the wasm tests and, on Linux, runs
-  `cctv` and `heap_scratch` on `wasm32-wasip2` under wasmtime, and
-  wipe-checks RSA-3072 and RSA-4096 key generation on 32-bit limbs.
-  `just wasm` is that wasm run with `SLOW_TESTS=1`, plus rind-rustls's and
-  rind-ring's tests; the nightly `build.yml` runs it. aws-lc does not build
-  for wasm, so the live differential tests stay on `just portable`, and the
-  adapters' handshakes run rind against itself. Ed25519 CCTV verdicts are
-  compared with a file recorded from aws-lc.
-  `ReuseCache`'s threaded test does not run there: this target has no threads.
-  `wasm32-unknown-unknown` stays compile-only: its tests need a JavaScript
-  host. The pull-request gate checks that rind-ring's
-  `wasm32_unknown_unknown_js` resolves one getrandom, rind's, with `wasm_js`
-  on, so it selects getrandom's JavaScript backend.
-  Constant time is unchecked on wasm: ctgrind and the trace checks inspect
-  native code, and a wasm engine
+  The nightly `build.yml` runs rind's vector tests and rind-rustls's and
+  rind-ring's tests on `wasm32-wasip2` under wasmtime (`just wasm`), without
+  the differential tests, since aws-lc does not build for wasm: Ed25519's CCTV
+  vectors compare with verdicts recorded from aws-lc instead, and the adapters'
+  handshakes run rind against itself. `wasm32-unknown-unknown` stays
+  compile-only: its tests need a JavaScript host. Constant time is unchecked on
+  wasm: ctgrind and the trace checks inspect native code, and a wasm engine
   compiles rind again, so its JIT may turn a select into a branch.
   RSA and the NIST curves run on 64-bit limbs on 64-bit targets and on
   `wasm32` built with `-C target-feature=+wide-arithmetic` (stable from Rust

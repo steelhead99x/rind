@@ -21,7 +21,7 @@ run time. [MIGRATING.md][migrating] maps each ring and aws-lc-rs item to it.
   from `public_key()`, which encodes itself (`to_spki`).
 - Encodings, signatures, and shared secrets are owned values of fixed
   capacity, such as `encoding::Pkcs8`, rather than caller buffers or
-  allocations. Keys wipe their secrets on drop under the `wipe` feature, and
+  allocations. Keys wipe their secrets on drop, and
   their `Debug` shows only their algorithm.
 - No call takes a random source: rind draws from the system's when it needs
   one, and `rand::fill` gives callers the same.

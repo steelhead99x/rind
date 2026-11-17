@@ -3,21 +3,10 @@
 //! rejection vector in `src/high/ecdsa.rs`. A mismatch with
 //! `ed25519-verdicts.txt` fails the test.
 
-// Miri does not run this file (`cfg(not(miri))`): its native tests call
-// aws-lc's C, which Miri cannot execute, and checking all 914 vectors against
-// the recorded file would be slow under it. wasm cannot build aws-lc either.
-// `tests/cctv/ed25519-verdicts.txt` is aws-lc's accept/reject for each vector.
-// `ed25519_verdicts_match_aws_lc` checks that file against aws-lc where aws-lc
-// builds. `ed25519_edge_cases` checks rind against the file on every target,
-// and on native targets also against live aws-lc. `ed25519_record_aws_lc_verdicts`
-// rewrites the file from aws-lc. It is ignored, and writes only with
-// `RIND_RECORD_VERDICTS=1`, so `--include-ignored` runs alongside the readers
-// without touching the file.
+// Miri cannot run aws-lc's C, and all 914 vectors would be slow under it.
+// wasm cannot build aws-lc, so there rind is checked only against
+// `cctv/ed25519-verdicts.txt`, aws-lc's recorded verdicts.
 #![cfg(not(miri))]
-
-#[cfg(not(target_family = "wasm"))]
-#[path = "support/replace_file.rs"]
-mod replace_file;
 
 #[cfg(not(target_family = "wasm"))]
 use aws_lc_rs::signature::{ED25519, UnparsedPublicKey};
@@ -134,7 +123,10 @@ fn ed25519_record_aws_lc_verdicts() {
         };
         text.push_str(&format!("{i} {verdict}\n"));
     }
-    replace_file::replace_file(&path, text.as_bytes());
+    let temporary = format!("{path}.{}.tmp", std::process::id());
+    std::fs::write(&temporary, &text)
+        .unwrap_or_else(|err| panic!("cannot write {temporary}: {err}"));
+    std::fs::rename(&temporary, &path).unwrap_or_else(|err| panic!("cannot replace {path}: {err}"));
     // The file reads back as written and parses as the readers parse it.
     let written = std::fs::read_to_string(&path).unwrap();
     assert_eq!(written, text, "{path}");

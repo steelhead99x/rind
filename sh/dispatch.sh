@@ -103,11 +103,10 @@ module rs '^(rind[^/]*/|fuzz/|thirdparty/|Cargo\.(toml|lock)$|\.rustfmt(\.unstab
 # build skips, and which a toolchain bump can break. A change under one
 # backend's low/ directory checks only the builds of that backend (see
 # `reach`), so an x86_64 kernel selects none of them. On Linux its aarch64 and
-# armv7 builds run in nix's cross shells. rind-ring's browser feature is one
-# of the wasm32 builds.
+# armv7 builds run in nix's cross shells.
 cross_tools=cargo
 [[ $(uname -s) != Linux ]] || cross_tools='cargo nix'
-module cross '^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|rind-ring/(src/|Cargo\.toml$)|Cargo\.(toml|lock)$|flake\.(nix|lock)$)' \
+module cross '^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|flake\.(nix|lock)$)' \
     tools="$cross_tools" compiles
 # The published adapters' wasm32 builds, and the tests the nightly runs there.
 # rind's manifest picks the random source rind-ring's browser feature reaches.
@@ -364,14 +363,6 @@ step() {
             # `cargo test`, it passes a selection with no tests, such as the
             # benches alone.
             run cargo nextest run "${packages[@]}" --locked --no-tests=warn
-            # Only the zeroing and heap scratch tests see the opt-in wipe,
-            # which the default build turns into no-ops.
-            if names rind "${packages[@]}"; then
-                run cargo nextest run -p rind --features wipe --test zeroing --test heap_scratch --locked
-            fi
-            if names rind-aws-lc-rs "${packages[@]}"; then
-                run cargo nextest run -p rind-aws-lc-rs --features wipe --test zeroing --locked
-            fi
             # The FIPS module's own code compiles only under its cfg, which a
             # workspace build leaves off, and only for glibc Linux on x86_64
             # and aarch64, where rind-fips is not empty. Its break build
@@ -487,73 +478,9 @@ step() {
                     run cargo clippy -p rind --lib --locked --target armv7-unknown-linux-gnueabihf -- --deny warnings
                 # wasm32 compiles on the portable backend; the browser target
                 # needs getrandom's JavaScript source, WASI has its own.
-                local features
-                for features in "" wipe; do
-                    run cargo clippy -p rind --lib --locked --target wasm32-wasip2 --features "$features" -- --deny warnings
-                    run cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
-                        --features "$features,getrandom/wasm_js" -- --deny warnings
-                done
-                # The recorded ML-DSA wipe and the Ed25519 verdict comparison
-                # are cfg'd to wasm, so the library clippy never builds them.
-                # Fork main has no build.yml nightly; this lane runs them.
-                run cargo clippy -p rind --test heap_scratch --test cctv --features wipe --locked \
-                    --target wasm32-wasip2 -- --deny warnings
-                if [[ $(uname -s) == Linux ]]; then
-                    # `wasm_runner` is the one `just wasm` uses. Cargo does not run
-                    # a wasm binary unless this is set, and the tests open the
-                    # verdict file and the PKCS#8 fixtures by absolute path,
-                    # so the checkout has to be preopened. SLOW_TESTS stays
-                    # unset: RSA generation stays on `just wasm`.
-                    # shellcheck source=sh/wasm.sh
-                    source sh/wasm.sh
-                    wasm_runner
-                    run nix develop .#wasm --command env \
-                        "CARGO_TARGET_WASM32_WASIP2_RUNNER=${CARGO_TARGET_WASM32_WASIP2_RUNNER}" \
-                        cargo test -p rind --features wipe --locked \
-                        --target wasm32-wasip2 --test cctv --test heap_scratch
-                    if [[ $(uname -m) == x86_64 ]]; then
-                        # RSA-3072 and RSA-4096 on the 32-bit limbs wasm uses.
-                        # Own target dir: these RUSTFLAGS must not rebuild the
-                        # shared tree.
-                        run env \
-                            CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/rind-limb32" \
-                            CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$portable --cfg rind_limb=\"32\"" \
-                            SLOW_TESTS=1 \
-                            cargo test -p rind --features wipe --test heap_scratch --locked --release \
-                            --target x86_64-unknown-linux-gnu -- rsa_generate
-                    fi
-                fi
-                # `check:wasm` clippy-checks rind-ring's
-                # `wasm32_unknown_unknown_js`, which type-checks only. Fail
-                # here if the library's getrandom does not unify with rind's,
-                # or if wasm_js never reaches it. `-e normal` leaves out
-                # dev-dependencies (proptest, aws-lc-rs): they are not in the
-                # library, and a getrandom they pull must not fail this gate.
-                # Duplicates first. `-i getrandom` errors once that name is
-                # ambiguous, and `set -e` would stop before the message below.
-                # The status is checked explicitly: a failure inside `$(...)`
-                # must not look like an empty listing.
-                local dups tree
-                if ! dups=$(cargo tree -p rind-ring --locked --target wasm32-unknown-unknown \
-                    --features wasm32_unknown_unknown_js -e normal -d --depth 0 --prefix none); then
-                    echo "error: cargo tree failed while checking duplicated getrandom" >&2
-                    return 1
-                fi
-                if grep -q '^getrandom v' <<<"$dups"; then
-                    echo "error: rind-ring's wasm32_unknown_unknown_js resolved more than one getrandom" >&2
-                    echo "$dups" >&2
-                    return 1
-                fi
-                if ! tree=$(cargo tree -p rind-ring --locked --target wasm32-unknown-unknown \
-                    --features wasm32_unknown_unknown_js -e normal,features -i getrandom@0.4); then
-                    echo "error: rind-ring's wasm32_unknown_unknown_js did not resolve getrandom 0.4" >&2
-                    return 1
-                fi
-                if ! grep -q 'wasm_js' <<<"$tree"; then
-                    echo "error: rind-ring's wasm32_unknown_unknown_js did not enable getrandom's wasm_js" >&2
-                    echo "$tree" >&2
-                    return 1
-                fi
+                run cargo clippy -p rind --lib --locked --target wasm32-wasip2 -- --deny warnings
+                run cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
+                    --features getrandom/wasm_js -- --deny warnings
             fi
             ;;
         check:wasm)

@@ -34,7 +34,7 @@ let key = key.serialize_der();
 - An unsupported algorithm returns `UnsupportedSignatureAlgorithm` where rcgen panics.
 
 The `pem` feature, on by default as rcgen's is, adds the PEM methods.
-The `wipe` feature wipes keys and the key pair's PKCS#8 copy on drop.
+Keys and the key pair's PKCS#8 copy are wiped on drop.
 The `zeroize` feature, as rcgen's, implements `Zeroize` for `KeyPair`, clearing its PKCS#8 copy.
 
 It builds for `wasm32-wasip2` and `wasm32-unknown-unknown`, the browser, where
