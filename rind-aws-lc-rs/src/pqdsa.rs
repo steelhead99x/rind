@@ -827,20 +827,14 @@ fn der_int_value(body: &[u8]) -> Option<u64> {
     let (0x02, bytes) = der::first_element(body)? else {
         return None;
     };
-    // `CBS_get_asn1_int64` accepts a positive value through `i64::MAX`, which
-    // is nine bytes when the magnitude's top bit is set.
-    if bytes.is_empty() || bytes[0] >= 0x80 || bytes.len() > 9 {
-        return None;
-    }
-    let bytes = if bytes.len() == 9 {
-        if bytes[0] != 0 {
-            return None;
-        }
-        &bytes[1..]
-    } else {
-        bytes
+    // `CBS_get_asn1_int64` takes a minimal encoding of a value up to
+    // `i64::MAX`, at most eight bytes; only a non-negative one is wanted here.
+    let minimal = match bytes {
+        [] => false,
+        [0, next, ..] => *next >= 0x80,
+        _ => true,
     };
-    if bytes.len() == 8 && bytes[0] >= 0x80 {
+    if !minimal || bytes[0] >= 0x80 || bytes.len() > 8 {
         return None;
     }
     let mut value = 0u64;

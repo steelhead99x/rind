@@ -423,6 +423,18 @@ fn pss_explicit_params() -> Vec<u8> {
     pss_params_with(SHA256, SHA256)
 }
 
+/// Explicit RSASSA-PSS parameters with SHA-256 and the given encoded
+/// `saltLength` and, if any, `trailerField`.
+fn pss_params_raw(salt: &[u8], trailer: Option<&[u8]>) -> Vec<u8> {
+    let sha = der(0x30, &[der(0x06, SHA256), der(0x05, &[])].concat());
+    let mgf = der(0x30, &[der(0x06, MGF1), sha.clone()].concat());
+    let mut fields = [der(0xa0, &sha), der(0xa1, &mgf), der(0xa2, salt)].concat();
+    if let Some(trailer) = trailer {
+        fields.extend(der(0xa3, trailer));
+    }
+    der(0x30, &fields)
+}
+
 /// Explicit RSASSA-PSS parameters naming `hash` and MGF1 over `mgf_hash`.
 fn pss_params_with(hash: &[u8], mgf_hash: &[u8]) -> Vec<u8> {
     let sha = der(0x30, &[der(0x06, hash), der(0x05, &[])].concat());
@@ -831,7 +843,7 @@ fn pqdsa_from_pkcs8_pss_inconsistent_and_v2() {
     let mut flipped_public = rsa_public_pkcs1(base);
     *flipped_public.last_mut().unwrap() ^= 0x01;
     let flipped_public = public_suffix(&flipped_public);
-    let shapes: [(&str, Option<Vec<u8>>); 7] = [
+    let shapes: [(&str, Option<Vec<u8>>); 12] = [
         ("absent params", None),
         ("empty params", Some(der(0x30, &[]))),
         ("null params", Some(der(0x05, &[]))),
@@ -842,6 +854,35 @@ fn pqdsa_from_pkcs8_pss_inconsistent_and_v2() {
         ),
         ("mgf1 sha224 params", Some(pss_params_with(SHA256, SHA224))),
         ("all sha224 params", Some(pss_params_with(SHA224, SHA224))),
+        (
+            "non-minimal salt length",
+            Some(pss_params_raw(&der(0x02, &[0x00, 0x20]), None)),
+        ),
+        (
+            "non-minimal trailer field",
+            Some(pss_params_raw(
+                &der(0x02, &[32]),
+                Some(&der(0x02, &[0x00, 0x01])),
+            )),
+        ),
+        (
+            "nine-byte salt length",
+            Some(pss_params_raw(
+                &der(0x02, &[0x00, 0x80, 0, 0, 0, 0, 0, 0, 0]),
+                None,
+            )),
+        ),
+        (
+            "eight-byte salt length",
+            Some(pss_params_raw(
+                &der(0x02, &[0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
+                None,
+            )),
+        ),
+        (
+            "trailer field 1",
+            Some(pss_params_raw(&der(0x02, &[32]), Some(&der(0x02, &[0x01])))),
+        ),
     ];
     for (name, params) in shapes {
         let params = params.as_deref();
