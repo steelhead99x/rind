@@ -435,6 +435,15 @@ mod tests {
             .unwrap();
         assert_eq!(calls(), before, "a secret path reached the public SHA-512");
         public.verify(&sig, &[7u8; 300]).unwrap();
-        assert!(calls() > before, "verification skipped the public SHA-512");
+        // Only a CPU with the SHA512 instructions takes the public path.
+        if low::has_sha512_public() {
+            assert!(calls() > before, "verification skipped the public SHA-512");
+        } else {
+            assert_eq!(
+                calls(),
+                before,
+                "verification took the public SHA-512 without the instructions"
+            );
+        }
     }
 }

@@ -145,7 +145,13 @@ impl VerifyingKey {
         // the SHA512 instructions; signing's hashes never do.
         let k = {
             #[cfg(rind_backend = "x86_64")]
-            let k = crate::mid::sha2::sha512_public(r_sig, &self.bytes, msg);
+            let k = if crate::low::has_sha512_public() {
+                crate::mid::sha2::sha512_public(r_sig, &self.bytes, msg)
+            } else {
+                // Without the instructions the public path only forwards to
+                // the routine this digest runs, through a second compress call.
+                ed25519_digest(r_sig, &self.bytes, msg)
+            };
             #[cfg(not(rind_backend = "x86_64"))]
             let k = ed25519_digest(r_sig, &self.bytes, msg);
             Scalar::reduce_from_le_bytes(&k)

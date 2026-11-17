@@ -67,6 +67,14 @@ fn pick() -> Path {
     }
 }
 
+/// Whether this CPU has the SHA512 instructions, so that
+/// [`sha512_compress_blocks_public`] runs them. Where it does not, that
+/// function only forwards to [`sha512_compress_blocks`], and a caller is
+/// faster on the digest API's cached context.
+pub(crate) fn has_sha512_public() -> bool {
+    HaveSha512::check().is_some()
+}
+
 /// As [`sha512_compress_blocks`], for SHA-512 whose every input is public:
 /// Ed25519 verification's `SHA-512(R || A || M)`, of a signature, a public
 /// key, and the message. Where the CPU has the SHA512 instructions it runs
@@ -385,5 +393,25 @@ pub(crate) mod tests {
                 assert_eq!(got, want, "sha512ext, {n} blocks");
             }
         }
+    }
+
+    // The digests match whichever routine runs, so only this sees the pick:
+    // AVX2 wherever rind's AVX2 kernels run, the SHA512 instructions' CPUs
+    // included, then AVX on Intel's, then the scalar routine.
+    #[test]
+    fn picks_the_fastest_routine() {
+        let got = match pick() {
+            Path::Avx2(_) => "avx2",
+            Path::Avx(_) => "avx",
+            Path::Nohw => "nohw",
+        };
+        let want = if HaveAvx2::check().is_some() {
+            "avx2"
+        } else if HaveAvx::check().is_some() && is_intel() {
+            "avx"
+        } else {
+            "nohw"
+        };
+        assert_eq!(got, want);
     }
 }
