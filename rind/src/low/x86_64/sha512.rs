@@ -9,8 +9,11 @@
 //! OpenSSL's AVX2 routine, as rind builds it; nothing verifies the scalar one.
 //!
 //! CPUs with the SHA512 instructions, from Arrow Lake and Lunar Lake on, run
-//! the AVX2 routine too. Intel's data-independent-timing list omits
-//! `VSHA512RNDS2`, `VSHA512MSG1`, and `VSHA512MSG2`.
+//! the AVX2 routine too, though OpenSSL's routine for those instructions is
+//! faster: Intel's data-independent-timing list omits `VSHA512RNDS2`,
+//! `VSHA512MSG1`, and `VSHA512MSG2`, so nothing bounds their timing on the
+//! secrets HMAC keys and Ed25519 nonces hash, and `admin/ct-vartime` refuses
+//! them.
 
 use std::sync::OnceLock;
 
@@ -215,5 +218,25 @@ mod tests {
                 assert_eq!(ct::into_public(got), want, "avx2, {n} blocks");
             }
         }
+    }
+
+    // The digests match whichever routine runs, so only this sees the pick:
+    // AVX2 wherever rind's AVX2 kernels run, the SHA512 instructions' CPUs
+    // included, then AVX on Intel's, then the scalar routine.
+    #[test]
+    fn picks_the_fastest_routine() {
+        let got = match pick() {
+            Path::Avx2(_) => "avx2",
+            Path::Avx(_) => "avx",
+            Path::Nohw => "nohw",
+        };
+        let want = if HaveAvx2::check().is_some() {
+            "avx2"
+        } else if HaveAvx::check().is_some() && is_intel() {
+            "avx"
+        } else {
+            "nohw"
+        };
+        assert_eq!(got, want);
     }
 }
