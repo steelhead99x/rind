@@ -513,10 +513,9 @@ done
       printf 'void %s(void) { for (;;) {} }\n' "$sym"
     done
 } > "$work/load-stubs.c"
-# Without these flags gcc turns each loop back into a call to the function
-# it is defining, which never returns.
-"$gcc" -c -mabi=call0 -O2 -fno-builtin -fno-tree-loop-distribute-patterns \
-  -o "$work/load-stubs.o" "$work/load-stubs.c"
+# Unoptimized: at -O2 gcc turns each loop back into a call to the function
+# it is defining, which never returns, or into a zero-overhead `loop`.
+"$gcc" -c -mabi=call0 -O0 -fno-builtin -o "$work/load-stubs.o" "$work/load-stubs.c"
 
 cat > "$work/load.ld" << 'EOF'
 MEMORY {
@@ -539,6 +538,12 @@ cat > "$work/start.S" << 'EOF'
 .section .text
 .global _start
 _start:
+    // Reset leaves PS.EXCM set, and a zero-overhead `loop` does not loop
+    // back while it is: the C stubs' loops would run once. PS 0 is ring 0,
+    // no exception mode, no windows, and no interrupt is enabled.
+    movi a2, 0
+    wsr.ps a2
+    rsync
     movi a1, 0x4001F000
     movi a4, load_msg
     movi a5, 5
@@ -630,6 +635,9 @@ abc 00000000" ]; then
   fi
   printf 'qemu esp32s3, %s: failed, exit %s\n' "$2" "$status" >&2
   cat "$out" "$err" >&2
+  # What the image took from the C stubs, and how they were compiled.
+  "$nm" -u "$work/obj/$name.o" >&2
+  "$objdump" -d "$work/load-stubs.o" | awk '/<mem(set|cpy)>:/{f=1} f' >&2
   qemu_failed=1
 }
 
