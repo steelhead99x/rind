@@ -103,7 +103,16 @@ fn main() {
         // faults on. A custom ARMv7 target without 64-bit atomics stays
         // portable: the manifest cannot see the triple's version
         // (UPSTREAM.md) and links libcrux only when the target has them.
-        "arm" if little && !forced && !bare_metal && has_atomic64() && armv7_or_later() && !m_profile() => "arm",
+        "arm"
+            if little
+                && !forced
+                && !bare_metal
+                && has_atomic64()
+                && armv7_or_later()
+                && !m_profile() =>
+        {
+            "arm"
+        }
         _ => "portable",
     };
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);
