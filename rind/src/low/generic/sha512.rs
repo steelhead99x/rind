@@ -500,12 +500,12 @@ static K: [u64; 80] = [
 // UPSTREAM.md, "cargo-mutants misses compound `cfg(test)`s".
 #[cfg(any(test, rind_sha512_load_probe))]
 mod tests {
+    use super::sha512_compress_blocks;
     use super::unrolled::message_word;
     #[cfg(test)]
-    use super::{rolled, sha512_compress_blocks, unrolled};
+    use super::{rolled, unrolled};
 
     /// SHA-512's IV, FIPS 180-4 §5.3.5.
-    #[cfg(test)]
     const IV: [u64; 8] = [
         0x6a09e667f3bcc908,
         0xbb67ae8584caa73b,
@@ -607,12 +607,74 @@ mod tests {
         0
     }
 
+    /// SHA-512 of "abc", FIPS 180-4: the state after its one padded block.
+    const ABC: [u64; 8] = [
+        0xddaf35a193617aba,
+        0xcc417349ae204131,
+        0x12e6fa4e89a97ea2,
+        0x0a9eeee64b55d39a,
+        0x2192992a274fc1a8,
+        0x36ba3c23a3feebbd,
+        0x454d4423643ce80e,
+        0x2a9ac94fa54ca49f,
+    ];
+
+    /// Compresses FIPS 180-4's padded "abc" block from the IV, at byte
+    /// offsets 0 and 1, through the driver and so the body this target
+    /// ships, and compares all eight words with the FIPS digest.
+    ///
+    /// Returns 0 when both match. Any other value is
+    /// `0x0200_0000 | (start << 8) | word` for the first mismatch. On the
+    /// ESP32-S3 ESP-IDF build that is the unrolled body in IRAM, its `K` in
+    /// DRAM, and its `l32i` load, so `admin/esp32s3-sha512-layout` runs this
+    /// under QEMU. Host tests take the same Rust with `from_be_bytes`.
+    fn abc_failures() -> u32 {
+        let fail = abc_failures_at(0);
+        if fail != 0 {
+            return fail;
+        }
+        abc_failures_at(1)
+    }
+
+    fn abc_failures_at(start: usize) -> u32 {
+        // FIPS 180-4 §5.1.2: "abc", the 0x80 terminator, zeros, and the
+        // 128-bit length, 24.
+        let mut buf = [0u8; 129];
+        buf[start] = b'a';
+        buf[start + 1] = b'b';
+        buf[start + 2] = b'c';
+        buf[start + 3] = 0x80;
+        buf[start + 127] = 24;
+        let mut state = IV;
+        sha512_compress_blocks(&mut state, &buf[start..start + 128]);
+        first_difference(&state, &ABC, start)
+    }
+
+    fn first_difference(got: &[u64; 8], want: &[u64; 8], start: usize) -> u32 {
+        let mut i = 0;
+        while i < 8 {
+            if got[i] != want[i] {
+                return 0x0200_0000 | ((start as u32) << 8) | i as u32;
+            }
+            i += 1;
+        }
+        0
+    }
+
     /// Entry the layout probe links and runs. Not a rind API.
     #[cfg(rind_sha512_load_probe)]
     #[unsafe(no_mangle)]
     #[inline(never)]
     pub extern "C" fn sha512_load_probe() -> u32 {
         message_load_failures()
+    }
+
+    /// Entry the layout probe links and runs. Not a rind API.
+    #[cfg(rind_sha512_load_probe)]
+    #[unsafe(no_mangle)]
+    #[inline(never)]
+    pub extern "C" fn sha512_abc_probe() -> u32 {
+        abc_failures()
     }
 
     #[cfg(test)]
@@ -763,6 +825,32 @@ mod tests {
     fn message_word_matches_from_be_bytes() {
         let fail = message_load_failures();
         assert_eq!(fail, 0, "message load mismatch {fail:#x}");
+    }
+
+    /// The probe's FIPS "abc" compression, at both offsets, through the
+    /// driver. `admin/esp32s3-sha512-layout` runs the same code on QEMU.
+    #[test]
+    fn abc_probe_matches_fips180() {
+        assert_eq!(abc_failures(), 0);
+        // Its expected state is the digest `fips180_abc` checks.
+        let mut digest = [0u8; 64];
+        for (out, word) in digest.chunks_exact_mut(8).zip(ABC) {
+            out.copy_from_slice(&word.to_be_bytes());
+        }
+        assert_eq!(digest, hash(b"abc"));
+    }
+
+    /// A mismatch names its offset and the first word that differs.
+    #[test]
+    fn first_difference_names_the_word() {
+        assert_eq!(first_difference(&ABC, &ABC, 1), 0);
+        for i in 0..8 {
+            let mut got = ABC;
+            got[i] ^= 1 << 63;
+            // A later word differs too, except when `i` is the last.
+            got[7] ^= 1;
+            assert_eq!(first_difference(&got, &ABC, 1), 0x0200_0100 | i as u32);
+        }
     }
 
     #[test]

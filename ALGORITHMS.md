@@ -188,15 +188,17 @@ with portable Rust in place of the assembly armv7 runs regardless.
   `K` in ordinary flash sections, as does `xtensa-esp32s3-none-elf`.
   `admin/esp32s3-sha512-layout` checks those sections, the relocation
   allowlist, and that the block has no call, at opt-level 3, s, and z.
-  It also runs the Xtensa message load (`l32i`, `ssai`, `src`), including
-  blocks at byte offsets 1 and 3, on QEMU's ESP32-S3 CPU. That run is the
-  emulator's model of the core, not a cycle count. The same check
+  It also runs, on QEMU's ESP32-S3 CPU, the Xtensa message load (`l32i`,
+  `ssai`, `src`), including blocks at byte offsets 1 and 3, and FIPS
+  180-4's "abc" block through the whole compressor, built for ESP-IDF so
+  the block runs from its IRAM section with `K` from DRAM, at byte offsets
+  0 and 1, comparing all eight state words. That run is the emulator's
+  model of the core, not a cycle count. The same check
   compiles ESP-IDF v5.5.1's ESP32-S3 `core-isa.h` and requires
   `XCHAL_UNALIGNED_LOAD_HW` 1 and `XCHAL_UNALIGNED_LOAD_EXCEPTION` 0, the
   hardware `l32i` of an unaligned address. Board time of this IRAM
-  placement against `esp32s3-sha512-flash` is not measured. QEMU runs the
-  message load, not the full compression. Host FIPS 180-4 vectors cover
-  both Rust bodies. The Xtensa load is not in the host ctgrind binary:
+  placement against `esp32s3-sha512-flash` is not measured. Host FIPS
+  180-4 vectors cover both Rust bodies. The Xtensa load is not in the host ctgrind binary:
   its instructions and shift distance are fixed. The synthetic link is not
   a full ESP-IDF image.
   SHA-256 on ESP-IDF Xtensa is the IRAM body above, and this

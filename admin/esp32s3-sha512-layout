@@ -15,10 +15,13 @@
 # Every ESP32-S3 object is also checked for the message byte swap: `l32i`
 # into `a14`, `ssai 8`, a 16-bit shift, then `src R, R, a14`; `src R, R, R`;
 # `src R, a14, R`. That is the sequence in `be_u32`. The ESP32 object must
-# have none: only the ESP32-S3 takes the unrolled body and its load. The
-# none-elf object is then linked call0 and run under QEMU's esp32s3 CPU,
-# including blocks that are not word-aligned. That is the emulator's model
-# of the core, not a cycle count. ESP-IDF v5.5.1's ESP32-S3 core-isa.h is
+# have none: only the ESP32-S3 takes the unrolled body and its load. A
+# call0 build of the ESP32-S3 ESP-IDF object, IRAM block and DRAM K
+# included, is then linked and run under QEMU's esp32s3 CPU: the message
+# load, including blocks that are not word-aligned, and FIPS 180-4's "abc"
+# block through the whole compressor, at byte offsets 0 and 1, compared
+# word for word. That is the emulator's model of the core, not a cycle
+# count. ESP-IDF v5.5.1's ESP32-S3 core-isa.h is
 # checked too: Hardware Alignment is on and an unaligned load does not
 # trap, which is that core's l32i of an address that is not a multiple of
 # 4. Board timing is not measured.
@@ -174,16 +177,19 @@ directory = "$vendor"
 EOF
 export CARGO_HOME="$work/cargo-home"
 
+# $1 name, $2 target, $3 opt-level, $4 cargo flags; the rest are rustc
+# flags for this crate only.
 build() {
   name=$1
   target=$2
   opt=$3
   extra=$4
+  shift 4
   # shellcheck disable=SC2086
   CARGO_TARGET_DIR="$work/target-$name" \
-    "$cargo" build --manifest-path "$work/probe/Cargo.toml" \
+    "$cargo" rustc --manifest-path "$work/probe/Cargo.toml" \
       --release --target "$target" -Z build-std=core --offline \
-      --config "profile.release.opt-level=$opt" $extra \
+      --config "profile.release.opt-level=$opt" $extra -- "$@" \
       >"$work/$name.log" 2>&1 \
     || {
       printf 'build %s failed\n' "$name" >&2
@@ -201,25 +207,14 @@ build s xtensa-esp32s3-espidf '"s"' ''
 build z xtensa-esp32s3-espidf '"z"' ''
 build flash xtensa-esp32s3-espidf 3 '--features esp32s3-sha512-flash'
 build esp32 xtensa-esp32-espidf 3 ''
-# call0, so the QEMU stub can enter the probe without a window exception.
-# Flags after `--` apply to this crate only. `-windowed` on core does not
-# compile. The firmware objects above keep the target's default ABI. The
-# inline asm sequence does not change with the ABI.
-CARGO_TARGET_DIR="$work/target-none" \
-  "$cargo" rustc --manifest-path "$work/probe/Cargo.toml" \
-    --release --target xtensa-esp32s3-none-elf -Z build-std=core --offline \
-    --config 'profile.release.opt-level=3' \
-    -- --cfg rind_sha512_load_probe -C target-feature=-windowed \
-    >"$work/none.log" 2>&1 \
-  || {
-    printf 'build none failed\n' >&2
-    cat "$work/none.log" >&2
-    exit 1
-  }
-rlib=$(find "$work/target-none/xtensa-esp32s3-none-elf/release/deps" -name 'libsha512_layout-*.rlib' | head -1)
-mkdir -p "$work/obj/none"
-(cd "$work/obj/none" && "$ar" x "$rlib")
-find "$work/obj/none" -name 'sha512_layout-*.o' -exec mv {} "$work/obj/none.o" \;
+build none xtensa-esp32s3-none-elf 3 ''
+# The QEMU probe: the ESP32-S3 ESP-IDF build, so the block is the IRAM one
+# with K in DRAM, plus the probe exports. call0, so the stub can enter it
+# without a window exception. `-windowed` on core does not compile, so the
+# flag is this crate's only. The firmware objects above keep the target's
+# default ABI. The inline asm sequence does not change with the ABI.
+build probe xtensa-esp32s3-espidf 3 '' \
+  --cfg rind_sha512_load_probe -C target-feature=-windowed
 
 sections() {
   "$objdump" -h "$1" | awk 'NR > 3 && $2 ~ /^\./ { print $2, $3 }'
@@ -284,6 +279,7 @@ expect_placed "$work/obj/z.o"
 expect_ordinary "$work/obj/flash.o" 'esp32s3-sha512-flash'
 expect_ordinary "$work/obj/esp32.o" 'xtensa-esp32-espidf'
 expect_ordinary "$work/obj/none.o" 'xtensa-esp32s3-none-elf'
+expect_placed "$work/obj/probe.o"
 
 # The block's own relocations point at its IRAM literal pool, and that pool
 # points at K in DRAM. A flash .rodata reference here would fault with the
@@ -311,6 +307,7 @@ check_iram() {
 check_iram "$work/obj/s3.o" 'opt-level 3'
 check_iram "$work/obj/s.o" 'opt-level s'
 check_iram "$work/obj/z.o" 'opt-level z'
+check_iram "$work/obj/probe.o" 'QEMU probe'
 
 # The message load is assembly on the ESP32-S3, and the host tests never
 # compile it. Require the operand order from `be_u32`, at least once per
@@ -395,6 +392,7 @@ check_swap 'opt-level z' "$work/obj/z.o"
 check_swap 'esp32s3-sha512-flash' "$work/obj/flash.o"
 check_swap 'xtensa-esp32-espidf' "$work/obj/esp32.o" none
 check_swap 'xtensa-esp32s3-none-elf' "$work/obj/none.o"
+check_swap 'QEMU probe' "$work/obj/probe.o"
 
 s3_text=.iram1.text
 flash_text=$(
@@ -467,20 +465,24 @@ for elf in "$work/s3.elf" "$work/flash.elf"; do
   fi
 done
 
-# Execute the message load. The firmware link above is not runnable: its
-# text sits in the flash window, which this sim machine does not map.
-# Code, constants, and the stack stay in the instruction RAM the
-# esp32s3 CPU model maps at 0x40000000. The stub is call0.
+# Execute the message load and a FIPS 180-4 "abc" compression through the
+# IRAM block. The firmware link above is not runnable: its text sits in the
+# flash window, which this sim machine does not map. Code, constants
+# (`.iram1` and `.dram1` included), and the stack stay in the instruction
+# RAM the esp32s3 CPU model maps at 0x40000000. The stub is call0.
 qemu=${RIND_QEMU:-"$esp/qemu/bin/qemu-system-xtensa"}
 if [ ! -x "$qemu" ]; then
   printf 'missing %s\ninstall it as .github/workflows/esp32s3-sha512-layout.yml does\n' "$qemu" >&2
   exit 1
 fi
-if ! "$nm" "$work/obj/none.o" | awk '$3 == "sha512_load_probe" { found = 1 } END { exit !found }'; then
-  fail 'none object has no sha512_load_probe'
-fi
-if "$objdump" -d "$work/obj/none.o" | awk '/<sha512_load_probe>:/{f=1} f && /^$/{exit} f' | grep -q 'entry'; then
-  fail 'sha512_load_probe is windowed; the QEMU stub is call0'
+for sym in sha512_load_probe sha512_abc_probe; do
+  if ! "$nm" "$work/obj/probe.o" | awk -v s="$sym" '$3 == s { found = 1 } END { exit !found }'; then
+    fail "probe object has no $sym"
+  fi
+done
+# The probes, the driver, and the block: no `entry`, so all call0.
+if "$objdump" -d "$work/obj/probe.o" | grep -Eq '^[[:space:]]*[0-9a-f]+:[[:space:]].*[[:space:]]entry[[:space:]]'; then
+  fail 'the probe object is windowed; the QEMU stub is call0'
 fi
 
 {
@@ -495,7 +497,7 @@ fi
   printf '%s\n' '    for (unsigned long i = 0; i < n; i++) out[i] = in[i];'
   printf '%s\n' '    return d;'
   printf '%s\n' '}'
-  "$nm" -u "$work/obj/none.o" | awk '$1 == "U" && $2 != "memset" && $2 != "memcpy" { print $2 }' | sort -u |
+  "$nm" -u "$work/obj/probe.o" | awk '$1 == "U" && $2 != "memset" && $2 != "memcpy" { print $2 }' | sort -u |
     while read -r sym; do
       # A panic must not return into the probe.
       printf 'void %s(void) { for (;;) {} }\n' "$sym"
@@ -509,9 +511,9 @@ MEMORY {
 }
 ENTRY(_start)
 SECTIONS {
-  .literal : { *(.literal .literal.* .xt.lit) } > iram
-  .text : { *(.text .text.*) } > iram
-  .rodata : { *(.rodata .rodata.*) } > iram
+  .literal : { *(.literal .literal.* .xt.lit .iram1.text.literal) } > iram
+  .text : { *(.text .text.* .iram1.text) } > iram
+  .rodata : { *(.rodata .rodata.* .dram1.rodata) } > iram
   .data : { *(.data .data.*) } > iram
   .bss : { *(.bss .bss.*) } > iram
 }
@@ -523,6 +525,9 @@ cat > "$work/start.S" << 'EOF'
 _start:
     movi a1, 0x4001F000
     call0 sha512_load_probe
+    bnez a2, 3f
+    call0 sha512_abc_probe
+3:
     mov a6, a2
     movi a2, 4
     movi a3, 1
@@ -546,7 +551,7 @@ fail_msg:
 EOF
 "$gcc" -c -mabi=call0 -o "$work/start.o" "$work/start.S"
 "$ld" --relax -e _start -T "$work/load.ld" -o "$work/load.elf" \
-  "$work/start.o" "$work/obj/none.o" "$work/load-stubs.o"
+  "$work/start.o" "$work/obj/probe.o" "$work/load-stubs.o"
 
 # The stack is at 0x4001F000 and grows down. The image has to end before it.
 "$readelf" -lW "$work/load.elf" | python3 -c '
@@ -578,7 +583,7 @@ run_load() {
     cat "$out" "$err" >&2
     exit 1
   fi
-  printf 'qemu %s: message load OK\n' "$cpu"
+  printf 'qemu %s: message load and FIPS 180-4 abc OK\n' "$cpu"
 }
 
 run_load esp32s3
