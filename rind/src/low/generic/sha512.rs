@@ -760,9 +760,9 @@ mod tests {
             let mut state = [0u64; 8];
             state.iter_mut().for_each(|w| *w = next());
             let mut block = [0u8; 128];
-            block
-                .chunks_exact_mut(8)
-                .for_each(|c| c.copy_from_slice(&next().to_be_bytes()));
+            for word in block.as_chunks_mut::<8>().0 {
+                *word = next().to_be_bytes();
+            }
             crate::low::ct::secret_slice(&block);
             let mut rolled_state = state;
             let mut unrolled_state = state;
@@ -834,8 +834,8 @@ mod tests {
         assert_eq!(abc_failures(), 0);
         // Its expected state is the digest `fips180_abc` checks.
         let mut digest = [0u8; 64];
-        for (out, word) in digest.chunks_exact_mut(8).zip(ABC) {
-            out.copy_from_slice(&word.to_be_bytes());
+        for (out, word) in digest.as_chunks_mut::<8>().0.iter_mut().zip(ABC) {
+            *out = word.to_be_bytes();
         }
         assert_eq!(digest, hash(b"abc"));
     }

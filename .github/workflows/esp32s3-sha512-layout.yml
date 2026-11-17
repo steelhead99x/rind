@@ -1,8 +1,10 @@
 name: ESP32-S3 SHA-512 layout
 
-# Links the rolled compressor the way ESP-IDF places `.iram1` and `.dram1`,
-# and checks that only the ESP32-S3 ESP-IDF build leaves `.flash.text`.
-# The toolchain is the one the board image uses (espup rustc 1.97.0.0).
+# Links the ESP32-S3 SHA-512 compressor the way ESP-IDF places `.iram1`
+# and `.dram1`, checks that only the ESP32-S3 ESP-IDF build leaves
+# `.flash.text`, records the IRAM block's size against its ceiling, and
+# runs the message load and FIPS 180-4 "abc" through the IRAM build on
+# QEMU. The toolchain is the one the board image uses (espup rustc 1.97.0.0).
 on:
   pull_request:
     paths:
