@@ -446,7 +446,22 @@ jobs:
           udid=$(xcrun simctl list devices available --json | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid"
-          flutter test integration_test -d "$udid"
+          # A hang in the app otherwise runs into the job's limit and ends
+          # cancelled with no log, so stop it first and print what the
+          # simulator saw.
+          status=0
+          # macOS has no timeout(1); perl's alarm survives the exec.
+          perl -e 'alarm shift; exec @ARGV' 1080 flutter test integration_test -d "$udid" --reporter expanded || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::group::simulator log (Runner)"
+            xcrun simctl spawn "$udid" log show --last 25m --style compact \
+              --predicate 'process == "Runner" OR eventMessage CONTAINS[c] "rind"' | tail -n 400 || true
+            echo "::endgroup::"
+            echo "::group::crash reports"
+            find ~/Library/Logs/DiagnosticReports -mmin -30 -name '*Runner*' -print -exec head -n 120 {} \; 2>/dev/null || true
+            echo "::endgroup::"
+            exit "$status"
+          fi
 
   # The portable backend, which every architecture without rind assembly
   # runs, forced on x86_64 so it runs without emulation. The recipe lints and
