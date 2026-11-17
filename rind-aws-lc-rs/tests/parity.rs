@@ -19,6 +19,7 @@ const P384: &[u8] = &[0x2b, 0x81, 0x04, 0x00, 0x22];
 const P521: &[u8] = &[0x2b, 0x81, 0x04, 0x00, 0x23];
 const RSA_ENCRYPTION: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
 const RSASSA_PSS: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a];
+const SHA224: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x04];
 const SHA256: &[u8] = &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01];
 const MGF1: &[u8] = &[0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x08];
 const ML_DSA_OID_PREFIX: [u8; 8] = [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03];
@@ -419,8 +420,14 @@ fn rsa_public_pkcs1(doc: &[u8]) -> Vec<u8> {
 }
 
 fn pss_explicit_params() -> Vec<u8> {
-    let sha = der(0x30, &[der(0x06, SHA256), der(0x05, &[])].concat());
-    let mgf = der(0x30, &[der(0x06, MGF1), sha.clone()].concat());
+    pss_params_with(SHA256, SHA256)
+}
+
+/// Explicit RSASSA-PSS parameters naming `hash` and MGF1 over `mgf_hash`.
+fn pss_params_with(hash: &[u8], mgf_hash: &[u8]) -> Vec<u8> {
+    let sha = der(0x30, &[der(0x06, hash), der(0x05, &[])].concat());
+    let mgf_sha = der(0x30, &[der(0x06, mgf_hash), der(0x05, &[])].concat());
+    let mgf = der(0x30, &[der(0x06, MGF1), mgf_sha].concat());
     der(
         0x30,
         &[
@@ -824,11 +831,17 @@ fn pqdsa_from_pkcs8_pss_inconsistent_and_v2() {
     let mut flipped_public = rsa_public_pkcs1(base);
     *flipped_public.last_mut().unwrap() ^= 0x01;
     let flipped_public = public_suffix(&flipped_public);
-    let shapes: [(&str, Option<Vec<u8>>); 4] = [
+    let shapes: [(&str, Option<Vec<u8>>); 7] = [
         ("absent params", None),
         ("empty params", Some(der(0x30, &[]))),
         ("null params", Some(der(0x05, &[]))),
         ("explicit sha256 params", Some(pss_explicit_params())),
+        (
+            "explicit sha224 params",
+            Some(pss_params_with(SHA224, SHA256)),
+        ),
+        ("mgf1 sha224 params", Some(pss_params_with(SHA256, SHA224))),
+        ("all sha224 params", Some(pss_params_with(SHA224, SHA224))),
     ];
     for (name, params) in shapes {
         let params = params.as_deref();
