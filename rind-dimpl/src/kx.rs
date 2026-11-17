@@ -59,20 +59,31 @@ impl fmt::Debug for Exchange {
 }
 
 /// Splits the DER element tagged `tag` off the front of `input`, returning its
-/// contents and what follows. Only minimal definite lengths below 65536
-/// parse, as aws-lc's `CBS_get_asn1` reads them, which covers every
-/// `SubjectPublicKeyInfo` these groups take.
+/// contents and what follows. Only minimal definite lengths parse, in up to
+/// four length octets, as aws-lc's `cbs_get_any_asn1_element` reads them for
+/// `CBS_get_asn1` (aws-lc-sys 0.47.0, `crypto/bytestring/cbs.c:353-394`): a
+/// long form for a length under 128, or one with a leading zero octet, is
+/// refused.
 fn der(tag: u8, input: &[u8]) -> Option<(&[u8], &[u8])> {
-    let [actual, len, rest @ ..] = input else {
+    let [actual, first, rest @ ..] = input else {
         return None;
     };
-    let (len, rest) = match (*len, rest) {
-        (0..=0x7f, rest) => (usize::from(*len), rest),
-        (0x81, [len @ 0x80..=0xff, rest @ ..]) => (usize::from(*len), rest),
-        (0x82, [high @ 0x01..=0xff, low, rest @ ..]) => {
-            (usize::from(u16::from_be_bytes([*high, *low])), rest)
+    let (len, rest) = if *first < 0x80 {
+        (usize::from(*first), rest)
+    } else {
+        let octets = usize::from(*first & 0x7f);
+        if !(1..=4).contains(&octets) {
+            return None;
         }
-        _ => return None,
+        let (bytes, rest) = rest.split_at_checked(octets)?;
+        if bytes[0] == 0 {
+            return None;
+        }
+        let len = bytes.iter().fold(0u64, |len, &b| len << 8 | u64::from(b));
+        if len < 0x80 {
+            return None;
+        }
+        (usize::try_from(len).ok()?, rest)
     };
     if *actual != tag {
         return None;
@@ -88,7 +99,8 @@ fn same_integer(bytes: &[u8], value: &[u8]) -> bool {
 }
 
 /// Whether `contents`, a DER INTEGER's, is `value`, which has its top bit
-/// set, as aws-lc's minimal non-negative `CBS_is_unsigned_asn1_integer` and
+/// set, as aws-lc's minimal non-negative `CBS_is_unsigned_asn1_integer`
+/// (`crypto/bytestring/cbs.c:686`) and
 /// [`same_integer`] together decide: its one such encoding is a zero byte,
 /// then `value`.
 fn top_bit_integer(contents: &[u8], value: &[u8]) -> bool {
@@ -184,7 +196,7 @@ static P384: Curve = Curve {
 impl Curve {
     /// Whether `params`, an `id-ecPublicKey` AlgorithmIdentifier's
     /// parameters, name this curve, as aws-lc's `EC_KEY_parse_parameters`
-    /// decides: its OID, or explicit `ECParameters` (RFC 3279 section 2.3.5)
+    /// (`crypto/ec_extra/ec_asn1.c:330`) decides: its OID, or explicit `ECParameters` (RFC 3279 section 2.3.5)
     /// that match it. Those may pad `p`, `a`, `b`, `n`, and each coordinate of
     /// the uncompressed base point with zeros, may carry a seed, and may give
     /// a cofactor of one.
@@ -235,7 +247,7 @@ impl Curve {
 /// The key inside `peer` when it is a `SubjectPublicKeyInfo` for `group`, as
 /// aws-lc-rs's `ParsedPublicKey::new` tries before the raw share.
 ///
-/// As aws-lc's `EVP_parse_public_key` reads it, a NIST key names
+/// As aws-lc's `EVP_parse_public_key` (`crypto/evp_extra/evp_asn1.c:71`) reads it, a NIST key names
 /// `id-ecPublicKey` and the group's curve ([`Curve::named_by`]), an X25519
 /// key names `id-X25519` with no parameters and holds 32 bytes, and bytes
 /// after the structure are ignored. WebCrypto's `id-ecDH`, which
@@ -337,5 +349,58 @@ impl ActiveKeyExchange for Exchange {
 
     fn group(&self) -> NamedGroup {
         self.group
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::der;
+
+    // aws-lc's `CBS_get_asn1` takes definite lengths of up to four octets, each
+    // the shortest that holds the length.
+    #[test]
+    fn der_lengths_match_cbs_get_asn1() {
+        let element = |header: &[u8], len: usize| {
+            let mut v = vec![0x04];
+            v.extend_from_slice(header);
+            v.extend(core::iter::repeat_n(0xaa, len));
+            v.push(0x55);
+            v
+        };
+        for (header, len) in [
+            (&[0x7f][..], 0x7f),
+            (&[0x81, 0x80], 0x80),
+            (&[0x81, 0xff], 0xff),
+            (&[0x82, 0x01, 0x00], 0x100),
+            (&[0x82, 0xff, 0xff], 0xffff),
+            (&[0x83, 0x01, 0x00, 0x00], 0x1_0000),
+            (&[0x83, 0x01, 0x00, 0x04], 0x1_0004),
+            (&[0x84, 0x01, 0x00, 0x00, 0x00], 0x100_0000),
+        ] {
+            let input = element(header, len);
+            let (body, rest) = der(0x04, &input).unwrap_or_else(|| panic!("{header:02x?}"));
+            assert_eq!((body.len(), rest), (len, &[0x55][..]), "{header:02x?}");
+        }
+    }
+
+    // Non-minimal forms, the indefinite form, more than four octets, and a
+    // length past the input are refused, as aws-lc refuses them.
+    #[test]
+    fn der_refuses_what_cbs_get_asn1_refuses() {
+        for input in [
+            &[0x04, 0x81, 0x7f][..],
+            &[0x04, 0x82, 0x00, 0x80],
+            &[0x04, 0x83, 0x00, 0xff, 0xff],
+            &[0x04, 0x84, 0x00, 0x01, 0x00, 0x00],
+            &[0x04, 0x80],
+            &[0x04, 0x85, 0x01, 0x00, 0x00, 0x00, 0x00],
+            &[0x04, 0xff],
+            &[0x04, 0x83, 0x01, 0x00],
+            &[0x04, 0x05, 0x00],
+            &[0x03, 0x00],
+            &[0x04],
+        ] {
+            assert!(der(0x04, input).is_none(), "{input:02x?}");
+        }
     }
 }
