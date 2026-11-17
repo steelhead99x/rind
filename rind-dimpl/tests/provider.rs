@@ -299,29 +299,112 @@ fn nist_hybrid_key_shares_match_aws_lc() {
     }
 }
 
-/// Every malformed neighbour of a fresh compressed or hybrid NIST share gets
-/// the same verdict from rind-dimpl as from dimpl's aws-lc-rs provider: the
-/// other `y`, `x` all ones (at least the field prime), a flipped `x` bit, an
-/// off-curve `y`, one byte short or long, prefix `0x05`, and the point at
-/// infinity alone or padded.
+/// A fresh uncompressed public key from dimpl's aws-lc-rs provider.
+fn aws_share(group: NamedGroup) -> Vec<u8> {
+    let aws = aws_lc_rs::default_provider();
+    let kx = aws.kx_groups.iter().find(|kx| kx.name() == group).unwrap();
+    kx.start_exchange(Buf::new()).unwrap().pub_key().to_vec()
+}
+
+/// Asserts rind-dimpl and dimpl's aws-lc-rs provider give `share` the same
+/// verdict, naming the share if rind-dimpl panics instead.
+fn assert_same_verdict(group: NamedGroup, share: &[u8]) {
+    let ours = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        accepts(&rind(), group, share)
+    }))
+    .unwrap_or_else(|_| panic!("{group:?} panicked on {share:02x?}"));
+    let theirs = accepts(&aws_lc_rs::default_provider(), group, share);
+    assert_eq!(ours, theirs, "{group:?} {share:02x?}");
+}
+
+/// `a + b` for big-endian numbers of the same length, which must not overflow.
+fn add_be(a: &[u8], b: &[u8]) -> Vec<u8> {
+    let mut sum = a.to_vec();
+    let mut carry = 0u16;
+    for (digit, &b) in sum.iter_mut().zip(b).rev() {
+        let total = u16::from(*digit) + u16::from(b) + carry;
+        *digit = total as u8;
+        carry = total >> 8;
+    }
+    assert_eq!(carry, 0, "the sum overflows");
+    sum
+}
+
+/// Every form and length a peer can send a NIST group, valid or hostile, gets
+/// the same verdict from rind-dimpl as from dimpl's aws-lc-rs provider: each
+/// SEC1 prefix from the point at infinity's `0x00` past hybrid `0x07`, and
+/// `0xff`, at every NIST curve's compressed and uncompressed length and one
+/// byte either side; the point at infinity; empty and oversized shares; and,
+/// in each of the uncompressed, compressed, and hybrid forms, `x` or `y` all
+/// ones, `x` equal to the field prime, `x + p` for a valid small `x`, an `x`
+/// with a flipped bit, the other `y`, an off-curve `y`, and one byte short or
+/// long.
 #[test]
 fn nist_share_edges_match_aws_lc() {
-    let aws = aws_lc_rs::default_provider();
-    let rind = rind();
-    for group in [NamedGroup::Secp256r1, NamedGroup::Secp384r1] {
-        let kx = aws.kx_groups.iter().find(|kx| kx.name() == group).unwrap();
-        let point = kx.start_exchange(Buf::new()).unwrap().pub_key().to_vec();
-        let field = (point.len() - 1) / 2;
-        let mut bases = vec![compress(&point)];
-        for prefix in [0x05, 0x06, 0x07] {
-            let mut share = point.clone();
-            share[0] = prefix;
-            bases.push(share);
+    for (group, algorithm, prime) in [
+        (
+            NamedGroup::Secp256r1,
+            &rind::agreement::ECDH_P256,
+            "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
+        ),
+        (
+            NamedGroup::Secp384r1,
+            &rind::agreement::ECDH_P384,
+            "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe\
+             ffffffff0000000000000000ffffffff",
+        ),
+    ] {
+        let prime: Vec<u8> = (0..prime.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&prime[i..i + 2], 16).unwrap())
+            .collect();
+        let field = prime.len();
+        let point = aws_share(group);
+        assert_eq!(point.len(), 1 + 2 * field);
+
+        // The smallest `x` on the curve, found by aws-lc-rs, so that `x + p`
+        // fits the field and only a reduction mod `p` would accept it.
+        let small = (0u8..=255)
+            .map(|x| {
+                let mut share = vec![0x02; 1 + field];
+                share[1..].fill(0);
+                share[field] = x;
+                share
+            })
+            .find(|share| accepts(&aws_lc_rs::default_provider(), group, share))
+            .expect("a small x on the curve");
+        let small_point = rind::agreement::PublicKey::new(algorithm, &small)
+            .unwrap()
+            .as_ref()
+            .to_vec();
+
+        let mut shares = vec![vec![], vec![0], vec![0; point.len()], vec![0xff; 4096]];
+        for prefix in [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0xff] {
+            for len in [33, 49, 65, 67, 97, 133] {
+                for len in [len - 1, len, len + 1] {
+                    let mut share: Vec<u8> = point.iter().copied().cycle().take(len).collect();
+                    share[0] = prefix;
+                    shares.push(share);
+                }
+            }
         }
-        let mut shares = vec![vec![], vec![0], vec![0; point.len()]];
-        for share in &bases {
+
+        let mut bases = Vec::new();
+        for (uncompressed, small_x) in [(&point, false), (&small_point, true)] {
+            bases.push((uncompressed.clone(), small_x));
+            bases.push((compress(uncompressed), small_x));
+            for prefix in [0x06, 0x07] {
+                let mut hybrid = uncompressed.clone();
+                hybrid[0] = prefix;
+                bases.push((hybrid, small_x));
+            }
+        }
+        for (share, small_x) in &bases {
+            let x = 1..=field;
             let mut x_max = share.clone();
-            x_max[1..=field].fill(0xff);
+            x_max[x.clone()].fill(0xff);
+            let mut x_prime = share.clone();
+            x_prime[x.clone()].copy_from_slice(&prime);
             let mut x_flip = share.clone();
             x_flip[field] ^= 1;
             let mut other_y = share.clone();
@@ -330,34 +413,74 @@ fn nist_share_edges_match_aws_lc() {
             long.push(0);
             shares.extend([
                 x_max,
+                x_prime,
                 x_flip,
                 other_y,
                 long,
                 share[..share.len() - 1].to_vec(),
             ]);
+            if *small_x {
+                let mut x_plus_p = share.clone();
+                x_plus_p[x.clone()].copy_from_slice(&add_be(&share[x], &prime));
+                shares.push(x_plus_p);
+            }
             if share.len() == point.len() {
+                let mut y_max = share.clone();
+                y_max[1 + field..].fill(0xff);
                 let mut off_curve = share.clone();
                 off_curve[share.len() - 2] ^= 1;
-                shares.push(off_curve);
+                shares.extend([y_max, off_curve]);
             }
         }
-        shares.extend(bases);
+        shares.extend(bases.into_iter().map(|(share, _)| share));
         for share in shares {
-            assert_eq!(
-                accepts(&rind, group, &share),
-                accepts(&aws, group, &share),
-                "{group:?} {share:02x?}"
-            );
+            assert_same_verdict(group, &share);
         }
     }
 }
 
-/// A share wrapped in an X.509 `SubjectPublicKeyInfo` is a known difference:
-/// aws-lc-rs's `ParsedPublicKey::new` (`aws-lc-rs-1.19.0/src/agreement.rs`,
-/// lines 747-790) tries `parse_rfc5280_public_key` before the raw point, so
-/// dimpl's aws-lc-rs provider takes it, and rind-dimpl, like dimpl's
-/// RustCrypto provider, refuses it. Whether to follow is the maintainer's call
-/// on quest/m2/confidence/dimpl-nist-share.md.
+/// Every truncation of a valid share, and each byte of it with its low or
+/// high bit flipped, gets an error or a secret from rind-dimpl, never a
+/// panic, and the same verdict as from dimpl's aws-lc-rs provider: X25519's
+/// share, and a NIST group's in the uncompressed, compressed, and both hybrid
+/// forms.
+#[test]
+fn mutated_key_shares_match_aws_lc() {
+    for group in [
+        NamedGroup::X25519,
+        NamedGroup::Secp256r1,
+        NamedGroup::Secp384r1,
+    ] {
+        let point = aws_share(group);
+        let mut bases = vec![point.clone()];
+        if group != NamedGroup::X25519 {
+            bases.push(compress(&point));
+            for prefix in [0x06, 0x07] {
+                let mut hybrid = point.clone();
+                hybrid[0] = prefix;
+                bases.push(hybrid);
+            }
+        }
+        for share in bases {
+            for len in 0..share.len() {
+                assert_same_verdict(group, &share[..len]);
+            }
+            for i in 0..share.len() {
+                for bit in [0x01, 0x80] {
+                    let mut mutated = share.clone();
+                    mutated[i] ^= bit;
+                    assert_same_verdict(group, &mutated);
+                }
+            }
+        }
+    }
+}
+
+/// A share wrapped in an X.509 `SubjectPublicKeyInfo` is a known difference,
+/// which `README.md` lists: aws-lc-rs's `ParsedPublicKey::new` tries
+/// `parse_rfc5280_public_key` before the raw point, so dimpl's aws-lc-rs
+/// provider takes it, and rind-dimpl, like dimpl's RustCrypto provider,
+/// refuses it.
 #[test]
 fn spki_key_shares_are_refused() {
     let aws = aws_lc_rs::default_provider();
@@ -372,15 +495,10 @@ fn spki_key_shares_are_refused() {
         assert!(!accepts(&rind, group, &spki), "{group:?}");
     }
 
-    let kx = aws
-        .kx_groups
-        .iter()
-        .find(|kx| kx.name() == NamedGroup::X25519)
-        .unwrap();
     let mut spki = vec![
         0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x6e, 0x03, 0x21, 0x00,
     ];
-    spki.extend_from_slice(kx.start_exchange(Buf::new()).unwrap().pub_key());
+    spki.extend_from_slice(&aws_share(NamedGroup::X25519));
     assert!(accepts(&aws, NamedGroup::X25519, &spki));
     assert!(!accepts(&rind, NamedGroup::X25519, &spki));
 }

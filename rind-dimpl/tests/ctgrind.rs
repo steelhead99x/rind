@@ -9,7 +9,8 @@
 use crabgrind::memcheck::{self, MemState};
 use crabgrind::valgrind::{self, RunningMode};
 use dimpl::crypto::{
-    Aad, Buf, Cipher, CryptoProvider, HashAlgorithm, Nonce, SignatureAlgorithm, TmpBuf, aws_lc_rs,
+    Aad, Buf, Cipher, CryptoProvider, HashAlgorithm, NamedGroup, Nonce, SignatureAlgorithm, TmpBuf,
+    aws_lc_rs,
 };
 
 /// Marks `value` secret: memcheck flags any branch or index that depends on it.
@@ -52,6 +53,46 @@ fn key_exchange() {
             "{:?}",
             group.name()
         );
+    }
+}
+
+/// Agrees on each NIST group from the peer's point in the compressed and
+/// hybrid forms, which rind-dimpl rewrites to the uncompressed point before
+/// its private key touches it.
+#[test]
+fn key_exchange_point_forms() {
+    for group in rind().kx_groups {
+        if group.name() == NamedGroup::X25519 {
+            continue;
+        }
+        for form in 0..2 {
+            let client = group.start_exchange(Buf::new()).unwrap();
+            let server = group.start_exchange(Buf::new()).unwrap();
+            let (client_pub, mut server_pub) =
+                (client.pub_key().to_vec(), server.pub_key().to_vec());
+            let y_parity = server_pub[server_pub.len() - 1] & 1;
+            if form == 0 {
+                server_pub.truncate(1 + server_pub.len() / 2);
+                server_pub[0] = 0x02 | y_parity;
+            } else {
+                server_pub[0] = 0x06 | y_parity;
+            }
+
+            let mut client_secret = Buf::new();
+            client.complete(&server_pub, &mut client_secret).unwrap();
+            let mut server_secret = Buf::new();
+            server.complete(&client_pub, &mut server_secret).unwrap();
+
+            public(client_secret.as_ref());
+            public(server_secret.as_ref());
+            assert_eq!(
+                client_secret.as_ref(),
+                server_secret.as_ref(),
+                "{:?} {:02x}",
+                group.name(),
+                server_pub[0]
+            );
+        }
     }
 }
 
