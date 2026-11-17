@@ -6,6 +6,7 @@ Usage: admin/bench-report-test
 
 import contextlib
 import fcntl
+import glob
 import hashlib
 import hmac
 import importlib.machinery
@@ -20,6 +21,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 # The script has no .py name to cache bytecode under.
 sys.dont_write_bytecode = True
@@ -2206,6 +2208,99 @@ class AnyHost(unittest.TestCase):
                         br.import_hosts(src)
                     self.assertEqual(os.listdir(empty), ["box.json"])
                     self.assertIn("missing: not imported, no well-formed results list", err.getvalue())
+        finally:
+            br.DATA_DIR = saved
+
+    def test_a_host_file_missing_what_the_report_reads_is_skipped(self):
+        """The published results pass; each field the report reads, removed or broken, skips the file."""
+        real = {}
+        for path in sorted(glob.glob(os.path.join(br.DATA_DIR, "*.json"))):
+            name = os.path.splitext(os.path.basename(path))[0]
+            if name != "tiers":
+                with open(path) as f:
+                    real[name] = json.load(f)
+        self.assertTrue(real)
+        for name, body in real.items():
+            self.assertEqual(br.unmeasured(body), "", name)
+        base = dict(next(iter(real.values())))
+        for key in ("machine", "alias_of"):
+            base.pop(key, None)
+        bad = {}
+        for field in ("commit", "started", "os", "cpu", "cpu.model", "cpu.arch", "cpu.logical_cpus", "toolchain", "toolchain.rustc"):
+            for how, value in (("missing", None), ("wrong", 7 if field != "cpu.logical_cpus" else "8")):
+                body = json.loads(json.dumps(base))
+                parent, _, key = field.rpartition(".")
+                holder = body[parent] if parent else body
+                if value is None:
+                    del holder[key]
+                else:
+                    holder[key] = value
+                bad[f"{how}-{field.replace('.', '-')}"] = body
+        for label, ns in (("0", 0), ("neg", -1), ("true", True), ("nan", float("nan")), ("inf", float("inf")), ("str", "1")):
+            body = json.loads(json.dumps(base))
+            body["results"][0]["ns"] = ns
+            bad[f"ns-{label}"] = body
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                for d in (src, data):
+                    for name, body in {"good": base, **bad}.items():
+                        with open(os.path.join(d, f"{name}.json"), "w") as f:
+                            json.dump(dict(body, host=name), f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    self.assertEqual(list(br.load_measured(data)), ["good"])
+                for name in bad:
+                    self.assertRegex(err.getvalue(), rf"bench-report: {name}: .*, skipped\n")
+                with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.summary(type("Args", (), {"dir": src})())
+                for name in bad:
+                    self.assertRegex(err.getvalue(), rf"bench-report: {name}: .*, skipped\n")
+                    self.assertNotIn(f"`{name}`", out.getvalue())
+                self.assertIn("`good`", out.getvalue())
+                with tempfile.TemporaryDirectory() as empty:
+                    br.DATA_DIR = empty
+                    with contextlib.redirect_stderr(io.StringIO()) as err:
+                        br.import_hosts(src)
+                    self.assertEqual(os.listdir(empty), ["good.json"])
+                    for name in bad:
+                        self.assertIn(f"bench-report: {name}: not imported, ", err.getvalue())
+        finally:
+            br.DATA_DIR = saved
+
+    def test_render_check_with_from_writes_nothing(self):
+        """`render --from DIR --check`, with or without --adopt, leaves the data directory byte for byte."""
+
+        def snapshot(d):
+            out = {}
+            for name in sorted(os.listdir(d)):
+                with open(os.path.join(d, name), "rb") as f:
+                    out[name] = f.read()
+            return out
+
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as scratch:
+                data = os.path.join(scratch, "data")
+                shutil.copytree(saved, data)
+                br.DATA_DIR = data
+                resident = laptop("nixos")
+                with open(os.path.join(data, "laptop.json"), "w") as f:
+                    json.dump(resident, f)
+                newcomer = laptop("laptop")
+                newcomer["machine"] = "cccccccc"
+                for name in ("laptop", "fresh"):
+                    with open(os.path.join(src, f"{name}.json"), "w") as f:
+                        json.dump(dict(newcomer, host=name), f)
+                before = snapshot(data)
+                for extra in ([], ["--adopt", "laptop"]):
+                    with self.subTest(extra=extra):
+                        argv = ["bench-report", "render", "--from", src, "--check", *extra]
+                        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(io.StringIO()):
+                            with self.assertRaises(SystemExit) as raised:
+                                br.main()
+                        self.assertEqual(snapshot(data), before)
+                        self.assertIn("--check", str(raised.exception))
         finally:
             br.DATA_DIR = saved
 
