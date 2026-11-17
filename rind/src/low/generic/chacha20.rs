@@ -110,13 +110,29 @@ fn state(key: &[u8; 32], nonce: &[u8; 16]) -> [u32; 16] {
 // Indexes, as `state` does, so `proofs/` can prove it.
 pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
     let mut st = state(key, nonce);
+    #[cfg(not(all(target_arch = "arm", not(target_has_atomic = "ptr"))))]
     rounds(&mut st);
+    #[cfg(all(target_arch = "arm", not(target_has_atomic = "ptr")))]
+    rounds_rolled(&mut st);
     let mut out = [0u8; 32];
     for i in 0..8 {
         let w = if i < 4 { st[i] } else { st[i + 8] };
         out[4 * i..4 * (i + 1)].copy_from_slice(&w.to_le_bytes());
     }
     out
+}
+
+/// The ten double rounds as a loop, for HChaCha20 on ARMv6-M (Arm without
+/// CAS atomics, in cfg terms), where code runs from flash through a small
+/// cache: inlined unrolled, they made XChaCha20-Poly1305's seal 4.4 KB of
+/// code that a short message runs once per call. The keystream keeps the
+/// unrolled rounds, which run once per 64 bytes.
+#[cfg(all(target_arch = "arm", not(target_has_atomic = "ptr")))]
+#[inline(never)]
+fn rounds_rolled(st: &mut [u32]) {
+    for _ in 0..10 {
+        double_round(st);
+    }
 }
 
 /// ChaCha20's keystream block for `key` and `counter_nonce`, the
