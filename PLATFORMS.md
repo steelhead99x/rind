@@ -116,11 +116,11 @@ qemu. iOS devices' code is only built.
   (`just bare-metal`), for `thumbv6m-none-eabi` and
   `riscv32imc-unknown-none-elf`, which lack compare-and-swap and so keep no
   reuse cache, for `thumbv7em-none-eabihf`, for `armv7a-none-eabi` and
-  `armv7r-none-eabihf` (the 32-bit ARM backend, with its NEON paths left
-  off), for `aarch64-unknown-none` (the aarch64 backend; its crypto tier is
-  the compile-time target features, and NEON is the default) and
-  `aarch64-unknown-none-softfloat` (the portable backend, which has no
-  NEON), and for `x86_64-unknown-none`. That target is soft-float and does not
+  `armv7r-none-eabihf`, for `aarch64-unknown-none` and
+  `aarch64-unknown-none-softfloat`, all on the portable backend, and for
+  `x86_64-unknown-none`. The aarch64 and 32-bit ARM assembly loads and stores
+  unaligned words, which these strict-align targets fault on when the MMU is
+  off or alignment checking is on, so bare metal does not build it. That target is soft-float and does not
   enable SSE2, so the build stays on the portable backend until it passes
   `-C target-feature=+sse,+sse2,-soft-float`, and
   `--cfg curve25519_dalek_backend="serial"` or `"fiat"`. Dalek's default
@@ -138,8 +138,8 @@ qemu. iOS devices' code is only built.
   and the avx512 backend when `avx512ifma` and `avx512vl` are both enabled.
   cpufeatures reports those features on this os only when they are target
   features, so dalek uses YMM or ZMM only under that same opt-in. An explicit
-  `simd` or `avx512` cfg selects that same code. The four targets that keep
-  an assembly backend are also built, so their `global_asm` is assembled.
+  `simd` or `avx512` cfg selects that same code. The SSE2 build is also
+  compiled, so its `global_asm` is assembled.
   `Dit::hold` does nothing on these targets: there is no thread-local count, and these backends set
   no CPU state there.
   The ESP32's Xtensa targets are tier 3, on Espressif's toolchain, so they
@@ -244,15 +244,16 @@ operands, so it is not constant-time on them:
   not end early, so it pays that long path; its speed was not measured. The
   rest of rind's secret arithmetic on 32-bit limbs still takes whole products.
 - 32-bit `arm` M-profile: Arm's Cortex-M3, whose `umull`, `smull`, `umlal`,
-  and `smlal` end early "depending on the size of the source values" (Arm
-  DDI 0337, "Cortex-M3 instructions"), as when an operand fits in 16 bits, is
+  and `smlal` end early "depending on the size of the source values" ([Cortex-M3
+  TRM] Table 3-1), as when an operand fits in 16 bits, is
   zero, or is a power of two ([BearSSL ctmul]). On its target,
   `thumbv7m-none-eabi`, and on `thumbv6m-none-eabi` and
   `thumbv8m.base-none-eabi`, whose cores have no `umull`, Poly1305 builds
   each product from 32x32->32-bit multiplies of 16-bit halves, which those
   cores do in one fixed time, so ChaCha20-Poly1305's MAC is constant time
   there. The rest of rind's secret arithmetic on 32-bit limbs still takes
-  whole 32x32->64-bit products. The Cortex-M4's `umull` takes one cycle.
+  whole 32x32->64-bit products. The Cortex-M4's `umull` takes one cycle
+  ([Cortex-M4 TRM] Table 3-1).
 - `x86_64` and 32-bit `x86`: VIA's Nano 2000 series ([BearSSL ctmul]). Intel
   lists `mul` and `imul` as data-independent-time ([Intel DOIT]).
 
@@ -314,6 +315,8 @@ family since 2004, and of some AMD cores.
 [ARM1176 TRM]: https://developer.arm.com/documentation/ddi0301/h
 [BearSSL ctmul]: https://www.bearssl.org/ctmul.html
 [eprint 2009/538]: https://eprint.iacr.org/2009/538
+[Cortex-M3 TRM]: https://developer.arm.com/documentation/ddi0337/h
+[Cortex-M4 TRM]: https://developer.arm.com/documentation/ddi0439/b
 [Gu and Shacham]: https://arxiv.org/abs/2311.14246
 [Intel DOIT]: https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/resources/data-operand-independent-timing-instructions.html
 [Intel DOITM]: https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/best-practices/data-operand-independent-timing-isa-guidance.html

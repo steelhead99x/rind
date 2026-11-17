@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 use core::arch::x86_64::*;
-use core::sync::atomic::{AtomicU8, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, Ordering};
 
 pub(crate) fn enter_cpu_state() -> u32 {
     // DOIT: "Data Operand Independent Timing" -- turning this on
@@ -370,38 +370,6 @@ impl HaveBmi2Adx {
     }
 }
 
-macro_rules! cached_tokens {
-    ($($name:ident),+ $(,)?) => {$(
-        impl $name {
-            /// Rebuilds a token the SHA path cache already proved.
-            pub(super) const fn cached() -> Self {
-                Self(())
-            }
-        }
-    )+};
-}
-
-cached_tokens!(
-    HaveSha1, HaveSha256, HaveAvx, HaveAvx2, HaveSsse3, HaveSha512
-);
-
-/// Remembers a non-zero `pick` in `slot`. `0` means empty, so `pick` must
-/// not return it. Concurrent callers may all run `pick`; it has to agree.
-pub(super) fn cached_tag(slot: &AtomicU8, pick: impl FnOnce() -> u8) -> u8 {
-    match slot.load(Ordering::Acquire) {
-        0 => {
-            let tag = pick();
-            // Zero means empty. A zero tag would be read as a miss forever.
-            assert_ne!(tag, 0, "a cached feature tag is never zero");
-            match slot.compare_exchange(0, tag, Ordering::Release, Ordering::Acquire) {
-                Ok(_) => tag,
-                Err(stored) => stored,
-            }
-        }
-        tag => tag,
-    }
-}
-
 /// Whether the CPU is Intel's, for code that is fastest on one vendor's cores.
 pub(crate) fn is_intel() -> bool {
     has(INTEL)
@@ -509,10 +477,16 @@ fn read_cpuid_leaves() -> CpuidLeaves {
         #[allow(unused_unsafe)]
         // SAFETY: CPUID reported a maximum leaf of at least 7.
         let leaf7 = unsafe { __cpuid(7) };
-        #[allow(unused_unsafe)]
-        // SAFETY: as above. Subleaf 1 is zero when the CPU does not have it.
-        let sub1 = unsafe { __cpuid_count(7, 1) };
-        (leaf7.ebx, leaf7.ecx, sub1.eax)
+        // Subleaf 0's EAX is the highest subleaf. Intel documents zeros above
+        // it, but a hypervisor need not follow that.
+        let sub1_eax = if leaf7.eax >= 1 {
+            #[allow(unused_unsafe)]
+            // SAFETY: as above, and subleaf 0 reported subleaf 1.
+            unsafe { __cpuid_count(7, 1) }.eax
+        } else {
+            0
+        };
+        (leaf7.ebx, leaf7.ecx, sub1_eax)
     } else {
         (0, 0, 0)
     };

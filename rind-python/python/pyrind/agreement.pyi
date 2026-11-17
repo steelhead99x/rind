@@ -30,7 +30,7 @@ class PrivateKey:
     def from_sec1(algorithm: Algorithm, der: Buffer) -> PrivateKey:
         """Loads an ECDH key for `algorithm` from SEC1 `ECPrivateKey` DER."""
     def public_key(self) -> PublicKey:
-        """The public key to send the peer."""
+        """The public key to send the peer, the same object each call."""
     def agree(self, peer: Buffer) -> bytes:
         """Agrees a shared secret with the peer's public key `peer`, as `bytes(PublicKey)` encodes it; raises `KeyRejected` for an invalid one."""
     def to_pkcs8(self) -> bytes:

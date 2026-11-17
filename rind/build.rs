@@ -13,10 +13,11 @@
 //! SSE makes LLVM abort while splitting vector results. The backend then
 //! reads CPUID through `core::arch`. AVX, AVX2, SHA512, and AVX-512 run
 //! only when those target features are enabled: XCR0 does not mean an
-//! interrupt saves YMM or ZMM. Bare-metal aarch64
-//! with NEON keeps the aarch64 backend,
-//! and its crypto tier is the compile-time target features, because there
-//! is no OS to ask. The 32-bit ARM assembly is cut for ARMv7,
+//! interrupt saves YMM or ZMM. Bare-metal aarch64 and 32-bit ARM get the
+//! portable backend: their targets are strict-align, since the MMU may be off
+//! or alignment checking on, and that assembly loads and stores unaligned
+//! words, such as AES-GCM's `ldp` of its input. x86_64 has no alignment
+//! fault unless ring 3 sets `AC`. The 32-bit ARM assembly is cut for ARMv7,
 //! so a target for an earlier core, such as ARMv6's
 //! `arm-unknown-linux-gnueabihf` or ARMv5TE's `arm-linux-androideabi`, gets
 //! the portable backend too, and so does a microcontroller (M-profile)
@@ -95,12 +96,14 @@ fn main() {
     let sse2 = enabled("sse2");
     let backend = match arch.as_str() {
         "x86_64" if little && !forced && (!bare_metal || sse2) => "x86_64",
-        "aarch64" if little && !forced && neon => "aarch64",
+        "aarch64" if little && !forced && !bare_metal && neon => "aarch64",
         // M-profile is Thumb-only and has no NEON, so the arm assembly
-        // cannot run there. A custom ARMv7 target without 64-bit atomics
-        // stays portable: the manifest cannot see the triple's version
+        // cannot run there. Bare metal takes the portable backend: the
+        // assembly makes unaligned accesses, which a strict-align target
+        // faults on. A custom ARMv7 target without 64-bit atomics stays
+        // portable: the manifest cannot see the triple's version
         // (UPSTREAM.md) and links libcrux only when the target has them.
-        "arm" if little && !forced && has_atomic64() && armv7_or_later() && !m_profile() => "arm",
+        "arm" if little && !forced && !bare_metal && has_atomic64() && armv7_or_later() && !m_profile() => "arm",
         _ => "portable",
     };
     println!(r#"cargo::rustc-cfg=rind_backend="{backend}""#);

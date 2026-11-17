@@ -1,10 +1,8 @@
 // Written for Graviola by Joe Birr-Pixton, 2024.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-use core::sync::atomic::AtomicU8;
-
 use crate::low::x86_64;
-use crate::low::x86_64::cpu::{HaveAvx, HaveAvx2, HaveSha256, HaveSsse3, cached_tag, is_intel};
+use crate::low::x86_64::cpu::{HaveAvx, HaveAvx2, HaveSha256, HaveSsse3, is_intel};
 use crate::low::{pad, sha256_digest, split_tail};
 
 /// The SHA-256 routine this CPU runs, with the proof it may.
@@ -53,22 +51,9 @@ fn sha256_compress_padded(state: &mut [u32; 8], message: &[u8], length: [u8; 8])
 }
 
 fn path() -> Path {
-    // Picked once, rather than testing up to four features on every compression.
-    // An atomic, not `OnceLock`: this file also builds for `x86_64-unknown-none`.
-    static PATH: AtomicU8 = AtomicU8::new(0);
-    match cached_tag(&PATH, || match pick() {
-        Path::Shaext(_) => 1,
-        Path::Avx(_) => 2,
-        Path::Avx2(_) => 3,
-        Path::Ssse3(_) => 4,
-        Path::Nohw => 5,
-    }) {
-        1 => Path::Shaext(HaveSha256::cached()),
-        2 => Path::Avx(HaveAvx::cached()),
-        3 => Path::Avx2(HaveAvx2::cached()),
-        4 => Path::Ssse3(HaveSsse3::cached()),
-        _ => Path::Nohw,
-    }
+    // Each check is one load of the detected features, so picking on every
+    // compression costs no more than reading a cached choice.
+    pick()
 }
 
 fn pick() -> Path {

@@ -17,6 +17,6 @@ Highs:
 Mediums:
 - CPUID leaf-7 subleaf 1 is read without checking the highest subleaf.
 - The `cached()` constructors skip the CPU check.
-- Targets without compare-and-swap rebuild the cache on every call.
+- Targets without compare-and-swap rebuild the cache on every call: moved to [Reuse cache without compare-and-swap](/quest/m2/no-cas-reuse-cache.md).
 
 Finish this before [#85](/quest/m2/85-xtensa-lint.md).

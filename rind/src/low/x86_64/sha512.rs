@@ -8,9 +8,7 @@
 //! builds it, and rind's HOL Light proof in `proofs/hol-light/` covers
 //! OpenSSL's AVX2 routine, as rind builds it; nothing verifies the others.
 
-use core::sync::atomic::AtomicU8;
-
-use super::cpu::{HaveAvx, HaveAvx2, HaveSha512, cached_tag, is_intel};
+use super::cpu::{HaveAvx, HaveAvx2, HaveSha512, is_intel};
 
 /// The SHA-512 routine this CPU runs, with the proof it may.
 #[derive(Clone, Copy)]
@@ -41,20 +39,9 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
 }
 
 fn path() -> Path {
-    // Picked once, rather than testing several features on every compression.
-    // An atomic, not `OnceLock`: this file also builds for `x86_64-unknown-none`.
-    static PATH: AtomicU8 = AtomicU8::new(0);
-    match cached_tag(&PATH, || match pick() {
-        Path::Sha512ext(_) => 1,
-        Path::Avx2(_) => 2,
-        Path::Avx(_) => 3,
-        Path::Nohw => 4,
-    }) {
-        1 => Path::Sha512ext(HaveSha512::cached()),
-        2 => Path::Avx2(HaveAvx2::cached()),
-        3 => Path::Avx(HaveAvx::cached()),
-        _ => Path::Nohw,
-    }
+    // Each check is one load of the detected features, so picking on every
+    // compression costs no more than reading a cached choice.
+    pick()
 }
 
 fn pick() -> Path {

@@ -38,16 +38,16 @@ libcrux-sha2 = { version = "0.0.9", features = ["expose-hacl"] }
 
 # armv7's ChaCha20 setup and its Poly1305 without NEON. A portable build
 # uses HACL*'s Poly1305 only from tests. build.rs sends a little-endian
-# ARMv7-or-later target that is not M-profile and has 64-bit atomics to the
-# arm backend, and everything else, including ARMv6, ARMv5TE, and M-profile,
-# to portable. A manifest cannot read that choice, nor the unstable `v7`
-# feature (UPSTREAM.md). It can read `target_has_atomic`: every standard
-# A-profile and R-profile triple has 64-bit atomics, and no M-profile or
-# ARMv5TE triple does. build.rs requires them too, so a custom ARMv7 target
-# without them stays portable and compiles, and loses the NEON assembly.
-# ARMv6 has 64-bit atomics and stays portable, so it still builds these
-# crates and does not call them.
-[target.'cfg(all(target_arch = "arm", target_endian = "little", not(rind_portable), target_has_atomic = "64"))'.dependencies]
+# ARMv7-or-later target that is not bare metal, not M-profile, and has
+# 64-bit atomics to the arm backend, and everything else, including ARMv6,
+# ARMv5TE, M-profile, and every `none` triple, to portable. A manifest cannot
+# read that choice, nor the unstable `v7` feature (UPSTREAM.md). It can read
+# `target_os` and `target_has_atomic`: every standard hosted A-profile triple
+# has 64-bit atomics, and no ARMv5TE triple does. build.rs requires them too,
+# so a custom ARMv7 target without them stays portable and compiles, and
+# loses the NEON assembly. Hosted ARMv6 has 64-bit atomics and stays
+# portable, so it still builds these crates and does not call them.
+[target.'cfg(all(target_arch = "arm", target_endian = "little", not(rind_portable), not(target_os = "none"), target_has_atomic = "64"))'.dependencies]
 libcrux-hacl-rs = { version = "0.0.6", features = ["alloc"] }
 libcrux-macros = "0.0.4"
 libcrux-poly1305 = { version = "0.0.7", features = ["expose-hacl"] }

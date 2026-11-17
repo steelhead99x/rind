@@ -151,11 +151,40 @@ mod generic {
         all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha1;
-    #[cfg(all(test, any(rind_backend = "arm", rind_backend = "x86_64")))]
+    #[cfg(all(
+        test,
+        any(
+            rind_backend = "arm",
+            rind_backend = "portable",
+            rind_backend = "x86_64"
+        )
+    ))]
     pub(super) mod sha256;
+    // FIPS 180-4 §4.2.2, one copy. The ESP-IDF Xtensa compressor and the
+    // test compressor above both read it. aarch64 tests compile neither
+    // reader, so the table stays out: clippy denies an unused static.
+    #[cfg(any(
+        all(target_arch = "xtensa", target_os = "espidf"),
+        all(
+            test,
+            any(
+                rind_backend = "arm",
+                rind_backend = "portable",
+                rind_backend = "x86_64"
+            )
+        )
+    ))]
+    pub(super) mod sha256_k;
     // SLH-DSA's SHA-256 lanes one at a time, which x86_64 runs with the SHA
     // extensions or without AVX2.
     pub(super) mod sha256x8;
+    // Rolled SHA-512 wherever the pointer is not 64 bits. HACL*'s unrolled
+    // form is about 47 KiB in that codegen and misses a small instruction
+    // cache. 64-bit tests still compile it and check it against FIPS 180-4.
+    // `rind_limb` does not select it: a 64-bit host forced to 32-bit limbs
+    // still ships the 64-bit HACL* body.
+    #[cfg(any(all(rind_backend = "portable", not(target_pointer_width = "64")), test))]
+    pub(super) mod sha512;
     pub(super) mod zeroise;
 }
 

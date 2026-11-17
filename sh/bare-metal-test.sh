@@ -172,9 +172,10 @@ if [[ -e $tmp/bad/0.args ]]; then
     exit 1
 fi
 
-# Default path: eight targets, two clippy rows each, then four assembly
-# builds, then the no-SSE2 x86_64 rows (two clippy and one build), then two
-# tree checks: thumbv7em-none-eabihf, then armv7a-none-eabi. The caller's
+# Default path: eight targets, two clippy rows each, then the one assembly
+# build, SSE2 x86_64 (the arm and aarch64 `none` targets are portable),
+# then the no-SSE2 x86_64 rows (two clippy and one build), then two tree
+# checks: thumbv7em-none-eabihf, then armv7a-none-eabi. The caller's
 # RUSTFLAGS and target variable stay as they were.
 # This script's flags go to the wrapper. Only x86_64-unknown-none gains SSE2.
 default=$tmp/default
@@ -186,8 +187,8 @@ if ! run "$default" env \
     exit 1
 fi
 count=$(find "$default" -name '*.args' | wc -l)
-if [[ $count -ne 25 ]]; then
-    echo "default path ran $count commands, want 25" >&2
+if [[ $count -ne 22 ]]; then
+    echo "default path ran $count commands, want 22" >&2
     exit 1
 fi
 i=0
@@ -221,31 +222,24 @@ while [[ $i -lt 16 ]]; do
     fi
     i=$((i + 1))
 done
-arm_a=$(args_of "$default/16.args")
-arm_r=$(args_of "$default/17.args")
-arm64=$(args_of "$default/18.args")
-x86=$(args_of "$default/19.args")
-assert_has "$arm_a" "build"
-assert_has "$arm_a" "armv7a-none-eabi"
-assert_has "$(script_flags "$default/16.env")" 'getrandom_backend="custom"'
-assert_has "$arm_r" "build"
-assert_has "$arm_r" "armv7r-none-eabihf"
-assert_has "$arm64" "aarch64-unknown-none"
+x86=$(args_of "$default/16.args")
+assert_has "$x86" "build"
 assert_has "$x86" "x86_64-unknown-none"
-assert_has "$(script_flags "$default/19.env")" "target-feature=+sse,+sse2,-soft-float"
-nosse=$(args_of "$default/20.args")
+assert_has "$(script_flags "$default/16.env")" 'getrandom_backend="custom"'
+assert_has "$(script_flags "$default/16.env")" "target-feature=+sse,+sse2,-soft-float"
+nosse=$(args_of "$default/17.args")
 assert_has "$nosse" "clippy"
 assert_has "$nosse" "x86_64-unknown-none"
-nosse_flags=$(script_flags "$default/20.env")
+nosse_flags=$(script_flags "$default/17.env")
 assert_has "$nosse_flags" 'curve25519_dalek_backend="serial"'
 assert_lacks "$nosse_flags" "soft-float"
-nosse_build=$(args_of "$default/22.args")
+nosse_build=$(args_of "$default/19.args")
 assert_has "$nosse_build" "build"
 assert_has "$nosse_build" "x86_64-unknown-none"
-tree_args=$(args_of "$default/23.args")
+tree_args=$(args_of "$default/20.args")
 assert_has "$tree_args" "tree"
 assert_has "$tree_args" "thumbv7em-none-eabihf"
-arm_tree=$(args_of "$default/24.args")
+arm_tree=$(args_of "$default/21.args")
 assert_has "$arm_tree" "tree"
 assert_has "$arm_tree" "armv7a-none-eabi"
 # Cargo does not fingerprint wrapper flags. Each flag set gets its own
@@ -253,7 +247,7 @@ assert_has "$arm_tree" "armv7a-none-eabi"
 thumb_dir=$(target_dir_of "$default/0.env")
 if [[ $thumb_dir != "$(target_dir_of "$default/2.env")" \
     || $thumb_dir == "$(target_dir_of "$default/14.env")" \
-    || $(target_dir_of "$default/14.env") == "$(target_dir_of "$default/20.env")" ]]; then
+    || $(target_dir_of "$default/14.env") == "$(target_dir_of "$default/17.env")" ]]; then
     echo "flag sets shared a target dir" >&2
     exit 1
 fi
