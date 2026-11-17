@@ -226,7 +226,8 @@ fn detect() -> u8 {
 /// `RIND_CPU_DISABLE_wide_mul` selects the narrow schedules, and
 /// `RIND_CPU_FORCE_wide_mul` the `_alt` ones, in a debug build or a release
 /// build with `--cfg rind_cpu_disable`. A release build without that cfg
-/// compiles both reads out. Disable wins.
+/// compiles both reads out, and the FIPS module compiles out the force.
+/// Disable wins.
 ///
 /// `_alt` is scalar base Armv8 and runs on every core rind supports, so
 /// forcing it cannot fault. [`test_toggle`] does not take a force flag:
@@ -264,11 +265,11 @@ fn detect_wide_multiplier() -> bool {
     #[cfg(target_os = "linux")]
     {
         // A debug build, or a release one with `--cfg rind_cpu_disable`, can
-        // name a fixture instead of the host's register. Release builds
-        // compile this out. `admin/mutants` runs the debug tests, so a mutant
-        // that returns a constant fails the fixture whose answer is the other
-        // one.
-        #[cfg(any(debug_assertions, rind_cpu_disable))]
+        // name a fixture instead of the host's register. Release builds and
+        // the FIPS module, which builds with that cfg, compile this out.
+        // `admin/mutants` runs the debug tests, so a mutant that returns a
+        // constant fails the fixture whose answer is the other one.
+        #[cfg(all(any(debug_assertions, rind_cpu_disable), not(rind_fips)))]
         if let Some(midr) = midr_fixture() {
             return midr.is_none_or(wide_from_midr);
         }
@@ -280,7 +281,12 @@ fn detect_wide_multiplier() -> bool {
 
 /// `RIND_TEST_MIDR=narrow|wide|none` stands in for `MIDR_EL1`: a
 /// Cortex-A76 r4p1, a Neoverse V1 r1p1, or a kernel without `HWCAP_CPUID`.
-#[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
+/// Not in the FIPS module, where no variable names the part.
+#[cfg(all(
+    target_os = "linux",
+    any(debug_assertions, rind_cpu_disable),
+    not(rind_fips)
+))]
 fn midr_fixture() -> Option<Option<u64>> {
     let midr = match std::env::var("RIND_TEST_MIDR").ok().as_deref() {
         Some("narrow") => Some(0x414f_d0b1),
@@ -423,8 +429,8 @@ fn test_toggle(id: &str, detected: bool) -> bool {
 }
 
 /// Deny with `RIND_CPU_DISABLE_<id>`. When `force` is set, also force with
-/// `RIND_CPU_FORCE_<id>`. Disable wins. A release build without
-/// `--cfg rind_cpu_disable` compiles both reads out.
+/// `RIND_CPU_FORCE_<id>`, except in the FIPS module. Disable wins. A release
+/// build without `--cfg rind_cpu_disable` compiles both reads out.
 #[cfg(not(any(debug_assertions, rind_cpu_disable)))]
 fn feature_toggle(_id: &str, detected: bool, _force: bool) -> bool {
     detected
@@ -442,11 +448,16 @@ fn feature_toggle(id: &str, detected: bool, force: bool) -> bool {
         println!("DEBUG: denying cpuid {id:?}");
         return false;
     }
+    // The FIPS module builds with `--cfg rind_cpu_disable` and keeps the
+    // denial, which only takes a path it already runs on a core without the
+    // feature. No variable forces one on inside its boundary.
+    #[cfg(not(rind_fips))]
     if force && std::env::var_os(format!("RIND_CPU_FORCE_{id}")).is_some() {
-        #[cfg(not(rind_fips))]
         println!("DEBUG: forcing cpuid {id:?}");
         return true;
     }
+    #[cfg(rind_fips)]
+    let _ = force;
     detected
 }
 
@@ -602,7 +613,7 @@ mod tests {
 
     // The override is process-wide, so each case is a child. Disable wins
     // over force. A release build without `--cfg rind_cpu_disable` compiles
-    // the read out, and this test with it.
+    // the read out, and this test with it. The FIPS module reads no force.
     #[cfg(any(debug_assertions, rind_cpu_disable))]
     #[test]
     fn wide_mul_env_overrides() {
@@ -612,11 +623,16 @@ mod tests {
             println!("{CHILD} done");
             return;
         }
-        for (mode, disable, force) in [
-            ("narrow", true, true),
-            ("wide", false, true),
-            ("narrow", true, false),
-        ] {
+        let cases: &[(&str, bool, bool)] = if cfg!(rind_fips) {
+            &[("narrow", true, true), ("narrow", true, false)]
+        } else {
+            &[
+                ("narrow", true, true),
+                ("wide", false, true),
+                ("narrow", true, false),
+            ]
+        };
+        for &(mode, disable, force) in cases {
             let mut cmd = reexec();
             // `--exact` matches the harness name, not the function's last
             // component. `module_path!` includes the crate, which libtest drops.
@@ -809,7 +825,11 @@ mod tests {
 
     /// `narrow` is Cortex-A76, `wide` is Neoverse V1, `none` has no
     /// `HWCAP_CPUID`.
-    #[cfg(all(target_os = "linux", any(debug_assertions, rind_cpu_disable)))]
+    #[cfg(all(
+        target_os = "linux",
+        any(debug_assertions, rind_cpu_disable),
+        not(rind_fips)
+    ))]
     #[test]
     fn midr_fixture_selects_the_schedule() {
         const CHILD: &str = "RIND_TEST_MIDR_CHILD";

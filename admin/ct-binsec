@@ -20,7 +20,7 @@
 # `UNDECODED`, whose instructions BINSEC cannot read and which this denies
 # through `--cfg rind_cpu_disable`, as `admin/ctgrind`'s jobs deny theirs.
 # `RIND_CPU_DISABLE_*` in the environment denies more. On aarch64, after the
-# host's own schedule, the X25519 and 16- and 32-word Montgomery tests run
+# host's own schedule, the elliptic-curve and 16-word Montgomery tests run
 # again with `RIND_CPU_DISABLE_wide_mul=1` and with `RIND_CPU_FORCE_wide_mul=1`,
 # each checked to take effect first: either host would otherwise prove only
 # its own schedule.
@@ -722,7 +722,6 @@ def main():
         "ct_binsec_ecdsa_p384",
         "ct_binsec_ecdsa_p521",
         "ct_binsec_mont16",
-        "ct_binsec_mont_mul",
     }
     overridden = any(os.environ.get(v) for v in ("RIND_CPU_DISABLE_wide_mul", "RIND_CPU_FORCE_wide_mul"))
     if arch(target) == "aarch64" and not overridden:

@@ -184,7 +184,7 @@ exclude_re = [
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace <= with > in tagged_from$',
   'rind/src/low/aarch64/aes_gcm\.rs:\d+:\d+: replace \+ with \* in tagged_from$',
   'rind/src/low/aarch64/bignum_copy_row_from_table_mux\.rs:\d+:\d+: replace match guard width\.is_multiple_of\(8\) with false in bignum_copy_row_from_table$',
-  'rind/src/low/aarch64/cpu\.rs:456:\d+: replace prefetch_ro with \(\)$',
+  'rind/src/low/aarch64/cpu\.rs:467:\d+: replace prefetch_ro with \(\)$',
   # Invisible to a test: whether the speculation barrier after setting DIT
   # runs, and which one.
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: (replace dit::speculation_barrier with \(\)|replace (!= with ==|& with [|^]) in dit::write)$',
@@ -271,8 +271,8 @@ exclude_re = [
   # The release build's toggle returns the detection and reads no environment
   # variable. Tests are debug builds, or release builds with
   # `rind_cpu_disable`, so they compile the other copy.
-  'rind/src/low/aarch64/cpu\.rs:430:\d+: replace feature_toggle -> bool with false$',
-  'rind/src/low/aarch64/cpu\.rs:430:\d+: replace feature_toggle -> bool with true$',
+  'rind/src/low/aarch64/cpu\.rs:436:\d+: replace feature_toggle -> bool with false$',
+  'rind/src/low/aarch64/cpu\.rs:436:\d+: replace feature_toggle -> bool with true$',
   # The portable backend has no CPU state to save, so `leave_cpu_state`
   # ignores it.
   'rind/src/low/portable/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',

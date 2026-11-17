@@ -10,7 +10,9 @@
 //! order, and a point at infinity are included too.
 //! `matches_portable` checks the narrow schedules against oracles other than
 //! the wide schedule: a schoolbook reduction, curve25519-dalek, and the
-//! generic backend.
+//! generic backend. `random` repeats both checks on seeded pseudo-random
+//! inputs. These tests compile only for aarch64, so they run on aarch64
+//! hosts and in the aarch64 qemu CI job.
 
 /// Both schedules agree, for every routine `wide_mux` dispatches.
 pub(crate) fn agree() {
@@ -425,6 +427,227 @@ pub(crate) fn agree() {
     }
 
     matches_portable(&g_affine, &g256, &g384, &g521);
+    random(&g_affine, &g256, &g384, &g521);
+}
+
+/// Seeded inputs per routine in [`random`] and in `mont`'s Karatsuba test.
+pub(super) const RANDOM_CASES: usize = 256;
+
+/// splitmix64, so a failure reproduces from its seed.
+pub(super) struct Rng(pub(super) u64);
+
+impl Rng {
+    pub(super) fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    }
+
+    pub(super) fn words<const N: usize>(&mut self) -> [u64; N] {
+        core::array::from_fn(|_| self.next())
+    }
+}
+
+/// Both schedules on [`RANDOM_CASES`] seeded inputs each, and against the
+/// oracles `matches_portable` uses: the schoolbook reduction for the field
+/// products and multiply-add, the generic backend for the NIST point
+/// operations, and, on the first `DALEK_CASES`, curve25519-dalek for X25519
+/// and Ed25519, and on the first `EULER_CASES` Euler's criterion for the
+/// inverse square root. The points are multiples of each generator by
+/// random full-width scalars. P-256's base multiplication, whose table
+/// `p256_base` builds, stays on the fixed scalars.
+fn random(g_affine: &[u64; 8], g256: &[u64; 12], g384: &[u64; 18], g521: &[u64; 27]) {
+    use curve25519_dalek::edwards::EdwardsPoint;
+    use curve25519_dalek::montgomery::MontgomeryPoint;
+    use curve25519_dalek::scalar::Scalar;
+
+    use crate::low::generic::limb64::{p256, p384, p521};
+
+    // dalek and the schoolbook exponentiation run unoptimised in the test
+    // build, and slower still in qemu.
+    const DALEK_CASES: usize = 16;
+    const EULER_CASES: usize = 4;
+    let p = [
+        0xffff_ffff_ffff_ffed,
+        u64::MAX,
+        u64::MAX,
+        0x7fff_ffff_ffff_ffff,
+    ];
+    let n = [
+        0x5812_631a_5cf5_d3ed,
+        0x14de_f9de_a2f7_9cd6,
+        0,
+        0x1000_0000_0000_0000,
+    ];
+    let mont256 = |x: &[u64]| {
+        let mut out = [0; 4];
+        p256::bignum_tomont_p256(&mut out, &limbs_at(x));
+        out
+    };
+    let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+    let mut invsqrt_samples = Vec::new();
+    // The previous case's points, so each addition has two random operands.
+    let mut prev256 = *g_affine;
+    let mut prev384 = *g384;
+    let mut prev521 = *g521;
+    for i in 0..RANDOM_CASES {
+        let [x, y, c]: [[u64; 4]; 3] = core::array::from_fn(|_| rng.words());
+        let dalek = i < DALEK_CASES;
+
+        let (mut w, mut nr) = ([0; 4], [0; 4]);
+        super::bignum_mul_p25519::bignum_mul_p25519(&mut w, &x, &y);
+        super::bignum_mul_p25519_narrow::bignum_mul_p25519(&mut nr, &x, &y);
+        assert_eq!(w, nr, "random mul {i}");
+        assert_eq!(nr, reduce(&mul256(x, y), &p), "random portable mul {i}");
+        super::bignum_sqr_p25519::bignum_sqr_p25519(&mut w, &x);
+        super::bignum_sqr_p25519_narrow::bignum_sqr_p25519(&mut nr, &x);
+        assert_eq!(w, nr, "random sqr {i}");
+        assert_eq!(nr, reduce(&mul256(x, x), &p), "random portable sqr {i}");
+        super::bignum_madd_n25519::bignum_madd_n25519(&mut w, &x, &y, &c);
+        super::bignum_madd_n25519_narrow::bignum_madd_n25519(&mut nr, &x, &y, &c);
+        assert_eq!(w, nr, "random madd {i}");
+        assert_eq!(nr, madd_n(x, y, c, n), "random portable madd {i}");
+        let rw = super::bignum_invsqrt_p25519::bignum_invsqrt_p25519(&mut w, &x);
+        let rn = super::bignum_invsqrt_p25519_narrow::bignum_invsqrt_p25519(&mut nr, &x);
+        assert_eq!((rw, w), (rn, nr), "random invsqrt {i}");
+        if i < EULER_CASES {
+            invsqrt_samples.push(x);
+        }
+
+        super::curve25519_x25519::curve25519_x25519(&mut w, &x, &y);
+        super::curve25519_x25519_narrow::curve25519_x25519(&mut nr, &x, &y);
+        assert_eq!(w, nr, "random x25519 {i}");
+        if dalek {
+            let want = MontgomeryPoint(words_to_bytes(&y))
+                .mul_clamped(words_to_bytes(&x))
+                .0;
+            assert_eq!(words_to_bytes(&nr), want, "random dalek x25519 {i}");
+        }
+        super::curve25519_x25519base::curve25519_x25519base(&mut w, &x);
+        super::curve25519_x25519base_narrow::curve25519_x25519base(&mut nr, &x);
+        assert_eq!(w, nr, "random x25519base {i}");
+        if dalek {
+            let want = MontgomeryPoint::mul_base_clamped(words_to_bytes(&x)).0;
+            assert_eq!(words_to_bytes(&nr), want, "random dalek x25519base {i}");
+        }
+
+        let (mut w, mut nr) = ([0; 8], [0; 8]);
+        super::edwards25519_scalarmulbase::edwards25519_scalarmulbase(&mut w, &x);
+        super::edwards25519_scalarmulbase_narrow::edwards25519_scalarmulbase(&mut nr, &x);
+        assert_eq!(w, nr, "random ed25519 base {i}");
+        if dalek {
+            let want = EdwardsPoint::mul_base(&Scalar::from_bytes_mod_order(words_to_bytes(&x)))
+                .compress()
+                .0;
+            assert_eq!(compress_edwards(&nr), want, "random dalek ed25519 base {i}");
+        }
+        let point = nr;
+        super::edwards25519_scalarmuldouble::edwards25519_scalarmuldouble(&mut w, &y, &point, &c);
+        super::edwards25519_scalarmuldouble_narrow::edwards25519_scalarmuldouble(
+            &mut nr, &y, &point, &c,
+        );
+        assert_eq!(w, nr, "random ed25519 double {i}");
+        // A valid encoding, and 32 random bytes, which mostly are not.
+        for (j, bytes) in [compress_edwards(&point), words_to_bytes(&c)]
+            .iter()
+            .enumerate()
+        {
+            let (mut w, mut nr) = ([0; 8], [0; 8]);
+            let rw = super::edwards25519_decode::edwards25519_decode(&mut w, bytes);
+            let rn = super::edwards25519_decode_narrow::edwards25519_decode(&mut nr, bytes);
+            assert_eq!((rw, w), (rn, nr), "random decode {i},{j}");
+        }
+        // `point` and `nr` (y·B) in extended (x, y, 1, xy) and projective
+        // (x, y, 1) coordinates.
+        let extended = |affine: &[u64; 8]| {
+            let mut out = [0; 16];
+            out[..8].copy_from_slice(affine);
+            out[8] = 1;
+            let mut t = [0; 4];
+            let (xy, _) = affine.as_chunks::<4>();
+            super::bignum_mul_p25519::bignum_mul_p25519(&mut t, &xy[0], &xy[1]);
+            out[12..].copy_from_slice(&t);
+            out
+        };
+        super::edwards25519_scalarmulbase::edwards25519_scalarmulbase(&mut nr, &y);
+        let (p1, p2) = (extended(&point), extended(&nr));
+        let (mut w16, mut n16) = ([0; 16], [0; 16]);
+        super::edwards25519_epadd::edwards25519_epadd(&mut w16, &p1, &p2);
+        super::edwards25519_epadd_narrow::edwards25519_epadd(&mut n16, &p1, &p2);
+        assert_eq!(w16, n16, "random epadd {i}");
+        let projective: [u64; 12] = p1[..12].try_into().unwrap();
+        super::edwards25519_epdouble::edwards25519_epdouble(&mut w16, &projective);
+        super::edwards25519_epdouble_narrow::edwards25519_epdouble(&mut n16, &projective);
+        assert_eq!(w16, n16, "random epdouble {i}");
+        let (mut w12, mut n12) = ([0; 12], [0; 12]);
+        super::edwards25519_pdouble::edwards25519_pdouble(&mut w12, &projective);
+        super::edwards25519_pdouble_narrow::edwards25519_pdouble(&mut n12, &projective);
+        assert_eq!(w12, n12, "random pdouble {i}");
+
+        // P-256: k·G, then k·G in Montgomery Jacobian (z = 1) plus the
+        // previous case's point in Montgomery affine.
+        let (mut w8, mut n8) = ([0; 8], [0; 8]);
+        super::p256_scalarmul::p256_scalarmul(&mut w8, &x, g_affine);
+        super::p256_scalarmul_narrow::p256_scalarmul(&mut n8, &x, g_affine);
+        assert_eq!(w8, n8, "random p256 scalarmul {i}");
+        let mut jacobian = [0; 12];
+        jacobian[..4].copy_from_slice(&mont256(&n8[..4]));
+        jacobian[4..8].copy_from_slice(&mont256(&n8[4..]));
+        jacobian[8..].copy_from_slice(&g256[8..]);
+        let mut affine = [0; 8];
+        affine[..4].copy_from_slice(&mont256(&prev256[..4]));
+        affine[4..].copy_from_slice(&mont256(&prev256[4..]));
+        prev256 = n8;
+        let (mut w12, mut n12, mut g12) = ([0; 12], [0; 12], [0; 12]);
+        super::p256_montjmixadd::p256_montjmixadd(&mut w12, &jacobian, &affine);
+        super::p256_montjmixadd_narrow::p256_montjmixadd(&mut n12, &jacobian, &affine);
+        p256::p256_montjmixadd(&mut g12, &jacobian, &affine);
+        assert_eq!((w12, n12), (g12, g12), "random p256 mixadd {i}");
+
+        let k6: [u64; 6] = rng.words();
+        let (mut w18, mut n18) = ([0; 18], [0; 18]);
+        super::p384_montjscalarmul::p384_montjscalarmul(&mut w18, &k6, g384);
+        super::p384_montjscalarmul_narrow::p384_montjscalarmul(&mut n18, &k6, g384);
+        assert_eq!(w18, n18, "random p384 scalarmul {i}");
+        let (px, py) = p384_affine(&prev384).expect("a random multiple is finite");
+        let mut affine384 = [0; 12];
+        affine384[..6].copy_from_slice(&px);
+        affine384[6..].copy_from_slice(&py);
+        let jacobian384 = n18;
+        prev384 = n18;
+        let mut g18 = [0; 18];
+        super::p384_montjmixadd::p384_montjmixadd(&mut w18, &jacobian384, &affine384);
+        super::p384_montjmixadd_narrow::p384_montjmixadd(&mut n18, &jacobian384, &affine384);
+        p384::p384_montjmixadd(&mut g18, &jacobian384, &affine384);
+        assert_eq!((w18, n18), (g18, g18), "random p384 mixadd {i}");
+
+        let k9: [u64; 9] = rng.words();
+        let (mut w27, mut n27, mut g27) = ([0; 27], [0; 27], [0; 27]);
+        super::p521_jscalarmul::p521_jscalarmul(&mut w27, &k9, g521);
+        super::p521_jscalarmul_narrow::p521_jscalarmul(&mut n27, &k9, g521);
+        assert_eq!(w27, n27, "random p521 scalarmul {i}");
+        let point521 = n27;
+        super::p521_jdouble::p521_jdouble(&mut w27, &point521);
+        super::p521_jdouble_narrow::p521_jdouble(&mut n27, &point521);
+        p521::p521_jdouble(&mut g27, &point521);
+        assert_eq!((w27, n27), (g27, g27), "random p521 double {i}");
+        super::p521_jadd::p521_jadd(&mut w27, &point521, &prev521);
+        super::p521_jadd_narrow::p521_jadd(&mut n27, &point521, &prev521);
+        p521::p521_jadd(&mut g27, &point521, &prev521);
+        assert_eq!((w27, n27), (g27, g27), "random p521 add {i}");
+        let (px, py) = p521_affine(&prev521).expect("a random multiple is finite");
+        let mut affine521 = [0; 18];
+        affine521[..9].copy_from_slice(&px);
+        affine521[9..].copy_from_slice(&py);
+        super::p521_jmixadd::p521_jmixadd(&mut w27, &point521, &affine521);
+        super::p521_jmixadd_narrow::p521_jmixadd(&mut n27, &point521, &affine521);
+        p521::p521_jmixadd(&mut g27, &point521, &affine521);
+        assert_eq!((w27, n27), (g27, g27), "random p521 mixadd {i}");
+        prev521 = point521;
+    }
+    invsqrt_oracle(&p, &invsqrt_samples);
 }
 
 /// Narrow schedules against oracles other than the wide schedule.
@@ -1358,7 +1581,7 @@ fn limbs_to_bytes(limbs: [u64; 4]) -> [u8; 32] {
 
 // The override is process-wide, so each schedule is a child. Disable wins
 // over force, and the mux calls the schedule the flag names.
-#[cfg(any(debug_assertions, rind_cpu_disable))]
+#[cfg(all(any(debug_assertions, rind_cpu_disable), not(rind_fips)))]
 #[test]
 fn mux_follows_the_override() {
     const CHILD: &str = "RIND_TEST_MUX_SCHEDULE";
@@ -1507,32 +1730,6 @@ fn ct_qemu_ed25519() {
     });
 }
 
-/// A 32-word Montgomery product. On a narrow multiplier that is
-/// `bignum_kmul_32_64`, `bignum_ksqr_32_64`, and `bignum_emontredc_8n`,
-/// which a 2048-bit sign never reaches. The inputs differ between the two
-/// seeds; the low limb of the modulus does not, so `-m^-1` is the same.
-#[test]
-#[ignore = "admin/ct-qemu runs it under qemu"]
-fn ct_qemu_mont32() {
-    let seed = qemu_seed(32 * 8 * 3);
-    let mut modulus = words(&seed[..256]);
-    let mut x = words(&seed[256..512]);
-    let mut y = words(&seed[512..]);
-    // The low limb is fixed, so `-m^-1` does not differ between the seeds.
-    modulus[0] = 1;
-    modulus[31] |= 1 << 63;
-    x[31] &= !(1 << 63);
-    y[31] &= !(1 << 63);
-    let mut n0 = [0u64];
-    super::bignum_negmodinv::bignum_negmodinv(&mut n0, &modulus[..1]);
-    super::ct_qemu::traced(|| {
-        let mut z = [0u64; 32];
-        super::mont::mont_mul(&mut z, &x, &y, &modulus, n0[0]);
-        super::mont::mont_sqr(&mut z, &x, &modulus, n0[0]);
-        z
-    });
-}
-
 /// A 16-word Montgomery product. On a narrow multiplier that is
 /// `bignum_kmul_16_32`, `bignum_ksqr_16_32`, and `bignum_emontredc_8n` at
 /// k = 16, which is every RSA-2048 CRT exponentiation. The inputs differ
@@ -1559,12 +1756,6 @@ fn ct_qemu_mont16() {
         super::mont::mont_sqr(&mut z, &x, &modulus, n0[0]);
         z
     });
-}
-
-fn words(bytes: &[u8]) -> [u64; 32] {
-    let mut out = [0u64; 32];
-    words_into(bytes, &mut out);
-    out
 }
 
 fn words_into(bytes: &[u8], out: &mut [u64]) {

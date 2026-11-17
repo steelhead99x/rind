@@ -192,7 +192,14 @@ run_suites "$@"
 # The arm64 runners are wide cores, so the pass above checks `_alt`. This
 # one checks the schedules Cortex-A72, Cortex-A76, and Neoverse N1 run.
 # `--cfg rind_cpu_disable` keeps the variable alive in a `--release` build.
-if [ -z "$narrow_requested" ] && targets_aarch64 "$@"; then
+# The FIPS module honours only the denial, never a force, which is all this
+# pass sets. The portable backend has no narrow schedule, so a
+# `rind_portable` run skips the pass, but for the fips suite, whose module
+# build replaces the caller's flags (rind-fips/build.rs).
+portable_requested() {
+    [ "$suite" != fips ] && env | grep -q '^[A-Z0-9_]*RUSTFLAGS=.*rind_portable'
+}
+if [ -z "$narrow_requested" ] && targets_aarch64 "$@" && ! portable_requested; then
     echo "ctgrind: narrow multiplier (RIND_CPU_DISABLE_wide_mul=1)" >&2
     export RIND_CPU_DISABLE_wide_mul=1
     export RIND_TEST_ARM_WIDE_MUL=0

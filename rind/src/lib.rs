@@ -873,7 +873,11 @@ pub mod key_wrap {
 
 /// CPU support.
 pub mod cpu {
-    pub use crate::low::cpu::{Dit, has_aes_hardware, wide_multiplier};
+    pub use crate::low::cpu::{Dit, has_aes_hardware};
+    // Hidden: only rind-cpuid, which reports the schedule rind picked with
+    // each benchmark, reads it. It is not a supported API.
+    #[doc(hidden)]
+    pub use crate::low::cpu::wide_multiplier;
 }
 
 /// Random bytes from the system's secure random source.
