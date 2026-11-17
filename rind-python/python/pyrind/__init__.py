@@ -1,9 +1,9 @@
 """rind's cryptography for Python.
 
 Each rind module is a submodule: `pyrind.aead`, `pyrind.agreement`,
-`pyrind.cipher`, `pyrind.cpu`, `pyrind.digest`, `pyrind.hkdf`,
-`pyrind.hmac`, `pyrind.kem`, `pyrind.key_wrap`, `pyrind.pbkdf2`,
-`pyrind.rsa`, and `pyrind.signature`. Every failure raises
+`pyrind.cipher`, `pyrind.cpu`, `pyrind.digest`, `pyrind.ecdsa`,
+`pyrind.ed25519`, `pyrind.hkdf`, `pyrind.hmac`, `pyrind.kem`,
+`pyrind.key_wrap`, `pyrind.pbkdf2`, and `pyrind.rsa`. Every failure raises
 a subclass of `pyrind.Error`.
 """
 
@@ -21,13 +21,14 @@ from pyrind._rind import (
     cipher,
     cpu,
     digest,
+    ecdsa,
+    ed25519,
     hkdf,
     hmac,
     kem,
     key_wrap,
     pbkdf2,
     rsa,
-    signature,
 )
 
 __all__ = [
@@ -44,11 +45,12 @@ __all__ = [
     "cipher",
     "cpu",
     "digest",
+    "ecdsa",
+    "ed25519",
     "hkdf",
     "hmac",
     "kem",
     "key_wrap",
     "pbkdf2",
     "rsa",
-    "signature",
 ]
