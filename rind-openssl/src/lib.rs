@@ -10,6 +10,9 @@
 
 use core::ffi::{c_int, c_void};
 
+mod ec;
+mod ecdh;
+mod ecdsa;
 mod ed25519;
 mod ffi;
 mod keymgmt;

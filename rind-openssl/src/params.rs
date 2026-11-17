@@ -10,6 +10,8 @@ use core::ffi::{CStr, c_int};
 use core::marker::PhantomData;
 use core::slice;
 
+use zeroize::Zeroizing;
+
 use crate::ffi::{INTEGER, OCTET_STRING, Param, REAL, UNSIGNED_INTEGER, UTF8_PTR, UTF8_STRING};
 
 /// A parameter array OpenSSL passes in, or none.
@@ -106,6 +108,78 @@ impl Param {
         // SAFETY: a parameter's data is valid for its size.
         let bytes = unsafe { slice::from_raw_parts(self.data.cast::<u8>(), self.data_size) };
         bytes.split(|&b| b == 0).next()
+    }
+
+    /// The value of an `OSSL_PARAM_INTEGER` of 1, 2, 4, or 8 bytes, as
+    /// `OSSL_PARAM_get_int` reads it, refused if it does not fit a `c_int`.
+    pub(crate) fn int(&self) -> Option<c_int> {
+        if self.data_type != INTEGER || self.data.is_null() {
+            return None;
+        }
+        // SAFETY: a parameter's data is valid for its size.
+        let bytes = unsafe { slice::from_raw_parts(self.data.cast::<u8>(), self.data_size) };
+        let value = match *bytes {
+            [a] => i64::from(i8::from_ne_bytes([a])),
+            [a, b] => i64::from(i16::from_ne_bytes([a, b])),
+            [a, b, c, d] => i64::from(i32::from_ne_bytes([a, b, c, d])),
+            [a, b, c, d, e, f, g, h] => i64::from_ne_bytes([a, b, c, d, e, f, g, h]),
+            _ => return None,
+        };
+        c_int::try_from(value).ok()
+    }
+
+    /// The value of an `OSSL_PARAM_UNSIGNED_INTEGER` of any size, as
+    /// `OSSL_PARAM_get_BN` reads it, in big-endian bytes of the parameter's
+    /// size. The bytes may be a private key's, so they wipe themselves.
+    pub(crate) fn unsigned_be(&self) -> Option<Zeroizing<Vec<u8>>> {
+        if self.data_type != UNSIGNED_INTEGER || self.data.is_null() {
+            return None;
+        }
+        // SAFETY: a parameter's data is valid for its size.
+        let native = unsafe { slice::from_raw_parts(self.data.cast::<u8>(), self.data_size) };
+        let mut value = Zeroizing::new(native.to_vec());
+        if cfg!(target_endian = "little") {
+            value.reverse();
+        }
+        Some(value)
+    }
+
+    /// Sets an `OSSL_PARAM_UNSIGNED_INTEGER` to the big-endian `value`, as
+    /// `OSSL_PARAM_set_BN` does: in the parameter's native byte order, padded
+    /// with zeros to its size, refused if its size is too small to hold
+    /// `value` without its leading zeros. A null `data` asks only the size.
+    pub(crate) fn set_unsigned_be(&mut self, value: &[u8]) -> bool {
+        if self.data_type != UNSIGNED_INTEGER {
+            self.return_size = 0;
+            return false;
+        }
+        let start = value.iter().position(|&b| b != 0).unwrap_or(value.len());
+        let significant = &value[start..];
+        // A zero takes the one byte `BN_bn2nativepad` gives it.
+        self.return_size = significant.len().max(1);
+        if self.data.is_null() {
+            return true;
+        }
+        if self.data_size < self.return_size {
+            return false;
+        }
+        let size = self.data_size;
+        let data = self.data.cast::<u8>();
+        for k in 0..size {
+            // The k-th least significant byte.
+            let byte = match significant.len().checked_sub(1 + k) {
+                Some(at) => significant[at],
+                None => 0,
+            };
+            let at = match cfg!(target_endian = "little") {
+                true => k,
+                false => size - 1 - k,
+            };
+            // SAFETY: a parameter's data is valid for its size, and `at` is
+            // below it.
+            unsafe { data.add(at).write(byte) };
+        }
+        true
     }
 
     /// Sets an integer or real parameter of any size that holds `value`,

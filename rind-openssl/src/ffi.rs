@@ -179,8 +179,10 @@ pub(crate) const OP_SIGNATURE: c_int = 12;
 pub(crate) const SELECT_PRIVATE_KEY: c_int = 0x01;
 pub(crate) const SELECT_PUBLIC_KEY: c_int = 0x02;
 pub(crate) const SELECT_KEYPAIR: c_int = SELECT_PRIVATE_KEY | SELECT_PUBLIC_KEY;
+pub(crate) const SELECT_DOMAIN_PARAMETERS: c_int = 0x04;
 
 // The core's functions.
+pub(crate) const CORE_GET_PARAMS: c_int = 2;
 pub(crate) const CORE_NEW_ERROR: c_int = 5;
 pub(crate) const CORE_VSET_ERROR: c_int = 7;
 
@@ -195,11 +197,13 @@ pub(crate) const PROVIDER_GET_REASON_STRINGS: c_int = 1029;
 // Key management.
 pub(crate) const KEYMGMT_NEW: c_int = 1;
 pub(crate) const KEYMGMT_GEN_INIT: c_int = 2;
+pub(crate) const KEYMGMT_GEN_SET_TEMPLATE: c_int = 3;
 pub(crate) const KEYMGMT_GEN_SET_PARAMS: c_int = 4;
 pub(crate) const KEYMGMT_GEN_SETTABLE_PARAMS: c_int = 5;
 pub(crate) const KEYMGMT_GEN: c_int = 6;
 pub(crate) const KEYMGMT_GEN_CLEANUP: c_int = 7;
 pub(crate) const KEYMGMT_FREE: c_int = 10;
+pub(crate) const KEYMGMT_QUERY_OPERATION_NAME: c_int = 20;
 pub(crate) const KEYMGMT_GET_PARAMS: c_int = 11;
 pub(crate) const KEYMGMT_GETTABLE_PARAMS: c_int = 12;
 pub(crate) const KEYMGMT_SET_PARAMS: c_int = 13;
@@ -220,6 +224,8 @@ pub(crate) const KEYEXCH_DERIVE: c_int = 3;
 pub(crate) const KEYEXCH_SET_PEER: c_int = 4;
 pub(crate) const KEYEXCH_FREECTX: c_int = 5;
 pub(crate) const KEYEXCH_DUPCTX: c_int = 6;
+pub(crate) const KEYEXCH_SET_CTX_PARAMS: c_int = 7;
+pub(crate) const KEYEXCH_SETTABLE_CTX_PARAMS: c_int = 8;
 pub(crate) const KEYEXCH_GET_CTX_PARAMS: c_int = 9;
 pub(crate) const KEYEXCH_GETTABLE_CTX_PARAMS: c_int = 10;
 
@@ -230,8 +236,12 @@ pub(crate) const SIGNATURE_SIGN: c_int = 3;
 pub(crate) const SIGNATURE_VERIFY_INIT: c_int = 4;
 pub(crate) const SIGNATURE_VERIFY: c_int = 5;
 pub(crate) const SIGNATURE_DIGEST_SIGN_INIT: c_int = 8;
+pub(crate) const SIGNATURE_DIGEST_SIGN_UPDATE: c_int = 9;
+pub(crate) const SIGNATURE_DIGEST_SIGN_FINAL: c_int = 10;
 pub(crate) const SIGNATURE_DIGEST_SIGN: c_int = 11;
 pub(crate) const SIGNATURE_DIGEST_VERIFY_INIT: c_int = 12;
+pub(crate) const SIGNATURE_DIGEST_VERIFY_UPDATE: c_int = 13;
+pub(crate) const SIGNATURE_DIGEST_VERIFY_FINAL: c_int = 14;
 pub(crate) const SIGNATURE_DIGEST_VERIFY: c_int = 15;
 pub(crate) const SIGNATURE_FREECTX: c_int = 16;
 pub(crate) const SIGNATURE_DUPCTX: c_int = 17;
@@ -241,7 +251,11 @@ pub(crate) const SIGNATURE_SET_CTX_PARAMS: c_int = 20;
 pub(crate) const SIGNATURE_SETTABLE_CTX_PARAMS: c_int = 21;
 pub(crate) const SIGNATURE_QUERY_KEY_TYPES: c_int = 26;
 pub(crate) const SIGNATURE_SIGN_MESSAGE_INIT: c_int = 27;
+pub(crate) const SIGNATURE_SIGN_MESSAGE_UPDATE: c_int = 28;
+pub(crate) const SIGNATURE_SIGN_MESSAGE_FINAL: c_int = 29;
 pub(crate) const SIGNATURE_VERIFY_MESSAGE_INIT: c_int = 30;
+pub(crate) const SIGNATURE_VERIFY_MESSAGE_UPDATE: c_int = 31;
+pub(crate) const SIGNATURE_VERIFY_MESSAGE_FINAL: c_int = 32;
 
 /// `OSSL_CALLBACK`: a function the core passes, called with parameters.
 pub(crate) type Callback = unsafe extern "C" fn(params: *const Param, arg: *mut c_void) -> c_int;
@@ -249,6 +263,9 @@ pub(crate) type Callback = unsafe extern "C" fn(params: *const Param, arg: *mut 
 // The signature of each function this provider gives or takes, by id, as
 // `core_dispatch.h` declares it. `entry!` casts a function through its alias,
 // so one whose signature differs fails to compile.
+/// `core_get_params`: reads parameters of the provider's own configuration
+/// section, and the core's.
+pub(crate) type CoreGetParams = unsafe extern "C" fn(*const CoreHandle, *mut Param) -> c_int;
 pub(crate) type CoreNewError = unsafe extern "C" fn(*const CoreHandle);
 /// `core_vset_error`, whose last parameter is a `va_list`. Every target's C
 /// ABI passes one as a single pointer-sized value: a pointer, a pointer to the
@@ -288,6 +305,8 @@ pub(crate) type KeymgmtTypes = unsafe extern "C" fn(c_int) -> *const Param;
 pub(crate) type KeymgmtExport =
     unsafe extern "C" fn(*mut c_void, c_int, Option<Callback>, *mut c_void) -> c_int;
 pub(crate) type KeymgmtDup = unsafe extern "C" fn(*const c_void, c_int) -> *mut c_void;
+pub(crate) type KeymgmtGenSetTemplate = unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int;
+pub(crate) type KeymgmtQueryOperationName = unsafe extern "C" fn(c_int) -> *const c_char;
 
 pub(crate) type KeyexchNewctx = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
 pub(crate) type KeyexchInit = unsafe extern "C" fn(*mut c_void, *mut c_void, *const Param) -> c_int;
@@ -305,6 +324,10 @@ pub(crate) type SignatureSign =
 pub(crate) type SignatureVerify =
     unsafe extern "C" fn(*mut c_void, *const u8, usize, *const u8, usize) -> c_int;
 pub(crate) type SignatureQueryKeyTypes = unsafe extern "C" fn() -> *const *const c_char;
+pub(crate) type SignatureUpdate = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> c_int;
+pub(crate) type SignatureSignFinal =
+    unsafe extern "C" fn(*mut c_void, *mut u8, *mut usize, usize) -> c_int;
+pub(crate) type SignatureVerifyFinal = unsafe extern "C" fn(*mut c_void, *const u8, usize) -> c_int;
 
 // What the key exchange and signature contexts share.
 pub(crate) type CtxFree = unsafe extern "C" fn(*mut c_void);

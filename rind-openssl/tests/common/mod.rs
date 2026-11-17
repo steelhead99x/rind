@@ -46,18 +46,24 @@ pub fn add_builtin(ctx: *mut OSSL_LIB_CTX) {
 /// its `module =` line names; `None` drops the line, so the section
 /// activates the built-in that [`add_builtin`] registered.
 pub fn config(module: Option<&Path>) -> PathBuf {
+    config_with(module, "")
+}
+
+/// As [`config`], with `extra` lines added to the `rind` section, such as
+/// `ec = 1`.
+pub fn config_with(module: Option<&Path>, extra: &str) -> PathBuf {
     let mut found = false;
     let config: String = include_str!("../../openssl.cnf")
         .lines()
-        .filter_map(|line| match (line.starts_with("module = "), module) {
-            (false, _) => Some(format!("{line}\n")),
+        .map(|line| match (line.starts_with("module = "), module) {
+            (false, _) => format!("{line}\n"),
             (true, None) => {
                 found = true;
-                None
+                extra_lines(extra)
             }
             (true, Some(path)) => {
                 found = true;
-                Some(format!("module = {}\n", conf_value(path)))
+                format!("module = {}\n{}", conf_value(path), extra_lines(extra))
             }
         })
         .collect();
@@ -71,6 +77,10 @@ pub fn config(module: Option<&Path>) -> PathBuf {
     ));
     std::fs::write(&path, config).unwrap();
     path
+}
+
+fn extra_lines(extra: &str) -> String {
+    extra.lines().map(|line| format!("{line}\n")).collect()
 }
 
 /// `path` as an `openssl.cnf` value: each ASCII character but a letter,

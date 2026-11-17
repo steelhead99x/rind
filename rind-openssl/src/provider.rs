@@ -7,15 +7,15 @@ use std::ffi::CString;
 use std::sync::Arc;
 
 use crate::ffi::{
-    Algorithm, CORE_NEW_ERROR, CORE_VSET_ERROR, Callback, CoreHandle, CoreNewError, CoreVsetError,
-    Dispatch, INTEGER, Item, OP_KEYEXCH, OP_KEYMGMT, OP_SIGNATURE, PROVIDER_GET_CAPABILITIES,
-    PROVIDER_GET_PARAMS, PROVIDER_GET_REASON_STRINGS, PROVIDER_GETTABLE_PARAMS,
-    PROVIDER_QUERY_OPERATION, PROVIDER_TEARDOWN, Param, ProviderGetCapabilities, ProviderGetParams,
-    ProviderGetReasonStrings, ProviderGettableParams, ProviderQueryOperation, ProviderTeardown,
-    UTF8_PTR, entry,
+    Algorithm, CORE_GET_PARAMS, CORE_NEW_ERROR, CORE_VSET_ERROR, Callback, CoreGetParams,
+    CoreHandle, CoreNewError, CoreVsetError, Dispatch, INTEGER, Item, OP_KEYEXCH, OP_KEYMGMT,
+    OP_SIGNATURE, PROVIDER_GET_CAPABILITIES, PROVIDER_GET_PARAMS, PROVIDER_GET_REASON_STRINGS,
+    PROVIDER_GETTABLE_PARAMS, PROVIDER_QUERY_OPERATION, PROVIDER_TEARDOWN, Param,
+    ProviderGetCapabilities, ProviderGetParams, ProviderGetReasonStrings, ProviderGettableParams,
+    ProviderQueryOperation, ProviderTeardown, UNMODIFIED, UTF8_PTR, entry,
 };
 use crate::params::ParamsMut;
-use crate::{ed25519, x25519};
+use crate::{ec, ecdh, ecdsa, ed25519, x25519};
 
 /// One activation of the provider, in one OpenSSL library context: the
 /// core's handle and the functions that raise errors through it.
@@ -23,6 +23,9 @@ pub(crate) struct Provider {
     handle: *const CoreHandle,
     new_error: CoreNewError,
     vset_error: CoreVsetError,
+    /// Whether the configuration section sets `ec = 1`, which registers the
+    /// `EC` key type, ECDSA, and ECDH.
+    ec: bool,
 }
 
 // SAFETY: the core's handle and functions serve every thread for as long as
@@ -170,7 +173,7 @@ pub(crate) unsafe fn init(
     out: *mut *const Dispatch,
     provctx: *mut *mut c_void,
 ) -> c_int {
-    let (mut new_error, mut vset_error) = (None, None);
+    let (mut new_error, mut vset_error, mut get_params) = (None, None, None);
     let mut at = core;
     while !at.is_null() {
         // SAFETY: the core's table runs to an entry with id 0.
@@ -191,6 +194,11 @@ pub(crate) unsafe fn init(
                         core::mem::transmute::<unsafe extern "C" fn(), CoreVsetError>(function),
                     )
                 }
+                (CORE_GET_PARAMS, Some(function)) => {
+                    get_params = Some(
+                        core::mem::transmute::<unsafe extern "C" fn(), CoreGetParams>(function),
+                    )
+                }
                 _ => {}
             }
         }
@@ -201,10 +209,24 @@ pub(crate) unsafe fn init(
     let (Some(new_error), Some(vset_error)) = (new_error, vset_error) else {
         return 0;
     };
+    let ec = match config_flag(handle, get_params, c"ec") {
+        Ok(ec) => ec,
+        Err(detail) => {
+            raise(
+                handle,
+                new_error,
+                vset_error,
+                Reason::InvalidArgument,
+                &detail,
+            );
+            return 0;
+        }
+    };
     let provider = Arc::new(Provider {
         handle,
         new_error,
         vset_error,
+        ec,
     });
     // SAFETY: the core passes both outputs to write.
     unsafe {
@@ -212,6 +234,51 @@ pub(crate) unsafe fn init(
         *provctx = Arc::into_raw(provider).cast_mut().cast();
     }
     1
+}
+
+/// The flag `name` the provider's configuration section sets: `1` for on, `0`
+/// or no such line for off, and anything else an error, since a misspelled
+/// switch left off would read as a working one.
+///
+/// OpenSSL hands the section's lines it does not use itself to the provider
+/// through the core, as strings.
+fn config_flag(
+    handle: *const CoreHandle,
+    get_params: Option<CoreGetParams>,
+    name: &CStr,
+) -> Result<bool, String> {
+    let Some(get_params) = get_params else {
+        return Ok(false);
+    };
+    let mut value: *const c_char = core::ptr::null();
+    let mut params = [
+        Param {
+            key: name.as_ptr(),
+            data_type: UTF8_PTR,
+            data: (&raw mut value).cast(),
+            data_size: 0,
+            return_size: UNMODIFIED,
+        },
+        Param::END,
+    ];
+    // SAFETY: the core's function takes its handle and a terminated array,
+    // and writes the pointer to the section's own string.
+    if unsafe { get_params(handle, params.as_mut_ptr()) } != 1 {
+        return Err(format!("OpenSSL cannot read the configuration's {name:?}"));
+    }
+    if params[0].return_size == UNMODIFIED || value.is_null() {
+        return Ok(false);
+    }
+    // SAFETY: the core points at a C string that lives as long as the
+    // provider's configuration.
+    match unsafe { CStr::from_ptr(value) }.to_bytes() {
+        b"1" => Ok(true),
+        b"0" => Ok(false),
+        other => Err(format!(
+            "{name:?} must be 0 or 1 in the rind section, not {:?}",
+            String::from_utf8_lossy(other)
+        )),
+    }
 }
 
 static FUNCTIONS: [Dispatch; 7] = [
@@ -304,20 +371,47 @@ static SIGNATURE: [Algorithm; 2] = [
     Algorithm::END,
 ];
 
+// The same lists with the NIST curves, for `ec = 1`.
+static KEYMGMT_EC: [Algorithm; 4] = [
+    Algorithm::new(c"X25519:1.3.101.110", &x25519::KEYMGMT),
+    Algorithm::new(c"ED25519:1.3.101.112", &ed25519::KEYMGMT),
+    Algorithm::new(c"EC:id-ecPublicKey:1.2.840.10045.2.1", &ec::KEYMGMT),
+    Algorithm::END,
+];
+
+static KEYEXCH_EC: [Algorithm; 3] = [
+    Algorithm::new(c"X25519:1.3.101.110", &x25519::KEYEXCH),
+    Algorithm::new(c"ECDH", &ecdh::KEYEXCH),
+    Algorithm::END,
+];
+
+static SIGNATURE_EC: [Algorithm; 3] = [
+    Algorithm::new(c"ED25519:1.3.101.112", &ed25519::SIGNATURE),
+    Algorithm::new(c"ECDSA", &ecdsa::SIGNATURE),
+    Algorithm::END,
+];
+
 unsafe extern "C" fn query_operation(
-    _provctx: *mut c_void,
+    provctx: *mut c_void,
     operation: c_int,
     no_store: *mut c_int,
 ) -> *const Algorithm {
     if !no_store.is_null() {
-        // SAFETY: OpenSSL passes a flag to write. The lists never change, so
-        // it may cache what they hold.
+        // SAFETY: OpenSSL passes a flag to write. The lists never change
+        // for a provider context, whose `ec` is fixed at its start, so
+        // OpenSSL may cache what they hold.
         unsafe { *no_store = 0 };
     }
-    match operation {
-        OP_KEYMGMT => KEYMGMT.as_ptr(),
-        OP_KEYEXCH => KEYEXCH.as_ptr(),
-        OP_SIGNATURE => SIGNATURE.as_ptr(),
+    // SAFETY: OpenSSL passes the context `init` made, which it has not torn
+    // down.
+    let ec = unsafe { provctx.cast_const().cast::<Provider>().as_ref() }.is_some_and(|p| p.ec);
+    match (operation, ec) {
+        (OP_KEYMGMT, false) => KEYMGMT.as_ptr(),
+        (OP_KEYEXCH, false) => KEYEXCH.as_ptr(),
+        (OP_SIGNATURE, false) => SIGNATURE.as_ptr(),
+        (OP_KEYMGMT, true) => KEYMGMT_EC.as_ptr(),
+        (OP_KEYEXCH, true) => KEYEXCH_EC.as_ptr(),
+        (OP_SIGNATURE, true) => SIGNATURE_EC.as_ptr(),
         _ => core::ptr::null(),
     }
 }
@@ -349,8 +443,40 @@ static TLS_GROUP: [Param; 10] = [
     Param::END,
 ];
 
+/// The NIST curves' TLS groups, as OpenSSL's default provider describes them,
+/// which `ec = 1` lists beside X25519's for the reason given there.
+static P256_ID: c_uint = 23;
+static P384_ID: c_uint = 24;
+static P521_ID: c_uint = 25;
+static P256_BITS: c_uint = 128;
+static P384_BITS: c_uint = 192;
+static P521_BITS: c_uint = 256;
+
+macro_rules! ec_group {
+    ($name:expr, $internal:expr, $id:expr, $bits:expr) => {
+        [
+            Param::text(c"tls-group-name", $name),
+            Param::text(c"tls-group-name-internal", $internal),
+            Param::text(c"tls-group-alg", c"EC"),
+            Param::unsigned(c"tls-group-id", &$id),
+            Param::unsigned(c"tls-group-sec-bits", &$bits),
+            Param::signed(c"tls-min-tls", &GROUP_MIN_TLS),
+            Param::signed(c"tls-max-tls", &GROUP_NO_MAX),
+            Param::signed(c"tls-min-dtls", &GROUP_MIN_DTLS),
+            Param::signed(c"tls-max-dtls", &GROUP_NO_MAX),
+            Param::END,
+        ]
+    };
+}
+
+static EC_GROUPS: [[Param; 10]; 3] = [
+    ec_group!(c"secp256r1", c"prime256v1", P256_ID, P256_BITS),
+    ec_group!(c"secp384r1", c"secp384r1", P384_ID, P384_BITS),
+    ec_group!(c"secp521r1", c"secp521r1", P521_ID, P521_BITS),
+];
+
 unsafe extern "C" fn get_capabilities(
-    _provctx: *mut c_void,
+    provctx: *mut c_void,
     capability: *const c_char,
     callback: Callback,
     arg: *mut c_void,
@@ -363,7 +489,21 @@ unsafe extern "C" fn get_capabilities(
     }
     // SAFETY: the callback is OpenSSL's, and takes the parameters it is
     // given to read for the call.
-    unsafe { callback(TLS_GROUP.as_ptr(), arg) }
+    if unsafe { callback(TLS_GROUP.as_ptr(), arg) } != 1 {
+        return 0;
+    }
+    // SAFETY: OpenSSL passes the context `init` made, which it has not torn
+    // down.
+    if !unsafe { provctx.cast_const().cast::<Provider>().as_ref() }.is_some_and(|p| p.ec) {
+        return 1;
+    }
+    for group in &EC_GROUPS {
+        // SAFETY: as above.
+        if unsafe { callback(group.as_ptr(), arg) } != 1 {
+            return 0;
+        }
+    }
+    1
 }
 
 unsafe extern "C" fn reason_strings(_provctx: *mut c_void) -> *const Item {
