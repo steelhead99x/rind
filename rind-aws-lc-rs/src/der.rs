@@ -94,7 +94,8 @@ pub(crate) struct Pkcs8Parts<'a> {
 }
 
 /// Splits a v1 or v2 PKCS#8 document. The version must be 0 or 1. An
-/// attributes set and a public key, in that order, may follow the private key.
+/// attributes set and, in version 1 only, a public key, in that order, may
+/// follow the private key.
 pub(crate) fn pkcs8_parts(der: &[u8]) -> Option<Pkcs8Parts<'_>> {
     let mut outer = untrusted::Reader::new(untrusted::Input::from(der));
     let body = read(&mut outer, SEQUENCE).ok()?;
@@ -110,8 +111,13 @@ pub(crate) fn pkcs8_parts(der: &[u8]) -> Option<Pkcs8Parts<'_>> {
     if body.peek(0xa0) {
         read(&mut body, 0xa0).ok()?;
     }
+    // RFC 5958 allows the public key only in version 1 (v2), as aws-lc's
+    // `EVP_parse_private_key` does.
     let has_public_key = body.peek(0x81);
     if has_public_key {
+        if version.as_slice_less_safe() != [1] {
+            return None;
+        }
         read(&mut body, 0x81).ok()?;
     }
     if !body.at_end() {

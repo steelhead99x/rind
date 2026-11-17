@@ -1220,6 +1220,60 @@ fn mldsa_pkcs8_forms() {
     report.finish();
 }
 
+/// RFC 5958 allows `[1] publicKey` only in version 1. aws-lc refuses it in
+/// a version 0 document of every type, as `InvalidEncoding`.
+#[test]
+fn v0_with_public_key() {
+    let mut report = Report::new();
+    let seed = [0x6d; 32];
+    let (_, public65, raw65, _) = generated_pair(65, &seed);
+    let (_, public44, _, _) = generated_pair(44, &seed);
+    for (form, private_key) in [("seed", der(0x80, &seed)), ("expanded", der(0x04, &raw65))] {
+        let doc = mldsa_pkcs8_version(18, &private_key, 0, &public_suffix(&public65));
+        for set in [65, 44] {
+            check_pkcs8(
+                &mut report,
+                &format!("mldsa65 {form} v0 public as mldsa{set}"),
+                set,
+                &doc,
+                Some("err:InvalidEncoding"),
+            );
+        }
+    }
+    let doc = mldsa_pkcs8_version(17, &der(0x80, &seed), 0, &public_suffix(&public44));
+    check_pkcs8(
+        &mut report,
+        "mldsa44 seed v0 public as mldsa65",
+        65,
+        &doc,
+        Some("err:InvalidEncoding"),
+    );
+    let public = public_suffix(&rsa_public_pkcs1(RSA2048));
+    check_pkcs8(
+        &mut report,
+        "pss v0 public",
+        65,
+        &rewrap_pss(RSA2048, None, 0, &public),
+        Some("err:InvalidEncoding"),
+    );
+    for last in [1, 2, 3] {
+        let alg = algorithm(&oid_with_last(&ML_KEM_OID_PREFIX, last), None);
+        check_pkcs8(
+            &mut report,
+            &format!("mlkem {last} v0 public"),
+            65,
+            &pkcs8(
+                0,
+                &alg,
+                &der(0x80, &[0x11; 64]),
+                &public_suffix(&[0x22; 32]),
+            ),
+            Some("err:InvalidEncoding"),
+        );
+    }
+    report.finish();
+}
+
 fn mldsa_pkcs8_version(last: u8, private_key: &[u8], version: u8, suffix: &[u8]) -> Vec<u8> {
     pkcs8(
         version,
