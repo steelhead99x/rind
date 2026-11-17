@@ -1,11 +1,11 @@
 name: argon2-measure
 
-# Measures the aarch64 Argon2 fill dispatch picks against the portable
-# permutation it replaces, and runs the gate. quest/m4/protocols/argon2-simd.md.
+# Measures candidate tunings of the plain NEON Argon2 fill against the
+# per-core pick and the portable permutation. quest/m4/protocols/argon2-simd.md.
 on:
   workflow_dispatch:
   push:
-    branches: [wip/argon2-neon-pick-measure]
+    branches: [wip/argon2-neon-tune]
 
 permissions:
   contents: read
@@ -47,10 +47,12 @@ jobs:
       - name: Tests (default)
         run: cargo test -p rind --lib argon2 2>&1 | tee out/test-default.txt
 
-      - name: Tests (SHA3 denied)
+      - name: Tests (each candidate)
         run: |
-          RUSTFLAGS='--cfg rind_cpu_disable' RIND_CPU_DISABLE_sha3=1 CARGO_TARGET_DIR=target-test-nosha3 \
-            cargo test -p rind --lib argon2 2>&1 | tee out/test-nosha3.txt
+          for f in rider4 sri; do
+            RUSTFLAGS="--cfg rind_argon2_try_$f" CARGO_TARGET_DIR=target-test-$f \
+              cargo test -p rind --lib argon2 2>&1 | tee out/test-$f.txt
+          done
           grep -E 'matches_portable|neon_matches_scalar|test result' out/test-*.txt
 
       - name: Bench (3 interleaved rounds)
@@ -59,7 +61,8 @@ jobs:
         run: |
           full=$(git rev-parse "$BASE_REV")
           git worktree add ../base-tree "$full"
-          BASE_TREE=$(cd ../base-tree && pwd) .github/argon2-measure/run.sh out/bench base default
+          git worktree add ../pick-tree origin/wip/argon2-neon-pick
+          .github/argon2-measure/run-specs.sh out/bench .github/argon2-measure/specs-neoverse.txt
 
       - name: Summary
         if: always()
@@ -70,38 +73,5 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: argon2-neon-pick-${{ matrix.os }}
+          name: argon2-neon-tune-${{ matrix.os }}
           path: out
-
-  gate:
-    name: just check (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04-arm, ubuntu-24.04]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-          # The change alone, without this measuring workflow.
-          ref: wip/argon2-neon-pick
-
-      - name: Fetch upstream main
-        run: |
-          git remote add upstream https://github.com/kixel-ai/rind.git
-          git fetch --no-tags upstream main
-
-      - uses: ./.github/actions/just
-      - uses: ./.github/actions/nix
-
-      - name: just check upstream/main
-        run: nix develop --command just check upstream/main 2>&1 | tee check.log; exit "${PIPESTATUS[0]}"
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: gate-${{ matrix.os }}
-          path: check.log

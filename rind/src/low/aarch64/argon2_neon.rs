@@ -208,17 +208,25 @@ macro_rules! round {
 /// lane order the vectors hold) between the vector steps, for the integer
 /// units the vector rounds leave idle.
 macro_rules! round_with_scalar {
-    ($v:ident, $s:ident) => {
+    ($v:ident, $ss:ident) => {
         g1(&mut $v);
-        super::scalar::half(&mut $s, &super::scalar::COLUMNS, 32, 24);
+        for s in $ss.iter_mut() {
+            super::scalar::half(s, &super::scalar::COLUMNS, 32, 24);
+        }
         g2(&mut $v);
-        super::scalar::half(&mut $s, &super::scalar::COLUMNS, 16, 63);
+        for s in $ss.iter_mut() {
+            super::scalar::half(s, &super::scalar::COLUMNS, 16, 63);
+        }
         diagonalize(&mut $v[0]);
         diagonalize(&mut $v[1]);
         g1(&mut $v);
-        super::scalar::half(&mut $s, &super::scalar::DIAGONALS, 32, 24);
+        for s in $ss.iter_mut() {
+            super::scalar::half(s, &super::scalar::DIAGONALS, 32, 24);
+        }
         g2(&mut $v);
-        super::scalar::half(&mut $s, &super::scalar::DIAGONALS, 16, 63);
+        for s in $ss.iter_mut() {
+            super::scalar::half(s, &super::scalar::DIAGONALS, 16, 63);
+        }
         undiagonalize(&mut $v[0]);
         undiagonalize(&mut $v[1]);
     };
@@ -286,7 +294,11 @@ macro_rules! fill {
                 // waits on. With `$scalar_rider`, rounds 6 and 7 of each pass
                 // run in scalar registers beside the first two pairs.
                 let words = |lanes: *mut MaybeUninit<uint64x2_t>| lanes.cast::<u64>();
-                for col in (0..if $scalar_rider { 6 } else { 8 }).step_by(2) {
+                const K: usize = if cfg!(rind_argon2_try_rider4) { 2 } else { 1 };
+                const VEC: usize = if $scalar_rider { 8 - 2 * K } else { 8 };
+                // The scalar rounds pair `col` (0 or 2) carries.
+                let rider = |col: usize, m: usize| if K == 2 { 4 + col + m } else { 6 + col / 2 };
+                for col in (0..VEC).step_by(2) {
                     let mut v = [[vdupq_n_u64(0); 8]; 2];
                     for (j, half) in v.iter_mut().enumerate() {
                         for (k, lane) in half.iter_mut().enumerate() {
@@ -304,22 +316,26 @@ macro_rules! fill {
                         }
                     }
                     if $scalar_rider && col < 4 {
-                        // Column 6 + col / 2: words 16 * c onwards.
-                        let base = 16 * (6 + col / 2);
-                        let mut s = [0u64; 16];
-                        for (k, word) in s.iter_mut().enumerate() {
-                            let r = *prev.0.get_unchecked(base + k)
-                                ^ *reference.0.get_unchecked(base + k);
-                            words(xy.as_mut_ptr()).add(base + k).write(if with_xor {
-                                r ^ *next.0.get_unchecked(base + k)
-                            } else {
-                                r
-                            });
-                            *word = r;
+                        let mut ss = [[0u64; 16]; K];
+                        for (m, s) in ss.iter_mut().enumerate() {
+                            let base = 16 * rider(col, m);
+                            for (k, word) in s.iter_mut().enumerate() {
+                                let r = *prev.0.get_unchecked(base + k)
+                                    ^ *reference.0.get_unchecked(base + k);
+                                words(xy.as_mut_ptr()).add(base + k).write(if with_xor {
+                                    r ^ *next.0.get_unchecked(base + k)
+                                } else {
+                                    r
+                                });
+                                *word = r;
+                            }
                         }
-                        round_with_scalar!(v, s);
-                        for (k, word) in s.into_iter().enumerate() {
-                            words(state.as_mut_ptr()).add(base + k).write(word);
+                        round_with_scalar!(v, ss);
+                        for (m, s) in ss.into_iter().enumerate() {
+                            let base = 16 * rider(col, m);
+                            for (k, word) in s.into_iter().enumerate() {
+                                words(state.as_mut_ptr()).add(base + k).write(word);
+                            }
                         }
                     } else {
                         round!(v);
@@ -330,7 +346,7 @@ macro_rules! fill {
                         }
                     }
                 }
-                for row in (0..if $scalar_rider { 6 } else { 8 }).step_by(2) {
+                for row in (0..VEC).step_by(2) {
                     let mut v = [[vdupq_n_u64(0); 8]; 2];
                     for (j, half) in v.iter_mut().enumerate() {
                         for (k, lane) in half.iter_mut().enumerate() {
@@ -338,19 +354,24 @@ macro_rules! fill {
                         }
                     }
                     if $scalar_rider && row < 4 {
-                        // Row 6 + row / 2: lanes r, r + 8, ..., two words each.
-                        let r = 6 + row / 2;
-                        let mut s = [0u64; 16];
-                        for (k, word) in s.iter_mut().enumerate() {
-                            *word = words(state.as_mut_ptr())
-                                .add(2 * (r + 8 * (k / 2)) + k % 2)
-                                .read();
+                        // Row r: lanes r, r + 8, ..., two words each.
+                        let mut ss = [[0u64; 16]; K];
+                        for (m, s) in ss.iter_mut().enumerate() {
+                            let r = rider(row, m);
+                            for (k, word) in s.iter_mut().enumerate() {
+                                *word = words(state.as_mut_ptr())
+                                    .add(2 * (r + 8 * (k / 2)) + k % 2)
+                                    .read();
+                            }
                         }
-                        round_with_scalar!(v, s);
-                        for (k, word) in s.into_iter().enumerate() {
-                            let w = 2 * (r + 8 * (k / 2)) + k % 2;
-                            *next.0.get_unchecked_mut(w) =
-                                word ^ words(xy.as_mut_ptr()).add(w).read();
+                        round_with_scalar!(v, ss);
+                        for (m, s) in ss.into_iter().enumerate() {
+                            let r = rider(row, m);
+                            for (k, word) in s.into_iter().enumerate() {
+                                let w = 2 * (r + 8 * (k / 2)) + k % 2;
+                                *next.0.get_unchecked_mut(w) =
+                                    word ^ words(xy.as_mut_ptr()).add(w).read();
+                            }
                         }
                     } else {
                         round!(v);
@@ -446,7 +467,12 @@ mod neon {
     #[target_feature(enable = "neon")]
     fn xor_rotr63(x: uint64x2_t, y: uint64x2_t) -> uint64x2_t {
         let z = veorq_u64(x, y);
-        veorq_u64(vshrq_n_u64::<63>(z), vaddq_u64(z, z))
+        if cfg!(rind_argon2_try_sri) {
+            // `z + z` with its low bit replaced by the top bit of `z`.
+            vsriq_n_u64::<63>(vaddq_u64(z, z), z)
+        } else {
+            veorq_u64(vshrq_n_u64::<63>(z), vaddq_u64(z, z))
+        }
     }
 }
 

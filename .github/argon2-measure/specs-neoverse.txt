@@ -1,0 +1,7 @@
+# name|tree|rustflags|env
+base|../base-tree||
+pick|../pick-tree||
+k1|.||
+rider4|.|--cfg rind_argon2_try_rider4|
+sri|.|--cfg rind_argon2_try_sri|
+rider4-sri|.|--cfg rind_argon2_try_rider4 --cfg rind_argon2_try_sri|
