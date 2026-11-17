@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import stat
 import tempfile
 import unittest
 from unittest import mock
@@ -2211,6 +2212,19 @@ class AnyHost(unittest.TestCase):
         finally:
             br.DATA_DIR = saved
 
+    def test_a_data_file_write_keeps_the_umask_mode(self):
+        """An atomic data-file write gets the mode `open` would, not mkstemp's 0600, and leaves no temp file."""
+        saved, umask = br.DATA_DIR, os.umask(0o022)
+        try:
+            with tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                br._dump_data_file("box", {"schema": 1, "host": "box"})
+                self.assertEqual(stat.S_IMODE(os.stat(os.path.join(data, "box.json")).st_mode), 0o644)
+                self.assertEqual(os.listdir(data), ["box.json"])
+        finally:
+            br.DATA_DIR = saved
+            os.umask(umask)
+
     def test_a_host_file_missing_what_the_report_reads_is_skipped(self):
         """The published results pass; each field the report reads, removed or broken, skips the file."""
         real = {}
@@ -2236,10 +2250,14 @@ class AnyHost(unittest.TestCase):
                 else:
                     holder[key] = value
                 bad[f"{how}-{field.replace('.', '-')}"] = body
-        for label, ns in (("0", 0), ("neg", -1), ("true", True), ("nan", float("nan")), ("inf", float("inf")), ("str", "1")):
+        for label, ns in (("0", 0), ("neg", -1), ("true", True), ("nan", float("nan")), ("inf", float("inf")), ("str", "1"), ("huge", 10**400)):
             body = json.loads(json.dumps(base))
             body["results"][0]["ns"] = ns
             bad[f"ns-{label}"] = body
+        for key in br.OPTIONAL_HOST_OBJECTS:
+            body = json.loads(json.dumps(base))
+            body[key] = "x"
+            bad[f"wrong-{key.replace('_', '-')}"] = body
         saved = br.DATA_DIR
         try:
             with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:

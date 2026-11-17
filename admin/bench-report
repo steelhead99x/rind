@@ -1427,6 +1427,9 @@ def unmeasured(host):
                 ok = False
         if not ok:
             return f"no well-formed {path}"
+    for key in OPTIONAL_HOST_OBJECTS:
+        if key in host and not isinstance(host[key], dict):
+            return f"no well-formed {key}"
     results = host.get("results")
     if not isinstance(results, list) or not all(
         isinstance(r, dict)
@@ -1442,11 +1445,14 @@ def unmeasured(host):
 # Every field of a measured host that the report and `summary` read
 # unguarded. `cpu.logical_cpus` is a count; the rest are nonempty strings.
 REQUIRED_HOST_FIELDS = ("commit", "started", "os", "cpu.model", "cpu.arch", "cpu.logical_cpus", "toolchain.rustc")
+# Optional fields the report reads as objects when a host has them.
+OPTIONAL_HOST_OBJECTS = ("load", "refused", "build_cost", "rind_cpu")
 
 
 def positive_time(ns):
-    """True for a finite time above zero. A bool is an int in Python, so it is refused by name."""
-    return isinstance(ns, (int, float)) and not isinstance(ns, bool) and math.isfinite(ns) and ns > 0
+    """True for a finite time above zero. A bool is an int in Python, so it is refused by name. NaN
+    fails both comparisons, and an int too large for a float compares without being converted."""
+    return isinstance(ns, (int, float)) and not isinstance(ns, bool) and 0 < ns <= sys.float_info.max
 
 
 def load_measured(directory):
@@ -2590,9 +2596,14 @@ def assign_import_name(name, host, existing, incoming=None, blocked=frozenset())
 
 def _replace_data_file(stem, write):
     """Writes `stem`.json in the data directory through `write(file)` in one rename,
-    so a crash leaves the old file or the new one, never half of either."""
+    so a crash leaves the old file or the new one, never half of either. The file
+    gets the mode `open` would give it under the umask, not mkstemp's 0600, and a
+    symlink at that name is replaced by a regular file."""
     fd, tmp = tempfile.mkstemp(dir=DATA_DIR, prefix=f".{stem}.", suffix=".tmp")
     try:
+        umask = os.umask(0)
+        os.umask(umask)
+        os.fchmod(fd, 0o666 & ~umask)
         with os.fdopen(fd, "w") as f:
             write(f)
         os.replace(tmp, os.path.join(DATA_DIR, f"{stem}.json"))
