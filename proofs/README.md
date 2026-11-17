@@ -60,13 +60,18 @@ those inputs, in any worktree, restores in under a second.
   `sha256_hash_blocks`. A naked function's object code is its whole section
   with its relocations and the read-only data they reach, here the round
   constants, which `admin/prove` extracts as an object file; the proof checks
-  the constants against FIPS 180-4's.
+  the constants against FIPS 180-4's. rind no longer links this function.
+  aarch64 SHA-256 is `core::arch` intrinsics, which this proof does not cover,
+  and `admin/prove` does not extract it.
 - `aarch64/sha512_block_data_order_hw.ml`: `SHA512_HW_SUBROUTINE_CORRECT`,
   rind's proof that the naked function
   `low::aarch64::sha512::sha512_block_data_order_hw`, aws-lc's routine for
   the SHA-512 instructions, computes s2n-bignum's FIPS 180-4 spec,
   `sha512_hash_blocks`, and stores it to the state, as `sha256`'s above; the
-  proof checks its round constants against FIPS 180-4's.
+  proof checks its round constants against FIPS 180-4's. rind no longer links
+  this function. aarch64 SHA-512 is `core::arch` intrinsics where the CPU has
+  them, and the unrolled body in `generic::sha512` otherwise. Neither is this
+  proof.
 - `x86_64/sha512_block_data_order_avx2.ml`:
   `SHA512_AVX2_SUBROUTINE_CORRECT`, rind's proof that the naked function
   `low::x86_64::sha512::sha512_block_data_order_avx2`, OpenSSL's routine for
@@ -74,7 +79,8 @@ those inputs, in any worktree, restores in under a second.
   stores it to the state, as `sha256`'s above, on s2n-bignum's x86 model with
   the instructions rind's fork adds (`thirdparty/s2n-bignum/RIND.md`); the proof checks its round
   constants against FIPS 180-4's. Its stack frame, which the routine aligns
-  down to 2048 bytes, lies in the 3440 bytes below the stack pointer.
+  down to 2048 bytes, lies in the 3440 bytes below the stack pointer. rind no
+  longer links this function. x86_64 SHA-512 is the unrolled scalar body.
 - `aarch64/bn_mul_mont.ml`: `BN_MUL_MONT_GENERIC_SUBROUTINE_CORRECT`, rind's
   proof that the naked function `low::aarch64::mont::bn_mul_mont`, aws-lc's
   Montgomery multiplication, writes the Montgomery product
@@ -100,21 +106,21 @@ those inputs, in any worktree, restores in under a second.
   has no relocations, so its object is its section alone.
 - `x86_64/sha256_compress_blocks_shaext.ml` and
   `x86_64/sha256_finish_shaext.ml`: `SHA256_COMPRESS_BLOCKS_SHAEXT_CORRECT`
-  and `SHA256_FINISH_SHAEXT_CORRECT`, rind's proofs that the blocks in
-  `low::x86_64::sha256::sha256_compress_blocks_shaext` and
-  `sha256_finish_shaext`, its routines for the SHA extensions, compute
-  s2n-bignum's FIPS 180-4 spec, `sha256_hash_blocks`. The first stores it to
-  the state over its blocks, any number of them. The second leaves the
-  digest's bytes in xmm2 and xmm1, over its blocks and then the padded block,
-  or two, that it builds from the tail's whole 16-byte lanes in memory, the
-  lane where the message ends as r10 and r11, and the length's word in r8.
-  Both run one round body, which `x86_64/sha256_shaext_rounds.ml` proves
-  once, `SHA256_SHAEXT_ROUNDS_CORRECT`. They read the round constants and
-  the byte-swap mask through rcx from the static `low::x86_64::sha256::K`,
-  whose bytes `admin/prove` extracts and the proof checks against FIPS
-  180-4's. `Rind/X86_64/Sha256Shaext.lean` restates the two as axioms and
-  proves that the finish's padding, plain Rust above its block, builds the
-  block, or two, that FIPS 180-4 pads.
+  and `SHA256_FINISH_SHAEXT_CORRECT`, rind's proofs that the former inline
+  `asm!` blocks in `low::x86_64::sha256::sha256_compress_blocks_shaext` and
+  `sha256_finish_shaext` compute s2n-bignum's FIPS 180-4 spec,
+  `sha256_hash_blocks`. The first stores it to the state over its blocks, any
+  number of them. The second leaves the digest's bytes in xmm2 and xmm1, over
+  its blocks and then the padded block, or two, that it builds from the tail's
+  whole 16-byte lanes in memory, the lane where the message ends as r10 and
+  r11, and the length's word in r8. Both run one round body, which
+  `x86_64/sha256_shaext_rounds.ml` proves once, `SHA256_SHAEXT_ROUNDS_CORRECT`.
+  They read the round constants and the byte-swap mask through rcx from the
+  static `low::x86_64::sha256::K`, whose bytes the proof checks against FIPS
+  180-4's. rind no longer ships those blocks. `sha256_compress_blocks_shaext`
+  is now `core::arch` intrinsics, `sha256_finish_shaext` is gone, and the
+  padding is the generic body's. `admin/prove` does not extract either.
+  `Rind/X86_64/Sha256Shaext.lean` still restates the two old proofs as axioms.
 - `<arch>/ct_compare_16.ml` and `<arch>/ct_compare_bytes.ml`, on x86_64,
   aarch64, and armv7: `CT_COMPARE_16_CORRECT` and `CT_COMPARE_BYTES_CORRECT`,
   that the blocks in `low::<arch>::cpu::ct_compare_16` and `ct_compare_bytes`,
@@ -374,18 +380,18 @@ against FIPS 180-4 and RFC 2104 as `Rind/HashSpec.lean` transliterates them:
 
 Below rind's padding, these theorems take `Sha1Blocks` or `Sha256Blocks` as
 a hypothesis, in each target's own `Rind/<Arch>/ShaBlocks.lean`. No proof
-covers a SHA-1 block function rind runs, or SHA-256's on x86_64 without the
-SHA extensions, so there each states that every such routine computes FIPS
-180-4's block function, x86_64's SHA extensions' routine for SHA-1's padded
-last blocks pads as FIPS 180-4 does, and that rind's checks pass.
-`Rind/X86_64/Sha256Shaext.lean` restates the HOL Light proofs above of
-SHA-256's routines for the SHA extensions as the axioms
-`sha256_compress_blocks_shaext_spec` and `finish_padded_spec`, and proves that
-the finish's padding, `padded` and `ended`, gives FIPS 180-4's last blocks.
-On aarch64, `Sha256Blocks` states only that the CPU has the crypto extension
-and rind's checks pass: `Rind/Aarch64/Sha256Hw.lean` restates the HOL Light
-proof above as the axiom `sha256_block_data_order_hw_spec`, and
-`Rind/S2nSha256.lean` proves s2n-bignum's spec FIPS 180-4's block function.
+covers a SHA-1 block function rind runs. SHA-256's shipped compressors are
+`core::arch` intrinsics or `generic::sha256`, and no proof covers those
+either. `Rind/X86_64/Sha256Shaext.lean` restates the HOL Light proofs above,
+of the inline assembly rind no longer ships, as the axioms
+`sha256_compress_blocks_shaext_spec` and `finish_padded_spec`. The padding
+those axioms describe, `padded` and `ended`, is not the padding the generic
+body now builds. On aarch64, `Sha256Blocks` states only that the CPU has the
+crypto extension and rind's checks pass: `Rind/Aarch64/Sha256Hw.lean` restates
+the HOL Light proof above, of assembly rind no longer links, as the axiom
+`sha256_block_data_order_hw_spec`, and `Rind/S2nSha256.lean` proves
+s2n-bignum's spec FIPS 180-4's block function. That axiom is not a proof of
+the intrinsics.
 `Rind/<Arch>/HashAxioms.lean` checks the axioms each theorem rests on: those
 for SHA-256 on x86_64 and aarch64. An input is at most `maxInput`
 (2^61 - 1) bytes, under FIPS 180-4's 2^64-bit limit. `Rind/HashSpecTest.lean`
@@ -461,9 +467,11 @@ writes for aarch64, models them for P-256 with SHA-256 and fixed-length
 signatures, over `Rind/X86_64/SignatureBuffer.lean`'s model of
 `Buffer::write`, whose closure returns a borrow of its argument.
 
-SHA-384, SHA-512, and SHA-512/256, from the digest API to aws-lc's block
-routine, in `Rind/X86_64/Sha512.lean`, which `admin/prove` also writes for
-aarch64:
+SHA-384, SHA-512, and SHA-512/256, from the digest API down to the block
+routine the Lean model names, in `Rind/X86_64/Sha512.lean`, which `admin/prove`
+also writes for aarch64. The model names assembly rind no longer links.
+The shipped body is `generic::sha512`, unrolled on a 64-bit pointer, or the
+aarch64 SHA-512 intrinsics. These theorems are not proofs of that code:
 
 - `sha512_family_digest`: `digest`'s bytes are the hash of the message;
 - `sha512_family_context`: a `Context` given the message in any chunks, then
@@ -472,14 +480,15 @@ aarch64:
 The hash is cryptol-specs' FIPS 180-4 SHA-512, in `Rind/Sha2.lean`, with its
 block compression `processBlock_Common` transliterated from FIPS 180-4 and
 checked by `Rind/Sha2Test.lean` against its examples. Each theorem assumes
-`RunsSha512`: on x86_64 that rind picks aws-lc's AVX routine, on an Intel CPU
-with AVX but without AVX2, or OpenSSL's AVX2 routine, on a CPU with AVX2 but
-without the SHA512 instructions, whose proof is rind's HOL Light proof above,
-which `Rind/X86_64/AwsLc.lean` restates as the axiom
-`sha512_block_data_order_avx2_spec`; on aarch64 only that rind's checks pass,
-as both of aws-lc's routines there have proofs: aws-lc-verification's of its
-scalar routine, and rind's HOL Light proof above of its routine for the
-SHA-512 instructions, which `Rind/Aarch64/AwsLc.lean` restates as the axiom
+`RunsSha512`: on x86_64 that the model picks aws-lc's AVX routine, on an Intel
+CPU with AVX but without AVX2, or OpenSSL's AVX2 routine, on a CPU with AVX2
+but without the SHA512 instructions, whose proof is rind's HOL Light proof
+above of assembly rind no longer links, which `Rind/X86_64/AwsLc.lean`
+restates as the axiom `sha512_block_data_order_avx2_spec`; on aarch64 only
+that rind's checks pass, as both of aws-lc's routines there had proofs of
+assembly rind no longer links: aws-lc-verification's of its scalar routine,
+and rind's HOL Light proof above of its routine for the SHA-512 instructions,
+which `Rind/Aarch64/AwsLc.lean` restates as the axiom
 `sha512_block_data_order_hw_spec`. For both HOL Light proofs,
 `Rind/S2nSha512.lean` proves s2n-bignum's spec `Rind/Sha2.lean`'s. The
 digest API reaches each hash through function pointers too, which

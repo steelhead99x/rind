@@ -52,26 +52,8 @@ IMPORTS_ARM = [
     },
 ]
 
-IMPORTS_X86_64 = [
-    {
-        "perlasm": "crypto/sha/asm/sha512-x86_64.pl",
-        # The perlasm reads the hash from its output's name.
-        "out": "sha512-x86_64",
-        "tag": "sha512",
-        "copyright": "Copyright 2005-2026 The OpenSSL Project Authors. All Rights Reserved.",
-        # Each table, and the aws-lc import that already holds it, if one does.
-        "tables": {"K512": "sha512-x86_64", "K512_single": None},
-        "routines": ["sha512_block_data_order_avx2", "sha512_block_data_order_sha512ext"],
-    },
-    {
-        "perlasm": "crypto/sha/asm/sha512-x86_64.pl",
-        "out": "sha256-x86_64",
-        "tag": "sha256",
-        "copyright": "Copyright 2005-2026 The OpenSSL Project Authors. All Rights Reserved.",
-        "tables": {"K256": "sha256-x86_64"},
-        "routines": ["sha256_block_data_order_avx2"],
-    },
-]
+# x86_64 SHA-256 and SHA-512 are rind's own Rust. Nothing here is imported.
+IMPORTS_X86_64 = []
 
 # The perlasm picks which routines to emit from the C compiler's version, so
 # this names one that has them all, whatever the host has.

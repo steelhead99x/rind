@@ -318,7 +318,7 @@ static ONES: Ones = Ones(include!("aws_lc/rsaz-2k-avx512.ones.rs"));
 // registers.
 
 macro_rules! rsaz_routine {
-    ($name:ident ($($arg:ident: $ty:ty),*) $(, $table:ident = $sym:ident)*) => {
+    ($name:ident ($($arg:ident: $ty:ty),* $(,)?) $(, $table:ident = $sym:ident)*) => {
         #[unsafe(naked)]
         unsafe extern "sysv64" fn $name($($arg: $ty),*) {
             #[cfg(not(target_vendor = "apple"))]
@@ -337,12 +337,51 @@ macro_rules! rsaz_routine {
     };
 }
 
-rsaz_routine!(rsaz_amm52x20_x2_ifma256(r: *mut u64, a: *const u64, b: *const u64, m: *const u64, k0: *const u64), mask52x4 = MASK52X4, ones = ONES);
-rsaz_routine!(rsaz_amm52x30_x2_ifma256(r: *mut u64, a: *const u64, b: *const u64, m: *const u64, k0: *const u64), mask52x4 = MASK52X4, ones = ONES);
-rsaz_routine!(rsaz_amm52x40_x2_ifma256(r: *mut u64, a: *const u64, b: *const u64, m: *const u64, k0: *const u64), mask52x4 = MASK52X4, ones = ONES);
-rsaz_routine!(extract_multiplier_2x20_win5(r: *mut u64, table: *const u64, i: u64, j: u64), ones = ONES);
-rsaz_routine!(extract_multiplier_2x30_win5(r: *mut u64, table: *const u64, i: u64, j: u64), ones = ONES);
-rsaz_routine!(extract_multiplier_2x40_win5(r: *mut u64, table: *const u64, i: u64, j: u64), ones = ONES);
+rsaz_routine!(
+    rsaz_amm52x20_x2_ifma256(
+        r: *mut u64,
+        a: *const u64,
+        b: *const u64,
+        m: *const u64,
+        k0: *const u64,
+    ),
+    mask52x4 = MASK52X4,
+    ones = ONES
+);
+rsaz_routine!(
+    rsaz_amm52x30_x2_ifma256(
+        r: *mut u64,
+        a: *const u64,
+        b: *const u64,
+        m: *const u64,
+        k0: *const u64,
+    ),
+    mask52x4 = MASK52X4,
+    ones = ONES
+);
+rsaz_routine!(
+    rsaz_amm52x40_x2_ifma256(
+        r: *mut u64,
+        a: *const u64,
+        b: *const u64,
+        m: *const u64,
+        k0: *const u64,
+    ),
+    mask52x4 = MASK52X4,
+    ones = ONES
+);
+rsaz_routine!(
+    extract_multiplier_2x20_win5(r: *mut u64, table: *const u64, i: u64, j: u64),
+    ones = ONES
+);
+rsaz_routine!(
+    extract_multiplier_2x30_win5(r: *mut u64, table: *const u64, i: u64, j: u64),
+    ones = ONES
+);
+rsaz_routine!(
+    extract_multiplier_2x40_win5(r: *mut u64, table: *const u64, i: u64, j: u64),
+    ones = ONES
+);
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

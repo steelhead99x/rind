@@ -2,8 +2,9 @@
 
 use std::sync::OnceLock;
 
+use crate::low::generic;
 use crate::low::x86_64;
-use crate::low::x86_64::cpu::{HaveAvx, HaveAvx2, HaveSha1, HaveSsse3, is_intel};
+use crate::low::x86_64::cpu::{HaveAvx2, HaveSha1};
 use crate::low::{pad, split_tail};
 
 /// The SHA-1 routine this CPU runs, with the proof it may.
@@ -11,18 +12,14 @@ use crate::low::{pad, split_tail};
 enum Path {
     Shaext(HaveSha1),
     Avx2(HaveAvx2),
-    Avx(HaveAvx),
-    Ssse3(HaveSsse3),
-    Nohw,
+    Generic,
 }
 
 pub(crate) fn sha1_compress_blocks(state: &mut [u32; 5], blocks: &[u8]) {
     match path() {
         Path::Shaext(token) => x86_64::sha1::sha1_compress_blocks_shaext(state, blocks, token),
         Path::Avx2(token) => x86_64::sha1::sha1_compress_blocks_avx2(state, blocks, token),
-        Path::Avx(token) => x86_64::sha1::sha1_compress_blocks_avx(state, blocks, token),
-        Path::Ssse3(token) => x86_64::sha1::sha1_compress_blocks_ssse3(state, blocks, token),
-        Path::Nohw => x86_64::sha1::sha1_compress_blocks_nohw(state, blocks),
+        Path::Generic => generic::sha1::sha1_compress_blocks(state, blocks),
     }
 }
 
@@ -59,11 +56,7 @@ fn pick() -> Path {
         Path::Shaext(token)
     } else if let Some(token) = HaveAvx2::check() {
         Path::Avx2(token)
-    } else if let Some(token) = HaveAvx::check().filter(|_| is_intel()) {
-        Path::Avx(token)
-    } else if let Some(token) = HaveSsse3::check() {
-        Path::Ssse3(token)
     } else {
-        Path::Nohw
+        Path::Generic
     }
 }

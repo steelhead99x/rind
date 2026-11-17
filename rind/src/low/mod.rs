@@ -111,7 +111,7 @@ mod generic {
     ))]
     pub(crate) mod poly1305;
     // 26-bit limbs wherever a 64x64 product would be a library call:
-    // `rind_limb` 32, and armv7 without NEON. wasm32 with `wide-arithmetic`
+    // `rind_limb` 32, and armv7. wasm32 with `wide-arithmetic`
     // has `rind_limb` 64 and uses the module above. Tests compile the 26-bit
     // limbs on the other backends too.
     #[cfg(any(
@@ -121,60 +121,24 @@ mod generic {
     ))]
     pub(crate) mod poly1305_32;
     pub(super) mod reuse_cache;
-    // The portable backend's SHA-1, and both hashes in armv7 and x86_64
-    // tests to check the assembly against.
-    #[cfg(any(
-        rind_backend = "portable",
-        all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
-    ))]
+    // SHA-1. The portable backend runs it, and x86_64, aarch64, and armv7
+    // fall back to it where they have no SHA instructions.
     pub(super) mod sha1;
-    // The portable backend's SHA-256, except ESP-IDF Xtensa, which ships the
-    // IRAM body and does not also link this one. armv7 and x86_64 compile it
-    // in tests and check their assembly against it.
-    #[cfg(any(
-        all(
-            rind_backend = "portable",
-            not(all(target_arch = "xtensa", target_os = "espidf"))
-        ),
-        all(
-            test,
-            any(
-                rind_backend = "arm",
-                rind_backend = "portable",
-                rind_backend = "x86_64"
-            )
-        )
-    ))]
+    // SHA-256, except on ESP-IDF Xtensa, which ships the IRAM body and does
+    // not also link this one. The other backends fall back to it, and
+    // aarch64's crypto-extension body reads the same round constants.
+    #[cfg(any(not(all(target_arch = "xtensa", target_os = "espidf")), test))]
     pub(super) mod sha256;
     // FIPS 180-4 §4.2.2, one copy. The portable compressor, the ESP-IDF
-    // Xtensa IRAM body, and the assembly tests above all read it. aarch64
-    // tests compile none of those readers, so the table stays out: clippy
-    // denies an unused static.
-    #[cfg(any(
-        all(target_arch = "xtensa", target_os = "espidf"),
-        all(
-            rind_backend = "portable",
-            not(all(target_arch = "xtensa", target_os = "espidf"))
-        ),
-        all(
-            test,
-            any(
-                rind_backend = "arm",
-                rind_backend = "portable",
-                rind_backend = "x86_64"
-            )
-        )
-    ))]
+    // Xtensa IRAM body, and the hardware SHA-256 bodies all read it.
     pub(super) mod sha256_k;
     // SLH-DSA's SHA-256 lanes one at a time, which x86_64 runs with the SHA
-    // extensions or without AVX2.
+    // extensions or without them.
     pub(super) mod sha256x8;
-    // The portable backend's SHA-512 on every pointer width. The unrolled
-    // body is about 47 KiB when the pointer is 32 bits and misses a 16 KiB
-    // instruction cache, so the rolled loop is the one every portable target
-    // ships. Other backends compile it in tests and check their assembly
-    // against it.
-    #[cfg(any(rind_backend = "portable", test))]
+    // SHA-512. A 64-bit pointer gets the unrolled body. A 32-bit pointer gets
+    // the rolled loop: the unrolled body is about 47 KiB then and misses a
+    // 16 KiB instruction cache. x86_64 runs this body. aarch64 falls back to
+    // it without the SHA-512 instructions, and armv7 always runs it.
     pub(super) mod sha512;
     pub(super) mod zeroise;
 }

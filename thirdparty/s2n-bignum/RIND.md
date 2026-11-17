@@ -88,16 +88,17 @@ requires a 16-byte memory source to be aligned.
 
 ### rind's instructions
 
-What aws-lc's x86_64 ChaCha20-Poly1305 and ChaCha20 routines need,
-`chacha20_poly1305_{seal,open}`, `poly_hash_ad_internal`, and
-`ChaCha20_ctr32_ssse3_4x` (maintainer, 2026-11-11, on
+What aws-lc's x86_64 ChaCha20-Poly1305 routines need,
+`chacha20_poly1305_{seal,open}` and `poly_hash_ad_internal` (maintainer,
+2026-11-11, on
 [kixel-ai/rind#627](https://github.com/kixel-ai/rind/pull/627)), its
 AES-CTR and AES-CBC routines, `aes_hw_ctr32_encrypt_blocks` and
-`aes_hw_cbc_encrypt`, its P-256 mixed additions,
-`ecp_nistz256_point_add_affine` and `ecp_nistz256_point_add_affinex`, and
-what OpenSSL's `sha512_block_data_order_avx2` adds to them: BMI1's `ANDN`,
-BMI2's `RORX`, and `PUSH m64`. With them every instruction of those
-routines, as rind's release build emits them,
+`aes_hw_cbc_encrypt`, and its P-256 mixed additions,
+`ecp_nistz256_point_add_affine` and `ecp_nistz256_point_add_affinex`.
+The model also has BMI1's `ANDN`, BMI2's `RORX`, and `PUSH m64`, which
+OpenSSL's `sha512_block_data_order_avx2` needed; rind no longer ships that
+routine or `ChaCha20_ctr32_ssse3_4x`. With the instructions below, every
+instruction of the routines rind still emits
 decodes. Posting them to awslabs/s2n-bignum needs the maintainer's approval
 ([kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
 

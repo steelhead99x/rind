@@ -68,8 +68,9 @@ SOURCE = re.compile(r"^// Transliterated from s2n-bignum's ((x86|arm)/[\w/]+)\.S
 FN = re.compile(r"^pub\(crate\) (?:unsafe )?fn (\w+)")
 ARCHES = {"x86_64": "x86", "aarch64": "arm"}
 
-# aws-lc at the revision aws-lc-verification 797302470c1703cbb1a3a6fa98daffef0bfd3d80,
-# whose SHA-512 proofs ALGORITHMS.md cites, pins as its `src` submodule.
+# aws-lc at the revision aws-lc-verification 797302470c1703cbb1a3a6fa98daffef0bfd3d80
+# pins as its `src` submodule. The SHA-512 proofs of that tree are of
+# assembly rind no longer links.
 AWS_LC_REVISION = "c21d40da4bbe8db42e6b11b40e2083ee861c0eed"
 
 # The naked functions rind runs over an upstream's proven routine: their
@@ -80,8 +81,6 @@ NAKED = [
         ("x86_64", f"rind::low::x86_64::aes_gcm_avx::{r}", "vale.o", r)
         for r in ("compute_iv_stdcall", "gcm128_encrypt_opt", "gcm256_encrypt_opt", "gcm128_decrypt_opt", "gcm256_decrypt_opt")
     ),
-    ("x86_64", "rind::low::x86_64::sha512::sha512_block_data_order_avx", "sha512-x86_64.o", "sha512_block_data_order_avx"),
-    ("aarch64", "rind::low::aarch64::sha512::sha512_block_data_order_nohw", "sha512-armv8.o", "sha512_block_data_order_nohw"),
 ]
 
 X86_RET = bytes([0xC3])

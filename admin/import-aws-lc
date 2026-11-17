@@ -97,40 +97,6 @@ ARM_IMPORTS = [
         "constants": [],
         "routines": ["gcm_init_v8", "gcm_ghash_v8"],
     },
-    {
-        "source": "sha1-armv4-large.S",
-        "tag": "sha1",
-        "perlasm": "crypto/fipsmodule/sha/asm/sha1-armv4-large.pl",
-        "copyright": "Copyright 2007-2016 The OpenSSL Project Authors. All Rights Reserved.",
-        "constants": [(".LK_00_19:.word", 3)],
-        "routines": [
-            "sha1_block_data_order_nohw",
-            "sha1_block_data_order_neon",
-            "sha1_block_data_order_hw",
-        ],
-    },
-    {
-        "source": "sha256-armv4.S",
-        "tag": "sha256",
-        "perlasm": "crypto/fipsmodule/sha/asm/sha256-armv4.pl",
-        "copyright": "Copyright 2007-2016 The OpenSSL Project Authors. All Rights Reserved.",
-        # `sha256_block_data_order_neon` ends its rounds on the zero word
-        # after the table.
-        "constants": [("K256:", 18), (".LK256_shortcut_neon:", 2), (".LK256_shortcut_hw:", 2)],
-        "routines": [
-            "sha256_block_data_order_nohw",
-            "sha256_block_data_order_neon",
-            "sha256_block_data_order_hw",
-        ],
-    },
-    {
-        "source": "sha512-armv4.S",
-        "tag": "sha512",
-        "perlasm": "crypto/fipsmodule/sha/asm/sha512-armv4.pl",
-        "copyright": "Copyright 2007-2016 The OpenSSL Project Authors. All Rights Reserved.",
-        "constants": [("K512:", 40)],
-        "routines": ["sha512_block_data_order_nohw", "sha512_block_data_order_neon"],
-    },
     # Montgomery multiplication, as aws-lc's `bn_mul_mont` picks between them:
     # NEON for widths of eight 32-bit words, and integer code otherwise.
     {
@@ -140,32 +106,6 @@ ARM_IMPORTS = [
         "copyright": "Copyright 2007-2016 The OpenSSL Project Authors. All Rights Reserved.",
         "constants": [],
         "routines": ["bn_mul_mont_nohw", "bn_mul8x_mont_neon"],
-    },
-    {
-        "source": "chacha-armv4.S",
-        "dir": "generated-src/linux-arm/crypto/chacha",
-        "tag": "chacha",
-        "perlasm": "crypto/chacha/asm/chacha-armv4.pl",
-        "copyright": "Copyright 2016 The OpenSSL Project Authors. All Rights Reserved.",
-        "constants": [(".Lsigma:", 3)],
-        "routines": ["ChaCha20_ctr32_nohw", "ChaCha20_ctr32_neon"],
-    },
-    # Written by hand rather than generated, its routines end without `.size`
-    # and its local labels start `._`, so the whole file is kept. aws-lc keeps
-    # BoringSSL's ISC license for it.
-    {
-        "source": "poly1305_arm_asm.S",
-        "dir": "crypto/poly1305",
-        "tag": "poly1305",
-        "notice": [
-            "Public domain: the neon2 version in SUPERCOP by D. J. Bernstein and",
-            "Peter Schwabe, as BoringSSL imported it. Copyright (c) 2014, Google Inc.",
-            "SPDX-License-Identifier: ISC",
-        ],
-        "local": "._",
-        "whole": True,
-        "constants": [],
-        "routines": ["openssl_poly1305_neon2_blocks", "openssl_poly1305_neon2_addmulmod"],
     },
 ]
 
@@ -205,28 +145,6 @@ ARCHES = {
 }
 
 IMPORTS_64 = [
-    {
-        "arch": "x86_64",
-        "source": "sha512-x86_64.S",
-        "tag": "sha512",
-        "perlasm": "crypto/fipsmodule/sha/asm/sha512-x86_64.pl",
-        "copyright": "Copyright 2005-2016 The OpenSSL Project Authors. All Rights Reserved.",
-        "tables": ["K512"],
-        "routines": ["sha512_block_data_order_avx", "sha512_block_data_order_nohw"],
-    },
-    {
-        "arch": "x86_64",
-        "source": "sha256-x86_64.S",
-        "tag": "sha256",
-        "perlasm": "crypto/fipsmodule/sha/asm/sha512-x86_64.pl",
-        "copyright": "Copyright 2005-2016 The OpenSSL Project Authors. All Rights Reserved.",
-        "tables": ["K256"],
-        "routines": [
-            "sha256_block_data_order_avx",
-            "sha256_block_data_order_ssse3",
-            "sha256_block_data_order_nohw",
-        ],
-    },
     # The mixed addition of P-256's generator multiplication, as aws-lc's
     # `ecp_nistz256_point_mul_base` runs it, with `mulq` or with BMI2 and ADX.
     # Each carries its field helpers, and `poly` runs on through `ONE_mont`,
@@ -268,30 +186,6 @@ IMPORTS_64 = [
         },
         "drops": {"ecp_nistz256_point_add_affinex": [".byte 0x67", ".byte 0x67,0x67"]},
         "dispatches": ["ecp_nistz256_point_add_affine"],
-    },
-    # The rest of the x86_64 imports are for CPUs without AVX2.
-    {
-        "arch": "x86_64",
-        "source": "sha1-x86_64.S",
-        "tag": "sha1",
-        "perlasm": "crypto/fipsmodule/sha/asm/sha1-x86_64.pl",
-        "copyright": "Copyright 2006-2016 The OpenSSL Project Authors. All Rights Reserved.",
-        "tables": ["K_XX_XX"],
-        "routines": [
-            "sha1_block_data_order_avx",
-            "sha1_block_data_order_ssse3",
-            "sha1_block_data_order_nohw",
-        ],
-    },
-    {
-        "arch": "x86_64",
-        "source": "chacha-x86_64.S",
-        "dir": "chacha",
-        "tag": "chacha",
-        "perlasm": "crypto/chacha/asm/chacha-x86_64.pl",
-        "copyright": "Copyright 2016 The OpenSSL Project Authors. All Rights Reserved.",
-        "tables": ["zero", "rot16"],
-        "routines": ["ChaCha20_ctr32_ssse3_4x"],
     },
     # The routines aws-lc's `bn_mul_mont` picks from, by width and CPU.
     # `bn_sqrx8x_internal` loads the two scratch words after the 2n-word
@@ -491,24 +385,6 @@ IMPORTS_64 = [
         }
         for d in ["d4", "d5", "d10", "d11"]
     ],
-    {
-        "arch": "aarch64",
-        "source": "sha512-armv8.S",
-        "tag": "sha512",
-        "perlasm": "crypto/fipsmodule/sha/asm/sha512-armv8.pl",
-        "copyright": "Copyright 2014-2020 The OpenSSL Project Authors. All Rights Reserved.",
-        "tables": ["K512"],
-        "routines": ["sha512_block_data_order_nohw", "sha512_block_data_order_hw"],
-    },
-    {
-        "arch": "aarch64",
-        "source": "sha256-armv8.S",
-        "tag": "sha256",
-        "perlasm": "crypto/fipsmodule/sha/asm/sha512-armv8.pl",
-        "copyright": "Copyright 2014-2020 The OpenSSL Project Authors. All Rights Reserved.",
-        "tables": ["K256"],
-        "routines": ["sha256_block_data_order_nohw", "sha256_block_data_order_hw"],
-    },
     # Montgomery multiplication, which picks its squaring or 4x routine by
     # the width itself.
     {
@@ -533,15 +409,6 @@ IMPORTS_64 = [
         "routines": ["aesv8_gcm_8x_enc_192", "aesv8_gcm_8x_dec_192"],
     },
     # The rest are for aarch64 CPUs without the crypto extension.
-    {
-        "arch": "aarch64",
-        "source": "sha1-armv8.S",
-        "tag": "sha1",
-        "perlasm": "crypto/fipsmodule/sha/asm/sha1-armv8.pl",
-        "copyright": "Copyright 2014-2016 The OpenSSL Project Authors. All Rights Reserved.",
-        "tables": [],
-        "routines": ["sha1_block_data_order_nohw"],
-    },
     {
         "arch": "aarch64",
         "source": "ghash-neon-armv8.S",

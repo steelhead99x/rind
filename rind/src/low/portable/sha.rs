@@ -15,11 +15,11 @@
 //! link `generic::sha256` beside it: a second compressor made long hashes
 //! slower on that chip. Host tests
 //! compile the IRAM body and call it directly, on the Rust `rotate_right`
-//! and `from_be_bytes` fallbacks rather than the Xtensa asm. SHA-384/512 is
-//! the rolled loop in `generic::sha512` on every pointer width. The unrolled
-//! form is about 47 KiB when the pointer is 32 bits and misses a 16 KiB
-//! instruction cache. The measured ratio against aws-lc's C is the portable
-//! SHA-2 decision in `benchmarks/gaps.toml`.
+//! and `from_be_bytes` fallbacks rather than the Xtensa asm. SHA-384/512
+//! unrolls `generic::sha512` when the pointer is 64 bits and rolls it when
+//! the pointer is 32 bits. The unrolled form is about 47 KiB on a 32-bit
+//! pointer and misses a 16 KiB instruction cache. The measured ratio against
+//! aws-lc's C is the portable SHA-2 decision in `benchmarks/gaps.toml`.
 
 pub(crate) use crate::low::generic::sha1::sha1_compress_blocks;
 pub(crate) use crate::low::generic::sha512::sha512_compress_blocks;

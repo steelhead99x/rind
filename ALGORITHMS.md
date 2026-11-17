@@ -21,11 +21,13 @@ AES-NI, PCLMULQDQ, and SSE4.1 (Core 2); and SSE2 also SSSE3. Without ADX
 alone (Haswell), rind runs the same sources as x86_64, through s2n-bignum's
 routines that don't use it, except that Ed25519 verification's
 multiplication runs curve25519-dalek ⚡ (see below).
-CPUs with AVX2 but without SHA-NI run [OpenSSL]'s AVX2 SHA-256, and SLH-DSA's
-SHA-2 sets [SPHINCS+]'s AVX2 eight-way SHA-256, and CPUs with the SHA512
-instructions run OpenSSL's SHA-384 and SHA-512 for them. Intel CPUs
-without AVX2 run [aws-lc]'s AVX SHA-1, SHA-256, and verified ✓ SHA-384 and
-SHA-512.
+CPUs with AVX2 but without SHA-NI run rind's SHA-256, the same FIPS body as
+the portable backend, and SLH-DSA's SHA-2 sets [SPHINCS+]'s AVX2 eight-way
+SHA-256. SHA-1 with AVX2 and without SHA-NI runs rind's AVX2 message
+schedule. SHA-384 and SHA-512 run rind's unrolled scalar body on every
+x86_64 CPU, including ones with the SHA512 instructions: those instructions
+are not what the tests execute. Without AVX2, SHA-1 and SHA-256 run the
+portable bodies.
 
 | Algorithm | x86_64 | no AVX2 | no AVX | no AES-NI | SSE2 |
 |---|---|---|---|---|---|
@@ -34,11 +36,11 @@ SHA-512.
 | AES-KW, AES-KWP | Graviola + rind |  |  | aws-lc + rind |  |
 | AES-CBC | Graviola + aws-lc + rind |  |  | aws-lc + rind |  |
 | ChaCha20 (header protection) | HACL* ✓ + rind |  |  |  |  |
-| ChaCha20-Poly1305, XChaCha20-Poly1305 | aws-lc ⚡ |  |  | HACL* ✓ + aws-lc ⚡ + Graviola ⚡ | HACL* ✓ + Graviola ⚡ |
+| ChaCha20-Poly1305, XChaCha20-Poly1305 | aws-lc ⚡ |  |  | HACL* ✓ + Graviola ⚡ | HACL* ✓ + Graviola ⚡ |
 | MD5 | rind |  |  |  |  |
-| SHA-1 | rind | aws-lc |  |  |  |
-| SHA-256 | Graviola ⚡ + rind ⚡ | aws-lc ⚡ |  |  |  |
-| SHA-384, SHA-512, SHA-512/256 | OpenSSL ⚡ | aws-lc ⚡ |  |  |  |
+| SHA-1 | rind |  |  |  |  |
+| SHA-256 | rind |  |  |  |  |
+| SHA-384, SHA-512, SHA-512/256 | rind |  |  |  |  |
 | SHA3-256, SHA3-384, SHA3-512 | s2n-bignum ✓ + Graviola |  |  |  |  |
 | HMAC | Graviola ⚡ |  |  |  |  |
 | HKDF | rind ⚡ |  |  |  |  |
@@ -118,11 +120,11 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | AES block, AES-CTR | Graviola + rind | aws-lc |  | aws-lc |
 | AES-KW, AES-KWP, AES-CBC | Graviola + rind | aws-lc + rind |  | aws-lc + rind |
 | ChaCha20 (header protection) | HACL* ✓ + rind |  |  |  |
-| ChaCha20-Poly1305, XChaCha20-Poly1305 | aws-lc ⚡ |  |  | HACL* rounds + Graviola; 26-bit rind when `rind_limb` is 32 |
+| ChaCha20-Poly1305, XChaCha20-Poly1305 | aws-lc ⚡ |  | HACL* rounds + 26-bit rind | HACL* rounds + Graviola; 26-bit rind when `rind_limb` is 32 |
 | MD5 | rind |  |  |  |
-| SHA-1 | rind | aws-lc |  | rind |
-| SHA-256 | aws-lc ⚡ | aws-lc |  | rind; ESP-IDF Xtensa runs the 16-round body from IRAM |
-| SHA-384, SHA-512, SHA-512/256 | aws-lc | aws-lc ✓ | aws-lc ⚡ | rolled rind |
+| SHA-1 | rind |  |  |  |
+| SHA-256 | rind |  |  | rind; ESP-IDF Xtensa runs the 16-round body from IRAM |
+| SHA-384, SHA-512, SHA-512/256 | rind |  | rolled rind | unrolled on 64-bit pointers, rolled on 32-bit |
 | SHA3-256, SHA3-384, SHA3-512 | s2n-bignum ✓ + Graviola |  | OpenSSL ⚡ + Graviola | rind + Graviola |
 | HMAC | Graviola ⚡ |  |  |  |
 | HKDF | rind ⚡ |  |  |  |
@@ -146,10 +148,12 @@ with portable Rust in place of the assembly armv7 runs regardless.
 
 - AES header protection on aarch64 pays the same indirect call as AES-GCM
   key setup on x86_64.
-- armv7 without crypto: SHA-256 and SHA-1 run aws-lc's NEON routines, or
-  its integer ones without NEON. A [native 32-bit comparison](benchmarks/armv7-sha256.md)
-  measured them 1.2 to 2.2× faster than Graviola's SHA-256 and rind's SHA-1,
-  which in turn ran SHA-256 28–30% faster than HACL*.
+- armv7: SHA-1, SHA-256, and SHA-384/512 run the portable bodies.
+  32-bit Arm NEON and SHA intrinsics are unstable on the toolchain this
+  crate builds with, so this backend does not ship a second compressor.
+  A [native 32-bit comparison](benchmarks/armv7-sha256.md) measured the
+  aws-lc assembly this replaced 1.2 to 2.2× faster than Graviola's SHA-256
+  and rind's SHA-1. That assembly is no longer what runs.
 - portable, ESP-IDF Xtensa: SHA-256 is rind's own FIPS 180-4 compression,
   sixteen rounds unrolled and the schedule body run three times, in IRAM
   (`.iram1`). `K` is in `.dram1`. Nothing proves this body. The 16-word
@@ -157,8 +161,9 @@ with portable Rust in place of the assembly armv7 runs regardless.
   `generic::sha256_k` (Joe Birr-Pixton); the rotates and the block load
   are Xtensa `asm!`. Host tests check the Rust fallback against
   FIPS 180-4, `generic::sha256`, and aws-lc. CAVP and ACVP on every other
-  portable target run `generic::sha256`, and SHA-384/512 run the rolled
-  loop in `generic::sha512` on every pointer width. The board's sha2
+  portable target run `generic::sha256`, and SHA-384/512 unroll
+  `generic::sha512` when the pointer is 64 bits and roll it when the
+  pointer is 32 bits. The board's sha2
   known-answer run executed the Xtensa asm. A fully
   rolled loop here was slower than the previous unrolled body in IRAM on
   an ESP32-S3. At
@@ -211,12 +216,12 @@ tests use [Wycheproof]'s vectors.
 | rind | its own code | Apache-2.0 OR ISC OR MIT-0 | nothing |
 | [Argon2's reference] | ported: its AVX2 BlaMka rounds, `blamka-round-opt.h`, to Rust intrinsics, for Argon2id on x86_64 CPUs with AVX2 | CC0-1.0 OR Apache-2.0, taken under CC0-1.0 | nothing |
 | [s2n-bignum] | copied: its assembly for the elliptic curves, RSA, ML-KEM, ML-DSA, Keccak-f, and aarch64 AES-GCM, transliterated into Rust `asm!` by `admin/parse-asm`, which ends each x86_64 routine using 256-bit registers with `vzeroupper` | Apache-2.0 OR ISC OR MIT-0; its ML-KEM, ML-DSA, and aarch64 Keccak-f routines (from mlkem-native and mldsa-native) Apache-2.0 OR ISC OR MIT; its x86_64 single-state Keccak-f (from OpenSSL) Apache-2.0 | HOL Light proofs ([x86_64](https://github.com/awslabs/s2n-bignum/tree/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs), [aarch64](https://github.com/awslabs/s2n-bignum/tree/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs)) that each routine's object code computes its specified result for all inputs; some also prove that its memory accesses stay in bounds and that its branches and addresses depend on no secret. `admin/prove bytes` checks that rind's build of each routine holds the instructions its proof lists, with the differences [below](#s2n-bignums-constant-time-theorems), so the proofs are of rind's code. The aarch64 AES-GCM kernels' theorems cover the in-place calls rind makes. |
-| [HACL\*] | copied, from libcrux-chacha20poly1305: the ChaCha20 rounds, for HChaCha20 and QUIC header protection and for x86_64's ChaCha20 up to one block, 128 bytes without AVX2, and every length without SSSE3, and every ChaCha20 length on the portable backend; armv7's ChaCha20 state words are rind's, RFC 8439, and its keystream is aws-lc; copied, by `admin/import-hacl`: Vale's x86_64 AES-GCM assembly, as Rust naked functions. Portable SHA-256, SHA-384/512, and Poly1305 are rind's, not this code | Apache-2.0; Vale's AES-GCM routines port OpenSSL's `aesni_gcm`, Apache-2.0 | [F\* proofs](https://github.com/hacl-star/hacl-star/tree/f557259007db9933442dde10aa995c1b00bd3446) of memory safety, functional correctness, and secret independence of the F\* source. libcrux's Rust is compiled mechanically from HACL\*'s verified C, and that step is not itself verified. rind's code that loads the rounds' state and XORs their keystream is not covered, except for header protection, which rind's own Lean proof covers with the rounds. Vale's [F\* proofs](https://github.com/hacl-star/hacl-star/blob/f557259007db9933442dde10aa995c1b00bd3446/vale/code/arch/x64/interop/Vale.Wrapper.X64.GCMencryptOpt.fsti) that its x86_64 AES-GCM, as Vale prints it, computes AES-128-GCM and AES-256-GCM, tag check included, for any AAD and message under 2^32 bytes, in place or not, from the counter block its own routine computes, which rind runs for it, and the round keys and GHASH key powers its own routines compute. `admin/prove bytes` checks that rind's copies of the routines it runs assemble to the instructions of Vale's printed text. rind computes those keys and powers itself, and its tests check them byte for byte against Vale's routines. [`proofs/`](proofs/README.md) proves that code, and rind's Rust that splits the message into the routines' blocks and copies the partial ones, as EverCrypt's proven Low\* wrapper does, from its AEAD API down to Vale's routines. |
+| [HACL\*] | copied, from libcrux-chacha20poly1305: the ChaCha20 rounds, for HChaCha20 and QUIC header protection, for x86_64's ChaCha20 up to one block and every length without AVX2, and for every ChaCha20 length on armv7 and the portable backend; armv7's ChaCha20 state words are rind's, RFC 8439; copied, by `admin/import-hacl`: Vale's x86_64 AES-GCM assembly, as Rust naked functions. Portable SHA-256, SHA-384/512, and Poly1305 are rind's, not this code | Apache-2.0; Vale's AES-GCM routines port OpenSSL's `aesni_gcm`, Apache-2.0 | [F\* proofs](https://github.com/hacl-star/hacl-star/tree/f557259007db9933442dde10aa995c1b00bd3446) of memory safety, functional correctness, and secret independence of the F\* source. libcrux's Rust is compiled mechanically from HACL\*'s verified C, and that step is not itself verified. rind's code that loads the rounds' state and XORs their keystream is not covered, except for header protection, which rind's own Lean proof covers with the rounds. Vale's [F\* proofs](https://github.com/hacl-star/hacl-star/blob/f557259007db9933442dde10aa995c1b00bd3446/vale/code/arch/x64/interop/Vale.Wrapper.X64.GCMencryptOpt.fsti) that its x86_64 AES-GCM, as Vale prints it, computes AES-128-GCM and AES-256-GCM, tag check included, for any AAD and message under 2^32 bytes, in place or not, from the counter block its own routine computes, which rind runs for it, and the round keys and GHASH key powers its own routines compute. `admin/prove bytes` checks that rind's copies of the routines it runs assemble to the instructions of Vale's printed text. rind computes those keys and powers itself, and its tests check them byte for byte against Vale's routines. [`proofs/`](proofs/README.md) proves that code, and rind's Rust that splits the message into the routines' blocks and copies the partial ones, as EverCrypt's proven Low\* wrapper does, from its AEAD API down to Vale's routines. |
 | [mlkem-native] | ported: its portable C polynomial arithmetic (the NTT, inverse NTT, base multiplication, reductions, byte encoding, and rejection sampling), to Rust, for armv7 and x86_64 CPUs without AVX2; copied, by `admin/import-aws-lc` from aws-lc's copy: its x86_64 AVX2 ciphertext compression at 4, 5, 10, and 11 bits, which rind ends with `vzeroupper` | Apache-2.0 OR ISC OR MIT | [CBMC proofs](https://github.com/pq-code-package/mlkem-native/tree/d1b2fe782888bdb761a50336012923180be7f502/proofs/cbmc) of memory safety and coefficient bounds for its C. They do not cover rind's port. [HOL Light proofs](https://github.com/pq-code-package/mlkem-native/tree/d1b2fe782888bdb761a50336012923180be7f502/proofs/hol_light/x86_64) that its AVX2 compression's object code computes its specified result for all inputs, of mlkem-native's own build, at the revision aws-lc's copy takes. |
 | [mldsa-native] | ported: its C FIPS 204 construction (`sign.c`, `packing.c`, `poly.c`, and `poly_kl.c`) on every CPU, and its portable C polynomial arithmetic for armv7, the portable backend, and x86_64 CPUs without AVX2, to Rust, at v2.0.0 | Apache-2.0 OR ISC OR MIT | [CBMC proofs](https://github.com/pq-code-package/mldsa-native/tree/834a90d5e846ffa1e1611bd24e160bb2e9b86d35/proofs/cbmc) of memory safety and coefficient bounds for its C. They do not cover rind's port, which rind's tests check against s2n-bignum's routines, [Wycheproof], ACVP, and aws-lc-rs. |
-| [aws-lc] | copied, by `admin/import-aws-lc`: its SHA-384/512 assembly for x86_64 and aarch64, its x86_64 AVX SHA-256 routine and its aarch64 one for the SHA-256 instructions, Montgomery multiplication and the x86_64 exponentiation's `bn_power5` (with one deliberate change: rind's `bn_sqr8x_mont` and `bn_powerx5` zero two scratch words their `mulx` squaring reads unwritten, which valgrind reports though results and timing do not depend on them), AVX2 and dual AVX-512 RSAZ exponentiation, AES-NI AES-CTR, P-256's mixed addition for its generator multiplication (with one deliberate change: rind's BMI2 and ADX copy drops the `.byte 0x67` address-size prefixes aws-lc pads two of its squaring's register-only `mulx` with, which the CPU ignores and s2n-bignum's x86 model does not decode), and SSE4.1 and AVX2 ChaCha20-Poly1305 (with one deliberate change: rind's copy reads the choice of AVX2 from the block rind passes it rather than aws-lc's `OPENSSL_ia32cap_P`), its aarch64 NEON ChaCha20-Poly1305 and eight-way AES-192-GCM, its x86_64 assembly for CPUs without AVX2 (SSSE3 ChaCha20, SSSE3 and AVX SHA-1, and SSSE3 SHA-256) without AES-NI (SSSE3 AES and GHASH), and without SSSE3 (integer SHA-1 and SHA-256), its aarch64 Montgomery multiplication, and its aarch64 assembly for CPUs without the crypto extension (NEON AES, NEON GHASH, and scalar SHA-1 and SHA-256), as Rust naked functions; its 32-bit ARM assembly for ChaCha20, SHA-1 and SHA-256 (NEON and integer), SHA-384/512, Montgomery multiplication, the ARMv8 crypto extension (AES, GHASH, SHA-1, SHA-256), and NEON Poly1305, in Rust `global_asm!`; and the C that drives that Poly1305, RSAZ, and `bn_power5`, that sets up its x86_64 SSSE3 GHASH table, and that computes its constant-time SSE2 AES and integer GHASH for x86_64 CPUs without SSSE3, ported to Rust, both also for armv7 without the crypto extension and the portable backend. aws-lc takes its Poly1305, ChaCha20-Poly1305, SSSE3 GHASH, and constant-time AES and GHASH from BoringSSL and the rest from OpenSSL | Apache-2.0; Poly1305, ChaCha20-Poly1305, SSSE3 and integer GHASH, and constant-time AES ISC | [SAW and NSym proofs](https://github.com/awslabs/aws-lc-verification/tree/797302470c1703cbb1a3a6fa98daffef0bfd3d80) that its x86_64 AVX and aarch64 scalar SHA-384/512 routines compute their specified result for all inputs. Their proof of its aarch64 routine for the SHA-512 instructions ends with the result in registers, before the routine stores it, so rind's own HOL Light proof covers that routine, of the object code rind's build emits, against s2n-bignum's FIPS 180-4 spec, and rind's own HOL Light proofs cover both forms of P-256's mixed addition, of the object code rind's Linux build emits, against s2n-bignum's P-256 group law. `admin/prove bytes` checks that rind's copies of the first two routines assemble to the instructions of aws-lc's text at the revision the proofs pin, so the proofs are of rind's code. They do not cover its 32-bit ARM code. [`proofs/`](proofs/README.md) proves rind's SHA-384/512 around the AVX and both aarch64 routines. |
+| [aws-lc] | copied, by `admin/import-aws-lc`: Montgomery multiplication and the x86_64 exponentiation's `bn_power5` (with one deliberate change: rind's `bn_sqr8x_mont` and `bn_powerx5` zero two scratch words their `mulx` squaring reads unwritten, which valgrind reports though results and timing do not depend on them), AVX2 and dual AVX-512 RSAZ exponentiation, AES-NI AES-CTR, P-256's mixed addition for its generator multiplication (with one deliberate change: rind's BMI2 and ADX copy drops the `.byte 0x67` address-size prefixes aws-lc pads two of its squaring's register-only `mulx` with, which the CPU ignores and s2n-bignum's x86 model does not decode), and SSE4.1 and AVX2 ChaCha20-Poly1305 (with one deliberate change: rind's copy reads the choice of AVX2 from the block rind passes it rather than aws-lc's `OPENSSL_ia32cap_P`), its aarch64 NEON ChaCha20-Poly1305 and eight-way AES-192-GCM, its x86_64 assembly for CPUs without AES-NI (SSSE3 AES and GHASH), its aarch64 Montgomery multiplication, and its aarch64 assembly for CPUs without the crypto extension (NEON AES and NEON GHASH), as Rust naked functions; its 32-bit ARM assembly for Montgomery multiplication and the ARMv8 crypto extension (AES and GHASH), in Rust `global_asm!`; and the C that drives RSAZ and `bn_power5`, that sets up its x86_64 SSSE3 GHASH table, and that computes its constant-time SSE2 AES and integer GHASH for x86_64 CPUs without SSSE3, ported to Rust, both also for armv7 without the crypto extension and the portable backend. aws-lc takes its ChaCha20-Poly1305, SSSE3 GHASH, and constant-time AES and GHASH from BoringSSL and the rest from OpenSSL | Apache-2.0; ChaCha20-Poly1305, SSSE3 and integer GHASH, and constant-time AES ISC | rind's own HOL Light proofs cover both forms of P-256's mixed addition, of the object code rind's Linux build emits, against s2n-bignum's P-256 group law. The SAW and NSym proofs of aws-lc's SHA-384/512, and rind's HOL Light proofs of the SHA-256 and SHA-512 assembly it used to ship, are of bytes rind no longer links. |
 | [BoringSSL] | copied, by `admin/import-boringssl`: its x86_64 VAES AES-GCM assembly, `aes-gcm-avx2-x86_64` and `aes-gcm-avx512-x86_64`, as Rust naked functions; its 32-bit ARM NEON X25519 assembly, in Rust `global_asm!`, which BoringSSL takes from [SUPERCOP]'s `neon2`, public domain | Apache-2.0 | nothing |
-| [OpenSSL] | copied, by `admin/import-openssl`: its x86_64 AVX2 SHA-256 and SHA-512 assembly and its SHA-512 assembly for the SHA512 instructions, from `sha512-x86_64`, as Rust naked functions; its 32-bit ARM Keccak-f assembly, integer and NEON, `keccak1600-armv4`, in Rust `global_asm!` | Apache-2.0 | nothing |
+| [OpenSSL] | copied, by `admin/import-openssl`: its 32-bit ARM Keccak-f assembly, integer and NEON, `keccak1600-armv4`, in Rust `global_asm!` | Apache-2.0 | nothing |
 | [SPHINCS+] | ported: the SPHINCS+ team's FIPS 205 code (`sign.c`, `fors.c`, `wots.c`, `merkle.c`, and its AVX2 builds' `treehashx4` and `treehashx8`, generalised over the lane count) on every CPU, and its x86_64 AVX2 eight-way SHA-256 (`sha256avx.c`), to Rust, from the `bas/fips205` branch | public domain, or CC0-1.0, 0BSD, or MIT-0 | nothing: no SLH-DSA implementation carries a proof of functional correctness |
 | [curve25519-dalek] | dependency, with its serial backend, for armv7 and the portable backend; ported: its AVX2 backend's field arithmetic, point formulas, and base point table, to Rust intrinsics, for Ed25519 verification's four-point multiplication on x86_64 CPUs with AVX2 but without ADX | BSD-3-Clause | nothing: that backend's field arithmetic is hand-written, as is the AVX2 backend's. Its `fiat` backend would run [fiat-crypto]'s verified field arithmetic instead, but only a `--cfg` flag for the whole build selects it, so rind refuses it rather than let the build pick. |
 | [fiat-crypto] | dependency | MIT OR Apache-2.0 OR BSD-1-Clause | [Coq proofs](https://github.com/mit-plv/fiat-crypto/tree/67316f05d771f7f2db62beede59e9b56406a9efd) that each generated field operation is correct. rind's point formulas, inversion, and table lookup over them are not covered. |
@@ -732,40 +737,31 @@ and 128f signing and slower at the rest, as above. OpenSSL 3.5's SLH-DSA took
 `fips205` 2.6-5.4x.
 
 ### Symmetric cryptography
-SHA1 and SHA256 have straightforward implementations using hashing intrinsics
-(aka "SHA-NI" on x86_64, "sha" extension on aarch64), except that aarch64 runs
-aws-lc's SHA256 assembly for those instructions: it keeps a register copy off
-each round's dependency chain, where LLVM's code for the intrinsics puts one
-on it, and x86_64 runs LLVM's code for its SHA256 intrinsics frozen into
-inline assembly, so that a proof can be about the bytes it runs, with the
-last block's padding in Rust. Without SHA-NI, x86_64
-selects at runtime an AVX2 message schedule with scalar rounds for SHA1, as
-aws-lc does, and for SHA256 runs OpenSSL's AVX2 routine, which aws-lc leaves
-out: 1.12x faster than aws-lc's AVX routine on an i7-8700 and 1.13x on Arrow
-Lake, and 1.17x faster than the Rust AVX2 port it replaces on the i7-8700.
-Without AVX2, both run aws-lc's AVX routines on Intel and its SSSE3 ones
-elsewhere, as aws-lc picks; they are
-2.2x (SHA256) and 1.7x (SHA1) faster than the pure Rust ones on Intel.
-Without SSSE3 too, both run aws-lc's integer routines, as aws-lc does: 2.2x
-(SHA256) and 1.25x (SHA1) faster than the pure Rust ones, and 1.3-1.5x
-faster than HACL*'s SHA256.
-aarch64 without the crypto extension runs aws-lc's
-scalar SHA1 and SHA256 assembly. 32-bit `arm` runs aws-lc's SHA1 and SHA256
-assembly: the crypto extension where the CPU has it, NEON where it has NEON,
-and the integer routine otherwise.
+SHA-1 and SHA-256 use the hashing intrinsics where the CPU has them
+("SHA-NI" on x86_64, the Armv8 SHA-256 instructions on aarch64) and
+`generic::sha1` and `generic::sha256` otherwise. The intrinsic sequences are
+the public-domain ones Jeffrey Walton published from Intel's and ARM's
+papers. They are not the HOL Light proofs of the assembly and the frozen
+inline assembly this replaced: those proofs are of bytes rind no longer
+ships. Without SHA-NI, x86_64 SHA-1 selects an AVX2 message schedule with
+scalar rounds, and SHA-256 runs the generic body. 32-bit `arm` runs the
+generic bodies: its NEON and SHA intrinsics are unstable on the toolchain
+this crate builds with. The assembly this replaced measured, for SHA-256,
+1.12× faster than aws-lc's AVX routine on an i7-8700 and 1.13× on Arrow Lake,
+and without AVX2 2.2× (SHA-256) and 1.7× (SHA-1) faster than these pure Rust
+bodies on Intel. This slice did not remeasure.
 
-SHA384, SHA512, and SHA512/256 run aws-lc's assembly everywhere but on
-x86_64 CPUs with AVX2, which run OpenSSL's: its routine for the SHA512
-instructions where the CPU has them, 5.4x faster than aws-lc's AVX routine on
-Arrow Lake, and its AVX2 routine otherwise, which aws-lc leaves out: 1.18x
-faster than aws-lc's AVX routine on an i7-8700 and 1.15x on Arrow Lake, and
-1.47x faster than its scalar one on AMD's Zen 3. Without AVX2, aws-lc's AVX
-routine runs on Intel and its scalar routine on other CPUs, as aws-lc picks:
-the AVX routine is 1.1x faster than the scalar one on Intel, and 1.5x slower
-on AMD's Zen. On aarch64, its routine for the SHA-512 instructions where the CPU
-has them, and its scalar routine otherwise; on 32-bit `arm`, its NEON routine
-where the CPU has NEON, and its scalar routine otherwise. The portable
-backend runs rind's rolled loop, on every pointer width.
+SHA-384, SHA-512, and SHA-512/256 run rind's body in `generic::sha512`.
+A 64-bit pointer unrolls all eighty rounds. A 32-bit pointer rolls them:
+that unrolled body is about 47 KiB, several times the ESP32-S3's 16 KiB
+instruction cache. On aarch64, CPUs with the SHA-512 instructions (Rust's
+`sha3` feature) run those intrinsics instead, in the order mbedtls and
+RustCrypto use. x86_64 does not: the SHA512 instructions are absent from
+the CPUs the tests run on, and an AVX2 schedule that interleaves two blocks
+was not written untested. The OpenSSL assembly this replaced measured 5.4×
+faster than aws-lc's AVX routine on Arrow Lake with the SHA512 instructions,
+and 1.18× faster than that AVX routine on an i7-8700 with AVX2. Those
+ratios are of code rind no longer ships.
 
 SHA3-256, SHA3-384, and SHA3-512 run Graviola's sponge over the Keccak-f
 ML-KEM uses (see [ML-KEM](#ml-kem)), one state at a time.
@@ -891,14 +887,11 @@ fix on it. For one block, the kernels measured 1.05-1.3x faster than HACL*'s
 rounds on Coffee Lake, Arrow Lake, and Zen 3, where HACL*'s rounds are within
 10% of aws-lc's integer routine.
 
-x86_64 CPUs without AVX2 run ChaCha20 above 128 bytes on aws-lc's
-`chacha-x86_64` SSSE3 routine, four blocks at a time, as aws-lc picks it,
-which measured 2.4-2.7x faster than HACL*'s rounds from 256 bytes on Coffee
-Lake, Zen 3, and Arrow Lake. Up to that, and at every length without SSSE3,
-where aws-lc runs its integer routine, they run HACL*'s verified rounds, which
-took 0.92-1.07 of that routine's time on the same CPUs. Header protection without AVX2 takes 0.91 of
-aws-lc-rs's time on an EPYC 9V74 and 0.96 on a Xeon Platinum 8573C in
-[run 41697909102].
+x86_64 CPUs without AVX2 run ChaCha20 on HACL*'s verified rounds at every
+length. The SSSE3 assembly this replaced measured 2.4-2.7× faster than those
+rounds from 256 bytes on Coffee Lake, Zen 3, and Arrow Lake. Header
+protection without AVX2 takes 0.91 of aws-lc-rs's time on an EPYC 9V74 and
+0.96 on a Xeon Platinum 8573C in [run 41697909102].
 
 QUIC header protection runs HACL*'s verified rounds in general-purpose
 registers on every architecture, one block straight from the key and sample,
@@ -924,10 +917,10 @@ reads the same bits from the block rind passes it, so the path is decided
 once per process like rind's others. Without SSE4.1, ChaCha20 and Poly1305
 run in separate passes, as in aws-lc.
 
-Elsewhere, 32-bit `arm` runs ChaCha20 on aws-lc's `chacha-armv4` assembly,
-switching from its integer routine to its NEON one at 192 bytes as aws-lc
-does, where `AT_HWCAP` reports NEON. Poly1305 runs aws-lc's NEON code there too, and
-rind's 26-bit limbs without NEON.
+Elsewhere, 32-bit `arm` runs ChaCha20 on HACL*'s rounds and Poly1305 on
+rind's 26-bit limbs. 32-bit Arm NEON intrinsics are unstable on the
+toolchain this crate builds with, so this backend does not ship a NEON
+keystream or a NEON Poly1305. The 26-bit state wipes itself on drop.
 
 [Graviola]: https://github.com/ctz/graviola
 [cifra]: https://github.com/ctz/cifra

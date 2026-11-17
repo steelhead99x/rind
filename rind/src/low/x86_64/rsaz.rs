@@ -288,7 +288,7 @@ static SCATTER_PERMD: ScatterPermd = ScatterPermd(include!("aws_lc/rsaz-avx2.sca
 // registers.
 
 macro_rules! rsaz_routine {
-    ($name:ident ($($arg:ident: $ty:ty),*) $(, $table:ident = $sym:ident)*) => {
+    ($name:ident ($($arg:ident: $ty:ty),* $(,)?) $(, $table:ident = $sym:ident)*) => {
         #[unsafe(naked)]
         unsafe extern "sysv64" fn $name($($arg: $ty),*) {
             #[cfg(not(target_vendor = "apple"))]
@@ -307,12 +307,24 @@ macro_rules! rsaz_routine {
     };
 }
 
-rsaz_routine!(rsaz_1024_sqr_avx2(r: *mut u64, a: *const u64, m: *const u64, n0: u64, count: i32), and_mask = AND_MASK);
-rsaz_routine!(rsaz_1024_mul_avx2(r: *mut u64, a: *const u64, b: *const u64, m: *const u64, n0: u64), and_mask = AND_MASK);
+rsaz_routine!(
+    rsaz_1024_sqr_avx2(r: *mut u64, a: *const u64, m: *const u64, n0: u64, count: i32),
+    and_mask = AND_MASK
+);
+rsaz_routine!(
+    rsaz_1024_mul_avx2(r: *mut u64, a: *const u64, b: *const u64, m: *const u64, n0: u64),
+    and_mask = AND_MASK
+);
 rsaz_routine!(rsaz_1024_norm2red_avx2(red: *mut u64, norm: *const u64));
 rsaz_routine!(rsaz_1024_red2norm_avx2(norm: *mut u64, red: *const u64));
-rsaz_routine!(rsaz_1024_scatter5_avx2(table: *mut u64, val: *const u64, i: u32), scatter_permd = SCATTER_PERMD);
-rsaz_routine!(rsaz_1024_gather5_avx2(val: *mut u64, table: *const u64, i: u32), scatter_permd = SCATTER_PERMD);
+rsaz_routine!(
+    rsaz_1024_scatter5_avx2(table: *mut u64, val: *const u64, i: u32),
+    scatter_permd = SCATTER_PERMD
+);
+rsaz_routine!(
+    rsaz_1024_gather5_avx2(val: *mut u64, table: *const u64, i: u32),
+    scatter_permd = SCATTER_PERMD
+);
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

@@ -317,8 +317,6 @@ release() {
 # an axiom beyond HOL Light's.
 hol_light_proofs=(
     "aarch64 bignum_eq.bin rind::low::aarch64::bignum_eq::bignum_eq"
-    "aarch64 sha256_block_data_order_hw.o rind::low::aarch64::sha256::sha256_block_data_order_hw"
-    "aarch64 sha512_block_data_order_hw.o rind::low::aarch64::sha512::sha512_block_data_order_hw"
     "aarch64 bn_mul_mont.o rind::low::aarch64::mont::bn_mul_mont"
     "aarch64 ct_compare_bytes.bin rind::low::aarch64::cpu::ct_compare_bytes"
     "aarch64 ct_compare_16.bin rind::low::aarch64::cpu::ct_compare_16"
@@ -326,20 +324,18 @@ hol_light_proofs=(
     "x86_64 ct_compare_16.bin rind::low::x86_64::cpu::ct_compare_16"
     "armv7 ct_compare_bytes.bin rind::low::arm::cpu::ct_compare_bytes"
     "armv7 ct_compare_16.bin rind::low::arm::cpu::ct_compare_16"
-    "x86_64 sha512_block_data_order_avx2.o rind::low::x86_64::sha512::sha512_block_data_order_avx2"
     "x86_64 bn_mul_mont_nohw.o rind::low::x86_64::mont::bn_mul_mont_nohw"
     "x86_64 aes_hw_cbc_encrypt.o rind::low::x86_64::aes_cbc::aes_hw_cbc_encrypt"
-    "x86_64 sha256_compress_blocks_shaext.bin rind::low::x86_64::sha256::sha256_compress_blocks_shaext"
-    "x86_64 sha256_finish_shaext.bin rind::low::x86_64::sha256::sha256_finish_shaext"
     "x86_64 ecp_nistz256_point_add_affine.o rind::low::x86_64::ecp_nistz256::ecp_nistz256_point_add_affine"
     "x86_64 ecp_nistz256_point_add_affinex.o rind::low::x86_64::ecp_nistz256::ecp_nistz256_point_add_affinex"
 )
 # The statics the proofs above read through a register, each `<arch>/<file>`
 # the static's bytes, which `rind_static` writes and the proof asserts are
 # what it lists.
-hol_light_data=(
-    "x86_64 sha256_shaext_k.bin rind::low::x86_64::sha256::K"
-)
+# SHA-256's round constants used to be extracted for the SHA-NI proof.
+# That proof is of inline assembly rind no longer ships, and the intrinsic
+# body reads `generic::sha256_k::K` instead.
+hol_light_data=()
 # The specs that no proof above loads yet, each loaded into the named target's
 # program so its known-answer tests run.
 hol_light_specs=(

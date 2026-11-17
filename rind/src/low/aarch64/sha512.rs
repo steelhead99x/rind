@@ -1,99 +1,124 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! SHA-512 compression with aws-lc's `sha512-armv8` routines, imported by
-//! `admin/import-aws-lc`: the SHA-512 instructions where the CPU has them,
-//! and scalar code otherwise.
+//! SHA-512 with the Armv8.2 SHA-512 instructions where the CPU has them,
+//! and `generic::sha512` otherwise.
 //!
-//! rind's HOL Light proof, `proofs/hol-light/aarch64/sha512_block_data_order_hw.ml`,
-//! covers the SHA-512-instruction routine as rind's Linux build emits it.
-//! aws-lc-verification's NSym proof covers the scalar routine as aws-lc
-//! builds it for Linux, and `admin/prove-bytes` checks that rind's Linux
-//! build matches. Neither comparison includes the Apple variant.
+//! The round order is the one mbedtls and RustCrypto use for `sha512h` and
+//! `sha512su0`. It is not the HOL Light proof of the assembly this replaced:
+//! that proof is of bytes rind no longer ships.
+
+use core::arch::aarch64::*;
 
 use super::cpu::HaveSha3;
+use crate::low::generic::sha512::K;
 
 pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     assert!(blocks.len().is_multiple_of(128));
-    // Both routines run their loop at least once, so zero blocks would read
-    // past `blocks`.
-    if blocks.is_empty() {
-        return;
-    }
     match HaveSha3::check() {
-        // SAFETY: `blocks` is a whole number of blocks, and not empty.
-        Some(sha3) => unsafe { compress_hw(sha3, state, blocks) },
-        // SAFETY: `blocks` is a whole number of blocks, and not empty.
-        None => unsafe { compress_nohw(state, blocks) },
+        // SAFETY: the token proves the SHA-512 instructions, which Rust
+        // names `sha3`, and `blocks` is a whole number of blocks.
+        Some(token) => unsafe { compress_hw(token, state, blocks) },
+        None => crate::low::generic::sha512::sha512_compress_blocks(state, blocks),
     }
 }
 
-/// Compresses `blocks`, a whole number of them, into `state` with the
-/// SHA-512 instructions.
+/// Two SHA-512 rounds. `$hi` and `$lo` are the lanes the instructions write;
+/// `$mid` and `$prev` are the other two state vectors, in the order the
+/// next pair rotates them into.
+macro_rules! pair {
+    ($wk:expr, $koff:expr, $hi:ident, $mid:ident, $lo:ident, $prev:ident) => {{
+        // SAFETY: `$koff` is an even index below 80, so the load is two
+        // round constants inside `K`.
+        let initial = unsafe { vaddq_u64($wk, vld1q_u64(K.as_ptr().add($koff))) };
+        let sum = vaddq_u64(vextq_u64::<1>(initial, initial), $hi);
+        let intermed = vsha512hq_u64(sum, vextq_u64::<1>($mid, $hi), vextq_u64::<1>($lo, $mid));
+        $hi = vsha512h2q_u64(intermed, $lo, $prev);
+        $lo = vaddq_u64($lo, intermed);
+    }};
+}
+
+/// Compresses `blocks` with the SHA-512 instructions.
 ///
 /// # Safety
 ///
-/// `blocks` must hold at least one whole block.
+/// The caller holds a `HaveSha3` token, and `blocks` is a whole number of
+/// blocks.
+#[target_feature(enable = "neon,sha3")]
 unsafe fn compress_hw(_: HaveSha3, state: &mut [u64; 8], blocks: &[u8]) {
-    // SAFETY: `blocks` is `len / 128` readable blocks, at least one, and the
-    // token proves the CPU has the SHA-512 instructions, which Rust's `sha3`
-    // feature includes.
-    unsafe {
-        asm_call!(unsafe extern "C" sha512_block_data_order_hw(state, blocks.as_ptr(), blocks.len() / 128))
+    // SAFETY: `state` is eight words. Each load is two of them.
+    let (mut ab, mut cd, mut ef, mut gh) = unsafe {
+        (
+            vld1q_u64(state.as_ptr()),
+            vld1q_u64(state.as_ptr().add(2)),
+            vld1q_u64(state.as_ptr().add(4)),
+            vld1q_u64(state.as_ptr().add(6)),
+        )
+    };
+
+    let (blocks, _) = blocks.as_chunks::<128>();
+    for block in blocks {
+        let ab0 = ab;
+        let cd0 = cd;
+        let ef0 = ef;
+        let gh0 = gh;
+
+        // SAFETY: `block` is 128 readable bytes, and each load is 16 of them.
+        let (mut s0, mut s1, mut s2, mut s3, mut s4, mut s5, mut s6, mut s7) = unsafe {
+            (
+                vreinterpretq_u64_u8(vrev64q_u8(vld1q_u8(block.as_ptr()))),
+                vreinterpretq_u64_u8(vrev64q_u8(vld1q_u8(block.as_ptr().add(16)))),
+                vreinterpretq_u64_u8(vrev64q_u8(vld1q_u8(block.as_ptr().add(32)))),
+                vreinterpretq_u64_u8(vrev64q_u8(vld1q_u8(block.as_ptr().add(48)))),
+                vreinterpretq_u64_u8(vrev64q_u8(vld1q_u8(block.as_ptr().add(64)))),
+                vreinterpretq_u64_u8(vrev64q_u8(vld1q_u8(block.as_ptr().add(80)))),
+                vreinterpretq_u64_u8(vrev64q_u8(vld1q_u8(block.as_ptr().add(96)))),
+                vreinterpretq_u64_u8(vrev64q_u8(vld1q_u8(block.as_ptr().add(112)))),
+            )
+        };
+
+        pair!(s0, 0, gh, ef, cd, ab);
+        pair!(s1, 2, ef, cd, ab, gh);
+        pair!(s2, 4, cd, ab, gh, ef);
+        pair!(s3, 6, ab, gh, ef, cd);
+        pair!(s4, 8, gh, ef, cd, ab);
+        pair!(s5, 10, ef, cd, ab, gh);
+        pair!(s6, 12, cd, ab, gh, ef);
+        pair!(s7, 14, ab, gh, ef, cd);
+
+        let mut t = 16;
+        while t < 80 {
+            s0 = vsha512su1q_u64(vsha512su0q_u64(s0, s1), s7, vextq_u64::<1>(s4, s5));
+            pair!(s0, t, gh, ef, cd, ab);
+            s1 = vsha512su1q_u64(vsha512su0q_u64(s1, s2), s0, vextq_u64::<1>(s5, s6));
+            pair!(s1, t + 2, ef, cd, ab, gh);
+            s2 = vsha512su1q_u64(vsha512su0q_u64(s2, s3), s1, vextq_u64::<1>(s6, s7));
+            pair!(s2, t + 4, cd, ab, gh, ef);
+            s3 = vsha512su1q_u64(vsha512su0q_u64(s3, s4), s2, vextq_u64::<1>(s7, s0));
+            pair!(s3, t + 6, ab, gh, ef, cd);
+            s4 = vsha512su1q_u64(vsha512su0q_u64(s4, s5), s3, vextq_u64::<1>(s0, s1));
+            pair!(s4, t + 8, gh, ef, cd, ab);
+            s5 = vsha512su1q_u64(vsha512su0q_u64(s5, s6), s4, vextq_u64::<1>(s1, s2));
+            pair!(s5, t + 10, ef, cd, ab, gh);
+            s6 = vsha512su1q_u64(vsha512su0q_u64(s6, s7), s5, vextq_u64::<1>(s2, s3));
+            pair!(s6, t + 12, cd, ab, gh, ef);
+            s7 = vsha512su1q_u64(vsha512su0q_u64(s7, s0), s6, vextq_u64::<1>(s3, s4));
+            pair!(s7, t + 14, ab, gh, ef, cd);
+            t += 16;
+        }
+
+        ab = vaddq_u64(ab, ab0);
+        cd = vaddq_u64(cd, cd0);
+        ef = vaddq_u64(ef, ef0);
+        gh = vaddq_u64(gh, gh0);
     }
-}
 
-/// As [`compress_hw`], with the scalar routine.
-///
-/// # Safety
-///
-/// `blocks` must hold at least one whole block.
-unsafe fn compress_nohw(state: &mut [u64; 8], blocks: &[u8]) {
-    // SAFETY: `blocks` is `len / 128` readable blocks, at least one.
+    // SAFETY: `state` is eight writable words.
     unsafe {
-        asm_call!(unsafe extern "C" sha512_block_data_order_nohw(state, blocks.as_ptr(), blocks.len() / 128))
+        vst1q_u64(state.as_mut_ptr(), ab);
+        vst1q_u64(state.as_mut_ptr().add(2), cd);
+        vst1q_u64(state.as_mut_ptr().add(4), ef);
+        vst1q_u64(state.as_mut_ptr().add(6), gh);
     }
-}
-
-/// The round constants, then a zero that ends the scalar routine's rounds.
-#[repr(C, align(64))]
-struct Table([u64; 81]);
-
-static K512: Table = Table(include!("aws_lc/sha512-armv8.K512.rs"));
-
-#[unsafe(naked)]
-unsafe extern "C" fn sha512_block_data_order_nohw(
-    state: *mut [u64; 8],
-    data: *const u8,
-    blocks: usize,
-) {
-    #[cfg(not(target_vendor = "apple"))]
-    core::arch::naked_asm!(
-        include_str!("aws_lc/sha512_block_data_order_nohw.linux.s"),
-        K512 = sym K512,
-    );
-    #[cfg(target_vendor = "apple")]
-    core::arch::naked_asm!(
-        include_str!("aws_lc/sha512_block_data_order_nohw.apple.s"),
-        K512 = sym K512,
-    );
-}
-
-#[unsafe(naked)]
-unsafe extern "C" fn sha512_block_data_order_hw(
-    state: *mut [u64; 8],
-    data: *const u8,
-    blocks: usize,
-) {
-    #[cfg(not(target_vendor = "apple"))]
-    core::arch::naked_asm!(
-        include_str!("aws_lc/sha512_block_data_order_hw.linux.s"),
-        K512 = sym K512,
-    );
-    #[cfg(target_vendor = "apple")]
-    core::arch::naked_asm!(
-        include_str!("aws_lc/sha512_block_data_order_hw.apple.s"),
-        K512 = sym K512,
-    );
 }
 
 #[cfg(test)]
@@ -101,18 +126,16 @@ unsafe extern "C" fn sha512_block_data_order_hw(
 mod tests {
     use super::*;
 
-    // Every other test sees only the routine the CPU picks, so the two are
-    // checked against each other here: odd and even block counts, with
-    // distinct bytes in every block.
     #[test]
-    fn hw_matches_nohw() {
-        if HaveSha3::check().is_none() {
+    fn hw_matches_generic() {
+        let Some(token) = HaveSha3::check() else {
             return;
-        }
+        };
         let blocks: Vec<u8> = (0..5 * 128u32)
             .map(|i| (i.wrapping_mul(0x9e3779b9) >> 24) as u8)
             .collect();
-        for n in 1..=5 {
+        for n in 0..=5 {
+            let blocks = &blocks[..n * 128];
             let mut want = [
                 0x6a09e667f3bcc908,
                 0xbb67ae8584caa73b,
@@ -124,12 +147,9 @@ mod tests {
                 0x5be0cd19137e2179,
             ];
             let mut got = want;
-            // SAFETY: `blocks` holds at least `n` blocks, and the CPU has the
-            // SHA-512 instructions.
-            unsafe {
-                asm_call!(unsafe extern "C" sha512_block_data_order_nohw(&mut want, blocks.as_ptr(), n));
-                asm_call!(unsafe extern "C" sha512_block_data_order_hw(&mut got, blocks.as_ptr(), n));
-            }
+            crate::low::generic::sha512::sha512_compress_blocks(&mut want, blocks);
+            // SAFETY: the token proves the SHA-512 instructions.
+            unsafe { compress_hw(token, &mut got, blocks) };
             assert_eq!(got, want, "{n} blocks");
         }
     }

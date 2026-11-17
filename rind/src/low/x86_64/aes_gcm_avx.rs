@@ -220,7 +220,7 @@ fn aead<const ENC: bool>(
 /// Declares a routine as a naked function over Vale's text. Each takes the
 /// System V ABI on every OS, since its text is Vale's ELF and Mach-O flavors.
 macro_rules! routine {
-    ($name:ident($($arg:ident: $ty:ty),*) $(-> $ret:ty)?) => {
+    ($name:ident($($arg:ident: $ty:ty),* $(,)?) $(-> $ret:ty)?) => {
         #[unsafe(naked)]
         unsafe extern "sysv64" fn $name($($arg: $ty),*) $(-> $ret)? {
             #[cfg(not(target_vendor = "apple"))]
@@ -246,14 +246,16 @@ routine!(aes256_key_expansion(key: *const u8, round_keys: *mut u8));
 routine!(aes128_keyhash_init(round_keys: *const u8, hkeys: *mut u8));
 #[cfg(test)]
 routine!(aes256_keyhash_init(round_keys: *const u8, hkeys: *mut u8));
-routine!(compute_iv_stdcall(
-    iv: *const u8,
-    iv_len: u64,
-    iv_blocks: u64,
-    j0: *mut u8,
-    extra: *const u8,
-    hkeys: *const u8
-));
+routine!(
+    compute_iv_stdcall(
+        iv: *const u8,
+        iv_len: u64,
+        iv_blocks: u64,
+        j0: *mut u8,
+        extra: *const u8,
+        hkeys: *const u8,
+    )
+);
 
 /// The AEAD routines' arguments: the AAD, its length and whole blocks, the
 /// round keys, the counter block, the GHASH key powers, and the AAD's

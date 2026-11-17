@@ -245,7 +245,7 @@ static INC: Inc = Inc(include!("aws_lc/x86_64-mont5.inc.rs"));
 // registers.
 
 macro_rules! mont5_routine {
-    ($name:ident ($($arg:ident: $ty:ty),*) $(, $operand:ident = $sym:path)*) => {
+    ($name:ident ($($arg:ident: $ty:ty),* $(,)?) $(, $operand:ident = $sym:path)*) => {
         #[unsafe(naked)]
         unsafe extern "sysv64" fn $name($($arg: $ty),*) {
             #[cfg(not(target_vendor = "apple"))]
@@ -265,12 +265,28 @@ macro_rules! mont5_routine {
 }
 
 mont5_routine!(
-    bn_power5(rp: *mut u64, ap: *const u64, table: *const u64, np: *const u64, n0: *const u64, num: i32, power: i32),
+    bn_power5(
+        rp: *mut u64,
+        ap: *const u64,
+        table: *const u64,
+        np: *const u64,
+        n0: *const u64,
+        num: i32,
+        power: i32,
+    ),
     inc = INC,
     bn_sqr8x_internal = super::mont::bn_sqr8x_internal
 );
 mont5_routine!(
-    bn_powerx5(rp: *mut u64, ap: *const u64, table: *const u64, np: *const u64, n0: *const u64, num: i32, power: i32),
+    bn_powerx5(
+        rp: *mut u64,
+        ap: *const u64,
+        table: *const u64,
+        np: *const u64,
+        n0: *const u64,
+        num: i32,
+        power: i32,
+    ),
     inc = INC,
     bn_sqrx8x_internal = super::mont::bn_sqrx8x_internal
 );

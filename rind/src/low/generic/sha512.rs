@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! A rolled SHA-512 compression. The portable backend ships this on every
-//! pointer width.
-//!
-//! An unrolled body is about 47 KiB when the pointer is 32 bits, several
-//! times the ESP32-S3's 16 KiB instruction cache, so every block would
-//! stream its code from flash. On that board this loop takes about 0.033×
-//! that unrolled body's time. It follows [`sha256`](sha256.rs):
-//! one 16-word window and an 80-round loop, which stays in a few kilobytes.
-//! The round functions and the eighty `K` constants are FIPS 180-4 §4.1.3
-//! and §4.2.3. The unit tests check FIPS 180-4's SHA-512 vectors, mark the
-//! block secret so ctgrind checks this loop, and, on every backend except
-//! portable, compare with the compression that backend ships.
+//! SHA-512 compression. A 64-bit pointer unrolls all eighty rounds. A 32-bit
+//! pointer rolls them: that unrolled body is about 47 KiB, several times the
+//! ESP32-S3's 16 KiB instruction cache, so every block would stream its code
+//! from flash. On that board the loop takes about 0.033× the unrolled body's
+//! time. It follows [`sha256`](sha256.rs): one 16-word window. The round
+//! functions and the eighty `K` constants are FIPS 180-4 §4.1.3 and §4.2.3.
+//! The unit tests check FIPS 180-4's SHA-512 vectors, mark the block secret
+//! so ctgrind checks this body, and, on every backend except portable,
+//! compare with the compression that backend ships.
 
 macro_rules! CH {
     ($x:expr, $y:expr, $z:expr) => {
@@ -50,6 +47,157 @@ macro_rules! SSIG1 {
     };
 }
 
+/// One block, eighty rounds unrolled. A 32-bit build keeps the loop below
+/// this function: the unrolled body is about 47 KiB there.
+#[cfg(target_pointer_width = "64")]
+#[inline(never)]
+fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
+    let (words, rest) = block.as_chunks::<8>();
+    debug_assert!(rest.is_empty());
+    let mut w = [0u64; 16];
+    for (slot, word) in w.iter_mut().zip(words) {
+        *slot = u64::from_be_bytes(*word);
+    }
+    let mut a = state[0];
+    let mut b = state[1];
+    let mut c = state[2];
+    let mut d = state[3];
+    let mut e = state[4];
+    let mut f = state[5];
+    let mut g = state[6];
+    let mut h = state[7];
+
+    macro_rules! round {
+        ($i:literal, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident) => {
+            let w_t = message_word(&mut w, $i);
+            let t1 = $h
+                .wrapping_add(BSIG1!($e))
+                .wrapping_add(CH!($e, $f, $g))
+                .wrapping_add(K[$i])
+                .wrapping_add(w_t);
+            let t2 = BSIG0!($a).wrapping_add(MAJ!($a, $b, $c));
+            $h = $g;
+            $g = $f;
+            $f = $e;
+            $e = $d.wrapping_add(t1);
+            $d = $c;
+            $c = $b;
+            $b = $a;
+            $a = t1.wrapping_add(t2);
+        };
+    }
+
+    round!(0, a, b, c, d, e, f, g, h);
+    round!(1, a, b, c, d, e, f, g, h);
+    round!(2, a, b, c, d, e, f, g, h);
+    round!(3, a, b, c, d, e, f, g, h);
+    round!(4, a, b, c, d, e, f, g, h);
+    round!(5, a, b, c, d, e, f, g, h);
+    round!(6, a, b, c, d, e, f, g, h);
+    round!(7, a, b, c, d, e, f, g, h);
+    round!(8, a, b, c, d, e, f, g, h);
+    round!(9, a, b, c, d, e, f, g, h);
+    round!(10, a, b, c, d, e, f, g, h);
+    round!(11, a, b, c, d, e, f, g, h);
+    round!(12, a, b, c, d, e, f, g, h);
+    round!(13, a, b, c, d, e, f, g, h);
+    round!(14, a, b, c, d, e, f, g, h);
+    round!(15, a, b, c, d, e, f, g, h);
+    round!(16, a, b, c, d, e, f, g, h);
+    round!(17, a, b, c, d, e, f, g, h);
+    round!(18, a, b, c, d, e, f, g, h);
+    round!(19, a, b, c, d, e, f, g, h);
+    round!(20, a, b, c, d, e, f, g, h);
+    round!(21, a, b, c, d, e, f, g, h);
+    round!(22, a, b, c, d, e, f, g, h);
+    round!(23, a, b, c, d, e, f, g, h);
+    round!(24, a, b, c, d, e, f, g, h);
+    round!(25, a, b, c, d, e, f, g, h);
+    round!(26, a, b, c, d, e, f, g, h);
+    round!(27, a, b, c, d, e, f, g, h);
+    round!(28, a, b, c, d, e, f, g, h);
+    round!(29, a, b, c, d, e, f, g, h);
+    round!(30, a, b, c, d, e, f, g, h);
+    round!(31, a, b, c, d, e, f, g, h);
+    round!(32, a, b, c, d, e, f, g, h);
+    round!(33, a, b, c, d, e, f, g, h);
+    round!(34, a, b, c, d, e, f, g, h);
+    round!(35, a, b, c, d, e, f, g, h);
+    round!(36, a, b, c, d, e, f, g, h);
+    round!(37, a, b, c, d, e, f, g, h);
+    round!(38, a, b, c, d, e, f, g, h);
+    round!(39, a, b, c, d, e, f, g, h);
+    round!(40, a, b, c, d, e, f, g, h);
+    round!(41, a, b, c, d, e, f, g, h);
+    round!(42, a, b, c, d, e, f, g, h);
+    round!(43, a, b, c, d, e, f, g, h);
+    round!(44, a, b, c, d, e, f, g, h);
+    round!(45, a, b, c, d, e, f, g, h);
+    round!(46, a, b, c, d, e, f, g, h);
+    round!(47, a, b, c, d, e, f, g, h);
+    round!(48, a, b, c, d, e, f, g, h);
+    round!(49, a, b, c, d, e, f, g, h);
+    round!(50, a, b, c, d, e, f, g, h);
+    round!(51, a, b, c, d, e, f, g, h);
+    round!(52, a, b, c, d, e, f, g, h);
+    round!(53, a, b, c, d, e, f, g, h);
+    round!(54, a, b, c, d, e, f, g, h);
+    round!(55, a, b, c, d, e, f, g, h);
+    round!(56, a, b, c, d, e, f, g, h);
+    round!(57, a, b, c, d, e, f, g, h);
+    round!(58, a, b, c, d, e, f, g, h);
+    round!(59, a, b, c, d, e, f, g, h);
+    round!(60, a, b, c, d, e, f, g, h);
+    round!(61, a, b, c, d, e, f, g, h);
+    round!(62, a, b, c, d, e, f, g, h);
+    round!(63, a, b, c, d, e, f, g, h);
+    round!(64, a, b, c, d, e, f, g, h);
+    round!(65, a, b, c, d, e, f, g, h);
+    round!(66, a, b, c, d, e, f, g, h);
+    round!(67, a, b, c, d, e, f, g, h);
+    round!(68, a, b, c, d, e, f, g, h);
+    round!(69, a, b, c, d, e, f, g, h);
+    round!(70, a, b, c, d, e, f, g, h);
+    round!(71, a, b, c, d, e, f, g, h);
+    round!(72, a, b, c, d, e, f, g, h);
+    round!(73, a, b, c, d, e, f, g, h);
+    round!(74, a, b, c, d, e, f, g, h);
+    round!(75, a, b, c, d, e, f, g, h);
+    round!(76, a, b, c, d, e, f, g, h);
+    round!(77, a, b, c, d, e, f, g, h);
+    round!(78, a, b, c, d, e, f, g, h);
+    round!(79, a, b, c, d, e, f, g, h);
+
+    state[0] = state[0].wrapping_add(a);
+    state[1] = state[1].wrapping_add(b);
+    state[2] = state[2].wrapping_add(c);
+    state[3] = state[3].wrapping_add(d);
+    state[4] = state[4].wrapping_add(e);
+    state[5] = state[5].wrapping_add(f);
+    state[6] = state[6].wrapping_add(g);
+    state[7] = state[7].wrapping_add(h);
+}
+
+/// `W[t]` from the 16-word window. Rounds 78 and 79 do not store: nothing
+/// later reads those words, and a store there is an unused assignment.
+#[cfg(target_pointer_width = "64")]
+#[inline(always)]
+fn message_word(w: &mut [u64; 16], t: usize) -> u64 {
+    if t < 16 {
+        w[t]
+    } else {
+        let w_t = SSIG1!(w[(t + 14) & 15])
+            .wrapping_add(w[(t + 9) & 15])
+            .wrapping_add(SSIG0!(w[(t + 1) & 15]))
+            .wrapping_add(w[t & 15]);
+        if t < 78 {
+            w[t & 15] = w_t;
+        }
+        w_t
+    }
+}
+
+#[cfg(not(target_pointer_width = "64"))]
 #[inline(never)]
 fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
     // Sixteen big-endian words. The caller already holds a whole block, so
@@ -123,8 +271,8 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     }
 }
 
-// FIPS 180-4 §4.2.3.
-static K: [u64; 80] = [
+// FIPS 180-4 §4.2.3. aarch64's SHA-512 instructions add these two at a time.
+pub(crate) static K: [u64; 80] = [
     0x428a2f98d728ae22,
     0x7137449123ef65cd,
     0xb5c0fbcfec4d3b2f,
@@ -244,8 +392,8 @@ mod tests {
         let padded = padded(message);
         let mut state = IV;
         // The block is the secret (a message, or an HMAC key block). Mark it
-        // before this rolled loop, which 64-bit builds compile only in tests,
-        // so ctgrind sees it. The state is public again before a comparison.
+        // before this body so ctgrind sees it. The state is public again
+        // before a comparison.
         crate::low::ct::secret_slice(&padded);
         sha512_compress_blocks(&mut state, &padded);
         encode(crate::low::ct::into_public(state))

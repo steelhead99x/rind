@@ -1,21 +1,5 @@
 # Memcheck findings in dependencies that rind cannot fix in its own code.
 
-# On armv7 without NEON, memcheck reports aws-lc's integer SHA-512 at the
-# `beq` at sha512_block_data_order_nohw+460, which reads only the Z flag of
-# `tst r14,#1` (the K512 pointer) at +456. That `tst` takes its carry from the
-# `adds` of secret words before it, and memcheck counts that carry against the
-# condition when a superblock boundary falls between the two, as the caller's
-# code layout decides. Run 41557470707 (kixel-ai/rind#254) found no report at
-# the default layout. With one instruction per superblock it flagged only the
-# readers of tests on round constants and pointers, even the `bne` after
-# `teq r1,r2`, which compares two public pointers.
-# See UPSTREAM.md, "Memcheck blames a public flag on a secret carry".
-{
-   aws-lc-sha512-armv4-nohw-flags
-   Memcheck:Cond
-   fun:rind_*_sha512_block_data_order_nohw
-}
-
 # rustls-pki-types parses PEM a line at a time: it finds each line's end and
 # tests each line for a `-----BEGIN`/`-----END` boundary, comparing secret
 # base64 characters with public delimiters. Whether a byte is a delimiter is

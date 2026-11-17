@@ -85,14 +85,6 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Reported:** no.
 - **Goes when:** valgrind passes `AT_HWCAP2` on ARM and runs SHA3 on aarch64.
 
-### Memcheck blames a public flag on a secret carry
-
-- **Breaks:** on armv7 without NEON, memcheck flags the `beq` at `sha512_block_data_order_nohw+460` in aws-lc's integer SHA-512, which reads only the Z flag of a `tst` on the public round-constant pointer. The `tst` keeps the carry of the secret `adds` before it, and memcheck counts that carry against the branch when a superblock boundary falls between them, which the caller's code layout decides.
-- **Reproduce:** the `no-neon` armv7 ctgrind row with `--vex-guest-max-insns=1` flags it, along with every branch on a `tst` of a public value.
-- **Workaround:** the `aws-lc-sha512-armv4-nohw-flags` suppression in `admin/ctgrind.supp`.
-- **Reported:** no.
-- **Goes when:** memcheck tracks the Z flag apart from the carry.
-
 ### Valgrind on ARM does not fault guard pages
 
 - **Breaks:** under valgrind on ARM, reading a `PROT_NONE` guard page does not fault, so `low::guard_pages`'s `planted_over_read_faults` fails.

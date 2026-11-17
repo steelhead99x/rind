@@ -2,11 +2,11 @@
 
 ## Goal
 
-Every operation earns the ✓ on aarch64 cores without the crypto extension (the Raspberry Pi 4's Cortex-A72 among them): AES-GCM and the AES modes over vpaes and NEON GHASH, and SHA-256 and SHA-1 over aws-lc's scalar routines.
+Every operation earns the ✓ on aarch64 cores without the crypto extension (the Raspberry Pi 4's Cortex-A72 among them): AES-GCM and the AES modes over vpaes and NEON GHASH, and SHA-256 and SHA-1 over `generic`.
 
 ## Plan
 
-- Runs: aws-lc's `vpaes-armv8` (key schedule, encrypt, decrypt, CTR, CBC; NEON `tbl` lookups, no secret-indexed memory) and `ghash-neon-armv8` (`gcm_init_neon`, `gcm_ghash_neon`), composed into AES-GCM over each eight blocks by rind's Rust as aws-lc composes them; aws-lc's `sha256_block_data_order_nohw` and `sha1_block_data_order_nohw`. SHA-512's `nohw` is already proven.
+- Runs: aws-lc's `vpaes-armv8` (key schedule, encrypt, decrypt, CTR, CBC; NEON `tbl` lookups, no secret-indexed memory) and `ghash-neon-armv8` (`gcm_init_neon`, `gcm_ghash_neon`), composed into AES-GCM over each eight blocks by rind's Rust as aws-lc composes them; `generic::sha1`, `generic::sha256`, and the unrolled `generic::sha512`. The scalar SHA assembly is gone, and the HOL Light proof of `sha512_block_data_order_nohw` is of bytes rind no longer links.
 - Route: HOL Light proofs in s2n-bignum's aarch64 model, which models NEON's `tbl` and 8-bit `pmull`, against `common/fips197.ml`, `common/gcm.ml`, and [awslabs/s2n-bignum#415](https://github.com/awslabs/s2n-bignum/pull/415)'s SHA-256 spec; Aeneas for rind's composition.
 - The AES and GCM specs: `common/gcm.ml` and `common/fips197.ml` at rind's s2n-bignum pin, `3f01260f`, which has [awslabs/s2n-bignum#490](https://github.com/awslabs/s2n-bignum/pull/490)'s rewrite of both.
 - Spec: [awslabs/s2n-bignum#415](https://github.com/awslabs/s2n-bignum/pull/415)'s spec, unmerged, as rind's vendored s2n-bignum fork carries it; `benchmarks/verified.toml`'s ✓ notes the unmerged PR until upstream merges it (maintainer, 2026-11-13: rind forks an upstream it needs changed and vendors the fork, replacing the 2026-11-07 pin by commit from [kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).

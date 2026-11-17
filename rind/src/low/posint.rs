@@ -151,6 +151,7 @@ impl<const N: usize> PosInt<N> {
 
     // Indexes rather than zipping reversed `as_chunks_mut`, which Aeneas
     // cannot translate, so `proofs/` can prove RSA's encoding.
+    #[allow(clippy::needless_range_loop)]
     pub(crate) fn to_bytes<'a>(&self, out: &'a mut [u8]) -> Result<&'a [u8], Error> {
         let required_bytes = self.used * 8;
         let Some(out) = out.get_mut(..required_bytes) else {

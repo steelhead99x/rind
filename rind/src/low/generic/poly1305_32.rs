@@ -3,8 +3,8 @@
 //! Poly1305 in five 26-bit limbs, for a 32-bit multiplier.
 //!
 //! The portable backend uses this when `rind_limb` is 32, including a
-//! 32-bit pointer whose 64-bit product is a library call, and armv7 uses it
-//! without NEON. A 32-bit target with a cheap 64-bit product, such as wasm32
+//! 32-bit pointer whose 64-bit product is a library call, and armv7 uses it.
+//! A 32-bit target with a cheap 64-bit product, such as wasm32
 //! built with `wide-arithmetic`, has `rind_limb` 64 and uses
 //! `generic::poly1305` instead. Each limb product here is one 32x32->64-bit
 //! multiply.
@@ -22,7 +22,7 @@
 //! early.
 
 use super::blockwise::Blockwise;
-use crate::low::ct;
+use crate::low::{Zeroable, ct, zeroise_value};
 
 /// The low 26 bits.
 const MASK: u32 = 0x3ff_ffff;
@@ -260,6 +260,15 @@ impl Poly1305 {
         self.h = [h0, h1, h2, h3, h4];
     }
 }
+
+impl Drop for Poly1305 {
+    fn drop(&mut self) {
+        // The clamped `r`, the pad `s`, and the accumulator are the key.
+        zeroise_value(self);
+    }
+}
+
+impl Zeroable for Poly1305 {}
 
 /// The 64-bit product of two 32-bit limbs.
 #[inline(always)]

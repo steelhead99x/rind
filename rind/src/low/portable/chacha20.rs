@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! ChaCha20 on HACL*'s verified rounds in `generic::chacha20`, one block at a
-//! time, as x86_64 runs it without SSSE3.
+//! time, as x86_64 runs it without AVX2.
 
 use crate::low::generic::chacha20;
 

@@ -293,9 +293,15 @@ impl HaveAvx2 {
 
 /// Proof that the CPU has the SHA512 instructions, and the AVX2 that
 /// OpenSSL's routine for them also uses.
+///
+/// SHA-512 no longer dispatches on this. The scalar unrolled body is what
+/// ships: this tree's hosts cannot execute SHA512-NI, so an intrinsic kernel
+/// would be untested. The token stays so the feature test can still see the bit.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HaveSha512(());
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl HaveSha512 {
     pub(crate) fn check() -> Option<Self> {
         has(SHA512 | AVX | AVX2).then_some(Self(()))
@@ -318,23 +324,25 @@ impl HaveAesHardware {
     }
 }
 
-/// Proof that the CPU has AVX, which aws-lc's AVX SHA routines use, and the
-/// SSSE3 they also use.
+/// Proof that the CPU has AVX, and the SSSE3 aws-lc's old AVX SHA routines
+/// also used. SHA no longer dispatches on it. The token stays so the feature
+/// test can still see the bit.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HaveAvx(());
 
+#[cfg_attr(not(test), allow(dead_code))]
 impl HaveAvx {
     pub(crate) fn check() -> Option<Self> {
         has(AVX | SSSE3).then_some(Self(()))
     }
 }
 
-/// Proof that the CPU has SSSE3, which aws-lc's vpaes, GHASH, ChaCha20,
-/// SHA-1, and SHA-256 routines for CPUs without AES-NI or AVX2 use.
+/// Proof that the CPU has SSSE3, which aws-lc's vpaes and GHASH use.
 ///
-/// Without it, aws-lc's integer SHA-1 and SHA-256 routines, ports of its
-/// constant-time AES and GHASH in SSE2 and integer code, and HACL*'s ChaCha20
-/// rounds run instead.
+/// Without it, ports of aws-lc's constant-time AES and GHASH in SSE2 and
+/// integer code run instead. SHA and the ChaCha20 keystream no longer
+/// dispatch on SSSE3.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HaveSsse3(());
 
@@ -370,7 +378,9 @@ impl HaveBmi2Adx {
     }
 }
 
-/// Whether the CPU is Intel's, for code that is fastest on one vendor's cores.
+/// Whether the CPU is Intel's. SHA-512 no longer branches on the vendor.
+/// The probe stays so the feature test can still see it.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn is_intel() -> bool {
     has(INTEL)
 }

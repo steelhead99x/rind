@@ -2,11 +2,13 @@
 
 //! ChaCha20 on armv7. The state words are RFC 8439 §2.3: the constants, the
 //! key, the block counter, and the nonce, each little-endian. The keystream
-//! is aws-lc's, in `chacha_armv4`. QUIC header protection's lone block skips
-//! this setup and runs the rounds in `generic::chacha20`.
+//! is HACL*'s rounds in `generic::chacha20`. QUIC header protection's lone
+//! block skips this setup and runs those rounds directly.
+//!
+//! 32-bit Arm NEON intrinsics are unstable on the toolchain this crate builds
+//! with, so this backend does not ship a NEON keystream.
 
-use super::chacha_armv4::chacha20_ctr32;
-use super::cpu::HaveNeon;
+use crate::low::generic::chacha20;
 
 const CONSTANTS: [u32; 4] = [0x61707865, 0x3320646e, 0x79622d32, 0x6b206574];
 
@@ -23,7 +25,6 @@ fn chacha20_init(ctx: &mut [u32; 16], key: &[u8; 32], nonce: &[u8; 12], counter:
 
 pub(crate) struct ChaCha20 {
     ctx: [u32; 16],
-    neon: Option<HaveNeon>,
 }
 
 impl ChaCha20 {
@@ -34,16 +35,15 @@ impl ChaCha20 {
         let counter = u32::from_le_bytes(*nonce.first_chunk::<4>().unwrap());
         let n: &[u8; 12] = nonce.last_chunk::<12>().unwrap();
         chacha20_init(&mut ctx, key, n, counter);
-        Self {
-            ctx,
-            neon: HaveNeon::check(),
-        }
+        Self { ctx }
     }
 
     /// XORs the keystream into `buffer`, starting at the current block, then
     /// moves the counter past every block it touched.
     pub(crate) fn cipher(&mut self, buffer: &mut [u8]) {
-        chacha20_ctr32(&self.ctx, buffer, self.neon);
+        let key: &[u32; 8] = self.ctx[4..12].try_into().unwrap();
+        let counter_nonce: &[u32; 4] = self.ctx[12..16].try_into().unwrap();
+        chacha20::cipher(key, counter_nonce, buffer);
         self.ctx[12] = self.ctx[12].wrapping_add(buffer.len().div_ceil(64) as u32);
     }
 }
@@ -52,8 +52,7 @@ impl ChaCha20 {
 mod tests {
     use super::*;
 
-    // RFC 8439 §2.3.2's initial state. Replacing HACL*'s loader dropped the
-    // only check of these words; this is that check, with no CPU feature.
+    // RFC 8439 §2.3.2's initial state.
     #[test]
     fn state_matches_rfc8439() {
         let key: [u8; 32] = core::array::from_fn(|i| i as u8);

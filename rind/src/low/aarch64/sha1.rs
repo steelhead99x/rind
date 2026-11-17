@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 //! SHA-1 compression with the SHA-1 instructions where the CPU has them, and
-//! aws-lc's scalar `sha1-armv8` routine otherwise, imported by
-//! `admin/import-aws-lc`. aws-lc's is not formally verified: its correctness
-//! rests on its use and testing in OpenSSL, BoringSSL, and aws-lc, and on
-//! rind's tests of it against the instructions, CAVP, and aws-lc-rs.
+//! `generic::sha1` otherwise.
 
 use core::arch::aarch64::*;
 
@@ -16,13 +13,7 @@ pub(crate) fn sha1_compress_blocks(state: &mut [u32; 5], blocks: &[u8]) {
         // SAFETY: the token proves the CPU has the `sha2` cpu feature, which
         // covers the SHA1 instructions, and rind requires `neon`.
         Some(_) => unsafe { sha1(state, blocks) },
-        // The routine runs its loop at least once, so zero blocks would read
-        // past `blocks`.
-        None if blocks.is_empty() => {}
-        // SAFETY: `blocks` is `blocks.len() / 64` readable blocks.
-        None => unsafe {
-            asm_call!(unsafe extern "C" sha1_block_data_order_nohw(state, blocks.as_ptr(), blocks.len() / 64))
-        },
+        None => crate::low::generic::sha1::sha1_compress_blocks(state, blocks),
     }
 }
 
@@ -37,18 +28,6 @@ pub(crate) fn sha1_compress_padded(state: &mut [u32; 5], message: &[u8], length:
     }
     let mut last = [[0u8; 64]; 2];
     sha1_compress_blocks(state, crate::low::pad(rest, length, &mut last));
-}
-
-#[unsafe(naked)]
-unsafe extern "C" fn sha1_block_data_order_nohw(
-    state: *mut [u32; 5],
-    data: *const u8,
-    blocks: usize,
-) {
-    #[cfg(not(target_vendor = "apple"))]
-    core::arch::naked_asm!(include_str!("aws_lc/sha1_block_data_order_nohw.linux.s"));
-    #[cfg(target_vendor = "apple")]
-    core::arch::naked_asm!(include_str!("aws_lc/sha1_block_data_order_nohw.apple.s"));
 }
 
 /// Four rounds of `$op` over message words `$w0`, binding `$e_next` for the
@@ -147,11 +126,10 @@ fn sha1(state: &mut [u32; 5], blocks: &[u8]) {
 mod tests {
     use super::*;
 
-    // Every other test sees only the routine the CPU picks, so the two are
-    // checked against each other here: odd and even block counts, with
-    // distinct bytes in every block.
+    // Every other test sees only the routine the CPU picks, so the SHA-1
+    // instructions are checked against `generic::sha1` here.
     #[test]
-    fn hw_matches_nohw() {
+    fn hw_matches_generic() {
         if HaveCryptoExt::check().is_none() {
             return;
         }
@@ -162,12 +140,10 @@ mod tests {
             let blocks = &blocks[..n * 64];
             let mut want = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
             let mut got = want;
+            crate::low::generic::sha1::sha1_compress_blocks(&mut want, blocks);
             // SAFETY: `blocks` is `n` blocks, and the CPU has the SHA-1
             // instructions.
-            unsafe {
-                sha1(&mut want, blocks);
-                asm_call!(unsafe extern "C" sha1_block_data_order_nohw(&mut got, blocks.as_ptr(), n));
-            }
+            unsafe { sha1(&mut got, blocks) };
             assert_eq!(got, want, "{n} blocks");
         }
     }
