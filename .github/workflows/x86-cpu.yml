@@ -69,6 +69,7 @@ jobs:
           RIND_TEST_X86_AVX2: 0
           RIND_TEST_X86_BMI2_ADX: 0
           RIND_TEST_X86_SHA: 0
+          RIND_TEST_X86_SHA512: 0
           RIND_TEST_X86_VAES_AES_GCM: 0
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: 0
           RIND_TEST_X86_AVX512_AES_GCM: 0
@@ -90,6 +91,7 @@ jobs:
           RIND_TEST_X86_AVX2: 0
           RIND_TEST_X86_BMI2_ADX: 0
           RIND_TEST_X86_SHA: 0
+          RIND_TEST_X86_SHA512: 0
           RIND_TEST_X86_VAES_AES_GCM: 0
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: 0
           RIND_TEST_X86_AVX512_AES_GCM: 0
@@ -111,6 +113,7 @@ jobs:
           RIND_TEST_X86_AVX2: 0
           RIND_TEST_X86_BMI2_ADX: 0
           RIND_TEST_X86_SHA: 0
+          RIND_TEST_X86_SHA512: 0
           RIND_TEST_X86_VAES_AES_GCM: 0
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: 0
           RIND_TEST_X86_AVX512_AES_GCM: 0
@@ -132,6 +135,7 @@ jobs:
           RIND_TEST_X86_AVX2: 0
           RIND_TEST_X86_BMI2_ADX: 0
           RIND_TEST_X86_SHA: 0
+          RIND_TEST_X86_SHA512: 0
           RIND_TEST_X86_VAES_AES_GCM: 0
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: 0
           RIND_TEST_X86_AVX512_AES_GCM: 0
@@ -153,6 +157,7 @@ jobs:
           RIND_TEST_X86_AVX2: 0
           RIND_TEST_X86_BMI2_ADX: 0
           RIND_TEST_X86_SHA: 1
+          RIND_TEST_X86_SHA512: 0
           RIND_TEST_X86_VAES_AES_GCM: 0
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: 0
           RIND_TEST_X86_AVX512_AES_GCM: 0
@@ -175,6 +180,7 @@ jobs:
           RIND_TEST_X86_AVX2: 0
           RIND_TEST_X86_BMI2_ADX: 0
           RIND_TEST_X86_SHA: 0
+          RIND_TEST_X86_SHA512: 0
           RIND_TEST_X86_VAES_AES_GCM: 0
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: 0
           RIND_TEST_X86_AVX512_AES_GCM: 0
@@ -196,6 +202,7 @@ jobs:
           RIND_TEST_X86_AVX2: 1
           RIND_TEST_X86_BMI2_ADX: 0
           RIND_TEST_X86_SHA: 0
+          RIND_TEST_X86_SHA512: 0
           RIND_TEST_X86_VAES_AES_GCM: 0
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: 1
           RIND_TEST_X86_AVX512_AES_GCM: 0
@@ -218,6 +225,7 @@ jobs:
           RIND_TEST_X86_AVX2: 1
           RIND_TEST_X86_BMI2_ADX: 1
           RIND_TEST_X86_SHA: 0
+          RIND_TEST_X86_SHA512: 0
           RIND_TEST_X86_VAES_AES_GCM: 0
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: 1
           RIND_TEST_X86_AVX512_AES_GCM: 0
@@ -239,6 +247,7 @@ jobs:
           RIND_TEST_X86_AVX2: 1
           RIND_TEST_X86_BMI2_ADX: 1
           RIND_TEST_X86_SHA: 1
+          RIND_TEST_X86_SHA512: 0
           RIND_TEST_X86_VAES_AES_GCM: 0
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: 1
           RIND_TEST_X86_AVX512_AES_GCM: 0
@@ -260,6 +269,7 @@ jobs:
           RIND_TEST_X86_AVX2: 1
           RIND_TEST_X86_BMI2_ADX: 1
           RIND_TEST_X86_SHA: 1
+          RIND_TEST_X86_SHA512: 0
           RIND_TEST_X86_VAES_AES_GCM: 1
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: 1
           RIND_TEST_X86_AVX512_AES_GCM: 0
@@ -267,9 +277,10 @@ jobs:
           RIND_TEST_X86_AVX512_RSA: 0
           RIND_TEST_X86_MCDT: 1
 
-      # Arrow Lake has the SHA512 instructions, which rind does not run:
-      # SHA-384 and SHA-512 take the AVX2 routine, as on Alder Lake. Lunar
-      # and Panther Lake, and Clearwater Forest, select the same paths.
+      # Arrow Lake adds the SHA512 instructions to Alder Lake's paths, which
+      # only Ed25519 verification's public SHA-512 runs; SHA-384, SHA-512, and
+      # everything else over them keep the AVX2 routine. Lunar and Panther
+      # Lake, and Clearwater Forest, select the same paths.
       - name: Check Arrow Lake
         run: nix develop .#sde --command cargo test --release --workspace --exclude rind-fips
         env:
@@ -281,6 +292,7 @@ jobs:
           RIND_TEST_X86_AVX2: 1
           RIND_TEST_X86_BMI2_ADX: 1
           RIND_TEST_X86_SHA: 1
+          RIND_TEST_X86_SHA512: 1
           RIND_TEST_X86_VAES_AES_GCM: 1
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: 1
           RIND_TEST_X86_AVX512_AES_GCM: 0
@@ -301,6 +313,7 @@ jobs:
           RIND_TEST_X86_AVX2: 1
           RIND_TEST_X86_BMI2_ADX: 1
           RIND_TEST_X86_SHA: 1
+          RIND_TEST_X86_SHA512: 0
           RIND_TEST_X86_VAES_AES_GCM: 1
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: 1
           RIND_TEST_X86_AVX512_AES_GCM: 0
@@ -308,8 +321,8 @@ jobs:
           RIND_TEST_X86_AVX512_RSA: 0
           RIND_TEST_X86_MCDT: 1
 
-      # Granite Rapids selects every path, including AVX-512 AES-GCM, ML-KEM,
-      # and RSA. Ice Lake, Ice Lake server,
+      # Granite Rapids selects every path but the SHA512 instructions',
+      # including AVX-512 AES-GCM, ML-KEM, and RSA. Ice Lake, Ice Lake server,
       # Tiger Lake, and Sapphire and Emerald Rapids select the same paths.
       - name: Check Granite Rapids
         run: nix develop .#sde --command cargo test --release --workspace --exclude rind-fips
@@ -322,6 +335,7 @@ jobs:
           RIND_TEST_X86_AVX2: 1
           RIND_TEST_X86_BMI2_ADX: 1
           RIND_TEST_X86_SHA: 1
+          RIND_TEST_X86_SHA512: 0
           RIND_TEST_X86_VAES_AES_GCM: 1
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: 1
           RIND_TEST_X86_AVX512_AES_GCM: 1
@@ -329,8 +343,8 @@ jobs:
           RIND_TEST_X86_AVX512_RSA: 1
           RIND_TEST_X86_MCDT: 1
 
-      # Diamond Rapids selects Granite Rapids' paths. It also has the SHA512
-      # instructions, which rind does not run.
+      # Diamond Rapids selects every path, Granite Rapids' and the SHA512
+      # instructions'.
       - name: Check Diamond Rapids
         run: nix develop .#sde --command cargo test --release --workspace --exclude rind-fips
         env:
@@ -342,6 +356,7 @@ jobs:
           RIND_TEST_X86_AVX2: 1
           RIND_TEST_X86_BMI2_ADX: 1
           RIND_TEST_X86_SHA: 1
+          RIND_TEST_X86_SHA512: 1
           RIND_TEST_X86_VAES_AES_GCM: 1
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: 1
           RIND_TEST_X86_AVX512_AES_GCM: 1

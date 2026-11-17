@@ -92,3 +92,9 @@ function = "<u64>::_fmt_inner"
 why = "Formats a number for Debug or Display output, which never holds a secret. Only 32-bit PowerPC reaches it, through the `.got2` table of addresses its position-independent code loads from, which the scan follows whole."
 [public.holds]
 "powerpc-unknown-linux-gnu" = "calls __udivdi3"
+
+[[public]]
+function = "rind::low::x86_64::sha512::compress_sha512ext"
+why = "Runs the SHA512 instructions, which Intel's data-independent-timing list omits, only for `low::sha512_compress_blocks_public`, whose sole caller, `mid::sha2::sha512_public`, Ed25519 verification calls on `R || A || M`: a signature, a public key, and a message, all public. The digest, HMAC, HKDF, and signing paths take `sha512_compress_blocks`, which never reaches it, as `high::ed25519`'s `only_verify_hashes_publicly` test checks."
+[public.holds]
+"x86_64-unknown-linux-gnu" = "vsha512msg1 x16, vsha512msg2 x16, vsha512rnds2 x40"

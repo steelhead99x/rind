@@ -405,4 +405,36 @@ mod tests {
         }
         assert_eq!(points, 8);
     }
+
+    // Only verification reaches the public SHA-512, which may run the SHA512
+    // instructions: key generation, signing, PKCS#8, and the digest, HMAC,
+    // and HKDF APIs over SHA-512 all keep to the routine for secrets.
+    #[cfg(rind_backend = "x86_64")]
+    #[test]
+    fn only_verify_hashes_publicly() {
+        use crate::high::{digest, hkdf, hmac};
+        let calls = || low::SHA512_PUBLIC_CALLS.with(|n| n.get());
+        let before = calls();
+        let key = Ed25519SigningKey::generate().unwrap();
+        let sig = key.sign(&[7u8; 300]);
+        let public = key.public_key();
+        let mut der = [0u8; 128];
+        let der = key.to_pkcs8_der(true, &mut der).unwrap();
+        Ed25519SigningKey::from_pkcs8_der(der).unwrap();
+        assert_eq!(
+            digest::digest(&digest::SHA512, &[1u8; 300]).as_ref().len(),
+            64
+        );
+        assert_eq!(
+            digest::digest(&digest::SHA384, &[1u8; 300]).as_ref().len(),
+            48
+        );
+        let tag = hmac::sign(&hmac::Key::new(&hmac::HMAC_SHA512, b"key"), &[2u8; 300]);
+        hkdf::Salt::new(&hkdf::HKDF_SHA512, b"salt")
+            .extract(tag.as_ref())
+            .unwrap();
+        assert_eq!(calls(), before, "a secret path reached the public SHA-512");
+        public.verify(&sig, &[7u8; 300]).unwrap();
+        assert!(calls() > before, "verification skipped the public SHA-512");
+    }
 }

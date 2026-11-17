@@ -731,7 +731,10 @@ libcrux's.
 SHA384, SHA512, and SHA512/256 run aws-lc's assembly everywhere but on
 x86_64 CPUs with AVX2, which run OpenSSL's AVX2 routine, including where the
 CPU has the SHA512 instructions. Intel's data-independent-timing list omits
-those instructions, so rind does not run OpenSSL's routine for them. rind's
+those instructions, so rind runs them only for Ed25519 verification's
+`SHA-512(R || A || M)`, whose every input is public, through
+`mid::sha2::sha512_public`, which nothing else calls: rind's own Rust over
+`core::arch`'s `VSHA512` intrinsics, unproven, as verification is. rind's
 HOL Light proof covers the AVX2 routine, which aws-lc leaves out: 1.18x
 faster than aws-lc's AVX routine
 on an i7-8700 and 1.15x on Arrow Lake, and 1.47x faster than its scalar one

@@ -291,6 +291,17 @@ impl HaveAvx2 {
     }
 }
 
+/// Proof that the CPU has the SHA512 instructions, and the AVX and AVX2 the
+/// public SHA-512 that runs them also uses.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveSha512(());
+
+impl HaveSha512 {
+    pub(crate) fn check() -> Option<Self> {
+        has(SHA512 | AVX | AVX2).then_some(Self(()))
+    }
+}
+
 /// Proof that the CPU has AES-NI and PCLMULQDQ, and the SSSE3 and SSE4.1
 /// their kernels also use: rind's AES-GCM and GHASH intrinsics, and aws-lc's
 /// AES-CTR.
@@ -385,6 +396,7 @@ const MOVBE: u32 = 1 << 17;
 const AVX512DQ: u32 = 1 << 18;
 const AVX512IFMA: u32 = 1 << 19;
 const BMI1: u32 = 1 << 20;
+const SHA512: u32 = 1 << 21;
 const INTEL: u32 = 1 << 30;
 /// What rind's AVX2 kernels use, for [`HaveAvx2`].
 const AVX2_KERNELS: u32 = AVX | AVX2 | BMI1 | BMI2 | POPCNT | SSSE3;
@@ -471,6 +483,7 @@ fn detect() -> u32 {
         | detect!("avx512vbmi", AVX512VBMI)
         | detect!("avx512vbmi2", AVX512VBMI2)
         | detect!("sha", SHA)
+        | detect!("sha512", SHA512)
         | detect!("movbe", MOVBE)
 }
 
@@ -604,6 +617,7 @@ mod tests {
             AVX512DQ,
             AVX512IFMA,
             BMI1,
+            SHA512,
             INTEL,
             DETECTED,
         ];
@@ -671,6 +685,10 @@ mod tests {
                 available!("avx", "avx2", "bmi1", "bmi2", "popcnt", "ssse3"),
             ),
             (
+                HaveSha512::check().is_some(),
+                available!("sha512", "avx", "avx2"),
+            ),
+            (
                 HaveAesHardware::check().is_some(),
                 available!("aes", "pclmulqdq", "ssse3", "sse4.1"),
             ),
@@ -718,6 +736,9 @@ mod tests {
         if let Some(expected) = std::env::var_os("RIND_TEST_X86_SHA") {
             assert_eq!(HaveSha256::check().is_some(), expected == "1");
             assert_eq!(HaveSha1::check().is_some(), expected == "1");
+        }
+        if let Some(expected) = std::env::var_os("RIND_TEST_X86_SHA512") {
+            assert_eq!(HaveSha512::check().is_some(), expected == "1");
         }
         if let Some(expected) = std::env::var_os("RIND_TEST_X86_VAES_AES_GCM") {
             assert_eq!(HaveVaesAvx2ForAesGcm::check().is_some(), expected == "1");

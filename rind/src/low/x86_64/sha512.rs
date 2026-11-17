@@ -10,11 +10,19 @@
 //!
 //! CPUs with the SHA512 instructions, from Arrow Lake and Lunar Lake on, run
 //! the AVX2 routine too. Intel's data-independent-timing list omits
-//! `VSHA512RNDS2`, `VSHA512MSG1`, and `VSHA512MSG2`.
+//! `VSHA512RNDS2`, `VSHA512MSG1`, and `VSHA512MSG2`, so
+//! [`sha512_compress_blocks`] never runs them. Only
+//! [`sha512_compress_blocks_public`], whose every input is public, does.
 
+use core::arch::x86_64::{
+    __m256i, _mm256_add_epi64, _mm256_blend_epi32, _mm256_castsi256_si128, _mm256_loadu_si256,
+    _mm256_permute2x128_si256, _mm256_permute4x64_epi64, _mm256_set_epi64x,
+    _mm256_sha512msg1_epi64, _mm256_sha512msg2_epi64, _mm256_sha512rnds2_epi64,
+    _mm256_shuffle_epi8, _mm256_storeu_si256,
+};
 use std::sync::OnceLock;
 
-use super::cpu::{HaveAvx, HaveAvx2, is_intel};
+use super::cpu::{HaveAvx, HaveAvx2, HaveSha512, is_intel};
 
 /// The SHA-512 routine this CPU runs, with the proof it may.
 #[derive(Clone, Copy)]
@@ -56,6 +64,133 @@ fn pick() -> Path {
         Path::Avx(token)
     } else {
         Path::Nohw
+    }
+}
+
+/// As [`sha512_compress_blocks`], for SHA-512 whose every input is public:
+/// Ed25519 verification's `SHA-512(R || A || M)`, of a signature, a public
+/// key, and the message. Where the CPU has the SHA512 instructions it runs
+/// them, whose timing Intel does not promise is independent of the data, so
+/// nothing secret may reach here: not the digest, HMAC, or HKDF APIs, nor
+/// Ed25519 signing or key generation. `admin/ct-vartime.toml` lists
+/// [`compress_sha512ext`] as public for this caller alone.
+pub(crate) fn sha512_compress_blocks_public(state: &mut [u64; 8], blocks: &[u8]) {
+    #[cfg(test)]
+    tests::PUBLIC_CALLS.with(|n| n.set(n.get() + 1));
+    assert!(blocks.len().is_multiple_of(128));
+    if blocks.is_empty() {
+        return;
+    }
+    match HaveSha512::check() {
+        // SAFETY: the token proves the SHA512 instructions and AVX2, and
+        // `blocks` is a whole number of blocks.
+        Some(token) => unsafe { compress_sha512ext(token, state, blocks) },
+        None => sha512_compress_blocks(state, blocks),
+    }
+}
+
+/// The round constants once each, for the SHA512 instructions, which take
+/// four of them at a time.
+#[repr(C, align(32))]
+struct SingleTable([u64; 80]);
+
+static K512_SINGLE: SingleTable = SingleTable({
+    let mut k = [0u64; 80];
+    let mut i = 0;
+    while i < 80 {
+        // `K512` holds each pair of constants twice.
+        k[i] = K512.0[(i / 2) * 4 + i % 2];
+        i += 1;
+    }
+    k
+});
+
+/// Rounds `4I .. 4I + 4` of [`compress_sha512ext`], with the message
+/// schedule's share of the work: `VSHA512MSG2` finishing `W[4I + 4 ..]`
+/// from the `VSHA512MSG1` two groups back, `W[4I - 3 .. 4I + 1]`, and
+/// `W[4I .. 4I + 4]`, then `VSHA512MSG1` starting `W[4I + 12 ..]`.
+#[inline]
+#[target_feature(enable = "sha512,avx2")]
+fn sha512ext_group<const I: usize>(abef: &mut __m256i, cdgh: &mut __m256i, w: &mut [__m256i; 4]) {
+    // SAFETY: `I` is at most 19, so the four constants lie within the table.
+    let k = unsafe { _mm256_loadu_si256(K512_SINGLE.0.as_ptr().add(4 * I).cast()) };
+    let wk = _mm256_add_epi64(w[I % 4], k);
+    *cdgh = _mm256_sha512rnds2_epi64(*cdgh, *abef, _mm256_castsi256_si128(wk));
+    let wk = _mm256_permute2x128_si256::<0x01>(wk, wk);
+    *abef = _mm256_sha512rnds2_epi64(*abef, *cdgh, _mm256_castsi256_si128(wk));
+    if 3 <= I && I < 19 {
+        let w7 = _mm256_blend_epi32::<0x3f>(
+            _mm256_permute4x64_epi64::<0x1b>(w[I % 4]),
+            _mm256_permute4x64_epi64::<0x39>(w[(I + 3) % 4]),
+        );
+        let next = _mm256_add_epi64(w[(I + 1) % 4], w7);
+        w[(I + 1) % 4] = _mm256_sha512msg2_epi64(next, w[I % 4]);
+    }
+    if 1 <= I && I < 17 {
+        w[(I + 3) % 4] = _mm256_sha512msg1_epi64(w[(I + 3) % 4], _mm256_castsi256_si128(w[I % 4]));
+    }
+}
+
+/// Compresses `blocks` into `state` with the SHA512 instructions, two rounds
+/// per `VSHA512RNDS2`, as Intel's reference for them does: `abef` and
+/// `cdgh` hold the working variables, highest lane first, and `w` the
+/// message schedule, four words a vector, `VSHA512MSG1` and `VSHA512MSG2`
+/// extending it, with `VPBLENDD` supplying `W[t-7]`.
+///
+/// # Safety
+///
+/// `blocks` must be a whole number of blocks.
+#[target_feature(enable = "sha512,avx2")]
+unsafe fn compress_sha512ext(_: HaveSha512, state: &mut [u64; 8], blocks: &[u8]) {
+    // Byte-swaps each 64-bit lane.
+    let swap = _mm256_set_epi64x(
+        0x08090a0b0c0d0e0f,
+        0x0001020304050607,
+        0x08090a0b0c0d0e0f,
+        0x0001020304050607,
+    );
+    // SAFETY: `state` is 64 readable bytes.
+    let (s0, s1) = unsafe {
+        (
+            _mm256_loadu_si256(state.as_ptr().cast()),
+            _mm256_loadu_si256(state.as_ptr().add(4).cast()),
+        )
+    };
+    // (f, e, b, a) and (h, g, d, c), lowest lane first.
+    let mut abef = _mm256_permute4x64_epi64::<0x1b>(_mm256_permute2x128_si256::<0x20>(s0, s1));
+    let mut cdgh = _mm256_permute4x64_epi64::<0x1b>(_mm256_permute2x128_si256::<0x31>(s0, s1));
+    for block in blocks.as_chunks::<128>().0 {
+        let (abef0, cdgh0) = (abef, cdgh);
+        let load = |i: usize| {
+            // SAFETY: `block` is 128 readable bytes, and `i` at most 3.
+            _mm256_shuffle_epi8(
+                unsafe { _mm256_loadu_si256(block.as_ptr().add(32 * i).cast()) },
+                swap,
+            )
+        };
+        let mut w: [__m256i; 4] = [load(0), load(1), load(2), load(3)];
+        // Unrolled, so every index into `w` is a constant.
+        macro_rules! groups {
+            ($($i:literal)*) => {$(
+                sha512ext_group::<$i>(&mut abef, &mut cdgh, &mut w);
+            )*};
+        }
+        groups!(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19);
+        abef = _mm256_add_epi64(abef, abef0);
+        cdgh = _mm256_add_epi64(cdgh, cdgh0);
+    }
+    let abef = _mm256_permute4x64_epi64::<0x1b>(abef);
+    let cdgh = _mm256_permute4x64_epi64::<0x1b>(cdgh);
+    // SAFETY: `state` is 64 writable bytes.
+    unsafe {
+        _mm256_storeu_si256(
+            state.as_mut_ptr().cast(),
+            _mm256_permute2x128_si256::<0x20>(abef, cdgh),
+        );
+        _mm256_storeu_si256(
+            state.as_mut_ptr().add(4).cast(),
+            _mm256_permute2x128_si256::<0x31>(abef, cdgh),
+        );
     }
 }
 
@@ -171,9 +306,14 @@ unsafe extern "sysv64" fn sha512_block_data_order_nohw(
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::low::ct;
+
+    std::thread_local! {
+        /// How many times this thread entered [`sha512_compress_blocks_public`].
+        pub(crate) static PUBLIC_CALLS: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
+    }
 
     // Every other test sees only the routine this CPU picks, so each the CPU
     // can run is checked against the scalar one here, on blocks
@@ -213,6 +353,36 @@ mod tests {
                 // SAFETY: as above.
                 unsafe { compress_avx2(token, &mut got, blocks) };
                 assert_eq!(ct::into_public(got), want, "avx2, {n} blocks");
+            }
+        }
+    }
+
+    // The public path, which runs the SHA512 instructions where the CPU has
+    // them, against the scalar routine, on public blocks: every block count
+    // to twelve, so each of its four schedule slots ends a block.
+    #[test]
+    fn public_matches_nohw() {
+        let blocks: Vec<u8> = (0..12 * 128u32)
+            .map(|i| (i.wrapping_mul(0x85ebca6b) >> 23) as u8)
+            .collect();
+        for n in 0..=12 {
+            let blocks = &blocks[..n * 128];
+            let start: [u64; 8] = core::array::from_fn(|i| {
+                0x0123456789abcdef_u64.rotate_left(8 * i as u32) ^ n as u64
+            });
+            let mut want = start;
+            if n > 0 {
+                // SAFETY: `blocks` holds `n` blocks, at least one.
+                unsafe { compress_nohw(&mut want, blocks) };
+            }
+            let mut got = start;
+            sha512_compress_blocks_public(&mut got, blocks);
+            assert_eq!(got, want, "{n} blocks");
+            if let Some(token) = HaveSha512::check() {
+                let mut got = start;
+                // SAFETY: `blocks` is a whole number of blocks.
+                unsafe { compress_sha512ext(token, &mut got, blocks) };
+                assert_eq!(got, want, "sha512ext, {n} blocks");
             }
         }
     }

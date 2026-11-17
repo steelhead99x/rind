@@ -178,10 +178,13 @@ Intel guarantees the timing of the instructions it lists as data-independent
   ([Intel DOITM]). Linux does not set it, as of 7.4, nor does KVM pass it to
   guests, and rind knows of no other kernel that does. Intel's list leaves out
   the `VSHA512` instructions (`VSHA512RNDS2`, `VSHA512MSG1`, and
-  `VSHA512MSG2`). SHA-384 and SHA-512 do not run them, including on Arrow Lake
-  and Lunar Lake: they take OpenSSL's AVX2 routine on every CPU with AVX2,
-  and `admin/ct-vartime` refuses `vsha512*`. Should Intel add them to its
-  list, the SHA512-extension routine is worth importing again.
+  `VSHA512MSG2`). SHA-384 and SHA-512 do not run them on secrets, including
+  on Arrow Lake and Lunar Lake: the digest, HMAC, HKDF, and signing APIs take
+  OpenSSL's AVX2 routine on every CPU with AVX2. Only Ed25519 verification,
+  whose `SHA-512(R || A || M)` hashes a signature, a public key, and a
+  message, runs them where the CPU has them, and `admin/ct-vartime` refuses
+  `vsha512*` in every other function. Should Intel add them to its list,
+  the other SHA-512 paths could run them too.
 - On Intel processors that do not report `MCDT_NO`, such as its Core processors
   from Skylake to Alder Lake, only while MXCSR holds `0x1FBF`: otherwise some
   vector integer multiplies, such as `vpmuludq` and `vpmullw`, may take a cycle

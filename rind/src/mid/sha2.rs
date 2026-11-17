@@ -299,6 +299,54 @@ impl UpdateBlocks for Sha512State {
     }
 }
 
+/// SHA512's state for inputs that are all public, which compresses with
+/// `low::sha512_compress_blocks_public`: on x86_64 that runs the SHA512
+/// instructions, whose timing may depend on the data. Only
+/// [`sha512_public`] builds one.
+#[cfg(rind_backend = "x86_64")]
+struct PublicSha512State(Sha512State);
+
+#[cfg(rind_backend = "x86_64")]
+impl UpdateBlocks for PublicSha512State {
+    fn update_blocks(&mut self, blocks: &[u8]) {
+        debug_assert!(blocks.len().is_multiple_of(Sha512Context::BLOCK_SZ));
+        if !blocks.is_empty() {
+            Entry::assert_held();
+            crate::low::sha512_compress_blocks_public(&mut self.0.h, blocks);
+            self.0.nblocks = self
+                .0
+                .nblocks
+                .saturating_add((blocks.len() / Sha512Context::BLOCK_SZ) as u64);
+        }
+    }
+}
+
+/// SHA512 of `x1 || x2 || x3`, every byte of which is public: for Ed25519
+/// verification's `SHA-512(R || A || M)` alone. Never pass it a key, a
+/// seed, a nonce's prefix, or anything derived from one.
+#[cfg(rind_backend = "x86_64")]
+pub(crate) fn sha512_public(x1: &[u8], x2: &[u8], x3: &[u8]) -> [u8; Sha512Context::OUTPUT_SZ] {
+    const BLOCK_SZ: usize = Sha512Context::BLOCK_SZ;
+    let mut state = PublicSha512State(Sha512State::new());
+    let mut blockwise = Blockwise::<BLOCK_SZ>::new();
+    blockwise.update(x1, &mut state);
+    blockwise.update(x2, &mut state);
+    blockwise.update(x3, &mut state);
+
+    // As `Sha512State::finish_with`, over the public routine.
+    let rest = blockwise.buffered();
+    let bits = (u128::from(state.0.nblocks) * BLOCK_SZ as u128 + rest.len() as u128) * 8;
+    let mut last = [[0u8; BLOCK_SZ]; 2];
+    let padded = pad(rest, bits.to_be_bytes(), &mut last);
+    Entry::assert_held();
+    crate::low::sha512_compress_blocks_public(&mut state.0.h, padded);
+    let mut r = [0u8; Sha512Context::OUTPUT_SZ];
+    for (i, word) in state.0.h.iter().enumerate() {
+        r[i * 8..(i + 1) * 8].copy_from_slice(&word.to_be_bytes());
+    }
+    r
+}
+
 /// A context for incremental computation of SHA512.
 // In this order for the reason `Sha256Context` is.
 #[derive(Clone)]
@@ -443,5 +491,31 @@ mod tests {
 
         assert_eq!(&outer.finish(),
                    b"\x61\x20\x81\x2e\xd5\x0c\xc3\x11\x67\x04\x3f\x1f\x06\x9d\xcd\x4a\xd8\x83\x23\xd9\x96\x53\xd9\x67\x38\x2c\xc3\x44\x25\x69\x53\x1c\xd0\x3d\xe4\x79\x0a\x71\xde\x88\x45\x44\x66\x80\xb8\xc5\x90\xb3\x07\xc8\xae\x52\x57\x67\xf9\x28\xf8\xda\x9e\x9e\x80\xc9\x35\x5e");
+    }
+
+    // The public SHA512 against the context, over every split of lengths
+    // around one and two blocks, so each part ends mid-block and on a block
+    // boundary.
+    #[cfg(rind_backend = "x86_64")]
+    #[test]
+    fn public_matches_context() {
+        let _entry = Entry::new_public();
+        let data: Vec<u8> = (0..400u32)
+            .map(|i| (i.wrapping_mul(0x9e3779b1) >> 24) as u8)
+            .collect();
+        for len in [
+            0, 1, 63, 64, 111, 112, 127, 128, 129, 200, 239, 240, 255, 256, 257, 400,
+        ] {
+            let data = &data[..len];
+            let mut want = Sha512Context::new();
+            want.update(data);
+            let want = want.finish();
+            for a in (0..=len).step_by(31).chain([len]) {
+                for b in (a..=len).step_by(47).chain([len]) {
+                    let got = sha512_public(&data[..a], &data[a..b], &data[b..]);
+                    assert_eq!(got, want, "{len} bytes split at {a}, {b}");
+                }
+            }
+        }
     }
 }

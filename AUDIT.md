@@ -74,8 +74,9 @@ Outside the model:
 - A CPU whose multiplier takes time by its operands, and an Intel CPU whose
   operating system leaves DOITM unset, as Linux does, both of which
   [PLATFORMS.md](PLATFORMS.md) describes. Intel's data-independent list omits
-  the `VSHA512` instructions; rind does not run them, and `admin/ct-vartime`
-  refuses them. On a Core Ultra 9 275HX (Arrow Lake), SHA-512 takes 2.0 to
+  the `VSHA512` instructions. rind runs them only on public data, Ed25519
+  verification's `SHA-512(R || A || M)`, and `admin/ct-vartime` refuses them
+  everywhere else. On a Core Ultra 9 275HX (Arrow Lake), SHA-512 takes 2.0 to
   2.2× its former time at 32 and 64 B and 4.4 to 4.7× from 1200 B, still 0.81
   to 0.86× aws-lc-rs's. Intel's MXCSR-dependent timing is in the model: rind
   loads `0x1FBF` around the x86_64 code that reaches an affected multiply, and
@@ -200,7 +201,9 @@ establishes, and what it does not:
   multiply whose timing depends on MXCSR that an export reaches outside
   `rind::low::Mcdt`, the mitigation; on 32-bit x86 and the portable backend,
   that every call enters it is unchecked. It takes the integer multiplier to
-  run in constant time, and on x86 it refuses `vsha512*`.
+  run in constant time, and on x86 it refuses `vsha512*` outside the one
+  function `admin/ct-vartime.toml` lists, which Ed25519 verification alone
+  reaches.
 - **s2n-bignum's `_SAFE` theorems** prove the routines
   [ALGORITHMS.md](ALGORITHMS.md#s2n-bignums-constant-time-theorems) lists
   constant time for every input, variable-time instructions included, but

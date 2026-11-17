@@ -141,7 +141,12 @@ impl VerifyingKey {
 
         // Step: rfc8032 5.1.7.2
         // Compute the challenge `k := SHA512(dom2(F, C) || R || A || msg)`
+        // `R`, `A`, and `msg` are all public, so on x86_64 this hash may run
+        // the SHA512 instructions; signing's hashes never do.
         let k = {
+            #[cfg(rind_backend = "x86_64")]
+            let k = crate::mid::sha2::sha512_public(r_sig, &self.bytes, msg);
+            #[cfg(not(rind_backend = "x86_64"))]
             let k = ed25519_digest(r_sig, &self.bytes, msg);
             Scalar::reduce_from_le_bytes(&k)
         };

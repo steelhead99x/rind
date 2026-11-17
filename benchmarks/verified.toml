@@ -57,7 +57,8 @@
 # header protection. On AMD's x86_64 CPUs without AVX2, rind runs aws-lc's
 # unproven scalar SHA-512, which is faster there, so neither SHA-512 nor
 # Ed25519 earns the ✓ there. CPUs with the SHA512 instructions run the proven
-# AVX2 routine. Ed25519's verification on any x86_64 CPU checks a multiple of
+# AVX2 routine but for Ed25519 verification's public hash, which nothing
+# proves. Ed25519's verification on any x86_64 CPU checks a multiple of
 # RFC 8032's equation with half-size scalars that nothing proves yet. Every other
 # rind operation runs unverified code, such as SHA-256's block function on
 # x86_64 or without the crypto extension, under padding and HMAC glue that

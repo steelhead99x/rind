@@ -65,6 +65,11 @@ opaque low.x86_64.sha512.compress_avx
 opaque low.x86_64.sha512.compress_nohw
   : Array Std.U64 8#usize → Slice Std.U8 → Result (Array Std.U64 8#usize)
 
+/-- Ed25519 verification's SHA-512 compression, for public inputs only, which
+runs the SHA512 instructions where the CPU has them. No proof covers it. -/
+opaque low.x86_64.sha512.sha512_compress_blocks_public
+  : Array Std.U64 8#usize → Slice Std.U8 → Result (Array Std.U64 8#usize)
+
 /-! Vale's AES-GCM routines, behind their Rust wrappers. -/
 
 opaque low.x86_64.aes_gcm_avx.counter_block
