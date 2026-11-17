@@ -279,7 +279,7 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 - **Breaks:** actionlint 1.7.12 errors on `queue: max`, which GitHub's concurrency groups accept since May 2026, as `unexpected key "queue" for "concurrency" section`.
 - **Reproduce:** `actionlint .github/workflows/mutants.yml` without the ignore below.
-- **Workaround:** `.github/actionlint.yaml` ignores that error in `mutants.yml`.
+- **Workaround:** `.github/actionlint.yaml` ignores that error in `mutants.yml` and `release.yml`.
 - **Reported:** [rhysd/actionlint#657](https://github.com/rhysd/actionlint/issues/657), with a fix in [rhysd/actionlint#654](https://github.com/rhysd/actionlint/pull/654).
 - **Goes when:** an actionlint release in nixpkgs accepts `queue`.
 
