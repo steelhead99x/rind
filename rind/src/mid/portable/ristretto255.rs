@@ -39,7 +39,14 @@ impl Element {
     /// RFC 9496 4.3.4's one-way map from 64 uniformly random bytes.
     pub(crate) fn from_uniform_bytes(bytes: &[u8; 64]) -> Self {
         low::Entry::assert_held();
-        Self(RistrettoPoint::from_uniform_bytes(bytes))
+        let point = RistrettoPoint::from_uniform_bytes(bytes);
+        // dalek's map is private, so the opposite pair is its whole output.
+        #[cfg(test)]
+        let point = match crate::test::OppositeHashes::held() {
+            true => point + -point,
+            false => point,
+        };
+        Self(point)
     }
 
     pub(crate) fn add(&self, other: &Self) -> Self {
