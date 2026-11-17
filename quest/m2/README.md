@@ -18,7 +18,7 @@ speed, and what the ecosystem needs from rind: ✅ every quest it planned
 joins m2 (rejected: the bets and speedups in m3; only the rind 0.4 work in
 m2). They are the API epic's new children, and the
 [speed](/quest/m2/speed/README.md), [RustCrypto](/quest/m2/rustcrypto/README.md),
-and [trust](/quest/m2/trust/README.md) epics, with new children in bench and
+and trust (finished) epics, with new children in bench and
 adoption. Each epic's Plan records what the audit considered and left out.
 
 Decided 2026-11-12 (maintainer, /quest-plan): ✅ [the website](/quest/m2/site/README.md)

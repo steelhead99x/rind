@@ -248,7 +248,7 @@ exporting, and naming things the same way, and no breaking change is planned.
   an adapter's patch release may move it to rind's next minor, and to that
   minor's `rust-version`. An adapter whose upstream needs a newer Rust than
   rind declares that one, as rind-openmls declares OpenMLS's 1.91, and CI
-  does not yet check such a crate on its own `rust-version`.
+  checks such a crate on its own `rust-version`.
 - [SECURITY.md][supported-versions] says which releases get security fixes,
   and [PLATFORMS.md][platforms] which targets and CPUs rind supports.
 
