@@ -236,7 +236,7 @@ fn compress(point: &[u8]) -> Vec<u8> {
     compressed
 }
 
-/// The dimpl fuzzer inputs `Av9paRCkAHn///cAAP8AAAIK` (P-256) and
+/// The dimpl fuzzer inputs `02ff696910a40079fffff70000ff0000020a` (P-256) and
 /// `09a0ff97fbffffff970100000340002b01db0d250c0c06` (P-384) are `KeyShare`
 /// edits of a fresh uncompressed point: P-256 XORs index 247 with 0 and index
 /// 0 with 2, and P-384 XORs index 0 with 3. Neither cuts. The prefix becomes
