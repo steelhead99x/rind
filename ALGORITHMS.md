@@ -189,9 +189,10 @@ with portable Rust in place of the assembly armv7 runs regardless.
   `admin/esp32s3-sha512-layout` checks those sections, the relocation
   allowlist, and that the block has no call, at opt-level 3, s, and z.
   At each it prints the block's IRAM and literal-pool bytes, and `K`'s 640
-  bytes of DRAM, and fails when block and pool pass its `iram_ceiling`:
-  the sizes are those the `ESP32-S3 SHA-512 layout` workflow's run
-  records, not figures measured by hand. It also runs, on QEMU's ESP32-S3 CPU, the Xtensa message load (`l32i`,
+  bytes of DRAM, and fails when block and pool pass its `iram_ceiling`,
+  20,480 bytes. The `ESP32-S3 SHA-512 layout` workflow's run at `942bb48a`
+  measured 18,533 bytes at opt-level 3 (18,401 of block and a 132-byte
+  pool), 17,792 at s, and 17,797 at z; later runs print the current ones. It also runs, on QEMU's ESP32-S3 CPU, the Xtensa message load (`l32i`,
   `ssai`, `src`), including blocks at byte offsets 1 and 3, and FIPS
   180-4's "abc" block through the whole compressor, built for ESP-IDF so
   the block runs from its IRAM section with `K` from DRAM, at byte offsets

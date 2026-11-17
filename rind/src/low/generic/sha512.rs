@@ -636,17 +636,33 @@ mod tests {
         abc_failures_at(1)
     }
 
-    fn abc_failures_at(start: usize) -> u32 {
+    /// The padded "abc" block twice, at byte 0 and at byte 129, so the
+    /// second copy starts one byte past a word boundary.
+    #[repr(align(4))]
+    struct AbcBlocks([u8; 257]);
+
+    // A constant, not a buffer zeroed at run time, so the probe needs no
+    // `memset` from the QEMU image, as `message_load_failures` needs none.
+    static ABC_BLOCKS: AbcBlocks = {
         // FIPS 180-4 §5.1.2: "abc", the 0x80 terminator, zeros, and the
         // 128-bit length, 24.
-        let mut buf = [0u8; 129];
-        buf[start] = b'a';
-        buf[start + 1] = b'b';
-        buf[start + 2] = b'c';
-        buf[start + 3] = 0x80;
-        buf[start + 127] = 24;
+        let mut b = [0u8; 257];
+        let mut at = 0;
+        while at <= 129 {
+            b[at] = b'a';
+            b[at + 1] = b'b';
+            b[at + 2] = b'c';
+            b[at + 3] = 0x80;
+            b[at + 127] = 24;
+            at += 129;
+        }
+        AbcBlocks(b)
+    };
+
+    fn abc_failures_at(start: usize) -> u32 {
+        let at = start * 129;
         let mut state = IV;
-        sha512_compress_blocks(&mut state, &buf[start..start + 128]);
+        sha512_compress_blocks(&mut state, &ABC_BLOCKS.0[at..at + 128]);
         first_difference(&state, &ABC, start)
     }
 

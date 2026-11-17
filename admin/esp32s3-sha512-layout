@@ -47,10 +47,10 @@ root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 host_cc=${CC:-cc}
 
 # Most IRAM the block may take at opt-level 3, s, or z: its .iram1.text
-# plus its literal pool, in bytes, as the object file has them. Provisional
-# until CI measures it: set it from the first CI run's largest total,
-# which this script prints, plus about 10% slack.
-iram_ceiling=24576
+# plus its literal pool, in bytes, as the object file has them. The first
+# CI run measured 18,533 at opt-level 3 (17,792 at s, 17,797 at z); this is
+# that plus about 10% slack.
+iram_ceiling=20480
 
 mkdir -p "$root/.tmp"
 work=$(mktemp -d "$root/.tmp/sha512-layout.XXXXXX")
@@ -502,7 +502,10 @@ fi
       printf 'void %s(void) { for (;;) {} }\n' "$sym"
     done
 } > "$work/load-stubs.c"
-"$gcc" -c -mabi=call0 -O2 -o "$work/load-stubs.o" "$work/load-stubs.c"
+# Without these flags gcc turns each loop back into a call to the function
+# it is defining, which never returns.
+"$gcc" -c -mabi=call0 -O2 -fno-builtin -fno-tree-loop-distribute-patterns \
+  -o "$work/load-stubs.o" "$work/load-stubs.c"
 
 cat > "$work/load.ld" << 'EOF'
 MEMORY {
@@ -523,8 +526,19 @@ cat > "$work/start.S" << 'EOF'
 .global _start
 _start:
     movi a1, 0x4001F000
+    // A marker before each probe, so a hang's log names the probe.
+    movi a2, 4
+    movi a3, 1
+    movi a4, load_msg
+    movi a5, 5
+    simcall
     call0 sha512_load_probe
     bnez a2, 3f
+    movi a2, 4
+    movi a3, 1
+    movi a4, abc_msg
+    movi a5, 4
+    simcall
     call0 sha512_abc_probe
 3:
     mov a6, a2
@@ -547,6 +561,10 @@ ok_msg:
     .ascii "OK\n"
 fail_msg:
     .ascii "FAIL\n"
+load_msg:
+    .ascii "load\n"
+abc_msg:
+    .ascii "abc\n"
 EOF
 "$gcc" -c -mabi=call0 -o "$work/start.o" "$work/start.S"
 "$ld" --relax -e _start -T "$work/load.ld" -o "$work/load.elf" \
