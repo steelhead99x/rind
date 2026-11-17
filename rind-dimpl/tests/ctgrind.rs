@@ -56,27 +56,52 @@ fn key_exchange() {
     }
 }
 
-/// Agrees on each NIST group from the peer's point in the compressed and
-/// hybrid forms, which rind-dimpl rewrites to the uncompressed point before
-/// its private key touches it.
+/// `key` in a `SubjectPublicKeyInfo` whose AlgorithmIdentifier holds
+/// `algorithm`; every length here is below 128.
+fn spki(algorithm: &[u8], key: &[u8]) -> Vec<u8> {
+    let bits = [&[0x03, key.len() as u8 + 1, 0][..], key].concat();
+    let identifier = [&[0x30, algorithm.len() as u8][..], algorithm].concat();
+    let body = [identifier, bits].concat();
+    [vec![0x30, body.len() as u8], body].concat()
+}
+
+/// Agrees from the peer's share in each other form aws-lc-rs takes, which
+/// rind-dimpl rewrites before its private key touches it: a NIST point
+/// compressed, hybrid, or in a `SubjectPublicKeyInfo`, and X25519's key in
+/// one.
 #[test]
 fn key_exchange_point_forms() {
+    const EC_PUBLIC_KEY: &[u8] = &[0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
     for group in rind().kx_groups {
-        if group.name() == NamedGroup::X25519 {
-            continue;
-        }
-        for form in 0..2 {
+        let algorithm = match group.name() {
+            NamedGroup::X25519 => vec![0x06, 0x03, 0x2b, 0x65, 0x6e],
+            NamedGroup::Secp256r1 => [
+                EC_PUBLIC_KEY,
+                &[0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07],
+            ]
+            .concat(),
+            _ => [EC_PUBLIC_KEY, &[0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22]].concat(),
+        };
+        let forms: &[fn(&[u8], &[u8]) -> Vec<u8>] = match group.name() {
+            NamedGroup::X25519 => &[spki],
+            _ => &[
+                |_, point| {
+                    let half = point.len() / 2;
+                    [&[0x02 | (point[point.len() - 1] & 1)][..], &point[1..=half]].concat()
+                },
+                |_, point| {
+                    let mut hybrid = point.to_vec();
+                    hybrid[0] = 0x06 | (point[point.len() - 1] & 1);
+                    hybrid
+                },
+                spki,
+            ],
+        };
+        for form in forms {
             let client = group.start_exchange(Buf::new()).unwrap();
             let server = group.start_exchange(Buf::new()).unwrap();
-            let (client_pub, mut server_pub) =
-                (client.pub_key().to_vec(), server.pub_key().to_vec());
-            let y_parity = server_pub[server_pub.len() - 1] & 1;
-            if form == 0 {
-                server_pub.truncate(1 + server_pub.len() / 2);
-                server_pub[0] = 0x02 | y_parity;
-            } else {
-                server_pub[0] = 0x06 | y_parity;
-            }
+            let client_pub = client.pub_key().to_vec();
+            let server_pub = form(&algorithm, server.pub_key());
 
             let mut client_secret = Buf::new();
             client.complete(&server_pub, &mut client_secret).unwrap();
@@ -88,9 +113,8 @@ fn key_exchange_point_forms() {
             assert_eq!(
                 client_secret.as_ref(),
                 server_secret.as_ref(),
-                "{:?} {:02x}",
-                group.name(),
-                server_pub[0]
+                "{:?} {server_pub:02x?}",
+                group.name()
             );
         }
     }
