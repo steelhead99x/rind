@@ -27,34 +27,8 @@
 //! on 32-bit limbs is unchanged.
 
 use super::blockwise::Blockwise;
+use super::hide::hide;
 use crate::low::ct;
-
-/// `v`, which the compiler cannot see through, as `generic::md5` hides its
-/// values, without a trip through memory. `finish`'s mask and every mul16
-/// half pass through it, so the compiler cannot turn a select on a secret
-/// into a branch, nor fuse the halves back into one long multiply.
-#[inline(always)]
-#[cfg(all(rind_reg_asm, not(miri)))]
-// The operand appears only in a comment, so no register width is printed.
-#[allow(asm_sub_register)]
-pub(super) fn hide(mut v: u32) -> u32 {
-    // SAFETY: the assembly is empty, so it reads, writes, and clobbers
-    // nothing but returns `v` in the register it took it in.
-    unsafe {
-        core::arch::asm!("/* {0} */", inout(reg) v, options(pure, nomem, nostack, preserves_flags));
-    }
-    v
-}
-
-// build.rs sets `rind_reg_asm` only where a `reg` operand is stable.
-// Elsewhere, such as WebAssembly, Xtensa, or MIPS, and under Miri,
-// `black_box` hides the value through memory: once per tag in `finish`, and
-// on no core that builds with `rind_mul16`.
-#[inline(always)]
-#[cfg(not(all(rind_reg_asm, not(miri))))]
-pub(super) fn hide(v: u32) -> u32 {
-    core::hint::black_box(v)
-}
 
 /// The low 26 bits.
 const MASK: u32 = 0x3ff_ffff;
@@ -117,11 +91,13 @@ impl Poly1305 {
     /// product here is five times a carry, not a widening multiply.
     #[inline(never)]
     pub(crate) fn finish(mut self) -> [u8; 16] {
-        if let Some(tail) = self.bw.clone().peek_remaining() {
-            // The short last block's 1 goes after its bytes, not at bit 128.
-            let mut block = [0u8; 16];
+        // The short last block's 1 goes after its bytes, not at bit 128.
+        let mut block = [0u8; 16];
+        let tail = self.bw.peek_remaining().map(|tail| {
             block[..tail.len()].copy_from_slice(tail);
             block[tail.len()] = 0x01;
+        });
+        if tail.is_some() {
             self.blocks(&[block], 0);
         }
 
@@ -502,20 +478,20 @@ mod tests {
     // Poly1305 is constant time in both.
     #[test]
     fn matches_hacl_and_generic() {
-        let mut rng = SplitMix(0x1305_5eed_0f90_1730);
+        let mut rng = Rng(0x1305_5eed_0f90_1730);
         let mut cases: Vec<([u8; 32], Vec<u8>)> = Vec::new();
         for (key, byte) in [([0xff; 32], 0xff), ([0; 32], 0)] {
             cases.push((key, vec![byte; 16 * 1024 + 15]));
         }
         let long: Vec<u8> = (0..300).map(|_| rng.next() as u8).collect();
         for len in 0..=long.len() {
-            cases.push((rng.key(), long[..len].to_vec()));
+            cases.push((key(&mut rng), long[..len].to_vec()));
         }
         let seeds = if cfg!(debug_assertions) { 96 } else { 512 };
         for _ in 0..seeds {
             let len = rng.below(16 * 1024 + 1);
             let msg: Vec<u8> = (0..len).map(|_| rng.next() as u8).collect();
-            cases.push((rng.key(), msg));
+            cases.push((key(&mut rng), msg));
         }
 
         for (key, msg) in &cases {
@@ -554,21 +530,10 @@ mod tests {
         }
     }
 
-    /// SplitMix64, for reproducible random cases.
-    struct SplitMix(u64);
+    use super::super::splitmix::Rng;
 
-    impl SplitMix {
-        fn next(&mut self) -> u64 {
-            super::super::splitmix::next(&mut self.0)
-        }
-
-        fn below(&mut self, n: usize) -> usize {
-            (self.next() % n as u64) as usize
-        }
-
-        fn key(&mut self) -> [u8; 32] {
-            core::array::from_fn(|_| self.next() as u8)
-        }
+    fn key(rng: &mut Rng) -> [u8; 32] {
+        core::array::from_fn(|_| rng.next() as u8)
     }
 
     fn hex(s: &str) -> Vec<u8> {

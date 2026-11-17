@@ -97,6 +97,16 @@ mod generic {
     // AVX2.
     #[cfg(not(rind_backend = "aarch64"))]
     pub(crate) mod mlkem_poly;
+    // The barrier Poly1305's 32-bit limbs and their 16-bit halves pass values
+    // through, so the compiler cannot branch on a mask or fuse the halves.
+    #[cfg(any(
+        all(
+            rind_backend = "portable",
+            any(target_pointer_width = "32", rind_limb = "32")
+        ),
+        test
+    ))]
+    pub(crate) mod hide;
     // Poly1305's 32x32->64-bit products from 16-bit halves where that
     // multiply ends early, is missing, or is a library call (see build.rs).
     // Only Poly1305 calls it.

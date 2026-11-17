@@ -45,7 +45,7 @@
 //! [BearSSL ctmul]: https://www.bearssl.org/ctmul.html
 //! [XScale]: https://download.intel.com/design/intelxscale/27347302.pdf
 
-use super::poly1305_32::hide;
+use super::hide::hide;
 
 /// `a * b` from four 16-bit halves. Every step is a multiply, add, shift, or
 /// mask, and the wrapping adds never wrap, since the sum is the product,
