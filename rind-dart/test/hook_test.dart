@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:code_assets/code_assets.dart';
 import 'package:crypto/crypto.dart' as crypto;
@@ -9,16 +10,21 @@ import 'package:test/test.dart';
 
 import '../hook/build.dart' as hook;
 
+// The package root, wherever `dart test` runs from.
+final _root = Isolate.resolvePackageUriSync(
+  Uri.parse('package:rind/'),
+)!.resolve('..');
+
 final fromSource = PackageUserDefines(
   workspacePubspec: PackageUserDefinesSource(
     defines: {'build_from_source': true},
-    basePath: Directory.current.uri,
+    basePath: _root,
   ),
 );
 
 // Only a released package, as sh/dart-package.sh and sh/dart-prebuilt.sh
 // stage it, pins prebuilt libraries.
-final released = File('hook/prebuilt.json').existsSync();
+final released = File.fromUri(_root.resolve('hook/prebuilt.json')).existsSync();
 
 /// Every target rind supports, as `os-arch[-iossdk]`.
 const supported = [

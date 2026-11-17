@@ -82,13 +82,20 @@ Future<ProcessResult> _firstCall(String name) async {
   ).copySync('${dir.path}/main.dart');
   final packages = Isolate.packageConfigSync!;
   // Written first, since a package config older than its pubspec is stale.
-  // The pubspec carries the build_from_source user-define. Unless it names
-  // a cargo target directory already, the copy names the one in hooks_runner's
-  // shared output folder for this package, where the outer build put it.
+  // A source checkout's pubspec carries the build_from_source user-define.
+  // Unless it names a cargo target directory already, the copy names the one
+  // in hooks_runner's shared output folder for this package, where the outer
+  // build put it. A released copy has no hooks section and downloads its
+  // pinned library instead.
   var pubspec = File.fromUri(_root.resolve('pubspec.yaml')).readAsStringSync();
-  if (!pubspec.contains('cargo_target_dir:')) {
-    final define = RegExp(r'^( +)build_from_source: true\r?$', multiLine: true);
-    expect(pubspec, contains(define));
+  final define = RegExp(r'^( +)build_from_source: true\r?$', multiLine: true);
+  if (!define.hasMatch(pubspec)) {
+    expect(
+      File.fromUri(_root.resolve('hook/prebuilt.json')).existsSync(),
+      isTrue,
+      reason: 'a copy that does not build from source pins prebuilt libraries',
+    );
+  } else if (!pubspec.contains('cargo_target_dir:')) {
     final target = packages
         .resolve('hooks_runner/shared/rind/build/target/')
         .toFilePath()
