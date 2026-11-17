@@ -39,12 +39,8 @@ pub(crate) mod bignum_inv_p521;
 pub(crate) mod bignum_invsqrt_p25519;
 pub(crate) mod bignum_invsqrt_p25519_narrow;
 pub(crate) mod bignum_kmul_16_32;
-// The 32-word Karatsuba routines run only in tests until they are
-// measured on a narrow multiplier; `mont` keeps `bn_mul_mont` at 32 words.
-#[cfg(test)]
 pub(crate) mod bignum_kmul_32_64;
 pub(crate) mod bignum_ksqr_16_32;
-#[cfg(test)]
 pub(crate) mod bignum_ksqr_32_64;
 pub(crate) mod bignum_madd_n25519;
 pub(crate) mod bignum_madd_n25519_narrow;
