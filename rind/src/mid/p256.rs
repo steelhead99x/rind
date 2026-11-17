@@ -1732,7 +1732,8 @@ mod tests {
 
     #[test]
     fn base_point_precomp() {
-        assert_eq!(align_of_val(&precomp::CURVE_GENERATOR_PRECOMP), 64);
+        // Where the linker put it, not just the type's alignment.
+        assert_eq!(generator_table().as_ptr().addr() % 64, 0);
         let mut base = JacobianMontPoint::from_affine(&CURVE_GENERATOR);
         for row in generator_table().iter() {
             let mut multiple = base;

@@ -1508,7 +1508,8 @@ mod tests {
     /// Python's integers, against rind's own arithmetic.
     #[test]
     fn base_point_precomp_comb() {
-        assert_eq!(align_of_val(&precomp::CURVE_GENERATOR_PRECOMP_COMB), 64);
+        // Where the linker put it, not just the type's alignment.
+        assert_eq!(generator_table().as_ptr().addr() % 64, 0);
         let mut base = JacobianPoint::from_affine(&CURVE_GENERATOR);
         for table in generator_table() {
             let mut multiple = base;
