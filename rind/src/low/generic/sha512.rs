@@ -422,8 +422,9 @@ mod tests {
         );
     }
 
-    /// The portable backend *is* this compression, so that comparison would
-    /// call itself. Everywhere else it is aws-lc's assembly.
+    /// The portable backend is this compression, and so are x86_64 and armv7,
+    /// so there the comparison calls itself. On aarch64 it compares the
+    /// crypto-extension body, when the CPU has it, with this one.
     #[cfg(not(rind_backend = "portable"))]
     #[test]
     fn matches_backend_compression() {

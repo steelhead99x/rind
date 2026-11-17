@@ -892,7 +892,8 @@ written for it with the target renamed, as for aarch64, over what differs:
 - `Rind/Portable/Sha512Entry.lean`: `RunsSha512`, which assumes the entry
   checks, as no dispatch picks a routine, and that
   `low::generic::sha512::sha512_compress_blocks` is FIPS 180-4's block
-  function. No proof covers that rolled loop.
+  function. No proof covers that body. A 64-bit pointer unrolls it; a
+  32-bit pointer rolls it.
 - `Rind/Portable/ShaBlocks.lean`: `Sha256Blocks`, the entry checks and the
   contract of `low::portable::sha::sha256_compress_blocks`, which calls
   `generic::sha256` on this translation. ESP-IDF Xtensa runs `sha256_iram`
