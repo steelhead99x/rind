@@ -789,7 +789,10 @@ one-pass routines, in `Rind/X86_64/ChaCha20Poly1305.lean`:
   failure the seal returns as `RngFailed`.
 
 HChaCha20, which derives XChaCha20's subkey, runs HACL*'s rounds, which
-`hchacha20_spec` proves. The theorems assume `RunsChaCha20Poly1305`: rind's
+`hchacha20_spec` proves. 32-bit portable HChaCha20 is the rolled loop in
+`low/generic/chacha20.rs`, which this proof does not cover; the output loop
+stays inside the unrolled `hchacha20` so Aeneas still extracts
+`hchacha20_loop`. The theorems assume `RunsChaCha20Poly1305`: rind's
 CPU-feature checks find SSE4.1, and `OnePass`, that aws-lc's one-pass
 routines compute RFC 8439's AEAD, which no proof covers yet;
 [the ChaCha20-Poly1305 quest](/quest/m4/verified/chacha20-poly1305-x86/aead.md)
