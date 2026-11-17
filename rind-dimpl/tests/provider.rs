@@ -215,10 +215,8 @@ fn accepts(provider: &CryptoProvider, group: NamedGroup, share: &[u8]) -> bool {
 /// A fresh aws-lc public key, edited as the fuzzer does, whose hybrid prefix
 /// matches `y`. aws-lc accepts that point and refuses the other parity.
 fn matching_hybrid(group: NamedGroup, flips: &[(u16, u8)]) -> Vec<u8> {
-    let aws = aws_lc_rs::default_provider();
-    let kx = aws.kx_groups.iter().find(|kx| kx.name() == group).unwrap();
     for _ in 0..64 {
-        let mut share = kx.start_exchange(Buf::new()).unwrap().pub_key().to_vec();
+        let mut share = aws_share(group);
         assert_eq!(share[0], 0x04, "{group:?} publishes an uncompressed point");
         edit_share(&mut share, flips, 0);
         if (share[0] & 1) == (share[share.len() - 1] & 1) {
