@@ -447,8 +447,12 @@ step() {
                     run nix develop .#msrv --command cargo check "${args[@]}" --locked
                 fi
                 for version in "${!versions[@]}"; do
+                    # This rustc is not the one building target/, so its
+                    # check keeps to its own directory instead of making
+                    # that build start over.
                     # shellcheck disable=SC2086 # each entry is "-p NAME" pairs
-                    run nix develop ".#msrv-${version//./_}" --command cargo check ${versions[$version]} --locked
+                    run nix develop ".#msrv-${version//./_}" --command \
+                        cargo check ${versions[$version]} --locked --target-dir "target/msrv-${version//./_}"
                 done
             fi
             # rind and rind-rustls on each other backend this change reaches.
