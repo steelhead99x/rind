@@ -65,7 +65,10 @@
 # by five, ends early on ARM7TDMI and XScale, and the planted copies of
 # those must be rejected. On RV32I it rejects a conditional branch in those
 # functions whose condition is a masked bit, the shape a select on the
-# secret half lowers to, and the planted branch must be rejected. A `none`
+# secret half lowers to, and the planted branch must be rejected. The
+# `+branch` row runs only that branch proof, on `riscv32imac`, whose 26-bit
+# limbs multiply with `mul` and `mulhu` but whose `finish` still selects
+# between h and h - p with a mask. A `none`
 # target gets getrandom's custom backend, because a library build cannot
 # name one.
 #
@@ -93,6 +96,10 @@ TARGETS = [
     "thumbv8m.base-none-eabi+mul16",
     "armv5te-unknown-linux-gnueabi+mul16",
     "riscv32i-unknown-none-elf+mul16",
+    # The 32-bit RISC-V cores with a multiplier run the same 26-bit limbs on
+    # plain products. RISC-V has no cmov, so a select in them could become
+    # a branch: this row runs only the secret-branch proof.
+    "riscv32imac-unknown-none-elf+branch",
     # The architectures whose only backend is the portable one. ARMv6 is
     # 32-bit ARM before ARMv7, and big-endian powerpc64 the ELFv1 ABI, whose
     # calls reach a function through its descriptor in `.opd`.
@@ -112,7 +119,7 @@ ARCH = {
 }
 PORTABLE = '--cfg rind_portable --cfg curve25519_dalek_backend="serial"'
 # The flags of each backend a target's `+` suffix names.
-BACKENDS = {"": [], "portable": [PORTABLE], "mul16": [PORTABLE, "--cfg rind_mul16"]}
+BACKENDS = {"": [], "portable": [PORTABLE], "mul16": [PORTABLE, "--cfg rind_mul16"], "branch": []}
 
 # Instructions whose latency may depend on their operands: integer division,
 # and floating-point arithmetic, whose subnormal operands take a slow path.
@@ -846,6 +853,19 @@ def branch_condition(mnemonic, operands):
     return regs[:2]
 
 
+# RISC-V's stores and loads, by mnemonic. `secret_branches` follows a secret
+# bit through a stack slot as through a register.
+RV_STORE = {"sb", "sh", "sw", "sd", "fsw", "c.sw", "c.swsp"}
+RV_LOAD = {"lb", "lbu", "lh", "lhu", "lw", "c.lw", "c.lwsp"}
+
+
+def rv_stack_slot(ops):
+    """The `sp`-relative slot `imm(sp)` names, as a key no register name
+    matches, or None for any other address."""
+    m = re.fullmatch(r"(-?(?:0x)?[0-9a-f]+)\(sp\)", ops[1]) if len(ops) >= 2 else None
+    return "sp+{}".format(int(m[1], 0)) if m else None
+
+
 def secret_branches(insns):
     """Conditional branches whose condition is a masked or compared bit.
 
@@ -896,10 +916,23 @@ def secret_branches(insns):
         if not ops or not RV_REG.fullmatch(ops[0]):
             return bits
         rd = ops[0]
-        if mnem in {"sw", "sb", "sh", "sd", "fsw"} or RV_BRANCH.fullmatch(mnem) or mnem in {"j", "jr", "ret"}:
+        if mnem in RV_STORE:
+            # A secret bit spilled to the stack stays secret in its slot, and
+            # a public value stored over it clears it. A store through any
+            # other base may alias a slot, so it clears nothing.
+            slot = rv_stack_slot(ops)
+            if slot is not None:
+                if rd in bits:
+                    bits.add(slot)
+                else:
+                    bits.discard(slot)
+            return bits
+        if RV_BRANCH.fullmatch(mnem) or mnem in {"j", "jr", "ret"}:
             return bits
         bits.discard(rd)
-        if mnem in {"mv", "c.mv"} and len(ops) >= 2 and ops[1] in bits:
+        if mnem in RV_LOAD and rv_stack_slot(ops) in bits:
+            bits.add(rd)
+        elif mnem in {"mv", "c.mv"} and len(ops) >= 2 and ops[1] in bits:
             bits.add(rd)
         elif mnem == "addi" and len(ops) >= 3 and ops[2] in {"0", "0x0"} and ops[1] in bits:
             bits.add(rd)
@@ -1000,6 +1033,12 @@ def self_test_mul16():
     assert branches("c.andi a2, 1\nc.beqz a2, 0x8") == ["c.beqz a2, 0x8"]
     assert branches("andi a0, a1, 1\njalr ra\nbnez a0, 0x10") == []
     assert branches("slli a2, a1, 1\nadd a2, a2, a0\nbnez a2, 0x8") == []
+    # A secret bit spilled to the stack and reloaded is still secret, and a
+    # public value stored over its slot is not.
+    assert branches("srli s0, t2, 31\nsw s0, 40(sp)\nlw s0, 40(sp)\nbnez s0, 0x8") == ["bnez s0, 0x8"]
+    assert branches("andi a2, a1, 1\nsw a2, 8(sp)\nli a3, 0\nsw a3, 8(sp)\nlw a2, 8(sp)\nbnez a2, 0x8") == []
+    assert branches("andi a2, a1, 1\nsw a2, 8(sp)\nsw a3, 0(a0)\nlw a2, 8(sp)\nbnez a2, 0x8") == ["bnez a2, 0x8"]
+    assert branches("andi a2, a1, 1\nsw a2, 8(sp)\nlw a2, 12(sp)\nbnez a2, 0x8") == []
 
 
 def section_spans(objects, node):
@@ -1048,6 +1087,46 @@ def find_bodies(objects, function):
         if any(objects.name(label) == function for _, label in labels):
             bodies.extend(body for name, body in section_spans(objects, node) if name == function)
     return bodies
+
+
+def check_secret_branches(objects):
+    """The RV32I secret-branch proof over `blocks` and `finish`, and its
+    planted branch: its report's lines, and whether it failed."""
+    lines = []
+    failed = False
+    for function, planted in MUL16.items():
+        if planted:
+            continue
+        bodies = poly_bodies(objects, function)
+        if not bodies:
+            lines.append("FAIL {}: no instructions for the branch check".format(function))
+            failed = True
+            continue
+        bad = []
+        broke = False
+        for name, body in bodies:
+            found = secret_branches(body)
+            if found is None:
+                lines.append("FAIL {}: a jump in {} left the branch proof".format(function, name))
+                failed = True
+                broke = True
+            else:
+                bad.extend("{}: {}".format(name, text) for text in found)
+        if bad:
+            lines.append("FAIL {}: conditional branch on a secret bit".format(function))
+            for item in bad[:12]:
+                lines.append("       " + item)
+            failed = True
+        elif not broke:
+            lines.append("ok   {}: no conditional branch on a secret bit".format(function))
+    bodies = find_bodies(objects, SECRET_BRANCH)
+    found = secret_branches(bodies[0]) if len(bodies) == 1 else None
+    if not found:
+        lines.append("FAIL {}: planted secret branch was not rejected".format(SECRET_BRANCH))
+        failed = True
+    else:
+        lines.append("ok   planted {}: {}".format(SECRET_BRANCH, found[0]))
+    return lines, failed
 
 
 def check_early_operands(objects, target):
@@ -1099,38 +1178,9 @@ def check_early_operands(objects, target):
             else:
                 lines.append("ok   planted {}: mul without bit 31".format(function))
     if target.split("-")[0].startswith("riscv"):
-        for function, planted in MUL16.items():
-            if planted:
-                continue
-            bodies = poly_bodies(objects, function)
-            if not bodies:
-                lines.append("FAIL {}: no instructions for the branch check".format(function))
-                failed = True
-                continue
-            bad = []
-            broke = False
-            for name, body in bodies:
-                found = secret_branches(body)
-                if found is None:
-                    lines.append("FAIL {}: a jump in {} left the branch proof".format(function, name))
-                    failed = True
-                    broke = True
-                else:
-                    bad.extend("{}: {}".format(name, text) for text in found)
-            if bad:
-                lines.append("FAIL {}: conditional branch on a secret bit".format(function))
-                for item in bad[:12]:
-                    lines.append("       " + item)
-                failed = True
-            elif not broke:
-                lines.append("ok   {}: no conditional branch on a secret bit".format(function))
-        bodies = find_bodies(objects, SECRET_BRANCH)
-        found = secret_branches(bodies[0]) if len(bodies) == 1 else None
-        if not found:
-            lines.append("FAIL {}: planted secret branch was not rejected".format(SECRET_BRANCH))
-            failed = True
-        else:
-            lines.append("ok   planted {}: {}".format(SECRET_BRANCH, found[0]))
+        more, more_failed = check_secret_branches(objects)
+        lines += more
+        failed |= more_failed
     return lines, failed
 
 def check_mul16(objects, target):
@@ -1185,6 +1235,9 @@ def check(tool, target, rind, others, public):
     objects = Objects(tool, arch, rind + others)
     if target.endswith("+mul16"):
         return check_mul16(objects, target)
+    if target.endswith("+branch"):
+        lines, failed = check_secret_branches(objects)
+        return ["{}: checked {} functions for secret branches".format(target, len(MUL16) - 1)] + lines, failed
     roots = {m for m, _ in objects.insns if m.startswith(os.path.basename(rind[0]) + "(")}
     starts = [
         node for node in objects.insns

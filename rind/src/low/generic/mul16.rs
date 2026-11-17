@@ -45,6 +45,8 @@
 //! [BearSSL ctmul]: https://www.bearssl.org/ctmul.html
 //! [XScale]: https://download.intel.com/design/intelxscale/27347302.pdf
 
+use super::poly1305_32::hide;
+
 /// `a * b` from four 16-bit halves. Every step is a multiply, add, shift, or
 /// mask, and the wrapping adds never wrap, since the sum is the product,
 /// which is under 2^64; they only keep a debug build's overflow checks from
@@ -81,24 +83,24 @@ fn mul_half(a: u32, b: u32) -> u32 {
 #[cfg(any(test, not(any(rind_mul16_soft, rind_mul16_top))))]
 #[inline(always)]
 fn mul_half_plain(a: u32, b: u32) -> u32 {
-    opaque(a).wrapping_mul(opaque(b))
+    hide(a).wrapping_mul(hide(b))
 }
 
 /// A 16-bit product whose multiplier always takes the long early-out path.
 #[cfg(any(test, all(rind_mul16_top, not(rind_mul16_soft))))]
 #[inline(always)]
 fn mul_half_top(a: u32, b: u32) -> u32 {
-    // `opaque` hides the range. Without it, LLVM simplifies this back to
+    // `hide` hides the range. Without it, LLVM simplifies this back to
     // `a * b` and the early-out sees the secret half again.
-    let a = opaque(a & 0xffff);
-    let b = opaque(b & 0xffff);
+    let a = hide(a & 0xffff);
+    let b = hide(b & 0xffff);
     let prod = (a | 0x8000_0000).wrapping_mul(b | 0x8000_0000);
     let cross = (a.wrapping_add(b) & 1) << 31;
     prod.wrapping_sub(cross)
 }
 
 /// A 16-bit product from shifts and adds. No multiply instruction. Inlined,
-/// so a block does not pay a hundred calls. `opaque` on the mask hides that
+/// so a block does not pay a hundred calls. `hide` on the mask hides that
 /// it is 0 or all-ones: without that, `a & mask` is a select on the secret
 /// bit, and RV32I can lower the select to a branch. `opaque` on the sum
 /// keeps the compiler from turning the recurrence into `__mulsi3`. It may
@@ -110,45 +112,12 @@ fn mul_half_soft(a: u32, mut b: u32) -> u32 {
     b &= 0xffff;
     let mut acc = 0u32;
     for _ in 0..16 {
-        let mask = opaque(0u32.wrapping_sub(b & 1));
-        acc = opaque(acc.wrapping_add(a & mask));
+        let mask = hide(0u32.wrapping_sub(b & 1));
+        acc = hide(acc.wrapping_add(a & mask));
         a <<= 1;
         b >>= 1;
     }
     acc
-}
-
-/// `v`, which the compiler cannot see through, as `generic::md5` hides its
-/// values, without a trip through memory.
-#[cfg(any(rind_mul16_top, rind_mul16_soft))]
-#[inline(always)]
-pub(crate) fn hide(v: u32) -> u32 {
-    opaque(v)
-}
-
-/// `v`, which the compiler cannot see through, as `generic::md5` hides its
-/// values, without a trip through memory.
-#[inline(always)]
-#[cfg(all(rind_reg_asm, not(miri)))]
-// The operand appears only in a comment, so no register width is printed.
-#[allow(asm_sub_register)]
-fn opaque(mut v: u32) -> u32 {
-    // SAFETY: the assembly is empty, so it reads, writes, and clobbers
-    // nothing but returns `v` in the register it took it in.
-    unsafe {
-        core::arch::asm!("/* {0} */", inout(reg) v, options(pure, nomem, nostack, preserves_flags));
-    }
-    v
-}
-
-// build.rs sets `rind_reg_asm` only where a `reg` operand is stable.
-// Elsewhere, and under Miri, `black_box` keeps the halves opaque. None of
-// those targets builds with `rind_mul16` except tests, which only check
-// the arithmetic.
-#[inline(always)]
-#[cfg(not(all(rind_reg_asm, not(miri))))]
-fn opaque(v: u32) -> u32 {
-    core::hint::black_box(v)
 }
 
 #[cfg(test)]

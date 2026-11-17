@@ -29,6 +29,33 @@
 use super::blockwise::Blockwise;
 use crate::low::ct;
 
+/// `v`, which the compiler cannot see through, as `generic::md5` hides its
+/// values, without a trip through memory. `finish`'s mask and every mul16
+/// half pass through it, so the compiler cannot turn a select on a secret
+/// into a branch, nor fuse the halves back into one long multiply.
+#[inline(always)]
+#[cfg(all(rind_reg_asm, not(miri)))]
+// The operand appears only in a comment, so no register width is printed.
+#[allow(asm_sub_register)]
+pub(super) fn hide(mut v: u32) -> u32 {
+    // SAFETY: the assembly is empty, so it reads, writes, and clobbers
+    // nothing but returns `v` in the register it took it in.
+    unsafe {
+        core::arch::asm!("/* {0} */", inout(reg) v, options(pure, nomem, nostack, preserves_flags));
+    }
+    v
+}
+
+// build.rs sets `rind_reg_asm` only where a `reg` operand is stable.
+// Elsewhere, such as WebAssembly, Xtensa, or MIPS, and under Miri,
+// `black_box` hides the value through memory: once per tag in `finish`, and
+// on no core that builds with `rind_mul16`.
+#[inline(always)]
+#[cfg(not(all(rind_reg_asm, not(miri))))]
+pub(super) fn hide(v: u32) -> u32 {
+    core::hint::black_box(v)
+}
+
 /// The low 26 bits.
 const MASK: u32 = 0x3ff_ffff;
 
@@ -128,7 +155,8 @@ impl Poly1305 {
 
         // g = h + 5 - 2^130, which is h - p, and is not negative exactly
         // when h >= p. Its sign is the top bit of g4, so the mask picks g
-        // then and h otherwise, without branching on h.
+        // then and h otherwise. `hide` keeps the compiler from turning that
+        // select into a branch on h, which RISC-V, with no cmov, would emit.
         let mut g0 = h0.wrapping_add(5);
         c = g0 >> 26;
         g0 &= MASK;
@@ -143,7 +171,7 @@ impl Poly1305 {
         g3 &= MASK;
         let g4 = h4.wrapping_add(c).wrapping_sub(1 << 26);
 
-        let use_g = (g4 >> 31).wrapping_sub(1);
+        let use_g = hide((g4 >> 31).wrapping_sub(1));
         let use_h = !use_g;
         h0 = (h0 & use_h) | (g0 & use_g);
         h1 = (h1 & use_h) | (g1 & use_g);
@@ -289,8 +317,8 @@ use super::mul16::mul16 as mul;
 fn times5(x: u32) -> u32 {
     #[cfg(any(rind_mul16_top, rind_mul16_soft))]
     {
-        let y = super::mul16::hide(x);
-        y.wrapping_add(super::mul16::hide(x << 2))
+        let y = hide(x);
+        y.wrapping_add(hide(x << 2))
     }
     #[cfg(not(any(rind_mul16_top, rind_mul16_soft)))]
     {

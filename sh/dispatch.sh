@@ -526,6 +526,10 @@ step() {
                     i686-unknown-linux-gnu arm-unknown-linux-gnueabihf loongarch64-unknown-linux-gnu
                     powerpc-unknown-linux-gnu powerpc64-unknown-linux-gnu powerpc64le-unknown-linux-gnu
                     riscv64gc-unknown-linux-gnu s390x-unknown-linux-gnu
+                    armv7-unknown-linux-gnueabihf+mul16 thumbv6m-none-eabi+mul16
+                    thumbv7m-none-eabi+mul16 thumbv8m.base-none-eabi+mul16
+                    armv5te-unknown-linux-gnueabi+mul16 riscv32i-unknown-none-elf+mul16
+                    riscv32imac-unknown-none-elf+branch
                 )
             fi
             run nix develop .#ct-vartime --command admin/ct-vartime "${targets[@]}"
