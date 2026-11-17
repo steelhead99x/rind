@@ -1270,7 +1270,10 @@ or uninitialized id is not a tag. A machine without one passes `--host`. A slug 
 this machine already has is refreshed, along with any second alias that carries its tag.
 A file without a tag may be any machine, so an import never replaces, reuses, or deletes
 one: a tagged result is stored beside it, and a result without a tag whose name is
-already on disk is not imported until it is rerun with a different `--host`. Of one
+already on disk is not imported until it is rerun with a different `--host`.
+`render --from DIR --adopt NAME` is the one exception: it writes the tag of DIR's tagged
+`NAME.json` into the untagged `NAME.json` on disk, so that machine's file is refreshed in
+place from then on, and it refuses a missing or tagged file or an untagged result. Of one
 machine's results under one slug in a collection, only the newest is imported.
 `summary` and `render --from` read every readable measured `<host>.json` and name any
 file they skip.

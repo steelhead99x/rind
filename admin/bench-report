@@ -2274,7 +2274,10 @@ def report(hosts, tiers, verified, gaps):
         "this machine already has is refreshed, along with any second alias that carries its tag.",
         "A file without a tag may be any machine, so an import never replaces, reuses, or deletes",
         "one: a tagged result is stored beside it, and a result without a tag whose name is",
-        "already on disk is not imported until it is rerun with a different `--host`. Of one",
+        "already on disk is not imported until it is rerun with a different `--host`.",
+        "`render --from DIR --adopt NAME` is the one exception: it writes the tag of DIR's tagged",
+        "`NAME.json` into the untagged `NAME.json` on disk, so that machine's file is refreshed in",
+        "place from then on, and it refuses a missing or tagged file or an untagged result. Of one",
         "machine's results under one slug in a collection, only the newest is imported.",
         "`summary` and `render --from` read every readable measured `<host>.json` and name any",
         "file they skip.",
@@ -2597,6 +2600,27 @@ def _drop_extra_aliases(slug, host, existing, keep):
     return removed
 
 
+def adopt_hosts(names, existing, copied):
+    """Writes each tag of `copied[name]` into the untagged data file `name`.
+
+    Every name is checked before any file is written, so a bad one changes nothing.
+    """
+    for name in names:
+        if name not in existing:
+            fail(f"--adopt {name}: the data directory has no readable {name}.json to adopt")
+        if machine_tag_of(existing[name]):
+            fail(f"--adopt {name}: {name}.json already carries a machine tag, so it is not untagged")
+        if not machine_tag_of(copied.get(name)):
+            fail(f"--adopt {name}: the collection has no measured, tagged {name}.json to adopt it")
+    for name in names:
+        tag = machine_tag_of(copied[name])
+        existing[name] = dict(existing[name], machine=tag)
+        with open(os.path.join(DATA_DIR, f"{name}.json"), "w") as f:
+            json.dump(existing[name], f, indent=1)
+            f.write("\n")
+        print(f"bench-report: {name}: adopted by machine {tag}", file=sys.stderr)
+
+
 def started_at(host):
     """When `host` started, as an aware time; the oldest possible when it does not say."""
     try:
@@ -2625,7 +2649,7 @@ def superseded(hosts):
     return out
 
 
-def import_hosts(directory):
+def import_hosts(directory, adopt=()):
     """Copies a collection's measured hosts into the report's data.
 
     When this machine already has the slug file, that file is refreshed and
@@ -2642,6 +2666,11 @@ def import_hosts(directory):
     and aliases in the collection, only the newest is imported, and moving
     an alias keeps `alias_of`. A file in the data directory that is not
     readable holds its name and is left as it is.
+
+    Each name in `adopt` is an untagged file in the data directory that the
+    tagged result of that name in the collection takes over: its tag is
+    written into the file first, so the same-tag rule then refreshes it in
+    place. Any other `adopt` name fails before anything is written.
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     existing = {}
@@ -2663,6 +2692,7 @@ def import_hosts(directory):
             print(f"bench-report: {name}: not imported, {why}", file=sys.stderr)
         else:
             copied[name] = host
+    adopt_hosts(adopt, existing, copied)
     for name, newer in sorted(superseded(copied).items()):
         print(f"bench-report: {name}: same machine as {newer}, not a second host", file=sys.stderr)
         del copied[name]
@@ -2691,8 +2721,10 @@ def import_hosts(directory):
 
 
 def render(args):
+    if args.adopt and not args.collection:
+        fail("--adopt needs --from DIR")
     if args.collection:
-        import_hosts(args.collection)
+        import_hosts(args.collection, args.adopt or ())
     hosts = load_measured(DATA_DIR)
     tiers_path = os.path.join(DATA_DIR, "tiers.json")
     tiers = None
@@ -2859,6 +2891,12 @@ def main():
 
     p = sub.add_parser("render", help="write BENCHMARKS.md and its SVGs from benchmarks/data")
     p.add_argument("--from", dest="collection", metavar="DIR", help="first import every measured host JSON from DIR")
+    p.add_argument(
+        "--adopt",
+        action="append",
+        metavar="NAME",
+        help="let DIR's tagged NAME.json take over the untagged NAME.json in benchmarks/data (repeatable)",
+    )
     p.add_argument("--check", action="store_true", help="fail if BENCHMARKS.md or its SVGs are out of date")
     p.set_defaults(func=render)
 

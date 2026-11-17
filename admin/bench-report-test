@@ -2209,6 +2209,75 @@ class AnyHost(unittest.TestCase):
         finally:
             br.DATA_DIR = saved
 
+    def adopt_case(self, resident, newcomer, adopt):
+        """The data directory's files and stderr after importing `newcomer` over `resident` as nixos."""
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                if resident is not None:
+                    with open(os.path.join(data, "nixos.json"), "w") as f:
+                        json.dump(resident, f)
+                with open(os.path.join(src, "nixos.json"), "w") as f:
+                    json.dump(newcomer, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src, adopt)
+                files = {}
+                for name in os.listdir(data):
+                    with open(os.path.join(data, name)) as f:
+                        files[name] = json.load(f)
+                return files, err.getvalue()
+        finally:
+            br.DATA_DIR = saved
+
+    def test_adopt_lets_a_tagged_result_take_over_an_untagged_file(self):
+        resident = laptop("nixos")
+        newcomer = laptop("nixos")
+        newcomer["machine"] = "cccccccc"
+        newcomer["started"] = "2026-11-05T00:00:00+00:00"
+        files, log = self.adopt_case(resident, newcomer, ["nixos"])
+        self.assertIn("nixos: adopted by machine cccccccc", log)
+        self.assertEqual(files, {"nixos.json": newcomer})
+        # Without --adopt the untagged file stays and the result gets a twin.
+        files, _ = self.adopt_case(resident, newcomer, ())
+        self.assertEqual(set(files), {"nixos.json", "nixos-cccccccc.json"})
+        self.assertEqual(files["nixos.json"], resident)
+
+    def test_adopt_refuses_anything_but_a_tagged_result_over_an_untagged_file(self):
+        tagged = laptop("nixos")
+        tagged["machine"] = "cccccccc"
+        other = laptop("nixos")
+        other["machine"] = "aaaaaaaa"
+        for resident, newcomer, adopt, message in (
+            (other, tagged, ["nixos"], "--adopt nixos: nixos.json already carries a machine tag"),
+            (laptop("nixos"), laptop("nixos"), ["nixos"], "--adopt nixos: the collection has no measured, tagged"),
+            (None, tagged, ["nixos"], "--adopt nixos: the data directory has no readable nixos.json"),
+            (laptop("nixos"), tagged, ["nixos", "kixtop"], "--adopt kixtop: the data directory has no readable"),
+        ):
+            with self.subTest(message=message):
+                saved = br.DATA_DIR
+                try:
+                    with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                        br.DATA_DIR = data
+                        if resident is not None:
+                            with open(os.path.join(data, "nixos.json"), "w") as f:
+                                json.dump(resident, f)
+                        with open(os.path.join(src, "nixos.json"), "w") as f:
+                            json.dump(newcomer, f)
+                        with self.assertRaises(SystemExit) as raised:
+                            br.import_hosts(src, adopt)
+                        self.assertIn(message, str(raised.exception))
+                        # A refused adopt writes nothing, even for a name that was fine.
+                        self.assertEqual(os.listdir(data), [] if resident is None else ["nixos.json"])
+                        if resident is not None:
+                            with open(os.path.join(data, "nixos.json")) as f:
+                                self.assertEqual(json.load(f), resident)
+                finally:
+                    br.DATA_DIR = saved
+        with self.assertRaises(SystemExit) as raised:
+            br.render(type("Args", (), {"collection": None, "adopt": ["nixos"], "check": False})())
+        self.assertIn("--adopt needs --from DIR", str(raised.exception))
+
     def test_import_rejects_a_reserved_name_already_on_disk(self):
         saved = br.DATA_DIR
         try:
