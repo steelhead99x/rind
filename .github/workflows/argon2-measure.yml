@@ -1,0 +1,107 @@
+name: argon2-measure
+
+# Measures the aarch64 Argon2 fill dispatch picks against the portable
+# permutation it replaces, and runs the gate. quest/m4/protocols/argon2-simd.md.
+on:
+  workflow_dispatch:
+  push:
+    branches: [wip/argon2-neon-pick-measure]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The tree before NEON became the default: the portable permutation.
+  BASE_REV: 52e0ed733b69c14253d1ffb5a8d310cd4c453a8d
+
+jobs:
+  measure:
+    name: measure (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+
+      - name: Record CPU
+        run: |
+          mkdir -p out
+          lscpu | tee out/lscpu.txt
+          grep -m1 -E '^(Features|flags)' /proc/cpuinfo | tee out/features.txt
+          rustc -vV | tee out/rustc.txt
+          git rev-parse HEAD | tee out/commit.txt
+          echo "$BASE_REV" > out/base-commit.txt
+
+      - name: Tests (default)
+        run: cargo test -p rind --lib argon2 2>&1 | tee out/test-default.txt
+
+      - name: Tests (SHA3 denied)
+        run: |
+          RUSTFLAGS='--cfg rind_cpu_disable' RIND_CPU_DISABLE_sha3=1 CARGO_TARGET_DIR=target-test-nosha3 \
+            cargo test -p rind --lib argon2 2>&1 | tee out/test-nosha3.txt
+          grep -E 'matches_portable|neon_matches_scalar|test result' out/test-*.txt
+
+      - name: Bench (3 interleaved rounds)
+        env:
+          PIN_CPU: "2"
+        run: |
+          full=$(git rev-parse "$BASE_REV")
+          git worktree add ../base-tree "$full"
+          BASE_TREE=$(cd ../base-tree && pwd) .github/argon2-measure/run.sh out/bench base default
+
+      - name: Summary
+        if: always()
+        run: |
+          python3 .github/argon2-measure/summary.py out/bench base | tee out/summary.md
+          cat out/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: argon2-neon-pick-${{ matrix.os }}
+          path: out
+
+  gate:
+    name: just check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04-arm, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          # The change alone, without this measuring workflow.
+          ref: wip/argon2-neon-pick
+
+      - name: Fetch upstream main
+        run: |
+          git remote add upstream https://github.com/kixel-ai/rind.git
+          git fetch --no-tags upstream main
+
+      - uses: ./.github/actions/just
+      - uses: ./.github/actions/nix
+
+      - name: just check upstream/main
+        run: nix develop --command just check upstream/main 2>&1 | tee check.log; exit "${PIPESTATUS[0]}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: gate-${{ matrix.os }}
+          path: check.log
