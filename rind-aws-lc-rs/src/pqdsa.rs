@@ -744,12 +744,12 @@ fn named_curve_private_key(pkcs8: &[u8]) -> bool {
     let Some((0x04, scalar)) = der::first_element(rest) else {
         return false;
     };
-    if !scalar_in_range(scalar, curve.order) {
-        return false;
-    }
+    // The scalar is secret: its checks yield masks, and only the verdict
+    // they combine into is branched on.
+    let in_range = scalar_in_range(scalar, curve.order);
     let tail = &rest[scalar_enc.len()..];
     if tail.is_empty() {
-        return true;
+        return in_range == 1;
     }
     // Optional [0] parameters, then [1] public key.
     let mut tail = tail;
@@ -760,7 +760,7 @@ fn named_curve_private_key(pkcs8: &[u8]) -> bool {
         tail = &tail[enc.len()..];
     }
     if tail.is_empty() {
-        return true;
+        return in_range == 1;
     }
     let Some((0xa1, wrapped)) = split_tag(tail) else {
         return false;
@@ -774,7 +774,7 @@ fn named_curve_private_key(pkcs8: &[u8]) -> bool {
     if der::leading_element(wrapped).is_none_or(|enc| enc.len() != wrapped.len()) {
         return false;
     }
-    public_point_matches(bits, scalar, &curve)
+    in_range & public_point_matches(bits, scalar, &curve) == 1
 }
 
 fn first_body(der: &[u8]) -> Result<(u8, &[u8]), ()> {
@@ -898,38 +898,32 @@ impl NamedCurve {
     }
 }
 
-/// Secret scalar in `(0, order)`, compared without returning early.
-fn scalar_in_range(scalar: &[u8], order: &[u8]) -> bool {
+/// 1 when the secret scalar is in `(0, order)`, else 0, computed without
+/// branching on its bytes. Only its length, which is public, is branched on.
+fn scalar_in_range(scalar: &[u8], order: &[u8]) -> u8 {
     if scalar.is_empty() || scalar.len() > order.len() + 8 {
-        return false;
+        return 0;
     }
     let mut value = alloc::vec![0u8; order.len()];
-    if scalar.len() > order.len() {
-        let extra = scalar.len() - order.len();
-        let mut high = 0u8;
-        for byte in &scalar[..extra] {
-            high |= byte;
-        }
-        if high != 0 {
-            return false;
-        }
-        value.copy_from_slice(&scalar[extra..]);
-    } else {
-        value[order.len() - scalar.len()..].copy_from_slice(scalar);
-    }
-    // The leading-zero check above branches on public length and on bytes
-    // that would make the integer wider than the order. Those bytes are
-    // public framing when the encoding is longer than the order. The value
-    // that fits is compared in full.
-    ct_nonzero(&value) && ct_less(&value, order)
+    let extra = scalar.len().saturating_sub(order.len());
+    // Bytes wider than the order must be zero.
+    let high_zero = nonzero_mask(&scalar[..extra]) ^ 1;
+    value[order.len() - (scalar.len() - extra)..].copy_from_slice(&scalar[extra..]);
+    high_zero & nonzero_mask(&value) & ct_less(&value, order)
 }
 
-fn ct_nonzero(bytes: &[u8]) -> bool {
-    let mut acc = 0u8;
+/// 1 when any byte is nonzero, else 0, without branching on them.
+fn nonzero_mask(bytes: &[u8]) -> u8 {
+    let mut acc = 0u32;
     for byte in bytes {
-        acc |= byte;
+        acc |= u32::from(*byte);
     }
-    acc != 0
+    ((acc | acc.wrapping_neg()) >> 31) as u8
+}
+
+/// Whether a public value has a nonzero byte.
+fn ct_nonzero(bytes: &[u8]) -> bool {
+    nonzero_mask(bytes) == 1
 }
 
 fn int_less(left: &[u8], right: &[u8]) -> bool {
@@ -938,10 +932,12 @@ fn int_less(left: &[u8], right: &[u8]) -> bool {
     let mut b = vec![0u8; n];
     a[n - left.len()..].copy_from_slice(left);
     b[n - right.len()..].copy_from_slice(right);
-    ct_less(&a, &b)
+    ct_less(&a, &b) == 1
 }
 
-fn ct_less(left: &[u8], right: &[u8]) -> bool {
+/// 1 when big-endian `left` is below `right`, of the same length, else 0,
+/// without branching on either.
+fn ct_less(left: &[u8], right: &[u8]) -> u8 {
     let mut decided = 0u8;
     let mut less = 0u8;
     for (&x, &y) in left.iter().zip(right) {
@@ -950,22 +946,22 @@ fn ct_less(left: &[u8], right: &[u8]) -> bool {
         less |= lt & (decided ^ 1);
         decided |= lt | gt;
     }
-    less == 1
+    less
 }
 
-/// Whether the public point is `scalar * G`. The scalar is secret: the
-/// ladder and the field arithmetic do not branch on it. The point's
-/// coordinates are public, and only the final equality is revealed.
-fn public_point_matches(bit_string: &[u8], scalar: &[u8], curve: &NamedCurve) -> bool {
+/// 1 when the public point is `scalar * G`, else 0. The scalar is secret:
+/// the ladder, the field arithmetic, and the comparisons do not branch on
+/// it. The point's coordinates are public.
+fn public_point_matches(bit_string: &[u8], scalar: &[u8], curve: &NamedCurve) -> u8 {
     let Some(0) = bit_string.first().copied() else {
-        return false;
+        return 0;
     };
     let Some(point) = bit_string.get(1..) else {
-        return false;
+        return 0;
     };
     let prime = Fe::from_be(curve.prime);
     let Some((x, y)) = decode_point(point, curve, &prime) else {
-        return false;
+        return 0;
     };
     let got = mul_base(scalar, curve, &prime);
     let (ax, ay) = affine(&got, &prime);
@@ -980,7 +976,7 @@ fn public_point_matches(bit_string: &[u8], scalar: &[u8], curve: &NamedCurve) ->
         Fe::from_be(curve.b),
         &prime,
     );
-    yy == right && ax == x && ay == y
+    (yy.eq_mask(right) & ax.eq_mask(x) & ay.eq_mask(y)) as u8
 }
 
 /// Uncompressed `04 || x || y`, or compressed `02`/`03 || x`. Coordinates
@@ -1163,12 +1159,22 @@ impl Fe {
         Self(limbs)
     }
 
+    /// 1 when every limb is zero, else 0, without branching on them.
     fn is_zero(self) -> u64 {
         let mut acc = 0u64;
         for limb in self.0 {
             acc |= limb;
         }
-        u64::from(acc == 0)
+        ((acc | acc.wrapping_neg()) >> 63) ^ 1
+    }
+
+    /// 1 when `self` equals `other`, else 0, without branching on either.
+    fn eq_mask(self, other: Self) -> u64 {
+        let mut diff = [0u64; 8];
+        for (d, (a, b)) in diff.iter_mut().zip(self.0.iter().zip(other.0)) {
+            *d = a ^ b;
+        }
+        Self(diff).is_zero()
     }
 }
 
@@ -1634,7 +1640,7 @@ fn dsa_private_key(pkcs8: &[u8]) -> bool {
     {
         return false;
     }
-    scalar_in_range(x, q)
+    scalar_in_range(x, q) == 1
 }
 
 fn take_int(der: &[u8]) -> Option<(Vec<u8>, &[u8])> {
@@ -1707,7 +1713,7 @@ mod named_curve_math {
             scalar[last] = 1;
             let mut bits = vec![0x00];
             bits.extend(point);
-            assert!(public_point_matches(&bits, &scalar, &curve), "{oid:?}");
+            assert_eq!(public_point_matches(&bits, &scalar, &curve), 1, "{oid:?}");
         }
     }
 
@@ -1719,10 +1725,10 @@ mod named_curve_math {
         let mut bits = vec![0x00, 0x04];
         bits.extend_from_slice(curve.gx);
         bits.extend_from_slice(curve.gy);
-        assert!(public_point_matches(&bits, &scalar, &curve));
+        assert_eq!(public_point_matches(&bits, &scalar, &curve), 1);
         let last = bits.len() - 1;
         bits[last] ^= 1;
-        assert!(!public_point_matches(&bits, &scalar, &curve));
+        assert_eq!(public_point_matches(&bits, &scalar, &curve), 0);
 
         let prime = Fe::from_be(curve.prime);
         let g = Pt {
