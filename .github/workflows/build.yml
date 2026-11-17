@@ -482,11 +482,13 @@ jobs:
             echo "::endgroup::"
             # 142 is SIGALRM: the hang. A real test failure is not retried.
             [ "$status" -eq 142 ] || exit "$status"
+            [ "$attempt" -lt 2 ] || break
             echo "::warning::dart-ios attempt $attempt hung; retrying on an erased simulator"
             xcrun simctl shutdown "$udid" || true
             xcrun simctl erase "$udid"
             flutter clean
           done
+          echo "::error::dart-ios hung on both attempts"
           exit 142
 
   # The portable backend, which every architecture without rind assembly
