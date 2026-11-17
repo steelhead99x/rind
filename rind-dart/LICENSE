@@ -126,16 +126,15 @@ aws-lc <https://github.com/aws/aws-lc>, from OpenSSL and BoringSSL
     bn_sqrx8x_internal of x86_64-mont5, and the rsaz_1024_*
     routines and tables of rsaz-avx2 (RSA); the
     aes_hw_ctr32_encrypt_blocks and aes_hw_cbc_encrypt routines of
-    aesni-x86_64 (AES-CTR and AES-CBC), the
-    vpaes_* routines and table of vpaes-x86_64 (AES), and the
-    ecp_nistz256_* routines and tables of p256-x86_64-asm (P-256); for
+    aesni-x86_64 (AES-CTR and AES-CBC), and the
+    vpaes_* routines and table of vpaes-x86_64 (AES); for
     aarch64, the bn_mul_mont routine of armv8-mont (RSA), the vpaes_*
     routines and table of vpaes-armv8 (AES), the gcm_*_neon routines and
     table of ghash-neon-armv8 (GHASH), and the *_block_data_order_nohw
     routines and table of sha1-armv8 (SHA1) and sha256-armv8 (SHA256). All
     are pregenerated from Perl scripts written for OpenSSL by Andy Polyakov,
-    or for rsaz-avx2 and p256-x86_64-asm by Shay Gueron and Vlad Krasnov
-    of Intel, which Andy Polyakov extended for p256-x86_64-asm;
+    or for rsaz-avx2 by Shay Gueron and Vlad Krasnov
+    of Intel;
     vpaes-armv8 and vpaes-x86_64 adapt the public domain vector permutation
     AES by Mike Hamburg. ghash_ssse3_x86_64.rs ports aws-lc's
     gcm_init_ssse3, from crypto/fipsmodule/modes/gcm.c, to Rust, and

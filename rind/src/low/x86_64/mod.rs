@@ -91,7 +91,6 @@ pub(crate) mod curve25519_x25519;
 pub(crate) mod curve25519_x25519_alt;
 pub(crate) mod curve25519_x25519base;
 pub(crate) mod curve25519_x25519base_alt;
-pub(crate) mod ecp_nistz256;
 pub(crate) mod edwards25519_decode;
 pub(crate) mod edwards25519_decode_alt;
 pub(crate) mod edwards25519_epadd;

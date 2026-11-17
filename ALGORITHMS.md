@@ -83,8 +83,9 @@ Ed25519 verification's multiplication runs curve25519-dalek ⚡, as above.
 - AES-GCM key setup: a key reaches its cipher through an indirect call, so
   that a binary links only the ciphers it names; the call adds about 3 ns per
   key or 32 B seal.
-- P-256 without ADX: verification runs s2n-bignum's verified routines rather
-  than aws-lc's `ecp_nistz256`.
+- P-256 without ADX: generator multiplication and verification run
+  s2n-bignum's verified `_alt` routines rather than aws-lc's `ecp_nistz256`
+  mulq ones, which measured faster.
 - P-256 on AMD CPUs with ADX but without AVX-512 IFMA, as Zen 3: a public
   key's derivation, and with it signing's nonce point, runs rind's own base
   point multiplication rather than verified-garbage's, which measured 1.02
@@ -587,9 +588,11 @@ other, which mixes in SIMD multiplies.
 
 P256 base point multiplication on x86_64 runs aws-lc's algorithm: 7-bit Booth
 windows over 37 rows of 64 affine points (a 152KB constant table), each row
-scanned whole by rind's constant-time Rust select and added by aws-lc's mixed
-addition, `ecp_nistz256_point_add_affine`, with `mulq` or with BMI2 and ADX,
-in the order aws-lc's `ecp_nistz256_point_mul_base` runs them. On
+scanned whole by rind's constant-time Rust select, in the order aws-lc's
+`ecp_nistz256_point_mul_base` runs them. Each is added by s2n-bignum's
+verified `p256_montjmixadd`, which on a Sapphire Rapids host took 155 ns a
+call to aws-lc's `ecp_nistz256_point_add_affinex`'s 213 ns, and made the
+whole multiplication about 16% faster. On
 aarch64 it is s2n-bignum's `p256_scalarmulbase`, over 6-bit Booth windows and
 a table of each window's 32 multiples (an 88KB constant table). Variable
 point multiplication is s2n-bignum's `p256_scalarmul` on both, whose proof

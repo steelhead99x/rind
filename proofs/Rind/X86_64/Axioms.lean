@@ -43,10 +43,7 @@ ChaCha20-Poly1305's theorems also take aws-lc's one-pass routines as the
 hypothesis `RunsChaCha20Poly1305`, which no axiom states, and ChaCha20's
 `apply_keystream` takes rind's two-block kernel as the hypothesis `Kernel`. The generator
 tables' point selects rest on no axiom, only on the hand model in
-`Rind.X86_64.PointSelectModel`. P-256's generator multiplication also rests
-on `p256_point_add_affine_spec` in `Rind.X86_64.S2nBignum`, which restates
-rind's HOL Light proofs of aws-lc's mixed addition. A change here is a
-change to the trust base.
+`Rind.X86_64.PointSelectModel`. A change here is a change to the trust base.
 -/
 
 /-- info: 'rind.x86_64.x25519_generate' depends on axioms: [propext,
@@ -99,7 +96,8 @@ change to the trust base.
  bignum_neg_p256_spec,
  bignum_tomont_p256_alt_spec,
  bignum_tomont_p256_spec,
- p256_point_add_affine_spec] -/
+ p256_montjmixadd_alt_spec,
+ p256_montjmixadd_spec] -/
 #guard_msgs in
 #print axioms p256_generate
 
@@ -120,7 +118,8 @@ change to the trust base.
  bignum_neg_p256_spec,
  bignum_tomont_p256_alt_spec,
  bignum_tomont_p256_spec,
- p256_point_add_affine_spec] -/
+ p256_montjmixadd_alt_spec,
+ p256_montjmixadd_spec] -/
 #guard_msgs in
 #print axioms p256_from_scalar
 
@@ -597,7 +596,8 @@ change to the trust base.
  bignum_neg_p256_spec,
  bignum_tomont_p256_alt_spec,
  bignum_tomont_p256_spec,
- p256_point_add_affine_spec] -/
+ p256_montjmixadd_alt_spec,
+ p256_montjmixadd_spec] -/
 #guard_msgs in
 #print axioms p256_ecdsa_generate
 
@@ -618,7 +618,8 @@ change to the trust base.
  bignum_neg_p256_spec,
  bignum_tomont_p256_alt_spec,
  bignum_tomont_p256_spec,
- p256_point_add_affine_spec] -/
+ p256_montjmixadd_alt_spec,
+ p256_montjmixadd_spec] -/
 #guard_msgs in
 #print axioms p256_ecdsa_from_scalar_and_public_key
 
@@ -644,7 +645,8 @@ change to the trust base.
  bignum_tomont_p256_alt_spec,
  bignum_tomont_p256_spec,
  finish_padded_spec,
- p256_point_add_affine_spec,
+ p256_montjmixadd_alt_spec,
+ p256_montjmixadd_spec,
  sha256_compress_blocks_shaext_spec] -/
 #guard_msgs in
 #print axioms p256_ecdsa_sign
@@ -1037,7 +1039,8 @@ change to the trust base.
  Quot.sound,
  bignum_mux_spec,
  bignum_neg_p256_spec,
- p256_point_add_affine_spec] -/
+ p256_montjmixadd_alt_spec,
+ p256_montjmixadd_spec] -/
 #guard_msgs in
 #print axioms P256Base.jac_base_multiply_spec
 
@@ -1055,7 +1058,8 @@ change to the trust base.
  bignum_neg_p256_spec,
  bignum_tomont_p256_alt_spec,
  bignum_tomont_p256_spec,
- p256_point_add_affine_spec] -/
+ p256_montjmixadd_alt_spec,
+ p256_montjmixadd_spec] -/
 #guard_msgs in
 #print axioms P256Base.base_multiply_spec
 

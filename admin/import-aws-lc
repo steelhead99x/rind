@@ -41,12 +41,8 @@ there from the routine's entry state. An import's `cpp` defines
 drop branches rind never takes. Its `aliases` name the
 routine an entry label calls, where that label shares the routine's own,
 which another import may hold. Its `inserts` add an instruction before the
-first that names a symbol, its `replaces` swap one instruction for another,
-and its `drops` delete every line spelled as given: deliberate changes to
-aws-lc's code, each saying why. Its `dispatches` drop
-a routine's CPU check, from its load of `OPENSSL_ia32cap_P` through its jump
-to a twin, since rind picks the twin itself; a twin that is not global keeps
-its name unprefixed in Apple's flavor. A `vzeroupper` import
+first that names a symbol, and its `replaces` swap one instruction for
+another: deliberate changes to aws-lc's code, each saying why. A `vzeroupper` import
 gains that instruction before each return: mlkem-native's routines return
 with the upper halves of the ymm registers dirty, which costs the SSE code
 that runs next a transition on Intel's cores, so rind ends them as
@@ -226,48 +222,6 @@ IMPORTS_64 = [
             "sha256_block_data_order_ssse3",
             "sha256_block_data_order_nohw",
         ],
-    },
-    # The mixed addition of P-256's generator multiplication, as aws-lc's
-    # `ecp_nistz256_point_mul_base` runs it, with `mulq` or with BMI2 and ADX.
-    # Each carries its field helpers, and `poly` runs on through `ONE_mont`,
-    # so a routine's object is one section of code reading one table, which
-    # its HOL Light proof in `proofs/hol-light/x86_64/` takes whole. The BMI2
-    # squaring pads two `mulx` with address-size prefixes, which a
-    # register-only `mulx` ignores and s2n-bignum's x86 model does not
-    # decode, so they are dropped.
-    {
-        "arch": "x86_64",
-        "source": "p256-x86_64-asm.S",
-        "tag": "p256",
-        "perlasm": "crypto/fipsmodule/ec/asm/p256-x86_64-asm.pl",
-        "notice": [
-            "Copyright 2014-2016 The OpenSSL Project Authors. All Rights Reserved.",
-            "Copyright (c) 2014, Intel Corporation. All Rights Reserved.",
-            "Copyright (c) 2015 CloudFlare, Inc.",
-            "SPDX-License-Identifier: Apache-2.0",
-        ],
-        "tables": ["poly"],
-        "packed": ["poly"],
-        "routines": [
-            "ecp_nistz256_point_add_affine",
-            "ecp_nistz256_point_add_affinex",
-        ],
-        "carries": {
-            "ecp_nistz256_point_add_affine": [
-                "__ecp_nistz256_mul_montq",
-                "__ecp_nistz256_sqr_montq",
-                "__ecp_nistz256_sub_fromq",
-                "__ecp_nistz256_subq",
-            ],
-            "ecp_nistz256_point_add_affinex": [
-                "__ecp_nistz256_mul_montx",
-                "__ecp_nistz256_sqr_montx",
-                "__ecp_nistz256_sub_fromx",
-                "__ecp_nistz256_subx",
-            ],
-        },
-        "drops": {"ecp_nistz256_point_add_affinex": [".byte 0x67", ".byte 0x67,0x67"]},
-        "dispatches": ["ecp_nistz256_point_add_affine"],
     },
     # The rest of the x86_64 imports are for CPUs without AVX2.
     {
@@ -898,13 +852,6 @@ def import_64(aws_lc):
                 directives = [line.split()[:1] for line in text]
                 if label[:-1] in inner and [".cfi_endproc"] in directives and [".cfi_startproc"] not in directives:
                     text = [".cfi_startproc"] + text
-                # Its CPU check, through the jump to its twin.
-                if name in spec.get("dispatches", []):
-                    at = [i for i, old in enumerate(text) if "OPENSSL_ia32cap_P" in old]
-                    if len(at) != 1:
-                        sys.exit(f"{name}: expected one CPU check")
-                    end = next(i for i in range(at[0], len(text)) if text[i].split()[0].startswith("j"))
-                    del text[at[0] : end + 1]
                 # Before the first instruction that names this symbol, which
                 # has no prefix if it is not global.
                 for op, symbol, line in spec.get("inserts", {}).get(name, []):
@@ -912,11 +859,6 @@ def import_64(aws_lc):
                     if not at:
                         sys.exit(f"{name}: expected {op} {symbol}")
                     text.insert(at[0], "\t" + line)
-                for line in spec.get("drops", {}).get(name, []):
-                    kept = [old for old in text if old.split() != line.split()]
-                    if len(kept) == len(text):
-                        sys.exit(f"{name}: expected {line}")
-                    text = kept
                 # The one instruction with these operands, which name a symbol.
                 for op, args, line in spec.get("replaces", {}).get(name, []):
                     at = [i for i, old in enumerate(text) if old.split() == [op, prefix + args]]
