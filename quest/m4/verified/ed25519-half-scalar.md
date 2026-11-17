@@ -15,4 +15,3 @@
 ## Related
 
 - [Ed25519 verification on AVX2 without ADX is proven](/quest/m4/verified/ed25519-avx2-verify.md) - the AVX2 tier's four-point multiplication, on top of this one's split and identity test
-- [aarch64's Ed25519 verification uses half-size scalars](/quest/m2/speed/ed25519-half-scalar-aarch64.md) - decides whether aarch64's proof moves to this check too

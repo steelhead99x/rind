@@ -89,7 +89,10 @@ SHA-512.
   verified in 0.72 to 0.73× aws-lc-rs's time against 0.89 to 0.92×, 0.77 to
   0.83× against 0.86 to 0.88× with ADX denied, and 0.93× against 1.10× with
   AVX2 denied as well. aarch64 runs it over the `_alt` point routines, as
-  x86_64 does without ADX, in place of `edwards25519_scalarmuldouble_alt`.
+  x86_64 does without ADX: on GitHub's Neoverse N2 runner it verified in
+  28.07 µs, 0.52× aws-lc-rs's time, against 35.73 to 35.80 µs, 0.66×, for
+  `edwards25519_scalarmuldouble_alt`, with aws-lc-rs at 54.33 to 54.34 µs in
+  each run.
 - ChaCha20-Poly1305 without AES-NI and on SSE2, which lack SSE4.1: rind runs
   Graviola's scalar Poly1305 there, and aws-lc BoringSSL's SSE2
   `poly1305_vec.c`, which rind doesn't port for CPUs older than Westmere.
