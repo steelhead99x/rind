@@ -1,0 +1,79 @@
+name: Site deploy
+
+# Builds site/ from main and deploys it to rind.kixel.ai, the Worker
+# site/deploy/wrangler.jsonc describes. Every merge deploys, since the site
+# reads and links files across the repository. A release deploys again once it
+# finishes, because its version bump merges before the crates publish, so the
+# merge's own deploy can print versions crates.io does not hold yet.
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time, and none cancelled midway. Each builds main as it
+# stands when it starts, not the commit that triggered it, so whichever runs
+# last deploys the newest site, even a late or rerun job for an old commit.
+concurrency:
+  group: site-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-24.04
+    # A job that runs past this ends `cancelled`, which alert.yml does not
+    # report for this workflow, since a deploy waiting behind another is
+    # replaced by a newer one and ends the same way. Each step therefore has a
+    # shorter timeout, which fails the step and so the run, and together they
+    # stay under this one.
+    timeout-minutes: 10
+    # The environment holds the Cloudflare token, and its deployment branch
+    # rule admits main alone, so a job naming it from any other branch,
+    # including one a pull request adds, gets no secret. This is the only job
+    # that names it.
+    environment:
+      name: site
+      url: https://rind.kixel.ai
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 1
+        with:
+          ref: main
+          persist-credentials: false
+
+      # The Bun site/package.json pins, which the flake asserts its own matches.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        timeout-minutes: 1
+        with:
+          bun-version-file: site/package.json
+
+      # Site's pull request job (site.yml) and the merge queue already ran the
+      # tests and browser check; the build still checks every page and link.
+      - name: Build
+        timeout-minutes: 3
+        working-directory: site
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      # Wrangler has a lockfile of its own, so pull requests' site builds skip
+      # its runtime.
+      - name: Install Wrangler
+        timeout-minutes: 1
+        working-directory: site/deploy
+        run: bun install --frozen-lockfile
+
+      - name: Deploy
+        timeout-minutes: 2
+        working-directory: site/deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bunx wrangler deploy

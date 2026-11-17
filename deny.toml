@@ -18,6 +18,12 @@ ignore = [
     # tests compare against, reaches it through p256 and p384 0.13. No
     # published crate depends on it.
     "RUSTSEC-2026-0387",
+
+    # chrono and humantime are unmaintained, with no safe upgrade. They ship in
+    # rind-object-store through object_store's gcp-base backend; an unmaintained
+    # crate is no vulnerability, so the waiver stands until object_store drops them.
+    "RUSTSEC-2026-0542",
+    "RUSTSEC-2026-0543",
 ]
 
 [licenses]

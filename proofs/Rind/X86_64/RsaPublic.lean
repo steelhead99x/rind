@@ -6,7 +6,8 @@ open Aeneas Aeneas.Std Result rind.spec rind.spec.rsa
 
 `RsaPublicKey::public_op` raises a signature to the public exponent modulo
 the modulus by square-and-multiply in the Montgomery domain, over whichever
-Montgomery products `MontProducts` states.
+Montgomery products `MontProducts` states, on a CPU without the AVX-512 IFMA
+that runs pyca/verified-garbage's public operation instead (`NoIfma`).
 -/
 
 namespace rind.x86_64
@@ -336,6 +337,14 @@ theorem mont_neg_inverse_spec (n : RsaInt) (hk : 1 ≤ n.used.val) (hk' : n.used
   rw [hslen, hs2, wordsNat_cons, wordsNat_nil, hs1, ← hN] at h
   simpa [Nat.add_mod, Nat.mul_mod] using h
 
+/-- The CPU lacks the AVX-512 IFMA features with which `public_op` runs
+pyca/verified-garbage's public operation for some keys, which Lean proves in
+that project and not here, so `public_op` runs the square-and-multiply below
+for every key. It speaks only of moduli of at most 128 words, as a loaded
+key's are: `check` reads `n`'s words, which panics past the array. -/
+def NoIfma : Prop :=
+  ∀ n : RsaInt, n.used.val ≤ 128 → ∀ e : U64, low.x86_64.rsa_ifma.RsaIfma.check n e = ok none
+
 /-- What `RsaPublicKey::new` establishes about a key: the modulus `n` of
 `k` words is odd, `n0` is `-n⁻¹ mod 2^64`, the montifier is `R² mod n` for
 `R = 2^(64k)`, the exponent is odd and above one, and the modulus has 1024
@@ -355,7 +364,7 @@ theorem div_pow_log2 (e : Nat) (he : e ≠ 0) : e / 2 ^ e.log2 = 1 := by
 /-- RSAVP1: `public_op` raises `c` to the public exponent modulo the
 modulus, or refuses a `c` not below it. -/
 theorem public_op_spec (key : mid.rsa_pub.RsaPublicKey) (hinv : PubKeyInv key)
-    (hP : MontProducts key.n.used.val) (c : RsaInt) (hcu : c.used.val ≤ 128)
+    (hP : MontProducts key.n.used.val) (hifma : NoIfma) (c : RsaInt) (hcu : c.used.val ≤ 128)
     (hcz : wordsNat (c.words.val.drop c.used.val) = 0) :
     mid.rsa_pub.RsaPublicKey.public_op key c ⦃ r => match r with
       | .Ok m => wordsNat (lowWords c c.used) < wordsNat (lowWords key.n key.n.used) ∧
@@ -378,6 +387,7 @@ theorem public_op_spec (key : mid.rsa_pub.RsaPublicKey) (hinv : PubKeyInv key)
       coprime_two_pow_odd hodd _
     -- `expand` keeps `c`'s value, which its words above `used` hold none of.
     unfold low.posint.PosInt.expand
+    simp only [hifma key.n hk key.e, bind_ok]
     have hcw : wordsNat c.words.val = wordsNat (lowWords c c.used) := by
       rw [wordsNat_take_drop c.words.val c.used, hcz, Nat.mul_zero, Nat.add_zero]; rfl
     have hc1 : wordsNat (lowWords ({ c with used := key.n.used } : RsaInt) key.n.used) =
