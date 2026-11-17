@@ -446,23 +446,26 @@ step() {
                         fi
                     elif [[ "${packages[i]}" == --workspace ]]; then
                         args+=(--workspace)
-                        for name in "${!own[@]}"; do
+                        # Sorted, as bash's associative arrays iterate in hash order.
+                        while IFS= read -r name; do
+                            [[ -n "$name" ]] || continue
                             args+=(--exclude "$name")
                             [[ -z "${own[$name]}" ]] || versions[${own[$name]}]+=" $name"
-                        done
+                        done < <(printf '%s\n' "${!own[@]}" | LC_ALL=C sort)
                     fi
                 done
                 if ((${#args[@]} > 0)); then
                     run nix develop .#msrv --command cargo check "${args[@]}" --locked
                 fi
-                for version in "${!versions[@]}"; do
+                while IFS= read -r version; do
+                    [[ -n "$version" ]] || continue
                     read -ra names <<<"${versions[$version]}"
                     args=()
                     for name in "${names[@]}"; do
                         args+=(-p "$name")
                     done
                     run nix develop ".#msrv-${version//./_}" --command cargo check "${args[@]}" --locked
-                done
+                done < <(printf '%s\n' "${!versions[@]}" | LC_ALL=C sort -V)
             fi
             # rind and rind-rustls on each other backend this change reaches.
             # i686 has only the portable one.
