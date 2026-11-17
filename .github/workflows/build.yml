@@ -448,9 +448,11 @@ jobs:
           # the job's limit cancels them; a rerun passes.
           # So each attempt stops after 15 minutes, prints what the simulator
           # saw, and the second attempt starts from a freshly erased
-          # simulator. macOS has no timeout(1), so perl runs the command in
-          # its own process group and, at the limit, kills the whole group
-          # (flutter and the xcodebuild and simctl it started) and exits 142.
+          # simulator and a clean build, since a build killed partway can
+          # leave a half-written framework that fails code signing. macOS
+          # has no timeout(1), so perl runs the command in its own process
+          # group and, at the limit, kills the whole group (flutter and the
+          # xcodebuild and simctl it started) and exits 142.
           limit() {
             perl -e '
               $secs = shift;
@@ -483,6 +485,7 @@ jobs:
             echo "::warning::dart-ios attempt $attempt hung; retrying on an erased simulator"
             xcrun simctl shutdown "$udid" || true
             xcrun simctl erase "$udid"
+            flutter clean
           done
           exit 142
 
