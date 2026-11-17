@@ -100,6 +100,9 @@ def signatures():
         found.append(
             dict(
                 fn=fn.group(1),
+                # The routine's entry label, which is its file's name. X25519's
+                # `_byte` routines keep the Rust name the word routines had.
+                symbol=os.path.basename(narrow),
                 args=args,
                 ret=ret,
                 params=[expr for _, expr in params],
@@ -112,8 +115,7 @@ def signatures():
 
 
 def emit_one(spec):
-    symbol = spec["fn"]
-    decl = f"fn {symbol}({spec['args']})"
+    decl = f"fn {spec['fn']}({spec['args']})"
     extra = {}
     if spec["ret"]:
         decl += f" -> {spec['ret']}"
@@ -130,7 +132,7 @@ def emit_one(spec):
         for constant in spec["constants"]:
             d.add_const_symbol(constant)
         d.emit_rust_function(
-            symbol,
+            spec["symbol"],
             parameter_map=[("inout", expr) for expr in spec["params"]],
             rust_decl=decl,
             **extra,
