@@ -10,8 +10,7 @@ import pathlib
 import unittest
 
 import pyrind
-from pyrind import aead, agreement, cipher, hkdf, hmac, kem, key_wrap, rsa, signature
-from pyrind.signature import verify
+from pyrind import aead, agreement, cipher, ecdsa, ed25519, hkdf, hmac, kem, key_wrap, rsa
 
 VECTORS = pathlib.Path(__file__).resolve().parents[2] / "thirdparty" / "vectors" / "wycheproof" / "testvectors_v1"
 
@@ -94,17 +93,17 @@ class Wycheproof(unittest.TestCase):
     def test_key_wrap(self):
         sizes = {128: key_wrap.AES_128, 192: key_wrap.AES_192, 256: key_wrap.AES_256}
 
-        def check(padded):
+        def check(mode):
             def run(group, test):
                 kek = key_wrap.AesKek(sizes[group["keySize"]], bytes.fromhex(test["key"]))
                 msg, ct = bytes.fromhex(test["msg"]), bytes.fromhex(test["ct"])
-                self.assertEqual((kek.unwrap_padded if padded else kek.unwrap)(ct), msg)
-                self.assertEqual((kek.wrap_padded if padded else kek.wrap)(msg), ct)
+                self.assertEqual(kek.unwrap_key(mode, ct), msg)
+                self.assertEqual(kek.wrap_key(mode, msg), ct)
 
             return run
 
-        self.run_vectors("aes_wrap", check(padded=False))
-        self.run_vectors("aes_kwp", check(padded=True))
+        self.run_vectors("aes_wrap", check(key_wrap.Mode.KW))
+        self.run_vectors("aes_kwp", check(key_wrap.Mode.KWP))
 
     def test_hmac(self):
         def run(group, test):
@@ -135,43 +134,41 @@ class Wycheproof(unittest.TestCase):
 
         self.run_vectors("ecdh_secp256r1_ecpoint", run)
 
-    def verify_vectors(self, name, algorithm, key_of):
+    def verify_vectors(self, name, verifier_of):
+        """Runs `name`'s signature vectors through `verifier_of(group)`, a
+        function of the message and signature."""
+
         def run(group, test):
-            public = key_of(group)
-            public.verify(bytes.fromhex(test["msg"]), bytes.fromhex(test["sig"]))
+            verify = verifier_of(group)
+            verify(bytes.fromhex(test["msg"]), bytes.fromhex(test["sig"]))
 
         self.run_vectors(name, run)
 
     def test_ed25519(self):
         self.verify_vectors(
             "ed25519",
-            verify.ED25519,
-            lambda group: signature.PublicKey(verify.ED25519, bytes.fromhex(group["publicKey"]["pk"])),
+            lambda group: ed25519.PublicKey(bytes.fromhex(group["publicKey"]["pk"])).verify,
         )
 
     def test_ecdsa_p256(self):
-        algorithm = verify.ECDSA_P256_SHA256_ASN1
+        algorithm = ecdsa.verify.P256_SHA256_ASN1
         self.verify_vectors(
             "ecdsa_secp256r1_sha256",
-            algorithm,
-            lambda group: signature.PublicKey.from_spki(algorithm, bytes.fromhex(group["publicKeyDer"])),
+            lambda group: ecdsa.PublicKey.from_spki(algorithm, bytes.fromhex(group["publicKeyDer"])).verify,
         )
+
+    def rsa_vectors(self, name, algorithm):
+        def verifier_of(group):
+            key = rsa.PublicKey.from_spki(bytes.fromhex(group["publicKeyDer"]))
+            return lambda message, signature: key.verify(algorithm, message, signature)
+
+        self.verify_vectors(name, verifier_of)
 
     def test_rsa_pkcs1(self):
-        algorithm = verify.RSA_PKCS1_SHA256
-        self.verify_vectors(
-            "rsa_signature_2048_sha256",
-            algorithm,
-            lambda group: signature.PublicKey.from_spki(algorithm, bytes.fromhex(group["publicKeyDer"])),
-        )
+        self.rsa_vectors("rsa_signature_2048_sha256", rsa.verify.PKCS1_SHA256)
 
     def test_rsa_pss(self):
-        algorithm = verify.RSA_PSS_SHA256
-        self.verify_vectors(
-            "rsa_pss_2048_sha256_mgf1_32",
-            algorithm,
-            lambda group: signature.PublicKey.from_spki(algorithm, bytes.fromhex(group["publicKeyDer"])),
-        )
+        self.rsa_vectors("rsa_pss_2048_sha256_mgf1_32", rsa.verify.PSS_SHA256)
 
     def test_rsa_oaep(self):
         def run(group, test):
