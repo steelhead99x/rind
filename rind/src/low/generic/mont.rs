@@ -480,9 +480,7 @@ fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Wide) -> Wide {
 /// Four limbs a block: each product depends only on `u` and `y`, so a
 /// block's four multiplies issue before the carry chain that adds them. A
 /// remainder of one to three limbs takes the one-limb step. Each sum is at
-/// most `mul_add_limb`'s bound, so the carry fits a limb. Written out, the
-/// block measured up to 8% faster on x86_64 than a loop over the four
-/// products.
+/// most `mul_add_limb`'s bound, so the carry fits a limb.
 #[inline]
 fn mul_add(x: &mut [Limb], y: &[Limb], u: Limb) -> Wide {
     assert!(x.len() == y.len());
@@ -490,25 +488,12 @@ fn mul_add(x: &mut [Limb], y: &[Limb], u: Limb) -> Wide {
     let (xb, xr) = x.as_chunks_mut::<4>();
     let (yb, yr) = y.as_chunks::<4>();
     for (xb, yb) in xb.iter_mut().zip(yb) {
-        let p0 = Wide::from(u).wrapping_mul(Wide::from(yb[0]));
-        let p1 = Wide::from(u).wrapping_mul(Wide::from(yb[1]));
-        let p2 = Wide::from(u).wrapping_mul(Wide::from(yb[2]));
-        let p3 = Wide::from(u).wrapping_mul(Wide::from(yb[3]));
-        let s0 = p0.wrapping_add(Wide::from(xb[0])).wrapping_add(carry);
-        xb[0] = s0 as Limb;
-        let s1 = p1
-            .wrapping_add(Wide::from(xb[1]))
-            .wrapping_add(s0 >> Limb::BITS);
-        xb[1] = s1 as Limb;
-        let s2 = p2
-            .wrapping_add(Wide::from(xb[2]))
-            .wrapping_add(s1 >> Limb::BITS);
-        xb[2] = s2 as Limb;
-        let s3 = p3
-            .wrapping_add(Wide::from(xb[3]))
-            .wrapping_add(s2 >> Limb::BITS);
-        xb[3] = s3 as Limb;
-        carry = s3 >> Limb::BITS;
+        let p = yb.map(|y| Wide::from(u).wrapping_mul(Wide::from(y)));
+        for (x, p) in xb.iter_mut().zip(p) {
+            let s = p.wrapping_add(Wide::from(*x)).wrapping_add(carry);
+            *x = s as Limb;
+            carry = s >> Limb::BITS;
+        }
     }
     for (x, y) in xr.iter_mut().zip(yr) {
         let s = mul_add_limb(u, *y, *x, carry);
