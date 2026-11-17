@@ -172,13 +172,10 @@ fi
 # ARMv6-M (Cortex-M0+, the RP2040) and RV32IMC (the ESP32-C3) have no
 # compare-and-swap, so they build `reuse_cache_without_cas`. ARMv7E-M
 # (Cortex-M4 and M7, such as the nRF52840) has it, on the portable backend.
-# A-profile `armv7a-none-eabi` and R-profile `armv7r-none-eabihf` keep the
-# 32-bit ARM backend: bare metal never asks a kernel, so that backend's
-# NEON and crypto paths stay off and the base assembly is what runs.
-# `aarch64-unknown-none` keeps the aarch64 backend. Its tier is the
-# compile-time target features: NEON by default, and the crypto extension
-# only when the target enables it. Soft-float aarch64 has no NEON, so it
-# stays on the portable backend. `x86_64-unknown-none` keeps the x86_64
+# A-profile `armv7a-none-eabi`, R-profile `armv7r-none-eabihf`, and
+# `aarch64-unknown-none` are on the portable backend too: their assembly makes
+# unaligned accesses, which a strict-align target faults on. Soft-float
+# aarch64 has no NEON either. `x86_64-unknown-none` keeps the x86_64
 # backend only with SSE2 and soft-float cleared, which this script enables:
 # without SSE2 the target has no `xmm` registers and the build stays
 # portable. With them the backend reads CPUID. AVX, AVX2, SHA512, and
@@ -195,13 +192,7 @@ for target in \
     x86_64-unknown-none; do
     lint "$target"
 done
-for target in \
-    armv7a-none-eabi \
-    armv7r-none-eabihf \
-    aarch64-unknown-none \
-    x86_64-unknown-none; do
-    assemble "$target"
-done
+assemble x86_64-unknown-none
 # The rlib this cargo invocation wrote. A `find` of the shared debug
 # directory also sees an older rlib from the SSE2 assemble row above.
 rlib_from_messages() {

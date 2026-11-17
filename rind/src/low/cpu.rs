@@ -109,19 +109,15 @@ std::thread_local! {
 // the count, and one count shared by every core and interrupt handler would
 // race: a guard dropped in one could turn DIT off under another's operation.
 // So there the guard keeps no count and does nothing. That is sound because
-// none of these backends change CPU state on bare metal: x86_64's
-// `enter_cpu_state` is a no-op, aarch64 sets DIT only for a hosted Apple
-// target, and arm and portable never set it.
+// the only backends bare metal builds, portable and x86_64, set no CPU state
+// there: x86_64's `enter_cpu_state` is a no-op. The aarch64 and arm assembly
+// is not built there, since it makes unaligned accesses that a strict-align
+// target faults on (see `build.rs`).
 #[cfg(all(
     target_os = "none",
-    not(any(
-        rind_backend = "arm",
-        rind_backend = "portable",
-        rind_backend = "x86_64",
-        rind_backend = "aarch64",
-    ))
+    not(any(rind_backend = "portable", rind_backend = "x86_64"))
 ))]
-compile_error!("`Dit` keeps no count on bare metal, so its backend must set no CPU state");
+compile_error!("bare metal builds only the portable and x86_64 backends");
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
