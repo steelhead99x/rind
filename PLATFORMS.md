@@ -180,7 +180,8 @@ Intel guarantees the timing of the instructions it lists as data-independent
   the `VSHA512` instructions (`VSHA512RNDS2`, `VSHA512MSG1`, and
   `VSHA512MSG2`). SHA-384 and SHA-512 do not run them, including on Arrow Lake
   and Lunar Lake: they take OpenSSL's AVX2 routine on every CPU with AVX2,
-  and `admin/ct-vartime` refuses `vsha512*`.
+  and `admin/ct-vartime` refuses `vsha512*`. Should Intel add them to its
+  list, the SHA512-extension routine is worth importing again.
 - On Intel processors that do not report `MCDT_NO`, such as its Core processors
   from Skylake to Alder Lake, only while MXCSR holds `0x1FBF`: otherwise some
   vector integer multiplies, such as `vpmuludq` and `vpmullw`, may take a cycle

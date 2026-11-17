@@ -2200,6 +2200,17 @@
   },
   {
    "operation": "ed25519-sign/{lib}",
+   "library": "rind",
+   "id": "ed25519-sign/rind",
+   "ns": 4111.479154925271,
+   "ns_low": 4109.472173093817,
+   "ns_high": 4113.655139596615,
+   "throughput": {
+    "Elements": 1
+   }
+  },
+  {
+   "operation": "ed25519-sign/{lib}",
    "library": "ring",
    "id": "ed25519-sign/ring",
    "ns": 13114.176522831387,
@@ -2728,6 +2739,17 @@
   },
   {
    "operation": "sha512/{lib}/64B",
+   "library": "rind",
+   "id": "sha512/rind/64B",
+   "ns": 60.090929140141704,
+   "ns_low": 60.00040388730218,
+   "ns_high": 60.1710997889434,
+   "throughput": {
+    "Bytes": 64
+   }
+  },
+  {
+   "operation": "sha512/{lib}/64B",
    "library": "ring",
    "id": "sha512/ring/64B",
    "ns": 139.97080335000595,
@@ -2794,6 +2816,17 @@
   },
   {
    "operation": "sha512/{lib}/1350B",
+   "library": "rind",
+   "id": "sha512/rind/1350B",
+   "ns": 249.33934868874138,
+   "ns_low": 249.1685386658306,
+   "ns_high": 249.51058111734417,
+   "throughput": {
+    "Bytes": 1350
+   }
+  },
+  {
+   "operation": "sha512/{lib}/1350B",
    "library": "ring",
    "id": "sha512/ring/1350B",
    "ns": 1258.5604929011652,
@@ -2854,6 +2887,17 @@
    "ns": 12288.512652518373,
    "ns_low": 12284.361134389035,
    "ns_high": 12293.268725292246,
+   "throughput": {
+    "Bytes": 16384
+   }
+  },
+  {
+   "operation": "sha512/{lib}/16KB",
+   "library": "rind",
+   "id": "sha512/rind/16KB",
+   "ns": 2625.8782779607436,
+   "ns_low": 2624.8208767235433,
+   "ns_high": 2627.0455703809835,
    "throughput": {
     "Bytes": 16384
    }
