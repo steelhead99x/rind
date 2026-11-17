@@ -708,119 +708,272 @@ def prove_multiplies(insns):
         for dest in ss:
             preds[dest].append(i)
 
-    def transfer(regs, slots, text):
-        regs, slots = dict(regs), dict(slots)
+    def transfer(state, text):
+        """One instruction's effect on what is proven.
+
+        `regs` and `slots` are must facts: the registers and `sp` slots that
+        hold bit 31 set on every path. `frame` and `escaped` are may facts:
+        the registers that may point into this function's frame, at a known
+        offset from `sp` or `None`, and whether a frame address may have been
+        stored or passed where a load or a callee could get it back. A store
+        through a register that may alias the frame, or through any pointer
+        once the frame escaped, may overwrite a slot, so it clears what it
+        cannot place.
+        """
+        regs, slots, frame, escaped = dict(state[0]), dict(state[1]), dict(state[2]), state[3]
         base, cond, opnds, raw = arm_parts(text)
         conditional = cond not in ("", "al")
 
-        def kill(reg):
-            number = ARM_REG.get(reg)
-            if number is not None and number < 15:
-                regs.pop(number, None)
+        def num(reg):
+            n = ARM_REG.get(reg)
+            return n if n is not None and n < 15 and reg != "sp" else None
 
-        if base in {"b", "bx", "bl", "blx", "cmp", "cmn", "tst", "teq"}:
-            if base in {"bl", "blx"}:
-                for number in (0, 1, 2, 3, 12, 14):
-                    regs.pop(number, None)
-            return regs, slots
-        if base == "push" or (base in {"sub", "add"} and opnds[:1] == ["sp"]):
+        def kill(n):
+            regs.pop(n, None)
+            if escaped:
+                frame[n] = None
+            else:
+                frame.pop(n, None)
+
+        def sp_moved():
             slots.clear()
-            return regs, slots
-        if base == "pop":
-            slots.clear()
-            return regs, slots
-        if base == "str" and not conditional:
-            stored = re.fullmatch(
-                r"\s*(\w+)\s*,\s*\[\s*sp\s*(?:,\s*#(-?(?:0x[0-9a-fA-F]+|\d+)))?\s*\]\s*$",
-                raw,
-            )
-            if stored and ARM_REG.get(stored.group(1)) is not None and stored.group(1) != "sp":
-                imm = int(stored.group(2), 0) if stored.group(2) else 0
-                src = ARM_REG[stored.group(1)]
-                if regs.get(src) == "top":
-                    slots[imm] = "top"
-                else:
-                    slots.pop(imm, None)
-                return regs, slots
-            if "[sp" in raw:
+            for n in list(frame):
+                frame[n] = None
+
+        def store_at(offset, size, sources):
+            """A store of `size` bytes at `sp + offset`, or at an unknown
+            frame address when `offset` is None."""
+            if offset is None or conditional:
                 slots.clear()
-            return regs, slots
-        if base.startswith("stm"):
-            slots.clear()
-            return regs, slots
-        if base == "ldr" and not conditional:
-            loaded = re.fullmatch(
-                r"\s*(\w+)\s*,\s*\[\s*sp\s*(?:,\s*#(-?(?:0x[0-9a-fA-F]+|\d+)))?\s*\]\s*$",
-                raw,
-            )
-            if loaded and ARM_REG.get(loaded.group(1)) is not None:
-                imm = int(loaded.group(2), 0) if loaded.group(2) else 0
-                rd = ARM_REG[loaded.group(1)]
-                if slots.get(imm) == "top":
-                    regs[rd] = "top"
-                else:
-                    regs.pop(rd, None)
-                return regs, slots
-            if opnds and ARM_REG.get(opnds[0]) is not None:
-                kill(opnds[0])
-            if "[sp" in raw:
+                return
+            for key in list(slots):
+                if key < offset + size and offset < key + 4:
+                    del slots[key]
+            if size % 4 == 0 and offset % 4 == 0:
+                for i, src in enumerate(sources):
+                    if src is not None and regs.get(src) == "top":
+                        slots[offset + 4 * i] = "top"
+
+        def address():
+            """The base register, the offset the access adds to it (None if a
+            register), whether it writes the base back, and that writeback's
+            offset (None if a register or unknown)."""
+            m = re.search(r"\[\s*(\w+)\s*(?:,\s*([^\]]+?))?\s*\](!?)\s*(?:,\s*(.+))?$", raw)
+            if not m:
+                return None
+            reg, inner, bang, post = m.group(1), m.group(2), m.group(3), m.group(4)
+            imm = 0
+            if inner is not None:
+                imm = int(inner[1:], 0) if re.fullmatch(r"#-?(?:0x[0-9a-fA-F]+|\d+)", inner) else None
+            if post is not None:
+                step = int(post[1:], 0) if re.fullmatch(r"#-?(?:0x[0-9a-fA-F]+|\d+)", post) else None
+                return reg, 0, True, step
+            return reg, imm, bool(bang), imm
+
+        def where(reg, imm):
+            """The `sp` offset `[reg, #imm]` names, None for an unknown frame
+            address, or False when `reg` cannot point into the frame."""
+            if reg == "sp":
+                return imm
+            n = num(reg)
+            if n is not None and n in frame:
+                return None if frame[n] is None or imm is None else frame[n] + imm
+            return None if escaped else False
+
+        def writeback(reg, step):
+            if reg == "sp":
+                sp_moved()
+                return
+            n = num(reg)
+            if n is None:
+                return
+            regs.pop(n, None)
+            if n in frame:
+                frame[n] = None if frame[n] is None or step is None else frame[n] + step
+
+        def reglist():
+            m = re.search(r"\{([^}]*)\}", raw)
+            out = []
+            for part in (m.group(1).split(",") if m else []):
+                part = part.strip()
+                r = re.fullmatch(r"r(\d+)\s*-\s*r(\d+)", part)
+                if r:
+                    out.extend("r{}".format(k) for k in range(int(r.group(1)), int(r.group(2)) + 1))
+                elif part:
+                    out.append(part)
+            return out
+
+        def result():
+            return regs, slots, frame, escaped
+
+        if base in {"b", "bx", "cmp", "cmn", "tst", "teq"}:
+            return result()
+        if base in {"bl", "blx"}:
+            # A callee given a frame address may store through it or keep it.
+            if escaped or any(n in frame for n in (0, 1, 2, 3)):
                 slots.clear()
-            return regs, slots
-        if base.startswith("ldm"):
-            listed = re.fullmatch(r"\s*sp\s*,\s*\{([^}]+)\}\s*$", raw)
-            if listed:
-                for reg in re.findall(r"r\d+|ip|lr|fp|sl|sb|pc", listed.group(1)):
-                    kill(reg)
-                return regs, slots
+                escaped = True
+            for n in (0, 1, 2, 3, 12, 14):
+                regs.pop(n, None)
+                frame.pop(n, None)
+                if escaped:
+                    frame[n] = None
+            return result()
+        if base == "push" or (base.startswith("stm") and raw.lstrip().startswith("sp")):
+            if any(num(r) in frame for r in reglist()):
+                escaped = True
+            sp_moved()
+            return result()
+        if base == "pop" or (base.startswith("ldm") and raw.lstrip().startswith("sp")):
+            for r in reglist():
+                n = num(r)
+                if n is not None:
+                    kill(n)
+            sp_moved()
+            return result()
+        if opnds[:1] == ["sp"]:
+            # `sub sp, sp, #n`, `mov sp, r7`, and every other write of sp.
+            sp_moved()
+            return result()
+
+        stores = {"str": 4, "strb": 1, "strh": 2, "strd": 8}
+        loads = {"ldr": 4, "ldrb": 1, "ldrh": 1, "ldrsb": 1, "ldrsh": 1, "ldrd": 8}
+        if base in stores or base.startswith("stm"):
+            if base.startswith("stm"):
+                sources = reglist()
+                addr = (raw.split(",")[0].strip().rstrip("!"), None, "!" in raw.split(",")[0], None)
+                size = 4 * len(sources)
+            else:
+                sources = opnds[:2] if base == "strd" else opnds[:1]
+                addr = address()
+                size = stores[base]
+            if any(num(r) in frame for r in sources):
+                escaped = True
+            if addr is None:
+                slots.clear()
+                return result()
+            reg, imm, wb, step = addr
+            at = where(reg, imm)
+            if at is not False:
+                store_at(at if not base.startswith("stm") else None, size, [num(r) for r in sources])
+            if wb:
+                writeback(reg, step)
+            return result()
+        if base in loads or base.startswith("ldm"):
+            if base.startswith("ldm"):
+                dests = reglist()
+                addr = (raw.split(",")[0].strip().rstrip("!"), None, "!" in raw.split(",")[0], None)
+            else:
+                dests = opnds[:2] if base == "ldrd" else opnds[:1]
+                addr = address()
+            at = False
+            if addr is not None and not base.startswith("ldm"):
+                at = where(addr[0], addr[1])
+            for i, r in enumerate(dests):
+                n = num(r)
+                if n is None:
+                    continue
+                kill(n)
+                if (
+                    not conditional
+                    and base in {"ldr", "ldrd"}
+                    and isinstance(at, int) and not isinstance(at, bool)
+                    and slots.get(at + 4 * i) == "top"
+                ):
+                    regs[n] = "top"
+            if addr is not None and addr[2]:
+                writeback(addr[0], addr[3])
+            return result()
+
+        dests = []
+        if base in {"umull", "smull", "umlal", "smlal", "umaal"}:
+            dests = opnds[:2]
+        elif opnds:
+            dests = opnds[:1]
+        sources = opnds[1:] if base not in {"umull", "smull", "umlal", "smlal", "umaal"} else opnds[2:]
+        n = num(dests[0]) if dests else None
         if (
             base == "orr"
             and not conditional
             and len(opnds) == 3
-            and opnds[2].startswith("#")
             and arm_imm(opnds[2]) == 0x80000000
-            and ARM_REG.get(opnds[0]) is not None
+            and n is not None
         ):
-            regs[ARM_REG[opnds[0]]] = "top"
-            return regs, slots
-        if (
-            base == "mov"
-            and not conditional
-            and len(opnds) == 2
-            and ARM_REG.get(opnds[0]) is not None
-            and ARM_REG.get(opnds[1]) is not None
-        ):
-            rd, rn = ARM_REG[opnds[0]], ARM_REG[opnds[1]]
-            if regs.get(rn) == "top":
-                regs[rd] = "top"
-            else:
-                regs.pop(rd, None)
-            return regs, slots
-        if opnds and ARM_REG.get(opnds[0]) is not None and opnds[0] not in {"sp", "pc"}:
-            kill(opnds[0])
-        return regs, slots
+            regs[n] = "top"
+            frame.pop(n, None)
+            return result()
+        if base == "mov" and not conditional and len(opnds) == 2 and n is not None:
+            if opnds[1] == "sp":
+                regs.pop(n, None)
+                frame[n] = 0
+                return result()
+            rn = num(opnds[1])
+            if rn is not None:
+                top = regs.get(rn) == "top"
+                had = frame.get(rn, "none") if rn in frame else "none"
+                regs.pop(n, None)
+                frame.pop(n, None)
+                if top:
+                    regs[n] = "top"
+                if had != "none":
+                    frame[n] = had
+                return result()
+        if base in {"add", "sub"} and not conditional and len(opnds) == 3 and n is not None:
+            rn = opnds[1]
+            imm = arm_imm(opnds[2])
+            off = 0 if rn == "sp" else frame.get(num(rn), "none") if num(rn) in frame else "none"
+            if off != "none":
+                regs.pop(n, None)
+                if off is None or imm is None:
+                    frame[n] = None
+                else:
+                    signed = imm - (1 << 32) if imm & 0x80000000 else imm
+                    frame[n] = off + signed if base == "add" else off - signed
+                return result()
+        # Any other write: its destinations hold no proven bit, and one that
+        # read the frame's address may still point into it.
+        derived = any(op == "sp" or num(op) in frame for op in sources)
+        for r in dests:
+            m = num(r)
+            if m is None:
+                continue
+            was = frame.get(m, "none") if m in frame else "none"
+            kill(m)
+            if derived or (conditional and was != "none"):
+                frame[m] = None
+        return result()
 
     slot_ids = set()
     for _off, _mnemonic, operands in insns:
         for match in re.finditer(r"\[sp(?:,\s*#(-?(?:0x[0-9a-fA-F]+|\d+)))?\]", operands):
             slot_ids.add(int(match.group(1), 0) if match.group(1) else 0)
-    # Greatest fixpoint. A slot set before a loop and never replaced stays set
-    # on the back edge. Starting from "not set" drops it where the loop does
-    # not store it again. The path from the entry removes a slot no store sets.
-    top = ({n: "top" for n in range(15)}, {slot: "top" for slot in slot_ids})
-    out = [(dict(top[0]), dict(top[1])) for _ in insns]
-    for _ in range(32):
+        if re.search(r"\bldrd\b", _mnemonic):
+            for match in re.finditer(r"\[sp(?:,\s*#(-?(?:0x[0-9a-fA-F]+|\d+)))?\]", operands):
+                slot_ids.add((int(match.group(1), 0) if match.group(1) else 0) + 4)
+
+    def meet(states):
+        """Must facts hold where every path holds them; may facts where any
+        path does, with a frame offset kept only where every such path
+        agrees on it."""
+        regs = {n: "top" for n in range(15) if all(st[0].get(n) == "top" for st in states)}
+        keys = set.intersection(*(set(st[1]) for st in states))
+        frame = {}
+        for st in states:
+            for n, off in st[2].items():
+                frame[n] = off if frame.get(n, off) == off else None
+        return regs, {key: "top" for key in keys}, frame, any(st[3] for st in states)
+
+    # Greatest fixpoint for the must facts, least for the may facts. A slot
+    # set before a loop and never replaced stays set on the back edge.
+    # Starting from "not set" drops it where the loop does not store it
+    # again. The path from the entry removes a slot no store sets.
+    top = ({n: "top" for n in range(15)}, {slot: "top" for slot in slot_ids}, {}, False)
+    out = [top for _ in insns]
+    for _ in range(64):
         changed = False
         for i, (_off, mnemonic, operands) in enumerate(insns):
-            if preds[i]:
-                regs = {
-                    n: "top" for n in range(15)
-                    if all(out[p][0].get(n) == "top" for p in preds[i])
-                }
-                keys = set.intersection(*(set(out[p][1]) for p in preds[i]))
-                slots = {key: "top" for key in keys}
-            else:
-                regs, slots = {}, {}
-            new = transfer(regs, slots, "{} {}".format(mnemonic, operands).rstrip())
+            state = meet([out[p] for p in preds[i]]) if preds[i] else ({}, {}, {}, False)
+            new = transfer(state, "{} {}".format(mnemonic, operands).rstrip())
             if new != out[i]:
                 out[i] = new
                 changed = True
@@ -834,13 +987,7 @@ def prove_multiplies(insns):
         sources = multiply_sources(base, opnds)
         if sources is None:
             continue
-        if preds[i]:
-            regs = {
-                n: "top" for n in range(15)
-                if all(out[p][0].get(n) == "top" for p in preds[i])
-            }
-        else:
-            regs = {}
+        regs = meet([out[p] for p in preds[i]])[0] if preds[i] else {}
         ok = all(ARM_REG.get(src) is not None and regs.get(ARM_REG[src]) == "top" for src in sources)
         proofs.append(("{} {}".format(mnemonic, operands).rstrip(), ok))
     return proofs
@@ -1019,6 +1166,31 @@ def self_test_mul16():
     assert proofs("mov r2, #5\nmul r1, r0, r2") == [("mul r1, r0, r2", False)]
     assert proofs("orr r0, r0, #-2147483648\nmul r2, r0, r1") == [("mul r2, r0, r1", False)]
     assert proofs("mov r3, #5\nmla r0, r1, r3, r2") == [("mla r0, r1, r3, r2", False)]
+    # Every register an instruction writes loses its proof, not only the
+    # first operand: `ldrd`, a long multiply, `pop`, and `ldmia sp!`.
+    top2 = "orr r4, r1, #-2147483648\norr r5, r1, #-2147483648\n"
+    assert not proofs(top2 + "ldrd r4, r5, [r0]\nmul r0, r5, r5")[0][1]
+    assert not proofs(top2 + "umull r4, r5, r2, r3\nmul r0, r5, r5")[0][1]
+    assert not proofs(top2 + "pop {r4, r5}\nmul r0, r5, r5")[0][1]
+    assert not proofs(top2 + "ldmia sp!, {r4, r5}\nmul r0, r5, r5")[0][1]
+    assert not proofs(top2 + "ldm r0, {r2, r5}\nmul r0, r5, r5")[0][1]
+    assert not proofs(top2 + "ldr r2, [r5], #4\nmul r0, r5, r5")[0][1]
+    # A slot loses its proof when a raw value is stored over it, by `strd`
+    # or through a register that points into the frame.
+    spill = "orr r2, r1, #-2147483648\nstr r2, [sp, #8]\nand r3, r1, #255\n"
+    reload = "ldr r4, [sp, #8]\norr r6, r1, #-2147483648\nmul r0, r4, r6"
+    assert not proofs(spill + "strd r3, r2, [sp, #8]\n" + reload)[0][1]
+    assert proofs("orr r2, r1, #-2147483648\nstrd r2, r2, [sp, #8]\nldrd r4, r5, [sp, #8]\nmul r0, r4, r5")[0][1]
+    assert not proofs(spill + "add r7, sp, #8\nstr r3, [r7]\n" + reload)[0][1]
+    assert not proofs("mov fp, sp\n" + spill + "str r3, [fp, #8]\n" + reload)[0][1]
+    assert not proofs("add r7, sp, #4\n" + spill + "str r3, [r7, #4]\n" + reload)[0][1]
+    assert proofs("add r7, sp, #4\n" + spill + "str r3, [r7, #8]\n" + reload)[0][1]
+    assert not proofs("mov r7, sp\nadd r7, r7, r0\n" + spill + "str r3, [r7]\n" + reload)[0][1]
+    # A callee handed a frame address, or a pointer loaded once one
+    # escaped, may store over a slot. A store through an argument may not.
+    assert not proofs(spill + "add r0, sp, #8\nbl 0x100\n" + reload)[0][1]
+    assert not proofs("add r1, sp, #8\nstr r1, [r0]\n" + spill + "ldr r5, [r0]\nstr r3, [r5]\n" + reload)[0][1]
+    assert proofs(spill + "str r3, [r0]\n" + reload)[0][1]
 
     def branches(text):
         got = secret_branches(fixture_insns(text))
