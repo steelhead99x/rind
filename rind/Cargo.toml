@@ -114,9 +114,8 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   "cfg(rind_vartime_planted)",
   # Forces the portable backend, for testing it on x86_64 (see build.rs).
   "cfg(rind_portable)",
-  # Argon2 fills measured before they replace the portable or AVX2 one.
+  # Argon2 fills measured before they replace the AVX2 one.
   # See quest/m4/protocols/argon2-simd.md.
-  "cfg(rind_argon2_neon)",
   "cfg(rind_argon2_avx512)",
   "cfg(rind_argon2_ssse3)",
   # Builds the FIPS module's source, which draws every random value from its

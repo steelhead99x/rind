@@ -33,10 +33,13 @@
 //!   per block. The SHA3 fill does not: on an Apple M1 Pro the scalar rounds
 //!   made the 64 MiB fill about 6% slower.
 //!
-//! Built for the tests, and for a release that passes `--cfg rind_argon2_neon`.
-//! Dispatch does not select it until that build: the quest keeps it only when
-//! it beats the portable permutation on an Apple core and a Neoverse core.
-//! aarch64's backend is compiled only when the target enables NEON.
+//! Dispatch runs the SHA3 fill on Apple's cores and the plain NEON fill with
+//! its scalar rider everywhere else. Against the portable permutation
+//! (`rind-bench`'s `argon2`, 16 MiB t=1 and 64 MiB t=3 p=4), the SHA3 fill
+//! measured 1.76x and 1.65x on an Apple M1 Pro and plain NEON 1.55x and 1.31x.
+//! On a Neoverse-N2 the SHA3 fill was 0.90x and 0.96x and plain NEON 1.07x and
+//! 1.06x. See quest/m4/protocols/argon2-simd.md. aarch64's backend is
+//! compiled only when the target enables NEON.
 
 use core::arch::aarch64::*;
 
@@ -51,9 +54,13 @@ pub(crate) enum Fill {
 }
 
 impl Fill {
-    /// SHA3's `xar`, then plain NEON. A CPU without SHA3 does not run it.
+    /// SHA3's `xar` on Apple's cores, which have it from the M1 on, and plain
+    /// NEON with the scalar rider everywhere else, including a Neoverse-N2
+    /// with SHA3, where `xar` measured slower than the portable permutation.
+    /// As for rind's other Apple-only paths, the target vendor names the
+    /// core. The choice depends on the CPU only, never on the data.
     pub(crate) fn select() -> Self {
-        if HaveSha3::check().is_some() {
+        if cfg!(target_vendor = "apple") && HaveSha3::check().is_some() {
             Self::Sha3
         } else {
             Self::Neon

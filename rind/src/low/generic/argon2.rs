@@ -21,9 +21,9 @@ impl crate::low::Zeroable for Argon2Block {}
 /// Sets `out` to G(`x`, `y`), or xors G(`x`, `y`) into it when `xor` is set,
 /// as passes after the first do.
 #[inline(always)]
-// Unused on aarch64 when `--cfg rind_argon2_neon` selects the NEON fill.
-// The tests still compare that fill to this one.
-#[cfg_attr(all(not(test), rind_argon2_neon), allow(dead_code))]
+// Unused on aarch64's backend, which runs the NEON fill. The tests still
+// compare that fill to this one.
+#[cfg_attr(all(not(test), rind_backend = "aarch64"), allow(dead_code))]
 pub(crate) fn argon2_compress(x: &Argon2Block, y: &Argon2Block, out: &mut Argon2Block, xor: bool) {
     let mut r = Argon2Block::ZERO;
     for i in 0..128 {
@@ -54,7 +54,7 @@ pub(crate) fn argon2_compress(x: &Argon2Block, y: &Argon2Block, out: &mut Argon2
 // RFC 9106's P, over the sixteen words of `block` that `at` maps 0 through
 // 15 to.
 #[inline(always)]
-#[cfg_attr(all(not(test), rind_argon2_neon), allow(dead_code))]
+#[cfg_attr(all(not(test), rind_backend = "aarch64"), allow(dead_code))]
 fn permute(block: &mut Argon2Block, at: impl Fn(usize) -> usize) {
     let words = &mut block.0;
     let mut v = [0u64; 16];
@@ -77,7 +77,7 @@ fn permute(block: &mut Argon2Block, at: impl Fn(usize) -> usize) {
 // RFC 9106's GB: BLAKE2b's G with each addition `a + b` replaced by
 // `a + b + 2 * lo(a) * lo(b)`, and no message words.
 #[inline(always)]
-#[cfg_attr(all(not(test), rind_argon2_neon), allow(dead_code))]
+#[cfg_attr(all(not(test), rind_backend = "aarch64"), allow(dead_code))]
 fn gb(v: &mut [u64; 16], a: usize, b: usize, c: usize, d: usize) {
     v[a] = fbla(v[a], v[b]);
     v[d] = (v[d] ^ v[a]).rotate_right(32);
@@ -90,7 +90,7 @@ fn gb(v: &mut [u64; 16], a: usize, b: usize, c: usize, d: usize) {
 }
 
 #[inline(always)]
-#[cfg_attr(all(not(test), rind_argon2_neon), allow(dead_code))]
+#[cfg_attr(all(not(test), rind_backend = "aarch64"), allow(dead_code))]
 fn fbla(x: u64, y: u64) -> u64 {
     let product = (x as u32 as u64) * (y as u32 as u64);
     x.wrapping_add(y).wrapping_add(product.wrapping_mul(2))
