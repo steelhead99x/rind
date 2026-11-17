@@ -20,18 +20,20 @@ use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyMemoryError};
 use pyo3::ffi;
 use pyo3::prelude::*;
+use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBytes, PyDict};
 
 mod aead;
 mod agreement;
 mod cipher;
 mod digest;
+mod ecdsa;
+mod ed25519;
 mod hkdf;
 mod hmac;
 mod kem;
 mod pbkdf2;
 mod rsa;
-mod signature;
 
 create_exception!(pyrind, Error, PyException, "A rind call failed.");
 create_exception!(
@@ -212,14 +214,35 @@ pub(crate) fn bytes_with<'py>(
     }
 }
 
+/// A key's public key as a Python object, made on the first `get` and the
+/// same object every call after, so a key that only signs, decrypts,
+/// agrees, or decapsulates never copies its public key.
+pub(crate) struct PublicKeyCell<T>(PyOnceLock<Py<T>>);
+
+impl<T: pyo3::PyClass> PublicKeyCell<T> {
+    pub(crate) const fn new() -> Self {
+        Self(PyOnceLock::new())
+    }
+
+    /// The public key, which `make` builds on the first call.
+    pub(crate) fn get(&self, py: Python<'_>, make: impl FnOnce() -> T) -> PyResult<Py<T>>
+    where
+        T: Into<pyo3::PyClassInitializer<T>>,
+    {
+        self.0
+            .get_or_try_init(py, || Py::new(py, make()))
+            .map(|key| key.clone_ref(py))
+    }
+}
+
 /// Returns `bytes` holding `value`.
 pub(crate) fn bytes<'py>(py: Python<'py>, value: impl AsRef<[u8]>) -> Bound<'py, PyBytes> {
     PyBytes::new(py, value.as_ref())
 }
 
-/// Adds the submodule `path`, such as `pyrind.signature.verify`, to
-/// `parent` under its last component, and to `sys.modules`, so that
-/// `import pyrind.signature.verify` finds it.
+/// Adds the submodule `path`, such as `pyrind.rsa.verify`, to `parent`
+/// under its last component, and to `sys.modules`, so that
+/// `import pyrind.rsa.verify` finds it.
 pub(crate) fn submodule<'py>(
     parent: &Bound<'py, PyModule>,
     path: &str,
@@ -263,12 +286,13 @@ fn pyrind(m: &Bound<'_, PyModule>) -> PyResult<()> {
         cpu.add_function(wrap_pyfunction!(has_aes_hardware, cpu)?)
     })?;
     submodule(m, "pyrind.digest", digest::register)?;
+    submodule(m, "pyrind.ecdsa", ecdsa::register)?;
+    submodule(m, "pyrind.ed25519", ed25519::register)?;
     submodule(m, "pyrind.hkdf", hkdf::register)?;
     submodule(m, "pyrind.hmac", hmac::register)?;
     submodule(m, "pyrind.kem", kem::register)?;
     submodule(m, "pyrind.key_wrap", cipher::register_key_wrap)?;
     submodule(m, "pyrind.pbkdf2", pbkdf2::register)?;
     submodule(m, "pyrind.rsa", rsa::register)?;
-    submodule(m, "pyrind.signature", signature::register)?;
     Ok(())
 }
