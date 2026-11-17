@@ -34,23 +34,16 @@
 #
 # Needs the espup rustc that the board uses (1.97.0.0, 8ea53bcd7) and the
 # xtensa-esp-elf binutils. Defaults are under $HOME/.espressif, which is
-# where .github/workflows/esp32s3-sha512-layout.yml installs them. It also
+# where .github/actions/esp32s3-toolchain installs them (admin/esp32s3-toolchain.sh
+# has the paths, shared with admin/esp32s3-sha256-layout). It also
 # needs curl, sha256sum, a host C compiler, and network, to fetch and
 # check that pinned header. The host compiler reads them so the
 # Xtensa gcc's own core header cannot satisfy the include guard first.
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
-esp=${RIND_ESP_ROOT:-"$HOME/.espressif"}
-rustc=${RIND_ESP_RUSTC:-"$esp/rust-nightly-x86_64-unknown-linux-gnu/rustc/bin/rustc"}
-cargo=${RIND_ESP_CARGO:-"$esp/rust-nightly-x86_64-unknown-linux-gnu/cargo/bin/cargo"}
-xtensa_bin=${RIND_XTENSA_BIN:-"$esp/xtensa-esp-elf/bin"}
-objdump=$xtensa_bin/xtensa-esp32s3-elf-objdump
-readelf=$xtensa_bin/xtensa-esp32s3-elf-readelf
-nm=$xtensa_bin/xtensa-esp32s3-elf-nm
-ar=$xtensa_bin/xtensa-esp32s3-elf-ar
-gcc=$xtensa_bin/xtensa-esp32s3-elf-gcc
-ld=$xtensa_bin/xtensa-esp32s3-elf-ld
+# shellcheck source=admin/esp32s3-toolchain.sh
+. "$root/admin/esp32s3-toolchain.sh"
 host_cc=${CC:-cc}
 
 # Most IRAM the block may take at opt-level 3, s, or z: its .iram1.text
@@ -110,7 +103,7 @@ check_unaligned_l32i esp32s3 \
 
 for tool in "$rustc" "$cargo" "$objdump" "$readelf" "$nm" "$ar" "$gcc" "$ld"; do
   if [ ! -x "$tool" ]; then
-    printf 'missing %s\ninstall the toolchain as .github/workflows/esp32s3-sha512-layout.yml does\n' "$tool" >&2
+    printf 'missing %s\ninstall the toolchain as .github/actions/esp32s3-toolchain does\n' "$tool" >&2
     exit 1
   fi
 done
@@ -158,32 +151,7 @@ codegen-units = 1
 panic = "abort"
 EOF
 
-PATH="$xtensa_bin:$(dirname "$cargo"):$(dirname "$rustc"):$PATH"
-export PATH
-# cargo's nightly -Z is the esp cargo; do not let rustup's stable cargo win.
-hash -r
-
-# -Z build-std resolves the sysroot's proc_macro crate, which depends on
-# rustc-literal-escaper. That crate is in the rust-src vendor tree. A
-# project .cargo/config is not visible to the std resolution, and --offline
-# against an empty registry fails before it looks there. A cargo home that
-# only replaces crates.io with that vendor tree resolves it.
-sysroot=$("$rustc" --print sysroot)
-vendor="$sysroot/lib/rustlib/src/rust/library/vendor"
-set -- "$vendor"/rustc-literal-escaper-*
-if [ ! -d "$1" ]; then
-  printf 'missing vendored std sources under %s\n' "$vendor" >&2
-  exit 1
-fi
-mkdir -p "$work/cargo-home"
-cat > "$work/cargo-home/config.toml" << EOF
-[source.crates-io]
-replace-with = "vendored-sources"
-
-[source.vendored-sources]
-directory = "$vendor"
-EOF
-export CARGO_HOME="$work/cargo-home"
+esp_toolchain_env "$work"
 
 # $1 name, $2 target, $3 opt-level, $4 cargo flags; the rest are rustc
 # flags for this crate only.
