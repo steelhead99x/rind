@@ -593,6 +593,14 @@ fn ml_dsa_every_refusal() {
         assert_eq!(theirs.description_(), expected, "aws-lc-rs");
         assert_eq!(ours.description_(), expected, "rind");
     };
+    // A key of a type rind cannot back is refused from its OID alone, so a
+    // malformed one is `WrongAlgorithm` where aws-lc-rs may name a parse error.
+    let unbacked = |doc: &[u8], theirs_expected: &str| {
+        let ours = ours::signature::PqdsaKeyPair::from_pkcs8(ours44, doc).unwrap_err();
+        let theirs = theirs::signature::PqdsaKeyPair::from_pkcs8(theirs44, doc).unwrap_err();
+        assert_eq!(theirs.description_(), theirs_expected, "aws-lc-rs");
+        assert_eq!(ours.description_(), "WrongAlgorithm", "rind");
+    };
     let loaded = |doc: &[u8], ours_alg, theirs_alg| {
         let ours = ours::signature::PqdsaKeyPair::from_pkcs8(ours_alg, doc).unwrap();
         let theirs = theirs::signature::PqdsaKeyPair::from_pkcs8(theirs_alg, doc).unwrap();
@@ -732,7 +740,7 @@ fn ml_dsa_every_refusal() {
     mismatched[last] ^= 0xff;
     kind(&mismatched, ours44, theirs44, "InvalidEncoding");
 
-    // Curves aws-lc parses and rind does not implement.
+    // Curves aws-lc parses and rind cannot back.
     let k1_g = [
         0x04, 0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0, 0x62, 0x95, 0xce, 0x87,
         0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce, 0x28, 0xd9, 0x59, 0xf2, 0x81, 0x5b, 0x16,
@@ -748,16 +756,12 @@ fn ml_dsa_every_refusal() {
     );
     let mut off = k1_g;
     off[1] ^= 0xff;
-    kind(
+    unbacked(
         &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x0a], &[1], Some(&off)),
-        ours44,
-        theirs44,
         "InvalidEncoding",
     );
-    kind(
+    unbacked(
         &ec_pkcs8(&[0x2b, 0x81, 0x04, 0x00, 0x0a], &[2], Some(&k1_g)),
-        ours44,
-        theirs44,
         "InvalidEncoding",
     );
     let mut compressed = vec![0x02];
@@ -798,13 +802,14 @@ fn ml_dsa_every_refusal() {
         "WrongAlgorithm",
     );
 
-    // DSA bounds, not primality. x = 0 and x = q are out of range.
+    // DSA, which rind cannot back. aws-lc checks bounds, not primality:
+    // x = 0 and x = q are out of range there.
     kind(&dsa_pkcs8(&[1]), ours44, theirs44, "WrongAlgorithm");
-    kind(&dsa_pkcs8(&[0]), ours44, theirs44, "InvalidEncoding");
+    unbacked(&dsa_pkcs8(&[0]), "InvalidEncoding");
     let mut q = vec![0x00, 0x80];
     q.extend_from_slice(&[0; 18]);
     q.push(0x01);
-    kind(&dsa_pkcs8(&q), ours44, theirs44, "InvalidEncoding");
+    unbacked(&dsa_pkcs8(&q), "InvalidEncoding");
 
     // An Ed25519 document with a trailing byte still parses.
     let ed = theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32])
