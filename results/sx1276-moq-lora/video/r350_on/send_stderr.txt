@@ -1,0 +1,3 @@
+CatWAN TX ready: OK F 915000000 350000 100000 None
+source: ffmpeg -hide_banner -loglevel error -nostdin -re -f lavfi -i testsrc2=size=320x240:rate=15 -vf scale=320:240,fps=15 -f rawvideo -pix_fmt yuv420p -
+encoder: ffmpeg -hide_banner -loglevel error -f rawvideo -pix_fmt yuv420p -s 320x240 -r 15 -i - -c:v libx264 -preset ultrafast -tune zerolatency -b:v 180000 -maxrate 180000 -bufsize 90000 -g 15 -keyint_min 15 -sc_threshold 0 -threads 2 -bsf:v dump_extra=freq=keyframe,h264_metadata=aud=insert -flush_packets 1 -f h264 -
