@@ -581,3 +581,56 @@ fn tls13_handshake_over_the_nist_curves() {
 // Silences an unused import when no test needs it.
 #[allow(dead_code)]
 fn _void(_: *mut c_void) {}
+
+/// Prints how fast each provider signs, verifies, and agrees, as the README's
+/// table: `cargo test --release -p rind-openssl --test ec -- --ignored
+/// --nocapture`. The default provider is OpenSSL's own build, so the numbers
+/// depend on the system.
+#[test]
+#[ignore = "a benchmark"]
+fn benchmark_against_the_default_provider() {
+    use std::time::{Duration, Instant};
+
+    fn rate(mut op: impl FnMut()) -> f64 {
+        for _ in 0..20 {
+            op();
+        }
+        let (start, mut n) = (Instant::now(), 0u32);
+        while start.elapsed() < Duration::from_secs(1) {
+            for _ in 0..20 {
+                op();
+            }
+            n += 20;
+        }
+        f64::from(n) / start.elapsed().as_secs_f64()
+    }
+
+    let ctx = Context::new();
+    let message = [0x78u8; 64];
+    for curve in CURVES {
+        // Rind has no digests of its own, so it is the preference.
+        for (provider, propq) in [("default", DEFAULT), ("rind", c"")] {
+            let key = ctx.generate(curve, propq).unwrap();
+            let peer = ctx.generate(curve, propq).unwrap();
+            let (signature, _) = ctx.sign(&key, null(), &message, propq.as_ptr()).unwrap();
+            let sign = rate(|| {
+                ctx.sign(&key, null(), &message, propq.as_ptr()).unwrap();
+            });
+            let verify = rate(|| {
+                let ok = ctx
+                    .verify(&key, null(), &message, &signature, propq.as_ptr())
+                    .unwrap();
+                assert!(ok.0);
+            });
+            let agree = rate(|| {
+                ctx.derive(&key, &peer, propq.as_ptr()).unwrap();
+            });
+            let generate = rate(|| {
+                ctx.generate(curve, propq).unwrap();
+            });
+            println!(
+                "{curve:11} {provider:8} sign {sign:8.0}/s verify {verify:8.0}/s ecdh {agree:8.0}/s keygen {generate:8.0}/s"
+            );
+        }
+    }
+}

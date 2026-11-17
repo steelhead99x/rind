@@ -793,17 +793,24 @@ fn load(
             .find(c"priv")
             .map(|param| {
                 // The scalar, big-endian and padded to the curve's length,
-                // which wipes itself.
+                // which wipes itself. Whether a value is too long for the
+                // curve is told without branching on its bytes, which are
+                // secret.
                 let value = param
                     .unsigned_be()
                     .ok_or_else(|| Failure::invalid("priv must be an unsigned integer"))?;
-                let start = value.iter().position(|&b| b != 0).unwrap_or(value.len());
-                let significant = &value[start..];
-                if significant.len() > curve.scalar_len() {
-                    return Err(Failure::invalid("priv is longer than the curve's order"));
+                let len = curve.scalar_len();
+                let mut scalar = Zeroizing::new(vec![0u8; len]);
+                if value.len() >= len {
+                    let (excess, tail) = value.split_at(value.len() - len);
+                    let zeros = vec![0u8; excess.len()];
+                    if rind::constant_time::verify(excess, &zeros).is_err() {
+                        return Err(Failure::invalid("priv is longer than the curve's order"));
+                    }
+                    scalar.copy_from_slice(tail);
+                } else {
+                    scalar[len - value.len()..].copy_from_slice(&value);
                 }
-                let mut scalar = Zeroizing::new(vec![0u8; curve.scalar_len()]);
-                scalar[curve.scalar_len() - significant.len()..].copy_from_slice(significant);
                 Ok(scalar)
             })
             .transpose()?,
