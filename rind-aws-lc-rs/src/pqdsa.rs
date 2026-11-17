@@ -276,12 +276,7 @@ impl PqdsaKeyPair {
                 }
             }
             Some(Some(id)) => {
-                let rebuilt = strict_mldsa_pkcs8(&id, pkcs8);
-                let document: &[u8] = match rebuilt.as_deref() {
-                    Some(bytes) => bytes,
-                    None => pkcs8,
-                };
-                let key = new_key!(id, from_pkcs8(document)).map_err(KeyRejected::rind)?;
+                let key = load_mldsa_pkcs8(&id, pkcs8).map_err(KeyRejected::rind)?;
                 Ok(Self::new(algorithm, key))
             }
             None => {
@@ -476,33 +471,23 @@ impl fmt::Debug for PqdsaPublicKey {
 
 /// Refuses a PKCS#8 key whose algorithm is another ML-DSA parameter set.
 ///
-/// A seed-form key is decided from public lengths. aws-lc's
-/// `pqdsa_priv_decode` (`crypto/evp_extra/p_pqdsa_asn1.c`) rejects any seed
-/// other than 32 bytes before keygen, and keygen accepts every 32-byte seed,
-/// so the parameter-set check is then `Unspecified` with no expansion. An
-/// expanded key still runs the consistency check: `pk_from_sk` rejects an
-/// inconsistent key, which is `InvalidEncoding`, and accepts a consistent
-/// one, which is then `Unspecified`. Bytes after the document are unread,
-/// as `EVP_parse_private_key` reads one value, and bytes after the seed
-/// element are unread (`pqdsa_priv_decode`, aws-lc-sys 0.47.0
-/// `crypto/evp_extra/p_pqdsa_asn1.c`, lines 198-211).
+/// The key is loaded in full as the set it names, as aws-lc's
+/// `pqdsa_priv_decode` (`crypto/evp_extra/p_pqdsa_asn1.c`) does before
+/// aws-lc-rs's `validate_pqdsa_evp_key` refuses the set. A key that fails to
+/// load keeps that refusal, `InvalidEncoding` for an inconsistent expanded
+/// key, and one that loads is `Unspecified`.
 fn other_parameter_set(id: &AlgorithmID, pkcs8: &[u8]) -> KeyRejected {
-    if let Some(parts) = der::pkcs8_parts(pkcs8) {
-        if !parts.parameters.is_empty() {
-            return KeyRejected::invalid_encoding();
-        }
-        if let Some((0x80, seed)) = der::first_element(parts.private_key) {
-            return if seed.len() == 32 {
-                KeyRejected::unspecified()
-            } else {
-                KeyRejected::invalid_encoding()
-            };
-        }
-    }
-    match new_key!(id, from_pkcs8(pkcs8)) {
+    match load_mldsa_pkcs8(id, pkcs8) {
         Ok(_) => KeyRejected::unspecified(),
         Err(err) => KeyRejected::rind(err),
     }
+}
+
+/// Loads an ML-DSA PKCS#8 key of parameter set `id` as aws-lc reads it,
+/// through [`strict_mldsa_pkcs8`].
+fn load_mldsa_pkcs8(id: &AlgorithmID, pkcs8: &[u8]) -> Result<Key, rind::Error> {
+    let rebuilt = strict_mldsa_pkcs8(id, pkcs8);
+    new_key!(id, from_pkcs8(rebuilt.as_deref().unwrap_or(pkcs8)))
 }
 
 /// Whether `pkcs8` is a private key of a type aws-lc-rs parses that is not

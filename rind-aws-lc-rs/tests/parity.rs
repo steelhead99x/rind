@@ -1107,18 +1107,21 @@ fn mldsa_seed_tail() {
     report.check("mldsa65 spki", &ours, &theirs_out, Some("ok"));
     let (ours, theirs_out) = load_public(65, &append_outer(&spki, &[0x00]));
     report.check("mldsa65 spki tail", &ours, &theirs_out, None);
-    check_pkcs8(
-        &mut report,
-        "mldsa65 null parameter",
-        65,
-        &pkcs8(
-            0,
-            &algorithm(&mldsa_oid(18), Some(&der(0x05, &[]))),
-            &seed_key(&seed, &[]),
-            &[],
-        ),
-        None,
+    let null_parameter = pkcs8(
+        0,
+        &algorithm(&mldsa_oid(18), Some(&der(0x05, &[]))),
+        &seed_key(&seed, &[]),
+        &[],
     );
+    for set in [65, 44] {
+        check_pkcs8(
+            &mut report,
+            &format!("mldsa65 null parameter as mldsa{set}"),
+            set,
+            &null_parameter,
+            None,
+        );
+    }
     let wycheproof = wycheproof_mldsa65_seed();
     check_pkcs8(
         &mut report,
@@ -1134,6 +1137,86 @@ fn mldsa_seed_tail() {
         &extend_private_key(&wycheproof, &[0x00]),
         None,
     );
+    report.finish();
+}
+
+/// Every RFC 9881 private-key form of every parameter set, intact and
+/// broken, bare and with each tail aws-lc ignores, loaded as each set. This
+/// pins Option A: a key of another set is loaded in full before it is
+/// refused, so a consistent one is `Unspecified` and an inconsistent one
+/// `InvalidEncoding`, as in aws-lc-rs.
+#[test]
+fn mldsa_pkcs8_forms() {
+    let mut report = Report::new();
+    let seed = [0x5c; 32];
+    for set in [44u8, 65, 87] {
+        let last = match set {
+            44 => 17,
+            65 => 18,
+            _ => 19,
+        };
+        let (_, public, raw, _) = generated_pair(set, &seed);
+        let mut flipped = raw.clone();
+        flipped[100] ^= 0x01;
+        let mut other_seed = seed;
+        other_seed[0] ^= 0x01;
+        let both = |seed: &[u8], expanded: &[u8]| {
+            der(0x30, &[der(0x04, seed), der(0x04, expanded)].concat())
+        };
+        let forms = [
+            ("seed", der(0x80, &seed)),
+            ("expanded", der(0x04, &raw)),
+            ("expanded flipped", der(0x04, &flipped)),
+            ("both", both(&seed, &raw)),
+            ("both mismatched", both(&other_seed, &raw)),
+            ("both flipped", both(&seed, &flipped)),
+        ];
+        for (form, private_key) in &forms {
+            let mut private_tail = private_key.clone();
+            private_tail.push(0x00);
+            let docs = [
+                ("bare", mldsa_pkcs8_version(last, private_key, 0, &[])),
+                (
+                    "private-key tail",
+                    mldsa_pkcs8_version(last, &private_tail, 0, &[]),
+                ),
+                (
+                    "v2 public key",
+                    mldsa_pkcs8_version(last, private_key, 1, &public_suffix(&public)),
+                ),
+                (
+                    "attributes",
+                    mldsa_pkcs8_version(last, private_key, 0, &attributes()),
+                ),
+                (
+                    "document tail",
+                    append_outer(&mldsa_pkcs8_version(last, private_key, 0, &[]), &[0x00]),
+                ),
+            ];
+            for (tail, doc) in &docs {
+                for load_as in [44u8, 65, 87] {
+                    check_pkcs8(
+                        &mut report,
+                        &format!("mldsa{set} {form} {tail} as mldsa{load_as}"),
+                        load_as,
+                        doc,
+                        None,
+                    );
+                }
+            }
+        }
+        for load_as in [44u8, 65, 87] {
+            for (name, key) in [("raw", &raw), ("raw flipped", &flipped)] {
+                let (ours, theirs) = load_raw(load_as, key);
+                report.check(
+                    &format!("mldsa{set} {name} as mldsa{load_as}"),
+                    &ours,
+                    &theirs,
+                    None,
+                );
+            }
+        }
+    }
     report.finish();
 }
 

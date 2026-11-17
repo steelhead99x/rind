@@ -340,3 +340,77 @@ fn ml_dsa_other_set() {
     public(err.description_().as_bytes());
     assert_eq!(err.description_(), "InvalidEncoding");
 }
+
+/// `PqdsaKeyPair::from_pkcs8` loads an ML-DSA-65 key in full as ML-DSA-65
+/// before refusing it as ML-DSA-44: its seed, its expanded key, one with a
+/// flipped byte, and both together. The seed and the expanded key past its
+/// public seed `rho` are marked secret; the framing is public.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn ml_dsa_other_set_pkcs8() {
+    use aws_lc_rs::encoding::{AsRawBytes, PqdsaPrivateKeyRaw};
+    use rind_aws_lc_rs::signature::{ML_DSA_44_SIGNING, PqdsaKeyPair};
+
+    let seed = [0x44u8; 32];
+    let raw: PqdsaPrivateKeyRaw<'static> = aws_lc_rs::signature::PqdsaKeyPair::from_seed(
+        &aws_lc_rs::signature::ML_DSA_65_SIGNING,
+        &seed,
+    )
+    .unwrap()
+    .private_key()
+    .as_raw_bytes()
+    .unwrap();
+    let raw = raw.as_ref().to_vec();
+    let mut flipped = raw.clone();
+    flipped[100] ^= 0x01;
+
+    let der = |tag: u8, body: &[u8]| {
+        let mut out = vec![tag];
+        match body.len() {
+            0..0x80 => out.push(body.len() as u8),
+            0x80..0x100 => out.extend([0x81, body.len() as u8]),
+            n => out.extend([0x82, (n >> 8) as u8, n as u8]),
+        }
+        out.extend_from_slice(body);
+        out
+    };
+    // id-ml-dsa-65, 2.16.840.1.101.3.4.3.18
+    let algorithm = der(
+        0x30,
+        &der(
+            0x06,
+            &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12],
+        ),
+    );
+    let pkcs8 = |private_key: &[u8]| {
+        der(
+            0x30,
+            &[&[0x02, 0x01, 0x00][..], &algorithm, &der(0x04, private_key)].concat(),
+        )
+    };
+    let both = |expanded: &[u8]| der(0x30, &[der(0x04, &seed), der(0x04, expanded)].concat());
+
+    for (doc, expected) in [
+        (pkcs8(&der(0x80, &seed)), "Unspecified"),
+        (pkcs8(&der(0x04, &raw)), "Unspecified"),
+        (pkcs8(&der(0x04, &flipped)), "InvalidEncoding"),
+        (pkcs8(&both(&raw)), "Unspecified"),
+        (pkcs8(&both(&flipped)), "InvalidEncoding"),
+    ] {
+        // Every needle is found before any is marked, so the search reads
+        // only defined bytes.
+        let found: Vec<_> = [&seed[..], &raw[32..], &flipped[32..]]
+            .into_iter()
+            .filter_map(|needle| {
+                let at = doc.windows(needle.len()).position(|w| w == needle)?;
+                Some(at..at + needle.len())
+            })
+            .collect();
+        for range in found {
+            secret(&doc[range]);
+        }
+        let err = PqdsaKeyPair::from_pkcs8(&ML_DSA_44_SIGNING, &doc).unwrap_err();
+        public(err.description_().as_bytes());
+        assert_eq!(err.description_(), expected);
+    }
+}
