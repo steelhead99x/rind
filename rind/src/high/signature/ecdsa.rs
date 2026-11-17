@@ -462,7 +462,7 @@ impl fmt::Debug for Signature {
 }
 
 /// An ECDSA private key as a big-endian scalar exactly the curve's length,
-/// wiped on drop under the `wipe` feature.
+/// wiped on drop.
 pub struct Scalar(Buffer<MAX_SCALAR_LEN>);
 
 impl AsRef<[u8]> for Scalar {
