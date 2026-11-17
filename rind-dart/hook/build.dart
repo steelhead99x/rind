@@ -225,7 +225,7 @@ Future<Uri> _buildFromSource(
     ..add(manifest)
     ..add(workspaceManifest)
     ..add(workspaceManifest.resolve('Cargo.lock'))
-    ..addAll(_parseDepInfo(File.fromUri(depInfo).readAsStringSync()));
+    ..addAll(_parseDepInfo(await _readDepInfo(File.fromUri(depInfo))));
   return library;
 }
 
@@ -279,11 +279,30 @@ Future<void> _checkTargetInstalled(String target) async {
   }
 }
 
+/// [file]'s text once it holds a whole rule. Every cargo run rewrites the
+/// dep-info beside the library, and outside cargo's lock, so a build that
+/// shares the target directory through `cargo_target_dir` can read it while
+/// another build has it truncated.
+Future<String> _readDepInfo(File file) async {
+  for (var attempt = 0; ; attempt++) {
+    final text = file.readAsStringSync();
+    if (text.split('\n').first.contains(': ') && text.endsWith('\n')) {
+      return text;
+    }
+    if (attempt == 50) {
+      throw FormatException('cargo left no dependency rule in ${file.path}');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+  }
+}
+
 /// The files a Makefile-style dep-info file lists, in which a backslash
 /// escapes a space in a path.
 Iterable<Uri> _parseDepInfo(String depInfo) sync* {
   final rule = depInfo.split('\n').first;
-  final deps = rule.substring(rule.indexOf(': ') + 2);
+  final colon = rule.indexOf(': ');
+  if (colon < 0) throw FormatException('no dependency rule', rule);
+  final deps = rule.substring(colon + 2);
   for (final path in deps.split(RegExp(r'(?<!\\) '))) {
     if (path.isNotEmpty) yield Uri.file(path.replaceAll(r'\ ', ' '));
   }
