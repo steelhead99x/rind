@@ -53,7 +53,7 @@ benchmarks/verified.toml, and the decision on each gap in
 benchmarks/gaps.toml, first importing every measured host JSON of a collection
 given by `--from`. It fails on a gap over 10% without a
 decision, or a decision that covers no gap the data measures. `--check` fails if they are out of
-date instead. A gap's `on` may name any host that has a result, and any nightly
+date instead, and writes nothing, so it refuses `--from`. A gap's `on` may name any host that has a result, and any nightly
 tier.
 
 `gate` fails on a gap over 10% in a weekly run's downloaded artifacts that
@@ -74,6 +74,7 @@ import glob
 import hashlib
 import hmac
 import json
+import math
 import os
 import platform
 import re
@@ -1410,16 +1411,41 @@ def unmeasured(host):
     """Why `host` has no times to report, or "" when it has them."""
     if host.get("status") != "ok":
         return f"not measured, {host.get('status', 'unmeasured')}: {host.get('reason', '')}"
+    for path in REQUIRED_HOST_FIELDS:
+        value = host
+        for key in path.split("."):
+            value = value.get(key) if isinstance(value, dict) else None
+        if path == "cpu.logical_cpus":
+            ok = type(value) is int and value > 0
+        else:
+            ok = isinstance(value, str) and value != ""
+        if path == "started" and ok:
+            try:
+                datetime.datetime.fromisoformat(value)
+            except ValueError:
+                ok = False
+        if not ok:
+            return f"no well-formed {path}"
     results = host.get("results")
     if not isinstance(results, list) or not all(
         isinstance(r, dict)
         and isinstance(r.get("operation"), str)
         and isinstance(r.get("library"), str)
-        and isinstance(r.get("ns"), (int, float))
+        and positive_time(r.get("ns"))
         for r in results
     ):
         return "no well-formed results list"
     return ""
+
+
+# Every field of a measured host that the report and `summary` read
+# unguarded. `cpu.logical_cpus` is a count; the rest are nonempty strings.
+REQUIRED_HOST_FIELDS = ("commit", "started", "os", "cpu.model", "cpu.arch", "cpu.logical_cpus", "toolchain.rustc")
+
+
+def positive_time(ns):
+    """True for a finite time above zero. A bool is an int in Python, so it is refused by name."""
+    return isinstance(ns, (int, float)) and not isinstance(ns, bool) and math.isfinite(ns) and ns > 0
 
 
 def load_measured(directory):
@@ -2258,7 +2284,8 @@ def report(hosts, tiers, verified, gaps):
         "`BENCHMARKS.md`, its SVGs, which the README shows too, and the README's comparison table from them,",
         "`benchmarks/verified.toml`, and",
         "`benchmarks/gaps.toml`, which must hold a quest or a reason for every gap",
-        "over 10%.",
+        "over 10%. `render --check` fails if those files are out of date and writes nothing,",
+        "so it refuses `--from`: import first, then check.",
         "",
         "`admin/bench-report run` measures the machine it is on. Anyone can run it: there is",
         "no host list to edit. The result's name is a slug of the CPU model, such as",
@@ -2280,7 +2307,8 @@ def report(hosts, tiers, verified, gaps):
         "place from then on, and it refuses a missing or tagged file or an untagged result. Of one",
         "machine's results under one slug in a collection, only the newest is imported.",
         "`summary` and `render --from` read every readable measured `<host>.json` and name any",
-        "file they skip.",
+        "file they skip, including one missing a field the report shows or with a time that is",
+        "not a finite number above zero.",
         "`collect` reaches only the maintainer's machines. A gap's `on` may name any host with a",
         "result, or any nightly tier.",
         "",
@@ -2723,6 +2751,8 @@ def import_hosts(directory, adopt=()):
 def render(args):
     if args.adopt and not args.collection:
         fail("--adopt needs --from DIR")
+    if args.check and args.collection:
+        fail("--check never writes, and --from DIR writes benchmarks/data: import with `render --from DIR`, then check")
     if args.collection:
         import_hosts(args.collection, args.adopt or ())
     hosts = load_measured(DATA_DIR)
@@ -2897,7 +2927,11 @@ def main():
         metavar="NAME",
         help="let DIR's tagged NAME.json take over the untagged NAME.json in benchmarks/data (repeatable)",
     )
-    p.add_argument("--check", action="store_true", help="fail if BENCHMARKS.md or its SVGs are out of date")
+    p.add_argument(
+        "--check",
+        action="store_true",
+        help="fail if BENCHMARKS.md or its SVGs are out of date, writing nothing (so not with --from)",
+    )
     p.set_defaults(func=render)
 
     p = sub.add_parser("weekly", help="save the latest weekly bench's results as the CPU tiers")

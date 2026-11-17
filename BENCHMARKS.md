@@ -1254,7 +1254,8 @@ measured host JSON from that directory into `benchmarks/data/` and writes
 `BENCHMARKS.md`, its SVGs, which the README shows too, and the README's comparison table from them,
 `benchmarks/verified.toml`, and
 `benchmarks/gaps.toml`, which must hold a quest or a reason for every gap
-over 10%.
+over 10%. `render --check` fails if those files are out of date and writes nothing,
+so it refuses `--from`: import first, then check.
 
 `admin/bench-report run` measures the machine it is on. Anyone can run it: there is
 no host list to edit. The result's name is a slug of the CPU model, such as
@@ -1276,6 +1277,7 @@ already on disk is not imported until it is rerun with a different `--host`.
 place from then on, and it refuses a missing or tagged file or an untagged result. Of one
 machine's results under one slug in a collection, only the newest is imported.
 `summary` and `render --from` read every readable measured `<host>.json` and name any
-file they skip.
+file they skip, including one missing a field the report shows or with a time that is
+not a finite number above zero.
 `collect` reaches only the maintainer's machines. A gap's `on` may name any host with a
 result, or any nightly tier.
