@@ -247,33 +247,14 @@ jobs:
           RIND_TEST_X86_MCDT: 1
 
       # Alder Lake adds VAES without AVX-512, so AES-GCM runs on 256-bit
-      # vectors. Meteor and Raptor Lake, and Sierra Forest, select the same
-      # paths.
+      # vectors. Meteor, Raptor, Arrow, Lunar, and Panther Lake, and Sierra
+      # and Clearwater Forest, select the same paths: rind runs none of the
+      # SHA512 instructions that Arrow Lake, Lunar Lake, Panther Lake, and
+      # Clearwater Forest add.
       - name: Check Alder Lake
         run: nix develop .#sde --command cargo test --release --workspace --exclude rind-fips
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "sde -adl --"
-          RIND_TEST_X86_SSSE3: 1
-          RIND_TEST_X86_SSE41: 1
-          RIND_TEST_X86_AES_HARDWARE: 1
-          RIND_TEST_X86_AVX: 1
-          RIND_TEST_X86_AVX2: 1
-          RIND_TEST_X86_BMI2_ADX: 1
-          RIND_TEST_X86_SHA: 1
-          RIND_TEST_X86_VAES_AES_GCM: 1
-          RIND_TEST_X86_AVX_MOVBE_AES_GCM: 1
-          RIND_TEST_X86_AVX512_AES_GCM: 0
-          RIND_TEST_X86_AVX512_ML_KEM: 0
-          RIND_TEST_X86_AVX512_RSA: 0
-          RIND_TEST_X86_MCDT: 1
-
-      # Arrow Lake has the SHA512 instructions, which rind does not run:
-      # SHA-384 and SHA-512 take the AVX2 routine, as on Alder Lake. Lunar
-      # and Panther Lake, and Clearwater Forest, select the same paths.
-      - name: Check Arrow Lake
-        run: nix develop .#sde --command cargo test --release --workspace --exclude rind-fips
-        env:
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "sde -arl --"
           RIND_TEST_X86_SSSE3: 1
           RIND_TEST_X86_SSE41: 1
           RIND_TEST_X86_AES_HARDWARE: 1
@@ -309,32 +290,12 @@ jobs:
           RIND_TEST_X86_MCDT: 1
 
       # Granite Rapids selects every path, including AVX-512 AES-GCM, ML-KEM,
-      # and RSA. Ice Lake, Ice Lake server,
-      # Tiger Lake, and Sapphire and Emerald Rapids select the same paths.
+      # and RSA. Ice Lake, Ice Lake server, Tiger Lake, and Sapphire, Emerald,
+      # and Diamond Rapids select the same paths.
       - name: Check Granite Rapids
         run: nix develop .#sde --command cargo test --release --workspace --exclude rind-fips
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "sde -gnr --"
-          RIND_TEST_X86_SSSE3: 1
-          RIND_TEST_X86_SSE41: 1
-          RIND_TEST_X86_AES_HARDWARE: 1
-          RIND_TEST_X86_AVX: 1
-          RIND_TEST_X86_AVX2: 1
-          RIND_TEST_X86_BMI2_ADX: 1
-          RIND_TEST_X86_SHA: 1
-          RIND_TEST_X86_VAES_AES_GCM: 1
-          RIND_TEST_X86_AVX_MOVBE_AES_GCM: 1
-          RIND_TEST_X86_AVX512_AES_GCM: 1
-          RIND_TEST_X86_AVX512_ML_KEM: 1
-          RIND_TEST_X86_AVX512_RSA: 1
-          RIND_TEST_X86_MCDT: 1
-
-      # Diamond Rapids selects Granite Rapids' paths. It also has the SHA512
-      # instructions, which rind does not run.
-      - name: Check Diamond Rapids
-        run: nix develop .#sde --command cargo test --release --workspace --exclude rind-fips
-        env:
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: "sde -dmr --"
           RIND_TEST_X86_SSSE3: 1
           RIND_TEST_X86_SSE41: 1
           RIND_TEST_X86_AES_HARDWARE: 1

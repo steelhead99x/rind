@@ -73,13 +73,9 @@ Outside the model:
   or a wasm engine may emit code no check has seen.
 - A CPU whose multiplier takes time by its operands, and an Intel CPU whose
   operating system leaves DOITM unset, as Linux does, both of which
-  [PLATFORMS.md](PLATFORMS.md) describes. Intel's data-independent list omits
-  the `VSHA512` instructions; rind does not run them, and `admin/ct-vartime`
-  refuses them. [Their quest](/quest/m2/confidence/intel-vsha512.md) measures
-  the SHA-512 loss on Arrow Lake. Intel's MXCSR-dependent timing is in the
-  model: rind loads
-  `0x1FBF` around the x86_64 code that reaches an affected multiply, and
-  around every call on 32-bit x86.
+  [PLATFORMS.md](PLATFORMS.md) describes. Intel's MXCSR-dependent timing is
+  in the model: rind loads `0x1FBF` around the x86_64 code that reaches an
+  affected multiply, and around every call on 32-bit x86.
 - The operating system's random source, which rind trusts through
   `getrandom`, and an attacker who reads the process's memory while it runs.
 - A caller's misuse the API permits, such as repeating a nonce it passes.

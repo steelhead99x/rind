@@ -620,11 +620,11 @@ mod tests {
     }
 
     // HMAC-SHA1 and HMAC-SHA256 on the SHA extensions, which valgrind cannot
-    // run, with a secret key and message, for `admin/ct-sde`. HMAC-SHA384 and
-    // HMAC-SHA512 take the AVX2 routine on this CPU. The longer key is hashed
-    // first, and the messages end in a block that pads within itself, fills
-    // it exactly, pads into another, or follows a whole one, both in one call
-    // and through a context's buffer.
+    // run, with a secret key and message, for `admin/ct-sde`; HMAC-SHA384 and
+    // HMAC-SHA512 run no instruction valgrind lacks, so ctgrind checks them.
+    // The longer key is hashed first, and the messages end in a block that
+    // pads within itself, fills it exactly, pads into another, or follows a
+    // whole one, both in one call and through a context's buffer.
     #[cfg(rind_backend = "x86_64")]
     #[test]
     #[ignore = "admin/ct-sde runs it under Intel SDE"]
@@ -632,13 +632,9 @@ mod tests {
         use crate::low::ct_sde;
 
         assert!(is_x86_feature_detected!("sha"), "the SHA extensions");
-        assert!(
-            is_x86_feature_detected!("sha512"),
-            "the SHA512 instructions"
-        );
         let seed = ct_sde::seed().to_le_bytes();
         let bytes = |n| seed.iter().cycle().take(n).copied().collect::<Vec<u8>>();
-        for algorithm in [&HMAC_SHA1, &HMAC_SHA256, &HMAC_SHA384, &HMAC_SHA512] {
+        for algorithm in [&HMAC_SHA1, &HMAC_SHA256] {
             for key_len in [16, 200] {
                 for message_len in [300, 311, 316, 320] {
                     let (key, message) = (bytes(key_len), bytes(message_len));

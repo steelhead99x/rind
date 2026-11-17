@@ -30,7 +30,7 @@ case "$arch" in
     x86_64)
         tiers=(
             "avx512f avx512bw"
-            "vaes sha sha512 intel"
+            "vaes sha intel"
             "adx"
             "avx2 movbe"
             "avx"

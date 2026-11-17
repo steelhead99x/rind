@@ -1,13 +1,11 @@
-# [S] SHA-384 and SHA-512 run no instruction Intel leaves off its data-independent list
+# [XS] desktop measures SHA-512 on the AVX2 routine
 
 ## Goal
 
-On x86_64, SHA-384, SHA-512, and SHA-512/256, and so HMAC, HKDF, and Ed25519 signing over them, run no `VSHA512` instruction while Intel's "Data Operand Independent Timing Instructions" list omits them, and `admin/ct-vartime` refuses them on x86.
+`benchmarks/data/desktop.json` times rind's SHA-512 and Ed25519 signing on Arrow Lake as rind runs them since [kixel-ai/rind#821](https://github.com/kixel-ai/rind/pull/821), on OpenSSL's AVX2 routine rather than the SHA512 instructions, so BENCHMARKS.md's `desktop` section shows them again and the SHA-512 loss against aws-lc-rs is measured at the bar's hash sizes.
 
 ## Plan
 
-Found on 2026-11-13 by the PR that handled Intel's MXCSR-dependent timing: Intel's list (updated 2026-02-23) holds `SHA1RNDS4` and `SHA256RNDS2` but none of `VSHA512RNDS2`, `VSHA512MSG1`, or `VSHA512MSG2`, which `rind/src/low/x86_64/sha512.rs` runs through OpenSSL's routine on every CPU with the SHA512 extension, from Arrow Lake and Lunar Lake on. aws-lc runs its AVX2 routine there. Each instruction `admin/ct-vartime` refuses is absent from its vendor's list, but its x86 `VARTIME` pattern names only division and floating-point arithmetic, so it accepts these today; `PLATFORMS.md` names the gap.
-
-- Recommended: ✅ drop the SHA512-extension path for OpenSSL's AVX2 routine, and add `vsha512\w*` to the x86 `VARTIME` pattern and its samples (rejected: keep it for hashing only, since the digest API cannot tell a secret input from a public one; keep it and document, which leaves HMAC keys and Ed25519 nonces on instructions with no timing guarantee).
-- Measure the SHA-512 loss on `desktop`'s Arrow Lake against aws-lc-rs at the bar's hash sizes, and drop `HaveSha512` and its test toggle if nothing else uses them.
-- Revisit if Intel adds the instructions to its list.
+- #821 dropped those four rind rows from `desktop.json`, which timed the removed routine (60 ns, 249 ns, and 2.63 µs at 64 B, 1350 B, and 16 KB, against aws-lc-rs's 134 ns, 1.24 µs, and 14.12 µs) and would have shown under a ✓ only the AVX2 routine earns. On this repository's x86_64 hosts without the instructions the AVX2 routine measured within 1.15x of aws-lc-rs's time or better.
+- Run `admin/bench-report collect --host desktop` at `main`, then `admin/bench-report render`, and record in the PR the AVX2 routine's time over aws-lc-rs's and over the old 60 ns, 249 ns, and 2.63 µs. It needs the SSH access to `desktop` that `admin/bench-report collect` uses.
+- Revisiting the SHA512 instructions themselves, if Intel lists them, is [their own quest](/quest/m4/verified/sha512-x86-ext.md).

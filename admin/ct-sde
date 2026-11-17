@@ -29,7 +29,6 @@ MARKS = ["52430001:repeat", "52430002:repeat"]
 # Rapids. Each test asserts that its model takes the path it checks.
 MODELS = {
     "vaes_avx2": "-adl",  # Alder Lake: VAES without AVX-512.
-    "hmac": "-arl",  # Arrow Lake: the SHA extensions. SHA-384/512 take AVX2.
 }
 # Far below where the program maps its thread stacks and heaps.
 PIN_MEMORY = "0x100000000000:0x200000000000"

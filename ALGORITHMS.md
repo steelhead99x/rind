@@ -23,8 +23,8 @@ routines that don't use it, except that Ed25519 verification's
 multiplication runs curve25519-dalek ⚡ (see below).
 CPUs with AVX2 but without SHA-NI run [OpenSSL]'s AVX2 SHA-256, and SLH-DSA's
 SHA-2 sets [SPHINCS+]'s AVX2 eight-way SHA-256. CPUs with AVX2 run
-[OpenSSL]'s AVX2 SHA-384 and SHA-512, including those with the SHA512
-instructions, which rind does not run. Intel CPUs
+[OpenSSL]'s AVX2 SHA-384 and SHA-512, those with the SHA512 instructions
+included (see [Symmetric cryptography](#symmetric-cryptography)). Intel CPUs
 without AVX2 run [aws-lc]'s AVX SHA-1, SHA-256, and verified ✓ SHA-384 and
 SHA-512.
 
@@ -756,13 +756,14 @@ otherwise: libcrux has no SHA1, and the pure Rust SHA256 is faster than
 libcrux's.
 
 SHA384, SHA512, and SHA512/256 run aws-lc's assembly everywhere but on
-x86_64 CPUs with AVX2, which run OpenSSL's AVX2 routine, including where the
-CPU has the SHA512 instructions. Intel's data-independent-timing list omits
-those instructions, so rind does not run OpenSSL's routine for them. rind's
-HOL Light proof covers the AVX2 routine, which aws-lc leaves out: 1.18x
-faster than aws-lc's AVX routine
+x86_64 CPUs with AVX2, which run OpenSSL's AVX2 routine, which aws-lc leaves
+out and rind's HOL Light proof covers: 1.18x faster than aws-lc's AVX routine
 on an i7-8700 and 1.15x on Arrow Lake, and 1.47x faster than its scalar one
-on AMD's Zen 3. Without AVX2, aws-lc's AVX
+on AMD's Zen 3. CPUs with the SHA512 instructions run it too: OpenSSL's
+routine for those instructions measured 5.4x faster than aws-lc's AVX routine
+on Arrow Lake, but Intel's data-independent-timing list omits `VSHA512RNDS2`,
+`VSHA512MSG1`, and `VSHA512MSG2`, so nothing bounds their timing on secret
+data, and `admin/ct-vartime` refuses them. Without AVX2, aws-lc's AVX
 routine runs on Intel and its scalar routine on other CPUs, as aws-lc picks:
 the AVX routine is 1.1x faster than the scalar one on Intel, and 1.5x slower
 on AMD's Zen. On aarch64, its routine for the SHA-512 instructions where the CPU
