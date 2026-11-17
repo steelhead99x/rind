@@ -636,15 +636,17 @@ theorem infinity_rep :
 
 /-- The loop adds every window: each adds its digit's multiple of G to the
 accumulator, which holds the sum of the windows below it, or keeps the
-accumulator for a zero digit. -/
+accumulator for a zero digit. `sum0` is the output buffer `base_multiply` hoists
+out of the loop: `p256_montjmixadd` overwrites it, so its value does not matter. -/
 theorem loop_spec (hr : Runs) (X : p256Curve.Point) (hX : nist.fromM X = p256G) (hord : addOrderOf X = n256)
     (k : Nat) (hk : k < n256) (windows : Std.Array (U8 × U8) 37#usize) (hw : WindowsOk k windows 37)
     (table : Std.Array (Std.Array U64 512#usize) 37#usize)
     (htable : table = mid.p256.precomp.CURVE_GENERATOR_PRECOMP)
-    (iter : core.ops.range.Range Usize) (hs : iter.start.val ≤ 37)
-    (he : iter.end.val = 37) (point : mid.p256.AffineMontPoint) (a : mid.p256.JacobianMontPoint)
+    (sum0 : mid.p256.JacobianMontPoint) (iter : core.ops.range.Range Usize)
+    (hs : iter.start.val ≤ 37) (he : iter.end.val = 37) (point : mid.p256.AffineMontPoint)
+    (a : mid.p256.JacobianMontPoint)
     (ha : p256Represents (gpt X (acc (digit k) iter.start.val)) (tripleNat a.xyz.val)) :
-    mid.p256.JacobianMontPoint.base_multiply_loop iter windows point table a ⦃ r =>
+    mid.p256.JacobianMontPoint.base_multiply_loop sum0 iter windows point table a ⦃ r =>
       p256Represents (gpt X (acc (digit k) 37)) (tripleNat r.xyz.val) ⦄ := by
   have hk256 : k < 2 ^ 256 := lt_trans hk (by simp [n256])
   unfold mid.p256.JacobianMontPoint.base_multiply_loop
@@ -675,8 +677,7 @@ theorem loop_spec (hr : Runs) (X : p256Curve.Point) (hX : nist.fromM X = p256G) 
         rw [hrow, htable, getElem!_pos _ _ (by rw [Std.Array.property]; scalar_tac)]
       step with select_entry (runsSelect_of_runs hr) X hX w (by omega) pt row hrow' dg sg hd64
         as ⟨pt1, hz, hP2⟩
-      step with infinity_rep as ⟨inf, -⟩
-      step with p256_montjmixadd_mux_spec hr inf.xyz res.xyz pt1.xy as ⟨sum, hsum⟩
+      step with p256_montjmixadd_mux_spec hr sum0.xyz res.xyz pt1.xy as ⟨sum, hsum⟩
       step with jac_select_spec res { xyz := sum } dg as ⟨r1, hr1⟩
       have hacc : acc (digit k) iter1.start.val = acc (digit k) w + digit k w * 128 ^ w := by
         rw [hst, acc_succ]
@@ -714,7 +715,7 @@ theorem jac_base_multiply_spec (hr : Runs) (k : mid.p256.Scalar) (hk : wordsNat 
   step with infinity_rep as ⟨res, hres⟩
   have hinit : p256Represents (gpt X (acc (digit (wordsNat k.val)) 0)) (tripleNat res.xyz.val) := by
     simpa [acc, gpt_zero] using hres
-  step with loop_spec hr X hX hord (wordsNat k.val) hk windows hw table htable
+  step with loop_spec hr X hX hord (wordsNat k.val) hk windows hw table htable res
     { start := 0#usize, «end» := 37#usize } (by simp) (by simp) _ res (by simpa using hinit)
     as ⟨a4, ha4⟩
   rw [show acc (digit (wordsNat k.val)) 37 = wordsNat k.val from booth_sum _ hk256] at ha4
