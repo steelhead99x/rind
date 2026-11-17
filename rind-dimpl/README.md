@@ -20,6 +20,8 @@ Or install it for the process with `dimpl::crypto::CryptoProvider::install_defau
 It negotiates DTLS 1.2 ECDHE-ECDSA and DTLS 1.3 with AES-128-GCM, AES-256-GCM, and ChaCha20-Poly1305, over X25519, P-256, and P-384, and signs with ECDSA P-256 or P-384 keys in PKCS#8 or SEC1, as DER or PEM.
 On a CPU where rind runs AES without CPU instructions, it puts ChaCha20-Poly1305 first, for speed.
 dimpl's PSK suite, AES-128-CCM-8, is not offered.
+A peer's key share is taken as aws-lc-rs takes a raw one: X25519's 32 bytes, or a P-256 or P-384 point uncompressed, compressed, or hybrid with its prefix matching `y`.
+A share wrapped in a `SubjectPublicKeyInfo`, which dimpl's aws-lc-rs provider also takes, is refused, as dimpl's RustCrypto provider refuses it.
 A PEM key whose preamble starts with `0` is refused: that byte is the tag every DER key starts with, and a DER key's later bytes are secret, so rind never searches them for PEM.
 
 It builds for `wasm32-wasip2` and `wasm32-unknown-unknown`, the browser, where
