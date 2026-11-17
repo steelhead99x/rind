@@ -5,10 +5,6 @@
 //! one records the blocks freed while the values that held a secret are
 //! dropped, and checks none still holds it. Inline values are boxed so they
 //! live on the heap too.
-//!
-//! The wipe is opt-in, so these tests build only with the `wipe` feature.
-
-#![cfg(feature = "wipe")]
 
 #[path = "../../rind/tests/freed/mod.rs"]
 mod freed;
@@ -173,7 +169,7 @@ fn kem_slack() {
 #[inline(never)]
 fn paint_stack(stale: &[u8; NEEDLE_LEN]) {
     let mut stack = [0u8; 64 * 1024];
-    for chunk in stack.chunks_exact_mut(NEEDLE_LEN) {
+    for chunk in stack.as_chunks_mut::<NEEDLE_LEN>().0 {
         chunk.copy_from_slice(stale);
     }
     core::hint::black_box(&mut stack);
@@ -211,7 +207,9 @@ fn ml_dsa() {
 
 /// An expanded ML-DSA private key, loaded raw, which the adapter wraps in
 /// PKCS#8 itself, and loaded from a PKCS#8 document in expanded form. The
-/// needle is FIPS 204's `K`, after `rho`, which the public key repeats.
+/// keys are loaded before the check: the PKCS#8 copy loading makes lives
+/// only inside the call, which the repository leaves unwiped. The needle is
+/// FIPS 204's `K`, after `rho`, which the public key repeats.
 #[test]
 fn ml_dsa_expanded() {
     use aws_lc_rs::encoding::AsRawBytes;
@@ -227,26 +225,22 @@ fn ml_dsa_expanded() {
     .as_ref()
     .to_vec();
     let secret = &raw[32..];
-    let leaked = leaks(secret, || {
-        let key = Box::new(
-            signature::PqdsaKeyPair::from_raw_private_key(&signature::ML_DSA_44_SIGNING, &raw)
-                .unwrap(),
-        );
-        assert!(key.to_pkcs8v1().is_err());
-        let mut sig = vec![0; signature::ML_DSA_44_SIGNING.signature_len()];
-        key.sign(b"expanded", &mut sig).unwrap();
-    });
-    assert_eq!(leaked, 0);
-
     let pkcs8 = expanded_pkcs8(&raw);
-    let leaked = leaks(secret, || {
-        let key = Box::new(
-            signature::PqdsaKeyPair::from_pkcs8(&signature::ML_DSA_44_SIGNING, &pkcs8).unwrap(),
-        );
-        let mut sig = vec![0; signature::ML_DSA_44_SIGNING.signature_len()];
-        key.sign(b"message", &mut sig).unwrap();
-    });
-    assert_eq!(leaked, 0);
+    for key in [
+        signature::PqdsaKeyPair::from_raw_private_key(&signature::ML_DSA_44_SIGNING, &raw).unwrap(),
+        signature::PqdsaKeyPair::from_pkcs8(&signature::ML_DSA_44_SIGNING, &pkcs8).unwrap(),
+    ] {
+        let key = Box::new(key);
+        let leaked = leaks(secret, || {
+            let clone = key.clone();
+            assert!(clone.to_pkcs8v1().is_err());
+            let mut sig = vec![0; signature::ML_DSA_44_SIGNING.signature_len()];
+            clone.sign(b"expanded", &mut sig).unwrap();
+            drop(clone);
+            drop(key);
+        });
+        assert_eq!(leaked, 0);
+    }
 }
 
 /// ML-DSA-44's PKCS#8 v1 in expanded form (RFC 9881).

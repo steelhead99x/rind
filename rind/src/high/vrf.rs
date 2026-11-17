@@ -67,8 +67,7 @@ pub static ECVRF_P256_SHA256_TAI: Algorithm = Algorithm {
     id: AlgorithmId::P256Sha256Tai,
 };
 
-/// A private key that proves outputs, and its public key, wiped on drop
-/// under the `wipe` feature.
+/// A private key that proves outputs, and its public key, wiped on drop.
 ///
 /// It keeps its public key, computed once when it is generated or loaded.
 ///
@@ -291,7 +290,7 @@ impl fmt::Debug for KeyPair {
     }
 }
 
-/// A key pair's 32-byte seed, wiped on drop under the `wipe` feature.
+/// A key pair's 32-byte seed, wiped on drop.
 pub struct Seed([u8; 32]);
 
 impl AsRef<[u8]> for Seed {

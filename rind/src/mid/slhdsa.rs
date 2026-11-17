@@ -193,7 +193,7 @@ const fn lanes<P: Params>() -> usize {
 /// A key pair: FIPS 205's private key encoding, whose second half is the
 /// public key.
 ///
-/// It wipes its whole value on drop under the `wipe` feature.
+/// It wipes its whole value on drop.
 pub(crate) struct KeyPair<P: Params> {
     secret_key: P::SecretKey,
 }

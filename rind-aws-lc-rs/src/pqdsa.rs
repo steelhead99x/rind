@@ -392,10 +392,7 @@ impl fmt::Debug for PqdsaKeyPair {
 }
 
 /// Wraps an expanded private key in PKCS#8 v1, as RFC 9881's `expandedKey`.
-///
-/// The buffer is the private key. It is wiped on drop under the `wipe`
-/// feature, as heap scratch that holds a private key.
-fn expanded_pkcs8(id: &AlgorithmID, key: &[u8]) -> Wiped<Vec<u8>> {
+fn expanded_pkcs8(id: &AlgorithmID, key: &[u8]) -> Vec<u8> {
     /// A DER header with a two-byte length, which every ML-DSA key needs.
     fn header(out: &mut Vec<u8>, tag: u8, len: usize) {
         let len = u16::try_from(len).expect("ML-DSA keys are under 64 KiB");
@@ -422,13 +419,14 @@ fn expanded_pkcs8(id: &AlgorithmID, key: &[u8]) -> Wiped<Vec<u8>> {
         0x03,
         id.oid_last(),
     ];
+    // A copy of the key inside one call, which the repository leaves unwiped.
     let mut der = Vec::with_capacity(prefix.len() + key.len() + 12);
     header(&mut der, 0x30, prefix.len() + key.len() + 8);
     der.extend_from_slice(&prefix);
     header(&mut der, 0x04, key.len() + 4);
     header(&mut der, 0x04, key.len());
     der.extend_from_slice(key);
-    Wiped::new(der)
+    der
 }
 
 /// An ML-DSA key pair's private key.
@@ -447,8 +445,8 @@ impl fmt::Debug for PqdsaPrivateKey<'_> {
     }
 }
 
-/// An ML-DSA key pair's public key, FIPS 204's encoding; wiped on drop under
-/// the `wipe` feature, as the key pair is.
+/// An ML-DSA key pair's public key, FIPS 204's encoding; wiped on drop, as
+/// the key pair is.
 #[derive(Clone)]
 pub struct PqdsaPublicKey {
     id: &'static AlgorithmID,
@@ -604,7 +602,7 @@ fn ml_kem_private_key(pkcs8: &[u8], expanded_len: usize) -> bool {
 /// already is one. aws-lc ignores bytes after the document, bytes after the
 /// single private-key element, and the v2 public key (`pqdsa_priv_decode`
 /// does not read `pubkey`).
-fn strict_mldsa_pkcs8(id: &AlgorithmID, pkcs8: &[u8]) -> Option<Wiped<Vec<u8>>> {
+fn strict_mldsa_pkcs8(id: &AlgorithmID, pkcs8: &[u8]) -> Option<Vec<u8>> {
     let parts = der::pkcs8_parts(pkcs8)?;
     if !parts.parameters.is_empty() {
         return None;
@@ -619,14 +617,14 @@ fn strict_mldsa_pkcs8(id: &AlgorithmID, pkcs8: &[u8]) -> Option<Wiped<Vec<u8>>> 
     encode_mldsa_pkcs8(id, element)
 }
 
-fn encode_mldsa_pkcs8(id: &AlgorithmID, private_key: &[u8]) -> Option<Wiped<Vec<u8>>> {
+fn encode_mldsa_pkcs8(id: &AlgorithmID, private_key: &[u8]) -> Option<Vec<u8>> {
     let oid = der_tlv(0x06, &id.oid())?;
     let algorithm = der_tlv(0x30, &oid)?;
     let key = der_tlv(0x04, private_key)?;
     let mut body = vec![0x02, 0x01, 0x00];
     body.extend(algorithm);
     body.extend(key);
-    Some(Wiped::new(der_tlv(0x30, &body)?))
+    der_tlv(0x30, &body)
 }
 
 fn der_tlv(tag: u8, body: &[u8]) -> Option<Vec<u8>> {
@@ -920,7 +918,7 @@ fn scalar_in_range(scalar: &[u8], order: &[u8]) -> bool {
     if scalar.is_empty() || scalar.len() > order.len() + 8 {
         return false;
     }
-    let mut value = Wiped::new(alloc::vec![0u8; order.len()]);
+    let mut value = alloc::vec![0u8; order.len()];
     if scalar.len() > order.len() {
         let extra = scalar.len() - order.len();
         let mut high = 0u8;
@@ -1445,7 +1443,7 @@ fn affine(point: &Pt, prime: &Fe) -> (Fe, Fe) {
 fn mul_base(scalar: &[u8], curve: &NamedCurve, prime: &Fe) -> Pt {
     let a = Fe::from_be(curve.a);
     let width = curve.order.len();
-    let mut wide = Wiped::new(alloc::vec![0u8; width]);
+    let mut wide = alloc::vec![0u8; width];
     if scalar.len() > width {
         wide.copy_from_slice(&scalar[scalar.len() - width..]);
     } else {
