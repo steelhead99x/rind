@@ -103,6 +103,11 @@ SHA-512.
   its four states in and out on each call; XKCP's, which SPHINCS+ runs on
   states it keeps transposed, measured 7% faster per call (see
   [SLH-DSA](#slh-dsa)).
+- SHA-384 and SHA-512: CPUs with the SHA512 instructions run [OpenSSL]'s
+  AVX2 routine rather than its routine for those instructions, which
+  measured 5.4x faster on Arrow Lake, as Intel lists no data-independent
+  timing for `VSHA512RNDS2`, `VSHA512MSG1`, or `VSHA512MSG2` (see
+  [Symmetric cryptography](#symmetric-cryptography)).
 
 aarch64 runs with the crypto extension and the SHA-512 and SHA-3
 instructions; no crypto denies them, as a Raspberry Pi 4 lacks them. armv7
