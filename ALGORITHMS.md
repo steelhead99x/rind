@@ -163,8 +163,8 @@ with portable Rust in place of the assembly armv7 runs regardless.
   [s2n-bignum's constant-time theorems](#s2n-bignums-constant-time-theorems)
   describes. The inventory in that section is not that comparison: "none"
   means s2n-bignum publishes no `_SUBROUTINE_SAFE` theorem for the routine.
-  `curve25519_x25519`, `p256_scalarmul`, `p256_montjmixadd`, `p521_jadd`,
-  and `p521_jmixadd` are "none" on the narrow schedule and on the `_alt`
+  `p256_scalarmul`, `p256_montjmixadd`, `p521_jadd`, and `p521_jmixadd`
+  are "none" on the narrow schedule and on the `_alt`
   schedule each replaces. The narrow path has a per-routine correctness
   proof and not yet rind's Lean composition: the Lean proofs of
   X25519, Ed25519, and P-256 name the `_alt` routines, so those benchmark ✓
@@ -379,10 +379,10 @@ BINSEC.
 | `bignum_tomont_p384_alt` | `bignum_tomont_p384_alt`: `BIGNUM_TOMONT_P384_ALT_SUBROUTINE_SAFE` | not imported |
 | `curve25519_x25519` | `curve25519_x25519`: `CURVE25519_X25519_SUBROUTINE_SAFE` | `curve25519_x25519_byte_alt`: `CURVE25519_X25519_BYTE_ALT_SUBROUTINE_SAFE` |
 | `curve25519_x25519_alt` | `curve25519_x25519_alt`: `CURVE25519_X25519_ALT_SUBROUTINE_SAFE` | not imported |
-| `curve25519_x25519_narrow::curve25519_x25519` | not imported | `curve25519_x25519`: none |
+| `curve25519_x25519_narrow::curve25519_x25519` | not imported | `curve25519_x25519_byte`: `CURVE25519_X25519_BYTE_SUBROUTINE_SAFE` |
 | `curve25519_x25519base` | `curve25519_x25519base`: `CURVE25519_X25519BASE_SUBROUTINE_SAFE` | `curve25519_x25519base_byte_alt`: `CURVE25519_X25519BASE_BYTE_ALT_SUBROUTINE_SAFE` |
 | `curve25519_x25519base_alt` | `curve25519_x25519base_alt`: `CURVE25519_X25519BASE_ALT_SUBROUTINE_SAFE` | not imported |
-| `curve25519_x25519base_narrow::curve25519_x25519base` | not imported | `curve25519_x25519base`: none |
+| `curve25519_x25519base_narrow::curve25519_x25519base` | not imported | `curve25519_x25519base_byte`: `CURVE25519_X25519BASE_BYTE_SUBROUTINE_SAFE` |
 | `edwards25519_decode` | `edwards25519_decode`: `EDWARDS25519_DECODE_SUBROUTINE_SAFE` | `edwards25519_decode_alt`: `EDWARDS25519_DECODE_ALT_SUBROUTINE_SAFE` |
 | `edwards25519_decode_alt` | `edwards25519_decode_alt`: `EDWARDS25519_DECODE_ALT_SUBROUTINE_SAFE` | not imported |
 | `edwards25519_decode_narrow::edwards25519_decode` | not imported | `edwards25519_decode`: `EDWARDS25519_DECODE_SUBROUTINE_SAFE` |
