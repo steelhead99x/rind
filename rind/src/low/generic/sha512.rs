@@ -4,35 +4,40 @@
 //! 64 bits.
 //!
 //! The portable backend otherwise calls HACL*'s `sha512_update`, which is
-//! fully unrolled. On Xtensa that function is about 47 KiB — several times
-//! the ESP32-S3's 16 KiB instruction cache — so every block streams its
+//! fully unrolled. On Xtensa that function is about 47 KiB, several times
+//! the ESP32-S3's 16 KiB instruction cache, so every block streams its
 //! code from flash. On that board the rolled loop takes about 0.033×
 //! main's unrolled HACL* body, about 30×. That figure is the rolled loop
-//! against that HACL* body, not a cycle count of this IRAM placement
-//! against `esp32s3-sha512-flash`. That comparison is not measured. This
-//! implementation follows [`sha256`](sha256.rs): one 16-word window and an
-//! 80-round loop, which stays in a few kilobytes. On the ESP32-S3 under
-//! ESP-IDF the block is placed in IRAM (`.iram1.text`, literal pool
-//! included) and its `K` table in internal DRAM. The driver
-//! `sha512_compress_blocks` stays in ordinary flash text, so the update
-//! path is not a cache-off API. The layout check, at opt-level 3, s, and z,
-//! verifies that this block adds no flash text and calls nothing.
-//! The `esp32s3-sha512-flash` feature leaves the ordinary flash sections,
-//! for an image whose IRAM is already full. The ESP32, the ESP32-S2,
-//! `*-none-elf`, and every other target keep the ordinary sections. The
-//! body is not unchanged there: every 32-bit portable target runs the same
-//! sixteen-round groups, whose code size is not checked on those targets,
-//! and every Xtensa core loads the message with the `l32i` sequence in
-//! `be_u32`, which `admin/esp32s3-sha512-layout` checks on the ESP32
-//! build too. ESP-IDF Xtensa
-//! SHA-256 is rind's own IRAM body in `sha256_iram`, so this placement
-//! leaves libcrux-sha2's sections as that crate built them. The round
-//! functions and the eighty `K` constants are FIPS 180-4 §4.1.3 and
-//! §4.2.3. The unit tests check FIPS 180-4's SHA-512 vectors, mark the
-//! block secret so ctgrind checks this loop, and, on every backend except
-//! portable with a pointer that is not 64 bits, compare with the
-//! compression the backend ships (HACL* or aws-lc). On 64-bit portable
-//! targets, HACL*'s unrolled form is still used.
+//! against that HACL* body, not a cycle count of the IRAM placement
+//! against `esp32s3-sha512-flash`, which is not measured.
+//!
+//! Two bodies, one per target, both following [`sha256`](sha256.rs) with
+//! one 16-word window. `rolled` is a single 80-round loop that stays in a
+//! few kilobytes, and every target but the ESP32-S3 runs it. `unrolled`
+//! is the ESP32-S3's: sixteen-round groups with constant indexes, so that
+//! no bounds check, iterator, or `memset` can outline into flash at
+//! opt-level s or z, and its message load is the `l32i` sequence in
+//! `be_u32`. Its code size is checked only on the ESP32-S3, which is why
+//! no other target takes it. On `xtensa-esp32s3-espidf` it is placed in
+//! IRAM (`.iram1.text`, literal pool included) and `K` in internal DRAM;
+//! `esp32s3-sha512-flash` leaves both in the ordinary flash sections, for
+//! an image whose IRAM is already full, as `xtensa-esp32s3-none-elf` does.
+//! The driver `sha512_compress_blocks` stays in ordinary flash text, so
+//! the update path is not a cache-off API. `admin/esp32s3-sha512-layout`
+//! checks, at opt-level 3, s, and z, that the IRAM block loads nothing
+//! from flash and calls nothing, prints its IRAM and literal-pool sizes,
+//! and fails above its ceiling; it also runs the S3 build's message load
+//! and a FIPS 180-4 compression under QEMU. ESP-IDF Xtensa SHA-256 is
+//! rind's own IRAM body in `sha256_iram`, so this placement leaves
+//! libcrux-sha2's sections as that crate built them.
+//!
+//! The round functions and the eighty `K` constants are FIPS 180-4 §4.1.3
+//! and §4.2.3. The unit tests run FIPS 180-4's SHA-512 vectors through both
+//! bodies and compare them on arbitrary chaining states, mark the block
+//! secret so ctgrind checks both, and, on every backend except portable
+//! with a pointer that is not 64 bits, compare with the compression the
+//! backend ships (HACL* or aws-lc). On 64-bit portable targets, HACL*'s
+//! unrolled form is still used.
 
 macro_rules! CH {
     ($x:expr, $y:expr, $z:expr) => {
@@ -71,221 +76,299 @@ macro_rules! SSIG1 {
     };
 }
 
-// One FIPS 180-4 round. Returning the working variables in rotated order
-// keeps a loop edge from moving them.
-#[inline(always)]
-fn sha512_round(
-    w: u64,
-    k: u64,
-    a: u64,
-    b: u64,
-    c: u64,
-    d: u64,
-    e: u64,
-    f: u64,
-    g: u64,
-    h: u64,
-) -> (u64, u64, u64, u64, u64, u64, u64, u64) {
-    let t1 = h
-        .wrapping_add(BSIG1!(e))
-        .wrapping_add(CH!(e, f, g))
-        .wrapping_add(k)
-        .wrapping_add(w);
-    let t2 = BSIG0!(a).wrapping_add(MAJ!(a, b, c));
-    (t1.wrapping_add(t2), a, b, c, d.wrapping_add(t1), e, f, g)
-}
+// The body this target ships. Tests compile both.
+#[cfg(not(rind_esp32s3))]
+use rolled::sha512_compress_block;
+#[cfg(rind_esp32s3)]
+use unrolled::sha512_compress_block;
 
-// `K` at a fixed offset from `kp`. `I` is a literal, so the load is a
-// constant displacement and not a bounds check. A safe `K[base + I]` with
-// a runtime `base` keeps a panic path, and at opt-level s/z that path is a
-// call into flash.
-#[inline(always)]
-fn round_constant<const I: usize>(kp: *const u64) -> u64 {
-    // SAFETY: callers pass `I` in `0..16` and a `kp` at `K[0]`, `K[16]`,
-    // `K[32]`, `K[48]`, or `K[64]`, so `kp.add(I)` stays inside `K`. `K` is
-    // aligned for `u64`, and `I` is a constant. The load does not depend on
-    // the message or the state.
-    unsafe { kp.add(I).read() }
-}
+#[cfg(any(not(rind_esp32s3), test))]
+mod rolled {
+    use super::K;
 
-// Big-endian word at byte `BYTE + OFF`, both literal offsets. Two
-// parameters because a const argument cannot be `{ BYTE + 4 }` on stable,
-// but an `asm!` const operand can add them.
-#[cfg(target_arch = "xtensa")]
-#[inline(always)]
-fn be_u32<const BYTE: usize, const OFF: usize>(block: &[u8; 128]) -> u32 {
-    let y;
-    // SAFETY: the same `l32i` plus byte swap as `sha256_iram`'s message
-    // load. `BYTE + OFF` is a multiple of 4 in `0..128`. ESP-IDF v5.5.1's
-    // `core-isa.h` sets `XCHAL_UNALIGNED_LOAD_HW` to 1 and
-    // `XCHAL_UNALIGNED_LOAD_EXCEPTION` to 0 on ESP32, ESP32-S2, and ESP32-S3.
-    // That is Hardware Alignment with no unaligned-load exception, so `l32i`
-    // returns the word at an address that is not a multiple of 4. It does
-    // not trap, it does not ignore the low bits, and it does not call a
-    // helper. `admin/esp32s3-sha512-layout` checks those three headers, and
-    // runs this sequence, including a block whose address is not a multiple
-    // of 4, on QEMU's `esp32` and `esp32s3` CPUs. That is the emulator's
-    // model of those cores, not a board measurement. This QEMU build has no
-    // ESP32-S2 CPU, which is why that chip is the header check. The
-    // sequence writes SAR, `a14`, and `y`, and does not use the stack. esp rustc
-    // 1.97 lists `sar` as a clobber-only register, the same class
-    // `sha256_iram` names with `out("sar") _`. The `ssai 8` is consumed by
-    // the three `src` before the block ends. The address is the public
-    // block cursor. The loaded bytes are the message, and none of these
-    // instructions branches or loops on them.
-    unsafe {
-        core::arch::asm!(
-            "l32i a14, {p}, {byte}",
-            "ssai 8",
-            "srli {y}, a14, 16",
-            "src {y}, {y}, a14",
-            "src {y}, {y}, {y}",
-            "src {y}, a14, {y}",
-            p = in(reg) block.as_ptr(),
-            byte = const BYTE + OFF,
-            y = lateout(reg) y,
-            out("a14") _,
-            out("sar") _,
-            options(nostack, readonly),
-        );
+    #[inline(never)]
+    pub(super) fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
+        // Sixteen big-endian words. The caller already holds a whole block,
+        // so the conversion is once, ahead of the round loop, and the loop
+        // does not carry a `try_into` panic path.
+        let (words, _) = block.as_chunks::<8>();
+        let mut a = state[0];
+        let mut b = state[1];
+        let mut c = state[2];
+        let mut d = state[3];
+        let mut e = state[4];
+        let mut f = state[5];
+        let mut g = state[6];
+        let mut h = state[7];
+
+        // A 16-word window into the whole W array, as in sha256.rs.
+        let mut w: [u64; 16] = [0; 16];
+
+        for t in 0..80 {
+            // W[0..16] comes from the block; W[16..80] is
+            //
+            // W[t] = SSIG1(W[t - 2]) + W[t - 7] + SSIG0(W[t - 15]) + W[t - 16]
+            //
+            // with every index reduced mod 16 into the window. `W[t - 16]`
+            // is the slot `W[t]` overwrites, `t % 16`.
+            let w_t = if t < 16 {
+                u64::from_be_bytes(words[t])
+            } else {
+                SSIG1!(w[(t - 2) % 16])
+                    .wrapping_add(w[(t - 7) % 16])
+                    .wrapping_add(SSIG0!(w[(t - 15) % 16]))
+                    .wrapping_add(w[t % 16])
+            };
+            w[t % 16] = w_t;
+
+            let t1 = h
+                .wrapping_add(BSIG1!(e))
+                .wrapping_add(CH!(e, f, g))
+                .wrapping_add(K[t])
+                .wrapping_add(w_t);
+            let t2 = BSIG0!(a).wrapping_add(MAJ!(a, b, c));
+            h = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(t1);
+            d = c;
+            c = b;
+            b = a;
+            a = t1.wrapping_add(t2);
+        }
+
+        state[0] = state[0].wrapping_add(a);
+        state[1] = state[1].wrapping_add(b);
+        state[2] = state[2].wrapping_add(c);
+        state[3] = state[3].wrapping_add(d);
+        state[4] = state[4].wrapping_add(e);
+        state[5] = state[5].wrapping_add(f);
+        state[6] = state[6].wrapping_add(g);
+        state[7] = state[7].wrapping_add(h);
     }
-    y
 }
 
-#[cfg(target_arch = "xtensa")]
-#[inline(always)]
-fn message_word<const BYTE: usize>(block: &[u8; 128]) -> u64 {
-    let hi = be_u32::<BYTE, 0>(block) as u64;
-    let lo = be_u32::<BYTE, 4>(block) as u64;
-    (hi << 32) | lo
-}
+#[cfg(any(rind_esp32s3, test))]
+mod unrolled {
+    use super::K;
 
-#[cfg(not(target_arch = "xtensa"))]
-#[inline(always)]
-fn message_word<const BYTE: usize>(block: &[u8; 128]) -> u64 {
-    let (words, _) = block.as_chunks::<8>();
-    u64::from_be_bytes(words[BYTE / 8])
-}
-
-// `W[t] = σ1(W[t-2]) + W[t-7] + σ0(W[t-15]) + W[t-16]`, `SLOT = t mod 16`.
-// The slot is the round number, not the message.
-#[inline(always)]
-fn schedule<const SLOT: usize>(w: &mut [core::mem::MaybeUninit<u64>; 16]) -> u64 {
-    // SAFETY: the message rounds write every slot before the first call.
-    // `SLOT` is `0..16`. A slot already written in this group is the new
-    // schedule word the formula reads (`W[t-15]` when `SLOT` is 15); every
-    // other read still holds the previous window. The write of this slot
-    // happens after those reads. The indexes are constant.
-    let w_t = unsafe {
-        SSIG1!(w[(SLOT + 14) & 15].assume_init())
-            .wrapping_add(w[(SLOT + 9) & 15].assume_init())
-            .wrapping_add(SSIG0!(w[(SLOT + 1) & 15].assume_init()))
-            .wrapping_add(w[SLOT].assume_init())
-    };
-    w[SLOT].write(w_t);
-    w_t
-}
-
-// `$i` is a literal, so the word index and the constant's offset both fold.
-macro_rules! message_rounds {
-    ($w:ident, $block:ident, $kp:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $($i:literal),*) => {
-        $(
-            {
-                let kk = round_constant::<$i>($kp);
-                let ww = message_word::<{ $i * 8 }>($block);
-                $w[$i].write(ww);
-                ($a, $b, $c, $d, $e, $f, $g, $h) =
-                    sha512_round(ww, kk, $a, $b, $c, $d, $e, $f, $g, $h);
-            }
-        )*
-    };
-}
-
-macro_rules! schedule_rounds {
-    ($w:ident, $kp:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $($i:literal),*) => {
-        $(
-            {
-                let kk = round_constant::<$i>($kp);
-                let ww = schedule::<$i>(&mut $w);
-                ($a, $b, $c, $d, $e, $f, $g, $h) =
-                    sha512_round(ww, kk, $a, $b, $c, $d, $e, $f, $g, $h);
-            }
-        )*
-    };
-}
-
-// ESP32-S3 ESP-IDF only (`xtensa-esp32s3-espidf`, and not the
-// `esp32s3-sha512-flash` feature). ESP-IDF's `soc.lf` puts `.iram1` and
-// `.iram1.*` in instruction RAM. The flash catch-all
-// `*(.literal .literal.* .text .text.*)` is applied per input file, so a
-// `.text.*` body here would sit in flash text ahead of later objects.
-// The Xtensa backend names the literal pool `.iram1.text.literal`, and
-// `l32r` reads that pool from IRAM. `K` is in `.dram1.rodata` (internal
-// DRAM). The layout probe checks opt-level 3, s, and z: each loads nothing
-// from flash and makes no call from this body. opt-level 0 is not a
-// cache-off guarantee. The length check in `sha512_compress_blocks` stays
-// in ordinary flash text. The ESP32, the ESP32-S2, and `*-none-elf` keep
-// the ordinary
-// text section. ESP-IDF Xtensa SHA-256 is `sha256_iram`, already in IRAM.
-//
-// SAFETY: the attribute only selects the output section. The instructions
-// match the ordinary text placement, and ESP-IDF maps `.iram1` as executable.
-#[inline(never)]
-#[cfg_attr(
-    all(
-        target_arch = "xtensa",
-        target_os = "espidf",
-        rind_esp32s3,
-        not(feature = "esp32s3-sha512-flash"),
-    ),
-    unsafe(link_section = ".iram1.text")
-)]
-fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
-    let mut a = state[0];
-    let mut b = state[1];
-    let mut c = state[2];
-    let mut d = state[3];
-    let mut e = state[4];
-    let mut f = state[5];
-    let mut g = state[6];
-    let mut h = state[7];
-
-    // A 16-word window into the whole W array, as in sha256.rs. Left
-    // uninitialized: a `[0; 16]` is a `memset`, and on the ESP32-S3 this
-    // body is in IRAM, where a call into flash faults while the cache is
-    // off. Rounds 0..16 write every word before a later round reads it.
-    // The sixteen-round groups are the same shape as `sha256_iram`: a
-    // `for` and a `K[t]` index keep a panic path that opt-level s/z can
-    // outline into flash.
-    let mut w = [const { core::mem::MaybeUninit::<u64>::uninit() }; 16];
-    let kp = K.as_ptr();
-    message_rounds!(
-        w, block, kp, a, b, c, d, e, f, g, h, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
-    );
-    // SAFETY: `K` has 80 words. The next group starts at word 16.
-    let mut kp = unsafe { kp.add(16) };
-    // Four trips, a public count. Not a `for`: a range iterator is one of
-    // the core helpers opt-level s/z outlines into flash.
-    let mut n = 0u32;
-    while n < 4 {
-        schedule_rounds!(
-            w, kp, a, b, c, d, e, f, g, h, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
-        );
-        // SAFETY: the next start is word 32, 48, 64, or 80. The pointer at
-        // 80 is one past the end of `K` and is not dereferenced; the loop
-        // ends first.
-        kp = unsafe { kp.add(16) };
-        n += 1;
+    // One FIPS 180-4 round. Returning the working variables in rotated order
+    // keeps a loop edge from moving them.
+    #[inline(always)]
+    fn sha512_round(
+        w: u64,
+        k: u64,
+        a: u64,
+        b: u64,
+        c: u64,
+        d: u64,
+        e: u64,
+        f: u64,
+        g: u64,
+        h: u64,
+    ) -> (u64, u64, u64, u64, u64, u64, u64, u64) {
+        let t1 = h
+            .wrapping_add(BSIG1!(e))
+            .wrapping_add(CH!(e, f, g))
+            .wrapping_add(k)
+            .wrapping_add(w);
+        let t2 = BSIG0!(a).wrapping_add(MAJ!(a, b, c));
+        (t1.wrapping_add(t2), a, b, c, d.wrapping_add(t1), e, f, g)
     }
 
-    state[0] = state[0].wrapping_add(a);
-    state[1] = state[1].wrapping_add(b);
-    state[2] = state[2].wrapping_add(c);
-    state[3] = state[3].wrapping_add(d);
-    state[4] = state[4].wrapping_add(e);
-    state[5] = state[5].wrapping_add(f);
-    state[6] = state[6].wrapping_add(g);
-    state[7] = state[7].wrapping_add(h);
+    // `K` at a fixed offset from `kp`. `I` is a literal, so the load is a
+    // constant displacement and not a bounds check. A safe `K[base + I]` with
+    // a runtime `base` keeps a panic path, and at opt-level s/z that path is a
+    // call into flash.
+    #[inline(always)]
+    fn round_constant<const I: usize>(kp: *const u64) -> u64 {
+        // SAFETY: callers pass `I` in `0..16` and a `kp` at `K[0]`, `K[16]`,
+        // `K[32]`, `K[48]`, or `K[64]`, so `kp.add(I)` stays inside `K`. `K` is
+        // aligned for `u64`, and `I` is a constant. The load does not depend on
+        // the message or the state.
+        unsafe { kp.add(I).read() }
+    }
+
+    // Big-endian word at byte `BYTE + OFF`, both literal offsets. Two
+    // parameters because a const argument cannot be `{ BYTE + 4 }` on stable,
+    // but an `asm!` const operand can add them.
+    #[cfg(target_arch = "xtensa")]
+    #[inline(always)]
+    fn be_u32<const BYTE: usize, const OFF: usize>(block: &[u8; 128]) -> u32 {
+        let y;
+        // SAFETY: the same `l32i` plus byte swap as `sha256_iram`'s message
+        // load. This module is Xtensa only on the ESP32-S3 (`rind_esp32s3`:
+        // its ESP-IDF and none-elf triples), the one core this load is
+        // checked on. `BYTE + OFF` is a multiple of 4 in `0..128`. ESP-IDF
+        // v5.5.1's ESP32-S3 `core-isa.h` sets `XCHAL_UNALIGNED_LOAD_HW` to 1
+        // and `XCHAL_UNALIGNED_LOAD_EXCEPTION` to 0: Hardware Alignment with
+        // no unaligned-load exception, so `l32i` returns the word at an
+        // address that is not a multiple of 4. It does not trap, it does not
+        // ignore the low bits, and it does not call a helper.
+        // `admin/esp32s3-sha512-layout` checks that header, and runs this
+        // sequence, including a block whose address is not a multiple of 4,
+        // on QEMU's `esp32s3` CPU. That is the emulator's model of the core,
+        // not a board measurement. The
+        // sequence writes SAR, `a14`, and `y`, and does not use the stack. esp rustc
+        // 1.97 lists `sar` as a clobber-only register, the same class
+        // `sha256_iram` names with `out("sar") _`. The `ssai 8` is consumed by
+        // the three `src` before the block ends. The address is the public
+        // block cursor. The loaded bytes are the message, and none of these
+        // instructions branches or loops on them.
+        unsafe {
+            core::arch::asm!(
+                "l32i a14, {p}, {byte}",
+                "ssai 8",
+                "srli {y}, a14, 16",
+                "src {y}, {y}, a14",
+                "src {y}, {y}, {y}",
+                "src {y}, a14, {y}",
+                p = in(reg) block.as_ptr(),
+                byte = const BYTE + OFF,
+                y = lateout(reg) y,
+                out("a14") _,
+                out("sar") _,
+                options(nostack, readonly),
+            );
+        }
+        y
+    }
+
+    #[cfg(target_arch = "xtensa")]
+    #[inline(always)]
+    pub(super) fn message_word<const BYTE: usize>(block: &[u8; 128]) -> u64 {
+        let hi = be_u32::<BYTE, 0>(block) as u64;
+        let lo = be_u32::<BYTE, 4>(block) as u64;
+        (hi << 32) | lo
+    }
+
+    #[cfg(not(target_arch = "xtensa"))]
+    #[inline(always)]
+    pub(super) fn message_word<const BYTE: usize>(block: &[u8; 128]) -> u64 {
+        let (words, _) = block.as_chunks::<8>();
+        u64::from_be_bytes(words[BYTE / 8])
+    }
+
+    // `W[t] = σ1(W[t-2]) + W[t-7] + σ0(W[t-15]) + W[t-16]`, `SLOT = t mod 16`.
+    // The slot is the round number, not the message.
+    #[inline(always)]
+    fn schedule<const SLOT: usize>(w: &mut [core::mem::MaybeUninit<u64>; 16]) -> u64 {
+        // SAFETY: the message rounds write every slot before the first call.
+        // `SLOT` is `0..16`. A slot already written in this group is the new
+        // schedule word the formula reads (`W[t-15]` when `SLOT` is 15); every
+        // other read still holds the previous window. The write of this slot
+        // happens after those reads. The indexes are constant.
+        let w_t = unsafe {
+            SSIG1!(w[(SLOT + 14) & 15].assume_init())
+                .wrapping_add(w[(SLOT + 9) & 15].assume_init())
+                .wrapping_add(SSIG0!(w[(SLOT + 1) & 15].assume_init()))
+                .wrapping_add(w[SLOT].assume_init())
+        };
+        w[SLOT].write(w_t);
+        w_t
+    }
+
+    // `$i` is a literal, so the word index and the constant's offset both fold.
+    macro_rules! message_rounds {
+        ($w:ident, $block:ident, $kp:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $($i:literal),*) => {
+            $(
+                {
+                    let kk = round_constant::<$i>($kp);
+                    let ww = message_word::<{ $i * 8 }>($block);
+                    $w[$i].write(ww);
+                    ($a, $b, $c, $d, $e, $f, $g, $h) =
+                        sha512_round(ww, kk, $a, $b, $c, $d, $e, $f, $g, $h);
+                }
+            )*
+        };
+    }
+
+    macro_rules! schedule_rounds {
+        ($w:ident, $kp:ident, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $($i:literal),*) => {
+            $(
+                {
+                    let kk = round_constant::<$i>($kp);
+                    let ww = schedule::<$i>(&mut $w);
+                    ($a, $b, $c, $d, $e, $f, $g, $h) =
+                        sha512_round(ww, kk, $a, $b, $c, $d, $e, $f, $g, $h);
+                }
+            )*
+        };
+    }
+
+    // IRAM on ESP32-S3 ESP-IDF only (`xtensa-esp32s3-espidf`, and not the
+    // `esp32s3-sha512-flash` feature). ESP-IDF's `soc.lf` puts `.iram1` and
+    // `.iram1.*` in instruction RAM. The flash catch-all
+    // `*(.literal .literal.* .text .text.*)` is applied per input file, so a
+    // `.text.*` body here would sit in flash text ahead of later objects.
+    // The Xtensa backend names the literal pool `.iram1.text.literal`, and
+    // `l32r` reads that pool from IRAM. `K` is in `.dram1.rodata` (internal
+    // DRAM). The layout probe checks opt-level 3, s, and z: each loads nothing
+    // from flash and makes no call from this body. opt-level 0 is not a
+    // cache-off guarantee. The length check in `sha512_compress_blocks` stays
+    // in ordinary flash text. `xtensa-esp32s3-none-elf` keeps the ordinary
+    // text section. ESP-IDF Xtensa SHA-256 is `sha256_iram`, already in IRAM.
+    //
+    // SAFETY: the attribute only selects the output section. The instructions
+    // match the ordinary text placement, and ESP-IDF maps `.iram1` as executable.
+    #[inline(never)]
+    #[cfg_attr(
+        all(
+            target_arch = "xtensa",
+            target_os = "espidf",
+            rind_esp32s3,
+            not(feature = "esp32s3-sha512-flash"),
+        ),
+        unsafe(link_section = ".iram1.text")
+    )]
+    pub(super) fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
+        let mut a = state[0];
+        let mut b = state[1];
+        let mut c = state[2];
+        let mut d = state[3];
+        let mut e = state[4];
+        let mut f = state[5];
+        let mut g = state[6];
+        let mut h = state[7];
+
+        // A 16-word window into the whole W array, as in sha256.rs. Left
+        // uninitialized: a `[0; 16]` is a `memset`, and on the ESP32-S3 this
+        // body is in IRAM, where a call into flash faults while the cache is
+        // off. Rounds 0..16 write every word before a later round reads it.
+        // The sixteen-round groups are the same shape as `sha256_iram`: a
+        // `for` and a `K[t]` index keep a panic path that opt-level s/z can
+        // outline into flash.
+        let mut w = [const { core::mem::MaybeUninit::<u64>::uninit() }; 16];
+        let kp = K.as_ptr();
+        message_rounds!(
+            w, block, kp, a, b, c, d, e, f, g, h, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+            15
+        );
+        // SAFETY: `K` has 80 words. The next group starts at word 16.
+        let mut kp = unsafe { kp.add(16) };
+        // Four trips, a public count. Not a `for`: a range iterator is one of
+        // the core helpers opt-level s/z outlines into flash.
+        let mut n = 0u32;
+        while n < 4 {
+            schedule_rounds!(
+                w, kp, a, b, c, d, e, f, g, h, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+            );
+            // SAFETY: the next start is word 32, 48, 64, or 80. The pointer at
+            // 80 is one past the end of `K` and is not dereferenced; the loop
+            // ends first.
+            kp = unsafe { kp.add(16) };
+            n += 1;
+        }
+
+        state[0] = state[0].wrapping_add(a);
+        state[1] = state[1].wrapping_add(b);
+        state[2] = state[2].wrapping_add(c);
+        state[3] = state[3].wrapping_add(d);
+        state[4] = state[4].wrapping_add(e);
+        state[5] = state[5].wrapping_add(f);
+        state[6] = state[6].wrapping_add(g);
+        state[7] = state[7].wrapping_add(h);
+    }
 }
 
 pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
@@ -300,9 +383,9 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     let whole = blocks.len() / 128;
     while n < whole {
         // SAFETY: `n < blocks.len() / 128`, so the 128 bytes at `ptr` are
-        // inside `blocks`. The block may be unaligned. On Xtensa,
-        // `message_word` loads it with `l32i`, which these cores perform
-        // unaligned in hardware; other targets read it as bytes. The
+        // inside `blocks`. The block may be unaligned. On the ESP32-S3,
+        // `unrolled::message_word` loads it with `l32i`, which that core
+        // performs unaligned in hardware; other targets read it as bytes. The
         // reference does not outlive this call, and `blocks` is not
         // mutated through it.
         let block = unsafe { &*ptr.cast::<[u8; 128]>() };
@@ -316,7 +399,7 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
 
 // FIPS 180-4 §4.2.3. On the ESP32-S3 ESP-IDF placement, internal DRAM rather
 // than flash `.rodata`: `.iram1` code is expected not to touch flash while
-// the cache is off. Same cfg as `sha512_compress_block`.
+// the cache is off. Same cfg as `unrolled::sha512_compress_block`.
 //
 // SAFETY: the attribute only selects the output section. The bytes are these
 // constants, and ESP-IDF maps `.dram1` into internal DRAM.
@@ -417,9 +500,9 @@ static K: [u64; 80] = [
 // UPSTREAM.md, "cargo-mutants misses compound `cfg(test)`s".
 #[cfg(any(test, rind_sha512_load_probe))]
 mod tests {
-    use super::message_word;
+    use super::unrolled::message_word;
     #[cfg(test)]
-    use super::sha512_compress_blocks;
+    use super::{rolled, sha512_compress_blocks, unrolled};
 
     /// SHA-512's IV, FIPS 180-4 §5.3.5.
     #[cfg(test)]
@@ -551,13 +634,36 @@ mod tests {
         out
     }
 
+    /// One block compression, as each body has it.
+    #[cfg(test)]
+    type Body = fn(&mut [u64; 8], &[u8; 128]);
+
+    /// Both bodies, whichever this target ships.
+    #[cfg(test)]
+    const BODIES: [(&str, Body); 2] = [
+        ("rolled", rolled::sha512_compress_block),
+        ("unrolled", unrolled::sha512_compress_block),
+    ];
+
+    #[cfg(test)]
+    fn hash_with(body: Body, message: &[u8]) -> [u8; 64] {
+        let padded = padded(message);
+        let mut state = IV;
+        // The block is the secret (a message, or an HMAC key block). Mark it
+        // before these bodies, which 64-bit builds compile only in tests, so
+        // ctgrind sees them. The state is public again before a comparison.
+        crate::low::ct::secret_slice(&padded);
+        for block in padded.as_chunks::<128>().0 {
+            body(&mut state, block);
+        }
+        encode(crate::low::ct::into_public(state))
+    }
+
+    /// Through the driver, and so the body this target ships.
     #[cfg(test)]
     fn hash(message: &[u8]) -> [u8; 64] {
         let padded = padded(message);
         let mut state = IV;
-        // The block is the secret (a message, or an HMAC key block). Mark it
-        // before this rolled loop, which 64-bit builds compile only in tests,
-        // so ctgrind sees it. The state is public again before a comparison.
         crate::low::ct::secret_slice(&padded);
         sha512_compress_blocks(&mut state, &padded);
         encode(crate::low::ct::into_public(state))
@@ -566,7 +672,54 @@ mod tests {
     #[cfg(test)]
     fn digest_hex(message: &[u8], hex_digest: &str) {
         let expected = hex::decode(hex_digest).unwrap();
-        assert_eq!(hash(message).as_slice(), expected.as_slice());
+        assert_eq!(hash(message).as_slice(), expected.as_slice(), "driver");
+        for (name, body) in BODIES {
+            assert_eq!(
+                hash_with(body, message).as_slice(),
+                expected.as_slice(),
+                "{name}"
+            );
+        }
+    }
+
+    /// The two bodies agree from chaining states no padded message reaches
+    /// in one block, on blocks whose words take every high and low bit.
+    #[test]
+    fn bodies_agree() {
+        let mut x = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            // xorshift64: arbitrary, public, reproducible.
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        for _ in 0..64 {
+            let mut state = [0u64; 8];
+            state.iter_mut().for_each(|w| *w = next());
+            let mut block = [0u8; 128];
+            block
+                .chunks_exact_mut(8)
+                .for_each(|c| c.copy_from_slice(&next().to_be_bytes()));
+            crate::low::ct::secret_slice(&block);
+            let mut rolled_state = state;
+            let mut unrolled_state = state;
+            rolled::sha512_compress_block(&mut rolled_state, &block);
+            unrolled::sha512_compress_block(&mut unrolled_state, &block);
+            assert_eq!(
+                crate::low::ct::into_public(rolled_state),
+                crate::low::ct::into_public(unrolled_state)
+            );
+        }
+        // All-zero and all-one blocks and states, the carry extremes.
+        for fill in [0u8, 0xff] {
+            let block = [fill; 128];
+            let mut rolled_state = [u64::from(fill) * 0x0101_0101_0101_0101; 8];
+            let mut unrolled_state = rolled_state;
+            rolled::sha512_compress_block(&mut rolled_state, &block);
+            unrolled::sha512_compress_block(&mut unrolled_state, &block);
+            assert_eq!(rolled_state, unrolled_state, "fill {fill:#x}");
+        }
     }
 
     #[test]

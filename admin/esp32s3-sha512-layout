@@ -12,14 +12,14 @@
 # the ESP32-S3 object as well: the same section, relocation, and no-call
 # rules, because a size-optimized outline into flash is the failure this
 # body is written to avoid. opt-level 0 is not a cache-off promise.
-# Every Xtensa object is also checked for the message byte swap: `l32i`
+# Every ESP32-S3 object is also checked for the message byte swap: `l32i`
 # into `a14`, `ssai 8`, a 16-bit shift, then `src R, R, a14`; `src R, R, R`;
-# `src R, a14, R`. That is the sequence in `be_u32`. The none-elf object is
-# then linked call0 and run under QEMU's esp32 and esp32s3 CPUs, including
-# blocks that are not word-aligned. That is the emulator's model of those
-# cores, not a cycle count. This QEMU build has no ESP32-S2 CPU. ESP-IDF
-# v5.5.1's core-isa.h for the ESP32, the ESP32-S2, and the ESP32-S3 is
-# checked instead: Hardware Alignment is on and an unaligned load does not
+# `src R, a14, R`. That is the sequence in `be_u32`. The ESP32 object must
+# have none: only the ESP32-S3 takes the unrolled body and its load. The
+# none-elf object is then linked call0 and run under QEMU's esp32s3 CPU,
+# including blocks that are not word-aligned. That is the emulator's model
+# of the core, not a cycle count. ESP-IDF v5.5.1's ESP32-S3 core-isa.h is
+# checked too: Hardware Alignment is on and an unaligned load does not
 # trap, which is that core's l32i of an address that is not a multiple of
 # 4. Board timing is not measured.
 #
@@ -31,7 +31,7 @@
 # xtensa-esp-elf binutils. Defaults are under $HOME/.espressif, which is
 # where .github/workflows/esp32s3-sha512-layout.yml installs them. It also
 # needs curl, sha256sum, a host C compiler, and network, to fetch and
-# check those three pinned headers. The host compiler reads them so the
+# check that pinned header. The host compiler reads them so the
 # Xtensa gcc's own core header cannot satisfy the include guard first.
 set -eu
 
@@ -52,11 +52,9 @@ mkdir -p "$root/.tmp"
 work=$(mktemp -d "$root/.tmp/sha512-layout.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
-# ESP-IDF v5.5.1 core-isa.h. QEMU executes an unaligned l32i on esp32 and
-# esp32s3 only. This build has no ESP32-S2 CPU, so that chip's header is
-# what says the instruction is a hardware load. The same macros are checked
-# on the two cores QEMU does run. XCHAL_UNALIGNED_LOAD_HW is the Hardware
-# Alignment option, which covers l32i. With XCHAL_UNALIGNED_LOAD_EXCEPTION
+# ESP-IDF v5.5.1's ESP32-S3 core-isa.h, beside the QEMU run below.
+# XCHAL_UNALIGNED_LOAD_HW is the Hardware Alignment option, which covers
+# l32i. With XCHAL_UNALIGNED_LOAD_EXCEPTION
 # at 0, an unaligned l32i is the word at that address: it does not trap and
 # it does not ignore the low bits. The bytes are checked before the compiler
 # reads a macro. The tag is v5.5.1, path
@@ -95,12 +93,6 @@ EOF
     -include "$hdr" "$work/$chip-unaligned.c"
   printf '%s core-isa.h: unaligned l32i is hardware\n' "$chip"
 }
-check_unaligned_l32i esp32 \
-  8171435d7244c032535b495bd4e8dfb592f492275519d5657e5fa5a05fd613db \
-  0xC2BCFFFEu 0x1CC5FE96u 260003
-check_unaligned_l32i esp32s2 \
-  4668ebfb2f51b21b3fc3dae0d93fbe3392028b52fe4c630eced8a47bdafff201 \
-  0xC2ECFAFEu 0x22075F76u 270008
 check_unaligned_l32i esp32s3 \
   7019cdf8369feda20f243f11ae5418bde0ecf99cb1c639d1ef4777957a4d800f \
   0xC2F0FFFEu 0x23090F1Fu 270012
@@ -320,17 +312,19 @@ check_iram "$work/obj/s3.o" 'opt-level 3'
 check_iram "$work/obj/s.o" 'opt-level s'
 check_iram "$work/obj/z.o" 'opt-level z'
 
-# The message load is assembly on every Xtensa target, and the host tests
-# never compile it. Require the operand order from `be_u32`, at least once
-# per half of each of the 16 message words. A swapped `src` operand fails.
+# The message load is assembly on the ESP32-S3, and the host tests never
+# compile it. Require the operand order from `be_u32`, at least once per
+# half of each of the 16 message words. A swapped `src` operand fails.
+# `none` requires that no such load is present, as on the ESP32's rolled
+# body, and lets any other `ssai 8`, such as a rotate's, through.
 check_swap() {
   label=$1
   "$objdump" -d "$2" > "$work/dis.s"
-  python3 - "$label" "$work/dis.s" << 'PY' || fail "$label byte swap"
+  python3 - "$label" "$work/dis.s" "${3:-some}" << 'PY' || fail "$label byte swap"
 import re
 import sys
 
-label, path = sys.argv[1], sys.argv[2]
+label, path, want = sys.argv[1], sys.argv[2], sys.argv[3]
 insn = re.compile(r"^\s*[0-9a-fA-F]+:\s+[0-9a-fA-F ]+\s+([a-z][a-z0-9.]*)\b(.*)$")
 
 def is_16(token):
@@ -354,6 +348,9 @@ while i < len(rows):
         continue
     window = rows[max(0, i - 1) : i + 5]
     if i == 0 or len(window) < 6:
+        if want == "none":
+            i += 1
+            continue
         raise SystemExit(f"{label}: ssai 8 is not inside a byte swap")
     load, _ssai, shift, first, second, third = window
     dest = shift[1][0] if shift[1] else ""
@@ -371,6 +368,9 @@ while i < len(rows):
         and second[1] == [dest, dest, dest]
         and third[1] == [dest, "a14", dest]
     )
+    if not ok and want == "none":
+        i += 1
+        continue
     if not ok:
         sys.stderr.write(f"{label}: byte swap operands are not l32i a14; ssai 8; shift 16; src\n")
         for item in window:
@@ -378,6 +378,11 @@ while i < len(rows):
         raise SystemExit(1)
     found += 1
     i += 5
+if want == "none":
+    if found:
+        raise SystemExit(f"{label}: expected no l32i byte swap, found {found}")
+    print(f"{label}: no l32i byte swap")
+    raise SystemExit(0)
 if found < 32:
     raise SystemExit(f"{label}: expected at least 32 byte swaps, found {found}")
 print(f"{label}: byte swaps {found}")
@@ -388,7 +393,7 @@ check_swap 'opt-level 3' "$work/obj/s3.o"
 check_swap 'opt-level s' "$work/obj/s.o"
 check_swap 'opt-level z' "$work/obj/z.o"
 check_swap 'esp32s3-sha512-flash' "$work/obj/flash.o"
-check_swap 'xtensa-esp32-espidf' "$work/obj/esp32.o"
+check_swap 'xtensa-esp32-espidf' "$work/obj/esp32.o" none
 check_swap 'xtensa-esp32s3-none-elf' "$work/obj/none.o"
 
 s3_text=.iram1.text
@@ -464,8 +469,8 @@ done
 
 # Execute the message load. The firmware link above is not runnable: its
 # text sits in the flash window, which this sim machine does not map.
-# Code, constants, and the stack stay in the instruction RAM both the
-# esp32 and esp32s3 CPU models map at 0x40000000. The stub is call0.
+# Code, constants, and the stack stay in the instruction RAM the
+# esp32s3 CPU model maps at 0x40000000. The stub is call0.
 qemu=${RIND_QEMU:-"$esp/qemu/bin/qemu-system-xtensa"}
 if [ ! -x "$qemu" ]; then
   printf 'missing %s\ninstall it as .github/workflows/esp32s3-sha512-layout.yml does\n' "$qemu" >&2
@@ -558,13 +563,6 @@ if max_end == 0 or max_end >= limit:
 print(f"load image ends at {max_end:#x}")
 '
 
-# This build's CPU list has esp32 and esp32s3 and no esp32s2. If a later
-# QEMU grows an esp32s2 CPU, the header check is no longer the only
-# evidence and the load has to run there too.
-if "$qemu" -cpu help | awk 'NR > 1 { print $1 }' | grep -qx esp32s2; then
-  fail 'this QEMU has an esp32s2 CPU; run the message load on it'
-fi
-
 run_load() {
   cpu=$1
   out=$work/load-$cpu.out
@@ -583,7 +581,6 @@ run_load() {
   printf 'qemu %s: message load OK\n' "$cpu"
 }
 
-run_load esp32
 run_load esp32s3
 
 printf 'board_timing: not measured\n'
