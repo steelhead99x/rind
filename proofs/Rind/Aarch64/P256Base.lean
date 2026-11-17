@@ -18,8 +18,9 @@ namespace rind.aarch64
 namespace P256
 
 /-- `generator_table` is the static. Aeneas names that binding `a`, which shifts
-every later anonymous let; `base_multiply` names the coordinates `x` and `y`
-so this proof does not follow that counter. -/
+every later anonymous let; `base_multiply` names the coordinates `x` and `y`,
+and the proof substitutes the binding rather than naming it, so it follows
+no generated name. -/
 @[step]
 theorem generator_table_spec :
     mid.p256.generator_table ⦃ t => t = mid.p256.precomp.CURVE_GENERATOR_PRECOMP ⦄ := by
@@ -56,7 +57,7 @@ theorem base_multiply_spec (_hr : Runs) (k : mid.p256.Scalar) (_hk : wordsNat k.
       rw [pairNat_drop _ h8]
       simp [feNat, hy_words, s1_post, mid.p256.AffineMontPoint.Y, List.slice, List.take_of_length_le, h8]
     refine ⟨(pairNat xy1.val).1, (pairNat xy1.val).2,
-      xy1_post _ p256OnCurve_G (by simpa [a_post] using tabulated), ?_⟩
+      xy1_post _ p256OnCurve_G (by subst_vars; exact tabulated), ?_⟩
     rw [q_post, pairNat_append _ _ fe.property fe1.property, ← hx, ← hy]
     exact Prod.ext fe_post fe1_post
 
