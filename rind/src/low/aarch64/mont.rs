@@ -9,15 +9,16 @@
 //! and twice as fast at 24, 48, 64, 96, and 128. It was also faster there
 //! than s2n-bignum's Karatsuba routines at 16 and 32 words.
 //!
-//! On a narrow multiplier the 16-word comparison reverses: RSA-2048's CRT
-//! primes take s2n-bignum's Karatsuba product and its 8n reduction, which
-//! is what aws-lc runs on a core outside its wide allowlist (Neoverse V1,
-//! V2, V3, and Apple). Every other width, 32 words included, keeps
-//! `bn_mul_mont` there until s2n-bignum's 32-word Karatsuba routines are
-//! measured on Cortex-A76 or Neoverse N1; the tests call those directly. On
-//! Neoverse N2, Cobalt 100, and any core Linux does not identify as
-//! Cortex-A72, Cortex-A76, or Neoverse N1, `bn_mul_mont` runs at 16 words
-//! too. The generic routines run only below two words.
+//! On a narrow multiplier both comparisons reverse: RSA-2048's CRT primes
+//! (16 words) and RSA-2048's modulus and RSA-4096's CRT primes (32 words)
+//! take s2n-bignum's Karatsuba product and its 8n reduction, which is what
+//! aws-lc runs on a core outside its wide allowlist (Neoverse V1, V2, V3,
+//! and Apple). On a Cortex-A76 at 32 words that took RSA-2048 verification
+//! and RSA-4096 signing to 0.57x and 0.52x of `bn_mul_mont`'s time. Every
+//! other width keeps `bn_mul_mont` there. On Neoverse N2, Cobalt 100, and
+//! any core Linux does not identify as Cortex-A72, Cortex-A76, or Neoverse
+//! N1, `bn_mul_mont` runs at 16 and 32 words too. The generic routines run
+//! only below two words.
 
 /// `z = x * y / 2^(64k) mod m`, for `x` and `y` below `m`, where `k` is the
 /// length of each and `n0` is `-m^-1 mod 2^64`.
@@ -25,6 +26,7 @@ pub(crate) fn mont_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) 
     assert!(z.len() == m.len() && x.len() == m.len() && y.len() == m.len());
     match m.len() {
         16 if !super::cpu::wide_multiplier() => karatsuba_mul(z, x, y, m, n0),
+        32 if !super::cpu::wide_multiplier() => karatsuba_mul_32(z, x, y, m, n0),
         k if k >= 2 => mul_mont(z, x, y, m, n0),
         _ => super::bignum_montmul::bignum_montmul(z, x, y, m),
     }
@@ -36,6 +38,7 @@ pub(crate) fn mont_sqr(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
     assert!(z.len() == m.len() && x.len() == m.len());
     match m.len() {
         16 if !super::cpu::wide_multiplier() => karatsuba_sqr(z, x, m, n0),
+        32 if !super::cpu::wide_multiplier() => karatsuba_sqr_32(z, x, m, n0),
         k if k >= 2 => mul_mont(z, x, x, m, n0),
         _ => super::bignum_montsqr::bignum_montsqr(z, x, m),
     }
@@ -52,6 +55,20 @@ fn karatsuba_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) {
 fn karatsuba_sqr(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
     let mut product = [0; 32];
     super::bignum_ksqr_16_32::bignum_ksqr_16_32(&mut product, x, &mut [0; 24]);
+    redc_8n(z, &mut product, m, n0);
+}
+
+/// `mont_mul` for 32 words on a narrow multiplier.
+fn karatsuba_mul_32(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) {
+    let mut product = [0; 64];
+    super::bignum_kmul_32_64::bignum_kmul_32_64(&mut product, x, y, &mut [0; 96]);
+    redc_8n(z, &mut product, m, n0);
+}
+
+/// `mont_sqr` for 32 words on a narrow multiplier.
+fn karatsuba_sqr_32(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
+    let mut product = [0; 64];
+    super::bignum_ksqr_32_64::bignum_ksqr_32_64(&mut product, x, &mut [0; 72]);
     redc_8n(z, &mut product, m, n0);
 }
 
@@ -155,21 +172,12 @@ mod tests {
         assert!(ran > 0);
     }
 
-    /// The Karatsuba product at 16 words, as `mont_mul` runs it on a narrow
-    /// multiplier, or at 32, which no dispatch reaches until it is measured.
+    /// The Karatsuba product `mont_mul` runs on a narrow multiplier, at 16
+    /// or 32 words, whichever multiplier this core has.
     fn kmul_any(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) {
         match m.len() {
             16 => karatsuba_mul(z, x, y, m, n0),
-            32 => {
-                let mut product = [0; 64];
-                super::super::bignum_kmul_32_64::bignum_kmul_32_64(
-                    &mut product,
-                    x,
-                    y,
-                    &mut [0; 96],
-                );
-                redc_8n(z, &mut product, m, n0);
-            }
+            32 => karatsuba_mul_32(z, x, y, m, n0),
             k => panic!("no Karatsuba product at {k} words"),
         }
     }
@@ -178,11 +186,7 @@ mod tests {
     fn ksqr_any(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
         match m.len() {
             16 => karatsuba_sqr(z, x, m, n0),
-            32 => {
-                let mut product = [0; 64];
-                super::super::bignum_ksqr_32_64::bignum_ksqr_32_64(&mut product, x, &mut [0; 72]);
-                redc_8n(z, &mut product, m, n0);
-            }
+            32 => karatsuba_sqr_32(z, x, m, n0),
             k => panic!("no Karatsuba square at {k} words"),
         }
     }
