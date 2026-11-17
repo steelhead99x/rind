@@ -26,8 +26,42 @@ for l in sys.stdin:
   echo "   -> ${exe[$name]}"
 done < "$spec"
 [ -n "${SKIP_RUN:-}" ] && exit 0
+# Optional bench lock: BENCH_LOCK=<dir> takes it with mkdir before each round,
+# once no lock exists, no cargo or rustc runs, and the CPU is QUIET_IDLE%
+# (default 75) idle; it is released after the round.
+idle() {
+  if [ -r /proc/stat ]; then
+    read -r _ a b c d e f g _ < /proc/stat; sleep 2
+    read -r _ A B C D E F G _ < /proc/stat
+    echo $(( 100 * ((D + E) - (d + e)) / ((A+B+C+D+E+F+G) - (a+b+c+d+e+f+g)) ))
+  else
+    top -l 2 -n 0 -s 1 | awk '/CPU usage/{v=$7} END{sub(/%/,"",v); printf "%d\n", v}'
+  fi
+}
+quiet() {
+  [ ! -e "$BENCH_LOCK" ] && ! pgrep -x rustc >/dev/null && ! pgrep -x cargo >/dev/null \
+    && [ "$(idle)" -ge "${QUIET_IDLE:-75}" ]
+}
+take_lock() {
+  [ -z "${BENCH_LOCK:-}" ] && return 0
+  while :; do
+    until quiet; do sleep 5; done
+    mkdir "$BENCH_LOCK" 2>/dev/null && break
+  done
+  echo "lane=argon2-simd what=argon2 fills round $1 start=$(date '+%F %T %Z') pid=$$" > "$BENCH_LOCK/owner"
+  echo "== lock taken for round $1, idle $(idle)%"
+}
+drop_lock() {
+  [ -z "${BENCH_LOCK:-}" ] && return 0
+  rm -f "$BENCH_LOCK/owner"; rmdir "$BENCH_LOCK"
+}
+trap drop_lock_if_ours EXIT
+drop_lock_if_ours() {
+  [ -n "${BENCH_LOCK:-}" ] && grep -qs "pid=$$\$" "$BENCH_LOCK/owner" && drop_lock || true
+}
 n=${#names[@]}
 for ((r = 1; r <= rounds; r++)); do
+  take_lock "$r"
   for ((i = 0; i < n; i++)); do
     c=${names[$(( (i + r - 1) % n ))]}
     dir="$out/$c/r$r"; mkdir -p "$dir"
@@ -36,4 +70,5 @@ for ((r = 1; r <= rounds; r++)); do
     # shellcheck disable=SC2086
     env CRITERION_HOME="$dir/criterion" ${envs[$c]} "${pin[@]}" "${exe[$c]}" --bench --noplot 2>&1 | tee "$dir/log.txt"
   done
+  drop_lock
 done
