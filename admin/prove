@@ -14,7 +14,7 @@
 # HACL*'s SHA-2 instead of aws-lc's. So does armv7, its header-protection model
 # and ChaCha20 proof.
 #
-# Usage: admin/prove [bytes | hol-light [<arch>] | cosim | lean | session <arch> [<file>]]
+# Usage: admin/prove [bytes | hol-light [<arch>] | cosim | vg | lean | session <arch> [<file>]]
 #
 # An argument checks only those proofs, `bytes` only that the assembly rind
 # imports is the object code its upstream's proofs checked, and declares
@@ -24,7 +24,10 @@
 # since it needs an x86_64 CPU with AVX2, checks the AArch32 model against
 # qemu-arm and the instructions rind adds to s2n-bignum's x86 model against
 # this CPU, both in its fork in `thirdparty/s2n-bignum`. The Lean proofs need
-# an x86_64 CPU with AVX2 too, to test the intrinsic models. `session` checks
+# an x86_64 CPU with AVX2 too, to test the intrinsic models. `vg`, which no
+# other run includes either, checks pyca/verified-garbage's code for this
+# CPU's target against VG's Lean models, as `vg` below describes, in the
+# flake's `vg` dev shell: `nix develop .#vg --command admin/prove vg`. `session` checks
 # nothing: it starts a HOL Light session for developing the proofs of `arch`,
 # `x86_64` or `aarch64`, which `session` below describes. Run it in the flake's
 # `prove` dev shell: `nix develop .#prove --command admin/prove`, or for the
@@ -32,9 +35,9 @@
 # develop .#hol-light --command admin/prove hol-light`.
 set -euo pipefail
 
-usage="usage: admin/prove [bytes | hol-light [x86_64 | aarch64 | armv7] | cosim | lean | session <x86_64 | aarch64> [<file>]]"
+usage="usage: admin/prove [bytes | hol-light [x86_64 | aarch64 | armv7] | cosim | vg | lean | session <x86_64 | aarch64> [<file>]]"
 case "${1:-}" in
-'' | bytes | cosim | lean) only=${1:-} ;;
+'' | bytes | cosim | vg | lean) only=${1:-} ;;
 hol-light)
     if [[ $# -gt 2 || ($# -eq 2 && $2 != x86_64 && $2 != aarch64 && $2 != armv7) ]]; then
         echo "$usage" >&2
@@ -448,6 +451,79 @@ cosim() {
         ./cosim.native)
 }
 
+# Checks pyca/verified-garbage's (VG's) code for this CPU's target against
+# VG's Lean models, so a theorem of VG's about a routine rind vendors from it
+# is about rind's machine code: `admin/import-vg-models --check` that
+# `proofs/verified-garbage` holds VG's models at its REV; `admin/vg-bytes`
+# that VG's machine code, and each routine rind vendors, is the text VG's
+# proofs are about; and the cosimulation, which runs each distinct
+# instruction of VG's code, for `VG_COSIM_CASES` random states each from the
+# seed `VG_COSIM_SEED`, on this CPU, or where it lacks a feature the
+# instruction needs, under Intel SDE or qemu-aarch64, and fails unless every
+# end state is the one VG's model gives. The groups split into a fixed number
+# of parts, each seeded from its index, so a seed gives the same cases on
+# every machine.
+vg() {
+    local dir=$out/vg upstream=.tmp/upstream/verified-garbage arch emu
+    local cases=${VG_COSIM_CASES:-4} seed=${VG_COSIM_SEED:-1} parts=16 cpu emulated part failed=0
+    local cosim=proofs/verified-garbage/.lake/build/bin/vg-cosim
+    arch=$(uname -m)
+    case $arch in
+    x86_64) emu=(sde -future --) ;;
+    aarch64) emu=(qemu-aarch64 -cpu "max,sve-default-vector-length=16") ;;
+    *)
+        echo "admin/prove: vg needs an x86_64 or aarch64 CPU" >&2
+        return 1
+        ;;
+    esac
+    hold vg
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    admin/upstream verified-garbage
+    admin/import-vg-models --check "$upstream"
+    hold scratch
+    build_asm "$arch"
+    rind_index "$arch" >/dev/null
+    admin/vg-bytes "$upstream" "$arch" "$dir" --rind "$out/asm/$arch-units"/*.rcgu.o
+    release scratch
+    (cd proofs/verified-garbage && lake build)
+    rustc --edition 2024 -O -o "$dir/runner" admin/vg-cosim-runner.rs
+    # A case that faults must name its instruction and fail the run, on the
+    # CPU and under the emulator.
+    local fault status want under
+    case $arch in
+    x86_64) want="the CPU faulted (signal 11) in mov rax, QWORD PTR [rbx]" ;;
+    aarch64) want="the CPU faulted (signal 11) in ldr x0, [x1]" ;;
+    esac
+    for under in cpu emulator; do
+        status=0
+        if [[ $under == emulator ]]; then
+            fault=$("${emu[@]}" "$dir/runner" --fault-test 2>&1) || status=$?
+        else
+            fault=$("$dir/runner" --fault-test 2>&1) || status=$?
+        fi
+        if [[ $status != 1 || $fault != "vg-cosim-runner: $want" ]]; then
+            echo "admin/prove: the runner's fault test on the $under exited $status with: $fault" >&2
+            return 1
+        fi
+    done
+    cpu=$("$dir/runner" --features)
+    emulated=$("${emu[@]}" "$dir/runner" --features)
+    split -n l/$parts -d -a 2 "$dir/groups.tsv" "$dir/part."
+    local pids=() pid
+    for part in $(seq -f %02g 0 $((parts - 1))); do
+        "$cosim" "$arch" "$dir/part.$part" "$cases" $((seed * parts + 10#$part)) \
+            "$cpu" "$dir/part.$part.cpu" "$emulated" "$dir/part.$part.emu" &
+        pids+=($!)
+    done
+    for pid in "${pids[@]}"; do
+        wait "$pid" || failed=1
+    done
+    "$dir/runner" "$dir"/part.??.cpu || failed=1
+    "${emu[@]}" "$dir/runner" "$dir"/part.??.emu || failed=1
+    return $failed
+}
+
 # The file each target's proofs load first, which its session images hold
 # loaded.
 declare -A hol_light_base=([x86_64]=x86/proofs/base.ml [aarch64]=arm/proofs/base.ml)
@@ -699,6 +775,9 @@ if [[ -z $only || $only == hol-light ]]; then
 fi
 if [[ $only == cosim ]]; then
     cosim
+fi
+if [[ $only == vg ]]; then
+    vg
 fi
 if [[ $only == session ]]; then
     session "$session_arch" "$session_file"
@@ -1136,7 +1215,21 @@ extract_kdf() {
 # translation's apart from x86_64's: Cargo can reuse a build script's output
 # across builds whose cfgs differ, such as `just check`'s portable cross builds,
 # leaving `rind_backend` naming another backend than the one compiled.
-prove_target=$PWD/target/prove
+#
+# Each is keyed by the toolchain Charon builds with, since Cargo reuses a build
+# across a bump that keeps the compiler's version string, such as nixpkgs's,
+# and fails with "can't find crate for `cfg_if`". Charon is a wrapper naming its
+# nightly Rust and standard library sysroots by store path, so its resolved
+# path, with the compiler's `-vV` for a Charon outside Nix, changes with any of
+# them. The directories of other keys are removed, so the cache does not grow.
+# Each on its own line, so that a missing Charon or a failing rustc stops the
+# script before the cache of the working toolchain is pruned.
+charon_path=$(realpath -e "$(command -v charon)")
+rustc_version=$(rustc -vV)
+toolchain=$(printf '%s\n' "$charon_path" "$rustc_version" | sha256sum)
+prove_target=$PWD/target/prove-${toolchain:0:16}
+mkdir -p target
+find "$PWD/target" -mindepth 1 -maxdepth 1 -name 'prove*' ! -name "prove-${toolchain:0:16}" ! -name "prove-${toolchain:0:16}-portable" -exec rm -rf {} +
 export CARGO_TARGET_DIR=$prove_target
 
 extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
@@ -1268,6 +1361,7 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --opaque crate::high::rsa::pkcs1_components \
     --opaque crate::high::rsa::spki_components \
     --opaque 'crate::high::rsa::_::to_pkcs1_der' \
+    --opaque 'crate::mid::rsa_pub::_::public_op_ifma' \
     --include crate::low::posint \
     --include crate::low::x86_64::mont::mont_mul \
     --include crate::low::x86_64::mont::mont_sqr \

@@ -762,7 +762,7 @@ graviola isn't timed on `ovh-sea`: it requires ADX, which this CPU lacks.
 
 ## Build cost
 
-A cold `cargo build --release` of a minimal binary per library (AES-128-GCM, SHA-256, ECDSA P-256, and X25519) and of a rustls client per provider, by `admin/build-cost`: the median of three builds with an empty target directory and a warm download cache, their CPU time, the stripped binary's size, the build tools it needs beyond rustc and a linker, and the crates it compiles. The system OpenSSL build leaves the library itself out of its size; the vendored build is the static figure.
+A cold `cargo build --release` of a minimal binary per library (AES-128-GCM, SHA-256, ECDSA P-256, and X25519) and of a rustls client per provider, by `admin/build-cost`: the median of three builds with an empty target directory and a warm download cache, their CPU time, the stripped binary's size, the build tools it needs beyond rustc and a linker, and the crates it compiles. The system OpenSSL build leaves the library itself out of its size; the vendored build is the static figure. verified-garbage has no P-256 key generation, so its binary imports a random scalar instead, and no rustls provider, so it has no rustls build.
 
 ### `nixos`
 
@@ -858,13 +858,13 @@ Measured 2026-11-06 at [`6b185382`](https://github.com/kixel-ai/rind/commit/6b18
 
 ## CPU tiers
 
-GitHub's runners, timed by the weekly `bench` workflow with CPU features denied as `bench.yml` describes: x86_64 runs every feature, its name suffixed with the AES-GCM tier the runner drew (AVX-512 or VAES AVX2); no IFMA denies AVX-512 IFMA, and no AVX-512 all of AVX-512 but VAES and VPCLMULQDQ; from no ADX, each column denies more (no ADX: ADX and AVX-512 IFMA; no AVX2: also AVX2, BMI2, SHA-NI, AVX-512, VAES, and VPCLMULQDQ; no AVX: also AVX; no AES-NI: also AES-NI, PCLMULQDQ, and SSE4.1; SSE2: also SSSE3). aarch64 runs with the crypto extension, no SHA-3 without the SHA-512 and SHA-3 instructions, no crypto without any of them, armv7 in 32-bit mode on the same core, and armv7 NEON there without the crypto extension. portable times rind's portable backend, forced with `--cfg rind_portable`, against aws-lc's C built without assembly; ring has no such build, so it sits that column out. Each cell is rind's time over the fastest of aws-lc-rs and ring (aws-lc-rs alone where a feature is denied, since ring can't be denied one), in the row's benchmark where rind trails most. An empty cell runs the same code as the one to its left, so it isn't timed.
+GitHub's runners, timed by the weekly `bench` workflow with CPU features denied as `bench.yml` describes: x86_64 runs every feature, its name suffixed with the AES-GCM tier the runner drew (AVX-512 or VAES AVX2); no IFMA denies AVX-512 IFMA, and no AVX-512 all of AVX-512 but VAES and VPCLMULQDQ; from no ADX, each column denies more (no ADX: ADX and AVX-512 IFMA; no AVX2: also AVX2, BMI2, SHA-NI, AVX-512, VAES, and VPCLMULQDQ; no AVX: also AVX; no AES-NI: also AES-NI, PCLMULQDQ, and SSE4.1; SSE2: also SSSE3). aarch64 runs with the crypto extension, no SHA-3 without the SHA-512 and SHA-3 instructions, no crypto without any of them, armv7 in 32-bit mode on the same core, and armv7 NEON there without the crypto extension. portable times rind's portable backend, forced with `--cfg rind_portable`, against aws-lc's C built without assembly; ring has no such build, and verified-garbage runs its assembly there, so both sit that column out. Each cell is rind's time over the fastest of aws-lc-rs, ring, and verified-garbage (without ring where a feature is denied, since ring can't be denied one), in the row's benchmark where rind trails most. A cell verified-garbage wins gets a quest that switches rind to its proven code, not an entry under Known gaps. An empty cell runs the same code as the one to its left, so it isn't timed.
 
 From [run 42734638175](https://github.com/kixel-ai/rind/actions/runs/42734638175), 2026-11-10 at [`3585c47b`](https://github.com/kixel-ai/rind/commit/3585c47bd13bb28d90701a033657a3d38d6a0d55), on AMD EPYC 7763 64-Core Processor, AMD EPYC 9V45 96-Core Processor, AMD EPYC 9V74 80-Core Processor, Neoverse-N2.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/tiers-dark.svg">
-  <img alt="rind's time over the fastest of aws-lc-rs and ring, by CPU tier" src="benchmarks/tiers.svg">
+  <img alt="rind's time over the fastest of aws-lc-rs, ring, and verified-garbage, by CPU tier" src="benchmarks/tiers.svg">
 </picture>
 
 <details>
@@ -1205,7 +1205,7 @@ A ✓ means a published, machine-checked proof shows that all the code computing
 | Library | Operations | Platform | Proof |
 |---|---|---|---|
 | rind | `x25519-ecdh` | x86_64 | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's dispatch table holds its own curve's functions, the only table rind builds, of its agreement API's X25519 down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of curve25519_x25519, curve25519_x25519base, their _alt forms without BMI2 and ADX, and bignum_eq, of s2n-bignum's own object code, which rind transliterates](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/X25519.lean) |
-| rind | `rsa2048-pkcs1-sha256-verify` | x86_64 with bmi2, adx | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's RSASSA-PKCS1-v1_5 SHA-256 verification against RFC 8017, key loading's checks, R^2 mod n, and -n^-1 mod 2^64 included, down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of bignum_kmul_16_32, bignum_kmul_32_64, bignum_ksqr_16_32, bignum_ksqr_32_64, bignum_emontredc_8n, bignum_optsub, bignum_cmp_lt, bignum_bitsize, and bignum_negmodinv, of s2n-bignum's own object code, which rind transliterates](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/RsaDispatch.lean) |
+| rind | `rsa2048-pkcs1-sha256-verify` | x86_64 with bmi2, adx without avx512ifma | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's RSASSA-PKCS1-v1_5 SHA-256 verification against RFC 8017, key loading's checks, R^2 mod n, and -n^-1 mod 2^64 included, down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of bignum_kmul_16_32, bignum_kmul_32_64, bignum_ksqr_16_32, bignum_ksqr_32_64, bignum_emontredc_8n, bignum_optsub, bignum_cmp_lt, bignum_bitsize, and bignum_negmodinv, of s2n-bignum's own object code, which rind transliterates](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/RsaDispatch.lean) |
 | rind | `x25519-ecdh` | aarch64 | [rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's dispatch table holds its own curve's functions, the only table rind builds, of its agreement API's X25519 down to s2n-bignum's routines, composed with s2n-bignum's HOL Light proofs of curve25519_x25519_byte_alt and curve25519_x25519base_byte_alt, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of bignum_eq, of the object code rind's build emits](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/X25519.lean) |
 | rind | `sha512/*` | x86_64 with intel, avx, ssse3 without avx2 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA-512, padding included, down to aws-lc's sha512_block_data_order_avx, which rind runs only on Intel's CPUs without AVX2, composed with aws-lc-verification's SAW proof of that routine, of aws-lc c21d40da, whose SHA-512 code rind's copy from 5ed12cce keeps](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha512.lean) |
 | rind | `sha512/*` | x86_64 with avx, avx2, bmi1, bmi2, popcnt, ssse3 without sha512 | [rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA-512, padding included, down to OpenSSL's sha512_block_data_order_avx2, which rind runs on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3 but without the SHA512 instructions, composed with rind's HOL Light proof of that routine, of the object code rind's build emits, on s2n-bignum's x86 model with the instructions rind adds to it, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's](https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha512.lean) |
@@ -1244,14 +1244,42 @@ A ✓ means a published, machine-checked proof shows that all the code computing
 ## Updating this report
 
 `admin/bench-report collect` runs the report's benchmarks, then
-`admin/build-cost`, on each benchmark host in turn over ssh, in the Nix dev
+`admin/build-cost`, on each machine in `COLLECT_HOSTS` in turn over ssh, in the Nix dev
 shell and under `quest gate`, which waits for the host to have room but
 shares it with other gated work, so its numbers are noisier than the weekly
 `bench` workflow's runners, which give the clean ones; it skips any host that is still busy, and writes their results and the hosts' details as JSON under
 `.tmp/bench-report/`. `admin/bench-report weekly` saves the latest weekly
-`bench` run's results, and `admin/bench-report render --from DIR` copies a
-collection's measured hosts into `benchmarks/data/` and writes
+`bench` run's results, and `admin/bench-report render --from DIR` copies every
+measured host JSON from that directory into `benchmarks/data/` and writes
 `BENCHMARKS.md`, its SVGs, which the README shows too, and the README's comparison table from them,
 `benchmarks/verified.toml`, and
 `benchmarks/gaps.toml`, which must hold a quest or a reason for every gap
-over 10%.
+over 10%. `render --check` fails if those files are out of date and writes nothing,
+so it refuses `--from`: import first, then check.
+
+`admin/bench-report run` measures the machine it is on. Anyone can run it: there is
+no host list to edit. The result's name is a slug of the CPU model, such as
+`intel-core-ultra-9-275hx`, unless `--host` sets another filesystem-safe name, and
+the JSON records the raw CPU string, that slug, the core counts, and the OS.
+A slug that equals a nightly tier name gains a `-host` suffix, so a minimal aarch64
+Linux box is `aarch64-host` rather than the reserved name `aarch64`, and a host whose
+chosen name is that spelling is left as it is. A second machine
+that wants a slug already on disk is stored as `<slug>-<tag>`, or `<slug>-2` when that
+alias is taken, and a later import replaces that file. The tag is eight hex characters
+of HMAC-SHA256 over the OS machine id, under a fixed application key. An empty, all-zero,
+or uninitialized id is not a tag. A machine without one passes `--host`. A slug file
+this machine already has is refreshed, along with any second alias that carries its tag.
+A file without a tag may be any machine, so an import never replaces, reuses, or deletes
+one: a tagged result is stored beside it, and a result without a tag whose name is
+already on disk is not imported until it is rerun with a different `--host`.
+`render --from DIR --adopt NAME` is the one exception: it writes the tag of DIR's tagged
+`NAME.json` into the untagged `NAME.json` on disk, so that machine's file is refreshed in
+place from then on, and it refuses a missing or tagged file, an untagged or alias result,
+or one older than that file. No import replaces or deletes a file from the same machine
+that started later. Of one
+machine's results under one slug in a collection, only the newest is imported.
+`summary` and `render --from` read every readable measured `<host>.json` and name any
+file they skip, including one missing a field the report shows or with a time that is
+not a finite number above zero.
+`collect` reaches only the maintainer's machines. A gap's `on` may name any host with a
+result, or any nightly tier.

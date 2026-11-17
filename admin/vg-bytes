@@ -1,0 +1,418 @@
+#!/usr/bin/env python3
+"""Checks that the machine code of pyca/verified-garbage's (VG's) routines is
+the assembly text its proofs are about, and lists that code for the
+cosimulation.
+
+VG prints each routine twice from the same Lean code: as a Rust naked
+function, `crates/verified-garbage-asm-<arch>/src/`, whose straight-line
+instructions are machine code from VG's own encoder (`TCB/<ISA>/Encode.lean`)
+and whose branches, calls and static addresses are text; and as assembly
+text, `assembly/*.s`, from its printer (`TCB/<ISA>/Print.lean`). VG's CI
+checks its encoder only against golden tests, so this compiles the naked
+functions with rustc, as rind does, assembles the text with nixpkgs' LLVM
+(`llvm-mc`, not rustc's), and fails unless every instruction of every
+routine is the same bytes, or for a branch or call, which the assembler lays
+out, goes to the same instruction or function. With `--rind`, it also checks
+every function of rind's named as one of VG's routines against that routine's
+compiled code, byte for byte, since those are the bytes the cosimulation runs.
+
+It writes `<out>/groups.tsv`, the instructions of VG's code for `vg-cosim`,
+one line per distinct instruction of the model: its kind (`insn`, `branch`,
+`call`), its text (the lines of an instruction the printer prints as more
+than one, joined by `; `), and its machine code in hex.
+
+Usage: admin/vg-bytes <vg-checkout> <x86_64|aarch64> <out-dir> [--rind <rind-object>...]
+"""
+
+import argparse
+import collections
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+TRIPLE = {"x86_64": "x86_64-unknown-linux-gnu", "aarch64": "aarch64-unknown-linux-gnu"}
+LABEL = re.compile(r"^(vg_[a-z0-9_]+):$")
+# A static or function the text names, as the naked function's `sym`
+# operand: `{VG_AES_SBOX}`, `{vg_keccak_f1600}`. Not EVEX's `{1to8}`,
+# `{k1}` or `{z}`.
+SYM = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+DECORATIONS = {"z", "k1"}
+# An aarch64 NOP, `HINT #0`, little-endian (DDI 0487 C6.2, "NOP").
+NOP = "1f2003d5"
+# The mnemonics that transfer control, which the assembler lays out.
+BRANCHES = {
+    "x86_64": {"je", "jne", "jb", "jae", "jmp", "call"},
+    "aarch64": {"cbz", "cbnz", "b", "bl"},
+}
+
+
+def fail(msg):
+    sys.exit(f"admin/vg-bytes: {msg}")
+
+
+def run(cmd, **kw):
+    return subprocess.run(cmd, check=True, capture_output=True, text=True, **kw).stdout
+
+
+def read_text(asm_dir):
+    """Each routine of VG's assembly files, by name: its lines, trimmed."""
+    funcs = {}
+    for path in sorted(asm_dir.glob("*.s")) + sorted(asm_dir.glob("internal/*.s")):
+        cur = None
+        for line in path.read_text().splitlines():
+            if line.startswith("//") or not line.strip():
+                continue
+            m = LABEL.match(line)
+            if m:
+                cur = m.group(1)
+                if cur in funcs:
+                    fail(f"{cur} is in two assembly files")
+                funcs[cur] = []
+            elif cur is None:
+                fail(f"{path}: {line!r} is outside a routine")
+            else:
+                funcs[cur].append(line.strip())
+    if not funcs:
+        fail(f"no routines in {asm_dir}")
+    return funcs
+
+
+def symbol(arch, text):
+    """The text as the assembler takes it: a static or function its name, as
+    the object format's syntax for the naked function's `sym` gives it (an
+    x86-64 static RIP-relative, an aarch64 page offset `:lo12:`)."""
+    def name(m):
+        return m.group(0) if m.group(1) in DECORATIONS or m.group(1).startswith("1to") else m.group(1)
+
+    if not SYM.search(text) or all(m.group(1) in DECORATIONS or m.group(1).startswith("1to")
+                                    for m in SYM.finditer(text)):
+        return text
+    mnemonic = text.split()[0]
+    if arch == "x86_64" and mnemonic == "lea":
+        return SYM.sub(lambda m: f"[rip + {m.group(1)}]", text)
+    if arch == "aarch64" and mnemonic == "add":
+        return SYM.sub(lambda m: f":lo12:{m.group(1)}", text)
+    return SYM.sub(name, text)
+
+
+def assemble_text(arch, funcs, out):
+    """Assembles VG's text, each routine a function in its own section."""
+    src = [".intel_syntax noprefix"] if arch == "x86_64" else []
+    for name, lines in funcs.items():
+        src += [f'.section .text.{name},"ax",@progbits', ".p2align 6", f".globl {name}",
+                f".type {name},@function", f"{name}:"]
+        src += [symbol(arch, t) for t in lines]
+        src.append(f".size {name}, .-{name}")
+    (out / "text.s").write_text("\n".join(src) + "\n")
+    # Every extension, since the features an instruction needs are the
+    # model's to say (`Instr.requires`), not the assembler's.
+    attr = ["-mattr=+all"] if arch == "aarch64" else []
+    run(["llvm-mc", f"--triple={TRIPLE[arch]}", *attr, "-filetype=obj", "-o", str(out / "text.o"),
+         str(out / "text.s")])
+    return out / "text.o"
+
+
+def compile_vg(vg, arch, out):
+    """Compiles VG's crate of naked functions for `arch` into one object, every
+    function kept."""
+    target = out / "target"
+    subprocess.run(["cargo", "rustc", "-q", "-p", f"verified-garbage-asm-{arch}", "--release",
+                    "--target", TRIPLE[arch], "--target-dir", str(target), "--",
+                    "--emit=obj", "-C", "codegen-units=1", "-C", "link-dead-code"],
+                   cwd=vg, check=True)
+    objs = list((target / TRIPLE[arch] / "release" / "deps").glob(f"verified_garbage_asm_{arch}-*.o"))
+    if len(objs) != 1:
+        fail(f"expected one object of VG's crate, found {objs}")
+    return objs[0]
+
+
+class Insn:
+    __slots__ = ("addr", "raw", "text", "relocs")
+
+    def __init__(self, addr, raw, text):
+        self.addr, self.raw, self.text, self.relocs = addr, raw, text, []
+
+
+def disassemble(arch, obj, keep):
+    """The instructions of each function of `obj` that `keep` takes, by the
+    demangled path's last component, with the relocations at each: its offset
+    in the instruction, its type, its symbol's last component, and its
+    addend."""
+    flags = ["-M", "intel"] if arch == "x86_64" else ["--mattr=+all"]
+    # `-z`: llvm-objdump otherwise prints a run of zero bytes as `...`.
+    dis = run(["llvm-objdump", "-d", "-z", "-r", "-C", *flags, str(obj)])
+    fns, names = {}, {}
+    cur = None
+    for line in dis.splitlines():
+        m = re.match(r"^([0-9a-f]+) <(.*)>:$", line)
+        if m:
+            path = m.group(2)
+            name = path.split("::")[-1]
+            cur = None
+            if keep(path, name):
+                if name in fns:
+                    fail(f"{obj}: two functions named {name}: {names[name]} and {path}")
+                cur = fns[name] = []
+                names[name] = path
+                start = int(m.group(1), 16)
+            continue
+        if cur is None:
+            continue
+        m = re.match(r"^\s*([0-9a-f]+):\s+(R_\S+)\s+(\S+)", line)
+        if m:
+            # Its offset in the instruction, so a relocation of the same bytes
+            # that patches other bytes of them differs.
+            off = int(m.group(1), 16) - cur[-1].addr
+            cur[-1].relocs.append((off, m.group(2), *relocation_target(m.group(3))))
+            continue
+        m = re.match(r"^\s*([0-9a-f]+):\s(.*)$", line)
+        if m:
+            raw, _, text = m.group(2).partition("\t")
+            text = " ".join(text.split())
+            raw = raw.replace(" ", "")
+            if arch == "aarch64":
+                # llvm-objdump prints an A64 instruction as its word; the
+                # bytes, as x86-64's are, are little-endian.
+                raw = bytes.fromhex(raw)[::-1].hex()
+            addr = int(m.group(1), 16)
+            if (cur[-1].addr + len(cur[-1].raw) // 2 if cur else start) != addr:
+                fail(f"{obj}: {names[name]} has bytes llvm-objdump does not disassemble "
+                     f"before {addr:#x}")
+            cur.append(Insn(addr, raw, text))
+    return fns
+
+
+def relocation_target(sym):
+    """A relocation's symbol, by its name's last component, and its addend."""
+    m = re.match(r"^(.*?)([+-]0x[0-9a-f]+)?$", sym)
+    return m.group(1).split("::")[-1], int(m.group(2) or "0", 16)
+
+
+def is_nop(arch, insn):
+    """Whether `insn` is a NOP an assembler pads code with."""
+    if arch == "aarch64":
+        return insn.text == "nop"
+    return "nop" in insn.text.split() or insn.text == "xchg ax, ax"
+
+
+def is_padding(arch, insn):
+    """Whether `insn` is padding a linker or assembler puts between
+    functions: a NOP, or a trap, x86-64's `int3` or aarch64's zero word."""
+    return is_nop(arch, insn) or insn.text in ("int3", "udf #0x0")
+
+
+def instructions(arch, name, text, insns, what):
+    """`insns`, the disassembly of routine `name`, without its padding: the
+    NOPs from each `.p2align k` of `text` to the next multiple of 2^k, and
+    after the routine's last instruction, which must then be one that never
+    falls through, NOPs or `int3` to the next function. Fails unless each
+    line of `text` that is an instruction has one of `insns`: an `int3` or
+    NOP in place of an instruction is not padding. Each function is in a
+    section of its own, aligned to more than any `.p2align` in it, so an
+    address is aligned when its offset in the section is."""
+    out = []
+    i = 0
+    for t in text:
+        if t.startswith(".p2align "):
+            align = 1 << int(t.split()[1])
+            while i < len(insns) and insns[i].addr % align and is_nop(arch, insns[i]):
+                i += 1
+            if i < len(insns) and insns[i].addr % align:
+                fail(f"{name}: {what} has {insns[i].text!r} at {insns[i].addr:#x}, where "
+                     f"{t!r} pads with NOPs")
+        elif t.startswith(".") or t.endswith(":"):
+            continue
+        elif i == len(insns):
+            fail(f"{name}: {what} ends before {t!r}")
+        else:
+            out.append(insns[i])
+            i += 1
+    rest = insns[i:]
+    if rest:
+        if not all(is_padding(arch, x) for x in rest):
+            fail(f"{name}: {what} has {rest[0].text!r} after the text's last instruction")
+        last = out[-1].text.split()[0] if out else None
+        if last not in ("ret", "jmp", "b"):
+            fail(f"{name}: {what} pads after {last!r}, which falls through into the padding")
+    return out
+
+
+def target_of(insn, insns):
+    """Which instruction of its function a branch goes to, by index, or which
+    function a call goes to, by name. Each function is in a section of its
+    own, so an address is its offset in the function."""
+    if insn.relocs:
+        return ("fn", insn.relocs[0][2], insn.relocs[0][3])
+    m = re.search(r"0x([0-9a-f]+) <", insn.text)
+    if not m:
+        return ("?", insn.text)
+    addr = int(m.group(1), 16)
+    for j, other in enumerate(insns):
+        if other.addr == addr:
+            return ("insn", j)
+    return ("?", insn.text)
+
+
+# Each instruction VG encodes otherwise than LLVM, with its two encodings:
+# how many times.
+ENCODINGS = collections.Counter()
+
+
+def branch_form(text):
+    """A branch's or call's disassembly without its target, which the
+    assembler lays out: `je`, `cbz x0,`, `call`."""
+    return re.sub(r"\s*#?0x[0-9a-f]+( <[^>]*>)?$", "", text)
+
+
+def compare(arch, name, text, got, want, what, exact=False):
+    """Fails unless `got`'s instructions are `want`'s and `text`'s: the same
+    bytes and relocations, or for a branch or call, the same instruction to
+    the same target. Another encoding of the same instruction passes, unless
+    `exact`, which requires every instruction's bytes to be `want`'s.
+    Returns the text's instructions and `got`'s, padding dropped."""
+    lines = [t for t in text if not t.startswith(".") and not t.endswith(":")]
+    got = instructions(arch, name, text, got, what)
+    want = instructions(arch, name, text, want, "the assembled text")
+    for i, (g, w, t) in enumerate(zip(got, want, lines)):
+        mnemonic = t.split()[0]
+        if exact and g.raw != w.raw:
+            fail(f"{name}: instruction {i}, {t!r}, is {g.raw} ({g.text}) in {what} "
+                 f"but {w.raw} ({w.text}) in VG's compiled code")
+        if g.relocs != w.relocs:
+            fail(f"{name}: instruction {i}, {t!r}, refers to {g.relocs} in {what} "
+                 f"but {w.relocs} assembled")
+        if mnemonic in BRANCHES[arch]:
+            if branch_form(g.text) != branch_form(w.text):
+                fail(f"{name}: instruction {i}, {t!r}, is {g.text!r} in {what} "
+                     f"but {w.text!r} assembled")
+            if target_of(g, got) != target_of(w, want):
+                fail(f"{name}: instruction {i}, {t!r}, goes to {target_of(g, got)} in {what} "
+                     f"but {target_of(w, want)} in the text")
+        elif g.raw != w.raw:
+            # Another encoding of the same instruction, as VG's EVEX form of
+            # a `vpbroadcastq` LLVM encodes with VEX: LLVM's disassembler
+            # reads VG's bytes as the instruction of the text.
+            if g.text != w.text:
+                fail(f"{name}: instruction {i}, {t!r}, is {g.raw} ({g.text}) in {what} "
+                     f"but {w.raw} ({w.text}) assembled")
+            ENCODINGS[(t, g.raw, w.raw)] += 1
+    return lines, got
+
+
+def groups(arch, lines, insns):
+    """The model's instructions in a routine: each its kind, its lines and
+    its machine code; the lines of one the printer prints as several
+    together."""
+    out = []
+    i = 0
+    while i < len(lines):
+        t = lines[i]
+        mnemonic = t.split()[0]
+        n = 1
+        kind = "insn"
+        has_sym = any(m.group(1) not in DECORATIONS and not m.group(1).startswith("1to")
+                      for m in SYM.finditer(t))
+        if mnemonic in BRANCHES[arch]:
+            if mnemonic in ("call", "bl") and has_sym:
+                kind = "call"
+            elif mnemonic in ("call",):
+                kind = "insn"
+            elif mnemonic in ("jmp", "b"):
+                kind = "jump"
+            else:
+                kind = "branch"
+        elif mnemonic == "ret":
+            kind = "ret"
+        elif has_sym:
+            # A static's address, which the linker writes (x86-64 `lea`
+            # RIP-relative, aarch64 `adrp` and `add`).
+            kind = "sym"
+        elif arch == "x86_64" and (mnemonic.startswith("kmov") or mnemonic == "vpcmpuw"):
+            n = 2
+        elif mnemonic in ("push", "pop") and arch == "x86_64":
+            while i + n < len(lines) and lines[i + n].split()[0] == mnemonic and \
+                    (mnemonic == "push" or lines[i + n] == t):
+                n += 1
+        out.append((kind, lines[i:i + n], "".join(x.raw for x in insns[i:i + n])))
+        i += n
+    return out
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("vg", type=Path)
+    p.add_argument("arch", choices=sorted(TRIPLE))
+    p.add_argument("out", type=Path)
+    p.add_argument("--rind", type=Path, nargs="+", default=[],
+                   help="the objects of rind's release build, whose vendored routines to check")
+    a = p.parse_args()
+    a.vg, a.out = a.vg.resolve(), a.out.resolve()
+    a.out.mkdir(parents=True, exist_ok=True)
+
+    text = read_text(a.vg / "crates" / f"verified-garbage-asm-{a.arch}" / "assembly")
+    assembled = disassemble(a.arch, assemble_text(a.arch, text, a.out), lambda path, name: name in text)
+    # Every naked function of VG's crate, which is each `vg_*` function but
+    # the Rust dispatchers of its `dispatch` module, must be a routine of the
+    # text, so none goes unchecked.
+    compiled = disassemble(a.arch, compile_vg(a.vg, a.arch, a.out),
+                           lambda path, name: name in text
+                           or (name.startswith("vg_") and "::dispatch::" not in path))
+    for name in compiled:
+        if name not in text:
+            fail(f"VG's compiled {name} is not a routine of its text")
+
+    seen = {}
+    counts = collections.Counter()
+    for name, lines in text.items():
+        if name not in compiled:
+            fail(f"{name} is in VG's text but not its compiled code")
+        lines, insns = compare(a.arch, name, lines, compiled[name], assembled[name], "VG's compiled code")
+        for kind, ls, code in groups(a.arch, lines, insns):
+            counts[kind] += 1
+            if kind in ("branch",):
+                key = (kind, ls[0].split()[0] + (" " + ls[0].split()[1] if a.arch == "aarch64" else ""))
+            elif kind == "call":
+                key = (kind, "call")
+            else:
+                key = (kind, "; ".join(ls), code)
+            seen.setdefault(key, (kind, ls, code))
+        if a.arch == "aarch64":
+            # A `.p2align k` in a routine is the model's `align k`, which it
+            # runs as a NOP, and the assembler pads with NOPs (`HINT #0`,
+            # D503201F), which `instructions` drops as padding: one NOP runs
+            # for it.
+            for t in text[name]:
+                if t.startswith(".p2align "):
+                    counts["align"] += 1
+                    seen.setdefault(("insn", t), ("insn", [t], NOP))
+    rind_checked = 0
+    # rind's copies must be VG's compiled code byte for byte, the bytes the
+    # cosimulation runs, so an encoding of the same instruction that differs
+    # from VG's, which may need another CPU feature, fails here. A routine
+    # is VG's by its name, wherever rind puts it; any function of a `vg`
+    # module must be one, so a routine an older pin had fails here.
+    for obj in a.rind:
+        vendored = disassemble(a.arch, obj, lambda path, name: name in text or "::vg::" in path)
+        for name, insns in vendored.items():
+            if name not in text:
+                fail(f"rind's {name} is not a routine of VG's text at this commit")
+            compare(a.arch, name, text[name], insns, compiled[name], "rind's build", exact=True)
+            rind_checked += 1
+
+    for (t, vg_raw, llvm_raw), k in sorted(ENCODINGS.items()):
+        print(f"admin/vg-bytes: {t!r} is {vg_raw} in VG's code, {llvm_raw} assembled, the same "
+              f"instruction disassembled ({k} times)")
+    with open(a.out / "groups.tsv", "w") as f:
+        for kind, ls, code in seen.values():
+            if kind in ("insn", "branch", "call"):
+                f.write(f"{kind}\t{'; '.join(ls)}\t{code}\n")
+    total = sum(len(v) for v in compiled.values() if v)
+    print(f"admin/vg-bytes: {a.arch}: {len(text)} routines, every instruction of VG's compiled code "
+          f"is its text; {rind_checked} of rind's routines checked; "
+          + ", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
+          + f"; {sum(1 for k in seen.values() if k[0] in ('insn', 'branch', 'call'))} distinct to cosimulate")
+
+
+if __name__ == "__main__":
+    main()

@@ -27,7 +27,7 @@ def aes_key_wrap(wrapping_key, key_to_wrap, backend=None):
         raise ValueError("The key to wrap must be at least 16 bytes")
     if len(key_to_wrap) % 8 != 0:
         raise ValueError("The key to wrap must be a multiple of 8 bytes")
-    return kek.wrap(key_to_wrap)
+    return kek.wrap_key(_key_wrap.Mode.KW, key_to_wrap)
 
 
 def aes_key_unwrap(wrapping_key, wrapped_key, backend=None):
@@ -38,7 +38,7 @@ def aes_key_unwrap(wrapping_key, wrapped_key, backend=None):
         raise InvalidUnwrap("The wrapped key must be a multiple of 8 bytes")
     kek = _kek(wrapping_key)
     try:
-        return kek.unwrap(wrapped_key)
+        return kek.unwrap_key(_key_wrap.Mode.KW, wrapped_key)
     except pyrind.DecryptFailed:
         raise InvalidUnwrap from None
 
@@ -47,7 +47,7 @@ def aes_key_wrap_with_padding(wrapping_key, key_to_wrap, backend=None):
     """Wraps `key_to_wrap`, of any length, under `wrapping_key` with RFC 5649's padding."""
     kek = _kek(wrapping_key)
     try:
-        return kek.wrap_padded(key_to_wrap)
+        return kek.wrap_key(_key_wrap.Mode.KWP, key_to_wrap)
     except pyrind.WrongLength:
         raise ValueError("The key to wrap must be at least 1 byte") from None
 
@@ -58,7 +58,7 @@ def aes_key_unwrap_with_padding(wrapping_key, wrapped_key, backend=None):
         raise InvalidUnwrap("Must be at least 16 bytes")
     kek = _kek(wrapping_key)
     try:
-        return kek.unwrap_padded(wrapped_key)
+        return kek.unwrap_key(_key_wrap.Mode.KWP, wrapped_key)
     except pyrind.DecryptFailed:
         raise InvalidUnwrap from None
 
