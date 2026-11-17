@@ -11,7 +11,9 @@
 # opt-level 3 is the firmware profile. opt-level s and z are checked on
 # the ESP32-S3 object as well: the same section, relocation, and no-call
 # rules, because a size-optimized outline into flash is the failure this
-# body is written to avoid. opt-level 0 is not a cache-off promise.
+# body is written to avoid. opt-level 0 is not a cache-off promise. At
+# each of the three it prints the IRAM block's and literal pool's sizes,
+# and fails when their sum passes iram_ceiling.
 # Every ESP32-S3 object is also checked for the message byte swap: `l32i`
 # into `a14`, `ssai 8`, a 16-bit shift, then `src R, R, a14`; `src R, R, R`;
 # `src R, a14, R`. That is the sequence in `be_u32`. The ESP32 object must
@@ -50,6 +52,12 @@ ar=$xtensa_bin/xtensa-esp32s3-elf-ar
 gcc=$xtensa_bin/xtensa-esp32s3-elf-gcc
 ld=$xtensa_bin/xtensa-esp32s3-elf-ld
 host_cc=${CC:-cc}
+
+# Most IRAM the block may take at opt-level 3, s, or z: its .iram1.text
+# plus its literal pool, in bytes, as the object file has them. Provisional
+# until CI measures it: set it from the first CI run's largest total,
+# which this script prints, plus about 10% slack.
+iram_ceiling=24576
 
 mkdir -p "$root/.tmp"
 work=$(mktemp -d "$root/.tmp/sha512-layout.XXXXXX")
@@ -280,6 +288,29 @@ expect_ordinary "$work/obj/flash.o" 'esp32s3-sha512-flash'
 expect_ordinary "$work/obj/esp32.o" 'xtensa-esp32-espidf'
 expect_ordinary "$work/obj/none.o" 'xtensa-esp32s3-none-elf'
 expect_placed "$work/obj/probe.o"
+
+# The IRAM this placement costs an image, printed so CI records it.
+largest=0
+for opt in 3 s z; do
+  case $opt in
+    3) obj=$work/obj/s3.o ;;
+    *) obj=$work/obj/$opt.o ;;
+  esac
+  text=$((0x$(section_size "$obj" .iram1.text)))
+  lit=$((0x$(section_size "$obj" .iram1.text.literal)))
+  k=$((0x$(section_size "$obj" .dram1.rodata)))
+  line="opt-level $opt: IRAM block $text bytes + literal pool $lit bytes = $((text + lit)); K in DRAM $k bytes"
+  printf 'esp32s3-sha512-layout: %s\n' "$line"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    printf -- '- SHA-512 %s\n' "$line" >>"$GITHUB_STEP_SUMMARY"
+  fi
+  if [ $((text + lit)) -gt "$largest" ]; then
+    largest=$((text + lit))
+  fi
+done
+if [ "$largest" -gt "$iram_ceiling" ]; then
+  fail "IRAM block and literal pool take $largest bytes, above iram_ceiling ($iram_ceiling); shrink the block, or raise the ceiling in this script with the reason in the PR"
+fi
 
 # The block's own relocations point at its IRAM literal pool, and that pool
 # points at K in DRAM. A flash .rodata reference here would fault with the

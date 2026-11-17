@@ -188,7 +188,10 @@ with portable Rust in place of the assembly armv7 runs regardless.
   `K` in ordinary flash sections, as does `xtensa-esp32s3-none-elf`.
   `admin/esp32s3-sha512-layout` checks those sections, the relocation
   allowlist, and that the block has no call, at opt-level 3, s, and z.
-  It also runs, on QEMU's ESP32-S3 CPU, the Xtensa message load (`l32i`,
+  At each it prints the block's IRAM and literal-pool bytes, and `K`'s 640
+  bytes of DRAM, and fails when block and pool pass its `iram_ceiling`:
+  the sizes are those the `ESP32-S3 SHA-512 layout` workflow's run
+  records, not figures measured by hand. It also runs, on QEMU's ESP32-S3 CPU, the Xtensa message load (`l32i`,
   `ssai`, `src`), including blocks at byte offsets 1 and 3, and FIPS
   180-4's "abc" block through the whole compressor, built for ESP-IDF so
   the block runs from its IRAM section with `K` from DRAM, at byte offsets

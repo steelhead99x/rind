@@ -17,7 +17,9 @@ targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "i686-unknow
 # Keeps the ESP32-S3 rolled SHA-512 compressor, and its K table, in flash.
 # The default on `xtensa-esp32s3-espidf` places the compressor in IRAM and K
 # in internal DRAM, so that body does not shift later flash text. Enable
-# this when the image's IRAM is already full. It does nothing elsewhere.
+# this when the image's IRAM is already full. The IRAM that costs, at
+# opt-level 3, s, and z, is what the `ESP32-S3 SHA-512 layout` workflow
+# prints, and admin/esp32s3-sha512-layout caps it. It does nothing elsewhere.
 esp32s3-sha512-flash = []
 __ctgrind = ["dep:crabgrind"]
 
