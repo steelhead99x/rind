@@ -10,7 +10,9 @@ import 'package:test/test.dart';
 
 import '../hook/build.dart' as hook;
 
-// The package root, wherever `dart test` runs from.
+// The package root, wherever `dart test` runs from. package:hooks'
+// testBuildHook itself still takes the working directory as the package
+// root, as `dart test` sets it.
 final _root = Isolate.resolvePackageUriSync(
   Uri.parse('package:rind/'),
 )!.resolve('..');
