@@ -279,3 +279,212 @@ fn ml_dsa() {
             .unwrap();
     }
 }
+
+/// `PqdsaKeyPair::from_pkcs8` parses an Ed25519 key before refusing it.
+/// The seed is marked secret. The OID is public.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn ml_dsa_other_private_key() {
+    use rind_aws_lc_rs::signature;
+
+    let seed = [3u8; 32];
+    let doc = aws_lc_rs::signature::Ed25519KeyPair::from_seed_unchecked(&seed)
+        .unwrap()
+        .to_pkcs8v1()
+        .unwrap();
+    let pkcs8 = doc.as_ref();
+    let at = pkcs8
+        .windows(seed.len())
+        .position(|window| window == seed)
+        .unwrap();
+    secret(&pkcs8[at..at + seed.len()]);
+    let err =
+        signature::PqdsaKeyPair::from_pkcs8(&signature::ML_DSA_44_SIGNING, pkcs8).unwrap_err();
+    public(err.description_().as_bytes());
+    assert_eq!(err.description_(), "WrongAlgorithm");
+    public(&pkcs8[..at]);
+    public(&pkcs8[at + seed.len()..]);
+}
+
+/// `PqdsaKeyPair::from_raw_private_key` loads an ML-DSA-65 expanded key,
+/// and one with a flipped byte, as ML-DSA-44 before refusing it. The secret
+/// bytes are marked. The first 32 bytes are the public seed `rho`.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn ml_dsa_other_set() {
+    use aws_lc_rs::encoding::{AsRawBytes, PqdsaPrivateKeyRaw};
+    use rind_aws_lc_rs::signature::{ML_DSA_44_SIGNING, PqdsaKeyPair};
+
+    let seed = [0x33u8; 32];
+    let raw: PqdsaPrivateKeyRaw<'static> = aws_lc_rs::signature::PqdsaKeyPair::from_seed(
+        &aws_lc_rs::signature::ML_DSA_65_SIGNING,
+        &seed,
+    )
+    .unwrap()
+    .private_key()
+    .as_raw_bytes()
+    .unwrap();
+    let raw = raw.as_ref().to_vec();
+    let mut corrupt = raw.clone();
+    corrupt[100] ^= 0x01;
+
+    // The expanded key's first 32 bytes are the public seed `rho`.
+    secret(&raw[32..]);
+    secret(&corrupt[32..]);
+
+    let err = PqdsaKeyPair::from_raw_private_key(&ML_DSA_44_SIGNING, &raw).unwrap_err();
+    public(err.description_().as_bytes());
+    assert_eq!(err.description_(), "Unspecified");
+
+    let err = PqdsaKeyPair::from_raw_private_key(&ML_DSA_44_SIGNING, &corrupt).unwrap_err();
+    public(err.description_().as_bytes());
+    assert_eq!(err.description_(), "InvalidEncoding");
+}
+
+/// `PqdsaKeyPair::from_pkcs8` loads an ML-DSA-65 key in full as ML-DSA-65
+/// before refusing it as ML-DSA-44: its seed, its expanded key, one with a
+/// flipped byte, and both together. The seed and the expanded key past its
+/// public seed `rho` are marked secret; the framing is public.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn ml_dsa_other_set_pkcs8() {
+    use aws_lc_rs::encoding::{AsRawBytes, PqdsaPrivateKeyRaw};
+    use rind_aws_lc_rs::signature::{ML_DSA_44_SIGNING, PqdsaKeyPair};
+
+    let seed = [0x44u8; 32];
+    let raw: PqdsaPrivateKeyRaw<'static> = aws_lc_rs::signature::PqdsaKeyPair::from_seed(
+        &aws_lc_rs::signature::ML_DSA_65_SIGNING,
+        &seed,
+    )
+    .unwrap()
+    .private_key()
+    .as_raw_bytes()
+    .unwrap();
+    let raw = raw.as_ref().to_vec();
+    let mut flipped = raw.clone();
+    flipped[100] ^= 0x01;
+
+    let der = |tag: u8, body: &[u8]| {
+        let mut out = vec![tag];
+        match body.len() {
+            0..0x80 => out.push(body.len() as u8),
+            0x80..0x100 => out.extend([0x81, body.len() as u8]),
+            n => out.extend([0x82, (n >> 8) as u8, n as u8]),
+        }
+        out.extend_from_slice(body);
+        out
+    };
+    // id-ml-dsa-65, 2.16.840.1.101.3.4.3.18
+    let algorithm = der(
+        0x30,
+        &der(
+            0x06,
+            &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12],
+        ),
+    );
+    let pkcs8 = |private_key: &[u8]| {
+        der(
+            0x30,
+            &[&[0x02, 0x01, 0x00][..], &algorithm, &der(0x04, private_key)].concat(),
+        )
+    };
+    let both = |expanded: &[u8]| der(0x30, &[der(0x04, &seed), der(0x04, expanded)].concat());
+
+    for (doc, expected) in [
+        (pkcs8(&der(0x80, &seed)), "Unspecified"),
+        (pkcs8(&der(0x04, &raw)), "Unspecified"),
+        (pkcs8(&der(0x04, &flipped)), "InvalidEncoding"),
+        (pkcs8(&both(&raw)), "Unspecified"),
+        (pkcs8(&both(&flipped)), "InvalidEncoding"),
+    ] {
+        // Every needle is found before any is marked, so the search reads
+        // only defined bytes.
+        let found: Vec<_> = [&seed[..], &raw[32..], &flipped[32..]]
+            .into_iter()
+            .filter_map(|needle| {
+                let at = doc.windows(needle.len()).position(|w| w == needle)?;
+                Some(at..at + needle.len())
+            })
+            .collect();
+        for range in found {
+            secret(&doc[range]);
+        }
+        let err = PqdsaKeyPair::from_pkcs8(&ML_DSA_44_SIGNING, &doc).unwrap_err();
+        public(err.description_().as_bytes());
+        assert_eq!(err.description_(), expected);
+    }
+}
+
+/// The other secret paths `PqdsaKeyPair::from_pkcs8` takes: an ML-DSA key
+/// of the caller's set that the adapter rebuilds without the tail aws-lc
+/// ignores, a P-256 key whose short scalar the adapter left-pads, and RSA
+/// keys of 2048 bits, which rind checks, and of 2047 bits, refused from the
+/// public modulus length. The secret bytes are marked; the framing is public.
+#[cfg(not(any(miri, target_family = "wasm")))]
+#[test]
+fn pkcs8_secret_paths() {
+    use rind_aws_lc_rs::signature::{ML_DSA_44_SIGNING, ML_DSA_65_SIGNING, PqdsaKeyPair};
+
+    let der = |tag: u8, body: &[u8]| {
+        let mut out = vec![tag];
+        match body.len() {
+            0..0x80 => out.push(body.len() as u8),
+            0x80..0x100 => out.extend([0x81, body.len() as u8]),
+            n => out.extend([0x82, (n >> 8) as u8, n as u8]),
+        }
+        out.extend_from_slice(body);
+        out
+    };
+    let pkcs8 = |algorithm: &[u8], private_key: &[u8]| {
+        der(
+            0x30,
+            &[&[0x02, 0x01, 0x00][..], algorithm, &der(0x04, private_key)].concat(),
+        )
+    };
+
+    // ML-DSA-65's seed with a byte after it, loaded as its own set.
+    let seed = [0x55u8; 32];
+    let mldsa65 = der(
+        0x30,
+        &der(
+            0x06,
+            &[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12],
+        ),
+    );
+    let doc = pkcs8(&mldsa65, &[der(0x80, &seed), vec![0x00]].concat());
+    let at = doc.windows(32).position(|w| w == seed).unwrap();
+    secret(&doc[at..at + 32]);
+    let key = PqdsaKeyPair::from_pkcs8(&ML_DSA_65_SIGNING, &doc);
+    public(&key.is_ok());
+    assert!(key.is_ok());
+
+    // P-256 with a 31-byte scalar and no public key (RFC 5915).
+    let scalar = [0x01u8; 31];
+    let ec = der(
+        0x30,
+        &[
+            der(0x06, &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01]),
+            der(0x06, &[0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07]),
+        ]
+        .concat(),
+    );
+    let sec1 = der(0x30, &[der(0x02, &[1]), der(0x04, &scalar)].concat());
+    let p256 = pkcs8(&ec, &sec1);
+    let rsa2048 = include_bytes!("../../rind/src/high/rsa/rsa2048.pkcs8.der").to_vec();
+    let rsa2047 = include_bytes!("../../rind/src/high/rsa/rsa2047.pkcs8.der").to_vec();
+    for (doc, at, len) in [
+        (
+            p256.clone(),
+            p256.windows(31).position(|w| w == scalar).unwrap(),
+            31,
+        ),
+        // The last bytes are the CRT coefficient, which only the private key holds.
+        (rsa2048.clone(), rsa2048.len() - 32, 32),
+        (rsa2047.clone(), rsa2047.len() - 32, 32),
+    ] {
+        secret(&doc[at..at + len]);
+        let err = PqdsaKeyPair::from_pkcs8(&ML_DSA_44_SIGNING, &doc).unwrap_err();
+        public(err.description_().as_bytes());
+        assert_eq!(err.description_(), "WrongAlgorithm");
+    }
+}
