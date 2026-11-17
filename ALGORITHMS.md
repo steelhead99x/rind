@@ -146,7 +146,9 @@ with portable Rust in place of the assembly armv7 runs regardless.
 
 - aarch64 chooses s2n-bignum's schedule by the multiplier for X25519,
   Ed25519, the P-256, P-384, and P-521 scalar multiplications, and RSA's
-  16-word and 32-word products. Linux selects the narrow schedules only when
+  16-word products. 32-word products keep `bn_mul_mont` on every core until
+  s2n-bignum's 32-word Karatsuba routines are measured on a narrow core, so
+  rind's release build does not contain those routines. Linux selects the narrow schedules only when
   `MIDR_EL1`, read with `mrs` under `HWCAP_CPUID` as aws-lc does, names
   Cortex-A72, Cortex-A76, or Neoverse N1. Apple, Neoverse V1, V2, V3, and N2,
   Cobalt 100, and a core rind does not recognise keep the `_alt` schedules.
@@ -299,9 +301,9 @@ BINSEC.
 | `bignum_invsqrt_p25519_alt` | `bignum_invsqrt_p25519_alt`: none | not imported |
 | `bignum_invsqrt_p25519_narrow::bignum_invsqrt_p25519` | not imported | `bignum_invsqrt_p25519`: none |
 | `bignum_kmul_16_32` | `bignum_kmul_16_32`: none | `bignum_kmul_16_32`: `BIGNUM_KMUL_16_32_SUBROUTINE_SAFE` |
-| `bignum_kmul_32_64` | `bignum_kmul_32_64`: none | `bignum_kmul_32_64`: `BIGNUM_KMUL_32_64_SUBROUTINE_SAFE` |
+| `bignum_kmul_32_64` | `bignum_kmul_32_64`: none | not imported |
 | `bignum_ksqr_16_32` | `bignum_ksqr_16_32`: none | `bignum_ksqr_16_32`: `BIGNUM_KSQR_16_32_SUBROUTINE_SAFE` |
-| `bignum_ksqr_32_64` | `bignum_ksqr_32_64`: none | `bignum_ksqr_32_64`: `BIGNUM_KSQR_32_64_SUBROUTINE_SAFE` |
+| `bignum_ksqr_32_64` | `bignum_ksqr_32_64`: none | not imported |
 | `bignum_madd_n25519` | `bignum_madd_n25519`: `BIGNUM_MADD_N25519_SUBROUTINE_SAFE` | `bignum_madd_n25519_alt`: `BIGNUM_MADD_N25519_ALT_SUBROUTINE_SAFE` |
 | `bignum_madd_n25519_alt` | `bignum_madd_n25519_alt`: `BIGNUM_MADD_N25519_ALT_SUBROUTINE_SAFE` | not imported |
 | `bignum_madd_n25519_narrow::bignum_madd_n25519` | not imported | `bignum_madd_n25519`: `BIGNUM_MADD_N25519_SUBROUTINE_SAFE` |
