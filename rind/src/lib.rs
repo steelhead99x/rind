@@ -30,7 +30,10 @@
     unused_qualifications
 )]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-#![cfg_attr(target_arch = "xtensa", feature(asm_experimental_arch))]
+#![cfg_attr(
+    all(target_arch = "xtensa", target_os = "espidf"),
+    feature(asm_experimental_arch)
+)]
 
 // Bare-metal targets (`target_os = "none"`) build without std, on `alloc`:
 // rind needs a global allocator there, and a getrandom backend. Nothing in
