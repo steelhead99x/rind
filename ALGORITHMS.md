@@ -90,9 +90,8 @@ Ed25519 verification's multiplication runs curve25519-dalek ⚡, as above.
   point multiplication rather than verified-garbage's, which measured 1.02
   to 1.06× slower there (see [ECC](#ecc)).
 - Ed25519 verification: rather than recompute `[S]B - [k]A` by s2n-bignum's
-  verified `edwards25519_scalarmuldouble`, x86_64 and aarch64 check
-  `[v S]B - [v]R - [u]A = O` for scalars `u ≡ v k (mod 8L)` of about 128
-  bits, after
+  verified `edwards25519_scalarmuldouble`, x86_64 and aarch64 check `[v S]B -
+  [v]R - [u]A = O` for scalars `u ≡ v k (mod 8L)` of about 128 bits, after
   ElSheikh et al., ["Accelerating EdDSA Signature Verification with Faster
   Scalar Size Halving"][half-size] (TCHES 2025), which halves the doublings.
   Solving modulo `8L` rather than the paper's `L`, with `v` odd, makes it
@@ -103,10 +102,8 @@ Ed25519 verification's multiplication runs curve25519-dalek ⚡, as above.
   curve25519-dalek's AVX2 backend. On an Arrow Lake core under load, it
   verified in 0.72 to 0.73× aws-lc-rs's time against 0.89 to 0.92×, 0.77 to
   0.83× against 0.86 to 0.88× with ADX denied, and 0.93× against 1.10× with
-  AVX2 denied as well. aarch64 runs the same half-size check, over the scalar
-  `_alt` forms of those point routines. Whether that is faster than
-  `edwards25519_scalarmuldouble_alt` is not measured yet, and that routine
-  is no longer imported.
+  AVX2 denied as well. aarch64 runs it over the `_alt` point routines, as
+  x86_64 does without ADX, in place of `edwards25519_scalarmuldouble_alt`.
 - ChaCha20-Poly1305 without AES-NI and on SSE2, which lack SSE4.1: rind runs
   Graviola's scalar Poly1305 there, and aws-lc BoringSSL's SSE2
   `poly1305_vec.c`, which rind doesn't port for CPUs older than Westmere.
@@ -518,9 +515,8 @@ only which candidates it discards.
 On x86_64 and aarch64, all ECC field and scalar arithmetic are provided by
 s2n-bignum, except P256's on x86_64 where aws-lc's is named below, and
 Ed25519 verification's on x86_64 CPUs with AVX2 but without ADX, which runs
-curve25519-dalek's AVX2 backend. Ed25519 verification on x86_64 and
-aarch64 splits `k` by the extended Euclidean algorithm on `8L` and `k`,
-stopped halfway, then
+curve25519-dalek's AVX2 backend. Ed25519 verification splits `k`
+by the extended Euclidean algorithm on `8L` and `k`, stopped halfway, then
 sums four multiples by Straus's method: width-5 non-adjacent forms of the
 two half-size scalars over tables of `-R`'s and `±A`'s odd multiples, and
 width-8 forms of `v S`'s two 128-bit halves over 10 KiB static tables each
