@@ -12,7 +12,10 @@
 //! (<https://bearssl.org/constanttime.html#ghash-for-gcm>), and reduces as
 //! <https://crypto.stanford.edu/RealWorldCrypto/slides/gueron.pdf> describes.
 //! x86_64's 64-bit `mul` and armv7's `umull` take the same time for every
-//! operand, so its timing is independent of the key and data. It is not
+//! operand, so its timing is independent of the key and data. ARMv6-M has
+//! no `umull`, so there each 32x32->64 product is taken by `muls` alone, as
+//! BearSSL's `ghash_ctmul32` does (`gcm_mul32_rev`), and Cortex-M0 and M0+
+//! `muls` also takes the same time for every operand. It is not
 //! formally verified: its correctness rests on its use and testing in
 //! BoringSSL and aws-lc, and on rind's tests of it against SSSE3, the
 //! portable model, Wycheproof, and aws-lc-rs.
@@ -126,7 +129,13 @@ fn gcm_mul64_wide(a: u64, b: u64) -> (u64, u64) {
 }
 
 /// The carry-less product of `a` and `b`, by 32-bit multiplies.
-#[cfg(any(target_pointer_width = "32", test))]
+#[cfg(any(
+    all(
+        target_pointer_width = "32",
+        not(all(target_arch = "arm", not(target_has_atomic = "ptr")))
+    ),
+    test
+))]
 fn gcm_mul32_nohw(a: u32, b: u32) -> u64 {
     // One term every four bits means the largest term is 32/4 = 8, which
     // does not overflow into the next term.
@@ -151,6 +160,42 @@ fn gcm_mul32_nohw(a: u32, b: u32) -> u64 {
         | (c2 & 0x4444_4444_4444_4444)
         | (c3 & 0x8888_8888_8888_8888)
 }
+
+/// ARMv6-M (Arm without CAS atomics, in cfg terms) has no `umull`, so each
+/// 32x32->64 multiply above is a call to `__aeabi_lmul`. This takes the same
+/// product with `muls` alone, as BearSSL's `ghash_ctmul32` does: the low word
+/// by multiplies truncated to 32 bits, which carries never cross downwards,
+/// and the high word as the low word of the product of the bit-reversed
+/// operands, reversed. Cortex-M0+ `muls` takes the same time for every
+/// operand.
+#[cfg(any(all(target_arch = "arm", not(target_has_atomic = "ptr")), test))]
+fn gcm_mul32_rev(a: u32, b: u32) -> u64 {
+    fn low(a: u32, b: u32) -> u32 {
+        let a0 = a & 0x1111_1111;
+        let a1 = a & 0x2222_2222;
+        let a2 = a & 0x4444_4444;
+        let a3 = a & 0x8888_8888;
+
+        let b0 = b & 0x1111_1111;
+        let b1 = b & 0x2222_2222;
+        let b2 = b & 0x4444_4444;
+        let b3 = b & 0x8888_8888;
+
+        let m = u32::wrapping_mul;
+        let c0 = m(a0, b0) ^ m(a1, b3) ^ m(a2, b2) ^ m(a3, b1);
+        let c1 = m(a0, b1) ^ m(a1, b0) ^ m(a2, b3) ^ m(a3, b2);
+        let c2 = m(a0, b2) ^ m(a1, b1) ^ m(a2, b0) ^ m(a3, b3);
+        let c3 = m(a0, b3) ^ m(a1, b2) ^ m(a2, b1) ^ m(a3, b0);
+
+        (c0 & 0x1111_1111) | (c1 & 0x2222_2222) | (c2 & 0x4444_4444) | (c3 & 0x8888_8888)
+    }
+    // The 63-bit product's bits 31 to 62, reversed.
+    let hi = low(a.reverse_bits(), b.reverse_bits()).reverse_bits() >> 1;
+    u64::from(low(a, b)) | u64::from(hi) << 32
+}
+
+#[cfg(all(target_arch = "arm", not(target_has_atomic = "ptr")))]
+use gcm_mul32_rev as gcm_mul32_nohw;
 
 /// The carry-less product of `a` and `b`, as its low and high words, by
 /// Karatsuba over 32-bit halves.
@@ -243,6 +288,33 @@ mod tests {
             gcm_mul64_wide(u64::MAX, u64::MAX),
             gcm_mul64_split(u64::MAX, u64::MAX)
         );
+    }
+
+    // ARMv6-M's 32-bit product agrees with the widening one. The operands
+    // are secret, so under `admin/ctgrind` this also checks that the product
+    // is constant time in them.
+    #[test]
+    fn mul32_rev_matches() {
+        let mut x = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..10_000 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            let (a, b) = (x as u32, (x >> 32) as u32);
+            let got = low::ct::into_public(gcm_mul32_rev(
+                low::ct::into_secret(a),
+                low::ct::into_secret(b),
+            ));
+            assert_eq!(got, gcm_mul32_nohw(a, b), "{a:x} {b:x}");
+        }
+        for (a, b) in [
+            (u32::MAX, u32::MAX),
+            (0, u32::MAX),
+            (1, 1),
+            (1 << 31, 1 << 31),
+        ] {
+            assert_eq!(gcm_mul32_rev(a, b), gcm_mul32_nohw(a, b), "{a:x} {b:x}");
+        }
     }
 
     // On x86_64, the SSSE3 table is the arm above this one, and the model
