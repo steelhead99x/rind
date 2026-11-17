@@ -484,7 +484,8 @@
             let
               workspace = builtins.fromTOML (builtins.readFile ./Cargo.toml);
               declared = map (
-                member: (builtins.fromTOML (builtins.readFile (./. + "/${member}/Cargo.toml"))).package.rust-version or null
+                member:
+                (builtins.fromTOML (builtins.readFile (./. + "/${member}/Cargo.toml"))).package.rust-version or null
               ) workspace.workspace.members;
               versions = pkgs.lib.unique (
                 builtins.filter (
