@@ -637,6 +637,9 @@ fn explicit_variants(params: &Params, other: &Params) -> (Vec<Vec<u8>>, Vec<Vec<
         with(&|e| e.cofactor.extend(NULL)),
         with(&|e| e.order = integer(&hex(other.n))),
         with(&|e| e.order = tlv(0x02, &concat(&[&[0, 0], &hex(params.n)]))),
+        // Without its sign byte, an INTEGER with the top bit set is negative.
+        with(&|e| e.order = tlv(0x02, &hex(params.n))),
+        with(&|e| e.field = tlv(0x30, &concat(&[PRIME_FIELD, &tlv(0x02, &hex(params.p))]))),
         with(&|e| e.field = tlv(0x30, &concat(&[PRIME_FIELD, &tlv(0x02, &padded(params.p))]))),
         with(&|e| e.field = tlv(0x30, &concat(&[PRIME_FIELD, &integer(&hex(other.p))]))),
         with(&|e| {

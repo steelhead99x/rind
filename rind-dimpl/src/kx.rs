@@ -87,17 +87,16 @@ fn same_integer(bytes: &[u8], value: &[u8]) -> bool {
     bytes[start..] == *value
 }
 
-/// Whether `contents` is a minimal, non-negative DER INTEGER.
-fn unsigned_integer(contents: &[u8]) -> bool {
-    match contents {
-        [] => false,
-        [0, next, ..] => next & 0x80 != 0,
-        [first, ..] => first & 0x80 == 0,
-    }
+/// Whether `contents`, a DER INTEGER's, is `value`, which has its top bit
+/// set, as aws-lc's minimal non-negative `CBS_is_unsigned_asn1_integer` and
+/// [`same_integer`] together decide: its one such encoding is a zero byte,
+/// then `value`.
+fn top_bit_integer(contents: &[u8], value: &[u8]) -> bool {
+    contents.split_first() == Some((&0, value))
 }
 
 /// A NIST curve's named-curve OID and domain parameters, each big-endian
-/// with no leading zeros.
+/// with no leading zeros, `p` and `n` with their top bit set.
 struct Curve {
     oid: &'static [u8],
     p: &'static [u8],
@@ -220,16 +219,14 @@ impl Curve {
         let (gx, gy) = base.split_at_checked(base.len() / 2)?;
         (version == [1]
             && field_type == PRIME_FIELD
-            && unsigned_integer(p)
-            && same_integer(p, self.p)
+            && top_bit_integer(p, self.p)
             && seeded.is_empty()
             && same_integer(a, self.a)
             && same_integer(b, self.b)
             && base.len() % 2 == 0
             && same_integer(gx, self.gx)
             && same_integer(gy, self.gy)
-            && unsigned_integer(n)
-            && same_integer(n, self.n)
+            && top_bit_integer(n, self.n)
             && cofactor)
             .then_some(())
     }
