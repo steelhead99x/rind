@@ -2,16 +2,17 @@
 //! The provider itself: its entry point, its parameters, the algorithms it
 //! registers, and the errors it raises on OpenSSL's queue.
 
-use core::ffi::{CStr, c_int, c_void};
+use core::ffi::{CStr, c_char, c_int, c_uint, c_void};
 use std::ffi::CString;
 use std::sync::Arc;
 
 use crate::ffi::{
-    Algorithm, CORE_NEW_ERROR, CORE_VSET_ERROR, CoreHandle, CoreNewError, CoreVsetError, Dispatch,
-    INTEGER, Item, OP_KEYEXCH, OP_KEYMGMT, OP_SIGNATURE, PROVIDER_GET_PARAMS,
-    PROVIDER_GET_REASON_STRINGS, PROVIDER_GETTABLE_PARAMS, PROVIDER_QUERY_OPERATION,
-    PROVIDER_TEARDOWN, Param, ProviderGetParams, ProviderGetReasonStrings, ProviderGettableParams,
-    ProviderQueryOperation, ProviderTeardown, UTF8_PTR, entry,
+    Algorithm, CORE_NEW_ERROR, CORE_VSET_ERROR, Callback, CoreHandle, CoreNewError, CoreVsetError,
+    Dispatch, INTEGER, Item, OP_KEYEXCH, OP_KEYMGMT, OP_SIGNATURE, PROVIDER_GET_CAPABILITIES,
+    PROVIDER_GET_PARAMS, PROVIDER_GET_REASON_STRINGS, PROVIDER_GETTABLE_PARAMS,
+    PROVIDER_QUERY_OPERATION, PROVIDER_TEARDOWN, Param, ProviderGetCapabilities, ProviderGetParams,
+    ProviderGetReasonStrings, ProviderGettableParams, ProviderQueryOperation, ProviderTeardown,
+    UTF8_PTR, entry,
 };
 use crate::params::ParamsMut;
 use crate::{ed25519, x25519};
@@ -213,7 +214,7 @@ pub(crate) unsafe fn init(
     1
 }
 
-static FUNCTIONS: [Dispatch; 6] = [
+static FUNCTIONS: [Dispatch; 7] = [
     entry!(PROVIDER_TEARDOWN, teardown, ProviderTeardown),
     entry!(
         PROVIDER_GETTABLE_PARAMS,
@@ -225,6 +226,11 @@ static FUNCTIONS: [Dispatch; 6] = [
         PROVIDER_QUERY_OPERATION,
         query_operation,
         ProviderQueryOperation
+    ),
+    entry!(
+        PROVIDER_GET_CAPABILITIES,
+        get_capabilities,
+        ProviderGetCapabilities
     ),
     entry!(
         PROVIDER_GET_REASON_STRINGS,
@@ -314,6 +320,50 @@ unsafe extern "C" fn query_operation(
         OP_SIGNATURE => SIGNATURE.as_ptr(),
         _ => core::ptr::null(),
     }
+}
+
+// The X25519 TLS group, as OpenSSL's default provider describes it. Through
+// OpenSSL 3.4 a group is offered only when the provider that lists it also
+// backs its algorithm, so with rind preferred, as in the README's
+// configuration, the default provider's X25519 group is dropped and TLS has
+// none unless rind lists it.
+static GROUP_ID: c_uint = 29;
+static GROUP_SECURITY_BITS: c_uint = 128;
+/// `TLS1_VERSION`.
+static GROUP_MIN_TLS: c_int = 0x0301;
+/// No maximum.
+static GROUP_NO_MAX: c_int = 0;
+/// `DTLS1_VERSION`.
+static GROUP_MIN_DTLS: c_int = 0xFEFF;
+
+static TLS_GROUP: [Param; 10] = [
+    Param::text(c"tls-group-name", c"x25519"),
+    Param::text(c"tls-group-name-internal", c"X25519"),
+    Param::text(c"tls-group-alg", c"X25519"),
+    Param::unsigned(c"tls-group-id", &GROUP_ID),
+    Param::unsigned(c"tls-group-sec-bits", &GROUP_SECURITY_BITS),
+    Param::signed(c"tls-min-tls", &GROUP_MIN_TLS),
+    Param::signed(c"tls-max-tls", &GROUP_NO_MAX),
+    Param::signed(c"tls-min-dtls", &GROUP_MIN_DTLS),
+    Param::signed(c"tls-max-dtls", &GROUP_NO_MAX),
+    Param::END,
+];
+
+unsafe extern "C" fn get_capabilities(
+    _provctx: *mut c_void,
+    capability: *const c_char,
+    callback: Callback,
+    arg: *mut c_void,
+) -> c_int {
+    // SAFETY: OpenSSL passes a C string.
+    if unsafe { CStr::from_ptr(capability) } != c"TLS-GROUP" {
+        // Nothing to give for any other, which is how a provider without
+        // this function answers.
+        return 1;
+    }
+    // SAFETY: the callback is OpenSSL's, and takes the parameters it is
+    // given to read for the call.
+    unsafe { callback(TLS_GROUP.as_ptr(), arg) }
 }
 
 unsafe extern "C" fn reason_strings(_provctx: *mut c_void) -> *const Item {

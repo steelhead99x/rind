@@ -1,40 +1,70 @@
 #!/usr/bin/env python3
-"""Times rind and the libraries it is compared with on the report's hosts.
+"""Times rind and the libraries it is compared with.
 
 Usage:
+  admin/bench-report run [--host NAME] --commit REV --jobs N --target-dir DIR --out FILE
   admin/bench-report collect [--commit REV] [--host NAME]... [--out DIR]
   admin/bench-report weekly
   admin/bench-report render [--from DIR] [--check]
   admin/bench-report gate DIR [--previous DIR]
   admin/bench-report summary DIR
 
-`collect` copies one commit to each host in turn, waits for room under
-`quest gate` and for any lease it has, builds rind-bench there in the commit's Nix dev shell with
-its pinned toolchain, and times every operation in OPERATIONS for every
-library that offers it, then measures each library's build cost with
-admin/build-cost. It runs here for the host this is, and over ssh for the
-others. A host that is busy, unreachable, or fails is recorded and skipped,
-never measured. DIR (default `.tmp/bench-report/<commit>`) gets one
-`<host>.json` per host, with its CPU, OS, toolchain, and library versions.
+`run` measures the machine it is on. The result's host name is a
+filesystem-safe slug of the CPU model (`intel-core-ultra-9-275hx`,
+`amd-ryzen-9-7950x`, `apple-m3-max`) unless `--host` sets another sane name.
+A machine whose OS has no machine id must pass `--host`: without an id its
+result carries no tag, and a name made from the CPU alone is the same on every
+machine with that CPU.
+The JSON records the raw CPU string, that slug, the logical and physical core
+counts, and the OS. Name the file `<host>.json` to feed it to `summary` or
+`render --from`. A slug that equals a nightly tier name gains a `-host`
+suffix, so a minimal aarch64 Linux box is `aarch64-host` rather than the
+reserved name `aarch64`. A result records a machine tag when the OS has a
+machine id: the first eight hex characters of HMAC-SHA256 under a fixed
+application key. A free host name is kept when another file carries that
+tag and is not this machine's marked alias. A second machine that wants a
+slug already on disk is `<slug>-<tag>`, or `<slug>-2` when that alias is
+taken, and a later import replaces that file, including after the slug
+itself is free. When this machine already has the slug file, that file is
+refreshed and a marked alias of it that carries its tag is removed. An alias
+without a tag may be another machine, so an import never reuses, takes over,
+or deletes it. A result with no tag has nothing to make a second name from:
+when another machine holds its name it is not imported, and the message says
+to rerun it with a different `--host`. A file in the data directory that is
+not readable JSON is named on stderr and left as it is, and it holds its name.
+An empty, all-zero, or uninitialized machine id is not a tag.
+A host whose chosen name is that spelling is left as it is.
+
+`collect` is the maintainer path. It copies one commit to each machine in
+COLLECT_HOSTS in turn, waits for room under `quest gate` and for any lease it
+has, builds rind-bench there in the commit's Nix dev shell with its pinned
+toolchain, and times every operation in OPERATIONS for every library that
+offers it, then measures each library's build cost with admin/build-cost. It
+runs here for the host this is, and over ssh for the others. A host that is
+busy, unreachable, or fails is recorded and skipped, never measured. DIR
+(default `.tmp/bench-report/<commit>`) gets one `<host>.json` per host, with
+its CPU, OS, toolchain, and library versions. A machine that is not in
+COLLECT_HOSTS is measured with `run`, not `collect`.
 
 `weekly` saves the latest weekly `bench` run's results on main, with gh, as
 the report's CPU tiers. `render` writes BENCHMARKS.md and its SVGs, among
-them the overview the README shows, from benchmarks/data, the verified code in
+them the overview the README shows, and benchmarks/report.json, the same
+report as data for the site's benchmarks page, from benchmarks/data, the verified code in
 benchmarks/verified.toml, and the decision on each gap in
-benchmarks/gaps.toml, first importing each measured host of a collection
+benchmarks/gaps.toml, first importing every measured host JSON of a collection
 given by `--from`. It fails on a gap over 10% without a
 decision, or a decision that covers no gap the data measures. `--check` fails if they are out of
-date instead.
+date instead, and writes nothing, so it refuses `--from`. A gap's `on` may name any host that has a result, and any nightly
+tier.
 
 `gate` fails on a gap over 10% in a weekly run's downloaded artifacts that
 benchmarks/gaps.toml holds no decision for, counting only a gap the previous
 run, given by `--previous`, showed too. The weekly bench runs it.
 
-`summary` prints a Markdown table of a collection: rind's time per operation
-and host, against the fastest other library's.
+`summary` prints a Markdown table of every host JSON in a directory: rind's
+time per operation and host, against the fastest other library's.
 
-`run` is the host side of `collect`, run from the copied checkout. Results
-written to DIR are measurements, not history: rerun `collect` to refresh them.
+Results written by `run` are measurements, not history.
 """
 
 import argparse
@@ -42,7 +72,10 @@ import ctypes
 import datetime
 import fnmatch
 import glob
+import hashlib
+import hmac
 import json
+import math
 import os
 import platform
 import re
@@ -52,17 +85,35 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 
-# The report's hosts, in the order they run. `jobs` caps the build: nixos2 is
-# a shared 15 GB machine that more jobs run out of memory. `ssh` is the
-# destination where it isn't the name, and `note` describes the machine in the
-# report. Other work on a host with a `lease` holds that lock file with
-# flock(1) for its whole run, so collect holds it too, or skips the host as
-# busy, and leaves no copy, build, or download cache behind.
+# Machines `collect` can reach, in the order they run. This is the maintainer's
+# ssh list, not a gate. `run` takes any filesystem-safe host name. `summary`,
+# `render`, and `load_gaps` take every host JSON whose name is not reserved,
+# and a nightly tier stays a valid gaps.toml `on`. A reserved CPU slug is
+# stored as `<slug>-host`. A second machine that wants a slug already on disk
+# is stored as `<slug>-<tag>`, or `<slug>-2` when that alias is taken. The
+# tag is eight hex characters of HMAC-SHA256 over the OS machine id under a
+# fixed application key. An empty, all-zero, or uninitialized id is not a
+# tag. When this machine already has the slug file, that file is refreshed
+# and a marked alias of it that carries its tag is removed. An alias without
+# a tag may be another machine, so an import never reuses, takes over, or
+# deletes it, and a result with no tag whose name another machine holds is
+# not imported. A chosen host of that spelling is left as it is.
+# `render` reads a `note` from here
+# only when that host's JSON has none, and shows these names first so the
+# published report keeps its order; every other host keeps the order it was
+# given. `load_hosts` sorts those files by name.
+# `jobs` caps the build: nixos2 is a shared 15 GB machine that more jobs run
+# out of memory. `ssh` is the destination where it isn't the name, and `note`
+# describes the machine in the report. Other work on a host with a `lease`
+# holds that lock file with flock(1) for its whole run, so collect holds it
+# too, or skips the host as busy, and leaves no copy, build, or download cache
+# behind.
 VPS_NOTE = "OVH VPS in {}, 4 shared vCPUs: other tenants add noise that a dedicated host's times lack."
-HOSTS = {
+COLLECT_HOSTS = {
     "nixos": {"jobs": 16},
     "desktop": {"jobs": 12},
     "nixos2": {"jobs": 3},
@@ -409,14 +460,177 @@ def output(cmd, env=None):
     return subprocess.run(cmd, capture_output=True, text=True, check=True, env=env).stdout.strip()
 
 
+def try_output(cmd):
+    try:
+        return output(cmd)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return ""
+
+
+def cpu_model_from_cpuinfo(text):
+    """The brand string from Linux /proc/cpuinfo, ignoring the numeric `model`."""
+    for line in text.splitlines():
+        if line.startswith(("model name", "Model")):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
+def cpu_model_from_lscpu(text):
+    for line in text.splitlines():
+        key, sep, value = line.partition(":")
+        if sep and key.strip().lower() == "model name" and value.strip():
+            return value.strip()
+    return ""
+
+
 def cpu_model():
+    """The raw CPU brand string: macOS sysctl, Linux /proc/cpuinfo, lscpu, then
+    platform.processor()."""
     if sys.platform == "darwin":
-        return output(["sysctl", "-n", "machdep.cpu.brand_string"])
-    with open("/proc/cpuinfo") as f:
-        for line in f:
-            if line.startswith(("model name", "Model")):
-                return line.split(":", 1)[1].strip()
-    return platform.processor()
+        brand = try_output(["sysctl", "-n", "machdep.cpu.brand_string"])
+        if brand:
+            return brand
+    else:
+        try:
+            with open("/proc/cpuinfo") as f:
+                found = cpu_model_from_cpuinfo(f.read())
+            if found:
+                return found
+        except OSError:
+            pass
+        found = cpu_model_from_lscpu(try_output(["lscpu"]))
+        if found:
+            return found
+    return cpu_model_fallback(platform.processor(), platform.machine())
+
+
+def cpu_model_fallback(processor, machine):
+    """The brand string when the OS names no model: processor, then machine."""
+    return processor or machine or "unknown"
+
+
+# Words and suffixes that are not part of the CPU's name: trademarks, a clock,
+# a core count, and a trailing "CPU" or "Processor".
+_SLUG_SKIP = {"cpu", "processor", "processors"}
+
+
+def cpu_slug(model):
+    """A filesystem-safe host name for a CPU brand string.
+
+    `Intel(R) Core(TM) Ultra 9 275HX` becomes `intel-core-ultra-9-275hx`,
+    `AMD Ryzen 9 7950X 16-Core Processor` becomes `amd-ryzen-9-7950x`, and
+    `Apple M3 Max` becomes `apple-m3-max`. A result that is a nightly tier
+    name, which is what `platform.machine()` returns on a minimal aarch64
+    Linux, gains a `-host` suffix so the slug is never reserved.
+    """
+    text = model.lower()
+    text = re.sub(r"\((?:r|tm|c)\)|[®™]", " ", text)
+    text = re.sub(r"@?\s*\d+(?:\.\d+)?\s*ghz\b", " ", text)
+    text = re.sub(r"\b\d+\s*-?\s*cores?\b", " ", text)
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    parts = [part for part in text.split() if part not in _SLUG_SKIP]
+    slug = "-".join(parts)
+    if len(slug) > 80:
+        slug = slug[:80].rsplit("-", 1)[0] or slug[:80]
+    slug = slug or "unknown"
+    if slug in reserved_host_names():
+        slug = f"{slug}-host"
+    return slug
+
+
+def physical_from_cpuinfo(text):
+    """How many (socket, core) pairs /proc/cpuinfo lists, or None."""
+    cores = set()
+    phys = core = None
+
+    def flush():
+        nonlocal phys, core
+        if phys is not None and core is not None:
+            cores.add((phys, core))
+        phys = core = None
+
+    for line in text.splitlines():
+        if not line.strip():
+            flush()
+            continue
+        key, sep, value = line.partition(":")
+        if not sep:
+            continue
+        key = key.strip()
+        if key == "physical id":
+            phys = value.strip()
+        elif key == "core id":
+            core = value.strip()
+    flush()
+    return len(cores) or None
+
+
+def physical_from_lscpu(text):
+    vals = {}
+    for line in text.splitlines():
+        key, sep, value = line.partition(":")
+        if sep:
+            vals[key.strip().lower()] = value.strip()
+    try:
+        cores = int(vals["core(s) per socket"].split()[0])
+        sockets = int(vals.get("socket(s)", "1").split()[0])
+    except (KeyError, ValueError):
+        return None
+    return cores * sockets or None
+
+
+def physical_cpus():
+    """Physical cores, when the OS reports them."""
+    if sys.platform == "darwin":
+        text = try_output(["sysctl", "-n", "hw.physicalcpu"])
+        return int(text) if text.isdigit() else None
+    try:
+        with open("/proc/cpuinfo") as f:
+            count = physical_from_cpuinfo(f.read())
+        if count:
+            return count
+    except OSError:
+        pass
+    return physical_from_lscpu(try_output(["lscpu"]))
+
+
+def cpu_metadata():
+    """The CPU fields a result records: the raw brand string, its slug, and
+    the logical and (when known) physical core counts."""
+    model = cpu_model()
+    info = {
+        "model": model,
+        "slug": cpu_slug(model),
+        "arch": platform.machine(),
+        "logical_cpus": cpu_count(),
+    }
+    physical = physical_cpus()
+    if physical:
+        info["physical_cpus"] = physical
+    return info
+
+
+def reserved_host_names():
+    """Nightly tier names and `tiers`. `tiers.json` and gaps.toml's `on` use them."""
+    return set(dict(TIERS).values()) | {"tiers"}
+
+
+def check_host_name(name):
+    """A host name is one path component: 1 to 81 letters, digits, `.`, `_`,
+    and `-`, and not a reserved name."""
+    if not isinstance(name, str):
+        fail(f"host name {name!r} is not a filesystem-safe name of letters, digits, '.', '_' and '-'")
+    if name in reserved_host_names():
+        fail(f"host name {name!r} is reserved; pass a different --host")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}", name):
+        fail(f"host name {name!r} is not a filesystem-safe name of letters, digits, '.', '_' and '-'")
+
+
+def resolve_host(name, model):
+    """The name `run` records: `--host` when it is given, otherwise the CPU slug."""
+    host = name or cpu_slug(model)
+    check_host_name(host)
+    return host
 
 
 def os_name():
@@ -455,14 +669,19 @@ def toolchain(env):
 
 def run(args):
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-    result = {
-        "schema": 1,
-        "host": args.host,
-        "commit": args.commit,
-        "started": started,
-        "cpu": {"model": cpu_model(), "arch": platform.machine(), "logical_cpus": cpu_count()},
-        "os": os_name(),
-    }
+    # No tag when the OS has no machine id. A hostname is not a substitute:
+    # it changes between container runs, and it is not an id.
+    tag = machine_tag()
+    if not tag and not args.host:
+        # A slug of the CPU model is the same on every machine with that CPU,
+        # and a tag is what keeps their results apart.
+        fail("this machine has no machine id, so a name made from its CPU could be another machine's: pass --host NAME")
+    cpu = cpu_metadata()
+    host = resolve_host(args.host, cpu["model"])
+    result = {"schema": 1, "host": host}
+    if tag:
+        result["machine"] = tag
+    result.update(commit=args.commit, started=started, cpu=cpu, os=os_name())
 
     def finish(status, **fields):
         result.update(status=status, **fields)
@@ -474,7 +693,7 @@ def run(args):
         idle_before_build = check_idle("before the build")
     except Busy as e:
         finish("busy", reason=str(e))
-        fail(f"{args.host}: {e}")
+        fail(f"{host}: {e}")
 
     env = dict(os.environ, CARGO_BUILD_JOBS=str(args.jobs), CARGO_TERM_COLOR="never")
     env["CARGO_TARGET_DIR"] = os.path.abspath(args.target_dir)
@@ -506,7 +725,7 @@ def run(args):
         idle_before_run = check_idle("before the benchmarks")
     except Busy as e:
         finish("busy", reason=str(e))
-        fail(f"{args.host}: {e}")
+        fail(f"{host}: {e}")
 
     criterion_dir = os.path.join(env["CARGO_TARGET_DIR"], "criterion")
     shutil.rmtree(criterion_dir, ignore_errors=True)
@@ -592,7 +811,7 @@ def ssh(host):
     # ServerAlive ends a session whose link died, which would otherwise hang
     # collect.
     options = ["BatchMode=yes", "ConnectTimeout=10", "ServerAliveInterval=15", "ServerAliveCountMax=4"]
-    return ["ssh", *(arg for o in options for arg in ("-o", o)), HOSTS[host].get("ssh", host)]
+    return ["ssh", *(arg for o in options for arg in ("-o", o)), COLLECT_HOSTS[host].get("ssh", host)]
 
 
 def on_host(host, script, **kwargs):
@@ -621,12 +840,12 @@ def host_script(host, work, cmd):
         f'(cd "$src" && {cmd}) </dev/null >&2\n'
         'cat "$src/result.json"; code=$?; rm -rf "$src"; exit $code\n'
     )
-    if "lease" not in HOSTS[host]:
+    if "lease" not in COLLECT_HOSTS[host]:
         return script
     # The script's processes inherit the descriptor holding the lock. Python
     # closes it in its own children, but subprocess.run kills its child when
     # Python fails, so no child outlives the lease.
-    lock = f"exec 9>{q(HOSTS[host]['lease'])} && {{ flock -n -E {LEASE_HELD} 9 || exit; }}\n"
+    lock = f"exec 9>{q(COLLECT_HOSTS[host]['lease'])} && {{ flock -n -E {LEASE_HELD} 9 || exit; }}\n"
     return lock + f"trap 'rm -rf {w}' EXIT\n" + script
 
 
@@ -650,7 +869,7 @@ def collect_host(host, commit, out_dir):
     archive = subprocess.run(["git", "-C", ROOT, "archive", "--format=tar", commit], capture_output=True, check=True)
     cmd = (
         f'nix develop "path:$PWD" --command python3 admin/bench-report run '
-        f"--host {q(host)} --commit {q(commit)} --jobs {HOSTS[host]['jobs']} "
+        f"--host {q(host)} --commit {q(commit)} --jobs {COLLECT_HOSTS[host]['jobs']} "
         f"--target-dir ../target --out result.json"
     )
     # The gate admits the run only while the host has room, but other gated
@@ -660,7 +879,7 @@ def collect_host(host, commit, out_dir):
     with open(os.path.join(ROOT, "flake.lock")) as f:
         quest = json.load(f)["nodes"]["quest"]["locked"]
     cmd = f"nix shell github:{quest['owner']}/{quest['repo']}/{quest['rev']} --command quest gate {cmd}"
-    if "lease" in HOSTS[host]:
+    if "lease" in COLLECT_HOSTS[host]:
         # Crate downloads too, so that removing the work directory leaves nothing.
         cmd = f'CARGO_HOME="$PWD/../cargo" {cmd}'
     # A macOS ssh session runs no login shell, which is what puts Nix on PATH.
@@ -672,22 +891,34 @@ def collect_host(host, commit, out_dir):
         return record("failed", "could not copy the commit")
     if ran.returncode != 0:
         return record("failed", "the run wrote no result; see its output above")
-    with open(out, "wb") as f:
-        f.write(ran.stdout)
-    status = json.loads(ran.stdout)["status"]
-    print(f"bench-report: {host}: {status}", file=sys.stderr)
+    payload = json.loads(ran.stdout)
+    # The note lives with the result, so a later render does not need this
+    # checkout's collect list to describe the machine.
+    note = COLLECT_HOSTS[host].get("note")
+    if note and not payload.get("note"):
+        payload["note"] = note
+    with open(out, "w") as f:
+        json.dump(payload, f, indent=1)
+        f.write("\n")
+    print(f"bench-report: {host}: {payload['status']}", file=sys.stderr)
 
 
 def collect(args):
+    if not COLLECT_HOSTS:
+        fail("no collect hosts configured")
+    hosts = args.host or list(COLLECT_HOSTS)
+    for host in hosts:
+        if host not in COLLECT_HOSTS:
+            fail(
+                f"unknown collect host {host}; known: {', '.join(COLLECT_HOSTS)} "
+                "(other machines use `admin/bench-report run`)"
+            )
     # A gate nested in a gated command runs at once, so this host's run would
-    # skip its own gate.
+    # skip its own gate. An unknown host is refused above, including when this
+    # check itself runs under `quest gate`.
     if os.environ.get("QUEST_GATE_ADMITTED") == "1":
         fail("run collect outside quest gate: it gates each host's run itself")
     commit = output(["git", "-C", ROOT, "rev-parse", f"{args.commit}^{{commit}}"])
-    hosts = args.host or list(HOSTS)
-    for host in hosts:
-        if host not in HOSTS:
-            fail(f"unknown host {host}; known: {', '.join(HOSTS)}")
     out_dir = args.out or os.path.join(ROOT, ".tmp", "bench-report", commit[:12])
     os.makedirs(out_dir, exist_ok=True)
     # One host at a time, so no run shares a machine or a network with another.
@@ -705,29 +936,28 @@ def human(ns):
 
 
 def summary(args):
-    hosts = []
-    for host in HOSTS:
-        path = os.path.join(args.dir, f"{host}.json")
-        if os.path.exists(path):
-            with open(path) as f:
-                hosts.append(json.load(f))
-    measured = [h for h in hosts if h["status"] == "ok"]
-    for h in hosts:
-        if h["status"] == "ok":
-            noisy = " (noisy)" if h["load"].get("noisy") else ""
-            print(f"- `{h['host']}`: {h['cpu']['model']}, {h['os']}, {h['toolchain']['rustc']}{noisy}")
+    loaded = load_hosts(args.dir)
+    measured = []
+    for name, h in loaded.items():
+        why = unmeasured(h)
+        if h.get("status") == "ok" and why:
+            print(f"bench-report: {name}: {why}, skipped", file=sys.stderr)
+        elif not why:
+            noisy = " (noisy)" if h.get("load", {}).get("noisy") else ""
+            print(f"- `{name}`: {h['cpu']['model']}, {h['os']}, {h['toolchain']['rustc']}{noisy}")
+            measured.append((name, h))
         else:
-            print(f"- `{h['host']}`: not measured, {h['status']}: {h['reason']}")
+            print(f"- `{name}`: not measured, {h.get('status', 'unmeasured')}: {h.get('reason', '')}")
     if not measured:
         return
     print()
     print("Each cell is rind's time, then that over the fastest other library's, and which library that is.")
     print()
-    print("| operation | " + " | ".join(h["host"] for h in measured) + " |")
+    print("| operation | " + " | ".join(name for name, _ in measured) + " |")
     print("|---|" + "---|" * len(measured))
     for op in OPERATIONS:
         cells = []
-        for h in measured:
+        for _, h in measured:
             times = {r["library"]: r["ns"] for r in h["results"] if r["operation"] == op}
             others = {lib: ns for lib, ns in times.items() if lib != "rind" and lib not in VARIANTS}
             if "rind" not in times or not others:
@@ -748,6 +978,8 @@ REPORT_DIR = os.path.join(ROOT, "benchmarks")
 DATA_DIR = os.path.join(REPORT_DIR, "data")
 VERIFIED = os.path.join(REPORT_DIR, "verified.toml")
 GAPS = os.path.join(REPORT_DIR, "gaps.toml")
+# The report as data, which the site's benchmarks page draws.
+SITE_DATA = os.path.join(REPORT_DIR, "report.json")
 REPO = "kixel-ai/rind"
 
 # The report's columns, in order, by library.
@@ -867,6 +1099,7 @@ BUILDS = {
     "rustcrypto": "RustCrypto + dalek",
     "graviola": "graviola",
     "libcrux": "libcrux",
+    "verified-garbage": "verified-garbage",
     "openssl": "OpenSSL, the system's, linked dynamically",
     "openssl-vendored": "OpenSSL, vendored",
     "rustls-rind": "rustls + rind-rustls",
@@ -966,10 +1199,10 @@ TIERS = [
 # The libraries the weekly bench times rind against.
 BASELINES = ["aws-lc-rs", "ring"]
 
-# Libraries the weekly bench also times and the tiers keep, but that neither the
-# tier heatmap nor the gate counts. A cell where pyca/verified-garbage's
-# proven code is faster gets a quest that switches rind to it, not an alert;
-# the hosts' report counts it like any other library.
+# Libraries the weekly bench also times, which the tier heatmap ranks rind
+# against like the baselines but the gate never counts: a cell where
+# pyca/verified-garbage's proven code is faster gets a quest that switches
+# rind to it, not an alert. The hosts' report counts it like any other library.
 TIMED = ["verified-garbage"]
 
 # The CPU-tier rows, as patterns over a weekly benchmark ID with `*` in the
@@ -979,7 +1212,7 @@ TIER_ROWS = [
     ("AES block, AES-CTR", r"(aes(128|192|256)-ctr|quic-header-protection/aes(128|256))/"),
     ("AES-CBC", r"aes(128|192|256)-cbc-"),
     ("AES-KW, AES-KWP", r"aes(128|256)-kwp?-"),
-    ("ChaCha20 (header protection)", r"quic-header-protection/chacha20/"),
+    ("ChaCha20", r"(quic-header-protection/)?chacha20/"),
     ("ChaCha20-Poly1305, XChaCha20-Poly1305", r"x?chacha20poly1305(-open)?/"),
     ("SHA-1", r"sha1/"),
     ("SHA-256", r"sha256(-updates)?/"),
@@ -1013,7 +1246,7 @@ UNRANKED = [
         r"(blind-rsa\d+|v?oprf|vrf|spake2plus|argon2id)-",
         "neither aws-lc-rs nor ring offers the protocol, so no baseline; the report's hosts compare it",
     ),
-    (r"chacha20/", "neither aws-lc-rs nor ring offers ChaCha20 without Poly1305, so no baseline"),
+    (r"slhdsa-", "neither aws-lc-rs nor ring offers SLH-DSA, so no baseline"),
 ]
 
 # rind's time over the fastest library's above which benchmarks/gaps.toml
@@ -1024,7 +1257,10 @@ SLOWER = 1.1
 SPEED_BINS = [SLOWER, 1.25, 1.5, 2, 4, 8]
 SPEED_LABELS = ["fastest, or within 10%", "to 1.25×", "to 1.5×", "to 2×", "to 4×", "to 8×", "over 8×"]
 
-# rind's time over the fastest baseline's, binned around the ~2% noise.
+# The tier heatmap's title.
+TIERS_TITLE = "rind's time over the fastest of aws-lc-rs, ring, and verified-garbage, by CPU tier"
+
+# rind's time over the fastest rival's, binned around the ~2% noise.
 TIER_BINS = [0.8, 0.9, 0.98, 1.02, 1.1, 1.25]
 TIER_LABELS = ["under 0.8", "to 0.9", "to 0.98", "even", "to 1.1", "to 1.25", "over 1.25"]
 
@@ -1107,13 +1343,14 @@ def load_verified(path=VERIFIED):
     return entries
 
 
-def proof_for(verified, library, row, host):
-    """The entry that verifies a library's code for an operation on a host."""
+def proof_for(verified, library, row, host, any_os=False):
+    """The entry that verifies a library's code for an operation on a host,
+    or with `any_os`, on the same CPU under any OS."""
     cpuid = host.get("rind_cpu", {}).get("cpuid", {})
     for e in verified:
         if e["library"] != library or e.get("arch", host_arch(host)) != host_arch(host):
             continue
-        if e.get("os", host_os(host)) != host_os(host):
+        if not any_os and e.get("os", host_os(host)) != host_os(host):
             continue
         if not all(cpuid.get(f.removeprefix("!")) == (0 if f.startswith("!") else 1) for f in e.get("cpu", [])):
             continue
@@ -1122,14 +1359,162 @@ def proof_for(verified, library, row, host):
     return None
 
 
+def shown_names(hosts):
+    """Every measured host. Maintainer machines stay in COLLECT_HOSTS order so
+    the published report does not move; every other name keeps the order of
+    `hosts`. COLLECT_HOSTS does not drop a host."""
+    known = [name for name in COLLECT_HOSTS if name in hosts]
+    return known + [name for name in hosts if name not in COLLECT_HOSTS]
+
+
+def host_note(name, host):
+    """Prose for a host section: the result's own note, or the collect list's
+    for a machine measured before notes were stored in the JSON."""
+    return host.get("note") or COLLECT_HOSTS.get(name, {}).get("note")
+
+
+class BadHostFile(Exception):
+    """A file in a host directory that is not readable as a host result."""
+
+
+def read_host(path, name):
+    """One host result. `name` is its file stem and has to be a host name,
+    and so does a `host` field that names something else. A file that is not
+    JSON, or not an object, raises `BadHostFile`, so a caller can skip it."""
+    check_host_name(name)
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        raise BadHostFile(f"{os.path.basename(path)}: not readable as JSON ({e})") from e
+    if not isinstance(data, dict):
+        raise BadHostFile(f"{os.path.basename(path)}: not a host result")
+    if "host" in data and data["host"] != name:
+        check_host_name(data["host"])
+    return data
+
+
 def load_hosts(directory):
-    hosts = {}
-    for name in HOSTS:
-        path = os.path.join(directory, f"{name}.json")
-        if os.path.exists(path):
-            with open(path) as f:
-                hosts[name] = json.load(f)
-    return hosts
+    """Every host result in `directory`, keyed by file name. `tiers.json` is
+    the nightly CPU tiers, not a host. Every other file name has to pass
+    `check_host_name`, and so does a `host` field that names something else.
+    A file that is not a readable host result is named on stderr and skipped,
+    so one bad file does not hide the others."""
+    found = {}
+    for path in glob.glob(os.path.join(directory, "*.json")):
+        name = os.path.splitext(os.path.basename(path))[0]
+        if name == "tiers":
+            continue
+        try:
+            found[name] = read_host(path, name)
+        except BadHostFile as e:
+            print(f"bench-report: {e}, skipped", file=sys.stderr)
+    # Glob order is not stable. Collect machines stay in COLLECT_HOSTS order
+    # and every other file follows by name.
+    names = [name for name in COLLECT_HOSTS if name in found]
+    names += sorted(name for name in found if name not in COLLECT_HOSTS)
+    return {name: found[name] for name in names}
+
+
+def unmeasured(host):
+    """Why `host` has no times to report, or "" when it has them."""
+    if host.get("status") != "ok":
+        return f"not measured, {host.get('status', 'unmeasured')}: {host.get('reason', '')}"
+    for path in REQUIRED_HOST_FIELDS:
+        value = host
+        for key in path.split("."):
+            value = value.get(key) if isinstance(value, dict) else None
+        if path == "cpu.logical_cpus":
+            ok = type(value) is int and value > 0
+        else:
+            ok = isinstance(value, str) and value != ""
+        if path == "started" and ok:
+            try:
+                datetime.datetime.fromisoformat(value)
+            except ValueError:
+                ok = False
+        if not ok:
+            return f"no well-formed {path}"
+    for key in OPTIONAL_HOST_OBJECTS:
+        if key in host and not isinstance(host[key], dict):
+            return f"no well-formed {key}"
+    if "refused" in host and not well_formed_refused(host["refused"]):
+        return "no well-formed refused"
+    if "build_cost" in host and not well_formed_build_cost(host["build_cost"]):
+        return "no well-formed build_cost"
+    results = host.get("results")
+    if not isinstance(results, list) or not all(
+        isinstance(r, dict)
+        and isinstance(r.get("operation"), str)
+        and isinstance(r.get("library"), str)
+        and positive_time(r.get("ns"))
+        for r in results
+    ):
+        return "no well-formed results list"
+    return ""
+
+
+# Every field of a measured host that the report and `summary` read
+# unguarded. `cpu.logical_cpus` is a count; the rest are nonempty strings.
+REQUIRED_HOST_FIELDS = ("commit", "started", "os", "cpu.model", "cpu.arch", "cpu.logical_cpus", "toolchain.rustc")
+# Optional fields the report reads as objects when a host has them.
+OPTIONAL_HOST_OBJECTS = ("load", "refused", "build_cost", "rind_cpu")
+
+
+def _strings(value):
+    return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+
+def _seconds(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= sys.float_info.max
+
+
+def well_formed_refused(refused):
+    """Whether `refused` maps known libraries to the CPU features each lacks, as the report reads it."""
+    return all(lib in COLUMNS and _strings(missing) for lib, missing in refused.items())
+
+
+def well_formed_build_cost(cost):
+    """Whether `cost` has every field `build_table` and the build-cost section read."""
+    if cost.get("status") != "ok":
+        return isinstance(cost.get("status"), str) and isinstance(cost.get("reason"), str)
+    host = cost.get("host")
+    builds = cost.get("builds")
+    return (
+        isinstance(cost.get("started"), str)
+        and isinstance(host, dict)
+        and all(isinstance(host.get(k), (str, int)) and not isinstance(host.get(k), bool) for k in ("rustc", "cc", "jobs"))
+        and isinstance(builds, list)
+        and all(
+            isinstance(b, dict)
+            and isinstance(b.get("name"), str)
+            and isinstance(b.get("seconds"), list)
+            and b["seconds"]
+            and all(_seconds(x) for x in b["seconds"])
+            and all(_seconds(b.get(k)) for k in ("median_seconds", "median_cpu_seconds", "stripped_bytes"))
+            and _strings(b.get("tools"))
+            and isinstance(b.get("packages"), list)
+            for b in builds
+        )
+    )
+
+
+def positive_time(ns):
+    """True for a finite time above zero. A bool is an int in Python, so it is refused by name. NaN
+    fails both comparisons, and an int too large for a float compares without being converted."""
+    return isinstance(ns, (int, float)) and not isinstance(ns, bool) and 0 < ns <= sys.float_info.max
+
+
+def load_measured(directory):
+    """`load_hosts`, minus every result without times, each named on stderr."""
+    found = {}
+    for name, host in load_hosts(directory).items():
+        why = unmeasured(host)
+        if why:
+            print(f"bench-report: {name}: {why}, skipped", file=sys.stderr)
+        else:
+            found[name] = host
+    return found
 
 
 def times(host):
@@ -1140,15 +1525,22 @@ def times(host):
     return out
 
 
-def tier_rows(tier):
-    """rind's time over the fastest baseline's, per benchmark of a tier."""
+def tier_rows(tier, rivals):
+    """rind's time over the fastest of `rivals`, per benchmark of a tier."""
     out = {}
     for key, libs in tier["benchmarks"].items():
-        base = {lib: ns for lib, ns in libs.items() if lib in BASELINES}
+        base = {lib: ns for lib, ns in libs.items() if lib in rivals}
         if "rind" in libs and base:
             best = min(base, key=base.get)
             out[key] = (libs["rind"] / base[best], libs["rind"], best, base[best])
     return out
+
+
+def heatmap_rivals(tier):
+    """The libraries the tier heatmap ranks rind against. The portable tier
+    leaves out verified-garbage, which runs its baseline assembly there, code
+    rind's portable backend can never take."""
+    return BASELINES + ([] if tier_name(tier) == "portable" else TIMED)
 
 
 def tier_name(tier):
@@ -1191,7 +1583,7 @@ def tier_cells(tiers):
     cells = {}
     for t in tiers["tiers"]:
         column = tier_column(t)
-        for key, value in tier_rows(t).items():
+        for key, value in tier_rows(t, heatmap_rivals(t)).items():
             row = tier_row(key)
             if row is None:
                 continue
@@ -1220,7 +1612,7 @@ def gaps_of(hosts, tiers):
                     out[(row, name)] = (libs["rind"] / others[best], best)
     for t in tiers["tiers"] if tiers else []:
         column = tier_name(t)
-        for key, (ratio, _, best, _) in tier_rows(t).items():
+        for key, (ratio, _, best, _) in tier_rows(t, BASELINES).items():
             if ratio > SLOWER and tier_row(key):
                 out[(key, column)] = (ratio, best)
     return out
@@ -1249,13 +1641,18 @@ def load_gaps(hosts, tiers, path=GAPS):
             fail(f"{where}: needs operations and on")
         if ("quest" in e) == ("reason" in e):
             fail(f"{where}: needs a quest or a reason, not both")
+        # The report's gap table, and the site's, hold the reason in one cell
+        # as inline Markdown.
+        if re.search(r"[\r\n]", e.get("reason", "")):
+            fail(f"{where}: the reason must be one line, since a table cell holds it")
         if "quest" in e and not (e["quest"].startswith("/quest/") and os.path.isfile(ROOT + e["quest"])):
             fail(f"{where}: no quest at {e['quest']}")
+        # A nightly tier stays valid when this run did not draw it. Any other
+        # name must be a host the data actually measured.
+        tier_names = set(dict(TIERS).values())
         for place in e["on"]:
-            if place not in HOSTS and place not in dict(TIERS).values():
+            if place not in tier_names and place not in hosts:
                 fail(f"{where}: no host or tier {place}")
-            if place in HOSTS and place not in hosts:
-                fail(f"{where}: {place} is not measured; update or remove the entry")
         covered = {k: v for k, v in found.items() if covers(e, *k)}
         if not covered and measured & set(e["on"]):
             fail(f"{where}: names no gap over 10%; update or remove the entry")
@@ -1276,16 +1673,23 @@ def quest_title(path):
         return re.sub(r"^# (\[\w+\] )?", "", f.readline().strip())
 
 
+def cell_text(markdown):
+    """Markdown for a table cell: each pipe it hasn't escaped, after an even
+    run of backslashes, escaped, so the cell holds it."""
+    return re.sub(r"(\\*)\|", lambda m: m.group(1) + ("|" if len(m.group(1)) % 2 else "\\|"), markdown)
+
+
 def gap_table(gaps):
     rows = {row_name(op) for op in OPERATIONS}
+    tier_names = set(dict(TIERS).values())
     lines = ["| Operation | On | rind's time over the fastest | Decision |", "|---|---|---|---|"]
     for e, covered in gaps:
         ops = ", ".join(label(op) if op in rows else f"`{op}`" for op in e["operations"])
-        on = ", ".join(f"`{p}`" if p in HOSTS else f"{p} tier" for p in e["on"])
+        on = ", ".join(f"{p} tier" if p in tier_names else f"`{p}`" for p in e["on"])
         ratios = [ratio for ratio, _ in covered.values()]
         spread = f"{min(ratios):.2f}×" + (f" to {max(ratios):.2f}×" if max(ratios) - min(ratios) >= 0.005 else "")
         fastest = ", ".join(sorted({COLUMNS[lib] for _, lib in covered.values()}))
-        decision = f"[{quest_title(e['quest'])}]({e['quest'][1:]})" if "quest" in e else e["reason"]
+        decision = f"[{quest_title(e['quest'])}]({e['quest'][1:]})" if "quest" in e else cell_text(e["reason"])
         lines.append(f"| {ops} | {on} | {spread} ({fastest}) | {decision} |")
     return lines
 
@@ -1429,7 +1833,7 @@ def overview_svg(hosts, verified, theme):
     """Operations by library, each cell a square per host, colored by its time
     over the fastest library's on that host, under how often rind leads."""
     svg = Svg(theme)
-    shown = [name for name in HOSTS if name in hosts]
+    shown = shown_names(hosts)
     libs_shown = columns(*hosts.values())
     names = [COLUMNS[lib] for lib in libs_shown]
     squares = len(shown) * SQUARE + (len(shown) - 1) * GAP
@@ -1518,7 +1922,7 @@ def host_svg(name, host, verified, theme):
 
 
 def tiers_svg(tiers, theme):
-    """rind's time over the fastest baseline's per CPU tier, in the benchmark
+    """rind's time over the fastest rival's per CPU tier, in the benchmark
     of each row where rind trails most."""
     svg = Svg(theme)
     cells = tier_cells(tiers)
@@ -1548,7 +1952,7 @@ def tiers_svg(tiers, theme):
             svg.rect(x, y + 1, cell - 4, ROW - 2, fill, title)
             svg.text(x + (cell - 4) / 2, y + 14, f"{ratio:.2f}", size=11, anchor="middle", color=ink_on(fill))
         y += ROW
-    return svg.render(width, y + 12, "rind's time over the fastest of aws-lc-rs and ring, by CPU tier")
+    return svg.render(width, y + 12, TIERS_TITLE)
 
 
 def and_list(words):
@@ -1574,6 +1978,17 @@ def commit_link(commit):
 def measured(host):
     noisy = ", noisy" if host.get("load", {}).get("noisy") else ""
     return f"{host['started'][:10]} at {commit_link(host['commit'])}{noisy}"
+
+
+# What a ✓ means, which the report and the site's verified page both state.
+VERIFIED_RULE = (
+    "A ✓ means a published, machine-checked proof shows that all the code computing the operation, as "
+    "that library runs it on that host, gives the specified result for every input: the cipher and its "
+    "mode, the hash over every block with its padding, the whole scalar multiplication or exponentiation, "
+    "and the glue around them, such as clamping, byte conversion, and point encoding. Parsing DER key and "
+    "signature containers, randomness, and the message hash a signature takes are left out. Proofs of "
+    "memory safety alone, or of only some of the code, earn no ✓."
+)
 
 
 def platform_of(entry):
@@ -1747,7 +2162,7 @@ def tier_table(tiers):
     by_key = {}
     for t in tiers["tiers"]:
         column = tier_column(t)
-        for key, (ratio, *_) in tier_rows(t).items():
+        for key, (ratio, *_) in tier_rows(t, heatmap_rivals(t)).items():
             by_key.setdefault(key, {})[column] = ratio
     lines = ["| Benchmark | " + " | ".join(columns) + " |", "|---|" + "---|" * len(columns)]
     for key in sorted(by_key):
@@ -1757,11 +2172,219 @@ def tier_table(tiers):
     return lines
 
 
+def site_data(hosts, tiers, verified, gaps):
+    """The report as data for the site's benchmarks page, which reads nothing
+    else, so it never decides for itself what counts as the fastest, a proof,
+    or a gap. A row's times are one cell per library of its host or tier, in
+    that `libraries` order, each [its time as the report writes it, its
+    SPEED_BINS bin, its time over the fastest's] or null where untimed, all
+    from the full-precision times, so the page shows what the report does."""
+
+    def cells(libraries, libs, best):
+        return [
+            [human(libs[lib]), bin_of(libs[lib] / libs[best], SPEED_BINS), round(libs[lib] / libs[best], 2)]
+            if lib in libs
+            else None
+            for lib in libraries
+        ]
+
+    gap_of = {place: i for i, (_, covered) in enumerate(gaps) for place in covered}
+    proof_index = {id(e): i for i, e in enumerate(verified)}
+    rows = {row_name(op) for op in OPERATIONS}
+    # The libraries the verified page has a column for.
+    proven = [lib for lib in columns(*hosts.values()) if lib not in VARIANTS]
+
+    def grid_cell(h, timed, lib, row):
+        """A library's cell for an operation on a host, for the verified
+        page: the index in `verified` of the proof that covers it,
+        `{"other_os": index}` for a proof limited to another OS, `refused`
+        where the library refuses to start on the host's CPU, `unproven`, or
+        `untimed`. A proof shows whether or not the host timed the operation,
+        since it covers the code; a cell with neither is `untimed`, as the
+        library may not offer the operation or the host's results may predate
+        its benchmark."""
+        if lib in h.get("refused", {}):
+            return "refused"
+        if entry := proof_for(verified, lib, row, h):
+            return proof_index[id(entry)]
+        if entry := proof_for(verified, lib, row, h, any_os=True):
+            return {"other_os": proof_index[id(entry)]}
+        return "unproven" if lib in timed.get(row, {}) else "untimed"
+
+    def host_data(name):
+        h = hosts[name]
+        out = {
+            "name": name,
+            "cpu": h["cpu"]["model"],
+            "arch": host_arch(h),
+            "logical_cpus": h["cpu"]["logical_cpus"],
+            "os": h["os"],
+            "os_kind": host_os(h),
+            "rustc": h["toolchain"]["rustc"],
+            "date": h["started"][:10],
+            "commit": h["commit"],
+            "noisy": bool(h.get("load", {}).get("noisy")),
+            "note": host_note(name, h),
+            "scaling": " ".join(scaling(h)).strip() or None,
+            "refused": {lib: [f.upper() for f in missing] for lib, missing in h.get("refused", {}).items()},
+            "libraries": columns(h),
+            "times": {},
+            "fastest": {},
+            "proofs": {},
+            # Every operation's cell for each library, timed or not, for the verified page.
+            "grid": {
+                row_name(op): {lib: grid_cell(h, times(h), lib, row_name(op)) for lib in proven}
+                for op in OPERATIONS
+            },
+            "gaps": {},
+        }
+        for row, libs in times(h).items():
+            if row not in rows:
+                continue
+            others = [lib for lib in libs if lib not in VARIANTS]
+            best = fastest(libs)
+            out["times"][row] = cells(out["libraries"], libs, best)
+            # One library alone has no rival, so no fastest.
+            if len(others) > 1:
+                out["fastest"][row] = best
+            proofs = {
+                lib: proof_index[id(p)]
+                for lib in libs
+                if (p := proof_for(verified, VARIANTS.get(lib, lib), row, h)) is not None
+            }
+            if proofs:
+                out["proofs"][row] = proofs
+            if (row, name) in gap_of:
+                out["gaps"][row] = gap_of[row, name]
+        cost = h.get("build_cost")
+        if cost and cost["status"] == "ok":
+            out["build"] = {
+                "date": cost["started"][:10],
+                "rustc": cost["host"]["rustc"],
+                "cc": cost["host"]["cc"],
+                "jobs": cost["host"]["jobs"],
+                "builds": [
+                    {
+                        "name": BUILDS.get(b["name"], b["name"]),
+                        # The library each build is of, so the page shows it beside that library.
+                        "library": b["name"].removeprefix("rustls-").removesuffix("-vendored"),
+                        "seconds": round(b["median_seconds"], 1),
+                        "low": round(min(b["seconds"]), 1),
+                        "high": round(max(b["seconds"]), 1),
+                        "cpu_seconds": round(b["median_cpu_seconds"]),
+                        "stripped_mb": round(b["stripped_bytes"] / 1e6, 2),
+                        "tools": b["tools"],
+                        "crates": len(b["packages"]),
+                    }
+                    for b in cost["builds"]
+                ],
+            }
+        elif cost:
+            out["build"] = {"reason": cost["reason"]}
+        return out
+
+    def tier_data(t):
+        column, name = tier_column(t), tier_name(t)
+        timed = {lib for libs in t["benchmarks"].values() for lib in libs}
+        out = {
+            "name": column,
+            # The TIERS name benchmarks/gaps.toml decides on.
+            "tier": name,
+            "cpu": t["cpu"],
+            "libraries": [lib for lib in ["rind", *BASELINES, *TIMED] if lib in timed],
+            # The libraries its fastest is drawn from.
+            "rivals": ["rind", *heatmap_rivals(t)],
+            "times": {},
+            "fastest": {},
+            "gaps": {},
+        }
+        for key, libs in t["benchmarks"].items():
+            rivals = {lib: ns for lib, ns in libs.items() if lib in out["rivals"]}
+            if not rivals:
+                continue
+            best = min(rivals, key=rivals.get)
+            out["times"][key] = cells(out["libraries"], libs, best)
+            if len(rivals) > 1:
+                out["fastest"][key] = best
+            if (key, name) in gap_of:
+                out["gaps"][key] = gap_of[key, name]
+        return out
+
+    def tier_groups(tiers):
+        """The tiers' benchmarks by TIER_ROWS row, then those UNRANKED keeps
+        apart, by its reason."""
+        keys = sorted({key for t in tiers["tiers"] for key in t["benchmarks"]})
+        groups = [{"name": name, "benchmarks": [k for k in keys if re.match(p, k)]} for name, p in TIER_ROWS]
+        unranked = [k for k in keys if tier_row(k) is None]
+        for pattern, why in UNRANKED:
+            group = [k for k in unranked if re.match(pattern, k)]
+            unranked = [k for k in unranked if k not in group]
+            groups.append({"name": f"Not ranked: {why}", "benchmarks": group})
+        return [g for g in groups if g["benchmarks"]]
+
+    data = {
+        "schema": 1,
+        "slower": SLOWER,
+        "rule": VERIFIED_RULE,
+        "bins": [
+            {"to": edge, "label": text, "color": color}
+            for edge, text, color in zip(SPEED_BINS + [None], SPEED_LABELS, SPEED)
+        ],
+        "standing": standing(hosts),
+        "libraries": [{"id": lib, "name": COLUMNS[lib], "variant_of": VARIANTS.get(lib)} for lib in COLUMNS],
+        "sections": [
+            {"name": section, "operations": [{"id": row_name(op), "label": label(row_name(op))} for op in ops]}
+            for section, ops in SECTIONS
+        ],
+        "hosts": [host_data(name) for name in shown_names(hosts)],
+        "unmeasured": [name for name in COLLECT_HOSTS if name not in hosts],
+        "tiers": None,
+        "gaps": [],
+        "verified": [
+            {
+                "library": e["library"],
+                "operations": e["operations"],
+                "platform": platform_of(e),
+                **({"os": e["os"]} if "os" in e else {}),
+                "proof": e["proof"],
+                "link": e["link"],
+            }
+            for e in verified
+        ],
+    }
+    if tiers is not None:
+        order = tier_columns(tiers)
+        data["tiers"] = {
+            # The libraries any tier's fastest is drawn from.
+            "rivals": ["rind", *BASELINES, *TIMED],
+            "run": tiers["run"],
+            "url": tiers["url"],
+            "date": tiers["date"][:10],
+            "commit": tiers["commit"],
+            "columns": [tier_data(t) for t in sorted(tiers["tiers"], key=lambda t: order.index(tier_column(t)))],
+            "groups": tier_groups(tiers),
+        }
+    for e, covered in gaps:
+        ratios = [ratio for ratio, _ in covered.values()]
+        data["gaps"].append(
+            {
+                "operations": [{"id": op, "label": label(op) if op in rows else None} for op in e["operations"]],
+                "on": [{"name": p, "host": p in hosts} for p in e["on"]],
+                "low": round(min(ratios), 2),
+                "high": round(max(ratios), 2),
+                "fastest": sorted({COLUMNS[lib] for _, lib in covered.values()}),
+                "quest": {"path": e["quest"], "title": quest_title(e["quest"])} if "quest" in e else None,
+                "reason": e.get("reason"),
+            }
+        )
+    return data
+
+
 def report(hosts, tiers, verified, gaps):
-    """BENCHMARKS.md, its SVGs, and the README with its comparison, by path."""
+    """BENCHMARKS.md, its SVGs, the site's data, and the README with its
+    comparison, by path."""
     files = {}
-    shown = [name for name in HOSTS if name in hosts]
-    missing = [f"`{name}`" for name in HOSTS if name not in hosts]
+    shown = shown_names(hosts)
     words = ["no", "one", "two", "three", "four", "five", "six"]
     count = words[len(shown)] if len(shown) < len(words) else str(len(shown))
     md = [
@@ -1782,8 +2405,6 @@ def report(hosts, tiers, verified, gaps):
         md += ["| Host | CPU | OS | Measured |", "|---|---|---|---|"]
         md += [f"| `{n}` | {hosts[n]['cpu']['model']} | {hosts[n]['os']} | {measured(hosts[n])} |" for n in shown]
         md.append("")
-    if missing:
-        md += [f"Not measured yet: {', '.join(missing)}.", ""]
     md += [
         "Each host builds with the pinned toolchain in the Nix dev shell, and runs "
         "`admin/bench-report` only when idle. Times are criterion's estimates.",
@@ -1823,17 +2444,16 @@ def report(hosts, tiers, verified, gaps):
         ]
         for theme, suffix in (("light", ""), ("dark", "-dark")):
             files[f"overview{suffix}.svg"] = overview_svg(hosts, verified, theme)
-    for name in HOSTS:
-        if name not in hosts:
-            continue
+    for name in shown:
         h = hosts[name]
+        note = host_note(name, h)
         untimed = [label(row_name(op)) for op in OPERATIONS if row_name(op) not in times(h)]
         md += [
             f"### `{name}`: {h['cpu']['model']}",
             "",
             f"Measured {measured(h)}, on {h['os']} with {h['toolchain']['rustc']}.",
             "",
-            *([HOSTS[name]["note"], ""] if "note" in HOSTS[name] else []),
+            *([note, ""] if note else []),
             *([f"Not timed on `{name}`: {', '.join(untimed)}.", ""] if untimed else []),
             *scaling(h),
             *(
@@ -1863,7 +2483,8 @@ def report(hosts, tiers, verified, gaps):
             "and X25519) and of a rustls client per provider, by `admin/build-cost`: the median of three builds with an empty target directory and a warm "
             "download cache, their CPU time, the stripped binary's size, the build tools it needs beyond rustc "
             "and a linker, and the crates it compiles. The system OpenSSL build leaves the library itself out of "
-            "its size; the vendored build is the static figure.",
+            "its size; the vendored build is the static figure. verified-garbage has no P-256 key generation, so "
+            "its binary imports a random scalar instead, and no rustls provider, so it has no rustls build.",
             "",
         ]
     for name in shown:
@@ -1896,15 +2517,16 @@ def report(hosts, tiers, verified, gaps):
             "no SHA-3 without the SHA-512 and SHA-3 instructions, no crypto without any of them, armv7 in 32-bit "
             "mode on the same core, and armv7 NEON there without the crypto extension. portable times rind's portable "
             "backend, forced with `--cfg rind_portable`, against aws-lc's C built without assembly; ring has no "
-            "such build, so it sits that column out. Each cell is rind's time over "
-            "the fastest of aws-lc-rs and ring (aws-lc-rs alone where a feature is denied, since ring can't "
-            "be denied one), in the row's benchmark where rind trails most. An empty cell runs the same code "
-            "as the one to its left, so it isn't timed.",
+            "such build, and verified-garbage runs its assembly there, so both sit that column out. Each cell is "
+            "rind's time over the fastest of aws-lc-rs, ring, and verified-garbage (without ring where a feature "
+            "is denied, since ring can't be denied one), in the row's benchmark where rind trails most. A cell "
+            "verified-garbage wins gets a quest that switches rind to its proven code, not an entry under "
+            "Known gaps. An empty cell runs the same code as the one to its left, so it isn't timed.",
             "",
             f"From [run {tiers['run']}]({tiers['url']}), {tiers['date'][:10]} at {commit_link(tiers['commit'])}, "
             f"on {', '.join(cpus)}.",
             "",
-            *picture("tiers", "rind's time over the fastest of aws-lc-rs and ring, by CPU tier"),
+            *picture("tiers", TIERS_TITLE),
             "",
             "<details>",
             "<summary>Every benchmark</summary>",
@@ -1929,13 +2551,7 @@ def report(hosts, tiers, verified, gaps):
         "",
         "## Verified code",
         "",
-        "A ✓ means a published, machine-checked proof shows that all the code computing the operation, as "
-        "that library runs it on that host, gives the specified result for every input: the cipher and its "
-        "mode, the hash over every block with its padding, the whole scalar multiplication or exponentiation, "
-        "and the glue around them, such as clamping, byte conversion, and point encoding. Parsing DER key and "
-        "signature containers, randomness, and the message hash a signature takes are left out. Proofs of "
-        "memory safety alone, or of only some of the code, earn no ✓. `benchmarks/verified.toml` holds this "
-        "table.",
+        f"{VERIFIED_RULE} `benchmarks/verified.toml` holds this table.",
         "",
         "| Library | Operations | Platform | Proof |",
         "|---|---|---|---|",
@@ -1948,44 +2564,546 @@ def report(hosts, tiers, verified, gaps):
         "## Updating this report",
         "",
         "`admin/bench-report collect` runs the report's benchmarks, then",
-        "`admin/build-cost`, on each benchmark host in turn over ssh, in the Nix dev",
+        "`admin/build-cost`, on each machine in `COLLECT_HOSTS` in turn over ssh, in the Nix dev",
         "shell and under `quest gate`, which waits for the host to have room but",
         "shares it with other gated work, so its numbers are noisier than the weekly",
         "`bench` workflow's runners, which give the clean ones; it skips any host that is still busy, and writes their results and the hosts' details as JSON under",
         "`.tmp/bench-report/`. `admin/bench-report weekly` saves the latest weekly",
-        "`bench` run's results, and `admin/bench-report render --from DIR` copies a",
-        "collection's measured hosts into `benchmarks/data/` and writes",
+        "`bench` run's results, and `admin/bench-report render --from DIR` copies every",
+        "measured host JSON from that directory into `benchmarks/data/` and writes",
         "`BENCHMARKS.md`, its SVGs, which the README shows too, and the README's comparison table from them,",
         "`benchmarks/verified.toml`, and",
         "`benchmarks/gaps.toml`, which must hold a quest or a reason for every gap",
-        "over 10%.",
+        "over 10%. `render --check` fails if those files are out of date and writes nothing,",
+        "so it refuses `--from`: import first, then check.",
+        "",
+        "`admin/bench-report run` measures the machine it is on. Anyone can run it: there is",
+        "no host list to edit. The result's name is a slug of the CPU model, such as",
+        "`intel-core-ultra-9-275hx`, unless `--host` sets another filesystem-safe name, and",
+        "the JSON records the raw CPU string, that slug, the core counts, and the OS.",
+        "A slug that equals a nightly tier name gains a `-host` suffix, so a minimal aarch64",
+        "Linux box is `aarch64-host` rather than the reserved name `aarch64`, and a host whose",
+        "chosen name is that spelling is left as it is. A second machine",
+        "that wants a slug already on disk is stored as `<slug>-<tag>`, or `<slug>-2` when that",
+        "alias is taken, and a later import replaces that file. The tag is eight hex characters",
+        "of HMAC-SHA256 over the OS machine id, under a fixed application key. An empty, all-zero,",
+        "or uninitialized id is not a tag. A machine without one passes `--host`. A slug file",
+        "this machine already has is refreshed, along with any second alias that carries its tag.",
+        "A file without a tag may be any machine, so an import never replaces, reuses, or deletes",
+        "one: a tagged result is stored beside it, and a result without a tag whose name is",
+        "already on disk is not imported until it is rerun with a different `--host`.",
+        "`render --from DIR --adopt NAME` is the one exception: it writes the tag of DIR's tagged",
+        "`NAME.json` into the untagged `NAME.json` on disk, so that machine's file is refreshed in",
+        "place from then on, and it refuses a missing or tagged file, an untagged or alias result,",
+        "or one older than that file. No import replaces or deletes a file from the same machine",
+        "that started later. Of one",
+        "machine's results under one slug in a collection, only the newest is imported.",
+        "`summary` and `render --from` read every readable measured `<host>.json` and name any",
+        "file they skip, including one missing a field the report shows or with a time that is",
+        "not a finite number above zero.",
+        "`collect` reaches only the maintainer's machines. A gap's `on` may name any host with a",
+        "result, or any nightly tier.",
         "",
     ]
     files = {os.path.join(REPORT_DIR, k): v for k, v in files.items()}
     files[REPORT] = "\n".join(md)
+    files[SITE_DATA] = json.dumps(site_data(hosts, tiers, verified, gaps), ensure_ascii=False, separators=(",", ":")) + "\n"
     files[README] = readme_with_comparison(comparison_table(hosts, verified))
     return files
 
 
-def import_hosts(directory):
-    """Copies a collection's measured hosts into the report's data."""
+def usable_machine_id(text):
+    """A machine id, or "" when `text` is empty or the first-boot sentinel.
+
+    machine-id(5) says the file contains `uninitialized` until the first boot
+    finishes, and that string must not be turned into an id.
+    """
+    text = text.strip()
+    if not text or text == "uninitialized":
+        return ""
+    return text
+
+
+def machine_id_text(ident):
+    """A machine id worth a tag, or "" when `ident` is not one.
+
+    `usable_machine_id` refuses only empty text and the sentinel. This also
+    refuses a different case of that sentinel, an all-zero id, and any string
+    that is not 32 hex digits or a UUID. Those values are shared by images
+    that were never given an id.
+    """
+    if not isinstance(ident, str):
+        return ""
+    if ident.strip().lower() == "uninitialized":
+        return ""
+    text = usable_machine_id(ident)
+    if not text:
+        return ""
+    plain = re.fullmatch(r"[0-9a-fA-F]{32}", text)
+    uuid = re.fullmatch(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        text,
+    )
+    if not plain and not uuid:
+        return ""
+    if set(text.replace("-", "").lower()) == {"0"}:
+        return ""
+    return text
+
+
+def read_machine_id(paths):
+    """The first usable machine id in `paths`, or "" when none is."""
+    for path in paths:
+        try:
+            with open(path) as f:
+                ident = machine_id_text(f.read())
+        except OSError:
+            ident = ""
+        if ident:
+            return ident
+    return ""
+
+
+def machine_identity():
+    """The OS machine id, or "" when this system has none.
+
+    A hostname is not an id: container names change every run, and a short
+    one can be guessed. Clones that share one machine id share one tag.
+    An empty, all-zero, or uninitialized id is no id, and so is any other
+    string that is not a machine id.
+    """
+    ident = read_machine_id(("/etc/machine-id", "/var/lib/dbus/machine-id"))
+    if ident:
+        return ident
+    if sys.platform == "darwin":
+        found = re.search(
+            r'"IOPlatformUUID" = "([^"]+)"', try_output(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"])
+        )
+        if found:
+            return machine_id_text(found.group(1))
+    return ""
+
+
+# machine-id(5): a value that leaves the machine is an HMAC under an
+# application key, so another program's hash of the same id does not match.
+# Not a secret: anyone who already has the raw id can recompute the tag.
+# The key is fixed, so one machine keeps one tag across imports.
+_MACHINE_TAG_KEY = b"rind-bench-report-host"
+
+
+def _absent_machine_id(ident):
+    """True for empty, `uninitialized`, and an all-zero id.
+
+    Those are not keyed. Any other string still is, so the HMAC itself can
+    be checked with a short input; `machine_id_text` is what refuses a file
+    that is not an id at all.
+    """
+    if not isinstance(ident, str):
+        return True
+    text = ident.strip()
+    if not text or text.lower() == "uninitialized":
+        return True
+    folded = text.replace("-", "")
+    return bool(folded) and set(folded.lower()) == {"0"} and re.fullmatch(r"[0-9a-fA-F-]+", text)
+
+
+def machine_tag_for(ident):
+    """The first eight hex characters of HMAC-SHA256 over `ident`, or "" when there is nothing to key."""
+    if not isinstance(ident, str) or _absent_machine_id(ident):
+        return ""
+    return hmac.new(_MACHINE_TAG_KEY, ident.strip().encode(), hashlib.sha256).hexdigest()[:8]
+
+
+def machine_tag():
+    """This machine's tag. Empty when the OS has no machine id."""
+    return machine_tag_for(machine_identity())
+
+
+def machine_tag_of(host):
+    tag = host.get("machine") if isinstance(host, dict) else None
+    if isinstance(tag, str) and re.fullmatch(r"[0-9a-f]{8}", tag):
+        return tag
+    return ""
+
+
+def _suffixed(slug, suffix):
+    """`slug` plus `suffix`, shortened to the host-name limit, or "" if it cannot fit."""
+    room = 81 - len(suffix)
+    if room < 1:
+        return ""
+    base = slug if len(slug) <= room else (slug[:room].rsplit("-", 1)[0] or slug[:room])
+    return base + suffix
+
+
+def suffixed_host_name(slug, suffix):
+    """`slug` plus `suffix`, shortened so the result still passes `check_host_name`."""
+    name = _suffixed(slug, suffix)
+    if not name:
+        fail(f"host name {slug!r} has no free suffix")
+    check_host_name(name)
+    return name
+
+
+def tagged_host_name(slug, tag):
+    """`slug` plus its machine tag."""
+    return suffixed_host_name(slug, f"-{tag}")
+
+
+def different_machine(previous, host):
+    """True unless both results carry the same machine tag.
+
+    A result without a tag says nothing about which machine it came from, so
+    it is never taken to be the same machine as any file, tagged or not.
+    """
+    left, right = machine_tag_of(previous), machine_tag_of(host)
+    return not (left and left == right)
+
+
+def generated_alias(host, name):
+    """True when this import created the file because `name` was taken."""
+    return isinstance(host, dict) and host.get("alias_of") == name
+
+
+def alias_target(host):
+    """The slug a generated alias records, or "" when this file is not one."""
+    if not isinstance(host, dict):
+        return ""
+    prior = host.get("alias_of")
+    if isinstance(prior, str) and prior:
+        return prior
+    return ""
+
+
+def same_machine_alias(body, name, tag):
+    """True when `body` is a generated alias of `name` for this result.
+
+    A tagged alias matches only that tag. An alias without a tag matches
+    nothing, and neither does an untagged result: either could be another
+    machine, so an import neither reuses, takes over, nor deletes it.
+    """
+    if not generated_alias(body, name):
+        return False
+    body_tag = machine_tag_of(body)
+    return bool(tag) and body_tag == tag
+
+
+def this_machine_file(existing, filename, host):
+    """True when `filename` in the data directory is already this result's machine."""
+    return filename in existing and not different_machine(existing[filename], host)
+
+
+def disambiguation_rank(stem, name, tag):
+    """Prefer the tag alias, then the lowest numeric suffix."""
+    if tag and stem == _suffixed(name, f"-{tag}"):
+        return (0, 0)
+    match = re.fullmatch(r"(.+)-([0-9]+)", stem)
+    return (1, int(match.group(2)) if match else 10**9)
+
+
+def collided_host_name(slug, tag, taken):
+    """A free name for a machine whose slug is already another machine's.
+
+    With a tag the suffix is that tag, so the same newcomer always lands on
+    the same name. Without one, the suffix is the lowest free `-2`, `-3`, ...
+    """
+    if tag:
+        candidate = tagged_host_name(slug, tag)
+        if candidate not in taken:
+            return candidate
+    n = 2
+    while True:
+        candidate = suffixed_host_name(slug, f"-{n}")
+        if candidate not in taken:
+            return candidate
+        n += 1
+
+
+def assign_import_name(name, host, existing, incoming=None, blocked=frozenset()):
+    """Where to put `host`, or None when it cannot be stored without risking
+    another machine's file: a result with no tag whose name is taken has no
+    tag to make a second name from, so it is not imported.
+    `blocked` names files in the data directory that could not be read. Each
+    holds its name like another machine's result, and nothing replaces it or
+    takes it as a destination.
+
+    When the slug file is already this machine, that file is the one
+    destination. A marked alias is the destination otherwise, including one
+    still in this collection and one whose slug is now free. That filename
+    is reusable when it is missing from the data directory or the file
+    already there is this machine's alias. Any other occupant is left in
+    place. A free name stays that name when no such alias exists, even if
+    another file carries the same tag. A result replaces only a file with
+    its own tag. A different machine that wants a taken name gets
+    `collided_host_name`. Only a result that will be imported counts as a
+    taken incoming name.
+    """
+    incoming = incoming or {}
+    tag = machine_tag_of(host)
+    # Without a tag nothing says whose alias this is, so its marker is ignored
+    # and the file is a chosen name like any other.
+    slug = (alias_target(host) if tag else "") or name
+    # The name already in the report wins when it is this machine. Updating
+    # a marked alias beside it would leave that name at the old time.
+    if isinstance(slug, str) and slug != name and this_machine_file(existing, slug, host):
+        return slug
+    if this_machine_file(existing, name, host):
+        return name
+    # A marked alias is this machine's one destination when the slug is not
+    # already its file, including when the slug is free. A same-tag file that
+    # is not an alias of this slug is left alone, which is how two chosen
+    # names on one machine both stay.
+    # An unreadable file and a result that will not be copied are never a
+    # destination: the first would be overwritten, the second would move this
+    # result to a name nothing else picked and drop the real alias.
+    copied = {stem: body for stem, body in incoming.items() if not unmeasured(body)}
+    found = {
+        stem
+        for records in (existing, copied)
+        for stem, body in records.items()
+        if stem != slug
+        and stem not in blocked
+        and same_machine_alias(body, slug, tag)
+        and (stem not in existing or same_machine_alias(existing[stem], slug, tag))
+    }
+    if found:
+        return min(found, key=lambda stem: disambiguation_rank(stem, slug, tag))
+    # A file that will not be copied does not hold its name. A marked alias of this
+    # result is a destination rather than a chosen host.
+    reserved = {stem for stem, body in copied.items() if not same_machine_alias(body, name, tag)}
+    taken = set(existing) | set(blocked) | reserved
+    if name in blocked:
+        return collided_host_name(name, tag, taken) if tag else None
+    if name not in existing or not different_machine(existing[name], host):
+        return name
+    return collided_host_name(name, tag, taken) if tag else None
+
+
+def _replace_data_file(stem, write):
+    """Writes `stem`.json in the data directory through `write(file)` in one rename,
+    so a crash leaves the old file or the new one, never half of either. The file
+    gets the mode `open` would give it under the umask, not mkstemp's 0600, and a
+    symlink at that name is replaced by a regular file."""
+    fd, tmp = tempfile.mkstemp(dir=DATA_DIR, prefix=f".{stem}.", suffix=".tmp")
+    try:
+        umask = os.umask(0)
+        os.umask(umask)
+        os.fchmod(fd, 0o666 & ~umask)
+        with os.fdopen(fd, "w") as f:
+            write(f)
+        os.replace(tmp, os.path.join(DATA_DIR, f"{stem}.json"))
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
+def _dump_data_file(stem, body):
+    """Stores `body` as `stem`.json in the data directory, atomically."""
+
+    def write(f):
+        json.dump(body, f, indent=1)
+        f.write("\n")
+
+    _replace_data_file(stem, write)
+
+
+def _write_imported(directory, name, host, dest):
+    """Stores `host` at `dest`, keeping a generated alias's real slug."""
+    slug = alias_target(host) or name
+    if dest == name and "alias_of" not in host:
+        with open(os.path.join(directory, f"{name}.json")) as src:
+            _replace_data_file(dest, lambda f: shutil.copyfileobj(src, f))
+        return host
+    body = dict(host)
+    body["host"] = dest
+    prior = alias_target(host)
+    if dest == slug:
+        body.pop("alias_of", None)
+    elif dest != name:
+        # Moving a marked alias keeps the slug it was generated for.
+        # Renaming a slug records that slug.
+        body["alias_of"] = prior if prior and prior != name else name
+    elif body.get("alias_of") == name:
+        body.pop("alias_of", None)
+    _dump_data_file(dest, body)
+    return body
+
+
+def _drop_extra_aliases(slug, host, existing, keep):
+    """Removes other marked aliases of `slug` so one machine stays one file.
+
+    A same-tag alias is this machine, so a second copy is removed wherever
+    the result lands. An alias without a tag may be another machine, so it is
+    never removed.
+    """
+    tag = machine_tag_of(host)
+    removed = []
+    for stem, body in list(existing.items()):
+        if stem == keep or not same_machine_alias(body, slug, tag):
+            continue
+        path = os.path.join(DATA_DIR, f"{stem}.json")
+        if os.path.isfile(path):
+            os.remove(path)
+        del existing[stem]
+        removed.append(stem)
+    return removed
+
+
+def newer_same_machine(slug, host, existing, dest):
+    """A same-machine file this import would replace or delete that started
+    later than `host`, or "" when there is none. Such a file is never lost to
+    an older run."""
+    tag = machine_tag_of(host)
+    stems = [dest] if dest in existing and not different_machine(existing[dest], host) else []
+    stems += sorted(
+        stem for stem, body in existing.items() if stem != dest and same_machine_alias(body, slug, tag)
+    )
+    ours = started_at(host)
+    return next((stem for stem in stems if started_at(existing[stem]) > ours), "")
+
+
+def adopt_hosts(names, existing, copied):
+    """Writes each tag of `copied[name]` into the untagged data file `name`.
+
+    Every name is checked before any file is written, so a bad one changes nothing.
+    """
+    for name in names:
+        if name not in existing:
+            fail(f"--adopt {name}: the data directory has no readable {name}.json to adopt")
+        if machine_tag_of(existing[name]):
+            fail(f"--adopt {name}: {name}.json already carries a machine tag, so it is not untagged")
+        if not machine_tag_of(copied.get(name)):
+            fail(f"--adopt {name}: the collection has no measured, tagged {name}.json to adopt it")
+        if alias_target(copied[name]):
+            fail(f"--adopt {name}: the collection's {name}.json is a generated alias of {alias_target(copied[name])}")
+        target = dict(existing[name], machine=machine_tag_of(copied[name]))
+        newer = newer_same_machine(name, copied[name], {**existing, name: target}, name)
+        if newer:
+            fail(f"--adopt {name}: {newer}.json started later than the collection's {name}.json, not adopted")
+    for name in names:
+        tag = machine_tag_of(copied[name])
+        why = unmeasured(existing[name])
+        if why:
+            print(f"bench-report: --adopt {name}: {name}.json holds no times ({why}), replacing it", file=sys.stderr)
+        existing[name] = dict(existing[name], machine=tag)
+        _dump_data_file(name, existing[name])
+        print(f"bench-report: {name}: adopted by machine {tag}", file=sys.stderr)
+
+
+def started_at(host):
+    """When `host` started, as an aware time; the oldest possible when it does not say."""
+    try:
+        when = datetime.datetime.fromisoformat(host.get("started"))
+    except (TypeError, ValueError):
+        return datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    return when if when.tzinfo else when.replace(tzinfo=datetime.timezone.utc)
+
+
+def superseded(hosts):
+    """Each result in one collection that a newer one from its machine replaces, mapped to that one.
+
+    A tagged slug file and its tagged aliases are one machine's results under
+    one slug, so only the newest `started` is imported. A tie keeps the slug
+    file, then the first name. An untagged result is never grouped.
+    """
+    groups = {}
+    for name, host in hosts.items():
+        tag = machine_tag_of(host)
+        if tag:
+            groups.setdefault((alias_target(host) or name, tag), []).append(name)
+    out = {}
+    for (slug, _), names in groups.items():
+        newest = max(sorted(names), key=lambda n: (started_at(hosts[n]), n == slug))
+        out.update((n, newest) for n in names if n != newest)
+    return out
+
+
+def import_hosts(directory, adopt=()):
+    """Copies a collection's measured hosts into the report's data.
+
+    When this machine already has the slug file, that file is refreshed and
+    a marked alias of it that carries its tag is removed. Otherwise a marked
+    alias that carries its tag is the one destination, even when the slug
+    itself is free. An alias without a tag is never reused, taken over, or
+    deleted, since it may be another machine. A free name stays that name. A
+    different machine with the same slug is stored beside it, as
+    `<slug>-<tag>`, or `<slug>-2` when that alias is taken. A result with no
+    tag has nothing to make a second name from, and no file is known to be
+    its machine, so when its name is taken it is not imported. A tagged
+    result never replaces an untagged file either. Only a file this import
+    will copy counts as a taken incoming name. Of one machine's slug file
+    and aliases in the collection, only the newest is imported, and moving
+    an alias keeps `alias_of`. A same-machine file in the data directory
+    that started later than the result is never replaced or deleted: the
+    result is skipped instead. A file in the data directory that is not
+    readable holds its name and is left as it is.
+
+    Each name in `adopt` is an untagged file in the data directory that the
+    tagged result of that name in the collection takes over: its tag is
+    written into the file first, so the same-tag rule then refreshes it in
+    place. Any other `adopt` name, an alias result, or a result older than
+    the file or its same-tag aliases fails before anything is written.
+    """
     os.makedirs(DATA_DIR, exist_ok=True)
-    for name in HOSTS:
-        path = os.path.join(directory, f"{name}.json")
-        if not os.path.exists(path):
+    existing = {}
+    blocked = set()
+    for path in glob.glob(os.path.join(DATA_DIR, "*.json")):
+        stem = os.path.splitext(os.path.basename(path))[0]
+        if stem == "tiers":
             continue
-        with open(path) as f:
-            host = json.load(f)
-        if host["status"] != "ok":
-            print(f"bench-report: {name}: not imported, {host['status']}: {host['reason']}", file=sys.stderr)
+        try:
+            existing[stem] = read_host(path, stem)
+        except BadHostFile as e:
+            print(f"bench-report: {e}, left as it is", file=sys.stderr)
+            blocked.add(stem)
+    incoming = load_hosts(directory)
+    copied = {}
+    for name, host in incoming.items():
+        why = unmeasured(host)
+        if why:
+            print(f"bench-report: {name}: not imported, {why}", file=sys.stderr)
+        else:
+            copied[name] = host
+    adopt_hosts(adopt, existing, copied)
+    for name, newer in sorted(superseded(copied).items()):
+        print(f"bench-report: {name}: same machine as {newer}, not a second host", file=sys.stderr)
+        del copied[name]
+    for name, host in copied.items():
+        slug = alias_target(host) or name
+        dest = assign_import_name(name, host, existing, copied, blocked)
+        if dest is None:
+            print(
+                f"bench-report: {name}: not imported, a result that may be another machine's holds {name} "
+                "and this one has no machine id to name a second file; rerun it with a different --host",
+                file=sys.stderr,
+            )
             continue
-        shutil.copy(path, os.path.join(DATA_DIR, f"{name}.json"))
+        newer = newer_same_machine(slug, host, existing, dest)
+        if newer:
+            print(f"bench-report: {name}: not imported, {newer} from the same machine started later", file=sys.stderr)
+            continue
+        creating = dest not in existing
+        prior = alias_target(host)
+        moved = prior and dest == prior and name != dest
+        if not creating and not moved:
+            print(f"bench-report: {name}: same machine as {dest}, not older, refreshed {dest}", file=sys.stderr)
+        existing[dest] = _write_imported(directory, name, host, dest)
+        removed = _drop_extra_aliases(slug, host, existing, dest)
+        for stem in sorted(removed):
+            print(f"bench-report: {stem}: same machine as {slug}, dropped", file=sys.stderr)
+        if moved:
+            print(f"bench-report: {name}: same machine as {dest}, refreshed {dest}", file=sys.stderr)
+        elif creating and dest != name:
+            print(f"bench-report: {name}: same slug as another machine, imported as {dest}", file=sys.stderr)
 
 
 def render(args):
+    if args.adopt and not args.collection:
+        fail("--adopt needs --from DIR")
+    if args.check and args.collection:
+        fail("--check never writes, and --from DIR writes benchmarks/data: import with `render --from DIR`, then check")
     if args.collection:
-        import_hosts(args.collection)
-    hosts = load_hosts(DATA_DIR)
+        import_hosts(args.collection, args.adopt or ())
+    hosts = load_measured(DATA_DIR)
     tiers_path = os.path.join(DATA_DIR, "tiers.json")
     tiers = None
     if os.path.exists(tiers_path):
@@ -2011,8 +3129,8 @@ def render(args):
     for path in generated:
         if path not in files:
             os.remove(path)
-    os.makedirs(REPORT_DIR, exist_ok=True)
     for path, content in files.items():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write(content)
     print(os.path.relpath(REPORT, ROOT))
@@ -2056,12 +3174,14 @@ def gate(args):
     tiers = run_tiers(args.dir)
     previous = gaps_of({}, run_tiers(args.previous)) if args.previous else None
     entries = gap_entries(GAPS)
+    # A benchmark only TIMED libraries rival, such as ChaCha20 without
+    # Poly1305, is ranked for the heatmap alone, so it goes unmentioned.
     unbaselined = sorted(
         {
             f"{key} on {tier_column(t)}"
             for t in tiers["tiers"]
             for key, libs in t["benchmarks"].items()
-            if tier_row(key) and not set(libs) & set(BASELINES)
+            if tier_row(key) and not set(libs) & set(BASELINES + TIMED)
         }
     )
     undecided, once = [], []
@@ -2139,19 +3259,29 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("collect", help="run the benchmarks on each host")
+    p = sub.add_parser("collect", help="run the benchmarks on the maintainer's machines")
     p.add_argument("--commit", default="HEAD", help="the commit to measure (default HEAD)")
-    p.add_argument("--host", action="append", help="a host to measure (default: all, in order)")
+    p.add_argument("--host", action="append", help="a COLLECT_HOSTS machine to measure (default: all, in order)")
     p.add_argument("--out", help="the results directory (default .tmp/bench-report/<commit>)")
     p.set_defaults(func=collect)
 
-    p = sub.add_parser("summary", help="print a collection's rind-versus-fastest table")
+    p = sub.add_parser("summary", help="print rind-versus-fastest for every host JSON in a directory")
     p.add_argument("dir")
     p.set_defaults(func=summary)
 
     p = sub.add_parser("render", help="write BENCHMARKS.md and its SVGs from benchmarks/data")
-    p.add_argument("--from", dest="collection", metavar="DIR", help="first import a collection's measured hosts")
-    p.add_argument("--check", action="store_true", help="fail if BENCHMARKS.md or its SVGs are out of date")
+    p.add_argument("--from", dest="collection", metavar="DIR", help="first import every measured host JSON from DIR")
+    p.add_argument(
+        "--adopt",
+        action="append",
+        metavar="NAME",
+        help="let DIR's tagged NAME.json take over the untagged NAME.json in benchmarks/data (repeatable)",
+    )
+    p.add_argument(
+        "--check",
+        action="store_true",
+        help="fail if BENCHMARKS.md or its SVGs are out of date, writing nothing (so not with --from)",
+    )
     p.set_defaults(func=render)
 
     p = sub.add_parser("weekly", help="save the latest weekly bench's results as the CPU tiers")
@@ -2162,8 +3292,8 @@ def main():
     p.add_argument("--previous", metavar="DIR", help="the previous run's, to fail only on a gap both show")
     p.set_defaults(func=gate)
 
-    p = sub.add_parser("run", help="the host side of collect")
-    p.add_argument("--host", required=True)
+    p = sub.add_parser("run", help="measure this machine")
+    p.add_argument("--host", help="name for this machine (default: a slug of its CPU model)")
     p.add_argument("--commit", required=True)
     p.add_argument("--jobs", type=int, required=True)
     p.add_argument("--target-dir", required=True)
