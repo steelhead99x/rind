@@ -1301,6 +1301,139 @@ fn v0_with_public_key() {
     report.finish();
 }
 
+/// `rsaEncryption` documents whose private key is not a two-prime
+/// `RSAPrivateKey`: aws-lc-rs refuses each as `InvalidEncoding`, and the
+/// adapter must not refuse one as another algorithm by a field it misreads
+/// as the modulus.
+#[test]
+fn rsa_private_key_framing() {
+    let mut report = Report::new();
+    let null = der(0x05, &[]);
+    let alg = algorithm(RSA_ENCRYPTION, Some(&null));
+    let int = |bytes: &[u8]| der(0x02, bytes);
+    let seq = |parts: &[Vec<u8>]| der(0x30, &parts.concat());
+    let small_n = {
+        let mut n = vec![0x00, 0xc0];
+        n.extend([0x55; 127]);
+        n.push(0x01);
+        n
+    };
+    let full = |version: &[u8], n: &[u8], e: &[u8], rest: usize| {
+        let mut parts = vec![int(version), int(n), int(e)];
+        parts.extend((0..rest).map(|_| int(&[0x01])));
+        seq(&parts)
+    };
+    for (name, private_key) in [
+        ("empty modulus", seq(&[int(&[0]), int(&[])])),
+        ("public key", rsa_public_pkcs1(RSA2048)),
+        (
+            "octet string and integer",
+            seq(&[der(0x04, b"x"), int(&[5])]),
+        ),
+        (
+            "1032-bit missing fields",
+            full(&[0], &small_n, &[0x01, 0x00, 0x01], 5),
+        ),
+        (
+            "1032-bit extra field",
+            full(&[0], &small_n, &[0x01, 0x00, 0x01], 7),
+        ),
+        (
+            "1032-bit version 1",
+            full(&[1], &small_n, &[0x01, 0x00, 0x01], 6),
+        ),
+        (
+            "1032-bit even exponent",
+            full(&[0], &small_n, &[0x01, 0x00, 0x00], 6),
+        ),
+        ("1032-bit exponent 1", full(&[0], &small_n, &[0x01], 6)),
+        (
+            "1032-bit negative modulus",
+            full(&[0], &small_n[1..], &[0x01, 0x00, 0x01], 6),
+        ),
+        (
+            "1032-bit 34-bit exponent",
+            full(&[0], &small_n, &[0x03, 0x00, 0x00, 0x00, 0x01], 6),
+        ),
+    ] {
+        check_pkcs8(
+            &mut report,
+            &format!("rsa {name}"),
+            65,
+            &pkcs8(0, &alg, &private_key, &[]),
+            Some("err:InvalidEncoding"),
+        );
+    }
+    let mut trailing = full(&[0], &small_n, &[0x01, 0x00, 0x01], 6);
+    trailing.push(0x00);
+    check_pkcs8(
+        &mut report,
+        "rsa 1032-bit trailing byte",
+        65,
+        &pkcs8(0, &alg, &trailing, &[]),
+        None,
+    );
+    report.finish();
+}
+
+/// Truncated and mutated PKCS#8 documents of every type the adapter reads
+/// never panic, as AGENTS.md requires of hostile input. Run it in a debug
+/// build, where arithmetic overflow panics too.
+#[test]
+fn hostile_pkcs8_never_panics() {
+    let seed = [0x3c; 32];
+    let (mldsa_seed, public, raw, _) = generated_pair(65, &seed);
+    let both = der(0x30, &[der(0x04, &seed), der(0x04, &raw)].concat());
+    let ed = theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32])
+        .unwrap()
+        .to_pkcs8v1()
+        .unwrap()
+        .as_ref()
+        .to_vec();
+    let small = embedded("rsa1024");
+    let docs = [
+        mldsa_seed,
+        mldsa_pkcs8_version(18, &der(0x04, &raw), 1, &public_suffix(&public)),
+        mldsa_pkcs8_version(18, &both, 0, &[]),
+        RSA2047.to_vec(),
+        small.clone(),
+        rewrap_pss(&small, Some(&pss_params_with(SHA224, SHA256)), 0, &[]),
+        ec_pkcs8(P256, &[0x01; 31], None, None),
+        embedded("secp256k1"),
+        embedded("dsa2048"),
+        ed,
+        pkcs8(
+            0,
+            &algorithm(&oid_with_last(&ML_KEM_OID_PREFIX, 1), None),
+            &der(0x80, &[0x11; 64]),
+            &[],
+        ),
+    ];
+    let load = |doc: &[u8]| {
+        for set in [44, 65] {
+            let (ours_alg, _) = signing(set);
+            let _ = ours::signature::PqdsaKeyPair::from_pkcs8(ours_alg, doc);
+        }
+        let _ = ours::signature::PqdsaKeyPair::from_raw_private_key(
+            &ours::signature::ML_DSA_44_SIGNING,
+            doc,
+        );
+    };
+    for doc in &docs {
+        for len in 0..doc.len() {
+            load(&doc[..len]);
+        }
+        // The headers, where every length and tag the adapter reads lives.
+        for at in 0..doc.len().min(48) {
+            for byte in [0x00, 0x01, 0x7f, 0x80, 0x81, 0x82, 0xff] {
+                let mut mutated = doc.clone();
+                mutated[at] = byte;
+                load(&mutated);
+            }
+        }
+    }
+}
+
 fn mldsa_pkcs8_version(last: u8, private_key: &[u8], version: u8, suffix: &[u8]) -> Vec<u8> {
     pkcs8(
         version,

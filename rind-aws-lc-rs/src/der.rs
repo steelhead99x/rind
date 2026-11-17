@@ -172,10 +172,37 @@ pub(crate) fn is_spki(der: &[u8]) -> bool {
         .unwrap_or(false)
 }
 
-/// The bit length of a big-endian magnitude without leading zero bytes.
+/// The bit length of a big-endian magnitude without leading zero bytes; 0
+/// for an empty one.
 pub(crate) fn bits(magnitude: &[u8]) -> usize {
-    8 * magnitude.len()
-        - magnitude
-            .first()
-            .map_or(8, |top| top.leading_zeros() as usize)
+    magnitude
+        .first()
+        .map_or(0, |top| 8 * magnitude.len() - top.leading_zeros() as usize)
+}
+
+/// The modulus's bit length in a two-prime PKCS#1 `RSAPrivateKey`, or `None`
+/// if its framing is not one. Only public parts are read: the version, a
+/// positive odd modulus, a positive odd exponent of 3 to 33 bits, then six
+/// INTEGERs stepped over by their headers, without reading their secret
+/// contents, and nothing after them.
+pub(crate) fn rsa_private_key_modulus_bits(der: &[u8]) -> Option<usize> {
+    untrusted::Input::from(der)
+        .read_all(Unspecified, |input| {
+            read(input, SEQUENCE)?.read_all(Unspecified, |input| {
+                if read(input, INTEGER)?.as_slice_less_safe() != [0] {
+                    return Err(Unspecified);
+                }
+                let n = positive_integer(input)?;
+                let e = positive_integer(input)?;
+                let odd = |value: &[u8]| value.last().is_some_and(|byte| byte & 1 == 1);
+                if !odd(n) || !odd(e) || !(2..=33).contains(&bits(e)) {
+                    return Err(Unspecified);
+                }
+                for _ in 0..6 {
+                    read(input, INTEGER)?;
+                }
+                Ok(bits(n))
+            })
+        })
+        .ok()
 }

@@ -564,21 +564,12 @@ fn rsa_private_key(pkcs8: &[u8]) -> bool {
     rind::rsa::KeyPair::from_pkcs8(pkcs8).is_ok() || unbacked_rsa_size(parts.private_key)
 }
 
-/// Whether a PKCS#1 `RSAPrivateKey`'s modulus is outside the 2048 to 8192
-/// bits rind signs with. rind cannot back such a key, so it is refused as
-/// another algorithm from that public length alone, without reading the
-/// private components.
+/// Whether a two-prime PKCS#1 `RSAPrivateKey`'s modulus is outside the 2048
+/// to 8192 bits rind signs with. rind cannot back such a key, so it is
+/// refused as another algorithm from its public framing and modulus length
+/// alone, without reading the private components.
 fn unbacked_rsa_size(pkcs1: &[u8]) -> bool {
-    let Some((0x30, body)) = der::first_element(pkcs1) else {
-        return false;
-    };
-    let Some(version) = der::leading_element(body) else {
-        return false;
-    };
-    let Some((0x02, modulus)) = body.get(version.len()..).and_then(der::first_element) else {
-        return false;
-    };
-    !(2048..=8192).contains(&der::bits(modulus))
+    der::rsa_private_key_modulus_bits(pkcs1).is_some_and(|bits| !(2048..=8192).contains(&bits))
 }
 
 /// An ML-KEM private key in RFC 9935's seed form or expanded form.
