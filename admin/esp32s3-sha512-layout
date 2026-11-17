@@ -191,6 +191,12 @@ build none xtensa-esp32s3-none-elf 3 ''
 # default ABI. The inline asm sequence does not change with the ABI.
 build probe xtensa-esp32s3-espidf 3 '' \
   --cfg rind_sha512_load_probe -C target-feature=-windowed
+build probe-s xtensa-esp32s3-espidf '"s"' '' \
+  --cfg rind_sha512_load_probe -C target-feature=-windowed
+build probe-z xtensa-esp32s3-espidf '"z"' '' \
+  --cfg rind_sha512_load_probe -C target-feature=-windowed
+build probe-none xtensa-esp32s3-none-elf 3 '' \
+  --cfg rind_sha512_load_probe -C target-feature=-windowed
 
 sections() {
   "$objdump" -h "$1" | awk 'NR > 3 && $2 ~ /^\./ { print $2, $3 }'
@@ -474,15 +480,18 @@ if [ ! -x "$qemu" ]; then
   printf 'missing %s\ninstall it as .github/workflows/esp32s3-sha512-layout.yml does\n' "$qemu" >&2
   exit 1
 fi
-for sym in sha512_load_probe sha512_abc_probe; do
-  if ! "$nm" "$work/obj/probe.o" | awk -v s="$sym" '$3 == s { found = 1 } END { exit !found }'; then
-    fail "probe object has no $sym"
+probes='probe probe-s probe-z probe-none'
+for name in $probes; do
+  for sym in sha512_load_probe sha512_abc_probe; do
+    if ! "$nm" "$work/obj/$name.o" | awk -v s="$sym" '$3 == s { found = 1 } END { exit !found }'; then
+      fail "$name object has no $sym"
+    fi
+  done
+  # The probes, the driver, and the block: no `entry`, so all call0.
+  if "$objdump" -d "$work/obj/$name.o" | grep -Eq '^[[:space:]]*[0-9a-f]+:[[:space:]].*[[:space:]]entry[[:space:]]'; then
+    fail "the $name object is windowed; the QEMU stub is call0"
   fi
 done
-# The probes, the driver, and the block: no `entry`, so all call0.
-if "$objdump" -d "$work/obj/probe.o" | grep -Eq '^[[:space:]]*[0-9a-f]+:[[:space:]].*[[:space:]]entry[[:space:]]'; then
-  fail 'the probe object is windowed; the QEMU stub is call0'
-fi
 
 {
   printf '%s\n' 'void *memset(void *s, int c, unsigned long n) {'
@@ -496,7 +505,9 @@ fi
   printf '%s\n' '    for (unsigned long i = 0; i < n; i++) out[i] = in[i];'
   printf '%s\n' '    return d;'
   printf '%s\n' '}'
-  "$nm" -u "$work/obj/probe.o" | awk '$1 == "U" && $2 != "memset" && $2 != "memcpy" { print $2 }' | sort -u |
+  for name in $probes; do
+    "$nm" -u "$work/obj/$name.o"
+  done | awk '$1 == "U" && $2 != "memset" && $2 != "memcpy" { print $2 }' | sort -u |
     while read -r sym; do
       # A panic must not return into the probe.
       printf 'void %s(void) { for (;;) {} }\n' "$sym"
@@ -521,57 +532,83 @@ SECTIONS {
 }
 EOF
 
+# Runs both probes and prints each one's name, then its result as eight hex
+# digits: the name alone on the last line means that probe never returned.
+# a12 is callee-saved under call0, so it holds the results across the calls.
 cat > "$work/start.S" << 'EOF'
 .section .text
 .global _start
 _start:
     movi a1, 0x4001F000
-    // A marker before each probe, so a hang's log names the probe.
-    movi a2, 4
-    movi a3, 1
     movi a4, load_msg
     movi a5, 5
-    simcall
+    call0 write
     call0 sha512_load_probe
-    bnez a2, 3f
-    movi a2, 4
-    movi a3, 1
+    mov a12, a2
+    call0 print_hex
     movi a4, abc_msg
     movi a5, 4
-    simcall
+    call0 write
     call0 sha512_abc_probe
-3:
-    mov a6, a2
-    movi a2, 4
+    or a12, a12, a2
+    call0 print_hex
+    movi a3, 0
+    beqz a12, 1f
     movi a3, 1
-    movi a4, ok_msg
-    movi a5, 3
-    beqz a6, 1f
-    movi a4, fail_msg
-    movi a5, 5
 1:
-    simcall
     movi a2, 1
-    mov a3, a6
     simcall
 2:
     j 2b
+
+// Writes the a5 bytes at a4 to stdout.
+write:
+    movi a2, 4
+    movi a3, 1
+    simcall
+    ret
+
+// Writes a2 as eight hex digits and a newline.
+print_hex:
+    movi a4, hex_buf
+    movi a7, 8
+3:
+    extui a8, a2, 28, 4
+    slli a2, a2, 4
+    movi a9, hex_digits
+    add a9, a9, a8
+    l8ui a9, a9, 0
+    s8i a9, a4, 0
+    addi a4, a4, 1
+    addi a7, a7, -1
+    bnez a7, 3b
+    movi a4, hex_buf
+    movi a5, 9
+    j write
+
 .section .rodata
-ok_msg:
-    .ascii "OK\n"
-fail_msg:
-    .ascii "FAIL\n"
 load_msg:
-    .ascii "load\n"
+    .ascii "load "
 abc_msg:
-    .ascii "abc\n"
+    .ascii "abc "
+hex_digits:
+    .ascii "0123456789abcdef"
+.section .data
+hex_buf:
+    .ascii "00000000\n"
 EOF
 "$gcc" -c -mabi=call0 -o "$work/start.o" "$work/start.S"
-"$ld" --relax -e _start -T "$work/load.ld" -o "$work/load.elf" \
-  "$work/start.o" "$work/obj/probe.o" "$work/load-stubs.o"
 
-# The stack is at 0x4001F000 and grows down. The image has to end before it.
-"$readelf" -lW "$work/load.elf" | python3 -c '
+# $1 probe object name, $2 what it is.
+run_probe() {
+  name=$1
+  elf=$work/$name.elf
+  out=$work/$name.out
+  err=$work/$name.err
+  "$ld" --relax -e _start -T "$work/load.ld" -o "$elf" \
+    "$work/start.o" "$work/obj/$name.o" "$work/load-stubs.o"
+  # The stack is at 0x4001F000 and grows down. The image has to end before it.
+  "$readelf" -lW "$elf" | python3 -c '
 import sys
 max_end = 0
 for line in sys.stdin:
@@ -582,28 +619,30 @@ for line in sys.stdin:
 limit = 0x4001F000
 if max_end == 0 or max_end >= limit:
     raise SystemExit(f"load image ends at {max_end:#x}, stack is {limit:#x}")
-print(f"load image ends at {max_end:#x}")
 '
-
-run_load() {
-  cpu=$1
-  out=$work/load-$cpu.out
-  err=$work/load-$cpu.err
-  if ! timeout 20 "$qemu" -M sim -cpu "$cpu" -nographic -monitor none -semihosting \
-      -device "loader,file=$work/load.elf,cpu-num=0" >"$out" 2>"$err"; then
-    printf 'qemu %s failed\n' "$cpu" >&2
-    cat "$out" "$err" >&2
-    exit 1
+  status=0
+  timeout 20 "$qemu" -M sim -cpu esp32s3 -nographic -monitor none -semihosting \
+    -device "loader,file=$elf,cpu-num=0" >"$out" 2>"$err" || status=$?
+  if [ "$status" -eq 0 ] && [ "$(cat "$out")" = "load 00000000
+abc 00000000" ]; then
+    printf 'qemu esp32s3, %s: message load and FIPS 180-4 abc OK\n' "$2"
+    return
   fi
-  if grep -q 'FAIL' "$out" || ! grep -qx 'OK' "$out"; then
-    printf 'qemu %s did not report OK\n' "$cpu" >&2
-    cat "$out" "$err" >&2
-    exit 1
-  fi
-  printf 'qemu %s: message load and FIPS 180-4 abc OK\n' "$cpu"
+  printf 'qemu esp32s3, %s: failed, exit %s\n' "$2" "$status" >&2
+  cat "$out" "$err" >&2
+  qemu_failed=1
 }
 
-run_load esp32s3
+# Every build runs before any failure is reported, so one log shows which
+# of the placement and the optimization level a failure follows.
+qemu_failed=0
+run_probe probe 'ESP-IDF IRAM build at opt-level 3'
+run_probe probe-s 'ESP-IDF IRAM build at opt-level s'
+run_probe probe-z 'ESP-IDF IRAM build at opt-level z'
+run_probe probe-none 'none-elf build at opt-level 3'
+if [ "$qemu_failed" -ne 0 ]; then
+  fail 'a QEMU probe failed'
+fi
 
 printf 'board_timing: not measured\n'
 printf 'esp32s3-sha512-layout: ok\n'
