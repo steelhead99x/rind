@@ -65,6 +65,9 @@ fn spki(algorithm: &[u8], key: &[u8]) -> Vec<u8> {
     [vec![0x30, body.len() as u8], body].concat()
 }
 
+/// A share built from an AlgorithmIdentifier's contents and the peer's key.
+type Form = fn(&[u8], &[u8]) -> Vec<u8>;
+
 /// Agrees from the peer's share in each other form aws-lc-rs takes, which
 /// rind-dimpl rewrites before its private key touches it: a NIST point
 /// compressed, hybrid, or in a `SubjectPublicKeyInfo`, and X25519's key in
@@ -82,7 +85,7 @@ fn key_exchange_point_forms() {
             .concat(),
             _ => [EC_PUBLIC_KEY, &[0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22]].concat(),
         };
-        let forms: &[fn(&[u8], &[u8]) -> Vec<u8>] = match group.name() {
+        let forms: &[Form] = match group.name() {
             NamedGroup::X25519 => &[spki],
             _ => &[
                 |_, point| {
