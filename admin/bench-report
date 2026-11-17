@@ -83,6 +83,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 
@@ -2277,7 +2278,9 @@ def report(hosts, tiers, verified, gaps):
         "already on disk is not imported until it is rerun with a different `--host`.",
         "`render --from DIR --adopt NAME` is the one exception: it writes the tag of DIR's tagged",
         "`NAME.json` into the untagged `NAME.json` on disk, so that machine's file is refreshed in",
-        "place from then on, and it refuses a missing or tagged file or an untagged result. Of one",
+        "place from then on, and it refuses a missing or tagged file, an untagged or alias result,",
+        "or one older than that file. No import replaces or deletes a file from the same machine",
+        "that started later. Of one",
         "machine's results under one slug in a collection, only the newest is imported.",
         "`summary` and `render --from` read every readable measured `<host>.json` and name any",
         "file they skip.",
@@ -2557,11 +2560,35 @@ def assign_import_name(name, host, existing, incoming=None, blocked=frozenset())
     return collided_host_name(name, tag, taken) if tag else None
 
 
+def _replace_data_file(stem, write):
+    """Writes `stem`.json in the data directory through `write(file)` in one rename,
+    so a crash leaves the old file or the new one, never half of either."""
+    fd, tmp = tempfile.mkstemp(dir=DATA_DIR, prefix=f".{stem}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            write(f)
+        os.replace(tmp, os.path.join(DATA_DIR, f"{stem}.json"))
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
+def _dump_data_file(stem, body):
+    """Stores `body` as `stem`.json in the data directory, atomically."""
+
+    def write(f):
+        json.dump(body, f, indent=1)
+        f.write("\n")
+
+    _replace_data_file(stem, write)
+
+
 def _write_imported(directory, name, host, dest):
     """Stores `host` at `dest`, keeping a generated alias's real slug."""
     slug = alias_target(host) or name
     if dest == name and "alias_of" not in host:
-        shutil.copy(os.path.join(directory, f"{name}.json"), os.path.join(DATA_DIR, f"{dest}.json"))
+        with open(os.path.join(directory, f"{name}.json")) as src:
+            _replace_data_file(dest, lambda f: shutil.copyfileobj(src, f))
         return host
     body = dict(host)
     body["host"] = dest
@@ -2574,9 +2601,7 @@ def _write_imported(directory, name, host, dest):
         body["alias_of"] = prior if prior and prior != name else name
     elif body.get("alias_of") == name:
         body.pop("alias_of", None)
-    with open(os.path.join(DATA_DIR, f"{dest}.json"), "w") as f:
-        json.dump(body, f, indent=1)
-        f.write("\n")
+    _dump_data_file(dest, body)
     return body
 
 
@@ -2600,6 +2625,19 @@ def _drop_extra_aliases(slug, host, existing, keep):
     return removed
 
 
+def newer_same_machine(slug, host, existing, dest):
+    """A same-machine file this import would replace or delete that started
+    later than `host`, or "" when there is none. Such a file is never lost to
+    an older run."""
+    tag = machine_tag_of(host)
+    stems = [dest] if dest in existing and not different_machine(existing[dest], host) else []
+    stems += sorted(
+        stem for stem, body in existing.items() if stem != dest and same_machine_alias(body, slug, tag)
+    )
+    ours = started_at(host)
+    return next((stem for stem in stems if started_at(existing[stem]) > ours), "")
+
+
 def adopt_hosts(names, existing, copied):
     """Writes each tag of `copied[name]` into the untagged data file `name`.
 
@@ -2612,12 +2650,19 @@ def adopt_hosts(names, existing, copied):
             fail(f"--adopt {name}: {name}.json already carries a machine tag, so it is not untagged")
         if not machine_tag_of(copied.get(name)):
             fail(f"--adopt {name}: the collection has no measured, tagged {name}.json to adopt it")
+        if alias_target(copied[name]):
+            fail(f"--adopt {name}: the collection's {name}.json is a generated alias of {alias_target(copied[name])}")
+        target = dict(existing[name], machine=machine_tag_of(copied[name]))
+        newer = newer_same_machine(name, copied[name], {**existing, name: target}, name)
+        if newer:
+            fail(f"--adopt {name}: {newer}.json started later than the collection's {name}.json, not adopted")
     for name in names:
         tag = machine_tag_of(copied[name])
+        why = unmeasured(existing[name])
+        if why:
+            print(f"bench-report: --adopt {name}: {name}.json holds no times ({why}), replacing it", file=sys.stderr)
         existing[name] = dict(existing[name], machine=tag)
-        with open(os.path.join(DATA_DIR, f"{name}.json"), "w") as f:
-            json.dump(existing[name], f, indent=1)
-            f.write("\n")
+        _dump_data_file(name, existing[name])
         print(f"bench-report: {name}: adopted by machine {tag}", file=sys.stderr)
 
 
@@ -2664,13 +2709,16 @@ def import_hosts(directory, adopt=()):
     result never replaces an untagged file either. Only a file this import
     will copy counts as a taken incoming name. Of one machine's slug file
     and aliases in the collection, only the newest is imported, and moving
-    an alias keeps `alias_of`. A file in the data directory that is not
+    an alias keeps `alias_of`. A same-machine file in the data directory
+    that started later than the result is never replaced or deleted: the
+    result is skipped instead. A file in the data directory that is not
     readable holds its name and is left as it is.
 
     Each name in `adopt` is an untagged file in the data directory that the
     tagged result of that name in the collection takes over: its tag is
     written into the file first, so the same-tag rule then refreshes it in
-    place. Any other `adopt` name fails before anything is written.
+    place. Any other `adopt` name, an alias result, or a result older than
+    the file or its same-tag aliases fails before anything is written.
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     existing = {}
@@ -2706,14 +2754,21 @@ def import_hosts(directory, adopt=()):
                 file=sys.stderr,
             )
             continue
+        newer = newer_same_machine(slug, host, existing, dest)
+        if newer:
+            print(f"bench-report: {name}: not imported, {newer} from the same machine started later", file=sys.stderr)
+            continue
         creating = dest not in existing
+        prior = alias_target(host)
+        moved = prior and dest == prior and name != dest
+        if not creating and not moved:
+            print(f"bench-report: {name}: same machine as {dest}, not older, refreshed {dest}", file=sys.stderr)
         existing[dest] = _write_imported(directory, name, host, dest)
         removed = _drop_extra_aliases(slug, host, existing, dest)
         for stem in sorted(removed):
             print(f"bench-report: {stem}: same machine as {slug}, dropped", file=sys.stderr)
             print(f"bench-report: {slug}: dropped extra alias {stem}", file=sys.stderr)
-        prior = alias_target(host)
-        if prior and dest == prior and name != dest:
+        if moved:
             print(f"bench-report: {name}: same machine as {dest}, imported as {dest}", file=sys.stderr)
             print(f"bench-report: {name}: this machine already has {dest}, refreshed {dest}", file=sys.stderr)
         elif creating and dest != name:

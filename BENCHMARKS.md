@@ -1273,7 +1273,9 @@ one: a tagged result is stored beside it, and a result without a tag whose name 
 already on disk is not imported until it is rerun with a different `--host`.
 `render --from DIR --adopt NAME` is the one exception: it writes the tag of DIR's tagged
 `NAME.json` into the untagged `NAME.json` on disk, so that machine's file is refreshed in
-place from then on, and it refuses a missing or tagged file or an untagged result. Of one
+place from then on, and it refuses a missing or tagged file, an untagged or alias result,
+or one older than that file. No import replaces or deletes a file from the same machine
+that started later. Of one
 machine's results under one slug in a collection, only the newest is imported.
 `summary` and `render --from` read every readable measured `<host>.json` and name any
 file they skip.

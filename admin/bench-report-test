@@ -2278,6 +2278,162 @@ class AnyHost(unittest.TestCase):
             br.render(type("Args", (), {"collection": None, "adopt": ["nixos"], "check": False})())
         self.assertIn("--adopt needs --from DIR", str(raised.exception))
 
+    def test_an_older_result_never_replaces_a_newer_file_from_its_machine(self):
+        tag = "cccccccc"
+        newer = laptop("nixos")
+        newer["machine"] = tag
+        newer["started"] = "2026-11-06T00:00:00+00:00"
+        older = dict(newer, started="2026-11-04T00:00:00+00:00")
+        files, log = self.adopt_case(newer, older, ())
+        self.assertIn("nixos: not imported, nixos from the same machine started later", log)
+        self.assertEqual(files, {"nixos.json": newer})
+        # A newer or equal run still refreshes the file, and says so.
+        files, log = self.adopt_case(older, newer, ())
+        self.assertIn("nixos: same machine as nixos, not older, refreshed nixos", log)
+        self.assertEqual(files, {"nixos.json": newer})
+
+    def test_an_older_result_never_deletes_a_newer_alias_from_its_machine(self):
+        tag = "cccccccc"
+        alias = f"nixos-{tag}"
+        saved = br.DATA_DIR
+        try:
+            with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                br.DATA_DIR = data
+                resident = laptop("nixos")
+                resident["machine"] = tag
+                resident["started"] = "2026-11-01T00:00:00+00:00"
+                marked = laptop(alias)
+                marked["machine"] = tag
+                marked["alias_of"] = "nixos"
+                marked["started"] = "2026-11-06T00:00:00+00:00"
+                for name, body in (("nixos", resident), (alias, marked)):
+                    with open(os.path.join(data, f"{name}.json"), "w") as f:
+                        json.dump(body, f)
+                older = laptop("nixos")
+                older["machine"] = tag
+                older["started"] = "2026-11-04T00:00:00+00:00"
+                with open(os.path.join(src, "nixos.json"), "w") as f:
+                    json.dump(older, f)
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    br.import_hosts(src)
+                self.assertIn(f"nixos: not imported, {alias} from the same machine started later", err.getvalue())
+                self.assertEqual(set(os.listdir(data)), {"nixos.json", f"{alias}.json"})
+                with open(os.path.join(data, f"{alias}.json")) as f:
+                    self.assertEqual(json.load(f), marked)
+                with open(os.path.join(data, "nixos.json")) as f:
+                    self.assertEqual(json.load(f), resident)
+        finally:
+            br.DATA_DIR = saved
+
+    def test_adopt_refuses_an_older_result_and_replaces_an_unmeasured_file(self):
+        tag = "cccccccc"
+        alias = f"nixos-{tag}"
+        resident = laptop("nixos")
+        resident["started"] = "2026-11-06T00:00:00+00:00"
+        older = laptop("nixos")
+        older["machine"] = tag
+        older["started"] = "2026-11-04T00:00:00+00:00"
+        marked = laptop(alias)
+        marked["machine"] = tag
+        marked["alias_of"] = "nixos"
+        marked["started"] = "2026-11-06T00:00:00+00:00"
+        early = dict(resident, started="2026-11-01T00:00:00+00:00")
+        for files, message in (
+            ({"nixos": resident}, "--adopt nixos: nixos.json started later than the collection's nixos.json"),
+            ({"nixos": early, alias: marked}, f"--adopt nixos: {alias}.json started later than the collection's"),
+        ):
+            with self.subTest(message=message):
+                saved = br.DATA_DIR
+                try:
+                    with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+                        br.DATA_DIR = data
+                        for name, body in files.items():
+                            with open(os.path.join(data, f"{name}.json"), "w") as f:
+                                json.dump(body, f)
+                        with open(os.path.join(src, "nixos.json"), "w") as f:
+                            json.dump(older, f)
+                        with self.assertRaises(SystemExit) as raised:
+                            br.import_hosts(src, ["nixos"])
+                        self.assertIn(message, str(raised.exception))
+                        for name, body in files.items():
+                            with open(os.path.join(data, f"{name}.json")) as f:
+                                self.assertEqual(json.load(f), body)
+                finally:
+                    br.DATA_DIR = saved
+        busy = {"schema": 1, "host": "nixos", "status": "busy", "reason": "busy"}
+        files, log = self.adopt_case(busy, older, ["nixos"])
+        self.assertIn("--adopt nixos: nixos.json holds no times (not measured, busy: busy), replacing it", log)
+        self.assertEqual(files, {"nixos.json": older})
+
+    def cli(self, data, *argv):
+        """Runs `admin/bench-report render` through argparse on `data`, writing no report files."""
+        saved = {k: getattr(br, k) for k in ("DATA_DIR", "REPORT_DIR", "REPORT", "report", "load_gaps")}
+        argv_saved = sys.argv
+        try:
+            with tempfile.TemporaryDirectory() as out:
+                br.DATA_DIR = data
+                br.REPORT_DIR = out
+                br.REPORT = os.path.join(out, "BENCHMARKS.md")
+                br.report = lambda *a: {}
+                br.load_gaps = lambda *a, **k: []
+                sys.argv = ["bench-report", "render", *argv]
+                with contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()):
+                    try:
+                        br.main()
+                    except SystemExit as e:
+                        return 1, err.getvalue() + str(e.code)
+                return 0, err.getvalue()
+        finally:
+            for k, v in saved.items():
+                setattr(br, k, v)
+            sys.argv = argv_saved
+
+    def test_adopt_through_the_command_line(self):
+        tag = "cccccccc"
+        with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as data:
+
+            def put(directory, name, body):
+                with open(os.path.join(directory, f"{name}.json"), "w") as f:
+                    f.write(body if isinstance(body, str) else json.dumps(body))
+
+            def tagged(name, **extra):
+                body = laptop(name)
+                body["machine"] = tag
+                body["started"] = "2026-11-06T00:00:00+00:00"
+                body.update(extra)
+                return body
+
+            for name in ("nixos", "kixtop"):
+                put(data, name, laptop(name))
+                put(src, name, tagged(name))
+            code, log = self.cli(data, "--from", src, "--adopt", "nixos", "--adopt", "kixtop")
+            self.assertEqual(code, 0, log)
+            self.assertIn("nixos: adopted by machine cccccccc", log)
+            self.assertIn("kixtop: adopted by machine cccccccc", log)
+            self.assertEqual(sorted(os.listdir(data)), ["kixtop.json", "nixos.json"])
+            for name in ("nixos", "kixtop"):
+                with open(os.path.join(data, f"{name}.json")) as f:
+                    self.assertEqual(json.load(f), tagged(name))
+            for target, incoming, message in (
+                ("{not json", tagged("box"), "--adopt box: the data directory has no readable box.json"),
+                (laptop("box"), {"schema": 1, "host": "box", "machine": tag, "status": "busy", "reason": "busy"},
+                 "--adopt box: the collection has no measured, tagged box.json"),
+                (laptop("box"), tagged("box", alias_of="nixos"),
+                 "--adopt box: the collection's box.json is a generated alias of nixos"),
+            ):
+                with self.subTest(message=message):
+                    put(data, "box", target)
+                    put(src, "box", incoming)
+                    code, log = self.cli(data, "--from", src, "--adopt", "box")
+                    self.assertEqual(code, 1)
+                    self.assertIn(message, log)
+                    with open(os.path.join(data, "box.json")) as f:
+                        self.assertEqual(f.read(), target if isinstance(target, str) else json.dumps(target))
+            code, log = self.cli(data, "--adopt", "nixos")
+            self.assertEqual(code, 1)
+            self.assertIn("--adopt needs --from DIR", log)
+            self.assertFalse([n for n in os.listdir(data) if n.endswith(".tmp")])
+
     def test_import_rejects_a_reserved_name_already_on_disk(self):
         saved = br.DATA_DIR
         try:
