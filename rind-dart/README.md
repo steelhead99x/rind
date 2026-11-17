@@ -71,6 +71,11 @@ rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-and
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 ```
 
+Each build hook output folder keeps its own cargo target directory. To share
+one between builds, such as several apps', name it with the
+`cargo_target_dir` user-define beside `build_from_source`, as a path relative
+to that `pubspec.yaml`.
+
 ## Platforms
 
 Android on arm64, armv7, and x86_64; iOS on devices and the simulator;

@@ -43,11 +43,23 @@ const _coldBuild = Timeout(Duration(minutes: 5));
 
 void main() {
   test('builds from source for the host, listing its sources', () async {
+    // In the cargo target directory the user-define names, relative to the
+    // pubspec that sets it.
+    final base = await Directory.systemTemp.createTemp();
+    addTearDown(() => base.delete(recursive: true));
     await testCodeBuildHook(
       mainMethod: hook.main,
-      userDefines: fromSource,
+      userDefines: PackageUserDefines(
+        workspacePubspec: PackageUserDefinesSource(
+          defines: {'build_from_source': true, 'cargo_target_dir': 'target'},
+          basePath: base.uri,
+        ),
+      ),
       check: (input, output) {
-        expect(output.assets.code.single.file, isNotNull);
+        expect(
+          output.assets.code.single.file!.toFilePath(),
+          startsWith(base.uri.resolve('target/').toFilePath()),
+        );
         expect(
           output.dependencies,
           containsAll([

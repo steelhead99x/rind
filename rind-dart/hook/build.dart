@@ -137,7 +137,13 @@ Future<Uri> _buildFromSource(
 ) async {
   final code = input.config.code;
   final manifest = input.packageRoot.resolve('Cargo.toml');
-  final targetDir = input.outputDirectoryShared.resolve('target/');
+  // The `cargo_target_dir` user-define shares one cargo target directory
+  // between builds whose hook output folders differ, so the later ones
+  // rebuild nothing; cargo locks it against concurrent builds.
+  final sharedTargetDir = input.userDefines.path('cargo_target_dir');
+  final targetDir = sharedTargetDir == null
+      ? input.outputDirectoryShared.resolve('target/')
+      : Directory.fromUri(sharedTargetDir).uri;
   final env = <String, String>{};
   final linkArgs = <String>[];
 
