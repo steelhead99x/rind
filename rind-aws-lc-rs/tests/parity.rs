@@ -1343,6 +1343,33 @@ fn nearby_edges() {
         &embedded("dsa2048"),
         Some("err:WrongAlgorithm"),
     );
+    // A DSA document whose outer framing does not parse, and one under the
+    // unbacked secp256k1 curve: the framing is checked before the OID decides.
+    for (name, doc) in [
+        ("dsa2048", embedded("dsa2048")),
+        ("secp256k1", embedded("secp256k1")),
+    ] {
+        let mut bad_version = doc.clone();
+        let at = bad_version
+            .windows(3)
+            .position(|w| w == [0x02, 0x01, 0x00])
+            .unwrap();
+        bad_version[at + 2] = 99;
+        check_pkcs8(
+            &mut report,
+            &format!("{name} version 99"),
+            65,
+            &bad_version,
+            Some("err:InvalidEncoding"),
+        );
+        check_pkcs8(
+            &mut report,
+            &format!("{name} truncated"),
+            65,
+            &doc[..doc.len() - 1],
+            Some("err:InvalidEncoding"),
+        );
+    }
     let ed_key = theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[3; 32]).unwrap();
     let ed_doc = ed_key.to_pkcs8v1().unwrap();
     let ed = ed_doc.as_ref();

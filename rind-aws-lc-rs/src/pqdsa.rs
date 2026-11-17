@@ -531,9 +531,9 @@ fn parses_as_other_private_key(pkcs8: &[u8]) -> bool {
         [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x03] => {
             ml_kem_private_key(document, 3168)
         }
-        // X9.57 `id-dsa`, which rind cannot back, decided from its OID
-        // alone without reading the private key.
-        [0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01] => true,
+        // X9.57 `id-dsa`, which rind cannot back, decided from its OID and
+        // the document's public framing, without reading the private key.
+        [0x2a, 0x86, 0x48, 0xce, 0x38, 0x04, 0x01] => der::pkcs8_parts(document).is_some(),
         _ => false,
     }
 }
@@ -643,29 +643,27 @@ fn der_tlv(tag: u8, body: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// P-256, P-384, and P-521 through rind, including a scalar shorter than the
-/// field. A curve rind cannot back is decided from its OID alone.
+/// P-256, P-384, and P-521 through rind, under the one curve the parameters
+/// name, including a scalar shorter than the field. secp256k1, secp224r1, and
+/// brainpoolP256r1, which rind cannot back, are decided from their OID alone,
+/// without reading the secret scalar.
 fn ec_private_key(pkcs8: &[u8]) -> bool {
-    use rind::ecdsa::sign::{
-        P256_SHA256_ASN1 as ECDSA_P256_SHA256_ASN1, P384_SHA384_ASN1 as ECDSA_P384_SHA384_ASN1,
-        P521_SHA512_ASN1 as ECDSA_P521_SHA512_ASN1,
+    use rind::ecdsa::sign::{P256_SHA256_ASN1, P384_SHA384_ASN1, P521_SHA512_ASN1};
+    let Some(oid) = der::pkcs8_parts(pkcs8).and_then(|parts| curve_oid(parts.parameters)) else {
+        return false;
     };
-    if unbacked_curve(pkcs8) {
-        return true;
-    }
-    let padded = padded_ec_scalar(pkcs8);
-    [
-        &ECDSA_P256_SHA256_ASN1,
-        &ECDSA_P384_SHA384_ASN1,
-        &ECDSA_P521_SHA512_ASN1,
-    ]
-    .into_iter()
-    .any(|algorithm| {
-        rind::ecdsa::KeyPair::from_pkcs8(algorithm, pkcs8).is_ok()
-            || padded
-                .as_ref()
-                .is_some_and(|padded| rind::ecdsa::KeyPair::from_pkcs8(algorithm, padded).is_ok())
-    })
+    let algorithm = match oid {
+        [0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07] => &P256_SHA256_ASN1,
+        [0x2b, 0x81, 0x04, 0x00, 0x22] => &P384_SHA384_ASN1,
+        [0x2b, 0x81, 0x04, 0x00, 0x23] => &P521_SHA512_ASN1,
+        [0x2b, 0x81, 0x04, 0x00, 0x0a]
+        | [0x2b, 0x81, 0x04, 0x00, 0x21]
+        | [0x2b, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x07] => return true,
+        _ => return false,
+    };
+    rind::ecdsa::KeyPair::from_pkcs8(algorithm, pkcs8).is_ok()
+        || padded_ec_scalar(pkcs8)
+            .is_some_and(|padded| rind::ecdsa::KeyPair::from_pkcs8(algorithm, &padded).is_ok())
 }
 
 /// A scalar shorter than the field, left-padded with zeros, for P-256,
@@ -720,22 +718,6 @@ fn curve_oid(parameters: &[u8]) -> Option<&[u8]> {
         return None;
     }
     Some(oid)
-}
-
-/// secp256k1, secp224r1, and brainpoolP256r1, which rind cannot back. A key
-/// naming one is refused as another algorithm from that public OID, without
-/// reading its secret scalar.
-fn unbacked_curve(pkcs8: &[u8]) -> bool {
-    der::pkcs8_parts(pkcs8)
-        .and_then(|parts| curve_oid(parts.parameters))
-        .is_some_and(|oid| {
-            matches!(
-                oid,
-                [0x2b, 0x81, 0x04, 0x00, 0x0a]
-                    | [0x2b, 0x81, 0x04, 0x00, 0x21]
-                    | [0x2b, 0x24, 0x03, 0x03, 0x02, 0x08, 0x01, 0x01, 0x07]
-            )
-        })
 }
 
 /// Absent parameters, an empty `RSASSA-PSS-params`, or one explicit hash
