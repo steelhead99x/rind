@@ -57,8 +57,8 @@ echo "Left out $skipped stanzas for Ed25519ctx or Ed25519ph through Ed25519's in
 "$OPENSSL_EVP_TEST/bin/evp_test" -config "$work/openssl.cnf" -provider rind "$work"/ecx/evppkey_*.txt
 
 # A stanza stays unless it runs a bare-digest operation, names a digest or a
-# group rind does not back, or uses a key whose name is not one of the three
-# curves'. Keys are named for their curves, as `ALICE_secp384r1_PUB` is.
+# group rind does not back, or uses a key (`Key`, `Derive`, `PeerKey`,
+# `PrivPubKeyPair`) whose name is not one of the three curves'. Keys are named for their curves, as `ALICE_secp384r1_PUB` is.
 skipped=0
 for file in "$OPENSSL_EVP_TEST"/share/evp_test/evppkey_{ecc,ecdh,ecdsa,ecdsa_sigalg,mismatch}.txt; do
     awk '
@@ -72,12 +72,21 @@ for file in "$OPENSSL_EVP_TEST"/share/evp_test/evppkey_{ecc,ecdh,ecdsa,ecdsa_sig
                 if (line !~ /digest:SHA(2-)?(256|384|512) *$/) return 1
             }
             if (line ~ /^Ctrl *= *group:/ && line !~ /group:P-(256|384|521) *$/) return 1
-            if (line ~ /^(Derive|PeerKey|DigestSign|DigestVerify|OneShotDigestVerify|PrivPubKeyPair) *=/) {
+            # These name a digest; the key is named by the Key line.
+            if (line ~ /^(DigestSign|DigestVerify|OneShotDigestVerify) *=/) {
+                value = line
+                sub(/^[^=]*= */, "", value)
+                if (value !~ /^SHA(2-)?(256|384|512) *$/) return 1
+            }
+            if (line ~ /^(Key|Derive|PeerKey|PrivPubKeyPair) *=/) {
                 value = line
                 sub(/^[^=]*= */, "", value)
                 m = split(value, parts, ":")
                 for (j = 1; j <= m; j++) {
                     if (toupper(parts[j]) ~ /EXPLICIT/) return 1
+                    # An RSA private key belongs to the default provider; the pair checks
+                    # that rind refuses to match it with the public key of a curve.
+                    if (line ~ /^PrivPubKeyPair/ && toupper(parts[j]) ~ /^RSA-/) continue
                     if (toupper(parts[j]) !~ /(^|[_-])(P-(256|384|521)|SECP(256|384|521)R1|PRIME256V1)([_-]|$)/) return 1
                 }
             }
