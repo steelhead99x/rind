@@ -32,7 +32,7 @@ ci-select $BASE="":
 fix $BASE="":
     sh/dispatch.sh fix "$BASE"
 
-# Build, lint, and test armv7, running the tests under qemu on both CPU paths (Linux only).
+# Build, lint, and test armv7 on each CPU tier, under qemu or natively on an aarch64 host that runs AArch32 code (Linux only).
 armv7:
     nix develop .#armv7 --command sh/armv7.sh
 
