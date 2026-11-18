@@ -29,6 +29,7 @@ PINS = [
     ("BoringSSL", "copied code", "admin/import-boringssl", REV),
     ("OpenSSL", "copied code", "admin/import-openssl", REV),
     ("HACL\\*", "Vale's x86_64 AES-GCM", "admin/import-hacl", REV),
+    ("pyca/verified-garbage", "copied code and the Lean ISA models its proofs rest on", "admin/import-vg", REV),
     (
         "s2n-bignum",
         "assembly and the HOL Light proofs of it",
