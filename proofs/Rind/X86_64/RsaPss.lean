@@ -787,7 +787,7 @@ theorem pss_salt_len_spec (salt : Option high.rsa.PssSalt) (em hash : Slice U8)
 the salt length `salt` names or, for `None`, with any. -/
 theorem verify_pss_digest_spec (hs : HashSpec inst H B L max Abs CAbs) (hnew : inst.new ⦃ c => CAbs [] c ⦄)
     (hL : 0 < L) (hmax : 2048 ≤ max) (hheld : low.entry.Entry.assert_held = ok ())
-    (key : high.rsa.VerifyingKey) (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma)
+    (key : high.rsa.VerifyingKey) (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns)
     (salt : Option high.rsa.PssSalt) (signature hash : Slice U8) (M : List Byte)
     (hmh : bv hash.val = H M) :
     high.rsa.VerifyingKey.verify_pss_digest inst key salt signature hash ⦃ r =>
@@ -795,7 +795,7 @@ theorem verify_pss_digest_spec (hs : HashSpec inst H B L max Abs CAbs) (hnew : i
         (bv signature.val)
         (salt.map (pssSaltLen (((wordsNat (lowWords key.n key.n.used)).size - 1 + 7) / 8) L)) ⦄ := by
   have hinv' := hinv
-  obtain ⟨hk2, hk, hodd, hn0, hmont, he, he3, hs1, hs2⟩ := hinv'
+  obtain ⟨hk2, hk, hodd, hn0, hmont, he, he3, hs1, hs2, -⟩ := hinv'
   have hL64 : L ≤ 64 := hs.out.2.1
   have hhL : hash.length = L := by rw [← hs.out.2.2.2.2 M, ← hmh, bv_length]
   unfold high.rsa.VerifyingKey.verify_pss_digest
@@ -864,7 +864,7 @@ exactly the signatures RFC 8017 does, with the salt length `salt` names or,
 for `None`, with any. -/
 theorem verify_pss_core_spec (hs : HashSpec inst H B L max Abs CAbs) (hnew : inst.new ⦃ c => CAbs [] c ⦄)
     (hL : 0 < L) (hmax : 2048 ≤ max) (hheld : low.entry.Entry.assert_held = ok ())
-    (key : high.rsa.VerifyingKey) (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma)
+    (key : high.rsa.VerifyingKey) (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns)
     (salt : Option high.rsa.PssSalt) (signature message : Slice U8) (hm : message.length ≤ max) :
     high.rsa.VerifyingKey._verify_pss inst key salt signature message ⦃ r =>
       r = .Ok () ↔ RsassaPss (wordsNat (lowWords key.n key.n.used)) key.e.val H L (bv message.val)
@@ -906,7 +906,7 @@ theorem sha512_ctx_new_spec :
 
 /-- RSASSA-PSS-VERIFY with SHA-256 and MGF1 with SHA-256. -/
 theorem verify_pss_sha256_spec (h : Runs) (hb : Sha256Blocks) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma) (salt : Option high.rsa.PssSalt)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns) (salt : Option high.rsa.PssSalt)
     (signature message : Slice U8) (hm : message.length ≤ maxInput) :
     high.rsa.VerifyingKey.verify_pss_sha256 key salt signature message ⦃ r =>
       r = .Ok () ↔ RsassaPss (wordsNat (lowWords key.n key.n.used)) key.e.val sha256.hash 32
@@ -919,7 +919,7 @@ theorem verify_pss_sha256_spec (h : Runs) (hb : Sha256Blocks) (key : high.rsa.Ve
 
 /-- RSASSA-PSS-VERIFY with SHA-384 and MGF1 with SHA-384. -/
 theorem verify_pss_sha384_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma) (salt : Option high.rsa.PssSalt)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns) (salt : Option high.rsa.PssSalt)
     (signature message : Slice U8) (hm : message.length ≤ maxInput) :
     high.rsa.VerifyingKey.verify_pss_sha384 key salt signature message ⦃ r =>
       r = .Ok () ↔ RsassaPss (wordsNat (lowWords key.n key.n.used)) key.e.val sha384Bytes 48
@@ -932,7 +932,7 @@ theorem verify_pss_sha384_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.Veri
 
 /-- RSASSA-PSS-VERIFY with SHA-512 and MGF1 with SHA-512. -/
 theorem verify_pss_sha512_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma) (salt : Option high.rsa.PssSalt)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns) (salt : Option high.rsa.PssSalt)
     (signature message : Slice U8) (hm : message.length ≤ maxInput) :
     high.rsa.VerifyingKey.verify_pss_sha512 key salt signature message ⦃ r =>
       r = .Ok () ↔ RsassaPss (wordsNat (lowWords key.n key.n.used)) key.e.val sha512Bytes 64

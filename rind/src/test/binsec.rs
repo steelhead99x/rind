@@ -299,12 +299,15 @@ fn ct_binsec_ecdh_p521() {
 }
 
 fn mlkem<P: crate::mid::mlkem::Params>() {
-    use crate::mid::mlkem::DecapKey;
+    use crate::mid::mlkem::{DecapKey, Message};
 
+    // A fixed message, so every run explores the same ciphertext: BINSEC's
+    // term building stalls on about one in a hundred, for as long as it is
+    // given, and a random one made that a flaky check.
+    // See UPSTREAM.md, "BINSEC stalls on some ML-KEM ciphertexts".
     let (_, ciphertext) = DecapKey::<P>::keygen_internal(&[1; 64])
         .encapsulation_key()
-        .encaps()
-        .unwrap();
+        .encaps_internal(Message([0x5a; 32]));
     checked(|| DecapKey::<P>::keygen_internal(&[1; 64]).decaps(&ciphertext));
 }
 
@@ -407,7 +410,10 @@ fn ct_binsec_mont16() {
 // exponentiation that runs thousands of them, whose other code
 // `ct_binsec_rsa2048_sign` checks at 16 words. On a wide aarch64 host that
 // sign takes `bn_mul_mont`, so the 16-word Karatsuba path is
-// `ct_binsec_mont16` with the narrow schedule forced.
+// `ct_binsec_mont16` with the narrow schedule forced. On aarch64 this runs
+// `bn_mul_mont` on a wide multiplier and s2n-bignum's `bignum_kmul_32_64`,
+// `bignum_ksqr_32_64`, and `bignum_emontredc_8n` on a narrow one, so
+// `admin/ct-binsec` runs it again with each schedule forced.
 #[test]
 #[ignore = "admin/ct-binsec runs it under BINSEC"]
 fn ct_binsec_mont_mul() {

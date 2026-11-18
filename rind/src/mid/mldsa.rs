@@ -15,6 +15,8 @@
 // cannot pass as `as_chunks`'s const argument in generic code.
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 use core::fmt;
 use core::mem::ManuallyDrop;
 use core::panic::{RefUnwindSafe, UnwindSafe};
@@ -575,7 +577,7 @@ pub struct Polys(Option<Box<[Poly]>>);
 
 impl Polys {
     fn new(polys: usize) -> Self {
-        Self(Some(vec![Poly::ZERO; polys].into_boxed_slice()))
+        Self(Some(alloc::vec![Poly::ZERO; polys].into_boxed_slice()))
     }
 
     /// The polynomials, none once freed.
@@ -745,7 +747,7 @@ fn public_key_from_secret<P: Params>(sk: &[u8], pk: &mut [u8], expanded: &mut [P
     // keeps the recomputed one.
     pk[..SEED_LEN].copy_from_slice(rho);
     expand_a::<P>(rho, a);
-    let mut t0_packed = vec![0u8; P::K * T0_PACKED];
+    let mut t0_packed = alloc::vec![0u8; P::K * T0_PACKED];
     compute_t::<P>(a, s1, s2, &mut pk[SEED_LEN..], t0, &mut t0_packed);
     let t0_matches = low::ct_equal(&t0_packed, &sk[layout.t0]);
     low::zeroise(&mut t0_packed);
@@ -828,6 +830,19 @@ fn sign_internal<P: Params>(
         sample_in_ball::<P>(&mut c, c_tilde);
         low::mldsa_ntt(&mut c.0);
 
+        // Each check below rejects less often than the one before, as
+        // mldsa-native orders them, so a rejected attempt skips the work the
+        // later ones need. First r0 = w0 - c * s2.
+        for (s2, w0) in s2.iter().zip(w0.iter_mut()) {
+            low::mldsa_pointwise(&mut tmp.0, &c.0, &s2.0);
+            low::mldsa_intt(&mut tmp.0);
+            sub(w0, &tmp);
+            low::mldsa_reduce(&mut w0.0);
+            if rejected(low::mldsa_chknorm(&w0.0, (P::GAMMA2 - P::BETA) as u64)) {
+                continue 'attempts;
+            }
+        }
+
         // z = y + c * s1
         let z_packed = &mut signature.as_mut()[P::CTILDE_LEN..P::CTILDE_LEN + l * P::Z_PACKED];
         for (i, (s1, y)) in s1.iter().zip(y.iter()).enumerate() {
@@ -842,16 +857,8 @@ fn sign_internal<P: Params>(
             pack_z::<P>(packed, &tmp);
         }
 
-        // r0 = w0 - c * s2, then w0 - c * s2 + c * t0 for the hints.
-        for ((s2, t0), w0) in s2.iter().zip(t0.iter()).zip(w0.iter_mut()) {
-            low::mldsa_pointwise(&mut tmp.0, &c.0, &s2.0);
-            low::mldsa_intt(&mut tmp.0);
-            sub(w0, &tmp);
-            low::mldsa_reduce(&mut w0.0);
-            if rejected(low::mldsa_chknorm(&w0.0, (P::GAMMA2 - P::BETA) as u64)) {
-                continue 'attempts;
-            }
-
+        // w0 - c * s2 + c * t0, for the hints.
+        for (t0, w0) in t0.iter().zip(w0.iter_mut()) {
             low::mldsa_pointwise(&mut tmp.0, &c.0, &t0.0);
             low::mldsa_intt(&mut tmp.0);
             low::mldsa_reduce(&mut tmp.0);
@@ -937,7 +944,7 @@ fn verify_internal<P: Params>(
     let unkept = match kept {
         Some(_) => Vec::new(),
         None => {
-            let mut a = vec![Poly::ZERO; k * l];
+            let mut a = alloc::vec![Poly::ZERO; k * l];
             expand_a::<P>(pk[..SEED_LEN].try_into().unwrap(), &mut a);
             a
         }
@@ -994,7 +1001,7 @@ fn verify_internal<P: Params>(
 /// A public key's expansion from its encoding `pk`: `A`, then `t1 * 2^d`,
 /// in the NTT domain.
 fn expand_public<P: Params>(pk: &[u8]) -> Box<[Poly]> {
-    let mut expanded = vec![Poly::ZERO; public_expansion_len::<P>()].into_boxed_slice();
+    let mut expanded = alloc::vec![Poly::ZERO; public_expansion_len::<P>()].into_boxed_slice();
     let (a, t1) = expanded.split_at_mut(P::K * P::L);
     expand_a::<P>(pk[..SEED_LEN].try_into().unwrap(), a);
     for (t1, packed) in t1.iter_mut().zip(pk[SEED_LEN..].as_chunks::<T1_PACKED>().0) {
