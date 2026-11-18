@@ -27,8 +27,8 @@ A primitive is checked five ways:
   its NEON table lookups or crypto extension; it denies the CPU features
   whose instructions BINSEC cannot decode, AES-NI, VAES, and AVX-512 on
   x86_64, and the crypto extension, SHA-3, and DIT on aarch64, so those
-  paths stay with the other three, and gives it
-  the effect of the few others rind and glibc run, such as aarch64's `tbl`.
+  paths stay with the other three, and gives it the effect of the few others
+  rind and glibc run, such as aarch64's `tbl`.
   Each harness fixes its public inputs, so it checks the paths those values
   take, except that ChaCha20 and ChaCha20-Poly1305 take every message
   length up to a block and a partial one; and BINSEC's lifter

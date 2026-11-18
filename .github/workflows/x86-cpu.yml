@@ -316,8 +316,8 @@ jobs:
               AVX512_RSA: 0
               MCDT: 1
           # Granite Rapids selects every path, including AVX-512 AES-GCM, ML-KEM,
-          # and RSA. Ice Lake, Ice Lake server,
-          # Tiger Lake, and Sapphire and Emerald Rapids select the same paths.
+          # and RSA. Ice Lake, Ice Lake server, Tiger Lake, and Sapphire and
+          # Emerald Rapids select the same paths.
           - model: Granite Rapids
             sde: gnr
             paths:
