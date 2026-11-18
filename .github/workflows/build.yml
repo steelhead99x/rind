@@ -427,7 +427,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.dart == 'true'
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: rind-dart/integration
@@ -455,31 +455,9 @@ jobs:
       - name: Run tests
         run: |
           udid=$(xcrun simctl list devices available --json | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')
-          # Some runs hang after the Xcode build, with no test output, until
-          # the job's limit cancels them and drops the log; a rerun passes.
-          # So each attempt stops after 15 minutes (macOS has no timeout(1);
-          # perl's alarm survives the exec), prints what the simulator saw,
-          # and the second attempt starts from a freshly erased simulator.
-          for attempt in 1 2; do
-            xcrun simctl boot "$udid"
-            xcrun simctl bootstatus "$udid"
-            status=0
-            perl -e 'alarm shift; exec @ARGV' 900 flutter test integration_test -d "$udid" --reporter expanded || status=$?
-            [ "$status" -eq 0 ] && exit 0
-            echo "::group::attempt $attempt: simulator log (Runner)"
-            xcrun simctl spawn "$udid" log show --last 15m --style compact \
-              --predicate 'process == "Runner"' | tail -n 300 || true
-            echo "::endgroup::"
-            echo "::group::attempt $attempt: crash reports"
-            find ~/Library/Logs/DiagnosticReports -mmin -15 -name '*Runner*' -print -exec head -n 120 {} \; 2>/dev/null || true
-            echo "::endgroup::"
-            # 142 is SIGALRM: the hang. A real test failure is not retried.
-            [ "$status" -eq 142 ] || exit "$status"
-            echo "::warning::dart-ios attempt $attempt hung; retrying on an erased simulator"
-            xcrun simctl shutdown "$udid" || true
-            xcrun simctl erase "$udid"
-          done
-          exit 142
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid"
+          flutter test integration_test -d "$udid"
 
   # The portable backend, which every architecture without rind assembly
   # runs, forced on x86_64 so it runs without emulation. The recipe lints and
