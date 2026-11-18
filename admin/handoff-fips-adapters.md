@@ -54,8 +54,19 @@ Then `just ci` in that shell. `sh/dispatch.sh` selects the `adapters` module fro
 
 The two quest branches both come from upstream `main` and both edit rind-rustls. Landing either second conflicts. Prefer to implement the FIPS provider after #860 has landed, so ML-DSA has one implementation. Do not merge #137 or fork `main` into `quest/m4/fips/adapters`: those commits are not on upstream `main`, and the claim PR would try to land them. If both proceed together, expect conflicts in the files above and in the `omitted` list (#137 drops `kx_group::MLKEM1024`; this work drops the `fips` skip).
 
+## Where to start in rind-aws-lc-rs
+
+`cargo build -p rind-fips --locked` succeeds on a plain x86_64 glibc host (rustc 1.97, no Nix dev shell; about 45 seconds for a debug build), so the module-backed half can be built and tested outside `nix develop`.
+
+The `fips` surface on this tree is `skip.fips` in `rind-aws-lc-rs/Cargo.toml` (the `skip` table), `try_fips_mode`, `fips_version`, and `try_fips_cpu_jitter_entropy` in `rind-aws-lc-rs/src/lib.rs`, the README passage that says the feature is refused, and `MIGRATE.md`'s line that says to drop the `fips` feature.
+
 ## Open questions
 
+These still need a decision before implementation. The recommendation is first.
+
+- **Order.** Implement after [kixel-ai/rind#860](https://github.com/kixel-ai/rind/pull/860) lands, so ML-DSA has one implementation. The other option is the rind-aws-lc-rs half now, since it does not touch rind-rustls's ML-DSA files, and the rustls half after #860.
+- **Targets where `rind-fips` is empty** (anything other than glibc Linux x86_64 and aarch64). Recommend `compile_error!` when `fips` is enabled: aws-lc-rs's FIPS build fails off its supported platforms, and a build that succeeds while `try_fips_mode()` returns `Err` would report a non-FIPS result from a feature the caller turned on. The other option is to build and return `Err` from `try_fips_mode()`.
+- **What stays available under `fips`.** Every operation `rind-fips` approves goes through it. X25519 and ChaCha20-Poly1305 stay on `rind` with `fips()` false, and stay callable. aws-lc-rs's FIPS build keeps its non-approved algorithms available the same way. Removing them from the FIPS build would diverge from that.
 - `fips_version()`: recommend `None`, and name it in the README as a function the module cannot back. Change that if Deno's FIPS build ([denoland/deno#36906](https://github.com/denoland/deno/pull/36906)) requires `Some`.
 - `try_fips_self_test`: recommend leaving it omitted, because `rind_fips::self_test` aborts instead of returning `Result`.
 - TLS 1.3 KDF in `rind-acvp`: recommend registering `HKDF/<hash>/extract` and `HKDFExpandLabel/<hash>` only after a trace shows the FIPS provider's key schedule calls the module's HKDF.
