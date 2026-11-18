@@ -43,8 +43,8 @@ fn ecdsa(signing: &'static EcdsaSigningAlgorithm) -> (EncodingKey, DecodingKey) 
 /// PKCS#8 for the private key, and the raw public key rind-jsonwebtoken
 /// parses: an X9.62 uncompressed point, not a SubjectPublicKeyInfo.
 #[cfg(any(target_arch = "xtensa", target_os = "none"))]
-fn ecdsa(signing: &'static rind::signature::EcdsaSigningAlgorithm) -> (EncodingKey, DecodingKey) {
-    let pair = rind::signature::EcdsaKeyPair::generate(signing).unwrap();
+fn ecdsa(signing: &'static rind::ecdsa::SigningAlgorithm) -> (EncodingKey, DecodingKey) {
+    let pair = rind::ecdsa::KeyPair::generate(signing).unwrap();
     let pkcs8 = pair.to_pkcs8();
     (
         EncodingKey::from_ec_der(pkcs8.as_ref()),
@@ -59,11 +59,11 @@ fn keys() -> Vec<(Algorithm, EncodingKey, DecodingKey)> {
     #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     let (es256_private, es256_public) = ecdsa(&ECDSA_P256_SHA256_FIXED_SIGNING);
     #[cfg(any(target_arch = "xtensa", target_os = "none"))]
-    let (es256_private, es256_public) = ecdsa(&rind::signature::sign::ECDSA_P256_SHA256_FIXED);
+    let (es256_private, es256_public) = ecdsa(&rind::ecdsa::sign::P256_SHA256_FIXED);
     #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     let (es384_private, es384_public) = ecdsa(&ECDSA_P384_SHA384_FIXED_SIGNING);
     #[cfg(any(target_arch = "xtensa", target_os = "none"))]
-    let (es384_private, es384_public) = ecdsa(&rind::signature::sign::ECDSA_P384_SHA384_FIXED);
+    let (es384_private, es384_public) = ecdsa(&rind::ecdsa::sign::P384_SHA384_FIXED);
 
     #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     let (ed25519, ed25519_public) = {
@@ -77,11 +77,11 @@ fn keys() -> Vec<(Algorithm, EncodingKey, DecodingKey)> {
     };
     #[cfg(any(target_arch = "xtensa", target_os = "none"))]
     let (ed25519, ed25519_public) = {
-        let pair = rind::signature::Ed25519KeyPair::generate().unwrap();
+        let pair = rind::ed25519::KeyPair::generate().unwrap();
         // The 32-byte public key. `to_spki` is a SubjectPublicKeyInfo, which
         // `PublicKey::new` refuses.
         let ed25519_public = pair.public_key().as_ref().to_vec();
-        (pair.to_pkcs8v1(), ed25519_public)
+        (pair.to_pkcs8(), ed25519_public)
     };
 
     let rsa = include_bytes!("../../rind/src/high/rsa/rsa2048.der");
