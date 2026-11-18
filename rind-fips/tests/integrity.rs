@@ -58,29 +58,46 @@ fn an_unchanged_copy_loads() {
     assert!(output.status.success(), "{output:?}");
 }
 
+/// Each case flips a byte that nothing before the integrity test reads.
+/// The dynamic loader applies every relocation, and the CPU check and the
+/// SHA-256 and HMAC self-tests run, before the integrity test does, so a
+/// byte they read could crash the load, or fail another test, before the
+/// integrity test reports: a corrupted relocation of the constructor's own
+/// pointer is a jump to a misaligned address, which aarch64 traps.
 #[test]
 fn tampering_fails_the_integrity_test() {
     let module = std::fs::read(MODULE).unwrap();
     let elf = Elf::parse(&module);
     let relocated = elf.relocated(&module);
-    let in_section = |name: &str, pick: &dyn Fn(usize, usize) -> Option<usize>| {
-        let (offset, size) = elf.section(&module, name);
-        pick(offset, size).unwrap_or_else(|| panic!("no byte to flip in {name}"))
-    };
+    let (rodata, rodata_size) = elf.section(".rodata");
+    let (data_rel_ro, data_rel_ro_size) = elf.section(".data.rel.ro");
 
     let cases = [
-        (".text", in_section(".text", &|o, s| Some(o + s / 2))),
-        (".rodata", in_section(".rodata", &|o, s| Some(o + s / 2))),
-        (".rela.dyn", in_section(".rela.dyn", &|o, _| Some(o + 16))),
+        // A service's code, which only a caller reaches.
+        (".text", elf.symbol(&module, "rind_fips_version")),
+        // The layout's marker, which only the build script reads.
+        (
+            ".rodata",
+            module[rodata..rodata + rodata_size]
+                .windows(16)
+                .position(|w| w == b"rind-fips layout")
+                .map(|at| rodata + at)
+                .expect("no layout marker in .rodata"),
+        ),
+        // The addend of a finalizer's relocation: finalizers run only at
+        // exit, which a failed self-test skips by aborting.
+        (
+            ".rela.dyn",
+            elf.relocation_into(&module, ".fini_array") + 16,
+        ),
         // A byte of `.data.rel.ro` that no relocation writes, such as a
-        // string's length beside its pointer.
+        // string's length beside its pointer. Every pointer in the module
+        // is relocated, so the byte is no address the load could follow.
         (
             ".data.rel.ro",
-            in_section(".data.rel.ro", &|o, s| {
-                (o..o + s).find(|&at| {
-                    module[at] != 0 && !relocated.iter().any(|&r| at >= r && at < r + 8)
-                })
-            }),
+            (data_rel_ro..data_rel_ro + data_rel_ro_size)
+                .find(|&at| module[at] != 0 && !relocated.iter().any(|&r| at >= r && at < r + 8))
+                .expect("no unrelocated byte in .data.rel.ro"),
         ),
     ];
     for (name, offset) in cases {
@@ -93,64 +110,125 @@ fn tampering_fails_the_integrity_test() {
     }
 }
 
-/// Just enough of a little-endian ELF64 file to find sections and
-/// relocations.
+/// Just enough of a little-endian ELF64 file to find sections, dynamic
+/// symbols, and relocations.
 struct Elf {
-    sections: Vec<(String, u32, usize, usize, u64)>,
+    sections: Vec<Section>,
+}
+
+struct Section {
+    name: String,
+    kind: u32,
+    addr: u64,
+    offset: usize,
+    size: usize,
+}
+
+const SHT_RELA: u32 = 4;
+const RELA_SIZE: usize = 24;
+const SYM_SIZE: usize = 24;
+
+fn u32_at(file: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes(file[at..at + 4].try_into().unwrap())
+}
+
+fn u64_at(file: &[u8], at: usize) -> u64 {
+    u64::from_le_bytes(file[at..at + 8].try_into().unwrap())
+}
+
+/// The NUL-terminated string at `at`.
+fn str_at(file: &[u8], at: usize) -> &[u8] {
+    let len = file[at..].iter().position(|&b| b == 0).unwrap();
+    &file[at..at + len]
 }
 
 impl Elf {
     fn parse(file: &[u8]) -> Self {
         let u16_at = |at: usize| u16::from_le_bytes(file[at..at + 2].try_into().unwrap());
-        let u32_at = |at: usize| u32::from_le_bytes(file[at..at + 4].try_into().unwrap());
-        let u64_at = |at: usize| u64::from_le_bytes(file[at..at + 8].try_into().unwrap());
-        let shoff = u64_at(0x28) as usize;
+        let shoff = u64_at(file, 0x28) as usize;
         let (shentsize, shnum, shstrndx) = (
             u16_at(0x3a) as usize,
             u16_at(0x3c) as usize,
             u16_at(0x3e) as usize,
         );
         let header = |i: usize| shoff + i * shentsize;
-        let names = u64_at(header(shstrndx) + 0x18) as usize;
+        let names = u64_at(file, header(shstrndx) + 0x18) as usize;
         let sections = (0..shnum)
             .map(|i| {
                 let h = header(i);
-                let name_at = names + u32_at(h) as usize;
-                let len = file[name_at..].iter().position(|&b| b == 0).unwrap();
-                (
-                    String::from_utf8_lossy(&file[name_at..name_at + len]).into_owned(),
-                    u32_at(h + 4),
-                    u64_at(h + 0x18) as usize,
-                    u64_at(h + 0x20) as usize,
-                    u64_at(h + 0x10),
-                )
+                Section {
+                    name: String::from_utf8_lossy(str_at(file, names + u32_at(file, h) as usize))
+                        .into_owned(),
+                    kind: u32_at(file, h + 4),
+                    addr: u64_at(file, h + 0x10),
+                    offset: u64_at(file, h + 0x18) as usize,
+                    size: u64_at(file, h + 0x20) as usize,
+                }
             })
             .collect();
         Self { sections }
     }
 
+    fn find(&self, name: &str) -> &Section {
+        self.sections
+            .iter()
+            .find(|s| s.name == name)
+            .unwrap_or_else(|| panic!("no {name} section"))
+    }
+
     /// The file offset and size of section `name`.
-    fn section(&self, _file: &[u8], name: &str) -> (usize, usize) {
-        let (_, _, offset, size, _) = self.sections.iter().find(|s| s.0 == name).unwrap();
-        (*offset, *size)
+    fn section(&self, name: &str) -> (usize, usize) {
+        let section = self.find(name);
+        (section.offset, section.size)
+    }
+
+    /// The file offset of virtual address `vaddr`, if a section holds it.
+    fn offset_of(&self, vaddr: u64) -> Option<usize> {
+        self.sections
+            .iter()
+            .find(|s| s.addr != 0 && vaddr >= s.addr && vaddr < s.addr + s.size as u64)
+            .map(|s| s.offset + (vaddr - s.addr) as usize)
+    }
+
+    /// Each relocation's file offset and the virtual address it writes.
+    fn relocations<'a>(&'a self, file: &'a [u8]) -> impl Iterator<Item = (usize, u64)> + 'a {
+        self.sections
+            .iter()
+            .filter(|s| s.kind == SHT_RELA)
+            .flat_map(|s| (s.offset..s.offset + s.size).step_by(RELA_SIZE))
+            .map(|at| (at, u64_at(file, at)))
     }
 
     /// The file offsets of every relocated word.
     fn relocated(&self, file: &[u8]) -> Vec<usize> {
-        let to_offset = |vaddr: u64| {
-            self.sections
-                .iter()
-                .find(|(_, _, _, size, addr)| {
-                    *addr != 0 && vaddr >= *addr && vaddr < addr + *size as u64
-                })
-                .map(|(_, _, offset, _, addr)| offset + (vaddr - addr) as usize)
-        };
-        self.sections
-            .iter()
-            // SHT_RELA
-            .filter(|s| s.1 == 4)
-            .flat_map(|(_, _, offset, size, _)| (*offset..offset + size).step_by(24))
-            .filter_map(|at| to_offset(u64::from_le_bytes(file[at..at + 8].try_into().unwrap())))
+        self.relocations(file)
+            .filter_map(|(_, vaddr)| self.offset_of(vaddr))
             .collect()
+    }
+
+    /// The file offset of a relocation in `.rela.dyn` that writes section
+    /// `name`.
+    fn relocation_into(&self, file: &[u8], name: &str) -> usize {
+        let rela = self.find(".rela.dyn");
+        let target = self.find(name);
+        self.relocations(file)
+            .find(|&(at, vaddr)| {
+                at >= rela.offset
+                    && at < rela.offset + rela.size
+                    && vaddr >= target.addr
+                    && vaddr < target.addr + target.size as u64
+            })
+            .map(|(at, _)| at)
+            .unwrap_or_else(|| panic!("no relocation in .rela.dyn writes {name}"))
+    }
+
+    /// The file offset of dynamic symbol `name`'s first byte.
+    fn symbol(&self, file: &[u8], name: &str) -> usize {
+        let (symbols, strings) = (self.find(".dynsym"), self.find(".dynstr"));
+        (symbols.offset..symbols.offset + symbols.size)
+            .step_by(SYM_SIZE)
+            .find(|&at| str_at(file, strings.offset + u32_at(file, at) as usize) == name.as_bytes())
+            .and_then(|at| self.offset_of(u64_at(file, at + 8)))
+            .unwrap_or_else(|| panic!("no dynamic symbol {name}"))
     }
 }

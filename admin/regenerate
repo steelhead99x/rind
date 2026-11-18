@@ -16,7 +16,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 upstream=.tmp/upstream
 
-for name in aws-lc boringssl openssl hacl-star s2n-bignum; do
+for name in aws-lc boringssl openssl hacl-star verified-garbage s2n-bignum; do
     admin/upstream "$name"
 done
 
@@ -37,13 +37,14 @@ if ! diff -u --label "$fork/RIND.md" --label "changed from upstream" <(echo "$li
 fi
 
 # Deleted first, so a file nothing regenerates shows as deleted.
-find rind/src/low/*/aws_lc rind/src/low/*/boringssl rind/src/low/*/openssl rind/src/low/*/hacl -type f -delete
+find rind/src/low/*/aws_lc rind/src/low/*/boringssl rind/src/low/*/openssl rind/src/low/*/hacl rind/src/low/*/vg -type f -delete
 grep -rlxZ '// generated source. do not edit.' rind/src | xargs -0 rm --
 
 admin/import-aws-lc "$upstream/aws-lc"
 admin/import-boringssl "$upstream/boringssl"
 admin/import-openssl "$upstream/openssl"
 admin/import-hacl "$upstream/hacl-star"
+admin/import-vg "$upstream/verified-garbage"
 (cd admin/parse-asm && ./all.sh >/dev/null)
 admin/p256-precomp
 admin/p384-precomp

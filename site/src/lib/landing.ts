@@ -22,11 +22,17 @@ if (!intro) throw new Error("the README has no <strong> headline with a line und
 export const headline = intro[1];
 export const subline = intro[2];
 
+// The site's page for a claim's proof, where it has one; the rest stay in BENCHMARKS.md.
+const proofPages: Record<string, string> = {
+	[`${repoUrl}/blob/main/BENCHMARKS.md`]: "/benchmarks",
+	[`${repoUrl}/blob/main/BENCHMARKS.md#verified-code`]: "/verified",
+};
+
 export interface Claim {
 	// The emoji the README opens the claim with.
 	icon: string;
 	title: string;
-	// The claim's one link into BENCHMARKS.md.
+	// The claim's proof: its one link into BENCHMARKS.md, or the site's page for it.
 	proof: string;
 	body: Token[];
 }
@@ -49,7 +55,7 @@ export const claims: Claim[] = list.items.map((item) => {
 	if (proofs.length !== 1) {
 		throw new Error(`a README claim must link BENCHMARKS.md once, as its proof: ${item.raw}`);
 	}
-	return { icon: lead.text.trim(), title: strong.text, proof: proofs[0], body };
+	return { icon: lead.text.trim(), title: strong.text, proof: proofPages[proofs[0]] ?? proofs[0], body };
 });
 if (claims.length !== 3) throw new Error(`the README makes ${claims.length} claims; the page lays out three`);
 
