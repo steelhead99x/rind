@@ -4,7 +4,7 @@
 import { fromPages } from "./from";
 import { benchmarks } from "./benchmarks";
 import * as landing from "./landing";
-import { blocks, definitions, link, spans } from "./markdown";
+import { blocks, definitions, link, rebase, spans } from "./markdown";
 import { picker } from "./routes";
 import * as verified from "./verified";
 
@@ -58,3 +58,14 @@ export const verifiedPage: Page = {
 };
 
 export const pages: Page[] = [home, benchmarks, verifiedPage, ...fromPages];
+
+// A page's Markdown twin: its Markdown with each link to another of the site's
+// pages pointing at that page's twin, so a reader that follows links stays in Markdown.
+export function twin(page: Page): string {
+	const twins = new Map(pages.map((p) => [p.path, twinPath(p)]));
+	return rebase(page.markdown(), (href) => {
+		const [, path = "", rest = ""] = href.match(/^(\/[^#?]*)(.*)$/) ?? [];
+		const to = twins.get(path);
+		return to === undefined ? href : to + rest;
+	});
+}

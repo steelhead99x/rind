@@ -28,11 +28,9 @@ pub struct DecapsulationKey<A: Algorithm> {
 
 impl<A: Algorithm> DecapsulationKey<A> {
     fn new(key: mlkem::DecapKey<A>) -> Self {
-        let public = key.encapsulation_key();
         Self {
             public: EncapsulationKey {
-                bytes: public.as_bytes(),
-                key: public,
+                key: key.encapsulation_key(),
             },
             key,
         }
@@ -59,14 +57,14 @@ impl<A: Algorithm> DecapsulationKey<A> {
 
 impl<A: Algorithm> Drop for DecapsulationKey<A> {
     // The private key's own drop wipes it, so this wipes the encapsulation
-    // key, once it frees its matrix.
+    // key, once it frees its decoded form.
     fn drop(&mut self) {
-        self.public.key.free_matrix();
+        self.public.key.free_decoded();
         low::zeroise_value(&mut self.public);
     }
 }
 
-// Bytes, and a matrix that is `None` once freed.
+// Bytes, a hash and its flag, and a decoded form that is `None` once freed.
 impl<A: Algorithm> low::Zeroable for EncapsulationKey<A> {}
 
 impl<A: Algorithm> fmt::Debug for DecapsulationKey<A> {
@@ -78,7 +76,6 @@ impl<A: Algorithm> fmt::Debug for DecapsulationKey<A> {
 /// An encapsulation key, which anyone may encapsulate a secret to.
 pub struct EncapsulationKey<A: Algorithm> {
     key: mlkem::EncapKey<A>,
-    bytes: A::EncapKeyBytes,
 }
 
 impl<A: Algorithm> EncapsulationKey<A> {
@@ -89,7 +86,7 @@ impl<A: Algorithm> EncapsulationKey<A> {
     pub fn new(bytes: &[u8]) -> Result<Self, Error> {
         let bytes = A::EncapKeyBytes::from_slice(bytes).ok_or(KeyFormatError::WrongLength)?;
         let key = mlkem::EncapKey::from_bytes(&bytes)?;
-        Ok(Self { key, bytes })
+        Ok(Self { key })
     }
 
     /// Encapsulates a fresh random secret, returning the ciphertext to send
@@ -104,14 +101,13 @@ impl<A: Algorithm> Clone for EncapsulationKey<A> {
     fn clone(&self) -> Self {
         Self {
             key: self.key.clone(),
-            bytes: self.bytes.clone(),
         }
     }
 }
 
 impl<A: Algorithm> AsRef<[u8]> for EncapsulationKey<A> {
     fn as_ref(&self) -> &[u8] {
-        self.bytes.as_ref()
+        self.key.as_bytes().as_ref()
     }
 }
 
@@ -505,7 +501,7 @@ mod tests {
 
             for test in tests(&file("keygen_tests")) {
                 let key = keygen::<A>(&test.bytes("seed"));
-                let public = key.encapsulation_key().as_bytes();
+                let public = key.encapsulation_key().as_bytes().clone();
                 assert_eq!(public.as_ref(), test.bytes("public_key"), "{test}");
                 let private = low::ct::into_public(key.as_bytes());
                 assert_eq!(private.as_ref(), test.bytes("private_key"), "{test}");
@@ -513,7 +509,7 @@ mod tests {
 
             for test in tests(&file("nist_keygen_tests")) {
                 let key = keygen::<A>(&[test.bytes("d"), test.bytes("z")].concat());
-                let public = key.encapsulation_key().as_bytes();
+                let public = key.encapsulation_key().as_bytes().clone();
                 assert_eq!(public.as_ref(), test.bytes("ek"), "{test}");
                 let private = low::ct::into_public(key.as_bytes());
                 assert_eq!(private.as_ref(), test.bytes("dk"), "{test}");

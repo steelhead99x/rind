@@ -7,7 +7,9 @@
 //! other architecture. A backend requires only what its target enables at
 //! compile time, so no CPU that runs the binary lacks a feature it needs:
 //! the aarch64 backend needs NEON, which only the `no_std`
-//! `*-none-softfloat` targets disable, so those get the portable backend.
+//! `*-none-softfloat` targets disable, and the x86_64 backend SSE2, so a
+//! build without it, such as one for the kernel and firmware targets
+//! `x86_64-unknown-none` and `x86_64-unknown-uefi`, gets the portable backend.
 //! The 32-bit ARM assembly is cut for ARMv7, so a target
 //! for an earlier core, such as ARMv6's `arm-unknown-linux-gnueabihf` or
 //! ARMv5TE's `arm-linux-androideabi`, gets the portable backend too.
@@ -23,6 +25,11 @@
 //! `wide-arithmetic` feature, and 32 elsewhere, where it would be a library
 //! call. `--cfg rind_limb="32"` forces 32-bit limbs on a 64-bit target, so
 //! CI checks both widths on x86_64; like `rind_portable`, it is for testing.
+//!
+//! And it sets `rind_std` where the target has an operating system and
+//! `std`, the only places rind may use `std`: every target but those for
+//! bare metal (`target_os = "none"`), UEFI, and Linux without a libc, such
+//! as `x86_64-unknown-linux-none`, all of which run `no_std` code.
 
 use std::env;
 
@@ -36,15 +43,23 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(rind_esp32s3)");
     // The SHA-512 layout probe sets this so it can link `sha512_load_probe`.
     println!("cargo::rustc-check-cfg=cfg(rind_sha512_load_probe)");
+    println!("cargo::rustc-check-cfg=cfg(rind_std)");
+
+    let os = env::var("CARGO_CFG_TARGET_OS").expect("cargo sets the target os");
+    let libc = env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|e| !e.is_empty());
+    if !(os == "none" || os == "uefi" || (os == "linux" && !libc)) {
+        println!("cargo::rustc-cfg=rind_std");
+    }
 
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
     let forced = env::var_os("CARGO_CFG_RIND_PORTABLE").is_some();
-    let neon =
-        env::var("CARGO_CFG_TARGET_FEATURE").is_ok_and(|f| f.split(',').any(|f| f == "neon"));
+    let enabled = |feature: &str| {
+        env::var("CARGO_CFG_TARGET_FEATURE").is_ok_and(|f| f.split(',').any(|f| f == feature))
+    };
     let backend = match arch.as_str() {
-        "x86_64" if little && !forced => "x86_64",
-        "aarch64" if little && !forced && neon => "aarch64",
+        "x86_64" if little && !forced && enabled("sse2") => "x86_64",
+        "aarch64" if little && !forced && enabled("neon") => "aarch64",
         "arm" if little && !forced && armv7_or_later() => "arm",
         _ => "portable",
     };

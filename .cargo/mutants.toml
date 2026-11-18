@@ -74,9 +74,9 @@ exclude_re = [
   'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: replace \| with \^$',
   # Pinned to its line: a `const` has no name to match, and only `AES`'s
   # `1 << 0` survives.
-  'rind/src/low/x86_64/cpu\.rs:396:\d+: replace << with >>$',
+  'rind/src/low/x86_64/cpu\.rs:444:\d+: replace << with >>$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^$',
-  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAesHardware::check|HaveAvx::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveSha1::check|HaveSha256::check|HaveSha512::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
+  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAdxForVgP256::check|HaveAesHardware::check|HaveAvx::check|HaveAvx512ForVgMlKem::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveIfmaForCurve25519::check|HaveIfmaForVgP256::check|HaveSha1::check|HaveSha256::check|HaveSha512::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^ in (Fe4::diff_sum|Fe4::split)$',
   'rind/src/low/x86_64/ghash\.rs:\d+:\d+: replace \| with \^ in Ghash<\x27a>::add_lengths$',
@@ -225,7 +225,7 @@ exclude_re = [
   'rind/src/low/x86_64/bignum_point_select\.rs:\d+:14: replace > with >= in _select_avx2$',
   'rind/src/low/x86_64/bignum_point_select\.rs:\d+:18: replace \* with / in _select_avx2$',
   'rind/src/low/x86_64/bignum_point_select\.rs:\d+:18: replace \* with \+ in _select_avx2$',
-  'rind/src/low/x86_64/chacha20\.rs:\d+:\d+: delete match arm \(None, Some\(_\), len @SSSE3_4X_MIN_LEN\.\.\) in ChaCha20::cipher$',
+  'rind/src/low/x86_64/chacha20\.rs:\d+:\d+: delete match arm \(None, Some\(t\), SSSE3_4X_MIN_LEN\.\.\) in ChaCha20::cipher$',
   'rind/src/low/x86_64/chacha20\.rs:\d+:\d+: delete match arm \(Some\(_\), _, 65\.\.\) in ChaCha20::cipher$',
   'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: replace << with >>$',
   'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: replace \| with &$',
@@ -268,7 +268,7 @@ exclude_re = [
   # can know what it should find, since nothing outside `cpuid` reports
   # `MCDT_NO`. x86-cpu.yml's SDE rows check `needed` on every model, and
   # `reads_the_vendor` checks `is_intel` on any host.
-  'rind/src/low/mcdt\.rs:\d+:\d+: (replace (needed|detect_once|reports_mcdt_no|denied) -> bool with (true|false)|.* in (needed|detect_once|reports_mcdt_no|denied))$',
+  'rind/src/low/mcdt\.rs:\d+:\d+: (replace (needed|detect_once|reports_mcdt_no) -> bool with (true|false)|.* in (needed|detect_once|reports_mcdt_no))$',
   # DIT, which rind sets only on Apple's cores, where no campaign runs:
   # elsewhere `enter_cpu_state` changes nothing for `Dit`, `Entry`, and
   # `leave_cpu_state` to restore, and `dit` compiles only for Apple.
@@ -281,10 +281,6 @@ exclude_re = [
   # which tests never are, or only off Linux.
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace && with \|\| in detect$',
   'rind/src/low/aarch64/cpu\.rs:\d+:24: replace << with >>$',
-  # Pinned to their line: the debug build's `test_toggle`, under the same
-  # name, is caught.
-  'rind/src/low/aarch64/cpu\.rs:276:\d+: replace test_toggle -> bool with false$',
-  'rind/src/low/aarch64/cpu\.rs:276:\d+: replace test_toggle -> bool with true$',
   # The portable backend has no CPU state to save, so `leave_cpu_state`
   # ignores it.
   'rind/src/low/portable/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
@@ -292,15 +288,15 @@ exclude_re = [
   'rind/src/low/x86_64/cpu\.rs:\d+:45: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:52: replace \| with &$',
   # Pinned to its line: `AVX2_KERNELS`'s `|` at the same column is caught.
-  'rind/src/low/x86_64/cpu\.rs:426:31: replace \| with &$',
+  'rind/src/low/x86_64/cpu\.rs:474:31: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:72: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAvxMovbeForAesGcm::check$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAesHardware::check$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
-  # Pinned to their line: the debug build's `test_toggle`, under the same
-  # name, is caught.
-  'rind/src/low/x86_64/cpu\.rs:512:\d+: replace test_toggle -> bool with false$',
-  'rind/src/low/x86_64/cpu\.rs:512:\d+: replace test_toggle -> bool with true$',
+  # Pinned to its line: the `cpu_denied` of a release build or one without
+  # an OS, which tests never are. The debug build's, under the same name, is
+  # caught.
+  'rind/src/low/mod\.rs:163:\d+: replace cpu_denied -> bool with true$',
   # The FIPS module's `SystemRandom`, compiled only under `--cfg rind_fips`,
   # which no mutation run sets; `fips_rng`'s tests cover what it calls.
   # Pinned to its line: the other `fill`, under the same name, is caught.
@@ -330,9 +326,9 @@ exclude_re = [
   'rind/src/low/x86_64/vpaes_x86_64\.rs:\d+:\d+: replace <impl Drop for VpaesDecKey>::drop with \(\)$',
   'rind/src/low/x86_64/vpaes_x86_64\.rs:\d+:\d+: replace <impl Drop for VpaesKey>::drop with \(\)$',
   'rind/src/mid/chacha20poly1305\.rs:\d+:\d+: replace <impl Drop for ChaCha20Poly1305>::drop with \(\)$',
-  # Unreachable from a test: a debug-only guard no public function trips, a
-  # debugging helper, an impl nothing calls, a limit past 2^48 calls, a fault
-  # only hardware injects, a check of what another check also refuses, or a
+  # Unreachable from a test: a debug-only guard no public function trips, an
+  # impl nothing calls, a limit past 2^48 calls, a fault only hardware
+  # injects, a check of what another check also refuses, or a
   # case random keys reach with probability below 2^-64.
   'rind/src/fips_rng\.rs:\d+:\d+: replace cast -> bool with true$',
   'rind/src/high/hmac_drbg\.rs:\d+:\d+: replace \+= with \*= in HmacDrbg<H>::generate$',
@@ -345,7 +341,6 @@ exclude_re = [
   'rind/src/low/entry\.rs:\d+:\d+: replace Entry::assert_held with \(\)$',
   # Pinned to its line: the other branch's `*`, at the same column, is caught.
   'rind/src/low/generic/blockwise\.rs:195:24: replace \* with / in pad$',
-  'rind/src/low/posint\.rs:\d+:\d+: replace PosInt<N>::debug with \(\)$',
   'rind/src/mid/rsa_priv/exponents\.rs:\d+:\d+: replace >= with < in Exponents::derive$',
   'rind/src/mid/rsa_priv/exponents\.rs:\d+:36: replace \* with \+ in Exponents::derive$',
   'rind/src/mid/rsa_priv/generate\.rs:\d+:\d+: delete ! in MillerRabinParams<\x27a>::check_base$',
@@ -440,4 +435,11 @@ exclude_re = [
   'rind-rustls/src/ticketer\.rs:\d+:\d+: replace > with < in <impl ProducesTickets for XChaCha20Ticketer>::decrypt$',
   'rind-rustls/src/ticketer\.rs:\d+:\d+: replace \* with /$',
   'rind-rustls/src/ticketer\.rs:\d+:\d+: replace \* with \+$',
+  # Discarding a VG routine's result runs rind's fallback, which computes the
+  # same result, as `fallback_matches_vg` checks; only the time differs.
+  'rind/src/mid/mlkem\.rs:\d+:\d+: replace vg_ran -> Option<T> with None$',
+  # Refusing VG's P-256 runs rind's own, which computes the same result;
+  # only the time differs.
+  'rind/src/low/(x86_64|aarch64)/p256_vg\.rs:\d+:\d+: replace P256::(check|check_public_key) -> Option<Self> with None$',
+  'rind/src/low/x86_64/p256_vg\.rs:\d+:\d+: replace \|\| with && in P256::check_public_key$',
 ]
