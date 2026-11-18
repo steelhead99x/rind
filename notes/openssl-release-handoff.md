@@ -4,6 +4,8 @@ Delete this file before merging anything into `quest/m4/openssl-release`. It is 
 
 Upstream claim: https://github.com/kixel-ai/rind/pull/874 (draft). Head is `steelhead99x:quest/m4/openssl-release`, base is kixel-ai/rind `main`.
 
+Fork handoff: https://github.com/steelhead99x/rind/pull/146
+
 The claim branch is empty commit `4797ac7e73a8d8cb963d123a473dd95e70dbaf65` (`chore(quest): claim quest/m4/openssl-release.md`, `Quest-Claim: b03f4034f4deb7b7`). Its parent is kixel-ai/rind `main` at `863ad5a8f2be2ad333e42bc0279c19ca0cf6a5c4` (`BINSEC's ML-KEM checks finish every run (#841)`). The commit changes no files.
 
 This quest is under [quest/m4/README.md](../quest/m4/README.md) (long-term work: an OpenSSL provider and FIPS) and [quest/README.md](../quest/README.md) (m4 is the C and regulated-deployment milestone). [quest/m4/openssl-provider.md](../quest/m4/openssl-provider.md) is the NIST-curve work. This quest ships the shared library the provider already builds.
