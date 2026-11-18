@@ -81,6 +81,7 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 ### Valgrind cannot run x86_64's newest extensions
 
 - **Breaks:** valgrind (through 3.27) decodes no AVX-512, VAES, VPCLMULQDQ, or SHA instruction and hides them from `cpuid`, so ctgrind never reaches the code that uses them.
+- **Reproduce:** on a Zen 5 (Ryzen 7 255) with valgrind 3.26.0, `cpuid` leaf 7 reports AVX-512F, DQ, IFMA, BW, VL, VBMI, and VBMI2, VAES, VPCLMULQDQ, and SHA natively and none of them under valgrind, and `xgetbv` drops XCR0's AVX-512 state bits (`0x2e7` natively, `0x7` under valgrind). `low::x86_64::cpu::tests::detects_the_expected_cpu` passes with `RIND_TEST_X86_AVX512_AES_GCM`, `RIND_TEST_X86_AVX512_ML_KEM`, `RIND_TEST_X86_AVX512_RSA`, `RIND_TEST_X86_VAES_AES_GCM`, and `RIND_TEST_X86_SHA` set to 1 natively and to 0 under valgrind, so ctgrind on an AVX-512 host checks the AVX2 paths, as on one without AVX-512.
 - **Workaround:** `admin/ct-sde` compares Intel SDE traces of those paths for two secrets, through the `ct_sde` tests (`rind/src/low/x86_64/ct_sde.rs`), in `ctgrind.yml`'s `x86_64-sde` job, all but AVX-512 ML-KEM, which samples only the public matrix. Unlike ctgrind it sees only addresses, not variable-time instructions.
 - **Reported:** no.
 - **Goes when:** valgrind decodes them and reports them in `cpuid`, and ctgrind runs on a host that has them; `admin/ct-sde` then duplicates ctgrind.
