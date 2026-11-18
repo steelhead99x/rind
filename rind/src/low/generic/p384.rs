@@ -304,11 +304,14 @@ fn fs_pow(x: &Fs, e: &[u64; 6]) -> Fs {
 
     let mut acc = one;
     for word in e.iter().rev() {
-        for shift in (0..64).step_by(4).rev() {
+        // Not `step_by(4).rev()`, which armv7 steps with an `ands` that keeps
+        // the reduction's secret carry: see UPSTREAM.md, "Memcheck blames a
+        // public flag on a secret carry".
+        for nibble in (0..16).rev() {
             for _ in 0..4 {
                 acc = fs_sqr(&acc);
             }
-            acc = fs_mul(&acc, &table[((word >> shift) & 0xf) as usize]);
+            acc = fs_mul(&acc, &table[((word >> (4 * nibble)) & 0xf) as usize]);
         }
     }
     acc
@@ -576,6 +579,11 @@ mod tests {
         Some(r)
     }
 
+    // The reference results are public but marked so anyway: memcheck can
+    // count the secret arithmetic's stale flags against a flag a reference
+    // routine sets itself, such as the `stc` before `bignum_add_p521`'s
+    // `adc` chain on x86_64. See UPSTREAM.md, "Memcheck blames a public
+    // flag on a secret carry".
     proptest! {
         #[test]
         fn field_ops(x in field(), y in field()) {
@@ -584,23 +592,23 @@ mod tests {
 
             bignum_montmul_p384(&mut ours, &sx, &sy);
             low::bignum_montmul_p384(&mut theirs, &x, &y);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_montsqr_p384(&mut ours, &sx);
             low::bignum_montsqr_p384(&mut theirs, &x);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_add_p384(&mut ours, &sx, &sy);
             low::bignum_add_p384(&mut theirs, &x, &y);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_neg_p384(&mut ours, &sx);
             low::bignum_neg_p384(&mut theirs, &x);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_demont_p384(&mut ours, &sx);
             low::bignum_demont_p384(&mut theirs, &x);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
         }
 
         #[test]
@@ -610,11 +618,11 @@ mod tests {
 
             bignum_tomont_p384(&mut ours, &sx);
             low::bignum_tomont_p384(&mut theirs, &x);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_inv_p384(&mut ours, &sx);
             low::bignum_inv_p384(&mut theirs, &x);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
         }
 
         #[test]
@@ -628,7 +636,7 @@ mod tests {
                 let (mut ours, mut theirs) = ([0; 18], [0; 18]);
                 p384_montjadd(&mut ours, &sp, &sq);
                 low::p384_montjadd(&mut theirs, &p, &q);
-                prop_assert_eq!(into_public(ours), theirs);
+                prop_assert_eq!(into_public(ours), into_public(theirs));
             }
         }
 
@@ -648,7 +656,7 @@ mod tests {
                 let (mut ours, mut theirs) = ([0; 18], [0; 18]);
                 p384_montjmixadd(&mut ours, &sp, &sq);
                 low::p384_montjmixadd(&mut theirs, &p, &q);
-                prop_assert_eq!(into_public(ours), theirs);
+                prop_assert_eq!(into_public(ours), into_public(theirs));
             }
         }
 
@@ -658,7 +666,7 @@ mod tests {
             let (mut ours, mut theirs) = ([0; 18], [0; 18]);
             p384_montjdouble(&mut ours, &sp);
             low::p384_montjdouble(&mut theirs, &p);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
         }
 
         #[test]
@@ -671,12 +679,12 @@ mod tests {
                 1..=16 => table.as_chunks::<18>().0[usize::from(index) - 1],
                 _ => [0; 18],
             };
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             let (mut ours, mut theirs) = ([0; 12], [0; 12]);
             bignum_aff_point_select_p384(&mut ours, &table[..192], into_secret(index));
             low::bignum_aff_point_select_p384(&mut theirs, &table[..192], index);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
         }
 
         #[test]
@@ -686,25 +694,25 @@ mod tests {
 
             bignum_mod_n384(&mut ours, &sraw);
             low::bignum_mod_n384(&mut theirs, &raw);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_montmul(&mut ours, &sx, &sy, &N);
             low::bignum_montmul(&mut theirs, &x, &y, &N);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_demont(&mut ours, &sx, &N);
             low::bignum_demont(&mut theirs, &x, &N);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_modadd(&mut ours, &sx, &sy, &N);
             low::bignum_modadd(&mut theirs, &x, &y, &N);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             // s2n-bignum leaves the inverse of zero unspecified.
             if x != [0; 6] {
                 bignum_modinv(&mut ours, &sx, &N, &mut [0; 18]);
                 low::bignum_modinv(&mut theirs, &x, &N, &mut [0; 18]);
-                prop_assert_eq!(into_public(ours), theirs);
+                prop_assert_eq!(into_public(ours), into_public(theirs));
             }
         }
 
@@ -713,7 +721,7 @@ mod tests {
             let (mut ours, mut theirs) = ([0; 6], [0; 6]);
             bignum_mux(into_secret(p), &mut ours, &x, &y);
             low::bignum_mux(p, &mut theirs, &x, &y);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
         }
     }
 

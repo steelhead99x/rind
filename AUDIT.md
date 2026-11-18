@@ -103,6 +103,7 @@ The pins, as `admin/audit` renders them from the files that hold them, so
 | BoringSSL | `8f2554dc344d` | `admin/import-boringssl` | copied code |
 | OpenSSL | `2f4e3a5fec05` | `admin/import-openssl` | copied code |
 | HACL\* | `f557259007db` | `admin/import-hacl` | Vale's x86_64 AES-GCM |
+| pyca/verified-garbage | `e7b0fe8a82b7` | `admin/import-vg` | copied code and the Lean ISA models its proofs rest on |
 | s2n-bignum | `3f01260ff1bd` | `thirdparty/s2n-bignum/RIND.md` | assembly and the HOL Light proofs of it |
 | aws-lc | `c21d40da4bbe` | `admin/prove-bytes` | the routines aws-lc-verification's SHA-384/512 proofs are about |
 | ACVP-Server | `975de31eb83d` | `admin/sync-acvp` | test vectors |
@@ -135,8 +136,9 @@ only for crates.
 How copied code is regenerated and checked:
 
 - `admin/import-aws-lc`, `admin/import-boringssl`, `admin/import-openssl`,
-  and `admin/import-hacl` fetch their upstream at its `REV` and write its
-  assembly under `rind/src/low` as Rust naked functions or `global_asm!`.
+  `admin/import-hacl`, and `admin/import-vg` fetch their upstream at its
+  `REV` and write its assembly under `rind/src/low` as Rust naked functions
+  or `global_asm!`.
 - `admin/parse-asm` transliterates s2n-bignum's assembly, from rind's fork
   in `thirdparty/s2n-bignum`, into Rust `asm!`. The fork's
   [RIND.md](thirdparty/s2n-bignum/RIND.md) lists every file that differs

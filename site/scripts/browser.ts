@@ -1,7 +1,8 @@
 // Loads each built page in headless Chrome under its Content-Security-Policy
-// and fails if the policy refuses anything, a request fails, or the landing
-// page's copy button does not put the prompt on the clipboard.
+// and fails if the policy refuses anything, a request fails, or a copy button
+// does not put its code block, on the landing page the prompt, on the clipboard.
 import path from "node:path";
+import { cpus, libraries } from "../src/lib/benchmarks";
 import { prompt } from "../src/lib/landing";
 import { pages } from "../src/lib/pages";
 
@@ -30,14 +31,14 @@ const errors: string[] = [];
 // The page whose requests the network listeners are seeing.
 let current = "about:blank";
 
-// Click the copy button and read back what it put on the clipboard.
-async function copies() {
+// Click one copy button and check that it put `expected` on the clipboard.
+async function copies(button: string, expected: string) {
 	// The button appears once its island hydrates, which the policy must allow.
-	await view.scrollTo("button", { timeout: 5000 });
+	await view.scrollTo(button, { timeout: 5000 });
 	// Watch the label from before the click: the button resets it to "Copy" two
 	// seconds after, so a check that starts late would miss the result.
 	await view.evaluate(`void (window.__label = new Promise((resolve) => {
-		const button = document.querySelector("button");
+		const button = document.querySelector(${JSON.stringify(button)});
 		const observer = new MutationObserver(() => {
 			if (button.textContent !== "Copy") resolve(button.textContent);
 		});
@@ -46,11 +47,135 @@ async function copies() {
 	}))`);
 	// Empty the clipboard first, so what it holds after is this click's doing.
 	await view.evaluate(`navigator.clipboard.writeText("")`);
-	await view.click("button", { timeout: 5000 });
+	await view.click(button, { timeout: 5000 });
 	const label = await view.evaluate("window.__label");
-	if (label !== "Copied") throw new Error(`the copy button says "${label}"`);
+	if (label !== "Copied") throw new Error(`${button} says "${label}"`);
 	const copied = await view.evaluate("navigator.clipboard.readText()");
-	if (copied !== prompt) throw new Error(`the copy button copied ${JSON.stringify(copied)}`);
+	if (copied !== expected) throw new Error(`${button} copied ${JSON.stringify(copied)}, not ${JSON.stringify(expected)}`);
+}
+
+// Every copy button on the page, each of which must copy the code beside it,
+// and on the landing page the prompt.
+async function copiesAll(path: string) {
+	// Buttons hydrate after the page loads, so count the blocks they sit beside.
+	const blocks = (await view.evaluate(`[...document.querySelectorAll(".code pre, .prompt pre")].map((pre, i) => {
+		pre.parentElement.dataset.copy = i;
+		return pre.textContent;
+	})`)) as string[];
+	if (path === "/" && (blocks.length !== 1 || blocks[0] !== prompt)) {
+		throw new Error(`the landing page's one code block is not the prompt: ${JSON.stringify(blocks)}`);
+	}
+	for (const [i, text] of blocks.entries()) await copies(`[data-copy="${i}"] button`, text);
+}
+
+// The benchmarks page shows the view its address links, and a pick rewrites
+// the address: only the picked CPU's view, and only the picked libraries'
+// columns, are displayed.
+async function picks(base: string) {
+	const [first, second] = cpus.filter((c) => c.kind === "host").map((c) => c.id);
+	const shown = ["rind", "aws-lc-rs"];
+	const more = [...shown, "ring"];
+	for (const id of more) if (!libraries.some((l) => l.id === id)) throw new Error(`the benchmarks page has no library ${id}`);
+	const displayed = `({
+		views: [...document.querySelectorAll(".view")].filter((v) => getComputedStyle(v).display !== "none").map((v) => v.id),
+		libs: [...new Set([...document.querySelectorAll(".view th[data-lib]")]
+			.filter((th) => th.offsetParent !== null).map((th) => th.dataset.lib))],
+		search: location.search,
+	})`;
+	const expect = async (want: { views: string[]; libs: string[]; search: string }) => {
+		const got = await view.evaluate(displayed);
+		if (JSON.stringify(got) !== JSON.stringify(want)) {
+			throw new Error(`the benchmarks page shows ${JSON.stringify(got)}, not ${JSON.stringify(want)}`);
+		}
+	};
+	// The island applies a linked view once it hydrates, when Astro drops its
+	// `ssr` attribute; one that never does fails the check rather than stall it.
+	const hydrated = `new Promise((resolve, reject) => {
+		const observer = new MutationObserver(() => done());
+		const timer = setTimeout(() => {
+			observer.disconnect();
+			reject(new Error("the picker never hydrated"));
+		}, 5000);
+		const done = () => {
+			if (document.querySelector("astro-island[ssr]")) return;
+			clearTimeout(timer);
+			observer.disconnect();
+			resolve(true);
+		};
+		observer.observe(document, { attributes: true, subtree: true });
+		done();
+	})`;
+	await view.navigate(`${base}?cpu=${first}&libs=${shown.join(",")}`);
+	await view.evaluate(hydrated);
+	await expect({ views: [`view-${first}`], libs: shown, search: `?cpu=${first}&libs=${shown.join(",")}` });
+	// Back within the page restores the controls with the address: an in-page
+	// link pushes an entry, a pick rewrites that entry, and Back returns to the
+	// earlier one.
+	await view.evaluate(`location.hash = "times"`);
+	await view.scrollTo(`#cpu-${second}`, { timeout: 5000 });
+	await view.click(`#cpu-${second}`, { timeout: 5000 });
+	await expect({ views: [`view-${second}`], libs: shown, search: `?cpu=${second}&libs=${shown.join(",")}` });
+	await view.evaluate(`new Promise((resolve) => {
+		addEventListener("popstate", () => setTimeout(resolve, 100), { once: true });
+		history.back();
+	})`);
+	await expect({ views: [`view-${first}`], libs: shown, search: `?cpu=${first}&libs=${shown.join(",")}` });
+	await view.scrollTo(`#cpu-${second}`, { timeout: 5000 });
+	await view.click(`#cpu-${second}`, { timeout: 5000 });
+	await expect({ views: [`view-${second}`], libs: shown, search: `?cpu=${second}&libs=${shown.join(",")}` });
+	await view.scrollTo("#lib-ring", { timeout: 5000 });
+	await view.click("#lib-ring", { timeout: 5000 });
+	await expect({ views: [`view-${second}`], libs: more, search: `?cpu=${second}&libs=${more.join(",")}` });
+
+	// A gap's place picks its CPU in place, keeping the libraries.
+	const id = await view.evaluate(
+		`[...document.querySelectorAll(".gaps label.place")].map((l) => l.htmlFor.slice(4)).find((c) => c !== ${JSON.stringify(second)})`,
+	);
+	const target = cpus.find((c) => c.id === id);
+	if (!target || target.kind === "all") throw new Error(`the benchmarks page's gaps name no CPU but ${second}`);
+	const timed = (target.kind === "host" ? target.host : target.tier).libraries.filter((l) => more.includes(l));
+	const place = `.gaps label[for="cpu-${target.id}"]`;
+	await view.scrollTo(place, { timeout: 5000 });
+	await view.click(place, { timeout: 5000 });
+	await expect({ views: [`view-${target.id}`], libs: timed, search: `?cpu=${target.id}&libs=${more.join(",")}` });
+	// And from the keyboard: Enter on the place picks it again after another pick.
+	await view.click(`#cpu-${second}`, { timeout: 5000 });
+	await view.evaluate(`document.querySelector(${JSON.stringify(place)}).focus()`);
+	await view.cdp("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+	await view.cdp("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+	await expect({ views: [`view-${target.id}`], libs: timed, search: `?cpu=${target.id}&libs=${more.join(",")}` });
+	const name = await view.evaluate(`document.querySelector("#cpu-${target.id}").getAttribute("aria-label")`);
+	if (typeof name !== "string" || name.length === 0) throw new Error(`#cpu-${target.id} has no accessible name of its own`);
+
+	// With JavaScript off, the CSS alone shows what the inputs pick.
+	// WebView's click waits on the page's scripts, so these click through
+	// Chrome's input events instead.
+	const press = async (selector: string) => {
+		await view.scrollTo(selector, { timeout: 5000 });
+		const [x, y] = (await view.evaluate(
+			`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`,
+		)) as [number, number];
+		for (const type of ["mousePressed", "mouseReleased"]) {
+			await view.cdp("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+		}
+	};
+	await view.cdp("Emulation.setScriptExecutionDisabled", { value: true });
+	try {
+		await view.navigate(base);
+		await press(place);
+		await press("#lib-ring");
+		const libs = (target.kind === "host" ? target.host : target.tier).libraries.filter((l) => l !== "ring");
+		await expect({ views: [`view-${target.id}`], libs, search: "" });
+	} finally {
+		await view.cdp("Emulation.setScriptExecutionDisabled", { value: false });
+	}
+
+	// A list naming no library the page has, such as a renamed one, shows them all.
+	await view.navigate(`${base}?cpu=${first}&libs=renamed`);
+	await view.evaluate(hydrated);
+	const host = cpus.find((c) => c.id === first);
+	if (host?.kind !== "host") throw new Error(`${first} is not a host`);
+	await expect({ views: [`view-${first}`], libs: host.host.libraries, search: `?cpu=${first}` });
 }
 
 try {
@@ -99,12 +224,12 @@ try {
 		for (const page of pages) {
 			current = `${page.path} (${scheme})`;
 			await view.navigate(new URL(page.path, server.url).href);
-			if (page.path === "/") {
-				try {
-					await copies();
-				} catch (e) {
-					errors.push(`${current}: ${e instanceof Error ? e.message : e}`);
-				}
+			try {
+				// The buttons once, in the first scheme: they draw nothing a scheme changes.
+				if (scheme === "light") await copiesAll(page.path);
+				if (page.path === "/benchmarks") await picks(new URL(page.path, server.url).href);
+			} catch (e) {
+				errors.push(`${current}: ${e instanceof Error ? e.message : e}`);
 			}
 			for (const v of (await view.evaluate("window.__violations")) as string[]) {
 				errors.push(`${current}: the Content-Security-Policy's ${v}`);
@@ -120,4 +245,6 @@ if (errors.length > 0) {
 	for (const e of errors) console.error(`error: ${e}`);
 	process.exit(1);
 }
-console.log(`site: ${pages.length} page(s) load in both colour schemes under their policy, and the copy button copies the prompt`);
+console.log(
+	`site: ${pages.length} page(s) load in both colour schemes under their policy, each copy button copies its block, and the benchmarks page shows what its address and picks name`,
+);

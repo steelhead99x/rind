@@ -2,17 +2,22 @@
 // Copyright (c) 2020-2021, Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Two exponentiations at once, each modulo its own odd modulus of 16, 24,
-//! or 32 words, by aws-lc's dual RSAZ: almost Montgomery products on 256-bit
+//! Two exponentiations at once, each modulo its own odd modulus of 24 or 32
+//! words, by aws-lc's dual RSAZ: almost Montgomery products on 256-bit
 //! AVX-512 IFMA vectors over 52-bit limbs, and a 5-bit fixed window whose
 //! table entry is gathered by masking every entry.
 //!
 //! This ports aws-lc's `RSAZ_mod_exp_avx512_x2`, from `rsaz_exp_x2.c` at the
-//! commit `admin/import-aws-lc` names, over its `rsaz-2k-avx512`,
-//! `rsaz-3k-avx512`, and `rsaz-4k-avx512` assembly, which Sergey Kirillov
-//! and Andrey Matyukov wrote for OpenSSL. aws-lc runs it for the CRT of
-//! RSA-2048, 3072, and 4096 on CPUs with AVX-512 IFMA, where it signed 1.85,
-//! 3.09, and 3.56 times as fast as rind's exponentiations one at a time. It
+//! commit `admin/import-aws-lc` names, over its `rsaz-3k-avx512` and
+//! `rsaz-4k-avx512` assembly, which Sergey Kirillov and Andrey Matyukov
+//! wrote for OpenSSL. aws-lc runs it for the CRT of RSA-2048, 3072, and 4096
+//! on CPUs with AVX-512 IFMA, where it signed 1.85, 3.09, and 3.56 times as
+//! fast as rind's exponentiations one at a time. rind runs it for the keys
+//! pyca/verified-garbage's CRT (`rsa_ifma.rs`) does not take: RSA-3072 on
+//! CPUs without AVX512_FP16, where VG's measured slower on Zen 5, and keys
+//! whose modulus is a word narrower than its two primes, such as a 4000-bit
+//! key's 63 words of 32-word primes. rind's 2048-bit floor leaves no such
+//! key of 16-word primes, so aws-lc's 2048-bit routines are not imported. It
 //! takes `rr` to its own `R` by the dual product, not aws-lc's single one,
 //! which rind then has no use for.
 //!
@@ -28,7 +33,7 @@ use crate::low;
 
 /// Proof that the dual RSAZ runs for moduli of the width it was checked for:
 /// the CPU has AVX-512 IFMA, as aws-lc's `BN_mod_exp_mont_consttime_x2`
-/// decides, and the width is 16, 24, or 32 words.
+/// decides, and the width is 24 or 32 words.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RsazAvx512 {
     token: HaveAvx512ForRsa,
@@ -49,7 +54,7 @@ pub(crate) struct Operands<'a> {
 impl RsazAvx512 {
     pub(crate) fn check(words: usize) -> Option<Self> {
         let token = HaveAvx512ForRsa::check()?;
-        matches!(words, 16 | 24 | 32).then_some(Self { token, words })
+        matches!(words, 24 | 32).then_some(Self { token, words })
     }
 
     /// `z[i] = x^e mod m` for each of `operands`.
@@ -64,7 +69,6 @@ impl RsazAvx512 {
         // `vpmadd52luq` and `vpmadd52huq` multiply the secrets.
         let _mcdt = low::Mcdt::enter();
         match self.words {
-            16 => mod_exp(self.token, &X20, z, &operands),
             24 => mod_exp(self.token, &X30, z, &operands),
             _ => mod_exp(self.token, &X40, z, &operands),
         }
@@ -150,11 +154,6 @@ struct Routines<const H: usize> {
     extract: unsafe extern "sysv64" fn(r: *mut u64, table: *const u64, i: u64, j: u64),
 }
 
-static X20: Routines<20> = Routines {
-    limbs: 20,
-    amm: rsaz_amm52x20_x2_ifma256,
-    extract: extract_multiplier_2x20_win5,
-};
 static X30: Routines<32> = Routines {
     limbs: 30,
     amm: rsaz_amm52x30_x2_ifma256,
@@ -310,15 +309,15 @@ struct Mask52x4([u64; 4]);
 #[repr(C, align(32))]
 struct Ones([u64; 8]);
 
-static MASK52X4: Mask52x4 = Mask52x4(include!("aws_lc/rsaz-2k-avx512.mask52x4.rs"));
-static ONES: Ones = Ones(include!("aws_lc/rsaz-2k-avx512.ones.rs"));
+static MASK52X4: Mask52x4 = Mask52x4(include!("aws_lc/rsaz-3k-avx512.mask52x4.rs"));
+static ONES: Ones = Ones(include!("aws_lc/rsaz-3k-avx512.ones.rs"));
 
 // The routines take the System V ABI on every OS, since their text is
 // aws-lc's ELF and Mach-O flavors, which read their arguments from its
 // registers.
 
 macro_rules! rsaz_routine {
-    ($name:ident ($($arg:ident: $ty:ty),* $(,)?) $(, $table:ident = $sym:ident)*) => {
+    ($name:ident ($($arg:ident: $ty:ty),*) $(, $table:ident = $sym:ident)*) => {
         #[unsafe(naked)]
         unsafe extern "sysv64" fn $name($($arg: $ty),*) {
             #[cfg(not(target_vendor = "apple"))]
@@ -337,51 +336,10 @@ macro_rules! rsaz_routine {
     };
 }
 
-rsaz_routine!(
-    rsaz_amm52x20_x2_ifma256(
-        r: *mut u64,
-        a: *const u64,
-        b: *const u64,
-        m: *const u64,
-        k0: *const u64,
-    ),
-    mask52x4 = MASK52X4,
-    ones = ONES
-);
-rsaz_routine!(
-    rsaz_amm52x30_x2_ifma256(
-        r: *mut u64,
-        a: *const u64,
-        b: *const u64,
-        m: *const u64,
-        k0: *const u64,
-    ),
-    mask52x4 = MASK52X4,
-    ones = ONES
-);
-rsaz_routine!(
-    rsaz_amm52x40_x2_ifma256(
-        r: *mut u64,
-        a: *const u64,
-        b: *const u64,
-        m: *const u64,
-        k0: *const u64,
-    ),
-    mask52x4 = MASK52X4,
-    ones = ONES
-);
-rsaz_routine!(
-    extract_multiplier_2x20_win5(r: *mut u64, table: *const u64, i: u64, j: u64),
-    ones = ONES
-);
-rsaz_routine!(
-    extract_multiplier_2x30_win5(r: *mut u64, table: *const u64, i: u64, j: u64),
-    ones = ONES
-);
-rsaz_routine!(
-    extract_multiplier_2x40_win5(r: *mut u64, table: *const u64, i: u64, j: u64),
-    ones = ONES
-);
+rsaz_routine!(rsaz_amm52x30_x2_ifma256(r: *mut u64, a: *const u64, b: *const u64, m: *const u64, k0: *const u64), mask52x4 = MASK52X4, ones = ONES);
+rsaz_routine!(rsaz_amm52x40_x2_ifma256(r: *mut u64, a: *const u64, b: *const u64, m: *const u64, k0: *const u64), mask52x4 = MASK52X4, ones = ONES);
+rsaz_routine!(extract_multiplier_2x30_win5(r: *mut u64, table: *const u64, i: u64, j: u64), ones = ONES);
+rsaz_routine!(extract_multiplier_2x40_win5(r: *mut u64, table: *const u64, i: u64, j: u64), ones = ONES);
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -462,7 +420,7 @@ mod tests {
     }
 
     fn pair() -> impl Strategy<Value = [(Vec<u64>, Vec<u64>, Vec<u64>); 2]> {
-        prop::sample::select(&[16, 24, 32][..]).prop_flat_map(|k| [operand(k), operand(k)])
+        prop::sample::select(&[24, 32][..]).prop_flat_map(|k| [operand(k), operand(k)])
     }
 
     proptest! {
@@ -487,7 +445,7 @@ mod tests {
             return;
         }
         let mut ran = 0;
-        for k in [16, 24, 32] {
+        for k in [24, 32] {
             let vectors: Vec<_> = mod_exp_vectors()
                 .into_iter()
                 .filter(|v| v.m.len() == k && v.e.len() <= k)
@@ -513,14 +471,8 @@ mod tests {
         assert!(ran > 0);
     }
 
-    // The CRT of each RSA size, with secret moduli, bases, and exponents,
-    // for `admin/ct-sde`.
-    #[test]
-    #[ignore = "admin/ct-sde runs it under Intel SDE"]
-    fn ct_sde_rsa2048() {
-        trace(16);
-    }
-
+    // The CRT of each width it runs, with secret moduli, bases, and
+    // exponents, for `admin/ct-sde`.
     #[test]
     #[ignore = "admin/ct-sde runs it under Intel SDE"]
     fn ct_sde_rsa3072() {

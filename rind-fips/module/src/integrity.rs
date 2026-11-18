@@ -5,7 +5,6 @@
 //! linked library and wrote into it.
 
 use core::cell::UnsafeCell;
-use core::ffi::{c_int, c_void};
 
 use rind::hmac;
 
@@ -115,46 +114,51 @@ impl Image for Loaded {
     }
 }
 
-/// Finds the loaded object holding this module's code.
-fn find_self() -> Option<Loaded> {
-    let mut found: Option<Loaded> = None;
-    // SAFETY: the callback reads only what the loader passes it.
-    unsafe {
-        libc::dl_iterate_phdr(Some(visit), (&raw mut found).cast());
-    }
-    found
+unsafe extern "C" {
+    /// The module's ELF header, which the linker defines at the start of
+    /// its first segment.
+    static __ehdr_start: u8;
 }
 
-unsafe extern "C" fn visit(
-    info: *mut libc::dl_phdr_info,
-    _size: usize,
-    data: *mut c_void,
-) -> c_int {
-    // SAFETY: the loader passes a valid `info`, and `data` is `find_self`'s.
-    let (info, found) = unsafe { (&*info, &mut *data.cast::<Option<Loaded>>()) };
-    let base = info.dlpi_addr;
-    let marker = (&raw const LAYOUT) as u64;
-    // SAFETY: the loader's program headers for this object.
-    let headers = unsafe { core::slice::from_raw_parts(info.dlpi_phdr, info.dlpi_phnum.into()) };
-    let ours = headers.iter().any(|h| {
-        h.p_type == image::PT_LOAD
-            && marker >= base + h.p_vaddr
-            && marker - (base + h.p_vaddr) < h.p_memsz
-    });
-    if !ours {
-        return 0;
+/// Finds the module as mapped from its own ELF header, without the dynamic
+/// loader: `dl_iterate_phdr` takes the loader's lock, which `fork` does not
+/// reset, so a child forked while another thread held it would hang in the
+/// integrity test.
+fn find_self() -> Option<Loaded> {
+    let header = (&raw const __ehdr_start).cast::<u8>();
+    let read = |at: usize, len: usize| -> u64 {
+        let mut word = [0u8; 8];
+        // SAFETY: the ELF header and its program headers are in the
+        // module's first segment, mapped while it is loaded.
+        unsafe { core::ptr::copy_nonoverlapping(header.add(at), word.as_mut_ptr(), len) };
+        u64::from_le_bytes(word)
+    };
+    let (phoff, phentsize, phnum) = (read(0x20, 8), read(0x36, 2), read(0x38, 2));
+    // Every linker places the program headers right after the 64-byte ELF
+    // header, and the page holding the header is mapped, so a table that
+    // ends within that page is readable whatever else the header says.
+    if phoff != 64 || phentsize != 56 || phoff + phnum * phentsize > 4096 {
+        return None;
     }
-    *found = Some(Loaded {
-        base,
-        segments: headers
-            .iter()
-            .map(|h| Segment {
-                kind: h.p_type,
-                flags: h.p_flags,
-                vaddr: h.p_vaddr,
-                filesz: h.p_filesz,
-            })
-            .collect(),
-    });
-    1
+    let segments: Vec<Segment> = (0..phnum)
+        .map(|i| {
+            let at = (phoff + i * phentsize) as usize;
+            Segment {
+                kind: read(at, 4) as u32,
+                flags: read(at + 4, 4) as u32,
+                vaddr: read(at + 0x10, 8),
+                filesz: read(at + 0x20, 8),
+            }
+        })
+        .collect();
+    // The header's address is the base only if the first segment maps the
+    // start of the file at address zero, as a shared library's does.
+    let first = segments.iter().find(|s| s.kind == image::PT_LOAD)?;
+    if first.vaddr != 0 || first.filesz < phoff + phnum * phentsize {
+        return None;
+    }
+    Some(Loaded {
+        base: header as u64,
+        segments,
+    })
 }
