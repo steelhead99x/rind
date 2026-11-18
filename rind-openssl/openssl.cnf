@@ -26,6 +26,10 @@ activate = 1
 [rind_sect]
 module = /usr/local/lib/ossl-modules/librind_openssl.so
 activate = 1
+# ECDSA and ECDH on P-256, P-384, and P-521 are off unless this is 1. They
+# fail what signs a digest the caller made, such as `openssl speed ecdsa`:
+# see the README.
+# ec = 1
 
 [algorithm_sect]
 # Prefer rind wherever it implements an algorithm; `?` makes it a preference.

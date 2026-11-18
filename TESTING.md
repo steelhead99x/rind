@@ -239,7 +239,18 @@ rind-openssl's target calls its C ABI as OpenSSL does, through
 `OSSL_provider_init` and the dispatch tables it returns, with parameter
 arrays of any names, types, and sizes and output buffers of any length. Each
 answer must match rind's own API, and each error must reach OpenSSL's core
-with a known reason and a format that reads no arguments.
+with a known reason and a format that reads no arguments. Its core table
+gives the provider `ec = 1`, so the same inputs reach the NIST curves: keys
+imported or generated from any parameters on each curve, signatures and
+verifications with any digest name, parameters, and buffer size, and
+exchanges with a peer of any bytes. The provider takes the compressed points
+OpenSSL does, which rind's one-shot `agree` refuses, so only uncompressed
+peers must be refused alike.
+
+rind-openssl's integration tests (`tests/ec.rs`) run the provider under
+OpenSSL itself, differentially against the default provider on each curve,
+through TLS 1.3 handshakes, and for the refusals. `tests/ctgrind.rs`
+(`nist_curves`) runs valgrind over the private scalar's every use.
 
 Adapter fuzz targets: `fuzz::rustls`, `fuzz::dimpl`, `fuzz::str0m`, `fuzz::openssl`.
 

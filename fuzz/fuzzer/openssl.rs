@@ -12,7 +12,8 @@ use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
 
 use libfuzzer_sys::{arbitrary, arbitrary::Arbitrary, fuzz_target};
-use rind::agreement::{PrivateKey, X25519};
+use rind::agreement::{ECDH_P256, ECDH_P384, ECDH_P521, PrivateKey, X25519};
+use rind::ecdsa;
 use rind::ed25519::{KeyPair, PublicKey};
 
 fuzz_target!(|input: Input| {
@@ -132,6 +133,38 @@ fuzz_target!(|input: Input| {
             encoded,
             size,
         } => derive(provider, &private, &peer, encoded, size),
+        Input::EcImport { selection, params } => ec_import(provider, selection.into(), &params),
+        Input::EcGenerate { selection, params } => {
+            let key = provider.ec_keymgmt.generate(selection.into(), &params);
+            if !key.is_null() {
+                ec_check(provider, key);
+                provider.ec_keymgmt.free(key);
+            }
+        }
+        Input::EcSign {
+            curve,
+            scalar,
+            mdname,
+            params,
+            size,
+            message,
+        } => ec_sign(provider, curve, &scalar, mdname, &params, size, &message),
+        Input::EcVerify {
+            curve,
+            scalar,
+            hash,
+            sign_it,
+            signature,
+            message,
+        } => ec_verify(provider, curve, &scalar, hash, sign_it, signature, &message),
+        Input::EcDerive {
+            curve,
+            scalar,
+            peer,
+            peer_scalar,
+            encoded,
+            size,
+        } => ec_derive(provider, curve, &scalar, &peer, peer_scalar, encoded, size),
     }
 });
 
@@ -183,6 +216,92 @@ enum Input {
         encoded: bool,
         size: u8,
     },
+    /// Imports an EC key from any parameters, then reads it back.
+    EcImport { selection: u8, params: Vec<Arg> },
+    /// Generates an EC key with any parameters, then reads it back.
+    EcGenerate { selection: u8, params: Vec<Arg> },
+    /// Signs as `EVP_DigestSign` does with a key of the curve, any digest
+    /// name and parameters, and a buffer of any size, and checks the
+    /// signature with rind's API.
+    EcSign {
+        curve: EcCurve,
+        scalar: Vec<u8>,
+        mdname: Option<Vec<u8>>,
+        params: Vec<Arg>,
+        size: u8,
+        message: Vec<u8>,
+    },
+    /// Verifies as `EVP_DigestVerify` does, with a signature the key made
+    /// when `sign_it`, so that verification passes too.
+    EcVerify {
+        curve: EcCurve,
+        scalar: Vec<u8>,
+        hash: u8,
+        sign_it: bool,
+        signature: Vec<u8>,
+        message: Vec<u8>,
+    },
+    /// Agrees as `EVP_PKEY_derive` does, with the peer's key from a scalar
+    /// or any bytes, imported or set as an encoded key on a key with a group.
+    EcDerive {
+        curve: EcCurve,
+        scalar: Vec<u8>,
+        peer: Vec<u8>,
+        peer_scalar: Option<Vec<u8>>,
+        encoded: bool,
+        size: u8,
+    },
+}
+
+#[derive(Arbitrary, Debug, Clone, Copy)]
+enum EcCurve {
+    P256,
+    P384,
+    P521,
+}
+
+impl EcCurve {
+    fn group(self) -> &'static CStr {
+        match self {
+            Self::P256 => c"prime256v1",
+            Self::P384 => c"secp384r1",
+            Self::P521 => c"secp521r1",
+        }
+    }
+
+    fn len(self) -> usize {
+        match self {
+            Self::P256 => 32,
+            Self::P384 => 48,
+            Self::P521 => 66,
+        }
+    }
+
+    fn agreement(self) -> &'static rind::agreement::Algorithm {
+        match self {
+            Self::P256 => &ECDH_P256,
+            Self::P384 => &ECDH_P384,
+            Self::P521 => &ECDH_P521,
+        }
+    }
+
+    fn signing(self) -> &'static ecdsa::SigningAlgorithm {
+        match self {
+            Self::P256 => &ecdsa::sign::P256_SHA256_ASN1,
+            Self::P384 => &ecdsa::sign::P384_SHA384_ASN1,
+            Self::P521 => &ecdsa::sign::P521_SHA512_ASN1,
+        }
+    }
+
+    /// A scalar of the curve's length from `bytes`, if it is in range.
+    fn scalar(self, bytes: &[u8]) -> Option<Vec<u8>> {
+        let mut scalar = bytes.get(..self.len())?.to_vec();
+        if matches!(self, Self::P521) {
+            scalar[0] &= 1;
+        }
+        PrivateKey::from_scalar(self.agreement(), &scalar).ok()?;
+        Some(scalar)
+    }
 }
 
 /// A parameter of a name the provider reads, or any other, holding a value
@@ -203,6 +322,12 @@ enum Name {
     DhkemIkm,
     Instance,
     ContextString,
+    Encoding,
+    PointFormat,
+    Digest,
+    NonceType,
+    CofactorMode,
+    KdfType,
     Other(Vec<u8>),
 }
 
@@ -213,12 +338,30 @@ enum Value {
     Int(i32),
     Long(i64),
     Uint(u32),
+    /// An unsigned integer of any size, in the native byte order, as a
+    /// bignum parameter is.
+    Bignum(Vec<u8>),
     /// A parameter with no data, as `OSSL_PARAM_construct_*` makes from a
     /// null pointer.
     Empty(u8),
 }
 
 impl Arg {
+    fn text(key: &CStr, value: &CStr) -> Self {
+        Self {
+            key: Name::Other(key.to_bytes().to_vec()),
+            value: Value::Utf8(value.to_bytes().to_vec()),
+        }
+    }
+
+    /// A big-endian bignum, as OpenSSL moves a private key.
+    fn bignum(key: &CStr, value: &[u8]) -> Self {
+        Self {
+            key: Name::Other(key.to_bytes().to_vec()),
+            value: Value::Bignum(value.to_vec()),
+        }
+    }
+
     fn octets(key: &CStr, value: &[u8]) -> Self {
         Self {
             key: Name::Other(key.to_bytes().to_vec()),
@@ -286,6 +429,12 @@ impl Params {
                 Name::DhkemIkm => c"dhkem-ikm".to_owned(),
                 Name::Instance => c"instance".to_owned(),
                 Name::ContextString => c"context-string".to_owned(),
+                Name::Encoding => c"encoding".to_owned(),
+                Name::PointFormat => c"point-format".to_owned(),
+                Name::Digest => c"digest".to_owned(),
+                Name::NonceType => c"nonce-type".to_owned(),
+                Name::CofactorMode => c"ecdh-cofactor-mode".to_owned(),
+                Name::KdfType => c"kdf-type".to_owned(),
                 Name::Other(key) => {
                     CString::new(key.iter().copied().filter(|&b| b != 0).collect::<Vec<_>>())
                         .unwrap()
@@ -298,6 +447,13 @@ impl Params {
                 Value::Int(value) => (INTEGER, value.to_ne_bytes().to_vec()),
                 Value::Long(value) => (INTEGER, value.to_ne_bytes().to_vec()),
                 Value::Uint(value) => (UNSIGNED_INTEGER, value.to_ne_bytes().to_vec()),
+                Value::Bignum(bytes) => {
+                    let mut native = bytes.clone();
+                    if cfg!(target_endian = "little") {
+                        native.reverse();
+                    }
+                    (UNSIGNED_INTEGER, native)
+                }
                 Value::Empty(data_type) => (c_uint::from(*data_type % 8), Vec::new()),
             };
             let mut words = vec![0u64; bytes.len().div_ceil(8)];
@@ -337,6 +493,28 @@ impl Params {
     }
 }
 
+/// The core's view of the provider's configuration section, which sets
+/// `ec = 1` so that the NIST curves register.
+unsafe extern "C" fn get_params(_handle: *const c_void, params: *mut Param) -> c_int {
+    let mut at = params;
+    loop {
+        // SAFETY: the array runs to its terminator.
+        let param = unsafe { &mut *at };
+        if param.key.is_null() {
+            return 1;
+        }
+        // SAFETY: keys are C strings.
+        if unsafe { CStr::from_ptr(param.key) } == c"ec" {
+            assert_eq!(param.data_type, UTF8_PTR);
+            // SAFETY: a `UTF8_PTR` parameter's data holds a pointer.
+            unsafe { param.data.cast::<*const c_char>().write(c"1".as_ptr()) };
+            param.return_size = 1;
+        }
+        // SAFETY: the array has not ended.
+        at = unsafe { at.add(1) };
+    }
+}
+
 // The core's error functions, which check what the provider raises.
 unsafe extern "C" fn new_error(_handle: *const c_void) {}
 
@@ -363,6 +541,8 @@ unsafe extern "C" fn vset_error(
     }
 }
 
+const CORE_GET_PARAMS: c_int = 2;
+const UTF8_PTR: c_uint = 6;
 const CORE_NEW_ERROR: c_int = 5;
 const CORE_VSET_ERROR: c_int = 7;
 const QUERY_OPERATION: c_int = 1027;
@@ -450,6 +630,9 @@ struct Provider {
     ed25519: Keymgmt,
     keyexch: *const Dispatch,
     signature: *const Dispatch,
+    ec_keymgmt: Keymgmt,
+    ec_keyexch: *const Dispatch,
+    ec_signature: *const Dispatch,
 }
 
 // SAFETY: the provider serves every thread, and the fuzzer runs one.
@@ -476,6 +659,16 @@ fn provider() -> &'static Provider {
                         unsafe extern "C" fn(*const c_void),
                         unsafe extern "C" fn(),
                     >(new_error)
+                }),
+            },
+            Dispatch {
+                id: CORE_GET_PARAMS,
+                // SAFETY: as above.
+                function: Some(unsafe {
+                    core::mem::transmute::<
+                        unsafe extern "C" fn(*const c_void, *mut Param) -> c_int,
+                        unsafe extern "C" fn(),
+                    >(get_params)
                 }),
             },
             Dispatch {
@@ -547,6 +740,13 @@ fn provider() -> &'static Provider {
             },
             keyexch: find(OP_KEYEXCH, "X25519"),
             signature: find(OP_SIGNATURE, "ED25519"),
+            ec_keymgmt: Keymgmt {
+                provctx,
+                table: find(OP_KEYMGMT, "EC"),
+                ed25519: false,
+            },
+            ec_keyexch: find(OP_KEYEXCH, "ECDH"),
+            ec_signature: find(OP_SIGNATURE, "ECDSA"),
         }
     })
 }
@@ -889,6 +1089,271 @@ fn derive(provider: &Provider, private: &[u8; 32], peer: &[u8], encoded: bool, s
                 assert_eq!(&secret[..len], expected.as_ref());
             }
             _ => assert!(!ok),
+        }
+        free(ctx);
+    }
+    keymgmt.free(peer_key);
+    keymgmt.free(key);
+}
+
+/// The parameters of an EC private key of the curve, as OpenSSL imports one.
+fn ec_private(curve: EcCurve, scalar: &[u8]) -> Vec<Arg> {
+    vec![
+        Arg::text(c"group", curve.group()),
+        Arg::bignum(c"priv", scalar),
+    ]
+}
+
+/// The public point of the curve's key for `scalar`, by rind's own API.
+fn ec_point(curve: EcCurve, scalar: &[u8]) -> Vec<u8> {
+    PrivateKey::from_scalar(curve.agreement(), scalar)
+        .unwrap()
+        .public_key()
+        .as_ref()
+        .to_vec()
+}
+
+/// What an EC key holds must agree with itself, however it is read.
+fn ec_check(provider: &Provider, key: *mut c_void) {
+    let keymgmt = provider.ec_keymgmt;
+    let has: Has = keymgmt.get(KEYMGMT_HAS);
+    // SAFETY: the key is live.
+    let (public, private) = unsafe { (has(key, PUBLIC_KEY) == 1, has(key, PRIVATE_KEY) == 1) };
+    assert!(public || !private, "a private key without its public half");
+    let exported = keymgmt.export(key, KEYPAIR);
+    if let Some(exported) = exported {
+        assert_eq!(exported.public.is_some(), public);
+        assert_eq!(exported.private.is_some(), private);
+    }
+    let dup: Dup = keymgmt.get(KEYMGMT_DUP);
+    for selection in [PUBLIC_KEY, KEYPAIR] {
+        // SAFETY: the key is live.
+        let copy = unsafe { dup(key, selection) };
+        if !copy.is_null() {
+            keymgmt.free(copy);
+        }
+    }
+}
+
+fn ec_import(provider: &Provider, selection: c_int, args: &[Arg]) {
+    let key = provider.ec_keymgmt.import(selection, args);
+    if !key.is_null() {
+        ec_check(provider, key);
+        provider.ec_keymgmt.free(key);
+    }
+}
+
+fn ec_sign(
+    provider: &Provider,
+    curve: EcCurve,
+    scalar: &[u8],
+    mdname: Option<Vec<u8>>,
+    args: &[Arg],
+    size: u8,
+    message: &[u8],
+) {
+    let Some(scalar) = curve.scalar(scalar) else {
+        return;
+    };
+    let keymgmt = provider.ec_keymgmt;
+    let key = keymgmt.import(KEYPAIR, &ec_private(curve, &scalar));
+    assert!(!key.is_null());
+    let new: NewCtx = lookup(provider.ec_signature, SIGNATURE_NEWCTX);
+    let init: DigestInit = lookup(provider.ec_signature, DIGEST_SIGN_INIT);
+    let sign: DigestSign = lookup(provider.ec_signature, DIGEST_SIGN);
+    let free: Free = lookup(provider.ec_signature, SIGNATURE_FREECTX);
+    let mdname = mdname.map(|name| {
+        CString::new(name.into_iter().filter(|&b| b != 0).collect::<Vec<_>>()).unwrap()
+    });
+    let plain = mdname.as_ref().is_none_or(|name| name.is_empty()) && args.is_empty();
+    let params = Params::new(args);
+    // SAFETY: the provider's context and the key are live, and the parameters
+    // end.
+    unsafe {
+        let ctx = new(provider.provctx, null());
+        assert!(!ctx.is_null());
+        let ok = init(
+            ctx,
+            mdname.as_ref().map_or(null(), |name| name.as_ptr()),
+            key,
+            params.as_ptr(),
+        );
+        // The curve's own digest must always begin.
+        assert!(ok == 1 || !plain);
+        if ok == 1 {
+            let mut signature = vec![0u8; size.into()];
+            let mut len = 0;
+            let ok = sign(
+                ctx,
+                signature.as_mut_ptr(),
+                &mut len,
+                signature.len(),
+                message.as_ptr(),
+                message.len(),
+            );
+            if ok == 1 && plain {
+                let public = ecdsa::PublicKey::new(
+                    match curve {
+                        EcCurve::P256 => &ecdsa::verify::P256_SHA256_ASN1,
+                        EcCurve::P384 => &ecdsa::verify::P384_SHA384_ASN1,
+                        EcCurve::P521 => &ecdsa::verify::P521_SHA512_ASN1,
+                    },
+                    &ec_point(curve, &scalar),
+                )
+                .unwrap();
+                public.verify(message, &signature[..len]).unwrap();
+            }
+        }
+        free(ctx);
+    }
+    keymgmt.free(key);
+}
+
+fn ec_verify(
+    provider: &Provider,
+    curve: EcCurve,
+    scalar: &[u8],
+    hash: u8,
+    sign_it: bool,
+    mut signature: Vec<u8>,
+    message: &[u8],
+) {
+    let Some(scalar) = curve.scalar(scalar) else {
+        return;
+    };
+    let point = ec_point(curve, &scalar);
+    let own = match curve {
+        EcCurve::P256 => &ecdsa::verify::P256_SHA256_ASN1,
+        EcCurve::P384 => &ecdsa::verify::P384_SHA384_ASN1,
+        EcCurve::P521 => &ecdsa::verify::P521_SHA512_ASN1,
+    };
+    if sign_it {
+        let pair =
+            ecdsa::KeyPair::from_scalar_and_public_key(curve.signing(), &scalar, &point).unwrap();
+        signature = pair.sign(message).unwrap().as_ref().to_vec();
+    }
+    let keymgmt = provider.ec_keymgmt;
+    let key = keymgmt.import(
+        PUBLIC_KEY,
+        &[
+            Arg::text(c"group", curve.group()),
+            Arg::octets(c"pub", &point),
+        ],
+    );
+    assert!(!key.is_null());
+    let new: NewCtx = lookup(provider.ec_signature, SIGNATURE_NEWCTX);
+    let init: DigestInit = lookup(provider.ec_signature, DIGEST_VERIFY_INIT);
+    let verify: DigestVerify = lookup(provider.ec_signature, DIGEST_VERIFY);
+    let free: Free = lookup(provider.ec_signature, SIGNATURE_FREECTX);
+    let mdname = [c"SHA2-256", c"SHA2-384", c"SHA2-512"][usize::from(hash) % 3];
+    // SAFETY: the provider's context and the key are live, and the parameters
+    // end.
+    unsafe {
+        let ctx = new(provider.provctx, null());
+        assert!(!ctx.is_null());
+        let ok = init(ctx, mdname.as_ptr(), key, Params::new(&[]).as_ptr());
+        assert_eq!(ok, 1, "a verification digest of the family must begin");
+        let ok = verify(
+            ctx,
+            signature.as_ptr(),
+            signature.len(),
+            message.as_ptr(),
+            message.len(),
+        ) == 1;
+        if usize::from(hash) % 3
+            == usize::from(matches!(curve, EcCurve::P384))
+                + 2 * usize::from(matches!(curve, EcCurve::P521))
+        {
+            // The curve's own digest agrees with rind's verifier.
+            let expected = ecdsa::PublicKey::new(own, &point)
+                .and_then(|key| key.verify(message, &signature))
+                .is_ok();
+            assert_eq!(ok, expected);
+        }
+        if sign_it
+            && usize::from(hash) % 3
+                == usize::from(matches!(curve, EcCurve::P384))
+                    + 2 * usize::from(matches!(curve, EcCurve::P521))
+        {
+            assert!(ok, "a signature of the key must verify");
+        }
+        free(ctx);
+    }
+    keymgmt.free(key);
+}
+
+fn ec_derive(
+    provider: &Provider,
+    curve: EcCurve,
+    scalar: &[u8],
+    peer: &[u8],
+    peer_scalar: Option<Vec<u8>>,
+    encoded: bool,
+    size: u8,
+) {
+    let Some(scalar) = curve.scalar(scalar) else {
+        return;
+    };
+    let peer = match peer_scalar.and_then(|bytes| curve.scalar(&bytes)) {
+        Some(peer_scalar) => ec_point(curve, &peer_scalar),
+        None => peer.to_vec(),
+    };
+    let keymgmt = provider.ec_keymgmt;
+    let key = keymgmt.import(KEYPAIR, &ec_private(curve, &scalar));
+    assert!(!key.is_null());
+    let peer_key = if encoded {
+        let peer_key = keymgmt.generate(0, &[Arg::text(c"group", curve.group())]);
+        if peer_key.is_null() {
+            keymgmt.free(key);
+            return;
+        }
+        let set: SetParams = keymgmt.get(KEYMGMT_SET_PARAMS);
+        let params = Params::new(&[Arg::octets(c"encoded-pub-key", &peer)]);
+        // SAFETY: the key is live, and the parameters end.
+        if unsafe { set(peer_key, params.as_ptr()) } != 1 {
+            keymgmt.free(peer_key);
+            null_mut()
+        } else {
+            peer_key
+        }
+    } else {
+        keymgmt.import(
+            PUBLIC_KEY,
+            &[
+                Arg::text(c"group", curve.group()),
+                Arg::octets(c"pub", &peer),
+            ],
+        )
+    };
+    if peer_key.is_null() {
+        keymgmt.free(key);
+        return;
+    }
+    let new: ExchangeNewCtx = lookup(provider.ec_keyexch, KEYEXCH_NEWCTX);
+    let init: ExchangeInit = lookup(provider.ec_keyexch, KEYEXCH_INIT);
+    let set_peer: SetPeer = lookup(provider.ec_keyexch, KEYEXCH_SET_PEER);
+    let derive: Derive = lookup(provider.ec_keyexch, KEYEXCH_DERIVE);
+    let free: Free = lookup(provider.ec_keyexch, KEYEXCH_FREECTX);
+    // SAFETY: the provider's context, the keys, and the buffer are live.
+    unsafe {
+        let ctx = new(provider.provctx);
+        assert_eq!(init(ctx, key, null()), 1);
+        if set_peer(ctx, peer_key) == 1 {
+            let mut secret = vec![0u8; size.into()];
+            let mut len = 0;
+            let ok = derive(ctx, secret.as_mut_ptr(), &mut len, secret.len()) == 1;
+            let expected = PrivateKey::from_scalar(curve.agreement(), &scalar)
+                .unwrap()
+                .agree(&peer);
+            if let (true, Ok(expected)) = (ok, &expected) {
+                assert_eq!(&secret[..len], expected.as_ref());
+            }
+            // The provider also takes the compressed points OpenSSL does,
+            // which rind's one-shot `agree` refuses, so only an uncompressed
+            // peer must be refused alike.
+            if secret.len() >= curve.len() && peer.first() == Some(&4) {
+                assert_eq!(ok, expected.is_ok());
+            }
         }
         free(ctx);
     }
