@@ -16,7 +16,7 @@
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
 #[cfg(target_os = "none")]
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 use core::mem::ManuallyDrop;
 use core::panic::{RefUnwindSafe, UnwindSafe};
