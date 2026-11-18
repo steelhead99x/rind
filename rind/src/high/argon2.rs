@@ -2,6 +2,8 @@
 
 //! Argon2id, standardized in [RFC 9106](https://datatracker.ietf.org/doc/html/rfc9106).
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 use core::fmt;
 
 use crate::Error;

@@ -1,5 +1,5 @@
 import Rind.X86_64.Funs
-import Rind.Gf128
+import Rind.GhashSpec
 import Rind.ValeBytes
 open Aeneas Aeneas.Std Result rind.vale rind.simd
 
@@ -91,14 +91,6 @@ theorem mul_eq (a b : BitVec 128) : low.x86_64.ghash._mul a b = ok (mulModel a b
   rfl
 
 /-! ## The GHASH key powers, `ClmulTable` and `AvxKernel::new` -/
-
-/-- H to H^8 as `ClmulTable::powers` multiplies them, from the key `h`. -/
-def ghashPowers (h : BitVec 128) : List (BitVec 128) :=
-  let h1 := skBV h
-  let h2 := mulModel h1 h1
-  let h3 := mulModel h2 h1
-  let h4 := mulModel h2 h2
-  [h1, h2, h3, h4, mulModel h4 h1, mulModel h4 h2, mulModel h4 h3, mulModel h4 h4]
 
 theorem powers_eq (h : Std.U128) :
     low.x86_64.ghash.ClmulTable.impl.powers h = ok (Std.Array.make 8#usize (ghashPowers h.bv) (by simp [ghashPowers])) := by
