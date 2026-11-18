@@ -21,7 +21,7 @@ select the same row whichever path `HaveAvx2::check` picks, under
 
 namespace rind.x86_64
 
-open rind.simd rind.select
+open rind.simd rind.select rind.vale
 
 /-- The selects' dispatch runs: `HaveAvx2::check` returns. -/
 def RunsSelect : Prop := ∃ t, low.x86_64.cpu.HaveAvx2.check = ok t

@@ -142,6 +142,19 @@ impl HaveSha3 {
     pub(crate) fn check() -> Option<Self> {
         (features() & SHA3 != 0).then_some(Self(()))
     }
+
+    /// The token where Keccak-f runs on the SHA3 instructions: only on Apple
+    /// targets, whose cores run them on every SIMD unit. Other cores, such as
+    /// Neoverse N2, run them on fewer, so scalar Keccak-f measured twice as
+    /// fast there; mlkem-native and verified-garbage choose the same way, by
+    /// target, so Linux on Apple's cores runs scalar code too.
+    pub(crate) fn check_keccak() -> Option<Self> {
+        if cfg!(target_vendor = "apple") {
+            Self::check()
+        } else {
+            None
+        }
+    }
 }
 
 /// Proof that the CPU has SVE2, which pyca/verified-garbage's fastest
@@ -212,7 +225,21 @@ fn detect_once() -> u8 {
 }
 
 fn detect() -> u8 {
+    // `std` asks the OS, which alone may read the CPU's ID registers. Without
+    // one there is no portable way to ask, so a target with no OS runs what
+    // it enables at compile time, as `std` does on an OS it cannot ask.
+    #[cfg(rind_std)]
     use std::arch::is_aarch64_feature_detected as detected;
+    #[cfg(not(rind_std))]
+    macro_rules! detected {
+        // Rust's `aes` target feature covers PMULL too.
+        ("pmull") => {
+            cfg!(target_feature = "aes")
+        };
+        ($feature:tt) => {
+            cfg!(target_feature = $feature)
+        };
+    }
 
     // Hardware features only. `wide_multiplier` reads `MIDR_EL1` on its own
     // first call, so an AES, SHA, NEON, or SVE2 check never reads the part.
@@ -250,7 +277,7 @@ fn detect() -> u8 {
 /// forcing it cannot fault. [`test_toggle`] does not take a force flag:
 /// forcing NEON or AES on a core that lacks the instructions faults.
 fn wide_toggle(detected: bool) -> bool {
-    feature_toggle("wide_mul", detected, true)
+    !crate::low::cpu_denied("wide_mul") && (detected || cpu_forced("wide_mul"))
 }
 
 #[cold]
@@ -441,41 +468,26 @@ mod dit {
     }
 }
 
-fn test_toggle(id: &str, detected: bool) -> bool {
-    feature_toggle(id, detected, false)
-}
-
-/// Deny with `RIND_CPU_DISABLE_<id>`. When `force` is set, also force with
-/// `RIND_CPU_FORCE_<id>`, except in the FIPS module. Disable wins. A release
-/// build without `--cfg rind_cpu_disable` compiles both reads out.
-#[cfg(not(any(debug_assertions, rind_cpu_disable)))]
-fn feature_toggle(_id: &str, detected: bool, _force: bool) -> bool {
-    detected
-}
-
-/// Lets a debug build, or a release one with `--cfg rind_cpu_disable`, deny a
-/// feature with `RIND_CPU_DISABLE_<id>`, as on x86_64, so a CPU with the
+/// `detected`, unless `RIND_CPU_DISABLE_<id>` denies it, so a CPU with the
 /// crypto extension also tests the code for one without.
-#[cfg(any(debug_assertions, rind_cpu_disable))]
-fn feature_toggle(id: &str, detected: bool, force: bool) -> bool {
-    if std::env::var_os(format!("RIND_CPU_DISABLE_{id}")).is_some() {
-        // The FIPS module honours the mask in its release build, where its
-        // caller's stdout is not its own.
-        #[cfg(not(rind_fips))]
-        println!("DEBUG: denying cpuid {id:?}");
-        return false;
-    }
-    // The FIPS module builds with `--cfg rind_cpu_disable` and keeps the
-    // denial, which only takes a path it already runs on a core without the
-    // feature. No variable forces one on inside its boundary.
-    #[cfg(not(rind_fips))]
-    if force && std::env::var_os(format!("RIND_CPU_FORCE_{id}")).is_some() {
-        println!("DEBUG: forcing cpuid {id:?}");
-        return true;
-    }
-    #[cfg(rind_fips)]
-    let _ = force;
-    detected
+fn test_toggle(id: &str, detected: bool) -> bool {
+    detected && !crate::low::cpu_denied(id)
+}
+
+/// Whether `RIND_CPU_FORCE_<id>` is set, in a debug build or a release one
+/// with `--cfg rind_cpu_disable`, outside the FIPS module, where no variable
+/// forces a feature on inside its boundary. Silent, like
+/// [`crate::low::cpu_denied`], since detection runs inside any call.
+#[cfg(all(rind_std, any(debug_assertions, rind_cpu_disable), not(rind_fips)))]
+fn cpu_forced(id: &str) -> bool {
+    std::env::var_os(std::format!("RIND_CPU_FORCE_{id}")).is_some()
+}
+
+/// Forces nothing, in a release build, without an OS, or in the FIPS module.
+#[cfg(not(all(rind_std, any(debug_assertions, rind_cpu_disable), not(rind_fips))))]
+#[inline(always)]
+fn cpu_forced(_id: &str) -> bool {
+    false
 }
 
 /// Read-only prefetch hint.
@@ -547,17 +559,12 @@ mod tests {
         assert_ne!(call!(ct_compare_16, &[1; 16], &[2; 16]), 0);
     }
 
-    /// Whether std detects every feature named, less those `test_toggle`
+    /// Whether std detects every feature named, less those `RIND_CPU_DISABLE_<id>`
     /// denies.
     macro_rules! available {
         ($($name:tt),+) => {
-            true $(&& std::arch::is_aarch64_feature_detected!($name) && !denied($name))+
+            true $(&& std::arch::is_aarch64_feature_detected!($name) && !crate::low::cpu_denied($name))+
         };
-    }
-
-    fn denied(name: &str) -> bool {
-        cfg!(any(debug_assertions, rind_cpu_disable))
-            && std::env::var(format!("RIND_CPU_DISABLE_{name}")).is_ok()
     }
 
     // Each check names the features its kernels need, which the OS reports
@@ -569,6 +576,10 @@ mod tests {
             available!("aes", "pmull", "sha2")
         );
         assert_eq!(HaveSha3::check().is_some(), available!("sha3"));
+        assert_eq!(
+            HaveSha3::check_keccak().is_some(),
+            cfg!(target_vendor = "apple") && available!("sha3")
+        );
         assert_eq!(HaveSve2::check().is_some(), available!("sve2"));
         #[cfg(target_vendor = "apple")]
         assert_eq!(features() & SB != 0, available!("sb"));
@@ -671,18 +682,12 @@ mod tests {
             }
             let output = cmd.output().unwrap();
             let stdout = String::from_utf8_lossy(&output.stdout);
-            // The marker proves the child ran even when FIPS suppresses CPU
-            // logging. Outside FIPS, disable wins and prints the denial.
-            let line = if disable {
-                "DEBUG: denying cpuid \"wide_mul\""
-            } else {
-                "DEBUG: forcing cpuid \"wide_mul\""
-            };
+            // Detection is silent, so the marker proves the child ran, and the
+            // child's own assertion that the multiplier is `mode` proves which
+            // override won: disable over force.
             assert!(
-                output.status.success()
-                    && stdout.contains(&format!("{CHILD} done"))
-                    && (cfg!(rind_fips) || stdout.contains(line)),
-                "{mode}: {line}\n{stdout}{}",
+                output.status.success() && stdout.contains(&format!("{CHILD} done")),
+                "{mode} (disable {disable}, force {force}):\n{stdout}{}",
                 String::from_utf8_lossy(&output.stderr)
             );
         }

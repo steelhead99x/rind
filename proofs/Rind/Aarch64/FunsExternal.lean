@@ -3,13 +3,14 @@ public import Aeneas
 public import Rind.Aarch64.Types
 public import Rind.Aarch64.Neon
 public import Rind.Aarch64.PointSelectModel
+public import Rind.Aarch64.AesGcmModel
 @[expose] public section
 open Aeneas Aeneas.Std Result
 set_option linter.dupNamespace false
 
 /-!
 The rind functions the aarch64 translation leaves opaque, beside those
-`Rind.Aarch64.PointSelectModel` models. No proof assumes anything about them
+`Rind.Aarch64.PointSelectModel` and `Rind.Aarch64.AesGcmModel` model. No proof assumes anything about them
 beyond what `Rind.Aarch64.S2nBignum` and `Rind.Aarch64.AwsLc` state for
 s2n-bignum's and aws-lc's routines and what each theorem takes as a hypothesis.
 -/
@@ -235,6 +236,8 @@ opaque low.entry.Entry.assert_held : Result Unit
 
 opaque low.aarch64.cpu.HaveSha3.check : Result (Option low.aarch64.cpu.HaveSha3)
 
+opaque low.aarch64.cpu.HaveSha3.check_keccak : Result (Option low.aarch64.cpu.HaveSha3)
+
 opaque low.aarch64.cpu.HaveCryptoExt.check : Result (Option low.aarch64.cpu.HaveCryptoExt)
 
 /-! SHA-1's block function, whose contract `Rind.Aarch64.ShaBlocks` states as a
@@ -329,6 +332,25 @@ opaque high.curve.P384.Insts.RindHighCurveCurveStaticPrivateKeyVerifyingKeyScala
 opaque high.curve.P384.Insts.RindHighCurveCurveStaticPrivateKeyVerifyingKeyScalar.generate_random_key
   {T0 : Type _} (midrngRandomSourceInst : mid.rng.RandomSource T0) :
   T0 → Result ((core.result.Result mid.p384.StaticPrivateKey error.Error) × T0)
+
+/-! Whether the CPU runs pyca/verified-garbage's P-256, and rind's calls of it,
+which the P-256 proofs take as not running: Lean proves VG's routines in that
+project, not here. -/
+
+opaque low.aarch64.p256_vg.P256.check : Result (Option low.aarch64.p256_vg.P256)
+
+opaque low.aarch64.p256_vg.P256.check_public_key : Result (Option low.aarch64.p256_vg.P256)
+
+opaque mid.p256.PrivateKey.vg_public_key
+  : mid.p256.PrivateKey → low.aarch64.p256_vg.P256 → Result (Array Std.U8 65#usize)
+
+opaque mid.p256.PrivateKey.vg_diffie_hellman
+  : mid.p256.PrivateKey → low.aarch64.p256_vg.P256 → mid.p256.PublicKey →
+    Result (core.result.Result mid.p256.SharedSecret error.Error)
+
+opaque mid.p256.vg_verify
+  : low.aarch64.p256_vg.P256 → mid.p256.AffineMontPoint → mid.p256.Scalar → mid.p256.Scalar →
+    mid.p256.Scalar → Result (core.result.Result Unit error.Error)
 
 /-! The other curves, which X25519's and P-256's results never depend on. -/
 
@@ -537,5 +559,31 @@ abbrev low.aarch64.wide_mux.p521_jadd := @low.aarch64.p521_jadd.p521_jadd
 abbrev low.aarch64.wide_mux.p521_jdouble := @low.aarch64.p521_jdouble.p521_jdouble
 abbrev low.aarch64.wide_mux.p521_jmixadd := @low.aarch64.p521_jmixadd.p521_jmixadd
 abbrev low.aarch64.wide_mux.p521_jscalarmul := @low.aarch64.p521_jscalarmul.p521_jscalarmul
+
+/-! AES-GCM's stitched kernels and the separate passes around them, which no
+proof covers yet, and aws-lc's NEON GHASH table. -/
+
+opaque low.aarch64.aes_gcm.cipher
+  : Bool → low.aarch64.aes.AesKey → low.aarch64.ghash.Ghash → Array Std.U8 16#usize → Slice Std.U8 →
+    Slice Std.U8 → Result (low.aarch64.ghash.Ghash × Slice Std.U8)
+
+opaque low.aarch64.ghash_neon_armv8.NeonTable.new
+  : Array Std.U8 16#usize → Result low.aarch64.ghash_neon_armv8.NeonTable
+
+/-- x86_64's AVX-512 IFMA X25519 and Ed25519, which no aarch64 CPU runs, and
+which the proofs here take as not running. -/
+opaque low.aarch64.curve25519_ifma.Curve25519Ifma.check : Result (Option low.aarch64.curve25519_ifma.Curve25519Ifma)
+
+opaque low.aarch64.curve25519_ifma.Curve25519Ifma.ed25519_key_pair
+  : low.aarch64.curve25519_ifma.Curve25519Ifma → Array Std.U8 32#usize → Result (Array Std.U8 64#usize × Array Std.U8 32#usize)
+
+opaque low.aarch64.curve25519_ifma.Curve25519Ifma.ed25519_sign
+  : low.aarch64.curve25519_ifma.Curve25519Ifma → Array Std.U8 64#usize → Array Std.U8 32#usize → Slice Std.U8 →
+    Result (Array Std.U8 64#usize)
+
+opaque low.aarch64.curve25519_ifma.Curve25519Ifma.ed25519_verify
+  : low.aarch64.curve25519_ifma.Curve25519Ifma → Array Std.U8 32#usize → Slice Std.U8 → Array Std.U8 64#usize → Result Bool
+
+opaque low.aarch64.curve25519_ifma.Curve25519Ifma.Insts.CoreCloneClone.clone : low.aarch64.curve25519_ifma.Curve25519Ifma → Result low.aarch64.curve25519_ifma.Curve25519Ifma
 
 end rind.aarch64
