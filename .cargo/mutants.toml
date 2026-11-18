@@ -139,8 +139,10 @@ exclude_re = [
   'rind/src/low/generic/p521\.rs:\d+:\d+: replace == with != in mont_pow$',
   'rind/src/low/generic/p521\.rs:\d+:27: replace >> with << in mont_mul$',
   'rind/src/low/generic/p521\.rs:\d+:49: replace >> with << in mont_mul$',
-  # Pinned to its line: `t - 7`'s `-`, at the same column, is caught.
-  'rind/src/low/generic/sha256\.rs:68:\d+: replace - with \+ in sha256_compress_block$',
+  # `(t - 16) % 16` and `(t + 16) % 16` are the same window slot. Pinned to
+  # its line: `t - 7`'s `-`, at the same column, is caught.
+  'rind/src/low/generic/sha256\.rs:70:\d+: replace - with \+ in sha256_compress_block$',
+  'rind/src/low/generic/sha512\.rs:89:\d+: replace - with \+ in sha512_compress_block$',
   'rind/src/low/posint\.rs:\d+:\d+: delete match arm 0 in PosInt<N>::mont_exp$',
   'rind/src/low/posint\.rs:\d+:21: replace % with / in PosInt<N>::mont_exp$',
   'rind/src/low/posint\.rs:\d+:21: replace % with \+ in PosInt<N>::mont_exp$',

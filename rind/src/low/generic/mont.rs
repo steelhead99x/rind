@@ -457,7 +457,9 @@ fn redc(t: &mut [Limb], m: &[Limb], n0: Limb) {
 /// that fits a limb, returning what lands above them, which fits `Wide`.
 ///
 /// Its two products a limb are summed in two carry chains, which run side
-/// by side where one chain's latency would bound `mul_add`.
+/// by side, so two rows take about one chain's latency, where `mul_add`
+/// takes one row a chain and gains its overlap from issuing four products
+/// before the chain.
 fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Wide) -> Wide {
     let (mut c0, mut c1, mut prev) = (c, 0, 0);
     for (x, y) in x.iter_mut().zip(y) {
@@ -472,13 +474,31 @@ fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Wide) -> Wide {
     mul_add_limb(v, prev, c0 as Limb, c1)
 }
 
-/// `x += y * u`, returning the carry out of the top limb.
+/// `x += y * u`, for equally long slices, returning the carry out of the
+/// top limb.
+///
+/// Four limbs a block: each product depends only on `u` and `y`, so a
+/// block's four multiplies issue before the carry chain that adds them. A
+/// remainder of one to three limbs takes the one-limb step. Each sum is at
+/// most `mul_add_limb`'s bound, so the carry fits a limb.
+#[inline]
 fn mul_add(x: &mut [Limb], y: &[Limb], u: Limb) -> Wide {
-    let mut carry = 0;
-    for (x, y) in x.iter_mut().zip(y) {
-        let t = mul_add_limb(u, *y, *x, carry);
-        *x = t as Limb;
-        carry = t >> Limb::BITS;
+    assert!(x.len() == y.len());
+    let mut carry: Wide = 0;
+    let (xb, xr) = x.as_chunks_mut::<4>();
+    let (yb, yr) = y.as_chunks::<4>();
+    for (xb, yb) in xb.iter_mut().zip(yb) {
+        let p = yb.map(|y| Wide::from(u).wrapping_mul(Wide::from(y)));
+        for (x, p) in xb.iter_mut().zip(p) {
+            let s = p.wrapping_add(Wide::from(*x)).wrapping_add(carry);
+            *x = s as Limb;
+            carry = s >> Limb::BITS;
+        }
+    }
+    for (x, y) in xr.iter_mut().zip(yr) {
+        let s = mul_add_limb(u, *y, *x, carry);
+        *x = s as Limb;
+        carry = s >> Limb::BITS;
     }
     carry
 }
@@ -548,7 +568,7 @@ mod tests {
     use super::super::super::bignum::tests::{modulus, public, secret};
     use super::*;
     use crate::low;
-    use crate::low::ct::into_secret;
+    use crate::low::ct::{into_public, into_secret, public_slice, secret_slice};
     use crate::test::bignum::words;
 
     proptest! {
@@ -618,6 +638,79 @@ mod tests {
             mont_sqr(&mut ours, &sx, &sm, into_secret(n0[0]));
             low::mont_mul(&mut theirs, &x, &x, &m, n0[0]);
             prop_assert_eq!(public(&ours), theirs);
+        }
+    }
+
+    /// Limbs mixing zeros, all-ones, and splitmix64's outputs, so each lane
+    /// of a block gets its own product and carry.
+    fn mixed(state: &mut u64, n: usize) -> Vec<Limb> {
+        (0..n)
+            .map(|_| {
+                *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+                let mut z = *state;
+                z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+                z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+                z ^= z >> 31;
+                match z % 8 {
+                    0 => 0,
+                    1 | 2 => Limb::MAX,
+                    3 => Limb::MAX - 1,
+                    _ => (z >> 3) as Limb,
+                }
+            })
+            .collect()
+    }
+
+    /// `acc += y * u`, a limb at a time, carrying through the rest of `acc`.
+    fn add_row(acc: &mut [Limb], y: &[Limb], u: Limb) {
+        let mut carry = 0;
+        for (i, a) in acc.iter_mut().enumerate() {
+            let product = Wide::from(u) * Wide::from(y.get(i).copied().unwrap_or(0));
+            let s = product + Wide::from(*a) + carry;
+            *a = s as Limb;
+            carry = s >> Limb::BITS;
+        }
+        assert_eq!(carry, 0);
+    }
+
+    /// `mul_add` and `mul_add2` against `add_row` at every length through
+    /// five blocks, so every remainder runs after zero to five blocks, and a
+    /// lane swapped within a block fails. The first case is all ones, the
+    /// largest sum each step can take.
+    #[test]
+    fn rows_match_scalar() {
+        let mut state = 1;
+        for n in 0..=20 {
+            for case in 0..32 {
+                let (x, y, [u, v, c]) = if case == 0 {
+                    (vec![Limb::MAX; n], vec![Limb::MAX; n], [Limb::MAX; 3])
+                } else {
+                    let (x, y) = (mixed(&mut state, n), mixed(&mut state, n));
+                    (x, y, mixed(&mut state, 3).try_into().unwrap())
+                };
+                let ys = y.clone();
+                secret_slice(&ys);
+
+                let mut want = [&x[..], &[0]].concat();
+                add_row(&mut want, &y, u);
+                let mut got = x.clone();
+                secret_slice(&got);
+                let carry = into_public(mul_add(&mut got, &ys, into_secret(u)));
+                public_slice(&got);
+                assert_eq!((&got[..], carry), (&want[..n], Wide::from(want[n])));
+
+                let mut want = [&x[..], &[0, 0]].concat();
+                add_row(&mut want, &[c], 1);
+                add_row(&mut want, &y, u);
+                add_row(&mut want[1..], &y, v);
+                let mut got = x.clone();
+                secret_slice(&got);
+                let (u, v, c) = (into_secret(u), into_secret(v), into_secret(Wide::from(c)));
+                let above = into_public(mul_add2(&mut got, &ys, u, v, c));
+                public_slice(&got);
+                let top = Wide::from(want[n]) | Wide::from(want[n + 1]) << Limb::BITS;
+                assert_eq!((&got[..], above), (&want[..n], top));
+            }
         }
     }
 

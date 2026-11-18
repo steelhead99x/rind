@@ -204,3 +204,61 @@ fn ml_dsa() {
         assert_eq!(leaked, 0);
     }
 }
+
+/// An expanded ML-DSA private key, loaded raw, which the adapter wraps in
+/// PKCS#8 itself, and loaded from a PKCS#8 document in expanded form. The
+/// keys are loaded before the check: the PKCS#8 copy loading makes lives
+/// only inside the call, which the repository leaves unwiped. The needle is
+/// FIPS 204's `K`, after `rho`, which the public key repeats.
+#[test]
+fn ml_dsa_expanded() {
+    use aws_lc_rs::encoding::AsRawBytes;
+
+    let raw = aws_lc_rs::signature::PqdsaKeyPair::from_seed(
+        &aws_lc_rs::signature::ML_DSA_44_SIGNING,
+        &distinct::<32>(17),
+    )
+    .unwrap()
+    .private_key()
+    .as_raw_bytes()
+    .unwrap()
+    .as_ref()
+    .to_vec();
+    let secret = &raw[32..];
+    let pkcs8 = expanded_pkcs8(&raw);
+    for key in [
+        signature::PqdsaKeyPair::from_raw_private_key(&signature::ML_DSA_44_SIGNING, &raw).unwrap(),
+        signature::PqdsaKeyPair::from_pkcs8(&signature::ML_DSA_44_SIGNING, &pkcs8).unwrap(),
+    ] {
+        let key = Box::new(key);
+        let leaked = leaks(secret, || {
+            let clone = key.clone();
+            assert!(clone.to_pkcs8v1().is_err());
+            let mut sig = vec![0; signature::ML_DSA_44_SIGNING.signature_len()];
+            clone.sign(b"expanded", &mut sig).unwrap();
+            drop(clone);
+            drop(key);
+        });
+        assert_eq!(leaked, 0);
+    }
+}
+
+/// ML-DSA-44's PKCS#8 v1 in expanded form (RFC 9881).
+fn expanded_pkcs8(raw: &[u8]) -> Vec<u8> {
+    let len = |n: usize| [0x82, (n >> 8) as u8, n as u8];
+    let mut inner = vec![0x04];
+    inner.extend(len(raw.len()));
+    inner.extend_from_slice(raw);
+    let mut body = vec![0x02, 0x01, 0x00];
+    // id-ml-dsa-44, 2.16.840.1.101.3.4.3.17
+    body.extend([
+        0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x11,
+    ]);
+    body.push(0x04);
+    body.extend(len(inner.len()));
+    body.extend_from_slice(&inner);
+    let mut der = vec![0x30];
+    der.extend(len(body.len()));
+    der.extend_from_slice(&body);
+    der
+}
