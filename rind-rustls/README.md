@@ -6,6 +6,14 @@
 
 This crate provides an integration between [rustls](https://github.com/rustls/rustls) and [rind](https://github.com/kixel-ai/rind/), a fork of [Graviola](https://github.com/ctz/graviola/).
 
+Turn off rustls's default features, which compile aws-lc-rs, and add this crate:
+
+```toml
+[dependencies]
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "logging"] }
+rind-rustls = "0.23"
+```
+
 Use it like:
 
 ```rust
@@ -15,12 +23,18 @@ rind_rustls::default_provider().install_default().unwrap();
 And then use rustls as normal.
 
 Its API is rustls's `crypto::aws_lc_rs` provider's, item for item, so
-swapping one for the other changes no other code. rind cannot back yet:
+replacing `rustls::crypto::aws_lc_rs` with `rind_rustls` changes no other code.
+A dependency that turns on rustls's `aws_lc_rs` or `ring` feature still
+compiles that library; [MIGRATING.md](https://github.com/kixel-ai/rind/blob/main/MIGRATING.md#crates-with-their-own-crypto-backend)
+says which features of each such crate avoid it.
+
+## What rind cannot back
 
 - `kx_group::MLKEM1024`, which `ALL_KX_GROUPS` leaves out.
 - ML-DSA: `default_provider()` neither verifies nor signs with it.
 
-Where it behaves differently:
+## Behaves differently
+
 
 - `default_provider()` puts ChaCha20-Poly1305 first on a CPU where rind runs
   AES without CPU instructions, for speed.

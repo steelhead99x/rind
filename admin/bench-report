@@ -48,7 +48,8 @@ COLLECT_HOSTS is measured with `run`, not `collect`.
 
 `weekly` saves the latest weekly `bench` run's results on main, with gh, as
 the report's CPU tiers. `render` writes BENCHMARKS.md and its SVGs, among
-them the overview the README shows, from benchmarks/data, the verified code in
+them the overview the README shows, and benchmarks/report.json, the same
+report as data for the site's benchmarks page, from benchmarks/data, the verified code in
 benchmarks/verified.toml, and the decision on each gap in
 benchmarks/gaps.toml, first importing every measured host JSON of a collection
 given by `--from`. It fails on a gap over 10% without a
@@ -977,6 +978,8 @@ REPORT_DIR = os.path.join(ROOT, "benchmarks")
 DATA_DIR = os.path.join(REPORT_DIR, "data")
 VERIFIED = os.path.join(REPORT_DIR, "verified.toml")
 GAPS = os.path.join(REPORT_DIR, "gaps.toml")
+# The report as data, which the site's benchmarks page draws.
+SITE_DATA = os.path.join(REPORT_DIR, "report.json")
 REPO = "kixel-ai/rind"
 
 # The report's columns, in order, by library.
@@ -1096,6 +1099,7 @@ BUILDS = {
     "rustcrypto": "RustCrypto + dalek",
     "graviola": "graviola",
     "libcrux": "libcrux",
+    "verified-garbage": "verified-garbage",
     "openssl": "OpenSSL, the system's, linked dynamically",
     "openssl-vendored": "OpenSSL, vendored",
     "rustls-rind": "rustls + rind-rustls",
@@ -1195,10 +1199,10 @@ TIERS = [
 # The libraries the weekly bench times rind against.
 BASELINES = ["aws-lc-rs", "ring"]
 
-# Libraries the weekly bench also times and the tiers keep, but that neither the
-# tier heatmap nor the gate counts. A cell where pyca/verified-garbage's
-# proven code is faster gets a quest that switches rind to it, not an alert;
-# the hosts' report counts it like any other library.
+# Libraries the weekly bench also times, which the tier heatmap ranks rind
+# against like the baselines but the gate never counts: a cell where
+# pyca/verified-garbage's proven code is faster gets a quest that switches
+# rind to it, not an alert. The hosts' report counts it like any other library.
 TIMED = ["verified-garbage"]
 
 # The CPU-tier rows, as patterns over a weekly benchmark ID with `*` in the
@@ -1208,7 +1212,7 @@ TIER_ROWS = [
     ("AES block, AES-CTR", r"(aes(128|192|256)-ctr|quic-header-protection/aes(128|256))/"),
     ("AES-CBC", r"aes(128|192|256)-cbc-"),
     ("AES-KW, AES-KWP", r"aes(128|256)-kwp?-"),
-    ("ChaCha20 (header protection)", r"quic-header-protection/chacha20/"),
+    ("ChaCha20", r"(quic-header-protection/)?chacha20/"),
     ("ChaCha20-Poly1305, XChaCha20-Poly1305", r"x?chacha20poly1305(-open)?/"),
     ("SHA-1", r"sha1/"),
     ("SHA-256", r"sha256(-updates)?/"),
@@ -1242,7 +1246,7 @@ UNRANKED = [
         r"(blind-rsa\d+|v?oprf|vrf|spake2plus|argon2id)-",
         "neither aws-lc-rs nor ring offers the protocol, so no baseline; the report's hosts compare it",
     ),
-    (r"chacha20/", "neither aws-lc-rs nor ring offers ChaCha20 without Poly1305, so no baseline"),
+    (r"slhdsa-", "neither aws-lc-rs nor ring offers SLH-DSA, so no baseline"),
 ]
 
 # rind's time over the fastest library's above which benchmarks/gaps.toml
@@ -1253,7 +1257,10 @@ SLOWER = 1.1
 SPEED_BINS = [SLOWER, 1.25, 1.5, 2, 4, 8]
 SPEED_LABELS = ["fastest, or within 10%", "to 1.25×", "to 1.5×", "to 2×", "to 4×", "to 8×", "over 8×"]
 
-# rind's time over the fastest baseline's, binned around the ~2% noise.
+# The tier heatmap's title.
+TIERS_TITLE = "rind's time over the fastest of aws-lc-rs, ring, and verified-garbage, by CPU tier"
+
+# rind's time over the fastest rival's, binned around the ~2% noise.
 TIER_BINS = [0.8, 0.9, 0.98, 1.02, 1.1, 1.25]
 TIER_LABELS = ["under 0.8", "to 0.9", "to 0.98", "even", "to 1.1", "to 1.25", "over 1.25"]
 
@@ -1336,13 +1343,14 @@ def load_verified(path=VERIFIED):
     return entries
 
 
-def proof_for(verified, library, row, host):
-    """The entry that verifies a library's code for an operation on a host."""
+def proof_for(verified, library, row, host, any_os=False):
+    """The entry that verifies a library's code for an operation on a host,
+    or with `any_os`, on the same CPU under any OS."""
     cpuid = host.get("rind_cpu", {}).get("cpuid", {})
     for e in verified:
         if e["library"] != library or e.get("arch", host_arch(host)) != host_arch(host):
             continue
-        if e.get("os", host_os(host)) != host_os(host):
+        if not any_os and e.get("os", host_os(host)) != host_os(host):
             continue
         if not all(cpuid.get(f.removeprefix("!")) == (0 if f.startswith("!") else 1) for f in e.get("cpu", [])):
             continue
@@ -1517,15 +1525,22 @@ def times(host):
     return out
 
 
-def tier_rows(tier):
-    """rind's time over the fastest baseline's, per benchmark of a tier."""
+def tier_rows(tier, rivals):
+    """rind's time over the fastest of `rivals`, per benchmark of a tier."""
     out = {}
     for key, libs in tier["benchmarks"].items():
-        base = {lib: ns for lib, ns in libs.items() if lib in BASELINES}
+        base = {lib: ns for lib, ns in libs.items() if lib in rivals}
         if "rind" in libs and base:
             best = min(base, key=base.get)
             out[key] = (libs["rind"] / base[best], libs["rind"], best, base[best])
     return out
+
+
+def heatmap_rivals(tier):
+    """The libraries the tier heatmap ranks rind against. The portable tier
+    leaves out verified-garbage, which runs its baseline assembly there, code
+    rind's portable backend can never take."""
+    return BASELINES + ([] if tier_name(tier) == "portable" else TIMED)
 
 
 def tier_name(tier):
@@ -1568,7 +1583,7 @@ def tier_cells(tiers):
     cells = {}
     for t in tiers["tiers"]:
         column = tier_column(t)
-        for key, value in tier_rows(t).items():
+        for key, value in tier_rows(t, heatmap_rivals(t)).items():
             row = tier_row(key)
             if row is None:
                 continue
@@ -1597,7 +1612,7 @@ def gaps_of(hosts, tiers):
                     out[(row, name)] = (libs["rind"] / others[best], best)
     for t in tiers["tiers"] if tiers else []:
         column = tier_name(t)
-        for key, (ratio, _, best, _) in tier_rows(t).items():
+        for key, (ratio, _, best, _) in tier_rows(t, BASELINES).items():
             if ratio > SLOWER and tier_row(key):
                 out[(key, column)] = (ratio, best)
     return out
@@ -1626,6 +1641,10 @@ def load_gaps(hosts, tiers, path=GAPS):
             fail(f"{where}: needs operations and on")
         if ("quest" in e) == ("reason" in e):
             fail(f"{where}: needs a quest or a reason, not both")
+        # The report's gap table, and the site's, hold the reason in one cell
+        # as inline Markdown.
+        if re.search(r"[\r\n]", e.get("reason", "")):
+            fail(f"{where}: the reason must be one line, since a table cell holds it")
         if "quest" in e and not (e["quest"].startswith("/quest/") and os.path.isfile(ROOT + e["quest"])):
             fail(f"{where}: no quest at {e['quest']}")
         # A nightly tier stays valid when this run did not draw it. Any other
@@ -1654,6 +1673,12 @@ def quest_title(path):
         return re.sub(r"^# (\[\w+\] )?", "", f.readline().strip())
 
 
+def cell_text(markdown):
+    """Markdown for a table cell: each pipe it hasn't escaped, after an even
+    run of backslashes, escaped, so the cell holds it."""
+    return re.sub(r"(\\*)\|", lambda m: m.group(1) + ("|" if len(m.group(1)) % 2 else "\\|"), markdown)
+
+
 def gap_table(gaps):
     rows = {row_name(op) for op in OPERATIONS}
     tier_names = set(dict(TIERS).values())
@@ -1664,7 +1689,7 @@ def gap_table(gaps):
         ratios = [ratio for ratio, _ in covered.values()]
         spread = f"{min(ratios):.2f}×" + (f" to {max(ratios):.2f}×" if max(ratios) - min(ratios) >= 0.005 else "")
         fastest = ", ".join(sorted({COLUMNS[lib] for _, lib in covered.values()}))
-        decision = f"[{quest_title(e['quest'])}]({e['quest'][1:]})" if "quest" in e else e["reason"]
+        decision = f"[{quest_title(e['quest'])}]({e['quest'][1:]})" if "quest" in e else cell_text(e["reason"])
         lines.append(f"| {ops} | {on} | {spread} ({fastest}) | {decision} |")
     return lines
 
@@ -1897,7 +1922,7 @@ def host_svg(name, host, verified, theme):
 
 
 def tiers_svg(tiers, theme):
-    """rind's time over the fastest baseline's per CPU tier, in the benchmark
+    """rind's time over the fastest rival's per CPU tier, in the benchmark
     of each row where rind trails most."""
     svg = Svg(theme)
     cells = tier_cells(tiers)
@@ -1927,7 +1952,7 @@ def tiers_svg(tiers, theme):
             svg.rect(x, y + 1, cell - 4, ROW - 2, fill, title)
             svg.text(x + (cell - 4) / 2, y + 14, f"{ratio:.2f}", size=11, anchor="middle", color=ink_on(fill))
         y += ROW
-    return svg.render(width, y + 12, "rind's time over the fastest of aws-lc-rs and ring, by CPU tier")
+    return svg.render(width, y + 12, TIERS_TITLE)
 
 
 def and_list(words):
@@ -1953,6 +1978,17 @@ def commit_link(commit):
 def measured(host):
     noisy = ", noisy" if host.get("load", {}).get("noisy") else ""
     return f"{host['started'][:10]} at {commit_link(host['commit'])}{noisy}"
+
+
+# What a ✓ means, which the report and the site's verified page both state.
+VERIFIED_RULE = (
+    "A ✓ means a published, machine-checked proof shows that all the code computing the operation, as "
+    "that library runs it on that host, gives the specified result for every input: the cipher and its "
+    "mode, the hash over every block with its padding, the whole scalar multiplication or exponentiation, "
+    "and the glue around them, such as clamping, byte conversion, and point encoding. Parsing DER key and "
+    "signature containers, randomness, and the message hash a signature takes are left out. Proofs of "
+    "memory safety alone, or of only some of the code, earn no ✓."
+)
 
 
 def platform_of(entry):
@@ -2126,7 +2162,7 @@ def tier_table(tiers):
     by_key = {}
     for t in tiers["tiers"]:
         column = tier_column(t)
-        for key, (ratio, *_) in tier_rows(t).items():
+        for key, (ratio, *_) in tier_rows(t, heatmap_rivals(t)).items():
             by_key.setdefault(key, {})[column] = ratio
     lines = ["| Benchmark | " + " | ".join(columns) + " |", "|---|" + "---|" * len(columns)]
     for key in sorted(by_key):
@@ -2136,8 +2172,217 @@ def tier_table(tiers):
     return lines
 
 
+def site_data(hosts, tiers, verified, gaps):
+    """The report as data for the site's benchmarks page, which reads nothing
+    else, so it never decides for itself what counts as the fastest, a proof,
+    or a gap. A row's times are one cell per library of its host or tier, in
+    that `libraries` order, each [its time as the report writes it, its
+    SPEED_BINS bin, its time over the fastest's] or null where untimed, all
+    from the full-precision times, so the page shows what the report does."""
+
+    def cells(libraries, libs, best):
+        return [
+            [human(libs[lib]), bin_of(libs[lib] / libs[best], SPEED_BINS), round(libs[lib] / libs[best], 2)]
+            if lib in libs
+            else None
+            for lib in libraries
+        ]
+
+    gap_of = {place: i for i, (_, covered) in enumerate(gaps) for place in covered}
+    proof_index = {id(e): i for i, e in enumerate(verified)}
+    rows = {row_name(op) for op in OPERATIONS}
+    # The libraries the verified page has a column for.
+    proven = [lib for lib in columns(*hosts.values()) if lib not in VARIANTS]
+
+    def grid_cell(h, timed, lib, row):
+        """A library's cell for an operation on a host, for the verified
+        page: the index in `verified` of the proof that covers it,
+        `{"other_os": index}` for a proof limited to another OS, `refused`
+        where the library refuses to start on the host's CPU, `unproven`, or
+        `untimed`. A proof shows whether or not the host timed the operation,
+        since it covers the code; a cell with neither is `untimed`, as the
+        library may not offer the operation or the host's results may predate
+        its benchmark."""
+        if lib in h.get("refused", {}):
+            return "refused"
+        if entry := proof_for(verified, lib, row, h):
+            return proof_index[id(entry)]
+        if entry := proof_for(verified, lib, row, h, any_os=True):
+            return {"other_os": proof_index[id(entry)]}
+        return "unproven" if lib in timed.get(row, {}) else "untimed"
+
+    def host_data(name):
+        h = hosts[name]
+        out = {
+            "name": name,
+            "cpu": h["cpu"]["model"],
+            "arch": host_arch(h),
+            "logical_cpus": h["cpu"]["logical_cpus"],
+            "os": h["os"],
+            "os_kind": host_os(h),
+            "rustc": h["toolchain"]["rustc"],
+            "date": h["started"][:10],
+            "commit": h["commit"],
+            "noisy": bool(h.get("load", {}).get("noisy")),
+            "note": host_note(name, h),
+            "scaling": " ".join(scaling(h)).strip() or None,
+            "refused": {lib: [f.upper() for f in missing] for lib, missing in h.get("refused", {}).items()},
+            "libraries": columns(h),
+            "times": {},
+            "fastest": {},
+            "proofs": {},
+            # Every operation's cell for each library, timed or not, for the verified page.
+            "grid": {
+                row_name(op): {lib: grid_cell(h, times(h), lib, row_name(op)) for lib in proven}
+                for op in OPERATIONS
+            },
+            "gaps": {},
+        }
+        for row, libs in times(h).items():
+            if row not in rows:
+                continue
+            others = [lib for lib in libs if lib not in VARIANTS]
+            best = fastest(libs)
+            out["times"][row] = cells(out["libraries"], libs, best)
+            # One library alone has no rival, so no fastest.
+            if len(others) > 1:
+                out["fastest"][row] = best
+            proofs = {
+                lib: proof_index[id(p)]
+                for lib in libs
+                if (p := proof_for(verified, VARIANTS.get(lib, lib), row, h)) is not None
+            }
+            if proofs:
+                out["proofs"][row] = proofs
+            if (row, name) in gap_of:
+                out["gaps"][row] = gap_of[row, name]
+        cost = h.get("build_cost")
+        if cost and cost["status"] == "ok":
+            out["build"] = {
+                "date": cost["started"][:10],
+                "rustc": cost["host"]["rustc"],
+                "cc": cost["host"]["cc"],
+                "jobs": cost["host"]["jobs"],
+                "builds": [
+                    {
+                        "name": BUILDS.get(b["name"], b["name"]),
+                        # The library each build is of, so the page shows it beside that library.
+                        "library": b["name"].removeprefix("rustls-").removesuffix("-vendored"),
+                        "seconds": round(b["median_seconds"], 1),
+                        "low": round(min(b["seconds"]), 1),
+                        "high": round(max(b["seconds"]), 1),
+                        "cpu_seconds": round(b["median_cpu_seconds"]),
+                        "stripped_mb": round(b["stripped_bytes"] / 1e6, 2),
+                        "tools": b["tools"],
+                        "crates": len(b["packages"]),
+                    }
+                    for b in cost["builds"]
+                ],
+            }
+        elif cost:
+            out["build"] = {"reason": cost["reason"]}
+        return out
+
+    def tier_data(t):
+        column, name = tier_column(t), tier_name(t)
+        timed = {lib for libs in t["benchmarks"].values() for lib in libs}
+        out = {
+            "name": column,
+            # The TIERS name benchmarks/gaps.toml decides on.
+            "tier": name,
+            "cpu": t["cpu"],
+            "libraries": [lib for lib in ["rind", *BASELINES, *TIMED] if lib in timed],
+            # The libraries its fastest is drawn from.
+            "rivals": ["rind", *heatmap_rivals(t)],
+            "times": {},
+            "fastest": {},
+            "gaps": {},
+        }
+        for key, libs in t["benchmarks"].items():
+            rivals = {lib: ns for lib, ns in libs.items() if lib in out["rivals"]}
+            if not rivals:
+                continue
+            best = min(rivals, key=rivals.get)
+            out["times"][key] = cells(out["libraries"], libs, best)
+            if len(rivals) > 1:
+                out["fastest"][key] = best
+            if (key, name) in gap_of:
+                out["gaps"][key] = gap_of[key, name]
+        return out
+
+    def tier_groups(tiers):
+        """The tiers' benchmarks by TIER_ROWS row, then those UNRANKED keeps
+        apart, by its reason."""
+        keys = sorted({key for t in tiers["tiers"] for key in t["benchmarks"]})
+        groups = [{"name": name, "benchmarks": [k for k in keys if re.match(p, k)]} for name, p in TIER_ROWS]
+        unranked = [k for k in keys if tier_row(k) is None]
+        for pattern, why in UNRANKED:
+            group = [k for k in unranked if re.match(pattern, k)]
+            unranked = [k for k in unranked if k not in group]
+            groups.append({"name": f"Not ranked: {why}", "benchmarks": group})
+        return [g for g in groups if g["benchmarks"]]
+
+    data = {
+        "schema": 1,
+        "slower": SLOWER,
+        "rule": VERIFIED_RULE,
+        "bins": [
+            {"to": edge, "label": text, "color": color}
+            for edge, text, color in zip(SPEED_BINS + [None], SPEED_LABELS, SPEED)
+        ],
+        "standing": standing(hosts),
+        "libraries": [{"id": lib, "name": COLUMNS[lib], "variant_of": VARIANTS.get(lib)} for lib in COLUMNS],
+        "sections": [
+            {"name": section, "operations": [{"id": row_name(op), "label": label(row_name(op))} for op in ops]}
+            for section, ops in SECTIONS
+        ],
+        "hosts": [host_data(name) for name in shown_names(hosts)],
+        "unmeasured": [name for name in COLLECT_HOSTS if name not in hosts],
+        "tiers": None,
+        "gaps": [],
+        "verified": [
+            {
+                "library": e["library"],
+                "operations": e["operations"],
+                "platform": platform_of(e),
+                **({"os": e["os"]} if "os" in e else {}),
+                "proof": e["proof"],
+                "link": e["link"],
+            }
+            for e in verified
+        ],
+    }
+    if tiers is not None:
+        order = tier_columns(tiers)
+        data["tiers"] = {
+            # The libraries any tier's fastest is drawn from.
+            "rivals": ["rind", *BASELINES, *TIMED],
+            "run": tiers["run"],
+            "url": tiers["url"],
+            "date": tiers["date"][:10],
+            "commit": tiers["commit"],
+            "columns": [tier_data(t) for t in sorted(tiers["tiers"], key=lambda t: order.index(tier_column(t)))],
+            "groups": tier_groups(tiers),
+        }
+    for e, covered in gaps:
+        ratios = [ratio for ratio, _ in covered.values()]
+        data["gaps"].append(
+            {
+                "operations": [{"id": op, "label": label(op) if op in rows else None} for op in e["operations"]],
+                "on": [{"name": p, "host": p in hosts} for p in e["on"]],
+                "low": round(min(ratios), 2),
+                "high": round(max(ratios), 2),
+                "fastest": sorted({COLUMNS[lib] for _, lib in covered.values()}),
+                "quest": {"path": e["quest"], "title": quest_title(e["quest"])} if "quest" in e else None,
+                "reason": e.get("reason"),
+            }
+        )
+    return data
+
+
 def report(hosts, tiers, verified, gaps):
-    """BENCHMARKS.md, its SVGs, and the README with its comparison, by path."""
+    """BENCHMARKS.md, its SVGs, the site's data, and the README with its
+    comparison, by path."""
     files = {}
     shown = shown_names(hosts)
     words = ["no", "one", "two", "three", "four", "five", "six"]
@@ -2238,7 +2483,8 @@ def report(hosts, tiers, verified, gaps):
             "and X25519) and of a rustls client per provider, by `admin/build-cost`: the median of three builds with an empty target directory and a warm "
             "download cache, their CPU time, the stripped binary's size, the build tools it needs beyond rustc "
             "and a linker, and the crates it compiles. The system OpenSSL build leaves the library itself out of "
-            "its size; the vendored build is the static figure.",
+            "its size; the vendored build is the static figure. verified-garbage has no P-256 key generation, so "
+            "its binary imports a random scalar instead, and no rustls provider, so it has no rustls build.",
             "",
         ]
     for name in shown:
@@ -2271,15 +2517,16 @@ def report(hosts, tiers, verified, gaps):
             "no SHA-3 without the SHA-512 and SHA-3 instructions, no crypto without any of them, armv7 in 32-bit "
             "mode on the same core, and armv7 NEON there without the crypto extension. portable times rind's portable "
             "backend, forced with `--cfg rind_portable`, against aws-lc's C built without assembly; ring has no "
-            "such build, so it sits that column out. Each cell is rind's time over "
-            "the fastest of aws-lc-rs and ring (aws-lc-rs alone where a feature is denied, since ring can't "
-            "be denied one), in the row's benchmark where rind trails most. An empty cell runs the same code "
-            "as the one to its left, so it isn't timed.",
+            "such build, and verified-garbage runs its assembly there, so both sit that column out. Each cell is "
+            "rind's time over the fastest of aws-lc-rs, ring, and verified-garbage (without ring where a feature "
+            "is denied, since ring can't be denied one), in the row's benchmark where rind trails most. A cell "
+            "verified-garbage wins gets a quest that switches rind to its proven code, not an entry under "
+            "Known gaps. An empty cell runs the same code as the one to its left, so it isn't timed.",
             "",
             f"From [run {tiers['run']}]({tiers['url']}), {tiers['date'][:10]} at {commit_link(tiers['commit'])}, "
             f"on {', '.join(cpus)}.",
             "",
-            *picture("tiers", "rind's time over the fastest of aws-lc-rs and ring, by CPU tier"),
+            *picture("tiers", TIERS_TITLE),
             "",
             "<details>",
             "<summary>Every benchmark</summary>",
@@ -2304,13 +2551,7 @@ def report(hosts, tiers, verified, gaps):
         "",
         "## Verified code",
         "",
-        "A ✓ means a published, machine-checked proof shows that all the code computing the operation, as "
-        "that library runs it on that host, gives the specified result for every input: the cipher and its "
-        "mode, the hash over every block with its padding, the whole scalar multiplication or exponentiation, "
-        "and the glue around them, such as clamping, byte conversion, and point encoding. Parsing DER key and "
-        "signature containers, randomness, and the message hash a signature takes are left out. Proofs of "
-        "memory safety alone, or of only some of the code, earn no ✓. `benchmarks/verified.toml` holds this "
-        "table.",
+        f"{VERIFIED_RULE} `benchmarks/verified.toml` holds this table.",
         "",
         "| Library | Operations | Platform | Proof |",
         "|---|---|---|---|",
@@ -2366,6 +2607,7 @@ def report(hosts, tiers, verified, gaps):
     ]
     files = {os.path.join(REPORT_DIR, k): v for k, v in files.items()}
     files[REPORT] = "\n".join(md)
+    files[SITE_DATA] = json.dumps(site_data(hosts, tiers, verified, gaps), ensure_ascii=False, separators=(",", ":")) + "\n"
     files[README] = readme_with_comparison(comparison_table(hosts, verified))
     return files
 
@@ -2887,8 +3129,8 @@ def render(args):
     for path in generated:
         if path not in files:
             os.remove(path)
-    os.makedirs(REPORT_DIR, exist_ok=True)
     for path, content in files.items():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write(content)
     print(os.path.relpath(REPORT, ROOT))
@@ -2932,12 +3174,14 @@ def gate(args):
     tiers = run_tiers(args.dir)
     previous = gaps_of({}, run_tiers(args.previous)) if args.previous else None
     entries = gap_entries(GAPS)
+    # A benchmark only TIMED libraries rival, such as ChaCha20 without
+    # Poly1305, is ranked for the heatmap alone, so it goes unmentioned.
     unbaselined = sorted(
         {
             f"{key} on {tier_column(t)}"
             for t in tiers["tiers"]
             for key, libs in t["benchmarks"].items()
-            if tier_row(key) and not set(libs) & set(BASELINES)
+            if tier_row(key) and not set(libs) & set(BASELINES + TIMED)
         }
     )
     undecided, once = [], []

@@ -4790,7 +4790,6 @@ dependencies = [
 name = "rind-fips-module"
 version = "0.1.0"
 dependencies = [
- "libc",
  "rind",
 ]
 
@@ -6007,7 +6006,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 [[package]]
 name = "verified-garbage"
 version = "0.0.0"
-source = "git+https://github.com/pyca/verified-garbage?rev=d004ffaeb3c226c377a59f9f824386246d73ca5d#d004ffaeb3c226c377a59f9f824386246d73ca5d"
+source = "git+https://github.com/pyca/verified-garbage?rev=e7b0fe8a82b7777958e078573771d51415f105bb#e7b0fe8a82b7777958e078573771d51415f105bb"
 dependencies = [
  "getrandom 0.4.3",
  "verified-garbage-asm-aarch64",
@@ -6022,7 +6021,7 @@ dependencies = [
 [[package]]
 name = "verified-garbage-asm-aarch64"
 version = "0.0.0"
-source = "git+https://github.com/pyca/verified-garbage?rev=d004ffaeb3c226c377a59f9f824386246d73ca5d#d004ffaeb3c226c377a59f9f824386246d73ca5d"
+source = "git+https://github.com/pyca/verified-garbage?rev=e7b0fe8a82b7777958e078573771d51415f105bb#e7b0fe8a82b7777958e078573771d51415f105bb"
 dependencies = [
  "verified-garbage-cpu",
 ]
@@ -6030,7 +6029,7 @@ dependencies = [
 [[package]]
 name = "verified-garbage-asm-arm"
 version = "0.0.0"
-source = "git+https://github.com/pyca/verified-garbage?rev=d004ffaeb3c226c377a59f9f824386246d73ca5d#d004ffaeb3c226c377a59f9f824386246d73ca5d"
+source = "git+https://github.com/pyca/verified-garbage?rev=e7b0fe8a82b7777958e078573771d51415f105bb#e7b0fe8a82b7777958e078573771d51415f105bb"
 dependencies = [
  "verified-garbage-cpu",
 ]
@@ -6038,7 +6037,7 @@ dependencies = [
 [[package]]
 name = "verified-garbage-asm-powerpc64le"
 version = "0.0.0"
-source = "git+https://github.com/pyca/verified-garbage?rev=d004ffaeb3c226c377a59f9f824386246d73ca5d#d004ffaeb3c226c377a59f9f824386246d73ca5d"
+source = "git+https://github.com/pyca/verified-garbage?rev=e7b0fe8a82b7777958e078573771d51415f105bb#e7b0fe8a82b7777958e078573771d51415f105bb"
 dependencies = [
  "verified-garbage-cpu",
 ]
@@ -6046,7 +6045,7 @@ dependencies = [
 [[package]]
 name = "verified-garbage-asm-riscv64"
 version = "0.0.0"
-source = "git+https://github.com/pyca/verified-garbage?rev=d004ffaeb3c226c377a59f9f824386246d73ca5d#d004ffaeb3c226c377a59f9f824386246d73ca5d"
+source = "git+https://github.com/pyca/verified-garbage?rev=e7b0fe8a82b7777958e078573771d51415f105bb#e7b0fe8a82b7777958e078573771d51415f105bb"
 dependencies = [
  "verified-garbage-cpu",
 ]
@@ -6054,7 +6053,7 @@ dependencies = [
 [[package]]
 name = "verified-garbage-asm-x86"
 version = "0.0.0"
-source = "git+https://github.com/pyca/verified-garbage?rev=d004ffaeb3c226c377a59f9f824386246d73ca5d#d004ffaeb3c226c377a59f9f824386246d73ca5d"
+source = "git+https://github.com/pyca/verified-garbage?rev=e7b0fe8a82b7777958e078573771d51415f105bb#e7b0fe8a82b7777958e078573771d51415f105bb"
 dependencies = [
  "verified-garbage-cpu",
 ]
@@ -6062,7 +6061,7 @@ dependencies = [
 [[package]]
 name = "verified-garbage-asm-x86_64"
 version = "0.0.0"
-source = "git+https://github.com/pyca/verified-garbage?rev=d004ffaeb3c226c377a59f9f824386246d73ca5d#d004ffaeb3c226c377a59f9f824386246d73ca5d"
+source = "git+https://github.com/pyca/verified-garbage?rev=e7b0fe8a82b7777958e078573771d51415f105bb#e7b0fe8a82b7777958e078573771d51415f105bb"
 dependencies = [
  "verified-garbage-cpu",
 ]
@@ -6070,7 +6069,7 @@ dependencies = [
 [[package]]
 name = "verified-garbage-cpu"
 version = "0.0.0"
-source = "git+https://github.com/pyca/verified-garbage?rev=d004ffaeb3c226c377a59f9f824386246d73ca5d#d004ffaeb3c226c377a59f9f824386246d73ca5d"
+source = "git+https://github.com/pyca/verified-garbage?rev=e7b0fe8a82b7777958e078573771d51415f105bb#e7b0fe8a82b7777958e078573771d51415f105bb"
 
 [[package]]
 name = "version_check"

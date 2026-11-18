@@ -7,6 +7,7 @@
       "dependencies": {
         "@astrojs/svelte": "9.1.6",
         "astro": "7.4.12",
+        "entities": "4.5.0",
         "marked": "18.2.0",
         "svelte": "5.57.3",
       },
