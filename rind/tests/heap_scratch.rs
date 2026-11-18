@@ -399,7 +399,7 @@ fn pbkdf2() {
         Secret::new(algorithm, b"password one")
             .derive(iterations, b"saltsalt", &mut stored)
             .unwrap();
-        independent(
+        assert_independent(
             &format!("{algorithm:?}"),
             [*b"password one", *b"password two"],
             |password| {
