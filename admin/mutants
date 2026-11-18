@@ -550,6 +550,8 @@ case $campaign in
             'rind/src/low/aarch64/**' 'rind/src/low/arm/**' "${portable[@]}"
             rind/src/low/generic/mlkem_sample.rs
             rind/src/low/x86_64/mlkem_sample_poly_ntt_8x.rs
+            rind/src/low/x86_64/mlkem_shake256_8x.rs
+            rind/src/low/x86_64/poly1305_ifma.rs
             rind/src/low/x86_64/rsaz_avx512.rs
         )
         rows=(
