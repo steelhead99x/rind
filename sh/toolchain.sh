@@ -67,7 +67,7 @@ EOF
     chmod +x "$stubs/rustc" "$stubs/cargo"
 
     # expect STATUS PATTERN RUSTC FMT CLIPPY: the check's exit status, and a
-    # pattern its stderr must match (empty: must be empty).
+        # pattern its stderr must match (empty: must be empty).
     expect() {
         local want=$1 pattern=$2 status=0
         out=$(PATH="$stubs:$PATH" STUB_RUSTC=$3 STUB_FMT=$4 STUB_CLIPPY=$5 check 2>&1) || status=$?
@@ -76,7 +76,11 @@ EOF
             echo "$out" >&2
             exit 1
         fi
-        if [[ -z "$pattern" && -n "$out" ]] || [[ -n "$pattern" ]] && ! grep -qE -- "$pattern" <<<"$out"; then
+        # `||` and `&&` share precedence and associate left, so an ungrouped
+        # trailing `&&` also runs when the pattern is empty, and `grep` of an
+        # empty pattern matches any output. Group it so a success that prints
+        # fails the test.
+        if [[ -z "$pattern" && -n "$out" ]] || { [[ -n "$pattern" ]] && ! grep -qE -- "$pattern" <<<"$out"; }; then
             echo "toolchain: self-test: rustc '$3', fmt '$4', clippy '$5' printed:" >&2
             echo "$out" >&2
             echo "want ${pattern:-nothing}" >&2
