@@ -4,6 +4,7 @@ import Base from "../layouts/Base.astro";
 import * as landing from "../lib/landing";
 import { html, inlineHtml } from "../lib/markdown";
 import { home } from "../lib/pages";
+import { picker } from "../lib/routes";
 ---
 
 <Base page={home} title={`rind: ${landing.headline}`}>
@@ -28,6 +29,11 @@ import { home } from "../lib/pages";
 					</article>
 				))
 			}
+		</section>
+
+		<section>
+			<h2>{picker.title}</h2>
+			<nav class="picker">{picker.links.map((l) => <a href={l.href}>{l.label}</a>)}</nav>
 		</section>
 
 		<section>
@@ -102,6 +108,20 @@ import { home } from "../lib/pages";
 	}
 	.claims h2 a {
 		color: inherit;
+	}
+	.picker {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+	.picker a {
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		padding: 0.25rem 0.9rem;
+		text-decoration: none;
+	}
+	.picker a:hover {
+		border-color: var(--accent);
 	}
 	.prompt {
 		position: relative;

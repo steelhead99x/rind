@@ -1,0 +1,16 @@
+name = "verified-garbage"
+defaultTargets = ["vg-cosim"]
+
+# pyca/verified-garbage's ISA models, which `admin/import-vg-models` vendors
+# byte for byte. They import only Lean core.
+[[lean_lib]]
+name = "VerifiedGarbage"
+globs = ["VerifiedGarbage.+"]
+
+[[lean_lib]]
+name = "Cosim"
+globs = ["Cosim.+"]
+
+[[lean_exe]]
+name = "vg-cosim"
+root = "Cosim.Main"

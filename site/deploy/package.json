@@ -1,0 +1,9 @@
+{
+	"name": "rind-site-deploy",
+	"private": true,
+	"type": "module",
+	"packageManager": "bun@1.4.4",
+	"dependencies": {
+		"wrangler": "4.159.0"
+	}
+}
