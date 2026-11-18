@@ -5,6 +5,8 @@
 //! one-pass routine runs.
 
 use crate::low::chacha20::ChaCha20;
+#[cfg(not(rind_backend = "aarch64"))]
+use crate::low::ct_equal;
 use crate::low::poly1305::Poly1305;
 
 /// Encrypts `inout` in place, returning the tag over `aad` and the ciphertext.
@@ -12,12 +14,18 @@ pub(crate) fn seal(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], inout: &mut [u8
     cipher(key, nonce, aad, inout, true)
 }
 
-/// Decrypts `inout` in place, returning the tag over `aad` and the
-/// ciphertext, which the caller checks.
-// aarch64 tests compare only `seal` with the one-pass routine.
+/// Decrypts `inout` in place, and returns whether `tag` is its tag over
+/// `aad` and the ciphertext, a secret.
+// aarch64 tests compare only `seal` with the one-pass routines.
 #[cfg(not(rind_backend = "aarch64"))]
-pub(crate) fn open(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], inout: &mut [u8]) -> [u8; 16] {
-    cipher(key, nonce, aad, inout, false)
+pub(crate) fn open(
+    key: &[u8; 32],
+    nonce: &[u8; 12],
+    aad: &[u8],
+    inout: &mut [u8],
+    tag: &[u8; 16],
+) -> bool {
+    ct_equal(&cipher(key, nonce, aad, inout, false), tag)
 }
 
 fn cipher(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], inout: &mut [u8], seal: bool) -> [u8; 16] {

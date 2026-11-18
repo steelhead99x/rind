@@ -567,8 +567,8 @@ case $campaign in
             rind/src/low/generic/sha1.rs rind/src/low/generic/sha256.rs
         )
         rows=(
-            "sha3"
-            "aes pmull sha2 sha3"
+            "sha3 sve2"
+            "aes pmull sha2 sha3 sve2"
         )
         ;;
     portable)

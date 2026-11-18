@@ -3,10 +3,11 @@
 
 use super::{enter_cpu_state, leave_cpu_state};
 
-#[cfg(all(debug_assertions, not(test)))]
+#[cfg(all(debug_assertions, not(test), rind_std))]
 std::thread_local! {
     // This thread's live `Entry`s, for `Entry::assert_held`. Unit tests call
-    // internals with no public function above them, so they don't count.
+    // internals with no public function above them, so they don't count, and
+    // a target without an OS has no threads to count per.
     static HELD: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
 }
 
@@ -34,7 +35,7 @@ impl Entry {
     /// Public functions have no secret data in their arguments or return values.
     #[must_use]
     pub(crate) fn new_public() -> Self {
-        #[cfg(all(debug_assertions, not(test)))]
+        #[cfg(all(debug_assertions, not(test), rind_std))]
         HELD.set(HELD.get() + 1);
 
         Self {
@@ -55,7 +56,7 @@ impl Entry {
     #[must_use]
     pub(crate) fn new_secret() -> Self {
         let cpu_state = enter_cpu_state();
-        #[cfg(all(debug_assertions, not(test)))]
+        #[cfg(all(debug_assertions, not(test), rind_std))]
         HELD.set(HELD.get() + 1);
 
         Self {
@@ -69,19 +70,19 @@ impl Entry {
         }
     }
 
-    /// Panics in a debug build unless this thread holds an `Entry`.
+    /// Panics in a debug build with an OS unless this thread holds an `Entry`.
     ///
     /// Primitives that make no `Entry` of their own call this, so a test
     /// reaching one through a public function that skipped its `Entry` fails.
     pub(crate) fn assert_held() {
-        #[cfg(all(debug_assertions, not(test)))]
+        #[cfg(all(debug_assertions, not(test), rind_std))]
         assert!(HELD.get() > 0, "computing outside an `Entry`");
     }
 }
 
 impl Drop for Entry {
     fn drop(&mut self) {
-        #[cfg(all(debug_assertions, not(test)))]
+        #[cfg(all(debug_assertions, not(test), rind_std))]
         HELD.set(HELD.get() - 1);
         if self.secret {
             leave_cpu_state(self.cpu_state);

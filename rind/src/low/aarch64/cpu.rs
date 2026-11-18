@@ -142,6 +142,31 @@ impl HaveSha3 {
     pub(crate) fn check() -> Option<Self> {
         (features() & SHA3 != 0).then_some(Self(()))
     }
+
+    /// The token where Keccak-f runs on the SHA3 instructions: only on Apple
+    /// targets, whose cores run them on every SIMD unit. Other cores, such as
+    /// Neoverse N2, run them on fewer, so scalar Keccak-f measured twice as
+    /// fast there; mlkem-native and verified-garbage choose the same way, by
+    /// target, so Linux on Apple's cores runs scalar code too.
+    pub(crate) fn check_keccak() -> Option<Self> {
+        if cfg!(target_vendor = "apple") {
+            Self::check()
+        } else {
+            None
+        }
+    }
+}
+
+/// Proof that the CPU has SVE2, which pyca/verified-garbage's fastest
+/// ChaCha20-Poly1305 uses, as Armv9 cores such as Neoverse N2 and V2 and the
+/// Cortex-A710 and X2 on have, and Apple's do not.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveSve2(());
+
+impl HaveSve2 {
+    pub(crate) fn check() -> Option<Self> {
+        (features() & SVE2 != 0).then_some(Self(()))
+    }
 }
 
 const CRYPTO_EXT: u8 = 1 << 1;
@@ -150,6 +175,7 @@ const SHA3: u8 = 1 << 2;
 const DIT: u8 = 1 << 3;
 #[cfg(target_vendor = "apple")]
 const SB: u8 = 1 << 4;
+const SVE2: u8 = 1 << 5;
 const DETECTED: u8 = 1 << 7;
 
 static FEATURES: AtomicU8 = AtomicU8::new(0);
@@ -173,14 +199,31 @@ fn detect_once() -> u8 {
 }
 
 fn detect() -> u8 {
+    // `std` asks the OS, which alone may read the CPU's ID registers. Without
+    // one there is no portable way to ask, so a target with no OS runs what
+    // it enables at compile time, as `std` does on an OS it cannot ask.
+    #[cfg(rind_std)]
     use std::arch::is_aarch64_feature_detected as detected;
+    #[cfg(not(rind_std))]
+    macro_rules! detected {
+        // Rust's `aes` target feature covers PMULL too.
+        ("pmull") => {
+            cfg!(target_feature = "aes")
+        };
+        ($feature:tt) => {
+            cfg!(target_feature = $feature)
+        };
+    }
 
     let crypto_ext = test_toggle("aes", detected!("aes"))
         && test_toggle("pmull", detected!("pmull"))
         // Rust's `sha2` covers the SHA-1 instructions too.
         && test_toggle("sha2", detected!("sha2"));
     let sha3 = test_toggle("sha3", detected!("sha3"));
-    let features = (if crypto_ext { CRYPTO_EXT } else { 0 }) | (if sha3 { SHA3 } else { 0 });
+    let sve2 = test_toggle("sve2", detected!("sve2"));
+    let features = (if crypto_ext { CRYPTO_EXT } else { 0 })
+        | (if sha3 { SHA3 } else { 0 })
+        | (if sve2 { SVE2 } else { 0 });
     #[cfg(target_vendor = "apple")]
     let features = features
         | if test_toggle("dit", detected!("dit")) {
@@ -271,25 +314,10 @@ mod dit {
     }
 }
 
-#[cfg(not(any(debug_assertions, rind_cpu_disable)))]
-fn test_toggle(_id: &str, detected: bool) -> bool {
-    detected
-}
-
-/// Lets a debug build, or a release one with `--cfg rind_cpu_disable`, deny a
-/// feature with `RIND_CPU_DISABLE_<id>`, as on x86_64, so a CPU with the
+/// `detected`, unless `RIND_CPU_DISABLE_<id>` denies it, so a CPU with the
 /// crypto extension also tests the code for one without.
-#[cfg(any(debug_assertions, rind_cpu_disable))]
 fn test_toggle(id: &str, detected: bool) -> bool {
-    if std::env::var(format!("RIND_CPU_DISABLE_{id}")).is_ok() {
-        // The FIPS module honours the mask in its release build, where its
-        // caller's stdout is not its own.
-        #[cfg(not(rind_fips))]
-        println!("DEBUG: denying cpuid {id:?}");
-        false
-    } else {
-        detected
-    }
+    detected && !crate::low::cpu_denied(id)
 }
 
 /// Read-only prefetch hint.
@@ -345,17 +373,12 @@ mod tests {
         assert_ne!(call!(ct_compare_16, &[1; 16], &[2; 16]), 0);
     }
 
-    /// Whether std detects every feature named, less those `test_toggle`
+    /// Whether std detects every feature named, less those `RIND_CPU_DISABLE_<id>`
     /// denies.
     macro_rules! available {
         ($($name:tt),+) => {
-            true $(&& std::arch::is_aarch64_feature_detected!($name) && !denied($name))+
+            true $(&& std::arch::is_aarch64_feature_detected!($name) && !crate::low::cpu_denied($name))+
         };
-    }
-
-    fn denied(name: &str) -> bool {
-        cfg!(any(debug_assertions, rind_cpu_disable))
-            && std::env::var(format!("RIND_CPU_DISABLE_{name}")).is_ok()
     }
 
     // Each check names the features its kernels need, which the OS reports
@@ -367,6 +390,11 @@ mod tests {
             available!("aes", "pmull", "sha2")
         );
         assert_eq!(HaveSha3::check().is_some(), available!("sha3"));
+        assert_eq!(
+            HaveSha3::check_keccak().is_some(),
+            cfg!(target_vendor = "apple") && available!("sha3")
+        );
+        assert_eq!(HaveSve2::check().is_some(), available!("sve2"));
         #[cfg(target_vendor = "apple")]
         assert_eq!(features() & SB != 0, available!("sb"));
     }
@@ -381,6 +409,9 @@ mod tests {
         }
         if let Some(expected) = std::env::var_os("RIND_TEST_ARM_SHA3") {
             assert_eq!(HaveSha3::check().is_some(), expected == "1");
+        }
+        if let Some(expected) = std::env::var_os("RIND_TEST_ARM_SVE2") {
+            assert_eq!(HaveSve2::check().is_some(), expected == "1");
         }
     }
 
