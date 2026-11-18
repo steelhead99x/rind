@@ -14,7 +14,7 @@ Fork PR #82. Its body records the latest head and review score.
 - [x] Limit the narrow path to widths that are benchmarked: 16 words, and 32 words once measured on a Cortex-A76 (RSA-2048 verification at 0.57x and RSA-4096 signing at 0.52x of `bn_mul_mont`'s time).
 - [x] Skip the ctgrind narrow rerun on portable builds.
 - Leave the one-time detection out of the ct-qemu traces.
-- Decide whether `wide_multiplier()` stays a `#[doc(hidden)]` public item, as the PR has it now, or goes crate-private with rind-cpuid reading `AT_HWCAP` and `MIDR_EL1` itself, as its x86_64 build reads `cpuid`. This is the maintainer's call.
+- [x] Keep `wide_multiplier()` crate-private, as AGENTS.md's "one way to do each job" and upstream's lone hidden public item (`rind::fips`, FIPS-build only) suggest; rind-cpuid reads `AT_HWCAP` and `MIDR_EL1` itself, as its x86_64 build reads `cpuid`.
 - Expect a file conflict with upstream #813.
 
 Next: [#118](/quest/m2/118-narrow-vs-generic-tests.md).
