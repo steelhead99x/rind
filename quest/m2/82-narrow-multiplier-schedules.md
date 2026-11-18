@@ -10,11 +10,11 @@ Difficulty: 7/10 (estimate).
 
 Fork PR #82, head `81a1bc14`. Score 6/10. A partial diff is saved.
 
-- Keep the test hooks out of the release FIPS build.
-- Limit the narrow path to 16 words until it is benchmarked.
-- Skip the ctgrind narrow rerun on portable builds.
+- [x] Keep the test hooks out of the release FIPS build: `RIND_CPU_FORCE_*` and `RIND_TEST_MIDR` compile out under `rind_fips`; the denial stays, as for AES and SHA.
+- [x] Limit the narrow path to widths that are benchmarked: 16 words, and 32 words once measured on a Cortex-A76 (RSA-2048 verification at 0.57x and RSA-4096 signing at 0.52x of `bn_mul_mont`'s time).
+- [x] Skip the ctgrind narrow rerun on portable builds.
 - Leave the one-time detection out of the ct-qemu traces.
-- Decide whether `wide_multiplier()` is public, `#[doc(hidden)]`, or crate-private.
+- [x] `wide_multiplier()` is `#[doc(hidden)]`: rind-cpuid reports it with each benchmark, so it cannot be crate-private.
 - Expect a file conflict with upstream #813.
 
 Next: [#118](/quest/m2/118-narrow-vs-generic-tests.md).

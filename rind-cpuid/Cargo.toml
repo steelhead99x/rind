@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 rust-version.workspace = true
 publish = false
+
+# The aarch64 probe reports which multiplier schedule rind selected.
+# x86_64 reads `cpuid` itself and does not link the library.
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+rind = { path = "../rind" }

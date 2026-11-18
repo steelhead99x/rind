@@ -4748,6 +4748,9 @@ dependencies = [
 [[package]]
 name = "rind-cpuid"
 version = "0.1.0"
+dependencies = [
+ "rind",
+]
 
 [[package]]
 name = "rind-dart"
