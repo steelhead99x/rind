@@ -370,10 +370,14 @@ IMPORTS_64 = [
         ],
     },
     # RSAZ's dual exponentiation, which aws-lc runs for the CRT of RSA-2048,
-    # 3072, and 4096 with AVX-512 IFMA: products on 256-bit vectors over
-    # 52-bit limbs, two moduli at once, and the gather of a table entry for
-    # each. `ones` runs on through `zeros`. The three sizes' tables match, so
-    # the 3k and 4k imports check theirs against the 2k one's and write none.
+    # 3072, and 4096 with AVX-512 IFMA, and rind for the keys
+    # pyca/verified-garbage's CRT does not take: RSA-3072 without AVX512_FP16,
+    # where VG's measured slower, and a modulus a word narrower than its two
+    # primes, which rind's 2048-bit floor leaves only for 4096-bit-class keys.
+    # Products on 256-bit vectors over 52-bit limbs, two moduli at once, and
+    # the gather of a table entry for each. `ones` runs on through `zeros`.
+    # The two sizes' tables match, so the 4k import checks its against the
+    # 3k one's and writes none.
     *[
         {
             "arch": "x86_64",
@@ -386,10 +390,10 @@ IMPORTS_64 = [
                 "SPDX-License-Identifier: Apache-2.0",
             ],
             "tables": ["mask52x4", "ones"],
-            **({} if size == "2k" else {"tables_of": "rsaz-2k-avx512"}),
+            **({} if size == "3k" else {"tables_of": "rsaz-3k-avx512"}),
             "routines": [f"rsaz_amm52x{digits}_x2_ifma256", f"extract_multiplier_2x{digits}_win5"],
         }
-        for size, digits in [("2k", 20), ("3k", 30), ("4k", 40)]
+        for size, digits in [("3k", 30), ("4k", 40)]
     ],
     # Of those, these are AES and GHASH for CPUs without AVX, or without
     # AES-NI and PCLMULQDQ.

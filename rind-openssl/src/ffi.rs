@@ -92,6 +92,55 @@ impl Param {
     }
 }
 
+impl Param {
+    /// A parameter that gives `value`, as a string.
+    pub(crate) const fn text(key: &'static CStr, value: &'static CStr) -> Self {
+        Self::value(
+            key,
+            UTF8_STRING,
+            value.as_ptr().cast(),
+            value.to_bytes_with_nul().len(),
+        )
+    }
+
+    /// A parameter that gives `value`, an unsigned integer.
+    pub(crate) const fn unsigned(key: &'static CStr, value: &'static c_uint) -> Self {
+        Self::value(
+            key,
+            UNSIGNED_INTEGER,
+            (value as *const c_uint).cast(),
+            size_of::<c_uint>(),
+        )
+    }
+
+    /// A parameter that gives `value`, an integer.
+    pub(crate) const fn signed(key: &'static CStr, value: &'static c_int) -> Self {
+        Self::value(
+            key,
+            INTEGER,
+            (value as *const c_int).cast(),
+            size_of::<c_int>(),
+        )
+    }
+
+    /// A parameter that gives `size` bytes of `data`, which OpenSSL reads and
+    /// never writes through the `*mut` its struct declares.
+    const fn value(
+        key: &'static CStr,
+        data_type: c_uint,
+        data: *const c_void,
+        size: usize,
+    ) -> Self {
+        Self {
+            key: key.as_ptr(),
+            data_type,
+            data: data.cast_mut(),
+            data_size: size,
+            return_size: UNMODIFIED,
+        }
+    }
+}
+
 /// `OSSL_ITEM`: a number and a pointer, here a reason code and its string.
 #[repr(C)]
 pub(crate) struct Item {
@@ -140,6 +189,7 @@ pub(crate) const PROVIDER_TEARDOWN: c_int = 1024;
 pub(crate) const PROVIDER_GETTABLE_PARAMS: c_int = 1025;
 pub(crate) const PROVIDER_GET_PARAMS: c_int = 1026;
 pub(crate) const PROVIDER_QUERY_OPERATION: c_int = 1027;
+pub(crate) const PROVIDER_GET_CAPABILITIES: c_int = 1030;
 pub(crate) const PROVIDER_GET_REASON_STRINGS: c_int = 1029;
 
 // Key management.
@@ -212,6 +262,8 @@ pub(crate) type ProviderGettableParams = unsafe extern "C" fn(*mut c_void) -> *c
 pub(crate) type ProviderGetParams = unsafe extern "C" fn(*mut c_void, *mut Param) -> c_int;
 pub(crate) type ProviderQueryOperation =
     unsafe extern "C" fn(*mut c_void, c_int, *mut c_int) -> *const Algorithm;
+pub(crate) type ProviderGetCapabilities =
+    unsafe extern "C" fn(*mut c_void, *const c_char, Callback, *mut c_void) -> c_int;
 pub(crate) type ProviderGetReasonStrings = unsafe extern "C" fn(*mut c_void) -> *const Item;
 
 pub(crate) type KeymgmtNew = unsafe extern "C" fn(*mut c_void) -> *mut c_void;

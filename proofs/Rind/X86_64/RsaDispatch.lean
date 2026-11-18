@@ -452,9 +452,9 @@ theorem public_key_verify_spec (pk : high.signature.rsa.PublicKey)
 /-- `PublicKey::verify(&verify::PKCS1_SHA256, ..)` with a loaded `(N, E)`
 key: refused if the modulus is under 2048 bits, and otherwise
 RSASSA-PKCS1-V1_5-VERIFY with SHA-256, over Montgomery products at its
-width. -/
+width, on a CPU without AVX-512 IFMA. -/
 theorem rsa_pkcs1_sha256_verify_spec (h : Runs) (hb : Sha256Blocks) (pk : high.signature.rsa.PublicKey)
-    (N E : Nat) (hk : KeyLoaded pk.key N E) (hP : MontProducts ((N.size + 63) / 64))
+    (N E : Nat) (hk : KeyLoaded pk.key N E) (hP : MontProducts ((N.size + 63) / 64)) (hifma : NoIfma)
     (message signature : Slice U8) (hm : message.length ≤ maxInput) :
     high.signature.rsa.PublicKey.verify pk high.signature.rsa.verify.PKCS1_SHA256 message signature ⦃ r =>
       if N.size < 2048 then r = .Err (.KeyRejected .RsaModulus)
@@ -464,14 +464,14 @@ theorem rsa_pkcs1_sha256_verify_spec (h : Runs) (hb : Sha256Blocks) (pk : high.s
   obtain ⟨hinv, hN, hE, hused⟩ := hk
   dsimp only [high.signature.rsa.verify.PKCS1_SHA256]
   rw [← hN, ← hE]
-  exact verify_pkcs1_sha256_spec h hb pk.key hinv (by rw [hused, ← hN]; exact hN ▸ hP) signature message hm
+  exact verify_pkcs1_sha256_spec h hb pk.key hinv (by rw [hused, ← hN]; exact hN ▸ hP) hifma signature message hm
 
 /-- `PublicKey::verify(&verify::PSS_SHA256, ..)` with a loaded `(N, E)` key:
 refused if the modulus is under 2048 bits, and otherwise RSASSA-PSS-VERIFY
 with SHA-256, MGF1 with SHA-256, and a 32-byte salt, over Montgomery
-products at its width. -/
+products at its width, on a CPU without AVX-512 IFMA. -/
 theorem rsa_pss_sha256_verify_spec (h : Runs) (hb : Sha256Blocks) (pk : high.signature.rsa.PublicKey)
-    (N E : Nat) (hk : KeyLoaded pk.key N E) (hP : MontProducts ((N.size + 63) / 64))
+    (N E : Nat) (hk : KeyLoaded pk.key N E) (hP : MontProducts ((N.size + 63) / 64)) (hifma : NoIfma)
     (message signature : Slice U8) (hm : message.length ≤ maxInput) :
     high.signature.rsa.PublicKey.verify pk high.signature.rsa.verify.PSS_SHA256 message signature ⦃ r =>
       if N.size < 2048 then r = .Err (.KeyRejected .RsaModulus)
@@ -480,7 +480,7 @@ theorem rsa_pss_sha256_verify_spec (h : Runs) (hb : Sha256Blocks) (pk : high.sig
   obtain ⟨hinv, hN, hE, hused⟩ := hk
   dsimp only [high.signature.rsa.verify.PSS_SHA256]
   rw [← hN, ← hE]
-  have := verify_pss_sha256_spec h hb pk.key hinv (by rw [hused, ← hN]; exact hN ▸ hP) (some .Hash)
+  have := verify_pss_sha256_spec h hb pk.key hinv (by rw [hused, ← hN]; exact hN ▸ hP) hifma (some .Hash)
     signature message hm
   simpa [pssSaltLen] using this
 

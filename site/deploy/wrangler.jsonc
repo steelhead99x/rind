@@ -1,0 +1,19 @@
+// The Worker that serves rind.kixel.ai: site/'s build as static assets, with
+// no script of its own, so no request runs code and none sets a cookie.
+// .github/workflows/site-deploy.yml's deploy job runs `wrangler deploy` from here,
+// with the account ID and token from the `site` environment.
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "rind-site",
+	"compatibility_date": "2026-11-09",
+	"assets": {
+		// build.format "file" writes /from/ring as from/ring.html, which the
+		// default html_handling serves at /from/ring.
+		"directory": "../dist"
+	},
+	// Cloudflare creates the DNS record for a custom domain itself.
+	"routes": [{ "pattern": "rind.kixel.ai", "custom_domain": true }],
+	// Only rind.kixel.ai serves it: no *.workers.dev name or preview URLs.
+	"workers_dev": false,
+	"preview_urls": false
+}

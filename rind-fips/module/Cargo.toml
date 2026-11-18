@@ -17,7 +17,6 @@ acvp = []
 
 [dependencies]
 rind = { path = "../../rind" }
-libc = { version = "0.2", default-features = false }
 
 [lints.rust]
 # Set by `rind-fips`'s build script: the module's build, and its break build.
