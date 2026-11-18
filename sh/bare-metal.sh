@@ -74,8 +74,8 @@ no_aws_lc() {
 # aarch64 has no NEON either. `x86_64-unknown-none` keeps the x86_64
 # backend only with SSE2 and soft-float cleared, which this script enables:
 # without SSE2 the target has no `xmm` registers and the build stays
-# portable. With them the backend reads CPUID. AVX, AVX2, SHA512, and
-# AVX-512 run only when those target features are enabled. XCR0 does not
+# portable. With them the backend reads CPUID. AVX, AVX2, SHA512, VAES,
+# VPCLMULQDQ, and AVX-512 run only when those target features are enabled. XCR0 does not
 # mean an interrupt saves YMM or ZMM. The script does not enable them.
 for target in \
     thumbv6m-none-eabi \
@@ -102,39 +102,28 @@ rlib_from_messages() {
 
 # `stmxcsr` is the bytes 0F AE /3. The mnemonic is not in the object code, so
 # grepping the rlib for that text misses an emitted instruction and can pass
-# on a build that still raises `#UD`. Disassemble this build's objects.
+# on a build that still raises `#UD`. Disassemble this build's objects. GNU
+# objdump and llvm-objdump (macOS's objdump) both read the rlib's archive
+# directly and skip its metadata member, so no `ar` dialect is involved.
 reject_stmxcsr() {
     local rlib=$1
-    local dir dump
-    if ! command -v ar >/dev/null || ! command -v objdump >/dev/null; then
-        echo "error: ar and objdump are required to check for stmxcsr" >&2
+    local dump
+    if ! command -v objdump >/dev/null; then
+        echo "error: objdump is required to check for stmxcsr" >&2
         exit 1
     fi
-    dir=$(mktemp -d)
-    dump=$(mktemp)
-    # The EXIT trap stays in this subshell.
-    (
-        trap 'rm -rf "$dir" "$dump"' EXIT
-        cd "$dir"
-        if ! ar x "$rlib"; then
-            echo "error: ar could not read $rlib" >&2
-            exit 1
-        fi
-        shopt -s nullglob
-        objs=(./*.o)
-        if ((${#objs[@]} == 0)); then
-            echo "error: $rlib contains no object file" >&2
-            exit 1
-        fi
-        if ! objdump -d "${objs[@]}" >"$dump"; then
-            echo "error: objdump failed on $rlib" >&2
-            exit 1
-        fi
-        if grep -E -q '(^|[[:space:]])stmxcsr([[:space:]]|$)' "$dump"; then
-            echo "error: $rlib emits stmxcsr" >&2
-            exit 1
-        fi
-    )
+    if ! dump=$(objdump -d "$rlib"); then
+        echo "error: objdump failed on $rlib" >&2
+        exit 1
+    fi
+    if ! grep -E -q '\.o\)?:[[:space:]]*file format' <<<"$dump"; then
+        echo "error: objdump found no object file in $rlib" >&2
+        exit 1
+    fi
+    if grep -E -q '(^|[[:space:]])stmxcsr([[:space:]]|$)' <<<"$dump"; then
+        echo "error: $rlib emits stmxcsr" >&2
+        exit 1
+    fi
 }
 
 # `x86_64-unknown-none` with no extra target features: portable backend,
