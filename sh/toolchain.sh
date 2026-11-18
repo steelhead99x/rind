@@ -38,7 +38,7 @@ check() {
         fi
     done
     if ((status)); then
-        echo "       Cargo runs cargo-<subcommand> from ${CARGO_HOME:-\$HOME/.cargo}/bin before PATH, so" >&2
+        echo "       Cargo runs cargo-<subcommand> from ${CARGO_HOME:-$HOME/.cargo}/bin before PATH, so" >&2
         echo "       rustup's shims there shadow the dev shell's tools. Remove them, put that" >&2
         echo "       directory on PATH after the dev shell's, or point CARGO_HOME at a directory" >&2
         echo "       whose bin/ holds none, or set ALLOW_HOST_TOOLCHAIN=1 to check anyway." >&2
@@ -49,8 +49,10 @@ check() {
 self_test() {
     local stubs out
     stubs=$(mktemp -d)
+    # EXIT, not RETURN: a failed case exits from inside expect, which skips a
+    # RETURN trap and would leave the stubs behind.
     # shellcheck disable=SC2064 # expand now: $stubs is local
-    trap "rm -rf '$stubs'" RETURN
+    trap "rm -rf '$stubs'" EXIT
     cat >"$stubs/rustc" <<'EOF'
 #!/usr/bin/env bash
 [[ -n "${STUB_RUSTC-}" ]] || exit 1
@@ -67,7 +69,7 @@ EOF
     chmod +x "$stubs/rustc" "$stubs/cargo"
 
     # expect STATUS PATTERN RUSTC FMT CLIPPY: the check's exit status, and a
-        # pattern its stderr must match (empty: must be empty).
+    # pattern its stderr must match (empty: must be empty).
     expect() {
         local want=$1 pattern=$2 status=0
         out=$(PATH="$stubs:$PATH" STUB_RUSTC=$3 STUB_FMT=$4 STUB_CLIPPY=$5 check 2>&1) || status=$?
@@ -76,10 +78,7 @@ EOF
             echo "$out" >&2
             exit 1
         fi
-        # `||` and `&&` share precedence and associate left, so an ungrouped
-        # trailing `&&` also runs when the pattern is empty, and `grep` of an
-        # empty pattern matches any output. Group it so a success that prints
-        # fails the test.
+        # Grouped because `grep` of an empty pattern matches any output.
         if [[ -z "$pattern" && -n "$out" ]] || { [[ -n "$pattern" ]] && ! grep -qE -- "$pattern" <<<"$out"; }; then
             echo "toolchain: self-test: rustc '$3', fmt '$4', clippy '$5' printed:" >&2
             echo "$out" >&2
@@ -93,7 +92,7 @@ EOF
     local clippy='clippy 0.1.98 (48a229ceae 2026-09-01)'
     expect 0 '' "$rustc" "$fmt" "$clippy"
     expect 0 '' 'rustc 1.98.1 (48a229cea 2026-09-01) (built from a source tarball)' "$fmt" "$clippy"
-    # The Alienware's case: rustup's stable rustfmt and clippy in $CARGO_HOME/bin.
+    # Rustup's newer stable rustfmt and clippy shadowing the shell's.
     expect 1 'cargo fmt --version` reports rustfmt 1\.11\.0-stable' \
         "$rustc" 'rustfmt 1.11.0-stable (0ef1bc3860 2026-11-09)' "$clippy"
     expect 1 'cargo clippy --version` reports clippy 0\.1\.100' \
