@@ -1,0 +1,75 @@
+---
+// /from and each /from/<library> page, drawn from the page's Markdown twin so
+// the two say the same thing.
+import CodeBlock from "../../components/CodeBlock.astro";
+import Base from "../../layouts/Base.astro";
+import { fromPages } from "../../lib/from";
+import { lex, segments } from "../../lib/markdown";
+import type { Page } from "../../lib/pages";
+
+export function getStaticPaths() {
+	return fromPages.map((page) => ({
+		params: { slug: page.path === "/from" ? undefined : page.path.slice("/from/".length) },
+		props: { page },
+	}));
+}
+
+const { page } = Astro.props as { page: Page };
+const parts = segments(lex(page.markdown()));
+---
+
+<Base page={page} title={`${page.title} | rind`}>
+	<header>
+		<a href="/">
+			<picture>
+				<source srcset="/wordmark.svg" media="(prefers-color-scheme: dark)" />
+				<img src="/wordmark-light.svg" width="96" height="77" alt="rind" />
+			</picture>
+		</a>
+	</header>
+	<main>
+		{parts.map((part) => ("code" in part ? <CodeBlock code={part.code} lang={part.lang} /> : <Fragment set:html={part.html} />))}
+	</main>
+</Base>
+
+<style>
+	header,
+	main {
+		max-width: 60rem;
+		margin: 0 auto;
+		padding: 0 1.25rem;
+	}
+	header {
+		padding-top: 1.5rem;
+	}
+	main {
+		padding-bottom: 4rem;
+	}
+	main :global(h1) {
+		font-size: clamp(1.5rem, 4vw, 2.25rem);
+		line-height: 1.25;
+	}
+	main :global(h2) {
+		margin-top: 2.5rem;
+		font-size: 1.35rem;
+	}
+	main :global(table) {
+		display: block;
+		overflow-x: auto;
+		border-collapse: collapse;
+		font-size: 0.95rem;
+	}
+	main :global(th),
+	main :global(td) {
+		border: 1px solid var(--border);
+		padding: 0.4rem 0.6rem;
+		text-align: left;
+		vertical-align: top;
+	}
+	main :global(blockquote) {
+		margin: 0;
+		padding: 0.25rem 1.25rem;
+		border-left: 4px solid var(--accent);
+		background: var(--surface);
+	}
+</style>

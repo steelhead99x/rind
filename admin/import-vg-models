@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""Copies pyca/verified-garbage's Lean ISA models into proofs/verified-garbage.
+
+Usage: admin/import-vg-models [--check] <verified-garbage checkout at REV>
+
+verified-garbage (VG) proves its routines against Lean models of x86_64 and
+aarch64 (`lean/VerifiedGarbage/TCB`), prints their assembly from the same
+models, and encodes it. `admin/prove vg` checks each instruction of VG's code
+that rind can run against the CPU through those models, so a proof of VG's
+about a routine rind vendors rests on a model this has checked. This copies
+the modules the cosimulation needs, `ROOTS` and every module they import,
+byte for byte, and deletes any other file there, so the copy is VG's at REV.
+`--check` changes nothing and fails unless the copy is already that.
+
+REV is `admin/import-vg`'s, the commit rind's VG code comes from, so moving
+that pin fails `--check` until the models move with it.
+`admin/upstream verified-garbage` checks out VG at REV.
+"""
+
+import os
+import re
+import sys
+
+ADMIN = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(ADMIN, "import-vg")) as f:
+    REV = re.search(r'^REV = "([0-9a-f]{40})"$', f.read(), re.M).group(1)
+
+DEST = os.path.join(ADMIN, "..", "proofs", "verified-garbage")
+
+# The modules the cosimulation imports: each target's ISA, its printer, which
+# turns an instruction into the text `admin/vg-bytes` reads, its encoder, and
+# its ABI.
+ROOTS = [
+    f"VerifiedGarbage.TCB.{arch}.{m}"
+    for arch in ["X86_64", "AArch64"]
+    for m in ["Isa", "Print", "Encode", "Target"]
+]
+
+IMPORT = re.compile(r"^(?:public )?(?:meta )?import (VerifiedGarbage\.[A-Za-z0-9_.]+)\b", re.M)
+
+
+def path_of(module):
+    return os.path.join(*module.split(".")) + ".lean"
+
+
+def main():
+    args = sys.argv[1:]
+    check = args[:1] == ["--check"]
+    if check:
+        args = args[1:]
+    if len(args) != 1:
+        sys.exit(__doc__.strip().split("\n\n")[1])
+    lean = os.path.join(args[0], "lean")
+
+    want = {}
+    todo = list(ROOTS)
+    while todo:
+        module = todo.pop()
+        if module in want:
+            continue
+        with open(os.path.join(lean, path_of(module)), "rb") as f:
+            want[module] = f.read()
+        todo += IMPORT.findall(want[module].decode())
+
+    have = set()
+    for d, _, files in os.walk(os.path.join(DEST, "VerifiedGarbage")):
+        for name in files:
+            have.add(os.path.relpath(os.path.join(d, name), DEST))
+
+    stale = []
+    for module, text in sorted(want.items()):
+        rel = path_of(module)
+        dest = os.path.join(DEST, rel)
+        if rel in have:
+            have.remove(rel)
+            with open(dest, "rb") as f:
+                if f.read() == text:
+                    continue
+        stale.append(rel)
+        if not check:
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(text)
+    for rel in sorted(have):
+        stale.append(rel)
+        if not check:
+            os.remove(os.path.join(DEST, rel))
+
+    if check and stale:
+        for rel in stale:
+            print(f"admin/import-vg-models: proofs/verified-garbage/{rel} is not VG's at {REV}", file=sys.stderr)
+        sys.exit(1)
+    print(f"admin/import-vg-models: {len(want)} modules of VG at {REV}" + ("" if check else f", {len(stale)} changed"))
+
+
+main()

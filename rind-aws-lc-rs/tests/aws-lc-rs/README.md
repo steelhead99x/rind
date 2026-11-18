@@ -22,7 +22,7 @@ leaves them out.
 ## What is left out
 
 Tests of what rind-aws-lc-rs does not offer, which its
-[README](../../README.md#not-offered) lists under "Not offered", are removed,
+[README](../../README.md#what-rind-cannot-back) lists under "What rind cannot back", are removed,
 or skip those cases where a test covers more:
 
 - `basic_openssh_test.rs`, `src/aead/chacha20_poly1305_openssh.rs`, and the
