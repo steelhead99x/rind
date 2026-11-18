@@ -284,8 +284,8 @@ exclude_re = [
   # variable. Tests are debug builds, or release builds with
   # `rind_cpu_disable`, so they compile the other copy. Pinned to its line:
   # the debug build's `feature_toggle`, under the same name, is caught.
-  'rind/src/low/aarch64/cpu\.rs:453:\d+: replace feature_toggle -> bool with false$',
-  'rind/src/low/aarch64/cpu\.rs:453:\d+: replace feature_toggle -> bool with true$',
+  'rind/src/low/aarch64/cpu\.rs:456:\d+: replace feature_toggle -> bool with false$',
+  'rind/src/low/aarch64/cpu\.rs:456:\d+: replace feature_toggle -> bool with true$',
   # The portable backend has no CPU state to save, so `leave_cpu_state`
   # ignores it.
   'rind/src/low/portable/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
