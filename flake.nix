@@ -69,6 +69,10 @@
               "wasm32-unknown-unknown"
               "wasm32-wasip2"
               "x86_64-unknown-linux-gnu"
+              # Targets with no `std`, one per architecture rind has assembly for.
+              "aarch64-unknown-none"
+              "armv7a-none-eabi"
+              "x86_64-unknown-none"
             ];
           };
 

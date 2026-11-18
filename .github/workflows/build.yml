@@ -185,9 +185,11 @@ jobs:
         run: |
           tier() { env "$@" cargo test --workspace --exclude rind-fips; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
           # test the by-4 AES-GCM and Keccak-f kernels for cores without SHA3,
-          # failing a run whose OS hides the crypto extension, and on Apple
-          # silicon the `dsb nsh; isb sy` barrier after DIT for cores without `sb`
-          tier RIND_CPU_DISABLE_sha3=1 RIND_CPU_DISABLE_sb=1 RIND_TEST_ARM_CRYPTO_EXT=1
+          # and aws-lc's NEON ChaCha20-Poly1305 for those without SVE2, such
+          # as Neoverse N1, failing a run whose OS hides the crypto extension,
+          # and on Apple silicon the `dsb nsh; isb sy` barrier after DIT for
+          # cores without `sb`
+          tier RIND_CPU_DISABLE_sha3=1 RIND_CPU_DISABLE_sve2=1 RIND_CPU_DISABLE_sb=1 RIND_TEST_ARM_CRYPTO_EXT=1 RIND_TEST_ARM_SVE2=0
           # test vpaes, NEON GHASH, and scalar SHA-1 and SHA-256 for cores
           # without the crypto extension, such as the Raspberry Pi 4's; the
           # last variable fails the run that lands on the wrong path

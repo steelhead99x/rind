@@ -252,8 +252,9 @@ structure State where
   /-- Regions the code may read and write. -/
   wr : List Region
   /-- Values the model does not know, used in order: the return address each
-  call stores and, on the ARM targets, what a linker veneer may leave in the
-  intra-procedure-call scratch registers (see `TCB/Code.lean`). -/
+  call stores, on the ARM targets what a linker veneer may leave in the
+  intra-procedure-call scratch registers (see `TCB/Code.lean`), and what a
+  released frame's bytes hold (`lose`). -/
   unknowns : Nat → BitVec 64 := fun _ => 0
   /-- The address of each `static` the code can name (`adrSym`), by name. -/
   syms : String → BitVec 64 := fun _ => 0
@@ -1508,20 +1509,56 @@ def push : Instr → State → Option State
     else none
   | _, _ => none
 
+/-- The memory once the `n` bytes at `a`, a released frame, are below the
+stack pointer. AAPCS64 (release 2026Q3), 6.4.5 "The Stack": "The inactive
+region of T's stack is the area of memory denoted by the half-open interval
+[T.limit, T.SP)", and 6.4.5.1 "Universal stack constraints": "No thread is
+permitted to access (for reading or for writing) the inactive region of S."
+Anything that runs on the stack between two instructions (a signal handler)
+may have written them, and the code can assume nothing of them. Apple's
+platforms keep more: "The ARM64 red zone consists of the 128 bytes
+immediately below the stack pointer. Apple platforms don't modify these
+bytes during exceptions" ("Writing ARM64 code for Apple platforms",
+"Respect the stack's red zone"); a byte that keeps its value is one of the
+outcomes here, so the model holds on those targets too, and it lets no
+proof use the red zone (the code may access only its regions, none of which
+is below the stack pointer). Each byte either keeps its value or takes one
+the model does not know, as the unknowns say: for the doubleword `j` of the
+frame, the bytes of `u (2 * j)` say which of its bytes are replaced (those
+not zero), and the bytes of `u (2 * j + 1)` are what replaces them. A byte
+may keep its value, so what a function leaves in a frame it releases may be
+left there (`NoResidue`, whose two runs share their unknowns, still tells
+apart a frame that holds a secret). -/
+def lose (m : Mem) (a : Addr) (n : Nat) (u : Nat → BitVec 64) : Mem :=
+  fun x =>
+    let d := (x - a).toNat
+    if d < n then
+      if (u (2 * (d / 8))).extractLsb' (8 * (d % 8)) 8 = 0 then m x
+      else (u (2 * (d / 8) + 1)).extractLsb' (8 * (d % 8)) 8
+    else m x
+
 /-- The pop of a frame, DDI 0487 C6.2 "LDR (immediate)", 64-bit, post-index
 (`ldr xr, [sp], #16`): `address = SP[]`; `data = Mem[address, 8]`; `SP[] =
 address + 16`; `X[t] = data`. Faults unless the stack pointer and the
 writable regions are those the push left (`s₁`), whose head is the frame;
-it removes the frame. -/
+it removes the frame. `free bytes` is `add sp, sp, #bytes` alone, likewise
+for the frame of `alloc bytes`. The released frame's bytes are then below
+the stack pointer, and are `lose`'s: the next of the state's `unknowns`,
+two for each doubleword of the frame, say what each holds. -/
 def pop : Instr → State → State → Option State
   | .free bytes, s₁, s₂ =>
     if 0 < bytes ∧ bytes < 4096 ∧ bytes % 16 = 0 ∧
         s₂.sp = s₁.sp ∧ s₂.wr = s₁.wr ∧ s₁.wr.head? = some ⟨s₁.sp, bytes⟩ then
-      some { s₂ with sp := s₂.sp + BitVec.ofNat 64 bytes, wr := s₂.wr.tail }
+      some { s₂ with
+        sp := s₂.sp + BitVec.ofNat 64 bytes, wr := s₂.wr.tail,
+        mem := lose s₂.mem s₂.sp bytes s₂.unknowns,
+        unknowns := fun n => s₂.unknowns (n + bytes / 4) }
     else none
   | .pop r, s₁, s₂ =>
     if s₂.sp = s₁.sp ∧ s₂.wr = s₁.wr ∧ s₁.wr.head? = some ⟨s₁.sp, 16⟩ then
-      some { s₂.write .x r (s₂.mem.read s₂.sp 8) with sp := s₂.sp + 16, wr := s₂.wr.tail }
+      some { s₂.write .x r (s₂.mem.read s₂.sp 8) with
+        sp := s₂.sp + 16, wr := s₂.wr.tail, mem := lose s₂.mem s₂.sp 16 s₂.unknowns,
+        unknowns := fun n => s₂.unknowns (n + 4) }
     else none
   | _, _, _ => none
 

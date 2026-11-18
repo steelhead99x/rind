@@ -866,6 +866,16 @@ aes_gcm_items() {
         'const BYTESWAP_512:' 'const BYTESWAP_512_EPI64:'
 }
 check_quote X86_64/AesGcmModel aes_gcm_items
+check_quote X86_64/TypesExternal items rind/src/low/x86_64/chacha20.rs 'struct VgState('
+aarch64_aes_gcm_items() {
+    items rind/src/low/aarch64/ghash.rs 'macro_rules! mul {' 'macro_rules! reduce {' \
+        '    pub(crate) fn add(&mut self, bytes: &[u8]) {' '    fn one_block(' '    fn eight_blocks(' \
+        'fn mul8(' 'fn _mul_h(' 'fn _mul8(' "pub(crate) struct Aggregate<'a> {" "impl<'a> Aggregate<'a> {" \
+        'fn reverse(' 'fn vmull_p64_fix(' 'fn vmull_high_p64_fix(' 'fn zero(' 'fn from_u128(' 'fn to_u128(' \
+        'const GF128_POLY_HI:' 'const GF128_POLY_CARRY_MASK:'
+    items rind/src/low/aarch64/aes_gcm.rs 'fn short<' 'static KEEP:' 'fn encrypt<' 'fn load(' 'fn store('
+}
+check_quote Aarch64/AesGcmModel aarch64_aes_gcm_items
 select_items() {
     items rind/src/low/x86_64/bignum_point_select.rs 'pub(crate) fn bignum_aff_point_select_p384(' \
         'pub(crate) fn bignum_aff_point_select_p256(' 'pub(crate) fn bignum_aff_point_select_p521(' \
@@ -1006,9 +1016,12 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # `Key` and `Context`, which hold function pointers, are not.
 # On x86_64, RSA verification is translated from `high::rsa::VerifyingKey`
 # down to `low::posint` and the Montgomery products' dispatch in
-# `low::x86_64::mont`, whose s2n-bignum and aws-lc routines are opaque. Its
-# DER parsing and encoding, which the ✓ leaves out, are opaque too, and
-# `RsaDispatch.lean` models `signature::rsa::PublicKey` above it.
+# `low::x86_64::mont`, whose s2n-bignum and aws-lc routines are opaque, and
+# to `RsaIfma::check`, over its opaque CPU check. pyca/verified-garbage's
+# AVX-512 IFMA public operation and CRT are opaque behind `RsaIfma::public`
+# and `IfmaCrt::crt`, which `VgRsa.lean`'s axioms state. Its DER parsing and
+# encoding, which the ✓ leaves out, are opaque too, and `RsaDispatch.lean`
+# models `signature::rsa::PublicKey` above it.
 # x86_64's RSA reaches `Digest::ct_equal`, so every target starts from it,
 # for the HMAC model all share.
 # See UPSTREAM.md, "Aeneas cannot translate several kinds of Rust".
@@ -1269,6 +1282,9 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --opaque 'crate::high::curve::_::generate_random_key' \
     --opaque 'crate::mid::p256::_::generate' \
     --opaque 'crate::mid::p256::_::new_random' \
+    --opaque 'crate::mid::p256::_::vg_public_key' \
+    --opaque 'crate::mid::p256::_::vg_diffie_hellman' \
+    --opaque crate::mid::p256::vg_verify \
     --include crate::low::x86_64::adx_mux::p256_montjadd \
     --include crate::low::x86_64::adx_mux::p256_montjdouble \
     --include crate::low::x86_64::adx_mux::p256_montjmixadd \
@@ -1313,6 +1329,16 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --start-from crate::mid::xchacha20poly1305::XChaCha20Poly1305::decrypt \
     --include crate::low::x86_64::chacha20poly1305::seal \
     --include crate::low::x86_64::chacha20poly1305::open \
+    --start-from crate::mid::chacha20::ChaCha20::apply_keystream \
+    --include crate::low::x86_64::chacha20 \
+    --opaque crate::low::x86_64::chacha20::VgState \
+    --opaque 'crate::low::x86_64::chacha20::_::uninit' \
+    --opaque 'crate::low::x86_64::chacha20::_::init' \
+    --opaque 'crate::low::x86_64::chacha20::_::apply_avx2' \
+    --opaque 'crate::low::x86_64::chacha20::_::apply_avx512vl' \
+    --opaque crate::low::x86_64::chacha20::cipher_ssse3_4x \
+    --opaque crate::low::x86_64::chacha20::cipher_avx2 \
+    --opaque crate::low::generic::chacha20::cipher \
     --include 'crate::mid::aes::_' \
     --include crate::low::x86_64::aes \
     --start-from crate::low::x86_64::aes::AesDecKey::new \
@@ -1363,7 +1389,10 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --opaque crate::high::rsa::pkcs1_components \
     --opaque crate::high::rsa::spki_components \
     --opaque 'crate::high::rsa::_::to_pkcs1_der' \
-    --opaque 'crate::mid::rsa_pub::_::public_op_ifma' \
+    --include crate::low::x86_64::rsa_ifma::RsaIfma \
+    --include 'crate::low::x86_64::rsa_ifma::_::check' \
+    --include crate::low::x86_64::rsa_ifma::IfmaCrt \
+    --start-from crate::low::x86_64::rsa_ifma::IfmaCrt::crt \
     --include crate::low::posint \
     --include crate::low::x86_64::mont::mont_mul \
     --include crate::low::x86_64::mont::mont_sqr \
@@ -1401,6 +1430,9 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --opaque 'crate::high::curve::_::generate_random_key' \
     --opaque 'crate::mid::p256::_::generate' \
     --opaque 'crate::mid::p256::_::new_random' \
+    --opaque 'crate::mid::p256::_::vg_public_key' \
+    --opaque 'crate::mid::p256::_::vg_diffie_hellman' \
+    --opaque crate::mid::p256::vg_verify \
     --include crate::low::aarch64::sha1::sha1_compress_padded \
     --include crate::low::aarch64::sha3_keccak_f1600_mux \
     --include crate::low::aarch64::sha3_keccak4_f1600_mux \
@@ -1418,7 +1450,24 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::aarch64::aes_cbc \
     --start-from crate::low::aarch64::aes_cbc::encrypt \
     --start-from crate::low::aarch64::aes_cbc::decrypt \
-    --opaque crate::low::aarch64::aes_cbc::aese_chained
+    --opaque crate::low::aarch64::aes_cbc::aese_chained \
+    --start-from crate::mid::aes_gcm::AesGcm::new \
+    --start-from crate::mid::aes_gcm::AesGcm::encrypt \
+    --start-from crate::mid::aes_gcm::AesGcm::decrypt \
+    --start-from crate::mid::aes_gcm::AesGcm::encrypt_any \
+    --start-from crate::mid::aes_gcm::AesGcm::decrypt_any \
+    --include crate::low::aarch64::ghash \
+    --opaque crate::low::aarch64::ghash::zero \
+    --opaque crate::low::aarch64::ghash::from_u128 \
+    --opaque crate::low::aarch64::ghash::to_u128 \
+    --opaque crate::low::aarch64::ghash::vmull_p64_fix \
+    --opaque crate::low::aarch64::ghash::vmull_high_p64_fix \
+    --opaque crate::low::aarch64::ghash::GF128_POLY_HI \
+    --opaque crate::low::aarch64::ghash::GF128_POLY_CARRY_MASK \
+    --opaque 'crate::low::aarch64::ghash::_::add' \
+    --include crate::low::aarch64::aes_gcm \
+    --opaque crate::low::aarch64::aes_gcm::short \
+    --opaque crate::low::aarch64::aes_gcm::cipher
 
 # The AEAD key's conversion is x86_64's alone: the AEAD API's model and proofs
 # are x86_64's, as AES-GCM's are.

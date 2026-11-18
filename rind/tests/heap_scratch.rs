@@ -379,6 +379,37 @@ fn argon2() {
     );
 }
 
+/// PBKDF2's verification derives its key on the heap where it runs
+/// pyca/verified-garbage's routine, which derives no block alone.
+#[test]
+fn pbkdf2() {
+    use rind::pbkdf2::{
+        PBKDF2_HMAC_SHA256, PBKDF2_HMAC_SHA384, PBKDF2_HMAC_SHA512, Secret,
+        legacy::PBKDF2_HMAC_SHA1,
+    };
+    let iterations = std::num::NonZeroU32::new(2).unwrap();
+    for algorithm in [
+        &PBKDF2_HMAC_SHA1,
+        &PBKDF2_HMAC_SHA256,
+        &PBKDF2_HMAC_SHA384,
+        &PBKDF2_HMAC_SHA512,
+    ] {
+        // Longer than one hash, so verification derives more than a block.
+        let mut stored = [0u8; 133];
+        Secret::new(algorithm, b"password one")
+            .derive(iterations, b"saltsalt", &mut stored)
+            .unwrap();
+        independent(
+            &format!("{algorithm:?}"),
+            [*b"password one", *b"password two"],
+            |password| {
+                let secret = Secret::new(algorithm, password);
+                black_box(secret.verify(iterations, b"saltsalt", &stored).is_ok())
+            },
+        );
+    }
+}
+
 /// The key `seed` expands to, as PKCS#8 in RFC 9881's expanded form, which
 /// rind writes only for a key loaded from it, so aws-lc-rs expands it.
 #[cfg(not(any(miri, target_family = "wasm")))]

@@ -3,12 +3,14 @@
 //! Picks s2n-bignum's routines that use BMI2 and ADX where the CPU has them,
 //! and otherwise their `_alt` twins, which use only `mul`, `adc`, and `sbb`.
 //! Without ADX, Ed25519 verification on CPUs with AVX2 runs a port of
-//! curve25519-dalek's AVX2 backend instead.
+//! curve25519-dalek's AVX2 backend instead, and with AVX-512 IFMA, X25519
+//! runs pyca/verified-garbage's routines, `super::curve25519_ifma`.
 //!
 //! The Karatsuba multipliers and `bignum_emontredc_8n` have no `_alt` twin;
 //! `super::mont` picks RSA's multiplication instead.
 
 use super::cpu::{HaveAvx2, HaveBmi2Adx};
+use super::curve25519_ifma::Curve25519Ifma;
 
 macro_rules! mux {
     ($($name:ident / $alt:ident ($($arg:ident: $ty:ty),*) $(-> $ret:ty)?;)*) => {$(
@@ -50,8 +52,6 @@ mux! {
     p521_jscalarmul / p521_jscalarmul_alt(res: &mut [u64; 27], scalar: &[u64; 9], point: &[u64; 27]);
 
     bignum_madd_n25519 / bignum_madd_n25519_alt(z: &mut [u64; 4], x: &[u64; 4], y: &[u64; 4], c: &[u64; 4]);
-    curve25519_x25519 / curve25519_x25519_alt(res: &mut [u64; 4], scalar: &[u64; 4], point: &[u64; 4]);
-    curve25519_x25519base / curve25519_x25519base_alt(res: &mut [u64; 4], scalar: &[u64; 4]);
     edwards25519_decode / edwards25519_decode_alt(z: &mut [u64; 8], c: &[u8; 32]) -> bool;
     edwards25519_scalarmulbase / edwards25519_scalarmulbase_alt(res: &mut [u64; 8], scalar: &[u64; 4]);
 
@@ -61,6 +61,27 @@ mux! {
     edwards25519_epadd / edwards25519_epadd_alt(p3: &mut [u64; 16], p1: &[u64; 16], p2: &[u64; 16]);
     edwards25519_epdouble / edwards25519_epdouble_alt(p3: &mut [u64; 16], p1: &[u64; 12]);
     edwards25519_pdouble / edwards25519_pdouble_alt(p3: &mut [u64; 12], p1: &[u64; 12]);
+}
+
+/// X25519 of `scalar` and `point`, little-endian words: `res` is zero for a
+/// point of small order.
+#[inline]
+pub(crate) fn curve25519_x25519(res: &mut [u64; 4], scalar: &[u64; 4], point: &[u64; 4]) {
+    match (Curve25519Ifma::check(), HaveBmi2Adx::check()) {
+        (Some(ifma), _) => ifma.x25519(res, scalar, point),
+        (None, Some(_)) => super::curve25519_x25519::curve25519_x25519(res, scalar, point),
+        (None, None) => super::curve25519_x25519_alt::curve25519_x25519_alt(res, scalar, point),
+    }
+}
+
+/// X25519's public key of `scalar`, little-endian words.
+#[inline]
+pub(crate) fn curve25519_x25519base(res: &mut [u64; 4], scalar: &[u64; 4]) {
+    match (Curve25519Ifma::check(), HaveBmi2Adx::check()) {
+        (Some(ifma), _) => ifma.x25519_base(res, scalar),
+        (None, Some(_)) => super::curve25519_x25519base::curve25519_x25519base(res, scalar),
+        (None, None) => super::curve25519_x25519base_alt::curve25519_x25519base_alt(res, scalar),
+    }
 }
 
 /// Ed25519 verification's `[base]B + [s0]P0 + [s1]P1`. Without ADX, CPUs

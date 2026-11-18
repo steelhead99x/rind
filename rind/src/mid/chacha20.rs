@@ -110,6 +110,34 @@ mod tests {
         );
     }
 
+    /// At the counter's end, a request that `cipher` splits between
+    /// verified-garbage's routines and the kernel, where the CPU has AVX2,
+    /// matches block-by-block encryption on HACL*'s rounds, and one byte more
+    /// is refused with the buffer unchanged.
+    #[test]
+    fn counter_end() {
+        let key = ChaCha20::new(&[7; 32]);
+        let nonce = [9; 12];
+        let start = u32::MAX - 9;
+        let msg: Vec<u8> = (0..641).map(|i| i as u8).collect();
+
+        let mut want = msg[..640].to_vec();
+        for (i, block) in want.chunks_mut(64).enumerate() {
+            key.apply_keystream(&nonce, start + i as u32, block)
+                .unwrap();
+        }
+        let mut got = msg[..640].to_vec();
+        key.apply_keystream(&nonce, start, &mut got).unwrap();
+        assert_eq!(got, want);
+
+        let mut past = msg.clone();
+        assert_eq!(
+            key.apply_keystream(&nonce, start, &mut past),
+            Err(Error::WrongLength)
+        );
+        assert_eq!(past, msg);
+    }
+
     #[test]
     fn counter_limits() {
         assert_eq!(check_counter(u32::MAX, 64), Ok(()));
