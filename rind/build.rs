@@ -11,9 +11,9 @@
 //! `xmm` operands are refused until the build passes
 //! `-C target-feature=+sse,+sse2,-soft-float`. Leaving soft-float set beside
 //! SSE makes LLVM abort while splitting vector results. The backend then
-//! reads CPUID through `core::arch`. AVX, AVX2, SHA512, and AVX-512 run
-//! only when those target features are enabled: XCR0 does not mean an
-//! interrupt saves YMM or ZMM. Bare-metal aarch64 and 32-bit ARM get the
+//! reads CPUID through `core::arch`. AVX, AVX2, SHA512, VAES, VPCLMULQDQ,
+//! and AVX-512 run only when those target features are enabled: XCR0 does
+//! not mean an interrupt saves YMM or ZMM. Bare-metal aarch64 and 32-bit ARM get the
 //! portable backend: their targets are strict-align, since the MMU may be off
 //! or alignment checking on, and that assembly loads and stores unaligned
 //! words, such as AES-GCM's `ldp` of its input. x86_64 has no alignment
