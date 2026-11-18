@@ -282,10 +282,16 @@ Future<void> _checkTargetInstalled(String target) async {
 /// [file]'s text once it holds a whole rule. Every cargo run rewrites the
 /// dep-info beside the library, and outside cargo's lock, so a build that
 /// shares the target directory through `cargo_target_dir` can read it while
-/// another build has it truncated.
+/// another build has it truncated, or has removed it to write it afresh, so
+/// a missing file waits as a truncated one does.
 Future<String> _readDepInfo(File file) async {
   for (var attempt = 0; ; attempt++) {
-    final text = file.readAsStringSync();
+    String text;
+    try {
+      text = file.readAsStringSync();
+    } on PathNotFoundException {
+      text = '';
+    }
     if (text.split('\n').first.contains(': ') && text.endsWith('\n')) {
       return text;
     }
