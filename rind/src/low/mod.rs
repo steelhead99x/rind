@@ -431,6 +431,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::mont_exp::mont_exp;
         pub(crate) use x86_64::rsaz::Rsaz;
         pub(crate) use x86_64::rsaz_avx512::{Operands, RsazAvx512};
+        pub(crate) use x86_64::rsa_ifma::{IfmaCrt, RsaIfma};
         pub(crate) use x86_64::mlkem_sample_poly_ntt_8x::mlkem_sample_poly_ntt_8x;
 
         pub(crate) use x86_64::adx_mux::p256_montjadd;

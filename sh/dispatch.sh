@@ -260,10 +260,9 @@ for module in "${modules[@]}"; do
     if [[ -z "$all" && -n "$pattern" ]] && ! grep -qE "$pattern" "$changed"; then
         continue
     fi
-    # The host's Linux build covers its own backend, but not the bare-metal
-    # targets, and those exist for every backend, including the host's. A
-    # plain assignment, so a failing `reach` stops the run instead of
-    # reading as no backend.
+    # The host's Linux build covers its own backend, but not its bare-metal
+    # build, which x86_64 has too. A plain assignment, so a failing `reach`
+    # stops the run instead of reading as no backend.
     if [[ "$verb:$module" == check:cross ]]; then
         cross_reach=$(reach cross)
         reaches "$cross_reach" x86_64 aarch64 arm portable || continue
@@ -486,14 +485,13 @@ step() {
                 run cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
                     --features getrandom/wasm_js -- --deny warnings
             fi
-            # And without std, on bare metal. Every backend has a target here:
-            # portable on M-profile, RISC-V, and soft-float aarch64; arm on
-            # A- and R-profile; aarch64 and x86_64 on their `none` targets.
-            # A change that reaches none of them skips the script. `run`
-            # keeps the lane's INT/QUIT trap, which a bare script would not.
-            # The harness needs no toolchain. Xtensa is `just xtensa`: its
-            # compiler is not in this shell.
-            if reaches "$backends" x86_64 aarch64 arm portable; then
+            # And without std, on bare metal, which builds only the portable
+            # backend and, on `x86_64-unknown-none` with SSE2, the x86_64 one
+            # (see rind/build.rs). A change that reaches neither skips the
+            # script. `run` keeps the lane's INT/QUIT trap, which a bare
+            # script would not. The harness needs no toolchain. Xtensa is
+            # `just xtensa`: its compiler is not in this shell.
+            if reaches "$backends" x86_64 portable; then
                 run sh/bare-metal-test.sh
                 run sh/bare-metal.sh
             fi

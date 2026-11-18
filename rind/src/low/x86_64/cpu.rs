@@ -229,17 +229,24 @@ impl HaveAvx512ForMlKem {
     }
 }
 
-/// Proof that the CPU has AVX-512 IFMA, with the F, DQ, BW, and VL that
-/// aws-lc's `CRYPTO_is_AVX512IFMA_capable` also asks for, and BMI2: what
-/// aws-lc's dual RSAZ exponentiation runs.
-///
-/// Without it, RSA's CRT runs its two exponentiations one at a time.
+/// Proof that the CPU has what RSA with AVX-512 IFMA runs: AVX-512 F, VL,
+/// and IFMA, AVX, BMI2, and ADX, pyca/verified-garbage's `_FEATURES`, and the
+/// DQ and BW that aws-lc's `CRYPTO_is_AVX512IFMA_capable` also asks for, as
+/// its dual RSAZ runs `kmovb`. Every CPU with IFMA has them all.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HaveAvx512ForRsa(());
 
 impl HaveAvx512ForRsa {
     pub(crate) fn check() -> Option<Self> {
-        has(AVX512F | AVX512DQ | AVX512IFMA | AVX512BW | AVX512VL | BMI2).then_some(Self(()))
+        has(AVX | AVX512F | AVX512DQ | AVX512BW | AVX512VL | AVX512IFMA | BMI2 | ADX)
+            .then_some(Self(()))
+    }
+
+    /// Whether the CPU has AVX-512 FP16 too, as Intel's cores with two
+    /// 512-bit multipliers do and AMD's Zen 4 and 5 do not: VG picks its
+    /// 512-bit CRT for 2048-bit keys by it.
+    pub(crate) fn fp16(self) -> bool {
+        has(AVX512FP16)
     }
 }
 
@@ -288,6 +295,17 @@ pub(crate) struct HaveAvx2(());
 impl HaveAvx2 {
     pub(crate) fn check() -> Option<Self> {
         has(AVX2_KERNELS).then_some(Self(()))
+    }
+}
+
+/// Proof that the CPU has AVX-512 F and VL, with what `HaveAvx2` proves:
+/// what pyca/verified-garbage's "AVX-512 VL" ChaCha20 needs, on zmm vectors.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveAvx512Vl(());
+
+impl HaveAvx512Vl {
+    pub(crate) fn check() -> Option<Self> {
+        has(AVX2_KERNELS | AVX512F | AVX512VL).then_some(Self(()))
     }
 }
 
@@ -397,6 +415,7 @@ const AVX512DQ: u32 = 1 << 18;
 const AVX512IFMA: u32 = 1 << 19;
 const BMI1: u32 = 1 << 20;
 const SHA512: u32 = 1 << 21;
+const AVX512FP16: u32 = 1 << 22;
 const INTEL: u32 = 1 << 30;
 /// What rind's AVX2 kernels use, for [`HaveAvx2`].
 const AVX2_KERNELS: u32 = AVX | AVX2 | BMI1 | BMI2 | POPCNT | SSSE3;
@@ -434,8 +453,8 @@ fn detect_once() -> u32 {
     features
 }
 
-/// CPUID leaves the bare-metal detector reads. `xcr0` is `None` when
-/// `XGETBV` would raise `#UD`, because XSAVE or OSXSAVE is clear.
+/// CPUID leaves the bare-metal detector reads, and in tests XCR0, which is
+/// `None` when `XGETBV` would raise `#UD`, because XSAVE or OSXSAVE is clear.
 #[cfg(any(test, target_os = "none"))]
 #[derive(Clone, Copy)]
 struct CpuidLeaves {
@@ -446,9 +465,9 @@ struct CpuidLeaves {
     leaf7_ecx: u32,
     /// Leaf 7, subleaf 1, EAX. SHA512 is reported here, not in subleaf 0.
     leaf7_sub1_eax: u32,
-    /// The std-matching check in tests reads this. The bare-metal detector
-    /// does not: XCR0 does not mean this context saves YMM or ZMM.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Only the std-matching check in tests reads this, so only tests run
+    /// `XGETBV`: XCR0 does not mean this context saves YMM or ZMM.
+    #[cfg(test)]
     xcr0: Option<u32>,
 }
 
@@ -466,6 +485,7 @@ fn read_cpuid_leaves() -> CpuidLeaves {
             leaf7_ebx: 0,
             leaf7_ecx: 0,
             leaf7_sub1_eax: 0,
+            #[cfg(test)]
             xcr0: None,
         };
     }
@@ -496,11 +516,12 @@ fn read_cpuid_leaves() -> CpuidLeaves {
         leaf7_ebx,
         leaf7_ecx,
         leaf7_sub1_eax,
+        #[cfg(test)]
         xcr0: os_xcr0(leaf1.ecx),
     }
 }
 
-#[cfg(any(test, target_os = "none"))]
+#[cfg(test)]
 fn os_xcr0(leaf1_ecx: u32) -> Option<u32> {
     const XSAVE: u32 = 1 << 26;
     const OSXSAVE: u32 = 1 << 27;
@@ -802,6 +823,7 @@ fn detect() -> u32 {
         | detect!("avx512vl", AVX512VL)
         | detect!("avx512vbmi", AVX512VBMI)
         | detect!("avx512vbmi2", AVX512VBMI2)
+        | detect!("avx512fp16", AVX512FP16)
         | detect!("sha", SHA)
         | detect!("sha512", SHA512)
         | detect!("movbe", MOVBE)
@@ -938,6 +960,7 @@ mod tests {
             AVX512IFMA,
             BMI1,
             SHA512,
+            AVX512FP16,
             INTEL,
             DETECTED,
         ];
@@ -983,14 +1006,27 @@ mod tests {
             ),
             (
                 HaveAvx512ForRsa::check().is_some(),
-                available!(
+                adx && available!(
+                    "avx",
                     "avx512f",
                     "avx512dq",
-                    "avx512ifma",
                     "avx512bw",
                     "avx512vl",
+                    "avx512ifma",
                     "bmi2"
                 ),
+            ),
+            (
+                HaveAvx512ForRsa::check().is_some_and(HaveAvx512ForRsa::fp16),
+                adx && available!(
+                    "avx",
+                    "avx512f",
+                    "avx512dq",
+                    "avx512bw",
+                    "avx512vl",
+                    "avx512ifma",
+                    "bmi2"
+                ) && available!("avx512fp16"),
             ),
             (
                 HaveSha1::check().is_some(),
@@ -1003,6 +1039,11 @@ mod tests {
             (
                 HaveAvx2::check().is_some(),
                 available!("avx", "avx2", "bmi1", "bmi2", "popcnt", "ssse3"),
+            ),
+            (
+                HaveAvx512Vl::check().is_some(),
+                available!("avx", "avx2", "bmi1", "bmi2", "popcnt", "ssse3")
+                    && available!("avx512f", "avx512vl"),
             ),
             (
                 HaveSha512::check().is_some(),

@@ -20,4 +20,4 @@ Recommended approach:
 
 ## Related
 
-- [Bare-metal no-std backends](/quest/m2/84-bare-metal-no-std.md) - the PR that added the keep-nothing fallback
+- [Fork PR #84](https://github.com/steelhead99x/rind/pull/84) - the PR that added the keep-nothing fallback

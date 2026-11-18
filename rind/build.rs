@@ -11,12 +11,12 @@
 //! `xmm` operands are refused until the build passes
 //! `-C target-feature=+sse,+sse2,-soft-float`. Leaving soft-float set beside
 //! SSE makes LLVM abort while splitting vector results. The backend then
-//! reads CPUID through `core::arch`. AVX, AVX2, SHA512, and AVX-512 run
-//! only when those target features are enabled: XCR0 does not mean an
-//! interrupt saves YMM or ZMM. Bare-metal aarch64 and 32-bit ARM get the
-//! portable backend: their targets are strict-align, since the MMU may be off
-//! or alignment checking on, and that assembly loads and stores unaligned
-//! words, such as AES-GCM's `ldp` of its input. x86_64 has no alignment
+//! reads CPUID through `core::arch`. AVX, AVX2, SHA512, VAES, VPCLMULQDQ,
+//! and AVX-512 run only when those target features are enabled: XCR0 does
+//! not mean an interrupt saves YMM or ZMM. Bare-metal aarch64 and 32-bit
+//! ARM get the portable backend: their targets are strict-align, since the
+//! MMU may be off or alignment checking on, and that assembly loads and
+//! stores unaligned words, such as AES-GCM's `ldp` of its input. x86_64 has no alignment
 //! fault unless ring 3 sets `AC`. The 32-bit ARM assembly is cut for ARMv7,
 //! so a target for an earlier core, such as ARMv6's
 //! `arm-unknown-linux-gnueabihf` or ARMv5TE's `arm-linux-androideabi`, gets
@@ -80,7 +80,6 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(rind_mul16_top)");
     println!("cargo::rustc-check-cfg=cfg(rind_mul16_soft)");
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
-    println!("cargo::rustc-check-cfg=cfg(rind_x86_64_none_dalek_scalar)");
 
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
@@ -123,10 +122,9 @@ fn main() {
     // target features are enabled, for the default backend as well as for
     // an explicit `simd` or `avx512` cfg, so the target feature is the opt-in.
     if arch == "x86_64" && bare_metal && !sse2 && !dalek_backend_is_scalar() {
-        // Dalek is compiled before this crate, so its simd backend aborts
-        // in LLVM on this soft-float target and the `compile_error` below
-        // never runs. Fail here, where the message is visible.
-        println!("cargo::rustc-cfg=rind_x86_64_none_dalek_scalar");
+        // Dalek is compiled before this crate, so its simd backend aborts in
+        // LLVM before a `compile_error!` in the crate could run. Fail here,
+        // where the message is visible.
         panic!(
             "x86_64-unknown-none without SSE2 needs --cfg curve25519_dalek_backend=\"serial\" \
              or \"fiat\": dalek's default simd backend does not compile on this soft-float target"
