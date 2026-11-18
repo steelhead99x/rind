@@ -13,10 +13,10 @@
 //! SSE makes LLVM abort while splitting vector results. The backend then
 //! reads CPUID through `core::arch`. AVX, AVX2, SHA512, VAES, VPCLMULQDQ,
 //! and AVX-512 run only when those target features are enabled: XCR0 does
-//! not mean an interrupt saves YMM or ZMM. Bare-metal aarch64 and 32-bit ARM get the
-//! portable backend: their targets are strict-align, since the MMU may be off
-//! or alignment checking on, and that assembly loads and stores unaligned
-//! words, such as AES-GCM's `ldp` of its input. x86_64 has no alignment
+//! not mean an interrupt saves YMM or ZMM. Bare-metal aarch64 and 32-bit
+//! ARM get the portable backend: their targets are strict-align, since the
+//! MMU may be off or alignment checking on, and that assembly loads and
+//! stores unaligned words, such as AES-GCM's `ldp` of its input. x86_64 has no alignment
 //! fault unless ring 3 sets `AC`. The 32-bit ARM assembly is cut for ARMv7,
 //! so a target for an earlier core, such as ARMv6's
 //! `arm-unknown-linux-gnueabihf` or ARMv5TE's `arm-linux-androideabi`, gets

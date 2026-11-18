@@ -75,8 +75,9 @@ no_aws_lc() {
 # backend only with SSE2 and soft-float cleared, which this script enables:
 # without SSE2 the target has no `xmm` registers and the build stays
 # portable. With them the backend reads CPUID. AVX, AVX2, SHA512, VAES,
-# VPCLMULQDQ, and AVX-512 run only when those target features are enabled. XCR0 does not
-# mean an interrupt saves YMM or ZMM. The script does not enable them.
+# VPCLMULQDQ, and AVX-512 run only when those target features are enabled.
+# XCR0 does not mean an interrupt saves YMM or ZMM. The script does not
+# enable them.
 for target in \
     thumbv6m-none-eabi \
     riscv32imc-unknown-none-elf \
@@ -112,16 +113,19 @@ reject_stmxcsr() {
         echo "error: objdump is required to check for stmxcsr" >&2
         exit 1
     fi
-    if ! dump=$(objdump -d "$rlib"); then
-        echo "error: objdump failed on $rlib" >&2
-        exit 1
+    # Tens of megabytes of text, so a file rather than a shell variable.
+    dump=$(mktemp)
+    local error=''
+    if ! objdump -d "$rlib" >"$dump"; then
+        error="objdump failed on $rlib"
+    elif ! grep -E -q '\.o\)?:[[:space:]]*file format' "$dump"; then
+        error="objdump found no object file in $rlib"
+    elif grep -E -q '(^|[[:space:]])stmxcsr([[:space:]]|$)' "$dump"; then
+        error="$rlib emits stmxcsr"
     fi
-    if ! grep -E -q '\.o\)?:[[:space:]]*file format' <<<"$dump"; then
-        echo "error: objdump found no object file in $rlib" >&2
-        exit 1
-    fi
-    if grep -E -q '(^|[[:space:]])stmxcsr([[:space:]]|$)' <<<"$dump"; then
-        echo "error: $rlib emits stmxcsr" >&2
+    rm -f "$dump"
+    if [[ -n $error ]]; then
+        echo "error: $error" >&2
         exit 1
     fi
 }
