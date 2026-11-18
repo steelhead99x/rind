@@ -407,7 +407,10 @@ fn ct_binsec_mont16() {
 // exponentiation that runs thousands of them, whose other code
 // `ct_binsec_rsa2048_sign` checks at 16 words. On a wide aarch64 host that
 // sign takes `bn_mul_mont`, so the 16-word Karatsuba path is
-// `ct_binsec_mont16` with the narrow schedule forced.
+// `ct_binsec_mont16` with the narrow schedule forced. On aarch64 this runs
+// `bn_mul_mont` on a wide multiplier and s2n-bignum's `bignum_kmul_32_64`,
+// `bignum_ksqr_32_64`, and `bignum_emontredc_8n` on a narrow one, so
+// `admin/ct-binsec` runs it again with each schedule forced.
 #[test]
 #[ignore = "admin/ct-binsec runs it under BINSEC"]
 fn ct_binsec_mont_mul() {
