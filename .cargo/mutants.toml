@@ -105,6 +105,8 @@ exclude_re = [
   'rind/src/high/rsa\.rs:\d+:74: replace \+ with \*$',
   'rind/src/high/sec1\.rs:\d+:\d+: replace \+ with \*$',
   'rind/src/high/signature\.rs:\d+:48: replace \+ with \*$',
+  # `sign`'s scratch bound, not its SEQUENCE length at column 15, which is caught.
+  'rind-openmls/src/provider\.rs:\d+:32: replace \+ with \* in <impl OpenMlsCrypto for RustCrypto>::sign$',
   # Pinned to its line: the next line's `+`, at the same column, is caught.
   'rind/src/low/generic/mont\.rs:167:\d+: replace \+ with \* in mont_mul$',
   'rind/src/low/x86_64/mlkem_sample_poly_ntt_8x\.rs:\d+:\d+: replace \+ with \* in _squeeze_rate_and_reject$',
@@ -112,7 +114,6 @@ exclude_re = [
   'rind/src/mid/rsa_priv\.rs:\d+:44: replace \+ with \*$',
   'rind/src/mid/rsa_priv\.rs:\d+:15: replace \+ with \*$',
   'rind/src/mid/rsa_priv/exponents\.rs:\d+:56: replace \* with \+ in Exponents::derive$',
-  'rind-openmls/src/provider\.rs:\d+:15: replace \+ with \* in <impl OpenMlsCrypto for RustCrypto>::sign$',
   # Equivalent: a comparison whose two forms differ only where both branches
   # give the same result, or a step that computes the same value another way,
   # such as squaring rather than multiplying to the same power.
