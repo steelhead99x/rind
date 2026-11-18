@@ -1682,10 +1682,18 @@ fn trace_ecdh(algorithm: &'static crate::agreement::Algorithm, len: usize) {
     if scalar.iter().all(|&byte| byte == 0) {
         scalar[len - 1] = 1;
     }
+    warm_detection();
     super::ct_qemu::traced(|| {
         let key = PrivateKey::from_scalar(algorithm, &scalar).unwrap();
         key.agree(&peer).is_ok()
     });
+}
+
+/// Runs the one-time multiplier detection, its `OnceLock`, environment
+/// reads, and `MIDR_EL1` probe, before a trace starts, so neither seed's
+/// trace includes it.
+fn warm_detection() {
+    let _ = super::cpu::wide_multiplier();
 }
 
 // Valgrind on the arm64 runner sees the schedule that runner's core selects,
@@ -1724,6 +1732,7 @@ fn ct_qemu_ed25519() {
 
     let seed = qemu_seed(32);
     let message = qemu_seed(40);
+    warm_detection();
     super::ct_qemu::traced(|| {
         let key = Ed25519KeyPair::from_seed(&seed).unwrap();
         key.sign(&message)
@@ -1732,26 +1741,43 @@ fn ct_qemu_ed25519() {
 
 /// A 16-word Montgomery product. On a narrow multiplier that is
 /// `bignum_kmul_16_32`, `bignum_ksqr_16_32`, and `bignum_emontredc_8n` at
-/// k = 16, which is every RSA-2048 CRT exponentiation. The inputs differ
-/// between the two seeds; the low limb of the modulus does not.
+/// k = 16, which is every RSA-2048 CRT exponentiation.
 #[test]
 #[ignore = "admin/ct-qemu runs it under qemu"]
 fn ct_qemu_mont16() {
-    let seed = qemu_seed(16 * 8 * 3);
-    let mut modulus = [0u64; 16];
-    let mut x = [0u64; 16];
-    let mut y = [0u64; 16];
-    words_into(&seed[..128], &mut modulus);
-    words_into(&seed[128..256], &mut x);
-    words_into(&seed[256..], &mut y);
+    trace_mont::<16>();
+}
+
+/// A 32-word Montgomery product. On a narrow multiplier that is
+/// `bignum_kmul_32_64`, `bignum_ksqr_32_64`, and `bignum_emontredc_8n` at
+/// k = 32: RSA-4096's CRT exponentiations and RSA-2048's public operation.
+#[test]
+#[ignore = "admin/ct-qemu runs it under qemu"]
+fn ct_qemu_mont32() {
+    trace_mont::<32>();
+}
+
+/// One `N`-word Montgomery product and one square. The inputs differ between
+/// the two seeds; the low limb of the modulus does not.
+fn trace_mont<const N: usize>() {
+    let seed = qemu_seed(N * 8 * 3);
+    let (modulus_bytes, rest) = seed.split_at(N * 8);
+    let (x_bytes, y_bytes) = rest.split_at(N * 8);
+    let mut modulus = [0u64; N];
+    let mut x = [0u64; N];
+    let mut y = [0u64; N];
+    words_into(modulus_bytes, &mut modulus);
+    words_into(x_bytes, &mut x);
+    words_into(y_bytes, &mut y);
     modulus[0] = 1;
-    modulus[15] |= 1 << 63;
-    x[15] &= !(1 << 63);
-    y[15] &= !(1 << 63);
+    modulus[N - 1] |= 1 << 63;
+    x[N - 1] &= !(1 << 63);
+    y[N - 1] &= !(1 << 63);
     let mut n0 = [0u64];
     super::bignum_negmodinv::bignum_negmodinv(&mut n0, &modulus[..1]);
+    warm_detection();
     super::ct_qemu::traced(|| {
-        let mut z = [0u64; 16];
+        let mut z = [0u64; N];
         super::mont::mont_mul(&mut z, &x, &y, &modulus, n0[0]);
         super::mont::mont_sqr(&mut z, &x, &modulus, n0[0]);
         z
