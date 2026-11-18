@@ -189,7 +189,7 @@ opaque low.generic.chacha20poly1305.seal
 
 opaque low.generic.chacha20poly1305.open
   : Std.Array Std.U8 32#usize → Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
-    Result ((Std.Array Std.U8 16#usize) × (Slice Std.U8))
+    Std.Array Std.U8 16#usize → Result (Bool × (Slice Std.U8))
 
 /-! s2n-bignum's Ed25519 routines, transliterated to inline assembly. -/
 

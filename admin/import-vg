@@ -42,6 +42,21 @@ ROOTS = {
         "vg_chacha20_init",
         "vg_chacha20_apply_avx2",
         "vg_chacha20_apply_avx512vl",
+        # ML-KEM-768's encapsulation key check and encapsulation, by key or
+        # with its hash, on every CPU; key generation and decapsulation
+        # with AVX-512.
+        "vg_mlkem768_check_ek",
+        "vg_mlkem768_check_ek_avx2",
+        "vg_mlkem768_encaps",
+        "vg_mlkem768_encaps_avx",
+        "vg_mlkem768_encaps_avx2",
+        "vg_mlkem768_encaps_avx512",
+        "vg_mlkem768_encaps_h",
+        "vg_mlkem768_encaps_h_avx",
+        "vg_mlkem768_encaps_h_avx2",
+        "vg_mlkem768_encaps_h_avx512",
+        "vg_mlkem768_keygen_avx512",
+        "vg_mlkem768_decaps_avx512",
         # RSA's public operation, with AVX512_IFMA for 2048-, 3072-, and
         # 4096-bit moduli and e = 65537 and with ADX for the rest.
         "vg_rsa_public_precomputed_checked_ifma",
@@ -49,6 +64,19 @@ ROOTS = {
         # keys, and its twin for CPUs with two 512-bit multipliers.
         "vg_rsa_private_crt_precomputed_ifma",
         "vg_rsa_private_crt_precomputed_ifma512",
+    ],
+    "aarch64": [
+        # ChaCha20-Poly1305 with SVE2.
+        "vg_chacha20_poly1305_seal_sve2",
+        "vg_chacha20_poly1305_open_sve2",
+        # ML-KEM-768's encapsulation key check, and encapsulation with the
+        # SHA-3 instructions: Apple's cores take VG's variant that also runs
+        # Keccak on them, as VG's dispatcher picks.
+        "vg_mlkem768_check_ek",
+        "vg_mlkem768_encaps_x2_sha3",
+        "vg_mlkem768_encaps_x2_sha3_keccak_sha3",
+        "vg_mlkem768_encaps_h_x2_sha3",
+        "vg_mlkem768_encaps_h_x2_sha3_keccak_sha3",
     ],
 }
 
@@ -194,7 +222,7 @@ def import_arch(vg, arch, roots):
         "//! pyca/verified-garbage's verified routines that rind runs, and the",
         "//! routines and tables they reach: see admin/import-vg.",
         "",
-        "#![allow(dead_code, unused_macros, clippy::all)]",
+        "#![allow(dead_code, unreachable_pub, unused_macros, clippy::all)]",
         "",
     ]
     if uses_macros:

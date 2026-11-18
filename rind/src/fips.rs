@@ -565,7 +565,7 @@ mod kat {
         let ek = key.encapsulation_key();
         check(
             "ml_kem_keygen",
-            sha256_of(&ek.as_bytes())[..] == hex(ML_KEM_EK_SHA256)
+            sha256_of(ek.as_bytes())[..] == hex(ML_KEM_EK_SHA256)
                 && sha256_of(&key.as_bytes())[..] == hex(ML_KEM_DK_SHA256),
         )?;
 

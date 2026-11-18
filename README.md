@@ -11,6 +11,7 @@
 </p>
 
 <p align="center">
+  <a href="https://rind.kixel.ai"><img alt="Website" src="https://img.shields.io/badge/website-rind.kixel.ai-719500"></a>
   <a href="https://crates.io/crates/rind"><img alt="Latest release" src="https://img.shields.io/crates/v/rind"></a>
   <a href="https://docs.rs/rind/"><img alt="Documentation" src="https://img.shields.io/docsrs/rind"></a>
   <a href="https://github.com/kixel-ai/rind/actions/workflows/build.yml?query=branch%3Amain"><img alt="Build Status" src="https://img.shields.io/github/actions/workflow/status/kixel-ai/rind/build.yml"></a>
@@ -45,7 +46,9 @@ closes it. [BENCHMARKS.md][benchmarks] has every time, build time, and
 binary size.
 
 The [launch post][launch-post] tells why rind exists and what building it
-cost in AI tokens.
+cost in AI tokens, and [rind.kixel.ai](https://rind.kixel.ai) lets you pick a
+CPU, maps each operation to the CPUs where a proof covers it, and has a page
+per library on how to move it to rind.
 
 ## Compared with the alternatives
 
@@ -181,7 +184,9 @@ could: the key is still there to read. What it does is shorten how long a
 key that is no longer in use stays in memory, in freed blocks a later
 allocation reuses, in swap, in core dumps and crash reports taken later, and
 in memory read after the fact; copies already written out stay. It does not wipe stack copies, digest contexts, or
-messages. The adapters wipe their own copies of secrets too, such as
+messages, except that pyca/verified-garbage's ChaCha20-Poly1305 and
+ML-KEM-768 routines wipe their own stack scratch, a property their proofs
+include. The adapters wipe their own copies of secrets too, such as
 rind-aws-lc-rs's PKCS#8 documents.
 
 ## Data-independent timing

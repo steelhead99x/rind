@@ -221,11 +221,24 @@ pub(crate) struct HaveAvx512ForMlKem(());
 
 impl HaveAvx512ForMlKem {
     pub(crate) fn check() -> Option<Self> {
-        // It runs inside rind's AVX2 ML-KEM.
-        match has(AVX2_KERNELS | AVX512F | AVX512BW | AVX512VBMI | AVX512VBMI2) {
+        // It runs inside rind's AVX2 ML-KEM. It needs no VL, which every CPU
+        // with VBMI2 has, but asking for it keeps ML-KEM-768 off this sampler
+        // wherever VG's AVX-512 key generation does not run.
+        match has(AVX2_KERNELS | AVX512F | AVX512BW | AVX512VL | AVX512VBMI | AVX512VBMI2) {
             true => Some(Self(())),
             false => None,
         }
+    }
+}
+
+/// Proof that the CPU has what pyca/verified-garbage's AVX-512 ML-KEM-768
+/// runs: AVX-512 F, BW, and VL, with AVX and AVX2.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveAvx512ForVgMlKem(());
+
+impl HaveAvx512ForVgMlKem {
+    pub(crate) fn check() -> Option<Self> {
+        has(AVX | AVX2 | AVX512F | AVX512BW | AVX512VL).then_some(Self(()))
     }
 }
 
@@ -680,7 +693,17 @@ mod tests {
             (
                 HaveAvx512ForMlKem::check().is_some(),
                 available!("avx", "avx2", "bmi1", "bmi2", "popcnt", "ssse3")
-                    && available!("avx512f", "avx512bw", "avx512vbmi", "avx512vbmi2"),
+                    && available!(
+                        "avx512f",
+                        "avx512bw",
+                        "avx512vl",
+                        "avx512vbmi",
+                        "avx512vbmi2"
+                    ),
+            ),
+            (
+                HaveAvx512ForVgMlKem::check().is_some(),
+                available!("avx", "avx2", "avx512f", "avx512bw", "avx512vl"),
             ),
             (
                 HaveAvx512ForRsa::check().is_some(),

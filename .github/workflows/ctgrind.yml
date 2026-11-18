@@ -34,9 +34,10 @@ env:
   VALGRIND_BUG_494162: 1
 
 jobs:
-  # Valgrind hides SHA3 from aarch64 programs, so the arm64 rows check the
-  # code for cores with the crypto extension but without SHA3, and say so;
-  # `aarch64-qemu` checks the SHA3 paths. x86_64 ignores the variables.
+  # Valgrind hides SHA3 and SVE2 from aarch64 programs, so the arm64 rows
+  # check the code for cores with the crypto extension but without either,
+  # and say so; `aarch64-qemu` checks the SHA3 and SVE2 paths. x86_64
+  # ignores the variables.
   # release-plz's release PR, which only bumps versions and changelogs, runs
   # neither this nor `binsec`: a `release-plz-` branch that moq-bot,
   # release.yml's app, opened.
@@ -51,6 +52,7 @@ jobs:
     env:
       RIND_TEST_ARM_CRYPTO_EXT: 1
       RIND_TEST_ARM_SHA3: 0
+      RIND_TEST_ARM_SVE2: 0
       # A pull request whose change reaches no backend this job builds skips it.
       RIND_SCOPE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
     steps:
@@ -164,7 +166,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [rsa3072, rsa4096, crt_ifma_2048, crt_ifma512_2048, crt_ifma512_3072, crt_ifma_4096, crt_ifma512_4096, public_ifma, aes128_gcm, aes192_gcm, aes256_gcm, aes_gcm_vaes_avx2, hmac, chacha20]
+        test: [rsa3072, rsa4096, crt_ifma_2048, crt_ifma512_2048, crt_ifma512_3072, crt_ifma_4096, crt_ifma512_4096, public_ifma, aes128_gcm, aes192_gcm, aes256_gcm, aes_gcm_vaes_avx2, hmac, chacha20, mlkem768]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -202,6 +204,7 @@ jobs:
           RIND_CPU_DISABLE_sha2: 1
           RIND_TEST_ARM_CRYPTO_EXT: 0
           RIND_TEST_ARM_SHA3: 0
+          RIND_TEST_ARM_SVE2: 0
 
   # The arm64 runner executes 32-bit ARM natively, so an armhf valgrind checks
   # the armv7 build without emulation. Its core has NEON and the crypto
@@ -286,9 +289,10 @@ jobs:
       - name: ct-qemu
         run: nix develop .#ct-qemu --command admin/ct-qemu
 
-  # Valgrind hides SHA3 from aarch64 programs too, so what rind runs only
-  # with it never runs under ctgrind: the eight-way AES-GCM kernels, the
-  # SHA-512 instructions, and the SHA3 Keccak kernels. `admin/ct-qemu`
+  # Valgrind hides SHA3 and SVE2 from aarch64 programs too, so what rind
+  # runs only with them never runs under ctgrind: the eight-way AES-GCM
+  # kernels, the SHA-512 instructions, the SHA3 Keccak kernels, and
+  # pyca/verified-garbage's SVE2 ChaCha20-Poly1305. `admin/ct-qemu`
   # traces them under qemu-aarch64 instead, natively built on the arm64
   # runner.
   aarch64-qemu:
