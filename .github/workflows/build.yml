@@ -469,9 +469,7 @@ jobs:
             xcrun simctl boot "$udid"
             xcrun simctl bootstatus "$udid"
             status=0
-            # TEMPORARY: force attempt 1 to time out to exercise the retry.
-            secs=900; [ "$attempt" -eq 1 ] && secs=150
-            limit "$secs" flutter test integration_test -d "$udid" --reporter expanded || status=$?
+            limit 900 flutter test integration_test -d "$udid" --reporter expanded || status=$?
             [ "$status" -eq 0 ] && exit 0
             echo "::group::attempt $attempt: simulator log (Runner)"
             xcrun simctl spawn "$udid" log show --last 15m --style compact \
