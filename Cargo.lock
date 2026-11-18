@@ -4749,7 +4749,7 @@ dependencies = [
 name = "rind-cpuid"
 version = "0.1.0"
 dependencies = [
- "rind",
+ "libc",
 ]
 
 [[package]]
