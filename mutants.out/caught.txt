@@ -1,2 +1,0 @@
-rind/src/mid/mlkem.rs:638:23: replace == with != in Decoded<P>::kpke_encrypt
-rind/src/mid/mlkem.rs:1273:38: replace * with + in shake256_fours
