@@ -59,6 +59,8 @@ const IFMA_CHUNK: usize = 16384;
 /// ChaCha20 then Poly1305 for sealing, or Poly1305 then ChaCha20 for opening,
 /// a chunk at a time: VG's AVX-512 VL ChaCha20 (`ChaCha20::new` picks it, as
 /// the token proves AVX-512 VL) and OpenSSL's IFMA Poly1305.
+// Never inlined, holding its `Mcdt` throughout, as `low::mcdt` requires.
+#[inline(never)]
 fn ifma_passes(
     ifma: HaveAvx512Ifma,
     key: &[u8; 32],
@@ -67,6 +69,9 @@ fn ifma_passes(
     inout: &mut [u8],
     seal: bool,
 ) -> [u8; 16] {
+    // `vpmadd52luq` and `vpmadd52huq` multiply the Poly1305 key `r`, its
+    // powers, and the accumulator, all secret.
+    let _mcdt = crate::low::Mcdt::enter();
     let mut counter_nonce = [0u8; 16];
     counter_nonce[4..].copy_from_slice(nonce);
 
