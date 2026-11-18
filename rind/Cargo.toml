@@ -41,8 +41,9 @@ libcrux-sha2 = { version = "0.0.9", features = ["expose-hacl"] }
 libc = { version = "0.2", default-features = false }
 
 # Reads `AT_HWCAP` for `HWCAP_CPUID` before reading `MIDR_EL1`, which
-# picks the multiplier schedule without opening a file.
-[target.'cfg(all(target_arch = "aarch64", target_os = "linux"))'.dependencies]
+# picks the multiplier schedule without opening a file. A libc-less Linux
+# target (`target_env = ""`) builds without `std` and has no `getauxval`.
+[target.'cfg(all(target_arch = "aarch64", target_os = "linux", not(target_env = "")))'.dependencies]
 libc = { version = "0.2", default-features = false }
 
 [dev-dependencies]
