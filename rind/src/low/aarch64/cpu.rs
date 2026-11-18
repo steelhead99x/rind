@@ -214,8 +214,8 @@ fn detect_once() -> u8 {
 fn detect() -> u8 {
     use std::arch::is_aarch64_feature_detected as detected;
 
-    // Hardware features only. The part list is `wide_multiplier`'s, so a
-    // seccomp filter that kills `open` still runs AES, SHA, NEON, and SVE2.
+    // Hardware features only. `wide_multiplier` reads `MIDR_EL1` on its own
+    // first call, so an AES, SHA, NEON, or SVE2 check never reads the part.
     let crypto_ext = test_toggle("aes", detected!("aes"))
         && test_toggle("pmull", detected!("pmull"))
         // Rust's `sha2` covers the SHA-1 instructions too.
