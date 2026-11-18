@@ -17,6 +17,8 @@
 //! destructor wipes the rest with [`zeroise_all`], as aws-lc's
 //! `rand_thread_state_clear_all` does.
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{PoisonError, RwLock, RwLockWriteGuard};

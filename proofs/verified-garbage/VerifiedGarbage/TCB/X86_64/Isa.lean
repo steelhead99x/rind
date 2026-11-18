@@ -25,7 +25,8 @@ Modelling choices:
   destination general-purpose register."
 * Only CF, ZF, SF and OF are modelled. Each is an `Option Bool`; `none` means
   "undefined" (as the SDM specifies for some instructions). Evaluating a
-  branch on an undefined flag faults, so verified code never depends on one.
+  branch on an undefined flag faults, so verified code never depends on one,
+  and returning with one counts as secret residue (`Residue.lean`).
   PF and AF are not modelled, and no modelled instruction reads them.
 * Memory accesses must lie within the state's permitted regions: loads within
   `rd ++ wr`, stores within `wr`; otherwise the instruction faults.
@@ -1036,6 +1037,33 @@ def push : Instr → State → Option State
     else none
   | _, _ => none
 
+/-- The memory once the `n` bytes at `a`, a released frame, are below the
+stack pointer. The functions are called with the System V convention
+(`extern "sysv64"`, `TCB/X86_64/Target.lean`) on every target, Windows
+included, and what may change the data below the stack pointer is the
+system's. The System V psABI (Draft 0.99.7, §3.2.2, "The Stack Frame") keeps
+only 128 bytes: "The 128-byte area beyond the location pointed to by %rsp
+is considered to be reserved and shall not be modified by signal or
+interrupt handlers." Windows keeps none ("x64 stack usage", Microsoft
+Learn): "All memory beyond the current address of RSP is considered
+volatile: The OS, or a debugger, may overwrite this memory during a user
+debug session, or an interrupt handler." So on Windows any byte of a
+released frame may change, and on System V any byte past the 128 below the
+stack pointer: each byte of the frame either keeps its value (as the red
+zone's do) or takes one the model does not know, as the unknowns say: for the quadword `j` of
+the frame, the bytes of `u (2 * j)` say which of its bytes are replaced
+(those not zero), and the bytes of `u (2 * j + 1)` are what replaces them.
+A byte may keep its value, so what a function leaves in a frame it releases
+may be left there (`NoResidue`, whose two runs share their unknowns, still
+tells apart a frame that holds a secret). -/
+def lose (m : Mem) (a : Addr) (n : Nat) (u : Nat → BitVec 64) : Mem :=
+  fun x =>
+    let d := (x - a).toNat
+    if d < n then
+      if (u (2 * (d / 8))).extractLsb' (8 * (d % 8)) 8 = 0 then m x
+      else (u (2 * (d / 8) + 1)).extractLsb' (8 * (d % 8)) 8
+    else m x
+
 /-- The pop of a frame: `pop r`, `k` times (`popReg`), so that `r` holds the
 last quadword of the frame. Faults if `k = 0` or `r` is `rsp`, and unless
 `rsp` and the writable regions are those the push left (`s₁`), and the
@@ -1043,18 +1071,25 @@ frame, the region at their head, has `8 * k` bytes; it removes the frame.
 
 Or `lea rsp, [rsp + bytes]` (`free`, "LEA" as for `alloc`), with the same
 conditions on `bytes` as `alloc` and on `rsp` and the writable regions as
-`pop`, the frame having `bytes` bytes; it changes neither memory nor any
-other register. -/
+`pop`, the frame having `bytes` bytes; it changes no other register.
+
+The released frame's bytes are then below the stack pointer, and are
+`lose`'s: the next of the state's `unknowns`, two for each quadword of the
+frame, say what each holds. -/
 def pop : Instr → State → State → Option State
   | .free bytes, s₁, s₂ =>
     if 0 < bytes ∧ bytes < 4096 ∧ bytes % 8 = 0 ∧ s₂.gpr .rsp = s₁.gpr .rsp ∧ s₂.wr = s₁.wr ∧
         s₁.wr.head? = some ⟨s₁.gpr .rsp, bytes⟩ then
-      some { s₂.setReg .rsp (s₂.gpr .rsp + BitVec.ofNat 64 bytes) with wr := s₂.wr.tail }
+      some { s₂.setReg .rsp (s₂.gpr .rsp + BitVec.ofNat 64 bytes) with
+        wr := s₂.wr.tail, mem := lose s₂.mem (s₂.gpr .rsp) bytes s₂.unknowns,
+        unknowns := fun n => s₂.unknowns (n + bytes / 4) }
     else none
   | .pop r k, s₁, s₂ =>
     if k ≠ 0 ∧ r ≠ .rsp ∧ s₂.gpr .rsp = s₁.gpr .rsp ∧ s₂.wr = s₁.wr ∧
         s₁.wr.head? = some ⟨s₁.gpr .rsp, 8 * k⟩ then
-      some { popReg s₂ r k with wr := s₂.wr.tail }
+      some { popReg s₂ r k with
+        wr := s₂.wr.tail, mem := lose s₂.mem (s₂.gpr .rsp) (8 * k) s₂.unknowns,
+        unknowns := fun n => s₂.unknowns (n + 2 * k) }
     else none
   | _, _, _ => none
 
