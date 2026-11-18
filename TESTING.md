@@ -147,8 +147,12 @@ the forced portable backend. On wasm, where aws-lc does not build, Ed25519's
 CCTV vectors compare with `rind/tests/cctv/ed25519-verdicts.txt`, aws-lc's
 recorded verdicts, which `cctv::ed25519_verdicts_match_aws_lc` keeps equal to
 aws-lc elsewhere. Rewrite it with
-`RIND_RECORD_VERDICTS=1 cargo test -p rind --test cctv -- --ignored ed25519_record_aws_lc_verdicts`. The nightly `build.yml` runs the million-case
-accumulation in native release builds, on every denied x86_64/aarch64 tier,
+
+```sh
+RIND_RECORD_VERDICTS=1 cargo test -p rind --test cctv -- --ignored ed25519_record_aws_lc_verdicts
+```
+
+The nightly `build.yml` runs the million-case accumulation in native release builds, on every denied x86_64/aarch64 tier,
 and through `just portable`. `just armv7` and `x86-cpu.yml`'s SDE models use
 the default 10,000 cases, even though they build in release mode.
 

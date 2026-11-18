@@ -92,8 +92,9 @@ fn assert_zeroed<R>(what: &str, op: impl Fn() -> R) {
 /// comparisons the real checks use, and report the result instead of panicking:
 /// wasm32-wasip2 aborts on panic, and a `should_panic` test cannot run there.
 /// Their own `assert!` aborts the wasm run when a canary misses, which still
-/// fails it, just without running the tests after it. Native targets also have `should_panic` canaries that go through the
-/// `assert_*` wrappers, so a no-op arm there cannot pass unnoticed.
+/// fails it, just without running the tests after it. Native targets also
+/// have `should_panic` canaries that go through the `assert_*` wrappers, so a
+/// no-op arm there cannot pass unnoticed.
 #[test]
 fn detects_a_leak() {
     let leaked = independent([[1u8; 32], [2u8; 32]], |key| {
