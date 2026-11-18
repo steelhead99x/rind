@@ -427,7 +427,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.dart == 'true'
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     defaults:
       run:
         working-directory: rind-dart/integration
@@ -455,12 +455,14 @@ jobs:
       - name: Run tests
         run: |
           udid=$(xcrun simctl list devices available --json | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')
-          # Some runs hang after the Xcode build, with no test output, until
-          # the job's limit cancels them; a rerun passes.
-          # So each attempt stops after 15 minutes, prints what the simulator
-          # saw, and the second attempt starts from a freshly erased
-          # simulator and a clean build, since a build killed partway can
-          # leave a half-written framework that fails code signing. macOS
+          # A backstop for hangs that beta's fix (see the Flutter step above)
+          # doesn't cover: a hung run would otherwise sit silent until the
+          # job's limit cancels it and drops the log. So each attempt stops
+          # after 20 minutes (a healthy beta run takes about 13, most of it
+          # building rind and the app), prints what the simulator saw, and
+          # the second attempt starts from a freshly erased simulator and a
+          # clean build, since a build killed partway can leave a
+          # half-written framework that fails code signing. macOS
           # has no timeout(1), so perl runs the command in its own process
           # group and, at the limit, kills the whole group (flutter and the
           # xcodebuild and simctl it started) and exits 142.
@@ -479,15 +481,19 @@ jobs:
           for attempt in 1 2; do
             xcrun simctl boot "$udid"
             xcrun simctl bootstatus "$udid"
+            # The logs below cover this attempt only: crash reports live on
+            # the host, so erasing the simulator doesn't clear attempt 1's.
+            start=$(date '+%Y-%m-%d %H:%M:%S')
+            touch "$RUNNER_TEMP/dart-ios-attempt"
             status=0
-            limit 900 flutter test integration_test -d "$udid" --reporter expanded || status=$?
+            limit 1200 flutter test integration_test -d "$udid" --reporter expanded || status=$?
             [ "$status" -eq 0 ] && exit 0
             echo "::group::attempt $attempt: simulator log (Runner)"
-            xcrun simctl spawn "$udid" log show --last 15m --style compact \
+            xcrun simctl spawn "$udid" log show --start "$start" --style compact \
               --predicate 'process == "Runner"' | tail -n 300 || true
             echo "::endgroup::"
             echo "::group::attempt $attempt: crash reports"
-            find ~/Library/Logs/DiagnosticReports -mmin -15 -name '*Runner*' -print -exec head -n 120 {} \; 2>/dev/null || true
+            find ~/Library/Logs/DiagnosticReports -newer "$RUNNER_TEMP/dart-ios-attempt" -name '*Runner*' -print -exec head -n 120 {} \; 2>/dev/null || true
             echo "::endgroup::"
             # 142 is SIGALRM: the hang. A real test failure is not retried.
             [ "$status" -eq 142 ] || exit "$status"
