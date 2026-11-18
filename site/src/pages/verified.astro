@@ -1,0 +1,228 @@
+---
+import Base from "../layouts/Base.astro";
+import { html, lex } from "../lib/markdown";
+import { verifiedPage } from "../lib/pages";
+import * as v from "../lib/verified";
+---
+
+<Base page={verifiedPage} title="rind: verified code, by CPU">
+	<header>
+		<p class="back"><a href="/">rind</a></p>
+		<h1>{v.title}</h1>
+		<Fragment set:html={html(lex(v.intro.join("\n\n")))} />
+	</header>
+
+	<main>
+		<section>
+			<h2>Legend</h2>
+			<dl class="legend">
+				{
+					v.legend.map(([mark, meaning]) => (
+						<div>
+							<dt>{mark}</dt>
+							<dd>{meaning}</dd>
+						</div>
+					))
+				}
+			</dl>
+		</section>
+
+		<section>
+			<h2>Summary</h2>
+			<p>Operations a proof covers, of the {v.operationCount} the benchmarks time, by library and host.</p>
+			<div class="scroll">
+				<table>
+					<thead>
+						<tr>
+							<th scope="col">Library</th>
+							{
+								v.hosts.map((h) => (
+									<th scope="col">
+										<code>{h.name}</code>
+										<span class="cpu">{h.cpu}</span>
+										<span class="cpu">{v.osName[h.os]}</span>
+									</th>
+								))
+							}
+						</tr>
+					</thead>
+					<tbody>
+						{
+							v.libraries.map((lib) => (
+								<tr>
+									<th scope="row">
+										<a href={`#${lib.id}`}>{lib.name}</a>
+									</th>
+									{v.hosts.map((_, i) => (
+										<td class:list={["count", { none: v.provenCount(lib.id, i) === 0 }]}>
+											{v.provenCount(lib.id, i)}
+										</td>
+									))}
+								</tr>
+							))
+						}
+					</tbody>
+				</table>
+			</div>
+		</section>
+
+		{
+			v.libraries.map((lib, n) => (
+				<section id={lib.id}>
+					<details open={n === 0}>
+						<summary>
+							<h2>{lib.name}</h2>
+						</summary>
+						<div class="scroll">
+							<table class="grid">
+								<thead>
+									<tr>
+										<th scope="col">Operation</th>
+										{v.hosts.map((h) => (
+											<th scope="col" title={v.hostHeading(h)}>
+												<code>{h.name}</code>
+												<span class="cpu">{v.osName[h.os]}</span>
+											</th>
+										))}
+									</tr>
+								</thead>
+								{v.sections.map((s) => (
+									<tbody>
+										<tr>
+											<th scope="rowgroup" colspan={v.hosts.length + 1} class="section">
+												{s.title}
+											</th>
+										</tr>
+										{s.rows.map((r) => (
+											<tr>
+												<th scope="row">{r.label}</th>
+												{r.cells[lib.id].map((c, i) => {
+													const shown = v.show(c, v.hosts[i], lib.id);
+													return (
+														<td class={shown.kind} title={shown.title}>
+															{shown.proof === undefined ? (
+																shown.text
+															) : (
+																<a href={`#${v.proofId(shown.proof)}`}>{shown.text}</a>
+															)}
+														</td>
+													);
+												})}
+											</tr>
+										))}
+									</tbody>
+								))}
+							</table>
+						</div>
+					</details>
+				</section>
+			))
+		}
+
+		<section>
+			<h2>Proofs</h2>
+			<Fragment set:html={html(lex(v.proofsLead))} />
+			<ol class="proofs">
+				{
+					v.proofs.map((p, i) => (
+						<li id={v.proofId(i)}>
+							<strong>{p.library}</strong>, {p.operations.map((o, j) => (
+								<>
+									{j > 0 && ", "}
+									<code>{o}</code>
+								</>
+							))}, on {p.platform}: <a href={p.link}>{p.proof}</a>
+						</li>
+					))
+				}
+			</ol>
+		</section>
+	</main>
+</Base>
+
+<style>
+	header,
+	main {
+		max-width: 72rem;
+		margin: 0 auto;
+		padding: 0 1.25rem;
+	}
+	header {
+		padding-top: 2rem;
+	}
+	.back {
+		margin: 0;
+	}
+	main {
+		padding-bottom: 3rem;
+	}
+	main > section {
+		margin-top: 2.5rem;
+	}
+	.legend div {
+		display: flex;
+		gap: 1rem;
+	}
+	.legend dt {
+		min-width: 8rem;
+		font-weight: 600;
+	}
+	.legend dd {
+		margin: 0;
+	}
+	.scroll {
+		overflow-x: auto;
+	}
+	table {
+		border-collapse: collapse;
+		font-size: 0.9rem;
+	}
+	th,
+	td {
+		border-bottom: 1px solid var(--border);
+		padding: 0.3rem 0.6rem;
+		text-align: left;
+		vertical-align: top;
+	}
+	thead th {
+		position: sticky;
+		top: 0;
+		background: var(--bg);
+	}
+	.cpu {
+		display: block;
+		font-weight: normal;
+		color: var(--muted);
+		font-size: 0.85em;
+	}
+	.count {
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+	}
+	.none,
+	.unproven,
+	.untimed,
+	.refused,
+	.other-os {
+		color: var(--muted);
+	}
+	.proven {
+		background: var(--surface);
+		font-weight: 600;
+	}
+	.section {
+		background: var(--surface);
+		font-size: 0.95em;
+	}
+	summary {
+		cursor: pointer;
+	}
+	summary h2 {
+		display: inline;
+		font-size: 1.35rem;
+	}
+	.proofs li {
+		margin-bottom: 0.5rem;
+		overflow-wrap: anywhere;
+	}
+</style>
