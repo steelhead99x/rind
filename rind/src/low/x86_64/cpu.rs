@@ -453,8 +453,8 @@ fn detect_once() -> u32 {
     features
 }
 
-/// CPUID leaves the bare-metal detector reads. `xcr0` is `None` when
-/// `XGETBV` would raise `#UD`, because XSAVE or OSXSAVE is clear.
+/// CPUID leaves the bare-metal detector reads, and in tests XCR0, which is
+/// `None` when `XGETBV` would raise `#UD`, because XSAVE or OSXSAVE is clear.
 #[cfg(any(test, target_os = "none"))]
 #[derive(Clone, Copy)]
 struct CpuidLeaves {
@@ -465,9 +465,9 @@ struct CpuidLeaves {
     leaf7_ecx: u32,
     /// Leaf 7, subleaf 1, EAX. SHA512 is reported here, not in subleaf 0.
     leaf7_sub1_eax: u32,
-    /// The std-matching check in tests reads this. The bare-metal detector
-    /// does not: XCR0 does not mean this context saves YMM or ZMM.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Only the std-matching check in tests reads this, so only tests run
+    /// `XGETBV`: XCR0 does not mean this context saves YMM or ZMM.
+    #[cfg(test)]
     xcr0: Option<u32>,
 }
 
@@ -485,6 +485,7 @@ fn read_cpuid_leaves() -> CpuidLeaves {
             leaf7_ebx: 0,
             leaf7_ecx: 0,
             leaf7_sub1_eax: 0,
+            #[cfg(test)]
             xcr0: None,
         };
     }
@@ -515,11 +516,12 @@ fn read_cpuid_leaves() -> CpuidLeaves {
         leaf7_ebx,
         leaf7_ecx,
         leaf7_sub1_eax,
+        #[cfg(test)]
         xcr0: os_xcr0(leaf1.ecx),
     }
 }
 
-#[cfg(any(test, target_os = "none"))]
+#[cfg(test)]
 fn os_xcr0(leaf1_ecx: u32) -> Option<u32> {
     const XSAVE: u32 = 1 << 26;
     const OSXSAVE: u32 = 1 << 27;
