@@ -2,9 +2,9 @@
 //! ECDSA on P-256, P-384, and P-521, as OpenSSL's default provider offers it
 //! under `ECDSA`, through `EVP_DigestSign` and `EVP_DigestVerify`.
 //!
-//! rind signs and verifies a message, so a context holds the message it is
-//! given until the signature or the verdict is asked for, and takes no
-//! digest the caller made: `EVP_PKEY_sign` and `EVP_PKEY_verify`, which hand
+//! A context hashes the message as it is given, in a digest context of
+//! constant size, and signs or verifies the digest, so it keeps no copy of
+//! the message. It takes no digest the caller made: `EVP_PKEY_sign` and `EVP_PKEY_verify`, which hand
 //! over one, fail as unsupported. rind signs each curve only with its own
 //! hash, as aws-lc-rs's algorithms do, and verifies with SHA-256, SHA-384,
 //! and SHA-512.
@@ -13,7 +13,9 @@ use core::ffi::{c_char, c_int, c_void};
 use core::slice;
 use std::sync::Arc;
 
-use crate::ec::{Hash, Key, KeyData, hash_message};
+use rind::digest;
+
+use crate::ec::{Hash, Key, KeyData};
 use crate::ffi::{
     CtxDup, CtxFree, CtxGetParams, CtxParamList, CtxSetParams, Dispatch, INTEGER, OCTET_STRING,
     Param, SIGNATURE_DIGEST_SIGN, SIGNATURE_DIGEST_SIGN_FINAL, SIGNATURE_DIGEST_SIGN_INIT,
@@ -107,8 +109,9 @@ struct Signing {
     verifying: bool,
     /// The hash the message is signed with, if the caller named one.
     hash: Option<Hash>,
-    /// The message so far, which rind signs or verifies whole.
-    message: Vec<u8>,
+    /// The hash of the message so far, which exists once an update has
+    /// begun it, and then fixes the hash.
+    hashing: Option<(Hash, digest::Context)>,
 }
 
 impl Signing {
@@ -137,7 +140,7 @@ impl Signing {
     ) -> Result<(), Failure> {
         // OpenSSL begins again without a key to change only the parameters.
         if keydata.is_null() && self.key.is_some() && self.verifying == verifying {
-            self.message.clear();
+            self.hashing = None;
         } else {
             // SAFETY: per the caller.
             let key = unsafe { KeyData::from_ptr(keydata) }
@@ -146,7 +149,7 @@ impl Signing {
             self.key = Some(key);
             self.verifying = verifying;
             self.hash = None;
-            self.message.clear();
+            self.hashing = None;
         }
         if !mdname.is_null() {
             // SAFETY: a digest name is a C string.
@@ -164,7 +167,17 @@ impl Signing {
             let name = digest
                 .utf8()
                 .ok_or_else(|| Failure::invalid("the digest must be a UTF-8 string"))?;
-            self.hash = Some(hash(name)?);
+            let new = hash(name)?;
+            if self
+                .hashing
+                .as_ref()
+                .is_some_and(|(begun, _)| *begun != new)
+            {
+                return Err(Failure::invalid(
+                    "the digest cannot change once the message has begun",
+                ));
+            }
+            self.hash = Some(new);
         }
         // rind fetches nothing, so it has no use for a property query.
         if params
@@ -195,13 +208,35 @@ impl Signing {
         Ok(self.hash.unwrap_or(self.key()?.curve.own_hash()))
     }
 
-    fn sign_message(
+    /// Adds `data` to the message's hash, which the first of them begins.
+    fn absorb(&mut self, data: &[u8]) -> Result<(), Failure> {
+        let hash = self.hash()?;
+        let (_, context) = self
+            .hashing
+            .get_or_insert_with(|| (hash, digest::Context::new(hash.digest())));
+        context.update(data);
+        Ok(())
+    }
+
+    /// The digest of the message the updates gave, which an operation with
+    /// none takes as empty, and begins a new message.
+    fn finish(&mut self) -> Result<digest::Digest, Failure> {
+        let hash = self.hash()?;
+        let (_, mut context) = self
+            .hashing
+            .take()
+            .unwrap_or_else(|| (hash, digest::Context::new(hash.digest())));
+        Ok(context.finish())
+    }
+
+    /// Checks a request to sign, and answers the length of the longest
+    /// signature if it asks only that. Returns whether to sign.
+    fn begin_sign(
         &self,
         signature: *mut u8,
         signature_len: *mut usize,
         size: usize,
-        message: &[u8],
-    ) -> Result<(), Failure> {
+    ) -> Result<bool, Failure> {
         if self.verifying {
             return Err(Failure::invalid("the operation verifies"));
         }
@@ -210,51 +245,104 @@ impl Signing {
         }
         let key = self.key()?;
         let max = key.curve.max_signature_len();
-        if !signature.is_null() {
-            if size < max {
-                return Err(Failure::invalid("the output buffer is too small"));
-            }
-            let Some(private) = key.private() else {
-                return Err(Failure::invalid("the key is not a private key"));
-            };
-            if self.hash()? != key.curve.own_hash() {
-                return Err(Failure::unsupported(&format!(
-                    "rind signs a curve only with its own hash, not {:?} here",
-                    self.hash()?
-                )));
-            }
-            let signed = private.sign(message)?;
-            let signed = signed.as_ref();
-            // SAFETY: OpenSSL passes `size` writable bytes at `signature`,
-            // and the signature is no longer than `max`.
-            unsafe {
-                core::ptr::copy_nonoverlapping(signed.as_ptr(), signature, signed.len());
-                *signature_len = signed.len();
-            }
-            return Ok(());
+        if signature.is_null() {
+            // SAFETY: OpenSSL passes a length to write.
+            unsafe { *signature_len = max };
+            return Ok(false);
         }
-        // SAFETY: OpenSSL passes a length to write.
-        unsafe { *signature_len = max };
+        if size < max {
+            return Err(Failure::invalid("the output buffer is too small"));
+        }
+        if key.private().is_none() {
+            return Err(Failure::invalid("the key is not a private key"));
+        }
+        if self.hash()? != key.curve.own_hash() {
+            return Err(Failure::unsupported(&format!(
+                "rind signs a curve only with its own hash, not {:?} here",
+                self.hash()?
+            )));
+        }
+        Ok(true)
+    }
+
+    /// Signs `digest` into `signature`, after [`Self::begin_sign`] agreed.
+    ///
+    /// # Safety
+    ///
+    /// `signature` is valid for the `size` that `begin_sign` checked, and
+    /// `signature_len` for a write.
+    unsafe fn write_signature(
+        &self,
+        signature: *mut u8,
+        signature_len: *mut usize,
+        digest: &digest::Digest,
+    ) -> Result<(), Failure> {
+        let private = self
+            .key()?
+            .private()
+            .ok_or_else(|| Failure::invalid("the key is not a private key"))?;
+        let signed = private.sign_digest(digest)?;
+        let signed = signed.as_ref();
+        // SAFETY: per the caller, and the signature is no longer than the
+        // longest.
+        unsafe {
+            core::ptr::copy_nonoverlapping(signed.as_ptr(), signature, signed.len());
+            *signature_len = signed.len();
+        }
         Ok(())
+    }
+
+    fn sign_message(
+        &self,
+        signature: *mut u8,
+        signature_len: *mut usize,
+        size: usize,
+        message: &[u8],
+    ) -> Result<(), Failure> {
+        if self.begin_sign(signature, signature_len, size)? {
+            let digest = digest::digest(self.hash()?.digest(), message);
+            // SAFETY: `begin_sign` checked `size`, and OpenSSL passes the
+            // buffer and the length.
+            unsafe { self.write_signature(signature, signature_len, &digest) }?;
+        }
+        Ok(())
+    }
+
+    fn sign_streamed(
+        &mut self,
+        signature: *mut u8,
+        signature_len: *mut usize,
+        size: usize,
+    ) -> Result<(), Failure> {
+        // A query for the size leaves the message to sign.
+        if self.begin_sign(signature, signature_len, size)? {
+            let digest = self.finish()?;
+            // SAFETY: as for `sign_message`.
+            unsafe { self.write_signature(signature, signature_len, &digest) }?;
+        }
+        Ok(())
+    }
+
+    fn verify_digest(&self, signature: &[u8], digest: &digest::Digest) -> Result<(), Failure> {
+        if !self.verifying {
+            return Err(Failure::invalid("the operation signs"));
+        }
+        let Some(verifier) = self.key()?.verifier() else {
+            return Err(Failure::Quiet);
+        };
+        // OpenSSL's default provider raises no error for a signature that
+        // fails, whether its encoding or its equation is wrong.
+        verifier
+            .verify_digest(digest, signature)
+            .map_err(|_| Failure::Quiet)
     }
 
     fn verify_message(&self, signature: &[u8], message: &[u8]) -> Result<(), Failure> {
         if !self.verifying {
             return Err(Failure::invalid("the operation signs"));
         }
-        let key = self.key()?;
-        let hash = self.hash()?;
-        let Some(verifier) = key.verifier() else {
-            return Err(Failure::Quiet);
-        };
-        // OpenSSL's default provider raises no error for a signature that
-        // fails, whether its encoding or its equation is wrong.
-        let verified = if hash == key.curve.own_hash() {
-            verifier.verify(message, signature)
-        } else {
-            verifier.verify_digest(&hash_message(hash, message), signature)
-        };
-        verified.map_err(|_| Failure::Quiet)
+        let digest = digest::digest(self.hash()?.digest(), message);
+        self.verify_digest(signature, &digest)
     }
 }
 
@@ -290,7 +378,7 @@ unsafe extern "C" fn newctx(provctx: *mut c_void, _propq: *const c_char) -> *mut
         key: None,
         verifying: false,
         hash: None,
-        message: Vec::new(),
+        hashing: None,
     }))
     .cast()
 }
@@ -374,10 +462,7 @@ unsafe extern "C" fn update(ctx: *mut c_void, data: *const u8, len: usize) -> c_
     };
     // SAFETY: OpenSSL passes `len` bytes at `data`.
     let result = match unsafe { bytes(data, len) } {
-        Some(data) if ctx.key.is_some() => {
-            ctx.message.extend_from_slice(data);
-            Ok(())
-        }
+        Some(data) if ctx.key.is_some() => ctx.absorb(data),
         Some(_) => Err(Failure::invalid("no key is set")),
         None => Err(Failure::invalid("no message")),
     };
@@ -416,12 +501,7 @@ unsafe extern "C" fn sign_final(
     let Some(ctx) = (unsafe { Signing::from_ptr(ctx) }) else {
         return 0;
     };
-    let message = core::mem::take(&mut ctx.message);
-    let result = ctx.sign_message(signature, signature_len, size, &message);
-    // A query for the size leaves the message to sign.
-    if signature.is_null() {
-        ctx.message = message;
-    }
+    let result = ctx.sign_streamed(signature, signature_len, size);
     ctx.provider.status(result)
 }
 
@@ -449,11 +529,12 @@ unsafe extern "C" fn verify_final(ctx: *mut c_void, signature: *const u8, len: u
     let Some(ctx) = (unsafe { Signing::from_ptr(ctx) }) else {
         return 0;
     };
-    let message = core::mem::take(&mut ctx.message);
+    let digest = ctx.finish();
     // SAFETY: OpenSSL passes `len` bytes at `signature`.
-    let result = match unsafe { bytes(signature, len) } {
-        Some(signature) => ctx.verify_message(signature, &message),
-        None => Err(Failure::Quiet),
+    let result = match (unsafe { bytes(signature, len) }, digest) {
+        (Some(signature), Ok(digest)) => ctx.verify_digest(signature, &digest),
+        (_, Err(failure)) => Err(failure),
+        (None, _) => Err(Failure::Quiet),
     };
     ctx.provider.status(result)
 }
@@ -527,7 +608,7 @@ unsafe extern "C" fn get_ctx_params(ctx: *mut c_void, params: *mut Param) -> c_i
         return 0;
     }
     if let Some(param) = params.find(c"digest-size")
-        && !param.set_int(hash.len() as c_int)
+        && !param.set_size(hash.len())
     {
         return 0;
     }

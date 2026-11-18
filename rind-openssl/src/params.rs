@@ -182,6 +182,20 @@ impl Param {
         true
     }
 
+    /// Sets a `size_t` parameter, as `OSSL_PARAM_set_size_t` does: a null
+    /// `data` asks for the size of a `size_t`, not of an `int`. `value` is
+    /// small, as a digest's length is.
+    pub(crate) fn set_size(&mut self, value: usize) -> bool {
+        if self.data_type == UNSIGNED_INTEGER && self.data.is_null() {
+            self.return_size = size_of::<usize>();
+            return true;
+        }
+        match c_int::try_from(value) {
+            Ok(value) => self.set_int(value),
+            Err(_) => false,
+        }
+    }
+
     /// Sets an integer or real parameter of any size that holds `value`,
     /// as `OSSL_PARAM_set_int` does; a null `data` asks only the size.
     pub(crate) fn set_int(&mut self, value: c_int) -> bool {

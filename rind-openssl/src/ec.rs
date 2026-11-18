@@ -184,18 +184,13 @@ impl Curve {
         }
     }
 
-    /// The algorithm that verifies the curve's signatures over `hash`.
-    fn verifying(self, hash: Hash) -> &'static ecdsa::VerificationAlgorithm {
-        match (self, hash) {
-            (Self::P256, Hash::Sha256) => &verify::P256_SHA256_ASN1,
-            (Self::P256, Hash::Sha384) => &verify::P256_SHA384_ASN1,
-            (Self::P256, Hash::Sha512) => &verify::P256_SHA512_ASN1,
-            (Self::P384, Hash::Sha256) => &verify::P384_SHA256_ASN1,
-            (Self::P384, Hash::Sha384) => &verify::P384_SHA384_ASN1,
-            (Self::P384, Hash::Sha512) => &verify::P384_SHA512_ASN1,
-            (Self::P521, Hash::Sha256) => &verify::P521_SHA256_ASN1,
-            (Self::P521, Hash::Sha384) => &verify::P521_SHA384_ASN1,
-            (Self::P521, Hash::Sha512) => &verify::P521_SHA512_ASN1,
+    /// The algorithm that verifies the curve's signatures, over its own
+    /// hash; `verify_digest` takes the others.
+    fn verifying(self) -> &'static ecdsa::VerificationAlgorithm {
+        match self {
+            Self::P256 => &verify::P256_SHA256_ASN1,
+            Self::P384 => &verify::P384_SHA384_ASN1,
+            Self::P521 => &verify::P521_SHA512_ASN1,
         }
     }
 }
@@ -256,8 +251,11 @@ impl Private {
         self.sign.to_scalar()
     }
 
-    pub(crate) fn sign(&self, message: &[u8]) -> Result<ecdsa::Signature, rind::Error> {
-        self.sign.sign(message)
+    pub(crate) fn sign_digest(
+        &self,
+        digest: &digest::Digest,
+    ) -> Result<ecdsa::Signature, rind::Error> {
+        self.sign.sign_digest(digest)
     }
 
     /// The key that agrees, which costs a scalar multiplication the first
@@ -316,9 +314,7 @@ impl Public {
     /// The verifier for the curve's own hash, parsed the first time.
     pub(crate) fn verifier(&self, curve: Curve) -> Option<&ecdsa::PublicKey> {
         self.verifier
-            .get_or_init(|| {
-                ecdsa::PublicKey::new(curve.verifying(curve.own_hash()), self.point()).ok()
-            })
+            .get_or_init(|| ecdsa::PublicKey::new(curve.verifying(), self.point()).ok())
             .as_ref()
     }
 }
@@ -730,6 +726,8 @@ unsafe extern "C" fn import(keydata: *mut c_void, selection: c_int, params: *con
             Ok(())
         }
         Err(Loading::Refused(refusal)) => {
+            // Its curve is no curve of rind's, whatever the key held before.
+            data.curve = None;
             data.held = Held::Refused(refusal);
             Ok(())
         }
@@ -803,8 +801,8 @@ fn load(
                 let mut scalar = Zeroizing::new(vec![0u8; len]);
                 if value.len() >= len {
                     let (excess, tail) = value.split_at(value.len() - len);
-                    let zeros = vec![0u8; excess.len()];
-                    if rind::constant_time::verify(excess, &zeros).is_err() {
+                    // Whether any excess byte is set, folded without a branch.
+                    if excess.iter().fold(0u8, |all, &byte| all | byte) != 0 {
                         return Err(Failure::invalid("priv is longer than the curve's order"));
                     }
                     scalar.copy_from_slice(tail);
@@ -1111,6 +1109,11 @@ unsafe extern "C" fn gen_set_params(genctx: *mut c_void, params: *const Param) -
         {
             return Err(Failure::invalid("properties must be a UTF-8 string"));
         }
+        if let Some(mode) = params.find(c"ecdh-cofactor-mode")
+            && !matches!(mode.int(), Some(-1..=1))
+        {
+            return Err(Failure::invalid("ecdh-cofactor-mode is -1, 0, or 1"));
+        }
         Ok(())
     })();
     generation.provider.status(result)
@@ -1210,10 +1213,6 @@ unsafe extern "C" fn dup(keydata: *const c_void, selection: c_int) -> *mut c_voi
 
 /// The digest `hash` names for `digest::digest`, for the verifier's other
 /// hashes.
-pub(crate) fn hash_message(hash: Hash, message: &[u8]) -> digest::Digest {
-    digest::digest(hash.digest(), message)
-}
-
 #[cfg(test)]
 mod tests {
     use std::alloc::{Layout, dealloc};

@@ -49,7 +49,7 @@ ec = 1
 Anything but `1`, `0`, or no `ec` line fails the provider's start with an error naming the value.
 
 OpenSSL's own encoders and decoders still read and write the keys, which move between the two providers as OpenSSL needs them.
-OpenSSL's `evp_test` passes on its X25519 and Ed25519 data with this provider loaded and preferred, as [`sh/openssl.sh`](../sh/openssl.sh) runs it.
+OpenSSL's `evp_test` passes on its X25519 and Ed25519 data with this provider loaded and preferred, as [`sh/openssl.sh`](../sh/openssl.sh) runs it. That script also runs its ECDSA and ECDH data with `ec = 1`, less the stanzas rind refuses, which it counts.
 
 ## What rind cannot back
 
@@ -64,7 +64,7 @@ OpenSSL's `evp_test` passes on its X25519 and Ed25519 data with this provider lo
 - A key given with both halves whose public half is not its private half's fails each signature, exchange, and export with an error saying so, and holds neither half. That includes such a key the default provider made, which moves to rind before each use. Importing it still succeeds: were the move refused, OpenSSL would run the use on the default provider.
 - An Ed25519 public key of small order verifies no signature, as rind refuses such keys.
 - With `ec = 1`, ECDSA signs with the curve's own digest, SHA-256, SHA-384, and SHA-512 for P-256, P-384, and P-521, and takes no other: a signature with a different digest fails rather than changes what it signs. Verifying takes SHA-256, SHA-384, and SHA-512 on each curve.
-- With `ec = 1`, the provider holds the message until the signature is made, as rind hashes it whole, so signing and verifying a long message cost its length in memory.
+- With `ec = 1`, the provider hashes the message as OpenSSL gives it, so a message of any length costs a constant amount of memory, and the digest cannot change once the message has begun.
 - With `ec = 1`, importing a private key costs a public-key computation, as rind checks the two halves agree.
 - It wipes every key it holds, and the key bytes it gives OpenSSL to move a key between providers, once it is done with them, as OpenSSL's own providers do.
 

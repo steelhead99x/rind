@@ -49,6 +49,10 @@ struct Exchange {
     provider: Arc<Provider>,
     key: Option<Arc<Key>>,
     peer: Option<Arc<Key>>,
+    /// The cofactor mode a caller set, which changes nothing as every
+    /// curve's cofactor is 1, and is read back as OpenSSL's is: -1 asks for
+    /// the key's, which is off.
+    cofactor_mode: c_int,
 }
 
 impl Exchange {
@@ -109,10 +113,11 @@ impl Exchange {
 
     fn set_params(&mut self, params: Params<'_>) -> Result<(), Failure> {
         // The cofactor of every curve here is 1.
-        if let Some(mode) = params.find(c"ecdh-cofactor-mode")
-            && !matches!(mode.int(), Some(-1..=1))
-        {
-            return Err(Failure::invalid("ecdh-cofactor-mode is -1, 0, or 1"));
+        if let Some(mode) = params.find(c"ecdh-cofactor-mode") {
+            match mode.int() {
+                Some(mode @ -1..=1) => self.cofactor_mode = mode,
+                _ => return Err(Failure::invalid("ecdh-cofactor-mode is -1, 0, or 1")),
+            }
         }
         // None of the X9.63 key derivation's parameters has a use here.
         if let Some(kdf) = params.find(c"kdf-type")
@@ -140,6 +145,7 @@ unsafe extern "C" fn newctx(provctx: *mut c_void) -> *mut c_void {
         provider,
         key: None,
         peer: None,
+        cofactor_mode: -1,
     }))
     .cast()
 }
@@ -232,13 +238,18 @@ unsafe extern "C" fn settable_ctx_params(_ctx: *mut c_void, _provctx: *mut c_voi
     SETTABLE_CTX.as_ptr()
 }
 
-unsafe extern "C" fn get_ctx_params(_ctx: *mut c_void, params: *mut Param) -> c_int {
-    // SAFETY: OpenSSL passes a writable array.
-    let mut params = unsafe { ParamsMut::new(params) };
-    // The cofactor mode OpenSSL's default provider starts at, and no key
-    // derivation.
+unsafe extern "C" fn get_ctx_params(ctx: *mut c_void, params: *mut Param) -> c_int {
+    // SAFETY: OpenSSL passes a context of this exchange, and a writable
+    // array.
+    let (Some(ctx), mut params) = (unsafe { Exchange::from_ptr(ctx) }, unsafe {
+        ParamsMut::new(params)
+    }) else {
+        return 0;
+    };
+    // The cofactor mode, which OpenSSL's default provider starts at off,
+    // and no key derivation.
     if let Some(param) = params.find(c"ecdh-cofactor-mode")
-        && !param.set_int(0)
+        && !param.set_int(ctx.cofactor_mode.max(0))
     {
         return 0;
     }

@@ -239,7 +239,7 @@
             installPhase = "install -D ct-qemu-plugin.so $out/lib/ct-qemu-plugin.so";
           };
 
-          # OpenSSL's `evp_test` and its X25519 and Ed25519 data, from the
+          # OpenSSL's `evp_test` and its X25519, Ed25519, ECDSA, and ECDH data, from the
           # source of the OpenSSL the dev shell has. `sh/openssl.sh` runs them
           # with rind-openssl loaded and preferred. A static build, so the
           # test runs the library it was built with, and the default provider
@@ -256,7 +256,7 @@
             '';
             installPhase = ''
               install -D test/evp_test $out/bin/evp_test
-              install -D -t $out/share/evp_test test/recipes/30-test_evp_data/evppkey_{ecx,ecx_sigalg,ecx_kem,mismatch_ecx}.txt
+              install -D -t $out/share/evp_test test/recipes/30-test_evp_data/evppkey_{ecx,ecx_sigalg,ecx_kem,mismatch_ecx,ecc,ecdh,ecdsa,ecdsa_sigalg,mismatch}.txt
             '';
           };
 
