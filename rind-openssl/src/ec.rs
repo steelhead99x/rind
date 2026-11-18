@@ -801,8 +801,14 @@ fn load(
                 let mut scalar = Zeroizing::new(vec![0u8; len]);
                 if value.len() >= len {
                     let (excess, tail) = value.split_at(value.len() - len);
-                    // Whether any excess byte is set, folded without a branch.
-                    if excess.iter().fold(0u8, |all, &byte| all | byte) != 0 {
+                    // Whether any excess byte is set: folded into one byte
+                    // behind an optimization barrier, which a compiler cannot
+                    // turn into a loop that stops at the first set byte, and
+                    // checked by `verify`, which declassifies only the answer.
+                    let folded = excess
+                        .iter()
+                        .fold(0u8, |all, &byte| core::hint::black_box(all | byte));
+                    if rind::constant_time::verify(&[folded], &[0]).is_err() {
                         return Err(Failure::invalid("priv is longer than the curve's order"));
                     }
                     scalar.copy_from_slice(tail);

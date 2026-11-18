@@ -288,108 +288,129 @@ fn nist_curves() {
         (c"secp384r1", 48, c"SHA384"),
         (c"secp521r1", 66, c"SHA512"),
     ] {
-        // A scalar below every curve's order, whatever its other bytes are.
-        let mut scalar = vec![0x2bu8; len];
-        scalar[0] = 0x01;
-        if cfg!(target_endian = "little") {
-            scalar.reverse();
-        }
-        secret(&scalar[..]);
-        let mut name = group.to_bytes_with_nul().to_vec();
-        let mut params = unsafe {
-            [
-                OSSL_PARAM_construct_utf8_string(c"group".as_ptr(), name.as_mut_ptr().cast(), 0),
-                OSSL_PARAM_construct_BN(c"priv".as_ptr(), scalar.as_mut_ptr(), scalar.len()),
-                OSSL_PARAM_construct_end(),
-            ]
-        };
-        let (key, peer) = unsafe {
-            let from = EVP_PKEY_CTX_new_from_name(ctx, c"EC".as_ptr(), null());
-            assert!(!from.is_null());
-            assert_eq!(EVP_PKEY_fromdata_init(from), 1);
-            let mut key = null_mut();
-            assert_eq!(
-                EVP_PKEY_fromdata(from, &mut key, 0x87, params.as_mut_ptr()),
-                1
-            );
-            assert_rind(EVP_PKEY_get0_provider(key));
-            EVP_PKEY_CTX_free(from);
+        // Once as long as the curve's scalar, and once with four leading zero
+        // bytes, which `priv` takes off without branching on a secret.
+        for pad in [0usize, 4] {
+            // A scalar below every curve's order, whatever its other bytes are.
+            let mut scalar = vec![0x2bu8; len];
+            scalar[0] = 0x01;
+            let mut scalar = [vec![0u8; pad], scalar].concat();
+            if cfg!(target_endian = "little") {
+                scalar.reverse();
+            }
+            secret(&scalar[..]);
+            let mut name = group.to_bytes_with_nul().to_vec();
+            let mut params = unsafe {
+                [
+                    OSSL_PARAM_construct_utf8_string(
+                        c"group".as_ptr(),
+                        name.as_mut_ptr().cast(),
+                        0,
+                    ),
+                    OSSL_PARAM_construct_BN(c"priv".as_ptr(), scalar.as_mut_ptr(), scalar.len()),
+                    OSSL_PARAM_construct_end(),
+                ]
+            };
+            let (key, peer) = unsafe {
+                let from = EVP_PKEY_CTX_new_from_name(ctx, c"EC".as_ptr(), null());
+                assert!(!from.is_null());
+                assert_eq!(EVP_PKEY_fromdata_init(from), 1);
+                let mut key = null_mut();
+                assert_eq!(
+                    EVP_PKEY_fromdata(from, &mut key, 0x87, params.as_mut_ptr()),
+                    1
+                );
+                assert_rind(EVP_PKEY_get0_provider(key));
+                EVP_PKEY_CTX_free(from);
 
-            // A peer rind generates, which rind marks secret itself.
-            let gen_ctx = EVP_PKEY_CTX_new_from_name(ctx, c"EC".as_ptr(), null());
-            assert_eq!(EVP_PKEY_keygen_init(gen_ctx), 1);
-            let group_params = [
-                OSSL_PARAM_construct_utf8_string(c"group".as_ptr(), name.as_mut_ptr().cast(), 0),
-                OSSL_PARAM_construct_end(),
-            ];
-            assert_eq!(EVP_PKEY_CTX_set_params(gen_ctx, group_params.as_ptr()), 1);
-            let mut peer = null_mut();
-            assert_eq!(EVP_PKEY_generate(gen_ctx, &mut peer), 1);
-            EVP_PKEY_CTX_free(gen_ctx);
-            assert_rind(EVP_PKEY_get0_provider(peer));
-            (key, peer)
-        };
-        let message = b"rind as an OpenSSL provider";
-        unsafe {
-            let md_ctx = EVP_MD_CTX_new();
-            let mut pctx = null_mut();
-            assert_eq!(
-                EVP_DigestSignInit_ex(md_ctx, &mut pctx, md.as_ptr(), ctx, null(), key, null()),
-                1
-            );
-            assert_rind(EVP_PKEY_CTX_get0_provider(pctx));
-            let mut signature = [0u8; 160];
-            let mut sig_len = signature.len();
-            assert_eq!(
-                EVP_DigestSign(
-                    md_ctx,
-                    signature.as_mut_ptr(),
-                    &mut sig_len,
-                    message.as_ptr(),
-                    message.len()
-                ),
-                1
-            );
-            public(&signature);
-            EVP_MD_CTX_free(md_ctx);
+                // A peer rind generates, which rind marks secret itself.
+                let gen_ctx = EVP_PKEY_CTX_new_from_name(ctx, c"EC".as_ptr(), null());
+                assert_eq!(EVP_PKEY_keygen_init(gen_ctx), 1);
+                let group_params = [
+                    OSSL_PARAM_construct_utf8_string(
+                        c"group".as_ptr(),
+                        name.as_mut_ptr().cast(),
+                        0,
+                    ),
+                    OSSL_PARAM_construct_end(),
+                ];
+                assert_eq!(EVP_PKEY_CTX_set_params(gen_ctx, group_params.as_ptr()), 1);
+                let mut peer = null_mut();
+                assert_eq!(EVP_PKEY_generate(gen_ctx, &mut peer), 1);
+                EVP_PKEY_CTX_free(gen_ctx);
+                assert_rind(EVP_PKEY_get0_provider(peer));
+                (key, peer)
+            };
+            let message = b"rind as an OpenSSL provider";
+            unsafe {
+                let md_ctx = EVP_MD_CTX_new();
+                let mut pctx = null_mut();
+                assert_eq!(
+                    EVP_DigestSignInit_ex(md_ctx, &mut pctx, md.as_ptr(), ctx, null(), key, null()),
+                    1
+                );
+                assert_rind(EVP_PKEY_CTX_get0_provider(pctx));
+                let mut signature = [0u8; 160];
+                let mut sig_len = signature.len();
+                assert_eq!(
+                    EVP_DigestSign(
+                        md_ctx,
+                        signature.as_mut_ptr(),
+                        &mut sig_len,
+                        message.as_ptr(),
+                        message.len()
+                    ),
+                    1
+                );
+                public(&signature);
+                EVP_MD_CTX_free(md_ctx);
 
-            let md_ctx = EVP_MD_CTX_new();
-            let mut pctx = null_mut();
-            assert_eq!(
-                EVP_DigestVerifyInit_ex(md_ctx, &mut pctx, md.as_ptr(), ctx, null(), key, null()),
-                1
-            );
-            assert_eq!(
-                EVP_DigestVerify(
-                    md_ctx,
-                    signature.as_ptr(),
-                    sig_len,
-                    message.as_ptr(),
-                    message.len()
-                ),
-                1
-            );
-            EVP_MD_CTX_free(md_ctx);
+                let md_ctx = EVP_MD_CTX_new();
+                let mut pctx = null_mut();
+                assert_eq!(
+                    EVP_DigestVerifyInit_ex(
+                        md_ctx,
+                        &mut pctx,
+                        md.as_ptr(),
+                        ctx,
+                        null(),
+                        key,
+                        null()
+                    ),
+                    1
+                );
+                assert_eq!(
+                    EVP_DigestVerify(
+                        md_ctx,
+                        signature.as_ptr(),
+                        sig_len,
+                        message.as_ptr(),
+                        message.len()
+                    ),
+                    1
+                );
+                EVP_MD_CTX_free(md_ctx);
 
-            let pctx = EVP_PKEY_CTX_new_from_pkey(ctx, key, null());
-            assert_eq!(EVP_PKEY_derive_init(pctx), 1);
-            assert_rind(EVP_PKEY_CTX_get0_provider(pctx));
-            assert_eq!(EVP_PKEY_derive_set_peer(pctx, peer), 1);
-            let mut shared = [0u8; 66];
-            let mut shared_len = shared.len();
-            assert_eq!(
-                EVP_PKEY_derive(pctx, shared.as_mut_ptr(), &mut shared_len,),
-                1
-            );
-            public(&shared);
-            assert_eq!(shared_len, len);
-            EVP_PKEY_CTX_free(pctx);
-        }
-        // Two keys from the same secret match, and the key exports.
-        export(key);
-        unsafe {
-            EVP_PKEY_free(peer);
-            EVP_PKEY_free(key);
+                let pctx = EVP_PKEY_CTX_new_from_pkey(ctx, key, null());
+                assert_eq!(EVP_PKEY_derive_init(pctx), 1);
+                assert_rind(EVP_PKEY_CTX_get0_provider(pctx));
+                assert_eq!(EVP_PKEY_derive_set_peer(pctx, peer), 1);
+                let mut shared = [0u8; 66];
+                let mut shared_len = shared.len();
+                assert_eq!(
+                    EVP_PKEY_derive(pctx, shared.as_mut_ptr(), &mut shared_len,),
+                    1
+                );
+                public(&shared);
+                assert_eq!(shared_len, len);
+                EVP_PKEY_CTX_free(pctx);
+            }
+            // Two keys from the same secret match, and the key exports.
+            export(key);
+            unsafe {
+                EVP_PKEY_free(peer);
+                EVP_PKEY_free(key);
+            }
         }
     }
     unsafe { OSSL_LIB_CTX_free(ctx) };
