@@ -48,5 +48,7 @@ crabgrind = { version = "0.4", default-features = false }
 # Its `crypto` feature, which the tests then share, gives rcgen's own key
 # identifiers to compare against.
 rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs"] }
+# Every test build gets `zeroize`, so its test runs, here and under mutation.
+rind-rcgen = { path = ".", features = ["zeroize"] }
 rind-rustls = { path = "../rind-rustls" }
 rustls = { version = "0.23.23", default-features = false, features = ["aws-lc-rs", "std"] }
