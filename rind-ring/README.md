@@ -44,6 +44,8 @@ output over (2^32 - 1) hash outputs, so its signatures match ring's
 exactly (maintainer, 2026-10-31). rind itself never panics on caller
 input.
 
+## What rind cannot back
+
 These items are not offered, so code using them, in a patched dependency
 too, fails to build:
 
@@ -57,7 +59,8 @@ too, fails to build:
 - `signature::RsaEncoding::encode`: ring's hidden, deprecated internal
   method, which takes a type callers cannot name.
 
-And these behave differently:
+## Behaves differently
+
 
 - Where ring takes a `rand::SecureRandom` to generate a key or sign,
   rind draws from the system random source itself, as

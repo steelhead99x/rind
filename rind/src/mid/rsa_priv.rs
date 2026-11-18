@@ -25,6 +25,10 @@ pub(crate) struct RsaPrivateKey {
     q_montifier: SecretRsaPosIntModP,
     p0: u64,
     q0: u64,
+
+    /// pyca/verified-garbage's values for its IFMA CRT, where it runs.
+    #[cfg(rind_backend = "x86_64")]
+    ifma: low::IfmaCrt,
 }
 
 impl RsaPrivateKey {
@@ -116,6 +120,8 @@ impl RsaPrivateKey {
         }
 
         Ok(Self {
+            #[cfg(rind_backend = "x86_64")]
+            ifma: low::IfmaCrt::new(public.n.as_words(), p.as_words(), q.as_words()),
             public,
             p,
             q,
@@ -212,6 +218,61 @@ impl RsaPrivateKey {
             return Err(Error::WrongLength);
         }
 
+        #[cfg(rind_backend = "x86_64")]
+        let m = match self.ifma.runs() {
+            true => self.crt_ifma(c)?,
+            false => self.crt(c),
+        };
+        #[cfg(not(rind_backend = "x86_64"))]
+        let m = self.crt(c);
+
+        // Check the result as a fault attack countermeasure: `new` checked
+        // the key's components, so only a fault fails this, and the verdict
+        // reveals nothing else.
+        match self.public.public_op(m.clone()) {
+            Ok(c2) if low::ct::into_public(c2.equals(c)) => Ok(m),
+            _ => Err(Error::Fault),
+        }
+    }
+
+    /// The CRT by pyca/verified-garbage's IFMA routine, for `c` below `n`.
+    #[cfg(rind_backend = "x86_64")]
+    fn crt_ifma(&self, c: &RsaPosIntModN) -> Result<RsaPosIntModN, Error> {
+        let k = self.modulus_len_bytes();
+        let p_len = self.p.as_words().len() * 8;
+        let mut x = [0u8; MAX_PUBLIC_MODULUS_BYTES];
+        c.to_bytes_fixed(&mut x[..k]);
+        let mut parts = [[0u8; MAX_PRIVATE_MODULUS_BYTES]; 3];
+        for (bytes, value) in parts.iter_mut().zip([&self.dp, &self.dq, &self.iqmp]) {
+            value.to_bytes_fixed(&mut bytes[..p_len]);
+        }
+        let [dp, dq, qinv] = &parts;
+        let mut m = [0u8; MAX_PUBLIC_MODULUS_BYTES];
+        // `new` and the caller ruled out each input it refuses.
+        if !self.ifma.crt(
+            &mut m[..k],
+            &x[..k],
+            &dp[..p_len],
+            &dq[..p_len],
+            &qinv[..p_len],
+        ) {
+            return Err(Error::Fault);
+        }
+        // As wide as `n`, without reading `m`'s value.
+        RsaPosIntModN::from_secret_bytes(&m[..k])
+    }
+
+    /// The CRT by pyca/verified-garbage's IFMA routine and by rind's, where
+    /// the former runs.
+    #[cfg(all(test, rind_backend = "x86_64"))]
+    pub(crate) fn crt_both(&self, c: &RsaPosIntModN) -> Option<[RsaPosIntModN; 2]> {
+        self.ifma
+            .runs()
+            .then(|| [self.crt_ifma(c).unwrap(), self.crt(c)])
+    }
+
+    /// The CRT, by rind's exponentiations.
+    fn crt(&self, c: &RsaPosIntModN) -> RsaPosIntModN {
         // A note about blinding:
         //
         // `c` is public, a message to sign or a ciphertext to decrypt, so
@@ -259,14 +320,7 @@ impl RsaPrivateKey {
         // its value, so widen it back before anything reads that width.
         let mut m = m_2.widen().add(&low::PosInt::mul(&self.q, &h));
         m.expand(&self.public.n);
-
-        // Check the result as a fault attack countermeasure: `new` checked
-        // the key's components, so only a fault fails this, and the verdict
-        // reveals nothing else.
-        match self.public.public_op(m.clone()) {
-            Ok(c2) if low::ct::into_public(c2.equals(c)) => Ok(m),
-            _ => Err(Error::Fault),
-        }
+        m
     }
 }
 
