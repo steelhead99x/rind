@@ -23,6 +23,8 @@ unsafe extern "C" {
         propq: *const c_char,
     ) -> *mut EVP_PKEY_CTX;
     fn EVP_PKEY_CTX_set_params(ctx: *mut EVP_PKEY_CTX, params: *const OSSL_PARAM) -> c_int;
+    fn EVP_PKEY_CTX_get_params(ctx: *mut EVP_PKEY_CTX, params: *mut OSSL_PARAM) -> c_int;
+    fn OSSL_PARAM_construct_int(key: *const c_char, buf: *mut c_int) -> OSSL_PARAM;
     fn EVP_PKEY_sign_init(ctx: *mut EVP_PKEY_CTX) -> c_int;
     fn EVP_DigestSignInit_ex(
         ctx: *mut EVP_MD_CTX,
@@ -426,6 +428,96 @@ fn ecdsa_refuses_what_rind_cannot_back() {
         assert!(EVP_PKEY_sign_init(pctx) <= 0);
         let error = errors();
         assert!(error.contains("unsupported by rind"), "{error}");
+        EVP_PKEY_CTX_free(pctx);
+    }
+}
+
+#[test]
+fn a_signing_digest_the_curve_does_not_own_fails_at_init() {
+    let ctx = Context::new();
+    for (curve, wrong) in [
+        ("prime256v1", c"SHA384"),
+        ("secp384r1", c"SHA256"),
+        ("secp521r1", c"SHA256"),
+    ] {
+        let key = ctx.generate(curve, c"").unwrap();
+        unsafe {
+            // Signing fails at init, before any message is hashed.
+            let md_ctx = non_null(EVP_MD_CTX_new());
+            let mut pctx = null_mut();
+            let status = EVP_DigestSignInit_ex(
+                md_ctx,
+                &mut pctx,
+                wrong.as_ptr(),
+                ctx.0,
+                null(),
+                key.0,
+                null(),
+            );
+            let error = errors();
+            EVP_MD_CTX_free(md_ctx);
+            assert!(status <= 0, "{curve} with {wrong:?} began signing");
+            assert!(error.contains("unsupported by rind"), "{curve}: {error}");
+            // Verifying with another digest is not refused at init: the
+            // signature simply does not verify.
+            let md_ctx = non_null(EVP_MD_CTX_new());
+            let mut pctx = null_mut();
+            assert_eq!(
+                EVP_DigestVerifyInit_ex(
+                    md_ctx,
+                    &mut pctx,
+                    wrong.as_ptr(),
+                    ctx.0,
+                    null(),
+                    key.0,
+                    null()
+                ),
+                1,
+                "{curve}"
+            );
+            EVP_MD_CTX_free(md_ctx);
+        }
+    }
+}
+
+#[test]
+fn ecdh_cofactor_mode_reads_back_as_openssl_does() {
+    let ctx = Context::new();
+    let key = ctx.generate("prime256v1", c"").unwrap();
+    unsafe {
+        let pctx = non_null(EVP_PKEY_CTX_new_from_pkey(ctx.0, key.0, null()));
+        assert_eq!(EVP_PKEY_derive_init(pctx), 1);
+        let read = || {
+            let mut mode: c_int = 99;
+            let mut params = [
+                OSSL_PARAM_construct_int(c"ecdh-cofactor-mode".as_ptr(), &mut mode),
+                OSSL_PARAM_construct_end(),
+            ];
+            assert_eq!(EVP_PKEY_CTX_get_params(pctx, params.as_mut_ptr()), 1);
+            mode
+        };
+        let set = |mut mode: c_int| {
+            let params = [
+                OSSL_PARAM_construct_int(c"ecdh-cofactor-mode".as_ptr(), &mut mode),
+                OSSL_PARAM_construct_end(),
+            ];
+            EVP_PKEY_CTX_set_params(pctx, params.as_ptr())
+        };
+        // OpenSSL's default provider starts with the mode off: -1 reads as 0.
+        assert_eq!(read(), 0);
+        assert_eq!(set(1), 1);
+        assert_eq!(read(), 1);
+        assert_eq!(set(0), 1);
+        assert_eq!(read(), 0);
+        assert_eq!(set(1), 1);
+        assert_eq!(set(-1), 1);
+        assert_eq!(read(), 0);
+        // Nothing else is a mode, and a refused one leaves the last in place.
+        assert_eq!(set(1), 1);
+        assert!(set(2) <= 0);
+        let error = errors();
+        assert!(error.contains("ecdh-cofactor-mode"), "{error}");
+        assert_eq!(read(), 1);
         EVP_PKEY_CTX_free(pctx);
     }
 }

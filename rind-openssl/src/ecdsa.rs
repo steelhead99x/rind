@@ -194,7 +194,21 @@ impl Signing {
                 "rind signs with random nonces, not deterministic ones",
             ));
         }
-        Ok(())
+        self.check_signing_digest()
+    }
+
+    /// Refuses a signing digest that is not the key's curve's own, as soon
+    /// as both are known, so `EVP_DigestSignInit_ex` fails rather than a
+    /// later call after the message has been hashed.
+    fn check_signing_digest(&self) -> Result<(), Failure> {
+        match (&self.key, self.hash) {
+            (Some(key), Some(hash)) if !self.verifying && hash != key.curve.own_hash() => {
+                Err(Failure::unsupported(&format!(
+                    "rind signs a curve only with its own hash, not {hash:?} here"
+                )))
+            }
+            _ => Ok(()),
+        }
     }
 
     fn key(&self) -> Result<&Key, Failure> {
@@ -245,6 +259,12 @@ impl Signing {
         }
         let key = self.key()?;
         let max = key.curve.max_signature_len();
+        if self.hash()? != key.curve.own_hash() {
+            return Err(Failure::unsupported(&format!(
+                "rind signs a curve only with its own hash, not {:?} here",
+                self.hash()?
+            )));
+        }
         if signature.is_null() {
             // SAFETY: OpenSSL passes a length to write.
             unsafe { *signature_len = max };
@@ -255,12 +275,6 @@ impl Signing {
         }
         if key.private().is_none() {
             return Err(Failure::invalid("the key is not a private key"));
-        }
-        if self.hash()? != key.curve.own_hash() {
-            return Err(Failure::unsupported(&format!(
-                "rind signs a curve only with its own hash, not {:?} here",
-                self.hash()?
-            )));
         }
         Ok(true)
     }
