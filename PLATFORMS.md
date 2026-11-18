@@ -23,7 +23,15 @@ qemu. iOS devices' code is only built.
   secret-dependent code runs with data-independent timing (DIT), set and
   cleared in each call unless `rind::cpu::Dit::hold()` holds it across a batch
   of calls. rind sets no DIT on other aarch64 platforms, where Arm says it
-  changes nothing on current cores.
+  changes nothing on current cores. On Linux, the public-key arithmetic
+  runs s2n-bignum's narrow-multiplier schedules when `MIDR_EL1` names
+  Cortex-A72, Cortex-A76, or Neoverse N1, and its `_alt` schedules
+  everywhere else (see [ALGORITHMS.md](ALGORITHMS.md)). The register is read
+  on whichever core makes the first such call, and the choice is cached for
+  the process, as aws-lc does. On a chip that mixes core types, such as
+  Cortex-A76 with Cortex-A55, every core then runs the schedule that first
+  core picked: correct and constant time on each, only slower on the cores
+  it was not picked for.
 - `x86_64` runs on every x86_64 CPU. Without `aes` and `pclmulqdq`, as on
   Core 2 and Nehalem, AES and GHASH run [aws-lc]'s SSSE3 assembly instead
   (see [ALGORITHMS.md](ALGORITHMS.md)), `rind::cpu::has_aes_hardware()` is false,

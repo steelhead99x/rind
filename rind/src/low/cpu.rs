@@ -3,6 +3,32 @@
 use core::cell::Cell;
 use core::marker::PhantomData;
 
+/// Whether this CPU runs s2n-bignum's wide-multiplier schedules.
+///
+/// `Some(true)` keeps the `_alt` schedules. `Some(false)` is the narrow
+/// ones. On aarch64 those run only when Linux reports `HWCAP_CPUID` and
+/// `MIDR_EL1` names Cortex-A72, Cortex-A76, or Neoverse N1. Apple's cores,
+/// Neoverse V1, V2, V3, and N2, Cobalt 100, and a core this crate does not
+/// recognise keep `_alt`. So do a kernel without `HWCAP_CPUID`, Android
+/// (the target is not Linux), and Windows on ARM, which never read a part.
+/// On a chip that mixes core types, the register is the one of the core
+/// the first read ran on, as in aws-lc.
+///
+/// The part is read on the first call here, or on the first elliptic-curve
+/// or RSA operation, and cached. The read is an `mrs` the kernel emulates:
+/// it makes no system call and opens no file, so a seccomp filter cannot
+/// stop it.
+///
+/// `None` is every other architecture: those builds have no such choice,
+/// and this reads no feature flag there.
+#[must_use]
+pub fn wide_multiplier() -> Option<bool> {
+    #[cfg(rind_backend = "aarch64")]
+    return Some(crate::low::aarch64::cpu::wide_multiplier());
+    #[cfg(not(rind_backend = "aarch64"))]
+    None
+}
+
 /// Reports whether rind runs AES on CPU instructions, as aws-lc's `EVP_has_aes_hardware` does.
 ///
 /// Where it doesn't, ChaCha20-Poly1305 is faster than AES-GCM, so a protocol
@@ -102,6 +128,14 @@ std::thread_local! {
 mod tests {
     #[cfg(not(rind_backend = "portable"))]
     use crate::low::AesKey;
+
+    #[test]
+    fn wide_multiplier_is_only_an_aarch64_choice() {
+        #[cfg(rind_backend = "aarch64")]
+        assert!(super::wide_multiplier().is_some());
+        #[cfg(not(rind_backend = "aarch64"))]
+        assert_eq!(super::wide_multiplier(), None);
+    }
 
     /// The flag agrees with the AES keys run, whichever features are denied.
     #[test]

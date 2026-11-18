@@ -124,14 +124,49 @@ if [ -n "${RIND_SCOPE:-}" ]; then
     fi
 fi
 
+# True when this invocation builds aarch64, either by `--target` or by
+# running on an aarch64 host with no target named.
+targets_aarch64() {
+    seen=0
+    aarch64=0
+    prev=
+    for arg in "$@"; do
+        case "$prev" in
+            --target)
+                seen=1
+                case "$arg" in
+                    aarch64-* | arm64-*) aarch64=1 ;;
+                esac
+                ;;
+        esac
+        case "$arg" in
+            --target=aarch64-* | --target=arm64-*)
+                seen=1
+                aarch64=1
+                ;;
+            --target=*) seen=1 ;;
+        esac
+        prev=$arg
+    done
+    if [ "$seen" -eq 1 ]; then
+        [ "$aarch64" -eq 1 ]
+        return
+    fi
+    case "$(uname -m)" in
+        aarch64 | arm64) return 0 ;;
+    esac
+    return 1
+}
+
 # rind's unit tests mark its secrets through the `__ctgrind` hooks. Wycheproof
 # runs without them, since its harness compares secret outputs directly.
-if [ "$suite" = all ] || [ "$suite" = unit ]; then
-    cargo test -p rind --lib --features __ctgrind "$@"
-fi
-if [ "$suite" = all ] || [ "$suite" = wycheproof ]; then
-    cargo test -p rind --test wycheproof "$@"
-fi
+run_suites() {
+    if [ "$suite" = all ] || [ "$suite" = unit ]; then
+        cargo test -p rind --lib --features __ctgrind "$@"
+    fi
+    if [ "$suite" = all ] || [ "$suite" = wycheproof ]; then
+        cargo test -p rind --test wycheproof "$@"
+    fi
 
 # Each adapter's ctgrind test marks the secrets it hands rind, while rind's
 # hooks mark the keys rind generates or parses. Python's tests run through
@@ -153,4 +188,34 @@ fi
 if [ "$suite" = fips ]; then
     cargo test -p rind-fips --test ctgrind --features __ctgrind,rind/__ctgrind "$@"
     cargo test -p rind-fips --test ctgrind --features __ctgrind,__acvp,rind/__ctgrind "$@" -- --exact acvp
+fi
+}
+
+# Captured before the narrow pass exports it. A caller that already set it
+# is running that pass itself.
+narrow_requested=${RIND_CPU_DISABLE_wide_mul-}
+run_suites "$@"
+
+# The arm64 runners are wide cores, so the pass above checks `_alt`. This
+# one checks the schedules Cortex-A72, Cortex-A76, and Neoverse N1 run.
+# `--cfg rind_cpu_disable` keeps the variable alive in a `--release` build.
+# The FIPS module honours only the denial, never a force, which is all this
+# pass sets. The portable backend has no narrow schedule, so a
+# `rind_portable` run skips the pass, but for the fips suite, whose module
+# build replaces the caller's flags (rind-fips/build.rs).
+portable_requested() {
+    [ "$suite" != fips ] && env | grep -q '^[A-Z0-9_]*RUSTFLAGS=.*rind_portable'
+}
+if [ -z "$narrow_requested" ] && targets_aarch64 "$@" && ! portable_requested; then
+    echo "ctgrind: narrow multiplier (RIND_CPU_DISABLE_wide_mul=1)" >&2
+    export RIND_CPU_DISABLE_wide_mul=1
+    export RIND_TEST_ARM_WIDE_MUL=0
+    case " ${RUSTFLAGS-} " in
+        *" rind_cpu_disable "*) ;;
+        *)
+            RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }--cfg rind_cpu_disable"
+            export RUSTFLAGS
+            ;;
+    esac
+    run_suites "$@"
 fi
