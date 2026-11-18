@@ -298,8 +298,8 @@ exclude_re = [
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
   # Pinned to their line: the debug build's `test_toggle`, under the same
   # name, is caught.
-  'rind/src/low/x86_64/cpu\.rs:832:\d+: replace test_toggle -> bool with false$',
-  'rind/src/low/x86_64/cpu\.rs:832:\d+: replace test_toggle -> bool with true$',
+  'rind/src/low/x86_64/cpu\.rs:834:\d+: replace test_toggle -> bool with false$',
+  'rind/src/low/x86_64/cpu\.rs:834:\d+: replace test_toggle -> bool with true$',
   # The FIPS module's `SystemRandom`, compiled only under `--cfg rind_fips`,
   # which no mutation run sets; `fips_rng`'s tests cover what it calls.
   # Pinned to its line: the other `fill`, under the same name, is caught.
