@@ -68,14 +68,52 @@ fn main() {
     let pmull = is_aarch64_feature_detected!("pmull");
     let sha2 = is_aarch64_feature_detected!("sha2");
     let sha3 = is_aarch64_feature_detected!("sha3");
-    // `None` is the portable aarch64 backend (`--cfg rind_portable`, a
-    // no-NEON target, or big-endian). It has no `_alt` schedule. Print 0
-    // so the feature JSON still comes out.
-    let wide_mul = rind::cpu::wide_multiplier().unwrap_or(false);
+    let wide_mul = wide_multiplier();
 
     println!(
         "{{ \"cpuid\": {{ \"aes\": {}, \"dit\": {}, \"neon\": {}, \"pmull\": {}, \
         \"sha2\": {}, \"sha3\": {}, \"wide_mul\": {} }} }}",
         aes as u8, dit as u8, neon as u8, pmull as u8, sha2 as u8, sha3 as u8, wide_mul as u8,
     );
+}
+
+/// Whether rind's aarch64 backend runs s2n-bignum's `_alt` (wide-multiplier)
+/// schedules on this core, as a release build of rind picks them: the narrow
+/// ones run only on Linux, when the kernel emulates EL0 reads of `MIDR_EL1`
+/// (`HWCAP_CPUID`) and the register names Cortex-A72, Cortex-A76, or
+/// Neoverse N1. Every other core and OS keeps `_alt`.
+///
+/// This repeats `read_midr` and `narrow_part` in
+/// `rind/src/low/aarch64/cpu.rs`; keep the part list in step with
+/// `narrow_part`. It reports the core, so it does not see the debug-only
+/// `RIND_CPU_DISABLE_wide_mul` and `RIND_CPU_FORCE_wide_mul`, which a release
+/// build compiles out, or the portable backend, which has no `_alt` schedule.
+#[cfg(target_arch = "aarch64")]
+fn wide_multiplier() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: `getauxval` reads the auxiliary vector the kernel passed at
+        // exec. It makes no system call.
+        let hwcap = unsafe { libc::getauxval(libc::AT_HWCAP) };
+        if hwcap & libc::HWCAP_CPUID == 0 {
+            return true;
+        }
+        let midr: u64;
+        // SAFETY: with `HWCAP_CPUID` set, Linux traps and emulates an EL0
+        // read of `MIDR_EL1` (Documentation/arch/arm64/cpu-feature-registers.rst),
+        // so this does not fault.
+        unsafe {
+            core::arch::asm!(
+                "mrs {}, midr_el1",
+                out(reg) midr,
+                options(nomem, nostack, preserves_flags)
+            );
+        }
+        // Implementer is bits 31:24 and part number bits 15:4; Arm is 0x41.
+        let implementer = (midr >> 24) & 0xff;
+        let part = (midr >> 4) & 0xfff;
+        !(implementer == 0x41 && matches!(part, 0xd08 | 0xd0b | 0xd0c))
+    }
+    #[cfg(not(target_os = "linux"))]
+    true
 }
