@@ -205,9 +205,11 @@ fi
 #
 # A caller that sets either variable has picked its schedule, and its
 # `RIND_TEST_ARM_WIDE_MUL` with it, so it gets the one pass it asked for.
-# Otherwise a value left over from a native run is dropped, since valgrind
-# would contradict it.
-schedule_requested=${RIND_CPU_DISABLE_wide_mul-}${RIND_CPU_FORCE_wide_mul-}
+# rind reads only whether a variable is set, so an empty or `0` value counts:
+# `RIND_CPU_DISABLE_wide_mul=` would otherwise deny the forced wide pass and
+# fail it. Otherwise a value left over from a native run is dropped, since
+# valgrind would contradict it.
+schedule_requested=${RIND_CPU_DISABLE_wide_mul+set}${RIND_CPU_FORCE_wide_mul+set}
 portable_requested() {
     [ "$suite" != fips ] && env | grep -q '^[A-Z0-9_]*RUSTFLAGS=.*rind_portable'
 }
@@ -258,6 +260,6 @@ echo "ctgrind: narrow multiplier (RIND_CPU_DISABLE_wide_mul=1)" >&2
 narrow=$?
 set -e
 if [ "$wide" -ne 0 ] || [ "$narrow" -ne 0 ]; then
-    echo "ctgrind: wide pass exited $wide, narrow pass exited $narrow" >&2
+    echo "ctgrind: first pass exited $wide, narrow pass exited $narrow" >&2
     exit 1
 fi
