@@ -1,0 +1,342 @@
+---
+import { createHash } from "node:crypto";
+import Heatmap from "../components/Heatmap.svelte";
+import Picker from "../components/Picker.svelte";
+import Times from "../components/Times.astro";
+import Base from "../layouts/Base.astro";
+import {
+	all,
+	benchmarks,
+	commitUrl,
+	cpus,
+	gapOperations,
+	gapRatio,
+	lead,
+	placeCpu,
+	libraries,
+	libraryName,
+	questUrl,
+	report,
+	reportUrl,
+	standingLine,
+	tierMarkdown,
+	tiers,
+	title,
+	untimed,
+} from "../lib/benchmarks";
+import { builtBy } from "../lib/landing";
+import { cell as md, html, lex } from "../lib/markdown";
+
+const hostRows = report.sections.map((s) => ({ name: s.name, rows: s.operations }));
+const tierRows = tiers.groups.map((g) => ({
+	name: g.name,
+	rows: g.benchmarks.map((id) => ({ id, label: id, code: true })),
+}));
+// What the picker picks, shown by CSS alone, so it works with JavaScript off:
+// the checked CPU's view, each unchecked library's cells hidden, and the
+// report's colors for its speed bins. The policy in astro.config.ts allows
+// this style by its hash.
+const css = [
+	...cpus.map((c) => `.bench:has(#cpu-${c.id}:checked) #view-${c.id}{display:block}`),
+	...libraries.map((l) => `.bench:has(#lib-${l.id}:not(:checked)) [data-lib="${l.id}"]{display:none}`),
+	...report.bins.map((b, i) => `.b${i}{background:${b.color}}`),
+].join("\n");
+Astro.csp.insertStyleHash(`sha256-${createHash("sha256").update(css).digest("base64")}`);
+
+const groups = [
+	{ label: "Overview", cpus: [all] },
+	{ label: "Benchmark hosts", cpus: cpus.filter((c) => c.kind === "host") },
+	{ label: "GitHub runners, by CPU tier", cpus: cpus.filter((c) => c.kind === "tier") },
+];
+const percent = Math.round((report.slower - 1) * 100);
+const list = new Intl.ListFormat("en");
+---
+
+<Base page={benchmarks} title={`rind: ${title}`}>
+	<style is:inline set:html={css} />
+	<header>
+		<p class="crumb"><a href="/">rind</a></p>
+		<h1>{title}</h1>
+		<p>{lead}</p>
+		<p class="standing">{standingLine}</p>
+	</header>
+
+	<main>
+		<section class="bench" id="times" aria-label="Times">
+			<Picker client:load groups={groups.map((g) => ({ label: g.label, cpus: g.cpus.map(({ id, label, detail }) => ({ id, label, detail })) }))} libraries={libraries.map((l) => ({ id: l.id, name: l.name }))} />
+
+			<ul class="legend" aria-label="Time over the fastest library's">
+				{report.bins.map((b, i) => <li><i class={`b${i}`} />{b.label}</li>)}
+			</ul>
+
+			{
+				cpus.map((cpu) => (
+					<div class="view" id={`view-${cpu.id}`}>
+						{cpu.kind === "all" && (
+							<>
+								<h2>Every host</h2>
+								<Heatmap libraries={libraries.map((l) => l.id)} hosts={report.hosts} />
+							</>
+						)}
+						{cpu.kind === "host" && (
+							<>
+								<h2>
+									<code>{cpu.host.name}</code>: {cpu.host.cpu}
+								</h2>
+								<p>
+									Measured {cpu.host.date} at <a href={commitUrl(cpu.host.commit)}><code>{cpu.host.commit.slice(0, 8)}</code></a>
+									{cpu.host.noisy && " (other work kept the host busy, so its times are noisy)"}, on {cpu.host.os} with {cpu.host.rustc}.
+								</p>
+								{cpu.host.note && <p>{cpu.host.note}</p>}
+								{untimed(cpu.host).length > 0 && <p>Not timed on <code>{cpu.host.name}</code>: {untimed(cpu.host).join(", ")}.</p>}
+								{cpu.host.scaling && <p>{cpu.host.scaling}</p>}
+								{Object.entries(cpu.host.refused).map(([lib, features]) => (
+									<p>
+										{libraryName(lib)} isn't timed on <code>{cpu.host.name}</code>: it requires {features.join(", ")}, which this CPU lacks.
+									</p>
+								))}
+								<Times times={cpu.host} groups={hostRows} />
+								<h3>Build cost on <code>{cpu.host.name}</code></h3>
+								{cpu.host.build === undefined || "reason" in cpu.host.build ? (
+									<p>Not measured{cpu.host.build && "reason" in cpu.host.build ? `: ${cpu.host.build.reason}` : "."}</p>
+								) : (
+									<>
+										<p>
+											A cold <code>cargo build --release</code> of a minimal binary per library and of a rustls client per
+											provider, measured {cpu.host.build.date} with {cpu.host.build.rustc}, {cpu.host.build.cc}, and{" "}
+											{cpu.host.build.jobs} jobs: the median of three builds and their range, their CPU time, the stripped
+											binary, the tools it needs beyond rustc, and the crates it compiles.
+										</p>
+										<div class="scroll">
+											<table class="plain">
+												<thead>
+													<tr>
+														<th>Build</th>
+														<th>Wall s (range)</th>
+														<th>CPU s</th>
+														<th>Stripped MB</th>
+														<th>Tools needed</th>
+														<th>Crates</th>
+													</tr>
+												</thead>
+												<tbody>
+													{cpu.host.build.builds.map((b) => (
+														<tr data-lib={b.library}>
+															<th scope="row">{b.name}</th>
+															<td>
+																{b.seconds.toFixed(1)} ({b.low.toFixed(1)} to {b.high.toFixed(1)})
+															</td>
+															<td>{b.cpu_seconds}</td>
+															<td>{b.stripped_mb.toFixed(2)}</td>
+															<td>{b.tools.join(", ") || "none"}</td>
+															<td>{b.crates}</td>
+														</tr>
+													))}
+												</tbody>
+											</table>
+										</div>
+									</>
+								)}
+							</>
+						)}
+						{cpu.kind === "tier" && (
+							<>
+								<h2>{cpu.tier.name}, a GitHub runner</h2>
+								<p>
+									On {cpu.tier.cpu}, from <a href={tiers.url}>run {tiers.run}</a>, {tiers.date} at{" "}
+									<a href={commitUrl(tiers.commit)}><code>{tiers.commit.slice(0, 8)}</code></a>. Here rind is timed against{" "}
+									{list.format(cpu.tier.libraries.filter((l) => l !== "rind").map(libraryName))}, by the weekly
+									benchmark's own IDs, and its time over the fastest of{" "}
+									{list.format(cpu.tier.libraries.filter((l) => cpu.tier.rivals.includes(l)).map(libraryName))}.
+									A benchmark this tier lacks runs the same code
+									as the tier before it, so it isn't timed.
+								</p>
+								<Times times={cpu.tier} groups={tierRows} />
+							</>
+						)}
+					</div>
+				))
+			}
+		</section>
+
+		<section>
+			<h2 id="cpu-tiers">CPU tiers</h2>
+			<Fragment set:html={html(lex(tierMarkdown))} />
+		</section>
+
+		<section>
+			<h2 id="known-gaps">Known gaps</h2>
+			<p>
+				Each operation where another library is more than {percent}% faster than rind, on a host or a CPU tier, and
+				what is decided: a quest that closes it, or the reason it stays. <code>benchmarks/gaps.toml</code> holds them,
+				and the report refuses a gap without one.
+			</p>
+			<div class="scroll">
+				<table class="plain gaps">
+					<thead>
+						<tr>
+							<th>Gap</th>
+							<th>Operation</th>
+							<th>On</th>
+							<th>rind's time over the fastest</th>
+							<th>Decision</th>
+						</tr>
+					</thead>
+					<tbody>
+						{
+							report.gaps.map((g, i) => (
+								<tr id={`gap-${i + 1}`}>
+									<td>{i + 1}</td>
+									<td set:html={md(gapOperations(g))} />
+									<td>{g.on.map((p, j) => (
+										<>
+											{j > 0 && ", "}
+											{(() => {
+												const label = p.host ? <code>{p.name}</code> : `${p.name} tier`;
+												const cpu = placeCpu(p);
+												// A label for the CPU's radio picks it in place, keeping the
+												// libraries, with or without JavaScript.
+												return cpu ? <label for={`cpu-${cpu.id}`} class="place" tabindex="0">{label}</label> : label;
+											})()}
+										</>
+									))}</td>
+									<td>{gapRatio(g)}</td>
+									<td>{g.quest ? <a href={questUrl(g.quest.path)}>{g.quest.title}</a> : <Fragment set:html={md(g.reason ?? "")} />}</td>
+								</tr>
+							))
+						}
+					</tbody>
+				</table>
+			</div>
+		</section>
+
+		<section>
+			<h2 id="verified-code">Verified code</h2>
+			<p>
+				A ✓ means a published, machine-checked proof shows that all the code computing the operation, as that
+				library runs it on that host, gives the specified result for every input. <a href={`${reportUrl}#verified-code`}>BENCHMARKS.md</a> says what that leaves out.
+			</p>
+			<div class="scroll">
+				<table class="plain">
+					<thead>
+						<tr>
+							<th>Library</th>
+							<th>Operations</th>
+							<th>Platform</th>
+							<th>Proof</th>
+						</tr>
+					</thead>
+					<tbody>
+						{
+							report.verified.map((v, i) => (
+								<tr id={`proof-${i + 1}`}>
+									<td>{libraryName(v.library)}</td>
+									<td>{v.operations.map((o, j) => <>{j > 0 && ", "}<code>{o}</code></>)}</td>
+									<td>{v.platform}</td>
+									<td><a href={v.link}>{v.proof}</a></td>
+								</tr>
+							))
+						}
+					</tbody>
+				</table>
+			</div>
+		</section>
+
+		<section>
+			<h2>How these are measured</h2>
+			<p>
+				Times are criterion's estimates. Each host builds with the pinned toolchain in the Nix dev shell and runs the
+				benchmarks only when idle; the weekly <code>bench</code> workflow times the CPU tiers on GitHub's runners.
+				<a href={reportUrl}>BENCHMARKS.md</a> is the full report, with the method, and this page is drawn from the same
+				data in the same commit.
+			</p>
+		</section>
+	</main>
+
+	<footer>
+		<p>Built by <a href={builtBy.href}>{builtBy.label}</a></p>
+	</footer>
+</Base>
+
+<style>
+	header,
+	main,
+	footer {
+		max-width: 72rem;
+		margin: 0 auto;
+		padding: 0 1.25rem;
+	}
+	header {
+		padding-top: 1.5rem;
+	}
+	.crumb {
+		margin: 0;
+	}
+	h1 {
+		font-size: clamp(1.5rem, 4vw, 2.25rem);
+		margin: 0.5rem 0;
+	}
+	.standing {
+		font-weight: 600;
+	}
+	main > section {
+		margin-top: 2.5rem;
+	}
+	.view {
+		display: none;
+	}
+	.legend {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem 1rem;
+		list-style: none;
+		padding: 0;
+		margin: 1rem 0;
+		font-size: 0.85rem;
+		color: var(--muted);
+	}
+	.legend i {
+		display: inline-block;
+		width: 0.8rem;
+		height: 0.8rem;
+		border-radius: 2px;
+		margin-right: 0.3rem;
+		vertical-align: -0.1rem;
+	}
+	.scroll {
+		overflow-x: auto;
+	}
+	.plain {
+		border-collapse: collapse;
+		font-size: 0.9rem;
+	}
+	.plain th,
+	.plain td {
+		padding: 0.3rem 0.75rem 0.3rem 0;
+		text-align: left;
+		vertical-align: top;
+		border-bottom: 1px solid var(--border);
+	}
+	.plain tbody th {
+		font-weight: normal;
+	}
+	.gaps td:last-child {
+		min-width: 24rem;
+	}
+	.place {
+		color: var(--accent);
+		text-decoration: underline;
+		cursor: pointer;
+	}
+	tr:target {
+		background: var(--surface);
+	}
+	footer {
+		margin-top: 4rem;
+		padding-top: 1.5rem;
+		padding-bottom: 3rem;
+		border-top: 1px solid var(--border);
+		color: var(--muted);
+		text-align: center;
+	}
+</style>

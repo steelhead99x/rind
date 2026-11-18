@@ -1,10 +1,14 @@
-# Every computation rind runs is formally verified
+# [S] Retire the m3 verification epic, keeping its rules
 
 ## Goal
 
-Every operation rind exports, on every path, runs code whose whole computation is covered by a published formal proof, so the benchmark report's strict ✓ appears on every rind cell. A gap that can't be closed is recorded with its reason.
+The rules and decisions below, which every verification quest links, live in [the m4 epic](/quest/m4/verified/README.md), and this epic is deleted with every link to it, the m2 verified-garbage quests' included.
 
 ## Plan
+
+Its last child, x86_64 SHA-256's ✓, finished in [kixel-ai/rind#865](https://github.com/kixel-ai/rind/pull/865), so what remains is this README: its goal, every operation verified on every path, is [the m4 epic's](/quest/m4/verified/README.md) now, and its composition rule and settled choices below are what other quests still link. Decided with the maintainer on 2026-11-17, from [kixel-ai/rind#865](https://github.com/kixel-ai/rind/pull/865): the composition rule and settled choices move into [the m4 epic](/quest/m4/verified/README.md)'s README, and every link to them is repointed there ✅ (rejected: `proofs/README.md`, leaving the move for later). The move is this quest's work.
+
+Decided with the maintainer on 2026-11-03, kept for the move: every operation rind exports, on every path, runs code whose whole computation is covered by a published formal proof, so the benchmark report's strict ✓ appears on every rind cell. A gap that can't be closed is recorded with its reason.
 
 Decided with the maintainer on 2026-11-03, after the benchmark report (`BENCHMARKS.md`) adopted its strict ✓ rule: a ✓ needs the whole computation proven, padding and protocol glue included.
 

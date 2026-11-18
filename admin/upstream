@@ -2,9 +2,9 @@
 # Checks out, into .tmp/upstream/<name>, the revision of the upstream that
 # `admin/import-<name>` pins as its REV, or for a fork rind vendors the base its
 # `RIND.md` names, or into .tmp/upstream/<name>@<rev> the revision `rev`,
-# fetching it shallowly unless it is already there.
+# fetching it shallowly unless a clean checkout of it is already there.
 #
-# Usage: admin/upstream <aws-lc | boringssl | openssl | hacl-star | s2n-bignum | blind-rsa-signatures> [rev]
+# Usage: admin/upstream <aws-lc | boringssl | openssl | hacl-star | verified-garbage | s2n-bignum | blind-rsa-signatures> [rev]
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -13,10 +13,11 @@ aws-lc) url=https://github.com/aws/aws-lc script=admin/import-aws-lc ;;
 boringssl) url=https://github.com/google/boringssl script=admin/import-boringssl ;;
 openssl) url=https://github.com/openssl/openssl script=admin/import-openssl ;;
 hacl-star) url=https://github.com/hacl-star/hacl-star script=admin/import-hacl ;;
+verified-garbage) url=https://github.com/pyca/verified-garbage script=admin/import-vg ;;
 s2n-bignum) url=https://github.com/awslabs/s2n-bignum script=thirdparty/s2n-bignum/RIND.md ;;
 blind-rsa-signatures) url=https://github.com/jedisct1/rust-blind-rsa-signatures script=thirdparty/blind-rsa-signatures/RIND.md ;;
 *)
-    echo "usage: admin/upstream <aws-lc | boringssl | openssl | hacl-star | s2n-bignum | blind-rsa-signatures> [rev]" >&2
+    echo "usage: admin/upstream <aws-lc | boringssl | openssl | hacl-star | verified-garbage | s2n-bignum | blind-rsa-signatures> [rev]" >&2
     exit 2
     ;;
 esac
@@ -32,7 +33,8 @@ if [[ -z "$rev" ]]; then
 fi
 # A directory that is not its own repository resolves to rind's.
 if [[ "$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" != "$PWD/$dir" ||
-    "$(git -C "$dir" rev-parse HEAD)" != "$rev" ]]; then
+    "$(git -C "$dir" rev-parse HEAD)" != "$rev" ||
+    -n "$(git -C "$dir" status --porcelain --untracked-files=all --ignored)" ]]; then
     rm -rf "$dir"
     git init -q "$dir"
     git -C "$dir" fetch -q --depth 1 "$url" "$rev"

@@ -69,6 +69,10 @@
               "wasm32-unknown-unknown"
               "wasm32-wasip2"
               "x86_64-unknown-linux-gnu"
+              # Targets with no `std`, one per architecture rind has assembly for.
+              "aarch64-unknown-none"
+              "armv7a-none-eabi"
+              "x86_64-unknown-none"
             ];
           };
 
@@ -127,7 +131,9 @@
               })
               armv7-cc
               pkgs.qemu-user
-            ];
+            ]
+            # sh/armv7.sh asks setarch whether the host runs AArch32 code.
+            ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.util-linux ];
 
             env = {
               CC_armv7_unknown_linux_gnueabihf = "${armv7-prefix}cc";
@@ -743,6 +749,35 @@
                 pkgs.git
                 pkgs.curl
               ];
+            };
+
+            # `admin/prove vg` and the prove workflow's `vg` jobs run in it:
+            # the Rust that compiles VG's naked functions and rind's, with the
+            # targets the bytes check reads; nixpkgs' LLVM, whose `llvm-mc`
+            # assembles VG's text with an assembler other than rustc's; elan,
+            # for the Lean that `proofs/lean-toolchain` names, which builds
+            # VG's models; and the emulator that runs the instructions this
+            # CPU lacks: Intel SDE on x86_64, qemu-aarch64 on aarch64.
+            vg = pkgs.mkShell {
+              packages = [
+                (rust-stable.minimal.override {
+                  extensions = [ "llvm-tools" ];
+                  targets = [
+                    "x86_64-unknown-linux-gnu"
+                    "aarch64-unknown-linux-gnu"
+                  ];
+                })
+                pkgs.llvmPackages_21.llvm
+                pkgs.elan
+                pkgs.git
+                pkgs.curl
+                pkgs.python3
+                pkgs.flock
+              ]
+              ++ pkgs.lib.optionals (system == "x86_64-linux") [ sde ]
+              ++ pkgs.lib.optionals (system == "aarch64-linux") [ pkgs.qemu-user ];
+
+              shellHook = pkgs.lib.optionalString (system == "x86_64-linux") sde-certs;
             };
 
             # `admin/ctgrind` and the ctgrind workflow run in it. A separate

@@ -2,13 +2,16 @@
 //! together, per certificate key type. Pinned on x86_64 alone, where it was
 //! measured, on the assembly and portable backends alike. RSA's private-key
 //! routines allocate differently by backend and with ADX or AVX-512 IFMA, so
-//! RSA certificates are not pinned.
+//! RSA certificates are not pinned. ML-KEM-768's own allocations vary with
+//! the CPU, since pyca/verified-garbage's routines keep no decoded matrix, so
+//! the pinned count leaves them out.
 #![cfg(target_arch = "x86_64")]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::Arc;
 
+use rind::kem::{Ciphertext, DecapsulationKey, EncapsulationKey, MlKem768};
 use rustls::client::Resumption;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
@@ -116,13 +119,27 @@ fn count(client: &Arc<ClientConfig>, server: &Arc<ServerConfig>) -> u64 {
     ALLOCATIONS.with(Cell::get) - before
 }
 
+/// The allocations rind makes for one ML-KEM-768 exchange, as
+/// X25519MLKEM768 runs it: the client's key generation, the server's parse of
+/// its key and encapsulation, and the client's decapsulation.
+fn mlkem768() -> u64 {
+    let before = ALLOCATIONS.with(Cell::get);
+    let key = DecapsulationKey::<MlKem768>::generate().unwrap();
+    let peer = EncapsulationKey::<MlKem768>::new(key.public_key().as_ref()).unwrap();
+    let (ciphertext, _) = peer.encapsulate().unwrap();
+    let ciphertext = Ciphertext::<MlKem768>::new(ciphertext.as_ref()).unwrap();
+    key.decapsulate(&ciphertext);
+    drop((key, peer));
+    ALLOCATIONS.with(Cell::get) - before
+}
+
 /// Each key type's allocations per handshake over rind-rustls's default
-/// provider, which leads with X25519MLKEM768.
+/// provider, which leads with X25519MLKEM768, less [`mlkem768`]'s.
 const EXPECTED: [(&str, u64); 4] = [
-    ("ecdsa-p256", 248),
-    ("ecdsa-p384", 252),
-    ("ecdsa-p521", 256),
-    ("ed25519", 248),
+    ("ecdsa-p256", 245),
+    ("ecdsa-p384", 249),
+    ("ecdsa-p521", 253),
+    ("ed25519", 245),
 ];
 
 #[test]
@@ -135,7 +152,7 @@ fn handshake_allocations() {
         // rustls shuffles the ClientHello's extensions, which moves where its
         // buffers grow, so a handshake makes a few more than the fewest about
         // half the time; the fewest of 32 is the fewest every time in practice.
-        let got = (0..32).map(|_| count(&client, &server)).min().unwrap();
+        let got = (0..32).map(|_| count(&client, &server)).min().unwrap() - mlkem768();
         if got != expected {
             wrong.push(format!("{key}: {got}, expected {expected}"));
         }

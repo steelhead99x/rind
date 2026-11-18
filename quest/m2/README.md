@@ -21,6 +21,6 @@ m2). They are the API epic's new children, and the
 and trust epics, with new children in bench and adoption; trust has landed.
 Each epic's Plan records what the audit considered and left out.
 
-Decided 2026-11-12 (maintainer, /quest-plan): ✅ [the website](/quest/m2/site/README.md)
+Decided 2026-11-12 (maintainer, /quest-plan): ✅ the website
 joins m2 (rejected: m3). Its announcement waits in m4 for the proofs it is
 about.
