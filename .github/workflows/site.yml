@@ -1,8 +1,9 @@
 name: Site
 
-# Builds site/, the landing page, checks its links, and loads it in the
-# runner's Chrome on every pull request, since the page quotes the README and
-# links files across the repository. The merge queue's `just ci` runs the same
+# Builds site/, the landing and migration pages, checks its links, and loads
+# it in the runner's Chrome on every pull request, since the pages quote the
+# README, MIGRATING.md, and each adapter's README and link files across the
+# repository. The merge queue's `just ci` runs the same
 # sh/site.sh on every group.
 on:
   pull_request:
