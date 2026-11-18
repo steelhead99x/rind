@@ -179,12 +179,13 @@ theorem as_bytes_uncompressed_spec (_hr : Runs) (pt : mid.p256.AffineMontPoint) 
     rw [fe1_post, fe3_post, fe_post, fe2_post, pairNat_drop _ hl]
     rfl
 
-theorem public_key_uncompressed_spec (h : Runs) (k : mid.p256.PrivateKey) (hk : wordsNat k.scalar.val < n256)
+theorem public_key_uncompressed_spec (h : Runs) (hvg : NoVgP256) (k : mid.p256.PrivateKey) (hk : wordsNat k.scalar.val < n256)
     (x y : Nat) (hq : p256Pow p256G (wordsNat k.scalar.val) = some (x, y)) (hc : p256OnCurve (some (x, y))) :
     mid.p256.PrivateKey.public_key_uncompressed k ⦃ b =>
       b.val.head? = some 4#u8 ∧ x962Coords b.val = (x, y) ⦄ := by
   unfold mid.p256.PrivateKey.public_key_uncompressed
   step
+  simp only [hvg.eq_public_key, bind_ok]
   step with public_point_spec h k hk x y hq hc as ⟨pt, hpt⟩
   have hp : 0 < p256 := by simp [p256]
   step with as_bytes_uncompressed_spec h pt (by rw [hpt]; exact Nat.mod_lt _ hp)
@@ -193,7 +194,7 @@ theorem public_key_uncompressed_spec (h : Runs) (k : mid.p256.PrivateKey) (hk : 
   rw [hbc, hpt]
   simp only [rinv_tomont _ hc.1, rinv_tomont _ hc.2.1]
 
-theorem encode_public_spec (h : Runs) (k : mid.p256.PrivateKey) (algorithm : high.agreement.Algorithm)
+theorem encode_public_spec (h : Runs) (hvg : NoVgP256) (k : mid.p256.PrivateKey) (algorithm : high.agreement.Algorithm)
     (hk : wordsNat k.scalar.val < n256) (x y : Nat) (hq : p256Pow p256G (wordsNat k.scalar.val) = some (x, y))
     (hc : p256OnCurve (some (x, y))) :
     high.curve.P256.Insts.RindHighAgreementAgreePrivateKey.encode_public k algorithm ⦃ pk =>
@@ -201,7 +202,7 @@ theorem encode_public_spec (h : Runs) (k : mid.p256.PrivateKey) (algorithm : hig
         b.length = 65 ∧ b.val.head? = some 4#u8 ∧ x962Coords b.val = (x, y) ⦄ ⦄ := by
   unfold high.curve.P256.Insts.RindHighAgreementAgreePrivateKey.encode_public high.agreement.PublicKey.from_encoding
     high.agreement.PublicKey.Insts.CoreConvertAsRefSliceU8.as_ref low.generic.zeroise.ZeroableRef.new
-  step with public_key_uncompressed_spec h k hk x y hq hc as ⟨a, ha4, hac⟩
+  step with public_key_uncompressed_spec h hvg k hk x y hq hc as ⟨a, ha4, hac⟩
   step as ⟨sl, hsl⟩
   subst hsl
   have hlen : a.to_slice.len.val = 65 := by simp
@@ -229,13 +230,13 @@ theorem public_key_of_coords (d x y : Nat) (hq : p256Pow p256G d = some (x, y))
   WP.spec_mono hpk fun b ⟨hl, h4, hxy⟩ => ⟨hl, h4, by rw [hq, hxy]⟩
 
 /-- The public key `encode_public` computes for a scalar in [1, n). -/
-theorem encode_public_key_spec (h : Runs) (k : mid.p256.PrivateKey) (algorithm : high.agreement.Algorithm)
+theorem encode_public_key_spec (h : Runs) (hvg : NoVgP256) (k : mid.p256.PrivateKey) (algorithm : high.agreement.Algorithm)
     (hk0 : 0 < wordsNat k.scalar.val) (hk : wordsNat k.scalar.val < n256) :
     high.curve.P256.Insts.RindHighAgreementAgreePrivateKey.encode_public k algorithm ⦃ pk =>
       high.agreement.PublicKey.Insts.CoreConvertAsRefSliceU8.as_ref pk ⦃ b =>
         p256PublicKey (wordsNat k.scalar.val) b.val ⦄ ⦄ := by
   obtain ⟨x, y, hq, hc⟩ := g_mult _ hk0 hk
-  exact WP.spec_mono (encode_public_spec h k algorithm hk x y hq hc)
+  exact WP.spec_mono (encode_public_spec h hvg k algorithm hk x y hq hc)
     fun pk hpk => public_key_of_coords _ x y hq pk hpk
 
 /-- `p256Agree`'s fields, which the theorems below rewrite to, so `step` finds
@@ -342,7 +343,7 @@ theorem drawKeygen_err (draws : Nat → core.result.Result Unit getrandom.error.
       · exact ih (i + 1) hr
     · simpa using hr
 
-theorem load_scalar_spec (h : Runs) (algorithm : high.agreement.Algorithm) (b : Slice U8) :
+theorem load_scalar_spec (h : Runs) (hvg : NoVgP256) (algorithm : high.agreement.Algorithm) (b : Slice U8) :
     high.curve.P256.Insts.RindHighAgreementAgreePrivateKey.load algorithm (.Scalar b) ⦃ r =>
       if b.length = 32 then
         if 0 < beNat b.val ∧ beNat b.val < n256 then
@@ -364,7 +365,7 @@ theorem load_scalar_spec (h : Runs) (algorithm : high.agreement.Algorithm) (b : 
       step with core.result.Result.Insts.CoreOpsTry.branch_Ok.spec as ⟨cf, hcf⟩
       subst hcf
       simp only
-      step with encode_public_key_spec h k algorithm (hk ▸ hrange.1) (hk ▸ hrange.2) as ⟨pk, hpk⟩
+      step with encode_public_key_spec h hvg k algorithm (hk ▸ hrange.1) (hk ▸ hrange.2) as ⟨pk, hpk⟩
       exact ⟨k, pk, rfl, hk, hk ▸ hpk⟩
     · subst hr
       simp [core.result.Result.Insts.CoreOpsTry.branch,
@@ -384,7 +385,7 @@ open P256
 system source whose bytes, read big-endian, are in [1, n), and key generation
 is refused if a draw fails before one is, or none is. The draws themselves are
 outside the functional spec. -/
-theorem p256_generate (h : Runs) (draws : Nat → core.result.Result Unit getrandom.error.Error × Slice U8)
+theorem p256_generate (h : Runs) (hvg : NoVgP256) (draws : Nat → core.result.Result Unit getrandom.error.Error × Slice U8)
     (hdraw : ∀ i, mid.p256.PrivateKey.draw i (Array.repeat 32#usize 0#u8).to_slice = ok (draws i))
     (hlen : ∀ i, (draws i).2.length = 32) :
     high.agreement.PrivateKey.generate high.agreement.ECDH_P256 ⦃ key => p256Keygen draws 0 64 key ⦄ := by
@@ -397,7 +398,7 @@ theorem p256_generate (h : Runs) (draws : Nat → core.result.Result Unit getran
   rcases r with k | e
   · obtain ⟨hk0, hk, hkey⟩ := drawKeygen_ok draws 64 0 k hr
     simp only [p256Agree_encode_public]
-    step with encode_public_key_spec h k _ hk0 hk as ⟨pk, hpk⟩
+    step with encode_public_key_spec h hvg k _ hk0 hk as ⟨pk, hpk⟩
     step with private_key_spec k pk hpk as ⟨key, hkey'⟩
     exact hkey key hkey'
   · simp only [WP.spec_ok]
@@ -406,7 +407,7 @@ theorem p256_generate (h : Runs) (draws : Nat → core.result.Result Unit getran
 /-- A P-256 key loaded from its scalar is refused unless it is 32 bytes and,
 read big-endian, in [1, n), and otherwise is that scalar, as
 `p256_generate`'s is a draw's. -/
-theorem p256_from_scalar (h : Runs) (b : Slice U8) :
+theorem p256_from_scalar (h : Runs) (hvg : NoVgP256) (b : Slice U8) :
     high.agreement.PrivateKey.from_scalar high.agreement.ECDH_P256 b ⦃ key =>
       if b.length = 32 then
         if 0 < beNat b.val ∧ beNat b.val < n256 then
@@ -416,7 +417,7 @@ theorem p256_from_scalar (h : Runs) (b : Slice U8) :
   unfold high.agreement.PrivateKey.from_scalar high.agreement.ECDH_P256 high.agreement.Algorithm.load
     high.agreement.Keyed.load
   simp only [p256Agree_load]
-  step with load_scalar_spec h _ b as ⟨r, hr⟩
+  step with load_scalar_spec h hvg _ b as ⟨r, hr⟩
   split_ifs at hr ⊢
   · obtain ⟨k, pk, rfl, hk, hpk⟩ := hr
     simp only

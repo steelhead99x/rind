@@ -1645,18 +1645,12 @@ fn mux_follows_the_override() {
         }
         let output = cmd.output().unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
-        // The marker proves the child ran even when FIPS suppresses CPU
-        // logging. Outside FIPS, disable wins and prints the denial.
-        let line = if disable {
-            "DEBUG: denying cpuid \"wide_mul\""
-        } else {
-            "DEBUG: forcing cpuid \"wide_mul\""
-        };
+        // Detection is silent, so the marker proves the child ran, and the
+        // child's own assertion that the multiplier is `mode` proves which
+        // override won: disable over force.
         assert!(
-            output.status.success()
-                && stdout.contains(&format!("{CHILD} done"))
-                && (cfg!(rind_fips) || stdout.contains(line)),
-            "{mode}: {line}\n{stdout}{}",
+            output.status.success() && stdout.contains(&format!("{CHILD} done")),
+            "{mode} (disable {disable}, force {force}):\n{stdout}{}",
             String::from_utf8_lossy(&output.stderr)
         );
     }

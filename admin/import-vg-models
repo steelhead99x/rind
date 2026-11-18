@@ -8,7 +8,8 @@ aarch64 (`lean/VerifiedGarbage/TCB`), prints their assembly from the same
 models, and encodes it. `admin/prove vg` checks each instruction of VG's code
 that rind can run against the CPU through those models, so a proof of VG's
 about a routine rind vendors rests on a model this has checked. This copies
-the modules the cosimulation needs, `ROOTS` and every module they import,
+the modules the cosimulation and those theorems need, `ROOTS` and every
+module they import,
 byte for byte, and deletes any other file there, so the copy is VG's at REV.
 `--check` changes nothing and fails unless the copy is already that.
 
@@ -34,6 +35,14 @@ ROOTS = [
     f"VerifiedGarbage.TCB.{arch}.{m}"
     for arch in ["X86_64", "AArch64"]
     for m in ["Isa", "Print", "Encode", "Target"]
+] + [
+    # The specs whose functions rind's axioms about VG's routines state.
+    "VerifiedGarbage.Spec.Rsa.PrivatePrecompute",
+    # ChaCha20's spec and contracts, which proofs/Rind/VgChaCha20.lean
+    # adapts rather than imports and proofs/Rind/X86_64/VgChaCha20.lean's
+    # axioms restate: a pin that changes them shows the change in its diff,
+    # against which that re-pin must review the adaptation and the axioms.
+    "VerifiedGarbage.Spec.ChaCha20.Contract",
 ]
 
 IMPORT = re.compile(r"^(?:public )?(?:meta )?import (VerifiedGarbage\.[A-Za-z0-9_.]+)\b", re.M)

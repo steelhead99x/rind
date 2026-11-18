@@ -83,6 +83,7 @@ pub(crate) mod cpu;
 #[cfg(test)]
 #[path = "../arm/ct_qemu.rs"]
 pub(crate) mod ct_qemu;
+pub(crate) mod curve25519_ifma;
 pub(crate) mod curve25519_x25519;
 pub(crate) mod curve25519_x25519_narrow;
 pub(crate) mod curve25519_x25519base;
@@ -140,6 +141,7 @@ pub(crate) mod p256_scalarmul;
 pub(crate) mod p256_scalarmul_narrow;
 pub(crate) mod p256_scalarmulbase;
 pub(crate) mod p256_scalarmulbase_narrow;
+pub(crate) mod p256_vg;
 pub(crate) mod p384_montjadd;
 pub(crate) mod p384_montjdouble;
 pub(crate) mod p384_montjmixadd;
@@ -154,6 +156,7 @@ pub(crate) mod p521_jmixadd;
 pub(crate) mod p521_jmixadd_narrow;
 pub(crate) mod p521_jscalarmul;
 pub(crate) mod p521_jscalarmul_narrow;
+pub(crate) mod pbkdf2_vg;
 #[cfg(test)]
 mod schedules;
 pub(crate) mod sha1;
