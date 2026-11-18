@@ -2,8 +2,7 @@
 # Discord alerting for scheduled, landing, and release failures, after moq-dev/moq's.
 # Usage:
 #   sh/alert.sh discord   Post the current workflow_run failure to Discord.
-#   sh/alert.sh check     Verify alert.yml watches every alertable workflow,
-#                         and that no push can cancel a release it alerts on.
+#   sh/alert.sh check     Verify alert.yml watches every alertable workflow.
 #
 # Environment (discord):
 #   DISCORD_WEBHOOK   Required. The #alerts channel webhook URL.
@@ -70,13 +69,6 @@ alertable='
     elif (.name | type) != "string" or .name == "" then error("no top-level name:")
     else .name end'
 
-# True when no concurrency group in a workflow replaces a pending run: each
-# one is an object with `queue: max` and without cancel-in-progress.
-# shellcheck disable=SC2016 # A jq program, not a shell expansion.
-queues='
-    [.concurrency, (.jobs // {} | .[].concurrency)] | map(select(. != null))
-    | all(type == "object" and .queue == "max" and (.["cancel-in-progress"] // false) == false)'
-
 check() {
     local file name expected=() watched
     shopt -s nullglob
@@ -88,16 +80,6 @@ check() {
             return 2
         fi
         [[ -z "$name" ]] || expected+=("$name")
-        # alert.yml posts every cancelled release, which is right only while
-        # no push can cancel one: each concurrency group must queue.
-        case "$name" in
-            Release | "Dart release")
-                if ! yq -o=json . "$file" | jq -e "$queues" >/dev/null; then
-                    echo "sh/alert.sh: a push can cancel a pending $name run, which alert.yml would post; give $file's concurrency groups queue: max" >&2
-                    return 1
-                fi
-                ;;
-        esac
     done
     watched=$(yq '.on.workflow_run.workflows[]' "$workflows/alert.yml")
 

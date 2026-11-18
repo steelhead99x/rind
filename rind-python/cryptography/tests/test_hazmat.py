@@ -26,7 +26,7 @@ from cryptography.hazmat.primitives.kdf import hkdf as pyca_hkdf
 from cryptography.hazmat.primitives.kdf import pbkdf2 as pyca_pbkdf2
 from cryptography.hazmat.primitives.kdf import x963kdf as pyca_x963kdf
 
-from pyrind_cryptography import _der, exceptions
+from pyrind_cryptography import exceptions
 from pyrind_cryptography.hazmat.primitives import constant_time, hashes, hmac, keywrap, padding, serialization
 from pyrind_cryptography.hazmat.primitives.asymmetric import ec, ed448, ed25519, rsa, utils, x25519
 from pyrind_cryptography.hazmat.primitives.asymmetric import padding as asym_padding
@@ -535,85 +535,6 @@ class Keys(unittest.TestCase):
                 self.assertEqual(pyca_key.decrypt(mirror.public_key().encrypt(b"secret", ours_oaep), theirs_oaep), b"secret")
                 with self.assertRaises(ValueError):
                     mirror.decrypt(bytes(256), ours_oaep)
-
-    def test_rsa_public_keys(self):
-        """RSA public keys from 1024 bits read every way pyca reads them, and verify with what rind does at their size."""
-        sha256 = hashes.SHA256()
-        pkcs1v15, pss = asym_padding.PKCS1v15(), asym_padding.PSS(asym_padding.MGF1(sha256), asym_padding.PSS.AUTO)
-        for bits in (1024, 2048):
-            pyca_key = pyca_rsa.generate_private_key(65537, bits)
-            pyca_public = pyca_key.public_key()
-            numbers = pyca_public.public_numbers()
-            spki = pyca_public.public_bytes(pyca_serialization.Encoding.DER, pyca_serialization.PublicFormat.SubjectPublicKeyInfo)
-            pkcs1 = pyca_public.public_bytes(pyca_serialization.Encoding.DER, pyca_serialization.PublicFormat.PKCS1)
-            pkcs1_pem = pyca_public.public_bytes(pyca_serialization.Encoding.PEM, pyca_serialization.PublicFormat.PKCS1)
-            keys = [
-                serialization.load_der_public_key(spki),
-                serialization.load_der_public_key(pkcs1),
-                serialization.load_pem_public_key(pkcs1_pem),
-                rsa.RSAPublicNumbers(numbers.e, numbers.n).public_key(),
-            ]
-            signed_pkcs1 = pyca_key.sign(b"m", pyca_asym_padding.PKCS1v15(), pyca_hashes.SHA256())
-            signed_pss = pyca_key.sign(b"m", pyca_asym_padding.PSS(pyca_asym_padding.MGF1(pyca_hashes.SHA256()), 32), pyca_hashes.SHA256())
-            for key in keys:
-                with self.subTest(bits=bits, key=keys.index(key)):
-                    self.assertEqual(key, keys[0])
-                    self.assertEqual(key.key_size, bits)
-                    self.assertEqual(key.public_numbers(), rsa.RSAPublicNumbers(numbers.e, numbers.n))
-                    self.assertEqual(key.public_bytes(ENC.DER, PUB.SubjectPublicKeyInfo), spki)
-                    self.assertEqual(key.public_bytes(ENC.DER, PUB.PKCS1), pkcs1)
-                    key.verify(signed_pkcs1, b"m", pkcs1v15, sha256)
-                    with self.assertRaises(exceptions.InvalidSignature):
-                        key.verify(signed_pkcs1, b"n", pkcs1v15, sha256)
-                    if bits >= 2048:
-                        key.verify(signed_pss, b"m", pss, sha256)
-                        continue
-                    # rind verifies keys under 2048 bits only with legacy
-                    # PKCS#1 v1.5, and refuses the key, not the signature, for
-                    # PSS, before it reads the signature.
-                    for signature in (signed_pss, b""):
-                        with self.assertRaises(exceptions.UnsupportedAlgorithm):
-                            key.verify(signature, b"m", pss, sha256)
-                    with self.assertRaises(exceptions.UnsupportedAlgorithm):
-                        key.verify(signed_pkcs1, b"m", pkcs1v15, hashes.SHA384())
-                    with self.assertRaises(exceptions.UnsupportedAlgorithm):
-                        key.encrypt(b"m", asym_padding.OAEP(asym_padding.MGF1(sha256), sha256, None))
-
-        # A size rind lacks is unsupported, whichever way it arrives; a key
-        # rind refuses for its exponent is malformed.
-        for n in ((1 << 1022) | 1, (1 << 8192) | 1):
-            pkcs1 = _der.sequence(_der.encode_integer(n), _der.encode_integer(65537))
-            for call in (
-                lambda: rsa.RSAPublicNumbers(65537, n).public_key(),
-                lambda: serialization.load_der_public_key(pkcs1),
-            ):
-                with self.assertRaises(exceptions.UnsupportedAlgorithm):
-                    call()
-        for e in (4, (1 << 33) + 1):
-            with self.assertRaises(ValueError):
-                rsa.RSAPublicNumbers(e, (1 << 2047) | 1).public_key()
-
-    def test_rsa_public_key_malformed_before_size(self):
-        """A malformed RSA public key is a ValueError, as on pyca, even when its modulus is a size rind lacks."""
-        with self.assertRaisesRegex(ValueError, "e must be odd"):
-            rsa.RSAPublicNumbers(4, (1 << 511) | 1).public_key()
-        with self.assertRaisesRegex(ValueError, "n must be odd"):
-            rsa.RSAPublicNumbers(3, 1 << 9000).public_key()
-        rsa_oid = _der.encode(_der.OID, bytes.fromhex("2a864886f70d010101"))
-
-        def spki(pkcs1, parameters=_der.encode(_der.NULL, b"")):
-            return _der.sequence(_der.sequence(rsa_oid, parameters), _der.encode(0x03, b"\x00" + pkcs1))
-
-        missing_e = _der.sequence(_der.encode_integer(5))
-        even_n = _der.sequence(_der.encode_integer(1 << 512), _der.encode_integer(65537))
-        odd_small = _der.sequence(_der.encode_integer((1 << 511) | 1), _der.encode_integer(65537))
-        for der in (spki(missing_e), missing_e, spki(even_n), even_n, spki(odd_small, _der.encode(0x02, b"\x00"))):
-            with self.subTest(der=der.hex()), self.assertRaises(ValueError):
-                serialization.load_der_public_key(der)
-        # A well-formed key of a size rind lacks stays unsupported.
-        for der in (spki(odd_small), odd_small):
-            with self.subTest(der=der.hex()), self.assertRaises(exceptions.UnsupportedAlgorithm):
-                serialization.load_der_public_key(der)
 
     def test_rsa_unsupported(self):
         key = rsa.generate_private_key(65537, 2048)

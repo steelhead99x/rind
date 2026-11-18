@@ -21,8 +21,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa as pyca_rsa
 from cryptography.hazmat.primitives.ciphers import aead as pyca_aead
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-from pyrind import aead, agreement, digest, ecdsa, hkdf, hmac, kem, rsa
-from pyrind import ed25519 as rind_ed25519
+from pyrind import aead, agreement, digest, hkdf, hmac, kem, signature
+from pyrind.signature import sign, verify
 
 
 def cases():
@@ -85,7 +85,7 @@ def cases():
         ),
     }
 
-    ours_ed = rind_ed25519.KeyPair.generate()
+    ours_ed = signature.Ed25519KeyPair.generate()
     theirs_ed = ed25519.Ed25519PrivateKey.from_private_bytes(ours_ed.to_seed())
     signed_ed = ours_ed.sign(message)
     public_ed, their_public_ed = ours_ed.public_key(), theirs_ed.public_key()
@@ -98,8 +98,8 @@ def cases():
         "cryptography": lambda: their_public_ed.verify(signed_ed, message),
     }
 
-    ours_ec = ecdsa.KeyPair.generate(ecdsa.sign.P256_SHA256_ASN1)
-    public_ec = ecdsa.PublicKey(ecdsa.verify.P256_SHA256_ASN1, bytes(ours_ec.public_key()))
+    ours_ec = signature.EcdsaKeyPair.generate(sign.ECDSA_P256_SHA256_ASN1)
+    public_ec = signature.PublicKey(verify.ECDSA_P256_SHA256_ASN1, bytes(ours_ec.public_key()))
     theirs_ec = ec.generate_private_key(ec.SECP256R1())
     their_public_ec = theirs_ec.public_key()
     signed_ec, their_signed_ec = ours_ec.sign(message), theirs_ec.sign(message, ec.ECDSA(hashes.SHA256()))
@@ -118,16 +118,16 @@ def cases():
     der = theirs_rsa.private_bytes(
         serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
     )
-    ours_rsa = rsa.KeyPair.from_pkcs8(der)
-    public_rsa = ours_rsa.public_key()
+    ours_rsa = signature.RsaKeyPair.from_pkcs8(der)
+    public_rsa = ours_rsa.public_key(sign.RSA_PKCS1_SHA256)
     their_public_rsa = theirs_rsa.public_key()
-    signed_rsa = ours_rsa.sign(rsa.sign.PKCS1_SHA256, message)
+    signed_rsa = ours_rsa.sign(sign.RSA_PKCS1_SHA256, message)
     yield "RSA-2048 PKCS#1 sign, 21 B", {
-        "pyrind": lambda: ours_rsa.sign(rsa.sign.PKCS1_SHA256, message),
+        "pyrind": lambda: ours_rsa.sign(sign.RSA_PKCS1_SHA256, message),
         "cryptography": lambda: theirs_rsa.sign(message, padding.PKCS1v15(), hashes.SHA256()),
     }
     yield "RSA-2048 PKCS#1 verify, 21 B", {
-        "pyrind": lambda: public_rsa.verify(rsa.verify.PKCS1_SHA256, message, signed_rsa),
+        "pyrind": lambda: public_rsa.verify(message, signed_rsa),
         "cryptography": lambda: their_public_rsa.verify(signed_rsa, message, padding.PKCS1v15(), hashes.SHA256()),
     }
 

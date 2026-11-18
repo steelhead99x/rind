@@ -103,71 +103,14 @@ fn state(key: &[u8; 32], nonce: &[u8; 16]) -> [u32; 16] {
     st
 }
 
-// On 32-bit portable targets a fully unrolled `rounds` is ~5 KiB and misses
-// a small instruction cache on every short XChaCha input. A 10-iteration
-// loop is the same 10 double-rounds. `rounds` itself stays unrolled so
-// `proofs/` and the ChaCha20 cipher path stay as they are. armv7's assembly
-// backend keeps that unrolled `hchacha20`: it was not the cache this loop
-// is for, and ALGORITHMS.md describes the unrolled rounds there. 64-bit
-// builds compile the rolled body only in tests, so ctgrind sees it; their
-// `hchacha20` keeps the output loop inside the function, which is what
-// Aeneas names `hchacha20_loop`.
-#[cfg(any(all(target_pointer_width = "32", rind_backend = "portable"), test))]
-#[inline(never)]
-fn hchacha20_double_round(st: &mut [u32]) {
-    // A separate function so LLVM cannot unroll ten copies of the
-    // inlined double-round into the caller (~5 KiB, same as `rounds`).
-    double_round(st);
-}
-
-#[cfg(any(all(target_pointer_width = "32", rind_backend = "portable"), test))]
-fn hchacha20_rounds(st: &mut [u32]) {
-    for _ in 0..10 {
-        hchacha20_double_round(st);
-    }
-}
-
-// The same word selection as the unrolled `hchacha20` below. It stays a
-// separate function here so the rolled body can call it, and it stays
-// written out inside the unrolled function so Aeneas still extracts
-// `hchacha20_loop`. Pulling that loop into this function changes the proof.
-#[cfg(any(all(target_pointer_width = "32", rind_backend = "portable"), test))]
-fn hchacha20_out(st: &[u32; 16]) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    for i in 0..8 {
-        let w = if i < 4 { st[i] } else { st[i + 8] };
-        out[4 * i..4 * (i + 1)].copy_from_slice(&w.to_le_bytes());
-    }
-    out
-}
-
-#[cfg(any(all(target_pointer_width = "32", rind_backend = "portable"), test))]
-#[inline(never)]
-fn hchacha20_rolled(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
-    let mut st = state(key, nonce);
-    hchacha20_rounds(&mut st);
-    hchacha20_out(&st)
-}
-
 /// HChaCha20 of `key` and `nonce`, for XChaCha20's subkey: the ChaCha20
 /// rounds without the final addition, keeping words 0-3 and 12-15, as
 /// draft-irtf-cfrg-xchacha-03 specifies.
-#[cfg(all(target_pointer_width = "32", rind_backend = "portable"))]
-#[inline(always)]
-pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
-    // `hchacha20_rolled` is the frame. Inlining this wrapper avoids a second.
-    hchacha20_rolled(key, nonce)
-}
-
-/// HChaCha20 of `key` and `nonce`, for XChaCha20's subkey: the ChaCha20
-/// rounds without the final addition, keeping words 0-3 and 12-15, as
-/// draft-irtf-cfrg-xchacha-03 specifies.
-#[cfg(not(all(target_pointer_width = "32", rind_backend = "portable")))]
+//
+// Indexes, as `state` does, so `proofs/` can prove it.
 pub(crate) fn hchacha20(key: &[u8; 32], nonce: &[u8; 16]) -> [u8; 32] {
     let mut st = state(key, nonce);
     rounds(&mut st);
-    // Keep the output loop in this function so Aeneas still extracts
-    // `hchacha20_loop`, which `proofs/` already proves.
     let mut out = [0u8; 32];
     for i in 0..8 {
         let w = if i < 4 { st[i] } else { st[i + 8] };
@@ -224,49 +167,6 @@ pub(crate) fn cipher(key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-
-    #[test]
-    fn rolled_hchacha_rounds_match_unrolled() {
-        let mut a = [0u32; 16];
-        let mut b = [0u32; 16];
-        for i in 0..16 {
-            a[i] = 0x9e37_79b9u32.wrapping_mul(i as u32 + 1);
-            b[i] = a[i];
-        }
-        for _ in 0..10 {
-            double_round(&mut a);
-        }
-        rounds(&mut b);
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn rolled_hchacha_matches_rounds() {
-        // The key is the secret. Mark it, run the rolled body (what 32-bit
-        // `hchacha20` calls, and what 64-bit builds compile only in tests),
-        // and compare with unrolled `rounds` plus the same output selection.
-        let key = [
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
-            0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
-            0x1c, 0x1d, 0x1e, 0x1f,
-        ];
-        let nonce: [u8; 16] = [
-            0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x4a, 0x00, 0x00, 0x00, 0x00, 0x31, 0x41,
-            0x59, 0x27,
-        ];
-        let mut st = state(&key, &nonce);
-        rounds(&mut st);
-        // Words 0-3 and 12-15, written out so this expected value is not a
-        // third copy of `hchacha20_out` or of the loop inside `hchacha20`.
-        let words = [st[0], st[1], st[2], st[3], st[12], st[13], st[14], st[15]];
-        let mut expected = [0u8; 32];
-        for (i, w) in words.into_iter().enumerate() {
-            expected[4 * i..4 * i + 4].copy_from_slice(&w.to_le_bytes());
-        }
-        crate::low::ct::secret_slice(&key);
-        let got = crate::low::ct::into_public(hchacha20_rolled(&key, &nonce));
-        assert_eq!(got, expected);
-    }
 
     #[test]
     fn hchacha_test_vectors() {

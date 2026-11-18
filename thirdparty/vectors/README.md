@@ -22,11 +22,8 @@ share.
 `rfc9180/test-vectors.json` holds [RFC 9180]'s HPKE vectors, from the
 CFRG draft's repository at the revision `admin/sync-vectors` pins: the base
 mode's, one per line, for the KEMs rind offers. The revision in
-[hpkewg/hpke] repeats them unchanged, and adds an appendix of edge-case
-vectors (rejection sampling in `DeriveKeyPair`, and empty and zero-byte
-inputs) in Markdown only: `rfc9180/edge-cases.md` is that appendix as
-published, from the draft at the revision `admin/sync-vectors` pins, and
-rind's tests parse it. They are IETF contributions, under [BCP 78].
+[hpkewg/hpke] repeats them unchanged. They are IETF contributions, under
+[BCP 78].
 
 `rfc9380/` holds [RFC 9380]'s hash-to-curve vectors, its Appendix J and K,
 from the CFRG draft's `poc/vectors` at the revision `admin/sync-vectors`

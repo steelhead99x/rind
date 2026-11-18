@@ -25,7 +25,6 @@
     unused_qualifications
 )]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-#![cfg_attr(target_arch = "xtensa", feature(asm_experimental_arch))]
 
 /// Low level operations.
 ///

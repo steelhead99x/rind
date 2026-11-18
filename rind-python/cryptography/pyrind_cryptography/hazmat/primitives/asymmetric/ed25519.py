@@ -2,7 +2,8 @@
 
 import abc
 
-from pyrind import ed25519 as _ed25519
+from pyrind import signature as _signature
+from pyrind.signature import verify as _verify
 
 from pyrind_cryptography.hazmat.primitives import _keys
 from pyrind_cryptography.hazmat.primitives.serialization import _ssh
@@ -21,7 +22,7 @@ class Ed25519PublicKey(metaclass=abc.ABCMeta):
         if len(memoryview(data).cast("B")) != 32:
             raise ValueError("An Ed25519 public key is 32 bytes long")
         with _keys.loading():
-            return Ed25519PublicKey(_ed25519.PublicKey(data))
+            return Ed25519PublicKey(_signature.PublicKey(_verify.ED25519, data))
 
     def public_bytes(self, encoding, format):
         """Writes the key as `encoding` and `format`."""
@@ -60,7 +61,7 @@ class Ed25519PrivateKey(metaclass=abc.ABCMeta):
     @classmethod
     def generate(cls):
         """Generates a key."""
-        return Ed25519PrivateKey(_ed25519.KeyPair.generate())
+        return Ed25519PrivateKey(_signature.Ed25519KeyPair.generate())
 
     @classmethod
     def from_private_bytes(cls, data):
@@ -69,7 +70,7 @@ class Ed25519PrivateKey(metaclass=abc.ABCMeta):
         if len(memoryview(data).cast("B")) != 32:
             raise ValueError("An Ed25519 private key is 32 bytes long")
         with _keys.loading():
-            return Ed25519PrivateKey(_ed25519.KeyPair.from_seed(data))
+            return Ed25519PrivateKey(_signature.Ed25519KeyPair.from_seed(data))
 
     def public_key(self):
         """The key's public key."""

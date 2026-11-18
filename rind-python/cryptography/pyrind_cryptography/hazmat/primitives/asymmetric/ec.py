@@ -4,9 +4,9 @@ import abc
 
 import pyrind
 from pyrind import agreement as _agreement
-from pyrind import ecdsa as _ecdsa
-from pyrind.ecdsa import sign as _sign
-from pyrind.ecdsa import verify as _verify
+from pyrind import signature as _signature
+from pyrind.signature import sign as _sign
+from pyrind.signature import verify as _verify
 
 from pyrind_cryptography import _der
 from pyrind_cryptography.exceptions import _Reasons, unsupported
@@ -61,21 +61,21 @@ _CURVE_TYPES["prime192v1"] = SECP192R1
 _CURVE_TYPES["prime256v1"] = SECP256R1
 
 # Each curve rind has: its algorithms, the field prime and `b` for
-# decompressing points (`a` is -3 on all three), and its SSH name.
+# decompressing points (`a` is -3 on all three), its OID, and its SSH name.
 _RIND = {
     "secp256r1": (
-        _sign.P256_SHA256_ASN1, _agreement.ECDH_P256, 2**256 - 2**224 + 2**192 + 2**96 - 1,
-        0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B, b"nistp256",
+        _sign.ECDSA_P256_SHA256_ASN1, _agreement.ECDH_P256, 2**256 - 2**224 + 2**192 + 2**96 - 1,
+        0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B, "1.2.840.10045.3.1.7", b"nistp256",
     ),
     "secp384r1": (
-        _sign.P384_SHA384_ASN1, _agreement.ECDH_P384, 2**384 - 2**128 - 2**96 + 2**32 - 1,
+        _sign.ECDSA_P384_SHA384_ASN1, _agreement.ECDH_P384, 2**384 - 2**128 - 2**96 + 2**32 - 1,
         0xB3312FA7E23EE7E4988E056BE3F82D19181D9C6EFE8141120314088F5013875AC656398D8A2ED19D2A85C8EDD3EC2AEF,
-        b"nistp384",
+        "1.3.132.0.34", b"nistp384",
     ),
     "secp521r1": (
-        _sign.P521_SHA512_ASN1, _agreement.ECDH_P521, 2**521 - 1,
+        _sign.ECDSA_P521_SHA512_ASN1, _agreement.ECDH_P521, 2**521 - 1,
         0x0051953EB9618E1C9A1F929A21A0B68540EEA2DA725B99B315F3B8B489918EF109E156193951EC7E937B1652C0BD3BB1BF073573DF883D2C34F1EF451FD46B503F00,
-        b"nistp521",
+        "1.3.132.0.35", b"nistp521",
     ),
 }
 _OIDS = {
@@ -86,15 +86,15 @@ _OIDS = {
 
 # The ECDSA algorithm rind verifies a curve and hash with.
 _VERIFY = {
-    ("secp256r1", "sha256"): _verify.P256_SHA256_ASN1,
-    ("secp256r1", "sha384"): _verify.P256_SHA384_ASN1,
-    ("secp256r1", "sha512"): _verify.P256_SHA512_ASN1,
-    ("secp384r1", "sha256"): _verify.P384_SHA256_ASN1,
-    ("secp384r1", "sha384"): _verify.P384_SHA384_ASN1,
-    ("secp384r1", "sha512"): _verify.P384_SHA512_ASN1,
-    ("secp521r1", "sha256"): _verify.P521_SHA256_ASN1,
-    ("secp521r1", "sha384"): _verify.P521_SHA384_ASN1,
-    ("secp521r1", "sha512"): _verify.P521_SHA512_ASN1,
+    ("secp256r1", "sha256"): _verify.ECDSA_P256_SHA256_ASN1,
+    ("secp256r1", "sha384"): _verify.ECDSA_P256_SHA384_ASN1,
+    ("secp256r1", "sha512"): _verify.ECDSA_P256_SHA512_ASN1,
+    ("secp384r1", "sha256"): _verify.ECDSA_P384_SHA256_ASN1,
+    ("secp384r1", "sha384"): _verify.ECDSA_P384_SHA384_ASN1,
+    ("secp384r1", "sha512"): _verify.ECDSA_P384_SHA512_ASN1,
+    ("secp521r1", "sha256"): _verify.ECDSA_P521_SHA256_ASN1,
+    ("secp521r1", "sha384"): _verify.ECDSA_P521_SHA384_ASN1,
+    ("secp521r1", "sha512"): _verify.ECDSA_P521_SHA512_ASN1,
 }
 _SIGN_HASH = {"secp256r1": "sha256", "secp384r1": "sha384", "secp521r1": "sha512"}
 
@@ -223,7 +223,7 @@ class EllipticCurvePrivateNumbers:
             raise ValueError("Invalid EC key.")
         public_key = self._public_numbers.public_key()
         with _keys.loading():
-            key_pair = _ecdsa.KeyPair.from_scalar_and_public_key(
+            key_pair = _signature.EcdsaKeyPair.from_scalar_and_public_key(
                 sign, self._private_value.to_bytes(width, "big"), public_key._point
             )
         return EllipticCurvePrivateKey(curve, key_pair)
@@ -239,7 +239,7 @@ class EllipticCurvePrivateNumbers:
 
 def _decompress(curve, point):
     """The uncompressed form of the compressed point `point`, which is public, so plain integer arithmetic serves."""
-    _, _, p, b, _ = _rind(curve)
+    _, _, p, b, _, _ = _rind(curve)
     width = _width(curve)
     if len(point) != 1 + width:
         raise ValueError("Invalid EC key.")
@@ -269,7 +269,7 @@ class EllipticCurvePublicKey(metaclass=abc.ABCMeta):
         """Loads the uncompressed point `point` on `curve`, refusing one off the curve."""
         _rind(curve)
         with _keys.loading():
-            key = _ecdsa.PublicKey(_VERIFY[curve.name, _SIGN_HASH[curve.name]], point)
+            key = _signature.PublicKey(_VERIFY[curve.name, _SIGN_HASH[curve.name]], point)
         public_key = EllipticCurvePublicKey(curve, point)
         public_key._verifiers[_SIGN_HASH[curve.name]] = key
         return public_key
@@ -305,8 +305,9 @@ class EllipticCurvePublicKey(metaclass=abc.ABCMeta):
         return EllipticCurvePublicNumbers(x, y, self._curve)
 
     def _spki(self):
-        # Each way to make a key loads its curve's own verifier first.
-        return self._verifiers[_SIGN_HASH[self._curve.name]].to_spki()
+        oid = _rind(self._curve)[4]
+        algorithm = _der.sequence(_der.encode(_der.OID, _der.encode_oid("1.2.840.10045.2.1")), _der.encode(_der.OID, _der.encode_oid(oid)))
+        return _der.spki(algorithm, self._point)
 
     def _encode_point(self, compressed):
         if not compressed:
@@ -315,7 +316,7 @@ class EllipticCurvePublicKey(metaclass=abc.ABCMeta):
         return bytes([2 | self._point[-1] & 1]) + self._point[1 : 1 + width]
 
     def _openssh(self):
-        name = _rind(self._curve)[4]
+        name = _rind(self._curve)[5]
         kind = b"ecdsa-sha2-" + name
         return _ssh.encode_public(kind, _ssh.string(name) + _ssh.string(self._point))
 
@@ -332,7 +333,7 @@ class EllipticCurvePublicKey(metaclass=abc.ABCMeta):
                 algorithm = _VERIFY[self._curve.name, hash_name]
             except KeyError:
                 raise unsupported(f"ECDSA on {self._curve.name} with {hash_name}", _Reasons.UNSUPPORTED_HASH) from None
-            key = self._verifiers[hash_name] = _ecdsa.PublicKey(algorithm, self._point)
+            key = self._verifiers[hash_name] = _signature.PublicKey(algorithm, self._point)
         with _keys.verifying():
             key.verify(data, signature)
 
@@ -411,7 +412,7 @@ class EllipticCurvePrivateKey(metaclass=abc.ABCMeta):
 
 def generate_private_key(curve, backend=None):
     """Generates a key on `curve`."""
-    return EllipticCurvePrivateKey(curve, _ecdsa.KeyPair.generate(_rind(curve)[0]))
+    return EllipticCurvePrivateKey(curve, _signature.EcdsaKeyPair.generate(_rind(curve)[0]))
 
 
 def derive_private_key(private_value, curve, backend=None):
@@ -426,7 +427,7 @@ def derive_private_key(private_value, curve, backend=None):
     scalar = private_value.to_bytes(_width(curve), "big")
     with _keys.loading():
         point = bytes(_agreement.PrivateKey.from_scalar(ecdh, scalar).public_key())
-        return EllipticCurvePrivateKey(curve, _ecdsa.KeyPair.from_scalar_and_public_key(sign, scalar, point))
+        return EllipticCurvePrivateKey(curve, _signature.EcdsaKeyPair.from_scalar_and_public_key(sign, scalar, point))
 
 
 __all__ = [

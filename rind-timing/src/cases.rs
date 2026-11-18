@@ -18,8 +18,7 @@ use std::sync::OnceLock;
 
 use rind::key_wrap::{self, Mode};
 use rind::{
-    aead, agreement, cipher, constant_time, digest, ecdsa, ed25519, hkdf, hmac, kem, oprf, pbkdf2,
-    rsa,
+    aead, agreement, cipher, constant_time, digest, ecdsa, ed25519, hkdf, hmac, kem, pbkdf2, rsa,
 };
 
 use crate::dudect::{Classes, Config, Report, classes, measure, measure_built};
@@ -103,7 +102,6 @@ pub fn all() -> Vec<Case> {
     aead_cases(&mut cases);
     cipher_cases(&mut cases);
     agreement_cases(&mut cases);
-    oprf_cases(&mut cases);
     kem_cases(&mut cases);
     rsa_cases(&mut cases);
     signature_cases(&mut cases);
@@ -480,73 +478,6 @@ fn agreement_cases(cases: &mut Vec<Case>) {
                 measure(config, &peers, |peer| key.agree(peer))
             },
         ));
-    }
-}
-
-/// Each suite's secrets: the server key, as `Evaluate` and `BlindEvaluate`
-/// take it, and VOPRF's proof with it, and the client's input, as `Blind`
-/// and `Evaluate` hash it. The blind and the proof's nonce are drawn from
-/// the system on each call, so both classes vary them alike.
-fn oprf_cases(cases: &mut Vec<Case>) {
-    use oprf::voprf;
-
-    for (name, suite) in [
-        ("ristretto255", &oprf::RISTRETTO255_SHA512),
-        ("p256", &oprf::P256_SHA256),
-        ("p384", &oprf::P384_SHA384),
-        ("p521", &oprf::P521_SHA512),
-    ] {
-        let scalar = move || {
-            let key = oprf::ServerKey::generate(suite).unwrap();
-            key.to_scalar().as_ref().to_vec()
-        };
-        let blinded = move || {
-            let (_, blinded) = oprf::Blind::new(suite, MESSAGE).unwrap();
-            blinded.as_ref().to_vec()
-        };
-
-        cases.push(case(format!("oprf/{name}/evaluate-key"), move |config| {
-            let scalars = classes(VALUES, fixed(scalar()), scalar);
-            let new = |s: &Vec<u8>| oprf::ServerKey::from_scalar(suite, s).unwrap();
-            measure_built(config, &scalars, new, |key| key.evaluate(MESSAGE))
-        }));
-        cases.push(case(format!("oprf/{name}/evaluate-input"), move |config| {
-            let key = oprf::ServerKey::generate(suite).unwrap();
-            measure(config, &secrets(32), |input| key.evaluate(input))
-        }));
-        cases.push(case(
-            format!("oprf/{name}/blind-evaluate-key"),
-            move |config| {
-                let blinded = blinded();
-                let scalars = classes(VALUES, fixed(scalar()), scalar);
-                let new = |s: &Vec<u8>| oprf::ServerKey::from_scalar(suite, s).unwrap();
-                measure_built(config, &scalars, new, |key| key.blind_evaluate(&blinded))
-            },
-        ));
-        cases.push(case(format!("oprf/{name}/blind-input"), move |config| {
-            measure(config, &secrets(32), |input| oprf::Blind::new(suite, input))
-        }));
-        cases.push(case(
-            format!("voprf/{name}/evaluate-input"),
-            move |config| {
-                let key = voprf::ServerKey::generate(suite).unwrap();
-                measure(config, &secrets(32), |input| key.evaluate(input))
-            },
-        ));
-        cases.push(case(
-            format!("voprf/{name}/blind-evaluate-key"),
-            move |config| {
-                let blinded = blinded();
-                let scalars = classes(VALUES, fixed(scalar()), scalar);
-                let new = |s: &Vec<u8>| voprf::ServerKey::from_scalar(suite, s).unwrap();
-                measure_built(config, &scalars, new, |key| key.blind_evaluate(&blinded))
-            },
-        ));
-        cases.push(case(format!("voprf/{name}/blind-input"), move |config| {
-            measure(config, &secrets(32), |input| {
-                voprf::Blind::new(suite, input)
-            })
-        }));
     }
 }
 

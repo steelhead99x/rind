@@ -1,9 +1,7 @@
 """Loading and writing keys: PEM and DER (PKCS#8, SubjectPublicKeyInfo, PKCS#1, and SEC1), and OpenSSH public keys."""
 
 from pyrind import agreement as _agreement
-from pyrind import ecdsa as _ecdsa
-from pyrind import ed25519 as _ed25519
-from pyrind import rsa as _rsa
+from pyrind import signature as _signature
 
 from pyrind_cryptography import _der
 from pyrind_cryptography.exceptions import _Reasons, unsupported
@@ -63,14 +61,14 @@ def _pkcs8(der):
     with _keys.loading():
         if algorithm == _RSA:
             rsa._check_private_size(_der.pkcs8_key(der))
-            return rsa.RSAPrivateKey(_rsa.KeyPair.from_pkcs8(der))
+            return rsa.RSAPrivateKey(_signature.RsaKeyPair.from_pkcs8(der))
         if algorithm == _EC:
             if parameter is None:
                 raise ValueError(_keys.DESERIALIZE)
             curve = ec._curve_for_oid(parameter)
-            return ec.EllipticCurvePrivateKey(curve, _ecdsa.KeyPair.from_pkcs8(ec._rind(curve)[0], der))
+            return ec.EllipticCurvePrivateKey(curve, _signature.EcdsaKeyPair.from_pkcs8(ec._rind(curve)[0], der))
         if algorithm == _ED25519:
-            return ed25519.Ed25519PrivateKey(_ed25519.KeyPair.from_pkcs8(der))
+            return ed25519.Ed25519PrivateKey(_signature.Ed25519KeyPair.from_pkcs8(der))
         if algorithm == _X25519:
             return x25519.X25519PrivateKey(_agreement.PrivateKey.from_pkcs8(_agreement.X25519, der))
     _unsupported_type(algorithm)
@@ -85,14 +83,14 @@ def _sec1(der, items):
     if curve is None:
         raise ValueError(_keys.DESERIALIZE)
     with _keys.loading():
-        return ec.EllipticCurvePrivateKey(curve, _ecdsa.KeyPair.from_sec1(ec._rind(curve)[0], der))
+        return ec.EllipticCurvePrivateKey(curve, _signature.EcdsaKeyPair.from_sec1(ec._rind(curve)[0], der))
 
 
 def _pkcs1_private(der):
     rsa = _modules()[2]
     rsa._check_private_size(der)
     with _keys.loading():
-        return rsa.RSAPrivateKey(_rsa.KeyPair.from_pkcs1(der))
+        return rsa.RSAPrivateKey(_signature.RsaKeyPair.from_pkcs1(der))
 
 
 def _private_der(der):
@@ -120,7 +118,7 @@ def _spki(der):
             ec._rind(curve)
             return ec.EllipticCurvePublicKey.from_encoded_point(curve, _der.spki_key(der))
         if algorithm == _ED25519:
-            return ed25519.Ed25519PublicKey(_ed25519.PublicKey.from_spki(der))
+            return ed25519.Ed25519PublicKey(_signature.PublicKey.from_spki(_signature.verify.ED25519, der))
         if algorithm == _X25519:
             return x25519.X25519PublicKey(_agreement.PublicKey.from_spki(_agreement.X25519, der))
     _unsupported_type(algorithm)
@@ -128,7 +126,7 @@ def _spki(der):
 
 def _pkcs1_public(der):
     rsa = _modules()[2]
-    return rsa.RSAPublicKey._from_pkcs1(der)
+    return rsa.RSAPublicKey._from_spki(_der.spki(rsa._ALGORITHM, der))
 
 
 def _public_der(der):

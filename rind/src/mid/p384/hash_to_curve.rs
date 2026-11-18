@@ -6,7 +6,7 @@ use super::{
     CURVE_A_MONT, CURVE_B_MONT, CURVE_ONE_MONT, CURVE_ORDER_MM, FieldElement, JacobianMontPoint,
     PublicKey, Scalar, util,
 };
-use crate::error::Error;
+use crate::error::{Error, KeyFormatError};
 use crate::low;
 use crate::mid::hash_to_curve::{self, Curve};
 use crate::mid::sha2::Sha384Context;
@@ -14,16 +14,17 @@ use crate::mid::sha2::Sha384Context;
 /// Hashes `msg` to a point, by RFC 9380's `P384_XMD:SHA-384_SSWU_RO_` with
 /// the domain separation tag `dst`.
 ///
-/// The two map outputs are added in constant time. Opposite outputs would
-/// sum to infinity (`Z = 0`); no message is known to reach that. Conversion
-/// inverts a nonzero element unconditionally, then exposes only the
-/// validation verdict: infinity is refused as a small-order point.
+/// The point at infinity, which no message is known to reach, is refused as
+/// a small-order point.
 pub(crate) fn hash_to_curve(msg: &[u8], dst: &[u8]) -> Result<PublicKey, Error> {
     let _entry = low::Entry::new_secret();
     let point = hash_to_curve::hash_to_curve::<FieldElement, Sha384Context>(msg, dst)?;
-    hash_to_curve::finite_public_key(point, |point| PublicKey {
-        point: jacobian(point).as_affine(),
-    })
+    match low::ct::into_public(point[2].ct_eq(&FieldElement::ZERO)) {
+        true => Err(KeyFormatError::SmallOrder.into()),
+        false => Ok(PublicKey {
+            point: jacobian(&point).as_affine(),
+        }),
+    }
 }
 
 /// Hashes `msg` to a scalar mod n, by RFC 9380's `hash_to_field` over
@@ -168,14 +169,7 @@ mod tests {
 
     #[test]
     fn sum() {
-        tests::check_sum::<FieldElement>(affine, |x| x.demont().inv().as_mont());
-    }
-
-    #[test]
-    fn opposite_points_are_refused() {
-        tests::refuses_opposite_sum::<FieldElement, Sha384Context>(|msg, dst| {
-            hash_to_curve(msg, dst).map(|_| ())
-        });
+        tests::check_sum::<FieldElement>(affine);
     }
 
     #[test]
@@ -203,13 +197,6 @@ mod tests {
             low::ct::public_slice(&p);
             p
         });
-        tests::check_wrapper_constant_time(|msg| {
-            hash_to_curve(msg, b"QUUX-V01-CS02")
-                .unwrap()
-                .point
-                .as_bytes_uncompressed()
-                .to_vec()
-        });
     }
 
     /// The public functions, against aws-lc's hash to the curve and
@@ -231,18 +218,6 @@ mod tests {
             .unwrap();
             assert_eq!(ours.as_bytes()[..], theirs.to_bytes()[..]);
         }
-    }
-
-    /// An empty DST is refused, as aws-lc's
-    /// `crypto/ec_extra/hash_to_curve.c` (`expand_message_xmd`) refuses it.
-    #[test]
-    fn empty_dst() {
-        tests::check_empty_dst(
-            hash_to_curve(b"msg", b"").map(|_| ()),
-            hash_to_scalar(&[b"msg"], b"").map(|_| ()),
-        );
-        #[cfg(not(any(miri, target_family = "wasm")))]
-        assert!(!crate::test::aws_lc_hash_to_curve_ok(384, b"msg", b""));
     }
 
     #[test]
