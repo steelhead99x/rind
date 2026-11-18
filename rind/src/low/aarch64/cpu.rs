@@ -296,7 +296,8 @@ fn detect_wide_once() -> bool {
 /// `HWCAP_CPUID`; the kernel emulates that read, so detection makes no
 /// system call and opens no file, and a seccomp filter that kills `open`
 /// cannot fire here. A kernel without `HWCAP_CPUID` (before Linux 4.11),
-/// Android (`target_os` is not `linux`), Windows on ARM, and FreeBSD never
+/// Android (`target_os` is not `linux`), Windows on ARM, FreeBSD, and a
+/// build without `std` (`rind_std` unset, which has no `getauxval`) never
 /// see a part, so they stay on `_alt` rather than guessing a narrow core.
 ///
 /// This is the read aws-lc makes (`crypto/fipsmodule/cpucap/cpu_aarch64_linux.c`
@@ -306,7 +307,7 @@ fn detect_wide_once() -> bool {
 /// follows that core and is then cached; both schedules are correct and
 /// constant time on every core, so only speed depends on it.
 fn detect_wide_multiplier() -> bool {
-    #[cfg(target_os = "linux")]
+    #[cfg(all(rind_std, target_os = "linux"))]
     {
         // A debug build, or a release one with `--cfg rind_cpu_disable`, can
         // name a fixture instead of the host's register. Release builds and
@@ -319,7 +320,7 @@ fn detect_wide_multiplier() -> bool {
         }
         read_midr().is_none_or(wide_from_midr)
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(all(rind_std, target_os = "linux")))]
     true
 }
 
@@ -327,6 +328,7 @@ fn detect_wide_multiplier() -> bool {
 /// Cortex-A76 r4p1, a Neoverse V1 r1p1, or a kernel without `HWCAP_CPUID`.
 /// Not in the FIPS module, where no variable names the part.
 #[cfg(all(
+    rind_std,
     target_os = "linux",
     any(debug_assertions, rind_cpu_disable),
     not(rind_fips)
@@ -343,7 +345,7 @@ fn midr_fixture() -> Option<Option<u64>> {
 
 /// `MIDR_EL1`, or `None` when the kernel does not emulate EL0 reads of the
 /// ID registers.
-#[cfg(target_os = "linux")]
+#[cfg(all(rind_std, target_os = "linux"))]
 fn read_midr() -> Option<u64> {
     // SAFETY: `getauxval` reads the auxiliary vector the kernel passed at
     // exec. It makes no system call.
@@ -370,7 +372,7 @@ fn read_midr() -> Option<u64> {
 /// The implementer is bits 31:24 and the part number bits 15:4. Variant,
 /// architecture, and revision do not change the multiplier, so they are
 /// ignored.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(all(rind_std, target_os = "linux"), test))]
 fn wide_from_midr(midr: u64) -> bool {
     !narrow_part((midr >> 24) & 0xff, (midr >> 4) & 0xfff)
 }
@@ -388,7 +390,7 @@ fn wide_from_midr(midr: u64) -> bool {
 /// V2, V3, and Apple, and defaults to the narrow schedules. This crate
 /// defaults to `_alt`, and keeps N2 and Cobalt there because `_alt` was
 /// measured faster on N2.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(all(rind_std, target_os = "linux"), test))]
 fn narrow_part(implementer: u64, part: u64) -> bool {
     implementer == 0x41 && matches!(part, 0xd08 | 0xd0b | 0xd0c)
 }
