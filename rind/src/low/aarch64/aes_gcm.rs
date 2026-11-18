@@ -112,11 +112,8 @@ pub(crate) fn tagged_from<const ENC: bool>(
     cipher::<ENC>(key, &mut ghash, &y0, aad, cipher_inout);
     ghash.add(&lengths(aad.len(), cipher_inout.len()));
 
-    let mut tag = key.encrypt_block(&y0);
-    for (t, x) in tag.iter_mut().zip(ghash.into_bytes()) {
-        *t ^= x;
-    }
-    tag
+    let mask = u128::from_be_bytes(key.encrypt_block(&y0));
+    (mask ^ u128::from_be_bytes(ghash.into_bytes())).to_be_bytes()
 }
 
 /// The most AAD and message blocks [`short`] seals and opens, past which the

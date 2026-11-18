@@ -24,37 +24,42 @@ theorem scalarmuldouble_spec (_h : Runs) (_hd : RunsDouble) (k : Std.Array U64 4
   step*
 
 open Classical in
-/-- `verify` with a key whose point is `A`, a point of the group, and whose
-bytes are `vk.bytes`: RFC 8032's verification. -/
-theorem mid_verify_spec (h : Runs) (hd : RunsDouble) (hs : RunsSha512) (vk : mid.ed25519.VerifyingKey) (A : EdPoint)
-    (hA : edOnCurve A) (hp : pairNat vk.point.val = edModEncodePair A)
+/-- `verify_rind` with the point `A`, a point of the group, and the key's
+bytes `vk.bytes`: RFC 8032's verification. -/
+theorem verify_rind_spec (h : Runs) (hd : RunsDouble) (hs : RunsSha512) (vk : mid.ed25519.VerifyingKey)
+    (pt : mid.ed25519.EdwardsPoint) (A : EdPoint) (hA : edOnCurve A) (hp : pairNat pt.val = edModEncodePair A)
     (sig : Std.Array U8 64#usize) (msg : Slice U8) (hm : msg.length + 64 < 2 ^ 64) :
-    mid.ed25519.VerifyingKey.verify vk sig msg ⦃ r =>
-      r = if ed25519Verifies A vk.bytes.val msg.val sig.val then
-        (.Ok () : core.result.Result Unit error.Error) else .Err .BadSignature ⦄ := by
-  unfold mid.ed25519.VerifyingKey.verify
+    mid.ed25519.VerifyingKey.verify_rind vk pt sig msg ⦃ b =>
+      b = decide (ed25519Verifies A vk.bytes.val msg.val sig.val) ⦄ := by
+  unfold mid.ed25519.VerifyingKey.verify_rind
   have hsig : sig.val.length = 64 := sig.property
   step*
-  simp only [r_post, core.result.Result.Ok.injEq] at *
-  have hs2 : s2.val = sig.val.drop 32 := by simp_all [Array.val_to_slice]
-  have hr : r_sig.val = sig.val.take 32 := by simp_all [Array.val_to_slice]
-  rw [hs2] at o_post
-  by_cases hS : leNat (sig.val.drop 32) < n25519
-  · simp only [hS, ↓reduceIte] at o_post
-    obtain ⟨S, rfl, hSv⟩ := o_post
-    simp only [core.option.Option.ok_or, core.result.Result.Insts.CoreOpsTry.branch]
-    step as ⟨s3, hs3⟩
-    step with ed25519_digest_spec hs r_sig s3 msg (by simp [Slice.length, hs3] at *; omega)
-      as ⟨k, hk⟩
-    step as ⟨k1, hk1⟩
-    step with negate_spec vk.point (by rw [hp]; exact (edModEncode_lt _).le) as ⟨ep, hep⟩
-    step as ⟨ep1, hep1⟩
-    have hR := hep1 (edNeg A) (edOnCurve_neg A hA) (by rw [hep, hp]; exact neg_decode A hA)
+  case hx => rw [hp]; exact (edModEncode_lt _).le
+  all_goals
+    have hs2 : s2.val = sig.val.drop 32 := by simp_all [Array.val_to_slice]
+    have hr : r_sig.val = sig.val.take 32 := by simp_all [Array.val_to_slice]
+    rw [hs2] at o_post
+  · have hS : ¬ leNat (sig.val.drop 32) < n25519 := by
+      intro hS
+      simp only [hS, ↓reduceIte] at o_post
+      obtain ⟨_, h1, _⟩ := o_post
+      simp_all
+    have hn : ¬ ed25519Verifies A vk.bytes.val msg.val sig.val := fun ⟨_, h, _⟩ => hS h
+    simp [hn]
+  · have ho : o = some s3 := by assumption
+    have hS : leNat (sig.val.drop 32) < n25519 := by
+      by_contra hS
+      simp only [hS, ↓reduceIte] at o_post
+      simp_all
+    simp only [hS, ↓reduceIte] at o_post
+    obtain ⟨S, hSo, hSv⟩ := o_post
+    rw [ho, Option.some.injEq] at hSo
+    subst hSo
+    have hR := ep1_post (edNeg A) (edOnCurve_neg A hA) (by rw [ep_post, hp]; exact neg_decode A hA)
     step with compress_point_spec ep1 _ hR as ⟨r2, hr2⟩
-    step as ⟨b, hb⟩
     have hr2l : r2.val.length = 32 := r2.property
     have hiff : r_sig.val = r2.val ↔ ed25519Verifies A vk.bytes.val msg.val sig.val := by
-      rw [hk1, hk, hSv, hs3, Array.val_to_slice] at hr2
+      rw [k1_post, k_post, hSv, s4_post, Array.val_to_slice] at hr2
       rw [ed25519Verifies, ← hr]
       constructor
       · intro he
@@ -62,17 +67,29 @@ theorem mid_verify_spec (h : Runs) (hd : RunsDouble) (hs : RunsSha512) (vk : mid
         rw [← hr2, he]
       · rintro ⟨-, -, he⟩
         exact leNat_inj _ _ (by simp [hr2l, r_sig_post]) (by rw [he, hr2])
-    rw [← hiff, ← hb]
-    split <;> simp_all
-  · simp only [hS, ↓reduceIte] at o_post
-    subst o_post
-    have hn : ¬ ed25519Verifies A vk.bytes.val msg.val sig.val := fun ⟨_, h, _⟩ => hS h
-    simp [core.option.Option.ok_or, core.result.Result.Insts.CoreOpsTry.branch,
-      core.result.Result.Insts.CoreOpsTry_traitFromResidualResult.from_residual, hn]
+    step as ⟨b, hb⟩
+    have hbv : b = true ↔ ed25519Verifies A vk.bytes.val msg.val sig.val := by
+      rw [← hiff]; exact hb
+    exact Bool.eq_iff_iff.mpr (by simpa using hbv)
+
+open Classical in
+/-- `verify` with a key that runs rind's own arithmetic on the point `A`, a
+point of the group, and whose bytes are `vk.bytes`: RFC 8032's verification. -/
+theorem mid_verify_spec (h : Runs) (hd : RunsDouble) (hs : RunsSha512) (vk : mid.ed25519.VerifyingKey) (A : EdPoint)
+    (hA : edOnCurve A) (hp : HoldsPoint vk A)
+    (sig : Std.Array U8 64#usize) (msg : Slice U8) (hm : msg.length + 64 < 2 ^ 64) :
+    mid.ed25519.VerifyingKey.verify vk sig msg ⦃ r =>
+      r = if ed25519Verifies A vk.bytes.val msg.val sig.val then
+        (.Ok () : core.result.Result Unit error.Error) else .Err .BadSignature ⦄ := by
+  obtain ⟨pt, hpath, hp⟩ := hp
+  unfold mid.ed25519.VerifyingKey.verify
+  rw [hpath]
+  step with verify_rind_spec h hd hs vk pt A hA hp sig msg hm as ⟨b, hb⟩
+  split <;> simp_all
 
 open Classical in
 theorem high_verify_spec (h : Runs) (hd : RunsDouble) (hs : RunsSha512) (vk : high.ed25519.Ed25519VerifyingKey) (A : EdPoint)
-    (hA : edOnCurve A) (hp : pairNat vk.point.val = edModEncodePair A) (sig msg : Slice U8)
+    (hA : edOnCurve A) (hp : HoldsPoint vk A) (sig msg : Slice U8)
     (hm : msg.length + 64 < 2 ^ 64) :
     high.ed25519.Ed25519VerifyingKey.verify vk sig msg ⦃ r =>
       r = if ed25519Verifies A (mid.ed25519.VerifyingKey.bytes vk).val msg.val sig.val then
@@ -107,7 +124,7 @@ theorem ed25519_key_pair_verify (h : Runs) (hd : RunsDouble) (hs : RunsSha512) (
       r = if ed25519Verifies (edPow edB (ed25519Scalar seed)) (ed25519PublicKey seed) msg.val sig.val then
         (.Ok () : core.result.Result Unit error.Error) else .Err .BadSignature ⦄ := by
   unfold high.signature.ed25519.KeyPair.public_key high.signature.ed25519.PublicKey.verify
-  obtain ⟨⟨-, -, -, hkb, hkpt⟩, hpub⟩ := hkp
+  obtain ⟨⟨-, -, hkb, hkpt⟩, hpub⟩ := hkp
   simp only [bind_ok]
   have hb : (mid.ed25519.VerifyingKey.bytes kp.«public»).val = ed25519PublicKey seed := by rw [hpub]; exact hkb
   rw [← hb]
@@ -119,7 +136,7 @@ bytes, refused if its y-coordinate is one of libsodium's small-order list,
 refused unless it encodes a point of the group, and otherwise its
 verification is RFC 8032's with that point, for messages under 2⁶⁴ - 64
 bytes. -/
-theorem ed25519_public_key_new (h : Runs) (hd : RunsDouble) (hs : RunsSha512) (key : Slice U8) :
+theorem ed25519_public_key_new (h : Runs) (hd : RunsDouble) (hs : RunsSha512) (hi : NoCurveIfma) (key : Slice U8) :
     high.signature.ed25519.PublicKey.new key ⦃ r =>
       if key.length ≠ 32 then r = .Err (.KeyRejected .WrongLength)
       else if leNat key.val % 2 ^ 255 ∈ edSmallOrderY then r = .Err (.KeyRejected .SmallOrder)
@@ -130,7 +147,7 @@ theorem ed25519_public_key_new (h : Runs) (hd : RunsDouble) (hs : RunsSha512) (k
               (.Ok () : core.result.Result Unit error.Error) else .Err .BadSignature ⦄
       else r = .Err (.KeyRejected .NotOnCurve) ⦄ := by
   unfold high.signature.ed25519.PublicKey.new
-  step with high_from_bytes_spec h hs key as ⟨r, hr⟩
+  step with high_from_bytes_spec h hs hi key as ⟨r, hr⟩
   split_ifs at hr ⊢ with hl hso hv
   · subst hr; simp [core.result.Result.map]
   · subst hr; simp [core.result.Result.map]

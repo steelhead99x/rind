@@ -21,4 +21,3 @@ Decided 2026-11-12 (maintainer, /quest-plan): ✅ announce the site with a new p
 ## Required
 
 - [Every rind path is proven, with the smallest trust base](/quest/m4/verified/README.md) - every hot tier of x86_64 and aarch64 proven, which is as far as the post's claim goes
-- [rind.kixel.ai gets a developer from a first visit to a first build](/quest/m2/site/README.md) - the site it announces
