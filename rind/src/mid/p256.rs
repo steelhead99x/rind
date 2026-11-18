@@ -1557,7 +1557,7 @@ mod tests {
     #[test]
     #[ignore = "timing, not a correctness test"]
     fn keygen_split() {
-        use std::hint::black_box;
+        use core::hint::black_box;
         use std::time::Instant;
 
         const CALLS: u32 = 2000;
