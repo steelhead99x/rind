@@ -57,7 +57,6 @@ impl Poly1305 {
     /// Hashes `blocks`, a whole number of 16-byte blocks, each with the
     /// 2^128 bit set.
     fn blocks(&mut self, blocks: &[u8]) {
-        debug_assert_eq!(blocks.len() % 16, 0);
         // SAFETY: `state` is the routine's state, which `new` initialised,
         // and `blocks` is `blocks.len()` readable bytes, of which it reads
         // the whole blocks. The token proves AVX-512 F, VL, and IFMA.
