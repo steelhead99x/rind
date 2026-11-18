@@ -8,13 +8,13 @@ The narrow multiplier path is limited and benchmarked before it ships, and test 
 
 Difficulty: 7/10 (estimate).
 
-Fork PR #82, head `81a1bc14`. Score 6/10. A partial diff is saved.
+Fork PR #82. Its body records the latest head and review score.
 
 - [x] Keep the test hooks out of the release FIPS build: `RIND_CPU_FORCE_*` and `RIND_TEST_MIDR` compile out under `rind_fips`; the denial stays, as for AES and SHA.
 - [x] Limit the narrow path to widths that are benchmarked: 16 words, and 32 words once measured on a Cortex-A76 (RSA-2048 verification at 0.57x and RSA-4096 signing at 0.52x of `bn_mul_mont`'s time).
 - [x] Skip the ctgrind narrow rerun on portable builds.
 - Leave the one-time detection out of the ct-qemu traces.
-- [x] `wide_multiplier()` is `#[doc(hidden)]`: rind-cpuid reports it with each benchmark, so it cannot be crate-private.
+- Decide whether `wide_multiplier()` stays a `#[doc(hidden)]` public item, as the PR has it now, or goes crate-private with rind-cpuid reading `AT_HWCAP` and `MIDR_EL1` itself, as its x86_64 build reads `cpuid`. This is the maintainer's call.
 - Expect a file conflict with upstream #813.
 
 Next: [#118](/quest/m2/118-narrow-vs-generic-tests.md).
