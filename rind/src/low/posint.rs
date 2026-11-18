@@ -165,6 +165,18 @@ impl<const N: usize> PosInt<N> {
         Ok(out)
     }
 
+    /// Writes the low `out.len()` bytes of the value to `out`, big-endian,
+    /// reading the same words whatever the value.
+    // Indexes, as `to_bytes` does, which Aeneas can translate.
+    #[cfg(rind_backend = "x86_64")]
+    pub(crate) fn to_bytes_fixed(&self, out: &mut [u8]) {
+        let len = out.len();
+        for i in 0..len {
+            let word = if i / 8 < N { self.words[i / 8] } else { 0 };
+            out[len - 1 - i] = (word >> (8 * (i % 8))) as u8;
+        }
+    }
+
     /// Like `to_bytes`, but guarantees a zero byte prefix.
     ///
     /// This means, if the result is used in an ASN.1 encoded integer, the encoding
@@ -447,7 +459,7 @@ impl<const N: usize> PosInt<N> {
 
     /// Computes each of `pair`, as [`Self::mod_exp`] does: two at once by
     /// aws-lc's dual RSAZ where it is the fastest, on x86_64 CPUs with
-    /// AVX-512 IFMA, for moduli of 16, 24, or 32 words each, and exponents
+    /// AVX-512 IFMA, for moduli of 24 or 32 words each, and exponents
     /// no wider.
     pub(crate) fn mod_exp_pair(pair: [ModExp<'_, N>; 2]) -> [Self; 2] {
         #[cfg(rind_backend = "x86_64")]
@@ -1007,12 +1019,12 @@ mod tests {
             n.words[k - 1] |= 1 << 63;
             n
         };
-        let moduli = [odd(16), odd(16), odd(15)];
+        let moduli = [odd(24), odd(24), odd(23)];
         let montifiers = moduli.each_ref().map(PosInt::montifier);
-        // Each below every modulus, as a 15-word value is.
-        let base = random(15);
-        // Exponents of 16 and 17 words.
-        let exponents = [random(16), random(17)];
+        // Each below every modulus, as a 23-word value is.
+        let base = random(23);
+        // Exponents of 24 and 25 words.
+        let exponents = [random(24), random(25)];
         let pair = |[i, j]: [usize; 2], [ei, ej]: [usize; 2]| {
             [(i, ei), (j, ej)].map(|(i, e)| ModExp {
                 base: &base,
@@ -1023,7 +1035,7 @@ mod tests {
             })
         };
 
-        let rsaz = low::RsazAvx512::check(16).is_some();
+        let rsaz = low::RsazAvx512::check(24).is_some();
         assert_eq!(
             PosInt::mod_exp_pair_rsaz(&pair([0, 1], [0, 0])).is_some(),
             rsaz

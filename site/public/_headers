@@ -1,0 +1,6 @@
+# Workers static assets add these to every response (site/deploy/wrangler.jsonc)
+# and serve no file named _headers. A <meta> Content-Security-Policy, which
+# astro.config.ts has each page carry, cannot say frame-ancestors, so it is a
+# header; a browser enforces both.
+/*
+  Content-Security-Policy: frame-ancestors 'none'

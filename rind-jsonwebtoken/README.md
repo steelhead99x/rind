@@ -6,6 +6,14 @@
 
 This crate provides an integration between [jsonwebtoken](https://github.com/Keats/jsonwebtoken) and [rind](https://github.com/kixel-ai/rind/), a fork of [Graviola](https://github.com/ctz/graviola/).
 
+Leave jsonwebtoken's `aws_lc_rs` and `rust_crypto` features off, and add this crate:
+
+```toml
+[dependencies]
+jsonwebtoken = "11"
+rind-jsonwebtoken = "11"
+```
+
 Use it like:
 
 ```rust
@@ -13,7 +21,14 @@ rind_jsonwebtoken::DEFAULT_PROVIDER.install_default().unwrap();
 ```
 
 And then use jsonwebtoken as normal.
+`rind_jsonwebtoken::DEFAULT_PROVIDER` stands in for jsonwebtoken's `crypto::aws_lc::DEFAULT_PROVIDER`.
 It signs and verifies HS256/384/512, ES256/384, RS256/384/512, PS256/384/512, and EdDSA, and implements the key utilities jsonwebtoken needs for JWKs.
+
+## What rind cannot back
+
+Nothing: it backs every algorithm jsonwebtoken names.
+
+## WebAssembly
 
 It builds for `wasm32-wasip2` and `wasm32-unknown-unknown`, the browser, where
 rind needs its JavaScript random source, `getrandom = { version = "0.4",

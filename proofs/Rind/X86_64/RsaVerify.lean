@@ -86,7 +86,7 @@ theorem pkcs1_verify_out_of_range (N e : Nat) (H : List Byte → List Byte) (di 
 /-- RSASSA-PKCS1-V1_5-VERIFY, given the message's hash and its `DigestInfo`
 prefix: `_verify_pkcs1` accepts exactly the signatures RFC 8017 does. -/
 theorem verify_pkcs1_core_spec (key : high.rsa.VerifyingKey) (hinv : PubKeyInv key)
-    (hP : MontProducts key.n.used.val) (signature digest_info hash : Slice U8)
+    (hP : MontProducts key.n.used.val) (hifma : NoIfma) (signature digest_info hash : Slice U8)
     (hT : digest_info.length + hash.length + 11 ≤ 128) (H : List Byte → List Byte) (M : List Byte)
     (hH : H M = bv hash.val) :
     high.rsa.VerifyingKey._verify_pkcs1 key signature digest_info hash ⦃ r =>
@@ -114,7 +114,7 @@ theorem verify_pkcs1_core_spec (key : high.rsa.VerifyingKey) (hinv : PubKeyInv k
     subst hr
     simp only [core.result.Result.map_err, core.result.Result.Insts.CoreOpsTry.branch, bind_ok]
     have hC : wordsNat (lowWords c c.used) = beNat signature.val := hcv
-    step with public_op_spec key hinv hP c hcu hcz as ⟨r2, hr2⟩
+    step with public_op_spec key hinv hP hifma c hcu hcz as ⟨r2, hr2⟩
     cases r2 with
     | Err e =>
       simp only at hr2
@@ -162,7 +162,7 @@ variable {Self C S : Type} {inst : high.hash.Hash Self C S} {H : List Byte → L
 /-- RSASSA-PKCS1-V1_5-VERIFY over a hash meeting `HashSpec`, as each
 `verify_pkcs1_*` runs it after taking the entry guard. -/
 theorem verify_pkcs1_hash_spec (hs : HashSpec inst H B L max Abs CAbs) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (signature message di : Slice U8)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma) (signature message di : Slice U8)
     (hm : message.length ≤ max) (hdi : di.length + L + 11 ≤ 128) :
     (do
       let hash ← high.hash.Hash.hash.default inst message
@@ -174,7 +174,7 @@ theorem verify_pkcs1_hash_spec (hs : HashSpec inst H B L max Abs CAbs) (key : hi
   rw [hs.hash_default] at hh
   step with hh as ⟨d, hdl, hdv⟩
   step with digest_as_ref_spec d as ⟨s, hsl, hsv⟩
-  exact verify_pkcs1_core_spec key hinv hP signature di s (by omega) H (bv message.val) (by rw [hsv, hdv])
+  exact verify_pkcs1_core_spec key hinv hP hifma signature di s (by omega) H (bv message.val) (by rw [hsv, hdv])
 
 end
 
@@ -200,7 +200,7 @@ theorem digestinfo_sha512 : bv high.pkcs1.DIGESTINFO_SHA512.val = digestInfoSha5
 
 /-- RSASSA-PKCS1-V1_5-VERIFY with SHA-256. -/
 theorem verify_pkcs1_sha256_spec (h : Runs) (hb : Sha256Blocks) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (signature message : Slice U8)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma) (signature message : Slice U8)
     (hm : message.length ≤ maxInput) :
     high.rsa.VerifyingKey.verify_pkcs1_sha256 key signature message ⦃ r =>
       r = .Ok () ↔ rsassaPkcs1v15Verify (wordsNat (lowWords key.n key.n.used)) key.e.val sha256.hash
@@ -208,12 +208,12 @@ theorem verify_pkcs1_sha256_spec (h : Runs) (hb : Sha256Blocks) (key : high.rsa.
   unfold high.rsa.VerifyingKey.verify_pkcs1_sha256
   step with new_public_spec h
   rw [← digestinfo_sha256.1]
-  exact verify_pkcs1_hash_spec (sha256_hashSpec hb) key hinv hP signature message _ hm
+  exact verify_pkcs1_hash_spec (sha256_hashSpec hb) key hinv hP hifma signature message _ hm
     (by rw [digestinfo_sha256.2]; norm_num)
 
 /-- RSASSA-PKCS1-V1_5-VERIFY with SHA-1. -/
 theorem verify_pkcs1_sha1_spec (h : Runs) (hb : Sha1Blocks) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (signature message : Slice U8)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma) (signature message : Slice U8)
     (hm : message.length ≤ maxInput) :
     high.rsa.VerifyingKey.verify_pkcs1_sha1 key signature message ⦃ r =>
       r = .Ok () ↔ rsassaPkcs1v15Verify (wordsNat (lowWords key.n key.n.used)) key.e.val sha1.hash
@@ -221,12 +221,12 @@ theorem verify_pkcs1_sha1_spec (h : Runs) (hb : Sha1Blocks) (key : high.rsa.Veri
   unfold high.rsa.VerifyingKey.verify_pkcs1_sha1
   step with new_public_spec h
   rw [← digestinfo_sha1.1]
-  exact verify_pkcs1_hash_spec (sha1_hashSpec hb) key hinv hP signature message _ hm
+  exact verify_pkcs1_hash_spec (sha1_hashSpec hb) key hinv hP hifma signature message _ hm
     (by rw [digestinfo_sha1.2]; norm_num)
 
 /-- RSASSA-PKCS1-V1_5-VERIFY with SHA-384. -/
 theorem verify_pkcs1_sha384_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (signature message : Slice U8)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma) (signature message : Slice U8)
     (hm : message.length ≤ maxInput) :
     high.rsa.VerifyingKey.verify_pkcs1_sha384 key signature message ⦃ r =>
       r = .Ok () ↔ rsassaPkcs1v15Verify (wordsNat (lowWords key.n key.n.used)) key.e.val sha384Bytes
@@ -234,12 +234,12 @@ theorem verify_pkcs1_sha384_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.Ve
   unfold high.rsa.VerifyingKey.verify_pkcs1_sha384
   step with new_public_spec h
   rw [← digestinfo_sha384.1]
-  exact verify_pkcs1_hash_spec (sha384_hashSpec hs) key hinv hP signature message _ hm
+  exact verify_pkcs1_hash_spec (sha384_hashSpec hs) key hinv hP hifma signature message _ hm
     (by rw [digestinfo_sha384.2]; norm_num)
 
 /-- RSASSA-PKCS1-V1_5-VERIFY with SHA-512. -/
 theorem verify_pkcs1_sha512_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (signature message : Slice U8)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma) (signature message : Slice U8)
     (hm : message.length ≤ maxInput) :
     high.rsa.VerifyingKey.verify_pkcs1_sha512 key signature message ⦃ r =>
       r = .Ok () ↔ rsassaPkcs1v15Verify (wordsNat (lowWords key.n key.n.used)) key.e.val sha512Bytes
@@ -247,7 +247,7 @@ theorem verify_pkcs1_sha512_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.Ve
   unfold high.rsa.VerifyingKey.verify_pkcs1_sha512
   step with new_public_spec h
   rw [← digestinfo_sha512.1]
-  exact verify_pkcs1_hash_spec (sha512_hashSpec hs) key hinv hP signature message _ hm
+  exact verify_pkcs1_hash_spec (sha512_hashSpec hs) key hinv hP hifma signature message _ hm
     (by rw [digestinfo_sha512.2]; norm_num)
 
 end rind.x86_64

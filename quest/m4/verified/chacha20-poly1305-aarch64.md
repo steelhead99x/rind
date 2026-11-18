@@ -14,4 +14,4 @@ ChaCha20-Poly1305, XChaCha20-Poly1305, and `cipher::ChaCha20` earn the ✓ on aa
 ## Required
 
 - [ChaCha20-Poly1305 on aarch64 runs pyca/verified-garbage's code where it is faster](/quest/m2/verified-garbage/chacha20-poly1305-aarch64.md) - VG's seal and open measured 0.60 to 0.92 of aws-lc's time; on each tier that switches, this quest keeps XChaCha20-Poly1305's glue and HChaCha20, which VG doesn't have, and `cipher::ChaCha20`; tiers that don't switch keep all of it
-- [cipher::ChaCha20 runs pyca/verified-garbage's code where it is faster](/quest/m2/verified-garbage/chacha20.md) - VG has a bare ChaCha20, not yet timed on aarch64; this quest drops `cipher::ChaCha20` only for the tiers that switch
+- [aarch64 cipher::ChaCha20 runs pyca/verified-garbage's code where it is faster](/quest/m2/verified-garbage/chacha20.md) - VG's bare ChaCha20 took 0.52 to 0.65 of rind's time on a Neoverse N2 from 1200 B but 1.22 at 32 B; this quest drops `cipher::ChaCha20` only for the lengths and tiers that switch

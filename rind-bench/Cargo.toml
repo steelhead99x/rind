@@ -63,9 +63,9 @@ spake2plus = "0.1"
 voprf = { version = "=0.6.0-pre.2", default-features = false, features = ["ristretto255-ciphersuite"] }
 vrf-rfc9381 = { version = "0.0.7", features = ["edwards25519", "p256"] }
 # pyca/verified-garbage, which is not on crates.io: pinned by commit, since
-# its generated assembly is checked in. `cpu-features-env` lets the nightly's
+# its generated assembly is checked in. `cpu-features-env` lets the weekly bench's
 # tiers deny it what they deny rind, through `VG_CPU_FEATURES`.
-verified-garbage = { git = "https://github.com/pyca/verified-garbage", rev = "d004ffaeb3c226c377a59f9f824386246d73ca5d", features = ["cpu-features-env"] }
+verified-garbage = { git = "https://github.com/pyca/verified-garbage", rev = "e7b0fe8a82b7777958e078573771d51415f105bb", features = ["cpu-features-env"] }
 x25519-dalek = { version = "3", features = ["getrandom"] }
 
 # Graviola supports only these.
