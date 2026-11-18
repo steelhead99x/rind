@@ -44,6 +44,11 @@ opaque low.x86_64.cpu.HaveSsse3 : Type
 opaque low.x86_64.cpu.HaveSha512 : Type
 opaque low.x86_64.cpu.HaveSse41 : Type
 
+/-- The tokens proving pyca/verified-garbage's ML-KEM-768 encapsulation, and
+its key generation and decapsulation, run here. -/
+opaque low.x86_64.mlkem768_vg.Encaps : Type
+opaque low.x86_64.mlkem768_vg.KeyPair : Type
+
 /-- MD5's chaining state, which no proof covers. -/
 opaque mid.md5.Md5State : Type
 
