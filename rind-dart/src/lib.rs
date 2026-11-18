@@ -100,20 +100,37 @@ fn run(f: impl FnOnce() -> Result<usize, Failure>) -> isize {
     }
 }
 
+/// Stops the process on a null pointer from the binding, which would
+/// otherwise be undefined behavior: a panic cannot unwind out of an
+/// `extern "C"` function, so it aborts, loudly, where the bug is.
+fn non_null<T>(ptr: *const T) {
+    assert!(
+        !ptr.is_null(),
+        "rind-dart: the binding passed a null pointer"
+    );
+}
+
 unsafe fn input<'a>(data: *const u8, len: usize) -> &'a [u8] {
     match len {
         0 => &[],
-        // SAFETY: the caller passes `len` readable bytes at `data`.
-        _ => unsafe { slice::from_raw_parts(data, len) },
+        _ => {
+            non_null(data);
+            // SAFETY: the caller passes `len` readable bytes at `data`,
+            // which is not null.
+            unsafe { slice::from_raw_parts(data, len) }
+        }
     }
 }
 
 unsafe fn output<'a>(data: *mut u8, len: usize) -> &'a mut [u8] {
     match len {
         0 => &mut [],
-        // SAFETY: the caller passes `len` writable bytes at `data`, which
-        // alias nothing else this call reads.
-        _ => unsafe { slice::from_raw_parts_mut(data, len) },
+        _ => {
+            non_null(data);
+            // SAFETY: the caller passes `len` writable bytes at `data`,
+            // which is not null and aliases nothing else this call reads.
+            unsafe { slice::from_raw_parts_mut(data, len) }
+        }
     }
 }
 
@@ -136,19 +153,22 @@ fn write(out: &mut [u8], bytes: &[u8]) -> Result<usize, Failure> {
 }
 
 unsafe fn handle<'a, T>(handle: *const T) -> &'a T {
-    // SAFETY: the caller passes a live handle of this type.
+    non_null(handle);
+    // SAFETY: the caller passes a live handle of this type, not null.
     unsafe { &*handle }
 }
 
 unsafe fn handle_mut<'a, T>(handle: *mut T) -> &'a mut T {
-    // SAFETY: the caller passes a live handle of this type, which nothing
-    // else uses during the call.
+    non_null(handle);
+    // SAFETY: the caller passes a live handle of this type, not null, which
+    // nothing else uses during the call.
     unsafe { &mut *handle }
 }
 
 /// Boxes `value` into the handle slot at `out`.
 unsafe fn store<T>(out: *mut *mut T, value: T) -> usize {
-    // SAFETY: the caller passes a writable slot.
+    non_null(out);
+    // SAFETY: the caller passes a writable slot, not null.
     unsafe { out.write(Box::into_raw(Box::new(value))) };
     0
 }
@@ -996,7 +1016,8 @@ pub unsafe extern "C" fn rind_dart_hmac_context_sign(
     out: *mut u8,
     out_len: usize,
 ) -> isize {
-    // SAFETY: a handle from `store`, which the caller gives up.
+    non_null(context);
+    // SAFETY: a handle from `store`, not null, which the caller gives up.
     let context = unsafe { Box::from_raw(context) };
     run(|| {
         // SAFETY: forwarded from the caller.
@@ -1826,5 +1847,43 @@ mod tests {
             rind_dart_agreement_public_key(0, 0, std::ptr::null(), 0, 2, std::ptr::null_mut(), 0)
         };
         assert_eq!(status, Status::Misuse as isize);
+    }
+
+    // A null pointer the binding should never pass stops the call before it
+    // is read, rather than being undefined behavior. Called directly here,
+    // the panic unwinds into the test; through an `extern "C"` entry it
+    // aborts.
+    #[test]
+    fn null_pointers_stop_the_call() {
+        let calls: [fn(); 5] = [
+            || {
+                // SAFETY: each null pointer is refused before it is read.
+                let _ = unsafe { input(std::ptr::null(), 1) };
+            },
+            || {
+                // SAFETY: as above.
+                let _ = unsafe { output(std::ptr::null_mut(), 1) };
+            },
+            || {
+                // SAFETY: as above.
+                let _ = unsafe { handle::<u8>(std::ptr::null()) };
+            },
+            || {
+                // SAFETY: as above.
+                let _ = unsafe { handle_mut::<u8>(std::ptr::null_mut()) };
+            },
+            || {
+                // SAFETY: as above.
+                let _ = unsafe { store::<u8>(std::ptr::null_mut(), 0) };
+            },
+        ];
+        for call in calls {
+            assert!(std::panic::catch_unwind(call).is_err());
+        }
+        // An empty slice takes any pointer, null included.
+        // SAFETY: length zero, so nothing is read or written.
+        assert!(unsafe { input(std::ptr::null(), 0) }.is_empty());
+        // SAFETY: as above.
+        assert!(unsafe { output(std::ptr::null_mut(), 0) }.is_empty());
     }
 }
