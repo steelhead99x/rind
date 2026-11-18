@@ -59,7 +59,6 @@ fn main() {
 
     println!(r#"cargo::rustc-check-cfg=cfg(rind_limb, values("32", "64"))"#);
     println!("cargo::rustc-check-cfg=cfg(rind_reg_asm)");
-    println!("cargo::rustc-check-cfg=cfg(rind_x86_64_none_dalek_scalar)");
 
     let arch = env::var("CARGO_CFG_TARGET_ARCH").expect("cargo sets the target arch");
     let little = env::var("CARGO_CFG_TARGET_ENDIAN").is_ok_and(|e| e == "little");
@@ -89,10 +88,9 @@ fn main() {
     // target features are enabled, for the default backend as well as for
     // an explicit `simd` or `avx512` cfg, so the target feature is the opt-in.
     if arch == "x86_64" && bare_metal && !sse2 && !dalek_backend_is_scalar() {
-        // Dalek is compiled before this crate, so its simd backend aborts
-        // in LLVM on this soft-float target and the `compile_error` below
-        // never runs. Fail here, where the message is visible.
-        println!("cargo::rustc-cfg=rind_x86_64_none_dalek_scalar");
+        // Dalek is compiled before this crate, so its simd backend aborts in
+        // LLVM before a `compile_error!` in the crate could run. Fail here,
+        // where the message is visible.
         panic!(
             "x86_64-unknown-none without SSE2 needs --cfg curve25519_dalek_backend=\"serial\" \
              or \"fiat\": dalek's default simd backend does not compile on this soft-float target"
