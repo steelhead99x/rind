@@ -4,9 +4,9 @@ Delete this file before the claim lands. It is notes for the next agent.
 
 Quest: [`quest/m4/fips/adapters.md`](https://github.com/kixel-ai/rind/blob/main/quest/m4/fips/adapters.md) on kixel-ai/rind `main` at `fdeaebc2`.
 
-Claim branch: `quest/m4/fips/adapters` on [steelhead99x/rind](https://github.com/steelhead99x/rind/tree/quest/m4/fips/adapters), commit `1f06a93ed49f944ba401b3a5fd276fa2c502e5cd` (`chore(quest): claim quest/m4/fips/adapters.md`, `Quest-Claim: e41b1d491235189d`). The commit is empty on top of `fdeaebc2`. `quest`'s hold check treats that fork branch as the claim. The draft PR on kixel-ai/rind was not opened from this environment: `quest start` got GitHub HTTP 403, and this run can open PRs only on steelhead99x/rind. Open it as a draft from <https://github.com/kixel-ai/rind/compare/main...steelhead99x:quest/m4/fips/adapters?expand=1> with title `FIPS builds of rind-rustls and rind-aws-lc-rs` and body `Claims [quest/m4/fips/adapters.md](https://github.com/kixel-ai/rind/blob/main/quest/m4/fips/adapters.md).`, then link the fork handoff PR from that body.
+Claim: [kixel-ai/rind#873](https://github.com/kixel-ai/rind/pull/873), draft, head `steelhead99x:quest/m4/fips/adapters` at `1f06a93ed49f944ba401b3a5fd276fa2c502e5cd` (`chore(quest): claim quest/m4/fips/adapters.md`, `Quest-Claim: e41b1d491235189d`). The commit is empty on top of `fdeaebc2`. Leave that PR a draft until `just ci` is green. Fork handoff: [steelhead99x/rind#144](https://github.com/steelhead99x/rind/pull/144).
 
-Do not merge this handoff into the quest branch. Implement on this branch, delete this file, and merge into `quest/m4/fips/adapters` with a merge commit only once the work is ready, so the claim fast-forwards. Leave the upstream PR a draft until `just ci` is green.
+Do not merge this handoff into the quest branch. Implement on this branch, delete this file, and merge into `quest/m4/fips/adapters` with a merge commit only once the work is ready, so [kixel-ai/rind#873](https://github.com/kixel-ai/rind/pull/873) fast-forwards.
 
 ## Done when
 
