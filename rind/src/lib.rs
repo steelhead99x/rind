@@ -43,15 +43,6 @@
 #[macro_use]
 extern crate alloc;
 
-// Without SSE2, dalek's default `simd` backend does not compile on this
-// soft-float target. `serial` and `fiat` do. build.rs sets the cfg when
-// the build did not name one of those.
-#[cfg(rind_x86_64_none_dalek_scalar)]
-compile_error!(
-    "x86_64-unknown-none without SSE2 needs `--cfg curve25519_dalek_backend=\"serial\"` \
-     or `\"fiat\"`: dalek's default simd backend does not compile on this soft-float target"
-);
-
 // The FIPS module's error state, its self-tests, and its DRBG use std
 // (`process::abort`, `thread_local`, `RwLock`). A bare-metal build stops
 // here with that reason.

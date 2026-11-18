@@ -115,36 +115,33 @@ qemu. iOS devices' code is only built.
   compiles rind again, so its JIT may turn a select into a branch.
   Bare-metal targets (`target_os = "none"`) build the library without std, on
   `alloc`: the program supplies a global allocator and a getrandom backend.
-  Every PR lints it, in debug and release
-  (`just bare-metal`), for `thumbv6m-none-eabi` and
+  `just check` lints them in debug and release (`just bare-metal`) whenever a
+  change reaches the portable or x86_64 backend: `thumbv6m-none-eabi` and
   `riscv32imc-unknown-none-elf`, which lack compare-and-swap and so keep no
-  reuse cache, for `thumbv7em-none-eabihf`, for `armv7a-none-eabi` and
-  `armv7r-none-eabihf`, for `aarch64-unknown-none` and
-  `aarch64-unknown-none-softfloat`, all on the portable backend, and for
-  `x86_64-unknown-none`. The aarch64 and 32-bit ARM assembly loads and stores
-  unaligned words, which these strict-align targets fault on when the MMU is
-  off or alignment checking is on, so bare metal does not build it. That target is soft-float and does not
-  enable SSE2, so the build stays on the portable backend until it passes
-  `-C target-feature=+sse,+sse2,-soft-float`, and
-  `--cfg curve25519_dalek_backend="serial"` or `"fiat"`. Dalek's default
-  `simd` backend does not compile on this soft-float target. The portable
-  backend also leaves out `stmxcsr`, which raises `#UD` when `CR4.OSFXSR`
-  is clear. SSE2 alone leaves soft-float set, and LLVM then aborts while
-  splitting vector results. Rustc warns that disabling soft-float this way
+  reuse cache, `thumbv7em-none-eabihf`, `armv7a-none-eabi`,
+  `armv7r-none-eabihf`, `aarch64-unknown-none`,
+  `aarch64-unknown-none-softfloat`, and `x86_64-unknown-none`. Every one but
+  `x86_64-unknown-none` runs the portable backend: the aarch64 and 32-bit ARM
+  assembly loads and stores unaligned words, which these strict-align targets
+  fault on when the MMU is off or alignment checking is on.
+  `x86_64-unknown-none` is soft-float and does not enable SSE2, so it stays on
+  the portable backend, which leaves out `stmxcsr` (that raises `#UD` when
+  `CR4.OSFXSR` is clear), and needs `--cfg curve25519_dalek_backend="serial"`
+  or `"fiat"`, since dalek's default `simd` backend does not compile there.
+  Built with `-C target-feature=+sse,+sse2,-soft-float`, it runs the x86_64
+  backend, which reads CPUID; the lint builds that too, so its `global_asm`
+  is assembled. SSE2 alone leaves soft-float set, and LLVM then aborts while
+  splitting vector results; rustc warns that clearing soft-float this way
   will become an error
   ([rust-lang/rust#116344](https://github.com/rust-lang/rust/issues/116344)).
-  With SSE2 and soft-float cleared it uses the x86_64 backend, which reads
-  CPUID. AVX, AVX2,
-  SHA512, and AVX-512 run only when those target features are enabled: XCR0
-  does not mean an interrupt saves YMM or ZMM, and this build does not
-  enable them. curve25519-dalek's default on x86_64 is its simd backend,
-  and the avx512 backend when `avx512ifma` and `avx512vl` are both enabled.
-  cpufeatures reports those features on this os only when they are target
-  features, so dalek uses YMM or ZMM only under that same opt-in. An explicit
-  `simd` or `avx512` cfg selects that same code. The SSE2 build is also
-  compiled, so its `global_asm` is assembled.
-  `Dit::hold` does nothing on these targets: there is no thread-local count, and these backends set
-  no CPU state there.
+  AVX, AVX2, SHA512, VAES, VPCLMULQDQ, and AVX-512 run only when the build
+  enables those target features, since XCR0 does not show that an interrupt
+  saves YMM or ZMM. curve25519-dalek follows the same opt-in: its default on
+  x86_64 is the simd backend, or avx512 when `avx512ifma` and `avx512vl` are
+  enabled, and cpufeatures reports AVX2 and AVX-512 on this os only when they
+  are target features. An explicit `simd` or `avx512` cfg selects the same
+  code. `Dit::hold` does nothing on these targets: there is no thread-local
+  count, and these backends set no CPU state there.
   The ESP32's Xtensa targets are tier 3, on Espressif's toolchain, so they
   are not part of that Nix lint. They use Espressif's 1.98.1.0, the release of
   the dev shell's rustc, since 1.97's Clippy does not know every lint rind
