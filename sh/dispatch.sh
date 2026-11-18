@@ -37,6 +37,12 @@ fi
 
 cd "$(git rev-parse --show-toplevel)"
 
+# Inside the dev shell, Cargo can still run a host's rustup rustfmt and clippy
+# from $CARGO_HOME/bin; sh/toolchain.sh stops before any check runs with them.
+if [[ -z "$query" && -n "${IN_RIND_DEV_SHELL:-}" && -z "${ALLOW_HOST_TOOLCHAIN:-}" ]]; then
+    sh/toolchain.sh
+fi
+
 changed=$(mktemp)
 trap 'rm -f "$changed"' EXIT
 
@@ -193,6 +199,9 @@ module gh '^(\.github/|sh/(alert|pins|release-check)\.sh$)' \
     tools='actionlint yq jq'
 module shell '' \
     tools='shellcheck'
+# The check above that Cargo's fmt and clippy are the shell's toolchain.
+module toolchain '^sh/toolchain\.sh$' \
+    tools='bash grep'
 module nix '' \
     tools='nixfmt' fix
 
@@ -564,6 +573,7 @@ step() {
             files 'sh/*.sh'
             run xargs -0 shellcheck <"$listed"
             ;;
+        check:toolchain) run sh/toolchain.sh --self-test ;;
         check:nix)
             files '*.nix'
             run xargs -0 nixfmt --check <"$listed"
