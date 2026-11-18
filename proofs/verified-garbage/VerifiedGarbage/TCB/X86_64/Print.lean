@@ -424,6 +424,14 @@ whose mnemonic, its first word, is among `mcdtMnemonics`. -/
 def Instr.mcdt (i : Instr) : Bool :=
   i.asm.any fun t => mcdtMnemonics.contains ((t.splitOn " ").headD "")
 
+/-- `test eax, eax` and a branch on `e` (`je`), after a call of `vg_mcdt_enter`:
+the branch is taken exactly when it returned 0 (ZF is set exactly when
+`eax`, its `u32` result, is 0), so that the code it skips runs only once it
+has returned 1 (`Printer.mcdtGuard`). -/
+def Instr.mcdtGuard : Instr → Cond → Bool
+  | .alu32 .test .rax (.reg .rax), .e => true
+  | _, _ => false
+
 def printer : Printer isa where
   instr := Instr.code
   branch c l := [s!"j{c.name} {l}"]
@@ -448,6 +456,7 @@ def printer : Printer isa where
   cannot move them, and with them its performance. -/
   funcAlign := [".p2align 6"]
   mcdt := Instr.mcdt
+  mcdtGuard := Instr.mcdtGuard
   unencodable
     | .leaSym .. => none
     | i => match i.memOps.filter (!·.dispOk) with

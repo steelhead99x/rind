@@ -39,4 +39,13 @@ def loadBytes (bytes : List U8) : BitVec 128 := leBytesToQuad32 (bytes.map (·.b
 def storeBytes (v : BitVec 128) : Std.Array Std.U8 16#usize :=
   Std.Array.from ((leQuad32ToBytes v).map fun b => ⟨b⟩) (by simp [leQuad32ToBytes])
 
+/-- Carry-less multiplication's first `k` partial products: `a` shifted left by
+each of `b`'s set bits below `k`, XORed. -/
+def clmulAux (a b : BitVec 64) : Nat → BitVec 128
+  | 0 => 0
+  | k + 1 => clmulAux a b k ^^^ (if b.getLsbD k then a.setWidth 128 <<< k else 0)
+
+/-- The carry-less product of two 64-bit values, `PCLMULQDQ`'s and `PMULL`'s. -/
+@[irreducible] def clmul (a b : BitVec 64) : BitVec 128 := clmulAux a b 64
+
 end rind.simd

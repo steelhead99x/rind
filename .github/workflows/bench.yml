@@ -91,10 +91,11 @@ jobs:
   # no phone or board, and it times the armv7 build natively too.
   #
   # A portable row denies both libraries what the slower path lacks: on
-  # aarch64, the crypto extension and the SHA-512 and SHA-3 instructions, as
-  # a Raspberry Pi 4 lacks them, and one row only the SHA-512 and SHA-3
-  # instructions, as a Cortex-A76 and a Neoverse N1 lack them, so rind runs
-  # its 4-way AES-GCM kernels, scalar SHA-512, and scalar Keccak; on armv7,
+  # aarch64, the crypto extension, the SHA-512 and SHA-3 instructions, and
+  # SVE2, as a Raspberry Pi 4 lacks them, and one row only the SHA-512 and
+  # SHA-3 instructions and SVE2, as a Cortex-A76 and a Neoverse N1 lack them,
+  # so rind runs its 4-way AES-GCM kernels, scalar SHA-512, scalar Keccak, and
+  # NEON ChaCha20-Poly1305; on armv7,
   # the crypto extension, which no ARMv7 core has, and which aws-lc's 32-bit
   # ARM detection has no variable to deny, so its build fixes its
   # capabilities to NEON alone with `OPENSSL_STATIC_ARMCAP`; on x86_64, what Sandy Bridge lacks: AVX2,
@@ -136,7 +137,7 @@ jobs:
             personality: linux64
             portable: true
             cpu: no-sha3
-            benches: --bench aes_gcm --bench sha2 --bench sha3 --bench hmac --bench hkdf --bench mlkem --bench mldsa
+            benches: --bench aes_gcm --bench chacha20poly1305 --bench xchacha20poly1305 --bench sha2 --bench sha3 --bench hmac --bench hkdf --bench mlkem --bench mldsa
           - target: armv7-unknown-linux-gnueabihf
             runner: ubuntu-24.04-arm
             personality: linux32
@@ -283,17 +284,17 @@ jobs:
             libs='rind|aws-lc-rs|verified-garbage'
             export RUSTFLAGS='--cfg rind_cpu_disable'
             case "${{ matrix.target }}/${{ matrix.cpu }}" in
-              # aws-lc's SHA512 and SHA3 bits.
+              # aws-lc's SHA512 and SHA3 bits. aws-lc has no SVE2 code to deny.
               aarch64-*/no-sha3)
-                export RIND_CPU_DISABLE_sha3=1
+                export RIND_CPU_DISABLE_sha3=1 RIND_CPU_DISABLE_sve2=1
                 export OPENSSL_armcap='~0x840'
-                vg_deny sha3
+                vg_deny sha3 sve2
                 ;;
               aarch64-*)
-                export RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha2=1 RIND_CPU_DISABLE_sha3=1
+                export RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha2=1 RIND_CPU_DISABLE_sha3=1 RIND_CPU_DISABLE_sve2=1
                 # aws-lc's AES, SHA1, SHA256, PMULL, SHA512, and SHA3 bits.
                 export OPENSSL_armcap='~0x87c'
-                vg_deny aes sha2 sha3
+                vg_deny aes sha2 sha3 sve2
                 ;;
               armv7-*/no-crypto)
                 export RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha1=1 RIND_CPU_DISABLE_sha2=1

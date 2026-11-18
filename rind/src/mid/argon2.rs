@@ -6,6 +6,8 @@
 //! (`ref.c`'s `fill_segment` and `index_alpha`), and checked against both's
 //! vectors and RustCrypto's `argon2`.
 
+use alloc::vec::Vec;
+
 use super::blake2b::{self, Blake2b};
 use crate::Error;
 use crate::low::{self, Argon2Block as Block, argon2_compress};

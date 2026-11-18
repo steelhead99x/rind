@@ -20,7 +20,7 @@
 # `UNDECODED`, whose instructions BINSEC cannot read and which this denies
 # through `--cfg rind_cpu_disable`, as `admin/ctgrind`'s jobs deny theirs.
 # `RIND_CPU_DISABLE_*` in the environment denies more. On aarch64, after the
-# host's own schedule, the elliptic-curve and 16-word Montgomery tests run
+# host's own schedule, the elliptic-curve and 16- and 32-word Montgomery tests run
 # again with `RIND_CPU_DISABLE_wide_mul=1` and with `RIND_CPU_FORCE_wide_mul=1`,
 # each checked to take effect first: either host would otherwise prove only
 # its own schedule.
@@ -102,13 +102,14 @@ print("EXIT {}".format(int(gdb.parse_and_eval("$_exitcode"))))
 # cannot decode, so their paths stay with `admin/ctgrind`, `admin/ct-sde`,
 # and `admin/ct-qemu`: on x86_64, AES-NI, VAES, the SHA512 instructions, and
 # every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and
-# SHA instructions, SHA3's, and the `msr` that sets DIT. Denying AES leaves
+# SHA instructions, SHA3's, SVE2's `xar`, and the `msr` that sets DIT.
+# Denying AES leaves
 # vpaes, whose `tbl` the script stubs.
 # See UPSTREAM.md, "BINSEC cannot decode much of what rind runs".
 UNDECODED = {
     "x86_64": ["aes", "vaes", "sha512", "avx512f", "avx512dq", "avx512ifma", "avx512bw"]
     + ["avx512vl", "avx512vbmi", "avx512vbmi2"],
-    "aarch64": ["aes", "pmull", "sha2", "sha3", "dit"],
+    "aarch64": ["aes", "pmull", "sha2", "sha3", "sve2", "dit"],
 }
 
 # glibc picks each of these for the runner's CPU, such as an EVEX one with
@@ -722,8 +723,11 @@ def main():
         "ct_binsec_ecdsa_p384",
         "ct_binsec_ecdsa_p521",
         "ct_binsec_mont16",
+        "ct_binsec_mont_mul",
     }
-    overridden = any(os.environ.get(v) for v in ("RIND_CPU_DISABLE_wide_mul", "RIND_CPU_FORCE_wide_mul"))
+    # rind honours either variable when it is set, even to "", so a caller
+    # that set one, to anything, has picked the schedule itself.
+    overridden = any(v in os.environ for v in ("RIND_CPU_DISABLE_wide_mul", "RIND_CPU_FORCE_wide_mul"))
     if arch(target) == "aarch64" and not overridden:
         again = [name for name in names if name.split("::")[-1] in narrow and not is_planted(name)]
         for label, var, wide in [

@@ -10,6 +10,7 @@
 //! RFC 8439, Wycheproof, aws-lc-rs, and the separate passes.
 
 use super::cpu::{HaveAvx2, HaveSse41};
+use crate::low::ct_equal;
 use crate::low::generic::chacha20poly1305 as separate;
 
 /// Encrypts `inout` in place, returning the tag over `aad` and the ciphertext.
@@ -20,12 +21,21 @@ pub(crate) fn seal(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], inout: &mut [u8
     }
 }
 
-/// Decrypts `inout` in place, returning the tag over `aad` and the
-/// ciphertext, which the caller checks.
-pub(crate) fn open(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], inout: &mut [u8]) -> [u8; 16] {
+/// Decrypts `inout` in place, and returns whether `tag` is its tag over
+/// `aad` and the ciphertext, a secret.
+pub(crate) fn open(
+    key: &[u8; 32],
+    nonce: &[u8; 12],
+    aad: &[u8],
+    inout: &mut [u8],
+    tag: &[u8; 16],
+) -> bool {
     match HaveSse41::check() {
-        Some(sse41) => one_pass(sse41, HaveAvx2::check(), key, nonce, aad, inout, false),
-        None => separate::open(key, nonce, aad, inout),
+        Some(sse41) => ct_equal(
+            &one_pass(sse41, HaveAvx2::check(), key, nonce, aad, inout, false),
+            tag,
+        ),
+        None => separate::open(key, nonce, aad, inout, tag),
     }
 }
 
