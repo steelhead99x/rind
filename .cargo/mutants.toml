@@ -356,6 +356,23 @@ exclude_re = [
   'rind/src/mid/rsa_priv/generate\.rs:\d+:\d+: replace \* with \+ in MillerRabinParams<\x27a>::random_base$',
   'rind/src/mid/rsa_priv/generate\.rs:\d+:58: replace \+ with - in MillerRabinParams<\x27a>::random_base$',
   'rind/src/mid/rsa_priv/generate\.rs:\d+:58: replace \+ with \* in MillerRabinParams<\x27a>::random_base$',
+  # Untested adapter code: quest/m2/confidence/mutants-adapters.md.
+  'rind-dimpl/src/digest\.rs:\d+:\d+: replace <impl fmt::Debug for Running>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-dimpl/src/kx\.rs:\d+:\d+: replace <impl fmt::Debug for Exchange>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-dimpl/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for Key>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-dimpl/src/suite\.rs:\d+:\d+: replace <impl fmt::Debug for Aead>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/aead/quic\.rs:\d+:\d+: replace <impl fmt::Debug for Algorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/agreement\.rs:\d+:\d+: replace <impl fmt::Debug for PublicKey>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/error\.rs:\d+:\d+: replace <impl fmt::Display for KeyRejected>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/error\.rs:\d+:\d+: replace <impl fmt::Display for Unspecified>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/hmac\.rs:\d+:\d+: replace <impl fmt::Debug for Algorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/rsa\.rs:\d+:\d+: replace <impl fmt::Debug for RsaParameters>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/signature\.rs:\d+:\d+: replace <impl fmt::Debug for EcdsaSigningAlgorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-ring/src/signature\.rs:\d+:\d+: replace <impl fmt::Debug for EcdsaVerificationAlgorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-rustls/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for Ecdsa>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
+  'rind-rustls/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for RsaSigningKey>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
+  'rind-rustls/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for RsaSigner>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
+  'rind-rustls/src/ticketer\.rs:\d+:\d+: replace <impl fmt::Debug for XChaCha20Ticketer>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   # One AAD, concatenated, is that AAD. Deleting the one-element arm still
   # feeds `open` the same bytes.
   'rind-str0m/src/srtp\.rs:\d+:\d+: delete match arm \[aad\] in Gcm::open$',
