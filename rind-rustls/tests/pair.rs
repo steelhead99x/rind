@@ -8,8 +8,8 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::sign::CertifiedKey;
 use rustls::{
-    ClientConfig, ClientConnection, HandshakeKind, NamedGroup, RootCertStore, ServerConfig,
-    ServerConnection,
+    ClientConfig, ClientConnection, ConnectionCommon, HandshakeKind, NamedGroup, RootCertStore,
+    ServerConfig, ServerConnection,
 };
 
 #[test]
@@ -185,23 +185,22 @@ fn client_config(provider: Arc<CryptoProvider>, key_type: KeyType) -> Arc<Client
 /// Moves one `write_tls` to the peer. A short `read_tls` is not a complete
 /// delivery: rustls reads once into its deframer, and the unread tail would
 /// otherwise be overwritten on the next write.
-macro_rules! transfer {
-    ($from:expr, $to:expr, $buf:expr) => {{
-        let wr = $from.write_tls(&mut &mut $buf[..]).unwrap();
-        let mut off = 0;
-        while off < wr {
-            let n = $to.read_tls(&mut &$buf[off..wr]).unwrap();
-            assert!(
-                n > 0,
-                "TLS peer read none of the {} bytes still queued",
-                wr - off
-            );
-            off += n;
-            // An incomplete record stays buffered. Process after each read so a
-            // full deframer cannot refuse the rest of this write.
-            $to.process_new_packets().unwrap();
-        }
-    }};
+fn transfer<A, B>(from: &mut ConnectionCommon<A>, to: &mut ConnectionCommon<B>) {
+    let mut buf = [0u8; 1024];
+    let wr = from.write_tls(&mut &mut buf[..]).unwrap();
+    let mut off = 0;
+    while off < wr {
+        let n = to.read_tls(&mut &buf[off..wr]).unwrap();
+        assert!(
+            n > 0,
+            "TLS peer read none of the {} bytes still queued",
+            wr - off
+        );
+        off += n;
+        // An incomplete record stays buffered. Process after each read so a
+        // full deframer cannot refuse the rest of this write.
+        to.process_new_packets().unwrap();
+    }
 }
 
 /// Drains both directions. A confidentiality limit of zero keeps `wants_write`
@@ -211,9 +210,8 @@ fn drain(client: &mut ClientConnection, server: &mut ServerConnection, what: &st
     while client.wants_write() || server.wants_write() {
         rounds += 1;
         assert!(rounds <= 64, "{what} did not finish");
-        let mut buf = [0u8; 1024];
-        transfer!(client, server, buf);
-        transfer!(server, client, buf);
+        transfer(client, server);
+        transfer(server, client);
     }
 }
 
@@ -234,9 +232,8 @@ fn exercise(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>) 
     {
         rounds += 1;
         assert!(rounds <= 64, "handshake did not finish");
-        let mut buf = [0u8; 1024];
-        transfer!(client, server, buf);
-        transfer!(server, client, buf);
+        transfer(&mut client, &mut server);
+        transfer(&mut server, &mut client);
     }
 
     client.writer().write_all(b"hello world").unwrap();
@@ -252,8 +249,8 @@ fn exercise(client_config: Arc<ClientConfig>, server_config: Arc<ServerConfig>) 
     let mut got = Vec::new();
     while got.len() < b"goodbye".len() {
         let mut buf = [0u8; 16];
-        // `WouldBlock` is what a reply that never arrives looks like. `unwrap`
-        // would panic with that error and hide the assertion below.
+        // `WouldBlock` is what a reply that never arrives looks like; say so
+        // rather than panic with the bare error.
         let n = client
             .reader()
             .read(&mut buf)
