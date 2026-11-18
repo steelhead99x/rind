@@ -9,7 +9,7 @@ public import Mathlib.Tactic.IntervalCases
 public import Mathlib.Tactic.LinearCombination
 public import Mathlib.Tactic.Ring
 public import Mathlib.Tactic.ComputeDegree
-public import Rind.X86_64.Simd
+public import Rind.Lanes
 @[expose] public section
 
 /-!

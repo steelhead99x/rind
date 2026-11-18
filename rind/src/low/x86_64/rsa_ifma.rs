@@ -113,7 +113,9 @@ impl RsaIfma {
         if e != 65537 || !matches!(n.len_bytes(), 256 | 384 | 512) {
             return None;
         }
-        HaveAvx512ForRsa::check().map(Self)
+        // Not `map(Self)`, whose translation Lean cannot check.
+        let token = HaveAvx512ForRsa::check()?;
+        Some(Self(token))
     }
 
     /// Writes `x^e mod n` to `out`, as long as `n`, for `pre` holding `n`
@@ -266,7 +268,7 @@ impl IfmaCrt {
         be_bytes(&self.q[..w], q);
         // On the heap, at up to 64 KiB, and wiped, as it holds values of the
         // private key.
-        let mut lines = vec![Line([0; 8]); (16 * k + 32).div_ceil(8)];
+        let mut lines = alloc::vec![Line([0; 8]); (16 * k + 32).div_ceil(8)];
         let scratch = &mut Line::words(&mut lines)[..16 * k + 32];
         let f: CrtFn = match token.fp16() {
             // SAFETY: VG declares its internal functions without parameters,

@@ -1,7 +1,8 @@
 // Checks the built site in dist/, offline: every page has its Markdown twin, a
 // line in llms.txt, and a sitemap entry; every page carries the
-// Content-Security-Policy that keeps it to its own origin; and every link into
-// the site or the repository resolves, anchors included.
+// Content-Security-Policy that keeps it to its own origin and the social card
+// it names; a Markdown twin links the site's pages by their twins; and every
+// link into the site or the repository resolves, anchors included.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { Lexer, type Tokens, walkTokens } from "marked";
@@ -86,6 +87,7 @@ function check(from: string, url: string) {
 		const file = target.endsWith("/") ? `${target}index.html` : target;
 		const found = [file, `${file}.html`].find((f) => files.includes(f));
 		if (!found) return fail(`${from}: ${url} is not in the build`);
+		if (from.endsWith(".md") && found.endsWith(".html")) fail(`${from}: ${url} is a page, so a twin links its Markdown`);
 		if (fragment && !ids(found).has(fragment)) fail(`${from}: ${found} has no id "${fragment}"`);
 		return;
 	}
@@ -180,8 +182,12 @@ for (const file of files) {
 	if (file.endsWith(".html")) {
 		const html = text(file);
 		policy(file, html);
-		for (const [, attrs] of tags(html)) {
+		for (const [tag, attrs] of tags(html)) {
 			for (const [name, value] of attrs) if (name === "href") check(file, value);
+			// The card a pasted link shows is read from the page, so it must be in the build.
+			if (tag === "meta" && attrs.some(([n, v]) => n === "property" && v === "og:image")) {
+				check(file, attrs.find(([n]) => n === "content")?.[1] ?? "");
+			}
 		}
 	} else if (file.endsWith(".md") || file.endsWith(".txt")) {
 		// Links, which include URLs written bare in prose, as GFM autolinks them,

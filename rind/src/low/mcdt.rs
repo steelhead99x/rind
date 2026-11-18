@@ -141,7 +141,9 @@ fn is_intel() -> bool {
     [leaf.ebx, leaf.edx, leaf.ecx] == [0x756e_6547, 0x4965_6e69, 0x6c65_746e]
 }
 
-/// Whether `cpuid` reports `MCDT_NO`, leaf 7, subleaf 2, EDX bit 5.
+/// Whether `cpuid` reports `MCDT_NO`, leaf 7, subleaf 2, EDX bit 5, unless
+/// `RIND_CPU_DISABLE_mcdt_no` ignores it, so a CPU that reports it also runs
+/// and times the mitigation.
 fn reports_mcdt_no() -> bool {
     // `__cpuid` is safe from Rust 1.94 but `unsafe` on the 1.90 MSRV.
     #[allow(unused_unsafe)]
@@ -150,15 +152,7 @@ fn reports_mcdt_no() -> bool {
     let mcdt_no = unsafe {
         __cpuid(0).eax >= 7 && __cpuid_count(7, 0).eax >= 2 && __cpuid_count(7, 2).edx & 1 << 5 != 0
     };
-    mcdt_no && !denied()
-}
-
-/// Lets a debug build, or a release one with `--cfg rind_cpu_disable`,
-/// ignore `MCDT_NO` with `RIND_CPU_DISABLE_mcdt_no`, so a CPU that reports
-/// it also runs and times the mitigation.
-fn denied() -> bool {
-    cfg!(any(debug_assertions, rind_cpu_disable))
-        && std::env::var_os("RIND_CPU_DISABLE_mcdt_no").is_some()
+    mcdt_no && !super::cpu_denied("mcdt_no")
 }
 
 #[cfg(test)]
