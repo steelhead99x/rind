@@ -3,6 +3,7 @@
 
 //! ML-KEM as standardised by FIPS-203, at each of its parameter sets.
 
+use alloc::boxed::Box;
 use core::fmt;
 use core::marker::PhantomData;
 use core::panic::{RefUnwindSafe, UnwindSafe};

@@ -27,6 +27,11 @@ impl Algorithm {
     pub fn tag_len(&self) -> usize {
         self.tag_len
     }
+
+    /// The hash this algorithm runs over.
+    pub(super) fn id(&self) -> Id {
+        self.id
+    }
 }
 
 pub static HMAC_SHA1: Algorithm = Algorithm {

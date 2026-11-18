@@ -22,6 +22,7 @@
 // pass as `as_chunks`'s const argument in generic code.
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
+use alloc::boxed::Box;
 use core::fmt;
 use core::panic::{RefUnwindSafe, UnwindSafe};
 
@@ -270,7 +271,7 @@ impl<P: Params> KeyPair<P> {
     /// FIPS 205's `slh_sign_internal` with randomness `addrnd`, `n` bytes.
     pub(crate) fn sign_internal(&self, prefix: &[u8], message: &[u8], addrnd: &[u8]) -> Box<[u8]> {
         let _entry = Entry::new_secret();
-        let mut signature = vec![0u8; P::SIG_LEN].into_boxed_slice();
+        let mut signature = alloc::vec![0u8; P::SIG_LEN].into_boxed_slice();
         sign_internal::<P>(
             self.secret_key.as_ref(),
             prefix,

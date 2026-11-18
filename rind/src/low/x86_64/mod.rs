@@ -86,6 +86,7 @@ pub(crate) mod chacha20poly1305;
 pub(crate) mod cpu;
 #[cfg(test)]
 pub(crate) mod ct_sde;
+pub(crate) mod curve25519_ifma;
 pub(crate) mod curve25519_x25519;
 pub(crate) mod curve25519_x25519_alt;
 pub(crate) mod curve25519_x25519base;
@@ -152,6 +153,7 @@ pub(crate) mod p256_montjmixadd;
 pub(crate) mod p256_montjmixadd_alt;
 pub(crate) mod p256_scalarmul;
 pub(crate) mod p256_scalarmul_alt;
+pub(crate) mod p256_vg;
 pub(crate) mod p384_montjadd;
 pub(crate) mod p384_montjadd_alt;
 pub(crate) mod p384_montjdouble;
