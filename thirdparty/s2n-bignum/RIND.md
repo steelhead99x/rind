@@ -94,9 +94,9 @@ What aws-lc's x86_64 ChaCha20-Poly1305 and ChaCha20 routines need,
 [kixel-ai/rind#627](https://github.com/kixel-ai/rind/pull/627)), its
 AES-CTR and AES-CBC routines, `aes_hw_ctr32_encrypt_blocks` and
 `aes_hw_cbc_encrypt`, and what OpenSSL's `sha512_block_data_order_avx2`
-adds to them: BMI1's `ANDN`, BMI2's `RORX`, and `PUSH m64`. With them every instruction of those
-routines, as rind's release build emits them,
-decodes. Posting them to awslabs/s2n-bignum needs the maintainer's approval
+adds to them: BMI1's `ANDN`, BMI2's `RORX`, and `PUSH m64`. With them every
+instruction of those routines, as rind's release build emits them, decodes.
+Posting them to awslabs/s2n-bignum needs the maintainer's approval
 ([kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
 
 | Instruction | Encoding | Note |

@@ -77,8 +77,8 @@ SHA-512.
   that a binary links only the ciphers it names; the call adds about 3 ns per
   key or 32 B seal.
 - P-256 without ADX: generator multiplication and verification run
-  s2n-bignum's verified `_alt` routines rather than aws-lc's `ecp_nistz256`
-  mulq ones, which measured faster.
+  s2n-bignum's verified `_alt` routines, though [#234] measured aws-lc's
+  `ecp_nistz256` mulq ones faster.
 - Ed25519 verification: rather than recompute `[S]B - [k]A` by s2n-bignum's
   verified `edwards25519_scalarmuldouble`, x86_64 checks `[v S]B - [v]R -
   [u]A = O` for scalars `u ≡ v k (mod 8L)` of about 128 bits, after
@@ -995,5 +995,6 @@ HACL*'s verified Poly1305 without NEON.
 [run 41861521276]: https://github.com/kixel-ai/rind/actions/runs/41861521276
 [run 41861526675]: https://github.com/kixel-ai/rind/actions/runs/41861526675
 [#224]: https://github.com/kixel-ai/rind/pull/224
+[#234]: https://github.com/kixel-ai/rind/pull/234
 [#281]: https://github.com/kixel-ai/rind/pull/281
 [LICENSE]: LICENSE
