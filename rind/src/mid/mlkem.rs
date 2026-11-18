@@ -622,19 +622,22 @@ impl<P: Params> EncapKey<P> {
         let transpose_a_hat = self.transpose_a_hat.as_deref().expect("wiped only on drop");
 
         // 9. - 12. y_i <- SamplePolyCBD_eta1(PRF(r, N))
-        let mut y = Coeffs::<P::Vector, Normal>::zero();
-        sample_poly_cbd(P::ETA1, &r.0, 0, y.polys_mut());
-
         // 13. - 16. e_1 <- SamplePolyCBD_eta2(PRF(r, N))
         // 17. e_2 <- SamplePolyCBD_eta2(PRF(r, N))
+        //
+        // N counts on from y's into e_1's and e_2's, so where eta1 is eta2
+        // one call samples all three, and hashes them in fewer batches.
+        let mut y = Coeffs::<P::Vector, Normal>::zero();
         let mut e_1 = Coeffs::<P::Vector, Normal>::zero();
         let mut e_2 = Coeffs::<Poly, Normal>::zero();
-        sample_poly_cbd(
-            ETA2,
-            &r.0,
-            P::K as u8,
-            e_1.polys_mut().chain(core::iter::once(&mut e_2.0)),
-        );
+        let errors = e_1.polys_mut().chain(core::iter::once(&mut e_2.0));
+        match P::ETA1 == ETA2 {
+            true => sample_poly_cbd(ETA2, &r.0, 0, y.polys_mut().chain(errors)),
+            false => {
+                sample_poly_cbd(P::ETA1, &r.0, 0, y.polys_mut());
+                sample_poly_cbd(ETA2, &r.0, P::K as u8, errors);
+            }
+        }
 
         // 18. y^ <- NTT(y)
         let y_hat = y.ntt();
@@ -1093,20 +1096,21 @@ fn sample_poly_cbd<'a>(
     }
 }
 
-/// [`sample_poly_cbd`] for `eta = 2`, four polynomials at a time.
+/// [`sample_poly_cbd`] for `eta = 2`, eight polynomials at a time, which
+/// x86_64 CPUs with AVX-512 hash at once and others four at a time.
 fn sample_poly_cbd2<'a>(
     sigma: &[u8; 32],
     mut n: u8,
     mut polys: impl Iterator<Item = &'a mut Poly>,
 ) {
     loop {
-        let batch: [Option<&mut Poly>; 4] = core::array::from_fn(|_| polys.next());
+        let batch: [Option<&mut Poly>; 8] = core::array::from_fn(|_| polys.next());
         let count = batch.iter().take_while(|p| p.is_some()).count();
         if count == 0 {
             return;
         }
 
-        let mut bufs = [[0; 40]; 4];
+        let mut bufs = [[0; 40]; 8];
         for buf in &mut bufs[..count] {
             buf[..32].copy_from_slice(sigma);
             buf[32] = n;
@@ -1114,16 +1118,30 @@ fn sample_poly_cbd2<'a>(
             n += 1;
         }
 
-        let mut samples = [[0; 128]; 4];
+        let mut samples = [[0; 128]; 8];
         match count {
-            1 => shake256_batch_of::<1>(&bufs, &mut samples),
-            2 => shake256_batch_of::<2>(&bufs, &mut samples),
-            3 => shake256_batch_of::<3>(&bufs, &mut samples),
-            _ => sha3::shake256_batch(&bufs, &mut samples),
+            1..=4 => shake256_fours(&bufs, &mut samples, count),
+            _ => low::mlkem_shake256_8x(&bufs, &mut samples, count, shake256_fours),
         }
 
         for (sample, poly) in samples.iter().zip(batch.into_iter().flatten()) {
             sample_cbd2(sample, poly);
+        }
+    }
+}
+
+/// [`sha3::shake256_batch`] of the first `count` of eight inputs, four at a
+/// time.
+fn shake256_fours(inputs: &[[u8; 40]; 8], outputs: &mut [[u8; 128]; 8], count: usize) {
+    let (inputs, _) = inputs.as_chunks::<4>();
+    let (outputs, _) = outputs.as_chunks_mut::<4>();
+    for (i, (inputs, outputs)) in inputs.iter().zip(outputs).enumerate() {
+        match count.saturating_sub(i * 4) {
+            0 => {}
+            1 => shake256_batch_of::<1>(inputs, outputs),
+            2 => shake256_batch_of::<2>(inputs, outputs),
+            3 => shake256_batch_of::<3>(inputs, outputs),
+            _ => sha3::shake256_batch(inputs, outputs),
         }
     }
 }

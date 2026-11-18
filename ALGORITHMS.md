@@ -687,6 +687,14 @@ have some different options depending on CPU features:
 - We have a `SampleNTT()` which does 8-wide Keccak-f permutation followed by
   rejection sampling using AVX-512 (F, BW, VBMI, VBMI2) on x86-64. This is
   Graviola's, and not verified.
+- With the same AVX-512, the PRFs behind `SamplePolyCBD()` with eta 2 run on
+  that 8-wide Keccak-f too, eight inputs to one permutation, as Graviola's
+  `sha3_shake256_8x_one_block` does: six in ML-KEM-768's key generation, and
+  seven in its encryption, which samples y, e_1, and e_2 in one batch where
+  eta1 is eta2. On an AVX-512 Xeon this took 0.94 of the time of the AVX2
+  4-wide batches in key generation, 0.93 in encapsulation, and 0.92 in
+  decapsulation. Not verified either: the 4-wide batches it replaces are
+  s2n-bignum's.
 - We have s2n-bignum's verified 4-wide Keccak-f using AVX2 on x86-64, and its
   single-state Keccak-f otherwise.
 - We have s2n-bignum's verified 2-wide Keccak-f using Neon+SHA3 on aarch64.

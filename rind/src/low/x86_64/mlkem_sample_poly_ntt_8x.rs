@@ -71,7 +71,7 @@ unsafe fn sample_poly_ntt_8x_avx512(
 }
 
 #[target_feature(enable = "avx512f")]
-fn _sha3_keccak8_f1600(state: &mut [__m512i; 25], rc: &[u64; 24]) {
+pub(super) fn _sha3_keccak8_f1600(state: &mut [__m512i; 25], rc: &[u64; 24]) {
     for round_constant in rc {
         // Theta step.
         //
@@ -127,7 +127,7 @@ static RHO: [[i32; 5]; 5] = [
     [27, 20, 39, 8, 14],
 ];
 
-const RC: [u64; 24] = [
+pub(super) const RC: [u64; 24] = [
     0x00000000_00000001,
     0x00000000_00008082,
     0x80000000_0000808A,

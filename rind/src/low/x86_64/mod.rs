@@ -138,6 +138,7 @@ pub(crate) mod mlkem_ntt;
 pub(crate) mod mlkem_reduce;
 pub(crate) mod mlkem_rej_uniform_vartime;
 pub(crate) mod mlkem_sample_poly_ntt_8x;
+pub(crate) mod mlkem_shake256_8x;
 pub(crate) mod mlkem_tobytes;
 pub(crate) mod mlkem_tomont;
 pub(crate) mod mlkem_unpack;
