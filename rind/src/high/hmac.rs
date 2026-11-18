@@ -130,6 +130,11 @@ impl Algorithm {
     pub fn tag_len(&self) -> usize {
         self.tag_len
     }
+
+    /// The hash this algorithm runs over.
+    pub(super) fn id(&self) -> Id {
+        self.id
+    }
 }
 
 impl fmt::Debug for Algorithm {

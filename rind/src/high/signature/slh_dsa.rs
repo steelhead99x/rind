@@ -3,6 +3,7 @@
 //! SLH-DSA's public API: key pairs and public keys whose parameter set is a
 //! type.
 
+use alloc::boxed::Box;
 use core::fmt;
 use core::marker::PhantomData;
 

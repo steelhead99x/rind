@@ -1,7 +1,9 @@
 ---
 // The shell every page shares: light and dark from the reader's setting, no
 // request to a third party (the Content-Security-Policy in astro.config.ts
-// refuses one), and a link to the page's Markdown twin.
+// refuses one), a link to the page's Markdown twin, and the card a pasted link
+// shows.
+import { card } from "../lib/card";
 import { type Page, origin, twinPath } from "../lib/pages";
 
 interface Props {
@@ -22,6 +24,16 @@ const { page, title = page.title } = Astro.props;
 		<meta name="description" content={page.answers} />
 		<link rel="canonical" href={`${origin}${page.path}`} />
 		<link rel="alternate" type="text/markdown" href={twinPath(page)} />
+		<meta property="og:type" content="website" />
+		<meta property="og:site_name" content="rind" />
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={page.answers} />
+		<meta property="og:url" content={`${origin}${page.path}`} />
+		<meta property="og:image" content={`${origin}${card.path}`} />
+		<meta property="og:image:width" content={String(card.width)} />
+		<meta property="og:image:height" content={String(card.height)} />
+		<meta property="og:image:alt" content="rind, with a curled strip of green graviola peel forming the r" />
+		<meta name="twitter:card" content="summary_large_image" />
 		{/* No favicon yet; this stops the browser asking for one. */}
 		<link rel="icon" href="data:," />
 	</head>

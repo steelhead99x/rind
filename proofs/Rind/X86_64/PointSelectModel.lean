@@ -151,7 +151,7 @@ they call; `Rind.X86_64.PointSelect` proves them.
 
 namespace rind.x86_64
 
-open rind.simd rind.select
+open rind.simd rind.select rind.vale
 
 /-- The four words of `row` from `row[k]`, as `_mm256_loadu_si256` loads them:
 `row[k]` lowest. -/

@@ -11,6 +11,7 @@ import Rind.Aarch64.P256Signature
 import Rind.Aarch64.AesModesLow
 import Rind.Aarch64.AesKw
 import Rind.Aarch64.AesModesApi
+import Rind.Aarch64.GhashPmull
 open rind.aarch64
 
 /-!
@@ -25,7 +26,8 @@ the theorems over every HMAC algorithm; rind's HOL Light proofs of its
 constant-time compares in `Rind.Aarch64.CtEqual` for HMAC's and PBKDF2's
 `verify` and key wrap's `unwrap` and `unwrap_padded`; and nothing else.
 P-384's comb table select rests on no axiom, only on the hand model in
-`Rind.Aarch64.PointSelectModel`.
+`Rind.Aarch64.PointSelectModel`. The PMULL GHASH's table and `Ghash::add` rest on
+no axiom, only on the hand model in `Rind.Aarch64.AesGcmModel`.
 A change here is a change to the trust base.
 -/
 
@@ -589,3 +591,11 @@ A change here is a change to the trust base.
 /-- info: 'rind.aarch64.aes_cbc_decrypting_key_decrypt_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms aes_cbc_decrypting_key_decrypt_spec
+
+/-- info: 'rind.aarch64.pmull.ghash_table_new_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms pmull.ghash_table_new_spec
+
+/-- info: 'rind.aarch64.pmull.ghash_add_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms pmull.ghash_add_spec
