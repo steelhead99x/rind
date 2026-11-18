@@ -195,9 +195,11 @@ def main():
     # trace would be `_alt`. Each schedule is a pass of its own, forced, and
     # checked to take effect, so a build that compiled the override out
     # fails here rather than tracing `_alt` twice. armv7 has no such choice.
+    # rind honours either variable when it is set, even to "", so a caller
+    # that set one, to anything, has picked the schedule itself.
     passes = [("", {})]
     if target == "aarch64-unknown-linux-gnu" and not any(
-        os.environ.get(v) for v in ("RIND_CPU_DISABLE_wide_mul", "RIND_CPU_FORCE_wide_mul")
+        v in os.environ for v in ("RIND_CPU_DISABLE_wide_mul", "RIND_CPU_FORCE_wide_mul")
     ):
         passes = [
             ("wide", {"RIND_CPU_FORCE_wide_mul": "1"}),

@@ -725,7 +725,9 @@ def main():
         "ct_binsec_mont16",
         "ct_binsec_mont_mul",
     }
-    overridden = any(os.environ.get(v) for v in ("RIND_CPU_DISABLE_wide_mul", "RIND_CPU_FORCE_wide_mul"))
+    # rind honours either variable when it is set, even to "", so a caller
+    # that set one, to anything, has picked the schedule itself.
+    overridden = any(v in os.environ for v in ("RIND_CPU_DISABLE_wide_mul", "RIND_CPU_FORCE_wide_mul"))
     if arch(target) == "aarch64" and not overridden:
         again = [name for name in names if name.split("::")[-1] in narrow and not is_planted(name)]
         for label, var, wide in [
