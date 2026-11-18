@@ -273,8 +273,11 @@ fn detect_wide_once() -> bool {
 /// see a part, so they stay on `_alt` rather than guessing a narrow core.
 ///
 /// This is the read aws-lc makes (`crypto/fipsmodule/cpucap/cpu_aarch64_linux.c`
-/// lines 19-23 and 74-75 at `5ed12cce`), gated on the same bit because
-/// valgrind cannot decode the register without it. Like aws-lc, it sees the
+/// lines 19-23 and 74-75 at `5ed12cce`), gated on the same bit, which says
+/// the kernel emulates the read. Valgrind clears that bit, so under valgrind
+/// this sees no part and picks `_alt`; `admin/ctgrind` forces each schedule
+/// instead (UPSTREAM.md, "Valgrind hides HWCAP_CPUID from aarch64
+/// programs"). Like aws-lc, it sees the
 /// core the first call ran on. On a chip that mixes core types, the choice
 /// follows that core and is then cached; both schedules are correct and
 /// constant time on every core, so only speed depends on it.

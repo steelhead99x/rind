@@ -93,6 +93,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Reported:** no.
 - **Goes when:** valgrind passes `AT_HWCAP2` on ARM and runs SHA3 on aarch64.
 
+### Valgrind hides HWCAP_CPUID from aarch64 programs
+
+- **Breaks:** valgrind on arm64 Linux limits a program's `AT_HWCAP` to the features it lists (`ARM64_SUPPORTED_HWCAP` in `coregrind/m_initimg/initimg-linux.c`: atomics, AES, PMULL, SHA1, SHA2, SHA512, CRC32, FP, ASIMD, ASIMDDP), which leaves out `HWCAP_CPUID`, though VEX can emulate the `MIDR_EL1` read it gates. rind reads `MIDR_EL1` only behind that bit, so under valgrind it sees no part and picks the wide `_alt` schedules even on a Cortex-A72, Cortex-A76, or Neoverse N1, whose native runs take the narrow ones. A pass that leaves the choice to detection checks only `_alt`, and `detects_the_expected_cpu` fails it if `RIND_TEST_ARM_WIDE_MUL=0` is set, as found on a Raspberry Pi 5 with valgrind 3.24.0.
+- **Reproduce:** `getauxval(AT_HWCAP) & HWCAP_CPUID` is nonzero natively on aarch64 Linux 4.11 or later and zero under valgrind; the mask is in valgrind's source through 3.28's development branch.
+- **Workaround:** `admin/ctgrind` runs aarch64 twice, forcing the wide schedules with `RIND_CPU_FORCE_wide_mul=1` and the narrow ones with `RIND_CPU_DISABLE_wide_mul=1`, each with the matching `RIND_TEST_ARM_WIDE_MUL`, and drops a caller's leftover value otherwise.
+- **Reported:** no.
+- **Goes when:** valgrind passes `HWCAP_CPUID`, since it already emulates the read.
+
 ### Memcheck blames a public flag on a secret carry
 
 - **Breaks:** on armv7, memcheck flags a branch or predicated instruction that reads only the Z flag of a logical op on public values, such as a `tst` or `ands`, when that op keeps the carry of a secret `adds` before it and a superblock boundary falls between them, which code layout decides. It flags the `beq` at `sha512_block_data_order_nohw+460` in aws-lc's integer SHA-512 without NEON, which tests the public round-constant pointer. It flagged the portable P-384 scalar inverse's `step_by(4).rev()` loop, whose `ands r0, r0, #3` follows the inlined reduction of the secret, and whose `movweq` then poisons the loop counter and the table index. On x86_64, VEX builds `stc`'s flags from the previous op's, so s2n-bignum's `bignum_add_p521`, which begins `stc` then `adc`, returned an undefined sum of two defined inputs right after the generic backend's secret arithmetic in `low::generic::limb64::p521::tests::field_ops`.
