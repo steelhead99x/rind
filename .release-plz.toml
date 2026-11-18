@@ -19,3 +19,10 @@ git_release_latest = true
 [[package]]
 name = "rind-python"
 git_only = true
+
+# rind-openssl, whose libraries .github/workflows/release.yml attaches to the
+# release this creates. It never goes to crates.io, so its versions come from
+# tags.
+[[package]]
+name = "rind-openssl"
+git_only = true

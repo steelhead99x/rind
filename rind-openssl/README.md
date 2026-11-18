@@ -6,13 +6,22 @@ OpenSSL loads it through its configuration file, so whatever links OpenSSL 3, su
 
 ## Setup
 
-Build the library, which needs only Rust:
+Each `rind-openssl-v*` [release](https://github.com/kixel-ai/rind/releases) attaches the library built for Linux on x86_64 and aarch64 (glibc 2.17 or newer) and macOS on arm64, with their SHA-256 sums and build provenance:
+
+```sh
+gh release download rind-openssl-v3.0.0 --repo kixel-ai/rind \
+    --pattern 'rind_openssl-x86_64-unknown-linux-gnu.so' --pattern SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+gh attestation verify rind_openssl-x86_64-unknown-linux-gnu.so --repo kixel-ai/rind
+```
+
+Elsewhere, build it, which needs only Rust:
 
 ```sh
 cargo build --release -p rind-openssl
 ```
 
-This makes `target/release/librind_openssl.so`, or `.dylib` on macOS, which can live anywhere; `openssl version -m` names OpenSSL's own module directory.
+This makes `target/release/librind_openssl.so`, or `.dylib` on macOS. Either library can live anywhere; `openssl version -m` names OpenSSL's own module directory.
 Copy [`openssl.cnf`](openssl.cnf), set its `module` line to the library's path, and point `OPENSSL_CONF` at it, or merge its sections into the system's configuration:
 
 ```sh

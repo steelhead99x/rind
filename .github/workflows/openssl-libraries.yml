@@ -1,0 +1,101 @@
+name: openssl-libraries
+
+# Builds the rind-openssl libraries each release ships, one per target, and
+# tests each against the OpenSSL 3 its runner's system ships before uploading
+# it. Nightly, on demand, and from release.yml, which attaches what this
+# uploads to rind-openssl's GitHub release. Read-only: releasing is
+# release.yml's.
+
+on:
+  schedule:
+    - cron: "50 18 * * *"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit or tag to build.
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openssl-libraries-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_ZIGBUILD_VERSION: "0.24.1"
+
+jobs:
+  library:
+    name: library (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native runners, so each library loads into its own system's OpenSSL.
+          # Zig links against glibc 2.17 from any host.
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            zig: true
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            zig: true
+          # Homebrew's OpenSSL 3, which the runner image carries.
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            openssl: /opt/homebrew/opt/openssl@3
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      # cargo-zigbuild's PyPI package brings zig, which it runs through the
+      # python3 its virtual environment puts first on PATH.
+      - name: Install cargo-zigbuild
+        if: matrix.zig
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zig"
+          "$RUNNER_TEMP/zig/bin/pip" install "cargo-zigbuild==$CARGO_ZIGBUILD_VERSION"
+          echo "$RUNNER_TEMP/zig/bin" >>"$GITHUB_PATH"
+
+      - name: Use Homebrew's OpenSSL
+        if: matrix.openssl
+        env:
+          OPENSSL: ${{ matrix.openssl }}
+        run: |
+          echo "$OPENSSL/bin" >>"$GITHUB_PATH"
+          echo "PKG_CONFIG_PATH=$OPENSSL/lib/pkgconfig" >>"$GITHUB_ENV"
+
+      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: sh/openssl-library.sh "$RUNNER_TEMP/libraries" "$TARGET"
+
+      # The library as shipped, through the README's configuration.
+      - name: Test the library
+        env:
+          TARGET: ${{ matrix.target }}
+        run: sh/openssl-smoke.sh "$RUNNER_TEMP"/libraries/rind_openssl-"$TARGET".*
+
+      # The provider's own tests, which check which provider runs each
+      # operation, against the same OpenSSL.
+      - name: Test the provider
+        run: cargo test --release --locked -p rind-openssl --test provider
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rind-openssl-library-${{ matrix.target }}
+          path: ${{ runner.temp }}/libraries
+          if-no-files-found: error

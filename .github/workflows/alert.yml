@@ -23,6 +23,7 @@ on:
       - fuzz
       - miri
       - mutants
+      - openssl-libraries
       - prove
       - Pullfrog
       - python
