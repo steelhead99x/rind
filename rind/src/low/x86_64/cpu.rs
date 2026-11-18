@@ -309,6 +309,19 @@ impl HaveAvx512Vl {
     }
 }
 
+/// Proof that the CPU has AVX-512 IFMA, with what `HaveAvx512Vl` proves:
+/// what OpenSSL's base 2^44 Poly1305 needs (F, VL, and IFMA, the check
+/// OpenSSL's `poly1305_init` makes), beside verified-garbage's AVX-512 VL
+/// ChaCha20.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveAvx512Ifma(());
+
+impl HaveAvx512Ifma {
+    pub(crate) fn check() -> Option<Self> {
+        has(AVX2_KERNELS | AVX512F | AVX512VL | AVX512IFMA).then_some(Self(()))
+    }
+}
+
 /// Proof that the CPU has the SHA512 instructions, and the AVX2 that
 /// OpenSSL's routine for them also uses.
 #[derive(Clone, Copy, Debug)]
