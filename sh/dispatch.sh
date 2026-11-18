@@ -134,7 +134,7 @@ module py '^(rind-python/|sh/python\.sh$|flake\.lock$)' \
     tools='cargo jq maturin python3' compiles
 # OpenSSL's own tests with rind-openssl loaded, against the OpenSSL the flake
 # pins. rind's own changes reach the provider through its tests.
-module openssl '^(rind-openssl/|sh/openssl\.sh$|flake\.(nix|lock)$)' \
+module openssl '^(rind-openssl/|sh/openssl(-(library|smoke|unreleased))?\.sh$|flake\.(nix|lock)$)' \
     tools='nix' compiles
 # The fixture builds this checkout's rind-ring under the rind-patch shim.
 module patch '^(patch/|rind-ring/|(rind/)?Cargo\.toml$|sh/patch\.sh$)' \

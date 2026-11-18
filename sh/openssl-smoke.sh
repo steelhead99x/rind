@@ -42,7 +42,7 @@ for maker in rind default; do
     for checker in rind default; do
         query=()
         [[ "$maker" == rind ]] && query=(-propquery provider=rind)
-        "$maker" genpkey -algorithm ED25519 "${query[@]}" -out "$work/ed.pem"
+        "$maker" genpkey -algorithm ED25519 ${query[@]+"${query[@]}"} -out "$work/ed.pem"
         "$maker" pkeyutl -sign -rawin -inkey "$work/ed.pem" -in "$work/message" -out "$work/sig"
         "$checker" pkey -in "$work/ed.pem" -pubout -out "$work/ed.pub"
         "$checker" pkeyutl -verify -rawin -pubin -inkey "$work/ed.pub" \

@@ -77,6 +77,9 @@ jobs:
         run: |
           echo "$OPENSSL/bin" >>"$GITHUB_PATH"
           echo "PKG_CONFIG_PATH=$OPENSSL/lib/pkgconfig" >>"$GITHUB_ENV"
+          # openssl-sys probes Homebrew's prefixes before pkg-config, so name
+          # the prefix both the smoke test and the provider tests must use.
+          echo "OPENSSL_DIR=$OPENSSL" >>"$GITHUB_ENV"
 
       - name: Build
         env:
