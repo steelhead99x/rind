@@ -10,7 +10,9 @@
 //! verified-garbage's AVX-512 VL ChaCha20 and OpenSSL's base 2^44 Poly1305
 //! (`poly1305_ifma`), a chunk at a time so the second pass reads what the
 //! first left in L1. aws-lc's one pass interleaves a scalar Poly1305, which
-//! takes about as long as both vector passes together.
+//! takes about as long as both vector passes together. `one_pass` makes
+//! that choice, below `seal` and `open`, so the dispatch `proofs/` checks
+//! is unchanged, and its `OnePass` hypothesis covers both.
 //!
 //! The aws-lc assembly is not formally verified: its correctness rests on its
 //! use and testing in BoringSSL and aws-lc, and on rind's tests of it against
@@ -19,28 +21,32 @@
 use super::cpu::{HaveAvx2, HaveAvx512Ifma, HaveSse41};
 use super::poly1305_ifma::Poly1305;
 use crate::low::chacha20::ChaCha20;
+use crate::low::ct_equal;
 use crate::low::generic::chacha20poly1305 as separate;
 
 /// Encrypts `inout` in place, returning the tag over `aad` and the ciphertext.
 pub(crate) fn seal(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], inout: &mut [u8]) -> [u8; 16] {
-    match (HaveAvx512Ifma::check(), HaveSse41::check()) {
-        (Some(ifma), _) if inout.len() >= IFMA_MIN_LEN => {
-            ifma_passes(ifma, key, nonce, aad, inout, true)
-        }
-        (_, Some(sse41)) => one_pass(sse41, HaveAvx2::check(), key, nonce, aad, inout, true),
-        (_, None) => separate::seal(key, nonce, aad, inout),
+    match HaveSse41::check() {
+        Some(sse41) => one_pass(sse41, HaveAvx2::check(), key, nonce, aad, inout, true),
+        None => separate::seal(key, nonce, aad, inout),
     }
 }
 
-/// Decrypts `inout` in place, returning the tag over `aad` and the
-/// ciphertext, which the caller checks.
-pub(crate) fn open(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], inout: &mut [u8]) -> [u8; 16] {
-    match (HaveAvx512Ifma::check(), HaveSse41::check()) {
-        (Some(ifma), _) if inout.len() >= IFMA_MIN_LEN => {
-            ifma_passes(ifma, key, nonce, aad, inout, false)
-        }
-        (_, Some(sse41)) => one_pass(sse41, HaveAvx2::check(), key, nonce, aad, inout, false),
-        (_, None) => separate::open(key, nonce, aad, inout),
+/// Decrypts `inout` in place, and returns whether `tag` is its tag over
+/// `aad` and the ciphertext, a secret.
+pub(crate) fn open(
+    key: &[u8; 32],
+    nonce: &[u8; 12],
+    aad: &[u8],
+    inout: &mut [u8],
+    tag: &[u8; 16],
+) -> bool {
+    match HaveSse41::check() {
+        Some(sse41) => ct_equal(
+            &one_pass(sse41, HaveAvx2::check(), key, nonce, aad, inout, false),
+            tag,
+        ),
+        None => separate::open(key, nonce, aad, inout, tag),
     }
 }
 
@@ -120,7 +126,29 @@ struct Data {
 /// AVX2 half.
 const IA32CAP_AVX2_BMI2: u32 = (1 << 5) | (1 << 8);
 
+/// aws-lc's one pass, or from `IFMA_MIN_LEN` bytes on a CPU with AVX-512
+/// IFMA, `ifma_passes`. Sealing returns the tag over `aad` and the
+/// ciphertext it leaves in `inout`, and opening the tag over `aad` and the
+/// ciphertext it was given. `proofs/` takes what it computes as a
+/// hypothesis, `OnePass`, which neither path is proven to meet.
 fn one_pass(
+    sse41: HaveSse41,
+    avx2: Option<HaveAvx2>,
+    key: &[u8; 32],
+    nonce: &[u8; 12],
+    aad: &[u8],
+    inout: &mut [u8],
+    seal: bool,
+) -> [u8; 16] {
+    match HaveAvx512Ifma::check() {
+        Some(ifma) if inout.len() >= IFMA_MIN_LEN => {
+            ifma_passes(ifma, key, nonce, aad, inout, seal)
+        }
+        _ => aws_lc_one_pass(sse41, avx2, key, nonce, aad, inout, seal),
+    }
+}
+
+fn aws_lc_one_pass(
     _: HaveSse41,
     avx2: Option<HaveAvx2>,
     key: &[u8; 32],
@@ -287,16 +315,18 @@ mod tests {
             ];
             for (path, avx2) in halves.into_iter().flatten() {
                 let mut ours = input[..len].to_vec();
-                let ours_tag =
-                    ct::into_public(one_pass(sse41, avx2, &key, &nonce, aad, &mut ours, true));
+                let ours_tag = ct::into_public(aws_lc_one_pass(
+                    sse41, avx2, &key, &nonce, aad, &mut ours, true,
+                ));
                 ct::public_slice(&ours);
                 assert_eq!(
                     ours_tag, tag,
                     "{path} seal tag, {len} bytes, {aad_len} of AAD"
                 );
                 assert_eq!(ours, sealed, "{path} seal, {len} bytes, {aad_len} of AAD");
-                let ours_tag =
-                    ct::into_public(one_pass(sse41, avx2, &key, &nonce, aad, &mut ours, false));
+                let ours_tag = ct::into_public(aws_lc_one_pass(
+                    sse41, avx2, &key, &nonce, aad, &mut ours, false,
+                ));
                 ct::public_slice(&ours);
                 assert_eq!(
                     ours_tag, tag,

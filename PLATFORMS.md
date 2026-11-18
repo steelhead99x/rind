@@ -16,12 +16,17 @@ qemu. iOS devices' code is only built.
   instructions. Without it, as on the Raspberry Pi 4, CM4, and Zero 2 W, they
   run [aws-lc]'s NEON and scalar assembly instead (see
   [ALGORITHMS.md](ALGORITHMS.md)), `rind::cpu::has_aes_hardware()` is false, and
-  rind-rustls and rind-dimpl prefer ChaCha20-Poly1305. On Apple's platforms,
+  rind-rustls and rind-dimpl prefer ChaCha20-Poly1305. Where the CPU has
+  SVE2, as Armv9 cores from Neoverse N2 and Cortex-A710 on do,
+  ChaCha20-Poly1305 runs [verified-garbage]'s SVE2 assembly, and aws-lc's
+  NEON assembly otherwise. On Apple's platforms,
   secret-dependent code runs with data-independent timing (DIT), set and
   cleared in each call unless `rind::cpu::Dit::hold()` holds it across a batch
   of calls. rind sets no DIT on other aarch64 platforms, where Arm says it
   changes nothing on current cores.
-- `x86_64` runs on every x86_64 CPU. Without `aes` and `pclmulqdq`, as on
+- `x86_64` runs on every x86_64 CPU. It needs a target that enables SSE2,
+  as every one with an OS does; `x86_64-unknown-none` and
+  `x86_64-unknown-uefi` disable it and run the portable backend. Without `aes` and `pclmulqdq`, as on
   Core 2 and Nehalem, AES and GHASH run [aws-lc]'s SSSE3 assembly instead
   (see [ALGORITHMS.md](ALGORITHMS.md)), `rind::cpu::has_aes_hardware()` is false,
   and rind-rustls and rind-dimpl prefer ChaCha20-Poly1305. Without `avx2`, as
@@ -30,7 +35,8 @@ qemu. iOS devices' code is only built.
   SHA256 its SSSE3 assembly, or for SHA its AVX assembly on Intel's cores,
   SHA-512 its scalar assembly on other vendors' cores,
   ML-KEM's and ML-DSA's arithmetic runs Rust ports of [mlkem-native]'s and
-  [mldsa-native]'s portable C, and
+  [mldsa-native]'s portable C, but for ML-KEM-768's encapsulation, which runs
+  [verified-garbage]'s assembly, and
   table lookups use SSE2 (see [ALGORITHMS.md](ALGORITHMS.md)). Without `sse4.1`,
   as on the first Core 2s and Atoms and AMD's Bobcat, ChaCha20 and Poly1305
   run in separate passes.
@@ -121,6 +127,48 @@ qemu. iOS devices' code is only built.
 A backend requires only what its target enables at compile time, so rind runs
 on every CPU its target does; every other feature only picks a faster path.
 
+rind is `no_std` with `alloc`, so a target without `std` builds it, given a
+global allocator. CI builds it for `x86_64-unknown-none`,
+`aarch64-unknown-none`, and `armv7a-none-eabi`. Without an OS:
+
+- rind draws random bytes from [getrandom], which has no source there until
+  the caller supplies one: pass `--cfg getrandom_backend="custom"` to every
+  crate, through `RUSTFLAGS` or the target's `rustflags` in
+  `.cargo/config.toml` rather than `cargo rustc`, and define
+  `__getrandom_v03_custom` in the application, as getrandom's documentation
+  says.
+- The x86_64 backend, which a target needs SSE2 for (`x86_64-unknown-none`
+  runs the portable one), reads `cpuid` and XCR0 itself, as `std` does, so it
+  takes a vector path only where the CPU has it and XCR0 says its registers
+  are saved. It detects once, at its first call, for every core and every
+  later call. So without a kernel, before that call the firmware must enable
+  every vector state the target enables at compile time, and the state XCR0
+  then enables must stay enabled; every core that runs rind must report the
+  same features and XCR0; and the code that switches contexts must save
+  every state XCR0 enables (or, where the target leaves AVX off, XCR0's AVX
+  bit can stay clear throughout).
+- aarch64 cannot ask without an OS, so it runs what the target enables at
+  compile time: `-C target-feature=+aes,+sha2` turns on its crypto extension
+  paths, `+sha3` those that use the SHA3 extension, such as SHA-512's
+  (Keccak-f1600 runs on it only on Apple's cores, so not here), and `+sve2`
+  the SVE2 ChaCha20-Poly1305. 32-bit `arm` asks only Linux and Android, so
+  elsewhere it runs the code for a core with neither NEON nor the crypto
+  extension, whatever the target enables.
+- curve25519-dalek, which the portable backend runs X25519 and Ed25519 on,
+  compiles its AVX2 backend on every x86_64 target, which LLVM fails to do
+  where SSE is off, as on `x86_64-unknown-none` and `x86_64-unknown-uefi`
+  ([curve25519-dalek#601]): build with
+  `--cfg curve25519_dalek_backend="serial"` there, as UPSTREAM.md's
+  "curve25519-dalek cannot compile without SSE" says.
+- The aarch64 and `arm` assembly makes unaligned loads and stores and runs
+  vector instructions, so it needs what an OS sets up for its code: the MMU
+  on, buffers in Normal memory, alignment checking off (SCTLR.A clear), and
+  Advanced SIMD, and SVE in a `+sve2` build, untrapped at every exception
+  level that runs rind. The `*-none` targets
+  build Rust with `strict-align` for code that runs before that.
+- `RIND_CPU_DISABLE_*` does nothing, and `rind::cpu::Dit::hold()` holds
+  nothing, since rind sets DIT only on Apple's platforms.
+
 [rind-fips](rind-fips/README.md)'s FIPS 140-3 module builds only for glibc
 Linux on `x86_64` and `aarch64`, and runs only the fastest paths there: on
 `x86_64` it requires `aes`, `pclmulqdq`, `ssse3`, `sse4.1`, `popcnt`,
@@ -202,13 +250,15 @@ Intel guarantees the timing of the instructions it lists as data-independent
 family since 2004, and of some AMD cores.
 
 [s2n-bignum]: https://github.com/awslabs/s2n-bignum
+[getrandom]: https://docs.rs/getrandom
+[curve25519-dalek#601]: https://github.com/dalek-cryptography/curve25519-dalek/issues/601
 [curve25519-dalek]: https://github.com/dalek-cryptography/curve25519-dalek
 [HACL\*]: https://github.com/hacl-star/hacl-star
 [mlkem-native]: https://github.com/pq-code-package/mlkem-native
+[verified-garbage]: https://github.com/pyca/verified-garbage
 [mldsa-native]: https://github.com/pq-code-package/mldsa-native
 [libcrux]: https://github.com/cryspen/libcrux
 [aws-lc]: https://github.com/aws/aws-lc
-[verified-garbage]: https://github.com/pyca/verified-garbage
 [BoringSSL]: https://boringssl.googlesource.com/boringssl
 [OpenSSL]: https://github.com/openssl/openssl
 [MPC603EUM]: https://www.nxp.com/docs/en/reference-manual/MPC603EUM.pdf

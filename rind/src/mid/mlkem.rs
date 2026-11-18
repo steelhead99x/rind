@@ -3,6 +3,7 @@
 
 //! ML-KEM as standardised by FIPS-203, at each of its parameter sets.
 
+use alloc::boxed::Box;
 use core::fmt;
 use core::marker::PhantomData;
 use core::panic::{RefUnwindSafe, UnwindSafe};
@@ -61,7 +62,7 @@ pub trait Params:
     #[doc(hidden)]
     type CiphertextBytes: Array<u8>;
     /// An expanded decapsulation key: `768 * K + 96` bytes.
-    #[cfg(any(test, rind_fips))]
+    #[doc(hidden)]
     type DecapKeyBytes: Array<u8>;
     /// FIPS-203's name for the set.
     #[cfg(test)]
@@ -79,8 +80,6 @@ pub trait Params:
     fn parse(_: Internal, input: &Self::EncapKeyBytes) -> Result<EncapKey<Self>, Error>;
     #[doc(hidden)]
     fn encaps(_: Internal, key: &EncapKey<Self>, m: Message) -> (SharedSecret, Ciphertext<Self>);
-    #[doc(hidden)]
-    fn encode(_: Internal, key: &EncapKey<Self>) -> Self::EncapKeyBytes;
 }
 
 /// Proof that a call to a [`Params`] method comes from rind: no other crate
@@ -120,12 +119,6 @@ macro_rules! algorithms {
             let _mcdt = low::Mcdt::enter();
             key.encaps_mitigated(m)
         }
-
-        #[inline(never)]
-        fn encode(_: Internal, key: &EncapKey<Self>) -> Self::EncapKeyBytes {
-            let _mcdt = low::Mcdt::enter();
-            key.encode_mitigated()
-        }
     };
 }
 
@@ -138,7 +131,6 @@ impl Params for MlKem512 {
     type Matrix = [Poly; 4];
     type EncapKeyBytes = [u8; 800];
     type CiphertextBytes = [u8; 768];
-    #[cfg(any(test, rind_fips))]
     type DecapKeyBytes = [u8; 1632];
     #[cfg(test)]
     const NAME: &'static str = "ML-KEM-512";
@@ -154,7 +146,6 @@ impl Params for MlKem768 {
     type Matrix = [Poly; 9];
     type EncapKeyBytes = [u8; 1184];
     type CiphertextBytes = [u8; 1088];
-    #[cfg(any(test, rind_fips))]
     type DecapKeyBytes = [u8; 2400];
     #[cfg(test)]
     const NAME: &'static str = "ML-KEM-768";
@@ -170,7 +161,6 @@ impl Params for MlKem1024 {
     type Matrix = [Poly; 16];
     type EncapKeyBytes = [u8; 1568];
     type CiphertextBytes = [u8; 1568];
-    #[cfg(any(test, rind_fips))]
     type DecapKeyBytes = [u8; 3168];
     #[cfg(test)]
     const NAME: &'static str = "ML-KEM-1024";
@@ -240,7 +230,51 @@ impl Vector for [Poly; 4] {
 /// A parameter set's `K` encoded polynomials.
 type Encoded<P> = <<P as Params>::Vector as Vector>::Encoded;
 
-/// An ML-KEM decapsulation key.
+/// pyca/verified-garbage's encapsulation, for ML-KEM-768 where it runs.
+///
+/// It measured faster than rind's at every tier it runs on, parsing the key
+/// included: see `low::mlkem768_vg`.
+fn vg_encaps<P: Params>() -> Option<low::mlkem768_vg::Encaps> {
+    match P::K {
+        3 => low::mlkem768_vg::Encaps::check(),
+        _ => None,
+    }
+}
+
+/// pyca/verified-garbage's key generation and decapsulation, for ML-KEM-768
+/// where they run.
+fn vg_key_pair<P: Params>() -> Option<low::mlkem768_vg::KeyPair> {
+    match P::K {
+        3 => low::mlkem768_vg::KeyPair::check(),
+        _ => None,
+    }
+}
+
+/// `bytes` as the array of ML-KEM-768's size that VG's routines take, which
+/// it is whenever [`vg_encaps`] or [`vg_key_pair`] gave a routine.
+fn vg_array<const L: usize>(bytes: &[u8]) -> &[u8; L] {
+    bytes
+        .try_into()
+        .expect("only ML-KEM-768 runs VG's routines")
+}
+
+/// A VG routine's result, or `None`, as when the routine reached its
+/// `SampleNTT` bound, in a test that forces rind's fallback.
+fn vg_ran<T>(result: Option<T>) -> Option<T> {
+    #[cfg(test)]
+    if tests::FORCE_FALLBACK.get() {
+        return None;
+    }
+    result
+}
+
+/// An ML-KEM decapsulation key: the fields of FIPS 203's encoding,
+/// `dkPKE || ek || H(ek) || z`.
+///
+/// One from rind's key generation decapsulates with rind's arithmetic, and
+/// its encapsulation key holds its decoded form. One from VG's, where it
+/// runs, decapsulates with VG's routine, and its encapsulation key holds
+/// none.
 #[doc(hidden)]
 pub struct DecapKey<P: Params> {
     ek_pke: EncapKey<P>,
@@ -265,10 +299,54 @@ impl<P: Params> DecapKey<P> {
         P::decaps(Internal(()), self, c)
     }
 
-    /// Return the corresponding [`EncapKey`].
+    /// Return the corresponding [`EncapKey`]: without its decoded form where
+    /// VG encapsulates, which needs none.
     pub(crate) fn encapsulation_key(&self) -> EncapKey<P> {
         let _entry = low::Entry::new_public();
-        self.ek_pke.clone()
+        match vg_encaps::<P>() {
+            Some(_) => EncapKey {
+                bytes: self.ek_pke.bytes.clone(),
+                h_ek: self.ek_pke.h_ek,
+                hashed: self.ek_pke.hashed,
+                decoded: None,
+            },
+            None => self.ek_pke.clone(),
+        }
+    }
+
+    /// FIPS 203's encoding of the key, `dkPKE || ek || H(ek) || z`, as VG's
+    /// decapsulation takes it.
+    fn encode(&self) -> P::DecapKeyBytes {
+        let mut out = P::DecapKeyBytes::filled(0);
+        let (dk_pke, rest) = out.as_mut().split_at_mut(P::K * 384);
+        let (ek, rest) = rest.split_at_mut(P::K * 384 + 32);
+        let (h_ek, z) = rest.split_at_mut(32);
+        dk_pke.copy_from_slice(self.dk_pke.as_ref().as_flattened());
+        ek.copy_from_slice(self.ek_pke.bytes.as_ref());
+        h_ek.copy_from_slice(&self.ek_pke.h_ek);
+        z.copy_from_slice(&self.z);
+        out
+    }
+
+    /// The fields of FIPS 203's encoding `dk`, with the encapsulation key's
+    /// decoded form if `decode`, trusting the `H(ek)` it holds.
+    fn decode(dk: &P::DecapKeyBytes, decode: bool) -> Self {
+        let (dk_pke, rest) = dk.as_ref().split_at(P::K * 384);
+        let (ek, rest) = rest.split_at(P::K * 384 + 32);
+        let (h_ek, z) = rest.split_at(32);
+        let mut encoded = Encoded::<P>::filled([0; 384]);
+        encoded.as_mut().as_flattened_mut().copy_from_slice(dk_pke);
+        let bytes = P::EncapKeyBytes::from_slice(ek).unwrap();
+        Self {
+            ek_pke: EncapKey {
+                decoded: decode.then(|| Box::new(Decoded::new(&bytes))),
+                bytes,
+                h_ek: h_ek.try_into().unwrap(),
+                hashed: true,
+            },
+            dk_pke: encoded,
+            z: z.try_into().unwrap(),
+        }
     }
 
     /// Encode the key as bytes.
@@ -277,38 +355,27 @@ impl<P: Params> DecapKey<P> {
     #[cfg(any(test, rind_fips))]
     pub(crate) fn as_bytes(&self) -> P::DecapKeyBytes {
         let _entry = low::Entry::new_secret();
-        let mut out = P::DecapKeyBytes::filled(0);
-        let (dk_pke, rest) = out.as_mut().split_at_mut(P::K * 384);
-        let (ek, rest) = rest.split_at_mut(P::K * 384 + 32);
-        let (h_ek, z) = rest.split_at_mut(32);
-        dk_pke.copy_from_slice(self.dk_pke.as_ref().as_flattened());
-        ek.copy_from_slice(self.ek_pke.as_bytes().as_ref());
-        h_ek.copy_from_slice(&self.ek_pke.h_ek);
-        z.copy_from_slice(&self.z);
-        out
+        self.encode()
     }
 
     /// Decode a key encoded as [`Self::as_bytes()`] encodes it, or `None` if
     /// its `H(ek)` is not that of its encapsulation key. Like FIPS 203's
     /// decapsulation input check (section 7.3), it checks nothing else: an
     /// embedded encapsulation key that fails its modulus check decodes
-    /// reduced mod q.
+    /// reduced mod q. It decapsulates with rind's arithmetic, since VG's
+    /// takes only a key VG generated.
     ///
     /// This is used for testing, and by the FIPS module's ACVP build: rind
     /// generates keys only from seeds.
     #[cfg(any(test, rind_fips))]
     pub(crate) fn from_bytes(dk: &P::DecapKeyBytes) -> Option<Self> {
-        let (dk_pke, rest) = dk.as_ref().split_at(P::K * 384);
-        let (ek, rest) = rest.split_at(P::K * 384 + 32);
-        let (h_ek, z) = rest.split_at(32);
-        let ek_pke = EncapKey::from_bytes_unchecked(&P::EncapKeyBytes::from_slice(ek).unwrap());
-        let mut encoded = Encoded::<P>::filled([0; 384]);
-        encoded.as_mut().as_flattened_mut().copy_from_slice(dk_pke);
-        (ek_pke.h_ek == h_ek).then(|| Self {
-            ek_pke,
-            dk_pke: encoded,
-            z: z.try_into().unwrap(),
-        })
+        let _entry = low::Entry::new_public();
+        // Its arithmetic runs multiplies Intel's MXCSR mitigation covers.
+        let _mcdt = low::Mcdt::enter();
+        let key = Self::decode(dk, true);
+        let mut h = sha3::Sha3_256Context::new();
+        h.update(key.ek_pke.bytes.as_ref());
+        (h.finish() == key.ek_pke.h_ek).then_some(key)
     }
 
     pub(crate) fn keygen_internal(seed: &[u8; 64]) -> Self {
@@ -317,6 +384,17 @@ impl<P: Params> DecapKey<P> {
 
     /// [`Self::keygen_internal`], under the caller's MXCSR mitigation.
     fn keygen_mitigated(seed: &[u8; 64]) -> Self {
+        if let Some(vg) = vg_key_pair::<P>() {
+            low::ct::secret_slice(seed);
+            // `None` with probability below 2^-261: rind's arithmetic then
+            // computes the same key.
+            if let Some(dk) = vg_ran(vg.keygen(seed)) {
+                // The encapsulation key and its hash are public.
+                low::ct::public_slice(&dk[P::K * 384..P::K * 768 + 64]);
+                return Self::decode(&P::DecapKeyBytes::from_slice(&dk).unwrap(), false);
+            }
+        }
+
         // Preliminaries: split seed into d and z.
         let (d, z) = seed.split_at(32);
         let d = low::ct::into_secret(d.try_into().unwrap());
@@ -336,6 +414,25 @@ impl<P: Params> DecapKey<P> {
 
     /// [`Self::decaps`], under the caller's MXCSR mitigation.
     fn decaps_mitigated(&self, c: &Ciphertext<P>) -> SharedSecret {
+        if self.ek_pke.decoded.is_some() {
+            return self.decaps_rind(c);
+        }
+        // A key VG generated, which VG's routine decapsulates where it runs.
+        let dk = self.encode();
+        if let Some(vg) = vg_key_pair::<P>() {
+            // Never `None`: VG's key generation sampled the same matrix
+            // without reaching its bound. rind's arithmetic would compute the
+            // same secret.
+            if let Some(k) = vg_ran(vg.decaps(vg_array(dk.as_ref()), vg_array(c.0.as_ref()))) {
+                return SharedSecret(k);
+            }
+        }
+        Self::decode(&dk, true).decaps_rind(c)
+    }
+
+    /// FIPS 203's `ML-KEM.Decaps_internal`, on rind's arithmetic: the
+    /// encapsulation key holds its decoded form.
+    fn decaps_rind(&self, c: &Ciphertext<P>) -> SharedSecret {
         // Steps 1. - 4. are not relevant for us.
         // 5. m' <- K-PKE.Decrypt(dkPKE, c)
         let m_prime = self.kpke_decrypt(c);
@@ -357,7 +454,12 @@ impl<P: Params> DecapKey<P> {
         j.finish().squeeze(&mut k_bar.0);
 
         // 8. c' <- K-PKE.Encrypt(ekPKE, m', r')
-        let c_prime = self.ek_pke.kpke_encrypt(m_prime, r_prime);
+        let c_prime = self
+            .ek_pke
+            .decoded
+            .as_deref()
+            .expect("rind decapsulates only a decoded key")
+            .kpke_encrypt(m_prime, r_prime);
 
         // 9. - 11. if c != c' then K' <- K‾
         // 12. return K'
@@ -398,9 +500,19 @@ impl<P: Params> DecapKey<P> {
         // 18. t^ = A^ ∘ ŝ + ê
         let t_hat = a_hat.mul_add(&s_hat, &e_hat);
 
-        // H(ek), for ML-KEM.KeyGen's step 3.
+        // 19. ekPKE <- ByteEncode_12(t^) || 𝜌, which is public.
         let t_hat = Coeffs(low::ct::into_public(t_hat.0), PhantomData);
-        let encap = EncapKey::new(t_hat, rho, a_hat.transpose(), None);
+        let mut bytes = P::EncapKeyBytes::filled(0);
+        let (t_hat_bytes, rho_bytes) = bytes.as_mut().split_at_mut(P::K * 384);
+        t_hat_bytes.copy_from_slice(t_hat.to_bytes().as_ref().as_flattened());
+        rho_bytes.copy_from_slice(&rho);
+        let encap = EncapKey::new(
+            bytes,
+            Decoded {
+                t_hat_coeffs: t_hat,
+                transpose_a_hat: a_hat.transpose(),
+            },
+        );
 
         s_hat.reduce_in_place();
         let decap = s_hat.to_bytes();
@@ -448,10 +560,10 @@ impl<P: Params> DecapKey<P> {
 }
 
 // Wiped whole, so no byte of the key survives, padding included. The boxed
-// matrix goes first, since the whole-value wipe nulls its pointer.
+// decoded form goes first, since the whole-value wipe nulls its pointer.
 impl<P: Params> Drop for DecapKey<P> {
     fn drop(&mut self) {
-        self.ek_pke.free_matrix();
+        self.ek_pke.free_decoded();
         low::zeroise_value(self);
     }
 }
@@ -461,156 +573,49 @@ impl<P: Params> low::Zeroable for DecapKey<P> {}
 /// An ML-KEM encapsulation key.
 #[doc(hidden)]
 pub struct EncapKey<P: Params> {
-    /// `H(ek)`, which both encapsulation and decapsulation hash in.
+    /// The key as FIPS 203 encodes it, `ByteEncode_12(t^) || 𝜌`.
+    bytes: P::EncapKeyBytes,
+    /// `H(ek)`, which both encapsulation and decapsulation hash in, if
+    /// `hashed`.
     h_ek: [u8; 32],
-    rho: [u8; 32],
-    /// `t_hat` decoded, which the modulus check computes anyway. No encoded
-    /// copy is kept: only `as_bytes` needs one, and it re-encodes.
+    /// Whether `h_ek` holds the hash: false only for a key VG parsed, whose
+    /// encapsulation hashes it. A flag, not an `Option`, so that the
+    /// all-zero value a wipe leaves is a valid one.
+    hashed: bool,
+    /// What rind's encryption multiplies by: `None` where VG encapsulates,
+    /// and once a key pair holding it is wiped. Boxed, as ML-KEM-1024's is
+    /// 10 KiB, so moving a key copies little.
+    decoded: Option<Box<Decoded<P>>>,
+}
+
+/// An encapsulation key decoded for rind's arithmetic.
+struct Decoded<P: Params> {
+    /// `t_hat` decoded, which the modulus check computes anyway.
     t_hat_coeffs: Coeffs<P::Vector, Ntt>,
-    /// The transposed matrix, which encryption multiplies by. Boxed, as
-    /// ML-KEM-1024's is 8 KiB, so moving a key copies little; `None` only
-    /// once a key pair holding it is wiped.
-    transpose_a_hat: Option<Box<Coeffs<P::Matrix, Ntt>>>,
+    /// The transposed matrix, sampled from `𝜌`.
+    transpose_a_hat: Coeffs<P::Matrix, Ntt>,
 }
 
-impl<P: Params> EncapKey<P> {
-    /// Wipes and frees the transposed matrix, so that a key pair's drop can
-    /// wipe the rest of the key's value.
-    pub(crate) fn free_matrix(&mut self) {
-        if let Some(mut transpose_a_hat) = self.transpose_a_hat.take() {
-            low::zeroise(transpose_a_hat.0.as_mut().as_flattened_mut());
-        }
-    }
-}
-
-impl<P: Params> Clone for EncapKey<P> {
+impl<P: Params> Clone for Decoded<P> {
     fn clone(&self) -> Self {
         Self {
-            h_ek: self.h_ek,
-            rho: self.rho,
             t_hat_coeffs: self.t_hat_coeffs.clone(),
             transpose_a_hat: self.transpose_a_hat.clone(),
         }
     }
 }
 
-impl<P: Params> EncapKey<P> {
-    /// Assemble a key from its decoded parts, hashing `encoded`, its
-    /// encoding, if the caller has it, or else re-encoding.
-    fn new(
-        t_hat_coeffs: Coeffs<P::Vector, Ntt>,
-        rho: [u8; 32],
-        transpose_a_hat: Coeffs<P::Matrix, Ntt>,
-        encoded: Option<&P::EncapKeyBytes>,
-    ) -> Self {
-        let mut h = sha3::Sha3_256Context::new();
-        match encoded {
-            Some(encoded) => h.update(encoded.as_ref()),
-            None => {
-                h.update(t_hat_coeffs.to_bytes().as_ref().as_flattened());
-                h.update(&rho);
-            }
-        }
+impl<P: Params> Decoded<P> {
+    /// `bytes` decoded, each coefficient reduced mod q, and its matrix
+    /// sampled.
+    fn new(bytes: &P::EncapKeyBytes) -> Self {
+        let (t_hat, rho) = bytes.as_ref().split_at(P::K * 384);
+        let mut encoded = Encoded::<P>::filled([0; 384]);
+        encoded.as_mut().as_flattened_mut().copy_from_slice(t_hat);
         Self {
-            h_ek: h.finish(),
-            rho,
-            t_hat_coeffs,
-            transpose_a_hat: Some(Box::new(transpose_a_hat)),
+            t_hat_coeffs: Coeffs::<P::Vector, Ntt>::from_bytes(&encoded),
+            transpose_a_hat: Coeffs::sample(rho.try_into().unwrap(), true),
         }
-    }
-
-    /// Create a new [`EncapKey`] from bytes.
-    pub(crate) fn from_bytes(input: &P::EncapKeyBytes) -> Result<Self, Error> {
-        let _entry = low::Entry::new_public();
-        P::parse(Internal(()), input)
-    }
-
-    /// [`Self::from_bytes`] without its modulus check, as decapsulation's
-    /// input check (FIPS 203, section 7.3) has it: `ByteDecode_12` reduces
-    /// each coefficient mod q, and `H(ek)` stays the hash of `input` as
-    /// given.
-    #[cfg(any(test, rind_fips))]
-    #[inline(never)]
-    fn from_bytes_unchecked(input: &P::EncapKeyBytes) -> Self {
-        let _entry = low::Entry::new_public();
-        // Its arithmetic runs multiplies Intel's MXCSR mitigation covers.
-        let _mcdt = low::Mcdt::enter();
-        let (t_hat, rho) = input.as_ref().split_at(P::K * 384);
-        let mut encoded = Encoded::<P>::filled([0; 384]);
-        encoded.as_mut().as_flattened_mut().copy_from_slice(t_hat);
-        let t_hat_coeffs = Coeffs::<P::Vector, Ntt>::from_bytes(&encoded);
-        let rho = rho.try_into().unwrap();
-        let transpose_a_hat = Coeffs::sample(&rho, true);
-        Self::new(t_hat_coeffs, rho, transpose_a_hat, Some(input))
-    }
-
-    /// [`Self::from_bytes`], under the caller's MXCSR mitigation.
-    fn parse_mitigated(input: &P::EncapKeyBytes) -> Result<Self, Error> {
-        let (t_hat, rho) = input.as_ref().split_at(P::K * 384);
-
-        // 2. (Modulus check) Perform the computation
-        //
-        //   test <- ByteEncode_12(ByteDecode_12(ek[0 ∶ 384k]))
-        //
-        // If test != ek[0 ∶ 384k], then input checking failed.
-        let mut encoded = Encoded::<P>::filled([0; 384]);
-        encoded.as_mut().as_flattened_mut().copy_from_slice(t_hat);
-        let t_hat_coeffs = Coeffs::<P::Vector, Ntt>::from_bytes(&encoded);
-        if t_hat != t_hat_coeffs.to_bytes().as_ref().as_flattened() {
-            return Err(KeyFormatError::MlKemModulus.into());
-        }
-
-        let rho = rho.try_into().unwrap();
-        let transpose_a_hat = Coeffs::sample(&rho, true);
-        Ok(Self::new(t_hat_coeffs, rho, transpose_a_hat, Some(input)))
-    }
-
-    /// Encapsulate a random shared secret, returning the shared secret and a ciphertext.
-    ///
-    /// The ciphertext can be returned to the holder of the [`DecapKey`] who can then
-    /// derive the same [`SharedSecret`].
-    pub(crate) fn encaps(&self) -> Result<(SharedSecret, Ciphertext<P>), Error> {
-        let _entry = low::Entry::new_secret();
-        let mut m = Message([0; 32]);
-        SystemRandom.fill(&mut m.0)?;
-        Ok(self.encaps_internal(m))
-    }
-
-    /// Encode the [`EncapKey`] as bytes.
-    pub(crate) fn as_bytes(&self) -> P::EncapKeyBytes {
-        let _entry = low::Entry::new_public();
-        P::encode(Internal(()), self)
-    }
-
-    /// [`Self::as_bytes`], under the caller's MXCSR mitigation.
-    fn encode_mitigated(&self) -> P::EncapKeyBytes {
-        let mut out = P::EncapKeyBytes::filled(0);
-        let (t_hat, rho) = out.as_mut().split_at_mut(P::K * 384);
-        t_hat.copy_from_slice(self.t_hat_coeffs.to_bytes().as_ref().as_flattened());
-        rho.copy_from_slice(&self.rho);
-        out
-    }
-
-    pub(crate) fn encaps_internal(&self, m: Message) -> (SharedSecret, Ciphertext<P>) {
-        P::encaps(Internal(()), self, m)
-    }
-
-    /// [`Self::encaps_internal`], under the caller's MXCSR mitigation.
-    fn encaps_mitigated(&self, m: Message) -> (SharedSecret, Ciphertext<P>) {
-        low::ct::secret_slice(&m.0);
-
-        // 1. (K, r) <- G(m || H(ek))
-        let mut g = sha3::Sha3_512Context::new();
-        g.update(&m.0);
-        g.update(&self.h_ek);
-        let kr = g.finish();
-        let (k, r) = kr.split_at(32);
-        let k = SharedSecret(k.try_into().unwrap());
-        let r = KpkeRandomness(r.try_into().unwrap());
-
-        // 2. c <- K-PKE.Encrypt(ek, m, r)
-        let c = self.kpke_encrypt(m, r);
-        (k, Ciphertext(low::ct::into_public(c.0)))
     }
 
     fn kpke_encrypt(&self, m: Message, r: KpkeRandomness) -> Ciphertext<P> {
@@ -619,7 +624,6 @@ impl<P: Params> EncapKey<P> {
         // 3. 𝜌 <- ekPKE[384k ∶ 384k + 32]
         //  - only required for a_hat expansion
         // 4. - 8. rolled into self.transpose_a_hat.
-        let transpose_a_hat = self.transpose_a_hat.as_deref().expect("wiped only on drop");
 
         // 9. - 12. y_i <- SamplePolyCBD_eta1(PRF(r, N))
         // 13. - 16. e_1 <- SamplePolyCBD_eta2(PRF(r, N))
@@ -644,7 +648,8 @@ impl<P: Params> EncapKey<P> {
         let y_cache = y_hat.mul_cache();
 
         // 19. u <- NTT^-1(transpose(A^) ∘ y^) + e_1
-        let mut u = transpose_a_hat
+        let mut u = self
+            .transpose_a_hat
             .mul_and_inverse_ntt(&y_hat, &y_cache)
             .add(&e_1);
         u.reduce_in_place();
@@ -687,6 +692,135 @@ impl<P: Params> EncapKey<P> {
 
         // 24. return c <- (c_1 || c_2)
         Ciphertext(c)
+    }
+}
+
+impl<P: Params> EncapKey<P> {
+    /// Wipes and frees the decoded form, so that a key pair's drop can wipe
+    /// the rest of the key's value.
+    pub(crate) fn free_decoded(&mut self) {
+        if let Some(mut decoded) = self.decoded.take() {
+            low::zeroise(decoded.t_hat_coeffs.0.as_mut().as_flattened_mut());
+            low::zeroise(decoded.transpose_a_hat.0.as_mut().as_flattened_mut());
+        }
+    }
+}
+
+impl<P: Params> Clone for EncapKey<P> {
+    fn clone(&self) -> Self {
+        Self {
+            bytes: self.bytes.clone(),
+            h_ek: self.h_ek,
+            hashed: self.hashed,
+            decoded: self.decoded.clone(),
+        }
+    }
+}
+
+impl<P: Params> EncapKey<P> {
+    /// A key decoded for rind's arithmetic, from its encoding `bytes`, which
+    /// it hashes.
+    fn new(bytes: P::EncapKeyBytes, decoded: Decoded<P>) -> Self {
+        let mut h = sha3::Sha3_256Context::new();
+        h.update(bytes.as_ref());
+        Self {
+            h_ek: h.finish(),
+            hashed: true,
+            bytes,
+            decoded: Some(Box::new(decoded)),
+        }
+    }
+
+    /// Create a new [`EncapKey`] from bytes.
+    pub(crate) fn from_bytes(input: &P::EncapKeyBytes) -> Result<Self, Error> {
+        let _entry = low::Entry::new_public();
+        P::parse(Internal(()), input)
+    }
+
+    /// [`Self::from_bytes`], under the caller's MXCSR mitigation.
+    fn parse_mitigated(input: &P::EncapKeyBytes) -> Result<Self, Error> {
+        // 2. (Modulus check) Perform the computation
+        //
+        //   test <- ByteEncode_12(ByteDecode_12(ek[0 ∶ 384k]))
+        //
+        // If test != ek[0 ∶ 384k], then input checking failed.
+        if let Some(vg) = vg_encaps::<P>() {
+            // VG's encapsulation hashes the key itself, almost for free.
+            return match vg.check_ek(vg_array(input.as_ref())) {
+                true => Ok(Self {
+                    bytes: input.clone(),
+                    h_ek: [0; 32],
+                    hashed: false,
+                    decoded: None,
+                }),
+                false => Err(KeyFormatError::MlKemModulus.into()),
+            };
+        }
+        let decoded = Decoded::new(input);
+        let t_hat = &input.as_ref()[..P::K * 384];
+        let encoded: Encoded<P> = decoded.t_hat_coeffs.to_bytes();
+        if t_hat != encoded.as_ref().as_flattened() {
+            return Err(KeyFormatError::MlKemModulus.into());
+        }
+        Ok(Self::new(input.clone(), decoded))
+    }
+
+    /// Encapsulate a random shared secret, returning the shared secret and a ciphertext.
+    ///
+    /// The ciphertext can be returned to the holder of the [`DecapKey`] who can then
+    /// derive the same [`SharedSecret`].
+    pub(crate) fn encaps(&self) -> Result<(SharedSecret, Ciphertext<P>), Error> {
+        let _entry = low::Entry::new_secret();
+        let mut m = Message([0; 32]);
+        SystemRandom.fill(&mut m.0)?;
+        Ok(self.encaps_internal(m))
+    }
+
+    /// The [`EncapKey`] as FIPS 203 encodes it.
+    pub(crate) fn as_bytes(&self) -> &P::EncapKeyBytes {
+        &self.bytes
+    }
+
+    pub(crate) fn encaps_internal(&self, m: Message) -> (SharedSecret, Ciphertext<P>) {
+        P::encaps(Internal(()), self, m)
+    }
+
+    /// [`Self::encaps_internal`], under the caller's MXCSR mitigation.
+    fn encaps_mitigated(&self, m: Message) -> (SharedSecret, Ciphertext<P>) {
+        low::ct::secret_slice(&m.0);
+
+        if let Some(decoded) = &self.decoded {
+            return self.encaps_rind(decoded, m);
+        }
+        // A key VG parsed, or a key pair's where VG encapsulates.
+        if let Some(vg) = vg_encaps::<P>() {
+            let h_ek = self.hashed.then_some(&self.h_ek);
+            // `None` with probability below 2^-261: rind's arithmetic then
+            // computes the same secret.
+            if let Some((k, c)) = vg_ran(vg.encaps(vg_array(self.bytes.as_ref()), h_ek, &m.0)) {
+                let c = P::CiphertextBytes::from_slice(&c).unwrap();
+                return (SharedSecret(k), Ciphertext(low::ct::into_public(c)));
+            }
+        }
+        let decoded = Decoded::new(&self.bytes);
+        Self::new(self.bytes.clone(), decoded.clone()).encaps_rind(&decoded, m)
+    }
+
+    /// FIPS 203's `ML-KEM.Encaps_internal`, on rind's arithmetic over
+    /// `decoded`, this key's decoded form, with its hash known.
+    fn encaps_rind(&self, decoded: &Decoded<P>, m: Message) -> (SharedSecret, Ciphertext<P>) {
+        // 1. (K, r) <- G(m || H(ek))
+        let mut g = sha3::Sha3_512Context::new();
+        g.update(&m.0);
+        g.update(&self.h_ek);
+        let kr = g.finish();
+        let (k, r) = kr.split_at(32);
+        let k = SharedSecret(k.try_into().unwrap());
+        let r = KpkeRandomness(r.try_into().unwrap());
+
+        // 2. c <- K-PKE.Encrypt(ek, m, r)
+        let c = decoded.kpke_encrypt(m, r);
+        (k, Ciphertext(low::ct::into_public(c.0)))
     }
 }
 
@@ -1228,6 +1362,51 @@ mod tests {
     use super::*;
     use crate::test::{Acvp, acvp};
 
+    std::thread_local! {
+        /// Whether [`vg_ran`] discards this thread's VG results.
+        pub(super) static FORCE_FALLBACK: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+    }
+
+    // Where a VG routine reaches its `SampleNTT` bound, rind's arithmetic
+    // computes the same key, ciphertext, and secret: for a key pair VG or
+    // rind generated, an encapsulation key with its hash, and one VG parsed,
+    // which has none. Where VG runs no routine, both sides are rind's, so it
+    // asserts that VG generated and parsed the keys wherever it runs.
+    #[test]
+    fn fallback_matches_vg() {
+        let seed = core::array::from_fn(|i| i as u8);
+        let m = || Message([0xa5; 32]);
+        let secret = |k: SharedSecret| low::ct::into_public(*k.as_ref());
+        let dk = DecapKey::<MlKem768>::keygen_internal(&seed);
+        let ek = dk.encapsulation_key();
+        let parsed = EncapKey::<MlKem768>::from_bytes(ek.as_bytes()).unwrap();
+        // Only VG's routines leave a key without its decoded form.
+        assert_eq!(
+            dk.ek_pke.decoded.is_none(),
+            vg_key_pair::<MlKem768>().is_some()
+        );
+        assert_eq!(parsed.decoded.is_none(), vg_encaps::<MlKem768>().is_some());
+        let (k, c) = ek.encaps_internal(m());
+        let k = secret(k);
+        assert_eq!(secret(dk.decaps(&c)), k);
+
+        FORCE_FALLBACK.set(true);
+        let rind = DecapKey::<MlKem768>::keygen_internal(&seed);
+        assert!(rind.ek_pke.decoded.is_some());
+        assert_eq!(
+            low::ct::into_public(rind.as_bytes()),
+            low::ct::into_public(dk.as_bytes())
+        );
+        assert_eq!(rind.encapsulation_key().as_bytes(), ek.as_bytes());
+        for ek in [&ek, &parsed] {
+            let (k_ek, c_ek) = ek.encaps_internal(m());
+            assert_eq!((secret(k_ek), c_ek.as_ref()), (k, c.as_ref()));
+        }
+        assert_eq!(secret(dk.decaps(&c)), k);
+        assert_eq!(secret(rind.decaps(&c)), k);
+        FORCE_FALLBACK.set(false);
+    }
+
     fn acvp_seed(test: &serde_json::Value) -> [u8; 64] {
         [test.hex("d"), test.hex("z")].concat().try_into().unwrap()
     }
@@ -1388,7 +1567,10 @@ mod tests {
             let key =
                 DecapKey::<P>::from_bytes(&P::DecapKeyBytes::from_slice(dk).unwrap()).unwrap();
             assert_eq!(key.ek_pke.h_ek, h);
-            assert_eq!(key.ek_pke.t_hat_coeffs.0.as_ref()[0][0], 0);
+            assert_eq!(
+                key.ek_pke.decoded.as_ref().unwrap().t_hat_coeffs.0.as_ref()[0][0],
+                0
+            );
         }
         check::<MlKem512>();
         check::<MlKem768>();
@@ -1487,5 +1669,73 @@ mod tests {
         check::<MlKem512>(&seed);
         check::<MlKem768>(&seed);
         check::<MlKem1024>(&seed);
+
+        // pyca/verified-garbage's ML-KEM-768 encapsulation, which runs with
+        // SHA3, to a key pair's public key, with its hash, and to a parsed
+        // one, without.
+        assert!(vg_encaps::<MlKem768>().is_some());
+        let dk = DecapKey::<MlKem768>::keygen_internal(&[0x5a; 64]);
+        let m = || Message(core::array::from_fn(|i| seed[i % seed.len()]));
+        let ek = dk.encapsulation_key();
+        ct_qemu::traced(|| ek.encaps_internal(m()));
+        let ek = EncapKey::<MlKem768>::from_bytes(ek.as_bytes()).unwrap();
+        ct_qemu::traced(|| ek.encaps_internal(m()));
+    }
+
+    // Valgrind runs no AVX-512, so `admin/ctgrind` never reaches
+    // pyca/verified-garbage's ML-KEM-768 key generation and decapsulation,
+    // nor its AVX-512 encapsulation; `admin/ct-sde` traces them here, under
+    // Sapphire Rapids, as `ct_qemu_mlkem` traces aarch64's. Encapsulating a
+    // secret message to a fixed key, with the key's hash and without, then
+    // decapsulating the ciphertext and a tampered copy. A second key then
+    // takes its implicit-rejection secret `z` from the seed, as its
+    // generation is traced: `𝜌` comes from the rest, so it stays fixed.
+    // Fixing `d` also fixes the secret vectors it derives, and key generation
+    // cannot vary them without varying `𝜌`, so the last key decapsulates
+    // with the fixed key's `ek` but the `dkPKE` of a key generated from a
+    // seeded `d`. VG's contract asks for a whole key its key generation
+    // wrote, and none varies `dkPKE` with `𝜌` fixed; each field here is one
+    // VG's key generation wrote, so every coefficient is in range.
+    #[cfg(rind_backend = "x86_64")]
+    #[test]
+    #[ignore = "admin/ct-sde runs it under Intel SDE"]
+    fn ct_sde_mlkem768() {
+        use crate::low::ct_sde;
+
+        assert!(vg_key_pair::<MlKem768>().is_some(), "AVX-512 F, BW, and VL");
+        let seed = ct_sde::seed().to_le_bytes();
+        let m = || Message(core::array::from_fn(|i| seed[i % seed.len()]));
+        let dk = DecapKey::<MlKem768>::keygen_internal(&[0x5a; 64]);
+        let ek = dk.encapsulation_key();
+        let (_, c) = ct_sde::traced(|| ek.encaps_internal(m()));
+        let ek = EncapKey::<MlKem768>::from_bytes(ek.as_bytes()).unwrap();
+        ct_sde::traced(|| ek.encaps_internal(m()));
+        ct_sde::traced(|| dk.decaps(&c));
+        let mut c = c.0;
+        c[0] ^= 1;
+        ct_sde::traced(|| dk.decaps(&Ciphertext(c)));
+
+        let dk = ct_sde::traced(|| {
+            DecapKey::<MlKem768>::keygen_internal(&core::array::from_fn(|i| match i {
+                ..32 => 0x5a,
+                _ => seed[i % seed.len()],
+            }))
+        });
+        let (_, c) = dk.encapsulation_key().encaps_internal(Message([0xa5; 32]));
+        ct_sde::traced(|| dk.decaps(&c));
+        let mut c = c.0;
+        c[0] ^= 1;
+        ct_sde::traced(|| dk.decaps(&Ciphertext(c)));
+
+        let fixed = DecapKey::<MlKem768>::keygen_internal(&[0x5a; 64]).encode();
+        let seeded = DecapKey::<MlKem768>::keygen_internal(&core::array::from_fn(|i| {
+            seed[i % seed.len()] ^ i as u8
+        }))
+        .encode();
+        let mut spliced = fixed;
+        spliced[..3 * 384].copy_from_slice(&seeded[..3 * 384]);
+        let dk = DecapKey::<MlKem768>::decode(&spliced, false);
+        let (_, c) = dk.encapsulation_key().encaps_internal(Message([0xa5; 32]));
+        ct_sde::traced(|| dk.decaps(&c));
     }
 }

@@ -141,6 +141,14 @@ structure Printer (M : ISA) where
   instruction of a target whose code puts such instructions between Intel's
   prologue and epilogue itself (x86), or has none. -/
   mcdt : M.Instr → Bool := fun _ => false
+  /-- Whether the instruction `i` and a branch on `c`, right after a call of
+  `vg_mcdt_enter` (`Spec/Mcdt.lean`), branch exactly when it returned 0: on
+  x86-64, `test eax, eax` and `je`. So the code that branch skips, the
+  `else` of an `ite` on `c`, which the printer lays out right after it
+  (`lower`), runs only once `vg_mcdt_enter` has returned 1, MXCSR then
+  holding `0x1FBF` (`Rust.mcdtOpen`). `false` for every instruction
+  of a target without `vg_mcdt_enter`. -/
+  mcdtGuard : M.Instr → M.Cond → Bool := fun _ _ => false
 
 variable {M : ISA} (P : Printer M)
 
