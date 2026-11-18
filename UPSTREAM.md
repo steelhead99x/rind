@@ -109,6 +109,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Reported:** no.
 - **Goes when:** valgrind's EXIDX reader takes `vsp = r11`.
 
+### Memcheck flags OpenSSL's name map on aarch64
+
+- **Breaks:** nixpkgs' OpenSSL 3.5.9 on aarch64 branches on the bytes past a NUL in its own uninitialised stack buffers while it sets up a library context: `OPENSSL_strlcpy` under `provider_conf_params_internal` when `OSSL_LIB_CTX_load_config` loads the config, and under `OBJ_obj2txt` when `get_legacy_*_names` fills the name map. Those bytes hash into the map's buckets, so `ossl_namemap_name2num` and `namemap_add_name` report on every later lookup. x86_64's build of the same OpenSSL reports nothing. None of it touches a key.
+- **Reproduce:** at main's 561555b3f, on an arm64 host, `admin/ctgrind adapters --release` reports 2945 errors from 32 contexts in `rind-openssl`'s `ctgrind` test, all in `libcrypto.so.3`'s setup.
+- **Workaround:** the `openssl-*` suppressions in `admin/ctgrind.supp`, each naming libcrypto's setup frames, never the provider's.
+- **Reported:** no.
+- **Goes when:** nixpkgs' OpenSSL no longer reads those bytes on aarch64, or memcheck tracks them apart.
+
 ### Valgrind on ARM does not fault guard pages
 
 - **Breaks:** under valgrind on ARM, reading a `PROT_NONE` guard page does not fault, so `low::guard_pages`'s `planted_over_read_faults` fails.
@@ -118,7 +126,7 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 ### BINSEC cannot decode much of what rind runs
 
-- **Breaks:** BINSEC 0.11.3 stops at instructions it cannot decode: on x86_64, AES-NI, VAES, the SHA512 instructions, and every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's, and the `msr` that sets DIT; on armv7, the NEON table lookups and the crypto extension.
+- **Breaks:** BINSEC 0.11.3 stops at instructions it cannot decode: on x86_64, AES-NI, VAES, the SHA512 instructions, and every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's, every SVE encoding, such as SVE2's `xar`, and the `msr` that sets DIT; on armv7, the NEON table lookups and the crypto extension.
 - **Workaround:** `admin/ct-binsec`'s `UNDECODED` denies those features, leaving their paths to `admin/ctgrind`, `admin/ct-sde`, and `admin/ct-qemu`, and armv7 has no `binsec` row in `ctgrind.yml`.
 - **Reported:** no.
 - **Goes when:** a BINSEC release decodes each, feature by feature.

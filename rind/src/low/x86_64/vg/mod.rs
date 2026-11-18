@@ -5,7 +5,11 @@
 //! pyca/verified-garbage's verified routines that rind runs, and the
 //! routines and tables they reach: see admin/import-vg.
 
-#![allow(dead_code, unused_macros, clippy::all)]
+#![allow(dead_code, unreachable_pub, unused_macros, clippy::all)]
+
+/// A table of constants, aligned to a cache line.
+#[repr(C, align(64))]
+pub struct Table<const N: usize>(pub [u8; N]);
 
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_apply_avx2;
@@ -22,6 +26,86 @@ pub(crate) mod vg_chacha20_xor_avx2;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_xor_avx512vl;
 #[rustfmt::skip]
+pub(crate) mod vg_keccak_absorb_scratch;
+#[rustfmt::skip]
+pub(crate) mod vg_keccak_f1600;
+#[rustfmt::skip]
+pub(crate) mod vg_keccak_pad_scratch;
+#[rustfmt::skip]
+pub(crate) mod vg_keccak_squeeze_scratch;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem16_cbd2_avx2;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_check_ek;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_check_ek_avx2;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_decaps_avx512;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_decaps_body_avx512;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encaps;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encaps_avx;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encaps_avx2;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encaps_avx512;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encaps_body;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encaps_body_avx2;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encaps_body_avx512;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encaps_h;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encaps_h_avx;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encaps_h_avx2;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encaps_h_avx512;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encaps_h_body;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encaps_h_body_avx2;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encaps_h_body_avx512;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_encrypt_mul;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_keygen_avx512;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_keygen_body_avx512;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_kpke_decrypt;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_kpke_encrypt;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_kpke_keygen_ntt;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem768_kpke_keygen_row;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem_add;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem_cbd2;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem_compress_encode;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem_decode12;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem_decode_decompress;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem_ntt_zetas;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem_sample_ntt;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem_sample_ntt4;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem_sample_tbl;
+#[rustfmt::skip]
+pub(crate) mod vg_mlkem_yconsts;
+#[rustfmt::skip]
 pub(crate) mod vg_rsa_mont_mul_adx;
 #[rustfmt::skip]
 pub(crate) mod vg_rsa_private_crt_precomputed_ifma;
@@ -29,3 +113,7 @@ pub(crate) mod vg_rsa_private_crt_precomputed_ifma;
 pub(crate) mod vg_rsa_private_crt_precomputed_ifma512;
 #[rustfmt::skip]
 pub(crate) mod vg_rsa_public_precomputed_checked_ifma;
+#[rustfmt::skip]
+pub(crate) mod vg_zeroize_avx_core;
+#[rustfmt::skip]
+pub(crate) mod vg_zeroize_core;

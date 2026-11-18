@@ -25,7 +25,9 @@ CPUs with AVX2 but without SHA-NI run [OpenSSL]'s AVX2 SHA-256, and SLH-DSA's
 SHA-2 sets [SPHINCS+]'s AVX2 eight-way SHA-256, and CPUs with the SHA512
 instructions run OpenSSL's SHA-384 and SHA-512 for them. Intel CPUs
 without AVX2 run [aws-lc]'s AVX SHA-1, SHA-256, and verified ✓ SHA-384 and
-SHA-512.
+SHA-512. CPUs with AVX2 but without AVX-512 run ML-KEM-768's key generation
+and decapsulation as ML-KEM-512's, on s2n-bignum ✓ + mlkem-native ✓, and only
+its encapsulation on [verified-garbage] (see [ML-KEM](#ml-kem)).
 
 | Algorithm | x86_64 | no AVX2 | no AVX | no AES-NI | SSE2 |
 |---|---|---|---|---|---|
@@ -56,7 +58,8 @@ SHA-512.
 | P-256 ECDH, ECDSA | s2n-bignum ✓ + aws-lc + Graviola ⚡ |  |  |  |  |
 | P-384 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ + Graviola ⚡ |  |  |  |  |
 | P-521 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ |  |  |  |  |
-| ML-KEM | s2n-bignum ✓ + mlkem-native ✓ + Graviola ⚡ | mlkem-native ⚡ + s2n-bignum ✓ |  |  |  |
+| ML-KEM-512, ML-KEM-1024 | s2n-bignum ✓ + mlkem-native ✓ + Graviola ⚡ | mlkem-native ⚡ + s2n-bignum ✓ |  |  |  |
+| ML-KEM-768 | verified-garbage | mlkem-native ⚡ + s2n-bignum ✓ + verified-garbage |  |  |  |
 | ML-DSA-44, ML-DSA-65, ML-DSA-87 | s2n-bignum ✓ + mldsa-native ⚡ | mldsa-native ⚡ + s2n-bignum ✓ |  |  |  |
 | SLH-DSA, over the SHA-2 and SHA-3 rows it builds on | SPHINCS+ |  |  |  |  |
 | RSA signatures, OAEP, blind signatures, key generation | s2n-bignum ✓ + aws-lc ⚡ + rind ⚡ + verified-garbage | s2n-bignum ✓ + aws-lc ⚡ |  |  |  |
@@ -106,8 +109,10 @@ SHA-512.
   states it keeps transposed, measured 7% faster per call (see
   [SLH-DSA](#slh-dsa)).
 
-aarch64 runs with the crypto extension and the SHA-512 and SHA-3
-instructions; no crypto denies them, as a Raspberry Pi 4 lacks them. armv7
+aarch64 runs with the crypto extension, the SHA-512 and SHA-3
+instructions, and SVE2; no crypto denies them, as a Raspberry Pi 4 lacks
+them. Without SVE2 alone, as on Apple's cores and Neoverse N1 and V1,
+ChaCha20-Poly1305 runs the no crypto column's aws-lc ⚡. armv7
 runs in 32-bit mode, with NEON and the crypto extension; without them it runs
 the code [Symmetric cryptography](#symmetric-cryptography) names. portable is
 the backend for every other architecture, for big-endian aarch64 and arm, and
@@ -122,7 +127,7 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | AES-KW, AES-KWP, AES-CBC | Graviola + rind | aws-lc + rind |  | aws-lc + rind |
 | ChaCha20 | Graviola |  | aws-lc + HACL* ✓ | HACL* ✓ |
 | ChaCha20 (header protection) | HACL* ✓ + rind |  |  |  |
-| ChaCha20-Poly1305, XChaCha20-Poly1305 | aws-lc ⚡ |  |  | HACL* ✓ + Graviola |
+| ChaCha20-Poly1305, XChaCha20-Poly1305 | verified-garbage | aws-lc ⚡ |  | HACL* ✓ + Graviola |
 | MD5 | rind |  |  |  |
 | SHA-1 | rind | aws-lc |  | rind |
 | SHA-256 | aws-lc ⚡ | aws-lc |  | HACL* ✓ except ESP-IDF Xtensa, where rind's 16-round body runs from IRAM |
@@ -143,7 +148,8 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | P-256 ECDH, ECDSA | s2n-bignum ✓ + Graviola |  | fiat-crypto ✓ + rind ⚡ + Graviola ⚡ | fiat-crypto ✓ + rind + Graviola ⚡ |
 | P-384 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ + Graviola ⚡ |  | fiat-crypto ✓ + rind ⚡ | fiat-crypto ✓ + rind |
 | P-521 ECDH, ECDSA | s2n-bignum ✓ + rind ⚡ |  | fiat-crypto ✓ + rind ⚡ |  |
-| ML-KEM | s2n-bignum ✓ + Graviola ⚡ |  | mlkem-native ⚡ + OpenSSL ⚡ + Graviola ⚡ | mlkem-native ⚡ + rind + Graviola ⚡ |
+| ML-KEM-512, ML-KEM-1024 | s2n-bignum ✓ + Graviola ⚡ |  | mlkem-native ⚡ + OpenSSL ⚡ + Graviola ⚡ | mlkem-native ⚡ + rind + Graviola ⚡ |
+| ML-KEM-768 | s2n-bignum ✓ + Graviola ⚡ + verified-garbage | s2n-bignum ✓ + Graviola ⚡ | mlkem-native ⚡ + OpenSSL ⚡ + Graviola ⚡ | mlkem-native ⚡ + rind + Graviola ⚡ |
 | ML-DSA-44, ML-DSA-65, ML-DSA-87 | s2n-bignum ✓ + mldsa-native ⚡ |  | mldsa-native ⚡ + OpenSSL ⚡ | mldsa-native ⚡ + rind |
 | SLH-DSA, over the SHA-2 and SHA-3 rows it builds on | SPHINCS+ |  |  |  |
 | RSA signatures, OAEP, blind signatures, key generation | s2n-bignum ✓ + aws-lc ⚡ + Graviola ⚡ |  | aws-lc ⚡ + Graviola ⚡ + rind ⚡ | Graviola ⚡ + rind ⚡ |
@@ -249,7 +255,7 @@ tests use [Wycheproof]'s vectors.
 | [SPHINCS+] | ported: the SPHINCS+ team's FIPS 205 code (`sign.c`, `fors.c`, `wots.c`, `merkle.c`, and its AVX2 builds' `treehashx4` and `treehashx8`, generalised over the lane count) on every CPU, and its x86_64 AVX2 eight-way SHA-256 (`sha256avx.c`), to Rust, from the `bas/fips205` branch | public domain, or CC0-1.0, 0BSD, or MIT-0 | nothing: no SLH-DSA implementation carries a proof of functional correctness |
 | [curve25519-dalek] | dependency, with its serial backend, for armv7 and the portable backend; ported: its AVX2 backend's field arithmetic, point formulas, and base point table, to Rust intrinsics, for Ed25519 verification's four-point multiplication on x86_64 CPUs with AVX2 but without ADX | BSD-3-Clause | nothing: that backend's field arithmetic is hand-written, as is the AVX2 backend's. Its `fiat` backend would run [fiat-crypto]'s verified field arithmetic instead, but only a `--cfg` flag for the whole build selects it, so rind refuses it rather than let the build pick. |
 | [fiat-crypto] | dependency | MIT OR Apache-2.0 OR BSD-1-Clause | [Coq proofs](https://github.com/mit-plv/fiat-crypto/tree/67316f05d771f7f2db62beede59e9b56406a9efd) that each generated field operation is correct. rind's point formulas, inversion, and table lookup over them are not covered. |
-| [verified-garbage] | copied, by `admin/import-vg`: its x86_64 ChaCha20 from 256 bytes on AVX2 and on AVX-512 VL, and its x86_64 RSA public operation and CRT for AVX-512 IFMA, with the Montgomery product they call, as Rust naked functions, byte for byte but for `.base64` directives written out as `.byte`, which rind's minimum Rust cannot assemble; and, by `admin/import-vg-models` at the same commit, its Lean x86_64 and aarch64 ISA models, printers, and encoders, under `proofs/verified-garbage/` | Apache-2.0 OR BSD-3-Clause; the models taken under Apache-2.0 | [Lean proofs](https://github.com/pyca/verified-garbage/tree/e7b0fe8a82b7777958e078573771d51415f105bb/lean) that each routine's machine code meets its contract, is memory safe, and takes the same branches and memory addresses whatever its secrets, over VG's own models of the instructions. The RSA routines rind runs are internal to VG, so their contracts are in its proofs rather than its trusted specification. `admin/prove vg` cosimulates those models for each instruction of VG's code, on the CPU or, where it lacks a feature, under Intel SDE or qemu-aarch64, but for `jmp`/`b`, static addresses, and a lone `ret`, which its bytes check covers, and checks that rind's copies are VG's text. rind claims no ✓ for this code until it imports the theorems, which waits on VG fixing [a gap in its stack model](https://github.com/pyca/verified-garbage/issues/5321). |
+| [verified-garbage] | copied, by `admin/import-vg`: its aarch64 SVE2 ChaCha20-Poly1305 seal and open, with the ChaCha20 and Poly1305 routines they call, its x86_64 ChaCha20 from 256 bytes on AVX2 and on AVX-512 VL, its x86_64 RSA public operation and CRT for AVX-512 IFMA, with the Montgomery product they call, and its ML-KEM-768 encapsulation key check and encapsulation on x86_64 and on aarch64 with the SHA-3 instructions, and key generation and decapsulation on x86_64 with AVX-512, with the Keccak and arithmetic routines they call, as Rust naked functions, byte for byte but for `.base64` directives written out as `.byte`, which rind's minimum Rust cannot assemble; and, by `admin/import-vg-models` at the same commit, its Lean x86_64 and aarch64 ISA models, printers, and encoders, under `proofs/verified-garbage/` | Apache-2.0 OR BSD-3-Clause; the models taken under Apache-2.0 | [Lean proofs](https://github.com/pyca/verified-garbage/tree/e7b0fe8a82b7777958e078573771d51415f105bb/lean) that each routine's machine code meets its contract (RFC 8439's for ChaCha20-Poly1305, FIPS 203's for ML-KEM-768), is memory safe, and takes the same branches and memory addresses whatever its secrets, over VG's own models of the instructions. The RSA routines rind runs are internal to VG, so their contracts are in its proofs rather than its trusted specification. `admin/prove vg` cosimulates those models for each instruction of VG's code, on the CPU or, where it lacks a feature, under Intel SDE or qemu-aarch64, but for `jmp`/`b`, static addresses, and a lone `ret`, which its bytes check covers, and checks that rind's copies are VG's text. rind claims no ✓ for this code until it imports the theorems, which waits on VG fixing [a gap in its stack model](https://github.com/pyca/verified-garbage/issues/5321). |
 
 rind's own code is licensed under Apache-2.0 OR ISC OR MIT-0. Copied code
 keeps its source's copyright and license, which [LICENSE] lists with the
@@ -725,6 +731,19 @@ under qemu, it ran key generation and encapsulation in 1.3x fewer
 instructions. The portable backend runs it with rind's Keccak-f, proven in
 [`proofs/`](proofs/README.md).
 
+ML-KEM-768 runs [verified-garbage]'s routines instead where they measured
+faster than rind's at every step they cover: each is a whole FIPS 203
+operation, hashing included, under rind's key types and glue. Its
+encapsulation, and the encapsulation key check that parsing a key runs, take
+VG's on every x86_64 CPU and on aarch64 with the SHA-3 instructions, at
+0.66-0.87x rind's time. Key generation and decapsulation take VG's only on
+x86_64 with AVX-512 (F, BW, and VL), at 0.81x and 0.96x; elsewhere VG's
+decapsulation measured 1.17-1.25x slower, and a key pair decapsulates with
+the code that generated it, so both stay rind's. On aarch64 without the SHA-3
+instructions VG measured 1.35x slower or more at every step, so rind's runs
+there. A VG routine reports when a `SampleNTT` reaches its loop bound, with
+probability below 2^-261; rind then runs its own arithmetic for that call.
+
 Compression and decompression are division-free, avoiding the variable-time
 division behind the KyberSlash attacks.
 
@@ -732,8 +751,9 @@ For sampling, which is a significant factor in ML-KEM performance, we
 have some different options depending on CPU features:
 
 - We have a `SampleNTT()` which does 8-wide Keccak-f permutation followed by
-  rejection sampling using AVX-512 (F, BW, VBMI, VBMI2) on x86-64. This is
-  Graviola's, and not verified.
+  rejection sampling using AVX-512 (F, BW, VL, VBMI, VBMI2) on x86-64, for
+  ML-KEM-512 and ML-KEM-1024, and for ML-KEM-768 only when it falls back from
+  verified-garbage's routines. This is Graviola's, and not verified.
 - We have s2n-bignum's verified 4-wide Keccak-f using AVX2 on x86-64, and its
   single-state Keccak-f otherwise.
 - We have s2n-bignum's verified 2-wide Keccak-f using Neon+SHA3 on aarch64.
@@ -1001,11 +1021,16 @@ in [run 41585945720], against 1.11 with SSSE3 rounds in [run 41550703300].
 ChaCha20-Poly1305, and XChaCha20-Poly1305 after HChaCha20, run aws-lc's
 `chacha20_poly1305` assembly, which interleaves ChaCha20 with Poly1305 in one
 pass: on x86_64, its AVX2 half where the CPU has AVX2 and BMI2 and its SSE4.1
-half otherwise, as aws-lc picks them, and on aarch64, its NEON routine.
-aws-lc's x86_64 routine reads its pick from `OPENSSL_ia32cap_P`; rind's copy
-reads the same bits from the block rind passes it, so the path is decided
-once per process like rind's others. Without SSE4.1, ChaCha20 and Poly1305
-run in separate passes, as in aws-lc.
+half otherwise, as aws-lc picks them, and on aarch64 without SVE2, its NEON
+routine. aws-lc's x86_64 routine reads its pick from `OPENSSL_ia32cap_P`;
+rind's copy reads the same bits from the block rind passes it, so the path
+is decided once per process like rind's others. Without SSE4.1, ChaCha20 and
+Poly1305 run in separate passes, as in aws-lc. aarch64 CPUs with SVE2 run
+[verified-garbage]'s one-pass routines instead, which rotate with SVE2's
+`xar`: on a Neoverse N2 they took 0.60 to 0.92 of aws-lc's time at every
+size. Its NEON routines took up to 1.06 of aws-lc's time at 32 to 512 bytes
+on Apple's M4, though 0.65 to 0.82 opening 256 bytes and up, so CPUs
+without SVE2 keep aws-lc's.
 
 Elsewhere, 32-bit `arm` runs ChaCha20 on aws-lc's `chacha-armv4` assembly,
 switching from its integer routine to its NEON one at 192 bytes as aws-lc

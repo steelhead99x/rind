@@ -2,7 +2,7 @@
 
 ## Goal
 
-ML-KEM-768 key generation, encapsulation, and decapsulation earn the ✓ on aarch64 and on x86_64 with AVX2 (without the AVX-512 sampler, which [its own quest](/quest/m4/verified/mlkem-avx512-sampler.md) adds): rind's FIPS 203 construction is proven down to s2n-bignum's and mlkem-native's proven polynomial routines and the proven sponge, whose theorems (`shake128x4_squeeze_spec`, `shake256_batch_spec`, `squeezing_squeeze_spec`, and the SHA-3 contexts') `proofs/Rind/X86_64/Sha3.lean` states. rind-rustls's default key exchange, X25519MLKEM768, then earns it wherever X25519 has it.
+ML-KEM-768 key generation and decapsulation earn the ✓ on aarch64 and on x86_64 with AVX2 but without AVX-512, and encapsulation on aarch64 without the SHA-3 instructions, where rind's arithmetic runs; pyca/verified-garbage's code runs the rest, which [its own quest](/quest/m2/verified-garbage/mlkem-proof.md) proves. rind's FIPS 203 construction is proven down to s2n-bignum's and mlkem-native's proven polynomial routines and the proven sponge, whose theorems (`shake128x4_squeeze_spec`, `shake256_batch_spec`, `squeezing_squeeze_spec`, and the SHA-3 contexts') `proofs/Rind/X86_64/Sha3.lean` states. rind-rustls's default key exchange, X25519MLKEM768, then earns it wherever X25519 has it.
 
 ## Plan
 

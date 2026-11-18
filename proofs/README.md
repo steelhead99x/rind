@@ -569,8 +569,9 @@ which `Rind/Keccak.lean` proves SymCrypt's KECCAK-f[1600].
 `Rind/<Arch>/KeccakDispatch.lean` proves what rind's dispatch to the one-,
 two-, and four-state routines computes, from those theorems. Each theorem
 assumes `RunsSha3`: rind's entry guard and CPU checks pass. x86_64's AVX-512
-eight-way Keccak, which ML-KEM's sampler runs, has
-[its own quest](/quest/m4/verified/mlkem-avx512-sampler.md).
+eight-way Keccak, which ML-KEM-512's and ML-KEM-1024's sampler runs, is not
+proven; ML-KEM-768 runs pyca/verified-garbage's code there instead, and the
+sampler only when a VG routine reaches its `SampleNTT` bound.
 
 The portable backend's Keccak-f, which its SHA-3, ML-KEM, and ML-DSA run, in
 `Rind/Portable/Keccak.lean`, over a translation of `low/portable/keccak.rs`
