@@ -262,6 +262,10 @@ exclude_re = [
   # The IFMA passes, and `one_pass`'s choice of them, which only AVX-512
   # IFMA CPUs take: on any other CPU each of these is the one pass.
   'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: (replace ifma_passes -> \[u8; 16\] with .*|replace match guard .* with (true|false) in one_pass|replace >= with < in one_pass)$',
+  # Equivalent: each batch of ML-KEM's PRF only adds outputs no polynomial
+  # reads, so taking eight at once for four or fewer, four for one to three,
+  # or the second four again, yields the same samples; only the time differs.
+  'rind/src/mid/mlkem\.rs:\d+:\d+: (delete match arm 1\.\.= 4 in sample_poly_cbd2|delete match arm [0-3] in shake256_fours|replace \* with / in shake256_fours)$',
   'rind/src/low/posint\.rs:\d+:\d+: (replace PosInt<N>::mod_exp_pair_rsaz -> .*|.* in PosInt<N>::mod_exp_pair_rsaz)$',
   # Compiled only for armv7, which no campaign runs: the portable AES-GCM's
   # crypto-extension half.
