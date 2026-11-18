@@ -69,16 +69,30 @@ theorem chacha20_poly1305_seal_spec (h : RunsChaCha20Poly1305) (key : Std.Array 
   exact (hop s a key nonce aad inout hl).1
 
 theorem chacha20_poly1305_open_spec (h : RunsChaCha20Poly1305) (key : Std.Array U8 32#usize)
-    (nonce : Std.Array U8 12#usize) (aad inout : Slice U8) (hl : inout.length ≤ 2 ^ 38 - 64) :
-    low.x86_64.chacha20poly1305.open key nonce aad inout ⦃ r =>
+    (nonce : Std.Array U8 12#usize) (aad inout : Slice U8) (tag : Std.Array U8 16#usize)
+    (hl : inout.length ≤ 2 ^ 38 - 64) :
+    low.x86_64.chacha20poly1305.open key nonce aad inout tag ⦃ r =>
       r.2.length = inout.length ∧
       bvs r.2.val = chacha20.encrypt (bvs key.val) 1 (bvs nonce.val) (bvs inout.val) ∧
-      bvs r.1.val = poly1305.mac (chacha20poly1305.otk (bvs key.val) (bvs nonce.val))
-        (chacha20poly1305.macData (bvs aad.val) (bvs inout.val)) ⦄ := by
+      r.1 = (poly1305.mac (chacha20poly1305.otk (bvs key.val) (bvs nonce.val))
+        (chacha20poly1305.macData (bvs aad.val) (bvs inout.val)) == bvs tag.val) ⦄ := by
+  have hh := h.2.1
   obtain ⟨-, -, ⟨s, hs⟩, ⟨a, ha⟩, hop⟩ := h
   unfold low.x86_64.chacha20poly1305.open
   simp only [hs, ha, bind_ok]
-  exact (hop s a key nonce aad inout hl).2
+  apply WP.spec_bind (hop s a key nonce aad inout hl).2
+  rintro ⟨actual, pt⟩ ⟨hlen, hpt, hmac⟩
+  simp only [lift, bind_ok]
+  apply WP.spec_bind (ct_equal_spec hh _ _)
+  rintro _ rfl
+  refine (WP.spec_ok _).2 ⟨hlen, hpt, ?_⟩
+  rw [← hmac]
+  simp only [Std.Array.to_slice, Slice.from_val]
+  by_cases hv : actual.val = tag.val
+  · simp [hv]
+  · have hb : (bvs actual.val == bvs tag.val) = false := by
+      rw [Bool.eq_false_iff]; intro hb; exact hv ((bvs_inj _ _).1 (beq_iff_eq.1 hb))
+    simp [hv, hb]
 
 /-! ## The length check, `mid::chacha20` -/
 
@@ -132,12 +146,9 @@ theorem open_tail_spec (h : RunsChaCha20Poly1305) (key : Std.Array U8 32#usize)
     (nonce : Std.Array U8 12#usize) (aad inout : Slice U8) (tag : Std.Array U8 16#usize)
     (hl : inout.length ≤ 2 ^ 38 - 64) :
     (do
-      let (actual_tag, cipher_inout1) ← low.x86_64.chacha20poly1305.open key nonce aad inout
-      let s ← lift (Std.Array.to_slice actual_tag)
-      let s1 ← lift (Std.Array.to_slice tag)
-      let b ← low.generic.ct_equal.ct_equal s s1
-      let b1 ← low.ct.into_public b
-      if b1
+      let (valid, cipher_inout1) ← low.x86_64.chacha20poly1305.open key nonce aad inout tag
+      let b ← low.ct.into_public valid
+      if b
       then
         low.ct.public_slice cipher_inout1
         ok ((core.result.Result.Ok () : core.result.Result Unit error.Error), cipher_inout1)
@@ -149,26 +160,16 @@ theorem open_tail_spec (h : RunsChaCha20Poly1305) (key : Std.Array U8 32#usize)
           (bvs tag.val)
         if out.2 then r.1 = .Ok () ∧ r.2.length = inout.length ∧ bvs r.2.val = out.1
         else r.1 = .Err .DecryptFailed ∧ r.2.val = List.replicate inout.length 0#u8 ⦄ := by
-  have hh := h.2.1
-  apply WP.spec_bind (chacha20_poly1305_open_spec h key nonce aad inout hl)
-  rintro ⟨actual, pt⟩ ⟨hlen, hpt, hmac⟩
-  simp only [lift, bind_ok]
-  apply WP.spec_bind (ct_equal_spec hh _ _)
-  rintro _ rfl
-  simp only [low.ct.into_public, bind_ok, Std.Array.to_slice]
-  have heq : (actual.val = tag.val) = ((poly1305.mac (chacha20poly1305.otk (bvs key.val) (bvs nonce.val))
-      (chacha20poly1305.macData (bvs aad.val) (bvs inout.val)) == bvs tag.val) = true) := by
-    rw [← hmac, beq_iff_eq, bvs_inj]
-  by_cases hv : actual.val = tag.val
-  · have ht : (poly1305.mac (chacha20poly1305.otk (bvs key.val) (bvs nonce.val))
-        (chacha20poly1305.macData (bvs aad.val) (bvs inout.val)) == bvs tag.val) = true := by
-      rw [← heq]; exact hv
-    simp only [hv, decide_true, ite_true, low.ct.public_slice, bind_ok, chacha20poly1305.open, ht]
+  apply WP.spec_bind (chacha20_poly1305_open_spec h key nonce aad inout tag hl)
+  rintro ⟨valid, pt⟩ ⟨hlen, hpt, hv⟩
+  simp only [low.ct.into_public, bind_ok]
+  subst hv
+  by_cases ht : (poly1305.mac (chacha20poly1305.otk (bvs key.val) (bvs nonce.val))
+      (chacha20poly1305.macData (bvs aad.val) (bvs inout.val)) == bvs tag.val) = true
+  · simp only [ht, ite_true, low.ct.public_slice, bind_ok, chacha20poly1305.open]
     exact (WP.spec_ok _).2 ⟨rfl, hlen, hpt⟩
-  · have ht : (poly1305.mac (chacha20poly1305.otk (bvs key.val) (bvs nonce.val))
-        (chacha20poly1305.macData (bvs aad.val) (bvs inout.val)) == bvs tag.val) = false := by
-      rw [Bool.eq_false_iff]; intro ht; exact hv (heq ▸ ht)
-    simp only [Slice.from_val, hv, decide_false, Bool.false_eq_true, ite_false, chacha20poly1305.open, ht]
+  · rw [Bool.not_eq_true] at ht
+    simp only [ht, Bool.false_eq_true, ite_false, chacha20poly1305.open]
     have hc : core.clone.CloneU8.clone 0#u8 ⦃ fun v' => v' = 0#u8 ⦄ := (WP.spec_ok _).2 rfl
     apply WP.spec_bind (core.slice.Slice.fill.spec core.clone.CloneU8 pt 0#u8 hc)
     rintro s ⟨-, hs⟩

@@ -596,6 +596,12 @@ def Runs : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ (∃ e, low.entry.Entry.new_public = ok e) ∧
     (∃ t, low.x86_64.cpu.HaveBmi2Adx.check = ok t) ∧ ∃ t, low.x86_64.cpu.HaveAvx2.check = ok t
 
+/-- X25519 and Ed25519 run s2n-bignum's routines and rind's glue: the CPU
+lacks AVX-512 IFMA, on which they run pyca/verified-garbage's instead, whose
+proof rind has yet to import (`quest/m2/verified-garbage/curve25519-proof.md`).
+The check reads no input. -/
+def NoCurveIfma : Prop := low.x86_64.curve25519_ifma.Curve25519Ifma.check = ok none
+
 @[step]
 theorem new_secret_spec (h : Runs) : low.entry.Entry.new_secret ⦃ _ => True ⦄ := by
   obtain ⟨⟨e, he⟩, -⟩ := h
@@ -608,21 +614,21 @@ theorem new_public_spec (h : Runs) : low.entry.Entry.new_public ⦃ _ => True �
 
 /-- The dispatch runs one of the twins, whose contracts agree. -/
 @[step]
-theorem curve25519_x25519_mux_spec (h : Runs) (res scalar point : Std.Array U64 4#usize) :
+theorem curve25519_x25519_mux_spec (h : Runs) (hi : NoCurveIfma) (res scalar point : Std.Array U64 4#usize) :
     low.x86_64.adx_mux.curve25519_x25519 res scalar point ⦃ r =>
       wordsNat r.val = rfcx25519 (wordsNat scalar.val) (wordsNat point.val) ⦄ := by
   obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
   unfold low.x86_64.adx_mux.curve25519_x25519
-  rw [ht]
+  rw [hi, ht]
   cases t <;> step*
 
 @[step]
-theorem curve25519_x25519base_mux_spec (h : Runs) (res scalar : Std.Array U64 4#usize) :
+theorem curve25519_x25519base_mux_spec (h : Runs) (hi : NoCurveIfma) (res scalar : Std.Array U64 4#usize) :
     low.x86_64.adx_mux.curve25519_x25519base res scalar ⦃ r =>
       wordsNat r.val = rfcx25519 (wordsNat scalar.val) 9 ⦄ := by
   obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
   unfold low.x86_64.adx_mux.curve25519_x25519base
-  rw [ht]
+  rw [hi, ht]
   cases t <;> step*
 
 @[step]
