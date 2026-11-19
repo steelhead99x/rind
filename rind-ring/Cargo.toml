@@ -70,3 +70,5 @@ untrusted = "0.9"
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 aws-lc-rs = { version = "1.16", default-features = false, features = ["alloc", "prebuilt-nasm", "non-fips"] }
 proptest = "1.5.0"
+# ring's own values, for the accessors and `Debug` aws-lc-rs has since changed.
+ring = "0.17.14"
