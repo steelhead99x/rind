@@ -9,6 +9,7 @@ void main() {
   test('every @Native resolves against the registered code asset', () {
     final registered = _hookAssetId();
     expect(nativeAssetId, registered, reason: 'hook/build.dart');
+    final separator = RegExp(r'[/\\]');
     final nativeLibraries = <String>[];
     for (final file in Directory(
       'lib',
@@ -30,9 +31,7 @@ void main() {
       }
     }
     expect(
-      nativeLibraries
-          .map((path) => path.split(RegExp(r'[/\\]')).last)
-          .toSet(),
+      nativeLibraries.map((path) => path.split(separator).last).toSet(),
       containsAll([
         'bindings.dart',
         'ecdsa.dart',
