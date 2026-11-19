@@ -37,7 +37,7 @@ says it is free.
 
 | PR | Why | Source |
 | --- | --- | --- |
-| #94 (ESP32-S3 SHA-512 in IRAM) | another agent holds it | [owner] |
+| #94 (ESP32-S3 SHA-512 in IRAM) | another agent holds it. Its body recommends keeping the `esp32s3-sha512-flash` opt-out as the zero-IRAM choice and leaves the decision to the maintainer | [owner]; [#94 `6a0ea54d`] Waiting |
 | #141 (P-256 aarch64 keygen) | on hold; it asks for a first review of `p256_vg.rs` and whether keygen, ECDH and sign stay on rind's routines on A72 and N1 (only the A76 was timed) | [owner] hold; [#141 `5dc1e735`] Waiting |
 | #172 | marked DO NOT MERGE by the owner on 2026-11-19; stays open as a reference, based on #102 | [#172 `5bf2ae2c`] comment 17:35 |
 | #190 | handed on; its body recommends closing it | [owner]; [#190 `ec158061`] Waiting |
@@ -53,7 +53,7 @@ below; do not start them from this file.
 | --- | --- | --- |
 | #190 | MSI, Zen 3+ | the Zen 3+ result is in: signing and keygen are 4.8 to 7.1 percent slower, 0 of 8 or 9 kept rounds faster; still no Zen 2 host. The PR recommends closing [#190 `ec158061`] Waiting |
 | #79 | MSI | confirm `lean` and `prove` on `0fa338a1`; close in favour of kixel-ai #790 or keep [#79 `f84f3976`] Waiting |
-| #178 | Alienware, quiet | 5 clean interleaved rounds (at the last measurement only 1 round was clean for X25519 and 3 for Ed25519 verify, load 10 to 48), a P-core and Zen 5, Windows CI of the frame handling, `admin/regenerate` in CI, BINSEC with the deny list; maintainer call on the unproven tier [#178 `8bab6b67`] body and Waiting |
+| #178 | Alienware, quiet | 5 clean interleaved rounds (at the last measurement only 1 round was clean for X25519 and 3 for Ed25519 verify, load 10 to 48), a P-core and Zen 5, Windows CI of the frame handling, `admin/regenerate` in CI, BINSEC with the deny list; maintainer call on the unproven tier. Method from the body: the same binary built with `RUSTFLAGS='--cfg rind_cpu_disable'`, `RIND_CPU_DISABLE_avxifma=1` selects the mulx path (A) and its absence AVX-IFMA (B), `taskset -c <core>` (an E-core, `-c 12`, was used), criterion `--warm-up-time 1 --measurement-time 3`, `rind-bench` `x25519-ecdh` and `ed25519-verify`, A and B interleaved. If Ed25519 falls below 5 percent on an idle host the PR says to close that half [#178 `8bab6b67`] body and Waiting |
 | #174 | Alienware | an Intel AVX-512 core and Zen 5 to decide whether the `is_intel()` gate lifts; only Zen 4 was measured [#174 `a9939936`] Waiting |
 | #187 | Jetson | CI's ctgrind on the arm64 runner and the `aarch64-qemu` step do not run on pull requests; the Pi 5 and the laptop ran the same checks [#187 `3a920b05`] Waiting |
 | kixel-ai #823 | Jetson | Valgrind plus libclang on aarch64 Linux, a BINSEC run extending `ct_binsec_chacha20`, Neoverse and Pi 5 timing [kixel-ai #823 `d5d061b3`] Waiting. The Jetson has neither Valgrind nor network [#169 `5514d0c0`] Waiting |
