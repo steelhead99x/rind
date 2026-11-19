@@ -50,7 +50,7 @@ pub(crate) fn mul_mont(x: &[u32; 8], y: &[u32; 8]) -> [u32; 8] {
     let mut r = [0; 8];
     // SAFETY: each pointer is to eight words, and the routine reads `x` and
     // `y` and writes `r`, which are distinct here.
-    unsafe { ecp_nistz256_mul_mont(&mut r, x, y) };
+    unsafe { asm_call!(unsafe extern "C" ecp_nistz256_mul_mont(&mut r, x, y)) };
     r
 }
 
@@ -58,7 +58,7 @@ pub(crate) fn mul_mont(x: &[u32; 8], y: &[u32; 8]) -> [u32; 8] {
 pub(crate) fn sqr_mont(x: &[u32; 8]) -> [u32; 8] {
     let mut r = [0; 8];
     // SAFETY: as in `mul_mont`.
-    unsafe { ecp_nistz256_sqr_mont(&mut r, x) };
+    unsafe { asm_call!(unsafe extern "C" ecp_nistz256_sqr_mont(&mut r, x)) };
     r
 }
 
@@ -66,7 +66,7 @@ pub(crate) fn sqr_mont(x: &[u32; 8]) -> [u32; 8] {
 pub(crate) fn add(x: &[u32; 8], y: &[u32; 8]) -> [u32; 8] {
     let mut r = [0; 8];
     // SAFETY: as in `mul_mont`.
-    unsafe { ecp_nistz256_add(&mut r, x, y) };
+    unsafe { asm_call!(unsafe extern "C" ecp_nistz256_add(&mut r, x, y)) };
     r
 }
 
@@ -74,7 +74,7 @@ pub(crate) fn add(x: &[u32; 8], y: &[u32; 8]) -> [u32; 8] {
 pub(crate) fn sub(x: &[u32; 8], y: &[u32; 8]) -> [u32; 8] {
     let mut r = [0; 8];
     // SAFETY: as in `mul_mont`.
-    unsafe { ecp_nistz256_sub(&mut r, x, y) };
+    unsafe { asm_call!(unsafe extern "C" ecp_nistz256_sub(&mut r, x, y)) };
     r
 }
 
@@ -241,6 +241,20 @@ mod tests {
     fn ct_qemu_nistz256_sqr() {
         let x = seeded(3);
         super::super::ct_qemu::traced(|| sqr_mont(&x));
+    }
+
+    #[test]
+    #[ignore = "admin/ct-qemu runs it under qemu"]
+    fn ct_qemu_nistz256_add() {
+        let (x, y) = (seeded(4), seeded(5));
+        super::super::ct_qemu::traced(|| add(&x, &y));
+    }
+
+    #[test]
+    #[ignore = "admin/ct-qemu runs it under qemu"]
+    fn ct_qemu_nistz256_sub() {
+        let (x, y) = (seeded(6), seeded(7));
+        super::super::ct_qemu::traced(|| sub(&x, &y));
     }
 
     #[test]

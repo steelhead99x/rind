@@ -79,7 +79,8 @@ qemu. iOS devices' code is only built.
   SHA-512, and SHA-512/256 always run aws-lc's assembly, with NEON where the
   CPU has it, as do SHA-1 and SHA-256 without the crypto extension, and with
   NEON, X25519's shared secret runs [BoringSSL]'s assembly. SHA-3's, ML-KEM's,
-  and ML-DSA's Keccak-f runs [OpenSSL]'s assembly, on NEON where the CPU has it.
+  and ML-DSA's Keccak-f runs [OpenSSL]'s assembly, on NEON where the CPU has it,
+  and so do P-256's field multiplication, squaring, addition, and subtraction.
   That assembly is A32 on every target, but `armv7-linux-androideabi` and
   the `thumbv7` targets build Rust as Thumb-2, the inline assembly of the
   constant-time compares included, so the compares' proofs (see
