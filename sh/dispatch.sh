@@ -388,6 +388,13 @@ step() {
                     run cargo nextest run -p rind-acvp --features module --locked
                 fi
             fi
+            # rind-rustls's `fips` feature does the same for the TLS provider,
+            # and its `skip` list keeps it out of admin/adapter-api too.
+            if names rind-rustls "${packages[@]}" &&
+                [[ "$(rustc -vV | sed -n 's/^host: //p')" =~ ^(x86_64|aarch64)-unknown-linux-gnu$ ]]; then
+                run cargo clippy -p rind-rustls --features fips --all-targets --locked -- --deny warnings
+                run cargo nextest run -p rind-rustls --features fips --locked --no-tests=warn
+            fi
             # Doc tests need a library. No packages at all means the workspace.
             mapfile -t libs < <(sh/select.sh "$changed" "$all" --lib)
             if ((${#libs[@]} > 0 || ${#packages[@]} == 0)); then

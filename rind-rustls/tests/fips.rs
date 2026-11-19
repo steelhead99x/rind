@@ -24,17 +24,23 @@ const FIPS: bool = cfg!(feature = "fips");
 /// ML-KEM-768 is true, as in rustls's aws-lc-rs provider.
 #[test]
 fn components_say_what_runs_in_the_module() {
-    for (suite, module) in [
+    #[allow(unused_mut)]
+    let mut suites = vec![
         (cipher_suite::TLS13_AES_128_GCM_SHA256, FIPS),
         (cipher_suite::TLS13_AES_256_GCM_SHA384, FIPS),
         (cipher_suite::TLS13_CHACHA20_POLY1305_SHA256, false),
+    ];
+    // The TLS 1.2 suites exist only with `tls12`.
+    #[cfg(feature = "tls12")]
+    suites.extend([
         (cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, false),
         (cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384, false),
         (
             cipher_suite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
             false,
         ),
-    ] {
+    ]);
+    for (suite, module) in suites {
         assert_eq!(suite.fips(), module, "{:?}", suite.suite());
     }
     for (group, module) in [
@@ -226,6 +232,58 @@ fn records_agree_with_aws_lc_rs_both_ways() {
             let mut bytes = sealed.payload.as_ref().to_vec();
             let record = InboundOpaqueMessage::new(sealed.typ, sealed.version, &mut bytes);
             assert!(open.decrypt(record, 10).is_err());
+        }
+    }
+}
+
+/// QUIC packets sealed here open under rustls's aws-lc-rs provider and the
+/// reverse, whatever packet number a key starts at: a key update (RFC 9001
+/// section 6.2) hands a new key the connection's next packet number, which is
+/// not 0, and `confidentiality_limit` is what makes it come early.
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn quic_packets_agree_with_aws_lc_rs_from_any_packet_number() {
+    use rustls::crypto::aws_lc_rs::cipher_suite as aws;
+    use rustls::crypto::cipher::{AeadKey, Iv};
+
+    // rustls builds a 16-byte key only by deriving it, so this takes the
+    // 32-byte AES-256 key directly, as the record test does.
+    {
+        let ours = cipher_suite::TLS13_AES_256_GCM_SHA384
+            .tls13()
+            .unwrap()
+            .quic_suite()
+            .unwrap();
+        let theirs = aws::TLS13_AES_256_GCM_SHA384
+            .tls13()
+            .unwrap()
+            .quic_suite()
+            .unwrap();
+        for start in [0u64, 1, 3, 8_388_609, 1 << 40, (1 << 62) - 3] {
+            let key = |alg: &dyn rustls::quic::Algorithm| {
+                alg.packet_key(AeadKey::from([0x42u8; 32]), Iv::new([0x5a; 12]))
+            };
+            let (here, there) = (key(ours.quic), key(theirs.quic));
+            let header = b"header";
+            // Consecutive and skipping packet numbers.
+            for pn in [start, start + 1, start + 2, start + 10, start + 11] {
+                let mut mine = b"quic payload".to_vec();
+                let tag = here.encrypt_in_place(pn, header, &mut mine).unwrap();
+                let mut theirs_out = b"quic payload".to_vec();
+                let their_tag = there.encrypt_in_place(pn, header, &mut theirs_out).unwrap();
+                assert_eq!(mine, theirs_out, "start {start} pn {pn}");
+                assert_eq!(tag.as_ref(), their_tag.as_ref());
+                // Open what the other sealed.
+                mine.extend_from_slice(tag.as_ref());
+                let plain = there.decrypt_in_place(pn, header, &mut mine).unwrap();
+                assert_eq!(plain, b"quic payload");
+            }
+            // A packet number already sealed under the key is refused.
+            let mut again = b"quic payload".to_vec();
+            assert!(
+                here.encrypt_in_place(start + 11, header, &mut again)
+                    .is_err()
+            );
         }
     }
 }
