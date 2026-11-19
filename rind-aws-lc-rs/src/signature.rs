@@ -11,6 +11,9 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::ops::Deref;
 
+#[cfg(feature = "fips")]
+use rind_fips as rind;
+
 use crate::digest::{self, Digest};
 // With `fips`, the approved services run in rind-fips's module, whose API is
 // rind's less what FIPS 140-3 does not approve.
@@ -40,8 +43,6 @@ pub use crate::rsa::{
 };
 use crate::wipe::Wiped;
 use crate::{pkcs8, rand, sealed};
-#[cfg(feature = "fips")]
-use rind_fips as rind;
 
 /// A signature.
 #[derive(Clone, Copy)]

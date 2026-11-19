@@ -15,14 +15,13 @@ use core::fmt;
 use core::ops::RangeInclusive;
 use std::sync::OnceLock;
 
+use engine::Pkcs1;
+pub(crate) use engine::PublicEngine;
 // With `fips`, the approved services run in rind-fips's module, whose API is
 // rind's less what FIPS 140-3 does not approve.
 #[cfg(feature = "fips")]
 use rind_fips as rind;
 use signing::RsaEncoding;
-
-use engine::Pkcs1;
-pub(crate) use engine::PublicEngine;
 
 mod engine;
 

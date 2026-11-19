@@ -4,14 +4,14 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::fmt;
 
+use engine::{PrivateEngine, PublicEngine};
+
 use crate::encoding::{
     AsBigEndian, AsDer, Curve25519SeedBin, EcPrivateKeyBin, EcPrivateKeyRfc5915Der,
     EcPublicKeyCompressedBin, EcPublicKeyUncompressedBin, Pkcs8V1Der, PublicKeyX509Der,
 };
 use crate::error::{KeyRejected, Unspecified};
 use crate::rand::SecureRandom;
-
-use engine::{PrivateEngine, PublicEngine};
 
 mod engine;
 
