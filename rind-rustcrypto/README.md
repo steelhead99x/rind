@@ -8,6 +8,7 @@ Each module mirrors the RustCrypto crate it stands in for, and each trait crate 
 |---|---|---|
 | `digest-0_11` | `digest` 0.11 | `sha2`, `sha3`, `hmac` |
 | `aead-0_6` | `aead` 0.6 | `aes_gcm`, `chacha20poly1305` |
+| `signature-3` | `signature` 3 | `ed25519` |
 
 ```toml
 [dependencies]
@@ -28,3 +29,4 @@ assert_eq!(Sha256::digest(b"abc").len(), 32);
 - `digest`'s `core_api` block-level traits (`CoreWrapper` and friends): the wrappers are whole hashes.
 - `Aead` for AES-192-GCM (`aes_gcm` has it only as `AesGcm<Aes192, U12>`), for nonces other than 12 bytes and tags other than 16, for XChaCha20-Poly1305 with a caller-chosen nonce (rind offers it only with a random one), and for AES-GCM-SIV, AES-CCM, AES-OCB, ChaCha8 and ChaCha12.
 - A refused open leaves a cleared buffer, where RustCrypto leaves it unspecified.
+- Ed25519: `Ed25519ph` and context signatures (`DigestSigner`), `Generate`, `TryKeyInit`, serde and the PKCS#8 conversions of `ed25519_dalek` (rind has its own PKCS#8 on its key types), and key export as raw bytes. `verify` is as strict as `ed25519_dalek`'s `verify_strict`: a small-order public key is refused where `ed25519_dalek`'s `verify` accepts it.

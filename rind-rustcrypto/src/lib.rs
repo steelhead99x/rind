@@ -16,3 +16,8 @@ pub use digest_impl::{hmac, sha2, sha3};
 mod aead_impl;
 #[cfg(feature = "aead-0_6")]
 pub use aead_impl::{aes_gcm, chacha20poly1305};
+
+#[cfg(feature = "signature-3")]
+mod signature_impl;
+#[cfg(feature = "signature-3")]
+pub use signature_impl::ed25519;

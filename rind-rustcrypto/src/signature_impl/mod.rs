@@ -1,0 +1,3 @@
+//! `signature` 3's traits over rind's signatures.
+
+pub mod ed25519;

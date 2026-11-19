@@ -4911,6 +4911,8 @@ dependencies = [
  "chacha20poly1305 0.11.0",
  "crabgrind 0.4.0",
  "digest 0.11.3",
+ "ed25519 3.0.0",
+ "ed25519-dalek 3.0.0",
  "hmac 0.13.0",
  "kem",
  "rind",
