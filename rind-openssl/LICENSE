@@ -78,8 +78,10 @@ libcrux <https://github.com/cryspen/libcrux>
 
 HACL* <https://github.com/hacl-star/hacl-star>, through libcrux
 
-  What: rind/src/low/arm/chacha20.rs, the ChaCha20 block function that
+  What: rind/src/low/generic/chacha20.rs, the ChaCha20 block function that
   libcrux-chacha20poly1305 0.0.10 compiles from HACL*'s Hacl_Chacha20.
+  rind/src/low/arm/chacha20.rs does not copy it: its state words are RFC 8439
+  and its keystream is rind's schedule of the same quarter-rounds.
   Copyright (c) 2016-2022 INRIA, CMU and Microsoft Corporation
   Copyright (c) 2022-2023 HACL* Contributors
   Copyright 2023 Cryspen Sarl
