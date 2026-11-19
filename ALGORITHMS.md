@@ -202,8 +202,11 @@ with portable Rust in place of the assembly armv7 runs regardless.
   the unrolled body's size is checked only on the ESP32-S3. On ESP-IDF the
   block is in `.iram1` and `K` is in `.dram1`. The driver
   `sha512_compress_blocks` stays in ordinary flash text, so the update
-  path is not a cache-off API. `esp32s3-sha512-flash` leaves the block and
-  `K` in ordinary flash sections, as does `xtensa-esp32s3-none-elf`.
+  path is not a cache-off API. `xtensa-esp32s3-none-elf` leaves the block and
+  `K` in ordinary flash sections. `esp32s3-sha512-flash` selects the rolled
+  loop there instead, with `K` in flash `.rodata`, for an image whose IRAM
+  is full: the unrolled body run from flash was 11.3 to 13.1 times slower
+  than the rolled loop.
   `admin/esp32s3-sha512-layout` checks those sections, the relocation
   allowlist, and that the block has no call, at opt-level 3, s, and z.
   At each it prints the block's IRAM and literal-pool bytes, and `K`'s 640
@@ -219,7 +222,9 @@ with portable Rust in place of the assembly armv7 runs regardless.
   compiles ESP-IDF v5.5.1's ESP32-S3 `core-isa.h` and requires
   `XCHAL_UNALIGNED_LOAD_HW` 1 and `XCHAL_UNALIGNED_LOAD_EXCEPTION` 0, the
   hardware `l32i` of an unaligned address. Board time of this IRAM
-  placement against `esp32s3-sha512-flash` is not measured. Host FIPS
+  placement against `esp32s3-sha512-flash` is on the board, in
+  steelhead99x/rind-results `results/diag/esp32s3-pr94-pr87-pr85-2026-11-18`
+  (the opt-out's rolled loop is measured there once it lands). Host FIPS
   180-4 vectors cover both Rust bodies. The Xtensa load is not in the host ctgrind binary:
   its instructions and shift distance are fixed. The synthetic link is not
   a full ESP-IDF image.

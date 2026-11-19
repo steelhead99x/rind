@@ -8,8 +8,8 @@
 //! the ESP32-S3's 16 KiB instruction cache, so every block streams its
 //! code from flash. On that board the rolled loop takes about 0.033×
 //! main's unrolled HACL* body, about 30×. That figure is the rolled loop
-//! against that HACL* body, not a cycle count of the IRAM placement
-//! against `esp32s3-sha512-flash`, which is not measured.
+//! against that HACL* body. The IRAM placement of the unrolled body takes
+//! about 0.91× the rolled loop's cycles at 1 KiB and up on the board.
 //!
 //! Two bodies, one per target, both following [`sha256`](sha256.rs) with
 //! one 16-word window. `rolled` is a single 80-round loop that stays in a
@@ -19,9 +19,14 @@
 //! opt-level s or z, and its message load is the `l32i` sequence in
 //! `be_u32`. Its code size is checked only on the ESP32-S3, which is why
 //! no other target takes it. On `xtensa-esp32s3-espidf` it is placed in
-//! IRAM (`.iram1.text`, literal pool included) and `K` in internal DRAM;
-//! `esp32s3-sha512-flash` leaves both in the ordinary flash sections, for
-//! an image whose IRAM is already full, as `xtensa-esp32s3-none-elf` does.
+//! IRAM (`.iram1.text`, literal pool included) and `K` in internal DRAM.
+//! `xtensa-esp32s3-none-elf` keeps it in the ordinary flash sections.
+//! `esp32s3-sha512-flash`, for an image whose IRAM is already full, drops
+//! the unrolled body and runs `rolled` there too, with `K` in flash
+//! `.rodata`: the unrolled body is about 18 KiB, which a 16 KiB
+//! instruction cache cannot hold, and measured 11.3 to 13.1 times slower
+//! than the rolled loop when it ran from flash (steelhead99x/rind-results,
+//! `results/diag/esp32s3-pr94-pr87-pr85-2026-11-18`).
 //! The driver `sha512_compress_blocks` stays in ordinary flash text, so
 //! the update path is not a cache-off API. `admin/esp32s3-sha512-layout`
 //! checks, at opt-level 3, s, and z, that the IRAM block loads nothing
@@ -76,13 +81,15 @@ macro_rules! SSIG1 {
     };
 }
 
-// The body this target ships. Tests compile both.
-#[cfg(not(rind_esp32s3))]
+// The body this target ships. Tests compile both. `esp32s3-sha512-flash`
+// selects the rolled loop on the ESP32-S3, so the unrolled body is not
+// built there.
+#[cfg(any(not(rind_esp32s3), feature = "esp32s3-sha512-flash"))]
 use rolled::sha512_compress_block;
-#[cfg(rind_esp32s3)]
+#[cfg(all(rind_esp32s3, not(feature = "esp32s3-sha512-flash")))]
 use unrolled::sha512_compress_block;
 
-#[cfg(any(not(rind_esp32s3), test))]
+#[cfg(any(not(rind_esp32s3), feature = "esp32s3-sha512-flash", test))]
 mod rolled {
     use super::K;
 
@@ -148,7 +155,7 @@ mod rolled {
     }
 }
 
-#[cfg(any(rind_esp32s3, test))]
+#[cfg(any(all(rind_esp32s3, not(feature = "esp32s3-sha512-flash")), test))]
 mod unrolled {
     use super::K;
 
@@ -296,11 +303,12 @@ mod unrolled {
         };
     }
 
-    // IRAM on ESP32-S3 ESP-IDF only (`xtensa-esp32s3-espidf`, and not the
-    // `esp32s3-sha512-flash` feature). ESP-IDF's `soc.lf` puts `.iram1` and
-    // `.iram1.*` in instruction RAM. The flash catch-all
-    // `*(.literal .literal.* .text .text.*)` is applied per input file, so a
-    // `.text.*` body here would sit in flash text ahead of later objects.
+    // IRAM on ESP32-S3 ESP-IDF only (`xtensa-esp32s3-espidf`; with the
+    // `esp32s3-sha512-flash` feature this body is not built). ESP-IDF's
+    // `soc.lf` puts `.iram1` and `.iram1.*` in instruction RAM. The flash
+    // catch-all `*(.literal .literal.* .text .text.*)` is applied per input
+    // file, so a `.text.*` body here would sit in flash text ahead of later
+    // objects.
     // The Xtensa backend names the literal pool `.iram1.text.literal`, and
     // `l32r` reads that pool from IRAM. `K` is in `.dram1.rodata` (internal
     // DRAM). The layout probe checks opt-level 3, s, and z: each loads nothing
@@ -313,12 +321,7 @@ mod unrolled {
     // match the ordinary text placement, and ESP-IDF maps `.iram1` as executable.
     #[inline(never)]
     #[cfg_attr(
-        all(
-            target_arch = "xtensa",
-            target_os = "espidf",
-            rind_esp32s3,
-            not(feature = "esp32s3-sha512-flash"),
-        ),
+        all(target_arch = "xtensa", target_os = "espidf", rind_esp32s3),
         unsafe(link_section = ".iram1.text")
     )]
     pub(super) fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
@@ -399,7 +402,8 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
 
 // FIPS 180-4 §4.2.3. On the ESP32-S3 ESP-IDF placement, internal DRAM rather
 // than flash `.rodata`: `.iram1` code is expected not to touch flash while
-// the cache is off. Same cfg as `unrolled::sha512_compress_block`.
+// the cache is off. The unrolled body's cfg, except that
+// `esp32s3-sha512-flash` leaves `K` in flash `.rodata` for the rolled loop.
 //
 // SAFETY: the attribute only selects the output section. The bytes are these
 // constants, and ESP-IDF maps `.dram1` into internal DRAM.

@@ -4,9 +4,10 @@
 #
 # On xtensa-esp32s3-espidf the body must land in .iram1.text (literal pool
 # included) and K in .dram1.rodata, so neither is part of the flash
-# catch-all that shifts later objects. The esp32s3-sha512-flash feature, the
-# ESP32, and xtensa-esp32s3-none-elf keep the ordinary sections. The
-# instructions of the two ESP32-S3 ESP-IDF builds must match.
+# catch-all that shifts later objects. The ESP32 and xtensa-esp32s3-none-elf
+# keep the ordinary sections. The esp32s3-sha512-flash feature runs the
+# rolled loop in ordinary sections: that object must carry no unrolled body
+# and no l32i byte swap, and no IRAM or DRAM section.
 #
 # opt-level 3 is the firmware profile. opt-level s and z are checked on
 # the ESP32-S3 object as well: the same section, relocation, and no-call
@@ -17,7 +18,8 @@
 # Every ESP32-S3 object is also checked for the message byte swap: `l32i`
 # into `a14`, `ssai 8`, a 16-bit shift, then `src R, R, a14`; `src R, R, R`;
 # `src R, a14, R`. That is the sequence in `be_u32`. The ESP32 object must
-# have none: only the ESP32-S3 takes the unrolled body and its load. A
+# have none, and so must the esp32s3-sha512-flash object: only the ESP32-S3
+# without that feature takes the unrolled body and its load. A
 # call0 build of the ESP32-S3 ESP-IDF object, IRAM block and DRAM K
 # included, is then linked and run under QEMU's esp32s3 CPU: the message
 # load, including blocks that are not word-aligned, and FIPS 180-4's "abc"
@@ -394,18 +396,10 @@ PY
 check_swap 'opt-level 3' "$work/obj/s3.o"
 check_swap 'opt-level s' "$work/obj/s.o"
 check_swap 'opt-level z' "$work/obj/z.o"
-check_swap 'esp32s3-sha512-flash' "$work/obj/flash.o"
+check_swap 'esp32s3-sha512-flash' "$work/obj/flash.o" none
 check_swap 'xtensa-esp32-espidf' "$work/obj/esp32.o" none
 check_swap 'xtensa-esp32s3-none-elf' "$work/obj/none.o"
 check_swap 'QEMU probe' "$work/obj/probe.o"
-
-s3_text=.iram1.text
-flash_text=$(
-  "$objdump" -h "$work/obj/flash.o" | awk '$2 ~ /^\.text\./ && $2 ~ /compress_block/ { print $2; exit }'
-)
-"$xtensa_bin/xtensa-esp32s3-elf-objcopy" -O binary -j "$s3_text" "$work/obj/s3.o" "$work/s3.bin"
-"$xtensa_bin/xtensa-esp32s3-elf-objcopy" -O binary -j "$flash_text" "$work/obj/flash.o" "$work/flash.bin"
-cmp "$work/s3.bin" "$work/flash.bin" || fail 'IRAM and flash-feature instruction bytes differ'
 
 # Link the compressor so the literal-pool order and the call from
 # sha512_entry can be checked. ESP-IDF Xtensa SHA-256 is sha256_iram;
