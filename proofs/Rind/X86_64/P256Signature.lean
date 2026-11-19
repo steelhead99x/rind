@@ -415,8 +415,9 @@ end P256
 /-! ## The signature API, `high::signature::ecdsa`, through the modelled dispatch -/
 
 /-- A generated key pair's private scalar is in [1, n), drawn from the system
-random source, and it holds its public key; generation is refused only if
-the draws fail. The draws themselves are outside the functional spec. -/
+random source, and it holds its public key; generation is refused only if a
+draw fails or none of its 64 draws is in [1, n). The draws themselves are
+outside the functional spec. -/
 theorem p256_ecdsa_generate (h : Runs) (hvg : NoVgP256) (hheld : Held) (hc : Cached) (hfill : Fills) :
     high.signature.ecdsa.KeyPair.generate high.signature.ecdsa.sign.P256_SHA256_FIXED ⦃ r =>
       (∀ kp, r = .Ok kp → ∃ d, EcdsaKeyPairOf kp d) ∧ ∀ e, r = .Err e → e = .RngFailed ⦄ := by
@@ -470,7 +471,8 @@ theorem p256_ecdsa_from_scalar_and_public_key (h : Runs) (hvg : NoVgP256) (hheld
 /-- A signature's bytes, if signing returns: the big-endian r and s of the
 ECDSA signature of `msg`'s SHA-256 under the key pair's scalar, for some
 nonce in [1, n), neither zero. Signing is refused only if the nonce's random
-input cannot be drawn. The nonces, RFC 6979's hedged with that input, are
+input cannot be drawn, a nonce draw fails, or none of a nonce's 64 draws is
+in [1, n). The nonces, RFC 6979's hedged with that input, are
 outside the functional spec. -/
 theorem p256_ecdsa_sign (h : Runs) (hvg : NoVgP256) (hdrbg : Drbg) (hfill : Fills)
     (hsha : Sha256Blocks) (kp : high.signature.ecdsa.KeyPair) (d : Nat) (hkp : EcdsaKeyPairOf kp d)

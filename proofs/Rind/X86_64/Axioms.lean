@@ -16,6 +16,7 @@ import Rind.X86_64.RsaDispatch
 import Rind.X86_64.Sha3
 import Rind.X86_64.AesKw
 import Rind.X86_64.P256Signature
+import Rind.X86_64.P384Signature
 import Rind.X86_64.PointSelect
 import Rind.X86_64.MlKemCoding
 open rind.x86_64
@@ -710,6 +711,147 @@ change to the trust base.
  sha256_compress_blocks_shaext_spec] -/
 #guard_msgs in
 #print axioms p256_ecdsa_public_key_new
+
+/-- info: 'rind.x86_64.p384_ecdsa_generate' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_add_p384_spec,
+ bignum_demont_p384_alt_spec,
+ bignum_demont_p384_spec,
+ bignum_eq_spec,
+ bignum_inv_p384_spec,
+ bignum_mod_n384_spec,
+ bignum_montmul_p384_alt_spec,
+ bignum_montmul_p384_spec,
+ bignum_montsqr_p384_alt_spec,
+ bignum_montsqr_p384_spec,
+ bignum_mux_spec,
+ bignum_neg_p384_spec,
+ bignum_tomont_p384_alt_spec,
+ bignum_tomont_p384_spec,
+ p384_montjdouble_alt_spec,
+ p384_montjdouble_spec,
+ p384_montjmixadd_alt_spec,
+ p384_montjmixadd_spec] -/
+#guard_msgs in
+#print axioms p384_ecdsa_generate
+
+/-- info: 'rind.x86_64.p384_ecdsa_from_scalar_and_public_key' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_add_p384_spec,
+ bignum_demont_p384_alt_spec,
+ bignum_demont_p384_spec,
+ bignum_eq_spec,
+ bignum_inv_p384_spec,
+ bignum_mod_n384_spec,
+ bignum_montmul_p384_alt_spec,
+ bignum_montmul_p384_spec,
+ bignum_montsqr_p384_alt_spec,
+ bignum_montsqr_p384_spec,
+ bignum_mux_spec,
+ bignum_neg_p384_spec,
+ bignum_tomont_p384_alt_spec,
+ bignum_tomont_p384_spec,
+ p384_montjdouble_alt_spec,
+ p384_montjdouble_spec,
+ p384_montjmixadd_alt_spec,
+ p384_montjmixadd_spec] -/
+#guard_msgs in
+#print axioms p384_ecdsa_from_scalar_and_public_key
+
+/-- info: 'rind.x86_64.p384_ecdsa_sign' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_add_p384_spec,
+ bignum_demont_p384_alt_spec,
+ bignum_demont_p384_spec,
+ bignum_demont_spec,
+ bignum_eq_spec,
+ bignum_inv_p384_spec,
+ bignum_mod_n384_spec,
+ bignum_modadd_spec,
+ bignum_modinv_spec,
+ bignum_montmul_p384_alt_spec,
+ bignum_montmul_p384_spec,
+ bignum_montmul_spec,
+ bignum_montsqr_p384_alt_spec,
+ bignum_montsqr_p384_spec,
+ bignum_mux_spec,
+ bignum_neg_p384_spec,
+ bignum_tomont_p384_alt_spec,
+ bignum_tomont_p384_spec,
+ compress_avx_spec,
+ p384_montjdouble_alt_spec,
+ p384_montjdouble_spec,
+ p384_montjmixadd_alt_spec,
+ p384_montjmixadd_spec,
+ sha512_block_data_order_avx2_spec] -/
+#guard_msgs in
+#print axioms p384_ecdsa_sign
+
+/-- info: 'rind.x86_64.p384_ecdsa_key_pair_public_key' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms p384_ecdsa_key_pair_public_key
+
+/-- info: 'rind.x86_64.p384_ecdsa_key_pair_verify' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_demont_p384_alt_spec,
+ bignum_demont_p384_spec,
+ bignum_demont_spec,
+ bignum_eq_spec,
+ bignum_inv_p384_spec,
+ bignum_mod_n384_spec,
+ bignum_modinv_spec,
+ bignum_montmul_p384_alt_spec,
+ bignum_montmul_p384_spec,
+ bignum_montmul_spec,
+ bignum_montsqr_p384_alt_spec,
+ bignum_montsqr_p384_spec,
+ bignum_neg_p384_spec,
+ bignum_tomont_p384_alt_spec,
+ bignum_tomont_p384_spec,
+ compress_avx_spec,
+ p384_montjadd_alt_spec,
+ p384_montjadd_spec,
+ p384_montjdouble_alt_spec,
+ p384_montjdouble_spec,
+ p384_montjmixadd_alt_spec,
+ p384_montjmixadd_spec,
+ sha512_block_data_order_avx2_spec] -/
+#guard_msgs in
+#print axioms p384_ecdsa_key_pair_verify
+
+/-- info: 'rind.x86_64.p384_ecdsa_public_key_new' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ bignum_add_p384_spec,
+ bignum_demont_p384_alt_spec,
+ bignum_demont_p384_spec,
+ bignum_demont_spec,
+ bignum_eq_spec,
+ bignum_inv_p384_spec,
+ bignum_mod_n384_spec,
+ bignum_modinv_spec,
+ bignum_montmul_p384_alt_spec,
+ bignum_montmul_p384_spec,
+ bignum_montmul_spec,
+ bignum_montsqr_p384_alt_spec,
+ bignum_montsqr_p384_spec,
+ bignum_neg_p384_spec,
+ bignum_tomont_p384_alt_spec,
+ bignum_tomont_p384_spec,
+ compress_avx_spec,
+ p384_montjadd_alt_spec,
+ p384_montjadd_spec,
+ p384_montjdouble_alt_spec,
+ p384_montjdouble_spec,
+ p384_montjmixadd_alt_spec,
+ p384_montjmixadd_spec,
+ sha512_block_data_order_avx2_spec] -/
+#guard_msgs in
+#print axioms p384_ecdsa_public_key_new
 
 /-- info: 'rind.x86_64.rsa_signature_new_spec' depends on axioms: [propext,
  Classical.choice,
