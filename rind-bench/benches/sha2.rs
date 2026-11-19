@@ -1,21 +1,31 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+#[cfg(not(target_arch = "xtensa"))]
 use sha2::Digest;
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_ring_sha256(data: &[u8]) {
     let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
     ctx.update(data);
     black_box(ctx.finish());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_ring_sha512(data: &[u8]) {
     let mut ctx = ring::digest::Context::new(&ring::digest::SHA512);
     ctx.update(data);
     black_box(ctx.finish());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_ring_sha512_256(data: &[u8]) {
     let mut ctx = ring::digest::Context::new(&ring::digest::SHA512_256);
     ctx.update(data);
@@ -23,6 +33,7 @@ fn test_ring_sha512_256(data: &[u8]) {
 }
 
 #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 fn test_aws_sha256(data: &[u8]) {
     let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA256);
     ctx.update(data);
@@ -30,6 +41,7 @@ fn test_aws_sha256(data: &[u8]) {
 }
 
 #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 fn test_aws_sha512(data: &[u8]) {
     let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA512);
     ctx.update(data);
@@ -37,48 +49,56 @@ fn test_aws_sha512(data: &[u8]) {
 }
 
 #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 fn test_aws_sha512_256(data: &[u8]) {
     let mut ctx = aws_lc_rs::digest::Context::new(&aws_lc_rs::digest::SHA512_256);
     ctx.update(data);
     black_box(ctx.finish());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rc_sha256(data: &[u8]) {
     let mut ctx = sha2::Sha256::new();
     ctx.update(data);
     black_box(ctx.finalize());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rc_sha512(data: &[u8]) {
     let mut ctx = sha2::Sha512::new();
     ctx.update(data);
     black_box(ctx.finalize());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rc_sha512_256(data: &[u8]) {
     let mut ctx = sha2::Sha512_256::new();
     ctx.update(data);
     black_box(ctx.finalize());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rind_sha256(data: &[u8]) {
     let mut ctx = rind::digest::Context::new(&rind::digest::SHA256);
     ctx.update(data);
     black_box(ctx.finish());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rind_sha512(data: &[u8]) {
     let mut ctx = rind::digest::Context::new(&rind::digest::SHA512);
     ctx.update(data);
     black_box(ctx.finish());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rind_sha512_256(data: &[u8]) {
     let mut ctx = rind::digest::Context::new(&rind::digest::SHA512_256);
     ctx.update(data);
     black_box(ctx.finish());
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_vg<H: verified_garbage::hashes::HashFunction>(data: &[u8]) {
     let mut ctx = H::new();
     ctx.update(data);
@@ -86,6 +106,7 @@ fn test_vg<H: verified_garbage::hashes::HashFunction>(data: &[u8]) {
 }
 
 // verified-garbage's row, after checking its digest matches rind's.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_row<H: verified_garbage::hashes::HashFunction>(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
     ours: &'static rind::digest::Algorithm,
@@ -105,6 +126,7 @@ fn vg_row<H: verified_garbage::hashes::HashFunction>(
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn sha256(c: &mut Criterion) {
     let mut group = c.benchmark_group("sha256");
     for (size, size_name) in criterion::HASH_SIZES {
@@ -153,7 +175,11 @@ fn sha256(c: &mut Criterion) {
             &input,
             |b, input| b.iter(|| black_box(libcrux_sha2::sha256(input))),
         );
-        #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+        #[cfg(all(
+            feature = "__bench_openssl",
+            target_family = "unix",
+            not(target_arch = "xtensa")
+        ))]
         group.bench_with_input(
             BenchmarkId::new("openssl", size_name),
             &input,
@@ -162,6 +188,7 @@ fn sha256(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn sha512(c: &mut Criterion) {
     let mut group = c.benchmark_group("sha512");
     for (size, size_name) in criterion::HASH_SIZES {
@@ -210,7 +237,11 @@ fn sha512(c: &mut Criterion) {
             &input,
             |b, input| b.iter(|| black_box(libcrux_sha2::sha512(input))),
         );
-        #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+        #[cfg(all(
+            feature = "__bench_openssl",
+            target_family = "unix",
+            not(target_arch = "xtensa")
+        ))]
         group.bench_with_input(
             BenchmarkId::new("openssl", size_name),
             &input,
@@ -219,6 +250,7 @@ fn sha512(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn sha512_256(c: &mut Criterion) {
     let mut group = c.benchmark_group("sha512-256");
     for (size, size_name) in criterion::HASH_SIZES {
@@ -252,6 +284,7 @@ fn sha512_256(c: &mut Criterion) {
 }
 
 // Many small updates show the cost of dispatching each one on the algorithm.
+#[cfg(not(target_arch = "xtensa"))]
 fn sha256_updates(c: &mut Criterion) {
     let mut group = c.benchmark_group("sha256-updates");
     let input = vec![0u8; 4096];
@@ -283,5 +316,7 @@ fn sha256_updates(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, sha256, sha512, sha512_256, sha256_updates);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

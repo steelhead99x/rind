@@ -1,6 +1,12 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
+#[cfg(not(target_arch = "xtensa"))]
 fn bench_aes_ctr(c: &mut Criterion) {
     let iv = [0u8; 16];
 
@@ -62,6 +68,7 @@ fn bench_aes_ctr(c: &mut Criterion) {
 // the input into a buffer of kept capacity, since both directions work in
 // place and decryption consumes its ciphertext; the copy is the same for
 // both libraries.
+#[cfg(not(target_arch = "xtensa"))]
 fn bench_aes_cbc(c: &mut Criterion) {
     let iv = [0u8; 16];
 
@@ -178,6 +185,7 @@ fn bench_aes_cbc(c: &mut Criterion) {
 
 // The bare ChaCha20 stream cipher, a fresh nonce per message. aws-lc-rs and
 // ring expose no ChaCha20 without Poly1305.
+#[cfg(not(target_arch = "xtensa"))]
 fn bench_chacha20(c: &mut Criterion) {
     let key = [7u8; 32];
     let nonce = [9u8; 12];
@@ -213,6 +221,7 @@ fn bench_chacha20(c: &mut Criterion) {
 }
 
 // The QUIC header protection mask: one cipher call on a 16-byte sample.
+#[cfg(not(target_arch = "xtensa"))]
 fn bench_header_protection(c: &mut Criterion) {
     let sample = [0x5au8; 16];
     let mut group = c.benchmark_group("quic-header-protection");
@@ -287,6 +296,7 @@ fn bench_header_protection(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rind_aes(key_len: usize) -> &'static rind::cipher::Algorithm {
     match key_len {
         16 => &rind::cipher::AES_128,
@@ -295,6 +305,7 @@ fn rind_aes(key_len: usize) -> &'static rind::cipher::Algorithm {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(
     benches,
     bench_aes_ctr,
@@ -302,4 +313,5 @@ criterion_group!(
     bench_chacha20,
     bench_header_protection
 );
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);
