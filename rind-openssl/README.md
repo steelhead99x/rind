@@ -30,10 +30,10 @@ It also sets `nodejs_conf`, since Node.js otherwise reads only its own section o
 |---|---|---|
 | X25519 | key generation, key exchange, the encoded public key TLS sends, and RFC 9180's `DeriveKeyPair` from `dhkem-ikm` | 1.2-1.4x on exchange, 1.6-2.4x on generation and exchange |
 | Ed25519 | signing and verifying | 2.6-5.4x on signing, 2.2-4.7x on verifying |
-| ECDSA and ECDH on P-256, P-384, and P-521, with `ec = 1` | key import and generation, signing and verifying through `EVP_DigestSign` and `EVP_DigestVerify`, ECDH, and the TLS 1.3 groups | P-256: 1.7x signing, 1.5x verifying, 2.6x ECDH. P-384: 13.6x, 3.9x, 7.0x. P-521: 3.5x, 1.9x, 2.5x |
+| ECDSA and ECDH on P-256, P-384, and P-521, with `ec = 1` | key import and generation, signing and verifying through `EVP_DigestSign` and `EVP_DigestVerify`, ECDH, and the TLS 1.3 groups | P-256: 1.9x signing, 1.3-1.4x verifying, 1.2-1.4x ECDH. P-384: 3.8-4.1x, 2.2-2.3x, 1.8-2.1x. P-521: 2.7-3.9x, 1.7-2.3x, 1.4-1.5x |
 
 Measured on an AMD Ryzen 9 9950X against OpenSSL 3.5.9's default provider, under load: with `openssl speed`, with Node.js 24, and with Python's `cryptography`, changing only `OPENSSL_CONF`.
-The NIST curves were measured later, on a shared 2.1 GHz Intel Xeon VM against OpenSSL 3.0.13's default provider, by `cargo test --release -p rind-openssl --test ec -- --ignored --nocapture`, which times each operation through the provider's own tables. A noisy host moves these by tens of percent, and the default provider's P-384 numbers are the least steady.
+The NIST curves were measured later, on an Intel Core Ultra 9 275HX (24 cores, a laptop, with a load average of 2.7 to 5.1 from other programs) against OpenSSL 3.5.8's default provider, by `cargo test --release -p rind-openssl --test ec -- --ignored --nocapture`, which times each operation through the provider's own tables. The table gives the lowest and highest of rind's rate over the default provider's across three runs; the default provider's own rates moved by up to a quarter between runs, and its P-521 signing the most. `openssl speed -seconds 3 ecdhp256 ecdhp384 ecdhp521` agrees on ECDH: 1.4x, 2.7x, and 1.2x. A quiet desktop would narrow these ranges; the earlier figures here, from a shared 2.1 GHz Xeon VM against OpenSSL 3.0.13, mostly measured that OpenSSL's slower P-384.
 
 ## The NIST curves
 
