@@ -832,11 +832,14 @@ ecdsa_items() {
     items rind/src/high/curve.rs 'impl Curve for P256 {'
     items rind/src/mid/p256.rs '    pub(crate) fn generate(rng: &mut dyn'
     items <(sed -n '/^impl StaticPrivateKey {/,/^}/p' rind/src/mid/p256.rs) '    pub(crate) fn generate('
+    items rind/src/high/curve.rs 'impl Curve for P384 {'
+    items rind/src/mid/p384.rs '    fn generate(rng: &mut dyn'
+    items <(sed -n '/^impl StaticPrivateKey {/,/^}/p' rind/src/mid/p384.rs) '    pub(crate) fn generate('
     items rind/src/high/signature.rs 'macro_rules! with_hash {' 'type Verify<K> =' 'type Sign<K> =' \
         'type Write<K> ='
     items rind/src/high/signature/ecdsa.rs 'struct Ecdsa {' 'macro_rules! with_ecdsa {' \
         'macro_rules! with_curve {' 'trait Encoding {' 'impl Encoding for Fixed {' 'trait EcdsaCurve:' \
-        'macro_rules! ecdsa_curve {' 'ecdsa_curve!(P256);' 'enum Key {' 'impl Clone for Key {' \
+        'macro_rules! ecdsa_curve {' 'ecdsa_curve!(P256);' 'ecdsa_curve!(P384);' 'enum Key {' 'impl Clone for Key {' \
         'struct EcdsaVerifier<' 'impl<C: EcdsaCurve> Clone for EcdsaVerifier<C> {' 'struct VerifyOps<' \
         'impl<C: EcdsaCurve> EcdsaVerifier<C> {' 'macro_rules! on_key {' 'fn parse_ecdsa<' \
         'pub struct VerificationAlgorithm {' 'const fn ecdsa_verification(' 'pub struct PublicKey {' \
@@ -844,7 +847,8 @@ ecdsa_items() {
         'const SIGNATURE_MAX_LEN:' 'const fn ecdsa_signing(' 'pub struct SigningAlgorithm {' \
         'enum EcdsaSource<' 'pub struct KeyPair {' 'enum EcdsaKey {' 'struct EcdsaPair<' 'struct EcdsaOps<' \
         'macro_rules! on_ecdsa {' 'impl KeyPair {' '    pub static P256_SHA256_FIXED: SigningAlgorithm' \
-        '    pub static P256_SHA256_FIXED: VerificationAlgorithm'
+        '    pub static P384_SHA384_FIXED: SigningAlgorithm' '    pub static P256_SHA256_FIXED: VerificationAlgorithm' \
+        '    pub static P384_SHA384_FIXED: VerificationAlgorithm'
 }
 check_quote X86_64/EcdsaDispatch ecdsa_items
 check_quote X86_64/DigestAlgorithm items rind/src/high/digest.rs 'pub struct Algorithm ' 'impl Algorithm {' \
@@ -1514,11 +1518,12 @@ mkdir -p proofs/Rind/Aarch64/Kdf
 # P-256's generator multiplication and its table differ per target, so each
 # target has its own `P256Base` stating it, and `P256KeyCheck` for the key
 # check x86_64 shortcuts; key generation and ECDSA above them are shared.
+# Each target's `P384KeyCheck` reads its own translation of the key check.
 for file in Dispatch QuicDispatch P256Dispatch P256Agree P384Dispatch X25519 P384 P384Table P384Keygen DigestAlgorithm \
     DigestDispatch Sha512 ChaCha20 SignatureBuffer Ed25519 \
     Blockwise Sha Hmac HmacDispatch HkdfExpand Kdf/TypesExternal Kdf/FunsExternal \
     CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3 AesCipher HkdfAes AesModesApi AesKw P256 EcdsaDispatch Naf P256Ecdsa P256Signature \
-    MlKemCoding; do
+    P384Ecdsa P384Signature MlKemCoding; do
     sed 's/X86_64/Aarch64/g; s/x86_64/aarch64/g' "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Aarch64/$file.lean"
 done
 # The AEAD model imports nothing aarch64 has, and no aarch64 translation reaches it.

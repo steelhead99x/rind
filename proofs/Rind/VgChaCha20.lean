@@ -1,141 +1,25 @@
--- Adapted from pyca/verified-garbage (https://github.com/pyca/verified-garbage),
--- `lean/VerifiedGarbage/Spec/ChaCha20.lean` at 0aa40d6c21fd02943fe5b38a5b69b6213d07764d.
--- Copyright (c) Individual contributors.
--- SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 import Rind.S2nChaCha20Poly1305
 import Rind.AesKw
-open rind.spec
+import VerifiedGarbage.Spec.ChaCha20
+open rind.spec VG.Spec.ChaCha20
 
 /-!
-# pyca/verified-garbage's ChaCha20 spec
+# pyca/verified-garbage's ChaCha20 spec, against rind's
 
-The RFC 8439 spec of ChaCha20 in pyca/verified-garbage's (VG's)
-`Spec/ChaCha20.lean`, which VG's theorems about its streaming routines state
-their results against (`Spec/ChaCha20/Contract.lean`), at the commit
-`admin/import-vg` pins. `admin/import-vg-models` vendors both under
-`proofs/verified-garbage/`, so a pin that changes them shows the change in its
-diff, and that re-pin must review this file against the new text: no check
-compares the two. VG's spec is Lean already, so the cipher's definitions
-are its text. Those over memory read the streaming state's 768 bytes `st`
-instead: VG's `m (p + i)`, for the state at `p`, is `st[i]!`, and its
-little-endian `Mem.read` and `Mem.readW` read `st` from an offset. The
-theorems here prove what rind's proof of the routines' Rust needs: that the
-keystream VG's `init` sets up, XORed into a message, is `Rind.Spec`'s
-`chacha20.encrypt`, and that the state holds as many bytes of keystream as
-its count says.
+pyca/verified-garbage's (VG's) RFC 8439 spec, `VerifiedGarbage.Spec.ChaCha20`,
+which VG's theorems about its streaming routines state their results against
+(`Spec/ChaCha20/Contract.lean`), and which `admin/import-vg-models` vendors
+byte for byte at the commit `admin/import-vg` pins. The theorems here prove
+what rind's proof of the routines' Rust needs: that the keystream VG's `init`
+sets up, XORed into a message, is `Rind.Spec`'s `chacha20.encrypt`; that the
+state holds as many bytes of keystream as its count says; and that VG's view
+of the streaming state reads only its 768 bytes, so what VG's theorems say of
+the state at one address holds wherever memory holds those bytes. They are
+over VG's own definitions, so a re-pin that changes those in a way these
+proofs cannot absorb fails here.
 -/
 
 namespace rind.spec.vg
-
-/-- A 32-bit word. -/
-abbrev Word := BitVec 32
-
-/-- The sixteen 32-bit words of a ChaCha state (§2.2), in the order of the
-RFC's 4×4 matrix (row by row). -/
-abbrev State := Vector Word 16
-
-/-- §2.1's quarter round. -/
-def quarterRound (a b c d : Word) : Word × Word × Word × Word :=
-  let a := a + b; let d := (d ^^^ a).rotateLeft 16
-  let c := c + d; let b := (b ^^^ c).rotateLeft 12
-  let a := a + b; let d := (d ^^^ a).rotateLeft 8
-  let c := c + d; let b := (b ^^^ c).rotateLeft 7
-  (a, b, c, d)
-
-/-- §2.2, `QUARTERROUND(x, y, z, w)`: the quarter round on the words of the
-state at indices `x, y, z, w`, leaving the others alone. -/
-def qround (s : State) (x y z w : Fin 16) : State :=
-  let (a, b, c, d) := quarterRound s[x] s[y] s[z] s[w]
-  ((((s.set x a).set y b).set z c).set w d)
-
-/-- The four constant words `0x61707865, 0x3320646e, 0x79622d32, 0x6b206574`. -/
-def constants : Vector Word 4 := #v[0x61707865, 0x3320646e, 0x79622d32, 0x6b206574]
-
-/-- §2.3.1, `inner_block`: a column round followed by a diagonal round. -/
-def innerBlock (s : State) : State :=
-  let s := qround s 0 4 8 12
-  let s := qround s 1 5 9 13
-  let s := qround s 2 6 10 14
-  let s := qround s 3 7 11 15
-  let s := qround s 0 5 10 15
-  let s := qround s 1 6 11 12
-  let s := qround s 2 7 8 13
-  qround s 3 4 9 14
-
-/-- §2.3: the ChaCha20 block function on a state: 20 rounds (10 iterations
-of `innerBlock`), then the original state added word by word. -/
-def block (s : State) : State :=
-  Vector.zipWith (· + ·) (Nat.repeat innerBlock 10 s) s
-
-/-- §2.3: serialize a state by sequencing its words in little-endian order. -/
-def serialize (s : State) : List (BitVec 8) :=
-  s.toList.flatMap fun x => [x.extractLsb' 0 8, x.extractLsb' 8 8, x.extractLsb' 16 8, x.extractLsb' 24 8]
-
-/-- Word `j` of a byte string read as little-endian 32-bit integers. -/
-def wordLE (bs : List (BitVec 8)) (j : Nat) : Word :=
-  (bs.getD (4 * j + 3) 0 ++ bs.getD (4 * j + 2) 0 ++ bs.getD (4 * j + 1) 0 ++ bs.getD (4 * j) 0 : Word)
-
-/-- §2.3: the initial state from a 256-bit key, a 32-bit block counter and a
-96-bit nonce. -/
-def initState (key : List (BitVec 8)) (counter : Word) (nonce : List (BitVec 8)) : State :=
-  Vector.ofFn fun i =>
-    if i.1 < 4 then constants.getD i.1 0
-    else if i.1 < 12 then wordLE key (i.1 - 4)
-    else if i.1 = 12 then counter
-    else wordLE nonce (i.1 - 13)
-
-/-- §2.3.1, `chacha20_block(key, counter, nonce)`: 64 bytes of keystream. -/
-def chacha20Block (key : List (BitVec 8)) (counter : Word) (nonce : List (BitVec 8)) : List (BitVec 8) :=
-  serialize (block (initState key counter nonce))
-
-/-- The whole keystream for the 256-bit key `key` and the 16-byte `nonce`,
-the initial 32-bit block counter `c` followed by the 96-bit nonce: the
-blocks for the counters `c` to 2³² − 1. -/
-def keystreamOf (key nonce : List (BitVec 8)) : List (BitVec 8) :=
-  let c := wordLE nonce 0
-  (List.range (2 ^ 32 - c.toNat)).flatMap fun j =>
-    chacha20Block key (c + BitVec.ofNat 32 j) (nonce.drop 4)
-
-/-! ## The streaming state
-
-VG's definitions over the memory `m` and the state's address `p`, over the
-state's bytes `st`. -/
-
-/-- `Mem.read`: the little-endian read of `n` bytes from offset `a`. -/
-def read (st : List (BitVec 8)) (a : Nat) : (n : Nat) → BitVec (8 * n)
-  | 0 => 0#0
-  | n + 1 => (read st (a + 1) n ++ st[a]! : BitVec (8 * n + 8))
-
-/-- `Mem.readW`: the little-endian read of a `w`-bit value from offset `a`
-(`w` a multiple of 8). -/
-def readW (st : List (BitVec 8)) (a w : Nat) : BitVec w := (read st a (w / 8)).setWidth w
-
-/-- `stateAt`: the 16-word state at the start of the streaming state. -/
-def stateAt (st : List (BitVec 8)) : State :=
-  Vector.ofFn fun j => readW st (4 * j.1) 32
-
-/-- The first `n` bytes of the keystream from the state `s`: the serialized
-blocks of `s` with the counter (word 12) advanced by `j = 0, 1, …`. -/
-def keystream (s : State) (n : Nat) : List (BitVec 8) :=
-  ((List.range ((n + 63) / 64)).flatMap fun j =>
-    serialize (block (s.set 12 (s[12] + BitVec.ofNat 32 j)))).take n
-
-/-- `bytesAt`: the `n` bytes from offset `a`. -/
-def bytesAt (st : List (BitVec 8)) (a n : Nat) : List (BitVec 8) :=
-  (List.range n).map fun i => st[a + i]!
-
-/-- `keyAt`: the streaming state's key, its bytes 16 to 47. -/
-def keyAt (st : List (BitVec 8)) : List (BitVec 8) := bytesAt st 16 32
-
-/-- `leftAt`: the number of bytes of keystream left, bytes 128 to 135. -/
-def leftAt (st : List (BitVec 8)) : Nat := (readW st 128 64).toNat
-
-/-- `restAt`: the keystream left, `leftAt st = n` bytes long: the last
-`n % 64` bytes of the block at bytes 64 to 127, then the first
-`64 * (n / 64)` bytes of the keystream of the 16-word state at bytes 0 to 63. -/
-def restAt (st : List (BitVec 8)) : List (BitVec 8) :=
-  let n := leftAt st
-  bytesAt st (128 - n % 64) (n % 64) ++ keystream (stateAt st) (64 * (n / 64))
 
 /-! ## The keystream is `Rind.Spec`'s -/
 
@@ -147,11 +31,11 @@ theorem length_keystream (s : State) (n : Nat) : (keystream s n).length = n := b
   simp only [length_serialize, List.map_const', List.length_range, List.sum_replicate, smul_eq_mul]
   omega
 
-theorem length_bytesAt (st : List (BitVec 8)) (a n : Nat) : (bytesAt st a n).length = n := by
+theorem length_bytesAt (m : VG.Mem) (p : VG.Addr) (n : Nat) : (bytesAt m p n).length = n := by
   simp [bytesAt]
 
 /-- The state holds as many bytes of keystream as its count says. -/
-theorem length_restAt (st : List (BitVec 8)) : (restAt st).length = leftAt st := by
+theorem length_restAt (m : VG.Mem) (p : VG.Addr) : (restAt m p).length = leftAt m p := by
   rw [restAt, List.length_append, length_bytesAt, length_keystream]
   omega
 
@@ -300,6 +184,73 @@ theorem length_keystreamOf (key nonce : List (BitVec 8)) (hk : key.length = 32) 
   have hn' : (nonce.drop 4).length = 12 := by simp [hn]
   simp only [keystreamOf, List.length_flatMap, chacha20Block_eq _ _ _ hk hn', s2n.length_block _ _ _ hk hn']
   simp [List.sum_replicate, Nat.mul_comm]
+
+/-! ## The streaming state's 768 bytes
+
+VG's contracts state the streaming state's key and keystream (`keyAt`,
+`leftAt`, `restAt`) over all of memory `m` and the state's address `p`.
+These read only the 768 bytes at `p`, the `[u64; 96]` the contracts' `state`
+parameter is: memory agreeing there agrees on them. -/
+
+/-- Memory holding the bytes `st` from address 0. -/
+def mem (st : List VG.Byte) : VG.Mem := fun a => st[a.toNat]!
+
+/-- `mem st` holds `st` from address 0. -/
+theorem bytesAt_mem (st : List VG.Byte) (h : st.length < 2 ^ 64) : bytesAt (mem st) 0 st.length = st := by
+  apply List.ext_getElem (by simp [bytesAt])
+  intro i h1 h2
+  have hi : (0 + BitVec.ofNat 64 i).toNat = i := by
+    simp only [BitVec.toNat_add, BitVec.toNat_ofNat, show (0 : VG.Addr).toNat = 0 from rfl]
+    omega
+  simp only [bytesAt, List.getElem_map, List.getElem_range, mem]
+  rw [hi, getElem!_pos st i h2]
+
+/-- Memory that agrees on the 768 bytes at `p` agrees on each of them. -/
+theorem eq_of_bytesAt {m m' : VG.Mem} {p : VG.Addr} (h : bytesAt m p 768 = bytesAt m' p 768) (k : Nat)
+    (hk : k < 768) : m (p + BitVec.ofNat 64 k) = m' (p + BitVec.ofNat 64 k) := by
+  have := congrArg (·[k]?) h
+  simpa [bytesAt, hk] using this
+
+/-- Memory that agrees on the state's bytes reads the same value inside them. -/
+theorem read_congr {m m' : VG.Mem} {p : VG.Addr} (h : bytesAt m p 768 = bytesAt m' p 768) (a n : Nat)
+    (ha : a + n ≤ 768) : m.read (p + BitVec.ofNat 64 a) n = m'.read (p + BitVec.ofNat 64 a) n := by
+  induction n generalizing a with
+  | zero => rfl
+  | succ n ih =>
+    simp only [VG.Mem.read]
+    have h1 : BitVec.ofNat 64 a + 1 = BitVec.ofNat 64 (a + 1) := by rw [BitVec.ofNat_add]; rfl
+    rw [eq_of_bytesAt h a (by omega), BitVec.add_assoc, h1, ih (a + 1) (by omega)]
+
+/-- Memory that agrees on the state's bytes reads the same bytes inside them. -/
+theorem bytesAt_congr {m m' : VG.Mem} {p : VG.Addr} (h : bytesAt m p 768 = bytesAt m' p 768) (a n : Nat)
+    (ha : a + n ≤ 768) : bytesAt m (p + BitVec.ofNat 64 a) n = bytesAt m' (p + BitVec.ofNat 64 a) n := by
+  simp only [bytesAt]
+  apply List.map_congr_left
+  intro i hi
+  rw [List.mem_range] at hi
+  rw [BitVec.add_assoc, ← BitVec.ofNat_add, eq_of_bytesAt h _ (by omega)]
+
+/-- The key reads only the state's 768 bytes. -/
+theorem keyAt_congr {m m' : VG.Mem} {p : VG.Addr} (h : bytesAt m p 768 = bytesAt m' p 768) :
+    keyAt m p = keyAt m' p :=
+  bytesAt_congr h 16 32 (by omega)
+
+/-- The count of keystream bytes left reads only the state's 768 bytes. -/
+theorem leftAt_congr {m m' : VG.Mem} {p : VG.Addr} (h : bytesAt m p 768 = bytesAt m' p 768) :
+    leftAt m p = leftAt m' p := by
+  simp only [leftAt, VG.Mem.readW]
+  rw [show (128 : VG.Addr) = BitVec.ofNat 64 128 from rfl, read_congr h 128 8 (by omega)]
+
+/-- The keystream left reads only the state's 768 bytes. -/
+theorem restAt_congr {m m' : VG.Mem} {p : VG.Addr} (h : bytesAt m p 768 = bytesAt m' p 768) :
+    restAt m p = restAt m' p := by
+  have hs : stateAt m p = stateAt m' p := by
+    apply Vector.ext
+    intro j hj
+    simp only [stateAt, VG.Mem.readW, Vector.getElem_ofFn]
+    rw [read_congr h (4 * j) 4 (by omega)]
+  simp only [restAt, leftAt_congr h, hs]
+  rw [bytesAt_congr h _ _ (by omega)]
 
 /-! ## Words as memory holds them -/
 
