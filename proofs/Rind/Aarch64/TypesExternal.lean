@@ -16,6 +16,14 @@ namespace rind.aarch64
 /-- The entry guard every operation holds, which changes no value. -/
 opaque low.entry.Entry : Type
 
+/-- The token proving the CPU runs pyca/verified-garbage's P-256, which no
+proof here covers. -/
+opaque low.aarch64.p256_vg.P256 : Type
+
+/-- x86_64's AVX-512 IFMA X25519 and Ed25519 token, which no aarch64 CPU
+builds. -/
+opaque low.aarch64.curve25519_ifma.Curve25519Ifma : Type
+
 /-- The token proving the CPU has the SHA-512 instructions. -/
 opaque low.aarch64.cpu.HaveSha3 : Type
 
@@ -33,7 +41,14 @@ opaque high.hmac_drbg.HmacDrbg (H : Type _) (Clause0_Context : Type _) (Clause0_
 
 /-- The NEON AES keys aarch64 CPUs without the crypto extension run. -/
 opaque low.aarch64.vpaes_armv8.VpaesKey : Type
+
+/-- aws-lc's NEON GHASH table, which aarch64 CPUs without the crypto extension run. -/
+opaque low.aarch64.ghash_neon_armv8.NeonTable : Type
 opaque low.aarch64.vpaes_armv8.VpaesDecKey : Type
+
+/-- The token proving pyca/verified-garbage's ML-KEM-768 encapsulation runs
+here: the CPU has the SHA-3 instructions. -/
+opaque low.aarch64.mlkem768_vg.Encaps : Type
 
 /-- MD5's chaining state, which no proof covers. -/
 opaque mid.md5.Md5State : Type
@@ -59,7 +74,7 @@ nothing, since `Keyed::private_key` builds each `Ops<K::Key>` from the curve
 marker `K`'s own `Agree` functions, which the model calls directly. -/
 @[reducible] def high.agreement.Ops (_Key : Type) : Type := Unit
 
-/-- A header-protection key with its cipher's mask, as `Rind.Aarch64.Dispatch` models it:
+/-- A header-protection key with its cipher's mask, as `Rind.Aarch64.QuicDispatch` models it:
 the key, since `Masker::new` builds every one with `C`'s own `mask`, which the
 model calls directly. -/
 @[reducible] def aead.quic.Masker (C : Type) : Type := C

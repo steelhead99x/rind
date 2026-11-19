@@ -2,7 +2,8 @@
 name = "rind-bench"
 version = "0.1.0"
 edition = "2024"
-rust-version.workspace = true
+# pyca/verified-garbage needs 1.95, so the MSRV check leaves this crate out.
+rust-version = "1.95"
 publish = false
 
 [dependencies]
@@ -11,16 +12,21 @@ codspeed-criterion-compat = { optional = true, version = "6" }
 
 [dev-dependencies]
 aes-gcm = "0.11"
+argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
 aws-lc-rs = { version = "1.19", features = ["non-fips"], default-features = false }
 # For XChaCha20-Poly1305, which aws-lc-rs does not expose.
 aws-lc-sys = { version = "0.47", default-features = false }
+blind-rsa-signatures = "0.18"
 chacha20poly1305 = "0.11"
 criterion = "0.8"
 ed25519-dalek = { version = "3", features = ["alloc", "pkcs8", "rand_core"] }
+fips205 = "0.5"
 getrandom = { version = "0.4", features = ["sys_rng"] }
 hkdf = "0.13"
 hex = { version = "0.4", features = ["serde"] }
 hmac = "0.13"
+hpke = { version = "0.15", features = ["aes", "hkdfsha2"] }
+hpke-rs = { version = "0.8", features = ["libcrux"] }
 jsonwebtoken = { version = "11.1", default-features = false, features = ["aws_lc_rs"] }
 libcrux-aes = "0.0.10"
 libcrux-chacha20poly1305 = "0.0.10"
@@ -30,7 +36,7 @@ libcrux-ed25519 = { version = "0.0.10", features = ["rand"] }
 libcrux-hkdf = "0.0.9"
 libcrux-hmac = "0.0.9"
 libcrux-ml-dsa = "0.0.11"
-libcrux-ml-kem = { version = "0.0.11", default-features = false, features = ["mlkem768", "alloc"] }
+libcrux-ml-kem = { version = "0.0.11", default-features = false, features = ["mlkem512", "mlkem768", "mlkem1024", "alloc"] }
 libcrux-rsa = "0.0.9"
 libcrux-sha2 = "0.0.9"
 libcrux-sha3 = "0.0.11"
@@ -38,19 +44,28 @@ md5 = { package = "md-5", version = "0.11" }
 ml-dsa = "0.1"
 ml-kem = { version = "0.3", features = ["getrandom"] }
 p256 = { version = "0.14", features = ["ecdh", "getrandom"] }
-p384 = { version = "0.14", features = ["ecdh", "getrandom"] }
+p384 = { version = "0.14", features = ["ecdh", "getrandom", "oprf"] }
 p521 = { version = "0.14", features = ["ecdh", "getrandom"] }
 proptest = "1.5.0"
 ring = "0.17"
 rind-jsonwebtoken = { path = "../rind-jsonwebtoken" }
 rind-rustls = { path = "../rind-rustls" }
-rsa = { version = "=0.10.0-rc.19", features = ["sha2"] }
+rsa = { version = "0.10", features = ["pkcs1v15"] }
 rustls = { version = "0.23.36", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.11"
 sha2 = "0.11"
 sha3 = "0.12"
+slh-dsa = "=0.2.0-rc.5"
+spake2plus = "0.1"
+# The release on RustCrypto's current curves; 0.5 is on the previous ones.
+voprf = { version = "=0.6.0-pre.2", default-features = false, features = ["ristretto255-ciphersuite"] }
+vrf-rfc9381 = { version = "0.0.7", features = ["edwards25519", "p256"] }
+# pyca/verified-garbage, which is not on crates.io: pinned by commit, since
+# its generated assembly is checked in. `cpu-features-env` lets the weekly bench's
+# tiers deny it what they deny rind, through `VG_CPU_FEATURES`.
+verified-garbage = { git = "https://github.com/pyca/verified-garbage", rev = "0aa40d6c21fd02943fe5b38a5b69b6213d07764d", features = ["cpu-features-env"] }
 x25519-dalek = { version = "3", features = ["getrandom"] }
 
 # Graviola supports only these.
@@ -67,6 +82,10 @@ rustls-openssl = { version = "0.4", default-features = false }
 [features]
 __bench_openssl = []
 __bench_codspeed = ["dep:codspeed-criterion-compat"]
+
+[[bench]]
+name = "argon2"
+harness = false
 
 [[bench]]
 name = "x25519"
@@ -133,7 +152,11 @@ name = "mldsa"
 harness = false
 
 [[bench]]
-name = "mlkem768"
+name = "slhdsa"
+harness = false
+
+[[bench]]
+name = "mlkem"
 harness = false
 
 [[bench]]
@@ -162,4 +185,24 @@ harness = false
 
 [[bench]]
 name = "rustls"
+harness = false
+
+[[bench]]
+name = "hpke"
+harness = false
+
+[[bench]]
+name = "vrf"
+harness = false
+
+[[bench]]
+name = "blind_rsa"
+harness = false
+
+[[bench]]
+name = "oprf"
+harness = false
+
+[[bench]]
+name = "spake2plus"
 harness = false

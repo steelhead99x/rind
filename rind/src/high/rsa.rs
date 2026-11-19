@@ -45,15 +45,6 @@ fn public_exponent(e: &[u8]) -> Result<u64, Error> {
     Ok(value)
 }
 
-/// The big-endian modulus and exponent of PKCS#1 `RSAPublicKey` or
-/// `SubjectPublicKeyInfo` DER.
-fn der_components(bytes: &[u8]) -> Result<(&[u8], &[u8]), Error> {
-    match asn1::opens_nested_sequence(bytes) {
-        true => spki_components(bytes),
-        false => pkcs1_components(bytes),
-    }
-}
-
 /// [`pkcs1_components`] of the key in `SubjectPublicKeyInfo` DER, whose
 /// algorithm must be one of [`KEY_ALGORITHMS`] with `NULL` parameters, as RFC
 /// 3279 section 2.3.1 requires for `rsaEncryption`, or none, which aws-lc
@@ -133,13 +124,12 @@ impl VerifyingKey {
         Self::from_unsigned(n, e)
     }
 
-    /// Decodes an RSA public key from PKCS#1 `RSAPublicKey` or
-    /// `SubjectPublicKeyInfo` DER, as aws-lc-rs takes either.
-    pub(crate) fn from_der(bytes: &[u8]) -> Result<Self, Error> {
+    /// Decodes an RSA public key from `SubjectPublicKeyInfo` DER.
+    pub(crate) fn from_spki_der(bytes: &[u8]) -> Result<Self, Error> {
         let _entry = Entry::new_public();
         // A `match` rather than `?` on the borrowed pair, whose translation
         // `proofs/` cannot check. The compiled code is the same.
-        match der_components(bytes) {
+        match spki_components(bytes) {
             Ok((n, e)) => Self::from_unsigned(n, e),
             Err(err) => Err(err),
         }
@@ -609,17 +599,26 @@ impl SigningKey {
             PosInt::from_bytes(decoded.modulus.as_ref()).map_err(|_| KeyFormatError::RsaModulus)?;
         let e = public_exponent(decoded.publicExponent.as_ref())?;
 
-        let prime = |x: &asn1::Integer<'_>| {
-            PosInt::from_bytes(x.as_ref()).map_err(|_| KeyFormatError::RsaPrimes)
-        };
-        let p = prime(&decoded.prime1)?;
-        let q = prime(&decoded.prime2)?;
-        // A component too wide for its slot cannot agree with the others.
-        let mismatched = |_| KeyFormatError::MismatchedRsaComponents;
-        let d = PosInt::from_bytes(decoded.privateExponent.as_ref()).map_err(mismatched)?;
-        let dp = PosInt::from_bytes(decoded.exponent1.as_ref()).map_err(mismatched)?;
-        let dq = PosInt::from_bytes(decoded.exponent2.as_ref()).map_err(mismatched)?;
-        let iqmp = PosInt::from_bytes(decoded.coefficient.as_ref()).map_err(mismatched)?;
+        // The private integers are secret: only whether one is negative, as
+        // aws-lc refuses, or too wide for its slot is revealed.
+        fn secret<const N: usize>(
+            x: &asn1::Integer<'_>,
+            err: KeyFormatError,
+        ) -> Result<PosInt<N>, KeyFormatError> {
+            if ct::into_public(x.is_negative()) {
+                return Err(err);
+            }
+            PosInt::from_secret_bytes(x.as_ref()).map_err(|_| err)
+        }
+        let p = secret(&decoded.prime1, KeyFormatError::RsaPrimes)?;
+        let q = secret(&decoded.prime2, KeyFormatError::RsaPrimes)?;
+        // A component that is negative or too wide cannot agree with the
+        // others.
+        let mismatched = KeyFormatError::MismatchedRsaComponents;
+        let d = secret(&decoded.privateExponent, mismatched)?;
+        let dp = secret(&decoded.exponent1, mismatched)?;
+        let dq = secret(&decoded.exponent2, mismatched)?;
+        let iqmp = secret(&decoded.coefficient, mismatched)?;
 
         let priv_key = rsa_priv::RsaPrivateKey::new(p, q, d, dp, dq, iqmp, n, e)?;
         Ok(Self(priv_key))
@@ -1026,6 +1025,73 @@ mod tests {
         }
     }
 
+    // Where the CPU runs pyca/verified-garbage's IFMA routines, they agree
+    // with rind's own arithmetic on every fixture key, each size and shape
+    // of prime, for edge and random inputs, and the public operation for
+    // exponents of each size it takes.
+    #[cfg(rind_backend = "x86_64")]
+    #[test]
+    fn ifma_matches_rind() {
+        let keys = [
+            SigningKey::from_pkcs1_der(include_bytes!("rsa/rsa2048.der")),
+            SigningKey::from_pkcs1_der(include_bytes!("rsa/rsa2048-q-above-p.der")),
+            SigningKey::from_pkcs8_der(include_bytes!("rsa/rsa2049.pkcs8.der")),
+            SigningKey::from_pkcs8_der(include_bytes!("rsa/rsa2050.pkcs8.der")),
+            SigningKey::from_pkcs8_der(include_bytes!("rsa/rsa2056.pkcs8.der")),
+            SigningKey::from_pkcs1_der(include_bytes!("rsa/rsa2086-unbalanced.der")),
+            SigningKey::from_pkcs8_der(include_bytes!("rsa/rsa2560.pkcs8.der")),
+            SigningKey::from_pkcs1_der(include_bytes!("rsa/rsa3072.der")),
+            SigningKey::from_pkcs1_der(include_bytes!("rsa/rsa4096.der")),
+            SigningKey::from_pkcs1_der(include_bytes!("rsa/rsa6144.der")),
+            SigningKey::from_pkcs1_der(include_bytes!("rsa/rsa8192.der")),
+        ];
+        let mut drbg = HmacDrbg::<hash::Sha256>::new(b"ifma_matches_rind", b"", b"");
+        let (mut public_ran, mut crt_ran, mut crt_3072) = (0, 0, false);
+        let mut cpu = false;
+        for key in keys {
+            let key = key.unwrap();
+            let n = key.0.public_key().n;
+            cpu |= crate::low::RsaIfma::check(&n, 65537).is_some();
+            let k = n.len_bytes();
+            let n_1 = n.sub(&PosInt::one());
+            let mut inputs = vec![PosInt::zero(), PosInt::one(), n_1];
+            for _ in 0..8 {
+                let mut bytes = vec![0; k - 1];
+                drbg.generate(&mut bytes, b"");
+                inputs.push(secret_int(&bytes));
+            }
+            for e in [3, 65537, (1 << 33) - 1, 0x1_2345_6789 | 1] {
+                let public = {
+                    let _entry = Entry::new_secret();
+                    rsa_pub::RsaPublicKey::new(n.clone(), e).unwrap()
+                };
+                for c in &inputs {
+                    let Some([got, want]) = public.public_op_both(c) else {
+                        continue;
+                    };
+                    assert!(got.pub_equals(&want), "{k}-byte modulus, e = {e}");
+                    public_ran += 1;
+                }
+            }
+            for c in &inputs {
+                let Some([got, want]) = key.0.crt_both(c) else {
+                    continue;
+                };
+                assert!(got.pub_equals(&want), "{k}-byte modulus");
+                crt_ran += 1;
+                crt_3072 |= k == 384;
+            }
+        }
+        if cpu {
+            // The 2048-, 3072-, and 4096-bit keys, and the 2048-bit one whose
+            // q is above p, each with e = 65537 alone, for the public
+            // operation; for the CRT too, but for the 3072-bit key on CPUs
+            // without AVX512_FP16.
+            assert_eq!(public_ran, 4 * 11);
+            assert_eq!(crt_ran, (3 + usize::from(crt_3072)) * 11);
+        }
+    }
+
     fn check_all_algs(buf: &mut [u8], private: &SigningKey, public: &VerifyingKey) {
         let sig = private.sign_pkcs1_sha256(buf, b"hello").unwrap();
         public.verify_pkcs1_sha256(sig, b"hello").unwrap();
@@ -1362,10 +1428,17 @@ mod tests {
 
         fn encode(&self) -> Vec<u8> {
             let signed = |x: &[u8]| [&[0][..], x].concat();
-            let ints = [
-                &self.n, &self.e, &self.d, &self.p, &self.q, &self.dp, &self.dq, &self.iqmp,
-            ]
-            .map(|x| signed(x));
+            Self::encode_signed(
+                [
+                    &self.n, &self.e, &self.d, &self.p, &self.q, &self.dp, &self.dq, &self.iqmp,
+                ]
+                .map(|x| signed(x)),
+            )
+        }
+
+        /// Encodes two's complement `n`, `e`, `d`, `p`, `q`, `dp`, `dq`, and
+        /// `iqmp`.
+        fn encode_signed(ints: [Vec<u8>; 8]) -> Vec<u8> {
             let [n, e, d, p, q, dp, dq, iqmp] = ints.each_ref().map(|x| asn1::Integer::new(x));
             let mut out = vec![0u8; 8192];
             let len = pkix::RSAPrivateKey {
@@ -1611,6 +1684,92 @@ mod tests {
         aws_lc_rs::rsa::KeyPair::from_der(der).unwrap();
         let private_key = SigningKey::from_pkcs1_der(der).unwrap();
         check_all_algs(&mut [0u8; 261], &private_key, &private_key.public_key());
+    }
+
+    /// A private integer read as negative is refused, as aws-lc-rs does,
+    /// though without its sign byte the bytes alone are the right magnitude.
+    #[test]
+    fn refuses_negative_private_integers() {
+        let key = Pkcs1::decode(include_bytes!("rsa/rsa2048.der"));
+        let signed = |x: &[u8]| [&[0][..], x].concat();
+        // The magnitude without its sign byte, or under an 0xff one.
+        let negative = |x: &[u8]| match x[0] & 0x80 {
+            0 => [&[0xff][..], x].concat(),
+            _ => x.to_vec(),
+        };
+        let ints = [
+            &key.n, &key.e, &key.d, &key.p, &key.q, &key.dp, &key.dq, &key.iqmp,
+        ];
+        // p and q fill their top byte, so they test a dropped sign byte.
+        assert!(key.p[0] & key.q[0] & 0x80 != 0);
+        for (i, want) in [
+            (2, KeyFormatError::MismatchedRsaComponents),
+            (3, KeyFormatError::RsaPrimes),
+            (4, KeyFormatError::RsaPrimes),
+            (5, KeyFormatError::MismatchedRsaComponents),
+            (6, KeyFormatError::MismatchedRsaComponents),
+            (7, KeyFormatError::MismatchedRsaComponents),
+        ] {
+            let der = Pkcs1::encode_signed(core::array::from_fn(|j| match j == i {
+                true => negative(ints[j]),
+                false => signed(ints[j]),
+            }));
+            assert_eq!(
+                SigningKey::from_pkcs1_der(&der).err(),
+                Some(want.into()),
+                "{i}"
+            );
+            #[cfg(not(any(miri, target_family = "wasm")))]
+            assert!(aws_lc_rs::rsa::KeyPair::from_der(&der).is_err(), "{i}");
+        }
+    }
+
+    /// Loads keys with every byte of their private integers secret, sign
+    /// bytes included, so under `admin/ctgrind` this checks that decoding
+    /// and checking them branches on and indexes by none.
+    #[test]
+    fn loads_secret_integers_in_constant_time() {
+        /// Marks secret the private integers of the PKCS#1 key `pkcs1`.
+        fn mark(pkcs1: &[u8]) {
+            let key = pkix::RSAPrivateKey::from_bytes(pkcs1).unwrap();
+            for x in [
+                key.privateExponent,
+                key.prime1,
+                key.prime2,
+                key.exponent1,
+                key.exponent2,
+                key.coefficient,
+            ] {
+                ct::secret_slice(x.as_ref());
+            }
+        }
+
+        for pkcs1 in [
+            &include_bytes!("rsa/rsa2048.der")[..],
+            include_bytes!("rsa/rsa2048-q-above-p.der"),
+            include_bytes!("rsa/rsa2086-unbalanced.der"),
+            include_bytes!("rsa/rsa4096.der"),
+            include_bytes!("rsa/rsa6144.der"),
+            // Its primes take every word, so their sign bytes lie above.
+            include_bytes!("rsa/rsa8192.der"),
+        ] {
+            let der = pkcs1.to_vec();
+            mark(&der);
+            let key = SigningKey::from_pkcs1_der(&der).unwrap();
+            let mut buffer = [0u8; SigningKey::MAX_PKCS1_BUFFER_LEN];
+            assert_eq!(key.to_pkcs1_der(&mut buffer).unwrap(), pkcs1);
+        }
+
+        let pkcs8 = include_bytes!("rsa/rsa2048.pkcs8.der");
+        let der = pkcs8.to_vec();
+        mark(
+            pkcs8::Key::decode(&der, &KEY_ALGORITHMS, Some(asn1::Any::Null(asn1::Null)))
+                .unwrap()
+                .private_key(),
+        );
+        let key = SigningKey::from_pkcs8_der(&der).unwrap();
+        let mut buffer = [0u8; SigningKey::MAX_PKCS1_BUFFER_LEN + 32];
+        assert_eq!(key.to_pkcs8_der(&mut buffer).unwrap(), pkcs8);
     }
 
     /// With q above p, `s mod q` can exceed `p + s mod p`, which a random

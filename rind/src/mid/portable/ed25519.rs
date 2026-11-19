@@ -148,6 +148,10 @@ impl VerifyingKey {
     pub(crate) fn as_bytes(&self) -> [u8; 32] {
         self.bytes
     }
+
+    pub(crate) fn bytes(&self) -> &[u8; 32] {
+        &self.bytes
+    }
 }
 
 /// This is `H(..) := SHA-512(dom2(phflag, ctx) || ..)` from rfc8032 5.1, with

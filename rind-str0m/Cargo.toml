@@ -3,11 +3,17 @@ name = "rind-str0m"
 version = "0.25.3"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
+homepage = "https://rind.kixel.ai"
 license = "Apache-2.0 OR ISC OR MIT-0"
 description = "str0m CryptoProvider backed by rind"
 categories = ["network-programming", "cryptography"]
 rust-version.workspace = true
 readme = "README.md"
+
+# The provider admin/adapter-api diffs this crate's API against.
+[package.metadata.rind.api]
+crate = "str0m-aws-lc-rs"
+module = ""
 
 [dependencies]
 dimpl = { version = "0.9", default-features = false }

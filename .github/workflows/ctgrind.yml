@@ -1,17 +1,19 @@
 name: ctgrind
 
+# Weekly, at its own hour: see TESTING.md, "Scheduled workflows".
 on:
   schedule:
-    - cron: "0 18 * * *"
+    - cron: "23 7 * * 6"
   workflow_dispatch:
   # A pull request runs only the x86_64 release row of `build`, the one that
-  # fails fastest; the nightly runs the rest.
+  # fails fastest, and `binsec`; the weekly run runs the rest.
   pull_request:
     branches: [main]
     paths:
       - rind/src/**
       - rind/Cargo.toml
       - "**/tests/ctgrind.rs"
+      - rind-fips/**
       - admin/ctgrind
       - admin/ctgrind.supp
       - admin/ct-binsec
@@ -32,10 +34,15 @@ env:
   VALGRIND_BUG_494162: 1
 
 jobs:
-  # Valgrind hides SHA3 from aarch64 programs, so the arm64 rows check the
-  # code for cores with the crypto extension but without SHA3, and say so;
-  # `aarch64-qemu` checks the SHA3 paths. x86_64 ignores the variables.
+  # Valgrind hides SHA3 and SVE2 from aarch64 programs, so the arm64 rows
+  # check the code for cores with the crypto extension but without either,
+  # and say so; `aarch64-qemu` checks the SHA3 and SVE2 paths. x86_64
+  # ignores the variables.
+  # release-plz's release PR, which only bumps versions and changelogs, runs
+  # neither this nor `binsec`: a `release-plz-` branch that moq-bot,
+  # release.yml's app, opened.
   build:
+    if: ${{ !(startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]') }}
     strategy:
       matrix:
         os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest", "ubuntu-24.04-arm"]') }}
@@ -45,17 +52,27 @@ jobs:
     env:
       RIND_TEST_ARM_CRYPTO_EXT: 1
       RIND_TEST_ARM_SHA3: 0
+      RIND_TEST_ARM_SVE2: 0
+      # A pull request whose change reaches no backend this job builds skips it.
+      RIND_SCOPE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - uses: ./.github/actions/vectors
+          fetch-depth: 0
 
       - uses: ./.github/actions/nix
 
+      # Only for the row pull requests run.
+      - uses: ./.github/actions/rust-cache
+        if: matrix.os == 'ubuntu-latest' && matrix.build == '--release'
+        with:
+          shell: .#ctgrind
+
       - name: ctgrind tests
         run: nix develop .#ctgrind --command admin/ctgrind ${{ matrix.build }}
+      - name: ctgrind FIPS module tests
+        run: nix develop .#ctgrind --command admin/ctgrind fips ${{ matrix.build }}
 
   # Valgrind hides ADX, which `admin/ctgrind`'s build switch overrides to
   # check s2n-bignum's ADX routines, so this job denies it to check what
@@ -101,8 +118,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/vectors
-
       - uses: ./.github/actions/nix
 
       # A denial set to any value takes effect, so a row's extra variables
@@ -134,8 +149,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/vectors
-
       - uses: ./.github/actions/nix
 
       - name: ctgrind tests
@@ -153,7 +166,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [rsa2048, rsa3072, rsa4096, aes128_gcm, aes192_gcm, aes256_gcm, aes_gcm_vaes_avx2, hmac]
+        test: [rsa3072, rsa4096, crt_ifma_2048, crt_ifma512_2048, crt_ifma512_3072, crt_ifma_4096, crt_ifma512_4096, public_ifma, aes128_gcm, aes192_gcm, aes256_gcm, aes_gcm_vaes_avx2, hmac, chacha20, mlkem768, x25519, ed25519, p256_ifma_ecdh]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -180,8 +193,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/vectors
-
       - uses: ./.github/actions/nix
 
       - name: ctgrind tests
@@ -193,6 +204,7 @@ jobs:
           RIND_CPU_DISABLE_sha2: 1
           RIND_TEST_ARM_CRYPTO_EXT: 0
           RIND_TEST_ARM_SHA3: 0
+          RIND_TEST_ARM_SVE2: 0
 
   # The arm64 runner executes 32-bit ARM natively, so an armhf valgrind checks
   # the armv7 build without emulation. Its core has NEON and the crypto
@@ -200,9 +212,9 @@ jobs:
   # code is checked here and the extension's by `armv7-qemu` (see
   # `admin/ctgrind`).
   #
-  # Release here: constant time matters most in the code that ships, so the
-  # debug build runs weekly in `ctgrind-debug.yml` instead. Valgrind runs every
-  # thread on one core, so the suites run as parallel jobs instead.
+  # Release and debug builds, as `build` checks. Valgrind runs every thread on
+  # one core, so the suites run as parallel jobs instead, and
+  # `--no-fail-fast` reports every failing test binary in one run.
   #
   # The `no-neon` row denies NEON to check the code cores without it run, such
   # as OpenSSL's integer Keccak-f. The denial takes `--cfg rind_cpu_disable`,
@@ -211,7 +223,7 @@ jobs:
   # Ubuntu's armhf valgrind rather than `devShells.ctgrind`: nixpkgs caches no
   # armhf valgrind for an arm64 host, and building it builds its gdb too.
   armv7:
-    name: armv7 (${{ matrix.suite }}${{ matrix.neon == '0' && ', no-neon' || '' }})
+    name: armv7 (${{ matrix.suite }}${{ matrix.neon == '0' && ', no-neon' || '' }}${{ matrix.build == '' && ', debug' || '' }})
     if: github.event_name != 'pull_request'
     strategy:
       # One suite's failure says nothing about the others.
@@ -219,17 +231,20 @@ jobs:
       matrix:
         suite: [unit, wycheproof, adapters]
         neon: ["1"]
+        build: ["", "--release"]
         include:
           - suite: unit
             neon: "0"
+            build: ""
+          - suite: unit
+            neon: "0"
+            build: --release
 
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - uses: ./.github/actions/vectors
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
@@ -250,7 +265,7 @@ jobs:
           if [ "$RIND_TEST_ARM_NEON" = 0 ]; then
             export RIND_CPU_DISABLE_neon=1 RUSTFLAGS='--cfg rind_cpu_disable'
           fi
-          admin/ctgrind ${{ matrix.suite }} --target armv7-unknown-linux-gnueabihf --release
+          admin/ctgrind ${{ matrix.suite }} --target armv7-unknown-linux-gnueabihf ${{ matrix.build }} --no-fail-fast
         env:
           CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
           CC_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-gcc
@@ -274,9 +289,10 @@ jobs:
       - name: ct-qemu
         run: nix develop .#ct-qemu --command admin/ct-qemu
 
-  # Valgrind hides SHA3 from aarch64 programs too, so what rind runs only
-  # with it never runs under ctgrind: the eight-way AES-GCM kernels, the
-  # SHA-512 instructions, and the SHA3 Keccak kernels. `admin/ct-qemu`
+  # Valgrind hides SHA3 and SVE2 from aarch64 programs too, so what rind
+  # runs only with them never runs under ctgrind: the eight-way AES-GCM
+  # kernels, the SHA-512 instructions, the SHA3 Keccak kernels, and
+  # pyca/verified-garbage's SVE2 ChaCha20-Poly1305. `admin/ct-qemu`
   # traces them under qemu-aarch64 instead, natively built on the arm64
   # runner.
   aarch64-qemu:
@@ -300,6 +316,7 @@ jobs:
   # table lookups or crypto extension.
   binsec:
     name: binsec (${{ matrix.backend }})
+    if: ${{ !(startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]') }}
     strategy:
       fail-fast: false
       matrix:

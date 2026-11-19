@@ -25,30 +25,53 @@ pub(crate) struct RsaPrivateKey {
     q_montifier: SecretRsaPosIntModP,
     p0: u64,
     q0: u64,
+
+    /// pyca/verified-garbage's values for its IFMA CRT, where it runs.
+    #[cfg(rind_backend = "x86_64")]
+    ifma: low::IfmaCrt,
 }
 
 impl RsaPrivateKey {
+    /// Checks and takes a key's components, which may be wider than they
+    /// need, so no width depends on a secret: each but d is narrowed to the
+    /// width its prime's public length sets.
     pub(crate) fn new(
-        p: RsaPosIntModP,
-        q: RsaPosIntModP,
+        mut p: RsaPosIntModP,
+        mut q: RsaPosIntModP,
         d: RsaPosIntD,
-        dp: RsaPosIntModP,
-        dq: RsaPosIntModP,
-        iqmp: RsaPosIntModP,
+        mut dp: RsaPosIntModP,
+        mut dq: RsaPosIntModP,
+        mut iqmp: RsaPosIntModP,
         n: RsaPosIntModN,
         e: u64,
     ) -> Result<Self, Error> {
-        let (p_len, q_len) = (p.len_bytes(), q.len_bytes());
         if n.len_bits() < MIN_MODULUS_BITS {
             return Err(KeyFormatError::RsaModulus.into());
         }
-        if p.is_even()
-            || q.is_even()
-            || q.len_bits() < 2
+        // The primes are secret, but their bit lengths are revealed, as
+        // aws-lc treats them as public: n's fixes only their sum, yet the
+        // DER framing already reveals each one's byte length, and hiding the
+        // rest would run every CRT at the encoding's wider width. Their
+        // parity is fixed in any valid key.
+        let (p_bits, q_bits) = (
+            low::ct::into_public(p.len_bits()),
+            low::ct::into_public(q.len_bits()),
+        );
+        let p_len = p_bits.div_ceil(8);
+        if low::ct::into_public(p.is_even() | q.is_even())
+            || q_bits < 2
             || !(MIN_PRIVATE_MODULUS_BYTES..=MAX_PRIVATE_MODULUS_BYTES).contains(&p_len)
         {
             return Err(KeyFormatError::RsaPrimes.into());
         }
+
+        // As a generated key's, dp, dq, and iqmp are as wide as their prime.
+        // One that does not fit cannot agree with the others, so this joins
+        // their verdict. d keeps its encoding's width, which may exceed n's,
+        // as d + (p - 1)(q - 1) is as good as d.
+        let (p_words, q_words) = (p_bits.div_ceil(64), q_bits.div_ceil(64));
+        let fits =
+            p.fit(p_words) & q.fit(q_words) & dp.fit(p_words) & dq.fit(q_words) & iqmp.fit(p_words);
 
         let public = RsaPublicKey::new(n, e)?;
 
@@ -66,7 +89,7 @@ impl RsaPrivateKey {
         // The CRT reduces `c` mod each prime by Montgomery reduction, which
         // needs `c` below 2^(64w) times the prime for a w-word prime. Working
         // at the wider prime's width meets that for unbalanced primes too.
-        if p_len < q_len {
+        if p_bits < q_bits {
             p.expand(&q);
         } else {
             q.expand(&p);
@@ -86,7 +109,8 @@ impl RsaPrivateKey {
         // below the modulus.
         let q_wide: RsaPosIntModN = q.widen();
         let q_p = q_wide.reduce(&p, &p_montifier);
-        let consistent = exponents_agree
+        let consistent = fits
+            & exponents_agree
             & pq.equals(&public.n)
             & iqmp.less_than(&p)
             // Out of Montgomery form: iqmp * R * q * R^-1 = iqmp * q (mod p).
@@ -96,6 +120,8 @@ impl RsaPrivateKey {
         }
 
         Ok(Self {
+            #[cfg(rind_backend = "x86_64")]
+            ifma: low::IfmaCrt::new(public.n.as_words(), p.as_words(), q.as_words()),
             public,
             p,
             q,
@@ -192,6 +218,61 @@ impl RsaPrivateKey {
             return Err(Error::WrongLength);
         }
 
+        #[cfg(rind_backend = "x86_64")]
+        let m = match self.ifma.runs() {
+            true => self.crt_ifma(c)?,
+            false => self.crt(c),
+        };
+        #[cfg(not(rind_backend = "x86_64"))]
+        let m = self.crt(c);
+
+        // Check the result as a fault attack countermeasure: `new` checked
+        // the key's components, so only a fault fails this, and the verdict
+        // reveals nothing else.
+        match self.public.public_op(m.clone()) {
+            Ok(c2) if low::ct::into_public(c2.equals(c)) => Ok(m),
+            _ => Err(Error::Fault),
+        }
+    }
+
+    /// The CRT by pyca/verified-garbage's IFMA routine, for `c` below `n`.
+    #[cfg(rind_backend = "x86_64")]
+    fn crt_ifma(&self, c: &RsaPosIntModN) -> Result<RsaPosIntModN, Error> {
+        let k = self.modulus_len_bytes();
+        let p_len = self.p.as_words().len() * 8;
+        let mut x = [0u8; MAX_PUBLIC_MODULUS_BYTES];
+        c.to_bytes_fixed(&mut x[..k]);
+        let mut parts = [[0u8; MAX_PRIVATE_MODULUS_BYTES]; 3];
+        for (bytes, value) in parts.iter_mut().zip([&self.dp, &self.dq, &self.iqmp]) {
+            value.to_bytes_fixed(&mut bytes[..p_len]);
+        }
+        let [dp, dq, qinv] = &parts;
+        let mut m = [0u8; MAX_PUBLIC_MODULUS_BYTES];
+        // `new` and the caller ruled out each input it refuses.
+        if !self.ifma.crt(
+            &mut m[..k],
+            &x[..k],
+            &dp[..p_len],
+            &dq[..p_len],
+            &qinv[..p_len],
+        ) {
+            return Err(Error::Fault);
+        }
+        // As wide as `n`, without reading `m`'s value.
+        RsaPosIntModN::from_secret_bytes(&m[..k])
+    }
+
+    /// The CRT by pyca/verified-garbage's IFMA routine and by rind's, where
+    /// the former runs.
+    #[cfg(all(test, rind_backend = "x86_64"))]
+    pub(crate) fn crt_both(&self, c: &RsaPosIntModN) -> Option<[RsaPosIntModN; 2]> {
+        self.ifma
+            .runs()
+            .then(|| [self.crt_ifma(c).unwrap(), self.crt(c)])
+    }
+
+    /// The CRT, by rind's exponentiations.
+    fn crt(&self, c: &RsaPosIntModN) -> RsaPosIntModN {
         // A note about blinding:
         //
         // `c` is public, a message to sign or a ciphertext to decrypt, so
@@ -239,14 +320,7 @@ impl RsaPrivateKey {
         // its value, so widen it back before anything reads that width.
         let mut m = m_2.widen().add(&low::PosInt::mul(&self.q, &h));
         m.expand(&self.public.n);
-
-        // Check the result as a fault attack countermeasure: `new` checked
-        // the key's components, so only a fault fails this, and the verdict
-        // reveals nothing else.
-        match self.public.public_op(m.clone()) {
-            Ok(c2) if low::ct::into_public(c2.equals(c)) => Ok(m),
-            _ => Err(Error::Fault),
-        }
+        m
     }
 }
 

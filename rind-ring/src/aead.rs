@@ -147,6 +147,7 @@ impl<A: AsRef<[u8]>> AsRef<[u8]> for Aad<A> {
 
 /// An authentication tag.
 #[derive(Clone, Copy)]
+#[repr(C)]
 pub struct Tag([u8; TAG_LEN]);
 
 impl AsRef<[u8]> for Tag {
@@ -209,9 +210,9 @@ impl From<hkdf::Okm<'_, &'static Algorithm>> for UnboundKey {
     }
 }
 
-/// A key that seals or opens with any nonce the caller gives it; wiped on drop under rind's `wipe` feature.
+/// A key that seals or opens with any nonce the caller gives it.
 ///
-/// A clone shares the expanded key.
+/// A clone shares the expanded key, which is wiped when the last clone drops.
 #[derive(Clone)]
 pub struct LessSafeKey {
     key: Arc<rind::aead::Key>,

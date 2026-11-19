@@ -2,6 +2,8 @@
 
 use crate::error::{Error, KeyFormatError};
 use crate::low;
+#[cfg(rind_backend = "x86_64")]
+use crate::mid::half_size;
 use crate::mid::sha2::Sha512Context;
 use crate::mid::util;
 
@@ -16,47 +18,82 @@ const ORDER: [u64; 4] = [
 
 pub(crate) struct SigningKey {
     seed: [u8; 32],
-    s: UnreducedScalar,
-    prefix: [u8; 32],
+    /// The seed's SHA-512 digest (RFC 8032 section 5.1.5): the scalar's
+    /// bytes before clamping, then the nonce prefix.
+    expanded: [u8; 64],
     verifying_key: VerifyingKey,
 }
+
+// Every field is bytes or a `Path`, valid at zero.
+impl low::Zeroable for SigningKey {}
 
 impl SigningKey {
     pub(crate) fn from_seed(seed: &[u8; 32]) -> Self {
         // Mark rind's own copy secret, never the caller's buffer.
         let seed = &low::ct::into_secret(*seed);
 
-        // Step: rfc8032 5.1.5.1, 5.1.5.2
+        if let Some(ifma) = low::Curve25519Ifma::check() {
+            let (expanded, bytes) = ifma.ed25519_key_pair(seed);
+            return Self {
+                seed: *seed,
+                expanded,
+                verifying_key: low::ct::into_public(VerifyingKey {
+                    bytes,
+                    path: Path::Ifma(ifma),
+                }),
+            };
+        }
+        Self::from_seed_rind(seed)
+    }
+
+    /// [`Self::from_seed`] on rind's own arithmetic, whichever the CPU runs.
+    fn from_seed_rind(seed: &[u8; 32]) -> Self {
+        // Step: rfc8032 5.1.5.1
         // `h := SHA512(seed)`
-        // `s := ed25519-clamp(h[0..32])`
-        // `prefix := h[32..64]`
-        let h = {
+        let expanded = {
             let mut ctx = Sha512Context::new();
             ctx.update(seed);
             ctx.finish()
         };
-        let s = UnreducedScalar::clamp_from_le_bytes(h[0..32].try_into().unwrap());
-        let prefix: [u8; 32] = h[32..64].try_into().unwrap();
 
-        // Step: rfc8032 5.1.5.3, 5.1.5.4
+        // Step: rfc8032 5.1.5.2, 5.1.5.3, 5.1.5.4
         // Compute `[s]B` and compress to get the public key bytes
-        let point = s.base_mul();
+        let point = UnreducedScalar::from_expanded(&expanded).base_mul();
         let bytes = point.compress().0;
 
         Self {
             seed: *seed,
-            prefix,
-            s,
-            verifying_key: low::ct::into_public(VerifyingKey { point, bytes }),
+            expanded,
+            verifying_key: low::ct::into_public(VerifyingKey {
+                bytes,
+                path: Path::Rind(point),
+            }),
         }
     }
 
     /// `PureEd25519` signing
     pub(crate) fn sign(&self, msg: &[u8]) -> [u8; 64] {
+        match &self.verifying_key.path {
+            Path::Ifma(ifma) => low::ct::into_public(ifma.ed25519_sign(
+                &self.expanded,
+                &self.verifying_key.bytes,
+                msg,
+            )),
+            Path::Rind(_) => self.sign_rind(msg),
+        }
+    }
+
+    /// [`Self::sign`] on rind's own arithmetic, whichever the CPU runs.
+    fn sign_rind(&self, msg: &[u8]) -> [u8; 64] {
+        // Step: rfc8032 5.1.5.2
+        // `s := ed25519-clamp(h[0..32])`, `prefix := h[32..64]`
+        let s = UnreducedScalar::from_expanded(&self.expanded);
+        let prefix = &self.expanded[32..];
+
         // Step: rfc8032 5.1.6.2
         // Compute the deterministic nonce
         // `r := SHA-512(dom2(F, C) || prefix || msg) mod L`
-        let r_hash = ed25519_digest(&self.prefix, msg, &[]);
+        let r_hash = ed25519_digest(prefix, msg, &[]);
         let r_wide = util::little_endian_to_u64x8(&r_hash);
         let mut r = Scalar([0u64; 4]);
         low::bignum_mod_n25519(&mut r.0, &r_wide);
@@ -78,7 +115,7 @@ impl SigningKey {
 
         // Step: rfc8032 5.1.6.5
         // Compute the proof `S := (k * s + r) mod L`
-        let s = Scalar::madd_n25519(&k.0, &self.s.0, &r.0);
+        let s = Scalar::madd_n25519(&k.0, &s.0, &r.0);
 
         let mut sig = [0u8; 64];
         sig[0..32].copy_from_slice(&sig_r.0);
@@ -97,19 +134,30 @@ impl SigningKey {
 
 impl Drop for SigningKey {
     fn drop(&mut self) {
-        low::zeroise(&mut self.seed);
-        low::zeroise(&mut self.s.0);
-        low::zeroise(&mut self.prefix);
-        // clearly not necessary, but makes zeroisation easier to test
-        low::zeroise(&mut self.verifying_key.point.0);
-        low::zeroise(&mut self.verifying_key.bytes);
+        // The public key too, which makes zeroisation easier to test.
+        low::zeroise_value(self);
     }
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct VerifyingKey {
     bytes: [u8; 32],
-    point: EdwardsPoint,
+    path: Path,
+}
+
+/// What a key verifies and signs on, picked once from the CPU: on x86_64
+/// with AVX-512 IFMA, pyca/verified-garbage's whole operations, which take
+/// the encoded key; otherwise rind's own arithmetic, on the decoded point.
+/// aarch64 has the variant too, which it never builds, so the two targets'
+/// code, and the proofs `admin/prove` writes from one for the other, match.
+///
+/// `repr(u8)` puts `Rind` at tag zero, so all-bits-zero is a valid value,
+/// which [`SigningKey`]'s drop leaves.
+#[derive(Clone, Debug)]
+#[repr(u8)]
+enum Path {
+    Rind(EdwardsPoint) = 0,
+    Ifma(low::Curve25519Ifma),
 }
 
 impl VerifyingKey {
@@ -119,14 +167,35 @@ impl VerifyingKey {
             return Err(KeyFormatError::WrongLength.into());
         };
 
-        EdwardsPoint::decompress_from(bytes).map(|point| Self {
+        // Decoded on every CPU, so a key that is no point's is refused when
+        // it is loaded.
+        let point = EdwardsPoint::decompress_from(bytes)?;
+        if let Some(ifma) = low::Curve25519Ifma::check() {
+            return Ok(Self {
+                bytes: *bytes,
+                path: Path::Ifma(ifma),
+            });
+        }
+        Ok(Self {
             bytes: *bytes,
-            point,
+            path: Path::Rind(point),
         })
     }
 
     /// `PureEd25519` signature verification
     pub(crate) fn verify(&self, sig: &[u8; 64], msg: &[u8]) -> Result<(), Error> {
+        let ok = match &self.path {
+            Path::Ifma(ifma) => ifma.ed25519_verify(&self.bytes, msg, sig),
+            Path::Rind(point) => self.verify_rind(point, sig, msg),
+        };
+        match ok {
+            true => Ok(()),
+            false => Err(Error::BadSignature),
+        }
+    }
+
+    /// [`Self::verify`] on rind's own arithmetic, for the key's `point`.
+    fn verify_rind(&self, point: &EdwardsPoint, sig: &[u8; 64], msg: &[u8]) -> bool {
         // Step: rfc8032 5.1.7.1 (A' := A is an invariant for `self`)
         let (r_sig, s) = sig.split_at(32);
 
@@ -135,7 +204,9 @@ impl VerifyingKey {
         let s = s.try_into().unwrap();
 
         // S must be in the range [0, order) to prevent signature malleability.
-        let s = Scalar::try_from_le_bytes(s).ok_or(Error::BadSignature)?;
+        let Some(s) = Scalar::try_from_le_bytes(s) else {
+            return false;
+        };
 
         // Step: rfc8032 5.1.7.2
         // Compute the challenge `k := SHA512(dom2(F, C) || R || A || msg)`
@@ -145,19 +216,57 @@ impl VerifyingKey {
         };
 
         // Step: rfc8032 5.1.7.3
-        // Compute `R := [S]B - [k]A`.
-        let r = EdwardsPoint::scalarmuldouble(&k, &self.point.negate(), &s).compress();
+        #[cfg(rind_backend = "x86_64")]
+        {
+            commits(point, r_sig.try_into().unwrap(), &k, &s)
+        }
 
-        if r_sig == r.0 {
-            Ok(())
-        } else {
-            Err(Error::BadSignature)
+        // aarch64 keeps s2n-bignum's proven full-size multiplication until
+        // the half-size one measures faster there.
+        // Compute `R := [S]B - [k]A`.
+        #[cfg(rind_backend = "aarch64")]
+        {
+            let r = EdwardsPoint::scalarmuldouble(&k, &point.negate(), &s).compress();
+            r_sig == r.0
         }
     }
 
     pub(crate) fn as_bytes(&self) -> [u8; 32] {
         self.bytes
     }
+
+    pub(crate) fn bytes(&self) -> &[u8; 32] {
+        &self.bytes
+    }
+}
+
+/// Whether `r` encodes `[s]B - [k]A` for the key `point`, checked as
+/// `[v s]B - [v]R - [u]A = O` for the half-size `u ≡ v k (mod 8L)` of
+/// `half_size`, which accepts the same.
+#[cfg(rind_backend = "x86_64")]
+fn commits(point: &EdwardsPoint, r: &[u8; 32], k: &Scalar, s: &Scalar) -> bool {
+    // Only a canonical encoding can equal `[s]B - [k]A`'s, so one that
+    // does not decode commits to nothing.
+    let Ok(r) = EdwardsPoint::decompress_from(r) else {
+        return false;
+    };
+
+    let split = half_size::split(&k.0);
+    let vs = Scalar::madd_n25519(&split.v, &s.0, &[0; 4]);
+    let a = match split.u_negative {
+        true => point.extended(),
+        false => point.negate().extended(),
+    };
+    let mut q = [0u64; 12];
+    low::edwards25519_msm(
+        &mut q,
+        &vs.0,
+        &[split.v, split.u],
+        &[r.negate().extended(), a],
+    );
+
+    // The identity is (0 : Z : Z), and the coordinates are reduced.
+    q[0] | q[1] | q[2] | q[3] == 0 && q[4] == q[8] && q[5] == q[9] && q[6] == q[10] && q[7] == q[11]
 }
 
 /// In ed25519 format, the curve point (x, y) is determined by the
@@ -203,9 +312,26 @@ impl EdwardsPoint {
     ]);
 
     /// Compute `A := [scalar]Point + [bscalar]B`.
+    #[cfg(rind_backend = "aarch64")]
     fn scalarmuldouble(scalar: &Scalar, point: &Self, bscalar: &Scalar) -> Self {
         let mut out = Self([0u64; 8]);
         low::edwards25519_scalarmuldouble(&mut out.0, &scalar.0, &point.0, &bscalar.0);
+        out
+    }
+
+    /// `(x, y, 1, x y)`, the point in extended coordinates.
+    #[cfg(rind_backend = "x86_64")]
+    fn extended(&self) -> [u64; 16] {
+        let mut t = [0u64; 4];
+        low::bignum_mul_p25519(
+            &mut t,
+            self.0[..4].try_into().unwrap(),
+            self.0[4..].try_into().unwrap(),
+        );
+        let mut out = [0u64; 16];
+        out[..8].copy_from_slice(&self.0);
+        out[8] = 1;
+        out[12..].copy_from_slice(&t);
         out
     }
 
@@ -269,6 +395,12 @@ impl EdwardsPoint {
 struct UnreducedScalar([u64; 4]);
 
 impl UnreducedScalar {
+    /// The secret scalar of a seed's SHA-512 digest: its first 32 bytes,
+    /// clamped (RFC 8032 section 5.1.5, steps 2 and 3).
+    fn from_expanded(expanded: &[u8; 64]) -> Self {
+        Self::clamp_from_le_bytes(expanded[0..32].try_into().unwrap())
+    }
+
     /// Read a uniformly random 32-byte little-endian string, and clamp it.
     fn clamp_from_le_bytes(x: &[u8; 32]) -> Self {
         // Clamp the words, saving a byte copy.
@@ -357,6 +489,200 @@ mod test {
         0xffffffffffffffff,
         0x7fffffffffffffff,
     ];
+
+    /// RFC 8032's check as written, `[S]B - [k]A` encoding as `R`, over
+    /// `mid::edwards25519`'s constant-time multiplication rather than
+    /// `verify`'s half-size one.
+    fn verify_reference(vk: &VerifyingKey, sig: &[u8; 64], msg: &[u8]) -> bool {
+        use mid::edwards25519::{Point, Scalar as S};
+        let (r_sig, s) = sig.split_at(32);
+        let Some(s) = Scalar::try_from_le_bytes(s.try_into().unwrap()) else {
+            return false;
+        };
+        let k = Scalar::reduce_from_le_bytes(&ed25519_digest(r_sig, &vk.bytes, msg));
+        let a = Point::from_bytes(&vk.bytes).unwrap();
+        Point::mul_base(&S(s.0))
+            .add(&a.neg().mul(&S(k.0)))
+            .to_bytes()
+            == r_sig
+    }
+
+    /// Keys and commitments with every torsion component, whose
+    /// signatures the plain check accepts exactly when the torsion of `R`
+    /// cancels `[k]`'s of `A`, as `half_size`'s argument says the half-size
+    /// check must too, and as aws-lc does.
+    #[test]
+    #[cfg(not(any(miri, target_family = "wasm")))]
+    fn half_size_check_matches_the_plain_one_with_torsion() {
+        use aws_lc_rs::signature::{ED25519, UnparsedPublicKey};
+        use mid::edwards25519::{Point, Scalar as S};
+        let _entry = low::Entry::new_public();
+        let mut rng = TestRng::new(202611131);
+        let random_scalar = |rng: &mut TestRng| {
+            let mut s = Scalar([0; 4]);
+            low::bignum_mod_n25519(&mut s.0, &util::little_endian_to_u64x8(&rng.next::<64>()));
+            s
+        };
+
+        // A point of order 8, and its multiples: the torsion subgroup.
+        let t8 = Point::from_bytes(&[
+            0x26, 0xe8, 0x95, 0x8f, 0xc2, 0xb2, 0x27, 0xb0, 0x45, 0xc3, 0xf4, 0x89, 0xf2, 0xef,
+            0x98, 0xf0, 0xd5, 0xdf, 0xac, 0x05, 0xd3, 0xc6, 0x33, 0x39, 0xb1, 0x38, 0x02, 0x88,
+            0x6d, 0x53, 0xfc, 0x05,
+        ])
+        .unwrap();
+        let mut torsion = [Point::IDENTITY; 8];
+        for i in 1..8 {
+            torsion[i] = torsion[i - 1].add(&t8);
+        }
+
+        let (mut accepted, mut torsion_accepted) = (0, 0);
+        for round in 0..512 {
+            let (i, j) = (round % 8, round / 8 % 8);
+            let a = random_scalar(&mut rng);
+            let a_bytes = Point::mul_base(&S(a.0)).add(&torsion[i]).to_bytes();
+            let vk = VerifyingKey::from_bytes(&a_bytes).unwrap();
+            let r = random_scalar(&mut rng);
+            let r_bytes = Point::mul_base(&S(r.0)).add(&torsion[j]).to_bytes();
+            let msg = rng.next::<16>();
+            let k = Scalar::reduce_from_le_bytes(&ed25519_digest(&r_bytes, &a_bytes, &msg));
+
+            // S = r + k a makes the prime-order parts agree; the torsion
+            // parts agree only when [j]T8 = -[k i]T8.
+            let s = Scalar::madd_n25519(&k.0, &a.0, &r.0);
+            let mut sig = [0u8; 64];
+            sig[..32].copy_from_slice(&r_bytes);
+            sig[32..].copy_from_slice(&s.to_le_bytes());
+
+            let want = verify_reference(&vk, &sig, &msg);
+            assert_eq!(vk.verify(&sig, &msg).is_ok(), want, "{i} {j} {sig:x?}");
+            let aws_lc = UnparsedPublicKey::new(&ED25519, &a_bytes).verify(&msg, &sig);
+            assert_eq!(aws_lc.is_ok(), want, "{i} {j} {sig:x?}");
+            accepted += u32::from(want);
+            torsion_accepted += u32::from(want && (i, j) != (0, 0));
+
+            // Any one bit flipped, in R or S.
+            let mut flipped = sig;
+            let bit = round * 37 % 512;
+            flipped[bit / 8] ^= 1 << (bit % 8);
+            let want = verify_reference(&vk, &flipped, &msg);
+            assert_eq!(
+                vk.verify(&flipped, &msg).is_ok(),
+                want,
+                "{i} {j} {flipped:x?}"
+            );
+            let aws_lc = UnparsedPublicKey::new(&ED25519, &a_bytes).verify(&msg, &flipped);
+            assert_eq!(aws_lc.is_ok(), want, "{i} {j} {flipped:x?}");
+        }
+        assert!(
+            accepted > 64 && torsion_accepted > 0,
+            "{accepted} {torsion_accepted}"
+        );
+    }
+
+    /// An `R` that is no point's canonical encoding: `y` of `p` or above,
+    /// no point with that `y`, and `x = 0` with the sign bit set.
+    #[test]
+    fn non_canonical_commitments_are_refused() {
+        let _entry = low::Entry::new_public();
+        let sk = SigningKey::from_seed(&[3; 32]);
+        let msg = b"message";
+        let sig = sk.sign(msg);
+        let vk = sk.verifying_key();
+        vk.verify(&sig, msg).unwrap();
+
+        let mut encodings = vec![];
+        for y in 0..19u8 {
+            // p + y, below 2^255.
+            let mut e = [0xff; 32];
+            e[0] = 0xed + y;
+            e[31] = 0x7f;
+            encodings.push(e);
+        }
+        // y = 1 has x = 0, so its sign bit must be clear.
+        let mut negative_zero = [0; 32];
+        negative_zero[0] = 1;
+        negative_zero[31] = 0x80;
+        encodings.push(negative_zero);
+        // y = 2 is no point's: (y^2 - 1) / (d y^2 + 1) is not a square.
+        let mut off_curve = [0; 32];
+        off_curve[0] = 2;
+        encodings.push(off_curve);
+
+        for e in encodings {
+            let mut forged = sig;
+            forged[..32].copy_from_slice(&e);
+            assert!(!verify_reference(vk, &forged, msg), "{e:x?}");
+            assert_eq!(vk.verify(&forged, msg), Err(Error::BadSignature), "{e:x?}");
+        }
+    }
+
+    /// On a CPU with AVX-512 IFMA, VG's key pairs, signatures, and verdicts
+    /// against rind's own, for seeds, messages across SHA-512's block
+    /// boundaries, and signatures valid, with a bit flipped, with a
+    /// commitment that encodes no point canonically, and with `S` of `L` or
+    /// above.
+    #[test]
+    fn ifma_matches_rind() {
+        let _entry = low::Entry::new_public();
+        if low::Curve25519Ifma::check().is_none() {
+            return;
+        }
+        let mut rng = TestRng::new(202611171);
+        let mut msg = vec![];
+        for round in 0..300 {
+            let seed = rng.next::<32>();
+            let ifma = SigningKey::from_seed(&seed);
+            let rind = SigningKey::from_seed_rind(&seed);
+            assert!(matches!(ifma.verifying_key.path, Path::Ifma(_)));
+            assert_eq!(ifma.expanded, rind.expanded);
+            assert_eq!(ifma.verifying_key.bytes, rind.verifying_key.bytes);
+
+            let sig = ifma.sign(&msg);
+            assert_eq!(sig, rind.sign_rind(&msg), "{round}");
+
+            let vk = &ifma.verifying_key;
+            let Path::Rind(point) = &rind.verifying_key.path else {
+                unreachable!()
+            };
+            let mut sigs = vec![sig];
+            let bit = round * 37 % 512;
+            let mut flipped = sig;
+            flipped[bit / 8] ^= 1 << (bit % 8);
+            sigs.push(flipped);
+            let mut non_canonical = sig;
+            non_canonical[..31].fill(0xff);
+            non_canonical[0] = 0xed + (round % 19) as u8;
+            non_canonical[31] = 0x7f;
+            sigs.push(non_canonical);
+            // `S + L`, which still fits in 256 bits, and all ones.
+            let mut s_plus_l = sig;
+            let s = util::little_endian_to_u64x4(sig[32..].try_into().unwrap());
+            let mut sum = [0u64; 4];
+            let mut carry = false;
+            for i in 0..4 {
+                let (a, c1) = s[i].overflowing_add(ORDER[i]);
+                let (b, c2) = a.overflowing_add(carry as u64);
+                sum[i] = b;
+                carry = c1 | c2;
+            }
+            s_plus_l[32..].copy_from_slice(&util::u64x4_to_little_endian(&sum));
+            sigs.push(s_plus_l);
+            let mut ones = sig;
+            ones[32..].fill(0xff);
+            sigs.push(ones);
+            for (i, sig) in sigs.iter().enumerate() {
+                assert_eq!(
+                    vk.verify(sig, &msg).is_ok(),
+                    vk.verify_rind(point, sig, &msg),
+                    "{round} {i} {sig:x?}"
+                );
+            }
+            assert!(vk.verify(&sigs[0], &msg).is_ok());
+
+            msg.push(rng.next::<1>()[0]);
+        }
+    }
 
     #[test]
     fn test_rfc8032_test_vectors() {

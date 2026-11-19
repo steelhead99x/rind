@@ -52,6 +52,39 @@ fn dup_lane<const N: i32>(a: uint8x16_t) -> uint8x16_t {
     vreinterpretq_u8_u32(vdupq_laneq_u32::<N>(vreinterpretq_u32_u8(a)))
 }
 
+#[target_feature(enable = "neon")]
+fn set_lane<const N: i32>(w: u32, a: uint8x16_t) -> uint8x16_t {
+    vreinterpretq_u8_u32(vsetq_lane_u32::<N>(w, vreinterpretq_u32_u8(a)))
+}
+
+#[target_feature(enable = "neon")]
+fn ext64<const N: i32>(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
+    vreinterpretq_u8_u64(vextq_u64::<N>(vreinterpretq_u64_u8(a), vreinterpretq_u64_u8(b)))
+}
+
+#[target_feature(enable = "neon")]
+fn get_s32<const N: i32>(a: uint8x16_t) -> i32 {
+    vgetq_lane_s32::<N>(vreinterpretq_s32_u8(a))
+}
+
+#[target_feature(enable = "neon")]
+fn set_s32<const N: i32>(w: i32, a: uint8x16_t) -> uint8x16_t {
+    vreinterpretq_u8_s32(vsetq_lane_s32::<N>(w, vreinterpretq_s32_u8(a)))
+}
+
+#[target_feature(enable = "neon")]
+fn shr_s32<const N: i32>(a: uint8x16_t) -> uint8x16_t {
+    vreinterpretq_u8_s32(vshrq_n_s32::<N>(vreinterpretq_s32_u8(a)))
+}
+
+/// A binary intrinsic on 32-bit lanes, reinterpreting its operands and
+/// result.
+macro_rules! u32_lanes {
+    ($f:ident) => {
+        |a, b| unsafe { vreinterpretq_u8_u32($f(vreinterpretq_u32_u8(a), vreinterpretq_u32_u8(b))) }
+    };
+}
+
 const ARM: &str = "core.core_arch.arm_shared.neon.generated";
 const AARCH64: &str = "core.core_arch.aarch64.neon.generated";
 const RANDOM: usize = 16;
@@ -76,7 +109,7 @@ fn main() {
     // `TBL`'s indices past 15 select zero: each pair's random second vector
     // has some, and these some at and around the edge.
     let tbl_edges = [0x0f10_1f20_7f80_ff00_0102_0304_0506_0708, 0x1011_1213_0f0e_0d0c_8000_7fff_4020_1008];
-    let binary: [(String, Binary); 5] = [
+    let binary: [(String, Binary); 9] = [
         (format!("{ARM}.veorq_u8"), |a, b| unsafe { veorq_u8(a, b) }),
         (format!("{AARCH64}.vqtbl1q_u8"), |a, b| unsafe {
             vqtbl1q_u8(a, b)
@@ -89,9 +122,15 @@ fn main() {
         }),
         (format!("{ARM}.vaeseq_u8"), |a, b| unsafe { vaeseq_u8(a, b) }),
         (format!("{ARM}.vaesdq_u8"), |a, b| unsafe { vaesdq_u8(a, b) }),
+        (format!("{ARM}.vceqq_u32"), u32_lanes!(vceqq_u32)),
+        (format!("{ARM}.vaddq_u32"), u32_lanes!(vaddq_u32)),
+        (format!("{ARM}.vandq_u32"), u32_lanes!(vandq_u32)),
+        (format!("{ARM}.veorq_u32"), u32_lanes!(veorq_u32)),
     ];
+    // `CMEQ` on vectors equal in some 32-bit lanes and not the others.
+    let lane_edges = [(inputs[3], inputs[3] ^ 1), (inputs[3], inputs[3] ^ (1 << 64))];
     for (name, f) in binary {
-        let edges = tbl_edges.iter().map(|&b| (inputs[3], b));
+        let edges = tbl_edges.iter().map(|&b| (inputs[3], b)).chain(lane_edges);
         for (a, b) in pairs.iter().copied().chain(edges) {
             let r = unsafe { f(v(a), v(b)) };
             guard(format!("{name} {} {}", q(v(a)), q(v(b))), q(r));
@@ -153,6 +192,117 @@ fn main() {
             format!("((·.bv) <$> {ARM}.vreinterpretq_p128_u8 {})", q(v(a))),
             format!("{r:#x}#128"),
         );
+    }
+
+    type SetLane = unsafe fn(u32, uint8x16_t) -> uint8x16_t;
+    let sets: [SetLane; 4] = [set_lane::<0>, set_lane::<1>, set_lane::<2>, set_lane::<3>];
+    for (imm, f) in sets.iter().enumerate() {
+        for (w, a) in [(0, u128::MAX), (u32::MAX, 0), (rng.u64() as u32, rng.u128())] {
+            let r = unsafe { f(w, v(a)) };
+            guard(format!("{ARM}.vsetq_lane_u32 ⟨{imm}#32⟩ ⟨{w}#32⟩ {}", q(v(a))), q(r));
+        }
+    }
+    // PMULL GHASH and the one-pass AES-GCM's.
+    let binary64: [(&str, Binary); 4] = [
+        ("veorq_u64", |a, b| unsafe {
+            vreinterpretq_u8_u64(veorq_u64(vreinterpretq_u64_u8(a), vreinterpretq_u64_u8(b)))
+        }),
+        ("vandq_u64", |a, b| unsafe {
+            vreinterpretq_u8_u64(vandq_u64(vreinterpretq_u64_u8(a), vreinterpretq_u64_u8(b)))
+        }),
+        ("vaddq_u64", |a, b| unsafe {
+            vreinterpretq_u8_u64(vaddq_u64(vreinterpretq_u64_u8(a), vreinterpretq_u64_u8(b)))
+        }),
+        ("vandq_u8", |a, b| unsafe { vandq_u8(a, b) }),
+    ];
+    for (name, f) in binary64 {
+        for &(a, b) in &pairs {
+            let r = unsafe { f(v(a), v(b)) };
+            guard(format!("{ARM}.{name} {} {}", q(v(a)), q(v(b))), q(r));
+        }
+    }
+    let unary64: [(&str, Unary); 3] = [
+        ("vrev64q_u8", |a| unsafe { vrev64q_u8(a) }),
+        ("vreinterpretq_s32_u64", |a| unsafe {
+            transmute(vreinterpretq_s32_u64(transmute(a)))
+        }),
+        ("vreinterpretq_u64_s32", |a| unsafe {
+            transmute(vreinterpretq_u64_s32(transmute(a)))
+        }),
+    ];
+    for (name, f) in unary64 {
+        for &a in &inputs {
+            let r = unsafe { f(v(a)) };
+            guard(format!("{ARM}.{name} {}", q(v(a))), q(r));
+        }
+    }
+    let ext64: [Binary; 2] = [ext64::<0>, ext64::<1>];
+    for (imm, f) in ext64.iter().enumerate() {
+        for &(a, b) in &pairs {
+            let r = unsafe { f(v(a), v(b)) };
+            guard(format!("{ARM}.vextq_u64 ⟨{imm}#32⟩ {} {}", q(v(a)), q(v(b))), q(r));
+        }
+    }
+    for &a in &inputs {
+        for imm in 0..2 {
+            let r = unsafe {
+                if imm == 0 {
+                    vgetq_lane_u64::<0>(transmute(v(a)))
+                } else {
+                    vgetq_lane_u64::<1>(transmute(v(a)))
+                }
+            };
+            guard(
+                format!("((·.bv) <$> {ARM}.vgetq_lane_u64 ⟨{imm}#32⟩ {})", q(v(a))),
+                format!("{r:#x}#64"),
+            );
+        }
+        let w = a as u64;
+        let r: uint8x16_t = unsafe { transmute(vdupq_n_u64(w)) };
+        guard(format!("{ARM}.vdupq_n_u64 ⟨{w:#x}#64⟩"), q(r));
+    }
+    for &(a, b) in &pairs {
+        let (a, b) = (a as u64, b as u64);
+        let r = unsafe { vmull_p64(a, b) };
+        guard(
+            format!("((·.bv) <$> {AARCH64}.vmull_p64 ⟨{a:#x}#64⟩ ⟨{b:#x}#64⟩)"),
+            format!("{r:#x}#128"),
+        );
+    }
+    let get32: [unsafe fn(uint8x16_t) -> i32; 4] = [get_s32::<0>, get_s32::<1>, get_s32::<2>, get_s32::<3>];
+    for (imm, f) in get32.iter().enumerate() {
+        for &a in &inputs[..4] {
+            let r = unsafe { f(v(a)) } as u32;
+            guard(
+                format!("((·.bv) <$> {ARM}.vgetq_lane_s32 ⟨{imm}#32⟩ {})", q(v(a))),
+                format!("{r:#x}#32"),
+            );
+        }
+    }
+    type SetS32 = unsafe fn(i32, uint8x16_t) -> uint8x16_t;
+    let sets32: [SetS32; 4] = [set_s32::<0>, set_s32::<1>, set_s32::<2>, set_s32::<3>];
+    for (imm, f) in sets32.iter().enumerate() {
+        for (w, a) in [(0, u128::MAX), (-1, 0), (rng.u64() as i32, rng.u128())] {
+            let r = unsafe { f(w, v(a)) };
+            guard(
+                format!("{ARM}.vsetq_lane_s32 ⟨{imm}#32⟩ ⟨{:#x}#32⟩ {}", w as u32, q(v(a))),
+                q(r),
+            );
+        }
+    }
+    let shrs: [Unary; 32] = [
+        shr_s32::<1>, shr_s32::<2>, shr_s32::<3>, shr_s32::<4>, shr_s32::<5>, shr_s32::<6>,
+        shr_s32::<7>, shr_s32::<8>, shr_s32::<9>, shr_s32::<10>, shr_s32::<11>, shr_s32::<12>,
+        shr_s32::<13>, shr_s32::<14>, shr_s32::<15>, shr_s32::<16>, shr_s32::<17>, shr_s32::<18>,
+        shr_s32::<19>, shr_s32::<20>, shr_s32::<21>, shr_s32::<22>, shr_s32::<23>, shr_s32::<24>,
+        shr_s32::<25>, shr_s32::<26>, shr_s32::<27>, shr_s32::<28>, shr_s32::<29>, shr_s32::<30>,
+        shr_s32::<31>, shr_s32::<32>,
+    ];
+    for (i, f) in shrs.iter().enumerate() {
+        for a in [inputs[2], rng.u128()] {
+            let r = unsafe { f(v(a)) };
+            guard(format!("{ARM}.vshrq_n_s32 ⟨{}#32⟩ {}", i + 1, q(v(a))), q(r));
+        }
     }
     print!("{out}");
 }

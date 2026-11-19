@@ -19,6 +19,15 @@ pub(crate) fn bignum_aff_point_select_p384(z: &mut [u64; 12], table: &[u64], ind
     }
 }
 
+/// As [`bignum_aff_point_select_p384`], for an affine p256 point of 8 words.
+pub(crate) fn bignum_aff_point_select_p256(z: &mut [u64; 8], table: &[u64], index: u8) {
+    match HaveAvx2::check() {
+        Some(token) => select_avx2::<8, 2>(z, table, index, token),
+        // SAFETY: every x86_64 CPU has SSE2
+        None => unsafe { select_sse2::<8, 4>(z, table, index) },
+    }
+}
+
 /// As [`bignum_aff_point_select_p384`], for an affine p521 point of 18 words.
 pub(crate) fn bignum_aff_point_select_p521(z: &mut [u64; 18], table: &[u64], index: u8) {
     match HaveAvx2::check() {
@@ -127,6 +136,12 @@ mod tests {
             .map(|i| i.wrapping_mul(0x9e3779b97f4a7c15))
             .collect();
         for index in 0..=17 {
+            let (mut want, mut got) = ([1; 8], [2; 8]);
+            select_avx2::<8, 2>(&mut want, &table[..8 * 16], index, token);
+            // SAFETY: every x86_64 CPU has SSE2
+            unsafe { select_sse2::<8, 4>(&mut got, &table[..8 * 16], index) };
+            assert_eq!(got, want, "p256, index {index}");
+
             let (mut want, mut got) = ([1; 12], [2; 12]);
             select_avx2::<12, 3>(&mut want, &table[..12 * 16], index, token);
             // SAFETY: every x86_64 CPU has SSE2

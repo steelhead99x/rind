@@ -43,7 +43,7 @@ fn hkdf() {
         ("hkdf_sha512_test.json", hkdf::HKDF_SHA512),
     ] {
         let data = File::open(format!(
-            "{}/../thirdparty/wycheproof/testvectors_v1/{file}",
+            "{}/../thirdparty/vectors/wycheproof/testvectors_v1/{file}",
             env!("CARGO_MANIFEST_DIR")
         ))
         .unwrap_or_else(|_| panic!("failed to open {file}"));

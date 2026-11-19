@@ -111,9 +111,8 @@ anything but `bytes` is copied first, so no other thread can change it
 mid-call. RSA key generation, RSA signing and decryption, and PBKDF2 release
 the GIL while they run.
 
-pyrind does not wipe keys or keyed state: the wheels build rind without its
-`wipe` feature, so Python frees them unwiped. To wipe them, use rind from Rust
-with `wipe`. Nothing wipes the `bytes` a key was loaded from or exported to;
+pyrind wipes keys and keyed state when Python frees them, as rind does.
+Nothing wipes the `bytes` a key was loaded from or exported to;
 Python owns those.
 
 ## Platforms
@@ -124,9 +123,6 @@ macOS on x86_64 and Apple silicon, and Windows on x86_64 and aarch64. PyPy,
 free-threaded CPython, and other platforms build the sdist, which needs a
 Rust toolchain. rind runs only on x86_64, aarch64, and 32-bit arm, so other
 architectures fail to build; there is no pure-Python fallback.
-
-Importing pyrind raises `ImportError` on a CPU missing a feature rind
-requires, naming it, rather than failing later.
 
 ## License
 

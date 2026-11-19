@@ -6,12 +6,13 @@
 //! Load the key as PKCS#1 or PKCS#8 instead.
 
 use core::fmt;
+use core::marker::PhantomData;
 
 use crate::{der, error, rand, signature};
 
 /// Signs with any [`signature::RsaEncoding`]; its modulus is 2048 to 4096 bits, a multiple of 512, as ring requires.
 pub struct KeyPair {
-    key: rind::signature::RsaKeyPair,
+    key: rind::rsa::KeyPair,
     public: PublicKey,
 }
 
@@ -19,24 +20,24 @@ impl KeyPair {
     /// Loads a PKCS#8 RSA private key, named `rsaEncryption`, `id-RSAES-OAEP`,
     /// or `id-ea-rsa`.
     pub fn from_pkcs8(pkcs8: &[u8]) -> Result<Self, error::KeyRejected> {
-        rind::signature::RsaKeyPair::from_pkcs8(pkcs8)
+        der::pkcs8_v1_only(pkcs8)?;
+        rind::rsa::KeyPair::from_pkcs8(pkcs8)
             .map_err(error::KeyRejected::rind)
             .and_then(Self::new)
     }
 
     /// Loads a PKCS#1 `RSAPrivateKey`.
     pub fn from_der(input: &[u8]) -> Result<Self, error::KeyRejected> {
-        rind::signature::RsaKeyPair::from_pkcs1(input)
+        rind::rsa::KeyPair::from_pkcs1(input)
             .map_err(error::KeyRejected::rind)
             .and_then(Self::new)
     }
 
     // rind takes moduli up to 8192 bits of any length; ring refuses the
     // rest, and an exponent below 65537.
-    fn new(key: rind::signature::RsaKeyPair) -> Result<Self, error::KeyRejected> {
-        let public = key.public_key(&rind::signature::sign::RSA_PKCS1_SHA256);
-        let public =
-            PublicKey::new(public.as_ref()).map_err(|_| error::KeyRejected::invalid_encoding())?;
+    fn new(key: rind::rsa::KeyPair) -> Result<Self, error::KeyRejected> {
+        let public = PublicKey::new(key.public_key().as_ref())
+            .map_err(|_| error::KeyRejected::invalid_encoding())?;
         let bits = public.modulus_bits();
         if bits < 2048 {
             return Err(error::KeyRejected::too_small());
@@ -77,7 +78,7 @@ impl KeyPair {
         }
         let signed = self
             .key
-            .sign(padding_alg.padding().rind, msg)
+            .sign(padding_alg.rind(), msg)
             .map_err(|_| error::Unspecified)?;
         if signed.as_ref().len() != signature.len() {
             return Err(error::Unspecified);
@@ -173,9 +174,10 @@ impl<B: AsRef<[u8]>> PublicKeyComponents<B> {
             n: self.n.as_ref(),
             e: self.e.as_ref(),
         };
-        rind::signature::PublicKey::from_components(params.rind, &components)
-            .and_then(|key| key.verify(message, signature))
-            .map_err(|_| error::Unspecified)
+        signature::verified(
+            rind::rsa::PublicKey::from_components(&components)
+                .and_then(|key| key.verify(params.rind, message, signature)),
+        )
     }
 }
 
@@ -190,8 +192,11 @@ impl<B: FromIterator<u8>> From<&PublicKey> for PublicKeyComponents<B> {
 
 /// An RSA verification algorithm: a padding, a hash, and the smallest modulus it accepts, up to 8192 bits.
 pub struct RsaParameters {
-    rind: &'static rind::signature::RsaVerificationAlgorithm,
+    rind: &'static rind::rsa::VerificationAlgorithm,
     id: &'static str,
+    // ring's holds a `&'static dyn` padding, which is neither `UnwindSafe`
+    // nor `RefUnwindSafe`, so neither is this.
+    unwind: PhantomData<&'static dyn Sync>,
 }
 
 impl fmt::Debug for RsaParameters {
@@ -209,7 +214,14 @@ impl signature::VerificationAlgorithm for RsaParameters {
         msg: untrusted::Input<'_>,
         signature: untrusted::Input<'_>,
     ) -> Result<(), error::Unspecified> {
-        signature::verify(self.rind, public_key, msg, signature)
+        let key = rind::rsa::PublicKey::new(public_key.as_slice_less_safe());
+        signature::verified(key.and_then(|key| {
+            key.verify(
+                self.rind,
+                msg.as_slice_less_safe(),
+                signature.as_slice_less_safe(),
+            )
+        }))
     }
 }
 
@@ -222,63 +234,64 @@ pub(crate) mod verification {
             pub static $name: RsaParameters = RsaParameters {
                 rind: &$rind,
                 id: stringify!($name),
+                unwind: core::marker::PhantomData,
             };
         };
     }
 
     rsa_params!(
         RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY,
-        rind::signature::verify::legacy::RSA_PKCS1_1024_SHA1,
+        rind::rsa::verify::legacy::PKCS1_1024_SHA1,
         "PKCS#1 v1.5 with SHA-1 and a modulus of 1024 to 8192 bits, for legacy protocols only."
     );
     rsa_params!(
         RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY,
-        rind::signature::verify::legacy::RSA_PKCS1_1024_SHA256,
+        rind::rsa::verify::legacy::PKCS1_1024_SHA256,
         "PKCS#1 v1.5 with SHA-256 and a modulus of 1024 to 8192 bits, for legacy protocols only."
     );
     rsa_params!(
         RSA_PKCS1_1024_8192_SHA512_FOR_LEGACY_USE_ONLY,
-        rind::signature::verify::legacy::RSA_PKCS1_1024_SHA512,
+        rind::rsa::verify::legacy::PKCS1_1024_SHA512,
         "PKCS#1 v1.5 with SHA-512 and a modulus of 1024 to 8192 bits, for legacy protocols only."
     );
     rsa_params!(
         RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY,
-        rind::signature::verify::legacy::RSA_PKCS1_SHA1,
+        rind::rsa::verify::legacy::PKCS1_SHA1,
         "PKCS#1 v1.5 with SHA-1 and a modulus of 2048 to 8192 bits, for legacy protocols only."
     );
     rsa_params!(
         RSA_PKCS1_2048_8192_SHA256,
-        rind::signature::verify::RSA_PKCS1_SHA256,
+        rind::rsa::verify::PKCS1_SHA256,
         "PKCS#1 v1.5 with SHA-256 and a modulus of 2048 to 8192 bits."
     );
     rsa_params!(
         RSA_PKCS1_2048_8192_SHA384,
-        rind::signature::verify::RSA_PKCS1_SHA384,
+        rind::rsa::verify::PKCS1_SHA384,
         "PKCS#1 v1.5 with SHA-384 and a modulus of 2048 to 8192 bits."
     );
     rsa_params!(
         RSA_PKCS1_2048_8192_SHA512,
-        rind::signature::verify::RSA_PKCS1_SHA512,
+        rind::rsa::verify::PKCS1_SHA512,
         "PKCS#1 v1.5 with SHA-512 and a modulus of 2048 to 8192 bits."
     );
     rsa_params!(
         RSA_PKCS1_3072_8192_SHA384,
-        rind::signature::verify::legacy::RSA_PKCS1_3072_SHA384,
+        rind::rsa::verify::legacy::PKCS1_3072_SHA384,
         "PKCS#1 v1.5 with SHA-384 and a modulus of 3072 to 8192 bits."
     );
     rsa_params!(
         RSA_PSS_2048_8192_SHA256,
-        rind::signature::verify::RSA_PSS_SHA256,
+        rind::rsa::verify::PSS_SHA256,
         "PSS with SHA-256, MGF1, a 32-byte salt, and a modulus of 2048 to 8192 bits."
     );
     rsa_params!(
         RSA_PSS_2048_8192_SHA384,
-        rind::signature::verify::RSA_PSS_SHA384,
+        rind::rsa::verify::PSS_SHA384,
         "PSS with SHA-384, MGF1, a 48-byte salt, and a modulus of 2048 to 8192 bits."
     );
     rsa_params!(
         RSA_PSS_2048_8192_SHA512,
-        rind::signature::verify::RSA_PSS_SHA512,
+        rind::rsa::verify::PSS_SHA512,
         "PSS with SHA-512, MGF1, a 64-byte salt, and a modulus of 2048 to 8192 bits."
     );
 }
@@ -286,63 +299,112 @@ pub(crate) mod verification {
 pub(crate) mod padding {
     use core::fmt;
 
-    use crate::sealed;
+    use crate::{digest, sealed};
 
     /// An RSA signature encoding, a padding and a hash, for [`super::KeyPair::sign`].
     pub trait RsaEncoding: Encoding {}
 
-    // Returns rind-ring's own `Padding`, never a rind type: a caller bounded
-    // by `E: RsaEncoding` can call this, and rind-ring's public API must not
-    // name rind.
-    pub trait Encoding: fmt::Debug + Sync + sealed::Sealed + 'static {
-        fn padding(&self) -> &Padding;
+    // A caller bounded by `E: RsaEncoding` can call this trait's methods, so
+    // it has exactly those of ring's `Padding`.
+    #[allow(private_bounds)]
+    pub trait Encoding: fmt::Debug + Sync + sealed::Sealed + Signs + 'static {
+        fn digest_alg(&self) -> &'static digest::Algorithm;
     }
 
-    /// One of the `RSA_PKCS1_*` and `RSA_PSS_*` signing encodings.
-    pub struct Padding {
-        pub(super) rind: &'static rind::signature::RsaSigningAlgorithm,
-        id: &'static str,
+    // `pub(crate)`, so callers cannot reach the rind algorithm through it.
+    pub(crate) trait Signs {
+        fn rind(&self) -> &'static rind::rsa::SigningAlgorithm;
     }
 
-    impl fmt::Debug for Padding {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str(self.id)
-        }
+    // ring's PKCS#1 and PSS encodings are two types, so a caller cannot
+    // assign one's value where the other's goes; neither can rind-ring's.
+    macro_rules! padding_type {
+        ($ty:ident, $doc:expr) => {
+            #[doc = $doc]
+            pub struct $ty {
+                rind: &'static rind::rsa::SigningAlgorithm,
+                digest: &'static digest::Algorithm,
+                id: &'static str,
+            }
+
+            impl fmt::Debug for $ty {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str(self.id)
+                }
+            }
+
+            impl sealed::Sealed for $ty {}
+
+            impl Encoding for $ty {
+                fn digest_alg(&self) -> &'static digest::Algorithm {
+                    self.digest
+                }
+            }
+
+            impl Signs for $ty {
+                fn rind(&self) -> &'static rind::rsa::SigningAlgorithm {
+                    self.rind
+                }
+            }
+
+            impl RsaEncoding for $ty {}
+        };
     }
 
-    impl sealed::Sealed for Padding {}
-
-    impl Encoding for Padding {
-        fn padding(&self) -> &Padding {
-            self
-        }
-    }
-
-    impl RsaEncoding for Padding {}
+    padding_type!(Pkcs1, "One of the `RSA_PKCS1_*` signing encodings.");
+    padding_type!(Pss, "One of the `RSA_PSS_*` signing encodings.");
 
     macro_rules! padding {
-        ($name:ident, $doc:expr) => {
+        ($name:ident, $rind:ident, $ty:ident, $digest:ident, $doc:expr) => {
             #[doc = $doc]
-            pub static $name: Padding = Padding {
-                rind: &rind::signature::sign::$name,
+            pub static $name: $ty = $ty {
+                rind: &rind::rsa::sign::$rind,
+                digest: &digest::$digest,
                 id: stringify!($name),
             };
         };
     }
 
-    padding!(RSA_PKCS1_SHA256, "PKCS#1 v1.5 signatures with SHA-256.");
-    padding!(RSA_PKCS1_SHA384, "PKCS#1 v1.5 signatures with SHA-384.");
-    padding!(RSA_PKCS1_SHA512, "PKCS#1 v1.5 signatures with SHA-512.");
+    padding!(
+        RSA_PKCS1_SHA256,
+        PKCS1_SHA256,
+        Pkcs1,
+        SHA256,
+        "PKCS#1 v1.5 signatures with SHA-256."
+    );
+    padding!(
+        RSA_PKCS1_SHA384,
+        PKCS1_SHA384,
+        Pkcs1,
+        SHA384,
+        "PKCS#1 v1.5 signatures with SHA-384."
+    );
+    padding!(
+        RSA_PKCS1_SHA512,
+        PKCS1_SHA512,
+        Pkcs1,
+        SHA512,
+        "PKCS#1 v1.5 signatures with SHA-512."
+    );
     padding!(
         RSA_PSS_SHA256,
+        PSS_SHA256,
+        Pss,
+        SHA256,
         "PSS signatures with SHA-256, MGF1, and a 32-byte random salt."
     );
     padding!(
         RSA_PSS_SHA384,
+        PSS_SHA384,
+        Pss,
+        SHA384,
         "PSS signatures with SHA-384, MGF1, and a 48-byte random salt."
     );
     padding!(
         RSA_PSS_SHA512,
+        PSS_SHA512,
+        Pss,
+        SHA512,
         "PSS signatures with SHA-512, MGF1, and a 64-byte random salt."
     );
 }

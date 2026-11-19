@@ -1,11 +1,23 @@
 # Upstream workarounds
 
-Every place rind works around a bug or gap in a tool or dependency it doesn't own.
+Every upstream rind forks, and every place it works around a bug or gap in a tool or dependency it doesn't own.
 Each entry says what breaks, how to see it, the workaround and where it lives, whether it is reported upstream, and what lets the workaround go.
 Each workaround's comment names its entry by heading, as [CONTRIBUTING.md](CONTRIBUTING.md#upstream) asks.
 
 rind's own bugs, deliberate choices, and plain version pins are not listed.
 "Reported" names an upstream issue rind filed or found; "no" means none is linked yet.
+
+## Forks
+
+Each upstream rind changes, with where its fork is vendored and where the list of rind's changes to it lives, as [CONTRIBUTING.md](CONTRIBUTING.md#upstream) asks.
+
+### s2n-bignum
+
+- **Breaks:** s2n-bignum's HOL Light x86_64 model cannot decode some instructions of aws-lc's ChaCha20-Poly1305 and ChaCha20 routines, or the SHA extensions rind's SHA-256 blocks run, its SHA-256 and SHA-512 specs are in pull requests not yet merged, and it has no AArch32 model, so those routines and armv7's assembly cannot be proven on it.
+- **Fork:** `thirdparty/s2n-bignum`, upstream's whole tree at the base its `RIND.md` names (maintainer, 2026-11-13, on [kixel-ai/rind#701](https://github.com/kixel-ai/rind/pull/701)).
+- **Changes:** listed in [its `RIND.md`](/thirdparty/s2n-bignum/RIND.md), which `admin/regenerate` checks lists every file that differs from upstream's: the model additions of [awslabs/s2n-bignum#450](https://github.com/awslabs/s2n-bignum/pull/450), the SHA extensions among them, rind's own additions, both cosimulated against the CPU, rind's AArch32 model in `aarch32/`, cosimulated against qemu-arm, rind's ChaCha20-Poly1305 spec, and the specs of [awslabs/s2n-bignum#415](https://github.com/awslabs/s2n-bignum/pull/415) and [#420](https://github.com/awslabs/s2n-bignum/pull/420).
+- **Offered:** no. #415, #420, and #450 are upstream's own open pull requests; rind's own changes need the maintainer's approval to post ([kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)), which [upstream-reports](/quest/m2/upstream-reports.md) asks for.
+- **Goes when:** s2n-bignum merges each change and the fork's base moves past it.
 
 ## Compilers and linkers
 
@@ -33,6 +45,14 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Reported:** no.
 - **Goes when:** the `v7` target feature is stable.
 
+### Rust 1.90's assembler cannot read verified-garbage's `.base64`
+
+- **Breaks:** pyca/verified-garbage prints its x86_64 machine code as `.base64` directives, which LLVM's assembler reads only from LLVM 22 (Rust 1.95); Rust 1.94 (LLVM 21.1) and rind's 1.90 MSRV stop at the first one.
+- **Reproduce:** a `naked_asm!` holding `.base64 "uAEAAADD"` builds on Rust 1.95 and fails at the directive on 1.94, as `nix shell --inputs-from . 'rust-overlay#rust_1_94_0'` runs it.
+- **Workaround:** `admin/import-vg` writes each `.base64` line as `.byte` lines of the same bytes, so rind's copy assembles to verified-garbage's machine code. Found in [kixel-ai/rind#811](https://github.com/kixel-ai/rind/pull/811).
+- **Reported:** no; verified-garbage requires Rust 1.95, so this is rind's MSRV, not its bug.
+- **Goes when:** rind's MSRV reaches Rust 1.95.
+
 ### No AddressSanitizer for 32-bit ARM Linux
 
 - **Breaks:** rustc has no AddressSanitizer for `armv7-unknown-linux-gnueabihf`.
@@ -49,6 +69,14 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Workaround:** `admin/ctgrind` sets `VALGRIND_BUG_494162`, which `rind/src/low/x86_64/cpu.rs` reads to take the ADX routines anyway.
 - **Reported:** [KDE bug 494162](https://bugs.kde.org/show_bug.cgi?id=494162).
 - **Goes when:** the flake's valgrind reports ADX.
+
+### Valgrind models only MXCSR's rounding mode
+
+- **Breaks:** valgrind's x86_64 guest keeps only MXCSR's rounding mode, so `stmxcsr` reads `0x1F80` after `ldmxcsr 0x1FBF`, and the `low::mcdt` tests that read back Intel's MXCSR mitigation fail. The guard itself still loads and restores MXCSR there.
+- **Reproduce:** `admin/ctgrind unit low::mcdt` fails `holds_and_restores` with `left: 8064, right: 8127`.
+- **Workaround:** `rind/src/low/mcdt.rs` ignores those two tests in `__ctgrind` builds; plain `cargo test` and x86-cpu.yml's SDE rows still run them.
+- **Reported:** no.
+- **Goes when:** valgrind keeps MXCSR's other bits.
 
 ### Valgrind cannot run x86_64's newest extensions
 
@@ -67,11 +95,27 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 
 ### Memcheck blames a public flag on a secret carry
 
-- **Breaks:** on armv7 without NEON, memcheck flags the `beq` at `sha512_block_data_order_nohw+460` in aws-lc's integer SHA-512, which reads only the Z flag of a `tst` on the public round-constant pointer. The `tst` keeps the carry of the secret `adds` before it, and memcheck counts that carry against the branch when a superblock boundary falls between them, which the caller's code layout decides.
-- **Reproduce:** the `no-neon` armv7 ctgrind row with `--vex-guest-max-insns=1` flags it, along with every branch on a `tst` of a public value.
-- **Workaround:** the `aws-lc-sha512-armv4-nohw-flags` suppression in `admin/ctgrind.supp`.
+- **Breaks:** on armv7, memcheck flags a branch or predicated instruction that reads only the Z flag of a logical op on public values, such as a `tst` or `ands`, when that op keeps the carry of a secret `adds` before it and a superblock boundary falls between them, which code layout decides. It flags the `beq` at `sha512_block_data_order_nohw+460` in aws-lc's integer SHA-512 without NEON, which tests the public round-constant pointer. It flagged the portable P-384 scalar inverse's `step_by(4).rev()` loop, whose `ands r0, r0, #3` follows the inlined reduction of the secret, and whose `movweq` then poisons the loop counter and the table index. On x86_64, VEX builds `stc`'s flags from the previous op's, so s2n-bignum's `bignum_add_p521`, which begins `stc` then `adc`, returned an undefined sum of two defined inputs right after the generic backend's secret arithmetic in `low::generic::limb64::p521::tests::field_ops`.
+- **Reproduce:** the `no-neon` armv7 ctgrind row with `--vex-guest-max-insns=1` flags the SHA-512 branch, along with every branch on a `tst` of a public value. At main's d0e8e97f1, `admin/ctgrind unit --target armv7-unknown-linux-gnueabihf --release -- high::ecdsa::tests::digest_signing_matches_message_signing` flags `fs_pow` at the default 50 instructions per superblock and at 30, and passes at 100. At 0470f9956 (kixel-ai/rind#817's first head), x86_64's `admin/ctgrind unit --release -- low::generic::limb64::p521::tests::field_ops` reports 2313 errors, and main passes it.
+- **Workaround:** the `aws-lc-sha512-armv4-nohw-flags` suppression in `admin/ctgrind.supp`; the portable P-256 and P-384 scalar inverses count nibbles with a plain range, whose loop armv7 tests with `cmp`, which sets every flag. The generic backend's tests mark their reference results public before comparing.
 - **Reported:** no.
 - **Goes when:** memcheck tracks the Z flag apart from the carry.
+
+### Valgrind cannot unwind std's frame-pointer entries on armv7
+
+- **Breaks:** valgrind unwinds armv7 code through its `.ARM.exidx` entries, and can rebuild the stack pointer from `r7`, Thumb's frame pointer, but not from `r11`, ARM's (`readexidx.c`, 3.22 through 3.27). Rust's prebuilt std keeps frame pointers, so its entries begin `vsp = r11`. A debug build calls std's shared `<[u8]>::starts_with` rather than inlining it, so a memcheck stack in it stops there, and a suppression that names the caller never matches: rind-dimpl's `pem_signing` reported rustls-pki-types' PEM boundary test, which `rustls-pki-types-pem-line-compare` covers.
+- **Reproduce:** at main's d0e8e97f1, on an arm64 host, `cargo test -p rind-dimpl --test ctgrind --features rind/__ctgrind --target armv7-unknown-linux-gnueabihf -- pem_signing` under `admin/ctgrind --run` reports `bcmp` called by `<[u8]>::starts_with` with no frame above it.
+- **Workaround:** `admin/ctgrind` passes `--unw-stack-scan-thresh=3`, which recovers `rustls_pki_types::pem::read` from the stack when an unwind stops within three frames. Scanned frames below the first can be stale return addresses.
+- **Reported:** no.
+- **Goes when:** valgrind's EXIDX reader takes `vsp = r11`.
+
+### Memcheck flags OpenSSL's name map on aarch64
+
+- **Breaks:** nixpkgs' OpenSSL 3.5.9 on aarch64 branches on the bytes past a NUL in its own uninitialised stack buffers while it sets up a library context: `OPENSSL_strlcpy` under `provider_conf_params_internal` when `OSSL_LIB_CTX_load_config` loads the config, and under `OBJ_obj2txt` when `get_legacy_*_names` fills the name map. Those bytes hash into the map's buckets, so `ossl_namemap_name2num` and `namemap_add_name` report on every later lookup. x86_64's build of the same OpenSSL reports nothing. None of it touches a key.
+- **Reproduce:** at main's 561555b3f, on an arm64 host, `admin/ctgrind adapters --release` reports 2945 errors from 32 contexts in `rind-openssl`'s `ctgrind` test, all in `libcrypto.so.3`'s setup.
+- **Workaround:** the `openssl-*` suppressions in `admin/ctgrind.supp`, each naming libcrypto's setup frames, never the provider's.
+- **Reported:** no.
+- **Goes when:** nixpkgs' OpenSSL no longer reads those bytes on aarch64, or memcheck tracks them apart.
 
 ### Valgrind on ARM does not fault guard pages
 
@@ -82,16 +126,16 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 
 ### BINSEC cannot decode much of what rind runs
 
-- **Breaks:** BINSEC 0.11.3 stops at instructions it cannot decode: on x86_64, AES-NI, VAES, the SHA512 instructions, and every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's, and the `msr` that sets DIT; on armv7, the NEON table lookups and the crypto extension.
+- **Breaks:** BINSEC 0.11.3 stops at instructions it cannot decode: on x86_64, AES-NI, VAES, the SHA512 instructions, and every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's, every SVE encoding, such as SVE2's `xar`, and the `msr` that sets DIT; on armv7, the NEON table lookups and the crypto extension.
 - **Workaround:** `admin/ct-binsec`'s `UNDECODED` denies those features, leaving their paths to `admin/ctgrind`, `admin/ct-sde`, and `admin/ct-qemu`, and armv7 has no `binsec` row in `ctgrind.yml`.
 - **Reported:** no.
 - **Goes when:** a BINSEC release decodes each, feature by feature.
 
 ### BINSEC cannot decode instructions `admin/ct-binsec` stubs
 
-- **Breaks:** BINSEC 0.11.3 stops with `uninterpreted` at these instructions rind's code or glibc runs: on x86_64, `stc` (`f9`), `clc` (`f8`), `movmskps` and VEX `vmovmskps`, `vinsertf128` (VEX.256 0F3A 18), `vpermpd` (VEX.256.W1 0F3A 01), `vmovshdup` (VEX F3 0F 16), and the `syscall` in glibc's `mprotect`; on aarch64, `mrs xN, tpidr_el0` (glibc's `malloc`), `tbl` with one to four table registers (8B and 16B), and `cnt` (8B and 16B).
+- **Breaks:** BINSEC 0.11.3 stops with `uninterpreted` at these instructions rind's code or glibc runs: on x86_64, `stc` (`f9`), `clc` (`f8`), `movmskps` and VEX `vmovmskps`, `vinsertf128` (VEX.256 0F3A 18), `vpermpd` (VEX.256.W1 0F3A 01), `vmovshdup` (VEX F3 0F 16), `stmxcsr` and `ldmxcsr` (0F AE /3 and /2, which Intel's MXCSR mitigation runs on a CPU that needs it), and the `syscall` in glibc's `mprotect`; on aarch64, `mrs xN, tpidr_el0` (glibc's `malloc`), `tbl` with one to four table registers (8B and 16B), and `cnt` (8B and 16B).
 - **Reproduce:** `admin/ct-binsec` with `STUBS` emptied stops at the first one its harnesses reach, such as `stc` in `ct_binsec_ecdh_p521` on x86_64 or `tbl` in `ct_binsec_aes` on aarch64.
-- **Workaround:** `admin/ct-binsec`'s `STUBS` gives each its effect in BINSEC's script language, generated per encoding from objdump's disassembly of the test binary and glibc, since `replace opcode` matches exact bytes; `tbl`, a constant-time table lookup, becomes a shift of the whole table, which needs no branch. Its script makes `mprotect` succeed without its system call.
+- **Workaround:** `admin/ct-binsec`'s `STUBS` gives each its effect in BINSEC's script language, generated per encoding from objdump's disassembly of the test binary and glibc, since `replace opcode` matches exact bytes; `tbl`, a constant-time table lookup, becomes a shift of the whole table, which needs no branch; `stmxcsr` stores MXCSR's default, and `ldmxcsr` does nothing, since BINSEC models no floating-point state. Its script makes `mprotect` succeed without its system call.
 - **Reported:** no.
 - **Goes when:** a BINSEC release decodes them, or `replace opcode` matches an encoding by mask, so one stub covers every encoding of an instruction.
 
@@ -110,6 +154,14 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Reported:** no.
 - **Goes when:** gdb's core dumps skip or read through guard regions.
 
+### BINSEC stalls on some ML-KEM ciphertexts
+
+- **Breaks:** `ct_binsec_mlkem*` decapsulates a ciphertext, and for about one in a hundred of them BINSEC 0.11.3 stops making progress inside `kpke_encrypt`'s re-encryption: it sends the solver no query and visits no more than a few hundred thousand instructions in 480 s, where the others finish in under ten seconds. `gdb` shows it inside `Term.sizeof`, building a term. A given ciphertext always stalls, so it is the input, not the runner, and swapping one half of a stalling ciphertext for another's makes it finish.
+- **Reproduce:** run `admin/ct-binsec --timeout 60 ct_binsec_mlkem512` on the portable backend a few hundred times with a random `encaps()` message, as the check did before it pinned one.
+- **Workaround:** the harness encapsulates a fixed message, so every run explores a ciphertext that finishes on every backend. Which ciphertexts stall moves with the compiled code: [kixel-ai/rind#870](https://github.com/kixel-ai/rind/pull/870)'s counted loops made the pinned `0x5a` message stall ML-KEM-768 on the portable backend, and `0x00` stall ML-KEM-1024, so the harness now pins `0x01`, which finishes every parameter set on x86_64 and portable in under ten seconds. A change that stalls the pinned message picks another, rather than raising the timeout.
+- **Reported:** no.
+- **Goes when:** BINSEC builds that term without the stall; the harness may then draw random messages again.
+
 ## Proofs
 
 ### Aeneas cannot translate several kinds of Rust
@@ -127,19 +179,20 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Reported:** no.
 - **Goes when:** Aeneas names the clauses apart.
 
+### Charon panics on HACL*'s unrolled SHA-2
+
+- **Breaks:** libcrux-macros' `unroll_for!` unrolls the 64 or 80 rounds of libcrux-sha2's `sha256_update_nblocks` and `sha512_update_nblocks` into one body whose blocks nest past Charon's fixed `MAX_STACK_DEPTH` of 1024, and Charon panics rebuilding its control flow.
+- **Reproduce:** add `--include 'libcrux_sha2::hacl::sha256_update_nblocks' --extract-opaque-bodies` to `admin/prove`'s portable pass and run `admin/prove lean`: Charon panics with "stack depth limit exceeded" in `transform/control_flow/ullbc_to_llbc.rs` translating `sha256_update`.
+- **Workaround:** the portable pass leaves both functions opaque, as Charon leaves other crates' bodies, and `proofs/Rind/Portable/Hacl.lean` states each as an axiom restating HACL*'s F* theorem about it. Found in [kixel-ai/rind#649](https://github.com/kixel-ai/rind/pull/649).
+- **Reported:** not yet; filing is approved, and [its quest](/quest/m4/verified/hacl-sha2-lean.md) holds the draft issue awaiting the maintainer's approval of its text.
+- **Goes when:** Charon translates both, and that quest proves them in Lean.
+
 ### Lean cannot compile P-384's comb as one literal
 
 - **Breaks:** Lean cannot compile the Aeneas translation of P-384's precomputed comb when it is one array literal.
 - **Workaround:** `admin/p384-precomp` emits each table as its own constant, which Aeneas translates to its own Lean definition.
 - **Reported:** no.
 - **Goes when:** Lean compiles the whole comb as one literal.
-
-### s2n-bignum lacks instructions and specs rind's proofs use
-
-- **Breaks:** s2n-bignum's HOL Light x86_64 model cannot decode some instructions of aws-lc's ChaCha20-Poly1305 and ChaCha20 routines, or the SHA extensions rind's SHA-256 blocks run, and its SHA-256 and SHA-512 specs are in pull requests not yet merged, so those routines cannot be proven on it.
-- **Workaround:** rind forks s2n-bignum in `thirdparty/s2n-bignum` (maintainer, 2026-11-13, on [kixel-ai/rind#701](https://github.com/kixel-ai/rind/pull/701)). Each change, with its upstream pull request, is in [its `RIND.md`](/thirdparty/s2n-bignum/RIND.md), which `admin/regenerate` checks lists every file that differs from upstream's: the model additions of [awslabs/s2n-bignum#450](https://github.com/awslabs/s2n-bignum/pull/450), the SHA extensions among them, rind's own additions, both cosimulated against the CPU, and the specs of [awslabs/s2n-bignum#415](https://github.com/awslabs/s2n-bignum/pull/415) and [#420](https://github.com/awslabs/s2n-bignum/pull/420).
-- **Reported:** found #415, #420, and #450, all open; rind's own additions are not offered, which needs the maintainer's approval ([kixel-ai/rind#448](https://github.com/kixel-ai/rind/pull/448)).
-- **Goes when:** s2n-bignum merges each change and the fork's base moves past it.
 
 ### dmtcp_command fails a checkpoint that succeeds
 
@@ -173,6 +226,14 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Reported:** no.
 - **Goes when:** cargo-mutants treats any `cfg` that requires `test` as test-only.
 
+### cargo-mutants matches `#[path]` with `..` literally
+
+- **Breaks:** cargo-mutants 27.1.0, the version nixpkgs pins in `flake.lock`, records a module included by `#[path = "../generic/aes_nohw.rs"]` as `rind/src/low/portable/../generic/aes_nohw.rs` (and the `x86_64` twin). `--in-diff` compares that string to the Git path, which has no `..`. Nothing matches, and a diff that selects no mutants exits 0, so the portable campaign reports success without testing the change. The same gap hits every campaign, because `x86_64` includes that file through the same kind of path.
+- **Reproduce:** `cargo mutants --list -p rind | grep /\.\./` prints the names, and `cargo mutants --list -p rind --in-diff` over a diff of `rind/src/low/generic/aes_nohw.rs` lists none of them; `admin/mutants --expand-diff-self-test` checks the rewrite. `SourceFile::load` in cargo-mutants 27.1.0 `src/source.rs` keeps a path whose `..` never climbs out of the tree, and `diff_filter` in `src/in_diff.rs` matches it with no normalization; `NoMutants` uses the success exit code.
+- **Workaround:** `admin/mutants` copies each diff section onto those un-normalized names before passing `--in-diff`. Survivor aggregation still strips one `/<dir>/../` when it joins outcomes.
+- **Reported:** no.
+- **Goes when:** cargo-mutants normalizes `..` before matching a diff.
+
 ## Emulators
 
 ### cross's i686 Android image cannot run its binaries natively
@@ -182,6 +243,14 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Reported:** no.
 - **Goes when:** the image runs i686 binaries natively, as its x86_64 one does.
 
+### Flutter's iOS simulator test run hangs when its log stream attaches late
+
+- **Breaks:** `flutter test integration_test -d <simulator>` reads the app's Dart VM service URL from a `log stream` process it starts as it launches the app, and `log stream` drops what was logged before it attached, about two seconds after the launch. When the app logs the URL first, as it did in roughly one `dart-ios` run in four on stable 3.50.0, the tool waits for it forever: silent after `Xcode build done` until the job's timeout.
+- **Reproduce:** run `flutter test integration_test -d <simulator> -v` on `rind-dart/integration` on a hosted `macos-latest` runner a few dozen times, with `xcrun simctl spawn <udid> log stream` running beside it. A hung run's verbose log ends at `Waiting for VM Service port to be available...`, and the simulator's log has the app's `The Dart VM service is listening on` line a fraction of a second before the `log` process's `Sending stream request to diagnosticd`; a passing run has them the other way round.
+- **Workaround:** `build.yml`'s `dart-ios` job runs Flutter's beta channel, whose 3.51.0-0.1.pre has the fix. Diagnosed in [kixel-ai/rind#810](https://github.com/kixel-ai/rind/pull/810).
+- **Reported:** [flutter/flutter#181771](https://github.com/flutter/flutter/issues/181771), fixed by [flutter/flutter#193142](https://github.com/flutter/flutter/pull/193142), which makes the tool wait for `log stream`'s first line before launching the app.
+- **Goes when:** a stable Flutter release has that fix, and the job returns to `channel: stable`.
+
 ### Flutter's debug JIT crashes under the Android emulator's ARM translation
 
 - **Breaks:** the x86_64 Android emulator runs armv7 apps through its ARM translation, in which Flutter's debug JIT crashes.
@@ -189,14 +258,23 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Reported:** no.
 - **Goes when:** the debug JIT runs under the translation.
 
+### LeakSanitizer deadlocks under Intel SDE
+
+- **Breaks:** at exit, LeakSanitizer clones a thread that ptrace-stops the program's threads to scan them. Under SDE that tracer sometimes waits forever on a futex with the main thread stopped, so a replay that printed libFuzzer's `Done` never exits, and `fuzz.yml`'s SDE replays ran into their 60-minute timeout.
+- **Reproduce:** replay any ASan fuzz target's corpus with `sde -dmr -- TARGET -runs=0 CORPUS` in `nix develop .#sde` a few dozen times; about one run in eight hangs, its main thread in `ptrace_stop` and traced by its own clone.
+- **Workaround:** `sh/fuzz-replay.sh` sets `ASAN_OPTIONS=detect_leaks=0` for the `x86_64-sde` tiers; the native x86_64 fuzzing and replay still check leaks. Diagnosed in [kixel-ai/rind#743](https://github.com/kixel-ai/rind/pull/743).
+- **Reported:** no (Intel SDE has no public tracker; LLVM documents that LeakSanitizer does not work under ptrace).
+- **Goes when:** an SDE release runs LeakSanitizer's stop-the-world without hanging.
+
+### Intel SDE aborts Go's `acvptool`
+
+- **Breaks:** with `x86-cpu.yml`'s Diamond Rapids job running the offline ACVP test under `sde -dmr --` as its cargo runner, SDE followed the test into `acvptool`, a Go binary, and Pin's instrumentation of it aborted it with SIGABRT and no message, twice on GitHub's AMD runners, so the job failed before any set was answered.
+- **Reproduce:** on an AMD x86_64 host in `nix develop .#sde`, run `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="sde -dmr --" cargo test -p rind-acvp --features module --release --test offline`. It has not reproduced on an Intel host (Core Ultra 7 270K), where all three CPU masks pass.
+- **Workaround:** the job sets `RIND_ACVP_WRAPPER_RUNNER` instead, and `rind-acvp/tests/offline.rs`'s `wrapper` runs only `rind-acvp`, the module, under SDE; the test and `acvptool` run natively. Found in [kixel-ai/rind#789](https://github.com/kixel-ai/rind/pull/789).
+- **Reported:** no (Intel SDE has no public tracker).
+- **Goes when:** an SDE release after 9.53.0 runs Go binaries on AMD hosts. Keeping it costs no coverage, since only the module needs the emulated CPU.
+
 ## Dependencies
-
-### libcrux-platform calls `__cpuid` outside `unsafe`
-
-- **Breaks:** libcrux-platform 0.0.4, which libcrux-aes pulled in, calls `__cpuid` outside `unsafe`, which compiles only since `__cpuid` became safe in Rust 1.94. rind dropped libcrux-aes with [kixel-ai/rind#613](https://github.com/kixel-ai/rind/pull/613), but README.md and PLATFORMS.md still state a 1.94 exception on 32-bit x86.
-- **Workaround:** README.md and PLATFORMS.md state the exception, and CI checks i686 only on stable.
-- **Reported:** [celabshq/libcrux#1646](https://github.com/celabshq/libcrux/issues/1646).
-- **Goes when:** [the x86 quest](/quest/m2/adoption/targets/x86.md) checks i686 on the MSRV and drops the exception.
 
 ### aws-lc cannot deny 32-bit ARM features at run time
 
@@ -212,12 +290,21 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Reported:** no.
 - **Goes when:** aws-lc-sys builds for the deployment target rustc uses.
 
-### nixpkgs' Rust crashes cargo-llvm-cov's tests
+### curve25519-dalek cannot compile without SSE
 
-- **Breaks:** cargo-llvm-cov's tests build with nixpkgs' rustc, whose instrumented binaries crash on exit, so cache.nixos.org has no build of it.
-- **Workaround:** `flake.nix`'s `coverage` shell overrides cargo-llvm-cov with `doCheck = false`; rind's coverage builds with the pinned toolchain, not nixpkgs'.
-- **Reported:** no.
-- **Goes when:** nixpkgs builds cargo-llvm-cov.
+- **Breaks:** curve25519-dalek compiles its AVX2 backend on every x86_64 target, choosing it or the serial one at run time, and LLVM fails to compile it where SSE is off, as on `x86_64-unknown-none` and `x86_64-unknown-uefi`.
+- **Reproduce:** `cargo build -p rind --lib --target x86_64-unknown-none` with `RUSTFLAGS='--cfg getrandom_backend="custom"'`.
+- **Workaround:** `sh/dispatch.sh`'s `no_std` builds pass `--cfg curve25519_dalek_backend="serial"` for `x86_64-unknown-none`, and [PLATFORMS.md](PLATFORMS.md) tells callers to do the same.
+- **Reported:** [curve25519-dalek#601](https://github.com/dalek-cryptography/curve25519-dalek/issues/601).
+- **Goes when:** curve25519-dalek falls back to its serial backend where the target lacks SSE.
+
+### blind-rsa-signatures 0.18 does not build on rsa 0.10.0
+
+- **Breaks:** blind-rsa-signatures 0.18.0, the latest release, accepts `rsa` `^0.10.0-rc.18` but implements the release candidates' `PrivateKeyParts`, so it fails to compile against 0.10.0, the first release patched for RUSTSEC-2023-0071. A workspace holds one `rsa` 0.10, so rind-bench's 0.10.0 breaks rind's tests, which check blind RSA against it.
+- **Reproduce:** `cargo check -p rind --tests` without the workspace's `[patch.crates-io]` entry for it.
+- **Workaround:** rind forks it in `thirdparty/blind-rsa-signatures`, ported to `rsa` 0.10.0, each change listed in [its `RIND.md`](/thirdparty/blind-rsa-signatures/RIND.md).
+- **Reported:** no; offering it needs the maintainer's approval, which [upstream-reports](/quest/m2/upstream-reports.md) asks for.
+- **Goes when:** a blind-rsa-signatures release builds on `rsa` 0.10.0.
 
 ### nixpkgs' Lean cannot read Mathlib's cache
 
@@ -225,13 +312,6 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Workaround:** `flake.nix`'s `prove` shell takes `elan`, which fetches the toolchain `proofs/lean-toolchain` names.
 - **Reported:** no.
 - **Goes when:** nixpkgs' Lean reads Mathlib's cache.
-
-### nixpkgs marks release-plz broken on Darwin
-
-- **Breaks:** nixpkgs marks release-plz broken on Darwin, so the default shell cannot evaluate with it there.
-- **Workaround:** `flake.nix`'s default shell adds release-plz only off Darwin.
-- **Reported:** no.
-- **Goes when:** nixpkgs builds release-plz on Darwin.
 
 ## CI tools
 
@@ -242,6 +322,21 @@ rind's own bugs, deliberate choices, and plain version pins are not listed.
 - **Workaround:** `.github/actionlint.yaml` ignores that error in `mutants.yml`.
 - **Reported:** [rhysd/actionlint#657](https://github.com/rhysd/actionlint/issues/657), with a fix in [rhysd/actionlint#654](https://github.com/rhysd/actionlint/pull/654).
 - **Goes when:** an actionlint release in nixpkgs accepts `queue`.
+
+### acvptool sends ML-DSA's externalMu for the external interface
+
+- **Breaks:** NIST's ML-DSA sigGen and sigVer sets give external-interface groups `externalMu: false`, and aws-lc's `acvptool` (through v5.11 and its `main`) forwards it to the module wrapper whatever the group's `signatureInterface`. A wrapper, aws-lc's own included, reads a present flag as the internal interface, so it signs and verifies the external interface's tests without their context and domain separation, and answers them wrongly.
+- **Reproduce:** run an unpatched `acvptool -json` on `thirdparty/acvp/ML-DSA-sigGen-FIPS204.json` through `rind-acvp`: the external groups' signatures differ from the expected ones.
+- **Workaround:** `flake.nix`'s `acvptool` forwards `externalMu` only for `signatureInterface: internal`, the convention aws-lc's module wrapper states. Found in [kixel-ai/rind#789](https://github.com/kixel-ai/rind/pull/789).
+- **Reported:** no (aws/aws-lc).
+- **Goes when:** an aws-lc release in nixpkgs forwards `externalMu` only for the internal interface.
+
+### Dependabot's Cargo lockfile updates skip its cooldown
+
+- **Breaks:** Dependabot pins the crate it bumps to a release older than its cooldown, but not the crates that release newly needs, which `cargo update` resolves to their newest compatible releases, however young. It does not pin a crate declared in `[workspace.dependencies]` either, so one would take its newest release too; rind declares none.
+- **Workaround:** REVIEW.md has a Dependabot PR's reviewer run `sh/cooldown.sh`, which lists each release its `Cargo.lock` gains that is younger than the cooldown.
+- **Reported:** [dependabot/dependabot-core#16428](https://github.com/dependabot/dependabot-core/issues/16428), for `[workspace.dependencies]`; no, for the crates a release newly needs.
+- **Goes when:** Dependabot holds its whole lockfile update to the cooldown.
 
 ## CI runner images
 

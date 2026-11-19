@@ -3,7 +3,7 @@
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 0
-const ROW_0: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_0: [u64; 512] = [
     0x79e730d418a9143c,
     0x75ba95fc5fedb601,
     0x79fb732b77622510,
@@ -516,11 +516,11 @@ const ROW_0: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x8f726bb98faeaf82,
     0x8010a4a078424bf8,
     0x296720440e844970,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 7
-const ROW_1: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_1: [u64; 512] = [
     0x63c5cb817a2ad62a,
     0x7ef2b6b9ac62ff54,
     0x3749bba4b3ad9db5,
@@ -1033,11 +1033,11 @@ const ROW_1: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xde286051f43d6c5b,
     0x4bdccc41f996c4d8,
     0xe7312ec00ae1e24e,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 14
-const ROW_2: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_2: [u64; 512] = [
     0xf8d112e76e6485b3,
     0x4d3e24db771c52f8,
     0x48e3ee41684a2f6d,
@@ -1550,11 +1550,11 @@ const ROW_2: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x8af84d04b5c241dc,
     0x63990a6f345efb86,
     0x6fef4e61b9b962cb,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 21
-const ROW_3: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_3: [u64; 512] = [
     0xf6368f0925722608,
     0x131260db131cf5c6,
     0x40eb353bfab4f7ac,
@@ -2067,11 +2067,11 @@ const ROW_3: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x7a2d0ed416aef06b,
     0x09735fb01cecb588,
     0x1641caaac6061f5b,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 28
-const ROW_4: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_4: [u64; 512] = [
     0x7f99824f20151427,
     0x206828b692430206,
     0xaa9097d7e1112357,
@@ -2584,11 +2584,11 @@ const ROW_4: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xaed3d6316d2934c6,
     0x2454b3025e4e65eb,
     0xab09f647f9950428,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 35
-const ROW_5: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_5: [u64; 512] = [
     0xb2083a1222248acc,
     0x1f6ec0ef3264e366,
     0x5659b7045afdee28,
@@ -3101,11 +3101,11 @@ const ROW_5: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xaf4d36ec1586ff27,
     0x8eaa8863f8de7dd1,
     0x0045d5cf88647c16,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 42
-const ROW_6: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_6: [u64; 512] = [
     0xa6f3d574c005979d,
     0xc2072b426a40e350,
     0xfca5c1568de2ecf9,
@@ -3618,11 +3618,11 @@ const ROW_6: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x46f147bc92053127,
     0x885b2434d722df94,
     0x6a444f65e6fc6b7c,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 49
-const ROW_7: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_7: [u64; 512] = [
     0x7a1a465ac3f16ea8,
     0x115a461db2f1d11c,
     0x4767dd956c68a172,
@@ -4135,11 +4135,11 @@ const ROW_7: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x213117473c9e3c1b,
     0x0cb0a2a77c99b6ab,
     0x5c48a3b3c2f888f2,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 56
-const ROW_8: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_8: [u64; 512] = [
     0xc7913e91991724f3,
     0x5eda799c39cbd686,
     0xddb595c763d4fc1e,
@@ -4652,11 +4652,11 @@ const ROW_8: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x44dbffeaa37799ef,
     0x4540b977ce6ac17c,
     0x495173a8af60acef,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 63
-const ROW_9: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_9: [u64; 512] = [
     0x9ebb284d391c2a82,
     0xbcdd4863158308e8,
     0x006f16ec83f1edca,
@@ -5169,11 +5169,11 @@ const ROW_9: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xe5e29f5d1220b1ff,
     0x4b82bb35233d9f4d,
     0x4e07633318cdc675,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 70
-const ROW_10: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_10: [u64; 512] = [
     0x0d53f5c7a3e6fced,
     0xe8cbbdd5f45fbdeb,
     0xf85c01df13339a70,
@@ -5686,11 +5686,11 @@ const ROW_10: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x9a6168bdfa3182ed,
     0x2216a665104152ba,
     0x46908d03b6926368,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 77
-const ROW_11: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_11: [u64; 512] = [
     0xa9f5d8745a1251fb,
     0x967747a8c72725c7,
     0x195c33e531ffe89e,
@@ -6203,11 +6203,11 @@ const ROW_11: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x1cca1fd31352d952,
     0xc66157a490fbc051,
     0x7990a63889b98636,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 84
-const ROW_12: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_12: [u64; 512] = [
     0xe5aa692a87dec0e1,
     0x010ded8df7b39d00,
     0x7b1b80c854cfa0b5,
@@ -6720,11 +6720,11 @@ const ROW_12: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xbbc11cf53b75ce0a,
     0x9fbb7accfbbc87d5,
     0xa1458e267badfde2,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 91
-const ROW_13: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_13: [u64; 512] = [
     0x1cb43668e039c256,
     0x5f26fb8b7c17fd5d,
     0xeee426af79aa062b,
@@ -7237,11 +7237,11 @@ const ROW_13: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xe74083ad91103e84,
     0xbeb183ce40afecc3,
     0x6b89de9fea043f7a,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 98
-const ROW_14: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_14: [u64; 512] = [
     0x0e299d23fe67ba66,
     0x9145076093cf2f34,
     0xf45b5ea997fcf913,
@@ -7754,11 +7754,11 @@ const ROW_14: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x1f1a520fdc158be5,
     0xf98db37d167d726e,
     0x8802786e1113e862,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 105
-const ROW_15: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_15: [u64; 512] = [
     0xefb2149e36f09ab0,
     0x03f163ca4a10bb5b,
     0xd029704506e20998,
@@ -8271,11 +8271,11 @@ const ROW_15: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xbddd49d5671bdae2,
     0x16fcd52821dd43f4,
     0xa5a454126619141a,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 112
-const ROW_16: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_16: [u64; 512] = [
     0x8ce9b6bfc360e25a,
     0xe6425195075a1a78,
     0x9dc756a8481732f4,
@@ -8788,11 +8788,11 @@ const ROW_16: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x5f06787cb833c5c2,
     0x814e091f3e6e71cf,
     0x76451f578b746666,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 119
-const ROW_17: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_17: [u64; 512] = [
     0x80f9bdef694db7e0,
     0xedca8787b9fcddc6,
     0x51981c3403b8dce1,
@@ -9305,11 +9305,11 @@ const ROW_17: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x56ea2c0546af512d,
     0xfac28daff3f28146,
     0x87fab43a959ef494,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 126
-const ROW_18: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_18: [u64; 512] = [
     0x09891641d4c5105f,
     0x1ae80f8e6d7fbd65,
     0x9d67225fbee6bdb0,
@@ -9822,11 +9822,11 @@ const ROW_18: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xa04edaca04afefdc,
     0x8b256ebc6119e34d,
     0x56a413e90787d78b,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 133
-const ROW_19: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_19: [u64; 512] = [
     0x82ee061d5a74be50,
     0xe41781c4dea16ff5,
     0xe0b0c81e99bfc8a2,
@@ -10339,11 +10339,11 @@ const ROW_19: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xedb5484f8aeddf5b,
     0x878f20e86dcf2fad,
     0x3516497c615f5699,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 140
-const ROW_20: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_20: [u64; 512] = [
     0xef0a3fecfa181e69,
     0x9ea02f8130d69a98,
     0xb2e9cf8e66eab95d,
@@ -10856,11 +10856,11 @@ const ROW_20: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x273d1ebfecce2e17,
     0x8ac1d5383cf607fd,
     0x8035f7ff12e10c25,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 147
-const ROW_21: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_21: [u64; 512] = [
     0x854d34c77e6c5520,
     0xc27df9efdcb9ea58,
     0x405f2369d686666d,
@@ -11373,11 +11373,11 @@ const ROW_21: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xd963bd82e068fc81,
     0x64da5c8b65917733,
     0x927090ff7b247328,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 154
-const ROW_22: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_22: [u64; 512] = [
     0x214bc9a7d298c241,
     0xe3b697ba56807cfd,
     0xef1c78024564eadb,
@@ -11890,11 +11890,11 @@ const ROW_22: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xf7dfbebe758b357b,
     0x2b057e74d69fea72,
     0xd485717a92731745,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 161
-const ROW_23: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_23: [u64; 512] = [
     0x896c42e8ee36860c,
     0xdaf04dfd4113c22d,
     0x1adbb7b744104213,
@@ -12407,11 +12407,11 @@ const ROW_23: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xb1f3e1e724b39366,
     0x26da26f32fdcdffc,
     0x79422f1d6097be83,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 168
-const ROW_24: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_24: [u64; 512] = [
     0x263a2cfb9db3b381,
     0x9c3a2deed4df0a4b,
     0x728d06e97d04e61f,
@@ -12924,11 +12924,11 @@ const ROW_24: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x80c2b746e57d8362,
     0xedd987f749ad7222,
     0xfdc229af4398ec7b,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 175
-const ROW_25: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_25: [u64; 512] = [
     0xb0d1ed8452666a58,
     0x4bcb6e00e6a9c3c2,
     0x3c57411c26906408,
@@ -13441,11 +13441,11 @@ const ROW_25: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x9051d0c09cb7cef3,
     0x86e8fe58296deec8,
     0x33b2818841010d74,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 182
-const ROW_26: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_26: [u64; 512] = [
     0x01079383171b445f,
     0x9bcf21e38131ad4c,
     0x8cdfe205c93987e8,
@@ -13958,11 +13958,11 @@ const ROW_26: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x3b49fbb4b5587dc3,
     0xfd44a08d07625f62,
     0x3ee4d65b9de9b762,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 189
-const ROW_27: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_27: [u64; 512] = [
     0x64e5137d0d63d1fa,
     0x658fc05202a9d89f,
     0x4889487450436309,
@@ -14475,11 +14475,11 @@ const ROW_27: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xba3d60a30ddc3722,
     0x7c311cd1742e7f87,
     0x6473ffeef6b01b6e,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 196
-const ROW_28: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_28: [u64; 512] = [
     0x8303604f692ac542,
     0xf079ffe1227b91d3,
     0x19f63e6315aaf9bd,
@@ -14992,11 +14992,11 @@ const ROW_28: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x7148ced32caa46d0,
     0x2e10c7efb61fe8eb,
     0x9fd835daff97cf4d,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 203
-const ROW_29: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_29: [u64; 512] = [
     0xa36da109081e9387,
     0xfb9780d78c935828,
     0xd5940332e540b015,
@@ -15509,11 +15509,11 @@ const ROW_29: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x82f2c67e42d9b707,
     0x25c817684cf7811b,
     0xbd53005e045bb95d,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 210
-const ROW_30: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_30: [u64; 512] = [
     0xe5f649be9d8e68fd,
     0xdb0f05331b044320,
     0xf6fde9b3e0c33398,
@@ -16026,11 +16026,11 @@ const ROW_30: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x341b0869df02c3a8,
     0xa023bf42723bbfc8,
     0x3d15002a14452691,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 217
-const ROW_31: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_31: [u64; 512] = [
     0x5ef7324c85edfa30,
     0x2597655487d4f3da,
     0x352f5bc0dcb50c86,
@@ -16543,11 +16543,11 @@ const ROW_31: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x763027359523032e,
     0x7fe1a721c4505a32,
     0x7b6e3e82f796409f,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 224
-const ROW_32: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_32: [u64; 512] = [
     0xe3417bc035d0b34a,
     0x440b386b8327c0a7,
     0x8fb7262dac0362d1,
@@ -17060,11 +17060,11 @@ const ROW_32: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xef22f7ace6518cdc,
     0xdeb483e6bf847a64,
     0xf508455892e0fa89,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 231
-const ROW_33: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_33: [u64; 512] = [
     0xab9659d8df7304d4,
     0xb71bcf1bff210e8e,
     0xa9a2438bd73fbd60,
@@ -17577,11 +17577,11 @@ const ROW_33: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x829277aa91c5aa81,
     0x7af18dd6832391ae,
     0x1740f316c71a84ca,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 238
-const ROW_34: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_34: [u64; 512] = [
     0x8928e99aeeaf8c49,
     0xee7aa73d6e24d728,
     0x4c5007c2e72b156c,
@@ -18094,11 +18094,11 @@ const ROW_34: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0x2e6392c3fd1502ac,
     0x6057b1a21b220846,
     0xe51ff9460c1b5b63,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 245
-const ROW_35: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_35: [u64; 512] = [
     0x6e85cb51566c5c43,
     0xcff9c9193597f046,
     0x9354e90c4994d94a,
@@ -18611,11 +18611,11 @@ const ROW_35: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xf9e3fa97e0de1ac5,
     0x5efb693e3d0e0c8b,
     0x037248e9d2d4fcb4,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 /// 1G..64G << 252
-const ROW_36: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
+const ROW_36: [u64; 512] = [
     0x80802dc91ec34f9e,
     0xd8772d3533810603,
     0x3f06d66c530cb4f3,
@@ -19128,7 +19128,7 @@ const ROW_36: crate::low::P256GeneratorRow = crate::low::P256GeneratorRow([
     0xf51865adeb78795e,
     0xd3e21fcee6a9d694,
     0x82ceb1dd8a37b527,
-]);
+];
 
 #[cfg(rind_backend = "x86_64")]
 pub(super) static CURVE_GENERATOR_PRECOMP: super::AffineMontPointTable = [

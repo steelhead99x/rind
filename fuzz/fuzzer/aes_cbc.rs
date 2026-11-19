@@ -22,7 +22,8 @@ fuzz_target!(|input: (Operation, [u8; 16], Vec<u8>, edit::Edit)| {
     let mut ct = msg.clone();
     AesCbcEncryptingKey::new(ours, key)
         .unwrap()
-        .encrypt(CbcIv::assume_unpredictable(iv), &mut ct);
+        .encrypt(CbcIv::assume_unpredictable(iv), &mut ct)
+        .unwrap();
     let mut right = msg.clone();
     PaddedBlockEncryptingKey::cbc_pkcs7(theirs())
         .unwrap()

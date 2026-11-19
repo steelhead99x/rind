@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+
+# Usage: admin/audit check | fix | unsafe
+#
+# `check` fails unless AUDIT.md's pins table, between its two markers, is the
+# one this renders from the pins themselves, and `fix` rewrites it: each
+# importer's and vector sync's revision, the base of rind's s2n-bignum fork,
+# and the version Cargo.lock resolves for each crate the `rind` crate's own code links. `check` also fails on a link
+# to a quest that no longer exists, since finishing it changes the gap
+# AUDIT.md describes there.
+#
+# `unsafe` prints how often the `unsafe` keyword appears outside comments and
+# literals in each area of the tree, for AUDIT.md's dated count.
+
+import pathlib, re, subprocess, sys, tomllib
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+PAGE = ROOT / "AUDIT.md"
+BEGIN = "<!-- admin/audit pins: begin -->"
+END = "<!-- admin/audit pins: end -->"
+
+SHA = r"([0-9a-f]{40})"
+REV = rf'^REV = "{SHA}"$'
+
+# Each pin: the upstream, what rind takes from it at that pin, the file that
+# pins it, and the pattern whose group is the pin there.
+PINS = [
+    ("aws-lc", "copied and ported code", "admin/import-aws-lc", REV),
+    ("BoringSSL", "copied code", "admin/import-boringssl", REV),
+    ("OpenSSL", "copied code", "admin/import-openssl", REV),
+    ("HACL\\*", "Vale's x86_64 AES-GCM", "admin/import-hacl", REV),
+    ("pyca/verified-garbage", "copied code and the Lean ISA models its proofs rest on", "admin/import-vg", REV),
+    (
+        "s2n-bignum",
+        "assembly and the HOL Light proofs of it",
+        "thirdparty/s2n-bignum/RIND.md",
+        rf"^Base: `{SHA}`$",
+    ),
+    (
+        "aws-lc",
+        "the routines aws-lc-verification's SHA-384/512 proofs are about",
+        "admin/prove-bytes",
+        rf'^AWS_LC_REVISION = "{SHA}"$',
+    ),
+    ("ACVP-Server", "test vectors", "admin/sync-acvp", rf"^ACVP_SERVER={SHA}$"),
+    ("aws-lc", "test vectors", "admin/sync-vectors", rf"^AWS_LC={SHA}$"),
+    ("BoringSSL", "test vectors", "admin/sync-vectors", rf"^BORINGSSL={SHA}$"),
+    ("Wycheproof", "test vectors", "admin/sync-vectors", rf"^WYCHEPROOF={SHA}$"),
+    ("CAVP", "test vectors", "admin/sync-vectors", rf"^CAVP={SHA}$"),
+    ("CCTV", "test vectors", "admin/sync-vectors", rf"^CCTV={SHA}$"),
+    ("RFC 9180", "HPKE test vectors", "admin/sync-vectors", rf"^HPKE={SHA}$"),
+    ("RFC 9380", "hash-to-curve test vectors", "admin/sync-vectors", rf"^HASH_TO_CURVE={SHA}$"),
+    ("blind-rsa-signatures", "RFC 9474 test vectors", "admin/sync-vectors", rf"^BLIND_RSA={SHA}$"),
+    ("RFC 9497", "OPRF test vectors", "admin/sync-vectors", rf"^VOPRF={SHA}$"),
+    ("RFC 9591", "FROST test vectors", "admin/sync-vectors", rf"^FROST={SHA}$"),
+]
+
+
+# What rind's code takes from each crate it links. A crate missing here fails
+# the check, so a new dependency says what it brings.
+CRATES = {
+    "cfg-if": "a macro for `cfg` blocks",
+    "curve25519-dalek": "X25519, Ed25519, and ristretto255 on armv7 and the portable backend",
+    "fiat-crypto": "the NIST curves' field arithmetic on armv7 and the portable backend",
+    "getrandom": "the operating system's random source",
+    "libc": "`getauxval`, for armv7's crypto extension bits",
+    "libcrux-hacl-rs": "the runtime of the HACL\\* ChaCha20 rounds rind copied",
+    "libcrux-macros": "the same",
+    "libcrux-poly1305": "HACL\\*'s Poly1305, on 32-bit portable targets",
+    "libcrux-sha2": "HACL\\*'s SHA-2 block functions, on the portable backend",
+}
+
+
+def pin(path, pattern):
+    found = re.findall(pattern, (ROOT / path).read_text(), re.M)
+    if len(found) != 1:
+        sys.exit(f"error: {path} has {len(found)} lines matching {pattern}, not one")
+    return found[0]
+
+
+def crates():
+    """The crates rind's own code links, at the versions Cargo.lock resolves."""
+    manifest = tomllib.loads((ROOT / "rind/Cargo.toml").read_text())
+    tables = [manifest.get("dependencies", {})]
+    tables += [t.get("dependencies", {}) for t in manifest.get("target", {}).values()]
+    # An optional dependency is behind a feature: crabgrind, ctgrind's only.
+    names = sorted({n for t in tables for n, s in t.items() if not (isinstance(s, dict) and s.get("optional"))})
+    lock = tomllib.loads((ROOT / "Cargo.lock").read_text())["package"]
+    (rind,) = [p for p in lock if p["name"] == "rind"]
+    rows = []
+    for name in names:
+        deps = [d.split(" ") for d in rind.get("dependencies", []) if d.split(" ")[0] == name]
+        if len(deps) != 1:
+            sys.exit(f"error: Cargo.lock lists rind's dependency {name} {len(deps)} times")
+        if len(deps[0]) > 1:
+            version = deps[0][1]
+        else:
+            versions = [p["version"] for p in lock if p["name"] == name]
+            if len(versions) != 1:
+                sys.exit(f"error: Cargo.lock resolves {name} to {versions or 'nothing'}, not one version")
+            version = versions[0]
+        rows.append((name, version))
+    return rows
+
+
+def render():
+    lines = [
+        "| Upstream | Pin | Pinned in | What rind takes at it |",
+        "|---|---|---|---|",
+    ]
+    for name, what, path, pattern in PINS:
+        lines.append(f"| {name} | `{pin(path, pattern)[:12]}` | `{path}` | {what} |")
+    for name, version in crates():
+        if name not in CRATES:
+            sys.exit(f"error: admin/audit's CRATES does not say what rind takes from {name}")
+        lines.append(f"| {name} | {version} | `Cargo.lock` | {CRATES[name]} |")
+    return "\n".join(lines)
+
+
+def replace(text, table):
+    before, sep, rest = text.partition(BEGIN + "\n")
+    middle, sep2, after = rest.partition(END)
+    if not sep or not sep2:
+        sys.exit(f"error: AUDIT.md lacks the {BEGIN} and {END} markers")
+    return f"{before}{BEGIN}\n{table}\n{END}{after}"
+
+
+# One Rust token the lexer skips or keeps: a comment opener, a string or char
+# literal, an identifier, or any other character. A `'` not closed as a char
+# literal is a lifetime or label, so its name lexes as an identifier.
+TOKEN = re.compile(
+    r"""(?P<line>//[^\n]*)"""
+    r"""|(?P<block>/\*)"""
+    r"""|(?P<raw>b?r(?P<hashes>#*)")"""
+    r"""|(?P<str>b?"(?:\\.|[^"\\])*")"""
+    r"""|(?P<char>b?'(?:\\(?:u\{[0-9a-fA-F_]*\}|x..|.)|[^'\\])')"""
+    r"""|(?P<ident>[A-Za-z_][A-Za-z0-9_]*)"""
+    r"""|.""",
+    re.S,
+)
+
+
+def idents(src):
+    """Yields the identifiers and keywords of Rust source, skipping comments and literals."""
+    i = 0
+    while i < len(src):
+        m = TOKEN.match(src, i)
+        i = m.end()
+        if m["block"]:
+            # Block comments nest.
+            depth = 1
+            while depth:
+                c = re.compile(r"/\*|\*/").search(src, i)
+                if not c:
+                    return
+                depth += 1 if c[0] == "/*" else -1
+                i = c.end()
+        elif m["raw"] is not None:
+            end = src.find('"' + m["hashes"], i)
+            i = len(src) if end < 0 else end + 1 + len(m["hashes"])
+        elif m["ident"]:
+            yield m["ident"]
+
+
+def unsafe():
+    """Counts `unsafe` outside comments, by area."""
+    counts = {}
+    files = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "--", "*.rs"], capture_output=True, text=True, check=True
+    ).stdout.split()
+    for f in files:
+        parts = f.split("/")
+        if parts[0] == "rind" and parts[1] == "src":
+            if parts[2] == "low" and len(parts) > 4:
+                area = "/".join(parts[:4])
+            elif parts[2] in ("low", "mid", "high") and len(parts) > 3:
+                area = "/".join(parts[:3])
+            else:
+                area = "rind/src"
+        else:
+            area = parts[0]
+        n = sum(1 for t in idents((ROOT / f).read_text()) if t == "unsafe")
+        if n:
+            counts[area] = counts.get(area, 0) + n
+    for area in sorted(counts):
+        print(f"{counts[area]:6} {area}")
+
+
+def main():
+    match sys.argv[1:]:
+        case ["check"]:
+            text = PAGE.read_text()
+            if replace(text, render()) != text:
+                sys.exit("error: AUDIT.md's pins table is stale; run `admin/audit fix`")
+            # A finished quest is deleted, and its gap with it.
+            for link in re.findall(r"\]\((/quest/[^)#]+)", text):
+                if not (ROOT / link[1:]).is_file():
+                    sys.exit(f"error: AUDIT.md links {link}, which is finished; say what changed")
+        case ["fix"]:
+            PAGE.write_text(replace(PAGE.read_text(), render()))
+        case ["unsafe"]:
+            unsafe()
+        case _:
+            sys.exit("usage: admin/audit check | fix | unsafe")
+
+
+main()

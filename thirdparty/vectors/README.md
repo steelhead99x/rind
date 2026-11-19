@@ -1,15 +1,23 @@
 # Vector files
 
-Copies of the vector files in [aws-lc] and [BoringSSL] that cover an
-algorithm rind offers. `admin/sync-vectors` fetches them, unmodified, from the
-revisions it pins, and lists every file. Both repositories are hundreds of
-megabytes, so rind keeps these copies rather than submodules.
+Copies of the vector files rind's tests read from [aws-lc], [BoringSSL],
+[Wycheproof], NIST's [CAVP] through the [ctz/cavp] mirror, and [CCTV].
+`admin/sync-vectors` fetches them, unmodified, from the revisions it pins,
+and lists every file. The tests read a small part of each repository, so
+rind keeps these copies rather than submodules, and a plain clone runs every
+test. Each test opens its files by name and fails on a missing one.
 
-The aws-lc and BoringSSL directories each hold their upstream's `LICENSE`.
+Each upstream's directory keeps its upstream's paths, a `REVISION` file
+naming the commit it was copied from, and its license: aws-lc's, BoringSSL's,
+and Wycheproof's `LICENSE` (Apache 2.0 for Wycheproof); CAVP's `README.md`,
+which names NIST's sources, whose sample files are U.S. government works;
+CCTV's `ed25519/LICENSE` for its Ed25519 vectors, and `ML-KEM/README.md`,
+which puts its ML-KEM vectors under CC0 1.0.
 To update, bump a revision in `admin/sync-vectors` and rerun it.
 
-The tests read them through `rind/src/test/file_test.rs`, which parses the
-FileTest format both projects share.
+The tests read the aws-lc and BoringSSL files through
+`rind/src/test/file_test.rs`, which parses the FileTest format both projects
+share.
 
 `rfc9180/test-vectors.json` holds [RFC 9180]'s HPKE vectors, from the
 CFRG draft's repository at the revision `admin/sync-vectors` pins: the base
@@ -23,6 +31,11 @@ pins: the `expand_message_xmd` files and the P-256, P-384, and P-521
 `_RO_` suites, named without the colons Windows cannot check out. They are
 IETF contributions too.
 
+`rfc9909/` holds [RFC 9909]'s appendix C examples, an SLH-DSA-SHA2-128s
+public key, private key, and self-signed certificate, decoded from the RFC's
+PEM to DER by hand, since no repository publishes them. They too are IETF
+contributions, under [BCP 78].
+
 `rfc9474/test-vectors.json` holds [RFC 9474]'s four RSABSSA vectors, from
 [blind-rsa-signatures] at the revision `admin/sync-vectors` pins, as the
 CFRG draft's repository holds stale ones. They are IETF contributions, under
@@ -34,12 +47,23 @@ pins: the OPRF and VOPRF modes of the ristretto255, P-256, P-384, and P-521
 suites, without decaf448 and the POPRF mode, which rind does not offer.
 They are IETF contributions, under [BCP 78].
 
+`rfc9591/` holds [RFC 9591]'s FROST vectors, its Appendix E, from the CFRG
+draft's `poc` at the revision `admin/sync-vectors` pins: the Ed25519,
+ristretto255, and P-256 suites, without Ed448 and secp256k1, which rind does
+not offer. They are IETF contributions, under [BCP 78].
+
 [aws-lc]: https://github.com/aws/aws-lc
+[Wycheproof]: https://github.com/C2SP/wycheproof
+[CAVP]: https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program
+[ctz/cavp]: https://github.com/ctz/cavp
+[CCTV]: https://github.com/C2SP/CCTV
 [BoringSSL]: https://boringssl.googlesource.com/boringssl
 [RFC 9180]: https://www.rfc-editor.org/rfc/rfc9180.html
 [RFC 9380]: https://www.rfc-editor.org/rfc/rfc9380.html
+[RFC 9909]: https://www.rfc-editor.org/rfc/rfc9909.html
 [hpkewg/hpke]: https://github.com/hpkewg/hpke
 [RFC 9474]: https://www.rfc-editor.org/rfc/rfc9474.html
 [RFC 9497]: https://www.rfc-editor.org/rfc/rfc9497.html
+[RFC 9591]: https://www.rfc-editor.org/rfc/rfc9591.html
 [blind-rsa-signatures]: https://github.com/jedisct1/rust-blind-rsa-signatures
 [BCP 78]: https://www.rfc-editor.org/info/bcp78

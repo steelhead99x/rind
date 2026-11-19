@@ -519,7 +519,10 @@ mod tests {
             }
         }
 
-        process_cavp("../thirdparty/cavp/ecdsa/PKV.rsp", &mut State::default());
+        process_cavp(
+            "../thirdparty/vectors/cavp/ecdsa/PKV.rsp",
+            &mut State::default(),
+        );
     }
 
     #[test]
@@ -689,7 +692,7 @@ mod tests {
         }
 
         process_cavp(
-            "../thirdparty/cavp/ecdsa/KeyPair.rsp",
+            "../thirdparty/vectors/cavp/ecdsa/KeyPair.rsp",
             &mut State::default(),
         );
     }

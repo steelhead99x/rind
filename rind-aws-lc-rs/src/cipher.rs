@@ -51,7 +51,7 @@ pub enum AlgorithmId {
 }
 
 /// A block cipher, chosen by one of this module's constants.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub struct Algorithm {
     id: AlgorithmId,
     key_len: usize,
@@ -69,6 +69,16 @@ impl Algorithm {
             AlgorithmId::Aes192 => &rind::cipher::AES_192,
             AlgorithmId::Aes256 => &rind::cipher::AES_256,
         }
+    }
+}
+
+impl fmt::Debug for Algorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Algorithm")
+            .field("id", &self.id)
+            .field("key_len", &self.key_len)
+            .field("block_len", &self.block_len())
+            .finish()
     }
 }
 
@@ -169,7 +179,7 @@ impl DecryptionContext {
     }
 }
 
-/// A key not yet given a mode; wiped on drop under the `wipe` feature.
+/// A key not yet given a mode; wiped on drop.
 pub struct UnboundCipherKey {
     algorithm: &'static Algorithm,
     key: Key,
@@ -216,6 +226,21 @@ impl From<hkdf::Okm<'_, &'static Algorithm>> for UnboundCipherKey {
     }
 }
 
+mod private {
+    /// What aws-lc-rs's `TryInto` turns an [`super::UnboundCipherKey`] into:
+    /// callers can hold one but name no use for it.
+    pub struct SymmetricCipherKey(#[allow(dead_code)] pub(super) super::UnboundCipherKey);
+}
+
+impl TryInto<private::SymmetricCipherKey> for UnboundCipherKey {
+    type Error = crate::error::KeyRejected;
+
+    // `new` and `From<Okm>` already fix the key's length, so this cannot fail.
+    fn try_into(self) -> Result<private::SymmetricCipherKey, Self::Error> {
+        Ok(private::SymmetricCipherKey(self))
+    }
+}
+
 enum Encrypting {
     Cbc(rind::cipher::AesCbcEncryptingKey),
     Ctr(rind::cipher::AesCtr),
@@ -246,7 +271,7 @@ fn ctr(key: &UnboundCipherKey) -> Result<rind::cipher::AesCtr, Unspecified> {
         .map_err(crate::error::unspecified)
 }
 
-/// A key that encrypts in CBC, without padding, or CTR mode; wiped on drop under the `wipe` feature.
+/// A key that encrypts in CBC, without padding, or CTR mode; wiped on drop.
 pub struct EncryptingKey {
     algorithm: &'static Algorithm,
     key: Encrypting,
@@ -339,7 +364,7 @@ impl Decrypting {
     }
 }
 
-/// A key that decrypts in CBC, without padding, or CTR mode; wiped on drop under the `wipe` feature.
+/// A key that decrypts in CBC, without padding, or CTR mode; wiped on drop.
 pub struct DecryptingKey {
     algorithm: &'static Algorithm,
     key: Decrypting,
@@ -401,7 +426,7 @@ impl fmt::Debug for DecryptingKey {
     }
 }
 
-/// A key that pads with PKCS#7 and encrypts in CBC mode; wiped on drop under the `wipe` feature.
+/// A key that pads with PKCS#7 and encrypts in CBC mode; wiped on drop.
 pub struct PaddedBlockEncryptingKey {
     algorithm: &'static Algorithm,
     key: rind::cipher::AesCbcEncryptingKey,
@@ -434,7 +459,9 @@ impl PaddedBlockEncryptingKey {
     {
         let iv = rind::cipher::CbcIv::random().map_err(crate::error::unspecified)?;
         let context = EncryptionContext::Iv128((*iv.as_bytes()).into());
-        self.key.encrypt(iv, in_out);
+        self.key
+            .encrypt(iv, in_out)
+            .map_err(crate::error::unspecified)?;
         Ok(context.into())
     }
 
@@ -448,10 +475,12 @@ impl PaddedBlockEncryptingKey {
     where
         InOut: AsMut<[u8]> + for<'in_out> Extend<&'in_out u8>,
     {
-        self.key.encrypt(
-            rind::cipher::CbcIv::assume_unpredictable(*context.iv()?),
-            in_out,
-        );
+        self.key
+            .encrypt(
+                rind::cipher::CbcIv::assume_unpredictable(*context.iv()?),
+                in_out,
+            )
+            .map_err(crate::error::unspecified)?;
         Ok(context.into())
     }
 }
@@ -461,11 +490,12 @@ impl fmt::Debug for PaddedBlockEncryptingKey {
         f.debug_struct("PaddedBlockEncryptingKey")
             .field("algorithm", self.algorithm)
             .field("mode", &self.mode())
+            .field("padding", &format_args!("PKCS7"))
             .finish_non_exhaustive()
     }
 }
 
-/// A key that decrypts in CBC mode and removes PKCS#7 padding; wiped on drop under the `wipe` feature.
+/// A key that decrypts in CBC mode and removes PKCS#7 padding; wiped on drop.
 pub struct PaddedBlockDecryptingKey {
     algorithm: &'static Algorithm,
     key: rind::cipher::AesCbcDecryptingKey,
@@ -509,6 +539,7 @@ impl fmt::Debug for PaddedBlockDecryptingKey {
         f.debug_struct("PaddedBlockDecryptingKey")
             .field("algorithm", self.algorithm)
             .field("mode", &self.mode())
+            .field("padding", &format_args!("PKCS7"))
             .finish_non_exhaustive()
     }
 }

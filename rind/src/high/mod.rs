@@ -4,6 +4,7 @@
 #![deny(unsafe_code)]
 
 pub(super) mod agreement;
+pub(super) mod argon2;
 pub(super) mod asn1;
 pub(super) mod blind_rsa;
 pub(super) mod constant_time;
@@ -11,6 +12,7 @@ pub(super) mod curve;
 pub(super) mod digest;
 pub(super) mod ecdsa;
 pub(super) mod ed25519;
+pub(super) mod frost;
 pub(super) mod hash;
 pub(super) mod hkdf;
 pub(super) mod hmac;

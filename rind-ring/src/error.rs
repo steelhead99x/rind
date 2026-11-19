@@ -12,6 +12,7 @@ impl fmt::Display for Unspecified {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for Unspecified {}
 
 impl From<untrusted::EndOfInput> for Unspecified {
@@ -49,10 +50,12 @@ impl KeyRejected {
         Self(Reason::Ring("InvalidEncoding"))
     }
 
+    #[cfg(feature = "alloc")]
     pub(crate) fn too_small() -> Self {
         Self(Reason::Ring("TooSmall"))
     }
 
+    #[cfg(feature = "alloc")]
     pub(crate) fn too_large() -> Self {
         Self(Reason::Ring("TooLarge"))
     }
@@ -73,6 +76,7 @@ impl KeyRejected {
         Self(Reason::Ring("VersionNotSupported"))
     }
 
+    #[cfg(feature = "alloc")]
     pub(crate) fn private_modulus_len_not_multiple_of_512_bits() -> Self {
         Self(Reason::Ring("PrivateModulusLenNotMultipleOf512Bits"))
     }
@@ -99,4 +103,5 @@ impl fmt::Display for KeyRejected {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for KeyRejected {}

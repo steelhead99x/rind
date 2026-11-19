@@ -2,11 +2,10 @@
 //! The C ABI that the `rind` Dart package's `dart:ffi` bindings call.
 //!
 //! Every function returns an `isize`: a byte count or zero on success, or a
-//! negative [`Status`] code. Keys and streaming states are boxed handles that
+//! negative `Status` code. Keys and streaming states are boxed handles that
 //! the Dart side frees, through a `NativeFinalizer`, with the matching
-//! `*_free` function; dropping one frees it without wiping, as this build
-//! leaves rind's `wipe` feature off. Algorithms are
-//! small integer ids, matched by `lib/src/ffi.dart`.
+//! `*_free` function; freeing a key wipes it, as rind wipes its keys.
+//! Algorithms are small integer ids, matched by `lib/src/ffi.dart`.
 //!
 //! A pointer and length pair may be dangling or null when the length is
 //! zero. The Dart side owns every other invariant: pointers are valid for
@@ -19,17 +18,16 @@ use core::cell::RefCell;
 use core::slice;
 use std::num::NonZeroU32;
 
-use rind::signature::{
-    EcdsaKeyPair, EcdsaSigningAlgorithm, Ed25519KeyPair, PublicKey, RsaKeyPair,
-    RsaSigningAlgorithm, RsaVerificationAlgorithm, VerificationAlgorithm, sign, verify,
-};
-use rind::{Error, aead, agreement, cipher, digest, hkdf, hmac, kem, pbkdf2, rsa};
+use rind::ecdsa::KeyPair as EcdsaKeyPair;
+use rind::ed25519::KeyPair as Ed25519KeyPair;
+use rind::rsa::KeyPair as RsaKeyPair;
+use rind::{Error, aead, agreement, cipher, digest, ecdsa, ed25519, hkdf, hmac, kem, pbkdf2, rsa};
 
 #[cfg(test)]
 mod ctgrind;
 
 /// The negative codes a call returns on failure, one per [`Error`] variant
-/// and two of the binding's own.
+/// and one of the binding's own.
 #[repr(isize)]
 enum Status {
     WrongLength = -1,
@@ -40,8 +38,6 @@ enum Status {
     NotEqual = -6,
     Fault = -7,
     Unsupported = -8,
-    /// The CPU lacks a feature rind requires; the message names it.
-    MissingCpuFeature = -9,
     /// An argument the Dart side should never pass, such as an unknown
     /// algorithm id.
     Misuse = -10,
@@ -93,12 +89,8 @@ impl From<Misuse> for Failure {
     }
 }
 
-/// Runs `f` on a CPU rind supports, which otherwise panics, and folds its
-/// result into a return value.
+/// Runs `f` and folds its result into a return value.
 fn run(f: impl FnOnce() -> Result<usize, Failure>) -> isize {
-    if let Err(missing) = rind::cpu::check() {
-        return fail(Status::MissingCpuFeature, missing);
-    }
     match f() {
         // A length never exceeds isize::MAX: it is the length of a slice.
         Ok(len) => len as isize,
@@ -152,7 +144,7 @@ unsafe fn store<T>(out: *mut *mut T, value: T) -> usize {
 
 macro_rules! free {
     ($($name:ident: $ty:ty;)*) => {$(
-        /// Drops the handle, freeing what it holds without wiping it.
+        /// Drops the handle, wiping a key as it frees it.
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn $name(handle: *mut $ty) {
             if !handle.is_null() {
@@ -182,8 +174,8 @@ free! {
     rind_dart_ed25519_key_pair_free: Ed25519KeyPair;
     rind_dart_rsa_key_pair_free: RsaKeyPair;
     rind_dart_public_key_free: PublicKey;
-    rind_dart_decapsulation_key_free: kem::DecapsulationKey;
-    rind_dart_encapsulation_key_free: kem::EncapsulationKey;
+    rind_dart_decapsulation_key_free: kem::DecapsulationKey<kem::MlKem768>;
+    rind_dart_encapsulation_key_free: kem::EncapsulationKey<kem::MlKem768>;
     rind_dart_decrypting_key_free: rsa::DecryptingKey;
     rind_dart_encrypting_key_free: rsa::EncryptingKey;
 }
@@ -264,68 +256,110 @@ fn agreement_algorithm(id: u32) -> Result<&'static agreement::Algorithm, Misuse>
     })
 }
 
-fn ecdsa_algorithm(id: u32) -> Result<&'static EcdsaSigningAlgorithm, Misuse> {
+fn ecdsa_algorithm(id: u32) -> Result<&'static ecdsa::SigningAlgorithm, Misuse> {
     Ok(match id {
-        0 => &sign::ECDSA_P256_SHA256_ASN1,
-        1 => &sign::ECDSA_P256_SHA256_FIXED,
-        2 => &sign::ECDSA_P384_SHA384_ASN1,
-        3 => &sign::ECDSA_P384_SHA384_FIXED,
-        4 => &sign::ECDSA_P521_SHA512_ASN1,
-        5 => &sign::ECDSA_P521_SHA512_FIXED,
+        0 => &ecdsa::sign::P256_SHA256_ASN1,
+        1 => &ecdsa::sign::P256_SHA256_FIXED,
+        2 => &ecdsa::sign::P384_SHA384_ASN1,
+        3 => &ecdsa::sign::P384_SHA384_FIXED,
+        4 => &ecdsa::sign::P521_SHA512_ASN1,
+        5 => &ecdsa::sign::P521_SHA512_FIXED,
         _ => return Err(Misuse("unknown ECDSA algorithm")),
     })
 }
 
-fn rsa_signing_algorithm(id: u32) -> Result<&'static RsaSigningAlgorithm, Misuse> {
+fn rsa_signing_algorithm(id: u32) -> Result<&'static rsa::SigningAlgorithm, Misuse> {
     Ok(match id {
-        0 => &sign::RSA_PKCS1_SHA256,
-        1 => &sign::RSA_PKCS1_SHA384,
-        2 => &sign::RSA_PKCS1_SHA512,
-        3 => &sign::RSA_PSS_SHA256,
-        4 => &sign::RSA_PSS_SHA384,
-        5 => &sign::RSA_PSS_SHA512,
+        0 => &rsa::sign::PKCS1_SHA256,
+        1 => &rsa::sign::PKCS1_SHA384,
+        2 => &rsa::sign::PKCS1_SHA512,
+        3 => &rsa::sign::PSS_SHA256,
+        4 => &rsa::sign::PSS_SHA384,
+        5 => &rsa::sign::PSS_SHA512,
         _ => return Err(Misuse("unknown RSA signing algorithm")),
     })
 }
 
 // RSA verification ids are 0..=8 and 100..=104, the others' 20..=34, so the
 // Dart side's one id space covers both.
-fn rsa_verification_algorithm(id: u32) -> Result<&'static RsaVerificationAlgorithm, Misuse> {
+fn rsa_verification_algorithm(id: u32) -> Result<&'static rsa::VerificationAlgorithm, Misuse> {
     Ok(match id {
-        0 => &verify::RSA_PKCS1_SHA256,
-        1 => &verify::RSA_PKCS1_SHA384,
-        2 => &verify::RSA_PKCS1_SHA512,
-        3 => &verify::RSA_PSS_SHA256,
-        4 => &verify::RSA_PSS_SHA384,
-        5 => &verify::RSA_PSS_SHA512,
-        6 => &verify::RSA_PSS_SHA256_ANY_SALT,
-        7 => &verify::RSA_PSS_SHA384_ANY_SALT,
-        8 => &verify::RSA_PSS_SHA512_ANY_SALT,
-        100 => &verify::legacy::RSA_PKCS1_SHA1,
-        101 => &verify::legacy::RSA_PKCS1_1024_SHA1,
-        102 => &verify::legacy::RSA_PKCS1_1024_SHA256,
-        103 => &verify::legacy::RSA_PKCS1_1024_SHA512,
-        104 => &verify::legacy::RSA_PKCS1_3072_SHA384,
+        0 => &rsa::verify::PKCS1_SHA256,
+        1 => &rsa::verify::PKCS1_SHA384,
+        2 => &rsa::verify::PKCS1_SHA512,
+        3 => &rsa::verify::PSS_SHA256,
+        4 => &rsa::verify::PSS_SHA384,
+        5 => &rsa::verify::PSS_SHA512,
+        6 => &rsa::verify::PSS_SHA256_ANY_SALT,
+        7 => &rsa::verify::PSS_SHA384_ANY_SALT,
+        8 => &rsa::verify::PSS_SHA512_ANY_SALT,
+        100 => &rsa::verify::legacy::PKCS1_SHA1,
+        101 => &rsa::verify::legacy::PKCS1_1024_SHA1,
+        102 => &rsa::verify::legacy::PKCS1_1024_SHA256,
+        103 => &rsa::verify::legacy::PKCS1_1024_SHA512,
+        104 => &rsa::verify::legacy::PKCS1_3072_SHA384,
         _ => return Err(Misuse("unknown RSA verification algorithm")),
     })
 }
 
-fn verification_algorithm(id: u32) -> Result<&'static VerificationAlgorithm, Misuse> {
+/// A verification algorithm, in its module.
+#[derive(Clone, Copy)]
+enum Verification {
+    Ecdsa(&'static ecdsa::VerificationAlgorithm),
+    Ed25519,
+    Rsa(&'static rsa::VerificationAlgorithm),
+}
+
+/// A public key and, for RSA, the algorithm it verifies with.
+#[allow(clippy::large_enum_variant)]
+pub enum PublicKey {
+    Ecdsa(ecdsa::PublicKey),
+    Ed25519(ed25519::PublicKey),
+    Rsa(rsa::PublicKey, &'static rsa::VerificationAlgorithm),
+}
+
+impl PublicKey {
+    fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), Error> {
+        match self {
+            Self::Ecdsa(key) => key.verify(message, signature),
+            Self::Ed25519(key) => key.verify(message, signature),
+            Self::Rsa(key, algorithm) => key.verify(algorithm, message, signature),
+        }
+    }
+
+    fn encoding(&self) -> &[u8] {
+        match self {
+            Self::Ecdsa(key) => key.as_ref(),
+            Self::Ed25519(key) => key.as_ref(),
+            Self::Rsa(key, _) => key.as_ref(),
+        }
+    }
+
+    fn to_spki(&self) -> rind::encoding::Spki {
+        match self {
+            Self::Ecdsa(key) => key.to_spki(),
+            Self::Ed25519(key) => key.to_spki(),
+            Self::Rsa(key, _) => key.to_spki(),
+        }
+    }
+}
+
+fn verification_algorithm(id: u32) -> Result<Verification, Misuse> {
     Ok(match id {
-        20 => &verify::ECDSA_P256_SHA256_ASN1,
-        21 => &verify::ECDSA_P256_SHA384_ASN1,
-        22 => &verify::ECDSA_P256_SHA512_ASN1,
-        23 => &verify::ECDSA_P384_SHA256_ASN1,
-        24 => &verify::ECDSA_P384_SHA384_ASN1,
-        25 => &verify::ECDSA_P384_SHA512_ASN1,
-        26 => &verify::ECDSA_P521_SHA256_ASN1,
-        27 => &verify::ECDSA_P521_SHA384_ASN1,
-        28 => &verify::ECDSA_P521_SHA512_ASN1,
-        29 => &verify::ECDSA_P256_SHA256_FIXED,
-        30 => &verify::ECDSA_P384_SHA384_FIXED,
-        31 => &verify::ECDSA_P521_SHA512_FIXED,
-        32 => &verify::ED25519,
-        _ => rsa_verification_algorithm(id)?.as_ref(),
+        20 => Verification::Ecdsa(&ecdsa::verify::P256_SHA256_ASN1),
+        21 => Verification::Ecdsa(&ecdsa::verify::P256_SHA384_ASN1),
+        22 => Verification::Ecdsa(&ecdsa::verify::P256_SHA512_ASN1),
+        23 => Verification::Ecdsa(&ecdsa::verify::P384_SHA256_ASN1),
+        24 => Verification::Ecdsa(&ecdsa::verify::P384_SHA384_ASN1),
+        25 => Verification::Ecdsa(&ecdsa::verify::P384_SHA512_ASN1),
+        26 => Verification::Ecdsa(&ecdsa::verify::P521_SHA256_ASN1),
+        27 => Verification::Ecdsa(&ecdsa::verify::P521_SHA384_ASN1),
+        28 => Verification::Ecdsa(&ecdsa::verify::P521_SHA512_ASN1),
+        29 => Verification::Ecdsa(&ecdsa::verify::P256_SHA256_FIXED),
+        30 => Verification::Ecdsa(&ecdsa::verify::P384_SHA384_FIXED),
+        31 => Verification::Ecdsa(&ecdsa::verify::P521_SHA512_FIXED),
+        32 => Verification::Ed25519,
+        _ => Verification::Rsa(rsa_verification_algorithm(id)?),
     })
 }
 
@@ -350,9 +384,10 @@ fn rsa_key_size(id: u32) -> Result<rsa::KeySize, Misuse> {
     })
 }
 
-fn kem_algorithm(id: u32) -> Result<&'static kem::Algorithm, Misuse> {
+/// Checks that `id` names ML-KEM-768, the one set these bindings offer.
+fn kem_algorithm(id: u32) -> Result<(), Misuse> {
     match id {
-        0 => Ok(&kem::ML_KEM_768),
+        0 => Ok(()),
         _ => Err(Misuse("unknown KEM algorithm")),
     }
 }
@@ -627,7 +662,7 @@ pub unsafe extern "C" fn rind_dart_aes_cbc_encrypt(
         if pad == 0 {
             key.encrypt_blocks(iv, &mut in_out[..len])?;
         } else {
-            key.encrypt(iv, &mut Room { buf: in_out, len });
+            key.encrypt(iv, &mut Room { buf: in_out, len })?;
         }
         Ok(padded_len)
     })
@@ -935,7 +970,7 @@ pub unsafe extern "C" fn rind_dart_hkdf_extract(
 ) -> isize {
     run(|| {
         // SAFETY: forwarded from the caller.
-        let prk = unsafe { handle(salt) }.extract(unsafe { input(secret, secret_len) });
+        let prk = unsafe { handle(salt) }.extract(unsafe { input(secret, secret_len) })?;
         // SAFETY: forwarded from the caller.
         Ok(unsafe { store(out, prk) })
     })
@@ -955,7 +990,7 @@ pub unsafe extern "C" fn rind_dart_hkdf_expand(
         // SAFETY: forwarded from the caller.
         let (prk, info, out) =
             unsafe { (handle(prk), input(info, info_len), output(out, out_len)) };
-        prk.expand(&[info], out.len()).fill(out)?;
+        prk.fill(&[info], out)?;
         Ok(out_len)
     })
 }
@@ -1186,7 +1221,7 @@ pub unsafe extern "C" fn rind_dart_ecdsa_key_pair_export(
             1 => write(out, pair.to_pkcs8().as_ref()),
             2 => write(out, pair.to_sec1().as_ref()),
             3 => write(out, pair.to_scalar().as_ref()),
-            4 => write(out, pair.to_spki().as_ref()),
+            4 => write(out, pair.public_key().to_spki().as_ref()),
             _ => Err(Misuse("unknown export").into()),
         }
     })
@@ -1256,7 +1291,7 @@ pub unsafe extern "C" fn rind_dart_ed25519_key_pair_export(
             1 => write(out, pair.to_pkcs8().as_ref()),
             2 => write(out, pair.to_pkcs8v1().as_ref()),
             3 => write(out, pair.to_seed().as_ref()),
-            4 => write(out, pair.to_spki().as_ref()),
+            4 => write(out, pair.public_key().to_spki().as_ref()),
             _ => Err(Misuse("unknown export").into()),
         }
     })
@@ -1323,7 +1358,7 @@ pub unsafe extern "C" fn rind_dart_rsa_key_pair_export(
         let (pair, out) = unsafe { (handle(pair), output(out, out_len)) };
         match what {
             1 => write(out, pair.to_pkcs8().as_ref()),
-            4 => write(out, pair.to_spki().as_ref()),
+            4 => write(out, pair.public_key().to_spki().as_ref()),
             _ => Err(Misuse("unknown export").into()),
         }
     })
@@ -1343,10 +1378,14 @@ pub unsafe extern "C" fn rind_dart_key_pair_public_key(
         // SAFETY: the caller passes a live handle of the type `kind` names.
         let key = unsafe {
             match kind {
-                0 => handle(pair.cast::<EcdsaKeyPair>()).public_key(),
-                1 => handle(pair.cast::<Ed25519KeyPair>()).public_key(),
+                0 => PublicKey::Ecdsa(handle(pair.cast::<EcdsaKeyPair>()).public_key().clone()),
+                1 => PublicKey::Ed25519(handle(pair.cast::<Ed25519KeyPair>()).public_key().clone()),
                 2 => {
-                    handle(pair.cast::<RsaKeyPair>()).public_key(rsa_signing_algorithm(algorithm)?)
+                    // Each signing algorithm's id is the verification
+                    // algorithm's of the same name.
+                    rsa_signing_algorithm(algorithm)?;
+                    let key = handle(pair.cast::<RsaKeyPair>()).public_key().clone();
+                    PublicKey::Rsa(key, rsa_verification_algorithm(algorithm)?)
                 }
                 _ => return Err(Misuse("unknown key pair").into()),
             }
@@ -1372,16 +1411,33 @@ pub unsafe extern "C" fn rind_dart_public_key_new(
     run(|| {
         // SAFETY: forwarded from the caller.
         let (bytes, exponent) = unsafe { (input(bytes, bytes_len), input(exponent, exponent_len)) };
-        let key = match source {
-            0 => PublicKey::new(verification_algorithm(algorithm)?, bytes),
-            1 => PublicKey::from_spki(verification_algorithm(algorithm)?, bytes),
-            2 => PublicKey::from_components(
-                rsa_verification_algorithm(algorithm)?,
-                &rind::rsa::PublicKeyComponents {
+        let key = match (source, verification_algorithm(algorithm)?) {
+            (0, Verification::Ecdsa(algorithm)) => {
+                ecdsa::PublicKey::new(algorithm, bytes).map(PublicKey::Ecdsa)
+            }
+            (1, Verification::Ecdsa(algorithm)) => {
+                ecdsa::PublicKey::from_spki(algorithm, bytes).map(PublicKey::Ecdsa)
+            }
+            (0, Verification::Ed25519) => ed25519::PublicKey::new(bytes).map(PublicKey::Ed25519),
+            (1, Verification::Ed25519) => {
+                ed25519::PublicKey::from_spki(bytes).map(PublicKey::Ed25519)
+            }
+            // PKCS#1 or SPKI, as the Dart API documents.
+            (0, Verification::Rsa(algorithm)) => rsa::PublicKey::new(bytes)
+                .or_else(|_| rsa::PublicKey::from_spki(bytes))
+                .map(|key| PublicKey::Rsa(key, algorithm)),
+            (1, Verification::Rsa(algorithm)) => {
+                rsa::PublicKey::from_spki(bytes).map(|key| PublicKey::Rsa(key, algorithm))
+            }
+            (2, Verification::Rsa(algorithm)) => {
+                let components = rsa::PublicKeyComponents {
                     n: bytes,
                     e: exponent,
-                },
-            ),
+                };
+                rsa::PublicKey::from_components(&components)
+                    .map(|key| PublicKey::Rsa(key, algorithm))
+            }
+            (2, _) => return Err(Misuse("unknown RSA verification algorithm").into()),
             _ => return Err(Misuse("unknown key source").into()),
         }?;
         // SAFETY: forwarded from the caller.
@@ -1424,7 +1480,7 @@ pub unsafe extern "C" fn rind_dart_public_key_export(
         // SAFETY: forwarded from the caller.
         let (key, out) = unsafe { (handle(key), output(out, out_len)) };
         match spki {
-            0 => write(out, key.as_ref()),
+            0 => write(out, key.encoding()),
             _ => write(out, key.to_spki().as_ref()),
         }
     })
@@ -1435,10 +1491,11 @@ pub unsafe extern "C" fn rind_dart_public_key_export(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rind_dart_decapsulation_key_generate(
     algorithm: u32,
-    out: *mut *mut kem::DecapsulationKey,
+    out: *mut *mut kem::DecapsulationKey<kem::MlKem768>,
 ) -> isize {
     run(|| {
-        let key = kem::DecapsulationKey::generate(kem_algorithm(algorithm)?)?;
+        kem_algorithm(algorithm)?;
+        let key = kem::DecapsulationKey::generate()?;
         // SAFETY: forwarded from the caller.
         Ok(unsafe { store(out, key) })
     })
@@ -1446,7 +1503,7 @@ pub unsafe extern "C" fn rind_dart_decapsulation_key_generate(
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rind_dart_decapsulation_key_public_key(
-    key: *const kem::DecapsulationKey,
+    key: *const kem::DecapsulationKey<kem::MlKem768>,
     out: *mut u8,
     out_len: usize,
 ) -> isize {
@@ -1459,7 +1516,7 @@ pub unsafe extern "C" fn rind_dart_decapsulation_key_public_key(
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rind_dart_decapsulate(
-    key: *const kem::DecapsulationKey,
+    key: *const kem::DecapsulationKey<kem::MlKem768>,
     ciphertext: *const u8,
     ciphertext_len: usize,
     out: *mut u8,
@@ -1474,7 +1531,8 @@ pub unsafe extern "C" fn rind_dart_decapsulate(
                 output(out, out_len),
             )
         };
-        write(out, key.decapsulate(ciphertext)?.as_ref())
+        let ciphertext = kem::Ciphertext::new(ciphertext)?;
+        write(out, key.decapsulate(&ciphertext).as_ref())
     })
 }
 
@@ -1483,12 +1541,12 @@ pub unsafe extern "C" fn rind_dart_encapsulation_key_new(
     algorithm: u32,
     bytes: *const u8,
     bytes_len: usize,
-    out: *mut *mut kem::EncapsulationKey,
+    out: *mut *mut kem::EncapsulationKey<kem::MlKem768>,
 ) -> isize {
     run(|| {
-        let algorithm = kem_algorithm(algorithm)?;
+        kem_algorithm(algorithm)?;
         // SAFETY: forwarded from the caller.
-        let key = kem::EncapsulationKey::new(algorithm, unsafe { input(bytes, bytes_len) })?;
+        let key = kem::EncapsulationKey::new(unsafe { input(bytes, bytes_len) })?;
         // SAFETY: forwarded from the caller.
         Ok(unsafe { store(out, key) })
     })
@@ -1498,7 +1556,7 @@ pub unsafe extern "C" fn rind_dart_encapsulation_key_new(
 /// returning the ciphertext's length.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rind_dart_encapsulate(
-    key: *const kem::EncapsulationKey,
+    key: *const kem::EncapsulationKey<kem::MlKem768>,
     ciphertext: *mut u8,
     ciphertext_len: usize,
     secret: *mut u8,
@@ -1555,7 +1613,7 @@ pub unsafe extern "C" fn rind_dart_decrypting_key_public_key(
 ) -> isize {
     run(|| {
         // SAFETY: forwarded from the caller.
-        let public_key = unsafe { handle(key) }.public_key();
+        let public_key = unsafe { handle(key) }.public_key().clone();
         // SAFETY: forwarded from the caller.
         Ok(unsafe { store(out, public_key) })
     })
@@ -1599,7 +1657,7 @@ pub unsafe extern "C" fn rind_dart_decrypting_key_export(
         let (key, out) = unsafe { (handle(key), output(out, out_len)) };
         match what {
             1 => write(out, key.to_pkcs8().as_ref()),
-            4 => write(out, key.to_spki().as_ref()),
+            4 => write(out, key.public_key().to_spki().as_ref()),
             _ => Err(Misuse("unknown export").into()),
         }
     })
@@ -1624,7 +1682,8 @@ pub unsafe extern "C" fn rind_dart_encrypting_key_new(
         // SAFETY: forwarded from the caller.
         let (bytes, exponent) = unsafe { (input(bytes, bytes_len), input(exponent, exponent_len)) };
         let key = match source {
-            0 => EncryptingKey::new(algorithm, bytes),
+            0 => EncryptingKey::new(algorithm, bytes)
+                .or_else(|_| EncryptingKey::from_spki(algorithm, bytes)),
             2 => EncryptingKey::from_components(
                 algorithm,
                 &rsa::PublicKeyComponents {
@@ -1688,4 +1747,18 @@ pub unsafe extern "C" fn rind_dart_encrypting_key_max_message_len(
 ) -> isize {
     // SAFETY: forwarded from the caller.
     run(|| Ok(unsafe { handle(key) }.max_message_len()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kem_refuses_an_unknown_algorithm() {
+        let mut key = std::ptr::null_mut();
+        // SAFETY: `key` is a writable handle slot.
+        let status = unsafe { rind_dart_decapsulation_key_generate(1, &mut key) };
+        assert_eq!(status, Status::Misuse as isize);
+        assert!(key.is_null());
+    }
 }

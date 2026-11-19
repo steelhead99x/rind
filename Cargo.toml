@@ -2,12 +2,15 @@
 resolver = "2"
 members = [
   "rind",
+  "rind-acvp",
   "rind-aws-lc-rs",
   "rind-bench",
   "rind-cpuid",
   "rind-dart",
   "rind-timing",
   "rind-dimpl",
+  "rind-fips",
+  "rind-fips/module",
   "rind-object-store",
   "rind-openmls",
   "rind-rcgen",
@@ -15,9 +18,13 @@ members = [
   "rind-rustls",
   "rind-str0m",
   "rind-jsonwebtoken",
+  "rind-openssl",
   "rind-python",
-  "fuzz"
+  "fuzz",
+  "admin/wasm-fixture"
 ]
+# Vendored upstream forks, built only through `[patch.crates-io]`.
+exclude = ["thirdparty/blind-rsa-signatures"]
 
 [workspace.package]
 rust-version = "1.90"
@@ -49,3 +56,8 @@ overflow-checks = false
 
 [profile.dev.package.subtle]
 debug-assertions = false
+
+# rind's fork, ported to rsa 0.10.0: UPSTREAM.md's "blind-rsa-signatures 0.18
+# does not build on rsa 0.10.0".
+[patch.crates-io]
+blind-rsa-signatures = { path = "thirdparty/blind-rsa-signatures" }

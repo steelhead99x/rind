@@ -196,6 +196,7 @@ impl<A: AsRef<[u8]>> AsRef<[u8]> for Aad<A> {
 
 /// An authentication tag.
 #[must_use]
+#[repr(C)]
 pub struct Tag([u8; TAG_LEN]);
 
 impl AsRef<[u8]> for Tag {
@@ -245,7 +246,7 @@ impl From<hkdf::Okm<'_, &'static Algorithm>> for UnboundKey {
     }
 }
 
-/// A key that seals or opens with any nonce the caller gives it; wiped on drop under the `wipe` feature.
+/// A key that seals or opens with any nonce the caller gives it; wiped on drop.
 pub struct LessSafeKey {
     key: rind::aead::Key,
     algorithm: &'static Algorithm,
@@ -372,8 +373,9 @@ impl LessSafeKey {
         A: AsRef<[u8]>,
         InOut: AsMut<[u8]> + for<'in_out> Extend<&'in_out u8>,
     {
-        let tag = self.seal_in_place_separate_tag(nonce, aad, in_out.as_mut())?;
-        in_out.extend(tag.as_ref());
+        let (plaintext, tag_out) = append_tag_room(in_out)?;
+        let tag = self.seal_in_place_separate_tag(nonce, aad, plaintext)?;
+        tag_out.copy_from_slice(tag.as_ref());
         Ok(())
     }
 
@@ -749,10 +751,12 @@ impl RandomizedNonceKey {
     }
 
     /// Seals `in_out` in place under a random nonce, appends the tag, and returns the nonce.
-    pub fn seal_in_place_append_tag<A, InOut>(
+    // aws-lc-rs names the lifetime, so this does too.
+    #[allow(clippy::needless_lifetimes)]
+    pub fn seal_in_place_append_tag<'a, A, InOut>(
         &self,
         aad: Aad<A>,
-        in_out: &mut InOut,
+        in_out: &'a mut InOut,
     ) -> Result<Nonce, error::Unspecified>
     where
         A: AsRef<[u8]>,
@@ -797,6 +801,23 @@ fn random_nonce() -> Result<[u8; NONCE_LEN], error::Unspecified> {
     let mut nonce = [0; NONCE_LEN];
     crate::rand::fill(&mut nonce)?;
     Ok(nonce)
+}
+
+// Appends zeroed room for the tag and splits `in_out` into the plaintext and
+// that room. `Extend` need not grow `in_out`, so a buffer that is not then
+// exactly one tag longer fails before any key sees the nonce, leaving the
+// plaintext as it was, as aws-lc-rs does.
+fn append_tag_room<InOut>(in_out: &mut InOut) -> Result<(&mut [u8], &mut [u8]), error::Unspecified>
+where
+    InOut: AsMut<[u8]> + for<'in_out> Extend<&'in_out u8>,
+{
+    let plaintext_len = in_out.as_mut().len();
+    in_out.extend(&[0; TAG_LEN]);
+    let in_out = in_out.as_mut();
+    if in_out.len() != plaintext_len + TAG_LEN {
+        return Err(error::Unspecified);
+    }
+    Ok(in_out.split_at_mut(plaintext_len))
 }
 
 /// Refuses scatter buffers whose lengths do not match, before a sealing key

@@ -109,3 +109,88 @@ asn1_oid! {
         csor(3) nistAlgorithm(4) sigAlgs(3) 19
     }
 }
+
+// RFC 9909's pure SLH-DSA OIDs.
+asn1_oid! {
+    id_slh_dsa_sha2_128s OBJECT IDENTIFIER ::= {
+        joint_iso_itu_t(2) country(16) us(840) organization(1) gov(101)
+        csor(3) nistAlgorithm(4) sigAlgs(3) 20
+    }
+}
+
+asn1_oid! {
+    id_slh_dsa_sha2_128f OBJECT IDENTIFIER ::= {
+        joint_iso_itu_t(2) country(16) us(840) organization(1) gov(101)
+        csor(3) nistAlgorithm(4) sigAlgs(3) 21
+    }
+}
+
+asn1_oid! {
+    id_slh_dsa_sha2_192s OBJECT IDENTIFIER ::= {
+        joint_iso_itu_t(2) country(16) us(840) organization(1) gov(101)
+        csor(3) nistAlgorithm(4) sigAlgs(3) 22
+    }
+}
+
+asn1_oid! {
+    id_slh_dsa_sha2_192f OBJECT IDENTIFIER ::= {
+        joint_iso_itu_t(2) country(16) us(840) organization(1) gov(101)
+        csor(3) nistAlgorithm(4) sigAlgs(3) 23
+    }
+}
+
+asn1_oid! {
+    id_slh_dsa_sha2_256s OBJECT IDENTIFIER ::= {
+        joint_iso_itu_t(2) country(16) us(840) organization(1) gov(101)
+        csor(3) nistAlgorithm(4) sigAlgs(3) 24
+    }
+}
+
+asn1_oid! {
+    id_slh_dsa_sha2_256f OBJECT IDENTIFIER ::= {
+        joint_iso_itu_t(2) country(16) us(840) organization(1) gov(101)
+        csor(3) nistAlgorithm(4) sigAlgs(3) 25
+    }
+}
+
+asn1_oid! {
+    id_slh_dsa_shake_128s OBJECT IDENTIFIER ::= {
+        joint_iso_itu_t(2) country(16) us(840) organization(1) gov(101)
+        csor(3) nistAlgorithm(4) sigAlgs(3) 26
+    }
+}
+
+asn1_oid! {
+    id_slh_dsa_shake_128f OBJECT IDENTIFIER ::= {
+        joint_iso_itu_t(2) country(16) us(840) organization(1) gov(101)
+        csor(3) nistAlgorithm(4) sigAlgs(3) 27
+    }
+}
+
+asn1_oid! {
+    id_slh_dsa_shake_192s OBJECT IDENTIFIER ::= {
+        joint_iso_itu_t(2) country(16) us(840) organization(1) gov(101)
+        csor(3) nistAlgorithm(4) sigAlgs(3) 28
+    }
+}
+
+asn1_oid! {
+    id_slh_dsa_shake_192f OBJECT IDENTIFIER ::= {
+        joint_iso_itu_t(2) country(16) us(840) organization(1) gov(101)
+        csor(3) nistAlgorithm(4) sigAlgs(3) 29
+    }
+}
+
+asn1_oid! {
+    id_slh_dsa_shake_256s OBJECT IDENTIFIER ::= {
+        joint_iso_itu_t(2) country(16) us(840) organization(1) gov(101)
+        csor(3) nistAlgorithm(4) sigAlgs(3) 30
+    }
+}
+
+asn1_oid! {
+    id_slh_dsa_shake_256f OBJECT IDENTIFIER ::= {
+        joint_iso_itu_t(2) country(16) us(840) organization(1) gov(101)
+        csor(3) nistAlgorithm(4) sigAlgs(3) 31
+    }
+}

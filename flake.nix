@@ -69,6 +69,10 @@
               "wasm32-unknown-unknown"
               "wasm32-wasip2"
               "x86_64-unknown-linux-gnu"
+              # Targets with no `std`, one per architecture rind has assembly for.
+              "aarch64-unknown-none"
+              "armv7a-none-eabi"
+              "x86_64-unknown-none"
             ];
           };
 
@@ -143,7 +147,9 @@
               })
               armv7-cc
               pkgs.qemu-user
-            ];
+            ]
+            # sh/armv7.sh asks setarch whether the host runs AArch32 code.
+            ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.util-linux ];
 
             env = {
               CC_armv7_unknown_linux_gnueabihf = "${armv7-prefix}cc";
@@ -208,6 +214,37 @@
               };
             };
 
+          # aws-lc's ACVP client, of the aws-lc release nixpkgs pins. Its
+          # `-json` mode answers vector sets offline through a module wrapper,
+          # as `rind-acvp`'s tests run it on rind's FIPS module.
+          acvptool = pkgs.buildGoModule {
+            pname = "acvptool";
+            inherit (pkgs.aws-lc) version src;
+            subPackages = [ "util/fipstools/acvp/acvptool" ];
+            vendorHash = "sha256-495bUr3Cuo7kuhuNLMVhrVg9NXTAXyFmnXRmBrCHovA=";
+            # It forwards ML-DSA's `externalMu` from external-interface groups
+            # too, which a wrapper then reads as the internal interface.
+            # See UPSTREAM.md, "acvptool sends ML-DSA's externalMu for the
+            # external interface".
+            postPatch = ''
+              file=util/fipstools/acvp/acvptool/subprocess/ml_dsa.go
+              substituteInPlace $file --replace-fail \
+                'boolToBytes(group.ExternalMu))' \
+                'boolToBytes(internalOnly(group.SignatureInterface, group.ExternalMu)))'
+              cat >>$file <<'EOF'
+
+              // internalOnly is externalMu for the internal interface, the only
+              // one it applies to, and absent for the external one.
+              func internalOnly(signatureInterface string, externalMu *bool) *bool {
+              	if !strings.EqualFold(signatureInterface, "internal") {
+              		return nil
+              	}
+              	return externalMu
+              }
+              EOF
+            '';
+          };
+
           # The tracer `admin/ct-qemu` loads into qemu-arm or qemu-aarch64,
           # built against the plugin API of the qemu-user its shells run.
           ct-qemu-plugin = pkgs.stdenv.mkDerivation {
@@ -221,6 +258,27 @@
                 $(pkg-config --cflags glib-2.0) -o ct-qemu-plugin.so $src
             '';
             installPhase = "install -D ct-qemu-plugin.so $out/lib/ct-qemu-plugin.so";
+          };
+
+          # OpenSSL's `evp_test` and its X25519 and Ed25519 data, from the
+          # source of the OpenSSL the dev shell has. `sh/openssl.sh` runs them
+          # with rind-openssl loaded and preferred. A static build, so the
+          # test runs the library it was built with, and the default provider
+          # inside it.
+          openssl-evp-test = pkgs.stdenv.mkDerivation {
+            pname = "openssl-evp-test";
+            inherit (pkgs.openssl) version src;
+            nativeBuildInputs = [ pkgs.perl ];
+            configurePhase = "perl Configure no-shared no-docs";
+            # Naming the target skips the headers `make` generates first.
+            buildPhase = ''
+              make -j$NIX_BUILD_CORES build_generated
+              make -j$NIX_BUILD_CORES test/evp_test
+            '';
+            installPhase = ''
+              install -D test/evp_test $out/bin/evp_test
+              install -D -t $out/share/evp_test test/recipes/30-test_evp_data/evppkey_{ecx,ecx_sigalg,ecx_kem,mismatch_ecx}.txt
+            '';
           };
 
           # Intel SDE, which `x86-cpu.yml`, `coverage.yml`, `admin/x86-cpu`,
@@ -249,7 +307,8 @@
           # its release with the decoders it takes from unisim-archisec and
           # the Bitwuzla solver it links. nixpkgs packages neither BINSEC nor
           # its `mula` dependency. BINSEC loads its plugins through findlib,
-          # so the wrapper points OCAMLPATH at its own.
+          # so the wrapper points OCAMLPATH at its own, and its library stays
+          # in `out`: a split `dev` output would reference `out` and back.
           binsec =
             let
               ocaml = pkgs.ocamlPackages;
@@ -265,6 +324,7 @@
             ocaml.buildDunePackage rec {
               pname = "binsec";
               version = "0.11.3";
+              outputs = [ "out" ];
               src = pkgs.fetchurl {
                 url = "https://github.com/binsec/binsec/releases/download/${version}/binsec-${version}.tbz";
                 hash = "sha256-k/b+Q51IaxZgYu9t2SxM46oJR7Xhixw6p94vwwA6ptk=";
@@ -310,6 +370,15 @@
               ${link "aarch64" pkgs.pkgsCross.aarch64-multiplatform}
             '';
 
+          # The armv7 C compiler and qemu-arm that build and run the AArch32
+          # model's cosimulation executor, linked without the cross
+          # compiler's setup hooks, as debian-cross-tools are.
+          armv7-cosim-tools = pkgs.runCommand "armv7-cosim-tools" { } ''
+            mkdir -p $out/bin
+            ln -s ${armv7-prefix}gcc $out/bin/armv7-linux-gnueabihf-gcc
+            ln -s ${pkgs.qemu-user}/bin/qemu-arm $out/bin/qemu-arm
+          '';
+
           # Otherwise cargo exports the host's OpenSSL CA paths, which on
           # Ubuntu lie under the /usr the SDE sandbox replaces, and the tests
           # that load the system's roots find none. A shell hook, since `nix
@@ -341,6 +410,7 @@
             targets = [
               "x86_64-unknown-linux-gnu"
               "aarch64-unknown-linux-gnu"
+              "armv7-unknown-linux-gnueabihf"
             ];
           };
 
@@ -355,7 +425,7 @@
             [source.vendored-sources]
             directory = "$(rustc --print sysroot)/lib/rustlib/src/rust/library/vendor"
             END
-            for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu armv7-unknown-linux-gnueabihf; do
               sysroot=$(cargo miri setup --target=$target --print-sysroot)
             done
             mkdir -p $out
@@ -392,11 +462,12 @@
           # Light, the OCaml it compiles the proofs with, as s2n-bignum's
           # `tools/build-proof.sh` does, the Rust whose build emits the object
           # code they are of, with llvm-objdump to read it, the Python that
-          # compares that code with the code upstream's proofs check, and the
-          # cross tools that assemble Vale's and aws-lc's, with flock, which
+          # compares that code with the code upstream's proofs check, the
+          # cross tools that assemble Vale's and aws-lc's, and flock, which
           # keeps runs in one worktree from rewriting each other's files. On
           # Linux, `admin/prove session` checkpoints and restores HOL Light
-          # with DMTCP.
+          # with DMTCP, and the AArch32 model's cosimulation runs under
+          # qemu-arm; qemu-user builds only on Linux.
           hol-light = pkgs.mkShell {
             packages = [
               (rust-stable.minimal.override {
@@ -404,6 +475,7 @@
                 targets = [
                   "x86_64-unknown-linux-gnu"
                   "aarch64-unknown-linux-gnu"
+                  "armv7-unknown-linux-gnueabihf"
                 ];
               })
               pkgs.hol_light
@@ -415,7 +487,10 @@
               debian-cross-tools
               pkgs.flock
             ]
-            ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.dmtcp;
+            ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+              pkgs.dmtcp
+              armv7-cosim-tools
+            ];
           };
 
           sde-certs = ''
@@ -458,13 +533,12 @@
                   cargo-modules
                   rustfmt-unstable
                   quest-cli
+                  release-plz
+                  # rind-acvp's tests answer ACVP's vector sets through it.
+                  acvptool
                 ]
                 ++ python-shell.packages
                 ++ pkgs.lib.optionals (!pkgs.stdenv.hostPlatform.isDarwin) [
-                  # Marked broken on Darwin in nixpkgs.
-                  # See UPSTREAM.md, "nixpkgs marks release-plz broken on
-                  # Darwin".
-                  release-plz
                   # admin/ctgrind's constant-time checks.
                   valgrind
                 ];
@@ -576,12 +650,7 @@
             coverage = pkgs.mkShell {
               packages = [
                 (rust-stable.minimal.override { extensions = [ "llvm-tools" ]; })
-                # Its tests build with nixpkgs' rustc, whose instrumented
-                # binaries crash on exit, so the cache has no build. rind's
-                # coverage builds with the toolchain above instead.
-                # See UPSTREAM.md, "nixpkgs' Rust crashes cargo-llvm-cov's
-                # tests".
-                (pkgs.cargo-llvm-cov.overrideAttrs { doCheck = false; })
+                pkgs.cargo-llvm-cov
                 # aws-lc-rs builds C.
                 pkgs.cmake
                 pkgs.pkg-config
@@ -596,6 +665,36 @@
               inherit (python-shell) env;
 
               shellHook = pkgs.lib.optionalString (system == "x86_64-linux") sde-certs;
+            };
+
+            # `just check` runs `sh/site.sh` in it, which builds site/, the
+            # landing page, with Bun, and loads it in headless Chromium. Its own
+            # shell, since Chromium would add hundreds of MB to the closure
+            # every CI job downloads.
+            site =
+              assert pkgs.lib.assertMsg
+                (
+                  (builtins.fromJSON (builtins.readFile ./site/package.json)).packageManager
+                  == "bun@${pkgs.bun.version}"
+                )
+                "Bun pins disagree: site/package.json's packageManager must be bun@${pkgs.bun.version}, the Bun in the pinned nixpkgs, which CI's site job also reads. Update them together.";
+              pkgs.mkShell {
+                packages = [ pkgs.bun ];
+                # Bun.WebView takes this browser over any on $PATH. nixpkgs has
+                # no Chromium for Darwin, where Bun finds an installed Chrome.
+                env = pkgs.lib.optionalAttrs (!pkgs.stdenv.hostPlatform.isDarwin) {
+                  BUN_CHROME_PATH = pkgs.lib.getExe pkgs.chromium;
+                };
+              };
+
+            # `just check` runs `sh/openssl.sh` in it, which builds rind-openssl
+            # and runs OpenSSL's `evp_test` with it.
+            openssl = pkgs.mkShell {
+              packages = [
+                rust-toolchain
+                pkgs.jq
+              ];
+              env.OPENSSL_EVP_TEST = openssl-evp-test;
             };
 
             # `just check` runs `admin/ct-vartime` in it: llvm-objdump, and the
@@ -640,6 +739,35 @@
               ];
             };
 
+            # `admin/prove vg` and the prove workflow's `vg` jobs run in it:
+            # the Rust that compiles VG's naked functions and rind's, with the
+            # targets the bytes check reads; nixpkgs' LLVM, whose `llvm-mc`
+            # assembles VG's text with an assembler other than rustc's; elan,
+            # for the Lean that `proofs/lean-toolchain` names, which builds
+            # VG's models; and the emulator that runs the instructions this
+            # CPU lacks: Intel SDE on x86_64, qemu-aarch64 on aarch64.
+            vg = pkgs.mkShell {
+              packages = [
+                (rust-stable.minimal.override {
+                  extensions = [ "llvm-tools" ];
+                  targets = [
+                    "x86_64-unknown-linux-gnu"
+                    "aarch64-unknown-linux-gnu"
+                  ];
+                })
+                pkgs.llvmPackages_21.llvm
+                pkgs.elan
+                pkgs.git
+                pkgs.curl
+                pkgs.python3
+                pkgs.flock
+              ]
+              ++ pkgs.lib.optionals (system == "x86_64-linux") [ sde ]
+              ++ pkgs.lib.optionals (system == "aarch64-linux") [ pkgs.qemu-user ];
+
+              shellHook = pkgs.lib.optionalString (system == "x86_64-linux") sde-certs;
+            };
+
             # `admin/ctgrind` and the ctgrind workflow run in it. A separate
             # shell because crabgrind's bindgen needs libclang, which no other
             # job does.
@@ -647,11 +775,24 @@
               packages = [
                 rust-stable.minimal
                 pkgs.valgrind
-                # crabgrind finds valgrind's headers through it.
+                # crabgrind finds valgrind's headers through it, and
+                # rind-openssl's tests OpenSSL's.
                 pkgs.pkg-config
+                pkgs.openssl
               ];
 
               env.LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+            };
+
+            # build.yml's nightly ACVP job answers ACVP's sets in it, with
+            # the large-data hash tests, on x86_64 and aarch64.
+            acvp = pkgs.mkShell {
+              packages = [
+                rust-stable.minimal
+                acvptool
+                # The aws-lc-rs dev-dependency builds C.
+                pkgs.cmake
+              ];
             };
 
             # `just wasm` runs the portable backend's tests on wasm32-wasip2
@@ -823,6 +964,8 @@
                 openssl
                 python3
                 sde
+                # x86-cpu.yml answers ACVP's sets on Diamond Rapids with it.
+                acvptool
                 # `admin/ct-sde` runs SDE without ASLR by its `setarch`.
                 util-linux
               ];

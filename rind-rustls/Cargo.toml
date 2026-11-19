@@ -3,22 +3,41 @@ name = "rind-rustls"
 version = "0.23.4"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
+homepage = "https://rind.kixel.ai"
 license = "Apache-2.0 OR ISC OR MIT-0"
 description = "rustls CryptoProvider backed by rind"
 categories = ["network-programming", "cryptography"]
 rust-version.workspace = true
 readme = "README.md"
 
+# The provider admin/adapter-api diffs this crate's API against.
+[package.metadata.rind.api]
+crate = "rustls"
+module = "crypto::aws_lc_rs"
+features = ["aws_lc_rs"]
+skip = { fips = "builds AWS-LC's FIPS module, which rind does not offer" }
+# Items rind cannot back, which the README names.
+omitted = [
+  "kx_group::MLKEM1024",
+]
+
 [dependencies]
 rind = { version = "0.3.2", path = "../rind" }
-rustls = { version = "0.23.20", default-features = false, features = ["std", "tls12"] }
+# rind-rustls needs the standard library, as does how it reports HPKE errors
+# through rustls's `OtherError`, whose fields depend on rustls's `std`.
+rustls = { version = "0.23.20", default-features = false, features = ["std"] }
 
 [dev-dependencies]
+env_logger = "0.11"
+hex = "0.4"
+
+# aws-lc-rs does not build for wasm and ring needs a C compiler targeting it,
+# so wasm leaves out the differential tests, and the examples, whose tokio
+# needs the threads and sockets wasm lacks.
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 # Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
 # features, as `admin/ctgrind` does; otherwise they build as no-ops.
 crabgrind = { version = "0.4", default-features = false }
-env_logger = "0.11"
-hex = "0.4"
 http = "1"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false }
@@ -28,5 +47,9 @@ rustls = { version = "0.23.36", default-features = false, features = ["aws-lc-rs
 tokio = { version = "1.0", features = ["io-std", "macros", "net", "rt-multi-thread"] }
 tokio-rustls = { version = "0.26", default-features = false }
 
+# rustls's: as there, `std` gates `Ticketer` and `tls12` the TLS 1.2 suites.
+# rustls's `std` is always on, since rind-rustls needs it.
 [features]
-default = []
+default = ["std", "tls12"]
+std = []
+tls12 = ["rustls/tls12"]

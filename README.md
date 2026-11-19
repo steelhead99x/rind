@@ -11,14 +11,15 @@
 </p>
 
 <p align="center">
+  <a href="https://rind.kixel.ai"><img alt="Website" src="https://img.shields.io/badge/website-rind.kixel.ai-719500"></a>
   <a href="https://crates.io/crates/rind"><img alt="Latest release" src="https://img.shields.io/crates/v/rind"></a>
   <a href="https://docs.rs/rind/"><img alt="Documentation" src="https://img.shields.io/docsrs/rind"></a>
   <a href="https://github.com/kixel-ai/rind/actions/workflows/build.yml?query=branch%3Amain"><img alt="Build Status" src="https://img.shields.io/github/actions/workflow/status/kixel-ai/rind/build.yml"></a>
 </p>
 
 - 🏎️ **As fast as aws-lc-rs and ring.** rind matches or beats both on
-  nearly every operation TLS and QUIC run, from the handshake to each
-  packet's AEAD.
+  [nearly every operation][benchmarks] TLS and QUIC run, from the handshake
+  to each packet's AEAD.
 - 🛡️ **Verified where it counts.** On x86_64 and aarch64, rind's
   elliptic-curve, RSA, ML-KEM, and ML-DSA arithmetic builds on [s2n-bignum]'s
   formally verified assembly, and rind's own [Lean proofs][proofs] carry
@@ -45,7 +46,41 @@ closes it. [BENCHMARKS.md][benchmarks] has every time, build time, and
 binary size.
 
 The [launch post][launch-post] tells why rind exists and what building it
-cost in AI tokens.
+cost in AI tokens, and [rind.kixel.ai](https://rind.kixel.ai) lets you pick a
+CPU, maps each operation to the CPUs where a proof covers it, and has a page
+per library on how to move it to rind.
+
+## Compared with the alternatives
+
+<!-- comparison: `admin/bench-report render` writes this table -->
+| Library | Build tools beyond rustc | Lacks, of the 14 algorithms benchmarked | Formally verified | Fastest, or within 10% |
+|---|---|---|---|---|
+| rind | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | none | [aarch64: SHA-256 (some CPUs), SHA-512, SHA-3, HMAC (some CPUs), HKDF (some CPUs), X25519, Ed25519, P-384; portable: SHA-256, SHA-512, HMAC, HKDF; x86_64: AES-GCM (some CPUs), SHA-256 (some CPUs), SHA-512 (some CPUs), SHA-3, HMAC (some CPUs), HKDF (some CPUs), X25519 (some CPUs), Ed25519 (some CPUs, some operations), P-256 (some CPUs), P-384, RSA (some CPUs, some operations)](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [331 of its 354 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
+| [aws-lc-rs](https://github.com/aws/aws-lc-rs) | [cc](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | XChaCha20-Poly1305 (aws-lc has it, through aws-lc-sys) | [x86_64: SHA-512 (some CPUs)](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [127 of its 354 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
+| [ring](https://github.com/briansmith/ring) | [cc](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | XChaCha20-Poly1305, P-521, ML-KEM | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [94 of its 294 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
+| [RustCrypto + dalek](https://github.com/RustCrypto) | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost) | none | [none](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code) | [27 of its 282 times](https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#speed) |
+<!-- end comparison -->
+
+Build tools are what a minimal binary needs, algorithms count only what
+[BENCHMARKS.md][benchmarks] times, a proof counts only when it covers an
+operation's whole computation, and the last column counts each library's
+times against the fastest library's on the same machine.
+
+What the table leaves out favors the others:
+
+- **FIPS 140-3.** aws-lc-rs's `fips` feature builds against an
+  AWS-LC-FIPS module. Its newest releases build
+  [AWS-LC-FIPS 4.x][aws-lc-rs-fips], which an accredited lab has tested and
+  NIST is still reviewing, and older releases build earlier modules that
+  hold [NIST certificates][aws-lc-fips]. rind has no FIPS validation.
+- **Audits.** ring was in scope of [Cure53's 2020 audit of
+  rustls][rustls-audit]. RustCrypto's [aes-gcm][rustcrypto-aes-gcm] and
+  [chacha20poly1305][rustcrypto-chacha] have had an audit by NCC Group, and
+  its [rsa][rustcrypto-rsa] crate an earlier one its code has since diverged
+  from, it says; its p256, ml-kem, and ml-dsa crates say they have had none.
+  rind has had no third-party audit.
+- **Maturity and reach.** ring has run in production for years, and
+  RustCrypto covers far more algorithms.
 
 ## Switch in one line
 
@@ -90,23 +125,20 @@ ring and aws-lc-rs item to rind's.
 ### Directly
 
 The `rind` crate's own API covers AES-GCM, ChaCha20-Poly1305, and
-XChaCha20-Poly1305, QUIC header protection, X25519 and ECDH, ML-KEM-768,
-HPKE, ECDSA, Ed25519, ML-DSA, and RSA signatures, RSA blind signatures, ECVRF, OPRFs, RSA-OAEP, SHA-1, SHA-2, and SHA-3,
-HMAC, HKDF, PBKDF2, SPAKE2+, and AES key wrap. Each algorithm is a constant and each key
+XChaCha20-Poly1305, QUIC header protection, X25519 and ECDH, ML-KEM,
+HPKE, ECDSA, Ed25519, ML-DSA, SLH-DSA, and RSA signatures, RSA blind signatures, FROST threshold signatures, ECVRF, OPRFs, RSA-OAEP, SHA-1, SHA-2, and SHA-3,
+HMAC, HKDF, PBKDF2, Argon2id, SPAKE2+, and AES key wrap. Each algorithm is a constant or a type and each key
 type has one role, so misuse fails to compile:
 
 ```rust
-use rind::signature::{EcdsaKeyPair, PublicKey, sign, verify};
+use rind::ecdsa::{KeyPair, PublicKey, sign, verify};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // An error naming the missing CPU feature, rather than a panic later.
-    rind::cpu::check()?;
-
-    let key_pair = EcdsaKeyPair::generate(&sign::ECDSA_P256_SHA256_ASN1)?;
+    let key_pair = KeyPair::generate(&sign::P256_SHA256_ASN1)?;
     let signature = key_pair.sign(b"hello")?;
 
-    let encoded = key_pair.public_key();
-    let public_key = PublicKey::new(&verify::ECDSA_P256_SHA256_ASN1, encoded.as_ref())?;
+    let encoded = key_pair.public_key().as_ref();
+    let public_key = PublicKey::new(&verify::P256_SHA256_ASN1, encoded)?;
     public_key.verify(b"hello", signature.as_ref())?;
     Ok(())
 }
@@ -129,25 +161,32 @@ Each crate's README shows its setup.
 | [rind-jsonwebtoken][] | JWTs through [jsonwebtoken](https://github.com/Keats/jsonwebtoken) |
 | [rind-object-store][] | S3, Azure, and GCS request signing through [object_store](https://github.com/apache/arrow-rs-object-store) |
 | [rind-rcgen][] | certificates through [rcgen](https://github.com/rustls/rcgen) |
+| [rind-openssl][] | X25519 and Ed25519 for whatever links OpenSSL 3, as a provider its configuration loads; built from source |
 | [rind-dart][] | Dart and Flutter, through FFI, as the `rind` package on [pub.dev](https://pub.dev/packages/rind) |
 | [rind_cryptography][] | Dart and Flutter, as the `rind_cryptography` package, with the `cryptography` package's API on rind |
 | [rind-python][] | Python, as the `pyrind` package on PyPI, with rind's own API |
 | [pyrind-cryptography][] | Python, as the `pyrind-cryptography` package on PyPI, with pyca/cryptography's `hazmat` API on pyrind |
 
+## Before you depend on it
+
+rind was written with AI coding agents, and no one outside the project has
+audited it. It is not FIPS 140-3 validated. [The comparison][comparison]
+lists what the established libraries have that rind lacks, and where another
+library is faster, [Known gaps][gaps] says why and what closes it.
+
 ## Wiping keys
 
-rind wipes keys, keyed state, and heap scratch derived from a private key
-on drop only under its `wipe` feature, as RustCrypto does with `zeroize`;
-aws-lc-rs always wipes, and ring never does. The benefit of wiping is to avoid *unused keys* being leaked
-in a heap dump, like with Heartbleed. But IMO, you have bigger issues at that point, and it's not worth the perf hit by default.
-Enable it on `rind` itself, and Cargo turns it on beneath every
-adapter too. rind-aws-lc-rs also has its own `wipe`, which turns on rind's
-and wipes the adapter's own copies of secrets.
-
-```toml
-[dependencies]
-rind = { version = "0.3", features = ["wipe"] }
-```
+rind always wipes keys, keyed state, and heap scratch derived from a
+private key on drop, as aws-lc-rs does; ring never does. Wiping does not
+stop an attacker who can read memory while a key is in use, as Heartbleed
+could: the key is still there to read. What it does is shorten how long a
+key that is no longer in use stays in memory, in freed blocks a later
+allocation reuses, in swap, in core dumps and crash reports taken later, and
+in memory read after the fact; copies already written out stay. It does not wipe stack copies, digest contexts, or
+messages, except that pyca/verified-garbage's ChaCha20-Poly1305 and
+ML-KEM-768 routines wipe their own stack scratch, a property their proofs
+include. The adapters wipe their own copies of secrets too, such as
+rind-aws-lc-rs's PKCS#8 documents.
 
 ## Data-independent timing
 
@@ -183,12 +222,39 @@ portable Rust on any other architecture. CI tests Linux (glibc and musl),
 macOS, and Windows on x86_64 and aarch64, Linux and Windows on 32-bit x86, iOS
 in the simulator, Android on aarch64, armv7, ARMv5TE, x86_64, and 32-bit x86,
 and Linux on armv7, ARMv6, big-endian s390x, riscv64gc (glibc and musl),
-loongarch64, powerpc64le, and big-endian powerpc64 and powerpc. Any x86_64 CPU
-runs it, little-endian aarch64 needs NEON, and every operation panics on a CPU
-missing a feature rind requires: call `rind::cpu::check()` at startup to get an
-error naming it instead.
+loongarch64, powerpc64le, and big-endian powerpc64 and powerpc. rind needs only
+what each target enables at compile time, so it runs on every CPU the target
+does.
 [PLATFORMS.md][platforms] lists what each architecture runs without each
 feature.
+
+## Versions
+
+rind is below 1.0, so a minor release is its breaking one. There is no date
+for 1.0: it comes once the API takes one shape, every key type loading,
+exporting, and naming things the same way, and no breaking change is planned.
+
+- A patch release, such as 0.3.1 to 0.3.2, adds API and fixes bugs: code
+  that built against an earlier patch of the same minor still builds. A fix
+  can make rind refuse input it wrongly accepted.
+- A minor release, such as 0.3 to 0.4, may break the API. rind batches
+  breaking changes so that few minor releases are needed, the changelog
+  marks each as **breaking**, and [MIGRATING.md][migrating] maps ring's and
+  aws-lc-rs's names onto the API as it now stands.
+- The minimum supported Rust version is each crate's `rust-version`, shown on
+  its crates.io page. rind's is 1.90, and CI checks rind and every crate that
+  shares it on 1.90. It rises only in a minor release, and only to a Rust at
+  least nine releases (about a year) older than the latest stable, the window
+  rustls allows itself. Correcting a `rust-version` the code never built on
+  is a fix, which a patch can ship.
+- Each adapter's version follows the upstream it adapts, as
+  [CONTRIBUTING.md][releases] says. rind is not part of an adapter's API, so
+  an adapter's patch release may move it to rind's next minor, and to that
+  minor's `rust-version`. An adapter whose upstream needs a newer Rust than
+  rind declares that one, as rind-openmls declares OpenMLS's 1.91, and CI
+  does not yet check such a crate on its own `rust-version`.
+- [SECURITY.md][supported-versions] says which releases get security fixes,
+  and [PLATFORMS.md][platforms] which targets and CPUs rind supports.
 
 ## Contributing
 
@@ -196,7 +262,8 @@ AI reviews and contributions are welcome. rind plans its work as quests,
 Markdown files under [`quest/`][quests], with skills for Claude Code and
 Codex. With [quest][quest-setup] installed, have your agent run
 `/quest-plan` to propose a change or report a finding, or `/quest-start` to
-take a quest from the backlog. [CONTRIBUTING.md][contributing] covers
+take a quest from the backlog. Report a vulnerability privately instead, as
+[SECURITY.md][security] says. [CONTRIBUTING.md][contributing] covers
 building, testing, and how a PR lands.
 
 ## Learn more
@@ -210,6 +277,9 @@ building, testing, and how a PR lands.
   layers beneath them.
 - [BENCHMARKS.md][benchmarks]: every operation's time, build time, and binary
   size, against the other libraries.
+- [AUDIT.md][audit]: where a security review starts: the threat model, each
+  line's source and pin, what each check does and does not establish, and
+  where the checks are thinnest.
 
 ## Built on great work
 
@@ -243,6 +313,12 @@ from other projects keeps its source's license, which [LICENSE] lists.
 [graviola-logo]: https://github.com/ctz/graviola/blob/main/admin/picture.png
 [rind-wordmark]: https://raw.githubusercontent.com/kixel-ai/rind/main/admin/wordmark.svg
 [aws-lc-rs]: https://github.com/aws/aws-lc-rs
+[aws-lc-rs-fips]: https://github.com/aws/aws-lc-rs/blob/main/aws-lc-rs/README.md#fips
+[aws-lc-fips]: https://github.com/aws/aws-lc/blob/main/crypto/fipsmodule/FIPS.md#validations
+[rustls-audit]: https://github.com/rustls/rustls/blob/main/audit/TLS-01-report.pdf
+[rustcrypto-aes-gcm]: https://github.com/RustCrypto/AEADs/tree/master/aes-gcm#security-notes
+[rustcrypto-chacha]: https://github.com/RustCrypto/AEADs/tree/master/chacha20poly1305#security-notes
+[rustcrypto-rsa]: https://github.com/RustCrypto/RSA#readme
 [s2n-bignum]: https://github.com/awslabs/s2n-bignum
 [HACL\*]: https://github.com/hacl-star/hacl-star
 [libcrux]: https://github.com/cryspen/libcrux
@@ -257,6 +333,7 @@ from other projects keeps its source's license, which [LICENSE] lists.
 [rind-str0m]: https://github.com/kixel-ai/rind/tree/main/rind-str0m
 [rind-openmls]: https://github.com/kixel-ai/rind/tree/main/rind-openmls
 [rind-jsonwebtoken]: https://github.com/kixel-ai/rind/tree/main/rind-jsonwebtoken
+[rind-openssl]: https://github.com/kixel-ai/rind/tree/main/rind-openssl
 [rind-object-store]: https://github.com/kixel-ai/rind/tree/main/rind-object-store
 [rind-rcgen]: https://github.com/kixel-ai/rind/tree/main/rind-rcgen
 [rind-dart]: https://github.com/kixel-ai/rind/tree/main/rind-dart
@@ -266,9 +343,13 @@ from other projects keeps its source's license, which [LICENSE] lists.
 [quests]: https://github.com/kixel-ai/rind/blob/main/quest/README.md
 [launch-post]: https://moq.dev/blog/rind/
 [contributing]: https://github.com/kixel-ai/rind/blob/main/CONTRIBUTING.md
+[releases]: https://github.com/kixel-ai/rind/blob/main/CONTRIBUTING.md#releases
+[supported-versions]: https://github.com/kixel-ai/rind/blob/main/SECURITY.md#supported-versions
+[security]: https://github.com/kixel-ai/rind/blob/main/SECURITY.md
 [migrating]: https://github.com/kixel-ai/rind/blob/main/MIGRATING.md
 [benchmarks]: https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md
 [gaps]: https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#known-gaps
+[comparison]: https://github.com/kixel-ai/rind/blob/main/README.md#compared-with-the-alternatives
 [build-cost]: https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#build-cost
 [verified]: https://github.com/kixel-ai/rind/blob/main/BENCHMARKS.md#verified-code
 [testing]: https://github.com/kixel-ai/rind/blob/main/TESTING.md#primitives
@@ -277,3 +358,4 @@ from other projects keeps its source's license, which [LICENSE] lists.
 [sources]: https://github.com/kixel-ai/rind/blob/main/ALGORITHMS.md#sources
 [platforms]: https://github.com/kixel-ai/rind/blob/main/PLATFORMS.md
 [architecture]: https://github.com/kixel-ai/rind/blob/main/ARCHITECTURE.md
+[audit]: https://github.com/kixel-ai/rind/blob/main/AUDIT.md

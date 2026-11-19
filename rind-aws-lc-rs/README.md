@@ -22,34 +22,36 @@ Every aws-lc-rs feature but `fips` is accepted. `ring-io` and `ring-sig-verify` 
 
 ## Wiping keys
 
-Keys, and the adapter's own copies of secrets such as PKCS#8 documents, Ed25519 seeds, and ML-KEM shared secrets, are wiped on drop only under the `wipe` feature, which aws-lc-rs lacks since it always wipes.
-It turns on rind's own `wipe` feature too. Leaving it off skips the wipe, which is faster.
-It is the one item this crate adds to aws-lc-rs's API.
+Keys, and the adapter's own copies of secrets such as PKCS#8 documents, Ed25519 seeds, and ML-KEM shared secrets, are wiped on drop, as aws-lc-rs wipes them.
 
-## Not offered
+## What rind cannot back
 
 These items are left out, so code using them fails to build:
 
-- ML-KEM-512 and ML-KEM-1024 (`kem::ML_KEM_512`, `kem::ML_KEM_1024`): rind has only ML-KEM-768 so far.
-- ML-DSA (`signature::ML_DSA_*`, `PqdsaKeyPair`, and the other `Pqdsa*` types): rind has it, and this crate does not offer it yet.
-  rustls's `aws_lc_rs` provider and rustls-webpki's `aws-lc-rs` feature name these and ML-KEM-1024, so they do not build on this crate yet.
-- `kem::DecapsulationKey::new` and `key_bytes`: rind neither imports nor exports an ML-KEM private key.
-- SHA-224 (`digest::SHA224`, `hmac::HMAC_SHA224`, and the ECDSA algorithms with it), ECDSA with SHA-1 or SHA-3, and ECDSA on secp256k1 (`ECDSA_P256K1_*`).
-- AES-GCM-SIV, AES in ECB, CFB, or OFB mode, ISO 10126 padding, DES (`legacy-des`), CMAC (`cmac`), the KBKDF and SSKDF key derivations (`kdf`), the TLS 1.2 PRF (`tls_prf`), and the streaming cipher contexts (`cipher::StreamingEncryptingKey` and the others).
+- `signature::PqdsaPrivateKey::as_raw_bytes` and `encoding::PqdsaPrivateKeyRaw`: rind does not export an ML-DSA key's expanded form. `to_pkcs8v1` encodes its seed.
+- `kem::DecapsulationKey::new`, `kem::DecapsulationKey::key_bytes`, and `kem::DecapsulationKeyBytes`: rind neither imports nor exports an ML-KEM private key.
+- SHA-224 (`digest::SHA224*`, `hmac::HMAC_SHA224`, `signature::ECDSA_P521_SHA224_*`), ECDSA with SHA-1 or SHA-3 (`signature::ECDSA_*_SHA1_*`, `signature::ECDSA_*_SHA3_*`), and ECDSA on secp256k1 (`signature::ECDSA_P256K1_*`).
+- AES-GCM-SIV (`aead::AES_*_GCM_SIV`); AES in ECB, CFB, or OFB mode (`cipher::*::ecb`, `cipher::*::ecb_pkcs7`, `cipher::*::cfb*`, `cipher::*::ofb`, `cipher::OperatingMode::ECB`, `cipher::OperatingMode::CFB*`, `cipher::OperatingMode::OFB`, `cipher::AES_CFB_IV_LEN`, `cipher::AES_OFB_IV_LEN`); ISO 10126 padding (`cipher::PaddedBlockDecryptingKey::cbc_iso10126`); DES under `legacy-des` (`cipher::DES_*`, `cipher::AlgorithmId::Des*`, `cipher::*Context::Iv64`); CMAC (`cmac`); the KBKDF and SSKDF key derivations (`kdf`); the TLS 1.2 PRF (`tls_prf`); and the streaming cipher contexts (`cipher::Streaming*`, `cipher::BufferUpdate`).
 - `aead::chacha20_poly1305_openssh`: rind has no SSH consumer.
-- `rsa::KeyPair::from_components` and `rsa::KeyPairComponents`: building a key from its private components means encoding them as DER here, which branches on their secret leading bytes. Load the key as PKCS#1 or PKCS#8.
-- `rsa::KeyPair::sign_digest`, `digest::Digest::import_less_safe`, and the PKCS#1 v1.5 encryption keys (`rsa::Pkcs1PublicEncryptingKey`, `rsa::Pkcs1PrivateDecryptingKey`): rind signs only digests it computed, and refuses PKCS#1 v1.5 encryption, which invites padding-oracle attacks.
-- `io::der`, `test`, `unstable`, `awslc_version`, `try_fips_self_test`, the FIPS-only functions, and `rand::unsealed`, which aws-lc-rs's `dev-tests-only` feature exposes; rind-aws-lc-rs accepts that feature but adds nothing for it.
+- `rsa::KeyPair::from_components`, `signature::RsaKeyPair::from_components`, and `rsa::KeyPairComponents`: building a key from its private components means encoding them as DER here, which branches on their secret leading bytes. Load the key as PKCS#1 or PKCS#8.
+- `rsa::KeyPair::sign_digest`, `signature::RsaKeyPair::sign_digest`, `digest::Digest::import_less_safe`, and the PKCS#1 v1.5 encryption keys (`rsa::Pkcs1*`): rind signs only digests it computed, and refuses PKCS#1 v1.5 encryption, which invites padding-oracle attacks.
+- `io::der`, `test`, `test_file`, `unstable`, `awslc_version`, `try_fips_self_test`, the FIPS-only functions, and the items aws-lc-rs's `dev-tests-only` feature exposes to supply a key or randomness (`agreement::*::generate_for_test`, `rand::unsealed`), since rind draws its own; under that feature rind-aws-lc-rs adds only `rand::SecureRandom::mut_fill`.
 
 ## Behaves differently
 
 - Where aws-lc-rs takes a [`rand::SecureRandom`] to generate a key or sign, rind draws from the system random source itself, as [`rand::SystemRandom`], the only `SecureRandom`, does.
 - A [`error::KeyRejected`] from rind's own checks gives rind's reason in its `Display`, and `"InvalidEncoding"` from `description_()`.
 - `VerificationAlgorithm::verify_digest_sig` and `verify_digest` fail for RSA, as they do for Ed25519: rind verifies RSA only over a message it hashes itself.
-- An Ed25519 public key of small order verifies no signature, and a PKCS#8 v2 Ed25519 key whose public key does not match, or is missing, is refused.
+- An Ed25519 public key of small order verifies no signature, and a PKCS#8 v2 Ed25519 key whose public key does not match is refused.
 - ECDSA and ECDH public keys in the X9.62 hybrid form are refused.
 - An RSA public key, from `rsa::PublicKey::from_der` or elsewhere, must have a modulus of 1024 to 8192 bits, the range rind verifies with.
-  One outside an algorithm's narrower range is refused when parsed for it, by `ParsedPublicKey::new` or `to_parsed_public_key`, rather than when verifying.
 - An RSA-OAEP private key is bound to one algorithm in rind, so a `rsa::PrivateDecryptingKey` loads the key again the first time it decrypts with each other algorithm, and keeps it.
+
+## WebAssembly
+
+It builds for `wasm32-wasip2` and `wasm32-unknown-unknown`, the browser, for
+neither of which aws-lc-rs builds. In the browser, rind needs its JavaScript random source, `getrandom = { version = "0.4",
+features = ["wasm_js"] }`. [PLATFORMS.md](https://github.com/kixel-ai/rind/blob/main/PLATFORMS.md) lists what each adapter's
+upstream needs there too, and why rind's constant-time checks do not cover wasm.
 
 License: Apache-2.0 OR ISC OR MIT-0

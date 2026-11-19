@@ -43,11 +43,15 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      # Outside a pull request every job runs.
+      # Outside a pull request every job runs, and in release-plz's release
+      # PR, which only bumps versions and changelogs, none does: a
+      # `release-plz-` branch that moq-bot, release.yml's app, opened.
       - id: match
+        env:
+          RELEASE_PR: ${{ startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]' }}
         run: |
           changed=
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+          if [[ "$GITHUB_EVENT_NAME" == pull_request && "$RELEASE_PR" != true ]]; then
             changed=$(sh/changed.sh)
           fi
           for rule in \
@@ -61,6 +65,27 @@ jobs:
               echo "${rule%%=*}=false"
             fi
           done >>"$GITHUB_OUTPUT"
+
+  # rind-fips's module answers ACVP's sets through rind-acvp on each of the
+  # runner's paths, with the large-data hash tests, 15 GiB a hash, which
+  # pull requests skip. x86-cpu.yml covers the AVX-512 paths under SDE.
+  acvp:
+    if: github.event_name != 'pull_request'
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/nix
+
+      - name: Answer ACVP's sets
+        run: nix develop .#acvp --command cargo test --release -p rind-acvp --features module --locked
+        env:
+          SLOW_TESTS: 1
 
   build:
     if: github.event_name != 'pull_request'
@@ -89,8 +114,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/vectors
-
       - name: Install ${{ matrix.rustc }} toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
@@ -102,24 +125,27 @@ jobs:
         run: cargo test
       - name: Run tests (debug, --no-default-features)
         run: cargo test --no-default-features
-      - name: Run zeroing tests (debug, --features wipe)
-        run: cargo test -p rind -p rind-aws-lc-rs -p rind-rcgen --features rind/wipe,rind-aws-lc-rs/wipe,rind-rcgen/wipe --test zeroing
-      - name: Run heap scratch tests (release, --features wipe)
-        run: env SLOW_TESTS=1 cargo test -p rind --features wipe --test heap_scratch --release
 
       - name: Build (release)
         run: cargo build -p rind --release
       - name: Run tests (release)
         run: env SLOW_TESTS=1 cargo test --release
+      # Each self-test's failure, and on every call, that each service's
+      # stack stays within what it zeroes.
+      - name: Run FIPS break tests
+        if: runner.os == 'Linux'
+        run: cargo test -p rind-fips --features __break_tests
 
       - name: Artificial CPU feature tests (x86_64)
         if: runner.arch == 'X64'
         shell: bash
         run: |
-          # Each tier runs the tests and the zeroing tests, then CCTV's million ML-KEM vectors in a
+          # Each tier runs the tests, then CCTV's million ML-KEM vectors in a
           # release build, which honours the tier's denials only with
           # `--cfg rind_cpu_disable`, alongside the check that they took effect
-          tier() { env "$@" cargo test; env "$@" cargo test -p rind --features wipe --test zeroing --test heap_scratch; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
+          # rind-fips is left out: its module refuses a CPU masked below its
+          # baseline.
+          tier() { env "$@" cargo test --workspace --exclude rind-fips; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
           # test rind's AVX2 SHA-1 and OpenSSL's AVX2 SHA-256 for CPUs without
           # the SHA extensions
           tier RIND_CPU_DISABLE_sha=1 RIND_CPU_DISABLE_intel=1
@@ -157,10 +183,13 @@ jobs:
         if: runner.arch == 'ARM64'
         shell: bash
         run: |
-          tier() { env "$@" cargo test; env "$@" cargo test -p rind --features wipe --test zeroing --test heap_scratch; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
+          tier() { env "$@" cargo test --workspace --exclude rind-fips; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
           # test the by-4 AES-GCM and Keccak-f kernels for cores without SHA3,
-          # failing a run whose OS hides the crypto extension
-          tier RIND_CPU_DISABLE_sha3=1 RIND_TEST_ARM_CRYPTO_EXT=1
+          # and aws-lc's NEON ChaCha20-Poly1305 for those without SVE2, such
+          # as Neoverse N1, failing a run whose OS hides the crypto extension,
+          # and on Apple silicon the `dsb nsh; isb sy` barrier after DIT for
+          # cores without `sb`
+          tier RIND_CPU_DISABLE_sha3=1 RIND_CPU_DISABLE_sve2=1 RIND_CPU_DISABLE_sb=1 RIND_TEST_ARM_CRYPTO_EXT=1 RIND_TEST_ARM_SVE2=0
           # test vpaes, NEON GHASH, and scalar SHA-1 and SHA-256 for cores
           # without the crypto extension, such as the Raspberry Pi 4's; the
           # last variable fails the run that lands on the wrong path
@@ -186,8 +215,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - uses: ./.github/actions/vectors
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
@@ -219,8 +246,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/vectors
-
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
@@ -234,26 +259,30 @@ jobs:
 
   # 32-bit ARM runs libcrux, or aws-lc's assembly for ChaCha20, NEON, and the
   # crypto extension. The recipe builds and lints Android and Linux gnueabihf,
-  # then runs the gnueabihf tests under qemu on each of rind's armv7 tiers, as
-  # a local run does.
+  # then runs the gnueabihf tests on each of rind's armv7 tiers, as a local
+  # run does: the arm64 runner runs the crypto extension's tier and the
+  # NEON-denied one natively, and qemu the Cortex-A15's.
   armv7:
     needs: changes
     if: needs.changes.outputs.armv7 == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/vectors
       - uses: ./.github/actions/just
       - uses: ./.github/actions/nix
+      - uses: ./.github/actions/rust-cache
+        with:
+          shell: .#armv7
 
       - name: Build, lint, and test
         run: just armv7
 
-  # wasm32-wasip2 on the portable backend, under wasmtime: the vector tests,
-  # without the differential ones, whose aws-lc does not build for wasm.
+  # wasm32-wasip2 on the portable backend, under wasmtime: rind's vector tests
+  # and rind-rustls's and rind-ring's tests, without the differential ones,
+  # whose aws-lc does not build for wasm.
   wasm:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -262,7 +291,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/vectors
       - uses: ./.github/actions/just
       - uses: ./.github/actions/nix
 
@@ -287,7 +315,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/vectors
       - uses: ./.github/actions/just
       - uses: ./.github/actions/nix
 
@@ -417,9 +444,12 @@ jobs:
           toolchain: stable
           targets: aarch64-apple-ios-sim
 
+      # Beta, not stable: stable 3.50.0's `flutter test` sometimes misses the
+      # app's VM service URL and hangs. See UPSTREAM.md, "Flutter's iOS
+      # simulator test run hangs when its log stream attaches late".
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
-          channel: stable
+          channel: beta
 
       - name: Create the iOS project
         run: flutter create --platforms ios .
@@ -443,9 +473,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/vectors
       - uses: ./.github/actions/just
       - uses: ./.github/actions/nix
+      - uses: ./.github/actions/rust-cache
 
       - name: Build, lint, and test
         run: just portable
@@ -463,6 +493,7 @@ jobs:
 
       - uses: ./.github/actions/just
       - uses: ./.github/actions/nix
+      - uses: ./.github/actions/rust-cache
 
       - name: Test
         run: just openmls --release
@@ -476,8 +507,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - uses: ./.github/actions/vectors
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
@@ -534,8 +563,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - uses: ./.github/actions/vectors
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1

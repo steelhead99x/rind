@@ -16,8 +16,10 @@
    widths and ignored W bits, and the memory forms on [rsp + disp8], 16-byte
    aligned for the legacy SSE forms that require it, the SHA extensions'
    included where the CPU has them. RSP itself is never an operand, since
-   the model's is symbolic. The F3 prefix the fork lets RET take is not
-   cosimulated, since RET leaves the simulator's harness. *)
+   the model's is symbolic, except as PUSH m64's base, which runs between
+   two LEAs that keep it within the harness's buffer. The F3 prefix the fork
+   lets RET take is not cosimulated, since RET leaves the simulator's
+   harness, nor is STOSB, whose model allows every next state. *)
 
 loadt "x86/proofs/simulator.ml";;
 
@@ -34,6 +36,12 @@ let sse ?(w=0) opcode md reg rm tail =
             then [rex w reg rm] else [] in
   [0x66] @ pre @ opcode @ [modrm md reg rm] @ tail;;
 
+(* [REX] <opcode> with ModRM fields reg and rm and no 66 prefix, the REX
+   byte also present at random where nothing needs it. *)
+let ps opcode md reg rm tail =
+  let pre = if reg > 7 || rm > 7 || rnd 4 = 0 then [rex 0 reg rm] else [] in
+  pre @ opcode @ [modrm md reg rm] @ tail;;
+
 (* [REX] 0F 38 <opcode> with ModRM fields reg and rm, as the SHA extensions
    encode them, without the 66 prefix. *)
 let sha opcode md reg rm tail =
@@ -41,11 +49,19 @@ let sha opcode md reg rm tail =
   pre @ [0x0f; 0x38; opcode; modrm md reg rm] @ tail;;
 
 (* A three-byte VEX prefix for the 0F (1), 0F38 (2) or 0F3A (3) map with
-   the 66 prefix. *)
-let vex map w v l opcode md reg rm tail =
+   the implied prefix pp: none (0), 66 (1), F3 (2) or F2 (3). *)
+let vexp pp map w v l opcode md reg rm tail =
   [0xc4; ((1 - reg / 8) lsl 7) lor (1 lsl 6) lor ((1 - rm / 8) lsl 5) lor map;
-   (w lsl 7) lor (((lnot v) land 15) lsl 3) lor (l lsl 2) lor 1;
+   (w lsl 7) lor (((lnot v) land 15) lsl 3) lor (l lsl 2) lor pp;
    opcode; modrm md reg rm] @ tail;;
+
+(* The same with the 66 prefix. *)
+let vex = vexp 1;;
+
+(* A BMI2 shift by a register: the 0F38 map with prefix bits pp, 1 for
+   SHLX's 66 and 3 for SHRX's F2, W for its width, and opcode F7, with ModRM
+   fields reg and rm and count register v. *)
+let shiftx pp w md reg rm v tail = vexp pp 2 w v 0 0xf7 md reg rm tail;;
 
 (* A random register other than RSP. *)
 let gpr () = let r = rnd 15 in if r >= 4 then r + 1 else r;;
@@ -71,6 +87,17 @@ let register_forms = [
   (fun () -> sse [0x0f; 0x6a] 3 (rnd 16) (rnd 16) []);         (* PUNPCKHDQ *)
   (fun () -> sse [0x0f; 0x6c] 3 (rnd 16) (rnd 16) []);         (* PUNPCKLQDQ *)
   (fun () -> sse [0x0f; 0x6d] 3 (rnd 16) (rnd 16) []);         (* PUNPCKHQDQ *)
+  (fun () -> vexp 3 3 (rnd 2) 0 0 0xf0 3 (gpr ()) (gpr ())
+               [imm ()]);                                      (* RORX *)
+  (fun () -> vexp 0 2 (rnd 2) (gpr ()) 0 0xf2 3 (gpr ()) (gpr ())
+               []);                                            (* ANDN *)
+  (fun () -> ps [0x0f; 0x57] 3 (rnd 16) (rnd 16) []);          (* XORPS *)
+  (fun () -> sse [0x0f; 0xdf] 3 (rnd 16) (rnd 16) []);         (* PANDN *)
+  (fun () -> sse [0x0f; 0x76] 3 (rnd 16) (rnd 16) []);         (* PCMPEQD *)
+  (* Equal lanes, which random ones almost never are. *)
+  (fun () -> let r = rnd 16 in sse [0x0f; 0x76] 3 r r []);     (* PCMPEQD *)
+  (fun () -> shiftx 1 (rnd 2) 3 (gpr ()) (gpr ()) (gpr ()) []); (* SHLX *)
+  (fun () -> shiftx 3 (rnd 2) 3 (gpr ()) (gpr ()) (gpr ()) []); (* SHRX *)
 ];;
 
 (* Memory forms on [rsp + d], run as cosimulate_instructions (Some 0) 32:
@@ -98,7 +125,26 @@ let memory_forms = [
   (fun () -> sse [0x0f; 0x6a] 1 (rnd 16) 4 (mem (aligned ())));   (* PUNPCKHDQ *)
   (fun () -> sse [0x0f; 0x6c] 1 (rnd 16) 4 (mem (aligned ())));   (* PUNPCKLQDQ *)
   (fun () -> sse [0x0f; 0x6d] 1 (rnd 16) 4 (mem (aligned ())));   (* PUNPCKHQDQ *)
+  (fun () -> vexp 3 3 (rnd 2) 0 0 0xf0 1 (gpr ()) 4
+               (mem (rnd 128) @ [imm ()]));                    (* RORX m *)
+  (fun () -> vexp 0 2 (rnd 2) (gpr ()) 0 0xf2 1 (gpr ()) 4
+               (mem (rnd 128)));                               (* ANDN m *)
+  (fun () -> ps [0x0f; 0x57] 1 (rnd 16) 4 (mem (aligned ())));    (* XORPS *)
+  (fun () -> ps [0x0f; 0x18] 1 1 4 (mem (rnd 128)));              (* PREFETCHT0 *)
+  (fun () -> sse [0x0f; 0xdf] 1 (rnd 16) 4 (mem (aligned ())));   (* PANDN *)
+  (fun () -> sse [0x0f; 0x76] 1 (rnd 16) 4 (mem (aligned ())));   (* PCMPEQD *)
+  (fun () -> shiftx 1 (rnd 2) 1 (gpr ()) 4 (gpr ())
+               (mem (8 * rnd 16)));                            (* SHLX m *)
+  (fun () -> shiftx 3 (rnd 2) 1 (gpr ()) 4 (gpr ())
+               (mem (8 * rnd 16)));                            (* SHRX m *)
 ];;
+
+(* PUSH m64, FF /6, of [rsp + d] between LEA rsp, [rsp + 16] and LEA rsp,
+   [rsp - 8], so it reads and writes within the harness's buffer and leaves
+   RSP as it was; run as cosimulate_instructions (Some 1) 0. *)
+let push_form () =
+  [[0x48; 0x8d; 0x64; 0x24; 0x10]; [0xff; 0x74; 0x24; 8 * rnd 16];
+   [0x48; 0x8d; 0x64; 0x24; 0xf8]];;
 
 (* The SHA extensions' forms, where the CPU has them, which admin/prove says
    in RIND_COSIM_SHA. *)
@@ -157,20 +203,40 @@ do_list (fun (name,pat) ->
    "sha256_msg1",`sha256_msg1 (word a) (word b)`;
    "sha256_msg2",`sha256_msg2 (word a) (word b)`];;
 
+(* Cases the executor lacks a feature for, which cosimulate_instructions
+   skips and reports as agreeing; counted apart so a run says what it did
+   not check. *)
+let rind_cosim_skipped = ref 0;;
+
+let rind_cosim_check (decoded,result) =
+  match cosim_take_skipped () with
+  | [] ->
+      if result then
+        (Format.print_string ("OK: " ^ string_of_term decoded);
+         Format.print_newline ())
+      else failwith ("cosimulation disagrees: " ^ string_of_term decoded)
+  | missing ->
+      incr rind_cosim_skipped;
+      Format.print_string ("SKIPPED, the executor lacks " ^
+        String.concat ", " missing ^ ": " ^ string_of_term decoded);
+      Format.print_newline ();;
+
 let rind_cosim memop add_assum form =
-  let ibytes = form () in
-  let decoded,result = cosimulate_instructions memop add_assum [ibytes] in
-  if result then
-    (Format.print_string ("OK: " ^ string_of_term decoded);
-     Format.print_newline ())
-  else failwith ("cosimulation disagrees: " ^ string_of_term decoded);;
+  rind_cosim_check (cosimulate_instructions memop add_assum [form ()]);;
 
 let rind_cosim_rounds = 20;;
 
+let rind_cosim_push () =
+  rind_cosim_check (cosimulate_instructions (Some 1) 0 (push_form ()));;
+
 for round = 1 to rind_cosim_rounds do
   do_list (rind_cosim None 0) register_forms;
-  do_list (rind_cosim (Some 0) 32) memory_forms
+  do_list (rind_cosim (Some 0) 32) memory_forms;
+  rind_cosim_push ()
 done;;
 
-Printf.printf "cosimulated %d cases\n"
-  (rind_cosim_rounds * (length register_forms + length memory_forms));;
+let rind_cosim_total =
+  rind_cosim_rounds * (length register_forms + length memory_forms + 1);;
+
+Printf.printf "cosimulated %d cases, skipped %d the executor lacks a feature for\n"
+  (rind_cosim_total - !rind_cosim_skipped) !rind_cosim_skipped;;

@@ -1,8 +1,10 @@
 #!/bin/sh
 set -e
 
-# Usage: admin/ctgrind [unit|wycheproof|adapters] [cargo test args...]
-# Runs every suite unless one is named, so CI can run them in parallel.
+# Usage: admin/ctgrind [unit|wycheproof|adapters|fips] [cargo test args...]
+# Runs every suite but fips unless one is named, so CI can run them in
+# parallel. fips checks the FIPS module, which refuses a CPU below its
+# baseline, so the CPU-masked runs leave it out.
 # Run it in `nix develop .#ctgrind`, which has the libclang and valgrind
 # headers crabgrind builds with.
 #
@@ -20,8 +22,10 @@ set -e
 # Valgrind (through 3.27) decodes no AVX-512, VAES, VPCLMULQDQ, or SHA
 # instruction and hides them from `cpuid`, so rind's AES-GCM on VAES, SHA-1
 # and SHA-256 on the SHA extensions, SHA-384 and SHA-512 on the SHA512
-# instructions, and AVX-512 ML-KEM and RSA go unchecked here. `admin/ct-sde` checks them under Intel SDE, all but ML-KEM, whose
-# AVX-512 code samples only the public matrix.
+# instructions, and AVX-512 ML-KEM, RSA, ChaCha20, X25519, Ed25519, and P-256
+# ECDH go unchecked here. `admin/ct-sde` checks them under Intel SDE, all but
+# Graviola's AVX-512 sampler for ML-KEM-512, ML-KEM-1024, and ML-KEM-768's
+# fallback from pyca/verified-garbage, which samples only the public matrix.
 # See UPSTREAM.md, "Valgrind cannot run x86_64's newest extensions".
 #
 # On aarch64 it hides SHA3, which rind takes for its eight-way AES-GCM
@@ -32,8 +36,14 @@ set -e
 #
 # Release builds keep line tables so memcheck names inlined frames, which
 # the suppressions match.
+#
+# On ARM, an unwind that stops within three frames scans the stack for
+# return addresses, so a suppression still sees the caller of a std function
+# whose unwind entry valgrind cannot read. Other architectures ignore it.
+# See UPSTREAM.md, "Valgrind cannot unwind std's frame-pointer entries on
+# armv7".
 self="$(cd "$(dirname "$0")" && pwd)/ctgrind"
-valgrind="valgrind --error-exitcode=99 --suppressions=$(dirname "$self")/ctgrind.supp"
+valgrind="valgrind --error-exitcode=99 --unw-stack-scan-thresh=3 --suppressions=$(dirname "$self")/ctgrind.supp"
 
 # Cargo runs each test binary through this script. `--track-origins=yes`
 # roughly doubles memcheck's cost, so only a binary memcheck failed reruns
@@ -51,7 +61,7 @@ fi
 
 suite=all
 case "$1" in
-    unit | wycheproof | adapters)
+    unit | wycheproof | adapters | fips)
         suite=$1
         shift
         ;;
@@ -69,6 +79,52 @@ export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER="$self --run"
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="$self --run"
 export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUNNER="$self --run"
 
+# RIND_SCOPE=BASE skips the run when nothing the branch changed since BASE
+# reaches a backend this run builds, as `sh/backends.sh` decides: the one
+# rind/build.rs picks for each `--target` (`host-tuple` is the host), else
+# `CARGO_BUILD_TARGET`, else the host, or the portable one under
+# `--cfg rind_portable`. Which of Cargo's
+# `*RUSTFLAGS` variables wins depends on precedence and target, so when any
+# names `rind_portable`, the run checks both backends it could build. The fips
+# suite's module build replaces the caller's flags (rind-fips/build.rs), so it
+# always takes the target's.
+if [ -n "${RIND_SCOPE:-}" ]; then
+    # Cargo builds every `--target` it is given.
+    targets=
+    prev=
+    for arg in "$@"; do
+        case "$prev:$arg" in
+            --target:*) targets="$targets $arg" ;;
+            *:--target=*) targets="$targets ${arg#--target=}" ;;
+        esac
+        prev=$arg
+    done
+    [ -n "$targets" ] || targets=${CARGO_BUILD_TARGET:-$(uname -m)}
+    backend=
+    for target in $targets; do
+        [ "$target" != host-tuple ] || target=$(uname -m)
+        case "$target" in
+            x86_64*) backend="$backend|x86_64" ;;
+            aarch64* | arm64*) backend="$backend|aarch64" ;;
+            armv7*) backend="$backend|arm" ;;
+            *) backend="$backend|portable" ;;
+        esac
+    done
+    backend=${backend#|}
+    if [ "$suite" != fips ] && env | grep -q '^[A-Z0-9_]*RUSTFLAGS=.*rind_portable'; then
+        backend="$backend|portable"
+    fi
+    root=$(dirname "$self")/..
+    # Its own command, so a base it cannot resolve fails the run under
+    # `set -e` rather than reading as an empty diff.
+    changed=$("$root/sh/changed.sh" "$RIND_SCOPE")
+    reached=$(printf '%s\n' "$changed" | "$root/sh/backends.sh" -)
+    if ! printf '%s\n' "$reached" | grep -qxE "all|$backend"; then
+        echo "ctgrind: nothing changed since $RIND_SCOPE reaches the $(printf '%s' "$backend" | sed 's/|/ or /g') backend" >&2
+        exit 0
+    fi
+fi
+
 # rind's unit tests mark its secrets through the `__ctgrind` hooks. Wycheproof
 # runs without them, since its harness compares secret outputs directly.
 if [ "$suite" = all ] || [ "$suite" = unit ]; then
@@ -81,6 +137,21 @@ fi
 # Each adapter's ctgrind test marks the secrets it hands rind, while rind's
 # hooks mark the keys rind generates or parses. Python's tests run through
 # its extension, not a Rust lib test binary, which would need libpython.
+#
+# rind-openssl's tests link the target's OpenSSL, which the armv7 jobs'
+# cross toolchain lacks, as `build.yml`'s cross targets do. Its glue is the
+# same Rust on every target, and the unit suite checks rind's armv7 code.
 if [ "$suite" = all ] || [ "$suite" = adapters ]; then
-    cargo test --workspace --exclude rind --exclude rind-python --lib --test ctgrind --features rind/__ctgrind "$@"
+    case " $* " in
+        *armv7-unknown-linux-gnueabihf*) set -- --exclude rind-openssl "$@" ;;
+    esac
+    cargo test --workspace --exclude rind --exclude rind-python --exclude rind-fips --lib --test ctgrind --features rind/__ctgrind "$@"
+fi
+
+# The FIPS module as it ships, built with rind's hooks: its test marks the
+# secrets it hands the module. Then the ACVP build's deterministic services,
+# which only that build exports.
+if [ "$suite" = fips ]; then
+    cargo test -p rind-fips --test ctgrind --features __ctgrind,rind/__ctgrind "$@"
+    cargo test -p rind-fips --test ctgrind --features __ctgrind,__acvp,rind/__ctgrind "$@" -- --exact acvp
 fi

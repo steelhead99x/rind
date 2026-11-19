@@ -1,6 +1,6 @@
 module
 public import Rind.X86_64.HmacDispatch
-public import Rind.X86_64.Dispatch
+public import Rind.X86_64.QuicDispatch
 public import Rind.X86_64.AeadDispatch
 @[expose] public section
 open Aeneas Aeneas.Std Result
@@ -18,5 +18,11 @@ namespace rind.x86_64.kdf
 
 /-- `NonZero<T>`: its `T`, which Rust keeps nonzero and no proof relies on. -/
 @[reducible] def core.num.nonzero.NonZero (T : Type) (_Inner : Type) : Type := T
+
+/-- `mid::pbkdf2_vg::Algorithm` and `Key`: PBKDF2 on pyca/verified-garbage's
+routine, where the CPU runs it. No proof here covers that branch of
+`pbkdf2::Secret`. -/
+opaque mid.pbkdf2_vg.Algorithm : Type
+opaque mid.pbkdf2_vg.Key : Type
 
 end rind.x86_64.kdf
