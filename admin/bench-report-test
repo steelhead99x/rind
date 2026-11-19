@@ -337,6 +337,8 @@ class Verified(unittest.TestCase):
         self.assertEqual(len(self.load(self.entry(cpu='["adx", "!vaes"]'))), 1)
         self.assertEqual(len(self.load(self.entry(arch=None))), 1)
         self.assertEqual(len(self.load(self.entry(arch='"armv7"', cpu=None))), 1)
+        # rind-cpuid reads armv7's NEON and crypto extension bits.
+        self.assertEqual(len(self.load(self.entry(arch='"armv7"', cpu='["neon", "aes", "!crc32"]'))), 1)
 
     def test_refuses_what_names_nothing(self):
         for fields in [
@@ -344,7 +346,7 @@ class Verified(unittest.TestCase):
             {"operations": '["x25519"]'},
             {"operations": '["aes256-gcm/8B"]'},
             {"arch": '"riscv64"'},
-            {"arch": '"armv7"', "cpu": '["neon"]'},
+            {"arch": '"armv7"', "cpu": '["avx2"]'},
             {"arch": None, "cpu": '["adx"]'},
             {"cpu": '["sha2"]'},
             {"os": '"windows"'},
