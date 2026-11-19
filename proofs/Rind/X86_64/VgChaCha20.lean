@@ -2,6 +2,7 @@ import Rind.X86_64.ChaCha20
 import Rind.X86_64.ChaCha20Poly1305
 import Rind.VgChaCha20
 open Aeneas Aeneas.Std Result rind.spec
+open VG.Spec.ChaCha20 (bytesAt keyAt leftAt restAt keystreamOf wordLE)
 
 /-!
 # `cipher::ChaCha20` on pyca/verified-garbage's routines, from 256 bytes on x86_64
@@ -13,24 +14,28 @@ last whole 512-byte group on rind's two-block kernel. The axioms
 below restate VG's Lean theorems about `vg_chacha20_init`,
 `vg_chacha20_apply_avx2`, and `vg_chacha20_apply_avx512vl` about the Rust
 wrappers that call them, `VgState::init`, `VgState::apply_avx2`, and
-`VgState::apply_avx512vl`, over `Rind.VgChaCha20`'s transliteration of VG's
-spec. `cipher_vg_spec` composes them, and `chacha20_apply_keystream` proves
-the API's result from them: RFC 8439's encryption, as `Rind.Spec`
+`VgState::apply_avx512vl`, over VG's own spec,
+`VerifiedGarbage.Spec.ChaCha20`, which `admin/import-vg-models` vendors byte
+for byte. `cipher_vg_spec` composes them, and `chacha20_apply_keystream`
+proves the API's result from them: RFC 8439's encryption, as `Rind.Spec`
 transliterates it.
 
 The kernel has no proof yet, so the theorems take its contract as the
 hypothesis `Kernel`, which [the x86_64 cipher
 quest](/quest/m4/verified/chacha20-poly1305-x86/cipher.md) is to prove.
 
-Trusted: each restatement, that `Rind.VgChaCha20` is VG's spec, and that each
-wrapper passes the routine its state's 768 bytes, which
-`Rind.X86_64.TypesExternal` models as the state, and the key's and counter
-and nonce's words as the little-endian bytes VG reads. VG's theorems rest on
-its models of the instructions, which `admin/prove vg` cosimulates for each
-instruction of VG's code rind runs, on the CPU or, where it lacks a feature,
-under Intel SDE, but for `jmp`, static addresses, and a lone `ret`, which its
-check that rind's copies are VG's text covers; and on VG's own Lean kernel
-check, at the commit `admin/import-vg` pins.
+Trusted: each restatement, and that each wrapper passes the routine its
+state's 768 bytes, which `Rind.X86_64.TypesExternal` models as the state, and
+the key's and counter and nonce's words as the little-endian bytes VG reads.
+That VG's definitions of the state's key and keystream read only those 768
+bytes is proven (`Rind.VgChaCha20`'s `keyAt_congr`, `leftAt_congr`, and
+`restAt_congr`), so the axioms, which hold for any memory holding them, say
+no more than VG's theorems. VG's theorems rest on its models of the
+instructions, which `admin/prove vg` cosimulates for each instruction of VG's
+code rind runs, on the CPU or, where it lacks a feature, under Intel SDE, but
+for `jmp`, static addresses, and a lone `ret`, which its check that rind's
+copies are VG's text covers; and on VG's own Lean kernel check, at the commit
+`admin/import-vg` pins.
 -/
 
 namespace rind.x86_64
@@ -43,10 +48,11 @@ def wordBytes (ws : List U32) : List (BitVec 8) := (ws.map (·.bv)).flatMap BitV
 /-! ## verified-garbage's routines, restated
 
 VG's contracts (`Spec/ChaCha20/Contract.lean`) are over its model's memory
-`m` before the call and `m'` after: each axiom reads the state's bytes `st`
-for `m` at the state, the key's and counter and nonce's words for theirs,
-and the data's bytes for `m` at the data. Each precondition holds for every
-call safe Rust makes: the state is 768 bytes; the state and the data, which
+`m` before the call and `m'` after, with the state at `p`: each axiom holds
+for any `m` and `m'` holding the state's 768 bytes at `p` before and after
+the call, and reads the key's and counter and nonce's words for the bytes at
+theirs, and the data's bytes for those at the data. Each precondition holds
+for every call safe Rust makes: the state is 768 bytes; the state and the data, which
 the routines write, are objects distinct from every other argument, so
 neither overlaps another argument, the return address, or the stack below it;
 no argument wraps the address space; and the token proves the CPU features.
@@ -64,8 +70,9 @@ the whole keystream for the counter and nonce. -/
 @[step]
 axiom vg_chacha20_init_spec (st : VgState) (key : Std.Array U32 8#usize) (counter_nonce : Std.Array U32 4#usize) :
     VgState.init st key counter_nonce ⦃ st' =>
-      vg.keyAt (bvs st'.val) = wordBytes key.val ∧
-      vg.restAt (bvs st'.val) = vg.keystreamOf (wordBytes key.val) (wordBytes counter_nonce.val) ⦄
+      ∀ (m' : VG.Mem) (p : VG.Addr), bytesAt m' p 768 = bvs st'.val →
+        keyAt m' p = wordBytes key.val ∧
+        restAt m' p = keystreamOf (wordBytes key.val) (wordBytes counter_nonce.val) ⦄
 
 /-- VG's `vg_chacha20_apply_avx2` on x86_64 meets
 `VG.Spec.ChaCha20.applyContract` ([`Stream.apply_verified`](https://github.com/pyca/verified-garbage/blob/0aa40d6c21fd02943fe5b38a5b69b6213d07764d/lean/VerifiedGarbage/Proof/ChaCha20/X86_64/Stream/ApplyCT.lean)
@@ -80,13 +87,14 @@ keeps the rest, and returns 1; otherwise it returns 0 and changes neither. -/
 axiom vg_chacha20_apply_avx2_spec (st : VgState) (t : low.x86_64.cpu.HaveAvx2) (data : Slice U8) :
     VgState.apply_avx2 st t data ⦃ r st' data' =>
       data'.length = data.length ∧
-      vg.keyAt (bvs st'.val) = vg.keyAt (bvs st.val) ∧
-      (data.length ≤ vg.leftAt (bvs st.val) →
-        r.val = 1 ∧
-          bvs data'.val = List.zipWith (· ^^^ ·) (bvs data.val) ((vg.restAt (bvs st.val)).take data.length) ∧
-          vg.restAt (bvs st'.val) = (vg.restAt (bvs st.val)).drop data.length) ∧
-      (vg.leftAt (bvs st.val) < data.length →
-        r.val = 0 ∧ bvs data'.val = bvs data.val ∧ vg.restAt (bvs st'.val) = vg.restAt (bvs st.val)) ⦄
+      ∀ (m m' : VG.Mem) (p : VG.Addr), bytesAt m p 768 = bvs st.val → bytesAt m' p 768 = bvs st'.val →
+        keyAt m' p = keyAt m p ∧
+        if data.length ≤ leftAt m p then
+          r.val = 1 ∧
+            bvs data'.val = List.zipWith (· ^^^ ·) (bvs data.val) ((restAt m p).take data.length) ∧
+            restAt m' p = (restAt m p).drop data.length
+        else
+          r.val = 0 ∧ bvs data'.val = bvs data.val ∧ restAt m' p = restAt m p ⦄
 
 /-- VG's `vg_chacha20_apply_avx512vl` on x86_64 meets
 `VG.Spec.ChaCha20.applyContract`, as `vg_chacha20_apply_avx2_spec` states, for its AVX-512
@@ -95,13 +103,14 @@ VL `vg_chacha20_xor` (`Scrub.applyReg avx512Vl`). -/
 axiom vg_chacha20_apply_avx512vl_spec (st : VgState) (t : low.x86_64.cpu.HaveAvx512Vl) (data : Slice U8) :
     VgState.apply_avx512vl st t data ⦃ r st' data' =>
       data'.length = data.length ∧
-      vg.keyAt (bvs st'.val) = vg.keyAt (bvs st.val) ∧
-      (data.length ≤ vg.leftAt (bvs st.val) →
-        r.val = 1 ∧
-          bvs data'.val = List.zipWith (· ^^^ ·) (bvs data.val) ((vg.restAt (bvs st.val)).take data.length) ∧
-          vg.restAt (bvs st'.val) = (vg.restAt (bvs st.val)).drop data.length) ∧
-      (vg.leftAt (bvs st.val) < data.length →
-        r.val = 0 ∧ bvs data'.val = bvs data.val ∧ vg.restAt (bvs st'.val) = vg.restAt (bvs st.val)) ⦄
+      ∀ (m m' : VG.Mem) (p : VG.Addr), bytesAt m p 768 = bvs st.val → bytesAt m' p 768 = bvs st'.val →
+        keyAt m' p = keyAt m p ∧
+        if data.length ≤ leftAt m p then
+          r.val = 1 ∧
+            bvs data'.val = List.zipWith (· ^^^ ·) (bvs data.val) ((restAt m p).take data.length) ∧
+            restAt m' p = (restAt m p).drop data.length
+        else
+          r.val = 0 ∧ bvs data'.val = bvs data.val ∧ restAt m' p = restAt m p ⦄
 
 /-! ## Words and bytes -/
 
@@ -116,7 +125,7 @@ theorem wordBytes_drop_one (ws : List U32) : (wordBytes ws).drop 4 = wordBytes (
     rw [List.drop_append_of_le_length (by simp [BitVec.toLEBytes_length]),
       List.drop_eq_nil_of_le (by simp [BitVec.toLEBytes_length]), List.nil_append]
 
-theorem wordLE_wordBytes (ws : List U32) (h : 0 < ws.length) : vg.wordLE (wordBytes ws) 0 = ws[0]!.bv := by
+theorem wordLE_wordBytes (ws : List U32) (h : 0 < ws.length) : wordLE (wordBytes ws) 0 = ws[0]!.bv := by
   rw [wordBytes, vg.wordLE_flatMap _ 0 (by simpa using h)]
   cases ws with
   | nil => simp at h
@@ -141,10 +150,10 @@ def Kernel : Prop :=
         (wordBytes (counter_nonce.val.drop 1)) (bvs buffer.val) ⦄
 
 /-- What a state `init` started holds, for a buffer the keystream covers. -/
-theorem leftAt_init (st : List (BitVec 8)) (key : Std.Array U32 8#usize)
+theorem leftAt_init (m : VG.Mem) (p : VG.Addr) (key : Std.Array U32 8#usize)
     (counter_nonce : Std.Array U32 4#usize)
-    (hr : vg.restAt st = vg.keystreamOf (wordBytes key.val) (wordBytes counter_nonce.val)) (n : Nat)
-    (hl : counter_nonce.val[0]!.val + (n + 63) / 64 ≤ 2 ^ 32) : n ≤ vg.leftAt st := by
+    (hr : restAt m p = keystreamOf (wordBytes key.val) (wordBytes counter_nonce.val)) (n : Nat)
+    (hl : counter_nonce.val[0]!.val + (n + 63) / 64 ≤ 2 ^ 32) : n ≤ leftAt m p := by
   rw [← vg.length_restAt, hr, vg.length_keystreamOf _ _ (by simp [length_wordBytes])
     (by simp [length_wordBytes]), wordLE_wordBytes _ (by simp)]
   simp only [UScalar.bv_toNat]
@@ -154,7 +163,7 @@ theorem leftAt_init (st : List (BitVec 8)) (key : Std.Array U32 8#usize)
 theorem keystream_encrypt (key : Std.Array U32 8#usize) (counter_nonce : Std.Array U32 4#usize)
     (msg : List (BitVec 8)) (hl : counter_nonce.val[0]!.val + (msg.length + 63) / 64 ≤ 2 ^ 32) :
     List.zipWith (· ^^^ ·) msg
-        ((vg.keystreamOf (wordBytes key.val) (wordBytes counter_nonce.val)).take msg.length) =
+        ((keystreamOf (wordBytes key.val) (wordBytes counter_nonce.val)).take msg.length) =
       chacha20.encrypt (wordBytes key.val) counter_nonce.val[0]!.bv
         (wordBytes (counter_nonce.val.drop 1)) msg := by
   have hk : (wordBytes key.val).length = 32 := by simp [length_wordBytes]
@@ -178,15 +187,23 @@ theorem cipher_vg_spec (hu : ∃ s, VgState.uninit = ok s) (v : low.x86_64.chach
   obtain ⟨s, hs⟩ := hu
   unfold low.x86_64.chacha20.cipher_vg
   simp only [hs, bind_ok]
-  step as ⟨st, _, hr⟩
-  have hn := leftAt_init _ key counter_nonce hr buffer.length hl
+  step as ⟨st, hst⟩
+  -- VG's theorems hold for any memory holding the state: take memory holding
+  -- only it, from address 0.
+  have hm : ∀ x : VgState, bytesAt (vg.mem (bvs x.val)) 0 768 = bvs x.val := fun x => by
+    have hx : (bvs x.val).length = 768 := by simp [bvs]
+    simpa [hx] using vg.bytesAt_mem (bvs x.val) (by rw [hx]; decide)
+  obtain ⟨-, hr⟩ := hst _ 0 (hm st)
+  have hn := leftAt_init _ _ key counter_nonce hr buffer.length hl
   have he := keystream_encrypt key counter_nonce (bvs buffer.val) (by rw [bvs_length]; exact hl)
   rw [bvs_length] at he
   cases v <;>
-  · step as ⟨r, hlen, _, hif, _⟩
-    obtain ⟨hr1, hb, -⟩ := hif hn
+  · step as ⟨r, hlen, happ⟩
     obtain ⟨r1, st', b'⟩ := r
-    simp only at hr1 hb hlen
+    simp only at happ hlen
+    obtain ⟨-, hif⟩ := happ _ _ 0 (hm st) (hm st')
+    rw [ite_eq_left hn, hr] at hif
+    obtain ⟨hr1, hb, -⟩ := hif
     have hr1' : r1 = 1#u32 := by scalar_tac
     subst hr1'
     step*
@@ -417,7 +434,7 @@ theorem chacha20_apply_keystream (h : RunsVg) (hk : Kernel) (k : mid.chacha20.Ch
       have hcn0 : cc.counter_nonce.val[0]!.bv = counter.bv := by
         rw [← wordLE_wordBytes _ (by simp), hB]
         conv_rhs => rw [← vg.wordLE_toLEBytes counter.bv]
-        simp only [vg.wordLE, List.getD_eq_getElem?_getD, Nat.mul_zero, Nat.zero_add]
+        simp only [wordLE, List.getD_eq_getElem?_getD, Nat.mul_zero, Nat.zero_add]
         rw [List.getElem?_append_left (by simp [BitVec.toLEBytes_length]),
           List.getElem?_append_left (by simp [BitVec.toLEBytes_length]),
           List.getElem?_append_left (by simp [BitVec.toLEBytes_length]),

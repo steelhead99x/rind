@@ -8,8 +8,12 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:cryptography/dart.dart';
+import 'package:rind/ecdsa.dart' as ecdsa;
+import 'package:rind/ed25519.dart' as ed25519;
 import 'package:rind/legacy.dart' as rind;
 import 'package:rind/rind.dart' as rind;
+import 'package:rind/rsa.dart' as rsa;
+import 'package:rind/rsa_legacy.dart' as rsa;
 
 part 'cipher.dart';
 part 'der.dart';
