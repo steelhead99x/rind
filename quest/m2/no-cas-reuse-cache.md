@@ -6,7 +6,7 @@ On targets without compare-and-swap, such as `thumbv6m-none-eabi` (the RP2040) a
 
 ## Plan
 
-Difficulty: 6/10 (estimate). Found while fixing [fork PR #84](https://github.com/steelhead99x/rind/pull/84).
+Difficulty: 6/10 (estimate). Found while fixing [fork PR #84](https://github.com/steelhead99x/rind/pull/84), which [fork PR #154](https://github.com/steelhead99x/rind/pull/154) replaces.
 
 These targets have atomic loads and stores but no read-modify-write. The current cache relies on a compare-and-swap to elect one writer, so it cannot be reused there.
 
@@ -20,4 +20,4 @@ Recommended approach:
 
 ## Related
 
-- [Fork PR #84](https://github.com/steelhead99x/rind/pull/84) - the PR that added the keep-nothing fallback
+- [Fork PR #154](https://github.com/steelhead99x/rind/pull/154) - the PR that carries the keep-nothing fallback, replacing fork PR #84, which is closed unmerged
