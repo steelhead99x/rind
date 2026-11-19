@@ -408,4 +408,34 @@ mod tests {
             }
         }
     }
+
+    // What valgrind hides: the AVX-512 VL copies run on secret-seeded states
+    // and blocks (`shake256_x4` hashes SK.seed), so `admin/ct-sde` compares
+    // their traces for two seeds. The AVX2 copies run under ctgrind.
+    #[test]
+    #[ignore = "admin/ct-sde runs it under Intel SDE"]
+    fn ct_sde_keccak4x_vl() {
+        use super::super::ct_sde;
+        assert!(HaveAvx512Vl::check().is_some(), "AVX-512 VL");
+        let mut x = ct_sde::seed();
+        let mut next = move || {
+            x = x.wrapping_add(0x9e3779b97f4a7c15);
+            let mut z = x;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+            z ^ (z >> 31)
+        };
+        let mut s = [[0u64; 4]; 25];
+        for lane in s.iter_mut().flatten() {
+            *lane = next();
+        }
+        let mut blocks = [[0u8; RATE]; 4];
+        for byte in blocks.iter_mut().flatten() {
+            *byte = next() as u8;
+        }
+        // SAFETY: AVX-512 F and VL were checked above.
+        ct_sde::traced(|| unsafe { permute_vl(&mut s, &crate::mid::sha3::RC) });
+        // SAFETY: as above.
+        ct_sde::traced(|| unsafe { hash_blocks_vl(&blocks, &crate::mid::sha3::RC) });
+    }
 }
