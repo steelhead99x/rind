@@ -70,7 +70,7 @@ pub fn ml_kem_key_gen<P: Algorithm>(
     seed[32..].copy_from_slice(z);
     let key = DecapKey::<P>::keygen_internal(&seed);
     crate::low::zeroise(&mut seed);
-    (key.encapsulation_key().as_bytes(), key.as_bytes())
+    (key.encapsulation_key().as_bytes().clone(), key.as_bytes())
 }
 
 /// FIPS 203's `ML-KEM.Encaps_internal` of message `m` to encapsulation key

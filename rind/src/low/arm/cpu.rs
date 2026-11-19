@@ -89,28 +89,11 @@ fn detect() -> u8 {
     0
 }
 
-#[cfg(all(
-    not(any(debug_assertions, rind_cpu_disable)),
-    any(target_os = "linux", target_os = "android")
-))]
-fn test_toggle(_id: &str, detected: bool) -> bool {
-    detected
-}
-
-/// Lets a debug build, or a release one with `--cfg rind_cpu_disable`, deny a
-/// feature with `RIND_CPU_DISABLE_<id>`, as on x86_64, so a CPU with the
-/// extension also tests the portable code.
-#[cfg(all(
-    any(debug_assertions, rind_cpu_disable),
-    any(target_os = "linux", target_os = "android")
-))]
+/// `detected`, unless `RIND_CPU_DISABLE_<id>` denies it, as on x86_64, so a
+/// CPU with the extension also tests the portable code.
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn test_toggle(id: &str, detected: bool) -> bool {
-    if std::env::var(format!("RIND_CPU_DISABLE_{id}")).is_ok() {
-        println!("DEBUG: denying cpuid {id:?}");
-        false
-    } else {
-        detected
-    }
+    detected && !crate::low::cpu_denied(id)
 }
 
 /// armv7 has no data-independent timing mode to enable.

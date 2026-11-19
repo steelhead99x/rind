@@ -1,0 +1,63 @@
+name: PR check
+
+# `just ci` over the PR's diff against its base, the same selection and modules
+# the merge queue runs, so a check that fails in the queue (an unstable-rustfmt
+# import order, stale mutants pins) fails here first. Advisory: main's ruleset
+# requires only `Queue build / Build`, which no job here replaces. check.yml
+# runs the unscoped suite on main; queue-build.yml runs the group on the queue's
+# own runner.
+#
+# It leaves no module out: `just ci --all` took 14 minutes on a hosted runner
+# with main's Rust cache (rs 10, vartime 5, dart 4, cross 3, the rest in
+# parallel), and a diff reaches fewer.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # release-plz's release PR, which only bumps versions and changelogs, skips
+  # this as it does the other advisory checks: a `release-plz-` branch that
+  # moq-bot, release.yml's app, opened. The queue's `just ci` still runs on it.
+  check:
+    name: Check
+    if: ${{ !(startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      BASE: origin/${{ github.base_ref }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The diff against the base needs its merge-base.
+          fetch-depth: 0
+
+      - uses: ./.github/actions/just
+
+      # A query failure fails this job.
+      - name: Select work
+        id: scope
+        run: just ci-select "$BASE" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/nix
+        if: steps.scope.outputs.needed == 'true'
+
+      - name: Rust cache
+        if: steps.scope.outputs.rust == 'true'
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # Restore main's cache (same job id as check.yml's) without a PR's
+          # own copy crowding it out of the repository's cache quota.
+          save-if: false
+
+      - name: Check
+        if: steps.scope.outputs.needed == 'true'
+        run: nix develop --command just ci "$BASE"

@@ -787,7 +787,7 @@ theorem pss_salt_len_spec (salt : Option high.rsa.PssSalt) (em hash : Slice U8)
 the salt length `salt` names or, for `None`, with any. -/
 theorem verify_pss_digest_spec (hs : HashSpec inst H B L max Abs CAbs) (hnew : inst.new ⦃ c => CAbs [] c ⦄)
     (hL : 0 < L) (hmax : 2048 ≤ max) (hheld : low.entry.Entry.assert_held = ok ())
-    (key : high.rsa.VerifyingKey) (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val)
+    (key : high.rsa.VerifyingKey) (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns)
     (salt : Option high.rsa.PssSalt) (signature hash : Slice U8) (M : List Byte)
     (hmh : bv hash.val = H M) :
     high.rsa.VerifyingKey.verify_pss_digest inst key salt signature hash ⦃ r =>
@@ -795,7 +795,7 @@ theorem verify_pss_digest_spec (hs : HashSpec inst H B L max Abs CAbs) (hnew : i
         (bv signature.val)
         (salt.map (pssSaltLen (((wordsNat (lowWords key.n key.n.used)).size - 1 + 7) / 8) L)) ⦄ := by
   have hinv' := hinv
-  obtain ⟨hk2, hk, hodd, hn0, hmont, he, he3, hs1, hs2⟩ := hinv'
+  obtain ⟨hk2, hk, hodd, hn0, hmont, he, he3, hs1, hs2, -⟩ := hinv'
   have hL64 : L ≤ 64 := hs.out.2.1
   have hhL : hash.length = L := by rw [← hs.out.2.2.2.2 M, ← hmh, bv_length]
   unfold high.rsa.VerifyingKey.verify_pss_digest
@@ -818,7 +818,7 @@ theorem verify_pss_digest_spec (hs : HashSpec inst H B L max Abs CAbs) (hnew : i
     subst hr
     simp only [core.result.Result.map_err, core.result.Result.Insts.CoreOpsTry.branch, bind_ok]
     have hC : wordsNat (lowWords c c.used) = beNat signature.val := hcv
-    step with public_op_spec key hinv hP c hcu hcz as ⟨r2, hr2⟩
+    step with public_op_spec key hinv hP hifma c hcu hcz as ⟨r2, hr2⟩
     cases r2 with
     | Err e =>
       simp only at hr2
@@ -864,7 +864,7 @@ exactly the signatures RFC 8017 does, with the salt length `salt` names or,
 for `None`, with any. -/
 theorem verify_pss_core_spec (hs : HashSpec inst H B L max Abs CAbs) (hnew : inst.new ⦃ c => CAbs [] c ⦄)
     (hL : 0 < L) (hmax : 2048 ≤ max) (hheld : low.entry.Entry.assert_held = ok ())
-    (key : high.rsa.VerifyingKey) (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val)
+    (key : high.rsa.VerifyingKey) (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns)
     (salt : Option high.rsa.PssSalt) (signature message : Slice U8) (hm : message.length ≤ max) :
     high.rsa.VerifyingKey._verify_pss inst key salt signature message ⦃ r =>
       r = .Ok () ↔ RsassaPss (wordsNat (lowWords key.n key.n.used)) key.e.val H L (bv message.val)
@@ -873,7 +873,7 @@ theorem verify_pss_core_spec (hs : HashSpec inst H B L max Abs CAbs) (hnew : ins
   unfold high.rsa.VerifyingKey._verify_pss
   step with hs.hash_spec message hm as ⟨d, _, hdv⟩
   step with digest_as_ref_spec d as ⟨sh, _, hshv⟩
-  exact verify_pss_digest_spec hs hnew hL hmax hheld key hinv hP salt signature sh _ (by rw [hshv, hdv])
+  exact verify_pss_digest_spec hs hnew hL hmax hheld key hinv hP hifma salt signature sh _ (by rw [hshv, hdv])
 
 end
 
@@ -906,7 +906,7 @@ theorem sha512_ctx_new_spec :
 
 /-- RSASSA-PSS-VERIFY with SHA-256 and MGF1 with SHA-256. -/
 theorem verify_pss_sha256_spec (h : Runs) (hb : Sha256Blocks) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (salt : Option high.rsa.PssSalt)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns) (salt : Option high.rsa.PssSalt)
     (signature message : Slice U8) (hm : message.length ≤ maxInput) :
     high.rsa.VerifyingKey.verify_pss_sha256 key salt signature message ⦃ r =>
       r = .Ok () ↔ RsassaPss (wordsNat (lowWords key.n key.n.used)) key.e.val sha256.hash 32
@@ -915,11 +915,11 @@ theorem verify_pss_sha256_spec (h : Runs) (hb : Sha256Blocks) (key : high.rsa.Ve
   unfold high.rsa.VerifyingKey.verify_pss_sha256
   step with new_public_spec h
   exact verify_pss_core_spec (sha256_hashSpec hb) sha256_ctx_new_spec (by decide) maxInput_ge hb.held key
-    hinv hP salt signature message hm
+    hinv hP hifma salt signature message hm
 
 /-- RSASSA-PSS-VERIFY with SHA-384 and MGF1 with SHA-384. -/
 theorem verify_pss_sha384_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (salt : Option high.rsa.PssSalt)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns) (salt : Option high.rsa.PssSalt)
     (signature message : Slice U8) (hm : message.length ≤ maxInput) :
     high.rsa.VerifyingKey.verify_pss_sha384 key salt signature message ⦃ r =>
       r = .Ok () ↔ RsassaPss (wordsNat (lowWords key.n key.n.used)) key.e.val sha384Bytes 48
@@ -928,11 +928,11 @@ theorem verify_pss_sha384_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.Veri
   unfold high.rsa.VerifyingKey.verify_pss_sha384
   step with new_public_spec h
   exact verify_pss_core_spec (sha384_hashSpec hs) sha384_ctx_new_spec (by decide) maxInput_ge hs.2.1 key
-    hinv hP salt signature message hm
+    hinv hP hifma salt signature message hm
 
 /-- RSASSA-PSS-VERIFY with SHA-512 and MGF1 with SHA-512. -/
 theorem verify_pss_sha512_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (salt : Option high.rsa.PssSalt)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns) (salt : Option high.rsa.PssSalt)
     (signature message : Slice U8) (hm : message.length ≤ maxInput) :
     high.rsa.VerifyingKey.verify_pss_sha512 key salt signature message ⦃ r =>
       r = .Ok () ↔ RsassaPss (wordsNat (lowWords key.n key.n.used)) key.e.val sha512Bytes 64
@@ -941,6 +941,6 @@ theorem verify_pss_sha512_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.Veri
   unfold high.rsa.VerifyingKey.verify_pss_sha512
   step with new_public_spec h
   exact verify_pss_core_spec (sha512_hashSpec hs) sha512_ctx_new_spec (by decide) maxInput_ge hs.2.1 key
-    hinv hP salt signature message hm
+    hinv hP hifma salt signature message hm
 
 end rind.x86_64

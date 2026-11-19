@@ -24,7 +24,7 @@ Every aws-lc-rs feature but `fips` is accepted. `ring-io` and `ring-sig-verify` 
 
 Keys, and the adapter's own copies of secrets such as PKCS#8 documents, Ed25519 seeds, and ML-KEM shared secrets, are wiped on drop, as aws-lc-rs wipes them.
 
-## Not offered
+## What rind cannot back
 
 These items are left out, so code using them fails to build:
 
@@ -46,6 +46,8 @@ These items are left out, so code using them fails to build:
 - ECDSA and ECDH public keys in the X9.62 hybrid form are refused.
 - An RSA public key, from `rsa::PublicKey::from_der` or elsewhere, must have a modulus of 1024 to 8192 bits, the range rind verifies with.
 - An RSA-OAEP private key is bound to one algorithm in rind, so a `rsa::PrivateDecryptingKey` loads the key again the first time it decrypts with each other algorithm, and keeps it.
+
+## WebAssembly
 
 It builds for `wasm32-wasip2` and `wasm32-unknown-unknown`, the browser, for
 neither of which aws-lc-rs builds. In the browser, rind needs its JavaScript random source, `getrandom = { version = "0.4",

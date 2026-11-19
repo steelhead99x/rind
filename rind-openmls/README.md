@@ -8,6 +8,12 @@ This crate provides a crypto provider for [OpenMLS](https://github.com/openmls/o
 
 It offers exactly the API of [openmls_rust_crypto](https://docs.rs/openmls_rust_crypto), item for item, so replacing that dependency and its `use` lines is the whole migration:
 
+```toml
+[dependencies]
+# In place of openmls_rust_crypto = "0.6".
+rind-openmls = "0.6"
+```
+
 ```rust
 use rind_openmls::OpenMlsRustCrypto;
 
@@ -17,7 +23,7 @@ let provider = OpenMlsRustCrypto::default();
 It offers the ciphersuites openmls_rust_crypto does: `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`, `MLS_128_DHKEMX25519_CHACHA20POLY1305_SHA256_Ed25519`, and `MLS_128_DHKEMP256_AES128GCM_SHA256_P256`.
 It signs and verifies with Ed25519 and ECDSA on P-256 and P-384, seals HPKE to X25519, P-256, and P-384, and draws randomness from the system's source.
 
-What rind cannot back:
+## What rind cannot back
 
 - The X448 and Ed448 ciphersuites, which openmls_rust_crypto lacks too.
 - The P-384 and P-521 ciphersuites, which openmls_rust_crypto lacks too. rind has their primitives, so they come once openmls_rust_crypto offers them or fixed test vectors can validate them: the MLS test vectors give some P-521 private keys without their leading zero ([mlswg/mls-implementations#176](https://github.com/mlswg/mls-implementations/issues/176)), and openmls's copy of the crypto-basics vectors signs both suites over SHA-256.
@@ -26,6 +32,8 @@ What rind cannot back:
 - The `virtual-clients-draft` feature: rind has no FF1.
 
 Naming one of those features fails to resolve, and turning on openmls's own `targeted-messages-draft` or `virtual-clients-draft` fails to compile this crate, rather than failing at run time.
+
+## WebAssembly
 
 It builds for `wasm32-wasip2` and `wasm32-unknown-unknown`, the browser, where
 rind needs its JavaScript random source, `getrandom = { version = "0.4",

@@ -3,6 +3,7 @@
 //! RFC 9497's VOPRF mode: the OPRF, with the server proving it evaluated
 //! every blinded element in a batch with the key it published.
 
+use alloc::vec::Vec;
 use core::fmt;
 
 use super::{
@@ -309,7 +310,8 @@ impl Blind {
         proof: &[u8],
         public_key: &PublicKey,
     ) -> Result<Output, Error> {
-        let mut outputs = Self::finalize_batch(vec![self], evaluated_element, proof, public_key)?;
+        let mut outputs =
+            Self::finalize_batch(alloc::vec![self], evaluated_element, proof, public_key)?;
         Ok(outputs.remove(0))
     }
 

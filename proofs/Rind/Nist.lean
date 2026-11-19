@@ -41,6 +41,13 @@ noncomputable abbrev p384Pow : nist.Point → Nat → nist.Point := nist.pow p38
 /-- `group_inv p384_group`, by `P384_GROUP`. -/
 abbrev p384Neg : nist.Point → nist.Point := nist.neg p384
 
+/-- FIPS 186-5 section 6.4.1's P-384 ECDSA signature. -/
+noncomputable abbrev ecdsaP384Sign : Nat → Nat → Nat → Option (Nat × Nat) := nist.ecdsaSign p384 n384 p384G
+
+/-- FIPS 186-5 section 6.4.2's P-384 ECDSA verification under the public key
+`Q`. -/
+abbrev ecdsaP384Verifies : nist.Point → Nat → Nat → Nat → Prop := nist.ecdsaVerifies p384 n384 p384G
+
 /-! ### s2n-bignum's representations of P-384's points -/
 
 /-- HOL Light's `inverse_mod p_384 (2 EXP 384)`: the number below `p384`

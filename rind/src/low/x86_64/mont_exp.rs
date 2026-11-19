@@ -84,7 +84,7 @@ fn mont_exp_by(
     // gather loads none partly. Two rows of scratch follow in the same
     // allocation, which is wiped before it is freed, as `table` is.
     let w = k.next_multiple_of(4);
-    let mut heap = vec![0; 32 * w + k + w];
+    let mut heap = alloc::vec![0; 32 * w + k + w];
     let (powers, scratch) = heap.split_at_mut(32 * w);
     let (spare, term) = scratch.split_at_mut(k);
     powers[..k].copy_from_slice(one);
@@ -108,7 +108,7 @@ fn mont_exp_by(
     // At 16 and 32 words with ADX, the verified Karatsuba products below run
     // instead.
     if k.is_multiple_of(8) && (adx.is_none() || !matches!(k, 16 | 32)) {
-        let mut table = vec![Row([0; 32]); k];
+        let mut table = alloc::vec![Row([0; 32]); k];
         // Indexed rather than `chunks_exact`, which divides by `w`, and
         // `admin/ct-vartime` refuses a division here.
         for i in 0..32 {

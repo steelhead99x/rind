@@ -43,11 +43,15 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      # Outside a pull request every job runs.
+      # Outside a pull request every job runs, and in release-plz's release
+      # PR, which only bumps versions and changelogs, none does: a
+      # `release-plz-` branch that moq-bot, release.yml's app, opened.
       - id: match
+        env:
+          RELEASE_PR: ${{ startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]' }}
         run: |
           changed=
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+          if [[ "$GITHUB_EVENT_NAME" == pull_request && "$RELEASE_PR" != true ]]; then
             changed=$(sh/changed.sh)
           fi
           for rule in \
@@ -181,9 +185,11 @@ jobs:
         run: |
           tier() { env "$@" cargo test --workspace --exclude rind-fips; env "$@" SLOW_TESTS=1 RUSTFLAGS='--cfg rind_cpu_disable' cargo test --release -p rind --lib -- cctv_accumulated detects_the_expected_cpu; }
           # test the by-4 AES-GCM and Keccak-f kernels for cores without SHA3,
-          # failing a run whose OS hides the crypto extension, and on Apple
-          # silicon the `dsb nsh; isb sy` barrier after DIT for cores without `sb`
-          tier RIND_CPU_DISABLE_sha3=1 RIND_CPU_DISABLE_sb=1 RIND_TEST_ARM_CRYPTO_EXT=1
+          # and aws-lc's NEON ChaCha20-Poly1305 for those without SVE2, such
+          # as Neoverse N1, failing a run whose OS hides the crypto extension,
+          # and on Apple silicon the `dsb nsh; isb sy` barrier after DIT for
+          # cores without `sb`
+          tier RIND_CPU_DISABLE_sha3=1 RIND_CPU_DISABLE_sve2=1 RIND_CPU_DISABLE_sb=1 RIND_TEST_ARM_CRYPTO_EXT=1 RIND_TEST_ARM_SVE2=0
           # test vpaes, NEON GHASH, and scalar SHA-1 and SHA-256 for cores
           # without the crypto extension, such as the Raspberry Pi 4's; the
           # last variable fails the run that lands on the wrong path
@@ -253,12 +259,13 @@ jobs:
 
   # 32-bit ARM runs libcrux, or aws-lc's assembly for ChaCha20, NEON, and the
   # crypto extension. The recipe builds and lints Android and Linux gnueabihf,
-  # then runs the gnueabihf tests under qemu on each of rind's armv7 tiers, as
-  # a local run does.
+  # then runs the gnueabihf tests on each of rind's armv7 tiers, as a local
+  # run does: the arm64 runner runs the crypto extension's tier and the
+  # NEON-denied one natively, and qemu the Cortex-A15's.
   armv7:
     needs: changes
     if: needs.changes.outputs.armv7 == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -266,6 +273,9 @@ jobs:
 
       - uses: ./.github/actions/just
       - uses: ./.github/actions/nix
+      - uses: ./.github/actions/rust-cache
+        with:
+          shell: .#armv7
 
       - name: Build, lint, and test
         run: just armv7
@@ -434,9 +444,12 @@ jobs:
           toolchain: stable
           targets: aarch64-apple-ios-sim
 
+      # Beta, not stable: stable 3.50.0's `flutter test` sometimes misses the
+      # app's VM service URL and hangs. See UPSTREAM.md, "Flutter's iOS
+      # simulator test run hangs when its log stream attaches late".
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
-          channel: stable
+          channel: beta
 
       - name: Create the iOS project
         run: flutter create --platforms ios .
@@ -462,6 +475,7 @@ jobs:
 
       - uses: ./.github/actions/just
       - uses: ./.github/actions/nix
+      - uses: ./.github/actions/rust-cache
 
       - name: Build, lint, and test
         run: just portable
@@ -479,6 +493,7 @@ jobs:
 
       - uses: ./.github/actions/just
       - uses: ./.github/actions/nix
+      - uses: ./.github/actions/rust-cache
 
       - name: Test
         run: just openmls --release
