@@ -1076,9 +1076,7 @@ VL routine, then Poly1305 on [OpenSSL]'s base 2^44 routines for AVX-512 IFMA,
 which hash eight blocks at a time, 16 KiB at a time so the second pass reads
 what the first left in L1. aws-lc's one pass interleaves a scalar Poly1305,
 which on its own took as long as both vector passes, so OpenSSL sealed 16 KB
-in 0.75 of rind's time on Zen 4 (a Ryzen 7 255; its published host id,
-`minisforum-zen5` in [rind-results](https://github.com/steelhead99x/rind-results),
-predates the CPU check, which rind-results#78 corrected). On an AVX-512
+in 0.75 of rind's time on Zen 4 (AMD Ryzen 7 255). On an AVX-512
 IFMA Xeon, the separate passes took 0.56 of the one pass's time at 16 KB and
 0.69 at 2 KB; at 1350 bytes they took 1.05 of it, as VG takes the blocks
 after its eight-block loop one at a time, so shorter messages keep the one
