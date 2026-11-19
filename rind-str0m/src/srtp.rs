@@ -228,3 +228,21 @@ impl AeadAes256GcmCipher for Gcm {
         self.open(iv, aads, input, output)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rind::aead;
+    use rind::cipher::{self, AesCtr};
+
+    use super::{Cm, Gcm};
+
+    #[test]
+    fn cipher_debug_names_the_type() {
+        let cm = Cm(AesCtr::new(&cipher::AES_128, &[0x11; 16], 128).unwrap());
+        let rendered = format!("{cm:?}");
+        assert!(rendered.contains("Cm"), "{rendered}");
+        let gcm = Gcm::new(&aead::AES_128_GCM, &[0x22; 16]);
+        let rendered = format!("{gcm:?}");
+        assert!(rendered.contains("Gcm"), "{rendered}");
+    }
+}
