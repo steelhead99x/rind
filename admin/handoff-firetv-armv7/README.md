@@ -1,5 +1,8 @@
 # armv7 Android (Fire TV Stick) bench run: findings and fix handoff
 
+Fork only: delete this directory before any upstream branch merges from this one.
+The `rind-cpuid` armv7 probe it describes is fork PR #207; this directory is its handoff.
+
 Read this first, then pick an area from the checklist at the bottom. Each area states the
 symptom, the measured root cause, where the code is, a suggested approach, and the number that
 closes it. Everything here was measured on one physical device, with the commands in
@@ -249,11 +252,11 @@ the vendored OpenSSL, and `adb` with the device authorised. Build output goes to
 
 ```sh
 # 1. cross-build the benches and rind-cpuid into ./pkg (nothing here is committed)
-docs/handoff/firetv-armv7/scripts/build.sh                       # all benches
-docs/handoff/firetv-armv7/scripts/build.sh chacha20poly1305 p256 # or a few
+admin/handoff-firetv-armv7/scripts/build.sh                       # all benches
+admin/handoff-firetv-armv7/scripts/build.sh chacha20poly1305 p256 # or a few
 
 # 2. push, run pinned to CPU 3, pull logs into ./out, remove the push
-SERIAL=<adb serial> CPU_MASK=8 docs/handoff/firetv-armv7/scripts/run-on-tv.sh \
+SERIAL=<adb serial> CPU_MASK=8 admin/handoff-firetv-armv7/scripts/run-on-tv.sh \
   'chacha20poly1305:^chacha20poly1305/(rind|aws-lc-rs|openssl)/(32B|1350B|16KB)$' \
   'aes_gcm:^aes128-gcm' \
   'p256:^p256-(ecdh|ecdsa-sign|ecdsa-verify)/'

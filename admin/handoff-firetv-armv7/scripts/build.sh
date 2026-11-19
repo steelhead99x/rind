@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Cross-builds rind-bench's binaries and rind-cpuid for armv7-linux-androideabi into ./pkg.
-# Usage (from the repo root): docs/handoff/firetv-armv7/scripts/build.sh [bench ...]
+# Usage (from the repo root): admin/handoff-firetv-armv7/scripts/build.sh [bench ...]
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=env-android.sh

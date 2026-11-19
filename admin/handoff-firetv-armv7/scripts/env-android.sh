@@ -6,7 +6,9 @@
 : "${ANDROID_HOME:=$HOME/Android/Sdk}"
 : "${ANDROID_NDK_HOME:=$(printf '%s\n' "$ANDROID_HOME"/ndk/* | tail -1)}"
 ANDROID_API="${ANDROID_API:-28}"
-TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+# The NDK names its host toolchain linux-x86_64 or darwin-x86_64; override with NDK_HOST_TAG.
+NDK_HOST_TAG="${NDK_HOST_TAG:-$(uname -s | tr '[:upper:]' '[:lower:]')-x86_64}"
+TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$NDK_HOST_TAG"
 export ANDROID_HOME ANDROID_NDK_HOME ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
 export PATH="$TOOLCHAIN/bin:$PATH"
 export CC_armv7_linux_androideabi="$TOOLCHAIN/bin/armv7a-linux-androideabi${ANDROID_API}-clang"
