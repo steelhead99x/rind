@@ -33,8 +33,11 @@ Graviola <https://github.com/ctz/graviola>
 
 Argon2's reference implementation <https://github.com/P-H-C/phc-winner-argon2>
 
-  What: rind/src/low/x86_64/argon2.rs, a Rust port of its AVX2 BlaMka
-  rounds, blamka-round-opt.h.
+  What: rind/src/low/x86_64/argon2.rs, argon2_avx512.rs, and
+  argon2_ssse3.rs, Rust ports of its AVX2, AVX-512F, and SSSE3 BlaMka
+  rounds in blamka-round-opt.h, and rind/src/low/aarch64/argon2_neon.rs,
+  a Rust port of the NEON layout libsodium gives those SSSE3 rounds in
+  blamka-round-neon.h.
   Copyright 2015 Daniel Dinu, Dmitry Khovratovich, Jean-Philippe
   Aumasson, and Samuel Neves
   License: CC0-1.0 OR Apache-2.0, taken under CC0-1.0, so the port
