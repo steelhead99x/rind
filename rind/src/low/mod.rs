@@ -111,14 +111,10 @@ mod generic {
     ))]
     pub(crate) mod poly1305;
     // 26-bit limbs wherever a 64x64 product would be a library call:
-    // `rind_limb` 32, and armv7. wasm32 with `wide-arithmetic`
-    // has `rind_limb` 64 and uses the module above. Tests compile the 26-bit
-    // limbs on the other backends too.
-    #[cfg(any(
-        all(rind_backend = "portable", rind_limb = "32"),
-        rind_backend = "arm",
-        test
-    ))]
+    // `rind_limb` 32. armv7 has its own 32-bit-word Poly1305. wasm32 with
+    // `wide-arithmetic` has `rind_limb` 64 and uses the module above. Tests
+    // compile the 26-bit limbs on the other backends too.
+    #[cfg(any(all(rind_backend = "portable", rind_limb = "32"), test))]
     pub(crate) mod poly1305_32;
     pub(super) mod reuse_cache;
     // SHA-1. The portable backend runs it, and x86_64, aarch64, and armv7

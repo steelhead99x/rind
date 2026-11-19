@@ -124,7 +124,7 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | AES-KW, AES-KWP, AES-CBC | Graviola + rind | aws-lc + rind |  | aws-lc + rind |
 | ChaCha20 | Graviola |  | aws-lc + HACL* ✓ | HACL* ✓ |
 | ChaCha20 (header protection) | HACL* ✓ + rind |  |  |  |
-| ChaCha20-Poly1305, XChaCha20-Poly1305 | aws-lc ⚡ |  | HACL* rounds + 26-bit rind | HACL* rounds + Graviola; 26-bit rind when `rind_limb` is 32 |
+| ChaCha20-Poly1305, XChaCha20-Poly1305 | aws-lc ⚡ |  | HACL* rounds + 32-bit-word rind | HACL* rounds + Graviola; 26-bit rind when `rind_limb` is 32 |
 | MD5 | rind |  |  |  |
 | SHA-1 | rind |  |  |  |
 | SHA-256 | rind |  |  | rind; ESP-IDF Xtensa runs the 16-round body from IRAM |
@@ -955,9 +955,11 @@ once per process like rind's others. Without SSE4.1, ChaCha20 and Poly1305
 run in separate passes, as in aws-lc.
 
 Elsewhere, 32-bit `arm` runs ChaCha20 on HACL*'s rounds and Poly1305 on
-rind's 26-bit limbs. 32-bit Arm NEON intrinsics are unstable on the
-toolchain this crate builds with, so this backend does not ship a NEON
-keystream or a NEON Poly1305. The 26-bit state wipes itself on drop.
+rind's 32-bit words, the radix of OpenSSL's `poly1305-armv4` integer path:
+sixteen `umlal` and four small multiplies a block, against twenty-five for
+26-bit limbs. 32-bit Arm NEON intrinsics are unstable on the toolchain this
+crate builds with, so this backend does not ship a NEON keystream or a NEON
+Poly1305. The state wipes itself on drop.
 
 [Graviola]: https://github.com/ctz/graviola
 [cifra]: https://github.com/ctz/cifra
