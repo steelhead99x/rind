@@ -54,12 +54,19 @@ compile_error!(
     "rind-aws-lc-rs's `fips` feature needs glibc Linux on little-endian x86_64 or aarch64, where rind-fips builds its module"
 );
 
-/// Succeeds with the `fips` feature, which backs the TLS record keys with
-/// rind-fips's module; fails without it.
+/// Fails until every approved service of the `fips` build runs in rind-fips's
+/// module: aws-lc-rs's FIPS build answers `Ok` only when it does, and a build
+/// that answered `Ok` with services still in rind would report FIPS mode for
+/// operations outside the module's boundary. [`NOT_IN_THE_MODULE`] names what
+/// is still in rind.
 #[cfg(feature = "fips")]
 pub fn try_fips_mode() -> Result<(), &'static str> {
-    Ok(())
+    Err(NOT_IN_THE_MODULE)
 }
+
+/// What the `fips` feature has not yet moved into rind-fips's module.
+#[cfg(feature = "fips")]
+const NOT_IN_THE_MODULE: &str = "FIPS mode not available: only the TLS record keys run in rind-fips's module; digest, hmac, hkdf, pbkdf2, the other aead keys, rand, agreement, signature, rsa, kem, and ML-DSA still run in rind";
 
 /// Fails without the `fips` feature, since rind is then not FIPS validated.
 #[cfg(not(feature = "fips"))]

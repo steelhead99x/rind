@@ -1,6 +1,6 @@
 //! The `fips` feature: with it, the TLS record keys are held in rind-fips's
-//! module and `try_fips_mode()` succeeds; without it, the keys run in rind
-//! and `try_fips_mode()` fails.
+//! module, and `try_fips_mode()` fails until every approved service is; without
+//! it, the keys run in rind and `try_fips_mode()` fails.
 
 use ours::aead::{
     AES_128_GCM, Aad, Nonce, TlsProtocolId, TlsRecordOpeningKey, TlsRecordSealingKey,
@@ -44,8 +44,11 @@ mod with_the_feature {
     }
 
     #[test]
-    fn fips_mode_succeeds() {
-        assert_eq!(ours::try_fips_mode(), Ok(()));
+    fn fips_mode_fails_while_services_still_run_in_rind() {
+        // Reporting FIPS mode with approved services outside the module would
+        // claim operations the module's boundary does not hold.
+        let error = ours::try_fips_mode().unwrap_err();
+        assert!(error.contains("still run in rind"), "{error}");
         // The module has no AWS-LC module number, and takes OS entropy.
         assert_eq!(ours::fips_version(), None);
         assert!(ours::try_fips_cpu_jitter_entropy().is_err());

@@ -388,6 +388,14 @@ step() {
                     run cargo nextest run -p rind-acvp --features module --locked
                 fi
             fi
+            # rind-aws-lc-rs's `fips` feature backs its services with rind-fips's
+            # module, so it builds and tests only where that module exists. Its
+            # `skip` list keeps the feature out of admin/adapter-api.
+            if names rind-aws-lc-rs "${packages[@]}" &&
+                [[ "$(rustc -vV | sed -n 's/^host: //p')" =~ ^(x86_64|aarch64)-unknown-linux-gnu$ ]]; then
+                run cargo clippy -p rind-aws-lc-rs --features fips --all-targets --locked -- --deny warnings
+                run cargo nextest run -p rind-aws-lc-rs --features fips --locked --no-tests=warn
+            fi
             # Doc tests need a library. No packages at all means the workspace.
             mapfile -t libs < <(sh/select.sh "$changed" "$all" --lib)
             if ((${#libs[@]} > 0 || ${#packages[@]} == 0)); then

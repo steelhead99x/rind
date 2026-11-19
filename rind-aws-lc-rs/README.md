@@ -21,12 +21,12 @@ Every aws-lc-rs feature is accepted. `ring-io` and `ring-sig-verify` gate the it
 
 ## FIPS
 
-With the `fips` feature, `try_fips_mode()` succeeds and `aead::TlsRecordSealingKey` and `aead::TlsRecordOpeningKey` hold their keys in [rind-fips](../rind-fips)'s FIPS 140-3 module: sealing through the module's TLS 1.3 IV construction, opening through its AES-GCM key.
+With the `fips` feature, `aead::TlsRecordSealingKey` and `aead::TlsRecordOpeningKey` hold their keys in [rind-fips](../rind-fips)'s FIPS 140-3 module: sealing through the module's TLS 1.3 IV construction, opening through its AES-GCM key. `try_fips_mode()` still fails, with a message naming the services that run in rind, until every service the module approves runs in it, as aws-lc-rs's FIPS build answers `Ok` only when its operations run in AWS-LC's module.
 Without it, `try_fips_mode()` fails with "FIPS mode not enabled!" and every key runs in rind.
 
 - The feature builds only for glibc Linux on little-endian x86_64 and aarch64, where rind-fips builds its module, and is a compile error elsewhere, as aws-lc-rs's FIPS build is off its supported platforms.
 - The module seals only TLS 1.3 records, so `TlsRecordSealingKey::new` with `TlsProtocolId::TLS12` fails. Opening takes either version.
-- Every other operation, approved by the module or not, still runs in rind and is not yet held in the module. X25519, ChaCha20-Poly1305, and the other algorithms the module leaves out stay callable, as in aws-lc-rs's FIPS build.
+- Every other operation the module approves (digests, HMAC, HKDF, PBKDF2, the other AEAD keys, random bytes, key agreement, signatures, RSA, ML-KEM, ML-DSA) still runs in rind and is being moved into the module family by family; this list shrinks as each moves. X25519, ChaCha20-Poly1305, and the other algorithms the module leaves out stay callable, as in aws-lc-rs's FIPS build.
 - `fips_version()` is `None`: the module has no AWS-LC module number to return. `try_fips_cpu_jitter_entropy()` fails, since the module takes OS entropy. `awslc_version` and `try_fips_self_test` are not offered; the module's self-test aborts instead of returning a `Result`.
 - rind-fips is unpublished, so a rind-aws-lc-rs release cannot yet carry the feature.
 

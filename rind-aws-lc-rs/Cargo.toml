@@ -12,9 +12,12 @@ readme = "README.md"
 # aws-lc-rs's own tests and test vectors, under their own licenses.
 exclude = ["tests/aws-lc-rs"]
 
-# Every feature, so docs.rs shows the items each gates, labeled with it.
+# Every feature, so docs.rs shows the items each gates, labeled with it. The
+# `fips` feature builds only for glibc Linux on x86_64 and aarch64, so docs.rs
+# builds for those two alone.
 [package.metadata.docs.rs]
 all-features = true
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
 
 # The aws-lc-rs version whose API this crate offers, which its own version
 # tracks (sh/adapter-versions.sh), since it implements aws-lc-rs rather than

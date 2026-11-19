@@ -15,11 +15,9 @@ fn test_init() {
 
 #[test]
 fn test_fips() {
-    // rind-aws-lc-rs: the `fips` feature backs the TLS record keys with
-    // rind-fips's module, as aws-lc-rs's does with AWS-LC's.
-    #[cfg(feature = "fips")]
-    assert!({ aws_lc_rs::try_fips_mode().is_ok() });
-    #[cfg(not(feature = "fips"))]
+    // rind-aws-lc-rs: the `fips` feature answers Ok only once every approved
+    // service runs in rind-fips's module (tests/fips.rs says which still do
+    // not); without it, FIPS mode is off.
     assert!({ aws_lc_rs::try_fips_mode().is_err() });
     // Re-enable with fixed test after upstream has merged RAGDOLL
     //assert!({ aws_lc_rs::try_fips_cpu_jitter_entropy().is_ok() });
