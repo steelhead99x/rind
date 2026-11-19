@@ -43,8 +43,11 @@ jobs:
           QUEST_GATE_PRIORITY: 1
         run: nix develop --command quest gate just ci "$BASE"
 
-  # DRAFT, not for landing before the runners below exist and their runner
-  # groups admit this workflow at refs/heads/main (see the header). The same
+  # DRAFT, not for landing before the runners below exist. Labels: GitHub gives
+  # every runner its OS and architecture labels itself, so one custom label,
+  # `rind-queue-arm64`, marks the aarch64 queue runners and `macOS` or `Linux`
+  # picks between them. `rind-queue` stays the x86_64 host's alone, so the job
+  # above can never be handed to an arm64 runner. The same
   # group build on the Mac mini, natively on macOS and on aarch64 Linux in a
   # VM on the same machine, so a pair of PRs that each pass x86_64 alone but
   # break aarch64 together never reach main. Each job's context, `Queue build /
@@ -54,7 +57,7 @@ jobs:
   build-macos:
     name: Build (macOS)
     if: github.event_name == 'merge_group'
-    runs-on: [self-hosted, rind-queue-macos]
+    runs-on: [self-hosted, rind-queue-arm64, macOS]
     timeout-minutes: 60
     env:
       BASE: ${{ github.event.merge_group.base_sha }}
@@ -72,7 +75,7 @@ jobs:
   build-linux-arm64:
     name: Build (aarch64 Linux)
     if: github.event_name == 'merge_group'
-    runs-on: [self-hosted, rind-queue-linux-arm64]
+    runs-on: [self-hosted, rind-queue-arm64, Linux]
     timeout-minutes: 60
     env:
       BASE: ${{ github.event.merge_group.base_sha }}
