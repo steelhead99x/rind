@@ -33,6 +33,10 @@ fn ed25519_vectors() -> Vec<Ed25519Vector> {
     let file = std::fs::File::open(&path).unwrap_or_else(|_| panic!("cannot open {path}"));
     let vectors: Vec<Ed25519Vector> = serde_json::from_reader(file).unwrap();
     assert_eq!(vectors.len(), 914);
+    // The verdict file is indexed by vector number.
+    for (i, v) in vectors.iter().enumerate() {
+        assert_eq!(v.number, i, "{path}");
+    }
     vectors
 }
 

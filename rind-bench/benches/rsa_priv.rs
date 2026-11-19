@@ -69,6 +69,7 @@ fn rsa2048_pkcs1_sha256_sign(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{rand, rsa, signature};
 
@@ -170,6 +171,7 @@ fn rsa2048_pss_sha256_sign(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{rand, rsa, signature};
 
@@ -322,6 +324,7 @@ fn rsa_pkcs1_sha256_sign_sizes(c: &mut Criterion) {
                 })
             });
         }
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_function("aws-lc-rs", |b| {
             use aws_lc_rs::{rand, rsa, signature};
 
@@ -382,6 +385,7 @@ fn rsa2048_oaep_sha256_decrypt(c: &mut Criterion) {
     let mut group = c.benchmark_group("rsa2048-oaep-sha256-decrypt");
     group.throughput(Throughput::Elements(1));
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::rsa::{
             OAEP_SHA256_MGF1SHA256, OaepPrivateDecryptingKey, PrivateDecryptingKey,
@@ -439,6 +443,7 @@ fn rsa_load(c: &mut Criterion) {
         let mut group = c.benchmark_group(format!("rsa{bits}-load"));
         group.throughput(Throughput::Elements(1));
 
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_function("aws-lc-rs", |b| {
             use aws_lc_rs::rsa;
 
