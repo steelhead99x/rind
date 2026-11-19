@@ -1,0 +1,21 @@
+Cortex-A7 (Pi 2 B Rev 1.1, 0xc07), 900 MHz, governor performance, core 3, 38-41 C, throttled=0x0.
+Dependent chains (each result feeds the next), `mb` in this directory, three runs of the binary, medians in ns per call.
+Agreement of ecp_nistz256_mul_mont and _sqr_mont with rind's fe_mul and fe_sqr: 0 mismatches in 20000 random inputs below p, in each run.
+
+                         run 1     run 2     run 3     run 4 (with fiat add/sub/opp)
+rind fe_mul  (umaal)     701.57    702.24    707.88    704.99
+nistz mul_mont           500.65    500.49    505.69    510.49
+rind fe_sqr              595.70    595.55    600.00    594.20
+nistz sqr_mont           514.34    501.75    506.15    500.65
+nistz add (call)         110.40    110.41    113.91    110.38
+nistz sub (call)         102.53    102.70    103.04    101.42
+fiat add                                              145.96
+fiat sub                                              103.73
+fiat opp                                              96.39
+
+(The first three columns are the first three groups of the first output; every later group agreed within 1%.)
+
+openssl speed (Debian OpenSSL 3.5.9, armv4 assembly), taskset core 3, performance governor, -seconds 4, three runs:
+ ecdsa nistp256   sign/s 1068.8 1040.2 1040.8   verify/s 392.2 378.6 393.2
+ ecdh  nistp256   op/s    560.0   556.9   559.8
+ (its ecdh row times the derive alone: no key generation, no public-key parse)
