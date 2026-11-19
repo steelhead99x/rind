@@ -209,9 +209,12 @@ OpenSSL <https://github.com/openssl/openssl>
   SHA-512 on AVX2, generated from
   crypto/sha/asm/sha512-x86_64.pl, written by Andy Polyakov;
   for 32-bit ARM, Keccak-f[1600] in integer code and on NEON, generated from
-  crypto/sha/asm/keccak1600-armv4.pl, written by Andy Polyakov.
+  crypto/sha/asm/keccak1600-armv4.pl, and P-256's Montgomery multiplication
+  and squaring, generated from crypto/ec/asm/ecp_nistz256-armv4.pl, both
+  written by Andy Polyakov.
   Copyright 2005-2026 The OpenSSL Project Authors. All Rights Reserved.
   Copyright 2017-2026 The OpenSSL Project Authors. All Rights Reserved.
+  Copyright 2015-2025 The OpenSSL Project Authors. All Rights Reserved.
   License: Apache-2.0. OpenSSL has no NOTICE file.
 
 curve25519-dalek <https://github.com/dalek-cryptography/curve25519-dalek>
