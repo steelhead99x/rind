@@ -21,6 +21,8 @@ on:
       - proofs/**
       - admin/prove
       - admin/prove-bytes
+      - admin/apple-bytes
+      - benchmarks/verified.toml
       - admin/simd-vectors.rs
       - admin/neon-vectors.rs
       - admin/avx512-vectors.rs
