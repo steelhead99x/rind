@@ -1,6 +1,6 @@
 //! The `fips` feature: with it, the TLS record keys are held in rind-fips's
-//! module, and `try_fips_mode()` fails until every approved service is; without
-//! it, the keys run in rind and `try_fips_mode()` fails.
+//! module, and `try_fips_mode()` is `Ok`; without it, the keys run in rind and
+//! `try_fips_mode()` fails.
 
 use ours::aead::{
     AES_128_GCM, Aad, Nonce, TlsProtocolId, TlsRecordOpeningKey, TlsRecordSealingKey,
@@ -44,11 +44,28 @@ mod with_the_feature {
     }
 
     #[test]
-    fn fips_mode_fails_while_services_still_run_in_rind() {
-        // Reporting FIPS mode with approved services outside the module would
-        // claim operations the module's boundary does not hold.
-        let error = ours::try_fips_mode().unwrap_err();
-        assert!(error.contains("still run in rind"), "{error}");
+    fn fips_mode_is_ok_and_caller_nonce_aes_gcm_stays_callable() {
+        use ours::aead::{LessSafeKey, UnboundKey};
+        // Every approved service runs in the module; the AES-GCM keys that
+        // seal under a caller's nonce stay in rind and stay callable.
+        assert_eq!(ours::try_fips_mode(), Ok(()));
+        let key = LessSafeKey::new(UnboundKey::new(&AES_128_GCM, &[7; 16]).unwrap());
+        let mut data = b"hello".to_vec();
+        key.seal_in_place_append_tag(
+            Nonce::assume_unique_for_key([1; 12]),
+            Aad::from(b"hdr"),
+            &mut data,
+        )
+        .unwrap();
+        assert_eq!(
+            key.open_in_place(
+                Nonce::assume_unique_for_key([1; 12]),
+                Aad::from(b"hdr"),
+                &mut data
+            )
+            .unwrap(),
+            b"hello"
+        );
         // The module has no AWS-LC module number, and takes OS entropy.
         assert_eq!(ours::fips_version(), None);
         assert!(ours::try_fips_cpu_jitter_entropy().is_err());

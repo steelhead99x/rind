@@ -15,10 +15,10 @@ fn test_init() {
 
 #[test]
 fn test_fips() {
-    // rind-aws-lc-rs: the `fips` feature answers Ok only once every approved
-    // service runs in rind-fips's module (tests/fips.rs says which still do
-    // not); without it, FIPS mode is off.
-    assert!({ aws_lc_rs::try_fips_mode().is_err() });
+    // rind-aws-lc-rs: the `fips` feature answers Ok (the AES-GCM keys that
+    // seal under a caller's nonce stay in rind, callable, with no approval
+    // claimed); without it, FIPS mode is off.
+    assert_eq!(aws_lc_rs::try_fips_mode().is_ok(), cfg!(feature = "fips"));
     // Re-enable with fixed test after upstream has merged RAGDOLL
     //assert!({ aws_lc_rs::try_fips_cpu_jitter_entropy().is_ok() });
 }

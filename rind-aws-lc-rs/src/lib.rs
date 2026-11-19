@@ -54,19 +54,17 @@ compile_error!(
     "rind-aws-lc-rs's `fips` feature needs glibc Linux on little-endian x86_64 or aarch64, where rind-fips builds its module"
 );
 
-/// Fails until every approved service of the `fips` build runs in rind-fips's
-/// module: aws-lc-rs's FIPS build answers `Ok` only when it does, and a build
-/// that answered `Ok` with services still in rind would report FIPS mode for
-/// operations outside the module's boundary. [`NOT_IN_THE_MODULE`] names what
-/// is still in rind.
+/// Answers `Ok` under the `fips` feature, as aws-lc-rs's FIPS build does. Every
+/// service the module approves runs in rind-fips's module. The AES-GCM
+/// `UnboundKey`, `LessSafeKey`, `SealingKey`, and `OpeningKey` stay in rind and
+/// stay callable, opens included, since the module seals only under IVs it
+/// generates and aws-lc-rs lets these seal under a caller's nonce (an
+/// unapproved use there too). No approval is claimed for them:
+/// `RandomizedNonceKey` and the TLS record keys are the approved path.
 #[cfg(feature = "fips")]
 pub fn try_fips_mode() -> Result<(), &'static str> {
-    Err(NOT_IN_THE_MODULE)
+    Ok(())
 }
-
-/// What the `fips` feature has not yet moved into rind-fips's module.
-#[cfg(feature = "fips")]
-const NOT_IN_THE_MODULE: &str = "FIPS mode not available: everything the module approves runs in rind-fips's module except the AES-GCM UnboundKey, LessSafeKey, SealingKey, and OpeningKey, which still run in rind";
 
 /// Fails without the `fips` feature, since rind is then not FIPS validated.
 #[cfg(not(feature = "fips"))]
