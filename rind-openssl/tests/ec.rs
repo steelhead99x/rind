@@ -726,3 +726,71 @@ fn benchmark_against_the_default_provider() {
         }
     }
 }
+
+/// Where one P-256 ECDH's time goes, in one process: the library alone, the
+/// provider's `derive` through an `EVP_PKEY_CTX` reused across operations (as
+/// `openssl speed ecdh` runs it), and the whole path with a new context each
+/// time (as `benchmark_against_the_default_provider` runs it).
+/// Run: `cargo test --release -p rind-openssl --test ec -- --ignored --nocapture p256_ecdh_layers`
+#[test]
+#[ignore = "a benchmark"]
+fn p256_ecdh_layers() {
+    use std::hint::black_box;
+    use std::time::{Duration, Instant};
+
+    fn micros(mut op: impl FnMut()) -> f64 {
+        for _ in 0..200 {
+            op();
+        }
+        let (start, mut n) = (Instant::now(), 0u32);
+        while start.elapsed() < Duration::from_secs(2) {
+            for _ in 0..50 {
+                op();
+            }
+            n += 50;
+        }
+        start.elapsed().as_secs_f64() * 1e6 / f64::from(n)
+    }
+
+    let ctx = Context::new();
+    // rind's library, with the peer as the bytes a TLS peer sends.
+    let library = {
+        use rind::agreement::{ECDH_P256, PrivateKey};
+        let ours = PrivateKey::generate(&ECDH_P256).unwrap();
+        let peer = PrivateKey::generate(&ECDH_P256).unwrap();
+        let peer_public = peer.public_key().as_ref().to_vec();
+        micros(|| {
+            black_box(ours.agree(black_box(&peer_public)).unwrap());
+        })
+    };
+    println!("library      agree (stored key, peer bytes)        {library:7.2} us");
+    for (provider, propq) in [("default", DEFAULT), ("rind", c"")] {
+        let key = ctx.generate("prime256v1", propq).unwrap();
+        let peer = ctx.generate("prime256v1", propq).unwrap();
+        unsafe {
+            let pctx = non_null(EVP_PKEY_CTX_new_from_pkey(ctx.0, key.0, propq.as_ptr()));
+            assert_eq!(EVP_PKEY_derive_init(pctx), 1);
+            assert_eq!(EVP_PKEY_derive_set_peer(pctx, peer.0), 1);
+            let mut secret = [0u8; 66];
+            let reused = micros(|| {
+                let mut len = secret.len();
+                assert_eq!(EVP_PKEY_derive(pctx, secret.as_mut_ptr(), &mut len), 1);
+                black_box(&secret);
+            });
+            let mut size_and_derive = || {
+                let mut len = 0;
+                assert_eq!(EVP_PKEY_derive(pctx, null_mut(), &mut len), 1);
+                let mut len = secret.len();
+                assert_eq!(EVP_PKEY_derive(pctx, secret.as_mut_ptr(), &mut len), 1);
+            };
+            let two_calls = micros(&mut size_and_derive);
+            EVP_PKEY_CTX_free(pctx);
+            let fresh = micros(|| {
+                black_box(ctx.derive(&key, &peer, propq.as_ptr()).unwrap());
+            });
+            println!(
+                "{provider:8}     reused ctx, one derive call           {reused:7.2} us\n{provider:8}     reused ctx, size query then derive    {two_calls:7.2} us\n{provider:8}     new ctx + init + set_peer + both calls {fresh:6.2} us"
+            );
+        }
+    }
+}
