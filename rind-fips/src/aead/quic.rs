@@ -175,14 +175,18 @@ pub const SEAL_WINDOW: u64 = 1024;
 ///
 /// // Packet 6 before packet 5 is fine.
 /// let mut later = b"hello".to_vec();
-/// let tag6 = key.seal_in_place_separate_tag(6, b"header", &mut later).unwrap();
+/// let tag6 = key
+///     .seal_in_place_separate_tag(6, b"header", &mut later)
+///     .unwrap();
 /// let mut earlier = b"hello".to_vec();
-/// key.seal_in_place_separate_tag(5, b"header", &mut earlier).unwrap();
+/// key.seal_in_place_separate_tag(5, b"header", &mut earlier)
+///     .unwrap();
 ///
 /// // But a packet number twice is not.
 /// let mut again = b"hello".to_vec();
 /// assert_eq!(
-///     key.seal_in_place_separate_tag(6, b"header", &mut again).err(),
+///     key.seal_in_place_separate_tag(6, b"header", &mut again)
+///         .err(),
 ///     Some(rind_fips::Error::MessageLimitReached)
 /// );
 ///
