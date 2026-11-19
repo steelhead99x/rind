@@ -99,6 +99,8 @@ fn fbla(x: u64, y: u64) -> u64 {
 /// Compares `compress` to the portable permutation on sixty-four blocks
 /// and both XOR modes.
 #[cfg(test)]
+// A target with no fill of its own to compare, such as armv7, never calls it.
+#[allow(dead_code)]
 pub(crate) fn assert_matches_portable(
     compress: impl Fn(&Argon2Block, &Argon2Block, &mut Argon2Block, bool),
 ) {
