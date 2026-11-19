@@ -63,20 +63,6 @@ opaque mid.md5.Md5Context.finish : mid.md5.Md5Context → Result (Array Std.U8 1
 
 opaque mid.md5.Md5Context.Insts.CoreCloneClone.clone : mid.md5.Md5Context → Result mid.md5.Md5Context
 
-/-! SHA-3, whose sponge this translation leaves out. -/
-
-opaque mid.sha3.Sha3Context.new
-  (R : Std.Usize) (OUT : Std.Usize) : Result (mid.sha3.Sha3Context R OUT)
-
-opaque mid.sha3.Sha3Context.update {R : Std.Usize} {OUT : Std.Usize}
-  : mid.sha3.Sha3Context R OUT → Slice Std.U8 → Result (mid.sha3.Sha3Context R OUT)
-
-opaque mid.sha3.Sha3Context.finish {R : Std.Usize} {OUT : Std.Usize}
-  : mid.sha3.Sha3Context R OUT → Result (Array Std.U8 OUT)
-
-opaque mid.sha3.Sha3Context.Insts.CoreCloneClone.clone {R : Std.Usize} {OUT : Std.Usize}
-  : mid.sha3.Sha3Context R OUT → Result (mid.sha3.Sha3Context R OUT)
-
 /-- `ZeroableRef::new`: its value, as `low.generic.zeroise.ZeroableRef` models
 it. -/
 def low.generic.zeroise.ZeroableRef.new {T : Type} (value : T) :

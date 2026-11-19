@@ -1055,6 +1055,16 @@ hashes=(
     --start-from crate::low::generic::ct_equal::ct_equal
     --start-from '{impl core::clone::Clone for crate::high::hmac::Hmac<_>}'
     --start-from crate::high::digest::Digest::ct_equal
+    --start-from crate::mid::sha3::shake256_batch
+    --start-from 'crate::mid::sha3::SqueezingSponge4xShake128::_'
+    --start-from crate::mid::sha3::SqueezingSponge::new
+    --start-from crate::mid::sha3::SqueezingSponge::squeeze
+    --start-from crate::mid::sha3::Sponge::new
+    --start-from crate::mid::sha3::Sponge::absorb
+    --start-from crate::mid::sha3::Sponge::finish
+    --start-from 'crate::mid::sha3::Sha3Context::_'
+    --start-from 'crate::mid::sha3::Shake::_'
+    --start-from 'crate::mid::sha3::Shake4x::_'
     --opaque crate::aead::quic::Masker
     --opaque crate::mid::aes
     --opaque crate::high::digest::Ops
@@ -1107,16 +1117,6 @@ assembly=(
     --start-from crate::high::signature::Buffer::new
     --start-from crate::high::ecdsa::EncodedPoint::copy_from
     --start-from '{impl core::convert::AsRef for crate::high::signature::ecdsa::Signature}'
-    --start-from crate::mid::sha3::shake256_batch
-    --start-from 'crate::mid::sha3::SqueezingSponge4xShake128::_'
-    --start-from crate::mid::sha3::SqueezingSponge::new
-    --start-from crate::mid::sha3::SqueezingSponge::squeeze
-    --start-from crate::mid::sha3::Sponge::new
-    --start-from crate::mid::sha3::Sponge::absorb
-    --start-from crate::mid::sha3::Sponge::finish
-    --start-from 'crate::mid::sha3::Sha3Context::_'
-    --start-from 'crate::mid::sha3::Shake::_'
-    --start-from 'crate::mid::sha3::Shake4x::_'
     --start-from crate::mid::aes::AesCtr::new
     --start-from crate::mid::aes::AesCtr::apply_keystream
     --start-from crate::mid::aes_cbc::AesCbcEncryptingKey::new
@@ -1523,8 +1523,7 @@ CARGO_TARGET_DIR=$portable_target RUSTFLAGS=$portable_cfg extract x86_64 Portabl
     --start-from crate::error::Error --start-from crate::low::ct::into_public \
     --start-from crate::low::portable::keccak::sha3_keccak4_f1600 \
     --start-from crate::low::portable::keccak::sha3_keccak_nof4_f1600 \
-    --include crate::low::portable::keccak \
-    --opaque crate::mid::sha3
+    --include crate::low::portable::keccak
 CARGO_TARGET_DIR=$portable_target RUSTFLAGS=$portable_cfg extract_kdf x86_64 Portable
 
 mkdir -p proofs/Rind/Aarch64/Kdf
@@ -1550,7 +1549,7 @@ sed -i 's/^public import Rind.Aarch64.HkdfExpand$/&\npublic import Rind.Aarch64.
 # in `Hacl.lean` and `ShaBlocks.lean`, and its compares' proof in `CtEqual.lean`.
 mkdir -p proofs/Rind/Portable/Kdf
 for file in QuicDispatch DigestAlgorithm DigestDispatch Sha512 ChaCha20 Blockwise Sha Hmac HmacDispatch \
-    HkdfExpand Kdf/TypesExternal Kdf/FunsExternal HmacApi DigestApi Hkdf Pbkdf2; do
+    HkdfExpand Kdf/TypesExternal Kdf/FunsExternal HmacApi DigestApi Hkdf Pbkdf2 Sha3; do
     sed 's/X86_64/Portable/g; s/x86_64/portable/g; s/Rind\.Portable\.AwsLc/Rind.Portable.Sha512Entry/' \
         "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Portable/$file.lean"
 done

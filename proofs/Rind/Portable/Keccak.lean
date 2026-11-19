@@ -6,10 +6,11 @@ open Aeneas Aeneas.Std Result rind.spec
 # The portable backend's Keccak-f[1600]
 
 `low/portable/keccak.rs` computes s2n-bignum's `keccak 24`, which
-`Rind.Keccak` proves FIPS 202's KECCAK-f[1600]: `keccak_f1600_spec`, one
-state; `keccak4_f1600_spec`, four; `keccak_nof4_f1600_spec`, the first `N` of
-four, as `Rind/<Arch>/KeccakDispatch.lean` states them for the other
-backends, given FIPS 202's round constants and nothing of the CPU.
+`Rind.Keccak` proves FIPS 202's KECCAK-f[1600]: `keccak_f1600_rc_spec`, one
+state; `keccak4_f1600_rc_spec`, four; `keccak_nof4_f1600_rc_spec`, the first `N` of
+four, given round constants `rc` and nothing of the CPU.
+`Rind.Portable.KeccakDispatch` states them over `mid::sha3::RC`, as
+`Rind/<Arch>/KeccakDispatch.lean` do for the other backends.
 -/
 
 namespace rind.portable
@@ -35,7 +36,7 @@ theorem bv_rotate_left (x : U64) (k : U32) :
     (core.num.U64.rotate_left x k).bv = x.bv.rotateLeft k.val := rfl
 
 /-- One round is s2n-bignum's `keccak_round`. -/
-theorem round_spec (a : Std.Array U64 25#usize) (rc : U64) :
+theorem keccak_round_spec (a : Std.Array U64 25#usize) (rc : U64) :
     low.portable.keccak.round a rc ⦃ r => lanes r = keccakRound rc.bv (lanes a) ⦄ := by
   unfold low.portable.keccak.round
   simp (disch := simp) only [index_lane a, lift, bind_ok, WP.spec_ok]
@@ -44,7 +45,7 @@ theorem round_spec (a : Std.Array U64 25#usize) (rc : U64) :
   rfl
 
 /-- Rounds `iter.start` to 23 of state `s`, whose first `iter.start` are done. -/
-theorem rounds_spec (L : List (BitVec 64)) (rc : Std.Array U64 24#usize)
+theorem keccak_rounds_spec (L : List (BitVec 64)) (rc : Std.Array U64 24#usize)
     (hrc : rc.val.map (·.bv) = keccakRoundConstants)
     (iter : core.ops.range.Range Usize) (s : Std.Array U64 25#usize)
     (hs : iter.start.val ≤ 24) (he : iter.end.val = 24) (hl : lanes s = keccak iter.start.val L) :
@@ -59,7 +60,7 @@ theorem rounds_spec (L : List (BitVec 64)) (rc : Std.Array U64 24#usize)
     · step with core.iter.range.IteratorRange.next_Usize_some_spec as ⟨o, it', ho, hst', hen⟩
       subst ho
       step with Array.index_usize_spec rc it.start (by simp; omega) as ⟨c, hc⟩
-      step with round_spec st c as ⟨y, hy⟩
+      step with keccak_round_spec st c as ⟨y, hy⟩
       have hen' : it'.end.val = it.end.val := by rw [hen]
       have hcv : c.bv = keccakRoundConstants[it.start.val]! := by
         rw [← hrc, hc, getElem!_pos _ it.start.val (by simp; omega)]; simp
@@ -71,11 +72,11 @@ theorem rounds_spec (L : List (BitVec 64)) (rc : Std.Array U64 24#usize)
       simpa [h24] using hst
   · exact ⟨hs, he, hl⟩
 
-/-- `keccak_f1600_spec`: one state, given FIPS 202's round constants. -/
-theorem keccak_f1600_spec (a : Std.Array U64 25#usize) (rc : Std.Array U64 24#usize)
+/-- `keccak_f1600_rc_spec`: one state, given FIPS 202's round constants. -/
+theorem keccak_f1600_rc_spec (a : Std.Array U64 25#usize) (rc : Std.Array U64 24#usize)
     (hrc : rc.val.map (·.bv) = keccakRoundConstants) :
     low.portable.keccak.sha3_keccak_f1600 a rc ⦃ r => lanes r = keccak 24 (lanes a) ⦄ :=
-  rounds_spec _ rc hrc _ a (by simp) (by simp) rfl
+  keccak_rounds_spec _ rc hrc _ a (by simp) (by simp) rfl
 
 /-- States `iter.start` to `N - 1` of four, whose first `iter.start` are permuted. -/
 theorem states_loop_spec (S : List (List (BitVec 64))) (N : Nat) (hN : N ≤ 4)
@@ -96,7 +97,7 @@ theorem states_loop_spec (S : List (List (BitVec 64))) (N : Nat) (hN : N ≤ 4)
     · step with core.iter.range.IteratorRange.next_Usize_some_spec as ⟨o, it', ho, hst', hen⟩
       subst ho
       step with Array.index_mut_usize_spec st it.start (by simp; omega) as ⟨x, back, hx, hback⟩
-      step with keccak_f1600_spec x rc hrc as ⟨y, hy⟩
+      step with keccak_f1600_rc_spec x rc hrc as ⟨y, hy⟩
       have hen' : it'.end.val = it.end.val := by rw [hen]
       refine ⟨by omega, by omega, ?_, by omega⟩
       rw [hback, hst', states_set S st it.start (by omega) hst y (by
@@ -107,8 +108,8 @@ theorem states_loop_spec (S : List (List (BitVec 64))) (N : Nat) (hN : N ≤ 4)
       simpa [hN'] using hst
   · exact ⟨hs, he, ha⟩
 
-/-- `keccak_nof4_f1600_spec`: the first `N` of four states. -/
-theorem keccak_nof4_f1600_spec (N : Usize) (hN : N.val ≤ 4)
+/-- `keccak_nof4_f1600_rc_spec`: the first `N` of four states. -/
+theorem keccak_nof4_f1600_rc_spec (N : Usize) (hN : N.val ≤ 4)
     (a : Std.Array (Std.Array U64 25#usize) 4#usize) (rc : Std.Array U64 24#usize)
     (hrc : rc.val.map (·.bv) = keccakRoundConstants) :
     low.portable.keccak.sha3_keccak_nof4_f1600 N a rc ⦃ r =>
@@ -117,8 +118,8 @@ theorem keccak_nof4_f1600_spec (N : Usize) (hN : N.val ≤ 4)
   intro r hr
   rw [hr, take_loop _ _ (by simp; omega)]
 
-/-- `keccak4_f1600_spec`: four states. -/
-theorem keccak4_f1600_spec (a : Std.Array (Std.Array U64 25#usize) 4#usize)
+/-- `keccak4_f1600_rc_spec`: four states. -/
+theorem keccak4_f1600_rc_spec (a : Std.Array (Std.Array U64 25#usize) 4#usize)
     (rc : Std.Array U64 24#usize) (hrc : rc.val.map (·.bv) = keccakRoundConstants) :
     low.portable.keccak.sha3_keccak4_f1600 a rc ⦃ r =>
       states r = (states a).map (keccak 24) ⦄ := by

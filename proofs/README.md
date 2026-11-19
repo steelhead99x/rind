@@ -679,9 +679,10 @@ digest API reaches each hash through function pointers too, which
 models the `Algorithm` statics that hold them, and `Digest`, whose
 `&'static Algorithm` Aeneas cannot end a borrow of `Digest` across.
 
-SHA3-256, SHA3-384, and SHA3-512, and the SHAKE calls ML-KEM and ML-DSA make, on x86_64
-and aarch64, from rind's Rust sponge to s2n-bignum's Keccak-f routines, in
-`Rind/X86_64/Sha3.lean`, which `admin/prove` also writes for aarch64:
+SHA3-256, SHA3-384, and SHA3-512, and the SHAKE calls ML-KEM and ML-DSA make, on x86_64,
+aarch64, and the portable backend, from rind's Rust sponge to s2n-bignum's
+Keccak-f routines, or on the portable backend to its own Keccak-f, in
+`Rind/X86_64/Sha3.lean`, which `admin/prove` also writes for the other two:
 
 - `sha3_family_digest`: `digest`'s bytes are the hash of the message;
 - `sha3_family_context`: a `Context` given the message in any chunks, then
@@ -721,10 +722,12 @@ polynomials four at a time and the ninth alone, never eight at a time.
 
 The portable backend's Keccak-f, which its SHA-3, ML-KEM, and ML-DSA run, in
 `Rind/Portable/Keccak.lean`, over a translation of `low/portable/keccak.rs`
-under `--cfg rind_portable`: `keccak_f1600_spec`, `keccak4_f1600_spec`, and
-`keccak_nof4_f1600_spec` state what `Rind/<Arch>/KeccakDispatch.lean`'s do,
-given FIPS 202's round constants and nothing of the CPU. Each round is
-`keccak_round` written out, which `round_spec` proves by unfolding.
+under `--cfg rind_portable`: `keccak_f1600_rc_spec`, `keccak4_f1600_rc_spec`,
+and `keccak_nof4_f1600_rc_spec` give each routine over any round constants
+that are FIPS 202's, and nothing of the CPU. Each round is `keccak_round`
+written out, which `keccak_round_spec` proves by unfolding.
+`Rind/Portable/KeccakDispatch.lean` states them as `Rind/<Arch>/KeccakDispatch.lean`
+does, over `mid::sha3::RC`, and assumes `RunsSha3`, the entry guard alone.
 
 ML-KEM's polynomial arithmetic, against FIPS 203 as SymCrypt's Lean spec
 (`Rind/SymCrypt/MlKem.lean`, MIT) states it, and of rind's Rust only the
@@ -1216,12 +1219,12 @@ statics are built wholly by quoted code.
 
 `admin/prove` translates the portable backend too, under `--cfg
 rind_portable`, the cfg CI's portable jobs build with, on x86_64, into
-`Rind/Portable/`: the hash, HMAC, KDF, and header-protection paths, and the
-Keccak-f above, alone. None of that Rust picks by pointer width or CPU, and Aeneas's `usize` is either
+`Rind/Portable/`: the hash, HMAC, KDF, header-protection, and SHA-3 sponge
+paths, down to the Keccak-f. None of that Rust picks by pointer width or CPU, and Aeneas's `usize` is either
 width, so the theorems hold on every target the backend builds for. The
 x86_64 proofs of SHA-256's padding, the SHA-512 family, HMAC's keyed states,
-the digest, HMAC, HKDF, and PBKDF2 APIs, and ChaCha20 header protection are
-written for it with the target renamed, as for aarch64, over what differs:
+the digest, HMAC, HKDF, and PBKDF2 APIs, ChaCha20 header protection, and the
+SHA-3 sponge are written for it with the target renamed, as for aarch64, over what differs:
 
 - `Rind/Portable/Hacl.lean`: HACL*'s SHA-256 and SHA-512 block functions,
   which libcrux-sha2 ships as the Rust KaRaMeL prints, as the axioms
@@ -1248,9 +1251,7 @@ protection none.
 Every other operation the portable backend runs has no proof yet, and
 these quests prove its code, whose proofs then run on this translation:
 
-- SHA-3 and ML-KEM: [the sponge's proof over its Keccak-f](/quest/m4/verified/sha3-portable.md),
-  which `Rind/Portable/Keccak.lean` proves,
-  [the construction](/quest/m4/verified/mlkem-construction.md), and
+- ML-KEM: [the construction](/quest/m4/verified/mlkem-construction.md) and
   [the portable arithmetic](/quest/m4/verified/mlkem-portable.md);
 - ChaCha20-Poly1305:
   [Graviola's Poly1305 and the separate-pass glue](/quest/m5/verified/chacha20-poly1305-portable.md);
@@ -1367,7 +1368,7 @@ proof after those.
   lanes, shared by `Rind/<Arch>/KeccakDispatch.lean`: rind's Keccak-f dispatch
   on each target, and `Rind/Portable/Keccak.lean`: the portable backend's
   Keccak-f; `Rind/X86_64/Sha3.lean`: the SHA-3 and
-  SHAKE proofs.
+  SHAKE proofs, which `admin/prove` writes for aarch64 and the portable backend.
 - `Rind/SymCrypt/{NatBit,Round,Xof,MlKem,MlKemPolynomials,MlKemNtt}.lean`:
   SymCrypt's Lean FIPS 203 spec and its NTT lemmas, vendored;
   `Rind/MlKem.lean`: FIPS 203's NTT and inverse NTT in closed form;
