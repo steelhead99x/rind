@@ -805,8 +805,8 @@ mod tests {
                 let blocks = pad_blocks(&inputs, total);
                 for (j, block) in blocks.iter().enumerate() {
                     let mut state = [[0u64; 25]; 4];
-                    for (word, chunk) in state[0].iter_mut().zip(block.chunks_exact(8)) {
-                        *word = u64::from_le_bytes(chunk.try_into().unwrap());
+                    for (word, chunk) in state[0].iter_mut().zip(block.as_chunks::<8>().0) {
+                        *word = u64::from_le_bytes(*chunk);
                     }
                     sha3_keccak_nof4_f1600::<1>(&mut state, &RC);
                     let mut digest = [0u8; 32];
