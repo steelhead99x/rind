@@ -6,7 +6,10 @@
 //! accumulator is read and written as whole words, so a block needs no limb
 //! split, and a block takes sixteen `umlal` and four small multiplies where
 //! the five 26-bit limbs of `generic::poly1305_32` take twenty-five `umlal`.
-//! The code is rind's; the arithmetic is below, with its bounds.
+//! The radix and the `5/4` folding of the high products are OpenSSL's, from
+//! `poly1305-armv4.pl` (Andy Polyakov); the code is rind's, written in Rust
+//! rather than ported line by line, and the arithmetic is below, with its
+//! bounds.
 //!
 //! 32-bit Arm NEON intrinsics are unstable on the toolchain this crate builds
 //! with, so this backend does not ship aws-lc's NEON Poly1305.
