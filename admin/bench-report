@@ -199,7 +199,7 @@ SECTIONS = [
         [
             *(
                 f"{hash}/{{lib}}/{size}"
-                for hash in ["sha256", "sha512", "sha3-256", "sha3-512"]
+                for hash in ["sha256", "sha512", "sha3-256", "sha3-512", "sha1", "md5"]
                 for size in ["64B", "1350B", "16KB"]
             ),
             "hmac-sha256/{lib}/64B",
@@ -1039,6 +1039,8 @@ NAMES = {
     "sha512": "SHA-512",
     "sha3-256": "SHA3-256",
     "sha3-512": "SHA3-512",
+    "sha1": "SHA-1",
+    "md5": "MD5",
     "hmac-sha256": "HMAC-SHA256",
     "hkdf-sha256/extract-expand": "HKDF-SHA256 extract and expand",
     "hkdf-sha256/expand": "HKDF-SHA256 expand",
@@ -1125,6 +1127,8 @@ ALGORITHMS = [
     ("SHA-256", r"sha256/"),
     ("SHA-512", r"sha512/"),
     ("SHA-3", r"sha3-"),
+    ("SHA-1", r"sha1/"),
+    ("MD5", r"md5/"),
     ("HMAC", r"hmac-"),
     ("HKDF", r"hkdf-"),
     ("X25519", r"x25519-"),
