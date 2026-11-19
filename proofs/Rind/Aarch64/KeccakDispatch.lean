@@ -15,10 +15,11 @@ which `admin/prove` writes from x86_64's, uses these names, which
 namespace rind.aarch64
 
 /-- rind's SHA-3 runs on this CPU: its entry guard, the debug build's check
-that one is held, and its SHA-3 extension check pass. None reads an input. -/
+that one is held, and its check of whether Keccak-f runs on the SHA3
+instructions pass. None reads an input. -/
 def RunsSha3 : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ low.entry.Entry.assert_held = ok () ∧
-    ∃ t, low.aarch64.cpu.HaveSha3.check = ok t
+    ∃ t, low.aarch64.cpu.HaveSha3.check_keccak = ok t
 
 theorem sha3_new_secret_spec (h : RunsSha3) : low.entry.Entry.new_secret ⦃ _ => True ⦄ := by
   obtain ⟨⟨e, he⟩, -⟩ := h

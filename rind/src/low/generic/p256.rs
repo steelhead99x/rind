@@ -417,8 +417,9 @@ fn fs_invert(x: &Fs) -> Fs {
     let r = fs_mul(&sqr_n(&x32, 64), &x32);
     let mut r = fs_mul(&sqr_n(&r, 32), &x32);
     for word in N_MINUS_2[..2].iter().rev() {
-        for shift in (0..64).step_by(4).rev() {
-            let digit = (word >> shift) & 0xf;
+        // A plain counter, as in `p384::fs_pow`.
+        for nibble in (0..16).rev() {
+            let digit = (word >> (4 * nibble)) & 0xf;
             r = fs_mul(&sqr_n(&r, 4), &table[digit as usize - 1]);
         }
     }
@@ -777,6 +778,11 @@ mod tests {
         table
     }
 
+    // The reference results are public but marked so anyway: memcheck can
+    // count the secret arithmetic's stale flags against a flag a reference
+    // routine sets itself, such as the `stc` before `bignum_add_p521`'s
+    // `adc` chain on x86_64. See UPSTREAM.md, "Memcheck blames a public
+    // flag on a secret carry".
     proptest! {
         #[test]
         fn field_ops(x in field(), y in field()) {
@@ -785,23 +791,23 @@ mod tests {
 
             bignum_montmul_p256(&mut ours, &sx, &sy);
             low::bignum_montmul_p256(&mut theirs, &x, &y);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_montsqr_p256(&mut ours, &sx);
             low::bignum_montsqr_p256(&mut theirs, &x);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_add_p256(&mut ours, &sx, &sy);
             low::bignum_add_p256(&mut theirs, &x, &y);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_neg_p256(&mut ours, &sx);
             low::bignum_neg_p256(&mut theirs, &x);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_demont_p256(&mut ours, &sx);
             low::bignum_demont_p256(&mut theirs, &x);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
         }
 
         #[test]
@@ -811,11 +817,11 @@ mod tests {
 
             bignum_tomont_p256(&mut ours, &sx);
             low::bignum_tomont_p256(&mut theirs, &x);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_inv_p256(&mut ours, &sx);
             low::bignum_inv_p256(&mut theirs, &x);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
         }
 
         #[test]
@@ -829,7 +835,7 @@ mod tests {
                 let (mut ours, mut theirs) = ([0; 12], [0; 12]);
                 p256_montjadd(&mut ours, &sp, &sq);
                 low::p256_montjadd(&mut theirs, &p, &q);
-                prop_assert_eq!(into_public(ours), theirs);
+                prop_assert_eq!(into_public(ours), into_public(theirs));
             }
         }
 
@@ -849,7 +855,7 @@ mod tests {
                 let (mut ours, mut theirs) = ([0; 12], [0; 12]);
                 p256_montjmixadd(&mut ours, &sp, &sq);
                 low::p256_montjmixadd(&mut theirs, &p, &q);
-                prop_assert_eq!(into_public(ours), theirs);
+                prop_assert_eq!(into_public(ours), into_public(theirs));
             }
         }
 
@@ -859,7 +865,7 @@ mod tests {
             let (mut ours, mut theirs) = ([0; 12], [0; 12]);
             p256_montjdouble(&mut ours, &sp);
             low::p256_montjdouble(&mut theirs, &p);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
         }
     }
 
@@ -872,7 +878,7 @@ mod tests {
             let mut ours = [0; 12];
             p256_montjscalarmul(&mut ours, &into_secret(k), &into_secret(p));
             let ours = into_public(ours);
-            prop_assert_eq!(plain_affine(&ours), s2n_multiply(&k, &p));
+            prop_assert_eq!(plain_affine(&ours), into_public(s2n_multiply(&k, &p)));
         }
 
         #[test]
@@ -882,25 +888,25 @@ mod tests {
 
             bignum_mod_n256(&mut ours, &sraw);
             low::bignum_mod_n256(&mut theirs, &raw);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_montmul(&mut ours, &sx, &sy, &N);
             low::bignum_montmul(&mut theirs, &x, &y, &N);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_demont(&mut ours, &sx, &N);
             low::bignum_demont(&mut theirs, &x, &N);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             bignum_modadd(&mut ours, &sx, &sy, &N);
             low::bignum_modadd(&mut theirs, &x, &y, &N);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             // s2n-bignum leaves the inverse of zero unspecified.
             if x != [0; 4] {
                 bignum_modinv(&mut ours, &sx, &N, &mut [0; 12]);
                 low::bignum_modinv(&mut theirs, &x, &N, &mut [0; 12]);
-                prop_assert_eq!(into_public(ours), theirs);
+                prop_assert_eq!(into_public(ours), into_public(theirs));
             }
         }
     }
@@ -945,7 +951,11 @@ mod tests {
         for k in scalars {
             let mut ours = [0; 8];
             p256_scalarmulbase(&mut ours, &into_secret(k), &table);
-            assert_eq!(into_public(ours), s2n_multiply(&k, &GENERATOR), "{k:x?}");
+            assert_eq!(
+                into_public(ours),
+                into_public(s2n_multiply(&k, &GENERATOR)),
+                "{k:x?}"
+            );
         }
     }
 

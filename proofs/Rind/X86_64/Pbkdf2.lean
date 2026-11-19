@@ -6,7 +6,10 @@ open Aeneas Aeneas.Std Result rind.spec
 
 `Secret::derive` writes RFC 8018's PBKDF2 and `Secret::verify` accepts exactly
 it, over HMAC with any of `high::hmac`'s hashes, down to
-`Rind.X86_64.HmacApi`. `Secret` is translated in the second Aeneas pass.
+`Rind.X86_64.HmacApi`, for a `Secret` on rind's loop, `Rind`. On aarch64 a
+`Secret` runs pyca/verified-garbage's routine instead where the CPU has the
+instructions it takes, which `mid::pbkdf2_vg` wraps and this translation leaves
+opaque. `Secret` is translated in the second Aeneas pass.
 `admin/prove` writes the aarch64 proof from this file by renaming the target.
 -/
 
@@ -54,7 +57,7 @@ theorem pbT_length (n : Nat) (hn : ∀ x, (prf P x).length = n) (c i : Nat) :
 
 end
 
-/-! ## `Secret::block` -/
+/-! ## `Rind::block` -/
 
 /-- `S` with its bytes before `k` XORed with `N`'s. -/
 def xorUpTo (S N : List U8) (k : Nat) : List U8 :=
@@ -89,16 +92,16 @@ theorem xorUpTo_end (S N : List U8) (hN : N.length = S.length) :
 
 theorem xor_loop_spec (S N : Slice U8) (hN : N.length = S.length) :
     ∀ (j : Usize) (sum : Slice U8), j.val ≤ S.length → sum.val = xorUpTo S.val N.val j.val →
-    high.pbkdf2.Secret.block_loop0_loop0 { start := j, «end» := S.len } sum N ⦃ r =>
+    high.pbkdf2.Rind.block_loop0_loop0 { start := j, «end» := S.len } sum N ⦃ r =>
       bv r.val = List.zipWith (· ^^^ ·) (bv S.val) (bv N.val) ⦄ := by
   intro j sum hj hs
-  unfold high.pbkdf2.Secret.block_loop0_loop0
+  unfold high.pbkdf2.Rind.block_loop0_loop0
   apply loop.spec_decr_nat (fun x => S.length - x.1.start.val)
     (fun x => x.1.«end» = S.len ∧ x.1.start.val ≤ S.length ∧
       x.2.val = xorUpTo S.val N.val x.1.start.val)
   · rintro ⟨it, sm⟩ ⟨he, hle, hsm⟩
     simp only at he hle hsm ⊢
-    unfold high.pbkdf2.Secret.block_loop0_loop0.body
+    unfold high.pbkdf2.Rind.block_loop0_loop0.body
     have hS : it.«end».val = S.length := by rw [he, Slice.len_val]
     step as ⟨o, iter1, ho, hend⟩
     by_cases hlt : it.start.val < it.«end».val
@@ -155,10 +158,10 @@ theorem block_loop_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (P : List By
       outLen u.algorithm = tagLen a → outLen t.algorithm = tagLen a →
       digestBytes u = (pbIter (hmacOf a) P (iter.start.val - 1) acc).1 →
       digestBytes t = (pbIter (hmacOf a) P (iter.start.val - 1) acc).2 →
-      high.pbkdf2.Secret.block_loop0 iter k u t ⦃ r =>
+      high.pbkdf2.Rind.block_loop0 iter k u t ⦃ r =>
         outLen r.algorithm = tagLen a ∧ digestBytes r = (pbIter (hmacOf a) P (c - 1) acc).2 ⦄ := by
   intro iter u t he h1 hle hul htl hu ht
-  unfold high.pbkdf2.Secret.block_loop0
+  unfold high.pbkdf2.Rind.block_loop0
   apply loop.spec_decr_nat (fun x => c - x.1.start.val)
     (fun x => x.2.1 = k ∧ x.1.«end».val = c ∧ 1 ≤ x.1.start.val ∧ x.1.start.val - 1 ≤ c - 1 ∧
       outLen x.2.2.1.algorithm = tagLen a ∧ outLen x.2.2.2.algorithm = tagLen a ∧
@@ -166,7 +169,7 @@ theorem block_loop_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (P : List By
       digestBytes x.2.2.2 = (pbIter (hmacOf a) P (x.1.start.val - 1) acc).2)
   · rintro ⟨it, sf, u, t⟩ ⟨rfl, he, h1, hle, hul, htl, hu, ht⟩
     simp only at he h1 hle hul htl hu ht ⊢
-    unfold high.pbkdf2.Secret.block_loop0.body
+    unfold high.pbkdf2.Rind.block_loop0.body
     step as ⟨o, iter1, ho, hend⟩
     by_cases hlt : it.start.val < it.«end».val
     · simp only [hlt, ↓reduceIte] at ho
@@ -219,16 +222,16 @@ theorem bv_toBEBytes (x : U32) :
   rw [BitVec.toNat_ofNat]
   exact (Nat.mod_eq_of_lt x.bv.isLt).symm
 
-/-- `Secret::block` is PBKDF2's block `T_index` after `iterations` iterations. -/
+/-- `Rind::block` is PBKDF2's block `T_index` after `iterations` iterations. -/
 theorem block_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (P : List Byte)
     (k : high.hmac.Key) (hk : KeyOf a P k) (salt : List U8) (salted : high.hmac.Streaming)
     (hs : StreamOf a P salt salted) (hm : hmacBlock a + salt.length + 4 ≤ maxInput)
     (iterations : core.num.nonzero.NonZero U32 core.num.niche_types.NonZeroU32Inner)
     (index : U32) :
-    high.pbkdf2.Secret.block k salted iterations index ⦃ r =>
+    high.pbkdf2.Rind.block k salted iterations index ⦃ r =>
       outLen r.algorithm = tagLen a ∧
         digestBytes r = pbT (hmacOf a) P (bv salt) iterations.val index.val ⦄ := by
-  unfold high.pbkdf2.Secret.block
+  unfold high.pbkdf2.Rind.block
   apply WP.spec_bind (stream_clone_spec a hr P salt salted hs)
   intro ctx hctx
   step as ⟨arr, harr⟩
@@ -330,13 +333,13 @@ theorem zipAt_measure (n L i' : Nat) (it it' : BlockIter) (hz : ZipAt n L i' it)
   rw [hz.2.2.2.1, hz'.2.2.2.1, Nat.add_mul, one_mul]
   omega
 
-/-! ## `Secret::derive` -/
+/-! ## `Rind::derive` -/
 
 theorem salted_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (P : List Byte)
     (k : high.hmac.Key) (hk : KeyOf a P k) (salt : Slice U8)
     (hm : hmacBlock a + salt.length ≤ maxInput) :
-    high.pbkdf2.Secret.salted k salt ⦃ s => StreamOf a P salt.val s ⦄ := by
-  unfold high.pbkdf2.Secret.salted
+    high.pbkdf2.Rind.salted k salt ⦃ s => StreamOf a P salt.val s ⦄ := by
+  unfold high.pbkdf2.Rind.salted
   apply WP.spec_bind (key_start_spec a hr P k hk)
   intro s hs
   have := stream_update_spec a hr P [] s hs salt (by simpa using hm)
@@ -351,20 +354,20 @@ theorem derive_loop_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (P : List B
     (hz : ZipAt (tagLen a) L i' it) (hl : out.length = L)
     (hpre : (bv out.val).take (i' * tagLen a) =
       (blocksOut (pbT (hmacOf a) P (bv salt) iterations.val) i').take L) :
-    high.pbkdf2.Secret.derive_loop it k iterations out salted hash_len ⦃ r =>
+    high.pbkdf2.Rind.derive_loop it k iterations out salted hash_len ⦃ r =>
       r.length = L ∧ bv r.val = (blocksOut (pbT (hmacOf a) P (bv salt) iterations.val)
         ((L + tagLen a - 1) / tagLen a)).take L ⦄ := by
   have hn := tagLen_pos a
   have hT : ∀ i, (pbT (hmacOf a) P (bv salt) iterations.val (i + 1)).length = tagLen a :=
     fun i => pbT_length _ _ _ _ (fun x => hmacOf_length a P x hr) _ _
-  unfold high.pbkdf2.Secret.derive_loop
+  unfold high.pbkdf2.Rind.derive_loop
   apply loop.spec_decr_nat (fun x => L - x.1.snd.iter.start.val)
     (fun x => ∃ i', ZipAt (tagLen a) L i' x.1 ∧ x.2.length = L ∧
       (bv x.2.val).take (i' * tagLen a) =
         (blocksOut (pbT (hmacOf a) P (bv salt) iterations.val) i').take L)
   · rintro ⟨it, out⟩ ⟨i', hz, hl, hpre⟩
     simp only at hz hl hpre ⊢
-    unfold high.pbkdf2.Secret.derive_loop.body
+    unfold high.pbkdf2.Rind.derive_loop.body
     apply WP.spec_bind (zip_next_spec _ L i' hn hK it hz)
     rintro ⟨o, it'⟩ ho
     rcases o with _ | ⟨idx, off⟩
@@ -411,12 +414,12 @@ theorem derive_loop_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (P : List B
 /-- `check_len` accepts a length of at least one and at most `u32::MAX` blocks. -/
 theorem check_len_spec (a : high.hmac.Algorithm) (P : List Byte) (k : high.hmac.Key)
     (hk : KeyOf a P k) (len : Usize) :
-    high.pbkdf2.Secret.check_len k len ⦃ r =>
+    high.pbkdf2.Rind.check_len k len ⦃ r =>
       r = if 0 < len.val ∧ (len.val + tagLen a - 1) / tagLen a ≤ U32.max then .Ok ()
         else .Err .WrongLength ⦄ := by
   obtain ⟨n, hn, hnv⟩ := tagLen_eq a
   have hpos := tagLen_pos a
-  unfold high.pbkdf2.Secret.check_len core.num.Usize.div_ceil
+  unfold high.pbkdf2.Rind.check_len core.num.Usize.div_ceil
   rw [key_algorithm_eq hk, bind_ok, hn, bind_ok]
   have h0 : ¬ n.val = 0 := by omega
   simp only [h0, ↓reduceDIte, bind_ok]
@@ -468,13 +471,13 @@ theorem zipAt_start (L : Nat) (n : Usize) (len : Usize) (hl : len.val = L) :
     ZipAt n.val L 0 ⟨⟨1#u32, core.num.U32.MAX, false⟩, ⟨⟨0#usize, len⟩, n⟩⟩ := by
   refine ⟨u32_max_val, fun _ => rfl, fun h => by simp at h, by simp, hl, rfl⟩
 
-/-- `Secret::derive` writes PBKDF2's output, for an output of at least one
+/-- `Rind::derive` writes PBKDF2's output, for an output of at least one
 and at most `u32::MAX` blocks, and refuses any other. -/
-theorem derive_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (P : List Byte)
+theorem rind_derive_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (P : List Byte)
     (k : high.hmac.Key) (hk : KeyOf a P k)
     (iterations : core.num.nonzero.NonZero U32 core.num.niche_types.NonZeroU32Inner)
     (salt out : Slice U8) (hm : hmacBlock a + salt.length + 4 ≤ maxInput) :
-    high.pbkdf2.Secret.derive k iterations salt out ⦃ r =>
+    high.pbkdf2.Rind.derive k iterations salt out ⦃ r =>
       if 0 < out.length ∧ (out.length + tagLen a - 1) / tagLen a ≤ U32.max then
         r.1 = .Ok () ∧ r.2.length = out.length ∧
           bv r.2.val = pbkdf2 (hmacOf a) (tagLen a) P (bv salt.val) iterations.val out.length
@@ -483,7 +486,7 @@ theorem derive_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (P : List Byte)
   have hpos := tagLen_pos a
   have hent := hr.1
   obtain ⟨e, he⟩ := hent
-  unfold high.pbkdf2.Secret.derive
+  unfold high.pbkdf2.Rind.derive
   rw [he, bind_ok]
   apply WP.spec_bind (check_len_spec a P k hk (Slice.len out))
   rintro c rfl
@@ -513,7 +516,7 @@ theorem derive_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (P : List Byte)
       core.convert.FromSame.from]
     simp
 
-/-! ## `Secret::verify` -/
+/-! ## `Rind::verify` -/
 
 section
 variable (T : Nat → List Byte) (n : Nat) (hT : ∀ i, (T (i + 1)).length = n)
@@ -574,21 +577,21 @@ theorem verify_loop_spec (a : high.hmac.Algorithm) (hr : RunsHmac a)
     (equal : Bool) (hz : ZipAt (tagLen a) prev.length i' it)
     (heq : equal = true ↔ (bv prev.val).take (i' * tagLen a) =
       (blocksOut (pbT (hmacOf a) P (bv salt) iterations.val) i').take prev.length) :
-    high.pbkdf2.Secret.verify_loop it k iterations prev salted hash_len equal ⦃ r =>
+    high.pbkdf2.Rind.verify_loop it k iterations prev salted hash_len equal ⦃ r =>
       r = true ↔ bv prev.val = (blocksOut (pbT (hmacOf a) P (bv salt) iterations.val)
         ((prev.length + tagLen a - 1) / tagLen a)).take prev.length ⦄ := by
   have hn := tagLen_pos a
   have hT : ∀ i, (pbT (hmacOf a) P (bv salt) iterations.val (i + 1)).length = tagLen a :=
     fun i => pbT_length _ _ _ _ (fun x => hmacOf_length a P x hr) _ _
   have hpl : prev.val.length = prev.length := rfl
-  unfold high.pbkdf2.Secret.verify_loop
+  unfold high.pbkdf2.Rind.verify_loop
   apply loop.spec_decr_nat (fun x => prev.length - x.1.snd.iter.start.val)
     (fun x => ∃ i', ZipAt (tagLen a) prev.length i' x.1 ∧
       (x.2 = true ↔ (bv prev.val).take (i' * tagLen a) =
         (blocksOut (pbT (hmacOf a) P (bv salt) iterations.val) i').take prev.length))
   · rintro ⟨it, equal⟩ ⟨i', hz, heq⟩
     simp only at hz heq ⊢
-    unfold high.pbkdf2.Secret.verify_loop.body
+    unfold high.pbkdf2.Rind.verify_loop.body
     apply WP.spec_bind (zip_next_spec _ _ i' hn hK it hz)
     rintro ⟨o, it'⟩ ho
     rcases o with _ | ⟨idx, off⟩
@@ -627,11 +630,11 @@ theorem verify_loop_spec (a : high.hmac.Algorithm) (hr : RunsHmac a)
       rw [this, Bool.and_eq_true, heq, hs1, hs2, decide_eq_true_iff]
   · exact ⟨i', hz, heq⟩
 
-theorem verify_spec (a : high.hmac.Algorithm) (hr : RunsHmac a)
+theorem rind_verify_spec (a : high.hmac.Algorithm) (hr : RunsHmac a)
     (P : List Byte) (k : high.hmac.Key) (hk : KeyOf a P k)
     (iterations : core.num.nonzero.NonZero U32 core.num.niche_types.NonZeroU32Inner)
     (salt prev : Slice U8) (hm : hmacBlock a + salt.length + 4 ≤ maxInput) :
-    high.pbkdf2.Secret.verify k iterations salt prev ⦃ r =>
+    high.pbkdf2.Rind.verify k iterations salt prev ⦃ r =>
       r = if prev.length < tagLen a ∨ ¬ (prev.length + tagLen a - 1) / tagLen a ≤ U32.max then
         .Err .WrongLength
       else if bv prev.val = pbkdf2 (hmacOf a) (tagLen a) P (bv salt.val) iterations.val
@@ -640,7 +643,7 @@ theorem verify_spec (a : high.hmac.Algorithm) (hr : RunsHmac a)
   obtain ⟨n, hn, hnv⟩ := tagLen_eq a
   have hpos := tagLen_pos a
   obtain ⟨e, he⟩ := hr.1
-  unfold high.pbkdf2.Secret.verify
+  unfold high.pbkdf2.Rind.verify
   rw [he, bind_ok, key_algorithm_eq hk, bind_ok, hn, bind_ok]
   have hlv : (Slice.len prev).val = prev.length := Slice.len_val prev
   by_cases hs : prev.length < tagLen a
@@ -681,5 +684,36 @@ theorem verify_spec (a : high.hmac.Algorithm) (hr : RunsHmac a)
       core.result.Result.Insts.CoreOpsTry_traitFromResidualResult.from_residual,
       core.convert.FromSame.from]
     simp
+
+/-! ## `Secret` -/
+
+/-- `Secret::derive` on rind's loop writes PBKDF2's output, for an output of at
+least one and at most `u32::MAX` blocks, and refuses any other. -/
+theorem derive_spec (a : high.hmac.Algorithm) (hr : RunsHmac a) (P : List Byte)
+    (k : high.hmac.Key) (hk : KeyOf a P k)
+    (iterations : core.num.nonzero.NonZero U32 core.num.niche_types.NonZeroU32Inner)
+    (salt out : Slice U8) (hm : hmacBlock a + salt.length + 4 ≤ maxInput) :
+    high.pbkdf2.Secret.derive (.Rind k) iterations salt out ⦃ r =>
+      if 0 < out.length ∧ (out.length + tagLen a - 1) / tagLen a ≤ U32.max then
+        r.1 = .Ok () ∧ r.2.length = out.length ∧
+          bv r.2.val = pbkdf2 (hmacOf a) (tagLen a) P (bv salt.val) iterations.val out.length
+      else r = (.Err .WrongLength, out) ⦄ := by
+  unfold high.pbkdf2.Secret.derive
+  exact rind_derive_spec a hr P k hk iterations salt out hm
+
+/-- `Secret::verify` on rind's loop accepts exactly PBKDF2's output, of at
+least the tag's length and at most `u32::MAX` blocks. -/
+theorem verify_spec (a : high.hmac.Algorithm) (hr : RunsHmac a)
+    (P : List Byte) (k : high.hmac.Key) (hk : KeyOf a P k)
+    (iterations : core.num.nonzero.NonZero U32 core.num.niche_types.NonZeroU32Inner)
+    (salt prev : Slice U8) (hm : hmacBlock a + salt.length + 4 ≤ maxInput) :
+    high.pbkdf2.Secret.verify (.Rind k) iterations salt prev ⦃ r =>
+      r = if prev.length < tagLen a ∨ ¬ (prev.length + tagLen a - 1) / tagLen a ≤ U32.max then
+        .Err .WrongLength
+      else if bv prev.val = pbkdf2 (hmacOf a) (tagLen a) P (bv salt.val) iterations.val
+          prev.length then .Ok ()
+      else .Err .BadSignature ⦄ := by
+  unfold high.pbkdf2.Secret.verify
+  exact rind_verify_spec a hr P k hk iterations salt prev hm
 
 end rind.x86_64.kdf
