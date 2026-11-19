@@ -78,10 +78,18 @@ pub const CHACHA20: Algorithm = Algorithm {
     id: AlgorithmId::CHACHA20,
 };
 
-/// A header-protection key; wiped on drop.
+/// A header-protection key; wiped on drop. With `fips`, AES keys live in
+/// rind-fips's module and ChaCha20's, which it does not approve, in rind.
 pub struct HeaderProtectionKey {
-    key: rind::aead::quic::HeaderProtectionKey,
+    key: Engine,
     algorithm: &'static Algorithm,
+}
+
+#[allow(clippy::large_enum_variant, reason = "a key is a value, as rind's is")]
+enum Engine {
+    Rind(rind::aead::quic::HeaderProtectionKey),
+    #[cfg(feature = "fips")]
+    Module(rind_fips::aead::quic::HeaderProtectionKey),
 }
 
 impl HeaderProtectionKey {
@@ -90,16 +98,38 @@ impl HeaderProtectionKey {
         algorithm: &'static Algorithm,
         key_bytes: &[u8],
     ) -> Result<Self, error::Unspecified> {
+        #[cfg(feature = "fips")]
+        let module = match algorithm.id {
+            AlgorithmId::AES_128 => Some(&rind_fips::aead::quic::AES_128),
+            AlgorithmId::AES_256 => Some(&rind_fips::aead::quic::AES_256),
+            AlgorithmId::CHACHA20 => None,
+        };
+        #[cfg(feature = "fips")]
+        if let Some(module) = module {
+            let key = rind_fips::aead::quic::HeaderProtectionKey::new(module, key_bytes)
+                .map_err(error::unspecified)?;
+            return Ok(Self {
+                key: Engine::Module(key),
+                algorithm,
+            });
+        }
         Ok(Self {
-            key: rind::aead::quic::HeaderProtectionKey::new(algorithm.rind(), key_bytes)
-                .map_err(error::unspecified)?,
+            key: Engine::Rind(
+                rind::aead::quic::HeaderProtectionKey::new(algorithm.rind(), key_bytes)
+                    .map_err(error::unspecified)?,
+            ),
             algorithm,
         })
     }
 
     /// Returns the five-byte mask for `sample`, failing unless it is a sample's length.
     pub fn new_mask(&self, sample: &[u8]) -> Result<[u8; 5], error::Unspecified> {
-        Ok(self.key.mask(sample.try_into()?))
+        let sample = sample.try_into()?;
+        Ok(match &self.key {
+            Engine::Rind(key) => key.mask(sample),
+            #[cfg(feature = "fips")]
+            Engine::Module(key) => key.mask(sample),
+        })
     }
 
     /// The algorithm this key was made for.

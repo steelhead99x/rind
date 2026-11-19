@@ -181,6 +181,54 @@ mod with_the_feature {
         }
     }
 
+    /// ML-KEM, AES key wrap, AES-CBC and AES-CTR, and QUIC header protection
+    /// run in the module; ChaCha20 header protection, which the module does
+    /// not approve, runs in rind.
+    #[test]
+    fn kem_key_wrap_cipher_and_quic_work_in_the_module() {
+        use ours::aead::quic::{AES_128, CHACHA20, HeaderProtectionKey};
+        use ours::cipher::{
+            AES_128 as CIPHER_AES_128, DecryptionContext, PaddedBlockDecryptingKey,
+            PaddedBlockEncryptingKey, UnboundCipherKey,
+        };
+        use ours::kem::{DecapsulationKey, ML_KEM_768};
+        use ours::key_wrap::{AES_256, AesKek, KeyEncryptionKey, KeyWrap};
+
+        let decapsulation = DecapsulationKey::generate(&ML_KEM_768).unwrap();
+        let (ciphertext, secret) = decapsulation
+            .encapsulation_key()
+            .unwrap()
+            .encapsulate()
+            .unwrap();
+        let opened = decapsulation.decapsulate(ciphertext).unwrap();
+        assert_eq!(opened.as_ref(), secret.as_ref());
+
+        let kek: AesKek = KeyEncryptionKey::new(&AES_256, &[3; 32]).unwrap();
+        let mut wrapped = [0; 40];
+        let wrapped = kek.wrap(&[9; 32], &mut wrapped).unwrap().to_vec();
+        let kek: AesKek = KeyEncryptionKey::new(&AES_256, &[3; 32]).unwrap();
+        let mut key = [0; 32];
+        assert_eq!(kek.unwrap(&wrapped, &mut key).unwrap(), [9; 32]);
+
+        let mut message = b"sixteen byte msg and a bit".to_vec();
+        let unbound = || UnboundCipherKey::new(&CIPHER_AES_128, &[5; 16]).unwrap();
+        let context = PaddedBlockEncryptingKey::cbc_pkcs7(unbound())
+            .unwrap()
+            .encrypt(&mut message)
+            .unwrap();
+        let context: DecryptionContext = context;
+        let opened = PaddedBlockDecryptingKey::cbc_pkcs7(unbound())
+            .unwrap()
+            .decrypt(&mut message, context)
+            .unwrap();
+        assert_eq!(opened, b"sixteen byte msg and a bit");
+
+        for (algorithm, len) in [(&AES_128, 16), (&CHACHA20, 32)] {
+            let key = HeaderProtectionKey::new(algorithm, &vec![1; len]).unwrap();
+            assert_eq!(key.new_mask(&[2; 16]).unwrap().len(), 5);
+        }
+    }
+
     #[test]
     fn a_sealed_record_opens_through_the_modules_opening_key() {
         let iv = [0x5a; 12];

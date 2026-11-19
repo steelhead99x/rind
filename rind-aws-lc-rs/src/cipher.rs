@@ -6,6 +6,11 @@
 
 use core::fmt;
 
+// With `fips`, AES-CBC and AES-CTR run in rind-fips's module, whose API is
+// rind's.
+#[cfg(feature = "fips")]
+use rind_fips as rind;
+
 use crate::error::Unspecified;
 use crate::hkdf;
 use crate::iv::{FixedLength, IV_LEN_128_BIT};

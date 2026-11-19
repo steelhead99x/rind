@@ -66,7 +66,7 @@ pub fn try_fips_mode() -> Result<(), &'static str> {
 
 /// What the `fips` feature has not yet moved into rind-fips's module.
 #[cfg(feature = "fips")]
-const NOT_IN_THE_MODULE: &str = "FIPS mode not available: the TLS record keys, digests, HMAC, HKDF, PBKDF2, random bytes, the constant-time compare, ECDH, ECDSA, Ed25519, RSA signatures, and ML-DSA run in rind-fips's module; the other aead keys, cipher, key_wrap, and kem still run in rind";
+const NOT_IN_THE_MODULE: &str = "FIPS mode not available: everything the module approves runs in rind-fips's module except the AES-GCM UnboundKey, LessSafeKey, SealingKey, and OpeningKey, which still run in rind";
 
 /// Fails without the `fips` feature, since rind is then not FIPS validated.
 #[cfg(not(feature = "fips"))]

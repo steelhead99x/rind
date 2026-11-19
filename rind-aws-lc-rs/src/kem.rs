@@ -4,6 +4,10 @@ use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use core::fmt;
 
+// With `fips`, ML-KEM runs in rind-fips's module, whose API is rind's.
+#[cfg(feature = "fips")]
+use rind_fips as rind;
+
 use rind::kem::{MlKem512, MlKem768, MlKem1024};
 
 use crate::buffer::generated_encodings;

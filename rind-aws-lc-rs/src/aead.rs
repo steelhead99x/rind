@@ -735,8 +735,16 @@ impl<N: NonceSequence> fmt::Debug for OpeningKeyPreparedNonce<'_, N> {
 /// An AES-GCM key that picks a random nonce for each seal and returns it.
 ///
 /// Its nonces are 96 random bits, as aws-lc-rs picks them, so seal fewer
-/// than 2^32 messages under one key.
-pub struct RandomizedNonceKey(LessSafeKey);
+/// than 2^32 messages under one key. With `fips`, the key lives in
+/// rind-fips's module, which draws the nonce from its DRBG, and refuses the
+/// 2^32nd message.
+pub struct RandomizedNonceKey {
+    #[cfg(not(feature = "fips"))]
+    key: LessSafeKey,
+    #[cfg(feature = "fips")]
+    key: rind_fips::aead::RandomizedNonceKey,
+    algorithm: &'static Algorithm,
+}
 
 impl RandomizedNonceKey {
     /// Expands `key_bytes` for `algorithm`, which must be [`AES_128_GCM`] or [`AES_256_GCM`].
@@ -747,9 +755,18 @@ impl RandomizedNonceKey {
         if !algorithm.is_aes_gcm_128_or_256() {
             return Err(error::Unspecified);
         }
-        Ok(Self(LessSafeKey::new(UnboundKey::new(
-            algorithm, key_bytes,
-        )?)))
+        #[cfg(not(feature = "fips"))]
+        let key = LessSafeKey::new(UnboundKey::new(algorithm, key_bytes)?);
+        #[cfg(feature = "fips")]
+        let key = rind_fips::aead::RandomizedNonceKey::new(
+            match algorithm.id {
+                AlgorithmId::AES_128_GCM => &rind_fips::aead::AES_128_GCM,
+                _ => &rind_fips::aead::AES_256_GCM,
+            },
+            key_bytes,
+        )
+        .map_err(error::unspecified)?;
+        Ok(Self { key, algorithm })
     }
 
     /// Opens `in_out`, the ciphertext followed by its tag, under the `nonce` sealing returned.
@@ -762,7 +779,12 @@ impl RandomizedNonceKey {
     where
         A: AsRef<[u8]>,
     {
-        self.0.open_in_place(nonce, aad, in_out)
+        #[cfg(not(feature = "fips"))]
+        return self.key.open_in_place(nonce, aad, in_out);
+        #[cfg(feature = "fips")]
+        self.key
+            .open_in_place(nonce.0.into(), aad.as_ref(), in_out)
+            .map_err(error::unspecified)
     }
 
     /// Seals `in_out` in place under a random nonce, appends the tag, and returns the nonce.
@@ -777,9 +799,22 @@ impl RandomizedNonceKey {
         A: AsRef<[u8]>,
         InOut: AsMut<[u8]> + for<'in_out> Extend<&'in_out u8>,
     {
-        let nonce = random_nonce()?;
-        self.0.seal_in_place_append_tag(Nonce(nonce), aad, in_out)?;
-        Ok(Nonce(nonce))
+        #[cfg(not(feature = "fips"))]
+        {
+            let nonce = random_nonce()?;
+            self.key
+                .seal_in_place_append_tag(Nonce(nonce), aad, in_out)?;
+            Ok(Nonce(nonce))
+        }
+        #[cfg(feature = "fips")]
+        {
+            // A buffer that does not grow by exactly a tag fails with the
+            // plaintext as it was, before the module seals.
+            let (plaintext, tag_out) = append_tag_room(in_out)?;
+            let (nonce, tag) = self.seal(aad.as_ref(), plaintext)?;
+            tag_out.copy_from_slice(tag.as_ref());
+            Ok(nonce)
+        }
     }
 
     /// Seals `in_out` in place under a random nonce, and returns the nonce and tag.
@@ -791,27 +826,46 @@ impl RandomizedNonceKey {
     where
         A: AsRef<[u8]>,
     {
-        let nonce = random_nonce()?;
-        let tag = self
-            .0
-            .seal_in_place_separate_tag(Nonce(nonce), aad, in_out)?;
-        Ok((Nonce(nonce), tag))
+        #[cfg(not(feature = "fips"))]
+        {
+            let nonce = random_nonce()?;
+            let tag = self
+                .key
+                .seal_in_place_separate_tag(Nonce(nonce), aad, in_out)?;
+            Ok((Nonce(nonce), tag))
+        }
+        #[cfg(feature = "fips")]
+        self.seal(aad.as_ref(), in_out)
+    }
+
+    /// Seals in the module, which picks the nonce.
+    #[cfg(feature = "fips")]
+    fn seal(&self, aad: &[u8], in_out: &mut [u8]) -> Result<(Nonce, Tag), error::Unspecified> {
+        let (nonce, tag) = self
+            .key
+            .seal_in_place_separate_tag(aad, in_out)
+            .map_err(error::unspecified)?;
+        Ok((
+            Nonce(nonce.as_ref().try_into()?),
+            Tag(tag.as_ref().try_into()?),
+        ))
     }
 
     /// The algorithm this key was made for.
     pub fn algorithm(&self) -> &'static Algorithm {
-        self.0.algorithm
+        self.algorithm
     }
 }
 
 impl fmt::Debug for RandomizedNonceKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RandomizedNonceKey")
-            .field("algorithm", self.0.algorithm)
+            .field("algorithm", self.algorithm)
             .finish()
     }
 }
 
+#[cfg(not(feature = "fips"))]
 fn random_nonce() -> Result<[u8; NONCE_LEN], error::Unspecified> {
     let mut nonce = [0; NONCE_LEN];
     crate::rand::fill(&mut nonce)?;
@@ -849,5 +903,28 @@ pub(crate) fn check_scatter(
     {
         true => Ok(()),
         false => Err(error::Unspecified),
+    }
+}
+
+/// With `fips`, the randomized-nonce key is the module's, which picks the nonce.
+#[cfg(all(test, feature = "fips"))]
+mod fips_tests {
+    use super::*;
+
+    #[test]
+    fn randomized_nonce_key_is_the_modules_and_round_trips() {
+        let key = RandomizedNonceKey::new(&AES_256_GCM, &[7; 32]).unwrap();
+        let _: &rind_fips::aead::RandomizedNonceKey = &key.key;
+        let mut message = b"hello".to_vec();
+        let nonce = key
+            .seal_in_place_append_tag(Aad::from(b"aad"), &mut message)
+            .unwrap();
+        assert_eq!(message.len(), 5 + TAG_LEN);
+        let opened = key
+            .open_in_place(nonce, Aad::from(b"aad"), &mut message)
+            .unwrap();
+        assert_eq!(opened, b"hello");
+        // The module takes AES-GCM only.
+        assert!(RandomizedNonceKey::new(&CHACHA20_POLY1305, &[7; 32]).is_err());
     }
 }

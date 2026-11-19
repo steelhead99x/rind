@@ -2,7 +2,10 @@
 
 use core::fmt;
 
+// With `fips`, key wrap runs in rind-fips's module, whose API is rind's.
 use rind::key_wrap::Mode;
+#[cfg(feature = "fips")]
+use rind_fips as rind;
 
 use crate::error::{Unspecified, unspecified};
 use crate::sealed::Sealed;
