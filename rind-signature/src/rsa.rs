@@ -11,7 +11,6 @@ use core::marker::PhantomData;
 
 use ::rsa::pkcs1::{EncodeRsaPrivateKey, EncodeRsaPublicKey};
 use ::signature::{Error, MultipartSigner, MultipartVerifier, Signer, Verifier};
-
 use rind_digest::sha2::{Sha256, Sha384, Sha512};
 
 mod sealed {
