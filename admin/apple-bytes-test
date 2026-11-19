@@ -17,6 +17,7 @@ loader = importlib.machinery.SourceFileLoader("apple_bytes", os.path.join(HERE, 
 spec = importlib.util.spec_from_loader("apple_bytes", loader)
 ab = importlib.util.module_from_spec(spec)
 loader.exec_module(ab)
+RELOCATIONS = ab.relocations  # the masking tests replace it
 
 
 def row(arch, op, proof, **extra):
@@ -73,17 +74,17 @@ class Policy(unittest.TestCase):
 
 class Masking(unittest.TestCase):
     def test_an_aarch64_relocated_field_is_zeroed_and_other_bits_kept(self):
-        ab.relocations = lambda obj, sym, lo, hi: [(0, "ARM64_RELOC_PAGE21"), (4, "ARM64_RELOC_PAGEOFF12")]
+        ab.relocations = lambda obj, sym, lo, hi: [(0, "ARM64_RELOC_PAGE21", "tab", None), (4, "ARM64_RELOC_PAGEOFF12", "tab", None)]
         adrp = 0x90000000 | (0x1234 << 5) | (0x3 << 29) | 5  # adrp x5, <page>
         add = 0x91000000 | (0x2AB << 10) | (5 << 5) | 5  # add x5, x5, #0x2ab
         insns = [[0, adrp.to_bytes(4, "little"), "adrp x5, 0x0"], [4, add.to_bytes(4, "little"), "add x5, x5, #0x2ab"]]
         data, relocs = ab.masked("aarch64", insns, "obj", "sym")
         self.assertEqual(int.from_bytes(data[:4], "little"), 0x90000000 | 5)
         self.assertEqual(int.from_bytes(data[4:], "little"), 0x91000000 | (5 << 5) | 5)
-        self.assertEqual(relocs, [0, 4])
+        self.assertEqual(relocs, [(0, "tab", 0), (4, "tab", 0)])
 
     def test_an_x86_64_relocated_displacement_is_zeroed(self):
-        ab.relocations = lambda obj, sym, lo, hi: [(3, "X86_64_RELOC_SIGNED")]
+        ab.relocations = lambda obj, sym, lo, hi: [(3, "X86_64_RELOC_SIGNED", "_tab", None)]
         insns = [[0, bytes([0x48, 0x8D, 0x05, 0x78, 0x56, 0x34, 0x12]), "leaq 0x12345678(%rip), %rax"]]
         data, _ = ab.masked("x86_64", insns, "obj", "sym")
         self.assertEqual(data, bytes([0x48, 0x8D, 0x05, 0, 0, 0, 0]))
@@ -98,6 +99,86 @@ class Masking(unittest.TestCase):
         self.assertTrue(ab.same_instructions(a, b))
         b[0][2] = "movq %rax, %rcx"
         self.assertFalse(ab.same_instructions(a, b))
+
+
+MACHO = """t.o:\tfile format mach-o arm64
+
+RELOCATION RECORDS FOR [__text]:
+OFFSET           TYPE                     VALUE
+000000000000000c ARM64_RELOC_PAGEOFF12    _tab
+0000000000000008 ARM64_RELOC_PAGE21       _tab
+0000000000000004 ARM64_RELOC_ADDEND       0x40
+0000000000000004 ARM64_RELOC_PAGEOFF12    _tab
+0000000000000000 ARM64_RELOC_ADDEND       0x40
+0000000000000000 ARM64_RELOC_PAGE21       _tab
+"""
+ELF = """l.o:\tfile format elf64-littleaarch64
+
+RELOCATION RECORDS FOR [.text.f1]:
+OFFSET           TYPE                     VALUE
+0000000000000000 R_AARCH64_ADR_PREL_PG_HI21 tab+0x40
+0000000000000004 R_AARCH64_ADD_ABS_LO12_NC tab+0x40
+0000000000000008 R_AARCH64_ADR_PREL_PG_HI21 tab
+000000000000000c R_AARCH64_ADD_ABS_LO12_NC tab
+"""
+
+
+class Relocations(unittest.TestCase):
+    def read(self, text):
+        saved = ab.tool
+        ab.tool = lambda *a: text
+        try:
+            return RELOCATIONS("obj", "f1", 0, 16)
+        finally:
+            ab.tool = saved
+
+    def test_a_macho_addend_record_folds_into_the_relocation_after_it(self):
+        relocs = sorted(self.read(MACHO))
+        self.assertEqual([(o, k) for o, k, _, _ in relocs], [(0, "ARM64_RELOC_PAGE21"), (4, "ARM64_RELOC_PAGEOFF12"), (8, "ARM64_RELOC_PAGE21"), (12, "ARM64_RELOC_PAGEOFF12")])
+        self.assertEqual([a for _, _, _, a in relocs], [0x40, 0x40, None, None])
+
+    def test_the_two_formats_of_one_routine_compare_equal(self):
+        lin = ab.canonical("aarch64", False, self.read(ELF))
+        app = ab.canonical("aarch64", True, self.read(MACHO))
+        self.assertEqual(lin, app)
+
+    def test_a_dropped_addend_is_a_difference(self):
+        lin = ab.canonical("aarch64", False, self.read(ELF))
+        app = ab.canonical("aarch64", True, self.read(MACHO.replace("0x40", "0x0")))
+        self.assertNotEqual(lin, app)
+
+    def test_a_different_global_at_the_same_offset_is_a_difference(self):
+        lin = ab.canonical("aarch64", False, self.read(ELF))
+        app = ab.canonical("aarch64", True, self.read(MACHO.replace("0000000000000008 ARM64_RELOC_PAGE21       _tab", "0000000000000008 ARM64_RELOC_PAGE21       _other")))
+        self.assertNotEqual(lin, app)
+
+    def test_locals_are_compared_by_the_order_they_appear_in(self):
+        a = [(0, "k", ".rodata..Lanon.x.0", 0), (4, "k", ".rodata..Lanon.y.1", 0), (8, "k", ".rodata..Lanon.x.0", 0)]
+        same = [(0, "k", "lCPI0_0", None), (4, "k", "lCPI0_1", None), (8, "k", "lCPI0_0", None)]
+        wrong = [(0, "k", "lCPI0_0", None), (4, "k", "lCPI0_1", None), (8, "k", "lCPI0_1", None)]
+        self.assertEqual(ab.canonical("x86_64", False, a), ab.canonical("x86_64", True, same))
+        self.assertNotEqual(ab.canonical("x86_64", False, a), ab.canonical("x86_64", True, wrong))
+
+    def test_a_mangled_name_is_a_local_whatever_its_hash(self):
+        lin = ab.canonical("aarch64", False, [(12, "k", ".rodata._RNvCsAAA_4rind4K256", 0)])
+        app = ab.canonical("aarch64", True, [(12, "k", "__RNvCsBBB_4rind4K256", None)])
+        self.assertEqual(lin, app)
+
+    def test_x86_64_addends_are_not_compared(self):
+        self.assertEqual(ab.canonical("x86_64", False, [(3, "k", "tab", -4)]), ab.canonical("x86_64", True, [(3, "k", "_tab", 0)]))
+
+
+class Extraction(unittest.TestCase):
+    def test_a_symbol_defined_twice_in_a_build_refuses(self):
+        with self.assertRaises(SystemExit):
+            ab.extract("x86_64", "x86_64-unknown-linux-gnu", "naked", "rind::low::f", {"rind::low::f": [("a.o", "f"), ("b.o", "f")]})
+
+
+class VerifiedGarbage(unittest.TestCase):
+    def test_an_unmarked_row_naming_a_vg_routine_is_listed_and_a_marked_one_is_not(self):
+        rsa = row("x86_64", "rsa2048-pss-sha256-verify", "down to vg_rsa_public_precomputed_checked_ifma")
+        ab.rows = lambda: [rsa, {**rsa, "os": "linux"}, row("x86_64", "sha512/*", "sha512_block_data_order_avx")]
+        self.assertEqual(ab.vg_rows(), [rsa])
 
 
 if __name__ == "__main__":

@@ -177,7 +177,7 @@ module compat '^(COMPATIBILITY\.md$|admin/x86-cpus?(/|$))' \
 # the verified-code table, and the gap decisions, which link the quests that
 # close them. admin/apple-bytes's policy test runs here, since it reads that
 # table.
-module bench '^(BENCHMARKS\.md$|README\.md$|benchmarks/|admin/(bench-report|apple-bytes)|quest/)' \
+module bench '^(BENCHMARKS\.md$|README\.md$|benchmarks/|admin/(bench-report|apple-bytes(-test)?$)|quest/)' \
     tools='python3'
 # The landing page reads and links files across the repository, and its build
 # takes seconds, so it runs on every diff rather than keep a list.

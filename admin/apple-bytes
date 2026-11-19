@@ -12,7 +12,7 @@ build emits. This builds rind's release library for each architecture's Apple
 target as `admin/prove` builds it for Linux, `cargo rustc --lib --release
 -C codegen-units=16`, reads both builds' objects with `llvm-objdump`, and
 compares each proven routine: the bytes of each `asm!` block and of each naked
-function, with a relocation's field masked and its target's name compared, and
+function, with a relocation's field masked and its target and addend compared, and
 trailing alignment padding left out. Linux builds' bytes are the ones the
 proofs assert, so equal bytes mean the proof covers the Apple build too.
 
@@ -21,7 +21,11 @@ The routines are `admin/prove-bytes list`'s and `admin/prove`'s
 `benchmarks/verified.toml` row of its architecture whose proof names it has
 `os = "linux"`: such a row is checked against nothing on macOS. A differing
 routine that no row names is listed and does not fail the check, since no ✓
-covers it. A routine that matches although its row says `os = "linux"` is
+covers it. A row without `os = "linux"` whose proof names a verified-garbage `vg_*`
+routine fails the check outright: `admin/vg-bytes` reads Linux objects only
+and the routines are not in this script's list.
+
+A routine that matches although its row says `os = "linux"` is
 listed too: Apple's layout puts a function's entry wherever the toolchain
 does, so a routine can match in one build and not in another (rind's lib test
 binary at 4 codegen units moves aarch64's `sha512_block_data_order_hw`'s entry
@@ -142,19 +146,51 @@ def trim(insns):
 
 
 def relocations(obj, sym, lo, hi):
-    """(offset in [lo, hi) less lo, type) of `obj`'s text relocations. Their
-    targets are not compared: a Mach-O object names a local label or section
-    where an ELF one names a section symbol."""
-    found, text = [], False
+    """(offset in [lo, hi) less lo, type, target, addend) of `obj`'s text
+    relocations, `addend` None where `obj` does not state one. An ELF record
+    reads `target+0x40`; a Mach-O aarch64 object puts the addend in a
+    separate `ARM64_RELOC_ADDEND` record at the same offset, which this folds
+    into the record after it, so it is never a relocation of its own."""
+    found, pending, text = [], {}, False
     for line in tool("llvm-objdump", "-r", obj).splitlines():
         m = re.match(r"RELOCATION RECORDS FOR \[(.*)\]:", line)
         if m:
             text = m.group(1) in ("__text", f".text.{sym}")
             continue
         m = re.match(r"^([0-9a-f]+)\s+(\S+)\s+(\S+)", line)
-        if text and m and lo <= int(m.group(1), 16) < hi:
-            found.append((int(m.group(1), 16) - lo, m.group(2)))
+        if not (text and m and lo <= int(m.group(1), 16) < hi):
+            continue
+        off = int(m.group(1), 16) - lo
+        if m.group(2) == "ARM64_RELOC_ADDEND":
+            pending[off] = int(m.group(3), 0)
+            continue
+        target, addend = m.group(3), pending.pop(off, None)
+        e = re.fullmatch(r"(.*?)([+-]0x[0-9a-f]+)", target)
+        if e:
+            target, addend = e.group(1), int(e.group(2), 16)
+        found.append((off, m.group(2), target, addend))
     return found
+
+
+def canonical(arch, apple, relocs):
+    """`relocs` as (offset, target, addend) comparable across the two builds.
+    A C-named global's name is compared (a Mach-O one has one more leading
+    underscore). A local label, section symbol, or Rust-mangled name, which
+    the two formats and targets name differently, becomes the order its target first appears in, so a routine
+    that reaches a different table, or one table twice where the other build
+    reaches two, differs. An addend is compared on aarch64 only: an x86-64
+    Mach-O field holds the part of the addend that an ELF record adds to its
+    own -4 for the instruction's end, and the two are not compared."""
+    local, out = {}, []
+    for off, _, target, addend in sorted(relocs, key=lambda r: r[0]):
+        name = target[1:] if apple and target.startswith("_") else None if apple else target
+        if not apple and target.startswith(".text."):
+            name = target[len(".text."):]
+        if name is not None and (name.startswith(".") or re.match(r"_(R[A-Z]|ZN)", name)):
+            name = None  # a mangled name holds a hash that differs by target
+        key = name if name is not None else ("local", local.setdefault(target, len(local)))
+        out.append((off, key, (addend or 0) if arch == "aarch64" else None))
+    return out
 
 
 def asm_block(arch, triple, obj, sym):
@@ -186,13 +222,14 @@ def asm_block(arch, triple, obj, sym):
     return insns[before:before + n]
 
 
-def masked(arch, insns, obj, sym):
-    """The routine's bytes with relocation fields zeroed, its relocations."""
+def masked(arch, insns, obj, sym, apple=False):
+    """The routine's bytes with relocation fields zeroed, its relocations as
+    `canonical` gives them."""
     lo = insns[0][0]
     hi = insns[-1][0] + len(insns[-1][1])
     relocs = relocations(obj, sym, lo, hi)
     data = bytearray(b"".join(i[1] for i in insns))
-    for off, kind in relocs:
+    for off, kind, _, _ in relocs:
         if arch == "aarch64":
             word = int.from_bytes(data[off:off + 4], "little")
             adrp = (word & 0x9F000000) == 0x90000000
@@ -200,7 +237,7 @@ def masked(arch, insns, obj, sym):
             data[off:off + 4] = word.to_bytes(4, "little")
         else:
             data[off:off + 4] = bytes(4)
-    return bytes(data), sorted(o for o, _ in relocs)
+    return bytes(data), canonical(arch, apple, relocs)
 
 
 def same_instructions(a, b):
@@ -214,13 +251,15 @@ def same_instructions(a, b):
 def extract(arch, triple, kind, path, found):
     if path not in found:
         return None
+    if len(found[path]) > 1:
+        sys.exit(f"admin/apple-bytes: {path} is defined {len(found[path])} times in the {triple} build; admin/prove's rind_symbol refuses that too")
     obj, sym = found[path][0]
     insns = trim(disassemble(obj, sym)) if kind == "naked" else asm_block(arch, triple, obj, sym)
     if not insns:
         return None
     # Rebase offsets so both builds compare from the routine's first instruction.
     base = insns[0][0]
-    data, relocs = masked(arch, insns, obj, sym)
+    data, relocs = masked(arch, insns, obj, sym, "apple" in triple)
     return {"insns": insns, "data": data, "relocs": relocs, "entry": base}
 
 
@@ -275,12 +314,23 @@ def check(args):
             if a == arch:
                 results[(a, name, path)] = compare(a, kind, path, name, linux_idx, apple_idx)
     failures, report, counts = judge(results)
+    for r in vg_rows():
+        failures.append((r["arch"], r["operations"][0]))
+        report.append(f"FAIL     {r['arch']} {r['operations'][0]}: its proof names a vg_ routine that admin/vg-bytes checks on Linux only; mark the row os = \"linux\" or check the Mach-O object here")
     for line in report:
         print(line)
     print(f"{counts['same']} routines match, {counts['differs']} differ, {counts['absent']} not in a build (inlined or unused)")
     if failures:
         print(f"admin/apple-bytes: {len(failures)} routine(s) differ in the Apple build under a row that does not say os = \"linux\"", file=sys.stderr)
         sys.exit(1)
+
+
+def vg_rows():
+    """The rows without `os = "linux"` whose proof names a pyca/verified-garbage
+    routine (`vg_*`). `admin/vg-bytes` checks those against Linux objects only
+    and this script does not read them, so such a row's Apple build is checked
+    by nothing: this names it rather than let it pass."""
+    return [r for r in rows() if r.get("os") != "linux" and re.search(r"\bvg_\w+", r["proof"])]
 
 
 def judge(results):
