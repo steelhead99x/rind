@@ -273,8 +273,9 @@ fn cipher<const ENC: bool>(
         // for reads and writes of `len` blocks. s2n-bignum's kernels' theorems
         // (`AES*_GCM_*_NOIBT_SUBROUTINE_{CORRECT,SAFE}`) take the input and
         // output either equal, as here, or disjoint, and every other buffer
-        // is a separate borrow. aws-lc runs its AES-192 routines in place too, and its four-way kernel's
-        // round count is fixed at 12, which only an AES-192 key's 13 round keys fit.
+        // is a separate borrow. aws-lc runs its AES-192 routines in place too,
+        // and its four-way kernel's round count is fixed at 12, which only an
+        // AES-192 key's 13 round keys fit.
         unsafe {
             match (hw_key, ENC, table.eight_way) {
                 (HwKey::Aes128(k), true, None) => {
@@ -530,7 +531,9 @@ mod tests {
     // `max` CPU: key and GHASH table setup, then each key size both ways with
     // a secret key, nonce or IV, AAD, and message, at lengths that take the
     // one-pass short path, and the kernels' eight-block loop with tails of
-    // seven blocks and a partial one, five blocks, and eight.
+    // seven blocks and a partial one, five blocks, and eight. `admin/ct-qemu
+    // --deny sha3` runs it again without SHA3, where AES-192 takes the
+    // four-way kernels, whose loop and tails the same lengths reach.
     #[test]
     #[ignore = "admin/ct-qemu runs it under qemu"]
     fn ct_qemu_aes_gcm() {
@@ -547,7 +550,8 @@ mod tests {
                 (key, PmullTable::new(u128::from_be_bytes(h), token))
             });
             assert!(matches!(key, AesKey::Hw(_)), "the crypto extension");
-            assert!(table.eight_way.is_some(), "SHA3");
+            let sha3 = std::env::var_os("RIND_CPU_DISABLE_sha3").is_none();
+            assert_eq!(table.eight_way.is_some(), sha3, "SHA3");
             let table = GhashTable::Pmull(table);
 
             let nonce = bytes(12).try_into().unwrap();

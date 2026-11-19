@@ -308,6 +308,11 @@ jobs:
       - name: ct-qemu
         run: nix develop .#ct-qemu-aarch64 --command admin/ct-qemu --target aarch64-unknown-linux-gnu
 
+      # Cores without SHA3 run AES-192-GCM on the four-way kernels, so this
+      # traces them too.
+      - name: ct-qemu, SHA3 denied
+        run: nix develop .#ct-qemu-aarch64 --command admin/ct-qemu --target aarch64-unknown-linux-gnu --deny sha3,sve2 aes_gcm
+
   # BINSEC proves each `ct_binsec` test's region constant time for every
   # secret at once, symbolically, on the code the runner's CPU takes short of
   # the instructions it cannot decode (see `admin/ct-binsec`). The portable

@@ -947,7 +947,7 @@ core with SHA3, which aws-lc runs on Apple and Neoverse V cores, and its by-4
 12, without it, as aws-lc does.
 aws-lc's routines are not verified. Valgrind hides SHA3 from
 `admin/ctgrind`, which runs the by-4 kernels, so `admin/ct-qemu` checks the
-eight-way ones under qemu-aarch64.
+eight-way ones under qemu-aarch64, and the by-4 ones again with SHA3 denied.
 AES-NI and ARMv8 expand an AES-192 key six words per vector step, with the
 SubWord the other sizes take, measured 0.88-0.94x aws-lc-rs's AES-GCM key
 setup on Zen 3 and Neoverse N2; the bitsliced path runs aws-lc's schedule,
