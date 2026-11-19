@@ -493,11 +493,17 @@ impl<'a> Integer<'a> {
         }
     }
 
+    /// Whether the sign bit is set, computed without branching on it, since
+    /// `rsa::SigningKey::from_pkcs1_der` asks of secret integers and only
+    /// then declassifies the answer. It matches on the first byte rather
+    /// than mapping it to an `Option<bool>`, whose `None` is the bool's
+    /// spare value 2: an unoptimized build tests that byte to tell `None`
+    /// from `Some`, a branch on the secret sign that ctgrind reports.
     pub(crate) fn is_negative(&self) -> bool {
-        self.twos_complement
-            .first()
-            .map(|b| b & 0x80 == 0x80)
-            .unwrap_or_default()
+        match self.twos_complement.first() {
+            Some(b) => b & 0x80 != 0,
+            None => false,
+        }
     }
 
     /// The two's complement bytes, borrowed for as long as what was parsed,
