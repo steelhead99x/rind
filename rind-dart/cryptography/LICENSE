@@ -119,7 +119,9 @@ aws-lc <https://github.com/aws/aws-lc>, from OpenSSL and BoringSSL
     aarch64, the bn_mul_mont routine of armv8-mont (RSA), the vpaes_*
     routines and table of vpaes-armv8 (AES), the gcm_*_neon routines and
     table of ghash-neon-armv8 (GHASH), and the *_block_data_order_nohw
-    routines and table of sha1-armv8 (SHA1) and sha256-armv8 (SHA256). All
+    routines and table of sha1-armv8 (SHA1) and sha256-armv8 (SHA256), and
+    the aesv8_gcm_8x_enc_192 and aesv8_gcm_8x_dec_192 routines of
+    aesv8-gcm-armv8-unroll8 (AES-192-GCM). All
     are pregenerated from Perl scripts written for OpenSSL by Andy Polyakov,
     or for rsaz-avx2 and p256-x86_64-asm by Shay Gueron and Vlad Krasnov
     of Intel, which Andy Polyakov extended for p256-x86_64-asm;
@@ -139,6 +141,7 @@ aws-lc <https://github.com/aws/aws-lc>, from OpenSSL and BoringSSL
     Copyright 2014-2020 The OpenSSL Project Authors. All Rights Reserved.
     Copyright 2015-2016 The OpenSSL Project Authors. All Rights Reserved.
     Copyright 2016 The OpenSSL Project Authors. All Rights Reserved.
+    Copyright 2020-2022 The OpenSSL Project Authors. All Rights Reserved.
     Copyright (c) 2012, Intel Corporation. All Rights Reserved.
     Copyright (c) 2014, Intel Corporation. All Rights Reserved.
     Copyright (c) 2015 CloudFlare, Inc.
@@ -158,6 +161,12 @@ aws-lc <https://github.com/aws/aws-lc>, from OpenSSL and BoringSSL
     pregenerated from Perl scripts written by Vlad Krasnov.
     Copyright (c) 2015, CloudFlare Ltd.
     Copyright (c) 2020, CloudFlare Ltd.
+    License: ISC.
+
+  - For aarch64, the aes_gcm_enc_kernel and aes_gcm_dec_kernel routines of
+    aesv8-gcm-armv8 (AES-192-GCM, four-way), which aws-lc takes from ARM's
+    contribution, pregenerated from its Perl script.
+    Copyright (c) 2022, ARM Inc.
     License: ISC.
 
   - For x86_64, the gcm_ghash_ssse3 routine and tables of

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Usage: admin/ct-qemu [--target aarch64-unknown-linux-gnu] [filter]
+# Usage: admin/ct-qemu [--target aarch64-unknown-linux-gnu] [--deny FEATURE,...] [filter]
 #
 # The constant-time check for what valgrind hides from the program (see
 # `admin/ctgrind`), as `admin/ct-sde` is for x86_64's extensions: armv7's
@@ -15,6 +15,12 @@
 # are compared as they arrive, so no run stores one. It cannot see
 # variable-time instructions, which take the same addresses whatever their
 # operands; `admin/ct-vartime` looks for those.
+#
+# `--deny sha3`, say, denies the CPU features it names to rind, through
+# `--cfg rind_cpu_disable` and `RIND_CPU_DISABLE_*` as `admin/ctgrind`'s jobs
+# do, so the code a CPU without them runs is traced under the `max` CPU: the
+# four-way AES-192-GCM kernels, with `sha3`. A test that needs a feature
+# reads the environment to know it is denied.
 #
 # The `ct_qemu_planted_...` tests leak their seed, and run every time. They
 # must differ, so a harness that traces nothing, or compares nothing, fails.
@@ -142,8 +148,15 @@ def main():
     if args[:1] == ["--target"]:
         target = args[1]
         args = args[2:]
+    if args[:1] == ["--deny"] and len(args) > 1:
+        denied = [f for f in args[1].split(",") if f]
+        args = args[2:]
+        flags = os.environ.get("RUSTFLAGS", "")
+        os.environ["RUSTFLAGS"] = (flags + " --cfg rind_cpu_disable").strip()
+        for feature in denied:
+            os.environ["RIND_CPU_DISABLE_" + feature] = "1"
     if target not in QEMU or len(args) > 1:
-        sys.exit("usage: admin/ct-qemu [--target {}] [filter]".format("|".join(QEMU)))
+        sys.exit("usage: admin/ct-qemu [--target {}] [--deny FEATURE,...] [filter]".format("|".join(QEMU)))
     filter = args[0] if args else ""
     exe = build(target)
     names = tests(target, exe, filter)
