@@ -56,14 +56,19 @@ IMPORTS_ARM = [
         "out": "ecp_nistz256-armv4.s",
         "tag": "nistz",
         "copyright": "Copyright 2015-2025 The OpenSSL Project Authors. All Rights Reserved.",
-        # P-256's Montgomery squaring, then multiplication and its shared body.
+        # P-256's Montgomery squaring, multiplication and its shared body, then
+        # modular addition and subtraction.
         # Nothing else in the file: no point routine, gather, or table.
         "spans": [
             ("ecp_nistz256_sqr_mont", "ecp_nistz256_sqr_mont"),
             ("ecp_nistz256_mul_mont", "__ecp_nistz256_mul_mont"),
+            ("ecp_nistz256_add", "ecp_nistz256_add"),
+            ("__ecp_nistz256_add", "__ecp_nistz256_add"),
+            ("ecp_nistz256_sub", "ecp_nistz256_sub"),
+            ("__ecp_nistz256_sub", "__ecp_nistz256_sub"),
         ],
-        "routines": ["ecp_nistz256_sqr_mont", "ecp_nistz256_mul_mont"],
-        "locals": ["__ecp_nistz256_mul_mont"],
+        "routines": ["ecp_nistz256_sqr_mont", "ecp_nistz256_mul_mont", "ecp_nistz256_add", "ecp_nistz256_sub"],
+        "locals": ["__ecp_nistz256_mul_mont", "__ecp_nistz256_add", "__ecp_nistz256_sub"],
     },
 ]
 

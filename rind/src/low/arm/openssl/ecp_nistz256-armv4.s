@@ -472,3 +472,151 @@
 
 	mov	pc,lr
 .size	.Lnistz___ecp_nistz256_mul_mont,.-.Lnistz___ecp_nistz256_mul_mont
+.type	{ecp_nistz256_add},%function
+.align	4
+{ecp_nistz256_add}:
+	stmdb	sp!,{{r4,r5,r6,r7,r8,r9,r10,r11,r12,lr}}
+	bl	.Lnistz___ecp_nistz256_add
+	ldmia	sp!,{{r4,r5,r6,r7,r8,r9,r10,r11,r12,pc}}
+.size	{ecp_nistz256_add},.-{ecp_nistz256_add}
+.type	.Lnistz___ecp_nistz256_add,%function
+.align	4
+.Lnistz___ecp_nistz256_add:
+	str	lr,[sp,#-4]!		@ push lr
+
+	ldr	r4,[r1,#0]
+	ldr	r5,[r1,#4]
+	ldr	r6,[r1,#8]
+	ldr	r7,[r1,#12]
+	ldr	r8,[r1,#16]
+	ldr	r3,[r2,#0]
+	ldr	r9,[r1,#20]
+	ldr	r12,[r2,#4]
+	ldr	r10,[r1,#24]
+	ldr	r14,[r2,#8]
+	ldr	r11,[r1,#28]
+	ldr	r1,[r2,#12]
+	adds	r4,r4,r3
+	ldr	r3,[r2,#16]
+	adcs	r5,r5,r12
+	ldr	r12,[r2,#20]
+	adcs	r6,r6,r14
+	ldr	r14,[r2,#24]
+	adcs	r7,r7,r1
+	ldr	r1,[r2,#28]
+	adcs	r8,r8,r3
+	adcs	r9,r9,r12
+	adcs	r10,r10,r14
+	mov	r3,#0
+	adcs	r11,r11,r1
+	adc	r3,r3,#0
+	ldr	lr,[sp],#4		@ pop lr
+
+.Lnistz_reduce_by_sub:
+
+	@ if a+b >= modulus, subtract modulus.
+	@
+	@ But since comparison implies subtraction, we subtract
+	@ modulus and then add it back if subtraction borrowed.
+
+	subs	r4,r4,#-1
+	sbcs	r5,r5,#-1
+	sbcs	r6,r6,#-1
+	sbcs	r7,r7,#0
+	sbcs	r8,r8,#0
+	sbcs	r9,r9,#0
+	sbcs	r10,r10,#1
+	sbcs	r11,r11,#-1
+	sbc	r3,r3,#0
+
+	@ Note that because mod has special form, i.e. consists of
+	@ 0xffffffff, 1 and 0s, we can conditionally synthesize it by
+	@ using value of borrow as a whole or extracting single bit.
+	@ Follow r3 register...
+
+	adds	r4,r4,r3		@ add synthesized modulus
+	adcs	r5,r5,r3
+	str	r4,[r0,#0]
+	adcs	r6,r6,r3
+	str	r5,[r0,#4]
+	adcs	r7,r7,#0
+	str	r6,[r0,#8]
+	adcs	r8,r8,#0
+	str	r7,[r0,#12]
+	adcs	r9,r9,#0
+	str	r8,[r0,#16]
+	adcs	r10,r10,r3,lsr#31
+	str	r9,[r0,#20]
+	adcs	r11,r11,r3
+	str	r10,[r0,#24]
+	str	r11,[r0,#28]
+
+	mov	pc,lr
+.size	.Lnistz___ecp_nistz256_add,.-.Lnistz___ecp_nistz256_add
+.type	{ecp_nistz256_sub},%function
+.align	4
+{ecp_nistz256_sub}:
+	stmdb	sp!,{{r4,r5,r6,r7,r8,r9,r10,r11,r12,lr}}
+	bl	.Lnistz___ecp_nistz256_sub
+	ldmia	sp!,{{r4,r5,r6,r7,r8,r9,r10,r11,r12,pc}}
+.size	{ecp_nistz256_sub},.-{ecp_nistz256_sub}
+.type	.Lnistz___ecp_nistz256_sub,%function
+.align	4
+.Lnistz___ecp_nistz256_sub:
+	str	lr,[sp,#-4]!		@ push lr
+
+	ldr	r4,[r1,#0]
+	ldr	r5,[r1,#4]
+	ldr	r6,[r1,#8]
+	ldr	r7,[r1,#12]
+	ldr	r8,[r1,#16]
+	ldr	r3,[r2,#0]
+	ldr	r9,[r1,#20]
+	ldr	r12,[r2,#4]
+	ldr	r10,[r1,#24]
+	ldr	r14,[r2,#8]
+	ldr	r11,[r1,#28]
+	ldr	r1,[r2,#12]
+	subs	r4,r4,r3
+	ldr	r3,[r2,#16]
+	sbcs	r5,r5,r12
+	ldr	r12,[r2,#20]
+	sbcs	r6,r6,r14
+	ldr	r14,[r2,#24]
+	sbcs	r7,r7,r1
+	ldr	r1,[r2,#28]
+	sbcs	r8,r8,r3
+	sbcs	r9,r9,r12
+	sbcs	r10,r10,r14
+	sbcs	r11,r11,r1
+	sbc	r3,r3,r3		@ broadcast borrow bit
+	ldr	lr,[sp],#4		@ pop lr
+
+.Lnistz_reduce_by_add:
+
+	@ if a-b borrows, add modulus.
+	@
+	@ Note that because mod has special form, i.e. consists of
+	@ 0xffffffff, 1 and 0s, we can conditionally synthesize it by
+	@ broadcasting borrow bit to a register, r3, and using it as
+	@ a whole or extracting single bit.
+
+	adds	r4,r4,r3		@ add synthesized modulus
+	adcs	r5,r5,r3
+	str	r4,[r0,#0]
+	adcs	r6,r6,r3
+	str	r5,[r0,#4]
+	adcs	r7,r7,#0
+	str	r6,[r0,#8]
+	adcs	r8,r8,#0
+	str	r7,[r0,#12]
+	adcs	r9,r9,#0
+	str	r8,[r0,#16]
+	adcs	r10,r10,r3,lsr#31
+	str	r9,[r0,#20]
+	adcs	r11,r11,r3
+	str	r10,[r0,#24]
+	str	r11,[r0,#28]
+
+	mov	pc,lr
+.size	.Lnistz___ecp_nistz256_sub,.-.Lnistz___ecp_nistz256_sub

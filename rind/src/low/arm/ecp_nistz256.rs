@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! P-256's Montgomery multiplication and squaring modulo
+//! P-256's Montgomery multiplication, squaring, addition, and subtraction modulo
 //! p = 2^256 - 2^224 + 2^192 + 2^96 - 1, on OpenSSL's `ecp_nistz256-armv4`
-//! routines `ecp_nistz256_mul_mont` and `ecp_nistz256_sqr_mont`.
+//! routines `ecp_nistz256_mul_mont`, `ecp_nistz256_sqr_mont`,
+//! `ecp_nistz256_add`, and `ecp_nistz256_sub`.
 //!
 //! The assembly is OpenSSL's, imported by `admin/import-openssl`: integer
 //! code with no branch, predicated instruction, or address that depends on
@@ -20,6 +21,12 @@ unsafe extern "C" {
 
     #[link_name = aws_lc_symbol!("ecp_nistz256_sqr_mont")]
     fn ecp_nistz256_sqr_mont(r: *mut [u32; 8], a: *const [u32; 8]);
+
+    #[link_name = aws_lc_symbol!("ecp_nistz256_add")]
+    fn ecp_nistz256_add(r: *mut [u32; 8], a: *const [u32; 8], b: *const [u32; 8]);
+
+    #[link_name = aws_lc_symbol!("ecp_nistz256_sub")]
+    fn ecp_nistz256_sub(r: *mut [u32; 8], a: *const [u32; 8], b: *const [u32; 8]);
 }
 
 // As in `keccak1600_armv4`: ARM mode, then the target's `.fpu` again. The
@@ -29,9 +36,13 @@ core::arch::global_asm!(
     ".code 32",
     ".globl {ecp_nistz256_mul_mont}",
     ".globl {ecp_nistz256_sqr_mont}",
+    ".globl {ecp_nistz256_add}",
+    ".globl {ecp_nistz256_sub}",
     include_str!("openssl/ecp_nistz256-armv4.s"),
     ecp_nistz256_mul_mont = sym ecp_nistz256_mul_mont,
     ecp_nistz256_sqr_mont = sym ecp_nistz256_sqr_mont,
+    ecp_nistz256_add = sym ecp_nistz256_add,
+    ecp_nistz256_sub = sym ecp_nistz256_sub,
 );
 
 /// `x * y / 2^256 mod p_256`, for `x` and `y` below p.
@@ -48,6 +59,22 @@ pub(crate) fn sqr_mont(x: &[u32; 8]) -> [u32; 8] {
     let mut r = [0; 8];
     // SAFETY: as in `mul_mont`.
     unsafe { ecp_nistz256_sqr_mont(&mut r, x) };
+    r
+}
+
+/// `x + y mod p_256`, for `x` and `y` below p.
+pub(crate) fn add(x: &[u32; 8], y: &[u32; 8]) -> [u32; 8] {
+    let mut r = [0; 8];
+    // SAFETY: as in `mul_mont`.
+    unsafe { ecp_nistz256_add(&mut r, x, y) };
+    r
+}
+
+/// `x - y mod p_256`, for `x` and `y` below p.
+pub(crate) fn sub(x: &[u32; 8], y: &[u32; 8]) -> [u32; 8] {
+    let mut r = [0; 8];
+    // SAFETY: as in `mul_mont`.
+    unsafe { ecp_nistz256_sub(&mut r, x, y) };
     r
 }
 
@@ -131,6 +158,10 @@ mod tests {
         assert_eq!(mul_mont(x, y), want.0, "mul {x:08x?} {y:08x?}");
         fp::fiat_p256_square(&mut want, &fx);
         assert_eq!(sqr_mont(x), want.0, "sqr {x:08x?}");
+        fp::fiat_p256_add(&mut want, &fx, &fy);
+        assert_eq!(add(x, y), want.0, "add {x:08x?} {y:08x?}");
+        fp::fiat_p256_sub(&mut want, &fx, &fy);
+        assert_eq!(sub(x, y), want.0, "sub {x:08x?} {y:08x?}");
     }
 
     #[test]
@@ -172,6 +203,10 @@ mod tests {
             prop_assert_eq!(mul_mont(&x, &y), want.0);
             fp::fiat_p256_square(&mut want, &fx);
             prop_assert_eq!(sqr_mont(&x), want.0);
+            fp::fiat_p256_add(&mut want, &fx, &fy);
+            prop_assert_eq!(add(&x, &y), want.0);
+            fp::fiat_p256_sub(&mut want, &fx, &fy);
+            prop_assert_eq!(sub(&x, &y), want.0);
         }
     }
 
