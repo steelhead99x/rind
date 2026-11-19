@@ -266,10 +266,7 @@ impl<const R: usize> Shake4x<R> {
 /// The padded SHAKE256 block of each of eight inputs, whose parts total
 /// `total` bytes and agree in length, for the eight-way kernel. A short batch
 /// repeats its last input.
-fn pad_blocks<const P: usize>(
-    inputs: &[[&[u8]; P]],
-    total: usize,
-) -> [[u8; SHAKE_256_R_BYTES]; 8] {
+fn pad_blocks<const P: usize>(inputs: &[[&[u8]; P]], total: usize) -> [[u8; SHAKE_256_R_BYTES]; 8] {
     const R: usize = SHAKE_256_R_BYTES;
     let mut blocks = [[0u8; R]; 8];
     for (j, block) in blocks.iter_mut().enumerate() {
