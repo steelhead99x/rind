@@ -17,8 +17,18 @@ The rename reaches only the crate that makes it, not dependencies that use aws-l
 
 It panics wherever aws-lc-rs panics, such as `pbkdf2::derive` asked for more than PBKDF2 allows, so its signatures stay aws-lc-rs's, as rind-ring's stay ring's.
 
-Every aws-lc-rs feature but `fips` is accepted. `ring-io` and `ring-sig-verify` gate the items they gate in aws-lc-rs, and the rest change nothing.
-`fips` is refused, since rind is not FIPS validated: `try_fips_mode()` always fails and `fips_version()` is `None`.
+Every aws-lc-rs feature is accepted. `ring-io` and `ring-sig-verify` gate the items they gate in aws-lc-rs, `fips` is described below, and the rest change nothing.
+
+## FIPS
+
+With the `fips` feature, `try_fips_mode()` succeeds and `aead::TlsRecordSealingKey` and `aead::TlsRecordOpeningKey` hold their keys in [rind-fips](../rind-fips)'s FIPS 140-3 module: sealing through the module's TLS 1.3 IV construction, opening through its AES-GCM key.
+Without it, `try_fips_mode()` fails with "FIPS mode not enabled!" and every key runs in rind.
+
+- The feature builds only for glibc Linux on little-endian x86_64 and aarch64, where rind-fips builds its module, and is a compile error elsewhere, as aws-lc-rs's FIPS build is off its supported platforms.
+- The module seals only TLS 1.3 records, so `TlsRecordSealingKey::new` with `TlsProtocolId::TLS12` fails. Opening takes either version.
+- Every other operation, approved by the module or not, still runs in rind and is not yet held in the module. X25519, ChaCha20-Poly1305, and the other algorithms the module leaves out stay callable, as in aws-lc-rs's FIPS build.
+- `fips_version()` is `None`: the module has no AWS-LC module number to return. `try_fips_cpu_jitter_entropy()` fails, since the module takes OS entropy. `awslc_version` and `try_fips_self_test` are not offered; the module's self-test aborts instead of returning a `Result`.
+- rind-fips is unpublished, so a rind-aws-lc-rs release cannot yet carry the feature.
 
 ## Wiping keys
 
@@ -35,7 +45,7 @@ These items are left out, so code using them fails to build:
 - `aead::chacha20_poly1305_openssh`: rind has no SSH consumer.
 - `rsa::KeyPair::from_components`, `signature::RsaKeyPair::from_components`, and `rsa::KeyPairComponents`: building a key from its private components means encoding them as DER here, which branches on their secret leading bytes. Load the key as PKCS#1 or PKCS#8.
 - `rsa::KeyPair::sign_digest`, `signature::RsaKeyPair::sign_digest`, `digest::Digest::import_less_safe`, and the PKCS#1 v1.5 encryption keys (`rsa::Pkcs1*`): rind signs only digests it computed, and refuses PKCS#1 v1.5 encryption, which invites padding-oracle attacks.
-- `io::der`, `test`, `test_file`, `unstable`, `awslc_version`, `try_fips_self_test`, the FIPS-only functions, and the items aws-lc-rs's `dev-tests-only` feature exposes to supply a key or randomness (`agreement::*::generate_for_test`, `rand::unsealed`), since rind draws its own; under that feature rind-aws-lc-rs adds only `rand::SecureRandom::mut_fill`.
+- `io::der`, `test`, `test_file`, `unstable`, `awslc_version`, `try_fips_self_test`, the FIPS-only functions it cannot back (see FIPS above), and the items aws-lc-rs's `dev-tests-only` feature exposes to supply a key or randomness (`agreement::*::generate_for_test`, `rand::unsealed`), since rind draws its own; under that feature rind-aws-lc-rs adds only `rand::SecureRandom::mut_fill`.
 
 ## Behaves differently
 

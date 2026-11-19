@@ -203,7 +203,13 @@ fn seal_combined_randnonce_rejects_shrinking_extend() {
 // so a buffer refused before that leaves the nonce free for a retry.
 #[test]
 fn tls_seal_rejected_extend_leaves_nonce_unused() {
-    for protocol in [TlsProtocolId::TLS12, TlsProtocolId::TLS13] {
+    // rind-aws-lc-rs: with `fips`, the module seals only TLS 1.3 records.
+    let protocols: &[TlsProtocolId] = if cfg!(feature = "fips") {
+        &[TlsProtocolId::TLS13]
+    } else {
+        &[TlsProtocolId::TLS12, TlsProtocolId::TLS13]
+    };
+    for &protocol in protocols {
         let mut key = TlsRecordSealingKey::new(&AES_128_GCM, protocol, &[0x42u8; 16]).unwrap();
         let mut refused = NoGrowBuffer(b"some plaintext".to_vec());
         assert!(

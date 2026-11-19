@@ -108,6 +108,9 @@ macro_rules! test_tls_aead {
     };
 }
 
+// rind-aws-lc-rs: with `fips`, the module seals only TLS 1.3 records, so a TLS 1.2
+// sealing key is refused (tests/fips.rs); its tests run without the feature.
+#[cfg(not(feature = "fips"))]
 test_tls_aead!(
     test_aes_128_gcm_tls12,
     &AES_128_GCM,
@@ -124,6 +127,7 @@ test_tls_aead!(
     &16,
     &12
 );
+#[cfg(not(feature = "fips"))]
 test_tls_aead!(
     test_aes_256_gcm_tls12,
     &AES_256_GCM,

@@ -4,19 +4,8 @@
 use core::fmt;
 use core::ops::RangeFrom;
 
-use super::{Aad, Algorithm, LessSafeKey, NONCE_LEN, Nonce, Tag, UnboundKey};
+use super::{Aad, Algorithm, LessSafeKey, NONCE_LEN, Nonce, Tag, TlsProtocolId, UnboundKey};
 use crate::error::Unspecified;
-
-/// The TLS version whose nonce construction a key checks.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum TlsProtocolId {
-    /// TLS 1.2 (RFC 5288), whose explicit nonce must increase.
-    TLS12,
-    /// TLS 1.3 (RFC 8446), whose sequence number, the nonce XOR the first
-    /// nonce, must increase.
-    TLS13,
-}
 
 /// A TLS record sealing key, for AES-128-GCM or AES-256-GCM.
 pub struct TlsRecordSealingKey {

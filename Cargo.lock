@@ -4674,6 +4674,7 @@ dependencies = [
  "hex",
  "proptest",
  "rind",
+ "rind-fips",
  "serde",
  "serde_json",
  "untrusted 0.7.1",

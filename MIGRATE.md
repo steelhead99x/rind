@@ -118,7 +118,9 @@ For each way the survey found:
 - **aws-lc-rs's API.** Rename the dependency the same way, with no code
   changes: `aws-lc-rs = { package = "rind-aws-lc-rs", version = "1" }`, or in
   a library with a rind feature `#[cfg(feature = "<its feature>")] extern crate rind_aws_lc_rs as
-  aws_lc_rs;`. Drop the `fips` feature, which rind-aws-lc-rs refuses.
+  aws_lc_rs;`. Keep the `fips` feature if you ask for it: rind-aws-lc-rs
+  accepts it on glibc Linux x86_64 and aarch64 and holds the TLS record keys in
+  rind-fips's module, but not yet every operation (its README's "FIPS").
 - **A crate that hard-wires ring 0.17.** Patch ring in the root `Cargo.toml`
   of each binary's workspace, then run `cargo update -p ring`, which changes
   ring alone:

@@ -36,17 +36,43 @@ mod wipe;
 /// Does nothing: rind needs no initialization. aws-lc-rs initializes AWS-LC here.
 pub fn init() {}
 
-/// Always fails, since rind is not FIPS validated.
+// rind-fips builds its module only for glibc Linux on x86_64 and aarch64, as
+// aws-lc-rs's FIPS build fails off its own supported platforms. A build that
+// succeeded here would answer `try_fips_mode()` with a failure the caller
+// asked not to get.
+#[cfg(all(
+    feature = "fips",
+    not(all(
+        target_os = "linux",
+        target_env = "gnu",
+        target_endian = "little",
+        target_pointer_width = "64",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))
+))]
+compile_error!(
+    "rind-aws-lc-rs's `fips` feature needs glibc Linux on little-endian x86_64 or aarch64, where rind-fips builds its module"
+);
+
+/// Succeeds with the `fips` feature, which backs the TLS record keys with
+/// rind-fips's module; fails without it.
+#[cfg(feature = "fips")]
+pub fn try_fips_mode() -> Result<(), &'static str> {
+    Ok(())
+}
+
+/// Fails without the `fips` feature, since rind is then not FIPS validated.
+#[cfg(not(feature = "fips"))]
 pub fn try_fips_mode() -> Result<(), &'static str> {
     Err("FIPS mode not enabled!")
 }
 
-/// Always `None`, since rind is not FIPS validated.
+/// Always `None`: rind-fips's module has no AWS-LC module number to return.
 pub fn fips_version() -> Option<u32> {
     None
 }
 
-/// Always fails, since rind is not FIPS validated.
+/// Always fails: the module takes OS entropy, not AWS-LC's CPU Jitter Entropy.
 pub fn try_fips_cpu_jitter_entropy() -> Result<(), &'static str> {
     Err("FIPS CPU Jitter Entropy not enabled!")
 }

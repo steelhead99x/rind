@@ -47,6 +47,16 @@ impl theirs::hkdf::KeyType for Len {
     }
 }
 
+/// Whether a TLS record key is TLS 1.3's. With `fips` the module seals only TLS 1.3
+/// records, so TLS 1.2 sealing keys are refused (tests/fips.rs) and not compared.
+fn tls_versions() -> BoxedStrategy<bool> {
+    if cfg!(feature = "fips") {
+        Just(true).boxed()
+    } else {
+        any::<bool>().boxed()
+    }
+}
+
 proptest! {
     #[test]
     fn digest(algorithm in 0..8usize, data in vec(any::<u8>(), 0..300), split in any::<prop::sample::Index>()) {
@@ -298,7 +308,7 @@ proptest! {
     // explicit part must too. A refused seal leaves its buffer as AWS-LC's does.
     #[test]
     fn tls_record_keys(
-        tls13 in any::<bool>(),
+        tls13 in tls_versions(),
         aes256 in any::<bool>(),
         mode in 0..3u8,
         extra in vec(any::<u8>(), 1..3),

@@ -17,10 +17,18 @@ const UNWRITTEN: u8 = 0xAA;
 /// The AEAD algorithms and TLS versions `TlsRecordSealingKey` accepts. TLS 1.2 and
 /// TLS 1.3 reach different C functions with different nonce handling, so the entry
 /// point is exercised over the whole matrix rather than one representative cell.
+// rind-aws-lc-rs: with `fips`, the module seals only TLS 1.3 records, so a TLS 1.2
+// sealing key is refused (tests/fips.rs); its tests run without the feature.
+#[cfg(not(feature = "fips"))]
 const MATRIX: [(&Algorithm, TlsProtocolId); 4] = [
     (&AES_128_GCM, TlsProtocolId::TLS12),
     (&AES_128_GCM, TlsProtocolId::TLS13),
     (&AES_256_GCM, TlsProtocolId::TLS12),
+    (&AES_256_GCM, TlsProtocolId::TLS13),
+];
+#[cfg(feature = "fips")]
+const MATRIX: [(&Algorithm, TlsProtocolId); 2] = [
+    (&AES_128_GCM, TlsProtocolId::TLS13),
     (&AES_256_GCM, TlsProtocolId::TLS13),
 ];
 

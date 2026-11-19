@@ -11,9 +11,24 @@ use crate::{error, hkdf};
 
 pub mod nonce_sequence;
 pub mod quic;
+#[cfg(not(feature = "fips"))]
+mod tls;
+#[cfg(feature = "fips")]
+#[path = "aead/tls_fips.rs"]
 mod tls;
 
-pub use tls::{TlsProtocolId, TlsRecordOpeningKey, TlsRecordSealingKey};
+pub use tls::{TlsRecordOpeningKey, TlsRecordSealingKey};
+
+/// The TLS version whose nonce construction a key checks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TlsProtocolId {
+    /// TLS 1.2 (RFC 5288), whose explicit nonce must increase.
+    TLS12,
+    /// TLS 1.3 (RFC 8446), whose sequence number, the nonce XOR the first
+    /// nonce, must increase.
+    TLS13,
+}
 
 /// An AEAD algorithm, chosen by one of this module's constants.
 pub struct Algorithm {
