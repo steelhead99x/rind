@@ -10,7 +10,7 @@
 //! and division steps (`bit_width_vartime`, `div_rem`) are flagged, so a test here would
 //! fail on `rsa`'s code until `rsa` encodes in constant time. The key is already an
 //! `rsa::PrivateKey` the caller built with `rsa`; rind's own RSA is checked in `rind`'s
-//! suite. (Written by Claude Sonnet 5.5)
+//! suite.
 
 use crabgrind::memcheck::{self, MemState};
 use crabgrind::valgrind::{self, RunningMode};
