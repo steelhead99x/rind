@@ -1,0 +1,12 @@
+md5 rc=0 secs=25 peakHWM_kB=9072 memavail_before_kB=237092 after_kB=236256
+sha1 rc=0 secs=23 peakHWM_kB=9236 memavail_before_kB=237768 after_kB=236348
+p521 rc=0 secs=33 peakHWM_kB=10688 memavail_before_kB=237112 after_kB=234700
+hpke rc=0 secs=17 peakHWM_kB=10564 memavail_before_kB=235300 after_kB=238272
+oprf rc=0 secs=26 peakHWM_kB=9512 memavail_before_kB=238624 after_kB=236992
+vrf rc=0 secs=17 peakHWM_kB=9352 memavail_before_kB=238248 after_kB=236200
+spake2plus rc=0 secs=17 peakHWM_kB=9212 memavail_before_kB=236716 after_kB=235068
+rsa_pub rc=0 secs=41 peakHWM_kB=10468 memavail_before_kB=235584 after_kB=251720
+rsa_priv rc=0 secs=52 peakHWM_kB=10592 memavail_before_kB=251688 after_kB=254876
+blind_rsa rc=0 secs=22 peakHWM_kB=9420 memavail_before_kB=255364 after_kB=252068
+argon2 rc=0 secs=6 peakHWM_kB=21328 memavail_before_kB=252616 after_kB=252396
+argon2 rc=0 secs=19 peakHWM_kB=70344 memavail_before_kB=252584 after_kB=283072
