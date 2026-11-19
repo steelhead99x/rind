@@ -143,14 +143,14 @@ const EXPECTED: [(&str, u64); 4] = [
     ("ed25519", 245),
 ];
 
-/// Under `fips` the module's keys and hashes make 10 fewer allocations, and
+/// Under `fips` the module's keys and hashes make 8 fewer allocations, and
 /// the default provider leads with X25519MLKEM768 as before.
 #[cfg(feature = "fips")]
 const EXPECTED: [(&str, u64); 4] = [
-    ("ecdsa-p256", 235),
-    ("ecdsa-p384", 239),
-    ("ecdsa-p521", 243),
-    ("ed25519", 235),
+    ("ecdsa-p256", 237),
+    ("ecdsa-p384", 241),
+    ("ecdsa-p521", 245),
+    ("ed25519", 237),
 ];
 
 #[test]

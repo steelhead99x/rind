@@ -278,12 +278,11 @@ fn quic_packets_agree_with_aws_lc_rs_from_any_packet_number() {
                 let plain = there.decrypt_in_place(pn, header, &mut mine).unwrap();
                 assert_eq!(plain, b"quic payload");
             }
-            // A packet number already sealed under the key is refused.
+            // The module refuses a packet number already sealed under the
+            // key; rind's own AES-GCM does not track them.
             let mut again = b"quic payload".to_vec();
-            assert!(
-                here.encrypt_in_place(start + 11, header, &mut again)
-                    .is_err()
-            );
+            let refused = here.encrypt_in_place(start + 11, header, &mut again);
+            assert_eq!(refused.is_err(), FIPS);
         }
     }
 }
