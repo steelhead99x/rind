@@ -78,6 +78,7 @@ an Intel SDE CPU model, as `x86-cpu.yml` names them.
 | Backend | Tier | Vectors and differential tests | Fuzz targets | Constant time |
 |---|---|---|---|---|
 | x86_64 | AVX-512 (Ice Lake and later, Zen 4 and 5) | SDE: Cannon Lake (RSA only), Granite Rapids, Diamond Rapids | SDE: Diamond Rapids; the runner's tier, when it has AVX-512 | `admin/ct-sde`: AES-GCM, RSA, ChaCha20, X25519, Ed25519, and verified-garbage's ML-KEM-768 and P-256 ECDH; Graviola's AVX-512 sampler reads only the public matrix |
+| x86_64 | AVX-IFMA without AVX-512 (Sierra Forest, Arrow Lake, Lunar Lake) | SDE: Arrow Lake; denied | denied | `admin/ct-sde`: X25519; `admin/ctgrind` cannot run it, as valgrind hides ADX, which the tier needs; `admin/ct-binsec`: denied |
 | x86_64 | SHA512 instructions (Arrow Lake, Diamond Rapids) | SDE: Arrow Lake, Diamond Rapids | SDE: Diamond Rapids | `admin/ct-sde`: HMAC |
 | x86_64 | VAES without AVX-512 (Alder Lake, Zen 3) | SDE: Alder Lake, Granite Rapids at 256 bits; the runner, when Zen 3 | SDE: Diamond Rapids, denied; the runner's tier, when Zen 3; denied, when it has AVX-512 | `admin/ct-sde`: AES-GCM |
 | x86_64 | SHA extensions (Goldmont, Cannon Lake and later, Zen) | SDE: Goldmont and later | SDE: Diamond Rapids; the runner's tier | `admin/ct-sde`: HMAC |

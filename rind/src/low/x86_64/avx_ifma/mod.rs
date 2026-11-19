@@ -20,3 +20,39 @@ pub(crate) mod vg_ed25519_verify_avx2_ifma;
 pub(crate) mod vg_ed25519_verify_equation_ifma;
 pub(crate) mod vg_x25519_exchange_ifma;
 pub(crate) mod vg_x25519_ifma;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    const SOURCES: [&str; 4] = [
+        include_str!("vg_ed25519_verify_avx2_ifma.rs"),
+        include_str!("vg_ed25519_verify_equation_ifma.rs"),
+        include_str!("vg_x25519_exchange_ifma.rs"),
+        include_str!("vg_x25519_ifma.rs"),
+    ];
+
+    // The routines must not use the red zone, which Windows x86_64 lacks:
+    // no memory operand is below the stack pointer, and a routine that
+    // spills allocates its slots with `lea` on entry and frees them before
+    // each of its returns, so the stack pointer is the caller's again there.
+    #[test]
+    fn spills_stay_above_the_stack_pointer() {
+        for source in SOURCES {
+            let asm: Vec<&str> = source
+                .lines()
+                .filter(|line| !line.starts_with("//"))
+                .collect();
+            let is_adjust = |line: &str| line.starts_with("lea ") && line.ends_with("(%rsp), %rsp");
+            for line in &asm {
+                let below = line.contains("-") && line.contains("(%rsp)");
+                assert!(!below || is_adjust(line), "red zone access: {line}");
+            }
+            let allocs = asm.iter().filter(|l| l.starts_with("lea -")).count();
+            let rets: Vec<usize> = (0..asm.len()).filter(|&i| asm[i] == ".byte 0xc3").collect();
+            assert!(allocs <= 1, "one allocation, on entry");
+            for ret in rets {
+                assert_eq!(allocs == 1, is_adjust(asm[ret - 1]), "freed before ret");
+            }
+        }
+    }
+}

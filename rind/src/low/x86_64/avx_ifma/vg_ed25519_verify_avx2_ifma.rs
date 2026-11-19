@@ -21,7 +21,7 @@
 /// * `scratch` must be valid for reads and writes of 8192 bytes.
 /// * The contents of `scratch` on return are unspecified and may contain secrets; the caller must destroy them after use.
 /// * `scratch` must not overlap `pk`, `message` or `signature` (distinct Rust objects never do).
-/// * None of `pk`, `message`, `signature` and `scratch` may overlap the return address on the stack or the 128 bytes of stack below it, or wrap around the end of the address space (no Rust object does).
+/// * None of `pk`, `message`, `signature` and `scratch` may overlap the return address on the stack or the 280 bytes of stack below it, or wrap around the end of the address space (no Rust object does).
 /// * The CPU must support the `avx`, `avx2`, `bmi1`, `bmi2`, `adx`, and `avxifma` target features.
 #[unsafe(naked)]
 pub(crate) unsafe extern "sysv64" fn vg_ed25519_verify_avx2_ifma(
