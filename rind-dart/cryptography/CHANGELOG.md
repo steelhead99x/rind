@@ -1,7 +1,9 @@
 ## Unreleased
 
 - `AesCbc`, `AesCtr`, and `Chacha20` with a MAC, such as `Hmac`, on rind's
-  ciphers, which need the rind release after 0.1.0.
+  ciphers.
+- Depends on rind 0.2.0, whose signature keys it moves to; its own API is
+  unchanged.
 
 ## 0.1.0
 
