@@ -127,7 +127,8 @@ BACKENDS = {"": [], "portable": [PORTABLE], "mul16": [PORTABLE, "--cfg rind_mul1
 # instructions:
 # - Intel, "Data Operand Independent Timing Instructions", updated
 #   2026-02-23, https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/resources/data-operand-independent-timing-instructions.html
-#   lists no DIV, IDIV, or floating-point arithmetic.
+#   lists no DIV, IDIV, or floating-point arithmetic, and none of
+#   VSHA512RNDS2, VSHA512MSG1, or VSHA512MSG2.
 # - Arm, DDI 0601 2026-09, "DIT, Data Independent Timing",
 #   https://developer.arm.com/documentation/ddi0601/2026-09/AArch64-Registers/DIT--Data-Independent-Timing
 #   lists no UDIV, SDIV, or floating-point instruction but FCSEL. For
@@ -164,6 +165,9 @@ VARTIME = {
         r"|vfn?m(add|sub|addsub|subadd)\d*[sp][sdh]|v(rcp|rsqrt)(14|28)[sp][sdh]"
         r"|v(scalef|getexp|getmant|reduce|rndscale|range|fixupimm)[sp][sdh]|v?cvt\w+"
         r"|v?u?comis[sdh]|v?cmp\w*[ps][sdh]"
+        # VSHA512RNDS2, VSHA512MSG1, and VSHA512MSG2 are absent from Intel's
+        # list. SHA-256's SHA extensions are on it, so they stay allowed.
+        r"|vsha512\w*"
         # Every x87 mnemonic begins with `f`; all but these control and
         # state ones take floating-point operands.
         r"|f(?!(n?stcw|ldcw|n?stsw|n?clex|n?init|n?save|rstor|n?stenv|ldenv|x(save|rstor)(64)?|wait|emms|freep?|decstp|incstp|nop)$)\w+"
@@ -240,8 +244,9 @@ MITIGATION = "rind::low::mcdt::enter"
 SAMPLES = {
     "x86": (
         "div idiv aam divsd vsqrtpd haddps addsubps vfmadd231pd vfmaddps vrcp14ps cvtsi2sd fdivp"
-        " ucomisd vcmpltpd cmpss fsin fld fcomip",
-        "mulx adcx vpmuludq vpaddd movaps xorps vpclmulqdq aesenc shrx cmp cmpxchg fnstcw fxsave64",
+        " ucomisd vcmpltpd cmpss fsin fld fcomip vsha512rnds2 vsha512msg1 vsha512msg2",
+        "mulx adcx vpmuludq vpaddd movaps xorps vpclmulqdq aesenc shrx cmp cmpxchg fnstcw fxsave64"
+        " sha256rnds2 sha256msg1 sha256msg2",
     ),
     "aarch64": (
         "udiv sdiv fdiv fsqrt faddp fmul fmla fcvtzs scvtf",

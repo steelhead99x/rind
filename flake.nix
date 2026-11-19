@@ -485,6 +485,39 @@
           sde-certs = ''
             export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
           '';
+
+          # `msrv-<version>`, with `.` as `_`, for each rust-version a workspace
+          # member declares itself rather than inheriting rind's, such as
+          # rind-openmls's 1.91: `just check`'s msrv module checks a published
+          # one there. Read from the manifests, so a new adapter with its own
+          # rust-version needs no edit here. Nix evaluates a shell only when
+          # it is entered, so an unpublished member's version costs nothing.
+          msrv-shells =
+            let
+              workspace = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+              declared = map (
+                member:
+                (builtins.fromTOML (builtins.readFile (./. + "/${member}/Cargo.toml"))).package.rust-version or null
+              ) workspace.workspace.members;
+              versions = pkgs.lib.unique (
+                builtins.filter (
+                  version: builtins.isString version && version != workspace.workspace.package.rust-version
+                ) declared
+              );
+            in
+            builtins.listToAttrs (
+              map (version: {
+                name = "msrv-${builtins.replaceStrings [ "." ] [ "_" ] version}";
+                value = pkgs.mkShell {
+                  packages = [
+                    (pkgs.rust-bin.fromRustupToolchain {
+                      channel = version;
+                      profile = "minimal";
+                    })
+                  ];
+                };
+              }) versions
+            );
         in
         {
           devShells = {
@@ -603,9 +636,9 @@
               };
             };
 
-            # The nightly MSRV job builds in it. The workspace's rust-version
-            # names a minor release, which resolves to its latest patch, as
-            # rustup does. The extra targets let it check rind's other
+            # `just check`'s msrv module builds in it. The workspace's
+            # rust-version names a minor release, which resolves to its latest
+            # patch, as rustup does. The extra targets let it check rind's other
             # backends and 32-bit x86, which `check` does without a C toolchain.
             msrv = pkgs.mkShell {
               packages = [
@@ -963,7 +996,8 @@
 
               shellHook = sde-certs;
             };
-          };
+          }
+          // msrv-shells;
 
           formatter = pkgs.nixfmt-tree;
         }
