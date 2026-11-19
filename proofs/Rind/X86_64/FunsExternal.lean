@@ -482,8 +482,8 @@ opaque low.x86_64.p384_montjmixadd_alt.p384_montjmixadd_alt
     → Result (Array Std.U64 18#usize)
 
 /-- Whether pyca/verified-garbage's P-384 `d·G` runs on this CPU, which
-`admin/prove` leaves opaque, as it does the routines it calls: they are VG's
-assembly. -/
+reads no input and `admin/prove` leaves opaque, as it does the routines it
+calls: they are VG's assembly, whose contracts `Rind.X86_64.VgP384` states. -/
 opaque low.x86_64.p384_vg.MulBase.check
   : Result (Option low.x86_64.p384_vg.MulBase)
 

@@ -59,6 +59,10 @@ ROOTS = [
     "VerifiedGarbage.Spec.EcKey.P256",
     "VerifiedGarbage.Spec.Ecdh.P256",
     "VerifiedGarbage.Spec.Ecdsa.Verify.P256",
+    # The same for P-384's public key and ECDSA verification, which
+    # proofs/Rind/X86_64/VgP384.lean's axioms restate.
+    "VerifiedGarbage.Spec.EcKey.P384",
+    "VerifiedGarbage.Spec.Ecdsa.Verify.P384",
     # PBKDF2-HMAC's contracts, over VG's SHA-1, SHA-2, and HMAC specs, which
     # proofs/Rind/VgPbkdf2.lean proves rind's.
     "VerifiedGarbage.Spec.Pbkdf2.Generic",

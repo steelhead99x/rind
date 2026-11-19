@@ -86,19 +86,34 @@ impl VerifyingKey {
     /// reused key on aarch64.
     pub(crate) fn raw_ecdsa_verify(&self, r: &Scalar, s: &Scalar, e: &Scalar) -> Result<(), Error> {
         if let Some(vg) = low::p384_vg::Verify::check() {
-            // On aarch64, only while the multiples are not ready:
-            // `get_or_build` returns `None` on a key's first verification and
-            // while another thread builds them.
-            if cfg!(rind_backend = "x86_64")
-                || self
-                    .odd_multiples
-                    .get_or_build(|| self.point.public_odd_multiples())
-                    .is_none()
-            {
+            if self.vg_takes() {
                 return self.vg_ecdsa_verify(vg, r, s, e);
             }
         }
+        self.rind_ecdsa_verify(r, s, e)
+    }
 
+    /// Whether pyca/verified-garbage's verification takes this one, where it
+    /// runs: every verification on x86_64.
+    #[cfg(rind_backend = "x86_64")]
+    fn vg_takes(&self) -> bool {
+        true
+    }
+
+    /// Whether pyca/verified-garbage's verification takes this one, where it
+    /// runs: only while the key's multiples are not ready, since
+    /// `get_or_build` returns `None` on a key's first verification and while
+    /// another thread builds them.
+    #[cfg(not(rind_backend = "x86_64"))]
+    fn vg_takes(&self) -> bool {
+        self.odd_multiples
+            .get_or_build(|| self.point.public_odd_multiples())
+            .is_none()
+    }
+
+    /// [`Self::raw_ecdsa_verify`] by rind's own code, over the key's
+    /// multiples.
+    fn rind_ecdsa_verify(&self, r: &Scalar, s: &Scalar, e: &Scalar) -> Result<(), Error> {
         // 4. Compute: u1 = e s^-1 mod n and u2 = r s^−1 mod n
         let s_inv = s.inv().as_mont();
         let u1 = s_inv.mont_mul(&e.as_mont()).demont();
@@ -197,11 +212,8 @@ impl PrivateKey {
     fn vg_public_key(&self, vg: low::p384_vg::MulBase) -> [u8; PublicKey::BYTES] {
         // It fails only for a scalar outside [1, n), which `Scalar`'s
         // checked decoding refuses.
-        let encoded = match vg
-            .public_key(&self.scalar.as_bytes())
-            .map(low::ct::into_public)
-        {
-            Some(encoded) => encoded,
+        let encoded = match vg.public_key(&self.scalar.as_bytes()) {
+            Some(encoded) => low::ct::into_public(encoded),
             None => panic!("internal fault"),
         };
         // Checked on the curve, as `public_point` checks rind's.
