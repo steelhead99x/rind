@@ -37,6 +37,12 @@ fi
 
 cd "$(git rev-parse --show-toplevel)"
 
+# Inside the dev shell, Cargo can still run a host's rustup rustfmt and clippy
+# from $CARGO_HOME/bin; sh/toolchain.sh stops before any check runs with them.
+if [[ -z "$query" && -n "${IN_RIND_DEV_SHELL:-}" && -z "${ALLOW_HOST_TOOLCHAIN:-}" ]]; then
+    sh/toolchain.sh
+fi
+
 changed=$(mktemp)
 trap 'rm -f "$changed"' EXIT
 
@@ -193,6 +199,9 @@ module gh '^(\.github/|sh/(alert|pins|release-check)\.sh$)' \
     tools='actionlint yq jq'
 module shell '' \
     tools='shellcheck'
+# The check above that Cargo's fmt and clippy are the shell's toolchain.
+module toolchain '^sh/toolchain\.sh$' \
+    tools='bash grep'
 module nix '' \
     tools='nixfmt' fix
 
@@ -496,7 +505,12 @@ step() {
             # which crashes LLVM there, unless the caller picks `serial`.
             # See UPSTREAM.md, "curve25519-dalek cannot compile without SSE".
             local rustflags
-            for target in aarch64:aarch64-unknown-none arm:armv7a-none-eabi portable:x86_64-unknown-none; do
+            # And for the microcontroller targets it must keep off the arm
+            # backend (M-profile is Thumb-only, with no NEON), two of them
+            # without compare-and-swap, which build `reuse_cache_without_cas`:
+            # `thumbv6m-none-eabi` and `riscv32imc-unknown-none-elf`.
+            for target in aarch64:aarch64-unknown-none arm:armv7a-none-eabi portable:x86_64-unknown-none \
+                portable:thumbv6m-none-eabi portable:thumbv7em-none-eabihf portable:riscv32imc-unknown-none-elf; do
                 if reaches "$backends" "${target%%:*}"; then
                     rustflags='--cfg getrandom_backend="custom"'
                     [[ $target != *x86_64* ]] || rustflags+=' --cfg curve25519_dalek_backend="serial"'
@@ -588,6 +602,7 @@ step() {
             files 'sh/*.sh'
             run xargs -0 shellcheck <"$listed"
             ;;
+        check:toolchain) run sh/toolchain.sh --self-test ;;
         check:nix)
             files '*.nix'
             run xargs -0 nixfmt --check <"$listed"
