@@ -32,7 +32,7 @@ Delete this file before the claim lands. It is a working document for the mainta
 | BINSEC stalls on some ML-KEM ciphertexts | draft ready | evidence in kixel-ai/rind#841 (3 of 150 and 3 of 240 runs stalled; captured ciphertexts stall 12 of 12 replays, others finish 24 of 24); no existing report; not rerun here (needs about 100 runs) | 1 |
 | Aeneas cannot translate several kinds of Rust | existing report | reported per limitation in its own quest, as the entry says | - |
 | Aeneas emits a duplicate markerCopyInst field | existing report | AeneasVerif/aeneas#1051 (open since 2026-08-11) is this bug: NonZero, ZeroablePrimitive, two Copy supertraits named markerCopyInst. The entry's 'Reported: no' is stale | link |
-| Charon panics on HACL*'s unrolled SHA-2 | draft ready | the quest's draft is sound; Charon HEAD (9b0ee438, 2026-11-18) still has MAX_STACK_DEPTH = 1024 and an ensure_sufficient_stack that panics, beside a try_ensure_sufficient_stack that returns an error; no existing report found; not rerun on HEAD | 1 |
+| Charon panics on HACL*'s unrolled SHA-2 | draft ready | the quest's draft is sound; Charon HEAD (9b0ee438, 2026-11-18) still has MAX_STACK_DEPTH = 1024 and an ensure_sufficient_stack that panics, beside a try_ensure_sufficient_stack that returns an error; no existing report found; reproduced with a standalone 300-line nested-`if` file on Charon 0.1.304 (the Aeneas nightly 2026.11.03 build; threshold between 250 and 300 nested ifs), source unchanged on HEAD | 1 |
 | Lean cannot compile P-384's comb as one literal | not rerun | Lean is 4.36.0 now, rind pins 4.35.0; needs the translation build; no existing report found | 2 |
 | dmtcp_command fails a checkpoint that succeeds | not rerun | DMTCP 4.2.0 (2026-06-26) is out and rind uses 4.1.1; I could not locate the command's source at the 4.2.0 tag; needs a recheck on 4.2.0 first | 2 |
 | Mathlib's cache unpacks a copy into each checkout | not rerun | no existing report found; a Lake and Mathlib design matter more than a bug | 3 |
@@ -62,7 +62,7 @@ Tiers: 1 is a first batch with a clean reproduction and a clear upstream-side fi
 
 | Draft | Strongest reason it might be wrong or unwelcome |
 | --- | --- |
-| Charon: stack depth panic | The reproduction needs rind's harness and an Aeneas nightly, not a standalone Rust file, so Charon's maintainers may ask for a smaller case; deeply nested macro-unrolled bodies may also be something they would rather handle with an opaque-body option than a limit change. I did not rerun it on Charon's HEAD. |
+| Charon: stack depth panic | The panic is caught per item (a warning, exit 0, the item missing from the output, and an error under `--abort-on-error`), so they may call it working as designed; a body nested 250 levels deep is unusual outside macro unrolling, and they may prefer an opaque-body option to a limit change. I ran the standalone case on Charon 0.1.304 from the Aeneas nightly, not on a build of HEAD, whose guard is textually unchanged. |
 | Valgrind: AT_HWCAP2 on 32-bit ARM | Valgrind's tracker is slow (the ADX bug 494162 has sat UNCONFIRMED since 2024) and 32-bit ARM on an AArch64 host is a niche setup, so it may be ignored; a maintainer may also want each HWCAP2 bit tested before it is passed, as the arm64 mask is. Not rerun on an ARM host: the claim rests on the source. |
 | cargo-mutants: `#[path]` with `..` | The maintainer may call an `--in-diff` miss on a `..` module an unsupported layout, and the exit code 0 may be intended for "nothing to test". The fix (normalize the path) is small and I verified the bug, but I did not write it. |
 | cargo-mutants: compound `cfg(test)` | The semantics are subtle (`all(test, x)` is test-only, `any(test, x)` and `not(test)` are not), so the maintainer may want a design rather than a report. Related to the open issue sourcefrog/cargo-mutants#50, which a maintainer may want this folded into. |
@@ -91,17 +91,32 @@ Tiers: 1 is a first batch with a clean reproduction and a clear upstream-side fi
 
 Title: Panic "stack depth limit exceeded" on deeply nested control flow from an unrolled loop
 
-Charon panics translating libcrux-sha2's `sha256_update_nblocks` (and `sha512_update_nblocks`). libcrux-macros' `unroll_for!` unrolls their 64 or 80 rounds into one function body whose blocks nest past the fixed `MAX_STACK_DEPTH` of 1024 in `charon/src/utils.rs`, and the control-flow reconstruction panics:
+Charon panics translating a function whose control flow nests a few hundred levels deep, such as libcrux-sha2's `sha256_update_nblocks` (and `sha512_update_nblocks`), where libcrux-macros' `unroll_for!` unrolls 64 or 80 rounds into one body. The nesting passes the fixed `MAX_STACK_DEPTH` of 1024 in `charon/src/utils.rs` and the control-flow reconstruction panics:
 
 ```
-stack depth limit exceeded (transform/control_flow/ullbc_to_llbc.rs)
+thread 'main' panicked at src/transform/control_flow/ullbc_to_llbc.rs:1122:9:
+stack depth limit exceeded
+warning: Thread panicked while transforming item `Fun(0)`.
 ```
+
+The panic is caught per item, so the run exits 0 with a warning and the function is missing from the output; it is an error only under `--abort-on-error`.
 
 **Version:** Aeneas nightly release `nightly-2026.11.03-ab34bd2`, which ships Charon, with Rust nightly 2026-09-17. On Charon's current `master` (`9b0ee438`, 2026-11-18) the guard is unchanged: `ensure_sufficient_stack` panics once the depth reaches `MAX_STACK_DEPTH`, while `try_ensure_sufficient_stack`, which returns `Err(StackDepthLimitExceeded)`, sits beside it in the same file.
 
-**Reproduce:** in [kixel-ai/rind](https://github.com/kixel-ai/rind), add `--include 'libcrux_sha2::hacl::sha256_update_nblocks' --extract-opaque-bodies` to `admin/prove`'s portable pass and run `nix develop .#prove --command admin/prove lean`. Charon panics translating `sha256_update`.
+**Reproduce (standalone, ran on Charon 0.1.304):** generate `deep.rs` with `n = 300` (`n = 250` translates, so the limit is about 4 depth units per nested `if`):
 
-**Expected:** the function translates, or Charon reports an error for that item and continues, rather than panicking. The body is straight-line code, so its depth comes from nesting, not from recursion. Using the `try_` variant in the control-flow reconstruction and reporting an error for the item, or a limit that scales with the body, would avoid the panic.
+```python
+n = 300
+s = "pub fn f(x: &mut [u32; 4], c: u32) {\n"
+for i in range(n):
+    s += f"if c & {1 << (i % 31)} != 0 {{ x[{i % 4}] = x[{i % 4}].wrapping_add({i}); "
+s += "x[0] = 0;" + "}" * n + "\n}\n"
+open("deep.rs", "w").write(s)
+```
+
+then `charon rustc --dest-file out.llbc -- --crate-type=lib --edition=2021 deep.rs`. The function is dropped with the panic above. The original case: in [kixel-ai/rind](https://github.com/kixel-ai/rind), add `--include 'libcrux_sha2::hacl::sha256_update_nblocks' --extract-opaque-bodies` to `admin/prove`'s portable pass and run `nix develop .#prove --command admin/prove lean`.
+
+**Expected:** the function translates, or Charon reports an error for that item, not a panic that the item guard has to catch. The body is straight-line code, so its depth comes from nesting, not from recursion. Using the `try_` variant in the control-flow reconstruction and reporting an error for the item, or a limit that scales with the body, would avoid the panic.
 
 We want the translation to prove these functions in Lean with Aeneas instead of assuming HACL*'s F* theorems about them.
 
@@ -115,7 +130,15 @@ On 32-bit ARM, `getauxval(AT_HWCAP2)` is 0 under Valgrind even on a CPU with the
 
 The cause, in `coregrind/m_initimg/initimg-linux.c` at the 3.28.0 release and on master: `case AT_HWCAP2:` is compiled only for `VGP_ppc64be_linux` and `VGP_ppc64le_linux`; on every other platform the auxv loop reaches `default:`, which sets the entry to `AT_IGNORE` ("stomp out anything we don't know about"). The AArch32 guest, meanwhile, decodes `AESE`, `AESD`, `AESMC`, `AESIMC`, `SHA1C`, `SHA1P`, `SHA1M`, `SHA1SU0`, `SHA1SU1`, `SHA256H`, `SHA256H2`, `SHA256SU0`, `SHA256SU1` and `VMULL.P64` (`VEX/priv/guest_arm_toIR.c`). The arm64 branch of the same function already shows the intended shape: it passes `AT_HWCAP` masked to `ARM64_SUPPORTED_HWCAP`.
 
-**Reproduce:** an armhf program that prints `getauxval(AT_HWCAP2)`, run natively and then under `valgrind` on an arm64 host with the crypto extension. Native shows `HWCAP2_AES | HWCAP2_PMULL | HWCAP2_SHA1 | HWCAP2_SHA2` set; Valgrind shows 0. (I read the source for this report and did not rerun it on an ARM host.)
+**Reproduce:** build this for armhf, run it natively and then under `valgrind` on an arm64 host with the crypto extension:
+
+```c
+#include <stdio.h>
+#include <sys/auxv.h>
+int main(void) { printf("0x%lx\n", getauxval(AT_HWCAP2)); return 0; }
+```
+
+Native should show `HWCAP2_AES | HWCAP2_PMULL | HWCAP2_SHA1 | HWCAP2_SHA2` (0x1e) set; Valgrind should show 0. I read the source (3.29 development head, `case AT_HWCAP2` only under the ppc64 `#if`) and did not run this: it needs an ARM board, which this recheck did not use.
 
 **Suggested fix:** on ARM, pass `AT_HWCAP2` masked to the bits the guest implements: AES, PMULL, SHA1, SHA2 (and CRC32 if the guest decodes it).
 
@@ -211,7 +234,9 @@ Title: acvptool forwards ML-DSA's `externalMu` for the external interface, which
 
 In `util/fipstools/acvp/acvptool/subprocess/ml_dsa.go` at v5.15.0 and on `main`, the sigGen and sigVer handlers pass `boolToBytes(group.ExternalMu)` to the wrapper for every group (lines 156 and 222), whatever the group's `signatureInterface`. NIST's ML-DSA sigGen and sigVer sets give the external-interface groups `externalMu: false`. The module wrapper's own comment in `modulewrapper.cc` says only `signatureInterface: internal` carries the `externalMu` field, so a wrapper that reads a present flag as the internal interface signs and verifies the external interface's tests without their context and domain separation, and answers them wrongly.
 
-**Reproduce:** run an unpatched `acvptool` over NIST's `ML-DSA-sigGen-FIPS204` file against a wrapper that follows that convention: the external groups' signatures differ from the expected ones. (I confirmed the code at both revisions; I did not run NIST's file end to end for this report.)
+**Measured:** in rind's copies of NIST's files (`thirdparty/acvp/ML-DSA-sigGen-FIPS204.json`, `ML-DSA-sigVer-FIPS204.json`), every group has `externalMu` present: sigGen has 6 external groups with `false`, 6 internal with `true` and 6 internal with `false`; sigVer has 3, 3 and 3. `boolToBytes` returns nil only for an absent field, so each external group is sent a 1-byte `0`, and the wrapper's `!extmu.empty()` branch then takes the internal path.
+
+**Reproduce:** run an unpatched `acvptool` over `ML-DSA-sigGen-FIPS204.json` against aws-lc's module wrapper: the external groups' signatures differ from the expected ones. (I confirmed the code at both revisions and the file counts above; I did not run `acvptool` end to end for this report, which needs an unpatched build.)
 
 **Suggested fix (small):** forward `externalMu` only when `group.SignatureInterface == "internal"`, in both handlers. We carry exactly that as a patch in our Nix packaging of `acvptool`.
 
@@ -317,6 +342,8 @@ Which of these, if any, would you like, and would you prefer them in this order?
 ## 6. Method and limits
 
 - Read: `UPSTREAM.md` from upstream `main` `96404e2f`; current releases through each project's releases API, crates.io and the Flutter release index; Valgrind's `NEWS`, `initimg-linux.c`, `readexidx.c`, `m_machine.c`, `guest_arm_toIR.c`, `guest_arm64_toIR.c`, `guest_amd64_helpers.c` at `master` (the 3.29 development line, after 3.28.0 of 2026-10-23); Charon's `utils.rs` and `ullbc_to_llbc.rs`; cargo-mutants' `visit.rs` and `in_diff.rs` at `6c720ae8`; aws-lc's `ml_dsa.go` at v5.15.0 and `main`; rust-lang/rust's target specs.
-- Ran: the MXCSR program (native and under valgrind 3.27.1) and a three-file crate for the three cargo-mutants entries (27.1.0, from rind's Nix shell).
+- Ran: the MXCSR program (native and under valgrind 3.27.1); a three-file crate for the three cargo-mutants entries (27.1.0, from rind's Nix shell, rerun on 2026-11-19 UTC: the `..` module listed as `src/a/../generic/f.rs`, `--in-diff` printed `No mutants to filter` and exited 0, `compound_test_helper` listed and `plain_test_helper` not, nothing listed for the `cfg_if!` module); the Charon nested-`if` file on Charon 0.1.304.
+- Rechecked read-only on 2026-11-19 UTC: Charon `master` `9b0ee438`, aws-lc `main` `784feabf` and v5.15.0 (`ml_dsa.go` lines 156 and 222 unchanged), cargo-mutants 27.1.0 (still latest) and `main` `6c720ae8`, BINSEC 0.11.3 (still latest), Valgrind master's `initimg-linux.c`, `readexidx.c`, `guest_arm_toIR.c` and `guest_amd64_helpers.c`; KDE Bugzilla has no bug for HWCAP2, MXCSR or EXIDX with r11 (searches "HWCAP2", "MXCSR", "exidx r11", "ldmxcsr"), and the Charon, cargo-mutants and aws-lc trackers have no report of these.
+- Not rerun, and why: the BINSEC stall (the stalling ciphertexts, core dump and binary were not kept, and reproducing needs about 100 BINSEC runs, so a maintainer cannot be given a reproducer until those are captured); the Valgrind AT_HWCAP2 and EXIDX r11 claims (need an ARM board).
 - Searched: GitHub's issue search per entry (rate-limited, so some searches were keyword-light), KDE's Bugzilla for Valgrind, and sourceware's for gdb. A zero result there is weak evidence.
 - Not run: anything needing a board, qemu, an Android or iOS toolchain, Intel SDE, a long build, or a Lean build. Those rows say "not rerun".
