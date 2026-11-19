@@ -6,7 +6,7 @@ A caller whose interface hands it the random source, such as the KEM traits' `en
 
 ## Plan
 
-`rind::kem` draws ML-KEM's 32-byte message from the system source with no way to supply it. An adapter that ignored the caller's RNG would silently drop the randomness the caller chose, so [rind implements RustCrypto's traits](/quest/m2/rustcrypto/traits.md) could not honestly implement `kem`'s `Encapsulate`, and a known-answer replay through the public API was impossible. Fork draft PR steelhead99x/rind#162 implements the first item below; it is not posted upstream.
+`rind::kem` draws ML-KEM's 32-byte message from the system source with no way to supply it. An adapter that ignored the caller's RNG would silently drop the randomness the caller chose, so [rind implements RustCrypto's traits](/quest/m2/rustcrypto/traits.md) could not honestly implement `kem`'s `Encapsulate`, and a known-answer replay through the public API was impossible.
 
 - Add one public type, `kem::Message`, in the shape the repo already uses for caller-supplied secret randomness (`ed25519::Seed`, `ml_dsa::Seed`, `vrf::Seed`, X-Wing's `Seed<A>`): a newtype that wipes on drop ✅ (rejected: the three below).
   - `Message::from_random_bytes(&mut [u8; 32])` takes fresh random bytes and zeroes the caller's array, so the caller keeps no copy to reuse.
