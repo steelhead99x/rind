@@ -81,11 +81,11 @@ pub(crate) fn sub(x: &[u32; 8], y: &[u32; 8]) -> [u32; 8] {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use fiat_crypto::p256_32 as fp;
+    use fp::fiat_p256_montgomery_domain_field_element as Fe;
     use proptest::prelude::*;
 
     use super::*;
-    use fiat_crypto::p256_32 as fp;
-    use fp::fiat_p256_montgomery_domain_field_element as Fe;
 
     /// p_256, least significant word first.
     const P: [u32; 8] = [
