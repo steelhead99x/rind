@@ -1,4 +1,6 @@
 use rind::aead;
+#[cfg(feature = "fips")]
+use rind_fips::aead as module;
 use rustls::crypto::cipher::{
     AeadKey, InboundOpaqueMessage, InboundPlainMessage, Iv, MessageDecrypter, MessageEncrypter,
     Nonce, OutboundOpaqueMessage, OutboundPlainMessage, PrefixedPayload, Tls13AeadAlgorithm,
@@ -134,6 +136,74 @@ impl MessageDecrypter for Tls13Cipher {
     }
 }
 
+/// TLS 1.3 sealing in the module, which holds the sequence number's order.
+#[cfg(feature = "fips")]
+struct ModuleSealer(module::TlsRecordSealingKey, Iv);
+
+#[cfg(feature = "fips")]
+impl MessageEncrypter for ModuleSealer {
+    fn encrypt(
+        &mut self,
+        m: OutboundPlainMessage<'_>,
+        seq: u64,
+    ) -> Result<OutboundOpaqueMessage, rustls::Error> {
+        let total_len = self.encrypted_payload_len(m.payload.len());
+        let mut payload = PrefixedPayload::with_capacity(total_len);
+
+        payload.extend_from_chunks(&m.payload);
+        payload.extend_from_slice(&m.typ.to_array());
+        let aad = make_tls13_aad(total_len);
+
+        let tag = self
+            .0
+            .seal_in_place_separate_tag(
+                module::Nonce::assume_unique_for_key(Nonce::new(&self.1, seq).0),
+                &aad,
+                payload.as_mut(),
+            )
+            .map_err(|_| rustls::Error::EncryptError)?;
+        payload.extend_from_slice(tag.as_ref());
+
+        Ok(OutboundOpaqueMessage::new(
+            ContentType::ApplicationData,
+            ProtocolVersion::TLSv1_2, // sic
+            payload,
+        ))
+    }
+
+    fn encrypted_payload_len(&self, payload_len: usize) -> usize {
+        payload_len + 1 + TAG_LEN
+    }
+}
+
+/// TLS 1.3 opening in the module.
+#[cfg(feature = "fips")]
+struct ModuleOpener(module::Key, Iv);
+
+#[cfg(feature = "fips")]
+impl MessageDecrypter for ModuleOpener {
+    fn decrypt<'a>(
+        &mut self,
+        mut m: InboundOpaqueMessage<'a>,
+        seq: u64,
+    ) -> Result<InboundPlainMessage<'a>, rustls::Error> {
+        let payload = &mut m.payload;
+        let aad = make_tls13_aad(payload.len());
+        let plain_len = self
+            .0
+            .open_in_place(
+                module::Nonce::assume_unique_for_key(Nonce::new(&self.1, seq).0),
+                &aad,
+                payload,
+            )
+            .map_err(|_| rustls::Error::DecryptError)?
+            .len();
+
+        payload.truncate(plain_len);
+        m.into_tls13_unpadded_message()
+    }
+}
+
 #[cfg(feature = "tls12")]
 struct ChaChaTls12Cipher(aead::Key, Iv);
 
@@ -191,29 +261,62 @@ impl MessageDecrypter for ChaChaTls12Cipher {
 }
 
 pub struct TlsAesGcm {
+    /// The algorithm TLS 1.2 and builds without `fips` run, outside any module.
     algorithm: &'static aead::Algorithm,
+    /// The module's, which TLS 1.3 runs under `fips`.
+    #[cfg(feature = "fips")]
+    module: &'static module::Algorithm,
     traffic_secrets: fn(AeadKey, Iv) -> ConnectionTrafficSecrets,
 }
 
 /// TLS record protection with AES-128-GCM.
 pub static AES_128_GCM: TlsAesGcm = TlsAesGcm {
     algorithm: &aead::AES_128_GCM,
+    #[cfg(feature = "fips")]
+    module: &module::AES_128_GCM,
     traffic_secrets: |key, iv| ConnectionTrafficSecrets::Aes128Gcm { key, iv },
 };
 
 /// TLS record protection with AES-256-GCM.
 pub static AES_256_GCM: TlsAesGcm = TlsAesGcm {
     algorithm: &aead::AES_256_GCM,
+    #[cfg(feature = "fips")]
+    module: &module::AES_256_GCM,
     traffic_secrets: |key, iv| ConnectionTrafficSecrets::Aes256Gcm { key, iv },
 };
 
 impl Tls13AeadAlgorithm for TlsAesGcm {
+    #[cfg(not(feature = "fips"))]
     fn encrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageEncrypter> {
         Box::new(Tls13Cipher(aead_key(self.algorithm, &key), iv))
     }
 
+    #[cfg(not(feature = "fips"))]
     fn decrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageDecrypter> {
         Box::new(Tls13Cipher(aead_key(self.algorithm, &key), iv))
+    }
+
+    #[cfg(feature = "fips")]
+    fn encrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageEncrypter> {
+        // rustls derives `key` at the algorithm's key length.
+        let key = module::TlsRecordSealingKey::new(
+            self.module,
+            module::TlsProtocolId::TLS13,
+            key.as_ref(),
+        )
+        .unwrap();
+        Box::new(ModuleSealer(key, iv))
+    }
+
+    #[cfg(feature = "fips")]
+    fn decrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageDecrypter> {
+        let key = module::Key::new(self.module, key.as_ref()).unwrap();
+        Box::new(ModuleOpener(key, iv))
+    }
+
+    /// TLS 1.3 record protection runs in the module under `fips`.
+    fn fips(&self) -> bool {
+        cfg!(feature = "fips")
     }
 
     fn key_len(&self) -> usize {

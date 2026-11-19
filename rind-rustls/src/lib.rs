@@ -21,6 +21,32 @@ use rustls::crypto::{CryptoProvider, KeyProvider, SupportedKxGroup, WebPkiSuppor
 use rustls::pki_types::PrivateKeyDer;
 use rustls::sign::SigningKey;
 
+// rind-fips builds its module only for glibc Linux on x86_64 and aarch64, as
+// rustls's FIPS build fails off aws-lc-rs's own supported platforms. A build
+// that succeeded elsewhere would offer a `fips` provider that runs nothing in
+// a module.
+#[cfg(all(
+    feature = "fips",
+    not(all(
+        target_os = "linux",
+        target_env = "gnu",
+        target_endian = "little",
+        target_pointer_width = "64",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))
+))]
+compile_error!(
+    "rind-rustls's `fips` feature needs glibc Linux on little-endian x86_64 or aarch64, where rind-fips builds its module"
+);
+
+#[cfg(not(feature = "fips"))]
+use rind as backend;
+/// The crate whose digests, HMAC, and AES-GCM the provider runs: rind-fips's
+/// module under `fips`, rind otherwise. Their APIs agree where this crate
+/// uses them.
+#[cfg(feature = "fips")]
+use rind_fips as backend;
+
 mod aead;
 mod hash;
 mod hmac;
@@ -56,9 +82,18 @@ pub fn default_provider() -> CryptoProvider {
     } else {
         CHACHA20_FIRST
     };
+    let (cipher_suites, kx_groups) = (cipher_suites.to_vec(), DEFAULT_KX_GROUPS.to_vec());
+    // Under `fips`, offer only what runs in the module, as rustls's aws-lc-rs
+    // provider does under its own `fips`: no ChaCha20-Poly1305, and no bare
+    // X25519.
+    #[cfg(feature = "fips")]
+    let (cipher_suites, kx_groups) = (
+        cipher_suites.into_iter().filter(|cs| cs.fips()).collect(),
+        kx_groups.into_iter().filter(|kx| kx.fips()).collect(),
+    );
     CryptoProvider {
-        cipher_suites: cipher_suites.to_vec(),
-        kx_groups: DEFAULT_KX_GROUPS.to_vec(),
+        cipher_suites,
+        kx_groups,
         signature_verification_algorithms: SUPPORTED_SIG_ALGS,
         secure_random: &Rind,
         key_provider: &Rind,
@@ -208,7 +243,12 @@ struct Rind;
 
 impl rustls::crypto::SecureRandom for Rind {
     fn fill(&self, bytes: &mut [u8]) -> Result<(), rustls::crypto::GetRandomFailed> {
-        rind::rand::fill(bytes).map_err(|_| rustls::crypto::GetRandomFailed)
+        backend::rand::fill(bytes).map_err(|_| rustls::crypto::GetRandomFailed)
+    }
+
+    /// The module's DRBG under `fips`.
+    fn fips(&self) -> bool {
+        cfg!(feature = "fips")
     }
 }
 
@@ -225,6 +265,8 @@ impl KeyProvider for Rind {
 mod tests {
     use super::*;
 
+    // `fips` never offers ChaCha20-Poly1305: tests/fips.rs checks that.
+    #[cfg(not(feature = "fips"))]
     #[test]
     fn prefers_chacha20_without_aes_hardware() {
         // CI runs armv7 on a CPU model with the crypto extension and one

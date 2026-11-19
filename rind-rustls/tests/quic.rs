@@ -24,6 +24,17 @@ fn others() -> [CryptoProvider; 1] {
     [rind_rustls::default_provider()]
 }
 
+/// Every cipher suite and group rind-rustls supports, which these interop tests
+/// drive: under `fips` the default provider leaves out ChaCha20-Poly1305 and
+/// X25519, which peers such as ring offer first.
+fn all_provider() -> CryptoProvider {
+    CryptoProvider {
+        cipher_suites: rind_rustls::ALL_CIPHER_SUITES.to_vec(),
+        kx_groups: rind_rustls::ALL_KX_GROUPS.to_vec(),
+        ..rind_rustls::default_provider()
+    }
+}
+
 #[test]
 fn initial_keys() {
     // Initial keys always use AES-128-GCM, derived from the client's first destination CID.
@@ -50,7 +61,7 @@ fn all_suites() {
     ] {
         let rind: Arc<_> = CryptoProvider {
             cipher_suites: vec![suite],
-            ..rind_rustls::default_provider()
+            ..all_provider()
         }
         .into();
         for other in others() {

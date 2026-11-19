@@ -48,6 +48,20 @@ Nothing: it backs every item of rustls's `crypto::aws_lc_rs` provider.
 - `sign::any_supported_type` refuses a PKCS#8 private key with bytes after its
   structure, where upstream's takes it.
 
+## FIPS
+
+The `fips` feature runs part of the provider in [rind-fips](../rind-fips/README.md)'s module. It builds only for glibc Linux on little-endian x86_64 and aarch64, and fails to compile elsewhere rather than offer a `fips` provider that runs nothing in a module. rind-fips is unpublished, so a published rind-rustls cannot carry this dependency until it is.
+
+What runs in the module with `fips`: SHA-2, HMAC, and HKDF, so TLS 1.3's key schedule; TLS 1.3 and QUIC AES-128-GCM and AES-256-GCM record protection, with QUIC's AES header protection; ECDH on P-256 and P-384; ML-KEM-768 and ML-KEM-1024; and random bytes. Each reports `fips() == true`. X25519, which no module approves, stays in rind with `fips()` false, and counts only as the classical half of `X25519MLKEM768`, as in rustls's aws-lc-rs provider.
+
+With `fips`, `default_provider()` offers only the suites and groups that report `fips()`: the TLS 1.3 AES-GCM suites, and `X25519MLKEM768`, `secp256r1`, and `secp384r1`. It drops ChaCha20-Poly1305 and bare X25519, as rustls's aws-lc-rs provider does under its `fips`.
+
+What does not yet run in the module, so `CryptoProvider::fips()` is `false`:
+
+- Signature verification, and the signing keys `KeyProvider` loads.
+- The TLS 1.2 suites, which report `fips() == false` and are not offered by default: the module seals only TLS 1.3 records. They stay available when named, running outside the module, as the ChaCha20-Poly1305 suites do. rustls's aws-lc-rs provider counts its TLS 1.2 AES-GCM suites as FIPS.
+- ECDH on P-521, and the hybrid and ML-KEM groups beyond the defaults, which are in the module but not in the default list.
+
 ## WebAssembly
 
 rind-rustls builds for `wasm32-wasip2`, where CI runs its tests under

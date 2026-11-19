@@ -12,6 +12,17 @@ use rustls::{
     ServerConnection,
 };
 
+/// Every cipher suite and group rind-rustls supports, which these interop tests
+/// drive: under `fips` the default provider leaves out ChaCha20-Poly1305 and
+/// X25519, which peers such as ring offer first.
+fn all_provider() -> CryptoProvider {
+    CryptoProvider {
+        cipher_suites: rind_rustls::ALL_CIPHER_SUITES.to_vec(),
+        kx_groups: rind_rustls::ALL_KX_GROUPS.to_vec(),
+        ..rind_rustls::default_provider()
+    }
+}
+
 #[test]
 fn all_suites() {
     let _ = env_logger::try_init();
@@ -106,7 +117,7 @@ fn test_key_exchange(
     let provider: Arc<_> = CryptoProvider {
         cipher_suites: vec![suite],
         kx_groups: vec![kx],
-        ..rind_rustls::default_provider()
+        ..all_provider()
     }
     .into();
     let other: Arc<_> = CryptoProvider {
@@ -121,7 +132,7 @@ fn test_key_exchange(
 fn test_suite(suite: rustls::SupportedCipherSuite, key_type: KeyType) {
     let provider: Arc<_> = CryptoProvider {
         cipher_suites: vec![suite],
-        ..rind_rustls::default_provider()
+        ..all_provider()
     }
     .into();
     for other in key_type.others() {
@@ -331,7 +342,7 @@ impl OtherProvider {
             Self::BaselineRing => ring::default_provider().into(),
             #[cfg(not(target_family = "wasm"))]
             Self::BaselineAwsLcRs => aws_lc_rs_provider::default_provider().into(),
-            Self::SelfTest => rind_rustls::default_provider().into(),
+            Self::SelfTest => all_provider().into(),
         }
     }
 

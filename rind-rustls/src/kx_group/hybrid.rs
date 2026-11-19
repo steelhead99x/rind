@@ -91,6 +91,14 @@ impl SupportedKxGroup for Hybrid {
     fn usable_for_version(&self, version: ProtocolVersion) -> bool {
         version == ProtocolVersion::TLSv1_3
     }
+
+    /// ML-KEM runs in the module, and so does the classical half unless it is
+    /// X25519, which no module approves and which FIPS 140-3 allows beside an
+    /// approved key exchange, as rustls's aws-lc-rs provider counts it.
+    fn fips(&self) -> bool {
+        self.post_quantum.fips()
+            && (self.classical.fips() || self.classical.name() == NamedGroup::X25519)
+    }
 }
 
 struct ActiveHybrid {

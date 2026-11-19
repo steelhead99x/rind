@@ -135,11 +135,22 @@ fn mlkem768() -> u64 {
 
 /// Each key type's allocations per handshake over rind-rustls's default
 /// provider, which leads with X25519MLKEM768, less [`mlkem768`]'s.
+#[cfg(not(feature = "fips"))]
 const EXPECTED: [(&str, u64); 4] = [
     ("ecdsa-p256", 245),
     ("ecdsa-p384", 249),
     ("ecdsa-p521", 253),
     ("ed25519", 245),
+];
+
+/// Under `fips` the module's keys and hashes make 10 fewer allocations, and
+/// the default provider leads with X25519MLKEM768 as before.
+#[cfg(feature = "fips")]
+const EXPECTED: [(&str, u64); 4] = [
+    ("ecdsa-p256", 235),
+    ("ecdsa-p384", 239),
+    ("ecdsa-p521", 243),
+    ("ed25519", 235),
 ];
 
 #[test]

@@ -1,12 +1,20 @@
 use rind::aead::{self, quic::SAMPLE_LEN};
+#[cfg(feature = "fips")]
+use rind_fips::aead::{self as module, quic as module_quic};
 use rustls::Error;
 use rustls::crypto::cipher::{AeadKey, Iv, Nonce};
 use rustls::quic;
+#[cfg(feature = "fips")]
+use std::sync::Mutex;
 
 /// QUIC packet and header protection for one cipher suite.
 pub(crate) struct Algorithm {
     packet: &'static aead::Algorithm,
     header: &'static aead::quic::Algorithm,
+    /// The module's packet and header algorithms, for the AES-GCM suites,
+    /// which run there under `fips`.
+    #[cfg(feature = "fips")]
+    module: Option<(&'static module::Algorithm, &'static module_quic::Algorithm)>,
     // RFC 9001 section 6.6
     confidentiality_limit: u64,
     integrity_limit: u64,
@@ -16,6 +24,8 @@ pub(crate) struct Algorithm {
 pub(crate) static AES_128_GCM: Algorithm = Algorithm {
     packet: &aead::AES_128_GCM,
     header: &aead::quic::AES_128,
+    #[cfg(feature = "fips")]
+    module: Some((&module::AES_128_GCM, &module_quic::AES_128)),
     confidentiality_limit: 1 << 23,
     integrity_limit: 1 << 52,
 };
@@ -24,6 +34,8 @@ pub(crate) static AES_128_GCM: Algorithm = Algorithm {
 pub(crate) static AES_256_GCM: Algorithm = Algorithm {
     packet: &aead::AES_256_GCM,
     header: &aead::quic::AES_256,
+    #[cfg(feature = "fips")]
+    module: Some((&module::AES_256_GCM, &module_quic::AES_256)),
     confidentiality_limit: 1 << 23,
     integrity_limit: 1 << 52,
 };
@@ -32,12 +44,32 @@ pub(crate) static AES_256_GCM: Algorithm = Algorithm {
 pub(crate) static CHACHA20_POLY1305: Algorithm = Algorithm {
     packet: &aead::CHACHA20_POLY1305,
     header: &aead::quic::CHACHA20,
+    #[cfg(feature = "fips")]
+    module: None,
     confidentiality_limit: u64::MAX,
     integrity_limit: 1 << 36,
 };
 
 impl quic::Algorithm for Algorithm {
     fn packet_key(&self, key: AeadKey, iv: Iv) -> Box<dyn quic::PacketKey> {
+        #[cfg(feature = "fips")]
+        if let Some((algorithm, _)) = self.module {
+            // rustls derives `key` at the algorithm's key length.
+            return Box::new(ModulePacketKey {
+                sealer: Mutex::new(
+                    module::TlsRecordSealingKey::new(
+                        algorithm,
+                        module::TlsProtocolId::TLS13,
+                        key.as_ref(),
+                    )
+                    .unwrap(),
+                ),
+                opener: module::Key::new(algorithm, key.as_ref()).unwrap(),
+                iv,
+                confidentiality_limit: self.confidentiality_limit,
+                integrity_limit: self.integrity_limit,
+            });
+        }
         Box::new(PacketKey {
             key: aead::Key::new(self.packet, key.as_ref()).unwrap(),
             iv,
@@ -47,13 +79,85 @@ impl quic::Algorithm for Algorithm {
     }
 
     fn header_protection_key(&self, key: AeadKey) -> Box<dyn quic::HeaderProtectionKey> {
-        Box::new(HeaderProtectionKey(
+        #[cfg(feature = "fips")]
+        if let Some((_, header)) = self.module {
+            return Box::new(HeaderProtectionKey(Mask::Module(
+                module_quic::HeaderProtectionKey::new(header, key.as_ref()).unwrap(),
+            )));
+        }
+        Box::new(HeaderProtectionKey(Mask::Rind(
             aead::quic::HeaderProtectionKey::new(self.header, key.as_ref()).unwrap(),
-        ))
+        )))
     }
 
     fn aead_key_len(&self) -> usize {
         self.packet.key_len()
+    }
+
+    /// The AES-GCM suites' packet and header protection run in the module
+    /// under `fips`.
+    fn fips(&self) -> bool {
+        #[cfg(feature = "fips")]
+        return self.module.is_some();
+        #[cfg(not(feature = "fips"))]
+        false
+    }
+}
+
+/// A QUIC packet key held in the module: sealing through its TLS 1.3 IV
+/// construction, which wants each packet number above the last sealed under
+/// the key, as QUIC's are; opening through its AES-GCM key.
+#[cfg(feature = "fips")]
+struct ModulePacketKey {
+    sealer: Mutex<module::TlsRecordSealingKey>,
+    opener: module::Key,
+    iv: Iv,
+    confidentiality_limit: u64,
+    integrity_limit: u64,
+}
+
+#[cfg(feature = "fips")]
+impl quic::PacketKey for ModulePacketKey {
+    fn encrypt_in_place(
+        &self,
+        packet_number: u64,
+        header: &[u8],
+        payload: &mut [u8],
+    ) -> Result<quic::Tag, Error> {
+        let nonce = module::Nonce::assume_unique_for_key(Nonce::new(&self.iv, packet_number).0);
+        let tag = self
+            .sealer
+            .lock()
+            .map_err(|_| Error::EncryptError)?
+            .seal_in_place_separate_tag(nonce, header, payload)
+            .map_err(|_| Error::EncryptError)?;
+        Ok(quic::Tag::from(tag.as_ref()))
+    }
+
+    fn decrypt_in_place<'a>(
+        &self,
+        packet_number: u64,
+        header: &[u8],
+        payload: &'a mut [u8],
+    ) -> Result<&'a [u8], Error> {
+        let nonce = module::Nonce::assume_unique_for_key(Nonce::new(&self.iv, packet_number).0);
+        let plain = self
+            .opener
+            .open_in_place(nonce, header, payload)
+            .map_err(|_| Error::DecryptError)?;
+        Ok(plain)
+    }
+
+    fn tag_len(&self) -> usize {
+        TAG_LEN
+    }
+
+    fn confidentiality_limit(&self) -> u64 {
+        self.confidentiality_limit
+    }
+
+    fn integrity_limit(&self) -> u64 {
+        self.integrity_limit
     }
 }
 
@@ -106,7 +210,27 @@ impl quic::PacketKey for PacketKey {
     }
 }
 
-struct HeaderProtectionKey(aead::quic::HeaderProtectionKey);
+struct HeaderProtectionKey(Mask);
+
+/// A header-protection key held by rind, or in the module under `fips`.
+// rind's expanded AES key is the large variant, and one lives per QUIC key
+// phase, so boxing it would cost an allocation for a few hundred bytes.
+#[cfg_attr(feature = "fips", allow(clippy::large_enum_variant))]
+enum Mask {
+    Rind(aead::quic::HeaderProtectionKey),
+    #[cfg(feature = "fips")]
+    Module(module_quic::HeaderProtectionKey),
+}
+
+impl Mask {
+    fn mask(&self, sample: &[u8; SAMPLE_LEN]) -> [u8; 5] {
+        match self {
+            Self::Rind(key) => key.mask(sample),
+            #[cfg(feature = "fips")]
+            Self::Module(key) => key.mask(sample),
+        }
+    }
+}
 
 impl HeaderProtectionKey {
     /// RFC 9001 section 5.4.1, leaving `first` and `packet_number` unchanged on error.

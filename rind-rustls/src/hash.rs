@@ -1,4 +1,4 @@
-use rind::digest;
+use crate::backend::digest;
 use rustls::crypto::hash;
 
 pub struct Hash {
@@ -31,6 +31,11 @@ impl hash::Hash for Hash {
 
     fn output_len(&self) -> usize {
         self.digest.output_len()
+    }
+
+    /// SHA-2 runs in the module under `fips`.
+    fn fips(&self) -> bool {
+        cfg!(feature = "fips")
     }
 }
 

@@ -1,7 +1,7 @@
 use core::fmt;
 use core::marker::PhantomData;
 
-use rind::kem;
+use crate::backend::kem;
 use rustls::crypto::{ActiveKeyExchange, CompletedKeyExchange, SharedSecret, SupportedKxGroup};
 use rustls::ffdhe_groups::FfdheGroup;
 use rustls::{Error, NamedGroup, PeerMisbehaved, ProtocolVersion};
@@ -75,6 +75,11 @@ impl<A: kem::Algorithm> SupportedKxGroup for MlKem<A> {
 
     fn usable_for_version(&self, version: ProtocolVersion) -> bool {
         version == ProtocolVersion::TLSv1_3
+    }
+
+    /// ML-KEM runs in the module under `fips`.
+    fn fips(&self) -> bool {
+        cfg!(feature = "fips")
     }
 }
 

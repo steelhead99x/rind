@@ -1,5 +1,7 @@
 use crypto::SupportedKxGroup;
 use rind::agreement;
+#[cfg(feature = "fips")]
+use rind_fips::agreement as module;
 use rustls::crypto;
 use rustls::ffdhe_groups::FfdheGroup;
 
@@ -13,15 +15,31 @@ pub static X25519: &dyn SupportedKxGroup = &KxGroup {
 };
 
 /// Key exchange with ECDH on P-256, also known as secp256r1.
+#[cfg(not(feature = "fips"))]
 pub static SECP256R1: &dyn SupportedKxGroup = &KxGroup {
     name: rustls::NamedGroup::secp256r1,
     algorithm: &agreement::ECDH_P256,
 };
 
 /// Key exchange with ECDH on P-384, also known as secp384r1.
+#[cfg(not(feature = "fips"))]
 pub static SECP384R1: &dyn SupportedKxGroup = &KxGroup {
     name: rustls::NamedGroup::secp384r1,
     algorithm: &agreement::ECDH_P384,
+};
+
+/// Key exchange with ECDH on P-256, also known as secp256r1, in the module.
+#[cfg(feature = "fips")]
+pub static SECP256R1: &dyn SupportedKxGroup = &ModuleKxGroup {
+    name: rustls::NamedGroup::secp256r1,
+    algorithm: &module::ECDH_P256,
+};
+
+/// Key exchange with ECDH on P-384, also known as secp384r1, in the module.
+#[cfg(feature = "fips")]
+pub static SECP384R1: &dyn SupportedKxGroup = &ModuleKxGroup {
+    name: rustls::NamedGroup::secp384r1,
+    algorithm: &module::ECDH_P384,
 };
 
 /// Hybrid key exchange with X25519 and ML-KEM-768, for TLS 1.3 only.
@@ -88,6 +106,67 @@ struct Active {
 }
 
 impl crypto::ActiveKeyExchange for Active {
+    fn complete(self: Box<Self>, peer: &[u8]) -> Result<crypto::SharedSecret, rustls::Error> {
+        let shared_secret = self
+            .priv_key
+            .agree(peer)
+            .map_err(|_| rustls::Error::from(rustls::PeerMisbehaved::InvalidKeyShare))?;
+        Ok(crypto::SharedSecret::from(shared_secret.as_ref()))
+    }
+
+    fn pub_key(&self) -> &[u8] {
+        self.priv_key.public_key().as_ref()
+    }
+
+    fn ffdhe_group(&self) -> Option<FfdheGroup<'static>> {
+        None
+    }
+
+    fn group(&self) -> rustls::NamedGroup {
+        self.group
+    }
+}
+
+/// An elliptic-curve key exchange group whose ECDH runs in the module.
+#[cfg(feature = "fips")]
+#[derive(Debug)]
+struct ModuleKxGroup {
+    name: rustls::NamedGroup,
+    algorithm: &'static module::Algorithm,
+}
+
+#[cfg(feature = "fips")]
+impl SupportedKxGroup for ModuleKxGroup {
+    fn start(&self) -> Result<Box<dyn crypto::ActiveKeyExchange>, rustls::Error> {
+        let priv_key = module::PrivateKey::generate(self.algorithm)
+            .map_err(|_| rustls::Error::from(crypto::GetRandomFailed))?;
+        Ok(Box::new(ModuleActive {
+            group: self.name,
+            priv_key,
+        }))
+    }
+
+    fn ffdhe_group(&self) -> Option<FfdheGroup<'static>> {
+        None
+    }
+
+    fn name(&self) -> rustls::NamedGroup {
+        self.name
+    }
+
+    fn fips(&self) -> bool {
+        true
+    }
+}
+
+#[cfg(feature = "fips")]
+struct ModuleActive {
+    group: rustls::NamedGroup,
+    priv_key: module::PrivateKey,
+}
+
+#[cfg(feature = "fips")]
+impl crypto::ActiveKeyExchange for ModuleActive {
     fn complete(self: Box<Self>, peer: &[u8]) -> Result<crypto::SharedSecret, rustls::Error> {
         let shared_secret = self
             .priv_key

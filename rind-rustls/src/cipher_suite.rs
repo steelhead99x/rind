@@ -3,7 +3,6 @@ use rustls::crypto::CipherSuiteCommon;
 use rustls::crypto::KeyExchangeAlgorithm;
 #[cfg(feature = "tls12")]
 use rustls::crypto::tls12::PrfUsingHmac;
-use rustls::crypto::tls13::HkdfUsingHmac;
 use rustls::{CipherSuite, SupportedCipherSuite, Tls13CipherSuite};
 #[cfg(feature = "tls12")]
 use rustls::{SignatureScheme, Tls12CipherSuite};
@@ -18,7 +17,7 @@ pub static TLS13_AES_256_GCM_SHA384: SupportedCipherSuite =
             hash_provider: &hash::SHA384,
             confidentiality_limit: 1 << 24,
         },
-        hkdf_provider: &HkdfUsingHmac(&hmac::SHA384),
+        hkdf_provider: &hmac::HKDF_SHA384,
         aead_alg: &aead::AES_256_GCM,
         quic: Some(&quic::AES_256_GCM),
     });
@@ -31,7 +30,7 @@ pub static TLS13_AES_128_GCM_SHA256: SupportedCipherSuite =
             hash_provider: &hash::SHA256,
             confidentiality_limit: 1 << 24,
         },
-        hkdf_provider: &HkdfUsingHmac(&hmac::SHA256),
+        hkdf_provider: &hmac::HKDF_SHA256,
         aead_alg: &aead::AES_128_GCM,
         quic: Some(&quic::AES_128_GCM),
     });
@@ -44,7 +43,7 @@ pub static TLS13_CHACHA20_POLY1305_SHA256: SupportedCipherSuite =
             hash_provider: &hash::SHA256,
             confidentiality_limit: u64::MAX,
         },
-        hkdf_provider: &HkdfUsingHmac(&hmac::SHA256),
+        hkdf_provider: &hmac::HKDF_SHA256,
         aead_alg: &aead::Chacha20Poly1305,
         quic: Some(&quic::CHACHA20_POLY1305),
     });
