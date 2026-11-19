@@ -350,3 +350,24 @@ fn stays_secret() {
         run(&suite, Steps);
     }
 }
+
+/// Debug output shows the public elements and hides the blind, the output,
+/// and the key's scalar.
+#[test]
+fn debug_shows_no_secret() {
+    let server = ServerKey::generate(&P256_SHA256).unwrap();
+    assert_eq!(format!("{:?}", server.to_scalar()), "Scalar(..)");
+    let (blind, blinded) = Blind::new(&P256_SHA256, b"input").unwrap();
+    assert_eq!(format!("{blind:?}"), "Blind { suite: P256-SHA256, .. }");
+    assert_eq!(
+        format!("{blinded:?}"),
+        format!("BlindedElement({:?})", blinded.as_ref())
+    );
+    let evaluated = server.blind_evaluate(blinded.as_ref()).unwrap();
+    assert_eq!(
+        format!("{evaluated:?}"),
+        format!("EvaluatedElement({:?})", evaluated.as_ref())
+    );
+    let output = blind.finalize(evaluated.as_ref()).unwrap();
+    assert_eq!(format!("{output:?}"), "Output(..)");
+}

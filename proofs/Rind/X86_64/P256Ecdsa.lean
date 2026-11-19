@@ -1507,9 +1507,55 @@ structure Cached : Prop where
 
 namespace P256
 
+/-- `vg_verify`: pyca/verified-garbage's ECDSA verification of `r`, `s`, and
+`e` under the point `Q`. -/
+theorem vg_verify_spec (h : Runs) (vg : low.x86_64.p256_vg.P256) (point : mid.p256.AffineMontPoint)
+    (Q : P256Point) (hQ : p256OnCurve Q) (hpt : p256Represents2 Q (pairNat point.xy.val))
+    (r s e : mid.p256.Scalar) :
+    mid.p256.vg_verify vg point r s e ⦃ res =>
+      (ecdsaP256Verifies Q (scNat e) (scNat r) (scNat s) ∧ res = core.result.Result.Ok ()) ∨
+        (¬ ecdsaP256Verifies Q (scNat e) (scNat r) (scNat s) ∧
+          res = core.result.Result.Err error.Error.BadSignature) ⦄ := by
+  unfold mid.p256.vg_verify mid.p256.Scalar.as_bytes
+  obtain ⟨hx, hy, hQe⟩ := hpt
+  step*
+  all_goals try (simp [*, Slice.length, Array.repeat, mid.p256.Scalar.BYTES]; done)
+  have hs1l : s1.length = 64 := by simp [Slice.length, s1_post, Array.repeat]
+  obtain ⟨hsig, hsigl⟩ := r_bytes_post4 r_bytes1 s_bytes1
+    (by simp [r_bytes1_post, s2_post, mid.p256.Scalar.BYTES])
+    (by simp [s_bytes1_post, s3_post, hs1l, mid.p256.Scalar.BYTES])
+  have hsgv : (to_slice_mut_back (split_at_mut_back (r_bytes1, s_bytes1))).val = a.val ++ a1.val := by
+    rw [to_slice_mut_back_post, Array.from_slice_val _ _ (by rw [← Slice.length, hsigl, hs1l]; rfl), hsig,
+      r_bytes1_post, s2_post, s_bytes1_post, s3_post, Array.val_to_slice, Array.val_to_slice]
+  step with as_bytes_uncompressed_spec h point hx hy as ⟨b, hb4, hbc⟩
+  step with u64x4_to_be_spec e as ⟨c, hc⟩
+  step with vg_p256_verify_spec as ⟨bb, hbb⟩
+  have hcb : some (vgP256.coords b.val) = Q := by
+    rw [← hQe]; exact congrArg some hbc
+  have hdec := vgP256.decode_bv b.val b.property hb4
+  rw [vgBytes, vgBytes, vgBytes, vgP256.hashToInt_32 c.val c.property, hc, hsgv] at hbb
+  unfold VG.Spec.Ecdsa.verify at hbb
+  rcases hd : VG.Spec.EcKey.decodePublicKey vgP256.C (b.val.map (·.bv)) with _ | Q'
+  · rw [hd] at hdec; exact absurd (hcb ▸ hQ) hdec
+  rw [hd] at hdec hbb
+  obtain ⟨hon, hQ'⟩ := hdec
+  have hr : VG.Spec.Weierstrass.ofBytes ((List.map (·.bv) (a.val ++ a1.val)).take vgP256.C.len) = scNat r := by
+    rw [List.map_append, List.take_left' (by simp; rfl), vgP256.ofBytes_bv, a_post]
+  have hs : VG.Spec.Weierstrass.ofBytes ((List.map (·.bv) (a.val ++ a1.val)).drop vgP256.C.len) = scNat s := by
+    rw [List.map_append, List.drop_left' (by simp; rfl), vgP256.ofBytes_bv, a1_post]
+  simp only [hr, hs] at hbb
+  have hiff := vgP256.verifyWith_iff Q' (hQ' ▸ hon) (scNat e) (scNat r) (scNat s)
+  rw [hQ', hcb] at hiff
+  subst hbb
+  by_cases hv : ecdsaP256Verifies Q (scNat e) (scNat r) (scNat s)
+  · simp [hiff.mpr hv, hv]
+  · have : VG.Spec.Ecdsa.verifyWith vgP256.C Q' (scNat e) (scNat r) (scNat s) = false := by
+      simpa using mt hiff.mp hv
+    simp [this, hv]
+
 /-- The ECDSA verification a key's raw check computes, for `r`, `s`, and
 `e` the signature's scalars and the hash's. -/
-theorem raw_verify_spec (_hr : Runs) (hvg : NoVgP256) (hc : Cached) (key : mid.p256.VerifyingKey)
+theorem raw_verify_spec (_hr : Runs) (hvg : RunsP256) (hc : Cached) (key : mid.p256.VerifyingKey)
     (Q : P256Point) (hQ : p256OnCurve Q) (hQo : P256OrderOf Q) (hpt : p256Represents2 Q (pairNat key.point.xy.val))
     (r s e : mid.p256.Scalar) (hr0 : 0 < scNat r) (hr : scNat r < n256) (hs0 : 0 < scNat s)
     (hs : scNat s < n256) (he : scNat e < n256) :
@@ -1518,7 +1564,12 @@ theorem raw_verify_spec (_hr : Runs) (hvg : NoVgP256) (hc : Cached) (key : mid.p
         (¬ ecdsaP256Verifies Q (scNat e) (scNat r) (scNat s) ∧
           res = core.result.Result.Err error.Error.BadSignature) ⦄ := by
   unfold mid.p256.VerifyingKey.raw_ecdsa_verify
-  simp only [hvg.eq, bind_ok]
+  obtain ⟨⟨t, ht⟩, -⟩ := hvg
+  simp only [ht, bind_ok]
+  rcases t with _ | vg
+  swap
+  · exact vg_verify_spec _hr vg key.point Q hQ hpt r s e
+  simp only
   have hlt : ∀ x, x % n256 < n256 := fun x => Nat.mod_lt _ n256_pos
   step with scalar_inv_spec s hs0 hs as ⟨si, hsi, hssi⟩
   step with scalar_as_mont_spec si hsi as ⟨sm, hsm⟩
@@ -1682,7 +1733,7 @@ theorem hash_to_scalar_spec (dg : Slice U8) (hdg : 32 ≤ dg.length) :
   rw [hh32] at he
   exact ⟨e, rfl, he⟩
 
-theorem ecdsa_verify_spec (h : Runs) (hvg : NoVgP256) (hc : Cached) {H Ctx St : Type}
+theorem ecdsa_verify_spec (h : Runs) (hvg : RunsP256) (hc : Cached) {H Ctx St : Type}
     (hinst : high.hash.SignatureHash H Ctx St)
     (key : high.ecdsa.VerifyingKey high.curve.P256 mid.p256.StaticPrivateKey mid.p256.VerifyingKey mid.p256.Scalar)
     (Q : P256Point) (hk : VKey Q key.public_key) (hQo : P256OrderOf Q) (msg sig dg : Slice U8)
@@ -1779,12 +1830,30 @@ theorem ecdsa_vk_from_x962_spec (h : Runs) (hheld : Held) (hc : Cached) (bytes :
 
 /-! ## Signing's r, `StaticPrivateKey::public_key_x_scalar` -/
 
-theorem x_scalar_spec (k : mid.p256.StaticPrivateKey) (h : Runs) (hvg : NoVgP256) (hk : scNat k.scalar < n256) (x y : Nat)
+theorem x_scalar_spec (k : mid.p256.StaticPrivateKey) (h : Runs) (hvg : RunsP256) (hk : scNat k.scalar < n256) (x y : Nat)
     (hq : p256Pow p256G (scNat k.scalar) = some (x, y)) (hc : p256OnCurve (some (x, y))) :
     mid.p256.StaticPrivateKey.public_key_x_scalar k ⦃ r => scNat r = x % n256 ⦄ := by
   unfold mid.p256.StaticPrivateKey.public_key_x_scalar mid.p256.AffineMontPoint.x_scalar
   step
-  simp only [hvg.eq_public_key, bind_ok]
+  obtain ⟨-, t, ht⟩ := hvg
+  simp only [ht, bind_ok]
+  rcases t with _ | vg
+  swap
+  · step with vg_public_key_spec h vg k hk x y hq hc as ⟨b, hb4, hbc⟩
+    simp only [mid.p256.Scalar.BYTES]
+    step as ⟨i, hi⟩
+    step as ⟨sl, hsl, hsll⟩
+    have hbl : b.val.length = 65 := b.property
+    have hslv : beNat sl.val = x := by
+      have := congrArg Prod.fst hbc
+      simp only [x962Coords] at this
+      rw [← this, hsl, Array.val_to_slice]
+      simp [hi]
+    show mid.p256.Scalar.Insts.RindHighCurveScalar.from_bytes_reduced sl ⦃ _ ⦄
+    apply WP.spec_mono (from_bytes_reduced_spec sl (by rw [hsll]; simp [hi]))
+    intro r hr
+    rw [hr, hslv]
+  simp only
   step with public_point_spec h k hk x y hq hc as ⟨pt, hpt⟩
   have hp : 0 < p256 := p256_pos
   step with as_bytes_uncompressed_spec h pt (by rw [hpt]; exact Nat.mod_lt _ hp)
@@ -1864,7 +1933,7 @@ theorem static_generate_spec (h : Runs) {T : Type} (inst : mid.rng.RandomSource 
 
 /-- The nonce loop: if it returns a signature, it is (r, s) for some nonce in
 [1, n), with neither zero. -/
-theorem sign_nonces_spec (h : Runs) (hvg : NoVgP256) {T : Type}
+theorem sign_nonces_spec (h : Runs) (hvg : RunsP256) {T : Type}
     (inst : mid.rng.RandomSource T) (hdr : Draws inst)
     (key : high.ecdsa.SigningKey high.curve.P256 mid.p256.StaticPrivateKey mid.p256.VerifyingKey mid.p256.Scalar)
     (hd : scNat key.private_key.scalar < n256)
@@ -1984,7 +2053,7 @@ theorem get_mut_rangeTo (s : Slice U8) (r : core.ops.range.RangeTo Usize) :
     core.slice.Slice.get_mut (core.slice.index.SliceIndexRangeToUsizeSlice U8) s r =
       core.slice.index.SliceIndexRangeToUsizeSlice.get_mut r s := rfl
 
-theorem rfc6979_spec (h : Runs) (hvg : NoVgP256) (hdrbg : Drbg) {H Ctx St : Type}
+theorem rfc6979_spec (h : Runs) (hvg : RunsP256) (hdrbg : Drbg) {H Ctx St : Type}
     (hinst : high.hash.Hash H Ctx St)
     (key : high.ecdsa.SigningKey high.curve.P256 mid.p256.StaticPrivateKey mid.p256.VerifyingKey mid.p256.Scalar)
     (hd : scNat key.private_key.scalar < n256)
@@ -2083,7 +2152,7 @@ def Fills : Prop := ∀ s : Slice U8, ∃ r, getrandom.fill s = ok r
 namespace P256
 
 /-- `ecdsa::SigningKey::sign` at P-256. -/
-theorem ecdsa_sign_spec (h : Runs) (hvg : NoVgP256) (hdrbg : Drbg) (hfill : Fills)
+theorem ecdsa_sign_spec (h : Runs) (hvg : RunsP256) (hdrbg : Drbg) (hfill : Fills)
     {H Ctx St : Type} (hinst : high.hash.SignatureHash H Ctx St)
     (key : high.ecdsa.SigningKey high.curve.P256 mid.p256.StaticPrivateKey mid.p256.VerifyingKey mid.p256.Scalar)
     (hd : scNat key.private_key.scalar < n256)

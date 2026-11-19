@@ -101,6 +101,7 @@ fn compress_one<const D: usize>(x: i16) -> u16 {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
