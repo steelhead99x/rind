@@ -209,9 +209,10 @@ back a value a signal handler may have overwritten on hardware
 ([pyca/verified-garbage#5321](https://github.com/pyca/verified-garbage/issues/5321)).
 VG fixed it in both models before the commit `admin/import-vg` pins.
 
-`Rind/VgChaCha20.lean` transliterates VG's RFC 8439 spec, `Spec/ChaCha20.lean`,
-over the bytes of its streaming state, and proves its keystream is
-`Rind/Spec.lean`'s. `Rind/X86_64/VgChaCha20.lean` restates VG's theorems
+`Rind/VgChaCha20.lean` proves the keystream of VG's RFC 8439 spec,
+`VerifiedGarbage.Spec.ChaCha20`, is `Rind/Spec.lean`'s, and that the spec's
+view of the streaming state reads only its 768 bytes.
+`Rind/X86_64/VgChaCha20.lean` restates VG's theorems
 about the x86_64 ChaCha20 routines rind runs, `Stream.init_verified` and
 `Stream.apply_verified` for AVX2 and AVX-512 VL, as one axiom per wrapper in
 `low::x86_64::chacha20`, and proves `cipher::ChaCha20` from them, as
@@ -221,12 +222,13 @@ about the x86_64 ChaCha20 routines rind runs, `Stream.init_verified` and
 axioms restating VG's theorems state, such as
 `VerifiedGarbage.Spec.Rsa.PrivatePrecompute`, which `Rind/X86_64/VgRsa.lean`
 imports, with `VerifiedGarbage.Spec.Rsa` through it, VG's FIPS 203 spec,
-`VerifiedGarbage.Spec.MlKem`, which `Rind/VgOutcome.lean` imports, and `VerifiedGarbage.Spec.ChaCha20` with its
-contracts, which `Rind/VgChaCha20.lean` adapts and
-`Rind/X86_64/VgChaCha20.lean`'s axioms restate, so a pin that changes them
-shows the change in its diff, against which that re-pin must review the
-adaptation, for a change to the spec, and the axioms, for one to the
-contracts. Every re-pin also moves the axioms' links to VG's theorems and
+`VerifiedGarbage.Spec.MlKem`, which `Rind/VgOutcome.lean` imports, and `VerifiedGarbage.Spec.ChaCha20`,
+which `Rind/VgChaCha20.lean` imports, with its contracts, which
+`Rind/X86_64/VgChaCha20.lean`'s axioms restate. A pin that changes the
+ChaCha20 spec needs no review of it, since what rests on it is stated over
+`Rind/Spec.lean`, so a change its proofs cannot absorb fails the Lean build. A
+pin that changes the contracts shows the change in its diff, against which
+that re-pin must review the axioms. Every re-pin also moves the axioms' links to VG's theorems and
 checks that the registrations they cite still emit the routines rind runs:
 `admin/vg-bytes` checks the code, not which theorem covers it.
 
@@ -377,6 +379,30 @@ which `admin/prove` also writes for aarch64, as P-256's is on aarch64:
   outside [1, n), and otherwise the key's scalar is the scalar;
 - `p384_public_key`: a key's public key is the X9.62 uncompressed encoding of
   its scalar times G.
+
+P-384 ECDSA with SHA-384 and fixed-length signatures on x86_64 and aarch64,
+from the signature API's `ecdsa::KeyPair` and `ecdsa::PublicKey` to
+s2n-bignum's routines, in `Rind/X86_64/P384Signature.lean` over
+`Rind/X86_64/P384Ecdsa.lean`, which `admin/prove` also writes for aarch64,
+over the comb above for k·G and each target's `Rind/<Arch>/P384KeyCheck.lean`,
+which reads its own translation of the public-key check: P-384 has no
+uncompressed fast path, so both targets compare a given public key with the
+key's own encoding. The theorems are P-256's, with 48-byte scalars, 97-byte
+points, 96-byte signatures, and the message's SHA-384 (`sha384E`), through
+the SHA-384 proof below, so signing and verification take its `RunsSha512`:
+`p384_ecdsa_generate`, `p384_ecdsa_from_scalar_and_public_key`,
+`p384_ecdsa_sign`, `p384_ecdsa_key_pair_public_key`,
+`p384_ecdsa_public_key_new`, and `p384_ecdsa_key_pair_verify`.
+`ecdsaP384Sign` and `ecdsaP384Verifies` in `Rind/Nist.lean` are
+`Rind/Spec.lean`'s FIPS 186-5 ECDSA at P-384's p, n, and G. Verification's
+twin multiplication reads a 385-digit width-5 NAF of e/s, whose multiples of G
+come from the comb's first table, and of r/s over Q's odd multiples, which a
+key caches, and `Rind/P384Multiples.lean` proves the laws by which its sum is
+e/s·G + r/s·Q and that every finite point on the curve has order n
+(`p384_order`). As for P-256, verification settles equal and opposite points
+by cases before s2n-bignum's `p384_montjadd` and `p384_montjmixadd`, whose
+contracts exclude them, and the theorems assume `Drbg`, `Fills`, `Held`, and
+P-384's `Cached`, its keys' caches.
 
 rind computes k·G with its own comb in Rust, aws-lc's layout: 77 Booth-recoded
 5-bit windows added from 20 tables of 1 to 16 times 2^(20j)·G, with five
@@ -546,10 +572,10 @@ RandomSource`, which Aeneas cannot translate either, and
 `Rind/X86_64/P256Dispatch.lean`, which `admin/prove` also writes for aarch64,
 models it the same way, for `Rind/<Arch>/Dispatch.lean` to call. The signature API's `ecdsa::KeyPair` reaches each curve's code, and
 `ecdsa::PublicKey` each ECDSA key's parser and verifier, through function
-pointers, and P-256's ECDSA key generation draws through a `dyn
+pointers, and P-256's and P-384's ECDSA key generation draws through a `dyn
 RandomSource`; `Rind/X86_64/EcdsaDispatch.lean`, which `admin/prove` also
-writes for aarch64, models them for P-256 with SHA-256 and fixed-length
-signatures, over `Rind/X86_64/SignatureBuffer.lean`'s model of
+writes for aarch64, models them for P-256 with SHA-256 and P-384 with
+SHA-384, each with fixed-length signatures, over `Rind/X86_64/SignatureBuffer.lean`'s model of
 `Buffer::write`, whose closure returns a borrow of its argument.
 
 SHA-384, SHA-512, and SHA-512/256, from the digest API to aws-lc's block
@@ -1203,11 +1229,10 @@ proof after those.
   `Rind/P256Group.lean`: that `p256` is prime, by a Pratt certificate;
   `Rind/N256Prime.lean`: that `n256` is prime; `Rind/P256Multiples.lean`: the
   group laws and multiples ECDSA's twin multiplication relies on;
-  `Rind/P384Multiples.lean`: the same for P-384, which no ECDSA proof uses
-  yet.
+  `Rind/P384Multiples.lean`: the same for P-384.
 - `Rind/X86_64/Naf.lean`, on both targets: that `mid::util::public_naf`
   writes a scalar's width-5 or width-6 non-adjacent form, for any number of
-  words, which P-256's ECDSA verification reads.
+  words, which P-256's and P-384's ECDSA verification reads.
 - `Rind/X86_64/P256Dispatch.lean`, `Rind/X86_64/P256Agree.lean`, and
   `Rind/X86_64/P256.lean`: the hand model of P-256's key generation, and the
   P-256 agreement and key generation proofs, on both targets.
@@ -1223,6 +1248,9 @@ proof after those.
   dispatch and key generation, the proof of `high::ecdsa` and `mid::p256`'s
   ECDSA at P-256, the signature API's theorems, and each target's check of a
   key pair's public key.
+- `Rind/X86_64/P384Ecdsa.lean` and `Rind/X86_64/P384Signature.lean`, on both
+  targets, over `Rind/<Arch>/P384KeyCheck.lean`, one per target: the same for
+  P-384 with SHA-384.
 
 ## Trust base
 
@@ -1236,7 +1264,7 @@ Beyond Lean's kernel:
   and RFC 8018.
 - The restatement of each s2n-bignum and aws-lc-verification theorem, and of
   each of rind's own HOL Light theorems, as an axiom, under the composition rule in the
-  [verification epic](/quest/m3/verified/README.md), and on aarch64 the
+  [verification epic](/quest/m4/verified/README.md#composition-rule), and on aarch64 the
   caveats aws-lc-verification lists for its NSym proof. It lets a
   group-membership fact a proof must decide be its defining equation, so
   `group_carrier p256_group` is the curve equation that HOL Light's

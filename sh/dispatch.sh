@@ -481,6 +481,11 @@ step() {
                 run cargo clippy -p rind --lib --locked --target wasm32-wasip2 -- --deny warnings
                 run cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
                     --features getrandom/wasm_js -- --deny warnings
+                # The library clippy never builds rind's test binaries for
+                # wasm, whose `cctv` and `heap_scratch` carry wasm-only code
+                # in place of aws-lc; the nightly `just wasm` runs them.
+                run cargo clippy -p rind --test heap_scratch --test cctv --locked \
+                    --target wasm32-wasip2 -- --deny warnings
             fi
             # A target with no `std` for each architecture rind has assembly
             # for; x86_64's, which disables SSE2, runs the portable backend.

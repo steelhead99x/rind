@@ -6,8 +6,8 @@ Every VG routine P-256 runs is imported as a theorem, so P-256 key agreement and
 
 ## Plan
 
-- Import each routine's VG theorem as one axiom about rind's opaque wrapper, under [the m3 epic's composition rule](/quest/m3/verified/README.md), as [the epic](/quest/m2/verified-garbage/README.md)'s Plan settles, and add the `benchmarks/verified.toml` entries for the switched tiers.
-- Prove rind's glue around it as the m3 and m4 epics prove rind's other glue: `mid/p256.rs` picks VG's routine by `P256::check` or `check_public_key`, encodes the key and point for it, and reads the public key's x-coordinate as signing's `r`. Then drop `NoVgP256` from the P-256 theorems and restore the `benchmarks/verified.toml` entries this quest's switch removed (aarch64's) or narrowed to `!adx` (x86_64's).
+- Import each routine's VG theorem as one axiom about rind's opaque wrapper, under [the m4 epic's composition rule](/quest/m4/verified/README.md#composition-rule), as [the epic](/quest/m2/verified-garbage/README.md)'s Plan settles, and add the `benchmarks/verified.toml` entries for the switched tiers.
+- Prove rind's glue around it as the m4 epic proves rind's other glue: `mid/p256.rs` picks VG's routine by `P256::check` or `check_public_key`, encodes the key and point for it, and reads the public key's x-coordinate as signing's `r`. Then drop `NoVgP256` from the P-256 theorems and restore the `benchmarks/verified.toml` entries this quest's switch removed (aarch64's) or narrowed to `!adx` (x86_64's).
 - Model gaps, which the maintainer ruled on 2026-11-17 ([kixel-ai/rind#815](https://github.com/kixel-ai/rind/pull/815#issuecomment-6943056592)) as [the epic](/quest/m2/verified-garbage/README.md)'s Plan records: ✅ the stack-slot gap is reported upstream and this ✓ waits for VG's fix and a re-pin (rejected: a rind-side check that each stack load reads only bytes its own frame stored; accepting the model as is). ✅ The `NoResidue` undefined-flags gap is reported upstream and does not hold this ✓, since rind imports no `NoResidue` theorem (rejected: not reporting it).
 
 ## Waiting
