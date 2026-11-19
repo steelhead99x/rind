@@ -71,7 +71,9 @@
               "x86_64-unknown-linux-gnu"
               # Targets with no `std`, one per architecture rind has assembly for.
               "aarch64-unknown-none"
+              "aarch64-unknown-none-softfloat"
               "armv7a-none-eabi"
+              "armv7r-none-eabihf"
               "x86_64-unknown-none"
               # Microcontrollers: M-profile (Thumb only), two without compare-and-swap.
               "riscv32imc-unknown-none-elf"

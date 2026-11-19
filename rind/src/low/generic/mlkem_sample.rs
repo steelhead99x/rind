@@ -21,3 +21,17 @@ pub(crate) fn mlkem_sample_poly_ntt_8x(
 ) {
     fallback_fn(inputs, outputs)
 }
+
+/// Computes the first `count` of eight 128-byte PRF outputs.
+type Fallback = fn(&[[u8; 40]; 8], &mut [[u8; 128]; 8], usize);
+
+/// ML-KEM's PRF on eight inputs, where no backend runs them at once:
+/// `fallback_fn` computes the first `count`.
+pub(crate) fn mlkem_shake256_8x(
+    inputs: &[[u8; 40]; 8],
+    outputs: &mut [[u8; 128]; 8],
+    count: usize,
+    fallback_fn: Fallback,
+) {
+    fallback_fn(inputs, outputs, count)
+}

@@ -1,14 +1,23 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 #[macro_use]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
+#[cfg(not(target_arch = "xtensa"))]
 use std::num::NonZeroU32;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
 // One key the length of the hash, as password storage derives. The cost is
 // all in the iterations, so throughput is in iterations per second.
+#[cfg(not(target_arch = "xtensa"))]
 const ITERATIONS: u32 = 1000;
 
+#[cfg(not(target_arch = "xtensa"))]
 fn bench<V: verified_garbage::kdf::pbkdf2_hmac::Pbkdf2Hash>(
     c: &mut Criterion,
     name: &str,
@@ -65,6 +74,7 @@ fn bench<V: verified_garbage::kdf::pbkdf2_hmac::Pbkdf2Hash>(
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn pbkdf2(c: &mut Criterion) {
     bench::<verified_garbage::hashes::sha1::Sha1>(
         c,
@@ -100,5 +110,7 @@ fn pbkdf2(c: &mut Criterion) {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, pbkdf2);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

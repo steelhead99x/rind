@@ -1,8 +1,19 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
-#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(all(
+    feature = "__bench_openssl",
+    target_family = "unix",
+    not(target_arch = "xtensa")
+))]
+#[cfg(not(target_arch = "xtensa"))]
 mod ossl_aead;
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_ring_chacha(key: &ring::aead::LessSafeKey, nonce: &[u8; 12], aad: &[u8], buf: &mut [u8]) {
     let _tag = key
         .seal_in_place_separate_tag(
@@ -14,6 +25,7 @@ fn test_ring_chacha(key: &ring::aead::LessSafeKey, nonce: &[u8; 12], aad: &[u8],
 }
 
 #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 fn test_aws_chacha(
     key: &aws_lc_rs::aead::LessSafeKey,
     nonce: &[u8; 12],
@@ -25,6 +37,7 @@ fn test_aws_chacha(
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rc_chacha(
     key: &chacha20poly1305::ChaCha20Poly1305,
     nonce: &[u8; 12],
@@ -37,12 +50,14 @@ fn test_rc_chacha(
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rind_chacha(key: &rind::aead::Key, nonce: &[u8; 12], aad: &[u8], buf: &mut [u8]) {
     let _tag = key
         .seal_in_place_separate_tag(rind::aead::Nonce::assume_unique_for_key(*nonce), aad, buf)
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn bench_chacha20poly1305(c: &mut Criterion) {
     let key = [0u8; 32];
     let key_bytes = &key;
@@ -116,7 +131,11 @@ fn bench_chacha20poly1305(c: &mut Criterion) {
                 .unwrap();
             });
         });
-        #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+        #[cfg(all(
+            feature = "__bench_openssl",
+            target_family = "unix",
+            not(target_arch = "xtensa")
+        ))]
         group.bench_function(BenchmarkId::new("openssl", size_name), |b| {
             let cipher = openssl::cipher::Cipher::chacha20_poly1305();
             let mut key = ossl_aead::Sealer::new(cipher, &key);
@@ -126,6 +145,7 @@ fn bench_chacha20poly1305(c: &mut Criterion) {
 }
 
 // Decrypting and verifying each size's ciphertext, as a receiver pays.
+#[cfg(not(target_arch = "xtensa"))]
 fn bench_chacha20poly1305_open(c: &mut Criterion) {
     let key = [0u8; 32];
     let nonce = [0u8; 12];
@@ -226,7 +246,11 @@ fn bench_chacha20poly1305_open(c: &mut Criterion) {
                 libcrux_chacha20poly1305::decrypt_detached(&key, pt, ct, tag, aad, &nonce).unwrap();
             });
         });
-        #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+        #[cfg(all(
+            feature = "__bench_openssl",
+            target_family = "unix",
+            not(target_arch = "xtensa")
+        ))]
         group.bench_function(BenchmarkId::new("openssl", size_name), |b| {
             let cipher = openssl::cipher::Cipher::chacha20_poly1305();
             let mut key = ossl_aead::Opener::new(cipher, &key);
@@ -238,5 +262,7 @@ fn bench_chacha20poly1305_open(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, bench_chacha20poly1305, bench_chacha20poly1305_open);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

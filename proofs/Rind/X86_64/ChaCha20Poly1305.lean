@@ -14,7 +14,8 @@ dispatch `Rind.X86_64.AeadDispatch` models. HChaCha20 runs HACL*'s rounds,
 which are Rust, so it is proven here too.
 
 Below rind's Rust, they take `OnePass` as a hypothesis: that aws-lc's one-pass
-routines, which `one_pass` calls, compute RFC 8439's ciphertext and tag. No
+routines, which `one_pass` calls (or, on a CPU with AVX-512 IFMA and from 2
+KiB, its separate vector passes), compute RFC 8439's ciphertext and tag. No
 proof covers those routines yet, so no theorem here earns the ✓.
 -/
 
@@ -25,7 +26,10 @@ a message of at most 2^38 - 64 bytes, as many as its 32-bit block counter
 covers from block 1: sealing leaves the ChaCha20 ciphertext in place and
 returns the Poly1305 tag over the AAD and it, and opening leaves the
 plaintext and returns the tag over the AAD and the ciphertext it was given.
-Either half, AVX2 or SSE4.1, computes the same. -/
+Either half, AVX2 or SSE4.1, computes the same, and so do the separate
+passes `one_pass` runs instead from 2 KiB on a CPU with AVX-512 IFMA:
+verified-garbage's ChaCha20 and OpenSSL's Poly1305, which no proof covers
+either. -/
 def OnePass : Prop :=
   ∀ sse41 avx2 (key : Std.Array U8 32#usize) (nonce : Std.Array U8 12#usize) (aad inout : Slice U8),
     inout.length ≤ 2 ^ 38 - 64 →

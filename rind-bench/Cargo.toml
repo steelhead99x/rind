@@ -10,7 +10,11 @@ publish = false
 rind = { path = "../rind" }
 codspeed-criterion-compat = { optional = true, version = "6" }
 
-[dev-dependencies]
+# Xtensa builds none of these. criterion's wait-timeout crate does not compile
+# against ESP-IDF's libc, ring and OpenSSL have no Xtensa port, and the bench
+# targets there are empty programs. A bench that names one of them fails the
+# Xtensa check, and a host `cargo bench` still builds every row.
+[target.'cfg(not(target_arch = "xtensa"))'.dev-dependencies]
 aes-gcm = "0.11"
 argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
 blind-rsa-signatures = "0.18"
@@ -44,11 +48,9 @@ p256 = { version = "0.14", features = ["ecdh", "getrandom"] }
 p384 = { version = "0.14", features = ["ecdh", "getrandom", "oprf"] }
 p521 = { version = "0.14", features = ["ecdh", "getrandom"] }
 proptest = "1.5.0"
-ring = "0.17"
 rind-jsonwebtoken = { path = "../rind-jsonwebtoken" }
 rind-rustls = { path = "../rind-rustls" }
 rsa = { version = "0.10", features = ["pkcs1v15"] }
-rustls = { version = "0.23.36", default-features = false, features = ["ring", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.11"
@@ -64,6 +66,8 @@ vrf-rfc9381 = { version = "0.0.7", features = ["edwards25519", "p256"] }
 # tiers deny it what they deny rind, through `VG_CPU_FEATURES`.
 verified-garbage = { git = "https://github.com/pyca/verified-garbage", rev = "0aa40d6c21fd02943fe5b38a5b69b6213d07764d", features = ["cpu-features-env"] }
 x25519-dalek = { version = "3", features = ["getrandom"] }
+ring = "0.17"
+rustls = { version = "0.23.36", default-features = false, features = ["ring", "std"] }
 
 # aws-lc builds for neither Xtensa nor bare metal (`target_os = "none"`), so
 # the benches leave its rows out there, on the same cfg, and these with them:
@@ -80,7 +84,9 @@ rustls = { version = "0.23.36", default-features = false, features = ["aws-lc-rs
 graviola = "0.4"
 rustls-graviola = "0.4"
 
-[target.'cfg(target_family = "unix")'.dev-dependencies]
+# ESP-IDF counts as unix, but openssl-sys needs a target OpenSSL this lint
+# does not install.
+[target.'cfg(all(target_family = "unix", not(target_arch = "xtensa")))'.dev-dependencies]
 foreign-types = "0.3"
 openssl = "0.10"
 openssl-sys = "0.9"
