@@ -137,7 +137,7 @@ fn ct_binsec_chacha20() {
     use crate::cipher::*;
 
     checked(|| {
-        // Eight blocks through x86_64's verified-garbage routine and a tail,
+        // Eight blocks through verified-garbage's routines and a tail,
         // then every shorter length, each of which takes its own path.
         let key = ChaCha20::new(&secret(1));
         key.apply_keystream(&[2; 12], 3, &mut secret::<{ 512 + MESSAGE }>(4))

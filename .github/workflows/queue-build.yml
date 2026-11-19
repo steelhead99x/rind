@@ -31,6 +31,11 @@ jobs:
       BASE: ${{ github.event.merge_group.base_sha }}
       # A failure ejects the group whatever else fails, so stop at the first.
       CHECK_FAIL_FAST: 1
+      # Also `regenerate` and `prove`'s x86_64 `vg` when the group touches
+      # their paths, beside the other modules. They run here rather than on
+      # GitHub-hosted runners, whose queue waits (46 minutes at p90 in
+      # November 2026) would run into this job's timeout.
+      CHECK_QUEUE: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

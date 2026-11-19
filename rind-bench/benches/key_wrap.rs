@@ -37,6 +37,7 @@ fn bench_key_wrap(c: &mut Criterion) {
                         });
                     });
                     group.bench_function(BenchmarkId::new("rind", &size_name), |b| {
+                        let _dit = criterion::rind_dit();
                         b.iter(|| {
                             let kek = rind_kek();
                             if unwrap {

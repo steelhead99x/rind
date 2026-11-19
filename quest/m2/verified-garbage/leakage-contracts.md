@@ -1,0 +1,17 @@
+# [M] rind imports pyca/verified-garbage's leakage contracts, and retires the harnesses they cover
+
+## Goal
+
+For each VG routine rind runs, its leakage theorem is imported as an axiom about the routine's artifact on VG's model, stated with the vendored `VerifiedGarbage/TCB/Artifact.lean`'s own trace definitions and citing VG's theorem at the pinned revision, with `admin/vg-bytes` checking that rind's build emits that artifact's bytes. Today it compares instruction bytes and relocations by the symbol's last path component only; extend it to bind each relocation's full target and the contents of the statics it reaches before any harness retires: the routine's address and branch trace depends only on what its contract declares public. It says nothing about rind's Rust wrapper, so [the composition rule](/quest/m4/verified/README.md#composition-rule)'s one functional axiom per wrapper is unchanged; `Axioms.lean` pins the new axioms too. The dedicated constant-time harness of each such routine is removed: `ct_sde_…` for VG's ML-KEM-768 and P-256 on x86_64, `ct_qemu_…` for its aarch64 SVE2 ChaCha20-Poly1305, and any `ct_binsec_…` region over only VG code. TESTING.md's constant-time column cites the theorem instead.
+
+## Plan
+
+Follow-up from the 2026-11-18 /quest-plan on independence and Lean, which settled with the maintainer: ✅ once a routine's leakage contract is proven in Lean, its dedicated trace harness is retired, and ctgrind keeps running every test (rejected: keep every harness). VG already proves these contracts (`VerifiedGarbage/TCB/Artifact.lean`). Today rind restates only what each wrapper returns (`Rind/VgOutcome.lean`, `Rind/<Arch>/VgMlKem.lean`), so the harnesses still carry the claim. Kept as a follow-up by the maintainer on 2026-11-18, on [kixel-ai/rind#893](https://github.com/kixel-ai/rind/pull/893): ✅ keep (rejected: drop).
+
+- A contract's declared leakage, such as a rejection-sampling count, must be public in rind's call too. Check each against the Rust that calls the routine, and keep the harness for any routine whose declared leakage rind's caller treats as secret.
+- The theorems need the cosimulation that the ✓ needs, which `admin/prove vg` already runs for these instructions. The stack-slot model gap recorded in [the epic](/quest/m2/verified-garbage/README.md) holds back only the routines it holds back there.
+- Where rind's Rust feeds a VG routine, ctgrind and BINSEC still check that Rust. An SDE or QEMU harness also traces the wrapper on a path valgrind cannot run and BINSEC does not decode (AVX-512, SVE2), so before retiring one, give that wrapper a retained trace check, such as a BINSEC region over it with the VG routine stubbed by its contract, and say which in the PR. Retire a BINSEC region only when it covers VG code alone.
+
+## Related
+
+- [aarch64 SHA-256 on the SHA-2 instructions is proven in Lean, constant time included](/quest/m2/lean-assembly-trial.md) - the same retirement rule, for rind's own Lean proofs

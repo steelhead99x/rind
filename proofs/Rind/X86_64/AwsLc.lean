@@ -21,8 +21,7 @@ The restatement, and that rind's naked function is aws-lc's object code with
 the wrapper passing the pointers and block count the spec names, are trusted.
 
 For OpenSSL's AVX2 routine, `sha512_block_data_order_avx2`, which rind runs on
-CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3 but without the SHA512
-instructions, rind proves the
+CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3, rind proves the
 routine itself: its HOL Light proof `SHA512_AVX2_SUBROUTINE_CORRECT`, in
 `proofs/hol-light/x86_64/sha512_block_data_order_avx2.ml` at rind's commit,
 that rind's naked function, as rind's build emits it, computes s2n-bignum's
@@ -40,8 +39,8 @@ it and the 128 bytes after it end below 2^64, as x86_64's user addresses do;
 the stack pointer is at least 4096, as page zero is never mapped; the linker
 places the table, which `K512`'s type aligns to 64 bytes, within the reach of
 the `lea` that addresses it. The restatement, and that the wrapper passes the
-pointers and block count the theorem names, are trusted. The OpenSSL routine
-for the SHA512 instructions and aws-lc's scalar one have no proof.
+pointers and block count the theorem names, are trusted. aws-lc's scalar
+routine has no proof.
 -/
 
 namespace rind.x86_64
@@ -72,9 +71,9 @@ axiom sha512_block_data_order_avx2_spec (t : low.x86_64.cpu.HaveAvx2)
 
 /-- rind's SHA-512 runs one of the two routines with a proof on this CPU:
 aws-lc's AVX routine, on Intel's CPUs with AVX and SSSE3 but not AVX2, or
-OpenSSL's AVX2 routine, on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3 but
-not the SHA512 instructions; and its entry guard and the debug build's check
-that one is held pass. None reads an input. -/
+OpenSSL's AVX2 routine, on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3; and
+its entry guard and the debug build's check that one is held pass. None reads
+an input. -/
 def RunsSha512 : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ low.entry.Entry.assert_held = ok () ∧
     ((∃ t, low.x86_64.sha512.path = ok (low.x86_64.sha512.Path.Avx t)) ∨

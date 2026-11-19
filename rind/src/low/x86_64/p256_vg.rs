@@ -19,7 +19,7 @@
 
 use core::mem::MaybeUninit;
 
-use super::cpu::{HaveAdxForVgP256, HaveIfmaForVgP256, is_intel};
+use super::cpu::{HaveAdxForVg, HaveIfmaForVgP256, is_intel};
 use super::vg;
 use crate::low::ct;
 
@@ -44,14 +44,14 @@ impl Scratch {
 /// and whether it has AVX-512 IFMA too.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct P256 {
-    adx: HaveAdxForVgP256,
+    adx: HaveAdxForVg,
     ifma: Option<HaveIfmaForVgP256>,
 }
 
 impl P256 {
     pub(crate) fn check() -> Option<Self> {
         Some(Self {
-            adx: HaveAdxForVgP256::check()?,
+            adx: HaveAdxForVg::check()?,
             ifma: HaveIfmaForVgP256::check(),
         })
     }
@@ -108,7 +108,7 @@ impl P256 {
 /// CPU has its features.
 #[derive(Clone, Copy, Debug)]
 enum Width {
-    Adx(HaveAdxForVgP256),
+    Adx(HaveAdxForVg),
     Ifma(HaveIfmaForVgP256),
 }
 
@@ -164,7 +164,7 @@ fn verify(width: Width, public: &[u8; 65], e: &[u8; 32], sig: &[u8; 64]) -> bool
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use crate::test::p256_vg::{check_ecdh, check_verify};
+    use crate::test::vg_ec::{check_ecdh, check_verify};
 
     /// The generator G, as an X9.62 uncompressed point.
     const G: [u8; 65] = *b"\x04\

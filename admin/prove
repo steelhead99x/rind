@@ -8,7 +8,9 @@
 # so no Lean module imports both. The aarch64 hand models and its X25519,
 # SHA-512, ChaCha20, Ed25519, SHA-1, SHA-256, HMAC, digest, HKDF, and PBKDF2 proofs are the
 # x86_64 ones with the target renamed, which this writes too, all but each
-# target's own `ShaBlocks.lean` and `HashAxioms.lean`. The portable backend,
+# target's own `ShaBlocks.lean` and `HashAxioms.lean`; aarch64 alone also
+# translates `mid::pbkdf2_vg`, which only its CPUs run, and proves it in its
+# own `Pbkdf2Vg.lean`. The portable backend,
 # translated for x86_64 into `proofs/Rind/Portable/`, takes the hash, HMAC,
 # HKDF, PBKDF2, and ChaCha20 header protection proofs the same way, over
 # HACL*'s SHA-2 instead of aws-lc's. So does armv7, its header-protection model
@@ -1311,6 +1313,7 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::x86_64::adx_mux::p384_montjdouble \
     --include crate::low::x86_64::adx_mux::p384_montjmixadd \
     --include crate::low::x86_64::adx_mux::p384_montjscalarmul \
+    --opaque crate::low::x86_64::p384_vg \
     --include crate::low::x86_64::adx_mux::curve25519_x25519 \
     --include crate::low::x86_64::adx_mux::curve25519_x25519base \
     --include 'crate::low::x86_64::curve25519_ifma::_::clone' \
@@ -1443,6 +1446,7 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --opaque 'crate::high::curve::_::generate_random_key' \
     --opaque 'crate::mid::p256::_::generate' \
     --opaque 'crate::mid::p256::_::new_random' \
+    --opaque crate::low::aarch64::p384_vg \
     --include crate::low::aarch64::sha1::sha1_compress_padded \
     --include crate::low::aarch64::sha3_keccak_f1600_mux \
     --include crate::low::aarch64::sha3_keccak4_f1600_mux \
@@ -1469,6 +1473,17 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --start-from crate::low::generic::mlkem::mlkem_compress_d11 \
     --start-from crate::low::aarch64::mlkem768_vg::Encaps::check_ek \
     --start-from crate::low::aarch64::mlkem768_vg::Encaps::encaps \
+    --include crate::low::aarch64::pbkdf2_vg \
+    --start-from crate::low::aarch64::pbkdf2_vg::Pbkdf2::sha1 \
+    --start-from crate::low::aarch64::pbkdf2_vg::Pbkdf2::sha256 \
+    --start-from crate::low::aarch64::pbkdf2_vg::Pbkdf2::sha384 \
+    --start-from crate::low::aarch64::pbkdf2_vg::Pbkdf2::sha512 \
+    --start-from 'crate::low::aarch64::pbkdf2_vg::_::derive' \
+    --opaque 'crate::low::aarch64::pbkdf2_vg::_::derive' \
+    --start-from crate::low::aarch64::chacha20poly1305::seal \
+    --start-from crate::low::aarch64::chacha20poly1305::open \
+    --include crate::low::aarch64::chacha20poly1305::seal \
+    --include crate::low::aarch64::chacha20poly1305::open \
     --start-from crate::mid::aes_gcm::AesGcm::new \
     --start-from crate::mid::aes_gcm::AesGcm::encrypt \
     --start-from crate::mid::aes_gcm::AesGcm::decrypt \
@@ -1490,7 +1505,9 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
 # The AEAD key's conversion is x86_64's alone: the AEAD API's model and proofs
 # are x86_64's, as AES-GCM's are.
 extract_kdf x86_64 X86_64 --start-from '{impl core::convert::From for crate::aead::Key}'
-extract_kdf aarch64 Aarch64
+extract_kdf aarch64 Aarch64 --include crate::mid::pbkdf2_vg \
+    --include 'crate::mid::sha1::_::BLOCK_SZ' --include 'crate::mid::sha1::_::OUTPUT_SZ' \
+    --include 'crate::mid::sha2::_::BLOCK_SZ' --include 'crate::mid::sha2::_::OUTPUT_SZ'
 extract_armv7
 
 # The portable backend, which builds only under the cfg CI's portable jobs
@@ -1525,6 +1542,9 @@ done
 # The AEAD model imports nothing aarch64 has, and no aarch64 translation reaches it.
 sed -i '/Rind.Aarch64.AeadDispatch/d' proofs/Rind/Aarch64/Kdf/TypesExternal.lean
 sed -i '/-- BEGIN aead/,/-- END aead/d' proofs/Rind/Aarch64/Kdf/FunsExternal.lean
+# aarch64 translates `mid::pbkdf2_vg`, which the other targets leave opaque.
+sed -i '/-- BEGIN vg/,/-- END vg/d' proofs/Rind/Aarch64/Kdf/TypesExternal.lean proofs/Rind/Aarch64/Kdf/FunsExternal.lean
+sed -i 's/^public import Rind.Aarch64.HkdfExpand$/&\npublic import Rind.Aarch64.Kdf.VgExternal/' proofs/Rind/Aarch64/Kdf/FunsExternal.lean
 # The portable backend's hash, HMAC, KDF, and header-protection proofs are the
 # x86_64 ones with the target renamed, over its own block functions' contracts
 # in `Hacl.lean` and `ShaBlocks.lean`, and its compares' proof in `CtEqual.lean`.

@@ -46,6 +46,7 @@ fn keygen(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| {
             let our_private_key = rind::ed25519::KeyPair::generate().unwrap();
             black_box(our_private_key.to_pkcs8());
@@ -139,6 +140,7 @@ fn verify(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         let public_key = rind::ed25519::PublicKey::new(public_key).unwrap();
 
         b.iter(|| {
@@ -226,6 +228,7 @@ fn sign(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         let signing_key = rind::ed25519::KeyPair::generate().unwrap();
 
         b.iter(|| {

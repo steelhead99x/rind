@@ -49,9 +49,12 @@ impl PublicKey {
 
 /// A P-384 public key for ECDSA verification.
 ///
-/// It builds the point's multiples on its first verification and keeps
-/// them, so verifying again skips computing them, and a key never verified
-/// with, such as an ECDSA key pair's, never pays for them.
+/// Where pyca/verified-garbage's verification runs (`low::p384_vg::Verify`),
+/// on x86_64 CPUs with ADX and on aarch64, it takes every verification on
+/// x86_64, and on aarch64 each until the key's multiples are ready. Otherwise
+/// this builds the point's multiples on the key's first verification by
+/// rind's code and keeps them, so verifying again skips computing them, and a
+/// key never verified with, such as an ECDSA key pair's, never pays for them.
 #[derive(Clone, Debug)]
 pub(crate) struct VerifyingKey {
     point: AffineMontPoint,
@@ -74,7 +77,28 @@ impl VerifyingKey {
         })
     }
 
+    /// FIPS 186-5's ECDSA verification (section 6.4.2) from step 4, for `r`
+    /// and `s` in [1, n).
+    ///
+    /// pyca/verified-garbage's routine measured faster than rind's for a
+    /// key's first verification wherever it runs, and on x86_64 for a reused
+    /// key too; rind's over the multiples it keeps measured faster for a
+    /// reused key on aarch64.
     pub(crate) fn raw_ecdsa_verify(&self, r: &Scalar, s: &Scalar, e: &Scalar) -> Result<(), Error> {
+        if let Some(vg) = low::p384_vg::Verify::check() {
+            // On aarch64, only while the multiples are not ready:
+            // `get_or_build` returns `None` on a key's first verification and
+            // while another thread builds them.
+            if cfg!(rind_backend = "x86_64")
+                || self
+                    .odd_multiples
+                    .get_or_build(|| self.point.public_odd_multiples())
+                    .is_none()
+            {
+                return self.vg_ecdsa_verify(vg, r, s, e);
+            }
+        }
+
         // 4. Compute: u1 = e s^-1 mod n and u2 = r s^−1 mod n
         let s_inv = s.inv().as_mont();
         let u1 = s_inv.mont_mul(&e.as_mont()).demont();
@@ -102,6 +126,27 @@ impl VerifyingKey {
             false => Err(Error::BadSignature),
         }
     }
+
+    /// [`Self::raw_ecdsa_verify`] by pyca/verified-garbage's routine, which
+    /// takes `e` as the digest whose leftmost 384 bits it reads: `e` itself,
+    /// below n.
+    fn vg_ecdsa_verify(
+        &self,
+        vg: low::p384_vg::Verify,
+        r: &Scalar,
+        s: &Scalar,
+        e: &Scalar,
+    ) -> Result<(), Error> {
+        let mut sig = [0u8; 2 * Scalar::BYTES];
+        let (sig_r, sig_s) = sig.split_at_mut(Scalar::BYTES);
+        sig_r.copy_from_slice(&r.as_bytes());
+        sig_s.copy_from_slice(&s.as_bytes());
+        let public = self.point.as_bytes_uncompressed();
+        match vg.ecdsa_verify(&public, &e.as_bytes(), &sig) {
+            true => Ok(()),
+            false => Err(Error::BadSignature),
+        }
+    }
 }
 
 /// A P-384 private key.
@@ -124,6 +169,9 @@ impl PrivateKey {
     /// X9.62 uncompressed encoding.
     pub(crate) fn public_key_uncompressed(&self) -> [u8; PublicKey::BYTES] {
         let _entry = low::Entry::new_secret();
+        if let Some(vg) = low::p384_vg::MulBase::check() {
+            return self.vg_public_key(vg);
+        }
         self.public_point().as_bytes_uncompressed()
     }
 
@@ -141,6 +189,25 @@ impl PrivateKey {
                 &result.x().demont().0,
             ))),
             false => Err(Error::Fault),
+        }
+    }
+
+    /// The public key's X9.62 uncompressed encoding, by
+    /// pyca/verified-garbage's `d·G`, which measured faster than rind's comb.
+    fn vg_public_key(&self, vg: low::p384_vg::MulBase) -> [u8; PublicKey::BYTES] {
+        // It fails only for a scalar outside [1, n), which `Scalar`'s
+        // checked decoding refuses.
+        let encoded = match vg
+            .public_key(&self.scalar.as_bytes())
+            .map(low::ct::into_public)
+        {
+            Some(encoded) => encoded,
+            None => panic!("internal fault"),
+        };
+        // Checked on the curve, as `public_point` checks rind's.
+        match AffineMontPoint::from_x962_uncompressed(&encoded) {
+            Ok(_) => encoded,
+            Err(_) => panic!("internal fault"),
         }
     }
 
@@ -221,11 +288,18 @@ impl StaticPrivateKey {
     /// X9.62 uncompressed encoding.
     pub(crate) fn public_key_uncompressed(&self) -> [u8; PublicKey::BYTES] {
         let _entry = low::Entry::new_secret();
+        if let Some(vg) = low::p384_vg::MulBase::check() {
+            return self.0.vg_public_key(vg);
+        }
         self.0.public_point().as_bytes_uncompressed()
     }
 
     pub(crate) fn public_key_x_scalar(&self) -> Scalar {
         let _entry = low::Entry::new_secret();
+        if let Some(vg) = low::p384_vg::MulBase::check() {
+            let encoded = self.0.vg_public_key(vg);
+            return Scalar::from_bytes_reduced(&encoded[1..1 + FieldElement::BYTES]).unwrap();
+        }
         self.0.public_point().x_scalar()
     }
 
@@ -1320,6 +1394,70 @@ mod tests {
             0x2b78_abc2_5a15_c5e9,
         ],
     };
+
+    // pyca/verified-garbage's `d·G`, for ECDSA's and agreement's keys,
+    // against rind's comb, at the ends of the scalar range and at random
+    // scalars.
+    #[cfg(any(rind_backend = "x86_64", rind_backend = "aarch64"))]
+    #[test]
+    fn vg_public_key_matches_comb() {
+        let n_minus_1 = Scalar::small_u64(1).neg();
+        let mut scalars = vec![Scalar::small_u64(1), Scalar::small_u64(2), n_minus_1];
+        scalars.extend((0..64).map(|_| Scalar::random().unwrap()));
+        for scalar in scalars {
+            let key = StaticPrivateKey::from_bytes(&scalar.as_bytes()).unwrap();
+            let comb = key.0.public_point();
+            assert_eq!(key.public_key_uncompressed(), comb.as_bytes_uncompressed());
+            assert_eq!(
+                key.0.public_key_uncompressed(),
+                comb.as_bytes_uncompressed()
+            );
+            assert_eq!(key.public_key_x_scalar().as_bytes(), {
+                let x = &comb.as_bytes_uncompressed()[1..49];
+                Scalar::from_bytes_reduced(x).unwrap().as_bytes()
+            });
+        }
+    }
+
+    // pyca/verified-garbage's verification against rind's, for signatures
+    // that verify and ones with each input changed, on a key verified with
+    // more than once, so it runs both.
+    #[cfg(any(rind_backend = "x86_64", rind_backend = "aarch64"))]
+    #[test]
+    fn vg_verify_matches_rind() {
+        for _ in 0..16 {
+            let d = StaticPrivateKey::new_random().unwrap();
+            let key = VerifyingKey::from_x962_uncompressed(&d.public_key_uncompressed()).unwrap();
+            // Public, as rind's verification takes them.
+            let e = low::ct::into_public(Scalar::random().unwrap());
+            let k = StaticPrivateKey::new_random().unwrap();
+            let r = k.public_key_x_scalar();
+            let s = d.raw_ecdsa_sign(&k, &e, &r);
+            let other = low::ct::into_public(Scalar::random().unwrap());
+            for (r, s, e) in [
+                (&r, &s, &e),
+                (&other, &s, &e),
+                (&r, &other, &e),
+                (&r, &s, &other),
+            ] {
+                let odd_multiples = key.point.public_odd_multiples();
+                let s_inv = s.inv().as_mont();
+                let u1 = s_inv.mont_mul(&e.as_mont()).demont();
+                let u2 = s_inv.mont_mul(&r.as_mont()).demont();
+                let point = JacobianMontPoint::public_twin_multiply(&u1, &u2, &odd_multiples, None);
+                let rind = !point.public_is_infinity() && {
+                    let x = point.as_affine().as_bytes_uncompressed();
+                    Scalar::from_bytes_reduced(&x[1..49]).unwrap().as_bytes() == r.as_bytes()
+                };
+                if let Some(vg) = low::p384_vg::Verify::check() {
+                    assert_eq!(key.vg_ecdsa_verify(vg, r, s, e).is_ok(), rind);
+                }
+                for _ in 0..3 {
+                    assert_eq!(key.raw_ecdsa_verify(r, s, e).is_ok(), rind);
+                }
+            }
+        }
+    }
 
     #[test]
     fn generator_on_curve() {

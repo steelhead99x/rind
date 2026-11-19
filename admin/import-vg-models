@@ -40,6 +40,7 @@ ROOTS = [
     for m in ["Isa", "Print", "Encode", "Target"]
 ] + [
     # The specs whose functions rind's axioms about VG's routines state.
+    "VerifiedGarbage.Spec.ChaCha20Poly1305",
     "VerifiedGarbage.Spec.MlKem",
     "VerifiedGarbage.Spec.Rsa.PrivatePrecompute",
     # ChaCha20's contracts, which proofs/Rind/X86_64/VgChaCha20.lean's
@@ -58,6 +59,9 @@ ROOTS = [
     "VerifiedGarbage.Spec.EcKey.P256",
     "VerifiedGarbage.Spec.Ecdh.P256",
     "VerifiedGarbage.Spec.Ecdsa.Verify.P256",
+    # PBKDF2-HMAC's contracts, over VG's SHA-1, SHA-2, and HMAC specs, which
+    # proofs/Rind/VgPbkdf2.lean proves rind's.
+    "VerifiedGarbage.Spec.Pbkdf2.Generic",
 ]
 
 IMPORT = re.compile(r"^(?:public )?(?:meta )?import (VerifiedGarbage\.[A-Za-z0-9_.]+)\b", re.M)

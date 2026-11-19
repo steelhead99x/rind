@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1108" height="634" viewBox="0 0 1108 634" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img">
+<svg xmlns="http://www.w3.org/2000/svg" width="1330" height="634" viewBox="0 0 1330 634" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img">
 <title>rind's time over the fastest of aws-lc-rs, ring, and verified-garbage, by CPU tier</title>
 <rect x="12.0" y="8.0" width="12.0" height="12.0" rx="2" fill="#6da7ec"/>
 <text x="28.0" y="18.0" font-size="11" text-anchor="start" font-weight="normal" fill="#c3c2b7">under 0.8</text>
@@ -14,405 +14,510 @@
 <text x="379.2" y="18.0" font-size="11" text-anchor="start" font-weight="normal" fill="#c3c2b7">to 1.25</text>
 <rect x="437.4" y="8.0" width="12.0" height="12.0" rx="2" fill="#ec7a63"/>
 <text x="453.4" y="18.0" font-size="11" text-anchor="start" font-weight="normal" fill="#c3c2b7">over 1.25</text>
-<text x="319.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">x86_64</text>
+<text x="319.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">x86_64 AVX-512</text>
 <text x="393.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">no IFMA</text>
-<text x="467.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">no ADX</text>
-<text x="541.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">no AVX2</text>
-<text x="615.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">no AVX</text>
-<text x="689.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">no AES-NI</text>
-<text x="763.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">SSE2</text>
-<text x="837.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">aarch64</text>
-<text x="911.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">no crypto</text>
-<text x="985.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">armv7</text>
-<text x="1059.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">portable</text>
+<text x="467.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">no AVX-512</text>
+<text x="541.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">no ADX</text>
+<text x="615.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">no AVX2</text>
+<text x="689.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">no AVX</text>
+<text x="763.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">no AES-NI</text>
+<text x="837.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">SSE2</text>
+<text x="911.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">aarch64</text>
+<text x="985.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">no SHA-3</text>
+<text x="1059.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">no crypto</text>
+<text x="1133.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">armv7</text>
+<text x="1207.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">armv7 NEON</text>
+<text x="1281.4" y="52.0" font-size="12" text-anchor="middle" font-weight="bold" fill="#f0efec">portable</text>
 <text x="12.0" y="76.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-GCM</text>
-<rect x="284.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>AES-GCM on x86_64: aes128-gcm-open/*/16KB takes 787 ns with rind, 810 ns with aws-lc-rs</title></rect>
+<rect x="284.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>AES-GCM on x86_64 AVX-512: aes192-gcm/*/key takes 132 ns with rind, 136 ns with aws-lc-rs</title></rect>
 <text x="319.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.97</text>
-<rect x="506.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>AES-GCM on no AVX2: aes192-gcm/*/16KB takes 4.22 µs with rind, 4.10 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.03</text>
-<rect x="580.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>AES-GCM on no AVX: aes192-gcm/*/key takes 82 ns with rind, 91 ns with aws-lc-rs</title></rect>
-<text x="615.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.91</text>
-<rect x="654.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-GCM on no AES-NI: aes256-gcm/*/1350B takes 6.28 µs with rind, 6.24 µs with aws-lc-rs</title></rect>
-<text x="689.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
-<rect x="728.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>AES-GCM on SSE2: aes256-gcm/*/1350B takes 9.92 µs with rind, 12.48 µs with aws-lc-rs</title></rect>
-<text x="763.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.80</text>
-<rect x="802.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>AES-GCM on aarch64: aes128-gcm/*/key takes 107 ns with rind, 124 ns with aws-lc-rs</title></rect>
+<rect x="432.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>AES-GCM on no AVX-512: aes192-gcm/*/key takes 97 ns with rind, 121 ns with aws-lc-rs</title></rect>
+<text x="467.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.81</text>
+<rect x="580.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>AES-GCM on no AVX2: aes192-gcm/*/16KB takes 4.23 µs with rind, 4.11 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.03</text>
+<rect x="654.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>AES-GCM on no AVX: aes256-gcm/*/16KB takes 3.20 µs with rind, 3.97 µs with aws-lc-rs</title></rect>
+<text x="689.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.81</text>
+<rect x="728.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-GCM on no AES-NI: aes128-gcm/*/quic-512B takes 2.06 µs with rind, 2.05 µs with aws-lc-rs</title></rect>
+<text x="763.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
+<rect x="802.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>AES-GCM on SSE2: aes192-gcm/*/16KB takes 79.51 µs with rind, 92.16 µs with aws-lc-rs</title></rect>
 <text x="837.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.86</text>
-<rect x="876.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-GCM on no crypto: aes256-gcm/*/1350B takes 7.63 µs with rind, 7.65 µs with aws-lc-rs</title></rect>
-<text x="911.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="950.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-GCM on armv7: aes256-gcm/*/16KB takes 8.91 µs with rind, 8.97 µs with aws-lc-rs</title></rect>
-<text x="985.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="1024.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>AES-GCM on portable: aes256-gcm/*/16KB takes 863.60 µs with rind, 119.00 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">7.26</text>
+<rect x="876.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>AES-GCM on aarch64: aes128-gcm/*/key takes 107 ns with rind, 124 ns with aws-lc-rs</title></rect>
+<text x="911.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.86</text>
+<rect x="950.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>AES-GCM on no SHA-3: aes192-gcm/*/1350B takes 538 ns with rind, 494 ns with aws-lc-rs</title></rect>
+<text x="985.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.09</text>
+<rect x="1024.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-GCM on no crypto: aes256-gcm/*/16KB takes 88.75 µs with rind, 89.01 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1098.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-GCM on armv7: aes256-gcm/*/16KB takes 8.91 µs with rind, 8.99 µs with aws-lc-rs</title></rect>
+<text x="1133.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="1172.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>AES-GCM on armv7 NEON: aes256-gcm/*/16KB takes 320.40 µs with rind, 93.20 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.44</text>
+<rect x="1246.4" y="63.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>AES-GCM on portable: aes256-gcm/*/16KB takes 157.10 µs with rind, 129.50 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="76.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.21</text>
 <text x="12.0" y="96.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES block, AES-CTR</text>
-<rect x="284.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES block, AES-CTR on x86_64: aes128-ctr/*/16KB takes 1.40 µs with rind, 1.41 µs with aws-lc-rs</title></rect>
-<text x="319.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="506.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES block, AES-CTR on no AVX2: aes256-ctr/*/16KB takes 2.32 µs with rind, 2.34 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="580.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES block, AES-CTR on no AVX: aes192-ctr/*/16KB takes 1.50 µs with rind, 1.52 µs with aws-lc-rs</title></rect>
+<rect x="284.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES block, AES-CTR on x86_64 AVX-512: aes256-ctr/*/16KB takes 1.98 µs with rind, 2.00 µs with aws-lc-rs</title></rect>
+<text x="319.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="580.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES block, AES-CTR on no AVX2: aes128-ctr/*/16KB takes 1.97 µs with rind, 1.98 µs with aws-lc-rs</title></rect>
 <text x="615.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="654.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>AES block, AES-CTR on no AES-NI: aes128-ctr/*/16KB takes 30.94 µs with rind, 29.66 µs with aws-lc-rs</title></rect>
-<text x="689.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.04</text>
-<rect x="728.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>AES block, AES-CTR on SSE2: quic-header-protection/aes128/* takes 405 ns with rind, 496 ns with aws-lc-rs</title></rect>
-<text x="763.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.82</text>
-<rect x="802.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES block, AES-CTR on aarch64: quic-header-protection/aes128/* takes 5 ns with rind, 6 ns with aws-lc-rs</title></rect>
-<text x="837.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.98</text>
-<rect x="876.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES block, AES-CTR on no crypto: quic-header-protection/aes128/* takes 68 ns with rind, 68 ns with aws-lc-rs</title></rect>
-<text x="911.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="950.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES block, AES-CTR on armv7: aes256-ctr/*/16KB takes 4.96 µs with rind, 4.98 µs with aws-lc-rs</title></rect>
-<text x="985.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="1024.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>AES block, AES-CTR on portable: aes256-ctr/*/16KB takes 649.70 µs with rind, 70.61 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">9.20</text>
+<rect x="654.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES block, AES-CTR on no AVX: aes256-ctr/*/16KB takes 2.01 µs with rind, 2.03 µs with aws-lc-rs</title></rect>
+<text x="689.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="728.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES block, AES-CTR on no AES-NI: aes256-ctr/*/16KB takes 41.70 µs with rind, 41.80 µs with aws-lc-rs</title></rect>
+<text x="763.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="802.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>AES block, AES-CTR on SSE2: quic-header-protection/aes128/* takes 364 ns with rind, 429 ns with aws-lc-rs</title></rect>
+<text x="837.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.85</text>
+<rect x="876.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES block, AES-CTR on aarch64: quic-header-protection/aes128/* takes 5 ns with rind, 5 ns with aws-lc-rs</title></rect>
+<text x="911.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="1024.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES block, AES-CTR on no crypto: quic-header-protection/aes128/* takes 68 ns with rind, 68 ns with aws-lc-rs</title></rect>
+<text x="1059.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1098.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES block, AES-CTR on armv7: aes256-ctr/*/16KB takes 4.96 µs with rind, 4.99 µs with aws-lc-rs</title></rect>
+<text x="1133.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="1172.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>AES block, AES-CTR on armv7 NEON: quic-header-protection/aes128/* takes 305 ns with rind, 137 ns with aws-lc-rs</title></rect>
+<text x="1207.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.23</text>
+<rect x="1246.4" y="83.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>AES block, AES-CTR on portable: aes128-ctr/*/16KB takes 84.26 µs with rind, 58.00 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="96.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.45</text>
 <text x="12.0" y="116.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-CBC</text>
-<rect x="284.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>AES-CBC on x86_64: aes128-cbc-decrypt/*/32B takes 26 ns with rind, 19 ns with aws-lc-rs</title></rect>
-<text x="319.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.34</text>
-<rect x="506.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>AES-CBC on no AVX2: aes256-cbc-decrypt/*/32B takes 40 ns with rind, 38 ns with aws-lc-rs</title></rect>
-<text x="541.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.06</text>
-<rect x="580.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>AES-CBC on no AVX: aes256-cbc-decrypt/*/32B takes 27 ns with rind, 18 ns with aws-lc-rs</title></rect>
-<text x="615.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.50</text>
-<rect x="654.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-CBC on no AES-NI: aes128-cbc-decrypt/*/16KB takes 63.02 µs with rind, 62.56 µs with aws-lc-rs</title></rect>
-<text x="689.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
-<rect x="728.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>AES-CBC on SSE2: aes256-cbc-decrypt/*/16KB takes 76.98 µs with rind, 98.13 µs with aws-lc-rs</title></rect>
-<text x="763.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.78</text>
-<rect x="802.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>AES-CBC on aarch64: aes128-cbc-encrypt/*/16KB takes 7.35 µs with rind, 6.32 µs with aws-lc-rs</title></rect>
-<text x="837.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.16</text>
-<rect x="876.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>AES-CBC on no crypto: aes256-cbc-encrypt/*/16KB takes 108.50 µs with rind, 111.20 µs with aws-lc-rs</title></rect>
-<text x="911.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.98</text>
-<rect x="950.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-CBC on armv7: aes128-cbc-encrypt/*/16KB takes 6.59 µs with rind, 6.61 µs with aws-lc-rs</title></rect>
-<text x="985.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="1024.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>AES-CBC on portable: aes192-cbc-decrypt/*/16KB takes 789.50 µs with rind, 84.19 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">9.38</text>
+<rect x="284.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-CBC on x86_64 AVX-512: aes192-cbc-encrypt/*/16KB takes 14.05 µs with rind, 14.03 µs with aws-lc-rs</title></rect>
+<text x="319.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="580.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-CBC on no AVX2: aes128-cbc-encrypt/*/16KB takes 19.14 µs with rind, 19.15 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="654.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>AES-CBC on no AVX: aes256-cbc-decrypt/*/1350B takes 191 ns with rind, 178 ns with aws-lc-rs</title></rect>
+<text x="689.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.07</text>
+<rect x="728.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-CBC on no AES-NI: aes128-cbc-decrypt/*/1350B takes 4.82 µs with rind, 4.79 µs with aws-lc-rs</title></rect>
+<text x="763.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
+<rect x="802.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>AES-CBC on SSE2: aes256-cbc-decrypt/*/1200B takes 5.11 µs with rind, 5.99 µs with aws-lc-rs</title></rect>
+<text x="837.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.85</text>
+<rect x="876.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-CBC on aarch64: aes192-cbc-encrypt/*/16KB takes 7.62 µs with rind, 7.57 µs with aws-lc-rs</title></rect>
+<text x="911.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
+<rect x="1024.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>AES-CBC on no crypto: aes256-cbc-encrypt/*/16KB takes 108.40 µs with rind, 111.20 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.97</text>
+<rect x="1098.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-CBC on armv7: aes192-cbc-encrypt/*/16KB takes 7.85 µs with rind, 7.83 µs with aws-lc-rs</title></rect>
+<text x="1133.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1172.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>AES-CBC on armv7 NEON: aes192-cbc-encrypt/*/16KB takes 389.50 µs with rind, 173.50 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.24</text>
+<rect x="1246.4" y="103.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>AES-CBC on portable: aes128-cbc-decrypt/*/16KB takes 107.90 µs with rind, 86.78 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="116.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.24</text>
 <text x="12.0" y="136.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">AES-KW, AES-KWP</text>
-<rect x="284.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>AES-KW, AES-KWP on x86_64: aes128-kw-wrap/*/32B takes 444 ns with rind, 400 ns with aws-lc-rs</title></rect>
-<text x="319.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.11</text>
-<rect x="506.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>AES-KW, AES-KWP on no AVX2: aes128-kw-wrap/*/16B takes 376 ns with rind, 315 ns with aws-lc-rs</title></rect>
-<text x="541.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.19</text>
-<rect x="654.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>AES-KW, AES-KWP on no AES-NI: aes128-kw-wrap/*/16B takes 931 ns with rind, 775 ns with aws-lc-rs</title></rect>
-<text x="689.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.20</text>
-<rect x="728.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>AES-KW, AES-KWP on SSE2: aes128-kw-wrap/*/16B takes 4.97 µs with rind, 6.31 µs with aws-lc-rs</title></rect>
-<text x="763.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.79</text>
-<rect x="802.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>AES-KW, AES-KWP on aarch64: aes256-kwp-wrap/*/32B takes 364 ns with rind, 458 ns with aws-lc-rs</title></rect>
-<text x="837.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.80</text>
-<rect x="876.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-KW, AES-KWP on no crypto: aes256-kw-wrap/*/32B takes 2.77 µs with rind, 2.81 µs with aws-lc-rs</title></rect>
-<text x="911.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.98</text>
-<rect x="950.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>AES-KW, AES-KWP on armv7: aes256-kw-wrap/*/32B takes 484 ns with rind, 477 ns with aws-lc-rs</title></rect>
-<text x="985.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.02</text>
-<rect x="1024.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>AES-KW, AES-KWP on portable: aes128-kw-unwrap/*/32B takes 15.98 µs with rind, 15.22 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.05</text>
+<rect x="284.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>AES-KW, AES-KWP on x86_64 AVX-512: aes128-kw-unwrap/*/16B takes 335 ns with rind, 280 ns with aws-lc-rs</title></rect>
+<text x="319.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.20</text>
+<rect x="580.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>AES-KW, AES-KWP on no AVX2: aes128-kw-unwrap/*/16B takes 359 ns with rind, 322 ns with aws-lc-rs</title></rect>
+<text x="615.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.12</text>
+<rect x="728.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>AES-KW, AES-KWP on no AES-NI: aes256-kwp-unwrap/*/16B takes 1.34 µs with rind, 1.29 µs with aws-lc-rs</title></rect>
+<text x="763.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.04</text>
+<rect x="802.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>AES-KW, AES-KWP on SSE2: aes128-kwp-unwrap/*/16B takes 5.41 µs with rind, 6.29 µs with aws-lc-rs</title></rect>
+<text x="837.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.86</text>
+<rect x="876.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>AES-KW, AES-KWP on aarch64: aes256-kwp-unwrap/*/32B takes 344 ns with rind, 460 ns with aws-lc-rs</title></rect>
+<text x="911.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.75</text>
+<rect x="1024.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>AES-KW, AES-KWP on no crypto: aes256-kw-wrap/*/32B takes 2.74 µs with rind, 2.82 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.97</text>
+<rect x="1098.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>AES-KW, AES-KWP on armv7: aes256-kw-wrap/*/32B takes 501 ns with rind, 485 ns with aws-lc-rs</title></rect>
+<text x="1133.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.03</text>
+<rect x="1172.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>AES-KW, AES-KWP on armv7 NEON: aes128-kw-wrap/*/32B takes 7.64 µs with rind, 3.61 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.12</text>
+<rect x="1246.4" y="123.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>AES-KW, AES-KWP on portable: aes256-kwp-unwrap/*/32B takes 13.47 µs with rind, 22.56 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="136.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.60</text>
 <text x="12.0" y="156.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ChaCha20</text>
-<rect x="284.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ChaCha20 on x86_64: quic-header-protection/chacha20/* takes 60 ns with rind, 68 ns with ring</title></rect>
-<text x="319.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.88</text>
-<rect x="506.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ChaCha20 on no AVX2: quic-header-protection/chacha20/* takes 93 ns with rind, 120 ns with aws-lc-rs</title></rect>
-<text x="541.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.77</text>
-<rect x="580.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ChaCha20 on no AVX: quic-header-protection/chacha20/* takes 57 ns with rind, 73 ns with aws-lc-rs</title></rect>
-<text x="615.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.78</text>
-<rect x="654.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ChaCha20 on no AES-NI: quic-header-protection/chacha20/* takes 93 ns with rind, 120 ns with aws-lc-rs</title></rect>
-<text x="689.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.77</text>
-<rect x="728.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ChaCha20 on SSE2: quic-header-protection/chacha20/* takes 93 ns with rind, 120 ns with aws-lc-rs</title></rect>
+<rect x="284.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ChaCha20 on x86_64 AVX-512: quic-header-protection/chacha20/* takes 84 ns with rind, 105 ns with ring</title></rect>
+<text x="319.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.80</text>
+<rect x="580.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ChaCha20 on no AVX2: quic-header-protection/chacha20/* takes 93 ns with rind, 120 ns with aws-lc-rs</title></rect>
+<text x="615.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.77</text>
+<rect x="654.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ChaCha20 on no AVX: quic-header-protection/chacha20/* takes 82 ns with rind, 93 ns with aws-lc-rs</title></rect>
+<text x="689.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.87</text>
+<rect x="728.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ChaCha20 on no AES-NI: quic-header-protection/chacha20/* takes 93 ns with rind, 120 ns with aws-lc-rs</title></rect>
 <text x="763.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.77</text>
-<rect x="802.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>ChaCha20 on aarch64: quic-header-protection/chacha20/* takes 100 ns with rind, 110 ns with ring</title></rect>
-<text x="837.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.90</text>
-<rect x="876.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ChaCha20 on no crypto: quic-header-protection/chacha20/* takes 100 ns with rind, 118 ns with aws-lc-rs</title></rect>
-<text x="911.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.84</text>
-<rect x="950.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ChaCha20 on armv7: quic-header-protection/chacha20/* takes 86 ns with rind, 123 ns with ring</title></rect>
-<text x="985.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.70</text>
-<rect x="1024.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ChaCha20 on portable: quic-header-protection/chacha20/* takes 88 ns with rind, 118 ns with aws-lc-rs</title></rect>
-<text x="1059.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.74</text>
+<rect x="802.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ChaCha20 on SSE2: quic-header-protection/chacha20/* takes 82 ns with rind, 94 ns with aws-lc-rs</title></rect>
+<text x="837.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.87</text>
+<rect x="876.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>ChaCha20 on aarch64: quic-header-protection/chacha20/* takes 100 ns with rind, 110 ns with ring</title></rect>
+<text x="911.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.90</text>
+<rect x="1024.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ChaCha20 on no crypto: quic-header-protection/chacha20/* takes 100 ns with rind, 118 ns with aws-lc-rs</title></rect>
+<text x="1059.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.85</text>
+<rect x="1098.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ChaCha20 on armv7: quic-header-protection/chacha20/* takes 86 ns with rind, 122 ns with ring</title></rect>
+<text x="1133.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.71</text>
+<rect x="1172.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ChaCha20 on armv7 NEON: quic-header-protection/chacha20/* takes 86 ns with rind, 136 ns with aws-lc-rs</title></rect>
+<text x="1207.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.63</text>
+<rect x="1246.4" y="143.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ChaCha20 on portable: quic-header-protection/chacha20/* takes 103 ns with rind, 138 ns with aws-lc-rs</title></rect>
+<text x="1281.4" y="156.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.75</text>
 <text x="12.0" y="176.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ChaCha20-Poly1305, XChaCha20-Poly1305</text>
-<rect x="284.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on x86_64: xchacha20poly1305/*/16KB takes 6.23 µs with rind, 6.04 µs with aws-lc-rs</title></rect>
-<text x="319.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.03</text>
-<rect x="506.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on no AVX2: chacha20poly1305/*/16KB takes 12.31 µs with rind, 12.28 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="654.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on no AES-NI: chacha20poly1305/*/16KB takes 18.13 µs with rind, 15.21 µs with aws-lc-rs</title></rect>
-<text x="689.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.19</text>
-<rect x="728.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on SSE2: chacha20poly1305/*/16KB takes 36.67 µs with rind, 32.57 µs with aws-lc-rs</title></rect>
-<text x="763.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.13</text>
-<rect x="802.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on aarch64: xchacha20poly1305/*/32B takes 733 ns with rind, 719 ns with aws-lc-rs</title></rect>
-<text x="837.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.02</text>
-<rect x="876.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on no crypto: xchacha20poly1305/*/32B takes 725 ns with rind, 723 ns with aws-lc-rs</title></rect>
+<rect x="284.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on x86_64 AVX-512: xchacha20poly1305/*/quic-256B takes 901 ns with rind, 862 ns with aws-lc-rs</title></rect>
+<text x="319.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.05</text>
+<rect x="580.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on no AVX2: chacha20poly1305/*/16KB takes 12.29 µs with rind, 12.27 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="728.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on no AES-NI: chacha20poly1305/*/16KB takes 18.16 µs with rind, 15.19 µs with aws-lc-rs</title></rect>
+<text x="763.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.20</text>
+<rect x="802.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on SSE2: xchacha20poly1305/*/16KB takes 28.71 µs with rind, 26.38 µs with aws-lc-rs</title></rect>
+<text x="837.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.09</text>
+<rect x="876.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on aarch64: chacha20poly1305/*/16KB takes 14.22 µs with rind, 14.22 µs with ring</title></rect>
 <text x="911.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="950.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on armv7: xchacha20poly1305/*/16KB takes 23.74 µs with rind, 23.92 µs with aws-lc-rs</title></rect>
-<text x="985.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="1024.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on portable: xchacha20poly1305/*/32B takes 931 ns with rind, 1.03 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.90</text>
+<rect x="1024.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on no crypto: xchacha20poly1305/*/16KB takes 14.72 µs with rind, 14.72 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1098.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on armv7: chacha20poly1305-open/*/16KB takes 23.63 µs with rind, 23.82 µs with aws-lc-rs</title></rect>
+<text x="1133.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="1172.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on armv7 NEON: chacha20poly1305-open/*/16KB takes 23.64 µs with rind, 23.82 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="1246.4" y="163.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ChaCha20-Poly1305, XChaCha20-Poly1305 on portable: xchacha20poly1305/*/32B takes 777 ns with rind, 909 ns with aws-lc-rs</title></rect>
+<text x="1281.4" y="176.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.85</text>
 <text x="12.0" y="196.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">SHA-1</text>
-<rect x="284.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-1 on x86_64: sha1/*/8KB takes 3.82 µs with rind, 3.84 µs with aws-lc-rs</title></rect>
+<rect x="284.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-1 on x86_64 AVX-512: sha1/*/16KB takes 8.54 µs with rind, 8.53 µs with aws-lc-rs</title></rect>
 <text x="319.4" y="196.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="506.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-1 on no AVX2: sha1/*/16KB takes 16.45 µs with rind, 16.53 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="196.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="580.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-1 on no AVX: sha1/*/16KB takes 10.34 µs with rind, 10.51 µs with aws-lc-rs</title></rect>
-<text x="615.4" y="196.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.98</text>
-<rect x="728.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-1 on SSE2: sha1/*/16KB takes 21.35 µs with rind, 21.41 µs with aws-lc-rs</title></rect>
-<text x="763.4" y="196.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="802.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-1 on aarch64: sha1/*/16KB takes 7.97 µs with rind, 7.94 µs with aws-lc-rs</title></rect>
+<rect x="580.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-1 on no AVX2: sha1/*/8KB takes 8.26 µs with rind, 8.32 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="196.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="654.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-1 on no AVX: sha1/*/16KB takes 15.32 µs with rind, 15.38 µs with aws-lc-rs</title></rect>
+<text x="689.4" y="196.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="802.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-1 on SSE2: sha1/*/16KB takes 18.19 µs with rind, 18.26 µs with aws-lc-rs</title></rect>
 <text x="837.4" y="196.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="876.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-1 on no crypto: sha1/*/16KB takes 20.40 µs with rind, 20.44 µs with aws-lc-rs</title></rect>
+<rect x="876.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-1 on aarch64: sha1/*/16KB takes 7.97 µs with rind, 7.94 µs with aws-lc-rs</title></rect>
 <text x="911.4" y="196.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="950.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-1 on armv7: sha1/*/16KB takes 6.53 µs with rind, 6.55 µs with aws-lc-rs</title></rect>
-<text x="985.4" y="196.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="1024.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>SHA-1 on portable: sha1/*/16KB takes 23.16 µs with rind, 19.42 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="196.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.19</text>
+<rect x="1024.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-1 on no crypto: sha1/*/16KB takes 20.40 µs with rind, 20.44 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="196.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1098.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-1 on armv7: sha1/*/16KB takes 6.53 µs with rind, 6.55 µs with aws-lc-rs</title></rect>
+<text x="1133.4" y="196.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1172.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>SHA-1 on armv7 NEON: sha1/*/16KB takes 20.00 µs with rind, 20.66 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="196.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.97</text>
+<rect x="1246.4" y="183.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>SHA-1 on portable: sha1/*/16KB takes 28.68 µs with rind, 25.55 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="196.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.12</text>
 <text x="12.0" y="216.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">SHA-256</text>
-<rect x="284.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on x86_64: sha256/*/16KB takes 8.03 µs with rind, 8.01 µs with ring</title></rect>
-<text x="319.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="506.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on no AVX2: sha256/*/8KB takes 18.81 µs with rind, 18.66 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
-<rect x="580.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on no AVX: sha256/*/8KB takes 13.31 µs with rind, 13.13 µs with aws-lc-rs</title></rect>
+<rect x="284.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on x86_64 AVX-512: sha256/*/8KB takes 4.55 µs with rind, 4.58 µs with ring</title></rect>
+<text x="319.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="580.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on no AVX2: sha256/*/8KB takes 18.84 µs with rind, 18.65 µs with aws-lc-rs</title></rect>
 <text x="615.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
-<rect x="728.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on SSE2: sha256/*/8KB takes 24.28 µs with rind, 24.27 µs with aws-lc-rs</title></rect>
-<text x="763.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="802.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on aarch64: sha256/*/1200B takes 588 ns with rind, 584 ns with ring</title></rect>
-<text x="837.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
-<rect x="876.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on no crypto: sha256/*/16KB takes 36.42 µs with rind, 36.50 µs with aws-lc-rs</title></rect>
+<rect x="654.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on no AVX: sha256/*/16KB takes 34.59 µs with rind, 34.65 µs with aws-lc-rs</title></rect>
+<text x="689.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="802.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on SSE2: sha256/*/16KB takes 37.15 µs with rind, 37.32 µs with aws-lc-rs</title></rect>
+<text x="837.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="876.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on aarch64: sha256/*/16KB takes 7.60 µs with rind, 7.62 µs with ring</title></rect>
 <text x="911.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="950.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on armv7: sha256/*/16KB takes 7.70 µs with rind, 7.75 µs with aws-lc-rs</title></rect>
+<rect x="950.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on no SHA-3: sha256/*/16KB takes 7.60 µs with rind, 7.64 µs with aws-lc-rs</title></rect>
 <text x="985.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="1024.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>SHA-256 on portable: sha256/*/16KB takes 47.12 µs with rind, 53.51 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.88</text>
+<rect x="1024.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on no crypto: sha256/*/16KB takes 36.42 µs with rind, 36.50 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1098.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-256 on armv7: sha256/*/16KB takes 7.70 µs with rind, 7.75 µs with aws-lc-rs</title></rect>
+<text x="1133.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="1172.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>SHA-256 on armv7 NEON: sha256/*/16KB takes 36.05 µs with rind, 38.60 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.93</text>
+<rect x="1246.4" y="203.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>SHA-256 on portable: sha256/*/1350B takes 6.44 µs with rind, 5.50 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="216.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.17</text>
 <text x="12.0" y="236.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">SHA-384, SHA-512, SHA-512/256</text>
-<rect x="284.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>SHA-384, SHA-512, SHA-512/256 on x86_64: sha512/*/64B takes 138 ns with rind, 185 ns with ring</title></rect>
-<text x="319.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.74</text>
-<rect x="506.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-384, SHA-512, SHA-512/256 on no AVX2: sha512/*/8KB takes 15.52 µs with rind, 15.52 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="580.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>SHA-384, SHA-512, SHA-512/256 on no AVX: sha512-256/*/8KB takes 9.55 µs with rind, 9.18 µs with aws-lc-rs</title></rect>
-<text x="615.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.04</text>
-<rect x="728.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-384, SHA-512, SHA-512/256 on SSE2: sha512/*/16KB takes 30.64 µs with rind, 30.71 µs with aws-lc-rs</title></rect>
-<text x="763.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="802.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-384, SHA-512, SHA-512/256 on aarch64: sha512-256/*/16KB takes 12.48 µs with rind, 12.49 µs with ring</title></rect>
-<text x="837.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="876.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-384, SHA-512, SHA-512/256 on no crypto: sha512-256/*/16KB takes 23.04 µs with rind, 23.08 µs with aws-lc-rs</title></rect>
+<rect x="284.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>SHA-384, SHA-512, SHA-512/256 on x86_64 AVX-512: sha512-256/*/1350B takes 1.65 µs with rind, 2.34 µs with ring</title></rect>
+<text x="319.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.70</text>
+<rect x="580.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-384, SHA-512, SHA-512/256 on no AVX2: sha512-256/*/16KB takes 30.83 µs with rind, 30.77 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="654.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-384, SHA-512, SHA-512/256 on no AVX: sha512-256/*/16KB takes 23.76 µs with rind, 23.71 µs with aws-lc-rs</title></rect>
+<text x="689.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="802.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-384, SHA-512, SHA-512/256 on SSE2: sha512/*/16KB takes 23.99 µs with rind, 23.71 µs with aws-lc-rs</title></rect>
+<text x="837.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
+<rect x="876.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-384, SHA-512, SHA-512/256 on aarch64: sha512-256/*/16KB takes 12.48 µs with rind, 12.48 µs with ring</title></rect>
 <text x="911.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="950.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-384, SHA-512, SHA-512/256 on armv7: sha512-256/*/1350B takes 5.30 µs with rind, 5.30 µs with ring</title></rect>
+<rect x="950.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-384, SHA-512, SHA-512/256 on no SHA-3: sha512-256/*/16KB takes 23.04 µs with rind, 23.09 µs with aws-lc-rs</title></rect>
 <text x="985.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="1024.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>SHA-384, SHA-512, SHA-512/256 on portable: sha512-256/*/16KB takes 30.14 µs with rind, 28.91 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.04</text>
+<rect x="1024.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-384, SHA-512, SHA-512/256 on no crypto: sha512-256/*/16KB takes 23.04 µs with rind, 23.08 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1098.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-384, SHA-512, SHA-512/256 on armv7: sha512-256/*/1350B takes 5.30 µs with rind, 5.29 µs with ring</title></rect>
+<text x="1133.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1172.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-384, SHA-512, SHA-512/256 on armv7 NEON: sha512/*/16KB takes 61.33 µs with rind, 61.34 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1246.4" y="223.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>SHA-384, SHA-512, SHA-512/256 on portable: sha512-256/*/16KB takes 44.53 µs with rind, 36.75 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="236.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.21</text>
 <text x="12.0" y="256.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">SHA-3</text>
-<rect x="284.4" y="243.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-3 on x86_64: sha3-256/*/16KB takes 26.59 µs with rind, 26.30 µs with aws-lc-rs</title></rect>
-<text x="319.4" y="256.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
-<rect x="506.4" y="243.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-3 on no AVX2: sha3-384/*/16KB takes 49.30 µs with rind, 48.98 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="256.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
-<rect x="802.4" y="243.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-3 on aarch64: sha3-256/*/16KB takes 55.63 µs with rind, 55.66 µs with aws-lc-rs</title></rect>
-<text x="837.4" y="256.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="876.4" y="243.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>SHA-3 on no crypto: sha3-256/*/16KB takes 26.31 µs with rind, 29.93 µs with aws-lc-rs</title></rect>
-<text x="911.4" y="256.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.88</text>
-<rect x="950.4" y="243.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>SHA-3 on armv7: sha3-256/*/8KB takes 45.57 µs with rind, 73.23 µs with aws-lc-rs</title></rect>
-<text x="985.4" y="256.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.62</text>
-<rect x="1024.4" y="243.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>SHA-3 on portable: sha3-256/*/16KB takes 40.96 µs with rind, 44.08 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="256.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.93</text>
+<rect x="284.4" y="243.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-3 on x86_64 AVX-512: sha3-256/*/8KB takes 16.80 µs with rind, 16.80 µs with aws-lc-rs</title></rect>
+<text x="319.4" y="256.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="580.4" y="243.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-3 on no AVX2: sha3-384/*/16KB takes 49.35 µs with rind, 49.04 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="256.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
+<rect x="876.4" y="243.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-3 on aarch64: sha3-256/*/16KB takes 55.63 µs with rind, 55.63 µs with aws-lc-rs</title></rect>
+<text x="911.4" y="256.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="950.4" y="243.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>SHA-3 on no SHA-3: sha3-256/*/16KB takes 26.33 µs with rind, 29.95 µs with aws-lc-rs</title></rect>
+<text x="985.4" y="256.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.88</text>
+<rect x="1024.4" y="243.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>SHA-3 on no crypto: sha3-256/*/16KB takes 26.33 µs with rind, 29.94 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="256.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.88</text>
+<rect x="1098.4" y="243.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>SHA-3 on armv7: sha3-512/*/16KB takes 168.90 µs with rind, 267.20 µs with aws-lc-rs</title></rect>
+<text x="1133.4" y="256.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.63</text>
+<rect x="1172.4" y="243.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>SHA-3 on armv7 NEON: sha3-512/*/8KB takes 84.47 µs with rind, 134.90 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="256.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.63</text>
+<rect x="1246.4" y="243.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>SHA-3 on portable: sha3-512/*/16KB takes 89.92 µs with rind, 88.89 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="256.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
 <text x="12.0" y="276.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">MD5</text>
-<rect x="284.4" y="263.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>MD5 on x86_64: md5/*/1350B takes 1.53 µs with rind, 1.50 µs with aws-lc-rs</title></rect>
-<text x="319.4" y="276.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.02</text>
-<rect x="506.4" y="263.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>MD5 on no AVX2: md5/*/8KB takes 11.74 µs with rind, 11.66 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="276.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
-<rect x="802.4" y="263.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>MD5 on aarch64: md5/*/16KB takes 22.48 µs with rind, 21.94 µs with aws-lc-rs</title></rect>
-<text x="837.4" y="276.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.02</text>
-<rect x="876.4" y="263.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>MD5 on no crypto: md5/*/16KB takes 22.48 µs with rind, 21.94 µs with aws-lc-rs</title></rect>
-<text x="911.4" y="276.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.02</text>
-<rect x="950.4" y="263.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>MD5 on armv7: md5/*/16KB takes 22.10 µs with rind, 24.87 µs with aws-lc-rs</title></rect>
-<text x="985.4" y="276.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.89</text>
-<rect x="1024.4" y="263.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>MD5 on portable: md5/*/16KB takes 20.41 µs with rind, 22.62 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="276.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.90</text>
+<rect x="284.4" y="263.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>MD5 on x86_64 AVX-512: md5/*/16KB takes 20.45 µs with rind, 20.30 µs with aws-lc-rs</title></rect>
+<text x="319.4" y="276.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
+<rect x="580.4" y="263.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>MD5 on no AVX2: md5/*/16KB takes 23.29 µs with rind, 23.18 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="276.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="876.4" y="263.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>MD5 on aarch64: md5/*/16KB takes 22.49 µs with rind, 21.94 µs with aws-lc-rs</title></rect>
+<text x="911.4" y="276.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.03</text>
+<rect x="1024.4" y="263.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>MD5 on no crypto: md5/*/16KB takes 22.49 µs with rind, 21.94 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="276.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.03</text>
+<rect x="1098.4" y="263.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>MD5 on armv7: md5/*/16KB takes 22.11 µs with rind, 24.86 µs with aws-lc-rs</title></rect>
+<text x="1133.4" y="276.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.89</text>
+<rect x="1172.4" y="263.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>MD5 on armv7 NEON: md5/*/16KB takes 22.11 µs with rind, 24.87 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="276.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.89</text>
+<rect x="1246.4" y="263.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>MD5 on portable: md5/*/16KB takes 21.96 µs with rind, 24.07 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="276.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.91</text>
 <text x="12.0" y="296.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">HMAC</text>
-<rect x="284.4" y="283.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>HMAC on x86_64: hmac-sha1/*/reused-key/16KB takes 7.46 µs with rind, 7.40 µs with aws-lc-rs</title></rect>
-<text x="319.4" y="296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
-<rect x="506.4" y="283.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>HMAC on no AVX2: hmac-sha256/*/16KB takes 37.85 µs with rind, 37.72 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="802.4" y="283.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>HMAC on aarch64: hmac-sha384/*/reused-key/16KB takes 12.58 µs with rind, 12.63 µs with ring</title></rect>
-<text x="837.4" y="296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="876.4" y="283.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>HMAC on no crypto: hmac-sha256/*/reused-key/16KB takes 36.59 µs with rind, 36.71 µs with aws-lc-rs</title></rect>
+<rect x="284.4" y="283.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>HMAC on x86_64 AVX-512: hmac-sha256/*/reused-key/16KB takes 9.14 µs with rind, 9.24 µs with ring</title></rect>
+<text x="319.4" y="296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="580.4" y="283.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>HMAC on no AVX2: hmac-sha256/*/reused-key/16KB takes 37.60 µs with rind, 37.29 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
+<rect x="876.4" y="283.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>HMAC on aarch64: hmac-sha384/*/reused-key/16KB takes 12.58 µs with rind, 12.63 µs with ring</title></rect>
 <text x="911.4" y="296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="950.4" y="283.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>HMAC on armv7: hmac-sha384/*/16KB takes 62.92 µs with rind, 62.96 µs with ring</title></rect>
-<text x="985.4" y="296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="1024.4" y="283.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>HMAC on portable: hmac-sha1/*/reused-key/16KB takes 23.27 µs with rind, 19.63 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.19</text>
+<rect x="950.4" y="283.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>HMAC on no SHA-3: hmac-sha384/*/reused-key/16KB takes 23.23 µs with rind, 23.36 µs with aws-lc-rs</title></rect>
+<text x="985.4" y="296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="1024.4" y="283.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>HMAC on no crypto: hmac-sha256/*/reused-key/16KB takes 36.59 µs with rind, 36.70 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1098.4" y="283.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>HMAC on armv7: hmac-sha384/*/8KB takes 32.53 µs with rind, 32.54 µs with ring</title></rect>
+<text x="1133.4" y="296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1172.4" y="283.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>HMAC on armv7 NEON: hmac-sha384/*/reused-key/16KB takes 61.79 µs with rind, 62.06 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1246.4" y="283.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>HMAC on portable: hmac-sha384/*/reused-key/16KB takes 45.48 µs with rind, 37.38 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="296.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.22</text>
 <text x="12.0" y="316.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">HKDF</text>
-<rect x="284.4" y="303.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>HKDF on x86_64: hkdf-sha384/expand-aes-256-gcm-key/* takes 355 ns with rind, 484 ns with ring</title></rect>
-<text x="319.4" y="316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.73</text>
-<rect x="506.4" y="303.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>HKDF on no AVX2: hkdf-sha384/extract-expand/* takes 2.10 µs with rind, 2.47 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.85</text>
-<rect x="802.4" y="303.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>HKDF on aarch64: hkdf-sha384/expand/* takes 258 ns with rind, 296 ns with ring</title></rect>
-<text x="837.4" y="316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.87</text>
-<rect x="876.4" y="303.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>HKDF on no crypto: hkdf-sha384/extract-expand/* takes 1.56 µs with rind, 1.80 µs with aws-lc-rs</title></rect>
-<text x="911.4" y="316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.87</text>
-<rect x="950.4" y="303.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>HKDF on armv7: hkdf-sha512/extract-expand/* takes 4.35 µs with rind, 4.37 µs with ring</title></rect>
-<text x="985.4" y="316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="1024.4" y="303.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>HKDF on portable: hkdf-sha384/extract-expand/* takes 2.17 µs with rind, 2.22 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.98</text>
+<rect x="284.4" y="303.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>HKDF on x86_64 AVX-512: hkdf-sha1/extract-expand/* takes 454 ns with rind, 646 ns with aws-lc-rs</title></rect>
+<text x="319.4" y="316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.70</text>
+<rect x="580.4" y="303.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>HKDF on no AVX2: hkdf-sha384/extract-expand/* takes 2.10 µs with rind, 2.47 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.85</text>
+<rect x="876.4" y="303.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>HKDF on aarch64: hkdf-sha384/extract-expand/* takes 907 ns with rind, 1.07 µs with ring</title></rect>
+<text x="911.4" y="316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.84</text>
+<rect x="950.4" y="303.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>HKDF on no SHA-3: hkdf-sha384/extract-expand/* takes 1.57 µs with rind, 1.80 µs with aws-lc-rs</title></rect>
+<text x="985.4" y="316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.87</text>
+<rect x="1024.4" y="303.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>HKDF on no crypto: hkdf-sha384/extract-expand/* takes 1.57 µs with rind, 1.80 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.87</text>
+<rect x="1098.4" y="303.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>HKDF on armv7: hkdf-sha384/extract-expand/* takes 4.36 µs with rind, 4.34 µs with ring</title></rect>
+<text x="1133.4" y="316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1172.4" y="303.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>HKDF on armv7 NEON: hkdf-sha384/extract-expand/* takes 4.35 µs with rind, 4.58 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.95</text>
+<rect x="1246.4" y="303.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>HKDF on portable: hkdf-sha256/extract-expand/* takes 2.51 µs with rind, 2.62 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="316.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.96</text>
 <text x="12.0" y="336.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">PBKDF2</text>
-<rect x="284.4" y="323.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>PBKDF2 on x86_64: pbkdf2-sha1/* takes 80.29 µs with rind, 91.77 µs with aws-lc-rs</title></rect>
-<text x="319.4" y="336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.87</text>
-<rect x="506.4" y="323.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>PBKDF2 on no AVX2: pbkdf2-sha256/* takes 345.20 µs with rind, 377.00 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.92</text>
-<rect x="802.4" y="323.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>PBKDF2 on aarch64: pbkdf2-sha384/* takes 229.70 µs with rind, 242.00 µs with aws-lc-rs</title></rect>
-<text x="837.4" y="336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.95</text>
-<rect x="876.4" y="323.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>PBKDF2 on no crypto: pbkdf2-sha384/* takes 389.90 µs with rind, 412.10 µs with aws-lc-rs</title></rect>
+<rect x="284.4" y="323.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>PBKDF2 on x86_64 AVX-512: pbkdf2-sha256/* takes 95.17 µs with rind, 113.70 µs with aws-lc-rs</title></rect>
+<text x="319.4" y="336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.84</text>
+<rect x="580.4" y="323.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>PBKDF2 on no AVX2: pbkdf2-sha256/* takes 344.70 µs with rind, 374.80 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.92</text>
+<rect x="876.4" y="323.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>PBKDF2 on aarch64: pbkdf2-sha384/* takes 230.10 µs with rind, 241.40 µs with aws-lc-rs</title></rect>
 <text x="911.4" y="336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.95</text>
-<rect x="950.4" y="323.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>PBKDF2 on armv7: pbkdf2-sha384/* takes 1.05 ms with rind, 1.05 ms with aws-lc-rs</title></rect>
-<text x="985.4" y="336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
-<rect x="1024.4" y="323.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>PBKDF2 on portable: pbkdf2-sha1/* takes 223.60 µs with rind, 218.00 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.03</text>
+<rect x="1024.4" y="323.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>PBKDF2 on no crypto: pbkdf2-sha384/* takes 390.40 µs with rind, 413.20 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.94</text>
+<rect x="1098.4" y="323.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>PBKDF2 on armv7: pbkdf2-sha384/* takes 1.05 ms with rind, 1.05 ms with aws-lc-rs</title></rect>
+<text x="1133.4" y="336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1172.4" y="323.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>PBKDF2 on armv7 NEON: pbkdf2-sha384/* takes 1.05 ms with rind, 1.05 ms with aws-lc-rs</title></rect>
+<text x="1207.4" y="336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1246.4" y="323.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>PBKDF2 on portable: pbkdf2-sha256/* takes 623.00 µs with rind, 623.50 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="336.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
 <text x="12.0" y="356.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">X25519</text>
-<rect x="284.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>X25519 on x86_64: x25519-ecdh/* takes 21.09 µs with rind, 20.76 µs with aws-lc-rs</title></rect>
+<rect x="284.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>X25519 on x86_64 AVX-512: x25519-keygen/* takes 7.86 µs with rind, 7.73 µs with aws-lc-rs</title></rect>
 <text x="319.4" y="356.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.02</text>
-<rect x="432.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>X25519 on no ADX: x25519-keygen/* takes 8.87 µs with rind, 8.76 µs with aws-lc-rs</title></rect>
-<text x="467.4" y="356.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
-<rect x="506.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>X25519 on no AVX2: x25519-ecdh-stored/* takes 33.43 µs with rind, 33.67 µs with aws-lc-rs</title></rect>
+<rect x="506.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>X25519 on no ADX: x25519-ecdh-stored/* takes 33.47 µs with rind, 33.68 µs with aws-lc-rs</title></rect>
 <text x="541.4" y="356.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="802.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>X25519 on aarch64: x25519-ecdh-stored/* takes 26.64 µs with rind, 32.43 µs with aws-lc-rs</title></rect>
-<text x="837.4" y="356.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.82</text>
-<rect x="876.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>X25519 on no crypto: x25519-ecdh-stored/* takes 26.63 µs with rind, 32.39 µs with aws-lc-rs</title></rect>
+<rect x="580.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>X25519 on no AVX2: x25519-keygen/* takes 10.02 µs with rind, 10.03 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="356.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="876.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>X25519 on aarch64: x25519-ecdh-stored/* takes 26.64 µs with rind, 32.39 µs with aws-lc-rs</title></rect>
 <text x="911.4" y="356.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.82</text>
-<rect x="950.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>X25519 on armv7: x25519-ecdh/* takes 127.50 µs with rind, 161.30 µs with ring</title></rect>
-<text x="985.4" y="356.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.79</text>
-<rect x="1024.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>X25519 on portable: x25519-ecdh-stored/* takes 51.88 µs with rind, 64.92 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="356.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.80</text>
+<rect x="1024.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>X25519 on no crypto: x25519-ecdh-stored/* takes 26.64 µs with rind, 32.40 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="356.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.82</text>
+<rect x="1098.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>X25519 on armv7: x25519-ecdh/* takes 127.20 µs with rind, 161.20 µs with ring</title></rect>
+<text x="1133.4" y="356.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.79</text>
+<rect x="1172.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>X25519 on armv7 NEON: x25519-keygen/* takes 46.93 µs with rind, 68.87 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="356.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.68</text>
+<rect x="1246.4" y="343.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>X25519 on portable: x25519-ecdh-stored/* takes 49.74 µs with rind, 72.16 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="356.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.69</text>
 <text x="12.0" y="376.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">Ed25519</text>
-<rect x="284.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>Ed25519 on x86_64: ed25519-keygen/* takes 5.25 µs with rind, 5.37 µs with aws-lc-rs</title></rect>
-<text x="319.4" y="376.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.98</text>
-<rect x="432.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>Ed25519 on no ADX: ed25519-keygen/* takes 9.27 µs with rind, 9.24 µs with aws-lc-rs</title></rect>
-<text x="467.4" y="376.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="506.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>Ed25519 on no AVX2: ed25519-keygen/* takes 10.62 µs with rind, 10.68 µs with aws-lc-rs</title></rect>
+<rect x="284.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>Ed25519 on x86_64 AVX-512: ed25519-keygen/* takes 8.26 µs with rind, 8.29 µs with aws-lc-rs</title></rect>
+<text x="319.4" y="376.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="506.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>Ed25519 on no ADX: ed25519-keygen/* takes 10.51 µs with rind, 10.65 µs with aws-lc-rs</title></rect>
 <text x="541.4" y="376.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="802.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>Ed25519 on aarch64: ed25519-verify/* takes 36.59 µs with rind, 43.49 µs with ring</title></rect>
-<text x="837.4" y="376.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.84</text>
-<rect x="876.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>Ed25519 on no crypto: ed25519-keygen/* takes 8.24 µs with rind, 11.03 µs with aws-lc-rs</title></rect>
-<text x="911.4" y="376.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.75</text>
-<rect x="950.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>Ed25519 on armv7: ed25519-verify/* takes 130.30 µs with rind, 159.50 µs with ring</title></rect>
-<text x="985.4" y="376.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.82</text>
-<rect x="1024.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>Ed25519 on portable: ed25519-sign/* takes 17.41 µs with rind, 25.10 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="376.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.69</text>
+<rect x="580.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>Ed25519 on no AVX2: ed25519-keygen/* takes 10.56 µs with rind, 10.64 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="376.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="876.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>Ed25519 on aarch64: ed25519-verify/* takes 35.79 µs with rind, 43.50 µs with ring</title></rect>
+<text x="911.4" y="376.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.82</text>
+<rect x="1024.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>Ed25519 on no crypto: ed25519-keygen/* takes 8.26 µs with rind, 11.04 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="376.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.75</text>
+<rect x="1098.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>Ed25519 on armv7: ed25519-verify/* takes 130.30 µs with rind, 159.50 µs with ring</title></rect>
+<text x="1133.4" y="376.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.82</text>
+<rect x="1172.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>Ed25519 on armv7 NEON: ed25519-keygen/* takes 48.16 µs with rind, 69.70 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="376.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.69</text>
+<rect x="1246.4" y="363.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>Ed25519 on portable: ed25519-sign/* takes 18.30 µs with rind, 28.27 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="376.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.65</text>
 <text x="12.0" y="396.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-256 ECDH, ECDSA</text>
-<rect x="284.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>P-256 ECDH, ECDSA on x86_64: p256-ecdsa-verify/* takes 35.17 µs with rind, 35.42 µs with aws-lc-rs</title></rect>
-<text x="319.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="432.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>P-256 ECDH, ECDSA on no ADX: p256-ecdsa-verify/* takes 59.94 µs with rind, 54.29 µs with aws-lc-rs</title></rect>
-<text x="467.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.10</text>
-<rect x="506.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>P-256 ECDH, ECDSA on no AVX2: p256-ecdsa-verify/* takes 67.88 µs with rind, 63.80 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.06</text>
-<rect x="802.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>P-256 ECDH, ECDSA on aarch64: p256-ecdsa-keygen/* takes 10.49 µs with rind, 10.07 µs with aws-lc-rs</title></rect>
-<text x="837.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.04</text>
-<rect x="876.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>P-256 ECDH, ECDSA on no crypto: p256-ecdsa-verify/* takes 53.62 µs with rind, 53.08 µs with aws-lc-rs</title></rect>
-<text x="911.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
-<rect x="950.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>P-256 ECDH, ECDSA on armv7: p256-ecdsa-verify/* takes 366.80 µs with rind, 529.60 µs with aws-lc-rs</title></rect>
-<text x="985.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.69</text>
-<rect x="1024.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>P-256 ECDH, ECDSA on portable: p256-ecdsa-verify/* takes 253.90 µs with rind, 180.70 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.41</text>
+<rect x="284.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>P-256 ECDH, ECDSA on x86_64 AVX-512: p256-ecdsa-keygen/* takes 9.12 µs with rind, 8.95 µs with aws-lc-rs</title></rect>
+<text x="319.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.02</text>
+<rect x="506.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>P-256 ECDH, ECDSA on no ADX: p256-ecdsa-verify/* takes 67.81 µs with rind, 63.01 µs with aws-lc-rs</title></rect>
+<text x="541.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.08</text>
+<rect x="580.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>P-256 ECDH, ECDSA on no AVX2: p256-ecdsa-verify/* takes 67.92 µs with rind, 63.53 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.07</text>
+<rect x="876.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>P-256 ECDH, ECDSA on aarch64: p256-ecdsa-keygen/* takes 10.55 µs with rind, 10.06 µs with aws-lc-rs</title></rect>
+<text x="911.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.05</text>
+<rect x="1024.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>P-256 ECDH, ECDSA on no crypto: p256-ecdsa-verify/* takes 53.89 µs with rind, 53.03 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.02</text>
+<rect x="1098.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>P-256 ECDH, ECDSA on armv7: p256-ecdsa-verify/* takes 343.20 µs with rind, 530.70 µs with aws-lc-rs</title></rect>
+<text x="1133.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.65</text>
+<rect x="1172.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>P-256 ECDH, ECDSA on armv7 NEON: p256-ecdsa-verify/* takes 343.10 µs with rind, 530.60 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.65</text>
+<rect x="1246.4" y="383.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>P-256 ECDH, ECDSA on portable: p256-ecdsa-verify/* takes 146.30 µs with rind, 248.00 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="396.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.59</text>
 <text x="12.0" y="416.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-384 ECDH, ECDSA</text>
-<rect x="284.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>P-384 ECDH, ECDSA on x86_64: p384-ecdh-stored/* takes 96.44 µs with rind, 100.70 µs with aws-lc-rs</title></rect>
-<text x="319.4" y="416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.96</text>
-<rect x="432.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>P-384 ECDH, ECDSA on no ADX: p384-ecdh-stored/* takes 157.90 µs with rind, 159.90 µs with aws-lc-rs</title></rect>
-<text x="467.4" y="416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="506.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>P-384 ECDH, ECDSA on no AVX2: p384-ecdh-stored/* takes 183.00 µs with rind, 185.30 µs with aws-lc-rs</title></rect>
+<rect x="284.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>P-384 ECDH, ECDSA on x86_64 AVX-512: p384-ecdh-stored/* takes 134.50 µs with rind, 137.30 µs with aws-lc-rs</title></rect>
+<text x="319.4" y="416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.98</text>
+<rect x="506.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>P-384 ECDH, ECDSA on no ADX: p384-ecdh-stored/* takes 182.70 µs with rind, 185.30 µs with aws-lc-rs</title></rect>
 <text x="541.4" y="416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="802.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>P-384 ECDH, ECDSA on aarch64: p384-ecdh-stored/* takes 154.20 µs with rind, 186.70 µs with aws-lc-rs</title></rect>
-<text x="837.4" y="416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.83</text>
-<rect x="876.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>P-384 ECDH, ECDSA on no crypto: p384-ecdh-stored/* takes 154.30 µs with rind, 186.60 µs with aws-lc-rs</title></rect>
+<rect x="580.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>P-384 ECDH, ECDSA on no AVX2: p384-ecdh-stored/* takes 182.90 µs with rind, 185.40 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="876.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>P-384 ECDH, ECDSA on aarch64: p384-ecdh-stored/* takes 154.50 µs with rind, 186.70 µs with aws-lc-rs</title></rect>
 <text x="911.4" y="416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.83</text>
-<rect x="950.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>P-384 ECDH, ECDSA on armv7: p384-ecdsa-verify/* takes 839.10 µs with rind, 1.86 ms with aws-lc-rs</title></rect>
-<text x="985.4" y="416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.45</text>
-<rect x="1024.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>P-384 ECDH, ECDSA on portable: p384-ecdsa-verify/* takes 697.00 µs with rind, 603.20 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.16</text>
+<rect x="1024.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>P-384 ECDH, ECDSA on no crypto: p384-ecdh-stored/* takes 154.30 µs with rind, 186.60 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.83</text>
+<rect x="1098.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>P-384 ECDH, ECDSA on armv7: p384-ecdsa-verify/* takes 828.10 µs with rind, 1.86 ms with aws-lc-rs</title></rect>
+<text x="1133.4" y="416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.44</text>
+<rect x="1172.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>P-384 ECDH, ECDSA on armv7 NEON: p384-ecdsa-verify/* takes 829.00 µs with rind, 1.86 ms with aws-lc-rs</title></rect>
+<text x="1207.4" y="416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.45</text>
+<rect x="1246.4" y="403.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>P-384 ECDH, ECDSA on portable: p384-ecdsa-verify/* takes 497.10 µs with rind, 900.40 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="416.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.55</text>
 <text x="12.0" y="436.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">P-521 ECDH, ECDSA</text>
-<rect x="284.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>P-521 ECDH, ECDSA on x86_64: p521-ecdh-stored/* takes 160.60 µs with rind, 156.80 µs with aws-lc-rs</title></rect>
-<text x="319.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.02</text>
-<rect x="432.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>P-521 ECDH, ECDSA on no ADX: p521-ecdh-stored/* takes 286.40 µs with rind, 288.30 µs with aws-lc-rs</title></rect>
-<text x="467.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="506.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>P-521 ECDH, ECDSA on no AVX2: p521-ecdh-stored/* takes 334.70 µs with rind, 337.20 µs with aws-lc-rs</title></rect>
+<rect x="284.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>P-521 ECDH, ECDSA on x86_64 AVX-512: p521-ecdh-stored/* takes 228.40 µs with rind, 230.80 µs with aws-lc-rs</title></rect>
+<text x="319.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="506.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>P-521 ECDH, ECDSA on no ADX: p521-ecdh-stored/* takes 335.30 µs with rind, 337.30 µs with aws-lc-rs</title></rect>
 <text x="541.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="802.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>P-521 ECDH, ECDSA on aarch64: p521-ecdh-stored/* takes 244.50 µs with rind, 367.30 µs with aws-lc-rs</title></rect>
-<text x="837.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.67</text>
-<rect x="876.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>P-521 ECDH, ECDSA on no crypto: p521-ecdh-stored/* takes 244.70 µs with rind, 366.90 µs with aws-lc-rs</title></rect>
+<rect x="580.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>P-521 ECDH, ECDSA on no AVX2: p521-ecdh-stored/* takes 334.80 µs with rind, 336.80 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="876.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>P-521 ECDH, ECDSA on aarch64: p521-ecdh-stored/* takes 244.10 µs with rind, 367.00 µs with aws-lc-rs</title></rect>
 <text x="911.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.67</text>
-<rect x="950.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>P-521 ECDH, ECDSA on armv7: p521-ecdsa-verify/* takes 1.53 ms with rind, 1.42 ms with aws-lc-rs</title></rect>
-<text x="985.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.08</text>
-<rect x="1024.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>P-521 ECDH, ECDSA on portable: p521-ecdsa-verify/* takes 1.26 ms with rind, 450.00 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.79</text>
+<rect x="1024.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>P-521 ECDH, ECDSA on no crypto: p521-ecdh-stored/* takes 244.60 µs with rind, 367.20 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.67</text>
+<rect x="1098.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>P-521 ECDH, ECDSA on armv7: p521-ecdsa-verify/* takes 1.28 ms with rind, 1.42 ms with aws-lc-rs</title></rect>
+<text x="1133.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.90</text>
+<rect x="1172.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>P-521 ECDH, ECDSA on armv7 NEON: p521-ecdsa-verify/* takes 1.28 ms with rind, 1.43 ms with aws-lc-rs</title></rect>
+<text x="1207.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.90</text>
+<rect x="1246.4" y="423.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>P-521 ECDH, ECDSA on portable: p521-ecdh-stored/* takes 384.80 µs with rind, 344.60 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="436.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.12</text>
 <text x="12.0" y="456.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-KEM</text>
-<rect x="284.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ML-KEM on x86_64: mlkem768-keygen/* takes 6.96 µs with rind, 12.17 µs with aws-lc-rs</title></rect>
-<text x="319.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.57</text>
-<rect x="506.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ML-KEM on no AVX2: mlkem768-keygen/* takes 29.32 µs with rind, 33.17 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.88</text>
-<rect x="802.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>ML-KEM on aarch64: mlkem768-encaps/* takes 19.60 µs with rind, 19.83 µs with aws-lc-rs</title></rect>
-<text x="837.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="876.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ML-KEM on no crypto: mlkem768-encaps/* takes 15.70 µs with rind, 17.95 µs with aws-lc-rs</title></rect>
-<text x="911.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.87</text>
-<rect x="950.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ML-KEM on armv7: mlkem768-encaps/* takes 57.50 µs with rind, 84.49 µs with aws-lc-rs</title></rect>
-<text x="985.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.68</text>
-<rect x="1024.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ML-KEM on portable: mlkem768-keygen/* takes 28.11 µs with rind, 45.45 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.62</text>
+<rect x="284.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ML-KEM on x86_64 AVX-512: mlkem768-keygen/* takes 9.68 µs with rind, 12.82 µs with aws-lc-rs</title></rect>
+<text x="319.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.75</text>
+<rect x="432.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>ML-KEM on no AVX-512: mlkem768-keygen/* takes 10.33 µs with rind, 10.86 µs with aws-lc-rs</title></rect>
+<text x="467.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.95</text>
+<rect x="580.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ML-KEM on no AVX2: mlkem768-keygen/* takes 29.42 µs with rind, 33.20 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.89</text>
+<rect x="876.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>ML-KEM on aarch64: mlkem768-encaps/* takes 19.55 µs with rind, 19.78 µs with aws-lc-rs</title></rect>
+<text x="911.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="950.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ML-KEM on no SHA-3: mlkem768-encaps/* takes 15.62 µs with rind, 17.50 µs with aws-lc-rs</title></rect>
+<text x="985.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.89</text>
+<rect x="1024.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ML-KEM on no crypto: mlkem768-encaps/* takes 15.60 µs with rind, 17.98 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.87</text>
+<rect x="1098.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ML-KEM on armv7: mlkem768-encaps/* takes 57.48 µs with rind, 84.59 µs with aws-lc-rs</title></rect>
+<text x="1133.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.68</text>
+<rect x="1172.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ML-KEM on armv7 NEON: mlkem768-encaps/* takes 57.49 µs with rind, 84.48 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.68</text>
+<rect x="1246.4" y="443.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>ML-KEM on portable: mlkem768-keygen/* takes 33.89 µs with rind, 47.03 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="456.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.72</text>
 <text x="12.0" y="476.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">X-Wing</text>
 <text x="12.0" y="496.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">ML-DSA</text>
+<rect x="284.4" y="483.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ML-DSA on x86_64 AVX-512: mldsa87-keygen/* takes 55.28 µs with rind, 63.50 µs with aws-lc-rs</title></rect>
+<text x="319.4" y="496.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.87</text>
+<rect x="580.4" y="483.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>ML-DSA on no AVX2: mldsa87-keygen/* takes 170.40 µs with rind, 178.10 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="496.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.96</text>
+<rect x="876.4" y="483.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>ML-DSA on aarch64: mldsa87-keygen/* takes 107.80 µs with rind, 117.70 µs with aws-lc-rs</title></rect>
+<text x="911.4" y="496.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.92</text>
+<rect x="950.4" y="483.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>ML-DSA on no SHA-3: mldsa65-sign/* takes 144.70 µs with rind, 160.10 µs with aws-lc-rs</title></rect>
+<text x="985.4" y="496.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.90</text>
+<rect x="1024.4" y="483.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>ML-DSA on no crypto: mldsa65-sign/* takes 145.30 µs with rind, 161.20 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="496.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.90</text>
+<rect x="1098.4" y="483.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ML-DSA on armv7: mldsa65-sign/* takes 629.40 µs with rind, 774.90 µs with aws-lc-rs</title></rect>
+<text x="1133.4" y="496.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.81</text>
+<rect x="1172.4" y="483.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>ML-DSA on armv7 NEON: mldsa65-sign/* takes 636.50 µs with rind, 776.20 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="496.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.82</text>
+<rect x="1246.4" y="483.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>ML-DSA on portable: mldsa87-keygen/* takes 184.90 µs with rind, 203.80 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="496.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.91</text>
 <text x="12.0" y="516.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">RSA signatures</text>
-<rect x="284.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA signatures on x86_64: rsa6144-pkcs1-sha256-sign/* takes 10.02 ms with rind, 10.26 ms with aws-lc-rs</title></rect>
+<rect x="284.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA signatures on x86_64 AVX-512: rsa2056-pkcs1-sha256-sign/* takes 1.22 ms with rind, 1.25 ms with aws-lc-rs</title></rect>
 <text x="319.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.98</text>
-<rect x="358.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA signatures on no IFMA: rsa3072-pkcs1-sha256-sign/* takes 1.73 ms with rind, 1.76 ms with aws-lc-rs</title></rect>
-<text x="393.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.98</text>
-<rect x="432.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>RSA signatures on no ADX: rsa3072-pkcs1-sha256-sign/* takes 2.44 ms with rind, 2.48 ms with aws-lc-rs</title></rect>
-<text x="467.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="506.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>RSA signatures on no AVX2: rsa2056-pkcs1-sha256-sign/* takes 1.52 ms with rind, 1.45 ms with aws-lc-rs</title></rect>
-<text x="541.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.05</text>
-<rect x="802.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA signatures on aarch64: rsa2056-pkcs1-sha256-sign/* takes 1.43 ms with rind, 1.47 ms with aws-lc-rs</title></rect>
-<text x="837.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.97</text>
-<rect x="876.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA signatures on no crypto: rsa2056-pkcs1-sha256-sign/* takes 1.43 ms with rind, 1.47 ms with aws-lc-rs</title></rect>
+<rect x="358.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>RSA signatures on no IFMA: rsa3072-pkcs1-sha256-sign/* takes 1.30 ms with rind, 1.31 ms with aws-lc-rs</title></rect>
+<text x="393.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="432.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>RSA signatures on no AVX-512: rsa2048-pss-sha256-sign/* takes 521.10 µs with rind, 496.00 µs with aws-lc-rs</title></rect>
+<text x="467.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.05</text>
+<rect x="506.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>RSA signatures on no ADX: rsa4096-pkcs1-sha256-sign/* takes 6.48 ms with rind, 6.50 ms with aws-lc-rs</title></rect>
+<text x="541.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="580.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>RSA signatures on no AVX2: rsa2056-pkcs1-sha256-sign/* takes 1.51 ms with rind, 1.45 ms with aws-lc-rs</title></rect>
+<text x="615.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.04</text>
+<rect x="876.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA signatures on aarch64: rsa2056-pkcs1-sha256-sign/* takes 1.43 ms with rind, 1.47 ms with aws-lc-rs</title></rect>
 <text x="911.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.97</text>
-<rect x="950.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>RSA signatures on armv7: rsa2056-pkcs1-sha256-sign/* takes 5.11 ms with rind, 5.11 ms with aws-lc-rs</title></rect>
-<text x="985.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="1024.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>RSA signatures on portable: rsa6144-pkcs1-sha256-verify/* takes 983.80 µs with rind, 225.90 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">4.36</text>
+<rect x="1024.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA signatures on no crypto: rsa2056-pkcs1-sha256-sign/* takes 1.44 ms with rind, 1.47 ms with aws-lc-rs</title></rect>
+<text x="1059.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.98</text>
+<rect x="1098.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>RSA signatures on armv7: rsa2056-pkcs1-sha256-sign/* takes 5.08 ms with rind, 5.12 ms with aws-lc-rs</title></rect>
+<text x="1133.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="1172.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>RSA signatures on armv7 NEON: rsa2056-pkcs1-sha256-sign/* takes 5.08 ms with rind, 5.14 ms with aws-lc-rs</title></rect>
+<text x="1207.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="1246.4" y="503.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA signatures on portable: rsa6144-pkcs1-sha256-verify/* takes 233.80 µs with rind, 246.80 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="516.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.95</text>
 <text x="12.0" y="536.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">RSA-OAEP</text>
-<rect x="284.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA-OAEP on x86_64: rsa2048-oaep-sha256-decrypt/* takes 199.30 µs with rind, 215.70 µs with aws-lc-rs</title></rect>
-<text x="319.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.92</text>
-<rect x="358.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA-OAEP on no IFMA: rsa2048-oaep-sha256-decrypt/* takes 524.70 µs with rind, 576.60 µs with aws-lc-rs</title></rect>
-<text x="393.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.91</text>
-<rect x="432.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA-OAEP on no ADX: rsa2048-oaep-sha256-decrypt/* takes 485.10 µs with rind, 499.50 µs with aws-lc-rs</title></rect>
-<text x="467.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.97</text>
-<rect x="506.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA-OAEP on no AVX2: rsa2048-oaep-sha256-decrypt/* takes 879.10 µs with rind, 899.70 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.98</text>
-<rect x="802.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>RSA-OAEP on aarch64: rsa2048-oaep-sha256-encrypt/* takes 16.89 µs with rind, 28.74 µs with aws-lc-rs</title></rect>
-<text x="837.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.59</text>
-<rect x="876.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>RSA-OAEP on no crypto: rsa2048-oaep-sha256-encrypt/* takes 18.21 µs with rind, 30.68 µs with aws-lc-rs</title></rect>
+<rect x="284.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA-OAEP on x86_64 AVX-512: rsa2048-oaep-sha256-decrypt/* takes 226.60 µs with rind, 244.30 µs with aws-lc-rs</title></rect>
+<text x="319.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.93</text>
+<rect x="358.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>RSA-OAEP on no IFMA: rsa2048-oaep-sha256-decrypt/* takes 395.40 µs with rind, 450.90 µs with aws-lc-rs</title></rect>
+<text x="393.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.88</text>
+<rect x="432.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>RSA-OAEP on no AVX-512: rsa2048-oaep-sha256-decrypt/* takes 520.40 µs with rind, 495.30 µs with aws-lc-rs</title></rect>
+<text x="467.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.05</text>
+<rect x="506.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA-OAEP on no ADX: rsa2048-oaep-sha256-decrypt/* takes 576.60 µs with rind, 596.20 µs with aws-lc-rs</title></rect>
+<text x="541.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.97</text>
+<rect x="580.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>RSA-OAEP on no AVX2: rsa2048-oaep-sha256-decrypt/* takes 884.80 µs with rind, 899.40 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.98</text>
+<rect x="876.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>RSA-OAEP on aarch64: rsa2048-oaep-sha256-encrypt/* takes 17.00 µs with rind, 28.77 µs with aws-lc-rs</title></rect>
 <text x="911.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.59</text>
-<rect x="950.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA-OAEP on armv7: rsa2048-oaep-sha256-decrypt/* takes 2.54 ms with rind, 2.70 ms with aws-lc-rs</title></rect>
-<text x="985.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.94</text>
-<rect x="1024.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>RSA-OAEP on portable: rsa2048-oaep-sha256-encrypt/* takes 112.50 µs with rind, 35.38 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.18</text>
+<rect x="1024.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>RSA-OAEP on no crypto: rsa2048-oaep-sha256-encrypt/* takes 18.37 µs with rind, 30.71 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.60</text>
+<rect x="1098.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA-OAEP on armv7: rsa2048-oaep-sha256-decrypt/* takes 2.52 ms with rind, 2.71 ms with aws-lc-rs</title></rect>
+<text x="1133.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.93</text>
+<rect x="1172.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>RSA-OAEP on armv7 NEON: rsa2048-oaep-sha256-decrypt/* takes 2.53 ms with rind, 2.71 ms with aws-lc-rs</title></rect>
+<text x="1207.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.93</text>
+<rect x="1246.4" y="523.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>RSA-OAEP on portable: rsa2048-oaep-sha256-decrypt/* takes 1.25 ms with rind, 1.53 ms with aws-lc-rs</title></rect>
+<text x="1281.4" y="536.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.82</text>
 <text x="12.0" y="556.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">HPKE</text>
+<rect x="284.4" y="543.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>HPKE on x86_64 AVX-512: hpke-x25519-setup-sender/* takes 33.91 µs with rind, 36.49 µs with aws-lc-rs</title></rect>
+<text x="319.4" y="556.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.93</text>
+<rect x="580.4" y="543.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>HPKE on no AVX2: hpke-x25519-setup-sender/* takes 49.62 µs with rind, 53.39 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="556.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.93</text>
+<rect x="876.4" y="543.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>HPKE on aarch64: hpke-x25519-setup-sender/* takes 36.05 µs with rind, 47.13 µs with aws-lc-rs</title></rect>
+<text x="911.4" y="556.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.76</text>
+<rect x="1024.4" y="543.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>HPKE on no crypto: hpke-x25519-aes128-gcm-seal/*/1350B takes 6.17 µs with rind, 6.56 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="556.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.94</text>
+<rect x="1098.4" y="543.0" width="70.0" height="18.0" rx="2" fill="#6da7ec"><title>HPKE on armv7: hpke-x25519-aes128-gcm-seal/*/1350B takes 785 ns with rind, 1.14 µs with aws-lc-rs</title></rect>
+<text x="1133.4" y="556.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.69</text>
+<rect x="1172.4" y="543.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>HPKE on armv7 NEON: hpke-x25519-aes128-gcm-seal/*/1350B takes 22.25 µs with rind, 7.68 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="556.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.90</text>
+<rect x="1246.4" y="543.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>HPKE on portable: hpke-x25519-aes128-gcm-seal/*/1350B takes 11.33 µs with rind, 11.71 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="556.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.97</text>
 <text x="12.0" y="576.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">JSON Web Tokens</text>
-<rect x="284.4" y="563.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>JSON Web Tokens on x86_64: jwt-eddsa-verify/*/token takes 23.80 µs with rind, 23.79 µs with aws-lc-rs</title></rect>
+<rect x="284.4" y="563.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>JSON Web Tokens on x86_64 AVX-512: jwt-eddsa-verify/*/token takes 36.54 µs with rind, 36.50 µs with aws-lc-rs</title></rect>
 <text x="319.4" y="576.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="506.4" y="563.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>JSON Web Tokens on no AVX2: jwt-es256-verify/*/token takes 66.77 µs with rind, 64.38 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="576.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.04</text>
-<rect x="802.4" y="563.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>JSON Web Tokens on aarch64: jwt-es256-verify/*/token takes 52.79 µs with rind, 53.32 µs with aws-lc-rs</title></rect>
-<text x="837.4" y="576.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="876.4" y="563.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>JSON Web Tokens on no crypto: jwt-es256-verify/*/token takes 53.80 µs with rind, 53.56 µs with aws-lc-rs</title></rect>
-<text x="911.4" y="576.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="950.4" y="563.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>JSON Web Tokens on armv7: jwt-rs256-verify/*/token takes 70.74 µs with rind, 74.92 µs with aws-lc-rs</title></rect>
-<text x="985.4" y="576.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.94</text>
-<rect x="1024.4" y="563.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>JSON Web Tokens on portable: jwt-rs256-verify/*/token takes 115.00 µs with rind, 33.02 µs with aws-lc-rs</title></rect>
-<text x="1059.4" y="576.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.48</text>
+<rect x="580.4" y="563.0" width="70.0" height="18.0" rx="2" fill="#8a2f1f"><title>JSON Web Tokens on no AVX2: jwt-es256-verify/*/token takes 67.51 µs with rind, 64.20 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="576.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.05</text>
+<rect x="876.4" y="563.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>JSON Web Tokens on aarch64: jwt-es256-verify/*/token takes 53.70 µs with rind, 53.33 µs with aws-lc-rs</title></rect>
+<text x="911.4" y="576.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
+<rect x="1024.4" y="563.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>JSON Web Tokens on no crypto: jwt-es256-verify/*/token takes 54.11 µs with rind, 53.57 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="576.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
+<rect x="1098.4" y="563.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>JSON Web Tokens on armv7: jwt-rs256-verify/*/token takes 71.12 µs with rind, 75.09 µs with aws-lc-rs</title></rect>
+<text x="1133.4" y="576.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.95</text>
+<rect x="1172.4" y="563.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>JSON Web Tokens on armv7 NEON: jwt-rs256-verify/*/token takes 71.48 µs with rind, 75.45 µs with aws-lc-rs</title></rect>
+<text x="1207.4" y="576.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.95</text>
+<rect x="1246.4" y="563.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>JSON Web Tokens on portable: jwt-hs256-verify/*/token takes 1.87 µs with rind, 1.99 µs with aws-lc-rs</title></rect>
+<text x="1281.4" y="576.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.94</text>
 <text x="12.0" y="596.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">rind-rustls handshakes</text>
-<rect x="284.4" y="583.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>rind-rustls handshakes on x86_64: rustls-full-handshake-key/ecdsa-p521/* takes 1.08 ms with rind, 978.40 µs with aws-lc-rs</title></rect>
-<text x="319.4" y="596.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.10</text>
-<rect x="506.4" y="583.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>rind-rustls handshakes on no AVX2: rustls-full-handshake-key/rsa-4096/* takes 6.93 ms with rind, 6.99 ms with aws-lc-rs</title></rect>
-<text x="541.4" y="596.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
-<rect x="802.4" y="583.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>rind-rustls handshakes on aarch64: rustls-full-handshake-key/rsa-4096/* takes 4.91 ms with rind, 5.41 ms with ring</title></rect>
-<text x="837.4" y="596.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.91</text>
-<rect x="876.4" y="583.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>rind-rustls handshakes on no crypto: rustls-full-handshake-group/x25519mlkem768/* takes 375.80 µs with rind, 455.60 µs with aws-lc-rs</title></rect>
-<text x="911.4" y="596.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.82</text>
-<rect x="950.4" y="583.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>rind-rustls handshakes on armv7: rustls-full-handshake-key/ecdsa-p521/* takes 5.55 ms with rind, 5.82 ms with aws-lc-rs</title></rect>
-<text x="985.4" y="596.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.95</text>
-<rect x="1024.4" y="583.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>rind-rustls handshakes on portable: rustls-full-handshake-key/rsa-4096/* takes 32.55 ms with rind, 9.02 ms with aws-lc-rs</title></rect>
-<text x="1059.4" y="596.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.61</text>
+<rect x="284.4" y="583.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>rind-rustls handshakes on x86_64 AVX-512: rustls-full-handshake-key/rsa-4096/* takes 1.71 ms with rind, 1.84 ms with aws-lc-rs</title></rect>
+<text x="319.4" y="596.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.93</text>
+<rect x="580.4" y="583.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>rind-rustls handshakes on no AVX2: rustls-full-handshake-key/rsa-4096/* takes 6.88 ms with rind, 7.00 ms with aws-lc-rs</title></rect>
+<text x="615.4" y="596.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.98</text>
+<rect x="876.4" y="583.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>rind-rustls handshakes on aarch64: rustls-full-handshake-key/rsa-4096/* takes 4.90 ms with rind, 5.42 ms with ring</title></rect>
+<text x="911.4" y="596.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.90</text>
+<rect x="1024.4" y="583.0" width="70.0" height="18.0" rx="2" fill="#2a78d6"><title>rind-rustls handshakes on no crypto: rustls-full-handshake-group/x25519mlkem768/* takes 377.80 µs with rind, 453.90 µs with aws-lc-rs</title></rect>
+<text x="1059.4" y="596.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">0.83</text>
+<rect x="1098.4" y="583.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>rind-rustls handshakes on armv7: rustls-full-handshake-key/rsa-4096/* takes 17.00 ms with rind, 18.00 ms with ring</title></rect>
+<text x="1133.4" y="596.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.94</text>
+<rect x="1172.4" y="583.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>rind-rustls handshakes on armv7 NEON: rustls-full-handshake-key/rsa-4096/* takes 17.05 ms with rind, 18.13 ms with aws-lc-rs</title></rect>
+<text x="1207.4" y="596.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.94</text>
+<rect x="1246.4" y="583.0" width="70.0" height="18.0" rx="2" fill="#184f95"><title>rind-rustls handshakes on portable: rustls-full-handshake-key/ecdsa-p521/* takes 2.00 ms with rind, 2.22 ms with aws-lc-rs</title></rect>
+<text x="1281.4" y="596.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.90</text>
 <text x="12.0" y="616.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">rind-rustls 1 MB transfer</text>
-<rect x="284.4" y="603.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>rind-rustls 1 MB transfer on x86_64: rustls-bulk/chacha20poly1305/* takes 840.00 µs with rind, 838.30 µs with ring</title></rect>
+<rect x="284.4" y="603.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>rind-rustls 1 MB transfer on x86_64 AVX-512: rustls-bulk/chacha20poly1305/* takes 919.80 µs with rind, 915.80 µs with ring</title></rect>
 <text x="319.4" y="616.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="506.4" y="603.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>rind-rustls 1 MB transfer on no AVX2: rustls-bulk/aes256-gcm/* takes 714.20 µs with rind, 703.90 µs with aws-lc-rs</title></rect>
-<text x="541.4" y="616.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
-<rect x="802.4" y="603.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>rind-rustls 1 MB transfer on aarch64: rustls-bulk/chacha20poly1305/* takes 1.94 ms with rind, 1.94 ms with ring</title></rect>
-<text x="837.4" y="616.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="876.4" y="603.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>rind-rustls 1 MB transfer on no crypto: rustls-bulk/chacha20poly1305/* takes 1.94 ms with rind, 1.95 ms with aws-lc-rs</title></rect>
+<rect x="580.4" y="603.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>rind-rustls 1 MB transfer on no AVX2: rustls-bulk/aes128-gcm/* takes 678.90 µs with rind, 670.20 µs with aws-lc-rs</title></rect>
+<text x="615.4" y="616.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.01</text>
+<rect x="876.4" y="603.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>rind-rustls 1 MB transfer on aarch64: rustls-bulk/chacha20poly1305/* takes 1.94 ms with rind, 1.94 ms with ring</title></rect>
 <text x="911.4" y="616.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="950.4" y="603.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>rind-rustls 1 MB transfer on armv7: rustls-bulk/chacha20poly1305/* takes 3.28 ms with rind, 3.29 ms with ring</title></rect>
-<text x="985.4" y="616.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
-<rect x="1024.4" y="603.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>rind-rustls 1 MB transfer on portable: rustls-bulk/aes256-gcm/* takes 110.70 ms with rind, 15.46 ms with aws-lc-rs</title></rect>
-<text x="1059.4" y="616.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">7.16</text>
+<rect x="1024.4" y="603.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>rind-rustls 1 MB transfer on no crypto: rustls-bulk/chacha20poly1305/* takes 1.94 ms with rind, 1.95 ms with aws-lc-rs</title></rect>
+<text x="1059.4" y="616.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.00</text>
+<rect x="1098.4" y="603.0" width="70.0" height="18.0" rx="2" fill="#383835"><title>rind-rustls 1 MB transfer on armv7: rustls-bulk/chacha20poly1305/* takes 3.29 ms with rind, 3.30 ms with ring</title></rect>
+<text x="1133.4" y="616.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">0.99</text>
+<rect x="1172.4" y="603.0" width="70.0" height="18.0" rx="2" fill="#ec7a63"><title>rind-rustls 1 MB transfer on armv7 NEON: rustls-bulk/aes256-gcm/* takes 41.38 ms with rind, 12.21 ms with aws-lc-rs</title></rect>
+<text x="1207.4" y="616.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.39</text>
+<rect x="1246.4" y="603.0" width="70.0" height="18.0" rx="2" fill="#c4452c"><title>rind-rustls 1 MB transfer on portable: rustls-bulk/aes256-gcm/* takes 20.33 ms with rind, 16.93 ms with aws-lc-rs</title></rect>
+<text x="1281.4" y="616.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#ffffff">1.20</text>
 </svg>

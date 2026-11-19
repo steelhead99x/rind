@@ -67,6 +67,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("spake2plus-p256-prover-start");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter(|| black_box(secrets.start(&RFC9383, &SESSION).unwrap()));
     });
     group.bench_function("rustcrypto", |b| {
@@ -79,6 +80,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("spake2plus-p256-verifier-start");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         let (share_p, _) = secrets.start(&RFC9383, &SESSION).unwrap();
         b.iter(|| black_box(record.start(&RFC9383, &SESSION, &share_p).unwrap()));
     });
@@ -97,6 +99,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("spake2plus-p256-prover-finish");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter_batched(
             || {
                 let (share_p, prover) = secrets.start(&RFC9383, &SESSION).unwrap();
@@ -133,6 +136,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("spake2plus-p256-verifier-finish");
     group.throughput(Throughput::Elements(1));
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         b.iter_batched(
             || {
                 let (share_p, prover) = secrets.start(&RFC9383, &SESSION).unwrap();

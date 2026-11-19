@@ -236,7 +236,7 @@ pub(crate) mod bignum;
 mod binsec;
 pub(crate) mod file_test;
 #[cfg(any(rind_backend = "x86_64", rind_backend = "aarch64"))]
-pub(crate) mod p256_vg;
+pub(crate) mod vg_ec;
 
 /// Messages and domain separation tags for crosschecking hashes to a curve:
 /// empty, short, and random messages, with tags of one byte, 255 bytes, and
@@ -253,51 +253,91 @@ pub(crate) fn hash_to_curve_inputs() -> Vec<(Vec<u8>, Vec<u8>)> {
     inputs
 }
 
+/// Whether aws-lc's P-256 or P-384 suite accepts `msg` and `dst`, for `bits`
+/// of 256 or 384.
+#[cfg(not(any(miri, target_family = "wasm")))]
+pub(crate) fn aws_lc_hash_to_curve_ok(bits: u16, msg: &[u8], dst: &[u8]) -> bool {
+    aws_lc_hashed_point(bits, msg, dst).is_some()
+}
+
 /// aws-lc's `EC_hash_to_curve_p256_xmd_sha256_sswu`, or its P-384 twin for
 /// `bits` of 384, as an X9.62 uncompressed point.
 #[cfg(not(any(miri, target_family = "wasm")))]
 pub(crate) fn aws_lc_hash_to_curve(bits: u16, msg: &[u8], dst: &[u8]) -> Vec<u8> {
     use aws_lc_sys::*;
 
-    // SAFETY: each pointer is to a live buffer of the length passed with it,
-    // and the point is freed once encoded.
+    let hashed = aws_lc_hashed_point(bits, msg, dst).expect("aws-lc hash to curve");
+    // SAFETY: `group` and `point` are the live pair from the hash, and `out`
+    // has room for an uncompressed point. `hashed` frees the point.
     unsafe {
-        let (group, hash) = match bits {
-            256 => (EC_group_p256(), EC_hash_to_curve_p256_xmd_sha256_sswu as _),
-            384 => (EC_group_p384(), EC_hash_to_curve_p384_xmd_sha384_sswu as _),
-            _ => unreachable!(),
-        };
-        let hash: unsafe extern "C" fn(
-            *const EC_GROUP,
-            *mut EC_POINT,
-            *const u8,
-            usize,
-            *const u8,
-            usize,
-        ) -> core::ffi::c_int = hash;
-        let point = EC_POINT_new(group);
-        assert_eq!(
-            hash(
-                group,
-                point,
-                dst.as_ptr(),
-                dst.len(),
-                msg.as_ptr(),
-                msg.len()
-            ),
-            1
-        );
         let mut out = vec![0; 1 + 2 * usize::from(bits / 8)];
         let len = EC_POINT_point2oct(
-            group,
-            point,
+            hashed.group,
+            hashed.point,
             point_conversion_form_t::POINT_CONVERSION_UNCOMPRESSED,
             out.as_mut_ptr(),
             out.len(),
             core::ptr::null_mut(),
         );
-        EC_POINT_free(point);
         assert_eq!(len, out.len());
         out
+    }
+}
+
+/// aws-lc's hash to P-256 or P-384, or `None` when it refuses the input.
+#[cfg(not(any(miri, target_family = "wasm")))]
+fn aws_lc_hashed_point(bits: u16, msg: &[u8], dst: &[u8]) -> Option<AwsLcPoint> {
+    use aws_lc_sys::*;
+
+    type HashToCurve = unsafe extern "C" fn(
+        *const EC_GROUP,
+        *mut EC_POINT,
+        *const u8,
+        usize,
+        *const u8,
+        usize,
+    ) -> core::ffi::c_int;
+
+    // SAFETY: `group` is a static curve. Each pointer passed to `hash` is a
+    // live buffer of the length passed with it, and `point` is non-null.
+    // A refused hash frees its point here; an accepted one is freed by
+    // `AwsLcPoint`.
+    unsafe {
+        let (group, hash): (*const EC_GROUP, HashToCurve) = match bits {
+            256 => (EC_group_p256(), EC_hash_to_curve_p256_xmd_sha256_sswu),
+            384 => (EC_group_p384(), EC_hash_to_curve_p384_xmd_sha384_sswu),
+            _ => unreachable!(),
+        };
+        let point = EC_POINT_new(group);
+        assert!(!point.is_null());
+        let ok = hash(
+            group,
+            point,
+            dst.as_ptr(),
+            dst.len(),
+            msg.as_ptr(),
+            msg.len(),
+        ) == 1;
+        match ok {
+            true => Some(AwsLcPoint { group, point }),
+            false => {
+                EC_POINT_free(point);
+                None
+            }
+        }
+    }
+}
+
+#[cfg(not(any(miri, target_family = "wasm")))]
+struct AwsLcPoint {
+    group: *const aws_lc_sys::EC_GROUP,
+    point: *mut aws_lc_sys::EC_POINT,
+}
+
+#[cfg(not(any(miri, target_family = "wasm")))]
+impl Drop for AwsLcPoint {
+    fn drop(&mut self) {
+        // SAFETY: `point` came from `EC_POINT_new` and has not been freed.
+        unsafe { aws_lc_sys::EC_POINT_free(self.point) }
     }
 }

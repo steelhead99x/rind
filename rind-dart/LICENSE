@@ -27,6 +27,10 @@ Graviola <https://github.com/ctz/graviola>
   Graviola by ..." header. Its aarch64 ChaCha20 and its Poly1305 began
   as cifra <https://github.com/ctz/cifra>, by the same author under
   CC0-1.0.
+  rind/src/low/portable/sha256_iram.rs is rind's own ESP-IDF Xtensa
+  SHA-256 compression. Its 16-word window follows generic/sha256.rs, and
+  its round constants are generic/sha256_k.rs. Joe Birr-Pixton wrote both
+  for Graviola; the rotates and the block load do not.
   Copyright 2024 Joe Birr-Pixton
   License: Apache-2.0 OR ISC OR MIT-0, the same choice as rind's own code.
   Graviola has no NOTICE file.
@@ -215,7 +219,7 @@ OpenSSL <https://github.com/openssl/openssl>
   What: the files under rind/src/low/{x86_64,arm}/openssl, which
   admin/import-openssl takes from OpenSSL at commit
   2f4e3a5fec05394068cfa7379890ab552483a8a6: for x86_64, SHA-256 and
-  SHA-512 on AVX2 and SHA-512 on the SHA512 instructions, generated from
+  SHA-512 on AVX2, generated from
   crypto/sha/asm/sha512-x86_64.pl, written by Andy Polyakov;
   for 32-bit ARM, Keccak-f[1600] in integer code and on NEON, generated from
   crypto/sha/asm/keccak1600-armv4.pl, written by Andy Polyakov.

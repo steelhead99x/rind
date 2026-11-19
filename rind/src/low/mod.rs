@@ -96,10 +96,12 @@ mod generic {
     // key generation and decapsulation, and every operation elsewhere.
     #[cfg(not(rind_backend = "x86_64"))]
     pub(crate) mod mlkem768_vg;
-    // pyca/verified-garbage's P-256 where it does not run: armv7 and the
-    // portable backend.
+    // pyca/verified-garbage's P-256 and P-384 where they do not run: armv7
+    // and the portable backend.
     #[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
     pub(crate) mod p256_vg;
+    #[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
+    pub(crate) mod p384_vg;
     // pyca/verified-garbage's PBKDF2 where it does not run: every backend
     // but aarch64's.
     #[cfg(not(rind_backend = "aarch64"))]
@@ -128,11 +130,46 @@ mod generic {
         all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha1;
-    #[cfg(all(test, any(rind_backend = "arm", rind_backend = "x86_64")))]
+    #[cfg(all(
+        test,
+        any(
+            rind_backend = "arm",
+            rind_backend = "portable",
+            rind_backend = "x86_64"
+        )
+    ))]
     pub(super) mod sha256;
+    // FIPS 180-4 §4.2.2, one copy. The ESP-IDF Xtensa compressor and the
+    // test compressor above both read it. aarch64 tests compile neither
+    // reader, so the table stays out: clippy denies an unused static.
+    #[cfg(any(
+        all(target_arch = "xtensa", target_os = "espidf"),
+        all(
+            test,
+            any(
+                rind_backend = "arm",
+                rind_backend = "portable",
+                rind_backend = "x86_64"
+            )
+        )
+    ))]
+    pub(super) mod sha256_k;
     // SLH-DSA's SHA-256 lanes one at a time, which x86_64 runs with the SHA
     // extensions or without AVX2.
     pub(super) mod sha256x8;
+    // Rolled SHA-512 on 32-bit microcontrollers (ESP-IDF or no OS), whose
+    // small instruction cache HACL*'s ~47 KiB unrolled body misses. Hosted
+    // 32-bit targets keep HACL*, which took 0.71-0.78 of this loop's time
+    // on i686. Tests compile it everywhere and check it against FIPS 180-4.
+    #[cfg(any(
+        all(
+            rind_backend = "portable",
+            not(target_pointer_width = "64"),
+            any(target_os = "espidf", target_os = "none")
+        ),
+        test
+    ))]
+    pub(super) mod sha512;
     pub(super) mod zeroise;
 }
 
@@ -368,6 +405,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::mlkem768_vg;
         pub(crate) use x86_64::p256_vg;
         pub(crate) use generic::pbkdf2_vg;
+        pub(crate) use x86_64::p384_vg;
         pub(crate) use x86_64::mlkem::{
             mlkem_ntt,
             mlkem_intt,
@@ -494,6 +532,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::mlkem768_vg;
         pub(crate) use aarch64::p256_vg;
         pub(crate) use aarch64::pbkdf2_vg;
+        pub(crate) use aarch64::p384_vg;
         pub(crate) use aarch64::mlkem::{
             mlkem_ntt,
             mlkem_intt,
@@ -558,6 +597,7 @@ cfg_if::cfg_if! {
         };
         pub(crate) use generic::mlkem768_vg;
         pub(crate) use generic::p256_vg;
+        pub(crate) use generic::p384_vg;
         pub(crate) use generic::pbkdf2_vg;
         pub(crate) use generic::sha256x8::sha256_finish_x8;
     } else if #[cfg(rind_backend = "portable")] {
@@ -577,6 +617,7 @@ cfg_if::cfg_if! {
         };
         pub(crate) use generic::mlkem768_vg;
         pub(crate) use generic::p256_vg;
+        pub(crate) use generic::p384_vg;
         pub(crate) use generic::pbkdf2_vg;
         pub(crate) use generic::sha256x8::sha256_finish_x8;
     } else {
