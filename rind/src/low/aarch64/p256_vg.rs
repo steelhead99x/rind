@@ -4,10 +4,12 @@
 //!
 //! Each routine is a whole operation on encoded keys: a public key's
 //! derivation, ECDH with the peer's key validated, and ECDSA verification of
-//! a hash. They measured faster than rind's on every aarch64 CPU, so rind
-//! takes them everywhere. VG signs only deterministically, so signing takes
-//! its public key derivation for the nonce's point and keeps rind's hedged
-//! nonce and arithmetic.
+//! a hash. They measured faster than rind's on every aarch64 CPU for
+//! verification, and on every one but the narrow-multiplier cores
+//! (Cortex-A72, A76, Neoverse N1) for the other two, which keep rind's own.
+//! VG signs only deterministically, so signing takes its public key
+//! derivation for the nonce's point and keeps rind's hedged nonce and
+//! arithmetic.
 //!
 //! Each routine's return code says only whether its inputs were valid: the
 //! private key's range, which rind's `Scalar` already holds it to, and the
@@ -44,10 +46,18 @@ impl P256 {
         Some(Self(()))
     }
 
-    /// [`Self::check`], for the public key's derivation, which measured
-    /// faster than rind's too.
+    /// [`Self::check`], for the public key's derivation. A core on the narrow
+    /// schedules (Cortex-A72, A76, Neoverse N1) is faster on rind's own
+    /// s2n-bignum `p256_scalarmulbase`: on a Pi 5, 36.5 against 45.2 us.
     pub(crate) fn check_public_key() -> Option<Self> {
-        Self::check()
+        super::cpu::wide_multiplier().then_some(Self(()))
+    }
+
+    /// [`Self::check`], for ECDH, with the same exception: rind's narrow
+    /// `p256_scalarmul` takes 200 us to VG's 282 on a Pi 5. VG's
+    /// verification stays faster there, so [`Self::check`] keeps it.
+    pub(crate) fn check_ecdh() -> Option<Self> {
+        super::cpu::wide_multiplier().then_some(Self(()))
     }
 
     /// The public key `dG` of the private key `d`, big-endian, as an X9.62

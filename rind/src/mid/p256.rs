@@ -144,7 +144,7 @@ impl PrivateKey {
     /// Returns a [`SharedSecret`].  May return an error in fault conditions.
     pub(crate) fn diffie_hellman(&self, peer: &PublicKey) -> Result<SharedSecret, Error> {
         let _entry = low::Entry::new_secret();
-        if let Some(vg) = low::p256_vg::P256::check() {
+        if let Some(vg) = low::p256_vg::P256::check_ecdh() {
             return self.vg_diffie_hellman(vg, peer);
         }
         let result = peer.point.multiply(&self.scalar);

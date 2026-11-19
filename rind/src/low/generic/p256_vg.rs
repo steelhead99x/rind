@@ -16,6 +16,10 @@ impl P256 {
         None
     }
 
+    pub(crate) fn check_ecdh() -> Option<Self> {
+        None
+    }
+
     pub(crate) fn public_key(self, _: &[u8; 32]) -> Option<[u8; 65]> {
         match self {}
     }
