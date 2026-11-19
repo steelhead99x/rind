@@ -1,10 +1,11 @@
 use core::fmt;
 use core::marker::PhantomData;
 
-use crate::backend::kem;
 use rustls::crypto::{ActiveKeyExchange, CompletedKeyExchange, SharedSecret, SupportedKxGroup};
 use rustls::ffdhe_groups::FfdheGroup;
 use rustls::{Error, NamedGroup, PeerMisbehaved, ProtocolVersion};
+
+use crate::backend::kem;
 
 /// A key exchange with one ML-KEM parameter set alone, which `group` names.
 pub(super) struct MlKem<A> {

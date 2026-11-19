@@ -1,6 +1,7 @@
-use crate::backend::hmac;
 use rustls::crypto;
 use rustls::crypto::tls13::{Hkdf as RustlsHkdf, HkdfExpander, HkdfUsingHmac, OkmBlock};
+
+use crate::backend::hmac;
 
 pub struct Hmac(&'static hmac::Algorithm);
 

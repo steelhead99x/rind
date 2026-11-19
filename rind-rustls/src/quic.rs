@@ -1,11 +1,12 @@
+#[cfg(feature = "fips")]
+use std::sync::Mutex;
+
 use rind::aead::{self, quic::SAMPLE_LEN};
 #[cfg(feature = "fips")]
 use rind_fips::aead::{self as module, quic as module_quic};
 use rustls::Error;
 use rustls::crypto::cipher::{AeadKey, Iv, Nonce};
 use rustls::quic;
-#[cfg(feature = "fips")]
-use std::sync::Mutex;
 
 /// QUIC packet and header protection for one cipher suite.
 pub(crate) struct Algorithm {

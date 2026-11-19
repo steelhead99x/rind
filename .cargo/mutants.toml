@@ -417,8 +417,8 @@ exclude_re = [
   'rind-rustls/src/aead\.rs:\d+:\d+: replace \+ with \* in (<impl MessageEncrypter for ChaChaTls12Cipher>::encrypted_payload_len|<impl MessageEncrypter for GcmTls12MessageEncrypter>::encrypted_payload_len)$',
   # Pinned to their lines: a `static` has no name to match, and the TLS 1.2
   # suites' `1 << 24`, at the same column, are caught.
-  'rind-rustls/src/cipher_suite\.rs:19:\d+: replace << with >>$',
-  'rind-rustls/src/cipher_suite\.rs:32:\d+: replace << with >>$',
+  'rind-rustls/src/cipher_suite\.rs:18:\d+: replace << with >>$',
+  'rind-rustls/src/cipher_suite\.rs:31:\d+: replace << with >>$',
   'rind-rustls/src/kx_group/hybrid\.rs:\d+:\d+: replace <impl SupportedKxGroup for Hybrid>::usable_for_version -> bool with true$',
   'rind-rustls/src/quic\.rs:\d+:\d+: replace << with >>$',
   'rind-rustls/src/quic\.rs:\d+:\d+: replace <impl quic::PacketKey for PacketKey>::confidentiality_limit -> u64 with 0$',

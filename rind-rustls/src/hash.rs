@@ -1,5 +1,6 @@
-use crate::backend::digest;
 use rustls::crypto::hash;
+
+use crate::backend::digest;
 
 pub struct Hash {
     digest: &'static digest::Algorithm,
