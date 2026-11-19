@@ -196,8 +196,11 @@ pub(crate) fn cpu_denied(_id: &str) -> bool {
     false
 }
 
-// Intel's MXCSR mitigation, where the instructions it covers exist: on x86
-// and x86_64 targets with SSE2, outside Miri, which runs no assembly.
+// Intel's MXCSR mitigation, where `stmxcsr` exists: x86 and x86_64 with
+// SSE2, outside Miri, which runs no assembly. `x86_64-unknown-none` leaves
+// SSE2 off, and `stmxcsr` raises `#UD` there when `CR4.OSFXSR` is clear.
+// Enabling SSE2, including the bare-metal lint's `+sse,+sse2,-soft-float`
+// row, selects the real guard.
 #[cfg_attr(
     not(all(
         any(target_arch = "x86_64", target_arch = "x86"),

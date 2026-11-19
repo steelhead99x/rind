@@ -18,11 +18,11 @@ use core::marker::PhantomData;
 /// `reuse_cache.rs`'s `ReuseCache`, keeping nothing.
 pub(crate) struct ReuseCache<T>(PhantomData<T>);
 
-// The bounds match `reuse_cache.rs`. `new` and `get_or_build` do not need
-// `Copy`: ML-DSA keeps a `Box<[Poly]>`, which is not `Copy`, and a target
-// without compare-and-swap still has to build. `get_or_build_now` returns a
-// copy on the other cache, so it keeps that bound.
-impl<T: Default> ReuseCache<T> {
+// `new` and `get_or_build` store nothing, so they need neither `Copy` nor
+// `Default`. ML-DSA keeps a `Box<[Poly]>`, which is neither, and a target
+// without compare-and-swap still builds it on every use. `get_or_build_now`
+// returns a copy on the other cache, so it keeps that bound.
+impl<T> ReuseCache<T> {
     pub(crate) fn new() -> Self {
         Self(PhantomData)
     }

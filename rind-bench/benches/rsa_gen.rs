@@ -1,8 +1,15 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
+#[cfg(not(target_arch = "xtensa"))]
 fn rsa_key_generation(c: &mut Criterion) {
     // All these are gated under `NOISY_BENCHMARKS` for the benefit of codspeed,
     // which runs each test once and expects deterministic results.  RSA key generation
@@ -63,5 +70,7 @@ fn rsa_key_generation(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, rsa_key_generation);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);
