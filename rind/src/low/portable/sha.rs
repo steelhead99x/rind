@@ -32,6 +32,13 @@ pub(crate) use crate::low::generic::sha512::sha512_compress_blocks;
 #[path = "sha256_iram.rs"]
 mod iram;
 
+// The IRAM body is what ESP-IDF Xtensa ships. Other builds compile it only
+// for the tests below, which call it by name, so their `cargo test` and
+// ctgrind still run the HACL* SHA-256 they ship.
+#[cfg(any(all(target_arch = "xtensa", target_os = "espidf"), test))]
+#[path = "sha256_iram.rs"]
+mod iram;
+
 /// Compresses whole 64-byte `blocks` into `state`.
 ///
 /// `generic::sha256` on every portable target except ESP-IDF Xtensa, which

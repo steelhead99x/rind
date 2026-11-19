@@ -200,7 +200,7 @@ pub unsafe extern "C" fn rind_fips_hmac_context_sign(
     out: *mut u8,
 ) -> usize {
     // SAFETY: the caller's contract.
-    let context = unsafe { Box::from_raw(context) };
+    let mut context = unsafe { Box::from_raw(context) };
     // SAFETY: the caller's contract.
     scrubbed(Depth::Small, || unsafe { write_tag(&context.sign(), out) })
 }

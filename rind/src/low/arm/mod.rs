@@ -29,6 +29,7 @@ pub(crate) mod aesv8_armx;
 pub(crate) mod chacha20;
 pub(crate) mod cpu;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod ct_qemu;
 pub(crate) mod curve25519;
 pub(crate) mod ghashv8_armx;

@@ -36,8 +36,9 @@ impl KeyPair {
     // rind takes moduli up to 8192 bits of any length; ring refuses the
     // rest, and an exponent below 65537.
     fn new(key: rind::rsa::KeyPair) -> Result<Self, error::KeyRejected> {
+        // rind's encoding of a key it loaded always parses.
         let public = PublicKey::new(key.public_key().as_ref())
-            .map_err(|_| error::KeyRejected::invalid_encoding())?;
+            .or(Err(error::KeyRejected::invalid_encoding()))?;
         let bits = public.modulus_bits();
         if bits < 2048 {
             return Err(error::KeyRejected::too_small());
@@ -407,4 +408,22 @@ pub(crate) mod padding {
         SHA512,
         "PSS signatures with SHA-512, MGF1, and a 64-byte random salt."
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PublicKey;
+    use crate::der::tests::tlv;
+
+    #[test]
+    fn modulus_bits_counts_a_top_byte_below_0x80() {
+        // 0x01ff is 9 bits. `8 * len - leading_zeros` becomes `8 * len +
+        // leading_zeros` only for this shape: a modulus whose top bit is set
+        // has no leading zeros, and the two agree.
+        let modulus = tlv(0x02, &[0x01, 0xff]);
+        let exponent = tlv(0x02, &[0x01, 0x00, 0x01]);
+        let der = tlv(0x30, &[modulus, exponent].concat());
+        let key = PublicKey::new(&der).unwrap();
+        assert_eq!(key.modulus_bits(), 9);
+    }
 }

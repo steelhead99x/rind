@@ -86,6 +86,7 @@ mod test;
 
 // vvv Public API
 pub use error::{Error, KeyRejected};
+pub use high::signature::any::KeyPair;
 
 /// Non-API documentation
 #[cfg(doc)]

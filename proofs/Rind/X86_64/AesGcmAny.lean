@@ -48,13 +48,6 @@ theorem gcmDecryptTrunc_full (alg : Algorithm) (key iv cipher auth tag : List (B
   rw [gcmDecryptTrunc, h, List.take_of_length_le (by rw [length_gcmTag])]
   rfl
 
-/-- An IV other than 96 bits hashes as `gcm_hash` does with no AAD. -/
-theorem computeIvBE_other (hLE : Quad32) (iv : List (BitVec 8)) (h : iv.length ≠ 12) :
-    computeIvBE hLE iv = reverseBytesQuad32 (gcmHash hLE [] iv) := by
-  have hz : insertNat64 (mkfour 0 0 0 0) (8 * ([] : List (BitVec 8)).length) 1 = mkfour 0 0 0 0 := by decide
-  rw [computeIvBE, ite_eq_right (by omega), gcmHash, hz]
-  simp [padTo128Bits, leBytesToSeqQuad32, seqNat8ToSeqNat32LE, seqToSeqFourLE]
-
 /-! ## Slices -/
 
 /-- `try_into` of a slice of length `N` to an array holds the slice's bytes. -/

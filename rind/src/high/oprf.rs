@@ -185,7 +185,7 @@ impl Group for Ristretto255 {
         let element = ristretto255::Element::from_uniform_bytes(&uniform);
         // Only the identity encodes to zeros.
         match ct::into_public(ct_equal(&element.to_bytes(), &[0; 32])) {
-            true => Err(identity()),
+            true => Err(IDENTITY_ERROR.into()),
             false => Ok(element),
         }
     }
@@ -274,8 +274,21 @@ fn not_identity(element: ristretto255::Element) -> Option<ristretto255::Element>
 }
 
 /// A NIST curve's group and its suite's hash, over `mid`'s curve.
+///
+/// The five-argument form hashes with `$curve::hash_to_curve`. A test passes
+/// a sixth path in place of that function.
 macro_rules! nist_group {
     ($group:ident, $curve:ident, $hash:ty, $name:literal, $suite:ident) => {
+        nist_group!(
+            $group,
+            $curve,
+            $hash,
+            $name,
+            $suite,
+            $curve::hash_to_curve::hash_to_curve
+        );
+    };
+    ($group:ident, $curve:ident, $hash:ty, $name:literal, $suite:ident, $hash_to_curve:path) => {
         #[derive(Clone, Copy)]
         struct $group;
 
@@ -295,7 +308,7 @@ macro_rules! nist_group {
             /// The point at infinity, which no input is known to reach, is
             /// refused as a small-order point.
             fn hash_to_group(input: &[u8], dst: &[u8]) -> Result<Self::Element, Error> {
-                $curve::hash_to_curve::hash_to_curve(input, dst).map(Into::into)
+                $hash_to_curve(input, dst).map(Into::into)
             }
 
             fn hash_to_scalar(msg: &[&[u8]], dst: &[u8]) -> Result<Self::Scalar, Error> {
@@ -536,9 +549,7 @@ fn len_prefix(x: &[u8]) -> [u8; 2] {
 
 /// The error for the identity where RFC 9497 forbids it, which no input or
 /// batch is known to reach: as the NIST curves' `hash_to_curve` refuses it.
-fn identity() -> Error {
-    KeyFormatError::SmallOrder.into()
-}
+const IDENTITY_ERROR: KeyFormatError = KeyFormatError::SmallOrder;
 
 /// A domain separation tag: `prefix || contextString`.
 struct Dst(Bytes<48>);

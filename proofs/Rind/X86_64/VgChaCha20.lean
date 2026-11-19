@@ -7,7 +7,7 @@ open VG.Spec.ChaCha20 (bytesAt keyAt leftAt restAt keystreamOf wordLE)
 /-!
 # `cipher::ChaCha20` on pyca/verified-garbage's routines, from 256 bytes on x86_64
 
-Where the CPU-feature checks find AVX2 or AVX-512 VL (`RunsVg`),
+Where the CPU-feature checks find AVX2 or AVX-512 VL,
 `cipher::ChaCha20` runs pyca/verified-garbage's (VG's) AVX2 routine, or its
 AVX-512 VL one, from 256 bytes, and a remainder of 65 to 255 bytes after the
 last whole 512-byte group on rind's two-block kernel. The axioms
@@ -16,13 +16,13 @@ below restate VG's Lean theorems about `vg_chacha20_init`,
 wrappers that call them, `VgState::init`, `VgState::apply_avx2`, and
 `VgState::apply_avx512vl`, over VG's own spec,
 `VerifiedGarbage.Spec.ChaCha20`, which `admin/import-vg-models` vendors byte
-for byte. `cipher_vg_spec` composes them, and `chacha20_apply_keystream`
-proves the API's result from them: RFC 8439's encryption, as `Rind.Spec`
+for byte. `cipher_vg_spec` composes them, and `cipher_spec` proves `cipher`'s
+result from them over 256 bytes: RFC 8439's encryption, as `Rind.Spec`
 transliterates it.
 
-The kernel has no proof yet, so the theorems take its contract as the
-hypothesis `Kernel`, which [the x86_64 cipher
-quest](/quest/m4/verified/chacha20-poly1305-x86/cipher.md) is to prove.
+`cipher_spec` takes the kernel's contract as the hypothesis `Kernel`, which
+`Rind.X86_64.ChaCha20Avx2` proves, and `Rind.X86_64.ChaCha20Cipher` composes
+the two at every length and up to the API.
 
 Trusted: each restatement, and that each wrapper passes the routine its
 state's 768 bytes, which `Rind.X86_64.TypesExternal` models as the state, and
@@ -139,9 +139,10 @@ theorem wordBytes_of_words (ws : List U32) (b : List (BitVec 8)) (n : Nat) (hb :
 
 /-! ## Composing the routines, `cipher_vg` -/
 
-/-- The kernel's contract, which no proof covers yet: for as many blocks as
-remain before the 32-bit block counter wraps, it XORs RFC 8439's keystream for
-the key and the counter and nonce into the buffer, as `cipher` calls it. -/
+/-- The kernel's contract, which `Rind.X86_64.ChaCha20Avx2`'s `kernel`
+proves: for as many blocks as remain before the 32-bit block counter wraps,
+it XORs RFC 8439's keystream for the key and the counter and nonce into the
+buffer, as `cipher` calls it. -/
 def Kernel : Prop :=
   ∀ (key : Std.Array U32 8#usize) (counter_nonce : Std.Array U32 4#usize) (buffer : Slice U8),
     counter_nonce.val[0]!.val + (buffer.length + 63) / 64 ≤ 2 ^ 32 →
@@ -396,59 +397,5 @@ theorem check_counter_spec (counter : U32) (len : Usize) :
   all_goals simp only [hm] at *
   all_goals have h4 : i4.val = 2 ^ 32 := by rw [i4_post]; simp [Nat.shiftLeft_eq, U64.size, U64.numBits]
   all_goals split_ifs <;> first | rfl | (exfalso; scalar_tac)
-
-/-- rind runs VG's routines for ChaCha20 on this CPU: the entry guard admits
-the call, a state can be made, and the CPU-feature checks find AVX2, or
-AVX-512 VL. None reads an input. -/
-def RunsVg : Prop :=
-  (∃ e, low.entry.Entry.new_secret = ok e) ∧ (∃ s, VgState.uninit = ok s) ∧
-  ∃ a b s, low.x86_64.cpu.HaveAvx512Vl.check = ok a ∧ low.x86_64.cpu.HaveAvx2.check = ok b ∧
-    low.x86_64.cpu.HaveSsse3.check = ok s ∧ (a.isSome ∨ b.isSome)
-
-/-- ChaCha20 over at least 256 bytes where the CPU-feature checks find AVX2
-or AVX-512 VL (`RunsVg`): RFC 8439's
-encryption of the buffer under the key, the block counter, and the nonce, if
-the counter covers it before it wraps; otherwise `WrongLength`, with the
-buffer unchanged. -/
-theorem chacha20_apply_keystream (h : RunsVg) (hk : Kernel) (k : mid.chacha20.ChaCha20)
-    (nonce : Std.Array U8 12#usize) (counter : U32) (inout : Slice U8) (h256 : 256 ≤ inout.length) :
-    k.apply_keystream nonce counter inout ⦃ r inout' =>
-      if counter.val + (inout.length + 63) / 64 ≤ 2 ^ 32 then
-        r = .Ok () ∧
-          bvs inout'.val = chacha20.encrypt (bvs k.key.val) counter.bv (bvs nonce.val) (bvs inout.val)
-      else r = .Err .WrongLength ∧ inout' = inout ⦄ := by
-  obtain ⟨⟨e, he⟩, hu, a, b, s, ha, hb, hs, hab⟩ := h
-  unfold mid.chacha20.ChaCha20.apply_keystream
-  simp only [he, bind_ok, low.ct.secret_slice, low.ct.public_slice]
-  step*
-  · rw [Slice.len_val] at r_post
-    split_ifs at r_post with hc
-    · subst r_post
-      simp only [hc, ↓reduceIte]
-      have hT : counter.bv.toLEBytes.length = 4 := by simp [BitVec.toLEBytes_length]
-      have hB : wordBytes cc.counter_nonce.val = counter.bv.toLEBytes ++ bvs nonce.val := by
-        rw [cc_post1, s3_post2, s5_post, s4_post, s_post2, s2_post, s1_post]
-        have hnl : nonce.val.length = 12 := nonce.property
-        simp [List.setSlice!, a_post, hT, bvs, Function.comp_def]
-        rw [List.take_of_length_le (by rw [hT]), List.take_of_length_le (by simp [hnl])]
-      have hcn0 : cc.counter_nonce.val[0]!.bv = counter.bv := by
-        rw [← wordLE_wordBytes _ (by simp), hB]
-        conv_rhs => rw [← vg.wordLE_toLEBytes counter.bv]
-        simp only [wordLE, List.getD_eq_getElem?_getD, Nat.mul_zero, Nat.zero_add]
-        rw [List.getElem?_append_left (by simp [BitVec.toLEBytes_length]),
-          List.getElem?_append_left (by simp [BitVec.toLEBytes_length]),
-          List.getElem?_append_left (by simp [BitVec.toLEBytes_length]),
-          List.getElem?_append_left (by simp [BitVec.toLEBytes_length])]
-      have hcnd : wordBytes (cc.counter_nonce.val.drop 1) = bvs nonce.val := by
-        rw [← wordBytes_drop_one, hB, List.drop_left' hT]
-      have hcv : cc.counter_nonce.val[0]!.val = counter.val := by
-        have := congrArg BitVec.toNat hcn0
-        simpa only [UScalar.bv_toNat] using this
-      step with cipher_spec hu hk cc (cc_post2.mpr hab) inout h256 (by rw [hcv]; exact hc) as ⟨c', inout1, h1⟩
-      step*
-    · subst r_post
-      simp_all
-  · rw [Slice.len_val] at r_post
-    split_ifs at r_post ⊢ <;> subst r_post <;> simp_all
 
 end rind.x86_64

@@ -85,6 +85,7 @@ pub(crate) mod chacha20;
 pub(crate) mod chacha20poly1305;
 pub(crate) mod cpu;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod ct_sde;
 pub(crate) mod curve25519_ifma;
 pub(crate) mod curve25519_x25519;
