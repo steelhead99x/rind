@@ -41,6 +41,7 @@ mod tests {
             let asm: Vec<&str> = source
                 .lines()
                 .filter(|line| !line.starts_with("//"))
+                .map(|line| line.trim_start().trim_start_matches("r#\""))
                 .collect();
             let is_adjust = |line: &str| line.starts_with("lea ") && line.ends_with("(%rsp), %rsp");
             for line in &asm {
