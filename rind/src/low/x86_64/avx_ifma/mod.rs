@@ -8,12 +8,13 @@
 //! `vpmadd52luq`, `vpmadd52huq`, and `vpxorq` to its VEX form, one for one,
 //! and where VG's ladder holds three 256-bit accumulators in ymm16 to ymm18,
 //! which VEX cannot name, it renames each live range onto a ymm register dead
-//! throughout it, or spills one around it to the red zone, which the routine
-//! zeroes again before it returns. No other instruction, branch, or memory
-//! access changes, so the routines compute what VG's do and run in constant
-//! time, which `admin/ctgrind` checks on a CPU that has them and
-//! `rind/tests` check against the vendored routines' vectors and
-//! aws-lc-rs. VG's Lean proofs do not cover them; `quest` plans their proof.
+//! throughout it, or spills one around it to a 96-byte stack frame the ladder
+//! allocates at its entry (not the red zone, which Windows lacks), zeroes
+//! before it returns, and frees. No other instruction, branch, or memory
+//! access changes, so the routines compute what VG's do. `admin/ct-sde`
+//! checks the ladder's trace under an Arrow Lake model, as `admin/ctgrind`
+//! cannot decode AVX-IFMA, and `rind/tests` check them against s2n-bignum,
+//! aws-lc-rs, and Wycheproof. VG's Lean proofs do not cover them; `quest` plans their proof.
 
 pub(crate) mod vg_ed25519_verify_avx2_ifma;
 pub(crate) mod vg_ed25519_verify_equation_ifma;
