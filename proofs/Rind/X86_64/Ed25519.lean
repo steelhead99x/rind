@@ -498,7 +498,8 @@ theorem mid_from_bytes_spec (h : Runs) (hs : RunsSha512) (hi : NoCurveIfma) (byt
     rw [ha] at hr1
     split_ifs at hr1 ⊢ with hv
     · obtain ⟨pt, rfl, hpt⟩ := hr1
-      rw [hi]
+      obtain ⟨hi1, hi2⟩ := hi
+      rw [hi1, hi2]
       simp [core.result.Result.Insts.CoreOpsTry.branch, HoldsPoint, ha, hpt]
     · subst hr1
       simp [core.result.Result.Insts.CoreOpsTry.branch,
@@ -665,7 +666,8 @@ theorem from_seed_spec (h : Runs) (hs : RunsSha512) (hi : NoCurveIfma) (seed : S
   unfold mid.ed25519.SigningKey.from_seed mid.ed25519.SigningKey.from_seed_rind low.ct.into_public
     low.ct.into_secret
   simp only [bind_ok]
-  rw [hi]
+  obtain ⟨hi1, -⟩ := hi
+  rw [hi1]
   simp only [bind_ok]
   step with context_new_spec as ⟨c, hc⟩
   step as ⟨s1, hs1⟩

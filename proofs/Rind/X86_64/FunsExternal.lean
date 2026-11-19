@@ -896,4 +896,18 @@ opaque low.x86_64.curve25519_ifma.Curve25519Ifma.ed25519_verify
 
 opaque low.x86_64.curve25519_ifma.Curve25519Ifma.Insts.CoreCloneClone.clone : low.x86_64.curve25519_ifma.Curve25519Ifma → Result low.x86_64.curve25519_ifma.Curve25519Ifma
 
+/-- Whether the CPU runs the AVX-IFMA re-encoding of pyca/verified-garbage's
+X25519 and Ed25519 verification, and those routines, which the proofs here take
+as not running. -/
+opaque low.x86_64.curve25519_avx_ifma.Curve25519AvxIfma.check : Result (Option low.x86_64.curve25519_avx_ifma.Curve25519AvxIfma)
+
+opaque low.x86_64.curve25519_avx_ifma.Curve25519AvxIfma.x25519
+  : low.x86_64.curve25519_avx_ifma.Curve25519AvxIfma → Array Std.U64 4#usize → Array Std.U64 4#usize → Array Std.U64 4#usize →
+    Result (Array Std.U64 4#usize)
+
+opaque low.x86_64.curve25519_avx_ifma.Curve25519AvxIfma.ed25519_verify
+  : low.x86_64.curve25519_avx_ifma.Curve25519AvxIfma → Array Std.U8 32#usize → Slice Std.U8 → Array Std.U8 64#usize → Result Bool
+
+opaque low.x86_64.curve25519_avx_ifma.Curve25519AvxIfma.Insts.CoreCloneClone.clone : low.x86_64.curve25519_avx_ifma.Curve25519AvxIfma → Result low.x86_64.curve25519_avx_ifma.Curve25519AvxIfma
+
 end rind.x86_64

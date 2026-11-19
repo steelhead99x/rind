@@ -516,4 +516,13 @@ opaque low.aarch64.curve25519_ifma.Curve25519Ifma.ed25519_verify
 
 opaque low.aarch64.curve25519_ifma.Curve25519Ifma.Insts.CoreCloneClone.clone : low.aarch64.curve25519_ifma.Curve25519Ifma → Result low.aarch64.curve25519_ifma.Curve25519Ifma
 
+/-- x86_64's AVX-IFMA X25519 and Ed25519 verification, which no aarch64 CPU
+runs, and which the proofs here take as not running. -/
+opaque low.aarch64.curve25519_avx_ifma.Curve25519AvxIfma.check : Result (Option low.aarch64.curve25519_avx_ifma.Curve25519AvxIfma)
+
+opaque low.aarch64.curve25519_avx_ifma.Curve25519AvxIfma.ed25519_verify
+  : low.aarch64.curve25519_avx_ifma.Curve25519AvxIfma → Array Std.U8 32#usize → Slice Std.U8 → Array Std.U8 64#usize → Result Bool
+
+opaque low.aarch64.curve25519_avx_ifma.Curve25519AvxIfma.Insts.CoreCloneClone.clone : low.aarch64.curve25519_avx_ifma.Curve25519AvxIfma → Result low.aarch64.curve25519_avx_ifma.Curve25519AvxIfma
+
 end rind.aarch64
