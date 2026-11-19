@@ -43,7 +43,8 @@ renames [rind-aws-lc-rs](#rind-aws-lc-rs) to `aws-lc-rs` the same way.
 | `Key::new(HMAC_SHA256, key)` | `Key::new(&HMAC_SHA256, key)` |
 | `Key::generate(alg, rng)` | `rand::fill` a `tag_len()`-byte key, then `Key::new` |
 | `Key::algorithm()` | the same, as `&'static` |
-| `Context::{with_key, update, sign}`, `sign`, `Tag` | the same |
+| `Context::{with_key, update}`, `sign`, `Tag` | the same |
+| `Context::sign(self)` | `Context::sign(&mut self)`, which leaves the context keyed to sign another message; bind the context `mut` |
 | `verify(key, data, tag)` | the same, failing with `Error::BadSignature` |
 | `HMAC_SHA256`, `HMAC_SHA384`, `HMAC_SHA512` | the same |
 | `HMAC_SHA1_FOR_LEGACY_USE_ONLY` | `legacy::HMAC_SHA1` |

@@ -9,7 +9,7 @@ use crate::low::{Entry, sha3_keccak_f1600, sha3_keccak_nof4_f1600, sha3_keccak4_
 
 /// A context for incremental computation of a SHA3 hash with an `R`-byte
 /// rate and an `OUT`-byte digest.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Sha3Context<const R: usize, const OUT: usize> {
     sponge: Sponge<R, SHA_PAD_BYTE>,
 }
@@ -317,7 +317,7 @@ pub(crate) fn shake256_x4<const OUT: usize, const P: usize>(
 
 /// A sponge absorbing input, XORed into the state as it arrives, so it needs
 /// no buffer.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Sponge<const R: usize, const PAD: u8> {
     s: [u64; 25],
     /// The bytes of the current block absorbed so far, under `R`.

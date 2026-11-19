@@ -6,8 +6,8 @@ Every VG routine X25519 and Ed25519 run is imported as a theorem, so they earn t
 
 ## Plan
 
-- Import each routine's VG theorem as one axiom about rind's opaque wrapper, under [the m3 epic's composition rule](/quest/m3/verified/README.md), as [the epic](/quest/m2/verified-garbage/README.md)'s Plan settles, and add the `benchmarks/verified.toml` entries for the switched tiers.
-- Prove rind's glue around it as the m3 and m4 epics prove rind's other glue: the word-to-byte conversions around X25519, and Ed25519's key types, whose `Path` picks VG's routines once per key and passes `vg_ed25519_sign_expanded_avx2_ifma` the digest and public key `vg_ed25519_key_pair_avx2_ifma` wrote, as its precondition requires.
+- Import each routine's VG theorem as one axiom about rind's opaque wrapper, under [the m4 epic's composition rule](/quest/m4/verified/README.md#composition-rule), as [the epic](/quest/m2/verified-garbage/README.md)'s Plan settles, and add the `benchmarks/verified.toml` entries for the switched tiers.
+- Prove rind's glue around it as the m4 epic proves rind's other glue: the word-to-byte conversions around X25519, and Ed25519's key types, whose `Path` picks VG's routines once per key and passes `vg_ed25519_sign_expanded_avx2_ifma` the digest and public key `vg_ed25519_key_pair_avx2_ifma` wrote, as its precondition requires.
 - Model gaps, which the maintainer ruled on 2026-11-17 ([kixel-ai/rind#815](https://github.com/kixel-ai/rind/pull/815#issuecomment-6943056592)) as [the epic](/quest/m2/verified-garbage/README.md)'s Plan records: ✅ the stack-slot gap is reported upstream and this ✓ waits for VG's fix and a re-pin (rejected: a rind-side check that each stack load reads only bytes its own frame stored; accepting the model as is). ✅ The `NoResidue` undefined-flags gap is reported upstream and does not hold this ✓, since rind imports no `NoResidue` theorem (rejected: not reporting it).
 
 ## Waiting
