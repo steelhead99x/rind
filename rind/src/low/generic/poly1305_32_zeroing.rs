@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
+
 //! The wipe-on-drop test for `poly1305_32::Poly1305`, in a file of its own:
 //! it needs `unsafe` to read the dropped bytes, and the file with the
 //! type's assertions must not hold any
