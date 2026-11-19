@@ -315,12 +315,10 @@ portable backend's on x86_64 and armv7, for divisions and floating-point arithme
 not list as taking only public operands. On the x86_64 backend it also fails
 on a multiply Intel's MXCSR configuration dependent timing affects that any
 function rind exports reaches outside `rind::low::Mcdt`, Intel's mitigation.
-`nix develop .#dudect --command admin/timing dudect` times each secret
-operation whose secret the API lets it set (not key generation, encapsulation,
-or varied ML-KEM decapsulation keys) on two classes of secret, as dudect does,
-and `admin/timing marvin` runs the Marvin toolkit against RSA-OAEP decryption. They need quiet
-hardware: the weekly `timing` workflow runs them on GitHub's runners, and a
-shared host adds noise that no gate removes.
+`nix develop .#timing --command admin/timing marvin` runs the Marvin toolkit
+against RSA-OAEP decryption. It needs quiet hardware: the weekly `timing`
+workflow runs it on GitHub's runners, and a shared host adds noise that no
+gate removes.
 `nix develop .#prove --command admin/prove` checks rind's HOL Light proofs of
 its assembly, then translates the Rust under proof to Lean with Aeneas and
 checks the proofs in [`proofs/`](proofs/README.md).
