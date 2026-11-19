@@ -240,9 +240,9 @@ pub(crate) fn bytes<'py>(py: Python<'py>, value: impl AsRef<[u8]>) -> Bound<'py,
     PyBytes::new(py, value.as_ref())
 }
 
-/// Adds the submodule `path`, such as `pyrind.signature.verify`, to
+/// Adds the submodule `path`, such as `pyrind.rsa.verify`, to
 /// `parent` under its last component, and to `sys.modules`, so that
-/// `import pyrind.signature.verify` finds it.
+/// `import pyrind.rsa.verify` finds it.
 pub(crate) fn submodule<'py>(
     parent: &Bound<'py, PyModule>,
     path: &str,
