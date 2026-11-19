@@ -8,11 +8,12 @@ Each module mirrors the RustCrypto crate it stands in for, and each trait crate 
 |---|---|---|
 | `digest-0_11` | `digest` 0.11 | `sha2`, `sha3`, `hmac` |
 | `aead-0_6` | `aead` 0.6 | `aes_gcm`, `chacha20poly1305` |
-| `signature-3` | `signature` 3 | `ed25519`, `p256::ecdsa`, `p384::ecdsa`, `p521::ecdsa`, `ml_dsa` |
+| `signature-3` | `signature` 3 | `ed25519`, `p256::ecdsa`, `p384::ecdsa`, `p521::ecdsa`, `ml_dsa`, and with `digest-0_11` too, `rsa::pkcs1v15` and `rsa::pss` |
 
 ```toml
 [dependencies]
-rind-rustcrypto = { version = "0.1", features = ["digest-0_11"] }
+# Every family by default; name only the ones you use with default-features = false.
+rind-rustcrypto = { version = "0.1", default-features = false, features = ["digest-0_11"] }
 ```
 
 ```rust
@@ -32,3 +33,5 @@ assert_eq!(Sha256::digest(b"abc").len(), 32);
 - Ed25519: `Ed25519ph` and context signatures (`DigestSigner`), `Generate`, `TryKeyInit`, serde and the PKCS#8 conversions of `ed25519_dalek` (rind has its own PKCS#8 on its key types), and key export as raw bytes. `verify` is as strict as `ed25519_dalek`'s `verify_strict`: a small-order public key is refused where `ed25519_dalek`'s `verify` accepts it.
 - ECDSA: the generic `ecdsa::SigningKey<C>` (each curve has its own type under the module path its RustCrypto crate uses), RFC 6979 deterministic signing (rind signs with a random nonce, so a signature differs from RustCrypto's for the same key and message, and verifies under it), `Prehash`, `Digest`, `Randomized` and recoverable signing and verification, `SignatureWithOid`, `Generate`, key export (`to_bytes`), PKCS#8 and PEM, and serde. A signing key takes a scalar of exactly the field's length; RustCrypto's `from_slice` also left-pads a shorter one.
 - ML-DSA: the deterministic `Signer` (rind signs hedged, with the empty context), the expanded signing key format, `DigestSigner`, `RandomizedSigner`, signing with a context or from `mu`, `Generate`, `KeyInit` and `KeyExport`, and PKCS#8. A key is made from its 32-byte seed with `SigningKey::from_seed`.
+- RSA: a modulus under 2048 bits (rind refuses it, `rsa` accepts it), `RandomizedSigner` and PSS with a salt of another length than the hash's, `Generate`, encryption, PKCS#8 and serde. A signing key is made from `rsa`'s `PrivateKey` through its PKCS#1 encoding, which `rsa` zeroizes when it is dropped; rind's key pair is the only copy this crate keeps.
+- The KEM traits (`kem` 0.3), all of them, and so no `kem-0_3` feature. `Kem` requires its encapsulation key to implement `Encapsulate`, whose `encapsulate_with_rng` takes the caller's random number generator, and rind's `kem::EncapsulationKey::encapsulate` draws from the system's and offers no way to give it the message. Implementing the method and ignoring the generator would drop a caller's randomness without saying so. Decapsulation alone, `Decapsulate`, cannot be offered without the chain. It needs an addition to rind (FIPS 203's `ML-KEM.Encaps_internal`, with the 32-byte message the caller's generator supplies), which is the owner's call.

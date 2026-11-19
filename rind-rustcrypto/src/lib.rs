@@ -25,3 +25,5 @@ pub use signature_impl::ecdsa::{p256, p384, p521};
 pub use signature_impl::ed25519;
 #[cfg(feature = "signature-3")]
 pub use signature_impl::ml_dsa;
+#[cfg(all(feature = "signature-3", feature = "digest-0_11"))]
+pub use signature_impl::rsa;

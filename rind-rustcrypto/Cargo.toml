@@ -17,12 +17,14 @@ readme = "README.md"
 adapts-several-upstreams = true
 
 [features]
-default = []
+# Every family this crate implements, so a workspace test run covers them; a
+# consumer that wants fewer sets default-features = false and names its own.
+default = ["digest-0_11", "aead-0_6", "signature-3"]
 # Each feature turns on the traits of one released version of one trait crate.
+# There is no `kem-0_3`: see the README's section on what rind cannot back.
 digest-0_11 = ["dep:digest"]
 aead-0_6 = ["dep:aead"]
-signature-3 = ["dep:signature", "dep:ed25519", "dep:ecdsa", "dep:p256", "dep:p384", "dep:p521", "dep:ml-dsa"]
-kem-0_3 = ["dep:kem"]
+signature-3 = ["dep:signature", "dep:ed25519", "dep:ecdsa", "dep:p256", "dep:p384", "dep:p521", "dep:ml-dsa", "dep:rsa"]
 
 [dependencies]
 rind = { version = "0.3.2", path = "../rind" }
@@ -35,7 +37,7 @@ p256 = { version = "0.14", default-features = false, features = ["ecdsa-core"], 
 p384 = { version = "0.14", default-features = false, features = ["ecdsa-core"], optional = true }
 p521 = { version = "0.14", default-features = false, features = ["ecdsa-core"], optional = true }
 ml-dsa = { version = "0.1.2", default-features = false, optional = true }
-kem = { version = "0.3.0", default-features = false, optional = true }
+rsa = { version = "0.10", default-features = false, features = ["encoding", "pkcs1v15"], optional = true }
 
 [dev-dependencies]
 sha2 = "0.11"
@@ -44,6 +46,7 @@ hmac = "0.13"
 aes-gcm = "0.11"
 chacha20poly1305 = "0.11"
 ed25519-dalek = "3"
+rsa = { version = "0.10", features = ["encoding", "pkcs1v15"] }
 p256 = { version = "0.14", features = ["ecdsa"] }
 p384 = { version = "0.14", features = ["ecdsa"] }
 p521 = { version = "0.14", features = ["ecdsa"] }
