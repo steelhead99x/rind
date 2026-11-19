@@ -15,9 +15,9 @@ Keep rules that need an AVX-512 core GitHub's runners do not reliably provide ar
   - The gate flipped, in the kernel's own quest and PR, only if its keep rule holds on every core it names; otherwise the numbers go in that quest's Plan and the gate stays.
 - Candidate follow-ups, each added to its own quest when this host's chip can settle it:
   - [The 256-bit rule](/quest/m2/speed/avoid-zmm.md) was adopted unmeasured; on a downclocking Intel core, time AES-GCM on one core while another runs scalar work, with and without the rule, as its Plan names.
-  - [ML-KEM-768's Keccak lane sharing](/quest/m2/mlkem-avx512-keccak.md) keeps each port only where it measures faster on an AVX-512 host.
+  - ML-KEM-768's Keccak lane sharing, which [kixel-ai/rind#812](https://github.com/kixel-ai/rind/pull/812) merged (its quest is finished and gone), keeps each port only where it measures faster; an AVX-512 host would show whether that holds on other cores.
   - AES-GCM's 512-bit kernel from 2 KB (`AVX512_KERNEL_MINIMUM_CIPHER_LEN`) and ML-KEM's 8-way sampler, the two zmm routines the 256-bit rule's inventory found, checked against their 256-bit siblings on the host's core.
-  - [X25519 and Ed25519](/quest/m2/verified-garbage/curve25519.md) and [RSA](/quest/m2/verified-garbage/rsa-avx512.md) on AVX-512 were timed against pyca/verified-garbage on Zen 4 only; an Intel AVX-512 core would show whether the switch holds there.
+  - X25519 and Ed25519 ([kixel-ai/rind#845](https://github.com/kixel-ai/rind/pull/845)) and RSA ([kixel-ai/rind#814](https://github.com/kixel-ai/rind/pull/814)) on AVX-512 were timed against pyca/verified-garbage on Zen 4 only, and their quests are finished and gone; an Intel AVX-512 core would show whether the switch holds there.
 - The host is never named here or in a PR beyond its chip.
 
 ## Waiting
