@@ -13,15 +13,49 @@
 //! Arithmetic on secrets wraps: the bounds rule out overflow, and a debug
 //! build's overflow check would branch on secret values.
 
-use super::p256::{Fe, Fs, N, P, opaque, select_words, split, sub};
+#[cfg(any(not(rind_backend = "arm"), test))]
+use super::p256::P;
+use super::p256::{Fe, Fs, N, opaque, select_words, split, sub};
 
 /// `x * y / 2^256 mod p_256`, for `x` and `y` below p.
+///
+/// On the `arm` backend this is OpenSSL's `ecp_nistz256_mul_mont`, which
+/// runs the same Montgomery form in fewer cycles than the `umaal` schedule
+/// below; the other 32-bit targets run the schedule.
 pub(super) fn fe_mul(x: &Fe, y: &Fe) -> Fe {
-    Fe(reduce_p(&mul_wide(&x.0, &y.0)))
+    #[cfg(rind_backend = "arm")]
+    {
+        Fe(crate::low::arm::ecp_nistz256::mul_mont(&x.0, &y.0))
+    }
+    #[cfg(not(rind_backend = "arm"))]
+    {
+        fe_mul_umaal(x, y)
+    }
 }
 
 /// `x^2 / 2^256 mod p_256`, for `x` below p.
+///
+/// OpenSSL's `ecp_nistz256_sqr_mont` on the `arm` backend, as [`fe_mul`].
 pub(super) fn fe_sqr(x: &Fe) -> Fe {
+    #[cfg(rind_backend = "arm")]
+    {
+        Fe(crate::low::arm::ecp_nistz256::sqr_mont(&x.0))
+    }
+    #[cfg(not(rind_backend = "arm"))]
+    {
+        fe_sqr_umaal(x)
+    }
+}
+
+/// [`fe_mul`] as an `umaal` schedule in Rust.
+#[cfg_attr(rind_backend = "arm", cfg(test))]
+pub(super) fn fe_mul_umaal(x: &Fe, y: &Fe) -> Fe {
+    Fe(reduce_p(&mul_wide(&x.0, &y.0)))
+}
+
+/// [`fe_sqr`] as an `umaal` schedule in Rust.
+#[cfg_attr(rind_backend = "arm", cfg(test))]
+pub(super) fn fe_sqr_umaal(x: &Fe) -> Fe {
     Fe(reduce_p(&sqr_wide(&x.0)))
 }
 
@@ -108,6 +142,7 @@ fn sqr_row<const I: usize>(t: &mut [u32; 16], x: &[u32; 8]) {
 /// three additions and one subtraction of a word, and a carry of -2 to 4
 /// from column k - 1, so it stays within (-2^33, 2^35) and carries -2 to 4
 /// itself.  The result is below 2p < 2^257.
+#[cfg_attr(rind_backend = "arm", cfg(test))]
 fn reduce_p(t: &[u32; 16]) -> [u32; 8] {
     let mut col = t.map(i64::from);
     for i in 0..8 {
@@ -228,8 +263,10 @@ mod fiat_tests {
             let mut want = Fe([0; 8]);
             fp::fiat_p256_mul(&mut want, &x, &y);
             prop_assert_eq!(fe_mul(&x, &y).0, want.0);
+            prop_assert_eq!(fe_mul_umaal(&x, &y).0, want.0);
             fp::fiat_p256_square(&mut want, &x);
             prop_assert_eq!(fe_sqr(&x).0, want.0);
+            prop_assert_eq!(fe_sqr_umaal(&x).0, want.0);
         }
 
         #[test]
