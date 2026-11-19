@@ -69,9 +69,9 @@ fn public_key_der(key: &::rsa::PublicKey) -> rind::rsa::PublicKey {
 
 /// RSASSA-PKCS1-v1_5, as `rsa::pkcs1v15`.
 pub mod pkcs1v15 {
-    use super::*;
-
     pub use ::rsa::pkcs1v15::Signature;
+
+    use super::*;
 
     /// A public key that verifies PKCS#1 v1.5 signatures over `D`.
     pub struct VerifyingKey<D: Hash> {
@@ -174,9 +174,9 @@ pub mod pkcs1v15 {
 
 /// RSASSA-PSS with a salt as long as the hash, as `rsa::pss`.
 pub mod pss {
-    use super::*;
-
     pub use ::rsa::pss::Signature;
+
+    use super::*;
 
     /// A public key that verifies PSS signatures over `D`.
     pub struct VerifyingKey<D: Hash> {

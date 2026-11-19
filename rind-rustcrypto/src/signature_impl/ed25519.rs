@@ -7,9 +7,8 @@
 
 use core::fmt;
 
-use signature::{Error, KeypairRef, MultipartSigner, MultipartVerifier, Signer, Verifier};
-
 pub use ::ed25519::Signature;
+use signature::{Error, KeypairRef, MultipartSigner, MultipartVerifier, Signer, Verifier};
 
 /// The secret key bytes: Ed25519's 32-byte seed.
 pub type SecretKey = [u8; 32];

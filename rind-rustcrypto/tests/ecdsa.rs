@@ -40,9 +40,10 @@ const LENGTHS: &[usize] = &[0, 1, 31, 32, 33, 63, 64, 65, 127, 128, 129, 1000, 1
 macro_rules! curve_tests {
     ($mod:ident, $ours:ident, $theirs:ident, $curve:ident, $len:expr) => {
         mod $mod {
-            use super::*;
             use ::$theirs::ecdsa as rc;
             use rind_rustcrypto::$ours::ecdsa as rind;
+
+            use super::*;
 
             const SCALAR_LEN: usize = $len;
 

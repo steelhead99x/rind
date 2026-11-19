@@ -9,9 +9,8 @@
 use core::fmt;
 
 use ::ml_dsa::{EncodedSignature, EncodedVerifyingKey, MlDsaParams};
-use ::signature::{Error, KeypairRef, MultipartSigner, MultipartVerifier, Signer, Verifier};
-
 pub use ::ml_dsa::{MlDsa44, MlDsa65, MlDsa87, Seed, Signature};
+use ::signature::{Error, KeypairRef, MultipartSigner, MultipartVerifier, Signer, Verifier};
 
 mod sealed {
     pub trait Sealed {}
