@@ -861,15 +861,9 @@ impl<P: Params> AsRef<[u8]> for Ciphertext<P> {
     }
 }
 
-/// A K-PKE message, wiped on drop: the encapsulated secret is derived from it.
+/// A K-PKE message.
 #[doc(hidden)]
 pub struct Message(pub(crate) [u8; 32]);
-
-impl Drop for Message {
-    fn drop(&mut self) {
-        low::zeroise(&mut self.0);
-    }
-}
 
 /// K-PKE randomness input: `sigma` for key generation, `r` for encryption.
 struct KpkeRandomness([u8; 32]);

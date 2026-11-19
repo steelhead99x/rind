@@ -150,15 +150,15 @@ const _: () = {
 /// The shared secret is derived from them and the key: a repeated message
 /// repeats the secret, and a guessable or attacker-chosen one hands the secret
 /// to whoever can guess or choose it. Nothing here can check that.
-pub struct Message(mlkem::Message);
+pub struct Message([u8; 32]);
 
 impl Message {
     /// Takes 32 fresh random bytes, zeroing `bytes` so the caller keeps no
     /// copy to reuse.
     pub fn from_random_bytes(bytes: &mut [u8; 32]) -> Self {
-        let message = mlkem::Message(*bytes);
+        let message = Self(*bytes);
         low::zeroise(bytes);
-        Self(message)
+        message
     }
 
     /// Encapsulates the secret this message determines to `key`, returning
@@ -169,8 +169,16 @@ impl Message {
         key: &EncapsulationKey<A>,
     ) -> (Ciphertext<A>, SharedSecret<A>) {
         let _entry = low::Entry::new_secret();
-        let (secret, ciphertext) = key.key.encaps_internal(self.0);
+        // The copy is a stack temporary, which stays unwiped as the one
+        // `EncapsulationKey::encapsulate` draws does; `self` wipes on drop.
+        let (secret, ciphertext) = key.key.encaps_internal(mlkem::Message(self.0));
         (Ciphertext(ciphertext), SharedSecret::new(secret))
+    }
+}
+
+impl Drop for Message {
+    fn drop(&mut self) {
+        low::zeroise(&mut self.0);
     }
 }
 
