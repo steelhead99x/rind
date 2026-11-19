@@ -260,6 +260,14 @@ pub(crate) use portable::{
 mod aarch64;
 #[cfg(rind_backend = "arm")]
 mod arm;
+// Test builds of the other backends compile armv7's Poly1305 alone, so its
+// vectors and its comparison with the 26-bit limbs run under their
+// `cargo test` and valgrind too.
+#[cfg(all(test, not(rind_backend = "arm")))]
+mod arm {
+    #[path = "poly1305.rs"]
+    pub(super) mod poly1305;
+}
 #[cfg(rind_backend = "x86_64")]
 mod x86_64;
 
