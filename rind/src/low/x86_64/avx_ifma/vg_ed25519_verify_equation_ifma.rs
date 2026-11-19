@@ -3,7 +3,7 @@
 //
 // pyca/verified-garbage's `vg_ed25519_verify_equation_ifma` with its AVX-512VL/IFMA instructions
 // re-encoded as VEX AVX-IFMA, one for one, and its ymm16 to ymm31
-// accumulators renamed onto free ymm0 to ymm15 or spilled to the red zone.
+// accumulators renamed onto free ymm0 to ymm15 or spilled to a 96-byte frame.
 // Not VG's proven bytes: see the module docs.
 //
 // Its `# Safety` contract is `vg::vg_ed25519_verify_equation_ifma`'s, with `avx`, `avx2`, `bmi2`, `adx`,
@@ -9387,12 +9387,6 @@ jmp .Led25519_verify_equation_ifma_6785
 .byte 0x4c,0x8b,0x7a,0x28
 .Led25519_verify_equation_ifma_679f:
 .byte 0xc3
-.Led25519_verify_equation_ifma_67a0:
-.byte 0x90
-.Led25519_verify_equation_ifma_67a1:
-.byte 0x66,0x66,0x2e,0x0f,0x1f,0x84,0x00,0x00,0x00,0x00,0x00
-.Led25519_verify_equation_ifma_67ac:
-.byte 0x66,0x66,0x2e,0x0f,0x1f,0x84,0x00,0x00,0x00,0x00,0x00
 .p2align 6"#,
         vg_ed25519_decode_powers_adx = sym super::super::vg::vg_ed25519_decode_powers_adx::vg_ed25519_decode_powers_adx,
         vg_ed25519_point_decode_adx = sym super::super::vg::vg_ed25519_point_decode_adx::vg_ed25519_point_decode_adx,

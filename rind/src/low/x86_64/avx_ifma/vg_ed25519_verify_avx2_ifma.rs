@@ -3,7 +3,7 @@
 //
 // pyca/verified-garbage's `vg_ed25519_verify_avx2_ifma` with its AVX-512VL/IFMA instructions
 // re-encoded as VEX AVX-IFMA, one for one, and its ymm16 to ymm31
-// accumulators renamed onto free ymm0 to ymm15 or spilled to the red zone.
+// accumulators renamed onto free ymm0 to ymm15 or spilled to a 96-byte frame.
 // Not VG's proven bytes: see the module docs.
 //
 // Its `# Safety` contract is `vg::vg_ed25519_verify_avx2_ifma`'s, with `avx`, `avx2`, `bmi2`, `adx`,
@@ -280,10 +280,6 @@ call {vg_ed25519_verify_equation_ifma}
 .byte 0x45,0x31,0xdb
 .Led25519_verify_avx2_ifma_1f2:
 .byte 0xc3
-.Led25519_verify_avx2_ifma_1f3:
-.byte 0x90
-.Led25519_verify_avx2_ifma_1f4:
-.byte 0x66,0x66,0x2e,0x0f,0x1f,0x84,0x00,0x00,0x00,0x00,0x00
 .p2align 6"#,
         vg_sha512_init_core = sym super::super::vg::vg_sha512_init_core::vg_sha512_init_core,
         vg_sha512_update_scratch_avx2 = sym super::super::vg::vg_sha512_update_scratch_avx2::vg_sha512_update_scratch_avx2,

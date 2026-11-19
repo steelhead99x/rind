@@ -6,7 +6,7 @@ usage: convert.py REPO NAME CONVERTED_SIBLINGS(comma separated)
 Writes rind/src/low/x86_64/avx_ifma/NAME.rs. Needs binutils (as, objdump, nm).
 Every EVEX `vpmadd52luq`, `vpmadd52huq`, and `vpxorq` on ymm0 to ymm15 becomes its
 `{vex}` form; a register above ymm15 is renamed onto a ymm register dead across its
-whole live range, or else spilled around that range to the red zone, zeroed again before
+whole live range, or else spilled around that range to a stack frame the routine allocates (no red zone, so Windows is safe), zeroed again before
 `ret`; 512-bit zeroing becomes `vzeroall`. Anything else EVEX fails the run.
 """
 REPO=sys.argv[1]
@@ -43,20 +43,20 @@ nm={l.split()[2]:int(l.split()[0],16) for l in subprocess.check_output(['nm',f'w
 lim=min(nm.values()) if nm else 1<<60
 # trim padding between body end and first stub: body ends at last ret before lim
 ins=[x for x in ins if x[0]<lim]
-while ins and ins[-1][2].startswith(('nop','xchg','int3')) or (ins and ins[-1][2].startswith('add') and ins[-1][1]==['00','00']): ins.pop()
+while ins and ins[-1][2].split()[0] not in ('ret','jmp'): ins.pop()
 stubaddr={v:k[5:] for k,v in nm.items()}
 addr2i={a:i for i,(a,_,_) in enumerate(ins)}
 N=len(ins)
-def regs(t): return [int(x) for x in re.findall(r'%ymm(\d+)',t)]
+def regs(t): return [int(x) for x in re.findall(r'%[xy]mm(\d+)',t)]
 def rw(t):
     op=t.split()[0]
-    if not op.startswith('v') or 'ymm' not in t and 'zmm' not in t: return set(),set()
+    if not op.startswith('v') or not re.search(r'[xyz]mm',t): return set(),set()
     if op=='vzeroupper' or op=='vzeroall': return set(),set()
     args=t.split(None,1)[1].split('#')[0]
     ops=[o.strip() for o in re.split(r',(?![^()]*\))',args)]
     dst=ops[-1]; rd=set();wr=set()
     for s in ops[:-1]: rd|=set(regs(s))
-    mm=re.match(r'%ymm(\d+)$',dst)
+    mm=re.match(r'%[xy]mm(\d+)$',dst)
     if mm:
         d=int(mm.group(1)); wr.add(d)
         if op.startswith('vpmadd52'): rd.add(d)
@@ -119,12 +119,15 @@ for hi in HIGH:
         assert cand is not None,(name,hi,s,e)
         for i in w: mapping[i][hi]=cand
 nslots=len(slot)
+assert not spills or 0 not in jt,(name,'entry is a jump target')
 print(name,'high regs',HIGH,'spills',sum(len(v) for v in spills.values()),file=sys.stderr)
 rets=[i for i,x in enumerate(ins) if x[2].startswith('ret')]
 out=[];z=False;nv=0;LP=name[3:]+'_'
+FRAME=32*nslots if spills else 0
+if FRAME: out.append(f'lea -{FRAME}(%rsp), %rsp')
 for i,(a,b,t) in enumerate(ins):
     out.append(f'.L{LP}{a:x}:')
-    for p,hi in spills.get(i,[]): out.append(f'vmovdqu %ymm{p}, -{slot[hi]*32}(%rsp)')
+    for p,hi in spills.get(i,[]): out.append(f'vmovdqu %ymm{p}, {(slot[hi]-1)*32}(%rsp)')
     op=t.split()[0]
     if op.startswith('j'): out.append(f'{op} .L{LP}{int(t.split()[1],16):x}')
     elif op=='lea' and '<stub_' in t:
@@ -135,7 +138,8 @@ for i,(a,b,t) in enumerate(ins):
     elif op=='ret':
         if spills:
             out.append('vpxor %ymm0,%ymm0,%ymm0')
-            out+= [f'vmovdqu %ymm0,-{k*32}(%rsp)' for k in range(1,nslots+1)]
+            out+= [f'vmovdqu %ymm0,{k*32}(%rsp)' for k in range(nslots)]
+            out.append(f'lea {FRAME}(%rsp), %rsp')
         out.append('.byte 0xc3')
     elif b[0]=='62':
         tt=t.split('#')[0].strip()
@@ -149,7 +153,7 @@ for i,(a,b,t) in enumerate(ins):
     else:
         assert not mapping[i],t
         out.append('.byte '+','.join('0x'+x for x in b))
-    for p,hi in spills_after.get(i,[]): out.append(f'vmovdqu -{slot[hi]*32}(%rsp), %ymm{p}')
+    for p,hi in spills_after.get(i,[]): out.append(f'vmovdqu {(slot[hi]-1)*32}(%rsp), %ymm{p}')
 symlines=''
 for k,mod in syms.items():
     path=f'super::{k}::{k}' if k in CONV else f'super::super::vg::{syms[k]}::{k}'
@@ -159,7 +163,7 @@ rs=f'''// SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 // pyca/verified-garbage's `{name}` with its AVX-512VL/IFMA instructions
 // re-encoded as VEX AVX-IFMA, one for one, and its ymm16 to ymm31
-// accumulators renamed onto free ymm0 to ymm15 or spilled to the red zone.
+// accumulators renamed onto free ymm0 to ymm15 or spilled to a 96-byte frame.
 // Not VG's proven bytes: see the module docs.
 //
 // Its `# Safety` contract is `vg::{name}`'s, with `avx`, `avx2`, `bmi2`, `adx`,

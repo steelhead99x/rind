@@ -3,7 +3,7 @@
 //
 // pyca/verified-garbage's `vg_x25519_exchange_ifma` with its AVX-512VL/IFMA instructions
 // re-encoded as VEX AVX-IFMA, one for one, and its ymm16 to ymm31
-// accumulators renamed onto free ymm0 to ymm15 or spilled to the red zone.
+// accumulators renamed onto free ymm0 to ymm15 or spilled to a 96-byte frame.
 // Not VG's proven bytes: see the module docs.
 //
 // Its `# Safety` contract is `vg::vg_x25519_exchange_ifma`'s, with `avx`, `avx2`, `bmi2`, `adx`,
@@ -256,16 +256,6 @@ vzeroall
 .byte 0x45,0x31,0xdb
 .Lx25519_exchange_ifma_1d1:
 .byte 0xc3
-.Lx25519_exchange_ifma_1d2:
-.byte 0x90
-.Lx25519_exchange_ifma_1d3:
-.byte 0x66,0x66,0x2e,0x0f,0x1f,0x84,0x00,0x00,0x00,0x00,0x00
-.Lx25519_exchange_ifma_1de:
-.byte 0x66,0x66,0x2e,0x0f,0x1f,0x84,0x00,0x00,0x00,0x00,0x00
-.Lx25519_exchange_ifma_1e9:
-.byte 0x66,0x66,0x2e,0x0f,0x1f,0x84,0x00,0x00,0x00,0x00,0x00
-.Lx25519_exchange_ifma_1f4:
-.byte 0x66,0x66,0x2e,0x0f,0x1f,0x84,0x00,0x00,0x00,0x00,0x00
 .p2align 6"#,
         vg_x25519_ifma = sym super::vg_x25519_ifma::vg_x25519_ifma,
         options(att_syntax),

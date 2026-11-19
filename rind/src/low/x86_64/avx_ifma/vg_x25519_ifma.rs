@@ -3,7 +3,7 @@
 //
 // pyca/verified-garbage's `vg_x25519_ifma` with its AVX-512VL/IFMA instructions
 // re-encoded as VEX AVX-IFMA, one for one, and its ymm16 to ymm31
-// accumulators renamed onto free ymm0 to ymm15 or spilled to the red zone.
+// accumulators renamed onto free ymm0 to ymm15 or spilled to a 96-byte frame.
 // Not VG's proven bytes: see the module docs.
 //
 // Its `# Safety` contract is `vg::vg_x25519_ifma`'s, with `avx`, `avx2`, `bmi2`, `adx`,
@@ -17,7 +17,8 @@
 #[unsafe(naked)]
 pub(crate) unsafe extern "sysv64" fn vg_x25519_ifma() {
     core::arch::naked_asm!(
-        r#".Lx25519_ifma_0:
+        r#"lea -96(%rsp), %rsp
+.Lx25519_ifma_0:
 .byte 0x4c,0x8b,0x02
 .Lx25519_ifma_3:
 .byte 0x4c,0x8b,0x4a,0x08
@@ -662,7 +663,7 @@ jne .Lx25519_ifma_c3
 .Lx25519_ifma_702:
 {{vex}} vpxor %ymm15,%ymm15,%ymm15
 .Lx25519_ifma_708:
-vmovdqu %ymm0, -96(%rsp)
+vmovdqu %ymm0, 64(%rsp)
 {{vex}} vpxor %ymm0,%ymm0,%ymm0
 .Lx25519_ifma_70e:
 {{vex}} vpmadd52luq %ymm7,%ymm11,%ymm3
@@ -692,7 +693,7 @@ vmovdqu %ymm0, -96(%rsp)
 {{vex}} vpaddq %ymm0,%ymm0,%ymm0
 .Lx25519_ifma_75c:
 {{vex}} vpaddq %ymm0,%ymm15,%ymm15
-vmovdqu -96(%rsp), %ymm0
+vmovdqu 64(%rsp), %ymm0
 .Lx25519_ifma_762:
 {{vex}} vpaddq %ymm15,%ymm3,%ymm3
 .Lx25519_ifma_768:
@@ -708,10 +709,10 @@ vmovdqu -96(%rsp), %ymm0
 .Lx25519_ifma_785:
 {{vex}} vpxor %ymm15,%ymm15,%ymm15
 .Lx25519_ifma_78b:
-vmovdqu %ymm0, -64(%rsp)
+vmovdqu %ymm0, 32(%rsp)
 {{vex}} vpxor %ymm0,%ymm0,%ymm0
 .Lx25519_ifma_791:
-vmovdqu %ymm1, -96(%rsp)
+vmovdqu %ymm1, 64(%rsp)
 {{vex}} vpxor %ymm1,%ymm1,%ymm1
 .Lx25519_ifma_797:
 {{vex}} vpmadd52luq %ymm8,%ymm11,%ymm4
@@ -741,7 +742,7 @@ vmovdqu %ymm1, -96(%rsp)
 {{vex}} vpaddq %ymm1,%ymm1,%ymm1
 .Lx25519_ifma_7e5:
 {{vex}} vpaddq %ymm1,%ymm0,%ymm0
-vmovdqu -96(%rsp), %ymm1
+vmovdqu 64(%rsp), %ymm1
 .Lx25519_ifma_7eb:
 {{vex}} vpaddq %ymm0,%ymm4,%ymm4
 .Lx25519_ifma_7f1:
@@ -750,7 +751,7 @@ vmovdqu -96(%rsp), %ymm1
 {{vex}} vpaddq %ymm5,%ymm4,%ymm4
 .Lx25519_ifma_7fd:
 {{vex}} vpsllq $0x4,%ymm0,%ymm5
-vmovdqu -64(%rsp), %ymm0
+vmovdqu 32(%rsp), %ymm0
 .Lx25519_ifma_804:
 {{vex}} vpaddq %ymm5,%ymm4,%ymm4
 .Lx25519_ifma_80a:
@@ -882,13 +883,13 @@ vmovdqu -64(%rsp), %ymm0
 .Lx25519_ifma_970:
 .byte 0xc4,0xe3,0x05,0x02,0xc0,0x0f
 .Lx25519_ifma_976:
-vmovdqu %ymm1, -32(%rsp)
+vmovdqu %ymm1, 0(%rsp)
 {{vex}} vpxor %ymm1,%ymm1,%ymm1
 .Lx25519_ifma_97c:
-vmovdqu %ymm2, -64(%rsp)
+vmovdqu %ymm2, 32(%rsp)
 {{vex}} vpxor %ymm2,%ymm2,%ymm2
 .Lx25519_ifma_982:
-vmovdqu %ymm3, -96(%rsp)
+vmovdqu %ymm3, 64(%rsp)
 {{vex}} vpxor %ymm3,%ymm3,%ymm3
 .Lx25519_ifma_988:
 {{vex}} vpmadd52luq %ymm9,%ymm11,%ymm2
@@ -914,37 +915,37 @@ vmovdqu %ymm3, -96(%rsp)
 {{vex}} vpaddq %ymm1,%ymm1,%ymm1
 .Lx25519_ifma_9ca:
 {{vex}} vpaddq %ymm1,%ymm0,%ymm0
-vmovdqu -32(%rsp), %ymm1
+vmovdqu 0(%rsp), %ymm1
 .Lx25519_ifma_9d0:
 {{vex}} vpaddq %ymm3,%ymm3,%ymm3
 .Lx25519_ifma_9d6:
 {{vex}} vpaddq %ymm3,%ymm2,%ymm2
-vmovdqu -96(%rsp), %ymm3
+vmovdqu 64(%rsp), %ymm3
 .Lx25519_ifma_9dc:
 {{vex}} vpaddq %ymm2,%ymm0,%ymm0
 .Lx25519_ifma_9e2:
-vmovdqu %ymm1, -96(%rsp)
+vmovdqu %ymm1, 64(%rsp)
 {{vex}} vpaddq %ymm2,%ymm2,%ymm1
 .Lx25519_ifma_9e8:
 {{vex}} vpaddq %ymm1,%ymm0,%ymm0
-vmovdqu -96(%rsp), %ymm1
+vmovdqu 64(%rsp), %ymm1
 .Lx25519_ifma_9ee:
-vmovdqu %ymm1, -96(%rsp)
+vmovdqu %ymm1, 64(%rsp)
 {{vex}} vpsllq $0x4,%ymm2,%ymm1
-vmovdqu -64(%rsp), %ymm2
+vmovdqu 32(%rsp), %ymm2
 .Lx25519_ifma_9f5:
 {{vex}} vpaddq %ymm1,%ymm0,%ymm0
-vmovdqu -96(%rsp), %ymm1
+vmovdqu 64(%rsp), %ymm1
 .Lx25519_ifma_9fb:
 .byte 0xc4,0xe3,0x05,0x02,0xc9,0x0f
 .Lx25519_ifma_a01:
-vmovdqu %ymm0, -32(%rsp)
+vmovdqu %ymm0, 0(%rsp)
 {{vex}} vpxor %ymm0,%ymm0,%ymm0
 .Lx25519_ifma_a07:
-vmovdqu %ymm2, -64(%rsp)
+vmovdqu %ymm2, 32(%rsp)
 {{vex}} vpxor %ymm2,%ymm2,%ymm2
 .Lx25519_ifma_a0d:
-vmovdqu %ymm3, -96(%rsp)
+vmovdqu %ymm3, 64(%rsp)
 {{vex}} vpxor %ymm3,%ymm3,%ymm3
 .Lx25519_ifma_a13:
 {{vex}} vpmadd52luq %ymm5,%ymm11,%ymm1
@@ -970,37 +971,37 @@ vmovdqu %ymm3, -96(%rsp)
 {{vex}} vpaddq %ymm0,%ymm0,%ymm0
 .Lx25519_ifma_a55:
 {{vex}} vpaddq %ymm0,%ymm1,%ymm1
-vmovdqu -32(%rsp), %ymm0
+vmovdqu 0(%rsp), %ymm0
 .Lx25519_ifma_a5b:
 {{vex}} vpaddq %ymm3,%ymm3,%ymm3
 .Lx25519_ifma_a61:
 {{vex}} vpaddq %ymm3,%ymm2,%ymm2
-vmovdqu -96(%rsp), %ymm3
+vmovdqu 64(%rsp), %ymm3
 .Lx25519_ifma_a67:
 {{vex}} vpaddq %ymm2,%ymm1,%ymm1
 .Lx25519_ifma_a6d:
-vmovdqu %ymm0, -96(%rsp)
+vmovdqu %ymm0, 64(%rsp)
 {{vex}} vpaddq %ymm2,%ymm2,%ymm0
 .Lx25519_ifma_a73:
 {{vex}} vpaddq %ymm0,%ymm1,%ymm1
-vmovdqu -96(%rsp), %ymm0
+vmovdqu 64(%rsp), %ymm0
 .Lx25519_ifma_a79:
-vmovdqu %ymm0, -96(%rsp)
+vmovdqu %ymm0, 64(%rsp)
 {{vex}} vpsllq $0x4,%ymm2,%ymm0
-vmovdqu -64(%rsp), %ymm2
+vmovdqu 32(%rsp), %ymm2
 .Lx25519_ifma_a80:
 {{vex}} vpaddq %ymm0,%ymm1,%ymm1
-vmovdqu -96(%rsp), %ymm0
+vmovdqu 64(%rsp), %ymm0
 .Lx25519_ifma_a86:
 .byte 0xc4,0xe3,0x05,0x02,0xd2,0x0f
 .Lx25519_ifma_a8c:
-vmovdqu %ymm0, -32(%rsp)
+vmovdqu %ymm0, 0(%rsp)
 {{vex}} vpxor %ymm0,%ymm0,%ymm0
 .Lx25519_ifma_a92:
-vmovdqu %ymm1, -64(%rsp)
+vmovdqu %ymm1, 32(%rsp)
 {{vex}} vpxor %ymm1,%ymm1,%ymm1
 .Lx25519_ifma_a98:
-vmovdqu %ymm3, -96(%rsp)
+vmovdqu %ymm3, 64(%rsp)
 {{vex}} vpxor %ymm3,%ymm3,%ymm3
 .Lx25519_ifma_a9e:
 {{vex}} vpmadd52luq %ymm6,%ymm11,%ymm2
@@ -1026,37 +1027,37 @@ vmovdqu %ymm3, -96(%rsp)
 {{vex}} vpaddq %ymm0,%ymm0,%ymm0
 .Lx25519_ifma_ae0:
 {{vex}} vpaddq %ymm0,%ymm2,%ymm2
-vmovdqu -32(%rsp), %ymm0
+vmovdqu 0(%rsp), %ymm0
 .Lx25519_ifma_ae6:
 {{vex}} vpaddq %ymm3,%ymm3,%ymm3
 .Lx25519_ifma_aec:
 {{vex}} vpaddq %ymm3,%ymm1,%ymm1
-vmovdqu -96(%rsp), %ymm3
+vmovdqu 64(%rsp), %ymm3
 .Lx25519_ifma_af2:
 {{vex}} vpaddq %ymm1,%ymm2,%ymm2
 .Lx25519_ifma_af8:
-vmovdqu %ymm0, -96(%rsp)
+vmovdqu %ymm0, 64(%rsp)
 {{vex}} vpaddq %ymm1,%ymm1,%ymm0
 .Lx25519_ifma_afe:
 {{vex}} vpaddq %ymm0,%ymm2,%ymm2
-vmovdqu -96(%rsp), %ymm0
+vmovdqu 64(%rsp), %ymm0
 .Lx25519_ifma_b04:
-vmovdqu %ymm0, -96(%rsp)
+vmovdqu %ymm0, 64(%rsp)
 {{vex}} vpsllq $0x4,%ymm1,%ymm0
-vmovdqu -64(%rsp), %ymm1
+vmovdqu 32(%rsp), %ymm1
 .Lx25519_ifma_b0b:
 {{vex}} vpaddq %ymm0,%ymm2,%ymm2
-vmovdqu -96(%rsp), %ymm0
+vmovdqu 64(%rsp), %ymm0
 .Lx25519_ifma_b11:
 .byte 0xc4,0xe3,0x05,0x02,0xdb,0x0f
 .Lx25519_ifma_b17:
-vmovdqu %ymm0, -32(%rsp)
+vmovdqu %ymm0, 0(%rsp)
 {{vex}} vpxor %ymm0,%ymm0,%ymm0
 .Lx25519_ifma_b1d:
-vmovdqu %ymm1, -64(%rsp)
+vmovdqu %ymm1, 32(%rsp)
 {{vex}} vpxor %ymm1,%ymm1,%ymm1
 .Lx25519_ifma_b23:
-vmovdqu %ymm2, -96(%rsp)
+vmovdqu %ymm2, 64(%rsp)
 {{vex}} vpxor %ymm2,%ymm2,%ymm2
 .Lx25519_ifma_b29:
 {{vex}} vpmadd52luq %ymm7,%ymm11,%ymm3
@@ -1082,36 +1083,36 @@ vmovdqu %ymm2, -96(%rsp)
 {{vex}} vpaddq %ymm0,%ymm0,%ymm0
 .Lx25519_ifma_b6b:
 {{vex}} vpaddq %ymm0,%ymm3,%ymm3
-vmovdqu -32(%rsp), %ymm0
+vmovdqu 0(%rsp), %ymm0
 .Lx25519_ifma_b71:
 {{vex}} vpaddq %ymm2,%ymm2,%ymm2
 .Lx25519_ifma_b77:
 {{vex}} vpaddq %ymm2,%ymm1,%ymm1
-vmovdqu -96(%rsp), %ymm2
+vmovdqu 64(%rsp), %ymm2
 .Lx25519_ifma_b7d:
 {{vex}} vpaddq %ymm1,%ymm3,%ymm3
 .Lx25519_ifma_b83:
-vmovdqu %ymm0, -96(%rsp)
+vmovdqu %ymm0, 64(%rsp)
 {{vex}} vpaddq %ymm1,%ymm1,%ymm0
 .Lx25519_ifma_b89:
 {{vex}} vpaddq %ymm0,%ymm3,%ymm3
-vmovdqu -96(%rsp), %ymm0
+vmovdqu 64(%rsp), %ymm0
 .Lx25519_ifma_b8f:
-vmovdqu %ymm0, -96(%rsp)
+vmovdqu %ymm0, 64(%rsp)
 {{vex}} vpsllq $0x4,%ymm1,%ymm0
-vmovdqu -64(%rsp), %ymm1
+vmovdqu 32(%rsp), %ymm1
 .Lx25519_ifma_b96:
 {{vex}} vpaddq %ymm0,%ymm3,%ymm3
-vmovdqu -96(%rsp), %ymm0
+vmovdqu 64(%rsp), %ymm0
 .Lx25519_ifma_b9c:
 .byte 0xc4,0xe3,0x05,0x02,0xe4,0x0f
 .Lx25519_ifma_ba2:
 {{vex}} vpxor %ymm15,%ymm15,%ymm15
 .Lx25519_ifma_ba8:
-vmovdqu %ymm0, -64(%rsp)
+vmovdqu %ymm0, 32(%rsp)
 {{vex}} vpxor %ymm0,%ymm0,%ymm0
 .Lx25519_ifma_bae:
-vmovdqu %ymm1, -96(%rsp)
+vmovdqu %ymm1, 64(%rsp)
 {{vex}} vpxor %ymm1,%ymm1,%ymm1
 .Lx25519_ifma_bb4:
 {{vex}} vpmadd52luq %ymm8,%ymm11,%ymm4
@@ -1141,7 +1142,7 @@ vmovdqu %ymm1, -96(%rsp)
 {{vex}} vpaddq %ymm1,%ymm1,%ymm1
 .Lx25519_ifma_c02:
 {{vex}} vpaddq %ymm1,%ymm0,%ymm0
-vmovdqu -96(%rsp), %ymm1
+vmovdqu 64(%rsp), %ymm1
 .Lx25519_ifma_c08:
 {{vex}} vpaddq %ymm0,%ymm4,%ymm4
 .Lx25519_ifma_c0e:
@@ -1150,7 +1151,7 @@ vmovdqu -96(%rsp), %ymm1
 {{vex}} vpaddq %ymm5,%ymm4,%ymm4
 .Lx25519_ifma_c1a:
 {{vex}} vpsllq $0x4,%ymm0,%ymm5
-vmovdqu -64(%rsp), %ymm0
+vmovdqu 32(%rsp), %ymm0
 .Lx25519_ifma_c21:
 {{vex}} vpaddq %ymm5,%ymm4,%ymm4
 .Lx25519_ifma_c27:
@@ -1362,7 +1363,7 @@ vmovdqu -64(%rsp), %ymm0
 .Lx25519_ifma_e83:
 {{vex}} vpxor %ymm15,%ymm15,%ymm15
 .Lx25519_ifma_e89:
-vmovdqu %ymm0, -96(%rsp)
+vmovdqu %ymm0, 64(%rsp)
 {{vex}} vpxor %ymm0,%ymm0,%ymm0
 .Lx25519_ifma_e8f:
 {{vex}} vpmadd52luq %ymm7,%ymm11,%ymm3
@@ -1392,7 +1393,7 @@ vmovdqu %ymm0, -96(%rsp)
 {{vex}} vpaddq %ymm0,%ymm0,%ymm0
 .Lx25519_ifma_edd:
 {{vex}} vpaddq %ymm0,%ymm15,%ymm15
-vmovdqu -96(%rsp), %ymm0
+vmovdqu 64(%rsp), %ymm0
 .Lx25519_ifma_ee3:
 {{vex}} vpaddq %ymm15,%ymm3,%ymm3
 .Lx25519_ifma_ee9:
@@ -1408,10 +1409,10 @@ vmovdqu -96(%rsp), %ymm0
 .Lx25519_ifma_f06:
 {{vex}} vpxor %ymm15,%ymm15,%ymm15
 .Lx25519_ifma_f0c:
-vmovdqu %ymm0, -64(%rsp)
+vmovdqu %ymm0, 32(%rsp)
 {{vex}} vpxor %ymm0,%ymm0,%ymm0
 .Lx25519_ifma_f12:
-vmovdqu %ymm1, -96(%rsp)
+vmovdqu %ymm1, 64(%rsp)
 {{vex}} vpxor %ymm1,%ymm1,%ymm1
 .Lx25519_ifma_f18:
 {{vex}} vpmadd52luq %ymm8,%ymm11,%ymm4
@@ -1441,7 +1442,7 @@ vmovdqu %ymm1, -96(%rsp)
 {{vex}} vpaddq %ymm1,%ymm1,%ymm1
 .Lx25519_ifma_f66:
 {{vex}} vpaddq %ymm1,%ymm0,%ymm0
-vmovdqu -96(%rsp), %ymm1
+vmovdqu 64(%rsp), %ymm1
 .Lx25519_ifma_f6c:
 {{vex}} vpaddq %ymm0,%ymm4,%ymm4
 .Lx25519_ifma_f72:
@@ -1450,7 +1451,7 @@ vmovdqu -96(%rsp), %ymm1
 {{vex}} vpaddq %ymm5,%ymm4,%ymm4
 .Lx25519_ifma_f7e:
 {{vex}} vpsllq $0x4,%ymm0,%ymm5
-vmovdqu -64(%rsp), %ymm0
+vmovdqu 32(%rsp), %ymm0
 .Lx25519_ifma_f85:
 {{vex}} vpaddq %ymm5,%ymm4,%ymm4
 .Lx25519_ifma_f8b:
@@ -2029,16 +2030,11 @@ call {vg_gf25519_r64_invert}
 .byte 0x4c,0x89,0x5e,0x18
 .Lx25519_ifma_14e1:
 vpxor %ymm0,%ymm0,%ymm0
-vmovdqu %ymm0,-32(%rsp)
-vmovdqu %ymm0,-64(%rsp)
-vmovdqu %ymm0,-96(%rsp)
+vmovdqu %ymm0,0(%rsp)
+vmovdqu %ymm0,32(%rsp)
+vmovdqu %ymm0,64(%rsp)
+lea 96(%rsp), %rsp
 .byte 0xc3
-.Lx25519_ifma_14e2:
-.byte 0x90
-.Lx25519_ifma_14e3:
-.byte 0x66,0x66,0x2e,0x0f,0x1f,0x84,0x00,0x00,0x00,0x00,0x00
-.Lx25519_ifma_14ee:
-.byte 0x66,0x66,0x2e,0x0f,0x1f,0x84,0x00,0x00,0x00,0x00,0x00
 .p2align 6"#,
         vg_gf25519_r64_invert = sym super::super::vg::vg_gf25519_r64_invert::vg_gf25519_r64_invert,
         options(att_syntax),
