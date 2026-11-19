@@ -40,6 +40,12 @@ libcrux-sha2 = { version = "0.0.9", features = ["expose-hacl"] }
 [target.'cfg(all(target_arch = "arm", target_endian = "little", not(rind_portable), any(target_os = "linux", target_os = "android")))'.dependencies]
 libc = { version = "0.2", default-features = false }
 
+# Reads `AT_HWCAP` for `HWCAP_CPUID` before reading `MIDR_EL1`, which
+# picks the multiplier schedule without opening a file. A libc-less Linux
+# target (`target_env = ""`) builds without `std` and has no `getauxval`.
+[target.'cfg(all(target_arch = "aarch64", target_os = "linux", not(target_env = "")))'.dependencies]
+libc = { version = "0.2", default-features = false }
+
 [dev-dependencies]
 # Argon2id's differential tests, since aws-lc-rs has no Argon2.
 argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
