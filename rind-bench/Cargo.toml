@@ -66,7 +66,7 @@ vrf-rfc9381 = { version = "0.0.7", features = ["edwards25519", "p256"] }
 # pyca/verified-garbage, which is not on crates.io: pinned by commit, since
 # its generated assembly is checked in. `cpu-features-env` lets the weekly bench's
 # tiers deny it what they deny rind, through `VG_CPU_FEATURES`.
-verified-garbage = { git = "https://github.com/pyca/verified-garbage", rev = "e7b0fe8a82b7777958e078573771d51415f105bb", features = ["cpu-features-env"] }
+verified-garbage = { git = "https://github.com/pyca/verified-garbage", rev = "0aa40d6c21fd02943fe5b38a5b69b6213d07764d", features = ["cpu-features-env"] }
 x-wing = { version = "0.1.1", features = ["getrandom"] }
 x25519-dalek = { version = "3", features = ["getrandom"] }
 

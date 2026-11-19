@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Copies pyca/verified-garbage's Lean ISA models into proofs/verified-garbage.
+"""Copies pyca/verified-garbage's Lean ISA models and specs into proofs/verified-garbage.
 
-Usage: admin/import-vg-models [--check] <verified-garbage checkout at REV>
+Usage: admin/import-vg-models [--check] <verified-garbage clone holding REV>
 
 verified-garbage (VG) proves its routines against Lean models of x86_64 and
 aarch64 (`lean/VerifiedGarbage/TCB`), prints their assembly from the same
 models, and encodes it. `admin/prove vg` checks each instruction of VG's code
 that rind can run against the CPU through those models, so a proof of VG's
 about a routine rind vendors rests on a model this has checked. This copies
-the modules the cosimulation needs, `ROOTS` and every module they import,
-byte for byte, and deletes any other file there, so the copy is VG's at REV.
+the modules the cosimulation and those theorems need, `ROOTS` and every
+module they import, byte for byte as REV holds them, whatever the clone's
+working tree holds, and deletes any other file under
+`proofs/verified-garbage/VerifiedGarbage`, so the copy is VG's at REV; the
+cosimulation beside it, `Cosim/`, is rind's own and left alone.
 `--check` changes nothing and fails unless the copy is already that.
 
 REV is `admin/import-vg`'s, the commit rind's VG code comes from, so moving
@@ -19,6 +22,7 @@ that pin fails `--check` until the models move with it.
 
 import os
 import re
+import subprocess
 import sys
 
 ADMIN = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +38,15 @@ ROOTS = [
     f"VerifiedGarbage.TCB.{arch}.{m}"
     for arch in ["X86_64", "AArch64"]
     for m in ["Isa", "Print", "Encode", "Target"]
+] + [
+    # The specs whose functions rind's axioms about VG's routines state.
+    "VerifiedGarbage.Spec.MlKem",
+    "VerifiedGarbage.Spec.Rsa.PrivatePrecompute",
+    # ChaCha20's contracts, which proofs/Rind/X86_64/VgChaCha20.lean's
+    # axioms restate over the spec they import: a pin that changes the
+    # contracts shows the change in its diff, against which that re-pin must
+    # review the axioms.
+    "VerifiedGarbage.Spec.ChaCha20.Contract",
 ]
 
 IMPORT = re.compile(r"^(?:public )?(?:meta )?import (VerifiedGarbage\.[A-Za-z0-9_.]+)\b", re.M)
@@ -50,7 +63,7 @@ def main():
         args = args[1:]
     if len(args) != 1:
         sys.exit(__doc__.strip().split("\n\n")[1])
-    lean = os.path.join(args[0], "lean")
+    clone = args[0]
 
     want = {}
     todo = list(ROOTS)
@@ -58,8 +71,10 @@ def main():
         module = todo.pop()
         if module in want:
             continue
-        with open(os.path.join(lean, path_of(module)), "rb") as f:
-            want[module] = f.read()
+        want[module] = subprocess.run(
+            ["git", "--no-replace-objects", "-C", clone, "show", f"{REV}:lean/{path_of(module)}"],
+            check=True, stdout=subprocess.PIPE,
+        ).stdout
         todo += IMPORT.findall(want[module].decode())
 
     have = set()

@@ -189,3 +189,75 @@
    fun:read_until
    fun:*10rind_rcgen3pem6decode*
 }
+
+# nixpkgs' OpenSSL 3.5.9 on aarch64 tests the bytes past a NUL in its own
+# uninitialised stack buffers while it sets up a library context: loading the
+# config, and building the name map, whose `get_legacy_*_names` copy each
+# legacy object's name out of `OBJ_obj2txt`. The undefined bytes then hash into
+# the name map's buckets, so each later lookup branches on them too. None of it
+# touches a key: rind's secrets are heap and test-binary memory, and every
+# frame here is libcrypto's own setup, never the provider's code.
+# See UPSTREAM.md, "Memcheck flags OpenSSL's name map on aarch64".
+{
+   openssl-config-strlcpy
+   Memcheck:Cond
+   fun:OPENSSL_strlcpy
+   fun:OPENSSL_strlcat
+   fun:provider_conf_params_internal
+}
+{
+   openssl-legacy-names-strlcpy
+   Memcheck:Cond
+   fun:OPENSSL_strlcpy
+   fun:OBJ_obj2txt
+   fun:get_legacy_*_names
+}
+{
+   openssl-legacy-names-add
+   Memcheck:Cond
+   fun:namemap_add_name
+   fun:ossl_namemap_add_name
+   fun:get_legacy_*_names
+}
+{
+   openssl-legacy-names-lookup
+   Memcheck:Cond
+   fun:ossl_namemap_name2num
+   fun:namemap_add_name
+   ...
+   fun:get_legacy_*_names
+}
+{
+   openssl-method-names-add
+   Memcheck:Cond
+   fun:namemap_add_name
+   fun:ossl_namemap_add_names
+   fun:construct_evp_method
+}
+{
+   openssl-method-names-lookup
+   Memcheck:Cond
+   fun:ossl_namemap_name2num
+   fun:namemap_add_name
+   fun:ossl_namemap_add_names
+   fun:construct_evp_method
+}
+{
+   openssl-method-names-add-lookup
+   Memcheck:Cond
+   fun:ossl_namemap_name2num
+   fun:ossl_namemap_add_names
+   fun:construct_evp_method
+}
+{
+   openssl-fetch-lookup
+   Memcheck:Cond
+   fun:ossl_namemap_name2num
+   fun:evp_generic_fetch
+}
+{
+   openssl-fetch-from-prov-lookup
+   Memcheck:Cond
+   fun:ossl_namemap_name2num
+   fun:evp_generic_fetch_from_prov
+}

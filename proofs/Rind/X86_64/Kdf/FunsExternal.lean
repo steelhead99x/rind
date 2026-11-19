@@ -27,6 +27,25 @@ def high.digest.Digest.Insts.CoreCloneClone.clone (d : high.digest.Digest) :
     Result high.digest.Digest :=
   ok d
 
+/-! PBKDF2 on pyca/verified-garbage's routine (`mid::pbkdf2_vg`), left
+opaque: `Pbkdf2.lean` proves `Secret`'s other branch, rind's loop. -/
+
+/-- `pbkdf2_vg::Key::new`. -/
+opaque mid.pbkdf2_vg.Key.new (algorithm : mid.pbkdf2_vg.Algorithm) (secret : Slice Std.U8) :
+    Result (Option mid.pbkdf2_vg.Key)
+
+/-- `pbkdf2_vg::Key::derive`. -/
+opaque mid.pbkdf2_vg.Key.derive (self : mid.pbkdf2_vg.Key)
+    (iterations : core.num.nonzero.NonZero Std.U32 core.num.niche_types.NonZeroU32Inner)
+    (salt out : Slice Std.U8) :
+    Result ((core.result.Result Unit error.Error) × (Slice Std.U8))
+
+/-- `pbkdf2_vg::Key::verify`. -/
+opaque mid.pbkdf2_vg.Key.verify (self : mid.pbkdf2_vg.Key)
+    (iterations : core.num.nonzero.NonZero Std.U32 core.num.niche_types.NonZeroU32Inner)
+    (salt previously_derived : Slice Std.U8) :
+    Result (core.result.Result Unit error.Error)
+
 /-! The header and AEAD models, lifted into what this translation calls them
 in. Each lift is what the Rust does: `key_len` is pure, and the `new`s return
 the error type this translation defines, not the models' own copy of it.

@@ -109,6 +109,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Reported:** no.
 - **Goes when:** valgrind's EXIDX reader takes `vsp = r11`.
 
+### Memcheck flags OpenSSL's name map on aarch64
+
+- **Breaks:** nixpkgs' OpenSSL 3.5.9 on aarch64 branches on the bytes past a NUL in its own uninitialised stack buffers while it sets up a library context: `OPENSSL_strlcpy` under `provider_conf_params_internal` when `OSSL_LIB_CTX_load_config` loads the config, and under `OBJ_obj2txt` when `get_legacy_*_names` fills the name map. Those bytes hash into the map's buckets, so `ossl_namemap_name2num` and `namemap_add_name` report on every later lookup. x86_64's build of the same OpenSSL reports nothing. None of it touches a key.
+- **Reproduce:** at main's 561555b3f, on an arm64 host, `admin/ctgrind adapters --release` reports 2945 errors from 32 contexts in `rind-openssl`'s `ctgrind` test, all in `libcrypto.so.3`'s setup.
+- **Workaround:** the `openssl-*` suppressions in `admin/ctgrind.supp`, each naming libcrypto's setup frames, never the provider's.
+- **Reported:** no.
+- **Goes when:** nixpkgs' OpenSSL no longer reads those bytes on aarch64, or memcheck tracks them apart.
+
 ### Valgrind on ARM does not fault guard pages
 
 - **Breaks:** under valgrind on ARM, reading a `PROT_NONE` guard page does not fault, so `low::guard_pages`'s `planted_over_read_faults` fails.
@@ -145,6 +153,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Workaround:** `admin/ct-binsec` calls `madvise(MADV_GUARD_REMOVE)` on the stack's mapping before dumping.
 - **Reported:** no.
 - **Goes when:** gdb's core dumps skip or read through guard regions.
+
+### BINSEC stalls on some ML-KEM ciphertexts
+
+- **Breaks:** `ct_binsec_mlkem*` decapsulates a ciphertext, and for about one in a hundred of them BINSEC 0.11.3 stops making progress inside `kpke_encrypt`'s re-encryption: it sends the solver no query and visits no more than a few hundred thousand instructions in 480 s, where the others finish in under ten seconds. `gdb` shows it inside `Term.sizeof`, building a term. A given ciphertext always stalls, so it is the input, not the runner, and swapping one half of a stalling ciphertext for another's makes it finish.
+- **Reproduce:** run `admin/ct-binsec --timeout 60 ct_binsec_mlkem512` on the portable backend a few hundred times with a random `encaps()` message, as the check did before it pinned one.
+- **Workaround:** the harness encapsulates a fixed message, so every run explores a ciphertext that finishes on every backend. Which ciphertexts stall moves with the compiled code: [kixel-ai/rind#870](https://github.com/kixel-ai/rind/pull/870)'s counted loops made the pinned `0x5a` message stall ML-KEM-768 on the portable backend, and `0x00` stall ML-KEM-1024, so the harness now pins `0x01`, which finishes every parameter set on x86_64 and portable in under ten seconds. A change that stalls the pinned message picks another, rather than raising the timeout.
+- **Reported:** no.
+- **Goes when:** BINSEC builds that term without the stall; the harness may then draw random messages again.
 
 ## Proofs
 
@@ -273,6 +289,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Workaround:** `build.yml`'s iOS job exports `rustc --print deployment-target` before building.
 - **Reported:** no.
 - **Goes when:** aws-lc-sys builds for the deployment target rustc uses.
+
+### curve25519-dalek cannot compile without SSE
+
+- **Breaks:** curve25519-dalek compiles its AVX2 backend on every x86_64 target, choosing it or the serial one at run time, and LLVM fails to compile it where SSE is off, as on `x86_64-unknown-none` and `x86_64-unknown-uefi`.
+- **Reproduce:** `cargo build -p rind --lib --target x86_64-unknown-none` with `RUSTFLAGS='--cfg getrandom_backend="custom"'`.
+- **Workaround:** `sh/dispatch.sh`'s `no_std` builds pass `--cfg curve25519_dalek_backend="serial"` for `x86_64-unknown-none`, and [PLATFORMS.md](PLATFORMS.md) tells callers to do the same.
+- **Reported:** [curve25519-dalek#601](https://github.com/dalek-cryptography/curve25519-dalek/issues/601).
+- **Goes when:** curve25519-dalek falls back to its serial backend where the target lacks SSE.
 
 ### blind-rsa-signatures 0.18 does not build on rsa 0.10.0
 

@@ -44,6 +44,7 @@ pub(super) mod mlkem;
 pub(super) mod p256;
 pub(super) mod p384;
 pub(super) mod p521;
+pub(super) mod pbkdf2_vg;
 #[cfg(test)]
 mod ristretto255_tests;
 pub(super) mod rng;

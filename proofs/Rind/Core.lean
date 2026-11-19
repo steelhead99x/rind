@@ -104,6 +104,10 @@ def Shared0Slice.Insts.CoreCmpPartialEqArray.eq {T U : Type _} {N : Std.Usize}
     (inst : core.cmp.PartialEq T U) (s : Slice T) (a : Array U N) : Result Bool :=
   core.slice.cmp.PartialEqSlice.eq inst s a.to_slice
 
+/-- `i32::wrapping_neg`: the negation modulo 2^32. -/
+def core.num.I32.wrapping_neg (x : Std.I32) : Result Std.I32 :=
+  Std.Result.ok ⟨-x.bv⟩
+
 /-- `i8::unsigned_abs`. -/
 def core.num.I8.unsigned_abs (x : Std.I8) : Result Std.U8 :=
   Std.Result.ok ⟨BitVec.ofNat 8 x.val.natAbs⟩
