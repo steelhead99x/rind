@@ -12,6 +12,8 @@ import 'package:cryptography/cryptography.dart'
     as cr
     show SecretKey, SecretKeyData;
 import 'package:pointycastle/export.dart' as pc;
+import 'package:rind/ecdsa.dart' as ecdsa;
+import 'package:rind/ed25519.dart' as ed25519;
 import 'package:rind/rind.dart';
 
 Future<void> main() async {
@@ -88,15 +90,15 @@ Future<void> main() async {
     ),
   });
 
-  final ed25519 = Ed25519KeyPair.generate();
+  final ed25519Pair = ed25519.KeyPair.generate();
   final cryptoEd25519 = cr.DartEd25519();
   final cryptoEdPair = await cryptoEd25519.newKeyPair();
   await bench('Ed25519 sign 64 B', {
-    'rind': () => ed25519.sign(message),
+    'rind': () => ed25519Pair.sign(message),
     'cryptography': () => cryptoEd25519.sign(message, keyPair: cryptoEdPair),
   });
-  final edVerifier = ed25519.publicKey;
-  final edSignature = ed25519.sign(message);
+  final edVerifier = ed25519Pair.publicKey;
+  final edSignature = ed25519Pair.sign(message);
   final cryptoEdSignature = await cryptoEd25519.sign(
     message,
     keyPair: cryptoEdPair,
@@ -107,17 +109,19 @@ Future<void> main() async {
         cryptoEd25519.verify(message, signature: cryptoEdSignature),
   });
 
-  final ecdsa = EcdsaKeyPair.generate(EcdsaSigningAlgorithm.p256Sha256Asn1);
+  final ecdsaPair = ecdsa.KeyPair.generate(
+    ecdsa.SigningAlgorithm.p256Sha256Asn1,
+  );
   final curve = pc.ECCurve_secp256r1();
-  final pcPrivate = pc.ECPrivateKey(_bigInt(ecdsa.toScalar()), curve);
+  final pcPrivate = pc.ECPrivateKey(_bigInt(ecdsaPair.toScalar()), curve);
   final pcPublic = pc.ECPublicKey(
-    curve.curve.decodePoint(ecdsa.publicKey.bytes),
+    curve.curve.decodePoint(ecdsaPair.publicKey.bytes),
     curve,
   );
   final random = pc.FortunaRandom()..seed(pc.KeyParameter(Uint8List(32)));
   pc.ECDSASigner signer() => pc.ECDSASigner(pc.SHA256Digest());
   await bench('ECDSA P-256 sign 64 B', {
-    'rind': () => ecdsa.sign(message),
+    'rind': () => ecdsaPair.sign(message),
     'pointycastle': () =>
         (signer()..init(
               true,
@@ -128,8 +132,8 @@ Future<void> main() async {
             ))
             .generateSignature(message),
   });
-  final ecdsaVerifier = ecdsa.publicKey;
-  final ecdsaSignature = ecdsa.sign(message);
+  final ecdsaVerifier = ecdsaPair.publicKey;
+  final ecdsaSignature = ecdsaPair.sign(message);
   final pcSignature =
       (signer()..init(
                 true,

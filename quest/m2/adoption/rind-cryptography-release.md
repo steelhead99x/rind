@@ -13,8 +13,14 @@ rind's.
   so it depends on rind from pub.dev. Its `hooks` user-define reaches no
   dependent app, as rind's pubspec explains.
 - Its AES-CBC, AES-CTR, and ChaCha20 use rind API newer than rind 0.1.0, so
-  first release rind with them (recommended 0.1.1, since they only add API)
-  and raise rind_cryptography's `rind` constraint to that release.
+  first release rind with them and raise rind_cryptography's `rind`
+  constraint to that release.
+- Decided 2026-11-18 (maintainer, /quest-complete): ✅ rind-dart's next
+  release is 0.1.1 (rejected: 0.2.0), since AES-CBC, AES-CTR, and ChaCha20
+  only add API. An agent bumps `rind-dart/pubspec.yaml` and
+  `rind-dart/Cargo.toml` to 0.1.1 with its changelog in a PR; once that is on
+  `main`, the maintainer approves pushing the `rind-dart-v0.1.1` tag, which
+  publishes to pub.dev through `dart-release.yml`.
 - Add a job that publishes it on a `rind-cryptography-v{{version}}` tag
   through pub.dev's automated publishing, with the run's OIDC token in the
   `pub.dev` environment and no stored credential, after checking the tag
@@ -23,11 +29,10 @@ rind's.
 
 ## Waiting
 
-- Maintainer: first release rind-dart with its AES-CBC, AES-CTR, and
-  ChaCha20, as 0.1.1 (recommended: they only add API) or 0.2.0, by pushing
-  its `rind-dart-v{{version}}` tag; then raise rind_cryptography's `rind`
-  constraint to it. The version and tag are the maintainer's call. Done when
-  https://pub.dev/packages/rind lists that release.
+- Maintainer: approve pushing the `rind-dart-v0.1.1` tag once the version
+  bump is on `main`, which publishes to pub.dev; an agent cannot publish a
+  release without that approval. Then raise rind_cryptography's `rind`
+  constraint to it. Done when https://pub.dev/packages/rind lists 0.1.1.
 - Maintainer: then publish 0.1.0 by hand (`cd rind-dart/cryptography && rm
   pubspec_overrides.yaml && dart pub publish`), since pub.dev creates a new
   package only from an uploader's account, as it did for rind; then, on its
