@@ -21,7 +21,7 @@ use std::num::NonZeroU32;
 use std::process::ExitCode;
 
 use rind_fips::acvp::{self, MlDsaMessage};
-use rind_fips::aead::gcm;
+use rind_fips::aead::{self, RandomizedNonceKey, gcm};
 use rind_fips::agreement;
 use rind_fips::cipher::{self, AesCbcDecryptingKey, AesCbcEncryptingKey, AesCtr, CbcIv};
 use rind_fips::digest;
@@ -161,6 +161,7 @@ impl Wrapper {
                 encrypting(direction)?;
                 aes_ctr(args)
             }
+            ["AES-GCM", "seal"] => aes_gcm_seal(args),
             ["AES-GCM", "open"] => aes_gcm_open(args),
             ["AES-KW", "seal"] => aes_kw_seal(Mode::Kw, args),
             ["AES-KW", "open"] => aes_kw_open(Mode::Kw, args),
@@ -458,6 +459,32 @@ fn aes_ctr(args: &[Vec<u8>]) -> Result<Reply> {
     let ctr = AesCtr::new(aes(key)?, key, 128)?;
     let mut out = input.to_vec();
     ctr.apply_keystream(iv.try_into()?, &mut out)?;
+    Ok(vec![out])
+}
+
+/// `AES-GCM/seal`: tag length, key, plaintext, an empty nonce, and AAD, to
+/// the ciphertext, tag, and the 12-byte IV the module generated, in one
+/// string. The module seals only under IVs it generates (IG C.H), with
+/// full tags, so a nonce `acvptool` supplies or a shorter tag is an error.
+fn aes_gcm_seal(args: &[Vec<u8>]) -> Result<Reply> {
+    let [tag_len, key, plaintext, nonce, aad] = take(args)?;
+    if u32_le(tag_len)? != 16 {
+        return Err("a sealing tag of other than 16 bytes".into());
+    }
+    if !nonce.is_empty() {
+        return Err("a sealing nonce: the module generates the IV".into());
+    }
+    let algorithm = match key.len() {
+        16 => &aead::AES_128_GCM,
+        24 => &aead::AES_192_GCM,
+        32 => &aead::AES_256_GCM,
+        len => return Err(format!("an AES key of {len} bytes").into()),
+    };
+    let key = RandomizedNonceKey::new(algorithm, key)?;
+    let mut out = plaintext.to_vec();
+    let (iv, tag) = key.seal_in_place_separate_tag(aad, &mut out)?;
+    out.extend_from_slice(tag.as_ref());
+    out.extend_from_slice(iv.as_ref());
     Ok(vec![out])
 }
 
