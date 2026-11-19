@@ -1,0 +1,16 @@
+[package]
+name = "ab-p256"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+rind = { path = "../../../../rind" }
+aws-lc-rs = { version = "1.19", features = ["non-fips"], default-features = false }
+ring = "0.17"
+openssl = { version = "0.10", features = ["vendored"] }
+
+[profile.release]
+opt-level = 3
