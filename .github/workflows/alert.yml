@@ -24,7 +24,6 @@ on:
       - Check
       - coverage
       - ctgrind
-      - ESP32-S3 SHA-256 layout
       - fuzz
       - miri
       - mutants
