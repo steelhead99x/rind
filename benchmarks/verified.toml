@@ -310,6 +310,13 @@ link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/Portable/Hacl.lea
 
 [[verified]]
 library = "rind"
+operations = ["sha3-256/*", "sha3-512/*"]
+arch = "portable"
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA3-256, SHA3-384, and SHA3-512, padding included, down to its portable Keccak-f1600, against FIPS 202 as SymCrypt's Lean spec states it, which rind proves is s2n-bignum's keccak spec, with no CPU dispatch to assume"
+link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/Portable/Keccak.lean"
+
+[[verified]]
+library = "rind"
 operations = ["quic-header-protection/chacha20"]
 arch = "portable"
 proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's mask is its own cipher's, the only one rind builds, of its header-protection API's ChaCha20 against RFC 9001 and RFC 8439, HACL*'s rounds included"
