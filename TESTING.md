@@ -25,10 +25,10 @@ A primitive is checked five ways:
   once, on x86_64, aarch64, and the portable backend, but not on armv7,
   which stays with ctgrind and `admin/ct-qemu` since BINSEC decodes none of
   its NEON table lookups or crypto extension; it denies the CPU features
-  whose instructions BINSEC cannot decode, AES-NI, VAES, the SHA512
-  instructions, and AVX-512 on x86_64, and the crypto extension, SHA-3,
-  SVE2, and DIT on aarch64, so those paths stay with the other three, and gives it
-  the effect of the few others rind and glibc run, such as aarch64's `tbl`.
+  whose instructions BINSEC cannot decode, AES-NI, VAES, and AVX-512 on
+  x86_64, and the crypto extension, SHA-3, SVE2, and DIT on aarch64, so those
+  paths stay with the other three, and gives it the effect of the few others
+  rind and glibc run, such as aarch64's `tbl`.
   Each harness fixes its public inputs, so it checks the paths those values
   take, except that ChaCha20 and ChaCha20-Poly1305 take every message
   length up to a block and a partial one; and BINSEC's lifter
@@ -47,7 +47,10 @@ A primitive is checked five ways:
   and fails on a freed block whose bytes differ between them, since those
   vary with the key, and fails on any nonzero block key generation frees.
   It runs wherever the zeroing tests do, RSA key generation only in the
-  nightly native and portable runs, and on wasm only for RSA-2048.
+  nightly native, portable, and wasm runs. wasm generates RSA-2048 keys only,
+  so `just portable` also generates every size on the 32-bit limbs wasm uses.
+  Its canaries report a planted leak without panicking, so they run on wasm,
+  where a test cannot catch a panic.
 
 Separately, `low::guard_pages` checks buffer bounds. It runs each kernel
 that takes a caller's slice (AES-GCM, ChaCha20-Poly1305, AES-CTR, AES-CBC,
@@ -78,8 +81,7 @@ an Intel SDE CPU model, as `x86-cpu.yml` names them.
 | Backend | Tier | Vectors and differential tests | Fuzz targets | Constant time |
 |---|---|---|---|---|
 | x86_64 | AVX-512 (Ice Lake and later, Zen 4 and 5) | SDE: Cannon Lake (RSA only), Granite Rapids, Diamond Rapids | SDE: Diamond Rapids; the runner's tier, when it has AVX-512 | `admin/ct-sde`: AES-GCM, RSA, ChaCha20, X25519, Ed25519, and verified-garbage's ML-KEM-768 and P-256 ECDH; Graviola's AVX-512 sampler reads only the public matrix |
-| x86_64 | SHA512 instructions (Arrow Lake, Diamond Rapids) | SDE: Arrow Lake, Diamond Rapids | SDE: Diamond Rapids | `admin/ct-sde`: HMAC |
-| x86_64 | VAES without AVX-512 (Alder Lake, Zen 3) | SDE: Alder Lake, Granite Rapids at 256 bits; the runner, when Zen 3 | SDE: Diamond Rapids, denied; the runner's tier, when Zen 3; denied, when it has AVX-512 | `admin/ct-sde`: AES-GCM |
+| x86_64 | VAES without AVX-512 (Alder Lake, Arrow Lake, Zen 3) | SDE: Alder Lake, Arrow Lake, Granite Rapids at 256 bits; the runner, when Zen 3 | SDE: Diamond Rapids, denied; the runner's tier, when Zen 3; denied, when it has AVX-512 | `admin/ct-sde`: AES-GCM |
 | x86_64 | SHA extensions (Goldmont, Cannon Lake and later, Zen) | SDE: Goldmont and later | SDE: Diamond Rapids; the runner's tier | `admin/ct-sde`: HMAC |
 | x86_64 | AVX2 and ADX, no SHA extensions or VAES (Broadwell to Cooper Lake) | SDE: Skylake server; denied | denied | ctgrind: valgrind hides AVX-512, VAES, and the SHA extensions, so the runner's own run lands here |
 | x86_64 | AVX2 without ADX (Haswell) | SDE: Haswell; denied | denied | ctgrind: denied (`no-adx`) |
@@ -99,7 +101,7 @@ an Intel SDE CPU model, as `x86-cpu.yml` names them.
 | portable | riscv64gc Linux, glibc and musl | `just qemu riscv64` and `just qemu riscv64-musl`: as s390x | as above | as s390x |
 | portable | PowerPC Linux: powerpc64le, big-endian powerpc64 and powerpc | `just qemu powerpc64le`, `just qemu powerpc64`, and `just qemu powerpc`: as s390x | as above | as s390x for the 64-bit targets. 32-bit powerpc ships rolled SHA-512 and rolled HChaCha20, which the 64-bit ctgrind test binary compiles and the 64-bit portable build does not. Its SHA-256 stays HACL*; the IRAM body is ESP-IDF Xtensa only, called by name from the tests the i686 row names |
 | portable | ARM before ARMv7 (Raspberry Pi 1 and Zero) | `just qemu armv6` and `just qemu armv6-softfloat`: as s390x, on qemu's ARM1176; `build.yml`'s `android` job: ARMv5TE Android | as above | as i686: rolled SHA-512 and rolled HChaCha20 are the 32-bit bodies, checked in the 64-bit ctgrind test binary, not the 64-bit portable build. SHA-256 stays HACL* |
-| portable | wasm32-wasip2 | `just wasm`: release vectors, and rind-rustls's and rind-ring's tests, under wasmtime, in the nightly `build.yml`; no differential tests, since aws-lc does not build for wasm, and `just portable` runs the same Rust against it | as above | unchecked: a wasm engine compiles rind again, and its JIT may turn a select into a branch. Rolled SHA-512 and rolled HChaCha20 are the 32-bit bodies, not the 64-bit portable build; the 64-bit ctgrind test binary compiles them. SHA-256 stays HACL*; the IRAM body is ESP-IDF Xtensa only |
+| portable | wasm32-wasip2 | `just wasm`: release vectors, and rind-rustls's and rind-ring's tests, under wasmtime, in the nightly `build.yml`; no differential tests, since aws-lc does not build for wasm, and `just portable` runs the same Rust against it; Ed25519's CCTV vectors compare with verdicts recorded from aws-lc | as above | unchecked: a wasm engine compiles rind again, and its JIT may turn a select into a branch. Rolled SHA-512 and rolled HChaCha20 are the 32-bit bodies, not the 64-bit portable build; the 64-bit ctgrind test binary compiles them. SHA-256 stays HACL*; the IRAM body is ESP-IDF Xtensa only |
 
 ## Vector suites
 
@@ -140,8 +142,16 @@ answers the sets for rind-fips's module through aws-lc's `acvptool`, on each
 CPU path, with the sets it builds for what the samples lack.
 
 These suites run wherever the [tier table](#tiers) runs `cargo test`, including
-the forced portable backend. The nightly `build.yml` runs the million-case
-accumulation in native release builds, on every denied x86_64/aarch64 tier,
+the forced portable backend. On wasm, where aws-lc does not build, Ed25519's
+CCTV vectors compare with `rind/tests/cctv/ed25519-verdicts.txt`, aws-lc's
+recorded verdicts, which `cctv::ed25519_verdicts_match_aws_lc` keeps equal to
+aws-lc elsewhere. Rewrite it with
+
+```sh
+RIND_RECORD_VERDICTS=1 cargo test -p rind --test cctv -- --ignored ed25519_record_aws_lc_verdicts
+```
+
+The nightly `build.yml` runs the million-case accumulation in native release builds, on every denied x86_64/aarch64 tier,
 and through `just portable`. `just armv7` and `x86-cpu.yml`'s SDE models use
 the default 10,000 cases, even though they build in release mode.
 
@@ -204,7 +214,7 @@ secret names a zeroing test, or says why it has none.
 | ML-KEM-512, ML-KEM-768, ML-KEM-1024 | `kem::{Algorithm, Ciphertext, DecapsulationKey, EncapsulationKey, SharedSecret, MlKem512, MlKem768, MlKem1024}` | `high::kem::wycheproof_keygen`, `high::kem::wycheproof_encaps`, `high::kem::wycheproof_decaps`, `high::kem::wycheproof_semi_expanded_decaps`, `high::kem::boringssl` and `high::kem::boringssl_evp` (ML-KEM-768 and ML-KEM-1024), `high::kem::cctv_intermediate`, `high::kem::cctv_unlucky_sample`, `high::kem::cctv_strcmp`, `high::kem::cctv_modulus`, `high::kem::cctv_accumulated` (ML-KEM-768), ACVP: `mid::mlkem::acvp_key_gen`, `mid::mlkem::acvp_encap_decap` | `fuzz::kem` (all three sets), `fuzz::keys` | `crosschecks::mlkem::encapsulated_by_ours_512`, `crosschecks::mlkem::encapsulated_by_ours_768`, `crosschecks::mlkem::encapsulated_by_ours_1024`, `high::kem::encapsulated_by_theirs_512`, `high::kem::encapsulated_by_theirs_768`, `high::kem::encapsulated_by_theirs_1024` | ctgrind: `mid::mlkem::keygen_internal`, `mid::mlkem::encaps_internal`, and pyca/verified-garbage's ML-KEM-768 with the CPU's widest variant, `low::x86_64::mlkem768_vg::widths_match_acvp` for each variant's encapsulation; SDE: `mid::mlkem::ct_sde_mlkem768`, verified-garbage's AVX-512 key generation, encapsulation, and decapsulation; proof: on aarch64, and on x86_64 only for reduction and rejection sampling, s2n-bignum's _SAFE theorems, for the routines [ALGORITHMS.md](ALGORITHMS.md#s2n-bignums-constant-time-theorems) lists with one; qemu: `mid::mlkem::ct_qemu_mlkem`, and `low::aarch64::mlkem768_vg::ct_qemu_mlkem768_variants` for both of verified-garbage's aarch64 encapsulation variants; BINSEC: `test::binsec::ct_binsec_mlkem512`, `test::binsec::ct_binsec_mlkem768`, `test::binsec::ct_binsec_mlkem1024` | `zeroing::mlkem` |
 | HPKE | `hpke::{Aead, EncapsulatedKey, Exporter, Kdf, Kem, PrivateKey, PublicKey, Recipient, Sender, Suite, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305, DHKEM_P256_HKDF_SHA256, DHKEM_P384_HKDF_SHA384, DHKEM_P521_HKDF_SHA512, DHKEM_X25519_HKDF_SHA256, HKDF_SHA256, HKDF_SHA384, HKDF_SHA512}` | `hpke_x25519_*_test`, RFC 9180 (X25519, P-256, and P-521 KEMs): `high::hpke::rfc9180`; the IETF revision's edge-case appendix, as hpkewg/hpke publishes it at the revision admin/sync-vectors pins (P-256 DeriveKeyPair at counter 1, empty and zero-byte aad, pt, info, and exporter context, and the PSK vector's KEM): `high::hpke::rfc9180_edge_cases`, `high::hpke::derive_rejects_a_candidate_at_or_above_the_order`; NIST keys at 0, n - 1, and n, as aws-lc-rs takes them: `high::hpke::scalar_range` | `fuzz::hpke`, against rustls's aws-lc-rs provider | `crosschecks::hpke::matches_hpke_rs`, against hpke-rs, as aws-lc-rs has no HPKE; rind-rustls's tests/hpke.rs compares its suites with rustls's aws-lc-rs provider's | ctgrind: `high::hpke::secret_decapsulation`, `high::hpke::secret_key_derivation` (rejection sampling included); the keys, as X25519 and ECDH above | `zeroing::hpke` |
 | Ed25519 signing | `ed25519::{KeyPair, Seed}` | RFC 8032: `mid::ed25519::test_rfc8032_test_vectors`, `aws_lc::ed25519`, `aws_lc::evp`, ACVP: `high::ed25519::acvp_key_gen`, `high::ed25519::acvp_sig_gen` | `fuzz::sign`; its seeds load in `fuzz::keys` | `crosschecks::ed25519::sign_verify`, `crosschecks::ed25519::seed_alone`, `crosschecks::ed25519::seed_and_public_key`, `crosschecks::ed25519_key_generation` | ctgrind: the seed `mid::ed25519::from_seed`, armv7 and portable seeds `mid::portable::ed25519::from_seed`; SDE: `low::x86_64::curve25519_ifma::ct_sde_ed25519_key_pair`, `low::x86_64::curve25519_ifma::ct_sde_ed25519_sign`; proof: s2n-bignum's _SAFE theorems, for the routines [ALGORITHMS.md](ALGORITHMS.md#s2n-bignums-constant-time-theorems) lists with one; BINSEC: `test::binsec::ct_binsec_ed25519` | `zeroing::ed25519` |
-| Ed25519 verification | `ed25519::{PublicKey, Signature}` | `ed25519_test`, `aws_lc::ed25519`, `aws_lc::evp`, `cctv::ed25519_edge_cases` (small-order keys refused, others against aws-lc's recorded verdicts), `cctv::ed25519_verdicts_match_aws_lc`, non-canonical commitments refused: `mid::ed25519::non_canonical_commitments_are_refused`, ACVP: `high::ed25519::acvp_key_ver`, `high::ed25519::acvp_sig_ver` | `fuzz::verify`, `fuzz::keys` | `crosschecks::ed25519::small_order_public_keys`; the half-size check against aws-lc-rs and RFC 8032's check as written, with keys and commitments of every torsion component, on x86_64 and aarch64: `mid::ed25519::half_size_check_matches_the_plain_one_with_torsion`, and its four-point multiplication against double-and-add: `low::generic::edwards25519_msm::matches_double_and_add` | | |
+| Ed25519 verification | `ed25519::{PublicKey, Signature}` | `ed25519_test`, `aws_lc::ed25519`, `aws_lc::evp`, `cctv::ed25519_edge_cases` (small-order keys refused, others against aws-lc's recorded verdicts), `cctv::ed25519_verdicts_match_aws_lc`, whose file `cctv::ed25519_record_aws_lc_verdicts` records, non-canonical commitments refused: `mid::ed25519::non_canonical_commitments_are_refused`, ACVP: `high::ed25519::acvp_key_ver`, `high::ed25519::acvp_sig_ver` | `fuzz::verify`, `fuzz::keys` | `crosschecks::ed25519::small_order_public_keys`; the half-size check against aws-lc-rs and RFC 8032's check as written, with keys and commitments of every torsion component, on x86_64 and aarch64: `mid::ed25519::half_size_check_matches_the_plain_one_with_torsion`, and its four-point multiplication against double-and-add: `low::generic::edwards25519_msm::matches_double_and_add` | | |
 | ECVRF | `vrf::{Algorithm, KeyPair, Output, Proof, PublicKey, Seed, ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI}` | RFC 9381: `high::vrf::rfc9381_vectors`, and refused proofs and keys: `high::vrf::refuses_altered_proofs`, `high::vrf::refuses_unreduced_s`, `high::vrf::refuses_bad_public_keys`; an Ed25519 signature on h_string reuses the nonce: `high::vrf::ed25519_signature_on_h_string_reveals_the_scalar` | `fuzz::vrf`, against itself, as no reference runs on aws-lc | `crosschecks::vrf::matches_akd`, against akd_core for Edwards25519, and `crosschecks::vrf::matches_vrf_rfc9381`, against vrf-rfc9381 for P-256, as aws-lc-rs has no VRF | ctgrind: secret keys are marked when loaded, `high::vrf::stays_secret`. P-256's RFC 6979 nonce retry is declassified in mid::p256::Scalar::into_range_check, so that test does not cover it | `zeroing::vrf` |
 | OPRF, VOPRF | `oprf::{Blind, BlindedElement, EvaluatedElement, Output, Scalar, ServerKey, Suite, P256_SHA256, P384_SHA384, P521_SHA512, RISTRETTO255_SHA512}`, `oprf::voprf::{Blind, EvaluatedElements, Proof, PublicKey, ServerKey}` | RFC 9497: `high::oprf::tests::rfc9497_oprf_vectors`, `high::oprf::voprf::tests::rfc9497_voprf_vectors`, and refused proofs, keys, elements, batches, and lengths: `high::oprf::voprf::tests::refuses_altered_proofs`, `high::oprf::voprf::tests::refuses_bad_public_keys`, `high::oprf::voprf::tests::refuses_bad_batches`, `high::oprf::tests::refuses_bad_keys`, `high::oprf::tests::refuses_bad_elements`, `high::oprf::tests::refuses_long_inputs` | `fuzz::oprf`, against itself, as no reference runs on aws-lc | `crosschecks::oprf::ristretto255_matches_voprf`, `crosschecks::oprf::p256_matches_voprf`, `crosschecks::oprf::p384_matches_voprf`, `crosschecks::oprf::p521_matches_voprf`, against the voprf crate in both modes, as aws-lc-rs has no OPRF | ctgrind: server keys are marked when loaded, `high::oprf::tests::stays_secret`, `high::oprf::voprf::tests::stays_secret` | `zeroing::oprf` |
 | FROST | `frost::{Commitments, deal, Identifier, PublicKey, Scalar, Signature, SignatureShare, SigningNonces, SigningPackage, SigningShare, Suite, VssCommitment, ED25519_SHA512, P256_SHA256, RISTRETTO255_SHA512}` | RFC 9591: `high::frost::tests::rfc9591_ed25519`, `high::frost::tests::rfc9591_ristretto255`, `high::frost::tests::rfc9591_p256`, and refused values: `high::frost::tests::refuses_misuse`, `high::frost::tests::refuses_bad_elements`, `high::frost::tests::refuses_altered_signatures`, `high::frost::tests::identifiers_are_nonzero_scalars`, `high::frost::tests::bad_shares_are_identified` | none: each run draws fresh nonces, so a fuzz input would not replay; `high::frost::tests::arbitrary_inputs_never_panic` feeds every loader arbitrary bytes | `crosschecks::frost::ed25519::reference_dealer_mixed_signers`, `crosschecks::frost::ed25519::rind_dealer_reference_signers`, `crosschecks::frost::ristretto255::reference_dealer_mixed_signers`, `crosschecks::frost::ristretto255::rind_dealer_reference_signers`, `crosschecks::frost::p256::reference_dealer_mixed_signers`, `crosschecks::frost::p256::rind_dealer_reference_signers`, against the Zcash Foundation's frost-ed25519, frost-ristretto255, and frost-p256, as aws-lc-rs has no FROST | ctgrind: the dealer's polynomial and the nonces' randomness are marked, `high::frost::tests::stays_secret` | `zeroing::frost` |
@@ -276,7 +286,7 @@ as `sh/backends.sh` decides, and otherwise runs in full; pull requests'
 ctgrind job sets it.
 `nix develop .#ctgrind --command admin/ctgrind` runs the weekly
 constant-time checks under valgrind, `nix develop .#sde --command
-admin/ct-sde` those of the AVX-512, VAES, SHA extension, and SHA512 code
+admin/ct-sde` those of the AVX-512, VAES, and SHA extension code
 valgrind cannot run, under Intel SDE, and `nix develop .#ct-qemu --command
 admin/ct-qemu` those of the armv7 crypto extension code valgrind hides, under
 qemu; on an aarch64 host, `nix develop .#ct-qemu-aarch64 --command
