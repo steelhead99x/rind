@@ -536,6 +536,23 @@ IMPORTS_64 = [
         "tables": [],
         "routines": ["aesv8_gcm_8x_enc_192", "aesv8_gcm_8x_dec_192"],
     },
+    # AES-192-GCM four blocks at a time, for CPUs without SHA3, where the
+    # eight-way kernel above does not run. The kernel reads its round count
+    # from the key schedule's AES_KEY struct, which rind's 13 round keys lack,
+    # so it is told 12 rounds.
+    {
+        "arch": "aarch64",
+        "source": "aesv8-gcm-armv8.S",
+        "tag": "gcm4x",
+        "perlasm": "crypto/fipsmodule/modes/asm/aesv8-gcm-armv8.pl",
+        "notice": ["Copyright (c) 2022, ARM Inc.", "SPDX-License-Identifier: ISC"],
+        "tables": [],
+        "routines": ["aes_gcm_enc_kernel", "aes_gcm_dec_kernel"],
+        "replaces": {
+            name: [("ldr", "w17, [x8, #240]", "mov\tw17, #12")]
+            for name in ["aes_gcm_enc_kernel", "aes_gcm_dec_kernel"]
+        },
+    },
     # The rest are for aarch64 CPUs without the crypto extension.
     {
         "arch": "aarch64",
@@ -919,7 +936,7 @@ def import_64(aws_lc):
                     text = kept
                 # The one instruction with these operands, which name a symbol.
                 for op, args, line in spec.get("replaces", {}).get(name, []):
-                    at = [i for i, old in enumerate(text) if old.split() == [op, prefix + args]]
+                    at = [i for i, old in enumerate(text) if old.split() in ([op, prefix + args], [op, *args.split()])]
                     if len(at) != 1:
                         sys.exit(f"{name}: expected one {op} {args}")
                     text[at[0]] = "\t" + line

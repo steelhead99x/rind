@@ -255,13 +255,11 @@ fn cipher<const ENC: bool>(
     inc32(&mut counter);
 
     // s2n-bignum's stitched kernels take AES-128 and AES-256 keys, and
-    // aws-lc's AES-192 one needs SHA3.
+    // aws-lc's eight-way AES-192 one needs SHA3, so AES-192 without it runs
+    // aws-lc's four-way kernel.
     let (AesKey::Hw(hw_key), GhashTable::Pmull(table)) = (key, ghash.table) else {
         return composed::<ENC>(key, ghash, &counter, cipher_inout);
     };
-    if let (HwKey::Aes192(_), None) = (hw_key, table.eight_way) {
-        return composed::<ENC>(key, ghash, &counter, cipher_inout);
-    }
 
     let (blocks, remainder) = cipher_inout.as_chunks_mut::<16>();
 
@@ -275,7 +273,8 @@ fn cipher<const ENC: bool>(
         // for reads and writes of `len` blocks. s2n-bignum's kernels' theorems
         // (`AES*_GCM_*_NOIBT_SUBROUTINE_{CORRECT,SAFE}`) take the input and
         // output either equal, as here, or disjoint, and every other buffer
-        // is a separate borrow. aws-lc runs its AES-192 routines in place too.
+        // is a separate borrow. aws-lc runs its AES-192 routines in place too, and its four-way kernel's
+        // round count is fixed at 12, which only an AES-192 key's 13 round keys fit.
         unsafe {
             match (hw_key, ENC, table.eight_way) {
                 (HwKey::Aes128(k), true, None) => {
@@ -310,7 +309,14 @@ fn cipher<const ENC: bool>(
                     let (key, ivec, xi) = (k.round_keys(), &mut counter, &mut tag);
                     asm_call!(unsafe extern "C" aesv8_gcm_8x_dec_192(inout, len * 128, inout, xi, ivec, key, htable));
                 }
-                (HwKey::Aes192(_), _, None) => unreachable!("composed above"),
+                (HwKey::Aes192(k), true, None) => {
+                    let (key, ivec, xi) = (k.round_keys(), &mut counter, &mut tag);
+                    asm_call!(unsafe extern "C" aes_gcm_enc_kernel(inout, len * 128, inout, xi, ivec, key, htable4));
+                }
+                (HwKey::Aes192(k), false, None) => {
+                    let (key, ivec, xi) = (k.round_keys(), &mut counter, &mut tag);
+                    asm_call!(unsafe extern "C" aes_gcm_dec_kernel(inout, len * 128, inout, xi, ivec, key, htable4));
+                }
             }
         }
 
@@ -373,8 +379,42 @@ macro_rules! gcm_8x {
 gcm_8x!(aesv8_gcm_8x_enc_192);
 gcm_8x!(aesv8_gcm_8x_dec_192);
 
+/// Defines a naked function running aws-lc's four-way stitched AES-GCM
+/// kernel, imported by `admin/import-aws-lc` with its round count fixed at
+/// 12, so it takes only an AES-192 key. Its arguments and checks are
+/// [`gcm_8x`]'s, but it reads six `htable` entries, as s2n-bignum's kernels
+/// do, so it needs no SHA3.
+macro_rules! gcm_4x {
+    ($name:ident) => {
+        #[unsafe(naked)]
+        unsafe extern "C" fn $name(
+            input: *const [u8; 16],
+            bits: usize,
+            output: *mut [u8; 16],
+            xi: &mut [u8; 16],
+            ivec: &mut [u8; 16],
+            round_keys: &[uint8x16_t; 13],
+            htable: &[uint64x2_t; 6],
+        ) -> usize {
+            #[cfg(not(target_vendor = "apple"))]
+            core::arch::naked_asm!(
+                ".arch_extension aes",
+                include_str!(concat!("aws_lc/", stringify!($name), ".linux.s"))
+            );
+            #[cfg(target_vendor = "apple")]
+            core::arch::naked_asm!(
+                ".arch_extension aes",
+                include_str!(concat!("aws_lc/", stringify!($name), ".apple.s"))
+            );
+        }
+    };
+}
+
+gcm_4x!(aes_gcm_enc_kernel);
+gcm_4x!(aes_gcm_dec_kernel);
+
 /// AES-CTR and GHASH in separate passes over each eight blocks, for keys
-/// without the stitched kernels, as aws-lc composes vpaes and NEON GHASH.
+/// without the crypto extension, as aws-lc composes vpaes and NEON GHASH.
 fn composed<const ENC: bool>(
     key: &AesKey,
     ghash: &mut Ghash<'_>,
