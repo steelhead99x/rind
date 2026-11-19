@@ -390,7 +390,7 @@ exclude_re = [
   'rind/src/low/x86_64/p256_vg\.rs:\d+:\d+: replace \|\| with && in P256::check_public_key$',
   # Either verification gives the same verdict, as `vg_verify_matches_rind`
   # checks; which one a reused key takes changes only the time.
-  'rind/src/mid/p384\.rs:\d+:\d+: replace \|\| with && in VerifyingKey::raw_ecdsa_verify$',
+  'rind/src/mid/p384\.rs:\d+:\d+: replace VerifyingKey::vg_takes -> bool with (true|false)$',
   # Refusing VG's P-384 runs rind's own, which computes the same result, as
   # `vg_public_key_matches_comb` and `vg_verify_matches_rind` check; only the
   # time differs.
