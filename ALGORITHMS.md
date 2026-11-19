@@ -54,7 +54,7 @@ Ed25519 verification's multiplication runs curve25519-dalek ⚡, as above.
 | OPRF, VOPRF, over the rows it builds on | rind |  |  |  |  |
 | FROST, over the rows it builds on | rind |  |  |  |  |
 | PBKDF2 | rind |  |  |  |  |
-| Argon2id | Argon2's reference + rind | rind |  |  |  |
+| Argon2id | Argon2's reference + rind | Argon2's reference + rind |  |  | rind |
 | SPAKE2+ | rind, over P-256 |  |  |  |  |
 | X25519 | verified-garbage |  |  |  |  |
 | Ed25519 | verified-garbage |  |  |  |  |
@@ -148,7 +148,7 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | OPRF, VOPRF, over the rows it builds on | rind |  |  |  |
 | FROST, over the rows it builds on | rind |  |  |  |
 | PBKDF2 | verified-garbage + rind | rind |  |  |
-| Argon2id | rind |  |  |  |
+| Argon2id | Argon2's reference + rind |  | rind | rind |
 | SPAKE2+ | rind, over P-256 |  |  |  |
 | X25519 | s2n-bignum ✓ |  | BoringSSL ⚡ + curve25519-dalek ⚡ | curve25519-dalek ⚡ |
 | Ed25519 | s2n-bignum ✓ + Graviola |  | curve25519-dalek ⚡ + rind ⚡ |  |

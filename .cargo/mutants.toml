@@ -289,6 +289,9 @@ exclude_re = [
   'rind/src/low/x86_64/cpu\.rs:\d+:72: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAvxMovbeForAesGcm::check$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAesHardware::check$',
+  # Equivalent: the Apple-core test only picks between two fills that compute the
+  # same block, so `||` picks the SHA3 fill on a Linux core that has it.
+  'rind/src/low/aarch64/argon2_neon\.rs:\d+:\d+: replace && with \|\| in Fill::select$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
   # Pinned to its line: the `cpu_denied` of a release build or one without
   # an OS, which tests never are. The debug build's, under the same name, is
