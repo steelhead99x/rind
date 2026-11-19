@@ -733,13 +733,19 @@ and FORS nodes hash several at a time on every CPU.
   the state with few spills; elsewhere they move into four states around the
   backend's four-way Keccak-f, as ML-KEM's (see [ML-KEM-768](#ml-kem-768)).
   A single lane, as verification's paths up each tree hash, runs one state.
-  The port has no proof yet. The plan: model the instructions it runs
+  On AVX-512 CPUs other than Intel's, whose cores may lower their clock for
+  512-bit vectors (see the avoid-zmm quest), the SHAKE sets hash eight lanes
+  at once: the same round on 512-bit vectors, one lane of eight states each,
+  for the blocks of F, H, and PRF, with `vprolq` for every rotation. On Zen 4,
+  which runs a 512-bit operation as two 256-bit halves, the permutation took
+  0.75-0.8x the four-way's time per state. Hashes of several blocks run as
+  two batches of four. The port has no proof yet. The plan: model the instructions it runs
   (xor, and-not, 64-bit shifts and rotates, and byte shuffles) in Lean, translate the
   port with Aeneas as `proofs/` translates `mid::sha3`, and prove it
   computes FIPS 202's Keccak-f on each of the four states against the same
   spec as the single-state proofs; its constant time follows from having no
   branch or address that depends on the state, which ctgrind checks of the
-  AVX2 copy (valgrind decodes no AVX-512).
+  AVX2 copy (valgrind decodes no AVX-512); `admin/ct-sde` checks the eight-way one.
 - The SHA-2 sets hash eight lanes, each continuing SHA-256 from the state
   after the block `PK.seed || 0`, which every F, PRF, and category 1 H and
   `T_l` start with. With SHA-NI they run one at a time, which on an Arrow
