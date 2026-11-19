@@ -24,16 +24,28 @@ the Pi 4 for its speed check, not for the proofs.
 
 ## Access
 
-Fill in before starting:
+Probed 2026-11-19:
 
-- Host / address:
-- User and key:
-- Cores / RAM / disk:
-- Rust toolchain on the board (`cargo --version`), or cross-build from the
-  laptop (`aarch64-unknown-linux-gnu`) and copy binaries:
-- Valgrind and libclang present? (ctgrind needs both; the Pi 5 had Valgrind
-  but no libclang, the Jetson had neither):
-- Passwordless sudo? (needed for the CPU governor):
+- Host / address: `192.168.90.42` (hostname `pi4b-bench`, Raspberry Pi 4
+  Model B Rev 1.5, Cortex-A72 part `0xd08`, kernel `6.18.50+rpt-rpi-v8`,
+  Debian 13 userland, glibc 2.41).
+- User and key: `admin`, key `~/.ssh/id_ed25519_pi` on the laptop
+  (`ssh -i ~/.ssh/id_ed25519_pi admin@192.168.90.42`). Each worker uses only
+  its own `~/w-pi4-<tag>` directory on the board.
+- Cores / RAM / disk: 4 cores (use core 3 for timing, cores 0 to 2 for builds
+  and tests), 3.8 GiB RAM plus 2 GiB swap, 58 GB SD card with 50 GB free.
+  CPU governor `ondemand` at boot, max 1.8 GHz.
+- Rust toolchain on the board: none (`cargo` and `rustc` absent). `gcc`,
+  `git` and `python3` are present. Cross-build from the laptop in
+  `nix develop .#aarch64` and copy binaries; nix-built binaries need
+  `patchelf --set-interpreter /lib/ld-linux-aarch64.so.1` (and an empty
+  rpath) to run against the board's glibc.
+- Valgrind and libclang present? Neither. No `perf` either. ctgrind cannot run
+  on the board as it stands; it needs both installed (which needs sudo).
+- Passwordless sudo? No, `sudo` asks for a password. The governor therefore
+  stays `ondemand` unless the owner changes it; timing workers record the
+  governor, `scaling_cur_freq`, temperature and `vcgencmd get_throttled`
+  instead, and warm the core up before each round.
 
 Confirm the CPU first and put the output in the first PR comment:
 
