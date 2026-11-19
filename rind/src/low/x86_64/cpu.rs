@@ -424,6 +424,19 @@ impl HaveAdxForVgP256 {
     }
 }
 
+/// Proof that the CPU has what X25519 and Ed25519 verification run for AVX-IFMA,
+/// the VEX encoding of IFMA that Alder Lake's successors and Zen 5 have
+/// without AVX-512: AVX-IFMA, AVX, AVX2, BMI1, BMI2, and ADX. A CPU with
+/// AVX-512 IFMA runs [`HaveIfmaForCurve25519`]'s routines instead.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveAvxIfmaForCurve25519(());
+
+impl HaveAvxIfmaForCurve25519 {
+    pub(crate) fn check() -> Option<Self> {
+        has(AVX | AVX2 | BMI1 | BMI2 | ADX | AVX_IFMA).then_some(Self(()))
+    }
+}
+
 /// Proof that the CPU has what pyca/verified-garbage's AVX-512 IFMA P-256
 /// ECDH and ECDSA verification run: AVX-512 F, VL, and IFMA, with what
 /// [`HaveAdxForVgP256`] proves.
@@ -464,6 +477,7 @@ const AVX512IFMA: u32 = 1 << 19;
 const BMI1: u32 = 1 << 20;
 const SHA512: u32 = 1 << 21;
 const AVX512FP16: u32 = 1 << 22;
+const AVX_IFMA: u32 = 1 << 23;
 const INTEL: u32 = 1 << 30;
 /// What rind's AVX2 kernels use, for [`HaveAvx2`].
 const AVX2_KERNELS: u32 = AVX | AVX2 | BMI1 | BMI2 | POPCNT | SSSE3;
@@ -535,6 +549,7 @@ named! {
     AVX512F: "avx512f",
     AVX512DQ: "avx512dq",
     AVX512IFMA: "avx512ifma",
+    AVX_IFMA: "avxifma",
     AVX512BW: "avx512bw",
     AVX512VL: "avx512vl",
     AVX512VBMI: "avx512vbmi",
@@ -650,6 +665,7 @@ fn decode(r: Registers) -> u32 {
         set(bit(r.ecx1, 28), AVX);
         set(bit(r.ebx7, 5), AVX2);
         set(bit(r.eax7_1, 0), SHA512);
+        set(bit(r.eax7_1, 23), AVX_IFMA);
         // And the AVX-512 state. Rust's `avx512f` implies FMA and F16C,
         // which Intel does not promise with it, so `std` requires them.
         let (fma, f16c) = (bit(r.ecx1, 12), bit(r.ecx1, 29));
@@ -804,6 +820,7 @@ mod tests {
         (Leaf::Ecx7, 10, VPCLMULQDQ),
         (Leaf::Edx7, 23, AVX512FP16),
         (Leaf::Eax7Sub1, 0, SHA512),
+        (Leaf::Eax7Sub1, 23, AVX_IFMA),
     ];
 
     /// Each feature is read from its own bit, and from no other.
@@ -848,7 +865,7 @@ mod tests {
             | AVX512VBMI
             | AVX512VBMI2
             | AVX512FP16;
-        let avx = AVX | AVX2 | SHA512 | avx512;
+        let avx = AVX | AVX2 | SHA512 | AVX_IFMA | avx512;
         for xcr0 in [None, Some(0), Some(0b010), Some(0b100), Some(!0b110)] {
             assert_eq!(decode(Registers { xcr0, ..all }), named & !avx, "{xcr0:?}");
         }
@@ -916,6 +933,7 @@ mod tests {
             BMI1,
             SHA512,
             AVX512FP16,
+            AVX_IFMA,
             INTEL,
             DETECTED,
         ];
@@ -1004,6 +1022,10 @@ mod tests {
                     "avx512vl",
                     "avx512ifma"
                 ),
+            ),
+            (
+                HaveAvxIfmaForCurve25519::check().is_some(),
+                adx && available!("avx", "avx2", "bmi1", "bmi2", "avxifma"),
             ),
             (
                 HaveSha1::check().is_some(),

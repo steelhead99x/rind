@@ -1,0 +1,12 @@
+#!/bin/sh
+# Regenerates rind/src/low/x86_64/avx_ifma/ from the vendored VG routines.
+set -eu
+repo=$(cd "$(dirname "$0")/../.." && pwd)
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+all=vg_x25519_ifma,vg_x25519_exchange_ifma,vg_ed25519_verify_equation_ifma,vg_ed25519_verify_avx2_ifma
+mkdir -p "$repo/rind/src/low/x86_64/avx_ifma"
+for f in $(echo "$all" | tr , ' '); do
+    WORK="$work" python3 -I "$repo/admin/avx-ifma/convert.py" "$repo" "$f" "$all"
+done
+rustfmt --edition 2024 "$repo"/rind/src/low/x86_64/avx_ifma/*.rs

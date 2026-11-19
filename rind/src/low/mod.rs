@@ -352,6 +352,7 @@ cfg_if::cfg_if! {
         pub(crate) use x86_64::adx_mux::bignum_tomont_p384;
         pub(crate) use x86_64::adx_mux::curve25519_x25519;
         pub(crate) use x86_64::adx_mux::curve25519_x25519base;
+        pub(crate) use x86_64::curve25519_avx_ifma::Curve25519AvxIfma;
         pub(crate) use x86_64::curve25519_ifma::Curve25519Ifma;
         pub(crate) use x86_64::adx_mux::edwards25519_decode;
         pub(crate) use x86_64::adx_mux::edwards25519_epadd;
@@ -479,6 +480,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::bignum_tomont_p384::bignum_tomont_p384;
         pub(crate) use aarch64::curve25519_x25519::curve25519_x25519;
         pub(crate) use aarch64::curve25519_x25519base::curve25519_x25519base;
+        pub(crate) use aarch64::curve25519_avx_ifma::Curve25519AvxIfma;
         pub(crate) use aarch64::curve25519_ifma::Curve25519Ifma;
         pub(crate) use aarch64::edwards25519_decode::edwards25519_decode;
         pub(crate) use aarch64::edwards25519_epadd::edwards25519_epadd;
