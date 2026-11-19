@@ -102,8 +102,8 @@ unstable = []
 [dependencies]
 rind = { version = "0.3.2", path = "../rind" }
 # rind-fips is unpublished, so a published rind-aws-lc-rs cannot yet carry
-# this dependency: see the README.
-rind-fips = { path = "../rind-fips", optional = true }
+# this dependency until rind-fips is published: see the README.
+rind-fips = { version = "0.1.0", path = "../rind-fips", optional = true }
 untrusted = "0.7.1"
 zeroize = "1.9"
 

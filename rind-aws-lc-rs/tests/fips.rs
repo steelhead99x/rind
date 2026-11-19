@@ -2,11 +2,10 @@
 //! module and `try_fips_mode()` succeeds; without it, the keys run in rind
 //! and `try_fips_mode()` fails.
 
-use rind_aws_lc_rs as ours;
-
 use ours::aead::{
     AES_128_GCM, Aad, Nonce, TlsProtocolId, TlsRecordOpeningKey, TlsRecordSealingKey,
 };
+use rind_aws_lc_rs as ours;
 
 #[cfg(not(feature = "fips"))]
 #[test]
@@ -31,8 +30,9 @@ fn without_the_feature_fips_mode_fails() {
 
 #[cfg(feature = "fips")]
 mod with_the_feature {
-    use super::*;
     use ours::aead::{AES_256_GCM, CHACHA20_POLY1305};
+
+    use super::*;
 
     /// TLS 1.3's nonce for sequence number `seq` under `iv`.
     fn nonce(iv: &[u8; 12], seq: u64) -> Nonce {
