@@ -414,6 +414,13 @@ mod tests {
         assert_eq!(bytes, [0; 32]);
     }
 
+    // Debug names the type and prints none of the secret.
+    #[test]
+    fn a_message_does_not_debug_print_its_bytes() {
+        let message = Message::from_random_bytes(&mut [0x5a; 32]);
+        assert_eq!(format!("{message:?}"), "Message(..)");
+    }
+
     #[test]
     fn wycheproof_decaps() {
         fn check<A: Algorithm>() {
