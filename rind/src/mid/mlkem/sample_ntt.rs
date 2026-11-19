@@ -9,7 +9,7 @@ use crate::{
 
 /// FIPS-203's `SampleNTT` of each polynomial of a `K` by `K` matrix into
 /// `out`, row by row, or of its transpose: eight at a time where the CPU
-/// samples eight at once, then four, then one.
+/// samples eight at once (but for ML-KEM-768), then four, then one.
 pub(super) fn sample_ntt(rho: &[u8; 32], transposed: bool, out: &mut [Poly]) {
     let k = super::rank(out.len());
     let mut buf = [0; 40];
@@ -31,7 +31,16 @@ pub(super) fn sample_ntt(rho: &[u8; 32], transposed: bool, out: &mut [Poly]) {
     });
     let mut next = || inputs.next().unwrap_or(buf);
 
-    let (eights, rest) = out.as_chunks_mut::<8>();
+    // ML-KEM-768 never samples eight at a time: it takes eight of its nine
+    // polynomials four at a time, over the four-way SHAKE128 `proofs/`
+    // proves, and the ninth alone, so Graviola's unproven eight-way Keccak is
+    // off its path. Where that would run, ML-KEM-768 runs
+    // pyca/verified-garbage's routines instead, so this costs nothing
+    // measurable.
+    let (eights, rest) = match k {
+        3 => (&mut [][..], out),
+        _ => out.as_chunks_mut::<8>(),
+    };
     for outputs in eights {
         let inputs = core::array::from_fn(|_| next());
         low::mlkem_sample_poly_ntt_8x(

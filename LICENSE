@@ -259,8 +259,8 @@ pyca/verified-garbage <https://github.com/pyca/verified-garbage>
   Copyright (c) Individual contributors.
   License: Apache-2.0 OR BSD-3-Clause, which the files keep.
 
-  What: the Lean ISA models, and the RSA and ChaCha20 specs and
-  contracts rind's proofs import or adapt, under
+  What: the Lean ISA models, the ML-KEM and SHA-3 specs, and the RSA and
+  ChaCha20 specs and contracts rind's proofs import or adapt, under
   proofs/verified-garbage/VerifiedGarbage, which admin/import-vg-models
   copies byte for byte from verified-garbage
   at the same commit, so they carry no SPDX comment; this entry names
