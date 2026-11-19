@@ -6,8 +6,9 @@ open Aeneas Aeneas.Std Result rind.spec rind.spec.rsa
 
 `RsaPublicKey::public_op` raises a signature to the public exponent modulo
 the modulus by square-and-multiply in the Montgomery domain, over whichever
-Montgomery products `MontProducts` states, on a CPU without the AVX-512 IFMA
-that runs pyca/verified-garbage's public operation instead (`NoIfma`).
+Montgomery products `MontProducts` states, for every key that does not run
+pyca/verified-garbage's AVX-512 IFMA public operation instead, which
+`Rind.X86_64.RsaIfma` composes with this.
 -/
 
 namespace rind.x86_64
@@ -337,102 +338,21 @@ theorem mont_neg_inverse_spec (n : RsaInt) (hk : 1 ≤ n.used.val) (hk' : n.used
   rw [hslen, hs2, wordsNat_cons, wordsNat_nil, hs1, ← hN] at h
   simpa [Nat.add_mod, Nat.mul_mod] using h
 
-/-- The CPU lacks the AVX-512 IFMA features with which `public_op` runs
-pyca/verified-garbage's public operation for some keys, which Lean proves in
-that project and not here, so `public_op` runs the square-and-multiply below
-for every key. It speaks only of moduli of at most 128 words, as a loaded
-key's are: `check` reads `n`'s words, which panics past the array. -/
-def NoIfma : Prop :=
-  ∀ n : RsaInt, n.used.val ≤ 128 → ∀ e : U64, low.x86_64.rsa_ifma.RsaIfma.check n e = ok none
-
 /-- What `RsaPublicKey::new` establishes about a key: the modulus `n` of
 `k` words is odd, `n0` is `-n⁻¹ mod 2^64`, the montifier is `R² mod n` for
 `R = 2^(64k)`, the exponent is odd and above one, and the modulus has 1024
-to 8192 bits. -/
+to 8192 bits, its top word nonzero. -/
 def PubKeyInv (key : mid.rsa_pub.RsaPublicKey) : Prop :=
   let k := key.n.used.val
   let N := wordsNat (lowWords key.n k)
   2 ≤ k ∧ k ≤ 128 ∧ N % 2 = 1 ∧ (N * key.n0.val + 1) % 2 ^ 64 = 0 ∧
     wordsNat (lowWords key.montifier k) = 2 ^ (128 * k) % N ∧ key.e.val % 2 = 1 ∧ 3 ≤ key.e.val ∧
-    1024 ≤ N.size ∧ N.size ≤ 8192
+    1024 ≤ N.size ∧ N.size ≤ 8192 ∧ 2 ^ (64 * (k - 1)) ≤ N
 
 theorem div_pow_log2 (e : Nat) (he : e ≠ 0) : e / 2 ^ e.log2 = 1 := by
   apply Nat.div_eq_of_lt_le
   · simpa using Nat.log2_self_le he
   · have := Nat.lt_log2_self (n := e); rw [Nat.pow_succ] at this; omega
 
-/-- RSAVP1: `public_op` raises `c` to the public exponent modulo the
-modulus, or refuses a `c` not below it. -/
-theorem public_op_spec (key : mid.rsa_pub.RsaPublicKey) (hinv : PubKeyInv key)
-    (hP : MontProducts key.n.used.val) (hifma : NoIfma) (c : RsaInt) (hcu : c.used.val ≤ 128)
-    (hcz : wordsNat (c.words.val.drop c.used.val) = 0) :
-    mid.rsa_pub.RsaPublicKey.public_op key c ⦃ r => match r with
-      | .Ok m => wordsNat (lowWords c c.used) < wordsNat (lowWords key.n key.n.used) ∧
-          m.used = key.n.used ∧
-          wordsNat (lowWords m key.n.used) =
-            wordsNat (lowWords c c.used) ^ key.e.val % wordsNat (lowWords key.n key.n.used)
-      | .Err _ => wordsNat (lowWords key.n key.n.used) ≤ wordsNat (lowWords c c.used) ⦄ := by
-  obtain ⟨hk2, hk, hodd, hn0, hmont, he, he3, _⟩ := hinv
-  unfold mid.rsa_pub.RsaPublicKey.public_op
-  step with less_than_spec c key.n hcu hk as ⟨b, hb⟩
-  unfold low.ct.into_public
-  simp only [bind_ok]
-  split
-  · rename_i hlt
-    rw [hb] at hlt
-    have hlt : wordsNat (lowWords c c.used) < wordsNat (lowWords key.n key.n.used) := by simpa using hlt
-    have hNR : wordsNat (lowWords key.n key.n.used) < 2 ^ (64 * key.n.used.val) := by
-      have := wordsNat_lt' (lowWords key.n key.n.used); rwa [lowWords_length _ hk] at this
-    have hR : Nat.Coprime (2 ^ (64 * key.n.used.val)) (wordsNat (lowWords key.n key.n.used)) :=
-      coprime_two_pow_odd hodd _
-    -- `expand` keeps `c`'s value, which its words above `used` hold none of.
-    unfold low.posint.PosInt.expand
-    simp only [hifma key.n hk key.e, bind_ok]
-    have hcw : wordsNat c.words.val = wordsNat (lowWords c c.used) := by
-      rw [wordsNat_take_drop c.words.val c.used, hcz, Nat.mul_zero, Nat.add_zero]; rfl
-    have hc1 : wordsNat (lowWords ({ c with used := key.n.used } : RsaInt) key.n.used) =
-        wordsNat (lowWords c c.used) := by
-      simp only [lowWords]; rw [wordsNat_take_mod, hcw]
-      exact Nat.mod_eq_of_lt (lt_trans hlt hNR)
-    -- `to_montgomery` takes `c` to `c·R`.
-    unfold low.posint.PosInt.to_montgomery low.posint.PosInt.mont_mul low.posint.PosInt.zero
-    step with mont_neg_inverse_spec key.n (by omega) hk hodd as ⟨n0', hn0'⟩
-    have hmlt : wordsNat (lowWords key.montifier key.n.used) < wordsNat (lowWords key.n key.n.used) := by
-      rw [hmont]; exact Nat.mod_lt _ (by omega)
-    step with mont_mul_into_spec _ key.montifier _ key.n n0' hP hk
-      (mont_args_of _ _ key.n n0' hk hk2 hodd hn0' (by rw [hc1]; exact hlt) hmlt) as ⟨cm, hcmu, hcmr, _⟩
-    obtain ⟨hcmN, hcmv⟩ := mont_result_of hcmr
-    rw [lowWords_length _ hk, hc1, hmont] at hcmv
-    have hcmC : wordsNat (lowWords cm key.n.used) ≡
-        wordsNat (lowWords c c.used) * 2 ^ (64 * key.n.used.val) [MOD wordsNat (lowWords key.n key.n.used)] := by
-      apply mont_cancel hR
-      refine hcmv.trans ?_
-      unfold Nat.ModEq
-      rw [Nat.mul_mod, Nat.mod_mod, ← Nat.mul_mod]
-      congr 1; ring
-    step as ⟨a, ha⟩
-    subst ha
-    step with ilog2_spec key.e (by omega) as ⟨L, hL⟩
-    step as ⟨iter, hiter⟩
-    have hL1 : 1 ≤ L.val := by
-      rw [hL]; exact Nat.le_log2 (by omega) |>.mpr (by omega)
-    have hL64 : L.val < 64 := by
-      rw [hL]; exact (Nat.log2_lt (by omega)).mpr (by have := key.e.hBounds; simpa using this)
-    step with public_op_loop_spec key.n key.e key.n0 _ a hP hk hk2 hodd hn0 he (by rw [hc1]; exact hlt)
-      hcmN (by rw [hc1]; exact hcmC) iter (by rw [hiter]; rfl) (by rw [hiter]; exact hL64) a _ true
-      (by
-        rw [hiter]
-        simp only [ExpInv, ↓reduceIte, show L.val ≠ 0 by omega]
-        refine ⟨hcmu, hcmN, ?_⟩
-        rw [hL, div_pow_log2 _ (by omega), pow_one, hc1]
-        exact hcmC) as ⟨a1, b3, in_a, hres⟩
-    simp only [ExpInv, ↓reduceIte, hc1] at hres
-    obtain ⟨hu, hN, hv⟩ := hres
-    split <;> rename_i hin <;> simp only [hin, ↓reduceIte] at hu hN hv <;> simp only [WP.spec_ok] <;>
-      exact ⟨hlt, hu, (Nat.mod_eq_of_lt hN).symm.trans hv⟩
-  · rename_i hge
-    rw [hb] at hge
-    simp only [WP.spec_ok]
-    simpa using hge
 
 end rind.x86_64

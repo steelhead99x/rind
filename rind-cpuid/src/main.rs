@@ -68,10 +68,11 @@ fn main() {
     let pmull = is_aarch64_feature_detected!("pmull");
     let sha2 = is_aarch64_feature_detected!("sha2");
     let sha3 = is_aarch64_feature_detected!("sha3");
+    let sve2 = is_aarch64_feature_detected!("sve2");
 
     println!(
         "{{ \"cpuid\": {{ \"aes\": {}, \"dit\": {}, \"neon\": {}, \"pmull\": {}, \
-        \"sha2\": {}, \"sha3\": {} }} }}",
-        aes as u8, dit as u8, neon as u8, pmull as u8, sha2 as u8, sha3 as u8,
+        \"sha2\": {}, \"sha3\": {}, \"sve2\": {} }} }}",
+        aes as u8, dit as u8, neon as u8, pmull as u8, sha2 as u8, sha3 as u8, sve2 as u8,
     );
 }

@@ -8,11 +8,12 @@
 /// This accepts an array of 384 bytes and unpacks them into 256 16-bit numbers
 /// in the range 0 <= a[i] < 2^12 (typically they will be < 3329, the ML-KEM prime).
 pub(crate) fn mlkem_frombytes(r: &mut [i16; 256], a: &[u8; 384]) {
-    let (r_chunks, _) = r.as_chunks_mut::<2>();
-    let (a_chunks, _) = a.as_chunks::<3>();
-    for (r, a) in r_chunks.iter_mut().zip(a_chunks.iter()) {
-        r[0] = (a[0] as i16) | (((a[1] & 0x0f) as i16) << 8);
-        r[1] = ((a[1] >> 4) as i16) | ((a[2] as i16) << 4);
+    // Counted, not zipped: the proof is about Aeneas's translation, which
+    // takes no iterator adapter.
+    for i in 0..128 {
+        let (a0, a1, a2) = (a[3 * i], a[3 * i + 1], a[3 * i + 2]);
+        r[2 * i] = (a0 as i16) | (((a1 & 0x0f) as i16) << 8);
+        r[2 * i + 1] = ((a1 >> 4) as i16) | ((a2 as i16) << 4);
     }
 }
 
@@ -31,43 +32,41 @@ pub(crate) fn mlkem_unpack(_a: &mut [i16; 256]) {}
 ///
 /// Input a[256] (signed 16-bit words, each in `[0, Q)`); output r[128] (bytes)
 pub(crate) fn mlkem_compress_d4(r: &mut [u8; 128], a: &[i16; 256]) {
-    compress::<4>(r, a);
+    compress::<4, 128>(r, a);
 }
 
 /// Compress ML-KEM polynomial coefficients to 5 bits each, and pack them
 ///
 /// Input a[256] (signed 16-bit words, each in `[0, Q)`); output r[160] (bytes)
 pub(crate) fn mlkem_compress_d5(r: &mut [u8; 160], a: &[i16; 256]) {
-    compress::<5>(r, a);
+    compress::<5, 160>(r, a);
 }
 
 /// Compress ML-KEM polynomial coefficients to 10 bits each, and pack them
 ///
 /// Input a[256] (signed 16-bit words, each in `[0, Q)`); output r[320] (bytes)
 pub(crate) fn mlkem_compress_d10(r: &mut [u8; 320], a: &[i16; 256]) {
-    compress::<10>(r, a);
+    compress::<10, 320>(r, a);
 }
 
 /// Compress ML-KEM polynomial coefficients to 11 bits each, and pack them
 ///
 /// Input a[256] (signed 16-bit words, each in `[0, Q)`); output r[352] (bytes)
 pub(crate) fn mlkem_compress_d11(r: &mut [u8; 352], a: &[i16; 256]) {
-    compress::<11>(r, a);
+    compress::<11, 352>(r, a);
 }
 
-/// FIPS 203's `ByteEncode_D(Compress_D(a))`: each eight coefficients become
-/// `D` bytes, little-endian bit order per `BitsToBytes`.
-fn compress<const D: usize>(r: &mut [u8], a: &[i16; 256]) {
-    let (octets, _) = a.as_chunks::<8>();
-    let (out_chunks, _) = r.as_chunks_mut::<D>();
-    debug_assert_eq!(out_chunks.len(), octets.len());
-
-    for (octet, out) in octets.iter().zip(out_chunks.iter_mut()) {
+/// FIPS 203's `ByteEncode_D(Compress_D(a))` into the `L = 32 * D` bytes of
+/// `r`: each eight coefficients become `D` bytes, little-endian bit order per
+/// `BitsToBytes`.
+fn compress<const D: usize, const L: usize>(r: &mut [u8; L], a: &[i16; 256]) {
+    debug_assert_eq!(L, 32 * D);
+    for i in 0..32 {
         let mut bits = 0u128;
-        for (i, x) in octet.iter().enumerate() {
-            bits |= (compress_one::<D>(*x) as u128) << (D * i);
+        for j in 0..8 {
+            bits |= (compress_one::<D>(a[8 * i + j]) as u128) << (D * j);
         }
-        out.copy_from_slice(&bits.to_le_bytes()[..D]);
+        r[D * i..D * i + D].copy_from_slice(&bits.to_le_bytes()[..D]);
     }
 }
 
@@ -80,8 +79,13 @@ const Q_HALF: i16 = (Q + 1) / 2;
 /// (cf. KyberSlash): `(x * 2^D + q / 2) * M >> S` is `floor` of the quotient
 /// by `q` for each `D`'s `M` and `S`, which `compress_is_exact` checks over
 /// the whole input range.
+#[expect(
+    clippy::manual_range_contains,
+    reason = "Aeneas's library has no `Range::contains`"
+)]
 fn compress_one<const D: usize>(x: i16) -> u16 {
-    debug_assert!((0..Q).contains(&crate::low::ct::into_public(x)));
+    let public = crate::low::ct::into_public(x);
+    debug_assert!(0 <= public && public < Q);
     let (m, s) = match D {
         4 | 5 => (80635, 28),
         10 => (1290167, 32),
@@ -97,6 +101,7 @@ fn compress_one<const D: usize>(x: i16) -> u16 {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

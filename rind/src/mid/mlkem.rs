@@ -3,6 +3,7 @@
 
 //! ML-KEM as standardised by FIPS-203, at each of its parameter sets.
 
+use alloc::boxed::Box;
 use core::fmt;
 use core::marker::PhantomData;
 use core::panic::{RefUnwindSafe, UnwindSafe};
@@ -531,18 +532,18 @@ impl<P: Params> DecapKey<P> {
         match P::DU {
             10 => polys
                 .zip(c_1.as_chunks::<320>().0)
-                .for_each(|(poly, bytes)| decompress::<10>(bytes, poly)),
+                .for_each(|(poly, bytes)| decompress::<10, 320>(bytes, poly)),
             11 => polys
                 .zip(c_1.as_chunks::<352>().0)
-                .for_each(|(poly, bytes)| decompress::<11>(bytes, poly)),
+                .for_each(|(poly, bytes)| decompress::<11, 352>(bytes, poly)),
             _ => unreachable!(),
         }
 
         // 4. v' <- Decompress_dv(ByteDecode_dv(c2))
         let mut v_prime = Coeffs::<Poly, Normal>::zero();
         match P::DV {
-            4 => decompress::<4>(c_2, &mut v_prime.0),
-            5 => decompress::<5>(c_2, &mut v_prime.0),
+            4 => decompress::<4, 128>(c_2.try_into().unwrap(), &mut v_prime.0),
+            5 => decompress::<5, 160>(c_2.try_into().unwrap(), &mut v_prime.0),
             _ => unreachable!(),
         }
 
@@ -1106,39 +1107,39 @@ fn basemul(r: &mut Poly, a: &[Poly], b: &[Poly], bt: &[[i16; N / 2]]) {
     }
 }
 
-/// `Decompress_D(ByteDecode_D(bytes))` into `out`: each `D` bytes yield
-/// eight `D`-bit values, little-endian bit order, and each value `y` becomes
-/// `round((q / 2^D) * y)`.
-fn decompress<const D: usize>(bytes: &[u8], out: &mut Poly) {
-    let (in_chunks, _) = bytes.as_chunks::<D>();
-    let (octets, _) = out.as_chunks_mut::<8>();
-    debug_assert_eq!(in_chunks.len(), octets.len());
-
-    for (inp, octet) in in_chunks.iter().zip(octets.iter_mut()) {
+/// `Decompress_D(ByteDecode_D(bytes))` into `out`, for `bytes` of `L = 32 * D`
+/// bytes: each `D` bytes yield eight `D`-bit values, little-endian bit order,
+/// and each value `y` becomes `round((q / 2^D) * y)`.
+///
+/// The loops here and in the helpers below count indices, rather than zip
+/// iterators, since their proof is about Aeneas's translation, which takes
+/// no iterator adapter.
+fn decompress<const D: usize, const L: usize>(bytes: &[u8; L], out: &mut Poly) {
+    debug_assert_eq!(L, 32 * D);
+    for i in 0..N / 8 {
         let mut bits = [0u8; 16];
-        bits[..D].copy_from_slice(inp);
+        bits[..D].copy_from_slice(&bytes[D * i..D * i + D]);
         let bits = u128::from_le_bytes(bits);
-        for (i, coeff) in octet.iter_mut().enumerate() {
-            let y = ((bits >> (D * i)) as u32) & ((1 << D) - 1);
-            *coeff = ((y * Q as u32 + (1 << (D - 1))) >> D) as i16;
+        for j in 0..8 {
+            let y = ((bits >> (D * j)) as u32) & ((1 << D) - 1);
+            out[8 * i + j] = ((y * Q as u32 + (1 << (D - 1))) >> D) as i16;
         }
     }
 }
 
-/// `Compress_1(x)` for eight coefficients in `[0, Q)`
-fn compress_1_x8(coeffs: &[i16; 8]) -> u8 {
-    let mut r = 0;
-
-    for (i, x) in coeffs.iter().enumerate() {
-        debug_assert!((0..Q).contains(&low::ct::into_public(*x)));
-        let x = (*x as u64) << 1;
-        let x = x.wrapping_add(Q_HALF as u64);
-        let x = x.wrapping_mul(80635);
-        let x = x >> 28;
-        r |= ((x & 1) as u8) << i;
-    }
-
-    r
+/// `Compress_1(x)`, for `x` in `[0, Q)`.
+#[expect(
+    clippy::manual_range_contains,
+    reason = "Aeneas's library has no `Range::contains`"
+)]
+fn compress_1(x: i16) -> u8 {
+    let public = low::ct::into_public(x);
+    debug_assert!(0 <= public && public < Q);
+    let x = (x as u64) << 1;
+    let x = x.wrapping_add(Q_HALF as u64);
+    let x = x.wrapping_mul(80635);
+    let x = x >> 28;
+    (x & 1) as u8
 }
 
 impl<V: Array<Poly>> Coeffs<V, Normal> {
@@ -1159,9 +1160,9 @@ impl Coeffs<Poly, Normal> {
     fn from_message_bits(m: Message) -> Self {
         let mut r = Self::zero();
 
-        for (i, byte) in m.0.iter().enumerate() {
+        for i in 0..32 {
             for bit in 0..8 {
-                r.0[i * 8 + bit] = ct_select_i16(byte >> bit & 1, Q_HALF, 0);
+                r.0[i * 8 + bit] = ct_select_i16(m.0[i] >> bit & 1, Q_HALF, 0);
             }
         }
 
@@ -1172,8 +1173,12 @@ impl Coeffs<Poly, Normal> {
     fn to_message_bits(&self) -> Message {
         let mut r = Message([0; 32]);
 
-        for (i, r) in r.0.iter_mut().enumerate() {
-            *r = compress_1_x8(&self.0[i * 8..(i + 1) * 8].try_into().unwrap());
+        for i in 0..32 {
+            let mut byte = 0;
+            for bit in 0..8 {
+                byte |= compress_1(self.0[i * 8 + bit]) << bit;
+            }
+            r.0[i] = byte;
         }
 
         r
@@ -1300,33 +1305,29 @@ fn sample_poly_cbd3<'a>(
 }
 
 fn sample_cbd2(buf: &[u8; 128], out: &mut Poly) {
-    let (buf_chunks, _) = buf.as_chunks::<4>();
-    let (out_chunks, _) = out.as_chunks_mut::<8>();
-    for (in_bytes, out_coeffs) in buf_chunks.iter().zip(out_chunks.iter_mut()) {
-        let t = u32::from_le_bytes(*in_bytes);
+    for i in 0..N / 8 {
+        let t = u32::from_le_bytes([buf[4 * i], buf[4 * i + 1], buf[4 * i + 2], buf[4 * i + 3]]);
         let d = (t & 0x5555_5555).wrapping_add((t >> 1) & 0x5555_5555);
 
-        for (j, coeff) in out_coeffs.iter_mut().enumerate() {
+        for j in 0..8 {
             let a = ((d >> (4 * j)) & 0x3) as i16;
             let b = ((d >> (4 * j + 2)) & 0x3) as i16;
-            *coeff = a.wrapping_sub(b);
+            out[8 * i + j] = a.wrapping_sub(b);
         }
     }
 }
 
 fn sample_cbd3(buf: &[u8; 192], out: &mut Poly) {
-    let (buf_chunks, _) = buf.as_chunks::<3>();
-    let (out_chunks, _) = out.as_chunks_mut::<4>();
-    for (in_bytes, out_coeffs) in buf_chunks.iter().zip(out_chunks.iter_mut()) {
-        let t = u32::from_le_bytes([in_bytes[0], in_bytes[1], in_bytes[2], 0]);
+    for i in 0..N / 4 {
+        let t = u32::from_le_bytes([buf[3 * i], buf[3 * i + 1], buf[3 * i + 2], 0]);
         let d = (t & 0x0024_9249)
             .wrapping_add((t >> 1) & 0x0024_9249)
             .wrapping_add((t >> 2) & 0x0024_9249);
 
-        for (j, coeff) in out_coeffs.iter_mut().enumerate() {
+        for j in 0..4 {
             let a = ((d >> (6 * j)) & 0x7) as i16;
             let b = ((d >> (6 * j + 3)) & 0x7) as i16;
-            *coeff = a.wrapping_sub(b);
+            out[4 * i + j] = a.wrapping_sub(b);
         }
     }
 }
@@ -1339,6 +1340,7 @@ const Q_HALF: i16 = (Q + 1) / 2;
 const N: usize = 256;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::test::{Acvp, acvp};
@@ -1562,7 +1564,7 @@ mod tests {
     // bound, `round(q / 2^(D + 1))`, and recompresses to the same bits.
     #[test]
     fn decompress_inverts_compress() {
-        fn check<const D: usize>(compress: fn(&mut [u8], &Poly)) {
+        fn check<const D: usize, const L: usize>(compress: fn(&mut [u8], &Poly)) {
             for start in (0..Q as usize + 7).step_by(N - 7) {
                 let poly = Coeffs::<Poly, Normal>(
                     core::array::from_fn(|i| ((start + i) % Q as usize) as i16),
@@ -1571,7 +1573,7 @@ mod tests {
                 let mut bytes = [0; 32 * 11];
                 compress(&mut bytes[..32 * D], &poly.0);
                 let mut out = [0; N];
-                decompress::<D>(&bytes[..32 * D], &mut out);
+                decompress::<D, L>(bytes[..32 * D].try_into().unwrap(), &mut out);
                 let mut again = [0; 32 * 11];
                 compress(&mut again[..32 * D], &out);
                 assert_eq!(bytes, again, "d{D}, from {start}");
@@ -1589,10 +1591,10 @@ mod tests {
         fn aligned(poly: &Poly) -> Coeffs<Poly, Normal> {
             Coeffs(*poly, PhantomData)
         }
-        check::<4>(|r, a| low::mlkem_compress_d4(r.try_into().unwrap(), &aligned(a).0));
-        check::<5>(|r, a| low::mlkem_compress_d5(r.try_into().unwrap(), &aligned(a).0));
-        check::<10>(|r, a| low::mlkem_compress_d10(r.try_into().unwrap(), &aligned(a).0));
-        check::<11>(|r, a| low::mlkem_compress_d11(r.try_into().unwrap(), &aligned(a).0));
+        check::<4, 128>(|r, a| low::mlkem_compress_d4(r.try_into().unwrap(), &aligned(a).0));
+        check::<5, 160>(|r, a| low::mlkem_compress_d5(r.try_into().unwrap(), &aligned(a).0));
+        check::<10, 320>(|r, a| low::mlkem_compress_d10(r.try_into().unwrap(), &aligned(a).0));
+        check::<11, 352>(|r, a| low::mlkem_compress_d11(r.try_into().unwrap(), &aligned(a).0));
     }
 
     // The two-block noise of ML-KEM-512's `eta1 = 3` matches the bitwise

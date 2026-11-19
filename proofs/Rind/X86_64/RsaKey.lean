@@ -1143,7 +1143,7 @@ theorem rsa_public_key_new_spec (h : low.entry.Entry.assert_held = ok ()) (n : R
       unfold PubKeyInv
       dsimp only
       rw [hN]
-      exact ⟨by omega, hk, hodd', hn0, hm, by omega, by omega, hsz.1, hsz.2⟩
+      exact ⟨by omega, hk, hodd', hn0, hm, by omega, by omega, hsz.1, hsz.2, htop⟩
     · have : (if decide (1024 ≤ N.size) = true then ok (decide (N.size ≤ 8192)) else ok false) = ok false := by
         by_cases h1 : 1024 ≤ N.size
         · simp only [h1, decide_true, ↓reduceIte]; simp only [ok.injEq, decide_eq_false_iff_not]; omega

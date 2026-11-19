@@ -1072,50 +1072,132 @@ def sha3Family : high.digest.Algorithm → Option (List Byte → List Byte)
   | .SHA3_512 => some sha3_512
   | _ => none
 
-/-- A digest context of `algorithm`, a SHA-3, that has hashed `m`. -/
-def Sha3ContextHashed (c : high.digest.Context) (algorithm : high.digest.Algorithm) (m : List U8) :
+/-- SHA-3 in one call: `digest`'s bytes are FIPS 202's hash of `data`. -/
+theorem sha3_family_digest' (h : RunsSha3) (algorithm : high.digest.Algorithm)
+    (f : List Byte → List Byte) (hf : sha3Family algorithm = some f) (data : Slice U8) :
+    high.digest.digest algorithm data ⦃ d =>
+      high.digest.Digest.Insts.CoreConvertAsRefSliceU8.as_ref d ⦃ b =>
+        bv b.val = f (bv data.val) ⦄ ⦄ := by
+  unfold high.digest.digest high.digest.Algorithm.hash high.digest.one_shot
+  step with sha3_new_secret_spec h as ⟨e⟩
+  cases algorithm <;> simp only [sha3Family, Option.some.injEq, reduceCtorEq] at hf <;> subst hf
+  · simp only [high.digest.Sha3_256Context.Insts.RindHighDigestVariant.NEW,
+      high.digest.Sha3_256Context.Insts.RindHighHashHashContext.update,
+      high.digest.Sha3_256Context.Insts.RindHighHashHashContext.finish, high.digest.SHA3_256, bind_ok]
+    step with sha3ctx_new_spec 136#usize 32#usize rfl (by decide) as ⟨c0, hc0⟩
+    step with sha3ctx_update_spec h (by decide) _ _ hc0 data as ⟨c1, hc1⟩
+    step with sha3ctx_finish_spec h (by decide) _ _ hc1 as ⟨d, hd⟩
+    step as ⟨sl, hsl⟩
+    have hl : sl.length = 32 := by simp [hsl]
+    apply WP.spec_mono (digest_new_as_ref' .SHA3_256 sl 32#usize rfl (by simp [hl]) (by simp [hl]))
+    intro dg hdg
+    apply WP.spec_mono hdg
+    intro b hb
+    rw [hb, hsl, Array.val_to_slice, hd, List.nil_append]
+    rfl
+  · simp only [high.digest.Sha3_384Context.Insts.RindHighDigestVariant.NEW,
+      high.digest.Sha3_384Context.Insts.RindHighHashHashContext.update,
+      high.digest.Sha3_384Context.Insts.RindHighHashHashContext.finish, high.digest.SHA3_384, bind_ok]
+    step with sha3ctx_new_spec 104#usize 48#usize rfl (by decide) as ⟨c0, hc0⟩
+    step with sha3ctx_update_spec h (by decide) _ _ hc0 data as ⟨c1, hc1⟩
+    step with sha3ctx_finish_spec h (by decide) _ _ hc1 as ⟨d, hd⟩
+    step as ⟨sl, hsl⟩
+    have hl : sl.length = 48 := by simp [hsl]
+    apply WP.spec_mono (digest_new_as_ref' .SHA3_384 sl 48#usize rfl (by simp [hl]) (by simp [hl]))
+    intro dg hdg
+    apply WP.spec_mono hdg
+    intro b hb
+    rw [hb, hsl, Array.val_to_slice, hd, List.nil_append]
+    rfl
+  · simp only [high.digest.Sha3_512Context.Insts.RindHighDigestVariant.NEW,
+      high.digest.Sha3_512Context.Insts.RindHighHashHashContext.update,
+      high.digest.Sha3_512Context.Insts.RindHighHashHashContext.finish, high.digest.SHA3_512, bind_ok]
+    step with sha3ctx_new_spec 72#usize 64#usize rfl (by decide) as ⟨c0, hc0⟩
+    step with sha3ctx_update_spec h (by decide) _ _ hc0 data as ⟨c1, hc1⟩
+    step with sha3ctx_finish_spec h (by decide) _ _ hc1 as ⟨d, hd⟩
+    step as ⟨sl, hsl⟩
+    have hl : sl.length = 64 := by simp [hsl]
+    apply WP.spec_mono (digest_new_as_ref' .SHA3_512 sl 64#usize rfl (by simp [hl]) (by simp [hl]))
+    intro dg hdg
+    apply WP.spec_mono hdg
+    intro b hb
+    rw [hb, hsl, Array.val_to_slice, hd, List.nil_append]
+    rfl
+
+/-- A digest context's state, of `algorithm`, a SHA-3, that has hashed `m`. -/
+def Sha3StateHashed (s : high.digest.State) (algorithm : high.digest.Algorithm) (m : List U8) :
     Prop :=
-  match c, algorithm with
+  match s, algorithm with
+  | .Fresh, .SHA3_256 => m = []
+  | .Fresh, .SHA3_384 => m = []
+  | .Fresh, .SHA3_512 => m = []
   | .Sha3_256 hs, .SHA3_256 => Sha3Hashed hs.context m
   | .Sha3_384 hs, .SHA3_384 => Sha3Hashed hs.context m
   | .Sha3_512 hs, .SHA3_512 => Sha3Hashed hs.context m
   | _, _ => False
+
+/-- A digest context of `algorithm`, a SHA-3, that has hashed `m`. -/
+def Sha3ContextHashed (c : high.digest.Context) (algorithm : high.digest.Algorithm) (m : List U8) :
+    Prop :=
+  c.algorithm = algorithm ∧ Sha3StateHashed c.state algorithm m
 
 /-- `Context::new` starts a context that has hashed nothing. -/
 theorem sha3_context_new (algorithm : high.digest.Algorithm) (f : List Byte → List Byte)
     (hf : sha3Family algorithm = some f) :
     high.digest.Context.new algorithm ⦃ c => Sha3ContextHashed c algorithm [] ⦄ := by
   cases algorithm <;> simp only [sha3Family, reduceCtorEq] at hf <;>
-    simp only [high.digest.Context.new, high.digest.Algorithm.start, high.digest.Hashing.start]
-  · simp only [high.digest.Sha3_256Context.Insts.RindHighDigestVariant.NEW,
-      high.digest.Sha3_256Context.Insts.RindHighDigestVariant.state]
-    step with sha3ctx_new_spec 136#usize 32#usize rfl (by decide) as ⟨c, hc⟩
-    simpa [Sha3ContextHashed] using hc
-  · simp only [high.digest.Sha3_384Context.Insts.RindHighDigestVariant.NEW,
-      high.digest.Sha3_384Context.Insts.RindHighDigestVariant.state]
-    step with sha3ctx_new_spec 104#usize 48#usize rfl (by decide) as ⟨c, hc⟩
-    simpa [Sha3ContextHashed] using hc
-  · simp only [high.digest.Sha3_512Context.Insts.RindHighDigestVariant.NEW,
-      high.digest.Sha3_512Context.Insts.RindHighDigestVariant.state]
-    step with sha3ctx_new_spec 72#usize 64#usize rfl (by decide) as ⟨c, hc⟩
-    simpa [Sha3ContextHashed] using hc
+    simp [high.digest.Context.new, Sha3ContextHashed, Sha3StateHashed]
 
-/-- `Context::update` adds `data` to what the context has hashed. -/
+/-- `Context::update` adds `data` to what the context has hashed, starting the
+hash on the first. -/
 theorem sha3_context_update (h : RunsSha3) (c : high.digest.Context)
     (algorithm : high.digest.Algorithm) (m : List U8) (data : Slice U8)
     (hc : Sha3ContextHashed c algorithm m) :
     high.digest.Context.update c data ⦃ c' => Sha3ContextHashed c' algorithm (m ++ data.val) ⦄ := by
+  obtain ⟨a, s⟩ := c
+  obtain ⟨rfl, hc⟩ := hc
   unfold high.digest.Context.update high.digest.State.update high.digest.Hashing.update
-  cases c <;> cases algorithm <;> simp only [Sha3ContextHashed] at hc ⊢
+  rcases s with _ | hs | hs | hs | hs | hs | hs | hs | hs | hs <;> cases a <;>
+    simp only [Sha3StateHashed] at hc
+  · subst hc
+    simp only [high.digest.Algorithm.start, high.digest.Hashing.start,
+      high.digest.Sha3_256Context.Insts.RindHighDigestVariant.NEW,
+      high.digest.Sha3_256Context.Insts.RindHighDigestVariant.state,
+      high.digest.Sha3_256Context.Insts.RindHighDigestVariant.hashing,
+      high.digest.Sha3_256Context.Insts.RindHighHashHashContext.update]
+    step with sha3ctx_new_spec 136#usize 32#usize rfl (by decide) as ⟨c0, hc0⟩
+    step with sha3ctx_update_spec h (by decide) _ _ hc0 data as ⟨c', hc'⟩
+    simpa [Sha3ContextHashed, Sha3StateHashed,
+      high.digest.Sha3_256Context.Insts.RindHighDigestVariant.state] using hc'
+  · subst hc
+    simp only [high.digest.Algorithm.start, high.digest.Hashing.start,
+      high.digest.Sha3_384Context.Insts.RindHighDigestVariant.NEW,
+      high.digest.Sha3_384Context.Insts.RindHighDigestVariant.state,
+      high.digest.Sha3_384Context.Insts.RindHighDigestVariant.hashing,
+      high.digest.Sha3_384Context.Insts.RindHighHashHashContext.update]
+    step with sha3ctx_new_spec 104#usize 48#usize rfl (by decide) as ⟨c0, hc0⟩
+    step with sha3ctx_update_spec h (by decide) _ _ hc0 data as ⟨c', hc'⟩
+    simpa [Sha3ContextHashed, Sha3StateHashed,
+      high.digest.Sha3_384Context.Insts.RindHighDigestVariant.state] using hc'
+  · subst hc
+    simp only [high.digest.Algorithm.start, high.digest.Hashing.start,
+      high.digest.Sha3_512Context.Insts.RindHighDigestVariant.NEW,
+      high.digest.Sha3_512Context.Insts.RindHighDigestVariant.state,
+      high.digest.Sha3_512Context.Insts.RindHighDigestVariant.hashing,
+      high.digest.Sha3_512Context.Insts.RindHighHashHashContext.update]
+    step with sha3ctx_new_spec 72#usize 64#usize rfl (by decide) as ⟨c0, hc0⟩
+    step with sha3ctx_update_spec h (by decide) _ _ hc0 data as ⟨c', hc'⟩
+    simpa [Sha3ContextHashed, Sha3StateHashed,
+      high.digest.Sha3_512Context.Insts.RindHighDigestVariant.state] using hc'
   · simp only [high.digest.Sha3_256Context.Insts.RindHighHashHashContext.update]
     step with sha3ctx_update_spec h (by decide) _ _ hc data as ⟨c', hc'⟩
-    simpa [Sha3ContextHashed] using hc'
+    simpa [Sha3ContextHashed, Sha3StateHashed] using hc'
   · simp only [high.digest.Sha3_384Context.Insts.RindHighHashHashContext.update]
     step with sha3ctx_update_spec h (by decide) _ _ hc data as ⟨c', hc'⟩
-    simpa [Sha3ContextHashed] using hc'
+    simpa [Sha3ContextHashed, Sha3StateHashed] using hc'
   · simp only [high.digest.Sha3_512Context.Insts.RindHighHashHashContext.update]
     step with sha3ctx_update_spec h (by decide) _ _ hc data as ⟨c', hc'⟩
-    simpa [Sha3ContextHashed] using hc'
+    simpa [Sha3ContextHashed, Sha3StateHashed] using hc'
 
 /-- `Context::finish` returns the digest of what the context has hashed, and
 leaves the context as `Context::new` makes it. -/
@@ -1126,19 +1208,49 @@ theorem sha3_context_finish (h : RunsSha3) (c : high.digest.Context)
       let (d, c) ← high.digest.Context.finish c
       let b ← high.digest.Digest.Insts.CoreConvertAsRefSliceU8.as_ref d
       ok (b, c)) ⦃ r => bv r.1.val = f (bv m) ∧ Sha3ContextHashed r.2 algorithm [] ⦄ := by
-  unfold high.digest.Context.finish high.digest.State.finish high.digest.Hashing.finish
-  step with sha3_new_secret_spec h as ⟨e⟩
-  cases c <;> cases algorithm <;>
-    simp only [Sha3ContextHashed, sha3Family, Option.some.injEq] at hc hf ⊢ <;> subst hf
+  obtain ⟨a, s⟩ := c
+  obtain ⟨rfl, hc⟩ := hc
+  rcases s with _ | hs | hs | hs | hs | hs | hs | hs | hs | hs <;> cases a <;>
+    simp only [Sha3StateHashed] at hc
+  · subst hc
+    apply WP.spec_bind (high.digest.Context.finish_fresh .SHA3_256
+      (P := fun r => r.2 = { algorithm := .SHA3_256, state := .Fresh } ∧
+        high.digest.Digest.Insts.CoreConvertAsRefSliceU8.as_ref r.1 ⦃ b => bv b.val = f (bv []) ⦄)
+      (WP.spec_mono (sha3_family_digest' h _ f hf _) fun d hd => ⟨rfl, by simpa using hd⟩))
+    rintro ⟨d, c⟩ ⟨rfl, hd⟩
+    apply WP.spec_bind hd
+    intro b hb
+    simp [Sha3ContextHashed, Sha3StateHashed, hb]
+  · subst hc
+    apply WP.spec_bind (high.digest.Context.finish_fresh .SHA3_384
+      (P := fun r => r.2 = { algorithm := .SHA3_384, state := .Fresh } ∧
+        high.digest.Digest.Insts.CoreConvertAsRefSliceU8.as_ref r.1 ⦃ b => bv b.val = f (bv []) ⦄)
+      (WP.spec_mono (sha3_family_digest' h _ f hf _) fun d hd => ⟨rfl, by simpa using hd⟩))
+    rintro ⟨d, c⟩ ⟨rfl, hd⟩
+    apply WP.spec_bind hd
+    intro b hb
+    simp [Sha3ContextHashed, Sha3StateHashed, hb]
+  · subst hc
+    apply WP.spec_bind (high.digest.Context.finish_fresh .SHA3_512
+      (P := fun r => r.2 = { algorithm := .SHA3_512, state := .Fresh } ∧
+        high.digest.Digest.Insts.CoreConvertAsRefSliceU8.as_ref r.1 ⦃ b => bv b.val = f (bv []) ⦄)
+      (WP.spec_mono (sha3_family_digest' h _ f hf _) fun d hd => ⟨rfl, by simpa using hd⟩))
+    rintro ⟨d, c⟩ ⟨rfl, hd⟩
+    apply WP.spec_bind hd
+    intro b hb
+    simp [Sha3ContextHashed, Sha3StateHashed, hb]
+  all_goals
+    unfold high.digest.Context.finish high.digest.State.finish high.digest.Hashing.finish
+    step with sha3_new_secret_spec h as ⟨e⟩
+    simp only [sha3Family, Option.some.injEq] at hf
+    subst hf
   · simp only [high.digest.Sha3_256Context.Insts.RindHighHashHashContext.finish, high.digest.SHA3_256, bind_ok]
     step with sha3ctx_finish_spec h (by decide) _ _ hc as ⟨d, hd⟩
     step as ⟨sl, hsl⟩
     have hl : sl.length = 32 := by simp [hsl]
     step with digest_new_as_ref' .SHA3_256 sl 32#usize rfl (by simp [hl]) (by simp [hl]) as ⟨dg, hdg⟩
-    simp only [high.digest.Sha3_256Context.Insts.RindHighDigestVariant.NEW]
-    step with sha3ctx_new_spec 136#usize 32#usize rfl (by decide) as ⟨c0, hc0⟩
     step with hdg as ⟨b, hb⟩
-    refine ⟨?_, by simpa using hc0⟩
+    refine ⟨?_, by simp [Sha3ContextHashed, Sha3StateHashed]⟩
     rw [hb, hsl, Array.val_to_slice, hd]
     rfl
   · simp only [high.digest.Sha3_384Context.Insts.RindHighHashHashContext.finish, high.digest.SHA3_384, bind_ok]
@@ -1146,10 +1258,8 @@ theorem sha3_context_finish (h : RunsSha3) (c : high.digest.Context)
     step as ⟨sl, hsl⟩
     have hl : sl.length = 48 := by simp [hsl]
     step with digest_new_as_ref' .SHA3_384 sl 48#usize rfl (by simp [hl]) (by simp [hl]) as ⟨dg, hdg⟩
-    simp only [high.digest.Sha3_384Context.Insts.RindHighDigestVariant.NEW]
-    step with sha3ctx_new_spec 104#usize 48#usize rfl (by decide) as ⟨c0, hc0⟩
     step with hdg as ⟨b, hb⟩
-    refine ⟨?_, by simpa using hc0⟩
+    refine ⟨?_, by simp [Sha3ContextHashed, Sha3StateHashed]⟩
     rw [hb, hsl, Array.val_to_slice, hd]
     rfl
   · simp only [high.digest.Sha3_512Context.Insts.RindHighHashHashContext.finish, high.digest.SHA3_512, bind_ok]
@@ -1157,10 +1267,8 @@ theorem sha3_context_finish (h : RunsSha3) (c : high.digest.Context)
     step as ⟨sl, hsl⟩
     have hl : sl.length = 64 := by simp [hsl]
     step with digest_new_as_ref' .SHA3_512 sl 64#usize rfl (by simp [hl]) (by simp [hl]) as ⟨dg, hdg⟩
-    simp only [high.digest.Sha3_512Context.Insts.RindHighDigestVariant.NEW]
-    step with sha3ctx_new_spec 72#usize 64#usize rfl (by decide) as ⟨c0, hc0⟩
     step with hdg as ⟨b, hb⟩
-    refine ⟨?_, by simpa using hc0⟩
+    refine ⟨?_, by simp [Sha3ContextHashed, Sha3StateHashed]⟩
     rw [hb, hsl, Array.val_to_slice, hd]
     rfl
 
@@ -1207,52 +1315,15 @@ theorem sha3Family_fips202 :
   · exact sha3_384_eq M
   · exact sha3_512_eq M
 
-/-- SHA-3 in one call: `digest`'s bytes are FIPS 202's hash of `data`. -/
+/-- SHA-3 in one call, as bytes. -/
 theorem sha3_family_digest (h : RunsSha3) (algorithm : high.digest.Algorithm)
     (f : List Byte → List Byte) (hf : sha3Family algorithm = some f) (data : Slice U8) :
     (do
       let d ← high.digest.digest algorithm data
       high.digest.Digest.Insts.CoreConvertAsRefSliceU8.as_ref d) ⦃ b =>
       bv b.val = f (bv data.val) ⦄ := by
-  unfold high.digest.digest high.digest.Algorithm.hash high.digest.one_shot
-  step with sha3_new_secret_spec h as ⟨e⟩
-  cases algorithm <;> simp only [sha3Family, Option.some.injEq, reduceCtorEq] at hf <;> subst hf
-  · simp only [high.digest.Sha3_256Context.Insts.RindHighDigestVariant.NEW,
-      high.digest.Sha3_256Context.Insts.RindHighHashHashContext.update,
-      high.digest.Sha3_256Context.Insts.RindHighHashHashContext.finish, high.digest.SHA3_256, bind_ok]
-    step with sha3ctx_new_spec 136#usize 32#usize rfl (by decide) as ⟨c0, hc0⟩
-    step with sha3ctx_update_spec h (by decide) _ _ hc0 data as ⟨c1, hc1⟩
-    step with sha3ctx_finish_spec h (by decide) _ _ hc1 as ⟨d, hd⟩
-    step as ⟨sl, hsl⟩
-    have hl : sl.length = 32 := by simp [hsl]
-    apply WP.spec_mono (digest_new_as_ref .SHA3_256 sl 32#usize rfl (by simp [hl]) (by simp [hl]))
-    intro b hb
-    rw [hb, hsl, Array.val_to_slice, hd, List.nil_append]
-    rfl
-  · simp only [high.digest.Sha3_384Context.Insts.RindHighDigestVariant.NEW,
-      high.digest.Sha3_384Context.Insts.RindHighHashHashContext.update,
-      high.digest.Sha3_384Context.Insts.RindHighHashHashContext.finish, high.digest.SHA3_384, bind_ok]
-    step with sha3ctx_new_spec 104#usize 48#usize rfl (by decide) as ⟨c0, hc0⟩
-    step with sha3ctx_update_spec h (by decide) _ _ hc0 data as ⟨c1, hc1⟩
-    step with sha3ctx_finish_spec h (by decide) _ _ hc1 as ⟨d, hd⟩
-    step as ⟨sl, hsl⟩
-    have hl : sl.length = 48 := by simp [hsl]
-    apply WP.spec_mono (digest_new_as_ref .SHA3_384 sl 48#usize rfl (by simp [hl]) (by simp [hl]))
-    intro b hb
-    rw [hb, hsl, Array.val_to_slice, hd, List.nil_append]
-    rfl
-  · simp only [high.digest.Sha3_512Context.Insts.RindHighDigestVariant.NEW,
-      high.digest.Sha3_512Context.Insts.RindHighHashHashContext.update,
-      high.digest.Sha3_512Context.Insts.RindHighHashHashContext.finish, high.digest.SHA3_512, bind_ok]
-    step with sha3ctx_new_spec 72#usize 64#usize rfl (by decide) as ⟨c0, hc0⟩
-    step with sha3ctx_update_spec h (by decide) _ _ hc0 data as ⟨c1, hc1⟩
-    step with sha3ctx_finish_spec h (by decide) _ _ hc1 as ⟨d, hd⟩
-    step as ⟨sl, hsl⟩
-    have hl : sl.length = 64 := by simp [hsl]
-    apply WP.spec_mono (digest_new_as_ref .SHA3_512 sl 64#usize rfl (by simp [hl]) (by simp [hl]))
-    intro b hb
-    rw [hb, hsl, Array.val_to_slice, hd, List.nil_append]
-    rfl
+  step with sha3_family_digest' h algorithm f hf data as ⟨d, hd⟩
+  exact hd
 
 /-! ## SHAKE, as ML-KEM calls it
 

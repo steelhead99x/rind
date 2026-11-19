@@ -12,3 +12,5 @@ Planned with the maintainer on 2026-11-15 from the `/quest-run` of 2026-11-14 an
 - ✅ The `admin/prove` cache fix joins this epic in m0 although it is a local tool: it cost several proof agents a failed run in one night and is tiny (rejected: m2; dropping it and relying on agents knowing to delete `target/prove`).
 - ✅ The armv7 `heap_scratch::detects_a_leak` failure seen once is not planned: one failure, not reproduced (rejected: a flake quest).
 - ✅ The portable BINSEC ML-KEM timeout, seen twice, gets a quest that finds its cause (maintainer, 2026-11-17; rejected: not planning it; raising the timeout).
+- ✅ The macOS ML-DSA zeroing failure, seen once on main's coverage nightly, gets a quest, since a missed wipe would break AGENTS.md's zeroing requirement (maintainer, 2026-11-18, on kixel-ai/rind#862).
+- ✅ The rind-fips fork test hang, seen once on the same nightly, is not planned: it meets the single-failure bar above (maintainer, 2026-11-18; rejected: a quest).

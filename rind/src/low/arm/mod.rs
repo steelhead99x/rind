@@ -30,6 +30,7 @@ pub(crate) mod chacha20;
 mod chacha_armv4;
 pub(crate) mod cpu;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod ct_qemu;
 pub(crate) mod curve25519;
 pub(crate) mod ghashv8_armx;

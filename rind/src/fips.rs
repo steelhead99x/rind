@@ -186,6 +186,9 @@ errors! {
         DuplicateIdentifier,
         UnknownIdentifier,
         MismatchedCommitments,
+        UnknownPkcs8Algorithm,
+        UnsupportedCurve,
+        X25519CannotSign,
     ],
     asn1: [
         UnexpectedTag,
@@ -268,6 +271,8 @@ pub fn check_rsa_modulus(key: &crate::rsa::PublicKey, legacy_1024: bool) -> Resu
 
 /// The known answers, from the standards' own examples where they give one.
 mod kat {
+    use alloc::vec::Vec;
+
     use super::broken;
     use crate::high::hash::{Hash, Sha256};
 

@@ -1,0 +1,14 @@
+# [S] Portable mul_add2 issues its products before its carry chains
+
+## Goal
+
+Portable RSA at 2048 to 8192 bits, whose limb counts are multiples of 4, runs its product and reduction rows through `mul_add2` in `rind/src/low/generic/mont.rs`, never `mul_add`, so the four-product `mul_add` row leaves it unchanged. `mul_add2` issues a block of its products before the carry chains that add them wherever that measures faster for portable RSA signing and verification at those sizes, at both limb widths; otherwise this quest's PR records the measurement and deletes the quest.
+
+## Plan
+
+- Each limb step computes `u * y[j]` and `v * y[j - 1]`, which depend only on `u`, `v`, and `y`, then folds each into its chain before the next step's multiplies. Issue a block of them first, as #780's `mul_add` did through its `add_product` helper (on that closed branch only, not on `main`).
+- The loop count comes from the public lengths and the arithmetic wraps, as now, so nothing branches on a secret. The comment states the bound each sum keeps, at most `2^2b - 1`.
+- Test it at both limb widths, with an all-ones closed form like `mul_add_ones` covering every remainder, and the existing `karatsuba` and `modular` proptests against s2n-bignum.
+- Measure portable RSA sign and verify against `main` and aws-lc-rs, at both limb widths, with `--cfg rind_portable`.
+- Decided 2026-11-19 (maintainer): the first attempt, [kixel-ai/rind#780](https://github.com/kixel-ai/rind/pull/780), was closed, so do not retry it blindly. It issued four products before one carry chain in `mul_add` (not `mul_add2`) and no real operation got faster: standard-size portable RSA never reaches `mul_add` in its exponentiation, only through `bignum_mul`'s CRT recombination and key-load products, under 0.1% of a signature. `bignum_mul` slowed 1 to 9% at 1 to 4 words (1.017 to 1.092 of base) and sped up only from 8 words (0.75 to 0.93 from 8 to 64 words with 64-bit limbs, 0.86 to 0.96 with 32-bit limbs). Dropping `#[inline]` from `mul_add` measured worse (1.13 to 1.18 at 1 to 2 words). End to end with `--cfg rind_portable`: RSA-2048 PKCS#1 sign medians about 593 µs on base against 605 µs, about 2% slower (aws-lc-rs about 350 µs); RSA-4096 sign 3.83 ms either way; key load unchanged (76.4 µs); RSA-3072 too noisy to call. Standard RSA's exponentiation never calls `mul_add`, so the 2% is likely code layout. This quest targets `mul_add2`, the rows RSA does run, but start from #780's numbers: if issuing products first moves none of portable RSA signing and verification at 2048 to 8192 bits, record it and delete the quest.
+- Scope: `mul_add2` covers the even rows. Sizes whose Karatsuba leaves are odd, such as 4352 bits (68 limbs of 64 bits, splitting to 34, then 17), still run an odd trailing schoolbook row through `mul_add`, which this quest leaves alone; the Goal's "never `mul_add`" holds for 2048 to 8192 bits at the sizes whose leaves stay even, and the measurement covers those.
