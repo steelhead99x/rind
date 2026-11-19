@@ -505,7 +505,12 @@ step() {
             # which crashes LLVM there, unless the caller picks `serial`.
             # See UPSTREAM.md, "curve25519-dalek cannot compile without SSE".
             local rustflags
-            for target in aarch64:aarch64-unknown-none arm:armv7a-none-eabi portable:x86_64-unknown-none; do
+            # And for the microcontroller targets it must keep off the arm
+            # backend (M-profile is Thumb-only, with no NEON), two of them
+            # without compare-and-swap, which build `reuse_cache_without_cas`:
+            # `thumbv6m-none-eabi` and `riscv32imc-unknown-none-elf`.
+            for target in aarch64:aarch64-unknown-none arm:armv7a-none-eabi portable:x86_64-unknown-none \
+                portable:thumbv6m-none-eabi portable:thumbv7em-none-eabihf portable:riscv32imc-unknown-none-elf; do
                 if reaches "$backends" "${target%%:*}"; then
                     rustflags='--cfg getrandom_backend="custom"'
                     [[ $target != *x86_64* ]] || rustflags+=' --cfg curve25519_dalek_backend="serial"'
