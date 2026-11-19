@@ -60,6 +60,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Reported:** no.
 - **Goes when:** rustc supports `-Zsanitizer=address` there.
 
+### Cargo runs $CARGO_HOME/bin's subcommands before PATH's
+
+- **Breaks:** Cargo looks up an external subcommand such as `cargo-fmt` or `cargo-clippy` in `$CARGO_HOME/bin` before `PATH`, unless that directory is itself on `PATH` ([the Cargo book](https://doc.rust-lang.org/cargo/reference/external-tools.html#custom-subcommands)). On a host with rustup there, `cargo fmt` and `cargo clippy` inside the dev shell run rustup's default toolchain, not the flake's, while `which cargo-fmt` names the flake's. A newer rustfmt then reformats files CI's accepts, and a toolchain without a cross target's standard library fails `check cross` with `can't find crate for core`.
+- **Reproduce:** `nix develop --command cargo fmt --version` on a host whose `$CARGO_HOME/bin/cargo-fmt` is rustup's, with `$CARGO_HOME/bin` not on `PATH`, reports rustup's rustfmt; found on [#140](https://github.com/steelhead99x/rind/pull/140).
+- **Workaround:** `sh/toolchain.sh`, which `sh/dispatch.sh` runs inside the dev shell before any check, stops unless `cargo fmt --version` and `cargo clippy --version` name the build `rustc --version` does.
+- **Reported:** no.
+- **Goes when:** Cargo prefers `PATH`'s subcommands, or the flake's shells put an empty `$CARGO_HOME/bin` ahead of a host's.
+
 ## Constant-time analysis
 
 ### Valgrind hides ADX from `cpuid`
@@ -126,7 +134,7 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 ### BINSEC cannot decode much of what rind runs
 
-- **Breaks:** BINSEC 0.11.3 stops at instructions it cannot decode: on x86_64, AES-NI, VAES, the SHA512 instructions, and every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's, every SVE encoding, such as SVE2's `xar`, and the `msr` that sets DIT; on armv7, the NEON table lookups and the crypto extension.
+- **Breaks:** BINSEC 0.11.3 stops at instructions it cannot decode: on x86_64, AES-NI, VAES, and every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's, every SVE encoding, such as SVE2's `xar`, and the `msr` that sets DIT; on armv7, the NEON table lookups and the crypto extension.
 - **Workaround:** `admin/ct-binsec`'s `UNDECODED` denies those features, leaving their paths to `admin/ctgrind`, `admin/ct-sde`, and `admin/ct-qemu`, and armv7 has no `binsec` row in `ctgrind.yml`.
 - **Reported:** no.
 - **Goes when:** a BINSEC release decodes each, feature by feature.
@@ -319,7 +327,7 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 
 - **Breaks:** actionlint 1.7.12 errors on `queue: max`, which GitHub's concurrency groups accept since May 2026, as `unexpected key "queue" for "concurrency" section`.
 - **Reproduce:** `actionlint .github/workflows/mutants.yml` without the ignore below.
-- **Workaround:** `.github/actionlint.yaml` ignores that error in `mutants.yml`.
+- **Workaround:** `.github/actionlint.yaml` ignores that error in `mutants.yml` and `release.yml`.
 - **Reported:** [rhysd/actionlint#657](https://github.com/rhysd/actionlint/issues/657), with a fix in [rhysd/actionlint#654](https://github.com/rhysd/actionlint/pull/654).
 - **Goes when:** an actionlint release in nixpkgs accepts `queue`.
 

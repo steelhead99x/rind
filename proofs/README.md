@@ -590,8 +590,8 @@ The hash is cryptol-specs' FIPS 180-4 SHA-512, in `Rind/Sha2.lean`, with its
 block compression `processBlock_Common` transliterated from FIPS 180-4 and
 checked by `Rind/Sha2Test.lean` against its examples. Each theorem assumes
 `RunsSha512`: on x86_64 that rind picks aws-lc's AVX routine, on an Intel CPU
-with AVX but without AVX2, or OpenSSL's AVX2 routine, on a CPU with AVX2 but
-without the SHA512 instructions, whose proof is rind's HOL Light proof above,
+with AVX but without AVX2, or OpenSSL's AVX2 routine, on a CPU with AVX2,
+whose proof is rind's HOL Light proof above,
 which `Rind/X86_64/AwsLc.lean` restates as the axiom
 `sha512_block_data_order_avx2_spec`; on aarch64 only that rind's checks pass,
 as both of aws-lc's routines there have proofs: aws-lc-verification's of its
@@ -961,7 +961,10 @@ one-pass routines, in `Rind/X86_64/ChaCha20Poly1305.lean`:
   failure the seal returns as `RngFailed`.
 
 HChaCha20, which derives XChaCha20's subkey, runs HACL*'s rounds, which
-`hchacha20_spec` proves. The theorems assume `RunsChaCha20Poly1305`: rind's
+`hchacha20_spec` proves. 32-bit portable HChaCha20 is the rolled loop in
+`low/generic/chacha20.rs`, which this proof does not cover; the output loop
+stays inside the unrolled `hchacha20` so Aeneas still extracts
+`hchacha20_loop`. The theorems assume `RunsChaCha20Poly1305`: rind's
 CPU-feature checks find SSE4.1, and `OnePass`, that aws-lc's one-pass
 routines compute RFC 8439's AEAD, which no proof covers yet;
 [the ChaCha20-Poly1305 quest](/quest/m4/verified/chacha20-poly1305-x86/aead.md)

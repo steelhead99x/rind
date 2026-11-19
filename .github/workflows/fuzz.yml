@@ -227,8 +227,7 @@ jobs:
           path: ${{ env.ARTIFACTS }}/
 
   # The x86_64 corpus under Intel SDE, on the paths a runner has or lacks from
-  # run to run (AVX-512, VAES, and the SHA extensions) and the SHA512
-  # instructions, which none has.
+  # run to run (AVX-512, VAES, and the SHA extensions).
   replay-x86_64-sde:
     name: Replay ${{ matrix.target }} under SDE
     needs: [build, fuzz]

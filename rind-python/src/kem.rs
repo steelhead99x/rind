@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rind::kem::{self, MlKem768};
 
-use crate::{Bytes, algorithm, bytes, constants, error};
+use crate::{Bytes, PublicKeyCell, algorithm, bytes, constants, error};
 
 /// The parameter sets these bindings offer.
 #[derive(Debug)]
@@ -18,7 +18,10 @@ algorithm!(
 
 /// The recipient's private key, which decapsulates.
 #[pyclass(frozen, module = "pyrind.kem")]
-struct DecapsulationKey(Box<kem::DecapsulationKey<MlKem768>>);
+struct DecapsulationKey {
+    inner: Box<kem::DecapsulationKey<MlKem768>>,
+    public_key: PublicKeyCell<EncapsulationKey>,
+}
 
 #[pymethods]
 impl DecapsulationKey {
@@ -26,15 +29,17 @@ impl DecapsulationKey {
     #[staticmethod]
     fn generate(algorithm: &Bound<'_, Algorithm>) -> PyResult<Self> {
         let ParameterSet::MlKem768 = algorithm.get().inner;
-        kem::DecapsulationKey::generate()
-            .map(Box::new)
-            .map(Self)
-            .map_err(error)
+        Ok(Self {
+            inner: Box::new(kem::DecapsulationKey::generate().map_err(error)?),
+            public_key: PublicKeyCell::new(),
+        })
     }
 
-    /// The public key to send the sender.
-    fn public_key(&self) -> EncapsulationKey {
-        EncapsulationKey(Box::new(self.0.public_key().clone()))
+    /// The public key to send the sender, the same object each call.
+    fn public_key(&self, py: Python<'_>) -> PyResult<Py<EncapsulationKey>> {
+        self.public_key.get(py, || {
+            EncapsulationKey(Box::new(self.inner.public_key().clone()))
+        })
     }
 
     /// Recovers the shared secret from the sender's `ciphertext`.
@@ -44,7 +49,7 @@ impl DecapsulationKey {
         ciphertext: Bytes<'_>,
     ) -> PyResult<Bound<'py, PyBytes>> {
         let ciphertext = kem::Ciphertext::new(&ciphertext).map_err(error)?;
-        Ok(bytes(py, self.0.decapsulate(&ciphertext)))
+        Ok(bytes(py, self.inner.decapsulate(&ciphertext)))
     }
 }
 

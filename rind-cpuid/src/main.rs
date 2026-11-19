@@ -15,7 +15,8 @@ fn main() {
     let intel = (id.ebx, id.edx, id.ecx) == (0x756e_6547, 0x4965_6e69, 0x6c65_746e);
 
     // Every feature `rind/src/low/x86_64/cpu.rs` reads, so the scans show
-    // which dispatch paths each CPU selects.
+    // which dispatch paths each CPU selects, plus `sha512`, which rind records
+    // and does not dispatch on.
     let cpuid = [
         ("intel", intel),
         ("adx", is_x86_feature_detected!("adx")),
