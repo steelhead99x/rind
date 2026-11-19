@@ -67,13 +67,23 @@ fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
     let mut g = state[6];
     let mut h = state[7];
 
+    // With the table's contents visible, LLVM builds each of the eighty
+    // constants with a `mov` and three `movk`, four instructions a round where
+    // a load is one. Hiding the contents makes aarch64 load them, as the
+    // assembly this replaced did. x86_64 has a one-instruction 64-bit
+    // immediate, so it keeps them.
+    #[cfg(target_arch = "aarch64")]
+    let k: &[u64; 80] = core::hint::black_box(&K);
+    #[cfg(not(target_arch = "aarch64"))]
+    let k: &[u64; 80] = &K;
+
     macro_rules! round {
         ($i:literal, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident) => {
             let w_t = message_word(&mut w, $i);
             let t1 = $h
                 .wrapping_add(BSIG1!($e))
                 .wrapping_add(CH!($e, $f, $g))
-                .wrapping_add(K[$i])
+                .wrapping_add(k[$i])
                 .wrapping_add(w_t);
             let t2 = BSIG0!($a).wrapping_add(MAJ!($a, $b, $c));
             $h = $g;
