@@ -1,11 +1,23 @@
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 #[macro_use]
 mod criterion;
-#[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+#[cfg(all(
+    feature = "__bench_openssl",
+    target_family = "unix",
+    not(target_arch = "xtensa")
+))]
+#[cfg(not(target_arch = "xtensa"))]
 mod ossl_aead;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_ring_aes_gcm(key: &ring::aead::LessSafeKey, nonce: &[u8; 12], aad: &[u8], buf: &mut [u8]) {
     let _tag = key
         .seal_in_place_separate_tag(
@@ -17,6 +29,7 @@ fn test_ring_aes_gcm(key: &ring::aead::LessSafeKey, nonce: &[u8; 12], aad: &[u8]
 }
 
 #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
+#[cfg(not(target_arch = "xtensa"))]
 fn test_aws_aes_gcm(
     key: &aws_lc_rs::aead::LessSafeKey,
     nonce: &[u8; 12],
@@ -28,6 +41,7 @@ fn test_aws_aes_gcm(
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rc_aes128_gcm(key: &aes_gcm::Aes128Gcm, nonce: &[u8; 12], aad: &[u8], buf: &mut [u8]) {
     use aes_gcm::AeadInOut;
     let _tag = key
@@ -35,6 +49,7 @@ fn test_rc_aes128_gcm(key: &aes_gcm::Aes128Gcm, nonce: &[u8; 12], aad: &[u8], bu
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rc_aes256_gcm(key: &aes_gcm::Aes256Gcm, nonce: &[u8; 12], aad: &[u8], buf: &mut [u8]) {
     use aes_gcm::AeadInOut;
     let _tag = key
@@ -42,6 +57,7 @@ fn test_rc_aes256_gcm(key: &aes_gcm::Aes256Gcm, nonce: &[u8; 12], aad: &[u8], bu
         .unwrap();
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn test_rind_aes_gcm(key: &rind::aead::Key, nonce: &[u8; 12], aad: &[u8], buf: &mut [u8]) {
     let _tag = key
         .seal_in_place_separate_tag(rind::aead::Nonce::assume_unique_for_key(*nonce), aad, buf)
@@ -49,6 +65,7 @@ fn test_rind_aes_gcm(key: &rind::aead::Key, nonce: &[u8; 12], aad: &[u8], buf: &
 }
 
 // verified-garbage's sealing row, checked once against rind's ciphertext and tag.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_seal(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
     key: &[u8],
@@ -78,6 +95,7 @@ fn vg_seal(
 }
 
 // verified-garbage's opening row, over a ciphertext and tag rind sealed.
+#[cfg(not(target_arch = "xtensa"))]
 fn vg_open(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
     key: &[u8],
@@ -99,6 +117,7 @@ fn vg_open(
 
 // Expanding a key and its GHASH table, as each QUIC connection and derived
 // track key pays. It drops each key in the loop, so their wiping is timed too.
+#[cfg(not(target_arch = "xtensa"))]
 fn key_setup(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
     key: &[u8],
@@ -124,6 +143,7 @@ fn key_setup(
 }
 
 /// The AEAD rows, then QUIC's ACK-sized packets under its 13 B short header.
+#[cfg(not(target_arch = "xtensa"))]
 fn rows() -> impl Iterator<Item = (usize, &'static str, &'static [u8])> {
     criterion::aead_rows().chain([
         (32, "quic-32B", &[0u8; 13][..]),
@@ -131,6 +151,7 @@ fn rows() -> impl Iterator<Item = (usize, &'static str, &'static [u8])> {
     ])
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn aes128_gcm(c: &mut Criterion) {
     let key = [0u8; 16];
     let nonce = [0u8; 12];
@@ -196,7 +217,11 @@ fn aes128_gcm(c: &mut Criterion) {
             let mut ct = vec![0u8; size];
             b.iter(|| key.encrypt(&mut ct, &mut tag, &nonce, aad, &buf).unwrap());
         });
-        #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+        #[cfg(all(
+            feature = "__bench_openssl",
+            target_family = "unix",
+            not(target_arch = "xtensa")
+        ))]
         group.bench_function(BenchmarkId::new("openssl", size_name), |b| {
             let mut key = ossl_aead::Sealer::new(openssl::cipher::Cipher::aes_128_gcm(), &key);
             b.iter(|| key.seal(&nonce, aad, &mut buf));
@@ -204,6 +229,7 @@ fn aes128_gcm(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn aes256_gcm(c: &mut Criterion) {
     let key = [0u8; 32];
     let nonce = [0u8; 12];
@@ -269,7 +295,11 @@ fn aes256_gcm(c: &mut Criterion) {
             let mut ct = vec![0u8; size];
             b.iter(|| key.encrypt(&mut ct, &mut tag, &nonce, aad, &buf).unwrap());
         });
-        #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+        #[cfg(all(
+            feature = "__bench_openssl",
+            target_family = "unix",
+            not(target_arch = "xtensa")
+        ))]
         group.bench_function(BenchmarkId::new("openssl", size_name), |b| {
             let mut key = ossl_aead::Sealer::new(openssl::cipher::Cipher::aes_256_gcm(), &key);
             b.iter(|| key.seal(&nonce, aad, &mut buf));
@@ -278,6 +308,7 @@ fn aes256_gcm(c: &mut Criterion) {
 }
 
 /// What opening needs that differs by key size.
+#[cfg(not(target_arch = "xtensa"))]
 trait KeySize {
     type RustCrypto: aes_gcm::KeyInit
         + aes_gcm::AeadInOut<
@@ -289,12 +320,18 @@ trait KeySize {
     /// one in each call costs only the copy.
     fn libcrux(key: &[u8], nonce: &[u8; 12], aad: &[u8], ct: &[u8], tag: &[u8; 16], pt: &mut [u8]);
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     fn openssl() -> &'static openssl::cipher::CipherRef;
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 struct Aes128;
 
+#[cfg(not(target_arch = "xtensa"))]
 impl KeySize for Aes128 {
     type RustCrypto = aes_gcm::Aes128Gcm;
 
@@ -304,14 +341,20 @@ impl KeySize for Aes128 {
             .unwrap()
     }
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     fn openssl() -> &'static openssl::cipher::CipherRef {
         openssl::cipher::Cipher::aes_128_gcm()
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 struct Aes256;
 
+#[cfg(not(target_arch = "xtensa"))]
 impl KeySize for Aes256 {
     type RustCrypto = aes_gcm::Aes256Gcm;
 
@@ -321,13 +364,18 @@ impl KeySize for Aes256 {
             .unwrap()
     }
 
-    #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+    #[cfg(all(
+        feature = "__bench_openssl",
+        target_family = "unix",
+        not(target_arch = "xtensa")
+    ))]
     fn openssl() -> &'static openssl::cipher::CipherRef {
         openssl::cipher::Cipher::aes_256_gcm()
     }
 }
 
 // Decrypting and verifying each size's ciphertext, as a receiver pays.
+#[cfg(not(target_arch = "xtensa"))]
 fn open<K: KeySize>(
     c: &mut Criterion,
     name: &str,
@@ -435,7 +483,11 @@ fn open<K: KeySize>(
             let tag = tag.as_ref().try_into().unwrap();
             b.iter(|| K::libcrux(key, &nonce, aad, ct, tag, pt));
         });
-        #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
+        #[cfg(all(
+            feature = "__bench_openssl",
+            target_family = "unix",
+            not(target_arch = "xtensa")
+        ))]
         group.bench_function(BenchmarkId::new("openssl", size_name), |b| {
             let mut key = ossl_aead::Opener::new(K::openssl(), key);
             b.iter(|| {
@@ -446,6 +498,7 @@ fn open<K: KeySize>(
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn aes128_gcm_open(c: &mut Criterion) {
     open::<Aes128>(
         c,
@@ -457,6 +510,7 @@ fn aes128_gcm_open(c: &mut Criterion) {
     );
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn aes256_gcm_open(c: &mut Criterion) {
     open::<Aes256>(
         c,
@@ -470,6 +524,7 @@ fn aes256_gcm_open(c: &mut Criterion) {
 
 // AES-192-GCM, which only aws-lc-rs of the other libraries offers, both
 // ways: WebCrypto and pyca take 192-bit keys.
+#[cfg(not(target_arch = "xtensa"))]
 fn aes192_gcm(c: &mut Criterion) {
     let key = [0u8; 24];
     let nonce = [0u8; 12];
@@ -566,6 +621,7 @@ fn aes192_gcm(c: &mut Criterion) {
     }
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(
     benches,
     aes128_gcm,
@@ -574,4 +630,5 @@ criterion_group!(
     aes256_gcm_open,
     aes192_gcm
 );
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);

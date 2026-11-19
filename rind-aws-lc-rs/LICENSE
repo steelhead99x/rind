@@ -215,11 +215,13 @@ OpenSSL <https://github.com/openssl/openssl>
   What: the files under rind/src/low/{x86_64,arm}/openssl, which
   admin/import-openssl takes from OpenSSL at commit
   2f4e3a5fec05394068cfa7379890ab552483a8a6: for x86_64, SHA-256 and
-  SHA-512 on AVX2, generated from
-  crypto/sha/asm/sha512-x86_64.pl, written by Andy Polyakov;
-  for 32-bit ARM, Keccak-f[1600] in integer code and on NEON, generated from
-  crypto/sha/asm/keccak1600-armv4.pl, written by Andy Polyakov.
+  SHA-512 on AVX2, generated from crypto/sha/asm/sha512-x86_64.pl, and
+  Poly1305 on AVX-512 IFMA, generated from crypto/poly1305/asm/poly1305-x86_64.pl,
+  both written by Andy Polyakov; for 32-bit ARM, Keccak-f[1600] in integer code
+  and on NEON, generated from crypto/sha/asm/keccak1600-armv4.pl, written by Andy
+  Polyakov.
   Copyright 2005-2026 The OpenSSL Project Authors. All Rights Reserved.
+  Copyright 2016-2026 The OpenSSL Project Authors. All Rights Reserved.
   Copyright 2017-2026 The OpenSSL Project Authors. All Rights Reserved.
   License: Apache-2.0. OpenSSL has no NOTICE file.
 
