@@ -26,12 +26,12 @@ the Pi 4 for its speed check, not for the proofs.
 
 Probed 2026-11-19:
 
-- Host / address: `192.168.90.42` (hostname `pi4b-bench`, Raspberry Pi 4
-  Model B Rev 1.5, Cortex-A72 part `0xd08`, kernel `6.18.50+rpt-rpi-v8`,
-  Debian 13 userland, glibc 2.41).
-- User and key: `admin`, key `~/.ssh/id_ed25519_pi` on the laptop
-  (`ssh -i ~/.ssh/id_ed25519_pi admin@192.168.90.42`). Each worker uses only
-  its own `~/w-pi4-<tag>` directory on the board.
+- Host: the Pi 4 on the owner's local network (Raspberry Pi 4 Model B
+  Rev 1.5, Cortex-A72 part `0xd08`, kernel `6.18.50+rpt-rpi-v8`, Debian 13
+  userland, glibc 2.41). Its address, host name, user and key path are kept
+  out of the repo: the owner supplies them with the job.
+- Login: SSH key authentication from the laptop. Each worker uses only its own
+  directory on the board, named for its tag.
 - Cores / RAM / disk: 4 cores (use core 3 for timing, cores 0 to 2 for builds
   and tests), 3.8 GiB RAM plus 2 GiB swap, 58 GB SD card with 50 GB free.
   CPU governor `ondemand` at boot, max 1.8 GHz.
