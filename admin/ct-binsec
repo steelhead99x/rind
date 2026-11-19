@@ -100,14 +100,14 @@ print("EXIT {}".format(int(gdb.parse_and_eval("$_exitcode"))))
 
 # The features each target's code uses instructions of that BINSEC 0.11
 # cannot decode, so their paths stay with `admin/ctgrind`, `admin/ct-sde`,
-# and `admin/ct-qemu`: on x86_64, AES-NI, VAES, the SHA512 instructions, and
-# every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and
-# SHA instructions, SHA3's, SVE2's `xar`, and the `msr` that sets DIT.
-# Denying AES leaves
-# vpaes, whose `tbl` the script stubs.
+# and `admin/ct-qemu`: on x86_64, AES-NI, VAES, and every EVEX encoding; on
+# aarch64, the crypto extension's AES, PMULL, and SHA instructions, SHA3's,
+# SVE2's `xar`, and the `msr` that sets DIT. Denying AES leaves vpaes, whose
+# `tbl` the script stubs. rind does not run the SHA512 instructions, which
+# BINSEC also cannot decode.
 # See UPSTREAM.md, "BINSEC cannot decode much of what rind runs".
 UNDECODED = {
-    "x86_64": ["aes", "vaes", "sha512", "avx512f", "avx512dq", "avx512ifma", "avx512bw"]
+    "x86_64": ["aes", "vaes", "avx512f", "avx512dq", "avx512ifma", "avx512bw"]
     + ["avx512vl", "avx512vbmi", "avx512vbmi2"],
     "aarch64": ["aes", "pmull", "sha2", "sha3", "sve2", "dit"],
 }
