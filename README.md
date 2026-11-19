@@ -161,6 +161,7 @@ Each crate's README shows its setup.
 | [rind-jsonwebtoken][] | JWTs through [jsonwebtoken](https://github.com/Keats/jsonwebtoken) |
 | [rind-object-store][] | S3, Azure, and GCS request signing through [object_store](https://github.com/apache/arrow-rs-object-store) |
 | [rind-rcgen][] | certificates through [rcgen](https://github.com/rustls/rcgen) |
+| [rind-rustcrypto][] | [RustCrypto](https://github.com/RustCrypto)'s traits (`Digest`, `Mac`, `Aead`, `Signer`, `Verifier`, the KEM traits), one feature per trait crate and version; not yet published |
 | [rind-openssl][] | X25519 and Ed25519 for whatever links OpenSSL 3, as a provider its configuration loads; built from source |
 | [rind-dart][] | Dart and Flutter, through FFI, as the `rind` package on [pub.dev](https://pub.dev/packages/rind) |
 | [rind_cryptography][] | Dart and Flutter, as the `rind_cryptography` package, with the `cryptography` package's API on rind |
@@ -336,6 +337,7 @@ from other projects keeps its source's license, which [LICENSE] lists.
 [rind-openssl]: https://github.com/kixel-ai/rind/tree/main/rind-openssl
 [rind-object-store]: https://github.com/kixel-ai/rind/tree/main/rind-object-store
 [rind-rcgen]: https://github.com/kixel-ai/rind/tree/main/rind-rcgen
+[rind-rustcrypto]: https://github.com/kixel-ai/rind/tree/main/rind-rustcrypto
 [rind-dart]: https://github.com/kixel-ai/rind/tree/main/rind-dart
 [rind_cryptography]: https://github.com/kixel-ai/rind/tree/main/rind-dart/cryptography
 [rind-python]: https://github.com/kixel-ai/rind/tree/main/rind-python

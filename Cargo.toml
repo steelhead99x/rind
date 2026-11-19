@@ -15,6 +15,7 @@ members = [
   "rind-openmls",
   "rind-rcgen",
   "rind-ring",
+  "rind-rustcrypto",
   "rind-rustls",
   "rind-str0m",
   "rind-jsonwebtoken",

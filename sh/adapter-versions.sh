@@ -23,7 +23,11 @@ def breaking:
 def norm: gsub("-"; "_");
 
 .packages[]
-| select((.name | startswith("rind-")) and .publish == null)
+# An adapter that adapts several upstreams, each versioned on its own, has no
+# one version to begin with; it declares so in `package.metadata.rind` and
+# versions on its own (rind-rustcrypto, whose features follow its trait crates).
+| select((.name | startswith("rind-")) and .publish == null
+         and (((.metadata.rind // {})["adapts-several-upstreams"] // false) | not))
 | (.name | ltrimstr("rind-") | norm) as $upstream
 | ([.dependencies[] | select(.kind == null and ((.rename // .name) | norm) == $upstream) | .req]) as $reqs
 | (.metadata.rind.upstream // null) as $declared

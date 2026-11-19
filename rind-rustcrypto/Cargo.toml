@@ -1,0 +1,42 @@
+[package]
+name = "rind-rustcrypto"
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/kixel-ai/rind"
+homepage = "https://rind.kixel.ai"
+license = "Apache-2.0 OR ISC OR MIT-0"
+description = "RustCrypto's traits on rind"
+categories = ["cryptography"]
+rust-version.workspace = true
+readme = "README.md"
+
+# Adapts several upstreams that each version on their own, so its version is
+# its own and sh/adapter-versions.sh skips it; a feature per trait crate and
+# version keeps a new major of one from being a breaking release here.
+[package.metadata.rind]
+adapts-several-upstreams = true
+
+[features]
+default = []
+# Each feature turns on the traits of one released version of one trait crate.
+digest-0_11 = ["dep:digest"]
+aead-0_6 = ["dep:aead"]
+signature-3 = ["dep:signature"]
+kem-0_3 = ["dep:kem"]
+
+[dependencies]
+rind = { version = "0.3.2", path = "../rind" }
+digest = { version = "0.11.3", default-features = false, features = ["mac"], optional = true }
+aead = { version = "0.6.1", default-features = false, optional = true }
+signature = { version = "3.0.0", default-features = false, optional = true }
+kem = { version = "0.3.0", default-features = false, optional = true }
+
+[dev-dependencies]
+sha2 = "0.11"
+sha3 = "0.12"
+hmac = "0.13"
+aes-gcm = "0.11"
+chacha20poly1305 = "0.11"
+# Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
+# features, as `admin/ctgrind` does; otherwise they build as no-ops.
+crabgrind = { version = "0.4", default-features = false }

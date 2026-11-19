@@ -19,3 +19,10 @@ git_release_latest = true
 [[package]]
 name = "rind-python"
 git_only = true
+
+# rind-rustcrypto, a new crate: a trusted-publishing release cannot create a
+# crate, so the maintainer publishes its first version by hand, and this entry
+# comes out then.
+[[package]]
+name = "rind-rustcrypto"
+release = false
