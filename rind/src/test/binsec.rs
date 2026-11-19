@@ -382,11 +382,39 @@ fn ct_binsec_ecdsa_p521() {
     );
 }
 
+// The 16-word Montgomery product RSA-2048's CRT exponentiation runs.
+// On a narrow aarch64 multiplier that is `bignum_kmul_16_32`,
+// `bignum_ksqr_16_32`, and `bignum_emontredc_8n`. `admin/ct-binsec` runs
+// this again with `RIND_CPU_DISABLE_wide_mul=1` on aarch64, because a wide
+// host's own schedule is `_alt` and `bn_mul_mont`.
+#[test]
+#[ignore = "admin/ct-binsec runs it under BINSEC"]
+fn ct_binsec_mont16() {
+    use crate::low::{mont_mul, mont_sqr};
+
+    checked(|| {
+        let (x, mut y, mut z) = ([1u64; 16], [2u64; 16], [0u64; 16]);
+        let m = [u64::MAX; 16];
+        ct::secret_slice(&x);
+        ct::secret_slice(&y);
+        ct::secret_slice(&m);
+        let n0 = ct::into_secret(1u64);
+        mont_mul(&mut z, &x, &y, &m, n0);
+        mont_sqr(&mut y, &z, &m, n0);
+        black_box(&y);
+    });
+}
+
 // The Montgomery products RSA-4096's private operation runs at its CRT
 // width, 32 words: s2n-bignum's Karatsuba routines and aws-lc's
 // `bn_mul4x_mont` and `bn_sqr8x_mont` on x86_64. BINSEC cannot finish the
 // exponentiation that runs thousands of them, whose other code
-// `ct_binsec_rsa2048_sign` checks at 16 words.
+// `ct_binsec_rsa2048_sign` checks at 16 words. On a wide aarch64 host that
+// sign takes `bn_mul_mont`, so the 16-word Karatsuba path is
+// `ct_binsec_mont16` with the narrow schedule forced. On aarch64 this runs
+// `bn_mul_mont` on a wide multiplier and s2n-bignum's `bignum_kmul_32_64`,
+// `bignum_ksqr_32_64`, and `bignum_emontredc_8n` on a narrow one, so
+// `admin/ct-binsec` runs it again with each schedule forced.
 #[test]
 #[ignore = "admin/ct-binsec runs it under BINSEC"]
 fn ct_binsec_mont_mul() {
