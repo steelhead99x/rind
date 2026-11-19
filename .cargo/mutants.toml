@@ -257,6 +257,10 @@ exclude_re = [
   # x86-cpu.yml's SDE tiers test them.
   'rind/src/low/x86_64/(aes|aes_gcm|aes_gcm_vaes|cpu|ghash)\.rs:\d+:\d+: (replace (HwKey::round_keys_512|RoundKeys512::split|_cipher_avx512|Counter512::\w+|VaesKernel::avx512|HaveAvx512(For\w+|Vl)::check|GhashTableAvx512::\w+|_mul16|_mul_tail)( -> .*)? with .*|.* in (_cipher_avx512|HaveAvx512(For\w+|Vl)::check|_mul_tail))$',
   'rind/src/low/x86_64/aes_gcm\.rs:\d+:45: replace \* with (\+|/)$',
+  # SLH-DSA's four-way Keccak rotates with AVX-512 VL's vprolq only on CPUs
+  # with it, which no campaign's runner is; ct_sde_keccak4x_vl and
+  # x86-cpu.yml's SDE tiers run it.
+  'rind/src/low/x86_64/sha3_keccak4x_avx2\.rs:\d+:\d+: replace rol_vl -> __m256i with Default::default\(\)$',
   'rind/src/low/posint\.rs:\d+:\d+: (replace PosInt<N>::mod_exp_pair_rsaz -> .*|.* in PosInt<N>::mod_exp_pair_rsaz)$',
   # Compiled only for armv7, which no campaign runs: the portable AES-GCM's
   # crypto-extension half.
