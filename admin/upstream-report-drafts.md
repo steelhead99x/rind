@@ -6,6 +6,8 @@ Rechecked on 2026-11-19 against each upstream's current release or main, with it
 
 Delete this file before the claim lands. It is a working document for the maintainer's review.
 
+Each draft template below ends with a `(Written by claude-sonnet-5-5)` line, which this fork's comments carry. Strip that line from a template before posting it anywhere outside the fork; the footer is never part of the text to post.
+
 ## 1. Triage
 
 41 entries listed (the Forks section's one fork, and every workaround entry but 1 held back, not listed): 14 draft ready, 12 not rerun, 9 existing report, 2 not a bug, 2 fixed upstream, 2 no public tracker.
