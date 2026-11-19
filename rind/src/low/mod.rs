@@ -129,12 +129,9 @@ mod generic {
     #[cfg(any(all(rind_backend = "portable", rind_limb = "32"), test))]
     pub(crate) mod poly1305_32;
     pub(super) mod reuse_cache;
-    // The portable backend's SHA-1, and both hashes in armv7 and x86_64
-    // tests to check the assembly against.
-    #[cfg(any(
-        rind_backend = "portable",
-        all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
-    ))]
+    // The portable backend's SHA-1, and in x86_64 tests to check the
+    // assembly against. armv7 runs aws-lc's, and no armv7 test reads this.
+    #[cfg(any(rind_backend = "portable", all(test, rind_backend = "x86_64")))]
     pub(super) mod sha1;
     // SHA-256, except on ESP-IDF Xtensa, which ships the IRAM body and does
     // not also link this one. The portable backend and armv7 run it, and
