@@ -516,12 +516,12 @@ mod tests {
                             ct::into_public(seal(&vpaes, &neon, &nonce, &aad, &mut want));
                         ct::public_slice(&want);
                         let mut got = plain.clone();
-                        let tag = ct::into_public(seal(&hw, &pmull, &nonce, &aad, &mut got));
+                        let tag = ct::into_public(seal(&hw, pmull, &nonce, &aad, &mut got));
                         ct::public_slice(&got);
                         assert_eq!(got, want, "{what}");
                         assert_eq!(tag, want_tag, "{what}");
 
-                        let valid = open(&hw, &pmull, &nonce, &aad, &mut got, &want_tag);
+                        let valid = open(&hw, pmull, &nonce, &aad, &mut got, &want_tag);
                         ct::public_slice(&got);
                         assert!(ct::into_public(valid), "{what}");
                         assert_eq!(got, plain, "{what}");
@@ -530,7 +530,7 @@ mod tests {
                             let mut wrong = want_tag;
                             wrong[byte] ^= 1;
                             let mut got = want.clone();
-                            let valid = open(&hw, &pmull, &nonce, &aad, &mut got, &wrong);
+                            let valid = open(&hw, pmull, &nonce, &aad, &mut got, &wrong);
                             assert!(!ct::into_public(valid), "{what}, byte {byte}");
                         }
                     }
