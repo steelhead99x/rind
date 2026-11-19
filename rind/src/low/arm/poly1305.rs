@@ -17,6 +17,11 @@ impl Poly1305 {
     pub(crate) fn new(key: &[u8; 32]) -> Self {
         match HaveNeon::check() {
             Some(token) => Self::Neon(Poly1305Neon::new(key, token)),
+            // ARMv7-A and ARMv7-R without NEON keep HACL*. BearSSL records
+            // Cortex-A and Cortex-R 32-bit to 64-bit products as constant
+            // time. Whether 26-bit limbs in `u32`s would be faster here is
+            // not measured. ChaCha20's setup links libcrux-hacl-rs and
+            // libcrux-macros on this backend either way.
             None => Self::Portable(Hacl::new(key)),
         }
     }

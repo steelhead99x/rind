@@ -258,3 +258,4 @@ no_sse2() {
 no_sse2
 
 no_aws_lc thumbv7em-none-eabihf
+no_aws_lc armv7a-none-eabi

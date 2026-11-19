@@ -135,7 +135,7 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | AES-KW, AES-KWP, AES-CBC | Graviola + rind | aws-lc + rind |  | aws-lc + rind |
 | ChaCha20 | Graviola |  | aws-lc + HACL* ✓ | HACL* ✓ |
 | ChaCha20 (header protection) | HACL* ✓ + rind |  |  |  |
-| ChaCha20-Poly1305, XChaCha20-Poly1305 | verified-garbage | aws-lc ⚡ |  | HACL* ✓ + Graviola |
+| ChaCha20-Poly1305, XChaCha20-Poly1305 | verified-garbage | aws-lc ⚡ |  | HACL* ✓ + Graviola + rind |
 | MD5 | rind |  |  |  |
 | SHA-1 | rind | aws-lc |  | rind |
 | SHA-256 | aws-lc ⚡ | aws-lc |  | HACL* ✓ except ESP-IDF Xtensa, where rind's 16-round body runs from IRAM |
@@ -196,8 +196,18 @@ with portable Rust in place of the assembly armv7 runs regardless.
   flash text. A debug build is not that promise. Every other portable
   target keeps HACL* through libcrux-sha2.
 - portable: ChaCha20-Poly1305's Poly1305 is Graviola's on 64-bit targets
-  and HACL*'s ✓ on 32-bit ones, whose streaming state counts its input in a
-  32-bit length that a 64-bit AEAD can overflow. SHA-3's, ML-KEM's, and
+  and rind's on 32-bit ones, in poly1305-donna-32's five 26-bit limbs, so
+  each limb product is one 32x32->64-bit multiply, or four 16-bit halves
+  where that multiply ends early or is a library call: a fixed-time 32-bit
+  `mul` on the Cortex-M3 and the cores without `umull`, the same `mul` with
+  bit 31 set on ARMv4T and ARMv5TE, and a shift-and-add on 32-bit RISC-V
+  with no multiply instruction. Zmmul keeps the widening multiply. 64-bit
+  RISC-V without a multiplier, MIPS, and 32-bit PowerPC do too
+  (PLATFORMS.md). HACL*'s verified one,
+  which armv7 runs without NEON, also has 26-bit limbs but keeps them in
+  `u64`s, and on a 32-bit core without NEON spends most of its time in
+  64-bit multiplies and adds; nothing proves rind's, whose tests check it
+  against HACL*'s. SHA-3's, ML-KEM's, and
   ML-DSA's Keccak-f is rind's, s2n-bignum's Keccak spec in Rust, which
   [`proofs/`](proofs/README.md) proves is FIPS 202's KECCAK-f[1600]; it
   measured as fast as RustCrypto's and libcrux-sha3's, which nothing proves.
