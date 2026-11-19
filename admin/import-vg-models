@@ -42,10 +42,10 @@ ROOTS = [
     # The specs whose functions rind's axioms about VG's routines state.
     "VerifiedGarbage.Spec.MlKem",
     "VerifiedGarbage.Spec.Rsa.PrivatePrecompute",
-    # ChaCha20's spec and contracts, which proofs/Rind/VgChaCha20.lean
-    # adapts rather than imports and proofs/Rind/X86_64/VgChaCha20.lean's
-    # axioms restate: a pin that changes them shows the change in its diff,
-    # against which that re-pin must review the adaptation and the axioms.
+    # ChaCha20's contracts, which proofs/Rind/X86_64/VgChaCha20.lean's
+    # axioms restate over the spec they import: a pin that changes the
+    # contracts shows the change in its diff, against which that re-pin must
+    # review the axioms.
     "VerifiedGarbage.Spec.ChaCha20.Contract",
 ]
 

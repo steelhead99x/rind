@@ -78,6 +78,49 @@ qemu. iOS devices' code is only built.
   [proofs/README.md](proofs/README.md)) cover only targets that build A32,
   such as `armv7-unknown-linux-gnueabihf`.
 
+  On a Raspberry Pi 2 B's Cortex-A7 (900 MHz, NEON, no crypto extension),
+  `armv7-unknown-linux-gnueabihf`, rind runs the key-derivation and public-key
+  operations below in less time than aws-lc-rs, ring, RustCrypto, and libcrux
+  do, except Argon2id's smallest cost, 4 MiB in one pass, where RustCrypto's
+  crate, which never wipes its memory, is 6% faster; the wipe is 4 of that
+  6 points. Median of three runs on one pinned core with the governor on
+  `performance` and the other cores near idle, each library's native build,
+  release profile; time in microseconds, and the last column is rind's time over the
+  fastest other library's.
+
+  | Operation | rind | aws-lc-rs | ring | RustCrypto or libcrux | rind over fastest |
+  |---|---|---|---|---|---|
+  | HMAC-SHA256, 64 bytes | 7.1 | 11.3 | 8.8 | | 0.81 |
+  | HMAC-SHA256, 1 KiB | 37.7 | 41.5 | 39.3 | | 0.96 |
+  | PBKDF2-HMAC-SHA256, 1000 iterations | 5381 | 6052 | 7057 | | 0.89 |
+  | HKDF-SHA256, extract and 32-byte expand | 23.0 | 28.5 | 25.7 | | 0.90 |
+  | X25519, shared secret | 1039 | 2823 | | 1869 (dalek) | 0.56 |
+  | X25519, public key | 643 | 767 | | | 0.84 |
+  | Ed25519, key from seed | 656 | 774 | | | 0.85 |
+  | Ed25519, sign 64 bytes | 672 | 815 | | 753 (dalek) | 0.89 |
+  | Ed25519, verify | 1732 | 2476 | 1779 | 1788 (dalek) | 0.97 |
+  | ML-KEM-768, key generation | 573 | 1130 | | 1308 (libcrux) | 0.51 |
+  | ML-KEM-768, encapsulate | 315 | 1247 | | 1486 (libcrux) | 0.25 |
+  | ML-KEM-768, decapsulate | 501 | 1516 | | 1745 (libcrux) | 0.33 |
+  | Argon2id, 4 MiB, 1 pass, 1 lane | 94 ms | | | 89 ms (RustCrypto) | 1.06 |
+  | Argon2id, 8 MiB, 3 passes, 1 lane | 498 ms | | | 501 ms (RustCrypto) | 0.99 |
+
+  Argon2id's fill runs portable Rust here, as stable Rust has no 32-bit Arm NEON
+  intrinsics, and it matches RustCrypto's. The first row's
+  gap is the wipe of its 4 MiB, which `AGENTS.md` requires of memory derived
+  from a password; without it rind takes 90.6 ms, 1.02 times RustCrypto's. aws-lc-rs and ring have no
+  Argon2id, and neither library has BLAKE2 or BLAKE3, which rind does not
+  offer outside Argon2id. Built from `main` at 529ff5c0 with the Nix dev
+  shell's `armv7` target and measured by a harness outside the workspace,
+  since `rind-bench` does not build `openssl-sys` for it.
+
+- Thumb-only M-profile targets (`thumbv6m-none-eabi`, `thumbv7em-none-eabihf`)
+  and `riscv32imc-unknown-none-elf` build the portable backend; M-profile has
+  no A32 and no NEON for the arm assembly. Where the target has no
+  compare-and-swap (`thumbv6m`, `riscv32imc`), the reuse cache keeps nothing, so
+  each use builds its value again; that is correct on any number of cores and
+  interrupt handlers and needs no critical section.
+
 - Builds with `-Z cf-protection=branch` or `-Z branch-protection=bti`, both
   unstable, are unsupported: rind calls aws-lc's x86_64 and aarch64 routines
   through function pointers, and their text, as rind imports it, holds no
@@ -114,8 +157,9 @@ qemu. iOS devices' code is only built.
   (`rustls-pki-types/web`) and the random sources of jsonwebtoken and str0m.
   The nightly `build.yml` runs rind's vector tests and rind-rustls's and
   rind-ring's tests on `wasm32-wasip2` under wasmtime (`just wasm`), without
-  the differential tests, since aws-lc does not build for wasm; the adapters'
-  handshakes run rind against itself. `wasm32-unknown-unknown` stays
+  the differential tests, since aws-lc does not build for wasm; Ed25519's CCTV
+  vectors and the expanded ML-DSA wipe check run against data recorded from
+  aws-lc instead, and the adapters' handshakes run rind against itself. `wasm32-unknown-unknown` stays
   compile-only: its tests need a JavaScript host. Constant time is unchecked on
   wasm: ctgrind and the trace checks inspect native code, and a wasm engine
   compiles rind again, so its JIT may turn a select into a branch.
@@ -228,8 +272,11 @@ Intel guarantees the timing of the instructions it lists as data-independent
   enclave on one that does runs with it set whatever the OS does
   ([Intel DOITM]). Linux does not set it, as of 7.4, nor does KVM pass it to
   guests, and rind knows of no other kernel that does. Intel's list leaves out
-  the `VSHA512` instructions, which SHA-384 and SHA-512 run where the CPU has
-  them, as from Arrow Lake and Lunar Lake on.
+  the `VSHA512` instructions (`VSHA512RNDS2`, `VSHA512MSG1`, and
+  `VSHA512MSG2`). SHA-384 and SHA-512 do not run them, including on Arrow Lake
+  and Lunar Lake: they take OpenSSL's AVX2 routine on every CPU with AVX2,
+  and `admin/ct-vartime` refuses `vsha512*`. Should Intel add them to its
+  list, the SHA512-extension routine is worth importing again.
 - On Intel processors that do not report `MCDT_NO`, such as its Core processors
   from Skylake to Alder Lake, only while MXCSR holds `0x1FBF`: otherwise some
   vector integer multiplies, such as `vpmuludq` and `vpmullw`, may take a cycle

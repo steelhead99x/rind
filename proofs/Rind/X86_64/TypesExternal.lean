@@ -35,13 +35,12 @@ opaque low.x86_64.cpu.HaveAvx512ForRsa : Type
 
 /-- The tokens proving the CPU has what each SHA-1, SHA-256, SHA-512, and
 ChaCha20-Poly1305 routine needs: the SHA extensions, AVX and SSSE3, AVX2,
-SSSE3, the SHA512 instructions, and SSE4.1. -/
+SSSE3, and SSE4.1. -/
 opaque low.x86_64.cpu.HaveSha1 : Type
 opaque low.x86_64.cpu.HaveSha256 : Type
 opaque low.x86_64.cpu.HaveAvx : Type
 opaque low.x86_64.cpu.HaveAvx2 : Type
 opaque low.x86_64.cpu.HaveSsse3 : Type
-opaque low.x86_64.cpu.HaveSha512 : Type
 opaque low.x86_64.cpu.HaveSse41 : Type
 
 /-- The tokens proving pyca/verified-garbage's ML-KEM-768 encapsulation, and
@@ -122,8 +121,8 @@ proves: what pyca/verified-garbage's AVX-512 VL ChaCha20 needs. -/
 opaque low.x86_64.cpu.HaveAvx512Vl : Type
 
 /-- pyca/verified-garbage's ChaCha20 streaming state, as its routines see it:
-the 768 bytes of memory they keep it in, which `Rind.VgChaCha20` reads as VG's
-spec reads memory. Rust leaves it uninitialised: `init` writes the bytes
+the 768 bytes of memory they keep it in, all that VG's spec reads of it, as
+`Rind.VgChaCha20` proves. Rust leaves it uninitialised: `init` writes the bytes
 `apply` reads on entry, and `apply` writes its scratch before reading it, so
 the model gives the rest any bytes.
 `admin/prove` fails unless this quote is still the type:

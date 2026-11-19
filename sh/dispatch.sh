@@ -118,7 +118,7 @@ module cross '^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|f
 # rind's manifest picks the random source rind-ring's browser feature reaches.
 module wasm '^(rind/Cargo\.toml$|rind-(aws-lc-rs|ring|rustls|rcgen|jsonwebtoken|dimpl|str0m|openmls|object-store)/(src/|tests/|Cargo\.toml$)|admin/wasm-fixture/|Cargo\.(toml|lock)$|flake\.(nix|lock)$)' \
     tools='cargo jq' compiles
-# Dependents may build with the workspace's declared rust-version. Plain
+# Dependents may build each crate with the rust-version it declares. Plain
 # `cargo check` covers the lib and bin targets, all a dependent builds, so a
 # crate's tests, benches, and docs cannot break it. A Rust crate nested in
 # an adapter, such as rind-fips/module/, counts too.
@@ -424,26 +424,57 @@ step() {
                 ((${#packages[@]} > 0)) || packages=(--workspace)
                 # An adapter whose upstream needs a newer Rust declares that
                 # rust-version instead, which its users need anyway, so it is
-                # left out.
-                local newer args=() i name
-                mapfile -t newer < <(cargo metadata --format-version 1 --no-deps --locked |
-                    jq -r '(.packages[] | select(.name == "rind") | .rust_version) as $v | .packages[] | select(.rust_version != $v) | .name')
+                # checked on its own version, in the flake's msrv-<version>
+                # shell, with every crate sharing that version, rather than
+                # on rind's. An unpublished crate with a rust-version of its
+                # own, or none, is left out: no user builds it on that
+                # version. A published crate with none promises no Rust
+                # version, which is an error rather than a skip.
+                local metadata own_list args=() i name version names
+                local -A own=() versions=()
+                # Plain assignments, so a failing cargo or jq stops the
+                # module instead of reading as no crate of its own.
+                metadata=$(cargo metadata --format-version 1 --no-deps --locked)
+                own_list=$(jq -r '(.packages[] | select(.name == "rind") | .rust_version) as $rind
+                    | .packages[] | select(.rust_version != $rind)
+                    | if .publish == [] then [.name, ""]
+                      elif .rust_version == null then error("\(.name) is published but declares no rust-version")
+                      else [.name, .rust_version] end
+                    | @tsv' <<<"$metadata")
+                while IFS=$'\t' read -r name version; do
+                    [[ -z "$name" ]] || own[$name]=$version
+                done <<<"$own_list"
                 for ((i = 0; i < ${#packages[@]}; i++)); do
                     if [[ "${packages[i]}" == -p ]]; then
                         i=$((i + 1))
-                        if ! printf '%s\n' "${newer[@]}" | grep -qxF "${packages[i]}"; then
-                            args+=(-p "${packages[i]}")
+                        name=${packages[i]}
+                        if [[ ! -v "own[$name]" ]]; then
+                            args+=(-p "$name")
+                        elif [[ -n "${own[$name]}" ]]; then
+                            versions[${own[$name]}]+=" $name"
                         fi
                     elif [[ "${packages[i]}" == --workspace ]]; then
                         args+=(--workspace)
-                        for name in "${newer[@]}"; do
+                        # Sorted, as bash's associative arrays iterate in hash order.
+                        while IFS= read -r name; do
+                            [[ -n "$name" ]] || continue
                             args+=(--exclude "$name")
-                        done
+                            [[ -z "${own[$name]}" ]] || versions[${own[$name]}]+=" $name"
+                        done < <(printf '%s\n' "${!own[@]}" | LC_ALL=C sort)
                     fi
                 done
                 if ((${#args[@]} > 0)); then
                     run nix develop .#msrv --command cargo check "${args[@]}" --locked
                 fi
+                while IFS= read -r version; do
+                    [[ -n "$version" ]] || continue
+                    read -ra names <<<"${versions[$version]}"
+                    args=()
+                    for name in "${names[@]}"; do
+                        args+=(-p "$name")
+                    done
+                    run nix develop ".#msrv-${version//./_}" --command cargo check "${args[@]}" --locked
+                done < <(printf '%s\n' "${!versions[@]}" | LC_ALL=C sort -V)
             fi
             # rind and rind-rustls on each other backend this change reaches.
             # i686 has only the portable one.
@@ -490,6 +521,11 @@ step() {
                 run cargo clippy -p rind --lib --locked --target wasm32-wasip2 -- --deny warnings
                 run cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
                     --features getrandom/wasm_js -- --deny warnings
+                # The library clippy never builds rind's test binaries for
+                # wasm, whose `cctv` and `heap_scratch` carry wasm-only code
+                # in place of aws-lc; the nightly `just wasm` runs them.
+                run cargo clippy -p rind --test heap_scratch --test cctv --locked \
+                    --target wasm32-wasip2 -- --deny warnings
             fi
             # A target with no `std` for each architecture rind has assembly
             # for; x86_64's, which disables SSE2, runs the portable backend.
@@ -500,7 +536,12 @@ step() {
             # which crashes LLVM there, unless the caller picks `serial`.
             # See UPSTREAM.md, "curve25519-dalek cannot compile without SSE".
             local rustflags
-            for target in aarch64:aarch64-unknown-none arm:armv7a-none-eabi portable:x86_64-unknown-none; do
+            # And for the microcontroller targets it must keep off the arm
+            # backend (M-profile is Thumb-only, with no NEON), two of them
+            # without compare-and-swap, which build `reuse_cache_without_cas`:
+            # `thumbv6m-none-eabi` and `riscv32imc-unknown-none-elf`.
+            for target in aarch64:aarch64-unknown-none arm:armv7a-none-eabi portable:x86_64-unknown-none \
+                portable:thumbv6m-none-eabi portable:thumbv7em-none-eabihf portable:riscv32imc-unknown-none-elf; do
                 if reaches "$backends" "${target%%:*}"; then
                     rustflags='--cfg getrandom_backend="custom"'
                     [[ $target != *x86_64* ]] || rustflags+=' --cfg curve25519_dalek_backend="serial"'
