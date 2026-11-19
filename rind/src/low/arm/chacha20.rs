@@ -76,7 +76,11 @@ impl ChaCha20 {
         xor_blocks(&mut self.ctx, blocks);
         if !tail.is_empty() {
             // A partial block goes through the same rounds in a block of its
-            // own, so there is one copy of them.
+            // own, so there is one copy of them. `last` holds the tail and the
+            // block's unused keystream, and stays unwiped: AGENTS.md leaves
+            // stack temporaries unwiped, as `generic::chacha20::cipher` leaves
+            // its key words and whole keystream block. The unused bytes are
+            // never keystream for a message, since a nonce is not reused.
             let mut last = [[0u8; 64]];
             last[0][..tail.len()].copy_from_slice(tail);
             xor_blocks(&mut self.ctx, &mut last);
@@ -393,7 +397,9 @@ only one tip for the future, sunscreen would be it.";
             reference(&key, &nonce, &mut want);
             ct::secret_slice(&key);
             ChaCha20::new(&key, &nonce).cipher(&mut got);
-            assert_eq!(ct::into_public(got), want, "{len}");
+            // `into_public` would unmark the `Vec`'s header, not its bytes.
+            ct::public_slice(&got);
+            assert_eq!(got, want, "{len}");
         }
     }
 
