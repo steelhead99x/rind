@@ -39,6 +39,14 @@ opaque low.aarch64.sha3_keccak2_f1600.sha3_keccak2_f1600
   : Array (Array Std.U64 25#usize) 2#usize → Array Std.U64 24#usize →
     Result (Array (Array Std.U64 25#usize) 2#usize)
 
+opaque low.aarch64.sha3_keccak4_f1600.sha3_keccak4_f1600
+  : Array (Array Std.U64 25#usize) 4#usize → Array Std.U64 24#usize →
+    Result (Array (Array Std.U64 25#usize) 4#usize)
+
+opaque low.aarch64.sha3_keccak4_f1600_alt.sha3_keccak4_f1600
+  : Array (Array Std.U64 25#usize) 4#usize → Array Std.U64 24#usize →
+    Result (Array (Array Std.U64 25#usize) 4#usize)
+
 opaque low.aarch64.bignum_eq.bignum_eq
   : Slice Std.U64 → Slice Std.U64 → Result Bool
 
@@ -225,6 +233,12 @@ def low.generic.zeroise.ZeroableRef.new {T : Type} (value : T) :
     Result (low.generic.zeroise.ZeroableRef T) :=
   ok value
 
+/-- `ZeroableRef::get`, which panics only on a wiped value, and only a drop
+wipes one: its value. -/
+def low.generic.zeroise.ZeroableRef.get {T : Type} (r : low.generic.zeroise.ZeroableRef T) :
+    Result T :=
+  ok r
+
 /-! The entry guard and CPU dispatch, which read no input. -/
 
 opaque low.entry.Entry.new_secret : Result low.entry.Entry
@@ -333,24 +347,26 @@ opaque high.curve.P384.Insts.RindHighCurveCurveStaticPrivateKeyVerifyingKeyScala
   {T0 : Type _} (midrngRandomSourceInst : mid.rng.RandomSource T0) :
   T0 → Result ((core.result.Result mid.p384.StaticPrivateKey error.Error) × T0)
 
-/-! Whether the CPU runs pyca/verified-garbage's P-256, and rind's calls of it,
-which the P-256 proofs take as not running: Lean proves VG's routines in that
-project, not here. -/
+/-! Whether the CPU runs pyca/verified-garbage's P-256, which reads no input,
+and its routines behind their Rust wrappers, whose contracts
+`Rind.Aarch64.VgP256` states. -/
 
 opaque low.aarch64.p256_vg.P256.check : Result (Option low.aarch64.p256_vg.P256)
 
 opaque low.aarch64.p256_vg.P256.check_public_key : Result (Option low.aarch64.p256_vg.P256)
 
-opaque mid.p256.PrivateKey.vg_public_key
-  : mid.p256.PrivateKey → low.aarch64.p256_vg.P256 → Result (Array Std.U8 65#usize)
+opaque low.aarch64.p256_vg.P256.public_key
+  : low.aarch64.p256_vg.P256 → Array Std.U8 32#usize → Result (Option (Array Std.U8 65#usize))
 
-opaque mid.p256.PrivateKey.vg_diffie_hellman
-  : mid.p256.PrivateKey → low.aarch64.p256_vg.P256 → mid.p256.PublicKey →
-    Result (core.result.Result mid.p256.SharedSecret error.Error)
+opaque low.aarch64.p256_vg.P256.ecdh
+  :
+  low.aarch64.p256_vg.P256 → Array Std.U8 32#usize → Array Std.U8 65#usize → Result (Option
+    (Array Std.U8 32#usize))
 
-opaque mid.p256.vg_verify
-  : low.aarch64.p256_vg.P256 → mid.p256.AffineMontPoint → mid.p256.Scalar → mid.p256.Scalar →
-    mid.p256.Scalar → Result (core.result.Result Unit error.Error)
+opaque low.aarch64.p256_vg.P256.verify
+  :
+  low.aarch64.p256_vg.P256 → Array Std.U8 65#usize → Array Std.U8 32#usize → Array Std.U8
+    64#usize → Result Bool
 
 /-! The other curves, which X25519's and P-256's results never depend on. -/
 
@@ -417,6 +433,13 @@ opaque low.aarch64.mlkem768_vg.Encaps.encaps
   low.aarch64.mlkem768_vg.Encaps → Array Std.U8 1184#usize → Option (Array
     Std.U8 32#usize) → Array Std.U8 32#usize → Result (Option ((Array
     Std.U8 32#usize) × (Array Std.U8 1088#usize)))
+
+/-- pyca/verified-garbage's PBKDF2 routines, behind their Rust wrapper,
+`Pbkdf2::derive`, whose contracts `Rind.Aarch64.VgPbkdf2` states. The
+iteration count is the `u32` its `NonZeroU32` holds. -/
+opaque low.aarch64.pbkdf2_vg.Pbkdf2.derive
+  : low.aarch64.pbkdf2_vg.Pbkdf2 → Slice Std.U8 → Slice Std.U8 → Std.U32 → Slice Std.U8 →
+    Result (Slice Std.U8)
 
 /-! MD5, which no proof covers. -/
 

@@ -69,17 +69,18 @@ impl<H: Hash> HmacKey<H> {
     pub(crate) fn start(&self) -> Hmac<H> {
         Hmac {
             inner: self.inner.resume(),
-            outer: self.outer.clone(),
+            key: self.clone(),
         }
     }
 }
 
-/// An in-progress HMAC computation, using hash function `H`.
+/// An in-progress HMAC computation, using hash function `H`, with the keyed
+/// states it restarts from.
 // `inner` first, so `Tagged` places it as `digest::Context` places a context.
 #[repr(C)]
 pub(crate) struct Hmac<H: Hash> {
     inner: H::Context,
-    outer: H::State,
+    key: HmacKey<H>,
 }
 
 // Not derived, as for `HmacKey`.
@@ -87,7 +88,7 @@ impl<H: Hash> Clone for Hmac<H> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            outer: self.outer.clone(),
+            key: self.key.clone(),
         }
     }
 }
@@ -103,7 +104,14 @@ impl<H: Hash> Hmac<H> {
     /// The HMAC output (sometimes called a "signature", or "tag") is returned.
     pub(crate) fn finish(&self) -> Digest {
         let inner = self.inner.finish();
-        self.outer.finish_with(inner.as_ref())
+        self.key.outer.finish_with(inner.as_ref())
+    }
+
+    /// Completes the HMAC signing operation, and starts a new message under the same key.
+    pub(crate) fn sign(&mut self) -> Digest {
+        let tag = self.finish();
+        self.inner = self.key.inner.resume();
+        tag
     }
 }
 
@@ -242,11 +250,11 @@ impl Context {
         self.0.update(data);
     }
 
-    /// Returns the tag of the message.
+    /// Returns the tag of the message, and starts a new one under the same key.
     #[must_use]
-    pub fn sign(self) -> Tag {
+    pub fn sign(&mut self) -> Tag {
         let _entry = Entry::new_secret();
-        Tag(self.0.finish())
+        Tag(self.0.sign())
     }
 }
 
@@ -360,9 +368,11 @@ impl Zeroable for Keyed {}
 #[derive(Clone)]
 pub(super) struct Streaming(Tagged);
 
-// As `Keyed`, with all-zero hash contexts too. Aligned to a cache line,
-// with each `Hmac` 16 bytes in on 64-bit targets, for the reason
-// `digest::Context` is.
+// As `Keyed`, with all-zero hash contexts too. Each `Hmac` sits 16 bytes
+// in on 64-bit targets, so, as in `digest::Context`, no 16-byte lane of its
+// contexts crosses a cache line. Aligned to a cache line rather than 16
+// bytes: on Arrow Lake a `Box`ed context ran up to 50 cycles slower, and
+// rind-rustls' `sign_concat` 15, at 16-byte alignment.
 #[derive(Clone)]
 #[repr(u8, align(64))]
 enum Tagged {
@@ -391,6 +401,16 @@ impl Streaming {
             Tagged::Sha256(hmac) => hmac.finish(),
             Tagged::Sha384(hmac) => hmac.finish(),
             Tagged::Sha512(hmac) => hmac.finish(),
+        }
+    }
+
+    /// The tag of the message, restarting under the same key, for callers that have entered.
+    fn sign(&mut self) -> Digest {
+        match &mut self.0 {
+            Tagged::Sha1(hmac) => hmac.sign(),
+            Tagged::Sha256(hmac) => hmac.sign(),
+            Tagged::Sha384(hmac) => hmac.sign(),
+            Tagged::Sha512(hmac) => hmac.sign(),
         }
     }
 }
@@ -485,6 +505,7 @@ struct Tagging<H: HmacHash> {
 struct TagOps<H: HmacHash> {
     update: fn(&mut Hmac<H>, &[u8]),
     finish: fn(&Hmac<H>) -> Digest,
+    sign: fn(&mut Hmac<H>) -> Digest,
 }
 
 // Not derived, as for `HmacKey`.
@@ -506,6 +527,7 @@ impl<H: HmacHash> Tagging<H> {
                     &TagOps {
                         update: |hmac, data| hmac.update(data),
                         finish: Hmac::finish,
+                        sign: Hmac::sign,
                     }
                 },
             ),
@@ -519,6 +541,10 @@ impl<H: HmacHash> Tagging<H> {
     fn finish(&self) -> Digest {
         (self.ops.get().finish)(&self.hmac)
     }
+
+    fn sign(&mut self) -> Digest {
+        (self.ops.get().sign)(&mut self.hmac)
+    }
 }
 
 #[cfg(test)]
@@ -528,7 +554,7 @@ mod tests {
     use crate::test::*;
 
     // Each inner context starts on a 16-byte boundary of a
-    // cache-line-aligned `Context`, as `digest::Context`'s do.
+    // cache-line-aligned `Context`.
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn layout() {
@@ -580,6 +606,24 @@ mod tests {
         let key = Key::new(&HMAC_SHA512, b"hello");
         assert_eq!(sign(&key, b"world").as_ref(),
                    b"\x66\x68\xed\x2f\x7d\x01\x6c\x5f\x12\xd7\x80\x8f\xc4\xf2\xd1\xdc\x48\x51\x62\x2d\x7f\x15\x61\x6d\xe9\x47\xa8\x23\xb3\xee\x67\xd7\x61\xb9\x53\xf0\x95\x60\xda\x30\x1f\x83\x29\x02\x02\r\xd1\xc6\x4f\x49\x6d\xf3\x7e\xb7\xac\x4f\xd2\xfe\xee\xb6\x7d\x77\xba\x9b");
+    }
+
+    #[test]
+    fn sign_resets() {
+        for algorithm in ALGORITHMS {
+            let key = Key::new(algorithm, b"key");
+            let mut ctx = Context::with_key(&key);
+            assert_eq!(ctx.sign().as_ref(), sign(&key, &[]).as_ref());
+            for message in [&[0x61u8; 3][..], &[0x62; 300], &[], &[0x63; 128]] {
+                ctx.update(message);
+                assert_eq!(
+                    ctx.sign().as_ref(),
+                    sign(&key, message).as_ref(),
+                    "{algorithm:?}, {} bytes",
+                    message.len()
+                );
+            }
+        }
     }
 
     #[test]

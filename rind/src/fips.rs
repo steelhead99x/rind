@@ -186,6 +186,9 @@ errors! {
         DuplicateIdentifier,
         UnknownIdentifier,
         MismatchedCommitments,
+        UnknownPkcs8Algorithm,
+        UnsupportedCurve,
+        X25519CannotSign,
     ],
     asn1: [
         UnexpectedTag,

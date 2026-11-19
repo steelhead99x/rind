@@ -27,6 +27,10 @@ Graviola <https://github.com/ctz/graviola>
   Graviola by ..." header. Its aarch64 ChaCha20 and its Poly1305 began
   as cifra <https://github.com/ctz/cifra>, by the same author under
   CC0-1.0.
+  rind/src/low/portable/sha256_iram.rs is rind's own ESP-IDF Xtensa
+  SHA-256 compression. Its 16-word window follows generic/sha256.rs, and
+  its round constants are generic/sha256_k.rs. Joe Birr-Pixton wrote both
+  for Graviola; the rotates and the block load do not.
   Copyright 2024 Joe Birr-Pixton
   License: Apache-2.0 OR ISC OR MIT-0, the same choice as rind's own code.
   Graviola has no NOTICE file.
@@ -255,9 +259,10 @@ pyca/verified-garbage <https://github.com/pyca/verified-garbage>
   Copyright (c) Individual contributors.
   License: Apache-2.0 OR BSD-3-Clause, which the files keep.
 
-  What: the Lean ISA models, the ML-KEM and SHA-3 specs, and the RSA and
-  ChaCha20 specs and contracts rind's proofs import or restate, under
-  proofs/verified-garbage/VerifiedGarbage, which admin/import-vg-models
+  What: the Lean ISA models, the ML-KEM, SHA-3, SHA-512, and X25519 specs, and the RSA,
+  ChaCha20, Ed25519, P-256, and PBKDF2 specs and contracts rind's proofs import or restate,
+  with the MD5, SHA-1, SHA-2, and HMAC specs PBKDF2's import,
+  under proofs/verified-garbage/VerifiedGarbage, which admin/import-vg-models
   copies byte for byte from verified-garbage
   at the same commit, so they carry no SPDX comment; this entry names
   their license.

@@ -37,6 +37,7 @@ mod macros;
 
 pub(crate) mod ct;
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod ct_binsec;
 
 #[cfg(rind_vartime_planted)]
@@ -97,8 +98,6 @@ mod generic {
     pub(crate) mod mlkem768_vg;
     // pyca/verified-garbage's P-256 where it does not run: armv7 and the
     // portable backend.
-    #[cfg(not(rind_backend = "x86_64"))]
-    pub(crate) mod mlkem_sample;
     #[cfg(not(any(rind_backend = "x86_64", rind_backend = "aarch64")))]
     pub(crate) mod p256_vg;
     // pyca/verified-garbage's PBKDF2 where it does not run: every backend
@@ -129,11 +128,46 @@ mod generic {
         all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
     ))]
     pub(super) mod sha1;
-    #[cfg(all(test, any(rind_backend = "arm", rind_backend = "x86_64")))]
+    #[cfg(all(
+        test,
+        any(
+            rind_backend = "arm",
+            rind_backend = "portable",
+            rind_backend = "x86_64"
+        )
+    ))]
     pub(super) mod sha256;
+    // FIPS 180-4 §4.2.2, one copy. The ESP-IDF Xtensa compressor and the
+    // test compressor above both read it. aarch64 tests compile neither
+    // reader, so the table stays out: clippy denies an unused static.
+    #[cfg(any(
+        all(target_arch = "xtensa", target_os = "espidf"),
+        all(
+            test,
+            any(
+                rind_backend = "arm",
+                rind_backend = "portable",
+                rind_backend = "x86_64"
+            )
+        )
+    ))]
+    pub(super) mod sha256_k;
     // SLH-DSA's SHA-256 lanes one at a time, which x86_64 runs with the SHA
     // extensions or without AVX2.
     pub(super) mod sha256x8;
+    // Rolled SHA-512 on 32-bit microcontrollers (ESP-IDF or no OS), whose
+    // small instruction cache HACL*'s ~47 KiB unrolled body misses. Hosted
+    // 32-bit targets keep HACL*, which took 0.71-0.78 of this loop's time
+    // on i686. Tests compile it everywhere and check it against FIPS 180-4.
+    #[cfg(any(
+        all(
+            rind_backend = "portable",
+            not(target_pointer_width = "64"),
+            any(target_os = "espidf", target_os = "none")
+        ),
+        test
+    ))]
+    pub(super) mod sha512;
     pub(super) mod zeroise;
 }
 
@@ -262,7 +296,6 @@ pub(crate) use generic::{
         mlkem_basemul_k2, mlkem_basemul_k3, mlkem_basemul_k4, mlkem_intt, mlkem_mulcache_compute,
         mlkem_ntt, mlkem_reduce, mlkem_rej_uniform_vartime, mlkem_tobytes, mlkem_tomont,
     },
-    mlkem_sample::mlkem_sample_poly_ntt_8x,
     // libcrux's P-256 runs 64-bit limbs and recomputes the nonce's point to
     // sign, it exports P-384 only as ECDH, and it has no P-521, so rind
     // composes their arithmetic itself.
@@ -534,7 +567,6 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::chacha20;
         pub(crate) use aarch64::chacha20poly1305;
         pub(crate) use generic::mlkem::{mlkem_compress_d4, mlkem_compress_d5, mlkem_compress_d10, mlkem_compress_d11, mlkem_frombytes, mlkem_unpack};
-        pub(crate) use generic::mlkem_sample::mlkem_sample_poly_ntt_8x;
     } else if #[cfg(rind_backend = "arm")] {
         pub(in crate::low) use arm::cpu::{enter_cpu_state, zero_bytes, ct_compare_bytes, ct_compare_16, leave_cpu_state};
         pub(crate) use arm::aes::{AesDecKey, AesKey};

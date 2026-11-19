@@ -869,6 +869,7 @@ mod arch {
 mod arch;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
     /// Runs `f` and returns its panic message, failing if it did not panic.

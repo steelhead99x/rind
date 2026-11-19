@@ -362,6 +362,10 @@ mod tests {
             format!("{dec:?}"),
             "AesCbcDecryptingKey { algorithm: Algorithm { key_len: 32 }, .. }"
         );
+        assert_eq!(
+            format!("{:?}", CbcIv::assume_unpredictable([0x42; 16])),
+            "CbcIv(..)"
+        );
     }
 
     #[test]

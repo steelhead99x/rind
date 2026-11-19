@@ -1340,6 +1340,7 @@ const Q_HALF: i16 = (Q + 1) / 2;
 const N: usize = 256;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::test::{Acvp, acvp};

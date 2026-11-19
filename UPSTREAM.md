@@ -60,6 +60,14 @@ Each upstream rind changes, with where its fork is vendored and where the list o
 - **Reported:** no.
 - **Goes when:** rustc supports `-Zsanitizer=address` there.
 
+### Cargo runs $CARGO_HOME/bin's subcommands before PATH's
+
+- **Breaks:** Cargo looks up an external subcommand such as `cargo-fmt` or `cargo-clippy` in `$CARGO_HOME/bin` before `PATH`, unless that directory is itself on `PATH`. On a host with rustup there, `cargo fmt` and `cargo clippy` inside a dev shell run rustup's default toolchain, not the flake's, while `command -v cargo-fmt` names the flake's. A newer rustfmt then reformats files CI accepts, and a toolchain without a cross target's standard library fails clippy with `can't find crate for core`.
+- **Reproduce:** `nix develop --command cargo fmt --version` on a host whose `$CARGO_HOME/bin/cargo-fmt` is a rustup shim and whose `$CARGO_HOME/bin` is not on `PATH` reports rustup's rustfmt. GitHub's ubuntu-24.04 image puts `$HOME/.cargo/bin` on `PATH`, so CI does not hit this.
+- **Workaround:** every dev shell's hook appends `$CARGO_HOME/bin` to `PATH` when it is missing, which turns off Cargo's lookup there first and leaves the flake's tools ahead of it.
+- **Reported:** no.
+- **Goes when:** Cargo prefers `PATH`'s subcommands.
+
 ## Constant-time analysis
 
 ### Valgrind hides ADX from `cpuid`

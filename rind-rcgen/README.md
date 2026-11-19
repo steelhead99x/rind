@@ -39,6 +39,7 @@ let key = key.serialize_der();
 - RSA keys load but do not generate: `generate_for` returns `KeyGenerationUnavailable`.
 - Only PKCS#8 private keys load, not SEC1 or PKCS#1.
 - An unsupported algorithm returns `UnsupportedSignatureAlgorithm` where rcgen panics.
+- PEM whose base64 is malformed returns `PemError` with rind's description, not the `base64` crate's.
 
 The `pem` feature, on by default as rcgen's is, adds the PEM methods.
 Keys and the key pair's PKCS#8 copy are wiped on drop.
