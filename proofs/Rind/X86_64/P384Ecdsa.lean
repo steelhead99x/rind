@@ -665,13 +665,14 @@ theorem twin_multiply_spec (_hr : Runs) (g p : mid.p384.Scalar) (Q : nist.Point)
       apply WP.spec_mono (scalar_naf_spec 6#u32 (by simp) p)
       intro pd hpd; simpa using hpd
   intro pd ⟨hpv, hpd⟩
+  step as ⟨a0, ha0⟩
   step as ⟨a1, ha1⟩
   step*
   have hgl : gd.val.length = 385 := gd.property
   have hpl : pd.val.length = 385 := pd.property
   have hend : iter.iter.end.val = 385 := by rw [iter_post]; simp [s_post, Slice.len, hgl]
   have hrow : GRow a1 := by
-    rw [ha1, getElem_eq_getElem! _ _ (by simp)]; exact first_row
+    rw [ha1, ha0, getElem_eq_getElem! _ _ (by simp)]; exact first_row
   apply WP.spec_mono (twin_loop_spec _hr Q hQ odd hodd more hmore gd pd (by simpa using hgd) hpd a1
     hrow iter (by rw [iter_post]; rfl)
     (by omega) result (by

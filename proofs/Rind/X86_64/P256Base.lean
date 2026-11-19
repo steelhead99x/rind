@@ -675,9 +675,9 @@ theorem jac_base_multiply_spec (hc : RunsSelect) (k : mid.p256.Scalar) (hk : wor
   unfold mid.p256.JacobianMontPoint.base_multiply mid.p256.AffineMontPoint.Insts.CoreDefaultDefault.default
     core.default.DefaultArray.default
   step with booth_w7_spec k as ⟨windows, hw⟩
+  step as ⟨table, htable⟩
   step as ⟨pr, hpr⟩
   obtain ⟨dg, sg⟩ := pr
-  step as ⟨table, htable⟩
   step as ⟨row, hrow⟩
   have hwk := hw 0 (by norm_num)
   have hpr' : windows.val[0]! = (dg, sg) := by
