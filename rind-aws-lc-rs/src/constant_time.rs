@@ -1,5 +1,9 @@
 //! Constant-time comparison.
 
+// With `fips`, the comparison runs in the module.
+#[cfg(feature = "fips")]
+use rind_fips as rind;
+
 use crate::error;
 
 /// Checks in constant time that `a` and `b` hold the same bytes.

@@ -3,6 +3,10 @@
 //! [`SystemRandom`] is the only [`SecureRandom`], as in aws-lc-rs. Calls that
 //! take one to generate a key or sign draw from the same source inside rind.
 
+// With `fips`, random bytes come from the module's SP 800-90A DRBG.
+#[cfg(feature = "fips")]
+use rind_fips as rind;
+
 use crate::error;
 
 /// A secure source of random bytes; only [`SystemRandom`] is one.

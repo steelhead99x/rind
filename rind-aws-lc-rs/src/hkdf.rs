@@ -128,8 +128,8 @@ impl fmt::Debug for Salt {
 impl From<Okm<'_, Algorithm>> for Salt {
     fn from(okm: Okm<'_, Algorithm>) -> Self {
         let algorithm = *okm.len();
-        let mut value = [0u8; digest::MAX_OUTPUT_LEN];
-        let value = &mut value[..algorithm.len()];
+        let mut buffer = Wiped::new([0u8; digest::MAX_OUTPUT_LEN]);
+        let value = &mut buffer[..algorithm.len()];
         okm.fill_exact(value);
         Self::new(algorithm, value)
     }
@@ -245,8 +245,8 @@ impl fmt::Debug for Prk {
 impl From<Okm<'_, Algorithm>> for Prk {
     fn from(okm: Okm<'_, Algorithm>) -> Self {
         let algorithm = *okm.len();
-        let mut key = [0u8; digest::MAX_OUTPUT_LEN];
-        let key = &mut key[..algorithm.len()];
+        let mut buffer = Wiped::new([0u8; digest::MAX_OUTPUT_LEN]);
+        let key = &mut buffer[..algorithm.len()];
         okm.fill_exact(key);
         Self::new_less_safe(algorithm, key)
     }

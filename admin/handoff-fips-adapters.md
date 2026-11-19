@@ -71,3 +71,15 @@ These still need a decision before implementation. The recommendation is first.
 - `try_fips_self_test`: recommend leaving it omitted, because `rind_fips::self_test` aborts instead of returning `Result`.
 - TLS 1.3 KDF in `rind-acvp`: recommend registering `HKDF/<hash>/extract` and `HKDFExpandLabel/<hash>` only after a trace shows the FIPS provider's key schedule calls the module's HKDF.
 - `admin/adapter-api`: recommend a rind-only `--features fips` build in the test lane, and keep the upstream `fips` feature out of the API diff if that diff would compile AWS-LC's FIPS module.
+
+## Status after the round 1 review (fork PR #144)
+
+The first review (5/10) found `try_fips_mode()` answering `Ok` with only the TLS record keys in the module. It now fails, naming what is left, and flips to `Ok(())` in the commit that completes the routing. Routed through `rind-fips` under `fips`: the TLS record keys, HMAC, HKDF, PBKDF2, `rand`, `constant_time`. Not yet: digests, the other AEAD keys, agreement, signatures, RSA, ML-KEM, ML-DSA (and `cipher` and `key_wrap`, which the module also approves).
+
+How the routed ones were done, for the next agent: where the module's API is rind's (HMAC, `rand`, `constant_time`), the module aliases `use rind_fips as rind;`. Where it approves only some shapes (HKDF, PBKDF2), the adapter keeps both backends and decides from the arguments, as the README says. A key the module holds cannot leave it, so a call on such a key that the module refuses must fail, not fall back.
+
+Open design points, in the order they bite:
+
+1. **Digests and signatures go together.** The adapter's `digest::Digest` wraps rind's `Digest`, and `sign_digest` and `verify_digest` take it; rind-fips's take its own `Digest`, and rind builds one only by hashing. Make the adapter's `Digest` an enum of the two, routed with `signature`, `rsa`, `pqdsa` (ML-DSA), and `agreement`'s digests in one step.
+2. **AES-GCM sealing under a caller's nonce.** The module seals only under IVs it generates. aws-lc-rs's FIPS build lets `LessSafeKey::seal_in_place*` and `SealingKey` seal under a caller's nonce, unapproved. Keeping such a key in both backends puts approved key material outside the module; refusing it diverges from aws-lc-rs. That is the owner's decision.
+3. **SHA-1, X25519, ChaCha20-Poly1305** stay in rind and callable, as in aws-lc-rs's FIPS build.
