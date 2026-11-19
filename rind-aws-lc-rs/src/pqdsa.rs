@@ -6,7 +6,11 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 
+// With `fips`, the approved services run in rind-fips's module, whose API is
+// rind's less what FIPS 140-3 does not approve.
 use rind::ml_dsa::{self, MlDsa44, MlDsa65, MlDsa87};
+#[cfg(feature = "fips")]
+use rind_fips as rind;
 
 use crate::digest::Digest;
 use crate::encoding::{AsDer, Pkcs8V1Der, PublicKeyX509Der};
@@ -374,7 +378,7 @@ impl AsRef<[u8]> for PqdsaPublicKey {
 impl AsDer<PublicKeyX509Der<'static>> for PqdsaPublicKey {
     fn as_der(&self) -> Result<PublicKeyX509Der<'static>, Unspecified> {
         let key = self.id.parse_raw(&self.bytes).map_err(unspecified)?;
-        Ok(PublicKeyX509Der::new(key.to_spki().as_ref().to_vec()))
+        Ok(PublicKeyX509Der::new(key.to_spki()))
     }
 }
 

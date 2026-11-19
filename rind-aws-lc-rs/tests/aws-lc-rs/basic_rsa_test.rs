@@ -221,6 +221,14 @@ fn test_sign_psssaltlen_custom() {
     let rng = SystemRandom::default();
 
     let mut sig = vec![0u8; key_pair.public_modulus_len()];
+    // rind-aws-lc-rs: with `fips`, the module signs PSS only with a salt the
+    // hash's length, and the key cannot leave it, so another salt is refused.
+    if cfg!(feature = "fips") {
+        key_pair
+            .sign(&ALG, &rng, &msg, sig.as_mut_slice())
+            .unwrap_err();
+        return;
+    }
     key_pair.sign(&ALG, &rng, &msg, sig.as_mut_slice()).unwrap();
 
     // Due to the padding, the output is not deterministic, but can still be verified.
@@ -353,6 +361,14 @@ fn test_sign_psssaltlen_max() {
     let rng = SystemRandom::default();
 
     let mut sig = vec![0u8; key_pair.public_modulus_len()];
+    // rind-aws-lc-rs: with `fips`, the module signs PSS only with a salt the
+    // hash's length, and the key cannot leave it, so another salt is refused.
+    if cfg!(feature = "fips") {
+        key_pair
+            .sign(&ALG, &rng, &msg, sig.as_mut_slice())
+            .unwrap_err();
+        return;
+    }
     key_pair.sign(&ALG, &rng, &msg, sig.as_mut_slice()).unwrap();
 
     // Due to the padding, the output is not deterministic, but can still be verified.

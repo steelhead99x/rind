@@ -8,8 +8,12 @@ use crate::encoding::{
     AsBigEndian, AsDer, Curve25519SeedBin, EcPrivateKeyBin, EcPrivateKeyRfc5915Der,
     EcPublicKeyCompressedBin, EcPublicKeyUncompressedBin, Pkcs8V1Der, PublicKeyX509Der,
 };
-use crate::error::{KeyRejected, Unspecified, unspecified};
+use crate::error::{KeyRejected, Unspecified};
 use crate::rand::SecureRandom;
+
+use engine::{PrivateEngine, PublicEngine};
+
+mod engine;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum AlgorithmId {
@@ -35,21 +39,14 @@ impl Algorithm {
         }
     }
 
-    fn from_rind(algorithm: &rind::agreement::Algorithm) -> &'static Self {
-        [&ECDH_P256, &ECDH_P384, &ECDH_P521, &X25519]
-            .into_iter()
-            .find(|alg| alg.rind() == algorithm)
-            .expect("every rind algorithm has an aws-lc-rs one")
-    }
-
-    /// The ECDSA algorithm on the same curve, through which a NIST key is
-    /// encoded as SEC1.
-    fn ecdsa(&self) -> Option<&'static rind::ecdsa::SigningAlgorithm> {
-        use rind::ecdsa::sign;
+    /// With `fips`, the module's algorithm, which approves ECDH alone:
+    /// X25519 stays in rind, as in aws-lc-rs's FIPS build.
+    #[cfg(feature = "fips")]
+    fn module(&self) -> Option<&'static rind_fips::agreement::Algorithm> {
         match self.id {
-            AlgorithmId::EcdhP256 => Some(&sign::P256_SHA256_ASN1),
-            AlgorithmId::EcdhP384 => Some(&sign::P384_SHA384_ASN1),
-            AlgorithmId::EcdhP521 => Some(&sign::P521_SHA512_ASN1),
+            AlgorithmId::EcdhP256 => Some(&rind_fips::agreement::ECDH_P256),
+            AlgorithmId::EcdhP384 => Some(&rind_fips::agreement::ECDH_P384),
+            AlgorithmId::EcdhP521 => Some(&rind_fips::agreement::ECDH_P521),
             AlgorithmId::X25519 => None,
         }
     }
@@ -97,14 +94,15 @@ pub const X25519: Algorithm = Algorithm {
 
 /// A private key for any number of key agreements; wiped on drop.
 pub struct PrivateKey {
-    key: rind::agreement::PrivateKey,
+    key: PrivateEngine,
+    alg: &'static Algorithm,
 }
 
 impl PrivateKey {
     /// Generates a private key for `alg` from the system random source.
     pub fn generate(alg: &'static Algorithm) -> Result<Self, Unspecified> {
-        let key = rind::agreement::PrivateKey::generate(alg.rind()).map_err(unspecified)?;
-        Ok(Self { key })
+        let key = PrivateEngine::generate(alg)?;
+        Ok(Self { key, alg })
     }
 
     /// Loads a NIST curve's private key from PKCS#8 or a SEC1 (RFC 5915)
@@ -116,10 +114,8 @@ impl PrivateKey {
         if alg.id == AlgorithmId::X25519 {
             return Err(KeyRejected::invalid_encoding());
         }
-        let key = rind::agreement::PrivateKey::from_pkcs8(alg.rind(), key_bytes)
-            .or_else(|_| rind::agreement::PrivateKey::from_sec1(alg.rind(), key_bytes))
-            .map_err(KeyRejected::rind)?;
-        Ok(Self { key })
+        let key = PrivateEngine::from_der(alg, key_bytes, true)?;
+        Ok(Self { key, alg })
     }
 
     /// Loads a private key from its bytes: X25519's 32, or a NIST curve's
@@ -131,22 +127,22 @@ impl PrivateKey {
         if key_bytes.len() != alg.private_key_len() {
             return Err(KeyRejected::wrong_algorithm());
         }
-        let key = rind::agreement::PrivateKey::from_scalar(alg.rind(), key_bytes)
-            .map_err(KeyRejected::rind)?;
-        Ok(Self { key })
+        let key = PrivateEngine::from_scalar(alg, key_bytes)?;
+        Ok(Self { key, alg })
     }
 
     /// The public key to send to the peer.
     pub fn compute_public_key(&self) -> Result<PublicKey, Unspecified> {
         Ok(PublicKey {
-            key: self.key.public_key().clone(),
+            key: self.key.public_key(),
+            alg: self.alg,
         })
     }
 
     /// The key's algorithm.
     #[must_use]
     pub fn algorithm(&self) -> &'static Algorithm {
-        Algorithm::from_rind(self.key.algorithm())
+        self.alg
     }
 }
 
@@ -160,12 +156,7 @@ impl AsDer<EcPrivateKeyRfc5915Der<'static>> for PrivateKey {
     /// Encodes a NIST curve's key as a SEC1 (RFC 5915) `ECPrivateKey`
     /// naming its curve and holding its public key; X25519 is refused.
     fn as_der(&self) -> Result<EcPrivateKeyRfc5915Der<'static>, Unspecified> {
-        let ecdsa = self.algorithm().ecdsa().ok_or(Unspecified)?;
-        let pkcs8 = self.key.to_pkcs8();
-        let pair = rind::ecdsa::KeyPair::from_pkcs8(ecdsa, pkcs8.as_ref()).map_err(unspecified)?;
-        Ok(EcPrivateKeyRfc5915Der::new(
-            pair.to_sec1().as_ref().to_vec(),
-        ))
+        Ok(EcPrivateKeyRfc5915Der::new(self.key.to_sec1(self.alg.id)?))
     }
 }
 
@@ -175,7 +166,7 @@ impl AsDer<Pkcs8V1Der<'static>> for PrivateKey {
         if self.algorithm().id == AlgorithmId::X25519 {
             return Err(Unspecified);
         }
-        Ok(Pkcs8V1Der::new(self.key.to_pkcs8().as_ref().to_vec()))
+        Ok(Pkcs8V1Der::new(self.key.to_pkcs8()))
     }
 }
 
@@ -185,7 +176,7 @@ impl AsBigEndian<EcPrivateKeyBin<'static>> for PrivateKey {
         if self.algorithm().id == AlgorithmId::X25519 {
             return Err(Unspecified);
         }
-        Ok(EcPrivateKeyBin::new(self.key.to_scalar().as_ref().to_vec()))
+        Ok(EcPrivateKeyBin::new(self.key.to_scalar()))
     }
 }
 
@@ -195,9 +186,7 @@ impl AsBigEndian<Curve25519SeedBin<'static>> for PrivateKey {
         if self.algorithm().id != AlgorithmId::X25519 {
             return Err(Unspecified);
         }
-        Ok(Curve25519SeedBin::new(
-            self.key.to_scalar().as_ref().to_vec(),
-        ))
+        Ok(Curve25519SeedBin::new(self.key.to_scalar()))
     }
 }
 
@@ -205,14 +194,15 @@ impl AsBigEndian<Curve25519SeedBin<'static>> for PrivateKey {
 /// point.
 #[derive(Clone)]
 pub struct PublicKey {
-    key: rind::agreement::PublicKey,
+    key: PublicEngine,
+    alg: &'static Algorithm,
 }
 
 impl PublicKey {
     /// The key's algorithm.
     #[must_use]
     pub fn algorithm(&self) -> &'static Algorithm {
-        Algorithm::from_rind(self.key.algorithm())
+        self.alg
     }
 }
 
@@ -233,7 +223,7 @@ impl AsRef<[u8]> for PublicKey {
 impl AsDer<PublicKeyX509Der<'static>> for PublicKey {
     /// Encodes the key as a `SubjectPublicKeyInfo`.
     fn as_der(&self) -> Result<PublicKeyX509Der<'static>, Unspecified> {
-        Ok(PublicKeyX509Der::new(self.key.to_spki().as_ref().to_vec()))
+        Ok(PublicKeyX509Der::new(self.key.to_spki()))
     }
 }
 
@@ -312,7 +302,8 @@ impl<B: AsRef<[u8]>> UnparsedPublicKey<B> {
 #[derive(Debug, Clone)]
 pub struct ParsedPublicKey {
     format: ParsedPublicKeyFormat,
-    key: rind::agreement::PublicKey,
+    key: PublicEngine,
+    alg: &'static Algorithm,
     bytes: Box<[u8]>,
 }
 
@@ -339,11 +330,11 @@ impl ParsedPublicKey {
         if bytes.is_empty() {
             return Err(KeyRejected::unspecified());
         }
-        let (format, key) = match rind::agreement::PublicKey::from_spki(algorithm.rind(), bytes) {
-            Ok(key) => (ParsedPublicKeyFormat::X509, key),
-            Err(_) => {
-                let key = rind::agreement::PublicKey::new(algorithm.rind(), bytes)
-                    .map_err(|_| KeyRejected::invalid_encoding())?;
+        let (format, key) = match PublicEngine::from_spki(algorithm, bytes) {
+            Some(key) => (ParsedPublicKeyFormat::X509, key),
+            None => {
+                let key = PublicEngine::new(algorithm, bytes)
+                    .ok_or_else(KeyRejected::invalid_encoding)?;
                 let format = match (algorithm.id, bytes[0]) {
                     (AlgorithmId::X25519, _) => ParsedPublicKeyFormat::Raw,
                     (_, 0x02 | 0x03) => ParsedPublicKeyFormat::Compressed,
@@ -356,6 +347,7 @@ impl ParsedPublicKey {
         Ok(Self {
             format,
             key,
+            alg: algorithm,
             bytes: bytes.into(),
         })
     }
@@ -369,7 +361,7 @@ impl ParsedPublicKey {
     /// The key's algorithm.
     #[must_use]
     pub fn alg(&self) -> &'static Algorithm {
-        Algorithm::from_rind(self.key.algorithm())
+        self.alg
     }
 }
 
@@ -413,12 +405,12 @@ where
     let Ok(peer) = peer_public_key.try_into() else {
         return Err(error_value);
     };
-    if peer.key.algorithm() != my_private_key.key.algorithm() {
+    if peer.alg != my_private_key.alg {
         return Err(error_value);
     }
-    match my_private_key.key.agree(peer.key.as_ref()) {
-        Ok(secret) => kdf(secret.as_ref()),
-        Err(_) => Err(error_value),
+    match my_private_key.key.agree(peer.key.as_ref(), kdf) {
+        Some(result) => result,
+        None => Err(error_value),
     }
 }
 

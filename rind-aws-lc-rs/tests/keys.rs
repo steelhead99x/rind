@@ -383,6 +383,12 @@ proptest! {
             (&OURS_PSS_MAX, &THEIRS_PSS_MAX),
         ] {
             let mut sig = vec![0; len];
+            // With `fips`, the module signs PSS only with a salt the hash's
+            // length, and the key cannot leave it.
+            if cfg!(feature = "fips") && format!("{ours_enc:?}").contains("salt length") {
+                prop_assert!(ours_pair.sign(ours_enc, &ours_rng, &msg, &mut sig).is_err());
+                continue;
+            }
             ours_pair.sign(ours_enc, &ours_rng, &msg, &mut sig).unwrap();
             let key = theirs::signature::UnparsedPublicKey::new(theirs_params, public);
             prop_assert!(key.verify(&msg, &sig).is_ok());

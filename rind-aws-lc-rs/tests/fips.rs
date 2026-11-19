@@ -129,6 +129,58 @@ mod with_the_feature {
         }
     }
 
+    /// The module signs RSA-PSS only with a salt the hash's length, and its
+    /// key cannot leave it, so another salt is refused; the default salt signs
+    /// and verifies, and a salt the module does not take still verifies, in
+    /// rind, since a public key holds no secret.
+    #[test]
+    fn rsa_signs_in_the_module_and_refuses_another_salt() {
+        use ours::rsa::{KeyPair, KeySize, RsaPssSaltLength};
+        use ours::signature::{
+            KeyPair as _, RSA_PSS_2048_8192_SHA256, RSA_PSS_SHA256, UnparsedPublicKey,
+        };
+
+        const MAX: ours::signature::RsaSignatureEncoding =
+            RSA_PSS_SHA256.with_pss_salt_length(RsaPssSaltLength::Max);
+        let rng = ours::rand::SystemRandom::new();
+        let key = KeyPair::generate(KeySize::Rsa2048).unwrap();
+        let mut signature = vec![0; key.public_modulus_len()];
+        key.sign(&RSA_PSS_SHA256, &rng, b"message", &mut signature)
+            .unwrap();
+        UnparsedPublicKey::new(&RSA_PSS_2048_8192_SHA256, key.public_key().as_ref())
+            .verify(b"message", &signature)
+            .unwrap();
+        assert!(key.sign(&MAX, &rng, b"message", &mut signature).is_err());
+    }
+
+    /// X25519 stays in rind, and ECDH in the module; both agree.
+    #[test]
+    fn x25519_and_ecdh_both_agree() {
+        use ours::agreement::{
+            ECDH_P256, EphemeralPrivateKey, UnparsedPublicKey, X25519, agree_ephemeral,
+        };
+
+        let rng = ours::rand::SystemRandom::new();
+        for algorithm in [&ECDH_P256, &X25519] {
+            let a = EphemeralPrivateKey::generate(algorithm, &rng).unwrap();
+            let b = EphemeralPrivateKey::generate(algorithm, &rng).unwrap();
+            let (a_public, b_public) = (
+                a.compute_public_key().unwrap(),
+                b.compute_public_key().unwrap(),
+            );
+            let secret = |key, peer: &ours::agreement::PublicKey| {
+                agree_ephemeral(
+                    key,
+                    UnparsedPublicKey::new(algorithm, peer.as_ref()),
+                    (),
+                    |secret| Ok(secret.to_vec()),
+                )
+                .unwrap()
+            };
+            assert_eq!(secret(a, &b_public), secret(b, &a_public));
+        }
+    }
+
     #[test]
     fn a_sealed_record_opens_through_the_modules_opening_key() {
         let iv = [0x5a; 12];

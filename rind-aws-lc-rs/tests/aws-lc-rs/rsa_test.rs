@@ -121,6 +121,7 @@ fn rsa_key_pair_clone() {
 
 #[test]
 fn rsa_from_pkcs8_test() {
+    let mut refused = 0;
     test::run(
         test_file!("data/rsa_from_pkcs8_tests.txt"),
         |section, test_case| {
@@ -131,6 +132,10 @@ fn rsa_from_pkcs8_test() {
 
             match (RsaKeyPair::from_pkcs8(&input), error) {
                 (Ok(_), None) => (),
+                // rind-aws-lc-rs: with `fips`, the module holds only keys of an
+                // even number of bits, from 2048 to 8192: the vectors of 2049
+                // and 2303 bits are refused.
+                (Err(_), None) if cfg!(feature = "fips") => refused += 1,
                 (Err(e), None) => panic!("Failed with error \"{e}\", but expected to succeed"),
                 (Ok(_), Some(e)) => panic!("Succeeded, but expected error \"{e}\""),
                 // rind-aws-lc-rs: only that the key is refused, since a
@@ -141,6 +146,9 @@ fn rsa_from_pkcs8_test() {
             Ok(())
         },
     );
+    if cfg!(feature = "fips") {
+        assert_eq!(refused, 2);
+    }
 }
 
 #[test]

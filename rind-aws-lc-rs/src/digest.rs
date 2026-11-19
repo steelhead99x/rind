@@ -59,6 +59,22 @@ impl Algorithm {
         self.block_len
     }
 
+    /// With `fips`, the module's algorithm, where it approves the hash: all
+    /// but SHA-1, which stays in rind as in aws-lc-rs's FIPS build.
+    #[cfg(feature = "fips")]
+    fn module(&self) -> Option<&'static rind_fips::digest::Algorithm> {
+        Some(match self.id {
+            AlgorithmId::SHA1 => return None,
+            AlgorithmId::SHA256 => &rind_fips::digest::SHA256,
+            AlgorithmId::SHA384 => &rind_fips::digest::SHA384,
+            AlgorithmId::SHA512 => &rind_fips::digest::SHA512,
+            AlgorithmId::SHA512_256 => &rind_fips::digest::SHA512_256,
+            AlgorithmId::SHA3_256 => &rind_fips::digest::SHA3_256,
+            AlgorithmId::SHA3_384 => &rind_fips::digest::SHA3_384,
+            AlgorithmId::SHA3_512 => &rind_fips::digest::SHA3_512,
+        })
+    }
+
     pub(crate) fn rind(&self) -> &'static rind::digest::Algorithm {
         match self.id {
             AlgorithmId::SHA1 => &rind::digest::legacy::SHA1,
@@ -178,28 +194,57 @@ pub fn digest(algorithm: &'static Algorithm, data: &[u8]) -> Digest {
 /// An in-progress hash computation; a clone forks it.
 #[derive(Clone)]
 pub struct Context {
-    inner: rind::digest::Context,
+    inner: ContextInner,
     algorithm: &'static Algorithm,
+}
+
+/// Where a hash runs: rind, or with `fips` the module for every hash it
+/// approves.
+#[derive(Clone)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "a context is a value, as rind's is"
+)]
+enum ContextInner {
+    Rind(rind::digest::Context),
+    #[cfg(feature = "fips")]
+    Module(rind_fips::digest::Context),
 }
 
 impl Context {
     /// Starts hashing with `algorithm`.
     pub fn new(algorithm: &'static Algorithm) -> Self {
+        #[cfg(feature = "fips")]
+        if let Some(module) = algorithm.module() {
+            return Self {
+                inner: ContextInner::Module(rind_fips::digest::Context::new(module)),
+                algorithm,
+            };
+        }
         Self {
-            inner: rind::digest::Context::new(algorithm.rind()),
+            inner: ContextInner::Rind(rind::digest::Context::new(algorithm.rind())),
             algorithm,
         }
     }
 
     /// Adds `data` to the message.
     pub fn update(&mut self, data: &[u8]) {
-        self.inner.update(data);
+        match &mut self.inner {
+            ContextInner::Rind(inner) => inner.update(data),
+            #[cfg(feature = "fips")]
+            ContextInner::Module(inner) => inner.update(data),
+        }
     }
 
     /// Returns the digest of the message.
     pub fn finish(mut self) -> Digest {
+        let inner = match &mut self.inner {
+            ContextInner::Rind(inner) => DigestInner::Rind(inner.finish()),
+            #[cfg(feature = "fips")]
+            ContextInner::Module(inner) => DigestInner::Module(inner.finish()),
+        };
         Digest {
-            inner: self.inner.finish(),
+            inner,
             algorithm: self.algorithm,
         }
     }
@@ -213,8 +258,19 @@ impl Context {
 /// The output of a hash function.
 #[derive(Clone, Copy)]
 pub struct Digest {
-    inner: rind::digest::Digest,
+    inner: DigestInner,
     algorithm: &'static Algorithm,
+}
+
+#[derive(Clone, Copy)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "a digest is a value, copied whole"
+)]
+enum DigestInner {
+    Rind(rind::digest::Digest),
+    #[cfg(feature = "fips")]
+    Module(rind_fips::digest::Digest),
 }
 
 impl Digest {
@@ -223,14 +279,32 @@ impl Digest {
         self.algorithm
     }
 
-    pub(crate) fn rind(&self) -> &rind::digest::Digest {
-        &self.inner
+    /// The digest as the backend that signs it holds it: the module's under
+    /// `fips`, which signs only the hashes it approves, so a SHA-1 digest
+    /// is `None`; rind's otherwise.
+    #[cfg(feature = "fips")]
+    pub(crate) fn signing(&self) -> Option<&rind_fips::digest::Digest> {
+        match &self.inner {
+            DigestInner::Module(inner) => Some(inner),
+            DigestInner::Rind(_) => None,
+        }
+    }
+
+    #[cfg(not(feature = "fips"))]
+    pub(crate) fn signing(&self) -> Option<&rind::digest::Digest> {
+        match &self.inner {
+            DigestInner::Rind(inner) => Some(inner),
+        }
     }
 }
 
 impl AsRef<[u8]> for Digest {
     fn as_ref(&self) -> &[u8] {
-        self.inner.as_ref()
+        match &self.inner {
+            DigestInner::Rind(inner) => inner.as_ref(),
+            #[cfg(feature = "fips")]
+            DigestInner::Module(inner) => inner.as_ref(),
+        }
     }
 }
 
@@ -238,5 +312,44 @@ impl fmt::Debug for Digest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}:", self.algorithm)?;
         crate::write_hex(f, self.as_ref())
+    }
+}
+
+/// With `fips`, the module hashes all but SHA-1, which it does not approve.
+#[cfg(all(test, feature = "fips"))]
+mod fips_tests {
+    use super::*;
+
+    #[test]
+    fn the_module_hashes_what_it_approves() {
+        for algorithm in [
+            &SHA256,
+            &SHA384,
+            &SHA512,
+            &SHA512_256,
+            &SHA3_256,
+            &SHA3_384,
+            &SHA3_512,
+        ] {
+            let digest = digest(algorithm, b"abc");
+            assert!(
+                matches!(digest.inner, DigestInner::Module(_)),
+                "{algorithm:?}"
+            );
+            assert!(digest.signing().is_some());
+        }
+        let digest = digest(&SHA1_FOR_LEGACY_USE_ONLY, b"abc");
+        assert!(matches!(digest.inner, DigestInner::Rind(_)));
+        assert!(digest.signing().is_none());
+    }
+
+    #[test]
+    fn a_fork_of_the_module_context_hashes_alike() {
+        let mut context = Context::new(&SHA256);
+        context.update(b"a");
+        let mut fork = context.clone();
+        context.update(b"bc");
+        fork.update(b"bc");
+        assert_eq!(context.finish().as_ref(), fork.finish().as_ref());
     }
 }

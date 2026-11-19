@@ -12,6 +12,8 @@ use core::marker::PhantomData;
 use core::ops::Deref;
 
 use crate::digest::{self, Digest};
+// With `fips`, the approved services run in rind-fips's module, whose API is
+// rind's less what FIPS 140-3 does not approve.
 use crate::encoding::{
     AsBigEndian, AsDer, Curve25519SeedBin, EcPrivateKeyBin, EcPrivateKeyRfc5915Der,
     EcPublicKeyCompressedBin, EcPublicKeyUncompressedBin, Pkcs8V1Der, Pkcs8V2Der, PublicKeyX509Der,
@@ -38,6 +40,8 @@ pub use crate::rsa::{
 };
 use crate::wipe::Wiped;
 use crate::{pkcs8, rand, sealed};
+#[cfg(feature = "fips")]
+use rind_fips as rind;
 
 /// A signature.
 #[derive(Clone, Copy)]
@@ -72,6 +76,8 @@ pub(crate) use private::ParsedKey;
 
 pub(crate) mod private {
     use rind::ml_dsa::{MlDsa44, MlDsa65, MlDsa87};
+    #[cfg(feature = "fips")]
+    use rind_fips as rind;
 
     use crate::digest::Digest;
     use crate::error::{KeyRejected, Unspecified};
@@ -84,18 +90,18 @@ pub(crate) mod private {
         MlDsa44(rind::ml_dsa::PublicKey<MlDsa44>),
         MlDsa65(rind::ml_dsa::PublicKey<MlDsa65>),
         MlDsa87(rind::ml_dsa::PublicKey<MlDsa87>),
-        Rsa(rind::rsa::PublicKey),
+        Rsa(crate::rsa::PublicEngine),
     }
 
     impl ParsedKey {
         /// The key as a `SubjectPublicKeyInfo`.
-        pub(crate) fn to_spki(&self) -> rind::encoding::Spki {
+        pub(crate) fn to_spki(&self) -> alloc::vec::Vec<u8> {
             match self {
-                Self::Ecdsa(key) => key.to_spki(),
-                Self::Ed25519(key) => key.to_spki(),
-                Self::MlDsa44(key) => key.to_spki(),
-                Self::MlDsa65(key) => key.to_spki(),
-                Self::MlDsa87(key) => key.to_spki(),
+                Self::Ecdsa(key) => key.to_spki().as_ref().to_vec(),
+                Self::Ed25519(key) => key.to_spki().as_ref().to_vec(),
+                Self::MlDsa44(key) => key.to_spki().as_ref().to_vec(),
+                Self::MlDsa65(key) => key.to_spki().as_ref().to_vec(),
+                Self::MlDsa87(key) => key.to_spki().as_ref().to_vec(),
                 Self::Rsa(key) => key.to_spki(),
             }
         }
@@ -316,7 +322,7 @@ impl ParsedPublicKey {
 
 impl AsDer<PublicKeyX509Der<'static>> for ParsedPublicKey {
     fn as_der(&self) -> Result<PublicKeyX509Der<'static>, Unspecified> {
-        Ok(PublicKeyX509Der::new(self.key.to_spki().as_ref().to_vec()))
+        Ok(PublicKeyX509Der::new(self.key.to_spki()))
     }
 }
 
@@ -431,8 +437,9 @@ impl private::Verify for EcdsaVerificationAlgorithm {
         let ParsedKey::Ecdsa(key) = key else {
             return Err(Unspecified);
         };
-        let digest = rind::digest::digest(self.digest.rind(), msg);
-        key.verify_digest(&digest, signature).map_err(unspecified)
+        let digest = digest::digest(self.digest, msg);
+        let digest = digest.signing().ok_or(Unspecified)?;
+        key.verify_digest(digest, signature).map_err(unspecified)
     }
 
     fn verify_parsed_digest(
@@ -447,7 +454,7 @@ impl private::Verify for EcdsaVerificationAlgorithm {
         if digest.algorithm() != self.digest {
             return Err(Unspecified);
         }
-        key.verify_digest(digest.rind(), signature)
+        key.verify_digest(digest.signing().ok_or(Unspecified)?, signature)
             .map_err(unspecified)
     }
 }
@@ -691,9 +698,9 @@ impl EcdsaKeyPair {
         message: &[u8],
     ) -> Result<Signature, Unspecified> {
         let _ = rng;
-        let digest = rind::digest::digest(self.algorithm.digest.rind(), message);
+        let digest = digest::digest(self.algorithm.digest, message);
         self.key
-            .sign_digest(&digest)
+            .sign_digest(digest.signing().ok_or(Unspecified)?)
             .map(|signature| Signature(SignatureBytes::Ecdsa(signature)))
             .map_err(unspecified)
     }
@@ -704,7 +711,7 @@ impl EcdsaKeyPair {
             return Err(Unspecified);
         }
         self.key
-            .sign_digest(digest.rind())
+            .sign_digest(digest.signing().ok_or(Unspecified)?)
             .map(|signature| Signature(SignatureBytes::Ecdsa(signature)))
             .map_err(unspecified)
     }
@@ -1029,3 +1036,17 @@ pub const ML_DSA_65_SIGNING: PqdsaSigningAlgorithm = PqdsaSigningAlgorithm(&ML_D
 
 /// ML-DSA-87 signing.
 pub const ML_DSA_87_SIGNING: PqdsaSigningAlgorithm = PqdsaSigningAlgorithm(&ML_DSA_87);
+
+/// With `fips`, the key pairs are the module's: the types say so.
+#[cfg(all(test, feature = "fips"))]
+mod fips_tests {
+    use super::*;
+
+    #[test]
+    fn ecdsa_and_ed25519_keys_are_the_modules() {
+        let ecdsa = EcdsaKeyPair::generate(&ECDSA_P256_SHA256_ASN1_SIGNING).unwrap();
+        let _: &rind_fips::ecdsa::KeyPair = &ecdsa.key;
+        let ed25519 = Ed25519KeyPair::generate().unwrap();
+        let _: &rind_fips::ed25519::KeyPair = &ed25519.key;
+    }
+}

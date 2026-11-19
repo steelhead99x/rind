@@ -69,6 +69,9 @@ pub struct KeyRejected(Reason);
 enum Reason {
     /// rind's own reason.
     Rind(rind::KeyRejected),
+    /// With `fips`, the module's own reason.
+    #[cfg(feature = "fips")]
+    Module(rind_fips::KeyRejected),
     /// A rule aws-lc-rs has and rind does not, named as aws-lc-rs names it.
     Named(&'static str),
 }
@@ -81,6 +84,8 @@ impl KeyRejected {
     pub fn description_(&self) -> &'static str {
         match self.0 {
             Reason::Rind(_) => "InvalidEncoding",
+            #[cfg(feature = "fips")]
+            Reason::Module(_) => "InvalidEncoding",
             Reason::Named(name) => name,
         }
     }
@@ -113,12 +118,34 @@ impl KeyRejected {
         Self(Reason::Named("UnexpectedError"))
     }
 
-    /// Keeps rind's reason for a refused key.
-    pub(crate) fn rind(error: rind::Error) -> Self {
-        match error {
-            rind::Error::KeyRejected(reason) => Self(Reason::Rind(reason)),
-            rind::Error::WrongLength => Self::invalid_encoding(),
-            _ => Self::unexpected_error(),
+    /// Keeps the reason, from rind or with `fips` the module, for a refused key.
+    pub(crate) fn rind(error: impl Refusal) -> Self {
+        error.key_rejected()
+    }
+}
+
+/// An error from rind, or with `fips` from the module, that refuses a key.
+pub(crate) trait Refusal {
+    fn key_rejected(self) -> KeyRejected;
+}
+
+impl Refusal for rind::Error {
+    fn key_rejected(self) -> KeyRejected {
+        match self {
+            Self::KeyRejected(reason) => KeyRejected(Reason::Rind(reason)),
+            Self::WrongLength => KeyRejected::invalid_encoding(),
+            _ => KeyRejected::unexpected_error(),
+        }
+    }
+}
+
+#[cfg(feature = "fips")]
+impl Refusal for rind_fips::Error {
+    fn key_rejected(self) -> KeyRejected {
+        match self {
+            Self::KeyRejected(reason) => KeyRejected(Reason::Module(reason)),
+            Self::WrongLength => KeyRejected::invalid_encoding(),
+            _ => KeyRejected::unexpected_error(),
         }
     }
 }
@@ -127,6 +154,8 @@ impl fmt::Display for KeyRejected {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {
             Reason::Rind(reason) => reason.fmt(f),
+            #[cfg(feature = "fips")]
+            Reason::Module(reason) => reason.fmt(f),
             Reason::Named(name) => f.write_str(name),
         }
     }
