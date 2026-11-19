@@ -1231,6 +1231,48 @@ mod tests {
         scalar
     }
 
+    /// An import of a curve rind refuses clears the curve the key held
+    /// before, whatever it was: OpenSSL moves a key into a key object that
+    /// may already hold one, and the refused key must fail every use rather
+    /// than run on the old curve. OpenSSL's C API does not re-import into a
+    /// populated key object, so this goes through `import` directly.
+    #[test]
+    fn a_refused_curve_clears_the_one_a_key_held() {
+        let data = KeyData::boxed(Provider::for_tests(), None, Held::Empty);
+        let import_group = |name: &CStr| {
+            let mut bytes = name.to_bytes_with_nul().to_vec();
+            let params = [
+                Param {
+                    key: c"group".as_ptr(),
+                    data_type: crate::ffi::UTF8_STRING,
+                    data: bytes.as_mut_ptr().cast(),
+                    data_size: bytes.len(),
+                    return_size: 0,
+                },
+                Param::END,
+            ];
+            // SAFETY: `data` is a live key object and `params` ends at END.
+            unsafe { import(data, SELECT_DOMAIN_PARAMETERS, params.as_ptr()) }
+        };
+        let state = || {
+            // SAFETY: `data` is a live key object, read on this thread only.
+            let data = unsafe { KeyData::from_mut_ptr(data) }.unwrap();
+            (data.curve, matches!(data.held, Held::Refused(_)))
+        };
+
+        assert_eq!(import_group(c"P-256"), 1);
+        assert_eq!(state(), (Some(Curve::P256), false));
+        // Another curve of rind's replaces it.
+        assert_eq!(import_group(c"secp384r1"), 1);
+        assert_eq!(state(), (Some(Curve::P384), false));
+        // One it refuses clears it, and the key holds the refusal.
+        assert_eq!(import_group(c"secp256k1"), 1);
+        assert_eq!(state(), (None, true));
+
+        // SAFETY: `data` came from `KeyData::boxed`, freed once.
+        drop(unsafe { Box::from_raw(data.cast::<KeyData>()) });
+    }
+
     #[test]
     fn names_resolve_to_the_three_curves() {
         for (name, curve) in [

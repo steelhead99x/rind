@@ -35,6 +35,27 @@ unsafe impl Send for Provider {}
 // SAFETY: as for `Send`; a `Provider` is never written after it is made.
 unsafe impl Sync for Provider {}
 
+#[cfg(test)]
+impl Provider {
+    /// A provider with no core behind it, for unit tests that raise nothing.
+    pub(crate) fn for_tests() -> Arc<Self> {
+        unsafe extern "C" fn new_error(_: *const CoreHandle) {}
+        unsafe extern "C" fn vset_error(
+            _: *const CoreHandle,
+            _: u32,
+            _: *const c_char,
+            _: *mut c_void,
+        ) {
+        }
+        Arc::new(Self {
+            handle: core::ptr::null(),
+            new_error,
+            vset_error,
+            ec: true,
+        })
+    }
+}
+
 impl Provider {
     /// Raises `reason` on the calling thread's error queue, with `detail`.
     pub(crate) fn raise(&self, reason: Reason, detail: &str) {

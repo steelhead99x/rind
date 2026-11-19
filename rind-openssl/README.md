@@ -2,7 +2,7 @@
 <img width="40%" align="right" src="https://raw.githubusercontent.com/kixel-ai/rind/main/admin/logo.png">
 
 An [OpenSSL 3 provider](https://docs.openssl.org/3.5/man7/provider/) backed by [rind](https://github.com/kixel-ai/rind/), a fork of [Graviola](https://github.com/ctz/graviola/).
-OpenSSL loads it through its configuration file, so whatever links OpenSSL 3, such as Node.js, Python's `cryptography`, Ruby, or nginx, signs with Ed25519 and agrees with X25519 through rind, and with ECDSA and ECDH on the NIST curves once `ec = 1` is set, with no change to its code.
+OpenSSL loads it through its configuration file, so whatever links OpenSSL 3, such as Node.js, Python's `cryptography`, Ruby, or nginx, signs with Ed25519 and agrees with X25519 through rind, and with ECDSA and ECDH on the NIST curves once `ec = 1` is set, with no change to its code, except where a program signs ECDSA over a digest it made (Python's `cryptography` does, and fails under `ec = 1`: see [the NIST curves](#the-nist-curves)).
 
 ## Setup
 
@@ -54,7 +54,7 @@ OpenSSL's `evp_test` passes on its X25519 and Ed25519 data with this provider lo
 ## What rind cannot back
 
 - Ed25519ph and Ed25519ctx, asked of the `ED25519` signature algorithm through its `instance` parameter: rind signs only pure Ed25519, and fails these with an `unsupported by rind` error. The separate `ED25519ph` and `ED25519ctx` signature algorithms of OpenSSL 3.4 on stay the default provider's.
-- Other curves, such as secp256k1, brainpool, and the P-224. OpenSSL gives every curve one `EC` key type, so with `ec = 1` a key of another curve imports, and each use of it then fails with an error saying so, rather than falling back to the default provider, which `?provider=rind` would otherwise do silently.
+- Other curves, such as secp256k1, brainpool, and P-224. OpenSSL gives every curve one `EC` key type, so with `ec = 1` a key of another curve imports, and each use of it then fails with an error saying so, rather than falling back to the default provider, which `?provider=rind` would otherwise do silently.
 - ECDSA over a digest the caller made, `EVP_PKEY_sign` and `EVP_PKEY_verify`: rind's ECDSA takes the message. This includes `openssl speed ecdsa` and Python's `cryptography`, which sign that way, and which fail under `ec = 1`. Use `EVP_DigestSign` and `EVP_DigestVerify`.
 - ECDSA over SHA-1, SHA-224, or SHA-3, ECDSA signatures other than DER, and the key derivation function of `EVP_PKEY_derive` on ECDH: each fails with an `unsupported by rind` error.
 - Everything else, such as X448, Ed448, RSA, ML-KEM, ML-DSA, ciphers, and digests, which stays the default provider's.
