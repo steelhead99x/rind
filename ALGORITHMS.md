@@ -761,12 +761,10 @@ have some different options depending on CPU features:
   that 8-wide Keccak-f too, eight inputs to one permutation, as Graviola's
   `sha3_shake256_8x_one_block` does: eight in ML-KEM-1024's key generation,
   and in encryption, which samples y, e_1, and e_2 in one batch where eta1 is
-  eta2, nine. ML-KEM-512 never has more than four to hash, and ML-KEM-768
-  batches its six and seven only where it falls back from verified-garbage's
-  routines. Before verified-garbage's ML-KEM-768 routines, this took
-  ML-KEM-768 on an AVX-512 Xeon to 0.94 of the time of the AVX2 4-wide
-  batches in key generation, 0.93 in encapsulation, and 0.92 in
-  decapsulation. Not verified either: the 4-wide batches it replaces are
+  eta2, nine. ML-KEM-512 never has more than four to hash. ML-KEM-768's six
+  and seven could fill a batch, but rind skips it for ML-KEM-768, including
+  when it falls back from verified-garbage's routines, and hashes them four
+  at a time. Not verified either: the 4-wide batches it replaces are
   s2n-bignum's.
 - We have s2n-bignum's verified 4-wide Keccak-f using AVX2 on x86-64, and its
   single-state Keccak-f otherwise.

@@ -489,7 +489,13 @@ impl<P: Params> DecapKey<P> {
         // 8. - 15.
         let mut s = Coeffs::<P::Vector, Normal>::zero();
         let mut e = Coeffs::<P::Vector, Normal>::zero();
-        sample_poly_cbd(P::ETA1, &sigma.0, 0, s.polys_mut().chain(e.polys_mut()));
+        sample_poly_cbd(
+            P::ETA1,
+            P::K,
+            &sigma.0,
+            0,
+            s.polys_mut().chain(e.polys_mut()),
+        );
 
         // 16. ŝ <- NTT(s)
         let mut s_hat = s.ntt();
@@ -636,10 +642,10 @@ impl<P: Params> Decoded<P> {
         let mut e_2 = Coeffs::<Poly, Normal>::zero();
         let errors = e_1.polys_mut().chain(core::iter::once(&mut e_2.0));
         match P::ETA1 == ETA2 {
-            true => sample_poly_cbd(ETA2, &r.0, 0, y.polys_mut().chain(errors)),
+            true => sample_poly_cbd(ETA2, P::K, &r.0, 0, y.polys_mut().chain(errors)),
             false => {
-                sample_poly_cbd(P::ETA1, &r.0, 0, y.polys_mut());
-                sample_poly_cbd(ETA2, &r.0, P::K as u8, errors);
+                sample_poly_cbd(P::ETA1, P::K, &r.0, 0, y.polys_mut());
+                sample_poly_cbd(ETA2, P::K, &r.0, P::K as u8, errors);
             }
         }
 
@@ -1220,23 +1226,26 @@ impl<V: Array<Poly>> Coeffs<V, Normal> {
 }
 
 /// `SamplePolyCBD_eta(PRF_eta(sigma, n))` into each of `polys`, with `n`
-/// counting from `first`.
+/// counting from `first`, for the parameter set of rank `k`.
 fn sample_poly_cbd<'a>(
     eta: usize,
+    k: usize,
     sigma: &[u8; 32],
     first: u8,
     polys: impl Iterator<Item = &'a mut Poly>,
 ) {
     match eta {
-        2 => sample_poly_cbd2(sigma, first, polys),
+        2 => sample_poly_cbd2(k, sigma, first, polys),
         3 => sample_poly_cbd3(sigma, first, polys),
         _ => unreachable!(),
     }
 }
 
 /// [`sample_poly_cbd`] for `eta = 2`, eight polynomials at a time, which
-/// x86_64 CPUs with AVX-512 hash at once and others four at a time.
+/// x86_64 CPUs with AVX-512 hash at once (but for ML-KEM-768) and others four
+/// at a time.
 fn sample_poly_cbd2<'a>(
+    k: usize,
     sigma: &[u8; 32],
     mut n: u8,
     mut polys: impl Iterator<Item = &'a mut Poly>,
@@ -1256,9 +1265,14 @@ fn sample_poly_cbd2<'a>(
             n += 1;
         }
 
+        // ML-KEM-768 never hashes eight at a time: it takes its six or
+        // seven four at a time, over the verified four-way Keccak-f, so
+        // Graviola's unproven eight-way Keccak is off its path, as in
+        // `sample_ntt`. Where that would run, ML-KEM-768 runs
+        // pyca/verified-garbage's routines instead.
         let mut samples = [[0; 128]; 8];
-        match count {
-            1..=4 => shake256_fours(&bufs, &mut samples, count),
+        match (k, count) {
+            (3, _) | (_, 1..=4) => shake256_fours(&bufs, &mut samples, count),
             _ => low::mlkem_shake256_8x(&bufs, &mut samples, count, shake256_fours),
         }
 
