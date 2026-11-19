@@ -376,9 +376,8 @@
 <text x="12.0" y="810.0" font-size="12" text-anchor="start" font-weight="bold" fill="#f0efec">Key agreement</text>
 <line x1="12.0" y1="814.0" x2="892.0" y2="814.0" stroke="#383835"/>
 <text x="12.0" y="832.0" font-size="12" text-anchor="start" font-weight="normal" fill="#f0efec">X25519</text>
-<rect x="342.0" y="819.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>X25519, rind: 51.79 µs, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, which assumes each key's dispatch table holds its own curve's functions, the only table rind builds, of its agreement API's X25519 down to s2n-bignum's routines, which rind runs on CPUs without AVX-512 IFMA, composed with s2n-bignum's HOL Light proofs of curve25519_x25519, curve25519_x25519base, their _alt forms without BMI2 and ADX, and bignum_eq, of s2n-bignum's own object code, which rind transliterates</title></rect>
-<text x="379.0" y="832.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">51.79 µs</text>
-<g transform="translate(408.4 822.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="342.0" y="819.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>X25519, rind: 51.79 µs, 1.00× the fastest</title></rect>
+<text x="386.0" y="832.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">51.79 µs</text>
 <rect x="434.0" y="819.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>X25519, aws-lc-rs: 55.09 µs, 1.06× the fastest</title></rect>
 <text x="478.0" y="832.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">55.09 µs</text>
 <rect x="526.0" y="819.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>X25519, ring: 79.18 µs, 1.53× the fastest</title></rect>
