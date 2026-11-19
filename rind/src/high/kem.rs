@@ -471,6 +471,22 @@ mod tests {
         Ciphertext::new(c).map(|c| secret_bytes(&key.decapsulate(&c)))
     }
 
+    /// A cloned ciphertext decapsulates to the same secret.
+    #[test]
+    fn cloned_ciphertext_decapsulates() {
+        fn check<A: Algorithm>() {
+            let key = DecapsulationKey::<A>::generate().unwrap();
+            let (ciphertext, secret) = key.public_key().encapsulate().unwrap();
+            let clone = ciphertext.clone();
+            assert_eq!(clone.as_ref(), ciphertext.as_ref());
+            assert_eq!(
+                secret_bytes(&key.decapsulate(&clone)),
+                secret_bytes(&secret)
+            );
+        }
+        each_set!(check);
+    }
+
     #[test]
     fn wycheproof_keygen() {
         fn check<A: Params>() {

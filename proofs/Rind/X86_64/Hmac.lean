@@ -288,11 +288,25 @@ theorem hmac_sign_spec (hs : HashSpec inst H B L max Abs CAbs) (key : List Byte)
   simp only [bv, List.map_append] at hsb hd1 ⊢
   rw [hsb, hd1]
 
-/-- `h` is a tag computation under `key` that has been given `p`. -/
+/-- `h` is a tag computation under `key` that has been given `p`, holding the
+keyed states it restarts from. -/
 def HmacCtx (CAbs : List U8 → C → Prop) (Abs : List U8 → S → Prop) (H : List Byte → List Byte)
     (B : Nat) (key : List Byte) (p : List U8) {Self : Type} (h : high.hmac.Hmac Self C S) : Prop :=
-  ∃ ki ko : List U8, CAbs (ki ++ p) h.inner ∧ Abs ko h.outer ∧ ki.length = B ∧ ko.length = B ∧
+  ∃ ki ko : List U8, CAbs (ki ++ p) h.inner ∧ Abs ki h.key.inner ∧ Abs ko h.key.outer ∧
+    ki.length = B ∧ ko.length = B ∧
     bv ki = (keyBlock H B key).map (· ^^^ 0x36) ∧ bv ko = (keyBlock H B key).map (· ^^^ 0x5c)
+
+theorem hmac_key_clone_spec (hs : HashSpec inst H B L max Abs CAbs) (ki ko : List U8)
+    (k : high.hmac.HmacKey Self C S) (hi : Abs ki k.inner) (ho : Abs ko k.outer) :
+    high.hmac.HmacKey.Insts.CoreCloneClone.clone inst k ⦃ k' =>
+      Abs ki k'.inner ∧ Abs ko k'.outer ⦄ := by
+  unfold high.hmac.HmacKey.Insts.CoreCloneClone.clone
+  apply WP.spec_bind (hs.clone _ _ hi)
+  intro i hi'
+  apply WP.spec_bind (hs.clone _ _ ho)
+  intro o ho'
+  simp only [WP.spec_ok]
+  exact ⟨hi', ho'⟩
 
 theorem hmac_start_spec (hs : HashSpec inst H B L max Abs CAbs) (key : List Byte)
     (k : high.hmac.HmacKey Self C S) (hk : HmacKeyed Abs H B key k) :
@@ -305,36 +319,36 @@ theorem hmac_start_spec (hs : HashSpec inst H B L max Abs CAbs) (key : List Byte
   unfold high.hmac.HmacKey.start
   apply WP.spec_bind (hs.resume ki k.inner hi)
   intro c hc
-  apply WP.spec_bind (hs.clone ko k.outer ho)
-  intro o hoc
+  apply WP.spec_bind (hmac_key_clone_spec hs ki ko k hi ho)
+  rintro k' ⟨hi', ho'⟩
   simp only [WP.spec_ok]
-  exact ⟨ki, ko, by simpa using hc, hoc, hkil, hkol, hbi, hbo⟩
+  exact ⟨ki, ko, by simpa using hc, hi', ho', hkil, hkol, hbi, hbo⟩
 
 theorem hmac_update_spec (hs : HashSpec inst H B L max Abs CAbs) (key : List Byte) (p : List U8)
     {T : Type} (asRef : core.convert.AsRef T (Slice U8)) (h : high.hmac.Hmac Self C S)
     (hh : HmacCtx CAbs Abs H B key p h) (bytes : T) (b : Slice U8)
     (hb : asRef.as_ref bytes = ok b) (hm : B + p.length + b.length ≤ max) :
     high.hmac.Hmac.update inst asRef h bytes ⦃ h' => HmacCtx CAbs Abs H B key (p ++ b.val) h' ⦄ := by
-  obtain ⟨ki, ko, hi, ho, hkil, hkol, hbi, hbo⟩ := hh
+  obtain ⟨ki, ko, hi, hki, ho, hkil, hkol, hbi, hbo⟩ := hh
   unfold high.hmac.Hmac.update
   rw [hb, bind_ok]
   apply WP.spec_bind (hs.update (ki ++ p) h.inner b hi (by
     simp only [Slice.length] at hm ⊢; simp only [List.length_append]; omega))
   intro c hc
   simp only [WP.spec_ok]
-  exact ⟨ki, ko, by simpa using hc, ho, hkil, hkol, hbi, hbo⟩
+  exact ⟨ki, ko, by simpa using hc, hki, ho, hkil, hkol, hbi, hbo⟩
 
 theorem hmac_finish_spec (hs : HashSpec inst H B L max Abs CAbs) (key : List Byte) (p : List U8)
     (h : high.hmac.Hmac Self C S) (hh : HmacCtx CAbs Abs H B key p h) (hm : B + p.length ≤ max) :
     high.hmac.Hmac.finish inst h ⦃ d =>
       outLen d.algorithm = L ∧ digestBytes d = hmac H B key (bv p) ⦄ := by
-  obtain ⟨ki, ko, hi, ho, hkil, hkol, hbi, hbo⟩ := hh
+  obtain ⟨ki, ko, hi, -, ho, hkil, hkol, hbi, hbo⟩ := hh
   obtain ⟨hLB, hL64, -, hBmax, -⟩ := hs.out
   unfold high.hmac.Hmac.finish
   apply WP.spec_bind (hs.finish (ki ++ p) h.inner hi (by simp; omega))
   rintro d1 ⟨hd1l, hd1⟩
   step with digest_as_ref_spec d1 as ⟨s, hsl, hsb⟩
-  apply WP.spec_mono (hs.finish_with ko h.outer s ho (by omega))
+  apply WP.spec_mono (hs.finish_with ko h.key.outer s ho (by omega))
   rintro d ⟨hdl, hd⟩
   refine ⟨hdl, ?_⟩
   rw [hd, hmac_def, ← hbo, ← hbi]
@@ -344,14 +358,32 @@ theorem hmac_finish_spec (hs : HashSpec inst H B L max Abs CAbs) (key : List Byt
 theorem hmac_clone_spec (hs : HashSpec inst H B L max Abs CAbs) (key : List Byte) (p : List U8)
     (h : high.hmac.Hmac Self C S) (hh : HmacCtx CAbs Abs H B key p h) :
     high.hmac.Hmac.Insts.CoreCloneClone.clone inst h ⦃ h' => HmacCtx CAbs Abs H B key p h' ⦄ := by
-  obtain ⟨ki, ko, hi, ho, hkil, hkol, hbi, hbo⟩ := hh
+  obtain ⟨ki, ko, hi, hki, ho, hkil, hkol, hbi, hbo⟩ := hh
   unfold high.hmac.Hmac.Insts.CoreCloneClone.clone
   apply WP.spec_bind (hs.cclone _ _ hi)
   intro c hc
-  apply WP.spec_bind (hs.clone _ _ ho)
-  intro o hoc
+  apply WP.spec_bind (hmac_key_clone_spec hs ki ko h.key hki ho)
+  rintro k' ⟨hi', ho'⟩
   simp only [WP.spec_ok]
-  exact ⟨ki, ko, hc, hoc, hkil, hkol, hbi, hbo⟩
+  exact ⟨ki, ko, hc, hi', ho', hkil, hkol, hbi, hbo⟩
+
+/-- Signing returns the tag of what `h` was given, and leaves it under the same
+key with an empty message. -/
+theorem hmac_ctx_sign_spec (hs : HashSpec inst H B L max Abs CAbs) (key : List Byte)
+    (p : List U8) (h : high.hmac.Hmac Self C S) (hh : HmacCtx CAbs Abs H B key p h)
+    (hm : B + p.length ≤ max) :
+    high.hmac.Hmac.sign inst h ⦃ r =>
+      outLen r.1.algorithm = L ∧ digestBytes r.1 = hmac H B key (bv p) ∧
+        HmacCtx CAbs Abs H B key [] r.2 ⦄ := by
+  have hf := hmac_finish_spec hs key p h hh hm
+  obtain ⟨ki, ko, -, hki, ho, hkil, hkol, hbi, hbo⟩ := hh
+  unfold high.hmac.Hmac.sign
+  apply WP.spec_bind hf
+  rintro d ⟨hdl, hd⟩
+  apply WP.spec_bind (hs.resume ki h.key.inner hki)
+  intro c hc
+  simp only [WP.spec_ok]
+  exact ⟨hdl, hd, ki, ko, by simpa using hc, hki, ho, hkil, hkol, hbi, hbo⟩
 
 end
 

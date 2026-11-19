@@ -3,6 +3,7 @@
 #![allow(clippy::len_without_is_empty, clippy::new_without_default)]
 #![warn(missing_docs, unreachable_pub)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use core::fmt;
 

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-# Usage: admin/ctgrind [unit|wycheproof|adapters|fips] [cargo test args...]
+# Usage: admin/ctgrind [unit|wycheproof|adapters|fips] [cargo nextest run args...]
 # Runs every suite but fips unless one is named, so CI can run them in
 # parallel. fips checks the FIPS module, which refuses a CPU below its
 # baseline, so the CPU-masked runs leave it out.
@@ -45,9 +45,10 @@ set -e
 self="$(cd "$(dirname "$0")" && pwd)/ctgrind"
 valgrind="valgrind --error-exitcode=99 --unw-stack-scan-thresh=3 --suppressions=$(dirname "$self")/ctgrind.supp"
 
-# Cargo runs each test binary through this script. `--track-origins=yes`
-# roughly doubles memcheck's cost, so only a binary memcheck failed reruns
-# with it, to name where each secret came from.
+# nextest runs each test in its own process, through this script, so the
+# tests spread over every core while valgrind runs each process's threads on
+# one. `--track-origins=yes` roughly doubles memcheck's cost, so only a test
+# memcheck failed reruns with it, to name where each secret came from.
 if [ "$1" = --run ]; then
     shift
     status=0
@@ -125,13 +126,16 @@ if [ -n "${RIND_SCOPE:-}" ]; then
     fi
 fi
 
+# `--no-fail-fast` reports every test memcheck fails, not just the first.
+set -- --no-fail-fast "$@"
+
 # rind's unit tests mark its secrets through the `__ctgrind` hooks. Wycheproof
 # runs without them, since its harness compares secret outputs directly.
 if [ "$suite" = all ] || [ "$suite" = unit ]; then
-    cargo test -p rind --lib --features __ctgrind "$@"
+    cargo nextest run -p rind --lib --features __ctgrind "$@"
 fi
 if [ "$suite" = all ] || [ "$suite" = wycheproof ]; then
-    cargo test -p rind --test wycheproof "$@"
+    cargo nextest run -p rind --test wycheproof "$@"
 fi
 
 # Each adapter's ctgrind test marks the secrets it hands rind, while rind's
@@ -145,13 +149,14 @@ if [ "$suite" = all ] || [ "$suite" = adapters ]; then
     case " $* " in
         *armv7-unknown-linux-gnueabihf*) set -- --exclude rind-openssl "$@" ;;
     esac
-    cargo test --workspace --exclude rind --exclude rind-python --exclude rind-fips --lib --test ctgrind --features rind/__ctgrind "$@"
+    cargo nextest run --workspace --exclude rind --exclude rind-python --exclude rind-fips --lib --test ctgrind --features rind/__ctgrind "$@"
 fi
 
 # The FIPS module as it ships, built with rind's hooks: its test marks the
 # secrets it hands the module. Then the ACVP build's deterministic services,
-# which only that build exports.
+# which only that build exports. A filter naming only `acvp` selects nothing
+# in the first build, which nextest otherwise fails on.
 if [ "$suite" = fips ]; then
-    cargo test -p rind-fips --test ctgrind --features __ctgrind,rind/__ctgrind "$@"
-    cargo test -p rind-fips --test ctgrind --features __ctgrind,__acvp,rind/__ctgrind "$@" -- --exact acvp
+    cargo nextest run -p rind-fips --test ctgrind --features __ctgrind,rind/__ctgrind --no-tests=warn "$@"
+    cargo nextest run -p rind-fips --test ctgrind --features __ctgrind,__acvp,rind/__ctgrind "$@" -- --exact acvp
 fi

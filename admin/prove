@@ -1013,6 +1013,9 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # proof assumes, and `proofs/Rind/X86_64/P256Table.lean` what x86_64's
 # Booth driver, which is translated, reads, and each target's `P256Base.lean`
 # that its first row holds G to 32G, which ECDSA verification looks up.
+# P-256's glue around pyca/verified-garbage's routines is translated, down to
+# `low::<arch>::p256_vg`, whose checks and wrappers are opaque and whose
+# routines `VgP256.lean`'s axioms state.
 # P-384's key generation draws through a `dyn RandomSource` too, so it is
 # opaque, and `proofs/Rind/X86_64/P384Dispatch.lean` models it on both
 # targets; its comb tables are translated, which `P384Table.lean` checks.
@@ -1292,9 +1295,6 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --opaque 'crate::high::curve::_::generate_random_key' \
     --opaque 'crate::mid::p256::_::generate' \
     --opaque 'crate::mid::p256::_::new_random' \
-    --opaque 'crate::mid::p256::_::vg_public_key' \
-    --opaque 'crate::mid::p256::_::vg_diffie_hellman' \
-    --opaque crate::mid::p256::vg_verify \
     --include crate::low::x86_64::adx_mux::p256_montjadd \
     --include crate::low::x86_64::adx_mux::p256_montjdouble \
     --include crate::low::x86_64::adx_mux::p256_montjmixadd \
@@ -1313,6 +1313,7 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::x86_64::adx_mux::p384_montjscalarmul \
     --include crate::low::x86_64::adx_mux::curve25519_x25519 \
     --include crate::low::x86_64::adx_mux::curve25519_x25519base \
+    --include 'crate::low::x86_64::curve25519_ifma::_::clone' \
     --include crate::low::x86_64::adx_mux::edwards25519_decode \
     --include crate::low::x86_64::adx_mux::edwards25519_scalarmulbase \
     --include crate::low::x86_64::adx_mux::bignum_madd_n25519 \
@@ -1347,8 +1348,6 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --opaque 'crate::low::x86_64::chacha20::_::apply_avx2' \
     --opaque 'crate::low::x86_64::chacha20::_::apply_avx512vl' \
     --opaque crate::low::x86_64::chacha20::cipher_ssse3_4x \
-    --opaque crate::low::x86_64::chacha20::cipher_avx2 \
-    --opaque crate::low::generic::chacha20::cipher \
     --include 'crate::mid::aes::_' \
     --include crate::low::x86_64::aes \
     --start-from crate::low::x86_64::aes::AesDecKey::new \
@@ -1444,9 +1443,6 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --opaque 'crate::high::curve::_::generate_random_key' \
     --opaque 'crate::mid::p256::_::generate' \
     --opaque 'crate::mid::p256::_::new_random' \
-    --opaque 'crate::mid::p256::_::vg_public_key' \
-    --opaque 'crate::mid::p256::_::vg_diffie_hellman' \
-    --opaque crate::mid::p256::vg_verify \
     --include crate::low::aarch64::sha1::sha1_compress_padded \
     --include crate::low::aarch64::sha3_keccak_f1600_mux \
     --include crate::low::aarch64::sha3_keccak4_f1600_mux \

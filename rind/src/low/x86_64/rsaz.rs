@@ -81,6 +81,7 @@ struct Storage {
 static ONE: Red = limb(0, 1);
 static TWO80: Red = limb(2, 1 << 22);
 
+#[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
 const fn limb(i: usize, v: u64) -> Red {
     let mut r = [0; 40];
     r[i] = v;
@@ -339,7 +340,7 @@ mod tests {
             .from_montgomery(&n);
 
         let mut got = [0; 16];
-        mod_exp(token, &mut got, x, e, m, &words(&rr), n0);
+        Rsaz(token).mod_exp(&mut got, x, e, m, &words(&rr), n0);
         [got, words(&want)]
     }
 

@@ -189,6 +189,7 @@ const fn verification(scheme: RsaScheme, min_bits: usize) -> VerificationAlgorit
     algorithm(RsaVerification::Scheme(scheme), scheme.min_bits(min_bits))
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
 const fn sha1_verification(min_bits: usize) -> VerificationAlgorithm {
     algorithm(RsaVerification::Pkcs1Sha1, min_bits)
 }

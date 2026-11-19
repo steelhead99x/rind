@@ -39,8 +39,9 @@ pub struct Signature {
     len: usize,
 }
 
-// The longest is a P-384 ASN.1 signature: a SEQUENCE, whose length takes two
-// bytes, of two INTEGERs, each with a tag, a length, and a sign byte.
+// ring's capacity, for a P-384 ASN.1 signature: a SEQUENCE, with two bytes
+// allowed for its length, of two INTEGERs, each with a tag, a length, and a
+// sign byte. The longest DER encoding needs one length byte, so 104 bytes.
 const MAX_LEN: usize = 3 + 2 * (3 + 48);
 
 impl Signature {
@@ -532,5 +533,23 @@ impl fmt::Debug for Ed25519KeyPair {
         f.debug_struct("Ed25519KeyPair")
             .field("public_key", &self.public_key)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Signature;
+
+    #[test]
+    fn signature_buffer_holds_105_bytes() {
+        // ring's capacity, which allows a two-byte SEQUENCE length that P-384's
+        // longest DER signature (104 bytes) never needs. `Signature::new`
+        // checks only capacity. Turning either `+` into `*` grows the buffer,
+        // so one byte past it must still be refused.
+        let longest = [0x30; 105];
+        assert!(Signature::new(&longest).is_ok());
+        let mut longer = longest.to_vec();
+        longer.push(0x30);
+        assert!(Signature::new(&longer).is_err());
     }
 }
