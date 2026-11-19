@@ -78,9 +78,7 @@ macOS, Linux, and Windows on arm64 and x86_64; and Linux on armv7. The build
 fails for any other target, such as Android's 32-bit x86, rather than falling
 back to slower code. There is no web build: rind has no WebAssembly backend.
 
-rind needs NEON on arm64 CPUs, which every Android and Apple device has. On a
-CPU missing a feature rind requires, every call throws an `UnsupportedError`
-naming it.
+rind's arm64 build enables NEON, which every Android and Apple device has; a source build for a target without NEON uses rind's portable backend.
 
 ## Use
 
@@ -116,9 +114,8 @@ API on it instead. Failures throw a `RindException` whose `error` says what
 failed, as rind's `Error` does, and a refused key says why in its `reason`.
 SHA-1, MD5, and RSA keys below 2048 bits are in `package:rind/legacy.dart`.
 
-Keys live in native memory, which Dart frees without wiping: this package
-builds rind without its `wipe` feature. To wipe keys, use rind from Rust with
-`wipe`.
+Keys live in native memory, and rind wipes that native copy when Dart frees
+the key. It does not wipe a `Uint8List` you passed in; clear that yourself.
 
 Generating RSA keys, RSA's private-key operations, and PBKDF2 take
 milliseconds to seconds, so call them off the UI isolate, as with

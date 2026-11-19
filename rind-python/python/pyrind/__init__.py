@@ -5,9 +5,6 @@ Each rind module is a submodule: `pyrind.aead`, `pyrind.agreement`,
 `pyrind.hmac`, `pyrind.kem`, `pyrind.key_wrap`, `pyrind.pbkdf2`,
 `pyrind.rsa`, and `pyrind.signature`. Every failure raises
 a subclass of `pyrind.Error`.
-
-Importing pyrind raises `ImportError` on a CPU missing a feature rind
-requires, naming it.
 """
 
 from pyrind._rind import (

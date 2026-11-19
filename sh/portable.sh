@@ -13,13 +13,6 @@ fi
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# Fail before the build rather than partway through the tests.
-unfetched=$(git submodule status -- thirdparty/cavp thirdparty/wycheproof | sed -n 's/^-[0-9a-f]* //p')
-if [[ -n "$unfetched" ]]; then
-    echo "error: test vectors not checked out; run: git submodule update --init ${unfetched//$'\n'/ }" >&2
-    exit 1
-fi
-
 # The bench and fuzz crates compare against other libraries, not backends.
 packages=(-p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-dimpl -p rind-openmls)
 
@@ -33,4 +26,3 @@ cargo clippy "${packages[@]}" --locked --target "$target" --all-targets -- --den
 export CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true
 export CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true
 SLOW_TESTS=1 cargo test "${packages[@]}" --locked --release --target "$target"
-SLOW_TESTS=1 cargo test -p rind --features wipe --test zeroing --test heap_scratch --locked --release --target "$target"

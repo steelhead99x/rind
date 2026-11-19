@@ -466,3 +466,172 @@ fn tls_scatter_keeps_nonce() {
     });
     assert_eq!(results, ((false, true), (false, true)));
 }
+
+/// An RSA key outside a verification algorithm's modulus range parses, then
+/// verifies nothing, on both sides of each algorithm's range, while a key in
+/// range verifies.
+#[test]
+fn rsa_range_at_verify() {
+    use theirs::signature::{self as sig, KeyPair as _, RsaKeyPair};
+    // aws-lc-rs signs neither with SHA-1 nor with a key under 2048 bits, so
+    // those signatures over "message" come from OpenSSL, in
+    // tests/data/rsa-range as `<bits>-<tag>.sig`. No PSS-SHA-512 signature
+    // with a salt as long as the hash fits a 1024-bit key.
+    let fixture = |bits: usize, tag: &str| {
+        if (bits, tag) == (1024, "pss-sha512") {
+            return None;
+        }
+        let path = format!(
+            "{}/tests/data/rsa-range/{bits}-{tag}.sig",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        Some(std::fs::read(&path).unwrap_or_else(|err| panic!("{path}: {err}")))
+    };
+    let signers = [
+        &include_bytes!("aws-lc-rs/data/rsa_test_private_key_2048.p8")[..],
+        include_bytes!("aws-lc-rs/data/rsa_test_private_key_8192.p8"),
+    ]
+    .map(|der| RsaKeyPair::from_pkcs8(der).unwrap());
+    let small = include_bytes!("aws-lc-rs/data/rsa_test_public_key_1024.x509");
+    let keys = [
+        (theirs::rsa::PublicKey::from_der(small).unwrap(), None),
+        (signers[0].public_key().clone(), Some(&signers[0])),
+        (signers[1].public_key().clone(), Some(&signers[1])),
+    ];
+    // Each verification algorithm, its smallest modulus, its fixture tag, and
+    // the encoding aws-lc-rs signs for it with, if any.
+    let algorithms: [(&str, usize, &str, Option<&'static dyn sig::RsaEncoding>); 11] = [
+        (
+            "RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY",
+            1024,
+            "sha1",
+            None,
+        ),
+        (
+            "RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY",
+            1024,
+            "sha256",
+            Some(&sig::RSA_PKCS1_SHA256),
+        ),
+        (
+            "RSA_PKCS1_1024_8192_SHA512_FOR_LEGACY_USE_ONLY",
+            1024,
+            "sha512",
+            Some(&sig::RSA_PKCS1_SHA512),
+        ),
+        (
+            "RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY",
+            2048,
+            "sha1",
+            None,
+        ),
+        (
+            "RSA_PKCS1_2048_8192_SHA256",
+            2048,
+            "sha256",
+            Some(&sig::RSA_PKCS1_SHA256),
+        ),
+        (
+            "RSA_PKCS1_2048_8192_SHA384",
+            2048,
+            "sha384",
+            Some(&sig::RSA_PKCS1_SHA384),
+        ),
+        (
+            "RSA_PKCS1_2048_8192_SHA512",
+            2048,
+            "sha512",
+            Some(&sig::RSA_PKCS1_SHA512),
+        ),
+        (
+            "RSA_PKCS1_3072_8192_SHA384",
+            3072,
+            "sha384",
+            Some(&sig::RSA_PKCS1_SHA384),
+        ),
+        (
+            "RSA_PSS_2048_8192_SHA256",
+            2048,
+            "pss-sha256",
+            Some(&sig::RSA_PSS_SHA256),
+        ),
+        (
+            "RSA_PSS_2048_8192_SHA384",
+            2048,
+            "pss-sha384",
+            Some(&sig::RSA_PSS_SHA384),
+        ),
+        (
+            "RSA_PSS_2048_8192_SHA512",
+            2048,
+            "pss-sha512",
+            Some(&sig::RSA_PSS_SHA512),
+        ),
+    ];
+    let rng = theirs::rand::SystemRandom::new();
+    for (key, signer) in &keys {
+        let public = key.as_ref();
+        let n = key.modulus().big_endian_without_leading_zero();
+        let e = key.exponent().big_endian_without_leading_zero();
+        let bits = key.modulus_len() * 8;
+        for (name, min_bits, tag, encoding) in algorithms {
+            let signature = match (signer, encoding) {
+                (Some(signer), Some(encoding)) => {
+                    let mut signature = vec![0; key.modulus_len()];
+                    signer
+                        .sign(encoding, &rng, b"message", &mut signature)
+                        .unwrap();
+                    Some(signature)
+                }
+                _ => fixture(bits, tag),
+            };
+            let valid = signature.is_some();
+            let signature = signature.unwrap_or_else(|| vec![0; key.modulus_len()]);
+            let results = both!(|c| {
+                use c::signature as s;
+                let algorithm: &'static s::RsaParameters = match name {
+                    "RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY" => {
+                        &s::RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY
+                    }
+                    "RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY" => {
+                        &s::RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY
+                    }
+                    "RSA_PKCS1_1024_8192_SHA512_FOR_LEGACY_USE_ONLY" => {
+                        &s::RSA_PKCS1_1024_8192_SHA512_FOR_LEGACY_USE_ONLY
+                    }
+                    "RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY" => {
+                        &s::RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY
+                    }
+                    "RSA_PKCS1_2048_8192_SHA256" => &s::RSA_PKCS1_2048_8192_SHA256,
+                    "RSA_PKCS1_2048_8192_SHA384" => &s::RSA_PKCS1_2048_8192_SHA384,
+                    "RSA_PKCS1_2048_8192_SHA512" => &s::RSA_PKCS1_2048_8192_SHA512,
+                    "RSA_PKCS1_3072_8192_SHA384" => &s::RSA_PKCS1_3072_8192_SHA384,
+                    "RSA_PSS_2048_8192_SHA256" => &s::RSA_PSS_2048_8192_SHA256,
+                    "RSA_PSS_2048_8192_SHA384" => &s::RSA_PSS_2048_8192_SHA384,
+                    _ => &s::RSA_PSS_2048_8192_SHA512,
+                };
+                let parsed = s::ParsedPublicKey::new(algorithm, public).unwrap();
+                let unparsed = s::UnparsedPublicKey::new(algorithm, public);
+                let components = s::RsaPublicKeyComponents { n, e }
+                    .to_parsed_public_key(algorithm)
+                    .unwrap();
+                [
+                    parsed.verify_sig(b"message", &signature).is_ok(),
+                    unparsed
+                        .parse()
+                        .unwrap()
+                        .verify_sig(b"message", &signature)
+                        .is_ok(),
+                    unparsed.verify(b"message", &signature).is_ok(),
+                    components.verify_sig(b"message", &signature).is_ok(),
+                ]
+            });
+            let expected = valid && bits >= min_bits;
+            assert_eq!(
+                results.1, [expected; 4],
+                "aws-lc-rs: {name} with a {bits}-bit key"
+            );
+            assert_eq!(results.0, results.1, "{name} with a {bits}-bit key");
+        }
+    }
+}

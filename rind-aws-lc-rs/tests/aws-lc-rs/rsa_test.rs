@@ -528,10 +528,8 @@ fn test_rsa_public_key_components_rejects_invalid_exponent() {
 
 // A 1024-bit RSA key is below the algorithm's accepted range
 // (`RSA_PKCS1_2048_8192_SHA256` accepts 2048..=8192).
-// rind-aws-lc-rs: aws-lc-rs checks the range when verifying, and named this
-// test `..._small_key_fails_at_verify`; rind checks it when the key is parsed.
 #[test]
-fn test_rsa_public_key_components_to_parsed_public_key_small_key_fails() {
+fn test_rsa_public_key_components_to_parsed_public_key_small_key_fails_at_verify() {
     // 1024-bit modulus taken from a valid RSA key.
     const N_HEX: &str = concat!(
         "a8b3b284af8eb50b387034a860f146c4919f318763cd6c5598c8ae4811a1e0ab",
@@ -545,9 +543,16 @@ fn test_rsa_public_key_components_to_parsed_public_key_small_key_fails() {
         n: n.as_slice(),
         e: e.as_slice(),
     };
-    components
+    // Construction succeeds: RSA SPKI parsing does not enforce the
+    // algorithm's bit-size range.
+    let parsed = components
         .to_parsed_public_key(&signature::RSA_PKCS1_2048_8192_SHA256)
-        .expect_err("rind checks the bit range at construction");
+        .expect("construction should succeed; bit-range check is deferred to verify");
+    // Verification fails because 1024 is outside `RSA_PKCS1_2048_8192_SHA256`'s
+    // 2048..=8192 range. The signature bytes are irrelevant -- the bit-range
+    // check short-circuits before any cryptographic work is attempted.
+    let fake_sig = vec![0u8; n.len()];
+    assert!(parsed.verify_sig(b"anything", &fake_sig).is_err());
 }
 
 // `AsDer<PublicKeyX509Der>` on `RsaPublicKeyComponents` must produce X.509

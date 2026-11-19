@@ -1,0 +1,4 @@
+# The 7-day cooldown .github/dependabot.yml sets for crates and actions, since
+# what this installs runs with the Cloudflare token.
+[install]
+minimumReleaseAge = 604800

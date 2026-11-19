@@ -1,34 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-use core::cell::Cell;
-use core::fmt;
 use core::marker::PhantomData;
-use core::sync::atomic::{AtomicBool, Ordering};
-
-/// A CPU feature rind requires that this CPU lacks.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MissingFeature(&'static str);
-
-impl fmt::Display for MissingFeature {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "rind requires {} CPU support on {}",
-            self.0,
-            std::env::consts::ARCH
-        )
-    }
-}
-
-impl core::error::Error for MissingFeature {}
-
-/// Checks that this CPU has every feature rind requires, naming the first one missing.
-pub fn check() -> Result<(), MissingFeature> {
-    match super::missing_cpu_feature() {
-        Some(feature) => Err(MissingFeature(feature)),
-        None => Ok(()),
-    }
-}
 
 /// Reports whether rind runs AES on CPU instructions, as aws-lc's `EVP_has_aes_hardware` does.
 ///
@@ -92,16 +64,19 @@ pub struct Dit {
 impl Dit {
     /// Turns DIT on for this thread, if rind sets it here, until the guard drops.
     pub fn hold() -> Self {
-        let (guards, cpu_state) = DIT_GUARDS.get();
-        let cpu_state = if guards == 0 {
-            super::enter_cpu_state()
-        } else {
-            cpu_state
-        };
-        // Saturating, here and in `drop`: past `usize::MAX` guards the count
-        // is inexact and DIT may turn off early, which costs speed but never
-        // safety, since every rind call sets DIT itself.
-        DIT_GUARDS.set((guards.saturating_add(1), cpu_state));
+        #[cfg(all(rind_backend = "aarch64", target_vendor = "apple"))]
+        {
+            let (guards, cpu_state) = DIT_GUARDS.get();
+            let cpu_state = if guards == 0 {
+                super::enter_cpu_state()
+            } else {
+                cpu_state
+            };
+            // Saturating, here and in `drop`: past `usize::MAX` guards the
+            // count is inexact and DIT may turn off early, which costs speed
+            // but never safety, since every rind call sets DIT itself.
+            DIT_GUARDS.set((guards.saturating_add(1), cpu_state));
+        }
         Self {
             _thread: PhantomData,
         }
@@ -110,37 +85,24 @@ impl Dit {
 
 impl Drop for Dit {
     fn drop(&mut self) {
-        let (guards, cpu_state) = DIT_GUARDS.get();
-        DIT_GUARDS.set((guards.saturating_sub(1), cpu_state));
-        if guards == 1 {
-            super::leave_cpu_state(cpu_state);
+        #[cfg(all(rind_backend = "aarch64", target_vendor = "apple"))]
+        {
+            let (guards, cpu_state) = DIT_GUARDS.get();
+            DIT_GUARDS.set((guards.saturating_sub(1), cpu_state));
+            if guards == 1 {
+                super::leave_cpu_state(cpu_state);
+            }
         }
     }
 }
 
+// Counted only where rind sets DIT, on Apple's aarch64 platforms, which all
+// have threads and `std`; elsewhere the guard holds nothing.
+#[cfg(all(rind_backend = "aarch64", target_vendor = "apple"))]
 std::thread_local! {
     // This thread's live guards, and what the first one's `enter_cpu_state`
     // returned, for the last one to drop to restore.
-    static DIT_GUARDS: Cell<(usize, u32)> = const { Cell::new((0, 0)) };
-}
-
-/// Panics with [`check`]'s error rather than run instructions this CPU lacks.
-pub(crate) fn verify_cpu_features() {
-    // Every operation calls this, and a single-block one costs little more
-    // than testing each feature, so a pass is remembered.
-    static VERIFIED: AtomicBool = AtomicBool::new(false);
-
-    #[cold]
-    fn verify() {
-        if let Err(missing) = check() {
-            panic!("{missing}");
-        }
-        VERIFIED.store(true, Ordering::Relaxed);
-    }
-
-    if !VERIFIED.load(Ordering::Relaxed) {
-        verify();
-    }
+    static DIT_GUARDS: core::cell::Cell<(usize, u32)> = const { core::cell::Cell::new((0, 0)) };
 }
 
 #[cfg(test)]
@@ -157,19 +119,5 @@ mod tests {
         #[cfg(rind_backend = "portable")]
         let hardware = false;
         assert_eq!(super::has_aes_hardware(), hardware);
-    }
-
-    // No CPU a test runs on lacks a required feature, so only this shows
-    // what the panic would say.
-    #[test]
-    fn missing_feature_names_it() {
-        let message = super::MissingFeature("neon").to_string();
-        assert_eq!(
-            message,
-            format!(
-                "rind requires neon CPU support on {}",
-                std::env::consts::ARCH
-            )
-        );
     }
 }

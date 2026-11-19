@@ -242,3 +242,40 @@ fn key_wrap() {
     public(unwrapped);
     assert_eq!(unwrapped, key);
 }
+
+/// An ML-DSA expanded key, which rind-aws-lc-rs wraps in PKCS#8 for rind to
+/// load, and the seed.
+#[test]
+fn ml_dsa() {
+    use aws_lc_rs::encoding::{AsRawBytes, PqdsaPrivateKeyRaw};
+    use rind_aws_lc_rs::signature::{self, KeyPair, ML_DSA_65_SIGNING, PqdsaKeyPair};
+
+    let seed = [0x33u8; 32];
+    let raw: PqdsaPrivateKeyRaw<'static> = aws_lc_rs::signature::PqdsaKeyPair::from_seed(
+        &aws_lc_rs::signature::ML_DSA_65_SIGNING,
+        &seed,
+    )
+    .unwrap()
+    .private_key()
+    .as_raw_bytes()
+    .unwrap();
+    let raw = raw.as_ref().to_vec();
+
+    secret(&seed);
+    // The expanded key's first 32 bytes are the public seed `rho`.
+    secret(&raw[32..]);
+    let msg = b"message";
+    for key in [
+        PqdsaKeyPair::from_seed(&ML_DSA_65_SIGNING, &seed).unwrap(),
+        PqdsaKeyPair::from_raw_private_key(&ML_DSA_65_SIGNING, &raw).unwrap(),
+    ] {
+        let public_key = key.public_key().as_ref().to_vec();
+        public(public_key.as_slice());
+        let mut sig = [0u8; 3309];
+        key.sign(msg, &mut sig).unwrap();
+        public(&sig);
+        signature::UnparsedPublicKey::new(&signature::ML_DSA_65, &public_key)
+            .verify(msg, &sig)
+            .unwrap();
+    }
+}

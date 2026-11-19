@@ -104,6 +104,10 @@ def Shared0Slice.Insts.CoreCmpPartialEqArray.eq {T U : Type _} {N : Std.Usize}
     (inst : core.cmp.PartialEq T U) (s : Slice T) (a : Array U N) : Result Bool :=
   core.slice.cmp.PartialEqSlice.eq inst s a.to_slice
 
+/-- `i32::wrapping_neg`: the negation modulo 2^32. -/
+def core.num.I32.wrapping_neg (x : Std.I32) : Result Std.I32 :=
+  Std.Result.ok ⟨-x.bv⟩
+
 /-- `i8::unsigned_abs`. -/
 def core.num.I8.unsigned_abs (x : Std.I8) : Result Std.U8 :=
   Std.Result.ok ⟨BitVec.ofNat 8 x.val.natAbs⟩
@@ -127,6 +131,29 @@ def core.slice.Slice.as_chunks {T : Type _} (N : Std.Usize) (s : Slice T) :
             exact le_trans (Nat.div_le_self _ _) this),
        Slice.from (s.val.drop (k * N.val)) (by have := s.property; simp; omega))
 
+/-- `core::slice::Chunks`: what is left of the slice, and the chunk size. -/
+structure core.slice.iter.Chunks (T : Type _) where
+  rest : Slice T
+  size : Std.Usize
+
+/-- `<[T]>::chunks`: the slice in pieces of `size` elements, the last shorter.
+It panics for a size of zero. -/
+def core.slice.Slice.chunks {T : Type _} (s : Slice T) (size : Std.Usize) :
+    Result (core.slice.iter.Chunks T) :=
+  if size.val = 0 then Std.Result.fail .panic else Std.Result.ok ⟨s, size⟩
+
+/-- `Chunks::next`: the next `size` elements, or all that is left if fewer,
+and none once nothing is. -/
+def core.slice.iter.Chunks.Insts.CoreIterTraitsIteratorIteratorSharedASlice.next {T : Type _}
+    (c : core.slice.iter.Chunks T) : Result (Option (Slice T) × core.slice.iter.Chunks T) :=
+  if c.rest.length = 0 then Std.Result.ok (none, c)
+  else
+    let head := Slice.from (c.rest.val.take c.size.val) (by
+      have := c.rest.property; simp only [List.length_take]; omega)
+    let tail := Slice.from (c.rest.val.drop c.size.val) (by
+      have := c.rest.property; simp only [List.length_drop]; omega)
+    Std.Result.ok (some head, { rest := tail, size := c.size })
+
 /-- `<[T]>::as_chunks_mut::<N>`: `as_chunks`'s views, which write back to the
 slice the chunks in order, then what is left. -/
 def core.slice.Slice.as_chunks_mut {T : Type _} (N : Std.Usize) (s : Slice T) :
@@ -135,6 +162,66 @@ def core.slice.Slice.as_chunks_mut {T : Type _} (N : Std.Usize) (s : Slice T) :
   ok (views, fun (chunks, rest) =>
     let l := chunks.val.flatMap (·.val) ++ rest.val
     if h : l.length ≤ Usize.max then Slice.from l h else s)
+
+/-- `core::hint::black_box`: the value itself. -/
+def core.hint.black_box {T : Type _} (x : T) : Result T := Std.Result.ok x
+
+/-- `usize::try_from(u64)`, which fails for a value past `usize::MAX`. -/
+def Usize.Insts.CoreConvertTryFromU64TryFromIntError.try_from (x : Std.U64) :
+    Result (core.result.Result Std.Usize core.num.error.TryFromIntError) :=
+  core.num.tryFromUScalar .Usize x
+
+/-- `<[T]>::split_first_chunk::<N>`: the first `N` elements and the rest, if
+there are that many. -/
+def core.slice.Slice.split_first_chunk {T : Type _} (N : Std.Usize) (s : Slice T) :
+    Result (Option ((Array T N) × (Slice T))) :=
+  if h : N.val ≤ s.length then
+    Std.Result.ok (some (Array.from (s.val.take N.val) (by simp [Slice.length] at h; simp [h]),
+      Slice.from (s.val.drop N.val) (by have := s.property; simp; omega)))
+  else Std.Result.ok none
+
+/-- `core::slice::from_mut`: the one-element slice, which writes back to it. -/
+def core.slice.raw.from_mut {T : Type _} (x : T) : Result ((Slice T) × (Slice T → T)) :=
+  Std.Result.ok (Slice.from [x] (by simp; scalar_tac), fun s => s.val.headD x)
+
+/-- `<[T]>::last_chunk::<N>`: the last `N` elements, if there are that many. -/
+def core.slice.Slice.last_chunk {T : Type _} (N : Std.Usize) (s : Slice T) :
+    Result (Option (Array T N)) :=
+  if h : N.val ≤ s.length then
+    Std.Result.ok (some (Array.from (s.val.drop (s.length - N.val)) (by
+      simp [Slice.length] at h ⊢; omega)))
+  else Std.Result.ok none
+
+/-- `u64::to_ne_bytes`, little-endian on rind's proven targets, x86_64 and
+aarch64. -/
+def core.num.U64.to_ne_bytes (x : Std.U64) : Result (Array Std.U8 8#usize) :=
+  Std.Result.ok (core.num.U64.to_le_bytes x)
+
+/-- `u64::from_ne_bytes`, little-endian on rind's proven targets. -/
+def core.num.U64.from_ne_bytes (a : Array Std.U8 8#usize) : Result Std.U64 :=
+  Std.Result.ok (core.num.U64.from_le_bytes a)
+
+/-- `u64::to_be`, which swaps the bytes on rind's little-endian targets. -/
+def core.num.U64.to_be (x : Std.U64) : Result Std.U64 :=
+  Std.Result.ok (core.num.U64.from_le_bytes (core.num.U64.to_be_bytes x))
+
+/-- `usize::next_multiple_of`: the least multiple of `b` at least `a`, which
+panics for a zero `b` and, as Aeneas's arithmetic does, on overflow. -/
+def core.num.Usize.next_multiple_of (a b : Std.Usize) : Result Std.Usize := do
+  let r ← a % b
+  if r = 0#usize then Std.Result.ok a
+  else
+    let d ← b - r
+    a + d
+
+/-- `ManuallyDrop::new`, which Aeneas translates as the value it wraps. -/
+def core.mem.manually_drop.ManuallyDrop.new {T : Type _} (x : T) : Result T :=
+  Std.Result.ok x
+
+/-- `<ManuallyDrop<T> as Deref>::deref`: the wrapped value. -/
+def core.mem.manually_drop.ManuallyDrop.Insts.CoreOpsDerefDeref.deref {T : Type _} (x : T) :
+    Result T :=
+  Std.Result.ok x
 
 /-- `<[T]>::last`. -/
 def core.slice.Slice.last {T : Type _} (s : Slice T) : Result (Option T) :=
@@ -222,3 +309,7 @@ opaque getrandom.fill :
 /-- `core::array::from_fn`. -/
 opaque core.array.from_fn {T F : Type _} (N : Std.Usize)
     (_ : core.ops.function.FnMut F Std.Usize T) : F → Result (Array T N)
+
+/-- `u32::swap_bytes`: the four bytes in the other order. -/
+def core.num.U32.swap_bytes (x : Std.U32) : Result Std.U32 :=
+  Std.Result.ok ⟨x.bv.extractLsb' 0 8 ++ x.bv.extractLsb' 8 8 ++ x.bv.extractLsb' 16 8 ++ x.bv.extractLsb' 24 8⟩

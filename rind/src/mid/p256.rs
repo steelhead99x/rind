@@ -50,9 +50,11 @@ impl PublicKey {
 
 /// A P-256 public key for ECDSA verification.
 ///
-/// It builds the point's multiples on its first verification and keeps
-/// them, so verifying again skips computing them, and a key never verified
-/// with, such as an ECDSA key pair's, never pays for them.
+/// Where pyca/verified-garbage's verification runs, it verifies with that,
+/// which takes the encoded key. Elsewhere it builds the point's multiples on
+/// its first verification and keeps them, so verifying again skips computing
+/// them, and a key never verified with, such as an ECDSA key pair's, never
+/// pays for them.
 #[derive(Clone, Debug)]
 pub(crate) struct VerifyingKey {
     point: AffineMontPoint,
@@ -76,6 +78,10 @@ impl VerifyingKey {
     }
 
     pub(crate) fn raw_ecdsa_verify(&self, r: &Scalar, s: &Scalar, e: &Scalar) -> Result<(), Error> {
+        if let Some(vg) = low::p256_vg::P256::check() {
+            return vg_verify(vg, &self.point, r, s, e);
+        }
+
         // 4. Compute: u1 = e s^-1 mod n and u2 = r s^−1 mod n
         let s_inv = s.inv().as_mont();
         let u1 = s_inv.mont_mul(&e.as_mont()).demont();
@@ -124,6 +130,9 @@ impl PrivateKey {
     /// X9.62 uncompressed encoding.
     pub(crate) fn public_key_uncompressed(&self) -> [u8; PublicKey::BYTES] {
         let _entry = low::Entry::new_secret();
+        if let Some(vg) = low::p256_vg::P256::check_public_key() {
+            return self.vg_public_key(vg);
+        }
         self.public_point().as_bytes_uncompressed()
     }
 
@@ -135,12 +144,47 @@ impl PrivateKey {
     /// Returns a [`SharedSecret`].  May return an error in fault conditions.
     pub(crate) fn diffie_hellman(&self, peer: &PublicKey) -> Result<SharedSecret, Error> {
         let _entry = low::Entry::new_secret();
+        if let Some(vg) = low::p256_vg::P256::check() {
+            return self.vg_diffie_hellman(vg, peer);
+        }
         let result = peer.point.multiply(&self.scalar);
         match low::ct::into_public(result.on_curve()) {
             true => Ok(SharedSecret(util::u64x4_to_big_endian(
                 &result.x().demont().0,
             ))),
             false => Err(Error::Fault),
+        }
+    }
+
+    /// [`Self::public_key_uncompressed`], on pyca/verified-garbage's routine.
+    fn vg_public_key(&self, vg: low::p256_vg::P256) -> [u8; PublicKey::BYTES] {
+        // It fails only for a scalar outside [1, n), which `Scalar`'s
+        // checked decoding refuses.
+        let encoded = match vg
+            .public_key(&self.scalar.as_bytes())
+            .map(low::ct::into_public)
+        {
+            Some(encoded) => encoded,
+            None => panic!("internal fault"),
+        };
+        // Checked on the curve, as `public_point` checks rind's.
+        match AffineMontPoint::from_x962_uncompressed(&encoded) {
+            Ok(_) => encoded,
+            Err(_) => panic!("internal fault"),
+        }
+    }
+
+    /// [`Self::diffie_hellman`], on pyca/verified-garbage's routine, which
+    /// checks the peer's point again and fails only in fault conditions, as
+    /// `PublicKey` holds a point on the curve.
+    fn vg_diffie_hellman(
+        &self,
+        vg: low::p256_vg::P256,
+        peer: &PublicKey,
+    ) -> Result<SharedSecret, Error> {
+        match vg.ecdh(&self.scalar.as_bytes(), &peer.point.as_bytes_uncompressed()) {
+            Some(shared) => Ok(SharedSecret(shared)),
+            None => Err(Error::Fault),
         }
     }
 
@@ -219,6 +263,9 @@ impl StaticPrivateKey {
     /// X9.62 uncompressed encoding.
     pub(crate) fn public_key_uncompressed(&self) -> [u8; PublicKey::BYTES] {
         let _entry = low::Entry::new_secret();
+        if let Some(vg) = low::p256_vg::P256::check_public_key() {
+            return self.0.vg_public_key(vg);
+        }
         self.0.public_point().as_bytes_uncompressed()
     }
 
@@ -257,6 +304,10 @@ impl StaticPrivateKey {
 
     pub(crate) fn public_key_x_scalar(&self) -> Scalar {
         let _entry = low::Entry::new_secret();
+        if let Some(vg) = low::p256_vg::P256::check_public_key() {
+            let encoded = self.0.vg_public_key(vg);
+            return Scalar::from_bytes_reduced(&encoded[1..1 + Scalar::BYTES]).unwrap();
+        }
         self.0.public_point().x_scalar()
     }
 
@@ -271,6 +322,26 @@ impl StaticPrivateKey {
             .add(e)
             .as_mont();
         low::ct::into_public(k.0.scalar.inv().mont_mul(&lhs_mont))
+    }
+}
+
+/// [`VerifyingKey::raw_ecdsa_verify`], on pyca/verified-garbage's routine,
+/// which takes `e` as a 32-byte hash, whose value it is, and checks `point`,
+/// `r`, and `s` again.
+fn vg_verify(
+    vg: low::p256_vg::P256,
+    point: &AffineMontPoint,
+    r: &Scalar,
+    s: &Scalar,
+    e: &Scalar,
+) -> Result<(), Error> {
+    let mut signature = [0u8; 2 * Scalar::BYTES];
+    let (r_bytes, s_bytes) = signature.split_at_mut(Scalar::BYTES);
+    r_bytes.copy_from_slice(&r.as_bytes());
+    s_bytes.copy_from_slice(&s.as_bytes());
+    match vg.verify(&point.as_bytes_uncompressed(), &e.as_bytes(), &signature) {
+        true => Ok(()),
+        false => Err(Error::BadSignature),
     }
 }
 
@@ -324,13 +395,17 @@ impl Point {
     ///
     /// A zero scalar's product, at infinity, is skipped, as the
     /// multiplications take only points that are not; every other product
-    /// is not, as the group's order is prime.
+    /// is not, as the group's order is prime. A point whose scalar is one,
+    /// such as a FROST hiding commitment, is added without a multiplication.
     pub(crate) fn public_mul_sum<'a>(
         terms: impl IntoIterator<Item = (&'a Self, &'a Scalar)>,
     ) -> Option<Self> {
+        let one = Scalar::one();
         let mut sum = JacobianMontPoint::infinity();
         for (point, scalar) in terms {
-            if !scalar.is_zero() {
+            if scalar.0 == one.0 {
+                sum = sum.public_add_affine(&point.0);
+            } else if !scalar.is_zero() {
                 sum = sum.public_add_affine(&point.0.multiply(scalar));
             }
         }
@@ -581,8 +656,8 @@ impl AffineMontPoint {
     /// Becomes `row`'s point `digit - 1`, or zeros for a zero `digit`, with
     /// `y` negated if `negate` is 1, in constant time.
     #[cfg(rind_backend = "x86_64")]
-    fn select_w7(&mut self, row: &low::P256GeneratorRow, digit: u8, negate: u8) {
-        low::p256_select_w7(&mut self.xy, row, digit);
+    fn select_w7(&mut self, row: &[u64; 512], digit: u8, negate: u8) {
+        low::bignum_aff_point_select_p256(&mut self.xy, row, digit);
         let y = self.y();
         low::bignum_mux(
             negate.into(),
@@ -742,17 +817,17 @@ impl JacobianMontPoint {
     /// No addition doubles, which `p256_point_add_affine` cannot: the
     /// accumulator sums lower windows, so it is a smaller integer than the
     /// table point, in magnitude, and below n.
+    ///
+    /// The rows are indexed rather than zipped with the windows, which
+    /// Aeneas cannot translate.
     #[cfg(rind_backend = "x86_64")]
     fn base_multiply(scalar: &Scalar) -> Self {
-        let mut windows = precomp::CURVE_GENERATOR_PRECOMP
-            .iter()
-            .zip(scalar.booth_recoded::<BASE_WINDOW>());
+        let windows = scalar.booth_w7();
         let mut point = AffineMontPoint::default();
 
-        // unwrap: the number of windows is constant. The first point is
-        // infinity, with a zero `z`, when its digit is zero.
-        let (row, (digit, sign)) = windows.next().unwrap();
-        point.select_w7(row, digit, sign);
+        // The first point is infinity, with a zero `z`, when its digit is zero.
+        let (digit, sign) = windows[0];
+        point.select_w7(&precomp::CURVE_GENERATOR_PRECOMP[0], digit, sign);
         let mut result = Self::from_affine(&point);
         low::bignum_mux(
             digit.into(),
@@ -761,8 +836,10 @@ impl JacobianMontPoint {
             &[0; 4],
         );
 
-        for (row, (digit, sign)) in windows {
-            point.select_w7(row, digit, sign);
+        #[allow(clippy::needless_range_loop)]
+        for w in 1..37 {
+            let (digit, sign) = windows[w];
+            point.select_w7(&precomp::CURVE_GENERATOR_PRECOMP[w], digit, sign);
             low::p256_point_add_affine(&mut result.xyz, &point.xy);
         }
         result
@@ -1261,10 +1338,24 @@ impl Scalar {
         }
     }
 
-    /// Iterator of `256 / W + 1` W-bit elements, LSB first, sign bit is separate
+    /// The 37 Booth-recoded 7-bit windows of this scalar, lowest first, each
+    /// a digit and its sign.
     #[cfg(rind_backend = "x86_64")]
-    fn booth_recoded<const W: usize>(&self) -> BoothRecode<W> {
-        BoothRecode::new(self)
+    fn booth_w7(&self) -> [(u8, u8); 37] {
+        let mut windows = [(0, 0); 37];
+        windows[0] = booth_recode_w7(((self.0[0] << 1) & 0xff) as u8);
+        // Indexed rather than `iter_mut`, which Aeneas cannot translate.
+        #[allow(clippy::needless_range_loop)]
+        for w in 1..37 {
+            let bit = 7 * w - 1;
+            let (word, shift) = (bit / 64, bit % 64);
+            let mut value = self.0[word] >> shift;
+            if shift > 56 && word < 3 {
+                value |= self.0[word + 1] << (64 - shift);
+            }
+            windows[w] = booth_recode_w7((value & 0xff) as u8);
+        }
+        windows
     }
 
     /// Another copy of this scalar.
@@ -1348,76 +1439,24 @@ impl Iterator for Bits<'_> {
     }
 }
 
+/// The signed digit and sign of an 8-bit Booth window, as the comment above
+/// BoringSSL's `ec_GFp_nistp_recode_scalar_bits` describes.
 #[cfg(rind_backend = "x86_64")]
-struct BoothRecode<const W: usize> {
-    // little endian
-    bytes: [u8; 33],
-    index: usize,
+fn booth_recode_w7(v: u8) -> (u8, u8) {
+    let sign = !((v >> 7).wrapping_sub(1));
+
+    let d = (1u16 << 8).wrapping_sub(v as u16).wrapping_sub(1) as u8;
+    let d = (d & sign) | (v & !sign);
+    let d = (d >> 1).wrapping_add(d & 1);
+
+    (d, sign & 1)
 }
-
-#[cfg(rind_backend = "x86_64")]
-impl<const W: usize> BoothRecode<W> {
-    fn new(scalar: &Scalar) -> Self {
-        let mut bytes = [0u8; 33];
-
-        bytes[0..8].copy_from_slice(&scalar.0[0].to_le_bytes());
-        bytes[8..16].copy_from_slice(&scalar.0[1].to_le_bytes());
-        bytes[16..24].copy_from_slice(&scalar.0[2].to_le_bytes());
-        bytes[24..32].copy_from_slice(&scalar.0[3].to_le_bytes());
-
-        Self { bytes, index: 0 }
-    }
-
-    fn recode(v: u8) -> (u8, u8) {
-        // see the comment above boringssl's `ec_GFp_nistp_recode_scalar_bits` for
-        // references
-        let sign = !((v >> W).wrapping_sub(1));
-
-        let d = (1u16 << (W + 1)).wrapping_sub(v as u16).wrapping_sub(1) as u8;
-        let d = (d & sign) | (v & !sign);
-        let d = (d >> 1).wrapping_add(d & 1);
-
-        (d, sign & 1)
-    }
-}
-
-#[cfg(rind_backend = "x86_64")]
-impl<const W: usize> Iterator for BoothRecode<W> {
-    type Item = (u8, u8);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let mask = ((1u16 << (W + 1)) - 1) as u8;
-
-        match self.index {
-            0 => {
-                self.index += W;
-                Some(Self::recode((self.bytes[0] << 1) & mask))
-            }
-
-            _ if self.index < 256 => {
-                let offset = (self.index - 1) / 8;
-                let shift = (self.index - 1) % 8;
-                let value = (((self.bytes[offset] as u16) | ((self.bytes[offset + 1] as u16) << 8))
-                    >> shift) as u8
-                    & mask;
-                self.index += W;
-                Some(Self::recode(value))
-            }
-
-            _ => None,
-        }
-    }
-}
-
-/// The generator table's window, aws-lc's.
-#[cfg(rind_backend = "x86_64")]
-const BASE_WINDOW: usize = 7;
 
 /// 37 rows of the 64 multiples `i * 2^(7 * j) * G`, one row per 7-bit window.
 ///
 /// 37 := 256 / 7 + 1, as Booth recoding carries into a window above the top bit.
 #[cfg(rind_backend = "x86_64")]
-type AffineMontPointTable = [low::P256GeneratorRow; 37];
+type AffineMontPointTable = [[u64; 512]; 37];
 
 /// 43 rows of the 32 multiples `i * 2^(6 * j) * G`, one row per 6-bit window.
 ///
@@ -1613,7 +1652,7 @@ mod tests {
             // Each digit at bit 7i, as a byte's multiple at byte 7i / 8.
             let mut sum = [0i64; 33];
             let mut windows = 0;
-            for (i, (digit, sign)) in Scalar(words).booth_recoded::<BASE_WINDOW>().enumerate() {
+            for (i, (digit, sign)) in Scalar(words).booth_w7().into_iter().enumerate() {
                 let digit = i64::from(digit) * if sign == 1 { -1 } else { 1 };
                 sum[7 * i / 8] += digit << (7 * i % 8);
                 windows += 1;

@@ -1,28 +1,50 @@
 // Written for Graviola by Joe Birr-Pixton, 2024.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
-// AVX2 by-8 implementation inspired by YuriMyakotin/ChaCha20-SIMD
+// AVX2 kernel inspired by YuriMyakotin/ChaCha20-SIMD
 
-//! ChaCha20: where the CPU has AVX2, rind's AVX2 kernels from two blocks;
-//! where it has SSSE3, aws-lc's `chacha-x86_64` SSSE3 routine, four blocks at
-//! a time, above 128 bytes, as aws-lc runs it, imported by
-//! `admin/import-aws-lc`; otherwise HACL*'s verified rounds in
-//! general-purpose registers, where aws-lc runs integer code.
+//! ChaCha20. Where the CPU has AVX2: from 256 bytes, pyca/verified-garbage's
+//! AVX2 routine, or its AVX-512 VL one where the CPU has that too, imported
+//! by `admin/import-vg`; below that, rind's two-block AVX2 kernel from two
+//! blocks, and HACL*'s verified rounds in general-purpose registers for one.
+//! VG's AVX2 routine runs what follows its eight-block loop on four-, two-,
+//! and one-block paths, which lost to the kernel, so on either routine a
+//! remainder of 65 to 255 bytes after the last whole 512-byte group runs on
+//! the kernel. Where the CPU has SSSE3 but not AVX2, aws-lc's `chacha-x86_64`
+//! SSSE3 routine, four blocks at a time, above 128 bytes, as aws-lc runs it,
+//! imported by `admin/import-aws-lc`; otherwise HACL*'s rounds, where aws-lc
+//! runs integer code.
 //!
-//! The aws-lc assembly is not formally verified: its correctness rests on its
-//! use and testing in OpenSSL, BoringSSL, and aws-lc, and on rind's tests of
-//! it against RFC 8439, Wycheproof, aws-lc-rs, and HACL*'s rounds.
+//! verified-garbage proves its routines correct and constant time in Lean,
+//! over its own models of the instructions, which `admin/prove vg`
+//! cosimulates. `proofs/Rind/X86_64/VgChaCha20.lean` restates VG's theorems
+//! as axioms and proves the glue around them for requests from 256 bytes,
+//! assuming the kernel's contract (`Kernel`) and that the CPU-feature checks
+//! find AVX2 or AVX-512 VL (`RunsVg`). The kernel and the aws-lc assembly
+//! are not formally verified: their correctness rests on rind's tests of them
+//! against RFC 8439, Wycheproof, aws-lc-rs, and HACL*'s rounds, and aws-lc's
+//! on its use in OpenSSL, BoringSSL, and aws-lc.
 
 use core::arch::x86_64::*;
+use core::mem::MaybeUninit;
 
-use super::cpu::{HaveAvx2, HaveSsse3};
+use super::cpu::{HaveAvx2, HaveAvx512Vl, HaveSsse3};
+use super::vg;
 use crate::low::generic::chacha20;
 
 pub(crate) struct ChaCha20 {
+    /// As little-endian words, which on x86_64 are also the bytes VG reads.
     key: [u32; 8],
     /// The block counter, then the 96-bit nonce.
     counter_nonce: [u32; 4],
-    avx2: Option<HaveAvx2>,
+    vg: Option<Vg>,
     ssse3: Option<HaveSsse3>,
+}
+
+/// Which of verified-garbage's routines the CPU runs.
+#[derive(Clone, Copy)]
+enum Vg {
+    Avx2(HaveAvx2),
+    Avx512Vl(HaveAvx512Vl),
 }
 
 impl ChaCha20 {
@@ -31,32 +53,48 @@ impl ChaCha20 {
         Self {
             key: words(key),
             counter_nonce: words(nonce),
-            avx2: HaveAvx2::check(),
+            vg: match (HaveAvx512Vl::check(), HaveAvx2::check()) {
+                (Some(t), _) => Some(Vg::Avx512Vl(t)),
+                (None, Some(t)) => Some(Vg::Avx2(t)),
+                (None, None) => None,
+            },
             ssse3: HaveSsse3::check(),
         }
     }
 
     /// XORs the keystream into `buffer`, starting at the current block, then
     /// moves the counter past every block it touched.
+    ///
+    /// The 32-bit counter must not pass 2^32 - 1, which callers rule out
+    /// with `mid::chacha20::check_counter`.
     pub(crate) fn cipher(&mut self, buffer: &mut [u8]) {
-        match (self.avx2, self.ssse3, buffer.len()) {
-            // SAFETY: the token proves the `avx2` cpu feature
-            (Some(_), _, 65..) => unsafe { cipher_avx2(&self.key, &self.counter_nonce, buffer) },
-            (None, Some(_), len @ SSSE3_4X_MIN_LEN..) => {
-                let ptr = buffer.as_mut_ptr();
-                // SAFETY: `buffer` is `len` readable and writable bytes, which
-                // the routine allows to alias exactly, and `key` and
-                // `counter_nonce` are 8 and 4 words. The token proves the
-                // `ssse3` cpu feature. Its 32-bit counter wraps unspecified
-                // past 2^32 blocks, which callers rule out with
-                // `mid::chacha20::check_counter`.
-                unsafe {
-                    asm_call!(unsafe extern "sysv64" chacha20_ctr32_ssse3_4x(ptr, ptr, len, &self.key, &self.counter_nonce))
+        match (self.vg, self.ssse3, buffer.len()) {
+            (Some(vg), _, len @ VG_MIN_LEN..) => {
+                // VG's AVX2 routine runs what follows its eight-block loop
+                // on narrower paths, which lose to the kernel for two to
+                // four blocks.
+                let tail = match len % 512 {
+                    tail @ 65..VG_MIN_LEN => tail,
+                    _ => 0,
+                };
+                let (whole, rest) = buffer.split_at_mut(len - tail);
+                cipher_vg(vg, &self.key, &self.counter_nonce, whole);
+                if !rest.is_empty() {
+                    let mut counter_nonce = self.counter_nonce;
+                    counter_nonce[0] = counter_nonce[0].wrapping_add((whole.len() / 64) as u32);
+                    // SAFETY: either of VG's tokens proves the `avx2` cpu feature.
+                    unsafe { cipher_avx2(&self.key, &counter_nonce, rest) };
                 }
             }
-            // As in aws-lc, which runs integer code here. The AVX2 kernels
-            // compute one block as a single serial chain, which Zen 5's
-            // two-cycle vector latency makes slower than this.
+            // SAFETY: either of VG's tokens proves the `avx2` cpu feature.
+            (Some(_), _, 65..) => unsafe { cipher_avx2(&self.key, &self.counter_nonce, buffer) },
+            // SAFETY: the buffer is at least `SSSE3_4X_MIN_LEN` bytes.
+            (None, Some(t), SSSE3_4X_MIN_LEN..) => unsafe {
+                cipher_ssse3_4x(t, &self.key, &self.counter_nonce, buffer)
+            },
+            // As in aws-lc, which runs integer code here. The kernel computes
+            // one block as a single serial chain, which Zen 5's two-cycle
+            // vector latency makes slower than this.
             _ => chacha20::cipher(&self.key, &self.counter_nonce, buffer),
         }
         self.counter_nonce[0] =
@@ -64,15 +102,141 @@ impl ChaCha20 {
     }
 }
 
+/// verified-garbage's streaming state, which only its routines read or
+/// write, and which they read only where they have written: 768 bytes,
+/// aligned to a cache line as VG's own wrapper aligns it.
+#[repr(C, align(64))]
+struct VgState(MaybeUninit<[u64; 96]>);
+
+// One wrapper per routine, each a single call, so that a proof can state
+// each routine's contract about its own wrapper.
+impl VgState {
+    /// A state for `init` to start.
+    #[inline(always)]
+    fn uninit() -> Self {
+        Self(MaybeUninit::uninit())
+    }
+
+    /// verified-garbage's `vg_chacha20_init`: starts the keystream for `key`
+    /// at the block counter and nonce `counter_nonce`.
+    #[inline(always)]
+    fn init(&mut self, key: &[u32; 8], counter_nonce: &[u32; 4]) {
+        // Little-endian words are the bytes VG reads.
+        let (key, counter_nonce) = (
+            key.as_ptr().cast::<[u8; 32]>(),
+            counter_nonce.as_ptr().cast::<[u8; 16]>(),
+        );
+        // SAFETY: `self` is 768 writable bytes, `key` 32 readable bytes, and
+        // `counter_nonce` 16. `self` is exclusively borrowed, so it overlaps
+        // neither input, which VG lets overlap each other; and none overlaps
+        // the return address or wraps the address space, as no object does.
+        unsafe {
+            asm_call!(unsafe extern "sysv64" (vg::vg_chacha20_init::vg_chacha20_init)(self.0.as_mut_ptr(), key, counter_nonce))
+        }
+    }
+
+    /// verified-garbage's `vg_chacha20_apply_avx2`: XORs the next
+    /// `buffer.len()` bytes of the keystream into `buffer` and returns 1, or
+    /// returns 0 and changes nothing if fewer are left.
+    ///
+    /// # Safety
+    ///
+    /// `init` must have started the state: the routine branches on the count
+    /// of keystream left that `init` writes.
+    #[inline(always)]
+    unsafe fn apply_avx2(&mut self, _: HaveAvx2, buffer: &mut [u8]) -> u32 {
+        // SAFETY: `self` is 768 readable and writable bytes, of which the
+        // routine reads only those `init`, which the caller ensures has run,
+        // or the routine itself wrote, and `buffer` is `len`; they are
+        // distinct objects, so neither overlaps the other, the return
+        // address, or the stack below it, or wraps the address space. The
+        // token proves the `avx` and `avx2` cpu features.
+        unsafe {
+            asm_call!(unsafe extern "sysv64" (vg::vg_chacha20_apply_avx2::vg_chacha20_apply_avx2)(self.0.as_mut_ptr(), buffer.as_mut_ptr(), buffer.len()))
+        }
+    }
+
+    /// verified-garbage's `vg_chacha20_apply_avx512vl`, as `apply_avx2`.
+    ///
+    /// # Safety
+    ///
+    /// As `apply_avx2`'s.
+    #[inline(always)]
+    unsafe fn apply_avx512vl(&mut self, _: HaveAvx512Vl, buffer: &mut [u8]) -> u32 {
+        // SAFETY: as `apply_avx2`'s; the token proves the routine's cpu
+        // features.
+        unsafe {
+            asm_call!(unsafe extern "sysv64" (vg::vg_chacha20_apply_avx512vl::vg_chacha20_apply_avx512vl)(self.0.as_mut_ptr(), buffer.as_mut_ptr(), buffer.len()))
+        }
+    }
+}
+
+/// XORs the keystream for `key` and `counter_nonce` into `buffer` on
+/// verified-garbage's routines: `init` starts the keystream at the block
+/// counter, and `apply` XORs it in. Out of line, so the paths that don't
+/// run it don't set up its 768-byte, cache-aligned frame.
+#[inline(never)]
+fn cipher_vg(vg: Vg, key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]) {
+    let mut state = VgState::uninit();
+    state.init(key, counter_nonce);
+    let ok = match vg {
+        // SAFETY: `init` has started the state.
+        Vg::Avx2(t) => unsafe { state.apply_avx2(t, buffer) },
+        // SAFETY: `init` has started the state.
+        Vg::Avx512Vl(t) => unsafe { state.apply_avx512vl(t, buffer) },
+    };
+    // `apply` refuses, leaving `buffer` as it was, only a keystream past
+    // block 2^32 - 1, which the callers rule out: never pass on plaintext.
+    assert_eq!(ok, 1, "ChaCha20 block counter would overflow");
+}
+
+/// aws-lc's SSSE3 routine, four blocks at a time.
+///
+/// # Safety
+///
+/// `buffer` must not be empty: given no bytes, the routine's byte loop
+/// counts its length down past zero, out of the buffer.
+unsafe fn cipher_ssse3_4x(
+    _: HaveSsse3,
+    key: &[u32; 8],
+    counter_nonce: &[u32; 4],
+    buffer: &mut [u8],
+) {
+    let (ptr, len) = (buffer.as_mut_ptr(), buffer.len());
+    // SAFETY: `buffer` is `len` readable and writable bytes, at least one as
+    // the caller ensures, which the routine allows to alias exactly, and
+    // `key` and `counter_nonce` are 8 and 4 words. The token proves the
+    // `ssse3` cpu feature. Its 32-bit counter wraps unspecified past 2^32
+    // blocks, which callers rule out.
+    unsafe {
+        asm_call!(unsafe extern "sysv64" chacha20_ctr32_ssse3_4x(ptr, ptr, len, key, counter_nonce))
+    }
+}
+
 /// `bytes` as little-endian words.
+//
+// Indexes rather than splitting into chunks, which Aeneas cannot translate,
+// so `proofs/` can prove `cipher`.
 fn words<const B: usize, const W: usize>(bytes: &[u8; B]) -> [u32; W] {
     const { assert!(B == 4 * W) };
     let mut words = [0; W];
-    for (w, b) in words.iter_mut().zip(bytes.as_chunks::<4>().0) {
-        *w = u32::from_le_bytes(*b);
+    for i in 0..W {
+        words[i] = u32::from_le_bytes([
+            bytes[4 * i],
+            bytes[4 * i + 1],
+            bytes[4 * i + 2],
+            bytes[4 * i + 3],
+        ]);
     }
     words
 }
+
+/// From this length verified-garbage's routines run, and from it on, a
+/// remainder of 65 to 255 bytes after the last whole 512-byte group runs on
+/// the two-block kernel instead: VG's AVX2 routine runs them on narrower paths
+/// than its eight-block loop, which lost to the kernel by up to 1.73x on
+/// Arrow Lake.
+const VG_MIN_LEN: usize = 256;
 
 /// From this length aws-lc runs its SSSE3 routine, which computes four
 /// blocks at a time, rather than its integer one.
@@ -147,6 +311,8 @@ macro_rules! rotate_left {
     };
 }
 
+/// The kernel, two blocks at a time, for the lengths below verified-garbage's
+/// routines and their short tails.
 #[target_feature(enable = "ssse3,avx2")]
 fn cipher_avx2(key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]) {
     // SAFETY: `SIGMA`, `key`, and `counter_nonce` are all readable
@@ -163,254 +329,8 @@ fn cipher_avx2(key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]) {
         )
     };
 
-    let (by8, remainder) = buffer.as_chunks_mut::<512>();
-    for block in by8 {
-        core_8x(z07, &mut z8f, block);
-    }
-    for block in remainder.chunks_mut(128) {
+    for block in buffer.chunks_mut(128) {
         core_2x(z07, &mut z8f, block);
-    }
-}
-
-/// Computes 8 blocks.  Does _NOT_ handle ragged output.
-#[target_feature(enable = "avx2")]
-fn core_8x(t07: __m256i, z8f: &mut __m256i, xor_out_512: &mut [u8; 512]) {
-    let t8f = *z8f;
-    *z8f = _mm256_add_epi32(*z8f, _mm256_set_epi32(0, 0, 0, 0, 0, 0, 0, 8));
-
-    let z03_z03 = _mm256_broadcastsi128_si256(_mm256_extracti128_si256(t07, 1));
-    let z47_z47 = _mm256_broadcastsi128_si256(_mm256_extracti128_si256(t07, 0));
-    let z8b_z8b = _mm256_broadcastsi128_si256(_mm256_extracti128_si256(t8f, 1));
-    let zcf_zcf = _mm256_broadcastsi128_si256(_mm256_extracti128_si256(t8f, 0));
-
-    let save_z03 = z03_z03;
-    let save_z47 = z47_z47;
-    let save_z8b = z8b_z8b;
-    let save_zcf = zcf_zcf;
-
-    let mut z03_z03 = [z03_z03; 4];
-    let mut z47_z47 = [z47_z47; 4];
-    let mut z8b_z8b = [z8b_z8b; 4];
-    let mut zcf_zcf = [zcf_zcf; 4];
-
-    zcf_zcf[0] = _mm256_add_epi32(zcf_zcf[0], _mm256_set_epi32(0, 0, 0, 0, 0, 0, 0, 4));
-    zcf_zcf[1] = _mm256_add_epi32(zcf_zcf[1], _mm256_set_epi32(0, 0, 0, 1, 0, 0, 0, 5));
-    zcf_zcf[2] = _mm256_add_epi32(zcf_zcf[2], _mm256_set_epi32(0, 0, 0, 2, 0, 0, 0, 6));
-    zcf_zcf[3] = _mm256_add_epi32(zcf_zcf[3], _mm256_set_epi32(0, 0, 0, 3, 0, 0, 0, 7));
-
-    for _ in 0..10 {
-        for i in 0..4 {
-            z03_z03[i] = _mm256_add_epi32(z03_z03[i], z47_z47[i]);
-        }
-        for i in 0..4 {
-            zcf_zcf[i] = _mm256_xor_si256(zcf_zcf[i], z03_z03[i]);
-        }
-        for z in &mut zcf_zcf {
-            *z = rotate_left!(*z, 16);
-        }
-
-        for i in 0..4 {
-            z8b_z8b[i] = _mm256_add_epi32(z8b_z8b[i], zcf_zcf[i]);
-        }
-        for i in 0..4 {
-            z47_z47[i] = _mm256_xor_si256(z47_z47[i], z8b_z8b[i]);
-        }
-        for z in &mut z47_z47 {
-            *z = rotate_left!(*z, 12);
-        }
-
-        for i in 0..4 {
-            z03_z03[i] = _mm256_add_epi32(z03_z03[i], z47_z47[i]);
-        }
-        for i in 0..4 {
-            zcf_zcf[i] = _mm256_xor_si256(zcf_zcf[i], z03_z03[i]);
-        }
-        for z in &mut zcf_zcf {
-            *z = rotate_left!(*z, 8);
-        }
-
-        for i in 0..4 {
-            z8b_z8b[i] = _mm256_add_epi32(z8b_z8b[i], zcf_zcf[i]);
-        }
-        for i in 0..4 {
-            z47_z47[i] = _mm256_xor_si256(z47_z47[i], z8b_z8b[i]);
-        }
-        for z in &mut z47_z47 {
-            *z = rotate_left!(*z, 7);
-        }
-
-        for z in &mut z47_z47 {
-            *z = _mm256_shuffle_epi32(*z, 0b00_11_10_01);
-        }
-        for z in &mut z8b_z8b {
-            *z = _mm256_shuffle_epi32(*z, 0b01_00_11_10);
-        }
-        for z in &mut zcf_zcf {
-            *z = _mm256_shuffle_epi32(*z, 0b10_01_00_11);
-        }
-
-        for i in 0..4 {
-            z03_z03[i] = _mm256_add_epi32(z03_z03[i], z47_z47[i]);
-        }
-        for i in 0..4 {
-            zcf_zcf[i] = _mm256_xor_si256(zcf_zcf[i], z03_z03[i]);
-        }
-        for z in &mut zcf_zcf {
-            *z = rotate_left!(*z, 16);
-        }
-
-        for i in 0..4 {
-            z8b_z8b[i] = _mm256_add_epi32(z8b_z8b[i], zcf_zcf[i]);
-        }
-        for i in 0..4 {
-            z47_z47[i] = _mm256_xor_si256(z47_z47[i], z8b_z8b[i]);
-        }
-        for z in &mut z47_z47 {
-            *z = rotate_left!(*z, 12);
-        }
-
-        for i in 0..4 {
-            z03_z03[i] = _mm256_add_epi32(z03_z03[i], z47_z47[i]);
-        }
-        for i in 0..4 {
-            zcf_zcf[i] = _mm256_xor_si256(zcf_zcf[i], z03_z03[i]);
-        }
-        for z in &mut zcf_zcf {
-            *z = rotate_left!(*z, 8);
-        }
-
-        for i in 0..4 {
-            z8b_z8b[i] = _mm256_add_epi32(z8b_z8b[i], zcf_zcf[i]);
-        }
-        for i in 0..4 {
-            z47_z47[i] = _mm256_xor_si256(z47_z47[i], z8b_z8b[i]);
-        }
-        for z in &mut z47_z47 {
-            *z = rotate_left!(*z, 7);
-        }
-
-        for z in &mut z47_z47 {
-            *z = _mm256_shuffle_epi32(*z, 0b10_01_00_11);
-        }
-        for z in &mut z8b_z8b {
-            *z = _mm256_shuffle_epi32(*z, 0b01_00_11_10);
-        }
-        for z in &mut zcf_zcf {
-            *z = _mm256_shuffle_epi32(*z, 0b00_11_10_01);
-        }
-    }
-
-    for i in 0..4 {
-        z03_z03[i] = _mm256_add_epi32(z03_z03[i], save_z03);
-        z47_z47[i] = _mm256_add_epi32(z47_z47[i], save_z47);
-        z8b_z8b[i] = _mm256_add_epi32(z8b_z8b[i], save_z8b);
-        zcf_zcf[i] = _mm256_add_epi32(zcf_zcf[i], save_zcf);
-    }
-
-    // reapply counter adjustments as save_zcf did not include them
-    zcf_zcf[0] = _mm256_add_epi32(zcf_zcf[0], _mm256_set_epi32(0, 0, 0, 0, 0, 0, 0, 4));
-    zcf_zcf[1] = _mm256_add_epi32(zcf_zcf[1], _mm256_set_epi32(0, 0, 0, 1, 0, 0, 0, 5));
-    zcf_zcf[2] = _mm256_add_epi32(zcf_zcf[2], _mm256_set_epi32(0, 0, 0, 2, 0, 0, 0, 6));
-    zcf_zcf[3] = _mm256_add_epi32(zcf_zcf[3], _mm256_set_epi32(0, 0, 0, 3, 0, 0, 0, 7));
-
-    // our eight output keystream blocks
-    let a0 = _mm256_permute2x128_si256(z03_z03[0], z47_z47[0], 0b0011_0001);
-    let a1 = _mm256_permute2x128_si256(z8b_z8b[0], zcf_zcf[0], 0b0011_0001);
-    let b0 = _mm256_permute2x128_si256(z03_z03[1], z47_z47[1], 0b0011_0001);
-    let b1 = _mm256_permute2x128_si256(z8b_z8b[1], zcf_zcf[1], 0b0011_0001);
-
-    let c0 = _mm256_permute2x128_si256(z03_z03[2], z47_z47[2], 0b0011_0001);
-    let c1 = _mm256_permute2x128_si256(z8b_z8b[2], zcf_zcf[2], 0b0011_0001);
-    let d0 = _mm256_permute2x128_si256(z03_z03[3], z47_z47[3], 0b0011_0001);
-    let d1 = _mm256_permute2x128_si256(z8b_z8b[3], zcf_zcf[3], 0b0011_0001);
-
-    let e0 = _mm256_permute2x128_si256(z03_z03[0], z47_z47[0], 0b0010_0000);
-    let e1 = _mm256_permute2x128_si256(z8b_z8b[0], zcf_zcf[0], 0b0010_0000);
-    let f0 = _mm256_permute2x128_si256(z03_z03[1], z47_z47[1], 0b0010_0000);
-    let f1 = _mm256_permute2x128_si256(z8b_z8b[1], zcf_zcf[1], 0b0010_0000);
-
-    let g0 = _mm256_permute2x128_si256(z03_z03[2], z47_z47[2], 0b0010_0000);
-    let g1 = _mm256_permute2x128_si256(z8b_z8b[2], zcf_zcf[2], 0b0010_0000);
-    let h0 = _mm256_permute2x128_si256(z03_z03[3], z47_z47[3], 0b0010_0000);
-    let h1 = _mm256_permute2x128_si256(z8b_z8b[3], zcf_zcf[3], 0b0010_0000);
-
-    let ptr: *mut __m256i = xor_out_512.as_mut_ptr().cast();
-
-    // SAFETY: `xor_out_512` is 512 bytes. Observe that
-    // `ptr` is unaligned which is allowed as we only use it here with unaligned
-    // stores/loads.
-    unsafe {
-        _mm256_storeu_si256(
-            ptr.add(0),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(0)), a0),
-        );
-        _mm256_storeu_si256(
-            ptr.add(1),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(1)), a1),
-        );
-
-        _mm256_storeu_si256(
-            ptr.add(2),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(2)), b0),
-        );
-        _mm256_storeu_si256(
-            ptr.add(3),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(3)), b1),
-        );
-
-        _mm256_storeu_si256(
-            ptr.add(4),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(4)), c0),
-        );
-        _mm256_storeu_si256(
-            ptr.add(5),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(5)), c1),
-        );
-
-        _mm256_storeu_si256(
-            ptr.add(6),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(6)), d0),
-        );
-        _mm256_storeu_si256(
-            ptr.add(7),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(7)), d1),
-        );
-
-        _mm256_storeu_si256(
-            ptr.add(8),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(8)), e0),
-        );
-        _mm256_storeu_si256(
-            ptr.add(9),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(9)), e1),
-        );
-
-        _mm256_storeu_si256(
-            ptr.add(10),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(10)), f0),
-        );
-        _mm256_storeu_si256(
-            ptr.add(11),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(11)), f1),
-        );
-
-        _mm256_storeu_si256(
-            ptr.add(12),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(12)), g0),
-        );
-        _mm256_storeu_si256(
-            ptr.add(13),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(13)), g1),
-        );
-
-        _mm256_storeu_si256(
-            ptr.add(14),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(14)), h0),
-        );
-        _mm256_storeu_si256(
-            ptr.add(15),
-            _mm256_xor_si256(_mm256_loadu_si256(ptr.add(15)), h1),
-        );
     }
 }
 
@@ -531,54 +451,141 @@ const SIGMA: [u8; 16] = *b"expand 32-byte k";
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::low::x86_64::adx_mux::tests::Rng;
+    use crate::low::x86_64::ct_sde;
     use crate::low::{ct, hchacha20};
 
     // The CPU's fastest path hides the others from every other test, so
-    // HACL*'s rounds and aws-lc's SSSE3 routine are checked against it
-    // directly, under a key `admin/ctgrind` keeps secret: every length
-    // through the paths' boundaries and two four-block batches, each
-    // continued by a second call, which a whole number of blocks leaves
-    // contiguous.
+    // each path the CPU can run is checked against HACL*'s rounds directly,
+    // under a key `admin/ctgrind` keeps secret: the dispatch for each of
+    // verified-garbage's routines, SSSE3, and none, and VG's routines and
+    // the two-block kernel alone, at every length through the paths'
+    // boundaries and past VG's eight- and sixteen-block loops and the
+    // kernel's tails, each continued by a second call, which a whole number
+    // of blocks leaves contiguous.
     #[test]
     fn paths_match() {
         let key = core::array::from_fn(|i| i as u8);
         ct::secret_slice(&key);
         let nonce = core::array::from_fn(|i| (i * 7) as u8);
-        for len in 0..=600 {
+        let base = ChaCha20::new(&key, &nonce);
+        let vgs = [
+            HaveAvx512Vl::check().map(Vg::Avx512Vl),
+            HaveAvx2::check().map(Vg::Avx2),
+        ];
+        let mut paths = vec![ChaCha20 {
+            vg: None,
+            ssse3: None,
+            ..base
+        }];
+        if let Some(t) = HaveSsse3::check() {
+            paths.push(ChaCha20 {
+                vg: None,
+                ssse3: Some(t),
+                ..base
+            });
+        }
+        for vg in vgs.into_iter().flatten() {
+            paths.push(ChaCha20 {
+                vg: Some(vg),
+                ..base
+            });
+        }
+        type Alone = fn(&ChaCha20, &mut [u8]);
+        let mut alone: Vec<(&str, Alone)> = Vec::new();
+        if HaveAvx512Vl::check().is_some() {
+            alone.push(("VG AVX-512 VL", |c, b| {
+                cipher_vg(
+                    Vg::Avx512Vl(HaveAvx512Vl::check().unwrap()),
+                    &c.key,
+                    &c.counter_nonce,
+                    b,
+                )
+            }));
+        }
+        if HaveAvx2::check().is_some() {
+            alone.push(("VG AVX2", |c, b| {
+                cipher_vg(
+                    Vg::Avx2(HaveAvx2::check().unwrap()),
+                    &c.key,
+                    &c.counter_nonce,
+                    b,
+                )
+            }));
+            // SAFETY: the check proves the `avx2` cpu feature.
+            alone.push(("kernel", |c, b| unsafe {
+                cipher_avx2(&c.key, &c.counter_nonce, b)
+            }));
+        }
+
+        for len in 0..=1700 {
             let mut want = vec![0x5a; len + 200];
-            let mut fastest = ChaCha20::new(&key, &nonce);
             let (first, second) = want.split_at_mut(len);
-            fastest.cipher(first);
-            fastest.cipher(second);
+            let mut counter_nonce = base.counter_nonce;
+            chacha20::cipher(&base.key, &counter_nonce, first);
+            counter_nonce[0] += len.div_ceil(64) as u32;
+            chacha20::cipher(&base.key, &counter_nonce, second);
             ct::public_slice(&want);
 
-            let mut ssse3 = ChaCha20 {
-                avx2: None,
-                ..ChaCha20::new(&key, &nonce)
-            };
-            let mut got = vec![0x5a; len + 200];
-            let (first, second) = got.split_at_mut(len);
-            ssse3.cipher(first);
-            ssse3.cipher(second);
-            ct::public_slice(&got);
-            assert_eq!(got, want, "SSSE3, {len} bytes, then 200");
+            for (i, path) in paths.iter().enumerate() {
+                let mut c = ChaCha20 { ..*path };
+                let mut got = vec![0x5a; len + 200];
+                let (first, second) = got.split_at_mut(len);
+                c.cipher(first);
+                c.cipher(second);
+                ct::public_slice(&got);
+                assert_eq!(got, want, "path {i}, {len} bytes, then 200");
 
-            let mut got = vec![0x5a; len + 200];
-            let (first, second) = got.split_at_mut(len);
-            let mut counter_nonce = words(&nonce);
-            chacha20::cipher(&words(&key), &counter_nonce, first);
-            counter_nonce[0] += len.div_ceil(64) as u32;
-            chacha20::cipher(&words(&key), &counter_nonce, second);
-            ct::public_slice(&got);
-            assert_eq!(got, want, "HACL*, {len} bytes, then 200");
-
-            if len % 64 == 0 {
-                let mut whole = vec![0x5a; len + 200];
-                ChaCha20::new(&key, &nonce).cipher(&mut whole);
-                ct::public_slice(&whole);
-                assert_eq!(whole, want, "{len} bytes, then 200, at once");
+                if len % 64 == 0 {
+                    let mut whole = vec![0x5a; len + 200];
+                    ChaCha20 { ..*path }.cipher(&mut whole);
+                    ct::public_slice(&whole);
+                    assert_eq!(whole, want, "path {i}, {len} bytes, then 200, at once");
+                }
+            }
+            for (name, f) in &alone {
+                let mut got = vec![0x5a; len];
+                f(&base, &mut got);
+                ct::public_slice(&got);
+                assert_eq!(got, want[..len], "{name}, {len} bytes");
             }
         }
+    }
+
+    /// verified-garbage's routines refuse a keystream past block 2^32 - 1,
+    /// which rind's callers never ask for, so the call panics rather than
+    /// return the buffer unencrypted; the last block itself is allowed.
+    #[test]
+    fn vg_counter_limit() {
+        let Some(t) = HaveAvx2::check() else { return };
+        let nonce = [u32::MAX, 0, 0, 0];
+        let mut last = [0u8; 64];
+        cipher_vg(Vg::Avx2(t), &[0; 8], &nonce, &mut last);
+        assert_ne!(last, [0; 64]);
+        let mut past = [0u8; 65];
+        let refused = std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
+            cipher_vg(Vg::Avx2(t), &[0; 8], &nonce, &mut past)
+        }));
+        assert!(refused.is_err());
+        assert_eq!(past, [0; 65]);
+    }
+
+    // verified-garbage's AVX-512 VL routine, which valgrind cannot run, with
+    // a secret key, nonce, and message, for `admin/ct-sde`: its wide loop
+    // and a tail of single blocks and a partial one. The block counter is
+    // public, and VG's contract lets the time depend on it.
+    #[test]
+    #[ignore = "admin/ct-sde runs it under Intel SDE"]
+    fn ct_sde_chacha20() {
+        let mut rng = Rng(ct_sde::seed());
+        let t = HaveAvx512Vl::check().expect("AVX-512 VL");
+        let key: [u32; 8] = core::array::from_fn(|_| rng.next() as u32);
+        let mut nonce: [u32; 4] = core::array::from_fn(|_| rng.next() as u32);
+        nonce[0] = 1;
+        let mut msg: Vec<u8> = (0..1024 + 512 + 3 * 64 + 9)
+            .map(|_| rng.next() as u8)
+            .collect();
+        ct_sde::traced(|| cipher_vg(Vg::Avx512Vl(t), &key, &nonce, &mut msg));
     }
 
     #[test]

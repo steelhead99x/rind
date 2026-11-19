@@ -20,7 +20,7 @@ impl ring::hkdf::KeyType for Len {
 
 // A 32-byte key for one label, from a PRK extracted once: what a QUIC token
 // or an e2ee track key derives from a long-lived secret.
-fn bench(
+fn bench<V: verified_garbage::hmac::HmacHash>(
     c: &mut Criterion,
     name: &str,
     ring: ring::hkdf::Algorithm,
@@ -64,8 +64,8 @@ fn bench(
                 let mut out = [0u8; 32];
                 rind::hkdf::Salt::new(ours, b"salt")
                     .extract(&secret)
-                    .expand(&info, out.len())
-                    .fill(&mut out)
+                    .unwrap()
+                    .fill(&info, &mut out)
                     .unwrap();
                 black_box(out)
             })
@@ -111,12 +111,14 @@ fn bench(
         })
     });
 
-    let prk = rind::hkdf::Salt::new(ours, b"salt").extract(&secret);
+    let prk = rind::hkdf::Salt::new(ours, b"salt")
+        .extract(&secret)
+        .unwrap();
     for (lib, _dit) in criterion::rind_rows() {
         group.bench_function(format!("expand/{lib}"), |b| {
             b.iter(|| {
                 let mut out = [0u8; 32];
-                prk.expand(&info, out.len()).fill(&mut out).unwrap();
+                prk.fill(&info, &mut out).unwrap();
                 black_box(out)
             })
         });
@@ -124,7 +126,7 @@ fn bench(
     group.bench_function("expand-aes-256-gcm-key/rind", |b| {
         b.iter(|| {
             black_box(rind::aead::Key::from(
-                prk.expand(&info, &rind::aead::AES_256_GCM),
+                prk.expand(&info, &rind::aead::AES_256_GCM).unwrap(),
             ))
         })
     });
@@ -136,6 +138,7 @@ fn bench(
         Hash::Sha512 => rustcrypto::<hkdf::hmac::Hmac<sha2::Sha512>>(&mut group, &secret, info[0]),
     }
     libcrux(&mut group, hash, &secret, info[0]);
+    vg::<V>(&mut group, ours, &secret, info[0]);
     #[cfg(all(feature = "__bench_openssl", target_family = "unix"))]
     openssl(&mut group, hash, &secret, info[0]);
 }
@@ -167,6 +170,60 @@ fn rustcrypto<H: hkdf::HmacImpl>(
         b.iter(|| {
             let mut out = [0u8; 32];
             prk.expand(info, &mut out).unwrap();
+            black_box(out)
+        })
+    });
+}
+
+// verified-garbage has no HKDF, so this is RFC 5869 over its HMAC, as rind's
+// glue would run it.
+fn vg_expand<V: verified_garbage::hmac::HmacHash>(prk: &[u8], info: &[u8], out: &mut [u8]) {
+    let mut previous: Option<V::Output> = None;
+    for (counter, chunk) in (1u8..).zip(out.chunks_mut(V::OUTPUT_SIZE)) {
+        let mut ctx = verified_garbage::hmac::Hmac::<V>::new(prk);
+        if let Some(previous) = &previous {
+            ctx.update(previous.as_ref());
+        }
+        ctx.update(info);
+        ctx.update(&[counter]);
+        let block = ctx.finalize();
+        chunk.copy_from_slice(&block.as_ref()[..chunk.len()]);
+        previous = Some(block);
+    }
+}
+
+fn vg<V: verified_garbage::hmac::HmacHash>(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    ours: &'static rind::hkdf::Algorithm,
+    secret: &[u8],
+    info: &[u8],
+) {
+    let extract_expand = |out: &mut [u8]| {
+        let prk = verified_garbage::hmac::Hmac::<V>::mac(b"salt", secret);
+        vg_expand::<V>(prk.as_ref(), info, out);
+    };
+    let mut expected = [0u8; 32];
+    rind::hkdf::Salt::new(ours, b"salt")
+        .extract(secret)
+        .unwrap()
+        .fill(&[info], &mut expected)
+        .unwrap();
+    let mut out = [0u8; 32];
+    extract_expand(&mut out);
+    assert_eq!(out, expected);
+
+    group.bench_function("extract-expand/verified-garbage", |b| {
+        b.iter(|| {
+            let mut out = [0u8; 32];
+            extract_expand(&mut out);
+            black_box(out)
+        })
+    });
+    let prk = verified_garbage::hmac::Hmac::<V>::mac(b"salt", secret);
+    group.bench_function("expand/verified-garbage", |b| {
+        b.iter(|| {
+            let mut out = [0u8; 32];
+            vg_expand::<V>(prk.as_ref(), info, &mut out);
             black_box(out)
         })
     });
@@ -247,7 +304,7 @@ fn openssl(group: &mut BenchmarkGroup<'_, WallTime>, hash: Hash, secret: &[u8], 
 }
 
 fn hkdf(c: &mut Criterion) {
-    bench(
+    bench::<verified_garbage::hashes::sha1::Sha1>(
         c,
         "hkdf-sha1",
         ring::hkdf::HKDF_SHA1_FOR_LEGACY_USE_ONLY,
@@ -255,7 +312,7 @@ fn hkdf(c: &mut Criterion) {
         &rind::hkdf::legacy::HKDF_SHA1,
         Hash::Sha1,
     );
-    bench(
+    bench::<verified_garbage::hashes::sha256::Sha256>(
         c,
         "hkdf-sha256",
         ring::hkdf::HKDF_SHA256,
@@ -263,7 +320,7 @@ fn hkdf(c: &mut Criterion) {
         &rind::hkdf::HKDF_SHA256,
         Hash::Sha256,
     );
-    bench(
+    bench::<verified_garbage::hashes::sha384::Sha384>(
         c,
         "hkdf-sha384",
         ring::hkdf::HKDF_SHA384,
@@ -271,7 +328,7 @@ fn hkdf(c: &mut Criterion) {
         &rind::hkdf::HKDF_SHA384,
         Hash::Sha384,
     );
-    bench(
+    bench::<verified_garbage::hashes::sha512::Sha512>(
         c,
         "hkdf-sha512",
         ring::hkdf::HKDF_SHA512,

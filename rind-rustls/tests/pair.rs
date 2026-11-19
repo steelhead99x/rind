@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 use std::sync::Arc;
 
 use rustls::crypto::{CryptoProvider, SupportedKxGroup};
+#[cfg(not(target_family = "wasm"))]
 use rustls::crypto::{aws_lc_rs as aws_lc_rs_provider, ring};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
@@ -31,6 +32,7 @@ fn all_suites() {
         test_keys_match(&rind_rustls::default_provider(), *key_type);
     }
 
+    #[cfg(feature = "tls12")]
     for key_type in KeyType::RSA {
         test_suite(
             rind_rustls::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
@@ -46,6 +48,7 @@ fn all_suites() {
         );
     }
 
+    #[cfg(feature = "tls12")]
     for key_type in KeyType::ECDSA {
         test_suite(
             rind_rustls::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
@@ -65,7 +68,11 @@ fn all_suites() {
 #[test]
 fn all_key_exchanges() {
     let tls13 = rind_rustls::cipher_suite::TLS13_AES_128_GCM_SHA256;
-    let tls12 = rind_rustls::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256;
+    let suites = [
+        tls13,
+        #[cfg(feature = "tls12")]
+        rind_rustls::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+    ];
 
     // Not supported by *ring*, and TLS 1.3 only.
     for group in [
@@ -73,13 +80,13 @@ fn all_key_exchanges() {
         rind_rustls::kx_group::SECP256R1MLKEM768,
         rind_rustls::kx_group::MLKEM768,
     ] {
-        for other in [OtherProvider::BaselineAwsLcRs, OtherProvider::SelfTest] {
-            test_key_exchange(group, tls13, other);
+        for other in OtherProvider::NOT_RING {
+            test_key_exchange(group, tls13, *other);
         }
     }
 
     for other in OtherProvider::OTHERS {
-        for suite in [tls13, tls12] {
+        for suite in suites {
             test_key_exchange(rind_rustls::kx_group::X25519, suite, *other);
             test_key_exchange(rind_rustls::kx_group::SECP256R1, suite, *other);
             test_key_exchange(rind_rustls::kx_group::SECP384R1, suite, *other);
@@ -237,8 +244,10 @@ impl KeyType {
         Self::EcdsaP521,
         Self::Ed25519,
     ];
+    #[cfg(feature = "tls12")]
     const RSA: &[Self] = &[Self::Rsa2048, Self::Rsa3072, Self::Rsa4096];
     // TLS 1.2's ECDHE_ECDSA suites also carry Ed25519 (RFC 8422).
+    #[cfg(feature = "tls12")]
     const ECDSA: &[Self] = &[
         Self::EcdsaP256,
         Self::EcdsaP384,
@@ -249,7 +258,7 @@ impl KeyType {
     /// The providers that can sign and verify with this key: *ring* has no P-521.
     fn others(self) -> &'static [OtherProvider] {
         match self {
-            Self::EcdsaP521 => &[OtherProvider::BaselineAwsLcRs],
+            Self::EcdsaP521 => OtherProvider::NOT_RING,
             _ => OtherProvider::OTHERS,
         }
     }
@@ -295,7 +304,9 @@ impl KeyType {
 
 #[derive(Copy, Clone, Debug)]
 enum OtherProvider {
+    #[cfg(not(target_family = "wasm"))]
     BaselineRing,
+    #[cfg(not(target_family = "wasm"))]
     BaselineAwsLcRs,
     SelfTest,
 }
@@ -303,18 +314,33 @@ enum OtherProvider {
 impl OtherProvider {
     fn into_provider(self) -> Arc<CryptoProvider> {
         match self {
+            #[cfg(not(target_family = "wasm"))]
             Self::BaselineRing => ring::default_provider().into(),
+            #[cfg(not(target_family = "wasm"))]
             Self::BaselineAwsLcRs => aws_lc_rs_provider::default_provider().into(),
             Self::SelfTest => rind_rustls::default_provider().into(),
         }
     }
 
+    #[cfg(not(target_family = "wasm"))]
     const OTHERS: &[Self] = &[Self::BaselineRing, Self::BaselineAwsLcRs];
+    /// Those with P-521 and ML-KEM, which *ring* lacks.
+    #[cfg(not(target_family = "wasm"))]
+    const NOT_RING: &[Self] = &[Self::BaselineAwsLcRs, Self::SelfTest];
+
+    // rustls's own providers build for neither wasm target, so there rind
+    // runs against itself.
+    #[cfg(target_family = "wasm")]
+    const OTHERS: &[Self] = &[Self::SelfTest];
+    #[cfg(target_family = "wasm")]
+    const NOT_RING: &[Self] = Self::OTHERS;
 
     /// This provider's own key exchange group named `name`.
     fn kx_group(self, name: NamedGroup) -> &'static dyn SupportedKxGroup {
         let all = match self {
+            #[cfg(not(target_family = "wasm"))]
             Self::BaselineRing => ring::ALL_KX_GROUPS,
+            #[cfg(not(target_family = "wasm"))]
             Self::BaselineAwsLcRs => aws_lc_rs_provider::ALL_KX_GROUPS,
             Self::SelfTest => rind_rustls::ALL_KX_GROUPS,
         };

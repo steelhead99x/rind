@@ -75,6 +75,8 @@ impl<H: Hash> HmacKey<H> {
 }
 
 /// An in-progress HMAC computation, using hash function `H`.
+// `inner` first, so `Tagged` places it as `digest::Context` places a context.
+#[repr(C)]
 pub(crate) struct Hmac<H: Hash> {
     inner: H::Context,
     outer: H::State,
@@ -128,6 +130,11 @@ impl Algorithm {
     pub fn tag_len(&self) -> usize {
         self.tag_len
     }
+
+    /// The hash this algorithm runs over.
+    pub(super) fn id(&self) -> Id {
+        self.id
+    }
 }
 
 impl fmt::Debug for Algorithm {
@@ -167,7 +174,7 @@ pub static HMAC_SHA512: Algorithm = Algorithm {
     key: Keying::<Sha512>::with_key,
 };
 
-/// An HMAC key, keyed once and reused for every message; wiped on drop under the `wipe` feature.
+/// An HMAC key, keyed once and reused for every message; wiped on drop.
 #[derive(Clone)]
 pub struct Key(Keyed);
 
@@ -218,7 +225,7 @@ impl fmt::Debug for Key {
     }
 }
 
-/// An in-progress tag computation, for a message given in pieces; wiped on drop under the `wipe` feature.
+/// An in-progress tag computation, for a message given in pieces; wiped on drop.
 ///
 /// A clone forks the computation, so messages sharing a prefix process it once.
 #[derive(Clone)]
@@ -353,9 +360,11 @@ impl Zeroable for Keyed {}
 #[derive(Clone)]
 pub(super) struct Streaming(Tagged);
 
-// As `Keyed`, with all-zero hash contexts too.
+// As `Keyed`, with all-zero hash contexts too. Aligned to a cache line,
+// with each `Hmac` 16 bytes in on 64-bit targets, for the reason
+// `digest::Context` is.
 #[derive(Clone)]
-#[repr(u8)]
+#[repr(u8, align(64))]
 enum Tagged {
     Sha1(Tagging<LegacySha1>),
     Sha256(Tagging<Sha256>),
@@ -467,9 +476,10 @@ impl<H: HmacHash> Keying<H> {
 }
 
 /// An in-progress computation with its hash's code, as [`Keying`].
+#[repr(C)]
 struct Tagging<H: HmacHash> {
-    hmac: Hmac<H>,
     ops: ZeroableRef<TagOps<H>>,
+    hmac: Hmac<H>,
 }
 
 struct TagOps<H: HmacHash> {
@@ -516,6 +526,27 @@ impl<H: HmacHash> Tagging<H> {
 mod tests {
     use super::*;
     use crate::test::*;
+
+    // Each inner context starts on a 16-byte boundary of a
+    // cache-line-aligned `Context`, as `digest::Context`'s do.
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn layout() {
+        assert_eq!(align_of::<Context>(), 64);
+        for algorithm in [&HMAC_SHA256, &HMAC_SHA384, &HMAC_SHA512] {
+            let ctx = Context::with_key(&Key::new(algorithm, b"key"));
+            let inner: *const u8 = match &ctx.0.0 {
+                Tagged::Sha256(tagging) => core::ptr::from_ref(&tagging.hmac.inner).cast(),
+                Tagged::Sha384(tagging) => core::ptr::from_ref(&tagging.hmac.inner).cast(),
+                Tagged::Sha512(tagging) => core::ptr::from_ref(&tagging.hmac.inner).cast(),
+                Tagged::Sha1(_) => unreachable!(),
+            };
+            assert_eq!(
+                (inner as usize - core::ptr::from_ref(&ctx) as usize) % 16,
+                0
+            );
+        }
+    }
 
     #[test]
     fn acvp() {
@@ -699,7 +730,10 @@ mod tests {
             }
         }
 
-        process_cavp("../thirdparty/cavp/hmac/HMAC.rsp", &mut Cavp::default());
+        process_cavp(
+            "../thirdparty/vectors/cavp/hmac/HMAC.rsp",
+            &mut Cavp::default(),
+        );
     }
 
     static ALGORITHMS: [&Algorithm; 4] = [&HMAC_SHA1, &HMAC_SHA256, &HMAC_SHA384, &HMAC_SHA512];

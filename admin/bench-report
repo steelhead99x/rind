@@ -3,7 +3,7 @@
 
 Usage:
   admin/bench-report collect [--commit REV] [--host NAME]... [--out DIR]
-  admin/bench-report nightly
+  admin/bench-report weekly
   admin/bench-report render [--from DIR] [--check]
   admin/bench-report gate DIR [--previous DIR]
   admin/bench-report summary DIR
@@ -17,18 +17,19 @@ others. A host that is busy, unreachable, or fails is recorded and skipped,
 never measured. DIR (default `.tmp/bench-report/<commit>`) gets one
 `<host>.json` per host, with its CPU, OS, toolchain, and library versions.
 
-`nightly` saves the latest nightly `bench` run's results on main, with gh, as
+`weekly` saves the latest weekly `bench` run's results on main, with gh, as
 the report's CPU tiers. `render` writes BENCHMARKS.md and its SVGs, among
-them the overview the README shows, from benchmarks/data, the verified code in
+them the overview the README shows, and benchmarks/report.json, the same
+report as data for the site's benchmarks page, from benchmarks/data, the verified code in
 benchmarks/verified.toml, and the decision on each gap in
 benchmarks/gaps.toml, first importing each measured host of a collection
 given by `--from`. It fails on a gap over 10% without a
 decision, or a decision that covers no gap the data measures. `--check` fails if they are out of
 date instead.
 
-`gate` fails on a gap over 10% in a nightly run's downloaded artifacts that
+`gate` fails on a gap over 10% in a weekly run's downloaded artifacts that
 benchmarks/gaps.toml holds no decision for, counting only a gap the previous
-run, given by `--previous`, showed too. The nightly bench runs it.
+run, given by `--previous`, showed too. The weekly bench runs it.
 
 `summary` prints a Markdown table of a collection: rind's time per operation
 and host, against the fastest other library's.
@@ -112,6 +113,8 @@ SECTIONS = [
             "rustls-full-handshake-key/ed25519/{lib}",
             "rustls-full-handshake-key/rsa-2048/{lib}",
             "rustls-resumed-handshake/x25519/{lib}",
+            "rustls-full-handshake-threads/x25519/{lib}",
+            "rustls-resumed-handshake-threads/x25519/{lib}",
             "rustls-bulk/aes128-gcm/{lib}",
             "rustls-bulk/aes256-gcm/{lib}",
             "rustls-bulk/chacha20poly1305/{lib}",
@@ -164,8 +167,29 @@ SECTIONS = [
             "rsa2048-pss-sha256-verify/{lib}",
         ],
     ),
-    ("ML-KEM", ["mlkem768-keygen/{lib}", "mlkem768-encaps/{lib}", "mlkem768-decaps/{lib}"]),
-    ("ML-DSA", ["mldsa65-keygen/{lib}", "mldsa65-sign/{lib}", "mldsa65-verify/{lib}"]),
+    (
+        "ML-KEM",
+        [
+            "mlkem768-keygen/{lib}",
+            "mlkem768-encaps/{lib}",
+            "mlkem768-decaps/{lib}",
+            "mlkem1024-keygen/{lib}",
+            "mlkem1024-encaps/{lib}",
+            "mlkem1024-decaps/{lib}",
+            "mlkem512-keygen/{lib}",
+            "mlkem512-encaps/{lib}",
+            "mlkem512-decaps/{lib}",
+        ],
+    ),
+    (
+        "ML-DSA",
+        [
+            "mldsa65-keygen/{lib}",
+            "mldsa65-sign/{lib}",
+            "mldsa65-verify/{lib}",
+            "mldsa65-load-verify/{lib}",
+        ],
+    ),
     (
         "P-384 and P-521",
         [
@@ -177,6 +201,41 @@ SECTIONS = [
             "p521-ecdsa-verify/{lib}",
         ],
     ),
+    (
+        "HPKE",
+        [
+            "hpke-x25519-setup-sender/{lib}",
+            "hpke-x25519-setup-recipient/{lib}",
+            "hpke-x25519-aes128-gcm-seal/{lib}/1350B",
+            "hpke-x25519-aes128-gcm-open/{lib}/1350B",
+        ],
+    ),
+    (
+        "Blind RSA",
+        [
+            "blind-rsa2048-blind/{lib}",
+            "blind-rsa2048-sign/{lib}",
+            "blind-rsa2048-finalize/{lib}",
+            "blind-rsa2048-verify/{lib}",
+        ],
+    ),
+    (
+        "OPRF",
+        [
+            f"{mode}-{group}-{step}/{{lib}}"
+            for mode, group in [("oprf", "ristretto255"), ("voprf", "p384")]
+            for step in ["blind", "evaluate", "finalize"]
+        ],
+    ),
+    (
+        "VRF",
+        [f"vrf-{curve}-{step}/{{lib}}" for curve in ["edwards25519", "p256"] for step in ["prove", "verify"]],
+    ),
+    (
+        "SPAKE2+",
+        [f"spake2plus-p256-{side}-{step}/{{lib}}" for step in ["start", "finish"] for side in ["prover", "verifier"]],
+    ),
+    ("Argon2id", ["argon2id-16MiB-t1-p1/{lib}", "argon2id-64MiB-t3-p4/{lib}"]),
 ]
 OPERATIONS = [op for _, ops in SECTIONS for op in ops]
 
@@ -195,6 +254,7 @@ LIBRARIES = {
     "libcrux": "libcrux",
     "libcrux-ml-kem": "libcrux",
     "openssl": "openssl",
+    "verified-garbage": "verified-garbage",
 }
 
 # The CPU features by architecture, as rind-cpuid names them, without which a
@@ -226,6 +286,13 @@ CRATES = {
         "ml-kem",
         "ed25519-dalek",
         "x25519-dalek",
+        # Protocols, each on RustCrypto's primitives.
+        "hpke",
+        "blind-rsa-signatures",
+        "voprf",
+        "vrf-rfc9381",
+        "spake2plus",
+        "argon2",
     ],
     "graviola": ["graviola", "rustls-graviola"],
     "libcrux": [
@@ -241,8 +308,11 @@ CRATES = {
         "libcrux-rsa",
         "libcrux-sha2",
         "libcrux-sha3",
+        "hpke-rs",
+        "hpke-rs-libcrux",
     ],
     "openssl": ["openssl", "openssl-sys", "rustls-openssl"],
+    "verified-garbage": ["verified-garbage"],
     "tls": ["rustls"],
 }
 
@@ -363,11 +433,13 @@ def os_name():
 
 
 def locked_versions():
-    """Each package's versions in Cargo.lock."""
+    """Each package's versions in Cargo.lock, with the commit of one from git,
+    such as verified-garbage, whose version never changes."""
     versions = {}
     with open(os.path.join(ROOT, "Cargo.lock")) as f:
-        for name, version in re.findall(r'\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"', f.read()):
-            versions.setdefault(name, []).append(version)
+        pattern = r'\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"(?:\nsource = "git\+[^"#]*#([0-9a-f]+)")?'
+        for name, version, commit in re.findall(pattern, f.read()):
+            versions.setdefault(name, []).append(f"{version} ({commit[:8]})" if commit else version)
     return versions
 
 
@@ -407,6 +479,9 @@ def run(args):
 
     env = dict(os.environ, CARGO_BUILD_JOBS=str(args.jobs), CARGO_TERM_COLOR="never")
     env["CARGO_TARGET_DIR"] = os.path.abspath(args.target_dir)
+    # The every-logical-CPU rows refuse to run on fewer CPUs than this, so the
+    # report's "all N logical CPUs" is what they measured.
+    env["RIND_BENCH_CPUS"] = str(result["cpu"]["logical_cpus"])
     cargo, versions, openssl = toolchain(env)
     result["toolchain"] = versions
     locked = locked_versions()
@@ -580,7 +655,7 @@ def collect_host(host, commit, out_dir):
         f"--target-dir ../target --out result.json"
     )
     # The gate admits the run only while the host has room, but other gated
-    # work may share it, so these numbers are noisier than the nightly
+    # work may share it, so these numbers are noisier than the weekly
     # runners'. The gate is this checkout's quest, so a commit pinning an
     # older one still runs, in its own dev shell.
     with open(os.path.join(ROOT, "flake.lock")) as f:
@@ -668,12 +743,14 @@ def summary(args):
 # --- report -----------------------------------------------------------------
 
 REPORT = os.path.join(ROOT, "BENCHMARKS.md")
-# The report's SVGs, and its inputs: each host's result, the nightly CPU
+# The report's SVGs, and its inputs: each host's result, the weekly CPU
 # tiers, and the table of verified code.
 REPORT_DIR = os.path.join(ROOT, "benchmarks")
 DATA_DIR = os.path.join(REPORT_DIR, "data")
 VERIFIED = os.path.join(REPORT_DIR, "verified.toml")
 GAPS = os.path.join(REPORT_DIR, "gaps.toml")
+# The report as data, which the site's benchmarks page draws.
+SITE_DATA = os.path.join(REPORT_DIR, "report.json")
 REPO = "kixel-ai/rind"
 
 # The report's columns, in order, by library.
@@ -686,6 +763,7 @@ COLUMNS = {
     "graviola": "graviola",
     "libcrux": "libcrux",
     "openssl": "OpenSSL",
+    "verified-garbage": "verified-garbage",
 }
 
 # Rows that time a library's own code another way, by that library. Each
@@ -708,6 +786,8 @@ NAMES = {
     "rustls-full-handshake-key/ed25519": "full handshake, Ed25519 certificate",
     "rustls-full-handshake-key/rsa-2048": "full handshake, RSA-2048 certificate",
     "rustls-resumed-handshake/x25519": "resumed handshake, X25519",
+    "rustls-full-handshake-threads/x25519": "full handshake, X25519, every logical CPU",
+    "rustls-resumed-handshake-threads/x25519": "resumed handshake, X25519, every logical CPU",
     "rustls-bulk/aes128-gcm": "1 MB transfer, AES-128-GCM",
     "rustls-bulk/aes256-gcm": "1 MB transfer, AES-256-GCM",
     "rustls-bulk/chacha20poly1305": "1 MB transfer, ChaCha20-Poly1305",
@@ -737,18 +817,49 @@ NAMES = {
     "rsa2048-pkcs1-sha256-verify": "RSA-2048 PKCS#1 verify",
     "rsa2048-pss-sha256-sign": "RSA-2048 PSS sign",
     "rsa2048-pss-sha256-verify": "RSA-2048 PSS verify",
+    "mlkem512-keygen": "ML-KEM-512 key generation",
+    "mlkem512-encaps": "ML-KEM-512 encapsulate",
+    "mlkem512-decaps": "ML-KEM-512 decapsulate",
     "mlkem768-keygen": "ML-KEM-768 key generation",
     "mlkem768-encaps": "ML-KEM-768 encapsulate",
     "mlkem768-decaps": "ML-KEM-768 decapsulate",
+    "mlkem1024-keygen": "ML-KEM-1024 key generation",
+    "mlkem1024-encaps": "ML-KEM-1024 encapsulate",
+    "mlkem1024-decaps": "ML-KEM-1024 decapsulate",
     "mldsa65-keygen": "ML-DSA-65 key generation",
     "mldsa65-sign": "ML-DSA-65 sign",
     "mldsa65-verify": "ML-DSA-65 verify",
+    "mldsa65-load-verify": "ML-DSA-65 load and verify",
     "p384-ecdh": "P-384 ECDH",
     "p384-ecdsa-sign": "P-384 ECDSA sign",
     "p384-ecdsa-verify": "P-384 ECDSA verify",
     "p521-ecdh": "P-521 ECDH",
     "p521-ecdsa-sign": "P-521 ECDSA sign",
     "p521-ecdsa-verify": "P-521 ECDSA verify",
+    "hpke-x25519-setup-sender": "HPKE X25519 sender setup",
+    "hpke-x25519-setup-recipient": "HPKE X25519 recipient setup",
+    "hpke-x25519-aes128-gcm-seal": "HPKE AES-128-GCM seal",
+    "hpke-x25519-aes128-gcm-open": "HPKE AES-128-GCM open",
+    "blind-rsa2048-blind": "Blind RSA-2048 blind",
+    "blind-rsa2048-sign": "Blind RSA-2048 sign",
+    "blind-rsa2048-finalize": "Blind RSA-2048 finalize",
+    "blind-rsa2048-verify": "Blind RSA-2048 verify",
+    "oprf-ristretto255-blind": "OPRF ristretto255 blind",
+    "oprf-ristretto255-evaluate": "OPRF ristretto255 evaluate",
+    "oprf-ristretto255-finalize": "OPRF ristretto255 finalize",
+    "voprf-p384-blind": "VOPRF P-384 blind",
+    "voprf-p384-evaluate": "VOPRF P-384 evaluate",
+    "voprf-p384-finalize": "VOPRF P-384 finalize",
+    "vrf-edwards25519-prove": "ECVRF edwards25519 prove",
+    "vrf-edwards25519-verify": "ECVRF edwards25519 verify",
+    "vrf-p256-prove": "ECVRF P-256 prove",
+    "vrf-p256-verify": "ECVRF P-256 verify",
+    "spake2plus-p256-prover-start": "SPAKE2+ P-256 prover share",
+    "spake2plus-p256-verifier-start": "SPAKE2+ P-256 verifier share and confirmation",
+    "spake2plus-p256-prover-finish": "SPAKE2+ P-256 prover confirmation and key",
+    "spake2plus-p256-verifier-finish": "SPAKE2+ P-256 verifier key",
+    "argon2id-16MiB-t1-p1": "Argon2id 16 MiB t=1 p=1",
+    "argon2id-64MiB-t3-p4": "Argon2id 64 MiB t=3 p=4",
 }
 
 # Each build of admin/build-cost, as the report names it.
@@ -759,6 +870,7 @@ BUILDS = {
     "rustcrypto": "RustCrypto + dalek",
     "graviola": "graviola",
     "libcrux": "libcrux",
+    "verified-garbage": "verified-garbage",
     "openssl": "OpenSSL, the system's, linked dynamically",
     "openssl-vendored": "OpenSSL, vendored",
     "rustls-rind": "rustls + rind-rustls",
@@ -766,17 +878,77 @@ BUILDS = {
     "rustls-ring": "rustls + ring",
 }
 
-# The CPU features a ✓ may require, as rind-cpuid names them.
-CPU_FEATURES = {
-    "x86_64": {
-        "intel", "adx", "aes", "vaes", "pclmulqdq", "vpclmulqdq", "bmi2", "movbe", "popcnt", "ssse3", "sse4.1",
-        "avx", "avx2", "avx512f", "avx512dq", "avx512ifma", "avx512bw", "avx512vl", "avx512vbmi", "avx512vbmi2",
-        "sha",
-    },
-    "aarch64": {"aes", "dit", "neon", "pmull", "sha2", "sha3"},
+# The libraries the README compares rind with, by library, each with the
+# page a reader goes to.
+COMPARED = {
+    "rind": "",
+    "aws-lc-rs": "https://github.com/aws/aws-lc-rs",
+    "ring": "https://github.com/briansmith/ring",
+    "rustcrypto": "https://github.com/RustCrypto",
 }
 
-# The nightly bench's columns, by target, portability, and denied tier, as
+# The comparison's algorithms, as patterns over a row name, which each match
+# from its start. Every row matches one, or an integration.
+ALGORITHMS = [
+    ("AES-GCM", r"aes(128|256)-gcm"),
+    ("ChaCha20-Poly1305", r"chacha20poly1305/"),
+    ("XChaCha20-Poly1305", r"xchacha20poly1305/"),
+    ("SHA-256", r"sha256/"),
+    ("SHA-512", r"sha512/"),
+    ("SHA-3", r"sha3-"),
+    ("HMAC", r"hmac-"),
+    ("HKDF", r"hkdf-"),
+    ("X25519", r"x25519-"),
+    ("Ed25519", r"ed25519-"),
+    ("P-256", r"p256-"),
+    ("P-384", r"p384-"),
+    ("P-521", r"p521-"),
+    ("RSA", r"rsa\d+-"),
+    ("ML-KEM", r"mlkem\d+-"),
+    ("ML-DSA", r"mldsa65-"),
+    ("HPKE", r"hpke-"),
+    ("Blind RSA", r"blind-rsa\d+-"),
+    ("OPRF", r"v?oprf-"),
+    ("VRF", r"vrf-"),
+    ("SPAKE2+", r"spake2plus-"),
+    ("Argon2id", r"argon2id-"),
+]
+
+# Rows that time an integration rather than an algorithm, which the
+# comparison leaves out: rind-bench times only some libraries through them.
+INTEGRATIONS = [r"rustls-", r"quic-header-protection/"]
+
+# Algorithms rind-bench times under a library's name through something other
+# than that library's API, by library and algorithm, with what it runs.
+OUTSIDE_API = {
+    ("aws-lc-rs", "XChaCha20-Poly1305"): "aws-lc has it, through aws-lc-sys",
+}
+
+# A comparison cell with no data behind it, which must never read as "none".
+UNMEASURED = "not measured"
+
+README = os.path.join(ROOT, "README.md")
+COMPARISON_MARKERS = (
+    "<!-- comparison: `admin/bench-report render` writes this table -->",
+    "<!-- end comparison -->",
+)
+
+# The CPU features a ✓ may require, as rind-cpuid names them.
+CPU_FEATURES = {
+    # rind's portable backend, the report's portable tier, which needs no CPU
+    # feature and is no host's arch, so its ✓ shows in the proof table alone.
+    "portable": set(),
+    "x86_64": {
+        "intel", "adx", "aes", "vaes", "pclmulqdq", "vpclmulqdq", "bmi1", "bmi2", "movbe", "popcnt", "ssse3", "sse4.1",
+        "avx", "avx2", "avx512f", "avx512dq", "avx512ifma", "avx512bw", "avx512vl", "avx512vbmi", "avx512vbmi2",
+        "sha", "sha512",
+    },
+    "aarch64": {"aes", "dit", "neon", "pmull", "sha2", "sha3"},
+    # rind-cpuid reads no armv7 features, so an armv7 entry names none.
+    "armv7": set(),
+}
+
+# The weekly bench's columns, by target, portability, and denied tier, as
 # bench.yml's `native` matrix defines them.
 TIERS = [
     (("x86_64-unknown-linux-gnu", False, ""), "x86_64"),
@@ -795,17 +967,23 @@ TIERS = [
     (("x86_64-unknown-linux-gnu", True, "generic"), "portable"),
 ]
 
-# The libraries the nightly bench times rind against.
+# The libraries the weekly bench times rind against.
 BASELINES = ["aws-lc-rs", "ring"]
 
-# The CPU-tier rows, as patterns over a nightly benchmark ID with `*` in the
+# Libraries the weekly bench also times, which the tier heatmap ranks rind
+# against like the baselines but the gate never counts: a cell where
+# pyca/verified-garbage's proven code is faster gets a quest that switches
+# rind to it, not an alert. The hosts' report counts it like any other library.
+TIMED = ["verified-garbage"]
+
+# The CPU-tier rows, as patterns over a weekly benchmark ID with `*` in the
 # library's place.
 TIER_ROWS = [
     ("AES-GCM", r"aes(128|192|256)-gcm(-open)?/"),
     ("AES block, AES-CTR", r"(aes(128|192|256)-ctr|quic-header-protection/aes(128|256))/"),
     ("AES-CBC", r"aes(128|192|256)-cbc-"),
     ("AES-KW, AES-KWP", r"aes(128|256)-kwp?-"),
-    ("ChaCha20 (header protection)", r"quic-header-protection/chacha20/"),
+    ("ChaCha20", r"(quic-header-protection/)?chacha20/"),
     ("ChaCha20-Poly1305, XChaCha20-Poly1305", r"x?chacha20poly1305(-open)?/"),
     ("SHA-1", r"sha1/"),
     ("SHA-256", r"sha256(-updates)?/"),
@@ -820,20 +998,26 @@ TIER_ROWS = [
     ("P-256 ECDH, ECDSA", r"p256-"),
     ("P-384 ECDH, ECDSA", r"p384-"),
     ("P-521 ECDH, ECDSA", r"p521-"),
-    ("ML-KEM-768", r"mlkem768-"),
+    ("ML-KEM", r"mlkem\d+-"),
     ("ML-DSA", r"mldsa(44|65|87)-"),
     ("RSA signatures", r"rsa\d+-(pkcs1|pss|load)"),
     ("RSA-OAEP", r"rsa\d+-oaep-"),
+    ("HPKE", r"hpke-"),
     ("JSON Web Tokens", r"jwt-[^/]+/\*/token$"),
     ("rind-rustls handshakes", r"rustls-(full|resumed)-"),
     ("rind-rustls 1 MB transfer", r"rustls-bulk/"),
 ]
 
-# The nightly benchmarks no CPU-tier row ranks, and why. Every other
+# The weekly benchmarks no CPU-tier row ranks, and why. Every other
 # benchmark must match a row, so a new one cannot go unwatched.
 UNRANKED = [
     (r"rsa\d+-key-generation", "RSA key generation varies too much from run to run to rank"),
     (r"jwt-[^/]+/\*/load$", "a token's key loading, the part of `token` spent on the key"),
+    (
+        r"(blind-rsa\d+|v?oprf|vrf|spake2plus|argon2id)-",
+        "neither aws-lc-rs nor ring offers the protocol, so no baseline; the report's hosts compare it",
+    ),
+    (r"slhdsa-", "neither aws-lc-rs nor ring offers SLH-DSA, so no baseline"),
 ]
 
 # rind's time over the fastest library's above which benchmarks/gaps.toml
@@ -844,7 +1028,10 @@ SLOWER = 1.1
 SPEED_BINS = [SLOWER, 1.25, 1.5, 2, 4, 8]
 SPEED_LABELS = ["fastest, or within 10%", "to 1.25×", "to 1.5×", "to 2×", "to 4×", "to 8×", "over 8×"]
 
-# rind's time over the fastest baseline's, binned around the ~2% noise.
+# The tier heatmap's title.
+TIERS_TITLE = "rind's time over the fastest of aws-lc-rs, ring, and verified-garbage, by CPU tier"
+
+# rind's time over the fastest rival's, binned around the ~2% noise.
 TIER_BINS = [0.8, 0.9, 0.98, 1.02, 1.1, 1.25]
 TIER_LABELS = ["under 0.8", "to 0.9", "to 0.98", "even", "to 1.1", "to 1.25", "over 1.25"]
 
@@ -888,7 +1075,7 @@ def bin_of(value, edges):
 
 def host_arch(host):
     arch = host["cpu"]["arch"]
-    return {"arm64": "aarch64", "amd64": "x86_64"}.get(arch, arch)
+    return {"arm64": "aarch64", "amd64": "x86_64", "armv7l": "armv7", "armv8l": "armv7"}.get(arch, arch)
 
 
 def host_os(host):
@@ -927,13 +1114,14 @@ def load_verified(path=VERIFIED):
     return entries
 
 
-def proof_for(verified, library, row, host):
-    """The entry that verifies a library's code for an operation on a host."""
+def proof_for(verified, library, row, host, any_os=False):
+    """The entry that verifies a library's code for an operation on a host,
+    or with `any_os`, on the same CPU under any OS."""
     cpuid = host.get("rind_cpu", {}).get("cpuid", {})
     for e in verified:
         if e["library"] != library or e.get("arch", host_arch(host)) != host_arch(host):
             continue
-        if e.get("os", host_os(host)) != host_os(host):
+        if not any_os and e.get("os", host_os(host)) != host_os(host):
             continue
         if not all(cpuid.get(f.removeprefix("!")) == (0 if f.startswith("!") else 1) for f in e.get("cpu", [])):
             continue
@@ -960,15 +1148,22 @@ def times(host):
     return out
 
 
-def tier_rows(tier):
-    """rind's time over the fastest baseline's, per benchmark of a tier."""
+def tier_rows(tier, rivals):
+    """rind's time over the fastest of `rivals`, per benchmark of a tier."""
     out = {}
     for key, libs in tier["benchmarks"].items():
-        base = {lib: ns for lib, ns in libs.items() if lib in BASELINES}
+        base = {lib: ns for lib, ns in libs.items() if lib in rivals}
         if "rind" in libs and base:
             best = min(base, key=base.get)
             out[key] = (libs["rind"] / base[best], libs["rind"], best, base[best])
     return out
+
+
+def heatmap_rivals(tier):
+    """The libraries the tier heatmap ranks rind against. The portable tier
+    leaves out verified-garbage, which runs its baseline assembly there, code
+    rind's portable backend can never take."""
+    return BASELINES + ([] if tier_name(tier) == "portable" else TIMED)
 
 
 def tier_name(tier):
@@ -976,7 +1171,7 @@ def tier_name(tier):
     CPU the runner drew."""
     name = dict(TIERS).get((tier["target"], tier["portable"], tier["tier"]))
     if name is None:
-        fail(f"nightly results name an unknown tier: {tier['target']} {tier['tier']}")
+        fail(f"weekly results name an unknown tier: {tier['target']} {tier['tier']}")
     return name
 
 
@@ -998,11 +1193,11 @@ def tier_columns(tiers):
 
 
 def tier_row(key):
-    """The CPU-tier row a nightly benchmark belongs to, or None for one
+    """The CPU-tier row a weekly benchmark belongs to, or None for one
     UNRANKED lists, refusing a benchmark in neither."""
     row = next((name for name, pattern in TIER_ROWS if re.match(pattern, key)), None)
     if row is None and not any(re.match(pattern, key) for pattern, _ in UNRANKED):
-        fail(f"nightly benchmark {key} matches neither a TIER_ROWS row nor UNRANKED")
+        fail(f"weekly benchmark {key} matches neither a TIER_ROWS row nor UNRANKED")
     return row
 
 
@@ -1011,7 +1206,7 @@ def tier_cells(tiers):
     cells = {}
     for t in tiers["tiers"]:
         column = tier_column(t)
-        for key, value in tier_rows(t).items():
+        for key, value in tier_rows(t, heatmap_rivals(t)).items():
             row = tier_row(key)
             if row is None:
                 continue
@@ -1040,7 +1235,7 @@ def gaps_of(hosts, tiers):
                     out[(row, name)] = (libs["rind"] / others[best], best)
     for t in tiers["tiers"] if tiers else []:
         column = tier_name(t)
-        for key, (ratio, _, best, _) in tier_rows(t).items():
+        for key, (ratio, _, best, _) in tier_rows(t, BASELINES).items():
             if ratio > SLOWER and tier_row(key):
                 out[(key, column)] = (ratio, best)
     return out
@@ -1054,7 +1249,7 @@ def gap_entries(path=GAPS):
 def load_gaps(hosts, tiers, path=GAPS):
     """The decision on each gap, with the gaps it covers, refusing a gap
     without one and an entry that covers no gap where the data measures. A
-    nightly gap can come and go with the runner's CPU, so an entry need not
+    weekly gap can come and go with the runner's CPU, so an entry need not
     match a gap everywhere it names."""
     entries = gap_entries(path)
     found = gaps_of(hosts, tiers)
@@ -1069,6 +1264,10 @@ def load_gaps(hosts, tiers, path=GAPS):
             fail(f"{where}: needs operations and on")
         if ("quest" in e) == ("reason" in e):
             fail(f"{where}: needs a quest or a reason, not both")
+        # The report's gap table, and the site's, hold the reason in one cell
+        # as inline Markdown.
+        if re.search(r"[\r\n]", e.get("reason", "")):
+            fail(f"{where}: the reason must be one line, since a table cell holds it")
         if "quest" in e and not (e["quest"].startswith("/quest/") and os.path.isfile(ROOT + e["quest"])):
             fail(f"{where}: no quest at {e['quest']}")
         for place in e["on"]:
@@ -1096,6 +1295,12 @@ def quest_title(path):
         return re.sub(r"^# (\[\w+\] )?", "", f.readline().strip())
 
 
+def cell_text(markdown):
+    """Markdown for a table cell: each pipe it hasn't escaped, after an even
+    run of backslashes, escaped, so the cell holds it."""
+    return re.sub(r"(\\*)\|", lambda m: m.group(1) + ("|" if len(m.group(1)) % 2 else "\\|"), markdown)
+
+
 def gap_table(gaps):
     rows = {row_name(op) for op in OPERATIONS}
     lines = ["| Operation | On | rind's time over the fastest | Decision |", "|---|---|---|---|"]
@@ -1105,7 +1310,7 @@ def gap_table(gaps):
         ratios = [ratio for ratio, _ in covered.values()]
         spread = f"{min(ratios):.2f}×" + (f" to {max(ratios):.2f}×" if max(ratios) - min(ratios) >= 0.005 else "")
         fastest = ", ".join(sorted({COLUMNS[lib] for _, lib in covered.values()}))
-        decision = f"[{quest_title(e['quest'])}]({e['quest'][1:]})" if "quest" in e else e["reason"]
+        decision = f"[{quest_title(e['quest'])}]({e['quest'][1:]})" if "quest" in e else cell_text(e["reason"])
         lines.append(f"| {ops} | {on} | {spread} ({fastest}) | {decision} |")
     return lines
 
@@ -1338,7 +1543,7 @@ def host_svg(name, host, verified, theme):
 
 
 def tiers_svg(tiers, theme):
-    """rind's time over the fastest baseline's per CPU tier, in the benchmark
+    """rind's time over the fastest rival's per CPU tier, in the benchmark
     of each row where rind trails most."""
     svg = Svg(theme)
     cells = tier_cells(tiers)
@@ -1368,7 +1573,7 @@ def tiers_svg(tiers, theme):
             svg.rect(x, y + 1, cell - 4, ROW - 2, fill, title)
             svg.text(x + (cell - 4) / 2, y + 14, f"{ratio:.2f}", size=11, anchor="middle", color=ink_on(fill))
         y += ROW
-    return svg.render(width, y + 12, "rind's time over the fastest of aws-lc-rs and ring, by CPU tier")
+    return svg.render(width, y + 12, TIERS_TITLE)
 
 
 def and_list(words):
@@ -1396,6 +1601,17 @@ def measured(host):
     return f"{host['started'][:10]} at {commit_link(host['commit'])}{noisy}"
 
 
+# What a ✓ means, which the report and the site's verified page both state.
+VERIFIED_RULE = (
+    "A ✓ means a published, machine-checked proof shows that all the code computing the operation, as "
+    "that library runs it on that host, gives the specified result for every input: the cipher and its "
+    "mode, the hash over every block with its padding, the whole scalar multiplication or exponentiation, "
+    "and the glue around them, such as clamping, byte conversion, and point encoding. Parsing DER key and "
+    "signature containers, randomness, and the message hash a signature takes are left out. Proofs of "
+    "memory safety alone, or of only some of the code, earn no ✓."
+)
+
+
 def platform_of(entry):
     words = [entry.get("arch", "any architecture")]
     has = [f for f in entry.get("cpu", []) if not f.startswith("!")]
@@ -1407,6 +1623,22 @@ def platform_of(entry):
     if "os" in entry:
         words.append({"linux": "on Linux", "macos": "on macOS"}[entry["os"]])
     return " ".join(words)
+
+
+def scaling(host):
+    """How rind-rustls's handshake throughput scales from one thread to every
+    core on a host, as report lines. No threshold checks it: a refresh that
+    sees it fall opens a quest."""
+    t = times(host)
+    parts = []
+    for kind, one in (("full", "rustls-full-handshake-group/x25519"), ("resumed", "rustls-resumed-handshake/x25519")):
+        rind_one = t.get(one, {}).get("rind")
+        rind_all = t.get(f"rustls-{kind}-handshake-threads/x25519", {}).get("rind")
+        if rind_one and rind_all:
+            parts.append(f"{kind} handshakes at {rind_one / rind_all:.1f} times")
+    if not parts:
+        return []
+    return [f"rind-rustls on all {host['cpu']['logical_cpus']} logical CPUs runs {and_list(parts)} its one-thread rate.", ""]
 
 
 def host_table(host, verified):
@@ -1445,12 +1677,113 @@ def build_table(cost):
     return lines
 
 
+def comparison_table(hosts, verified):
+    """The README's table of rind against the libraries an adopter weighs it
+    against, every cell drawn from the results, build costs, and verified
+    code."""
+    rows = [row_name(op) for op in OPERATIONS]
+    algorithm = {}
+    for row in rows:
+        names = [name for name, pattern in ALGORITHMS if re.match(pattern, row)]
+        if len(names) != 1 and not any(re.match(p, row) for p in INTEGRATIONS):
+            fail(f"{row} matches {len(names)} of the comparison's algorithms, not one")
+        if len(names) == 1:
+            algorithm[row] = names[0]
+    for (lib, name), why in OUTSIDE_API.items():
+        if lib not in COMPARED or name not in dict(ALGORITHMS):
+            fail(f"OUTSIDE_API names {lib} and {name}, which the comparison lacks")
+    offered = {lib: set() for lib in COMPARED}
+    for h in hosts.values():
+        for row, libs in times(h).items():
+            for lib in libs:
+                if lib in offered and row in algorithm:
+                    offered[lib].add(algorithm[row])
+    timed = [name for name, _ in ALGORITHMS if any(name in names for names in offered.values())]
+    lines = [
+        f"| Library | Build tools beyond rustc | Lacks, of the {len(timed)} algorithms benchmarked "
+        "| Formally verified | Fastest, or within 10% |",
+        "|---|---|---|---|---|",
+    ]
+    for lib, link in COMPARED.items():
+        tools, built = set(), False
+        for h in hosts.values():
+            cost = h.get("build_cost") or {}
+            for b in cost.get("builds", []) if cost.get("status") == "ok" else []:
+                if b["name"] == lib:
+                    tools.update(b["tools"])
+                    built = True
+        lacks = [
+            f"{name} ({OUTSIDE_API[lib, name]})" if (lib, name) in OUTSIDE_API else name
+            for name in timed
+            if name not in offered[lib] or (lib, name) in OUTSIDE_API
+        ]
+        # Each verified algorithm by architecture, marked when only some of
+        # that architecture's CPUs run the proven code of one of its
+        # operations, or the proofs cover only some of its benchmarked ones.
+        proven = {}
+        for e in verified:
+            if e["library"] != lib:
+                continue
+            covered = {r for p in e["operations"] for r in fnmatch.filter(rows, p) if r in algorithm}
+            # An entry with no arch runs the same code on every one.
+            arch = e.get("arch", "all")
+            everywhere = not (e.get("cpu") or e.get("os"))
+            for row in covered:
+                # Each row, and whether some proof of it runs on every CPU.
+                ops = proven.setdefault(arch, {}).setdefault(algorithm[row], {})
+                ops[row] = ops.get(row, False) or everywhere
+        order = [name for name, _ in ALGORITHMS]
+
+        def limits(name, ops):
+            some = ["some CPUs"] if not all(ops.values()) else []
+            if any(algorithm[r] == name and r not in ops for r in algorithm):
+                some.append("some operations")
+            return f" ({', '.join(some)})" if some else ""
+
+        arches = [
+            f"{arch}: "
+            + ", ".join(
+                name + limits(name, ops)
+                for name, ops in sorted(proven[arch].items(), key=lambda item: order.index(item[0]))
+            )
+            for arch in sorted(proven, key=lambda arch: (arch != "all", arch))
+        ]
+        lead = timings = 0
+        for h in hosts.values():
+            for libs in times(h).values():
+                if lib in libs and any(other != lib and other not in VARIANTS for other in libs):
+                    timings += 1
+                    lead += libs[lib] / libs[fastest(libs)] <= SLOWER
+        name = COLUMNS[lib] if lib == "rind" else f"[{COLUMNS[lib]}]({link})"
+        # Absolute, since crates.io and docs.rs show the README too.
+        benchmarks = f"https://github.com/{REPO}/blob/main/BENCHMARKS.md"
+        lines.append(
+            f"| {name} | [{(', '.join(sorted(tools)) or 'none') if built else UNMEASURED}]({benchmarks}#build-cost) "
+            f"| {(', '.join(lacks) or 'none') if offered[lib] else UNMEASURED} "
+            f"| [{'; '.join(arches) or 'none'}]({benchmarks}#verified-code) "
+            f"| [{f'{lead} of its {timings} times' if timings else UNMEASURED}]({benchmarks}#speed) |"
+        )
+    return lines
+
+
+def readme_with_comparison(lines, path=README):
+    """The README with the comparison between its markers replaced."""
+    with open(path) as f:
+        text = f.read()
+    start, end = COMPARISON_MARKERS
+    if text.count(start) != 1 or text.count(end) != 1 or text.index(start) > text.index(end):
+        fail(f"{os.path.relpath(path, ROOT)} needs one {start} before one {end}")
+    head, rest = text.split(start)
+    _, tail = rest.split(end)
+    return head + start + "\n" + "\n".join(lines) + "\n" + end + tail
+
+
 def tier_table(tiers):
     columns = tier_columns(tiers)
     by_key = {}
     for t in tiers["tiers"]:
         column = tier_column(t)
-        for key, (ratio, *_) in tier_rows(t).items():
+        for key, (ratio, *_) in tier_rows(t, heatmap_rivals(t)).items():
             by_key.setdefault(key, {})[column] = ratio
     lines = ["| Benchmark | " + " | ".join(columns) + " |", "|---|" + "---|" * len(columns)]
     for key in sorted(by_key):
@@ -1460,8 +1793,217 @@ def tier_table(tiers):
     return lines
 
 
+def site_data(hosts, tiers, verified, gaps):
+    """The report as data for the site's benchmarks page, which reads nothing
+    else, so it never decides for itself what counts as the fastest, a proof,
+    or a gap. A row's times are one cell per library of its host or tier, in
+    that `libraries` order, each [its time as the report writes it, its
+    SPEED_BINS bin, its time over the fastest's] or null where untimed, all
+    from the full-precision times, so the page shows what the report does."""
+
+    def cells(libraries, libs, best):
+        return [
+            [human(libs[lib]), bin_of(libs[lib] / libs[best], SPEED_BINS), round(libs[lib] / libs[best], 2)]
+            if lib in libs
+            else None
+            for lib in libraries
+        ]
+
+    gap_of = {place: i for i, (_, covered) in enumerate(gaps) for place in covered}
+    proof_index = {id(e): i for i, e in enumerate(verified)}
+    rows = {row_name(op) for op in OPERATIONS}
+    # The libraries the verified page has a column for.
+    proven = [lib for lib in columns(*hosts.values()) if lib not in VARIANTS]
+
+    def grid_cell(h, timed, lib, row):
+        """A library's cell for an operation on a host, for the verified
+        page: the index in `verified` of the proof that covers it,
+        `{"other_os": index}` for a proof limited to another OS, `refused`
+        where the library refuses to start on the host's CPU, `unproven`, or
+        `untimed`. A proof shows whether or not the host timed the operation,
+        since it covers the code; a cell with neither is `untimed`, as the
+        library may not offer the operation or the host's results may predate
+        its benchmark."""
+        if lib in h.get("refused", {}):
+            return "refused"
+        if entry := proof_for(verified, lib, row, h):
+            return proof_index[id(entry)]
+        if entry := proof_for(verified, lib, row, h, any_os=True):
+            return {"other_os": proof_index[id(entry)]}
+        return "unproven" if lib in timed.get(row, {}) else "untimed"
+
+    def host_data(name):
+        h = hosts[name]
+        out = {
+            "name": name,
+            "cpu": h["cpu"]["model"],
+            "arch": host_arch(h),
+            "logical_cpus": h["cpu"]["logical_cpus"],
+            "os": h["os"],
+            "os_kind": host_os(h),
+            "rustc": h["toolchain"]["rustc"],
+            "date": h["started"][:10],
+            "commit": h["commit"],
+            "noisy": bool(h.get("load", {}).get("noisy")),
+            "note": HOSTS[name].get("note"),
+            "scaling": " ".join(scaling(h)).strip() or None,
+            "refused": {lib: [f.upper() for f in missing] for lib, missing in h.get("refused", {}).items()},
+            "libraries": columns(h),
+            "times": {},
+            "fastest": {},
+            "proofs": {},
+            # Every operation's cell for each library, timed or not, for the verified page.
+            "grid": {
+                row_name(op): {lib: grid_cell(h, times(h), lib, row_name(op)) for lib in proven}
+                for op in OPERATIONS
+            },
+            "gaps": {},
+        }
+        for row, libs in times(h).items():
+            if row not in rows:
+                continue
+            others = [lib for lib in libs if lib not in VARIANTS]
+            best = fastest(libs)
+            out["times"][row] = cells(out["libraries"], libs, best)
+            # One library alone has no rival, so no fastest.
+            if len(others) > 1:
+                out["fastest"][row] = best
+            proofs = {
+                lib: proof_index[id(p)]
+                for lib in libs
+                if (p := proof_for(verified, VARIANTS.get(lib, lib), row, h)) is not None
+            }
+            if proofs:
+                out["proofs"][row] = proofs
+            if (row, name) in gap_of:
+                out["gaps"][row] = gap_of[row, name]
+        cost = h.get("build_cost")
+        if cost and cost["status"] == "ok":
+            out["build"] = {
+                "date": cost["started"][:10],
+                "rustc": cost["host"]["rustc"],
+                "cc": cost["host"]["cc"],
+                "jobs": cost["host"]["jobs"],
+                "builds": [
+                    {
+                        "name": BUILDS.get(b["name"], b["name"]),
+                        # The library each build is of, so the page shows it beside that library.
+                        "library": b["name"].removeprefix("rustls-").removesuffix("-vendored"),
+                        "seconds": round(b["median_seconds"], 1),
+                        "low": round(min(b["seconds"]), 1),
+                        "high": round(max(b["seconds"]), 1),
+                        "cpu_seconds": round(b["median_cpu_seconds"]),
+                        "stripped_mb": round(b["stripped_bytes"] / 1e6, 2),
+                        "tools": b["tools"],
+                        "crates": len(b["packages"]),
+                    }
+                    for b in cost["builds"]
+                ],
+            }
+        elif cost:
+            out["build"] = {"reason": cost["reason"]}
+        return out
+
+    def tier_data(t):
+        column, name = tier_column(t), tier_name(t)
+        timed = {lib for libs in t["benchmarks"].values() for lib in libs}
+        out = {
+            "name": column,
+            # The TIERS name benchmarks/gaps.toml decides on.
+            "tier": name,
+            "cpu": t["cpu"],
+            "libraries": [lib for lib in ["rind", *BASELINES, *TIMED] if lib in timed],
+            # The libraries its fastest is drawn from.
+            "rivals": ["rind", *heatmap_rivals(t)],
+            "times": {},
+            "fastest": {},
+            "gaps": {},
+        }
+        for key, libs in t["benchmarks"].items():
+            rivals = {lib: ns for lib, ns in libs.items() if lib in out["rivals"]}
+            if not rivals:
+                continue
+            best = min(rivals, key=rivals.get)
+            out["times"][key] = cells(out["libraries"], libs, best)
+            if len(rivals) > 1:
+                out["fastest"][key] = best
+            if (key, name) in gap_of:
+                out["gaps"][key] = gap_of[key, name]
+        return out
+
+    def tier_groups(tiers):
+        """The tiers' benchmarks by TIER_ROWS row, then those UNRANKED keeps
+        apart, by its reason."""
+        keys = sorted({key for t in tiers["tiers"] for key in t["benchmarks"]})
+        groups = [{"name": name, "benchmarks": [k for k in keys if re.match(p, k)]} for name, p in TIER_ROWS]
+        unranked = [k for k in keys if tier_row(k) is None]
+        for pattern, why in UNRANKED:
+            group = [k for k in unranked if re.match(pattern, k)]
+            unranked = [k for k in unranked if k not in group]
+            groups.append({"name": f"Not ranked: {why}", "benchmarks": group})
+        return [g for g in groups if g["benchmarks"]]
+
+    data = {
+        "schema": 1,
+        "slower": SLOWER,
+        "rule": VERIFIED_RULE,
+        "bins": [
+            {"to": edge, "label": text, "color": color}
+            for edge, text, color in zip(SPEED_BINS + [None], SPEED_LABELS, SPEED)
+        ],
+        "standing": standing(hosts),
+        "libraries": [{"id": lib, "name": COLUMNS[lib], "variant_of": VARIANTS.get(lib)} for lib in COLUMNS],
+        "sections": [
+            {"name": section, "operations": [{"id": row_name(op), "label": label(row_name(op))} for op in ops]}
+            for section, ops in SECTIONS
+        ],
+        "hosts": [host_data(name) for name in HOSTS if name in hosts],
+        "unmeasured": [name for name in HOSTS if name not in hosts],
+        "tiers": None,
+        "gaps": [],
+        "verified": [
+            {
+                "library": e["library"],
+                "operations": e["operations"],
+                "platform": platform_of(e),
+                **({"os": e["os"]} if "os" in e else {}),
+                "proof": e["proof"],
+                "link": e["link"],
+            }
+            for e in verified
+        ],
+    }
+    if tiers is not None:
+        order = tier_columns(tiers)
+        data["tiers"] = {
+            # The libraries any tier's fastest is drawn from.
+            "rivals": ["rind", *BASELINES, *TIMED],
+            "run": tiers["run"],
+            "url": tiers["url"],
+            "date": tiers["date"][:10],
+            "commit": tiers["commit"],
+            "columns": [tier_data(t) for t in sorted(tiers["tiers"], key=lambda t: order.index(tier_column(t)))],
+            "groups": tier_groups(tiers),
+        }
+    for e, covered in gaps:
+        ratios = [ratio for ratio, _ in covered.values()]
+        data["gaps"].append(
+            {
+                "operations": [{"id": op, "label": label(op) if op in rows else None} for op in e["operations"]],
+                "on": [{"name": p, "host": p in HOSTS} for p in e["on"]],
+                "low": round(min(ratios), 2),
+                "high": round(max(ratios), 2),
+                "fastest": sorted({COLUMNS[lib] for _, lib in covered.values()}),
+                "quest": {"path": e["quest"], "title": quest_title(e["quest"])} if "quest" in e else None,
+                "reason": e.get("reason"),
+            }
+        )
+    return data
+
+
 def report(hosts, tiers, verified, gaps):
-    """BENCHMARKS.md and its SVGs, by path."""
+    """BENCHMARKS.md, its SVGs, the site's data, and the README with its
+    comparison, by path."""
     files = {}
     shown = [name for name in HOSTS if name in hosts]
     missing = [f"`{name}`" for name in HOSTS if name not in hosts]
@@ -1502,6 +2044,14 @@ def report(hosts, tiers, verified, gaps):
             "the tables below each host give them all. A library with no square doesn't offer the operation, or "
             "the host didn't time it, as its section says.",
             "",
+            "The rustls rows run both peers in one process. The every-logical-CPU rows run one handshake per "
+            "thread on all of the host's logical CPUs at once, each thread with its own client and server, and give the "
+            "machine's time per handshake; each host's text gives rind-rustls's throughput there over its "
+            "one-thread rate. A full handshake over rind-rustls's default provider, both peers, makes 245 heap "
+            "allocations with an ECDSA P-256 certificate on x86_64, which `rind-rustls/tests/allocations.rs` pins. "
+            "Over rustls's aws-lc-rs provider it makes 214 through Rust's allocator and about 90 more in AWS-LC's C "
+            "code, which only a process-wide count such as valgrind's sees (2026-11-13).",
+            "",
             *(
                 [
                     "rind (DIT held) times rind with `rind::cpu::Dit::hold()` held across the timed loop, as a "
@@ -1530,6 +2080,7 @@ def report(hosts, tiers, verified, gaps):
             "",
             *([HOSTS[name]["note"], ""] if "note" in HOSTS[name] else []),
             *([f"Not timed on `{name}`: {', '.join(untimed)}.", ""] if untimed else []),
+            *scaling(h),
             *(
                 f"{COLUMNS[lib]} isn't timed on `{name}`: it requires {and_list([f.upper() for f in missing])}, "
                 "which this CPU lacks."
@@ -1557,7 +2108,8 @@ def report(hosts, tiers, verified, gaps):
             "and X25519) and of a rustls client per provider, by `admin/build-cost`: the median of three builds with an empty target directory and a warm "
             "download cache, their CPU time, the stripped binary's size, the build tools it needs beyond rustc "
             "and a linker, and the crates it compiles. The system OpenSSL build leaves the library itself out of "
-            "its size; the vendored build is the static figure.",
+            "its size; the vendored build is the static figure. verified-garbage has no P-256 key generation, so "
+            "its binary imports a random scalar instead, and no rustls provider, so it has no rustls build.",
             "",
         ]
     for name in shown:
@@ -1578,11 +2130,11 @@ def report(hosts, tiers, verified, gaps):
 
     md += ["## CPU tiers", ""]
     if tiers is None:
-        md += ["No nightly results yet.", ""]
+        md += ["No weekly results yet.", ""]
     else:
         cpus = sorted({t["cpu"] for t in tiers["tiers"]})
         md += [
-            "GitHub's runners, timed by the nightly `bench` workflow with CPU features denied as `bench.yml` "
+            "GitHub's runners, timed by the weekly `bench` workflow with CPU features denied as `bench.yml` "
             "describes: x86_64 runs every feature, its name suffixed with the AES-GCM tier the runner drew (AVX-512 or VAES AVX2); no IFMA denies AVX-512 IFMA, and no AVX-512 all of AVX-512 but "
             "VAES and VPCLMULQDQ; from no ADX, each column denies more (no ADX: ADX and AVX-512 IFMA; "
             "no AVX2: also AVX2, BMI2, SHA-NI, AVX-512, VAES, and VPCLMULQDQ; no AVX: also AVX; no AES-NI: "
@@ -1590,15 +2142,16 @@ def report(hosts, tiers, verified, gaps):
             "no SHA-3 without the SHA-512 and SHA-3 instructions, no crypto without any of them, armv7 in 32-bit "
             "mode on the same core, and armv7 NEON there without the crypto extension. portable times rind's portable "
             "backend, forced with `--cfg rind_portable`, against aws-lc's C built without assembly; ring has no "
-            "such build, so it sits that column out. Each cell is rind's time over "
-            "the fastest of aws-lc-rs and ring (aws-lc-rs alone where a feature is denied, since ring can't "
-            "be denied one), in the row's benchmark where rind trails most. An empty cell runs the same code "
-            "as the one to its left, so it isn't timed.",
+            "such build, and verified-garbage runs its assembly there, so both sit that column out. Each cell is "
+            "rind's time over the fastest of aws-lc-rs, ring, and verified-garbage (without ring where a feature "
+            "is denied, since ring can't be denied one), in the row's benchmark where rind trails most. A cell "
+            "verified-garbage wins gets a quest that switches rind to its proven code, not an entry under "
+            "Known gaps. An empty cell runs the same code as the one to its left, so it isn't timed.",
             "",
             f"From [run {tiers['run']}]({tiers['url']}), {tiers['date'][:10]} at {commit_link(tiers['commit'])}, "
             f"on {', '.join(cpus)}.",
             "",
-            *picture("tiers", "rind's time over the fastest of aws-lc-rs and ring, by CPU tier"),
+            *picture("tiers", TIERS_TITLE),
             "",
             "<details>",
             "<summary>Every benchmark</summary>",
@@ -1623,13 +2176,7 @@ def report(hosts, tiers, verified, gaps):
         "",
         "## Verified code",
         "",
-        "A ✓ means a published, machine-checked proof shows that all the code computing the operation, as "
-        "that library runs it on that host, gives the specified result for every input: the cipher and its "
-        "mode, the hash over every block with its padding, the whole scalar multiplication or exponentiation, "
-        "and the glue around them, such as clamping, byte conversion, and point encoding. Parsing DER key and "
-        "signature containers, randomness, and the message hash a signature takes are left out. Proofs of "
-        "memory safety alone, or of only some of the code, earn no ✓. `benchmarks/verified.toml` holds this "
-        "table.",
+        f"{VERIFIED_RULE} `benchmarks/verified.toml` holds this table.",
         "",
         "| Library | Operations | Platform | Proof |",
         "|---|---|---|---|",
@@ -1644,18 +2191,21 @@ def report(hosts, tiers, verified, gaps):
         "`admin/bench-report collect` runs the report's benchmarks, then",
         "`admin/build-cost`, on each benchmark host in turn over ssh, in the Nix dev",
         "shell and under `quest gate`, which waits for the host to have room but",
-        "shares it with other gated work, so its numbers are noisier than the nightly",
+        "shares it with other gated work, so its numbers are noisier than the weekly",
         "`bench` workflow's runners, which give the clean ones; it skips any host that is still busy, and writes their results and the hosts' details as JSON under",
-        "`.tmp/bench-report/`. `admin/bench-report nightly` saves the latest nightly",
+        "`.tmp/bench-report/`. `admin/bench-report weekly` saves the latest weekly",
         "`bench` run's results, and `admin/bench-report render --from DIR` copies a",
         "collection's measured hosts into `benchmarks/data/` and writes",
-        "`BENCHMARKS.md` and its SVGs, which the README shows too, from them, `benchmarks/verified.toml`, and",
+        "`BENCHMARKS.md`, its SVGs, which the README shows too, the README's comparison table, and",
+        "`benchmarks/verified.toml`, and",
         "`benchmarks/gaps.toml`, which must hold a quest or a reason for every gap",
         "over 10%.",
         "",
     ]
     files = {os.path.join(REPORT_DIR, k): v for k, v in files.items()}
     files[REPORT] = "\n".join(md)
+    files[SITE_DATA] = json.dumps(site_data(hosts, tiers, verified, gaps), ensure_ascii=False, separators=(",", ":")) + "\n"
+    files[README] = readme_with_comparison(comparison_table(hosts, verified))
     return files
 
 
@@ -1703,8 +2253,8 @@ def render(args):
     for path in generated:
         if path not in files:
             os.remove(path)
-    os.makedirs(REPORT_DIR, exist_ok=True)
     for path, content in files.items():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write(content)
     print(os.path.relpath(REPORT, ROOT))
@@ -1715,7 +2265,7 @@ def significant(ns):
 
 
 def load_run(paths):
-    """A nightly run's tiers from its `bench-*/bench-results.json` artifacts,
+    """A weekly run's tiers from its `bench-*/bench-results.json` artifacts,
     each benchmark's times by library under its ID with `*` in the library's
     place."""
     tiers = []
@@ -1725,7 +2275,7 @@ def load_run(paths):
         benchmarks = {}
         for r in saved["results"]:
             parts = r["id"].split("/")
-            lib = next((p for p in parts if p == "rind" or p in BASELINES), None)
+            lib = next((p for p in parts if p == "rind" or p in BASELINES or p in TIMED), None)
             if lib is None:
                 continue
             key = "/".join("*" if p == lib else p for p in parts)
@@ -1748,12 +2298,14 @@ def gate(args):
     tiers = run_tiers(args.dir)
     previous = gaps_of({}, run_tiers(args.previous)) if args.previous else None
     entries = gap_entries(GAPS)
+    # A benchmark only TIMED libraries rival, such as ChaCha20 without
+    # Poly1305, is ranked for the heatmap alone, so it goes unmentioned.
     unbaselined = sorted(
         {
             f"{key} on {tier_column(t)}"
             for t in tiers["tiers"]
             for key, libs in t["benchmarks"].items()
-            if tier_row(key) and not set(libs) & set(BASELINES)
+            if tier_row(key) and not set(libs) & set(BASELINES + TIMED)
         }
     )
     undecided, once = [], []
@@ -1775,8 +2327,8 @@ def gate(args):
     print(f"Every gap over {SLOWER}× has a decision in benchmarks/gaps.toml.")
 
 
-def nightly(args):
-    """Saves the latest nightly bench's results on main as the CPU tiers,
+def weekly(args):
+    """Saves the latest weekly bench's results on main as the CPU tiers,
     from a run that timed every tier, since the report reads an empty cell as
     code that tier shares with the one to its left."""
     runs = json.loads(
@@ -1785,7 +2337,7 @@ def nightly(args):
             + ["schedule", "--limit", "20", "--json", "databaseId,headSha,createdAt,url,status"]
         )
     )
-    scratch = os.path.join(ROOT, ".tmp", "bench-report", "nightly")
+    scratch = os.path.join(ROOT, ".tmp", "bench-report", "weekly")
     incomplete = []
     for run in runs:
         if run["status"] != "completed":
@@ -1824,7 +2376,7 @@ def nightly(args):
         shutil.rmtree(scratch)
         print(f"bench-report: tiers from run {run['databaseId']}", file=sys.stderr)
         return
-    fail("no completed nightly bench run on main timed every tier" + "".join(f"; run {r}" for r in incomplete))
+    fail("no completed weekly bench run on main timed every tier" + "".join(f"; run {r}" for r in incomplete))
 
 
 def main():
@@ -1846,10 +2398,10 @@ def main():
     p.add_argument("--check", action="store_true", help="fail if BENCHMARKS.md or its SVGs are out of date")
     p.set_defaults(func=render)
 
-    p = sub.add_parser("nightly", help="save the latest nightly bench's results as the CPU tiers")
-    p.set_defaults(func=nightly)
+    p = sub.add_parser("weekly", help="save the latest weekly bench's results as the CPU tiers")
+    p.set_defaults(func=weekly)
 
-    p = sub.add_parser("gate", help="fail on a nightly run's gap without a decision")
+    p = sub.add_parser("gate", help="fail on a weekly run's gap without a decision")
     p.add_argument("dir", help="the run's downloaded bench-* artifacts")
     p.add_argument("--previous", metavar="DIR", help="the previous run's, to fail only on a gap both show")
     p.set_defaults(func=gate)

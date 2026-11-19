@@ -1,10 +1,11 @@
 use rind::aead;
 use rustls::crypto::cipher::{
-    AeadKey, InboundOpaqueMessage, InboundPlainMessage, Iv, KeyBlockShape, MessageDecrypter,
-    MessageEncrypter, NONCE_LEN, Nonce, OutboundOpaqueMessage, OutboundPlainMessage,
-    PrefixedPayload, Tls12AeadAlgorithm, Tls13AeadAlgorithm, UnsupportedOperationError,
-    make_tls12_aad, make_tls13_aad,
+    AeadKey, InboundOpaqueMessage, InboundPlainMessage, Iv, MessageDecrypter, MessageEncrypter,
+    Nonce, OutboundOpaqueMessage, OutboundPlainMessage, PrefixedPayload, Tls13AeadAlgorithm,
+    UnsupportedOperationError, make_tls13_aad,
 };
+#[cfg(feature = "tls12")]
+use rustls::crypto::cipher::{KeyBlockShape, NONCE_LEN, Tls12AeadAlgorithm, make_tls12_aad};
 use rustls::{ConnectionTrafficSecrets, ContentType, ProtocolVersion};
 
 /// rustls derives `key` at the algorithm's key length.
@@ -41,6 +42,7 @@ impl Tls13AeadAlgorithm for Chacha20Poly1305 {
     }
 }
 
+#[cfg(feature = "tls12")]
 impl Tls12AeadAlgorithm for Chacha20Poly1305 {
     fn encrypter(&self, key: AeadKey, iv: &[u8], _: &[u8]) -> Box<dyn MessageEncrypter> {
         Box::new(ChaChaTls12Cipher(
@@ -132,8 +134,10 @@ impl MessageDecrypter for Tls13Cipher {
     }
 }
 
+#[cfg(feature = "tls12")]
 struct ChaChaTls12Cipher(aead::Key, Iv);
 
+#[cfg(feature = "tls12")]
 impl MessageEncrypter for ChaChaTls12Cipher {
     fn encrypt(
         &mut self,
@@ -160,6 +164,7 @@ impl MessageEncrypter for ChaChaTls12Cipher {
     }
 }
 
+#[cfg(feature = "tls12")]
 impl MessageDecrypter for ChaChaTls12Cipher {
     fn decrypt<'a>(
         &mut self,
@@ -224,6 +229,7 @@ impl Tls13AeadAlgorithm for TlsAesGcm {
     }
 }
 
+#[cfg(feature = "tls12")]
 impl Tls12AeadAlgorithm for TlsAesGcm {
     fn encrypter(
         &self,
@@ -260,8 +266,10 @@ impl Tls12AeadAlgorithm for TlsAesGcm {
     }
 }
 
+#[cfg(feature = "tls12")]
 struct GcmTls12MessageDecrypter(aead::Key, [u8; 4]);
 
+#[cfg(feature = "tls12")]
 impl MessageDecrypter for GcmTls12MessageDecrypter {
     fn decrypt<'a>(
         &mut self,
@@ -300,8 +308,10 @@ impl MessageDecrypter for GcmTls12MessageDecrypter {
     }
 }
 
+#[cfg(feature = "tls12")]
 struct GcmTls12MessageEncrypter(aead::Key, Iv);
 
+#[cfg(feature = "tls12")]
 impl MessageEncrypter for GcmTls12MessageEncrypter {
     fn encrypt(
         &mut self,
@@ -334,6 +344,7 @@ impl MessageEncrypter for GcmTls12MessageEncrypter {
     }
 }
 
+#[cfg(feature = "tls12")]
 fn gcm_iv(write_iv: &[u8], explicit: &[u8]) -> Iv {
     debug_assert_eq!(write_iv.len(), 4);
     debug_assert_eq!(explicit.len(), 8);
@@ -354,10 +365,13 @@ fn gcm_iv(write_iv: &[u8], explicit: &[u8]) -> Iv {
 
 const TAG_LEN: usize = 16;
 
+#[cfg(feature = "tls12")]
 const MAX_FRAGMENT_LEN: usize = 16384;
 
+#[cfg(feature = "tls12")]
 // TLS1.2-specific
 const AESGCM_EXPLICIT_NONCE_LEN: usize = 8;
+#[cfg(feature = "tls12")]
 const AESGCM_OVERHEAD: usize = AESGCM_EXPLICIT_NONCE_LEN + TAG_LEN;
 
 #[cfg(test)]
@@ -393,6 +407,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "tls12")]
     #[test]
     fn test_chacha20_poly1305_tls12() {
         let cipher = Chacha20Poly1305;
@@ -456,6 +471,7 @@ mod tests {
         test_aes_gcm_tls13(256);
     }
 
+    #[cfg(feature = "tls12")]
     #[test]
     fn test_aes_gcm_tls12() {
         fn test_aes_gcm_tls12(key_bits: usize) {
@@ -500,6 +516,7 @@ mod tests {
 
     /// rustls bounds TLS 1.2 plaintext only through the decrypter, so each
     /// must refuse a record over 2^14 bytes that its encrypter would seal.
+    #[cfg(feature = "tls12")]
     #[test]
     fn tls12_refuses_oversized_records() {
         // rustls only builds a 32-byte `AeadKey`; AES-128-GCM shares the GCM decrypter.

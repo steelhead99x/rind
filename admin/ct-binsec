@@ -98,13 +98,14 @@ print("EXIT {}".format(int(gdb.parse_and_eval("$_exitcode"))))
 # cannot decode, so their paths stay with `admin/ctgrind`, `admin/ct-sde`,
 # and `admin/ct-qemu`: on x86_64, AES-NI, VAES, the SHA512 instructions, and
 # every EVEX encoding; on aarch64, the crypto extension's AES, PMULL, and
-# SHA instructions, SHA3's, and the `msr` that sets DIT. Denying AES leaves
+# SHA instructions, SHA3's, SVE2's `xar`, and the `msr` that sets DIT.
+# Denying AES leaves
 # vpaes, whose `tbl` the script stubs.
 # See UPSTREAM.md, "BINSEC cannot decode much of what rind runs".
 UNDECODED = {
     "x86_64": ["aes", "vaes", "sha512", "avx512f", "avx512dq", "avx512ifma", "avx512bw"]
     + ["avx512vl", "avx512vbmi", "avx512vbmi2"],
-    "aarch64": ["aes", "pmull", "sha2", "sha3", "dit"],
+    "aarch64": ["aes", "pmull", "sha2", "sha3", "sve2", "dit"],
 }
 
 # glibc picks each of these for the runner's CPU, such as an EVEX one with
@@ -122,7 +123,9 @@ LIBC = ["memcpy", "memmove", "memset", "memcmp", "bcmp"]
 # s2n-bignum's P-521 code sets the carry with `stc`, LLVM tests the portable
 # P-256 and P-384 for zero with `movmskps`, and loads and stores rind's AVX2
 # ChaCha20 state with `vinsertf128` and `vpermpd`, and aws-lc's AVX2 ML-DSA
-# moves lanes with `vmovshdup` and samples with `vmovmskps`. glibc's `malloc`
+# moves lanes with `vmovshdup` and samples with `vmovmskps`. Intel's MXCSR
+# mitigation, `rind::low::Mcdt`, runs `stmxcsr` and `ldmxcsr` on a CPU that
+# needs it. glibc's `malloc`
 # reads the thread pointer with `mrs`, vpaes and aws-lc's NEON ChaCha20 look
 # up bytes with `tbl`, and ML-KEM's rejection sampling counts bits with `cnt`.
 # See UPSTREAM.md, "BINSEC cannot decode instructions `admin/ct-binsec` stubs".
@@ -225,8 +228,26 @@ def cnt(ops, _):
     return "q{} := {}".format(dst, " :: ".join(out))
 
 
+def stmxcsr(ops, _):
+    """MXCSR's default, which BINSEC does not model: Intel's mitigation then
+    loads its own value, as on a CPU that needs it."""
+    m = re.fullmatch(r"(-?0x[0-9a-f]+)?\(%(r\w+)\)", ops[0]) if len(ops) == 1 else None
+    if not m:
+        return None
+    disp = int(m[1], 16) if m[1] else 0
+    addr = m[2] + (" + {:#x}".format(disp) if disp > 0 else " - {:#x}".format(-disp) if disp else "")
+    return "@[{}, 4] := 0x00001f80".format(addr)
+
+
+def ldmxcsr(ops, _):
+    """Nothing BINSEC models: MXCSR sets only floating-point state, which rind
+    never reads."""
+    return "libc_i := libc_i" if len(ops) == 1 else None
+
+
 STUBS = {
     "x86_64": {"stc": lambda *_: "cf := true", "clc": lambda *_: "cf := false"}
+    | {"stmxcsr": stmxcsr, "ldmxcsr": ldmxcsr}
     | {"movmskps": movmskps, "vmovmskps": movmskps, "vinsertf128": vinsertf128, "vpermpd": vpermpd, "vmovshdup": vmovshdup},
     "aarch64": {"mrs": mrs, "tbl": tbl, "cnt": cnt},
 }

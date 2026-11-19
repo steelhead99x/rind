@@ -1,0 +1,89 @@
+---
+// The shell every page shares: light and dark from the reader's setting, no
+// request to a third party (the Content-Security-Policy in astro.config.ts
+// refuses one), a link to the page's Markdown twin, and the card a pasted link
+// shows.
+import { card } from "../lib/card";
+import { type Page, origin, twinPath } from "../lib/pages";
+
+interface Props {
+	page: Page;
+	// The document title, when it should say more than the page's own.
+	title?: string;
+}
+const { page, title = page.title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="color-scheme" content="light dark" />
+		<title>{title}</title>
+		<meta name="description" content={page.answers} />
+		<link rel="canonical" href={`${origin}${page.path}`} />
+		<link rel="alternate" type="text/markdown" href={twinPath(page)} />
+		<meta property="og:type" content="website" />
+		<meta property="og:site_name" content="rind" />
+		<meta property="og:title" content={title} />
+		<meta property="og:description" content={page.answers} />
+		<meta property="og:url" content={`${origin}${page.path}`} />
+		<meta property="og:image" content={`${origin}${card.path}`} />
+		<meta property="og:image:width" content={String(card.width)} />
+		<meta property="og:image:height" content={String(card.height)} />
+		<meta property="og:image:alt" content="rind, with a curled strip of green graviola peel forming the r" />
+		<meta name="twitter:card" content="summary_large_image" />
+		{/* No favicon yet; this stops the browser asking for one. */}
+		<link rel="icon" href="data:," />
+	</head>
+	<body>
+		<slot />
+	</body>
+</html>
+
+<style is:global>
+	:root {
+		--bg: #fffdf6;
+		--fg: #1f2410;
+		--muted: #5b6148;
+		--border: #e2dcc4;
+		--surface: #f6f1df;
+		--accent: #4f6a00;
+		font-family:
+			system-ui,
+			-apple-system,
+			"Segoe UI",
+			Roboto,
+			sans-serif;
+		line-height: 1.6;
+		color: var(--fg);
+		background: var(--bg);
+	}
+	@media (prefers-color-scheme: dark) {
+		:root {
+			--bg: #12140d;
+			--fg: #ece8d8;
+			--muted: #a9ab95;
+			--border: #33372a;
+			--surface: #1b1e14;
+			--accent: #add500;
+		}
+	}
+	body {
+		margin: 0;
+	}
+	a {
+		color: var(--accent);
+	}
+	code,
+	pre {
+		font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+		font-size: 0.9em;
+	}
+	:not(pre) > code {
+		background: var(--surface);
+		padding: 0.1em 0.3em;
+		border-radius: 0.25rem;
+	}
+</style>

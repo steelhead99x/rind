@@ -9,10 +9,6 @@ all-features = true
 version = 2
 yanked = "deny"
 ignore = [
-    # rsa Marvin Attack: rind-bench measures the rsa crate as a comparison
-    # point. No published crate depends on it.
-    "RUSTSEC-2023-0071",
-
     # proc-macro-error2 is unmaintained (proc-macro, build-time only). Pulled
     # by hax-lib-macros under libcrux's `cfg(hax)` dependencies, which only
     # hax's verification toolchain compiles; no build of rind does.
@@ -22,6 +18,12 @@ ignore = [
     # tests compare against, reaches it through p256 and p384 0.13. No
     # published crate depends on it.
     "RUSTSEC-2026-0387",
+
+    # chrono and humantime are unmaintained, with no safe upgrade. They ship in
+    # rind-object-store through object_store's gcp-base backend; an unmaintained
+    # crate is no vulnerability, so the waiver stands until object_store drops them.
+    "RUSTSEC-2026-0542",
+    "RUSTSEC-2026-0543",
 ]
 
 [licenses]
@@ -59,3 +61,5 @@ allow-wildcard-paths = true
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# rind-bench times pyca/verified-garbage, which is not on crates.io.
+allow-git = ["https://github.com/pyca/verified-garbage"]

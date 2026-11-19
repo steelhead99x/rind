@@ -1,21 +1,37 @@
 [package]
 name = "rind-rcgen"
-version = "0.14.4"
+version = "0.14.5"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
+homepage = "https://rind.kixel.ai"
 license = "Apache-2.0 OR ISC OR MIT-0"
 description = "rcgen KeyPair backed by rind"
 categories = ["cryptography"]
 rust-version.workspace = true
 readme = "README.md"
 
+# Every feature, so docs.rs shows the items each gates, labeled with it.
+[package.metadata.docs.rs]
+all-features = true
+
+# The provider admin/adapter-api diffs this crate's API against.
+[package.metadata.rind.api]
+crate = "rcgen"
+module = ""
+items = ["KeyPair"]
+# rcgen's default backend, whose behavior the README documents.
+features = ["ring"]
+skip = { fips = "builds AWS-LC's FIPS module, which rind does not offer" }
+# Items rind cannot back, which the README names.
+omitted = [
+  "KeyPair::generate_rsa_for",
+]
+
 [features]
 # rcgen's default features include `pem`.
 default = ["pem"]
 # rcgen's PEM methods on `KeyPair`.
 pem = ["dep:base64ct", "rcgen/pem"]
-# rind-rcgen's own: wipes rind's keys and the key pair's PKCS#8 copy on drop.
-wipe = ["rind/wipe"]
 # rcgen's `impl Zeroize for KeyPair`, which clears its PKCS#8 copy.
 zeroize = []
 

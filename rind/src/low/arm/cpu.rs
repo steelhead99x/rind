@@ -2,13 +2,6 @@
 
 use core::sync::atomic::{AtomicU8, Ordering};
 
-/// The portable code needs nothing beyond the base instruction set, so NEON
-/// and the crypto extension speed things up where present but are never
-/// required.
-pub(crate) fn missing_cpu_feature() -> Option<&'static str> {
-    None
-}
-
 /// Proof that the CPU has the ARMv8 Crypto Extension in AArch32: NEON, AES,
 /// PMULL, SHA-1, and SHA-256.
 ///
@@ -96,28 +89,11 @@ fn detect() -> u8 {
     0
 }
 
-#[cfg(all(
-    not(any(debug_assertions, rind_cpu_disable)),
-    any(target_os = "linux", target_os = "android")
-))]
-fn test_toggle(_id: &str, detected: bool) -> bool {
-    detected
-}
-
-/// Lets a debug build, or a release one with `--cfg rind_cpu_disable`, deny a
-/// feature with `RIND_CPU_DISABLE_<id>`, as on x86_64, so a CPU with the
-/// extension also tests the portable code.
-#[cfg(all(
-    any(debug_assertions, rind_cpu_disable),
-    any(target_os = "linux", target_os = "android")
-))]
+/// `detected`, unless `RIND_CPU_DISABLE_<id>` denies it, as on x86_64, so a
+/// CPU with the extension also tests the portable code.
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn test_toggle(id: &str, detected: bool) -> bool {
-    if std::env::var(format!("RIND_CPU_DISABLE_{id}")).is_ok() {
-        println!("DEBUG: denying cpuid {id:?}");
-        false
-    } else {
-        detected
-    }
+    detected && !crate::low::cpu_denied(id)
 }
 
 /// armv7 has no data-independent timing mode to enable.
@@ -174,27 +150,31 @@ pub(in crate::low) unsafe fn zero_bytes(ptr: *mut u8, len: usize) {
 /// every one of them whatever their values.
 ///
 /// Returns zero if they are equal, otherwise non-zero.
+#[inline(never)]
 pub(in crate::low) fn ct_compare_bytes(a: &[u8], b: &[u8]) -> u8 {
     let (len, a, b) = (a.len().min(b.len()), a.as_ptr(), b.as_ptr());
-    let mut acc = 0u32;
-    // SAFETY: inline assembly. all written registers are listed as clobbers.
+    let acc: u32;
+    // SAFETY: reads `len` bytes from `a` and `b`, which both hold.
+    // Its registers are fixed, and it is never inlined, so its proof in
+    // `proofs/hol-light/armv7/ct_compare_bytes.ml` is of one copy, where the
+    // target builds A32. Android and the `thumbv7` targets build it as
+    // Thumb-2, which no proof covers.
     unsafe {
         core::arch::asm!(
-            "   2:  subs {len}, {len}, #1",
+            "   2:  subs r2, r2, #1",
             "       blo 3f",
-            "       ldrb {tmpa}, [{a}], #1",
-            "       ldrb {tmpb}, [{b}], #1",
-            "       eor {tmpa}, {tmpa}, {tmpb}",
-            "       orr {acc}, {acc}, {tmpa}",
+            "       ldrb r12, [r0], #1",
+            "       ldrb lr, [r1], #1",
+            "       eor r12, r12, lr",
+            "       orr r3, r3, r12",
             "       b 2b",
             "   3:",
-
-            a = inout(reg) a => _,
-            b = inout(reg) b => _,
-            len = inout(reg) len => _,
-            acc = inout(reg) acc,
-            tmpa = out(reg) _,
-            tmpb = out(reg) _,
+            inout("r0") a => _,
+            inout("r1") b => _,
+            inout("r2") len => _,
+            inout("r3") 0u32 => acc,
+            out("r12") _,
+            out("lr") _,
             options(readonly, nostack),
         )
     }
@@ -205,27 +185,30 @@ pub(in crate::low) fn ct_compare_bytes(a: &[u8], b: &[u8]) -> u8 {
 ///
 /// Returns zero if `a == b`, otherwise non-zero. The words are combined in
 /// assembly so the compiler cannot split the test into early exits.
+#[inline(never)]
 pub(in crate::low) fn ct_compare_16(a: &[u8; 16], b: &[u8; 16]) -> usize {
     let (a, b) = (u128::from_ne_bytes(*a), u128::from_ne_bytes(*b));
-    let mut diff = a as u32;
-    // SAFETY: register-only arithmetic.
+    let diff: u32;
+    // SAFETY: register-only arithmetic, proven in
+    // `proofs/hol-light/armv7/ct_compare_16.ml` where the target builds A32,
+    // as for `ct_compare_bytes`.
     unsafe {
         core::arch::asm!(
-            "eor {diff}, {diff}, {b0}",
-            "eor {a1}, {a1}, {b1}",
-            "eor {a2}, {a2}, {b2}",
-            "eor {a3}, {a3}, {b3}",
-            "orr {diff}, {diff}, {a1}",
-            "orr {a2}, {a2}, {a3}",
-            "orr {diff}, {diff}, {a2}",
-            diff = inout(reg) diff,
-            a1 = inout(reg) (a >> 32) as u32 => _,
-            a2 = inout(reg) (a >> 64) as u32 => _,
-            a3 = inout(reg) (a >> 96) as u32 => _,
-            b0 = in(reg) b as u32,
-            b1 = in(reg) (b >> 32) as u32,
-            b2 = in(reg) (b >> 64) as u32,
-            b3 = in(reg) (b >> 96) as u32,
+            "eor r0, r0, r4",
+            "eor r1, r1, r5",
+            "eor r2, r2, r8",
+            "eor r3, r3, r12",
+            "orr r0, r0, r1",
+            "orr r2, r2, r3",
+            "orr r0, r0, r2",
+            inout("r0") a as u32 => diff,
+            inout("r1") (a >> 32) as u32 => _,
+            inout("r2") (a >> 64) as u32 => _,
+            inout("r3") (a >> 96) as u32 => _,
+            in("r4") b as u32,
+            in("r5") (b >> 32) as u32,
+            in("r8") (b >> 64) as u32,
+            in("r12") (b >> 96) as u32,
             options(pure, nomem, nostack, preserves_flags),
         );
     }

@@ -31,6 +31,15 @@ Graviola <https://github.com/ctz/graviola>
   License: Apache-2.0 OR ISC OR MIT-0, the same choice as rind's own code.
   Graviola has no NOTICE file.
 
+Argon2's reference implementation <https://github.com/P-H-C/phc-winner-argon2>
+
+  What: rind/src/low/x86_64/argon2.rs, a Rust port of its AVX2 BlaMka
+  rounds, blamka-round-opt.h.
+  Copyright 2015 Daniel Dinu, Dmitry Khovratovich, Jean-Philippe
+  Aumasson, and Samuel Neves
+  License: CC0-1.0 OR Apache-2.0, taken under CC0-1.0, so the port
+  carries rind's own license.
+
 s2n-bignum <https://github.com/awslabs/s2n-bignum>
 
   What: the files under rind/src/low/x86_64 and rind/src/low/aarch64
@@ -92,7 +101,7 @@ aws-lc <https://github.com/aws/aws-lc>, from OpenSSL and BoringSSL
   What: the files under rind/src/low/{arm,aarch64,x86_64}/aws_lc but
   the mlkem_* ones (see mlkem-native), which
   admin/import-aws-lc takes from aws-lc's assembly at commit
-  91c93a8eb860e51482a871a8772cb9b1b310baea,
+  5ed12cce0fd4453f2f63300d44325ed14f845d6f,
   rind/src/low/arm/poly1305_arm.rs,
   rind/src/low/x86_64/ghash_ssse3_x86_64.rs,
   rind/src/low/x86_64/rsaz.rs, rind/src/low/x86_64/aes_nohw.rs, and
@@ -178,7 +187,7 @@ mlkem-native <https://github.com/pq-code-package/mlkem-native>
   What: rind/src/low/generic/mlkem_poly.rs, which ports mlkem-native's
   portable C polynomial arithmetic (mlkem/poly.c, poly_k.c, compress.c,
   sampling.c, and zetas.inc, as aws-lc vendors them at commit
-  91c93a8eb860e51482a871a8772cb9b1b310baea) to Rust; and
+  5ed12cce0fd4453f2f63300d44325ed14f845d6f) to Rust; and
   rind/src/low/x86_64/aws_lc/mlkem_*, which admin/import-aws-lc takes from
   mlkem-native's x86_64 AVX2 assembly as aws-lc vendors it at that commit,
   with the tables of its compress_consts.c in
@@ -190,7 +199,7 @@ BoringSSL <https://boringssl.googlesource.com/boringssl>
 
   What: the files under rind/src/low/{x86_64,arm}/boringssl, which
   admin/import-boringssl takes from BoringSSL at commit
-  ed9209cff8b5a2fbc6c10050f29b3355048bda85: for x86_64, AES-GCM on VAES
+  8f2554dc344d403fd6d628773d39637c323eb801: for x86_64, AES-GCM on VAES
   from its pregenerated gen/bcm/aes-gcm-avx2-x86_64 and
   aes-gcm-avx512-x86_64, the AVX-512 one based on aes-gcm-avx10-x86_64.S
   from Linux; for 32-bit ARM, X25519 on NEON from
@@ -216,11 +225,10 @@ OpenSSL <https://github.com/openssl/openssl>
 
 curve25519-dalek <https://github.com/dalek-cryptography/curve25519-dalek>
 
-  What: rind/src/low/x86_64/edwards25519_scalarmuldouble_avx2.rs, a port
-  of curve25519-dalek 5.0.0's AVX2 backend (its field arithmetic, point
-  formulas, and table of the base point's odd multiples) and its scalars'
-  non-adjacent forms, for Ed25519 verification on x86_64 CPUs with AVX2 but
-  without ADX.
+  What: rind/src/low/x86_64/edwards25519_msm_avx2.rs, a port of
+  curve25519-dalek 5.0.0's AVX2 backend (its field arithmetic, point
+  formulas, and table of the base point's odd multiples), for Ed25519
+  verification on x86_64 CPUs with AVX2 but without ADX.
   Copyright (c) 2016-2021 isis agora lovecruft. All rights reserved.
   Copyright (c) 2016-2021 Henry de Valence. All rights reserved.
   License: BSD-3-Clause.

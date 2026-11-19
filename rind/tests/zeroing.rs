@@ -1,5 +1,5 @@
-//! Verification that, under the `wipe` feature, every value owning a secret
-//! (a key, keyed state, or a shared secret) is zeroed on drop.
+//! Verification that every value owning a secret (a key, keyed state, or a
+//! shared secret) is zeroed on drop.
 //!
 //! Some of this is subject to whims of the compiler, and
 //! hand-written drop impls, so we test it here.
@@ -41,8 +41,6 @@
 //!     been zeroised upon drop, even if the value was a `Key::Key128`
 //!     that only initialized half of that space.
 
-#![cfg(feature = "wipe")]
-
 use core::mem::size_of;
 use core::ops::Deref;
 use core::pin::Pin;
@@ -51,8 +49,8 @@ use std::alloc::{Layout, dealloc};
 
 #[test]
 fn rsa() {
-    use rind::signature::RsaKeyPair;
-    let rsa = RsaKeyPair::from_pkcs1(include_bytes!("../src/high/rsa/rsa8192.der")).unwrap();
+    use rind::rsa::KeyPair;
+    let rsa = KeyPair::from_pkcs1(include_bytes!("../src/high/rsa/rsa8192.der")).unwrap();
     check_zeroed_on_drop(Box::pin(rsa.to_pkcs8()));
     check_zeroed_on_drop(Box::pin(rsa));
 }
@@ -79,22 +77,22 @@ fn blind_rsa() {
 
 #[test]
 fn ecdsa() {
-    use rind::signature::{EcdsaKeyPair, sign};
+    use rind::ecdsa::{KeyPair, sign};
     for (algorithm, pkcs8) in [
         (
-            &sign::ECDSA_P256_SHA256_ASN1,
+            &sign::P256_SHA256_ASN1,
             &include_bytes!("../src/high/ecdsa/secp256r1.pkcs8.der")[..],
         ),
         (
-            &sign::ECDSA_P384_SHA384_ASN1,
+            &sign::P384_SHA384_ASN1,
             &include_bytes!("../src/high/ecdsa/secp384r1.pkcs8.der")[..],
         ),
         (
-            &sign::ECDSA_P521_SHA512_ASN1,
+            &sign::P521_SHA512_ASN1,
             &include_bytes!("../src/high/ecdsa/secp521r1.pkcs8.der")[..],
         ),
     ] {
-        let key = EcdsaKeyPair::from_pkcs8(algorithm, pkcs8).unwrap();
+        let key = KeyPair::from_pkcs8(algorithm, pkcs8).unwrap();
         check_zeroed_on_drop(Box::pin(key.to_pkcs8()));
         check_zeroed_on_drop(Box::pin(key.to_scalar()));
         check_zeroed_on_drop(Box::pin(key.to_sec1()));
@@ -104,34 +102,61 @@ fn ecdsa() {
 
 #[test]
 fn ed25519() {
-    use rind::signature::Ed25519KeyPair;
+    use rind::ed25519::KeyPair;
     let ed25519 =
-        Ed25519KeyPair::from_pkcs8(include_bytes!("../src/high/asn1/testdata/ed25519-p8v2.bin"))
-            .unwrap();
+        KeyPair::from_pkcs8(include_bytes!("../src/high/asn1/testdata/ed25519-p8v2.bin")).unwrap();
     check_zeroed_on_drop(Box::pin(ed25519.to_pkcs8()));
     check_zeroed_on_drop(Box::pin(ed25519.to_pkcs8v1()));
     check_zeroed_on_drop(Box::pin(ed25519.to_seed()));
     let seed = ed25519.to_seed();
-    check_zeroed_on_drop(Box::pin(Ed25519KeyPair::from_seed(seed.as_ref()).unwrap()));
+    check_zeroed_on_drop(Box::pin(KeyPair::from_seed(seed.as_ref()).unwrap()));
     check_zeroed_on_drop(Box::pin(ed25519));
 }
 
 #[test]
 fn ml_dsa() {
-    use rind::signature::sign::{MlDsa44, MlDsa65, MlDsa87, MlDsaKeyPair, MlDsaParameterSet};
-    fn check<P: MlDsaParameterSet>() {
-        let key = MlDsaKeyPair::<P>::generate().unwrap();
+    use rind::ml_dsa::{KeyPair, MlDsa44, MlDsa65, MlDsa87, ParameterSet};
+    fn check<P: ParameterSet>() {
+        let key = KeyPair::<P>::generate().unwrap();
         check_zeroed_on_drop(Box::pin(key.to_pkcs8()));
         check_zeroed_on_drop(Box::pin(key.to_seed().unwrap()));
         let seed = key.to_seed().unwrap();
-        check_zeroed_on_drop(Box::pin(
-            MlDsaKeyPair::<P>::from_seed(seed.as_ref()).unwrap(),
-        ));
+        check_zeroed_on_drop(Box::pin(KeyPair::<P>::from_seed(seed.as_ref()).unwrap()));
+        // Its public key's second verification keeps the expansion, which
+        // the drop frees before its wipe.
+        let signature = key.sign(b"message").unwrap();
+        for _ in 0..2 {
+            key.public_key()
+                .verify(b"message", signature.as_ref())
+                .unwrap();
+        }
         check_zeroed_on_drop(Box::pin(key));
     }
     check::<MlDsa44>();
     check::<MlDsa65>();
     check::<MlDsa87>();
+}
+
+#[test]
+fn slh_dsa() {
+    use rind::slh_dsa::{
+        KeyPair, ParameterSet, SlhDsaSha2_128f, SlhDsaSha2_192f, SlhDsaSha2_256f, SlhDsaShake128f,
+        SlhDsaShake192f, SlhDsaShake256f,
+    };
+    // The f sets, whose keys are quick to make, cover each key size.
+    fn check<P: ParameterSet>() {
+        let key = KeyPair::<P>::generate().unwrap();
+        check_zeroed_on_drop(Box::pin(key.to_pkcs8()));
+        let pkcs8 = key.to_pkcs8();
+        check_zeroed_on_drop(Box::pin(KeyPair::<P>::from_pkcs8(pkcs8.as_ref()).unwrap()));
+        check_zeroed_on_drop(Box::pin(key));
+    }
+    check::<SlhDsaSha2_128f>();
+    check::<SlhDsaSha2_192f>();
+    check::<SlhDsaSha2_256f>();
+    check::<SlhDsaShake128f>();
+    check::<SlhDsaShake192f>();
+    check::<SlhDsaShake256f>();
 }
 
 #[test]
@@ -164,15 +189,28 @@ fn oprf() {
         let key = ServerKey::generate(suite).unwrap();
         let (blind, _) = Blind::new(suite, b"input").unwrap();
         check_zeroed_on_drop(Box::pin(key.evaluate(b"input").unwrap()));
-        check_zeroed_on_drop(Box::pin(key.to_bytes()));
+        check_zeroed_on_drop(Box::pin(key.to_scalar()));
         check_zeroed_on_drop(Box::pin(blind));
         check_zeroed_on_drop(Box::pin(key));
 
         let key = voprf::ServerKey::generate(suite).unwrap();
         let (blind, _) = voprf::Blind::new(suite, b"input").unwrap();
-        check_zeroed_on_drop(Box::pin(key.to_bytes()));
+        check_zeroed_on_drop(Box::pin(key.to_scalar()));
         check_zeroed_on_drop(Box::pin(blind));
         check_zeroed_on_drop(Box::pin(key));
+    }
+}
+
+#[test]
+fn frost() {
+    use rind::frost::*;
+    for suite in [&ED25519_SHA512, &RISTRETTO255_SHA512, &P256_SHA256] {
+        let (mut shares, _) = deal(suite, 2, 3).unwrap();
+        let share = shares.pop().unwrap();
+        let (nonces, _) = SigningNonces::commit(&share).unwrap();
+        check_zeroed_on_drop(Box::pin(share.to_scalar()));
+        check_zeroed_on_drop(Box::pin(nonces));
+        check_zeroed_on_drop(Box::pin(share));
     }
 }
 
@@ -180,24 +218,28 @@ fn oprf() {
 fn vrf() {
     use rind::vrf::*;
     for algorithm in [&ECVRF_EDWARDS25519_SHA512_TAI, &ECVRF_P256_SHA256_TAI] {
-        let key = SecretKey::generate(algorithm).unwrap();
-        check_zeroed_on_drop(Box::pin(key.to_bytes()));
+        let key = KeyPair::generate(algorithm).unwrap();
+        check_zeroed_on_drop(Box::pin(key.to_seed()));
         check_zeroed_on_drop(Box::pin(key));
     }
 }
 
 #[test]
-fn mlkem768() {
+fn mlkem() {
     use rind::kem::*;
-    let key = DecapsulationKey::generate(&ML_KEM_768).unwrap();
-    let (ciphertext, secret) = key.public_key().encapsulate().unwrap();
-    check_zeroed_on_drop(Box::pin(secret));
-    let decapsulated = DecapsulationKey::generate(&ML_KEM_768)
-        .unwrap()
-        .decapsulate(ciphertext.as_ref())
-        .unwrap();
-    check_zeroed_on_drop(Box::pin(decapsulated));
-    check_zeroed_on_drop(Box::pin(key));
+    fn check<A: Algorithm>() {
+        let key = DecapsulationKey::<A>::generate().unwrap();
+        let (ciphertext, secret) = key.public_key().encapsulate().unwrap();
+        check_zeroed_on_drop(Box::pin(secret));
+        let decapsulated = DecapsulationKey::<A>::generate()
+            .unwrap()
+            .decapsulate(&ciphertext);
+        check_zeroed_on_drop(Box::pin(decapsulated));
+        check_zeroed_on_drop(Box::pin(key));
+    }
+    check::<MlKem512>();
+    check::<MlKem768>();
+    check::<MlKem1024>();
 }
 
 #[test]
@@ -214,7 +256,7 @@ fn hpke() {
         &DHKEM_P521_HKDF_SHA512,
     ] {
         let key = PrivateKey::generate(kem).unwrap();
-        let (enc, sender) = Sender::new(suite, &key.public_key(), b"info").unwrap();
+        let (enc, sender) = Sender::new(suite, key.public_key(), b"info").unwrap();
         check_zeroed_on_drop(Box::pin(sender));
         check_zeroed_on_drop(Box::pin(
             Recipient::new(suite, &key, enc.as_ref(), b"info").unwrap(),
@@ -232,7 +274,7 @@ fn hkdf() {
     use rind::hkdf::*;
 
     let salt = Salt::new(&HKDF_SHA256, b"salt");
-    check_zeroed_on_drop(Box::pin(salt.extract(b"ikm")));
+    check_zeroed_on_drop(Box::pin(salt.extract(b"ikm").unwrap()));
     check_zeroed_on_drop(Box::pin(salt));
 }
 
@@ -261,22 +303,52 @@ fn spake2plus() {
 
     let (share_p, prover) = ProverSecrets::new(&w0, &w1)
         .unwrap()
-        .start(&RFC9383, b"context", b"prover", b"verifier")
+        .start(
+            &RFC9383,
+            &Session {
+                context: b"context",
+                id_prover: b"prover",
+                id_verifier: b"verifier",
+            },
+        )
         .unwrap();
     let (_, _, verifier) = VerifierRecord::from_w1(&w0, &w1)
         .unwrap()
-        .start(&RFC9383, b"context", b"prover", b"verifier", &share_p)
+        .start(
+            &RFC9383,
+            &Session {
+                context: b"context",
+                id_prover: b"prover",
+                id_verifier: b"verifier",
+            },
+            &share_p,
+        )
         .unwrap();
     check_zeroed_on_drop(Box::pin(prover));
     check_zeroed_on_drop(Box::pin(verifier));
 
     let (share_p, prover) = ProverSecrets::new(&w0, &w1)
         .unwrap()
-        .start(&RFC9383, b"context", b"prover", b"verifier")
+        .start(
+            &RFC9383,
+            &Session {
+                context: b"context",
+                id_prover: b"prover",
+                id_verifier: b"verifier",
+            },
+        )
         .unwrap();
     let (share_v, confirm_v, _) = VerifierRecord::from_w1(&w0, &w1)
         .unwrap()
-        .start(&RFC9383, b"context", b"prover", b"verifier", &share_p)
+        .start(
+            &RFC9383,
+            &Session {
+                context: b"context",
+                id_prover: b"prover",
+                id_verifier: b"verifier",
+            },
+            &share_p,
+        )
         .unwrap();
     let (_, key) = prover.finish(&share_v, &confirm_v).unwrap();
     check_zeroed_on_drop(Box::pin(key));
@@ -294,6 +366,11 @@ fn pbkdf2() {
     ] {
         check_zeroed_on_drop(Box::pin(Secret::new(algorithm, b"password")));
     }
+}
+
+#[test]
+fn argon2() {
+    check_zeroed_on_drop(Box::pin(rind::argon2::Secret::new(b"password")));
 }
 
 #[test]

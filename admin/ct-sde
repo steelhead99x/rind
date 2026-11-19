@@ -30,6 +30,7 @@ MARKS = ["52430001:repeat", "52430002:repeat"]
 MODELS = {
     "vaes_avx2": "-adl",  # Alder Lake: VAES without AVX-512.
     "hmac": "-arl",  # Arrow Lake: the SHA extensions and SHA512 instructions.
+    "_ifma_": "-icx",  # Ice Lake server: AVX-512 IFMA without AVX512_FP16.
 }
 # Far below where the program maps its thread stacks and heaps.
 PIN_MEMORY = "0x100000000000:0x200000000000"

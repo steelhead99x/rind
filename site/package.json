@@ -1,0 +1,18 @@
+{
+	"name": "rind-site",
+	"private": true,
+	"type": "module",
+	"packageManager": "bun@1.4.4",
+	"scripts": {
+		"dev": "ASTRO_TELEMETRY_DISABLED=1 bun --bun astro dev",
+		"build": "ASTRO_TELEMETRY_DISABLED=1 bun --bun astro build && bun scripts/check.ts"
+	},
+	"dependencies": {
+		"@astrojs/svelte": "9.1.6",
+		"@resvg/resvg-wasm": "2.6.2",
+		"astro": "7.4.12",
+		"entities": "4.5.0",
+		"marked": "18.2.0",
+		"svelte": "5.57.3"
+	}
+}

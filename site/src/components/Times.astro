@@ -1,0 +1,113 @@
+---
+// One host's or tier's times: a row per operation, a column per library, each
+// cell its time, its time over the fastest's, its proof, and rind's gap.
+import { type Host, libraryName, marks, ratio, type Tier } from "../lib/benchmarks";
+
+interface Props {
+	times: Host | Tier;
+	groups: { name: string; rows: { id: string; label: string; code?: boolean }[] }[];
+}
+const { times: t, groups } = Astro.props;
+const proofs = "proofs" in t ? t.proofs : undefined;
+---
+
+<div class="times-scroll">
+	<table class="times">
+		<thead>
+			<tr>
+				<th>Operation</th>
+				{t.libraries.map((lib) => <th data-lib={lib}>{libraryName(lib)}</th>)}
+			</tr>
+		</thead>
+		{
+			groups
+				.map((g) => ({ ...g, rows: g.rows.filter((r) => r.id in t.times) }))
+				.filter((g) => g.rows.length > 0)
+				.map((g) => (
+					<tbody>
+						<tr>
+							<th colspan={t.libraries.length + 1} class="section">
+								{g.name}
+							</th>
+						</tr>
+						{g.rows.map((r) => (
+							<tr>
+								<th scope="row">{r.code ? <code>{r.id}</code> : r.label}</th>
+								{t.times[r.id].map((c, i) => {
+									const lib = t.libraries[i];
+									if (c === null) return <td data-lib={lib}>-</td>;
+									const m = marks({ ...t, proofs }, r.id, lib);
+									return (
+										<td data-lib={lib}>
+											<i class={`b${c[1]}`} />
+											{m.fastest ? <strong>{c[0]}</strong> : c[0]}
+											{!m.fastest && t.fastest[r.id] && (
+												<small title={`${ratio(c[2])} the time of the fastest, ${libraryName(t.fastest[r.id])}`}>{ratio(c[2])}</small>
+											)}
+											{m.proof !== undefined && (
+												<a href={`#proof-${m.proof + 1}`} title="Verified code: its proof">
+													✓
+												</a>
+											)}
+											{m.gap !== undefined && (
+												<a href={`#gap-${m.gap + 1}`} class="gap" title="rind's known gap: what is decided">
+													gap {m.gap + 1}
+												</a>
+											)}
+										</td>
+									);
+								})}
+							</tr>
+						))}
+					</tbody>
+				))
+		}
+	</table>
+</div>
+
+<style is:global>
+	/* Global, under .times, since a scoped style marks each of the thousands of cells. */
+	.times-scroll {
+		overflow-x: auto;
+	}
+	.times {
+		border-collapse: collapse;
+		font-size: 0.9rem;
+		font-variant-numeric: tabular-nums;
+	}
+	.times th,
+	.times td {
+		padding: 0.2rem 0.75rem 0.2rem 0;
+		text-align: left;
+		white-space: nowrap;
+		border-bottom: 1px solid var(--border);
+	}
+	.times thead th {
+		vertical-align: bottom;
+	}
+	.times th[scope="row"] {
+		font-weight: normal;
+	}
+	.times .section {
+		padding-top: 1rem;
+		font-weight: 600;
+	}
+	.times i {
+		display: inline-block;
+		width: 0.7rem;
+		height: 0.7rem;
+		border-radius: 2px;
+		margin-right: 0.35rem;
+	}
+	.times small {
+		color: var(--muted);
+		margin-left: 0.3rem;
+	}
+	.times a {
+		margin-left: 0.3rem;
+		text-decoration: none;
+	}
+	.times .gap {
+		font-size: 0.8rem;
+	}
+</style>

@@ -259,6 +259,7 @@ let instruction_INDUCTION,instruction_RECURSION = define_type
    | AESENCLAST operand operand
    | AESKEYGENASSIST operand operand operand
    | AND operand operand
+   | ANDN operand operand operand
    | BSF operand operand
    | BSR operand operand
    | BSWAP operand
@@ -285,6 +286,7 @@ let instruction_INDUCTION,instruction_RECURSION = define_type
    | MOVD operand operand
    | MOVQ operand operand
    | MOVSB bool operand operand operand
+   | STOSB bool
    | MOVSX operand operand
    | MOVZX operand operand
    | MOVAPS operand operand
@@ -303,6 +305,8 @@ let instruction_INDUCTION,instruction_RECURSION = define_type
    | PALIGNR operand operand operand
    | PAND operand operand
    | PBLENDW operand operand operand
+   | PANDN operand operand
+   | PCMPEQD operand operand
    | PCMPGTD operand operand
    | PCMPGTW operand operand
    | PEXT operand operand operand
@@ -334,6 +338,7 @@ let instruction_INDUCTION,instruction_RECURSION = define_type
    | RET
    | ROL operand operand
    | ROR operand operand
+   | RORX operand operand operand
    | SAR operand operand
    | SBB operand operand
    | SET condition operand
@@ -342,7 +347,9 @@ let instruction_INDUCTION,instruction_RECURSION = define_type
    | SHA256RNDS2 operand operand
    | SHL operand operand
    | SHR operand operand
+   | SHLX operand operand operand
    | SHLD operand operand operand
+   | SHRX operand operand operand
    | SHRD operand operand operand
    | STCF
    | STD

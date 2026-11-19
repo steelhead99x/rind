@@ -3,7 +3,7 @@
 
 use super::chacha20::check_counter;
 use crate::Error;
-use crate::low::{self, Entry, ct_equal, zeroise};
+use crate::low::{self, Entry, zeroise};
 
 /// A XChaCha20Poly1305 key.
 ///
@@ -72,9 +72,9 @@ impl XChaCha20Poly1305 {
         let _entry = Entry::new_secret();
         check_counter(1, cipher_inout.len())?;
         let (key, nonce) = self.subkey(nonce);
-        let actual_tag = low::chacha20poly1305::open(&key, &nonce, aad, cipher_inout);
+        let valid = low::chacha20poly1305::open(&key, &nonce, aad, cipher_inout, tag);
 
-        if low::ct::into_public(ct_equal(&actual_tag, tag)) {
+        if low::ct::into_public(valid) {
             low::ct::public_slice(cipher_inout);
             Ok(())
         } else {

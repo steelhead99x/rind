@@ -15,6 +15,7 @@ use std::mem::transmute;
 
 type Unary = unsafe fn(__m128i) -> __m128i;
 type Binary = unsafe fn(__m128i, __m128i) -> __m128i;
+type Binary256 = unsafe fn(__m256i, __m256i) -> __m256i;
 
 macro_rules! imm8 {
     ($f:ident) => {
@@ -124,6 +125,16 @@ fn q(x: __m128i) -> String {
     format!("0x{:032x}#128", unsafe { transmute::<__m128i, u128>(x) })
 }
 
+/// A 256-bit vector of two 128-bit halves, `lo` lowest.
+fn v256(hi: u128, lo: u128) -> __m256i {
+    unsafe { transmute([lo, hi]) }
+}
+
+fn q256(x: __m256i) -> String {
+    let [lo, hi] = unsafe { transmute::<__m256i, [u128; 2]>(x) };
+    format!("0x{hi:032x}{lo:032x}#256")
+}
+
 const SSE2: &str = "core.core_arch.x86.sse2";
 const RANDOM: usize = 64;
 
@@ -136,6 +147,7 @@ fn main() {
             std::arch::is_x86_feature_detected!("pclmulqdq"),
         ),
         ("aes", std::arch::is_x86_feature_detected!("aes")),
+        ("avx2", std::arch::is_x86_feature_detected!("avx2")),
     ];
     for (feature, present) in features {
         if !present {
@@ -155,8 +167,9 @@ fn main() {
         writeln!(out, "#guard reducesTo (R := BitVec _) ( {call} ) {result}").unwrap()
     };
 
-    let binary: [(&str, Binary); 12] = [
+    let binary: [(&str, Binary); 13] = [
         ("sse2._mm_xor_si128", |a, b| unsafe { _mm_xor_si128(a, b) }),
+        ("sse2._mm_cmpeq_epi32", |a, b| unsafe { _mm_cmpeq_epi32(a, b) }),
         ("sse2._mm_and_si128", |a, b| unsafe { _mm_and_si128(a, b) }),
         ("sse2._mm_or_si128", |a, b| unsafe { _mm_or_si128(a, b) }),
         ("sse2._mm_add_epi64", |a, b| unsafe { _mm_add_epi64(a, b) }),
@@ -191,6 +204,43 @@ fn main() {
                 q(r),
             );
         }
+    }
+
+    // Each 256-bit binary on pairs of 128-bit halves from `pairs`, and on a
+    // vector against itself, where every lane compares equal.
+    let binary256: [(&str, Binary256); 4] = [
+        ("avx2._mm256_cmpeq_epi32", |a, b| unsafe { _mm256_cmpeq_epi32(a, b) }),
+        ("avx2._mm256_add_epi32", |a, b| unsafe { _mm256_add_epi32(a, b) }),
+        ("avx2._mm256_and_si256", |a, b| unsafe { _mm256_and_si256(a, b) }),
+        ("avx2._mm256_xor_si256", |a, b| unsafe { _mm256_xor_si256(a, b) }),
+    ];
+    for (name, f) in binary256 {
+        for w in pairs.windows(2) {
+            let (a, b) = (v256(w[0].0, w[1].0), v256(w[0].1, w[1].1));
+            for (a, b) in [(a, b), (a, a)] {
+                let r = unsafe { f(a, b) };
+                guard(
+                    format!("core.core_arch.x86.{name} {} {}", q256(a), q256(b)),
+                    q256(r),
+                );
+            }
+        }
+    }
+    guard(
+        "core.core_arch.x86.avx._mm256_setzero_si256".into(),
+        q256(unsafe { _mm256_setzero_si256() }),
+    );
+    for w in inputs.windows(2) {
+        let a = v256(w[0], w[1]);
+        guard(
+            format!("core.core_arch.x86.avx._mm256_castsi256_si128 {}", q256(a)),
+            q(unsafe { _mm256_castsi256_si128(a) }),
+        );
+        let x = w[0] as i32;
+        guard(
+            format!("core.core_arch.x86.avx._mm256_set1_epi32 ⟨{}#32⟩", x as u32),
+            q256(unsafe { _mm256_set1_epi32(x) }),
+        );
     }
 
     for &a in &inputs {

@@ -67,8 +67,7 @@ don't ask again (✅ is the chosen option):
   a project from choosing rind. The maintainer picked four bets ✅: RustCrypto's
   traits and a `[patch]` spike, which are
   [their own epic](/quest/m2/rustcrypto/README.md), and here
-  [a `no_std` build](/quest/m2/adoption/no-std.md) and
-  [adapters on wasm32](/quest/m2/adoption/wasm-adapters.md), which Bitwarden
+  a `no_std` build and adapters on wasm32 (both landed), which Bitwarden
   and Matrix were left out for above. An npm package was offered and not
   picked, so Node stays out as decided on 2026-11-04. Considered and left out,
   so don't raise them again without new evidence:

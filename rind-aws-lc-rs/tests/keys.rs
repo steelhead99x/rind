@@ -225,19 +225,89 @@ proptest! {
         prop_assert_eq!(seed_bin.as_ref(), &seed[..]);
     }
 
+    // Each side loads the other's ML-DSA keys, from a seed, PKCS#8, or the
+    // expanded key, and verifies the other's signatures. ML-DSA hedges its
+    // signatures with fresh randomness, so they differ.
     #[test]
-    fn kem(_case in any::<u8>()) {
-        let ours_key = ours::kem::DecapsulationKey::generate(&ours::kem::ML_KEM_768).unwrap();
-        let theirs_key = theirs::kem::DecapsulationKey::generate(&theirs::kem::ML_KEM_768).unwrap();
+    fn ml_dsa(set in 0..3usize, seed in any::<[u8; 32]>(), msg in vec(any::<u8>(), 0..100)) {
+        let ours_sign = [&ours::signature::ML_DSA_44_SIGNING, &ours::signature::ML_DSA_65_SIGNING, &ours::signature::ML_DSA_87_SIGNING][set];
+        let theirs_sign = [&theirs::signature::ML_DSA_44_SIGNING, &theirs::signature::ML_DSA_65_SIGNING, &theirs::signature::ML_DSA_87_SIGNING][set];
+        let ours_verify = [&ours::signature::ML_DSA_44, &ours::signature::ML_DSA_65, &ours::signature::ML_DSA_87][set];
+        let theirs_verify = [&theirs::signature::ML_DSA_44, &theirs::signature::ML_DSA_65, &theirs::signature::ML_DSA_87][set];
+        prop_assert_eq!(ours_sign.signature_len(), theirs_sign.signature_len());
+        prop_assert_eq!(ours_sign.public_key_len(), theirs_sign.public_key_len());
+        prop_assert_eq!(ours_sign.seed_len(), theirs_sign.seed_len());
+
+        let ours_pair = ours::signature::PqdsaKeyPair::from_seed(ours_sign, &seed).unwrap();
+        let theirs_pair = theirs::signature::PqdsaKeyPair::from_seed(theirs_sign, &seed).unwrap();
+        prop_assert_eq!(ours_pair.public_key().as_ref(), theirs_pair.public_key().as_ref());
+        prop_assert_eq!(
+            ours_pair.public_key().as_der().unwrap().as_ref().to_vec(),
+            theirs_pair.public_key().as_der().unwrap().as_ref().to_vec()
+        );
+        let theirs_doc = theirs_pair.to_pkcs8v1().unwrap();
+        let ours_doc = ours_pair.to_pkcs8v1().unwrap();
+        prop_assert_eq!(ours_doc.as_ref(), theirs_doc.as_ref());
+        let loaded = ours::signature::PqdsaKeyPair::from_pkcs8(ours_sign, theirs_doc.as_ref()).unwrap();
+        prop_assert_eq!(loaded.public_key().as_ref(), theirs_pair.public_key().as_ref());
+        let other = [&ours::signature::ML_DSA_44_SIGNING, &ours::signature::ML_DSA_65_SIGNING, &ours::signature::ML_DSA_87_SIGNING][(set + 1) % 3];
+        prop_assert!(ours::signature::PqdsaKeyPair::from_pkcs8(other, theirs_doc.as_ref()).is_err());
+
+        // The expanded key loads without its seed, so neither encodes it.
+        let raw: theirs::encoding::PqdsaPrivateKeyRaw = theirs::encoding::AsRawBytes::as_raw_bytes(&theirs_pair.private_key()).unwrap();
+        let ours_raw = ours::signature::PqdsaKeyPair::from_raw_private_key(ours_sign, raw.as_ref()).unwrap();
+        let theirs_raw = theirs::signature::PqdsaKeyPair::from_raw_private_key(theirs_sign, raw.as_ref()).unwrap();
+        prop_assert_eq!(ours_raw.public_key().as_ref(), theirs_pair.public_key().as_ref());
+        prop_assert!(ours_raw.to_pkcs8v1().is_err());
+        prop_assert!(theirs_raw.to_pkcs8v1().is_err());
+        prop_assert!(ours::signature::PqdsaKeyPair::from_raw_private_key(ours_sign, &raw.as_ref()[1..]).is_err());
+
+        let spki = theirs_pair.public_key().as_der().unwrap();
+        for signer in [&ours_pair, &ours_raw] {
+            let mut sig = vec![0; ours_sign.signature_len() + 1];
+            prop_assert_eq!(signer.sign(&msg, &mut sig).unwrap(), ours_sign.signature_len());
+            let sig = &sig[..ours_sign.signature_len()];
+            for key in [theirs_pair.public_key().as_ref(), spki.as_ref()] {
+                let key = theirs::signature::UnparsedPublicKey::new(theirs_verify, key);
+                prop_assert!(key.verify(&msg, sig).is_ok());
+                prop_assert!(key.verify(b"other", sig).is_err());
+            }
+        }
+        prop_assert!(ours_pair.sign(&msg, &mut vec![0; ours_sign.signature_len() - 1]).is_err());
+
+        let mut sig = vec![0; theirs_sign.signature_len()];
+        theirs_pair.sign(&msg, &mut sig).unwrap();
+        for key in [theirs_pair.public_key().as_ref(), spki.as_ref()] {
+            let key = ours::signature::UnparsedPublicKey::new(ours_verify, key);
+            prop_assert!(key.verify(&msg, &sig).is_ok());
+            prop_assert!(key.verify(b"other", &sig).is_err());
+            prop_assert!(key.verify(&msg, &sig[1..]).is_err());
+            let parsed = key.parse().unwrap();
+            prop_assert!(parsed.verify_sig(&msg, &sig).is_ok());
+            let digest = ours::digest::digest(&ours::digest::SHA256, &msg);
+            prop_assert!(parsed.verify_digest_sig(&digest, &sig).is_err());
+        }
+        prop_assert!(ours::signature::ParsedPublicKey::new(ours_verify, &theirs_pair.public_key().as_ref()[1..]).is_err());
+    }
+
+    #[test]
+    fn kem(set in 0..3usize) {
+        let (ours_alg, theirs_alg) = [
+            (&ours::kem::ML_KEM_512, &theirs::kem::ML_KEM_512),
+            (&ours::kem::ML_KEM_768, &theirs::kem::ML_KEM_768),
+            (&ours::kem::ML_KEM_1024, &theirs::kem::ML_KEM_1024),
+        ][set];
+        let ours_key = ours::kem::DecapsulationKey::generate(ours_alg).unwrap();
+        let theirs_key = theirs::kem::DecapsulationKey::generate(theirs_alg).unwrap();
 
         let ours_public = ours_key.encapsulation_key().unwrap().key_bytes().unwrap();
-        let peer = theirs::kem::EncapsulationKey::new(&theirs::kem::ML_KEM_768, ours_public.as_ref()).unwrap();
+        let peer = theirs::kem::EncapsulationKey::new(theirs_alg, ours_public.as_ref()).unwrap();
         let (ciphertext, secret) = peer.encapsulate().unwrap();
         let ours_secret = ours_key.decapsulate(ours::kem::Ciphertext::from(ciphertext.as_ref())).unwrap();
         prop_assert_eq!(ours_secret.as_ref(), secret.as_ref());
 
         let theirs_public = theirs_key.encapsulation_key().unwrap().key_bytes().unwrap();
-        let peer = ours::kem::EncapsulationKey::new(&ours::kem::ML_KEM_768, theirs_public.as_ref()).unwrap();
+        let peer = ours::kem::EncapsulationKey::new(ours_alg, theirs_public.as_ref()).unwrap();
         let (ciphertext, secret) = peer.encapsulate().unwrap();
         let theirs_secret = theirs_key
             .decapsulate(theirs::kem::Ciphertext::from(ciphertext.as_ref()))
@@ -246,7 +316,7 @@ proptest! {
 
         use ours::kem::AlgorithmIdentifier as _;
         use theirs::kem::AlgorithmIdentifier as _;
-        prop_assert_eq!(ours::kem::ML_KEM_768.id().nid(), theirs::kem::ML_KEM_768.id().nid());
+        prop_assert_eq!(ours_alg.id().nid(), theirs_alg.id().nid());
     }
 }
 
@@ -400,6 +470,20 @@ fn refused() {
     assert!(theirs::rsa::KeyPair::from_pkcs8(truncated).is_err());
     assert!(ours::signature::Ed25519KeyPair::from_seed_unchecked(&[0; 31]).is_err());
     assert!(theirs::signature::Ed25519KeyPair::from_seed_unchecked(&[0; 31]).is_err());
+    for len in [0, 31, 33] {
+        let seed = vec![0; len];
+        assert!(
+            ours::signature::PqdsaKeyPair::from_seed(&ours::signature::ML_DSA_65_SIGNING, &seed)
+                .is_err()
+        );
+        assert!(
+            theirs::signature::PqdsaKeyPair::from_seed(
+                &theirs::signature::ML_DSA_65_SIGNING,
+                &seed
+            )
+            .is_err()
+        );
+    }
     for alg in 0..4 {
         let ours_key =
             ours::agreement::PrivateKey::generate(agreement_algorithms!(ours)[alg]).unwrap();

@@ -4,7 +4,7 @@
 //! GHASH in integer code alone, for x86_64 CPUs without SSSE3 and for
 //! AES-GCM from any IV on armv7 without the crypto extension and on the
 //! portable backend: aws-lc's `crypto/fipsmodule/modes/gcm_nohw.c` at commit
-//! 91c93a8eb860e51482a871a8772cb9b1b310baea, in Rust, in its 64-bit
+//! 5ed12cce0fd4453f2f63300d44325ed14f845d6f, in Rust, in its 64-bit
 //! configuration on 64-bit targets and its 32-bit one on 32-bit targets.
 //!
 //! It multiplies carry-less with ordinary integer multiplies of operands

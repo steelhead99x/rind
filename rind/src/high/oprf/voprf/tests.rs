@@ -78,7 +78,7 @@ fn rfc9497_voprf_vectors() {
             assert_eq!(server.suite(), G::suite());
             assert_eq!(server.public_key().as_ref(), str_field(suite, "pkSm"));
             assert_eq!(
-                ct::into_public(server.to_bytes().0.clone()).as_ref(),
+                ct::into_public(server.to_scalar().0.clone()).as_ref(),
                 str_field(suite, "skSm")
             );
             let parsed = PublicKey::new(G::suite(), &str_field(suite, "pkSm")).unwrap();
@@ -386,7 +386,7 @@ fn refuses_bad_public_keys() {
         let parsed = PublicKey::new(suite, good).unwrap();
         assert_eq!(parsed.as_ref(), good);
         assert!(format!("{parsed:?}").starts_with("PublicKey"));
-        let loaded = ServerKey::from_bytes(suite, server.to_bytes().as_ref()).unwrap();
+        let loaded = ServerKey::from_scalar(suite, server.to_scalar().as_ref()).unwrap();
         assert_eq!(loaded.public_key().as_ref(), good);
     }
 }
@@ -396,7 +396,7 @@ fn refuses_bad_public_keys() {
 fn modes_differ() {
     for suite in SUITES {
         let oprf = super::super::ServerKey::generate(suite).unwrap();
-        let voprf = ServerKey::from_bytes(suite, oprf.to_bytes().as_ref()).unwrap();
+        let voprf = ServerKey::from_scalar(suite, oprf.to_scalar().as_ref()).unwrap();
         assert_ne!(
             ct::into_public(oprf.evaluate(b"x").unwrap().0.clone()).as_ref(),
             ct::into_public(voprf.evaluate(b"x").unwrap().0.clone()).as_ref()

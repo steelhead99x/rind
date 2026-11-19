@@ -8,7 +8,9 @@
 use core::fmt;
 
 /// An RSA public key as its big-endian modulus and exponent.
+#[cfg(feature = "alloc")]
 pub use crate::rsa::PublicKeyComponents as RsaPublicKeyComponents;
+#[cfg(feature = "alloc")]
 pub use crate::rsa::{
     RsaParameters,
     padding::{
@@ -27,6 +29,7 @@ pub use crate::rsa::{
 use crate::{der, error, pkcs8, rand, sealed};
 
 /// An RSA key pair, for signing.
+#[cfg(feature = "alloc")]
 pub type RsaKeyPair = crate::rsa::KeyPair;
 
 /// A signature from an ECDSA or Ed25519 key pair.
@@ -80,16 +83,9 @@ pub trait VerificationAlgorithm: fmt::Debug + Sync + sealed::Sealed {
     ) -> Result<(), error::Unspecified>;
 }
 
-/// Verifies with rind's `algorithm`, parsing `public_key` for it.
-pub(crate) fn verify(
-    algorithm: &'static impl AsRef<rind::signature::VerificationAlgorithm>,
-    public_key: untrusted::Input<'_>,
-    msg: untrusted::Input<'_>,
-    signature: untrusted::Input<'_>,
-) -> Result<(), error::Unspecified> {
-    rind::signature::PublicKey::new(algorithm, public_key.as_slice_less_safe())
-        .and_then(|key| key.verify(msg.as_slice_less_safe(), signature.as_slice_less_safe()))
-        .map_err(|_| error::Unspecified)
+/// Maps rind's verdict on a key and signature to ring's.
+pub(crate) fn verified(result: Result<(), rind::Error>) -> Result<(), error::Unspecified> {
+    result.map_err(|_| error::Unspecified)
 }
 
 /// A peer's encoded public key, parsed only when it verifies.
@@ -136,8 +132,9 @@ impl<B: AsRef<[u8]> + fmt::Debug> fmt::Debug for UnparsedPublicKey<B> {
 mod public_key {
     use core::fmt;
 
-    /// An ECDSA key pair's uncompressed point, or an Ed25519 key pair's 32 bytes.
-    #[derive(Clone)]
+    /// An ECDSA key pair's uncompressed point. `Copy`, as ring's is, and
+    /// a type of its own, as ring's is, apart from [`Ed25519PublicKey`].
+    #[derive(Clone, Copy)]
     pub struct PublicKey {
         bytes: [u8; MAX_LEN],
         len: usize,
@@ -171,13 +168,40 @@ mod public_key {
                 .finish()
         }
     }
+
+    /// An Ed25519 key pair's 32 bytes. `Copy`, as ring's is.
+    #[derive(Clone, Copy)]
+    pub struct Ed25519PublicKey([u8; 32]);
+
+    impl Ed25519PublicKey {
+        /// Copies `key`, rind's 32-byte encoding.
+        pub(crate) fn new(key: &[u8]) -> Self {
+            let mut bytes = [0; 32];
+            bytes.copy_from_slice(key);
+            Self(bytes)
+        }
+    }
+
+    impl AsRef<[u8]> for Ed25519PublicKey {
+        fn as_ref(&self) -> &[u8] {
+            &self.0
+        }
+    }
+
+    impl fmt::Debug for Ed25519PublicKey {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_tuple("PublicKey")
+                .field(&crate::Hex(self.as_ref()))
+                .finish()
+        }
+    }
 }
 
-use public_key::PublicKey;
+use public_key::{Ed25519PublicKey, PublicKey};
 
 /// An ECDSA verification algorithm: a curve, a hash, and a signature encoding.
 pub struct EcdsaVerificationAlgorithm {
-    rind: &'static rind::signature::VerificationAlgorithm,
+    rind: &'static rind::ecdsa::VerificationAlgorithm,
     id: &'static str,
 }
 
@@ -196,15 +220,20 @@ impl VerificationAlgorithm for EcdsaVerificationAlgorithm {
         msg: untrusted::Input<'_>,
         signature: untrusted::Input<'_>,
     ) -> Result<(), error::Unspecified> {
-        verify(self.rind, public_key, msg, signature)
+        let key = rind::ecdsa::PublicKey::new(self.rind, public_key.as_slice_less_safe());
+        verified(
+            key.and_then(|key| {
+                key.verify(msg.as_slice_less_safe(), signature.as_slice_less_safe())
+            }),
+        )
     }
 }
 
 macro_rules! ecdsa_verification {
-    ($name:ident, $doc:expr) => {
+    ($name:ident, $rind:ident, $doc:expr) => {
         #[doc = $doc]
         pub static $name: EcdsaVerificationAlgorithm = EcdsaVerificationAlgorithm {
-            rind: &rind::signature::verify::$name,
+            rind: &rind::ecdsa::verify::$rind,
             id: stringify!($name),
         };
     };
@@ -212,32 +241,38 @@ macro_rules! ecdsa_verification {
 
 ecdsa_verification!(
     ECDSA_P256_SHA256_ASN1,
+    P256_SHA256_ASN1,
     "ECDSA on P-256 with SHA-256, ASN.1 DER signatures."
 );
 ecdsa_verification!(
     ECDSA_P256_SHA256_FIXED,
+    P256_SHA256_FIXED,
     "ECDSA on P-256 with SHA-256, `r || s` signatures."
 );
 ecdsa_verification!(
     ECDSA_P256_SHA384_ASN1,
+    P256_SHA384_ASN1,
     "ECDSA on P-256 with SHA-384, ASN.1 DER signatures."
 );
 ecdsa_verification!(
     ECDSA_P384_SHA256_ASN1,
+    P384_SHA256_ASN1,
     "ECDSA on P-384 with SHA-256, ASN.1 DER signatures."
 );
 ecdsa_verification!(
     ECDSA_P384_SHA384_ASN1,
+    P384_SHA384_ASN1,
     "ECDSA on P-384 with SHA-384, ASN.1 DER signatures."
 );
 ecdsa_verification!(
     ECDSA_P384_SHA384_FIXED,
+    P384_SHA384_FIXED,
     "ECDSA on P-384 with SHA-384, `r || s` signatures."
 );
 
 /// An ECDSA signing algorithm, which an [`EcdsaKeyPair`] is bound to.
 pub struct EcdsaSigningAlgorithm {
-    rind: &'static rind::signature::EcdsaSigningAlgorithm,
+    rind: &'static rind::ecdsa::SigningAlgorithm,
     id: &'static str,
 }
 
@@ -259,7 +294,7 @@ macro_rules! ecdsa_signing {
     ($name:ident, $rind:ident, $doc:expr) => {
         #[doc = $doc]
         pub static $name: EcdsaSigningAlgorithm = EcdsaSigningAlgorithm {
-            rind: &rind::signature::sign::$rind,
+            rind: &rind::ecdsa::sign::$rind,
             id: stringify!($name),
         };
     };
@@ -267,28 +302,28 @@ macro_rules! ecdsa_signing {
 
 ecdsa_signing!(
     ECDSA_P256_SHA256_ASN1_SIGNING,
-    ECDSA_P256_SHA256_ASN1,
+    P256_SHA256_ASN1,
     "ECDSA on P-256 with SHA-256, ASN.1 DER signatures."
 );
 ecdsa_signing!(
     ECDSA_P256_SHA256_FIXED_SIGNING,
-    ECDSA_P256_SHA256_FIXED,
+    P256_SHA256_FIXED,
     "ECDSA on P-256 with SHA-256, `r || s` signatures."
 );
 ecdsa_signing!(
     ECDSA_P384_SHA384_ASN1_SIGNING,
-    ECDSA_P384_SHA384_ASN1,
+    P384_SHA384_ASN1,
     "ECDSA on P-384 with SHA-384, ASN.1 DER signatures."
 );
 ecdsa_signing!(
     ECDSA_P384_SHA384_FIXED_SIGNING,
-    ECDSA_P384_SHA384_FIXED,
+    P384_SHA384_FIXED,
     "ECDSA on P-384 with SHA-384, `r || s` signatures."
 );
 
 /// An ECDSA private key and its public key, bound to one signing algorithm.
 pub struct EcdsaKeyPair {
-    key: rind::signature::EcdsaKeyPair,
+    key: rind::ecdsa::KeyPair,
     public_key: PublicKey,
 }
 
@@ -299,8 +334,7 @@ impl EcdsaKeyPair {
         rng: &dyn rand::SecureRandom,
     ) -> Result<pkcs8::Document, error::Unspecified> {
         let _ = rng;
-        let key =
-            rind::signature::EcdsaKeyPair::generate(alg.rind).map_err(|_| error::Unspecified)?;
+        let key = rind::ecdsa::KeyPair::generate(alg.rind).map_err(|_| error::Unspecified)?;
         Ok(pkcs8::Document::new(key.to_pkcs8()))
     }
 
@@ -312,8 +346,9 @@ impl EcdsaKeyPair {
         rng: &dyn rand::SecureRandom,
     ) -> Result<Self, error::KeyRejected> {
         let _ = rng;
-        let key = rind::signature::EcdsaKeyPair::from_pkcs8(alg.rind, pkcs8)
-            .map_err(error::KeyRejected::rind)?;
+        der::pkcs8_v1_only(pkcs8)?;
+        let key =
+            rind::ecdsa::KeyPair::from_pkcs8(alg.rind, pkcs8).map_err(error::KeyRejected::rind)?;
         // ring requires the public key, uncompressed, where rind also takes
         // it compressed.
         match der::ecdsa_pkcs8_public_key(pkcs8) == Some(key.public_key().as_ref()) {
@@ -331,12 +366,9 @@ impl EcdsaKeyPair {
         rng: &dyn rand::SecureRandom,
     ) -> Result<Self, error::KeyRejected> {
         let _ = rng;
-        let key = rind::signature::EcdsaKeyPair::from_scalar_and_public_key(
-            alg.rind,
-            private_key,
-            public_key,
-        )
-        .map_err(error::KeyRejected::rind)?;
+        let key =
+            rind::ecdsa::KeyPair::from_scalar_and_public_key(alg.rind, private_key, public_key)
+                .map_err(error::KeyRejected::rind)?;
         // rind also takes the point compressed, which ring refuses.
         match key.public_key().as_ref() == public_key {
             true => Ok(Self::new(key)),
@@ -344,7 +376,7 @@ impl EcdsaKeyPair {
         }
     }
 
-    fn new(key: rind::signature::EcdsaKeyPair) -> Self {
+    fn new(key: rind::ecdsa::KeyPair) -> Self {
         let public_key = PublicKey::new(key.public_key().as_ref());
         Self { key, public_key }
     }
@@ -395,11 +427,11 @@ impl VerificationAlgorithm for EdDSAParameters {
         msg: untrusted::Input<'_>,
         signature: untrusted::Input<'_>,
     ) -> Result<(), error::Unspecified> {
-        verify(
-            &rind::signature::verify::ED25519,
-            public_key,
-            msg,
-            signature,
+        let key = rind::ed25519::PublicKey::new(public_key.as_slice_less_safe());
+        verified(
+            key.and_then(|key| {
+                key.verify(msg.as_slice_less_safe(), signature.as_slice_less_safe())
+            }),
         )
     }
 }
@@ -417,8 +449,8 @@ const ED25519_PKCS8_V1_PREFIX: [u8; 16] = [
 
 /// An Ed25519 private key and its public key.
 pub struct Ed25519KeyPair {
-    key: rind::signature::Ed25519KeyPair,
-    public_key: PublicKey,
+    key: rind::ed25519::KeyPair,
+    public_key: Ed25519PublicKey,
 }
 
 impl Ed25519KeyPair {
@@ -427,7 +459,7 @@ impl Ed25519KeyPair {
         rng: &dyn rand::SecureRandom,
     ) -> Result<pkcs8::Document, error::Unspecified> {
         let _ = rng;
-        let key = rind::signature::Ed25519KeyPair::generate().map_err(|_| error::Unspecified)?;
+        let key = rind::ed25519::KeyPair::generate().map_err(|_| error::Unspecified)?;
         Ok(pkcs8::Document::new(key.to_pkcs8()))
     }
 
@@ -457,7 +489,7 @@ impl Ed25519KeyPair {
         seed: &[u8],
         public_key: &[u8],
     ) -> Result<Self, error::KeyRejected> {
-        rind::signature::Ed25519KeyPair::from_seed_and_public_key(seed, public_key)
+        rind::ed25519::KeyPair::from_seed_and_public_key(seed, public_key)
             .map(Self::new)
             .map_err(error::KeyRejected::rind)
     }
@@ -471,13 +503,13 @@ impl Ed25519KeyPair {
         let (prefix, key) = pkcs8.split_at_mut(ED25519_PKCS8_V1_PREFIX.len());
         prefix.copy_from_slice(&ED25519_PKCS8_V1_PREFIX);
         key.copy_from_slice(seed);
-        rind::signature::Ed25519KeyPair::from_pkcs8(&pkcs8[..])
+        rind::ed25519::KeyPair::from_pkcs8(&pkcs8[..])
             .map(Self::new)
             .map_err(error::KeyRejected::rind)
     }
 
-    fn new(key: rind::signature::Ed25519KeyPair) -> Self {
-        let public_key = PublicKey::new(key.public_key().as_ref());
+    fn new(key: rind::ed25519::KeyPair) -> Self {
+        let public_key = Ed25519PublicKey::new(key.public_key().as_ref());
         Self { key, public_key }
     }
 
@@ -488,9 +520,9 @@ impl Ed25519KeyPair {
 }
 
 impl KeyPair for Ed25519KeyPair {
-    type PublicKey = PublicKey;
+    type PublicKey = Ed25519PublicKey;
 
-    fn public_key(&self) -> &PublicKey {
+    fn public_key(&self) -> &Ed25519PublicKey {
         &self.public_key
     }
 }

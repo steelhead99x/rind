@@ -13,13 +13,25 @@ of `p256Pow`, HOL Light's `group_pow p256_group`, through the dispatch
 `mont_on_curve` relates to the curve equation, and s2n-bignum's
 `p256_scalarmul` takes and returns plain coordinates. `admin/prove` writes the
 aarch64 proof from this file by renaming the target. Key generation, which
-multiplies the generator, is `Rind.Aarch64.P256`'s, aarch64's alone: x86_64
-runs aws-lc's generator multiplication, which no proof covers yet.
+multiplies the generator, is `Rind.X86_64.P256`'s.
 -/
 
 namespace rind.x86_64
 
 /-! ## What the theorems state -/
+
+/-- Neither of pyca/verified-garbage's P-256 checks passes, so P-256 runs the
+code these theorems state: `check`, for ECDH and verification, and
+`check_public_key`, for the public key's derivation. VG's routines are proven
+in that project, not here. Both checks fail on exactly the x86-64 CPUs
+without BMI2, ADX, AVX, or AVX2; every 64-bit Arm CPU passes them. -/
+def NoVgP256 : Prop :=
+  low.x86_64.p256_vg.P256.check = ok none ∧ low.x86_64.p256_vg.P256.check_public_key = ok none
+
+theorem NoVgP256.eq (hvg : NoVgP256) : low.x86_64.p256_vg.P256.check = ok none := hvg.1
+
+theorem NoVgP256.eq_public_key (hvg : NoVgP256) :
+    low.x86_64.p256_vg.P256.check_public_key = ok none := hvg.2
 
 /-- The coordinates an encoded point names, read big-endian after its tag byte. -/
 def x962Coords (bytes : List U8) : Nat × Nat :=
@@ -617,7 +629,7 @@ theorem not_onCurve_zero : ¬ p256OnCurve (some (0, 0)) := by
   simp [p256OnCurve, nist.OnCurve, p256, b256]
 
 @[step]
-theorem diffie_hellman_spec (h : Runs) (k : mid.p256.PrivateKey) (peer : mid.p256.PublicKey) (P : P256Point)
+theorem diffie_hellman_spec (h : Runs) (hvg : NoVgP256) (k : mid.p256.PrivateKey) (peer : mid.p256.PublicKey) (P : P256Point)
     (hP : p256OnCurve P) (hrep : p256Represents2 P (pairNat peer.point.xy.val)) :
     mid.p256.PrivateKey.diffie_hellman k peer ⦃ r =>
       match p256Pow P (wordsNat k.scalar.val) with
@@ -626,6 +638,7 @@ theorem diffie_hellman_spec (h : Runs) (k : mid.p256.PrivateKey) (peer : mid.p25
       | none => r = .Err .Fault ⦄ := by
   unfold mid.p256.PrivateKey.diffie_hellman low.ct.into_public
   step
+  simp only [hvg.eq, bind_ok]
   step with multiply_spec h _ _ P hP hrep as ⟨q, rx, ry, hz, hq⟩
   have hl : (q.xy.val).length = 8 := q.xy.property
   step as ⟨b, hb⟩
@@ -684,7 +697,7 @@ theorem public_from_x962_spec (h : Runs) (bytes : Slice U8) :
       · subst hr; simp
     · subst hr; simp
 
-theorem agree_spec (h : Runs) (k : mid.p256.PrivateKey) (peer : Slice U8) :
+theorem agree_spec (h : Runs) (hvg : NoVgP256) (k : mid.p256.PrivateKey) (peer : Slice U8) :
     high.curve.P256.Insts.RindHighAgreementAgreePrivateKey.agree k peer ⦃ r =>
       p256Agreement (wordsNat k.scalar.val) peer.val r ⦄ := by
   unfold high.curve.P256.Insts.RindHighAgreementAgreePrivateKey.agree p256Agreement
@@ -701,7 +714,7 @@ theorem agree_spec (h : Runs) (k : mid.p256.PrivateKey) (peer : Slice U8) :
       · by_cases hon : p256OnCurve (some (x962Coords peer.val)) <;> simp only [hon, ↓reduceIte] at hr ⊢
         · obtain ⟨pk, rfl, hpk⟩ := hr
           simp only
-          step with diffie_hellman_spec h k pk _ hon hpk as ⟨r1, hr1⟩
+          step with diffie_hellman_spec h hvg k pk _ hon hpk as ⟨r1, hr1⟩
           rcases hq : p256Pow (some (x962Coords peer.val)) (wordsNat k.scalar.val) with _ | ⟨x, y⟩ <;>
             simp only [hq] at hr1 ⊢
           · subst hr1; simp
@@ -725,13 +738,13 @@ every finite point has order n, which follows from the curve's group having
 n points, a count that needs more than Mathlib proves (Hasse's bound at
 least). G's order, which the kernel checks, says nothing about the peer's
 point. -/
-theorem p256_agree (h : Runs) (key : high.agreement.PrivateKey)
+theorem p256_agree (h : Runs) (hvg : NoVgP256) (key : high.agreement.PrivateKey)
     (k : high.agreement.Keyed high.curve.P256 mid.p256.PrivateKey) (hk : key.«private» = .P256 k) (peer : Slice U8) :
     high.agreement.PrivateKey.agree key peer ⦃ r =>
       p256Agreement (wordsNat k.key.scalar.val) peer.val r ⦄ := by
   unfold high.agreement.PrivateKey.agree high.agreement.Keyed.agree
   rw [hk]
-  step with agree_spec h k.key peer as ⟨r, hr⟩
+  step with agree_spec h hvg k.key peer as ⟨r, hr⟩
   rcases r with s | e <;> simpa using hr
 
 /-- The shared secret's bytes are the ones `p256_agree` states. -/

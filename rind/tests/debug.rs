@@ -116,9 +116,12 @@ fn hmac() {
 
     let salt = hkdf::Salt::new(&hkdf::HKDF_SHA256, &[0xff; 32]);
     assert_eq!(show(&salt), "Salt { algorithm: Sha256, .. }");
-    let prk = salt.extract(&[0xff; 32]);
+    let prk = salt.extract(&[0xff; 32]).unwrap();
     assert_eq!(show(&prk), "Prk { algorithm: Sha256, .. }");
-    assert_eq!(show(&prk.expand(&[], 16)), "Okm { algorithm: Sha256, .. }");
+    assert_eq!(
+        show(&prk.expand(&[], &hkdf::HKDF_SHA256).unwrap()),
+        "Okm { algorithm: Sha256, .. }"
+    );
 
     let secret = pbkdf2::Secret::new(&pbkdf2::PBKDF2_HMAC_SHA512, &[0xff; 8]);
     assert_eq!(show(&secret), "Secret { algorithm: Sha512, .. }");
@@ -127,14 +130,15 @@ fn hmac() {
 
 #[test]
 fn kem() {
-    use rind::kem::{DecapsulationKey, ML_KEM_768};
-    assert_eq!(format!("{ML_KEM_768:?}"), "MlKem768");
-    let key = DecapsulationKey::generate(&ML_KEM_768).unwrap();
+    use rind::kem::{DecapsulationKey, MlKem768};
+    let key = DecapsulationKey::<MlKem768>::generate().unwrap();
     assert_eq!(format!("{key:?}"), "DecapsulationKey { .. }");
     let public = key.public_key();
     let shown = format!("{:?}", public.as_ref());
     assert_eq!(format!("{public:?}"), format!("EncapsulationKey({shown})"));
-    let (_, secret) = public.encapsulate().unwrap();
+    let (ciphertext, secret) = public.encapsulate().unwrap();
+    let shown = format!("{:?}", ciphertext.as_ref());
+    assert_eq!(format!("{ciphertext:?}"), format!("Ciphertext({shown})"));
     assert_eq!(format!("{secret:?}"), "SharedSecret(..)");
 }
 
@@ -163,32 +167,26 @@ fn rsa() {
 
 #[test]
 fn signature() {
-    use rind::signature::{EcdsaKeyPair, Ed25519KeyPair, RsaKeyPair, sign, verify};
+    use rind::{ecdsa, ed25519, ml_dsa, rsa};
     let ecdsa = r#"Ecdsa { curve: P256, hash: Sha256, encoding: Asn1 }"#;
     assert_eq!(
-        format!("{:?}", verify::ECDSA_P256_SHA256_ASN1),
-        format!("Ecdsa({ecdsa})")
+        format!("{:?}", ecdsa::verify::P256_SHA256_ASN1),
+        format!("VerificationAlgorithm({ecdsa})")
     );
-    assert_eq!(format!("{:?}", verify::ED25519), "Ed25519");
-    let rsa =
-        "Rsa { verification: Scheme(RsaScheme { padding: Pkcs1, hash: Sha256 }), min_bits: 2048 }";
-    assert_eq!(format!("{:?}", verify::RSA_PKCS1_SHA256), rsa);
-    assert_eq!(
-        format!("{:?}", verify::RSA_PKCS1_SHA256.as_ref()),
-        format!("Rsa({rsa})")
-    );
+    let rsa = "VerificationAlgorithm { verification: Scheme(RsaScheme { padding: Pkcs1, hash: Sha256 }), min_bits: 2048 }";
+    assert_eq!(format!("{:?}", rsa::verify::PKCS1_SHA256), rsa);
 
-    let algorithm = &sign::ECDSA_P256_SHA256_ASN1;
+    let algorithm = &ecdsa::sign::P256_SHA256_ASN1;
     assert_eq!(
         format!("{algorithm:?}"),
-        format!("EcdsaSigningAlgorithm({ecdsa})")
+        format!("SigningAlgorithm({ecdsa})")
     );
-    let pair = EcdsaKeyPair::generate(algorithm).unwrap();
+    let pair = ecdsa::KeyPair::generate(algorithm).unwrap();
     let public = pair.public_key();
     let point = format!("{:?}", public.as_ref());
     assert_eq!(
         format!("{pair:?}"),
-        format!("EcdsaKeyPair {{ algorithm: {ecdsa}, public_key: {point}, .. }}")
+        format!("KeyPair {{ algorithm: {ecdsa}, public_key: {point}, .. }}")
     );
     assert_eq!(
         format!("{public:?}"),
@@ -197,45 +195,42 @@ fn signature() {
     let signature = pair.sign(b"").unwrap();
     let bytes = format!("{:?}", signature.as_ref());
     assert_eq!(format!("{signature:?}"), format!("Signature({bytes})"));
-    let spki = pair.to_spki();
+    let spki = public.to_spki();
     let bytes = format!("{:?}", spki.as_ref());
     assert_eq!(format!("{spki:?}"), format!("Spki({bytes})"));
     assert_eq!(format!("{:?}", pair.to_pkcs8()), "Pkcs8(..)");
     assert_eq!(format!("{:?}", pair.to_sec1()), "Sec1(..)");
-    assert_eq!(format!("{:?}", pair.to_scalar()), "EcdsaScalar(..)");
+    assert_eq!(format!("{:?}", pair.to_scalar()), "Scalar(..)");
 
     let pss = "RsaScheme { padding: Pss(Hash), hash: Sha256 }";
     assert_eq!(
-        format!("{:?}", sign::RSA_PSS_SHA256),
-        format!("RsaSigningAlgorithm({pss})")
+        format!("{:?}", rsa::sign::PSS_SHA256),
+        format!("SigningAlgorithm({pss})")
     );
-    let pair = RsaKeyPair::from_pkcs8(include_bytes!("../src/high/rsa/rsa2048.pkcs8.der")).unwrap();
-    let public = pair.public_key(&sign::RSA_PSS_SHA256);
+    let pair =
+        rsa::KeyPair::from_pkcs8(include_bytes!("../src/high/rsa/rsa2048.pkcs8.der")).unwrap();
+    let public = pair.public_key();
     let bytes = format!("{:?}", public.as_ref());
     assert_eq!(
         format!("{pair:?}"),
-        format!("RsaKeyPair {{ public_key: {bytes}, .. }}")
+        format!("KeyPair {{ public_key: {bytes}, .. }}")
     );
-    assert_eq!(
-        format!("{public:?}"),
-        format!("PublicKey {{ algorithm: Scheme({pss}), bytes: {bytes} }}")
-    );
+    assert_eq!(format!("{public:?}"), format!("PublicKey({bytes})"));
 
-    let pair = Ed25519KeyPair::generate().unwrap();
+    let pair = ed25519::KeyPair::generate().unwrap();
     let bytes = format!("{:?}", pair.public_key().as_ref());
     assert_eq!(
         format!("{pair:?}"),
-        format!("Ed25519KeyPair {{ public_key: {bytes}, .. }}")
+        format!("KeyPair {{ public_key: {bytes}, .. }}")
     );
-    assert_eq!(format!("{:?}", pair.to_seed()), "Ed25519Seed(..)");
-
-    use rind::signature::sign::{MlDsa65, MlDsaKeyPair};
-    assert_eq!(format!("{:?}", verify::ML_DSA_65), "ML-DSA-65");
-    let pair = MlDsaKeyPair::<MlDsa65>::generate().unwrap();
     assert_eq!(
-        format!("{pair:?}"),
-        "MlDsaKeyPair { algorithm: ML-DSA-65, .. }"
+        format!("{:?}", pair.public_key()),
+        format!("PublicKey({bytes})")
     );
+    assert_eq!(format!("{:?}", pair.to_seed()), "Seed(..)");
+
+    let pair = ml_dsa::KeyPair::<ml_dsa::MlDsa65>::generate().unwrap();
+    assert_eq!(format!("{pair:?}"), "KeyPair { algorithm: ML-DSA-65, .. }");
     let public = pair.public_key();
     let bytes = format!("{:?}", public.as_ref());
     assert_eq!(
@@ -244,9 +239,30 @@ fn signature() {
     );
     let signature = pair.sign(b"").unwrap();
     let bytes = format!("{:?}", signature.as_ref());
-    assert_eq!(format!("{signature:?}"), format!("MlDsaSignature({bytes})"));
-    assert_eq!(format!("{:?}", pair.to_seed().unwrap()), "MlDsaSeed(..)");
+    assert_eq!(format!("{signature:?}"), format!("Signature({bytes})"));
+    assert_eq!(format!("{:?}", pair.to_seed().unwrap()), "Seed(..)");
     assert_eq!(format!("{:?}", pair.to_pkcs8()), "Pkcs8(..)");
+
+    use rind::slh_dsa::{self, SlhDsaShake128f};
+    let pair = slh_dsa::KeyPair::<SlhDsaShake128f>::generate().unwrap();
+    assert_eq!(
+        format!("{pair:?}"),
+        "KeyPair { algorithm: SLH-DSA-SHAKE-128f, .. }"
+    );
+    let public = pair.public_key();
+    let bytes = format!("{:?}", public.as_ref());
+    assert_eq!(
+        format!("{public:?}"),
+        format!("PublicKey {{ algorithm: SLH-DSA-SHAKE-128f, bytes: {bytes} }}")
+    );
+    assert_eq!(format!("{:?}", pair.to_pkcs8()), "Pkcs8(..)");
+    // A signature takes Miri half an hour; the native runs sign.
+    if cfg!(miri) {
+        return;
+    }
+    let signature = pair.sign(b"").unwrap();
+    let bytes = format!("{:?}", signature.as_ref());
+    assert_eq!(format!("{signature:?}"), format!("Signature({bytes})"));
 }
 
 #[test]
@@ -261,4 +277,42 @@ fn agreement() {
     assert_eq!(format!("{public:?}"), format!("PublicKey({bytes})"));
     let secret = key.agree(public.as_ref()).unwrap();
     assert_eq!(format!("{secret:?}"), "SharedSecret(..)");
+}
+
+#[test]
+fn vrf() {
+    use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI, KeyPair};
+    for (algorithm, name) in [
+        (&ECVRF_EDWARDS25519_SHA512_TAI, "Edwards25519Sha512Tai"),
+        (&ECVRF_P256_SHA256_TAI, "P256Sha256Tai"),
+    ] {
+        assert_eq!(format!("{algorithm:?}"), name);
+        let key = KeyPair::from_seed(algorithm, &[0x11; 32]).unwrap();
+        // `show` flags "255", which `Edwards25519`'s name contains, so check
+        // the seed's decimal bytes (0x11) here.
+        let secret = |value: &dyn core::fmt::Debug| {
+            let shown = format!("{value:?}");
+            assert!(!shown.contains("17"), "{shown}");
+            shown
+        };
+        assert_eq!(secret(&key), format!("KeyPair {{ algorithm: {name}, .. }}"));
+        assert_eq!(secret(&key.to_seed()), "Seed(..)");
+
+        let public = key.public_key();
+        let bytes = format!("{:?}", public.as_ref());
+        assert_eq!(format!("{public:?}"), format!("PublicKey({bytes})"));
+        let (proof, output) = key.prove(b"alpha").unwrap();
+        let bytes = format!("{:?}", proof.as_ref());
+        assert_eq!(format!("{proof:?}"), format!("Proof({bytes})"));
+        let bytes = format!("{:?}", output.as_ref());
+        assert_eq!(format!("{output:?}"), format!("Output({bytes})"));
+    }
+}
+
+#[test]
+fn vrf_algorithms_differ() {
+    use rind::vrf::{ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI};
+    assert_eq!(ECVRF_P256_SHA256_TAI, ECVRF_P256_SHA256_TAI);
+    assert_eq!(ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_EDWARDS25519_SHA512_TAI);
+    assert_ne!(ECVRF_EDWARDS25519_SHA512_TAI, ECVRF_P256_SHA256_TAI);
 }

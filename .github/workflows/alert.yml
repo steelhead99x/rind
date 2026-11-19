@@ -1,16 +1,20 @@
 name: Alert
 
-# Posts nightly, landing, and release failures to the Discord #alerts channel,
+# Posts scheduled, landing, release, and deploy failures to the Discord #alerts channel,
 # since those runs have no pull request to turn red. Reads the kixel-ai
 # organization's DISCORD_WEBHOOK secret.
 
 permissions:
   contents: read
+  # Telling a time-limit cancellation from any other reads the run's jobs and
+  # their annotations.
+  actions: read
+  checks: read
 
 on:
   workflow_run:
     # Matched by workflow `name:`, not filename. Only workflows that run outside
-    # a pull request. `sh/alert.sh check` enforces the list.
+    # a pull request and a manual dispatch. `sh/alert.sh check` enforces the list.
     workflows:
       - asan
       - bench
@@ -20,39 +24,38 @@ on:
       - Check
       - coverage
       - ctgrind
-      - ctgrind debug
       - fuzz
       - miri
       - mutants
       - prove
-      - Pullfrog
       - python
       - quality lints
-      - Queue
       - regenerate
+      - Site deploy
       - Release
       - timing
       - x86-cpu
     types:
       - completed
 
-# No concurrency group: each run reports a different failed run, and the
-# nightlies share a schedule, so cancelling would drop alerts.
+# No concurrency group: each run reports a different failed run, and
+# scheduled runs can finish together, so cancelling would drop alerts.
 
 jobs:
   discord:
     name: Discord
-    # `cancelled` is excluded: a superseded run is cancelled as a matter of
-    # course. The nightlies alert only when scheduled, since whoever dispatched
-    # one is already watching it. Release and Check alert however they ran:
-    # they follow the queue's pushes to main, which nobody watches. So does
-    # Dart release, which a tag push starts with nobody watching.
-    # Queue failures stay on the PR and go to the queue watcher and fixer.
+    # Scheduled runs alert only when scheduled, since whoever dispatched one
+    # is already watching it. Release alerts however it ran: it follows the
+    # queue's pushes to main, which nobody watches. So do Site deploy, which a
+    # merge to main starts, and Dart release, which a tag push starts with
+    # nobody watching. A cancellation posts only when a job hit its time limit
+    # (`sh/alert.sh timed-out`), since a newer run or a hand cancel stops a run
+    # as a matter of course. Queue failures stay on the PR and go to the queue
+    # watcher and fixer.
     if: >-
-      (github.event.workflow_run.conclusion == 'failure' ||
-      github.event.workflow_run.conclusion == 'timed_out') &&
+      contains(fromJSON('["failure", "timed_out", "cancelled"]'), github.event.workflow_run.conclusion) &&
       (github.event.workflow_run.event == 'schedule' ||
-      contains(fromJSON('["Release", "Check", "Dart release"]'), github.event.workflow_run.name))
+      contains(fromJSON('["Release", "Dart release", "Site deploy"]'), github.event.workflow_run.name))
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -64,6 +67,9 @@ jobs:
       - name: Post to Discord
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           RUN_REPO: ${{ github.repository }}
           RUN_NAME: ${{ github.event.workflow_run.name }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}

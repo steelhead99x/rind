@@ -44,12 +44,12 @@ impl Algorithm {
 
     /// The ECDSA algorithm on the same curve, through which a NIST key is
     /// encoded as SEC1.
-    fn ecdsa(&self) -> Option<&'static rind::signature::EcdsaSigningAlgorithm> {
-        use rind::signature::sign;
+    fn ecdsa(&self) -> Option<&'static rind::ecdsa::SigningAlgorithm> {
+        use rind::ecdsa::sign;
         match self.id {
-            AlgorithmId::EcdhP256 => Some(&sign::ECDSA_P256_SHA256_ASN1),
-            AlgorithmId::EcdhP384 => Some(&sign::ECDSA_P384_SHA384_ASN1),
-            AlgorithmId::EcdhP521 => Some(&sign::ECDSA_P521_SHA512_ASN1),
+            AlgorithmId::EcdhP256 => Some(&sign::P256_SHA256_ASN1),
+            AlgorithmId::EcdhP384 => Some(&sign::P384_SHA384_ASN1),
+            AlgorithmId::EcdhP521 => Some(&sign::P521_SHA512_ASN1),
             AlgorithmId::X25519 => None,
         }
     }
@@ -95,7 +95,7 @@ pub const X25519: Algorithm = Algorithm {
     id: AlgorithmId::X25519,
 };
 
-/// A private key for any number of key agreements; wiped on drop under the `wipe` feature.
+/// A private key for any number of key agreements; wiped on drop.
 pub struct PrivateKey {
     key: rind::agreement::PrivateKey,
 }
@@ -162,8 +162,7 @@ impl AsDer<EcPrivateKeyRfc5915Der<'static>> for PrivateKey {
     fn as_der(&self) -> Result<EcPrivateKeyRfc5915Der<'static>, Unspecified> {
         let ecdsa = self.algorithm().ecdsa().ok_or(Unspecified)?;
         let pkcs8 = self.key.to_pkcs8();
-        let pair = rind::signature::EcdsaKeyPair::from_pkcs8(ecdsa, pkcs8.as_ref())
-            .map_err(unspecified)?;
+        let pair = rind::ecdsa::KeyPair::from_pkcs8(ecdsa, pkcs8.as_ref()).map_err(unspecified)?;
         Ok(EcPrivateKeyRfc5915Der::new(
             pair.to_sec1().as_ref().to_vec(),
         ))
@@ -423,7 +422,7 @@ where
     }
 }
 
-/// A private key for one key agreement; wiped on drop under the `wipe` feature.
+/// A private key for one key agreement; wiped on drop.
 pub struct EphemeralPrivateKey(PrivateKey);
 
 impl EphemeralPrivateKey {

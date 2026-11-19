@@ -16,8 +16,8 @@ mod edit;
 
 const ALGORITHMS: [&Algorithm; 2] = [&ECVRF_EDWARDS25519_SHA512_TAI, &ECVRF_P256_SHA256_TAI];
 
-static KEYS: LazyLock<[SecretKey; 2]> = LazyLock::new(|| {
-    ALGORITHMS.map(|algorithm| SecretKey::from_bytes(algorithm, &[0x42; 32]).unwrap())
+static KEYS: LazyLock<[KeyPair; 2]> = LazyLock::new(|| {
+    ALGORITHMS.map(|algorithm| KeyPair::from_seed(algorithm, &[0x42; 32]).unwrap())
 });
 
 #[derive(Arbitrary, Debug)]

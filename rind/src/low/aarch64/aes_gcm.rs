@@ -112,11 +112,8 @@ pub(crate) fn tagged_from<const ENC: bool>(
     cipher::<ENC>(key, &mut ghash, &y0, aad, cipher_inout);
     ghash.add(&lengths(aad.len(), cipher_inout.len()));
 
-    let mut tag = key.encrypt_block(&y0);
-    for (t, x) in tag.iter_mut().zip(ghash.into_bytes()) {
-        *t ^= x;
-    }
-    tag
+    let mask = u128::from_be_bytes(key.encrypt_block(&y0));
+    (mask ^ u128::from_be_bytes(ghash.into_bytes())).to_be_bytes()
 }
 
 /// The most AAD and message blocks [`short`] seals and opens, past which the
@@ -275,12 +272,10 @@ fn cipher<const ENC: bool>(
         let (inout, len) = (blocks.as_mut_ptr(), blocks.len());
         // SAFETY: only a `HaveCryptoExt` token builds a `HwKey`, proving the
         // `aes` cpu feature, `eight_way` proves `sha3`, and `inout` is valid
-        // for reads and writes of `len` blocks. s2n-bignum's kernels' proofs
-        // assume the input and output do not overlap, but every path through
-        // them loads each input block before storing its output block and
-        // never reads an output back, so in place they compute the same, as
-        // `admin/parse-asm/inplace.py` checks. aws-lc runs its AES-192
-        // routines in place too.
+        // for reads and writes of `len` blocks. s2n-bignum's kernels' theorems
+        // (`AES*_GCM_*_NOIBT_SUBROUTINE_{CORRECT,SAFE}`) take the input and
+        // output either equal, as here, or disjoint, and every other buffer
+        // is a separate borrow. aws-lc runs its AES-192 routines in place too.
         unsafe {
             match (hw_key, ENC, table.eight_way) {
                 (HwKey::Aes128(k), true, None) => {

@@ -6,6 +6,9 @@
 //! defined before the test checks them. rind itself marks the private keys it
 //! generates or parses, and the ticket key it is given.
 
+// Its aws-lc-rs keys do not build for wasm, nor does valgrind run there.
+#![cfg(not(target_family = "wasm"))]
+
 use crabgrind::memcheck::{self, MemState};
 use crabgrind::valgrind::{self, RunningMode};
 use rustls::crypto::aws_lc_rs;
@@ -106,6 +109,7 @@ fn tls13_key_schedule() {
     }
 }
 
+#[cfg(feature = "tls12")]
 #[test]
 fn tls12_prf() {
     for (suite, reference) in [
@@ -322,6 +326,7 @@ fn subject_public_key(spki: &[u8]) -> &[u8] {
     &bits[1..]
 }
 
+#[cfg(feature = "std")]
 #[test]
 fn tickets() {
     let ticketer = rind_rustls::Ticketer::new().unwrap();

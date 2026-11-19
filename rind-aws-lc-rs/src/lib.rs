@@ -2,6 +2,7 @@
 // aws-lc-rs's API has these shapes, which a drop-in keeps.
 #![allow(clippy::len_without_is_empty, clippy::new_without_default)]
 #![warn(missing_docs, unreachable_pub)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use core::fmt;
 
@@ -29,6 +30,7 @@ pub mod signature;
 
 mod buffer;
 mod der;
+mod pqdsa;
 mod wipe;
 
 /// Does nothing: rind needs no initialization. aws-lc-rs initializes AWS-LC here.

@@ -92,7 +92,7 @@ pub(crate) fn wycheproof_groups<G: serde::de::DeserializeOwned>(name: &str) -> V
     }
 
     let path = format!(
-        "{}/../thirdparty/wycheproof/testvectors_v1/{name}",
+        "{}/../thirdparty/vectors/wycheproof/testvectors_v1/{name}",
         env!("CARGO_MANIFEST_DIR")
     );
     let file = File::open(&path).unwrap_or_else(|_| panic!("cannot open {path}"));
@@ -189,7 +189,10 @@ pub(crate) enum Expected {
 
 /// The path of `name` in C2SP's CCTV vectors.
 pub(crate) fn cctv(name: &str) -> String {
-    format!("{}/../thirdparty/cctv/{name}", env!("CARGO_MANIFEST_DIR"))
+    format!(
+        "{}/../thirdparty/vectors/cctv/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    )
 }
 
 /// Reads a CCTV file of `name = hex` lines, each blank-line-separated record
@@ -223,9 +226,17 @@ pub(crate) fn cctv_value<'a>(record: &'a [(String, Vec<u8>)], name: &str) -> &'a
         .1
 }
 
+/// Whether this is ctgrind's debug build, under which valgrind runs SLH-DSA
+/// hundreds of times slower than it runs natively: hours for its tests. Its
+/// tests then check only the 128f sets, which take every code path the
+/// others do, and whose secrets the others handle alike.
+pub(crate) const CTGRIND_DEBUG: bool = cfg!(all(feature = "__ctgrind", debug_assertions));
+
 pub(crate) mod bignum;
 mod binsec;
 pub(crate) mod file_test;
+#[cfg(any(rind_backend = "x86_64", rind_backend = "aarch64"))]
+pub(crate) mod p256_vg;
 
 /// Messages and domain separation tags for crosschecking hashes to a curve:
 /// empty, short, and random messages, with tags of one byte, 255 bytes, and

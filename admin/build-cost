@@ -41,6 +41,7 @@ BUILDS = {
     "rustcrypto": ("rustcrypto", []),
     "graviola": ("graviola", []),
     "libcrux": ("libcrux", []),
+    "verified-garbage": ("verified-garbage", []),
     "openssl": ("openssl", []),
     "openssl-vendored": ("openssl", ["vendored"]),
     "rustls-rind": ("rustls", ["rind"]),

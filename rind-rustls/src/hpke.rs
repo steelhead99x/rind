@@ -1,4 +1,5 @@
 use std::fmt;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use rind::hpke::{self, Kem, PrivateKey, PublicKey, Recipient, Sender, Suite};
@@ -27,10 +28,10 @@ pub static ALL_SUPPORTED_SUITES: &[&dyn Hpke] = &[
 ];
 
 macro_rules! suites {
-    ($($(#[$doc:meta])* $name:ident: $kem:ident, $kdf:ident, $aead:ident = $rustls_aead:ident;)*) => {
+    ($($(#[$doc:meta])* $name:ident: $kem:ident, $kdf:ident, $aead:ident = $rustls_aead:ident, <$key:ident, $kdf_len:ident>;)*) => {
         $(
             $(#[$doc])*
-            pub static $name: &dyn Hpke = &RindHpke {
+            pub static $name: &HpkeAwsLcRs<$key, $kdf_len> = &HpkeAwsLcRs {
                 suite: HpkeSuite {
                     kem: HpkeKem::$kem,
                     sym: HpkeSymmetricCipherSuite {
@@ -43,45 +44,59 @@ macro_rules! suites {
                     kdf: &hpke::$kdf,
                     aead: &hpke::$aead,
                 },
+                unwind: PhantomData,
             };
         )*
     };
 }
 
+// Upstream's names for its suites' sizes, which their types spell out.
+const AES_128_KEY_LEN: usize = 16;
+const AES_256_KEY_LEN: usize = 32;
+const CHACHA_KEY_LEN: usize = 32;
+const SHA256_OUTPUT_LEN: usize = 32;
+const SHA384_OUTPUT_LEN: usize = 48;
+const SHA512_OUTPUT_LEN: usize = 64;
+
 suites! {
     /// DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, and AES-128-GCM.
-    DH_KEM_P256_HKDF_SHA256_AES_128: DHKEM_P256_HKDF_SHA256, HKDF_SHA256, AES_128_GCM = AES_128_GCM;
+    DH_KEM_P256_HKDF_SHA256_AES_128: DHKEM_P256_HKDF_SHA256, HKDF_SHA256, AES_128_GCM = AES_128_GCM, <AES_128_KEY_LEN, SHA256_OUTPUT_LEN>;
     /// DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, and AES-256-GCM.
-    DH_KEM_P256_HKDF_SHA256_AES_256: DHKEM_P256_HKDF_SHA256, HKDF_SHA256, AES_256_GCM = AES_256_GCM;
+    DH_KEM_P256_HKDF_SHA256_AES_256: DHKEM_P256_HKDF_SHA256, HKDF_SHA256, AES_256_GCM = AES_256_GCM, <AES_256_KEY_LEN, SHA256_OUTPUT_LEN>;
     /// DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, and ChaCha20-Poly1305.
-    DH_KEM_P256_HKDF_SHA256_CHACHA20_POLY1305: DHKEM_P256_HKDF_SHA256, HKDF_SHA256, CHACHA20_POLY1305 = CHACHA20_POLY_1305;
+    DH_KEM_P256_HKDF_SHA256_CHACHA20_POLY1305: DHKEM_P256_HKDF_SHA256, HKDF_SHA256, CHACHA20_POLY1305 = CHACHA20_POLY_1305, <CHACHA_KEY_LEN, SHA256_OUTPUT_LEN>;
     /// DHKEM(P-384, HKDF-SHA384), HKDF-SHA384, and AES-128-GCM.
-    DH_KEM_P384_HKDF_SHA384_AES_128: DHKEM_P384_HKDF_SHA384, HKDF_SHA384, AES_128_GCM = AES_128_GCM;
+    DH_KEM_P384_HKDF_SHA384_AES_128: DHKEM_P384_HKDF_SHA384, HKDF_SHA384, AES_128_GCM = AES_128_GCM, <AES_128_KEY_LEN, SHA384_OUTPUT_LEN>;
     /// DHKEM(P-384, HKDF-SHA384), HKDF-SHA384, and AES-256-GCM.
-    DH_KEM_P384_HKDF_SHA384_AES_256: DHKEM_P384_HKDF_SHA384, HKDF_SHA384, AES_256_GCM = AES_256_GCM;
+    DH_KEM_P384_HKDF_SHA384_AES_256: DHKEM_P384_HKDF_SHA384, HKDF_SHA384, AES_256_GCM = AES_256_GCM, <AES_256_KEY_LEN, SHA384_OUTPUT_LEN>;
     /// DHKEM(P-384, HKDF-SHA384), HKDF-SHA384, and ChaCha20-Poly1305.
-    DH_KEM_P384_HKDF_SHA384_CHACHA20_POLY1305: DHKEM_P384_HKDF_SHA384, HKDF_SHA384, CHACHA20_POLY1305 = CHACHA20_POLY_1305;
+    DH_KEM_P384_HKDF_SHA384_CHACHA20_POLY1305: DHKEM_P384_HKDF_SHA384, HKDF_SHA384, CHACHA20_POLY1305 = CHACHA20_POLY_1305, <CHACHA_KEY_LEN, SHA384_OUTPUT_LEN>;
     /// DHKEM(P-521, HKDF-SHA512), HKDF-SHA512, and AES-128-GCM.
-    DH_KEM_P521_HKDF_SHA512_AES_128: DHKEM_P521_HKDF_SHA512, HKDF_SHA512, AES_128_GCM = AES_128_GCM;
+    DH_KEM_P521_HKDF_SHA512_AES_128: DHKEM_P521_HKDF_SHA512, HKDF_SHA512, AES_128_GCM = AES_128_GCM, <AES_128_KEY_LEN, SHA512_OUTPUT_LEN>;
     /// DHKEM(P-521, HKDF-SHA512), HKDF-SHA512, and AES-256-GCM.
-    DH_KEM_P521_HKDF_SHA512_AES_256: DHKEM_P521_HKDF_SHA512, HKDF_SHA512, AES_256_GCM = AES_256_GCM;
+    DH_KEM_P521_HKDF_SHA512_AES_256: DHKEM_P521_HKDF_SHA512, HKDF_SHA512, AES_256_GCM = AES_256_GCM, <AES_256_KEY_LEN, SHA512_OUTPUT_LEN>;
     /// DHKEM(P-521, HKDF-SHA512), HKDF-SHA512, and ChaCha20-Poly1305.
-    DH_KEM_P521_HKDF_SHA512_CHACHA20_POLY1305: DHKEM_P521_HKDF_SHA512, HKDF_SHA512, CHACHA20_POLY1305 = CHACHA20_POLY_1305;
+    DH_KEM_P521_HKDF_SHA512_CHACHA20_POLY1305: DHKEM_P521_HKDF_SHA512, HKDF_SHA512, CHACHA20_POLY1305 = CHACHA20_POLY_1305, <CHACHA_KEY_LEN, SHA512_OUTPUT_LEN>;
     /// DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, and AES-128-GCM.
-    DH_KEM_X25519_HKDF_SHA256_AES_128: DHKEM_X25519_HKDF_SHA256, HKDF_SHA256, AES_128_GCM = AES_128_GCM;
+    DH_KEM_X25519_HKDF_SHA256_AES_128: DHKEM_X25519_HKDF_SHA256, HKDF_SHA256, AES_128_GCM = AES_128_GCM, <AES_128_KEY_LEN, SHA256_OUTPUT_LEN>;
     /// DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, and AES-256-GCM.
-    DH_KEM_X25519_HKDF_SHA256_AES_256: DHKEM_X25519_HKDF_SHA256, HKDF_SHA256, AES_256_GCM = AES_256_GCM;
+    DH_KEM_X25519_HKDF_SHA256_AES_256: DHKEM_X25519_HKDF_SHA256, HKDF_SHA256, AES_256_GCM = AES_256_GCM, <AES_256_KEY_LEN, SHA256_OUTPUT_LEN>;
     /// DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, and ChaCha20-Poly1305.
-    DH_KEM_X25519_HKDF_SHA256_CHACHA20_POLY1305: DHKEM_X25519_HKDF_SHA256, HKDF_SHA256, CHACHA20_POLY1305 = CHACHA20_POLY_1305;
+    DH_KEM_X25519_HKDF_SHA256_CHACHA20_POLY1305: DHKEM_X25519_HKDF_SHA256, HKDF_SHA256, CHACHA20_POLY1305 = CHACHA20_POLY_1305, <CHACHA_KEY_LEN, SHA256_OUTPUT_LEN>;
 }
 
-struct RindHpke {
+/// An HPKE suite, named as rustls's aws-lc-rs provider names its own: AEAD
+/// keys of `KEY_SIZE` bytes and a KDF of `KDF_SIZE`-byte outputs.
+pub struct HpkeAwsLcRs<const KEY_SIZE: usize, const KDF_SIZE: usize> {
     suite: HpkeSuite,
     kem: &'static Kem,
     rind: Suite,
+    // Upstream's holds a `&'static dyn` HKDF, which is neither `UnwindSafe`
+    // nor `RefUnwindSafe`, so neither is this.
+    unwind: PhantomData<&'static dyn Sync>,
 }
 
-impl RindHpke {
+impl<const KEY_SIZE: usize, const KDF_SIZE: usize> HpkeAwsLcRs<KEY_SIZE, KDF_SIZE> {
     fn sender(
         &self,
         info: &[u8],
@@ -105,7 +120,7 @@ impl RindHpke {
     }
 }
 
-impl Hpke for RindHpke {
+impl<const KEY_SIZE: usize, const KDF_SIZE: usize> Hpke for HpkeAwsLcRs<KEY_SIZE, KDF_SIZE> {
     fn seal(
         &self,
         info: &[u8],
@@ -158,7 +173,7 @@ impl Hpke for RindHpke {
     }
 }
 
-impl fmt::Debug for RindHpke {
+impl<const KEY_SIZE: usize, const KDF_SIZE: usize> fmt::Debug for HpkeAwsLcRs<KEY_SIZE, KDF_SIZE> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.suite.fmt(f)
     }
