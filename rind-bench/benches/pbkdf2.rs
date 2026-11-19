@@ -1,3 +1,4 @@
+#[macro_use]
 mod criterion;
 use std::hint::black_box;
 use std::num::NonZeroU32;
@@ -12,10 +13,12 @@ fn bench<V: verified_garbage::kdf::pbkdf2_hmac::Pbkdf2Hash>(
     c: &mut Criterion,
     name: &str,
     ring: ring::pbkdf2::Algorithm,
-    aws: aws_lc_rs::pbkdf2::Algorithm,
+    aws: aws!(pbkdf2::Algorithm),
     ours: &'static rind::pbkdf2::Algorithm,
     len: usize,
 ) {
+    #[cfg(any(target_arch = "xtensa", target_os = "none"))]
+    let _ = &aws;
     let mut group = c.benchmark_group(name);
     group.throughput(Throughput::Elements(ITERATIONS as u64));
     let iterations = NonZeroU32::new(ITERATIONS).unwrap();
@@ -27,6 +30,7 @@ fn bench<V: verified_garbage::kdf::pbkdf2_hmac::Pbkdf2Hash>(
             black_box(&out);
         })
     });
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         b.iter(|| {
             aws_lc_rs::pbkdf2::derive(aws, iterations, b"salt", b"password", &mut out);
@@ -66,7 +70,7 @@ fn pbkdf2(c: &mut Criterion) {
         c,
         "pbkdf2-sha1",
         ring::pbkdf2::PBKDF2_HMAC_SHA1,
-        aws_lc_rs::pbkdf2::PBKDF2_HMAC_SHA1,
+        aws!(pbkdf2::PBKDF2_HMAC_SHA1),
         &rind::pbkdf2::legacy::PBKDF2_HMAC_SHA1,
         20,
     );
@@ -74,7 +78,7 @@ fn pbkdf2(c: &mut Criterion) {
         c,
         "pbkdf2-sha256",
         ring::pbkdf2::PBKDF2_HMAC_SHA256,
-        aws_lc_rs::pbkdf2::PBKDF2_HMAC_SHA256,
+        aws!(pbkdf2::PBKDF2_HMAC_SHA256),
         &rind::pbkdf2::PBKDF2_HMAC_SHA256,
         32,
     );
@@ -82,7 +86,7 @@ fn pbkdf2(c: &mut Criterion) {
         c,
         "pbkdf2-sha384",
         ring::pbkdf2::PBKDF2_HMAC_SHA384,
-        aws_lc_rs::pbkdf2::PBKDF2_HMAC_SHA384,
+        aws!(pbkdf2::PBKDF2_HMAC_SHA384),
         &rind::pbkdf2::PBKDF2_HMAC_SHA384,
         48,
     );
@@ -90,7 +94,7 @@ fn pbkdf2(c: &mut Criterion) {
         c,
         "pbkdf2-sha512",
         ring::pbkdf2::PBKDF2_HMAC_SHA512,
-        aws_lc_rs::pbkdf2::PBKDF2_HMAC_SHA512,
+        aws!(pbkdf2::PBKDF2_HMAC_SHA512),
         &rind::pbkdf2::PBKDF2_HMAC_SHA512,
         64,
     );
