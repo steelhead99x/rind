@@ -325,16 +325,15 @@ fn signatures() {
                 });
                 let signature =
                     out(|o, n| rind_dart_ecdsa_sign(reloaded, b"msg".as_ptr(), 3, o, n));
-                let public_key =
-                    new(|out| rind_dart_key_pair_public_key(0, reloaded.cast(), 0, out));
-                ok(rind_dart_public_key_verify(
+                let public_key = new(|out| rind_dart_ecdsa_key_pair_public_key(reloaded, out));
+                ok(rind_dart_ecdsa_public_key_verify(
                     public_key,
                     b"msg".as_ptr(),
                     3,
                     signature.as_ptr(),
                     signature.len(),
                 ));
-                rind_dart_public_key_free(public_key);
+                rind_dart_ecdsa_public_key_free(public_key);
                 rind_dart_ecdsa_key_pair_free(reloaded);
             }
             rind_dart_ecdsa_key_pair_free(pair);
@@ -353,6 +352,15 @@ fn signatures() {
             out(|o, n| rind_dart_ed25519_sign(reloaded, b"msg".as_ptr(), 3, o, n)),
             signature
         );
+        let public_key = new(|out| rind_dart_ed25519_key_pair_public_key(reloaded, out));
+        ok(rind_dart_ed25519_public_key_verify(
+            public_key,
+            b"msg".as_ptr(),
+            3,
+            signature.as_ptr(),
+            signature.len(),
+        ));
+        rind_dart_ed25519_public_key_free(public_key);
         rind_dart_ed25519_key_pair_free(reloaded);
         rind_dart_ed25519_key_pair_free(pair);
 
@@ -363,16 +371,16 @@ fn signatures() {
         for algorithm in [0, 3] {
             let signature =
                 out(|o, n| rind_dart_rsa_sign(reloaded, algorithm, b"msg".as_ptr(), 3, o, n));
-            let public_key =
-                new(|out| rind_dart_key_pair_public_key(2, reloaded.cast(), algorithm, out));
-            ok(rind_dart_public_key_verify(
+            let public_key = new(|out| rind_dart_rsa_key_pair_public_key(reloaded, out));
+            ok(rind_dart_rsa_public_key_verify(
                 public_key,
+                algorithm,
                 b"msg".as_ptr(),
                 3,
                 signature.as_ptr(),
                 signature.len(),
             ));
-            rind_dart_public_key_free(public_key);
+            rind_dart_rsa_public_key_free(public_key);
         }
         rind_dart_rsa_key_pair_free(reloaded);
         rind_dart_rsa_key_pair_free(pair);

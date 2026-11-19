@@ -44,6 +44,11 @@ opaque low.x86_64.cpu.HaveSsse3 : Type
 opaque low.x86_64.cpu.HaveSha512 : Type
 opaque low.x86_64.cpu.HaveSse41 : Type
 
+/-- The tokens proving pyca/verified-garbage's ML-KEM-768 encapsulation, and
+its key generation and decapsulation, run here. -/
+opaque low.x86_64.mlkem768_vg.Encaps : Type
+opaque low.x86_64.mlkem768_vg.KeyPair : Type
+
 /-- MD5's chaining state, which no proof covers. -/
 opaque mid.md5.Md5State : Type
 
@@ -117,8 +122,8 @@ proves: what pyca/verified-garbage's AVX-512 VL ChaCha20 needs. -/
 opaque low.x86_64.cpu.HaveAvx512Vl : Type
 
 /-- pyca/verified-garbage's ChaCha20 streaming state, as its routines see it:
-the 768 bytes of memory they keep it in, which `Rind.VgChaCha20` reads as VG's
-spec reads memory. Rust leaves it uninitialised: `init` writes the bytes
+the 768 bytes of memory they keep it in, all that VG's spec reads of it, as
+`Rind.VgChaCha20` proves. Rust leaves it uninitialised: `init` writes the bytes
 `apply` reads on entry, and `apply` writes its scratch before reading it, so
 the model gives the rest any bytes.
 `admin/prove` fails unless this quote is still the type:

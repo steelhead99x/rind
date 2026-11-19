@@ -6,7 +6,7 @@ Every operation rind exports earns `benchmarks/verified.toml`'s strict ✓ on th
 
 ## Plan
 
-Moved from [the m4 verified epic](/quest/m4/verified/README.md) with the maintainer on 2026-11-09, so the hot tiers' proofs rank ahead of these. That epic's rules hold here: prove the code rind runs, in HOL Light or Lean, under the m3 epic's composition rule.
+Moved from [the m4 verified epic](/quest/m4/verified/README.md) with the maintainer on 2026-11-09, so the hot tiers' proofs rank ahead of these. That epic's rules hold here: prove the code rind runs, in HOL Light or Lean, under [the m4 epic's composition rule](/quest/m4/verified/README.md#composition-rule).
 
 Under `AGENTS.md`'s speed rule (maintainer, 2026-11-09: ✅ the fastest source, then its proof; rejected: verified code within about 10% on cold tiers, or everywhere), these tiers run their fastest source unproven until a quest here proves it. A verified source replaces one only where it measures as fast at every size.
 

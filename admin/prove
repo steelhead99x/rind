@@ -832,11 +832,14 @@ ecdsa_items() {
     items rind/src/high/curve.rs 'impl Curve for P256 {'
     items rind/src/mid/p256.rs '    pub(crate) fn generate(rng: &mut dyn'
     items <(sed -n '/^impl StaticPrivateKey {/,/^}/p' rind/src/mid/p256.rs) '    pub(crate) fn generate('
+    items rind/src/high/curve.rs 'impl Curve for P384 {'
+    items rind/src/mid/p384.rs '    fn generate(rng: &mut dyn'
+    items <(sed -n '/^impl StaticPrivateKey {/,/^}/p' rind/src/mid/p384.rs) '    pub(crate) fn generate('
     items rind/src/high/signature.rs 'macro_rules! with_hash {' 'type Verify<K> =' 'type Sign<K> =' \
         'type Write<K> ='
     items rind/src/high/signature/ecdsa.rs 'struct Ecdsa {' 'macro_rules! with_ecdsa {' \
         'macro_rules! with_curve {' 'trait Encoding {' 'impl Encoding for Fixed {' 'trait EcdsaCurve:' \
-        'macro_rules! ecdsa_curve {' 'ecdsa_curve!(P256);' 'enum Key {' 'impl Clone for Key {' \
+        'macro_rules! ecdsa_curve {' 'ecdsa_curve!(P256);' 'ecdsa_curve!(P384);' 'enum Key {' 'impl Clone for Key {' \
         'struct EcdsaVerifier<' 'impl<C: EcdsaCurve> Clone for EcdsaVerifier<C> {' 'struct VerifyOps<' \
         'impl<C: EcdsaCurve> EcdsaVerifier<C> {' 'macro_rules! on_key {' 'fn parse_ecdsa<' \
         'pub struct VerificationAlgorithm {' 'const fn ecdsa_verification(' 'pub struct PublicKey {' \
@@ -844,7 +847,8 @@ ecdsa_items() {
         'const SIGNATURE_MAX_LEN:' 'const fn ecdsa_signing(' 'pub struct SigningAlgorithm {' \
         'enum EcdsaSource<' 'pub struct KeyPair {' 'enum EcdsaKey {' 'struct EcdsaPair<' 'struct EcdsaOps<' \
         'macro_rules! on_ecdsa {' 'impl KeyPair {' '    pub static P256_SHA256_FIXED: SigningAlgorithm' \
-        '    pub static P256_SHA256_FIXED: VerificationAlgorithm'
+        '    pub static P384_SHA384_FIXED: SigningAlgorithm' '    pub static P256_SHA256_FIXED: VerificationAlgorithm' \
+        '    pub static P384_SHA384_FIXED: VerificationAlgorithm'
 }
 check_quote X86_64/EcdsaDispatch ecdsa_items
 check_quote X86_64/DigestAlgorithm items rind/src/high/digest.rs 'pub struct Algorithm ' 'impl Algorithm {' \
@@ -1133,6 +1137,12 @@ assembly=(
     --opaque 'crate::mid::p384::_::new_random'
     --opaque 'crate::mid::p521::_::_'
     --include 'crate::mid::p521::_::BYTES'
+    --start-from crate::mid::mlkem::sample_cbd2
+    --start-from crate::mid::mlkem::sample_cbd3
+    --start-from crate::mid::mlkem::decompress
+    --start-from 'crate::mid::mlkem::_::from_message_bits'
+    --start-from 'crate::mid::mlkem::_::to_message_bits'
+    --include crate::low::generic::ct_copy::ct_select_i16
 )
 extract() {
     local arch=$1 dir=$2
@@ -1398,7 +1408,11 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::x86_64::mont::mont_sqr \
     --include crate::low::x86_64::mont::karatsuba_mul \
     --include crate::low::x86_64::mont::karatsuba_sqr \
-    --include crate::low::x86_64::mont::redc_8n
+    --include crate::low::x86_64::mont::redc_8n \
+    --start-from crate::low::x86_64::mlkem768_vg::Encaps::check_ek \
+    --start-from crate::low::x86_64::mlkem768_vg::Encaps::encaps \
+    --start-from crate::low::x86_64::mlkem768_vg::KeyPair::keygen \
+    --start-from crate::low::x86_64::mlkem768_vg::KeyPair::decaps
 extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::aarch64::sha512::sha512_compress_blocks \
     --start-from crate::mid::p256::PrivateKey::from_bytes \
@@ -1451,6 +1465,14 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --start-from crate::low::aarch64::aes_cbc::encrypt \
     --start-from crate::low::aarch64::aes_cbc::decrypt \
     --opaque crate::low::aarch64::aes_cbc::aese_chained \
+    --include crate::low::generic::mlkem \
+    --start-from crate::low::generic::mlkem::mlkem_frombytes \
+    --start-from crate::low::generic::mlkem::mlkem_compress_d4 \
+    --start-from crate::low::generic::mlkem::mlkem_compress_d5 \
+    --start-from crate::low::generic::mlkem::mlkem_compress_d10 \
+    --start-from crate::low::generic::mlkem::mlkem_compress_d11 \
+    --start-from crate::low::aarch64::mlkem768_vg::Encaps::check_ek \
+    --start-from crate::low::aarch64::mlkem768_vg::Encaps::encaps \
     --start-from crate::mid::aes_gcm::AesGcm::new \
     --start-from crate::mid::aes_gcm::AesGcm::encrypt \
     --start-from crate::mid::aes_gcm::AesGcm::decrypt \
@@ -1496,10 +1518,12 @@ mkdir -p proofs/Rind/Aarch64/Kdf
 # P-256's generator multiplication and its table differ per target, so each
 # target has its own `P256Base` stating it, and `P256KeyCheck` for the key
 # check x86_64 shortcuts; key generation and ECDSA above them are shared.
+# Each target's `P384KeyCheck` reads its own translation of the key check.
 for file in Dispatch QuicDispatch P256Dispatch P256Agree P384Dispatch X25519 P384 P384Table P384Keygen DigestAlgorithm \
     DigestDispatch Sha512 ChaCha20 SignatureBuffer Ed25519 \
     Blockwise Sha Hmac HmacDispatch HkdfExpand Kdf/TypesExternal Kdf/FunsExternal \
-    CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3 AesCipher HkdfAes AesModesApi AesKw P256 EcdsaDispatch Naf P256Ecdsa P256Signature; do
+    CtEqual HmacApi DigestApi Hkdf Pbkdf2 Sha3 AesCipher HkdfAes AesModesApi AesKw P256 EcdsaDispatch Naf P256Ecdsa P256Signature \
+    P384Ecdsa P384Signature MlKemCoding; do
     sed 's/X86_64/Aarch64/g; s/x86_64/aarch64/g' "proofs/Rind/X86_64/$file.lean" >"proofs/Rind/Aarch64/$file.lean"
 done
 # The AEAD model imports nothing aarch64 has, and no aarch64 translation reaches it.

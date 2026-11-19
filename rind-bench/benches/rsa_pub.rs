@@ -37,6 +37,7 @@ fn rsa2048_pkcs1_sha256_verify(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::signature;
         let peer_public_key =
@@ -107,6 +108,7 @@ fn rsa2048_pkcs1_sha256_verify(c: &mut Criterion) {
     let mut group = c.benchmark_group("rsa2048-pkcs1-sha256-verify-parsed");
     group.throughput(Throughput::Elements(1));
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::signature;
         let peer_public_key =
@@ -160,6 +162,7 @@ fn rsa1024_pkcs1_sha1_verify(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::signature;
         let peer_public_key = signature::UnparsedPublicKey::new(
@@ -221,6 +224,7 @@ fn rsa2048_pss_sha256_verify(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::signature;
         let peer_public_key =
@@ -325,6 +329,7 @@ fn rsa2048_oaep_sha256_encrypt(c: &mut Criterion) {
     let mut group = c.benchmark_group("rsa2048-oaep-sha256-encrypt");
     group.throughput(Throughput::Elements(1));
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::rsa::{
             OAEP_SHA256_MGF1SHA256, OaepPublicEncryptingKey, PublicEncryptingKey,
@@ -437,6 +442,7 @@ fn rsa_pkcs1_sha256_verify_sizes(c: &mut Criterion) {
             })
         });
 
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_function("aws-lc-rs", |b| {
             use aws_lc_rs::signature;
             let peer_public_key = signature::UnparsedPublicKey::new(
