@@ -2,15 +2,33 @@
 
 use core::fmt;
 
+use super::{NONCE_LEN, TAG_LEN, Tag};
 use crate::cipher::new_handle;
-use crate::ffi::{Bytes, Handle, Status, ids, opaque};
+use crate::ffi::{self, Bytes, Handle, Status, ids, opaque};
 use crate::{Error, hkdf};
 
 opaque! {
     QuicHpKey => rind_fips_quic_hp_free,
+    QuicSealingKey => rind_fips_quic_sealing_key_free,
 }
 
 unsafe extern "C" {
+    fn rind_fips_quic_sealing_key_new(
+        id: u32,
+        key: *const u8,
+        len: usize,
+        iv: *const [u8; NONCE_LEN],
+        out: *mut *mut QuicSealingKey,
+    ) -> Status;
+    fn rind_fips_quic_seal(
+        key: *mut QuicSealingKey,
+        pn: u64,
+        aad: *const u8,
+        aad_len: usize,
+        in_out: *mut u8,
+        len: usize,
+        tag: *mut [u8; TAG_LEN],
+    ) -> Status;
     fn rind_fips_quic_hp_new(
         id: u32,
         key: *const u8,
@@ -126,5 +144,116 @@ impl From<hkdf::Okm<'_, &'static Algorithm>> for HeaderProtectionKey {
             algorithm: okm.len,
             handle: Handle::new(handle),
         }
+    }
+}
+
+/// How many packet numbers below the highest sealed a [`PacketSealingKey`]
+/// still tracks.
+pub const SEAL_WINDOW: u64 = 1024;
+
+/// An AES-GCM key that seals QUIC packets (RFC 9001 section 5.3), each
+/// packet number once; held in the module, which wipes it on drop.
+///
+/// The module builds each nonce itself, as the key's packet protection IV
+/// XORed with the packet number, so the caller never picks one. Unlike a
+/// [`super::TlsRecordSealingKey`], it does not need packet numbers in
+/// increasing order, since QUIC senders may seal packet `n + 1` before `n`:
+/// the module remembers which of the last [`SEAL_WINDOW`] packet numbers
+/// below the highest it has sealed, and refuses a repeat, one further below
+/// the highest than that. Any `u64` is a packet number, though QUIC's are
+/// below 2^62 (RFC 9000 section 17.1), since the XOR with the IV is
+/// one-to-one on all of them. So no nonce is used twice under a key, in
+/// whatever order the calls come (SP 800-38D section 8.2.1). Open packets with a
+/// [`super::Key`].
+///
+/// ```
+/// use rind_fips::aead::quic::*;
+/// use rind_fips::aead::*;
+///
+/// let iv = [0x5a; 12];
+/// let mut key = PacketSealingKey::new(&AES_128_GCM, &[7; 16], &iv).unwrap();
+///
+/// // Packet 6 before packet 5 is fine.
+/// let mut later = b"hello".to_vec();
+/// let tag6 = key.seal_in_place_separate_tag(6, b"header", &mut later).unwrap();
+/// let mut earlier = b"hello".to_vec();
+/// key.seal_in_place_separate_tag(5, b"header", &mut earlier).unwrap();
+///
+/// // But a packet number twice is not.
+/// let mut again = b"hello".to_vec();
+/// assert_eq!(
+///     key.seal_in_place_separate_tag(6, b"header", &mut again).err(),
+///     Some(rind_fips::Error::MessageLimitReached)
+/// );
+///
+/// let opening = Key::new(&AES_128_GCM, &[7; 16]).unwrap();
+/// let plaintext = opening
+///     .open_in_place_separate_tag(Nonce::from_sequence(&iv, 6), b"header", tag6, &mut later)
+///     .unwrap();
+/// assert_eq!(plaintext, b"hello");
+/// ```
+pub struct PacketSealingKey {
+    algorithm: &'static super::Algorithm,
+    handle: Handle<QuicSealingKey>,
+}
+
+impl PacketSealingKey {
+    /// Expands `key` for `algorithm`, with packet protection IV `iv`,
+    /// failing with [`Error::Unsupported`] unless `algorithm` is one of
+    /// QUIC's, [`super::AES_128_GCM`] or [`super::AES_256_GCM`], and with
+    /// [`Error::WrongLength`] if `key` is not its [`super::Algorithm::key_len`]
+    /// bytes.
+    pub fn new(
+        algorithm: &'static super::Algorithm,
+        key: &[u8],
+        iv: &[u8; NONCE_LEN],
+    ) -> Result<Self, Error> {
+        let handle = new_handle(|out| {
+            // SAFETY: `key` is readable, `iv` is its length's bytes, and
+            // `out` writable.
+            unsafe {
+                rind_fips_quic_sealing_key_new(algorithm.id, key.as_ptr(), key.len(), iv, out)
+            }
+        })?;
+        Ok(Self { algorithm, handle })
+    }
+
+    /// Encrypts `in_out` in place as packet `packet_number` and returns the
+    /// tag.
+    ///
+    /// Fails with [`Error::MessageLimitReached`] if `packet_number` was
+    /// sealed under the key already, is more than [`SEAL_WINDOW`] below the
+    /// highest sealed, and with [`Error::WrongLength`]
+    /// past the sealing limits, zeroing `in_out` in either case. The latter
+    /// still spends the packet number.
+    pub fn seal_in_place_separate_tag(
+        &mut self,
+        packet_number: u64,
+        aad: &[u8],
+        in_out: &mut [u8],
+    ) -> Result<Tag, Error> {
+        let mut tag = [0; TAG_LEN];
+        // SAFETY: the handle is live and borrowed mutably, `tag` is its
+        // length's bytes, `aad` readable, and `in_out` writable.
+        ffi::check(unsafe {
+            rind_fips_quic_seal(
+                self.handle.ptr(),
+                packet_number,
+                aad.as_ptr(),
+                aad.len(),
+                in_out.as_mut_ptr(),
+                in_out.len(),
+                &mut tag,
+            )
+        })?;
+        Ok(Tag(tag))
+    }
+}
+
+impl fmt::Debug for PacketSealingKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PacketSealingKey")
+            .field("algorithm", &format_args!("{}", self.algorithm.name))
+            .finish_non_exhaustive()
     }
 }

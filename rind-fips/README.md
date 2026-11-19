@@ -38,7 +38,11 @@ lab to test.
   (scenario 2) and seals at most 2^32 messages. A `TlsRecordSealingKey`
   is TLS 1.3's (scenario 5, RFC 8446): it seals a record only if its
   sequence number, the nonce XORed with the first nonce, is above the last
-  and below 2^64 - 1, so the caller must rekey before it wraps. Keys live
+  and below 2^64 - 1, so the caller must rekey before it wraps. A
+  `quic::PacketSealingKey` is QUIC's: the module builds each nonce from the
+  packet protection IV and the packet number, and seals each packet number
+  once, in any order within 1024 of the highest (QUIC senders may seal
+  packet `n + 1` before `n`), refusing a repeat or one further below. Keys live
   only in memory, so after a restart a new key is established, as IG C.H
   requires. A seal that fails zeroes its buffer, as aws-lc's does.
 

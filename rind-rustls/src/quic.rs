@@ -98,20 +98,18 @@ impl quic::Algorithm for Algorithm {
     }
 }
 
-/// A QUIC packet key held in the module: sealing through its TLS 1.3 IV
-/// construction, opening through its AES-GCM key.
+/// A QUIC packet key held in the module: sealing through its QUIC packet
+/// service, opening through its AES-GCM key.
 ///
-/// The module takes the first nonce it seals under as sequence number 0 and
-/// wants each later sequence number above the last. QUIC's packet numbers
-/// start anywhere and carry on across key updates (RFC 9001 section 6.2), so
-/// the key first seals an empty message under the nonce of packet number
-/// 2^63, which no packet uses (QUIC's are below 2^62), and discards it. The
-/// module then counts packet number `n` as sequence `2^63 | n`, above that
-/// and increasing with `n`. A packet number at or below one already sealed
-/// under the key is refused, as the module refuses a repeated nonce.
+/// The module builds each packet's nonce from the packet protection IV and
+/// the packet number, and seals each packet number once under a key, in any
+/// order within a window below the highest (`module_quic::SEAL_WINDOW`), so
+/// concurrent sealing of packet `n + 1` before `n` works as in rustls's
+/// aws-lc-rs provider. A packet number sealed already, and one far below the
+/// highest, are refused.
 #[cfg(feature = "fips")]
 struct ModulePacketKey {
-    sealer: Mutex<module::TlsRecordSealingKey>,
+    sealer: Mutex<module_quic::PacketSealingKey>,
     opener: module::Key,
     iv: Iv,
     confidentiality_limit: u64,
@@ -120,9 +118,6 @@ struct ModulePacketKey {
 
 #[cfg(feature = "fips")]
 impl ModulePacketKey {
-    /// No QUIC packet number reaches this (RFC 9000 section 17.1: below 2^62).
-    const UNUSED_PACKET_NUMBER: u64 = 1 << 63;
-
     fn new(
         algorithm: &'static module::Algorithm,
         key: &[u8],
@@ -130,17 +125,12 @@ impl ModulePacketKey {
         confidentiality_limit: u64,
         integrity_limit: u64,
     ) -> Self {
-        let mut sealer =
-            module::TlsRecordSealingKey::new(algorithm, module::TlsProtocolId::TLS13, key).unwrap();
-        let nonce =
-            module::Nonce::assume_unique_for_key(Nonce::new(&iv, Self::UNUSED_PACKET_NUMBER).0);
-        // The ciphertext of nothing, which is discarded: only its tag is
-        // computed, and the nonce is never used for a packet.
-        sealer
-            .seal_in_place_separate_tag(nonce, &[], &mut [])
-            .unwrap();
+        // The IV is the nonce of packet number 0.
+        let iv_bytes = Nonce::new(&iv, 0).0;
         Self {
-            sealer: Mutex::new(sealer),
+            sealer: Mutex::new(
+                module_quic::PacketSealingKey::new(algorithm, key, &iv_bytes).unwrap(),
+            ),
             opener: module::Key::new(algorithm, key).unwrap(),
             iv,
             confidentiality_limit,
@@ -157,12 +147,11 @@ impl quic::PacketKey for ModulePacketKey {
         header: &[u8],
         payload: &mut [u8],
     ) -> Result<quic::Tag, Error> {
-        let nonce = module::Nonce::assume_unique_for_key(Nonce::new(&self.iv, packet_number).0);
         let tag = self
             .sealer
             .lock()
             .map_err(|_| Error::EncryptError)?
-            .seal_in_place_separate_tag(nonce, header, payload)
+            .seal_in_place_separate_tag(packet_number, header, payload)
             .map_err(|_| Error::EncryptError)?;
         Ok(quic::Tag::from(tag.as_ref()))
     }
