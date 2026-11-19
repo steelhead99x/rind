@@ -10,3 +10,8 @@ publish = false
 # probe, which reads `cpuid` itself, it does not link the library.
 [target.'cfg(all(target_arch = "aarch64", target_os = "linux"))'.dependencies]
 libc = { version = "0.2", default-features = false }
+
+# The 32-bit ARM probe reads `AT_HWCAP` and `AT_HWCAP2`, as rind's arm backend
+# does, and does not link the library either.
+[target.'cfg(all(target_arch = "arm", any(target_os = "linux", target_os = "android")))'.dependencies]
+libc = { version = "0.2", default-features = false }

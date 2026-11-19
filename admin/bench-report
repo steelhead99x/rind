@@ -1173,8 +1173,7 @@ CPU_FEATURES = {
         "sha", "sha512",
     },
     "aarch64": {"aes", "dit", "neon", "pmull", "sha2", "sha3", "wide_mul"},
-    # rind-cpuid reads no armv7 features, so an armv7 entry names none.
-    "armv7": set(),
+    "armv7": {"neon", "aes", "pmull", "sha1", "sha2", "crc32"},
 }
 
 # The weekly bench's columns, by target, portability, and denied tier, as
