@@ -44,8 +44,10 @@ pub(crate) fn decode(pem: &str) -> Result<Vec<u8>, Error> {
         )));
     }
 
-    let data = core::str::from_utf8(data)
-        .map_err(|e| Error::PemError(format!("invalid utf-8 value: {e}")))?;
+    // `data` lies between ASCII delimiters, so it is a slice of `pem` at
+    // character boundaries; taking it as one checks only its first byte.
+    let at = data.as_ptr().addr() - pem.as_ptr().addr();
+    let data = pem.get(at..at + data.len()).ok_or_else(malformed)?;
     let der = Base64::decode_vec(&strip_whitespace(data))
         .map_err(|e| Error::PemError(format!("invalid data: {e}")))?;
 

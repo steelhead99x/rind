@@ -43,7 +43,8 @@ renames [rind-aws-lc-rs](#rind-aws-lc-rs) to `aws-lc-rs` the same way.
 | `Key::new(HMAC_SHA256, key)` | `Key::new(&HMAC_SHA256, key)` |
 | `Key::generate(alg, rng)` | `rand::fill` a `tag_len()`-byte key, then `Key::new` |
 | `Key::algorithm()` | the same, as `&'static` |
-| `Context::{with_key, update, sign}`, `sign`, `Tag` | the same |
+| `Context::{with_key, update}`, `sign`, `Tag` | the same |
+| `Context::sign(self)` | `Context::sign(&mut self)`, which leaves the context keyed to sign another message; bind the context `mut` |
 | `verify(key, data, tag)` | the same, failing with `Error::BadSignature` |
 | `HMAC_SHA256`, `HMAC_SHA384`, `HMAC_SHA512` | the same |
 | `HMAC_SHA1_FOR_LEGACY_USE_ONLY` | `legacy::HMAC_SHA1` |
@@ -185,6 +186,8 @@ A key's type names its algorithm, so a key of one cannot reach a call of
 another, and a program links only the algorithms it names. A protocol that
 picks the algorithm at run time, as TLS and JWS do, holds an enum of the
 modules' public keys, as [rind-rustls](rind-rustls/src/verify.rs) does.
+A PKCS#8 private key of unknown type loads in one call, `rind::KeyPair::from_pkcs8`,
+an enum over the modules' key pairs.
 
 | aws-lc-rs | rind |
 |---|---|
@@ -199,6 +202,7 @@ modules' public keys, as [rind-rustls](rind-rustls/src/verify.rs) does.
 | `KeyPair` trait, `KeyPair::public_key()`, ring's `RsaKeyPair::public()` | inherent `public_key()`, a borrowed `PublicKey` of the same module |
 | `Ed25519PublicKey`, `EcdsaPublicKey`, `RsaSubjectPublicKey` | `ed25519::PublicKey`, `ecdsa::PublicKey`, `rsa::PublicKey` |
 | `generate_pkcs8(rng)`, `generate_pkcs8(alg, rng)`, `generate_pkcs8v1` | `generate(..)?.to_pkcs8()` |
+| Each key type's `from_pkcs8` in turn, as rustls's `any_supported_type` does | `rind::KeyPair::from_pkcs8(der)?`, which reads the algorithm identifier once and refuses a key that cannot sign, naming it; an ECDSA key signs with its curve's hash and ASN.1 signatures |
 | `to_pkcs8()`, `to_pkcs8v1()`, `public_key().as_der()`, each an allocated `Document` | `to_pkcs8()`, `to_pkcs8v1()` (Ed25519), `public_key().to_spki()`, each of fixed capacity; `Pkcs8` is wiped on drop |
 | `Signature`, one type for every algorithm | each module's `Signature`, which holds only its algorithm's length |
 

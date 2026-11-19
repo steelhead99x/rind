@@ -74,9 +74,9 @@ exclude_re = [
   'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: replace \| with \^$',
   # Pinned to its line: a `const` has no name to match, and only `AES`'s
   # `1 << 0` survives.
-  'rind/src/low/x86_64/cpu\.rs:409:\d+: replace << with >>$',
+  'rind/src/low/x86_64/cpu\.rs:444:\d+: replace << with >>$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^$',
-  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAesHardware::check|HaveAvx::check|HaveAvx512ForVgMlKem::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveSha1::check|HaveSha256::check|HaveSha512::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
+  'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace \| with \^ in (HaveAdxForVgP256::check|HaveAesHardware::check|HaveAvx::check|HaveAvx512ForVgMlKem::check|HaveAvxMovbeForAesGcm::check|HaveBmi2Adx::check|HaveIfmaForCurve25519::check|HaveIfmaForVgP256::check|HaveSha1::check|HaveSha256::check|HaveSha512::check|HaveSse41::check|HaveVaesAvx2ForAesGcm::check|detect|detect_once)$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace \| with \^ in (Fe4::diff_sum|Fe4::split)$',
   'rind/src/low/x86_64/ghash\.rs:\d+:\d+: replace \| with \^ in Ghash<\x27a>::add_lengths$',
@@ -124,6 +124,10 @@ exclude_re = [
   'rind/src/low/generic/edwards25519_msm\.rs:\d+:(18|21): replace < with <= in non_adjacent_form$',
   'rind/src/low/generic/edwards25519_msm\.rs:\d+:(16|20): replace (> with >=|\+ with \*) in non_adjacent_form$',
   'rind/src/mid/half_size\.rs:\d+:18: replace < with <= in split$',
+  # ChaCha20's chunk length: with a whole chunk left, both branches give it.
+  # The loop guard's `<`, at column 16, is caught.
+  'rind/src/low/generic/chacha20\.rs:\d+:40: replace < with <= in cipher$',
+  'rind/src/low/x86_64/chacha20\.rs:\d+:40: replace < with <= in cipher_avx2$',
   'rind/src/high/asn1\.rs:\d+:\d+: replace < with <= in ObjectId::from_path$',
   'rind/src/high/ecdsa\.rs:\d+:\d+: replace > with >= in hash_to_scalar$',
   'rind/src/high/rsa\.rs:\d+:\d+: replace > with >= in public_exponent$',
@@ -149,7 +153,6 @@ exclude_re = [
   'rind/src/low/posint\.rs:\d+:\d+: replace > with >= in PosInt<N>::reduce_even$',
   'rind/src/low/posint\.rs:\d+:\d+: replace \* with / in PosInt<N>::reduce_even$',
   'rind/src/low/x86_64/aes\.rs:\d+:19: replace - with / in invert_round_keys$',
-  'rind/src/low/x86_64/chacha20\.rs:\d+:\d+: replace > with >= in core_2x$',
   'rind/src/low/x86_64/edwards25519_msm_avx2\.rs:\d+:\d+: replace > with >= in msm$',
   'rind/src/low/x86_64/ghash\.rs:\d+:41: replace / with % in store_partial$',
   'rind/src/low/x86_64/mldsa\.rs:\d+:\d+: replace < with <= in rej_uniform_table$',
@@ -222,7 +225,7 @@ exclude_re = [
   'rind/src/low/x86_64/bignum_point_select\.rs:\d+:14: replace > with >= in _select_avx2$',
   'rind/src/low/x86_64/bignum_point_select\.rs:\d+:18: replace \* with / in _select_avx2$',
   'rind/src/low/x86_64/bignum_point_select\.rs:\d+:18: replace \* with \+ in _select_avx2$',
-  'rind/src/low/x86_64/chacha20\.rs:\d+:\d+: delete match arm \(None, Some\(_\), len @SSSE3_4X_MIN_LEN\.\.\) in ChaCha20::cipher$',
+  'rind/src/low/x86_64/chacha20\.rs:\d+:\d+: delete match arm \(None, Some\(t\), SSSE3_4X_MIN_LEN\.\.\) in ChaCha20::cipher$',
   'rind/src/low/x86_64/chacha20\.rs:\d+:\d+: delete match arm \(Some\(_\), _, 65\.\.\) in ChaCha20::cipher$',
   'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: replace << with >>$',
   'rind/src/low/x86_64/chacha20poly1305\.rs:\d+:\d+: replace \| with &$',
@@ -247,6 +250,9 @@ exclude_re = [
   'rind/src/low/x86_64/rsaz\.rs:\d+:61: replace \+ with \* in mod_exp$',
   'rind/src/low/x86_64/sha1_mux\.rs:\d+:\d+: delete match arm Path::Shaext\(token\) in sha1_compress_padded$',
   'rind/src/low/x86_64/sha256_mux\.rs:\d+:\d+: delete match arm Path::Shaext\(token\) in sha256_finish$',
+  # The scalar arm and the four-way kernels give the same states in the lanes
+  # in use, and no caller reads the rest.
+  'rind/src/low/aarch64/sha3_keccak_nof4_f1600\.rs:\d+:\d+: replace (match guard N == 4 with (true|false)|== with !=) in sha3_keccak_nof4_f1600$',
   'rind/src/low/x86_64/sha3_keccak_nof4_f1600\.rs:\d+:\d+: replace > with < in sha3_keccak_nof4_f1600$',
   'rind/src/low/x86_64/sha3_keccak_nof4_f1600\.rs:\d+:\d+: replace > with == in sha3_keccak_nof4_f1600$',
   'rind/src/low/x86_64/sha3_keccak_nof4_f1600\.rs:\d+:\d+: replace > with >= in sha3_keccak_nof4_f1600$',
@@ -265,7 +271,7 @@ exclude_re = [
   # can know what it should find, since nothing outside `cpuid` reports
   # `MCDT_NO`. x86-cpu.yml's SDE rows check `needed` on every model, and
   # `reads_the_vendor` checks `is_intel` on any host.
-  'rind/src/low/mcdt\.rs:\d+:\d+: (replace (needed|detect_once|reports_mcdt_no|denied) -> bool with (true|false)|.* in (needed|detect_once|reports_mcdt_no|denied))$',
+  'rind/src/low/mcdt\.rs:\d+:\d+: (replace (needed|detect_once|reports_mcdt_no) -> bool with (true|false)|.* in (needed|detect_once|reports_mcdt_no))$',
   # DIT, which rind sets only on Apple's cores, where no campaign runs:
   # elsewhere `enter_cpu_state` changes nothing for `Dit`, `Entry`, and
   # `leave_cpu_state` to restore, and `dit` compiles only for Apple.
@@ -278,10 +284,6 @@ exclude_re = [
   # which tests never are, or only off Linux.
   'rind/src/low/aarch64/cpu\.rs:\d+:\d+: replace && with \|\| in detect$',
   'rind/src/low/aarch64/cpu\.rs:\d+:24: replace << with >>$',
-  # Pinned to their line: the debug build's `test_toggle`, under the same
-  # name, is caught.
-  'rind/src/low/aarch64/cpu\.rs:292:\d+: replace test_toggle -> bool with false$',
-  'rind/src/low/aarch64/cpu\.rs:292:\d+: replace test_toggle -> bool with true$',
   # The portable backend has no CPU state to save, so `leave_cpu_state`
   # ignores it.
   'rind/src/low/portable/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
@@ -289,15 +291,15 @@ exclude_re = [
   'rind/src/low/x86_64/cpu\.rs:\d+:45: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:52: replace \| with &$',
   # Pinned to its line: `AVX2_KERNELS`'s `|` at the same column is caught.
-  'rind/src/low/x86_64/cpu\.rs:439:31: replace \| with &$',
+  'rind/src/low/x86_64/cpu\.rs:474:31: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:72: replace \| with &$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAvxMovbeForAesGcm::check$',
   'rind/src/low/x86_64/cpu\.rs:\d+:17: replace \| with & in HaveAesHardware::check$',
   'rind/src/low/x86_64/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
-  # Pinned to their line: the debug build's `test_toggle`, under the same
-  # name, is caught.
-  'rind/src/low/x86_64/cpu\.rs:525:\d+: replace test_toggle -> bool with false$',
-  'rind/src/low/x86_64/cpu\.rs:525:\d+: replace test_toggle -> bool with true$',
+  # Pinned to its line: the `cpu_denied` of a release build or one without
+  # an OS, which tests never are. The debug build's, under the same name, is
+  # caught.
+  'rind/src/low/mod\.rs:162:\d+: replace cpu_denied -> bool with true$',
   # The FIPS module's `SystemRandom`, compiled only under `--cfg rind_fips`,
   # which no mutation run sets; `fips_rng`'s tests cover what it calls.
   # Pinned to its line: the other `fill`, under the same name, is caught.
@@ -327,9 +329,9 @@ exclude_re = [
   'rind/src/low/x86_64/vpaes_x86_64\.rs:\d+:\d+: replace <impl Drop for VpaesDecKey>::drop with \(\)$',
   'rind/src/low/x86_64/vpaes_x86_64\.rs:\d+:\d+: replace <impl Drop for VpaesKey>::drop with \(\)$',
   'rind/src/mid/chacha20poly1305\.rs:\d+:\d+: replace <impl Drop for ChaCha20Poly1305>::drop with \(\)$',
-  # Unreachable from a test: a debug-only guard no public function trips, a
-  # debugging helper, an impl nothing calls, a limit past 2^48 calls, a fault
-  # only hardware injects, a check of what another check also refuses, or a
+  # Unreachable from a test: a debug-only guard no public function trips, an
+  # impl nothing calls, a limit past 2^48 calls, a fault only hardware
+  # injects, a check of what another check also refuses, or a
   # case random keys reach with probability below 2^-64.
   'rind/src/fips_rng\.rs:\d+:\d+: replace cast -> bool with true$',
   'rind/src/high/hmac_drbg\.rs:\d+:\d+: replace \+= with \*= in HmacDrbg<H>::generate$',
@@ -342,7 +344,6 @@ exclude_re = [
   'rind/src/low/entry\.rs:\d+:\d+: replace Entry::assert_held with \(\)$',
   # Pinned to its line: the other branch's `*`, at the same column, is caught.
   'rind/src/low/generic/blockwise\.rs:195:24: replace \* with / in pad$',
-  'rind/src/low/posint\.rs:\d+:\d+: replace PosInt<N>::debug with \(\)$',
   'rind/src/mid/rsa_priv/exponents\.rs:\d+:\d+: replace >= with < in Exponents::derive$',
   'rind/src/mid/rsa_priv/exponents\.rs:\d+:36: replace \* with \+ in Exponents::derive$',
   'rind/src/mid/rsa_priv/generate\.rs:\d+:\d+: delete ! in MillerRabinParams<\x27a>::check_base$',
@@ -353,91 +354,35 @@ exclude_re = [
   'rind/src/mid/rsa_priv/generate\.rs:\d+:\d+: replace \* with \+ in MillerRabinParams<\x27a>::random_base$',
   'rind/src/mid/rsa_priv/generate\.rs:\d+:58: replace \+ with - in MillerRabinParams<\x27a>::random_base$',
   'rind/src/mid/rsa_priv/generate\.rs:\d+:58: replace \+ with \* in MillerRabinParams<\x27a>::random_base$',
-  # Untested adapter code: quest/m2/confidence/mutants-adapters.md.
-  'rind-dimpl/src/digest\.rs:\d+:\d+: replace <impl SecureRandom for Random>::fill -> Result<\(\), CryptoError> with Ok\(\(\)\)$',
+  # The adapters' `Debug` and `Display` impls: no caller relies on their
+  # text, so no test pins it.
   'rind-dimpl/src/digest\.rs:\d+:\d+: replace <impl fmt::Debug for Running>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   'rind-dimpl/src/kx\.rs:\d+:\d+: replace <impl fmt::Debug for Exchange>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-dimpl/src/sign\.rs:\d+:\d+: delete match arm \(NamedGroup::Secp384r1, HashAlgorithm::SHA256\) in <impl SignatureVerifier for Verifier>::verify_signature$',
   'rind-dimpl/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for Key>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-dimpl/src/suite\.rs:\d+:\d+: replace <impl SupportedDtls12CipherSuite for Dtls12>::hash_algorithm -> HashAlgorithm with Default::default\(\)$',
-  'rind-dimpl/src/suite\.rs:\d+:\d+: replace <impl SupportedDtls13CipherSuite for Dtls13>::hash_algorithm -> HashAlgorithm with Default::default\(\)$',
   'rind-dimpl/src/suite\.rs:\d+:\d+: replace <impl fmt::Debug for Aead>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/aead\.rs:\d+:\d+: replace <impl AsRef<\[u8; NONCE_LEN\]> for Nonce>::as_ref -> &\[u8; NONCE_LEN\] with Box::leak\(Box::new\(\[0; NONCE_LEN\]\)\)$',
-  'rind-ring/src/aead\.rs:\d+:\d+: replace <impl AsRef<\[u8; NONCE_LEN\]> for Nonce>::as_ref -> &\[u8; NONCE_LEN\] with Box::leak\(Box::new\(\[1; NONCE_LEN\]\)\)$',
-  'rind-ring/src/aead\.rs:\d+:\d+: replace <impl PartialEq for Algorithm>::eq -> bool with false$',
-  'rind-ring/src/aead\.rs:\d+:\d+: replace <impl PartialEq for Algorithm>::eq -> bool with true$',
-  'rind-ring/src/aead\.rs:\d+:\d+: replace == with != in <impl PartialEq for Algorithm>::eq$',
-  'rind-ring/src/aead\.rs:\d+:\d+: replace Algorithm::tag_len -> usize with 0$',
-  'rind-ring/src/aead\.rs:\d+:\d+: replace Algorithm::tag_len -> usize with 1$',
-  'rind-ring/src/aead/quic\.rs:\d+:\d+: replace <impl PartialEq for Algorithm>::eq -> bool with false$',
-  'rind-ring/src/aead/quic\.rs:\d+:\d+: replace <impl PartialEq for Algorithm>::eq -> bool with true$',
   'rind-ring/src/aead/quic\.rs:\d+:\d+: replace <impl fmt::Debug for Algorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/aead/quic\.rs:\d+:\d+: replace == with != in <impl PartialEq for Algorithm>::eq$',
-  'rind-ring/src/agreement\.rs:\d+:\d+: replace <impl AsRef<\[u8\]> for PublicKey>::as_ref -> &\[u8\] with Vec::leak\(Vec::new\(\)\)$',
-  'rind-ring/src/agreement\.rs:\d+:\d+: replace <impl AsRef<\[u8\]> for PublicKey>::as_ref -> &\[u8\] with Vec::leak\(vec!\[0\]\)$',
-  'rind-ring/src/agreement\.rs:\d+:\d+: replace <impl AsRef<\[u8\]> for PublicKey>::as_ref -> &\[u8\] with Vec::leak\(vec!\[1\]\)$',
-  'rind-ring/src/agreement\.rs:\d+:\d+: replace <impl PartialEq for Algorithm>::eq -> bool with true$',
   'rind-ring/src/agreement\.rs:\d+:\d+: replace <impl fmt::Debug for PublicKey>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/der\.rs:\d+:\d+: delete match arm \[2\.\.= 0x7f\] in ed25519_pkcs8$',
-  'rind-ring/src/der\.rs:\d+:\d+: delete match arm \[\] \|\[0x80\.\.= 0xff, \.\.\] in positive_integer$',
-  'rind-ring/src/der\.rs:\d+:\d+: replace match guard input\.at_end\(\) with false in ed25519_pkcs8$',
-  'rind-ring/src/digest\.rs:\d+:\d+: replace Algorithm::block_len -> usize with 0$',
-  'rind-ring/src/digest\.rs:\d+:\d+: replace Algorithm::block_len -> usize with 1$',
-  'rind-ring/src/digest\.rs:\d+:\d+: replace Algorithm::chaining_len -> usize with 0$',
-  'rind-ring/src/digest\.rs:\d+:\d+: replace Algorithm::chaining_len -> usize with 1$',
-  'rind-ring/src/error\.rs:\d+:\d+: delete match arm rind::Error::KeyRejected\(reason\) in KeyRejected::rind$',
-  'rind-ring/src/error\.rs:\d+:\d+: delete match arm rind::Error::RngFailed in KeyRejected::rind$',
-  'rind-ring/src/error\.rs:\d+:\d+: delete match arm rind::Error::WrongLength in KeyRejected::rind$',
   'rind-ring/src/error\.rs:\d+:\d+: replace <impl fmt::Display for KeyRejected>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   'rind-ring/src/error\.rs:\d+:\d+: replace <impl fmt::Display for Unspecified>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/hmac\.rs:\d+:\d+: replace <impl PartialEq for Algorithm>::eq -> bool with false$',
-  'rind-ring/src/hmac\.rs:\d+:\d+: replace <impl PartialEq for Algorithm>::eq -> bool with true$',
   'rind-ring/src/hmac\.rs:\d+:\d+: replace <impl fmt::Debug for Algorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/hmac\.rs:\d+:\d+: replace == with != in <impl PartialEq for Algorithm>::eq$',
-  'rind-ring/src/pbkdf2\.rs:\d+:\d+: replace <impl PartialEq for Algorithm>::eq -> bool with false$',
-  'rind-ring/src/pbkdf2\.rs:\d+:\d+: replace <impl PartialEq for Algorithm>::eq -> bool with true$',
-  'rind-ring/src/pbkdf2\.rs:\d+:\d+: replace == with != in <impl PartialEq for Algorithm>::eq$',
-  'rind-ring/src/rand\.rs:\d+:\d+: replace sealed::<impl RandomlyConstructable for \[u8; N\]>::as_mut_bytes -> &mut\[u8\] with Vec::leak\(Vec::new\(\)\)$',
-  'rind-ring/src/rand\.rs:\d+:\d+: replace sealed::<impl RandomlyConstructable for \[u8; N\]>::as_mut_bytes -> &mut\[u8\] with Vec::leak\(vec!\[0\]\)$',
-  'rind-ring/src/rand\.rs:\d+:\d+: replace sealed::<impl RandomlyConstructable for \[u8; N\]>::as_mut_bytes -> &mut\[u8\] with Vec::leak\(vec!\[1\]\)$',
-  'rind-ring/src/rsa\.rs:\d+:\d+: replace - with \+ in PublicKey::modulus_bits$',
   'rind-ring/src/rsa\.rs:\d+:\d+: replace <impl fmt::Debug for RsaParameters>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/signature\.rs:\d+:\d+: replace <impl PartialEq for EcdsaSigningAlgorithm>::eq -> bool with false$',
-  'rind-ring/src/signature\.rs:\d+:\d+: replace <impl PartialEq for EcdsaSigningAlgorithm>::eq -> bool with true$',
   'rind-ring/src/signature\.rs:\d+:\d+: replace <impl fmt::Debug for EcdsaSigningAlgorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
   'rind-ring/src/signature\.rs:\d+:\d+: replace <impl fmt::Debug for EcdsaVerificationAlgorithm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-ring/src/signature\.rs:\d+:\d+: replace == with != in <impl PartialEq for EcdsaSigningAlgorithm>::eq$',
-  'rind-ring/src/signature\.rs:\d+:(26|35): replace \+ with \*$',
-  'rind-rustls/src/aead\.rs:\d+:\d+: replace < with <= in <impl MessageDecrypter for GcmTls12MessageDecrypter>::decrypt$',
-  'rind-rustls/src/aead\.rs:\d+:\d+: replace < with == in <impl MessageDecrypter for GcmTls12MessageDecrypter>::decrypt$',
-  'rind-rustls/src/aead\.rs:\d+:\d+: replace <impl MessageEncrypter for ChaChaTls12Cipher>::encrypted_payload_len -> usize with 0$',
-  'rind-rustls/src/aead\.rs:\d+:\d+: replace <impl MessageEncrypter for ChaChaTls12Cipher>::encrypted_payload_len -> usize with 1$',
-  'rind-rustls/src/aead\.rs:\d+:\d+: replace <impl MessageEncrypter for GcmTls12MessageEncrypter>::encrypted_payload_len -> usize with 0$',
-  'rind-rustls/src/aead\.rs:\d+:\d+: replace <impl MessageEncrypter for GcmTls12MessageEncrypter>::encrypted_payload_len -> usize with 1$',
-  'rind-rustls/src/aead\.rs:\d+:\d+: replace \+ with \* in (<impl MessageEncrypter for ChaChaTls12Cipher>::encrypted_payload_len|<impl MessageEncrypter for GcmTls12MessageEncrypter>::encrypted_payload_len)$',
-  # Pinned to their lines: a `static` has no name to match, and the TLS 1.2
-  # suites' `1 << 24`, at the same column, are caught.
-  'rind-rustls/src/cipher_suite\.rs:19:\d+: replace << with >>$',
-  'rind-rustls/src/cipher_suite\.rs:32:\d+: replace << with >>$',
-  'rind-rustls/src/kx_group/hybrid\.rs:\d+:\d+: replace <impl SupportedKxGroup for Hybrid>::usable_for_version -> bool with true$',
-  'rind-rustls/src/quic\.rs:\d+:\d+: replace << with >>$',
-  'rind-rustls/src/quic\.rs:\d+:\d+: replace <impl quic::PacketKey for PacketKey>::confidentiality_limit -> u64 with 0$',
-  'rind-rustls/src/quic\.rs:\d+:\d+: replace <impl quic::PacketKey for PacketKey>::confidentiality_limit -> u64 with 1$',
-  'rind-rustls/src/quic\.rs:\d+:\d+: replace <impl quic::PacketKey for PacketKey>::integrity_limit -> u64 with 0$',
-  'rind-rustls/src/quic\.rs:\d+:\d+: replace <impl quic::PacketKey for PacketKey>::integrity_limit -> u64 with 1$',
-  'rind-rustls/src/quic\.rs:\d+:\d+: replace <impl quic::PacketKey for PacketKey>::tag_len -> usize with 0$',
-  'rind-rustls/src/quic\.rs:\d+:\d+: replace <impl quic::PacketKey for PacketKey>::tag_len -> usize with 1$',
-  'rind-rustls/src/sign\.rs:\d+:\d+: delete match arm PrivateKeyDer::Pkcs1\(_\) in unsupported$',
-  'rind-rustls/src/sign\.rs:\d+:\d+: delete match arm PrivateKeyDer::Pkcs8\(_\) in unsupported$',
-  'rind-rustls/src/sign\.rs:\d+:\d+: delete match arm PrivateKeyDer::Sec1\(_\) in unsupported$',
   'rind-rustls/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for Ecdsa>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
   'rind-rustls/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for RsaSigningKey>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
   'rind-rustls/src/sign\.rs:\d+:\d+: replace <impl fmt::Debug for RsaSigner>::fmt -> Result<\(\), fmt::Error> with Ok\(\(\)\)$',
   'rind-rustls/src/ticketer\.rs:\d+:\d+: replace <impl fmt::Debug for XChaCha20Ticketer>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
-  'rind-rustls/src/ticketer\.rs:\d+:\d+: replace > with < in <impl ProducesTickets for XChaCha20Ticketer>::decrypt$',
-  'rind-rustls/src/ticketer\.rs:\d+:\d+: replace \* with /$',
-  'rind-rustls/src/ticketer\.rs:\d+:\d+: replace \* with \+$',
+  'rind-str0m/src/dtls\.rs:\d+:\d+: replace <impl std::fmt::Debug for Dtls>::fmt -> std::fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-str0m/src/srtp\.rs:\d+:\d+: replace <impl fmt::Debug for Cm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  'rind-str0m/src/srtp\.rs:\d+:\d+: replace <impl fmt::Debug for Gcm>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+  # One AAD, concatenated, is that AAD. Deleting the one-element arm still
+  # feeds `open` the same bytes.
+  'rind-str0m/src/srtp\.rs:\d+:\d+: delete match arm \[aad\] in Gcm::open$',
   # Discarding a VG routine's result runs rind's fallback, which computes the
   # same result, as `fallback_matches_vg` checks; only the time differs.
   'rind/src/mid/mlkem\.rs:\d+:\d+: replace vg_ran -> Option<T> with None$',
+  # Refusing VG's P-256 runs rind's own, which computes the same result;
+  # only the time differs.
+  'rind/src/low/(x86_64|aarch64)/p256_vg\.rs:\d+:\d+: replace P256::(check|check_public_key) -> Option<Self> with None$',
+  'rind/src/low/x86_64/p256_vg\.rs:\d+:\d+: replace \|\| with && in P256::check_public_key$',
 ]

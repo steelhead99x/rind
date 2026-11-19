@@ -111,6 +111,7 @@ impl<T: Copy + Default + fmt::Debug> fmt::Debug for ReuseCache<T> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

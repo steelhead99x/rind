@@ -66,7 +66,7 @@ struct KxGroup {
 impl SupportedKxGroup for KxGroup {
     fn start(&self) -> Result<Box<dyn crypto::ActiveKeyExchange>, rustls::Error> {
         let priv_key = agreement::PrivateKey::generate(self.algorithm)
-            .map_err(|_| rustls::Error::from(crypto::GetRandomFailed))?;
+            .or(Err(rustls::Error::from(crypto::GetRandomFailed)))?;
         Ok(Box::new(Active {
             group: self.name,
             priv_key,
@@ -146,7 +146,10 @@ mod tests {
         for (group, classical_len) in [(X25519MLKEM768, 32), (SECP256R1MLKEM768, 65)] {
             let client_len = mlkem::MlKem768::ENCAPS_LEN + classical_len;
             let server_len = mlkem::MlKem768::CIPHERTEXT_LEN + classical_len;
-            assert_eq!(group.start().unwrap().pub_key().len(), client_len);
+            assert_eq!(group.ffdhe_group(), None);
+            let active = group.start().unwrap();
+            assert_eq!(active.pub_key().len(), client_len);
+            assert_eq!(active.ffdhe_group(), None);
 
             for len in [0, client_len - 1, client_len + 1] {
                 assert!(group.start_and_complete(&vec![0; len]).is_err());

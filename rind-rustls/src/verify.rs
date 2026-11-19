@@ -577,6 +577,27 @@ mod tests {
         }
     }
 
+    // aws-lc-rs does not build for wasm.
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn ids_match_aws_lc() {
+        let aws = rustls::crypto::aws_lc_rs::default_provider();
+        let ours = crate::SUPPORTED_SIG_ALGS.all;
+        // Equal lengths mean a missing rind algorithm cannot hide behind
+        // `any`.
+        let theirs = aws.signature_verification_algorithms.all;
+        assert_eq!(ours.len(), theirs.len());
+        for alg in ours {
+            assert!(
+                theirs.iter().any(|other| {
+                    other.public_key_alg_id() == alg.public_key_alg_id()
+                        && other.signature_alg_id() == alg.signature_alg_id()
+                }),
+                "{alg:?}"
+            );
+        }
+    }
+
     // Like rustls's own providers: `all` holds no algorithm twice.
     #[test]
     fn test_no_duplicate_algorithms() {

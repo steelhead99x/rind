@@ -185,7 +185,7 @@ impl Group for Ristretto255 {
         let element = ristretto255::Element::from_uniform_bytes(&uniform);
         // Only the identity encodes to zeros.
         match ct::into_public(ct_equal(&element.to_bytes(), &[0; 32])) {
-            true => Err(identity()),
+            true => Err(IDENTITY_ERROR.into()),
             false => Ok(element),
         }
     }
@@ -536,9 +536,7 @@ fn len_prefix(x: &[u8]) -> [u8; 2] {
 
 /// The error for the identity where RFC 9497 forbids it, which no input or
 /// batch is known to reach: as the NIST curves' `hash_to_curve` refuses it.
-fn identity() -> Error {
-    KeyFormatError::SmallOrder.into()
-}
+const IDENTITY_ERROR: KeyFormatError = KeyFormatError::SmallOrder;
 
 /// A domain separation tag: `prefix || contextString`.
 struct Dst(Bytes<48>);

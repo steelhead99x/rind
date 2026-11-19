@@ -12,7 +12,8 @@ set -euo pipefail
 AWS_LC=5ed12cce0fd4453f2f63300d44325ed14f845d6f
 BORINGSSL=8f2554dc344d403fd6d628773d39637c323eb801
 # RFC 9180's repository. hpkewg/hpke's revision of it repeats these vectors
-# unchanged.
+# unchanged; its edge-case appendix, Markdown only, is copied by hand into
+# rind/src/high/hpke.rs's tests.
 HPKE=b1f7cb0cdeab6906c61b3d6574e8bdfdbe1cd3fb
 # RFC 9380's repository, whose `poc/vectors` are its Appendix J and K.
 HASH_TO_CURVE=664b13592116cecc9e52fb192dcde0ade36f904e
