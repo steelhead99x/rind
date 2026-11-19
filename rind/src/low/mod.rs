@@ -311,6 +311,15 @@ pub(crate) use portable::{
 mod aarch64;
 #[cfg(rind_backend = "arm")]
 mod arm;
+// armv7's ChaCha20 and Poly1305 are portable Rust, so every host's tests run
+// them.
+#[cfg(all(test, not(rind_backend = "arm")))]
+mod arm {
+    #[path = "chacha20.rs"]
+    pub(super) mod chacha20;
+    #[path = "poly1305.rs"]
+    pub(super) mod poly1305;
+}
 #[cfg(rind_backend = "x86_64")]
 mod x86_64;
 
