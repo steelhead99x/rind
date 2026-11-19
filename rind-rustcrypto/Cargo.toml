@@ -21,7 +21,7 @@ default = []
 # Each feature turns on the traits of one released version of one trait crate.
 digest-0_11 = ["dep:digest"]
 aead-0_6 = ["dep:aead"]
-signature-3 = ["dep:signature", "dep:ed25519", "dep:ecdsa", "dep:p256", "dep:p384", "dep:p521"]
+signature-3 = ["dep:signature", "dep:ed25519", "dep:ecdsa", "dep:p256", "dep:p384", "dep:p521", "dep:ml-dsa"]
 kem-0_3 = ["dep:kem"]
 
 [dependencies]
@@ -34,6 +34,7 @@ ecdsa = { version = "0.17", default-features = false, features = ["der"], option
 p256 = { version = "0.14", default-features = false, features = ["ecdsa-core"], optional = true }
 p384 = { version = "0.14", default-features = false, features = ["ecdsa-core"], optional = true }
 p521 = { version = "0.14", default-features = false, features = ["ecdsa-core"], optional = true }
+ml-dsa = { version = "0.1.2", default-features = false, optional = true }
 kem = { version = "0.3.0", default-features = false, optional = true }
 
 [dev-dependencies]

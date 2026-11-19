@@ -23,3 +23,5 @@ mod signature_impl;
 pub use signature_impl::ecdsa::{p256, p384, p521};
 #[cfg(feature = "signature-3")]
 pub use signature_impl::ed25519;
+#[cfg(feature = "signature-3")]
+pub use signature_impl::ml_dsa;

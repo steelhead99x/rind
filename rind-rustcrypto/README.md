@@ -8,7 +8,7 @@ Each module mirrors the RustCrypto crate it stands in for, and each trait crate 
 |---|---|---|
 | `digest-0_11` | `digest` 0.11 | `sha2`, `sha3`, `hmac` |
 | `aead-0_6` | `aead` 0.6 | `aes_gcm`, `chacha20poly1305` |
-| `signature-3` | `signature` 3 | `ed25519`, `p256::ecdsa`, `p384::ecdsa`, `p521::ecdsa` |
+| `signature-3` | `signature` 3 | `ed25519`, `p256::ecdsa`, `p384::ecdsa`, `p521::ecdsa`, `ml_dsa` |
 
 ```toml
 [dependencies]
@@ -31,3 +31,4 @@ assert_eq!(Sha256::digest(b"abc").len(), 32);
 - A refused open leaves a cleared buffer, where RustCrypto leaves it unspecified.
 - Ed25519: `Ed25519ph` and context signatures (`DigestSigner`), `Generate`, `TryKeyInit`, serde and the PKCS#8 conversions of `ed25519_dalek` (rind has its own PKCS#8 on its key types), and key export as raw bytes. `verify` is as strict as `ed25519_dalek`'s `verify_strict`: a small-order public key is refused where `ed25519_dalek`'s `verify` accepts it.
 - ECDSA: the generic `ecdsa::SigningKey<C>` (each curve has its own type under the module path its RustCrypto crate uses), RFC 6979 deterministic signing (rind signs with a random nonce, so a signature differs from RustCrypto's for the same key and message, and verifies under it), `Prehash`, `Digest`, `Randomized` and recoverable signing and verification, `SignatureWithOid`, `Generate`, key export (`to_bytes`), PKCS#8 and PEM, and serde. A signing key takes a scalar of exactly the field's length; RustCrypto's `from_slice` also left-pads a shorter one.
+- ML-DSA: the deterministic `Signer` (rind signs hedged, with the empty context), the expanded signing key format, `DigestSigner`, `RandomizedSigner`, signing with a context or from `mu`, `Generate`, `KeyInit` and `KeyExport`, and PKCS#8. A key is made from its 32-byte seed with `SigningKey::from_seed`.
