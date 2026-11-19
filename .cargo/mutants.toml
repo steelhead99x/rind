@@ -258,6 +258,12 @@ exclude_re = [
   'rind/src/low/x86_64/(aes|aes_gcm|aes_gcm_vaes|cpu|ghash)\.rs:\d+:\d+: (replace (HwKey::round_keys_512|RoundKeys512::split|_cipher_avx512|Counter512::\w+|VaesKernel::avx512|HaveAvx512(For\w+|Vl)::check|GhashTableAvx512::\w+|_mul16|_mul_tail)( -> .*)? with .*|.* in (_cipher_avx512|HaveAvx512(For\w+|Vl)::check|_mul_tail))$',
   'rind/src/low/x86_64/aes_gcm\.rs:\d+:45: replace \* with (\+|/)$',
   'rind/src/low/posint\.rs:\d+:\d+: (replace PosInt<N>::mod_exp_pair_rsaz -> .*|.* in PosInt<N>::mod_exp_pair_rsaz)$',
+  # SLH-DSA's eight-way SHAKE, which only AVX-512 CPUs other than Intel's
+  # run, so no campaign's runner does: the kernel's file is skipped, and
+  # these are its callers' guards and fallbacks, which give the digests of the
+  # four-way path. `pad_blocks` and `lanes` are tested instead.
+  'rind/src/low/generic/keccak4x\.rs:\d+:\d+: (replace sha3_keccak8x_available -> bool with (true|false)|replace sha3_keccak8x_hash_blocks -> Option<\[\[u8; 32\]; 8\]> with .*|.* in sha3_keccak8x_available)$',
+  'rind/src/mid/sha3\.rs:\d+:\d+: (replace shake256_x8 -> bool with false|.* in shake256_x8)$',
   # Compiled only for armv7, which no campaign runs: the portable AES-GCM's
   # crypto-extension half.
   'rind/src/mid/portable/aes_gcm\.rs:\d+:\d+: (replace (<impl Ghash for GhashTable>::ghash|<impl Parts for Hw>::\w+)( -> .*)? with .*|.* in <impl Parts for Hw>::\w+)$',

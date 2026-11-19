@@ -1134,6 +1134,17 @@ mod tests {
     use super::*;
     use crate::test::{Acvp, CTGRIND_DEBUG, acvp};
 
+    // SHA-256 sets always hash eight at once and SHAKE sets four, or eight
+    // where the CPU's Keccak-f takes eight states.
+    #[test]
+    fn lanes_follow_the_cpu() {
+        assert_eq!(lanes::<SlhDsaSha2_128f>(), 8);
+        assert_eq!(lanes::<SlhDsaSha2_256s>(), 8);
+        let shake = if low::sha3_keccak8x_available() { 8 } else { 4 };
+        assert_eq!(lanes::<SlhDsaShake128f>(), shake);
+        assert_eq!(lanes::<SlhDsaShake256s>(), shake);
+    }
+
     /// Runs `$f::<P>($args)` for the parameter set ACVP names `$set`.
     macro_rules! by_set {
         ($set:expr, $f:ident($($arg:expr),*)) => {

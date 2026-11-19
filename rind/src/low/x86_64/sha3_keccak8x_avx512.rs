@@ -31,7 +31,7 @@ pub(crate) fn sha3_keccak8x_hash_blocks(
     blocks: &[[u8; RATE]; 8],
     rc: &[u64; 24],
 ) -> [[u8; 32]; 8] {
-    // SAFETY: the token proves AVX-512 F, which this function requires.
+    // SAFETY: the token proves AVX-512 F and VL, and this function requires F.
     unsafe { hash_blocks(blocks, rc) }
 }
 
