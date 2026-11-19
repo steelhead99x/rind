@@ -182,7 +182,7 @@ module compat '^(COMPATIBILITY\.md$|admin/x86-cpus?(/|$))' \
 # BENCHMARKS.md and the README's comparison are generated from the results,
 # the verified-code table, and the gap decisions, which link the quests that
 # close them.
-module bench '^(BENCHMARKS\.md$|README\.md$|benchmarks/|admin/bench-report|quest/)' \
+module bench '^(BENCHMARKS\.md$|README\.md$|benchmarks/|admin/bench-(report|app)|quest/)' \
     tools='python3'
 # The landing page reads and links files across the repository, and its build
 # takes seconds, so it runs on every diff rather than keep a list.
@@ -604,6 +604,7 @@ step() {
         fix:compat) run python3 admin/x86-cpu markdown-table >COMPATIBILITY.md ;;
         check:bench)
             run python3 admin/bench-report-test
+            run python3 admin/bench-app-test
             run python3 admin/bench-report render --check
             ;;
         # Each fixture is its own workspace and resolves its own lockfile.

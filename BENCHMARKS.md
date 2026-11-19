@@ -1285,3 +1285,10 @@ file they skip, including one missing a field the report shows or with a time th
 not a finite number above zero.
 `collect` reaches only the maintainer's machines. A gap's `on` may name any host with a
 result, or any nightly tier.
+
+`admin/bench-app` is the short, scrubbed run for a contributor's machine. It times a few
+of the report's operations for rind, aws-lc-rs, and ring in at least 5 interleaved rounds
+on one pinned core, records the governor, temperature, and throttle state around each
+round, and marks the result `noisy`, which `render` skips, unless 5 rounds are clean and
+the aws-lc-rs control's spread over them is at most 1.02. It removes paths, user and host
+names, addresses, wifi names, and tokens before it writes `<host>.json`.

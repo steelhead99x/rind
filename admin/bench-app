@@ -1,0 +1,476 @@
+#!/usr/bin/env python3
+"""Times rind against aws-lc-rs and ring on this machine, in interleaved
+rounds, and writes a scrubbed host result that admin/bench-report imports.
+
+Usage:
+  nix develop --command admin/bench-app [--host NAME] [--rounds N] [--cpu N] [--out DIR]
+
+It builds rind-bench's benches for SUITE, then runs ROUNDS rounds. Each round
+times every library on every operation before the next round starts, on one
+core where the OS can pin one (the fastest, highest numbered by default), and
+reads the core's governor, the temperature, and the throttle state before and
+after. Other work on the machine is recorded, not refused. A round that
+throttled is not clean, and while the aws-lc-rs spread over the rest (each
+row's slowest round over its fastest) is above MAX_SPREAD, the round furthest
+from the aws-lc-rs medians is dropped. The run is `ok` when at least
+MIN_CLEAN rounds are left, and each time is then their median. Otherwise it
+is `noisy`, with the reason, and `render` skips it.
+
+The host name and machine tag follow `admin/bench-report run`. Before the
+result is written, paths, usernames, hostnames, IP and MAC addresses, emails,
+UUIDs, wifi names, and tokens are scrubbed from it, and the command fails if
+a value it was told to remove survives. `<out>/<host>.json` (default
+`.tmp/bench-app/`) is ready for `admin/bench-report render --from DIR`.
+"""
+
+import argparse
+import datetime
+import getpass
+import glob
+import importlib.machinery
+import importlib.util
+import json
+import os
+import platform
+import re
+import shutil
+import socket
+import statistics
+import subprocess
+import sys
+import tempfile
+
+sys.dont_write_bytecode = True
+HERE = os.path.dirname(os.path.abspath(__file__))
+_loader = importlib.machinery.SourceFileLoader("bench_report", os.path.join(HERE, "bench-report"))
+_spec = importlib.util.spec_from_loader("bench_report", _loader)
+br = importlib.util.module_from_spec(_spec)
+_loader.exec_module(br)
+
+# The report operations this command times, by rind-bench bench target: the
+# ones rind, aws-lc-rs, and ring all have rows for, plus ML-KEM, which ring
+# lacks. About 90 s a round at CRITERION_ARGS.
+SUITE = {
+    "aes_gcm": ["aes128-gcm/{lib}/1350B"],
+    "chacha20poly1305": ["chacha20poly1305/{lib}/1350B"],
+    "sha2": ["sha256/{lib}/1350B"],
+    "x25519": ["x25519-ecdh/{lib}"],
+    "ed25519": ["ed25519-sign/{lib}", "ed25519-verify/{lib}"],
+    "p256": ["p256-ecdh/{lib}", "p256-ecdsa-sign/{lib}", "p256-ecdsa-verify/{lib}"],
+    "mlkem": ["mlkem768-encaps/{lib}", "mlkem768-decaps/{lib}"],
+}
+LIBS = ("rind", "aws-lc-rs", "ring")
+CONTROL = "aws-lc-rs"
+CRITERION_ARGS = ["--noplot", "--warm-up-time", "1", "--measurement-time", "2"]
+ROUNDS = 7
+MIN_CLEAN = 5
+MAX_SPREAD = 1.02
+
+for _ops in SUITE.values():
+    for _op in _ops:
+        assert _op in br.OPERATIONS, _op
+
+
+def fail(message):
+    sys.exit(f"bench-app: {message}")
+
+
+def suite_regex():
+    """A criterion filter for SUITE's operations in LIBS, and nothing else."""
+    lib = "(" + "|".join(re.escape(lib) for lib in LIBS) + ")"
+    ops = "|".join(re.escape(op).replace(re.escape("{lib}"), lib) for ops in SUITE.values() for op in ops)
+    return f"^({ops})$"
+
+
+# --- machine state ----------------------------------------------------------
+
+
+def read(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def fastest_cpu():
+    """The core to pin to: the highest maximum clock, the highest numbered of
+    equals, since core 0 takes most interrupts. None where the OS cannot pin."""
+    if not hasattr(os, "sched_setaffinity"):
+        return None
+    allowed = sorted(os.sched_getaffinity(0))
+    freq = {c: int(read(f"/sys/devices/system/cpu/cpu{c}/cpufreq/cpuinfo_max_freq") or 0) for c in allowed}
+    return max(allowed, key=lambda c: (freq[c], c))
+
+
+def parse_vcgencmd(text):
+    """`vcgencmd get_throttled`'s bits as an int."""
+    m = re.fullmatch(r"throttled=(0x[0-9a-fA-F]+)", text.strip())
+    if not m:
+        fail(f"unexpected vcgencmd output: {text!r}")
+    return int(m.group(1), 16)
+
+
+# Under-voltage, frequency capped, throttled, soft temperature limit: now, and
+# since boot.
+VC_NOW = 0xF
+VC_SINCE_BOOT = 0xF0000
+
+
+def vc_throttled(before, after):
+    return bool((before | after) & VC_NOW) or bool(after & VC_SINCE_BOOT & ~before)
+
+
+def parse_pmset(text):
+    """Whether `pmset -g therm` reports a speed limit or a warning level."""
+    limit = re.search(r"CPU_Speed_Limit\s*=\s*(\d+)", text)
+    levels = re.findall(r"(?:Thermal|Performance) Warning Level\s*=\s*(\d+)", text)
+    return bool(limit and int(limit.group(1)) < 100) or any(int(x) for x in levels)
+
+
+class Probe:
+    """Reads the pinned core's governor, the temperature, and the throttle
+    state, from sources decided once at setup."""
+
+    def __init__(self, cpu):
+        self.cpu = cpu
+        self.governor_path = f"/sys/devices/system/cpu/cpu{cpu}/cpufreq/scaling_governor" if cpu is not None else None
+        if self.governor_path and read(self.governor_path) is None:
+            self.governor_path = None
+        self.zones = sorted(p for p in glob.glob("/sys/class/thermal/thermal_zone*/temp") if read(p))
+        self.throttle_counts = sorted(
+            glob.glob("/sys/devices/system/cpu/cpu*/thermal_throttle/core_throttle_count")
+            + glob.glob("/sys/devices/system/cpu/cpu*/thermal_throttle/package_throttle_count")
+        )
+        if shutil.which("vcgencmd") and br.try_output(["vcgencmd", "get_throttled"]):
+            self.throttle = "vcgencmd"
+        elif self.throttle_counts:
+            self.throttle = "thermal_throttle"
+        elif sys.platform == "darwin":
+            self.throttle = "pmset"
+        else:
+            self.throttle = None
+
+    def read(self):
+        state = {"governor": read(self.governor_path) if self.governor_path else None}
+        temps = [int(read(p)) / 1000 for p in self.zones if (read(p) or "").lstrip("-").isdigit()]
+        state["temp_c"] = round(max(temps), 1) if temps else None
+        if self.throttle == "vcgencmd":
+            state["throttle"] = parse_vcgencmd(br.output(["vcgencmd", "get_throttled"]))
+        elif self.throttle == "thermal_throttle":
+            state["throttle"] = sum(int(read(p) or 0) for p in self.throttle_counts)
+        elif self.throttle == "pmset":
+            state["throttle"] = parse_pmset(br.output(["pmset", "-g", "therm"]))
+        else:
+            state["throttle"] = None
+        return state
+
+    def throttled(self, before, after):
+        """Whether the core throttled between two reads, or None when unknown."""
+        if self.throttle == "vcgencmd":
+            return vc_throttled(before["throttle"], after["throttle"])
+        if self.throttle == "thermal_throttle":
+            return after["throttle"] > before["throttle"]
+        if self.throttle == "pmset":
+            return before["throttle"] or after["throttle"]
+        return None
+
+
+# --- scrubbing --------------------------------------------------------------
+
+REDACTED = "<redacted>"
+HEX4 = r"[0-9A-Fa-f]{1,4}"
+PATTERNS = [
+    # Home directories, before the usernames in them are matched.
+    (re.compile(r"(?:/home|/Users)/[^/\s\"']+|/root(?=/|\b)"), "~"),
+    (re.compile(r"[A-Za-z]:\\Users\\[^\\\s\"']+"), "~"),
+    (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), REDACTED),
+    (re.compile(r"(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}(?![0-9A-Fa-f:])"), REDACTED),
+    (re.compile(rf"(?<![\w:])(?:{HEX4}:){{7}}{HEX4}(?![\w:])"), REDACTED),
+    (re.compile(rf"(?<![\w:])(?:{HEX4}(?::{HEX4})*)?::(?:{HEX4}(?::{HEX4})*)?(?![\w:])"), REDACTED),
+    (re.compile(r"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])"), REDACTED),
+    (re.compile(r"\b[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}\b"), REDACTED),
+    (re.compile(r"\b[0-9A-F]{8}-[0-9A-F]{16}\b"), REDACTED),
+    (
+        re.compile(
+            r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}|glpat-[\w-]{20,}|xox[abprs]-[\w-]{10,}"
+            r"|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{20,}|eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,})"
+        ),
+        REDACTED,
+    ),
+]
+
+
+def literal(value):
+    """A pattern for `value` as a whole word, so a short username like `pi`
+    leaves `Raspberry Pi` and `spake2plus` alone."""
+    return re.compile(rf"(?<![A-Za-z0-9]){re.escape(value)}(?![A-Za-z0-9])")
+
+
+def scrub_text(text, secrets):
+    for pattern, replacement in PATTERNS:
+        text = pattern.sub(replacement, text)
+    for value in secrets:
+        text = literal(value).sub(REDACTED, text)
+    return text
+
+
+def scrub(value, secrets):
+    """`value` with every string in it, keys included, scrubbed."""
+    if isinstance(value, str):
+        return scrub_text(value, secrets)
+    if isinstance(value, list):
+        return [scrub(v, secrets) for v in value]
+    if isinstance(value, dict):
+        return {scrub_text(k, secrets): scrub(v, secrets) for k, v in value.items()}
+    return value
+
+
+def leaks(value, secrets):
+    """What scrubbing should have removed from `value` and did not."""
+    text = json.dumps(value, ensure_ascii=False)
+    found = [v for v in secrets if literal(v).search(text)]
+    found += [m.group(0) for pattern, _ in PATTERNS for m in pattern.finditer(text)]
+    return found
+
+
+def wifi_names():
+    """Wifi network names this machine knows, from whichever tools it has."""
+    names = []
+    if sys.platform == "darwin":
+        for line in (br.try_output(["networksetup", "-getairportnetwork", "en0"]) or "").splitlines():
+            if line.startswith("Current Wi-Fi Network:"):
+                names.append(line.split(":", 1)[1].strip())
+        for line in (br.try_output(["ipconfig", "getsummary", "en0"]) or "").splitlines():
+            m = re.match(r"\s*SSID\s*:\s*(.+)", line)
+            if m:
+                names.append(m.group(1).strip())
+    else:
+        names.append(br.try_output(["iwgetid", "-r"]) or "")
+        for line in (br.try_output(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"]) or "").splitlines():
+            name, _, kind = line.rpartition(":")
+            if "wireless" in kind:
+                names.append(name.replace("\\:", ":"))
+    return names
+
+
+def secrets():
+    """This machine's identifying values: its user, host, and wifi names, and
+    its raw machine id. Values under 2 characters are too common to match."""
+    values = [getpass.getuser(), os.environ.get("USER"), os.environ.get("LOGNAME"), os.environ.get("SUDO_USER")]
+    for name in (socket.gethostname(), platform.node()):
+        values += [name, name.split(".")[0]]
+    values += wifi_names()
+    values.append(br.machine_identity())
+    return sorted({v for v in values if v and len(v) >= 2 and v != REDACTED}, key=len, reverse=True)
+
+
+# --- verdict ----------------------------------------------------------------
+
+
+def verdict(rounds):
+    """The run's status, its reason, and the indexes of its clean rounds.
+    Each round is `{"ns": {id: ns}, "throttled": bool | None}`.
+
+    Rounds that throttled are dropped first. Then, while the control spread
+    over the rest is above MAX_SPREAD, the round furthest from the control
+    medians is dropped. What remains are the clean rounds."""
+    controls = control_ids(rounds[0]["ns"])
+    if not controls:
+        return "noisy", f"no {CONTROL} control row was timed", []
+    clean = [i for i, r in enumerate(rounds) if r["throttled"] is not True]
+    while clean and spread(rounds, clean, controls) > MAX_SPREAD:
+        median = {c: statistics.median(rounds[i]["ns"][c] for i in clean) for c in controls}
+        worst = max(clean, key=lambda i: max(abs(rounds[i]["ns"][c] / median[c] - 1) for c in controls))
+        clean.remove(worst)
+    if len(clean) < MIN_CLEAN:
+        return "noisy", f"{len(clean)} of {len(rounds)} rounds clean, fewer than {MIN_CLEAN}", clean
+    return "ok", "", clean
+
+
+def control_ids(ids):
+    """The criterion IDs of CONTROL's rows."""
+    return sorted(i for i in ids if (br.operation_of(i) or (None, None))[1] == CONTROL)
+
+
+def spread(rounds, clean, ids):
+    """The largest max/min ratio of any row over the clean rounds."""
+    return max(max(rounds[i]["ns"][x] for i in clean) / min(rounds[i]["ns"][x] for i in clean) for x in ids)
+
+
+def results_of(rounds, clean):
+    """A report results list: each row's median over the clean rounds, its
+    range, and every round's time."""
+    out = []
+    for full_id in sorted(rounds[0]["ns"]):
+        found = br.operation_of(full_id)
+        if found is None:
+            continue
+        op, lib = found
+        times = [rounds[i]["ns"][full_id] for i in clean] or [r["ns"][full_id] for r in rounds]
+        out.append(
+            {
+                "operation": op,
+                "library": br.LIBRARIES.get(lib, lib),
+                "id": full_id,
+                "ns": statistics.median(times),
+                "ns_low": min(times),
+                "ns_high": max(times),
+                "rounds_ns": [round(r["ns"][full_id], 3) for r in rounds],
+            }
+        )
+    order = {op: i for i, op in enumerate(br.OPERATIONS)}
+    out.sort(key=lambda r: (order[r["operation"]], r["library"]))
+    return out
+
+
+# --- running ----------------------------------------------------------------
+
+
+def build(cargo, env):
+    """Builds SUITE's bench targets and returns each one's executable."""
+    cmd = cargo + ["bench", "-p", "rind-bench", "--no-run", "--message-format=json-render-diagnostics"]
+    for target in SUITE:
+        cmd += ["--bench", target]
+    proc = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, text=True, check=True)
+    exes = {}
+    for line in proc.stdout.splitlines():
+        msg = json.loads(line)
+        if msg.get("reason") == "compiler-artifact" and msg.get("executable") and "bench" in msg["target"]["kind"]:
+            exes[msg["target"]["name"]] = msg["executable"]
+    missing = sorted(set(SUITE) - set(exes))
+    if missing:
+        fail(f"cargo built no executable for {', '.join(missing)}")
+    return exes
+
+
+def time_round(exes, order, cpu, env, scratch):
+    """One round: each bench target in `order`, pinned to `cpu` if given.
+    Returns each criterion ID's time in ns."""
+    env = dict(env, CRITERION_HOME=scratch)
+    shutil.rmtree(scratch, ignore_errors=True)
+    pin = (lambda: os.sched_setaffinity(0, {cpu})) if cpu is not None else None
+    for target in order:
+        subprocess.run([exes[target], "--bench", *CRITERION_ARGS, suite_regex()], env=env, preexec_fn=pin, check=True)
+    ns = {}
+    for path in glob.glob(os.path.join(scratch, "**", "new", "benchmark.json"), recursive=True):
+        with open(path) as f:
+            full_id = json.load(f)["full_id"]
+        with open(os.path.join(os.path.dirname(path), "estimates.json")) as f:
+            estimates = json.load(f)
+        ns[full_id] = (estimates.get("slope") or estimates["mean"])["point_estimate"]
+    return ns
+
+
+def run(args):
+    if args.rounds < MIN_CLEAN:
+        fail(f"--rounds {args.rounds} is fewer than the {MIN_CLEAN} clean rounds a run needs")
+    started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    tag = br.machine_tag()
+    if not tag and not args.host:
+        fail("this machine has no machine id, so a name made from its CPU could be another machine's: pass --host NAME")
+    cpu_info = br.cpu_metadata()
+    host = br.resolve_host(args.host, cpu_info["model"])
+    cpu = args.cpu if args.cpu is not None else fastest_cpu()
+    if cpu is not None and not hasattr(os, "sched_setaffinity"):
+        fail("--cpu needs an OS that can pin a process to a core")
+    if cpu is not None and cpu not in os.sched_getaffinity(0):
+        fail(f"--cpu {cpu} is not a core this process may run on")
+    hidden = secrets()
+
+    env = dict(os.environ, CARGO_TERM_COLOR="never")
+    env["CARGO_TARGET_DIR"] = os.path.abspath(args.target_dir)
+    cargo, versions, _ = br.toolchain(env)
+    locked = br.locked_versions()
+    result = {"schema": 1, "host": host}
+    if tag:
+        result["machine"] = tag
+    result.update(commit=br.output(["git", "-C", br.ROOT, "rev-parse", "HEAD"]), started=started, cpu=cpu_info)
+    result.update(os=br.os_name(), toolchain=versions)
+    result["libraries"] = {lib: {c: ", ".join(locked.get(c, ["?"])) for c in br.CRATES[lib]} for lib in LIBS}
+    # Other work is recorded, not refused: a contributor's machine is rarely
+    # idle, and the control rows, timed on the same core in the same rounds,
+    # are what show whether it disturbed the run.
+    busy_before_build = round(br.busy_cpus(), 2)
+    exes = build(cargo, env)
+    result["rind_cpu"] = json.loads(br.output(cargo + ["run", "-q", "--release", "-p", "rind-cpuid"], env))
+    busy_before_run = round(br.busy_cpus(), 2)
+
+    probe = Probe(cpu)
+    rounds = []
+    targets = list(SUITE)
+    with tempfile.TemporaryDirectory(prefix="bench-app-") as scratch:
+        for i in range(args.rounds):
+            # Rotate the targets, so none always runs first after a pause.
+            order = targets[i % len(targets) :] + targets[: i % len(targets)]
+            print(f"bench-app: round {i + 1} of {args.rounds}", file=sys.stderr)
+            before = probe.read()
+            ns = time_round(exes, order, cpu, env, os.path.join(scratch, "criterion"))
+            after = probe.read()
+            rounds.append({"ns": ns, "throttled": probe.throttled(before, after), "before": before, "after": after})
+    ids = set(rounds[0]["ns"])
+    if not ids or any(set(r["ns"]) != ids for r in rounds):
+        fail("the rounds timed different rows; a bench failed or filtered differently")
+
+    status, reason, clean = verdict(rounds)
+    controls = control_ids(ids)
+    result.update(
+        status=status,
+        finished=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        criterion_args=CRITERION_ARGS + [suite_regex()],
+        load={"busy_cpus_before_build": busy_before_build, "busy_cpus_before_run": busy_before_run, "noisy": status != "ok"},
+        bench_app={
+            "pinned_cpu": cpu,
+            "throttle_source": probe.throttle,
+            "rounds": len(rounds),
+            "clean_rounds": clean,
+            "control": CONTROL,
+            "control_spread": round(spread(rounds, clean or range(len(rounds)), controls), 4) if controls else None,
+            "states": [{"before": r["before"], "after": r["after"], "throttled": r["throttled"]} for r in rounds],
+        },
+        results=results_of(rounds, clean),
+    )
+    if reason:
+        result["reason"] = reason
+    result = scrub(result, hidden)
+    left = leaks(result, hidden)
+    if left:
+        fail(f"scrubbing left {len(left)} identifying value(s) in the result; nothing was written")
+    if status == "ok" and br.unmeasured(result):
+        fail(f"the result is not one admin/bench-report reads: {br.unmeasured(result)}")
+    os.makedirs(args.out, exist_ok=True)
+    out = os.path.join(args.out, f"{host}.json")
+    with open(out, "w") as f:
+        json.dump(result, f, indent=1)
+        f.write("\n")
+    print_summary(result)
+    print(out)
+    if status != "ok":
+        fail(f"{host}: {status}: {reason}")
+
+
+def print_summary(result):
+    """Each operation's rind time over the faster control's, on stderr."""
+    by_op = {}
+    for r in result["results"]:
+        by_op.setdefault(r["operation"], {})[r["library"]] = r["ns"]
+    print(f"bench-app: {result['host']}: {result['status']}, control spread {result['bench_app']['control_spread']}", file=sys.stderr)
+    for op, libs in by_op.items():
+        rivals = [ns for lib, ns in libs.items() if lib != "rind"]
+        if "rind" in libs and rivals:
+            name = op.replace("/{lib}", "")
+            print(f"  {name:28} rind {libs['rind']:12.1f} ns  {libs['rind'] / min(rivals):.3f}x the fastest control", file=sys.stderr)
+
+
+def main():
+    p = argparse.ArgumentParser(description="Times rind against aws-lc-rs and ring on this machine.")
+    p.add_argument("--host", help="the result's host name (default: a slug of the CPU model)")
+    p.add_argument("--rounds", type=int, default=ROUNDS, help=f"interleaved rounds (default {ROUNDS})")
+    p.add_argument("--cpu", type=int, help="the core to pin to (default: the fastest, highest numbered)")
+    p.add_argument("--out", default=os.path.join(br.ROOT, ".tmp", "bench-app"), help="the result directory")
+    p.add_argument("--target-dir", default=os.path.join(br.ROOT, "target"), help="cargo's target directory")
+    run(p.parse_args())
+
+
+if __name__ == "__main__":
+    main()
