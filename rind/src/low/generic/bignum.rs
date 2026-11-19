@@ -344,6 +344,11 @@ pub(super) mod tests {
         x.to_vec()
     }
 
+    // The reference results are public but marked so anyway: memcheck can
+    // count the secret arithmetic's stale flags against a flag a reference
+    // routine sets itself, such as the `stc` before `bignum_add_p521`'s
+    // `adc` chain on x86_64. See UPSTREAM.md, "Memcheck blames a public
+    // flag on a secret carry".
     proptest! {
         #[test]
         fn plain(x in words(0, 8), y in words(0, 8), p in 0..12usize, index in 0..4u64) {
@@ -391,7 +396,7 @@ pub(super) mod tests {
             let (mut ours, mut theirs) = ([0], [0]);
             bignum_negmodinv(&mut ours, &sm[..1]);
             low::bignum_negmodinv(&mut theirs, &m[..1]);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
         }
 
         #[test]
@@ -399,7 +404,7 @@ pub(super) mod tests {
             let w = x.len().max(y.len());
             let ours = bignum_coprime(&secret(&x), &secret(&y), &mut vec![0; 2 * w]);
             let theirs = low::bignum_coprime(&x, &y, &mut vec![0; 2 * w]);
-            prop_assert_eq!(into_public(ours), theirs);
+            prop_assert_eq!(into_public(ours), into_public(theirs));
 
             let k = m.len();
             if low::bignum_coprime(&a, &m, &mut vec![0; 2 * k]) {

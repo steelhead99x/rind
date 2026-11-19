@@ -74,6 +74,7 @@ pub(crate) mod cpu;
 #[cfg(test)]
 #[path = "../arm/ct_qemu.rs"]
 pub(crate) mod ct_qemu;
+pub(crate) mod curve25519_ifma;
 pub(crate) mod curve25519_x25519;
 pub(crate) mod curve25519_x25519base;
 pub(crate) mod edwards25519_decode;
@@ -102,6 +103,7 @@ pub(crate) mod mldsa_rej_uniform_eta2_vartime;
 pub(crate) mod mldsa_rej_uniform_eta4_vartime;
 pub(crate) mod mldsa_rej_uniform_vartime;
 pub(crate) mod mlkem;
+pub(crate) mod mlkem768_vg;
 pub(crate) mod mlkem_basemul_k2;
 pub(crate) mod mlkem_basemul_k3;
 pub(crate) mod mlkem_basemul_k4;
@@ -118,6 +120,7 @@ pub(crate) mod p256_montjdouble;
 pub(crate) mod p256_montjmixadd;
 pub(crate) mod p256_scalarmul;
 pub(crate) mod p256_scalarmulbase;
+pub(crate) mod p256_vg;
 pub(crate) mod p384_montjadd;
 pub(crate) mod p384_montjdouble;
 pub(crate) mod p384_montjmixadd;
@@ -126,6 +129,7 @@ pub(crate) mod p521_jadd;
 pub(crate) mod p521_jdouble;
 pub(crate) mod p521_jmixadd;
 pub(crate) mod p521_jscalarmul;
+pub(crate) mod pbkdf2_vg;
 pub(crate) mod sha1;
 pub(crate) mod sha256;
 pub(crate) mod sha3_keccak2_f1600;
@@ -135,4 +139,6 @@ pub(crate) mod sha3_keccak_f1600_alt;
 pub(crate) mod sha3_keccak_f1600_mux;
 pub(crate) mod sha3_keccak_nof4_f1600;
 pub(crate) mod sha512;
+// pyca/verified-garbage's routines, as admin/import-vg vendors them.
+pub(crate) mod vg;
 pub(crate) mod vpaes_armv8;

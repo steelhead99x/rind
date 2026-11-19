@@ -37,4 +37,8 @@ nothing, since `Hashing::start` builds the only one, of `C`'s own
 `HashContext` functions, which the model calls directly. -/
 @[reducible] def high.digest.Ops (_C : Type) : Type := Unit
 
+/-- A `&'static T` that a wiped value may hold: the `T`, since only the drop
+that wipes it leaves it `None`. -/
+@[reducible] def low.generic.zeroise.ZeroableRef (T : Type) : Type := T
+
 end rind.portable

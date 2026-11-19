@@ -268,6 +268,8 @@ pub fn check_rsa_modulus(key: &crate::rsa::PublicKey, legacy_1024: bool) -> Resu
 
 /// The known answers, from the standards' own examples where they give one.
 mod kat {
+    use alloc::vec::Vec;
+
     use super::broken;
     use crate::high::hash::{Hash, Sha256};
 
@@ -565,7 +567,7 @@ mod kat {
         let ek = key.encapsulation_key();
         check(
             "ml_kem_keygen",
-            sha256_of(&ek.as_bytes())[..] == hex(ML_KEM_EK_SHA256)
+            sha256_of(ek.as_bytes())[..] == hex(ML_KEM_EK_SHA256)
                 && sha256_of(&key.as_bytes())[..] == hex(ML_KEM_DK_SHA256),
         )?;
 

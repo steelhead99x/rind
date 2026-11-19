@@ -61,6 +61,9 @@ proofs/Rind/Aarch64/EcdsaDispatch.lean
 proofs/Rind/Aarch64/Naf.lean
 proofs/Rind/Aarch64/P256Ecdsa.lean
 proofs/Rind/Aarch64/P256Signature.lean
+proofs/Rind/Aarch64/P384Ecdsa.lean
+proofs/Rind/Aarch64/P384Signature.lean
+proofs/Rind/Aarch64/MlKemCoding.lean
 proofs/Rind/Armv7/QuicDispatch.lean
 proofs/Rind/Armv7/ChaCha20.lean
 patch/*/Cargo.lock
@@ -68,3 +71,5 @@ __pycache__/
 site/node_modules/
 site/dist/
 site/.astro/
+site/deploy/node_modules/
+site/deploy/.wrangler/

@@ -75,20 +75,28 @@ those inputs, in any worktree, restores in under a second.
   the instructions rind's fork adds (`thirdparty/s2n-bignum/RIND.md`); the proof checks its round
   constants against FIPS 180-4's. Its stack frame, which the routine aligns
   down to 2048 bytes, lies in the 3440 bytes below the stack pointer.
-- `aarch64/bn_mul_mont.ml`: `BN_MUL_MONT_GENERIC_SUBROUTINE_CORRECT`, rind's
+- `aarch64/bn_mul_mont.ml`: `BN_MUL_MONT_SUBROUTINE_CORRECT`, rind's
   proof that the naked function `low::aarch64::mont::bn_mul_mont`, aws-lc's
   Montgomery multiplication, writes the Montgomery product
   `x * y / 2^(64k) mod m` of its `k`-word operands, as s2n-bignum's
   `bignum_montmul` states it, given `-m^-1 mod 2^64` and
-  `x * y <= 2^(64k) * m`, for every width from two up that is not a multiple
-  of four: those its width-generic path runs, for `k < 2^58`, a 16-aligned
-  stack pointer, and `z` and the stack frame disjoint from the code and the
-  inputs, so `z` may not alias `x`. The theorem covers the dispatch,
-  the stack frame of up to `8k + 72` bytes below the stack pointer, and the
-  callee-saved registers it restores. The widths that run `__bn_mul4x_mont`
-  and `__bn_sqr8x_mont`, which include every standard RSA size and its CRT
-  primes, are not proven yet, and no axiom in `Rind/` restates the theorem
-  yet. The function has no relocations.
+  `x * y <= 2^(64k) * m`, for every width from two words up: for `k < 2^58`,
+  a 16-aligned stack pointer, and `z` and the `16k + 128` bytes below the
+  stack pointer disjoint from the code, the inputs, and each other, so `z`
+  may not alias `x`. It is of the Linux build's object: Apple's
+  `aws_lc/bn_mul_mont.apple.s` lacks the entry's `.align 5`, so its branches
+  can land at other offsets, and no proof covers it. At a multiple of four it also needs `x + 32` and `m + 32` not to wrap
+  past `2^64`, since the 4x path reads the carry of adding 32 to those
+  pointers. The theorem covers the dispatch, the stack frame, and the
+  callee-saved registers the function restores. It joins one theorem for
+  each routine the dispatch reaches, each with that routine's own frame:
+  `BN_MUL_MONT_GENERIC_SUBROUTINE_CORRECT` for a width that is not a multiple
+  of four, which the width-generic path runs in up to `8k + 72` bytes;
+  `BN_MUL_MONT_MUL4X_SUBROUTINE_CORRECT` for a multiple of four, through
+  `__bn_mul4x_mont` in `8k + 160` bytes, except a multiple of eight with
+  `x = y`; and `BN_MUL_MONT_SQR8X_SUBROUTINE_CORRECT` for that case, the
+  squarings `__bn_sqr8x_mont` runs in `16k + 128` bytes. No axiom in `Rind/`
+  restates any of them yet. The function has no relocations.
 - `x86_64/bn_mul_mont_nohw.ml`: `BN_MUL_MONT_NOHW_SUBROUTINE_CORRECT`, rind's
   proof that the naked function `low::x86_64::mont::bn_mul_mont_nohw`,
   aws-lc's word-serial Montgomery multiplication, writes the Montgomery
@@ -157,6 +165,82 @@ instructions armv7's proofs need, which `aarch32/proofs/simulator.ml` checks
 against qemu-arm. `nix develop .#hol-light --command admin/prove cosim` runs
 both cosimulations, on an x86_64 CPU with AVX2.
 
+## verified-garbage's models
+
+[pyca/verified-garbage](https://github.com/pyca/verified-garbage) (VG)
+proves its routines in Lean against its own models of x86_64 and aarch64,
+and prints each routine from the same Lean code twice: as assembly text, and
+as a Rust naked function of machine code from its own encoder. Those models
+are VG's trusted base, and VG's CI checks its encoder only against golden
+tests, so before a routine rind takes from VG counts as proven, rind checks
+both against hardware. `verified-garbage/` holds the models, which
+`admin/import-vg-models` copies byte for byte from VG at the commit
+`admin/import-vg` pins for VG's code,
+and the cosimulation over them, a Lake package of its own, since the models
+import only Lean core. `nix develop .#vg --command admin/prove vg` checks,
+for this CPU's target:
+
+- that every instruction of VG's compiled naked functions, and of each `vg_*`
+  routine rind vendors, is the instruction its assembly text gives, which
+  `admin/vg-bytes` assembles with nixpkgs' LLVM; a branch or call need only
+  reach the same instruction or function, since the assembler lays those
+  out, and an encoding that differs but disassembles the same is reported;
+- that each distinct instruction of VG's code ends, from random states, in
+  the state VG's model gives. `Cosim/` parses each instruction's text back to
+  every instruction of the model that prints as exactly that text, runs the
+  model on random states, weighted toward edge values, with each memory
+  operand in a window of the runner's data, and `admin/vg-cosim-runner.rs`
+  runs VG's machine code for it on the CPU, or under Intel SDE or
+  qemu-aarch64 for an instruction that needs a feature the CPU lacks, and
+  compares every register, flag the model defines, and byte of the data.
+  A conditional branch is checked for whether it is taken, and a call or
+  indirect call with the `ret` that returns from it. A table load is checked
+  with random table words at the address it reads.
+
+Not cosimulated: the `jmp`/`b` and the address of a static (`lea`, or
+`adrp` and `add`), which the assembler and linker resolve and the bytes
+check covers, and `ret` alone, which each call's case runs. The `prove`
+workflow runs it on x86_64 and aarch64, nightly with a new seed.
+
+A gap in what the models allow across instructions is beyond what
+cosimulating one instruction at a time can catch. Reviewers found one: a
+freed frame's bytes kept their values in the models, so a proof could read
+back a value a signal handler may have overwritten on hardware
+([pyca/verified-garbage#5321](https://github.com/pyca/verified-garbage/issues/5321)).
+VG fixed it in both models before the commit `admin/import-vg` pins.
+
+`Rind/VgChaCha20.lean` proves the keystream of VG's RFC 8439 spec,
+`VerifiedGarbage.Spec.ChaCha20`, is `Rind/Spec.lean`'s, and that the spec's
+view of the streaming state reads only its 768 bytes.
+`Rind/X86_64/VgChaCha20.lean` restates VG's theorems
+about the x86_64 ChaCha20 routines rind runs, `Stream.init_verified` and
+`Stream.apply_verified` for AVX2 and AVX-512 VL, as one axiom per wrapper in
+`low::x86_64::chacha20`, and proves `cipher::ChaCha20` from them, as
+"What is proven" lists.
+
+`verified-garbage/` also holds the `Spec` modules whose definitions the
+axioms restating VG's theorems state, such as
+`VerifiedGarbage.Spec.Rsa.PrivatePrecompute`, which `Rind/X86_64/VgRsa.lean`
+imports, with `VerifiedGarbage.Spec.Rsa` through it, VG's FIPS 203 spec,
+`VerifiedGarbage.Spec.MlKem`, which `Rind/VgOutcome.lean` imports, and `VerifiedGarbage.Spec.ChaCha20`,
+which `Rind/VgChaCha20.lean` imports, with its contracts, which
+`Rind/X86_64/VgChaCha20.lean`'s axioms restate. A pin that changes the
+ChaCha20 spec needs no review of it, since what rests on it is stated over
+`Rind/Spec.lean`, so a change its proofs cannot absorb fails the Lean build. A
+pin that changes the contracts shows the change in its diff, against which
+that re-pin must review the axioms. Every re-pin also moves the axioms' links to VG's theorems and
+checks that the registrations they cite still emit the routines rind runs:
+`admin/vg-bytes` checks the code, not which theorem covers it.
+
+`Rind/VgOutcome.lean` and `Rind/<Arch>/VgMlKem.lean` restate VG's contracts
+for the ML-KEM-768 routines rind runs as one axiom per wrapper in
+`low::<arch>::mlkem768_vg`. Each states only what the wrapper returns,
+not VG's wipe of its scratch or what the routine may leak. The contracts
+they restate, VG's `Spec/MlKem/Contract.lean` and `Spec/MlKem/EncapsH.lean`,
+are not vendored, so a re-pin compares them at VG's new commit. No theorem rests
+on them yet: the ✓ also needs rind's glue in `mid/mlkem.rs` proven, and its
+fallback to rind's arithmetic.
+
 ## What is proven
 
 X25519 on x86_64 and aarch64, from the agreement API's `PrivateKey` to
@@ -198,6 +282,13 @@ which rind proves in HOL Light:
   secret is the 32 big-endian bytes of the x-coordinate of the scalar times
   that point, or a fault unless that is a finite point on the curve;
 - `p256_shared_secret`: the secret's bytes are those.
+
+Every P-256 theorem, ECDSA's below included, assumes `NoVgP256`: the CPU
+does not run pyca/verified-garbage's P-256, which rind takes on x86_64 with
+BMI2, ADX, AVX, and AVX2 and on every aarch64 CPU, and whose Lean proof lives
+in that project, not here. So on x86_64 they cover CPUs without those
+features, and on aarch64 no CPU, until
+[their quest](/quest/m2/verified-garbage/p256-proof.md) imports VG's theorems.
 
 `p256Pow` is HOL Light's `group_pow p256_group`, defined as HOL Light does
 once for the NIST curves in `Rind/Spec.lean`, and `Rind/NistGroup.lean`
@@ -288,6 +379,30 @@ which `admin/prove` also writes for aarch64, as P-256's is on aarch64:
   outside [1, n), and otherwise the key's scalar is the scalar;
 - `p384_public_key`: a key's public key is the X9.62 uncompressed encoding of
   its scalar times G.
+
+P-384 ECDSA with SHA-384 and fixed-length signatures on x86_64 and aarch64,
+from the signature API's `ecdsa::KeyPair` and `ecdsa::PublicKey` to
+s2n-bignum's routines, in `Rind/X86_64/P384Signature.lean` over
+`Rind/X86_64/P384Ecdsa.lean`, which `admin/prove` also writes for aarch64,
+over the comb above for k·G and each target's `Rind/<Arch>/P384KeyCheck.lean`,
+which reads its own translation of the public-key check: P-384 has no
+uncompressed fast path, so both targets compare a given public key with the
+key's own encoding. The theorems are P-256's, with 48-byte scalars, 97-byte
+points, 96-byte signatures, and the message's SHA-384 (`sha384E`), through
+the SHA-384 proof below, so signing and verification take its `RunsSha512`:
+`p384_ecdsa_generate`, `p384_ecdsa_from_scalar_and_public_key`,
+`p384_ecdsa_sign`, `p384_ecdsa_key_pair_public_key`,
+`p384_ecdsa_public_key_new`, and `p384_ecdsa_key_pair_verify`.
+`ecdsaP384Sign` and `ecdsaP384Verifies` in `Rind/Nist.lean` are
+`Rind/Spec.lean`'s FIPS 186-5 ECDSA at P-384's p, n, and G. Verification's
+twin multiplication reads a 385-digit width-5 NAF of e/s, whose multiples of G
+come from the comb's first table, and of r/s over Q's odd multiples, which a
+key caches, and `Rind/P384Multiples.lean` proves the laws by which its sum is
+e/s·G + r/s·Q and that every finite point on the curve has order n
+(`p384_order`). As for P-256, verification settles equal and opposite points
+by cases before s2n-bignum's `p384_montjadd` and `p384_montjmixadd`, whose
+contracts exclude them, and the theorems assume `Drbg`, `Fills`, `Held`, and
+P-384's `Cached`, its keys' caches.
 
 rind computes k·G with its own comb in Rust, aws-lc's layout: 77 Booth-recoded
 5-bit windows added from 20 tables of 1 to 16 times 2^(20j)·G, with five
@@ -406,7 +521,9 @@ and RFC 8018 as `Rind/HashSpec.lean` transliterates them:
   `kdf.prk_new_fill` (`Rind/X86_64/Hkdf.lean`): HKDF's extract and expand,
   and expand from a PRK loaded from bytes;
 - `kdf.derive_spec`, `kdf.verify_spec` (`Rind/X86_64/Pbkdf2.lean`): PBKDF2's
-  `Secret::derive` and `Secret::verify`.
+  `Secret::derive` and `Secret::verify` on rind's loop. On aarch64 with the
+  instructions it takes, a `Secret` runs pyca/verified-garbage's routine
+  instead, through `mid::pbkdf2_vg`, which the second pass leaves opaque.
 
 HKDF's `From<Okm>` conversions, each filling the key's length of HKDF-Expand
 into a zeroed buffer and keying it, in `Rind/X86_64/Hkdf.lean` and
@@ -455,10 +572,10 @@ RandomSource`, which Aeneas cannot translate either, and
 `Rind/X86_64/P256Dispatch.lean`, which `admin/prove` also writes for aarch64,
 models it the same way, for `Rind/<Arch>/Dispatch.lean` to call. The signature API's `ecdsa::KeyPair` reaches each curve's code, and
 `ecdsa::PublicKey` each ECDSA key's parser and verifier, through function
-pointers, and P-256's ECDSA key generation draws through a `dyn
+pointers, and P-256's and P-384's ECDSA key generation draws through a `dyn
 RandomSource`; `Rind/X86_64/EcdsaDispatch.lean`, which `admin/prove` also
-writes for aarch64, models them for P-256 with SHA-256 and fixed-length
-signatures, over `Rind/X86_64/SignatureBuffer.lean`'s model of
+writes for aarch64, models them for P-256 with SHA-256 and P-384 with
+SHA-384, each with fixed-length signatures, over `Rind/X86_64/SignatureBuffer.lean`'s model of
 `Buffer::write`, whose closure returns a borrow of its argument.
 
 SHA-384, SHA-512, and SHA-512/256, from the digest API to aws-lc's block
@@ -522,8 +639,10 @@ which `Rind/Keccak.lean` proves SymCrypt's KECCAK-f[1600].
 `Rind/<Arch>/KeccakDispatch.lean` proves what rind's dispatch to the one-,
 two-, and four-state routines computes, from those theorems. Each theorem
 assumes `RunsSha3`: rind's entry guard and CPU checks pass. x86_64's AVX-512
-eight-way Keccak, which ML-KEM's sampler runs, has
-[its own quest](/quest/m4/verified/mlkem-avx512-sampler.md).
+eight-way Keccak, which ML-KEM-1024's sampler runs, is not
+proven; ML-KEM-768 runs pyca/verified-garbage's code there instead.
+Wherever rind's sampler runs for ML-KEM-768, it samples eight of its nine
+polynomials four at a time and the ninth alone, never eight at a time.
 
 The portable backend's Keccak-f, which its SHA-3, ML-KEM, and ML-DSA run, in
 `Rind/Portable/Keccak.lean`, over a translation of `low/portable/keccak.rs`
@@ -533,8 +652,9 @@ given FIPS 202's round constants and nothing of the CPU. Each round is
 `keccak_round` written out, which `round_spec` proves by unfolding.
 
 ML-KEM's polynomial arithmetic, against FIPS 203 as SymCrypt's Lean spec
-(`Rind/SymCrypt/MlKem.lean`, MIT) states it, though not yet rind's Rust,
-which has [its quest](/quest/m4/verified/mlkem-construction.md):
+(`Rind/SymCrypt/MlKem.lean`, MIT) states it, and of rind's Rust only the
+coding below it; the rest has
+[its quest](/quest/m4/verified/mlkem-construction.md):
 
 - `NTT_get`, `NTTInv_get` (`Rind/MlKem.lean`): Algorithms 9 and 10 compute
   the residues FIPS 203's Equations (4.12) and (4.13) define, and back;
@@ -545,6 +665,31 @@ which has [its quest](/quest/m4/verified/mlkem-construction.md):
 - `avx2ForwardNtt_eq`, `avx2InverseNtt_eq`, `avx2Mulcache_eq`, and
   `pmulaccred0K3_eq` and its siblings: the same for the x86_64 routines, which
   keep FIPS 203's coefficients in the AVX2 order.
+
+ML-KEM's decompression and message coding, on x86_64 and aarch64, in
+`Rind/X86_64/MlKemCoding.lean`, which `admin/prove` also writes for aarch64.
+They are the same Rust for ML-KEM-512, 768, and 1024, and rest on no axiom:
+
+- `decompress_spec`: `mid::mlkem::decompress::<D, L>` writes FIPS 203's
+  `Decompress_D(ByteDecode_D(bytes))`, each coefficient in `[0, q)`, for
+  every `D` from 1 to 11 and `L = 32 * D` bytes, so for the 4, 5, 10, and 11
+  bits a ciphertext's halves take;
+- `from_message_bits_spec`: K-PKE's message, as a polynomial, is
+  `Decompress_1(ByteDecode_1(m))`;
+- `to_message_bits_spec`: the message K-PKE decrypts is
+  `ByteEncode_1(Compress_1(f))` of a polynomial `f`, given Rust coefficients
+  each in `[0, q)` and equal to `f`'s modulo `q` (`Holds 0 3328`), so its
+  caller must show the coefficients canonical, not only congruent: `-1`
+  stands for the same element as 3328 but does not meet it.
+
+`Rind/MlKemCoding.lean` states what they need of the spec, with no Rust:
+`ByteEncode_bit`, `ByteDecode_get`, and `SamplePolyCBD_get` give each bit or
+coefficient of FIPS 203's `ByteEncode`, `ByteDecode`, and `SamplePolyCBD`,
+which the spec writes as loops, and `Compress_val` and `Decompress_val` give
+`Compress` and `Decompress`, which it writes as rounded rationals, as
+quotients of naturals. Nothing above these three calls them yet: K-PKE, the
+Fujisaki-Okamoto transform, the samplers, and the other encodings are the
+quest's.
 
 Ed25519 on x86_64 and aarch64, from the signature API's `ed25519::KeyPair`
 to s2n-bignum's routines and the SHA-512 proof above, in
@@ -714,6 +859,20 @@ CPU-feature checks pick Vale's tier (`RunsValeAesGcm`) or the SSE tier
 (`Algorithm`'s `expand` and `Sealer`'s `Ops`), and `seal_in_place_append_tag`,
 which is generic over its buffer.
 
+On aarch64, AES-GCM is not yet proven; its GHASH key setup and hashing on
+CPUs with the crypto extension are. `Rind/Aarch64/GhashPmull.lean` proves
+that `GhashTable::new` builds the PMULL table of H to H^8, each shifted as
+Vale's `shift_key_1` does (`ghash_table_new_spec`), and that `Ghash::add` on
+it is the Horner rule on the padded blocks, Vale's `ghash_LE`
+(`ghash_add_spec`): its `mul!` is the x86 Karatsuba step with the key's
+halves stored swapped, its `reduce!` the same reduction, and its eight-block
+loop the same sum of descending powers, the target-independent lemmas shared
+in `Rind/GhashSpec.lean`. `Rind/Aarch64/AesGcmModel.lean` models by hand
+what Aeneas cannot translate, the NEON transmutes, `Ghash::add`'s slice
+chunking, and the one-pass short path with its `Aggregate`, quoting the
+Rust; the short path, the s2n-bignum kernels' composition, and the AEAD API
+above them remain to prove.
+
 `aead::gcm::Key`, which takes an IV of any length and tags of any
 `TagLength`, is proven on the same tiers, in `Rind/X86_64/GcmKey.lean`, a
 hand model over `AeadDispatch` that quotes `rind/src/aead/gcm.rs`. Its `new`
@@ -801,6 +960,28 @@ and Poly1305 passes, which the model leaves opaque. `AeadDispatch` models
 `Rind/ChaCha20Poly1305Test.lean` checks `Rind/Spec.lean`'s transliterations
 against RFC 8439's and draft-irtf-cfrg-xchacha-03's test vectors.
 
+ChaCha20 on x86_64 CPUs with AVX2, from 256 bytes, from `cipher::ChaCha20`
+down to pyca/verified-garbage's AVX2 and AVX-512 VL routines, in
+`Rind/X86_64/VgChaCha20.lean`:
+
+- `chacha20_apply_keystream`: a buffer that needs more blocks than remain
+  before the 32-bit block counter wraps is refused with `WrongLength` and
+  left as it is, and otherwise it becomes RFC 8439's encryption of it under
+  the key, the block counter, and the nonce.
+
+It rests on the axioms `vg_chacha20_init_spec`,
+`vg_chacha20_apply_avx2_spec`, and `vg_chacha20_apply_avx512vl_spec`, which
+restate VG's theorems, and composes them as `cipher` does: VG's routines over
+the whole buffer, or, when what follows its last whole 512-byte group is 65
+to 255 bytes, over the groups, and rind's two-block AVX2 kernel over that
+remainder from the block counter past them. It assumes `Kernel`, that
+kernel's contract, which no proof covers yet;
+[the x86_64 cipher quest](/quest/m4/verified/chacha20-poly1305-x86/cipher.md)
+owns it. It also assumes `RunsVg`: the entry guard admits the call,
+constructing the VG state succeeds (the model leaves `VgState::uninit`
+opaque), and the CPU-feature checks find AVX2 or AVX-512 VL. VG's code earns its ✓ on this
+path from its theorems; the kernel's is the cipher quest's.
+
 RSASSA-PKCS1-v1_5 and RSASSA-PSS verification with SHA-256 on x86_64, from
 the signature API's `rsa::PublicKey` to the Montgomery products, in
 `Rind/X86_64/RsaDispatch.lean`, against RFC 8017 as `Rind/Rsa.lean`
@@ -827,8 +1008,12 @@ modulus of 1024 to 8192 bits, and an odd exponent from 3 to below 2^33 load,
 and a loaded key holds them, with an odd modulus of 1024 to 8192 bits, an
 odd exponent of at least 3, `pub_montifier`'s R^2 mod N, and
 `mont_neg_inverse`'s -N^-1 mod 2^64.
-`Rind/X86_64/RsaPublic.lean` proves the public operation's square-and-multiply
-(`public_op_spec`), `Rind/X86_64/RsaBytes.lean` the conversions between
+`Rind/X86_64/RsaPublic.lean` proves the public operation's square-and-multiply,
+`Rind/X86_64/RsaIfma.lean` the public operation (`public_op_spec`), which
+runs pyca/verified-garbage's AVX-512 IFMA routine for the exponent 65537 and
+2048-, 3072-, and 4096-bit moduli on a CPU with it, through the axiom
+`Rind/X86_64/VgRsa.lean` restates from that project's Lean proof,
+`Rind/X86_64/RsaBytes.lean` the conversions between
 bytes and words, and `Rind/X86_64/{RsaVerify,RsaPss}.lean`
 EMSA-PKCS1-v1_5's encoding check and EMSA-PSS-VERIFY. DER is opaque, as the ✓
 leaves it out, so the `new` and `from_spki` theorems hold for every key
@@ -836,7 +1021,8 @@ those return without saying which encodings they accept. The loaders assume
 that the entry guard holds, `from_components` also `Runs`, and each `verify`
 theorem `Runs`, `Sha256Blocks`, messages of at most `maxInput` bytes, and
 `MontProducts k`, that `low::x86_64::mont`'s products
-return their results at the modulus's width of k words.
+return their results at the modulus's width of k words, and
+`IfmaCheckReturns`, that the CPU check for AVX-512 IFMA returns.
 `Rind/X86_64/RsaMont.lean`'s `mont_products` proves it at 16 and 32 words
 with BMI2 and ADX, from s2n-bignum's theorems, and from `AwsLcMont`, that
 aws-lc's unproven routines return theirs, at every other width and CPU.
@@ -919,6 +1105,10 @@ proof after those.
 
 - `hol-light/<arch>/`: rind's HOL Light proofs, one file per routine, on
   rind's fork of s2n-bignum in `thirdparty/s2n-bignum`.
+- `verified-garbage/VerifiedGarbage/`: VG's ISA models and the `Spec`
+  modules its theorems state, copied, and
+  `verified-garbage/Cosim/`, the cosimulation of them, which
+  [verified-garbage's models](#verified-garbages-models) describes.
 - `Rind/<Arch>/{Types,Funs}.lean`: Aeneas's translation, which `admin/prove`
   writes and git ignores.
 - `Rind/<Arch>/{Types,Funs}External.lean` and `Rind/Core.lean`: what the
@@ -978,8 +1168,10 @@ proof after those.
   `Rind/<Arch>/{AesModesLow,AesModesApi,AesKw}.lean`, their proofs;
   `hol-light/x86_64/aes_hw_spec.ml`, AES on the AES-NI instructions and CTR32's
   counter blocks, for the x86_64 routines' HOL Light proofs; and
+  `Rind/GhashSpec.lean` and
   `Rind/X86_64/{Ghash,PartialBlock,AesGcmGlue,AesGcm,GhashClmul,AesGcmBy8,AesGcmClmul,AesGcmAead,AesGcmAny,GhashAvx512,AesGcmAvx512}.lean`:
-  the AES-GCM proof, on x86_64 alone; `Rind/X86_64/GcmKey.lean`, the hand model
+  the AES-GCM proof, on x86_64 alone; `Rind/Aarch64/{AesGcmModel,GhashPmull}.lean`,
+  aarch64's hand model and its PMULL GHASH proof; `Rind/X86_64/GcmKey.lean`, the hand model
   of `aead::gcm::Key` and its proofs; `Rind/X86_64/ChaCha20Poly1305.lean`, the
   ChaCha20-Poly1305 and XChaCha20-Poly1305 proof above aws-lc's routines.
 - `Rind/Rsa.lean` and `Rind/RsaLemmas.lean`: RFC 8017's verification,
@@ -999,7 +1191,10 @@ proof after those.
   SymCrypt's Lean FIPS 203 spec and its NTT lemmas, vendored;
   `Rind/MlKem.lean`: FIPS 203's NTT and inverse NTT in closed form;
   `Rind/S2nMlKem.lean`: s2n-bignum's ML-KEM specs, transliterated, and their
-  proofs that they are FIPS 203's.
+  proofs that they are FIPS 203's; `Rind/MlKemCoding.lean`: FIPS 203's byte
+  coding, compression, and CBD sampling bit by bit and coefficient by
+  coefficient; `Rind/X86_64/MlKemCoding.lean`, on both targets: that rind's
+  decompression and message coding are FIPS 203's.
 - `Rind/<Arch>/ShaBlocks.lean`: SHA-1 and SHA-256's block functions on each
   target, SHA-1's padded last blocks, and SHA-256's padded last blocks and
   finish; `Rind/Aarch64/Sha256Hw.lean`, the axiom for aarch64's routine with
@@ -1021,11 +1216,10 @@ proof after those.
   `Rind/P256Group.lean`: that `p256` is prime, by a Pratt certificate;
   `Rind/N256Prime.lean`: that `n256` is prime; `Rind/P256Multiples.lean`: the
   group laws and multiples ECDSA's twin multiplication relies on;
-  `Rind/P384Multiples.lean`: the same for P-384, which no ECDSA proof uses
-  yet.
+  `Rind/P384Multiples.lean`: the same for P-384.
 - `Rind/X86_64/Naf.lean`, on both targets: that `mid::util::public_naf`
   writes a scalar's width-5 or width-6 non-adjacent form, for any number of
-  words, which P-256's ECDSA verification reads.
+  words, which P-256's and P-384's ECDSA verification reads.
 - `Rind/X86_64/P256Dispatch.lean`, `Rind/X86_64/P256Agree.lean`, and
   `Rind/X86_64/P256.lean`: the hand model of P-256's key generation, and the
   P-256 agreement and key generation proofs, on both targets.
@@ -1041,6 +1235,9 @@ proof after those.
   dispatch and key generation, the proof of `high::ecdsa` and `mid::p256`'s
   ECDSA at P-256, the signature API's theorems, and each target's check of a
   key pair's public key.
+- `Rind/X86_64/P384Ecdsa.lean` and `Rind/X86_64/P384Signature.lean`, on both
+  targets, over `Rind/<Arch>/P384KeyCheck.lean`, one per target: the same for
+  P-384 with SHA-384.
 
 ## Trust base
 
@@ -1054,7 +1251,7 @@ Beyond Lean's kernel:
   and RFC 8018.
 - The restatement of each s2n-bignum and aws-lc-verification theorem, and of
   each of rind's own HOL Light theorems, as an axiom, under the composition rule in the
-  [verification epic](/quest/m3/verified/README.md), and on aarch64 the
+  [verification epic](/quest/m4/verified/README.md#composition-rule), and on aarch64 the
   caveats aws-lc-verification lists for its NSym proof. It lets a
   group-membership fact a proof must decide be its defining equation, so
   `group_carrier p256_group` is the curve equation that HOL Light's

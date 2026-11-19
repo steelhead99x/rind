@@ -1,11 +1,12 @@
 // Checks the built site in dist/, offline: every page has its Markdown twin, a
 // line in llms.txt, and a sitemap entry; every page carries the
-// Content-Security-Policy that keeps it to its own origin; and every link into
-// the site or the repository resolves, anchors included.
+// Content-Security-Policy that keeps it to its own origin and the social card
+// it names; a Markdown twin links the site's pages by their twins; and every
+// link into the site or the repository resolves, anchors included.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { Lexer, type Token, type Tokens, walkTokens } from "marked";
-import { hrefs, lex } from "../src/lib/markdown";
+import { Lexer, type Tokens, walkTokens } from "marked";
+import { hrefs, lex, slugger } from "../src/lib/markdown";
 import { origin, pages, twinPath } from "../src/lib/pages";
 import { repoUrl, root } from "../src/lib/repo";
 
@@ -37,39 +38,27 @@ for (const page of pages) {
 	if (!sitemap.includes(`<loc>${origin}${page.path}</loc>`)) fail(`sitemap.xml does not list ${page.path}`);
 }
 
-// The ids a built page's anchors can name.
-const ids = (file: string) =>
-	new Set([...tags(text(file))].flatMap(([, attrs]) => attrs.filter(([name]) => name === "id").map(([, value]) => value)));
+// The ids a built page's anchors can name: the ids in its HTML, or in a
+// Markdown twin's, plus the anchors of the twin's headings.
+function ids(file: string): Set<string> {
+	const out = new Set(
+		[...tags(text(file))].flatMap(([, attrs]) => attrs.filter(([name]) => name === "id").map(([, value]) => value)),
+	);
+	if (file.endsWith(".md")) {
+		const slug = slugger();
+		walkTokens(lex(text(file)), (t) => void (t.type === "heading" && out.add(slug(t as Tokens.Heading))));
+	}
+	return out;
+}
 
 // GitHub's anchor for each heading of a repository Markdown file, and each id
 // or name its HTML gives, such as `<a name="x">`.
 function anchors(file: string): Set<string> {
-	// A heading's text, without the tags of any HTML in it, as GitHub reads it.
-	const plain = (tokens: Token[]): string =>
-		tokens
-			.map((t) => (t.type === "html" ? "" : "tokens" in t && t.tokens ? plain(t.tokens) : "text" in t ? t.text : ""))
-			.join("");
-	// A repeated slug takes the next `-n` no earlier anchor holds, as github-slugger does,
-	// so `Foo`, `Foo`, `Foo-1` are `foo`, `foo-1`, `foo-1-1`.
-	const counts = new Map<string, number>();
+	const slug = slugger();
 	const out = new Set<string>();
 	const tokens = Lexer.lex(readFileSync(path.join(root, file), "utf8"));
 	// Every heading in document order, nested ones included, as each takes a slug.
-	const headings: Tokens.Heading[] = [];
-	walkTokens(tokens, (t) => void (t.type === "heading" && headings.push(t as Tokens.Heading)));
-	for (const t of headings) {
-		const base = plain(t.tokens)
-			.toLowerCase()
-			.replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, "")
-			.replaceAll(" ", "-");
-		let slug = base;
-		while (out.has(slug)) {
-			const n = (counts.get(base) ?? 0) + 1;
-			counts.set(base, n);
-			slug = `${base}-${n}`;
-		}
-		out.add(slug);
-	}
+	walkTokens(tokens, (t) => void (t.type === "heading" && out.add(slug(t as Tokens.Heading))));
 	walkTokens(tokens, (t) => {
 		if (t.type !== "html") return;
 		for (const [, attrs] of tags(t.raw)) {
@@ -98,6 +87,7 @@ function check(from: string, url: string) {
 		const file = target.endsWith("/") ? `${target}index.html` : target;
 		const found = [file, `${file}.html`].find((f) => files.includes(f));
 		if (!found) return fail(`${from}: ${url} is not in the build`);
+		if (from.endsWith(".md") && found.endsWith(".html")) fail(`${from}: ${url} is a page, so a twin links its Markdown`);
 		if (fragment && !ids(found).has(fragment)) fail(`${from}: ${found} has no id "${fragment}"`);
 		return;
 	}
@@ -192,8 +182,12 @@ for (const file of files) {
 	if (file.endsWith(".html")) {
 		const html = text(file);
 		policy(file, html);
-		for (const [, attrs] of tags(html)) {
+		for (const [tag, attrs] of tags(html)) {
 			for (const [name, value] of attrs) if (name === "href") check(file, value);
+			// The card a pasted link shows is read from the page, so it must be in the build.
+			if (tag === "meta" && attrs.some(([n, v]) => n === "property" && v === "og:image")) {
+				check(file, attrs.find(([n]) => n === "content")?.[1] ?? "");
+			}
 		}
 	} else if (file.endsWith(".md") || file.endsWith(".txt")) {
 		// Links, which include URLs written bare in prose, as GFM autolinks them,

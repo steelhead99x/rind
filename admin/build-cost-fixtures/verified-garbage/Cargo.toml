@@ -1,0 +1,15 @@
+[package]
+name = "build-cost-verified-garbage"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Its own workspace, so it resolves and builds alone.
+[workspace]
+
+[dependencies]
+# The version verified-garbage depends on, for the P-256 scalar it has no
+# generator for.
+getrandom = "0.4"
+# Not on crates.io: the commit rind-bench pins.
+verified-garbage = { git = "https://github.com/pyca/verified-garbage", rev = "0aa40d6c21fd02943fe5b38a5b69b6213d07764d" }

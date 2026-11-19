@@ -233,6 +233,38 @@ curve25519-dalek <https://github.com/dalek-cryptography/curve25519-dalek>
   Copyright (c) 2016-2021 Henry de Valence. All rights reserved.
   License: BSD-3-Clause.
 
+pyca/verified-garbage <https://github.com/pyca/verified-garbage>
+
+  What: the files under rind/src/low/*/vg, which admin/import-vg
+  takes from the Rust that verified-garbage generates from its Lean
+  sources, at commit 0aa40d6c21fd02943fe5b38a5b69b6213d07764d:
+  ChaCha20-Poly1305 on aarch64 with SVE2, and the ChaCha20 and
+  Poly1305 routines it calls; ChaCha20 on x86_64 with AVX2 and with
+  AVX-512 VL; X25519 and Ed25519 on x86_64 with AVX-512 IFMA, and the
+  SHA-512 and field and point routines they call; RSA's public
+  operation and CRT on x86_64 with AVX-512 IFMA, and the Montgomery
+  product they call; ML-KEM-768's encapsulation key check and
+  encapsulation on x86_64 and on aarch64 with the SHA-3 instructions,
+  and its key generation and decapsulation on x86_64 with AVX-512;
+  PBKDF2 on aarch64 over HMAC-SHA1 and HMAC-SHA256 with the crypto
+  extension and over HMAC-SHA384 and HMAC-SHA512 with the SHA-512
+  instructions; P-256's public key derivation, ECDH, and ECDSA
+  verification on x86_64 with BMI2 and ADX, ECDH and verification
+  also with AVX-512 IFMA, and on aarch64; and the Keccak, hash,
+  arithmetic, and point routines and tables they call.
+  Copyright (c) Individual contributors.
+  License: Apache-2.0 OR BSD-3-Clause, which the files keep.
+
+  What: the Lean ISA models, the ML-KEM and SHA-3 specs, and the RSA and
+  ChaCha20 specs and contracts rind's proofs import or restate, under
+  proofs/verified-garbage/VerifiedGarbage, which admin/import-vg-models
+  copies byte for byte from verified-garbage
+  at the same commit, so they carry no SPDX comment; this entry names
+  their license.
+  Copyright (c) Individual contributors.
+  License: Apache-2.0 OR BSD-3-Clause, taken under Apache-2.0.
+  verified-garbage has no NOTICE file.
+
 SPHINCS+ <https://github.com/sphincs/sphincsplus>
 
   What: rind/src/mid/slhdsa.rs, a port of the SPHINCS+ team's FIPS 205

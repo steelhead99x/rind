@@ -4,7 +4,15 @@ name: bench
 on:
   schedule:
     - cron: "23 12 * * 6"
+  # A dispatch measures every bench target, unless `benches` names some, such
+  # as `-f benches='aes_gcm sha2'`: then each row times only those of them it
+  # times at all, and a row left with none skips.
   workflow_dispatch:
+    inputs:
+      benches:
+        description: Bench targets of rind-bench to measure, space-separated; empty measures all
+        type: string
+        default: ""
 
 concurrency:
   group: bench-${{ github.ref }}
@@ -39,23 +47,40 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@851112458b5f28a29e5bc14a690c3f283d9dcc6f # v1.26.2
-
-      - name: Install cargo-codspeed
-        run: cargo binstall -y cargo-codspeed
-
-      - name: Build benchmarks
+      # The shard's targets, of those the dispatch asked for. Only a shard
+      # left with none of them skips; one with no targets at all fails.
+      - name: Select benchmarks
+        id: select
         run: |
           mapfile -t benches < <(cargo metadata --format-version 1 --no-deps |
             jq -r --argjson shard ${{ matrix.shard }} '[.packages[] | select(.name == "rind-bench").targets[]
               | select(.kind == ["bench"]).name] | sort | to_entries[]
-              | select(.key % 3 == $shard - 1) | "--bench", .value')
-          # Without --bench, cargo codspeed builds every target into one upload.
+              | select(.key % 3 == $shard - 1) | .value')
           [ ${#benches[@]} -gt 0 ] || { echo "no bench targets for shard ${{ matrix.shard }}"; exit 1; }
-          cargo codspeed build -p rind-bench --features __bench_codspeed "${benches[@]}"
+          selected=$(sh/bench-select.sh "${benches[*]}")
+          echo "benches=$selected" >>"$GITHUB_OUTPUT"
+        env:
+          BENCHES: ${{ inputs.benches }}
+
+      - name: Install cargo-binstall
+        if: steps.select.outputs.benches != ''
+        uses: cargo-bins/cargo-binstall@851112458b5f28a29e5bc14a690c3f283d9dcc6f # v1.26.2
+
+      - name: Install cargo-codspeed
+        if: steps.select.outputs.benches != ''
+        run: cargo binstall -y cargo-codspeed
+
+      # Without --bench, cargo codspeed builds every target into one upload.
+      - name: Build benchmarks
+        if: steps.select.outputs.benches != ''
+        run: |
+          read -ra benches <<<"$SELECTED"
+          cargo codspeed build -p rind-bench --features __bench_codspeed "${benches[@]/#/--bench=}"
+        env:
+          SELECTED: ${{ steps.select.outputs.benches }}
 
       - name: Run benchmarks
+        if: steps.select.outputs.benches != ''
         uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5.6.3
         with:
           mode: simulation
@@ -66,10 +91,11 @@ jobs:
   # no phone or board, and it times the armv7 build natively too.
   #
   # A portable row denies both libraries what the slower path lacks: on
-  # aarch64, the crypto extension and the SHA-512 and SHA-3 instructions, as
-  # a Raspberry Pi 4 lacks them, and one row only the SHA-512 and SHA-3
-  # instructions, as a Cortex-A76 and a Neoverse N1 lack them, so rind runs
-  # its 4-way AES-GCM kernels, scalar SHA-512, and scalar Keccak; on armv7,
+  # aarch64, the crypto extension, the SHA-512 and SHA-3 instructions, and
+  # SVE2, as a Raspberry Pi 4 lacks them, and one row only the SHA-512 and
+  # SHA-3 instructions and SVE2, as a Cortex-A76 and a Neoverse N1 lack them,
+  # so rind runs its 4-way AES-GCM kernels, scalar SHA-512, scalar Keccak, and
+  # NEON ChaCha20-Poly1305; on armv7,
   # the crypto extension, which no ARMv7 core has, and which aws-lc's 32-bit
   # ARM detection has no variable to deny, so its build fixes its
   # capabilities to NEON alone with `OPENSSL_STATIC_ARMCAP`; on x86_64, what Sandy Bridge lacks: AVX2,
@@ -111,7 +137,7 @@ jobs:
             personality: linux64
             portable: true
             cpu: no-sha3
-            benches: --bench aes_gcm --bench sha2 --bench sha3 --bench hmac --bench hkdf --bench mlkem --bench mldsa
+            benches: --bench aes_gcm --bench chacha20poly1305 --bench xchacha20poly1305 --bench sha2 --bench sha3 --bench hmac --bench hkdf --bench mlkem --bench mldsa
           - target: armv7-unknown-linux-gnueabihf
             runner: ubuntu-24.04-arm
             personality: linux32
@@ -184,11 +210,30 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
 
+      # A dispatch that names bench targets runs those of the row's; a row
+      # timing none of them skips the rest.
+      - name: Select benchmarks
+        id: select
+        run: |
+          args=$ROW
+          if [ -n "$BENCHES" ]; then
+            read -ra names <<<"${ROW//--bench /}"
+            selected=$(sh/bench-select.sh "${names[*]}")
+            args=
+            for name in $selected; do args+=" --bench $name"; done
+            [ -n "$args" ] || { echo "skip=true" >>"$GITHUB_OUTPUT"; echo "This row times none of: $BENCHES"; }
+          fi
+          echo "args=$args" >>"$GITHUB_OUTPUT"
+        env:
+          ROW: ${{ matrix.benches }}
+          BENCHES: ${{ inputs.benches }}
+
       # Hosted hardware can change under the same label. The personality
       # makes the kernel list the features the target's code sees, such as
       # the crypto instructions aws-lc-rs uses. Arm kernels call that list
       # `Features`, and x86 ones `flags`.
       - name: Record the CPU
+        if: steps.select.outputs.skip != 'true'
         shell: bash
         run: |
           model=$(lscpu | sed -n 's/^Model name: *//p' | head -n1)
@@ -196,11 +241,11 @@ jobs:
           echo "CPU: $model; ${{ matrix.target }} features:$features" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Install OpenSSL
-        if: matrix.target != 'armv7-unknown-linux-gnueabihf'
+        if: steps.select.outputs.skip != 'true' && matrix.target != 'armv7-unknown-linux-gnueabihf'
         run: sudo apt-get update && sudo apt-get install -y libssl-dev
 
       - name: Install armhf toolchain and OpenSSL
-        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        if: steps.select.outputs.skip != 'true' && matrix.target == 'armv7-unknown-linux-gnueabihf'
         run: |
           sudo dpkg --add-architecture armhf
           sudo apt-get update
@@ -214,6 +259,7 @@ jobs:
       # another every CPU with it has, such as ADX without AVX2. On armv7 it
       # detects no NEON or crypto extension, so those tiers name nothing.
       - name: Run benchmarks
+        if: steps.select.outputs.skip != 'true'
         run: |
           vg_deny() {
             local flags name flag names allowed=()
@@ -238,17 +284,17 @@ jobs:
             libs='rind|aws-lc-rs|verified-garbage'
             export RUSTFLAGS='--cfg rind_cpu_disable'
             case "${{ matrix.target }}/${{ matrix.cpu }}" in
-              # aws-lc's SHA512 and SHA3 bits.
+              # aws-lc's SHA512 and SHA3 bits. aws-lc has no SVE2 code to deny.
               aarch64-*/no-sha3)
-                export RIND_CPU_DISABLE_sha3=1
+                export RIND_CPU_DISABLE_sha3=1 RIND_CPU_DISABLE_sve2=1
                 export OPENSSL_armcap='~0x840'
-                vg_deny sha3
+                vg_deny sha3 sve2
                 ;;
               aarch64-*)
-                export RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha2=1 RIND_CPU_DISABLE_sha3=1
+                export RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha2=1 RIND_CPU_DISABLE_sha3=1 RIND_CPU_DISABLE_sve2=1
                 # aws-lc's AES, SHA1, SHA256, PMULL, SHA512, and SHA3 bits.
                 export OPENSSL_armcap='~0x87c'
-                vg_deny aes sha2 sha3
+                vg_deny aes sha2 sha3 sve2
                 ;;
               armv7-*/no-crypto)
                 export RIND_CPU_DISABLE_aes=1 RIND_CPU_DISABLE_pmull=1 RIND_CPU_DISABLE_sha1=1 RIND_CPU_DISABLE_sha2=1
@@ -318,7 +364,7 @@ jobs:
                 ;;
             esac
           fi
-          cargo bench "${config[@]}" -p rind-bench ${{ matrix.benches }} --target ${{ matrix.target }} -- --noplot "(^|/)($libs)(/|\$)"
+          cargo bench "${config[@]}" -p rind-bench ${{ steps.select.outputs.args }} --target ${{ matrix.target }} -- --noplot "(^|/)($libs)(/|\$)"
         env:
           # Times RSA key generation too, which varies from run to run.
           NOISY_BENCHMARKS: 1
@@ -332,6 +378,7 @@ jobs:
       # `admin/bench-report weekly` turns into BENCHMARKS.md's CPU-tier
       # heatmap.
       - name: Save results
+        if: steps.select.outputs.skip != 'true'
         shell: bash
         run: |
           # Whether the runner has the features rind's AVX-512 AES-GCM needs, so
@@ -356,6 +403,7 @@ jobs:
           TIER: ${{ matrix.cpu }}
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.select.outputs.skip != 'true'
         with:
           name: bench-${{ matrix.target }}${{ matrix.portable && '-portable' || '' }}${{ matrix.cpu && format('-{0}', matrix.cpu) || '' }}
           path: bench-results.json
@@ -363,6 +411,7 @@ jobs:
       # One row per benchmark, in run order, with rind's time over the fastest
       # baseline's, and over verified-garbage's.
       - name: Summarize
+        if: steps.select.outputs.skip != 'true'
         shell: bash
         run: |
           find target/criterion -path '*/new/benchmark.json' -printf '%T@ %p\n' | sort -n | cut -d' ' -f2- |
