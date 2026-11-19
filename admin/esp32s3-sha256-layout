@@ -54,6 +54,9 @@ gcc=$xtensa_bin/xtensa-esp32s3-elf-gcc
 ld=$xtensa_bin/xtensa-esp32s3-elf-ld
 py=$root/admin/esp32s3-sha256-layout.py
 
+# The symbol matcher is checked on real rustc v0 and legacy names first.
+python3 "$py" selftest
+
 if [ -n "$image" ]; then
   if [ -z "$map" ] || [ ! -f "$image" ] || [ ! -f "$map" ]; then
     printf 'esp32s3-sha256-layout: --image needs an ELF and a --map\n' >&2

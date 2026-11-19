@@ -8,7 +8,9 @@
 # so no Lean module imports both. The aarch64 hand models and its X25519,
 # SHA-512, ChaCha20, Ed25519, SHA-1, SHA-256, HMAC, digest, HKDF, and PBKDF2 proofs are the
 # x86_64 ones with the target renamed, which this writes too, all but each
-# target's own `ShaBlocks.lean` and `HashAxioms.lean`. The portable backend,
+# target's own `ShaBlocks.lean` and `HashAxioms.lean`; aarch64 alone also
+# translates `mid::pbkdf2_vg`, which only its CPUs run, and proves it in its
+# own `Pbkdf2Vg.lean`. The portable backend,
 # translated for x86_64 into `proofs/Rind/Portable/`, takes the hash, HMAC,
 # HKDF, PBKDF2, and ChaCha20 header protection proofs the same way, over the
 # contracts in `ShaBlocks.lean` and `Sha512Entry.lean`. So does armv7, its
@@ -1015,6 +1017,9 @@ only_quoted rind/src/aead.rs "$out/AeadDispatch.rs" '= Algorithm \{'
 # proof assumes, and `proofs/Rind/X86_64/P256Table.lean` what x86_64's
 # Booth driver, which is translated, reads, and each target's `P256Base.lean`
 # that its first row holds G to 32G, which ECDSA verification looks up.
+# P-256's glue around pyca/verified-garbage's routines is translated, down to
+# `low::<arch>::p256_vg`, whose checks and wrappers are opaque and whose
+# routines `VgP256.lean`'s axioms state.
 # P-384's key generation draws through a `dyn RandomSource` too, so it is
 # opaque, and `proofs/Rind/X86_64/P384Dispatch.lean` models it on both
 # targets; its comb tables are translated, which `P384Table.lean` checks.
@@ -1294,9 +1299,6 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --opaque 'crate::high::curve::_::generate_random_key' \
     --opaque 'crate::mid::p256::_::generate' \
     --opaque 'crate::mid::p256::_::new_random' \
-    --opaque 'crate::mid::p256::_::vg_public_key' \
-    --opaque 'crate::mid::p256::_::vg_diffie_hellman' \
-    --opaque crate::mid::p256::vg_verify \
     --include crate::low::x86_64::adx_mux::p256_montjadd \
     --include crate::low::x86_64::adx_mux::p256_montjdouble \
     --include crate::low::x86_64::adx_mux::p256_montjmixadd \
@@ -1315,6 +1317,7 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --include crate::low::x86_64::adx_mux::p384_montjscalarmul \
     --include crate::low::x86_64::adx_mux::curve25519_x25519 \
     --include crate::low::x86_64::adx_mux::curve25519_x25519base \
+    --include 'crate::low::x86_64::curve25519_ifma::_::clone' \
     --include crate::low::x86_64::adx_mux::edwards25519_decode \
     --include crate::low::x86_64::adx_mux::edwards25519_scalarmulbase \
     --include crate::low::x86_64::adx_mux::bignum_madd_n25519 \
@@ -1349,8 +1352,6 @@ extract x86_64 X86_64 "${hashes[@]}" "${assembly[@]}" \
     --opaque 'crate::low::x86_64::chacha20::_::apply_avx2' \
     --opaque 'crate::low::x86_64::chacha20::_::apply_avx512vl' \
     --opaque crate::low::x86_64::chacha20::cipher_ssse3_4x \
-    --opaque crate::low::x86_64::chacha20::cipher_avx2 \
-    --opaque crate::low::generic::chacha20::cipher \
     --include 'crate::mid::aes::_' \
     --include crate::low::x86_64::aes \
     --start-from crate::low::x86_64::aes::AesDecKey::new \
@@ -1446,9 +1447,6 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --opaque 'crate::high::curve::_::generate_random_key' \
     --opaque 'crate::mid::p256::_::generate' \
     --opaque 'crate::mid::p256::_::new_random' \
-    --opaque 'crate::mid::p256::_::vg_public_key' \
-    --opaque 'crate::mid::p256::_::vg_diffie_hellman' \
-    --opaque crate::mid::p256::vg_verify \
     --include crate::low::aarch64::sha1::sha1_compress_padded \
     --include crate::low::aarch64::sha3_keccak_f1600_mux \
     --include crate::low::aarch64::sha3_keccak4_f1600_mux \
@@ -1475,6 +1473,13 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
     --start-from crate::low::generic::mlkem::mlkem_compress_d11 \
     --start-from crate::low::aarch64::mlkem768_vg::Encaps::check_ek \
     --start-from crate::low::aarch64::mlkem768_vg::Encaps::encaps \
+    --include crate::low::aarch64::pbkdf2_vg \
+    --start-from crate::low::aarch64::pbkdf2_vg::Pbkdf2::sha1 \
+    --start-from crate::low::aarch64::pbkdf2_vg::Pbkdf2::sha256 \
+    --start-from crate::low::aarch64::pbkdf2_vg::Pbkdf2::sha384 \
+    --start-from crate::low::aarch64::pbkdf2_vg::Pbkdf2::sha512 \
+    --start-from 'crate::low::aarch64::pbkdf2_vg::_::derive' \
+    --opaque 'crate::low::aarch64::pbkdf2_vg::_::derive' \
     --start-from crate::mid::aes_gcm::AesGcm::new \
     --start-from crate::mid::aes_gcm::AesGcm::encrypt \
     --start-from crate::mid::aes_gcm::AesGcm::decrypt \
@@ -1496,7 +1501,9 @@ extract aarch64 Aarch64 "${hashes[@]}" "${assembly[@]}" \
 # The AEAD key's conversion is x86_64's alone: the AEAD API's model and proofs
 # are x86_64's, as AES-GCM's are.
 extract_kdf x86_64 X86_64 --start-from '{impl core::convert::From for crate::aead::Key}'
-extract_kdf aarch64 Aarch64
+extract_kdf aarch64 Aarch64 --include crate::mid::pbkdf2_vg \
+    --include 'crate::mid::sha1::_::BLOCK_SZ' --include 'crate::mid::sha1::_::OUTPUT_SZ' \
+    --include 'crate::mid::sha2::_::BLOCK_SZ' --include 'crate::mid::sha2::_::OUTPUT_SZ'
 extract_armv7
 
 # The portable backend, which builds only under the cfg CI's portable jobs
@@ -1533,6 +1540,9 @@ done
 # The AEAD model imports nothing aarch64 has, and no aarch64 translation reaches it.
 sed -i '/Rind.Aarch64.AeadDispatch/d' proofs/Rind/Aarch64/Kdf/TypesExternal.lean
 sed -i '/-- BEGIN aead/,/-- END aead/d' proofs/Rind/Aarch64/Kdf/FunsExternal.lean
+# aarch64 translates `mid::pbkdf2_vg`, which the other targets leave opaque.
+sed -i '/-- BEGIN vg/,/-- END vg/d' proofs/Rind/Aarch64/Kdf/TypesExternal.lean proofs/Rind/Aarch64/Kdf/FunsExternal.lean
+sed -i 's/^public import Rind.Aarch64.HkdfExpand$/&\npublic import Rind.Aarch64.Kdf.VgExternal/' proofs/Rind/Aarch64/Kdf/FunsExternal.lean
 # The portable backend's hash, HMAC, KDF, and header-protection proofs are the
 # x86_64 ones with the target renamed, over its own block functions' contracts
 # in `ShaBlocks.lean` and `Sha512Entry.lean`, and its compares' proof in

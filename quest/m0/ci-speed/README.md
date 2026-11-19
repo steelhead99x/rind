@@ -1,8 +1,8 @@
-# CI stops making PRs wait
+# [S] CI stops making PRs wait
 
 ## Goal
 
-rind's PRs and merge queue wait on machines only for real work: PR checks get a GitHub-hosted runner without queueing behind nightly and dispatched jobs, the merge queue loses its fixed overhead, and the heavy suites run at a cadence the hosted runners absorb. Once every child lands, re-measure the way this epic was planned and record the before and after in the last child's PR.
+rind's PRs and merge queue wait on machines only for real work: PR checks get a GitHub-hosted runner without queueing behind nightly and dispatched jobs, the merge queue loses its fixed overhead, and the heavy suites run at a cadence the hosted runners absorb. Once every child lands, re-measure the way this epic was planned and record the before and after in this epic's PR.
 
 ## Plan
 
@@ -17,6 +17,10 @@ Planned with the maintainer on 2026-11-12 from 14 days of Actions data (Oct 29 t
 - ✅ SDE keeps every CPU tier, weekly; PRs run only the tiers their diff can reach (rejected: buying the old CPUs to run them natively). Native masking with `rind_cpu_disable` picks a tier's paths but does not fault on an instruction the tier lacks, which is what SDE is for.
 - ✅ These quests sit in m0, whose goal covers hosted CI that blocks every PR (rejected: m2).
 - Re-measure with the Actions REST API: per-label wait from a job's `created_at` to `started_at`, merge-group build time, and machine-hours per workflow over the 14 days after the last child lands.
+
+## Scheduled
+
+- 2026-12-03 - 14 days of Actions data after the last child, [kixel-ai/rind#843](https://github.com/kixel-ai/rind/pull/843), lands; start later if it landed after 2026-11-19
 
 ## Related
 

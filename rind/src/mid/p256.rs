@@ -160,11 +160,8 @@ impl PrivateKey {
     fn vg_public_key(&self, vg: low::p256_vg::P256) -> [u8; PublicKey::BYTES] {
         // It fails only for a scalar outside [1, n), which `Scalar`'s
         // checked decoding refuses.
-        let encoded = match vg
-            .public_key(&self.scalar.as_bytes())
-            .map(low::ct::into_public)
-        {
-            Some(encoded) => encoded,
+        let encoded = match vg.public_key(&self.scalar.as_bytes()) {
+            Some(encoded) => low::ct::into_public(encoded),
             None => panic!("internal fault"),
         };
         // Checked on the curve, as `public_point` checks rind's.

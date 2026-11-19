@@ -150,8 +150,9 @@ global allocator. CI builds it for `x86_64-unknown-none`,
   bit can stay clear throughout).
 - aarch64 cannot ask without an OS, so it runs what the target enables at
   compile time: `-C target-feature=+aes,+sha2` turns on its crypto extension
-  paths, `+sha3` those that use the SHA3 extension, such as SHA-512's
-  (Keccak-f1600 runs on it only on Apple's cores, so not here), and `+sve2`
+  paths, `+sha3` those that use the SHA3 extension, such as SHA-512's and
+  four-way Keccak-f1600's (fewer states run on it only on Apple's cores, so
+  not here), and `+sve2`
   the SVE2 ChaCha20-Poly1305. 32-bit `arm` asks only Linux and Android, so
   elsewhere it runs the code for a core with neither NEON nor the crypto
   extension, whatever the target enables.

@@ -1,4 +1,5 @@
 import Rind.X86_64.S2nBignum
+import Rind.X86_64.VgP256
 import Rind.X86_64.Dispatch
 import Rind.Bytes
 import Mathlib.Tactic.LinearCombination
@@ -20,18 +21,13 @@ namespace rind.x86_64
 
 /-! ## What the theorems state -/
 
-/-- Neither of pyca/verified-garbage's P-256 checks passes, so P-256 runs the
-code these theorems state: `check`, for ECDH and verification, and
-`check_public_key`, for the public key's derivation. VG's routines are proven
-in that project, not here. Both checks fail on exactly the x86-64 CPUs
-without BMI2, ADX, AVX, or AVX2; every 64-bit Arm CPU passes them. -/
-def NoVgP256 : Prop :=
-  low.x86_64.p256_vg.P256.check = ok none ∧ low.x86_64.p256_vg.P256.check_public_key = ok none
-
-theorem NoVgP256.eq (hvg : NoVgP256) : low.x86_64.p256_vg.P256.check = ok none := hvg.1
-
-theorem NoVgP256.eq_public_key (hvg : NoVgP256) :
-    low.x86_64.p256_vg.P256.check_public_key = ok none := hvg.2
+/-- pyca/verified-garbage's P-256 checks return, reading no input: `check`,
+for ECDH and verification, and `check_public_key`, for the public key's
+derivation. Where one passes, P-256 runs VG's routine, whose contract
+`Rind.X86_64.VgP256` states, and otherwise rind's own; the theorems cover
+both. -/
+def RunsP256 : Prop :=
+  (∃ t, low.x86_64.p256_vg.P256.check = ok t) ∧ ∃ t, low.x86_64.p256_vg.P256.check_public_key = ok t
 
 /-- The coordinates an encoded point names, read big-endian after its tag byte. -/
 def x962Coords (bytes : List U8) : Nat × Nat :=
@@ -625,12 +621,82 @@ theorem multiply_spec (_h : Runs) (pt : mid.p256.AffineMontPoint) (k : mid.p256.
     · rw [q_post, pairNat_append _ _ fe4.property fe5.property, ← hxa, ← hya]
       exact Prod.ext fe4_post fe5_post
 
+theorem as_bytes_uncompressed_spec (_hr : Runs) (pt : mid.p256.AffineMontPoint) (hx : (pairNat pt.xy.val).1 < p256)
+    (hy : (pairNat pt.xy.val).2 < p256) :
+    mid.p256.AffineMontPoint.as_bytes_uncompressed pt ⦃ b =>
+      b.val.head? = some 4#u8 ∧
+        x962Coords b.val = (p256RInv * (pairNat pt.xy.val).1 % p256, p256RInv * (pairNat pt.xy.val).2 % p256) ⦄ := by
+  have hl : (pt.xy.val).length = 8 := pt.xy.property
+  unfold mid.p256.AffineMontPoint.as_bytes_uncompressed
+  simp only [mid.p256.FieldElement.BYTES]
+  have h65 : (Array.repeat 65#usize 0#u8).val.length = 65 := by simp [Array.repeat]
+  step*
+  · have hsl : s.length = 65 := by simp [Slice.length, s_post, Array.repeat]
+    rw [indicator_post1, hsl]; simp
+  · simpa [feNat, fe_post, pairNat] using hx
+  · simp [x_post, s1_post]
+  · simpa [feNat, fe2_post, pairNat_drop _ hl] using hy
+  · have hsl : s.length = 65 := by simp [Slice.length, s_post, Array.repeat]
+    simp [x_post1, indicator_post1, hsl, s2_post]
+  · have hsl : s.length = 65 := by simp [Slice.length, s_post, Array.repeat]
+    have hxyl : xy.length = 64 := by rw [indicator_post1, hsl]
+    have ha32 : (a.val).length = 32 := a.property
+    have ha132 : (a1.val).length = 32 := a1.property
+    obtain ⟨hxy, hxyl'⟩ := x_post4 x1 y1 (by simp [x1_post, s1_post])
+      (by simp [y1_post, s2_post, hxyl])
+    obtain ⟨hall, hall'⟩ := indicator_post4 indicator1 (split_at_mut_back1 (x1, y1))
+      (by simp [indicator1_post, indicator_post]) (by rw [hxyl', hxyl, hsl])
+    have hind : indicator1.val = [4#u8] := by
+      rw [indicator1_post, Slice.set_val_eq, indicator_post2, s_post]
+      simp [Array.repeat]
+    rw [to_slice_mut_back_post, Array.from_slice_val _ _ (by rw [← Slice.length, hall', hsl]; rfl), hall, hind,
+      hxy, x1_post, y1_post, s1_post, s2_post, Array.val_to_slice, Array.val_to_slice]
+    refine ⟨rfl, ?_⟩
+    simp only [x962Coords]
+    have h1 : ([4#u8] ++ (a.val ++ a1.val)).slice 1 33 = a.val := by
+      simp [List.slice, List.take_left' ha32]
+    have h2 : ([4#u8] ++ (a.val ++ a1.val)).slice 33 65 = a1.val := by
+      simp [List.slice, List.drop_left' ha32, List.take_of_length_le, ha132]
+    rw [h1, h2, a_post, a1_post]
+    simp only [feNat] at fe1_post fe3_post
+    rw [fe1_post, fe3_post, fe_post, fe2_post, pairNat_drop _ hl]
+    rfl
+
+/-- `PrivateKey::vg_diffie_hellman`: pyca/verified-garbage's ECDH of a scalar
+below n with a point on the curve. -/
+theorem vg_diffie_hellman_spec (h : Runs) (vg : low.x86_64.p256_vg.P256) (k : mid.p256.PrivateKey)
+    (peer : mid.p256.PublicKey) (P : P256Point) (hk : wordsNat k.scalar.val < n256)
+    (hP : p256OnCurve P) (hrep : p256Represents2 P (pairNat peer.point.xy.val)) :
+    mid.p256.PrivateKey.vg_diffie_hellman k vg peer ⦃ r =>
+      match p256Pow P (wordsNat k.scalar.val) with
+      | some (x, _) => ∃ s, r = .Ok s ∧ beNat s.val = x
+      | none => r = .Err .Fault ⦄ := by
+  unfold mid.p256.PrivateKey.vg_diffie_hellman mid.p256.Scalar.as_bytes
+  obtain ⟨hx, hy, hPe⟩ := hrep
+  step with u64x4_to_be_spec k.scalar as ⟨a, ha⟩
+  step with as_bytes_uncompressed_spec h peer.point hx hy as ⟨b, hb4, hbc⟩
+  have hcb : some (vgP256.coords b.val) = P := by
+    rw [← hPe]; exact congrArg some hbc
+  step with vg_p256_ecdh_spec vg a b as ⟨o, ho⟩
+  simp only [vgBytes, vgP256.ofBytes_bv, ha] at ho
+  rw [vgP256.exchange_eq _ hk b.val b.property hb4 (hcb ▸ hP), hcb] at ho
+  rcases hq : p256Pow P (wordsNat k.scalar.val) with _ | ⟨x, y⟩ <;> rw [hq] at ho <;> simp only at ho
+  · subst ho; simp
+  · obtain ⟨out, rfl, hout⟩ := ho
+    simp only [WP.spec_ok]
+    refine ⟨out, rfl, ?_⟩
+    have hon := vgP256.pow_onCurve P hP (wordsNat k.scalar.val)
+    rw [hq] at hon
+    show beNat out.val = x
+    rw [← vgP256.ofBytes_bv, hout,
+      vgP256.ofBytes_toBytes_lt _ _ (lt_trans hon.1 (by simp [p256]))]
+
 theorem not_onCurve_zero : ¬ p256OnCurve (some (0, 0)) := by
   simp [p256OnCurve, nist.OnCurve, p256, b256]
 
 @[step]
-theorem diffie_hellman_spec (h : Runs) (hvg : NoVgP256) (k : mid.p256.PrivateKey) (peer : mid.p256.PublicKey) (P : P256Point)
-    (hP : p256OnCurve P) (hrep : p256Represents2 P (pairNat peer.point.xy.val)) :
+theorem diffie_hellman_spec (h : Runs) (hvg : RunsP256) (k : mid.p256.PrivateKey) (peer : mid.p256.PublicKey) (P : P256Point)
+    (hk : wordsNat k.scalar.val < n256) (hP : p256OnCurve P) (hrep : p256Represents2 P (pairNat peer.point.xy.val)) :
     mid.p256.PrivateKey.diffie_hellman k peer ⦃ r =>
       match p256Pow P (wordsNat k.scalar.val) with
       | some (x, y) =>
@@ -638,7 +704,19 @@ theorem diffie_hellman_spec (h : Runs) (hvg : NoVgP256) (k : mid.p256.PrivateKey
       | none => r = .Err .Fault ⦄ := by
   unfold mid.p256.PrivateKey.diffie_hellman low.ct.into_public
   step
-  simp only [hvg.eq, bind_ok]
+  obtain ⟨⟨t, ht⟩, -⟩ := hvg
+  simp only [ht, bind_ok]
+  rcases t with _ | vg
+  swap
+  · apply WP.spec_mono (vg_diffie_hellman_spec h vg k peer P hk hP hrep)
+    intro r hr
+    rcases hq : p256Pow P (wordsNat k.scalar.val) with _ | ⟨x, y⟩ <;> simp only [hq] at hr ⊢
+    · exact hr
+    · have hon := vgP256.pow_onCurve P hP (wordsNat k.scalar.val)
+      rw [hq] at hon
+      simp only [hon, ↓reduceIte]
+      exact hr
+  simp only
   step with multiply_spec h _ _ P hP hrep as ⟨q, rx, ry, hz, hq⟩
   have hl : (q.xy.val).length = 8 := q.xy.property
   step as ⟨b, hb⟩
@@ -697,7 +775,8 @@ theorem public_from_x962_spec (h : Runs) (bytes : Slice U8) :
       · subst hr; simp
     · subst hr; simp
 
-theorem agree_spec (h : Runs) (hvg : NoVgP256) (k : mid.p256.PrivateKey) (peer : Slice U8) :
+theorem agree_spec (h : Runs) (hvg : RunsP256) (k : mid.p256.PrivateKey) (hk : wordsNat k.scalar.val < n256)
+    (peer : Slice U8) :
     high.curve.P256.Insts.RindHighAgreementAgreePrivateKey.agree k peer ⦃ r =>
       p256Agreement (wordsNat k.scalar.val) peer.val r ⦄ := by
   unfold high.curve.P256.Insts.RindHighAgreementAgreePrivateKey.agree p256Agreement
@@ -714,7 +793,7 @@ theorem agree_spec (h : Runs) (hvg : NoVgP256) (k : mid.p256.PrivateKey) (peer :
       · by_cases hon : p256OnCurve (some (x962Coords peer.val)) <;> simp only [hon, ↓reduceIte] at hr ⊢
         · obtain ⟨pk, rfl, hpk⟩ := hr
           simp only
-          step with diffie_hellman_spec h hvg k pk _ hon hpk as ⟨r1, hr1⟩
+          step with diffie_hellman_spec h hvg k pk _ hk hon hpk as ⟨r1, hr1⟩
           rcases hq : p256Pow (some (x962Coords peer.val)) (wordsNat k.scalar.val) with _ | ⟨x, y⟩ <;>
             simp only [hq] at hr1 ⊢
           · subst hr1; simp
@@ -733,18 +812,21 @@ open P256
 /-! ## The agreement API, `high::agreement`, through the modelled dispatch -/
 
 /-- A P-256 agreement with the peer's encoded public key: `p256Agreement` of
-this key's scalar. Its fault case never happens for a scalar in [1, n) if
-every finite point has order n, which follows from the curve's group having
-n points, a count that needs more than Mathlib proves (Hasse's bound at
-least). G's order, which the kernel checks, says nothing about the peer's
-point. -/
-theorem p256_agree (h : Runs) (hvg : NoVgP256) (key : high.agreement.PrivateKey)
-    (k : high.agreement.Keyed high.curve.P256 mid.p256.PrivateKey) (hk : key.«private» = .P256 k) (peer : Slice U8) :
+this key's scalar, which `hd` holds below n, as `drawKeygen_ok` proves of a
+generated key and `from_bytes_spec` of one loaded from a 32-byte scalar; a
+PKCS#8 or SEC 1 load passes other lengths through the same range check,
+which no theorem covers yet. Its fault case never happens for a scalar in [1, n) if
+every finite point has order n, which `rind.spec.p256_order` proves for every
+finite on-curve point, though this theorem does not yet use it to rule the
+fault out. -/
+theorem p256_agree (h : Runs) (hvg : RunsP256) (key : high.agreement.PrivateKey)
+    (k : high.agreement.Keyed high.curve.P256 mid.p256.PrivateKey) (hk : key.«private» = .P256 k)
+    (hd : wordsNat k.key.scalar.val < n256) (peer : Slice U8) :
     high.agreement.PrivateKey.agree key peer ⦃ r =>
       p256Agreement (wordsNat k.key.scalar.val) peer.val r ⦄ := by
   unfold high.agreement.PrivateKey.agree high.agreement.Keyed.agree
   rw [hk]
-  step with agree_spec h hvg k.key peer as ⟨r, hr⟩
+  step with agree_spec h hvg k.key hd peer as ⟨r, hr⟩
   rcases r with s | e <;> simpa using hr
 
 /-- The shared secret's bytes are the ones `p256_agree` states. -/
