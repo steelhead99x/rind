@@ -228,9 +228,11 @@ with portable Rust in place of the assembly armv7 runs regardless.
   compiles ESP-IDF v5.5.1's ESP32-S3 `core-isa.h` and requires
   `XCHAL_UNALIGNED_LOAD_HW` 1 and `XCHAL_UNALIGNED_LOAD_EXCEPTION` 0, the
   hardware `l32i` of an unaligned address. Board time of this IRAM
-  placement against `esp32s3-sha512-flash` is on the board, in
-  steelhead99x/rind-results `results/diag/esp32s3-pr94-pr87-pr85-2026-11-18`
-  (the opt-out's rolled loop is measured there once it lands). Host FIPS
+  placement against the rolled loop, which `esp32s3-sha512-flash`
+  selects, was measured on the board: 0.911 to 0.918 of its cycles for
+  SHA-512 and HMAC-SHA384. The unrolled body from flash was 11.3 to 13.1
+  times slower than that loop. The numbers are in steelhead99x/rind-results
+  `results/diag/esp32s3-pr94-pr87-pr85-2026-11-18`. Host FIPS
   180-4 vectors cover both Rust bodies. The Xtensa load is not in the host ctgrind binary:
   its instructions and shift distance are fixed. The synthetic link is not
   a full ESP-IDF image.

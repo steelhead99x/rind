@@ -8,8 +8,8 @@
 //! the ESP32-S3's 16 KiB instruction cache, so every block streams its
 //! code from flash. On that board the rolled loop takes about 0.033×
 //! main's unrolled HACL* body, about 30×. That figure is the rolled loop
-//! against that HACL* body. The IRAM placement of the unrolled body takes
-//! about 0.91× the rolled loop's cycles at 1 KiB and up on the board.
+//! against that HACL* body. Against the rolled loop on the board, the IRAM
+//! placement of the unrolled body takes 0.911 to 0.918 of its cycles.
 //!
 //! Two bodies, one per target, both following [`sha256`](sha256.rs) with
 //! one 16-word window. `rolled` is a single 80-round loop that stays in a
