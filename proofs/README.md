@@ -75,24 +75,28 @@ those inputs, in any worktree, restores in under a second.
   the instructions rind's fork adds (`thirdparty/s2n-bignum/RIND.md`); the proof checks its round
   constants against FIPS 180-4's. Its stack frame, which the routine aligns
   down to 2048 bytes, lies in the 3440 bytes below the stack pointer.
-- `aarch64/bn_mul_mont.ml`: `BN_MUL_MONT_GENERIC_SUBROUTINE_CORRECT`, rind's
+- `aarch64/bn_mul_mont.ml`: `BN_MUL_MONT_SUBROUTINE_CORRECT`, rind's
   proof that the naked function `low::aarch64::mont::bn_mul_mont`, aws-lc's
   Montgomery multiplication, writes the Montgomery product
   `x * y / 2^(64k) mod m` of its `k`-word operands, as s2n-bignum's
   `bignum_montmul` states it, given `-m^-1 mod 2^64` and
-  `x * y <= 2^(64k) * m`, for every width from two up that is not a multiple
-  of four: those its width-generic path runs, for `k < 2^58`, a 16-aligned
-  stack pointer, and `z` and the stack frame disjoint from the code and the
-  inputs, so `z` may not alias `x`. The theorem covers the dispatch,
-  the stack frame of up to `8k + 72` bytes below the stack pointer, and the
-  callee-saved registers it restores. `BN_MUL_MONT_MUL4X_SUBROUTINE_CORRECT`
-  states the same for every multiple of four from four up, through
-  `__bn_mul4x_mont`, except a multiple of eight with `x = y`: the squarings
-  `__bn_sqr8x_mont` runs, which are not proven yet. It also needs
-  `x + 32` and `m + 32` not to wrap past `2^64`, since the code reads the
-  carry of adding 32 to those pointers, and its stack frame is the
-  `8k + 160` bytes below the stack pointer, saving `x19` to `x28`. No axiom
-  in `Rind/` restates either theorem yet. The function has no relocations.
+  `x * y <= 2^(64k) * m`, for every width from two words up: for `k < 2^58`,
+  a 16-aligned stack pointer, and `z` and the `16k + 128` bytes below the
+  stack pointer disjoint from the code, the inputs, and each other, so `z`
+  may not alias `x`. It is of the Linux build's object: Apple's
+  `aws_lc/bn_mul_mont.apple.s` lacks the entry's `.align 5`, so its branches
+  can land at other offsets, and no proof covers it. At a multiple of four it also needs `x + 32` and `m + 32` not to wrap
+  past `2^64`, since the 4x path reads the carry of adding 32 to those
+  pointers. The theorem covers the dispatch, the stack frame, and the
+  callee-saved registers the function restores. It joins one theorem for
+  each routine the dispatch reaches, each with that routine's own frame:
+  `BN_MUL_MONT_GENERIC_SUBROUTINE_CORRECT` for a width that is not a multiple
+  of four, which the width-generic path runs in up to `8k + 72` bytes;
+  `BN_MUL_MONT_MUL4X_SUBROUTINE_CORRECT` for a multiple of four, through
+  `__bn_mul4x_mont` in `8k + 160` bytes, except a multiple of eight with
+  `x = y`; and `BN_MUL_MONT_SQR8X_SUBROUTINE_CORRECT` for that case, the
+  squarings `__bn_sqr8x_mont` runs in `16k + 128` bytes. No axiom in `Rind/`
+  restates any of them yet. The function has no relocations.
 - `x86_64/bn_mul_mont_nohw.ml`: `BN_MUL_MONT_NOHW_SUBROUTINE_CORRECT`, rind's
   proof that the naked function `low::x86_64::mont::bn_mul_mont_nohw`,
   aws-lc's word-serial Montgomery multiplication, writes the Montgomery
@@ -214,15 +218,26 @@ about the x86_64 ChaCha20 routines rind runs, `Stream.init_verified` and
 "What is proven" lists.
 
 `verified-garbage/` also holds the `Spec` modules whose definitions the
-axioms restating VG's theorems state, such as `VerifiedGarbage.Spec.Rsa`,
-which `Rind/X86_64/VgRsa.lean` imports, and `VerifiedGarbage.Spec.ChaCha20`
-with its contracts, which `Rind/VgChaCha20.lean` adapts and
+axioms restating VG's theorems state, such as
+`VerifiedGarbage.Spec.Rsa.PrivatePrecompute`, which `Rind/X86_64/VgRsa.lean`
+imports, with `VerifiedGarbage.Spec.Rsa` through it, VG's FIPS 203 spec,
+`VerifiedGarbage.Spec.MlKem`, which `Rind/VgOutcome.lean` imports, and `VerifiedGarbage.Spec.ChaCha20` with its
+contracts, which `Rind/VgChaCha20.lean` adapts and
 `Rind/X86_64/VgChaCha20.lean`'s axioms restate, so a pin that changes them
 shows the change in its diff, against which that re-pin must review the
 adaptation, for a change to the spec, and the axioms, for one to the
 contracts. Every re-pin also moves the axioms' links to VG's theorems and
 checks that the registrations they cite still emit the routines rind runs:
 `admin/vg-bytes` checks the code, not which theorem covers it.
+
+`Rind/VgOutcome.lean` and `Rind/<Arch>/VgMlKem.lean` restate VG's contracts
+for the ML-KEM-768 routines rind runs as one axiom per wrapper in
+`low::<arch>::mlkem768_vg`. Each states only what the wrapper returns,
+not VG's wipe of its scratch or what the routine may leak. The contracts
+they restate, VG's `Spec/MlKem/Contract.lean` and `Spec/MlKem/EncapsH.lean`,
+are not vendored, so a re-pin compares them at VG's new commit. No theorem rests
+on them yet: the ✓ also needs rind's glue in `mid/mlkem.rs` proven, and its
+fallback to rind's arithmetic.
 
 ## What is proven
 
@@ -598,9 +613,10 @@ which `Rind/Keccak.lean` proves SymCrypt's KECCAK-f[1600].
 `Rind/<Arch>/KeccakDispatch.lean` proves what rind's dispatch to the one-,
 two-, and four-state routines computes, from those theorems. Each theorem
 assumes `RunsSha3`: rind's entry guard and CPU checks pass. x86_64's AVX-512
-eight-way Keccak, which ML-KEM-512's and ML-KEM-1024's sampler runs, is not
-proven; ML-KEM-768 runs pyca/verified-garbage's code there instead, and the
-sampler only when a VG routine reaches its `SampleNTT` bound.
+eight-way Keccak, which ML-KEM-1024's sampler runs, is not
+proven; ML-KEM-768 runs pyca/verified-garbage's code there instead.
+Wherever rind's sampler runs for ML-KEM-768, it samples eight of its nine
+polynomials four at a time and the ninth alone, never eight at a time.
 
 The portable backend's Keccak-f, which its SHA-3, ML-KEM, and ML-DSA run, in
 `Rind/Portable/Keccak.lean`, over a translation of `low/portable/keccak.rs`
@@ -610,8 +626,9 @@ given FIPS 202's round constants and nothing of the CPU. Each round is
 `keccak_round` written out, which `round_spec` proves by unfolding.
 
 ML-KEM's polynomial arithmetic, against FIPS 203 as SymCrypt's Lean spec
-(`Rind/SymCrypt/MlKem.lean`, MIT) states it, though not yet rind's Rust,
-which has [its quest](/quest/m4/verified/mlkem-construction.md):
+(`Rind/SymCrypt/MlKem.lean`, MIT) states it, and of rind's Rust only the
+coding below it; the rest has
+[its quest](/quest/m4/verified/mlkem-construction.md):
 
 - `NTT_get`, `NTTInv_get` (`Rind/MlKem.lean`): Algorithms 9 and 10 compute
   the residues FIPS 203's Equations (4.12) and (4.13) define, and back;
@@ -622,6 +639,31 @@ which has [its quest](/quest/m4/verified/mlkem-construction.md):
 - `avx2ForwardNtt_eq`, `avx2InverseNtt_eq`, `avx2Mulcache_eq`, and
   `pmulaccred0K3_eq` and its siblings: the same for the x86_64 routines, which
   keep FIPS 203's coefficients in the AVX2 order.
+
+ML-KEM's decompression and message coding, on x86_64 and aarch64, in
+`Rind/X86_64/MlKemCoding.lean`, which `admin/prove` also writes for aarch64.
+They are the same Rust for ML-KEM-512, 768, and 1024, and rest on no axiom:
+
+- `decompress_spec`: `mid::mlkem::decompress::<D, L>` writes FIPS 203's
+  `Decompress_D(ByteDecode_D(bytes))`, each coefficient in `[0, q)`, for
+  every `D` from 1 to 11 and `L = 32 * D` bytes, so for the 4, 5, 10, and 11
+  bits a ciphertext's halves take;
+- `from_message_bits_spec`: K-PKE's message, as a polynomial, is
+  `Decompress_1(ByteDecode_1(m))`;
+- `to_message_bits_spec`: the message K-PKE decrypts is
+  `ByteEncode_1(Compress_1(f))` of a polynomial `f`, given Rust coefficients
+  each in `[0, q)` and equal to `f`'s modulo `q` (`Holds 0 3328`), so its
+  caller must show the coefficients canonical, not only congruent: `-1`
+  stands for the same element as 3328 but does not meet it.
+
+`Rind/MlKemCoding.lean` states what they need of the spec, with no Rust:
+`ByteEncode_bit`, `ByteDecode_get`, and `SamplePolyCBD_get` give each bit or
+coefficient of FIPS 203's `ByteEncode`, `ByteDecode`, and `SamplePolyCBD`,
+which the spec writes as loops, and `Compress_val` and `Decompress_val` give
+`Compress` and `Decompress`, which it writes as rounded rationals, as
+quotients of naturals. Nothing above these three calls them yet: K-PKE, the
+Fujisaki-Okamoto transform, the samplers, and the other encodings are the
+quest's.
 
 Ed25519 on x86_64 and aarch64, from the signature API's `ed25519::KeyPair`
 and `ed25519::PublicKey` to s2n-bignum's routines and the SHA-512 proof above, in
@@ -1139,7 +1181,10 @@ proof after those.
   SymCrypt's Lean FIPS 203 spec and its NTT lemmas, vendored;
   `Rind/MlKem.lean`: FIPS 203's NTT and inverse NTT in closed form;
   `Rind/S2nMlKem.lean`: s2n-bignum's ML-KEM specs, transliterated, and their
-  proofs that they are FIPS 203's.
+  proofs that they are FIPS 203's; `Rind/MlKemCoding.lean`: FIPS 203's byte
+  coding, compression, and CBD sampling bit by bit and coefficient by
+  coefficient; `Rind/X86_64/MlKemCoding.lean`, on both targets: that rind's
+  decompression and message coding are FIPS 203's.
 - `Rind/<Arch>/ShaBlocks.lean`: SHA-1 and SHA-256's block functions on each
   target, SHA-1's padded last blocks, and SHA-256's padded last blocks and
   finish; `Rind/Aarch64/Sha256Hw.lean`, the axiom for aarch64's routine with

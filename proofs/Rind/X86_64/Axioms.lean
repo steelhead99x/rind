@@ -17,6 +17,7 @@ import Rind.X86_64.Sha3
 import Rind.X86_64.AesKw
 import Rind.X86_64.P256Signature
 import Rind.X86_64.PointSelect
+import Rind.X86_64.MlKemCoding
 open rind.x86_64
 
 /-!
@@ -915,3 +916,15 @@ change to the trust base.
  p256_point_add_affine_spec] -/
 #guard_msgs in
 #print axioms P256Base.base_multiply_spec
+
+/-- info: 'rind.x86_64.MlKemCoding.decompress_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms MlKemCoding.decompress_spec
+
+/-- info: 'rind.x86_64.MlKemCoding.from_message_bits_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms MlKemCoding.from_message_bits_spec
+
+/-- info: 'rind.x86_64.MlKemCoding.to_message_bits_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms MlKemCoding.to_message_bits_spec
