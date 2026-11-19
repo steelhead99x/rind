@@ -112,7 +112,9 @@ module rs '^(rind[^/]*/|fuzz/|thirdparty/|Cargo\.(toml|lock)$|\.rustfmt(\.unstab
 # armv7 builds run in nix's cross shells.
 cross_tools=cargo
 [[ $(uname -s) != Linux ]] || cross_tools='cargo nix'
-module cross '^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|flake\.(nix|lock)$)' \
+# `sh/bare-metal.sh` is this module's script. It is not under `rind/src/`, so
+# `reach` treats a change to it as every backend.
+module cross '^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|rind-bench/Cargo\.toml$|sh/bare-metal(-test)?\.sh$|Cargo\.(toml|lock)$|flake\.(nix|lock)$)' \
     tools="$cross_tools" compiles
 # The published adapters' wasm32 builds, and the tests the nightly runs there.
 # rind's manifest picks the random source rind-ring's browser feature reaches.
@@ -496,30 +498,16 @@ step() {
                 run cargo clippy -p rind --test heap_scratch --test cctv --locked \
                     --target wasm32-wasip2 -- --deny warnings
             fi
-            # A target with no `std` for each architecture rind has assembly
-            # for; x86_64's, which disables SSE2, runs the portable backend.
-            # Without an OS getrandom has no source but the one its caller
-            # supplies, which a library build need not link. Built as well as
-            # linted, since codegen can fail where a check passes: on
-            # x86_64-unknown-none, curve25519-dalek compiles its AVX2 backend,
-            # which crashes LLVM there, unless the caller picks `serial`.
-            # See UPSTREAM.md, "curve25519-dalek cannot compile without SSE".
-            local rustflags
-            # And for the microcontroller targets it must keep off the arm
-            # backend (M-profile is Thumb-only, with no NEON), two of them
-            # without compare-and-swap, which build `reuse_cache_without_cas`:
-            # `thumbv6m-none-eabi` and `riscv32imc-unknown-none-elf`.
-            for target in aarch64:aarch64-unknown-none arm:armv7a-none-eabi portable:x86_64-unknown-none \
-                portable:thumbv6m-none-eabi portable:thumbv7em-none-eabihf portable:riscv32imc-unknown-none-elf; do
-                if reaches "$backends" "${target%%:*}"; then
-                    rustflags='--cfg getrandom_backend="custom"'
-                    [[ $target != *x86_64* ]] || rustflags+=' --cfg curve25519_dalek_backend="serial"'
-                    RUSTFLAGS="$rustflags" \
-                        run cargo clippy -p rind --lib --locked --target "${target#*:}" -- --deny warnings
-                    RUSTFLAGS="$rustflags --deny warnings" \
-                        run cargo build -p rind --lib --locked --target "${target#*:}"
-                fi
-            done
+            # And without std, on bare metal, which builds only the portable
+            # backend and, on `x86_64-unknown-none` with SSE2, the x86_64 one
+            # (see rind/build.rs). A change that reaches neither skips the
+            # script. `run` keeps the lane's INT/QUIT trap, which a bare
+            # script would not. The harness needs no toolchain. Xtensa is
+            # `just xtensa`: its compiler is not in this shell.
+            if reaches "$backends" x86_64 portable; then
+                run sh/bare-metal-test.sh
+                run sh/bare-metal.sh
+            fi
             ;;
         check:wasm)
             # Each published adapter, as sh/adapter-versions.sh finds them.

@@ -35,6 +35,7 @@ on:
       - Release
       - timing
       - x86-cpu
+      - xtensa
     types:
       - completed
 

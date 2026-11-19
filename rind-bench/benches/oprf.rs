@@ -1,19 +1,33 @@
 //! RFC 9497's OPRF mode on ristretto255, and its VOPRF mode on P-384,
 //! Privacy Pass's privately verifiable tokens: the client's blind, the
 //! server's evaluation, and the client's finalize.
+#[cfg(target_arch = "xtensa")]
+fn main() {}
+
+#[cfg(not(target_arch = "xtensa"))]
 mod criterion;
+#[cfg(not(target_arch = "xtensa"))]
 use std::hint::black_box;
 
+#[cfg(not(target_arch = "xtensa"))]
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
+#[cfg(not(target_arch = "xtensa"))]
 use getrandom::SysRng;
+#[cfg(not(target_arch = "xtensa"))]
 use p384::NistP384;
+#[cfg(not(target_arch = "xtensa"))]
 use rind::oprf::{RISTRETTO255_SHA512, voprf as rind_voprf};
+#[cfg(not(target_arch = "xtensa"))]
 use voprf::{OprfClient, OprfServer, Ristretto255, VoprfClient, VoprfServer};
 
+#[cfg(not(target_arch = "xtensa"))]
 const INPUT: &[u8] = b"a Privacy Pass token input";
+#[cfg(not(target_arch = "xtensa"))]
 const SEED: [u8; 32] = [0x42; 32];
+#[cfg(not(target_arch = "xtensa"))]
 const INFO: &[u8] = b"rind-bench";
 
+#[cfg(not(target_arch = "xtensa"))]
 fn oprf(c: &mut Criterion) {
     // Both derive the same key, and so the same output, by RFC 9497's
     // DeriveKeyPair.
@@ -78,6 +92,7 @@ fn oprf(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 fn voprf(c: &mut Criterion) {
     let suite = &rind::oprf::P384_SHA384;
     let rind_server = rind_voprf::ServerKey::derive(suite, &SEED, INFO).unwrap();
@@ -169,5 +184,7 @@ fn voprf(c: &mut Criterion) {
     });
 }
 
+#[cfg(not(target_arch = "xtensa"))]
 criterion_group!(benches, oprf, voprf);
+#[cfg(not(target_arch = "xtensa"))]
 criterion_main!(benches);
