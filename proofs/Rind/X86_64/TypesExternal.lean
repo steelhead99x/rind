@@ -18,8 +18,20 @@ namespace rind.x86_64
 /-- The entry guard every operation holds, which changes no value. -/
 opaque low.entry.Entry : Type
 
+/-- The token proving the CPU runs pyca/verified-garbage's P-256, which no
+proof here covers. -/
+opaque low.x86_64.p256_vg.P256 : Type
+
+/-- The token proving the CPU runs pyca/verified-garbage's AVX-512 IFMA X25519
+and Ed25519, which no proof here covers. -/
+opaque low.x86_64.curve25519_ifma.Curve25519Ifma : Type
+
 /-- The token proving the CPU has BMI2 and ADX. -/
 opaque low.x86_64.cpu.HaveBmi2Adx : Type
+
+/-- The token proving the CPU has the AVX-512 IFMA, BMI2, and ADX that
+pyca/verified-garbage's RSA routines need. -/
+opaque low.x86_64.cpu.HaveAvx512ForRsa : Type
 
 /-- The tokens proving the CPU has what each SHA-1, SHA-256, SHA-512, and
 ChaCha20-Poly1305 routine needs: the SHA extensions, AVX and SSSE3, AVX2,
@@ -31,6 +43,11 @@ opaque low.x86_64.cpu.HaveAvx2 : Type
 opaque low.x86_64.cpu.HaveSsse3 : Type
 opaque low.x86_64.cpu.HaveSha512 : Type
 opaque low.x86_64.cpu.HaveSse41 : Type
+
+/-- The tokens proving pyca/verified-garbage's ML-KEM-768 encapsulation, and
+its key generation and decapsulation, run here. -/
+opaque low.x86_64.mlkem768_vg.Encaps : Type
+opaque low.x86_64.mlkem768_vg.KeyPair : Type
 
 /-- MD5's chaining state, which no proof covers. -/
 opaque mid.md5.Md5State : Type
@@ -99,5 +116,23 @@ nothing, since `Hashing::start` builds the only one, of `C`'s own
 models it: the key, since `Sealer::expand` builds every one with `C`'s own
 `seal` and `open`, which the model calls directly. -/
 @[reducible] def aead.Sealer (C : Type) : Type := C
+
+/-- The token proving the CPU has AVX-512 F and VL, with what `HaveAvx2`
+proves: what pyca/verified-garbage's AVX-512 VL ChaCha20 needs. -/
+opaque low.x86_64.cpu.HaveAvx512Vl : Type
+
+/-- pyca/verified-garbage's ChaCha20 streaming state, as its routines see it:
+the 768 bytes of memory they keep it in, all that VG's spec reads of it, as
+`Rind.VgChaCha20` proves. Rust leaves it uninitialised: `init` writes the bytes
+`apply` reads on entry, and `apply` writes its scratch before reading it, so
+the model gives the rest any bytes.
+`admin/prove` fails unless this quote is still the type:
+
+```rust
+struct VgState(MaybeUninit<[u64; 96]>);
+
+```
+-/
+@[reducible] def low.x86_64.chacha20.VgState : Type := Std.Array Std.U8 768#usize
 
 end rind.x86_64

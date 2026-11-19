@@ -44,6 +44,8 @@ output over (2^32 - 1) hash outputs, so its signatures match ring's
 exactly (maintainer, 2026-10-31). rind itself never panics on caller
 input.
 
+## What rind cannot back
+
 These items are not offered, so code using them, in a patched dependency
 too, fails to build:
 
@@ -57,13 +59,16 @@ too, fails to build:
 - `signature::RsaEncoding::encode`: ring's hidden, deprecated internal
   method, which takes a type callers cannot name.
 
-And these behave differently:
+## Behaves differently
+
 
 - Where ring takes a `rand::SecureRandom` to generate a key or sign,
   rind draws from the system random source itself, as
   `rand::SystemRandom`, the only `SecureRandom`, does.
 - An Ed25519 public key of small order verifies no signature, where
   ring verifies some that nobody made on it.
+- A secret or private key wipes its memory on drop, which ring never
+  does; a public key on its own is not wiped.
 - A `error::KeyRejected`'s `Display` gives rind's reason, not ring's
   name for it, which ring documents as changing between releases.
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Build site/, the landing page, from its frozen lockfile after its unit tests,
-# check the output's pages, policy, and links (site/scripts/check.ts), and load
-# it in headless Chrome (site/scripts/browser.ts).
+# Build site/ from its frozen lockfile after its unit tests, check the output's
+# pages, policy, and links (site/scripts/check.ts), and load it in headless
+# Chrome (site/scripts/browser.ts). The build reads crates.io's index and the
+# adapters' published READMEs (site/src/lib/registry.ts), so it needs the
+# network.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../site"

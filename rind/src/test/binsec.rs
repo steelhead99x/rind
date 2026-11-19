@@ -137,8 +137,8 @@ fn ct_binsec_chacha20() {
     use crate::cipher::*;
 
     checked(|| {
-        // Eight blocks through x86_64's AVX2 kernel and a tail, then every
-        // shorter length, each of which takes its own path.
+        // Eight blocks through x86_64's verified-garbage routine and a tail,
+        // then every shorter length, each of which takes its own path.
         let key = ChaCha20::new(&secret(1));
         key.apply_keystream(&[2; 12], 3, &mut secret::<{ 512 + MESSAGE }>(4))
             .unwrap();
@@ -299,12 +299,16 @@ fn ct_binsec_ecdh_p521() {
 }
 
 fn mlkem<P: crate::mid::mlkem::Params>() {
-    use crate::mid::mlkem::DecapKey;
+    use crate::mid::mlkem::{DecapKey, Message};
 
+    // A fixed message, so every run explores the same ciphertext: BINSEC's
+    // term building stalls on a few, for as long as it is given, and a random
+    // one made that a flaky check. Which ones stall moves with the compiled
+    // code, so a change that stalls this one picks another.
+    // See UPSTREAM.md, "BINSEC stalls on some ML-KEM ciphertexts".
     let (_, ciphertext) = DecapKey::<P>::keygen_internal(&[1; 64])
         .encapsulation_key()
-        .encaps()
-        .unwrap();
+        .encaps_internal(Message([0x01; 32]));
     checked(|| DecapKey::<P>::keygen_internal(&[1; 64]).decaps(&ciphertext));
 }
 

@@ -8,8 +8,6 @@
 //! builds it, and rind's HOL Light proof in `proofs/hol-light/` covers
 //! OpenSSL's AVX2 routine, as rind builds it; nothing verifies the others.
 
-use std::sync::OnceLock;
-
 use super::cpu::{HaveAvx, HaveAvx2, HaveSha512, is_intel};
 
 /// The SHA-512 routine this CPU runs, with the proof it may.
@@ -40,13 +38,9 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     }
 }
 
+/// The routine this CPU runs: a few tests of the features `cpu` read once.
+#[inline]
 fn path() -> Path {
-    // Picked once, rather than testing several features on every compression.
-    static PATH: OnceLock<Path> = OnceLock::new();
-    *PATH.get_or_init(pick)
-}
-
-fn pick() -> Path {
     if let Some(token) = HaveSha512::check() {
         Path::Sha512ext(token)
     } else if let Some(token) = HaveAvx2::check() {

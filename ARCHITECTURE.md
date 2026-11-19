@@ -21,7 +21,7 @@ run time. [MIGRATING.md][migrating] maps each ring and aws-lc-rs item to it.
   from `public_key()`, which encodes itself (`to_spki`).
 - Encodings, signatures, and shared secrets are owned values of fixed
   capacity, such as `encoding::Pkcs8`, rather than caller buffers or
-  allocations. Keys wipe their secrets on drop under the `wipe` feature, and
+  allocations. Keys wipe their secrets on drop, and
   their `Debug` shows only their algorithm.
 - No call takes a random source: rind draws from the system's when it needs
   one, and `rand::fill` gives callers the same.
@@ -96,9 +96,15 @@ The modules:
 
 The public modules wrap three private layers:
 
-- `low`: low level primitives. platform-specific. unsafe allowed. minimal std and alloc.
-- `mid`: constructions, protocols and encodings. platform agnostic. no unsafe. minimal std and alloc.
+- `low`: low level primitives. platform-specific. unsafe allowed. minimal alloc.
+- `mid`: constructions, protocols and encodings. platform agnostic. no unsafe. minimal alloc.
 - `high`: high level encodings and operations. platform agnostic. no unsafe.
+
+rind is `no_std` with `alloc`. It uses `std` only where build.rs's `rind_std`
+says the target has an OS, and only for what needs one: aarch64's run-time CPU
+detection, the `RIND_CPU_DISABLE_*` switches (read by debug builds and by
+release ones with `--cfg rind_cpu_disable`), the debug builds' `Entry` check,
+the `Dit` guard's per-thread count on Apple's platforms, and the FIPS module.
 
 `low` code should not refer to `mid`, nor `mid` to `high`.
 

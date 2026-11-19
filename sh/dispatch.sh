@@ -363,14 +363,6 @@ step() {
             # `cargo test`, it passes a selection with no tests, such as the
             # benches alone.
             run cargo nextest run "${packages[@]}" --locked --no-tests=warn
-            # Only the zeroing and heap scratch tests see the opt-in wipe,
-            # which the default build turns into no-ops.
-            if names rind "${packages[@]}"; then
-                run cargo nextest run -p rind --features wipe --test zeroing --test heap_scratch --locked
-            fi
-            if names rind-aws-lc-rs "${packages[@]}"; then
-                run cargo nextest run -p rind-aws-lc-rs --features wipe --test zeroing --locked
-            fi
             # The FIPS module's own code compiles only under its cfg, which a
             # workspace build leaves off, and only for glibc Linux on x86_64
             # and aarch64, where rind-fips is not empty. Its break build
@@ -486,13 +478,34 @@ step() {
                     run cargo clippy -p rind --lib --locked --target armv7-unknown-linux-gnueabihf -- --deny warnings
                 # wasm32 compiles on the portable backend; the browser target
                 # needs getrandom's JavaScript source, WASI has its own.
-                local features
-                for features in "" wipe; do
-                    run cargo clippy -p rind --lib --locked --target wasm32-wasip2 --features "$features" -- --deny warnings
-                    run cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
-                        --features "$features,getrandom/wasm_js" -- --deny warnings
-                done
+                run cargo clippy -p rind --lib --locked --target wasm32-wasip2 -- --deny warnings
+                run cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
+                    --features getrandom/wasm_js -- --deny warnings
+                # The library clippy never builds rind's test binaries for
+                # wasm, whose `cctv` and `heap_scratch` carry wasm-only code
+                # in place of aws-lc; the nightly `just wasm` runs them.
+                run cargo clippy -p rind --test heap_scratch --test cctv --locked \
+                    --target wasm32-wasip2 -- --deny warnings
             fi
+            # A target with no `std` for each architecture rind has assembly
+            # for; x86_64's, which disables SSE2, runs the portable backend.
+            # Without an OS getrandom has no source but the one its caller
+            # supplies, which a library build need not link. Built as well as
+            # linted, since codegen can fail where a check passes: on
+            # x86_64-unknown-none, curve25519-dalek compiles its AVX2 backend,
+            # which crashes LLVM there, unless the caller picks `serial`.
+            # See UPSTREAM.md, "curve25519-dalek cannot compile without SSE".
+            local rustflags
+            for target in aarch64:aarch64-unknown-none arm:armv7a-none-eabi portable:x86_64-unknown-none; do
+                if reaches "$backends" "${target%%:*}"; then
+                    rustflags='--cfg getrandom_backend="custom"'
+                    [[ $target != *x86_64* ]] || rustflags+=' --cfg curve25519_dalek_backend="serial"'
+                    RUSTFLAGS="$rustflags" \
+                        run cargo clippy -p rind --lib --locked --target "${target#*:}" -- --deny warnings
+                    RUSTFLAGS="$rustflags --deny warnings" \
+                        run cargo build -p rind --lib --locked --target "${target#*:}"
+                fi
+            done
             ;;
         check:wasm)
             # Each published adapter, as sh/adapter-versions.sh finds them.

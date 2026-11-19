@@ -38,15 +38,6 @@ def lane32x8 (x : BitVec 256) (i : Nat) : BitVec 32 := x.extractLsb' (32 * i) 32
 def ofLanes32x8 (f : Nat → BitVec 32) : BitVec 256 :=
   f 7 ++ f 6 ++ f 5 ++ f 4 ++ f 3 ++ f 2 ++ f 1 ++ f 0
 
-/-- Carry-less multiplication's first `k` partial products: `a` shifted left by
-each of `b`'s set bits below `k`, XORed. -/
-def clmulAux (a b : BitVec 64) : Nat → BitVec 128
-  | 0 => 0
-  | k + 1 => clmulAux a b k ^^^ (if b.getLsbD k then a.setWidth 128 <<< k else 0)
-
-/-- `PCLMULQDQ`'s carry-less product of two 64-bit values. -/
-@[irreducible] def clmul (a b : BitVec 64) : BitVec 128 := clmulAux a b 64
-
 end rind.simd
 
 open rind.simd rind.vale

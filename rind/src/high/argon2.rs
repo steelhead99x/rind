@@ -2,6 +2,8 @@
 
 //! Argon2id, standardized in [RFC 9106](https://datatracker.ietf.org/doc/html/rfc9106).
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 use core::fmt;
 
 use crate::Error;
@@ -61,8 +63,7 @@ impl Params {
     }
 }
 
-/// A password, kept for every salt and cost it derives with; wiped on drop
-/// under the `wipe` feature.
+/// A password, kept for every salt and cost it derives with; wiped on drop.
 pub struct Secret(
     /// A copy of the password, `None` only once wiped.
     Option<Box<[u8]>>,

@@ -3,6 +3,7 @@
 //! RFC 9497's VOPRF mode: the OPRF, with the server proving it evaluated
 //! every blinded element in a batch with the key it published.
 
+use alloc::vec::Vec;
 use core::fmt;
 
 use super::{
@@ -78,8 +79,7 @@ suited!(
 );
 
 /// The server's key in the VOPRF mode, which evaluates blinded elements
-/// for clients and proves it used the key it published, wiped on drop
-/// under the `wipe` feature.
+/// for clients and proves it used the key it published, wiped on drop.
 ///
 /// It keeps its public key, computed once when it is generated or loaded.
 /// Its outputs differ from an [`oprf::ServerKey`](super::ServerKey)'s with
@@ -271,7 +271,7 @@ impl fmt::Debug for PublicKey {
 
 /// A client's secret for one input in the VOPRF mode, which verifies the
 /// server's proof and turns its evaluated element into the output, wiped
-/// on drop under the `wipe` feature.
+/// on drop.
 pub struct Blind(BlindInner);
 
 impl Blind {
@@ -310,7 +310,8 @@ impl Blind {
         proof: &[u8],
         public_key: &PublicKey,
     ) -> Result<Output, Error> {
-        let mut outputs = Self::finalize_batch(vec![self], evaluated_element, proof, public_key)?;
+        let mut outputs =
+            Self::finalize_batch(alloc::vec![self], evaluated_element, proof, public_key)?;
         Ok(outputs.remove(0))
     }
 

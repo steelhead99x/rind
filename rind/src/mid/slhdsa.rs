@@ -22,6 +22,7 @@
 // pass as `as_chunks`'s const argument in generic code.
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
+use alloc::boxed::Box;
 use core::fmt;
 use core::panic::{RefUnwindSafe, UnwindSafe};
 
@@ -193,7 +194,7 @@ const fn lanes<P: Params>() -> usize {
 /// A key pair: FIPS 205's private key encoding, whose second half is the
 /// public key.
 ///
-/// It wipes its whole value on drop under the `wipe` feature.
+/// It wipes its whole value on drop.
 pub(crate) struct KeyPair<P: Params> {
     secret_key: P::SecretKey,
 }
@@ -270,7 +271,7 @@ impl<P: Params> KeyPair<P> {
     /// FIPS 205's `slh_sign_internal` with randomness `addrnd`, `n` bytes.
     pub(crate) fn sign_internal(&self, prefix: &[u8], message: &[u8], addrnd: &[u8]) -> Box<[u8]> {
         let _entry = Entry::new_secret();
-        let mut signature = vec![0u8; P::SIG_LEN].into_boxed_slice();
+        let mut signature = alloc::vec![0u8; P::SIG_LEN].into_boxed_slice();
         sign_internal::<P>(
             self.secret_key.as_ref(),
             prefix,

@@ -121,7 +121,7 @@ pub static CHACHA20_POLY1305: Algorithm = Algorithm {
     expand: Sealer::<ChaCha20Poly1305>::expand,
 };
 
-/// An AEAD key that seals with any nonce the caller gives it; wiped on drop under the `wipe` feature.
+/// An AEAD key that seals with any nonce the caller gives it; wiped on drop.
 ///
 /// The caller owns nonce uniqueness: sealing two messages with one nonce and
 /// key loses confidentiality and lets anyone forge messages. Derive nonces

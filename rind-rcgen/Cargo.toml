@@ -1,8 +1,9 @@
 [package]
 name = "rind-rcgen"
-version = "0.14.4"
+version = "0.14.5"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
+homepage = "https://rind.kixel.ai"
 license = "Apache-2.0 OR ISC OR MIT-0"
 description = "rcgen KeyPair backed by rind"
 categories = ["cryptography"]
@@ -31,8 +32,6 @@ omitted = [
 default = ["pem"]
 # rcgen's PEM methods on `KeyPair`.
 pem = ["dep:base64ct", "rcgen/pem"]
-# rind-rcgen's own: wipes rind's keys and the key pair's PKCS#8 copy on drop.
-wipe = ["rind/wipe"]
 # rcgen's `impl Zeroize for KeyPair`, which clears its PKCS#8 copy.
 zeroize = []
 

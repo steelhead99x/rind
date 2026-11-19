@@ -3,6 +3,7 @@ name = "rind"
 version = "0.3.2"
 edition = "2024"
 repository = "https://github.com/kixel-ai/rind"
+homepage = "https://rind.kixel.ai"
 license = "(Apache-2.0 OR ISC OR MIT-0) AND (Apache-2.0 OR ISC OR MIT) AND Apache-2.0 AND ISC AND BSD-3-Clause"
 readme = "README.md"
 description = "Pure-Rust cryptography for MoQ, forked from graviola"
@@ -14,9 +15,6 @@ rust-version.workspace = true
 targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "i686-unknown-linux-gnu"]
 
 [features]
-default = []
-# Wipes keys, keyed state, and private-key heap scratch on drop.
-wipe = []
 __ctgrind = ["dep:crabgrind"]
 
 [dependencies]
@@ -29,7 +27,7 @@ crabgrind = { version = "0.4", optional = true }
 # build.rs's choice of the arm or portable backend (or portable for aarch64
 # without NEON), which a manifest cannot read. SHA-2 and Poly1305 on those
 # targets are rind's own Rust.
-[target.'cfg(any(rind_portable, target_endian = "big", all(target_arch = "aarch64", not(target_feature = "neon")), not(any(target_arch = "x86_64", target_arch = "aarch64"))))'.dependencies]
+[target.'cfg(any(rind_portable, target_endian = "big", all(target_arch = "aarch64", not(target_feature = "neon")), all(target_arch = "x86_64", not(target_feature = "sse2")), not(any(target_arch = "x86_64", target_arch = "aarch64"))))'.dependencies]
 curve25519-dalek = { version = "5", default-features = false, features = ["precomputed-tables"] }
 fiat-crypto = { version = "0.3", default-features = false }
 

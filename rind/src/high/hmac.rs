@@ -130,6 +130,11 @@ impl Algorithm {
     pub fn tag_len(&self) -> usize {
         self.tag_len
     }
+
+    /// The hash this algorithm runs over.
+    pub(super) fn id(&self) -> Id {
+        self.id
+    }
 }
 
 impl fmt::Debug for Algorithm {
@@ -169,7 +174,7 @@ pub static HMAC_SHA512: Algorithm = Algorithm {
     key: Keying::<Sha512>::with_key,
 };
 
-/// An HMAC key, keyed once and reused for every message; wiped on drop under the `wipe` feature.
+/// An HMAC key, keyed once and reused for every message; wiped on drop.
 #[derive(Clone)]
 pub struct Key(Keyed);
 
@@ -220,7 +225,7 @@ impl fmt::Debug for Key {
     }
 }
 
-/// An in-progress tag computation, for a message given in pieces; wiped on drop under the `wipe` feature.
+/// An in-progress tag computation, for a message given in pieces; wiped on drop.
 ///
 /// A clone forks the computation, so messages sharing a prefix process it once.
 #[derive(Clone)]

@@ -49,8 +49,8 @@ rind assumes an attacker who:
 rind's defenses are the rules [AGENTS.md](AGENTS.md#required) sets: hostile
 input returns an error, never a panic, and its cost is bounded by design;
 secret-dependent code runs in constant time; and a key type wipes its whole
-value on drop, with keyed state and heap scratch derived from a private key,
-under the `wipe` feature ([Wiping keys](README.md#wiping-keys)). Wiping is a
+value on drop, with keyed state and heap scratch derived from a private key
+([Wiping keys](README.md#wiping-keys)). Wiping is a
 second layer against an attacker who later reads freed memory, as in a heap
 dump; it does not wipe digest contexts, decrypted messages, or stack
 temporaries.
@@ -103,6 +103,7 @@ The pins, as `admin/audit` renders them from the files that hold them, so
 | BoringSSL | `8f2554dc344d` | `admin/import-boringssl` | copied code |
 | OpenSSL | `2f4e3a5fec05` | `admin/import-openssl` | copied code |
 | HACL\* | `f557259007db` | `admin/import-hacl` | Vale's x86_64 AES-GCM |
+| pyca/verified-garbage | `0aa40d6c21fd` | `admin/import-vg` | copied code and the Lean ISA models its proofs rest on |
 | s2n-bignum | `3f01260ff1bd` | `thirdparty/s2n-bignum/RIND.md` | assembly and the HOL Light proofs of it |
 | aws-lc | `c21d40da4bbe` | `admin/prove-bytes` | the routines aws-lc-verification's SHA-384/512 proofs are about |
 | ACVP-Server | `975de31eb83d` | `admin/sync-acvp` | test vectors |
@@ -135,8 +136,9 @@ only for crates.
 How copied code is regenerated and checked:
 
 - `admin/import-aws-lc`, `admin/import-boringssl`, `admin/import-openssl`,
-  and `admin/import-hacl` fetch their upstream at its `REV` and write its
-  assembly under `rind/src/low` as Rust naked functions or `global_asm!`.
+  `admin/import-hacl`, and `admin/import-vg` fetch their upstream at its
+  `REV` and write its assembly under `rind/src/low` as Rust naked functions
+  or `global_asm!`.
 - `admin/parse-asm` transliterates s2n-bignum's assembly, from rind's fork
   in `thirdparty/s2n-bignum`, into Rust `asm!`. The fork's
   [RIND.md](thirdparty/s2n-bignum/RIND.md) lists every file that differs
@@ -216,8 +218,8 @@ establishes, and what it does not:
   compiled from HACL\*'s verified C by an unverified step.
 - **Zeroing**: `rind/tests/zeroing.rs` drops each value holding a secret and
   fails on any byte left nonzero, and `rind/tests/heap_scratch.rs` fails on a
-  freed heap block that differs between two keys. Both run only under the
-  `wipe` feature, and see only the value itself and the heap blocks it frees.
+  freed heap block that differs between two keys. Both see only the value
+  itself and the heap blocks it frees.
 - **Bounds**: `low::guard_pages` runs each kernel that takes a caller's
   slice against `PROT_NONE` pages, at lengths up to 1100 bytes and, for the
   AEADs, 2000 to 2600, on Unix. It is the only bounds check on the assembly

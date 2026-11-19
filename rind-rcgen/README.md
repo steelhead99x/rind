@@ -7,8 +7,15 @@
 This crate provides rcgen's `KeyPair` for [rcgen](https://github.com/rustls/rcgen), backed by [rind](https://github.com/kixel-ai/rind/), a fork of [Graviola](https://github.com/ctz/graviola/).
 It generates and loads ECDSA P-256 and P-384 and Ed25519 keys, and loads RSA keys.
 
-Build rcgen with `default-features = false` so it compiles no other crypto backend,
-and use `rind_rcgen::KeyPair` where rcgen's `crypto` feature would give `rcgen::KeyPair`.
+Build rcgen with `default-features = false` so it compiles no other crypto backend:
+
+```toml
+[dependencies]
+rcgen = { version = "0.14", default-features = false }
+rind-rcgen = "0.14"
+```
+
+Then use `rind_rcgen::KeyPair` where rcgen's `crypto` feature would give `rcgen::KeyPair`.
 Without that feature, rcgen needs each certificate's serial number set explicitly,
 and leaves its key identifiers empty unless `key_identifier_method` is set.
 
@@ -34,8 +41,10 @@ let key = key.serialize_der();
 - An unsupported algorithm returns `UnsupportedSignatureAlgorithm` where rcgen panics.
 
 The `pem` feature, on by default as rcgen's is, adds the PEM methods.
-The `wipe` feature wipes keys and the key pair's PKCS#8 copy on drop.
+Keys and the key pair's PKCS#8 copy are wiped on drop.
 The `zeroize` feature, as rcgen's, implements `Zeroize` for `KeyPair`, clearing its PKCS#8 copy.
+
+## WebAssembly
 
 It builds for `wasm32-wasip2` and `wasm32-unknown-unknown`, the browser, where
 rind needs its JavaScript random source, `getrandom = { version = "0.4",

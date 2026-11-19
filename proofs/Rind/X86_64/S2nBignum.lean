@@ -451,6 +451,22 @@ axiom p384_montjscalarmul_alt_spec (res : Std.Array U64 18#usize) (scalar : Std.
       ∀ P, p384OnCurve P → p384Represents P (tripleNat6 point.val) →
         p384Represents (p384Pow P (wordsNat scalar.val)) (tripleNat6 r.val) ⦄
 
+/-- `P384_MONTJADD_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/p384_montjadd.ml#L7500 -/
+@[step]
+axiom p384_montjadd_spec (p3 p1 p2 : Std.Array U64 18#usize) :
+    low.x86_64.p384_montjadd.p384_montjadd p3 p1 p2 ⦃ r =>
+      ∀ P1 P2, p384Represents P1 (tripleNat6 p1.val) → p384Represents P2 (tripleNat6 p2.val) →
+        (P1 = P2 → P2 = none) → p384Represents (p384Add P1 P2) (tripleNat6 r.val) ⦄
+
+/-- `P384_MONTJADD_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/p384_montjadd_alt.ml#L7695 -/
+@[step]
+axiom p384_montjadd_alt_spec (p3 p1 p2 : Std.Array U64 18#usize) :
+    low.x86_64.p384_montjadd_alt.p384_montjadd_alt p3 p1 p2 ⦃ r =>
+      ∀ P1 P2, p384Represents P1 (tripleNat6 p1.val) → p384Represents P2 (tripleNat6 p2.val) →
+        (P1 = P2 → P2 = none) → p384Represents (p384Add P1 P2) (tripleNat6 r.val) ⦄
+
 /-- `P384_MONTJDOUBLE_SUBROUTINE_CORRECT`,
 https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/p384_montjdouble.ml#L4854 -/
 @[step]
@@ -629,6 +645,12 @@ def Runs : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ (∃ e, low.entry.Entry.new_public = ok e) ∧
     (∃ t, low.x86_64.cpu.HaveBmi2Adx.check = ok t) ∧ ∃ t, low.x86_64.cpu.HaveAvx2.check = ok t
 
+/-- X25519 and Ed25519 run s2n-bignum's routines and rind's glue: the CPU
+lacks AVX-512 IFMA, on which they run pyca/verified-garbage's instead, whose
+proof rind has yet to import (`quest/m2/verified-garbage/curve25519-proof.md`).
+The check reads no input. -/
+def NoCurveIfma : Prop := low.x86_64.curve25519_ifma.Curve25519Ifma.check = ok none
+
 @[step]
 theorem new_secret_spec (h : Runs) : low.entry.Entry.new_secret ⦃ _ => True ⦄ := by
   obtain ⟨⟨e, he⟩, -⟩ := h
@@ -641,21 +663,21 @@ theorem new_public_spec (h : Runs) : low.entry.Entry.new_public ⦃ _ => True �
 
 /-- The dispatch runs one of the twins, whose contracts agree. -/
 @[step]
-theorem curve25519_x25519_mux_spec (h : Runs) (res scalar point : Std.Array U64 4#usize) :
+theorem curve25519_x25519_mux_spec (h : Runs) (hi : NoCurveIfma) (res scalar point : Std.Array U64 4#usize) :
     low.x86_64.adx_mux.curve25519_x25519 res scalar point ⦃ r =>
       wordsNat r.val = rfcx25519 (wordsNat scalar.val) (wordsNat point.val) ⦄ := by
   obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
   unfold low.x86_64.adx_mux.curve25519_x25519
-  rw [ht]
+  rw [hi, ht]
   cases t <;> step*
 
 @[step]
-theorem curve25519_x25519base_mux_spec (h : Runs) (res scalar : Std.Array U64 4#usize) :
+theorem curve25519_x25519base_mux_spec (h : Runs) (hi : NoCurveIfma) (res scalar : Std.Array U64 4#usize) :
     low.x86_64.adx_mux.curve25519_x25519base res scalar ⦃ r =>
       wordsNat r.val = rfcx25519 (wordsNat scalar.val) 9 ⦄ := by
   obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
   unfold low.x86_64.adx_mux.curve25519_x25519base
-  rw [ht]
+  rw [hi, ht]
   cases t <;> step*
 
 @[step]
@@ -824,6 +846,16 @@ theorem p384_montjdouble_mux_spec (h : Runs) (p3 p1 : Std.Array U64 18#usize) :
       ∀ P, p384Represents P (tripleNat6 p1.val) → p384Represents (p384Add P P) (tripleNat6 r.val) ⦄ := by
   obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
   unfold low.x86_64.adx_mux.p384_montjdouble
+  rw [ht]
+  cases t <;> step*
+
+@[step]
+theorem p384_montjadd_mux_spec (h : Runs) (p3 p1 p2 : Std.Array U64 18#usize) :
+    low.x86_64.adx_mux.p384_montjadd p3 p1 p2 ⦃ r =>
+      ∀ P1 P2, p384Represents P1 (tripleNat6 p1.val) → p384Represents P2 (tripleNat6 p2.val) →
+        (P1 = P2 → P2 = none) → p384Represents (p384Add P1 P2) (tripleNat6 r.val) ⦄ := by
+  obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
+  unfold low.x86_64.adx_mux.p384_montjadd
   rw [ht]
   cases t <;> step*
 
