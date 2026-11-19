@@ -255,7 +255,7 @@ exclude_re = [
   # SLH-DSA's one-block shortcut through AVX2's registers: the states path it
   # falls back to gives the same digests, so only speed tells them apart.
   'rind/src/low/generic/keccak4x\.rs:\d+:\d+: replace sha3_keccak4x_hash_blocks -> Option<\[\[u8; 32\]; 4\]> with None$',
-  'rind/src/mid/sha3\.rs:\d+:\d+: replace >= with < in shake256_x4$',
+  'rind/src/mid/sha3\.rs:\d+:\d+: replace >= with < in shake256_xn$',
   # Run only on AVX-512 CPUs, which no campaign's runner is: the x86_64
   # campaign skips the files only they run, and these are the rest.
   # x86-cpu.yml's SDE tiers test them.
