@@ -142,8 +142,8 @@ exclude_re = [
   # `(t - 16) % 16` and `(t + 16) % 16` are the same window slot. The line is
   # the subtraction: a use above it moves the pin, and pinning the `(t - 7)`
   # line instead would skip a mutant the tests can kill.
-  'rind/src/low/generic/sha256\.rs:70:\d+: replace - with \+ in sha256_compress_block$',
-  'rind/src/low/generic/sha512\.rs:86:\d+: replace - with \+ in sha512_compress_block$',
+  'rind/src/low/generic/sha256\.rs:202:\d+: replace - with \+ in sha256_compress_block$',
+  'rind/src/low/generic/sha512\.rs:420:\d+: replace - with \+ in sha512_compress_block$',
   'rind/src/low/posint\.rs:\d+:\d+: delete match arm 0 in PosInt<N>::mont_exp$',
   'rind/src/low/posint\.rs:\d+:21: replace % with / in PosInt<N>::mont_exp$',
   'rind/src/low/posint\.rs:\d+:21: replace % with \+ in PosInt<N>::mont_exp$',
@@ -296,7 +296,7 @@ exclude_re = [
   # Pinned to its line: the `cpu_denied` of a release build or one without
   # an OS, which tests never are. The debug build's, under the same name, is
   # caught.
-  'rind/src/low/mod\.rs:163:\d+: replace cpu_denied -> bool with true$',
+  'rind/src/low/mod\.rs:198:\d+: replace cpu_denied -> bool with true$',
   # The FIPS module's `SystemRandom`, compiled only under `--cfg rind_fips`,
   # which no mutation run sets; `fips_rng`'s tests cover what it calls.
   # Pinned to its line: the other `fill`, under the same name, is caught.
