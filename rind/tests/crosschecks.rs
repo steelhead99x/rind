@@ -2322,9 +2322,46 @@ mod mlkem {
         Ok(())
     }
 
+    // aws-lc-rs decapsulates what we encapsulate from a message we supply, and
+    // the same message gives the same ciphertext. aws-lc-rs has no
+    // deterministic encapsulation, so its secret is the only reference here;
+    // the vectors that fix the ciphertext are FIPS 203's, in rind's own tests.
+    fn encapsulated_from_a_message<A: kem::Algorithm>(
+        algorithm: &'static Algorithm<AlgorithmId>,
+        message: [u8; 32],
+    ) -> Result<(), TestCaseError> {
+        let theirs = DecapsulationKey::generate(algorithm).unwrap();
+        let theirs_public = theirs.encapsulation_key().unwrap().key_bytes().unwrap();
+        let key = kem::EncapsulationKey::<A>::new(theirs_public.as_ref()).unwrap();
+        let take = || kem::Message::from_random_bytes(&mut message.clone());
+        let (ciphertext, secret) = take().encapsulate(&key);
+        let (again, _) = take().encapsulate(&key);
+        prop_assert_eq!(ciphertext.as_ref(), again.as_ref());
+        let theirs_secret = theirs
+            .decapsulate(Ciphertext::from(ciphertext.as_ref()))
+            .unwrap();
+        prop_assert_eq!(secret.as_ref(), theirs_secret.as_ref());
+        Ok(())
+    }
+
     // Each case generates a key, which is slow under emulation.
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(32))]
+
+        #[test]
+        fn encapsulated_from_a_message_512(message in any::<[u8; 32]>()) {
+            encapsulated_from_a_message::<kem::MlKem512>(&ML_KEM_512, message)?;
+        }
+
+        #[test]
+        fn encapsulated_from_a_message_768(message in any::<[u8; 32]>()) {
+            encapsulated_from_a_message::<kem::MlKem768>(&ML_KEM_768, message)?;
+        }
+
+        #[test]
+        fn encapsulated_from_a_message_1024(message in any::<[u8; 32]>()) {
+            encapsulated_from_a_message::<kem::MlKem1024>(&ML_KEM_1024, message)?;
+        }
 
         #[test]
         fn encapsulated_by_ours_512(_case in any::<u8>()) {

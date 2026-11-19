@@ -240,6 +240,8 @@ fn mlkem() {
     check::<MlKem512>();
     check::<MlKem768>();
     check::<MlKem1024>();
+    // The message an encapsulation is made from, which determines its secret.
+    check_zeroed_on_drop(Box::pin(Message::from_random_bytes(&mut [0x5a; 32])));
 }
 
 #[test]

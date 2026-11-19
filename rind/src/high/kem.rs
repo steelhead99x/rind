@@ -134,6 +134,52 @@ const _: () = {
     small!(MlKem512, MlKem768, MlKem1024);
 };
 
+/// The 32 secret random bytes one encapsulation turns into its shared
+/// secret, wiped on drop.
+///
+/// [`EncapsulationKey::encapsulate`] draws them from the system random
+/// source, which is what almost every caller wants. This type is for a caller
+/// whose interface hands it the random source, such as an adapter, or that
+/// replays known-answer vectors; it is consumed by one [`Message::encapsulate`],
+/// so a message is used once.
+///
+/// # Security
+///
+/// The bytes must be fresh, uniformly random, and from a cryptographically
+/// secure source, and never reused, guessable, or chosen by anyone else.
+/// The shared secret is derived from them and the key: a repeated message
+/// repeats the secret, and a guessable or attacker-chosen one hands the secret
+/// to whoever can guess or choose it. Nothing here can check that.
+pub struct Message(mlkem::Message);
+
+impl Message {
+    /// Takes 32 fresh random bytes, zeroing `bytes` so the caller keeps no
+    /// copy to reuse.
+    pub fn from_random_bytes(bytes: &mut [u8; 32]) -> Self {
+        let message = mlkem::Message(*bytes);
+        low::zeroise(bytes);
+        Self(message)
+    }
+
+    /// Encapsulates the secret this message determines to `key`, returning
+    /// the ciphertext to send to the key's holder and the secret, as
+    /// [`EncapsulationKey::encapsulate`] does with its own message.
+    pub fn encapsulate<A: Algorithm>(
+        self,
+        key: &EncapsulationKey<A>,
+    ) -> (Ciphertext<A>, SharedSecret<A>) {
+        let _entry = low::Entry::new_secret();
+        let (secret, ciphertext) = key.key.encaps_internal(self.0);
+        (Ciphertext(ciphertext), SharedSecret::new(secret))
+    }
+}
+
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Message").finish_non_exhaustive()
+    }
+}
+
 /// A ciphertext carrying an encapsulated secret, to send to the key's holder.
 pub struct Ciphertext<A: Algorithm>(mlkem::Ciphertext<A>);
 
@@ -195,7 +241,7 @@ mod tests {
 
     use super::*;
     use crate::low;
-    use crate::test::{Expected, cctv, cctv_records, cctv_value, wycheproof};
+    use crate::test::{Acvp, Expected, acvp, cctv, cctv_records, cctv_value, wycheproof};
 
     /// Runs the generic test `f` for every parameter set.
     macro_rules! each_set {
@@ -243,15 +289,12 @@ mod tests {
         mlkem::DecapKey::keygen_internal(&seed.try_into().unwrap())
     }
 
-    /// The encapsulation of `m` to `key`: its secret and ciphertext.
+    /// The encapsulation of `m` to `key`, through the public [`Message`]:
+    /// its secret and ciphertext.
     fn encaps<A: Algorithm>(key: &EncapsulationKey<A>, m: &[u8]) -> (Vec<u8>, Ciphertext<A>) {
-        let (secret, ciphertext) = key
-            .key
-            .encaps_internal(mlkem::Message(m.try_into().unwrap()));
-        (
-            secret_bytes(&SharedSecret::<A>::new(secret)),
-            Ciphertext(ciphertext),
-        )
+        let mut m: [u8; 32] = m.try_into().unwrap();
+        let (ciphertext, secret) = Message::from_random_bytes(&mut m).encapsulate(key);
+        (secret_bytes(&secret), ciphertext)
     }
 
     /// The expanded decapsulation key `dk`, or `None` where rind would never
@@ -300,6 +343,67 @@ mod tests {
             }
         }
         each_set!(check);
+    }
+
+    // FIPS 203's own encapsulation vectors, through the public message type.
+    #[test]
+    fn acvp_encapsulation_through_the_public_message() {
+        fn check<A: Algorithm>(group: &serde_json::Value) {
+            for test in group.tests() {
+                let key = EncapsulationKey::<A>::new(&test.hex("ek")).unwrap();
+                let (secret, ciphertext) = encaps(&key, &test.hex("m"));
+                assert_eq!(secret, test.hex("k"));
+                assert_eq!(ciphertext.as_ref(), &test.hex("c")[..]);
+            }
+        }
+
+        let mut sets = Vec::new();
+        for group in acvp("ML-KEM-encapDecap-FIPS203-tr1") {
+            if group.str("function") != "encapsulation" || group.str("keyFormat") != "none" {
+                continue;
+            }
+            let set = group.str("parameterSet");
+            match set {
+                "ML-KEM-512" => check::<MlKem512>(&group),
+                "ML-KEM-768" => check::<MlKem768>(&group),
+                "ML-KEM-1024" => check::<MlKem1024>(&group),
+                other => panic!("unexpected parameter set {other}"),
+            }
+            sets.push(set.to_string());
+        }
+        sets.sort();
+        sets.dedup();
+        assert_eq!(sets, ["ML-KEM-1024", "ML-KEM-512", "ML-KEM-768"]);
+    }
+
+    // The same message to the same key encapsulates the same secret, and the
+    // holder decapsulates it; a different message does not.
+    #[test]
+    fn a_message_fixes_the_encapsulation() {
+        fn check<A: Algorithm>() {
+            let key = DecapsulationKey::<A>::generate().unwrap();
+            let message = |byte: u8| Message::from_random_bytes(&mut [byte; 32]);
+            let (c1, k1) = message(0x3c).encapsulate(key.public_key());
+            let (c2, k2) = message(0x3c).encapsulate(key.public_key());
+            let (c3, k3) = message(0xc3).encapsulate(key.public_key());
+            assert_eq!(c1.as_ref(), c2.as_ref());
+            assert_ne!(c1.as_ref(), c3.as_ref());
+            let (k1, k2, k3) = (secret_bytes(&k1), secret_bytes(&k2), secret_bytes(&k3));
+            assert_eq!(k1, k2);
+            assert_ne!(k1, k3);
+            assert_eq!(secret_bytes(&key.decapsulate(&c1)), k1);
+            assert_eq!(secret_bytes(&key.decapsulate(&c3)), k3);
+        }
+        each_set!(check);
+    }
+
+    // Taking the bytes leaves the caller none to reuse. That the message is
+    // zero in every byte once dropped is checked in `tests/zeroing.rs`.
+    #[test]
+    fn a_message_takes_the_callers_bytes() {
+        let mut bytes = [0x5a; 32];
+        let _message = Message::from_random_bytes(&mut bytes);
+        assert_eq!(bytes, [0; 32]);
     }
 
     #[test]
