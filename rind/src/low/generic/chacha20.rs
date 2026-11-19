@@ -6,10 +6,10 @@
 // ChaCha20's rounds, from HACL*'s verified `Hacl_Chacha20` as
 // libcrux-chacha20poly1305 0.0.10 ships it (`src/hacl/chacha20.rs`), for
 // HChaCha20 and QUIC header protection on every backend, for the portable
-// backend's ChaCha20, and for x86_64's: one block, up to 128 bytes without
-// AVX2, and every length without SSSE3. They run in general-purpose registers, as aws-lc's integer routines
-// do: a single block packed into vector registers is one serial chain, which
-// Zen 5's two-cycle vector latency makes twice as slow.
+// backend's ChaCha20, for armv7's, and for x86_64's below two blocks or
+// without AVX2. They run in general-purpose registers: a single block packed
+// into vector registers is one serial chain, which Zen 5's two-cycle vector
+// latency makes twice as slow.
 //
 // `proofs/` proves `chacha20_block` against RFC 8439 and `hchacha20` against
 // draft-irtf-cfrg-xchacha-03, these rounds included.
@@ -192,7 +192,11 @@ pub(crate) fn chacha20_block(key: &[u8; 32], counter_nonce: &[u8; 16]) -> [u8; 6
 
 /// XORs the ChaCha20 keystream for `key` and `counter_nonce`, the block
 /// counter then the 96-bit nonce, into `buffer`, one block at a time.
-#[cfg(any(rind_backend = "x86_64", rind_backend = "portable"))]
+#[cfg(any(
+    rind_backend = "x86_64",
+    rind_backend = "arm",
+    rind_backend = "portable"
+))]
 pub(crate) fn cipher(key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]) {
     let mut input = [0u32; 16];
     for (i, b) in input.iter_mut().zip(b"expand 32-byte k".as_chunks::<4>().0) {

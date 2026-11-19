@@ -114,22 +114,8 @@ ARM_IMPORTS = [
         "tag": "sha256",
         "perlasm": "crypto/fipsmodule/sha/asm/sha256-armv4.pl",
         "copyright": "Copyright 2007-2016 The OpenSSL Project Authors. All Rights Reserved.",
-        # `sha256_block_data_order_neon` ends its rounds on the zero word
-        # after the table.
-        "constants": [("K256:", 18), (".LK256_shortcut_neon:", 2), (".LK256_shortcut_hw:", 2)],
-        "routines": [
-            "sha256_block_data_order_nohw",
-            "sha256_block_data_order_neon",
-            "sha256_block_data_order_hw",
-        ],
-    },
-    {
-        "source": "sha512-armv4.S",
-        "tag": "sha512",
-        "perlasm": "crypto/fipsmodule/sha/asm/sha512-armv4.pl",
-        "copyright": "Copyright 2007-2016 The OpenSSL Project Authors. All Rights Reserved.",
-        "constants": [("K512:", 40)],
-        "routines": ["sha512_block_data_order_nohw", "sha512_block_data_order_neon"],
+        "constants": [("K256:", 18), (".LK256_shortcut_hw:", 2)],
+        "routines": ["sha256_block_data_order_hw"],
     },
     # Montgomery multiplication, as aws-lc's `bn_mul_mont` picks between them:
     # NEON for widths of eight 32-bit words, and integer code otherwise.
@@ -140,32 +126,6 @@ ARM_IMPORTS = [
         "copyright": "Copyright 2007-2016 The OpenSSL Project Authors. All Rights Reserved.",
         "constants": [],
         "routines": ["bn_mul_mont_nohw", "bn_mul8x_mont_neon"],
-    },
-    {
-        "source": "chacha-armv4.S",
-        "dir": "generated-src/linux-arm/crypto/chacha",
-        "tag": "chacha",
-        "perlasm": "crypto/chacha/asm/chacha-armv4.pl",
-        "copyright": "Copyright 2016 The OpenSSL Project Authors. All Rights Reserved.",
-        "constants": [(".Lsigma:", 3)],
-        "routines": ["ChaCha20_ctr32_nohw", "ChaCha20_ctr32_neon"],
-    },
-    # Written by hand rather than generated, its routines end without `.size`
-    # and its local labels start `._`, so the whole file is kept. aws-lc keeps
-    # BoringSSL's ISC license for it.
-    {
-        "source": "poly1305_arm_asm.S",
-        "dir": "crypto/poly1305",
-        "tag": "poly1305",
-        "notice": [
-            "Public domain: the neon2 version in SUPERCOP by D. J. Bernstein and",
-            "Peter Schwabe, as BoringSSL imported it. Copyright (c) 2014, Google Inc.",
-            "SPDX-License-Identifier: ISC",
-        ],
-        "local": "._",
-        "whole": True,
-        "constants": [],
-        "routines": ["openssl_poly1305_neon2_blocks", "openssl_poly1305_neon2_addmulmod"],
     },
 ]
 

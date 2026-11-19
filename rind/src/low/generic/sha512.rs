@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! A rolled SHA-512 compression. The portable backend ships this on every
-//! pointer width.
-//!
-//! An unrolled body is about 47 KiB when the pointer is 32 bits, several
-//! times the ESP32-S3's 16 KiB instruction cache, so every block would
-//! stream its code from flash. On that board this loop takes about 0.033×
-//! that unrolled body's time. It follows [`sha256`](sha256.rs):
-//! one 16-word window and an 80-round loop, which stays in a few kilobytes.
-//! The round functions and the eighty `K` constants are FIPS 180-4 §4.1.3
-//! and §4.2.3. The unit tests check FIPS 180-4's SHA-512 vectors, mark the
-//! block secret so ctgrind checks this loop, and, on every backend except
-//! portable, compare with the compression that backend ships.
+//! SHA-512 compression. A 64-bit pointer unrolls all eighty rounds. A 32-bit
+//! pointer rolls them: that unrolled body is about 47 KiB, several times the
+//! ESP32-S3's 16 KiB instruction cache, so every block would stream its code
+//! from flash. On that board the loop takes about 0.033× the unrolled body's
+//! time. It follows [`sha256`](sha256.rs): one 16-word window. The round
+//! functions and the eighty `K` constants are FIPS 180-4 §4.1.3 and §4.2.3.
+//! The unit tests check FIPS 180-4's SHA-512 vectors, mark the block secret
+//! so ctgrind checks this body, and, on every backend except portable,
+//! compare with the compression that backend ships.
 
+#[cfg(not(target_arch = "arm"))]
 macro_rules! CH {
     ($x:expr, $y:expr, $z:expr) => {
         ($x & $y) ^ (!$x & $z)
@@ -25,31 +23,367 @@ macro_rules! MAJ {
     };
 }
 
-// Σ0, Σ1, σ0, σ1 of FIPS 180-4 §4.1.3.
+// Σ0, Σ1, σ0, σ1 of FIPS 180-4 §4.1.3. armv7 writes them out on 32-bit halves
+// (`bsig0` and the rest below).
+#[cfg(not(target_arch = "arm"))]
 macro_rules! BSIG0 {
     ($x:expr) => {
         $x.rotate_right(28) ^ $x.rotate_right(34) ^ $x.rotate_right(39)
     };
 }
 
+#[cfg(not(target_arch = "arm"))]
 macro_rules! BSIG1 {
     ($x:expr) => {
         $x.rotate_right(14) ^ $x.rotate_right(18) ^ $x.rotate_right(41)
     };
 }
 
+#[cfg(not(target_arch = "arm"))]
 macro_rules! SSIG0 {
     ($x:expr) => {
         $x.rotate_right(1) ^ $x.rotate_right(8) ^ ($x >> 7)
     };
 }
 
+#[cfg(not(target_arch = "arm"))]
 macro_rules! SSIG1 {
     ($x:expr) => {
         $x.rotate_right(19) ^ $x.rotate_right(61) ^ ($x >> 6)
     };
 }
 
+/// One block, eighty rounds unrolled. A 32-bit build keeps the loop below
+/// this function: the unrolled body is about 47 KiB there.
+#[cfg(target_pointer_width = "64")]
+#[inline(never)]
+fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
+    let (words, rest) = block.as_chunks::<8>();
+    debug_assert!(rest.is_empty());
+    let mut w = [0u64; 16];
+    for (slot, word) in w.iter_mut().zip(words) {
+        *slot = u64::from_be_bytes(*word);
+    }
+    let mut a = state[0];
+    let mut b = state[1];
+    let mut c = state[2];
+    let mut d = state[3];
+    let mut e = state[4];
+    let mut f = state[5];
+    let mut g = state[6];
+    let mut h = state[7];
+
+    // With the table's contents visible, LLVM builds each of the eighty
+    // constants with a `mov` and three `movk`, four instructions a round where
+    // a load is one. Hiding the contents makes aarch64 load them, as the
+    // assembly this replaced did. x86_64 has a one-instruction 64-bit
+    // immediate, so it keeps them.
+    #[cfg(target_arch = "aarch64")]
+    let k: &[u64; 80] = core::hint::black_box(&K);
+    #[cfg(not(target_arch = "aarch64"))]
+    let k: &[u64; 80] = &K;
+
+    macro_rules! round {
+        ($i:literal, $a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident) => {
+            let w_t = message_word(&mut w, $i);
+            let t1 = $h
+                .wrapping_add(BSIG1!($e))
+                .wrapping_add(CH!($e, $f, $g))
+                .wrapping_add(k[$i])
+                .wrapping_add(w_t);
+            let t2 = BSIG0!($a).wrapping_add(MAJ!($a, $b, $c));
+            $h = $g;
+            $g = $f;
+            $f = $e;
+            $e = $d.wrapping_add(t1);
+            $d = $c;
+            $c = $b;
+            $b = $a;
+            $a = t1.wrapping_add(t2);
+        };
+    }
+
+    round!(0, a, b, c, d, e, f, g, h);
+    round!(1, a, b, c, d, e, f, g, h);
+    round!(2, a, b, c, d, e, f, g, h);
+    round!(3, a, b, c, d, e, f, g, h);
+    round!(4, a, b, c, d, e, f, g, h);
+    round!(5, a, b, c, d, e, f, g, h);
+    round!(6, a, b, c, d, e, f, g, h);
+    round!(7, a, b, c, d, e, f, g, h);
+    round!(8, a, b, c, d, e, f, g, h);
+    round!(9, a, b, c, d, e, f, g, h);
+    round!(10, a, b, c, d, e, f, g, h);
+    round!(11, a, b, c, d, e, f, g, h);
+    round!(12, a, b, c, d, e, f, g, h);
+    round!(13, a, b, c, d, e, f, g, h);
+    round!(14, a, b, c, d, e, f, g, h);
+    round!(15, a, b, c, d, e, f, g, h);
+    round!(16, a, b, c, d, e, f, g, h);
+    round!(17, a, b, c, d, e, f, g, h);
+    round!(18, a, b, c, d, e, f, g, h);
+    round!(19, a, b, c, d, e, f, g, h);
+    round!(20, a, b, c, d, e, f, g, h);
+    round!(21, a, b, c, d, e, f, g, h);
+    round!(22, a, b, c, d, e, f, g, h);
+    round!(23, a, b, c, d, e, f, g, h);
+    round!(24, a, b, c, d, e, f, g, h);
+    round!(25, a, b, c, d, e, f, g, h);
+    round!(26, a, b, c, d, e, f, g, h);
+    round!(27, a, b, c, d, e, f, g, h);
+    round!(28, a, b, c, d, e, f, g, h);
+    round!(29, a, b, c, d, e, f, g, h);
+    round!(30, a, b, c, d, e, f, g, h);
+    round!(31, a, b, c, d, e, f, g, h);
+    round!(32, a, b, c, d, e, f, g, h);
+    round!(33, a, b, c, d, e, f, g, h);
+    round!(34, a, b, c, d, e, f, g, h);
+    round!(35, a, b, c, d, e, f, g, h);
+    round!(36, a, b, c, d, e, f, g, h);
+    round!(37, a, b, c, d, e, f, g, h);
+    round!(38, a, b, c, d, e, f, g, h);
+    round!(39, a, b, c, d, e, f, g, h);
+    round!(40, a, b, c, d, e, f, g, h);
+    round!(41, a, b, c, d, e, f, g, h);
+    round!(42, a, b, c, d, e, f, g, h);
+    round!(43, a, b, c, d, e, f, g, h);
+    round!(44, a, b, c, d, e, f, g, h);
+    round!(45, a, b, c, d, e, f, g, h);
+    round!(46, a, b, c, d, e, f, g, h);
+    round!(47, a, b, c, d, e, f, g, h);
+    round!(48, a, b, c, d, e, f, g, h);
+    round!(49, a, b, c, d, e, f, g, h);
+    round!(50, a, b, c, d, e, f, g, h);
+    round!(51, a, b, c, d, e, f, g, h);
+    round!(52, a, b, c, d, e, f, g, h);
+    round!(53, a, b, c, d, e, f, g, h);
+    round!(54, a, b, c, d, e, f, g, h);
+    round!(55, a, b, c, d, e, f, g, h);
+    round!(56, a, b, c, d, e, f, g, h);
+    round!(57, a, b, c, d, e, f, g, h);
+    round!(58, a, b, c, d, e, f, g, h);
+    round!(59, a, b, c, d, e, f, g, h);
+    round!(60, a, b, c, d, e, f, g, h);
+    round!(61, a, b, c, d, e, f, g, h);
+    round!(62, a, b, c, d, e, f, g, h);
+    round!(63, a, b, c, d, e, f, g, h);
+    round!(64, a, b, c, d, e, f, g, h);
+    round!(65, a, b, c, d, e, f, g, h);
+    round!(66, a, b, c, d, e, f, g, h);
+    round!(67, a, b, c, d, e, f, g, h);
+    round!(68, a, b, c, d, e, f, g, h);
+    round!(69, a, b, c, d, e, f, g, h);
+    round!(70, a, b, c, d, e, f, g, h);
+    round!(71, a, b, c, d, e, f, g, h);
+    round!(72, a, b, c, d, e, f, g, h);
+    round!(73, a, b, c, d, e, f, g, h);
+    round!(74, a, b, c, d, e, f, g, h);
+    round!(75, a, b, c, d, e, f, g, h);
+    round!(76, a, b, c, d, e, f, g, h);
+    round!(77, a, b, c, d, e, f, g, h);
+    round!(78, a, b, c, d, e, f, g, h);
+    round!(79, a, b, c, d, e, f, g, h);
+
+    state[0] = state[0].wrapping_add(a);
+    state[1] = state[1].wrapping_add(b);
+    state[2] = state[2].wrapping_add(c);
+    state[3] = state[3].wrapping_add(d);
+    state[4] = state[4].wrapping_add(e);
+    state[5] = state[5].wrapping_add(f);
+    state[6] = state[6].wrapping_add(g);
+    state[7] = state[7].wrapping_add(h);
+}
+
+/// `W[t]` from the 16-word window. Rounds 78 and 79 do not store: nothing
+/// later reads those words, and a store there is an unused assignment.
+#[cfg(target_pointer_width = "64")]
+#[inline(always)]
+fn message_word(w: &mut [u64; 16], t: usize) -> u64 {
+    if t < 16 {
+        w[t]
+    } else {
+        let w_t = SSIG1!(w[(t + 14) & 15])
+            .wrapping_add(w[(t + 9) & 15])
+            .wrapping_add(SSIG0!(w[(t + 1) & 15]))
+            .wrapping_add(w[t & 15]);
+        if t < 78 {
+            w[t & 15] = w_t;
+        }
+        w_t
+    }
+}
+
+/// Σ1 (14, 18, 41), the terms of each half ordered so no two neighbours in
+/// the XOR chain are the disjoint halves of one rotate. LLVM folds such a pair
+/// into an `lsl` and an `orr`; this order leaves each term an `eor` with a
+/// shifted operand, six instructions a half where the rotate form takes eight.
+#[cfg(target_arch = "arm")]
+#[inline(always)]
+fn bsig1(x: u64) -> u64 {
+    let (l, h) = (x as u32, (x >> 32) as u32);
+    let lo = (l >> 14) ^ (l >> 18) ^ (h >> 9) ^ (h << 18) ^ (h << 14) ^ (l << 23);
+    let hi = (h >> 14) ^ (h >> 18) ^ (l >> 9) ^ (l << 18) ^ (l << 14) ^ (h << 23);
+    ((hi as u64) << 32) | lo as u64
+}
+
+/// Σ0 (28, 34, 39).
+#[cfg(target_arch = "arm")]
+#[inline(always)]
+fn bsig0(x: u64) -> u64 {
+    let (l, h) = (x as u32, (x >> 32) as u32);
+    let lo = (l >> 28) ^ (h >> 2) ^ (h >> 7) ^ (h << 4) ^ (l << 30) ^ (l << 25);
+    let hi = (h >> 28) ^ (l >> 2) ^ (l >> 7) ^ (l << 4) ^ (h << 30) ^ (h << 25);
+    ((hi as u64) << 32) | lo as u64
+}
+
+/// σ0 (rotates 1 and 8, shift 7).
+#[cfg(target_arch = "arm")]
+#[inline(always)]
+fn ssig0(x: u64) -> u64 {
+    let (l, h) = (x as u32, (x >> 32) as u32);
+    let lo = (l >> 1) ^ (l >> 7) ^ (l >> 8) ^ (h << 31) ^ (h << 25) ^ (h << 24);
+    let hi = (h >> 1) ^ (h >> 7) ^ (h >> 8) ^ (l << 31) ^ (l << 24);
+    ((hi as u64) << 32) | lo as u64
+}
+
+/// σ1 (rotates 19 and 61, shift 6).
+#[cfg(target_arch = "arm")]
+#[inline(always)]
+fn ssig1(x: u64) -> u64 {
+    let (l, h) = (x as u32, (x >> 32) as u32);
+    let lo = (l >> 6) ^ (l >> 19) ^ (h >> 29) ^ (h << 13) ^ (h << 26) ^ (l << 3);
+    let hi = (h >> 6) ^ (h >> 19) ^ (l >> 29) ^ (l << 13) ^ (h << 3);
+    ((hi as u64) << 32) | lo as u64
+}
+
+/// One round with the eight working variables renamed instead of rotated, so
+/// a round moves no register: the next round names `$h` as its `a`. A 32-bit
+/// Arm core keeps each `u64` in a register pair and has too few registers for
+/// eight of them, so rotating them costs a store and a load apiece.
+#[cfg(target_arch = "arm")]
+macro_rules! round {
+    ($a:ident, $b:ident, $c:ident, $d:ident, $e:ident, $f:ident, $g:ident, $h:ident, $k:expr, $w:expr) => {
+        let t1 = $h
+            .wrapping_add(bsig1($e))
+            .wrapping_add($g ^ ($e & ($f ^ $g)))
+            .wrapping_add($k)
+            .wrapping_add($w);
+        $d = $d.wrapping_add(t1);
+        $h = t1.wrapping_add(bsig0($a).wrapping_add(MAJ!($a, $b, $c)));
+    };
+}
+
+/// `W[t]` in place of `W[t - 16]`, from the 16-word window `w`, for `i` = `t`
+/// mod 16.
+#[cfg(target_arch = "arm")]
+macro_rules! extend {
+    ($w:ident, $i:literal) => {
+        $w[$i] = ssig1($w[($i + 14) % 16])
+            .wrapping_add($w[($i + 9) % 16])
+            .wrapping_add(ssig0($w[($i + 1) % 16]))
+            .wrapping_add($w[$i]);
+    };
+}
+
+/// Sixteen rounds from `s`, with the constants `k`. `SCHEDULE` extends `w` by
+/// sixteen words first, each just ahead of the round that reads it, so the
+/// schedule's loads and shifts fill the round's idle issue slots: a separate
+/// pass over `w` measured 9% slower on a Cortex-A7.
+#[cfg(target_arch = "arm")]
+#[inline(always)]
+fn rounds16<const SCHEDULE: bool>(s: &mut [u64; 8], w: &mut [u64; 16], k: &[u64; 16]) {
+    let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *s;
+    if SCHEDULE {
+        extend!(w, 0);
+    }
+    round!(a, b, c, d, e, f, g, h, k[0], w[0]);
+    if SCHEDULE {
+        extend!(w, 1);
+    }
+    round!(h, a, b, c, d, e, f, g, k[1], w[1]);
+    if SCHEDULE {
+        extend!(w, 2);
+    }
+    round!(g, h, a, b, c, d, e, f, k[2], w[2]);
+    if SCHEDULE {
+        extend!(w, 3);
+    }
+    round!(f, g, h, a, b, c, d, e, k[3], w[3]);
+    if SCHEDULE {
+        extend!(w, 4);
+    }
+    round!(e, f, g, h, a, b, c, d, k[4], w[4]);
+    if SCHEDULE {
+        extend!(w, 5);
+    }
+    round!(d, e, f, g, h, a, b, c, k[5], w[5]);
+    if SCHEDULE {
+        extend!(w, 6);
+    }
+    round!(c, d, e, f, g, h, a, b, k[6], w[6]);
+    if SCHEDULE {
+        extend!(w, 7);
+    }
+    round!(b, c, d, e, f, g, h, a, k[7], w[7]);
+    if SCHEDULE {
+        extend!(w, 8);
+    }
+    round!(a, b, c, d, e, f, g, h, k[8], w[8]);
+    if SCHEDULE {
+        extend!(w, 9);
+    }
+    round!(h, a, b, c, d, e, f, g, k[9], w[9]);
+    if SCHEDULE {
+        extend!(w, 10);
+    }
+    round!(g, h, a, b, c, d, e, f, k[10], w[10]);
+    if SCHEDULE {
+        extend!(w, 11);
+    }
+    round!(f, g, h, a, b, c, d, e, k[11], w[11]);
+    if SCHEDULE {
+        extend!(w, 12);
+    }
+    round!(e, f, g, h, a, b, c, d, k[12], w[12]);
+    if SCHEDULE {
+        extend!(w, 13);
+    }
+    round!(d, e, f, g, h, a, b, c, k[13], w[13]);
+    if SCHEDULE {
+        extend!(w, 14);
+    }
+    round!(c, d, e, f, g, h, a, b, k[14], w[14]);
+    if SCHEDULE {
+        extend!(w, 15);
+    }
+    round!(b, c, d, e, f, g, h, a, k[15], w[15]);
+    *s = [a, b, c, d, e, f, g, h];
+}
+
+/// One block on armv7: five groups of sixteen rounds, each group's rounds
+/// unrolled with renamed variables (about a fifth of the 47 KiB the fully
+/// unrolled body takes).
+#[cfg(target_arch = "arm")]
+#[inline(never)]
+fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
+    let (words, rest) = block.as_chunks::<8>();
+    debug_assert!(rest.is_empty());
+    let mut w = [0u64; 16];
+    for (slot, word) in w.iter_mut().zip(words) {
+        *slot = u64::from_be_bytes(*word);
+    }
+    let mut s = *state;
+    rounds16::<false>(&mut s, &mut w, K[..16].try_into().unwrap());
+    for group in 1..5 {
+        let k: &[u64; 16] = K[group * 16..group * 16 + 16].try_into().unwrap();
+        rounds16::<true>(&mut s, &mut w, k);
+    }
+    for (x, y) in state.iter_mut().zip(s) {
+        *x = x.wrapping_add(y);
+    }
+}
+
+#[cfg(all(not(target_pointer_width = "64"), not(target_arch = "arm")))]
 #[inline(never)]
 fn sha512_compress_block(state: &mut [u64; 8], block: &[u8; 128]) {
     // Sixteen big-endian words. The caller already holds a whole block, so
@@ -123,8 +457,8 @@ pub(crate) fn sha512_compress_blocks(state: &mut [u64; 8], blocks: &[u8]) {
     }
 }
 
-// FIPS 180-4 §4.2.3.
-static K: [u64; 80] = [
+// FIPS 180-4 §4.2.3. aarch64's SHA-512 instructions add these two at a time.
+pub(crate) static K: [u64; 80] = [
     0x428a2f98d728ae22,
     0x7137449123ef65cd,
     0xb5c0fbcfec4d3b2f,
@@ -244,8 +578,8 @@ mod tests {
         let padded = padded(message);
         let mut state = IV;
         // The block is the secret (a message, or an HMAC key block). Mark it
-        // before this rolled loop, which 64-bit builds compile only in tests,
-        // so ctgrind sees it. The state is public again before a comparison.
+        // before this body so ctgrind sees it. The state is public again
+        // before a comparison.
         crate::low::ct::secret_slice(&padded);
         sha512_compress_blocks(&mut state, &padded);
         encode(crate::low::ct::into_public(state))

@@ -3,8 +3,8 @@
 //! Poly1305 in five 26-bit limbs, for a 32-bit multiplier.
 //!
 //! The portable backend uses this when `rind_limb` is 32, including a
-//! 32-bit pointer whose 64-bit product is a library call, and armv7 uses it
-//! without NEON. A 32-bit target with a cheap 64-bit product, such as wasm32
+//! 32-bit pointer whose 64-bit product is a library call, and armv7 uses it.
+//! A 32-bit target with a cheap 64-bit product, such as wasm32
 //! built with `wide-arithmetic`, has `rind_limb` 64 and uses
 //! `generic::poly1305` instead. Each limb product here is one 32x32->64-bit
 //! multiply.
@@ -22,7 +22,7 @@
 //! early.
 
 use super::blockwise::Blockwise;
-use crate::low::ct;
+use crate::low::{Zeroable, ct, zeroise_value};
 
 /// The low 26 bits.
 const MASK: u32 = 0x3ff_ffff;
@@ -190,11 +190,12 @@ impl Poly1305 {
             // the last block's carries, or 0), and each limb of the block is
             // under 2^26, or 2^25 for the top one, so each sum is under 2^27
             // but h1, which is under 2^27 + 2^6.
-            h0 = h0.wrapping_add(read32(block, 0) & MASK);
-            h1 = h1.wrapping_add((read32(block, 3) >> 2) & MASK);
-            h2 = h2.wrapping_add((read32(block, 6) >> 4) & MASK);
-            h3 = h3.wrapping_add((read32(block, 9) >> 6) & MASK);
-            h4 = h4.wrapping_add((read32(block, 12) >> 8) | hibit);
+            let [m0, m1, m2, m3, m4] = limbs(block, hibit);
+            h0 = h0.wrapping_add(m0);
+            h1 = h1.wrapping_add(m1);
+            h2 = h2.wrapping_add(m2);
+            h3 = h3.wrapping_add(m3);
+            h4 = h4.wrapping_add(m4);
             // A debug build's overflow checks would branch on the secret, as
             // these assertions would without declassifying, hence wrapping
             // arithmetic.
@@ -261,10 +262,40 @@ impl Poly1305 {
     }
 }
 
+impl Drop for Poly1305 {
+    fn drop(&mut self) {
+        // The clamped `r`, the pad `s`, and the accumulator are the key.
+        zeroise_value(self);
+    }
+}
+
+impl Zeroable for Poly1305 {}
+
 /// The 64-bit product of two 32-bit limbs.
 #[inline(always)]
 fn mul(a: u32, b: u32) -> u64 {
     u64::from(a).wrapping_mul(u64::from(b))
+}
+
+/// The five 26-bit limbs of a 16-byte block, `hibit` added to the top one.
+///
+/// Four whole-word loads and funnel shifts: reading each limb as its own
+/// unaligned `u32` at byte 0, 3, 6, 9, 12 compiles on armv7 to byte loads and
+/// shift-or chains, about thirty instructions a block.
+#[inline(always)]
+fn limbs(block: &[u8; 16], hibit: u32) -> [u32; 5] {
+    let (words, _) = block.as_chunks::<4>();
+    let w0 = u32::from_le_bytes(words[0]);
+    let w1 = u32::from_le_bytes(words[1]);
+    let w2 = u32::from_le_bytes(words[2]);
+    let w3 = u32::from_le_bytes(words[3]);
+    [
+        w0 & MASK,
+        ((w0 >> 26) | (w1 << 6)) & MASK,
+        ((w1 >> 20) | (w2 << 12)) & MASK,
+        ((w2 >> 14) | (w3 << 18)) & MASK,
+        (w3 >> 8) | hibit,
+    ]
 }
 
 /// Little-endian word at `at`. Callers pass a 16-byte block with `at` in
