@@ -42,3 +42,47 @@ jobs:
         env:
           QUEST_GATE_PRIORITY: 1
         run: nix develop --command quest gate just ci "$BASE"
+
+  # DRAFT, not for landing before the runners below exist and their runner
+  # groups admit this workflow at refs/heads/main (see the header). The same
+  # group build on the Mac mini, natively on macOS and on aarch64 Linux in a
+  # VM on the same machine, so a pair of PRs that each pass x86_64 alone but
+  # break aarch64 together never reach main. Each job's context, `Queue build /
+  # Build (macOS)` and `Queue build / Build (aarch64 Linux)`, joins the
+  # required contexts in dotfiles' repo-settings only after its runner has
+  # passed a group, so a group never waits on a runner that is not there.
+  build-macos:
+    name: Build (macOS)
+    if: github.event_name == 'merge_group'
+    runs-on: [self-hosted, rind-queue-macos]
+    timeout-minutes: 60
+    env:
+      BASE: ${{ github.event.merge_group.base_sha }}
+      CHECK_FAIL_FAST: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check and test the merge group
+        env:
+          QUEST_GATE_PRIORITY: 1
+        run: nix develop --command quest gate just ci "$BASE"
+
+  build-linux-arm64:
+    name: Build (aarch64 Linux)
+    if: github.event_name == 'merge_group'
+    runs-on: [self-hosted, rind-queue-linux-arm64]
+    timeout-minutes: 60
+    env:
+      BASE: ${{ github.event.merge_group.base_sha }}
+      CHECK_FAIL_FAST: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check and test the merge group
+        env:
+          QUEST_GATE_PRIORITY: 1
+        run: nix develop --command quest gate just ci "$BASE"

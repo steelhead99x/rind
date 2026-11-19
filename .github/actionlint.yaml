@@ -1,6 +1,8 @@
 self-hosted-runner:
   labels:
     - rind-queue
+    - rind-queue-macos
+    - rind-queue-linux-arm64
 paths:
   # See UPSTREAM.md, "actionlint rejects `concurrency.queue`".
   .github/workflows/mutants.yml:
