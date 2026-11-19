@@ -76,7 +76,7 @@ theorem public_key_is_uncompressed_spec (h : Runs) (k : mid.p256.StaticPrivateKe
   obtain ⟨pk, rfl, hpk⟩ := hr
   simp only
   have hl8 : pk.point.xy.val.length = 8 := pk.point.xy.property
-  step with P256Base.jac_base_multiply_spec h k.scalar hk as ⟨prod, hprod⟩
+  step with P256Base.jac_base_multiply_spec (P256Base.runsSelect_of_runs h) k.scalar hk as ⟨prod, hprod⟩
   rw [hq] at hprod
   obtain ⟨hX, hY, hZ, hP⟩ := hprod
   step with jac_z_spec prod as ⟨fz, hfz⟩

@@ -812,16 +812,13 @@ impl JacobianMontPoint {
         r
     }
 
-    /// `scalar * G`, over aws-lc's `ecp_nistz256_point_mul_base` layout: one
-    /// addition from each generator table row per Booth-recoded 7-bit window,
-    /// with every row scanned whole.
+    /// `scalar * G`, as aws-lc's `ecp_nistz256_point_mul_base` computes it:
+    /// one addition from each generator table row per Booth-recoded 7-bit
+    /// window, with every row scanned whole.
     ///
-    /// The addition is s2n-bignum's `p256_montjmixadd`, which measured about
-    /// 27% faster per call than aws-lc's `ecp_nistz256_point_add_affinex` on
-    /// a Sapphire Rapids host. Its proof covers an accumulator at infinity
-    /// and needs the points unequal, which they are: the accumulator sums
-    /// lower windows, so it is a smaller integer than the table point, in
-    /// magnitude, and below n.
+    /// No addition doubles, which `p256_point_add_affine` cannot: the
+    /// accumulator sums lower windows, so it is a smaller integer than the
+    /// table point, in magnitude, and below n.
     ///
     /// The rows are indexed rather than zipped with the windows, which
     /// Aeneas cannot translate.
@@ -831,15 +828,22 @@ impl JacobianMontPoint {
         let mut point = AffineMontPoint::default();
         let table = generator_table();
 
-        let mut result = Self::infinity();
+        // The first point is infinity, with a zero `z`, when its digit is zero.
+        let (digit, sign) = windows[0];
+        point.select_w7(&table[0], digit, sign);
+        let mut result = Self::from_affine(&point);
+        low::bignum_mux(
+            digit.into(),
+            &mut result.xyz[Self::Z],
+            &CURVE_ONE_MONT.0,
+            &[0; 4],
+        );
+
         #[allow(clippy::needless_range_loop)]
-        for w in 0..37 {
+        for w in 1..37 {
             let (digit, sign) = windows[w];
             point.select_w7(&table[w], digit, sign);
-            let mut sum = Self::infinity();
-            low::p256_montjmixadd(&mut sum.xyz, &result.xyz, &point.xy);
-            // `p256_montjmixadd` cannot take an affine point at infinity.
-            result = Self::select(&result, &sum, digit);
+            low::p256_point_add_affine(&mut result.xyz, &point.xy);
         }
         result
     }
@@ -1042,7 +1046,7 @@ impl JacobianMontPoint {
     }
 
     /// Return p0 if select == 0, p1 otherwise
-    #[cfg(any(test, rind_backend = "x86_64"))]
+    #[cfg(test)]
     #[must_use]
     fn select(p0: &Self, p1: &Self, select: u8) -> Self {
         let mut r = Self::zero();

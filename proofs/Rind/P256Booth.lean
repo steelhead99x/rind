@@ -8,13 +8,14 @@ import Mathlib.Tactic.Ring
 /-!
 # The arithmetic of x86_64's P-256 Booth driver
 
-x86_64's `JacobianMontPoint::base_multiply` computes k·G over aws-lc's
-`ecp_nistz256_point_mul_base` layout: k's 37 Booth-recoded 7-bit windows,
+x86_64's `JacobianMontPoint::base_multiply` computes k·G as aws-lc's
+`ecp_nistz256_point_mul_base` does: k's 37 Booth-recoded 7-bit windows,
 lowest first, are digits `e w` in [-64, 64] whose sum of `e w · 128^w` is k,
 and window `w` adds `e w · 2^(7w) · G` from table row `w`, with no doublings.
 
 `booth_sum` proves the windows' digits sum to k. `booth_ne` proves that no
-addition adds equal points, which s2n-bignum's `p256_montjmixadd` cannot: the accumulator is the sum of the lower windows, which is smaller in
+addition adds equal points, which aws-lc's `ecp_nistz256_point_add_affine`
+cannot: the accumulator is the sum of the lower windows, which is smaller in
 magnitude than the window's own term, and their difference is below n except
 at the last window, where equality would need k ≥ n.
 

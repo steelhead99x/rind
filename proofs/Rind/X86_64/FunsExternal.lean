@@ -630,6 +630,11 @@ opaque low.x86_64.bignum_modinv.bignum_modinv
   Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Slice Std.U64 →
     Result ((Slice Std.U64) × (Slice Std.U64))
 
+/-! P-256's generator multiplication's mixed addition, aws-lc's. -/
+
+opaque low.x86_64.ecp_nistz256.p256_point_add_affine
+  : Array Std.U64 12#usize → Array Std.U64 8#usize → Result (Array Std.U64 12#usize)
+
 /-! The HMAC-DRBG an ECDSA signature draws its nonces from. -/
 
 opaque high.hmac_drbg.HmacDrbg.new

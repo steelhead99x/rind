@@ -320,6 +320,39 @@ axiom bignum_mux_spec (p : U64) (z x y : Slice U64) (hx : x.length = z.length)
     low.x86_64.bignum_mux.bignum_mux p z x y ⦃ r =>
       r.length = z.length ∧ wordsNat r.val = if p.val ≠ 0 then wordsNat x.val else wordsNat y.val ⦄
 
+/-! ### P-256's generator multiplication
+
+aws-lc's mixed addition, which rind imports rather than takes from s2n-bignum,
+is proven in HOL Light, of the bytes rind's Linux build emits, in
+`proofs/hol-light/x86_64/`. Apple's text aligns its helpers but not its entry,
+so its calls can reach them at other offsets, which no proof covers. -/
+
+/-- `ECP_NISTZ256_POINT_ADD_AFFINE_SUBROUTINE_CORRECT`, in
+`proofs/hol-light/x86_64/ecp_nistz256_point_add_affine.ml`, and
+`ECP_NISTZ256_POINT_ADD_AFFINEX_SUBROUTINE_CORRECT`, in
+`proofs/hol-light/x86_64/ecp_nistz256_point_add_affinex.ml`, for the routine
+the wrapper picks: what aws-lc's `ecp_nistz256_point_add_affine` and
+`_affinex` compute, in place, for coordinates below p: `p1` itself when `p2`
+is all zeros, the affine infinity; `p2` with a Montgomery-form z of one when
+`p1`'s z is zero, the Jacobian infinity; and otherwise the sum of the points
+they represent, unless those are equal, which it cannot double. The
+theorems also assume what the wrapper and the System V ABI give and Lean
+cannot state, which is trusted: the stack is 16-byte aligned at the call,
+and the `POLY` table is too, as its `align(16)` makes it;
+the routine's code, its 200-byte `POLY` table, `p1`, `p2`, and its 544-byte
+frame do not overlap; and the table's rip-relative displacements reach it. -/
+@[step]
+axiom p256_point_add_affine_spec (p1 : Std.Array U64 12#usize) (p2 : Std.Array U64 8#usize) :
+    low.x86_64.ecp_nistz256.p256_point_add_affine p1 p2 ⦃ r =>
+      (tripleNat p1.val).1 < p256 → (tripleNat p1.val).2.1 < p256 → (tripleNat p1.val).2.2 < p256 →
+      (pairNat p2.val).1 < p256 → (pairNat p2.val).2 < p256 →
+        (pairNat p2.val = (0, 0) → tripleNat r.val = tripleNat p1.val) ∧
+        (pairNat p2.val ≠ (0, 0) → (tripleNat p1.val).2.2 = 0 →
+          tripleNat r.val = ((pairNat p2.val).1, (pairNat p2.val).2, 2 ^ 256 % p256)) ∧
+        (pairNat p2.val ≠ (0, 0) → (tripleNat p1.val).2.2 ≠ 0 →
+          ∀ P1 P2, p256Represents P1 (tripleNat p1.val) → p256Represents2 P2 (pairNat p2.val) →
+            P1 ≠ P2 → p256Represents (p256Add P1 P2) (tripleNat r.val)) ⦄
+
 /-! ### P-384 -/
 
 /-- `BIGNUM_TOMONT_P384_SUBROUTINE_CORRECT`,

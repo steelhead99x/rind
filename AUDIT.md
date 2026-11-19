@@ -285,6 +285,9 @@ Hand-written arithmetic no proof covers, by where it came from:
   on armv7 and the portable backend. There ristretto255's differential test
   compares dalek with itself, so only RFC 9496's and RFC 9497's vectors
   check it.
+- **x86_64 P-256's mixed addition on macOS**, aws-lc's: rind's HOL Light
+  proofs check the Linux build's object, and Apple's text can place the
+  routines' helpers at other offsets.
 
 Primitives whose reference is weak: ECVRF, OPRF, VOPRF, blind RSA, SPAKE2+,
 FROST, and HPKE have no aws-lc-rs counterpart, so their differential tests
