@@ -85,8 +85,7 @@ fn generate_certificate() -> Option<DtlsCert> {
     // so the serial must be unique across processes, not only within one.
     let mut serial = [0u8; 20];
     rind::rand::fill(&mut serial).ok()?;
-    // The top bit clear keeps it a positive integer of at most 20 octets (RFC 5280).
-    serial[0] &= 0x7f;
+    let serial = clear_serial_high_bit(serial);
     params.serial_number = Some(SerialNumber::from_slice(&serial));
     // rcgen's `KeyIdMethod::Sha256`, which needs its `crypto` feature: the first
     // 20 bytes of the SubjectPublicKeyInfo's SHA-256 (RFC 7093 method 1).
@@ -100,6 +99,12 @@ fn generate_certificate() -> Option<DtlsCert> {
         certificate: certificate.der().to_vec(),
         private_key: key.serialize_der(),
     })
+}
+
+/// Clears the top bit so the serial is a positive INTEGER of at most 20 octets (RFC 5280).
+fn clear_serial_high_bit(mut serial: [u8; 20]) -> [u8; 20] {
+    serial[0] &= 0x7f;
+    serial
 }
 
 /// A dimpl connection, forwarded as is.
@@ -150,5 +155,20 @@ impl DtlsInstance for Dtls {
 
     fn close(&mut self) -> Result<(), DtlsImplError> {
         self.0.close()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clear_serial_high_bit;
+
+    /// A fixed `0xff` octet, not a draw from `rind::rand`. Branching on a
+    /// random serial is a secret-dependent branch, which `admin/ctgrind` would
+    /// reject in this crate's unit tests.
+    #[test]
+    fn clear_serial_high_bit_forces_a_positive_integer() {
+        let serial = clear_serial_high_bit([0xff; 20]);
+        assert_eq!(serial[0], 0x7f);
+        assert_eq!(&serial[1..], &[0xff; 19]);
     }
 }
