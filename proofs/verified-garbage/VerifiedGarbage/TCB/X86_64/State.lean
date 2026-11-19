@@ -59,8 +59,9 @@ structure State where
   /-- Regions the code may read and write. -/
   wr : List Region
   /-- Values the model does not know, used in order: the return address each
-  call stores and, on the ARM targets, what a linker veneer may leave in the
-  intra-procedure-call scratch registers (see `TCB/Code.lean`). -/
+  call stores, what a released frame's bytes hold (`lose`,
+  `TCB/X86_64/Isa.lean`) and, on the ARM targets, what a linker veneer may
+  leave in the intra-procedure-call scratch registers (see `TCB/Code.lean`). -/
   unknowns : Nat → BitVec 64 := fun _ => 0
   /-- The address of each `static` the code can name (`leaSym`), by name. -/
   syms : String → BitVec 64 := fun _ => 0

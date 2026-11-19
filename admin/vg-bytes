@@ -142,6 +142,7 @@ def disassemble(arch, obj, keep):
     flags = ["-M", "intel"] if arch == "x86_64" else ["--mattr=+all"]
     # `-z`: llvm-objdump otherwise prints a run of zero bytes as `...`.
     dis = run(["llvm-objdump", "-d", "-z", "-r", "-C", *flags, str(obj)])
+    statics = section_statics(obj)
     fns, names = {}, {}
     cur = None
     for line in dis.splitlines():
@@ -164,7 +165,7 @@ def disassemble(arch, obj, keep):
             # Its offset in the instruction, so a relocation of the same bytes
             # that patches other bytes of them differs.
             off = int(m.group(1), 16) - cur[-1].addr
-            cur[-1].relocs.append((off, m.group(2), *relocation_target(m.group(3))))
+            cur[-1].relocs.append((off, m.group(2), *relocation_target(m.group(3), statics)))
             continue
         m = re.match(r"^\s*([0-9a-f]+):\s(.*)$", line)
         if m:
@@ -183,10 +184,26 @@ def disassemble(arch, obj, keep):
     return fns
 
 
-def relocation_target(sym):
+def section_statics(obj):
+    """The static that starts each data section of `obj`, by the section's
+    name. A relocation of a static local to its object may name the static's
+    section instead, as LLVM's aarch64 backend does, and each static has a
+    section of its own, so that section's start is the static."""
+    statics = {}
+    for line in run(["llvm-objdump", "-t", "-C", str(obj)]).splitlines():
+        m = re.match(r"^0+ .{6}O (\S+)\s+[0-9a-f]+ (?:\.hidden )?(.+)$", line)
+        if m:
+            if m.group(1) in statics:
+                fail(f"{obj}: section {m.group(1)} starts two statics")
+            statics[m.group(1)] = m.group(2)
+    return statics
+
+
+def relocation_target(sym, statics):
     """A relocation's symbol, by its name's last component, and its addend."""
     m = re.match(r"^(.*?)([+-]0x[0-9a-f]+)?$", sym)
-    return m.group(1).split("::")[-1], int(m.group(2) or "0", 16)
+    name = statics.get(m.group(1), m.group(1))
+    return name.split("::")[-1], int(m.group(2) or "0", 16)
 
 
 def is_nop(arch, insn):

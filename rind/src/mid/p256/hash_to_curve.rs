@@ -6,7 +6,7 @@ use super::{
     CURVE_A_MONT, CURVE_B_MONT, CURVE_ONE_MONT, CURVE_ORDER_MM, FieldElement, JacobianMontPoint,
     PublicKey, Scalar, util,
 };
-use crate::error::{Error, KeyFormatError};
+use crate::error::Error;
 use crate::low;
 use crate::mid::hash_to_curve::{self, Curve};
 use crate::mid::sha2::Sha256Context;
@@ -18,13 +18,21 @@ use crate::mid::sha2::Sha256Context;
 /// a small-order point.
 pub(crate) fn hash_to_curve(msg: &[u8], dst: &[u8]) -> Result<PublicKey, Error> {
     let _entry = low::Entry::new_secret();
-    let point = hash_to_curve::hash_to_curve::<FieldElement, Sha256Context>(msg, dst)?;
-    match low::ct::into_public(point[2].ct_eq(&FieldElement::ZERO)) {
-        true => Err(KeyFormatError::SmallOrder.into()),
-        false => Ok(PublicKey {
-            point: jacobian(&point).as_affine(),
-        }),
-    }
+    public_key(hash_to_curve::hash_to_curve::<FieldElement, Sha256Context>(
+        msg, dst,
+    )?)
+}
+
+fn public_key(point: [FieldElement; 3]) -> Result<PublicKey, Error> {
+    hash_to_curve::affine_or_small_order(point, |point| PublicKey {
+        point: jacobian(&point).as_affine(),
+    })
+}
+
+/// Converts an opposite-point sum for the OPRF boundary tests.
+#[cfg(test)]
+pub(crate) fn hash_to_infinity(_msg: &[u8], _dst: &[u8]) -> Result<PublicKey, Error> {
+    public_key(hash_to_curve::tests::opposite_sum::<FieldElement>())
 }
 
 /// Hashes `msg` to a scalar mod n, by RFC 9380's `hash_to_field` over
@@ -150,6 +158,7 @@ mod tests {
     use p256::hash2curve::{self as rustcrypto, GroupDigest};
 
     use super::*;
+    use crate::error::KeyFormatError;
     use crate::mid::hash_to_curve::tests;
 
     fn affine(p: &[FieldElement; 3]) -> Vec<u8> {
@@ -163,7 +172,18 @@ mod tests {
 
     #[test]
     fn sum() {
-        tests::check_sum::<FieldElement>(affine);
+        tests::check_sum::<FieldElement>(affine, |x| x.demont().inv().as_mont());
+    }
+
+    #[test]
+    fn opposite_points_are_refused() {
+        let _entry = low::Entry::new_secret();
+        let point = tests::opposite_sum::<FieldElement>();
+        assert!(low::ct::into_public(point[2].ct_eq(&FieldElement::ZERO)));
+        assert_eq!(
+            public_key(point).map(|_| ()),
+            Err(KeyFormatError::SmallOrder.into())
+        );
     }
 
     #[test]
@@ -191,6 +211,10 @@ mod tests {
             low::ct::public_slice(&p);
             p
         });
+        // The wrapper, so a branch on Z is under taint.
+        let msg = low::ct::into_secret(*b"password");
+        let point = hash_to_curve(&msg, b"QUUX-V01-CS02").unwrap();
+        low::ct::public_slice(&point.point.as_bytes_uncompressed());
     }
 
     /// The public functions, against aws-lc's hash to the curve and
@@ -212,6 +236,18 @@ mod tests {
             .unwrap();
             assert_eq!(ours.as_bytes()[..], theirs.to_bytes()[..]);
         }
+    }
+
+    /// An empty DST is refused, as aws-lc's
+    /// `crypto/ec_extra/hash_to_curve.c` (`expand_message_xmd`) refuses it.
+    #[cfg(not(any(miri, target_family = "wasm")))]
+    #[test]
+    fn empty_dst() {
+        tests::check_empty_dst(
+            hash_to_curve(b"msg", b"").map(|_| ()),
+            hash_to_scalar(&[b"msg"], b"").map(|_| ()),
+        );
+        assert!(!crate::test::aws_lc_hash_to_curve_ok(256, b"msg", b""));
     }
 
     #[test]

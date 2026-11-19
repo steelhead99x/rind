@@ -3,6 +3,7 @@
 //! SLH-DSA's public API: key pairs and public keys whose parameter set is a
 //! type.
 
+use alloc::boxed::Box;
 use core::fmt;
 use core::marker::PhantomData;
 
@@ -199,16 +200,18 @@ impl<P: ParameterSet> KeyPair<P> {
     }
 }
 
+impl<P: ParameterSet> KeyPair<P> {
+    /// The parameter set's OID.
+    pub(crate) const fn oid() -> &'static asn1::ObjectId {
+        P::ALGORITHM.oid
+    }
+}
+
 #[cfg(test)]
 impl<P: ParameterSet> KeyPair<P> {
     /// The key pair the mid layer holds.
     pub(crate) fn inner(&self) -> &slhdsa::KeyPair<P> {
         &self.pair
-    }
-
-    /// The parameter set's OID.
-    pub(crate) fn oid() -> &'static asn1::ObjectId {
-        P::ALGORITHM.oid
     }
 }
 

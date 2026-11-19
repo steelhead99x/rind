@@ -1045,3 +1045,45 @@ fn encodings_fit_the_largest_keys() {
         ed25519.public_key().as_ref()
     );
 }
+
+/// A cloned public key verifies what the original does, with an expansion
+/// of its own, and a cloned signature is the same bytes.
+#[test]
+fn post_quantum_clones_verify() {
+    let key = ml_dsa::KeyPair::<MlDsa44>::generate().unwrap();
+    let signature = key.sign(b"message").unwrap();
+    let copy = signature.clone();
+    assert_eq!(copy.as_ref(), signature.as_ref());
+    let public_key = key.public_key().clone();
+    for _ in 0..2 {
+        public_key.verify(b"message", copy.as_ref()).unwrap();
+    }
+    assert_eq!(public_key.as_ref(), key.public_key().as_ref());
+    let clone = public_key.clone();
+    clone.verify(b"message", signature.as_ref()).unwrap();
+
+    let key = slh_dsa::KeyPair::<SlhDsaSha2_128f>::generate().unwrap();
+    let signature = key.sign(b"message").unwrap();
+    let copy = signature.clone();
+    assert_eq!(copy.as_ref(), signature.as_ref());
+    let public_key = key.public_key().clone();
+    assert_eq!(public_key.as_ref(), key.public_key().as_ref());
+    public_key.verify(b"message", copy.as_ref()).unwrap();
+}
+
+/// Ed25519 and RSA signatures show as their bytes.
+#[test]
+fn signatures_debug_as_bytes() {
+    let key = ed25519::KeyPair::from_seed(&[7; 32]).unwrap();
+    let signature = key.sign(b"message");
+    assert_eq!(
+        format!("{signature:?}"),
+        format!("Signature({:?})", signature.as_ref())
+    );
+    let key = rsa::KeyPair::from_pkcs8(include_bytes!("../rsa/rsa2048.pkcs8.der")).unwrap();
+    let signature = key.sign(&rsa::sign::PKCS1_SHA256, b"message").unwrap();
+    assert_eq!(
+        format!("{signature:?}"),
+        format!("Signature({:?})", signature.as_ref())
+    );
+}

@@ -13,7 +13,7 @@ use crate::low::{Blockwise, Entry, UpdateBlocks, pad, split_tail};
 /// Finishing needs no buffer, so a one-shot hash, or HMAC from its keyed
 /// states, works on this alone.
 // `h` first: see `Sha256Context`.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub(crate) struct Sha256State {
     h: [u32; 8],
@@ -88,7 +88,7 @@ impl UpdateBlocks for Sha256State {
 // holds `h` and the buffer on 16-byte boundaries too, so no 16-byte load or
 // store of them crosses a cache line, which on Zen 5 stops later loads
 // taking their bytes from the stores still in flight.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub(crate) struct Sha256Context {
     state: Sha256State,
@@ -110,6 +110,7 @@ impl Sha256Context {
     }
 
     /// Add `bytes` to the ongoing hash computation.
+    #[inline(always)]
     pub(crate) fn update(&mut self, bytes: &[u8]) {
         self.blockwise.update(bytes, &mut self.state);
     }
@@ -127,7 +128,7 @@ impl Sha256Context {
 }
 
 /// A context for incremental computation of SHA384.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Sha384Context {
     inner: Sha512Context,
 }
@@ -158,6 +159,7 @@ impl Sha384Context {
     }
 
     /// Add `bytes` to the ongoing hash computation.
+    #[inline(always)]
     pub(crate) fn update(&mut self, bytes: &[u8]) {
         self.inner.update(bytes)
     }
@@ -177,7 +179,7 @@ impl Sha384Context {
 }
 
 /// A context for incremental computation of SHA512/256.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Sha512_256Context {
     inner: Sha512Context,
 }
@@ -196,6 +198,7 @@ impl Sha512_256Context {
     ]);
 
     /// Start a new SHA512/256 hash computation.
+    #[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
     pub(crate) const fn new() -> Self {
         Self {
             inner: Sha512Context::resume(Self::INITIAL),
@@ -203,6 +206,7 @@ impl Sha512_256Context {
     }
 
     /// Add `bytes` to the ongoing hash computation.
+    #[inline(always)]
     pub(crate) fn update(&mut self, bytes: &[u8]) {
         self.inner.update(bytes)
     }
@@ -225,7 +229,7 @@ impl Sha512_256Context {
 ///
 /// SHA384 and SHA512/256 share it, from their own initial values.
 // `h` first: see `Sha512Context`.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub(crate) struct Sha512State {
     h: [u64; 8],
@@ -301,7 +305,7 @@ impl UpdateBlocks for Sha512State {
 
 /// A context for incremental computation of SHA512.
 // In this order for the reason `Sha256Context` is.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub(crate) struct Sha512Context {
     state: Sha512State,
@@ -323,6 +327,7 @@ impl Sha512Context {
     }
 
     /// Add `bytes` to the ongoing hash computation.
+    #[inline(always)]
     pub(crate) fn update(&mut self, bytes: &[u8]) {
         self.blockwise.update(bytes, &mut self.state);
     }

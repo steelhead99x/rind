@@ -110,27 +110,29 @@ impl<const N: usize> PosInt<N> {
     /// Like `from_bytes`, for secret `bytes`: it reads none of them through
     /// a branch or an index, so the value is as wide as `bytes`, leading
     /// zeroes included, and `fit` sets the width it needs.
+    // Indexes, as `to_bytes_fixed` does, which Aeneas can translate, so
+    // `proofs/` can prove RSA's public operation on AVX-512 IFMA.
     pub(crate) fn from_secret_bytes(bytes: &[u8]) -> Result<Self, Error> {
         // A DER integer this wide fits only with a zero sign byte, so the
         // check reveals only whether it is too wide to be valid.
-        let bytes = match bytes.split_first() {
-            Some((&sign, rest)) if bytes.len() == N * 8 + 1 => {
-                if !low::ct::into_public(sign == 0) {
-                    return Err(Error::WrongLength);
-                }
-                rest
+        let bytes = if bytes.len() == N * 8 + 1 {
+            // `eq`, a `bool`, where Aeneas reads `==` as a proposition.
+            if !low::ct::into_public(bytes[0].eq(&0)) {
+                return Err(Error::WrongLength);
             }
-            _ if bytes.len() > N * 8 => return Err(Error::WrongLength),
-            _ => bytes,
+            &bytes[1..]
+        } else if bytes.len() > N * 8 {
+            return Err(Error::WrongLength);
+        } else {
+            bytes
         };
 
         let mut r = Self::zero();
-        for (word, chunk) in r.words.iter_mut().zip(bytes.rchunks(8)) {
-            let mut be = [0; 8];
-            be[8 - chunk.len()..].copy_from_slice(chunk);
-            *word = u64::from_be_bytes(be);
+        let len = bytes.len();
+        for i in 0..len {
+            r.words[i / 8] |= (bytes[len - 1 - i] as u64) << (8 * (i % 8));
         }
-        r.used = bytes.len().div_ceil(8);
+        r.used = len.div_ceil(8);
         Ok(r)
     }
 
@@ -198,17 +200,6 @@ impl<const N: usize> PosInt<N> {
         Ok(out)
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn debug(&self, why: &str) {
-        let mut bytes = [0u8; 1024];
-        let bytes = self.to_bytes(&mut bytes).unwrap();
-        print!("{why} = 0x");
-        for b in bytes {
-            print!("{b:02x}");
-        }
-        println!();
-    }
-
     pub(crate) fn len_bytes(&self) -> usize {
         self.len_bits().wrapping_add(7) / 8
     }
@@ -246,7 +237,7 @@ impl<const N: usize> PosInt<N> {
     ///
     /// This is safe assuming `len.used` is in range (a fundamental invariant in this type)
     /// because `len` and `self` share the same type.
-    fn as_words_with_len_of(&self, len: &Self) -> &[u64] {
+    pub(crate) fn as_words_with_len_of(&self, len: &Self) -> &[u64] {
         &self.words[..len.used]
     }
 
@@ -578,7 +569,7 @@ impl<const N: usize> PosInt<N> {
 
         // `table` holds `self^i` at row `i`: each even power squares its
         // half, and each odd one multiplies the power below it by `self`.
-        let mut table = vec![0; k << WINDOW];
+        let mut table = alloc::vec![0; k << WINDOW];
         table[..k].copy_from_slice(one_mont.as_words_with_len_of(n));
         table[k..2 * k].copy_from_slice(self.as_words_with_len_of(n));
         for i in 2..1 << WINDOW {
@@ -1212,15 +1203,12 @@ mod tests {
         let one_2 = PosInt::<2>::one();
 
         let r = PosInt::mul(&one_1, &one_1);
-        r.debug("1 x 1");
         assert!(r.pub_equals(&one_2));
 
         let r = PosInt::mul(&zero_1, &one_1);
-        r.debug("1 x 0");
         assert!(r.pub_equals(&zero_2));
 
         let r = PosInt::mul(&zero_1, &zero_1);
-        r.debug("0 x 0");
         assert!(r.pub_equals(&zero_2));
 
         let x_4 = PosInt::<4>::from_bytes(b"\xed\x1f\xde\xb5\xc6\x39\x43\x8f\xea\x1d\x05\x9c\xba\xa8\xd3\x7c\x13\x96\xf4\x96\x1c\x8e\x5f\x52\x8f\x3c\x4c\x3c\x45\xe5\x75\xa2").unwrap();

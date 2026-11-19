@@ -3,13 +3,14 @@
 //! RFC 9497's VOPRF mode: the OPRF, with the server proving it evaluated
 //! every blinded element in a batch with the key it published.
 
+use alloc::vec::Vec;
 use core::fmt;
 
 use super::{
-    Bytes, ClientState, Group, Key, KeyInner, MAX_ELEMENT, MAX_OUTPUT, MAX_SCALAR, Mode, Output,
-    P256, P384, P521, Pick, Ristretto255, Scalar, Suite, SuiteId, decode, derive_scalar, dispatch,
-    encode, hash_to_scalar, identity, len_prefix, scalar_bytes, scalar_from_key, suited,
-    with_group,
+    Bytes, ClientState, Group, IDENTITY_ERROR, Key, KeyInner, MAX_ELEMENT, MAX_OUTPUT, MAX_SCALAR,
+    Mode, Output, P256, P384, P521, Pick, Ristretto255, Scalar, Suite, SuiteId, decode,
+    derive_scalar, dispatch, encode, hash_to_scalar, len_prefix, scalar_bytes, scalar_from_key,
+    suited, with_group,
 };
 use crate::error::Error;
 use crate::low::{self, Entry, ct};
@@ -309,7 +310,8 @@ impl Blind {
         proof: &[u8],
         public_key: &PublicKey,
     ) -> Result<Output, Error> {
-        let mut outputs = Self::finalize_batch(vec![self], evaluated_element, proof, public_key)?;
+        let mut outputs =
+            Self::finalize_batch(alloc::vec![self], evaluated_element, proof, public_key)?;
         Ok(outputs.remove(0))
     }
 
@@ -553,7 +555,7 @@ fn prove<G: Group>(
     debug_assert_eq!(blinded.len(), evaluated.len());
     let weights = composite_weights::<G>(public, blinded_bytes, evaluated_bytes)?;
     // `M` is the identity with a chance of about 2^-252 for any batch.
-    let m = G::public_mul_sum(blinded.iter().zip(&weights)).ok_or_else(identity)?;
+    let m = G::public_mul_sum(blinded.iter().zip(&weights)).ok_or(IDENTITY_ERROR)?;
     let z = G::mul(&m, k);
     let t2 = G::mul_base(&r);
     let t3 = G::mul(&m, &r);

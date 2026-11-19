@@ -50,9 +50,11 @@ impl PublicKey {
 
 /// A P-256 public key for ECDSA verification.
 ///
-/// It builds the point's multiples on its first verification and keeps
-/// them, so verifying again skips computing them, and a key never verified
-/// with, such as an ECDSA key pair's, never pays for them.
+/// Where pyca/verified-garbage's verification runs, it verifies with that,
+/// which takes the encoded key. Elsewhere it builds the point's multiples on
+/// its first verification and keeps them, so verifying again skips computing
+/// them, and a key never verified with, such as an ECDSA key pair's, never
+/// pays for them.
 #[derive(Clone, Debug)]
 pub(crate) struct VerifyingKey {
     point: AffineMontPoint,
@@ -76,6 +78,10 @@ impl VerifyingKey {
     }
 
     pub(crate) fn raw_ecdsa_verify(&self, r: &Scalar, s: &Scalar, e: &Scalar) -> Result<(), Error> {
+        if let Some(vg) = low::p256_vg::P256::check() {
+            return vg_verify(vg, &self.point, r, s, e);
+        }
+
         // 4. Compute: u1 = e s^-1 mod n and u2 = r s^−1 mod n
         let s_inv = s.inv().as_mont();
         let u1 = s_inv.mont_mul(&e.as_mont()).demont();
@@ -124,6 +130,9 @@ impl PrivateKey {
     /// X9.62 uncompressed encoding.
     pub(crate) fn public_key_uncompressed(&self) -> [u8; PublicKey::BYTES] {
         let _entry = low::Entry::new_secret();
+        if let Some(vg) = low::p256_vg::P256::check_public_key() {
+            return self.vg_public_key(vg);
+        }
         self.public_point().as_bytes_uncompressed()
     }
 
@@ -135,12 +144,44 @@ impl PrivateKey {
     /// Returns a [`SharedSecret`].  May return an error in fault conditions.
     pub(crate) fn diffie_hellman(&self, peer: &PublicKey) -> Result<SharedSecret, Error> {
         let _entry = low::Entry::new_secret();
+        if let Some(vg) = low::p256_vg::P256::check() {
+            return self.vg_diffie_hellman(vg, peer);
+        }
         let result = peer.point.multiply(&self.scalar);
         match low::ct::into_public(result.on_curve()) {
             true => Ok(SharedSecret(util::u64x4_to_big_endian(
                 &result.x().demont().0,
             ))),
             false => Err(Error::Fault),
+        }
+    }
+
+    /// [`Self::public_key_uncompressed`], on pyca/verified-garbage's routine.
+    fn vg_public_key(&self, vg: low::p256_vg::P256) -> [u8; PublicKey::BYTES] {
+        // It fails only for a scalar outside [1, n), which `Scalar`'s
+        // checked decoding refuses.
+        let encoded = match vg.public_key(&self.scalar.as_bytes()) {
+            Some(encoded) => low::ct::into_public(encoded),
+            None => panic!("internal fault"),
+        };
+        // Checked on the curve, as `public_point` checks rind's.
+        match AffineMontPoint::from_x962_uncompressed(&encoded) {
+            Ok(_) => encoded,
+            Err(_) => panic!("internal fault"),
+        }
+    }
+
+    /// [`Self::diffie_hellman`], on pyca/verified-garbage's routine, which
+    /// checks the peer's point again and fails only in fault conditions, as
+    /// `PublicKey` holds a point on the curve.
+    fn vg_diffie_hellman(
+        &self,
+        vg: low::p256_vg::P256,
+        peer: &PublicKey,
+    ) -> Result<SharedSecret, Error> {
+        match vg.ecdh(&self.scalar.as_bytes(), &peer.point.as_bytes_uncompressed()) {
+            Some(shared) => Ok(SharedSecret(shared)),
+            None => Err(Error::Fault),
         }
     }
 
@@ -219,6 +260,9 @@ impl StaticPrivateKey {
     /// X9.62 uncompressed encoding.
     pub(crate) fn public_key_uncompressed(&self) -> [u8; PublicKey::BYTES] {
         let _entry = low::Entry::new_secret();
+        if let Some(vg) = low::p256_vg::P256::check_public_key() {
+            return self.0.vg_public_key(vg);
+        }
         self.0.public_point().as_bytes_uncompressed()
     }
 
@@ -257,6 +301,10 @@ impl StaticPrivateKey {
 
     pub(crate) fn public_key_x_scalar(&self) -> Scalar {
         let _entry = low::Entry::new_secret();
+        if let Some(vg) = low::p256_vg::P256::check_public_key() {
+            let encoded = self.0.vg_public_key(vg);
+            return Scalar::from_bytes_reduced(&encoded[1..1 + Scalar::BYTES]).unwrap();
+        }
         self.0.public_point().x_scalar()
     }
 
@@ -271,6 +319,26 @@ impl StaticPrivateKey {
             .add(e)
             .as_mont();
         low::ct::into_public(k.0.scalar.inv().mont_mul(&lhs_mont))
+    }
+}
+
+/// [`VerifyingKey::raw_ecdsa_verify`], on pyca/verified-garbage's routine,
+/// which takes `e` as a 32-byte hash, whose value it is, and checks `point`,
+/// `r`, and `s` again.
+fn vg_verify(
+    vg: low::p256_vg::P256,
+    point: &AffineMontPoint,
+    r: &Scalar,
+    s: &Scalar,
+    e: &Scalar,
+) -> Result<(), Error> {
+    let mut signature = [0u8; 2 * Scalar::BYTES];
+    let (r_bytes, s_bytes) = signature.split_at_mut(Scalar::BYTES);
+    r_bytes.copy_from_slice(&r.as_bytes());
+    s_bytes.copy_from_slice(&s.as_bytes());
+    match vg.verify(&point.as_bytes_uncompressed(), &e.as_bytes(), &signature) {
+        true => Ok(()),
+        false => Err(Error::BadSignature),
     }
 }
 

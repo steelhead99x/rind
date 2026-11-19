@@ -18,6 +18,7 @@
 // suggestion for `chunks_exact(G::ELEMENT_LEN)` would need.
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
+use alloc::vec::Vec;
 use core::cmp::Ordering;
 use core::fmt;
 
@@ -589,9 +590,7 @@ fn decode_element<G: Group>(bytes: &[u8]) -> Result<Bytes<MAX_ELEMENT>, Error> {
 
 /// The error for the identity where RFC 9591 forbids it, which no honest
 /// run is known to reach.
-fn identity() -> Error {
-    KeyFormatError::SmallOrder.into()
-}
+const IDENTITY_ERROR: KeyFormatError = KeyFormatError::SmallOrder;
 
 /// A participant's identifier: a nonzero scalar, unique within a group.
 ///
@@ -1409,7 +1408,7 @@ impl SigningPackage {
             terms.push((binding, rho));
         }
         let group_commitment =
-            G::element_to_bytes(&G::public_mul_sum(&terms).ok_or_else(identity)?);
+            G::element_to_bytes(&G::public_mul_sum(&terms).ok_or(IDENTITY_ERROR)?);
         let challenge =
             G::scalar_to_bytes(&challenge::<G>(&group_commitment, public_key, message)?);
         Ok(Self {

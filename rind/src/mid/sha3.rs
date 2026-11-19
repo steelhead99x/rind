@@ -11,7 +11,7 @@ use crate::low::{
 
 /// A context for incremental computation of a SHA3 hash with an `R`-byte
 /// rate and an `OUT`-byte digest.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Sha3Context<const R: usize, const OUT: usize> {
     sponge: Sponge<R, SHA_PAD_BYTE>,
 }
@@ -308,6 +308,7 @@ fn shake256_x8<const OUT: usize, const P: usize>(
 
 /// SHAKE256 of each of `inputs`, one to eight, four or eight at once, writing the
 /// first `OUT` bytes of each, at most a block, to its item of `outputs`.
+/// Items of `outputs` past the inputs stay as they were.
 /// Each input is its `P` parts in turn, and the inputs' parts agree in
 /// length, so they absorb in place, without being copied together.
 ///
@@ -436,7 +437,7 @@ fn squeeze_x4<const OUT: usize>(states: &[[u64; 4]; 25], outputs: &mut [[u8; OUT
 
 /// A sponge absorbing input, XORed into the state as it arrives, so it needs
 /// no buffer.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Sponge<const R: usize, const PAD: u8> {
     s: [u64; 25],
     /// The bytes of the current block absorbed so far, under `R`.
@@ -835,8 +836,9 @@ mod tests {
                     .iter()
                     .map(|i| [&i[..len / 3], &i[len / 3..len / 2], &i[len / 2..len]])
                     .collect();
-                let mut outputs = [[0u8; 40]; 8];
+                let mut outputs = [[0xA5u8; 40]; 8];
                 shake256_xn(&inputs, &mut outputs);
+                assert!(outputs[lanes..].iter().all(|o| *o == [0xA5; 40]));
                 for (input, output) in inputs.iter().zip(&outputs) {
                     let mut sponge = Shake256Sponge::new();
                     for part in input {
