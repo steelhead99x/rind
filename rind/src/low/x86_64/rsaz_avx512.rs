@@ -192,7 +192,7 @@ fn mod_exp<const H: usize>(
     // squares its half, and each odd one multiplies the entry below it by
     // the base.
     let one = Pair::both(1, 0);
-    let mut table = vec![Pair::ZERO; 32];
+    let mut table = alloc::vec![Pair::ZERO; 32];
     rsaz.mul(&mut table[0], &one, &rr);
     rsaz.mul(&mut table[1], &Pair::from_words([a.x, b.x]), &rr);
     for i in 2..32 {

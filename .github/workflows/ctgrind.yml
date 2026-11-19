@@ -166,7 +166,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [rsa3072, rsa4096, crt_ifma_2048, crt_ifma512_2048, crt_ifma512_3072, crt_ifma_4096, crt_ifma512_4096, public_ifma, aes128_gcm, aes192_gcm, aes256_gcm, aes_gcm_vaes_avx2, hmac, chacha20, mlkem768, keccak4x_vl]
+        test: [rsa3072, rsa4096, crt_ifma_2048, crt_ifma512_2048, crt_ifma512_3072, crt_ifma_4096, crt_ifma512_4096, public_ifma, aes128_gcm, aes192_gcm, aes256_gcm, aes_gcm_vaes_avx2, hmac, chacha20, mlkem768, x25519, ed25519, p256_ifma_ecdh, keccak4x_vl]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -212,9 +212,7 @@ jobs:
   # code is checked here and the extension's by `armv7-qemu` (see
   # `admin/ctgrind`).
   #
-  # Release and debug builds, as `build` checks. Valgrind runs every thread on
-  # one core, so the suites run as parallel jobs instead, and
-  # `--no-fail-fast` reports every failing test binary in one run.
+  # Release and debug builds, as `build` checks, each suite its own job.
   #
   # The `no-neon` row denies NEON to check the code cores without it run, such
   # as OpenSSL's integer Keccak-f. The denial takes `--cfg rind_cpu_disable`,
@@ -258,6 +256,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libc6:armhf valgrind:armhf
 
+      # The dev shell's version, as a checksum-verified prebuilt.
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-nextest@0.9.149
+
       # A denial set to any value takes effect, so only the `no-neon` row sets
       # one.
       - name: ctgrind tests
@@ -265,7 +268,7 @@ jobs:
           if [ "$RIND_TEST_ARM_NEON" = 0 ]; then
             export RIND_CPU_DISABLE_neon=1 RUSTFLAGS='--cfg rind_cpu_disable'
           fi
-          admin/ctgrind ${{ matrix.suite }} --target armv7-unknown-linux-gnueabihf ${{ matrix.build }} --no-fail-fast
+          admin/ctgrind ${{ matrix.suite }} --target armv7-unknown-linux-gnueabihf ${{ matrix.build }}
         env:
           CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER: arm-linux-gnueabihf-gcc
           CC_armv7_unknown_linux_gnueabihf: arm-linux-gnueabihf-gcc

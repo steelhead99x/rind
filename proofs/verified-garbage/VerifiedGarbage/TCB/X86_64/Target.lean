@@ -99,7 +99,7 @@ def abi : Abi isa where
       | 0 => True
       | n => n ≤ (s.gpr .rsp).toNat) ∧
       (s.gpr .rsp).toNat + 8 * (ws.length - argRegs.length + 1) ≤ 2 ^ 64
-  pub s₁ s₂ := s₁.gpr .rsp = s₂.gpr .rsp
+  pub s₁ s₂ := s₁.gpr .rsp = s₂.gpr .rsp ∧ s₁.mxcsr = s₂.mxcsr
   mem s := s.mem
   rd s := s.rd
   wr s := s.wr

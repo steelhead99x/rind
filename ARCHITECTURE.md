@@ -13,7 +13,9 @@ run time. [MIGRATING.md][migrating] maps each ring and aws-lc-rs item to it.
   `Signature`, so a key of one algorithm cannot reach another's call, and a
   program links only the algorithms it names. A caller that picks the
   algorithm at run time, such as a TLS stack, holds an enum of the modules'
-  public keys.
+  public keys. One private key of unknown type, read from a key file, loads
+  as `rind::KeyPair`, an enum of the modules' key pairs, whose
+  `from_pkcs8` reads the algorithm identifier and links every module.
 - Algorithms only old protocols should use sit in `legacy` submodules, such
   as `digest::legacy::SHA1`.
 - Key pairs name the DER format they load or encode (`from_pkcs8`,
@@ -96,9 +98,15 @@ The modules:
 
 The public modules wrap three private layers:
 
-- `low`: low level primitives. platform-specific. unsafe allowed. minimal std and alloc.
-- `mid`: constructions, protocols and encodings. platform agnostic. no unsafe. minimal std and alloc.
+- `low`: low level primitives. platform-specific. unsafe allowed. minimal alloc.
+- `mid`: constructions, protocols and encodings. platform agnostic. no unsafe. minimal alloc.
 - `high`: high level encodings and operations. platform agnostic. no unsafe.
+
+rind is `no_std` with `alloc`. It uses `std` only where build.rs's `rind_std`
+says the target has an OS, and only for what needs one: aarch64's run-time CPU
+detection, the `RIND_CPU_DISABLE_*` switches (read by debug builds and by
+release ones with `--cfg rind_cpu_disable`), the debug builds' `Entry` check,
+the `Dit` guard's per-thread count on Apple's platforms, and the FIPS module.
 
 `low` code should not refer to `mid`, nor `mid` to `high`.
 

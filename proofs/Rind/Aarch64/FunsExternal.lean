@@ -3,13 +3,14 @@ public import Aeneas
 public import Rind.Aarch64.Types
 public import Rind.Aarch64.Neon
 public import Rind.Aarch64.PointSelectModel
+public import Rind.Aarch64.AesGcmModel
 @[expose] public section
 open Aeneas Aeneas.Std Result
 set_option linter.dupNamespace false
 
 /-!
 The rind functions the aarch64 translation leaves opaque, beside those
-`Rind.Aarch64.PointSelectModel` models. No proof assumes anything about them
+`Rind.Aarch64.PointSelectModel` and `Rind.Aarch64.AesGcmModel` model. No proof assumes anything about them
 beyond what `Rind.Aarch64.S2nBignum` and `Rind.Aarch64.AwsLc` state for
 s2n-bignum's and aws-lc's routines and what each theorem takes as a hypothesis.
 -/
@@ -37,6 +38,14 @@ opaque low.aarch64.sha3_keccak_f1600_alt.sha3_keccak_f1600
 opaque low.aarch64.sha3_keccak2_f1600.sha3_keccak2_f1600
   : Array (Array Std.U64 25#usize) 2#usize → Array Std.U64 24#usize →
     Result (Array (Array Std.U64 25#usize) 2#usize)
+
+opaque low.aarch64.sha3_keccak4_f1600.sha3_keccak4_f1600
+  : Array (Array Std.U64 25#usize) 4#usize → Array Std.U64 24#usize →
+    Result (Array (Array Std.U64 25#usize) 4#usize)
+
+opaque low.aarch64.sha3_keccak4_f1600_alt.sha3_keccak4_f1600
+  : Array (Array Std.U64 25#usize) 4#usize → Array Std.U64 24#usize →
+    Result (Array (Array Std.U64 25#usize) 4#usize)
 
 opaque low.aarch64.bignum_eq.bignum_eq
   : Slice Std.U64 → Slice Std.U64 → Result Bool
@@ -235,6 +244,8 @@ opaque low.entry.Entry.assert_held : Result Unit
 
 opaque low.aarch64.cpu.HaveSha3.check : Result (Option low.aarch64.cpu.HaveSha3)
 
+opaque low.aarch64.cpu.HaveSha3.check_keccak : Result (Option low.aarch64.cpu.HaveSha3)
+
 opaque low.aarch64.cpu.HaveCryptoExt.check : Result (Option low.aarch64.cpu.HaveCryptoExt)
 
 /-! SHA-1's block function, whose contract `Rind.Aarch64.ShaBlocks` states as a
@@ -330,6 +341,27 @@ opaque high.curve.P384.Insts.RindHighCurveCurveStaticPrivateKeyVerifyingKeyScala
   {T0 : Type _} (midrngRandomSourceInst : mid.rng.RandomSource T0) :
   T0 → Result ((core.result.Result mid.p384.StaticPrivateKey error.Error) × T0)
 
+/-! Whether the CPU runs pyca/verified-garbage's P-256, which reads no input,
+and its routines behind their Rust wrappers, whose contracts
+`Rind.Aarch64.VgP256` states. -/
+
+opaque low.aarch64.p256_vg.P256.check : Result (Option low.aarch64.p256_vg.P256)
+
+opaque low.aarch64.p256_vg.P256.check_public_key : Result (Option low.aarch64.p256_vg.P256)
+
+opaque low.aarch64.p256_vg.P256.public_key
+  : low.aarch64.p256_vg.P256 → Array Std.U8 32#usize → Result (Option (Array Std.U8 65#usize))
+
+opaque low.aarch64.p256_vg.P256.ecdh
+  :
+  low.aarch64.p256_vg.P256 → Array Std.U8 32#usize → Array Std.U8 65#usize → Result (Option
+    (Array Std.U8 32#usize))
+
+opaque low.aarch64.p256_vg.P256.verify
+  :
+  low.aarch64.p256_vg.P256 → Array Std.U8 65#usize → Array Std.U8 32#usize → Array Std.U8
+    64#usize → Result Bool
+
 /-! The other curves, which X25519's and P-256's results never depend on. -/
 
 opaque mid.p521.PrivateKey.new_random
@@ -383,6 +415,18 @@ tests. -/
 def low.aarch64.aes_cbc.aese_chained (y b : core.core_arch.arm_shared.neon.uint8x16_t) :
     Result core.core_arch.arm_shared.neon.uint8x16_t :=
   core.core_arch.arm_shared.neon.generated.vaeseq_u8 y b
+
+/-! pyca/verified-garbage's ML-KEM-768 routines, behind their Rust wrappers,
+whose contracts `Rind.Aarch64.VgMlKem` states. -/
+
+opaque low.aarch64.mlkem768_vg.Encaps.check_ek
+  : low.aarch64.mlkem768_vg.Encaps → Array Std.U8 1184#usize → Result Bool
+
+opaque low.aarch64.mlkem768_vg.Encaps.encaps
+  :
+  low.aarch64.mlkem768_vg.Encaps → Array Std.U8 1184#usize → Option (Array
+    Std.U8 32#usize) → Array Std.U8 32#usize → Result (Option ((Array
+    Std.U8 32#usize) × (Array Std.U8 1088#usize)))
 
 /-! MD5, which no proof covers. -/
 
@@ -455,5 +499,31 @@ opaque low.aarch64.cpu.ct_compare_16
   : Array Std.U8 16#usize → Array Std.U8 16#usize → Result Std.Usize
 
 opaque low.aarch64.cpu.ct_compare_bytes : Slice Std.U8 → Slice Std.U8 → Result Std.U8
+
+/-! AES-GCM's stitched kernels and the separate passes around them, which no
+proof covers yet, and aws-lc's NEON GHASH table. -/
+
+opaque low.aarch64.aes_gcm.cipher
+  : Bool → low.aarch64.aes.AesKey → low.aarch64.ghash.Ghash → Array Std.U8 16#usize → Slice Std.U8 →
+    Slice Std.U8 → Result (low.aarch64.ghash.Ghash × Slice Std.U8)
+
+opaque low.aarch64.ghash_neon_armv8.NeonTable.new
+  : Array Std.U8 16#usize → Result low.aarch64.ghash_neon_armv8.NeonTable
+
+/-- x86_64's AVX-512 IFMA X25519 and Ed25519, which no aarch64 CPU runs, and
+which the proofs here take as not running. -/
+opaque low.aarch64.curve25519_ifma.Curve25519Ifma.check : Result (Option low.aarch64.curve25519_ifma.Curve25519Ifma)
+
+opaque low.aarch64.curve25519_ifma.Curve25519Ifma.ed25519_key_pair
+  : low.aarch64.curve25519_ifma.Curve25519Ifma → Array Std.U8 32#usize → Result (Array Std.U8 64#usize × Array Std.U8 32#usize)
+
+opaque low.aarch64.curve25519_ifma.Curve25519Ifma.ed25519_sign
+  : low.aarch64.curve25519_ifma.Curve25519Ifma → Array Std.U8 64#usize → Array Std.U8 32#usize → Slice Std.U8 →
+    Result (Array Std.U8 64#usize)
+
+opaque low.aarch64.curve25519_ifma.Curve25519Ifma.ed25519_verify
+  : low.aarch64.curve25519_ifma.Curve25519Ifma → Array Std.U8 32#usize → Slice Std.U8 → Array Std.U8 64#usize → Result Bool
+
+opaque low.aarch64.curve25519_ifma.Curve25519Ifma.Insts.CoreCloneClone.clone : low.aarch64.curve25519_ifma.Curve25519Ifma → Result low.aarch64.curve25519_ifma.Curve25519Ifma
 
 end rind.aarch64
