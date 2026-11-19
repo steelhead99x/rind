@@ -11,3 +11,8 @@
 mod digest_impl;
 #[cfg(feature = "digest-0_11")]
 pub use digest_impl::{hmac, sha2, sha3};
+
+#[cfg(feature = "aead-0_6")]
+mod aead_impl;
+#[cfg(feature = "aead-0_6")]
+pub use aead_impl::{aes_gcm, chacha20poly1305};
