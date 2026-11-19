@@ -18,14 +18,13 @@ use super::super::generic::argon2::{Argon2Block, argon2_compress as portable};
 use super::cpu::HaveAvx2;
 #[cfg(rind_argon2_avx512)]
 use super::cpu::HaveAvx512ForArgon2;
-#[cfg(rind_argon2_ssse3)]
 use super::cpu::HaveSsse3;
 
 /// Argon2's compression function, as `low::generic::argon2` defines it.
 ///
-/// AVX2 where the CPU has it, and the portable permutation otherwise. The
-/// AVX-512F and SSSE3 fills are built for the tests and selected only with
-/// `--cfg rind_argon2_avx512` and `--cfg rind_argon2_ssse3`.
+/// AVX2 where the CPU has it, then SSSE3, and the portable permutation
+/// otherwise. The AVX-512F fill is built for the tests and selected only with
+/// `--cfg rind_argon2_avx512`.
 pub(crate) fn argon2_compress(x: &Argon2Block, y: &Argon2Block, out: &mut Argon2Block, xor: bool) {
     // Off until it wins on Zen 4 or 5 and on Sapphire Rapids.
     #[cfg(rind_argon2_avx512)]
@@ -37,8 +36,8 @@ pub(crate) fn argon2_compress(x: &Argon2Block, y: &Argon2Block, out: &mut Argon2
         // SAFETY: the token proves AVX2, and the blocks are 1024 bytes.
         return unsafe { compress_avx2(x, y, out, xor) };
     }
-    // Off until it beats the portable permutation on a CPU without AVX2.
-    #[cfg(rind_argon2_ssse3)]
+    // 1.12x and 1.13x the portable permutation on a Xeon 6975P-C and 1.2x on a
+    // Core Ultra 9 275HX, each with AVX2 denied.
     if HaveSsse3::check().is_some() {
         // SAFETY: the token proves SSSE3, and the blocks are 1024 bytes.
         return unsafe { super::argon2_ssse3::compress(x, y, out, xor) };
@@ -213,9 +212,8 @@ mod tests {
         }
     }
 
-    /// The build's `--cfg` gates select a fill, and that fill matches the
-    /// portable permutation.
-    #[cfg(any(rind_argon2_avx512, rind_argon2_ssse3))]
+    /// The fill dispatch selects, whichever the build and CPU choose, matches
+    /// the portable permutation.
     #[test]
     fn configured_dispatch_matches_portable() {
         crate::low::generic::argon2::assert_matches_portable(argon2_compress);

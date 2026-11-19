@@ -7,10 +7,9 @@
 //!
 //! A port of the reference implementation's 128-bit `BLAKE2_ROUND`
 //! (`blamka-round-opt.h`), the same permutation `d6114f56` runs on x86_64
-//! without AVX2. Built for the tests, and for a release that passes
-//! `--cfg rind_argon2_ssse3`. Dispatch does not select it until that build,
-//! and only when the CPU has SSSE3 and lacks the AVX2 set. Keep it when it
-//! beats the portable permutation on such a CPU.
+//! without AVX2. Dispatch selects it when the CPU has SSSE3 and lacks the
+//! AVX2 set: it beat the portable permutation by 1.12x to 1.2x on the CPUs
+//! tried, with AVX2 denied (see quest/m4/protocols/argon2-simd.md).
 
 use core::arch::x86_64::*;
 

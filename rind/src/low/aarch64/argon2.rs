@@ -2,19 +2,26 @@
 
 //! Argon2's compression function on aarch64.
 //!
-//! The portable permutation runs unless the build passes
-//! `--cfg rind_argon2_neon`, which selects [`super::argon2_neon`]: the NEON
-//! fill measured on `perf/argon2-neon-scalar-rider`, SHA3's `xar` where the
-//! CPU has it and the plain NEON fill with its scalar rider otherwise.
+//! The NEON fill of [`super::argon2_neon`]: SHA3's `xar` fill on Apple cores
+//! that have it, and the plain NEON fill with its scalar rider everywhere
+//! else. Both measured faster than the portable permutation on every core
+//! tried (see quest/m4/protocols/argon2-simd.md for the numbers); the SHA3
+//! fill loses to the portable permutation on a Neoverse-N2, so only Apple
+//! takes it.
 
 use crate::low::generic::argon2::Argon2Block;
 
 /// Argon2's compression function, as `low::generic::argon2` defines it.
 pub(crate) fn argon2_compress(x: &Argon2Block, y: &Argon2Block, out: &mut Argon2Block, xor: bool) {
-    // Off until the kernel beats the portable permutation on an Apple core
-    // and a Neoverse core. See quest/m4/protocols/argon2-simd.md.
-    #[cfg(rind_argon2_neon)]
     super::argon2_neon::compress_selected(x, y, out, xor);
-    #[cfg(not(rind_argon2_neon))]
-    crate::low::generic::argon2::argon2_compress(x, y, out, xor);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dispatch_matches_portable() {
+        crate::low::generic::argon2::assert_matches_portable(argon2_compress);
+    }
 }

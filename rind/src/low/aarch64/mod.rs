@@ -14,7 +14,6 @@ pub(crate) mod aes_cbc;
 pub(crate) mod aes_ctr;
 pub(crate) mod aes_gcm;
 pub(crate) mod argon2;
-#[cfg(any(test, rind_argon2_neon))]
 pub(crate) mod argon2_neon;
 pub(crate) mod bignum_add;
 pub(crate) mod bignum_add_p25519;

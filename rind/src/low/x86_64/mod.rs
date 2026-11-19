@@ -13,7 +13,6 @@ pub(crate) mod aes_nohw;
 pub(crate) mod argon2;
 #[cfg(any(test, rind_argon2_avx512))]
 pub(crate) mod argon2_avx512;
-#[cfg(any(test, rind_argon2_ssse3))]
 pub(crate) mod argon2_ssse3;
 pub(crate) mod bignum_add;
 pub(crate) mod bignum_add_p25519;
