@@ -8,7 +8,9 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:cryptography/dart.dart';
+import 'package:rind/ecdsa.dart' as ecdsa;
 import 'package:rind/rind.dart' as rind;
+import 'package:rind/rsa.dart' as rsa;
 import 'package:rind_cryptography/rind_cryptography.dart';
 import 'package:test/test.dart';
 
@@ -835,16 +837,16 @@ void main() {
   group('ECDSA', () {
     final curves = {
       _rind.ecdsaP256(_rind.sha256()): (
-        rind.EcdsaSigningAlgorithm.p256Sha256Fixed,
-        rind.VerificationAlgorithm.ecdsaP256Sha256Fixed,
+        ecdsa.SigningAlgorithm.p256Sha256Fixed,
+        ecdsa.VerificationAlgorithm.p256Sha256Fixed,
       ),
       _rind.ecdsaP384(_rind.sha384()): (
-        rind.EcdsaSigningAlgorithm.p384Sha384Fixed,
-        rind.VerificationAlgorithm.ecdsaP384Sha384Fixed,
+        ecdsa.SigningAlgorithm.p384Sha384Fixed,
+        ecdsa.VerificationAlgorithm.p384Sha384Fixed,
       ),
       _rind.ecdsaP521(_rind.sha512()): (
-        rind.EcdsaSigningAlgorithm.p521Sha512Fixed,
-        rind.VerificationAlgorithm.ecdsaP521Sha512Fixed,
+        ecdsa.SigningAlgorithm.p521Sha512Fixed,
+        ecdsa.VerificationAlgorithm.p521Sha512Fixed,
       ),
     };
 
@@ -857,7 +859,7 @@ void main() {
         final message = _bytes(100);
 
         final signature = await algorithm.sign(message, keyPair: pair);
-        rind.PublicKey(
+        ecdsa.PublicKey(
           verification,
           point,
         ).verify(message, Uint8List.fromList(signature.bytes));
@@ -868,10 +870,10 @@ void main() {
         );
 
         // The package's own PKCS#8 and SPKI encodings, which rind reads.
-        final rindPair = rind.EcdsaKeyPair.fromPkcs8(signing, data.toDer());
+        final rindPair = ecdsa.KeyPair.fromPkcs8(signing, data.toDer());
         expect(rindPair.publicKey.bytes, point);
         expect(
-          rind.PublicKey.fromSpki(verification, data.publicKey.toDer()).bytes,
+          ecdsa.PublicKey.fromSpki(verification, data.publicKey.toDer()).bytes,
           point,
         );
         final rindSignature = Signature(
@@ -922,18 +924,17 @@ void main() {
       // signature at all means they round-tripped.
       final message = _bytes(100);
       for (final (hash, verification) in [
-        (_rind.sha256(), rind.VerificationAlgorithm.rsaPkcs1Sha256),
-        (_rind.sha384(), rind.VerificationAlgorithm.rsaPkcs1Sha384),
-        (_rind.sha512(), rind.VerificationAlgorithm.rsaPkcs1Sha512),
+        (_rind.sha256(), rsa.VerificationAlgorithm.pkcs1Sha256),
+        (_rind.sha384(), rsa.VerificationAlgorithm.pkcs1Sha384),
+        (_rind.sha512(), rsa.VerificationAlgorithm.pkcs1Sha512),
       ]) {
         final pkcs1 = _rind.rsaSsaPkcs1v15(hash);
         final signature = await pkcs1.sign(message, keyPair: data);
         expect(signature.publicKey, data.publicKey);
-        rind.PublicKey.fromComponents(
-          verification,
+        rsa.PublicKey.fromComponents(
           n: Uint8List.fromList(data.n),
           e: Uint8List.fromList(data.e),
-        ).verify(message, Uint8List.fromList(signature.bytes));
+        ).verify(verification, message, Uint8List.fromList(signature.bytes));
         expect(await pkcs1.verify(message, signature: signature), isTrue);
         expect(
           await pkcs1.verify([...message, 0], signature: signature),
@@ -947,11 +948,14 @@ void main() {
       final pss = _rind.rsaPss(_rind.sha256(), nonceLengthInBytes: 32);
       final signature = await pss.sign(message, keyPair: data);
       expect(await pss.verify(message, signature: signature), isTrue);
-      rind.PublicKey.fromComponents(
-        rind.VerificationAlgorithm.rsaPssSha256,
+      rsa.PublicKey.fromComponents(
         n: Uint8List.fromList(data.n),
         e: Uint8List.fromList(data.e),
-      ).verify(message, Uint8List.fromList(signature.bytes));
+      ).verify(
+        rsa.VerificationAlgorithm.pssSha256,
+        message,
+        Uint8List.fromList(signature.bytes),
+      );
 
       // Another salt length verifies any salt, and signs nothing.
       final salted = _rind.rsaPss(_rind.sha256(), nonceLengthInBytes: 16);

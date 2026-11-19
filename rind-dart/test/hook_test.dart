@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:code_assets/code_assets.dart';
 import 'package:crypto/crypto.dart' as crypto;
@@ -9,16 +10,23 @@ import 'package:test/test.dart';
 
 import '../hook/build.dart' as hook;
 
+// The package root, wherever `dart test` runs from. package:hooks'
+// testBuildHook itself still takes the working directory as the package
+// root, as `dart test` sets it.
+final _root = Isolate.resolvePackageUriSync(
+  Uri.parse('package:rind/'),
+)!.resolve('..');
+
 final fromSource = PackageUserDefines(
   workspacePubspec: PackageUserDefinesSource(
     defines: {'build_from_source': true},
-    basePath: Directory.current.uri,
+    basePath: _root,
   ),
 );
 
 // Only a released package, as sh/dart-package.sh and sh/dart-prebuilt.sh
 // stage it, pins prebuilt libraries.
-final released = File('hook/prebuilt.json').existsSync();
+final released = File.fromUri(_root.resolve('hook/prebuilt.json')).existsSync();
 
 /// Every target rind supports, as `os-arch[-iossdk]`.
 const supported = [
@@ -43,11 +51,23 @@ const _coldBuild = Timeout(Duration(minutes: 5));
 
 void main() {
   test('builds from source for the host, listing its sources', () async {
+    // In the cargo target directory the user-define names, relative to the
+    // pubspec that sets it.
+    final base = await Directory.systemTemp.createTemp();
+    addTearDown(() => base.delete(recursive: true));
     await testCodeBuildHook(
       mainMethod: hook.main,
-      userDefines: fromSource,
+      userDefines: PackageUserDefines(
+        workspacePubspec: PackageUserDefinesSource(
+          defines: {'build_from_source': true, 'cargo_target_dir': 'target'},
+          basePath: base.uri,
+        ),
+      ),
       check: (input, output) {
-        expect(output.assets.code.single.file, isNotNull);
+        expect(
+          output.assets.code.single.file!.toFilePath(),
+          startsWith(base.uri.resolve('target/').toFilePath()),
+        );
         expect(
           output.dependencies,
           containsAll([
