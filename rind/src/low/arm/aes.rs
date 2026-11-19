@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! AES on the crypto extension where the CPU has it, and the portable
-//! backend's bitsliced AES otherwise.
+//! AES on the crypto extension where the CPU has it, on NEON where it has
+//! that, and the portable backend's bitsliced AES otherwise.
 
+use super::aes_neon::{NeonDecKey, NeonKey};
 use super::aesv8_armx::{AesHwDecKey, AesHwKey};
-use super::cpu::HaveCryptoExt;
+use super::cpu::{HaveCryptoExt, HaveNeon};
 use crate::low::{self, portable::aes as portable};
 
 // Keep all-zero valid when drop wipes the whole enum. A process only ever
@@ -15,6 +16,9 @@ pub(crate) enum AesKey {
     Portable(portable::AesKey),
     /// The crypto extension's, which the key picks when the CPU has it.
     Hw(AesHwKey),
+    /// NEON's, which the key picks when the CPU has NEON but not the
+    /// extension.
+    Neon(NeonKey),
 }
 
 impl AesKey {
@@ -22,7 +26,10 @@ impl AesKey {
     pub(crate) fn new(key: &[u8]) -> Self {
         match HaveCryptoExt::check() {
             Some(token) => Self::Hw(AesHwKey::new(key, token)),
-            None => Self::Portable(portable::AesKey::new(key)),
+            None => match HaveNeon::check() {
+                Some(token) => Self::Neon(NeonKey::new(key, token)),
+                None => Self::Portable(portable::AesKey::new(key)),
+            },
         }
     }
 
@@ -31,6 +38,7 @@ impl AesKey {
         match self {
             Self::Portable(key) => key.encrypt_block(block),
             Self::Hw(key) => key.encrypt_block(block),
+            Self::Neon(key) => key.encrypt_block(block),
         }
     }
 
@@ -40,6 +48,7 @@ impl AesKey {
         match self {
             Self::Portable(key) => key.key_len(),
             Self::Hw(key) => key.key_len(),
+            Self::Neon(key) => key.key_len(),
         }
     }
 }
@@ -59,6 +68,7 @@ impl low::Zeroable for AesKey {}
 pub(crate) enum AesDecKey {
     Portable(portable::AesDecKey),
     Hw(AesHwDecKey),
+    Neon(NeonDecKey),
 }
 
 impl AesDecKey {
@@ -66,7 +76,10 @@ impl AesDecKey {
     pub(crate) fn new(key: &[u8]) -> Self {
         match HaveCryptoExt::check() {
             Some(token) => Self::Hw(AesHwDecKey::new(key, token)),
-            None => Self::Portable(portable::AesDecKey::new(key)),
+            None => match HaveNeon::check() {
+                Some(token) => Self::Neon(NeonDecKey::new(key, token)),
+                None => Self::Portable(portable::AesDecKey::new(key)),
+            },
         }
     }
 
@@ -74,6 +87,7 @@ impl AesDecKey {
         match self {
             Self::Portable(key) => key.decrypt_block(inout),
             Self::Hw(key) => key.decrypt_block(inout),
+            Self::Neon(key) => key.decrypt_block(inout),
         }
     }
 }
@@ -99,17 +113,18 @@ mod tests {
             if let Some(token) = HaveCryptoExt::check() {
                 assert_eq!(AesKey::Hw(AesHwKey::new(key, token)).key_len(), key.len());
             }
+            if let Some(token) = HaveNeon::check() {
+                assert_eq!(AesKey::Neon(NeonKey::new(key, token)).key_len(), key.len());
+            }
         }
     }
 
-    // Every other test sees only the path the CPU picks, so the crypto
-    // extension's AES is checked against the portable code here: each key
-    // size, single blocks, and counter mode across the 32-bit counter's wrap.
+    // Every other test sees only the path the CPU picks, so each hardware
+    // path is checked against the portable code here: each key size, single
+    // blocks, and counter mode across the 32-bit counter's wrap, at lengths
+    // around the NEON path's eight-block batches.
     #[test]
     fn hw_matches_portable() {
-        let Some(token) = HaveCryptoExt::check() else {
-            return;
-        };
         let bytes = |n: usize, seed: u32| -> Vec<u8> {
             (0..n as u32)
                 .map(|i| (i.wrapping_add(seed).wrapping_mul(0x9e3779b9) >> 24) as u8)
@@ -118,26 +133,36 @@ mod tests {
         for (key_len, seed) in [16, 24, 32].into_iter().zip(1..) {
             let key = bytes(key_len, seed);
             let portable = AesKey::Portable(portable::AesKey::new(&key));
-            let hw = AesKey::Hw(AesHwKey::new(&key, token));
+            let mut paths = vec![];
+            if let Some(token) = HaveCryptoExt::check() {
+                paths.push(AesKey::Hw(AesHwKey::new(&key, token)));
+            }
+            if let Some(token) = HaveNeon::check() {
+                paths.push(AesKey::Neon(NeonKey::new(&key, token)));
+            }
+            for (path, hw) in paths.iter().enumerate() {
+                let block: [u8; 16] = bytes(16, seed).try_into().unwrap();
+                assert_eq!(
+                    hw.encrypt_block(&block),
+                    portable.encrypt_block(&block),
+                    "{key_len}-byte key block, path {path}"
+                );
 
-            let block: [u8; 16] = bytes(16, seed).try_into().unwrap();
-            assert_eq!(
-                hw.encrypt_block(&block),
-                portable.encrypt_block(&block),
-                "{key_len}-byte key block"
-            );
-
-            let nonce = bytes(12, seed).try_into().unwrap();
-            for counter in [0, 1, u32::MAX - 3, u32::MAX] {
-                for len in [1, 15, 16, 17, 127, 128, 129, 300] {
-                    let mut want = bytes(len, counter);
-                    let mut got = want.clone();
-                    aes_ctr::apply(&portable, &nonce, counter, &mut want);
-                    aes_ctr::apply(&hw, &nonce, counter, &mut got);
-                    assert_eq!(
-                        got, want,
-                        "{key_len}-byte key, counter {counter}, {len} bytes"
-                    );
+                let nonce = bytes(12, seed).try_into().unwrap();
+                for counter in [0, 1, u32::MAX - 3, u32::MAX] {
+                    for len in [
+                        1, 15, 16, 17, 127, 128, 129, 300, 16 * 6 - 1, 16 * 6, 16 * 7, 16 * 8,
+                        16 * 8 + 16 * 5, 16 * 8 + 16 * 6, 16 * 15, 16 * 16 + 3,
+                    ] {
+                        let mut want = bytes(len, counter);
+                        let mut got = want.clone();
+                        aes_ctr::apply(&portable, &nonce, counter, &mut want);
+                        aes_ctr::apply(hw, &nonce, counter, &mut got);
+                        assert_eq!(
+                            got, want,
+                            "{key_len}-byte key, path {path}, counter {counter}, {len} bytes"
+                        );
+                    }
                 }
             }
         }
@@ -158,6 +183,9 @@ mod tests {
             let mut paths = vec![AesDecKey::Portable(portable::AesDecKey::new(&key))];
             if let Some(token) = HaveCryptoExt::check() {
                 paths.push(AesDecKey::Hw(AesHwDecKey::new(&key, token)));
+            }
+            if let Some(token) = HaveNeon::check() {
+                paths.push(AesDecKey::Neon(NeonDecKey::new(&key, token)));
             }
             for block_seed in 0..4 {
                 let block: [u8; 16] = bytes(16, block_seed).try_into().unwrap();

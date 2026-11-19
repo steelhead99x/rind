@@ -4,7 +4,7 @@ use super::aes::{check_gcm_iv, check_gcm_lengths};
 use crate::Error;
 use crate::low::{self, Entry, NohwTable, PortableAesKey, ct_equal};
 #[cfg(rind_backend = "arm")]
-use crate::low::{AesHwKey, GhashTable, HaveCryptoExt};
+use crate::low::{AesHwKey, GhashTable, HaveCryptoExt, HaveNeon, NeonKey, NeonTable};
 
 /// An AES-GCM key.
 pub(crate) enum AesGcm {
@@ -12,6 +12,9 @@ pub(crate) enum AesGcm {
     /// armv7's crypto extension's, which the key picks when the CPU has it.
     #[cfg(rind_backend = "arm")]
     Hw(Hw),
+    /// armv7's NEON, for CPUs with it but not the crypto extension.
+    #[cfg(rind_backend = "arm")]
+    Neon(Neon),
 }
 
 impl AesGcm {
@@ -28,6 +31,10 @@ impl AesGcm {
         if let Some(token) = HaveCryptoExt::check() {
             return Self::Hw(Hw::new(copy_key, token));
         }
+        #[cfg(rind_backend = "arm")]
+        if let Some(token) = HaveNeon::check() {
+            return Self::Neon(Neon::new(copy_key, token));
+        }
         Self::Portable(Portable::new(copy_key))
     }
 
@@ -37,6 +44,8 @@ impl AesGcm {
             Self::Portable(key) => key.key.key_len(),
             #[cfg(rind_backend = "arm")]
             Self::Hw(key) => key.key.key_len(),
+            #[cfg(rind_backend = "arm")]
+            Self::Neon(key) => key.key.key_len(),
         }
     }
 
@@ -65,6 +74,8 @@ impl AesGcm {
             Self::Portable(key) => *tag_out = key.tagged::<true>(nonce, aad, cipher_inout),
             #[cfg(rind_backend = "arm")]
             Self::Hw(key) => *tag_out = key.tagged::<true>(nonce, aad, cipher_inout),
+            #[cfg(rind_backend = "arm")]
+            Self::Neon(key) => *tag_out = key.tagged::<true>(nonce, aad, cipher_inout),
         }
         low::ct::public_slice(cipher_inout);
         low::ct::public_slice(tag_out);
@@ -98,6 +109,8 @@ impl AesGcm {
             Self::Portable(key) => key.tagged::<false>(nonce, aad, cipher_inout),
             #[cfg(rind_backend = "arm")]
             Self::Hw(key) => key.tagged::<false>(nonce, aad, cipher_inout),
+            #[cfg(rind_backend = "arm")]
+            Self::Neon(key) => key.tagged::<false>(nonce, aad, cipher_inout),
         };
         let result = ct_equal(&want, tag);
 
@@ -131,6 +144,8 @@ impl AesGcm {
             Self::Portable(key) => key.tagged::<true>(iv, aad, cipher_inout),
             #[cfg(rind_backend = "arm")]
             Self::Hw(key) => key.tagged::<true>(iv, aad, cipher_inout),
+            #[cfg(rind_backend = "arm")]
+            Self::Neon(key) => key.tagged::<true>(iv, aad, cipher_inout),
         };
         tag_out.copy_from_slice(&tag[..tag_out.len()]);
         low::ct::public_slice(cipher_inout);
@@ -158,6 +173,8 @@ impl AesGcm {
             Self::Portable(key) => key.tagged::<false>(iv, aad, cipher_inout),
             #[cfg(rind_backend = "arm")]
             Self::Hw(key) => key.tagged::<false>(iv, aad, cipher_inout),
+            #[cfg(rind_backend = "arm")]
+            Self::Neon(key) => key.tagged::<false>(iv, aad, cipher_inout),
         };
         let valid = ct_equal(&want[..tag.len()], tag);
 
@@ -206,6 +223,24 @@ impl Hw {
         let key = AesHwKey::new(key, token);
         let h = key.encrypt_block(&[0; 16]);
         let table = GhashTable::new(&h, token);
+        Self { key, table }
+    }
+}
+
+/// aws-lc's NEON AES and GHASH, composed as aws-lc's
+/// `CRYPTO_gcm128_encrypt_ctr32` does on 32-bit ARM without the extension.
+#[cfg(rind_backend = "arm")]
+pub(crate) struct Neon {
+    key: NeonKey,
+    table: NeonTable,
+}
+
+#[cfg(rind_backend = "arm")]
+impl Neon {
+    fn new(key: &[u8], token: HaveNeon) -> Self {
+        let key = NeonKey::new(key, token);
+        let h = key.encrypt_block(&[0; 16]);
+        let table = NeonTable::new(&h, token);
         Self { key, table }
     }
 }
@@ -277,6 +312,13 @@ impl Ghash for GhashTable {
     }
 }
 
+#[cfg(rind_backend = "arm")]
+impl Ghash for NeonTable {
+    fn ghash(&self, xi: &mut [u8; 16], input: &[[u8; 16]]) {
+        self.ghash(xi, input);
+    }
+}
+
 impl Ghash for NohwTable {
     fn ghash(&self, xi: &mut [u8; 16], input: &[[u8; 16]]) {
         self.ghash(xi, input);
@@ -288,6 +330,33 @@ impl Parts for Hw {
     type Table = GhashTable;
 
     fn table(&self) -> &GhashTable {
+        &self.table
+    }
+
+    fn encrypt_block(&self, block: &[u8; 16]) -> [u8; 16] {
+        self.key.encrypt_block(block)
+    }
+
+    fn ctr(&self, ivec: &[u8; 16], inout: &mut [u8]) -> [u8; 16] {
+        let (blocks, tail) = inout.as_chunks_mut::<16>();
+        self.key.ctr32(ivec, blocks);
+        let ivec = add32(ivec, blocks.len() as u32);
+        if tail.is_empty() {
+            return ivec;
+        }
+
+        for (b, k) in tail.iter_mut().zip(self.key.encrypt_block(&ivec)) {
+            *b ^= k;
+        }
+        add32(&ivec, 1)
+    }
+}
+
+#[cfg(rind_backend = "arm")]
+impl Parts for Neon {
+    type Table = NeonTable;
+
+    fn table(&self) -> &NeonTable {
         &self.table
     }
 
@@ -386,7 +455,7 @@ mod tests {
         assert_eq!(cipher, [b'p'; 4164]);
     }
 
-    // The crypto extension's composition and the portable one, against GCM
+    // Each hardware composition and the portable one, against GCM
     // by the book: each key size,
     // IVs of 1, 12, and 17 bytes, message lengths around the block and chunk
     // boundaries, and counter blocks whose 32-bit counter wraps within the
@@ -405,9 +474,11 @@ mod tests {
             let portable = Portable::new(&raw);
             #[cfg(rind_backend = "arm")]
             let hw = HaveCryptoExt::check().map(|token| Hw::new(&raw, token));
+            #[cfg(rind_backend = "arm")]
+            let neon = HaveNeon::check().map(|token| Neon::new(&raw, token));
             let encrypt = |b: &[u8; 16]| portable.encrypt_block(b);
             let aad = bytes(17, 2);
-            for msg_len in [0, 1, 16, 17, 100, 3071, 3073] {
+            for msg_len in [0, 1, 16, 17, 100, 128, 129, 16 * 14 + 3, 3071, 3073] {
                 let plain = bytes(msg_len, 3);
                 let what = format!("{key_len} {msg_len}");
                 let mut runs = vec![];
@@ -430,6 +501,10 @@ mod tests {
                     #[cfg(rind_backend = "arm")]
                     if let Some(hw) = &hw {
                         check(hw, &iv, &aad, &plain, &want, &what);
+                    }
+                    #[cfg(rind_backend = "arm")]
+                    if let Some(neon) = &neon {
+                        check(neon, &iv, &aad, &plain, &want, &what);
                     }
                 }
             }
@@ -455,6 +530,14 @@ mod tests {
             let mut got = plain.clone();
             let next = hw.ctr(&add32(&y0, 1), &mut got[..48]);
             hw.ctr(&next, &mut got[48..]);
+            assert_eq!(got, want);
+        }
+        #[cfg(rind_backend = "arm")]
+        if let Some(token) = HaveNeon::check() {
+            let neon = Neon::new(&[7; 16], token);
+            let mut got = plain.clone();
+            let next = neon.ctr(&add32(&y0, 1), &mut got[..48]);
+            neon.ctr(&next, &mut got[48..]);
             assert_eq!(got, want);
         }
 

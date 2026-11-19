@@ -25,6 +25,7 @@ macro_rules! aws_lc_symbol {
 pub(crate) mod aes;
 pub(crate) mod aes_cbc;
 pub(crate) mod aes_ctr;
+pub(crate) mod aes_neon;
 pub(crate) mod aesv8_armx;
 pub(crate) mod chacha20;
 mod chacha_armv4;
@@ -33,6 +34,7 @@ pub(crate) mod cpu;
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod ct_qemu;
 pub(crate) mod curve25519;
+pub(crate) mod ghash_armv4;
 pub(crate) mod ghashv8_armx;
 pub(crate) mod keccak1600_armv4;
 pub(crate) mod mont;
