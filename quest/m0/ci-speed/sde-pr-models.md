@@ -12,3 +12,7 @@ Decided with the maintainer on 2026-11-18 (/quest-plan): ✅ three models on pul
 - `x86-cpu.yml`'s `pull_request` paths miss paths `sh/backends.sh` counts as reaching every backend, such as `rind/build.rs`, which picks the backend, and `rind/tests/**`; add every such path.
 - Pick the AVX2 model from `admin/x86-cpus` as the one whose dispatch set covers the most hot paths (Skylake server or Haswell), and say why in the workflow comment.
 - The merge queue must not slow down noticeably: run the models as parallel jobs, as `x86-cpu.yml` already does, and give the queue's wall time before and after in the PR, as `quest context` requires for anything that slows the gate. If the slowest model dominates, say so and propose a split. Every model must also finish inside the queue's 90-minute window, hosted-runner wait included (p90 84 minutes on 2026-11-18, per [the epic](/quest/m0/ci-speed/README.md)); if they cannot, run them in the queue build on the self-hosted runner.
+
+## Waiting
+
+- Maintainer: add `x86-cpu gate` to main's ruleset as a required status check, once its PR has landed, so the merge queue waits on every SDE model. An agent cannot edit the ruleset. Check with `gh api repos/kixel-ai/rind/rulesets`; then set `pr: False` in `admin/x86-cpu` for every model but Prescott, Skylake server, and Diamond Rapids.

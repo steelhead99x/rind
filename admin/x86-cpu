@@ -45,7 +45,360 @@ KNOWN_CPUS = [
     ("-cwf", "Clearwater Forest"),
 ]
 
-_, mode = sys.argv
+# One entry per distinct set of dispatch paths that `rind/src/low/x86_64/cpu.rs`
+# picks from cpuid; x86-cpu.yml runs each as a job, asserting its set with
+# `RIND_TEST_X86_*`, and each comment names the other models that select the
+# same set, per the scans `sde-scan` saves in `admin/x86-cpus`. SDE reports no
+# `MCDT_NO` for any model, Arrow Lake's included, so every row needs
+# `rind/src/low/mcdt.rs`'s guard.
+#
+# `pr` marks the models a pull request runs; the merge queue and the weekly run
+# run every one. Until main's ruleset requires `x86-cpu gate`, which only the
+# queue runs, a pull request runs every model.
+MODELS = [
+    # Prescott, a Pentium 4, lacks SSSE3, so it runs every slowest path:
+    # aws-lc's SSE2 AES and integer GHASH, SHA-1, and SHA-256, HACL*'s
+    # ChaCha20 rounds, the portable ML-KEM arithmetic, s2n-bignum's `_alt` routines, and aws-lc's
+    # Montgomery multiplication.
+    dict(
+        model="Prescott",
+        sde="p4p",
+        pr=True,
+        paths=dict(
+            SSSE3=0,
+            SSE41=0,
+            AES_HARDWARE=0,
+            AVX=0,
+            AVX2=0,
+            BMI2_ADX=0,
+            SHA=0,
+            VAES_AES_GCM=0,
+            AVX_MOVBE_AES_GCM=0,
+            AVX512_AES_GCM=0,
+            AVX512_ML_KEM=0,
+            AVX512_RSA=0,
+            MCDT=1,
+        ),
+    ),
+    # Merom, the first Core 2, adds SSSE3 but not SSE4.1 or AES-NI, so it
+    # runs aws-lc's vpaes and SSSE3 GHASH, ChaCha20, SHA-1, and SHA-256,
+    # beside Prescott's other paths. Saltwell selects the same paths.
+    dict(
+        model="Merom",
+        sde="mrm",
+        pr=True,
+        paths=dict(
+            SSSE3=1,
+            SSE41=0,
+            AES_HARDWARE=0,
+            AVX=0,
+            AVX2=0,
+            BMI2_ADX=0,
+            SHA=0,
+            VAES_AES_GCM=0,
+            AVX_MOVBE_AES_GCM=0,
+            AVX512_AES_GCM=0,
+            AVX512_ML_KEM=0,
+            AVX512_RSA=0,
+            MCDT=1,
+        ),
+    ),
+    # Nehalem adds SSE4.1, so ChaCha20-Poly1305 runs in one pass, but still
+    # lacks AES-NI, so it otherwise runs Merom's paths. Penryn selects the
+    # same paths.
+    dict(
+        model="Nehalem",
+        sde="nhm",
+        pr=True,
+        paths=dict(
+            SSSE3=1,
+            SSE41=1,
+            AES_HARDWARE=0,
+            AVX=0,
+            AVX2=0,
+            BMI2_ADX=0,
+            SHA=0,
+            VAES_AES_GCM=0,
+            AVX_MOVBE_AES_GCM=0,
+            AVX512_AES_GCM=0,
+            AVX512_ML_KEM=0,
+            AVX512_RSA=0,
+            MCDT=1,
+        ),
+    ),
+    # Westmere adds AES-NI and PCLMULQDQ without AVX, so rind's AES-GCM and
+    # GHASH intrinsics run without VEX encoding. Silvermont selects the same
+    # paths.
+    dict(
+        model="Westmere",
+        sde="wsm",
+        pr=True,
+        paths=dict(
+            SSSE3=1,
+            SSE41=1,
+            AES_HARDWARE=1,
+            AVX=0,
+            AVX2=0,
+            BMI2_ADX=0,
+            SHA=0,
+            VAES_AES_GCM=0,
+            AVX_MOVBE_AES_GCM=0,
+            AVX512_AES_GCM=0,
+            AVX512_ML_KEM=0,
+            AVX512_RSA=0,
+            MCDT=1,
+        ),
+    ),
+    # Goldmont, an Atom, runs Westmere's paths, but SHA-1 and SHA-256 on
+    # its SHA extensions. Goldmont Plus, Tremont, and Snow Ridge select the
+    # same paths.
+    dict(
+        model="Goldmont",
+        sde="glm",
+        pr=True,
+        paths=dict(
+            SSSE3=1,
+            SSE41=1,
+            AES_HARDWARE=1,
+            AVX=0,
+            AVX2=0,
+            BMI2_ADX=0,
+            SHA=1,
+            VAES_AES_GCM=0,
+            AVX_MOVBE_AES_GCM=0,
+            AVX512_AES_GCM=0,
+            AVX512_ML_KEM=0,
+            AVX512_RSA=0,
+            MCDT=1,
+        ),
+    ),
+    # Sandy Bridge lacks AVX2, MOVBE, BMI2, and ADX, so rind's AES-GCM
+    # intrinsics, aws-lc's AVX SHA and SSSE3 ChaCha20 routines, the portable
+    # ML-KEM arithmetic, s2n-bignum's `_alt` routines, and aws-lc's
+    # Montgomery multiplication run. Ivy Bridge selects the same paths.
+    dict(
+        model="Sandy Bridge",
+        sde="snb",
+        pr=True,
+        paths=dict(
+            SSSE3=1,
+            SSE41=1,
+            AES_HARDWARE=1,
+            AVX=1,
+            AVX2=0,
+            BMI2_ADX=0,
+            SHA=0,
+            VAES_AES_GCM=0,
+            AVX_MOVBE_AES_GCM=0,
+            AVX512_AES_GCM=0,
+            AVX512_ML_KEM=0,
+            AVX512_RSA=0,
+            MCDT=1,
+        ),
+    ),
+    # Haswell lacks ADX and VAES, so s2n-bignum's `_alt` routines, aws-lc's
+    # Montgomery multiplication, its RSAZ exponentiation for RSA-2048, and
+    # its AVX AES-GCM run, beside the AVX2 kernels.
+    dict(
+        model="Haswell",
+        sde="hsw",
+        pr=True,
+        paths=dict(
+            SSSE3=1,
+            SSE41=1,
+            AES_HARDWARE=1,
+            AVX=1,
+            AVX2=1,
+            BMI2_ADX=0,
+            SHA=0,
+            VAES_AES_GCM=0,
+            AVX_MOVBE_AES_GCM=1,
+            AVX512_AES_GCM=0,
+            AVX512_ML_KEM=0,
+            AVX512_RSA=0,
+            MCDT=1,
+        ),
+    ),
+    # Skylake server has AVX-512 but neither SHA nor VAES, so it runs the
+    # AVX2 kernels with s2n-bignum's BMI2 and ADX routines, aws-lc's AVX
+    # AES-GCM, and OpenSSL's AVX2 SHA-256 and SHA-512. Broadwell, Skylake,
+    # Cascade Lake, and Cooper Lake select the same paths.
+    dict(
+        model="Skylake server",
+        sde="skx",
+        pr=True,
+        paths=dict(
+            SSSE3=1,
+            SSE41=1,
+            AES_HARDWARE=1,
+            AVX=1,
+            AVX2=1,
+            BMI2_ADX=1,
+            SHA=0,
+            VAES_AES_GCM=0,
+            AVX_MOVBE_AES_GCM=1,
+            AVX512_AES_GCM=0,
+            AVX512_ML_KEM=0,
+            AVX512_RSA=0,
+            MCDT=1,
+        ),
+    ),
+    # Cannon Lake adds SHA and AVX-512 IFMA, but lacks VAES and AVX-512
+    # VBMI2, so it runs Skylake server's paths with SHA-1 and SHA-256 on the
+    # SHA extensions, and RSA on pyca/verified-garbage's IFMA routines, but
+    # 3072-bit signing on aws-lc's dual AVX-512 RSAZ.
+    dict(
+        model="Cannon Lake",
+        sde="cnl",
+        pr=True,
+        paths=dict(
+            SSSE3=1,
+            SSE41=1,
+            AES_HARDWARE=1,
+            AVX=1,
+            AVX2=1,
+            BMI2_ADX=1,
+            SHA=1,
+            VAES_AES_GCM=0,
+            AVX_MOVBE_AES_GCM=1,
+            AVX512_AES_GCM=0,
+            AVX512_ML_KEM=0,
+            AVX512_RSA=1,
+            MCDT=1,
+        ),
+    ),
+    # Alder Lake adds VAES without AVX-512, so AES-GCM runs on 256-bit
+    # vectors. Meteor and Raptor Lake, and Sierra Forest, select the same
+    # paths.
+    dict(
+        model="Alder Lake",
+        sde="adl",
+        pr=True,
+        paths=dict(
+            SSSE3=1,
+            SSE41=1,
+            AES_HARDWARE=1,
+            AVX=1,
+            AVX2=1,
+            BMI2_ADX=1,
+            SHA=1,
+            VAES_AES_GCM=1,
+            AVX_MOVBE_AES_GCM=1,
+            AVX512_AES_GCM=0,
+            AVX512_ML_KEM=0,
+            AVX512_RSA=0,
+            MCDT=1,
+        ),
+    ),
+    # Arrow Lake has the SHA512 instructions, which rind does not run:
+    # SHA-384 and SHA-512 take the AVX2 routine, as on Alder Lake. Lunar
+    # and Panther Lake, and Clearwater Forest, select the same paths.
+    dict(
+        model="Arrow Lake",
+        sde="arl",
+        pr=True,
+        paths=dict(
+            SSSE3=1,
+            SSE41=1,
+            AES_HARDWARE=1,
+            AVX=1,
+            AVX2=1,
+            BMI2_ADX=1,
+            SHA=1,
+            VAES_AES_GCM=1,
+            AVX_MOVBE_AES_GCM=1,
+            AVX512_AES_GCM=0,
+            AVX512_ML_KEM=0,
+            AVX512_RSA=0,
+            MCDT=1,
+        ),
+    ),
+    # Granite Rapids limited to 256-bit AVX10 hides AVX-512F, so it selects
+    # Alder Lake's paths, checking that rind takes no AVX-512 path there.
+    dict(
+        model="Granite Rapids (AVX10.1 / 256VL)",
+        sde="gnr256",
+        pr=True,
+        paths=dict(
+            SSSE3=1,
+            SSE41=1,
+            AES_HARDWARE=1,
+            AVX=1,
+            AVX2=1,
+            BMI2_ADX=1,
+            SHA=1,
+            VAES_AES_GCM=1,
+            AVX_MOVBE_AES_GCM=1,
+            AVX512_AES_GCM=0,
+            AVX512_ML_KEM=0,
+            AVX512_RSA=0,
+            MCDT=1,
+        ),
+    ),
+    # Granite Rapids selects every path, including AVX-512 AES-GCM, ML-KEM,
+    # and RSA. Ice Lake, Ice Lake server,
+    # Tiger Lake, and Sapphire and Emerald Rapids select the same paths.
+    dict(
+        model="Granite Rapids",
+        sde="gnr",
+        pr=True,
+        paths=dict(
+            SSSE3=1,
+            SSE41=1,
+            AES_HARDWARE=1,
+            AVX=1,
+            AVX2=1,
+            BMI2_ADX=1,
+            SHA=1,
+            VAES_AES_GCM=1,
+            AVX_MOVBE_AES_GCM=1,
+            AVX512_AES_GCM=1,
+            AVX512_ML_KEM=1,
+            AVX512_RSA=1,
+            MCDT=1,
+        ),
+    ),
+    # Diamond Rapids selects Granite Rapids' paths. It also has the SHA512
+    # instructions, which rind does not run.
+    dict(
+        model="Diamond Rapids",
+        sde="dmr",
+        pr=True,
+        paths=dict(
+            SSSE3=1,
+            SSE41=1,
+            AES_HARDWARE=1,
+            AVX=1,
+            AVX2=1,
+            BMI2_ADX=1,
+            SHA=1,
+            VAES_AES_GCM=1,
+            AVX_MOVBE_AES_GCM=1,
+            AVX512_AES_GCM=1,
+            AVX512_ML_KEM=1,
+            AVX512_RSA=1,
+            MCDT=1,
+        ),
+    ),
+]
+
+
+def matrix(which):
+    """The x86-cpu.yml matrix for `pr` or `all`, one entry per SDE model."""
+    flags = {flag for flag, _ in KNOWN_CPUS}
+    keys = {tuple(m["paths"]) for m in MODELS}
+    assert len(keys) == 1, "every model sets the same paths"
+    assert len({m["sde"] for m in MODELS}) == len(MODELS), "a model is listed twice"
+    for m in MODELS:
+        assert "-" + m["sde"] in flags, m["sde"] + " is not an SDE CPU"
+    return [
+        dict(model=m["model"], sde=m["sde"], paths=m["paths"])
+        for m in MODELS
+        if which == "all" or m["pr"]
+    ]
+
+
+mode = sys.argv[1]
 
 if mode == "sde-scan":
     output = []
@@ -61,6 +414,10 @@ if mode == "sde-scan":
             dict(name="Intel " + name, source="Intel SDE " + flag, result=js),
             open("admin/x86-cpus/intel-{:02d}{}.json".format(i + 1, flag), "w"),
         )
+elif mode == "matrix":
+    # A job's matrix, `pr` or `all`: `admin/x86-cpu matrix pr`.
+    json.dump(matrix(sys.argv[2]), sys.stdout, separators=(",", ":"))
+    print()
 elif mode == "markdown-table":
     data = []
     for f in sorted(glob.glob("admin/x86-cpus/*.json")):

@@ -73,7 +73,7 @@ constant-time checks. A primitive's cell on a tier is its row in the
 [primitives table](#primitives) narrowed to what the tier's row runs. A
 "denied" tier is the runner's CPU with `RIND_CPU_DISABLE_*` hiding features,
 as `build.yml`, `ctgrind.yml`, and `sh/fuzz-replay.sh` set them; an SDE tier is
-an Intel SDE CPU model, as `x86-cpu.yml` names them.
+an Intel SDE CPU model, as `admin/x86-cpu` lists them for `x86-cpu.yml`.
 
 | Backend | Tier | Vectors and differential tests | Fuzz targets | Constant time |
 |---|---|---|---|---|

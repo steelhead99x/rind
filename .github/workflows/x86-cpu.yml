@@ -1,20 +1,20 @@
 name: x86-cpu
 
 # Weekly, at its own hour: see TESTING.md, "Scheduled workflows".
+#
+# The merge queue and the weekly run run every SDE model; a pull request runs
+# the ones admin/x86-cpu's MODELS marks `pr`, which says why. The queue's
+# models report through `x86-cpu gate`, which skips, and so passes, on a pull
+# request: GitHub admits a PR to the queue only once its required checks
+# report, so this workflow has no `paths` filter, and `scope` decides instead.
 on:
   schedule:
     - cron: "23 8 * * 0"
   workflow_dispatch:
   pull_request:
     branches: [main]
-    paths:
-      - rind/src/**
-      - rind/Cargo.toml
-      - Cargo.lock
-      - flake.nix
-      - flake.lock
-      - admin/x86-cpu
-      - .github/workflows/x86-cpu.yml
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
@@ -27,19 +27,20 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # A pull request runs the models only when sh/backends.sh says its diff can
-  # reach x86_64 code, and always when it changes this workflow or
-  # admin/x86-cpu. Every model or none: each selects its own set of dispatch
-  # paths, and no map from a changed file to the paths that run it is kept.
+  # A pull request or merge group runs the models only when sh/backends.sh
+  # says its diff can reach x86_64 code, and always when it changes this
+  # workflow or admin/x86-cpu. Every model of the event's set or none: each
+  # selects its own set of dispatch paths, and no map from a changed file to
+  # the paths that run it is kept. A merge group's diff is against its base.
   # release-plz's release PR, which only bumps versions and changelogs, runs
   # none: a `release-plz-` branch that moq-bot, release.yml's app, opened.
   scope:
     runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.reach.outputs.run }}
+      matrix: ${{ steps.reach.outputs.matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name == 'pull_request' && !(startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]')
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -48,14 +49,17 @@ jobs:
         shell: bash
         env:
           RELEASE_PR: ${{ startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]' }}
+          BASE: ${{ github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
           run=true
+          models=all
           if [ "$RELEASE_PR" = true ]; then
             echo "A release PR bumps only versions and changelogs."
             run=false
-          elif [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            changed=$(sh/changed.sh)
+          elif [ "$GITHUB_EVENT_NAME" = pull_request ] || [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            if [ "$GITHUB_EVENT_NAME" = pull_request ]; then models='pr'; fi
+            changed=$(sh/changed.sh "${BASE:-origin/$GITHUB_BASE_REF}")
             if ! grep -qE '^(\.github/workflows/x86-cpu\.yml|admin/x86-cpu)$' <<<"$changed"; then
               reach=$(sh/backends.sh - <<<"$changed")
               echo "Backends the diff reaches: $(paste -sd' ' <<<"$reach")"
@@ -63,13 +67,11 @@ jobs:
             fi
           fi
           echo "run=$run" | tee -a "$GITHUB_OUTPUT"
+          echo "matrix=$(python3 admin/x86-cpu matrix "$models")" | tee -a "$GITHUB_OUTPUT"
 
-  # One job per SDE model, for each distinct set of dispatch paths that
-  # `rind/src/low/x86_64/cpu.rs` picks from cpuid; each asserts its set with
-  # `RIND_TEST_X86_*`. Its comment names the other models that select the
-  # same set, per the scans `admin/x86-cpu sde-scan` saves in
-  # `admin/x86-cpus`. SDE reports no `MCDT_NO` for any model, Arrow Lake's
-  # included, so every row needs `rind/src/low/mcdt.rs`'s guard.
+  # One job per SDE model, from admin/x86-cpu's MODELS: one for each distinct
+  # set of dispatch paths that `rind/src/low/x86_64/cpu.rs` picks from cpuid,
+  # each asserting its set with `RIND_TEST_X86_*`.
   #
   # A job each, not one job for all: SDE's speed depends on the host, and on
   # GitHub's AMD EPYC 7763 runners a model with the SHA extensions runs the
@@ -80,278 +82,13 @@ jobs:
     needs: scope
     if: needs.scope.outputs.run == 'true'
     runs-on: ubuntu-latest
+    # A merge group's models report inside the queue's 90-minute window, which
+    # the wait for a hosted runner also spends, or the group expires unreported.
+    timeout-minutes: ${{ github.event_name == 'merge_group' && 75 || 360 }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # Prescott, a Pentium 4, lacks SSSE3, so it runs every slowest path:
-          # aws-lc's SSE2 AES and integer GHASH, SHA-1, and SHA-256, HACL*'s
-          # ChaCha20 rounds, the portable ML-KEM arithmetic, s2n-bignum's `_alt` routines, and aws-lc's
-          # Montgomery multiplication.
-          - model: Prescott
-            sde: p4p
-            paths:
-              SSSE3: 0
-              SSE41: 0
-              AES_HARDWARE: 0
-              AVX: 0
-              AVX2: 0
-              BMI2_ADX: 0
-              SHA: 0
-              VAES_AES_GCM: 0
-              AVX_MOVBE_AES_GCM: 0
-              AVX512_AES_GCM: 0
-              AVX512_ML_KEM: 0
-              AVX512_RSA: 0
-              MCDT: 1
-          # Merom, the first Core 2, adds SSSE3 but not SSE4.1 or AES-NI, so it
-          # runs aws-lc's vpaes and SSSE3 GHASH, ChaCha20, SHA-1, and SHA-256,
-          # beside Prescott's other paths. Saltwell selects the same paths.
-          - model: Merom
-            sde: mrm
-            paths:
-              SSSE3: 1
-              SSE41: 0
-              AES_HARDWARE: 0
-              AVX: 0
-              AVX2: 0
-              BMI2_ADX: 0
-              SHA: 0
-              VAES_AES_GCM: 0
-              AVX_MOVBE_AES_GCM: 0
-              AVX512_AES_GCM: 0
-              AVX512_ML_KEM: 0
-              AVX512_RSA: 0
-              MCDT: 1
-          # Nehalem adds SSE4.1, so ChaCha20-Poly1305 runs in one pass, but still
-          # lacks AES-NI, so it otherwise runs Merom's paths. Penryn selects the
-          # same paths.
-          - model: Nehalem
-            sde: nhm
-            paths:
-              SSSE3: 1
-              SSE41: 1
-              AES_HARDWARE: 0
-              AVX: 0
-              AVX2: 0
-              BMI2_ADX: 0
-              SHA: 0
-              VAES_AES_GCM: 0
-              AVX_MOVBE_AES_GCM: 0
-              AVX512_AES_GCM: 0
-              AVX512_ML_KEM: 0
-              AVX512_RSA: 0
-              MCDT: 1
-          # Westmere adds AES-NI and PCLMULQDQ without AVX, so rind's AES-GCM and
-          # GHASH intrinsics run without VEX encoding. Silvermont selects the same
-          # paths.
-          - model: Westmere
-            sde: wsm
-            paths:
-              SSSE3: 1
-              SSE41: 1
-              AES_HARDWARE: 1
-              AVX: 0
-              AVX2: 0
-              BMI2_ADX: 0
-              SHA: 0
-              VAES_AES_GCM: 0
-              AVX_MOVBE_AES_GCM: 0
-              AVX512_AES_GCM: 0
-              AVX512_ML_KEM: 0
-              AVX512_RSA: 0
-              MCDT: 1
-          # Goldmont, an Atom, runs Westmere's paths, but SHA-1 and SHA-256 on
-          # its SHA extensions. Goldmont Plus, Tremont, and Snow Ridge select the
-          # same paths.
-          - model: Goldmont
-            sde: glm
-            paths:
-              SSSE3: 1
-              SSE41: 1
-              AES_HARDWARE: 1
-              AVX: 0
-              AVX2: 0
-              BMI2_ADX: 0
-              SHA: 1
-              VAES_AES_GCM: 0
-              AVX_MOVBE_AES_GCM: 0
-              AVX512_AES_GCM: 0
-              AVX512_ML_KEM: 0
-              AVX512_RSA: 0
-              MCDT: 1
-          # Sandy Bridge lacks AVX2, MOVBE, BMI2, and ADX, so rind's AES-GCM
-          # intrinsics, aws-lc's AVX SHA and SSSE3 ChaCha20 routines, the portable
-          # ML-KEM arithmetic, s2n-bignum's `_alt` routines, and aws-lc's
-          # Montgomery multiplication run. Ivy Bridge selects the same paths.
-          - model: Sandy Bridge
-            sde: snb
-            paths:
-              SSSE3: 1
-              SSE41: 1
-              AES_HARDWARE: 1
-              AVX: 1
-              AVX2: 0
-              BMI2_ADX: 0
-              SHA: 0
-              VAES_AES_GCM: 0
-              AVX_MOVBE_AES_GCM: 0
-              AVX512_AES_GCM: 0
-              AVX512_ML_KEM: 0
-              AVX512_RSA: 0
-              MCDT: 1
-          # Haswell lacks ADX and VAES, so s2n-bignum's `_alt` routines, aws-lc's
-          # Montgomery multiplication, its RSAZ exponentiation for RSA-2048, and
-          # its AVX AES-GCM run, beside the AVX2 kernels.
-          - model: Haswell
-            sde: hsw
-            paths:
-              SSSE3: 1
-              SSE41: 1
-              AES_HARDWARE: 1
-              AVX: 1
-              AVX2: 1
-              BMI2_ADX: 0
-              SHA: 0
-              VAES_AES_GCM: 0
-              AVX_MOVBE_AES_GCM: 1
-              AVX512_AES_GCM: 0
-              AVX512_ML_KEM: 0
-              AVX512_RSA: 0
-              MCDT: 1
-          # Skylake server has AVX-512 but neither SHA nor VAES, so it runs the
-          # AVX2 kernels with s2n-bignum's BMI2 and ADX routines, aws-lc's AVX
-          # AES-GCM, and OpenSSL's AVX2 SHA-256 and SHA-512. Broadwell, Skylake,
-          # Cascade Lake, and Cooper Lake select the same paths.
-          - model: Skylake server
-            sde: skx
-            paths:
-              SSSE3: 1
-              SSE41: 1
-              AES_HARDWARE: 1
-              AVX: 1
-              AVX2: 1
-              BMI2_ADX: 1
-              SHA: 0
-              VAES_AES_GCM: 0
-              AVX_MOVBE_AES_GCM: 1
-              AVX512_AES_GCM: 0
-              AVX512_ML_KEM: 0
-              AVX512_RSA: 0
-              MCDT: 1
-          # Cannon Lake adds SHA and AVX-512 IFMA, but lacks VAES and AVX-512
-          # VBMI2, so it runs Skylake server's paths with SHA-1 and SHA-256 on the
-          # SHA extensions, and RSA on pyca/verified-garbage's IFMA routines, but
-          # 3072-bit signing on aws-lc's dual AVX-512 RSAZ.
-          - model: Cannon Lake
-            sde: cnl
-            paths:
-              SSSE3: 1
-              SSE41: 1
-              AES_HARDWARE: 1
-              AVX: 1
-              AVX2: 1
-              BMI2_ADX: 1
-              SHA: 1
-              VAES_AES_GCM: 0
-              AVX_MOVBE_AES_GCM: 1
-              AVX512_AES_GCM: 0
-              AVX512_ML_KEM: 0
-              AVX512_RSA: 1
-              MCDT: 1
-          # Alder Lake adds VAES without AVX-512, so AES-GCM runs on 256-bit
-          # vectors. Meteor and Raptor Lake, and Sierra Forest, select the same
-          # paths.
-          - model: Alder Lake
-            sde: adl
-            paths:
-              SSSE3: 1
-              SSE41: 1
-              AES_HARDWARE: 1
-              AVX: 1
-              AVX2: 1
-              BMI2_ADX: 1
-              SHA: 1
-              VAES_AES_GCM: 1
-              AVX_MOVBE_AES_GCM: 1
-              AVX512_AES_GCM: 0
-              AVX512_ML_KEM: 0
-              AVX512_RSA: 0
-              MCDT: 1
-          # Arrow Lake has the SHA512 instructions, which rind does not run:
-          # SHA-384 and SHA-512 take the AVX2 routine, as on Alder Lake. Lunar
-          # and Panther Lake, and Clearwater Forest, select the same paths.
-          - model: Arrow Lake
-            sde: arl
-            paths:
-              SSSE3: 1
-              SSE41: 1
-              AES_HARDWARE: 1
-              AVX: 1
-              AVX2: 1
-              BMI2_ADX: 1
-              SHA: 1
-              VAES_AES_GCM: 1
-              AVX_MOVBE_AES_GCM: 1
-              AVX512_AES_GCM: 0
-              AVX512_ML_KEM: 0
-              AVX512_RSA: 0
-              MCDT: 1
-          # Granite Rapids limited to 256-bit AVX10 hides AVX-512F, so it selects
-          # Alder Lake's paths, checking that rind takes no AVX-512 path there.
-          - model: "Granite Rapids (AVX10.1 / 256VL)"
-            sde: gnr256
-            paths:
-              SSSE3: 1
-              SSE41: 1
-              AES_HARDWARE: 1
-              AVX: 1
-              AVX2: 1
-              BMI2_ADX: 1
-              SHA: 1
-              VAES_AES_GCM: 1
-              AVX_MOVBE_AES_GCM: 1
-              AVX512_AES_GCM: 0
-              AVX512_ML_KEM: 0
-              AVX512_RSA: 0
-              MCDT: 1
-          # Granite Rapids selects every path, including AVX-512 AES-GCM, ML-KEM,
-          # and RSA. Ice Lake, Ice Lake server,
-          # Tiger Lake, and Sapphire and Emerald Rapids select the same paths.
-          - model: Granite Rapids
-            sde: gnr
-            paths:
-              SSSE3: 1
-              SSE41: 1
-              AES_HARDWARE: 1
-              AVX: 1
-              AVX2: 1
-              BMI2_ADX: 1
-              SHA: 1
-              VAES_AES_GCM: 1
-              AVX_MOVBE_AES_GCM: 1
-              AVX512_AES_GCM: 1
-              AVX512_ML_KEM: 1
-              AVX512_RSA: 1
-              MCDT: 1
-          # Diamond Rapids selects Granite Rapids' paths. It also has the SHA512
-          # instructions, which rind does not run.
-          - model: Diamond Rapids
-            sde: dmr
-            paths:
-              SSSE3: 1
-              SSE41: 1
-              AES_HARDWARE: 1
-              AVX: 1
-              AVX2: 1
-              BMI2_ADX: 1
-              SHA: 1
-              VAES_AES_GCM: 1
-              AVX_MOVBE_AES_GCM: 1
-              AVX512_AES_GCM: 1
-              AVX512_ML_KEM: 1
-              AVX512_RSA: 1
-              MCDT: 1
+        include: ${{ fromJSON(needs.scope.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -410,6 +147,7 @@ jobs:
     needs: scope
     if: needs.scope.outputs.run == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'merge_group' && 75 || 360 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -428,3 +166,19 @@ jobs:
         run: nix develop .#sde --command cargo test --release -p rind-acvp --features module --locked
         env:
           RIND_ACVP_WRAPPER_RUNNER: "sde -dmr --"
+
+  # The result main's ruleset can require, `x86-cpu gate`: every model and the
+  # ACVP run of a merge group, or a skip on a pull request, which reports the
+  # context as passed so GitHub admits the PR to the queue. A group whose diff
+  # misses x86_64 skips the models and passes.
+  gate:
+    name: x86-cpu gate
+    if: always() && github.event_name == 'merge_group'
+    needs: [scope, check, acvp]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every model passed or was out of scope
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: jq -e 'to_entries | all(.value.result == "success" or .value.result == "skipped")' <<<"$NEEDS"
