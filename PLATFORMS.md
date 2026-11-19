@@ -78,6 +78,42 @@ qemu. iOS devices' code is only built.
   [proofs/README.md](proofs/README.md)) cover only targets that build A32,
   such as `armv7-unknown-linux-gnueabihf`.
 
+  On a Raspberry Pi 2 B's Cortex-A7 (900 MHz, NEON, no crypto extension),
+  `armv7-unknown-linux-gnueabihf`, rind runs the key-derivation and public-key
+  operations below in less time than aws-lc-rs, ring, RustCrypto, and libcrux
+  do, except Argon2id's smallest cost, 4 MiB in one pass, where RustCrypto's
+  crate, which never wipes its memory, is 6% faster; the wipe is 4 of that
+  6 points. Median of three runs on one pinned core with the governor on
+  `performance` and the other cores near idle, each library's native build,
+  release profile; time in microseconds, and the last column is rind's time over the
+  fastest other library's.
+
+  | Operation | rind | aws-lc-rs | ring | RustCrypto or libcrux | rind over fastest |
+  |---|---|---|---|---|---|
+  | HMAC-SHA256, 64 bytes | 7.1 | 11.3 | 8.8 | | 0.81 |
+  | HMAC-SHA256, 1 KiB | 37.7 | 41.5 | 39.3 | | 0.96 |
+  | PBKDF2-HMAC-SHA256, 1000 iterations | 5381 | 6052 | 7057 | | 0.89 |
+  | HKDF-SHA256, extract and 32-byte expand | 23.0 | 28.5 | 25.7 | | 0.90 |
+  | X25519, shared secret | 1039 | 2823 | | 1869 (dalek) | 0.56 |
+  | X25519, public key | 643 | 767 | | | 0.84 |
+  | Ed25519, key from seed | 656 | 774 | | | 0.85 |
+  | Ed25519, sign 64 bytes | 672 | 815 | | 753 (dalek) | 0.89 |
+  | Ed25519, verify | 1732 | 2476 | 1779 | 1788 (dalek) | 0.97 |
+  | ML-KEM-768, key generation | 573 | 1130 | | 1308 (libcrux) | 0.51 |
+  | ML-KEM-768, encapsulate | 315 | 1247 | | 1486 (libcrux) | 0.25 |
+  | ML-KEM-768, decapsulate | 501 | 1516 | | 1745 (libcrux) | 0.33 |
+  | Argon2id, 4 MiB, 1 pass, 1 lane | 94 ms | | | 89 ms (RustCrypto) | 1.06 |
+  | Argon2id, 8 MiB, 3 passes, 1 lane | 498 ms | | | 501 ms (RustCrypto) | 0.99 |
+
+  Argon2id's fill runs portable Rust here, as stable Rust has no 32-bit Arm NEON
+  intrinsics, and it matches RustCrypto's. The first row's
+  gap is the wipe of its 4 MiB, which `AGENTS.md` requires of memory derived
+  from a password; without it rind takes 90.6 ms, 1.02 times RustCrypto's. aws-lc-rs and ring have no
+  Argon2id, and neither library has BLAKE2 or BLAKE3, which rind does not
+  offer outside Argon2id. Built from `main` at 529ff5c0 with the Nix dev
+  shell's `armv7` target and measured by a harness outside the workspace,
+  since `rind-bench` does not build `openssl-sys` for it.
+
 - Thumb-only M-profile targets (`thumbv6m-none-eabi`, `thumbv7em-none-eabihf`)
   and `riscv32imc-unknown-none-elf` build the portable backend; M-profile has
   no A32 and no NEON for the arm assembly. Where the target has no
