@@ -24,6 +24,9 @@ pub struct Hkdf {
     inner: HkdfUsingHmac<'static>,
     #[cfg(feature = "fips")]
     algorithm: &'static hkdf::Algorithm,
+    /// rind's HKDF, for the empty `info` the module refuses.
+    #[cfg(feature = "fips")]
+    rind: &'static rind::hkdf::Algorithm,
     #[cfg(feature = "fips")]
     hmac: &'static hmac::Algorithm,
 }
@@ -41,12 +44,14 @@ pub static HKDF_SHA384: Hkdf = Hkdf {
 #[cfg(feature = "fips")]
 pub static HKDF_SHA256: Hkdf = Hkdf {
     algorithm: &hkdf::HKDF_SHA256,
+    rind: &rind::hkdf::HKDF_SHA256,
     hmac: &hmac::HMAC_SHA256,
 };
 
 #[cfg(feature = "fips")]
 pub static HKDF_SHA384: Hkdf = Hkdf {
     algorithm: &hkdf::HKDF_SHA384,
+    rind: &rind::hkdf::HKDF_SHA384,
     hmac: &hmac::HMAC_SHA384,
 };
 
@@ -83,8 +88,13 @@ impl Hkdf {
         let prk = hkdf::Salt::new(self.algorithm, salt)
             .extract(secret)
             .expect("a non-empty salt is approved");
+        // The empty-`info` copy is the same extraction in rind.
+        let copy = rind::hkdf::Salt::new(self.rind, salt)
+            .extract(secret)
+            .expect("rind extracts with any salt");
         Box::new(Expander {
             prk,
+            copy,
             len: self.hmac.tag_len(),
         })
     }
@@ -104,6 +114,7 @@ impl RustlsHkdf for Hkdf {
     fn expander_for_okm(&self, okm: &OkmBlock) -> Box<dyn HkdfExpander> {
         Box::new(Expander {
             prk: hkdf::Prk::new(self.algorithm, okm.as_ref()),
+            copy: rind::hkdf::Prk::new(self.rind, okm.as_ref()),
             len: self.hmac.tag_len(),
         })
     }
@@ -120,24 +131,43 @@ impl RustlsHkdf for Hkdf {
 }
 
 /// A pseudorandom key held in the module.
+///
+/// rustls's aws-lc-rs provider derives an empty `info` too (its
+/// `expand_slice(&[], ..)` succeeds; AWS-LC's FIPS build leaves the service
+/// indicator unset for it), and this follows it. The module refuses an empty
+/// `info`, so the key keeps a second copy in rind, wiped on drop, and derives
+/// an empty `info` there. That copy means the key is not held only inside the
+/// module, and an empty-`info` derivation is not a module service. TLS 1.3's
+/// labels are never empty, so the handshake always derives in the module.
 #[cfg(feature = "fips")]
 struct Expander {
     prk: hkdf::Prk,
+    copy: rind::hkdf::Prk,
     len: usize,
+}
+
+#[cfg(feature = "fips")]
+impl Expander {
+    fn fill(&self, info: &[&[u8]], output: &mut [u8]) -> Result<(), OutputLengthError> {
+        if info.iter().all(|part| part.is_empty()) {
+            self.copy.fill(info, output).map_err(|_| OutputLengthError)
+        } else {
+            self.prk.fill(info, output).map_err(|_| OutputLengthError)
+        }
+    }
 }
 
 #[cfg(feature = "fips")]
 impl HkdfExpander for Expander {
     fn expand_slice(&self, info: &[&[u8]], output: &mut [u8]) -> Result<(), OutputLengthError> {
-        self.prk.fill(info, output).map_err(|_| OutputLengthError)
+        self.fill(info, output)
     }
 
     fn expand_block(&self, info: &[&[u8]]) -> OkmBlock {
         let mut buf = [0u8; OkmBlock::MAX_LEN];
         let output = &mut buf[..self.len];
-        // TLS 1.3's labels are never empty, and one block is far under the
-        // 255-block limit.
-        self.prk.fill(info, output).unwrap();
+        // One block is far under the 255-block limit.
+        self.fill(info, output).unwrap();
         OkmBlock::new(output)
     }
 

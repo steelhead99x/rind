@@ -286,3 +286,95 @@ fn quic_packets_agree_with_aws_lc_rs_from_any_packet_number() {
         }
     }
 }
+
+/// HKDF-Expand through rind-rustls's TLS 1.3 suites matches rustls's aws-lc-rs
+/// provider for every `info` it takes, an empty one included: aws-lc-rs
+/// derives `expand_slice(&[], ..)`, and under `fips` the module refuses it, so
+/// the expander derives it in its rind copy. The same `info` split into parts
+/// gives the same bytes, and a length over 255 hash outputs fails in both.
+#[cfg(not(target_family = "wasm"))]
+#[test]
+fn hkdf_expand_agrees_with_aws_lc_rs_for_any_info() {
+    use rustls::crypto::aws_lc_rs::cipher_suite as aws;
+    use rustls::crypto::tls13::{Hkdf, HkdfExpander};
+
+    let pairs = [
+        (
+            cipher_suite::TLS13_AES_128_GCM_SHA256,
+            aws::TLS13_AES_128_GCM_SHA256,
+        ),
+        (
+            cipher_suite::TLS13_AES_256_GCM_SHA384,
+            aws::TLS13_AES_256_GCM_SHA384,
+        ),
+    ];
+    let infos: [&[&[u8]]; 9] = [
+        &[],
+        &[b""],
+        &[b"", b"", b""],
+        &[b"label"],
+        &[b"la", b"bel"],
+        &[b"", b"la", b"", b"bel", b""],
+        &[b"l", b"a", b"b", b"e", b"l"],
+        &[&[0u8; 300]],
+        &[&[0xffu8; 1], &[0u8; 0], &[7u8; 130]],
+    ];
+    let secret = [0x5au8; 32];
+    for (ours, theirs) in pairs {
+        let ours: &dyn Hkdf = ours.tls13().unwrap().hkdf_provider;
+        let theirs: &dyn Hkdf = theirs.tls13().unwrap().hkdf_provider;
+        let salts: [Option<&[u8]>; 3] = [None, Some(&[]), Some(b"a salt")];
+        for salt in salts {
+            let a = ours.extract_from_secret(salt, &secret);
+            let b = theirs.extract_from_secret(salt, &secret);
+            let z_a = ours.extract_from_zero_ikm(salt);
+            let z_b = theirs.extract_from_zero_ikm(salt);
+            let okm = a.expand_block(&[b"okm"]);
+            let c = ours.expander_for_okm(&okm);
+            let d = theirs.expander_for_okm(&okm);
+            let hash_len = a.hash_len();
+            assert_eq!(hash_len, b.hash_len());
+            for (x, y) in [(&a, &b), (&z_a, &z_b), (&c, &d)] {
+                check_expanders(x.as_ref(), y.as_ref(), &infos, hash_len);
+            }
+        }
+    }
+
+    fn check_expanders(
+        ours: &dyn HkdfExpander,
+        theirs: &dyn HkdfExpander,
+        infos: &[&[&[u8]]],
+        hash_len: usize,
+    ) {
+        for info in infos {
+            for len in [0, 1, hash_len, 3 * hash_len + 7, 255 * hash_len] {
+                let mut x = vec![1u8; len];
+                let mut y = vec![2u8; len];
+                let rx = ours.expand_slice(info, &mut x);
+                let ry = theirs.expand_slice(info, &mut y);
+                assert_eq!(rx.is_ok(), ry.is_ok(), "{info:?} {len}");
+                assert_eq!(x, y, "{info:?} {len}");
+            }
+            let mut x = vec![0u8; 255 * hash_len + 1];
+            let mut y = x.clone();
+            assert!(ours.expand_slice(info, &mut x).is_err());
+            assert!(theirs.expand_slice(info, &mut y).is_err());
+            assert_eq!(
+                ours.expand_block(info).as_ref(),
+                theirs.expand_block(info).as_ref(),
+                "{info:?}"
+            );
+        }
+        // Every split of one `info` derives the same bytes.
+        let mut whole = vec![0u8; hash_len];
+        ours.expand_slice(&[b"label"], &mut whole).unwrap();
+        let mut split = vec![0u8; hash_len];
+        ours.expand_slice(&[b"la", b"", b"bel"], &mut split)
+            .unwrap();
+        assert_eq!(whole, split);
+        // An empty `info` is not the same as a non-empty one.
+        let mut empty = vec![0u8; hash_len];
+        ours.expand_slice(&[], &mut empty).unwrap();
+        assert_ne!(whole, empty);
+    }
+}
