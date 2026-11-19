@@ -415,6 +415,18 @@ def low.aarch64.aes_cbc.aese_chained (y b : core.core_arch.arm_shared.neon.uint8
     Result core.core_arch.arm_shared.neon.uint8x16_t :=
   core.core_arch.arm_shared.neon.generated.vaeseq_u8 y b
 
+/-! pyca/verified-garbage's ML-KEM-768 routines, behind their Rust wrappers,
+whose contracts `Rind.Aarch64.VgMlKem` states. -/
+
+opaque low.aarch64.mlkem768_vg.Encaps.check_ek
+  : low.aarch64.mlkem768_vg.Encaps → Array Std.U8 1184#usize → Result Bool
+
+opaque low.aarch64.mlkem768_vg.Encaps.encaps
+  :
+  low.aarch64.mlkem768_vg.Encaps → Array Std.U8 1184#usize → Option (Array
+    Std.U8 32#usize) → Array Std.U8 32#usize → Result (Option ((Array
+    Std.U8 32#usize) × (Array Std.U8 1088#usize)))
+
 /-! MD5, which no proof covers. -/
 
 opaque mid.md5.Md5State.new : Result mid.md5.Md5State

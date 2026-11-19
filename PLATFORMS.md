@@ -78,6 +78,13 @@ qemu. iOS devices' code is only built.
   [proofs/README.md](proofs/README.md)) cover only targets that build A32,
   such as `armv7-unknown-linux-gnueabihf`.
 
+- Thumb-only M-profile targets (`thumbv6m-none-eabi`, `thumbv7em-none-eabihf`)
+  and `riscv32imc-unknown-none-elf` build the portable backend; M-profile has
+  no A32 and no NEON for the arm assembly. Where the target has no
+  compare-and-swap (`thumbv6m`, `riscv32imc`), the reuse cache keeps nothing, so
+  each use builds its value again; that is correct on any number of cores and
+  interrupt handlers and needs no critical section.
+
 - Builds with `-Z cf-protection=branch` or `-Z branch-protection=bti`, both
   unstable, are unsupported: rind calls aws-lc's x86_64 and aarch64 routines
   through function pointers, and their text, as rind imports it, holds no
@@ -114,8 +121,9 @@ qemu. iOS devices' code is only built.
   (`rustls-pki-types/web`) and the random sources of jsonwebtoken and str0m.
   The nightly `build.yml` runs rind's vector tests and rind-rustls's and
   rind-ring's tests on `wasm32-wasip2` under wasmtime (`just wasm`), without
-  the differential tests, since aws-lc does not build for wasm; the adapters'
-  handshakes run rind against itself. `wasm32-unknown-unknown` stays
+  the differential tests, since aws-lc does not build for wasm; Ed25519's CCTV
+  vectors and the expanded ML-DSA wipe check run against data recorded from
+  aws-lc instead, and the adapters' handshakes run rind against itself. `wasm32-unknown-unknown` stays
   compile-only: its tests need a JavaScript host. Constant time is unchecked on
   wasm: ctgrind and the trace checks inspect native code, and a wasm engine
   compiles rind again, so its JIT may turn a select into a branch.
