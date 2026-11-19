@@ -487,39 +487,52 @@ mod tests {
             let hw = AesKey::new(&key);
             let vpaes = AesKey::Vpaes(VpaesKey::new(&key));
             let h = vpaes.encrypt_block(&[0; 16]);
-            let pmull = GhashTable::Pmull(PmullTable::new(u128::from_be_bytes(h), token));
+            let table = PmullTable::new(u128::from_be_bytes(h), token);
+            // The four-way kernels too, on hosts that run the eight-way ones.
+            let four_way = table.eight_way.is_some().then_some(PmullTable {
+                htable: table.htable,
+                eight_way: None,
+            });
+            let pmulls: Vec<_> = [Some(table), four_way]
+                .into_iter()
+                .flatten()
+                .map(GhashTable::Pmull)
+                .collect();
             let neon = GhashTable::Neon(NeonTable::new(&h));
 
-            for aad_len in [0, 1, 13, 16, 17, 32, 33, 112, 400] {
-                for msg_len in [
-                    0, 1, 3, 15, 16, 17, 35, 64, 80, 81, 95, 96, 97, 112, 113, 127, 128, 129, 224,
-                    225, 240, 255, 256, 480, 481, 496, 1000,
-                ] {
-                    let nonce = bytes(12, msg_len as u32).try_into().unwrap();
-                    let aad = bytes(aad_len, 2);
-                    let plain = bytes(msg_len, 3);
-                    let what = format!("{key_len} {aad_len} {msg_len}");
+            for pmull in &pmulls {
+                for aad_len in [0, 1, 13, 16, 17, 32, 33, 112, 400] {
+                    for msg_len in [
+                        0, 1, 3, 15, 16, 17, 35, 64, 80, 81, 95, 96, 97, 112, 113, 127, 128, 129,
+                        224, 225, 240, 255, 256, 480, 481, 496, 1000,
+                    ] {
+                        let nonce = bytes(12, msg_len as u32).try_into().unwrap();
+                        let aad = bytes(aad_len, 2);
+                        let plain = bytes(msg_len, 3);
+                        let what = format!("{key_len} {aad_len} {msg_len}");
 
-                    let mut want = plain.clone();
-                    let want_tag = ct::into_public(seal(&vpaes, &neon, &nonce, &aad, &mut want));
-                    ct::public_slice(&want);
-                    let mut got = plain.clone();
-                    let tag = ct::into_public(seal(&hw, &pmull, &nonce, &aad, &mut got));
-                    ct::public_slice(&got);
-                    assert_eq!(got, want, "{what}");
-                    assert_eq!(tag, want_tag, "{what}");
+                        let mut want = plain.clone();
+                        let want_tag =
+                            ct::into_public(seal(&vpaes, &neon, &nonce, &aad, &mut want));
+                        ct::public_slice(&want);
+                        let mut got = plain.clone();
+                        let tag = ct::into_public(seal(&hw, &pmull, &nonce, &aad, &mut got));
+                        ct::public_slice(&got);
+                        assert_eq!(got, want, "{what}");
+                        assert_eq!(tag, want_tag, "{what}");
 
-                    let valid = open(&hw, &pmull, &nonce, &aad, &mut got, &want_tag);
-                    ct::public_slice(&got);
-                    assert!(ct::into_public(valid), "{what}");
-                    assert_eq!(got, plain, "{what}");
+                        let valid = open(&hw, &pmull, &nonce, &aad, &mut got, &want_tag);
+                        ct::public_slice(&got);
+                        assert!(ct::into_public(valid), "{what}");
+                        assert_eq!(got, plain, "{what}");
 
-                    for byte in [0, 15] {
-                        let mut wrong = want_tag;
-                        wrong[byte] ^= 1;
-                        let mut got = want.clone();
-                        let valid = open(&hw, &pmull, &nonce, &aad, &mut got, &wrong);
-                        assert!(!ct::into_public(valid), "{what}, byte {byte}");
+                        for byte in [0, 15] {
+                            let mut wrong = want_tag;
+                            wrong[byte] ^= 1;
+                            let mut got = want.clone();
+                            let valid = open(&hw, &pmull, &nonce, &aad, &mut got, &wrong);
+                            assert!(!ct::into_public(valid), "{what}, byte {byte}");
+                        }
                     }
                 }
             }
@@ -596,6 +609,14 @@ mod tests {
             let mut paths = vec![(vpaes, GhashTable::Neon(NeonTable::new(&h)))];
             if let Some(token) = HaveCryptoExt::check() {
                 let pmull = PmullTable::new(u128::from_be_bytes(h), token);
+                // The four-way kernels too, on hosts that run the eight-way ones.
+                if pmull.eight_way.is_some() {
+                    let four_way = PmullTable {
+                        htable: pmull.htable,
+                        eight_way: None,
+                    };
+                    paths.push((AesKey::new(&key), GhashTable::Pmull(four_way)));
+                }
                 paths.push((AesKey::new(&key), GhashTable::Pmull(pmull)));
             }
 
