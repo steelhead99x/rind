@@ -38,7 +38,7 @@ public repo only).
 
 1. The gate, from any host (non-zero means stable has the fix):
 
-       curl -s https://raw.githubusercontent.com/flutter/flutter/stable/packages/flutter_tools/lib/src/ios/simulators.dart | grep -c _ready
+       curl -s https://raw.githubusercontent.com/flutter/flutter/stable/packages/flutter_tools/lib/src/ios/simulators.dart | grep -c _ready || true
 
    Also `flutter --version` on the stable channel for the release number.
    Until it is non-zero, change nothing and report "still waiting".
@@ -80,7 +80,9 @@ with no beta comment, the `UPSTREAM.md` entry gone, 20 or more clean
 - Work in your own git worktree and CARGO_TARGET_DIR under `~/.cache`, never
   the shared clone and never `/tmp`. Commits are authored as the fork owner
   (`steelhead99x <224322244+steelhead99x@users.noreply.github.com>`) with a
-  `Co-Authored-By: <model> <noreply@anthropic.com>` trailer.
+  `Co-Authored-By: <model> <noreply@anthropic.com>` trailer. That is for fork
+  PR commits only: anything bound for an upstream PR is restacked by the
+  owner with no AI trailer, so do not open upstream PRs yourself.
 - Report losses and failures as plainly as wins. Do not hide a failure with a
   retry or a looser check.
 
@@ -107,5 +109,3 @@ with no beta comment, the `UPSTREAM.md` entry gone, 20 or more clean
 
 The gate count with the date, the Flutter stable release number, the PR, the
 run count and results, and anything left in `UPSTREAM.md`.
-
-(Written by Claude Sonnet 5.5)

@@ -54,7 +54,15 @@ Confirm the host first and put the output in the first PR comment:
    The failure rate was low (one run in the nightlies), so run at least a few
    thousand iterations per config, and also under `taskpolicy`/load
    (`yes > /dev/null &` per core) because the allocator behaviour may matter.
-   Compile once, then loop the test binary directly.
+   Compile once per config, then loop that config's test binary directly.
+   `RUSTFLAGS` changes Cargo's target hash, so the two configs build two
+   different binaries; find each path and loop it, so the default binary is
+   not run twice:
+
+       zbin() { cargo test --release -p rind --test zeroing --no-run --message-format=json 2>/dev/null | python3 -c 'import sys,json; [print(m["executable"]) for m in map(json.loads,sys.stdin) if m.get("executable") and m["target"]["name"]=="zeroing"]'; }
+       bin1=$(zbin)
+       bin2=$(RIND_CPU_DISABLE_sha3=1 RUSTFLAGS='--cfg rind_cpu_disable' zbin)
+       for b in "$bin1" "$bin2"; do i=0; while "$b" --exact ml_dsa >/dev/null 2>&1; do i=$((i+1)); done; echo "$b failed after $i passes"; done
 2. Locate it. Extend the test locally (do not commit the debugging) to print,
    on failure, the offset of each field of the 4016-byte value
    (`core::mem::offset_of!`, or `{:p}` differences from the base) and the
@@ -93,7 +101,9 @@ extra instrumentation. Do not close it on "could not reproduce".
 - Work in your own git worktree and CARGO_TARGET_DIR under `~/.cache`, never
   the shared clone and never `/tmp`. Commits are authored as the fork owner
   (`steelhead99x <224322244+steelhead99x@users.noreply.github.com>`) with a
-  `Co-Authored-By: <model> <noreply@anthropic.com>` trailer.
+  `Co-Authored-By: <model> <noreply@anthropic.com>` trailer. That is for fork
+  PR commits only: anything bound for an upstream PR is restacked by the
+  owner with no AI trailer, so do not open upstream PRs yourself.
 - Report losses and failures as plainly as wins. Do not hide a failure with a
   retry or a looser check.
 
@@ -124,5 +134,3 @@ extra instrumentation. Do not close it on "could not reproduce".
 Host and chip, how many iterations per config before a failure, the offset and
 field, the fix and its PR, the clean loop counts, and what could not run
 (ctgrind).
-
-(Written by Claude Sonnet 5.5)

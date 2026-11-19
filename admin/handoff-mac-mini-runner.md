@@ -128,7 +128,9 @@ ruleset change need the maintainer.
 - Work in your own git worktree and CARGO_TARGET_DIR under `~/.cache`, never
   the shared clone and never `/tmp`. Commits are authored as the fork owner
   (`steelhead99x <224322244+steelhead99x@users.noreply.github.com>`) with a
-  `Co-Authored-By: <model> <noreply@anthropic.com>` trailer.
+  `Co-Authored-By: <model> <noreply@anthropic.com>` trailer. That is for fork
+  PR commits only: anything bound for an upstream PR is restacked by the
+  owner with no AI trailer, so do not open upstream PRs yourself.
 - Report losses and failures as plainly as wins. Do not hide a failure with a
   retry or a looser check.
 
@@ -163,5 +165,3 @@ Host, macOS and chip, Nix version, native `just ci` and `just gate` times cold
 and warm with pass counts, the VM option chosen with its added time, the
 runner labels and workflow results, anything that could not run, and each
 decision the owner or maintainer must make.
-
-(Written by Claude Sonnet 5.5)

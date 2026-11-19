@@ -105,7 +105,9 @@ finishing PR either way.
 - Work in your own git worktree and CARGO_TARGET_DIR under `~/.cache`, never
   the shared clone and never `/tmp`. Commits are authored as the fork owner
   (`steelhead99x <224322244+steelhead99x@users.noreply.github.com>`) with a
-  `Co-Authored-By: <model> <noreply@anthropic.com>` trailer.
+  `Co-Authored-By: <model> <noreply@anthropic.com>` trailer. That is for fork
+  PR commits only: anything bound for an upstream PR is restacked by the
+  owner with no AI trailer, so do not open upstream PRs yourself.
 - Report losses and failures as plainly as wins. Do not hide a failure with a
   retry or a looser check.
 
@@ -133,5 +135,3 @@ finishing PR either way.
 CPU and kernel, `vaes` absent confirmation, the table at each length for seal
 and open (rind `by8`, rind Vale, aws-lc-rs, ring) with spread, the decision,
 the PR, and what the owner must decide.
-
-(Written by Claude Sonnet 5.5)
