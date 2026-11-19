@@ -840,6 +840,28 @@ opaque low.x86_64.mont.sqr8x
   Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Std.U64 → Option
     low.x86_64.cpu.HaveBmi2Adx → Result (Slice Std.U64)
 
+/-! pyca/verified-garbage's ML-KEM-768 routines, behind their Rust wrappers,
+whose contracts `Rind.X86_64.VgMlKem` states. -/
+
+opaque low.x86_64.mlkem768_vg.Encaps.check_ek
+  : low.x86_64.mlkem768_vg.Encaps → Array Std.U8 1184#usize → Result Bool
+
+opaque low.x86_64.mlkem768_vg.Encaps.encaps
+  :
+  low.x86_64.mlkem768_vg.Encaps → Array Std.U8 1184#usize → Option (Array
+    Std.U8 32#usize) → Array Std.U8 32#usize → Result (Option ((Array
+    Std.U8 32#usize) × (Array Std.U8 1088#usize)))
+
+opaque low.x86_64.mlkem768_vg.KeyPair.keygen
+  :
+  low.x86_64.mlkem768_vg.KeyPair → Array Std.U8 64#usize → Result (Option
+    (Array Std.U8 2400#usize))
+
+opaque low.x86_64.mlkem768_vg.KeyPair.decaps
+  :
+  low.x86_64.mlkem768_vg.KeyPair → Array Std.U8 2400#usize → Array Std.U8
+    1088#usize → Result (Option (Array Std.U8 32#usize))
+
 /-! RSA's DER parsing and encoding, which the ✓ leaves out. -/
 
 opaque high.rsa.pkcs1_components
