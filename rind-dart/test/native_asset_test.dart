@@ -30,7 +30,9 @@ void main() {
       }
     }
     expect(
-      nativeLibraries.map((path) => path.split('/').last).toSet(),
+      nativeLibraries
+          .map((path) => path.split(RegExp(r'[/\\]')).last)
+          .toSet(),
       containsAll([
         'bindings.dart',
         'ecdsa.dart',
