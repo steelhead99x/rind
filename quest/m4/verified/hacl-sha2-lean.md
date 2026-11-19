@@ -15,6 +15,8 @@ Decided 2026-11-12 (maintainer, /quest-unblock): ✅ approve the HACL* axioms ro
 - Decided 2026-11-13 (maintainer, /quest-merge of #649): ✅ keep this quest (rejected: drop). ✅ approve filing the Charon panic upstream now (rejected: wait for [the upstream reports batch](/quest/m2/upstream-reports.md), the maintainer files it), because the fix blocks rind's own proof work, unlike most `UPSTREAM.md` entries. An agent drafted the issue below; the maintainer approves its text before it is posted.
 - The unrolled bodies are long straight-line code; if `step*` is slow on them, prove one round as a lemma and let the unrolled body reuse it.
 
+- Decided 2026-11-18 (maintainer, /quest-complete): ✅ hold the Charon issue until #794 is merged or closed (rejected: approve posting now), since #794 landing makes this quest moot.
+
 ### Draft issue for AeneasVerif/charon
 
 Title: Panic "stack depth limit exceeded" on deeply nested control flow from an unrolled loop
@@ -36,7 +38,7 @@ Title: Panic "stack depth limit exceeded" on deeply nested control flow from an 
 ## Waiting
 
 - AeneasVerif/charon: translate a function whose body nests past Charon's fixed `MAX_STACK_DEPTH` without panicking. Check by bumping Charon in `flake.nix` and running the reproduction in `UPSTREAM.md`'s "Charon panics on HACL*'s unrolled SHA-2", which then translates both functions.
-- Maintainer: approve the draft issue text above, or edit it, so an agent posts it to AeneasVerif/charon; an agent cannot post outside the maintainer's orgs without that approval. Done once the issue exists and `UPSTREAM.md`'s entry links it.
+- Maintainer: approve the draft issue text above, or edit it, so an agent posts it to AeneasVerif/charon; an agent cannot post outside the maintainer's orgs without that approval. Held until [kixel-ai/rind#794](https://github.com/kixel-ai/rind/pull/794), which drops libcrux from rind and with it these functions, is merged or closed; if it merges, delete this quest instead. Done once the issue exists and `UPSTREAM.md`'s entry links it.
 
 ## Related
 

@@ -122,8 +122,8 @@ proves: what pyca/verified-garbage's AVX-512 VL ChaCha20 needs. -/
 opaque low.x86_64.cpu.HaveAvx512Vl : Type
 
 /-- pyca/verified-garbage's ChaCha20 streaming state, as its routines see it:
-the 768 bytes of memory they keep it in, which `Rind.VgChaCha20` reads as VG's
-spec reads memory. Rust leaves it uninitialised: `init` writes the bytes
+the 768 bytes of memory they keep it in, all that VG's spec reads of it, as
+`Rind.VgChaCha20` proves. Rust leaves it uninitialised: `init` writes the bytes
 `apply` reads on entry, and `apply` writes its scratch before reading it, so
 the model gives the rest any bytes.
 `admin/prove` fails unless this quote is still the type:

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Discord alerting for scheduled, landing, and release failures, after moq-dev/moq's.
 # Usage:
-#   sh/alert.sh discord   Post the current workflow_run failure to Discord.
-#   sh/alert.sh check     Verify alert.yml watches every alertable workflow,
-#                         and that no push can cancel a release it alerts on.
+#   sh/alert.sh discord    Post the current workflow_run failure to Discord.
+#   sh/alert.sh timed-out  Print yes when a cancelled job of the run hit its
+#                          time limit, no when none did.
+#   sh/alert.sh check      Verify alert.yml watches every alertable workflow.
 #
 # Environment (discord):
 #   DISCORD_WEBHOOK   Required. The #alerts channel webhook URL.
@@ -15,6 +16,9 @@
 #   RUN_REF           head_branch.
 #   RUN_TITLE         display_title, usually the commit subject.
 #   RUN_ACTOR         Triggering actor login.
+#   RUN_ID            Run id, to classify a cancellation.
+#   RUN_ATTEMPT       Run attempt, to classify a cancellation.
+#   GH_TOKEN          Token with actions: read and checks: read, for the same.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -25,9 +29,27 @@ workflows=.github/workflows
 discord() {
     : "${DISCORD_WEBHOOK:?DISCORD_WEBHOOK is required}"
 
+    # A job past its time limit ends cancelled, not timed_out, and so does a
+    # run that a hand cancel, a newer run in its concurrency group, or a
+    # pending Release behind another stops. Only the first is an alert. A
+    # cancellation that can't be classified still posts: nothing watches
+    # Alert, so dropping it would hide the hang it may be.
+    local title="${RUN_REPO:-rind} ${RUN_NAME:-workflow} ${RUN_CONCLUSION:-failed}" verdict
+    if [[ ${RUN_CONCLUSION:-} == cancelled ]]; then
+        # A deadline leaves the 5-minute job time to post.
+        if ! verdict=$(timeout 120 sh/alert.sh timed-out); then
+            title+=", could not tell whether it hit a time limit"
+        elif [[ $verdict == no ]]; then
+            echo "not posting: no cancelled job of the run hit its time limit"
+            return 0
+        else
+            title+=" at its time limit"
+        fi
+    fi
+
     local payload
     payload=$(jq -n \
-        --arg title "${RUN_REPO:-rind} ${RUN_NAME:-workflow} ${RUN_CONCLUSION:-failed}" \
+        --arg title "$title" \
         --arg url "${RUN_URL:-}" \
         --arg desc "${RUN_TITLE:-}" \
         --arg ref "${RUN_REF:-unknown}" \
@@ -56,9 +78,30 @@ discord() {
         "$DISCORD_WEBHOOK"
 }
 
+# Both forms GitHub writes: "The job has exceeded the maximum execution time
+# of 1h0m0s" for timeout-minutes, and "The job running on runner ... has
+# exceeded the maximum execution time of 360 minutes." for the hosted limit.
+timed_out() {
+    : "${RUN_REPO:?}" "${RUN_ID:?}" "${RUN_ATTEMPT:?}" "${GH_TOKEN:?}"
+    local jobs id hits
+    # Assignments, not pipes or conditions, so errexit fails on a bad request.
+    jobs=$(gh api --paginate "repos/$RUN_REPO/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT/jobs?per_page=100" \
+        --jq '.jobs[] | select(.conclusion == "cancelled") | .id')
+    for id in $jobs; do
+        hits=$(gh api --paginate "repos/$RUN_REPO/check-runs/$id/annotations?per_page=100" \
+            --jq '.[].message | select(test("has exceeded the maximum execution time of "))')
+        if [[ -n $hits ]]; then
+            echo yes
+            return 0
+        fi
+    done
+    echo no
+}
+
 # A workflow's name when a failure there would otherwise go unseen: it runs
-# outside a pull request (whose failure shows on the PR) and outside a caller
-# (whose run reports it). A workflow without a name can't be listed in
+# outside a pull request (whose failure shows on the PR), outside a caller
+# (whose run reports it), and outside a manual dispatch (whose dispatcher is
+# watching it). A workflow without a name can't be listed in
 # alert.yml, so it is an error rather than a skip.
 # shellcheck disable=SC2016 # A jq program, not a shell expansion.
 alertable='
@@ -66,16 +109,9 @@ alertable='
         elif type == "array" then .
         elif type == "object" then keys
         else error("cannot read on:") end) as $triggers
-    | if $triggers - ["pull_request", "pull_request_target", "merge_group", "workflow_call"] == [] then empty
+    | if $triggers - ["pull_request", "pull_request_target", "merge_group", "workflow_call", "workflow_dispatch"] == [] then empty
     elif (.name | type) != "string" or .name == "" then error("no top-level name:")
     else .name end'
-
-# True when no concurrency group in a workflow replaces a pending run: each
-# one is an object with `queue: max` and without cancel-in-progress.
-# shellcheck disable=SC2016 # A jq program, not a shell expansion.
-queues='
-    [.concurrency, (.jobs // {} | .[].concurrency)] | map(select(. != null))
-    | all(type == "object" and .queue == "max" and (.["cancel-in-progress"] // false) == false)'
 
 check() {
     local file name expected=() watched
@@ -88,16 +124,6 @@ check() {
             return 2
         fi
         [[ -z "$name" ]] || expected+=("$name")
-        # alert.yml posts every cancelled release, which is right only while
-        # no push can cancel one: each concurrency group must queue.
-        case "$name" in
-            Release | "Dart release")
-                if ! yq -o=json . "$file" | jq -e "$queues" >/dev/null; then
-                    echo "sh/alert.sh: a push can cancel a pending $name run, which alert.yml would post; give $file's concurrency groups queue: max" >&2
-                    return 1
-                fi
-                ;;
-        esac
     done
     watched=$(yq '.on.workflow_run.workflows[]' "$workflows/alert.yml")
 
@@ -112,9 +138,10 @@ check() {
 
 case "${1:-}" in
     discord) discord ;;
+    timed-out) timed_out ;;
     check) check ;;
     *)
-        echo "usage: sh/alert.sh discord|check" >&2
+        echo "usage: sh/alert.sh discord|timed-out|check" >&2
         exit 2
         ;;
 esac
