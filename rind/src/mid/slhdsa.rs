@@ -32,7 +32,7 @@ use crate::low::{self, Entry, UpdateBlocks};
 use crate::mid::mldsa::Array;
 use crate::mid::rng::{RandomSource, SystemRandom};
 use crate::mid::sha2::{Sha256Context, Sha256State, Sha512Context, Sha512State};
-use crate::mid::sha3::{Shake256Sponge, shake256_x4};
+use crate::mid::sha3::{Shake256Sponge, shake256_xn};
 
 /// The largest `n`, the hash output length.
 const MAX_N: usize = 32;
@@ -44,7 +44,7 @@ const MAX_A: usize = 14;
 const MAX_K: usize = 35;
 /// The largest message digest length `m`.
 const MAX_M: usize = 49;
-/// The hashes run at once: four SHAKE, or eight SHA-256.
+/// The most hashes run at once: eight SHAKE with AVX-512 or eight SHA-256.
 const MAX_LANES: usize = 8;
 /// The Winternitz parameter `w`, for `lg_w = 4`.
 const W: u32 = 16;
@@ -186,9 +186,14 @@ const fn digest_len<P: Params>() -> usize {
     (P::K * P::A).div_ceil(8) + (P::H - P::HP).div_ceil(8) + P::HP.div_ceil(8)
 }
 
-/// The hashes a parameter set runs at once.
-const fn lanes<P: Params>() -> usize {
-    if P::SHAKE { 4 } else { 8 }
+/// The hashes a parameter set runs at once: SHAKE four, or eight where the
+/// CPU's Keccak-f takes eight states, and SHA-256 eight.
+fn lanes<P: Params>() -> usize {
+    if P::SHAKE && !low::sha3_keccak8x_available() {
+        4
+    } else {
+        8
+    }
 }
 
 /// A key pair: FIPS 205's private key encoding, whose second half is the
@@ -1075,12 +1080,12 @@ impl<P: Params> Hasher<P> {
                 shake256(&[pk_seed, &addrs[0].0, input], &mut out[0][..P::N]);
                 return;
             }
-            let parts: [[&[u8]; 3]; 4] = core::array::from_fn(|j| {
+            let parts: [[&[u8]; 3]; 8] = core::array::from_fn(|j| {
                 let j = Ord::min(j, inputs.len() - 1);
                 [pk_seed, &addrs[j].0, inputs[j]]
             });
-            let mut digests = [[0u8; MAX_N]; 4];
-            shake256_x4(&parts[..inputs.len()], &mut digests);
+            let mut digests = [[0u8; MAX_N]; 8];
+            shake256_xn(&parts[..inputs.len()], &mut digests);
             for (out, digest) in out.iter_mut().zip(&digests[..inputs.len()]) {
                 out[..P::N].copy_from_slice(&digest[..P::N]);
             }
@@ -1129,6 +1134,17 @@ impl<P: Params> Hasher<P> {
 mod tests {
     use super::*;
     use crate::test::{Acvp, CTGRIND_DEBUG, acvp};
+
+    // SHA-256 sets always hash eight at once and SHAKE sets four, or eight
+    // where the CPU's Keccak-f takes eight states.
+    #[test]
+    fn lanes_follow_the_cpu() {
+        assert_eq!(lanes::<SlhDsaSha2_128f>(), 8);
+        assert_eq!(lanes::<SlhDsaSha2_256s>(), 8);
+        let shake = if low::sha3_keccak8x_available() { 8 } else { 4 };
+        assert_eq!(lanes::<SlhDsaShake128f>(), shake);
+        assert_eq!(lanes::<SlhDsaShake256s>(), shake);
+    }
 
     /// Runs `$f::<P>($args)` for the parameter set ACVP names `$set`.
     macro_rules! by_set {

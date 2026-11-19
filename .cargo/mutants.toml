@@ -265,7 +265,7 @@ exclude_re = [
   # SLH-DSA's one-block shortcut through AVX2's registers: the states path it
   # falls back to gives the same digests, so only speed tells them apart.
   'rind/src/low/generic/keccak4x\.rs:\d+:\d+: replace sha3_keccak4x_hash_blocks -> Option<\[\[u8; 32\]; 4\]> with None$',
-  'rind/src/mid/sha3\.rs:\d+:\d+: replace >= with < in shake256_x4$',
+  'rind/src/mid/sha3\.rs:\d+:\d+: replace >= with < in shake256_xn$',
   # Run only on AVX-512 CPUs, which no campaign's runner is: the x86_64
   # campaign skips the files only they run, and these are the rest.
   # x86-cpu.yml's SDE tiers test them.
@@ -276,6 +276,12 @@ exclude_re = [
   # x86-cpu.yml's SDE tiers run it.
   'rind/src/low/x86_64/sha3_keccak4x_avx2\.rs:\d+:\d+: replace rol_vl -> __m256i with Default::default\(\)$',
   'rind/src/low/posint\.rs:\d+:\d+: (replace PosInt<N>::mod_exp_pair_rsaz -> .*|.* in PosInt<N>::mod_exp_pair_rsaz)$',
+  # SLH-DSA's eight-way SHAKE, which only AVX-512 CPUs other than Intel's
+  # run, so no campaign's runner does: the kernel's file is skipped, and
+  # these are its callers' guards and fallbacks, which give the digests of the
+  # four-way path. `pad_blocks` and `lanes` are tested instead.
+  'rind/src/low/generic/keccak4x\.rs:\d+:\d+: (replace sha3_keccak8x_available -> bool with (true|false)|replace sha3_keccak8x_hash_blocks -> Option<\[\[u8; 32\]; 8\]> with .*|.* in sha3_keccak8x_available)$',
+  'rind/src/mid/sha3\.rs:\d+:\d+: (replace shake256_x8 -> bool with false|.* in shake256_x8)$',
   # Compiled only for armv7, which no campaign runs: the portable AES-GCM's
   # crypto-extension half.
   'rind/src/mid/portable/aes_gcm\.rs:\d+:\d+: (replace (<impl Ghash for GhashTable>::ghash|<impl Parts for Hw>::\w+)( -> .*)? with .*|.* in <impl Parts for Hw>::\w+)$',

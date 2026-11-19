@@ -410,7 +410,7 @@ mod tests {
     }
 
     // What valgrind hides: the AVX-512 VL copies run on secret-seeded states
-    // and blocks (`shake256_x4` hashes SK.seed), so `admin/ct-sde` compares
+    // and blocks (`shake256_xn` hashes SK.seed), so `admin/ct-sde` compares
     // their traces for two seeds. The AVX2 copies run under ctgrind.
     #[test]
     #[ignore = "admin/ct-sde runs it under Intel SDE"]
