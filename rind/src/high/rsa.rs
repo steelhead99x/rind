@@ -22,7 +22,7 @@ pub(crate) const MAX_PKCS8_LEN: usize = SigningKey::MAX_PKCS1_BUFFER_LEN + 64;
 /// The algorithms an RSA key's `SubjectPublicKeyInfo` or PKCS#8 may name,
 /// all for the same key, as aws-lc takes them: `rsaEncryption`, RFC 4055's
 /// `id-RSAES-OAEP`, and X.509's `id-ea-rsa`.
-static KEY_ALGORITHMS: [&asn1::ObjectId; 3] = [
+pub(crate) static KEY_ALGORITHMS: [&asn1::ObjectId; 3] = [
     &asn1::oid::rsaEncryption,
     &asn1::oid::id_RSAES_OAEP,
     &asn1::oid::id_ea_rsa,

@@ -120,4 +120,27 @@ mod tests {
         let hardware = false;
         assert_eq!(super::has_aes_hardware(), hardware);
     }
+
+    /// rind runs while nested guards are held, on every backend, and where
+    /// rind sets DIT the guards count up and back down to none.
+    #[test]
+    fn dit_guards_nest() {
+        let guards = |_expected: usize| {
+            #[cfg(all(rind_backend = "aarch64", target_vendor = "apple"))]
+            assert_eq!(super::DIT_GUARDS.get().0, _expected);
+        };
+        let outer = super::Dit::hold();
+        let inner = super::Dit::hold();
+        guards(2);
+        assert_eq!(
+            crate::digest::digest(&crate::digest::SHA256, b"")
+                .as_ref()
+                .len(),
+            32
+        );
+        drop(outer);
+        guards(1);
+        drop(inner);
+        guards(0);
+    }
 }

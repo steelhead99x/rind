@@ -113,5 +113,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [lints.rust]
-# aws-lc-rs's own tests (tests/aws-lc-rs) skip their slow cases under it.
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(disable_slow_tests)"] }
+unexpected_cfgs = { level = "warn", check-cfg = [
+  "cfg(coverage_nightly)",
+  # aws-lc-rs's own tests (tests/aws-lc-rs) skip their slow cases under it.
+  "cfg(disable_slow_tests)",
+] }

@@ -300,6 +300,31 @@ fn signatures_are_checked_against_the_certificate() {
     );
 }
 
+/// A certificate whose public key is off its curve is refused as one, before
+/// any signature is checked.
+#[test]
+fn certificates_with_invalid_points_are_refused() {
+    let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+    let cert = rcgen::CertificateParams::new(Vec::<String>::new())
+        .unwrap()
+        .self_signed(&key)
+        .unwrap();
+    let mut cert = cert.der().to_vec();
+    let point = key.public_key_raw();
+    let at = cert.windows(point.len()).position(|w| w == point).unwrap();
+    cert[at + point.len() - 1] ^= 1;
+    assert_eq!(
+        rind().signature_verification.verify_signature(
+            &cert,
+            b"transcript",
+            &[0; 64],
+            HashAlgorithm::SHA256,
+            SignatureAlgorithm::ECDSA
+        ),
+        Err(CryptoError::InvalidPublicKey(NamedGroup::Secp256r1))
+    );
+}
+
 #[test]
 fn only_ecdsa_keys_load() {
     let provider = rind();
@@ -408,4 +433,101 @@ fn ecdsa_key_encodings_load_as_aws_lc() {
             }
         }
     }
+}
+
+#[test]
+fn suite_parameters_match_aws_lc() {
+    let aws_lc = aws_lc_rs::default_provider();
+    let provider = rind();
+    for suite in provider.cipher_suites {
+        let reference = aws_lc
+            .cipher_suites
+            .iter()
+            .find(|other| other.suite() == suite.suite())
+            .unwrap();
+        assert_eq!(suite.hash_algorithm(), reference.hash_algorithm());
+        assert_eq!(suite.tag_len(), reference.tag_len());
+        assert_eq!(suite.key_lengths(), reference.key_lengths());
+        assert_eq!(suite.explicit_nonce_len(), reference.explicit_nonce_len());
+    }
+    for suite in provider.dtls13_cipher_suites {
+        let reference = aws_lc
+            .dtls13_cipher_suites
+            .iter()
+            .find(|other| other.suite() == suite.suite())
+            .unwrap();
+        assert_eq!(suite.hash_algorithm(), reference.hash_algorithm());
+        assert_eq!(suite.tag_len(), reference.tag_len());
+        assert_eq!(suite.key_len(), reference.key_len());
+        assert_eq!(suite.iv_len(), reference.iv_len());
+    }
+}
+
+#[test]
+fn signing_keys_match_aws_lc() {
+    let reference = aws_lc_rs::default_provider();
+    for algorithm in [
+        &rcgen::PKCS_ECDSA_P256_SHA256,
+        &rcgen::PKCS_ECDSA_P384_SHA384,
+    ] {
+        let (_, pkcs8) = certificate(algorithm);
+        let key = rind().key_provider.load_private_key(&pkcs8).unwrap();
+        let aws_lc = reference.key_provider.load_private_key(&pkcs8).unwrap();
+        assert_eq!(key.hash_algorithm(), aws_lc.hash_algorithm());
+        assert_eq!(
+            key.supported_hash_algorithms(),
+            aws_lc.supported_hash_algorithms()
+        );
+    }
+}
+
+#[test]
+fn p384_sha256_verification_reaches_the_verifier() {
+    // DTLS 1.2 may verify P-384 with SHA-256. A bad signature still takes that
+    // arm: deleting it reports the pair as unsupported instead of a bad signature.
+    // Eight zero bytes are refused by every verifier, so a valid signature is
+    // what shows the arm picked P-384 with SHA-256. aws-lc-rs publishes that
+    // pair only as a verifier. Sign its digest with the P-384 key: `sign_digest`
+    // uses the digest's hash and keeps the key's ASN.1 encoding.
+    let (cert, key) = certificate(&rcgen::PKCS_ECDSA_P384_SHA384);
+    let signing =
+        rind::ecdsa::KeyPair::from_pkcs8(&rind::ecdsa::sign::P384_SHA384_ASN1, &key).unwrap();
+    let digest = rind::digest::digest(&rind::digest::SHA256, b"data");
+    let signature = signing.sign_digest(&digest).unwrap();
+    rind()
+        .signature_verification
+        .verify_signature(
+            &cert,
+            b"data",
+            signature.as_ref(),
+            HashAlgorithm::SHA256,
+            SignatureAlgorithm::ECDSA,
+        )
+        .expect("a P-384/SHA-256 signature verifies");
+
+    let error = rind()
+        .signature_verification
+        .verify_signature(
+            &cert,
+            b"data",
+            &[0; 8],
+            HashAlgorithm::SHA256,
+            SignatureAlgorithm::ECDSA,
+        )
+        .expect_err("an eight-byte signature does not verify");
+    assert!(
+        matches!(error, CryptoError::SignatureVerificationFailed { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn random_fill_replaces_the_buffer() {
+    // Replacing `Random::fill` with `Ok(())` leaves the caller's bytes.
+    // This stays out of the crate's unit tests: `admin/ctgrind adapters` runs
+    // those under valgrind, and comparing the filled buffer branches on secret
+    // bytes.
+    let mut buf = [0x5a; 32];
+    rind().secure_random.fill(&mut buf).unwrap();
+    assert_ne!(buf, [0x5a; 32]);
 }

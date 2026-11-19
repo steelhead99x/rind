@@ -75,6 +75,8 @@ pub(crate) static RANDOM: Random = Random;
 
 impl SecureRandom for Random {
     fn fill(&self, buf: &mut [u8]) -> Result<(), CryptoError> {
-        rind::rand::fill(buf).map_err(|_| CryptoError::OperationFailed(CryptoOperation::FillRandom))
+        rind::rand::fill(buf).or(Err(CryptoError::OperationFailed(
+            CryptoOperation::FillRandom,
+        )))
     }
 }
