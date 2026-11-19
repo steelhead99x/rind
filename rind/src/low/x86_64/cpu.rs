@@ -334,6 +334,17 @@ impl HaveAvx512Vl {
     }
 }
 
+/// Proof that the CPU has AVX-512 F, which Argon2's 512-bit compression
+/// function uses, and the AVX2 that its 256-bit one falls back to.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveAvx512ForArgon2(());
+
+impl HaveAvx512ForArgon2 {
+    pub(crate) fn check() -> Option<Self> {
+        has(AVX2_KERNELS | AVX512F).then_some(Self(()))
+    }
+}
+
 /// Proof that the CPU has the SHA512 instructions, and the AVX2 that
 /// OpenSSL's routine for them also uses.
 #[derive(Clone, Copy, Debug)]

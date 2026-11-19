@@ -15,15 +15,162 @@
 use core::arch::x86_64::*;
 
 use super::super::generic::argon2::{Argon2Block, argon2_compress as portable};
-use super::cpu::HaveAvx2;
+use super::cpu::{HaveAvx2, HaveAvx512ForArgon2};
 
 /// Argon2's compression function, as `low::generic::argon2` defines it.
 pub(crate) fn argon2_compress(x: &Argon2Block, y: &Argon2Block, out: &mut Argon2Block, xor: bool) {
+    if HaveAvx512ForArgon2::check().is_some() {
+        // SAFETY: the token proves AVX-512 F
+        return unsafe { compress_avx512(x, y, out, xor) };
+    }
     match HaveAvx2::check() {
         // SAFETY: the token proves AVX2
         Some(_) => unsafe { compress_avx2(x, y, out, xor) },
         None => portable(x, y, out, xor),
     }
+}
+
+/// The same on 512-bit vectors, which hold two rows' step of P, or four
+/// columns', so each round runs half the instructions, and which rotate
+/// natively. A block's 16 vectors of eight are the rows' two halves in turn.
+#[target_feature(enable = "avx512f")]
+fn compress_avx512(x: &Argon2Block, y: &Argon2Block, out: &mut Argon2Block, xor: bool) {
+    let load = |block: &Argon2Block, i: usize| {
+        // SAFETY: `i` is below 16, so the 64 bytes read lie in the block,
+        // whose 64-byte alignment aligns them.
+        unsafe { _mm512_load_si512(block.0.as_ptr().cast::<__m512i>().add(i).cast()) }
+    };
+
+    let mut state = [_mm512_setzero_si512(); 16];
+    let mut r = [_mm512_setzero_si512(); 16];
+    for i in 0..16 {
+        state[i] = _mm512_xor_si512(load(x, i), load(y, i));
+        r[i] = match xor {
+            true => _mm512_xor_si512(state[i], load(out, i)),
+            false => state[i],
+        };
+    }
+
+    // Four rows: each row is (A B) and (C D) as 256-bit halves, and a round
+    // wants two rows' A in one vector, and likewise B, C, and D.
+    for i in 0..2 {
+        let z: &mut [__m512i; 8] = (&mut state[8 * i..8 * i + 8]).try_into().unwrap();
+        let [z0, z1, z2, z3, z4, z5, z6, z7] = *z;
+        let mut v = [
+            _mm512_shuffle_i64x2::<0x44>(z0, z2),
+            _mm512_shuffle_i64x2::<0x44>(z4, z6),
+            _mm512_shuffle_i64x2::<0xEE>(z0, z2),
+            _mm512_shuffle_i64x2::<0xEE>(z4, z6),
+            _mm512_shuffle_i64x2::<0x44>(z1, z3),
+            _mm512_shuffle_i64x2::<0x44>(z5, z7),
+            _mm512_shuffle_i64x2::<0xEE>(z1, z3),
+            _mm512_shuffle_i64x2::<0xEE>(z5, z7),
+        ];
+        let [a0, a1, b0, b1, c0, c1, d0, d1] = v.each_mut();
+        round_rows512([a0, a1, b0, b1, c0, c1, d0, d1]);
+        let [a0, a1, b0, b1, c0, c1, d0, d1] = v;
+        // Back to (A B), (C D) for each row: the low halves of A and B are
+        // the first row's, the high halves the second's.
+        z[0] = _mm512_shuffle_i64x2::<0x44>(a0, b0);
+        z[2] = _mm512_shuffle_i64x2::<0xEE>(a0, b0);
+        z[4] = _mm512_shuffle_i64x2::<0x44>(a1, b1);
+        z[6] = _mm512_shuffle_i64x2::<0xEE>(a1, b1);
+        z[1] = _mm512_shuffle_i64x2::<0x44>(c0, d0);
+        z[3] = _mm512_shuffle_i64x2::<0xEE>(c0, d0);
+        z[5] = _mm512_shuffle_i64x2::<0x44>(c1, d1);
+        z[7] = _mm512_shuffle_i64x2::<0xEE>(c1, d1);
+    }
+    for i in 0..2 {
+        let mut picked = state.iter_mut().skip(i).step_by(2);
+        let v: [&mut __m512i; 8] = core::array::from_fn(|_| picked.next().unwrap());
+        round_columns512(v);
+    }
+
+    for i in 0..16 {
+        let word = _mm512_xor_si512(state[i], r[i]);
+        // SAFETY: as `load`, writing.
+        unsafe { _mm512_store_si512(out.0.as_mut_ptr().cast::<__m512i>().add(i).cast(), word) };
+    }
+}
+
+// P over four rows, two to a vector: GB down their columns, then their
+// diagonals.
+#[target_feature(enable = "avx512f")]
+#[inline]
+fn round_rows512(v: [&mut __m512i; 8]) {
+    let [a0, a1, b0, b1, c0, c1, d0, d1] = v;
+    gb512(a0, b0, c0, d0);
+    gb512(a1, b1, c1, d1);
+    for (b, c, d) in [
+        (&mut *b0, &mut *c0, &mut *d0),
+        (&mut *b1, &mut *c1, &mut *d1),
+    ] {
+        *b = _mm512_permutex_epi64::<0b00_11_10_01>(*b);
+        *c = _mm512_permutex_epi64::<0b01_00_11_10>(*c);
+        *d = _mm512_permutex_epi64::<0b10_01_00_11>(*d);
+    }
+    gb512(a0, b0, c0, d0);
+    gb512(a1, b1, c1, d1);
+    for (b, c, d) in [
+        (&mut *b0, &mut *c0, &mut *d0),
+        (&mut *b1, &mut *c1, &mut *d1),
+    ] {
+        *b = _mm512_permutex_epi64::<0b10_01_00_11>(*b);
+        *c = _mm512_permutex_epi64::<0b01_00_11_10>(*c);
+        *d = _mm512_permutex_epi64::<0b00_11_10_01>(*d);
+    }
+}
+
+// P over four columns, as `round_columns` does over two: the blends and swaps
+// act on each 128-bit unit alike.
+#[target_feature(enable = "avx512f")]
+#[inline]
+fn round_columns512(v: [&mut __m512i; 8]) {
+    let [a0, a1, b0, b1, c0, c1, d0, d1] = v;
+    let swap = |x: __m512i| _mm512_shuffle_epi32::<0b01_00_11_10>(x);
+    gb512(a0, b0, c0, d0);
+    gb512(a1, b1, c1, d1);
+    (*b0, *b1) = (
+        swap(_mm512_mask_blend_epi64(0x55, *b0, *b1)),
+        swap(_mm512_mask_blend_epi64(0xaa, *b0, *b1)),
+    );
+    core::mem::swap(c0, c1);
+    (*d0, *d1) = (
+        swap(_mm512_mask_blend_epi64(0xaa, *d0, *d1)),
+        swap(_mm512_mask_blend_epi64(0x55, *d0, *d1)),
+    );
+    gb512(a0, b0, c0, d0);
+    gb512(a1, b1, c1, d1);
+    (*b0, *b1) = (
+        swap(_mm512_mask_blend_epi64(0xaa, *b0, *b1)),
+        swap(_mm512_mask_blend_epi64(0x55, *b0, *b1)),
+    );
+    core::mem::swap(c0, c1);
+    (*d0, *d1) = (
+        swap(_mm512_mask_blend_epi64(0x55, *d0, *d1)),
+        swap(_mm512_mask_blend_epi64(0xaa, *d0, *d1)),
+    );
+}
+
+// RFC 9106's GB on each of eight lanes.
+#[target_feature(enable = "avx512f")]
+#[inline]
+fn gb512(a: &mut __m512i, b: &mut __m512i, c: &mut __m512i, d: &mut __m512i) {
+    *a = fbla512(*a, *b);
+    *d = _mm512_ror_epi64::<32>(_mm512_xor_si512(*d, *a));
+    *c = fbla512(*c, *d);
+    *b = _mm512_ror_epi64::<24>(_mm512_xor_si512(*b, *c));
+    *a = fbla512(*a, *b);
+    *d = _mm512_ror_epi64::<16>(_mm512_xor_si512(*d, *a));
+    *c = fbla512(*c, *d);
+    *b = _mm512_ror_epi64::<63>(_mm512_xor_si512(*b, *c));
+}
+
+#[target_feature(enable = "avx512f")]
+#[inline]
+fn fbla512(x: __m512i, y: __m512i) -> __m512i {
+    let product = _mm512_mul_epu32(x, y);
+    _mm512_add_epi64(_mm512_add_epi64(x, y), _mm512_add_epi64(product, product))
 }
 
 #[target_feature(enable = "avx2")]
@@ -190,6 +337,60 @@ mod tests {
             unsafe { compress_avx2(&x, &y, &mut ours, xor) };
             portable(&x, &y, &mut theirs, xor);
             assert_eq!(ours.0, theirs.0);
+        }
+    }
+
+    // The AVX-512 compression function, which valgrind cannot run, on blocks
+    // derived from a secret seed, for `admin/ct-sde`. Its data-dependent
+    // addressing lies outside it, in the fill that picks the block to read.
+    #[test]
+    #[ignore = "admin/ct-sde runs it under Intel SDE"]
+    fn ct_sde_argon2_compress_avx512() {
+        let t = HaveAvx512ForArgon2::check().expect("AVX-512");
+        let mut seed = super::super::ct_sde::seed();
+        let mut block = || {
+            let mut b = Argon2Block::ZERO;
+            for w in &mut b.0 {
+                seed = seed
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                *w = seed;
+            }
+            b
+        };
+        let (x, y, mut out) = (block(), block(), block());
+        super::super::ct_sde::traced(|| {
+            let _ = t;
+            // SAFETY: the token proves AVX-512 F
+            unsafe { compress_avx512(&x, &y, &mut out, true) }
+        });
+    }
+
+    #[test]
+    fn avx512_matches_portable() {
+        let Some(_) = HaveAvx512ForArgon2::check() else {
+            return;
+        };
+        let mut seed = 7u64;
+        let mut block = || {
+            let mut b = Argon2Block::ZERO;
+            for w in &mut b.0 {
+                seed = seed
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                *w = seed;
+            }
+            b
+        };
+        for xor in [false, true] {
+            for _ in 0..16 {
+                let (x, y, old) = (block(), block(), block());
+                let (mut ours, mut theirs) = (old.clone(), old);
+                // SAFETY: AVX-512 F checked above
+                unsafe { compress_avx512(&x, &y, &mut ours, xor) };
+                portable(&x, &y, &mut theirs, xor);
+                assert_eq!(ours.0, theirs.0);
+            }
         }
     }
 }
