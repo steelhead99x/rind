@@ -198,6 +198,18 @@ pub(crate) fn wide_multiplier() -> bool {
     }
 }
 
+/// Whether this core is one where rind's own narrow P-256 routines were
+/// measured faster than verified-garbage's: a Cortex-A76, the Pi 5's core,
+/// on the narrow schedules. A72 and N1 are narrow too, but no timing of
+/// either exists, so P-256 keeps VG's routines there.
+#[inline]
+pub(crate) fn narrow_p256_core() -> bool {
+    if WIDE.load(Ordering::Relaxed) == WIDE_UNSET {
+        detect_wide_once();
+    }
+    WIDE.load(Ordering::Relaxed) == WIDE_NARROW_A76
+}
+
 static FEATURES: AtomicU8 = AtomicU8::new(0);
 /// Separate from [`FEATURES`], so an AES or SHA check does not read the
 /// part. `0` means the choice has not been made.
@@ -205,6 +217,8 @@ static WIDE: AtomicU8 = AtomicU8::new(WIDE_UNSET);
 const WIDE_UNSET: u8 = 0;
 const WIDE_NARROW: u8 = 1;
 const WIDE_ALT: u8 = 2;
+/// Narrow, and the core is a Cortex-A76 (see [`narrow_p256_core`]).
+const WIDE_NARROW_A76: u8 = 3;
 
 /// The detected features, read once. Inlined, so a check is a load and a
 /// test, with the first call's detection out of line.
@@ -283,8 +297,14 @@ fn wide_toggle(detected: bool) -> bool {
 #[cold]
 #[inline(never)]
 fn detect_wide_once() -> bool {
-    let wide = wide_toggle(detect_wide_multiplier());
-    WIDE.store(if wide { WIDE_ALT } else { WIDE_NARROW }, Ordering::Relaxed);
+    let (detected, a76) = detect_wide_multiplier();
+    let wide = wide_toggle(detected);
+    let state = match (wide, a76) {
+        (true, _) => WIDE_ALT,
+        (false, true) => WIDE_NARROW_A76,
+        (false, false) => WIDE_NARROW,
+    };
+    WIDE.store(state, Ordering::Relaxed);
     wide
 }
 
@@ -309,7 +329,7 @@ fn detect_wide_once() -> bool {
 /// core the first call ran on. On a chip that mixes core types, the choice
 /// follows that core and is then cached; both schedules are correct and
 /// constant time on every core, so only speed depends on it.
-fn detect_wide_multiplier() -> bool {
+fn detect_wide_multiplier() -> (bool, bool) {
     #[cfg(all(rind_std, target_os = "linux"))]
     {
         // A debug build, or a release one with `--cfg rind_cpu_disable`, can
@@ -319,12 +339,19 @@ fn detect_wide_multiplier() -> bool {
         // constant fails the fixture whose answer is the other one.
         #[cfg(all(any(debug_assertions, rind_cpu_disable), not(rind_fips)))]
         if let Some(midr) = midr_fixture() {
-            return midr.is_none_or(wide_from_midr);
+            return (
+                midr.is_none_or(wide_from_midr),
+                midr.is_some_and(a76_from_midr),
+            );
         }
-        read_midr().is_none_or(wide_from_midr)
+        let midr = read_midr();
+        (
+            midr.is_none_or(wide_from_midr),
+            midr.is_some_and(a76_from_midr),
+        )
     }
     #[cfg(not(all(rind_std, target_os = "linux")))]
-    true
+    (true, false)
 }
 
 /// `RIND_TEST_MIDR=narrow|wide|none` stands in for `MIDR_EL1`: a
@@ -368,6 +395,12 @@ fn read_midr() -> Option<u64> {
         );
     }
     Some(midr)
+}
+
+/// Whether `midr` names a Cortex-A76.
+#[cfg(any(all(rind_std, target_os = "linux"), test))]
+fn a76_from_midr(midr: u64) -> bool {
+    (midr >> 24) & 0xff == 0x41 && (midr >> 4) & 0xfff == 0xd0b
 }
 
 /// Whether the core `midr` names should run the `_alt` schedules.
@@ -610,6 +643,16 @@ mod tests {
     }
 
     #[test]
+    fn only_a76_is_the_p256_narrow_core() {
+        assert!(a76_from_midr(0x414f_d0b1));
+        // Cortex-A72, Neoverse N1, Neoverse V1, and another implementer's
+        // part `0xd0b`.
+        for midr in [0x410f_d083, 0x413f_d0c1, 0x411f_d401, 0x510f_d0b0] {
+            assert!(!a76_from_midr(midr), "{midr:#x}");
+        }
+    }
+
+    #[test]
     fn midr_selects_known_narrow_cores() {
         // Cortex-A72 r0p3, Cortex-A76 r4p1 (the Pi 5), and Neoverse N1 r3p1.
         for midr in [0x410f_d083, 0x414f_d0b1, 0x413f_d0c1] {
@@ -833,7 +876,7 @@ mod tests {
         // core reads its own MIDR_EL1. Compare only when both reads around
         // the detection agree.
         let midr = read_midr();
-        let detected = detect_wide_multiplier();
+        let detected = detect_wide_multiplier().0;
         if read_midr() == midr {
             assert_eq!(detected, midr.is_none_or(wide_from_midr));
         }
@@ -867,8 +910,9 @@ mod tests {
         const CHILD: &str = "RIND_TEST_MIDR_CHILD";
         if std::env::var_os(CHILD).is_some() {
             let mode = std::env::var("RIND_TEST_MIDR").unwrap();
-            let wide = detect_wide_multiplier();
+            let (wide, a76) = detect_wide_multiplier();
             assert_eq!(wide, mode != "narrow", "{mode}");
+            assert_eq!(a76, mode == "narrow", "{mode}");
             println!("{CHILD} {mode}");
             return;
         }
