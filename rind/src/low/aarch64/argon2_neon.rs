@@ -35,7 +35,9 @@
 //!
 //! Dispatch selects it on every aarch64 build: the quest keeps it only where it
 //! beats the portable permutation, which it does on an Apple core and on
-//! Neoverse-N2, Cortex-A76, and Cortex-A78AE cores (see
+//! Neoverse-N2, Cortex-A76, and Cortex-A72 cores. On a Cortex-A78AE (the
+//! Orin) a controlled re-timing gives 0.983x to 0.989x, about 1 to 2% slower,
+//! which the owner accepted; the default is unchanged (see
 //! quest/m4/protocols/argon2-simd.md).
 //! aarch64's backend is compiled only when the target enables NEON.
 
@@ -56,9 +58,11 @@ impl Fill {
     ///
     /// Measured against the portable permutation, the SHA3 fill is 1.76x and
     /// 1.65x on an M1 Pro but 0.90x and 0.96x on a Neoverse-N2, where plain
-    /// NEON is 1.07x and 1.06x; plain NEON beats the portable permutation on
-    /// every core tried (M1 Pro, Neoverse-N2, Cortex-A76, Cortex-A78AE). A
-    /// CPU without SHA3 does not run the SHA3 fill.
+    /// NEON is 1.07x and 1.06x. Plain NEON beats the portable permutation on
+    /// an M1 Pro, a Neoverse-N2, a Cortex-A76, and a Cortex-A72 (1.12x at
+    /// 8 MiB, 1.065x at 64 MiB), and is 0.983x to 0.989x on a Cortex-A78AE,
+    /// about 1 to 2% slower, which the owner accepted. A CPU without SHA3 does
+    /// not run the SHA3 fill.
     pub(crate) fn select() -> Self {
         if cfg!(target_vendor = "apple") && HaveSha3::check().is_some() {
             Self::Sha3

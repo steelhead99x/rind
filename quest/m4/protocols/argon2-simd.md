@@ -17,7 +17,7 @@ aarch64 runs the NEON fill (`low::aarch64::argon2_neon`), ported from `perf/argo
 
 x86_64 runs the landed AVX2 fill, then the reference's SSSE3 fill on a CPU with SSSE3 and without AVX2, then the portable permutation. SSSE3 measured 1.12x to 1.22x the portable permutation with AVX2 denied (Xeon 6975P-C and Core Ultra 9 275HX). The reference's AVX-512F fill sits beside them, tested against the portable permutation, and runs only with `--cfg rind_argon2_avx512`: it is the one part still gated.
 
-Published numbers from earlier work are in `steelhead99x/rind-results`, branches `results/argon2-a76-interleave` (`results/argon2-interleave/`) and the scalar-rider notes in that same branch (`results/argon2-scalar-rider/`). They compare fills to each other and to RustCrypto, at 1 MiB t=3, 16 MiB t=1, and 64 MiB t=1, which is not this bench.
+Published numbers from earlier work are in the owner's results repository, branches `results/argon2-a76-interleave` (`results/argon2-interleave/`) and the scalar-rider notes in that same branch (`results/argon2-scalar-rider/`). They compare fills to each other and to RustCrypto, at 1 MiB t=3, 16 MiB t=1, and 64 MiB t=1, which is not this bench.
 
 ### Still open against the keep rules
 
@@ -49,7 +49,7 @@ Intel Core Ultra 9 275HX (Arrow Lake-HX, a laptop, load average 3.4 to 5.7 from 
 
 An earlier three-round run at load 5.7 gave 1.25x and 1.22x with spreads of 17% to 27%. RustCrypto is faster than both here (3.7 ms and 61 ms) because it is not subject to the AVX2 denial: the denial turns off rind's dispatch, not RustCrypto's compile-time vectorization.
 
-2026-11-17, `cargo bench -p rind-bench --bench argon2` with criterion's defaults, each configuration built once and run three times, interleaved with the order rotated each round. The GitHub runners pin to one CPU. Each value is the median of the three runs' criterion medians, in ms; spread is (max - min) / median. Ratio is the portable `rind` time over this row's. Tree: this branch at `e3e4d0cd` plus a measuring workflow only (`steelhead99x/rind`, branch `wip/argon2-measure`), rustc 1.100.0.
+2026-11-17, `cargo bench -p rind-bench --bench argon2` with criterion's defaults, each configuration built once and run three times, interleaved with the order rotated each round. The GitHub runners pin to one CPU. Each value is the median of the three runs' criterion medians, in ms; spread is (max - min) / median. Ratio is the portable `rind` time over this row's. Tree: this branch at `e3e4d0cd` plus a measuring workflow only (a fork PR branch), rustc 1.100.0.
 
 Neoverse-N2 GitHub runner (`ubuntu-24.04-arm`, 4 CPUs, has `sha3`). `default` is the portable permutation, `neon` takes the SHA3 fill, and `neon-plain` is plain NEON with the scalar rider (`RIND_CPU_DISABLE_sha3=1`). `neon_matches_scalar` passes with and without the gate.
 

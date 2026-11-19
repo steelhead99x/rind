@@ -4,8 +4,9 @@
 //!
 //! The NEON fill of [`super::argon2_neon`]: SHA3's `xar` fill on Apple cores
 //! that have it, and the plain NEON fill with its scalar rider everywhere
-//! else. Both measured faster than the portable permutation on every core
-//! tried (see quest/m4/protocols/argon2-simd.md for the numbers); the SHA3
+//! else. Both measured faster than the portable permutation on the cores
+//! tried except the Cortex-A78AE, where plain NEON is about 1 to 2% slower
+//! (see quest/m4/protocols/argon2-simd.md for the numbers); the SHA3
 //! fill loses to the portable permutation on a Neoverse-N2, so only Apple
 //! takes it.
 
