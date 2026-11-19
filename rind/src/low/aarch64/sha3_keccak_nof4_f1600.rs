@@ -1,7 +1,6 @@
 // Written for Graviola by Joe Birr-Pixton, 2026.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-use super::sha3_keccak_f1600::sha3_keccak_f1600;
 use super::sha3_keccak_f1600_alt::sha3_keccak_f1600 as sha3_keccak_f1600_alt;
 use super::sha3_keccak2_f1600::sha3_keccak2_f1600;
 use super::sha3_keccak4_f1600::sha3_keccak4_f1600;
@@ -41,9 +40,11 @@ pub(crate) fn sha3_keccak_nof4_f1600<const N: usize>(a: &mut [[u64; 25]; 4], rc:
             Some(_) => unsafe { sha3_keccak4_f1600(a, rc) },
             None => sha3_keccak4_f1600_alt(a, rc),
         },
+        // One state at a time, on the single-state dispatch, which runs
+        // `_alt2` on Cortex-A72.
         None => {
             for i in 0..N {
-                sha3_keccak_f1600(&mut a[i], rc);
+                super::sha3_keccak_f1600_mux::sha3_keccak_f1600(&mut a[i], rc);
             }
         }
     }
@@ -53,6 +54,7 @@ pub(crate) fn sha3_keccak_nof4_f1600<const N: usize>(a: &mut [[u64; 25]; 4], rc:
 mod tests {
     use super::*;
     use crate::low::aarch64::cpu::HaveSha3;
+    use crate::low::aarch64::sha3_keccak_f1600::sha3_keccak_f1600;
     use crate::mid::sha3::RC;
 
     fn states(seed: u64) -> [[u64; 25]; 4] {

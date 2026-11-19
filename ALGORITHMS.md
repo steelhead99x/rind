@@ -482,6 +482,7 @@ BINSEC.
 | `sha3_keccak4_f1600` | not imported | `sha3_keccak4_f1600`: `SHA3_KECCAK4_F1600_SUBROUTINE_SAFE` |
 | `sha3_keccak4_f1600_alt::sha3_keccak4_f1600` | `sha3_keccak4_f1600_alt`: none | `sha3_keccak4_f1600_alt`: `SHA3_KECCAK4_F1600_ALT_SUBROUTINE_SAFE` |
 | `sha3_keccak_f1600` | `sha3_keccak_f1600`: none | `sha3_keccak_f1600`: `SHA3_KECCAK_F1600_SUBROUTINE_SAFE` |
+| `sha3_keccak_f1600_alt2::sha3_keccak_f1600` | not imported | `sha3_keccak_f1600_alt2`: `SHA3_KECCAK_F1600_ALT2_SUBROUTINE_SAFE` |
 | `sha3_keccak_f1600_alt::sha3_keccak_f1600` | not imported | `sha3_keccak_f1600_alt`: `SHA3_KECCAK_F1600_ALT_SUBROUTINE_SAFE` |
 <!-- end admin/prove-bytes inventory -->
 
@@ -809,7 +810,10 @@ have some different options depending on CPU features:
   unit, and scalar code on others. On Neoverse N2 the scalar code measured 2.1x faster
   than the SHA3 instructions for SHA-3, and 1.1-1.3x for ML-KEM and ML-DSA,
   which run it one state at a time; mlkem-native and verified-garbage make
-  the same choice.
+  the same choice. On Cortex-A72, the Raspberry Pi 4's core, that scalar
+  code is s2n-bignum's `sha3_keccak_f1600_alt2`, compiled for that core,
+  which permutes in 0.67x the time there; it took 1.24x on Cortex-A76 and
+  1.14x on Cortex-A78AE, so only a `MIDR_EL1` naming Cortex-A72 picks it.
 - We have s2n-bignum's verified 4-wide Keccak-f on aarch64 cores other than
   Apple's, and Apple's without the SHA3 instructions, which runs one state in scalar code beside two NEON pairs, after
   [Becker and Kannwischer](https://eprint.iacr.org/2022/1243), so the scalar
