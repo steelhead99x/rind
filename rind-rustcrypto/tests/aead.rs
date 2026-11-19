@@ -60,12 +60,11 @@ where
             );
             assert_eq!(sealed.len(), plain_len + 16);
             // Each opens what the other sealed.
-            let open = |aead: &dyn Fn(&[u8]) -> Result<Vec<u8>, aead::Error>| aead(&sealed);
             let by_ours = |ct: &[u8]| ours.decrypt(&our_nonce, Payload { msg: ct, aad: &aad });
             let by_theirs =
                 |ct: &[u8]| theirs.decrypt(&their_nonce, Payload { msg: ct, aad: &aad });
-            assert_eq!(open(&by_ours).unwrap(), plaintext);
-            assert_eq!(open(&by_theirs).unwrap(), plaintext);
+            assert_eq!(by_ours(&sealed).unwrap(), plaintext);
+            assert_eq!(by_theirs(&sealed).unwrap(), plaintext);
 
             // Every flipped bit of a short message, or sampled positions of a long one, is refused.
             let stride = (sealed.len() / 40).max(1);
