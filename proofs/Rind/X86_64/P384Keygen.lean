@@ -20,6 +20,8 @@ which `comb_ne` proves for a scalar below n.
 
 The table lookup is rind's AVX2, SSE2, or NEON select, which
 `Rind.X86_64.P384Select` states from its proof.
+Each theorem that derives the public key assumes `NoVgP384`, under which
+rind runs this comb rather than pyca/verified-garbage's `d·G`.
 `admin/prove` writes the aarch64 proof from this file by renaming the target.
 -/
 
@@ -28,6 +30,25 @@ set_option exponentiation.threshold 400
 namespace rind.x86_64
 
 /-! ## What the theorems state -/
+
+/-- pyca/verified-garbage's P-384 `d·G` check fails, so key generation and
+ECDSA signing run the code these theorems state. VG's routines are proven in
+that project, not here. rind takes VG's `d·G` on every x86-64 and 64-bit Arm
+CPU, so no CPU meets this until `quest/m2/verified-garbage/p384-proof.md`
+imports VG's theorems and drops it. -/
+def NoVgP384 : Prop :=
+  low.x86_64.p384_vg.MulBase.check = ok none
+
+theorem NoVgP384.eq (hvg : NoVgP384) : low.x86_64.p384_vg.MulBase.check = ok none := hvg
+
+/-- pyca/verified-garbage's P-384 ECDSA verification check fails, so
+verification runs the code these theorems state: on exactly the x86-64 CPUs
+without BMI2 or ADX; every 64-bit Arm CPU passes it. -/
+def NoVgP384Verify : Prop :=
+  low.x86_64.p384_vg.Verify.check = ok none
+
+theorem NoVgP384Verify.eq (hvg : NoVgP384Verify) : low.x86_64.p384_vg.Verify.check = ok none :=
+  hvg
 
 /-- `b` is X9.62's uncompressed encoding of `d` times the generator. -/
 def p384PublicKey (d : Nat) (b : List U8) : Prop :=
@@ -833,18 +854,19 @@ theorem as_bytes_uncompressed_spec (h : Runs) (pt : mid.p384.AffineMontPoint) (h
     simp only [feNat] at fe_post fe1_post fe2_post fe3_post
     rw [fe1_post, fe3_post, fe_post, fe2_post]
 
-theorem public_key_uncompressed_spec (h : Runs) (k : mid.p384.PrivateKey) (x y : Nat)
+theorem public_key_uncompressed_spec (h : Runs) (hvg : NoVgP384) (k : mid.p384.PrivateKey) (x y : Nat)
     (hk : wordsNat k.scalar.val < n384)
     (hq : p384Pow p384G (wordsNat k.scalar.val) = some (x, y)) (hc : p384OnCurve (some (x, y))) :
     mid.p384.PrivateKey.public_key_uncompressed k ⦃ b =>
       b.val.head? = some 4#u8 ∧ p384Coords b.val = (x, y) ⦄ := by
   unfold mid.p384.PrivateKey.public_key_uncompressed
   step
+  simp only [hvg.eq, bind_ok]
   step with public_point_spec h k x y hk hq hc as ⟨pt, hx, hy, hpx, hpy⟩
   step with as_bytes_uncompressed_spec h pt hx hy as ⟨b, hb4, hbc⟩
   exact ⟨hb4, hbc.trans (Prod.ext hpx hpy)⟩
 
-theorem encode_public_spec (h : Runs) (k : mid.p384.PrivateKey) (algorithm : high.agreement.Algorithm)
+theorem encode_public_spec (h : Runs) (hvg : NoVgP384) (k : mid.p384.PrivateKey) (algorithm : high.agreement.Algorithm)
     (x y : Nat) (hk : wordsNat k.scalar.val < n384) (hq : p384Pow p384G (wordsNat k.scalar.val) = some (x, y))
     (hc : p384OnCurve (some (x, y))) :
     high.curve.P384.Insts.RindHighAgreementAgreePrivateKey.encode_public k algorithm ⦃ pk =>
@@ -852,7 +874,7 @@ theorem encode_public_spec (h : Runs) (k : mid.p384.PrivateKey) (algorithm : hig
         b.length = 97 ∧ b.val.head? = some 4#u8 ∧ p384Coords b.val = (x, y) ⦄ ⦄ := by
   unfold high.curve.P384.Insts.RindHighAgreementAgreePrivateKey.encode_public high.agreement.PublicKey.from_encoding
     high.agreement.PublicKey.Insts.CoreConvertAsRefSliceU8.as_ref low.generic.zeroise.ZeroableRef.new
-  step with public_key_uncompressed_spec h k x y hk hq hc as ⟨a, ha4, hac⟩
+  step with public_key_uncompressed_spec h hvg k x y hk hq hc as ⟨a, ha4, hac⟩
   step as ⟨sl, hsl⟩
   subst hsl
   have hlen : a.to_slice.len.val = 97 := by simp
@@ -880,13 +902,13 @@ theorem public_key_of_coords (d x y : Nat) (hq : p384Pow p384G d = some (x, y))
   WP.spec_mono hpk fun b ⟨hl, h4, hxy⟩ => ⟨hl, h4, by rw [hq, hxy]⟩
 
 /-- The public key `encode_public` computes for a scalar in [1, n). -/
-theorem encode_public_key_spec (h : Runs) (k : mid.p384.PrivateKey) (algorithm : high.agreement.Algorithm)
+theorem encode_public_key_spec (h : Runs) (hvg : NoVgP384) (k : mid.p384.PrivateKey) (algorithm : high.agreement.Algorithm)
     (hk0 : 0 < wordsNat k.scalar.val) (hk : wordsNat k.scalar.val < n384) :
     high.curve.P384.Insts.RindHighAgreementAgreePrivateKey.encode_public k algorithm ⦃ pk =>
       high.agreement.PublicKey.Insts.CoreConvertAsRefSliceU8.as_ref pk ⦃ b =>
         p384PublicKey (wordsNat k.scalar.val) b.val ⦄ ⦄ := by
   obtain ⟨x, y, hq, hc⟩ := p384_g_mult _ hk0 hk
-  exact WP.spec_mono (encode_public_spec h k algorithm x y hk hq hc)
+  exact WP.spec_mono (encode_public_spec h hvg k algorithm x y hk hq hc)
     fun pk hpk => public_key_of_coords _ x y hq pk hpk
 
 /-- `p384Agree`'s fields, which the theorems below rewrite to, so `step` finds
@@ -993,7 +1015,7 @@ theorem drawKeygen_err (draws : Nat → core.result.Result Unit getrandom.error.
       · exact ih (i + 1) hr
     · simpa using hr
 
-theorem load_scalar_spec (h : Runs) (algorithm : high.agreement.Algorithm) (b : Slice U8) :
+theorem load_scalar_spec (h : Runs) (hvg : NoVgP384) (algorithm : high.agreement.Algorithm) (b : Slice U8) :
     high.curve.P384.Insts.RindHighAgreementAgreePrivateKey.load algorithm (.Scalar b) ⦃ r =>
       if b.length = 48 then
         if 0 < beNat b.val ∧ beNat b.val < n384 then
@@ -1015,7 +1037,7 @@ theorem load_scalar_spec (h : Runs) (algorithm : high.agreement.Algorithm) (b : 
       step with core.result.Result.Insts.CoreOpsTry.branch_Ok.spec as ⟨cf, hcf⟩
       subst hcf
       simp only
-      step with encode_public_key_spec h k algorithm (hk ▸ hrange.1) (hk ▸ hrange.2) as ⟨pk, hpk⟩
+      step with encode_public_key_spec h hvg k algorithm (hk ▸ hrange.1) (hk ▸ hrange.2) as ⟨pk, hpk⟩
       exact ⟨k, pk, rfl, hk, hk ▸ hpk⟩
     · subst hr
       simp [core.result.Result.Insts.CoreOpsTry.branch,
@@ -1035,7 +1057,7 @@ open P384
 system source whose bytes, read big-endian, are in [1, n), and key generation
 is refused if a draw fails before one is, or none is. The draws themselves are
 outside the functional spec. -/
-theorem p384_generate (h : Runs) (draws : Nat → core.result.Result Unit getrandom.error.Error × Slice U8)
+theorem p384_generate (h : Runs) (hvg : NoVgP384) (draws : Nat → core.result.Result Unit getrandom.error.Error × Slice U8)
     (hdraw : ∀ i, mid.p384.PrivateKey.draw i (Array.repeat 48#usize 0#u8).to_slice = ok (draws i))
     (hlen : ∀ i, (draws i).2.length = 48) :
     high.agreement.PrivateKey.generate high.agreement.ECDH_P384 ⦃ key => p384Keygen draws 0 64 key ⦄ := by
@@ -1048,7 +1070,7 @@ theorem p384_generate (h : Runs) (draws : Nat → core.result.Result Unit getran
   rcases r with k | e
   · obtain ⟨hk0, hk, hkey⟩ := drawKeygen_ok draws 64 0 k hr
     simp only [p384Agree_encode_public]
-    step with encode_public_key_spec h k _ hk0 hk as ⟨pk, hpk⟩
+    step with encode_public_key_spec h hvg k _ hk0 hk as ⟨pk, hpk⟩
     step with private_key_spec k pk hpk as ⟨key, hkey'⟩
     exact hkey key hkey'
   · simp only [WP.spec_ok]
@@ -1057,7 +1079,7 @@ theorem p384_generate (h : Runs) (draws : Nat → core.result.Result Unit getran
 /-- A P-384 key loaded from its scalar is refused unless it is 48 bytes and,
 read big-endian, in [1, n), and otherwise is that scalar, as
 `p384_generate`'s is a draw's. -/
-theorem p384_from_scalar (h : Runs) (b : Slice U8) :
+theorem p384_from_scalar (h : Runs) (hvg : NoVgP384) (b : Slice U8) :
     high.agreement.PrivateKey.from_scalar high.agreement.ECDH_P384 b ⦃ key =>
       if b.length = 48 then
         if 0 < beNat b.val ∧ beNat b.val < n384 then
@@ -1067,7 +1089,7 @@ theorem p384_from_scalar (h : Runs) (b : Slice U8) :
   unfold high.agreement.PrivateKey.from_scalar high.agreement.ECDH_P384 high.agreement.Algorithm.load
     high.agreement.Keyed.load
   simp only [p384Agree_load]
-  step with load_scalar_spec h _ b as ⟨r, hr⟩
+  step with load_scalar_spec h hvg _ b as ⟨r, hr⟩
   split_ifs at hr ⊢
   · obtain ⟨k, pk, rfl, hk, hpk⟩ := hr
     simp only

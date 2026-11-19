@@ -169,6 +169,7 @@ fn mlkem768_keygen(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::kem::*;
 
         b.iter(|| {
@@ -263,6 +264,7 @@ fn mlkem768_encaps(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::kem::*;
 
         let encaps = DecapsulationKey::<MlKem768>::generate()
@@ -360,6 +362,7 @@ fn mlkem768_decaps(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::kem::*;
 
         let decaps = DecapsulationKey::<MlKem768>::generate().unwrap();
@@ -467,6 +470,7 @@ fn mlkem768_combined(c: &mut Criterion) {
     });
 
     group.bench_function("rind", |b| {
+        let _dit = criterion::rind_dit();
         use rind::kem::*;
 
         b.iter(|| {
@@ -536,6 +540,7 @@ macro_rules! mlkem_set {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::kem::*;
 
                 b.iter(|| {
@@ -583,6 +588,7 @@ macro_rules! mlkem_set {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::kem::*;
 
                 let encaps = DecapsulationKey::<$set>::generate()
@@ -635,6 +641,7 @@ macro_rules! mlkem_set {
             });
 
             group.bench_function("rind", |b| {
+                let _dit = criterion::rind_dit();
                 use rind::kem::*;
 
                 let decaps = DecapsulationKey::<$set>::generate().unwrap();

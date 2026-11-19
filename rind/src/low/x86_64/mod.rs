@@ -163,6 +163,7 @@ pub(crate) mod p384_montjmixadd;
 pub(crate) mod p384_montjmixadd_alt;
 pub(crate) mod p384_montjscalarmul;
 pub(crate) mod p384_montjscalarmul_alt;
+pub(crate) mod p384_vg;
 pub(crate) mod p521_jadd;
 pub(crate) mod p521_jadd_alt;
 pub(crate) mod p521_jdouble;

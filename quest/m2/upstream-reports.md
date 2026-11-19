@@ -19,4 +19,4 @@ Extended with the maintainer on 2026-11-13: ✅ once rind is complete enough, fi
 
 ## Waiting
 
-- Maintainer: say rind is mature enough to start reporting upstream. An agent can't judge this; it is the maintainer's view of rind's standing. Not yet, as of 2026-11-18: ask again once [rind 0.4 ships](/quest/m2/api/release-0.4.md) and [the benchmark report refresh](/quest/m2/bench/report-refresh.md) lands. Clear it by removing this item.
+- Maintainer: say rind is mature enough to start reporting upstream. An agent can't judge this; it is the maintainer's view of rind's standing. Not yet, as of 2026-11-18: ask again once [rind 0.4 ships](/quest/m2/api/release-0.4.md). Clear it by removing this item.

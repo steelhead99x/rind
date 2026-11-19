@@ -98,7 +98,6 @@ jobs:
               AVX2: 0
               BMI2_ADX: 0
               SHA: 0
-              SHA512: 0
               VAES_AES_GCM: 0
               AVX_MOVBE_AES_GCM: 0
               AVX512_AES_GCM: 0
@@ -118,7 +117,6 @@ jobs:
               AVX2: 0
               BMI2_ADX: 0
               SHA: 0
-              SHA512: 0
               VAES_AES_GCM: 0
               AVX_MOVBE_AES_GCM: 0
               AVX512_AES_GCM: 0
@@ -138,7 +136,6 @@ jobs:
               AVX2: 0
               BMI2_ADX: 0
               SHA: 0
-              SHA512: 0
               VAES_AES_GCM: 0
               AVX_MOVBE_AES_GCM: 0
               AVX512_AES_GCM: 0
@@ -158,7 +155,6 @@ jobs:
               AVX2: 0
               BMI2_ADX: 0
               SHA: 0
-              SHA512: 0
               VAES_AES_GCM: 0
               AVX_MOVBE_AES_GCM: 0
               AVX512_AES_GCM: 0
@@ -178,7 +174,6 @@ jobs:
               AVX2: 0
               BMI2_ADX: 0
               SHA: 1
-              SHA512: 0
               VAES_AES_GCM: 0
               AVX_MOVBE_AES_GCM: 0
               AVX512_AES_GCM: 0
@@ -199,7 +194,6 @@ jobs:
               AVX2: 0
               BMI2_ADX: 0
               SHA: 0
-              SHA512: 0
               VAES_AES_GCM: 0
               AVX_MOVBE_AES_GCM: 0
               AVX512_AES_GCM: 0
@@ -219,7 +213,6 @@ jobs:
               AVX2: 1
               BMI2_ADX: 0
               SHA: 0
-              SHA512: 0
               VAES_AES_GCM: 0
               AVX_MOVBE_AES_GCM: 1
               AVX512_AES_GCM: 0
@@ -240,7 +233,6 @@ jobs:
               AVX2: 1
               BMI2_ADX: 1
               SHA: 0
-              SHA512: 0
               VAES_AES_GCM: 0
               AVX_MOVBE_AES_GCM: 1
               AVX512_AES_GCM: 0
@@ -261,7 +253,6 @@ jobs:
               AVX2: 1
               BMI2_ADX: 1
               SHA: 1
-              SHA512: 0
               VAES_AES_GCM: 0
               AVX_MOVBE_AES_GCM: 1
               AVX512_AES_GCM: 0
@@ -281,16 +272,15 @@ jobs:
               AVX2: 1
               BMI2_ADX: 1
               SHA: 1
-              SHA512: 0
               VAES_AES_GCM: 1
               AVX_MOVBE_AES_GCM: 1
               AVX512_AES_GCM: 0
               AVX512_ML_KEM: 0
               AVX512_RSA: 0
               MCDT: 1
-          # Arrow Lake adds the SHA512 instructions to Alder Lake's paths, so
-          # SHA-384 and SHA-512 run OpenSSL's routine for them. Lunar and Panther
-          # Lake, and Clearwater Forest, select the same paths.
+          # Arrow Lake has the SHA512 instructions, which rind does not run:
+          # SHA-384 and SHA-512 take the AVX2 routine, as on Alder Lake. Lunar
+          # and Panther Lake, and Clearwater Forest, select the same paths.
           - model: Arrow Lake
             sde: arl
             paths:
@@ -301,7 +291,6 @@ jobs:
               AVX2: 1
               BMI2_ADX: 1
               SHA: 1
-              SHA512: 1
               VAES_AES_GCM: 1
               AVX_MOVBE_AES_GCM: 1
               AVX512_AES_GCM: 0
@@ -320,15 +309,14 @@ jobs:
               AVX2: 1
               BMI2_ADX: 1
               SHA: 1
-              SHA512: 0
               VAES_AES_GCM: 1
               AVX_MOVBE_AES_GCM: 1
               AVX512_AES_GCM: 0
               AVX512_ML_KEM: 0
               AVX512_RSA: 0
               MCDT: 1
-          # Granite Rapids selects every path but the SHA512 instructions',
-          # including AVX-512 AES-GCM, ML-KEM, and RSA. Ice Lake, Ice Lake server,
+          # Granite Rapids selects every path, including AVX-512 AES-GCM, ML-KEM,
+          # and RSA. Ice Lake, Ice Lake server,
           # Tiger Lake, and Sapphire and Emerald Rapids select the same paths.
           - model: Granite Rapids
             sde: gnr
@@ -340,15 +328,14 @@ jobs:
               AVX2: 1
               BMI2_ADX: 1
               SHA: 1
-              SHA512: 0
               VAES_AES_GCM: 1
               AVX_MOVBE_AES_GCM: 1
               AVX512_AES_GCM: 1
               AVX512_ML_KEM: 1
               AVX512_RSA: 1
               MCDT: 1
-          # Diamond Rapids selects every path, Granite Rapids' and the SHA512
-          # instructions'.
+          # Diamond Rapids selects Granite Rapids' paths. It also has the SHA512
+          # instructions, which rind does not run.
           - model: Diamond Rapids
             sde: dmr
             paths:
@@ -359,7 +346,6 @@ jobs:
               AVX2: 1
               BMI2_ADX: 1
               SHA: 1
-              SHA512: 1
               VAES_AES_GCM: 1
               AVX_MOVBE_AES_GCM: 1
               AVX512_AES_GCM: 1
@@ -409,7 +395,6 @@ jobs:
           RIND_TEST_X86_AVX2: ${{ matrix.paths.AVX2 }}
           RIND_TEST_X86_BMI2_ADX: ${{ matrix.paths.BMI2_ADX }}
           RIND_TEST_X86_SHA: ${{ matrix.paths.SHA }}
-          RIND_TEST_X86_SHA512: ${{ matrix.paths.SHA512 }}
           RIND_TEST_X86_VAES_AES_GCM: ${{ matrix.paths.VAES_AES_GCM }}
           RIND_TEST_X86_AVX_MOVBE_AES_GCM: ${{ matrix.paths.AVX_MOVBE_AES_GCM }}
           RIND_TEST_X86_AVX512_AES_GCM: ${{ matrix.paths.AVX512_AES_GCM }}

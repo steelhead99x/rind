@@ -12,8 +12,9 @@ lemmas in `Rind.X86_64.P384` and `Rind.X86_64.P384Keygen`. The twin
 multiplication of verification looks the generator's multiples up in the
 first comb table, which `Rind.X86_64.P384Table` checks holds G to 16G; key
 generation and each signature's k·G run the comb `Rind.X86_64.P384Keygen`
-proves. `admin/prove` writes the aarch64 proof from this file by renaming the
-target.
+proves, under its `NoVgP384`, and verification rind's own under
+`NoVgP384Verify`. `admin/prove` writes the aarch64 proof from this file by
+renaming the target.
 -/
 
 set_option exponentiation.threshold 400
@@ -1219,7 +1220,7 @@ structure Cached : Prop where
     low.generic.reuse_cache.ReuseCache.get_or_build_now
       (Array.Insts.CoreMarkerCopy 8#usize mid.p384.AffineMontPoint.Insts.CoreMarkerCopy)
       (core.default.DefaultArray 8#usize mid.p384.AffineMontPoint.Insts.CoreDefaultDefault)
-      mid.p384.VerifyingKey.raw_ecdsa_verify.closure.Insts.CoreOpsFunctionFnOnceTupleArrayAffineMontPoint8
+      mid.p384.VerifyingKey.raw_ecdsa_verify.closure_1.Insts.CoreOpsFunctionFnOnceTupleArrayAffineMontPoint8
       key.odd_multiples key ⦃ P ⦄
   get_or_build : ∀ (key : mid.p384.VerifyingKey) (odd : Std.Array mid.p384.AffineMontPoint 8#usize)
       (P : Std.Array mid.p384.AffineMontPoint 8#usize → Prop),
@@ -1228,7 +1229,7 @@ structure Cached : Prop where
     mid.p384.AffineMontPoint.public_more_odd_multiples odd ⦃ P ⦄ →
     low.generic.reuse_cache.ReuseCache.get_or_build
       (core.default.DefaultArray 8#usize mid.p384.AffineMontPoint.Insts.CoreDefaultDefault)
-      mid.p384.VerifyingKey.raw_ecdsa_verify.closure_1.Insts.CoreOpsFunctionFnOnceTupleArrayAffineMontPoint8
+      mid.p384.VerifyingKey.raw_ecdsa_verify.closure_2.Insts.CoreOpsFunctionFnOnceTupleArrayAffineMontPoint8
       key.more_odd_multiples odd ⦃ r => r = none ∨ ∃ m, r = some m ∧ P m ⦄
   clone : ∀ c, ∃ c', low.generic.reuse_cache.ReuseCache.Insts.CoreCloneClone.clone
       (Array.Insts.CoreMarkerCopy 8#usize mid.p384.AffineMontPoint.Insts.CoreMarkerCopy)
@@ -1245,7 +1246,7 @@ structure Cached : Prop where
 
 /-- The ECDSA verification a key's raw check computes, for `r`, `s`, and
 `e` the signature's scalars and the hash's. -/
-theorem raw_verify_spec (_hr : Runs) (hc : Cached) (key : mid.p384.VerifyingKey)
+theorem raw_verify_spec (_hr : Runs) (hvg : NoVgP384Verify) (hc : Cached) (key : mid.p384.VerifyingKey)
     (Q : nist.Point) (hQ : p384OnCurve Q) (hQo : P384OrderOf Q) (hpt : p384Represents2 Q (pairNat6 key.point.xy.val))
     (r s e : mid.p384.Scalar) (hr0 : 0 < scNat r) (hr : scNat r < n384) (hs0 : 0 < scNat s)
     (hs : scNat s < n384) (he : scNat e < n384) :
@@ -1254,6 +1255,7 @@ theorem raw_verify_spec (_hr : Runs) (hc : Cached) (key : mid.p384.VerifyingKey)
         (¬ ecdsaP384Verifies Q (scNat e) (scNat r) (scNat s) ∧
           res = core.result.Result.Err error.Error.BadSignature) ⦄ := by
   unfold mid.p384.VerifyingKey.raw_ecdsa_verify
+  simp only [hvg.eq, bind_ok]
   have hlt : ∀ x, x % n384 < n384 := fun x => Nat.mod_lt _ n384_pos
   step with scalar_inv_spec s hs0 hs as ⟨si, hsi, hssi⟩
   step with scalar_as_mont_spec si hsi as ⟨sm, hsm⟩
@@ -1417,7 +1419,7 @@ theorem hash_to_scalar_spec (dg : Slice U8) (hdg : 48 ≤ dg.length) :
   rw [hh48] at he
   exact ⟨e, rfl, he⟩
 
-theorem ecdsa_verify_spec (h : Runs) (hc : Cached) {H Ctx St : Type}
+theorem ecdsa_verify_spec (h : Runs) (hvg : NoVgP384Verify) (hc : Cached) {H Ctx St : Type}
     (hinst : high.hash.SignatureHash H Ctx St)
     (key : high.ecdsa.VerifyingKey high.curve.P384 mid.p384.StaticPrivateKey mid.p384.VerifyingKey mid.p384.Scalar)
     (Q : nist.Point) (hk : VKey Q key.public_key) (hQo : P384OrderOf Q) (msg sig dg : Slice U8)
@@ -1466,7 +1468,7 @@ theorem ecdsa_verify_spec (h : Runs) (hc : Cached) {H Ctx St : Type}
         subst hr4
         simp only [bind_ok, mid.p384.VerifyingKey.Insts.RindHighCurvePublicKeyScalar.raw_ecdsa_verify]
         obtain ⟨hQ, -, hpt⟩ := hk
-        apply WP.spec_mono (raw_verify_spec h hc key.public_key Q hQ hQo hpt scr scs e
+        apply WP.spec_mono (raw_verify_spec h hvg hc key.public_key Q hQ hQo hpt scr scs e
           (by unfold scNat; rw [hscr]; exact hra.1) (by unfold scNat; rw [hscr]; exact hra.2)
           (by unfold scNat; rw [hscs]; exact hsa.1) (by unfold scNat; rw [hscs]; exact hsa.2)
           (by rw [he]; exact Nat.mod_lt _ n384_pos))
@@ -1514,11 +1516,12 @@ theorem ecdsa_vk_from_x962_spec (h : Runs) (hheld : Held) (hc : Cached) (bytes :
 
 /-! ## Signing's r, `StaticPrivateKey::public_key_x_scalar` -/
 
-theorem x_scalar_spec (k : mid.p384.StaticPrivateKey) (h : Runs) (hk : scNat k.scalar < n384) (x y : Nat)
+theorem x_scalar_spec (k : mid.p384.StaticPrivateKey) (h : Runs) (hvg : NoVgP384) (hk : scNat k.scalar < n384) (x y : Nat)
     (hq : p384Pow p384G (scNat k.scalar) = some (x, y)) (hc : p384OnCurve (some (x, y))) :
     mid.p384.StaticPrivateKey.public_key_x_scalar k ⦃ r => scNat r = x % n384 ⦄ := by
   unfold mid.p384.StaticPrivateKey.public_key_x_scalar mid.p384.AffineMontPoint.x_scalar
   step
+  simp only [hvg.eq, bind_ok]
   step with public_point_spec h k x y hk hq hc as ⟨pt, hpx, hpy, hpx', hpy'⟩
   step with as_bytes_uncompressed_spec h pt hpx hpy as ⟨b, hb4, hbc0⟩
   have hbc : p384Coords b.val = (x, y) := by rw [hbc0, hpx', hpy']
@@ -1585,7 +1588,7 @@ theorem static_generate_spec (_h : Runs) {T : Type} (inst : mid.rng.RandomSource
 
 /-- The nonce loop: if it returns a signature, it is (r, s) for some nonce in
 [1, n), with neither zero. -/
-theorem sign_nonces_spec (h : Runs) {T : Type}
+theorem sign_nonces_spec (h : Runs) (hvg : NoVgP384) {T : Type}
     (inst : mid.rng.RandomSource T) (hdr : Draws inst)
     (key : high.ecdsa.SigningKey high.curve.P384 mid.p384.StaticPrivateKey mid.p384.VerifyingKey mid.p384.Scalar)
     (hd : scNat key.private_key.scalar < n384)
@@ -1614,7 +1617,7 @@ theorem sign_nonces_spec (h : Runs) {T : Type}
   · obtain ⟨hk0, hk⟩ := hok k rfl
     simp only [core.result.Result.Insts.CoreOpsTry.branch]
     obtain ⟨x, y, hq, hc⟩ := p384_g_mult _ hk0 hk
-    step with x_scalar_spec k h hk x y hq hc as ⟨r1, hr1⟩
+    step with x_scalar_spec k h hvg hk x y hq hc as ⟨r1, hr1⟩
     step as ⟨b, hb⟩
     split
     · rename_i hbt
@@ -1685,7 +1688,7 @@ theorem get_mut_rangeTo (s : Slice U8) (r : core.ops.range.RangeTo Usize) :
     core.slice.Slice.get_mut (core.slice.index.SliceIndexRangeToUsizeSlice U8) s r =
       core.slice.index.SliceIndexRangeToUsizeSlice.get_mut r s := rfl
 
-theorem rfc6979_spec (h : Runs) (hdrbg : Drbg) {H Ctx St : Type}
+theorem rfc6979_spec (h : Runs) (hvg : NoVgP384) (hdrbg : Drbg) {H Ctx St : Type}
     (hinst : high.hash.Hash H Ctx St)
     (key : high.ecdsa.SigningKey high.curve.P384 mid.p384.StaticPrivateKey mid.p384.VerifyingKey mid.p384.Scalar)
     (hd : scNat key.private_key.scalar < n384)
@@ -1725,7 +1728,7 @@ theorem rfc6979_spec (h : Runs) (hdrbg : Drbg) {H Ctx St : Type}
   obtain ⟨g, hg⟩ := hdrbg.seeds hinst sl s4 random
   rw [hg]
   simp only [bind_ok, high.ecdsa.SigningKey.sign_with_nonces]
-  apply WP.dspec_bind (sign_nonces_spec h _ (hdrbg.draws_spec hinst) key hd e (by rw [he]; exact Nat.mod_lt _ n384_pos) g)
+  apply WP.dspec_bind (sign_nonces_spec h hvg _ (hdrbg.draws_spec hinst) key hd e (by rw [he]; exact Nat.mod_lt _ n384_pos) g)
   rintro ⟨r2, g2⟩ ⟨hr2ok, hr2err⟩
   simp only at hr2ok hr2err
   simp only [uncurry]
@@ -1777,7 +1780,7 @@ theorem rfc6979_spec (h : Runs) (hdrbg : Drbg) {H Ctx St : Type}
 
 
 /-- `ecdsa::SigningKey::sign` at P-384. -/
-theorem ecdsa_sign_spec (h : Runs) (hdrbg : Drbg) (hfill : Fills)
+theorem ecdsa_sign_spec (h : Runs) (hvg : NoVgP384) (hdrbg : Drbg) (hfill : Fills)
     {H Ctx St : Type} (hinst : high.hash.SignatureHash H Ctx St)
     (key : high.ecdsa.SigningKey high.curve.P384 mid.p384.StaticPrivateKey mid.p384.VerifyingKey mid.p384.Scalar)
     (hd : scNat key.private_key.scalar < n384)
@@ -1794,7 +1797,7 @@ theorem ecdsa_sign_spec (h : Runs) (hdrbg : Drbg) (hfill : Fills)
   rcases fr with _ | ferr
   · simp only [core.result.Result.map_err, bind_ok, core.result.Result.Insts.CoreOpsTry.branch]
     step as ⟨rnd, hrnd⟩
-    exact rfc6979_spec h hdrbg hinst.HashInst key hd msg rnd sig dg d hhash hdg' hdg
+    exact rfc6979_spec h hvg hdrbg hinst.HashInst key hd msg rnd sig dg d hhash hdg' hdg
   · simp only [core.result.Result.map_err, bind_tc_ok, bind_ok, core.result.Result.Insts.CoreOpsTry.branch,
       
       mid.rng.RandomSourceSystemRandom.fill.closure.Insts.CoreOpsFunctionFnOnceTupleErrorError.call_once,

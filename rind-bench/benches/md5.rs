@@ -58,6 +58,7 @@ fn md5(c: &mut Criterion) {
             |b, input| b.iter(|| test_rc_md5(input)),
         );
         group.bench_with_input(BenchmarkId::new("rind", size_name), &input, |b, input| {
+            let _dit = criterion::rind_dit();
             b.iter(|| test_rind_md5(input))
         });
         assert_eq!(

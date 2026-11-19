@@ -197,9 +197,14 @@ fn keystream(input: &[u32; 16]) -> [u8; 64] {
 
 /// XORs the ChaCha20 keystream for `key` and `counter_nonce`, the block
 /// counter then the 96-bit nonce, into `buffer`, one block at a time.
+/// aarch64 tests check its routines against it.
 //
 // Indexes, as `state` does, so `proofs/` can prove it.
-#[cfg(any(rind_backend = "x86_64", rind_backend = "portable"))]
+#[cfg(any(
+    rind_backend = "x86_64",
+    rind_backend = "portable",
+    all(test, rind_backend = "aarch64")
+))]
 pub(crate) fn cipher(key: &[u32; 8], counter_nonce: &[u32; 4], buffer: &mut [u8]) {
     let mut input = [0u32; 16];
     input[..4].copy_from_slice(&SIGMA);

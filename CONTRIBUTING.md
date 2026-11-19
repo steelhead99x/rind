@@ -54,6 +54,7 @@ Queue the reviewed head with `quest merge <pr> --land <sha>` (`/quest-merge` doe
 `pr-check.yml` runs `just ci` over the PR's diff on a GitHub-hosted runner, advisory like the runs above, so a check the queue would fail shows red here first.
 release-plz's release PR skips it, `x86-cpu`, and the path-filtered `build` and `ctgrind` jobs, since the queue's `just ci` and `just release-check` still run on it.
 The required `Queue build / Build` check skips on pull requests; the merge group runs `just ci` against the merge group's base on the self-hosted runner, and that job's own result decides the group.
+When the group's diff touches the paths that trigger `regenerate` or `prove` on a pull request, that build also runs `regenerate` or `prove`'s x86_64 `vg` beside its other checks (`CHECK_QUEUE` in `sh/dispatch.sh`), so two PRs that each pass those checks alone cannot break them together on `main`; `vg`'s aarch64 job runs only on pull requests and nightly.
 That build lives in `.github/workflows/queue-build.yml`, which the merge group calls from `main`, so a PR's edit to it runs only after the PR lands.
 A PR the queue drops for a failed build or a conflict gets a Codex fixer, which requeues it or hands it back with a diagnosis.
 The admin bypass of `main`'s ruleset is for emergencies.

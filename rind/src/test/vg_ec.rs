@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! Wycheproof's P-256 vectors for each variant of pyca/verified-garbage's
-//! routines, which the CPU's widest variant hides from rind's other tests.
+//! Wycheproof's P-256 and P-384 vectors for pyca/verified-garbage's routines,
+//! which rind's other tests reach only through its own choice of variant and,
+//! for P-384 on aarch64, only until a key's multiples are ready.
 
 use super::{Expected, wycheproof, wycheproof_groups};
 use crate::low::ct;
-use crate::mid::sha2::Sha256Context;
+use crate::mid::sha2::{Sha256Context, Sha384Context};
 
 /// Checks `ecdh`, given a private key and a peer's X9.62 uncompressed point,
 /// against Wycheproof's P-256 ECDH vectors with such points, with the
@@ -53,6 +54,30 @@ pub(crate) fn check_ecdh(ecdh: impl Fn(&[u8; 32], &[u8; 65]) -> Option<[u8; 32]>
 /// and a fixed-length signature, against Wycheproof's P-256 ECDSA vectors
 /// with SHA-256.
 pub(crate) fn check_verify(verify: impl Fn(&[u8; 65], &[u8; 32], &[u8; 64]) -> bool) {
+    check_verify_vectors("ecdsa_secp256r1_sha256_p1363_test.json", verify, |msg| {
+        let mut hash = Sha256Context::new();
+        hash.update(msg);
+        hash.finish()
+    });
+}
+
+/// [`check_verify`] for P-384, against Wycheproof's P-384 ECDSA vectors with
+/// SHA-384.
+pub(crate) fn check_verify_p384(verify: impl Fn(&[u8; 97], &[u8; 48], &[u8; 96]) -> bool) {
+    check_verify_vectors("ecdsa_secp384r1_sha384_p1363_test.json", verify, |msg| {
+        let mut hash = Sha384Context::new();
+        hash.update(msg);
+        hash.finish()
+    });
+}
+
+/// Checks `verify` against the fixed-length ECDSA vectors in `file`, whose
+/// messages `hash` digests.
+fn check_verify_vectors<const K: usize, const H: usize, const S: usize>(
+    file: &str,
+    verify: impl Fn(&[u8; K], &[u8; H], &[u8; S]) -> bool,
+    hash: impl Fn(&[u8]) -> [u8; H],
+) {
     #[derive(serde::Deserialize)]
     struct Group {
         #[serde(rename = "publicKey")]
@@ -78,16 +103,14 @@ pub(crate) fn check_verify(verify: impl Fn(&[u8; 65], &[u8; 32], &[u8; 64]) -> b
     }
 
     let mut ran = 0;
-    for group in wycheproof_groups::<Group>("ecdsa_secp256r1_sha256_p1363_test.json") {
-        let public: [u8; 65] = group.public_key.uncompressed[..].try_into().unwrap();
+    for group in wycheproof_groups::<Group>(file) {
+        let public: [u8; K] = group.public_key.uncompressed[..].try_into().unwrap();
         for test in group.tests {
             // A signature of another length is refused before VG's routine.
-            let Ok(sig) = <[u8; 64]>::try_from(&test.sig[..]) else {
+            let Ok(sig) = <[u8; S]>::try_from(&test.sig[..]) else {
                 continue;
             };
-            let mut hash = Sha256Context::new();
-            hash.update(&test.msg);
-            let valid = verify(&public, &hash.finish(), &sig);
+            let valid = verify(&public, &hash(&test.msg), &sig);
             match test.result {
                 Expected::Valid => assert!(valid, "{}", test.id),
                 Expected::Invalid => assert!(!valid, "{}", test.id),

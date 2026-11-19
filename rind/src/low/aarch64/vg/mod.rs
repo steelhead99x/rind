@@ -46,19 +46,31 @@ macro_rules! vg_sym_pageoff {
 pub struct Table<const N: usize>(pub [u8; N]);
 
 #[rustfmt::skip]
+pub(crate) mod vg_chacha20_apply_neon;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_apply_sve2;
+#[rustfmt::skip]
 pub(crate) mod vg_chacha20_block;
+#[rustfmt::skip]
+pub(crate) mod vg_chacha20_init;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_poly1305_open_sve2;
 #[rustfmt::skip]
 pub(crate) mod vg_chacha20_poly1305_seal_sve2;
 #[rustfmt::skip]
+pub(crate) mod vg_chacha20_xor_neon;
+#[rustfmt::skip]
 pub(crate) mod vg_chacha20_xor_sve2;
 #[rustfmt::skip]
 pub(crate) mod vg_ec_p256_public_key;
 #[rustfmt::skip]
+pub(crate) mod vg_ec_p384_public_key;
+#[rustfmt::skip]
 pub(crate) mod vg_ecdh_p256;
 #[rustfmt::skip]
 pub(crate) mod vg_ecdsa_p256_verify;
+#[rustfmt::skip]
+pub(crate) mod vg_ecdsa_p384_verify;
 #[rustfmt::skip]
 pub(crate) mod vg_hmac_sha1_finalize_scratch_sha2;
 #[rustfmt::skip]
@@ -129,6 +141,22 @@ pub(crate) mod vg_p256_check_point;
 pub(crate) mod vg_p256_comb;
 #[rustfmt::skip]
 pub(crate) mod vg_p256_gtab;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_check_point;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_comb;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_gtab;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_inv_mod_n;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_inv_mod_p;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_mul_mod_n;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_mul_mod_p;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_sqr_mod_p;
 #[rustfmt::skip]
 pub(crate) mod vg_pbkdf2_hmac_sha1_iterate_sha2;
 #[rustfmt::skip]

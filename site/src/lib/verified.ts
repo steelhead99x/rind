@@ -41,9 +41,9 @@ export const hosts: Host[] = measured.map((h) => ({
 	refused: h.refused,
 }));
 
-// A library has a column when some host's grid has a cell for it; a variant of another library shares its column.
-export const libraries = report.libraries.filter(
-	(l) => l.variant_of === null && measured.some((h) => Object.values(h.grid).some((cells) => l.id in cells)),
+// A library has a column when some host's grid has a cell for it.
+export const libraries = report.libraries.filter((l) =>
+	measured.some((h) => Object.values(h.grid).some((cells) => l.id in cells)),
 );
 const names = new Map(report.libraries.map((l) => [l.id, l.name]));
 

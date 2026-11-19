@@ -461,6 +461,15 @@ by cases before s2n-bignum's `p384_montjadd` and `p384_montjmixadd`, whose
 contracts exclude them, and the theorems assume `Drbg`, `Fills`, `Held`, and
 P-384's `Cached`, its keys' caches.
 
+Every P-384 theorem that derives a public key, key generation's and signing's
+included, assumes `NoVgP384`: the CPU does not run pyca/verified-garbage's
+`d·G`, which rind takes on every x86_64 and aarch64 CPU, and whose Lean proof
+lives in that project, not here. So those theorems cover no CPU until
+[their quest](/quest/m2/verified-garbage/p384-proof.md) imports VG's theorems.
+Verification's assume only `NoVgP384Verify`: the CPU does not run VG's
+verification, which rind takes on x86_64 with BMI2 and ADX and on every
+aarch64 CPU, so they cover x86_64 CPUs without those features.
+
 rind computes k·G with its own comb in Rust, aws-lc's layout: 77 Booth-recoded
 5-bit windows added from 20 tables of 1 to 16 times 2^(20j)·G, with five
 doublings between the four teeth. `Rind/P384Comb.lean` proves the windows'
@@ -656,8 +665,9 @@ The hash is cryptol-specs' FIPS 180-4 SHA-512, in `Rind/Sha2.lean`, with its
 block compression `processBlock_Common` transliterated from FIPS 180-4 and
 checked by `Rind/Sha2Test.lean` against its examples. Each theorem assumes
 `RunsSha512`: on x86_64 that rind picks aws-lc's AVX routine, on an Intel CPU
-with AVX but without AVX2, or OpenSSL's AVX2 routine, on a CPU with AVX2 but
-without the SHA512 instructions, whose proof is rind's HOL Light proof above,
+with AVX but without the feature set below, or OpenSSL's AVX2 routine, on a
+CPU with AVX2, BMI1, BMI2, POPCNT, and SSSE3,
+whose proof is rind's HOL Light proof above,
 which `Rind/X86_64/AwsLc.lean` restates as the axiom
 `sha512_block_data_order_avx2_spec`; on aarch64 only that rind's checks pass,
 as both of aws-lc's routines there have proofs: aws-lc-verification's of its

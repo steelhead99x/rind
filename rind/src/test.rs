@@ -236,7 +236,7 @@ pub(crate) mod bignum;
 mod binsec;
 pub(crate) mod file_test;
 #[cfg(any(rind_backend = "x86_64", rind_backend = "aarch64"))]
-pub(crate) mod p256_vg;
+pub(crate) mod vg_ec;
 
 /// Messages and domain separation tags for crosschecking hashes to a curve:
 /// empty, short, and random messages, with tags of one byte, 255 bytes, and

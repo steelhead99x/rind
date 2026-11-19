@@ -53,11 +53,6 @@ opaque low.x86_64.curve25519_x25519.curve25519_x25519
 
 /-! OpenSSL's and aws-lc's SHA-512 routines, behind their Rust wrappers. -/
 
-opaque low.x86_64.sha512.compress_sha512ext
-  :
-  low.x86_64.cpu.HaveSha512 → Array Std.U64 8#usize → Slice Std.U8 → Result
-    (Array Std.U64 8#usize)
-
 opaque low.x86_64.sha512.compress_avx2
   :
   low.x86_64.cpu.HaveAvx2 → Array Std.U64 8#usize → Slice Std.U8 → Result
@@ -480,6 +475,30 @@ opaque low.x86_64.p384_montjmixadd_alt.p384_montjmixadd_alt
   :
   Array Std.U64 18#usize → Array Std.U64 18#usize → Array Std.U64 12#usize
     → Result (Array Std.U64 18#usize)
+
+/-- Whether pyca/verified-garbage's P-384 `d·G` runs on this CPU, which
+`admin/prove` leaves opaque, as it does the routines it calls: they are VG's
+assembly. -/
+opaque low.x86_64.p384_vg.MulBase.check
+  : Result (Option low.x86_64.p384_vg.MulBase)
+
+/-- pyca/verified-garbage's `d·G` for key generation and ECDSA's nonces,
+opaque as `low.x86_64.p384_vg.MulBase.check` is. -/
+opaque low.x86_64.p384_vg.MulBase.public_key
+  : low.x86_64.p384_vg.MulBase → Array Std.U8 48#usize →
+    Result (Option (Array Std.U8 97#usize))
+
+/-- Whether pyca/verified-garbage's P-384 ECDSA verification runs on this
+CPU, opaque as `low.x86_64.p384_vg.MulBase.check` is. -/
+opaque low.x86_64.p384_vg.Verify.check
+  : Result (Option low.x86_64.p384_vg.Verify)
+
+/-- pyca/verified-garbage's P-384 ECDSA verification, opaque as
+`low.x86_64.p384_vg.MulBase.check` is. -/
+opaque low.x86_64.p384_vg.Verify.ecdsa_verify
+  :
+  low.x86_64.p384_vg.Verify → Array Std.U8 97#usize → Array Std.U8 48#usize →
+    Array Std.U8 96#usize → Result Bool
 
 opaque low.x86_64.p384_montjscalarmul.p384_montjscalarmul
   :
