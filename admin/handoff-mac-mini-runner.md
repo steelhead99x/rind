@@ -4,6 +4,10 @@ Delete this file before the claim lands. It is notes for the next agent.
 
 Quest: [`quest/m0/mac-mini-runner.md`](https://github.com/kixel-ai/rind/blob/main/quest/m0/mac-mini-runner.md). Claim: [kixel-ai/rind#895](https://github.com/kixel-ai/rind/pull/895), draft, head `steelhead99x:quest/m0/mac-mini-runner`, one empty claim commit on upstream `main` `96404e2f`. Implement on `claude/m0-mac-mini-runner` and merge into `quest/m0/mac-mini-runner` only when the work is ready, so #895 fast-forwards; squash if fork `main` history has been merged in. Never merge fork `main` into the quest branch.
 
+## Status (2026-11-19): claim released, up for pick-up
+
+The owner has only a Raspberry Pi 5 and a Jetson Orin Nano to verify on today, so the upstream claim [kixel-ai/rind#895](https://github.com/kixel-ai/rind/pull/895) is released. If the Mac mini and the Linux VM on it are a requirement (the quest says they are), someone with an Apple-silicon machine needs to take this: the macOS runner and the VM are the part nothing here could check. Everything else is done and measured: the draft `queue-build.yml` jobs and label below, and the native aarch64 lane on the two boards (0 failures, about 39 minutes cold; section 6). This branch is a starting point, not a claim: it is based on a fork-only branch at upstream `main` `96404e2f` and its history still carries the empty claim commit `de154dcb`, which a new claim should not reuse.
+
 ## Why it is parked
 
 The quest's only `## Waiting` item is physical: the Mac mini must be on the network and reachable over SSH with an account that can install Nix and register a runner. As of 2026-11-19 no Mac mini is in the owner's SSH config or on the 192.168.90.0/24 subnet, and the fork has no registered self-hosted runners. The Mac mini validation is outstanding by the owner's decision; until it exists the native aarch64 Linux check runs by hand on the Pi 5 and the Jetson (section 6). The workflow jobs below cannot be verified until a runner exists.
