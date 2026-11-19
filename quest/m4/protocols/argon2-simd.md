@@ -13,7 +13,7 @@ Argon2id's compression function runs the fastest kernel measured on aarch64, on 
 
 ### Status
 
-aarch64 runs the NEON fill (`low::aarch64::argon2_neon`), ported from `perf/argon2-neon-scalar-rider` (`3025440d`): SHA3's `xar` / `umlal` fill on an Apple core that has SHA3, and plain NEON with the scalar rider on every other core. Plain NEON beats this tree's portable permutation on all four cores measured (Apple M1 Pro, Neoverse-N2, Cortex-A76, Cortex-A78AE); the SHA3 fill loses to it on the Neoverse-N2 (0.90x and 0.96x), so only Apple takes it. Tests compare both fills to the portable permutation (`low::aarch64::argon2_neon::neon_matches_scalar`), and `low::aarch64::argon2::tests::dispatch_matches_portable` checks the fill dispatch selects.
+aarch64 runs the NEON fill (`low::aarch64::argon2_neon`), ported from `perf/argon2-neon-scalar-rider` (`3025440d`): SHA3's `xar` / `umlal` fill on an Apple core that has SHA3, and plain NEON with the scalar rider on every other core. Plain NEON beats this tree's portable permutation on the Apple M1 Pro, Neoverse-N2 and Cortex-A76; on the Orin's Cortex-A78AE a controlled 64MiB-t3-p4 re-timing gives 0.983x to 0.989x, so no gain and about 1% to 2% slower; the SHA3 fill loses to it on the Neoverse-N2 (0.90x and 0.96x), so only Apple takes it. Tests compare both fills to the portable permutation (`low::aarch64::argon2_neon::neon_matches_scalar`), and `low::aarch64::argon2::tests::dispatch_matches_portable` checks the fill dispatch selects.
 
 x86_64 runs the landed AVX2 fill, then the reference's SSSE3 fill on a CPU with SSSE3 and without AVX2, then the portable permutation. SSSE3 measured 1.12x to 1.22x the portable permutation with AVX2 denied (Xeon 6975P-C and Core Ultra 9 275HX). The reference's AVX-512F fill sits beside them, tested against the portable permutation, and runs only with `--cfg rind_argon2_avx512`: it is the one part still gated.
 
@@ -38,7 +38,7 @@ Raspberry Pi 5 (Cortex-A76, governor `performance`, no `sha3`, so the plain NEON
 | Orin | 16MiB-t1-p1 | 17.13 | 3.0% | 16.19 | 0.2% | 1.058x | 16.67 |
 | Orin | 64MiB-t3-p4 | 270.85 | 1.7% | 263.95 | 1.9% | 1.026x | 280.49 |
 
-Plain NEON beats the portable permutation on every aarch64 core measured, so NEON is kept. The Orin's gain is small (3% to 6%) and its spreads are 2% to 3%, so read that row as "no loss". The Pi 5 gain is large.
+Plain NEON beats the portable permutation on the Apple M1 Pro, Neoverse-N2 and Cortex-A76 (Pi 5 1.39x to 1.40x, Neoverse-N2 1.06x to 1.07x). On the Orin's Cortex-A78AE the rows above are an earlier run with 2% to 3% spreads, and the controlled 64MiB-t3-p4 re-timing is 0.983x to 0.989x: no gain, about 1% to 2% slower than portable. Whether plain NEON stays the default on the A78AE is the owner's decision; the dispatch is unchanged.
 
 Intel Core Ultra 9 275HX (Arrow Lake-HX, a laptop, load average 3.4 to 5.7 from other work, pinned to a P-core), AVX2 denied with `--cfg rind_cpu_disable` and `RIND_CPU_DISABLE_avx2=1`; the SSSE3 build adds `--cfg rind_argon2_ssse3`, which this change also makes the default. Five rounds:
 
