@@ -278,7 +278,9 @@ mod arm {
                 .lines()
                 .find(|l| l.starts_with("Features"))
                 .expect("a Features line");
-            let has = |name: &str| line.split_whitespace().skip(2).any(|w| w == name);
+            // Take the words after the colon, so `Features:` and `Features\t:` both work.
+            let (_, list) = line.split_once(':').expect("a colon in the Features line");
+            let has = |name: &str| list.split_whitespace().any(|w| w == name);
             assert_eq!(f.neon, has("neon"), "{line}");
             assert_eq!(f.aes, has("aes"), "{line}");
             assert_eq!(f.pmull, has("pmull"), "{line}");

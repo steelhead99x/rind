@@ -1,1 +1,0 @@
-{ "arch": "arm", "at_hwcap": 4174038, "at_hwcap2": 31, "cpuid": { "neon": 1, "aes": 1, "pmull": 1, "sha1": 1, "sha2": 1, "crc32": 1 }, "rind_has_aes_hardware": 1, "compatible": 1 }
