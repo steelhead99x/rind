@@ -322,7 +322,7 @@ link = "https://github.com/awslabs/aws-lc-verification/blob/797302470c1703cbb1a3
 # HKDF over them have no entry. The padding and API proofs take the
 # compressors as hypotheses: `generic::sha256`, which
 # `low::portable::sha::sha256_compress_blocks` calls, and `generic::sha512`'s
-# rolled loop. The quest is quest/m4/verified/hacl-sha2-lean.md.
+# rolled loop. The quest is quest/m4/verified/rolled-sha2-esp.md.
 [[verified]]
 library = "rind"
 operations = ["quic-header-protection/chacha20"]

@@ -111,7 +111,8 @@ aws-lc <https://github.com/aws/aws-lc>, from OpenSSL and BoringSSL
   rind/src/low/generic/ghash_nohw.rs:
 
   - For 32-bit ARM, aesv8-armx.s (AES), ghashv8-armx.s (GHASH),
-    sha1-armv4-large.s (SHA1) and sha256-armv4.s (SHA256); for aarch64 and x86_64, the
+    sha1-armv4-large.s (SHA1), sha256-armv4.s (SHA256), and sha512-armv4.s
+    (SHA512); for aarch64 and x86_64, the
     sha512_block_data_order_* routines and the K512 tables of
     sha512-armv8 and sha512-x86_64 (SHA512); for x86_64, the
     sha256_block_data_order_avx, _ssse3, and _nohw routines and the K256

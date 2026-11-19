@@ -1205,7 +1205,7 @@ none beyond Lean's own.
 Every other operation the portable backend runs has no proof yet, and
 these quests prove its code, whose proofs then run on this translation:
 
-- SHA-256 and SHA-512 compression: [`generic::sha256` and the rolled SHA-512](/quest/m4/verified/hacl-sha2-lean.md),
+- SHA-256 and SHA-512 compression: [`generic::sha256` and the rolled SHA-512](/quest/m4/verified/rolled-sha2-esp.md),
   which discharges `Sha256Blocks` and `RunsSha512`;
 - SHA-3 and ML-KEM: [the sponge's proof over its Keccak-f](/quest/m4/verified/sha3-portable.md),
   which `Rind/Portable/Keccak.lean` proves,

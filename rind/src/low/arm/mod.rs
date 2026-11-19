@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! 32-bit ARM: the portable ChaCha20, SHA, and Poly1305 bodies, with aws-lc's
-//! assembly for RSA's Montgomery multiplication and the ARMv8 crypto
-//! extension where the CPU has it, BoringSSL's for X25519 where the CPU has
-//! NEON, and OpenSSL's for Keccak-f.
+//! 32-bit ARM: the portable ChaCha20 and Poly1305 bodies, with aws-lc's
+//! assembly for SHA-1, SHA-256, SHA-512, and RSA's Montgomery multiplication
+//! (the ARMv8 crypto extension where the CPU has it), BoringSSL's for X25519
+//! where the CPU has NEON, and OpenSSL's for Keccak-f.
 
 /// The symbol for an aws-lc routine, qualified by rind's version so two
 /// semver-incompatible copies of rind can link into one binary.

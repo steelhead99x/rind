@@ -128,28 +128,49 @@ mod generic {
     #[cfg(any(all(rind_backend = "portable", rind_limb = "32"), test))]
     pub(crate) mod poly1305_32;
     pub(super) mod reuse_cache;
-    // The portable backend's SHA-1, and in x86_64 tests to check the
-    // assembly against. armv7 runs aws-lc's, and no armv7 test reads this.
-    #[cfg(any(rind_backend = "portable", all(test, rind_backend = "x86_64")))]
+    // The portable backend's SHA-1, and both hashes in armv7 and x86_64
+    // tests to check the assembly against.
+    #[cfg(any(
+        rind_backend = "portable",
+        all(test, any(rind_backend = "arm", rind_backend = "x86_64"))
+    ))]
     pub(super) mod sha1;
-    // SHA-256, except on ESP-IDF Xtensa, which ships the IRAM body and does
-    // not also link this one. The portable backend and armv7 run it, and
-    // x86_64 compiles it in tests and checks its assembly against it.
+    // The portable backend's SHA-256, except ESP-IDF Xtensa, which ships the
+    // IRAM body and does not also link this one. armv7 and x86_64 compile it
+    // in tests and check their assembly against it.
     #[cfg(any(
         all(
-            any(rind_backend = "arm", rind_backend = "portable"),
+            rind_backend = "portable",
             not(all(target_arch = "xtensa", target_os = "espidf"))
         ),
-        all(test, rind_backend = "x86_64")
+        all(
+            test,
+            any(
+                rind_backend = "arm",
+                rind_backend = "portable",
+                rind_backend = "x86_64"
+            )
+        )
     ))]
     pub(super) mod sha256;
-    // FIPS 180-4 §4.2.2, one copy. The portable compressor and the ESP-IDF
-    // Xtensa IRAM body read it, as do the x86_64 tests above.
+    // FIPS 180-4 §4.2.2, one copy. The portable compressor, the ESP-IDF
+    // Xtensa IRAM body, and the assembly tests above all read it. aarch64
+    // tests compile none of those readers, so the table stays out: clippy
+    // denies an unused static.
     #[cfg(any(
         all(target_arch = "xtensa", target_os = "espidf"),
-        rind_backend = "arm",
-        rind_backend = "portable",
-        all(test, rind_backend = "x86_64")
+        all(
+            rind_backend = "portable",
+            not(all(target_arch = "xtensa", target_os = "espidf"))
+        ),
+        all(
+            test,
+            any(
+                rind_backend = "arm",
+                rind_backend = "portable",
+                rind_backend = "x86_64"
+            )
+        )
     ))]
     pub(super) mod sha256_k;
     // SLH-DSA's SHA-256 lanes one at a time, which x86_64 runs with the SHA
@@ -157,9 +178,10 @@ mod generic {
     pub(super) mod sha256x8;
     // SHA-512. A 64-bit pointer gets the unrolled body. A 32-bit pointer gets
     // the rolled loop: the unrolled body is about 47 KiB then and misses a
-    // 16 KiB instruction cache. The portable backend and armv7 always run it.
-    // Other backends compile it in tests and check their assembly against it.
-    #[cfg(any(rind_backend = "arm", rind_backend = "portable", test))]
+    // 16 KiB instruction cache. The portable backend always runs it. Other
+    // backends, armv7 among them, compile it in tests and check their
+    // assembly against it.
+    #[cfg(any(rind_backend = "portable", test))]
     pub(super) mod sha512;
     pub(super) mod zeroise;
 }

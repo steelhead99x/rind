@@ -16,7 +16,7 @@
 # contracts in `ShaBlocks.lean` and `Sha512Entry.lean`. So does armv7, its
 # header-protection model and ChaCha20 proof. `generic::sha256` and
 # `generic::sha512`'s rolled loop stay opaque until
-# quest/m4/verified/hacl-sha2-lean.md proves them.
+# quest/m4/verified/rolled-sha2-esp.md proves them.
 #
 # Usage: admin/prove [bytes | hol-light [<arch>] | cosim | vg | lean | session <arch> [<file>]]
 #
@@ -1510,7 +1510,7 @@ extract_armv7
 # build with, here on x86_64: the hashes, down to `generic::sha256` and
 # `generic::sha512`'s rolled loop. Both stay opaque with the rest of
 # `crate::low`, since this pass does not `--include` them, until
-# quest/m4/verified/hacl-sha2-lean.md proves them. The Keccak-f is included.
+# quest/m4/verified/rolled-sha2-esp.md proves them. The Keccak-f is included.
 # `proofs/Rind/Portable/Compare.lean` models its constant-time compares, which
 # read through raw pointers and `black_box`. The error type and `into_public`,
 # which the other targets reach through their curves, are start points of
