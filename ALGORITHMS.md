@@ -103,9 +103,12 @@ Ed25519 verification's multiplication runs curve25519-dalek ⚡, as above.
   curve25519-dalek's AVX2 backend. On an Arrow Lake core under load, it
   verified in 0.72 to 0.73× aws-lc-rs's time against 0.89 to 0.92×, 0.77 to
   0.83× against 0.86 to 0.88× with ADX denied, and 0.93× against 1.10× with
-  AVX2 denied as well. aarch64 runs it over the `_alt` point routines, as
-  x86_64 does without ADX: on GitHub's Neoverse N2 runner it verified in
-  28.07 µs, 0.52× aws-lc-rs's time, against 35.73 to 35.80 µs, 0.66×, for
+  AVX2 denied as well. aarch64 runs it over the point routines
+  `edwards25519_epadd`, `edwards25519_epdouble`, `edwards25519_pdouble`, and
+  the field product `bignum_mul_p25519`, which `low::aarch64::wide_mux`
+  dispatches to their `_alt` forms on wide-multiplier cores and to their
+  `_narrow` forms on Cortex-A72, Cortex-A76, and Neoverse-N1: on GitHub's Neoverse N2 runner it
+  verified in 28.07 µs, 0.52× aws-lc-rs's time, against 35.73 to 35.80 µs, 0.66×, for
   `edwards25519_scalarmuldouble_alt`, with aws-lc-rs at 54.33 to 54.34 µs in
   each run.
 - ChaCha20-Poly1305 without AES-NI and on SSE2, which lack SSE4.1: rind runs
