@@ -53,22 +53,6 @@ fn hkdf() {
         for test in tests.groups.into_iter().flat_map(|group| group.tests) {
             let prk = hkdf::Salt::new(algorithm, &test.salt).extract(&test.ikm);
             let info = [test.info.as_slice()];
-            // With `fips`, a key the module holds (a non-empty salt, not
-            // SHA-1) refuses an empty `info`, which FIPS 140-3 does not
-            // approve, so `expand` fails.
-            #[cfg(feature = "fips")]
-            if !test.salt.is_empty()
-                && test.info.is_empty()
-                && algorithm != hkdf::HKDF_SHA1_FOR_LEGACY_USE_ONLY
-            {
-                assert!(
-                    prk.expand(&info, OutputLen(test.size)).is_err(),
-                    "{file} {}",
-                    test.id
-                );
-                count += 1;
-                continue;
-            }
             let mut okm = vec![0u8; test.size];
             let result = prk
                 .expand(&info, OutputLen(test.size))

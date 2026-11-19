@@ -101,8 +101,13 @@ impl Salt {
         if let Some(salt) = &self.module
             && let Ok(prk) = salt.extract(secret)
         {
+            // The empty-`info` copy is the same extraction in rind.
+            let copy = hmac::sign(&self.key, secret);
             return Prk {
-                inner: Engine::Module(prk),
+                inner: Engine::Module(
+                    prk,
+                    rind::hkdf::Prk::new(self.algorithm().rind(), copy.as_ref()),
+                ),
                 algorithm: self.algorithm(),
                 extracted: Wiped::new(true),
             };
@@ -153,12 +158,18 @@ pub struct Prk {
 }
 
 /// What derives from a [`Prk`]: rind, or with `fips` the module, which holds
-/// the key and refuses an empty `info`, as FIPS 140-3 does not approve one.
+/// the key and derives every `info` FIPS 140-3 approves.
+///
+/// aws-lc's FIPS build derives an empty `info` too, outside its approved
+/// services (the service indicator stays unset), and this follows it. The
+/// module refuses an empty `info`, so a module key keeps a second copy in
+/// rind, wiped on drop, for that case alone: the empty `info` is derived in
+/// rind, and a key the module holds is no longer the only copy of it.
 #[derive(Clone)]
 enum Engine {
     Rind(rind::hkdf::Prk),
     #[cfg(feature = "fips")]
-    Module(rind_fips::hkdf::Prk),
+    Module(rind_fips::hkdf::Prk, rind::hkdf::Prk),
 }
 
 impl Engine {
@@ -168,7 +179,10 @@ impl Engine {
     fn new(algorithm: Algorithm, value: &[u8], in_module: bool) -> Self {
         #[cfg(feature = "fips")]
         if let Some(module) = algorithm.module().filter(|_| in_module) {
-            return Self::Module(rind_fips::hkdf::Prk::new(module, value));
+            return Self::Module(
+                rind_fips::hkdf::Prk::new(module, value),
+                rind::hkdf::Prk::new(algorithm.rind(), value),
+            );
         }
         let _ = in_module;
         Self::Rind(rind::hkdf::Prk::new(algorithm.rind(), value))
@@ -178,7 +192,15 @@ impl Engine {
         match self {
             Self::Rind(prk) => prk.fill(info, out).map_err(|_| error::Unspecified),
             #[cfg(feature = "fips")]
-            Self::Module(prk) => prk.fill(info, out).map_err(|_| error::Unspecified),
+            Self::Module(prk, rind) => {
+                // Not approved, so not the module's: aws-lc derives it, with
+                // its indicator unset, and this follows it in rind.
+                if info.iter().all(|part| part.is_empty()) {
+                    rind.fill(info, out).map_err(|_| error::Unspecified)
+                } else {
+                    prk.fill(info, out).map_err(|_| error::Unspecified)
+                }
+            }
         }
     }
 }
@@ -206,12 +228,6 @@ impl Prk {
     ) -> Result<Okm<'a, L>, error::Unspecified> {
         let len_cached = len.len();
         if len_cached > 255 * self.algorithm.len() {
-            return Err(error::Unspecified);
-        }
-        // The module does not approve an empty `info`, so a key it holds
-        // cannot expand one; failing here keeps `fill_exact`'s expectation.
-        #[cfg(feature = "fips")]
-        if matches!(self.inner, Engine::Module(_)) && info.iter().all(|part| part.is_empty()) {
             return Err(error::Unspecified);
         }
         Ok(Okm {

@@ -60,8 +60,8 @@ renames [rind-aws-lc-rs](#rind-aws-lc-rs) to `aws-lc-rs` the same way.
 | `HKDF_SHA256`, `HKDF_SHA384`, `HKDF_SHA512` | the same |
 | `HKDF_SHA1_FOR_LEGACY_USE_ONLY` | `legacy::HKDF_SHA1` |
 | `Prk::new_less_safe(HKDF_SHA256, prk)` | `Prk::new(&HKDF_SHA256, prk)` |
-| `prk.expand(info, alg)?`, for a key | the same, which never fails in rind; rind-fips refuses an empty `info` |
-| `prk.expand(info, len)?.fill(out)?`, with your own `KeyType` for `len` | `prk.fill(info, out)?`, failing with `Error::WrongLength` beyond 255 hash outputs; rind-fips also refuses an empty `info` |
+| `prk.expand(info, alg)?`, for a key | the same, which never fails in rind; rind-fips refuses an empty `info`, where rind-aws-lc-rs's `fips` build follows aws-lc-rs and derives it |
+| `prk.expand(info, len)?.fill(out)?`, with your own `KeyType` for `len` | `prk.fill(info, out)?`, failing with `Error::WrongLength` beyond 255 hash outputs; rind-fips also refuses an empty `info`, where rind-aws-lc-rs's `fips` build follows aws-lc-rs and derives it |
 | your own `KeyType` | none: it is sealed, for an `aead`, `aead::quic`, `hmac`, or `hkdf` algorithm |
 | `UnboundKey::from(okm)`, `HeaderProtectionKey::from(okm)`, `hmac::Key::from(okm)`, `Prk::from(okm)` | `aead::Key::from(okm)`, `HeaderProtectionKey::from(okm)`, `hmac::Key::from(okm)`, `Prk::from(okm)` with `&HKDF_SHA256` |
 | `Salt::from(okm)` | none |

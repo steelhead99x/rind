@@ -54,25 +54,59 @@ mod with_the_feature {
         assert!(ours::try_fips_cpu_jitter_entropy().is_err());
     }
 
-    /// A pseudorandom key the module holds refuses an empty `info`, which
-    /// FIPS 140-3 does not approve; one rind holds expands it. So whether
-    /// `expand` accepts an empty `info` shows where the key lives.
+    /// A key the module holds derives an empty `info` as aws-lc-rs does, with
+    /// the same bytes, though the module refuses it: the adapter derives that
+    /// in rind from a copy of the key. Every other `info` derives in the
+    /// module, and the two agree with a key rind holds.
     #[test]
-    fn hkdf_runs_in_the_module_where_it_is_approved() {
+    fn hkdf_empty_info_follows_aws_lc_rs() {
         use ours::hkdf::{HKDF_SHA1_FOR_LEGACY_USE_ONLY, HKDF_SHA256, Prk, Salt};
 
+        fn derive(prk: &Prk, info: &[&[u8]]) -> [u8; 42] {
+            let mut out = [0u8; 42];
+            let okm = prk.expand(info, Len(42)).unwrap();
+            okm.fill(&mut out).unwrap();
+            out
+        }
+        struct Len(usize);
+        impl ours::hkdf::KeyType for Len {
+            fn len(&self) -> usize {
+                self.0
+            }
+        }
+
         let empty: &[&[u8]] = &[b""];
+        let parts: &[&[u8]] = &[b"", b""];
         // A non-empty salt, extracted in the module.
         let module = Salt::new(HKDF_SHA256, b"a salt").extract(b"secret");
-        assert!(module.expand(empty, HKDF_SHA256).is_err());
+        assert!(module.expand(empty, HKDF_SHA256).is_ok());
         assert!(module.expand(&[b"info"], HKDF_SHA256).is_ok());
-        // A key handed over whole is the module's too.
+        let none: &[&[u8]] = &[];
+        assert_eq!(derive(&module, empty), derive(&module, none));
+        assert_eq!(derive(&module, empty), derive(&module, parts));
+        // The same bytes as aws-lc-rs's HKDF, which derives it unapproved.
+        let reference =
+            aws_lc_rs::hkdf::Salt::new(aws_lc_rs::hkdf::HKDF_SHA256, b"a salt").extract(b"secret");
+        struct RefLen(usize);
+        impl aws_lc_rs::hkdf::KeyType for RefLen {
+            fn len(&self) -> usize {
+                self.0
+            }
+        }
+        let mut expected = [0u8; 42];
+        reference
+            .expand(empty, RefLen(42))
+            .unwrap()
+            .fill(&mut expected)
+            .unwrap();
+        assert_eq!(derive(&module, empty), expected);
+        // A key handed over whole is the module's too, and does the same.
         let given = Prk::new_less_safe(HKDF_SHA256, &[7; 32]);
-        assert!(given.expand(empty, HKDF_SHA256).is_err());
-        // An absent salt is not approved, so the key stays in rind.
+        assert!(given.expand(empty, HKDF_SHA256).is_ok());
+        assert_ne!(derive(&given, empty), derive(&given, &[b"info"]));
+        // An absent salt and SHA-1 stay in rind, and expand any `info`.
         let rind = Salt::none(HKDF_SHA256).extract(b"secret");
         assert!(rind.expand(empty, HKDF_SHA256).is_ok());
-        // SHA-1 is not approved either.
         let sha1 = Salt::new(HKDF_SHA1_FOR_LEGACY_USE_ONLY, b"a salt").extract(b"secret");
         assert!(sha1.expand(empty, HKDF_SHA1_FOR_LEGACY_USE_ONLY).is_ok());
     }
