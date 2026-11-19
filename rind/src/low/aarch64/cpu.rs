@@ -199,15 +199,16 @@ pub(crate) fn wide_multiplier() -> bool {
 }
 
 /// Whether this core is one where rind's own narrow P-256 routines were
-/// measured faster than verified-garbage's: a Cortex-A76, the Pi 5's core,
-/// on the narrow schedules. A72 and N1 are narrow too, but no timing of
-/// either exists, so P-256 keeps VG's routines there.
+/// measured faster than verified-garbage's: a Cortex-A72 (the Pi 4's core)
+/// or a Cortex-A76 (the Pi 5's), on the narrow schedules. Neoverse N1 is
+/// narrow too, but no timing of it exists, so P-256 keeps VG's routines
+/// there.
 #[inline]
 pub(crate) fn narrow_p256_core() -> bool {
     if WIDE.load(Ordering::Relaxed) == WIDE_UNSET {
         detect_wide_once();
     }
-    WIDE.load(Ordering::Relaxed) == WIDE_NARROW_A76
+    WIDE.load(Ordering::Relaxed) == WIDE_NARROW_P256
 }
 
 static FEATURES: AtomicU8 = AtomicU8::new(0);
@@ -217,8 +218,8 @@ static WIDE: AtomicU8 = AtomicU8::new(WIDE_UNSET);
 const WIDE_UNSET: u8 = 0;
 const WIDE_NARROW: u8 = 1;
 const WIDE_ALT: u8 = 2;
-/// Narrow, and the core is a Cortex-A76 (see [`narrow_p256_core`]).
-const WIDE_NARROW_A76: u8 = 3;
+/// Narrow, and the core is a Cortex-A72 or A76 (see [`narrow_p256_core`]).
+const WIDE_NARROW_P256: u8 = 3;
 
 /// The detected features, read once. Inlined, so a check is a load and a
 /// test, with the first call's detection out of line.
@@ -297,11 +298,11 @@ fn wide_toggle(detected: bool) -> bool {
 #[cold]
 #[inline(never)]
 fn detect_wide_once() -> bool {
-    let (detected, a76) = detect_wide_multiplier();
+    let (detected, p256) = detect_wide_multiplier();
     let wide = wide_toggle(detected);
-    let state = match (wide, a76) {
+    let state = match (wide, p256) {
         (true, _) => WIDE_ALT,
-        (false, true) => WIDE_NARROW_A76,
+        (false, true) => WIDE_NARROW_P256,
         (false, false) => WIDE_NARROW,
     };
     WIDE.store(state, Ordering::Relaxed);
@@ -341,13 +342,13 @@ fn detect_wide_multiplier() -> (bool, bool) {
         if let Some(midr) = midr_fixture() {
             return (
                 midr.is_none_or(wide_from_midr),
-                midr.is_some_and(a76_from_midr),
+                midr.is_some_and(p256_narrow_from_midr),
             );
         }
         let midr = read_midr();
         (
             midr.is_none_or(wide_from_midr),
-            midr.is_some_and(a76_from_midr),
+            midr.is_some_and(p256_narrow_from_midr),
         )
     }
     #[cfg(not(all(rind_std, target_os = "linux")))]
@@ -397,10 +398,10 @@ fn read_midr() -> Option<u64> {
     Some(midr)
 }
 
-/// Whether `midr` names a Cortex-A76.
+/// Whether `midr` names a Cortex-A72 or Cortex-A76.
 #[cfg(any(all(rind_std, target_os = "linux"), test))]
-fn a76_from_midr(midr: u64) -> bool {
-    (midr >> 24) & 0xff == 0x41 && (midr >> 4) & 0xfff == 0xd0b
+fn p256_narrow_from_midr(midr: u64) -> bool {
+    (midr >> 24) & 0xff == 0x41 && matches!((midr >> 4) & 0xfff, 0xd08 | 0xd0b)
 }
 
 /// Whether the core `midr` names should run the `_alt` schedules.
@@ -643,12 +644,14 @@ mod tests {
     }
 
     #[test]
-    fn only_a76_is_the_p256_narrow_core() {
-        assert!(a76_from_midr(0x414f_d0b1));
-        // Cortex-A72, Neoverse N1, Neoverse V1, and another implementer's
-        // part `0xd0b`.
-        for midr in [0x410f_d083, 0x413f_d0c1, 0x411f_d401, 0x510f_d0b0] {
-            assert!(!a76_from_midr(midr), "{midr:#x}");
+    fn only_a72_and_a76_are_the_p256_narrow_cores() {
+        // Cortex-A76 r4p1 (the Pi 5) and Cortex-A72 r0p3 (the Pi 4).
+        assert!(p256_narrow_from_midr(0x414f_d0b1));
+        assert!(p256_narrow_from_midr(0x410f_d083));
+        // Neoverse N1, Neoverse V1, and another implementer's parts
+        // `0xd08` and `0xd0b`.
+        for midr in [0x413f_d0c1, 0x411f_d401, 0x510f_d0b0, 0x510f_d080] {
+            assert!(!p256_narrow_from_midr(midr), "{midr:#x}");
         }
     }
 
@@ -910,9 +913,9 @@ mod tests {
         const CHILD: &str = "RIND_TEST_MIDR_CHILD";
         if std::env::var_os(CHILD).is_some() {
             let mode = std::env::var("RIND_TEST_MIDR").unwrap();
-            let (wide, a76) = detect_wide_multiplier();
+            let (wide, p256) = detect_wide_multiplier();
             assert_eq!(wide, mode != "narrow", "{mode}");
-            assert_eq!(a76, mode == "narrow", "{mode}");
+            assert_eq!(p256, mode == "narrow", "{mode}");
             println!("{CHILD} {mode}");
             return;
         }

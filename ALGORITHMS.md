@@ -90,11 +90,12 @@ Ed25519 verification's multiplication runs curve25519-dalek ⚡, as above.
   key's derivation, and with it signing's nonce point, runs rind's own base
   point multiplication rather than verified-garbage's, which measured 1.02
   to 1.06× slower there (see [ECC](#ecc)).
-- P-256 on a Cortex-A76, as the Pi 5: a public key's derivation, signing's
-  nonce point, and ECDH run rind's own narrow s2n-bignum routines rather than
-  verified-garbage's, which measured 1.05 to 1.32× slower than aws-lc-rs
-  there; verification keeps VG's. The Cortex-A72 and Neoverse N1 keep VG's
-  for all three, as P-256 was not timed on them.
+- P-256 on a Cortex-A76 or Cortex-A72, as the Pi 5 and Pi 4: a public key's
+  derivation, signing's nonce point, and ECDH run rind's own narrow
+  s2n-bignum routines rather than verified-garbage's, which measured 1.05 to
+  1.32× slower than aws-lc-rs on the A76 and 1.05× slower (ECDH) on the A72;
+  verification keeps VG's. Neoverse N1 keeps VG's for all three, as P-256
+  was not timed on it.
 - Ed25519 verification: rather than recompute `[S]B - [k]A` by s2n-bignum's
   verified `edwards25519_scalarmuldouble`, x86_64 checks `[v S]B - [v]R -
   [u]A = O` for scalars `u ≡ v k (mod 8L)` of about 128 bits, after

@@ -284,7 +284,7 @@ exclude_re = [
   # Pinned to its line: the `cpu_forced` of a release build, one without an
   # OS, or the FIPS module, which mutation runs never are. The debug build's,
   # under the same name, is caught.
-  'rind/src/low/aarch64/cpu\.rs:528:\d+: replace cpu_forced -> bool with true$',
+  'rind/src/low/aarch64/cpu\.rs:529:\d+: replace cpu_forced -> bool with true$',
   # The portable backend has no CPU state to save, so `leave_cpu_state`
   # ignores it.
   'rind/src/low/portable/cpu\.rs:\d+:\d+: replace enter_cpu_state -> u32 with 1$',
