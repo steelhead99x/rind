@@ -120,6 +120,11 @@ proptest! {
         at_limit in any::<bool>(),
     ) {
         let info: Vec<&[u8]> = info.iter().map(Vec::as_slice).collect();
+        // With `fips`, a key the module holds (a non-empty salt, not SHA-1)
+        // refuses an empty `info`, which FIPS 140-3 does not approve, where
+        // aws-lc-rs expands it; tests/wycheproof.rs asserts that refusal.
+        #[cfg(feature = "fips")]
+        prop_assume!(algorithm == 0 || salt.is_empty() || info.iter().any(|part| !part.is_empty()));
         same!(|c| {
             let algorithm = [
                 c::hkdf::HKDF_SHA1_FOR_LEGACY_USE_ONLY,

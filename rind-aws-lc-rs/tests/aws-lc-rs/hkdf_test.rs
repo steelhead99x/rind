@@ -28,6 +28,20 @@ fn hkdf_tests() {
         test_case.consume_bytes("PRK");
         let expected_out = test_case.consume_bytes("OKM");
 
+        // rind-aws-lc-rs: with `fips`, a key the module holds (a non-empty
+        // salt, not SHA-1) refuses an empty `info`, which FIPS 140-3 does not
+        // approve, so `expand` fails.
+        #[cfg(feature = "fips")]
+        if !salt.is_empty() && info.is_empty() && alg != hkdf::HKDF_SHA1_FOR_LEGACY_USE_ONLY {
+            assert!(
+                hkdf::Salt::new(alg, &salt)
+                    .extract(&secret)
+                    .expand(&[&info], My(expected_out.len()))
+                    .is_err()
+            );
+            return Ok(());
+        }
+
         let salt = hkdf::Salt::new(alg, &salt);
 
         // TODO: test multi-part info, especially with empty parts.

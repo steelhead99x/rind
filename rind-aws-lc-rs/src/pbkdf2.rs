@@ -9,6 +9,18 @@ use crate::{digest, error, hmac};
 pub struct Algorithm(hmac::Algorithm);
 
 impl Algorithm {
+    /// The module's algorithm, or `None` for SHA-1, which it does not approve.
+    #[cfg(feature = "fips")]
+    fn module(&self) -> Option<&'static rind_fips::pbkdf2::Algorithm> {
+        use digest::AlgorithmId::*;
+        match self.0.digest_algorithm().id {
+            SHA256 => Some(&rind_fips::pbkdf2::PBKDF2_HMAC_SHA256),
+            SHA384 => Some(&rind_fips::pbkdf2::PBKDF2_HMAC_SHA384),
+            SHA512 => Some(&rind_fips::pbkdf2::PBKDF2_HMAC_SHA512),
+            _ => None,
+        }
+    }
+
     fn rind(&self) -> &'static rind::pbkdf2::Algorithm {
         use digest::AlgorithmId::*;
         match self.0.digest_algorithm().id {
@@ -35,6 +47,25 @@ pub const PBKDF2_HMAC_SHA384: Algorithm = Algorithm(hmac::HMAC_SHA384);
 /// PBKDF2 with HMAC-SHA512.
 pub const PBKDF2_HMAC_SHA512: Algorithm = Algorithm(hmac::HMAC_SHA512);
 
+/// The module for a derivation SP 800-132 approves, which it refuses
+/// otherwise: a secret of at least 14 bytes, a salt of at least 16, at least
+/// 1000 iterations, and an `out` of at least 14 bytes. Decided from the
+/// arguments, not by trying the module, so rind runs exactly the rest.
+#[cfg(feature = "fips")]
+fn approved(
+    algorithm: Algorithm,
+    iterations: NonZeroU32,
+    salt: &[u8],
+    secret: &[u8],
+    out_len: usize,
+) -> Option<&'static rind_fips::pbkdf2::Algorithm> {
+    if secret.len() >= 14 && salt.len() >= 16 && iterations.get() >= 1000 && out_len >= 14 {
+        algorithm.module()
+    } else {
+        None
+    }
+}
+
 /// Fills `out` with the key derived from `secret` and `salt` over `iterations` rounds.
 ///
 /// # Panics
@@ -49,6 +80,13 @@ pub fn derive(
     out: &mut [u8],
 ) {
     if out.is_empty() {
+        return;
+    }
+    #[cfg(feature = "fips")]
+    if let Some(module) = approved(algorithm, iterations, salt, secret, out.len()) {
+        rind_fips::pbkdf2::Secret::new(module, secret)
+            .derive(iterations, salt, out)
+            .expect("derived key too long");
         return;
     }
     rind::pbkdf2::Secret::new(algorithm.rind(), secret)
@@ -69,6 +107,20 @@ pub fn verify(
     secret: &[u8],
     previously_derived: &[u8],
 ) -> Result<(), error::Unspecified> {
+    #[cfg(feature = "fips")]
+    if previously_derived.len() >= algorithm.0.tag_len()
+        && let Some(module) = approved(
+            algorithm,
+            iterations,
+            salt,
+            secret,
+            previously_derived.len(),
+        )
+    {
+        return rind_fips::pbkdf2::Secret::new(module, secret)
+            .verify(iterations, salt, previously_derived)
+            .map_err(error::unspecified);
+    }
     let secret = rind::pbkdf2::Secret::new(algorithm.rind(), secret);
     let hash_len = algorithm.0.tag_len();
     if previously_derived.len() >= hash_len {

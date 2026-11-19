@@ -54,6 +54,81 @@ mod with_the_feature {
         assert!(ours::try_fips_cpu_jitter_entropy().is_err());
     }
 
+    /// A pseudorandom key the module holds refuses an empty `info`, which
+    /// FIPS 140-3 does not approve; one rind holds expands it. So whether
+    /// `expand` accepts an empty `info` shows where the key lives.
+    #[test]
+    fn hkdf_runs_in_the_module_where_it_is_approved() {
+        use ours::hkdf::{HKDF_SHA1_FOR_LEGACY_USE_ONLY, HKDF_SHA256, Prk, Salt};
+
+        let empty: &[&[u8]] = &[b""];
+        // A non-empty salt, extracted in the module.
+        let module = Salt::new(HKDF_SHA256, b"a salt").extract(b"secret");
+        assert!(module.expand(empty, HKDF_SHA256).is_err());
+        assert!(module.expand(&[b"info"], HKDF_SHA256).is_ok());
+        // A key handed over whole is the module's too.
+        let given = Prk::new_less_safe(HKDF_SHA256, &[7; 32]);
+        assert!(given.expand(empty, HKDF_SHA256).is_err());
+        // An absent salt is not approved, so the key stays in rind.
+        let rind = Salt::none(HKDF_SHA256).extract(b"secret");
+        assert!(rind.expand(empty, HKDF_SHA256).is_ok());
+        // SHA-1 is not approved either.
+        let sha1 = Salt::new(HKDF_SHA1_FOR_LEGACY_USE_ONLY, b"a salt").extract(b"secret");
+        assert!(sha1.expand(empty, HKDF_SHA1_FOR_LEGACY_USE_ONLY).is_ok());
+    }
+
+    /// The module derives only what SP 800-132 approves; the rest still works,
+    /// in rind, as in aws-lc-rs's FIPS build. Both give the same bytes as
+    /// aws-lc-rs (tests/differential.rs); this checks they are both reachable.
+    #[test]
+    fn pbkdf2_derives_approved_and_unapproved_shapes() {
+        use core::num::NonZeroU32;
+
+        use ours::pbkdf2::{PBKDF2_HMAC_SHA256, derive, verify};
+
+        let rounds = |n| NonZeroU32::new(n).unwrap();
+        // Approved: a 14-byte secret, a 16-byte salt, 1000 rounds, 32 bytes.
+        let mut approved = [0u8; 32];
+        derive(
+            PBKDF2_HMAC_SHA256,
+            rounds(1000),
+            &[1; 16],
+            &[2; 14],
+            &mut approved,
+        );
+        assert!(
+            verify(
+                PBKDF2_HMAC_SHA256,
+                rounds(1000),
+                &[1; 16],
+                &[2; 14],
+                &approved
+            )
+            .is_ok()
+        );
+        // Each unapproved shape still derives: a short salt, few rounds, a
+        // short secret, a short output.
+        for (rounds_, salt, secret, len) in [
+            (1000, 8, 14, 32),
+            (999, 16, 14, 32),
+            (1000, 16, 13, 32),
+            (1000, 16, 14, 13),
+        ] {
+            let mut out = vec![0u8; len];
+            derive(
+                PBKDF2_HMAC_SHA256,
+                rounds(rounds_),
+                &vec![1; salt],
+                &vec![2; secret],
+                &mut out,
+            );
+            assert!(
+                out.iter().any(|&b| b != 0),
+                "{rounds_} {salt} {secret} {len}"
+            );
+        }
+    }
+
     #[test]
     fn a_sealed_record_opens_through_the_modules_opening_key() {
         let iv = [0x5a; 12];

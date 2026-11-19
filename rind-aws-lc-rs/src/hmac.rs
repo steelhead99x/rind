@@ -4,6 +4,11 @@
 
 use core::fmt;
 
+// With `fips`, the approved services run in rind-fips's module, whose API is
+// rind's less what FIPS 140-3 does not approve.
+#[cfg(feature = "fips")]
+use rind_fips as rind;
+
 use crate::{digest, error, hkdf, rand};
 
 /// Renamed to [`Tag`].
