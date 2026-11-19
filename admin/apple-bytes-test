@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Tests admin/apple-bytes's policy and byte masking on synthetic input.
+
+Usage: admin/apple-bytes-test
+"""
+
+import importlib.machinery
+import importlib.util
+import os
+import sys
+import unittest
+
+# The script has no .py name to cache bytecode under.
+sys.dont_write_bytecode = True
+HERE = os.path.dirname(os.path.abspath(__file__))
+loader = importlib.machinery.SourceFileLoader("apple_bytes", os.path.join(HERE, "apple-bytes"))
+spec = importlib.util.spec_from_loader("apple_bytes", loader)
+ab = importlib.util.module_from_spec(spec)
+loader.exec_module(ab)
+
+
+def row(arch, op, proof, **extra):
+    return {"library": "rind", "arch": arch, "operations": [op], "proof": proof, **extra}
+
+
+class Policy(unittest.TestCase):
+    def judge(self, rows, state, name="sha512_block_data_order_avx", arch="x86_64"):
+        ab.rows = lambda: rows
+        return ab.judge({(arch, name, "rind::low::" + name): (state, "detail")})
+
+    def test_a_matching_routine_passes(self):
+        failures, report, counts = self.judge([row("x86_64", "sha512/*", "down to sha512_block_data_order_avx")], "same")
+        self.assertEqual((failures, report, counts["same"]), ([], [], 1))
+
+    def test_a_differing_routine_under_an_unmarked_row_fails(self):
+        failures, report, _ = self.judge([row("x86_64", "sha512/*", "down to sha512_block_data_order_avx")], "differs")
+        self.assertEqual(failures, [("x86_64", "sha512_block_data_order_avx")])
+        self.assertTrue(report[0].startswith("FAIL"))
+
+    def test_a_differing_routine_under_a_marked_row_passes(self):
+        failures, report, _ = self.judge([row("x86_64", "sha512/*", "sha512_block_data_order_avx", os="linux")], "differs")
+        self.assertEqual(failures, [])
+        self.assertIn("os = \"linux\"", report[0])
+
+    def test_one_unmarked_row_among_marked_ones_fails(self):
+        rows = [row("x86_64", "sha512/*", "sha512_block_data_order_avx", os="linux"), row("x86_64", "ed25519-sign", "sha512_block_data_order_avx")]
+        failures, _, _ = self.judge(rows, "differs")
+        self.assertEqual(len(failures), 1)
+
+    def test_a_row_of_another_arch_does_not_cover_it(self):
+        failures, report, _ = self.judge([row("aarch64", "sha512/*", "sha512_block_data_order_avx")], "differs")
+        self.assertEqual(failures, [])
+        self.assertIn("no row names it", report[0])
+
+    def test_a_name_must_match_whole(self):
+        failures, _, _ = self.judge([row("x86_64", "sha512/*", "sha512_block_data_order_avx2")], "differs")
+        self.assertEqual(failures, [])
+
+    def test_aes_gcm_rows_cover_the_vale_routines_though_they_do_not_name_them(self):
+        unmarked = row("x86_64", "aes128-gcm/*", "rind's Lean proof of AES-GCM", cpu=["aes", "avx", "movbe"])
+        failures, _, _ = self.judge([unmarked], "differs", name="gcm128_encrypt_opt")
+        self.assertEqual(len(failures), 1)
+        failures, _, _ = self.judge([{**unmarked, "os": "linux"}], "differs", name="gcm128_encrypt_opt")
+        self.assertEqual(failures, [])
+        without_avx = row("x86_64", "aes128-gcm/*", "rind's Lean proof of AES-GCM", cpu=["aes", "!avx"])
+        failures, _, _ = self.judge([without_avx], "differs", name="gcm128_encrypt_opt")
+        self.assertEqual(failures, [])
+
+    def test_a_matching_routine_under_a_marked_row_is_reported(self):
+        _, report, _ = self.judge([row("x86_64", "sha512/*", "sha512_block_data_order_avx", os="linux")], "same")
+        self.assertTrue(report[0].startswith("matches"))
+
+
+class Masking(unittest.TestCase):
+    def test_an_aarch64_relocated_field_is_zeroed_and_other_bits_kept(self):
+        ab.relocations = lambda obj, sym, lo, hi: [(0, "ARM64_RELOC_PAGE21"), (4, "ARM64_RELOC_PAGEOFF12")]
+        adrp = 0x90000000 | (0x1234 << 5) | (0x3 << 29) | 5  # adrp x5, <page>
+        add = 0x91000000 | (0x2AB << 10) | (5 << 5) | 5  # add x5, x5, #0x2ab
+        insns = [[0, adrp.to_bytes(4, "little"), "adrp x5, 0x0"], [4, add.to_bytes(4, "little"), "add x5, x5, #0x2ab"]]
+        data, relocs = ab.masked("aarch64", insns, "obj", "sym")
+        self.assertEqual(int.from_bytes(data[:4], "little"), 0x90000000 | 5)
+        self.assertEqual(int.from_bytes(data[4:], "little"), 0x91000000 | (5 << 5) | 5)
+        self.assertEqual(relocs, [0, 4])
+
+    def test_an_x86_64_relocated_displacement_is_zeroed(self):
+        ab.relocations = lambda obj, sym, lo, hi: [(3, "X86_64_RELOC_SIGNED")]
+        insns = [[0, bytes([0x48, 0x8D, 0x05, 0x78, 0x56, 0x34, 0x12]), "leaq 0x12345678(%rip), %rax"]]
+        data, _ = ab.masked("x86_64", insns, "obj", "sym")
+        self.assertEqual(data, bytes([0x48, 0x8D, 0x05, 0, 0, 0, 0]))
+
+    def test_trailing_padding_is_trimmed_and_a_final_nop_of_the_code_is_not_the_only_one(self):
+        insns = [[0, b"\x90", "nop"], [1, b"\xc3", "ret"], [2, b"\x0f\x1f\x00", "nopl (%rax)"], [5, b"\x90", "nop"]]
+        self.assertEqual([i[2] for i in ab.trim(insns)], ["nop", "ret"])
+
+    def test_alignment_padding_is_told_from_changed_instructions(self):
+        a = [[0, b"", "nop"], [1, b"", "movq %rax, %rbx"], [4, b"", "jne 0x20"], [6, b"", "ret"]]
+        b = [[0, b"", "movq %rax, %rbx"], [3, b"", "nopw (%rax)"], [4, b"", "jne 0x30"], [6, b"", "ret"]]
+        self.assertTrue(ab.same_instructions(a, b))
+        b[0][2] = "movq %rax, %rcx"
+        self.assertFalse(ab.same_instructions(a, b))
+
+
+if __name__ == "__main__":
+    unittest.main()

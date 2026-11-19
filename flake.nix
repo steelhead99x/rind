@@ -440,7 +440,8 @@
           # `admin/prove hol-light` and `admin/prove bytes` run in it: HOL
           # Light, the OCaml it compiles the proofs with, as s2n-bignum's
           # `tools/build-proof.sh` does, the Rust whose build emits the object
-          # code they are of, with llvm-objdump to read it, the Python that
+          # code they are of, for Apple's targets too, which `admin/apple-bytes`
+          # compares with Linux's, with llvm-objdump to read it, the Python that
           # compares that code with the code upstream's proofs check, the
           # cross tools that assemble Vale's and aws-lc's, and flock, which
           # keeps runs in one worktree from rewriting each other's files. On
@@ -455,6 +456,8 @@
                   "x86_64-unknown-linux-gnu"
                   "aarch64-unknown-linux-gnu"
                   "armv7-unknown-linux-gnueabihf"
+                  "x86_64-apple-darwin"
+                  "aarch64-apple-darwin"
                 ];
               })
               pkgs.hol_light

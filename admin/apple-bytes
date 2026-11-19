@@ -1,0 +1,326 @@
+#!/usr/bin/env python3
+"""Checks that each routine a verified.toml row's proof covers is, in rind's
+Apple build, the bytes of rind's Linux build, or that the row says it is not.
+
+Usage: admin/apple-bytes check [--no-build]
+       admin/apple-bytes list
+
+`admin/prove bytes` and `admin/prove hol-light` check that rind's Linux build
+holds the instructions each proof is about, and `benchmarks/verified.toml`
+marks a row `os = "linux"` where nothing checks the Mach-O object the macOS
+build emits. This builds rind's release library for each architecture's Apple
+target as `admin/prove` builds it for Linux, `cargo rustc --lib --release
+-C codegen-units=16`, reads both builds' objects with `llvm-objdump`, and
+compares each proven routine: the bytes of each `asm!` block and of each naked
+function, with a relocation's field masked and its target's name compared, and
+trailing alignment padding left out. Linux builds' bytes are the ones the
+proofs assert, so equal bytes mean the proof covers the Apple build too.
+
+The routines are `admin/prove-bytes list`'s and `admin/prove`'s
+`hol_light_proofs`. A routine whose bytes differ passes only if every
+`benchmarks/verified.toml` row of its architecture whose proof names it has
+`os = "linux"`: such a row is checked against nothing on macOS. A differing
+routine that no row names is listed and does not fail the check, since no ✓
+covers it. A routine that matches although its row says `os = "linux"` is
+listed too: Apple's layout puts a function's entry wherever the toolchain
+does, so a routine can match in one build and not in another (rind's lib test
+binary at 4 codegen units moves aarch64's `sha512_block_data_order_hw`'s entry
+8 bytes off 16 and makes it differ), and the owner keeps such rows marked.
+
+The check reads one layout, `admin/prove`'s, so a match is not a promise for
+every build; `os = "linux"` is the only row state that promises nothing about
+macOS.
+"""
+
+import argparse
+import glob
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tomllib
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.path.join(ROOT, ".tmp", "prove")
+ARCHES = ("x86_64", "aarch64")
+LINUX = {a: f"{a}-unknown-linux-gnu" for a in ARCHES}
+APPLE = {a: f"{a}-apple-darwin" for a in ARCHES}
+
+
+
+def tools_dir():
+    """The Rust sysroot's LLVM tools, as `admin/prove` finds them."""
+    rustc = lambda *a: subprocess.run(["rustc", *a], capture_output=True, text=True, check=True).stdout
+    host = re.search(r"^host: (.*)$", rustc("-vV"), re.M).group(1)
+    return os.path.join(rustc("--print", "sysroot").strip(), "lib", "rustlib", host, "bin")
+
+
+# An instruction that only fills space: a NOP, or the zero bytes an
+# assembler pads a section with.
+PADDING = re.compile(r"^(nop\w*|data16|cs\s+nop\w*|xchg\s+%ax,\s*%ax|xchgw\s+%ax,\s*%ax|\.byte\s+0x0*|udf\s+#0x0|<unknown>)")
+BRANCH = re.compile(r"^(b|bl|b\.\w+|cbz|cbnz|tbz|tbnz|adr|j\w+|call\w*|loop\w*)\s")
+
+
+def tool(name, *args):
+    return subprocess.run([os.path.join(tools_dir(), name), *args], capture_output=True, text=True, check=True).stdout
+
+
+def routines():
+    """The proven routines: (arch, kind, path, name), kind `block` or `naked`."""
+    found = {}
+    listing = subprocess.run([sys.executable, os.path.join(ROOT, "admin", "prove-bytes"), "list"], capture_output=True, text=True, check=True).stdout
+    for line in listing.splitlines():
+        arch, kind, path, name, *_ = line.split()
+        found[(arch, path)] = (arch, kind, path, name)
+    # `hol_light_proofs` in admin/prove: "<arch> <file> <rust path>", a `.bin`
+    # an `asm!` block and a `.o` a naked function.
+    source = open(os.path.join(ROOT, "admin", "prove")).read()
+    body = re.search(r"^hol_light_proofs=\((.*?)^\)", source, re.M | re.S)
+    if not body:
+        sys.exit("admin/apple-bytes: admin/prove has no hol_light_proofs array")
+    for arch, file, path in re.findall(r'^\s*"(\w+) (\S+) (\S+)"$', body.group(1), re.M):
+        if arch not in ARCHES:
+            continue
+        found.setdefault((arch, path), (arch, "block" if file.endswith(".bin") else "naked", path, path.rsplit("::", 1)[1]))
+    return sorted(found.values())
+
+
+def build(arch, triple):
+    """Builds rind's release library for `triple`, as `admin/prove` does for
+    Linux, and extracts its codegen units to `<out>/asm/<triple>-units`."""
+    subprocess.run(
+        ["cargo", "rustc", "-q", "-p", "rind", "--lib", "--release", "--target", triple, "--target-dir", os.path.join(OUT, "asm"), "--", "--emit=asm", "-C", "codegen-units=16"],
+        cwd=ROOT, check=True)
+    units = os.path.join(OUT, "asm", f"{triple}-units")
+    shutil.rmtree(units, ignore_errors=True)
+    os.makedirs(units)
+    rlib = sorted(glob.glob(os.path.join(OUT, "asm", triple, "release", "deps", "librind-*.rlib")), key=os.path.getmtime)[-1]
+    subprocess.run([os.path.join(tools_dir(), "llvm-ar"), "x", "--output", units, rlib], check=True)
+
+
+def index(triple):
+    """Maps each defined function's demangled path to (object, symbol)."""
+    found = {}
+    units = os.path.join(OUT, "asm", f"{triple}-units")
+    for obj in sorted(glob.glob(os.path.join(units, "*.rcgu.o"))):
+        raw = tool("llvm-nm", "--defined-only", obj).splitlines()
+        dem = tool("llvm-nm", "--defined-only", "-C", obj).splitlines()
+        for r, d in zip(raw, dem):
+            rp, dp = r.split(None, 2), d.split(None, 2)
+            if len(rp) < 3 or rp[1] not in "tT":
+                continue
+            path = re.sub(r" \(\.llvm\.\d+\)$", "", dp[2])
+            found.setdefault(path, []).append((obj, rp[2]))
+    return found
+
+
+def disassemble(obj, sym):
+    """Each instruction of `sym` in `obj` as [offset, bytes, text]. A Mach-O
+    object's symbol runs to the next one's, so this includes the padding after
+    it; `trim` drops that."""
+    insns = []
+    for line in tool("llvm-objdump", "-d", f"--disassemble-symbols={sym}", obj).splitlines():
+        m = re.match(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2}[ \t]+)+|[0-9a-f]{8}(?=\s))\s*(.*)$", line)
+        if not m:
+            continue
+        raw = bytes.fromhex(re.sub(r"\s", "", m.group(2)))
+        if re.fullmatch(r"[0-9a-f]{8}", m.group(2).strip()):
+            raw = raw[::-1]  # aarch64 prints the word, not its bytes
+        text = re.sub(r"\s+", " ", re.split(r"//|#|;", m.group(3))[0]).strip()
+        if not text and insns:
+            insns[-1][1] += raw  # a continuation line of a long instruction
+            continue
+        insns.append([int(m.group(1), 16), raw, text])
+    return insns
+
+
+def trim(insns):
+    while insns and PADDING.match(insns[-1][2]):
+        insns.pop()
+    return insns
+
+
+def relocations(obj, sym, lo, hi):
+    """(offset in [lo, hi) less lo, type) of `obj`'s text relocations. Their
+    targets are not compared: a Mach-O object names a local label or section
+    where an ELF one names a section symbol."""
+    found, text = [], False
+    for line in tool("llvm-objdump", "-r", obj).splitlines():
+        m = re.match(r"RELOCATION RECORDS FOR \[(.*)\]:", line)
+        if m:
+            text = m.group(1) in ("__text", f".text.{sym}")
+            continue
+        m = re.match(r"^([0-9a-f]+)\s+(\S+)\s+(\S+)", line)
+        if text and m and lo <= int(m.group(1), 16) < hi:
+            found.append((int(m.group(1), 16) - lo, m.group(2)))
+    return found
+
+
+def asm_block(arch, triple, obj, sym):
+    """The one `asm!` block of the function `sym`: its instructions, found as
+    those between the markers rustc's assembly output puts around it."""
+    apple = "apple" in triple
+    start, end = (r"^\t(;|##) InlineAsm Start$", r"^\t(;|##) InlineAsm End$") if apple else (r"^\t(//|#)APP$", r"^\t(//|#)NO_APP$")
+    asm = os.path.join(OUT, "asm", triple, "release", "deps", os.path.basename(obj)[:-2] + ".s")
+    inside = playing = False
+    blocks = before = after = count = 0
+    for line in open(asm, errors="replace"):
+        line = line.rstrip("\n")
+        if not playing:
+            playing = line == sym + ":"
+            continue
+        if re.match(r"^\.?Lfunc_end", line) or line == "\t.cfi_endproc":
+            break
+        if re.match(start, line):
+            blocks, before, inside, after = blocks + 1, count, True, 0
+        elif re.match(end, line):
+            inside = False
+        elif re.match(r"^\t[a-z]", line) and not inside:
+            count += 1
+            after += 1
+    insns = trim(disassemble(obj, sym))
+    n = len(insns) - before - after
+    if blocks != 1 or n <= 0:
+        return None
+    return insns[before:before + n]
+
+
+def masked(arch, insns, obj, sym):
+    """The routine's bytes with relocation fields zeroed, its relocations."""
+    lo = insns[0][0]
+    hi = insns[-1][0] + len(insns[-1][1])
+    relocs = relocations(obj, sym, lo, hi)
+    data = bytearray(b"".join(i[1] for i in insns))
+    for off, kind in relocs:
+        if arch == "aarch64":
+            word = int.from_bytes(data[off:off + 4], "little")
+            adrp = (word & 0x9F000000) == 0x90000000
+            word &= ~(0x60FFFFE0 if adrp else 0x003FFC00 if "PAGEOFF" in kind or "LO12" in kind else 0x03FFFFFF)
+            data[off:off + 4] = word.to_bytes(4, "little")
+        else:
+            data[off:off + 4] = bytes(4)
+    return bytes(data), sorted(o for o, _ in relocs)
+
+
+def same_instructions(a, b):
+    """Whether two routines hold the same instructions in order, ignoring
+    padding and branch targets' addresses: the difference is only alignment."""
+    def texts(insns):
+        return [re.sub(r"0x[0-9a-f]+.*$|<.*>", "", i[2]) if BRANCH.match(i[2]) else re.sub(r"-?0x[0-9a-f]+(?=\(%rip\))|<.*>", "", i[2]) for i in insns if not PADDING.match(i[2])]
+    return texts(a) == texts(b)
+
+
+def extract(arch, triple, kind, path, found):
+    if path not in found:
+        return None
+    obj, sym = found[path][0]
+    insns = trim(disassemble(obj, sym)) if kind == "naked" else asm_block(arch, triple, obj, sym)
+    if not insns:
+        return None
+    # Rebase offsets so both builds compare from the routine's first instruction.
+    base = insns[0][0]
+    data, relocs = masked(arch, insns, obj, sym)
+    return {"insns": insns, "data": data, "relocs": relocs, "entry": base}
+
+
+def rows():
+    toml = tomllib.load(open(os.path.join(ROOT, "benchmarks", "verified.toml"), "rb"))["verified"]
+    return [r for r in toml if r.get("library") == "rind"]
+
+
+# Routines whose rows' proofs do not name them, as (routine name pattern,
+# arch, pattern of an operation the row covers, a CPU feature the row needs):
+# AES-GCM's proofs name Vale's specs, not each routine, and the routines run
+# only where AVX does.
+UNNAMED = [(r"^(gcm\d+_(en|de)crypt_opt|compute_iv_stdcall)$", "x86_64", r"-gcm", "avx")]
+
+
+def covering(arch, name):
+    """The rows of `arch` whose proof names the routine `name`, or that
+    UNNAMED gives it."""
+    def covers(row):
+        if row.get("arch") != arch:
+            return False
+        if re.search(rf"\b{re.escape(name)}\b", row["proof"]):
+            return True
+        return any(
+            re.search(n, name) and a == arch and any(re.search(o, op) for op in row["operations"]) and feature in row.get("cpu", [])
+            for n, a, o, feature in UNNAMED)
+    return [r for r in rows() if covers(r)]
+
+
+def compare(arch, kind, path, name, linux_idx, apple_idx):
+    lin = extract(arch, LINUX[arch], kind, path, linux_idx)
+    app = extract(arch, APPLE[arch], kind, path, apple_idx)
+    if not lin and not app:
+        return "absent", "in neither build"
+    if not lin or not app:
+        return "differs", f"only in the {'Linux' if lin else 'Apple'} build"
+    if lin["data"] == app["data"] and lin["relocs"] == app["relocs"]:
+        return "same", f"{len(lin['data'])} B"
+    why = "padding only" if same_instructions(lin["insns"], app["insns"]) else "instructions differ"
+    return "differs", f"{why}: linux {len(lin['data'])} B, apple {len(app['data'])} B, apple entry at {app['entry'] % 64} mod 64"
+
+
+def check(args):
+    todo = routines()
+    results = {}
+    for arch in ARCHES:
+        if not args.no_build:
+            build(arch, LINUX[arch])
+            build(arch, APPLE[arch])
+        linux_idx, apple_idx = index(LINUX[arch]), index(APPLE[arch])
+        for a, kind, path, name in todo:
+            if a == arch:
+                results[(a, name, path)] = compare(a, kind, path, name, linux_idx, apple_idx)
+    failures, report, counts = judge(results)
+    for line in report:
+        print(line)
+    print(f"{counts['same']} routines match, {counts['differs']} differ, {counts['absent']} not in a build (inlined or unused)")
+    if failures:
+        print(f"admin/apple-bytes: {len(failures)} routine(s) differ in the Apple build under a row that does not say os = \"linux\"", file=sys.stderr)
+        sys.exit(1)
+
+
+def judge(results):
+    """Applies the policy to `{(arch, name, path): (state, detail)}`: the
+    failures, the report's lines, and the count of each state."""
+    failures, report = [], []
+    counts = {"same": 0, "differs": 0, "absent": 0}
+    for (arch, name, path), (state, detail) in sorted(results.items()):
+        counts[state] += 1
+        owners = covering(arch, name)
+        marked = [r for r in owners if r.get("os") == "linux"]
+        if state == "differs":
+            unmarked = [r for r in owners if r.get("os") != "linux"]
+            if unmarked:
+                failures.append((arch, name))
+                report.append(f"FAIL     {arch} {name}: {detail}")
+                for r in unmarked:
+                    report.append(f"           row without os = \"linux\": {r['operations'][0]} ({r.get('cpu', 'any cpu')})")
+            elif owners:
+                report.append(f"differs  {arch} {name}: {detail}; {len(marked)} row(s) say os = \"linux\"")
+            else:
+                report.append(f"differs  {arch} {name}: {detail}; no row names it")
+        elif state == "same" and marked:
+            report.append(f"matches  {arch} {name}: row(s) say os = \"linux\" anyway ({len(marked)})")
+    return failures, report, counts
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("list")
+    c = sub.add_parser("check")
+    c.add_argument("--no-build", action="store_true")
+    args = parser.parse_args()
+    if args.command == "list":
+        for a, kind, path, name in routines():
+            print(a, kind, path)
+    else:
+        check(args)
+
+
+if __name__ == "__main__":
+    main()

@@ -17,9 +17,12 @@
 # Usage: admin/prove [bytes | hol-light [<arch>] | cosim | vg | lean | session <arch> [<file>]]
 #
 # An argument checks only those proofs, `bytes` only that the assembly rind
-# imports is the object code its upstream's proofs checked, and declares
-# each register they let it change. `hol-light <arch>` checks only that
-# target's HOL Light proofs, so CI runs each target in its own job.
+# imports is the object code its upstream's proofs checked, declares
+# each register they let it change, and that rind's Apple build holds the same
+# bytes as its Linux build for each proven routine or its row says
+# `os = "linux"`, which `admin/apple-bytes` describes. `hol-light <arch>`
+# checks only that target's HOL Light proofs, so CI runs each target in its
+# own job.
 # `cosim`, which no other run includes
 # since it needs an x86_64 CPU with AVX2, checks the AArch32 model against
 # qemu-arm and the instructions rind adds to s2n-bignum's x86 model against
@@ -767,6 +770,7 @@ bytes() {
         relocation_data "${found%% *}" "$dir/$arch/$name.bin.relocs" "$dir/$arch/$name.bin.data" "$arch"
     done <"$dir/routines"
     admin/prove-bytes check "$dir"
+    admin/apple-bytes check
     release scratch
 }
 if [[ -z $only || $only == bytes ]]; then
