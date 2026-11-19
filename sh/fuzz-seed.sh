@@ -2,8 +2,8 @@
 # Seed the fuzz corpora that take encoded input: `keys` from the test keys,
 # each seed the loader's selector byte (see fuzz/fuzzer/keys.rs) followed by a
 # key, `verify` from Wycheproof's signatures (see fuzz/fuzzer/verify.rs), and
-# `dimpl` from the NIST key-share inputs in
-# quest/m2/confidence/dimpl-nist-share.md.
+# `dimpl` from the hybrid NIST key-share inputs aws-lc-rs accepts and
+# rind-dimpl refuses (see fuzz/fuzzer/dimpl.rs).
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."

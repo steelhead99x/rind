@@ -63,10 +63,11 @@ const MAX_NIST_SHARE: usize = 97;
 
 /// `peer` as the uncompressed point [`PrivateKey::agree`] takes.
 ///
-/// X25519 is unchanged. A NIST compressed point is decompressed. A hybrid
-/// point of the group's uncompressed length is rewritten to `0x04` when its
-/// prefix parity matches `y`, which is the check aws-lc's `EC_POINT_oct2point`
-/// makes, and left alone otherwise so `agree` refuses it.
+/// X25519 is unchanged. A NIST compressed point is decompressed, as aws-lc-rs
+/// and `PublicKey::new` do. Every other form reaches `agree`, which refuses
+/// it: hybrid points (SEC1 prefix `0x06` or `0x07`) and
+/// `SubjectPublicKeyInfo`, which aws-lc-rs accepts and RFC 8422 section 5.1.2
+/// forbids.
 fn nist_share<'a>(
     exchange: &Exchange,
     peer: &'a [u8],
@@ -75,32 +76,17 @@ fn nist_share<'a>(
     if !matches!(
         exchange.group,
         NamedGroup::Secp256r1 | NamedGroup::Secp384r1
-    ) {
+    ) || !matches!(peer.first(), Some(0x02 | 0x03))
+    {
         return Ok(peer);
     }
-
-    let uncompressed_len = exchange.key.public_key().as_ref().len();
-    match peer.first().copied() {
-        Some(0x02 | 0x03) => {
-            let public = PublicKey::new(exchange.key.algorithm(), peer)?;
-            let encoded = public.as_ref();
-            let out = buf
-                .get_mut(..encoded.len())
-                .ok_or(rind::Error::WrongLength)?;
-            out.copy_from_slice(encoded);
-            Ok(out)
-        }
-        Some(prefix @ (0x06 | 0x07))
-            if peer.len() == uncompressed_len
-                && peer.len() <= buf.len()
-                && (prefix & 1) == (peer[peer.len() - 1] & 1) =>
-        {
-            buf[..peer.len()].copy_from_slice(peer);
-            buf[0] = 0x04;
-            Ok(&buf[..peer.len()])
-        }
-        _ => Ok(peer),
-    }
+    let public = PublicKey::new(exchange.key.algorithm(), peer)?;
+    let encoded = public.as_ref();
+    let out = buf
+        .get_mut(..encoded.len())
+        .ok_or(rind::Error::WrongLength)?;
+    out.copy_from_slice(encoded);
+    Ok(out)
 }
 
 impl ActiveKeyExchange for Exchange {
@@ -112,9 +98,8 @@ impl ActiveKeyExchange for Exchange {
         // Covers a malformed or off-curve point, and X25519's all-zero output
         // from a low-order point (RFC 7748 section 6.1).
         //
-        // aws-lc-rs also accepts a NIST point's SEC1 compressed form, and its
-        // hybrid form when the prefix's low bit matches `y`. `agree` takes
-        // only the uncompressed point.
+        // aws-lc-rs also accepts a NIST point's SEC1 compressed form, which
+        // `agree` does not take.
         let mut canonical = [0u8; MAX_NIST_SHARE];
         let peer = nist_share(&self, peer_pub, &mut canonical)
             .map_err(|_| CryptoError::InvalidPublicKey(self.group))?;

@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use arrayvec::ArrayVec;
 use dimpl::crypto::{
-    Aad, Buf, CryptoProvider, HashAlgorithm, Nonce, SignatureAlgorithm, SupportedKxGroup, TmpBuf,
-    aws_lc_rs,
+    Aad, Buf, CryptoProvider, HashAlgorithm, NamedGroup, Nonce, SignatureAlgorithm,
+    SupportedKxGroup, TmpBuf, aws_lc_rs,
 };
 use dimpl::{Config, Dtls, DtlsCertificate, Output};
 use libfuzzer_sys::{arbitrary, arbitrary::Arbitrary, fuzz_target};
@@ -228,6 +228,15 @@ fn key_share(group: u8, share: Share) {
             .complete(&share, &mut out)
             .is_ok()
     };
+    // rind-dimpl takes a NIST share only uncompressed or compressed, so it
+    // refuses a hybrid point (prefix 0x06 or 0x07) and a DER
+    // `SubjectPublicKeyInfo` (0x30) that aws-lc-rs accepts; see its README.
+    let nist = matches!(ours.name(), NamedGroup::Secp256r1 | NamedGroup::Secp384r1);
+    let spki = share.first() == Some(&0x30) && (nist || share.len() == 44);
+    if spki || (nist && matches!(share.first(), Some(0x06 | 0x07))) {
+        assert!(!complete(ours), "{:?} {share:02x?}", ours.name());
+        return;
+    }
     assert_eq!(complete(ours), complete(theirs), "{:?}", ours.name());
 }
 

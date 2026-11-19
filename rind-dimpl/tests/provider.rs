@@ -241,11 +241,11 @@ fn compress(point: &[u8]) -> Vec<u8> {
 /// edits of a fresh uncompressed point: P-256 XORs index 247 with 0 and index
 /// 0 with 2, and P-384 XORs index 0 with 3. Neither cuts. The prefix becomes
 /// SEC1 hybrid `0x06` or `0x07`, and the coordinates stay. aws-lc-rs accepts
-/// that point when the prefix's low bit matches `y`, and accepts the same
-/// point compressed. Both refuse a hybrid prefix whose parity does not match,
-/// and the point at infinity.
+/// that point when the prefix's low bit matches `y`; rind-dimpl refuses every
+/// hybrid point, as dimpl's RustCrypto provider does, and takes the same point
+/// compressed.
 #[test]
-fn nist_hybrid_key_shares_match_aws_lc() {
+fn nist_hybrid_key_shares_are_refused() {
     let aws = aws_lc_rs::default_provider();
     let rind = rind();
     let cases = [
@@ -254,53 +254,32 @@ fn nist_hybrid_key_shares_match_aws_lc() {
     ];
     for (group, flips) in cases {
         let share = matching_hybrid(group, flips);
-        assert_eq!(
-            accepts(&rind, group, &share),
+        assert!(
             accepts(&aws, group, &share),
-            "{group:?} hybrid {:02x}",
-            share[0]
+            "{group:?} aws-lc-rs refused a hybrid point"
         );
+        assert!(!accepts(&rind, group, &share), "{group:?} hybrid");
 
-        // Flip only the prefix (`0x06` / `0x07`). `y` stays on the curve, and
-        // its parity no longer matches the prefix.
         let mut mismatched = share.clone();
         mismatched[0] ^= 1;
-        assert_eq!(
-            accepts(&rind, group, &mismatched),
-            accepts(&aws, group, &mismatched),
-            "{group:?} hybrid prefix parity"
-        );
-        assert!(
-            !accepts(&aws, group, &mismatched),
-            "{group:?} aws-lc-rs accepted a hybrid point whose prefix parity does not match y"
-        );
+        assert!(!accepts(&aws, group, &mismatched));
+        assert!(!accepts(&rind, group, &mismatched), "{group:?} parity");
 
         let mut uncompressed = share.clone();
         uncompressed[0] = 0x04;
         let compressed = compress(&uncompressed);
-        assert_eq!(
-            accepts(&rind, group, &compressed),
-            accepts(&aws, group, &compressed),
-            "{group:?} compressed"
-        );
-        assert!(
-            accepts(&aws, group, &compressed),
-            "{group:?} aws-lc-rs refused a compressed point"
-        );
+        assert!(accepts(&aws, group, &compressed), "{group:?}");
+        assert!(accepts(&rind, group, &compressed), "{group:?} compressed");
 
         for peer in [&[0u8][..], &compressed[..compressed.len() - 1]] {
-            assert_eq!(
-                accepts(&rind, group, peer),
-                accepts(&aws, group, peer),
-                "{group:?} {peer:?}"
-            );
             assert!(!accepts(&aws, group, peer), "{group:?} {peer:?}");
+            assert!(!accepts(&rind, group, peer), "{group:?} {peer:?}");
         }
     }
 }
 
-/// Every malformed neighbour of a fresh compressed or hybrid NIST share gets
-/// the same verdict from rind-dimpl as from dimpl's aws-lc-rs provider: the
+/// Every malformed neighbour of a fresh compressed NIST share, and of an
+/// uncompressed or `0x05` one, gets the same verdict from rind-dimpl as from dimpl's aws-lc-rs provider: the
 /// other `y`, `x` all ones (at least the field prime), a flipped `x` bit, an
 /// off-curve `y`, one byte short or long, prefix `0x05`, and the point at
 /// infinity alone or padded.
@@ -313,11 +292,9 @@ fn nist_share_edges_match_aws_lc() {
         let point = kx.start_exchange(Buf::new()).unwrap().pub_key().to_vec();
         let field = (point.len() - 1) / 2;
         let mut bases = vec![compress(&point)];
-        for prefix in [0x05, 0x06, 0x07] {
-            let mut share = point.clone();
-            share[0] = prefix;
-            bases.push(share);
-        }
+        let mut share = point.clone();
+        share[0] = 0x05;
+        bases.push(share);
         let mut shares = vec![vec![], vec![0], vec![0; point.len()]];
         for share in &bases {
             let mut x_max = share.clone();
@@ -356,8 +333,7 @@ fn nist_share_edges_match_aws_lc() {
 /// aws-lc-rs's `ParsedPublicKey::new` (`aws-lc-rs-1.19.0/src/agreement.rs`,
 /// lines 747-790) tries `parse_rfc5280_public_key` before the raw point, so
 /// dimpl's aws-lc-rs provider takes it, and rind-dimpl, like dimpl's
-/// RustCrypto provider, refuses it. Whether to follow is the maintainer's call
-/// on quest/m2/confidence/dimpl-nist-share.md.
+/// RustCrypto provider, refuses it, as RFC 8422 section 5.1.2 requires.
 #[test]
 fn spki_key_shares_are_refused() {
     let aws = aws_lc_rs::default_provider();
