@@ -34,6 +34,14 @@ unsafe fn compress_hw(_: HaveCryptoExt, state: &mut [u32; 8], blocks: &[u8]) {
     let (mut state0, mut state1) =
         unsafe { (vld1q_u32(state.as_ptr()), vld1q_u32(state.as_ptr().add(4))) };
 
+    // A zero the compiler cannot see through. `sha256h` overwrites its first
+    // operand, and `sha256h2` needs the old `state0`, so a copy of it is
+    // unavoidable. Written as a plain copy, LLVM puts it in front of
+    // `sha256h`, on the chain every round waits on. Made with an `eor` of this
+    // zero, the copy feeds only `sha256h2`, as in the assembly this replaced,
+    // and `sha256h` runs in place.
+    let zero = core::hint::black_box(vdupq_n_u32(0));
+
     let (blocks, _) = blocks.as_chunks::<64>();
     for block in blocks {
         let saved0 = state0;
@@ -61,105 +69,105 @@ unsafe fn compress_hw(_: HaveCryptoExt, state: &mut [u32; 8], blocks: &[u8]) {
         let mut tmp2;
 
         msg[0] = vsha256su0q_u32(msg[0], msg[1]);
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp1 = kadd!(msg[1], 4);
         state0 = vsha256hq_u32(state0, state1, tmp0);
         state1 = vsha256h2q_u32(state1, tmp2, tmp0);
         msg[0] = vsha256su1q_u32(msg[0], msg[2], msg[3]);
 
         msg[1] = vsha256su0q_u32(msg[1], msg[2]);
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp0 = kadd!(msg[2], 8);
         state0 = vsha256hq_u32(state0, state1, tmp1);
         state1 = vsha256h2q_u32(state1, tmp2, tmp1);
         msg[1] = vsha256su1q_u32(msg[1], msg[3], msg[0]);
 
         msg[2] = vsha256su0q_u32(msg[2], msg[3]);
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp1 = kadd!(msg[3], 12);
         state0 = vsha256hq_u32(state0, state1, tmp0);
         state1 = vsha256h2q_u32(state1, tmp2, tmp0);
         msg[2] = vsha256su1q_u32(msg[2], msg[0], msg[1]);
 
         msg[3] = vsha256su0q_u32(msg[3], msg[0]);
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp0 = kadd!(msg[0], 16);
         state0 = vsha256hq_u32(state0, state1, tmp1);
         state1 = vsha256h2q_u32(state1, tmp2, tmp1);
         msg[3] = vsha256su1q_u32(msg[3], msg[1], msg[2]);
 
         msg[0] = vsha256su0q_u32(msg[0], msg[1]);
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp1 = kadd!(msg[1], 20);
         state0 = vsha256hq_u32(state0, state1, tmp0);
         state1 = vsha256h2q_u32(state1, tmp2, tmp0);
         msg[0] = vsha256su1q_u32(msg[0], msg[2], msg[3]);
 
         msg[1] = vsha256su0q_u32(msg[1], msg[2]);
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp0 = kadd!(msg[2], 24);
         state0 = vsha256hq_u32(state0, state1, tmp1);
         state1 = vsha256h2q_u32(state1, tmp2, tmp1);
         msg[1] = vsha256su1q_u32(msg[1], msg[3], msg[0]);
 
         msg[2] = vsha256su0q_u32(msg[2], msg[3]);
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp1 = kadd!(msg[3], 28);
         state0 = vsha256hq_u32(state0, state1, tmp0);
         state1 = vsha256h2q_u32(state1, tmp2, tmp0);
         msg[2] = vsha256su1q_u32(msg[2], msg[0], msg[1]);
 
         msg[3] = vsha256su0q_u32(msg[3], msg[0]);
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp0 = kadd!(msg[0], 32);
         state0 = vsha256hq_u32(state0, state1, tmp1);
         state1 = vsha256h2q_u32(state1, tmp2, tmp1);
         msg[3] = vsha256su1q_u32(msg[3], msg[1], msg[2]);
 
         msg[0] = vsha256su0q_u32(msg[0], msg[1]);
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp1 = kadd!(msg[1], 36);
         state0 = vsha256hq_u32(state0, state1, tmp0);
         state1 = vsha256h2q_u32(state1, tmp2, tmp0);
         msg[0] = vsha256su1q_u32(msg[0], msg[2], msg[3]);
 
         msg[1] = vsha256su0q_u32(msg[1], msg[2]);
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp0 = kadd!(msg[2], 40);
         state0 = vsha256hq_u32(state0, state1, tmp1);
         state1 = vsha256h2q_u32(state1, tmp2, tmp1);
         msg[1] = vsha256su1q_u32(msg[1], msg[3], msg[0]);
 
         msg[2] = vsha256su0q_u32(msg[2], msg[3]);
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp1 = kadd!(msg[3], 44);
         state0 = vsha256hq_u32(state0, state1, tmp0);
         state1 = vsha256h2q_u32(state1, tmp2, tmp0);
         msg[2] = vsha256su1q_u32(msg[2], msg[0], msg[1]);
 
         msg[3] = vsha256su0q_u32(msg[3], msg[0]);
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp0 = kadd!(msg[0], 48);
         state0 = vsha256hq_u32(state0, state1, tmp1);
         state1 = vsha256h2q_u32(state1, tmp2, tmp1);
         msg[3] = vsha256su1q_u32(msg[3], msg[1], msg[2]);
 
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp1 = kadd!(msg[1], 52);
         state0 = vsha256hq_u32(state0, state1, tmp0);
         state1 = vsha256h2q_u32(state1, tmp2, tmp0);
 
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp0 = kadd!(msg[2], 56);
         state0 = vsha256hq_u32(state0, state1, tmp1);
         state1 = vsha256h2q_u32(state1, tmp2, tmp1);
 
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         tmp1 = kadd!(msg[3], 60);
         state0 = vsha256hq_u32(state0, state1, tmp0);
         state1 = vsha256h2q_u32(state1, tmp2, tmp0);
 
-        tmp2 = state0;
+        tmp2 = veorq_u32(state0, zero);
         state0 = vsha256hq_u32(state0, state1, tmp1);
         state1 = vsha256h2q_u32(state1, tmp2, tmp1);
 
