@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-part of 'bindings.dart';
+library;
 
 /// Why a rind call failed, one kind per kind of call, as rind's `Error`.
 enum RindError {

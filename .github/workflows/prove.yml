@@ -49,10 +49,10 @@ jobs:
   # queued next, and `admin/prove` prints each proof's time to show where it
   # goes.
   #
-  # aarch64's proofs took 2724 s on an Intel Core Ultra 7 270K, 2523 s of
+  # aarch64's proofs took 2799 s on an Intel Core Ultra 7 270K, 2602 s of
   # them in `bn_mul_mont`, whose 4x path's two column-step lemmas take 930 s
   # each. GitHub's runners took 1.2 to 2.1 times as long as that machine on
-  # the other aarch64 proofs, so the job can run about 100 minutes with
+  # the other aarch64 proofs, so the job can run about 105 minutes with
   # `admin/prove bytes` and the build.
   hol-light-aarch64:
     runs-on: ubuntu-24.04

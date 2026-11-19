@@ -2,8 +2,10 @@ mod criterion;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 /// aws-lc's XChaCha20-Poly1305, which aws-lc-rs does not expose.
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 struct AwsXChaCha(*mut aws_lc_sys::EVP_AEAD_CTX);
 
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 impl AwsXChaCha {
     fn new(key: &[u8; 32]) -> Self {
         // SAFETY: the key pointer and length describe `key`, and aws-lc copies it.
@@ -47,6 +49,7 @@ impl AwsXChaCha {
     }
 }
 
+#[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
 impl Drop for AwsXChaCha {
     fn drop(&mut self) {
         // SAFETY: `self.0` came from `EVP_AEAD_CTX_new` and is freed once.
@@ -88,6 +91,7 @@ fn bench_chacha20poly1305(c: &mut Criterion) {
         buf.resize(size, 0u8);
         group.throughput(Throughput::Bytes(size as u64));
 
+        #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
         group.bench_function(BenchmarkId::new("aws-lc-rs", size_name), |b| {
             let key = AwsXChaCha::new(&key);
             b.iter(|| key.seal(aad, &mut buf[..size]));

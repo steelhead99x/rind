@@ -2,13 +2,14 @@ import Rind.X86_64.SignatureBuffer
 open Aeneas Aeneas.Std Result
 
 /-!
-# The signature API's P-256 ECDSA dispatch, modelled by hand
+# The signature API's P-256 and P-384 ECDSA dispatch, modelled by hand
 
 `ecdsa::KeyPair` reaches each algorithm's code, and `ecdsa::PublicKey` each
-key's parser and verifier, through function pointers, and P-256's key
-generation draws through a `dyn RandomSource`, none of which Aeneas can
-translate, so the translation stops below them and this file models the Rust
-above them for ECDSA on P-256 with SHA-256 and fixed-length signatures.
+key's parser and verifier, through function pointers, and P-256's and
+P-384's key generation draws through a `dyn RandomSource`, none of which
+Aeneas can translate, so the translation stops below them and this file models
+the Rust above them for ECDSA on P-256 with SHA-256 and on P-384 with SHA-384,
+each with fixed-length signatures.
 `admin/prove` fails unless these quotes are still that Rust, so a change to
 it is a change to this model:
 
@@ -43,6 +44,37 @@ impl Curve for P256 {
 
     pub(crate) fn generate(rng: &mut dyn RandomSource) -> Result<Self, Error> {
         let _entry = low::Entry::new_secret();
+        PrivateKey::generate(rng).map(Self)
+    }
+
+impl Curve for P384 {
+    type PrivateKey = p384::StaticPrivateKey;
+    type PublicKey = p384::VerifyingKey;
+    type Scalar = p384::Scalar;
+
+    fn oid() -> asn1::ObjectId {
+        asn1::oid::secp384r1.clone()
+    }
+
+    fn generate_random_key(rng: &mut impl RandomSource) -> Result<p384::StaticPrivateKey, Error> {
+        p384::StaticPrivateKey::generate(rng)
+    }
+}
+
+    fn generate(rng: &mut dyn RandomSource) -> Result<Self, Error> {
+        for _ in 0..64 {
+            let mut r = [0u8; Scalar::BYTES];
+            rng.fill(&mut r)?;
+            low::ct::secret_slice(&r);
+            if let Ok(p) = Self::from_bytes(&r) {
+                return Ok(p);
+            }
+        }
+
+        Err(Error::RngFailed)
+    }
+
+    pub(crate) fn generate(rng: &mut dyn RandomSource) -> Result<Self, Error> {
         PrivateKey::generate(rng).map(Self)
     }
 
@@ -194,6 +226,8 @@ macro_rules! ecdsa_curve {
 }
 
 ecdsa_curve!(P256);
+
+ecdsa_curve!(P384);
 
 enum Key {
     P256(EcdsaVerifier<P256>),
@@ -593,27 +627,35 @@ impl KeyPair {
 
     pub static P256_SHA256_FIXED: SigningAlgorithm = ecdsa_signing(&verify::P256_SHA256_FIXED);
 
+    pub static P384_SHA384_FIXED: SigningAlgorithm = ecdsa_signing(&verify::P384_SHA384_FIXED);
+
     pub static P256_SHA256_FIXED: VerificationAlgorithm =
         ecdsa_verification(CurveId::P256, HashId::Sha256, EcdsaEncoding::Fixed);
+
+    pub static P384_SHA384_FIXED: VerificationAlgorithm =
+        ecdsa_verification(CurveId::P384, HashId::Sha384, EcdsaEncoding::Fixed);
 
 ```
 
 The model departs from the Rust in these ways, and adds no axiom:
 
-- P-256's `generate_random_key` is `StaticPrivateKey::generate`, which is
-  `PrivateKey::generate` over the source it is given, whose `dyn` is the
+- Each curve's `generate_random_key` is `StaticPrivateKey::generate`, which
+  is `PrivateKey::generate` over the source it is given, whose `dyn` is the
   source's `RandomSource` impl. `low::ct::secret_slice`, a ctgrind marker
-  that computes nothing, is left out. `P256C` is the translated `Curve` impl
-  for `P256` with `generate_random_key` replaced by this model, so the
-  translated ECDSA code over it runs the model.
+  that computes nothing, is left out. `P256C` and `P384C` are the translated
+  `Curve` impls for `P256` and `P384` with `generate_random_key` replaced by
+  this model, so the translated ECDSA code over them runs the model.
 - A `VerificationAlgorithm` is its `parse`; `with_ecdsa!` gives
-  `verify::P256_SHA256_FIXED` `parse_ecdsa::<P256, Sha256, Fixed>`. Its
+  `verify::P256_SHA256_FIXED` `parse_ecdsa::<P256, Sha256, Fixed>`, and
+  `verify::P384_SHA384_FIXED` `parse_ecdsa::<P384, Sha384, Fixed>`. Its
   `ecdsa`, which `PublicKey::new` copies into the key's `algorithm`, and its
   `decompress`, read only by `PublicKey::from_spki`, are left out.
 - A `Key::P256` whose `EcdsaVerifier`'s ops `parse::<Sha256, Fixed>` built is
   `Key.P256Sha256Fixed`, holding its `VerifyingKey`, and `PublicKey::verify`
   calls those ops' `verify`, `Fixed::verify::<P256, Sha256>`, which is
-  `VerifyingKey::verify::<Sha256>`, directly: `parse` builds every
+  `VerifyingKey::verify::<Sha256>`, directly; likewise a `Key::P384` whose
+  ops `parse::<Sha384, Fixed>` built is `Key.P384Sha384Fixed`, verified by
+  `VerifyingKey::verify::<Sha384>`: `parse` builds every
   `VerifyOps`, a clone keeps its ops, and they are read only through
   `ops.get()`. Every other key is `Other`, holding what `verify` does for it,
   and `ZeroableRef`, which holds the ops, is left out.
@@ -621,12 +663,16 @@ The model departs from the Rust in these ways, and adds no axiom:
   `KeyPair::to_sec1`, is left out.
 - A `SigningAlgorithm` is the `load` it holds, applied to its `Ecdsa`;
   `with_ecdsa!` gives `sign::P256_SHA256_FIXED`
-  `KeyPair::load::<P256, Sha256, Fixed>`.
+  `KeyPair::load::<P256, Sha256, Fixed>`, and `sign::P384_SHA384_FIXED`
+  `KeyPair::load::<P384, Sha384, Fixed>`.
 - An `EcdsaKey::P256` whose ops that `load` built is
   `EcdsaKey.P256Sha256Fixed`, holding its signing key, and `KeyPair::sign`
   calls those ops' `sign`, `Fixed::sign::<P256, Sha256>`, which is
-  `SigningKey::sign::<Sha256>`, directly: `load` builds every `EcdsaOps` and
-  `EcdsaPair`. Every other key is `Other`, holding what `sign` does for it.
+  `SigningKey::sign::<Sha256>`, directly, and likewise an `EcdsaKey::P384`
+  that `load::<P384, Sha384, Fixed>` built is `EcdsaKey.P384Sha384Fixed`,
+  signing by `SigningKey::sign::<Sha384>`: `load` builds every `EcdsaOps`
+  and `EcdsaPair`. Every other key is `Other`, holding what `sign` does for
+  it.
 - `admin/prove` checks that the quotes hold every mention of `Key::` and
   `EcdsaKey::`, every `VerifyOps`, `EcdsaOps`, and `EcdsaPair` built, every
   `Key` a clone builds, and every read of an `ops`.
@@ -680,6 +726,38 @@ abbrev P256C : high.curve.Curve high.curve.P256 mid.p256.StaticPrivateKey mid.p2
 /-- SHA-256's `SignatureHash` impl. -/
 abbrev Sha256Sig := high.hash.Sha256.Insts.RindHighHashSignatureHashSha256ContextSha256State
 
+/-- The loop of `p384::PrivateKey::generate(rng)`, with `n` draws left. -/
+def mid.p384.PrivateKey.generate_from_loop {T : Type} (inst : mid.rng.RandomSource T) :
+    Nat → T → Result (core.result.Result mid.p384.PrivateKey error.Error × T)
+  | 0, rng => ok (.Err .RngFailed, rng)
+  | n + 1, rng => do
+    let r := Array.repeat 48#usize 0#u8
+    let (s, to_slice_mut_back) ← lift (Array.to_slice_mut r)
+    let (r1, rng1, s1) ← inst.fill rng s
+    match r1 with
+    | .Err e => ok (.Err e, rng1)
+    | .Ok () =>
+      let p ← mid.p384.PrivateKey.from_bytes (to_slice_mut_back s1).to_slice
+      match p with
+      | .Ok p => ok (.Ok p, rng1)
+      | .Err _ => mid.p384.PrivateKey.generate_from_loop inst n rng1
+
+/-- `p384::StaticPrivateKey::generate(rng)`, which P-384's
+`generate_random_key` is. -/
+def mid.p384.StaticPrivateKey.generate {T : Type} (inst : mid.rng.RandomSource T) (rng : T) :
+    Result (core.result.Result mid.p384.StaticPrivateKey error.Error × T) :=
+  mid.p384.PrivateKey.generate_from_loop inst 64 rng
+
+/-- P-384's `Curve` impl, whose `generate_random_key` is
+`StaticPrivateKey::generate`. -/
+abbrev P384C : high.curve.Curve high.curve.P384 mid.p384.StaticPrivateKey mid.p384.VerifyingKey
+    mid.p384.Scalar :=
+  { high.curve.P384.Insts.RindHighCurveCurveStaticPrivateKeyVerifyingKeyScalar with
+    generate_random_key := fun inst rng => mid.p384.StaticPrivateKey.generate inst rng }
+
+/-- SHA-384's `SignatureHash` impl. -/
+abbrev Sha384Sig := high.hash.Sha384.Insts.RindHighHashSignatureHashSha384ContextSha384State
+
 /-- An ECDSA signing key on P-256. -/
 abbrev P256SigningKey :=
   high.ecdsa.SigningKey high.curve.P256 mid.p256.StaticPrivateKey mid.p256.VerifyingKey mid.p256.Scalar
@@ -688,10 +766,20 @@ abbrev P256SigningKey :=
 abbrev P256VerifyingKey :=
   high.ecdsa.VerifyingKey high.curve.P256 mid.p256.StaticPrivateKey mid.p256.VerifyingKey mid.p256.Scalar
 
+/-- An ECDSA signing key on P-384. -/
+abbrev P384SigningKey :=
+  high.ecdsa.SigningKey high.curve.P384 mid.p384.StaticPrivateKey mid.p384.VerifyingKey mid.p384.Scalar
+
+/-- An ECDSA verifying key on P-384. -/
+abbrev P384VerifyingKey :=
+  high.ecdsa.VerifyingKey high.curve.P384 mid.p384.StaticPrivateKey mid.p384.VerifyingKey mid.p384.Scalar
+
 /-- `Key`, whose P-256 verifier `parse::<Sha256, Fixed>` built is
-`P256Sha256Fixed`. -/
+`P256Sha256Fixed`, and whose P-384 verifier `parse::<Sha384, Fixed>` built is
+`P384Sha384Fixed`. -/
 inductive high.signature.ecdsa.Key where
   | P256Sha256Fixed (key : P256VerifyingKey)
+  | P384Sha384Fixed (key : P384VerifyingKey)
   | Other (verify : Slice Std.U8 → Slice Std.U8 → Result (core.result.Result Unit error.Error))
 
 /-- `PublicKey`. -/
@@ -725,6 +813,28 @@ def high.signature.ecdsa.parse_ecdsa_p256_sha256_fixed (point : Slice Std.U8) :
 def high.signature.ecdsa.verify.P256_SHA256_FIXED : high.signature.ecdsa.VerificationAlgorithm :=
   ⟨high.signature.ecdsa.parse_ecdsa_p256_sha256_fixed⟩
 
+/-- `EcdsaVerifier::<P384>::parse::<Sha384, Fixed>`, whose ops' `verify` is
+`VerifyingKey::verify::<Sha384>`, as the `VerifyingKey` it holds. -/
+def high.signature.ecdsa.EcdsaVerifier.parse_p384_sha384_fixed (point : Slice Std.U8) :
+    Result (core.result.Result P384VerifyingKey error.Error) := do
+  let r ← high.ecdsa.VerifyingKey.from_x962_uncompressed P384C point
+  match r with
+  | .Ok key => ok (.Ok key)
+  | .Err e => ok (.Err e)
+
+/-- `parse_ecdsa::<P384, Sha384, Fixed>`. -/
+def high.signature.ecdsa.parse_ecdsa_p384_sha384_fixed (point : Slice Std.U8) :
+    Result (core.result.Result high.signature.ecdsa.Key error.Error) := do
+  let r ← high.signature.ecdsa.EcdsaVerifier.parse_p384_sha384_fixed point
+  match r with
+  | .Ok key => ok (.Ok (.P384Sha384Fixed key))
+  | .Err e => ok (.Err e)
+
+/-- The `verify::P384_SHA384_FIXED` static, whose parser is
+`parse_ecdsa::<P384, Sha384, Fixed>`. -/
+def high.signature.ecdsa.verify.P384_SHA384_FIXED : high.signature.ecdsa.VerificationAlgorithm :=
+  ⟨high.signature.ecdsa.parse_ecdsa_p384_sha384_fixed⟩
+
 /-- `PublicKey::new`. -/
 def high.signature.ecdsa.PublicKey.new (algorithm : high.signature.ecdsa.VerificationAlgorithm)
     (point : Slice Std.U8) :
@@ -739,11 +849,13 @@ def high.signature.ecdsa.PublicKey.new (algorithm : high.signature.ecdsa.Verific
     | .Err e => ok (.Err e)
 
 /-- `PublicKey::verify`, whose P-256 verifier's `verify` is
-`VerifyingKey::verify::<Sha256>`. -/
+`VerifyingKey::verify::<Sha256>`, and P-384 verifier's
+`VerifyingKey::verify::<Sha384>`. -/
 def high.signature.ecdsa.PublicKey.verify (self : high.signature.ecdsa.PublicKey)
     (message signature : Slice Std.U8) : Result (core.result.Result Unit error.Error) :=
   match self.key with
   | .P256Sha256Fixed key => high.ecdsa.VerifyingKey.verify P256C Sha256Sig key message signature
+  | .P384Sha384Fixed key => high.ecdsa.VerifyingKey.verify P384C Sha384Sig key message signature
   | .Other verify => verify message signature
 
 /-- `PublicKey`'s `AsRef<[u8]>`. -/
@@ -752,9 +864,11 @@ def high.signature.ecdsa.PublicKey.Insts.CoreConvertAsRefSliceU8.as_ref
   high.ecdsa.EncodedPoint.Insts.CoreConvertAsRefSliceU8.as_ref self.point
 
 /-- `EcdsaKey`, whose P-256 pair `load::<P256, Sha256, Fixed>` built is
-`P256Sha256Fixed`. -/
+`P256Sha256Fixed`, and whose P-384 pair `load::<P384, Sha384, Fixed>` built
+is `P384Sha384Fixed`. -/
 inductive high.signature.ecdsa.EcdsaKey where
   | P256Sha256Fixed (signing : P256SigningKey)
+  | P384Sha384Fixed (signing : P384SigningKey)
   | Other (sign : Slice Std.U8 →
       Result (core.result.Result high.signature.ecdsa.Signature error.Error))
 
@@ -806,6 +920,37 @@ def high.signature.ecdsa.KeyPair.load_p256_sha256_fixed (source : high.signature
 def high.signature.ecdsa.sign.P256_SHA256_FIXED : high.signature.ecdsa.SigningAlgorithm :=
   ⟨high.signature.ecdsa.KeyPair.load_p256_sha256_fixed⟩
 
+/-- `ecdsa::SigningKey::<P384>::from_pkcs8_der`, DER the ✓ leaves out. -/
+opaque high.ecdsa.SigningKey.from_pkcs8_der_p384 :
+    Slice Std.U8 → Result (core.result.Result P384SigningKey error.Error)
+
+/-- `ecdsa::SigningKey::<P384>::from_sec1_der`, DER the ✓ leaves out. -/
+opaque high.ecdsa.SigningKey.from_sec1_der_p384 :
+    Slice Std.U8 → Result (core.result.Result P384SigningKey error.Error)
+
+/-- `KeyPair::load::<P384, Sha384, Fixed>`. -/
+def high.signature.ecdsa.KeyPair.load_p384_sha384_fixed (source : high.signature.ecdsa.EcdsaSource) :
+    Result (core.result.Result high.signature.ecdsa.KeyPair error.Error) := do
+  let signing ← match source with
+    | .Generate => high.ecdsa.SigningKey.generate P384C
+    | .Pkcs8 der => high.ecdsa.SigningKey.from_pkcs8_der_p384 der
+    | .Sec1 der => high.ecdsa.SigningKey.from_sec1_der_p384 der
+    | .Scalar scalar public_key =>
+      high.ecdsa.SigningKey.from_private_key_and_public_key P384C scalar public_key
+  match signing with
+  | .Err e => ok (.Err e)
+  | .Ok signing =>
+    let point ← high.ecdsa.SigningKey.public_key_uncompressed P384C signing
+    let s ← high.ecdsa.EncodedPoint.Insts.CoreConvertAsRefSliceU8.as_ref point
+    let r ← high.signature.ecdsa.EcdsaVerifier.parse_p384_sha384_fixed s
+    let key ← core.result.Result.expect error.Error.Insts.CoreFmtDebug r (toStr "its own point")
+    ok (.Ok { key := .P384Sha384Fixed signing, «public» := { key := .P384Sha384Fixed key, point } })
+
+/-- The `sign::P384_SHA384_FIXED` static, whose `load` is
+`KeyPair::load::<P384, Sha384, Fixed>`. -/
+def high.signature.ecdsa.sign.P384_SHA384_FIXED : high.signature.ecdsa.SigningAlgorithm :=
+  ⟨high.signature.ecdsa.KeyPair.load_p384_sha384_fixed⟩
+
 /-- `KeyPair::generate`. -/
 def high.signature.ecdsa.KeyPair.generate (algorithm : high.signature.ecdsa.SigningAlgorithm) :
     Result (core.result.Result high.signature.ecdsa.KeyPair error.Error) :=
@@ -822,13 +967,17 @@ def high.signature.ecdsa.KeyPair.public_key (self : high.signature.ecdsa.KeyPair
     Result high.signature.ecdsa.PublicKey :=
   ok self.«public»
 
-/-- `KeyPair::sign`, whose P-256 ops' `sign` is `SigningKey::sign::<Sha256>`. -/
+/-- `KeyPair::sign`, whose P-256 ops' `sign` is `SigningKey::sign::<Sha256>`,
+and P-384 ops' `SigningKey::sign::<Sha384>`. -/
 def high.signature.ecdsa.KeyPair.sign (self : high.signature.ecdsa.KeyPair) (message : Slice Std.U8) :
     Result (core.result.Result high.signature.ecdsa.Signature error.Error) :=
   match self.key with
   | .P256Sha256Fixed signing =>
     high.signature.Buffer.write 141#usize fun output =>
       high.ecdsa.SigningKey.sign P256C Sha256Sig signing message output
+  | .P384Sha384Fixed signing =>
+    high.signature.Buffer.write 141#usize fun output =>
+      high.ecdsa.SigningKey.sign P384C Sha384Sig signing message output
   | .Other sign => sign message
 
 end rind.x86_64
