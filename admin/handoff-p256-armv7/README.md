@@ -1,8 +1,12 @@
 # P-256 on armv7: plan to import OpenSSL's `ecp_nistz256-armv4` field multiplication
 
+Fork only: delete this directory before any upstream branch merges from this one.
+
 Stage 1 of the "P-256 on armv7 (L)" follow-up from the Fire TV handoff
-([docs/handoff/firetv-armv7/README.md](firetv-armv7/README.md), area 4): measure, find the source,
-and plan. This branch changes no code and imports no assembly. Stage 2, the import, waits for the owner.
+(`admin/handoff-firetv-armv7/README.md` on fork PR #217's branch `claude/firetv-armv7-handoff`, area 4):
+measure, find the source, and plan. This branch changes no code and imports no assembly. Stage 2, the
+import, is fork PR #222; its measured gain on the Pi 2 B is 8 to 13% (not the 15 to 18% estimated here),
+and the table below is the stage 1 estimate.
 
 Recommendation: **go**, narrowly. Import only the integer Montgomery multiplication and squaring
 (`ecp_nistz256_mul_mont`, `ecp_nistz256_sqr_mont`, about 1.6 KB of code), behind the existing
@@ -122,7 +126,7 @@ smaller return and are not proposed.
 Variants live in their own target directories (one variant here: `main` at `847a3e3c`, so one
 directory; the harness takes a binary name per variant for stage 2), built on the laptop with
 `nix develop .#armv7`, `cargo build --release --target armv7-unknown-linux-gnueabihf`, copied to the
-Pi 2 B (`ssh pi2b`, Raspberry Pi OS 6.18 `armv7l`), run as `taskset -c 3 /lib/ld-linux-armhf.so.3
+Pi 2 B (`ssh $ARMV7_HOST`, Raspberry Pi OS 6.18 `armv7l`), run as `taskset -c 3 /lib/ld-linux-armhf.so.3
 ./ab-p256 <lib> <op>` with `performance` governor on all cores and nothing else running. `run.sh`
 interleaves the libraries within each operation in each round, rotating the order between rounds;
 each invocation warms up, sizes batches to 50 ms, takes 40 batches, and reports the median batch
@@ -130,7 +134,7 @@ mean per call; the table's value is the median of the rounds. `an.py` computes t
 
 - `ab-p256/`: the A/B binary (rind, aws-lc-rs, ring, vendored OpenSSL; `openssl` needs `perl` with
   `FindBin`, which the nix shell's host perl lacked, so build under `nix shell nixpkgs#perl`).
-- `run.sh`, `an.py`, `data/ab-run-control.log` (rind against itself, 7 rounds),
+- `run.sh` (set `ARMV7_HOST` to the Pi's ssh host), `an.py`, `data/ab-run-control.log` (rind against itself, 7 rounds),
   `data/ab-run-openssl.log` (all four libraries, 5 rounds), `data/mul-microbench.txt`.
 - `mb/`: the multiplication microbenchmark. It needs two generated files that are not committed
   (OpenSSL's assembly is the import this plan proposes, so it stays out of the tree until stage 2):
