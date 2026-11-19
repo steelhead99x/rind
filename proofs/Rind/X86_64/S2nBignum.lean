@@ -418,6 +418,22 @@ axiom p384_montjscalarmul_alt_spec (res : Std.Array U64 18#usize) (scalar : Std.
       ∀ P, p384OnCurve P → p384Represents P (tripleNat6 point.val) →
         p384Represents (p384Pow P (wordsNat scalar.val)) (tripleNat6 r.val) ⦄
 
+/-- `P384_MONTJADD_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/p384_montjadd.ml#L7500 -/
+@[step]
+axiom p384_montjadd_spec (p3 p1 p2 : Std.Array U64 18#usize) :
+    low.x86_64.p384_montjadd.p384_montjadd p3 p1 p2 ⦃ r =>
+      ∀ P1 P2, p384Represents P1 (tripleNat6 p1.val) → p384Represents P2 (tripleNat6 p2.val) →
+        (P1 = P2 → P2 = none) → p384Represents (p384Add P1 P2) (tripleNat6 r.val) ⦄
+
+/-- `P384_MONTJADD_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/p384_montjadd_alt.ml#L7695 -/
+@[step]
+axiom p384_montjadd_alt_spec (p3 p1 p2 : Std.Array U64 18#usize) :
+    low.x86_64.p384_montjadd_alt.p384_montjadd_alt p3 p1 p2 ⦃ r =>
+      ∀ P1 P2, p384Represents P1 (tripleNat6 p1.val) → p384Represents P2 (tripleNat6 p2.val) →
+        (P1 = P2 → P2 = none) → p384Represents (p384Add P1 P2) (tripleNat6 r.val) ⦄
+
 /-- `P384_MONTJDOUBLE_SUBROUTINE_CORRECT`,
 https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/x86/proofs/p384_montjdouble.ml#L4854 -/
 @[step]
@@ -797,6 +813,16 @@ theorem p384_montjdouble_mux_spec (h : Runs) (p3 p1 : Std.Array U64 18#usize) :
       ∀ P, p384Represents P (tripleNat6 p1.val) → p384Represents (p384Add P P) (tripleNat6 r.val) ⦄ := by
   obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
   unfold low.x86_64.adx_mux.p384_montjdouble
+  rw [ht]
+  cases t <;> step*
+
+@[step]
+theorem p384_montjadd_mux_spec (h : Runs) (p3 p1 p2 : Std.Array U64 18#usize) :
+    low.x86_64.adx_mux.p384_montjadd p3 p1 p2 ⦃ r =>
+      ∀ P1 P2, p384Represents P1 (tripleNat6 p1.val) → p384Represents P2 (tripleNat6 p2.val) →
+        (P1 = P2 → P2 = none) → p384Represents (p384Add P1 P2) (tripleNat6 r.val) ⦄ := by
+  obtain ⟨-, -, ⟨t, ht⟩, -⟩ := h
+  unfold low.x86_64.adx_mux.p384_montjadd
   rw [ht]
   cases t <;> step*
 
