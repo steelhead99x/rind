@@ -25,10 +25,10 @@ A primitive is checked five ways:
   once, on x86_64, aarch64, and the portable backend, but not on armv7,
   which stays with ctgrind and `admin/ct-qemu` since BINSEC decodes none of
   its NEON table lookups or crypto extension; it denies the CPU features
-  whose instructions BINSEC cannot decode, AES-NI, VAES, the SHA512
-  instructions, and AVX-512 on x86_64, and the crypto extension, SHA-3,
-  SVE2, and DIT on aarch64, so those paths stay with the other three, and gives it
-  the effect of the few others rind and glibc run, such as aarch64's `tbl`.
+  whose instructions BINSEC cannot decode, AES-NI, VAES, and AVX-512 on
+  x86_64, and the crypto extension, SHA-3, SVE2, and DIT on aarch64, so those
+  paths stay with the other three, and gives it the effect of the few others
+  rind and glibc run, such as aarch64's `tbl`.
   Each harness fixes its public inputs, so it checks the paths those values
   take, except that ChaCha20 and ChaCha20-Poly1305 take every message
   length up to a block and a partial one; and BINSEC's lifter
@@ -78,8 +78,7 @@ an Intel SDE CPU model, as `x86-cpu.yml` names them.
 | Backend | Tier | Vectors and differential tests | Fuzz targets | Constant time |
 |---|---|---|---|---|
 | x86_64 | AVX-512 (Ice Lake and later, Zen 4 and 5) | SDE: Cannon Lake (RSA only), Granite Rapids, Diamond Rapids | SDE: Diamond Rapids; the runner's tier, when it has AVX-512 | `admin/ct-sde`: AES-GCM, RSA, ChaCha20, X25519, Ed25519, and verified-garbage's ML-KEM-768 and P-256 ECDH; Graviola's AVX-512 sampler reads only the public matrix |
-| x86_64 | SHA512 instructions (Arrow Lake, Diamond Rapids) | SDE: Arrow Lake, Diamond Rapids | SDE: Diamond Rapids | `admin/ct-sde`: HMAC |
-| x86_64 | VAES without AVX-512 (Alder Lake, Zen 3) | SDE: Alder Lake, Granite Rapids at 256 bits; the runner, when Zen 3 | SDE: Diamond Rapids, denied; the runner's tier, when Zen 3; denied, when it has AVX-512 | `admin/ct-sde`: AES-GCM |
+| x86_64 | VAES without AVX-512 (Alder Lake, Arrow Lake, Zen 3) | SDE: Alder Lake, Arrow Lake, Granite Rapids at 256 bits; the runner, when Zen 3 | SDE: Diamond Rapids, denied; the runner's tier, when Zen 3; denied, when it has AVX-512 | `admin/ct-sde`: AES-GCM |
 | x86_64 | SHA extensions (Goldmont, Cannon Lake and later, Zen) | SDE: Goldmont and later | SDE: Diamond Rapids; the runner's tier | `admin/ct-sde`: HMAC |
 | x86_64 | AVX2 and ADX, no SHA extensions or VAES (Broadwell to Cooper Lake) | SDE: Skylake server; denied | denied | ctgrind: valgrind hides AVX-512, VAES, and the SHA extensions, so the runner's own run lands here |
 | x86_64 | AVX2 without ADX (Haswell) | SDE: Haswell; denied | denied | ctgrind: denied (`no-adx`) |
@@ -276,7 +275,7 @@ as `sh/backends.sh` decides, and otherwise runs in full; pull requests'
 ctgrind job sets it.
 `nix develop .#ctgrind --command admin/ctgrind` runs the weekly
 constant-time checks under valgrind, `nix develop .#sde --command
-admin/ct-sde` those of the AVX-512, VAES, SHA extension, and SHA512 code
+admin/ct-sde` those of the AVX-512, VAES, and SHA extension code
 valgrind cannot run, under Intel SDE, and `nix develop .#ct-qemu --command
 admin/ct-qemu` those of the armv7 crypto extension code valgrind hides, under
 qemu; on an aarch64 host, `nix develop .#ct-qemu-aarch64 --command
