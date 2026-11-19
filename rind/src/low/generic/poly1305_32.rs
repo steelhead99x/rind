@@ -317,6 +317,12 @@ impl Drop for Poly1305 {
 
 impl Zeroable for Poly1305 {}
 
+// Apart from `tests`, which has no `unsafe`: this file's `debug_assert!`s keep
+// it from sharing a file with any (`low::tests::no_debug_assert_beside_unsafe`).
+#[cfg(test)]
+#[path = "poly1305_32_zeroing.rs"]
+mod zeroing;
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -324,28 +330,6 @@ mod tests {
     #[cfg(any(rind_backend = "arm", rind_backend = "portable"))]
     use crate::low::portable::poly1305::Hacl;
     use crate::test::file_test;
-
-    // Dropping wipes the whole value, padding included, whether or not any
-    // input was buffered. The drop runs in place and the bytes are read
-    // before the storage goes, as `rind/tests/zeroing.rs` does for the
-    // public key types, which cannot reach this crate-internal type.
-    #[test]
-    fn zeroes_on_drop() {
-        use core::mem::{ManuallyDrop, size_of};
-
-        for buffered in [0usize, 5, 16, 40] {
-            let mut p = ManuallyDrop::new(Poly1305::new(&[0xff; 32]));
-            p.add_bytes(&[0xff; 40][..buffered]);
-            // SAFETY: `p` is dropped once, here, and only its bytes are
-            // read afterwards.
-            unsafe { ManuallyDrop::drop(&mut p) };
-            // SAFETY: `p` still owns `size_of::<Poly1305>()` initialized bytes.
-            let bytes: &[u8] = unsafe {
-                core::slice::from_raw_parts((&raw const *p).cast::<u8>(), size_of::<Poly1305>())
-            };
-            assert!(bytes.iter().all(|&b| b == 0), "{buffered}: {bytes:?}");
-        }
-    }
 
     // aws-lc's vectors, of every length and carry.
     #[test]
