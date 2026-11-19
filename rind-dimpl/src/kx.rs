@@ -66,8 +66,8 @@ const MAX_NIST_SHARE: usize = 97;
 /// X25519 is unchanged. A NIST compressed point is decompressed, as aws-lc-rs
 /// and `PublicKey::new` do. Every other form reaches `agree`, which refuses
 /// it: hybrid points (SEC1 prefix `0x06` or `0x07`) and
-/// `SubjectPublicKeyInfo`, which aws-lc-rs accepts and RFC 8422 section 5.1.2
-/// forbids.
+/// `SubjectPublicKeyInfo`, which aws-lc-rs accepts and `PublicKey::new`,
+/// rind-aws-lc-rs and dimpl's RustCrypto provider refuse.
 fn nist_share<'a>(
     exchange: &Exchange,
     peer: &'a [u8],

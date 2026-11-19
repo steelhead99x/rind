@@ -279,10 +279,10 @@ fn nist_hybrid_key_shares_are_refused() {
 }
 
 /// Every malformed neighbour of a fresh compressed NIST share, and of an
-/// uncompressed or `0x05` one, gets the same verdict from rind-dimpl as from dimpl's aws-lc-rs provider: the
-/// other `y`, `x` all ones (at least the field prime), a flipped `x` bit, an
-/// off-curve `y`, one byte short or long, prefix `0x05`, and the point at
-/// infinity alone or padded.
+/// uncompressed or `0x05` one, gets the same verdict from rind-dimpl as from
+/// dimpl's aws-lc-rs provider: the other `y`, `x` all ones (at least the field
+/// prime), a flipped `x` bit, an off-curve `y`, one byte short or long, prefix
+/// `0x05`, and the point at infinity alone or padded.
 #[test]
 fn nist_share_edges_match_aws_lc() {
     let aws = aws_lc_rs::default_provider();
@@ -333,7 +333,7 @@ fn nist_share_edges_match_aws_lc() {
 /// aws-lc-rs's `ParsedPublicKey::new` (`aws-lc-rs-1.19.0/src/agreement.rs`,
 /// lines 747-790) tries `parse_rfc5280_public_key` before the raw point, so
 /// dimpl's aws-lc-rs provider takes it, and rind-dimpl, like dimpl's
-/// RustCrypto provider, refuses it, as RFC 8422 section 5.1.2 requires.
+/// RustCrypto provider, `PublicKey::new` and rind-aws-lc-rs, refuses it.
 #[test]
 fn spki_key_shares_are_refused() {
     let aws = aws_lc_rs::default_provider();
