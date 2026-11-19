@@ -1,20 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-//! Montgomery multiplication modulo an RSA modulus or prime: from two words,
-//! aws-lc's `bn_mul_mont`, which picks its own squaring or 4x routine by the
-//! width as aws-lc does. On a Neoverse-N2 it measured faster than
-//! s2n-bignum's generic `bignum_montmul` and `bignum_montsqr` in every width
-//! class it branches on: 1.15x at 17 and 33 words, 1.6x at 20, and twice as
-//! fast at 24, 48, 64, 96, and 128. It replaces s2n-bignum's Karatsuba
-//! routines at 16 and 32 words too, where it signs RSA-2048 1.75x and
-//! RSA-4096 1.6x as fast, and verifies RSA-1024 and RSA-2048 1.5x as fast.
-//! The generic routines run only below two words.
+//! Montgomery multiplication modulo an RSA modulus or prime.
+//!
+//! From two words, aws-lc's `bn_mul_mont`, which picks its own squaring or
+//! 4x routine by the width as aws-lc does. On a Neoverse-N2, a wide
+//! multiplier, it measured faster than s2n-bignum's generic routines in
+//! every width class it branches on: 1.15x at 17 and 33 words, 1.6x at 20,
+//! and twice as fast at 24, 48, 64, 96, and 128. It was also faster there
+//! than s2n-bignum's Karatsuba routines at 16 and 32 words.
+//!
+//! On a narrow multiplier both comparisons reverse: RSA-2048's CRT primes
+//! (16 words) and RSA-2048's modulus and RSA-4096's CRT primes (32 words)
+//! take s2n-bignum's Karatsuba product and its 8n reduction, which is what
+//! aws-lc runs on a core outside its wide allowlist (Neoverse V1, V2, V3,
+//! and Apple). On a Cortex-A76 at 32 words that took RSA-2048 verification
+//! and RSA-4096 signing to 0.57x and 0.52x of `bn_mul_mont`'s time. Every
+//! other width keeps `bn_mul_mont` there. On Neoverse N2, Cobalt 100, and
+//! any core Linux does not identify as Cortex-A72, Cortex-A76, or Neoverse
+//! N1, `bn_mul_mont` runs at 16 and 32 words too. The generic routines run
+//! only below two words.
 
 /// `z = x * y / 2^(64k) mod m`, for `x` and `y` below `m`, where `k` is the
 /// length of each and `n0` is `-m^-1 mod 2^64`.
 pub(crate) fn mont_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) {
     assert!(z.len() == m.len() && x.len() == m.len() && y.len() == m.len());
     match m.len() {
+        16 if !super::cpu::wide_multiplier() => karatsuba_mul(z, x, y, m, n0),
+        32 if !super::cpu::wide_multiplier() => karatsuba_mul_32(z, x, y, m, n0),
         k if k >= 2 => mul_mont(z, x, y, m, n0),
         _ => super::bignum_montmul::bignum_montmul(z, x, y, m),
     }
@@ -25,9 +37,47 @@ pub(crate) fn mont_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) 
 pub(crate) fn mont_sqr(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
     assert!(z.len() == m.len() && x.len() == m.len());
     match m.len() {
+        16 if !super::cpu::wide_multiplier() => karatsuba_sqr(z, x, m, n0),
+        32 if !super::cpu::wide_multiplier() => karatsuba_sqr_32(z, x, m, n0),
         k if k >= 2 => mul_mont(z, x, x, m, n0),
         _ => super::bignum_montsqr::bignum_montsqr(z, x, m),
     }
+}
+
+/// `mont_mul` for 16 words on a narrow multiplier.
+fn karatsuba_mul(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) {
+    let mut product = [0; 32];
+    super::bignum_kmul_16_32::bignum_kmul_16_32(&mut product, x, y, &mut [0; 32]);
+    redc_8n(z, &mut product, m, n0);
+}
+
+/// `mont_sqr` for 16 words on a narrow multiplier.
+fn karatsuba_sqr(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
+    let mut product = [0; 32];
+    super::bignum_ksqr_16_32::bignum_ksqr_16_32(&mut product, x, &mut [0; 24]);
+    redc_8n(z, &mut product, m, n0);
+}
+
+/// `mont_mul` for 32 words on a narrow multiplier.
+fn karatsuba_mul_32(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) {
+    let mut product = [0; 64];
+    super::bignum_kmul_32_64::bignum_kmul_32_64(&mut product, x, y, &mut [0; 96]);
+    redc_8n(z, &mut product, m, n0);
+}
+
+/// `mont_sqr` for 32 words on a narrow multiplier.
+fn karatsuba_sqr_32(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
+    let mut product = [0; 64];
+    super::bignum_ksqr_32_64::bignum_ksqr_32_64(&mut product, x, &mut [0; 72]);
+    redc_8n(z, &mut product, m, n0);
+}
+
+/// Reduces the `2k`-word `product` into the `k`-word `z`, fully, modulo `m`.
+fn redc_8n(z: &mut [u64], product: &mut [u64], m: &[u64], n0: u64) {
+    let carry = super::bignum_emontredc_8n::bignum_emontredc_8n(product, m, n0);
+    let (_, reduced) = product.split_at(m.len());
+    let ge = carry | (1 - super::bignum_cmp_lt::bignum_cmp_lt(reduced, m));
+    super::bignum_optsub::bignum_optsub(z, reduced, m, ge);
 }
 
 /// `mont_mul` for any width from two words. It squares by its own routine
@@ -74,6 +124,12 @@ mod tests {
         let (mut mul, mut sqr) = (vec![0; m.len()], vec![0; m.len()]);
         mul_mont(&mut mul, x, y, m, n0[0]);
         mul_mont(&mut sqr, x, x, m, n0[0]);
+        if matches!(m.len(), 16 | 32) {
+            let (mut kmul, mut ksqr) = (vec![0; m.len()], vec![0; m.len()]);
+            kmul_any(&mut kmul, x, y, m, n0[0]);
+            ksqr_any(&mut ksqr, x, m, n0[0]);
+            assert_eq!((mul.clone(), sqr.clone()), (kmul, ksqr));
+        }
         [mul, sqr]
     }
 
@@ -114,5 +170,93 @@ mod tests {
             ran += 1;
         }
         assert!(ran > 0);
+    }
+
+    /// The Karatsuba product `mont_mul` runs on a narrow multiplier, at 16
+    /// or 32 words, whichever multiplier this core has.
+    fn kmul_any(z: &mut [u64], x: &[u64], y: &[u64], m: &[u64], n0: u64) {
+        match m.len() {
+            16 => karatsuba_mul(z, x, y, m, n0),
+            32 => karatsuba_mul_32(z, x, y, m, n0),
+            k => panic!("no Karatsuba product at {k} words"),
+        }
+    }
+
+    /// [`kmul_any`]'s square.
+    fn ksqr_any(z: &mut [u64], x: &[u64], m: &[u64], n0: u64) {
+        match m.len() {
+            16 => karatsuba_sqr(z, x, m, n0),
+            32 => karatsuba_sqr_32(z, x, m, n0),
+            k => panic!("no Karatsuba square at {k} words"),
+        }
+    }
+
+    /// 16- and 32-word Karatsuba, and so `bignum_emontredc_8n`, against the
+    /// portable Montgomery product: on edge moduli and operands, then on
+    /// seeded pseudo-random ones. `matches_generic` compares those widths
+    /// to s2n-bignum and aws-lc; this compares them to
+    /// `generic::limb64::mont`, which is the backend every other
+    /// architecture runs.
+    #[test]
+    fn karatsuba_matches_portable() {
+        use super::super::schedules::{RANDOM_CASES, Rng};
+        use crate::low::generic::limb64::mont as portable;
+
+        let check = |m: &[u64], x: &[u64], y: &[u64], at: &str| {
+            let k = m.len();
+            let mut n0 = [0u64];
+            bignum_negmodinv::bignum_negmodinv(&mut n0, &m[..1]);
+            let mut got = vec![0u64; k];
+            let mut want = vec![0u64; k];
+            kmul_any(&mut got, x, y, m, n0[0]);
+            portable::mont_mul(&mut want, x, y, m, n0[0]);
+            assert_eq!(got, want, "mul {k} {at}");
+            ksqr_any(&mut got, x, m, n0[0]);
+            portable::mont_sqr(&mut want, x, m, n0[0]);
+            assert_eq!(got, want, "sqr {k} {at}");
+        };
+
+        for k in [16usize, 32] {
+            let mut sparse = vec![0u64; k];
+            sparse[0] = 0xffff_ffff_ffff_ffc5;
+            sparse[k - 1] = 1u64 << 63;
+            let dense_mod = vec![u64::MAX; k];
+            // A small top word, as in a DH modulus that is not near a power
+            // of two. `below` is m - 1, so the conditional subtraction in
+            // `redc_8n` runs on a product of values next to m.
+            let mut small_top = vec![u64::MAX; k];
+            small_top[k - 1] = 1;
+            for m in [sparse, dense_mod, small_top] {
+                let mut one = vec![0u64; k];
+                one[0] = 1;
+                let mut below = m.clone();
+                below[0] -= 1;
+                let mut dense = vec![u64::MAX; k];
+                dense[k - 1] = 0;
+                let inputs = [vec![0u64; k], one, below, dense];
+                for x in &inputs {
+                    for y in &inputs {
+                        check(&m, x, y, "edge");
+                    }
+                }
+            }
+
+            // Odd moduli with a random top word, so some are short of the
+            // full width, and operands below them.
+            let mut rng = Rng(0x6a09_e667_f3bc_c908 ^ k as u64);
+            for i in 0..RANDOM_CASES {
+                let mut m: Vec<u64> = (0..k).map(|_| rng.next()).collect();
+                m[0] |= 1;
+                m[k - 1] >>= rng.next() % 64;
+                m[k - 1] |= 1;
+                let mut below = || {
+                    let mut v: Vec<u64> = (0..k).map(|_| rng.next()).collect();
+                    v[k - 1] %= m[k - 1];
+                    v
+                };
+                let (x, y) = (below(), below());
+                check(&m, &x, &y, &format!("random {i}"));
+            }
+        }
     }
 }
