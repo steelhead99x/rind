@@ -316,7 +316,7 @@ mod tests {
 
 if __name__ == "__main__":
     specs = signatures()
-    assert len(specs) == 21, len(specs)
+    assert len(specs) == 20, len(specs)
     for spec in specs:
         emit_one(spec)
     emit_fastmul()

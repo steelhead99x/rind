@@ -61,8 +61,8 @@ mod generic {
     pub(super) mod ct_equal;
     pub(super) mod ctr;
     // Ed25519 verification's multi-scalar multiplication over s2n-bignum's
-    // point routines.
-    #[cfg(rind_backend = "x86_64")]
+    // point routines. x86_64 dispatches it; aarch64 runs this one.
+    #[cfg(any(rind_backend = "x86_64", rind_backend = "aarch64"))]
     pub(crate) mod edwards25519_msm;
     #[cfg(test)]
     pub(crate) mod ghash;
@@ -521,7 +521,7 @@ cfg_if::cfg_if! {
         pub(crate) use aarch64::wide_mux::edwards25519_epdouble;
         pub(crate) use aarch64::wide_mux::edwards25519_pdouble;
         pub(crate) use aarch64::wide_mux::edwards25519_scalarmulbase;
-        pub(crate) use aarch64::wide_mux::edwards25519_scalarmuldouble;
+        pub(crate) use generic::edwards25519_msm::edwards25519_msm;
         pub(crate) use aarch64::mldsa::{
             mldsa_ntt, mldsa_intt, mldsa_nttunpack, mldsa_pointwise, mldsa_pointwise_acc,
             mldsa_reduce, mldsa_caddq, mldsa_chknorm, mldsa_decompose_32, mldsa_decompose_88,
