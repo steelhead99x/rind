@@ -91,8 +91,10 @@ fn assert_zeroed<R>(what: &str, op: impl Fn() -> R) {
 /// means something. These canaries call `independent` and `first_nonzero`, the
 /// comparisons the real checks use, and report the result instead of panicking:
 /// wasm32-wasip2 aborts on panic, and a `should_panic` test cannot run there.
-/// Native targets also have `should_panic` canaries that go through the
-/// `assert_*` wrappers, so a no-op arm there cannot pass unnoticed.
+/// Their own `assert!` aborts the wasm run when a canary misses, which still
+/// fails it, just without running the tests after it. Native targets also
+/// have `should_panic` canaries that go through the `assert_*` wrappers, so a
+/// no-op arm there cannot pass unnoticed.
 #[test]
 fn detects_a_leak() {
     let leaked = independent([[1u8; 32], [2u8; 32]], |key| {
@@ -215,9 +217,10 @@ fn rsa_generate() {
     if std::env::var_os("SLOW_TESTS").is_none() {
         return;
     }
-    // Under wasmtime, where `just wasm` sets SLOW_TESTS, larger sizes take
-    // far longer, so wasm generates RSA-2048 keys only. Key generation
-    // allocates the same way at every size.
+    // Under wasmtime, where `just wasm` sets SLOW_TESTS, the portable
+    // backend runs under a JIT and every freed block is copied, so larger
+    // sizes would take far longer: wasm generates RSA-2048 keys only, and
+    // `just portable` checks every size on the same 32-bit limbs natively.
     let sizes: &[KeySize] = if cfg!(target_family = "wasm") {
         &[KeySize::Rsa2048]
     } else {

@@ -590,8 +590,8 @@ The hash is cryptol-specs' FIPS 180-4 SHA-512, in `Rind/Sha2.lean`, with its
 block compression `processBlock_Common` transliterated from FIPS 180-4 and
 checked by `Rind/Sha2Test.lean` against its examples. Each theorem assumes
 `RunsSha512`: on x86_64 that rind picks aws-lc's AVX routine, on an Intel CPU
-with AVX but without AVX2, or OpenSSL's AVX2 routine, on a CPU with AVX2 but
-without the SHA512 instructions, whose proof is rind's HOL Light proof above,
+with AVX but without AVX2, or OpenSSL's AVX2 routine, on a CPU with AVX2,
+whose proof is rind's HOL Light proof above,
 which `Rind/X86_64/AwsLc.lean` restates as the axiom
 `sha512_block_data_order_avx2_spec`; on aarch64 only that rind's checks pass,
 as both of aws-lc's routines there have proofs: aws-lc-verification's of its
