@@ -3,6 +3,8 @@
 Status: first round not started. The board has been described as connected to
 the owner's network, but it was not found on 2026-11-19 (see "Access"). Fill in
 the host details before starting, then keep the tracking table below current.
+The owner supplies access details with the job; none are written in this file.
+Fork only: delete this file before any upstream branch merges from this one.
 
 ## Why this board
 
@@ -13,10 +15,14 @@ the owner has. It differs from every host measured so far:
   the Pi 4 and CM4: AES, GHASH, SHA-1 and SHA-256 run on aws-lc's NEON and
   scalar assembly, `rind::cpu::has_aes_hardware()` is false, and rind-rustls and
   rind-dimpl prefer ChaCha20-Poly1305.
-- **In-order, dual-issue core.** The A53 is the narrow core that fork PR #82
-  (`perf(aarch64): run s2n-bignum's narrow-multiplier schedules on narrow
-  cores`) targets. The Pi 4's A72 and the Pi 5's A76 are out of order, so only
-  this board and a Pi 3 exercise the narrow schedules on real silicon.
+- **In-order, dual-issue core.** Fork PR #82 (MERGED, `847a3e3c`: `perf(aarch64):
+  run s2n-bignum's narrow-multiplier schedules on narrow cores`) picks the
+  schedule from `MIDR_EL1` in `narrow_part()` (`rind/src/low/aarch64/cpu.rs`).
+  On `main` that list is the Cortex-A72 (`0xd08`, Pi 4), A76 (`0xd0b`, Pi 5) and
+  Neoverse N1 (`0xd0c`) only. The Cortex-A53 (`0xd03`) is not in it, so
+  unmodified `main` runs the `_alt` (wide) schedules on this board by default.
+  The A53 is the in-order core the narrow schedules were written for, so it is
+  the board to test whether `0xd03` belongs in the list.
 - **A multiplier that may not be constant-time.** PLATFORMS.md records that the
   A53's 64-bit multiply takes a cycle longer when both operands exceed 32 bits
   ([Gu and Shacham] 2.1, measured on a Pi 3), that Arm's manual documents no
@@ -33,10 +39,10 @@ the owner has. It differs from every host measured so far:
 
 Fill in before starting:
 
-- Host / address (it was not on 192.168.90.0/24 by Raspberry Pi MAC prefix, SSH
-  scan or mDNS on 2026-11-19; `192.168.90.86` has a Raspberry Pi MAC but only
-  ports 80 and 443 open, so it is something else; check the USB gadget
-  interface and the serial console too):
+- Host / address (it was not on the LAN by Raspberry Pi MAC prefix, SSH scan or
+  mDNS on 2026-11-19; one other Raspberry Pi MAC answered only on ports 80 and
+  443, so it is something else; check the USB gadget interface and the serial
+  console too):
 - User and key:
 - OS, bitness (`uname -m`, `getconf LONG_BIT`), kernel:
 - CPU part (expect `0xd03`), `Features` line (expect no `aes`, `pmull`,
@@ -82,10 +88,15 @@ Confirm the CPU first and put the output in the first PR comment:
    may fail to build for the board (openssl-sys); the Pi 2B and Jetson workers
    used a small standalone A/B crate: reuse it. Do it for the aarch64 build
    and, if the OS allows, the armv7 build.
-2. **Narrow-schedule check for #82.** On the A53, compare s2n-bignum's narrow
-   and wide multiplier schedules for Ed25519, X25519 and P-256 (forcing flags in
-   `rind/src/low/aarch64/cpu.rs`: `cpu_forced`), and check that the CPU-part
-   table classifies `0xd03` as narrow.
+2. **Narrow-schedule check for #82.** On `main`, `narrow_part()` does not list
+   `0xd03`, so the default on this board is the `_alt` (wide) schedule. Compare
+   it with the narrow schedule for Ed25519, X25519 and P-256 on the A53. Both
+   toggles need a debug build or a release build with `RUSTFLAGS='--cfg
+   rind_cpu_disable'`: `RIND_CPU_DISABLE_wide_mul=1` selects the narrow
+   schedules (the #82 code path), `RIND_CPU_FORCE_wide_mul=1` selects `_alt`
+   (see `wide_toggle` in `rind/src/low/aarch64/cpu.rs`). Interleave the two
+   variants, and if narrow wins reproducibly add `0xd03` to `narrow_part()` and
+   its test. If `_alt` wins, say so and leave the list alone.
 3. **Multiplier timing.** Measure whether the A53's multiply time depends on its
    operands, in the style of [Gu and Shacham] 2.1: 64-bit `mul` and `umulh` on
    aarch64, and `umull`, `smull` and `mla` on 32-bit arm, with operands whose
