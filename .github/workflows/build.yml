@@ -230,9 +230,9 @@ jobs:
           echo "CC_${CARGO_BUILD_TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
 
       - name: Run tests (debug)
-        run: cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m
+        run: cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-digest -p rind-aead -p rind-signature -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m
       - name: Run tests (release)
-        run: env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --release
+        run: env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-digest -p rind-aead -p rind-signature -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --release
 
   # 32-bit x86 Windows on the portable backend, which the x86_64 runner runs
   # natively. The qemu job tests Linux's, and the android job Android's.
@@ -253,9 +253,9 @@ jobs:
           targets: i686-pc-windows-msvc
 
       - name: Run tests (debug)
-        run: cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked
+        run: cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-digest -p rind-aead -p rind-signature -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked
       - name: Run tests (release)
-        run: env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked --release
+        run: env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-digest -p rind-aead -p rind-signature -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked --release
 
   # 32-bit ARM runs libcrux, or aws-lc's assembly for ChaCha20, NEON, and the
   # crypto extension. The recipe builds and lints Android and Linux gnueabihf,
@@ -521,7 +521,7 @@ jobs:
       - name: Build tests (device)
         run: |
           export "$(rustc --print deployment-target --target aarch64-apple-ios)"
-          cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios --no-run
+          cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-digest -p rind-aead -p rind-signature -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios --no-run
 
       - name: Boot a simulator
         run: |
@@ -535,8 +535,8 @@ jobs:
           RIND_TEST_ARM_CRYPTO_EXT: 1
         run: |
           export "$(rustc --print deployment-target --target aarch64-apple-ios-sim)"
-          cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios-sim
-          env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios-sim --release
+          cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-digest -p rind-aead -p rind-signature -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios-sim
+          env SLOW_TESTS=1 cargo test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-digest -p rind-aead -p rind-signature -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --target aarch64-apple-ios-sim --release
 
   # cross's images (see Cross.toml) hold an Android system for the tests, and
   # run aarch64, armv7, and i686 under qemu-user. The aarch64 and armv7 CPUs
@@ -585,4 +585,4 @@ jobs:
         env:
           CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: true
           CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS: true
-        run: env ${{ matrix.expect }} cross test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked --release --target ${{ matrix.target }}
+        run: env ${{ matrix.expect }} cross test -p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-digest -p rind-aead -p rind-signature -p rind-aws-lc-rs -p rind-dimpl -p rind-openmls -p rind-str0m --locked --release --target ${{ matrix.target }}

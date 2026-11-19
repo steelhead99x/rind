@@ -173,7 +173,7 @@ fn a_public_key_rind_refuses_is_an_error() {
     let modulus =
         (BoxedUint::one_with_precision(9024) << 8999) | BoxedUint::one_with_precision(9024);
     let exponent = BoxedUint::from(65537u64);
-    let key = rsa::PublicKey::new_with_max_size(modulus, exponent, 16384).unwrap();
+    let key = rsa::PublicKey::new_with_size_limits(modulus, exponent, 1024..=16384).unwrap();
 
     type Hash = rind_digest::sha2::Sha256;
     assert!(pkcs1v15::VerifyingKey::<Hash>::try_new(key.clone()).is_err());

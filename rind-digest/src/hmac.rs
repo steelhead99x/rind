@@ -103,7 +103,7 @@ impl<D: HmacHash> Update for Hmac<D> {
 }
 
 impl<D: HmacHash> FixedOutput for Hmac<D> {
-    fn finalize_into(self, out: &mut Output<Self>) {
+    fn finalize_into(mut self, out: &mut Output<Self>) {
         out.copy_from_slice(self.context.sign().as_ref());
     }
 }
@@ -116,8 +116,7 @@ impl<D: HmacHash> Reset for Hmac<D> {
 
 impl<D: HmacHash> FixedOutputReset for Hmac<D> {
     fn finalize_into_reset(&mut self, out: &mut Output<Self>) {
-        let context =
-            core::mem::replace(&mut self.context, rind::hmac::Context::with_key(&self.key));
-        out.copy_from_slice(context.sign().as_ref());
+        // Signing starts a new message under the same key, which is the reset.
+        out.copy_from_slice(self.context.sign().as_ref());
     }
 }

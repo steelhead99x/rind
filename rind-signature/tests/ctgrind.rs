@@ -5,7 +5,12 @@
 //! index that depends on them. Outputs that are public by design are marked
 //! defined before the test checks them. The wrappers copy no key: each passes
 //! the bytes it is given to rind, which marks and wipes what it keeps.
-//! RSA is not here: its secret path is `rsa`'s own encoder, not this crate's.
+//! RSA is not here: its secret path is `rsa`'s own `to_pkcs1_der`, not this crate's. Under
+//! memcheck with the private exponent and primes marked secret, that encoder's bit-width
+//! and division steps (`bit_width_vartime`, `div_rem`) are flagged, so a test here would
+//! fail on `rsa`'s code until `rsa` encodes in constant time. The key is already an
+//! `rsa::PrivateKey` the caller built with `rsa`; rind's own RSA is checked in `rind`'s
+//! suite. (Written by Claude Sonnet 5.5)
 
 use crabgrind::memcheck::{self, MemState};
 use crabgrind::valgrind::{self, RunningMode};

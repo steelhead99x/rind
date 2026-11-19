@@ -14,7 +14,7 @@ fi
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 # The bench and fuzz crates compare against other libraries, not backends.
-packages=(-p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-dimpl -p rind-openmls)
+packages=(-p rind -p rind-rustls -p rind-jsonwebtoken -p rind-object-store -p rind-rcgen -p rind-ring -p rind-digest -p rind-aead -p rind-signature -p rind-dimpl -p rind-openmls)
 
 # The explicit target keeps these builds apart from the host's, whose flags
 # differ.
