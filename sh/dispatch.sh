@@ -490,6 +490,11 @@ step() {
                 run cargo clippy -p rind --lib --locked --target wasm32-wasip2 -- --deny warnings
                 run cargo clippy -p rind --lib --locked --target wasm32-unknown-unknown \
                     --features getrandom/wasm_js -- --deny warnings
+                # The library clippy never builds rind's test binaries for
+                # wasm, whose `cctv` and `heap_scratch` carry wasm-only code
+                # in place of aws-lc; the nightly `just wasm` runs them.
+                run cargo clippy -p rind --test heap_scratch --test cctv --locked \
+                    --target wasm32-wasip2 -- --deny warnings
             fi
             # A target with no `std` for each architecture rind has assembly
             # for; x86_64's, which disables SSE2, runs the portable backend.
@@ -500,7 +505,12 @@ step() {
             # which crashes LLVM there, unless the caller picks `serial`.
             # See UPSTREAM.md, "curve25519-dalek cannot compile without SSE".
             local rustflags
-            for target in aarch64:aarch64-unknown-none arm:armv7a-none-eabi portable:x86_64-unknown-none; do
+            # And for the microcontroller targets it must keep off the arm
+            # backend (M-profile is Thumb-only, with no NEON), two of them
+            # without compare-and-swap, which build `reuse_cache_without_cas`:
+            # `thumbv6m-none-eabi` and `riscv32imc-unknown-none-elf`.
+            for target in aarch64:aarch64-unknown-none arm:armv7a-none-eabi portable:x86_64-unknown-none \
+                portable:thumbv6m-none-eabi portable:thumbv7em-none-eabihf portable:riscv32imc-unknown-none-elf; do
                 if reaches "$backends" "${target%%:*}"; then
                     rustflags='--cfg getrandom_backend="custom"'
                     [[ $target != *x86_64* ]] || rustflags+=' --cfg curve25519_dalek_backend="serial"'

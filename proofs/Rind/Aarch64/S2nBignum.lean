@@ -274,6 +274,14 @@ axiom p384_montjscalarmul_spec (res : Std.Array U64 18#usize) (scalar : Std.Arra
       ∀ P, p384OnCurve P → p384Represents P (tripleNat6 point.val) →
         p384Represents (p384Pow P (wordsNat scalar.val)) (tripleNat6 r.val) ⦄
 
+/-- `P384_MONTJADD_ALT_SUBROUTINE_CORRECT`,
+https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/p384_montjadd_alt.ml#L5225 -/
+@[step]
+axiom p384_montjadd_spec (p3 p1 p2 : Std.Array U64 18#usize) :
+    low.aarch64.p384_montjadd.p384_montjadd p3 p1 p2 ⦃ r =>
+      ∀ P1 P2, p384Represents P1 (tripleNat6 p1.val) → p384Represents P2 (tripleNat6 p2.val) →
+        (P1 = P2 → P2 = none) → p384Represents (p384Add P1 P2) (tripleNat6 r.val) ⦄
+
 /-- `P384_MONTJDOUBLE_ALT_SUBROUTINE_CORRECT`,
 https://github.com/awslabs/s2n-bignum/blob/3f01260ff1bd2577abf0117ce45aa008bc243a80/arm/proofs/p384_montjdouble_alt.ml#L3625 -/
 @[step]
