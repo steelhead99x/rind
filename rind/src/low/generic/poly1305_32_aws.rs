@@ -11,7 +11,7 @@ use aws_lc_sys::{CRYPTO_poly1305_finish, CRYPTO_poly1305_init, CRYPTO_poly1305_u
 /// One tag from `CRYPTO_poly1305_init`, `CRYPTO_poly1305_update`, and
 /// `CRYPTO_poly1305_finish` (`include/openssl/poly1305.h`).
 /// `poly1305_state` there is `uint8_t[512]`.
-pub(super) fn tag(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
+pub(crate) fn tag(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
     let mut state = [0u8; 512];
     let mut mac = [0u8; 16];
     let state_ptr = (&mut state as *mut [u8; 512]).cast::<aws_lc_sys::poly1305_state>();

@@ -39,7 +39,11 @@ fn cipher(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], inout: &mut [u8], seal: 
     let mut poly = Poly1305::new(&poly_key);
 
     // AAD || pad(AAD) || ciphertext || pad(ciphertext) || len_64(AAD) || len_64(ciphertext)
-    let pad = |poly: &mut Poly1305, len: usize| poly.add_bytes(&[0u8; 16][..(16 - len % 16) % 16]);
+    let pad = |poly: &mut Poly1305, len: usize| {
+        if !len.is_multiple_of(16) {
+            poly.add_bytes(&[0u8; 16][..16 - len % 16]);
+        }
+    };
     poly.add_bytes(aad);
     pad(&mut poly, aad.len());
     if seal {
@@ -50,7 +54,11 @@ fn cipher(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], inout: &mut [u8], seal: 
         chacha.cipher(inout);
     }
     pad(&mut poly, inout.len());
-    poly.add_bytes(&(aad.len() as u64).to_le_bytes());
-    poly.add_bytes(&(inout.len() as u64).to_le_bytes());
+    // Both lengths are public, and fill one block, so Poly1305 takes them in
+    // one update, with no partial-block buffering.
+    let mut lengths = [0u8; 16];
+    lengths[..8].copy_from_slice(&(aad.len() as u64).to_le_bytes());
+    lengths[8..].copy_from_slice(&(inout.len() as u64).to_le_bytes());
+    poly.add_bytes(&lengths);
     poly.finish()
 }

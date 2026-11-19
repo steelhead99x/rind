@@ -310,7 +310,7 @@ fn read32(bytes: &[u8], at: usize) -> u32 {
 // file that has both, so the call lives next to this one.
 #[cfg(all(test, not(any(miri, target_family = "wasm"))))]
 #[path = "poly1305_32_aws.rs"]
-mod aws;
+pub(crate) mod aws;
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

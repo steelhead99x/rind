@@ -135,7 +135,7 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | AES-KW, AES-KWP, AES-CBC | Graviola + rind | aws-lc + rind |  | aws-lc + rind |
 | ChaCha20 | Graviola |  | HACL* ✓ | HACL* ✓ |
 | ChaCha20 (header protection) | HACL* ✓ + rind |  |  |  |
-| ChaCha20-Poly1305, XChaCha20-Poly1305 | verified-garbage | aws-lc ⚡ | HACL* rounds + 26-bit rind | HACL* rounds + Graviola; 26-bit rind when `rind_limb` is 32 |
+| ChaCha20-Poly1305, XChaCha20-Poly1305 | verified-garbage | aws-lc ⚡ | HACL* rounds + 32-bit-word rind | HACL* rounds + Graviola; 26-bit rind when `rind_limb` is 32 |
 | MD5 | rind |  |  |  |
 | SHA-1 | rind | aws-lc |  | rind |
 | SHA-256 | aws-lc ⚡ | aws-lc | rind; aws-lc ⚡ with the crypto extension | rind; ESP-IDF Xtensa runs the 16-round body from IRAM |
@@ -1052,11 +1052,15 @@ size. Its NEON routines took up to 1.06 of aws-lc's time at 32 to 512 bytes
 on Apple's M4, though 0.65 to 0.82 opening 256 bytes and up, so CPUs
 without SVE2 keep aws-lc's.
 
-Elsewhere, 32-bit `arm` runs HACL*'s rounds for ChaCha20 and rind's 26-bit
-limbs for Poly1305, in separate passes, as on the portable backend. aws-lc's
-`chacha-armv4` and NEON Poly1305 beat them from 1200 bytes up (1.26 times the
-time at 1200 B and 1.44 times at 16 KB for the whole seal, on a Cortex-A7), and
-the Rust is faster at 32 and 64 bytes (0.72 and 0.75 times).
+Elsewhere, 32-bit `arm` runs ChaCha20 on HACL*'s rounds and Poly1305 on
+rind's 32-bit words, the radix of OpenSSL's `poly1305-armv4` integer path:
+sixteen `umlal` and four small multiplies a block, against twenty-five for
+26-bit limbs. 32-bit Arm NEON intrinsics are unstable on the toolchain this
+crate builds with, so this backend does not ship a NEON keystream or a NEON
+Poly1305. The state wipes itself on drop.
+aws-lc's `chacha-armv4` and NEON Poly1305 beat that from 1200 bytes up (1.26 times
+the whole seal's time at 1200 B and 1.44 times at 16 KB, on a Cortex-A7), and the
+Rust is faster at 32 and 64 bytes (0.72 and 0.75 times).
 
 [Graviola]: https://github.com/ctz/graviola
 [cifra]: https://github.com/ctz/cifra
