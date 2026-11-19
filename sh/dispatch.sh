@@ -112,9 +112,9 @@ module rs '^(rind[^/]*/|fuzz/|thirdparty/|Cargo\.(toml|lock)$|\.rustfmt(\.unstab
 # armv7 builds run in nix's cross shells.
 cross_tools=cargo
 [[ $(uname -s) != Linux ]] || cross_tools='cargo nix'
-# `sh/bare-metal.sh` is this module's script. It is not under `rind/src/`, so
-# `reach` treats a change to it as every backend.
-module cross '^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|rind-bench/Cargo\.toml$|sh/bare-metal(-test)?\.sh$|Cargo\.(toml|lock)$|flake\.(nix|lock)$)' \
+# `sh/bare-metal.sh` and `sh/bare-metal-rustc` are this module's scripts. They
+# are not under `rind/src/`, so `reach` treats a change to them as every backend.
+module cross '^(rind/(src/|tests/|Cargo\.toml$|build\.rs$)|rind-bench/Cargo\.toml$|sh/bare-metal((-test)?\.sh|-rustc)$|Cargo\.(toml|lock)$|flake\.(nix|lock)$)' \
     tools="$cross_tools" compiles
 # The published adapters' wasm32 builds, and the tests the nightly runs there.
 # rind's manifest picks the random source rind-ring's browser feature reaches.
