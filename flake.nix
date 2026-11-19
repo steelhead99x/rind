@@ -73,6 +73,10 @@
               "aarch64-unknown-none"
               "armv7a-none-eabi"
               "x86_64-unknown-none"
+              # Microcontrollers: M-profile (Thumb only), two without compare-and-swap.
+              "riscv32imc-unknown-none-elf"
+              "thumbv6m-none-eabi"
+              "thumbv7em-none-eabihf"
             ];
           };
 

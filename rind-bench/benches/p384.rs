@@ -54,6 +54,7 @@ fn ecdh(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{agreement, error, rand};
         let rng = rand::SystemRandom::new();
@@ -158,6 +159,7 @@ fn keygen(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{agreement, rand};
         let rng = rand::SystemRandom::new();
@@ -228,6 +230,7 @@ fn ecdsa_verify(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         let public_key = aws_lc_rs::signature::UnparsedPublicKey::new(
             &aws_lc_rs::signature::ECDSA_P384_SHA384_FIXED,
@@ -302,6 +305,7 @@ fn ecdsa_verify(c: &mut Criterion) {
     let mut group = c.benchmark_group("p384-ecdsa-verify-parsed");
     group.throughput(Throughput::Elements(1));
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::signature;
         let public_key =
@@ -327,6 +331,7 @@ fn ecdsa_verify(c: &mut Criterion) {
     let mut group = c.benchmark_group("p384-ecdsa-verify-digest");
     group.throughput(Throughput::Elements(1));
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{digest, signature};
         let public_key =
@@ -397,6 +402,7 @@ fn ecdsa_sign(c: &mut Criterion) {
         })
     });
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{rand, signature};
         let rng = rand::SystemRandom::new();
@@ -483,6 +489,7 @@ fn ecdsa_sign(c: &mut Criterion) {
     let mut group = c.benchmark_group("p384-ecdsa-sign-digest");
     group.throughput(Throughput::Elements(1));
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{digest, rand, signature};
         let private_key = signature::EcdsaKeyPair::generate_pkcs8(
@@ -542,6 +549,7 @@ fn stored(c: &mut Criterion) {
     let public_key: &[u8] = PUBLIC_KEY;
     let scalar = [1u8; 48];
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::{agreement, error};
         let key = agreement::PrivateKey::from_private_key(&agreement::ECDH_P384, &scalar).unwrap();

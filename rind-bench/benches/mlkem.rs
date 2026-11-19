@@ -141,6 +141,7 @@ fn mlkem768_keygen(c: &mut Criterion) {
         });
     }
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::kem;
 
@@ -216,6 +217,7 @@ fn mlkem768_encaps(c: &mut Criterion) {
         });
     }
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::kem;
 
@@ -316,6 +318,7 @@ fn mlkem768_decaps(c: &mut Criterion) {
         });
     }
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::kem;
 
@@ -422,6 +425,7 @@ fn mlkem768_combined(c: &mut Criterion) {
         });
     }
 
+    #[cfg(not(any(target_arch = "xtensa", target_os = "none")))]
     group.bench_function("aws-lc-rs", |b| {
         use aws_lc_rs::kem;
 
