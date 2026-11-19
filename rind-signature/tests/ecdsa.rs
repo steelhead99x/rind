@@ -1,7 +1,6 @@
 //! ECDSA on each curve against RustCrypto's own: the same public key for the
 //! same scalar, each verifying the other's signatures in both encodings, and
 //! the malformed scalars, points, and signatures both refuse.
-#![cfg(feature = "signature-3")]
 
 use signature::{MultipartSigner, MultipartVerifier, Signer, Verifier};
 
@@ -41,7 +40,7 @@ macro_rules! curve_tests {
     ($mod:ident, $ours:ident, $theirs:ident, $curve:ident, $len:expr) => {
         mod $mod {
             use ::$theirs::ecdsa as rc;
-            use rind_rustcrypto::$ours::ecdsa as rind;
+            use rind_signature::$ours::ecdsa as rind;
 
             use super::*;
 

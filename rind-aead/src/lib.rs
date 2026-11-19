@@ -1,5 +1,9 @@
-//! `aead` 0.6's traits: AES-GCM and ChaCha20-Poly1305 as `Aead` and
+//! `aead` 0.6's traits on rind: AES-GCM and ChaCha20-Poly1305 as `Aead` and
 //! `AeadInOut`, with the 12-byte nonce and 16-byte tag RustCrypto's aliases fix.
+//!
+//! Each module mirrors the RustCrypto crate it stands in for (`aes_gcm`,
+//! `chacha20poly1305`). Every type is a thin wrapper that calls rind; nothing
+//! here is a primitive. The README lists what rind cannot back.
 
 // One wrapper over rind's `aead::Key`, which holds the expanded key and wipes
 // it on drop. The wrapper copies no key bytes: `KeyInit::new` hands the slice

@@ -2,7 +2,6 @@
 //! the same (the scheme is deterministic), each verifying the other's, PSS
 //! signatures from `rsa` verifying under rind's key, and everything altered
 //! refused by both.
-#![cfg(all(feature = "signature-3", feature = "digest-0_11"))]
 
 use rsa::pkcs8::DecodePrivateKey;
 use signature::{MultipartSigner, MultipartVerifier, SignatureEncoding, Signer, Verifier};
@@ -34,10 +33,10 @@ macro_rules! pkcs1v15_tests {
     ($($test:ident: $ours:ident, $theirs:ty;)*) => {$(
         #[test]
         fn $test() {
-            use rind_rustcrypto::rsa::pkcs1v15 as rind;
+            use rind_signature::rsa::pkcs1v15 as rind;
             let mut rng = Xorshift(0x9e37_79b9_7f4a_7c15);
             let key = private_key();
-            let ours = rind::SigningKey::<rind_rustcrypto::sha2::$ours>::try_new(key.clone()).unwrap();
+            let ours = rind::SigningKey::<rind_digest::sha2::$ours>::try_new(key.clone()).unwrap();
             let theirs = rsa::pkcs1v15::SigningKey::<$theirs>::new(key.clone());
             let our_verifier = ours.verifying_key();
             let their_verifier = rsa::pkcs1v15::VerifyingKey::<$theirs>::new(rsa::PublicKey::from(&key));
@@ -80,7 +79,7 @@ macro_rules! pkcs1v15_tests {
                 }
             }
             // Another hash is another signature.
-            let wrong_hash = rind::VerifyingKey::<rind_rustcrypto::sha2::Sha512>::new(rsa::PublicKey::from(&key));
+            let wrong_hash = rind::VerifyingKey::<rind_digest::sha2::Sha512>::try_new(rsa::PublicKey::from(&key)).unwrap();
             if stringify!($ours) != "Sha512" {
                 assert!(wrong_hash.verify(&msg, &sig).is_err());
             }
@@ -98,14 +97,14 @@ macro_rules! pss_tests {
     ($($test:ident: $ours:ident, $theirs:ty;)*) => {$(
         #[test]
         fn $test() {
-            use rind_rustcrypto::rsa::pss as rind;
+            use rind_signature::rsa::pss as rind;
             let mut rng = Xorshift(0xd1b5_4a32_d192_ed03);
             let key = private_key();
             let theirs = rsa::pss::SigningKey::<$theirs>::new(key.clone());
             let public = rsa::PublicKey::from(&key);
-            let ours = rind::VerifyingKey::<rind_rustcrypto::sha2::$ours>::new(public.clone());
-            let any_salt = rind::VerifyingKey::<rind_rustcrypto::sha2::$ours>::new_with_auto_salt_len(public);
-            let signer = rind::SigningKey::<rind_rustcrypto::sha2::$ours>::try_new(key.clone()).unwrap();
+            let ours = rind::VerifyingKey::<rind_digest::sha2::$ours>::try_new(public.clone()).unwrap();
+            let any_salt = rind::VerifyingKey::<rind_digest::sha2::$ours>::try_new_with_auto_salt_len(public).unwrap();
+            let signer = rind::SigningKey::<rind_digest::sha2::$ours>::try_new(key.clone()).unwrap();
             for &len in LENGTHS {
                 let msg = rng.vec(len);
                 let sig = theirs.try_sign(&msg).unwrap();
@@ -156,8 +155,30 @@ fn generic_sign_verify<
 
 #[test]
 fn a_generic_function_runs_on_rind() {
-    use rind_rustcrypto::rsa::pkcs1v15 as rind;
+    use rind_signature::rsa::pkcs1v15 as rind;
     let key = private_key();
-    let ours = rind::SigningKey::<rind_rustcrypto::sha2::Sha256>::try_new(key).unwrap();
+    let ours = rind::SigningKey::<rind_digest::sha2::Sha256>::try_new(key).unwrap();
     generic_sign_verify(&ours, &ours.verifying_key(), b"generic over Signer");
+}
+
+/// A public key `rsa` holds but rind refuses, as a modulus above 8192 bits: a
+/// verifying key from it is an error, never a panic, in both schemes and every
+/// constructor.
+#[test]
+fn a_public_key_rind_refuses_is_an_error() {
+    use rind_signature::rsa::{pkcs1v15, pss};
+    use rsa::BoxedUint;
+
+    // 2^8999 + 1 is odd and 9000 bits long; rsa takes it once its size limit is raised.
+    let modulus =
+        (BoxedUint::one_with_precision(9024) << 8999) | BoxedUint::one_with_precision(9024);
+    let exponent = BoxedUint::from(65537u64);
+    let key = rsa::PublicKey::new_with_max_size(modulus, exponent, 16384).unwrap();
+
+    type Hash = rind_digest::sha2::Sha256;
+    assert!(pkcs1v15::VerifyingKey::<Hash>::try_new(key.clone()).is_err());
+    assert!(pkcs1v15::VerifyingKey::<Hash>::try_from(key.clone()).is_err());
+    assert!(pss::VerifyingKey::<Hash>::try_new(key.clone()).is_err());
+    assert!(pss::VerifyingKey::<Hash>::try_new_with_auto_salt_len(key.clone()).is_err());
+    assert!(pss::VerifyingKey::<Hash>::try_from(key).is_err());
 }

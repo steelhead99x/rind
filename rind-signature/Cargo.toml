@@ -1,0 +1,35 @@
+[package]
+name = "rind-signature"
+version = "3.0.0"
+edition = "2024"
+repository = "https://github.com/kixel-ai/rind"
+homepage = "https://rind.kixel.ai"
+license = "Apache-2.0 OR ISC OR MIT-0"
+description = "RustCrypto's signature 3 traits on rind"
+categories = ["cryptography"]
+rust-version.workspace = true
+readme = "README.md"
+
+[dependencies]
+rind = { version = "0.3.2", path = "../rind" }
+# RSA's key types are generic over a hash, which this crate names with rind-digest's.
+rind-digest = { version = "0.11.0", path = "../rind-digest" }
+signature = { version = "3.0.0", default-features = false }
+ed25519 = { version = "3", default-features = false }
+ecdsa = { version = "0.17", default-features = false, features = ["der"] }
+p256 = { version = "0.14", default-features = false, features = ["ecdsa-core"] }
+p384 = { version = "0.14", default-features = false, features = ["ecdsa-core"] }
+p521 = { version = "0.14", default-features = false, features = ["ecdsa-core"] }
+ml-dsa = { version = "0.1.2", default-features = false }
+rsa = { version = "0.10", default-features = false, features = ["encoding", "pkcs1v15"] }
+
+[dev-dependencies]
+sha2 = "0.11"
+ed25519-dalek = "3"
+rsa = { version = "0.10", features = ["encoding", "pkcs1v15"] }
+p256 = { version = "0.14", features = ["ecdsa"] }
+p384 = { version = "0.14", features = ["ecdsa"] }
+p521 = { version = "0.14", features = ["ecdsa"] }
+# Requests reach valgrind only once `rind/__ctgrind` turns on crabgrind's default
+# features, as `admin/ctgrind` does; otherwise they build as no-ops.
+crabgrind = { version = "0.4", default-features = false }

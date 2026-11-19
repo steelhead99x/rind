@@ -1,4 +1,9 @@
-//! `digest` 0.11's traits: hashes as `Digest`, HMAC as `Mac`.
+//! `digest` 0.11's traits on rind: SHA-2 and SHA-3 as `Digest`, HMAC as `Mac`.
+//!
+//! Each module mirrors the RustCrypto crate it stands in for (`sha2`, `sha3`,
+//! `hmac`), so code generic over those traits runs on rind by naming a different
+//! type. Every type is a thin wrapper that calls rind; nothing here is a
+//! primitive or an encoding. The README lists what rind cannot back.
 
 // One wrapper type over rind's `digest::Context` for each hash. rind's context
 // is `Clone`, so a clone forks the running hash as `Clone` promises, and it

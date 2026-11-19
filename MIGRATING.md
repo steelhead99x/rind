@@ -495,36 +495,35 @@ dependency and its `use` lines change. It offers the same ciphersuites; its
 | `OpenMlsRustCrypto`, `RustCrypto`, `RandError`, `MemoryStorage`, `MemoryStorageError` | the same names in `rind_openmls` |
 | the `test-utils` and `extensions-draft` features | the same features |
 
-### rind-rustcrypto
+### rind-digest, rind-aead, rind-signature
 
-rind-rustcrypto gives rind's algorithms RustCrypto's traits, so code generic
-over `Digest`, `Mac`, `Aead`, `Signer`, and `Verifier` runs on rind by naming a
-different type. Each module keeps the path of the RustCrypto crate it stands in
-for, and each trait crate and version is a feature (`digest-0_11`, `aead-0_6`,
-`signature-3`); all three are on by default. Its
-[README](rind-rustcrypto/README.md) lists what rind cannot back, including the
-whole of `kem`'s traits, which need a way to give rind the caller's random
-number generator.
+These give rind's algorithms RustCrypto's traits, one crate per trait crate, so
+code generic over `Digest`, `Mac`, `Aead`, `Signer`, and `Verifier` runs on rind
+by naming a different type, and a new major of one trait crate bumps only its
+own adapter. Each module keeps the path of the RustCrypto crate it stands in
+for. Each README lists what rind cannot back: `kem`'s traits, whose crate
+`rind-kem` waits on rind's `kem::Message`.
 
-| RustCrypto | rind-rustcrypto | rind's own |
+| RustCrypto | rind adapter | rind's own |
 |---|---|---|
-| `sha2::{Sha256, Sha384, Sha512, Sha512_256}` | `rind_rustcrypto::sha2` | `digest::{SHA256, SHA384, SHA512, SHA512_256}` |
-| `sha3::{Sha3_256, Sha3_384, Sha3_512}` | `rind_rustcrypto::sha3` | `digest::{SHA3_256, SHA3_384, SHA3_512}` |
-| `hmac::Hmac<Sha256 \| Sha384 \| Sha512>` | `rind_rustcrypto::hmac::Hmac` | `hmac::{Key, Context}` |
-| `aes_gcm::{Aes128Gcm, Aes256Gcm}` | `rind_rustcrypto::aes_gcm` | `aead::{AES_128_GCM, AES_256_GCM}` |
-| `chacha20poly1305::ChaCha20Poly1305` | `rind_rustcrypto::chacha20poly1305` | `aead::CHACHA20_POLY1305` |
-| `ed25519_dalek::{SigningKey, VerifyingKey}` | `rind_rustcrypto::ed25519` | `ed25519::{KeyPair, PublicKey}` |
-| `p256::ecdsa`, `p384::ecdsa`, `p521::ecdsa` | `rind_rustcrypto::{p256, p384, p521}::ecdsa` | `ecdsa::{KeyPair, PublicKey}` |
-| `ml_dsa::{SigningKey, VerifyingKey}` | `rind_rustcrypto::ml_dsa` | `ml_dsa::{KeyPair, PublicKey}` |
-| `rsa::pkcs1v15`, `rsa::pss` | `rind_rustcrypto::rsa` | `rsa::{KeyPair, PublicKey}` |
-| `ml_kem` | none | `kem::{DecapsulationKey, EncapsulationKey}` |
+| `sha2::{Sha256, Sha384, Sha512, Sha512_256}` | `rind_digest::sha2` | `digest::{SHA256, SHA384, SHA512, SHA512_256}` |
+| `sha3::{Sha3_256, Sha3_384, Sha3_512}` | `rind_digest::sha3` | `digest::{SHA3_256, SHA3_384, SHA3_512}` |
+| `hmac::Hmac<Sha256 \| Sha384 \| Sha512>` | `rind_digest::hmac::Hmac` | `hmac::{Key, Context}` |
+| `aes_gcm::{Aes128Gcm, Aes256Gcm}` | `rind_aead::aes_gcm` | `aead::{AES_128_GCM, AES_256_GCM}` |
+| `chacha20poly1305::ChaCha20Poly1305` | `rind_aead::chacha20poly1305` | `aead::CHACHA20_POLY1305` |
+| `ed25519_dalek::{SigningKey, VerifyingKey}` | `rind_signature::ed25519` | `ed25519::{KeyPair, PublicKey}` |
+| `p256::ecdsa`, `p384::ecdsa`, `p521::ecdsa` | `rind_signature::{p256, p384, p521}::ecdsa` | `ecdsa::{KeyPair, PublicKey}` |
+| `ml_dsa::{SigningKey, VerifyingKey}` | `rind_signature::ml_dsa` | `ml_dsa::{KeyPair, PublicKey}` |
+| `rsa::pkcs1v15`, `rsa::pss` | `rind_signature::rsa`, over `rind_digest::sha2` hashes | `rsa::{KeyPair, PublicKey}` |
+| `ml_kem` | none yet | `kem::{DecapsulationKey, EncapsulationKey}` |
 
 The differences: rind signs ECDSA, ML-DSA, and PSS with fresh randomness where
 RustCrypto's `Signer` is deterministic (ECDSA, ML-DSA), so a signature differs
 for the same key and message and verifies under both; PKCS#1 v1.5 and Ed25519
 are byte for byte the same. rind refuses a small-order Ed25519 key and an RSA
-modulus under 2048 bits, which RustCrypto accepts, and a refused AEAD open
-leaves a cleared buffer.
+modulus under 2048 bits or over 8192 bits, which RustCrypto accepts, so RSA's
+`VerifyingKey` and `SigningKey` are built with `try_new` and `TryFrom`, and a
+refused AEAD open leaves a cleared buffer.
 
 ## Crates with their own crypto backend
 

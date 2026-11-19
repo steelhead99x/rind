@@ -1,7 +1,6 @@
 //! ML-DSA at each parameter set against the `ml-dsa` crate: the same public key
 //! for the same seed, each verifying the other's signatures, and every
 //! alteration both refuse.
-#![cfg(feature = "signature-3")]
 
 use ml_dsa::{MlDsa44, MlDsa65, MlDsa87, Signature};
 use signature::{Keypair, MultipartSigner, MultipartVerifier, Signer, Verifier};
@@ -21,7 +20,7 @@ impl Xorshift {
     }
 }
 
-use rind_rustcrypto::ml_dsa::{Params, SigningKey as Ours};
+use rind_signature::ml_dsa::{Params, SigningKey as Ours};
 
 fn seed(rng: &mut Xorshift) -> ml_dsa::Seed {
     ml_dsa::Seed::try_from(rng.vec(32).as_slice()).unwrap()

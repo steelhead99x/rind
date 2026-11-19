@@ -12,7 +12,7 @@ use core::marker::PhantomData;
 use ::rsa::pkcs1::{EncodeRsaPrivateKey, EncodeRsaPublicKey};
 use ::signature::{Error, MultipartSigner, MultipartVerifier, Signer, Verifier};
 
-use crate::sha2::{Sha256, Sha384, Sha512};
+use rind_digest::sha2::{Sha256, Sha384, Sha512};
 
 mod sealed {
     pub trait Sealed {}
@@ -61,10 +61,12 @@ hash! {
     Sha512: PKCS1_SHA512, PSS_SHA512, PSS_SHA512_ANY_SALT;
 }
 
-/// The PKCS#1 `RSAPublicKey` DER of a key, which rind parses.
-fn public_key_der(key: &::rsa::PublicKey) -> rind::rsa::PublicKey {
-    let der = key.to_pkcs1_der().expect("a public key encodes");
-    rind::rsa::PublicKey::new(der.as_bytes()).expect("rsa's keys are well formed")
+/// The key as rind holds it, parsed from its PKCS#1 `RSAPublicKey` DER. rind
+/// refuses keys `rsa` holds (a modulus under 1024 or over 8192 bits, say), so
+/// this can fail where `rsa`'s own `VerifyingKey::new` cannot.
+fn public_key_der(key: &::rsa::PublicKey) -> Result<rind::rsa::PublicKey, Error> {
+    let der = key.to_pkcs1_der().map_err(|_| Error::new())?;
+    rind::rsa::PublicKey::new(der.as_bytes()).map_err(|_| Error::new())
 }
 
 /// RSASSA-PKCS1-v1_5, as `rsa::pkcs1v15`.
@@ -89,18 +91,20 @@ pub mod pkcs1v15 {
     }
 
     impl<D: Hash> VerifyingKey<D> {
-        /// A verifying key for `key`.
-        pub fn new(key: ::rsa::PublicKey) -> Self {
-            Self {
-                key: public_key_der(&key),
+        /// A verifying key for `key`, refused if rind does not take it.
+        pub fn try_new(key: ::rsa::PublicKey) -> Result<Self, Error> {
+            Ok(Self {
+                key: public_key_der(&key)?,
                 hash: PhantomData,
-            }
+            })
         }
     }
 
-    impl<D: Hash> From<::rsa::PublicKey> for VerifyingKey<D> {
-        fn from(key: ::rsa::PublicKey) -> Self {
-            Self::new(key)
+    impl<D: Hash> TryFrom<::rsa::PublicKey> for VerifyingKey<D> {
+        type Error = Error;
+
+        fn try_from(key: ::rsa::PublicKey) -> Result<Self, Error> {
+            Self::try_new(key)
         }
     }
 
@@ -196,28 +200,32 @@ pub mod pss {
     }
 
     impl<D: Hash> VerifyingKey<D> {
-        /// A verifying key whose signatures carry a salt as long as the hash.
-        pub fn new(key: ::rsa::PublicKey) -> Self {
-            Self {
-                key: public_key_der(&key),
+        /// A verifying key whose signatures carry a salt as long as the hash,
+        /// refused if rind does not take `key`.
+        pub fn try_new(key: ::rsa::PublicKey) -> Result<Self, Error> {
+            Ok(Self {
+                key: public_key_der(&key)?,
                 any_salt: false,
                 hash: PhantomData,
-            }
+            })
         }
 
-        /// A verifying key that takes a signature's salt of any length.
-        pub fn new_with_auto_salt_len(key: ::rsa::PublicKey) -> Self {
-            Self {
-                key: public_key_der(&key),
+        /// A verifying key that takes a signature's salt of any length,
+        /// refused if rind does not take `key`.
+        pub fn try_new_with_auto_salt_len(key: ::rsa::PublicKey) -> Result<Self, Error> {
+            Ok(Self {
+                key: public_key_der(&key)?,
                 any_salt: true,
                 hash: PhantomData,
-            }
+            })
         }
     }
 
-    impl<D: Hash> From<::rsa::PublicKey> for VerifyingKey<D> {
-        fn from(key: ::rsa::PublicKey) -> Self {
-            Self::new(key)
+    impl<D: Hash> TryFrom<::rsa::PublicKey> for VerifyingKey<D> {
+        type Error = Error;
+
+        fn try_from(key: ::rsa::PublicKey) -> Result<Self, Error> {
+            Self::try_new(key)
         }
     }
 

@@ -8,7 +8,7 @@ use digest::{
     Reset, Update, common::KeySizeUser,
 };
 
-use super::sha2::{Sha256, Sha384, Sha512};
+use crate::sha2::{Sha256, Sha384, Sha512};
 
 /// A hash rind can key HMAC with: [`Sha256`], [`Sha384`], and [`Sha512`].
 pub trait HmacHash: sealed::Sealed + OutputSizeUser + digest::common::BlockSizeUser {

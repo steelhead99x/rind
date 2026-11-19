@@ -1,7 +1,6 @@
 //! Every AEAD here against RustCrypto's own crate: the same ciphertext and tag
 //! for the same key, nonce, and data; each opens the other's; and both refuse
 //! what is altered.
-#![cfg(feature = "aead-0_6")]
 
 use aead::{Aead, AeadInOut, KeyInit, Payload, array::Array};
 
@@ -121,20 +120,19 @@ where
 
 #[test]
 fn aes_128_gcm() {
-    compare::<rind_rustcrypto::aes_gcm::Aes128Gcm, aes_gcm::Aes128Gcm>(0x1);
+    compare::<rind_aead::aes_gcm::Aes128Gcm, aes_gcm::Aes128Gcm>(0x1);
 }
 
 #[test]
 fn aes_256_gcm() {
-    compare::<rind_rustcrypto::aes_gcm::Aes256Gcm, aes_gcm::Aes256Gcm>(0x2);
+    compare::<rind_aead::aes_gcm::Aes256Gcm, aes_gcm::Aes256Gcm>(0x2);
 }
 
 #[test]
 fn chacha20_poly1305() {
-    compare::<
-        rind_rustcrypto::chacha20poly1305::ChaCha20Poly1305,
-        chacha20poly1305::ChaCha20Poly1305,
-    >(0x3);
+    compare::<rind_aead::chacha20poly1305::ChaCha20Poly1305, chacha20poly1305::ChaCha20Poly1305>(
+        0x3,
+    );
 }
 
 /// The in-place and detached forms, with separate input and output buffers too.
@@ -191,14 +189,14 @@ fn inout_forms<A: AeadInOut + KeyInit>() {
 
 #[test]
 fn the_inout_forms() {
-    inout_forms::<rind_rustcrypto::aes_gcm::Aes128Gcm>();
-    inout_forms::<rind_rustcrypto::aes_gcm::Aes256Gcm>();
-    inout_forms::<rind_rustcrypto::chacha20poly1305::ChaCha20Poly1305>();
+    inout_forms::<rind_aead::aes_gcm::Aes128Gcm>();
+    inout_forms::<rind_aead::aes_gcm::Aes256Gcm>();
+    inout_forms::<rind_aead::chacha20poly1305::ChaCha20Poly1305>();
 }
 
 #[test]
 fn a_key_of_the_wrong_length_is_refused() {
-    use rind_rustcrypto::aes_gcm::Aes256Gcm;
+    use rind_aead::aes_gcm::Aes256Gcm;
     for len in [0usize, 1, 15, 16, 31, 33, 64] {
         assert!(Aes256Gcm::new_from_slice(&vec![0; len]).is_err(), "{len}");
     }
@@ -217,11 +215,11 @@ fn generic_round_trip<A: Aead + KeyInit>(plaintext: &[u8]) -> Vec<u8> {
 #[test]
 fn a_generic_function_runs_on_rind() {
     assert_eq!(
-        generic_round_trip::<rind_rustcrypto::aes_gcm::Aes256Gcm>(b"generic over Aead"),
+        generic_round_trip::<rind_aead::aes_gcm::Aes256Gcm>(b"generic over Aead"),
         generic_round_trip::<aes_gcm::Aes256Gcm>(b"generic over Aead")
     );
     assert_eq!(
-        generic_round_trip::<rind_rustcrypto::chacha20poly1305::ChaCha20Poly1305>(b"x"),
+        generic_round_trip::<rind_aead::chacha20poly1305::ChaCha20Poly1305>(b"x"),
         generic_round_trip::<chacha20poly1305::ChaCha20Poly1305>(b"x")
     );
 }

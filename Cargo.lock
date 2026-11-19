@@ -4666,6 +4666,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rind-aead"
+version = "0.6.0"
+dependencies = [
+ "aead 0.6.1",
+ "aes-gcm 0.11.1",
+ "chacha20poly1305 0.11.0",
+ "crabgrind 0.4.0",
+ "rind",
+]
+
+[[package]]
 name = "rind-aws-lc-rs"
 version = "1.0.4"
 dependencies = [
@@ -4755,6 +4766,18 @@ version = "0.1.0"
 dependencies = [
  "crabgrind 0.4.0",
  "rind",
+]
+
+[[package]]
+name = "rind-digest"
+version = "0.11.0"
+dependencies = [
+ "crabgrind 0.4.0",
+ "digest 0.11.3",
+ "hmac 0.13.0",
+ "rind",
+ "sha2 0.11.1",
+ "sha3 0.12.0",
 ]
 
 [[package]]
@@ -4903,30 +4926,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rind-rustcrypto"
-version = "0.1.0"
-dependencies = [
- "aead 0.6.1",
- "aes-gcm 0.11.1",
- "chacha20poly1305 0.11.0",
- "crabgrind 0.4.0",
- "digest 0.11.3",
- "ecdsa 0.17.0",
- "ed25519 3.0.0",
- "ed25519-dalek 3.0.0",
- "hmac 0.13.0",
- "ml-dsa",
- "p256 0.14.0",
- "p384 0.14.0",
- "p521 0.14.0",
- "rind",
- "rsa",
- "sha2 0.11.1",
- "sha3 0.12.0",
- "signature 3.0.0",
-]
-
-[[package]]
 name = "rind-rustls"
 version = "0.23.4"
 dependencies = [
@@ -4942,6 +4941,25 @@ dependencies = [
  "rustls",
  "tokio",
  "tokio-rustls",
+]
+
+[[package]]
+name = "rind-signature"
+version = "3.0.0"
+dependencies = [
+ "crabgrind 0.4.0",
+ "ecdsa 0.17.0",
+ "ed25519 3.0.0",
+ "ed25519-dalek 3.0.0",
+ "ml-dsa",
+ "p256 0.14.0",
+ "p384 0.14.0",
+ "p521 0.14.0",
+ "rind",
+ "rind-digest",
+ "rsa",
+ "sha2 0.11.1",
+ "signature 3.0.0",
 ]
 
 [[package]]

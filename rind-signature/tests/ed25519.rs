@@ -1,7 +1,6 @@
 //! Ed25519 against ed25519-dalek: the same key and the same (deterministic)
 //! signature for every seed and message, each verifying the other's, and the
 //! malformed keys and signatures both refuse.
-#![cfg(feature = "signature-3")]
 
 use ed25519::Signature;
 use signature::{Keypair, MultipartSigner, MultipartVerifier, Signer, Verifier};
@@ -25,7 +24,7 @@ impl Xorshift {
     }
 }
 
-use rind_rustcrypto::ed25519::{SigningKey, VerifyingKey};
+use rind_signature::ed25519::{SigningKey, VerifyingKey};
 
 const LENGTHS: &[usize] = &[0, 1, 2, 31, 32, 33, 63, 64, 65, 127, 128, 129, 1000, 65_537];
 

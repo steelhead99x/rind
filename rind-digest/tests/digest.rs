@@ -1,6 +1,5 @@
 //! Every hash and HMAC here against RustCrypto's own crate for the same
 //! algorithm, on fixed and pseudo-random inputs and at the edges.
-#![cfg(feature = "digest-0_11")]
 
 use digest::{Digest, DynDigest, FixedOutputReset, KeyInit, Mac, Reset};
 
@@ -71,13 +70,13 @@ macro_rules! hash_tests {
 }
 
 hash_tests! {
-    sha256: rind_rustcrypto::sha2::Sha256, sha2::Sha256;
-    sha384: rind_rustcrypto::sha2::Sha384, sha2::Sha384;
-    sha512: rind_rustcrypto::sha2::Sha512, sha2::Sha512;
-    sha512_256: rind_rustcrypto::sha2::Sha512_256, sha2::Sha512_256;
-    sha3_256: rind_rustcrypto::sha3::Sha3_256, sha3::Sha3_256;
-    sha3_384: rind_rustcrypto::sha3::Sha3_384, sha3::Sha3_384;
-    sha3_512: rind_rustcrypto::sha3::Sha3_512, sha3::Sha3_512;
+    sha256: rind_digest::sha2::Sha256, sha2::Sha256;
+    sha384: rind_digest::sha2::Sha384, sha2::Sha384;
+    sha512: rind_digest::sha2::Sha512, sha2::Sha512;
+    sha512_256: rind_digest::sha2::Sha512_256, sha2::Sha512_256;
+    sha3_256: rind_digest::sha3::Sha3_256, sha3::Sha3_256;
+    sha3_384: rind_digest::sha3::Sha3_384, sha3::Sha3_384;
+    sha3_512: rind_digest::sha3::Sha3_512, sha3::Sha3_512;
 }
 
 fn clone_forks_and_reset_restarts<Ours, Theirs>()
@@ -139,11 +138,11 @@ fn generic_digest<D: Digest>(data: &[u8]) -> Vec<u8> {
 fn a_generic_function_runs_on_rind() {
     let data = b"generic over Digest";
     assert_eq!(
-        generic_digest::<rind_rustcrypto::sha2::Sha256>(data),
+        generic_digest::<rind_digest::sha2::Sha256>(data),
         generic_digest::<sha2::Sha256>(data)
     );
     assert_eq!(
-        generic_digest::<rind_rustcrypto::sha3::Sha3_512>(data),
+        generic_digest::<rind_digest::sha3::Sha3_512>(data),
         generic_digest::<sha3::Sha3_512>(data)
     );
 }
@@ -158,10 +157,10 @@ macro_rules! hmac_tests {
     ($($test:ident: $hash:ident;)*) => {$(
         #[test]
         fn $test() {
-            type Ours = rind_rustcrypto::hmac::Hmac<rind_rustcrypto::sha2::$hash>;
+            type Ours = rind_digest::hmac::Hmac<rind_digest::sha2::$hash>;
             type Theirs = hmac::Hmac<sha2::$hash>;
             let mut rng = Xorshift(0xd1b5_4a32_d192_ed03);
-            let block = <rind_rustcrypto::sha2::$hash as digest::common::BlockSizeUser>::block_size();
+            let block = <rind_digest::sha2::$hash as digest::common::BlockSizeUser>::block_size();
             // Keys around the block size, which HMAC hashes when it is longer,
             // and the empty key.
             for key_len in [0, 1, 20, block - 1, block, block + 1, 2 * block + 3, 1000] {
@@ -187,7 +186,7 @@ hmac_tests! {
 
 #[test]
 fn hmac_verifies_and_refuses_as_rustcrypto_does() {
-    use rind_rustcrypto::{hmac::Hmac, sha2::Sha256};
+    use rind_digest::{hmac::Hmac, sha2::Sha256};
     let key = b"a key";
     let mut ours = <Hmac<Sha256> as KeyInit>::new_from_slice(key).unwrap();
     Mac::update(&mut ours, b"message");
