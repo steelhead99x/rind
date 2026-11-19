@@ -38,31 +38,33 @@
 # graviola has none. Its X25519 and Ed25519 run only s2n-bignum's verified
 # routines, but convert between bytes and limbs in unverified Rust.
 #
-# rind: X25519, P-256 ECDH and ECDSA (on x86_64 only on Linux, as the
-# proofs check the ELF object, not the Mach-O one), P-384 ECDH, SHA-256,
-# HMAC-SHA256, and HKDF-SHA256 on aarch64 with the crypto extension, SHA3-256
-# and SHA3-512, whose Rust sponge `proofs/` proves against SymCrypt's Lean
-# FIPS 202 spec and s2n-bignum's Keccak-f theorems, SHA-512 and Ed25519 on
-# aarch64, and SHA-512 and Ed25519 signing where x86_64's SHA-512 block
-# routine has a proof, whose Rust `proofs/` proves against s2n-bignum's and
-# aws-lc-verification's theorems, ChaCha20 header protection, whose Rust
-# `proofs/` proves against RFC 8439, HACL*'s rounds included, AES header
-# protection on x86_64 with AES-NI and aarch64 with the crypto extension,
-# whose Rust `proofs/` proves against Vale's FIPS 197 spec, and AES-GCM on
-# x86_64 with AES-NI but no VAES, whose Rust, key setup and by-8 kernels
-# included, `proofs/` proves against Vale's specs, and with AVX and MOVBE
-# against Vale's theorems for its routines. On the portable backend, SHA-256
-# and the SHA-512 family, with HMAC and HKDF over them, whose Rust `proofs/`
-# proves against HACL*'s theorems for its SHA-2 block functions, and ChaCha20
-# header protection. On x86_64 CPUs with the SHA512 instructions, or AMD's
-# without AVX2, rind runs OpenSSL's or aws-lc's unproven routines, which are
-# faster there, so neither SHA-512 nor Ed25519 earns the ✓ there; nor does
-# Ed25519's verification on any x86_64 CPU, which checks a multiple of RFC
-# 8032's equation with half-size scalars that nothing proves yet. Every other
-# rind operation runs unverified code, such as SHA-256's block function on
-# x86_64 or without the crypto extension, under padding and HMAC glue that
-# `proofs/` proves, or ChaCha20-Poly1305's aws-lc one-pass routines on x86_64,
-# under glue `proofs/` proves.
+# rind: X25519, P-256 ECDH and ECDSA (on x86_64 only on Linux, as the proofs
+# check the ELF object, not the Mach-O one), P-384 ECDH, SHA-256, HMAC-SHA256,
+# and HKDF-SHA256 on aarch64 with the crypto extension, SHA3-256 and SHA3-512,
+# whose Rust sponge `proofs/` proves against SymCrypt's Lean FIPS 202 spec and
+# s2n-bignum's Keccak-f theorems, SHA-512 and Ed25519 on aarch64 (on Linux
+# only, as the proofs check the ELF object, not the Mach-O one), and SHA-512
+# and Ed25519 signing where x86_64's SHA-512 block routine has a proof (on
+# Linux only, as the proofs check the ELF object, not the Mach-O one), whose
+# Rust `proofs/` proves against s2n-bignum's and aws-lc-verification's
+# theorems, ChaCha20 header protection, whose Rust `proofs/` proves against
+# RFC 8439, HACL*'s rounds included, AES header protection on x86_64 with
+# AES-NI and aarch64 with the crypto extension, whose Rust `proofs/` proves
+# against Vale's FIPS 197 spec, and AES-GCM on x86_64 with AES-NI but no VAES,
+# whose Rust, key setup and by-8 kernels included, `proofs/` proves against
+# Vale's specs, and with AVX and MOVBE against Vale's theorems for its
+# routines (on Linux only, as the proofs check the ELF object, not the Mach-O
+# one). On the portable backend, SHA-256 and the SHA-512 family, with HMAC and
+# HKDF over them, whose Rust `proofs/` proves against HACL*'s theorems for its
+# SHA-2 block functions, and ChaCha20 header protection. On x86_64 CPUs with
+# the SHA512 instructions, or AMD's without AVX2, rind runs OpenSSL's or
+# aws-lc's unproven routines, which are faster there, so neither SHA-512 nor
+# Ed25519 earns the ✓ there; nor does Ed25519's verification on any x86_64
+# CPU, which checks a multiple of RFC 8032's equation with half-size scalars
+# that nothing proves yet. Every other rind operation runs unverified code,
+# such as SHA-256's block function on x86_64 or without the crypto extension,
+# under padding and HMAC glue that `proofs/` proves, or ChaCha20-Poly1305's
+# aws-lc one-pass routines on x86_64, under glue `proofs/` proves.
 #
 # rind's RSA-2048 PKCS#1 v1.5 verification earns the ✓ on x86_64 with BMI2
 # and ADX, whose Montgomery products are s2n-bignum's Karatsuba routines, but
@@ -107,7 +109,7 @@ operations = ["sha512/*"]
 arch = "x86_64"
 cpu = ["avx", "avx2", "bmi1", "bmi2", "popcnt", "ssse3", "!sha512"]
 os = "linux"
-proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA-512, padding included, down to OpenSSL's sha512_block_data_order_avx2, which rind runs on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3 but without the SHA512 instructions, composed with rind's HOL Light proof of that routine, of the object code rind's build emits, on s2n-bignum's x86 model with the instructions rind adds to it, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's"
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA-512, padding included, down to OpenSSL's sha512_block_data_order_avx2, which rind runs on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3 but without the SHA512 instructions, composed with rind's HOL Light proof of that routine, of the object code rind's Linux build emits, on s2n-bignum's x86 model with the instructions rind adds to it, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's"
 link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha512.lean"
 
 [[verified]]
@@ -115,7 +117,7 @@ library = "rind"
 operations = ["sha512/*"]
 arch = "aarch64"
 os = "linux"
-proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA-512, padding included, down to aws-lc's sha512_block_data_order_hw, which rind runs with the SHA-512 instructions, and sha512_block_data_order_nohw, which it runs without them, composed with rind's HOL Light proof of the first, of the object code rind's build emits, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's, and aws-lc-verification's NSym proof of the second, with its ArmSpecGap caveat, of aws-lc c21d40da, whose SHA-512 code rind's copy from 5ed12cce keeps"
+proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch Aeneas cannot translate, of its digest API's SHA-512, padding included, down to aws-lc's sha512_block_data_order_hw, which rind runs with the SHA-512 instructions, and sha512_block_data_order_nohw, which it runs without them, composed with rind's HOL Light proof of the first, of the object code rind's Linux build emits, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's, and aws-lc-verification's NSym proof of the second, with its ArmSpecGap caveat, of aws-lc c21d40da, whose SHA-512 code rind's copy from 5ed12cce keeps"
 link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Sha512.lean"
 
 [[verified]]
@@ -132,7 +134,7 @@ operations = ["ed25519-sign"]
 arch = "x86_64"
 cpu = ["avx", "avx2", "bmi1", "bmi2", "popcnt", "ssse3", "!sha512"]
 os = "linux"
-proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's Ed25519 key pair generation, loading, and signing, down to s2n-bignum's routines and its SHA-512 down to OpenSSL's sha512_block_data_order_avx2, which rind runs on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3 but without the SHA512 instructions, composed with s2n-bignum's HOL Light proofs of edwards25519_scalarmulbase, bignum_madd_n25519, their _alt forms without BMI2 and ADX, and bignum_mod_n25519, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of that SHA-512 routine, of the object code rind's build emits, on s2n-bignum's x86 model with the instructions rind adds to it, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's. Verification checks a multiple of RFC 8032's equation with half-size scalars, which nothing proves yet"
+proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's Ed25519 key pair generation, loading, and signing, down to s2n-bignum's routines and its SHA-512 down to OpenSSL's sha512_block_data_order_avx2, which rind runs on CPUs with AVX2, BMI1, BMI2, POPCNT, and SSSE3 but without the SHA512 instructions, composed with s2n-bignum's HOL Light proofs of edwards25519_scalarmulbase, bignum_madd_n25519, their _alt forms without BMI2 and ADX, and bignum_mod_n25519, of s2n-bignum's own object code, which rind transliterates, and rind's HOL Light proof of that SHA-512 routine, of the object code rind's Linux build emits, on s2n-bignum's x86 model with the instructions rind adds to it, which rind cosimulates against the CPU, against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's. Verification checks a multiple of RFC 8032's equation with half-size scalars, which nothing proves yet"
 link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Ed25519.lean"
 
 [[verified]]
@@ -140,7 +142,7 @@ library = "rind"
 operations = ["ed25519-sign", "ed25519-verify"]
 arch = "aarch64"
 os = "linux"
-proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's Ed25519 key loading, signing, and verification, small-order key refusal included, down to s2n-bignum's routines and its SHA-512 down to aws-lc's sha512_block_data_order_hw, which rind runs with the SHA-512 instructions, and sha512_block_data_order_nohw, which it runs without them, composed with s2n-bignum's HOL Light proofs of edwards25519_decode_alt, edwards25519_scalarmulbase_alt, edwards25519_scalarmuldouble_alt, bignum_madd_n25519_alt, bignum_mod_n25519, bignum_neg_p25519, and bignum_lt, of s2n-bignum's own object code, which rind transliterates, rind's HOL Light proofs of bignum_eq and of the first SHA-512 routine, of the object code rind's build emits, the latter against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's, and aws-lc-verification's NSym proof of the second, with its ArmSpecGap caveat"
+proof = "rind's Lean proof, through Aeneas and a hand model of the function-pointer dispatch Aeneas cannot translate, of its signature API's Ed25519 key loading, signing, and verification, small-order key refusal included, down to s2n-bignum's routines and its SHA-512 down to aws-lc's sha512_block_data_order_hw, which rind runs with the SHA-512 instructions, and sha512_block_data_order_nohw, which it runs without them, composed with s2n-bignum's HOL Light proofs of edwards25519_decode_alt, edwards25519_scalarmulbase_alt, edwards25519_scalarmuldouble_alt, bignum_madd_n25519_alt, bignum_mod_n25519, bignum_neg_p25519, and bignum_lt, of s2n-bignum's own object code, which rind transliterates, rind's HOL Light proofs of bignum_eq and of the first SHA-512 routine, of the object code rind's Linux build emits, the latter against s2n-bignum's FIPS 180-4 spec from awslabs/s2n-bignum#420, unmerged, which rind pins at 7ef7ba7c and proves FIPS 180-4's, and aws-lc-verification's NSym proof of the second, with its ArmSpecGap caveat"
 link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/X86_64/Ed25519.lean"
 
 [[verified]]
