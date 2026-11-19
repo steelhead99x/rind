@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Checks the ESP32-S3 placement of the rolled SHA-512 compressor.
+# Checks the ESP32-S3 placement of the SHA-512 compressor, the unrolled body, in IRAM and its K table in DRAM.
 #
 # On xtensa-esp32s3-espidf the body must land in .iram1.text (literal pool
 # included) and K in .dram1.rodata, so neither is part of the flash
