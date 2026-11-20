@@ -1398,7 +1398,9 @@ proof after those.
   `Rind/P256Group.lean`: that `p256` is prime, by a Pratt certificate;
   `Rind/N256Prime.lean`: that `n256` is prime; `Rind/P256Multiples.lean`: the
   group laws and multiples ECDSA's twin multiplication relies on;
-  `Rind/P384Multiples.lean`: the same for P-384.
+  `Rind/P384Multiples.lean`: the same for P-384; `Rind/P521Group.lean`: that
+  `p521` and `n521` are prime, by Pratt certificates, and that G and its
+  multiples by [1, n) have order n, so `p521Pow` is Mathlib's group law.
 - `Rind/X86_64/Naf.lean`, on both targets: that `mid::util::public_naf`
   writes a scalar's width-5 or width-6 non-adjacent form, for any number of
   words, which P-256's and P-384's ECDSA verification reads.
