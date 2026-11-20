@@ -18,7 +18,8 @@ use std::sync::OnceLock;
 
 use rind::key_wrap::{self, Mode};
 use rind::{
-    aead, agreement, cipher, constant_time, digest, ecdsa, ed25519, hkdf, hmac, kem, pbkdf2, rsa,
+    aead, agreement, cipher, constant_time, digest, ecdsa, ed25519, hkdf, hmac, kem, oprf, pbkdf2,
+    rsa,
 };
 
 use crate::dudect::{Classes, Config, Report, classes, measure, measure_built};
@@ -102,6 +103,7 @@ pub fn all() -> Vec<Case> {
     aead_cases(&mut cases);
     cipher_cases(&mut cases);
     agreement_cases(&mut cases);
+    oprf_cases(&mut cases);
     kem_cases(&mut cases);
     rsa_cases(&mut cases);
     signature_cases(&mut cases);
@@ -481,6 +483,42 @@ fn agreement_cases(cases: &mut Vec<Case>) {
     }
 }
 
+/// The input is the secret hashed to the group, in both modes and on every
+/// suite. The server scalar stays fixed, so the two classes differ only in
+/// that message.
+fn oprf_cases(cases: &mut Vec<Case>) {
+    for (name, suite, scalar_len) in OPRF_SUITES {
+        cases.push(case(format!("oprf/{name}/input"), move |config| {
+            let key = oprf::ServerKey::from_scalar(suite, &server_scalar(scalar_len)).unwrap();
+            measure(config, &secrets(32), |input| key.evaluate(input).unwrap())
+        }));
+        cases.push(case(format!("voprf/{name}/input"), move |config| {
+            let key =
+                oprf::voprf::ServerKey::from_scalar(suite, &server_scalar(scalar_len)).unwrap();
+            measure(config, &secrets(32), |input| key.evaluate(input).unwrap())
+        }));
+    }
+}
+
+const OPRF_SUITES: [(&str, &oprf::Suite, usize); 4] = [
+    ("p256", &oprf::P256_SHA256, 32),
+    ("p384", &oprf::P384_SHA384, 48),
+    ("p521", &oprf::P521_SHA512, 66),
+    ("ristretto255", &oprf::RISTRETTO255_SHA512, 32),
+];
+
+/// A fixed server scalar below every suite's order, with bits set under the
+/// top byte.
+///
+/// NIST scalars are big-endian and ristretto255's is little-endian, so both
+/// ends stay zero: the high byte is clear either way.
+fn server_scalar(len: usize) -> Vec<u8> {
+    let mut scalar = vec![0x5a; len];
+    scalar[0] = 0;
+    scalar[len - 1] = 0;
+    scalar
+}
+
 fn kem_cases(cases: &mut Vec<Case>) {
     use kem::{Ciphertext, MlKem768};
 
@@ -793,6 +831,20 @@ fn xor_mgf1(out: &mut [u8], seed: &[u8]) {
         let mask = digest::digest(&digest::SHA256, &[seed, &counter.to_be_bytes()].concat());
         for (out, mask) in chunk.iter_mut().zip(mask.as_ref()) {
             *out ^= mask;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{OPRF_SUITES, server_scalar};
+
+    #[test]
+    fn oprf_timing_scalar_is_in_range() {
+        for (_, suite, len) in OPRF_SUITES {
+            let scalar = server_scalar(len);
+            rind::oprf::ServerKey::from_scalar(suite, &scalar).unwrap();
+            rind::oprf::voprf::ServerKey::from_scalar(suite, &scalar).unwrap();
         }
     }
 }

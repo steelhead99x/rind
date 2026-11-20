@@ -46,6 +46,8 @@ qemu. iOS devices' code is only built.
   its integer assembly, and ChaCha20 [HACL\*]'s verified rounds.
   Without `adx`, as on Haswell, AMD's cores before Zen, and virtual CPUs
   that hide it, [s2n-bignum]'s `_alt` routines replace those that use it,
+  P-384's `d·G`, for key generation and ECDSA signing, runs
+  [verified-garbage]'s baseline routine and its ECDSA verification rind's own,
   and [aws-lc]'s Montgomery multiplication replaces its Karatsuba routines
   for RSA; with `avx2` there, as on Haswell, RSA-2048 signing runs aws-lc's
   RSAZ exponentiation, and Ed25519 verification's multiplication a port of
@@ -230,8 +232,11 @@ Intel guarantees the timing of the instructions it lists as data-independent
   enclave on one that does runs with it set whatever the OS does
   ([Intel DOITM]). Linux does not set it, as of 7.4, nor does KVM pass it to
   guests, and rind knows of no other kernel that does. Intel's list leaves out
-  the `VSHA512` instructions, which SHA-384 and SHA-512 run where the CPU has
-  them, as from Arrow Lake and Lunar Lake on.
+  the `VSHA512` instructions (`VSHA512RNDS2`, `VSHA512MSG1`, and
+  `VSHA512MSG2`). SHA-384 and SHA-512 do not run them, including on Arrow Lake
+  and Lunar Lake: they take OpenSSL's AVX2 routine on every CPU with AVX2, BMI1, BMI2, POPCNT, and SSSE3,
+  and `admin/ct-vartime` refuses `vsha512*`. Should Intel add them to its
+  list, the SHA512-extension routine is worth importing again.
 - On Intel processors that do not report `MCDT_NO`, such as its Core processors
   from Skylake to Alder Lake, only while MXCSR holds `0x1FBF`: otherwise some
   vector integer multiplies, such as `vpmuludq` and `vpmullw`, may take a cycle

@@ -28,6 +28,10 @@ pub(crate) mod vg_chacha20_xor_avx512vl;
 #[rustfmt::skip]
 pub(crate) mod vg_ec_p256_public_key_adx;
 #[rustfmt::skip]
+pub(crate) mod vg_ec_p384_public_key;
+#[rustfmt::skip]
+pub(crate) mod vg_ec_p384_public_key_adx;
+#[rustfmt::skip]
 pub(crate) mod vg_ecdh_p256_adx;
 #[rustfmt::skip]
 pub(crate) mod vg_ecdh_p256_ifma;
@@ -35,6 +39,8 @@ pub(crate) mod vg_ecdh_p256_ifma;
 pub(crate) mod vg_ecdsa_p256_verify_adx;
 #[rustfmt::skip]
 pub(crate) mod vg_ecdsa_p256_verify_ifma;
+#[rustfmt::skip]
+pub(crate) mod vg_ecdsa_p384_verify_adx;
 #[rustfmt::skip]
 pub(crate) mod vg_ed25519_comb;
 #[rustfmt::skip]
@@ -157,6 +163,32 @@ pub(crate) mod vg_p256_inv_mod_n_adx;
 pub(crate) mod vg_p256_inv_mod_p_adx;
 #[rustfmt::skip]
 pub(crate) mod vg_p256_mul_base_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_check_point_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_comb;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_gtab;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_inv_mod_n_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_inv_mod_p;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_inv_mod_p_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_jac_add_affine_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_jac_add_cached_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_mul_base;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_mul_base_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_mul_mod_n_adx;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_mul_mod_p;
+#[rustfmt::skip]
+pub(crate) mod vg_p384_mul_mod_p_adx;
 #[rustfmt::skip]
 pub(crate) mod vg_rsa_mont_mul_adx;
 #[rustfmt::skip]

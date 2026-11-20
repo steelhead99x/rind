@@ -455,20 +455,18 @@
 <text x="12.0" y="876.0" font-size="12" text-anchor="start" font-weight="bold" fill="#0b0b0b">Signatures</text>
 <line x1="12.0" y1="880.0" x2="984.0" y2="880.0" stroke="#c3c2b7"/>
 <text x="12.0" y="898.0" font-size="12" text-anchor="start" font-weight="normal" fill="#0b0b0b">Ed25519 sign</text>
-<rect x="342.0" y="885.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>Ed25519 sign, rind: 4.11 µs, 1.00× the fastest</title></rect>
-<text x="386.0" y="898.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">4.11 µs</text>
-<rect x="434.0" y="885.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>Ed25519 sign, aws-lc-rs: 4.49 µs, 1.09× the fastest</title></rect>
+<rect x="434.0" y="885.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>Ed25519 sign, aws-lc-rs: 4.49 µs, 1.02× the fastest</title></rect>
 <text x="478.0" y="898.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">4.49 µs</text>
-<rect x="526.0" y="885.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>Ed25519 sign, ring: 13.11 µs, 3.19× the fastest</title></rect>
+<rect x="526.0" y="885.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>Ed25519 sign, ring: 13.11 µs, 2.98× the fastest</title></rect>
 <text x="570.0" y="898.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">13.11 µs</text>
-<rect x="618.0" y="885.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>Ed25519 sign, RustCrypto + dalek: 9.60 µs, 2.34× the fastest</title></rect>
+<rect x="618.0" y="885.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>Ed25519 sign, RustCrypto + dalek: 9.60 µs, 2.18× the fastest</title></rect>
 <text x="662.0" y="898.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">9.60 µs</text>
-<rect x="710.0" y="885.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>Ed25519 sign, graviola: 4.40 µs, 1.07× the fastest</title></rect>
+<rect x="710.0" y="885.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>Ed25519 sign, graviola: 4.40 µs, 1.00× the fastest</title></rect>
 <text x="754.0" y="898.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">4.40 µs</text>
-<rect x="802.0" y="885.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>Ed25519 sign, libcrux: 28.54 µs, 6.94× the fastest; verified: HACL*'s F* proof of Hacl.Ed25519's sign and verify, compiled to Rust by an unverified step</title></rect>
+<rect x="802.0" y="885.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>Ed25519 sign, libcrux: 28.54 µs, 6.49× the fastest; verified: HACL*'s F* proof of Hacl.Ed25519's sign and verify, compiled to Rust by an unverified step</title></rect>
 <text x="839.0" y="898.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">28.54 µs</text>
 <g transform="translate(868.4 888.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#e4572e" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
-<rect x="894.0" y="885.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>Ed25519 sign, OpenSSL: 13.67 µs, 3.33× the fastest</title></rect>
+<rect x="894.0" y="885.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>Ed25519 sign, OpenSSL: 13.67 µs, 3.11× the fastest</title></rect>
 <text x="938.0" y="898.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">13.67 µs</text>
 <text x="12.0" y="918.0" font-size="12" text-anchor="start" font-weight="normal" fill="#0b0b0b">Ed25519 verify</text>
 <rect x="342.0" y="905.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>Ed25519 verify, rind: 21.43 µs, 1.00× the fastest</title></rect>
@@ -574,55 +572,49 @@
 <rect x="894.0" y="1031.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>SHA-256, 16 KB, OpenSSL: 3.36 µs, 1.05× the fastest</title></rect>
 <text x="938.0" y="1044.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">3.36 µs</text>
 <text x="12.0" y="1064.0" font-size="12" text-anchor="start" font-weight="normal" fill="#0b0b0b">SHA-512, 64 B</text>
-<rect x="342.0" y="1051.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>SHA-512, 64 B, rind: 60 ns, 1.00× the fastest</title></rect>
-<text x="386.0" y="1064.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">60 ns</text>
-<rect x="434.0" y="1051.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>SHA-512, 64 B, aws-lc-rs: 134 ns, 2.23× the fastest; verified: aws-lc-verification's SAW proof of SHA-512 through EVP_Digest, padding included, over sha512_block_data_order_avx, which aws-lc runs only on Intel; of aws-lc c21d40da, whose SHA-512 code 5.12.0 keeps</title></rect>
+<rect x="434.0" y="1051.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>SHA-512, 64 B, aws-lc-rs: 134 ns, 1.11× the fastest; verified: aws-lc-verification's SAW proof of SHA-512 through EVP_Digest, padding included, over sha512_block_data_order_avx, which aws-lc runs only on Intel; of aws-lc c21d40da, whose SHA-512 code 5.12.0 keeps</title></rect>
 <text x="471.0" y="1064.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">134 ns</text>
-<g transform="translate(493.8 1054.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#f6a03c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
-<rect x="526.0" y="1051.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>SHA-512, 64 B, ring: 140 ns, 2.33× the fastest</title></rect>
+<g transform="translate(493.8 1054.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#74c476" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="526.0" y="1051.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>SHA-512, 64 B, ring: 140 ns, 1.16× the fastest</title></rect>
 <text x="570.0" y="1064.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">140 ns</text>
-<rect x="618.0" y="1051.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>SHA-512, 64 B, RustCrypto + dalek: 120 ns, 2.00× the fastest</title></rect>
+<rect x="618.0" y="1051.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>SHA-512, 64 B, RustCrypto + dalek: 120 ns, 1.00× the fastest</title></rect>
 <text x="662.0" y="1064.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">120 ns</text>
-<rect x="710.0" y="1051.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>SHA-512, 64 B, graviola: 148 ns, 2.47× the fastest</title></rect>
+<rect x="710.0" y="1051.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>SHA-512, 64 B, graviola: 148 ns, 1.24× the fastest</title></rect>
 <text x="754.0" y="1064.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">148 ns</text>
-<rect x="802.0" y="1051.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>SHA-512, 64 B, libcrux: 166 ns, 2.77× the fastest; verified: HACL*'s F* proof of Hacl.Streaming.SHA2's hash_256 and hash_512, compiled to Rust by an unverified step</title></rect>
+<rect x="802.0" y="1051.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>SHA-512, 64 B, libcrux: 166 ns, 1.38× the fastest; verified: HACL*'s F* proof of Hacl.Streaming.SHA2's hash_256 and hash_512, compiled to Rust by an unverified step</title></rect>
 <text x="839.0" y="1064.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">166 ns</text>
-<g transform="translate(861.8 1054.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#f6a03c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
-<rect x="894.0" y="1051.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>SHA-512, 64 B, OpenSSL: 226 ns, 3.76× the fastest</title></rect>
+<g transform="translate(861.8 1054.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#c2e07c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="894.0" y="1051.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>SHA-512, 64 B, OpenSSL: 226 ns, 1.88× the fastest</title></rect>
 <text x="938.0" y="1064.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">226 ns</text>
 <text x="12.0" y="1084.0" font-size="12" text-anchor="start" font-weight="normal" fill="#0b0b0b">SHA-512, 1350 B</text>
-<rect x="342.0" y="1071.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>SHA-512, 1350 B, rind: 249 ns, 1.00× the fastest</title></rect>
-<text x="386.0" y="1084.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">249 ns</text>
-<rect x="434.0" y="1071.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>SHA-512, 1350 B, aws-lc-rs: 1.24 µs, 4.99× the fastest; verified: aws-lc-verification's SAW proof of SHA-512 through EVP_Digest, padding included, over sha512_block_data_order_avx, which aws-lc runs only on Intel; of aws-lc c21d40da, whose SHA-512 code 5.12.0 keeps</title></rect>
+<rect x="434.0" y="1071.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>SHA-512, 1350 B, aws-lc-rs: 1.24 µs, 1.06× the fastest; verified: aws-lc-verification's SAW proof of SHA-512 through EVP_Digest, padding included, over sha512_block_data_order_avx, which aws-lc runs only on Intel; of aws-lc c21d40da, whose SHA-512 code 5.12.0 keeps</title></rect>
 <text x="471.0" y="1084.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.24 µs</text>
-<g transform="translate(497.1 1074.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#e4572e" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
-<rect x="526.0" y="1071.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>SHA-512, 1350 B, ring: 1.26 µs, 5.05× the fastest</title></rect>
+<g transform="translate(497.1 1074.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="526.0" y="1071.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>SHA-512, 1350 B, ring: 1.26 µs, 1.08× the fastest</title></rect>
 <text x="570.0" y="1084.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.26 µs</text>
-<rect x="618.0" y="1071.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>SHA-512, 1350 B, RustCrypto + dalek: 1.17 µs, 4.68× the fastest</title></rect>
+<rect x="618.0" y="1071.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>SHA-512, 1350 B, RustCrypto + dalek: 1.17 µs, 1.00× the fastest</title></rect>
 <text x="662.0" y="1084.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.17 µs</text>
-<rect x="710.0" y="1071.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>SHA-512, 1350 B, graviola: 1.49 µs, 5.96× the fastest</title></rect>
+<rect x="710.0" y="1071.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>SHA-512, 1350 B, graviola: 1.49 µs, 1.27× the fastest</title></rect>
 <text x="754.0" y="1084.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.49 µs</text>
-<rect x="802.0" y="1071.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>SHA-512, 1350 B, libcrux: 1.72 µs, 6.89× the fastest; verified: HACL*'s F* proof of Hacl.Streaming.SHA2's hash_256 and hash_512, compiled to Rust by an unverified step</title></rect>
+<rect x="802.0" y="1071.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>SHA-512, 1350 B, libcrux: 1.72 µs, 1.47× the fastest; verified: HACL*'s F* proof of Hacl.Streaming.SHA2's hash_256 and hash_512, compiled to Rust by an unverified step</title></rect>
 <text x="839.0" y="1084.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.72 µs</text>
-<g transform="translate(865.1 1074.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#e4572e" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
-<rect x="894.0" y="1071.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>SHA-512, 1350 B, OpenSSL: 1.17 µs, 4.70× the fastest</title></rect>
+<g transform="translate(865.1 1074.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#c2e07c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="894.0" y="1071.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>SHA-512, 1350 B, OpenSSL: 1.17 µs, 1.00× the fastest</title></rect>
 <text x="938.0" y="1084.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">1.17 µs</text>
 <text x="12.0" y="1104.0" font-size="12" text-anchor="start" font-weight="normal" fill="#0b0b0b">SHA-512, 16 KB</text>
-<rect x="342.0" y="1091.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>SHA-512, 16 KB, rind: 2.63 µs, 1.00× the fastest</title></rect>
-<text x="386.0" y="1104.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">2.63 µs</text>
-<rect x="434.0" y="1091.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>SHA-512, 16 KB, aws-lc-rs: 14.12 µs, 5.38× the fastest; verified: aws-lc-verification's SAW proof of SHA-512 through EVP_Digest, padding included, over sha512_block_data_order_avx, which aws-lc runs only on Intel; of aws-lc c21d40da, whose SHA-512 code 5.12.0 keeps</title></rect>
+<rect x="434.0" y="1091.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>SHA-512, 16 KB, aws-lc-rs: 14.12 µs, 1.15× the fastest; verified: aws-lc-verification's SAW proof of SHA-512 through EVP_Digest, padding included, over sha512_block_data_order_avx, which aws-lc runs only on Intel; of aws-lc c21d40da, whose SHA-512 code 5.12.0 keeps</title></rect>
 <text x="471.0" y="1104.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">14.12 µs</text>
-<g transform="translate(500.4 1094.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#e4572e" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
-<rect x="526.0" y="1091.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>SHA-512, 16 KB, ring: 14.10 µs, 5.37× the fastest</title></rect>
+<g transform="translate(500.4 1094.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#74c476" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="526.0" y="1091.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>SHA-512, 16 KB, ring: 14.10 µs, 1.15× the fastest</title></rect>
 <text x="570.0" y="1104.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">14.10 µs</text>
-<rect x="618.0" y="1091.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>SHA-512, 16 KB, RustCrypto + dalek: 13.51 µs, 5.15× the fastest</title></rect>
+<rect x="618.0" y="1091.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>SHA-512, 16 KB, RustCrypto + dalek: 13.51 µs, 1.10× the fastest</title></rect>
 <text x="662.0" y="1104.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">13.51 µs</text>
-<rect x="710.0" y="1091.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>SHA-512, 16 KB, graviola: 17.50 µs, 6.66× the fastest</title></rect>
+<rect x="710.0" y="1091.0" width="88.0" height="18.0" rx="2" fill="#c2e07c"><title>SHA-512, 16 KB, graviola: 17.50 µs, 1.42× the fastest</title></rect>
 <text x="754.0" y="1104.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">17.50 µs</text>
-<rect x="802.0" y="1091.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>SHA-512, 16 KB, libcrux: 20.10 µs, 7.66× the fastest; verified: HACL*'s F* proof of Hacl.Streaming.SHA2's hash_256 and hash_512, compiled to Rust by an unverified step</title></rect>
+<rect x="802.0" y="1091.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>SHA-512, 16 KB, libcrux: 20.10 µs, 1.64× the fastest; verified: HACL*'s F* proof of Hacl.Streaming.SHA2's hash_256 and hash_512, compiled to Rust by an unverified step</title></rect>
 <text x="839.0" y="1104.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">20.10 µs</text>
-<g transform="translate(868.4 1094.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#e4572e" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
-<rect x="894.0" y="1091.0" width="88.0" height="18.0" rx="2" fill="#e4572e"><title>SHA-512, 16 KB, OpenSSL: 12.29 µs, 4.68× the fastest</title></rect>
+<g transform="translate(868.4 1094.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#f9d64a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="894.0" y="1091.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>SHA-512, 16 KB, OpenSSL: 12.29 µs, 1.00× the fastest</title></rect>
 <text x="938.0" y="1104.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">12.29 µs</text>
 <text x="12.0" y="1124.0" font-size="12" text-anchor="start" font-weight="normal" fill="#0b0b0b">SHA3-256, 64 B</text>
 <text x="12.0" y="1144.0" font-size="12" text-anchor="start" font-weight="normal" fill="#0b0b0b">SHA3-256, 1350 B</text>
@@ -812,9 +804,8 @@
 <text x="12.0" y="1746.0" font-size="12" text-anchor="start" font-weight="bold" fill="#0b0b0b">P-384 and P-521</text>
 <line x1="12.0" y1="1750.0" x2="984.0" y2="1750.0" stroke="#c3c2b7"/>
 <text x="12.0" y="1768.0" font-size="12" text-anchor="start" font-weight="normal" fill="#0b0b0b">P-384 ECDH</text>
-<rect x="342.0" y="1755.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-384 ECDH, rind: 100.20 µs, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of key generation's draws through a dyn RandomSource, and of the AVX2 and SSE2 comb table select, whose intrinsics' models rind tests against the CPU, which Aeneas cannot translate, of its agreement API's P-384 key generation, public key, and agreement down to s2n-bignum's routines, its own comb for k·G and its tables included, composed with s2n-bignum's HOL Light proofs of p384_montjscalarmul, p384_montjdouble, p384_montjmixadd, bignum_tomont_p384, bignum_demont_p384, bignum_montmul_p384, bignum_montsqr_p384, and their _alt forms without BMI2 and ADX, bignum_add_p384, bignum_inv_p384, bignum_neg_p384, bignum_mod_n384_6, bignum_mux, and bignum_eq, of s2n-bignum's own object code, which rind transliterates, with the generator's order n proven by Pratt certificates</title></rect>
-<text x="379.0" y="1768.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">100.20 µs</text>
-<g transform="translate(411.7 1758.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="342.0" y="1755.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-384 ECDH, rind: 100.20 µs, 1.00× the fastest</title></rect>
+<text x="386.0" y="1768.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">100.20 µs</text>
 <rect x="434.0" y="1755.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-384 ECDH, aws-lc-rs: 109.34 µs, 1.09× the fastest</title></rect>
 <text x="478.0" y="1768.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">109.34 µs</text>
 <rect x="526.0" y="1755.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-384 ECDH, ring: 369.83 µs, 3.69× the fastest</title></rect>
@@ -826,9 +817,8 @@
 <rect x="894.0" y="1755.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-384 ECDH, OpenSSL: 265.21 µs, 2.65× the fastest</title></rect>
 <text x="938.0" y="1768.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">265.21 µs</text>
 <text x="12.0" y="1788.0" font-size="12" text-anchor="start" font-weight="normal" fill="#0b0b0b">P-384 ECDSA sign</text>
-<rect x="342.0" y="1775.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-384 ECDSA sign, rind: 23.48 µs, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the nonces' draws through a dyn RandomSource, and of the AVX2 and SSE2 comb table select, whose intrinsics' models rind tests against the CPU, which Aeneas cannot translate, of its signature API's P-384 ECDSA with SHA-384 and fixed-length signatures, key generation and loading, signing, and verification, down to s2n-bignum's routines, its own comb for k·G and its tables included, composed with s2n-bignum's HOL Light proofs of p384_montjadd, p384_montjdouble, p384_montjmixadd, bignum_tomont_p384, bignum_demont_p384, bignum_montmul_p384, bignum_montsqr_p384, and their _alt forms without BMI2 and ADX, bignum_add_p384, bignum_inv_p384, bignum_neg_p384, bignum_mod_n384_6, bignum_mux, bignum_modadd, bignum_montmul, bignum_demont, bignum_modinv, and bignum_eq, of s2n-bignum's own object code, which rind transliterates, with the group laws its twin multiplication relies on proven from Mathlib's, the generator's order n proven by Pratt certificates, every finite point's order n proven, and proving a signature right when signing returns, as its nonce loop has no bound</title></rect>
-<text x="379.0" y="1788.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">23.48 µs</text>
-<g transform="translate(408.4 1778.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="342.0" y="1775.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-384 ECDSA sign, rind: 23.48 µs, 1.00× the fastest</title></rect>
+<text x="386.0" y="1788.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">23.48 µs</text>
 <rect x="434.0" y="1775.0" width="88.0" height="18.0" rx="2" fill="#f9d64a"><title>P-384 ECDSA sign, aws-lc-rs: 46.55 µs, 1.98× the fastest</title></rect>
 <text x="478.0" y="1788.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">46.55 µs</text>
 <rect x="526.0" y="1775.0" width="88.0" height="18.0" rx="2" fill="#a50f15"><title>P-384 ECDSA sign, ring: 197.31 µs, 8.40× the fastest</title></rect>
@@ -840,9 +830,8 @@
 <rect x="894.0" y="1775.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-384 ECDSA sign, OpenSSL: 88.98 µs, 3.79× the fastest</title></rect>
 <text x="938.0" y="1788.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">88.98 µs</text>
 <text x="12.0" y="1808.0" font-size="12" text-anchor="start" font-weight="normal" fill="#0b0b0b">P-384 ECDSA verify</text>
-<rect x="342.0" y="1795.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-384 ECDSA verify, rind: 100.10 µs, 1.00× the fastest; verified: rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch, of the nonces' draws through a dyn RandomSource, and of the AVX2 and SSE2 comb table select, whose intrinsics' models rind tests against the CPU, which Aeneas cannot translate, of its signature API's P-384 ECDSA with SHA-384 and fixed-length signatures, key generation and loading, signing, and verification, down to s2n-bignum's routines, its own comb for k·G and its tables included, composed with s2n-bignum's HOL Light proofs of p384_montjadd, p384_montjdouble, p384_montjmixadd, bignum_tomont_p384, bignum_demont_p384, bignum_montmul_p384, bignum_montsqr_p384, and their _alt forms without BMI2 and ADX, bignum_add_p384, bignum_inv_p384, bignum_neg_p384, bignum_mod_n384_6, bignum_mux, bignum_modadd, bignum_montmul, bignum_demont, bignum_modinv, and bignum_eq, of s2n-bignum's own object code, which rind transliterates, with the group laws its twin multiplication relies on proven from Mathlib's, the generator's order n proven by Pratt certificates, every finite point's order n proven, and proving a signature right when signing returns, as its nonce loop has no bound</title></rect>
-<text x="379.0" y="1808.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">100.10 µs</text>
-<g transform="translate(411.7 1798.0) scale(0.917)" pointer-events="none"><path d="M6 0.6 L10.8 2.4 V5.8 C10.8 8.7 8.8 10.8 6 11.6 C3.2 10.8 1.2 8.7 1.2 5.8 V2.4 Z" fill="#0b0b0b"/><path d="M3.7 6.1 L5.4 7.8 L8.4 4.5" fill="none" stroke="#1a9641" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<rect x="342.0" y="1795.0" width="88.0" height="18.0" rx="2" fill="#1a9641"><title>P-384 ECDSA verify, rind: 100.10 µs, 1.00× the fastest</title></rect>
+<text x="386.0" y="1808.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">100.10 µs</text>
 <rect x="434.0" y="1795.0" width="88.0" height="18.0" rx="2" fill="#74c476"><title>P-384 ECDSA verify, aws-lc-rs: 115.71 µs, 1.16× the fastest</title></rect>
 <text x="478.0" y="1808.0" font-size="11" text-anchor="middle" font-weight="normal" fill="#0b0b0b">115.71 µs</text>
 <rect x="526.0" y="1795.0" width="88.0" height="18.0" rx="2" fill="#f6a03c"><title>P-384 ECDSA verify, ring: 357.26 µs, 3.57× the fastest</title></rect>
