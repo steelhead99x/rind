@@ -3866,7 +3866,6 @@ dependencies = [
  "base16ct 1.0.0",
  "ecdsa 0.17.0",
  "elliptic-curve 0.14.3",
- "hash2curve",
  "primefield",
  "primeorder 0.14.0",
  "sha2 0.11.1",

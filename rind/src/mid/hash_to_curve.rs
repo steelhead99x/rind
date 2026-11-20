@@ -9,7 +9,8 @@
 //! the field arithmetic its key agreement already does, s2n-bignum's
 //! verified routines or, on armv7 and the portable backend, fiat-crypto's,
 //! so their proofs cover each step; the composition is the RFC's, checked
-//! by its vectors and against aws-lc and RustCrypto.
+//! by its vectors and against aws-lc and an independent reference on big
+//! integers.
 //!
 //! [RFC 9380]: https://www.rfc-editor.org/rfc/rfc9380.html
 
@@ -474,6 +475,58 @@ pub(crate) mod tests {
             assert_eq!(affine(&p), v.p.uncompressed(bytes));
         }
         assert_eq!(file.vectors.len(), 5);
+    }
+
+    /// The independent reference, `test::h2c`, against Appendix J's vectors:
+    /// each `u`, the map's `Q0` and `Q1`, and the hashed point `P`.
+    #[cfg(not(any(miri, target_family = "wasm")))]
+    pub(crate) fn check_reference(name: &str, suite: &crate::test::h2c::Suite) {
+        let bytes = suite.bytes();
+        let file: SuiteFile = vectors(name);
+        for v in &file.vectors {
+            let uniform =
+                suite.expand_message_xmd(&[v.msg.as_bytes()], file.dst.as_bytes(), 2 * suite.l());
+            for ((tv, expect), q) in uniform.chunks(suite.l()).zip(&v.u).zip([&v.q0, &v.q1]) {
+                let u = suite.reduce(tv);
+                assert_eq!(u, num_bigint::BigUint::from_bytes_be(&be(expect, bytes)));
+                assert_eq!(suite.map_to_curve_bytes(&u), q.uncompressed(bytes));
+            }
+            assert_eq!(
+                suite.hash_to_curve(v.msg.as_bytes(), file.dst.as_bytes()),
+                Some(v.p.uncompressed(bytes))
+            );
+        }
+        assert_eq!(file.vectors.len(), 5);
+    }
+
+    /// The reference's `expand_message_xmd`, against Appendix K's vectors.
+    #[cfg(not(any(miri, target_family = "wasm")))]
+    #[test]
+    fn expand_message_xmd_reference() {
+        for (name, suite) in [
+            (
+                "expand_message_xmd_SHA256_38",
+                crate::test::h2c::Suite::p256(),
+            ),
+            (
+                "expand_message_xmd_SHA256_256",
+                crate::test::h2c::Suite::p256(),
+            ),
+            (
+                "expand_message_xmd_SHA512_38",
+                crate::test::h2c::Suite::p521(),
+            ),
+        ] {
+            let file: ExpandFile = vectors(name);
+            for test in file.tests {
+                let out = suite.expand_message_xmd(
+                    &[test.msg.as_bytes()],
+                    file.dst.as_bytes(),
+                    test.uniform_bytes.len(),
+                );
+                assert_eq!(out, test.uniform_bytes);
+            }
+        }
     }
 
     /// An actual sum at infinity, without needing a hash preimage for it.

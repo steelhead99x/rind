@@ -152,11 +152,6 @@ fn coordinates(p: &JacobianPoint) -> [FieldElement; 3] {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use p521::NistP521;
-    use p521::elliptic_curve::array::typenum::U98;
-    use p521::elliptic_curve::sec1::ToSec1Point;
-    use p521::hash2curve::{self as rustcrypto, GroupDigest};
-
     use super::*;
     use crate::error::KeyFormatError;
     use crate::mid::hash_to_curve::tests;
@@ -216,38 +211,44 @@ mod tests {
         low::ct::public_slice(&point.point.as_bytes_uncompressed());
     }
 
-    /// The public functions, against RustCrypto's, as aws-lc has no
-    /// P-521 suite.
+    /// The public functions, against the `num-bigint` reference's, as aws-lc
+    /// has no P-521 suite.
+    #[cfg(not(any(miri, target_family = "wasm")))]
     #[test]
     fn crosscheck() {
+        let reference = crate::test::h2c::Suite::p521();
         for (msg, dst) in crate::test::hash_to_curve_inputs() {
             let ours = hash_to_curve(&msg, &dst).unwrap();
-            let theirs = NistP521::hash_from_bytes(&[&msg], &[&dst]).unwrap();
             assert_eq!(
                 ours.point.as_bytes_uncompressed()[..],
-                theirs.to_affine().to_sec1_point(false).as_bytes()[..]
+                reference.hash_to_curve(&msg, &dst).unwrap()[..]
             );
 
             let ours = hash_to_scalar(&[&msg], &dst).unwrap();
-            let theirs = rustcrypto::hash_to_scalar::<
-                NistP521,
-                <NistP521 as GroupDigest>::ExpandMsg,
-                U98,
-            >(&[&msg], &[&dst])
-            .unwrap();
-            assert_eq!(ours.as_bytes()[..], theirs.to_bytes()[..]);
+            assert_eq!(
+                ours.as_bytes()[..],
+                reference.hash_to_scalar(&[&msg], &dst)[..]
+            );
         }
     }
 
-    /// An empty DST is refused, as RustCrypto refuses it, since aws-lc has
-    /// no P-521 suite.
+    /// The reference, against Appendix J's vectors.
+    #[cfg(not(any(miri, target_family = "wasm")))]
+    #[test]
+    fn reference_rfc9380() {
+        tests::check_reference(
+            "P521_XMD_SHA-512_SSWU_RO_",
+            &crate::test::h2c::Suite::p521(),
+        );
+    }
+
+    /// An empty DST is refused, as RFC 9380 section 3.1 requires.
     #[test]
     fn empty_dst() {
         tests::check_empty_dst(
             hash_to_curve(b"msg", b"").map(|_| ()),
             hash_to_scalar(&[b"msg"], b"").map(|_| ()),
         );
-        assert!(NistP521::hash_from_bytes(&[b"msg"], &[b""]).is_err());
     }
 
     #[test]

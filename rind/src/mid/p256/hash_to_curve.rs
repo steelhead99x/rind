@@ -153,9 +153,6 @@ pub(super) fn coordinates(p: &JacobianMontPoint) -> [FieldElement; 3] {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use p256::NistP256;
-    use p256::elliptic_curve::array::typenum::U48;
-    use p256::hash2curve::{self as rustcrypto, GroupDigest};
 
     use super::*;
     use crate::error::KeyFormatError;
@@ -217,25 +214,37 @@ mod tests {
         low::ct::public_slice(&point.point.as_bytes_uncompressed());
     }
 
-    /// The public functions, against aws-lc's hash to the curve and
-    /// RustCrypto's to a scalar.
+    /// The public functions, against aws-lc's hash to the curve and the
+    /// `num-bigint` reference's to the curve and to a scalar.
     #[cfg(not(any(miri, target_family = "wasm")))]
     #[test]
     fn crosscheck() {
+        let reference = crate::test::h2c::Suite::p256();
         for (msg, dst) in crate::test::hash_to_curve_inputs() {
             let ours = hash_to_curve(&msg, &dst).unwrap();
             let theirs = crate::test::aws_lc_hash_to_curve(256, &msg, &dst);
             assert_eq!(ours.point.as_bytes_uncompressed()[..], theirs[..]);
+            assert_eq!(
+                ours.point.as_bytes_uncompressed()[..],
+                reference.hash_to_curve(&msg, &dst).unwrap()[..]
+            );
 
             let ours = hash_to_scalar(&[&msg], &dst).unwrap();
-            let theirs = rustcrypto::hash_to_scalar::<
-                NistP256,
-                <NistP256 as GroupDigest>::ExpandMsg,
-                U48,
-            >(&[&msg], &[&dst])
-            .unwrap();
-            assert_eq!(ours.as_bytes()[..], theirs.to_bytes()[..]);
+            assert_eq!(
+                ours.as_bytes()[..],
+                reference.hash_to_scalar(&[&msg], &dst)[..]
+            );
         }
+    }
+
+    /// The reference, against Appendix J's vectors.
+    #[cfg(not(any(miri, target_family = "wasm")))]
+    #[test]
+    fn reference_rfc9380() {
+        tests::check_reference(
+            "P256_XMD_SHA-256_SSWU_RO_",
+            &crate::test::h2c::Suite::p256(),
+        );
     }
 
     /// An empty DST is refused, as aws-lc's
