@@ -457,10 +457,28 @@ fn redc(t: &mut [Limb], m: &[Limb], n0: Limb) {
 /// that fits a limb, returning what lands above them, which fits `Wide`.
 ///
 /// Its two products a limb are summed in two carry chains, which run side
-/// by side where one chain's latency would bound `mul_add`.
+/// by side where one chain's latency would bound `mul_add`. It takes two
+/// limbs a step, which measured faster than one a step or four.
 fn mul_add2(x: &mut [Limb], y: &[Limb], u: Limb, v: Limb, c: Wide) -> Wide {
     let (mut c0, mut c1, mut prev) = (c, 0, 0);
-    for (x, y) in x.iter_mut().zip(y) {
+    let n = x.len().min(y.len());
+    let (x, y) = (&mut x[..n], &y[..n]);
+    let (xb, xr) = x.as_chunks_mut::<2>();
+    let (yb, yr) = y.split_at(xb.len() * 2);
+    for (x, y) in xb.iter_mut().zip(yb.as_chunks::<2>().0) {
+        let s0 = mul_add_limb(u, y[0], x[0], c0);
+        c0 = s0 >> Limb::BITS;
+        let s1 = mul_add_limb(v, prev, s0 as Limb, c1);
+        x[0] = s1 as Limb;
+        c1 = s1 >> Limb::BITS;
+        let t0 = mul_add_limb(u, y[1], x[1], c0);
+        c0 = t0 >> Limb::BITS;
+        let t1 = mul_add_limb(v, y[0], t0 as Limb, c1);
+        x[1] = t1 as Limb;
+        c1 = t1 >> Limb::BITS;
+        prev = y[1];
+    }
+    for (x, y) in xr.iter_mut().zip(yr) {
         let s0 = mul_add_limb(u, *y, *x, c0);
         c0 = s0 >> Limb::BITS;
         let s1 = mul_add_limb(v, prev, s0 as Limb, c1);
@@ -618,6 +636,34 @@ mod tests {
             mont_sqr(&mut ours, &sx, &sm, into_secret(n0[0]));
             low::mont_mul(&mut theirs, &x, &x, &m, n0[0]);
             prop_assert_eq!(public(&ours), theirs);
+        }
+    }
+
+    /// With every limb of `x`, `y`, `u`, and `v` all ones, `mul_add2` sums to
+    /// (2^bn - 1) 2^2b + c, since 1 + (2^b - 1)(1 + 2^b) = 2^2b: the
+    /// widest sums, at every length, so every odd remainder.
+    #[test]
+    fn mul_add2_ones() {
+        for n in 0..=3 * 4 + 1 {
+            for c in [0, 1, Wide::from(Limb::MAX)] {
+                let mut x = vec![Limb::MAX; n];
+                let rest = mul_add2(&mut x, &vec![Limb::MAX; n], Limb::MAX, Limb::MAX, c);
+                // 2^b(n + 2) - 2^2b + c, as n + 2 limbs.
+                let mut want = vec![Limb::MAX; n + 2];
+                want[0] = c as Limb;
+                want[1] = 0;
+                let got: Vec<Limb> = x
+                    .iter()
+                    .copied()
+                    .chain([rest as Limb, (rest >> Limb::BITS) as Limb])
+                    .collect();
+                if n == 0 {
+                    // No limbs leave only `c`.
+                    assert_eq!(rest, c);
+                } else {
+                    assert_eq!(got, want, "n = {n}, c = {c}");
+                }
+            }
         }
     }
 
