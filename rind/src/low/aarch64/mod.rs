@@ -83,6 +83,7 @@ pub(crate) mod cpu;
 #[cfg(test)]
 #[path = "../arm/ct_qemu.rs"]
 pub(crate) mod ct_qemu;
+pub(crate) mod curve25519_avx_ifma;
 pub(crate) mod curve25519_ifma;
 pub(crate) mod curve25519_x25519;
 pub(crate) mod curve25519_x25519_narrow;

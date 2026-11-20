@@ -45,6 +45,9 @@ admin/import-boringssl "$upstream/boringssl"
 admin/import-openssl "$upstream/openssl"
 admin/import-hacl "$upstream/hacl-star"
 admin/import-vg "$upstream/verified-garbage"
+# Re-encodes the VG routines just imported for AVX-IFMA; the check below then
+# catches a converter or toolchain change that alters them.
+admin/avx-ifma/generate
 (cd admin/parse-asm && ./all.sh >/dev/null)
 admin/p256-precomp
 admin/p384-precomp

@@ -1173,7 +1173,7 @@ CPU_FEATURES = {
     "portable": set(),
     "x86_64": {
         "intel", "adx", "aes", "vaes", "pclmulqdq", "vpclmulqdq", "bmi1", "bmi2", "movbe", "popcnt", "ssse3", "sse4.1",
-        "avx", "avx2", "avx512f", "avx512dq", "avx512ifma", "avx512bw", "avx512vl", "avx512vbmi", "avx512vbmi2",
+        "avx", "avx2", "avx512f", "avx512dq", "avx512ifma", "avxifma", "avx512bw", "avx512vl", "avx512vbmi", "avx512vbmi2",
         "sha", "sha512",
     },
     "aarch64": {"aes", "dit", "neon", "pmull", "sha2", "sha3", "wide_mul"},

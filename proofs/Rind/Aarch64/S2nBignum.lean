@@ -407,8 +407,11 @@ def Runs : Prop :=
   (∃ e, low.entry.Entry.new_secret = ok e) ∧ (∃ e, low.entry.Entry.new_public = ok e)
 
 /-- X25519 and Ed25519 run s2n-bignum's routines and rind's glue, as they do
-on every aarch64 CPU, which lacks the x86_64 AVX-512 IFMA routines. -/
-def NoCurveIfma : Prop := low.aarch64.curve25519_ifma.Curve25519Ifma.check = ok none
+on every aarch64 CPU, which lacks the x86_64 AVX-512 IFMA and AVX-IFMA
+routines. -/
+def NoCurveIfma : Prop :=
+  low.aarch64.curve25519_ifma.Curve25519Ifma.check = ok none ∧
+    low.aarch64.curve25519_avx_ifma.Curve25519AvxIfma.check = ok none
 
 @[step]
 theorem new_secret_spec (h : Runs) : low.entry.Entry.new_secret ⦃ _ => True ⦄ := by

@@ -426,6 +426,19 @@ impl HaveAdxForVgP256 {
     }
 }
 
+/// Proof that the CPU has what X25519 and Ed25519 verification run for AVX-IFMA,
+/// the VEX encoding of IFMA that Alder Lake's successors and Zen 5 have
+/// without AVX-512: AVX-IFMA, AVX, AVX2, BMI1, BMI2, and ADX. A CPU with
+/// AVX-512 IFMA runs [`HaveIfmaForCurve25519`]'s routines instead.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveAvxIfmaForCurve25519(());
+
+impl HaveAvxIfmaForCurve25519 {
+    pub(crate) fn check() -> Option<Self> {
+        has(AVX | AVX2 | BMI1 | BMI2 | ADX | AVX_IFMA).then_some(Self(()))
+    }
+}
+
 /// Proof that the CPU has what pyca/verified-garbage's AVX-512 IFMA P-256
 /// ECDH and ECDSA verification run: AVX-512 F, VL, and IFMA, with what
 /// [`HaveAdxForVgP256`] proves.
@@ -465,6 +478,7 @@ const AVX512DQ: u32 = 1 << 18;
 const AVX512IFMA: u32 = 1 << 19;
 const BMI1: u32 = 1 << 20;
 const AVX512FP16: u32 = 1 << 22;
+const AVX_IFMA: u32 = 1 << 23;
 const INTEL: u32 = 1 << 30;
 /// What rind's AVX2 kernels use, for [`HaveAvx2`].
 const AVX2_KERNELS: u32 = AVX | AVX2 | BMI1 | BMI2 | POPCNT | SSSE3;
@@ -536,6 +550,7 @@ named! {
     AVX512F: "avx512f",
     AVX512DQ: "avx512dq",
     AVX512IFMA: "avx512ifma",
+    AVX_IFMA: "avxifma",
     AVX512BW: "avx512bw",
     AVX512VL: "avx512vl",
     AVX512VBMI: "avx512vbmi",
@@ -574,10 +589,12 @@ struct Registers {
     intel: bool,
     /// Leaf 1's ECX, or zero where the CPU has no leaf 1.
     ecx1: u32,
-    /// Leaf 7's EBX, ECX, and EDX, or zero where the CPU has no leaf 7.
+    /// Leaf 7's EBX, ECX, and EDX, and subleaf 1's EAX, or zero where the
+    /// CPU has no leaf 7.
     ebx7: u32,
     ecx7: u32,
     edx7: u32,
+    eax7_1: u32,
     /// XCR0, or `None` where the OS has not enabled `xgetbv`.
     xcr0: Option<u64>,
 }
@@ -602,8 +619,9 @@ fn registers() -> Registers {
     }
     if leaf0.eax >= 7 {
         // SAFETY: as above.
-        let leaf7 = unsafe { __cpuid_count(7, 0) };
-        (found.ebx7, found.ecx7, found.edx7) = (leaf7.ebx, leaf7.ecx, leaf7.edx);
+        let (leaf7, leaf7_1) = unsafe { (__cpuid_count(7, 0), __cpuid_count(7, 1)) };
+        (found.ebx7, found.ecx7, found.edx7, found.eax7_1) =
+            (leaf7.ebx, leaf7.ecx, leaf7.edx, leaf7_1.eax);
     }
     // XSAVE, and OSXSAVE: the OS has enabled `xgetbv`.
     if found.ecx1 & (1 << 26 | 1 << 27) == 1 << 26 | 1 << 27 {
@@ -646,6 +664,7 @@ fn decode(r: Registers) -> u32 {
     if xcr0 & 0b110 == 0b110 {
         set(bit(r.ecx1, 28), AVX);
         set(bit(r.ebx7, 5), AVX2);
+        set(bit(r.eax7_1, 23), AVX_IFMA);
         // And the AVX-512 state. Rust's `avx512f` implies FMA and F16C,
         // which Intel does not promise with it, so `std` requires them.
         let (fma, f16c) = (bit(r.ecx1, 12), bit(r.ecx1, 29));
@@ -761,6 +780,7 @@ mod tests {
         Ebx7,
         Ecx7,
         Edx7,
+        Eax7Sub1,
     }
 
     impl Leaf {
@@ -770,6 +790,7 @@ mod tests {
                 Self::Ebx7 => &mut r.ebx7,
                 Self::Ecx7 => &mut r.ecx7,
                 Self::Edx7 => &mut r.edx7,
+                Self::Eax7Sub1 => &mut r.eax7_1,
             }
         }
     }
@@ -797,6 +818,7 @@ mod tests {
         (Leaf::Ecx7, 9, VAES),
         (Leaf::Ecx7, 10, VPCLMULQDQ),
         (Leaf::Edx7, 23, AVX512FP16),
+        (Leaf::Eax7Sub1, 23, AVX_IFMA),
     ];
 
     /// Each feature is read from its own bit, and from no other.
@@ -826,6 +848,7 @@ mod tests {
             ebx7: u32::MAX,
             ecx7: u32::MAX,
             edx7: u32::MAX,
+            eax7_1: u32::MAX,
             xcr0: Some(u64::MAX),
         };
         let named = NAMED.iter().fold(0, |all, &(bit, _)| all | bit);
@@ -840,7 +863,7 @@ mod tests {
             | AVX512VBMI
             | AVX512VBMI2
             | AVX512FP16;
-        let avx = AVX | AVX2 | avx512;
+        let avx = AVX | AVX2 | AVX_IFMA | avx512;
         for xcr0 in [None, Some(0), Some(0b010), Some(0b100), Some(!0b110)] {
             assert_eq!(decode(Registers { xcr0, ..all }), named & !avx, "{xcr0:?}");
         }
@@ -907,6 +930,7 @@ mod tests {
             AVX512IFMA,
             BMI1,
             AVX512FP16,
+            AVX_IFMA,
             INTEL,
             DETECTED,
         ];
@@ -995,6 +1019,10 @@ mod tests {
                     "avx512vl",
                     "avx512ifma"
                 ),
+            ),
+            (
+                HaveAvxIfmaForCurve25519::check().is_some(),
+                adx && available!("avx", "avx2", "bmi1", "bmi2", "avxifma"),
             ),
             (
                 HaveSha1::check().is_some(),

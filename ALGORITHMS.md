@@ -32,7 +32,9 @@ and decapsulation as ML-KEM-512's, on s2n-bignum ✓ + mlkem-native ✓, and onl
 its encapsulation on [verified-garbage] (see [ML-KEM](#ml-kem)). CPUs
 without AVX-512 IFMA run X25519 and Ed25519 on s2n-bignum ✓ and rind's
 glue, not verified-garbage (see [ECC](#ecc)), except that without ADX
-Ed25519 verification's multiplication runs curve25519-dalek ⚡, as above.
+Ed25519 verification's multiplication runs curve25519-dalek ⚡, as above, and
+that CPUs with AVX-IFMA run X25519 and Ed25519 verification on
+verified-garbage's routines re-encoded for it ⚡.
 
 | Algorithm | x86_64 | no AVX2 | no AVX | no AES-NI | SSE2 |
 |---|---|---|---|---|---|
@@ -636,6 +638,21 @@ whose VM hid AVX-512, 0.92-0.97 but 1.07 for verification, in [run
 44169300257]; 1.10-1.77 on that run's tiers that deny ADX or AVX2; 1.09 for
 signing on a Zen 3 Ryzen 9 5900XT; and up to 1.17 for verification on Arrow
 Lake, whose SHA-512 instructions VG also runs, though under load.
+
+CPUs with AVX-IFMA, the VEX encoding of IFMA that Arrow Lake and Zen 5 have,
+and AVX2, BMI1, BMI2, and ADX but no AVX-512, run X25519 and Ed25519
+verification on the same routines re-encoded by `admin/avx-ifma`. The
+transform maps each EVEX `vpmadd52luq`, `vpmadd52huq`, and `vpxorq` on a ymm
+register to its VEX form and nothing else, except that VG's X25519 ladder
+holds three accumulators in ymm16 to ymm18, which VEX cannot name, so each
+live range of one moves onto a ymm register dead throughout it, or else
+around a spill of one to a 96-byte stack frame the ladder allocates, which it
+zeroes and frees before it returns. They are not VG's proven bytes, so they carry no ✓. VG's key
+generation and signing, and X25519's public key, use 512-bit registers, so
+those stay on s2n-bignum. Ed25519 verification uses VG's variant for CPUs
+without the SHA-512 instructions, so no `vsha512` instruction runs. On a Core
+Ultra 9 275HX core, X25519's agreement took 0.66 of the s2n-bignum routine's
+time, and Ed25519 verification 0.91 of it.
 
 Where s2n-bignum ships a routine in two verified variants, aarch64 runs the
 scalar `_alt` one under the plain name: on Apple's M1 and M4 and on Neoverse

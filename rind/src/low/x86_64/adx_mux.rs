@@ -10,6 +10,7 @@
 //! `super::mont` picks RSA's multiplication instead.
 
 use super::cpu::{HaveAvx2, HaveBmi2Adx};
+use super::curve25519_avx_ifma::Curve25519AvxIfma;
 use super::curve25519_ifma::Curve25519Ifma;
 
 macro_rules! mux {
@@ -67,10 +68,17 @@ mux! {
 /// point of small order.
 #[inline]
 pub(crate) fn curve25519_x25519(res: &mut [u64; 4], scalar: &[u64; 4], point: &[u64; 4]) {
-    match (Curve25519Ifma::check(), HaveBmi2Adx::check()) {
-        (Some(ifma), _) => ifma.x25519(res, scalar, point),
-        (None, Some(_)) => super::curve25519_x25519::curve25519_x25519(res, scalar, point),
-        (None, None) => super::curve25519_x25519_alt::curve25519_x25519_alt(res, scalar, point),
+    match (
+        Curve25519Ifma::check(),
+        Curve25519AvxIfma::check(),
+        HaveBmi2Adx::check(),
+    ) {
+        (Some(ifma), _, _) => ifma.x25519(res, scalar, point),
+        (None, Some(avx_ifma), _) => avx_ifma.x25519(res, scalar, point),
+        (None, None, Some(_)) => super::curve25519_x25519::curve25519_x25519(res, scalar, point),
+        (None, None, None) => {
+            super::curve25519_x25519_alt::curve25519_x25519_alt(res, scalar, point)
+        }
     }
 }
 
