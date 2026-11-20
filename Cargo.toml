@@ -47,6 +47,11 @@ debug = true
 [profile.dev.package.fiat-crypto]
 overflow-checks = false
 
+# The tests' schoolbook P-384 and P-521 reference divides at every point
+# operation, which is slow unoptimized.
+[profile.dev.package.num-bigint]
+opt-level = 3
+
 [profile.dev.package.base64ct]
 overflow-checks = false
 

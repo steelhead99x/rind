@@ -3929,4 +3929,575 @@ mod independent {
             }
         }
     }
+
+    /// What each curve's tests run: the curve's own hash with both encodings,
+    /// and the other hashes with the ASN.1 one, which rind verifies for them.
+    struct Case {
+        hash: &'static rind::digest::Algorithm,
+        asn1: &'static rind::ecdsa::VerificationAlgorithm,
+        fixed: Option<&'static rind::ecdsa::VerificationAlgorithm>,
+    }
+
+    struct NistCurve {
+        /// The scalar and field element length in bytes.
+        len: usize,
+        ecdh: &'static rind::agreement::Algorithm,
+        sign_fixed: &'static rind::ecdsa::SigningAlgorithm,
+        sign_asn1: &'static rind::ecdsa::SigningAlgorithm,
+        cases: Vec<Case>,
+    }
+
+    fn nist_curves() -> [NistCurve; 3] {
+        use rind::agreement::{ECDH_P256, ECDH_P384, ECDH_P521};
+        use rind::digest::{SHA256, SHA384, SHA512};
+        use rind::ecdsa::{sign, verify};
+        [
+            NistCurve {
+                len: 32,
+                ecdh: &ECDH_P256,
+                sign_fixed: &sign::P256_SHA256_FIXED,
+                sign_asn1: &sign::P256_SHA256_ASN1,
+                cases: vec![
+                    Case {
+                        hash: &SHA256,
+                        asn1: &verify::P256_SHA256_ASN1,
+                        fixed: Some(&verify::P256_SHA256_FIXED),
+                    },
+                    Case {
+                        hash: &SHA384,
+                        asn1: &verify::P256_SHA384_ASN1,
+                        fixed: None,
+                    },
+                    Case {
+                        hash: &SHA512,
+                        asn1: &verify::P256_SHA512_ASN1,
+                        fixed: None,
+                    },
+                ],
+            },
+            NistCurve {
+                len: 48,
+                ecdh: &ECDH_P384,
+                sign_fixed: &sign::P384_SHA384_FIXED,
+                sign_asn1: &sign::P384_SHA384_ASN1,
+                cases: vec![
+                    Case {
+                        hash: &SHA384,
+                        asn1: &verify::P384_SHA384_ASN1,
+                        fixed: Some(&verify::P384_SHA384_FIXED),
+                    },
+                    Case {
+                        hash: &SHA256,
+                        asn1: &verify::P384_SHA256_ASN1,
+                        fixed: None,
+                    },
+                    Case {
+                        hash: &SHA512,
+                        asn1: &verify::P384_SHA512_ASN1,
+                        fixed: None,
+                    },
+                ],
+            },
+            NistCurve {
+                len: 66,
+                ecdh: &ECDH_P521,
+                sign_fixed: &sign::P521_SHA512_FIXED,
+                sign_asn1: &sign::P521_SHA512_ASN1,
+                cases: vec![
+                    Case {
+                        hash: &SHA512,
+                        asn1: &verify::P521_SHA512_ASN1,
+                        fixed: Some(&verify::P521_SHA512_FIXED),
+                    },
+                    Case {
+                        hash: &SHA256,
+                        asn1: &verify::P521_SHA256_ASN1,
+                        fixed: None,
+                    },
+                    Case {
+                        hash: &SHA384,
+                        asn1: &verify::P521_SHA384_ASN1,
+                        fixed: None,
+                    },
+                ],
+            },
+        ]
+    }
+
+    #[cfg(all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_endian = "little",
+        not(rind_portable)
+    ))]
+    /// Any scalar of the curve's length that is a private key: P-521's
+    /// leading byte keeps its nine bits, and a value of n or more is
+    /// vanishingly rare.
+    fn scalar(len: usize, bytes: &[u8]) -> Vec<u8> {
+        let mut scalar = bytes[..len].to_vec();
+        if len == 66 {
+            scalar[0] &= 1;
+        }
+        scalar
+    }
+
+    /// Splits an ASN.1 `ECDSA-Sig-Value` into `r || s`, each `len` bytes.
+    fn fixed_from_der(der: &[u8], len: usize) -> Vec<u8> {
+        let mut at = if der[1] & 0x80 == 0 {
+            2
+        } else {
+            2 + usize::from(der[1] & 0x7f)
+        };
+        let mut out = Vec::new();
+        for _ in 0..2 {
+            assert_eq!(der[at], 2);
+            let int = &der[at + 2..at + 2 + usize::from(der[at + 1])];
+            let int = &int[int.iter().take_while(|&&b| b == 0).count()..];
+            out.extend_from_slice(&vec![0; len - int.len()]);
+            out.extend_from_slice(int);
+            at += 2 + usize::from(der[at + 1]);
+        }
+        out
+    }
+
+    /// The reverse: a minimal DER `ECDSA-Sig-Value` for `r || s`.
+    fn der_from_fixed(fixed: &[u8]) -> Vec<u8> {
+        let int = |bytes: &[u8]| {
+            let bytes = &bytes[bytes.iter().take_while(|&&b| b == 0).count()..];
+            let padded = if bytes.first().is_none_or(|b| b & 0x80 != 0) {
+                [&[0][..], bytes].concat()
+            } else {
+                bytes.to_vec()
+            };
+            crate::der(2, &padded)
+        };
+        let (r, s) = fixed.split_at(fixed.len() / 2);
+        crate::der(0x30, &[int(r), int(s)].concat())
+    }
+
+    /// Schoolbook affine P-384 and P-521 over `num-bigint`: each point
+    /// operation divides, with no table, no projective coordinates, and no
+    /// field code of any kind, so it shares nothing with rind on any tier,
+    /// including armv7 and the portable backend, where RustCrypto's crates
+    /// run fiat-crypto's arithmetic as rind does. It is slow and variable
+    /// time, and checks its constants against the curve equation and the
+    /// group's order.
+    mod reference {
+        use num_bigint::{BigInt, BigUint, Sign};
+
+        pub type Point = Option<(BigUint, BigUint)>;
+
+        pub struct Curve {
+            pub p: BigUint,
+            pub n: BigUint,
+            pub b: BigUint,
+            pub g: (BigUint, BigUint),
+            pub len: usize,
+        }
+
+        fn hex(digits: &str) -> BigUint {
+            BigUint::parse_bytes(digits.as_bytes(), 16).unwrap()
+        }
+
+        pub fn p384() -> Curve {
+            let one = BigUint::from(1u8);
+            Curve {
+                p: (&one << 384) - (&one << 128) - (&one << 96) + (&one << 32) - &one,
+                n: hex(
+                    "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973",
+                ),
+                b: hex(
+                    "b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef",
+                ),
+                g: (
+                    hex(
+                        "aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7",
+                    ),
+                    hex(
+                        "3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f",
+                    ),
+                ),
+                len: 48,
+            }
+        }
+
+        pub fn p521() -> Curve {
+            let one = BigUint::from(1u8);
+            Curve {
+                p: (&one << 521) - &one,
+                n: hex(
+                    "1fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa51868783bf2f966b7fcc0148f709a5d03bb5c9b8899c47aebb6fb71e91386409",
+                ),
+                b: hex(
+                    "0051953eb9618e1c9a1f929a21a0b68540eea2da725b99b315f3b8b489918ef109e156193951ec7e937b1652c0bd3bb1bf073573df883d2c34f1ef451fd46b503f00",
+                ),
+                g: (
+                    hex(
+                        "00c6858e06b70404e9cd9e3ecb662395b4429c648139053fb521f828af606b4d3dbaa14b5e77efe75928fe1dc127a2ffa8de3348b3c1856a429bf97e7e31c2e5bd66",
+                    ),
+                    hex(
+                        "011839296a789a3bc0045c8a5fb42c7d1bd998f54449579b446817afbd17273e662c97ee72995ef42640c550b9013fad0761353c7086a272c24088be94769fd16650",
+                    ),
+                ),
+                len: 66,
+            }
+        }
+
+        /// `a`'s inverse modulo the prime `m`, by the extended Euclidean
+        /// algorithm.
+        fn inverse(a: &BigUint, m: &BigUint) -> BigUint {
+            let m = BigInt::from(m.clone());
+            let (mut r0, mut r1) = (m.clone(), BigInt::from(a.clone()) % &m);
+            let (mut t0, mut t1) = (BigInt::from(0), BigInt::from(1));
+            while r1.sign() != Sign::NoSign {
+                let q = &r0 / &r1;
+                let r2 = &r0 - &q * &r1;
+                (r0, r1) = (r1, r2);
+                let t2 = &t0 - &q * &t1;
+                (t0, t1) = (t1, t2);
+            }
+            assert_eq!(r0, BigInt::from(1));
+            (((t0 % &m) + &m) % &m).to_biguint().unwrap()
+        }
+
+        /// The big-endian `len` bytes of `x`.
+        pub fn be(x: &BigUint, len: usize) -> Vec<u8> {
+            let bytes = x.to_bytes_be();
+            [vec![0; len - bytes.len()], bytes].concat()
+        }
+
+        impl Curve {
+            fn sub(&self, a: &BigUint, b: &BigUint) -> BigUint {
+                (a + &self.p - b) % &self.p
+            }
+
+            pub fn on_curve(&self, (x, y): &(BigUint, BigUint)) -> bool {
+                let rhs = (x * x % &self.p * x + &self.p * 3u8 - x * 3u8 + &self.b) % &self.p;
+                y * y % &self.p == rhs
+            }
+
+            pub fn add(&self, a: &Point, b: &Point) -> Point {
+                let (Some((x1, y1)), Some((x2, y2))) = (a, b) else {
+                    return a.clone().or_else(|| b.clone());
+                };
+                let lambda = if x1 == x2 {
+                    if y1 != y2 || *y1 == BigUint::from(0u8) {
+                        return None;
+                    }
+                    // a = -3, so the slope is (3x^2 - 3) / 2y.
+                    let numerator = (x1 * x1 * 3u8 + &self.p - 3u8) % &self.p;
+                    numerator * inverse(&(y1 * 2u8), &self.p) % &self.p
+                } else {
+                    self.sub(y2, y1) * inverse(&self.sub(x2, x1), &self.p) % &self.p
+                };
+                let x3 = self.sub(&self.sub(&(&lambda * &lambda % &self.p), x1), x2);
+                let y3 = self.sub(&(&lambda * self.sub(x1, &x3) % &self.p), y1);
+                Some((x3, y3))
+            }
+
+            /// `k * point`, by double and add from the top bit.
+            pub fn mul(&self, k: &BigUint, point: &Point) -> Point {
+                let mut acc = None;
+                for bit in (0..k.bits()).rev() {
+                    acc = self.add(&acc, &acc);
+                    if k.bit(bit) {
+                        acc = self.add(&acc, point);
+                    }
+                }
+                acc
+            }
+
+            pub fn generator(&self) -> Point {
+                Some(self.g.clone())
+            }
+
+            /// X9.62's uncompressed point.
+            pub fn encode(&self, point: &Point) -> Vec<u8> {
+                let (x, y) = point.as_ref().expect("not the point at infinity");
+                [&[4][..], &be(x, self.len), &be(y, self.len)].concat()
+            }
+
+            /// Checks the constants: G is on the curve, and n * G is the point
+            /// at infinity.
+            pub fn check_constants(&self) {
+                assert!(self.on_curve(&self.g));
+                assert_eq!(self.mul(&self.n, &self.generator()), None);
+            }
+
+            /// A scalar from 1 to n - 1 out of any bytes.
+            pub fn scalar(&self, bytes: &[u8]) -> BigUint {
+                BigUint::from_bytes_be(bytes) % (&self.n - 1u8) + 1u8
+            }
+
+            /// The ECDH shared secret: the x-coordinate of `d * peer`.
+            pub fn ecdh(&self, d: &BigUint, peer: &Point) -> Vec<u8> {
+                let shared = self.mul(d, peer).expect("not the point at infinity");
+                be(&shared.0, self.len)
+            }
+
+            /// The digest as FIPS 186-5 takes it: its leftmost n.bits() bits.
+            pub fn hash_to_scalar(&self, digest: &[u8]) -> BigUint {
+                let e = BigUint::from_bytes_be(digest);
+                let excess = (digest.len() * 8).saturating_sub(self.n.bits() as usize);
+                e >> excess
+            }
+
+            /// An ECDSA signature `r || s` of `digest`, by the nonce `k`, or
+            /// nothing where `r` or `s` is zero.
+            pub fn sign(&self, d: &BigUint, k: &BigUint, digest: &[u8]) -> Option<Vec<u8>> {
+                let zero = BigUint::from(0u8);
+                let (x, _) = self.mul(k, &self.generator())?;
+                let r = x % &self.n;
+                let s = inverse(k, &self.n) * (self.hash_to_scalar(digest) + &r * d) % &self.n;
+                (r != zero && s != zero).then(|| [be(&r, self.len), be(&s, self.len)].concat())
+            }
+
+            /// Whether `r || s` signs `digest` under `public`.
+            pub fn verify(&self, public: &Point, digest: &[u8], signature: &[u8]) -> bool {
+                let (r, s) = signature.split_at(self.len);
+                let (r, s) = (BigUint::from_bytes_be(r), BigUint::from_bytes_be(s));
+                let zero = BigUint::from(0u8);
+                if r == zero || s == zero || r >= self.n || s >= self.n {
+                    return false;
+                }
+                let w = inverse(&s, &self.n);
+                let u1 = self.hash_to_scalar(digest) * &w % &self.n;
+                let u2 = &r * &w % &self.n;
+                let point = self.add(&self.mul(&u1, &self.generator()), &self.mul(&u2, public));
+                point.is_some_and(|(x, _)| x % &self.n == r)
+            }
+        }
+    }
+
+    #[test]
+    fn reference_constants() {
+        reference::p384().check_constants();
+        reference::p521().check_constants();
+    }
+
+    // Three 66-byte values cover the private key, the peer's, and the nonce
+    // of the largest curve; the smaller ones reduce them.
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(4))]
+
+        // P-384 and P-521 against the schoolbook reference, on every tier.
+        #[test]
+        fn p384_p521_reference(
+            bytes in vec(any::<u8>(), 198),
+            message in vec(any::<u8>(), 0..300),
+        ) {
+            let curves = nist_curves();
+            for (curve, reference) in [
+                (&curves[1], reference::p384()),
+                (&curves[2], reference::p521()),
+            ] {
+                let d = reference.scalar(&bytes[..66]);
+                let peer = reference.scalar(&bytes[66..132]);
+                let k = reference.scalar(&bytes[132..]);
+                let public = reference.mul(&d, &reference.generator());
+                let peer_public = reference.mul(&peer, &reference.generator());
+                let encoded = reference.encode(&public);
+
+                // Key derivation and ECDH.
+                let d_bytes = reference::be(&d, curve.len);
+                let ours = rind::agreement::PrivateKey::from_scalar(curve.ecdh, &d_bytes).unwrap();
+                prop_assert_eq!(ours.public_key().as_ref(), &encoded[..]);
+                let shared = ours.agree(&reference.encode(&peer_public)).unwrap();
+                prop_assert_eq!(shared.as_ref(), &reference.ecdh(&d, &peer_public)[..]);
+
+                for case in &curve.cases {
+                    let digest = rind::digest::digest(case.hash, &message);
+                    let other = rind::digest::digest(case.hash, b"other");
+
+                    // rind signs; the reference verifies.
+                    for (sign, is_asn1) in [(curve.sign_fixed, false), (curve.sign_asn1, true)] {
+                        let pair = rind::ecdsa::KeyPair::from_scalar_and_public_key(sign, &d_bytes, &encoded).unwrap();
+                        let signature = pair.sign_digest(&digest).unwrap();
+                        let fixed = if is_asn1 {
+                            fixed_from_der(signature.as_ref(), curve.len)
+                        } else {
+                            signature.as_ref().to_vec()
+                        };
+                        prop_assert!(reference.verify(&public, digest.as_ref(), &fixed));
+                        prop_assert!(!reference.verify(&public, other.as_ref(), &fixed));
+                    }
+
+                    // The reference signs; rind verifies.
+                    let Some(fixed) = reference.sign(&d, &k, digest.as_ref()) else { continue };
+                    let verifier = rind::ecdsa::PublicKey::new(case.asn1, &encoded).unwrap();
+                    let der = der_from_fixed(&fixed);
+                    prop_assert!(verifier.verify_digest(&digest, &der).is_ok());
+                    prop_assert!(verifier.verify_digest(&other, &der).is_err());
+                    if let Some(verification) = case.fixed {
+                        let verifier = rind::ecdsa::PublicKey::new(verification, &encoded).unwrap();
+                        prop_assert!(verifier.verify_digest(&digest, &fixed).is_ok());
+                        prop_assert!(verifier.verify_digest(&other, &fixed).is_err());
+                    }
+                }
+            }
+        }
+    }
+
+    // RustCrypto's NIST curves on the tiers where rind runs s2n-bignum,
+    // verified-garbage, or Graviola; armv7 and the portable backend run
+    // fiat-crypto, as its crates do, so the test leaves them out.
+    #[cfg(all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_endian = "little",
+        not(rind_portable)
+    ))]
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(16))]
+
+        #[test]
+        fn nist_rustcrypto(
+            bytes in vec(any::<u8>(), 198),
+            message in vec(any::<u8>(), 0..300),
+        ) {
+            macro_rules! check {
+                ($theirs:ident, $curve:expr) => {{
+                    use $theirs::ecdsa::signature::hazmat::{PrehashSigner, PrehashVerifier};
+
+                    let curve = &$curve;
+                    let (d, peer) = (scalar(curve.len, &bytes), scalar(curve.len, &bytes[66..]));
+                    let ours = rind::agreement::PrivateKey::from_scalar(curve.ecdh, &d).unwrap();
+                    let secret = $theirs::SecretKey::from_slice(&d).unwrap();
+                    let peer_secret = $theirs::SecretKey::from_slice(&peer).unwrap();
+                    let public = secret.public_key();
+                    let peer_public = peer_secret.public_key();
+                    prop_assert_eq!(ours.public_key().as_ref(), &public.to_sec1_bytes()[..]);
+
+                    // ECDH, both ways.
+                    let shared = $theirs::elliptic_curve::ecdh::diffie_hellman(
+                        secret.to_nonzero_scalar(),
+                        peer_public.as_affine(),
+                    );
+                    let agreed = ours.agree(&peer_public.to_sec1_bytes()).unwrap();
+                    prop_assert_eq!(agreed.as_ref(), &shared.raw_secret_bytes()[..]);
+                    let ours_peer = rind::agreement::PrivateKey::from_scalar(curve.ecdh, &peer).unwrap();
+                    let agreed = ours_peer.agree(ours.public_key().as_ref()).unwrap();
+                    prop_assert_eq!(agreed.as_ref(), &shared.raw_secret_bytes()[..]);
+
+                    let signing = $theirs::ecdsa::SigningKey::from(&secret);
+                    let verifying = *signing.verifying_key();
+                    for case in &curve.cases {
+                        let digest = rind::digest::digest(case.hash, &message);
+                        let other = rind::digest::digest(case.hash, b"other");
+
+                        // They sign; rind verifies, in each encoding it has.
+                        let signature: $theirs::ecdsa::Signature =
+                            signing.sign_prehash(digest.as_ref()).unwrap();
+                        let verifier = rind::ecdsa::PublicKey::new(case.asn1, ours.public_key().as_ref()).unwrap();
+                        prop_assert!(verifier.verify_digest(&digest, signature.to_der().as_bytes()).is_ok());
+                        prop_assert!(verifier.verify_digest(&other, signature.to_der().as_bytes()).is_err());
+                        if let Some(fixed) = case.fixed {
+                            let verifier = rind::ecdsa::PublicKey::new(fixed, ours.public_key().as_ref()).unwrap();
+                            prop_assert!(verifier.verify_digest(&digest, &signature.to_bytes()).is_ok());
+                        }
+
+                        // rind signs; they verify.
+                        for (sign, is_asn1) in [(curve.sign_fixed, false), (curve.sign_asn1, true)] {
+                            let pair = rind::ecdsa::KeyPair::from_scalar_and_public_key(
+                                sign,
+                                &d,
+                                ours.public_key().as_ref(),
+                            )
+                            .unwrap();
+                            let signature = pair.sign_digest(&digest).unwrap();
+                            let theirs = if is_asn1 {
+                                $theirs::ecdsa::Signature::from_der(signature.as_ref())
+                            } else {
+                                $theirs::ecdsa::Signature::from_slice(signature.as_ref())
+                            }
+                            .unwrap();
+                            prop_assert!(verifying.verify_prehash(digest.as_ref(), &theirs).is_ok());
+                            prop_assert!(verifying.verify_prehash(other.as_ref(), &theirs).is_err());
+                        }
+                    }
+                }};
+            }
+            let curves = nist_curves();
+            let [p256, p384, p521] = curves;
+            check!(p256, p256);
+            check!(p384, p384);
+            check!(p521, p521);
+        }
+    }
+
+    // libcrux's P-256 (HACL*) on armv7 and the portable backend, where
+    // RustCrypto's p256 runs fiat-crypto's field arithmetic as rind does.
+    // HACL* signs a digest of 32 bytes or more by its leftmost 32.
+    #[cfg(not(all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_endian = "little",
+        not(rind_portable)
+    )))]
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(16))]
+
+        #[test]
+        fn p256_libcrux(
+            d in any::<[u8; 32]>(),
+            peer in any::<[u8; 32]>(),
+            nonce in any::<[u8; 32]>(),
+            message in vec(any::<u8>(), 0..300),
+        ) {
+            let curve = &nist_curves()[0];
+            let (mut theirs_public, mut peer_public) = ([0u8; 64], [0u8; 64]);
+            prop_assume!(libcrux_p256::dh_initiator(&mut theirs_public, &d));
+            prop_assume!(libcrux_p256::dh_initiator(&mut peer_public, &peer));
+            let ours = rind::agreement::PrivateKey::from_scalar(curve.ecdh, &d).unwrap();
+            let encoded = [&[4][..], &theirs_public].concat();
+            prop_assert_eq!(ours.public_key().as_ref(), &encoded[..]);
+
+            // ECDH: HACL* returns the point, whose x-coordinate is the secret.
+            let mut shared = [0u8; 64];
+            prop_assert!(libcrux_p256::dh_responder(&mut shared, &peer_public, &d));
+            let agreed = ours.agree(&[&[4][..], &peer_public].concat()).unwrap();
+            prop_assert_eq!(agreed.as_ref(), &shared[..32]);
+
+            for case in &curve.cases {
+                let digest = rind::digest::digest(case.hash, &message);
+                let other = rind::digest::digest(case.hash, b"other");
+
+                // HACL* signs; rind verifies.
+                let mut signature = [0u8; 64];
+                prop_assume!(libcrux_p256::ecdsa_sign_p256_without_hash(
+                    &mut signature,
+                    digest.as_ref().len() as u32,
+                    digest.as_ref(),
+                    &d,
+                    &nonce,
+                ));
+                let verifier = rind::ecdsa::PublicKey::new(case.asn1, &encoded).unwrap();
+                prop_assert!(verifier.verify_digest(&digest, &der_from_fixed(&signature)).is_ok());
+                prop_assert!(verifier.verify_digest(&other, &der_from_fixed(&signature)).is_err());
+                if let Some(fixed) = case.fixed {
+                    let verifier = rind::ecdsa::PublicKey::new(fixed, &encoded).unwrap();
+                    prop_assert!(verifier.verify_digest(&digest, &signature).is_ok());
+                }
+
+                // rind signs; HACL* verifies.
+                for (sign, is_asn1) in [(curve.sign_fixed, false), (curve.sign_asn1, true)] {
+                    let pair = rind::ecdsa::KeyPair::from_scalar_and_public_key(sign, &d, &encoded).unwrap();
+                    let signature = pair.sign_digest(&digest).unwrap();
+                    let fixed = if is_asn1 {
+                        fixed_from_der(signature.as_ref(), 32)
+                    } else {
+                        signature.as_ref().to_vec()
+                    };
+                    let verified = |digest: &rind::digest::Digest| {
+                        libcrux_p256::ecdsa_verif_without_hash(
+                            digest.as_ref().len() as u32,
+                            digest.as_ref(),
+                            &theirs_public,
+                            &fixed[..32],
+                            &fixed[32..],
+                        )
+                    };
+                    prop_assert!(verified(&digest));
+                    prop_assert!(!verified(&other));
+                }
+            }
+        }
+    }
 }
