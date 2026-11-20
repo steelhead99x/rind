@@ -20,8 +20,9 @@ the others, the code, and the stack frame of `16k + 128` bytes below the stack
 pointer, which the routine owns; the ABI keeps the stack pointer 16-byte
 aligned; and `n0` is read through a reference to the one word `mul_mont`
 passes. At a multiple of four the routine adds 32 to `x` and `m`, and the
-theorem needs the sums not to wrap, which holds because a slice of at least 32
-bytes does not end at the top of the address space. `k < 2^58` holds for each
+theorem needs the sums not to wrap. The axiom does not carry that hypothesis,
+since the model has no addresses: it is a trusted step, that a slice of at
+least 32 bytes does not end at the top of the address space. `k < 2^58` holds for each
 width RSA takes, which `MontArgs` bounds below `2^32`. The restatement, and
 that the wrapper passes the pointers and width the theorem names, are trusted.
 -/
