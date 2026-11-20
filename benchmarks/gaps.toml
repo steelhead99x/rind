@@ -51,7 +51,7 @@ reason = "rind's portable SHA-1 trails aws-lc's C by 1.1 to 1.25× from 1200 B u
 [[gap]]
 operations = ["sha256/*", "sha256-updates/*", "hmac-sha256/*", "sha512*", "hmac-sha384/*"]
 on = ["portable"]
-reason = "Fix in place on x86_64, unconfirmed: the x86_64 portable backend now runs aws-lc's `sha256_block_data_order_nohw` and `sha512_block_data_order_nohw` ported to Rust, where [run 43646114817](https://github.com/kixel-ai/rind/actions/runs/43646114817) measured HACL*'s SHA-2 at 1.11 to 1.22× aws-lc's C. A local run pinned to one loaded x86_64 core took 0.85 to 0.90× aws-lc's C built without assembly for SHA-256 and 0.97 to 1.04× for SHA-512 and SHA-512/256, from 32 B to 16 KB. The weekly tier has not rerun, so the gap stays until it confirms the port; the other portable targets keep HACL* and are unmeasured, which [its quest](/quest/m2/speed/portable-sha2.md) tracks."
+reason = "Fix in place on x86_64, unconfirmed: the x86_64 portable backend now runs aws-lc's `sha256_block_data_order_nohw` and `sha512_block_data_order_nohw` ported to Rust, where [run 43646114817](https://github.com/kixel-ai/rind/actions/runs/43646114817) measured HACL*'s SHA-2 at 1.11 to 1.22× aws-lc's C. A local run pinned to one loaded x86_64 core took 0.85 to 0.90× aws-lc's C built without assembly for SHA-256 and 0.97 to 1.04× for SHA-512 and SHA-512/256, from 32 B to 16 KB. The weekly tier has not rerun, so the gap stays until it confirms the port; the other portable targets keep HACL* and are unmeasured, which [its quest](https://github.com/kixel-ai/rind/blob/main/quest/m2/speed/portable-sha2.md) tracks."
 
 [[gap]]
 operations = ["aes*", "quic-header-protection/aes*", "rustls-bulk/aes*", "hpke-*-aes128-gcm-*"]
