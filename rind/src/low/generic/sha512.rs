@@ -2,11 +2,11 @@
 
 //! A rolled SHA-512 compression, for 32-bit portable microcontrollers.
 //!
-//! The portable backend otherwise calls HACL*'s fully unrolled
+//! The 32-bit portable backend otherwise calls HACL*'s fully unrolled
 //! `sha512_update`, about 47 KiB in 32-bit codegen: several times an
 //! ESP32-S3's 16 KiB instruction cache, so every block streams its code
-//! from flash. This follows [`sha256`](sha256.rs): one 16-word window and
-//! an 80-round loop, a few kilobytes. The round functions and the eighty
+//! from flash. This runs one 16-word window and an 80-round loop, a few
+//! kilobytes. The round functions and the eighty
 //! `K` constants are FIPS 180-4 §4.1.3 and §4.2.3. Every test build
 //! compiles it, so ctgrind checks it on a host.
 
@@ -190,7 +190,7 @@ mod tests {
     }
 
     /// Where the backend ships this compression, the comparison would call
-    /// itself. Everywhere else it is HACL* or aws-lc.
+    /// itself. Everywhere else it is HACL*, `sha512_awslc`, or aws-lc.
     #[cfg(not(all(
         rind_backend = "portable",
         not(target_pointer_width = "64"),

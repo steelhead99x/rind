@@ -176,10 +176,12 @@ with portable Rust in place of the assembly armv7 runs regardless.
   0.86-0.93 of HACL*'s time for SHA-256 and 0.77-0.86 for SHA-384/512 and
   SHA-512/256 from 32 B to 16 KB on x86_64's forced portable backend, and
   0.85-0.90 and 0.97-1.04 of aws-lc's C built without assembly, where
-  Graviola's rolled SHA-256, rind's before, took 1.07-1.19 of HACL*'s. Nothing proves
-  them; [the rolled SHA-2 proof](quest/m4/verified/rolled-sha2-esp.md)
-  plans theirs. 32-bit targets keep what they ran, which was not measured
-  against them.
+  Graviola's rolled SHA-256, rind's before, took 1.07-1.19 of HACL*'s. Nothing
+  measured the other 64-bit portable targets (aarch64 without NEON, riscv64,
+  s390x, powerpc64), which run it too. Nothing proves it;
+  [the portable SHA-2 proof](quest/m4/verified/portable-sha2-lean.md) plans
+  that. 32-bit targets keep what they ran, which was not measured against
+  it.
 - portable, 32-bit microcontrollers (ESP-IDF or no OS): SHA-384/512 is
   rind's rolled loop in `generic::sha512`, since HACL*'s unrolled body,
   about 47 KiB in 32-bit codegen, misses a small instruction cache. On a
@@ -193,8 +195,8 @@ with portable Rust in place of the assembly armv7 runs regardless.
   its rotates and block load are Xtensa `asm!`. On that board it took
   about 0.65-0.74 of HACL*'s time from flash from 1200 B to 16 KB, and
   0.76 of HACL* placed in IRAM, for 4,516 more bytes of IRAM. Host tests
-  check its Rust fallbacks against FIPS 180-4, `generic::sha256`, HACL*,
-  and aws-lc, and `admin/esp32s3-sha256-layout` checks the linked
+  check its Rust fallbacks against FIPS 180-4, `generic::sha256`, HACL* on
+  32-bit hosts, and aws-lc, and `admin/esp32s3-sha256-layout` checks the linked
   placement.
 - portable: ChaCha20-Poly1305's Poly1305 is Graviola's on 64-bit targets
   and HACL*'s ✓ on 32-bit ones, whose streaming state counts its input in a

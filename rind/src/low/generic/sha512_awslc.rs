@@ -129,4 +129,37 @@ mod tests {
             }
         }
     }
+
+    /// FIPS 180-4's two-block message, "abcdefgh...stu" (112 bytes), whose
+    /// padding fills a second block.
+    #[test]
+    fn two_blocks() {
+        let iv: [u64; 8] = [
+            0x6a09e667f3bcc908,
+            0xbb67ae8584caa73b,
+            0x3c6ef372fe94f82b,
+            0xa54ff53a5f1d36f1,
+            0x510e527fade682d1,
+            0x9b05688c2b3e6c1f,
+            0x1f83d9abfb41bd6b,
+            0x5be0cd19137e2179,
+        ];
+        let mut blocks = [0u8; 256];
+        blocks[..112].copy_from_slice(
+            b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu",
+        );
+        blocks[112] = 0x80;
+        blocks[254..].copy_from_slice(&(896u16).to_be_bytes());
+        let mut state = iv;
+        sha512_compress_blocks(&mut state, &blocks);
+        let mut want = [0u8; 64];
+        for (chunk, word) in want.chunks_mut(8).zip(state) {
+            chunk.copy_from_slice(&word.to_be_bytes());
+        }
+        let hex: String = want.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex,
+            "8e959b75dae313da8cf4f72814fc143f8f7779c6eb9f7fa17299aeadb6889018501d289e4900f7e4331b99dec4b5433ac7d329eeb6dd26545e96e55b874be909"
+        );
+    }
 }

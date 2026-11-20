@@ -128,7 +128,7 @@ mod tests {
     ];
 
     /// The IRAM body, with the same padding `sha256_finish` uses. Host tests
-    /// call this rather than `sha256_finish`, which stays on HACL* off Xtensa.
+    /// call this rather than `sha256_finish`, which is another body off Xtensa.
     fn iram_digest(message: &[u8]) -> [u8; 32] {
         let bits = (message.len() as u64).checked_mul(8).unwrap();
         let mut state = IV;
