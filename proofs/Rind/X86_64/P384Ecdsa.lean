@@ -1341,12 +1341,12 @@ theorem vg_verify_spec (h : Runs) (vg : low.x86_64.p384_vg.Verify) (key : mid.p3
   step*
   all_goals try (simp [*, Slice.length, Array.repeat, mid.p384.Scalar.BYTES]; done)
   have hs1l : s1.length = 96 := by simp [Slice.length, s1_post, Array.repeat]
-  obtain ⟨hsig, hsigl⟩ := r_bytes_post4 r_bytes1 s_bytes1
-    (by simp [r_bytes1_post, s2_post, mid.p384.Scalar.BYTES])
-    (by simp [s_bytes1_post, s3_post, hs1l, mid.p384.Scalar.BYTES])
-  have hsgv : (to_slice_mut_back (split_at_mut_back (r_bytes1, s_bytes1))).val = a.val ++ a1.val := by
+  obtain ⟨hsig, hsigl⟩ := sig_r_post4 sig_r1 sig_s1
+    (by simp [sig_r1_post, s2_post, mid.p384.Scalar.BYTES])
+    (by simp [sig_s1_post, s3_post, hs1l, mid.p384.Scalar.BYTES])
+  have hsgv : (to_slice_mut_back (split_at_mut_back (sig_r1, sig_s1))).val = a.val ++ a1.val := by
     rw [to_slice_mut_back_post, Array.from_slice_val _ _ (by rw [← Slice.length, hsigl, hs1l]; rfl), hsig,
-      r_bytes1_post, s2_post, s_bytes1_post, s3_post, Array.val_to_slice, Array.val_to_slice]
+      sig_r1_post, s2_post, sig_s1_post, s3_post, Array.val_to_slice, Array.val_to_slice]
   step with as_bytes_uncompressed_spec h key.point hx hy as ⟨b, hb4, hbc⟩
   step with u64x6_to_be_spec e as ⟨c, hc⟩
   step with vg_p384_verify_spec as ⟨bb, hbb⟩
