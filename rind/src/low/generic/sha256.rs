@@ -180,12 +180,12 @@ mod tests {
                 .wrapping_add(s1);
         }
         let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *state;
-        for i in 0..64 {
+        for (&k, &w) in super::K.iter().zip(&w) {
             let t1 = h
                 .wrapping_add(e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25))
                 .wrapping_add((e & f) ^ (!e & g))
-                .wrapping_add(super::K[i])
-                .wrapping_add(w[i]);
+                .wrapping_add(k)
+                .wrapping_add(w);
             let t2 = (a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22))
                 .wrapping_add((a & b) ^ (a & c) ^ (b & c));
             h = g;
