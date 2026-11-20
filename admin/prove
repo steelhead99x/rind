@@ -1664,6 +1664,19 @@ if [[ -n $untested ]]; then
     exit 1
 fi
 
+# Each executable spec the proofs trust as a transliteration of its standard
+# (`HashSpec`, `Sha2`, `Sha3`) runs on the published vectors in
+# `thirdparty/vectors/` and on random inputs from a fixed seed, and must give
+# the answer the vector or rind's own output states: `admin/spec-vectors.rs`
+# writes the cases into `admin/spec-vectors.lean`, which Lean checks once the
+# proofs build. It runs a fixed sample, to stay in the `lean` job's budget;
+# `SPEC_VECTORS=full`, which the nightly run sets, runs every case the specs
+# can run in reasonable time.
+cargo build -q -p rind --lib --release --target-dir "$out/spec-rind"
+rustc --edition 2024 -O --extern rind="$out/spec-rind/release/librind.rlib" \
+    -L dependency="$out/spec-rind/release/deps" -o "$out/spec-vectors" admin/spec-vectors.rs
+"$out/spec-vectors" >"$out/SpecVectors.lean"
+
 cd proofs
 # Mathlib's cache unpacks a copy into each checkout, so take Mathlib and Aeneas
 # from Lake's artifact cache, which `lakefile.toml` turns on, when another
@@ -1683,3 +1696,4 @@ elif ((status != 0)); then
 fi
 lake build
 lake env lean "../$out/SimdVectors.lean"
+lake env lean "../$out/SpecVectors.lean"

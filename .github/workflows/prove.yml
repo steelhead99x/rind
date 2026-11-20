@@ -43,6 +43,9 @@ on:
       - admin/simd-vectors.rs
       - admin/neon-vectors.rs
       - admin/avx512-vectors.rs
+      - admin/spec-vectors.rs
+      - admin/spec-vectors.lean
+      - thirdparty/vectors/**
       - admin/upstream
       - admin/import-vg
       - admin/import-vg-models
@@ -301,3 +304,6 @@ jobs:
 
       - name: Prove
         run: nix develop .#prove --command admin/prove lean
+        env:
+          # The nightly run checks every case; a pull request, a sample.
+          SPEC_VECTORS: ${{ github.event_name == 'schedule' && 'full' || 'sample' }}

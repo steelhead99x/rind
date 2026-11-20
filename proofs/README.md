@@ -1434,6 +1434,10 @@ Beyond Lean's kernel:
   axiom.
 - That `Rind/HashSpec.lean` transliterates FIPS 180-4, RFC 2104, RFC 5869,
   and RFC 8018.
+  `admin/spec-vectors.rs` runs it, `Rind/Sha2.lean`, and `Rind/Sha3.lean` on the
+  published CAVP and Wycheproof vectors and on random inputs against rind's
+  output, and `admin/prove` fails on a disagreement. The other specs in this
+  list are not yet tested this way.
 - The restatement of each s2n-bignum and aws-lc-verification theorem, and of
   each of rind's own HOL Light theorems, as an axiom, under the composition rule in the
   [verification epic](/quest/m4/verified/README.md#composition-rule), and on aarch64 the
