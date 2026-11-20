@@ -898,7 +898,7 @@ On x86_64, `Rind/X86_64/AesModesApi.lean` proves the same over
 `hw_cbc_encrypt_spec`, and `hw_cbc_decrypt_spec` restate HOL Light theorems
 of aws-lc's `aes_hw_ctr32_encrypt_blocks` and `aes_hw_cbc_encrypt` that are
 pending: `hol-light/x86_64/aes_hw_cbc_encrypt.ml` proves CBC encryption and
-most of decryption, and CTR has no proof yet. Until they are, those theorems are not in
+decryption, and CTR has no proof yet. Until both are, those theorems are not in
 `Rind/X86_64/Axioms.lean` and earn no ✓, which [the AES modes
 quest](/quest/m4/verified/aes-modes.md) owns.
 

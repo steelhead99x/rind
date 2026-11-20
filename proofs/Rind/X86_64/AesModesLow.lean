@@ -10,8 +10,8 @@ open Aeneas Aeneas.Std Result rind.vale rind.simd rind.modes
 run aws-lc's `aes_hw_ctr32_encrypt_blocks` and `aes_hw_cbc_encrypt` for a key
 `expand_key` or `AesDecKey::new` expanded on the AES instructions. The axioms
 below assume HOL Light theorems of both routines, as rind's build emits them,
-that are not proven yet: `proofs/hol-light/x86_64/aes_hw_cbc_encrypt.ml`
-proves CBC encryption and part of decryption, and CTR has no proof, so
+that are not all proven yet: `proofs/hol-light/x86_64/aes_hw_cbc_encrypt.ml`
+proves CBC encryption and decryption, and CTR has no proof, so
 `Axioms.lean` lists none of them and [the AES modes
 quest](/quest/m4/verified/aes-modes.md) owns the rest. Each states its block's
 result in `proofs/hol-light/x86_64/aes_hw_spec.ml`'s `aes_hw_encrypt`,
