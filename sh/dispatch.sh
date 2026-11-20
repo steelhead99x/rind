@@ -239,9 +239,10 @@ module site '' \
 module quest '^(quest/|flake\.lock$)' \
     tools='quest'
 # alert.yml must watch every workflow that runs outside a pull request, every
-# third-party action must be pinned, and every scheduled workflow must run
-# whole when the release check dispatches it.
-module gh '^(\.github/|sh/(alert|pins|release-check)\.sh$)' \
+# third-party action must be pinned, every scheduled workflow must run whole
+# when the release check dispatches it, and every job of a workflow that takes
+# `jobs` must honor it.
+module gh '^(\.github/|sh/(alert|pins|release-check|select-jobs)\.sh$)' \
     tools='actionlint yq jq'
 module shell '' \
     tools='shellcheck'
@@ -646,6 +647,7 @@ step() {
             run sh/alert.sh check
             run sh/pins.sh
             run sh/release-check.sh --check >/dev/null
+            run sh/select-jobs.sh --check
             ;;
         check:shell)
             files 'sh/*.sh'
