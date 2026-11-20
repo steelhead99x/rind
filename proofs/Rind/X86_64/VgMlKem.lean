@@ -24,8 +24,9 @@ as `AGENTS.md` allows, and what each routine may leak, are left out.
 Trusted: the restatement; that rind's `vg_*` routines are VG's at the pin,
 whose instructions and relocation targets `admin/prove vg` checks along with
 VG's models of the instructions they run; that the constant tables
-`admin/import-vg` generates beside them are VG's at the pin, which no check
-reads back; and VG's proofs and models.
+`admin/import-vg` generates beside them are VG's at the pin, which
+`admin/prove vg` checks for each table a routine reaches, byte for byte and
+relocation for relocation; and VG's proofs and models.
 -/
 
 namespace rind.x86_64

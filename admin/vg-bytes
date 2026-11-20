@@ -15,6 +15,9 @@ routine is the same bytes, or for a branch or call, which the assembler lays
 out, goes to the same instruction or function. With `--rind`, it also checks
 every function of rind's named as one of VG's routines against that routine's
 compiled code, byte for byte, since those are the bytes the cosimulation runs.
+It also fails unless each static such a function reaches is VG's, in size,
+bytes, and relocations, so a relocation's target name stands for the contents
+VG's proofs read.
 
 It writes `<out>/groups.tsv`, the instructions of VG's code for `vg-cosim`,
 one line per distinct instruction of the model: its kind (`insn`, `branch`,
@@ -184,19 +187,74 @@ def disassemble(arch, obj, keep):
     return fns
 
 
+class Static:
+    """A static of an object: its section, size, bytes, and the relocations
+    in them, each its offset, type, target's last component, and addend."""
+    __slots__ = ("section", "size", "data", "relocs", "path")
+
+
+def data_symbols(obj, keep=lambda path: True):
+    """Each data symbol of `obj` that `keep` takes by its demangled path,
+    by the path's last component, as a `Static`. Fails if two share a last
+    component, since a relocation names a static by it, or if a static does
+    not start its section, which each has to itself."""
+    out = {}
+    by_section = {}
+    for line in run(["llvm-objdump", "-t", "-C", str(obj)]).splitlines():
+        m = re.match(r"^([0-9a-f]+) .{6}O (\S+)\s+([0-9a-f]+) (?:\.hidden )?(.+)$", line)
+        if not m:
+            continue
+        if int(m.group(1), 16) != 0:
+            if keep(m.group(4)):
+                fail(f"{obj}: {m.group(4)} does not start its section {m.group(2)}")
+            continue
+        if m.group(2) in by_section:
+            if keep(m.group(4)) and keep(by_section[m.group(2)].path):
+                fail(f"{obj}: section {m.group(2)} starts two statics")
+            if not keep(m.group(4)):
+                continue
+        st = Static()
+        st.section, st.size, st.path = m.group(2), int(m.group(3), 16), m.group(4)
+        st.data, st.relocs = None, []
+        by_section[st.section] = st
+    names = {sec: st.path.split("::")[-1] for sec, st in by_section.items()}
+    sections = {sec for sec, st in by_section.items() if keep(st.path)}
+    if sections:
+        cur = None
+        for line in run(["llvm-objdump", "-r", str(obj)]).splitlines():
+            m = re.match(r"^RELOCATION RECORDS FOR \[(.*)\]:$", line)
+            if m:
+                cur = by_section.get(m.group(1)) if m.group(1) in sections else None
+                continue
+            m = re.match(r"^([0-9a-f]+)\s+(R_\S+)\s+(\S+)$", line)
+            if m and cur is not None:
+                cur.relocs.append((int(m.group(1), 16), m.group(2),
+                                   *relocation_target(m.group(3), names)))
+        for sec in sections:
+            st = by_section[sec]
+            dump = run(["llvm-objdump", "-s", "-j", sec, str(obj)])
+            hexes = []
+            for line in dump.splitlines():
+                m = re.match(r"^ ([0-9a-f]+) ((?:[0-9a-f]{2,8} ?)+)", line)
+                if m:
+                    hexes.append(m.group(2).replace(" ", ""))
+            st.data = "".join(hexes)
+            if len(st.data) != 2 * st.size:
+                fail(f"{obj}: {st.path} is {st.size} bytes, but its section {sec} holds "
+                     f"{len(st.data) // 2}")
+            name = st.path.split("::")[-1]
+            if name in out:
+                fail(f"{obj}: two statics named {name}: {out[name].path} and {st.path}")
+            out[name] = st
+    return out, names
+
+
 def section_statics(obj):
     """The static that starts each data section of `obj`, by the section's
     name. A relocation of a static local to its object may name the static's
     section instead, as LLVM's aarch64 backend does, and each static has a
     section of its own, so that section's start is the static."""
-    statics = {}
-    for line in run(["llvm-objdump", "-t", "-C", str(obj)]).splitlines():
-        m = re.match(r"^0+ .{6}O (\S+)\s+[0-9a-f]+ (?:\.hidden )?(.+)$", line)
-        if m:
-            if m.group(1) in statics:
-                fail(f"{obj}: section {m.group(1)} starts two statics")
-            statics[m.group(1)] = m.group(2)
-    return statics
+    return data_symbols(obj, lambda path: False)[1]
 
 
 def relocation_target(sym, statics):
@@ -317,6 +375,36 @@ def compare(arch, name, text, got, want, what, exact=False):
     return lines, got
 
 
+def bind_statics(name, got, got_statics, want, want_statics, bound):
+    """Fails unless every static the routine `got` reaches, through its
+    relocations and then those of the statics it reaches, is `want`'s, the
+    compiled routine's, in size, bytes, and relocations (each a target and
+    addend, by the target's name): a relocation's name alone does not say what
+    the static it names holds. A static is by its name, which each side
+    has once. Adds each to `bound`."""
+    todo = [r[2] for i in got for r in i.relocs]
+    seen = set()
+    while todo:
+        n = todo.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        if n not in want_statics:
+            if n in got_statics:
+                fail(f"{name}: rind's build reaches the static {n}, which VG's does not define")
+            # A function, which the routine-by-routine comparison covers, or
+            # a symbol outside the object.
+            continue
+        if n not in got_statics:
+            fail(f"{name}: VG's routine reaches the static {n}, which rind's build does not define")
+        g, w = got_statics[n], want_statics[n]
+        if (g.size, g.data, g.relocs) != (w.size, w.data, w.relocs):
+            fail(f"{name}: rind's static {g.path} ({g.size} bytes) is not VG's {w.path} "
+                 f"({w.size} bytes): its bytes or relocations differ")
+        bound.add(n)
+        todo += [r[2] for r in g.relocs]
+
+
 def groups(arch, lines, insns):
     """The model's instructions in a routine: each its kind, its lines and
     its machine code; the lines of one the printer prints as several
@@ -372,7 +460,8 @@ def main():
     # Every naked function of VG's crate, which is each `vg_*` function but
     # the Rust dispatchers of its `dispatch` module, must be a routine of the
     # text, so none goes unchecked.
-    compiled = disassemble(a.arch, compile_vg(a.vg, a.arch, a.out),
+    vg_obj = compile_vg(a.vg, a.arch, a.out)
+    compiled = disassemble(a.arch, vg_obj,
                            lambda path, name: name in text
                            or (name.startswith("vg_") and "::dispatch::" not in path))
     for name in compiled:
@@ -404,6 +493,16 @@ def main():
                     counts["align"] += 1
                     seen.setdefault(("insn", t), ("insn", [t], NOP))
     rind_checked = 0
+    # The Rust dispatchers' own statics, `CHOSEN` in each, are no routine's.
+    vg_statics, _ = data_symbols(vg_obj, lambda path: "::dispatch::" not in path)
+    rind_statics = {}
+    for obj in a.rind:
+        for name, st in data_symbols(obj, lambda path: "::vg::" in path)[0].items():
+            if name in rind_statics:
+                fail(f"rind's build has two statics named {name}: {rind_statics[name].path} "
+                     f"and {st.path}")
+            rind_statics[name] = st
+    bound = set()
     # rind's copies must be VG's compiled code byte for byte, the bytes the
     # cosimulation runs, so an encoding of the same instruction that differs
     # from VG's, which may need another CPU feature, fails here. A routine
@@ -415,6 +514,7 @@ def main():
             if name not in text:
                 fail(f"rind's {name} is not a routine of VG's text at this commit")
             compare(a.arch, name, text[name], insns, compiled[name], "rind's build", exact=True)
+            bind_statics(name, insns, rind_statics, compiled[name], vg_statics, bound)
             rind_checked += 1
 
     for (t, vg_raw, llvm_raw), k in sorted(ENCODINGS.items()):
@@ -425,6 +525,8 @@ def main():
             if kind in ("insn", "branch", "call"):
                 f.write(f"{kind}\t{'; '.join(ls)}\t{code}\n")
     total = sum(len(v) for v in compiled.values() if v)
+    print(f"admin/vg-bytes: {a.arch}: {len(bound)} statics the vendored routines reach are "
+          f"VG's, byte for byte and relocation for relocation")
     print(f"admin/vg-bytes: {a.arch}: {len(text)} routines, every instruction of VG's compiled code "
           f"is its text; {rind_checked} of rind's routines checked; "
           + ", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
