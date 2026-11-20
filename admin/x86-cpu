@@ -215,7 +215,10 @@ MODELS = [
     ),
     # Haswell lacks ADX and VAES, so s2n-bignum's `_alt` routines, aws-lc's
     # Montgomery multiplication, its RSAZ exponentiation for RSA-2048, and
-    # its AVX AES-GCM run, beside the AVX2 kernels.
+    # its AVX AES-GCM run, beside the AVX2 kernels. Haswell alone runs that
+    # AVX2 RSAZ (CPUs with ADX take other RSA paths), so a pull request that
+    # drops Haswell for Skylake server stops running it there; the merge queue
+    # and the weekly run still do.
     dict(
         model="Haswell",
         sde="hsw",
@@ -240,6 +243,12 @@ MODELS = [
     # AVX2 kernels with s2n-bignum's BMI2 and ADX routines, aws-lc's AVX
     # AES-GCM, and OpenSSL's AVX2 SHA-256 and SHA-512. Broadwell, Skylake,
     # Cascade Lake, and Cooper Lake select the same paths.
+    #
+    # The AVX2 model a pull request runs once stage 2 sets `pr` (see above) is
+    # this one, not Haswell: it adds the BMI2 and ADX routines and covers the
+    # AVX2 SHA and AVX AES-GCM kernels Haswell does. It does not run all of
+    # Haswell's: the AVX2 RSAZ above is Haswell's alone, so that coverage
+    # moves to the queue. Haswell's `_alt` routines are Prescott's too.
     dict(
         model="Skylake server",
         sde="skx",
@@ -402,12 +411,14 @@ MODELS = [
 
 def matrix(which):
     """The x86-cpu.yml matrix for `pr` or `all`, one entry per SDE model."""
+    assert which in ("pr", "all"), which
     flags = {flag for flag, _ in KNOWN_CPUS}
     keys = {tuple(m["paths"]) for m in MODELS}
     assert len(keys) == 1, "every model sets the same paths"
     assert len({m["sde"] for m in MODELS}) == len(MODELS), "a model is listed twice"
     for m in MODELS:
         assert "-" + m["sde"] in flags, m["sde"] + " is not an SDE CPU"
+    assert {m["sde"] for m in MODELS if m["pr"]} >= {"p4p", "skx", "dmr"}, "stage 2 needs p4p, skx, dmr"
     return [
         dict(model=m["model"], sde=m["sde"], paths=m["paths"])
         for m in MODELS
