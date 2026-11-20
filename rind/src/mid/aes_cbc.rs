@@ -491,9 +491,12 @@ mod tests {
         }
     }
 
-    // armv7's AES-CBC on the crypto extension, which valgrind hides, for each
-    // key size, with a secret key and message, for `admin/ct-qemu`. The
-    // message's 7 blocks take the decryption's 3-block loop and its tail.
+    // armv7's AES-CBC, on the crypto extension under qemu's `max` CPU and on
+    // NEON (vpaes and bsaes) under the Cortex-A15, which valgrind hides, for
+    // each key size, with a secret key and message, for `admin/ct-qemu`. The
+    // message's 11 padded blocks take the NEON decryption's 8-block bsaes
+    // batch and 3-block vpaes tail, and the crypto extension's 3-block loop
+    // and its tail.
     #[cfg(rind_backend = "arm")]
     #[test]
     #[ignore = "admin/ct-qemu runs it under qemu-arm"]
@@ -506,10 +509,14 @@ mod tests {
             let key = bytes(algorithm.key_len);
             let enc = ct_qemu::traced(|| AesCbcEncryptingKey::new(algorithm, &key).unwrap());
             let dec = ct_qemu::traced(|| AesCbcDecryptingKey::new(algorithm, &key).unwrap());
-            assert!(matches!(enc.key, AesKey::Hw(_)), "the crypto extension");
+            if ct_qemu::crypto_ext() {
+                assert!(matches!(enc.key, AesKey::Hw(_)), "the crypto extension");
+            } else {
+                assert!(matches!(enc.key, AesKey::Neon(_)), "NEON");
+            }
 
             let iv = bytes(16).try_into().unwrap();
-            let mut msg = bytes(6 * 16 + 5);
+            let mut msg = bytes(10 * 16 + 5);
             ct_qemu::traced(|| enc.encrypt(CbcIv::assume_unpredictable(iv), &mut msg)).unwrap();
             ct_qemu::traced(|| dec.decrypt(&iv, &mut msg)).unwrap();
         }

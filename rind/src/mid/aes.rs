@@ -538,10 +538,13 @@ mod tests {
         assert_eq!(check_gcm_lengths(max_aad + 1, 0), Err(Error::WrongLength));
     }
 
-    // armv7's AES block and AES-CTR on the crypto extension, which valgrind
-    // hides, for each key size, with a secret key, block, and message, for
-    // `admin/ct-qemu`. The message's 5 blocks take the CTR routine's 3-block
-    // loop and 2-block tail, then its partial block a 1-block call.
+    // armv7's AES block and AES-CTR, on the crypto extension under qemu's
+    // `max` CPU and on NEON (vpaes and bsaes) under the Cortex-A15, which
+    // valgrind hides, for each key size, with a secret key, block, and
+    // message, for `admin/ct-qemu`. The message's 11 blocks take the NEON
+    // CTR's 8-block bsaes batch and 3-block vpaes tail, and the crypto
+    // extension's 3-block loop and 2-block tail; its partial block is a
+    // 1-block call.
     #[cfg(rind_backend = "arm")]
     #[test]
     #[ignore = "admin/ct-qemu runs it under qemu-arm"]
@@ -554,13 +557,17 @@ mod tests {
             let key = bytes(algorithm.key_len);
             let aes = ct_qemu::traced(|| Aes::new(algorithm, &key).unwrap());
             let ctr = ct_qemu::traced(|| AesCtr::new(algorithm, &key, 32).unwrap());
-            assert!(matches!(aes.0, AesKey::Hw(_)), "the crypto extension");
+            if ct_qemu::crypto_ext() {
+                assert!(matches!(aes.0, AesKey::Hw(_)), "the crypto extension");
+            } else {
+                assert!(matches!(aes.0, AesKey::Neon(_)), "NEON");
+            }
 
             let mut block = bytes(16).try_into().unwrap();
             ct_qemu::traced(|| aes.encrypt_block(&mut block));
             let mut counter_block: [u8; 16] = bytes(16).try_into().unwrap();
             counter_block[12..].copy_from_slice(&7u32.to_be_bytes());
-            let mut msg = bytes(5 * 16 + 8);
+            let mut msg = bytes(11 * 16 + 8);
             ct_qemu::traced(|| ctr.apply_keystream(&counter_block, &mut msg)).unwrap();
         }
     }
