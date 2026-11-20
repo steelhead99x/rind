@@ -61,6 +61,20 @@ opaque low.aarch64.mlkem768_vg.Encaps : Type
 runs pyca/verified-garbage's routines. -/
 opaque low.aarch64.cpu.HaveSve2 : Type
 
+/-- pyca/verified-garbage's ChaCha20 streaming state, as its routines see it:
+the 768 bytes of memory they keep it in, which `Rind.VgChaCha20` reads as VG's
+spec reads memory. Rust leaves it uninitialised: `init` writes the bytes
+`apply` reads on entry, and `apply` writes its scratch before reading it, so
+the model gives the rest any bytes.
+`admin/prove` fails unless this quote is still the type:
+
+```rust
+struct VgState(MaybeUninit<[u64; 96]>);
+
+```
+-/
+@[reducible] def low.aarch64.chacha20.VgState : Type := Std.Array Std.U8 768#usize
+
 /-- MD5's chaining state, which no proof covers. -/
 opaque mid.md5.Md5State : Type
 

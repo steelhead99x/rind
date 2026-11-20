@@ -219,6 +219,15 @@ about the x86_64 ChaCha20 routines rind runs, `Stream.init_verified` and
 own proofs of the two-block kernel and HACL*'s loop, as "What is proven"
 lists.
 
+`Rind/Aarch64/VgChaCha20.lean` restates VG's theorems about the aarch64
+ChaCha20 routines rind runs, `Stream.initCleared_verified` and
+`Stream.apply_verified` at the NEON and SVE2 implementations, as one axiom per
+wrapper in `low::aarch64::chacha20`, and proves `cipher::ChaCha20`'s
+`cipher` from them at the lengths that run them (`cipher_spec`: from 128
+bytes with SVE2, and from 192 to 256 bytes and from 448 without), with no
+hypothesis about rind's NEON code, which runs the other lengths and which no
+theorem covers. The API above `cipher` is not proven yet.
+
 `Rind/X86_64/VgCurve25519.lean` restates VG's theorems about its x86_64
 AVX-512 IFMA X25519 and Ed25519 routines, one axiom per wrapper in
 `low::x86_64::curve25519_ifma`, over its specs as `Rind/VgCurve25519.lean`

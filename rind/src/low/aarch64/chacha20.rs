@@ -13,9 +13,10 @@
 //!
 //! verified-garbage proves its routines correct and constant time in Lean,
 //! over its own models of the instructions, which `admin/prove vg`
-//! cosimulates. rind's NEON code is not formally verified: its correctness
-//! rests on rind's tests of it against RFC 8439, Wycheproof, aws-lc-rs, and
-//! HACL*'s rounds.
+//! cosimulates. `proofs/Rind/Aarch64/VgChaCha20.lean` restates VG's theorems
+//! as axioms and proves the glue around them at the lengths they run. rind's
+//! NEON code is not formally verified: its correctness rests on rind's tests
+//! of it against RFC 8439, Wycheproof, aws-lc-rs, and HACL*'s rounds.
 
 use core::arch::aarch64::{
     uint8x16_t, uint32x4_t, vaddq_u32, vdupq_n_u32, veorq_u32, vorrq_u32, vqtbl1q_u8,
@@ -39,9 +40,21 @@ pub(crate) struct ChaCha20 {
 }
 
 /// `bytes` as little-endian words.
+//
+// Indexes rather than splitting into chunks, which Aeneas cannot translate,
+// so `proofs/` can prove `cipher`.
 fn words<const B: usize, const W: usize>(bytes: &[u8; B]) -> [u32; W] {
     const { assert!(B == 4 * W) };
-    core::array::from_fn(|i| u32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().unwrap()))
+    let mut words = [0; W];
+    for i in 0..W {
+        words[i] = u32::from_le_bytes([
+            bytes[4 * i],
+            bytes[4 * i + 1],
+            bytes[4 * i + 2],
+            bytes[4 * i + 3],
+        ]);
+    }
+    words
 }
 
 impl ChaCha20 {

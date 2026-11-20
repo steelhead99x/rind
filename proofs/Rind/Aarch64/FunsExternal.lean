@@ -486,6 +486,27 @@ opaque low.aarch64.chacha20poly1305.open_neon
   : Std.Array Std.U8 32#usize → Std.Array Std.U8 12#usize → Slice Std.U8 → Slice Std.U8 →
     Result ((Std.Array Std.U8 16#usize) × (Slice Std.U8))
 
+/-! `cipher::ChaCha20`'s routines: pyca/verified-garbage's, behind one
+wrapper each, whose contracts `Rind.Aarch64.VgChaCha20` restates, and rind's
+NEON code, which no theorem is about yet. -/
+
+opaque low.aarch64.chacha20.VgState.uninit : Result low.aarch64.chacha20.VgState
+
+opaque low.aarch64.chacha20.VgState.init
+  : low.aarch64.chacha20.VgState → Std.Array Std.U32 8#usize → Std.Array Std.U32 4#usize →
+    Result low.aarch64.chacha20.VgState
+
+opaque low.aarch64.chacha20.VgState.apply_neon
+  : low.aarch64.chacha20.VgState → Slice Std.U8 →
+    Result (Std.U32 × low.aarch64.chacha20.VgState × (Slice Std.U8))
+
+opaque low.aarch64.chacha20.VgState.apply_sve2
+  : low.aarch64.chacha20.VgState → low.aarch64.cpu.HaveSve2 → Slice Std.U8 →
+    Result (Std.U32 × low.aarch64.chacha20.VgState × (Slice Std.U8))
+
+opaque low.aarch64.chacha20.cipher_neon
+  : Std.Array Std.U32 8#usize → Std.Array Std.U32 4#usize → Slice Std.U8 → Result (Slice Std.U8)
+
 /-! MD5, which no proof covers. -/
 
 opaque mid.md5.Md5State.new : Result mid.md5.Md5State

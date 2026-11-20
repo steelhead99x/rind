@@ -18,6 +18,7 @@ import Rind.Aarch64.MlKemCoding
 import Rind.Aarch64.GhashPmull
 import Rind.Aarch64.AesGcm
 import Rind.Aarch64.VgChaCha20Poly1305
+import Rind.Aarch64.VgChaCha20
 open rind.aarch64
 
 /-!
@@ -44,6 +45,9 @@ ML-KEM's decompression and message coding rest on no axiom.
 ChaCha20-Poly1305's one pass on SVE2 rests on the axioms restating
 pyca/verified-garbage's theorems for its routines in
 `Rind.Aarch64.VgChaCha20Poly1305`.
+`cipher::ChaCha20`'s lengths on pyca/verified-garbage's routines rest on the
+axioms restating its theorems for them in `Rind.Aarch64.VgChaCha20`, and
+nothing about rind's NEON code, which runs the other lengths.
 A change here is a change to the trust base.
 -/
 
@@ -847,3 +851,25 @@ A change here is a change to the trust base.
  vg_chacha20_poly1305_open_sve2_spec] -/
 #guard_msgs in
 #print axioms chacha20_poly1305_open_sve2_spec
+
+/-- info: 'rind.aarch64.cipher_vg_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_chacha20_apply_neon_spec,
+ vg_chacha20_apply_sve2_spec,
+ vg_chacha20_init_spec] -/
+#guard_msgs in
+#print axioms cipher_vg_spec
+
+/-- info: 'rind.aarch64.cipher_spec' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ vg_chacha20_apply_neon_spec,
+ vg_chacha20_apply_sve2_spec,
+ vg_chacha20_init_spec] -/
+#guard_msgs in
+#print axioms cipher_spec
+
+/-- info: 'rind.aarch64.new_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms new_spec
