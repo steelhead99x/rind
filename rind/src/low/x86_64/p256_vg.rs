@@ -62,6 +62,11 @@ impl P256 {
         Self::check().filter(|vg| vg.ifma.is_some() || is_intel())
     }
 
+    /// [`Self::check`], for ECDH, which VG runs wherever it runs at all.
+    pub(crate) fn check_ecdh() -> Option<Self> {
+        Self::check()
+    }
+
     /// The public key `dG` of the private key `d`, big-endian, as an X9.62
     /// uncompressed point, or `None` if `d` is not in [1, n).
     pub(crate) fn public_key(self, d: &[u8; 32]) -> Option<[u8; 65]> {

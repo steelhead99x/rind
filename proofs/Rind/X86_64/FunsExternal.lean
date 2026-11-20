@@ -685,6 +685,8 @@ opaque low.x86_64.p256_vg.P256.check : Result (Option low.x86_64.p256_vg.P256)
 
 opaque low.x86_64.p256_vg.P256.check_public_key : Result (Option low.x86_64.p256_vg.P256)
 
+opaque low.x86_64.p256_vg.P256.check_ecdh : Result (Option low.x86_64.p256_vg.P256)
+
 opaque mid.p256.PrivateKey.vg_public_key
   : mid.p256.PrivateKey → low.x86_64.p256_vg.P256 → Result (Array Std.U8 65#usize)
 
