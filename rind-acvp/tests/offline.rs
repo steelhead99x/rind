@@ -842,7 +842,8 @@ fn gcm_internal_iv() -> Set {
             let algorithm = match key.len() {
                 16 => &aws_aead::AES_128_GCM,
                 24 => &aws_aead::AES_192_GCM,
-                _ => &aws_aead::AES_256_GCM,
+                32 => &aws_aead::AES_256_GCM,
+                len => unreachable!("a sealing prompt with a key of {len} bytes"),
             };
             let key = aws_aead::LessSafeKey::new(
                 aws_aead::UnboundKey::new(algorithm, &key).map_err(|e| e.to_string())?,

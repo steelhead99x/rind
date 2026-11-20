@@ -1050,7 +1050,7 @@ fn ml_dsa<P: ParameterSet>(operation: &str, args: &[Vec<u8>]) -> Result<Reply> {
 
 #[cfg(test)]
 mod tests {
-    use super::read_request;
+    use super::{aes_gcm_seal, read_request};
 
     #[test]
     fn input_ends_only_between_requests() {
@@ -1066,5 +1066,26 @@ mod tests {
             Some(vec![b"ab".to_vec()])
         );
         assert!(read_request(&mut input).is_err());
+    }
+
+    /// The two guards `acvptool`'s configuration never reaches: a shorter
+    /// tag, and a nonce it supplies, are both refused; the valid call seals.
+    #[test]
+    fn gcm_seal_refuses_a_tag_or_nonce_it_is_not_configured_for() {
+        let seal = |tag_len: u32, nonce: &[u8]| {
+            aes_gcm_seal(&[
+                tag_len.to_le_bytes().to_vec(),
+                vec![7; 32],
+                b"plaintext".to_vec(),
+                nonce.to_vec(),
+                b"aad".to_vec(),
+            ])
+        };
+        // Ciphertext, 16-byte tag, then the 12-byte IV.
+        assert_eq!(seal(16, &[]).unwrap()[0].len(), 9 + 16 + 12);
+        let tag = seal(15, &[]).unwrap_err().to_string();
+        assert!(tag.contains("tag of other than 16 bytes"), "{tag}");
+        let nonce = seal(16, &[0; 12]).unwrap_err().to_string();
+        assert!(nonce.contains("module generates the IV"), "{nonce}");
     }
 }
