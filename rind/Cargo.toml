@@ -85,6 +85,9 @@ sha3 = { version = "0.12", default-features = false }
 # portable backend run dalek, so the test leaves them out.
 ed25519-dalek = { version = "3", default-features = false }
 x25519-dalek = { version = "3", default-features = false, features = ["static_secrets"] }
+# RSA, with `num-bigint`'s raw modular exponentiation beside it.
+num-bigint = "0.4"
+rsa = { version = "0.10", default-features = false, features = ["encoding", "pkcs1v15", "std"] }
 # aws-lc's XChaCha20-Poly1305, which aws-lc-rs does not expose.
 aws-lc-sys = { version = "0.47", default-features = false }
 # HPKE, which aws-lc-rs does not expose either; `hazmat` reads its private keys.
