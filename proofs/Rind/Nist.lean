@@ -92,4 +92,43 @@ def p384Represents (P : nist.Point) (xyz : Nat × Nat × Nat) : Prop :=
     nist.ofJacobian p384 (p384RInv * xyz.1 % p384) (p384RInv * xyz.2.1 % p384)
       (p384RInv * xyz.2.2 % p384) = P
 
+/-! ## P-521 -/
+
+/-- `p_521`, the field's prime, 2⁵²¹ - 1, from HOL Light's `EC/nistp521.ml` at
+https://github.com/jrh13/hol-light/blob/217dd32e798d98926d3ab81ed3dfcdf435831e1f/EC/nistp521.ml -/
+def p521 : Nat :=
+  6864797660130609714981900799081393217269435300143305409394463459185543183397656052122559640661454554977296311391480858037121987999716643812574028291115057151
+
+/-- `n_521`, the group's order. -/
+def n521 : Nat :=
+  6864797660130609714981900799081393217269435300143305409394463459185543183397655394245057746333217197532963996371363321113864768612440380340372808892707005449
+
+/-- `b_521`, the curve's constant term; its `a` is -3. -/
+def b521 : Nat :=
+  0x0051953eb9618e1c9a1f929a21a0b68540eea2da725b99b315f3b8b489918ef109e156193951ec7e937b1652c0bd3bb1bf073573df883d2c34f1ef451fd46b503f00
+
+/-- `G_521`, the generator. -/
+def p521G : nist.Point :=
+  some (0x00c6858e06b70404e9cd9e3ecb662395b4429c648139053fb521f828af606b4d3dbaa14b5e77efe75928fe1dc127a2ffa8de3348b3c1856a429bf97e7e31c2e5bd66,
+    0x011839296a789a3bc0045c8a5fb42c7d1bd998f54449579b446817afbd17273e662c97ee72995ef42640c550b9013fad0761353c7086a272c24088be94769fd16650)
+
+/-- Whether a point is in `group_carrier p521_group`, by `P521_GROUP`. -/
+abbrev p521OnCurve : nist.Point → Prop := nist.OnCurve p521 b521
+
+/-- `group_mul p521_group`, by `P521_GROUP`. -/
+noncomputable abbrev p521Add : nist.Point → nist.Point → nist.Point := nist.add p521
+
+/-- `group_pow p521_group`. -/
+noncomputable abbrev p521Pow : nist.Point → Nat → nist.Point := nist.pow p521
+
+/-- `group_inv p521_group`, by `P521_GROUP`. -/
+abbrev p521Neg : nist.Point → nist.Point := nist.neg p521
+
+/-- FIPS 186-5 section 6.4.1's P-521 ECDSA signature. -/
+noncomputable abbrev ecdsaP521Sign : Nat → Nat → Nat → Option (Nat × Nat) := nist.ecdsaSign p521 n521 p521G
+
+/-- FIPS 186-5 section 6.4.2's P-521 ECDSA verification under the public key
+`Q`. -/
+abbrev ecdsaP521Verifies : nist.Point → Nat → Nat → Nat → Prop := nist.ecdsaVerifies p521 n521 p521G
+
 end rind.spec
