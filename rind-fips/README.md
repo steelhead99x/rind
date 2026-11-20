@@ -41,8 +41,8 @@ lab to test.
   and below 2^64 - 1, so the caller must rekey before it wraps. A
   `quic::PacketSealingKey` is QUIC's: the module builds each nonce from the
   packet protection IV and the packet number, and seals each packet number
-  once, in any order within 1024 of the highest (QUIC senders may seal
-  packet `n + 1` before `n`), refusing a repeat or one further below. Keys live
+  once, in any order, up to 1023 below the highest (QUIC senders may seal
+  packet `n + 1` before `n`), refusing a repeat or one 1024 or more below. Keys live
   only in memory, so after a restart a new key is established, as IG C.H
   requires. A seal that fails zeroes its buffer, as aws-lc's does.
 

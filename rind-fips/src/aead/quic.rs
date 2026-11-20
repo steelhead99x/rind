@@ -147,8 +147,9 @@ impl From<hkdf::Okm<'_, &'static Algorithm>> for HeaderProtectionKey {
     }
 }
 
-/// How many packet numbers below the highest sealed a [`PacketSealingKey`]
-/// still tracks.
+/// How many packet numbers a [`PacketSealingKey`] tracks: the highest sealed
+/// and the `SEAL_WINDOW - 1` below it. A packet number `SEAL_WINDOW` or more
+/// below the highest sealed is refused.
 pub const SEAL_WINDOW: u64 = 1024;
 
 /// An AES-GCM key that seals QUIC packets (RFC 9001 section 5.3), each
@@ -226,7 +227,7 @@ impl PacketSealingKey {
     /// tag.
     ///
     /// Fails with [`Error::MessageLimitReached`] if `packet_number` was
-    /// sealed under the key already, is more than [`SEAL_WINDOW`] below the
+    /// sealed under the key already, is [`SEAL_WINDOW`] or more below the
     /// highest sealed, and with [`Error::WrongLength`]
     /// past the sealing limits, zeroing `in_out` in either case. The latter
     /// still spends the packet number.

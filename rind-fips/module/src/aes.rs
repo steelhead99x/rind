@@ -713,10 +713,10 @@ free!(rind_fips_tls13_sealing_key_free, Tls13SealingKey);
 /// QUIC may seal packets out of order (a sender seals packet `n + 1` while
 /// another thread still seals `n`), so the module does not demand increasing
 /// packet numbers, as [`Tls13SealingKey`] does. It remembers instead which of
-/// the last [`Self::WINDOW`] packet numbers it has sealed and refuses a
-/// repeat, and any packet number that far below the highest, which it can no
-/// longer vouch for. Under one key a nonce is therefore never used twice,
-/// whatever the order of calls: SP 800-38D section 8.2.1's requirement that
+/// the last [`Self::WINDOW`] packet numbers, the highest included, it has
+/// sealed and refuses a repeat, and any packet number `WINDOW` or more below
+/// the highest, which it can no longer vouch for. Under one key a nonce is
+/// therefore never used twice, whatever the order of calls: SP 800-38D section 8.2.1's requirement that
 /// the invocation field is unique, which holds for any bijective mapping
 /// from packet number to nonce, as XOR with a fixed IV is.
 pub struct QuicSealingKey {
@@ -724,13 +724,13 @@ pub struct QuicSealingKey {
     iv: [u8; 12],
     /// The highest packet number sealed, if any.
     top: Option<u64>,
-    /// Bit `n % WINDOW` is set if packet number `n`, within `WINDOW` of
-    /// `top`, was sealed.
+    /// Bit `n % WINDOW` is set if packet number `n`, at most `WINDOW - 1`
+    /// below `top`, was sealed.
     seen: [u64; Self::WINDOW / 64],
 }
 
 impl QuicSealingKey {
-    /// How far below the highest packet number sealed one may still be.
+    /// How many packet numbers are tracked: `top` and the `WINDOW - 1` below it.
     const WINDOW: usize = 1024;
 
     /// Takes packet number `pn`, refusing one sealed before, one too far
@@ -802,8 +802,8 @@ pub unsafe extern "C" fn rind_fips_quic_sealing_key_new(
 
 /// Encrypts the `len` bytes at `in_out` in place for packet number `pn`
 /// and the `aad_len` bytes at `aad`, writing the tag to `tag`, if no
-/// packet of `pn` was sealed under the key and `pn` is within 1024 of the
-/// highest sealed.
+/// packet of `pn` was sealed under the key and `pn` is less than 1024 below
+/// the highest sealed.
 ///
 /// # Safety
 /// `key` must be live and in no other call, `aad` valid for `aad_len`
