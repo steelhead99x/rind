@@ -68,10 +68,11 @@ qemu. iOS devices' code is only built.
   the CPU has the ARMv8 crypto extension, as most 32-bit Android devices do,
   AES, GHASH, SHA1, and SHA256 run [aws-lc]'s assembly for it instead.
   Without it, `rind::cpu::has_aes_hardware()` is false, and rind-rustls and
-  rind-dimpl prefer ChaCha20-Poly1305, which is faster there: ChaCha20 runs
-  aws-lc's assembly, and so does Poly1305 where the CPU has NEON. SHA-384,
-  SHA-512, and SHA-512/256 always run aws-lc's assembly, with NEON where the
-  CPU has it, as do SHA-1 and SHA-256 without the crypto extension, and with
+  rind-dimpl prefer ChaCha20-Poly1305, which is faster there: ChaCha20 and
+  Poly1305 run rind's Rust, since stable Rust has no 32-bit Arm NEON
+  intrinsics. SHA-384, SHA-512, and SHA-512/256 always run aws-lc's assembly,
+  with NEON where the CPU has it, as do SHA-1 and SHA-256 without the crypto
+  extension, and with
   NEON, X25519's shared secret runs [BoringSSL]'s assembly. SHA-3's, ML-KEM's,
   and ML-DSA's Keccak-f runs [OpenSSL]'s assembly, on NEON where the CPU has it.
   That assembly is A32 on every target, but `armv7-linux-androideabi` and

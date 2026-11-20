@@ -1,13 +1,15 @@
 # armv7 SHA-256 and SHA-1 source comparison
 
-This is the comparison that chose aws-lc's SHA-256 and SHA-1 assembly over
-Graviola's SHA-256 and rind's SHA-1 Rust. armv7 still runs aws-lc's SHA-1
-assembly, `sha1_block_data_order_neon` where the CPU has NEON and its `_nohw`
-integer twin otherwise, and every row below beat the Rust. SHA-256 now runs
-rind's `generic::sha256` without the crypto extension, whose schedule and
-register renaming are not the Graviola body measured here: on a Raspberry Pi 2B
-(Cortex-A7) it took 1.26 times aws-lc's NEON routine's time from 1200 B up,
-where the table's Graviola took 2.24 times on a Neoverse-N2.
+Without the crypto extension, armv7 runs aws-lc's SHA-256 and SHA-1
+assembly: `sha256_block_data_order_neon` and `sha1_block_data_order_neon`
+where the CPU has NEON, and their `_nohw` integer twins otherwise. Every
+assembly row beat the Rust it replaced, Graviola's SHA-256 and rind's SHA-1.
+
+rind's own `generic::sha256` (a rolled and register-renamed Rust body) and
+`generic::sha512` were also measured against this assembly on a Raspberry Pi 2B
+(Cortex-A7): without the crypto extension, SHA-256 took 1.26 times aws-lc's
+NEON routine's time and SHA-512 took 2.14 times, each over 1.2 times from 1200 B
+up, so armv7 keeps the assembly for both.
 
 ## Assembly against Rust
 
