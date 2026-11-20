@@ -71,8 +71,9 @@ KNOWN_CPUS = [
 # `MCDT_NO` for any model, Arrow Lake's included, so every row needs
 # `rind/src/low/mcdt.rs`'s guard.
 #
-# `pr` marks the models a pull request runs; the merge queue and the weekly run
-# run every one. Until main's ruleset requires `x86-cpu gate`, which only the
+# `pr` marks the models a pull request runs; the weekly run runs every one, and
+# the merge queue every one except the slow ones below, which run in
+# queue-build.yml and are not required until the host is confirmed. Until main's ruleset requires `x86-cpu gate`, which only the
 # queue runs, a pull request runs every model.
 #
 # `slow` marks the models the merge queue runs in queue-build.yml, on its

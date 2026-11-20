@@ -26,7 +26,8 @@ jobs:
     runs-on: [self-hosted, rind-queue]
     # Below the queue's 90-minute response window, so a hung build reports
     # before the group expires: the build step's 60 minutes (this job's whole
-    # limit before) plus the slow SDE models step's 25, which leaves 5.
+    # limit before) plus the slow SDE models step's 25 is 85, which leaves only
+    # 5 of the 90 minutes.
     timeout-minutes: 85
     env:
       BASE: ${{ github.event.merge_group.base_sha }}
@@ -57,10 +58,27 @@ jobs:
       # build above alone decides `Queue build / Build`. The failure shows in
       # this step's log and annotation. Drop `continue-on-error` once the host
       # is confirmed and the models' time on it is measured.
+      #
+      # The 25 minutes is an unmeasured guess, and probably too short: on
+      # hosted runners the two models took 50.8 and 46.7 minutes each, and they
+      # run one after the other after the archive build, so on hosted-class
+      # hardware they are expected to exceed it. Until the host's time is
+      # measured this step is not coverage: it will likely time out, green.
       - name: Slow SDE models (not required)
         continue-on-error: true
         timeout-minutes: 25
+        env:
+          GROUP_REF: ${{ github.event.merge_group.head_ref }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
+          # x86-cpu.yml's `scope` skips a release PR, which bumps only
+          # versions and changelogs. sh/backends.sh does not: Cargo.toml and
+          # Cargo.lock reach every backend. A failed lookup runs the step.
+          if [[ "$GROUP_REF" =~ /pr-([0-9]+)- ]]; then
+            pr=$(gh api "repos/$REPO/pulls/${BASH_REMATCH[1]}" --jq '"\(.head.ref) \(.user.login)"' || true)
+            if [[ "$pr" == release-plz-*' moq-bot[bot]' ]]; then echo "A release PR."; exit 0; fi
+          fi
           changed=$(sh/changed.sh "$BASE")
           if ! grep -qE '^(\.github/workflows/x86-cpu\.yml|admin/x86-cpu)$' <<<"$changed"; then
             reach=$(sh/backends.sh - <<<"$changed")

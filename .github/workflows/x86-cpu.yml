@@ -2,8 +2,9 @@ name: x86-cpu
 
 # Weekly, at its own hour: see TESTING.md, "Scheduled workflows".
 #
-# The merge queue and the weekly run run every SDE model; a pull request runs
-# the ones admin/x86-cpu's MODELS marks `pr`, which says why. The queue's
+# The weekly run runs every SDE model; the merge queue runs every model except
+# the slow ones (gnr, cnl), which run in queue-build.yml and are not required
+# until the host is confirmed; a pull request runs the ones admin/x86-cpu's MODELS marks `pr`, which says why. The queue's
 # models report through `x86-cpu gate`, which skips, and so passes, on a pull
 # request: GitHub admits a PR to the queue only once its required checks
 # report, so this workflow has no `paths` filter, and `scope` decides instead.
