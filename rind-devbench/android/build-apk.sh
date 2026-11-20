@@ -23,9 +23,9 @@ cp $CARGO_TARGET_DIR/aarch64-linux-android/release/librind_devbench.so $OUT/apk/
 $TC/llvm-strip --strip-debug $OUT/apk/lib/arm64-v8a/librind_devbench.so
 cp -R ../../rind-rustls/tests/keys $OUT/apk/assets/keys
 # The collector the app fills in by itself (no typing): USB via `adb reverse` on
-# 127.0.0.1:PORT first, then this LAN address. Baked in here; override with
+# 127.0.0.1:PORT first, then a LAN address if one is given. Set with
 # COLLECTOR_HOST / COLLECTOR_PORT. 9103 = Android (iPads use 9101/9102).
-COLLECTOR_HOST=${COLLECTOR_HOST:-192.168.90.75} COLLECTOR_PORT=${COLLECTOR_PORT:-9103}
+COLLECTOR_HOST=${COLLECTOR_HOST:-} COLLECTOR_PORT=${COLLECTOR_PORT:-9103}
 mkdir -p $OUT/gen/com/kyledouglas/rindbench
 cat > $OUT/gen/com/kyledouglas/rindbench/Collector.java <<J
 package com.kyledouglas.rindbench;

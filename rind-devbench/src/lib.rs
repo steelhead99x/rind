@@ -9,8 +9,8 @@
 //! - `devbench_stop()`, `devbench_free(ptr)`.
 //!
 //! Output: JSON lines (`t` = start | row | error | round | done | stopped |
-//! report) streamed to an optional TCP sink (the Alienware's `ncat -l -k`
-//! collectors on :9099/:9100) and written to `<out_dir>/<run_id>.jsonl`; the
+//! report) streamed to an optional TCP sink (a plain `ncat -l -k`
+//! collector, see tools/listen-devbench.sh) and written to `<out_dir>/<run_id>.jsonl`; the
 //! final `report` line and `<run_id>.json` are a bench-report host result
 //! (schema 1: host, commit, cpu, os, libraries, results[{operation, library,
 //! id, ns, ns_low, ns_high, throughput}]) so rind-results' tooling can read it.

@@ -156,7 +156,7 @@ public class MainActivity extends Activity {
         Intent it = getIntent();
         if (it.hasExtra("host")) c.add(new String[]{it.getStringExtra("host"), String.valueOf(it.getIntExtra("port", Collector.PORT)), "set by adb"});
         c.add(new String[]{"127.0.0.1", String.valueOf(Collector.PORT), "over USB"});
-        c.add(new String[]{Collector.HOST, String.valueOf(Collector.PORT), "over Wi-Fi"});
+        if (!Collector.HOST.isEmpty()) c.add(new String[]{Collector.HOST, String.valueOf(Collector.PORT), "over Wi-Fi"});
         return c;
     }
     private void findCollector(Runnable then) {

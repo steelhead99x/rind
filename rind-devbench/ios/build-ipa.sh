@@ -1,9 +1,9 @@
 #!/bin/bash
-# usage: build-ipa.sh PORT [HOST]  -> out/RindBenchAll-v${VER:-14.1}-<PORT>.ipa (unsigned; sign with plumesign on the Alienware)
+# usage: build-ipa.sh PORT [HOST]  -> out/RindBenchAll-v${VER:-14.1}-<PORT>.ipa (unsigned; sign it yourself, e.g. with plumesign)
 # Ports: 9101 for the iPad Pro M4, 9102 for the iPad mini A17 Pro (new listeners, so v13's 9099/9100 logs stay clean).
 set -eu
 cd "$(dirname "$0")"
-PORT=${1:-9101}; HOST=${2:-192.168.90.75}
+PORT=${1:-9101}; HOST=${2:-}  # HOST: the collector's LAN address; empty = results stay on the device
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 ../build-ios.sh ${CARGO_FEATURES---features __bench_openssl}
 LIB=$HOME/rind-devbench/target/aarch64-apple-ios/release/librind_devbench.a

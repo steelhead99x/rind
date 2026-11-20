@@ -33,7 +33,6 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kyledouglas.rindbench.all
-        DEVELOPMENT_TEAM: 5J2R6P4QL3
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1,2"
         OTHER_LDFLAGS: ["$(RIND_DEVBENCH_LIB)", "-framework", "Security", "-lc++"]
