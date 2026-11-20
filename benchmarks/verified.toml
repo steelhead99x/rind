@@ -56,10 +56,9 @@
 # whose Rust `proofs/` proves against Vale's FIPS 197 spec, and AES-GCM on
 # x86_64 with AES-NI but no VAES, whose Rust, key setup and by-8 kernels
 # included, `proofs/` proves against Vale's specs, and with AVX and MOVBE
-# against Vale's theorems for its routines. On the portable backend, SHA-256
-# and the SHA-512 family, with HMAC and HKDF over them, whose Rust `proofs/`
-# proves against HACL*'s theorems for its SHA-2 block functions, and ChaCha20
-# header protection. On AMD's x86_64 CPUs without AVX2, rind runs aws-lc's
+# against Vale's theorems for its routines. On the portable backend, ChaCha20
+# header protection, but not SHA-2: its 64-bit block functions are aws-lc's C
+# ported, which nothing proves yet, so HMAC and HKDF over them do not earn it. On AMD's x86_64 CPUs without AVX2, rind runs aws-lc's
 # unproven scalar SHA-512, which is faster there, so SHA-512 does not earn the
 # ✓ there, nor does Ed25519 unless the CPU has AVX-512 IFMA. CPUs with the
 # SHA512 instructions run the proven AVX2 routine when they have its whole
@@ -301,13 +300,6 @@ arch = "x86_64"
 cpu = ["intel", "avx", "ssse3"]
 proof = "aws-lc-verification's SAW proof of SHA-512 through EVP_Digest, padding included, over sha512_block_data_order_avx, which aws-lc runs only on Intel; of aws-lc c21d40da, whose SHA-512 code 5.12.0 keeps"
 link = "https://github.com/awslabs/aws-lc-verification/blob/797302470c1703cbb1a3a6fa98daffef0bfd3d80/SAW/proof/SHA512/verify-SHA512-x86.saw"
-
-[[verified]]
-library = "rind"
-operations = ["sha256/*", "sha512/*", "hmac-sha256/*", "hkdf-sha256/*"]
-arch = "portable"
-proof = "rind's Lean proof, through Aeneas and hand models of the function-pointer dispatch and of HKDF-Expand's loop over its info slices, which Aeneas cannot translate, of its digest, HMAC, and HKDF APIs' SHA-256 and SHA-512, padding included, down to HACL*'s Hacl.SHA2.Scalar32 sha256_update_nblocks and sha512_update_nblocks, which rind runs in pieces under 2^31 bytes, composed with HACL*'s F* proofs of them, compiled to Rust by an unverified step"
-link = "https://github.com/kixel-ai/rind/blob/main/proofs/Rind/Portable/Hacl.lean"
 
 [[verified]]
 library = "rind"
