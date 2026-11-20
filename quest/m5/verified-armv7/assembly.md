@@ -9,7 +9,7 @@ Every assembly routine armv7 runs is proven on the AArch32 model in `thirdparty/
 Runs, each in `low/arm/`, in rough order of use:
 
 - aws-lc's `sha_armv4`: SHA-256 and SHA-1 with the crypto extension, and SHA-256, SHA-1, and SHA-512 on NEON and without, which beat rind's Rust on a Cortex-A7 by 1.26 times (SHA-256) and 2.14 times (SHA-512);
-- `generic`'s ChaCha20 rounds and rind's 32-bit-word Poly1305, which are not assembly: 32-bit Arm NEON intrinsics are unstable on the toolchain this crate builds with, and aws-lc's NEON routines beat them only from 1200 bytes up (1.34 times at 16 KB for the whole seal on a Cortex-A7);
+- rind's ChaCha20 schedule (`low::arm::chacha20`), `generic`'s ChaCha20 rounds, and rind's 32-bit-word Poly1305, which are not assembly: 32-bit Arm NEON intrinsics are unstable on the toolchain this crate builds with, and aws-lc's NEON routines beat the seal only at 16 KB and up (rind's takes 1.08 times aws-lc-rs's at 16 KB and 0.96 at 1200 B on a Cortex-A7);
 - aws-lc's `aesv8-armx` and `ghashv8-armx`, under rind's AES-GCM composition;
 - OpenSSL's `keccak1600-armv4`, integer and NEON, under ML-KEM and SHA-3;
 - aws-lc's `bn_mul8x_mont_neon` and `bn_mul_mont_nohw`, under RSA;
