@@ -11,8 +11,9 @@ run aws-lc's `aes_hw_ctr32_encrypt_blocks` and `aes_hw_cbc_encrypt` for a key
 `expand_key` or `AesDecKey::new` expanded on the AES instructions. The axioms
 below assume HOL Light theorems of both routines, as rind's build emits them,
 that are not all proven yet: `proofs/hol-light/x86_64/aes_hw_cbc_encrypt.ml`
-proves CBC encryption and decryption, and CTR has no proof, so
-`Axioms.lean` lists none of them and [the AES modes
+proves CBC encryption and decryption, and CTR (`hw_ctr32_spec`) has no proof, so
+`Axioms.lean` lists none of them, the formal check that each axiom restates its
+theorem waits for CTR, and [the AES modes
 quest](/quest/m4/verified/aes-modes.md) owns the rest. Each states its block's
 result in `proofs/hol-light/x86_64/aes_hw_spec.ml`'s `aes_hw_encrypt`,
 `aes_hw_decrypt`, and `aes_ctr32_block`: the round keys `ks`, read
@@ -114,7 +115,9 @@ axiom hw_cbc_encrypt_spec (k : low.x86_64.aes.HwKey) (iv : Std.Array U8 16#usize
         (loadBytes blocks.val[i]!.val ^^^
           if i = 0 then loadBytes iv.val else loadBytes r.val[i - 1]!.val) ⦄
 
-/-- `aes_hw_cbc_encrypt`'s theorem for decryption, not yet proven: block `i`, read
+/-- `aes_hw_cbc_encrypt`'s theorem for decryption, which
+`proofs/hol-light/x86_64/aes_hw_cbc_encrypt.ml` proves as
+`AES_HW_CBC_ENCRYPT_DECRYPT_SUBROUTINE_CORRECT`: block `i`, read
 little-endian, becomes `aes_hw_decrypt ks` of itself XORed with the IV for the
 first and the previous input block for the rest. -/
 @[step]
