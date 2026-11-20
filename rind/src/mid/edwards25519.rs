@@ -7,6 +7,8 @@
 //! Each field and point routine is HOL Light-proven in s2n-bignum. What this
 //! module composes from them (the ladder, the square root of a ratio, the
 //! inversion, and the signed recoding) is rind's own, covered by tests only.
+//! On x86_64 CPUs with AVX2 but without ADX the multiplication instead runs a
+//! port of curve25519-dalek's AVX2 formulas, which nothing proves.
 
 use crate::error::Error;
 use crate::low;
@@ -281,9 +283,9 @@ impl Point {
         self.0[..12].try_into().unwrap()
     }
 
-    /// `[scalar]self`, in constant time: on CPUs with AVX2, curve25519-dalek's
-    /// AVX2 formulas, which measured faster than s2n-bignum's, and elsewhere
-    /// `mul_s2n_bignum`.
+    /// `[scalar]self`, in constant time: on x86_64 CPUs with AVX2 but without
+    /// ADX, curve25519-dalek's AVX2 formulas, which measured faster there (and
+    /// slower with ADX), and elsewhere `mul_s2n_bignum`.
     pub(crate) fn mul(&self, scalar: &Scalar) -> Self {
         #[cfg(rind_backend = "x86_64")]
         if let Some(r) = low::edwards25519_mul_avx2(&scalar.signed_radix_16(), &self.0) {
@@ -514,13 +516,13 @@ mod tests {
         assert_eq!(Fe::D.mul(&n(121666)).0, n(121665).neg().0);
     }
 
-    /// The AVX2 multiplication agrees with s2n-bignum's on every digit
-    /// value, at the scalars' edges and at the identity and small-order
-    /// points.
+    /// The AVX2 multiplication agrees with s2n-bignum's on every digit the
+    /// recoding yields (-8 to 7), at the scalars' edges and at the identity
+    /// and a point of order two. It checks nothing on a CPU without AVX2.
     #[test]
     fn mul_paths_agree() {
         let order_minus_one = Scalar([Scalar::ORDER[0] - 1, Scalar::ORDER[1], 0, Scalar::ORDER[3]]);
-        // Every nibble 0..=15, so each digit from -8 to 8 occurs, with and
+        // Every nibble 0..=15, so each digit from -8 to 7 occurs, with and
         // without a carry in.
         let nibbles = Scalar([
             0xfedc_ba98_7654_3210,

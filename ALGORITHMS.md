@@ -21,8 +21,8 @@ AES-NI, PCLMULQDQ, and SSE4.1 (Core 2); and SSE2 also SSSE3. Without ADX
 alone (Haswell), rind runs the same sources as x86_64, through s2n-bignum's
 routines that don't use it, except that Ed25519 verification's
 multiplication and the constant-time variable-point multiplication of
-ristretto255 and edwards25519 run curve25519-dalek ⚡ (see below) and P-256 runs the no
-AVX2 column's code.
+ristretto255 and edwards25519 run curve25519-dalek ⚡ (see below) and P-256
+runs the no AVX2 column's code.
 CPUs with AVX2 but without SHA-NI run [OpenSSL]'s AVX2 SHA-256, and SLH-DSA's
 SHA-2 sets [SPHINCS+]'s AVX2 eight-way SHA-256. CPUs with AVX2, BMI1, BMI2,
 POPCNT, and SSSE3 run [OpenSSL]'s verified ✓ AVX2 SHA-384 and SHA-512,
@@ -672,9 +672,9 @@ but on x86_64 CPUs with AVX-512 IFMA, which run verified-garbage's (see above).
 ristretto255's and edwards25519's constant-time variable-point multiplication
 is rind's, a fixed window of four bits over s2n-bignum's point routines, or on
 x86_64 CPUs with AVX2 but without ADX over curve25519-dalek's AVX2 formulas,
-which measured 8 to 10 percent faster in the OPRF's blind and evaluation there
-and 3.5 to 7 percent slower than s2n-bignum's with ADX. Nothing in it is
-proven.
+which measured 8 to 10 percent faster in the OPRF's blind and evaluation on an
+Arrow Lake core with ADX denied, and 3.5 to 7 percent slower than
+s2n-bignum's with ADX. Nothing in it is proven.
 
 ECVRF (RFC 9381) is rind's, over the curves' code above: on edwards25519, the
 ristretto255 code's constant-time variable-point multiplication and
