@@ -13,7 +13,6 @@ Every VG routine `cipher::ChaCha20` runs is imported as a theorem, so it earns t
 
 ## Waiting
 
-- The API: a theorem for `mid::chacha20::ChaCha20::apply_keystream` on aarch64 at the lengths `cipher_spec` covers (counter check, nonce and counter layout, `ChaCha20::new`'s SVE2 check, the secret and public slice markers), as `Rind/X86_64/ChaCha20Cipher.lean` does for x86_64. `new_spec` and `check_counter_spec` are proven; the rest is not.
-- Rind's NEON code (`cipher_neon`) and its lengths (below 128 bytes with SVE2; below 192, 257 to 447 without), which [the aarch64 ChaCha20-Poly1305 quest](/quest/m4/verified/chacha20-poly1305-aarch64.md) proves; `ALGORITHMS.md` claims the ✓ for VG's routines only, and Graviola's NEON code keeps none.
-- x86_64's `Kernel` hypothesis, which [kixel-ai/rind#869](https://github.com/kixel-ai/rind/pull/869) proves.
-- armv7's hand-scheduled ChaCha20 stays out of this ✓ and out of this quest's scope.
+- Claude: prove the API, a theorem for `mid::chacha20::ChaCha20::apply_keystream` on aarch64 at the lengths `cipher_spec` covers (counter check, nonce and counter layout, `ChaCha20::new`'s SVE2 check, the secret and public slice markers), as `Rind/X86_64/ChaCha20Cipher.lean` does for x86_64. `new_spec` and `check_counter_spec` are proven; the rest is not.
+- Claude: prove rind's NEON code (`cipher_neon`) and the lengths it runs (below 128 bytes with SVE2; below 192 and from 257 to 447 without) in [the aarch64 ChaCha20-Poly1305 quest](/quest/m4/verified/chacha20-poly1305-aarch64.md). `ALGORITHMS.md` claims the ✓ for VG's routines only, and Graviola's NEON code keeps none.
+- Maintainer: merge [kixel-ai/rind#869](https://github.com/kixel-ai/rind/pull/869), which proves x86_64's `Kernel` hypothesis. armv7's hand-scheduled ChaCha20 is out of this ✓ and this quest.
