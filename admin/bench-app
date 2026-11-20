@@ -450,7 +450,8 @@ def run(args):
 
 
 def print_summary(result):
-    """Each operation's rind time over the faster control's, on stderr."""
+    """Each operation's rind time, and that time over the lower of the two
+    controls' (1.000 is the same time), on stderr."""
     by_op = {}
     for r in result["results"]:
         by_op.setdefault(r["operation"], {})[r["library"]] = r["ns"]
@@ -459,11 +460,11 @@ def print_summary(result):
         rivals = [ns for lib, ns in libs.items() if lib != "rind"]
         if "rind" in libs and rivals:
             name = op.replace("/{lib}", "")
-            print(f"  {name:28} rind {libs['rind']:12.1f} ns  {libs['rind'] / min(rivals):.3f}x the fastest control", file=sys.stderr)
+            print(f"  {name:28} rind {libs['rind']:12.1f} ns  time vs control {libs['rind'] / min(rivals):.3f}", file=sys.stderr)
 
 
 def main():
-    p = argparse.ArgumentParser(description="Times rind against aws-lc-rs and ring on this machine.")
+    p = argparse.ArgumentParser(description="Times rind, with aws-lc-rs and ring as controls, on this machine, so the result can be contributed.")
     p.add_argument("--host", help="the result's host name (default: a slug of the CPU model)")
     p.add_argument("--rounds", type=int, default=ROUNDS, help=f"interleaved rounds (default {ROUNDS})")
     p.add_argument("--cpu", type=int, help="the core to pin to (default: the fastest, highest numbered)")
