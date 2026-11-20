@@ -706,6 +706,140 @@ pub unsafe extern "C" fn rind_fips_tls13_seal(
 
 free!(rind_fips_tls13_sealing_key_free, Tls13SealingKey);
 
+/// A QUIC packet sealing key: AES-GCM under the nonce the module builds
+/// itself, the packet protection IV XORed with the packet number (RFC 9001
+/// section 5.3), for each packet number once.
+///
+/// QUIC may seal packets out of order (a sender seals packet `n + 1` while
+/// another thread still seals `n`), so the module does not demand increasing
+/// packet numbers, as [`Tls13SealingKey`] does. It remembers instead which of
+/// the last [`Self::WINDOW`] packet numbers, the highest included, it has
+/// sealed and refuses a repeat, and any packet number `WINDOW` or more below
+/// the highest, which it can no longer vouch for. Under one key a nonce is
+/// therefore never used twice, whatever the order of calls: SP 800-38D section 8.2.1's requirement that
+/// the invocation field is unique, which holds for any bijective mapping
+/// from packet number to nonce, as XOR with a fixed IV is.
+pub struct QuicSealingKey {
+    key: aead::Key,
+    iv: [u8; 12],
+    /// The highest packet number sealed, if any.
+    top: Option<u64>,
+    /// Bit `n % WINDOW` is set if packet number `n`, at most `WINDOW - 1`
+    /// below `top`, was sealed.
+    seen: [u64; Self::WINDOW / 64],
+}
+
+impl QuicSealingKey {
+    /// How many packet numbers are tracked: `top` and the `WINDOW - 1` below it.
+    const WINDOW: usize = 1024;
+
+    /// Takes packet number `pn`, refusing one sealed before, one too far
+    /// below the highest.
+    fn take(&mut self, pn: u64) -> Result<(), Error> {
+        let window = Self::WINDOW as u64;
+        let slot = (pn % window) as usize;
+        let (word, bit) = (slot / 64, 1u64 << (slot % 64));
+        match self.top {
+            None => {
+                self.seen = [0; Self::WINDOW / 64];
+                self.top = Some(pn);
+            }
+            Some(top) if pn > top => {
+                // Slide the window: forget the packet numbers it leaves.
+                let gone = (pn - top).min(window);
+                for old in (top + 1)..=(top + gone) {
+                    let slot = (old % window) as usize;
+                    self.seen[slot / 64] &= !(1u64 << (slot % 64));
+                }
+                self.top = Some(pn);
+            }
+            Some(top) => {
+                if top - pn >= window || self.seen[word] & bit != 0 {
+                    return Err(Error::MessageLimitReached);
+                }
+            }
+        }
+        self.seen[word] |= bit;
+        Ok(())
+    }
+}
+
+/// A QUIC packet sealing key for the algorithm `id` names, AES-128-GCM or
+/// AES-256-GCM, from the `len` bytes at `key`, with packet protection IV
+/// `iv`.
+///
+/// # Safety
+/// `key` must be valid for `len` reads, `iv` for 12, and `out` for a write.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_fips_quic_sealing_key_new(
+    id: u32,
+    key: *const u8,
+    len: usize,
+    iv: *const [u8; 12],
+    out: *mut *mut QuicSealingKey,
+) -> Status {
+    let algorithm = match id {
+        ids::aead::AES_128_GCM | ids::aead::AES_256_GCM => aead_algorithm(id),
+        _ => None,
+    };
+    let Some(algorithm) = algorithm else {
+        return status(Err(Error::Unsupported));
+    };
+    // SAFETY: the caller's contract.
+    let (key, iv) = unsafe { (bytes(key, len), *iv) };
+    // SAFETY: the caller's contract.
+    unsafe {
+        new_handle(out, || {
+            Ok(QuicSealingKey {
+                key: aead::Key::new(algorithm, key)?,
+                iv,
+                top: None,
+                seen: [0; QuicSealingKey::WINDOW / 64],
+            })
+        })
+    }
+}
+
+/// Encrypts the `len` bytes at `in_out` in place for packet number `pn`
+/// and the `aad_len` bytes at `aad`, writing the tag to `tag`, if no
+/// packet of `pn` was sealed under the key and `pn` is less than 1024 below
+/// the highest sealed.
+///
+/// # Safety
+/// `key` must be live and in no other call, `aad` valid for `aad_len`
+/// reads, `in_out` for `len` reads and writes, and `tag` for 16 writes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rind_fips_quic_seal(
+    key: *mut QuicSealingKey,
+    pn: u64,
+    aad: *const u8,
+    aad_len: usize,
+    in_out: *mut u8,
+    len: usize,
+    tag: *mut [u8; 16],
+) -> Status {
+    // SAFETY: the caller's contract.
+    let (key, aad, in_out) = unsafe { (&mut *key, bytes(aad, aad_len), bytes_mut(in_out, len)) };
+    scrubbed(Depth::Small, || {
+        // As for a TLS record, a seal that then fails spends its number.
+        let mut sealed_tag = [0u8; 16];
+        let result = key.take(pn).and_then(|()| {
+            let mut nonce = key.iv;
+            for (n, p) in nonce[4..].iter_mut().zip(pn.to_be_bytes()) {
+                *n ^= p;
+            }
+            seal(&key.key, nonce, aad, in_out, &mut sealed_tag)
+        });
+        if result.is_ok() {
+            // SAFETY: the caller's contract.
+            unsafe { put(tag, sealed_tag) };
+        }
+        sealed(result, in_out)
+    })
+}
+
+free!(rind_fips_quic_sealing_key_free, QuicSealingKey);
+
 /// An AES-GCM key of any IV length for the AES key size `id`, from the
 /// `len` bytes at `key`, with tags of `tag_len` bytes.
 ///
