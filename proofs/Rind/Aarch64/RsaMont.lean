@@ -7,7 +7,8 @@ open Aeneas Aeneas.Std Result rind.spec rind.spec.rsa
 
 `low::aarch64::mont`'s `mont_mul` and `mont_sqr` run aws-lc's `bn_mul_mont`
 from two words, behind the wrapper `mul_mont`, and s2n-bignum's `bignum_montmul`
-below. rind's HOL Light proof `BN_MUL_MONT_SUBROUTINE_CORRECT`, in
+and `bignum_montsqr` below two words, which `MontArgs` excludes. rind's HOL
+Light proof `BN_MUL_MONT_SUBROUTINE_CORRECT`, in
 `proofs/hol-light/aarch64/bn_mul_mont.ml` at rind's commit, joins the proofs
 of its three routines, the generic path, `__bn_mul4x_mont`, and
 `__bn_sqr8x_mont`, and `admin/prove` checks it against the object code rind's
@@ -22,9 +23,10 @@ aligned; and `n0` is read through a reference to the one word `mul_mont`
 passes. At a multiple of four the routine adds 32 to `x` and `m`, and the
 theorem needs the sums not to wrap. The axiom does not carry that hypothesis,
 since the model has no addresses: it is a trusted step, that a slice of at
-least 32 bytes does not end at the top of the address space. `k < 2^58` holds for each
-width RSA takes, which `MontArgs` bounds below `2^32`. The restatement, and
-that the wrapper passes the pointers and width the theorem names, are trusted.
+least 32 bytes does not end at the top of the address space. `k < 2^58` holds
+for each width RSA takes, which `MontArgs` bounds below `2^32`. The
+restatement, and that the wrapper passes the pointers and width the theorem
+names, are trusted.
 -/
 
 namespace rind.aarch64

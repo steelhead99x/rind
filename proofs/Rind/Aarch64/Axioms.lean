@@ -49,7 +49,8 @@ RSA's Montgomery products rest on the axiom restating rind's HOL Light proof of
 aws-lc's `bn_mul_mont` in `Rind.Aarch64.RsaMont`, which trusts, as the
 axiom's statement over slices drops it, that a slice of at least 32 bytes does
 not end at the top of the address space, so the 4x path's `x + 32` and
-`m + 32` do not wrap.
+`m + 32` do not wrap. The axiom holds for the Linux build's object only:
+Apple's `bn_mul_mont.apple.s` is not covered (quest `rsa-aarch64`).
 A change here is a change to the trust base.
 -/
 

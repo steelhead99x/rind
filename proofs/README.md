@@ -1205,10 +1205,10 @@ with BMI2 and ADX, from s2n-bignum's theorems, and from `AwsLcMont`, that
 aws-lc's unproven routines return theirs, at every other width and CPU.
 `PublicKey::verify` reaches each algorithm's verification through a function
 pointer, and every loader encodes the key through `Buffer::write`, which
-`Rind/X86_64/RsaDispatch.lean` models for these two algorithms. On aarch64 the products are aws-lc's, which
-`Rind/Aarch64/RsaMont.lean`'s `mont_products` proves at every width from two
-words for `MontArgs`'s inputs, from the axiom restating
-`BN_MUL_MONT_SUBROUTINE_CORRECT`; the RSA proofs are not copied there yet.
+`Rind/X86_64/RsaDispatch.lean` models for these two algorithms. On aarch64 the
+products are aws-lc's, which `Rind/Aarch64/RsaMont.lean`'s `mont_products`
+proves at every width from two words for `MontArgs`'s inputs, from the axiom
+restating `BN_MUL_MONT_SUBROUTINE_CORRECT`; the RSA proofs are not copied there yet.
 
 `admin/prove` fails if a hand model's quote no longer matches the source, if
 the source names `Ops`, builds a `Masker`, or writes its `mask` outside the
