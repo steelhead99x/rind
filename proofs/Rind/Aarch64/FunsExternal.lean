@@ -111,6 +111,9 @@ opaque low.aarch64.bignum_montmul.bignum_montmul
   Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Slice Std.U64 →
     Result (Slice Std.U64)
 
+opaque low.aarch64.bignum_montsqr.bignum_montsqr
+  : Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Result (Slice Std.U64)
+
 opaque low.aarch64.bignum_demont.bignum_demont
   : Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Result (Slice Std.U64)
 
@@ -271,6 +274,14 @@ opaque low.aarch64.sha256.compress_hw
 
 opaque low.aarch64.sha256.compress_nohw
   : Array Std.U32 8#usize → Slice Std.U8 → Result (Array Std.U32 8#usize)
+
+/-! aws-lc's `bn_mul_mont`, behind its Rust wrapper, whose contract
+`Rind.Aarch64.RsaMont` states as rind's HOL Light proof's theorem. -/
+
+opaque low.aarch64.mont.mul_mont
+  :
+  Slice Std.U64 → Slice Std.U64 → Slice Std.U64 → Slice Std.U64 →
+    Std.U64 → Result (Slice Std.U64)
 
 /-! P-384's s2n-bignum routines, its table select, and `bignum_mux`. -/
 
