@@ -52,11 +52,9 @@ fiat-crypto = { version = "0.3", default-features = false }
 # CCTV gzips its ML-KEM modulus vectors.
 flate2 = { version = "1.1.11", default-features = false, features = ["rust_backend"] }
 hex = { version = "0.4", features = ["serde"] }
-# The reference for P-521's hash-to-curve, which aws-lc lacks, and for each
-# curve's hash to a scalar, which aws-lc does not export.
-p256 = { version = "0.14", default-features = false, features = ["group-digest"] }
-p384 = { version = "0.14", default-features = false, features = ["group-digest"] }
-p521 = { version = "0.14", default-features = false, features = ["group-digest"] }
+p256 = { version = "0.14", default-features = false, features = ["arithmetic"] }
+p384 = { version = "0.14", default-features = false, features = ["arithmetic"] }
+p521 = { version = "0.14", default-features = false, features = ["arithmetic"] }
 # Without `fork` and `timeout`, which spawn processes wasm cannot.
 proptest = { version = "1.5.0", default-features = false, features = ["std", "bit-set"] }
 serde = { version = "1", features = ["derive"] }
@@ -79,6 +77,9 @@ chacha20poly1305 = { version = "0.11", default-features = false, features = ["al
 hmac = { version = "0.13", default-features = false }
 ml-dsa = { version = "0.1", default-features = false }
 ml-kem = { version = "0.3", default-features = false, features = ["hazmat"] }
+# The reference for hashing to P-256, P-384, and P-521 and to their scalars:
+# RFC 9380 on big integers, in `test::h2c`.
+num-bigint = "0.5"
 sha2 = { version = "0.11", default-features = false }
 sha3 = { version = "0.12", default-features = false }
 # Ed25519 and X25519 on the tiers where rind runs s2n-bignum; armv7 and the

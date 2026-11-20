@@ -235,6 +235,8 @@ pub(crate) const CTGRIND_DEBUG: bool = cfg!(all(feature = "__ctgrind", debug_ass
 pub(crate) mod bignum;
 mod binsec;
 pub(crate) mod file_test;
+#[cfg(not(any(miri, target_family = "wasm")))]
+pub(crate) mod h2c;
 #[cfg(any(rind_backend = "x86_64", rind_backend = "aarch64"))]
 pub(crate) mod vg_ec;
 
