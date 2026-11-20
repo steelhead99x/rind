@@ -6,9 +6,9 @@ The portable backend's SHA-256 and SHA-512 block functions on x86_64, `low::gene
 
 ## Plan
 
-The portable SHA-2 speed quest replaced HACL*'s verified block functions on x86_64's portable backend with these, which measured faster on one x86_64 core (`ALGORITHMS.md`, "portable, x86_64"), so the portable SHA-2 ✓ went, no theorem covers them, and the portable theorems take their contracts as hypotheses, as SHA-1's do.
+The PR that finished and deleted the portable SHA-2 speed quest replaced HACL*'s verified block functions on x86_64's portable backend with these, which measured faster on one x86_64 core (`ALGORITHMS.md`, "portable, x86_64"), so the portable SHA-2 ✓ went, no theorem covers them, and the portable theorems take their contracts as hypotheses, as SHA-1's do.
 
-Decided 2026-11-20 (maintainer): ✅ this lands before [kixel-ai/rind#794](https://github.com/kixel-ai/rind/pull/794)'s replacement, and ✅ only x86_64 runs the ports until aarch64 without NEON, riscv64 and s390x are measured (rejected: every 64-bit portable target). Those, and the 32-bit targets, keep HACL*.
+Decided 2026-11-20 (owner): ✅ this lands before [kixel-ai/rind#794](https://github.com/kixel-ai/rind/pull/794)'s replacement, and ✅ only x86_64 runs the ports until aarch64 without NEON, riscv64 and s390x are measured (rejected: every 64-bit portable target). Those, and the 32-bit targets, keep HACL*.
 
 - The functions are macro-unrolled rounds over a 16-word window, then three or four passes of sixteen rounds with the working variables renamed by position. They are plain Rust over arrays and rotates, which should translate without the stack-depth panic HACL*'s `unroll_for!` bodies hit; check that first.
 - Have `admin/prove`'s portable pass include `crate::low::generic::sha256` and `crate::low::generic::sha512_awslc` instead of leaving them opaque (`Rind/Portable/FunsExternal.lean` declares them opaque today), and prove each against `Rind/HashSpec.lean`'s `sha256.compress` and `Rind/Sha2.lean`'s `processBlock`, as `Rind/X86_64/ChaCha20.lean` proves HACL*'s ChaCha20 rounds. The statements are the fields `ShaBlocks.lean` and `Sha512Entry.lean` already hold, so nothing above them changes.

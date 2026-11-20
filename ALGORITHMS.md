@@ -140,8 +140,8 @@ with portable Rust in place of the assembly armv7 runs regardless.
 | ChaCha20-Poly1305, XChaCha20-Poly1305 | verified-garbage | aws-lc ⚡ |  | HACL* ✓ + Graviola |
 | MD5 | rind |  |  |  |
 | SHA-1 | rind | aws-lc |  | rind |
-| SHA-256 | aws-lc ⚡ | aws-lc |  | aws-lc ⚡ on x86_64, HACL* ✓ on other targets except ESP-IDF Xtensa, where rind's 16-round body runs from IRAM |
-| SHA-384, SHA-512, SHA-512/256 | aws-lc | aws-lc ✓ | aws-lc ⚡ | aws-lc ⚡ on x86_64, HACL* ✓ on other targets, except rind's rolled loop on 32-bit microcontrollers |
+| SHA-256 | aws-lc ⚡ | aws-lc |  | aws-lc ⚡ on x86_64, HACL* on other targets (its F* proofs cover its block function, not rind's glue) except ESP-IDF Xtensa, where rind's 16-round body runs from IRAM |
+| SHA-384, SHA-512, SHA-512/256 | aws-lc | aws-lc ✓ | aws-lc ⚡ | aws-lc ⚡ on x86_64, HACL* on other targets (its F* proofs cover its block function, not rind's glue), except rind's rolled loop on 32-bit microcontrollers |
 | SHA3-256, SHA3-384, SHA3-512 | s2n-bignum ✓ + Graviola |  | OpenSSL ⚡ + Graviola | rind + Graviola |
 | HMAC | Graviola ⚡ |  |  |  |
 | HKDF | rind ⚡ |  |  |  |
@@ -173,7 +173,7 @@ with portable Rust in place of the assembly armv7 runs regardless.
 - portable, x86_64: SHA-256 and SHA-384/512 are aws-lc's
   `sha256_block_data_order_nohw` and `sha512_block_data_order_nohw`, ported
   to Rust (`generic::sha256`, `generic::sha512_awslc`), which measured
-  0.86-0.93 of HACL*'s time for SHA-256 and 0.77-0.86 for SHA-384/512 and
+  0.86-0.91 of HACL*'s time for SHA-256 and 0.77-0.86 for SHA-384/512 and
   SHA-512/256 from 32 B to 16 KB on x86_64's forced portable backend, and
   0.85-0.90 and 0.97-1.04 of aws-lc's C built without assembly, where
   Graviola's rolled SHA-256, rind's before, took 1.07-1.19 of HACL*'s. Nothing

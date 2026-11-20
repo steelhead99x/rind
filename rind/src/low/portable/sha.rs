@@ -3,7 +3,7 @@
 //! SHA-1 on rind's portable code in `generic`, as armv7 runs it without the
 //! crypto extension, and the SHA-2 family on aws-lc's portable C, ported to
 //! Rust in `generic::sha256` and `generic::sha512_awslc`, on x86_64.
-//! It measured 0.86-0.93 of HACL*'s SHA-256 and 0.77-0.86 of its SHA-512 on
+//! It measured 0.86-0.91 of HACL*'s SHA-256 and 0.77-0.86 of its SHA-512 on
 //! x86_64's forced portable backend, from 32 B to 16 KB, and within 4% of
 //! aws-lc's C compiled without assembly for SHA-512, where Graviola's rolled
 //! SHA-256 took 1.07-1.19 of HACL*'s.
