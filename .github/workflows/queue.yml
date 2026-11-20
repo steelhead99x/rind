@@ -25,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: The PR head commit to report the skipped required context on.
+        description: The PR head commit to report the skipped required contexts on.
         required: true
 
 permissions:
@@ -63,7 +63,7 @@ jobs:
     permissions:
       checks: write
     steps:
-      - name: Report the skipped required context
+      - name: Report the skipped required contexts
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -72,3 +72,7 @@ jobs:
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be a full commit SHA" >&2; exit 1; }
           gh api "repos/$REPO/check-runs" -f 'name=Queue build / Build' -f head_sha="$SHA" -f status=completed -f conclusion=skipped \
             -f 'output[title]=Queue build / Build' -f 'output[summary]=Skipped on the pull request; the merge queue builds the group.' --silent
+          # x86-cpu.yml's required context, for a head that predates it. Its
+          # own dispatch cannot take this input: see sh/release-check.sh.
+          gh api "repos/$REPO/check-runs" -f 'name=x86-cpu gate' -f head_sha="$SHA" -f status=completed -f conclusion=skipped \
+            -f 'output[title]=x86-cpu gate' -f 'output[summary]=Skipped on the pull request; the merge queue runs the models.' --silent

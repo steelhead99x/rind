@@ -7,20 +7,34 @@ name: x86-cpu
 # models report through `x86-cpu gate`, which skips, and so passes, on a pull
 # request: GitHub admits a PR to the queue only once its required checks
 # report, so this workflow has no `paths` filter, and `scope` decides instead.
+# The skip comes from a job with no `needs`, as queue-build.yml's Build job
+# has, so it reports when the run starts, not after the slow models. A PR whose
+# head predates this workflow gets no run from it: queue.yml's `Report Queue`
+# reports the context there (`gh workflow run queue.yml -f sha=<head>`), since
+# a required input here would fail sh/release-check.sh's dispatch of the weekly
+# run.
 on:
   schedule:
     - cron: "23 8 * * 0"
   workflow_dispatch:
   pull_request:
     branches: [main]
+    # `edited` covers a PR retargeted to main, which needs the context too.
+    # `scope` runs no model for an edit that is not a retarget.
+    types: [opened, synchronize, reopened, edited]
   merge_group:
     types: [checks_requested]
 
 permissions:
   contents: read
 
+# A new push or a retarget replaces the PR's running models. An edit of a title
+# or body is no change to test, so it gets a group of its own and cannot cancel
+# a running model, which a run of the PR's group would.
 concurrency:
-  group: x86-cpu-${{ github.ref }}
+  group: >-
+    x86-cpu-${{ github.event.action == 'edited' && !github.event.changes.base
+    && format('edit-{0}', github.run_id) || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -33,9 +47,15 @@ jobs:
   # selects its own set of dispatch paths, and no map from a changed file to
   # the paths that run it is kept. A merge group's diff is against its base.
   # release-plz's release PR, which only bumps versions and changelogs, runs
-  # none: a `release-plz-` branch that moq-bot, release.yml's app, opened.
+  # none: a `release-plz-` branch that moq-bot, release.yml's app, opened. A
+  # merge group has no head_ref or pull request user, so its PR is read from the
+  # queue's ref, `gh-readonly-queue/main/pr-<number>-<sha>`; the queue builds
+  # one PR a group (queue.yml), so that is the group's PR.
   scope:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       run: ${{ steps.reach.outputs.run }}
       matrix: ${{ steps.reach.outputs.matrix }}
@@ -43,18 +63,31 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0
+          # Only sh/changed.sh reads history, and runs only for these events.
+          fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 0 || 1 }}
 
       - id: reach
         shell: bash
         env:
           RELEASE_PR: ${{ startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.user.login == 'moq-bot[bot]' }}
           BASE: ${{ github.event.merge_group.base_sha }}
+          GROUP_REF: ${{ github.event.merge_group.head_ref }}
+          EDIT: ${{ github.event.action == 'edited' && !github.event.changes.base }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           run=true
           models=all
-          if [ "$RELEASE_PR" = true ]; then
+          if [ "$GITHUB_EVENT_NAME" = merge_group ] && [[ "$GROUP_REF" =~ /pr-([0-9]+)- ]]; then
+            # A failed lookup leaves RELEASE_PR false: the models run.
+            pr=$(gh api "repos/$REPO/pulls/${BASH_REMATCH[1]}" --jq '"\(.head.ref) \(.user.login)"' || true)
+            if [[ "$pr" == release-plz-*' moq-bot[bot]' ]]; then RELEASE_PR=true; fi
+          fi
+          if [ "$EDIT" = true ]; then
+            echo "A title or body edit changes nothing to test."
+            run=false
+          elif [ "$RELEASE_PR" = true ]; then
             echo "A release PR bumps only versions and changelogs."
             run=false
           elif [ "$GITHUB_EVENT_NAME" = pull_request ] || [ "$GITHUB_EVENT_NAME" = merge_group ]; then
@@ -167,10 +200,22 @@ jobs:
         env:
           RIND_ACVP_WRAPPER_RUNNER: "sde -dmr --"
 
-  # The result main's ruleset can require, `x86-cpu gate`: every model and the
-  # ACVP run of a merge group, or a skip on a pull request, which reports the
-  # context as passed so GitHub admits the PR to the queue. A group whose diff
-  # misses x86_64 skips the models and passes.
+  # The result main's ruleset can require, `x86-cpu gate`, in two jobs of that
+  # name. On a pull request `gate-pr` reports skipped, and so passed, when the
+  # run starts: it has no `needs`, as queue-build.yml's Build job has none, so
+  # it neither waits for the models nor is cancelled with them. That is what
+  # lets GitHub admit the PR to the queue. No event is named 'never' (actionlint
+  # rejects a constant false), so it always skips and `gate` is the only one
+  # that ever runs.
+  gate-pr:
+    name: x86-cpu gate
+    if: github.event_name == 'never'
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+
+  # A merge group's gate: every model and the ACVP run, or a pass when the
+  # group's diff misses x86_64 and they skip.
   gate:
     name: x86-cpu gate
     if: always() && github.event_name == 'merge_group'
