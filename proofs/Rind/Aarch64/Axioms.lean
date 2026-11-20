@@ -137,7 +137,8 @@ A change here is a change to the trust base.
  bignum_neg_p384_spec,
  bignum_tomont_p384_spec,
  p384_montjdouble_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_generate
 
@@ -155,7 +156,8 @@ A change here is a change to the trust base.
  bignum_neg_p384_spec,
  bignum_tomont_p384_spec,
  p384_montjdouble_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_from_scalar
 
@@ -530,7 +532,8 @@ A change here is a change to the trust base.
  bignum_neg_p384_spec,
  bignum_tomont_p384_spec,
  p384_montjdouble_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_generate
 
@@ -548,7 +551,8 @@ A change here is a change to the trust base.
  bignum_neg_p384_spec,
  bignum_tomont_p384_spec,
  p384_montjdouble_spec,
- p384_montjmixadd_spec] -/
+ p384_montjmixadd_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_from_scalar_and_public_key
 
@@ -572,7 +576,8 @@ A change here is a change to the trust base.
  compress_nohw_spec,
  p384_montjdouble_spec,
  p384_montjmixadd_spec,
- sha512_block_data_order_hw_spec] -/
+ sha512_block_data_order_hw_spec,
+ vg_p384_public_key_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_sign
 
@@ -598,7 +603,8 @@ A change here is a change to the trust base.
  p384_montjadd_spec,
  p384_montjdouble_spec,
  p384_montjmixadd_spec,
- sha512_block_data_order_hw_spec] -/
+ sha512_block_data_order_hw_spec,
+ vg_p384_verify_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_key_pair_verify
 
@@ -621,7 +627,8 @@ A change here is a change to the trust base.
  p384_montjadd_spec,
  p384_montjdouble_spec,
  p384_montjmixadd_spec,
- sha512_block_data_order_hw_spec] -/
+ sha512_block_data_order_hw_spec,
+ vg_p384_verify_spec] -/
 #guard_msgs in
 #print axioms p384_ecdsa_public_key_new
 
