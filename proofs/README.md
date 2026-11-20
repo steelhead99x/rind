@@ -185,6 +185,8 @@ for this CPU's target:
   `admin/vg-bytes` assembles with nixpkgs' LLVM; a branch or call need only
   reach the same instruction or function, since the assembler lays those
   out, and an encoding that differs but disassembles the same is reported;
+  each static a vendored routine reaches, through its relocations and those of
+  the statics it reaches, has VG's size, bytes, and relocations;
 - that each distinct instruction of VG's code ends, from random states, in
   the state VG's model gives. `Cosim/` parses each instruction's text back to
   every instruction of the model that prints as exactly that text, runs the

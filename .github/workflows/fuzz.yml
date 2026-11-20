@@ -15,6 +15,9 @@ on:
   # A pull request only builds the targets; fuzzing needs the saved corpus
   # and hours.
   pull_request:
+    # A draft skips every job until it is marked ready, and turning a PR back
+    # into a draft cancels its ready run: see CONTRIBUTING.md.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     branches: [main]
     paths:
       - fuzz/**
@@ -34,6 +37,7 @@ env:
 jobs:
   build:
     name: Build fuzz targets (${{ matrix.arch }})
+    if: ${{ !github.event.pull_request.draft }}
     strategy:
       matrix:
         include:
