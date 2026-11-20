@@ -71,6 +71,20 @@ libc = { version = "0.2", default-features = false }
 # calls it.
 [target.'cfg(not(any(miri, target_family = "wasm")))'.dev-dependencies]
 aws-lc-rs = { version = "1.19", default-features = false, features = ["alloc", "prebuilt-nasm", "non-fips"] }
+# Independent oracles: RustCrypto's crates, which share no code with the path
+# rind runs, for the differential tests beside aws-lc-rs. See
+# `tests/crosschecks.rs`'s `independent`.
+aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
+chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc"] }
+hmac = { version = "0.13", default-features = false }
+ml-dsa = { version = "0.1", default-features = false }
+ml-kem = { version = "0.3", default-features = false, features = ["hazmat"] }
+sha2 = { version = "0.11", default-features = false }
+sha3 = { version = "0.12", default-features = false }
+# Ed25519 and X25519 on the tiers where rind runs s2n-bignum; armv7 and the
+# portable backend run dalek, so the test leaves them out.
+ed25519-dalek = { version = "3", default-features = false }
+x25519-dalek = { version = "3", default-features = false, features = ["static_secrets"] }
 # aws-lc's XChaCha20-Poly1305, which aws-lc-rs does not expose.
 aws-lc-sys = { version = "0.47", default-features = false }
 # HPKE, which aws-lc-rs does not expose either; `hazmat` reads its private keys.

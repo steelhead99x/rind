@@ -4612,6 +4612,7 @@ dependencies = [
 name = "rind"
 version = "0.3.2"
 dependencies = [
+ "aes-gcm 0.11.1",
  "akd_core",
  "argon2",
  "aws-lc-rs",
@@ -4619,8 +4620,10 @@ dependencies = [
  "blake2",
  "blind-rsa-signatures",
  "cfg-if",
+ "chacha20poly1305 0.11.0",
  "crabgrind 0.4.0",
  "curve25519-dalek 5.0.0",
+ "ed25519-dalek 3.0.0",
  "fiat-crypto 0.3.0",
  "fips205",
  "flate2",
@@ -4629,6 +4632,7 @@ dependencies = [
  "frost-ristretto255",
  "getrandom 0.4.3",
  "hex",
+ "hmac 0.13.0",
  "hpke-rs 0.8.0",
  "libc",
  "libcrux-hacl-rs 0.0.6",
@@ -4636,6 +4640,8 @@ dependencies = [
  "libcrux-poly1305 0.0.7",
  "libcrux-sha2 0.0.9",
  "matter-crypto",
+ "ml-dsa",
+ "ml-kem",
  "p256 0.13.2",
  "p256 0.14.0",
  "p384 0.13.1",
@@ -4649,9 +4655,12 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
+ "sha3 0.12.0",
  "slh-dsa",
  "voprf 0.5.0",
  "vrf-rfc9381",
+ "x25519-dalek 3.0.0",
 ]
 
 [[package]]

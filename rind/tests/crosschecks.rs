@@ -3692,3 +3692,241 @@ mod frost {
         differential!(frost_p256, &P256_SHA256);
     }
 }
+
+/// Oracles that share no code with rind's path, besides aws-lc-rs: RustCrypto's
+/// crates, and dalek's on the tiers where rind runs s2n-bignum. Each test
+/// runs the same inputs through rind and the oracle and demands equal
+/// answers, so a routine aws-lc-rs and rind both take from s2n-bignum,
+/// mlkem-native, or mldsa-native is checked against a third implementation.
+mod independent {
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use proptest::sample::Index;
+
+    proptest! {
+        #[test]
+        fn sha2_sha3_hmac(
+            message in vec(any::<u8>(), 0..1100),
+            key in vec(any::<u8>(), 0..300),
+            split in any::<Index>(),
+        ) {
+            use hmac::{KeyInit, Mac};
+            use sha2::Digest as _;
+
+            let split = split.index(message.len() + 1);
+            let digest = |algorithm| {
+                let mut ctx = rind::digest::Context::new(algorithm);
+                ctx.update(&message[..split]);
+                ctx.update(&message[split..]);
+                ctx.finish()
+            };
+            { let (got, wanted) = (digest(&rind::digest::SHA256), sha2::Sha256::digest(&message)); prop_assert_eq!(got.as_ref(), &wanted[..]); }
+            { let (got, wanted) = (digest(&rind::digest::SHA384), sha2::Sha384::digest(&message)); prop_assert_eq!(got.as_ref(), &wanted[..]); }
+            { let (got, wanted) = (digest(&rind::digest::SHA512), sha2::Sha512::digest(&message)); prop_assert_eq!(got.as_ref(), &wanted[..]); }
+            { let (got, wanted) = (digest(&rind::digest::SHA512_256), sha2::Sha512_256::digest(&message)); prop_assert_eq!(got.as_ref(), &wanted[..]); }
+            { let (got, wanted) = (digest(&rind::digest::SHA3_256), sha3::Sha3_256::digest(&message)); prop_assert_eq!(got.as_ref(), &wanted[..]); }
+            { let (got, wanted) = (digest(&rind::digest::SHA3_384), sha3::Sha3_384::digest(&message)); prop_assert_eq!(got.as_ref(), &wanted[..]); }
+            { let (got, wanted) = (digest(&rind::digest::SHA3_512), sha3::Sha3_512::digest(&message)); prop_assert_eq!(got.as_ref(), &wanted[..]); }
+
+            macro_rules! mac {
+                ($ours:expr, $theirs:ty) => {{
+                    let ours = rind::hmac::Key::new($ours, &key);
+                    let wanted = {
+                        let mut mac = <hmac::Hmac<$theirs> as KeyInit>::new_from_slice(&key).unwrap();
+                        mac.update(&message);
+                        mac.finalize().into_bytes()
+                    };
+                    let got = rind::hmac::sign(&ours, &message);
+                    prop_assert_eq!(got.as_ref(), &wanted[..]);
+                }};
+            }
+            mac!(&rind::hmac::HMAC_SHA256, sha2::Sha256);
+            mac!(&rind::hmac::HMAC_SHA384, sha2::Sha384);
+            mac!(&rind::hmac::HMAC_SHA512, sha2::Sha512);
+        }
+
+        #[test]
+        fn aead(
+            key in any::<[u8; 32]>(),
+            nonce in any::<[u8; 12]>(),
+            aad in vec(any::<u8>(), 0..100),
+            msg in vec(any::<u8>(), 0..1100),
+            flip in any::<Option<Index>>(),
+        ) {
+            use aes_gcm::aead::{AeadInOut, KeyInit};
+
+            // Seals with the oracle, opens with rind, and the other way
+            // round, with one bit of the sealed message flipped for `flip`.
+            macro_rules! check {
+                ($ours:expr, $theirs:ty, $key:expr) => {{
+                    let theirs = <$theirs>::new_from_slice($key).unwrap();
+                    let mut sealed = msg.clone();
+                    let tag = theirs
+                        .encrypt_inout_detached(&nonce.into(), &aad, sealed.as_mut_slice().into())
+                        .unwrap();
+                    sealed.extend_from_slice(&tag);
+
+                    let ours = rind::aead::Key::new($ours, $key).unwrap();
+                    let mut mine = msg.clone();
+                    ours.seal_in_place_append_tag(
+                        rind::aead::Nonce::assume_unique_for_key(nonce),
+                        &aad,
+                        &mut mine,
+                    )
+                    .unwrap();
+                    prop_assert_eq!(&mine, &sealed);
+
+                    if let Some(flip) = flip {
+                        let bit = flip.index(sealed.len() * 8);
+                        sealed[bit / 8] ^= 1 << (bit % 8);
+                    }
+                    let opened = ours
+                        .open_in_place(rind::aead::Nonce::assume_unique_for_key(nonce), &aad, &mut sealed)
+                        .map(|plain| plain.to_vec());
+                    if flip.is_some() {
+                        prop_assert_eq!(opened, Err(rind::Error::DecryptFailed));
+                    } else {
+                        prop_assert_eq!(opened, Ok(msg.clone()));
+                    }
+                }};
+            }
+            check!(&rind::aead::AES_128_GCM, aes_gcm::Aes128Gcm, &key[..16]);
+            check!(&rind::aead::AES_256_GCM, aes_gcm::Aes256Gcm, &key[..]);
+            check!(&rind::aead::CHACHA20_POLY1305, chacha20poly1305::ChaCha20Poly1305, &key[..]);
+        }
+    }
+
+    // Each case generates a key, which is slow under emulation.
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(16))]
+
+        #[test]
+        fn ml_kem(seed in any::<[u8; 64]>(), m in any::<[u8; 32]>()) {
+            use ml_kem::{Decapsulate as _, KeyExport as _};
+
+            macro_rules! check {
+                ($ours:ty, $theirs:ident, $kem:ident) => {{
+                    // ml-kem's key, which rind encapsulates to and ml-kem
+                    // decapsulates for.
+                    let dk = ml_kem::$theirs::DecapsulationKey::from_seed(seed.into());
+                    let ek = dk.encapsulation_key();
+                    let (ciphertext, secret) =
+                        rind::kem::EncapsulationKey::<$ours>::new(&ek.to_bytes())
+                            .unwrap()
+                            .encapsulate()
+                            .unwrap();
+                    let ciphertext =
+                        ml_kem::Ciphertext::<ml_kem::$kem>::try_from(ciphertext.as_ref()).unwrap();
+                    prop_assert_eq!(secret.as_ref(), &dk.decapsulate(&ciphertext)[..]);
+
+                    // rind's key, which ml-kem encapsulates to and rind
+                    // decapsulates for.
+                    let ours = rind::kem::DecapsulationKey::<$ours>::generate().unwrap();
+                    let theirs = ml_kem::$theirs::EncapsulationKey::new(
+                        &ml_kem::Key::<ml_kem::$theirs::EncapsulationKey>::try_from(
+                            ours.public_key().as_ref(),
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap();
+                    let (ciphertext, secret) = theirs.encapsulate_deterministic(&m.into());
+                    let got = ours
+                        .decapsulate(&rind::kem::Ciphertext::<$ours>::new(ciphertext.as_ref()).unwrap());
+                    prop_assert_eq!(got.as_ref(), &secret[..]);
+                }};
+            }
+            check!(rind::kem::MlKem512, ml_kem_512, MlKem512);
+            check!(rind::kem::MlKem768, ml_kem_768, MlKem768);
+            check!(rind::kem::MlKem1024, ml_kem_1024, MlKem1024);
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(16))]
+
+        #[test]
+        fn ml_dsa(seed in any::<[u8; 32]>(), message in vec(any::<u8>(), 0..300), flip in any::<Option<Index>>()) {
+            use ml_dsa::{Keypair as _, KeyExport as _, Signer as _, Verifier as _};
+
+            macro_rules! check {
+                ($ours:ty, $theirs:ty) => {{
+                    let theirs = ml_dsa::SigningKey::<$theirs>::from_seed(&seed.into());
+                    let ours = rind::ml_dsa::KeyPair::<$ours>::from_seed(&seed).unwrap();
+                    let public = theirs.verifying_key();
+                    prop_assert_eq!(ours.public_key().as_ref(), &public.to_bytes()[..]);
+
+                    // Each verifies the other's signature, and refuses it
+                    // with one bit flipped.
+                    let mut signature = ours.sign(&message).unwrap().as_ref().to_vec();
+                    let theirs_signature = theirs.sign(&message).encode().to_vec();
+                    let verifier = rind::ml_dsa::PublicKey::<$ours>::new(&public.to_bytes()).unwrap();
+                    verifier.verify(&message, &theirs_signature).unwrap();
+                    if let Some(flip) = flip {
+                        let bit = flip.index(signature.len() * 8);
+                        signature[bit / 8] ^= 1 << (bit % 8);
+                    }
+                    let accepted = ml_dsa::Signature::<$theirs>::decode(&signature.as_slice().try_into().unwrap())
+                        .is_some_and(|signature| public.verify(&message, &signature).is_ok());
+                    prop_assert_eq!(accepted, flip.is_none());
+                }};
+            }
+            check!(rind::ml_dsa::MlDsa44, ml_dsa::MlDsa44);
+            check!(rind::ml_dsa::MlDsa65, ml_dsa::MlDsa65);
+            check!(rind::ml_dsa::MlDsa87, ml_dsa::MlDsa87);
+        }
+    }
+
+    // dalek on the tiers where rind runs s2n-bignum; armv7 and the portable
+    // backend run dalek, which would check it against itself.
+    #[cfg(all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_endian = "little",
+        not(rind_portable)
+    ))]
+    proptest! {
+        #[test]
+        fn ed25519_x25519(
+            seed in any::<[u8; 32]>(),
+            peer in any::<[u8; 32]>(),
+            message in vec(any::<u8>(), 0..300),
+            flip in any::<Option<Index>>(),
+        ) {
+            use ed25519_dalek::Signer as _;
+
+            let theirs = ed25519_dalek::SigningKey::from_bytes(&seed);
+            let ours = rind::ed25519::KeyPair::from_seed(&seed).unwrap();
+            let (ours_public, theirs_public) = (ours.public_key(), theirs.verifying_key());
+            prop_assert_eq!(ours_public.as_ref(), theirs_public.as_bytes());
+            let signature = theirs.sign(&message);
+            let ours_signature = ours.sign(&message);
+            prop_assert_eq!(ours_signature.as_ref(), &signature.to_bytes()[..]);
+            let mut signature = signature.to_bytes();
+            if let Some(flip) = flip {
+                let bit = flip.index(signature.len() * 8);
+                signature[bit / 8] ^= 1 << (bit % 8);
+            }
+            prop_assert_eq!(
+                rind::ed25519::PublicKey::new(theirs.verifying_key().as_bytes())
+                    .unwrap()
+                    .verify(&message, &signature)
+                    .is_ok(),
+                flip.is_none()
+            );
+
+            // Any 32 bytes is a private key and a peer's u-coordinate; both
+            // refuse a low-order peer's all-zero secret.
+            let secret = x25519_dalek::StaticSecret::from(seed);
+            let public = x25519_dalek::PublicKey::from(&secret);
+            let ours = rind::agreement::PrivateKey::from_scalar(&rind::agreement::X25519, &seed).unwrap();
+            prop_assert_eq!(ours.public_key().as_ref(), public.as_bytes());
+            let shared = secret.diffie_hellman(&x25519_dalek::PublicKey::from(peer));
+            match ours.agree(&peer) {
+                Ok(got) => {
+                    prop_assert!(shared.was_contributory());
+                    prop_assert_eq!(got.as_ref(), shared.as_bytes());
+                }
+                Err(_) => prop_assert!(!shared.was_contributory()),
+            }
+        }
+    }
+}
