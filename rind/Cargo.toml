@@ -79,15 +79,16 @@ chacha20poly1305 = { version = "0.11", default-features = false, features = ["al
 hmac = { version = "0.13", default-features = false }
 ml-dsa = { version = "0.1", default-features = false }
 ml-kem = { version = "0.3", default-features = false, features = ["hazmat"] }
+# The independent oracles' big integers: RFC 9380's hash to curve
+# (`test::h2c`), RSA's raw modular exponentiation, and the curve oracle's
+# schoolbook affine arithmetic.
+num-bigint = "0.5"
 sha2 = { version = "0.11", default-features = false }
 sha3 = { version = "0.12", default-features = false }
 # Ed25519 and X25519 on the tiers where rind runs s2n-bignum; armv7 and the
 # portable backend run dalek, so the test leaves them out.
 ed25519-dalek = { version = "3", default-features = false }
 x25519-dalek = { version = "3", default-features = false, features = ["static_secrets"] }
-# RSA, with `num-bigint`'s raw modular exponentiation beside it.
-num-bigint = "0.4"
-rsa = { version = "0.10", default-features = false, features = ["encoding", "pkcs1v15", "std"] }
 # aws-lc's XChaCha20-Poly1305, which aws-lc-rs does not expose.
 aws-lc-sys = { version = "0.47", default-features = false }
 # HPKE, which aws-lc-rs does not expose either; `hazmat` reads its private keys.
@@ -99,6 +100,9 @@ pakery-spake2plus = { version = "0.6.2", default-features = false, features = ["
 matter-crypto = { version = "0.5.1", default-features = false, features = ["test-support"] }
 # RSA blind signatures, which aws-lc-rs does not offer.
 blind-rsa-signatures = { version = "0.18", default-features = false }
+# RustCrypto's RSA, the independent oracle for RSA; `num-bigint` does the
+# raw modular exponentiation beside it.
+rsa = { version = "0.10", default-features = false, features = ["encoding", "pkcs1v15", "std"] }
 # ECVRF, which aws-lc-rs does not offer: key transparency's `akd` for
 # Edwards25519, and `vrf-rfc9381` for P-256.
 akd_core = { version = "0.13", default-features = false, features = ["vrf"] }

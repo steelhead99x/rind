@@ -4642,7 +4642,7 @@ dependencies = [
  "matter-crypto",
  "ml-dsa",
  "ml-kem",
- "num-bigint 0.4.8",
+ "num-bigint 0.5.1",
  "p256 0.13.2",
  "p256 0.14.0",
  "p384 0.13.1",

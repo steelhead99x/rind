@@ -3703,6 +3703,399 @@ mod independent {
     use proptest::prelude::*;
     use proptest::sample::Index;
 
+    /// RSA against the `rsa` crate, whose arithmetic is crypto-bigint's, and
+    /// against `num-bigint`'s raw modular exponentiation, which the test
+    /// pairs with RFC 8017's encodings written out here. aws-lc-rs runs the
+    /// same s2n-bignum and RSAZ routines rind runs on x86_64 and aarch64, so
+    /// neither shares code with the path rind takes. The keys have moduli
+    /// that are not a whole number of words or bytes, and a 33-bit public
+    /// exponent, beside 2048 and 3072 bits, as `rsa` tests.
+    mod rsa_oracle {
+        use std::convert::Infallible;
+        use std::sync::LazyLock;
+
+        use ::rsa::pkcs8::DecodePrivateKey;
+        use ::rsa::rand_core::{TryCryptoRng, TryRng};
+        use ::rsa::sha2::{Digest, Sha256, Sha384, Sha512};
+        use ::rsa::traits::{PrivateKeyParts, PublicKeyParts};
+        use ::rsa::{Oaep, Pkcs1v15Sign, Pss};
+        use num_bigint::BigUint;
+        use proptest::collection::vec;
+        use proptest::prelude::*;
+        use rind::Error;
+        use rind::rsa::{
+            DecryptingKey, KeyPair, PssSaltLength, SigningAlgorithm, VerificationAlgorithm, sign,
+            verify,
+        };
+
+        const DERS: [&[u8]; 6] = [
+            include_bytes!("../src/high/rsa/rsa2048.pkcs8.der"),
+            include_bytes!("../src/high/rsa/rsa2049.pkcs8.der"),
+            include_bytes!("../src/high/rsa/rsa2050.pkcs8.der"),
+            include_bytes!("../src/high/rsa/rsa2056.pkcs8.der"),
+            include_bytes!("../src/high/rsa/rsa2048-e33.pkcs8.der"),
+            include_bytes!("../src/high/rsa/rsa3072.pkcs8.der"),
+        ];
+
+        /// A deterministic generator for the oracle's salts, blinding, and
+        /// OAEP seeds, so a failing case replays.
+        struct Drbg {
+            seed: [u8; 32],
+            counter: u64,
+        }
+
+        impl TryRng for Drbg {
+            type Error = Infallible;
+
+            fn try_next_u32(&mut self) -> Result<u32, Infallible> {
+                let mut bytes = [0; 4];
+                self.try_fill_bytes(&mut bytes)?;
+                Ok(u32::from_le_bytes(bytes))
+            }
+
+            fn try_next_u64(&mut self) -> Result<u64, Infallible> {
+                let mut bytes = [0; 8];
+                self.try_fill_bytes(&mut bytes)?;
+                Ok(u64::from_le_bytes(bytes))
+            }
+
+            fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Infallible> {
+                for chunk in dst.chunks_mut(32) {
+                    let block = Sha256::new_with_prefix(self.seed)
+                        .chain_update(self.counter.to_be_bytes())
+                        .finalize();
+                    self.counter += 1;
+                    chunk.copy_from_slice(&block[..chunk.len()]);
+                }
+                Ok(())
+            }
+        }
+
+        impl TryCryptoRng for Drbg {}
+
+        fn drbg(seed: [u8; 32]) -> Drbg {
+            Drbg { seed, counter: 0 }
+        }
+
+        struct Key {
+            der: &'static [u8],
+            theirs: ::rsa::PrivateKey,
+            ours: KeyPair,
+            n: BigUint,
+            e: BigUint,
+            d: BigUint,
+            bits: usize,
+            /// The modulus's length in bytes.
+            len: usize,
+        }
+
+        static KEYS: LazyLock<Vec<Key>> = LazyLock::new(|| {
+            DERS.iter()
+                .map(|der| {
+                    let theirs = ::rsa::PrivateKey::from_pkcs8_der(der).unwrap();
+                    let n = BigUint::from_bytes_be(&theirs.n_bytes());
+                    let bits = usize::try_from(n.bits()).unwrap();
+                    Key {
+                        der,
+                        ours: KeyPair::from_pkcs8(der).unwrap(),
+                        e: BigUint::from_bytes_be(&theirs.e_bytes()),
+                        d: BigUint::from_bytes_be(&theirs.d().to_be_bytes_trimmed_vartime()),
+                        n,
+                        bits,
+                        len: bits.div_ceil(8),
+                        theirs,
+                    }
+                })
+                .collect()
+        });
+
+        impl Key {
+            /// `x^exp mod n`, as `len` big-endian bytes.
+            fn raw(&self, x: &[u8], exp: &BigUint) -> Vec<u8> {
+                let out = BigUint::from_bytes_be(x).modpow(exp, &self.n).to_bytes_be();
+                let mut padded = vec![0; self.len - out.len()];
+                padded.extend(out);
+                padded
+            }
+        }
+
+        fn hash<D: Digest>(parts: &[&[u8]]) -> Vec<u8> {
+            let mut digest = D::new();
+            for part in parts {
+                digest.update(part);
+            }
+            digest.finalize().to_vec()
+        }
+
+        type Hash = fn(&[&[u8]]) -> Vec<u8>;
+
+        /// RFC 8017 appendix B.2.1's MGF1.
+        fn mgf1(hash: Hash, seed: &[u8], len: usize) -> Vec<u8> {
+            let mut out = Vec::new();
+            for counter in 0u32.. {
+                if out.len() >= len {
+                    break;
+                }
+                out.extend(hash(&[seed, &counter.to_be_bytes()]));
+            }
+            out.truncate(len);
+            out
+        }
+
+        fn xor(a: &[u8], b: &[u8]) -> Vec<u8> {
+            assert_eq!(a.len(), b.len());
+            a.iter().zip(b).map(|(a, b)| a ^ b).collect()
+        }
+
+        /// RFC 8017 section 9.1.2: the signature's salt length if `sig`
+        /// is a valid EMSA-PSS signature of `message`, decoded from `s^e mod n`.
+        fn pss_salt_len(key: &Key, hash: Hash, message: &[u8], sig: &[u8]) -> Option<usize> {
+            let (em_bits, h_len) = (key.bits - 1, hash(&[]).len());
+            let em_len = em_bits.div_ceil(8);
+            let em = key.raw(sig, &key.e);
+            let (zero, em) = em.split_at(key.len - em_len);
+            if zero.iter().any(|&b| b != 0) || em_len < h_len + 2 || em[em_len - 1] != 0xbc {
+                return None;
+            }
+            let (masked, rest) = em.split_at(em_len - h_len - 1);
+            let h = &rest[..h_len];
+            let top = 0xffu8 >> (8 * em_len - em_bits);
+            if masked[0] & !top != 0 {
+                return None;
+            }
+            let mut db = xor(masked, &mgf1(hash, h, masked.len()));
+            db[0] &= top;
+            let at = db.iter().position(|&b| b != 0)?;
+            if db[at] != 1 {
+                return None;
+            }
+            let salt = &db[at + 1..];
+            let m_hash = hash(&[message]);
+            (hash(&[&[0; 8], &m_hash, salt]) == h).then_some(salt.len())
+        }
+
+        /// RFC 8017 section 7.1.2: the message of a valid EME-OAEP block,
+        /// decoded from `c^d mod n`.
+        fn oaep_message(key: &Key, hash: Hash, label: &[u8], ciphertext: &[u8]) -> Option<Vec<u8>> {
+            let h_len = hash(&[]).len();
+            let em = key.raw(ciphertext, &key.d);
+            if em[0] != 0 {
+                return None;
+            }
+            let (masked_seed, masked_db) = em[1..].split_at(h_len);
+            let seed = xor(masked_seed, &mgf1(hash, masked_db, h_len));
+            let db = xor(masked_db, &mgf1(hash, &seed, masked_db.len()));
+            let (l_hash, db) = db.split_at(h_len);
+            if l_hash != hash(&[label]) {
+                return None;
+            }
+            let at = db.iter().position(|&b| b != 0)?;
+            (db[at] == 1).then(|| db[at + 1..].to_vec())
+        }
+
+        // The big integers under `rsa` and `num-bigint` build optimised in
+        // every profile (the workspace's `profile.dev.package`), so these run
+        // in a debug test build too, in seconds.
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(4))]
+
+            /// PKCS#1 v1.5 signatures are the same bytes, and PSS ones
+            /// verify both ways, each with the encoding checked by hand
+            /// over `num-bigint`.
+            #[test]
+            fn sign_verify(
+                message in vec(any::<u8>(), 0..300),
+                seed in any::<[u8; 32]>(),
+                salt in any::<u16>(),
+            ) {
+                macro_rules! check {
+                    ($d:ty, $prefix:expr, $pkcs1:expr, $pkcs1_verify:expr, $pss:ident, $pss_verify:ident, $any_salt:ident) => {{
+                        let hash = hash::<$d> as Hash;
+                        let digest = hash(&[&message]);
+                        for key in KEYS.iter() {
+                            let mut rng = drbg(seed);
+                            let public = key.theirs.as_public_key();
+                            let ours_public = key.ours.public_key();
+
+                            // PKCS#1 v1.5: no randomness, so the bytes match.
+                            let ours = key.ours.sign($pkcs1, &message).unwrap();
+                            let theirs = key
+                                .theirs
+                                .sign_with_rng(&mut rng, Pkcs1v15Sign::new::<$d>(), &digest)
+                                .unwrap();
+                            prop_assert_eq!(ours.as_ref(), &theirs[..]);
+                            let mut t = $prefix.to_vec();
+                            t.extend(&digest);
+                            let mut em = vec![0, 1];
+                            em.resize(key.len - t.len() - 1, 0xff);
+                            em.push(0);
+                            em.extend(&t);
+                            prop_assert_eq!(key.raw(ours.as_ref(), &key.e), em.clone());
+                            prop_assert_eq!(key.raw(&em, &key.d), ours.as_ref());
+                            public.verify(Pkcs1v15Sign::new::<$d>(), &digest, ours.as_ref()).unwrap();
+                            ours_public.verify($pkcs1_verify, &message, &theirs).unwrap();
+                            prop_assert_eq!(
+                                ours_public.verify($pkcs1_verify, &[&message[..], b"!"].concat(), &theirs),
+                                Err(Error::BadSignature)
+                            );
+
+                            // PSS, with the digest's length as the salt, and
+                            // with another length, up to RFC 8017's longest.
+                            let h_len = digest.len();
+                            let max = (key.bits - 1).div_ceil(8) - h_len - 2;
+                            for salt_len in [h_len, usize::from(salt) % (max + 1)] {
+                                let custom = PssSaltLength::Custom(u16::try_from(salt_len).unwrap());
+                                let ours = key.ours.sign(&SigningAlgorithm::$pss(custom), &message).unwrap();
+                                prop_assert_eq!(pss_salt_len(key, hash, &message, ours.as_ref()), Some(salt_len));
+                                public
+                                    .verify(Pss::<$d>::new_with_salt(salt_len), &digest, ours.as_ref())
+                                    .unwrap();
+                                let theirs = key
+                                    .theirs
+                                    .sign_with_rng(&mut rng, Pss::<$d>::new_with_salt(salt_len), &digest)
+                                    .unwrap();
+                                prop_assert_eq!(pss_salt_len(key, hash, &message, &theirs), Some(salt_len));
+                                ours_public
+                                    .verify(&VerificationAlgorithm::$pss_verify(custom), &message, &theirs)
+                                    .unwrap();
+                                // The verifier that recovers the salt length from the
+                                // block takes both sides' signatures, and refuses a
+                                // changed message.
+                                ours_public.verify(&verify::$any_salt, &message, &theirs).unwrap();
+                                ours_public.verify(&verify::$any_salt, &message, ours.as_ref()).unwrap();
+                                prop_assert_eq!(
+                                    ours_public.verify(&verify::$any_salt, &[&message[..], b"!"].concat(), &theirs),
+                                    Err(Error::BadSignature)
+                                );
+                                prop_assert_eq!(
+                                    ours_public.verify(
+                                        &VerificationAlgorithm::$pss_verify(custom),
+                                        &[&message[..], b"!"].concat(),
+                                        &theirs,
+                                    ),
+                                    Err(Error::BadSignature)
+                                );
+                            }
+                        }
+                    }};
+                }
+                check!(
+                    Sha256,
+                    [0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20],
+                    &sign::PKCS1_SHA256, &verify::PKCS1_SHA256, pss_sha256, pss_sha256, PSS_SHA256_ANY_SALT
+                );
+                check!(
+                    Sha384,
+                    [0x30, 0x41, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05, 0x00, 0x04, 0x30],
+                    &sign::PKCS1_SHA384, &verify::PKCS1_SHA384, pss_sha384, pss_sha384, PSS_SHA384_ANY_SALT
+                );
+                check!(
+                    Sha512,
+                    [0x30, 0x51, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05, 0x00, 0x04, 0x40],
+                    &sign::PKCS1_SHA512, &verify::PKCS1_SHA512, pss_sha512, pss_sha512, PSS_SHA512_ANY_SALT
+                );
+            }
+
+            /// Each decrypts what the other encrypts, and the private
+            /// operation's block decodes by hand over `num-bigint`.
+            #[test]
+            fn oaep(
+                message in vec(any::<u8>(), 0..200),
+                label in vec(any::<u8>(), 0..40),
+                seed in any::<[u8; 32]>(),
+                flip in any::<prop::sample::Index>(),
+            ) {
+                macro_rules! check {
+                    ($d:ty, $algorithm:expr) => {{
+                        let hash = hash::<$d> as Hash;
+                        for key in KEYS.iter() {
+                            let mut rng = drbg(seed);
+                            let ours = DecryptingKey::from_pkcs8($algorithm, key.der).unwrap();
+                            let public = ours.public_key();
+                            let message = &message[..message.len().min(public.max_message_len())];
+                            let padding = || Oaep::<$d>::new_with_label(label.clone());
+
+                            let ciphertext = public.encrypt(message, &label).unwrap();
+                            let ciphertext = ciphertext.as_ref();
+                            prop_assert_eq!(oaep_message(key, hash, &label, ciphertext), Some(message.to_vec()));
+                            prop_assert_eq!(
+                                key.theirs.decrypt_blinded(&mut rng, padding(), ciphertext).unwrap(),
+                                message
+                            );
+
+                            let theirs = key.theirs.as_public_key().encrypt(&mut rng, padding(), message).unwrap();
+                            prop_assert_eq!(oaep_message(key, hash, &label, &theirs), Some(message.to_vec()));
+                            let decrypted = ours.decrypt(&theirs, &label).unwrap();
+                            prop_assert_eq!(decrypted.as_ref(), message);
+
+                            // Both refuse a tampered ciphertext, and one
+                            // under another label.
+                            let mut tampered = theirs.clone();
+                            let bit = flip.index(tampered.len() * 8);
+                            tampered[bit / 8] ^= 1 << (bit % 8);
+                            prop_assert!(key.theirs.decrypt_blinded(&mut rng, padding(), &tampered).is_err());
+                            prop_assert_eq!(ours.decrypt(&tampered, &label).err(), Some(Error::DecryptFailed));
+                            let other = [&label[..], b"!"].concat();
+                            prop_assert!(
+                                key.theirs
+                                    .decrypt_blinded(&mut rng, Oaep::<$d>::new_with_label(other.clone()), &theirs)
+                                    .is_err()
+                            );
+                            prop_assert_eq!(ours.decrypt(&theirs, &other).err(), Some(Error::DecryptFailed));
+                        }
+                    }};
+                }
+                check!(Sha256, &rind::rsa::OAEP_SHA256);
+                check!(Sha384, &rind::rsa::OAEP_SHA384);
+                check!(Sha512, &rind::rsa::OAEP_SHA512);
+            }
+        }
+
+        /// A key rind generates loads into `rsa`, which validates it, and
+        /// its factors, exponents, and signatures check out over `num-bigint`.
+        #[test]
+        fn generated_key() {
+            let ours = KeyPair::generate(rind::rsa::KeySize::Rsa2048).unwrap();
+            let theirs = ::rsa::PrivateKey::from_pkcs8_der(ours.to_pkcs8().as_ref()).unwrap();
+            theirs.validate().unwrap();
+            assert_eq!(theirs.n_bytes().len(), 256);
+            let big = |bytes: &[u8]| BigUint::from_bytes_be(bytes);
+            let (n, e, d) = (
+                big(&theirs.n_bytes()),
+                big(&theirs.e_bytes()),
+                big(&theirs.d().to_be_bytes_trimmed_vartime()),
+            );
+            let primes: Vec<BigUint> = theirs
+                .primes()
+                .iter()
+                .map(|p| big(&p.as_ref().to_be_bytes_trimmed_vartime()))
+                .collect();
+            assert_eq!(primes.len(), 2);
+            assert_eq!(&primes[0] * &primes[1], n);
+            assert_eq!(n.bits(), 2048);
+            for p in &primes {
+                assert_eq!((&d * &e) % (p - 1u32), BigUint::from(1u32));
+            }
+
+            let signature = ours.sign(&sign::PKCS1_SHA256, b"hello").unwrap();
+            let digest = hash::<Sha256>(&[b"hello"]);
+            theirs
+                .as_public_key()
+                .verify(Pkcs1v15Sign::new::<Sha256>(), &digest, signature.as_ref())
+                .unwrap();
+            let theirs_signature = theirs
+                .sign_with_rng(&mut drbg([7; 32]), Pkcs1v15Sign::new::<Sha256>(), &digest)
+                .unwrap();
+            assert_eq!(signature.as_ref(), &theirs_signature[..]);
+            assert_eq!(
+                BigUint::from_bytes_be(signature.as_ref())
+                    .modpow(&e, &n)
+                    .to_bytes_be()[0],
+                1
+            );
+        }
+    }
+
     proptest! {
         #[test]
         fn sha2_sha3_hmac(
@@ -3927,393 +4320,6 @@ mod independent {
                 }
                 Err(_) => prop_assert!(!shared.was_contributory()),
             }
-        }
-    }
-
-    /// RSA against the `rsa` crate, whose arithmetic is crypto-bigint's, and
-    /// against `num-bigint`'s raw modular exponentiation, which the test
-    /// pairs with RFC 8017's encodings written out here. aws-lc-rs runs the
-    /// same s2n-bignum and RSAZ routines rind runs on x86_64 and aarch64, so
-    /// neither shares code with the path rind takes. The keys have moduli
-    /// that are not a whole number of words or bytes, and a 33-bit public
-    /// exponent, beside 2048 and 3072 bits, as `rsa` tests.
-    mod rsa_oracle {
-        use std::convert::Infallible;
-        use std::sync::LazyLock;
-
-        use ::rsa::pkcs8::DecodePrivateKey;
-        use ::rsa::rand_core::{TryCryptoRng, TryRng};
-        use ::rsa::sha2::{Digest, Sha256, Sha384, Sha512};
-        use ::rsa::traits::{PrivateKeyParts, PublicKeyParts};
-        use ::rsa::{Oaep, Pkcs1v15Sign, Pss};
-        use num_bigint::BigUint;
-        use proptest::collection::vec;
-        use proptest::prelude::*;
-        use rind::Error;
-        use rind::rsa::{
-            DecryptingKey, KeyPair, PssSaltLength, SigningAlgorithm, VerificationAlgorithm, sign,
-            verify,
-        };
-
-        const DERS: [&[u8]; 6] = [
-            include_bytes!("../src/high/rsa/rsa2048.pkcs8.der"),
-            include_bytes!("../src/high/rsa/rsa2049.pkcs8.der"),
-            include_bytes!("../src/high/rsa/rsa2050.pkcs8.der"),
-            include_bytes!("../src/high/rsa/rsa2056.pkcs8.der"),
-            include_bytes!("../src/high/rsa/rsa2048-e33.pkcs8.der"),
-            include_bytes!("../src/high/rsa/rsa3072.pkcs8.der"),
-        ];
-
-        /// A deterministic generator for the oracle's salts, blinding, and
-        /// OAEP seeds, so a failing case replays.
-        struct Drbg {
-            seed: [u8; 32],
-            counter: u64,
-        }
-
-        impl TryRng for Drbg {
-            type Error = Infallible;
-
-            fn try_next_u32(&mut self) -> Result<u32, Infallible> {
-                let mut bytes = [0; 4];
-                self.try_fill_bytes(&mut bytes)?;
-                Ok(u32::from_le_bytes(bytes))
-            }
-
-            fn try_next_u64(&mut self) -> Result<u64, Infallible> {
-                let mut bytes = [0; 8];
-                self.try_fill_bytes(&mut bytes)?;
-                Ok(u64::from_le_bytes(bytes))
-            }
-
-            fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Infallible> {
-                for chunk in dst.chunks_mut(32) {
-                    let block = Sha256::new_with_prefix(self.seed)
-                        .chain_update(self.counter.to_be_bytes())
-                        .finalize();
-                    self.counter += 1;
-                    chunk.copy_from_slice(&block[..chunk.len()]);
-                }
-                Ok(())
-            }
-        }
-
-        impl TryCryptoRng for Drbg {}
-
-        fn drbg(seed: [u8; 32]) -> Drbg {
-            Drbg { seed, counter: 0 }
-        }
-
-        struct Key {
-            der: &'static [u8],
-            theirs: ::rsa::PrivateKey,
-            ours: KeyPair,
-            n: BigUint,
-            e: BigUint,
-            d: BigUint,
-            bits: usize,
-            /// The modulus's length in bytes.
-            len: usize,
-        }
-
-        static KEYS: LazyLock<Vec<Key>> = LazyLock::new(|| {
-            DERS.iter()
-                .map(|der| {
-                    let theirs = ::rsa::PrivateKey::from_pkcs8_der(der).unwrap();
-                    let n = BigUint::from_bytes_be(&theirs.n_bytes());
-                    let bits = usize::try_from(n.bits()).unwrap();
-                    Key {
-                        der,
-                        ours: KeyPair::from_pkcs8(der).unwrap(),
-                        e: BigUint::from_bytes_be(&theirs.e_bytes()),
-                        d: BigUint::from_bytes_be(&theirs.d().to_be_bytes_trimmed_vartime()),
-                        n,
-                        bits,
-                        len: bits.div_ceil(8),
-                        theirs,
-                    }
-                })
-                .collect()
-        });
-
-        impl Key {
-            /// `x^exp mod n`, as `len` big-endian bytes.
-            fn raw(&self, x: &[u8], exp: &BigUint) -> Vec<u8> {
-                let out = BigUint::from_bytes_be(x).modpow(exp, &self.n).to_bytes_be();
-                let mut padded = vec![0; self.len - out.len()];
-                padded.extend(out);
-                padded
-            }
-        }
-
-        fn hash<D: Digest>(parts: &[&[u8]]) -> Vec<u8> {
-            let mut digest = D::new();
-            for part in parts {
-                digest.update(part);
-            }
-            digest.finalize().to_vec()
-        }
-
-        type Hash = fn(&[&[u8]]) -> Vec<u8>;
-
-        /// RFC 8017 appendix B.2.1's MGF1.
-        fn mgf1(hash: Hash, seed: &[u8], len: usize) -> Vec<u8> {
-            let mut out = Vec::new();
-            for counter in 0u32.. {
-                if out.len() >= len {
-                    break;
-                }
-                out.extend(hash(&[seed, &counter.to_be_bytes()]));
-            }
-            out.truncate(len);
-            out
-        }
-
-        fn xor(a: &[u8], b: &[u8]) -> Vec<u8> {
-            assert_eq!(a.len(), b.len());
-            a.iter().zip(b).map(|(a, b)| a ^ b).collect()
-        }
-
-        /// RFC 8017 section 9.1.2: the signature's salt length if `sig`
-        /// is a valid EMSA-PSS signature of `message`, decoded from `s^e mod n`.
-        fn pss_salt_len(key: &Key, hash: Hash, message: &[u8], sig: &[u8]) -> Option<usize> {
-            let (em_bits, h_len) = (key.bits - 1, hash(&[]).len());
-            let em_len = em_bits.div_ceil(8);
-            let em = key.raw(sig, &key.e);
-            let (zero, em) = em.split_at(key.len - em_len);
-            if zero.iter().any(|&b| b != 0) || em_len < h_len + 2 || em[em_len - 1] != 0xbc {
-                return None;
-            }
-            let (masked, rest) = em.split_at(em_len - h_len - 1);
-            let h = &rest[..h_len];
-            let top = 0xffu8 >> (8 * em_len - em_bits);
-            if masked[0] & !top != 0 {
-                return None;
-            }
-            let mut db = xor(masked, &mgf1(hash, h, masked.len()));
-            db[0] &= top;
-            let at = db.iter().position(|&b| b != 0)?;
-            if db[at] != 1 {
-                return None;
-            }
-            let salt = &db[at + 1..];
-            let m_hash = hash(&[message]);
-            (hash(&[&[0; 8], &m_hash, salt]) == h).then_some(salt.len())
-        }
-
-        /// RFC 8017 section 7.1.2: the message of a valid EME-OAEP block,
-        /// decoded from `c^d mod n`.
-        fn oaep_message(key: &Key, hash: Hash, label: &[u8], ciphertext: &[u8]) -> Option<Vec<u8>> {
-            let h_len = hash(&[]).len();
-            let em = key.raw(ciphertext, &key.d);
-            if em[0] != 0 {
-                return None;
-            }
-            let (masked_seed, masked_db) = em[1..].split_at(h_len);
-            let seed = xor(masked_seed, &mgf1(hash, masked_db, h_len));
-            let db = xor(masked_db, &mgf1(hash, &seed, masked_db.len()));
-            let (l_hash, db) = db.split_at(h_len);
-            if l_hash != hash(&[label]) {
-                return None;
-            }
-            let at = db.iter().position(|&b| b != 0)?;
-            (db[at] == 1).then(|| db[at + 1..].to_vec())
-        }
-
-        // `rsa` is generic, so it compiles into this test at the test's own
-        // optimisation level, and unoptimised its private operations take
-        // seconds each. The release run, which every tier makes, takes these.
-        proptest! {
-            #![proptest_config(ProptestConfig::with_cases(4))]
-
-            /// PKCS#1 v1.5 signatures are the same bytes, and PSS ones
-            /// verify both ways, each with the encoding checked by hand
-            /// over `num-bigint`.
-            #[test]
-            #[cfg_attr(debug_assertions, ignore = "RustCrypto's RSA is slow unoptimised")]
-            fn sign_verify(
-                message in vec(any::<u8>(), 0..300),
-                seed in any::<[u8; 32]>(),
-                salt in any::<u16>(),
-            ) {
-                macro_rules! check {
-                    ($d:ty, $prefix:expr, $pkcs1:expr, $pkcs1_verify:expr, $pss:ident, $pss_verify:ident) => {{
-                        let hash = hash::<$d> as Hash;
-                        let digest = hash(&[&message]);
-                        for key in KEYS.iter() {
-                            let mut rng = drbg(seed);
-                            let public = key.theirs.as_public_key();
-                            let ours_public = key.ours.public_key();
-
-                            // PKCS#1 v1.5: no randomness, so the bytes match.
-                            let ours = key.ours.sign($pkcs1, &message).unwrap();
-                            let theirs = key
-                                .theirs
-                                .sign_with_rng(&mut rng, Pkcs1v15Sign::new::<$d>(), &digest)
-                                .unwrap();
-                            prop_assert_eq!(ours.as_ref(), &theirs[..]);
-                            let mut t = $prefix.to_vec();
-                            t.extend(&digest);
-                            let mut em = vec![0, 1];
-                            em.resize(key.len - t.len() - 1, 0xff);
-                            em.push(0);
-                            em.extend(&t);
-                            prop_assert_eq!(key.raw(ours.as_ref(), &key.e), em.clone());
-                            prop_assert_eq!(key.raw(&em, &key.d), ours.as_ref());
-                            public.verify(Pkcs1v15Sign::new::<$d>(), &digest, ours.as_ref()).unwrap();
-                            ours_public.verify($pkcs1_verify, &message, &theirs).unwrap();
-                            prop_assert_eq!(
-                                ours_public.verify($pkcs1_verify, &[&message[..], b"!"].concat(), &theirs),
-                                Err(Error::BadSignature)
-                            );
-
-                            // PSS, with the digest's length as the salt, and
-                            // with another length, up to RFC 8017's longest.
-                            let h_len = digest.len();
-                            let max = (key.bits - 1).div_ceil(8) - h_len - 2;
-                            for salt_len in [h_len, usize::from(salt) % (max + 1)] {
-                                let custom = PssSaltLength::Custom(u16::try_from(salt_len).unwrap());
-                                let ours = key.ours.sign(&SigningAlgorithm::$pss(custom), &message).unwrap();
-                                prop_assert_eq!(pss_salt_len(key, hash, &message, ours.as_ref()), Some(salt_len));
-                                public
-                                    .verify(Pss::<$d>::new_with_salt(salt_len), &digest, ours.as_ref())
-                                    .unwrap();
-                                let theirs = key
-                                    .theirs
-                                    .sign_with_rng(&mut rng, Pss::<$d>::new_with_salt(salt_len), &digest)
-                                    .unwrap();
-                                prop_assert_eq!(pss_salt_len(key, hash, &message, &theirs), Some(salt_len));
-                                ours_public
-                                    .verify(&VerificationAlgorithm::$pss_verify(custom), &message, &theirs)
-                                    .unwrap();
-                                prop_assert_eq!(
-                                    ours_public.verify(
-                                        &VerificationAlgorithm::$pss_verify(custom),
-                                        &[&message[..], b"!"].concat(),
-                                        &theirs,
-                                    ),
-                                    Err(Error::BadSignature)
-                                );
-                            }
-                        }
-                    }};
-                }
-                check!(
-                    Sha256,
-                    [0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20],
-                    &sign::PKCS1_SHA256, &verify::PKCS1_SHA256, pss_sha256, pss_sha256
-                );
-                check!(
-                    Sha384,
-                    [0x30, 0x41, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05, 0x00, 0x04, 0x30],
-                    &sign::PKCS1_SHA384, &verify::PKCS1_SHA384, pss_sha384, pss_sha384
-                );
-                check!(
-                    Sha512,
-                    [0x30, 0x51, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05, 0x00, 0x04, 0x40],
-                    &sign::PKCS1_SHA512, &verify::PKCS1_SHA512, pss_sha512, pss_sha512
-                );
-            }
-
-            /// Each decrypts what the other encrypts, and the private
-            /// operation's block decodes by hand over `num-bigint`.
-            #[test]
-            #[cfg_attr(debug_assertions, ignore = "RustCrypto's RSA is slow unoptimised")]
-            fn oaep(
-                message in vec(any::<u8>(), 0..200),
-                label in vec(any::<u8>(), 0..40),
-                seed in any::<[u8; 32]>(),
-                flip in any::<prop::sample::Index>(),
-            ) {
-                macro_rules! check {
-                    ($d:ty, $algorithm:expr) => {{
-                        let hash = hash::<$d> as Hash;
-                        for key in KEYS.iter() {
-                            let mut rng = drbg(seed);
-                            let ours = DecryptingKey::from_pkcs8($algorithm, key.der).unwrap();
-                            let public = ours.public_key();
-                            let message = &message[..message.len().min(public.max_message_len())];
-                            let padding = || Oaep::<$d>::new_with_label(label.clone());
-
-                            let ciphertext = public.encrypt(message, &label).unwrap();
-                            let ciphertext = ciphertext.as_ref();
-                            prop_assert_eq!(oaep_message(key, hash, &label, ciphertext), Some(message.to_vec()));
-                            prop_assert_eq!(
-                                key.theirs.decrypt_blinded(&mut rng, padding(), ciphertext).unwrap(),
-                                message
-                            );
-
-                            let theirs = key.theirs.as_public_key().encrypt(&mut rng, padding(), message).unwrap();
-                            prop_assert_eq!(oaep_message(key, hash, &label, &theirs), Some(message.to_vec()));
-                            let decrypted = ours.decrypt(&theirs, &label).unwrap();
-                            prop_assert_eq!(decrypted.as_ref(), message);
-
-                            // Both refuse a tampered ciphertext, and one
-                            // under another label.
-                            let mut tampered = theirs.clone();
-                            let bit = flip.index(tampered.len() * 8);
-                            tampered[bit / 8] ^= 1 << (bit % 8);
-                            prop_assert!(key.theirs.decrypt_blinded(&mut rng, padding(), &tampered).is_err());
-                            prop_assert_eq!(ours.decrypt(&tampered, &label).err(), Some(Error::DecryptFailed));
-                            let other = [&label[..], b"!"].concat();
-                            prop_assert!(
-                                key.theirs
-                                    .decrypt_blinded(&mut rng, Oaep::<$d>::new_with_label(other.clone()), &theirs)
-                                    .is_err()
-                            );
-                            prop_assert_eq!(ours.decrypt(&theirs, &other).err(), Some(Error::DecryptFailed));
-                        }
-                    }};
-                }
-                check!(Sha256, &rind::rsa::OAEP_SHA256);
-                check!(Sha384, &rind::rsa::OAEP_SHA384);
-                check!(Sha512, &rind::rsa::OAEP_SHA512);
-            }
-        }
-
-        /// A key rind generates loads into `rsa`, which validates it, and
-        /// its factors, exponents, and signatures check out over `num-bigint`.
-        #[test]
-        #[cfg_attr(debug_assertions, ignore = "RustCrypto's RSA is slow unoptimised")]
-        fn generated_key() {
-            let ours = KeyPair::generate(rind::rsa::KeySize::Rsa2048).unwrap();
-            let theirs = ::rsa::PrivateKey::from_pkcs8_der(ours.to_pkcs8().as_ref()).unwrap();
-            theirs.validate().unwrap();
-            assert_eq!(theirs.n_bytes().len(), 256);
-            let big = |bytes: &[u8]| BigUint::from_bytes_be(bytes);
-            let (n, e, d) = (
-                big(&theirs.n_bytes()),
-                big(&theirs.e_bytes()),
-                big(&theirs.d().to_be_bytes_trimmed_vartime()),
-            );
-            let primes: Vec<BigUint> = theirs
-                .primes()
-                .iter()
-                .map(|p| big(&p.as_ref().to_be_bytes_trimmed_vartime()))
-                .collect();
-            assert_eq!(primes.len(), 2);
-            assert_eq!(&primes[0] * &primes[1], n);
-            assert_eq!(n.bits(), 2048);
-            for p in &primes {
-                assert_eq!((&d * &e) % (p - 1u32), BigUint::from(1u32));
-            }
-
-            let signature = ours.sign(&sign::PKCS1_SHA256, b"hello").unwrap();
-            let digest = hash::<Sha256>(&[b"hello"]);
-            theirs
-                .as_public_key()
-                .verify(Pkcs1v15Sign::new::<Sha256>(), &digest, signature.as_ref())
-                .unwrap();
-            let theirs_signature = theirs
-                .sign_with_rng(&mut drbg([7; 32]), Pkcs1v15Sign::new::<Sha256>(), &digest)
-                .unwrap();
-            assert_eq!(signature.as_ref(), &theirs_signature[..]);
-            assert_eq!(
-                BigUint::from_bytes_be(signature.as_ref())
-                    .modpow(&e, &n)
-                    .to_bytes_be()[0],
-                1
-            );
         }
     }
 }
