@@ -104,6 +104,9 @@ pakery-spake2plus = { version = "0.6.2", default-features = false, features = ["
 matter-crypto = { version = "0.5.1", default-features = false, features = ["test-support"] }
 # RSA blind signatures, which aws-lc-rs does not offer.
 blind-rsa-signatures = { version = "0.18", default-features = false }
+# RustCrypto's RSA, the independent oracle for RSA; `num-bigint` does the
+# raw modular exponentiation beside it.
+rsa = { version = "0.10", default-features = false, features = ["encoding", "pkcs1v15", "std"] }
 # ECVRF, which aws-lc-rs does not offer: key transparency's `akd` for
 # Edwards25519, and `vrf-rfc9381` for P-256.
 akd_core = { version = "0.13", default-features = false, features = ["vrf"] }
