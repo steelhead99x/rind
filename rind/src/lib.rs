@@ -25,6 +25,25 @@
     unused_qualifications
 )]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+// Unit tests run on hosted targets and keep `std`'s prelude.
+#![cfg_attr(not(test), no_std)]
+
+extern crate alloc;
+
+// Only where a build needs an operating system: the FIPS module, aarch64's
+// run-time CPU detection, and the `RIND_CPU_DISABLE_*` switches of debug
+// builds. `rind_std` (build.rs) marks the targets that have it.
+#[cfg(all(
+    not(test),
+    any(
+        rind_fips,
+        all(
+            rind_std,
+            any(debug_assertions, rind_cpu_disable, rind_backend = "aarch64")
+        )
+    )
+))]
+extern crate std;
 
 /// Low level operations.
 ///
@@ -66,6 +85,7 @@ mod test;
 
 // vvv Public API
 pub use error::{Error, KeyRejected};
+pub use high::signature::any::KeyPair;
 
 /// Non-API documentation
 #[cfg(doc)]

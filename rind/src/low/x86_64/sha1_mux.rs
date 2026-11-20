@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-use std::sync::OnceLock;
-
 use crate::low::x86_64;
 use crate::low::x86_64::cpu::{HaveAvx, HaveAvx2, HaveSha1, HaveSsse3, is_intel};
 use crate::low::{pad, split_tail};
@@ -48,13 +46,9 @@ pub(crate) fn sha1_compress_padded(state: &mut [u32; 5], message: &[u8], length:
     }
 }
 
+/// The routine this CPU runs: a few tests of the features `cpu` read once.
+#[inline]
 fn path() -> Path {
-    // Picked once, rather than testing up to four features on every compression.
-    static PATH: OnceLock<Path> = OnceLock::new();
-    *PATH.get_or_init(pick)
-}
-
-fn pick() -> Path {
     if let Some(token) = HaveSha1::check() {
         Path::Shaext(token)
     } else if let Some(token) = HaveAvx2::check() {

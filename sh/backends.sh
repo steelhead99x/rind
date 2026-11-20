@@ -23,7 +23,7 @@ changed=$1
 # actions that run ctgrind, and the adapters, whose tests ctgrind runs too,
 # along with any Rust crate nested in one, such as the FIPS module in
 # rind-fips/module/ (Dart's lib/src/ is not one).
-shared='^(Cargo\.(toml|lock)$|flake\.(nix|lock)$|rust-toolchain(\.toml)?$|\.cargo/|justfile$|thirdparty/|sh/(backends|changed)\.sh$|admin/ctgrind|\.github/(workflows/(ctgrind|ctgrind-debug)\.yml$|actions/)|rind-[a-z0-9-]+/((src/|tests/|build\.rs$|Cargo\.toml$)|([^/]+/)+(src/.*\.rs$|build\.rs$|Cargo\.toml$)))'
+shared='^(Cargo\.(toml|lock)$|flake\.(nix|lock)$|rust-toolchain(\.toml)?$|\.cargo/|justfile$|thirdparty/|sh/(backends|changed)\.sh$|admin/ctgrind|\.github/(workflows/ctgrind\.yml$|actions/)|rind-[a-z0-9-]+/((src/|tests/|build\.rs$|Cargo\.toml$)|([^/]+/)+(src/.*\.rs$|build\.rs$|Cargo\.toml$)))'
 
 # It reads every line, even once it knows the answer, so a writer piping a
 # long diff in never meets a closed pipe.

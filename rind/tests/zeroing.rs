@@ -160,6 +160,57 @@ fn slh_dsa() {
 }
 
 #[test]
+fn key_pair() {
+    use rind::KeyPair;
+    use rind::ml_dsa::{self, MlDsa44, MlDsa87};
+    use rind::slh_dsa::{self, SlhDsaShake128f};
+    // The enum has no drop of its own, so a caller can move its key out:
+    // each variant's key pair wipes its whole value in place, leaving only
+    // the tag that names the algorithm.
+    let keys = [
+        include_bytes!("../src/high/ecdsa/secp256r1.pkcs8.der").to_vec(),
+        include_bytes!("../src/high/ecdsa/secp384r1.pkcs8.der").to_vec(),
+        include_bytes!("../src/high/ecdsa/secp521r1.pkcs8.der").to_vec(),
+        include_bytes!("../src/high/asn1/testdata/ed25519-p8v2.bin").to_vec(),
+        include_bytes!("../src/high/rsa/rsa8192.pkcs8.der").to_vec(),
+        ml_dsa::KeyPair::<MlDsa44>::generate()
+            .unwrap()
+            .to_pkcs8()
+            .as_ref()
+            .to_vec(),
+        ml_dsa::KeyPair::<MlDsa87>::generate()
+            .unwrap()
+            .to_pkcs8()
+            .as_ref()
+            .to_vec(),
+        slh_dsa::KeyPair::<SlhDsaShake128f>::generate()
+            .unwrap()
+            .to_pkcs8()
+            .as_ref()
+            .to_vec(),
+    ];
+    for der in keys {
+        let key = Box::pin(KeyPair::from_pkcs8(&der).unwrap());
+        let (at, len) = match &*key {
+            KeyPair::EcdsaP256(k) | KeyPair::EcdsaP384(k) | KeyPair::EcdsaP521(k) => span(k),
+            KeyPair::Ed25519(k) => span(k),
+            KeyPair::Rsa(k) => span(k),
+            KeyPair::MlDsa44(k) => span(k),
+            KeyPair::MlDsa87(k) => span(k),
+            KeyPair::SlhDsaShake128f(k) => span(k),
+            other => panic!("no span for {other:?}"),
+        };
+        let at = at - key.deref() as *const KeyPair as usize;
+        check_span_zeroed_on_drop(key, at, len);
+    }
+}
+
+/// Where `value` starts, and its length.
+fn span<T>(value: &T) -> (usize, usize) {
+    (value as *const T as usize, size_of::<T>())
+}
+
+#[test]
 fn ecdh() {
     use rind::agreement::*;
     for algorithm in [&X25519, &ECDH_P256, &ECDH_P384, &ECDH_P521] {
@@ -429,8 +480,14 @@ fn key_wrap() {
 }
 
 fn check_zeroed_on_drop<T: Unpin>(value: Pin<Box<T>>) {
-    let ptr = value.deref() as *const T as *const u8;
-    let len = size_of::<T>();
+    check_span_zeroed_on_drop(value, 0, size_of::<T>());
+}
+
+/// Checks that dropping `value` zeroes its `len` bytes from offset `at`.
+fn check_span_zeroed_on_drop<T: Unpin>(value: Pin<Box<T>>, at: usize, len: usize) {
+    assert!(at + len <= size_of::<T>());
+    // SAFETY: `at + len` is within `value`.
+    let ptr = unsafe { (value.deref() as *const T as *const u8).add(at) };
     assert_ne!(len, 0);
     println!("this value is {len} bytes in length");
     let before_drop = read_into_vec(ptr, len);

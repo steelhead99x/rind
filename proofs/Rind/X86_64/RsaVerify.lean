@@ -1,4 +1,4 @@
-import Rind.X86_64.RsaBytes
+import Rind.X86_64.RsaIfma
 import Rind.X86_64.Hmac
 import Rind.X86_64.Sha512
 open Aeneas Aeneas.Std Result rind.spec rind.spec.rsa
@@ -14,45 +14,12 @@ products that return their results (`MontProducts`).
 
 namespace rind.x86_64
 
-theorem len_bits_spec (p : RsaInt) (hu : p.used.val ≤ 128) :
-    low.posint.PosInt.len_bits p ⦃ r => r.val = (wordsNat (lowWords p p.used)).size ⦄ := by
-  unfold low.posint.PosInt.len_bits low.posint.PosInt.as_words
-  step*
-  rw [r_post, s_post]
-  simp [lowWords, List.slice, Array.val_to_slice]
-
-/-- The modulus's length in bytes is RFC 8017's `k`. -/
-theorem modulus_len_bytes_spec (key : mid.rsa_pub.RsaPublicKey) (hinv : PubKeyInv key) :
-    mid.rsa_pub.RsaPublicKey.modulus_len_bytes key ⦃ r =>
-      r.val = octetLen (wordsNat (lowWords key.n key.n.used)) ⦄ := by
-  obtain ⟨-, hk, -, -, -, -, -, -, hs2⟩ := hinv
-  unfold mid.rsa_pub.RsaPublicKey.modulus_len_bytes low.posint.PosInt.len_bytes
-  step with len_bits_spec key.n hk as ⟨b, hb⟩
-  step*
-  rw [r_post, i1_post, core.num.Usize.wrapping_add_val_eq, hb, octetLen]
-  congr 1
-  rw [Nat.mod_eq_of_lt]
-  · rfl
-  rw [← hb] at hs2 ⊢
-  have : (7#usize).val = 7 := rfl
-  have : 2 ^ 32 ≤ UScalar.size UScalarTy.Usize := by
-    simp only [UScalar.size, UScalarTy.numBits]
-    cases System.Platform.numBits_eq <;> simp_all
-  omega
-
 theorem rsa_slice_eq_spec (s t : Slice U8) :
     core.slice.cmp.PartialEqSlice.eq core.cmp.PartialEqU8 s t ⦃ b => b ↔ s.val = t.val ⦄ := by
   apply WP.spec_mono (core.slice.cmp.PartialEqSlice.eq_homo_spec _ s t
     (fun x y => by simp [liftFun2]))
   intro b hb
   rw [hb, Slice.eq_iff]
-
-/-- `k` bytes hold any number below the modulus. -/
-theorem lt_octetLen (N x : Nat) (hx : x < N) : x < 256 ^ octetLen N := by
-  calc x < N := hx
-    _ < 2 ^ N.size := Nat.lt_size_self N
-    _ ≤ 2 ^ (8 * octetLen N) := Nat.pow_le_pow_right (by norm_num) (by unfold octetLen; omega)
-    _ = 256 ^ octetLen N := by rw [pow_mul]; norm_num
 
 theorem bv_pkcs1 (n : Nat) (di h : List U8) :
     bv ([0#u8, 1#u8] ++ List.replicate n 255#u8 ++ [0#u8] ++ di ++ h) =
@@ -86,14 +53,14 @@ theorem pkcs1_verify_out_of_range (N e : Nat) (H : List Byte → List Byte) (di 
 /-- RSASSA-PKCS1-V1_5-VERIFY, given the message's hash and its `DigestInfo`
 prefix: `_verify_pkcs1` accepts exactly the signatures RFC 8017 does. -/
 theorem verify_pkcs1_core_spec (key : high.rsa.VerifyingKey) (hinv : PubKeyInv key)
-    (hP : MontProducts key.n.used.val) (hifma : NoIfma) (signature digest_info hash : Slice U8)
+    (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns) (signature digest_info hash : Slice U8)
     (hT : digest_info.length + hash.length + 11 ≤ 128) (H : List Byte → List Byte) (M : List Byte)
     (hH : H M = bv hash.val) :
     high.rsa.VerifyingKey._verify_pkcs1 key signature digest_info hash ⦃ r =>
       r = .Ok () ↔ rsassaPkcs1v15Verify (wordsNat (lowWords key.n key.n.used)) key.e.val H
         (bv digest_info.val) M (bv signature.val) ⦄ := by
   have hinv' := hinv
-  obtain ⟨hk2, hk, hodd, hn0, hmont, he, he3, hs1, hs2⟩ := hinv'
+  obtain ⟨hk2, hk, hodd, hn0, hmont, he, he3, hs1, hs2, -⟩ := hinv'
   unfold high.rsa.VerifyingKey._verify_pkcs1
   step with modulus_len_bytes_spec key hinv as ⟨k, hkv⟩
   have hk128 : 128 ≤ k.val := by rw [hkv, octetLen]; omega
@@ -162,7 +129,7 @@ variable {Self C S : Type} {inst : high.hash.Hash Self C S} {H : List Byte → L
 /-- RSASSA-PKCS1-V1_5-VERIFY over a hash meeting `HashSpec`, as each
 `verify_pkcs1_*` runs it after taking the entry guard. -/
 theorem verify_pkcs1_hash_spec (hs : HashSpec inst H B L max Abs CAbs) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma) (signature message di : Slice U8)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns) (signature message di : Slice U8)
     (hm : message.length ≤ max) (hdi : di.length + L + 11 ≤ 128) :
     (do
       let hash ← high.hash.Hash.hash.default inst message
@@ -200,7 +167,7 @@ theorem digestinfo_sha512 : bv high.pkcs1.DIGESTINFO_SHA512.val = digestInfoSha5
 
 /-- RSASSA-PKCS1-V1_5-VERIFY with SHA-256. -/
 theorem verify_pkcs1_sha256_spec (h : Runs) (hb : Sha256Blocks) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma) (signature message : Slice U8)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns) (signature message : Slice U8)
     (hm : message.length ≤ maxInput) :
     high.rsa.VerifyingKey.verify_pkcs1_sha256 key signature message ⦃ r =>
       r = .Ok () ↔ rsassaPkcs1v15Verify (wordsNat (lowWords key.n key.n.used)) key.e.val sha256.hash
@@ -213,7 +180,7 @@ theorem verify_pkcs1_sha256_spec (h : Runs) (hb : Sha256Blocks) (key : high.rsa.
 
 /-- RSASSA-PKCS1-V1_5-VERIFY with SHA-1. -/
 theorem verify_pkcs1_sha1_spec (h : Runs) (hb : Sha1Blocks) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma) (signature message : Slice U8)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns) (signature message : Slice U8)
     (hm : message.length ≤ maxInput) :
     high.rsa.VerifyingKey.verify_pkcs1_sha1 key signature message ⦃ r =>
       r = .Ok () ↔ rsassaPkcs1v15Verify (wordsNat (lowWords key.n key.n.used)) key.e.val sha1.hash
@@ -226,7 +193,7 @@ theorem verify_pkcs1_sha1_spec (h : Runs) (hb : Sha1Blocks) (key : high.rsa.Veri
 
 /-- RSASSA-PKCS1-V1_5-VERIFY with SHA-384. -/
 theorem verify_pkcs1_sha384_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma) (signature message : Slice U8)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns) (signature message : Slice U8)
     (hm : message.length ≤ maxInput) :
     high.rsa.VerifyingKey.verify_pkcs1_sha384 key signature message ⦃ r =>
       r = .Ok () ↔ rsassaPkcs1v15Verify (wordsNat (lowWords key.n key.n.used)) key.e.val sha384Bytes
@@ -239,7 +206,7 @@ theorem verify_pkcs1_sha384_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.Ve
 
 /-- RSASSA-PKCS1-V1_5-VERIFY with SHA-512. -/
 theorem verify_pkcs1_sha512_spec (h : Runs) (hs : RunsSha512) (key : high.rsa.VerifyingKey)
-    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : NoIfma) (signature message : Slice U8)
+    (hinv : PubKeyInv key) (hP : MontProducts key.n.used.val) (hifma : IfmaCheckReturns) (signature message : Slice U8)
     (hm : message.length ≤ maxInput) :
     high.rsa.VerifyingKey.verify_pkcs1_sha512 key signature message ⦃ r =>
       r = .Ok () ↔ rsassaPkcs1v15Verify (wordsNat (lowWords key.n key.n.used)) key.e.val sha512Bytes

@@ -38,15 +38,6 @@ def lane32x8 (x : BitVec 256) (i : Nat) : BitVec 32 := x.extractLsb' (32 * i) 32
 def ofLanes32x8 (f : Nat → BitVec 32) : BitVec 256 :=
   f 7 ++ f 6 ++ f 5 ++ f 4 ++ f 3 ++ f 2 ++ f 1 ++ f 0
 
-/-- Carry-less multiplication's first `k` partial products: `a` shifted left by
-each of `b`'s set bits below `k`, XORed. -/
-def clmulAux (a b : BitVec 64) : Nat → BitVec 128
-  | 0 => 0
-  | k + 1 => clmulAux a b k ^^^ (if b.getLsbD k then a.setWidth 128 <<< k else 0)
-
-/-- `PCLMULQDQ`'s carry-less product of two 64-bit values. -/
-@[irreducible] def clmul (a b : BitVec 64) : BitVec 128 := clmulAux a b 64
-
 end rind.simd
 
 open rind.simd rind.vale
@@ -249,6 +240,74 @@ def core.core_arch.x86.avx2._mm256_and_si256 (a b : core.core_arch.x86.__m256i) 
 def core.core_arch.x86.avx2._mm256_xor_si256 (a b : core.core_arch.x86.__m256i) :
     Result core.core_arch.x86.__m256i :=
   ok (a ^^^ b)
+
+namespace rind.simd
+
+/-- A 256-bit vector's 128-bit half `j`. -/
+def half (x : BitVec 256) (j : Nat) : BitVec 128 := x.extractLsb' (128 * j) 128
+
+/-- The 256-bit vector of two 128-bit halves, half 0 lowest. -/
+def ofHalves (f : Nat → BitVec 128) : BitVec 256 := f 1 ++ f 0
+
+end rind.simd
+
+/-- `_mm256_setr_epi32`: the 32-bit lanes in order, the first lowest. -/
+def core.core_arch.x86.avx._mm256_setr_epi32 (e0 e1 e2 e3 e4 e5 e6 e7 : Std.I32) :
+    Result core.core_arch.x86.__m256i :=
+  ok (e7.bv ++ e6.bv ++ e5.bv ++ e4.bv ++ e3.bv ++ e2.bv ++ e1.bv ++ e0.bv)
+
+/-- `_mm256_set_epi8`: the bytes, the last lowest. -/
+def core.core_arch.x86.avx._mm256_set_epi8
+    (e31 e30 e29 e28 e27 e26 e25 e24 e23 e22 e21 e20 e19 e18 e17 e16 e15 e14 e13 e12 e11 e10 e9 e8 e7
+      e6 e5 e4 e3 e2 e1 e0 : Std.I8) : Result core.core_arch.x86.__m256i :=
+  ok (e31.bv ++ e30.bv ++ e29.bv ++ e28.bv ++ e27.bv ++ e26.bv ++ e25.bv ++ e24.bv ++ e23.bv ++ e22.bv ++
+    e21.bv ++ e20.bv ++ e19.bv ++ e18.bv ++ e17.bv ++ e16.bv ++ e15.bv ++ e14.bv ++ e13.bv ++ e12.bv ++
+    e11.bv ++ e10.bv ++ e9.bv ++ e8.bv ++ e7.bv ++ e6.bv ++ e5.bv ++ e4.bv ++ e3.bv ++ e2.bv ++ e1.bv ++ e0.bv)
+
+/-- `_mm256_extract_epi32::<INDEX>`: the 32-bit lane `INDEX` selects. Rust
+accepts only 0 to 7; the model reads `INDEX`'s low three bits. -/
+def core.core_arch.x86.avx._mm256_extract_epi32 (INDEX : Std.I32) (a : core.core_arch.x86.__m256i) :
+    Result Std.I32 :=
+  ok ⟨lane32x8 a (INDEX.bv.toNat % 8)⟩
+
+/-- `_mm256_or_si256`, `VPOR`. -/
+def core.core_arch.x86.avx2._mm256_or_si256 (a b : core.core_arch.x86.__m256i) :
+    Result core.core_arch.x86.__m256i :=
+  ok (a ||| b)
+
+/-- `_mm256_slli_epi32::<IMM8>`, `VPSLLD`: each 32-bit lane shifted left by
+`IMM8` bits, or zero past 31. -/
+def core.core_arch.x86.avx2._mm256_slli_epi32 (IMM8 : Std.I32) (a : core.core_arch.x86.__m256i) :
+    Result core.core_arch.x86.__m256i :=
+  let n := IMM8.bv.toNat % 256
+  ok (ofLanes32x8 fun i => if n > 31 then 0 else lane32x8 a i <<< n)
+
+/-- `_mm256_srli_epi32::<IMM8>`, `VPSRLD`: each 32-bit lane shifted right
+logically by `IMM8` bits, or zero past 31. -/
+def core.core_arch.x86.avx2._mm256_srli_epi32 (IMM8 : Std.I32) (a : core.core_arch.x86.__m256i) :
+    Result core.core_arch.x86.__m256i :=
+  let n := IMM8.bv.toNat % 256
+  ok (ofLanes32x8 fun i => if n > 31 then 0 else lane32x8 a i >>> n)
+
+/-- `_mm256_shuffle_epi8`, `VPSHUFB`: `PSHUFB` in each 128-bit half. -/
+def core.core_arch.x86.avx2._mm256_shuffle_epi8 (a b : core.core_arch.x86.__m256i) :
+    Result core.core_arch.x86.__m256i :=
+  ok (ofHalves fun j => ofBytes fun i =>
+    if (byte (half b j) i).msb then 0 else byte (half a j) ((byte (half b j) i).toNat % 16))
+
+/-- `_mm256_shuffle_epi32::<MASK>`, `VPSHUFD`: `PSHUFD` in each 128-bit half. -/
+def core.core_arch.x86.avx2._mm256_shuffle_epi32 (MASK : Std.I32) (a : core.core_arch.x86.__m256i) :
+    Result core.core_arch.x86.__m256i :=
+  ok (ofHalves fun j => ofLanes32 fun i => lane32 (half a j) (MASK.bv.toNat / 4 ^ i % 4))
+
+/-- `_mm256_permute2x128_si256::<IMM8>`, `VPERM2I128`: half `j` is zero if
+bit `4j + 3` of `IMM8` is set, and otherwise the half of `a`:`b`, `a`'s
+lowest, that bits `4j` and `4j + 1` select. -/
+def core.core_arch.x86.avx2._mm256_permute2x128_si256 (IMM8 : Std.I32)
+    (a b : core.core_arch.x86.__m256i) : Result core.core_arch.x86.__m256i :=
+  ok (ofHalves fun j =>
+    let sel := IMM8.bv.toNat / 16 ^ j % 16
+    if sel / 8 % 2 = 1 then 0 else [half a 0, half a 1, half b 0, half b 1][sel % 4]!)
 
 /-! ## 512-bit vectors
 

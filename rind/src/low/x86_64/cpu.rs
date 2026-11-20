@@ -263,6 +263,18 @@ impl HaveAvx512ForRsa {
     }
 }
 
+/// Proof that the CPU has what pyca/verified-garbage's X25519 and Ed25519
+/// for AVX-512 IFMA run: AVX-512 F, VL, and IFMA, with AVX, AVX2, BMI1,
+/// BMI2, and ADX, the union of their `_FEATURES`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveIfmaForCurve25519(());
+
+impl HaveIfmaForCurve25519 {
+    pub(crate) fn check() -> Option<Self> {
+        has(AVX | AVX2 | BMI1 | BMI2 | ADX | AVX512F | AVX512VL | AVX512IFMA).then_some(Self(()))
+    }
+}
+
 /// Token type reflecting the check for CPU features needed for SHA1 using SHA-NI,
 /// and the SSSE3 and SSE4.1 its rounds also use
 ///
@@ -401,6 +413,29 @@ impl HaveBmi2Adx {
     }
 }
 
+/// Proof that the CPU has what pyca/verified-garbage's BMI2 and ADX P-256
+/// routines run: BMI2, ADX, AVX, and AVX2.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveAdxForVgP256(());
+
+impl HaveAdxForVgP256 {
+    pub(crate) fn check() -> Option<Self> {
+        has(BMI2 | ADX | AVX | AVX2).then_some(Self(()))
+    }
+}
+
+/// Proof that the CPU has what pyca/verified-garbage's AVX-512 IFMA P-256
+/// ECDH and ECDSA verification run: AVX-512 F, VL, and IFMA, with what
+/// [`HaveAdxForVgP256`] proves.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HaveIfmaForVgP256(());
+
+impl HaveIfmaForVgP256 {
+    pub(crate) fn check() -> Option<Self> {
+        has(BMI2 | ADX | AVX | AVX2 | AVX512F | AVX512VL | AVX512IFMA).then_some(Self(()))
+    }
+}
+
 /// Whether the CPU is Intel's, for code that is fastest on one vendor's cores.
 pub(crate) fn is_intel() -> bool {
     has(INTEL)
@@ -466,82 +501,177 @@ fn detect_once() -> u32 {
     features
 }
 
+/// The features rind tests for, with `std`'s name for each, which
+/// `RIND_CPU_DISABLE_<name>` takes without its dots.
+macro_rules! named {
+    ($($bit:ident: $name:tt),+ $(,)?) => {
+        const NAMED: &[(u32, &str)] = &[$(($bit, $name)),+];
+
+        /// Those the target enables at compile time, which every CPU that
+        /// runs the binary has, as `is_x86_feature_detected!` also reports.
+        const ENABLED: u32 = 0 $(| if cfg!(target_feature = $name) { $bit } else { 0 })+;
+
+        /// What `std` detects, which `detect` must match.
+        #[cfg(test)]
+        fn std_detected() -> u32 {
+            0 $(| if is_x86_feature_detected!($name) { $bit } else { 0 })+
+        }
+    };
+}
+
+named! {
+    AES: "aes",
+    VAES: "vaes",
+    PCLMULQDQ: "pclmulqdq",
+    VPCLMULQDQ: "vpclmulqdq",
+    BMI1: "bmi1",
+    BMI2: "bmi2",
+    ADX: "adx",
+    POPCNT: "popcnt",
+    SSSE3: "ssse3",
+    SSE41: "sse4.1",
+    AVX: "avx",
+    AVX2: "avx2",
+    AVX512F: "avx512f",
+    AVX512DQ: "avx512dq",
+    AVX512IFMA: "avx512ifma",
+    AVX512BW: "avx512bw",
+    AVX512VL: "avx512vl",
+    AVX512VBMI: "avx512vbmi",
+    AVX512VBMI2: "avx512vbmi2",
+    AVX512FP16: "avx512fp16",
+    SHA: "sha",
+    SHA512: "sha512",
+    MOVBE: "movbe",
+}
+
 fn detect() -> u32 {
-    macro_rules! detect {
-        ($name:tt, $bit:expr) => {
-            if test_toggle($name, is_x86_feature_detected!($name)) {
-                $bit
-            } else {
-                0
-            }
-        };
-    }
-
-    // "GenuineIntel", spread over ebx, edx, and ecx.
-    // `__cpuid` is safe from Rust 1.94 but `unsafe` on the 1.90 MSRV.
-    #[allow(unused_unsafe)]
-    // SAFETY: every x86_64 CPU has `cpuid`.
-    let id = unsafe { __cpuid(0) };
-    let intel = (id.ebx, id.edx, id.ecx) == (0x756e_6547, 0x4965_6e69, 0x6c65_746e);
-
     // Valgrind runs ADX instructions but hides them from `cpuid`
     // (https://bugs.kde.org/show_bug.cgi?id=494162), so `admin/ctgrind` builds
     // with this switch to check the ADX routines rather than their `_alt`
     // twins.
     // See UPSTREAM.md, "Valgrind hides ADX from `cpuid`".
-    let adx = is_x86_feature_detected!("adx") || option_env!("VALGRIND_BUG_494162").is_some();
-
-    (if test_toggle("intel", intel) {
+    let valgrind = if option_env!("VALGRIND_BUG_494162").is_some() {
+        ADX
+    } else {
+        0
+    };
+    let found = decode(registers()) | ENABLED | valgrind;
+    let intel = if found & INTEL != 0 && !super::super::cpu_denied("intel") {
         INTEL
     } else {
         0
-    }) | (if test_toggle("adx", adx) { ADX } else { 0 })
-        | detect!("aes", AES)
-        | detect!("vaes", VAES)
-        | detect!("pclmulqdq", PCLMULQDQ)
-        | detect!("vpclmulqdq", VPCLMULQDQ)
-        | detect!("bmi1", BMI1)
-        | detect!("bmi2", BMI2)
-        | detect!("popcnt", POPCNT)
-        | detect!("ssse3", SSSE3)
-        | detect!("sse4.1", SSE41)
-        | detect!("avx", AVX)
-        | detect!("avx2", AVX2)
-        | detect!("avx512f", AVX512F)
-        | detect!("avx512dq", AVX512DQ)
-        | detect!("avx512ifma", AVX512IFMA)
-        | detect!("avx512bw", AVX512BW)
-        | detect!("avx512vl", AVX512VL)
-        | detect!("avx512vbmi", AVX512VBMI)
-        | detect!("avx512vbmi2", AVX512VBMI2)
-        | detect!("avx512fp16", AVX512FP16)
-        | detect!("sha", SHA)
-        | detect!("sha512", SHA512)
-        | detect!("movbe", MOVBE)
+    };
+    NAMED
+        .iter()
+        .filter(|&&(bit, name)| found & bit != 0 && !super::super::cpu_denied(name))
+        .fold(intel, |features, &(bit, _)| features | bit)
 }
 
-#[cfg(not(any(debug_assertions, rind_cpu_disable)))]
-fn test_toggle(_id: &str, detected: bool) -> bool {
-    detected
+/// The `cpuid` and `xgetbv` registers that name the features rind tests for.
+#[derive(Clone, Copy, Default)]
+struct Registers {
+    intel: bool,
+    /// Leaf 1's ECX, or zero where the CPU has no leaf 1.
+    ecx1: u32,
+    /// Leaf 7's EBX, ECX, and EDX, and subleaf 1's EAX, or zero where the
+    /// CPU has no leaf 7.
+    ebx7: u32,
+    ecx7: u32,
+    edx7: u32,
+    eax7_1: u32,
+    /// XCR0, or `None` where the OS has not enabled `xgetbv`.
+    xcr0: Option<u64>,
 }
 
-/// Lets a debug build deny a feature with `RIND_CPU_DISABLE_<id>`, so a CPU
-/// with it also tests the code for one without. `--cfg rind_cpu_disable`
-/// does the same for a release build, so benches and ctgrind time and check
-/// the code that ships; only `RUSTFLAGS` sets it, never a dependent crate.
-/// The variable drops the dot from `sse4.1`, since shells drop variables
-/// whose names have one.
-#[cfg(any(debug_assertions, rind_cpu_disable))]
-fn test_toggle(id: &str, detected: bool) -> bool {
-    if std::env::var(format!("RIND_CPU_DISABLE_{}", id.replace('.', ""))).is_ok() {
-        // The FIPS module honours the mask in its release build, where its
-        // caller's stdout is not its own.
-        #[cfg(not(rind_fips))]
-        println!("DEBUG: denying cpuid {id:?}");
-        false
-    } else {
-        detected
+/// Reads the registers `decode` reads.
+#[allow(unused_unsafe)]
+fn registers() -> Registers {
+    let mut found = Registers::default();
+    // An SGX enclave cannot trust `cpuid`, so `std` reports nothing there.
+    if cfg!(target_env = "sgx") {
+        return found;
     }
+    // `__cpuid` is safe from Rust 1.94 but `unsafe` on the 1.90 MSRV.
+    // SAFETY: every x86_64 CPU has `cpuid`, and no leaf past the highest it
+    // reports is read.
+    let leaf0 = unsafe { __cpuid(0) };
+    // "GenuineIntel", spread over ebx, edx, and ecx.
+    found.intel = (leaf0.ebx, leaf0.edx, leaf0.ecx) == (0x756e_6547, 0x4965_6e69, 0x6c65_746e);
+    if leaf0.eax >= 1 {
+        // SAFETY: as above.
+        found.ecx1 = unsafe { __cpuid(1) }.ecx;
+    }
+    if leaf0.eax >= 7 {
+        // SAFETY: as above.
+        let (leaf7, leaf7_1) = unsafe { (__cpuid_count(7, 0), __cpuid_count(7, 1)) };
+        (found.ebx7, found.ecx7, found.edx7, found.eax7_1) =
+            (leaf7.ebx, leaf7.ecx, leaf7.edx, leaf7_1.eax);
+    }
+    // XSAVE, and OSXSAVE: the OS has enabled `xgetbv`.
+    if found.ecx1 & (1 << 26 | 1 << 27) == 1 << 26 | 1 << 27 {
+        // SAFETY: the CPU has XSAVE, and the OS has enabled it.
+        found.xcr0 = Some(unsafe { _xgetbv(0) });
+    }
+    found
+}
+
+/// What the registers say the CPU has and the OS saves the state of, read
+/// as `std`'s `is_x86_feature_detected!` reads them (its
+/// `std_detect/src/detect/os/x86.rs`), so a hosted build picks the paths it
+/// did with `std`, and a build without an OS can ask too: `cpuid` and
+/// `xgetbv` need none. A kernel that never enabled the AVX or AVX-512 state
+/// in XCR0 gets no AVX tier, rather than a fault on its first `vmovdqu`.
+fn decode(r: Registers) -> u32 {
+    let bit = |register: u32, at: u32| register >> at & 1 != 0;
+    let mut features = 0;
+    let mut set = |on: bool, feature: u32| {
+        if on {
+            features |= feature;
+        }
+    };
+    set(r.intel, INTEL);
+    set(bit(r.ecx1, 1), PCLMULQDQ);
+    set(bit(r.ecx1, 9), SSSE3);
+    set(bit(r.ecx1, 19), SSE41);
+    set(bit(r.ecx1, 22), MOVBE);
+    set(bit(r.ecx1, 23), POPCNT);
+    set(bit(r.ecx1, 25), AES);
+    set(bit(r.ebx7, 3), BMI1);
+    set(bit(r.ebx7, 8), BMI2);
+    set(bit(r.ebx7, 19), ADX);
+    set(bit(r.ebx7, 29), SHA);
+    set(bit(r.ecx7, 9), VAES);
+    set(bit(r.ecx7, 10), VPCLMULQDQ);
+
+    let xcr0 = r.xcr0.unwrap_or(0);
+    // The OS saves the SSE and AVX state.
+    if xcr0 & 0b110 == 0b110 {
+        set(bit(r.ecx1, 28), AVX);
+        set(bit(r.ebx7, 5), AVX2);
+        set(bit(r.eax7_1, 0), SHA512);
+        // And the AVX-512 state. Rust's `avx512f` implies FMA and F16C,
+        // which Intel does not promise with it, so `std` requires them.
+        let (fma, f16c) = (bit(r.ecx1, 12), bit(r.ecx1, 29));
+        if xcr0 & 0b1110_0000 == 0b1110_0000 && fma && f16c {
+            set(bit(r.ebx7, 16), AVX512F);
+            set(bit(r.ebx7, 17), AVX512DQ);
+            set(bit(r.ebx7, 21), AVX512IFMA);
+            set(bit(r.ebx7, 30), AVX512BW);
+            set(bit(r.ebx7, 31), AVX512VL);
+            set(bit(r.ecx7, 1), AVX512VBMI);
+            set(bit(r.ecx7, 6), AVX512VBMI2);
+            set(bit(r.edx7, 23), AVX512FP16);
+        }
+    }
+
+    // Some Skylakes report BMI1 and BMI2 without them (Intel's erratum
+    // SKL052); all of those lack AVX, so `std` drops both on Intel's CPUs
+    // without it.
+    if r.intel && features & AVX == 0 {
+        features &= !(BMI1 | BMI2);
+    }
+    features
 }
 
 // --- Safe abstractions over common intrinsics operations ---
@@ -610,17 +740,151 @@ mod tests {
         assert_ne!(call!(ct_compare_16, &[1; 16], &[2; 16]), 0);
     }
 
-    /// Whether std detects every feature named, less those `test_toggle`
+    /// Whether std detects every feature named, less those `RIND_CPU_DISABLE_<id>`
     /// denies.
     macro_rules! available {
         ($($name:tt),+) => {
-            true $(&& is_x86_feature_detected!($name) && !denied($name))+
+            true $(&& is_x86_feature_detected!($name) && !crate::low::cpu_denied($name))+
         };
     }
 
-    fn denied(name: &str) -> bool {
-        cfg!(any(debug_assertions, rind_cpu_disable))
-            && std::env::var(format!("RIND_CPU_DISABLE_{}", name.replace('.', ""))).is_ok()
+    /// The registers decode as `std` reads them on this host.
+    #[test]
+    fn detects_what_std_does() {
+        assert_eq!((decode(registers()) | ENABLED) & !INTEL, std_detected());
+    }
+
+    /// Where each feature's bit is, and the registers `decode` needs before
+    /// it reads any bit that hangs on AVX-512 support: the OS saving every
+    /// vector state, and FMA and F16C.
+    const FMA_F16C: u32 = 1 << 12 | 1 << 29;
+    /// The registers `BITS` names.
+    #[derive(Clone, Copy)]
+    enum Leaf {
+        Ecx1,
+        Ebx7,
+        Ecx7,
+        Edx7,
+        Eax7Sub1,
+    }
+
+    impl Leaf {
+        fn of(self, r: &mut Registers) -> &mut u32 {
+            match self {
+                Self::Ecx1 => &mut r.ecx1,
+                Self::Ebx7 => &mut r.ebx7,
+                Self::Ecx7 => &mut r.ecx7,
+                Self::Edx7 => &mut r.edx7,
+                Self::Eax7Sub1 => &mut r.eax7_1,
+            }
+        }
+    }
+
+    const BITS: &[(Leaf, u32, u32)] = &[
+        (Leaf::Ecx1, 1, PCLMULQDQ),
+        (Leaf::Ecx1, 9, SSSE3),
+        (Leaf::Ecx1, 19, SSE41),
+        (Leaf::Ecx1, 22, MOVBE),
+        (Leaf::Ecx1, 23, POPCNT),
+        (Leaf::Ecx1, 25, AES),
+        (Leaf::Ecx1, 28, AVX),
+        (Leaf::Ebx7, 3, BMI1),
+        (Leaf::Ebx7, 5, AVX2),
+        (Leaf::Ebx7, 8, BMI2),
+        (Leaf::Ebx7, 16, AVX512F),
+        (Leaf::Ebx7, 17, AVX512DQ),
+        (Leaf::Ebx7, 19, ADX),
+        (Leaf::Ebx7, 21, AVX512IFMA),
+        (Leaf::Ebx7, 29, SHA),
+        (Leaf::Ebx7, 30, AVX512BW),
+        (Leaf::Ebx7, 31, AVX512VL),
+        (Leaf::Ecx7, 1, AVX512VBMI),
+        (Leaf::Ecx7, 6, AVX512VBMI2),
+        (Leaf::Ecx7, 9, VAES),
+        (Leaf::Ecx7, 10, VPCLMULQDQ),
+        (Leaf::Edx7, 23, AVX512FP16),
+        (Leaf::Eax7Sub1, 0, SHA512),
+    ];
+
+    /// Each feature is read from its own bit, and from no other.
+    #[test]
+    fn decodes_each_bit() {
+        let base = Registers {
+            ecx1: FMA_F16C,
+            xcr0: Some(u64::MAX),
+            ..Registers::default()
+        };
+        assert_eq!(decode(base), 0);
+        for &(leaf, at, feature) in BITS {
+            let mut r = base;
+            *leaf.of(&mut r) |= 1 << at;
+            assert_eq!(decode(r), feature, "bit {at}");
+        }
+        assert_eq!(BITS.len(), NAMED.len());
+    }
+
+    /// The AVX features need the OS to save the AVX state, and the AVX-512
+    /// ones its AVX-512 state, FMA, and F16C, as `std` requires.
+    #[test]
+    fn decodes_vector_features_only_where_the_os_saves_them() {
+        let all = Registers {
+            intel: false,
+            ecx1: u32::MAX,
+            ebx7: u32::MAX,
+            ecx7: u32::MAX,
+            edx7: u32::MAX,
+            eax7_1: u32::MAX,
+            xcr0: Some(u64::MAX),
+        };
+        let named = NAMED.iter().fold(0, |all, &(bit, _)| all | bit);
+        assert_eq!(decode(all), named);
+        assert_eq!(decode(Registers { intel: true, ..all }), named | INTEL);
+
+        let avx512 = AVX512F
+            | AVX512DQ
+            | AVX512IFMA
+            | AVX512BW
+            | AVX512VL
+            | AVX512VBMI
+            | AVX512VBMI2
+            | AVX512FP16;
+        let avx = AVX | AVX2 | SHA512 | avx512;
+        for xcr0 in [None, Some(0), Some(0b010), Some(0b100), Some(!0b110)] {
+            assert_eq!(decode(Registers { xcr0, ..all }), named & !avx, "{xcr0:?}");
+        }
+        for xcr0 in [0b110, 0b0110_0110, 0b1010_0110, 0b1100_0110] {
+            let r = Registers {
+                xcr0: Some(xcr0),
+                ..all
+            };
+            assert_eq!(decode(r), named & !avx512, "{xcr0:#x}");
+        }
+        for missing in [1 << 12, 1 << 29] {
+            let r = Registers {
+                ecx1: !missing,
+                ..all
+            };
+            assert_eq!(decode(r), named & !avx512);
+        }
+    }
+
+    /// Intel's CPUs without AVX lose BMI1 and BMI2 (erratum SKL052); other
+    /// vendors' keep them.
+    #[test]
+    fn drops_bmi_on_intel_without_avx() {
+        let r = Registers {
+            ebx7: 1 << 3 | 1 << 8,
+            ..Registers::default()
+        };
+        assert_eq!(decode(r), BMI1 | BMI2);
+        assert_eq!(decode(Registers { intel: true, ..r }), INTEL);
+        let avx = Registers {
+            intel: true,
+            ecx1: 1 << 28,
+            xcr0: Some(0b110),
+            ..r
+        };
+        assert_eq!(decode(avx), INTEL | AVX | BMI1 | BMI2);
     }
 
     // Each feature has a bit of its own, so no check can pass for one
@@ -667,7 +931,7 @@ mod tests {
     #[test]
     fn checks_need_their_features() {
         let adx = (is_x86_feature_detected!("adx") || option_env!("VALGRIND_BUG_494162").is_some())
-            && !denied("adx");
+            && !crate::low::cpu_denied("adx");
         let gcm = available!(
             "aes",
             "pclmulqdq",
@@ -730,6 +994,18 @@ mod tests {
                 ) && available!("avx512fp16"),
             ),
             (
+                HaveIfmaForCurve25519::check().is_some(),
+                adx && available!(
+                    "avx",
+                    "avx2",
+                    "bmi1",
+                    "bmi2",
+                    "avx512f",
+                    "avx512vl",
+                    "avx512ifma"
+                ),
+            ),
+            (
                 HaveSha1::check().is_some(),
                 available!("sha", "ssse3", "sse4.1"),
             ),
@@ -758,6 +1034,15 @@ mod tests {
             (HaveSsse3::check().is_some(), available!("ssse3")),
             (HaveSse41::check().is_some(), available!("ssse3", "sse4.1")),
             (HaveBmi2Adx::check().is_some(), available!("bmi2") && adx),
+            (
+                HaveAdxForVgP256::check().is_some(),
+                adx && available!("bmi2", "avx", "avx2"),
+            ),
+            (
+                HaveIfmaForVgP256::check().is_some(),
+                adx && available!("bmi2", "avx", "avx2")
+                    && available!("avx512f", "avx512vl", "avx512ifma"),
+            ),
         ];
         for (i, (check, expected)) in checks.into_iter().enumerate() {
             assert_eq!(check, expected, "check {i}");
@@ -769,7 +1054,7 @@ mod tests {
         let vendor = [id.ebx, id.edx, id.ecx].map(u32::to_le_bytes);
         assert_eq!(
             is_intel(),
-            vendor.as_flattened() == b"GenuineIntel" && !denied("intel")
+            vendor.as_flattened() == b"GenuineIntel" && !crate::low::cpu_denied("intel")
         );
     }
 
@@ -816,6 +1101,11 @@ mod tests {
         }
         if let Some(expected) = std::env::var_os("RIND_TEST_X86_AVX512_RSA") {
             assert_eq!(HaveAvx512ForRsa::check().is_some(), expected == "1");
+        }
+        // Every CPU and SDE model with AVX-512 IFMA has the rest of what
+        // either needs, so RSA's tiers name X25519's and Ed25519's too.
+        if let Some(expected) = std::env::var_os("RIND_TEST_X86_AVX512_RSA") {
+            assert_eq!(HaveIfmaForCurve25519::check().is_some(), expected == "1");
         }
     }
 }

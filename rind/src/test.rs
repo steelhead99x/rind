@@ -235,6 +235,8 @@ pub(crate) const CTGRIND_DEBUG: bool = cfg!(all(feature = "__ctgrind", debug_ass
 pub(crate) mod bignum;
 mod binsec;
 pub(crate) mod file_test;
+#[cfg(any(rind_backend = "x86_64", rind_backend = "aarch64"))]
+pub(crate) mod p256_vg;
 
 /// Messages and domain separation tags for crosschecking hashes to a curve:
 /// empty, short, and random messages, with tags of one byte, 255 bytes, and

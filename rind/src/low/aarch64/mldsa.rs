@@ -120,6 +120,7 @@ rej_eta!(
 
 /// For each 4-bit mask, the byte offsets of its set bits' 32-bit lanes,
 /// packed low first, then 255.
+#[cfg_attr(coverage_nightly, coverage(off))] // const-evaluated only
 const fn rej_uniform_table() -> [u8; 256] {
     let mut t = [255; 256];
     let mut m = 0;

@@ -1,8 +1,6 @@
 // Written for Graviola by Joe Birr-Pixton, 2024.
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
-use std::sync::OnceLock;
-
 use crate::low::x86_64;
 use crate::low::x86_64::cpu::{HaveAvx, HaveAvx2, HaveSha256, HaveSsse3, is_intel};
 use crate::low::{pad, sha256_digest, split_tail};
@@ -52,13 +50,9 @@ fn sha256_compress_padded(state: &mut [u32; 8], message: &[u8], length: [u8; 8])
     sha256_compress_blocks(state, pad(rest, length, &mut last));
 }
 
+/// The routine this CPU runs: a few tests of the features `cpu` read once.
+#[inline]
 fn path() -> Path {
-    // Picked once, rather than testing up to four features on every compression.
-    static PATH: OnceLock<Path> = OnceLock::new();
-    *PATH.get_or_init(pick)
-}
-
-fn pick() -> Path {
     if let Some(token) = HaveSha256::check() {
         Path::Shaext(token)
     } else if let Some(token) = HaveAvx2::check() {

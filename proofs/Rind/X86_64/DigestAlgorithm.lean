@@ -23,7 +23,7 @@ pub struct Algorithm {
     // The only paths to the hash's code, so a binary links only the hashes
     // whose algorithms it names.
     hash: fn(&[u8]) -> Digest,
-    start: fn() -> State,
+    start: fn(&mut State, &[u8]),
 }
 
 impl Algorithm {

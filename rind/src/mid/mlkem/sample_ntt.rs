@@ -2,14 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0 OR ISC OR MIT-0
 
 use super::{N, Poly, Q};
-use crate::{
-    low,
-    mid::sha3::{self, SqueezingSponge},
-};
+use crate::{low, mid::sha3};
 
 /// FIPS-203's `SampleNTT` of each polynomial of a `K` by `K` matrix into
 /// `out`, row by row, or of its transpose: eight at a time where the CPU
-/// samples eight at once, then four, then one.
+/// samples eight at once (but for ML-KEM-768), then four, then one.
 pub(super) fn sample_ntt(rho: &[u8; 32], transposed: bool, out: &mut [Poly]) {
     let k = super::rank(out.len());
     let mut buf = [0; 40];
@@ -31,15 +28,24 @@ pub(super) fn sample_ntt(rho: &[u8; 32], transposed: bool, out: &mut [Poly]) {
     });
     let mut next = || inputs.next().unwrap_or(buf);
 
-    let (eights, rest) = out.as_chunks_mut::<8>();
+    // ML-KEM-768 never samples eight at a time: it takes eight of its nine
+    // polynomials four at a time, over the four-way SHAKE128 `proofs/`
+    // proves, and the ninth alone, so Graviola's unproven eight-way Keccak is
+    // off its path. Where that would run, ML-KEM-768 runs
+    // pyca/verified-garbage's routines instead, so this costs nothing
+    // measurable.
+    let (eights, rest) = match k {
+        3 => (&mut [][..], out),
+        _ => out.as_chunks_mut::<8>(),
+    };
     for outputs in eights {
         let inputs = core::array::from_fn(|_| next());
-        low::mlkem_sample_poly_ntt_8x(
-            &inputs,
-            outputs.as_flattened_mut().try_into().unwrap(),
-            _sample_poly_ntt_8x,
-            _sample_poly_ntt_tail,
-        );
+        let outputs = outputs.as_flattened_mut().try_into().unwrap();
+        // Only x86_64 has an eight-way sampler, which hands back the tails.
+        #[cfg(rind_backend = "x86_64")]
+        low::mlkem_sample_poly_ntt_8x(&inputs, outputs, _sample_poly_ntt_8x, _sample_poly_ntt_tail);
+        #[cfg(not(rind_backend = "x86_64"))]
+        _sample_poly_ntt_8x(&inputs, outputs);
     }
 
     let (fours, rest) = rest.as_chunks_mut::<4>();
@@ -80,9 +86,10 @@ fn sample_poly_ntt_4x(inputs: &[[u8; 40]; 4], outputs: &mut [Poly; 4]) {
     }
 }
 
+#[cfg(rind_backend = "x86_64")]
 fn _sample_poly_ntt_tail(tail_sponge: &mut [u64; 25], tail: &mut [i16]) {
     Shake128ForMlKem {
-        sponge: SqueezingSponge::new(*tail_sponge),
+        sponge: sha3::SqueezingSponge::new(*tail_sponge),
     }
     .tail_case(tail);
 }
@@ -211,7 +218,7 @@ mod tests {
                 [(x & 0xfff) as i16, (x >> 12) as i16]
             })
             .collect();
-        let got: Vec<i16> = Shake128TwelveBitIterator::new(SqueezingSponge::new(state))
+        let got: Vec<i16> = Shake128TwelveBitIterator::new(sha3::SqueezingSponge::new(state))
             .take(want.len())
             .collect();
         assert_eq!(got, want);
