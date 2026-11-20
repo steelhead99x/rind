@@ -73,8 +73,9 @@ KNOWN_CPUS = [
 #
 # `pr` marks the models a pull request runs; the weekly run runs every one, and
 # the merge queue every one except the slow ones below, which run in
-# queue-build.yml and are not required until the host is confirmed. Until main's ruleset requires `x86-cpu gate`, which only the
-# queue runs, a pull request runs every model.
+# queue-build.yml and are not required until the host is confirmed. Until
+# main's ruleset requires `x86-cpu gate`, which only the queue runs, a pull
+# request runs every model.
 #
 # `slow` marks the models the merge queue runs in queue-build.yml, on its
 # self-hosted runner, rather than on a hosted runner, whose wait and the model
