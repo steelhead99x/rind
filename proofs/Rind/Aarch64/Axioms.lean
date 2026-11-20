@@ -32,7 +32,9 @@ the theorems over every HMAC algorithm; rind's HOL Light proofs of its
 constant-time compares in `Rind.Aarch64.CtEqual` for HMAC's and PBKDF2's
 `verify` and key wrap's `unwrap` and `unwrap_padded`; for P-256's public
 key, ECDH, and ECDSA verification, pyca/verified-garbage's Lean proofs of its
-routines, which `Rind.Aarch64.VgP256` restates; for PBKDF2 on
+routines, which `Rind.Aarch64.VgP256` restates; for P-384's public key and
+ECDSA verification, those of its routines, which `Rind.Aarch64.VgP384`
+restates; for PBKDF2 on
 pyca/verified-garbage's routines, its contracts in `Rind.Aarch64.VgPbkdf2`;
 and nothing else.
 P-384's comb table select rests on no axiom, only on the hand model in

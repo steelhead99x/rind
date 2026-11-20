@@ -257,6 +257,13 @@ multiply as `p256Add` and `p256Pow`, through Mathlib's group of points
 strings `beNat`'s, and its ECDSA verification `ecdsaP256Verifies`. The P-256
 theorems below rest on them.
 
+`Rind/<Arch>/VgP384.lean` restates VG's contracts for the P-384 public key and
+ECDSA verification routines rind runs, one axiom per wrapper in
+`low::<arch>::p384_vg`, over `VerifiedGarbage.Spec.EcKey` and `Spec.Ecdsa`,
+whose P-384 contracts `admin/import-vg-models` vendors too. `Rind/VgP384.lean`
+proves those specs are rind's, as `Rind/VgP256.lean` does for P-256. The P-384
+theorems below rest on them.
+
 `Rind/VgPbkdf2.lean` proves VG's SHA-1, SHA-256, SHA-384, SHA-512, HMAC,
 and PBKDF2 specs, which `VerifiedGarbage.Spec.Pbkdf2.Generic` imports, are
 `Rind/HashSpec.lean`'s and `Rind/Sha2.lean`'s, PBKDF2's refusing a key longer
@@ -1409,6 +1416,9 @@ proof after those.
 - `Rind/VgP256.lean`: that pyca/verified-garbage's P-256 specs are rind's,
   and `Rind/<Arch>/VgP256.lean`, one per target, the axioms restating VG's
   theorems about its P-256 routines.
+- `Rind/VgP384.lean`: that pyca/verified-garbage's P-384 specs are rind's,
+  and `Rind/<Arch>/VgP384.lean`, one per target, the axioms restating VG's
+  theorems about its P-384 routines.
 - `Rind/P256Booth.lean`: the arithmetic of x86_64's Booth-recoded generator
   multiplication.
 - `Rind/<Arch>/P256Table.lean` and `Rind/<Arch>/P256Base.lean`, one per

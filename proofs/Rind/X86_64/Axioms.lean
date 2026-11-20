@@ -41,7 +41,8 @@ IFMA, pyca/verified-garbage's Lean proof of its routine, which
 `Rind.X86_64.VgRsa` restates; pyca/verified-garbage's for ChaCha20's
 `apply_keystream` in `Rind.X86_64.VgChaCha20`, for X25519 and Ed25519 on
 AVX-512 IFMA in `Rind.X86_64.VgCurve25519`, and for P-256's public key, ECDH,
-and ECDSA verification in `Rind.X86_64.VgP256`; and nothing else.
+and ECDSA verification in `Rind.X86_64.VgP256`, and for P-384's public key and
+ECDSA verification in `Rind.X86_64.VgP384`; and nothing else.
 ChaCha20-Poly1305's theorems also take aws-lc's one-pass routines as the
 hypothesis `RunsChaCha20Poly1305`, which no axiom states. ChaCha20's
 `apply_keystream` on a CPU without AVX2 takes aws-lc's SSSE3 routine as the
