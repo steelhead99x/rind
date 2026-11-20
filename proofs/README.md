@@ -466,7 +466,8 @@ e/s·G + r/s·Q and that every finite point on the curve has order n
 (`p384_order`). As for P-256, verification settles equal and opposite points
 by cases before s2n-bignum's `p384_montjadd` and `p384_montjmixadd`, whose
 contracts exclude them, and the theorems assume `Drbg`, `Fills`, `Held`, and
-P-384's `Cached`, its keys' caches.
+P-384's `Cached`, its keys' caches, including that
+`VerifyingKey.vg_takes` returns.
 
 Every P-384 theorem assumes `RunsP384`, that pyca/verified-garbage's two
 checks return, which read no input. Those that derive a public key, key

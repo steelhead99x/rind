@@ -15,8 +15,8 @@ set_option exponentiation.threshold 400
 
 VG's contracts for its P-384 routines state their results over its own
 transcription of SEC 1 and FIPS 186-5 (`VG.Spec.Weierstrass`,
-`VG.Spec.EcKey`, `VG.Spec.Ecdh`, and `VG.Spec.Ecdsa`, on the curve
-`VG.Spec.P384.curve`), which `admin/import-vg-models` vendors. This proves
+`VG.Spec.EcKey`, and `VG.Spec.Ecdsa`, on the curve `VG.Spec.P384.curve`), which
+`admin/import-vg-models` vendors. This proves
 that, on P-384, they are what rind's theorems state over HOL Light's
 (`Rind/Spec.lean`): VG's points, read as `ofVg`, add as `p384Add` and
 multiply as `p384Pow`, through Mathlib's group of points (`Rind.NistGroup`);

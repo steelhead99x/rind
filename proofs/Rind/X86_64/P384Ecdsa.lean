@@ -1231,6 +1231,8 @@ structure Cached : Prop where
       (core.default.DefaultArray 8#usize mid.p384.AffineMontPoint.Insts.CoreDefaultDefault)
       mid.p384.VerifyingKey.rind_ecdsa_verify.closure_1.Insts.CoreOpsFunctionFnOnceTupleArrayAffineMontPoint8
       key.more_odd_multiples odd ⦃ r => r = none ∨ ∃ m, r = some m ∧ P m ⦄
+  /-- `vg_takes` returns: on x86_64 it is `true`, on aarch64 it reads the key's
+  cache, whose `get_or_build` this structure's other fields state. -/
   vg_takes : ∀ key : mid.p384.VerifyingKey, ∃ b, mid.p384.VerifyingKey.vg_takes key = ok b
   clone : ∀ c, ∃ c', low.generic.reuse_cache.ReuseCache.Insts.CoreCloneClone.clone
       (Array.Insts.CoreMarkerCopy 8#usize mid.p384.AffineMontPoint.Insts.CoreMarkerCopy)
