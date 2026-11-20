@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
-# Statistical timing tests of rind's secret operations, on this machine.
+# Timing tests of rind's RSA-OAEP decryption, on this machine.
 #
 # Usage:
-#   admin/timing dudect [--seconds S] [--list] [FILTER...]
 #   admin/timing marvin [--repeat N] [BITS...]
-#
-# `dudect` times each operation whose secret rind's API lets it set, on two
-# classes of secret, after a planted leak it must find, and fails on a |t|
-# over dudect's 10. rind-timing/src/cases.rs lists what it cannot time: key
-# generation, encapsulation, and varied ML-KEM decapsulation keys.
 #
 # `marvin` runs the Marvin toolkit's RSA-OAEP probes against rind's
 # decryption, for 2048-, 3072-, and 4096-bit keys unless BITS names others:
@@ -18,15 +12,13 @@
 # report.txt among it, lands in .tmp/timing/marvin/rsaBITS/probes. rind has no
 # PKCS#1 v1.5 decryption, the toolkit's main target.
 #
-# `marvin` needs `nix develop .#timing`. Run either on a quiet machine:
-# other work on a shared one adds noise, and a
-# CPU throttled by power or heat runs faster on some data than on other. On Linux the tests
-# run pinned to CPU 1 (RIND_TIMING_CPU picks another), off the CPU most
-# interrupts land on.
+# `marvin` needs `nix develop .#timing`. Run it on a quiet machine: other work
+# on a shared one adds noise, and a CPU throttled by power or heat runs faster
+# on some data than on other. On Linux the test runs pinned to CPU 1
+# (RIND_TIMING_CPU picks another), off the CPU most interrupts land on.
 set -euo pipefail
 
-usage="usage: admin/timing dudect [--seconds S] [--list] [FILTER...]
-       admin/timing marvin [--repeat N] [BITS...]"
+usage="usage: admin/timing marvin [--repeat N] [BITS...]"
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 bin=$(cargo build --release --locked -p rind-timing --message-format=json-render-diagnostics |
@@ -92,10 +84,6 @@ marvin() {
 }
 
 case "${1:-}" in
-    dudect)
-        shift
-        exec "${pin[@]}" "$bin" dudect "$@"
-        ;;
     marvin)
         shift
         marvin "$@"

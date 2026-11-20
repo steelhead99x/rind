@@ -25,10 +25,9 @@ Two constant-time children joined on 2026-11-12, with the maintainer, from readi
 
 Two children joined on 2026-11-14 from [the upstream-updates run](/quest/m2/upstream-updates.md): secret-branch checks for the portable-only targets, after libsodium's and RUSTSEC-2026-0426's compiler-inserted branches, and the HPKE revision's edge-case vectors.
 
-Four children joined on 2026-11-18, with the maintainer (/quest-plan), after a survey of how other libraries verify themselves:
+Three children joined on 2026-11-18, with the maintainer (/quest-plan), after a survey of how other libraries verify themselves:
 - an oracle sharing no code with rind, one quest for the differential tests and one for the fuzz targets, since aws-lc-rs runs the same s2n-bignum, mlkem-native, and mldsa-native code on the hot tiers;
 - tests of the Lean specs against vectors and against rind;
-- the removal of dudect, which adds noise and no signal.
 
 - Fix what a check finds in its own quest's PR when it's small; otherwise plan a follow-up.
 - Slow suites run in their own workflows, not in `just ci`.

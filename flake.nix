@@ -561,9 +561,6 @@
               };
             };
 
-            # dudect needs only Rust, without Marvin's Python and toolkit fetches.
-            dudect = mkDevShell timing-shell;
-
             # The Marvin toolkit's RSA ciphertexts, timed by rind-timing and
             # analysed by tlsfuzzer.
             timing = mkDevShell {
