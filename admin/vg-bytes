@@ -444,6 +444,48 @@ def groups(arch, lines, insns):
     return out
 
 
+def check_progs(a, text):
+    """The functions `vg-print` printed, by name: the text of each `Prog` rind's
+    leakage axioms are about, and of each function it calls. Fails unless each
+    is VG's assembly text of that function, line for line, so that VG's text,
+    which the machine code is checked against, is the printer's text of that
+    `Prog`. A `Prog` and its text are one only if VG's printer is injective on
+    them, which it is not in general (it prints `frame` and `block` alike, and
+    loses how a block is grouped), so that link is VG's printer's: it is in the
+    trusted base, not checked here."""
+    funcs = {}
+    cur = None
+    for raw in a.progs.read_text().splitlines():
+        if raw.startswith("function "):
+            cur = raw[len("function "):]
+            if cur in funcs:
+                fail(f"{a.progs} prints {cur} twice")
+            funcs[cur] = []
+        elif raw.startswith("\t") and cur is not None:
+            funcs[cur].append(raw[1:].strip())
+        else:
+            fail(f"{a.progs}: {raw!r} is not a line of a function")
+    if not funcs:
+        fail(f"{a.progs} prints no function")
+    for name, lines in funcs.items():
+        if name not in text:
+            fail(f"vg-print's {name} is not a routine of VG's text")
+        # The assembly file ends each function with its printer's `funcAlign`,
+        # which `Printer.function` does not print.
+        want = text[name]
+        got = lines
+        if want[-1:] == [".p2align 6"] and got[-1:] != [".p2align 6"]:
+            want = want[:-1]
+        if got != want:
+            for i, (g, w) in enumerate(zip(got, want)):
+                if g != w:
+                    fail(f"vg-print's {name} differs from VG's text at line {i + 1}: {g!r} against {w!r}")
+            fail(f"vg-print's {name} has {len(got)} lines, VG's text {len(want)}")
+    print(f"admin/vg-bytes: {a.arch}: {len(funcs)} functions of the `Prog`s rind's axioms are about "
+          f"print as VG's text")
+    return funcs
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("vg", type=Path)
@@ -451,6 +493,8 @@ def main():
     p.add_argument("out", type=Path)
     p.add_argument("--rind", type=Path, nargs="+", default=[],
                    help="the objects of rind's release build, whose vendored routines to check")
+    p.add_argument("--progs", type=Path,
+                   help="`vg-print`'s output: the text of each `Prog` rind's leakage axioms are about")
     a = p.parse_args()
     a.vg, a.out = a.vg.resolve(), a.out.resolve()
     a.out.mkdir(parents=True, exist_ok=True)
@@ -493,6 +537,7 @@ def main():
                     counts["align"] += 1
                     seen.setdefault(("insn", t), ("insn", [t], NOP))
     rind_checked = 0
+    printed = check_progs(a, text) if a.progs else {}
     # The Rust dispatchers' own statics, `CHOSEN` in each, are no routine's.
     vg_statics, _ = data_symbols(vg_obj, lambda path: "::dispatch::" not in path)
     rind_statics = {}
@@ -503,6 +548,7 @@ def main():
                      f"and {st.path}")
             rind_statics[name] = st
     bound = set()
+    rind_names = set()
     # rind's copies must be VG's compiled code byte for byte, the bytes the
     # cosimulation runs, so an encoding of the same instruction that differs
     # from VG's, which may need another CPU feature, fails here. A routine
@@ -516,6 +562,10 @@ def main():
             compare(a.arch, name, text[name], insns, compiled[name], "rind's build", exact=True)
             bind_statics(name, insns, rind_statics, compiled[name], vg_statics, bound)
             rind_checked += 1
+            rind_names.add(name)
+    for name in printed:
+        if a.rind and name not in rind_names:
+            fail(f"{name} is the text of a `Prog` rind states an axiom about, but rind's build has no such routine")
 
     for (t, vg_raw, llvm_raw), k in sorted(ENCODINGS.items()):
         print(f"admin/vg-bytes: {t!r} is {vg_raw} in VG's code, {llvm_raw} assembled, the same "

@@ -187,6 +187,11 @@ for this CPU's target:
   out, and an encoding that differs but disassembles the same is reported;
   each static a vendored routine reaches, through its relocations and those of
   the statics it reaches, has VG's size, bytes, and relocations;
+- on aarch64, that the text of each `Prog` the ChaCha20-Poly1305 leakage axioms
+  are about (`Cosim/Progs.lean`), and of each function it calls, which
+  `vg-print` prints, is VG's assembly for it: `admin/vg-bytes --progs`
+  compares them, so VG's vendored printer is trusted to print a `Prog` as the
+  text of the code it builds, which is not checked;
 - that each distinct instruction of VG's code ends, from random states, in
   the state VG's model gives. `Cosim/` parses each instruction's text back to
   every instruction of the model that prints as exactly that text, runs the
@@ -286,8 +291,12 @@ specs, which `Rind/VgChaCha20Poly1305.lean` imports and proves is
 `Rind/Spec.lean`'s, so a re-pin that changes the spec fails there. Each axiom
 states only what the wrapper returns, not VG's wipe of its stack scratch or
 what the routine may leak. The contracts they restate, VG's
-`Spec/ChaCha20Poly1305/Contract.lean`, are not vendored, so a re-pin
-compares them at VG's new commit.
+`Spec/ChaCha20Poly1305/Contract.lean`, are vendored by `admin/import-vg-models`
+with the modules of VG's `Impl/` they need, so a re-pin that changes them
+fails `admin/import-vg-models --check`. The two leakage axioms in
+`Rind/Aarch64/VgChaCha20Poly1305Ct.lean` state `VG.ConstantTime` of the SVE2
+seal and open over `Cosim.Progs`, VG's own `Prog` terms, and `vg-print` with
+`admin/vg-bytes --progs` binds those terms to VG's assembly text.
 
 ## What is proven
 
@@ -1357,7 +1366,9 @@ proof after those.
   `Rind/VgChaCha20Poly1305.lean`, the proof that pyca/verified-garbage's
   ChaCha20-Poly1305 spec is `Rind/Spec.lean`'s, and
   `Rind/Aarch64/VgChaCha20Poly1305.lean`, the aarch64 one pass over its SVE2
-  routines.
+  routines, and `Rind/Aarch64/VgChaCha20Poly1305Ct.lean`, the two axioms that
+  state the leakage of those routines over `verified-garbage/Cosim/Progs.lean`
+  (`Cosim/PrintMain.lean`'s `vg-print` prints them for `admin/vg-bytes`).
 - `Rind/Rsa.lean` and `Rind/RsaLemmas.lean`: RFC 8017's verification,
   transliterated, and its lemmas; `Rind/X86_64/{RsaBytes,RsaMont,RsaPublic,RsaKey,RsaVerify,RsaPss}.lean`:
   the RSA verification proof, on x86_64 alone, and

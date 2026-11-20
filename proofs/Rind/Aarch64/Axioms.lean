@@ -18,6 +18,7 @@ import Rind.Aarch64.MlKemCoding
 import Rind.Aarch64.GhashPmull
 import Rind.Aarch64.AesGcm
 import Rind.Aarch64.VgChaCha20Poly1305
+import Rind.Aarch64.VgChaCha20Poly1305Ct
 open rind.aarch64
 
 /-!
@@ -43,7 +44,9 @@ with the crypto extension's key, rest on no axiom, only on the hand model in
 ML-KEM's decompression and message coding rest on no axiom.
 ChaCha20-Poly1305's one pass on SVE2 rests on the axioms restating
 pyca/verified-garbage's theorems for its routines in
-`Rind.Aarch64.VgChaCha20Poly1305`.
+`Rind.Aarch64.VgChaCha20Poly1305`, and its two axioms that VG's SVE2 routines are constant time under
+their contracts, in `Rind.Aarch64.VgChaCha20Poly1305Ct`, which no theorem about rind's
+wrappers uses.
 A change here is a change to the trust base.
 -/
 
@@ -847,3 +850,15 @@ A change here is a change to the trust base.
  vg_chacha20_poly1305_open_sve2_spec] -/
 #guard_msgs in
 #print axioms chacha20_poly1305_open_sve2_spec
+
+/-- info: 'rind.aarch64.vg_chacha20_poly1305_seal_sve2_ct' depends on axioms: [propext,
+ Quot.sound,
+ vg_chacha20_poly1305_seal_sve2_ct] -/
+#guard_msgs in
+#print axioms vg_chacha20_poly1305_seal_sve2_ct
+
+/-- info: 'rind.aarch64.vg_chacha20_poly1305_open_sve2_ct' depends on axioms: [propext,
+ Quot.sound,
+ vg_chacha20_poly1305_open_sve2_ct] -/
+#guard_msgs in
+#print axioms vg_chacha20_poly1305_open_sve2_ct

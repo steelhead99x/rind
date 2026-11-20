@@ -14,3 +14,9 @@ globs = ["Cosim.+"]
 [[lean_exe]]
 name = "vg-cosim"
 root = "Cosim.Main"
+
+# Prints the text of the `Prog`s rind's leakage axioms are about, which
+# `admin/vg-bytes` checks against VG's assembly.
+[[lean_exe]]
+name = "vg-print"
+root = "Cosim.PrintMain"
