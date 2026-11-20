@@ -3,6 +3,11 @@
 // The catalog (rows, libraries, sections) comes from the Rust core; nothing
 // here names an operation or a library.
 #import <UIKit/UIKit.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <poll.h>
 
 extern char *devbench_catalog_json(void);
 extern int devbench_start(const char *config);
@@ -21,6 +26,19 @@ static NSString *Fmt(double ns) {
   if (ns >= 1e3) return [NSString stringWithFormat:@"%.3f µs", ns / 1e3];
   return [NSString stringWithFormat:@"%.1f ns", ns];
 }
+// TCP connect with a timeout: is the collector listening? (The run connects again itself.)
+static BOOL Reachable(NSString *host, int port, int ms) {
+  struct addrinfo hints = {0}, *res = NULL; hints.ai_socktype = SOCK_STREAM;
+  if (getaddrinfo(host.UTF8String, [NSString stringWithFormat:@"%d", port].UTF8String, &hints, &res) != 0 || !res) return NO;
+  int fd = socket(res->ai_family, SOCK_STREAM, 0); BOOL ok = NO;
+  if (fd >= 0) {
+    fcntl(fd, F_SETFL, O_NONBLOCK);
+    if (connect(fd, res->ai_addr, res->ai_addrlen) == 0) ok = YES;
+    else { struct pollfd p = {fd, POLLOUT, 0}; if (poll(&p, 1, ms) == 1) { int e = 0; socklen_t l = sizeof e; getsockopt(fd, SOL_SOCKET, SO_ERROR, &e, &l); ok = e == 0; } }
+    close(fd);
+  }
+  freeaddrinfo(res); return ok;
+}
 #define C_BG [UIColor colorWithRed:0.06 green:0.07 blue:0.09 alpha:1]
 #define C_CARD [UIColor colorWithRed:0.11 green:0.12 blue:0.15 alpha:1]
 #define C_MUTED [UIColor colorWithWhite:0.65 alpha:1]
@@ -31,9 +49,10 @@ static NSString *Fmt(double ns) {
 
 @implementation VC {
   UIStackView *root, *libBox, *secBox;
-  UILabel *deviceLbl, *statusLbl, *resultsLbl;
+  UILabel *deviceLbl, *statusLbl, *resultsLbl, *collectorLbl;
   UISwitch *agree; UISegmentedControl *preset;
-  UIButton *startBtn, *stopBtn;
+  UIButton *startBtn, *stopBtn, *clearBtn;
+  BOOL running;
   NSDictionary *catalog;
   NSMutableDictionary<NSString *, UISwitch *> *libSw, *secSw;
   NSTimer *timer;
@@ -90,8 +109,11 @@ static NSString *Fmt(double ns) {
   UIStackView *agreeRow = [[UIStackView alloc] initWithArrangedSubviews:@[agree, agreeL]]; agreeRow.spacing = 12; agreeRow.alignment = UIStackViewAlignmentCenter;
   startBtn = [self button:@"Start test" action:@selector(startTapped)]; startBtn.enabled = NO; startBtn.alpha = 0.4;
   stopBtn = [self button:@"Stop" action:@selector(stopTapped)]; stopBtn.hidden = YES;
-  UIStackView *btns = [[UIStackView alloc] initWithArrangedSubviews:@[startBtn, stopBtn]]; btns.spacing = 12;
-  [root addArrangedSubview:[self card:@[[self label:@"Timing" size:20 weight:UIFontWeightBold color:nil], preset, agreeRow, btns]]];
+  clearBtn = [self button:@"Clear" action:@selector(clearTapped)]; clearBtn.hidden = YES;
+  UIStackView *btns = [[UIStackView alloc] initWithArrangedSubviews:@[startBtn, stopBtn, clearBtn]]; btns.spacing = 12;
+  collectorLbl = [self label:@"Results go to: looking for the computer that installed this app…" size:14 weight:UIFontWeightRegular color:C_MUTED];
+  [root addArrangedSubview:[self card:@[[self label:@"Timing" size:20 weight:UIFontWeightBold color:nil], preset, agreeRow, collectorLbl, btns]]];
+  [self findCollector];
   statusLbl = [self label:@"" size:15 weight:UIFontWeightMedium color:nil];
   resultsLbl = [self label:@"" size:12 weight:UIFontWeightRegular color:nil];
   resultsLbl.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
@@ -122,6 +144,29 @@ static NSString *Fmt(double ns) {
   statusLbl.text = [NSString stringWithFormat:@"Ready. %lu report operations have no row on this platform.", (unsigned long)[cat[@"operations_without_rows"] count]];
 }
 
+// The collector fills itself in from the address baked in at build time (BenchHost/BenchPort); shown, never typed.
+- (void)findCollector {
+  NSString *host = [NSBundle.mainBundle objectForInfoDictionaryKey:@"BenchHost"];
+  NSNumber *port = [NSBundle.mainBundle objectForInfoDictionaryKey:@"BenchPort"];
+  if (!host.length || !port) { collectorLbl.text = @"Results are saved on this iPad (no collector in this build)."; return; }
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+    BOOL ok = Reachable(host, port.intValue, 800);
+    dispatch_async(dispatch_get_main_queue(), ^{
+      self->collectorLbl.text = ok ? [NSString stringWithFormat:@"Results go to: %@:%@ (over Wi-Fi, found automatically). They are also saved on this iPad.", host, port]
+                                   : [NSString stringWithFormat:@"Results go to: %@:%@ (could not reach it yet; will try again at Start). They are saved on this iPad either way.", host, port];
+      self->collectorLbl.textColor = ok ? UIColor.whiteColor : C_MUTED;
+    });
+  });
+}
+
+- (void)clearTapped {
+  if (running) return;
+  agree.on = NO; agree.enabled = YES; resultsLbl.text = @""; clearBtn.hidden = YES;
+  [startBtn setTitle:@"Start test" forState:UIControlStateNormal]; startBtn.hidden = NO; [self agreeChanged];
+  statusLbl.text = [NSString stringWithFormat:@"Ready. %lu report operations have no row on this platform.", (unsigned long)[catalog[@"operations_without_rows"] count]];
+  [self findCollector];
+}
+
 - (void)agreeChanged { startBtn.enabled = agree.on && catalog; startBtn.alpha = startBtn.enabled ? 1 : 0.4; }
 
 - (void)startTapped {
@@ -145,7 +190,8 @@ static NSString *Fmt(double ns) {
   NSString *s = [[NSString alloc] initWithData:js encoding:NSUTF8StringEncoding];
   if (devbench_start(s.UTF8String) != 0) { NSDictionary *st = JSON(devbench_status_json()); statusLbl.text = [NSString stringWithFormat:@"Could not start: %@", st[@"start_error"]]; return; }
   UIApplication.sharedApplication.idleTimerDisabled = YES;
-  startBtn.hidden = YES; stopBtn.hidden = NO; stopBtn.enabled = YES; agree.enabled = NO;
+  startBtn.hidden = YES; clearBtn.hidden = YES; stopBtn.hidden = NO; stopBtn.enabled = YES; agree.enabled = NO; running = YES;
+  [self findCollector];
   [timer invalidate];
   timer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) { [self poll]; }];
 }
@@ -154,7 +200,7 @@ static NSString *Fmt(double ns) {
 
 - (void)poll {
   NSDictionary *s = JSON(devbench_status_json());
-  BOOL running = [s[@"running"] boolValue];
+  running = [s[@"running"] boolValue];
   NSString *thermal = @[@"nominal", @"fair", @"serious", @"critical"][MIN(3, (NSInteger)NSProcessInfo.processInfo.thermalState)];
   if (running)
     statusLbl.text = [NSString stringWithFormat:@"Running %@ of %@ · round %@ of %@\n%@\nerrors %@ · sent %@ lines (%@) · thermal %@",
@@ -188,7 +234,7 @@ static NSString *Fmt(double ns) {
   resultsLbl.text = out;
   if (!running) {
     [timer invalidate]; timer = nil; UIApplication.sharedApplication.idleTimerDisabled = NO;
-    startBtn.hidden = NO; [startBtn setTitle:@"Run again" forState:UIControlStateNormal]; stopBtn.hidden = YES; agree.enabled = YES;
+    startBtn.hidden = NO; [startBtn setTitle:@"Run again" forState:UIControlStateNormal]; stopBtn.hidden = YES; clearBtn.hidden = NO; agree.enabled = YES;
   }
 }
 @end

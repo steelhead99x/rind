@@ -41,6 +41,6 @@ CAPTURE --out DIR` splits a collector capture into one JSON per run.
 - iPad: sign + install with plumesign (Apple ID + 2FA), start `tools/listen-devbench.sh`
   on the Alienware, open "RindBench All", agree, Start.
 - Android: `adb install -r RindBench-android.apk`; optional
-  `adb reverse tcp:9101 tcp:9101` + a listener; or headless:
-  `adb shell am start -n com.kyledouglas.rindbench/.MainActivity --es host 127.0.0.1 --ei port 9101 --es preset quick --es libraries rind,ring --es sections AEADs --ez autostart true`;
+  the collector fills itself in (127.0.0.1:9103 via `adb reverse`, else the LAN address baked in by build-apk.sh); headless:
+  `adb shell am start -n com.kyledouglas.rindbench/.MainActivity --es preset quick --es libraries rind,ring --es sections AEADs --ez autostart true`;
   results also in `/sdcard/Android/data/com.kyledouglas.rindbench/files/`.
