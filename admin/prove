@@ -485,13 +485,19 @@ vg() {
     mkdir -p "$dir"
     admin/upstream verified-garbage
     admin/import-vg-models --check "$upstream"
-    (cd proofs/verified-garbage && lake build)
+    # `lake build` alone builds only the default target (vg-cosim).
+    (cd proofs/verified-garbage && lake build vg-cosim vg-print)
+    local vgprint=proofs/verified-garbage/.lake/build/bin/vg-print
+    if [[ ! -x $vgprint ]]; then
+        echo "admin/prove: lake build did not produce $vgprint" >&2
+        return 1
+    fi
     # The text of each `Prog` rind's axioms about VG's leakage are about, which
     # `admin/vg-bytes` checks is VG's assembly (so VG's printer is trusted to
     # print that `Prog` as it does, which it does not check); only aarch64's so far.
     local progs=()
     if [[ $arch == aarch64 ]]; then
-        proofs/verified-garbage/.lake/build/bin/vg-print "$arch" >"$dir/progs.txt"
+        "$vgprint" "$arch" >"$dir/progs.txt"
         progs=(--progs "$dir/progs.txt")
     fi
     hold scratch

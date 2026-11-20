@@ -34,16 +34,6 @@ def asmLines (call : String) : List Line → Bool → List String
       | .call n => (call ++ " {" ++ n ++ "}") :: asmLines call ls false
       | .sym s _ n => (s ++ "{" ++ n ++ "}") :: asmLines call ls false
 
-/-- Every function a code calls, with its code, the callers' first. -/
-partial def callees {I C : Type} : Code I C → List (String × Code I C)
-  | .block _ => []
-  | .seq a b => callees a ++ callees b
-  | .ite _ t e => callees t ++ callees e
-  | .loop b _ => callees b
-  | .call n b => (n, b) :: callees b
-  | .frame _ b _ => callees b
-  | .icall _ n b next => (n, b) :: callees b ++ callees next
-
 def main (args : List String) : IO UInt32 := do
   unless args == ["aarch64"] do
     IO.eprintln "usage: vg-print aarch64"
@@ -54,7 +44,7 @@ def main (args : List String) : IO UInt32 := do
      ("vg_chacha20_poly1305_open_sve2", Cosim.Progs.chacha20Poly1305OpenSve2)]
   let mut seen : List (String × List String) := []
   let mut failed := false
-  for (name, code) in routines ++ routines.flatMap fun (_, c) => callees c do
+  for (name, code) in routines ++ routines.flatMap fun (_, c) => c.calls do
     let text := asmLines P.call (P.function code) false
     match seen.lookup name with
     | some t =>
