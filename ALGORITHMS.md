@@ -974,9 +974,11 @@ without SSSE3, in its 32-bit configuration, which bitslices two blocks into
 32-bit words, and for AES-GCM a port of aws-lc's `gcm_nohw.c` in its 32-bit
 configuration, composed the same way. A key expands once, when it is made:
 the NEON path's holds `vpaes`'s schedule, which runs single blocks, key wrap,
-and CBC encryption, and its conversion for `bsaes`, a bitsliced AES that runs
-counter mode and CBC decryption eight blocks at a time, as aws-lc picks them,
-so a key serves every mode. `vpaes` is Mike Hamburg's vector permutation AES,
+and CBC encryption, and the first call that runs `bsaes`, a bitsliced AES for
+counter mode and CBC decryption, converts it for `bsaes` and keeps the
+result, where aws-lc converts on every call. As aws-lc picks, `bsaes` takes
+the eight-block batches and a last batch of six or seven, and `vpaes` the
+other blocks, so a key serves every mode. `vpaes` is Mike Hamburg's vector permutation AES,
 whose S-box is NEON `vtbl` lookups into registers, and `ghash-armv4` builds
 each GHASH product from NEON's 8-bit polynomial multiplies; neither reads
 memory or branches by a secret. The nohw path holds its round keys bitsliced
