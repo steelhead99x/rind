@@ -4,7 +4,8 @@
 //! routines allocate differently by backend and with ADX or AVX-512 IFMA, so
 //! RSA certificates are not pinned. ML-KEM-768's own allocations vary with
 //! the CPU, since pyca/verified-garbage's routines keep no decoded matrix, so
-//! the pinned count leaves them out.
+//! the pinned count leaves them out. Under `fips` they run in the module,
+//! which has its own allocator, so they are not in the count to leave out.
 #![cfg(target_arch = "x86_64")]
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -123,6 +124,13 @@ fn count(client: &Arc<ClientConfig>, server: &Arc<ServerConfig>) -> u64 {
 /// X25519MLKEM768 runs it: the client's key generation, the server's parse of
 /// its key and encapsulation, and the client's decapsulation.
 fn mlkem768() -> u64 {
+    // Under `fips` ML-KEM runs in the module, whose allocator this counter
+    // doesn't see, so the handshake's count holds none of it; subtracting
+    // the test's own `rind::kem` run, which makes 1 allocation without
+    // AVX-512 and 0 with it, would make the pinned count depend on the CPU.
+    if cfg!(feature = "fips") {
+        return 0;
+    }
     let before = ALLOCATIONS.with(Cell::get);
     let key = DecapsulationKey::<MlKem768>::generate().unwrap();
     let peer = EncapsulationKey::<MlKem768>::new(key.public_key().as_ref()).unwrap();
@@ -143,14 +151,15 @@ const EXPECTED: [(&str, u64); 4] = [
     ("ed25519", 245),
 ];
 
-/// Under `fips` the module's keys and hashes make 8 fewer allocations, and
-/// the default provider leads with X25519MLKEM768 as before.
+/// Under `fips` the module's keys, hashes, and ML-KEM allocate out of this
+/// count, which makes 7 fewer allocations than above with nothing for
+/// [`mlkem768`] to subtract; the counts are the same on every CPU tier.
 #[cfg(feature = "fips")]
 const EXPECTED: [(&str, u64); 4] = [
-    ("ecdsa-p256", 237),
-    ("ecdsa-p384", 241),
-    ("ecdsa-p521", 245),
-    ("ed25519", 237),
+    ("ecdsa-p256", 238),
+    ("ecdsa-p384", 242),
+    ("ecdsa-p521", 246),
+    ("ed25519", 238),
 ];
 
 #[test]
