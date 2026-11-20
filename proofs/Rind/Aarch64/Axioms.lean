@@ -873,3 +873,11 @@ A change here is a change to the trust base.
 /-- info: 'rind.aarch64.new_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms new_spec
+
+/-- info: 'rind.aarch64.words_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms words_spec
+
+/-- info: 'rind.aarch64.check_counter_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms check_counter_spec

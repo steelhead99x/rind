@@ -17,13 +17,17 @@ about the Rust wrappers that call them, `VgState::init`,
 `VgState::apply_neon`, and `VgState::apply_sve2`, over VG's own spec,
 `VerifiedGarbage.Spec.ChaCha20`, which `admin/import-vg-models` vendors byte
 for byte. `cipher_vg_spec` composes them, `cipher_spec` proves `cipher`'s
-result from them at the lengths that run them, and `apply_keystream_spec`
-proves the API's: RFC 8439's encryption, as `Rind.Spec` transliterates it.
+result from them at the lengths that run them, and `new_spec` and
+`check_counter_spec` prove `ChaCha20::new` and the counter check. The API
+above `cipher`, whose result is RFC 8439's encryption as `Rind.Spec`
+transliterates it, is not proven yet.
 
 Trusted: each restatement, and that each wrapper passes the routine its
 state's 768 bytes, which `Rind.Aarch64.TypesExternal` models as the state,
 and the key's and counter and nonce's words as the little-endian bytes VG
-reads, which are the words' bytes on aarch64. That VG's definitions of the
+reads, which are the words' bytes on aarch64. The hypothesis `hu` of `cipher_vg_spec` and `cipher_spec` is also trusted:
+that `VgState::uninit`, which is `MaybeUninit::uninit()`, returns, which every
+call meets. That VG's definitions of the
 state's key and keystream read only those 768 bytes is proven
 (`Rind.VgChaCha20`'s `keyAt_congr`, `leftAt_congr`, and `restAt_congr`), so
 the axioms, which hold for any memory holding them, say no more than VG's
