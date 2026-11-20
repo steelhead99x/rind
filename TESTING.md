@@ -326,7 +326,9 @@ its assembly, then translates the Rust under proof to Lean with Aeneas and
 checks the proofs in [`proofs/`](proofs/README.md).
 It also runs the executable Lean specs the proofs trust (SHA-1, SHA-2, SHA-3, HMAC,
 HKDF, PBKDF2) on `thirdparty/vectors/` and on fixed-seed random inputs compared
-with rind's output, through `admin/spec-vectors.rs`. A pull request runs a
+with rind's output (SHA-1 itself meets published vectors only through the
+HMAC, HKDF, and PBKDF2 vectors over it, and the RFC-derived cases run in full
+only in the nightly sweep), through `admin/spec-vectors.rs`. A pull request runs a
 sample; the nightly run sets `SPEC_VECTORS=full` for every case. A spec that
 disagrees fails `admin/prove`.
 

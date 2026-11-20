@@ -1668,12 +1668,12 @@ fi
 # (`HashSpec`, `Sha2`, `Sha3`) runs on the published vectors in
 # `thirdparty/vectors/` and on random inputs from a fixed seed, and must give
 # the answer the vector or rind's own output states: `admin/spec-vectors.rs`
-# writes the cases into `admin/spec-vectors.lean`, which Lean checks once the
-# proofs build. It runs a fixed sample, to stay in the `lean` job's budget;
-# `SPEC_VECTORS=full`, which the nightly run gets here, runs every case the
-# specs can run in reasonable time.
+# prints `admin/spec-vectors.lean` with the cases filled in, saved here as
+# `SpecVectors.lean`, which Lean checks once the proofs build. It runs a fixed
+# sample, to stay in the `lean` job's budget; `SPEC_VECTORS=full`, which the
+# nightly run gets here, runs every case the specs can run in reasonable time.
 [[ ${GITHUB_EVENT_NAME:-} != schedule ]] || export SPEC_VECTORS=full
-cargo build -q -p rind --lib --release --target-dir "$out/spec-rind"
+cargo build -q --locked -p rind --lib --release --target-dir "$out/spec-rind"
 rustc --edition 2024 -O --extern rind="$out/spec-rind/release/librind.rlib" \
     -L dependency="$out/spec-rind/release/deps" -o "$out/spec-vectors" admin/spec-vectors.rs
 "$out/spec-vectors" >"$out/SpecVectors.lean"

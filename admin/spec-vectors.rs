@@ -13,7 +13,8 @@
 //! which the nightly `prove` run uses.
 //!
 //! Usage: run by `admin/prove`, from the repository root, built against rind's
-//! rlib; its output is `admin/spec-vectors.lean` with the cases filled in.
+//! rlib; it prints a copy of `admin/spec-vectors.lean` with the cases filled in,
+//! which `admin/prove` writes to `.tmp/prove/SpecVectors.lean`.
 
 use std::fmt::Write as _;
 use std::fs;

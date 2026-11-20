@@ -63,7 +63,7 @@ def check (line : String) : Option String :=
     | none => some s!"{label}: no spec for {alg}"
     -- CAVP's HMAC answers are truncated to the tag length they name.
     | some got =>
-      if got.take expected.length == expected && (alg.startsWith "hmac" || got.length == expected.length)
+      if expected.length > 0 && got.take expected.length == expected && (alg.startsWith "hmac" || got.length == expected.length)
       then none else some s!"{label}: spec disagrees"
   | _ => some s!"malformed case {line}"
 
